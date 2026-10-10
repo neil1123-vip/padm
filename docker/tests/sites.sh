@@ -78,6 +78,10 @@ dockerComposeRun() {
         esac
     fi
 }
+dockerComposeExecute() {
+    [[ "$*" == down ]] || fail "意外恢复启停参数: $*"
+    dockerComposeRun "$@"
+}
 dockerInitializeStateRoot
 mkdir -p "${root}/secrets/tls"
 printf 'fixture-cert\n' >"${root}/secrets/tls/${DOMAIN}.crt"

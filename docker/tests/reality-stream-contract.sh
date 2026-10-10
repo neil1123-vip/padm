@@ -64,6 +64,7 @@ dockerRealityStreamContractChecks() {
         : >"${calls}"
         docker() { streamContainerBoundary "$@"; }
         dockerComposeRun() { printf 'compose %s\n' "$*" >>"${calls}"; }
+        dockerComposeExecute() { printf 'compose %s\n' "$*" >>"${calls}"; }
         dockerRenewalScheduleInstall() { printf 'renewal\n' >>"${calls}"; }
         DOCKER_CONFIG_SWITCHED=1
         DOCKER_CONFIG_STREAM_TRANSITION=${transition}
@@ -71,6 +72,38 @@ dockerRealityStreamContractChecks() {
         corrupt) printf 'not-json\n' >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ;;
         *) cp "${current}" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ;;
         esac
+        case "${action}" in
+        corrupt-current-enabled)
+            # 合法备份不能冒充损坏当前规格的 Fail2ban owner。
+            jq '.reality_stream = null | .core.secondary_type = null |
+              .core.protocols |= map(select(.id == 21)) |
+              .host_integrations = [{type:"fail2ban",profile:"net-fail2ban",
+                firewall_rules:["DOCKER-USER"],devices:[],schedules:[],
+                settings:{log_file:"access.log",ports:[24444],max_retry:5,find_time:600,ban_time:3600}}]' \
+                "${original}" >"${TEST_ROOT}/restore-current.spec.json"
+            dockerConfigureSpecValidate "${TEST_ROOT}/restore-current.spec.json" &&
+                dockerGenerateDeployment "${TEST_ROOT}/restore-current.spec.json" \
+                    "${PADM_DOCKER_INSTALL_DIR}/deployment.json" &&
+                dockerGenerateCompose "${TEST_ROOT}/restore-current.spec.json" \
+                    "${PADM_DOCKER_INSTALL_DIR}/compose.json" "${PADM_DOCKER_INSTALL_DIR}" ||
+                fail '当前启用 Fail2ban 恢复拒绝夹具生成失败'
+            ;;
+        corrupt-current-unknown)
+            jq 'del(.host_integrations)' "${PADM_DOCKER_INSTALL_DIR}/deployment.json" \
+                >"${TEST_ROOT}/restore-current.deployment"
+            cp -- "${TEST_ROOT}/restore-current.deployment" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+            ;;
+        esac
+        if [[ "${action}" == corrupt-current-enabled || "${action}" == corrupt-current-unknown ]]; then
+            before=$(snapshot)
+            if dockerRestoreConfiguration >"${STDOUT}" 2>"${STDERR}"; then
+                fail "${label}: 损坏当前规格借合法备份绕过 Fail2ban owner 门禁"
+            fi
+            [[ ! -s "${calls}" && "$(snapshot)" == "${before}" &&
+                "${DOCKER_CONFIG_SWITCHED}" == 1 ]] ||
+                fail "${label}: 拒绝恢复前停止服务、改写配置或清除恢复标记"
+            exit 0
+        fi
         if jq -e '.reality_stream.host_website.network_mode == "host"' "${original}" >/dev/null ||
             { [[ "${current}" != corrupt ]] &&
                 jq -e '.reality_stream.host_website.network_mode == "host"' "${current}" >/dev/null; }; then
@@ -181,6 +214,7 @@ dockerRealityStreamContractChecks() {
         : >"${calls}"
         docker() { streamContainerBoundary "$@"; }
         dockerComposeRun() { printf 'compose %s\n' "$*" >>"${calls}"; }
+        dockerComposeExecute() { printf 'compose %s\n' "$*" >>"${calls}"; }
         dockerTrafficScheduleRemove() { return 0; }
         dockerRenewalScheduleInstall() { printf 'renewal\n' >>"${calls}"; }
         dockerInstallCandidate "${candidate}" "${backup}" &&
@@ -408,6 +442,8 @@ dockerRealityStreamContractChecks() {
         grep -Fq 'Nginx 候选配置校验失败' "${STDERR}" ||
         fail '共存更新没有在备份和停服前拒绝 Nginx 校验失败'
     streamRestoreContract corrupt-current "${enabled}" corrupt 1
+    streamRestoreContract corrupt-current-enabled "${enabled}" corrupt 1
+    streamRestoreContract corrupt-current-unknown "${enabled}" corrupt 1
     streamRestoreContract bad-backup "${enabled}" corrupt 1
     streamRestoreContract enable-failed "${base}" "${enabled}" 1
     streamRestoreContract disable-failed "${enabled}" "${base}" 0

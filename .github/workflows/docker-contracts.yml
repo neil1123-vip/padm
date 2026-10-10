@@ -20,7 +20,7 @@ jobs:
       PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
     strategy:
       fail-fast: true
-      max-parallel: 10
+      max-parallel: 11
       matrix:
         selector:
           - docker-setup-core
@@ -30,7 +30,8 @@ jobs:
           - docker-contracts-protocol
           - docker-contracts-reality
           - docker-contracts-system
-          - docker-contracts-fast
+          - docker-contracts-fast-heavy
+          - docker-contracts-fast-rest
           - docker-routing-core-workflow
           - docker-routing-domains-workflow
     steps:
@@ -40,7 +41,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 1
       - name: Prepare control and site contract tools
-        if: matrix.selector == 'docker-contracts-fast' || startsWith(matrix.selector, 'docker-routing-')
+        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')
         shell: bash
         run: |
           docker build --tag padm-regression:contracts shell/regression/container
@@ -50,7 +51,7 @@ jobs:
           SELECTOR: ${{ matrix.selector }}
         run: |
           set -euo pipefail
-          if [[ "${SELECTOR}" == docker-contracts-fast || "${SELECTOR}" == docker-routing-* ]]; then
+          if [[ "${SELECTOR}" == docker-contracts-fast-* || "${SELECTOR}" == docker-routing-* ]]; then
             git ls-files -z | tar --null -T - -cf "${RUNNER_TEMP}/padm-contracts-source.tar"
             docker run --rm --network none --init \
               --env PADM_REGRESSION_PARALLEL_JOBS=4 \

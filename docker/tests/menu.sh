@@ -961,7 +961,10 @@ runPty() {
             # 等待输入时现场检查，避免只验证退出后的清理。
             [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 2
         fi
-        if [[ "${driver}" == setup ]]; then
+        if [[ "${driver}" == source-input ]]; then
+            waitForText 'fixture-source-input: ' "${CONTROL_LOG}" || exit 11
+            printf '%s\n' "${input}" >&3
+        elif [[ "${driver}" == setup ]]; then
             printf '2\n' >&3
             waitForText '核心 [1=Xray, 2=sing-box, 3=Xray+sing-box, 4=sing-box+Xray, 0=取消]' "${CONTROL_LOG}" || exit 11
             printf '0\n' >&3
@@ -1248,7 +1251,22 @@ dockerEditCommand() {
 }
 PADM_DOCKER_RC_STATE=15
 PADM_DOCKER_RC_USAGE=2
+if [[ "${SOURCE_INPUT_CHECK:-0}" == 1 && "${1:-}" != source-input-menu ]]; then
+    recordAction "$@"
+    [[ -t 0 ]] || exit 19
+    printf 'fixture-source-input: '
+    IFS= read -r sourceInput || exit 19
+    recordAction source-input "${sourceInput}"
+    exit 0
+fi
 case "${1:-}" in
+source-input-menu)
+    source "${PROJECT_ROOT}/docker/lib/menu.sh"
+    dockerMenuCli() { printf '%s\n' "${TLS_WIZARD_CLI}"; }
+    printf 'Docker 管理菜单\n'
+    shift
+    dockerMenuRun "$@"
+    ;;
 status)
     [[ "${SITE_MENU_RECORD_STATUS:-0}" != 1 ]] || recordAction status
     exit 0
@@ -1379,6 +1397,21 @@ menu)
     ;;
 esac
 EOF
+# 启动与恢复共用来源输入；直接验证生产动作分组，不重复业务菜单的导航矩阵。
+export SOURCE_INPUT_CHECK=1
+for sourceAction in up restart update rollback fail2ban-disable business-restore; do
+    case "${sourceAction}" in
+    fail2ban-disable) sourceCommand=(fail2ban disable --confirm PADM-DOCKER-EDIT) ;;
+    business-restore) sourceCommand=(business restore fixture.json --strategy replace --yes) ;;
+    *) sourceCommand=("${sourceAction}") ;;
+    esac
+    : >"${TLS_WIZARD_ACTIONS}"
+    runPty "source-input-${sourceAction}" source-input 203.0.113.9 \
+        "${TLS_WIZARD_CLI}" source-input-menu "${sourceCommand[@]}"
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${sourceCommand[*]}"$'\nsource-input 203.0.113.9' ]] ||
+        fail "${sourceAction}: 来源输入未到达前台 CLI 或参数分发错误"
+done
+unset SOURCE_INPUT_CHECK
 printf '{"tls":null}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
 : >"${TLS_WIZARD_ACTIONS}"
 runPty tls-no-domain menu $'8\n0\n' "${TLS_WIZARD_CLI}" menu
@@ -1913,6 +1946,7 @@ cat >"${PADM_DOCKER_INSTALL_DIR}/deployment.json" <<'EOF'
   "mode": "docker",
   "padm_version": "test",
   "core": {"type": "xray"},
+  "host_integrations": [],
   "compose": {"project": "padm-docker", "profiles": ["core-xray"]}
 }
 EOF

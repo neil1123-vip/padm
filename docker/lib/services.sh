@@ -2774,6 +2774,7 @@ dockerGenerateCompose() {
       | if ($fail2ban | length) == 1 then
           .services["net-fail2ban"] = (defaults + {
             image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
+            restart: "no",
             profiles: ["net-fail2ban"],
             command: ["fail2ban", ($fail2ban[0].settings.ports | join(","))],
             network_mode: "host",
@@ -3532,10 +3533,9 @@ dockerFail2banSourceWitness() (
     return 1
 )
 
-dockerFail2banContainer() (
-    local root ids container image sourcePath candidate status mode=${1:-running}
-    [[ "$#" -le 1 ]] || return 1
-    case "${mode}" in running|exited) ;; *) return 1 ;; esac
+dockerFail2banConfigurationCheck() (
+    local root sourcePath candidate status mode=${1:-current}
+    case "${mode}" in current|owner) ;; *) return 1 ;; esac
     root=$(dockerInstallRoot) || return 1
     for sourcePath in config/spec.json deployment.json images.env compose.json; do
         dockerTrafficSafePath "${root}" "${root}/${sourcePath}" || return 1
@@ -3543,8 +3543,11 @@ dockerFail2banContainer() (
     dockerComposeFile >/dev/null &&
         dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
             "${root}/deployment.json" "${root}/images.env" &&
-        cmp -s -- "${root}/compose.json" \
-            <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") &&
+        { cmp -s -- "${root}/compose.json" \
+            <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") ||
+            { [[ "${mode}" == owner ]] && cmp -s -- "${root}/compose.json" \
+                <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}" |
+                  jq '.services["net-fail2ban"].restart = "unless-stopped"'); }; } &&
         jq -e 'any(.host_integrations[]; .type == "fail2ban")' \
             "${root}/config/spec.json" >/dev/null || {
         dockerError '当前部署未配置 Fail2ban 或受管配置不一致'
@@ -3571,6 +3574,158 @@ dockerFail2banContainer() (
         sourcePath=${sourcePath/'${PADM_NET_ROOT}'/${root}}
         dockerTrafficSafePath "${root}" "${sourcePath}" || return 1
     done < <(jq -r '.services["net-fail2ban"].volumes[].source' "${root}/compose.json")
+)
+
+dockerFail2banSourcePlan() {
+    local spec=$1
+    dockerConfigureSpecValidate "${spec}" || return 1
+    jq -ec '
+      . as $spec | [.host_integrations[] | select(.type == "fail2ban")] as $jails |
+      if $jails | length == 0 then [] else
+        [$jails[0].settings.ports[] as $port |
+          [$spec.core.protocols[] | select(.id == 21 and .public_port == $port)] as $entries |
+          if ($entries | length) != 1 or $spec.reality_stream != null or
+            ($entries[0].listener_id | type) != "string" or
+            any($spec.port_aliases[]?; .listener_id == $entries[0].listener_id)
+          then error("source verification requires direct WS listeners") else
+            $entries[0] as $entry | $entry.address_families[] |
+            {listener_id:$entry.listener_id,family:.,public_port:$port,
+             internal_port:($entry.websocket.tls_port // 8443),
+             domain:($spec.tls.domain | ascii_downcase)}
+          end] | sort_by(.public_port,.family)
+      end
+    ' "${spec}"
+}
+
+dockerFail2banSourceInputsPrepare() {
+    local spec plan family address variable families=''
+    for spec in "$@"; do
+        [[ -e "${spec}" || -L "${spec}" ]] || continue
+        plan=$(dockerFail2banSourcePlan "${spec}") || return 1
+        families+=$(jq -r '.[].family' <<<"${plan}")$'\n'
+    done
+    for family in ipv4 ipv6; do
+        grep -qxF "${family}" <<<"${families}" || continue
+        variable="DOCKER_FAIL2BAN_SOURCE_${family^^}"
+        address=${!variable:-}
+        if [[ -z "${address}" ]]; then
+            variable="PADM_DOCKER_FAIL2BAN_SOURCE_${family^^}"
+            address=${!variable:-}
+        fi
+        if [[ -z "${address}" ]]; then
+            [[ -t 0 ]] || {
+                dockerError "Fail2ban 需要本次外部 ${family} 来源输入，尚未停止或修改服务"
+                return 1
+            }
+            printf '本次外部客户端 %s（0 取消）: ' "${family}" >&2
+            IFS= read -r address || return 1
+        fi
+        address=$(dockerFail2banSourceAddress "${address}") &&
+            { [[ "${family}" == ipv4 && "${address}" != *:* ]] ||
+                [[ "${family}" == ipv6 && "${address}" == *:* ]]; } || {
+            dockerError "外部 ${family} 来源地址无效，尚未停止或修改服务"
+            return 1
+        }
+        printf -v "DOCKER_FAIL2BAN_SOURCE_${family^^}" '%s' "${address}"
+    done
+}
+
+dockerFail2banCleanCheck() {
+    local root ids ports
+    root=$(dockerInstallRoot) || return 1
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=net-fail2ban \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ -z "${ids}" && ! -e "${root}/data/net/fail2ban/fail2ban.state" &&
+        ! -L "${root}/data/net/fail2ban/fail2ban.state" ]] || {
+        dockerError 'Fail2ban 仍有容器或状态，保留现场并拒绝启动'
+        return 1
+    }
+    ports=$(jq -er '.host_integrations[] | select(.type == "fail2ban") |
+      .settings.ports | join(",")' "${root}/config/spec.json") || return 1
+    dockerComposeExecute run --rm --no-deps net-fail2ban \
+        preflight fail2ban "${ports}" unowned >/dev/null
+}
+
+dockerFail2banSourceInputsCheck() {
+    local spec=$1 plan family source
+    plan=$(dockerFail2banSourcePlan "${spec}") || return 1
+    for family in ipv4 ipv6; do
+        jq -e --arg family "${family}" 'any(.[]; .family == $family)' <<<"${plan}" >/dev/null || continue
+        source="DOCKER_FAIL2BAN_SOURCE_${family^^}"
+        source=${!source:-}
+        [[ -n "${source}" ]] &&
+            source=$(dockerFail2banSourceAddress "${source}") &&
+            { [[ "${family}" == ipv4 && "${source}" != *:* ]] ||
+                [[ "${family}" == ipv6 && "${source}" == *:* ]]; } || {
+            dockerError 'Fail2ban 缺少本次来源输入，不停止或启动 jail'
+            return 1
+        }
+    done
+}
+
+dockerFail2banStartVerified() {
+    local root spec hash plan tuple listener family source snapshot current services i
+    local -a starts=() tuples=() snapshots=() recreate=()
+    case "${1:-}" in ''|restart) ;; recreate) recreate=(--force-recreate) ;; *) return 1 ;; esac
+    root=$(dockerInstallRoot) || return 1
+    spec="${root}/config/spec.json"
+    dockerFail2banSourceInputsCheck "${spec}" &&
+        plan=$(dockerFail2banSourcePlan "${spec}") &&
+        hash=$(sha256sum -- "${spec}") || return 1
+    [[ "$(jq 'length' <<<"${plan}")" -gt 0 ]] || return 1
+    while IFS= read -r tuple; do
+        tuples+=("${tuple}")
+    done < <(jq -c '.[]' <<<"${plan}")
+    dockerFail2banConfigurationCheck && dockerFail2banCleanCheck || return 1
+    services=$(jq -er --slurpfile deployment "${root}/deployment.json" '
+      [.services | to_entries[] | select(.key != "net-fail2ban") |
+        select((.value.profiles // [] | index("net-check")) == null) |
+        select((.value.profiles // [] | length) == 0 or
+          any(.value.profiles[]; . as $p | $deployment[0].compose.profiles | index($p))) |
+        select((.value.depends_on // {} | has("net-fail2ban")) | not) | .key] |
+      if length > 0 and index("nginx") != null then .[] else error("missing runtime nginx") end
+    ' "${root}/compose.json") || return 1
+    mapfile -t starts <<<"${services}"
+    # 见证前启动长期服务；显式服务列表不能带入 acme 或一次性内核检查。
+    if [[ "${1:-}" == restart ]]; then
+        dockerComposeExecute restart --no-deps "${starts[@]}" >/dev/null || return 1
+    fi
+    dockerComposeExecute up -d "${recreate[@]}" --wait \
+        --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${starts[@]}" >/dev/null || return 1
+    for tuple in "${tuples[@]}"; do
+        listener=$(jq -er '.listener_id' <<<"${tuple}") &&
+            family=$(jq -er '.family' <<<"${tuple}") || return 1
+        snapshot=$(dockerFail2banSourceContainer "${listener}" "${family}") || return 1
+        snapshots+=("${snapshot}")
+    done
+    for tuple in "${tuples[@]}"; do
+        listener=$(jq -er '.listener_id' <<<"${tuple}") &&
+            family=$(jq -er '.family' <<<"${tuple}") || return 1
+        source="DOCKER_FAIL2BAN_SOURCE_${family^^}"
+        dockerFail2banSourceWitness "${listener}" "${!source}" >&2 || return 1
+    done
+    # 后续挑战不能掩盖先前入口的重建、启动代次或网络变化。
+    for ((i = 0; i < ${#tuples[@]}; i++)); do
+        listener=$(jq -er '.listener_id' <<<"${tuples[i]}") &&
+            family=$(jq -er '.family' <<<"${tuples[i]}") &&
+            current=$(dockerFail2banSourceContainer "${listener}" "${family}") &&
+            [[ "${current}" == "${snapshots[i]}" ]] || return 1
+    done
+    [[ "$(sha256sum -- "${spec}")" == "${hash}" ]] &&
+        dockerFail2banConfigurationCheck && dockerFail2banCleanCheck || return 1
+    # 最后一段禁止启动依赖，Nginx 重建会让刚取得的全部现场证明失效。
+    dockerComposeExecute up -d --no-deps --wait \
+        --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" net-fail2ban >/dev/null &&
+        dockerFail2banContainer >/dev/null
+}
+
+dockerFail2banContainer() (
+    local root ids container image mode=${1:-running}
+    [[ "$#" -le 1 ]] || return 1
+    case "${mode}" in running|exited) ;; *) return 1 ;; esac
+    root=$(dockerInstallRoot) || return 1
+    dockerFail2banConfigurationCheck owner || return 1
     ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
         --filter label=com.docker.compose.service=net-fail2ban \
         --filter label=com.docker.compose.oneoff=False) || return 1
@@ -3604,6 +3759,7 @@ dockerFail2banContainer() (
         $c.Config.Image == $image and $c.Config.Cmd == $service.command and
         $c.Config.Entrypoint == ["/usr/local/bin/padm-entrypoint"] and $c.Config.User == "0:0" and
         $c.HostConfig.NetworkMode == "host" and
+        $c.HostConfig.RestartPolicy.Name == $service.restart and
         $c.HostConfig.ReadonlyRootfs == $service.read_only and $c.HostConfig.Privileged == false and
         ($c.HostConfig.CapAdd | map(sub("^CAP_"; "")) | sort) == ($service.cap_add | sort) and
         ($c.HostConfig.CapDrop | map(sub("^CAP_"; "")) | sort) == ($service.cap_drop | sort) and
@@ -3631,16 +3787,26 @@ dockerFail2banContainer() (
 )
 
 dockerFail2banDisablePrepare() {
-    local nextSpec=$1 root oldEnabled newEnabled deployedEnabled composeEnabled ids before mode audited ports
+    local nextSpec=$1 restoreMode=${2:-normal}
+    local root oldEnabled newEnabled deployedEnabled composeEnabled ids before mode audited ports corruptSpec=0
     root=$(dockerInstallRoot) || return 1
+    case "${restoreMode}" in normal|restore) ;; *) return 1 ;; esac
     newEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${nextSpec}") || return 1
-    if [[ "${newEnabled}" == false ]]; then
-        # 未启用也须排除受管遗留容器，避免后续 remove-orphans 绕过审计。
-        ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
-            --filter label=com.docker.compose.service=net-fail2ban \
-            --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ "${newEnabled}" == true || "${newEnabled}" == false ]] || return 1
+    # 每次转换都审计旧保护，不能借新规格仍启用而跳过停止证明。
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=net-fail2ban \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    if [[ "${restoreMode}" == restore &&
+        ( -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ) ]]; then
+        dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+            [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] || return 1
+        jq -e 'type == "object" and (.host_integrations | type == "array")' \
+            "${root}/config/spec.json" >/dev/null 2>&1 || corruptSpec=1
     fi
-    if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]]; then
+    if [[ "${corruptSpec}" == 1 ||
+        ( ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ) ]]; then
+        # 当前规格损坏时只接受可证明的 disabled 元数据，不能借恢复备份冒充旧 owner。
         if [[ -e "${root}/deployment.json" || -L "${root}/deployment.json" ]]; then
             dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
                 [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] &&
@@ -3654,18 +3820,18 @@ dockerFail2banDisablePrepare() {
                 jq -e '(.services | type == "object") and
                   (.services | has("net-fail2ban") | not)' \
                     "${root}/compose.json" >/dev/null || return 1
+        else
+            [[ "${corruptSpec}" == 0 ]] || return 1
         fi
-        if [[ "${newEnabled}" == false ]]; then
-            [[ -z "${ids}" ]] || {
+        [[ -z "${ids}" ]] || {
                 dockerError '存在未审计的受管 Fail2ban 遗留容器，未修改配置'
                 return 1
-            }
-            [[ ! -e "${root}/data/net/fail2ban/fail2ban.state" &&
+        }
+        [[ ! -e "${root}/data/net/fail2ban/fail2ban.state" &&
                 ! -L "${root}/data/net/fail2ban/fail2ban.state" ]] || {
                 dockerError '存在未清理的 Fail2ban 状态，保留证据并拒绝修改配置'
                 return 1
-            }
-        fi
+        }
         return 0
     fi
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
@@ -3675,7 +3841,6 @@ dockerFail2banDisablePrepare() {
       then any(.host_integrations[]; .type == "fail2ban")
       else error("invalid host integration state") end
     ' "${root}/config/spec.json") || return 1
-    [[ "${newEnabled}" == false ]] || return 0
     if [[ -e "${root}/deployment.json" || -L "${root}/deployment.json" ]]; then
         # 未启用的结论也须与旧部署和编排一致，不能借改写 spec 绕过停用审计。
         dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
@@ -3707,6 +3872,11 @@ dockerFail2banDisablePrepare() {
         }
         return 0
     fi
+    dockerFail2banConfigurationCheck owner || return 1
+    if [[ -z "${ids}" ]]; then
+        dockerFail2banCleanCheck
+        return $?
+    fi
     [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || {
         dockerError '停用需要唯一的旧受管 Fail2ban 容器，未修改配置'
         return 1
@@ -3735,6 +3905,8 @@ dockerFail2banDisablePrepare() {
         dockerError 'Fail2ban 停止后仍有状态或规则，保留旧配置与恢复证据'
         return 1
     }
+    # 只移除刚证明正常退出且清理完成的容器，下一阶段不借旧 release 接管。
+    docker rm "${ids}" >/dev/null || return 1
 }
 
 dockerFail2banCommand() {
@@ -4173,6 +4345,9 @@ dockerCreateUpdateCandidate() {
           .release = $inputs.release | .images = $inputs.images
         ' "${root}/config/spec.json" >"${candidate}/config/spec.json" || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
+        if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${candidate}/config/spec.json" >/dev/null; then
+            dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.json" "${root}" || return 1
+        fi
         dockerConfigureSpecValidate "${candidate}/config/spec.json" &&
             dockerConfigureReleaseValidate "${candidate}/config/spec.json" &&
             dockerControlStateCheck "${root}" &&
@@ -4348,6 +4523,15 @@ dockerEnsureRuntimeDataPermissions() {
     dockerSiteTreeValidate "${root}/data/static" &&
         find "${root}/data/static" -type d -exec chmod 0750 {} + &&
         find "${root}/data/static" -type f -exec chmod 0640 {} + || return 1
+    if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${root}/config/spec.json" >/dev/null 2>&1; then
+        dockerTrafficSafePath "${root}" "${root}/logs/nginx/access.log" || return 1
+        if [[ ! -e "${root}/logs/nginx/access.log" && ! -L "${root}/logs/nginx/access.log" ]]; then
+            # 首启先提供日志文件供只读 preflight 核验，不能截断已有访问证据。
+            (set -C; : >"${root}/logs/nginx/access.log") || return 1
+        fi
+        [[ -f "${root}/logs/nginx/access.log" && ! -L "${root}/logs/nginx/access.log" ]] &&
+            chmod 0640 "${root}/logs/nginx/access.log" || return 1
+    fi
     for directory in config data/subscription; do
         [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
         [[ -z "$(find "${root}/${directory}" -type l -print -quit)" ]] || return 1
@@ -4380,6 +4564,7 @@ dockerEnsureRuntimeDataPermissions() {
 dockerRestoreConfiguration() {
     local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic includeStatic=0
     local alpnListener=${DOCKER_CONFIG_RESTORE_ALPN_LISTENER:-} alpnTemporary= ipv6Cleanup=0
+    local legacyFail2ban=0
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
@@ -4395,9 +4580,43 @@ dockerRestoreConfiguration() {
     if jq -e '.tls.http01 == true' "${backup}/config/spec.json" >/dev/null 2>&1; then
         dockerAcmeWebrootEnsure "${root}" || return 1
     fi
+    if [[ -f "${backup}/config/spec.json" ]]; then
+        dockerFail2banSourceInputsCheck "${backup}/config/spec.json" || return 1
+        if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${backup}/config/spec.json" >/dev/null; then
+            if ! cmp -s -- "${backup}/compose.json" \
+                <(dockerGenerateCompose "${backup}/config/spec.json" /dev/stdout "${root}"); then
+                cmp -s -- "${backup}/compose.json" \
+                    <(dockerGenerateCompose "${backup}/config/spec.json" /dev/stdout "${root}" |
+                      jq '.services["net-fail2ban"].restart = "unless-stopped"') || {
+                    dockerError 'Fail2ban 恢复编排不受管，尚未停止或修改服务'
+                    return 1
+                }
+                legacyFail2ban=1
+            fi
+        fi
+    elif [[ -e "${backup}/deployment.json" || -e "${backup}/compose.json" ]]; then
+        jq -en --slurpfile deployment "${backup}/deployment.json" \
+            --slurpfile compose "${backup}/compose.json" '
+          ($deployment | length) == 1 and ($compose | length) == 1 and
+          ($deployment[0].host_integrations | type == "array") and
+          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban")) == false and
+          ($compose[0].services | type == "object") and
+          ($compose[0].services | has("net-fail2ban")) == false
+        ' >/dev/null || {
+            dockerError '恢复点缺少可验证的 Fail2ban 原始规格，尚未停止或修改服务'
+            return 1
+        }
+    fi
     dockerControlRestorePrepare "${backup}" || return 1
     # 当前配置可能只安装了一部分，恢复授权只取自已验证的备份。
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" || return 1
+    if [[ -f "${backup}/config/spec.json" ]]; then
+        dockerFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
+    elif [[ -f "${backup}/deployment.json" ]]; then
+        dockerFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
+    else
+        dockerFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
+    fi
     if [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
         jq -e '.networks.ipv6 != null' "${root}/compose.json" >/dev/null &&
         ! { [[ -f "${backup}/compose.json" && ! -L "${backup}/compose.json" ]] &&
@@ -4426,7 +4645,8 @@ dockerRestoreConfiguration() {
             dockerRealityStreamStopServices nginx xray || return 1
         fi
     else
-        dockerComposeRun down >/dev/null || return 1
+        # 同次恢复已完成 owner 门禁，停止不能再依赖可能损坏的当前规格。
+        dockerComposeExecute down >/dev/null || return 1
     fi
     # 旧快照未记录站点内容时保留现有目录，不能把它当作空站点删除。
     grep -qxF data/static "${backup}/present" && includeStatic=1
@@ -4448,6 +4668,10 @@ dockerRestoreConfiguration() {
             cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/spec.json" "${root}/config/spec.json" &&
             cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/control/state.json" \
                 "${root}/config/control/state.json" || return 1
+    fi
+    if [[ "${legacyFail2ban}" == 1 ]]; then
+        # 备份原文不变，仅规范化已验证的旧自动重启策略，再重新取得现场证明。
+        dockerGenerateCompose "${root}/config/spec.json" "${root}/compose.json" "${root}" || return 1
     fi
     [[ -z "${bundleTarget}" ]] || dockerActivateBundle "${bundleTarget}" || return 1
     if [[ -f "${root}/deployment.json" && -f "${root}/compose.json" && -f "${root}/images.env" ]]; then
@@ -4473,7 +4697,10 @@ dockerRestoreConfiguration() {
             }
         fi
         dockerEnsureRuntimeDataPermissions || return 1
-        dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null 2>&1 || return 1
+        dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null || {
+            dockerError "配置文件已恢复，但服务或 Fail2ban 来源复验未完成，保留备份: ${backup}"
+            return 1
+        }
     else
         dockerTlsRuntimePermissions "${root}/secrets/tls" || return 1
         if [[ -e "${root}/data/acme" || -L "${root}/data/acme" ]]; then
@@ -4524,7 +4751,7 @@ dockerCleanupConfigurationCandidate() {
 }
 
 dockerConfigurationInterrupted() {
-    dockerRestoreConfiguration || true
+    dockerRestoreConfiguration || dockerError "中断恢复未完成，保留恢复证据: ${DOCKER_CONFIG_BACKUP:-}"
     dockerCleanupConfigurationCandidate || true
     dockerRestoreTlsFiles || true
     dockerCleanupTlsCandidate || true
@@ -4612,6 +4839,9 @@ dockerRealityStreamTransitionPrepare() {
 dockerConfigureApply() {
     local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-}
     local specFile candidate backup answer root backupPrefix=configure
+    # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
+    # shellcheck disable=SC2034
+    local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     [[ -z "${businessSource}" ]] || backupPrefix=business
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     dockerControlRecoveryCheck || return "${PADM_DOCKER_RC_STATE}"
@@ -4677,6 +4907,10 @@ dockerConfigureApply() {
             ;;
         esac
     fi
+    dockerFail2banSourceInputsPrepare "${specFile}" "${root}/config/spec.json" || {
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    }
     if [[ "${mode}" != configure ]]; then
         # 确认后才采集旧核心，并以最新额度状态重渲染候选账号。
         dockerTrafficBeforeChange
@@ -5139,7 +5373,11 @@ dockerBackupTlsFiles() {
 
 dockerCommitTlsCandidate() {
     local candidate=$1 domain=$2 root targetDir extension tempFile
+    # TLS 失败恢复通过动态作用域读取本次来源输入。
+    # shellcheck disable=SC2034
+    local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     root=$(dockerInstallRoot) || return 1
+    dockerFail2banSourceInputsPrepare "${root}/config/spec.json" || return 1
     targetDir="${root}/secrets/tls"
     dockerDomainIsValid "${domain}" &&
         dockerTrafficSafePath "${root}" "${candidate}" &&
@@ -5676,6 +5914,13 @@ dockerAcmeChallengePrepare() {
         dockerAcmeHostPortOwned "${owners}" || return 1
     fi
     if [[ "$(jq 'length' <<<"${owners}")" != 0 ]]; then
+        if jq -e 'any(.[]; .Config.Labels["com.docker.compose.service"] == "nginx")' \
+            <<<"${owners}" >/dev/null &&
+            jq -e 'any(.host_integrations[]; .type == "fail2ban")' \
+                "${root}/config/spec.json" >/dev/null; then
+            dockerError 'Fail2ban 保护的 Nginx 不能用 standalone 停启，HTTP-01 请使用 webroot'
+            return 1
+        fi
         printf 'HTTP-01 临时暂停 80 端口服务: %s；同容器其它端口也会短暂停机。\n' \
             "$(jq -r 'map(.Config.Labels["com.docker.compose.service"]) | unique | join(",")' <<<"${owners}")"
         # 停止前登记，部分停止失败或信号到达时仍恢复全部原运行容器。

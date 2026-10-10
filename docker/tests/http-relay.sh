@@ -63,6 +63,10 @@ dockerComposeRun() {
         return 1
     fi
 }
+dockerComposeExecute() {
+    [[ "$*" == down ]] || fail "意外恢复启停参数: $*"
+    dockerComposeRun "$@"
+}
 mkdir -p "${TEST_ROOT}/bundle/docker/contracts"
 printf '%s\n' "$(printf 'a%.0s' {1..40})" >"${TEST_ROOT}/bundle/${PADM_DOCKER_BUNDLE_REF}"
 cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \

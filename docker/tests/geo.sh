@@ -127,7 +127,11 @@ docker() {
         *) printf 'xray-test-container\n' ;;
         esac
         ;;
-    ps) [[ "$(<"${TEST_ROOT}/running")" != 1 ]] || printf 'xray-test-container\n' ;;
+    ps)
+        if [[ "$*" != 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]]; then
+            [[ "$(<"${TEST_ROOT}/running")" != 1 ]] || printf 'xray-test-container\n'
+        fi
+        ;;
     run)
         [[ "${MODE}" != probe-fail ]] || status=1
         for argument in "$@"; do
@@ -209,7 +213,7 @@ newState() {
     dockerGenerateXrayConfig "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json"
     cp "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base"
     printf '{"inbounds":[],"outbounds":[]}\n' >"${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json"
-    printf '{"schema_version":3,"core":{"type":"xray","secondary_type":"sing-box"},"compose":{"profiles":["core-xray","core-sing-box"]}}\n' \
+    printf '{"schema_version":3,"core":{"type":"xray","secondary_type":"sing-box"},"host_integrations":[],"compose":{"profiles":["core-xray","core-sing-box"]}}\n' \
         >"${PADM_DOCKER_INSTALL_DIR}/deployment.json"
     printf '{"accounts":{"11111111-1111-4111-8111-111111111111":{"upload":123,"download":456}}}\n' \
         >"${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json"

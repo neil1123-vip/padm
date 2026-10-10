@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import ipaddress
 import json
 import os
@@ -24,6 +25,67 @@ SOURCES = {
     "ipv4": ("198.18.2.2", "198.18.2.3"),
     "ipv6": ("fd42:7061:646d:2::2", "fd42:7061:646d:2::3"),
 }
+
+# 离线镜像只适配身份与固定配置审计，启用、见证和内核清理仍执行生产函数。
+FIXTURE_RUNTIME = r'''
+source "$1"
+dockerFail2banConfigurationCheck() {
+    dockerConfigureSpecValidate "$PADM_DOCKER_INSTALL_DIR/config/spec.json" &&
+        printf '%s\n' "$PADM_TEST_CONFIG_HASHES" | sha256sum --check --status --strict
+}
+dockerComposeExecute() {
+    jq -cn --args '$ARGS.positional' -- "$@" >>"$PADM_TEST_COMPOSE_CALLS" || return 1
+    docker compose --project-name padm-docker --project-directory "$PADM_DOCKER_INSTALL_DIR" \
+      --file "$PADM_DOCKER_INSTALL_DIR/compose.json" --profile '*' "$@" </dev/null
+}
+dockerFail2banSourceContainer() {
+    local entry identity
+    entry=$(jq -ce --arg listener "$1" --arg family "$2" '
+      [.core.protocols[] | select(.listener_id == $listener and
+        (.address_families | index($family)) != null)] |
+      select(length == 1) | .[0] |
+      {public_port,internal_port:.websocket.tls_port}
+    ' "$PADM_DOCKER_INSTALL_DIR/config/spec.json") || return 1
+    identity=$(docker ps -aq --filter label=com.docker.compose.project=padm-docker \
+      --filter label=com.docker.compose.service=nginx \
+      --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ "$identity" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    docker inspect "$identity" | jq -ce \
+      --argjson entry "$entry" --arg image "$PADM_TEST_NGINX_IMAGE" \
+      --argjson hosts "$PADM_TEST_SOURCE_HOSTS" '
+      select(length == 1) | .[0] |
+      select(.Image == $image and .State.Running == true and .State.Restarting == false and
+        .Config.User == "10001:10001" and .HostConfig.ReadonlyRootfs == true and
+        .HostConfig.Privileged == false and .HostConfig.CapDrop == ["ALL"] and
+        (.HostConfig.CapAdd // []) == []) |
+      {id:.Id,started_at:.State.StartedAt,restart_count:.RestartCount,
+       public_port:$entry.public_port,internal_port:$entry.internal_port,domain:"source.padm.test",
+       networks:(.NetworkSettings.Networks | to_entries |
+         map({name:.key,id:.value.NetworkID}) | sort_by(.name)),
+       addresses:($hosts + [.NetworkSettings.Networks[] |
+         .IPAddress,.Gateway,.GlobalIPv6Address,.IPv6Gateway] | map(select(. != "")) | unique)}
+    '
+}
+dockerFail2banContainer() {
+    local identity
+    dockerFail2banConfigurationCheck || return 1
+    identity=$(docker ps -aq --filter label=com.docker.compose.project=padm-docker \
+      --filter label=com.docker.compose.service=net-fail2ban \
+      --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ "$identity" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    docker inspect "$identity" | jq -e --arg image "$PADM_TEST_NET_IMAGE" '
+      length == 1 and (.[0] | .Image == $image and .State.Running == true and
+        .State.Restarting == false and .HostConfig.NetworkMode == "host" and
+        .HostConfig.ReadonlyRootfs == true and .HostConfig.Privileged == false and
+        .Config.User == "0:0" and
+        (.HostConfig.CapAdd | map(ltrimstr("CAP_"))) == ["NET_ADMIN"] and
+        .HostConfig.CapDrop == ["ALL"])
+    ' >/dev/null &&
+        dockerFail2banRuntimeAudit "$identity" &&
+        docker exec "$identity" sh /usr/local/bin/padm-entrypoint fail2ban-health || return 1
+    printf '%s\n' "$identity"
+}
+'''
 
 
 def wait_ready(probe, message, limit=15):
@@ -65,7 +127,7 @@ def namespaces():
     processes = []
     try:
         for number in range(2):
-            process = subprocess.Popen(["unshare", "--net", "--", "sleep", "180"])
+            process = subprocess.Popen(["unshare", "--net", "--", "sleep", "360"])
             processes.append(process)
             wait_ready(lambda: Path(f"/proc/{process.pid}/ns/net").readlink() !=
                        Path("/proc/self/ns/net").readlink(), "客户端 netns 未隔离")
@@ -111,6 +173,129 @@ def client(process, family, path="/", forged=None, port=PORT):
 
 def inspect(docker, identity):
     return json.loads(command(docker + ["inspect", identity]))[0]
+
+
+def jail_absent(docker):
+    identities = command(docker + [
+        "ps", "-aq", "--filter", "label=com.docker.compose.project=padm-docker",
+        "--filter", "label=com.docker.compose.service=net-fail2ban",
+        "--filter", "label=com.docker.compose.oneoff=False"])
+    assert not identities.strip(), "来源见证完成前 jail 已创建"
+
+
+def verified_start(docker, compose, deployment, inputs, client_processes, mode, output_root):
+    spec = json.loads((deployment / "config/spec.json").read_text())
+    ports = set(spec["host_integrations"][0]["settings"]["ports"])
+    expected = sorted(
+        (entry["public_port"], family, entry["listener_id"], entry["websocket"]["tls_port"])
+        for entry in spec["core"]["protocols"] if entry["public_port"] in ports
+        for family in entry["address_families"])
+    paths = [
+        deployment / name for name in ("config/spec.json", "compose.json", "deployment.json",
+                                      "images.env", "config/nginx/default.conf",
+                                      "config/xray/config.json")
+    ] + sorted((deployment / "config/net/fail2ban").iterdir())
+    calls = deployment / "compose.calls.jsonl"
+    environment = dict(
+        os.environ, DOCKER_HOST=docker[-1], PADM_DOCKER_INSTALL_DIR=str(deployment),
+        PADM_TEST_NGINX_IMAGE=inputs["nginx"]["image_id"],
+        PADM_TEST_NET_IMAGE=inputs["net"]["image_id"], PADM_TEST_COMPOSE_CALLS=str(calls),
+        PADM_TEST_CONFIG_HASHES="\n".join(
+            hashlib.sha256(path.read_bytes()).hexdigest() + "  " + str(path) for path in paths),
+        PADM_TEST_SOURCE_HOSTS=json.dumps(list(HOST.values()) +
+                                         ["198.18.2.4", "fd42:7061:646d:2::4"]),
+        DOCKER_FAIL2BAN_SOURCE_IPV4=SOURCES["ipv4"][0],
+        DOCKER_FAIL2BAN_SOURCE_IPV6=SOURCES["ipv6"][0])
+    jail_absent(docker)
+    process = subprocess.Popen(
+        ["bash", "-Eeuo", "pipefail", "-c", FIXTURE_RUNTIME + "\ndockerFail2banStartVerified",
+         "test", str(ROOT / "install-docker.sh")], env=environment,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, bufsize=0)
+    transcript, pending, challenges, proofs = bytearray(), b"", [], []
+    nginx_snapshot = None
+    deadline = time.monotonic() + 120
+    try:
+        with selectors.DefaultSelector() as reader:
+            reader.register(process.stderr, selectors.EVENT_READ)
+            while reader.get_map():
+                assert time.monotonic() < deadline, "生产启用事务未完成"
+                if not reader.select(timeout=0.5):
+                    continue
+                block = os.read(process.stderr.fileno(), 65536)
+                if not block:
+                    reader.unregister(process.stderr)
+                    break
+                transcript.extend(block)
+                pending += block
+                while b"\n" in pending:
+                    raw, pending = pending.split(b"\n", 1)
+                    line = raw.decode()
+                    if line.startswith("source-challenge="):
+                        assert len(challenges) == len(proofs), "未完成见证就进入下一挑战"
+                        challenge = json.loads(line.removeprefix("source-challenge="))
+                        port, family, listener, internal = expected[len(challenges)]
+                        assert challenge["public_port"] == port and challenge["family"] == family
+                        assert challenge["domain"] == "source.padm.test"
+                        uri = challenge["uri"]
+                        assert uri.startswith("/.well-known/padm-source/")
+                        assert len(uri.rsplit("/", 1)[1]) == 48
+                        jail_absent(docker)
+                        nginx_id = command(compose + ["ps", "-q", "nginx"]).decode().strip()
+                        nginx = inspect(docker, nginx_id)
+                        snapshot = dict(id=nginx["Id"], started_at=nginx["State"]["StartedAt"],
+                                        restart_count=nginx["RestartCount"])
+                        if nginx_snapshot is None:
+                            nginx_snapshot = snapshot
+                        assert snapshot == nginx_snapshot, "挑战过程中 Nginx 已重建"
+                        assert uri.encode() not in command(docker + ["logs", nginx_id])
+                        address = HOST[family] if family == "ipv4" else f"[{HOST[family]}]"
+                        result = command([
+                            "nsenter", "--target", str(client_processes[0].pid), "--net", "--",
+                            "curl", "-4" if family == "ipv4" else "-6", "--fail", "--show-error",
+                            "--silent", "--noproxy", "*", "--max-time", "3",
+                            "--cacert", str(deployment / "secrets/tls/source.padm.test.crt"),
+                            "--resolve", f"source.padm.test:{port}:{address}",
+                            "--header", f"X-Forwarded-For: {SOURCES[family][1]}",
+                            "--header", f"Forwarded: for=\"{SOURCES[family][1]}\"",
+                            "--output", "/dev/null", "--write-out", "%{http_code}",
+                            f"https://source.padm.test:{port}{uri}"], timeout=5)
+                        assert result == b"204", (challenge, result)
+                        challenges.append(challenge)
+                    elif line.startswith("source-verified="):
+                        assert len(challenges) == len(proofs) + 1, "无当前挑战的来源见证"
+                        proof = json.loads(line.removeprefix("source-verified="))
+                        port, family, listener, internal = expected[len(proofs)]
+                        assert {key: value for key, value in proof.items() if key != "source"} == dict(
+                            listener_id=listener, family=family, public_port=port,
+                            internal_port=internal), proof
+                        assert ipaddress.ip_address(proof["source"]) == ipaddress.ip_address(
+                            SOURCES[family][0]), proof
+                        proofs.append(proof)
+        assert process.wait(timeout=5) == 0, transcript.decode(errors="replace")
+        assert len(challenges) == len(proofs) == len(expected), transcript.decode(errors="replace")
+        current = inspect(docker, nginx_snapshot["id"])
+        assert current["Id"] == nginx_snapshot["id"]
+        assert current["State"]["StartedAt"] == nginx_snapshot["started_at"]
+        assert current["RestartCount"] == nginx_snapshot["restart_count"]
+        records = [json.loads(line) for line in calls.read_text().splitlines()]
+        starts = [row for row in records if row[0] == "up"]
+        assert len(starts) == 2, records
+        assert {"xray", "nginx", "--wait"} <= set(starts[0]), starts
+        assert not {"net-fail2ban", "acme", "net-tun-check"} & set(starts[0]), starts
+        assert {"net-fail2ban", "--no-deps", "--wait"} <= set(starts[1]), starts
+        assert not {"xray", "nginx", "acme", "net-tun-check", "--force-recreate"} & set(starts[1])
+        checks = [row for row in records if row[0] == "run"]
+        assert len(checks) == 2 and all(row[-4:] == [
+            "preflight", "fail2ban", "24444,24445", "unowned"] for row in checks), records
+        assert [row[0] for row in records] == ["run", "up", "run", "up"], records
+        print("fail2ban-production-start-verified=" + json.dumps(dict(
+            mode=mode, proofs=proofs, nginx=nginx_snapshot, compose=records),
+            sort_keys=True), flush=True)
+        return challenges[-1]["uri"]
+    finally:
+        (output_root / f"{mode}.start.log").write_bytes(transcript)
+        if process.poll() is None:
+            stop(process)
 
 
 def witness(docker, identity, client_processes, family, listener, port, internal_port,
@@ -229,7 +414,8 @@ def run(root):
             shutil.copyfile(ROOT / "docker/images/net/entrypoint.sh", entrypoint)
             entrypoint.chmod(0o755)
             evidence = {"ipv4": "unverified", "dual_ipv4": "unverified",
-                        "ipv6": "unverified", "image_ids": inputs}
+                        "ipv6": "unverified", "start_ipv4": "unverified",
+                        "start_dual": "unverified", "image_ids": inputs}
             for mode in ("ipv4", "dual"):
                 deployment = node / mode
                 command(["cp", "-a", str(root / mode), str(deployment)])
@@ -238,6 +424,7 @@ def run(root):
                                       for name in ("xray", "nginx", "net-fail2ban")}
                 for name, service in source["services"].items():
                     service["image"] = inputs["net" if name == "net-fail2ban" else name]["image_id"]
+                    service["pull_policy"] = "never"
                     for volume in service["volumes"]:
                         volume["source"] = volume["source"].replace(
                             "${PADM_DOCKER_ROOT}", str(deployment)).replace(
@@ -255,7 +442,8 @@ def run(root):
                 compose_path.write_text(json.dumps(source))
                 compose = docker + ["compose", "--project-name", "padm-docker", "--file",
                                     str(compose_path), "--profile", "*"]
-                command(compose + ["up", "-d", "--pull", "never"], timeout=50)
+                history_uri = verified_start(docker, compose, deployment, inputs, clients, mode, root)
+                evidence[f"start_{mode}"] = "passed"
                 identities = {name: command(compose + ["ps", "-q", name]).decode().strip()
                               for name in source["services"]}
                 nginx = inspect(docker, identities["nginx"])
@@ -290,15 +478,12 @@ def run(root):
                     docker + ["exec", identities["net-fail2ban"], "fail2ban-client", "status", "padm-nginx"],
                     capture_output=True).returncode == 0, "Fail2ban 未就绪")
                 families = ("ipv4",) if mode == "ipv4" else ("ipv4", "ipv6")
-                history_uri = None
                 for family in families:
                     wait_ready(lambda: client(clients[0], family).get("status") == 200,
                                f"{family} 发布连接未就绪")
-                    for listener, public_port, internal_port in (
-                            ("entry-source-ws", PORT, 8443), ("entry-source-ws2", PORT + 1, 8444)):
-                        history_uri = witness(docker, identities["nginx"], clients, family,
-                                              listener, public_port, internal_port, history_uri=history_uri)
                     if mode == "ipv4":
+                        history_uri = witness(docker, identities["nginx"], clients, family,
+                                              "entry-source-ws", PORT, 8443, history_uri=history_uri)
                         for reason in ("port", "source"):
                             witness(docker, identities["nginx"], clients, family,
                                     "entry-source-ws", PORT, 8443, reject=reason)
@@ -367,7 +552,8 @@ def run(root):
                     assert b"padm-f2b" not in remaining, f"停止后残留 {table} Fail2ban 资源"
             evidence["elapsed"] = round(time.monotonic() - started, 3)
             print("fail2ban-source-real-evidence=" + json.dumps(evidence, sort_keys=True), flush=True)
-            assert all(evidence[family] == "passed" for family in ("ipv4", "dual_ipv4", "ipv6"))
+            assert all(evidence[family] == "passed" for family in (
+                "ipv4", "dual_ipv4", "ipv6", "start_ipv4", "start_dual"))
         except BaseException:
             result = subprocess.run(docker + ["ps", "-aq"], capture_output=True, timeout=10)
             for identity in result.stdout.decode().split() if not result.returncode else []:

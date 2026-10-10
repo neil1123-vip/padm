@@ -521,6 +521,90 @@ dockerIPv6NetworkManage() {
 }
 
 dockerComposeRun() {
+    local root composeFile enabled specEnabled deployedEnabled argument noDeps=0 recreate='' skipTimeout=0
+    local -a services=()
+    case "${1:-}" in up|restart|down|exec) ;; *) dockerComposeExecute "$@"; return $? ;; esac
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    case "${1:-}" in
+    up|restart|exec)
+        dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        ;;
+    esac
+    composeFile=$(dockerComposeFile) || return "${PADM_DOCKER_RC_COMPOSE}"
+    jq -e 'type == "object" and (.services | type == "object")' \
+        "${composeFile}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    enabled=$(jq -r '.services | has("net-fail2ban")' "${composeFile}") || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -f "${root}/config/spec.json" ]]; then
+        specEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${root}/config/spec.json") &&
+            deployedEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${root}/deployment.json") &&
+            [[ "${enabled}" == "${specEnabled}" && "${enabled}" == "${deployedEnabled}" ]] || {
+            dockerError 'Fail2ban 规格、部署与编排不一致，拒绝服务变更'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    elif [[ "${enabled}" == true ]]; then
+        dockerError 'Fail2ban 缺少受管规格，拒绝服务变更'
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ "${enabled}" == true ]]; then
+        case "${1:-}" in
+        up|restart)
+            for argument in "${@:2}"; do
+                if [[ "${skipTimeout}" == 1 ]]; then
+                    [[ "${argument}" =~ ^[1-9][0-9]*$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+                    skipTimeout=0
+                    continue
+                fi
+                case "${argument}" in
+                --no-deps) noDeps=1 ;;
+                --force-recreate) recreate=recreate ;;
+                --wait-timeout) skipTimeout=1 ;;
+                -d|--wait) ;;
+                *)
+                    jq -e --arg service "${argument}" '.services | has($service)' \
+                        "${composeFile}" >/dev/null || return "${PADM_DOCKER_RC_USAGE}"
+                    services+=("${argument}")
+                    ;;
+                esac
+            done
+            [[ "${skipTimeout}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$1" != restart ]] || recreate=restart
+            if [[ "${noDeps}" == 1 && "${#services[@]}" -gt 0 &&
+                " ${services[*]} " != *' net-fail2ban '* && " ${services[*]} " != *' nginx '* ]]; then
+                dockerComposeExecute "$@"
+                return $?
+            fi
+            dockerFail2banConfigurationCheck || {
+                dockerError '当前 Fail2ban 编排不是受管新策略，请先通过 update 规范化后再启动'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            dockerFail2banSourceInputsCheck "${root}/config/spec.json" &&
+                dockerFail2banDisablePrepare "${root}/config/spec.json" &&
+                dockerFail2banStartVerified "${recreate}" || return "${PADM_DOCKER_RC_STATE}"
+            return 0
+            ;;
+        down)
+            dockerFail2banDisablePrepare "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+            ;;
+        exec)
+            if [[ " $* " == *' nginx '* && " $* " == *' reload '* ]]; then
+                dockerFail2banConfigurationCheck &&
+                    dockerFail2banSourceInputsCheck "${root}/config/spec.json" &&
+                    dockerFail2banDisablePrepare "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+            fi
+            ;;
+        esac
+    elif [[ "$1" == up || "$1" == down ]]; then
+        if [[ -f "${root}/config/spec.json" ]]; then
+            dockerFail2banDisablePrepare "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+        else
+            dockerFail2banDisablePrepare "${root}/deployment.json" || return "${PADM_DOCKER_RC_STATE}"
+        fi
+    fi
+    dockerComposeExecute "$@"
+}
+
+dockerComposeExecute() {
     local composeFile composeDir root profile
     local -a commandArgs=() extraArgs=()
     composeFile=$(dockerComposeFile) || {
@@ -623,6 +707,9 @@ dockerStatusCommand() {
 
 dockerLifecycleCommand() {
     local operation=$1 root
+    # 来源输入仅在本次调用栈共享，不留跨事务的成功标记。
+    # shellcheck disable=SC2034
+    local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     shift
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
@@ -634,6 +721,8 @@ dockerLifecycleCommand() {
     up|restart)
         root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
         dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        dockerFail2banSourceInputsPrepare "${root}/config/spec.json" ||
             return "${PADM_DOCKER_RC_STATE}"
         ;;
     esac
@@ -904,6 +993,9 @@ dockerAssessCommand() {
 
 dockerUpdateCommand() {
     local manifest= bundle= controlBundle= candidate backup root
+    # 升级失败恢复仍须重新挑战，只复用本次预期来源。
+    # shellcheck disable=SC2034
+    local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --manifest)
@@ -953,6 +1045,10 @@ dockerUpdateCommand() {
     }
     candidate=${DOCKER_CONFIG_CANDIDATE}
     dockerValidateUpdateCandidate "${candidate}" || {
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    dockerFail2banSourceInputsPrepare "${candidate}/config/spec.json" "${root}/config/spec.json" || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }
@@ -1092,6 +1188,9 @@ dockerTrafficRollbackCheck() {
 
 dockerRollbackCommand() {
     local backup currentBackup bundlePath root
+    # 回滚与失败恢复共享输入，现场证明每次重新取得。
+    # shellcheck disable=SC2034
+    local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
@@ -1126,6 +1225,8 @@ dockerRollbackCommand() {
     dockerTrafficRollbackCheck "${backup}" || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficRuntimeCheck "$(jq -r '.core.type, (.core.secondary_type // empty)' "${backup}/deployment.json")" ||
         return "${PADM_DOCKER_RC_HOST}"
+    dockerFail2banSourceInputsPrepare "${backup}/config/spec.json" "${root}/config/spec.json" ||
+        return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficBeforeChange
     dockerBackupConfiguration rollback || return "${PADM_DOCKER_RC_STATE}"
     currentBackup=${DOCKER_CONFIG_BACKUP}

@@ -444,8 +444,21 @@ Verification binds the real Nginx source, internal port and container startup id
 forwarded headers and historical logs are not evidence. Local, container and gateway
 sources, port aliases sharing an internal listener, and coexistence entries are rejected.
 The result is not stored as an enabling credential and does not start Fail2ban or change
-configuration or firewall rules. Enabling still requires every protected port and family
-to be witnessed within the same configuration transaction.
+configuration or firewall rules. Configure, update, up/restart and rollback first audit
+and stop the previous owner and prove cleanup, then start non-jail runtime services.
+Every protected port and family receives a fresh challenge. The batch snapshots must
+still match before starting only the jail with `--no-deps`; recovery also requires new
+challenges. Missing inputs or failed proof leave the jail stopped and preserve recovery evidence.
+The menu collects expected external addresses after confirmation. Noninteractive commands
+can set `PADM_DOCKER_FAIL2BAN_SOURCE_IPV4` and `PADM_DOCKER_FAIL2BAN_SOURCE_IPV6`;
+these are expected sources, not authorization, and the external client must still respond
+to each new URI. Disable also collects sources needed if restoring the previous configuration.
+Preview and cancellation do not require a challenge response.
+Docker automatic restart is disabled for `net-fail2ban`; after daemon restart, use the
+management entry point for new proof. Update old `unless-stopped` deployments first.
+Restoring a verified old backup normalizes only that policy without modifying the backup.
+Protected Nginx cannot use standalone HTTP-01 stop/start; use webroot. TLS reload also
+requires current source inputs and challenges, so unattended rotation without inputs fails closed.
 The 30 seconds is a log collection window; a blocked Docker log or address query can make
 the command take longer, and timeout still fails closed. The check proves consistency of
 the disk configuration, container metadata and observed request, not every byte loaded in
@@ -461,8 +474,8 @@ Dual-stack WS protection connects Nginx to the existing owned IPv6 network,
 avoiding source loss through an IPv4 bridge proxy. Update old dual-stack Compose
 through the normal configure/upgrade transaction; do not bypass body checks.
 Real dual-stack sources, automatic log bans, packet drops and unban recovery passed
-in isolated Linux amd64. On-site source witnessing before enabling, SSH/control
-protection, native hosts, arm64, reboot/uninstall and
+in isolated Linux amd64. In-transaction multi-port, dual-stack enabling has passed;
+SSH/control protection, native hosts, arm64, reboot/uninstall and
 complete management still require 5C acceptance.
 
 The existing TProxy profile records its random chain, rule token, mark, route table
