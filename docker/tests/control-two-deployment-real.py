@@ -478,6 +478,32 @@ def main():
                 "--peer-address", ADDRESS[1], "--yes")
             initial_services = services(controller)
             assert "control" in initial_services
+            proof_output = controller["path"] / "source-proof.log"
+            with proof_output.open("wb") as output:
+                proof = subprocess.Popen(
+                    controller["enter"] + ["bash", str(controller["path"] / "bin/padm-docker"),
+                                           "control", "source-check"],
+                    env=controller["env"], stdout=output, stderr=subprocess.STDOUT,
+                )
+                try:
+                    deadline = time.monotonic() + 20
+                    while b"source-challenge=" not in proof_output.read_bytes():
+                        assert proof.poll() is None and time.monotonic() < deadline, \
+                            f"来源挑战未发布，退出码 {proof.poll()}：" + diagnostic(
+                                controller, proof_output.read_text())
+                        time.sleep(0.05)
+                    registration_path = controller["path"] / "deployment/data/control-source/challenge.json"
+                    registration = json.loads(registration_path.read_text())
+                    cli(controlled, "control", "source-probe", "--address", ADDRESS[0], "--port", "39778",
+                        "--peer-address", ADDRESS[1], "--nonce", registration["nonce"])
+                    assert proof.wait(timeout=20) == 0, diagnostic(controller, proof_output.read_text())
+                    assert b"source-verified=" in proof_output.read_bytes()
+                    assert not registration_path.exists()
+                    receipt = (controller["path"] / "deployment/logs/control/source.receipt").read_text()
+                    assert f"nonce={registration['nonce']} status=401 source={ADDRESS[1]}" in receipt
+                    print("docker-control-two-deployment-source-witness-ok", flush=True)
+                finally:
+                    stop(proof)
             invite = controller["path"] / "private/invite.json"
             cli(controller, "control", "invite", "--output", str(invite), "--yes")
             controlled_invite = controlled["path"] / "private/invite.json"

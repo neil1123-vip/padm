@@ -146,16 +146,24 @@ chmod 0750 "${controlRoot}" "${controlRoot}/config"
 printf '{"control":{"role":"main"}}\n' >"${controlRoot}/config/spec.json"
 dockerControlAccessLogEnsure "${controlRoot}"
 controlLog="${controlRoot}/logs/control/auth.log"
+sourceReceipt="${controlRoot}/logs/control/source.receipt"
+sourceChallenge="${controlRoot}/data/control-source/challenge.json"
 assertMetadata "${controlRoot}/logs/control" '750 0 10001'
 assertMetadata "${controlLog}" '640 10001 10001'
+assertMetadata "${sourceReceipt}" '640 10001 10001'
+assertMetadata "${controlRoot}/data/control-source" '750 0 10001'
+[[ ! -e "${sourceChallenge}" ]] || fail 'runtime permissions created a challenge'
 (
     cd "${controlRoot}/logs/control"
     setpriv --reuid 10001 --regid 10001 --clear-groups -- sh -c \
         'test -w auth.log && test ! -w . && printf "kept-control-evidence\n" >>auth.log'
 ) || fail 'control UID could not append to the protected log'
 controlDigest=$(sha256sum "${controlLog}")
+printf 'kept-source-receipt\n' >"${sourceReceipt}"
+receiptDigest=$(sha256sum "${sourceReceipt}")
 dockerControlAccessLogEnsure "${controlRoot}"
 [[ "$(sha256sum "${controlLog}")" == "${controlDigest}" ]] || fail 'existing control log was truncated'
+[[ "$(sha256sum "${sourceReceipt}")" == "${receiptDigest}" ]] || fail 'existing source receipt was truncated'
 mv -- "${controlLog}" "${controlRoot}/saved-auth.log"
 printf 'untouched\n' >"${controlRoot}/outside-log"
 chmod 0600 "${controlRoot}/outside-log"
@@ -197,11 +205,61 @@ chmod 0777 "${controlRoot}/logs/control/unexpected"
 rmdir -- "${controlRoot}/logs/control/unexpected"
 dockerControlAccessLogEnsure "${controlRoot}"
 [[ "$(sha256sum "${controlLog}")" == "${controlDigest}" ]] || fail 'control log changed after rejected unsafe inputs'
-printf '{"control_sync":{}}\n' >"${controlRoot}/config/spec.json"
-rm -- "${controlLog}"
-rmdir -- "${controlRoot}/logs/control"
+mv -- "${sourceReceipt}" "${controlRoot}/saved-source.receipt"
+ln -s "${controlRoot}/outside-log" "${sourceReceipt}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'source receipt symlink was accepted'
+rm -- "${sourceReceipt}"
+ln "${controlRoot}/saved-source.receipt" "${sourceReceipt}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'source receipt hardlink was accepted'
+rm -- "${sourceReceipt}"
+mv -- "${controlRoot}/saved-source.receipt" "${sourceReceipt}"
+chmod 0660 "${sourceReceipt}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe source receipt permissions were repaired'
+assertMetadata "${sourceReceipt}" '660 10001 10001'
+chmod 0640 "${sourceReceipt}"
+printf '{"fixture":"registered-source"}\n' >"${sourceChallenge}"
+chmod 0640 "${sourceChallenge}"
+chown 0:10001 "${sourceChallenge}"
+challengeDigest=$(sha256sum "${sourceChallenge}")
 dockerControlAccessLogEnsure "${controlRoot}"
-[[ ! -e "${controlRoot}/logs/control" ]] || fail 'controlled node created an unused control log'
+(
+    cd "${controlRoot}/data/control-source"
+    setpriv --reuid 10001 --regid 10001 --clear-groups -- sh -c \
+        'test -r challenge.json && test ! -w challenge.json && test ! -w .'
+) || fail 'control UID could modify the root-owned challenge registration'
+ln "${sourceChallenge}" "${controlRoot}/challenge-link"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'source challenge hardlink was accepted'
+rm -- "${controlRoot}/challenge-link"
+chmod 0660 "${sourceChallenge}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe source challenge permissions were repaired'
+assertMetadata "${sourceChallenge}" '660 0 10001'
+chmod 0640 "${sourceChallenge}"
+chown 10001:10001 "${sourceChallenge}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'API-owned source challenge was accepted'
+assertMetadata "${sourceChallenge}" '640 10001 10001'
+chown 0:10001 "${sourceChallenge}"
+[[ "$(sha256sum "${sourceChallenge}")" == "${challengeDigest}" ]] || fail 'challenge content was replaced'
+mv -- "${sourceChallenge}" "${controlRoot}/saved-challenge.json"
+ln -s "${controlRoot}/saved-challenge.json" "${sourceChallenge}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'source challenge symlink was accepted'
+rm -- "${sourceChallenge}"
+mv -- "${controlRoot}/saved-challenge.json" "${sourceChallenge}"
+printf '%4097s' '' >"${sourceChallenge}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'oversize source challenge was accepted'
+[[ "$(stat -c %s -- "${sourceChallenge}")" == 4097 ]] || fail 'oversize source challenge was truncated'
+rm -- "${sourceChallenge}"
+chmod 0770 "${controlRoot}/data"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe source directory parent was accepted'
+chmod 0750 "${controlRoot}/data"
+dockerControlAccessLogEnsure "${controlRoot}"
+[[ "$(sha256sum "${sourceReceipt}")" == "${receiptDigest}" ]] || fail 'source receipt changed after rejected unsafe inputs'
+printf '{"control_sync":{}}\n' >"${controlRoot}/config/spec.json"
+rm -- "${controlLog}" "${sourceReceipt}"
+rmdir -- "${controlRoot}/logs/control"
+rmdir -- "${controlRoot}/data/control-source"
+dockerControlAccessLogEnsure "${controlRoot}"
+[[ ! -e "${controlRoot}/logs/control" && ! -e "${controlRoot}/data/control-source" ]] ||
+    fail 'controlled node created unused source paths'
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/unconfigured"
 dockerInitializeStateRoot
@@ -232,4 +290,11 @@ chmod 0600 "${unsafeLogCandidate}/logs/control/auth.log"
 chown 12345:12345 "${unsafeLogCandidate}/logs/control/auth.log"
 ! dockerPrepareCandidatePermissions "${unsafeLogCandidate}" || fail 'candidate carried runtime control evidence'
 assertMetadata "${unsafeLogCandidate}/logs/control/auth.log" '600 12345 12345'
+unsafeSourceCandidate="${TEST_ROOT}/unsafe-source-candidate"
+mkdir -p "${unsafeSourceCandidate}/data/control-source"
+printf 'not-candidate-registration\n' >"${unsafeSourceCandidate}/data/control-source/challenge.json"
+chmod 0600 "${unsafeSourceCandidate}/data/control-source/challenge.json"
+chown 12345:12345 "${unsafeSourceCandidate}/data/control-source/challenge.json"
+! dockerPrepareCandidatePermissions "${unsafeSourceCandidate}" || fail 'candidate carried a runtime challenge'
+assertMetadata "${unsafeSourceCandidate}/data/control-source/challenge.json" '600 12345 12345'
 printf 'docker-permissions-regression-ok\n'

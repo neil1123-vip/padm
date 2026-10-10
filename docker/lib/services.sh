@@ -1388,7 +1388,7 @@ dockerCreateConfigurationCandidate() {
     for directory in \
         config/xray config/sing-box config/nginx config/control config/net/fail2ban config/net/transparent \
         data/xray data/sing-box data/static data/subscription data/acme \
-        data/net/wireguard data/net/fail2ban data/net/transparent \
+        data/net/wireguard data/net/fail2ban data/net/transparent data/control-source \
         secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme logs/control; do
         mkdir -p -- "${candidate}/${directory}" || {
             dockerRemoveManagedTree "${root}" "${candidate}" || true
@@ -2761,11 +2761,14 @@ dockerGenerateCompose() {
             user: "10001:10001",
             network_mode: "host",
             command: ["control", "--state", "/etc/padm/control/state.json",
-              "--access-log", "/var/log/padm/control/auth.log"],
+              "--access-log", "/var/log/padm/control/auth.log",
+              "--source-challenge", "/run/padm/control-source/challenge.json",
+              "--source-receipt", "/var/log/padm/control/source.receipt"],
             labels: labels("control"),
             depends_on: {"net-wireguard": {condition: "service_healthy"}},
             volumes: (mounts("config/control"; "/etc/padm/control"; true) +
-              mounts("logs/control"; "/var/log/padm/control"; false)),
+              mounts("logs/control"; "/var/log/padm/control"; false) +
+              mounts("data/control-source"; "/run/padm/control-source"; true)),
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=8m"],
             healthcheck: {
               test: ["CMD", "/usr/local/bin/padm-entrypoint", "control-health",
@@ -2835,8 +2838,12 @@ dockerGenerateCompose() {
 dockerGenerateCompatibleControlCompose() {
     local specFile=$1 actualFile=$2 directory=$3 expected
     expected=$(dockerGenerateCompose "${specFile}" /dev/stdout "${directory}") || return 1
-    # release 标签沿用既有编辑兼容规则；旧主控只差固定日志参数与挂载。
+    # release 标签沿用既有编辑规则；三代主控只接受各自完整的固定参数与挂载。
     jq -en --argjson expected "${expected}" --slurpfile actual "${actualFile}" '
+      def logged_legacy:
+        .services.control.command = ["control", "--state", "/etc/padm/control/state.json",
+          "--access-log", "/var/log/padm/control/auth.log"] |
+        .services.control.volumes = .services.control.volumes[:2];
       def legacy:
         .services.control.command = ["control", "--state", "/etc/padm/control/state.json"] |
         .services.control.volumes = [.services.control.volumes[0]];
@@ -2852,6 +2859,9 @@ dockerGenerateCompatibleControlCompose() {
       if ($actual | length) != 1 then error("invalid control compose")
       else ($expected | release_metadata($actual[0])) as $compatible |
         if $actual[0].services.control == $compatible.services.control then $compatible
+        elif $compatible.services.control != null and
+          $actual[0].services.control == ($compatible | logged_legacy | .services.control)
+        then $compatible | logged_legacy
         elif $compatible.services.control != null and
           $actual[0].services.control == ($compatible | legacy | .services.control)
         then $compatible | legacy
@@ -3058,10 +3068,12 @@ dockerPrepareCandidatePermissions() {
         dockerError '候选权限准备拒绝符号链接'
         return 1
     }
-    if [[ -e "${candidate}/logs/control" || -L "${candidate}/logs/control" ]]; then
-        [[ -d "${candidate}/logs/control" &&
-            -z "$(find "${candidate}/logs/control" -mindepth 1 -print -quit)" ]] || return 1
-    fi
+    for directory in logs/control data/control-source; do
+        if [[ -e "${candidate}/${directory}" || -L "${candidate}/${directory}" ]]; then
+            [[ -d "${candidate}/${directory}" &&
+                -z "$(find "${candidate}/${directory}" -mindepth 1 -print -quit)" ]] || return 1
+        fi
+    done
     dockerSiteTreeValidate "${candidate}/data/static" || return 1
     if jq -e '.tls.http01 == true' "${candidate}/config/spec.json" >/dev/null 2>&1; then
         [[ -d "${candidate}/data/acme-webroot" && ! -L "${candidate}/data/acme-webroot" ]] || return 1
@@ -3091,6 +3103,9 @@ dockerPrepareCandidatePermissions() {
             "${candidate}/logs" "${candidate}/secrets" || return 1
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${candidate}/logs/nginx" || return 1
+        if [[ -d "${candidate}/data/control-source" ]]; then
+            chown "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/control-source" || return 1
+        fi
         for directory in "${candidate}/data/xray" "${candidate}/data/sing-box" "${candidate}/data/acme"; do
             chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
         done
@@ -4163,7 +4178,9 @@ dockerValidateCandidate() {
     if jq -e 'has("control")' "${specFile}" >/dev/null; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps control \
             control --state /etc/padm/control/state.json \
-            --access-log /var/log/padm/control/auth.log --check >/dev/null || {
+            --access-log /var/log/padm/control/auth.log \
+            --source-challenge /run/padm/control-source/challenge.json \
+            --source-receipt /var/log/padm/control/source.receipt --check >/dev/null || {
             dockerError '主控私网服务候选配置校验失败'
             return 1
         }
@@ -4365,7 +4382,7 @@ dockerCreateUpdateCandidate() {
             cmp -s -- "${root}/compose.json" \
                 <(jq -e 'select(.services["net-fail2ban"] != null) |
                     .services["net-fail2ban"].restart = "unless-stopped"' <<<"${expected}"); } || return 1
-        mkdir -p -- "${candidate}/logs/control" || return 1
+        mkdir -p -- "${candidate}/logs/control" "${candidate}/data/control-source" || return 1
     fi
     cp -- "${root}/compose.json" "${candidate}/compose.json" || return 1
     dockerUpdateRenderImagesEnv "${root}/images.env" "${candidate}/images.env" "${candidate}" || return 1
@@ -4444,7 +4461,9 @@ dockerValidateUpdateCandidate() {
     if jq -e '.control != null' "${candidate}/config/spec.json" >/dev/null 2>&1; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps control \
             control --state /etc/padm/control/state.json \
-            --access-log /var/log/padm/control/auth.log --check >/dev/null || return 1
+            --access-log /var/log/padm/control/auth.log \
+            --source-challenge /run/padm/control-source/challenge.json \
+            --source-receipt /var/log/padm/control/source.receipt --check >/dev/null || return 1
     fi
 }
 
@@ -4568,43 +4587,65 @@ dockerInstallCandidate() {
 }
 
 dockerControlAccessLogEnsure() {
-    local root=$1 directory="${1}/logs/control" logFile="${1}/logs/control/auth.log" cursor mode
+    local root=$1 directory logFile cursor mode
+    local logDirectory="${1}/logs/control" sourceDirectory="${1}/data/control-source"
     local specFile=${2:-"${1}/config/spec.json"}
     jq -e '.control != null and .control.role == "main"' "${specFile}" >/dev/null 2>&1 || return 0
-    dockerTrafficSafePath "${root}" "${logFile}" || return 1
-    cursor=${directory%/*}
-    [[ -e "${cursor}" || -L "${cursor}" ]] || cursor=${root}
-    while [[ -n "${cursor}" ]]; do
-        [[ -d "${cursor}" && ! -L "${cursor}" && "$(stat -c %u -- "${cursor}")" == 0 ]] || return 1
-        mode=$(stat -c %a -- "${cursor}") || return 1
-        # 只允许部署根外的 root sticky 临时目录，受管父目录不能由其它用户替换。
-        (( (8#${mode} & 022) == 0 )) ||
-            { [[ "${cursor}" != "${root}" && "${cursor}" != "${root}/"* ]] &&
-                (( (8#${mode} & 01000) != 0 )); } || return 1
-        [[ "${cursor}" != / ]] || break
-        cursor=${cursor%/*}
-        [[ -n "${cursor}" ]] || cursor=/
+    for directory in "${logDirectory}" "${sourceDirectory}"; do
+        dockerTrafficSafePath "${root}" "${directory}" || return 1
+        cursor=${directory%/*}
+        [[ -e "${cursor}" || -L "${cursor}" ]] || cursor=${root}
+        while [[ -n "${cursor}" ]]; do
+            [[ -d "${cursor}" && ! -L "${cursor}" && "$(stat -c %u -- "${cursor}")" == 0 ]] || return 1
+            mode=$(stat -c %a -- "${cursor}") || return 1
+            # 只允许部署根外的 root sticky 临时目录，受管父目录不能由其它用户替换。
+            (( (8#${mode} & 022) == 0 )) ||
+                { [[ "${cursor}" != "${root}" && "${cursor}" != "${root}/"* ]] &&
+                    (( (8#${mode} & 01000) != 0 )); } || return 1
+            [[ "${cursor}" != / ]] || break
+            cursor=${cursor%/*}
+            [[ -n "${cursor}" ]] || cursor=/
+        done
     done
-    if [[ ! -e "${root}/logs" && ! -L "${root}/logs" ]]; then
-        mkdir -- "${root}/logs" && chmod 0750 "${root}/logs" &&
-            chown "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/logs" || return 1
+    # 先核对已有证据，不得在坏日志或登记上修饰权限、复制回滚或清空内容。
+    if [[ -e "${logDirectory}" || -L "${logDirectory}" ]]; then
+        [[ -d "${logDirectory}" &&
+            "$(stat -c '%a:%u:%g' -- "${logDirectory}")" == "750:0:${PADM_DOCKER_CONTAINER_GID}" &&
+            -z "$(find "${logDirectory}" -mindepth 1 -maxdepth 1 \
+                ! -path "${logDirectory}/auth.log" ! -path "${logDirectory}/source.receipt" -print -quit)" ]] || return 1
     fi
-    if [[ ! -e "${directory}" && ! -L "${directory}" ]]; then
-        mkdir -- "${directory}" && chmod 0750 "${directory}" &&
-            chown "0:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
+    for logFile in "${logDirectory}/auth.log" "${logDirectory}/source.receipt"; do
+        [[ -e "${logFile}" || -L "${logFile}" ]] || continue
+        [[ -f "${logFile}" && ! -L "${logFile}" &&
+            "$(stat -c '%a:%u:%g:%h' -- "${logFile}")" == \
+                "640:${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}:1" ]] || return 1
+    done
+    if [[ -e "${sourceDirectory}" || -L "${sourceDirectory}" ]]; then
+        [[ -d "${sourceDirectory}" &&
+            "$(stat -c '%a:%u:%g' -- "${sourceDirectory}")" == "750:0:${PADM_DOCKER_CONTAINER_GID}" &&
+            -z "$(find "${sourceDirectory}" -mindepth 1 -maxdepth 1 \
+                ! -path "${sourceDirectory}/challenge.json" -print -quit)" ]] || return 1
     fi
-    [[ -d "${directory}" && ! -L "${directory}" &&
-        "$(stat -c '%a:%u:%g' -- "${directory}")" == "750:0:${PADM_DOCKER_CONTAINER_GID}" &&
-        -z "$(find "${directory}" -mindepth 1 -maxdepth 1 ! -path "${logFile}" -print -quit)" ]] || return 1
-    if [[ ! -e "${logFile}" && ! -L "${logFile}" ]]; then
-        # 仅首启创建，不截断已存在的来源证据；目录只有 root 能创建或替换文件。
-        (umask 027; set -C; : >"${logFile}") &&
-            chmod 0640 "${logFile}" &&
-            chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${logFile}" || return 1
+    if [[ -e "${sourceDirectory}/challenge.json" || -L "${sourceDirectory}/challenge.json" ]]; then
+        [[ -f "${sourceDirectory}/challenge.json" && ! -L "${sourceDirectory}/challenge.json" &&
+            "$(stat -c '%a:%u:%g:%h' -- "${sourceDirectory}/challenge.json")" == \
+                "640:0:${PADM_DOCKER_CONTAINER_GID}:1" &&
+            "$(stat -c %s -- "${sourceDirectory}/challenge.json")" -le 4096 ]] || return 1
     fi
-    [[ -f "${logFile}" && ! -L "${logFile}" &&
-        "$(stat -c '%a:%u:%g:%h' -- "${logFile}")" == \
-            "640:${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}:1" ]]
+    for directory in "${root}/logs" "${root}/data" "${logDirectory}" "${sourceDirectory}"; do
+        if [[ ! -e "${directory}" && ! -L "${directory}" ]]; then
+            mkdir -- "${directory}" && chmod 0750 "${directory}" &&
+                chown "0:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
+        fi
+    done
+    for logFile in "${logDirectory}/auth.log" "${logDirectory}/source.receipt"; do
+        if [[ ! -e "${logFile}" && ! -L "${logFile}" ]]; then
+            # 仅首启提供 API 可追加的单链接文件，挑战登记始终由宿主事务短期创建。
+            (umask 027; set -C; : >"${logFile}") &&
+                chmod 0640 "${logFile}" &&
+                chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${logFile}" || return 1
+        fi
+    done
 }
 
 dockerEnsureRuntimeDataPermissions() {

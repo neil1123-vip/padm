@@ -233,6 +233,62 @@ def access_log_failure():
         raise SystemExit(78) from None
 
 
+def append_access_line(path, line):
+    descriptor = open_access_log(path)
+    try:
+        content = (line + "\n").encode("ascii")
+        if os.write(descriptor, content) != len(content):
+            raise OSError("访问日志短写")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def read_source_challenge(path):
+    path = Path(path)
+    if not path.is_absolute():
+        raise ValueError("来源登记路径不安全")
+    for parent in path.parents:
+        metadata = parent.lstat()
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0
+                or metadata.st_mode & 0o022):
+            raise ValueError("来源登记目录不安全")
+        if parent == path.parent and (metadata.st_gid != 10001 or stat.S_IMODE(metadata.st_mode) != 0o750):
+            raise ValueError("来源登记目录权限不匹配")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(descriptor, "rb") as source:
+        metadata = os.fstat(source.fileno())
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
+                or metadata.st_uid != 0 or metadata.st_gid != 10001
+                or stat.S_IMODE(metadata.st_mode) != 0o640 or metadata.st_size > 4096):
+            raise ValueError("来源登记文件权限或大小不匹配")
+        content = source.read(4097)
+    if len(content) > 4096:
+        raise ValueError("来源登记超过大小限制")
+    try:
+        challenge = json.loads(content, object_pairs_hook=strict_object)
+        exact_keys(challenge, "schema_version nonce expires_at expected_source target port")
+        if (type(challenge["schema_version"]) is not int or challenge["schema_version"] != 1
+                or not isinstance(challenge["nonce"], str)
+                or re.fullmatch(r"[a-f0-9]{64}", challenge["nonce"]) is None
+                or type(challenge["expires_at"]) is not int
+                or type(challenge["port"]) is not int or not 1024 <= challenge["port"] <= 65535):
+            raise ValueError("来源登记字段不合法")
+        private_address(challenge["expected_source"])
+        private_address(challenge["target"])
+        if challenge["expected_source"] == challenge["target"]:
+            raise ValueError("来源登记不能引用本机")
+        now = time.time()
+        if challenge["expires_at"] > now + 30:
+            raise ValueError("来源登记有效期超出边界")
+        return challenge if now < challenge["expires_at"] else None
+    except (KeyError, TypeError, AttributeError, RecursionError) as error:
+        raise ValueError("来源登记类型不合法") from error
+
+
 def request_log_event(status, endpoints, access_log=None):
     if endpoints is None:
         if access_log is not None:
@@ -244,14 +300,7 @@ def request_log_event(status, endpoints, access_log=None):
     try:
         if access_log is not None:
             # 每条重新打开已预建的安全文件，单次追加并同步后才允许 stdout 或响应。
-            descriptor = open_access_log(access_log)
-            try:
-                content = (line + "\n").encode("ascii")
-                if os.write(descriptor, content) != len(content):
-                    raise OSError("访问日志短写")
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+            append_access_line(access_log, line)
         print(line, flush=True)
     except (OSError, ValueError):
         if access_log is not None:
@@ -293,7 +342,8 @@ class ControlHandler(BaseHTTPRequestHandler):
             and self.client_address[0] == peer["address"]
         )
         if not authorized:
-            self.reply(401, {"ok": False, "error": "unauthorized"})
+            challenge = self.source_challenge(state)
+            self.reply(401, {"ok": False, "error": "unauthorized"}, challenge)
         elif self.headers.get_all("X-Padm-Control-Version", []) != [str(API_VERSION)]:
             self.reply(409, {"ok": False, "error": "api_version_mismatch", "api_version": API_VERSION})
         elif self.path not in ("/v1/health", "/v1/desired"):
@@ -309,9 +359,37 @@ class ControlHandler(BaseHTTPRequestHandler):
                 response["accounts"] = state["accounts"]
             self.reply(200, response)
 
-    def reply(self, status_code, value):
+    def source_challenge(self, state):
+        path = getattr(self.server, "source_challenge", None)
+        headers = self.headers.get_all("X-Padm-Source-Challenge", [])
+        expected = state["peer"]["address"], state["listen"]["address"], state["listen"]["port"]
+        if (path is None or self.path != "/v1/health"
+                or self.headers.get_all("Authorization", []) != []
+                or len(headers) != 1 or re.fullmatch(r"[a-f0-9]{64}", headers[0]) is None
+                or self.log_endpoints != expected):
+            return None
+        try:
+            challenge = read_source_challenge(path)
+            if (challenge is not None and hmac.compare_digest(headers[0], challenge["nonce"])
+                    and self.log_endpoints == (
+                        challenge["expected_source"], challenge["target"], challenge["port"])):
+                return challenge
+        except (OSError, ValueError, TypeError, RecursionError):
+            access_log_failure()
+        return None
+
+    def reply(self, status_code, value, challenge=None):
         content = json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode("ascii")
         self.send_response(status_code)
+        if challenge is not None:
+            source, target, port = self.log_endpoints
+            timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            line = (f"{timestamp} control-source nonce={challenge['nonce']} status=401 "
+                    f"source={source} target={target} port={port}")
+            try:
+                append_access_line(self.server.source_receipt, line)
+            except (OSError, ValueError):
+                access_log_failure()
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(content)))
@@ -379,10 +457,15 @@ def main():
     parser.add_argument("--version", action="version", version="padm-control/1")
     parser.add_argument("--state", required=True)
     parser.add_argument("--access-log")
+    parser.add_argument("--source-challenge")
+    parser.add_argument("--source-receipt")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--health", action="store_true")
     args = parser.parse_args()
+    if ((args.source_challenge is None) != (args.source_receipt is None)
+            or (args.source_challenge is not None and args.access_log is None)):
+        parser.error("来源登记和回执须成对设置，且必须启用访问日志")
     try:
         state = read_state(args.state)
         if args.check:
@@ -393,6 +476,9 @@ def main():
         if args.access_log is not None:
             try:
                 os.close(open_access_log(args.access_log))
+                if args.source_challenge is not None:
+                    os.close(open_access_log(args.source_receipt))
+                    read_source_challenge(args.source_challenge)
             except (OSError, ValueError):
                 access_log_failure()
         require_wireguard_address(state)
@@ -400,6 +486,8 @@ def main():
         server.state_path = args.state
         server.listen = state["listen"]
         server.access_log = args.access_log
+        server.source_challenge = args.source_challenge
+        server.source_receipt = args.source_receipt
         with server:
             server.serve_forever()
     except (OSError, ValueError, http.client.HTTPException) as error:

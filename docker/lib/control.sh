@@ -420,6 +420,258 @@ ip -4 route get "$1" from "$2" | awk -v source="$2" '"'"'
     }
 }
 
+dockerControlSourceSnapshot() (
+    local root spec service ids inspected image snapshots='[]' file hashes digest
+    root=$(dockerInstallRoot) || return 1
+    spec="${root}/config/spec.json"
+    dockerControlRequireMain "${spec}" "${root}" &&
+        dockerControlInviteRuntimeCheck "${spec}" &&
+        cmp -s -- "${root}/compose.json" <(dockerGenerateCompose "${spec}" /dev/stdout "${root}") ||
+        return 1
+    for service in control net-wireguard; do
+        ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+            --filter "label=com.docker.compose.service=${service}" \
+            --filter label=com.docker.compose.oneoff=False) || return 1
+        [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+        inspected=$(docker container inspect "${ids}") &&
+            image=$(jq -er --arg service "${service}" \
+                '.images[if $service == "control" then "ops" else "net" end]' "${spec}") || return 1
+        jq -e --arg root "${root}" --arg image "${image}" --arg service "${service}" \
+            --slurpfile compose "${root}/compose.json" '
+          length == 1 and (.[0] as $c | $compose[0].services[$service] as $s |
+            ($c.Id | type == "string" and test("^[a-f0-9]{64}$")) and
+            $c.State.Status == "running" and $c.State.Running == true and
+            $c.State.Restarting == false and $c.State.Paused == false and $c.State.Dead == false and
+            $c.State.Health.Status == "healthy" and
+            ($c.State.StartedAt | type == "string" and
+              test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$")) and
+            ($c.RestartCount | type == "number" and floor == . and . >= 0) and
+            $c.Config.Labels["com.docker.compose.project"] == "padm-docker" and
+            $c.Config.Labels["com.docker.compose.project.working_dir"] == $root and
+            $c.Config.Labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+            $c.Config.Labels["com.docker.compose.service"] == $service and
+            $c.Config.Labels["com.docker.compose.oneoff"] == "False" and
+            all($s.labels | to_entries[]; $c.Config.Labels[.key] == .value) and
+            $c.Config.Image == $image and
+            $c.Config.User == (if $service == "control" then "10001:10001" else "0:0" end) and
+            $c.Config.Entrypoint == ["/usr/local/bin/padm-entrypoint"] and $c.Config.Cmd == $s.command and
+            $c.Config.Healthcheck.Test == $s.healthcheck.test and
+            $c.HostConfig.NetworkMode == "host" and $c.HostConfig.ReadonlyRootfs == true and
+            $c.HostConfig.Privileged == false and $c.HostConfig.Init == true and
+            ($c.HostConfig.CapAdd // [] | map(sub("^CAP_"; "")) | sort) == ($s.cap_add // [] | sort) and
+            ($c.HostConfig.CapDrop | sort) == ["ALL"] and
+            ($c.HostConfig.SecurityOpt | sort) == ($s.security_opt | sort) and
+            $c.HostConfig.LogConfig.Type == $s.logging.driver and
+            $c.HostConfig.LogConfig.Config == $s.logging.options and
+            (($c.HostConfig.Tmpfs // {}) | keys | sort) ==
+              ([$s.tmpfs[] | split(":")[0]] | sort) and
+            all($c.Mounts[]; .Type == "bind") and
+            ($c.Mounts | map({source:.Source,target:.Destination,read_only:(.RW | not)}) | sort_by(.target)) ==
+              ($s.volumes | map({source:(.source | sub("^\\$\\{PADM_(DOCKER|NET)_ROOT\\}"; $root)),
+                target,read_only}) | sort_by(.target)))
+        ' <<<"${inspected}" >/dev/null || {
+            dockerError "控制来源快照的 ${service} 容器状态或归属漂移"
+            return 1
+        }
+        snapshots=$(jq -cn --argjson previous "${snapshots}" --argjson current "${inspected}" \
+            '$previous + [$current[0] | {id:.Id,started_at:.State.StartedAt,restart_count:.RestartCount}]') ||
+            return 1
+    done
+    hashes=
+    for file in config/spec.json config/control/state.json compose.json deployment.json images.env \
+        secrets/net/wireguard/wg-padm.conf data/net/wireguard/wireguard.state; do
+        dockerTrafficSafePath "${root}" "${root}/${file}" &&
+            [[ -f "${root}/${file}" && ! -L "${root}/${file}" ]] || return 1
+        digest=$(sha256sum -- "${root}/${file}") || return 1
+        hashes+="${digest}"$'\n'
+    done
+    jq -cn --argjson containers "${snapshots}" --arg hashes "${hashes}" \
+        '{containers:$containers,hashes:$hashes}'
+)
+
+dockerControlSourceReceipt() (
+    local file=$1 cursor=$2 nonce=$3 source=$4 target=$5 port=$6 since=$7 until=$8 metadata size offset
+    set -o pipefail
+    dockerTrafficSafePath "$(dockerInstallRoot)" "${file}" &&
+        [[ -f "${file}" && ! -L "${file}" &&
+            "$(stat -c '%a:%u:%g:%h' "${file}")" == "640:10001:10001:1" ]] || return 1
+    metadata=$(stat -c '%d:%i:%s' "${file}") || return 1
+    [[ "${metadata%:*}" == "${cursor%:*}" ]] || return 1
+    size=${metadata##*:}
+    offset=${cursor##*:}
+    ((size >= offset && size - offset <= 65536)) || return 1
+    # 只读本次偏移后的完整行；随机挑战关联不能由时间窗口或普通 401 代替。
+    dd if="${file}" bs=1 skip="${offset}" count="$((size - offset))" status=none |
+        jq -erRs --arg nonce "${nonce}" --arg source "${source}" --arg target "${target}" --arg port "${port}" \
+            --arg since "${since}" --arg until "${until}" '
+          def record:
+            "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z control-source nonce=[a-f0-9]{64} status=401 source=[0-9.]+ target=[0-9.]+ port=[0-9]+$";
+          if length == 0 or (endswith("\n") | not) then "pending"
+          else [split("\n")[] | select(length > 0) |
+            if test(record) then
+              capture("^(?<time>[^ ]+) control-source nonce=(?<nonce>[a-f0-9]{64}) status=401 source=(?<source>[0-9.]+) target=(?<target>[0-9.]+) port=(?<port>[0-9]+)$")
+            else error("invalid control source receipt") end] |
+            map(select(.nonce == $nonce)) |
+            if length == 0 then "pending"
+            elif length == 1 and .[0].source == $source and .[0].target == $target and .[0].port == $port and
+              .[0].time >= $since and .[0].time < $until
+            then "verified" else error("invalid control source receipt") end
+          end
+        '
+)
+
+dockerControlSourceCheck() (
+    local root spec challenge receipt temporary= registration= snapshot current nonce image expires cursor result started
+    local registrationHash= since until directory mode
+    [[ "$#" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    spec="${root}/config/spec.json"
+    challenge="${root}/data/control-source/challenge.json"
+    receipt="${root}/logs/control/source.receipt"
+    dockerTrafficSafePath "${root}" "${challenge}" &&
+        [[ -d "${root}/data/control-source" &&
+            "$(stat -c '%a:%u:%g' "${root}/data/control-source")" == "750:0:10001" &&
+            -z "$(find "${root}/data/control-source" -mindepth 1 -print -quit)" ]] || {
+        dockerError '来源挑战需要新版受管空登记目录，旧登记未删除'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    for directory in "${root}" "${root}/config" "${root}/data" "${root}/logs" "${root}/logs/control"; do
+        [[ -d "${directory}" && ! -L "${directory}" &&
+            "$(stat -c '%u' "${directory}")" == 0 ]] || return "${PADM_DOCKER_RC_STATE}"
+        (( (8#$(stat -c '%a' "${directory}") & 022) == 0 )) || return "${PADM_DOCKER_RC_STATE}"
+    done
+    directory=${root%/*}
+    while [[ -n "${directory}" ]]; do
+        [[ -d "${directory}" && ! -L "${directory}" &&
+            "$(stat -c %u "${directory}")" == 0 ]] || return "${PADM_DOCKER_RC_STATE}"
+        mode=$(stat -c %a "${directory}") || return "${PADM_DOCKER_RC_STATE}"
+        (( (8#${mode} & 022) == 0 )) || (( (8#${mode} & 01000) != 0 )) ||
+            return "${PADM_DOCKER_RC_STATE}"
+        [[ "${directory}" != / ]] || break
+        directory=${directory%/*}
+        [[ -n "${directory}" ]] || directory=/
+    done
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'status=$?; if [[ -n "${registration}" ]]; then
+        if [[ ! -e "${challenge}" && ! -L "${challenge}" ]]; then :
+        elif [[ -f "${challenge}" && ! -L "${challenge}" &&
+            "$(stat -c "%d:%i:%a:%u:%g:%h" "${challenge}")" == "${registration}" &&
+            "$(sha256sum "${challenge}")" == "${registrationHash}" ]]; then
+            rm -- "${challenge}" || status=15
+        else dockerError "来源挑战登记已变化，保留文件"; status=15; fi
+      fi
+      [[ -z "${temporary}" ]] || dockerRemoveManagedTree "${root}" "${temporary}" || status=15
+      dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    snapshot=$(dockerControlSourceSnapshot) || return "${PADM_DOCKER_RC_STATE}"
+    image=$(dockerAccountImage ops) &&
+        nonce=$(dockerSetupRandomHex "${image}" 32) &&
+        [[ "${nonce}" =~ ^[a-f0-9]{64}$ ]] || return "${PADM_DOCKER_RC_STATE}"
+    temporary=$(mktemp -d "${root}/.control-source.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+    chmod 0700 "${temporary}" || return "${PADM_DOCKER_RC_STATE}"
+    expires=$(date +%s) && [[ "${expires}" =~ ^[0-9]{1,10}$ ]] || return "${PADM_DOCKER_RC_STATE}"
+    since=$(date -u -d "@${expires}" '+%Y-%m-%dT%H:%M:%S.000Z') || return "${PADM_DOCKER_RC_STATE}"
+    expires=$((expires + 30))
+    until=$(date -u -d "@${expires}" '+%Y-%m-%dT%H:%M:%S.000Z') || return "${PADM_DOCKER_RC_STATE}"
+    (umask 027; jq --arg nonce "${nonce}" --argjson expires "${expires}" '
+      {schema_version:1,nonce:$nonce,expires_at:$expires,
+       expected_source:.control.peer.address,target:.control.listen.address,port:.control.listen.port}
+    ' "${spec}" >"${temporary}/challenge.json") &&
+        chmod 0640 "${temporary}/challenge.json" &&
+        chown 0:10001 "${temporary}/challenge.json" &&
+        registration=$(stat -c '%d:%i:%a:%u:%g:%h' "${temporary}/challenge.json") &&
+        registrationHash=$(sha256sum "${temporary}/challenge.json") ||
+        return "${PADM_DOCKER_RC_STATE}"
+    registrationHash="${registrationHash%% *}  ${challenge}"
+    [[ "$(stat -c %d "${temporary}")" == "$(stat -c %d "${root}/data/control-source")" &&
+        ! -e "${challenge}" && ! -L "${challenge}" ]] &&
+        mv -T -n -- "${temporary}/challenge.json" "${challenge}" &&
+        [[ ! -e "${temporary}/challenge.json" ]] || return "${PADM_DOCKER_RC_STATE}"
+    [[ "$(stat -c '%d:%i:%a:%u:%g:%h' "${challenge}")" == "${registration}" &&
+        "$(sha256sum "${challenge}")" == "${registrationHash}" ]] || return "${PADM_DOCKER_RC_STATE}"
+    [[ -f "${receipt}" && ! -L "${receipt}" &&
+        "$(stat -c '%a:%u:%g:%h' "${receipt}")" == "640:10001:10001:1" ]] ||
+        return "${PADM_DOCKER_RC_STATE}"
+    cursor=$(stat -c '%d:%i:%s' "${receipt}") || return "${PADM_DOCKER_RC_STATE}"
+    started=${SECONDS}
+    printf 'source-challenge=%s\n' "$(jq -c '.' "${challenge}")" || return 1
+    printf '请在受管 Peer 执行: padm-docker control source-probe --address %s --port %s --peer-address %s --nonce %s\n' \
+        "$(jq -r .target "${challenge}")" "$(jq -r .port "${challenge}")" \
+        "$(jq -r .expected_source "${challenge}")" "${nonce}" >&2
+    while ((SECONDS - started < 30)); do
+        [[ "$(stat -c '%d:%i:%a:%u:%g:%h' "${challenge}")" == "${registration}" &&
+            "$(sha256sum "${challenge}")" == "${registrationHash}" &&
+            "$(date +%s)" -lt "${expires}" ]] || return "${PADM_DOCKER_RC_STATE}"
+        result=$(dockerControlSourceReceipt "${receipt}" "${cursor}" "${nonce}" \
+            "$(jq -r .control.peer.address "${spec}")" "$(jq -r .control.listen.address "${spec}")" \
+            "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}") ||
+            return "${PADM_DOCKER_RC_STATE}"
+        if [[ "${result}" == verified ]]; then
+            current=$(dockerControlSourceSnapshot) && [[ "${current}" == "${snapshot}" ]] &&
+                ((SECONDS - started < 30)) && [[ "$(date +%s)" -lt "${expires}" &&
+                    "$(stat -c '%d:%i:%a:%u:%g:%h' "${challenge}")" == "${registration}" &&
+                    "$(sha256sum "${challenge}")" == "${registrationHash}" &&
+                    "$(dockerControlSourceReceipt "${receipt}" "${cursor}" "${nonce}" \
+                      "$(jq -r .control.peer.address "${spec}")" "$(jq -r .control.listen.address "${spec}")" \
+                      "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}")" == verified ]] ||
+                return "${PADM_DOCKER_RC_STATE}"
+            printf 'source-verified=%s\n' "$(jq -c '{source:.expected_source,target,port}' "${challenge}")"
+            return $?
+        fi
+        sleep 1
+    done
+    dockerError '30 秒内未收到当前随机挑战的可信回执'
+    return "${PADM_DOCKER_RC_HOST}"
+)
+
+dockerControlSourceProbe() (
+    local address= port= source= nonce= image root input=
+    while [[ "$#" -gt 0 ]]; do
+        [[ "$#" -ge 2 && -n "$2" ]] || return "${PADM_DOCKER_RC_USAGE}"
+        case "$1" in
+        --address) [[ -z "${address}" ]] || return 2; address=$2 ;;
+        --port) [[ -z "${port}" ]] || return 2; port=$2 ;;
+        --peer-address) [[ -z "${source}" ]] || return 2; source=$2 ;;
+        --nonce) [[ -z "${nonce}" ]] || return 2; nonce=$2 ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+        shift 2
+    done
+    dockerControlPrivateAddressIsValid "${address}" &&
+        dockerControlPrivateAddressIsValid "${source}" &&
+        [[ "${address}" != "${source}" && "${port}" =~ ^[1-9][0-9]{3,4}$ &&
+            "${nonce}" =~ ^[a-f0-9]{64}$ ]] && ((port >= 1024 && port <= 65535)) ||
+        return "${PADM_DOCKER_RC_USAGE}"
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'status=$?; if [[ -n "${input}" ]] && ! dockerRemoveManagedTree "${root}" "${input}"; then
+        dockerError "控制来源探测临时目录清理失败"; status=15
+      fi; dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    input=$(mktemp -d "${root}/.control-source-probe.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+    chmod 0700 "${input}" &&
+        jq -n --arg address "${address}" --arg source "${source}" \
+            '{listen:{address:$address},peer_address:$source}' >"${input}/connection.json" &&
+        dockerControlClientRuntimeCheck "${input}/connection.json" || return "${PADM_DOCKER_RC_HOST}"
+    image=$(dockerAccountImage ops) || return "${PADM_DOCKER_RC_STATE}"
+    dockerRealityProbeRun 10 --user 0:0 --network host --log-driver none \
+        --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+        --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+        --entrypoint python3 "${image}" -c '
+import sys
+sys.path.insert(0, "/opt/padm")
+from control_client import source_probe
+try:
+    source_probe(sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4])
+except Exception:
+    sys.exit("控制来源探测失败")
+' "${address}" "${port}" "${source}" "${nonce}" || return "${PADM_DOCKER_RC_HOST}"
+)
+
 dockerControlClientBuildDraft() {
     local directory=$1 image
     shift
@@ -591,8 +843,10 @@ dockerControlCommand() {
     revoke) dockerControlRevoke "$@" ;;
     join) dockerControlJoin "$@" ;;
     sync) dockerControlSync "$@" ;;
+    source-check) dockerControlSourceCheck "$@" ;;
+    source-probe) dockerControlSourceProbe "$@" ;;
     *)
-        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件>'
+        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex>'
         return "${PADM_DOCKER_RC_USAGE}"
         ;;
     esac

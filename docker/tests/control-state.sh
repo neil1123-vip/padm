@@ -194,6 +194,9 @@ jq -e '.control.revision == 0 and .control.last_digest != null' "${spec}" >/dev/
 [[ "$(stat -c '%a:%u:%g' "${root}/config/control")" == 750:0:10001 ]]
 [[ "$(stat -c '%a:%u:%g' "${root}/logs/control")" == 750:0:10001 ]]
 [[ "$(stat -c '%a:%u:%g:%h' "${root}/logs/control/auth.log")" == 640:10001:10001:1 ]]
+[[ "$(stat -c '%a:%u:%g:%h' "${root}/logs/control/source.receipt")" == 640:10001:10001:1 ]]
+[[ "$(stat -c '%a:%u:%g' "${root}/data/control-source")" == 750:0:10001 &&
+    ! -e "${root}/data/control-source/challenge.json" ]]
 jq -e '.services.control |
   .network_mode == "host" and .user == "10001:10001" and
   .cap_drop == ["ALL"] and (has("ports") | not) and
@@ -201,9 +204,13 @@ jq -e '.services.control |
   .volumes[0].target == "/etc/padm/control" and .volumes[0].read_only and
   .volumes[1] == {type:"bind",source:"${PADM_DOCKER_ROOT}/logs/control",
     target:"/var/log/padm/control",read_only:false} and
-  (.volumes | length) == 2 and
+  .volumes[2] == {type:"bind",source:"${PADM_DOCKER_ROOT}/data/control-source",
+    target:"/run/padm/control-source",read_only:true} and
+  (.volumes | length) == 3 and
   .command == ["control","--state","/etc/padm/control/state.json",
-    "--access-log","/var/log/padm/control/auth.log"] and
+    "--access-log","/var/log/padm/control/auth.log",
+    "--source-challenge","/run/padm/control-source/challenge.json",
+    "--source-receipt","/var/log/padm/control/source.receipt"] and
   .healthcheck.test[-3:] == ["control-health","--state","/etc/padm/control/state.json"]' \
   "${root}/compose.json" >/dev/null
 printf 'existing-control-auth-evidence\n' >>"${root}/logs/control/auth.log"
@@ -274,29 +281,38 @@ DOCKER_STAGED_BUNDLE_PATH=$(dockerCurrentBundlePath)
     dockerEditBaselineValidate "${spec}" "${root}/legacy-baseline"
     # 候选生成也用于只读评估，不得给旧 stdout 部署创建生产日志。
     mv -- "${root}/logs/control" "${root}/saved-control-log"
+    mv -- "${root}/data/control-source" "${root}/saved-control-source"
     dockerCreateUpdateCandidate
-    [[ ! -e "${root}/logs/control" ]]
+    [[ ! -e "${root}/logs/control" && ! -e "${root}/data/control-source" ]]
     [[ "$(stat -c '%a:%u:%g' "${DOCKER_CONFIG_CANDIDATE}/config/spec.json")" == 600:0:0 ]]
     dockerControlStateCheck "${DOCKER_CONFIG_CANDIDATE}"
     [[ "$(jq '.control.revision' "${DOCKER_CONFIG_CANDIDATE}/config/spec.json")" == 0 ]]
     [[ "$(stat -c '%a:%u:%g' "${DOCKER_CONFIG_CANDIDATE}/logs/control")" == 750:0:10001 &&
-        ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.log" ]]
-    jq -e '.services.control.command[-2:] ==
-      ["--access-log","/var/log/padm/control/auth.log"] and
+        ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.log" &&
+        ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/source.receipt" &&
+        "$(stat -c '%a:%u:%g' "${DOCKER_CONFIG_CANDIDATE}/data/control-source")" == 750:0:10001 &&
+        ! -e "${DOCKER_CONFIG_CANDIDATE}/data/control-source/challenge.json" ]]
+    jq -e '.services.control.command[-6:] ==
+      ["--access-log","/var/log/padm/control/auth.log",
+       "--source-challenge","/run/padm/control-source/challenge.json",
+       "--source-receipt","/var/log/padm/control/source.receipt"] and
       ([.services[].labels["io.padm.release"]] | unique) == ["3.1.8"]' \
       "${DOCKER_CONFIG_CANDIDATE}/compose.json" >/dev/null
     dockerCandidateCompose() {
         [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} config --format json" ]] && return 0
-        [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --check" ]] || return 1
+        [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --source-challenge /run/padm/control-source/challenge.json --source-receipt /var/log/padm/control/source.receipt --check" ]] || return 1
         [[ "${REJECT_ACCESS_LOG_ARGUMENT:-0}" != 1 ]]
     }
     dockerValidateUpdateCandidate "${DOCKER_CONFIG_CANDIDATE}"
     REJECT_ACCESS_LOG_ARGUMENT=1
     if dockerValidateUpdateCandidate "${DOCKER_CONFIG_CANDIDATE}"; then exit 1; fi
     [[ ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.log" &&
-        ! -e "${root}/logs/control" ]]
+        ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/source.receipt" &&
+        ! -e "${DOCKER_CONFIG_CANDIDATE}/data/control-source/challenge.json" &&
+        ! -e "${root}/logs/control" && ! -e "${root}/data/control-source" ]]
     dockerCleanupConfigurationCandidate
     mv -- "${root}/saved-control-log" "${root}/logs/control"
+    mv -- "${root}/saved-control-source" "${root}/data/control-source"
     # 旧参数和新挂载的混合形态不属于任何受管版本，不能在升级时洗白。
     jq '.services.control.command = ["control","--state","/etc/padm/control/state.json"]' \
         "${root}/current-compose.json" >"${root}/compose.json"
@@ -474,8 +490,8 @@ dockerCleanupConfigurationCandidate
 # 旧镜像恢复保留精确旧主控编排；日志不是配置快照，不能倒退已有来源证据。
 dockerBackupConfiguration update
 legacyBackup=${DOCKER_CONFIG_BACKUP}
-[[ ! -e "${legacyBackup}/logs" ]] &&
-    ! grep -q '^logs/' "${legacyBackup}/present"
+[[ ! -e "${legacyBackup}/logs" && ! -e "${legacyBackup}/data/control-source" ]] &&
+    ! grep -Eq '^logs/|^data/control-source' "${legacyBackup}/present"
 jq '.services.control.command = ["control","--state","/etc/padm/control/state.json"] |
   .services.control.volumes = [.services.control.volumes[0]] |
   .services[].labels["io.padm.release"] = "3.1.7"' \
@@ -497,7 +513,32 @@ jq -e '.services.control.command == ["control","--state","/etc/padm/control/stat
 [[ "$(sha256sum "${legacyBackup}/compose.json")" == "${legacyComposeDigest}" &&
     "$(sha256sum "${root}/logs/control/auth.log")" == "${authDigest}" ]]
 dockerCleanupConfigurationCandidate
+# 仅持久日志的 5C.7b 目标同样保持原格式，不能把新来源参数强塞给旧镜像。
+printf '{"fixture":"registered-source"}\n' >"${root}/data/control-source/challenge.json"
+chmod 0640 "${root}/data/control-source/challenge.json"
+chown 0:10001 "${root}/data/control-source/challenge.json"
+printf 'existing-source-receipt\n' >"${root}/logs/control/source.receipt"
+receiptDigest=$(sha256sum "${root}/logs/control/source.receipt")
+dockerBackupConfiguration update
+loggedBackup=${DOCKER_CONFIG_BACKUP}
+[[ ! -e "${loggedBackup}/data/control-source" && ! -e "${loggedBackup}/logs" ]]
+dockerGenerateCompose "${spec}" /dev/stdout "${root}" |
+    jq '.services.control.command = ["control","--state","/etc/padm/control/state.json",
+      "--access-log","/var/log/padm/control/auth.log"] |
+      .services.control.volumes = .services.control.volumes[:2]' >"${loggedBackup}/compose.json"
+chmod 0600 "${loggedBackup}/compose.json"
+DOCKER_CONFIG_BACKUP=${loggedBackup}
+DOCKER_CONFIG_SWITCHED=1
+dockerRestoreConfiguration
+jq -e '.services.control.command == ["control","--state","/etc/padm/control/state.json",
+  "--access-log","/var/log/padm/control/auth.log"] and
+  (.services.control.volumes | length) == 2' "${root}/compose.json" >/dev/null
+[[ "$(sha256sum "${root}/logs/control/source.receipt")" == "${receiptDigest}" &&
+    -f "${root}/data/control-source/challenge.json" ]]
+rm -- "${root}/data/control-source/challenge.json"
+dockerCleanupConfigurationCandidate
 # 不明确受管的恢复点在服务停止之前拒绝，不能只靠删日志参数兼容。
+DOCKER_CONFIG_BACKUP=${legacyBackup}
 cp -- "${legacyBackup}/compose.json" "${legacyBackup}/compose.safe.json"
 jq '.services.control.command += ["--unknown"]' \
     "${legacyBackup}/compose.safe.json" >"${legacyBackup}/compose.json"
