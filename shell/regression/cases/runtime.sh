@@ -3331,6 +3331,56 @@ runRuntimeAndRealityRegression() {
     local visionClients
 
     (
+        # wget 持续收到数据时，下载仍必须遵守整次调用的时间预算。
+        local root="${TMP_DIR}/download-total-time" downloadMode downloadStatus downloadStarted workerPid workerState
+        local failed=0 downloadFailure=false budget
+        mkdir -p "${root}"
+        command() {
+            [[ "$*" != "-v curl" ]] || return 1
+            builtin command "$@"
+        }
+        wget() {
+            local chunk
+            [[ "${downloadFailure}" != true ]] || return 7
+            printf '%s\n' "${BASHPID}" >"${root}/${downloadMode}.pid"
+            trap '' TERM
+            for ((chunk=0; chunk < 20; chunk++)); do
+                printf x
+                sleep 0.2
+            done
+        }
+        for downloadMode in top nested; do
+            downloadStatus=0
+            downloadStarted=$(date +%s%N)
+            if [[ "${downloadMode}" == nested ]]; then
+                padmRunCancelableCommand downloadUrlToFileBounded fixture "${root}/${downloadMode}.out" 1024 1 || downloadStatus=$?
+            else
+                downloadUrlToFileBounded fixture "${root}/${downloadMode}.out" 1024 1 || downloadStatus=$?
+            fi
+            workerPid=$(<"${root}/${downloadMode}.pid")
+            workerState=$(ps -o stat= -p "${workerPid}" 2>/dev/null || true)
+            if [[ "${downloadStatus}" != 124 || "${workerState}" == *[RS]* ||
+                $(( ($(date +%s%N) - downloadStarted) / 1000000 )) -ge 3800 ]]; then
+                printf 'download budget escaped: %s status=%s state=%s\n' \
+                    "${downloadMode}" "${downloadStatus}" "${workerState}" >&2
+                failed=$((failed + 1))
+                kill -KILL "${workerPid}" 2>/dev/null || true
+            fi
+        done
+        downloadFailure=true
+        regressionExpectStatus 1 downloadUrlToFileBounded fixture "${root}/failed.out" 1024 1
+        for budget in 0 -1 bad 01 1000000000; do
+            printf unchanged >"${root}/invalid.out"
+            regressionExpectStatus 1 downloadUrlToFileBounded fixture "${root}/invalid.out" 1024 "${budget}"
+            [[ "$(<"${root}/invalid.out")" == unchanged ]]
+        done
+        wget() { printf payload; }
+        downloadUrlToFileBounded fixture "${root}/success.out" 1024
+        [[ "$(<"${root}/success.out")" == payload ]]
+        [[ "${failed}" == 0 ]]
+    )
+
+    (
         # 严格校验返回任意失败码时，不能把运行校验成功显示为严格校验通过。
         local root="${TMP_DIR}/xray-health-strict-status"
         local PADM_XRAY_BINARY="${root}/xray"
