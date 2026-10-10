@@ -20,25 +20,31 @@ jobs:
       PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
     strategy:
       fail-fast: true
-      max-parallel: 16
+      max-parallel: 20
       matrix:
         selector:
-          - docker-setup-core
-          - docker-setup-encrypted
-          - docker-setup-transports
-          - docker-setup-tls
-          - docker-traditional-tls
-          - docker-reality
-          - docker-contracts-reality
-          - docker-phase3
-          - docker-phase4
-          - docker-phase6
-          - docker-contracts-fast-heavy
           - docker-contracts-fast-rest
-          - docker-routing-core-contracts
-          - docker-routing-core-lifecycle
-          - docker-routing-dns-hosts-workflow
+          - docker-phase3
+          - docker-reality-targets-direct
+          - docker-reality-targets-selection
+          - docker-traditional-tls
+          - docker-setup-transports
+          - docker-contracts-fast-heavy
+          - docker-phase4-maintenance
+          - docker-phase4-lifecycle
+          - docker-setup-encrypted-udp
+          - docker-setup-encrypted-tcp
+          - docker-reality-parameters
+          - docker-reality
+          - docker-setup-core
+          - docker-setup-tls
           - docker-routing-direct-block-workflow
+          - docker-routing-dns-hosts-workflow
+          - docker-routing-core-policy-lifecycle
+          - docker-routing-core-network-lifecycle
+          - docker-phase6
+          - docker-routing-core-contracts
+          - docker-reality-target-library
     steps:
       - name: Checkout checked source
         uses: actions/checkout@v7

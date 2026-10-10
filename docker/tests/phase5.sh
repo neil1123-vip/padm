@@ -855,8 +855,8 @@ grep -Fq "if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWit
     fail 'fast 分片没有同时使用隔离工具镜像和源码快照'
 grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
-grep -Fq 'max-parallel: 16' "${CONTRACT_WORKFLOW}" ||
-    fail 'CI 合同矩阵没有同时启动全部分片'
+grep -Fq 'max-parallel: 20' "${CONTRACT_WORKFLOW}" ||
+    fail 'CI 合同矩阵没有保留 20 个并发槽位'
 if grep -Fq 'subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}"; then
     fail 'image workflow repeats the contract suite'
 fi
