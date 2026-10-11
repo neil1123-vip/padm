@@ -931,6 +931,10 @@ runRoutingDriver() {
         targetReply '追加直连例外规则' $'\n'
         targetReply 'Docker 区域阻断策略' $'3\n'
         targetReply '追加直连例外规则' $'\n'
+        targetReply 'Docker 区域阻断策略' $'5\n'
+        targetReply '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
+        targetReply 'Docker 区域阻断策略' $'6\n'
+        targetReply '删除自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'Docker 区域阻断策略' $'4\n'
         targetReply 'Docker 区域阻断策略' $'0\n'
         targetReply 'Docker 路由与出站' $'19\n'
@@ -1010,6 +1014,12 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'18\n'
         targetReply 'Docker 区域阻断策略' $'1\n'
         targetReply '追加直连例外规则' $'0\n'
+        for input in 0 ''; do
+            targetReply 'Docker 区域阻断策略' $'5\n'
+            targetReply '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
+            targetReply 'Docker 区域阻断策略' $'6\n'
+            targetReply '删除自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
+        done
         targetReply 'Docker 区域阻断策略' $'0\n'
         targetReply 'Docker 路由与出站' $'19\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
@@ -1144,6 +1154,20 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'18\n'
         targetReply 'Docker 区域阻断策略' $'1\n'
         targetReply '追加直连例外规则' $'\004'
+        targetReply 'Docker 区域阻断策略' $'5\n'
+        targetReply '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+        targetReply 'Docker 区域阻断策略' $'6\n'
+        targetReply '删除自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+        targetReply 'Docker 区域阻断策略' $'0\n'
+        ;;
+    region-allow-invalid|region-allow-failed)
+        targetReply 'Docker 路由与出站' $'18\n'
+        input=Example.NET
+        [[ "${scenario}" != region-allow-invalid ]] || input=regexp:bad
+        targetReply 'Docker 区域阻断策略' $'5\n'
+        targetReply '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
+        targetReply 'Docker 区域阻断策略' $'6\n'
+        targetReply '删除自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
         targetReply 'Docker 区域阻断策略' $'0\n'
         ;;
     ipv6-eof)
@@ -1571,7 +1595,8 @@ edit)
             [[ "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
         "${2:-}" == --direct-domains-add || "${2:-}" == --block-domains-add ||
-        "${2:-}" == --direct-domains-remove || "${2:-}" == --block-domains-remove ]]; then
+        "${2:-}" == --direct-domains-remove || "${2:-}" == --block-domains-remove ||
+        "${2:-}" == --region-allow-add || "${2:-}" == --region-allow-remove ]]; then
         dockerSocks5DomainsNormalize "${3:-}" >/dev/null || exit 2
     elif [[ "${2:-}" == --dns-rules ]]; then
         [[ "$#" -eq 5 && -n "${3:-}" && "${3:-}" != --* &&
@@ -2022,18 +2047,19 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof region-eof ipv6-eof warp-eof warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof region-eof region-allow-invalid region-allow-failed ipv6-eof warp-eof warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
-        "${routingCase}" != dns-failed ]] || SITE_EDIT_STATUS=15
+        "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
         expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
-        expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip\nedit --region-off'
+        expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip'
+        expectedRouting+=$'\nedit --region-allow-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-allow-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --warp /root/padm-warp.json\nedit --warp-off\nprotocol routing-status'
         for warpAction in '--warp-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN' \
@@ -2097,6 +2123,16 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
             fail 'Direct/Block 删除缺项未显示状态错误并保留菜单'
         ;;
+    region-allow-invalid)
+        expectedRouting=$'edit --region-allow-add regexp:bad\nedit --region-allow-remove regexp:bad'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail '区域自定义例外非法 CSV 未显示用法错误并保留菜单'
+        ;;
+    region-allow-failed)
+        expectedRouting=$'edit --region-allow-add Example.NET\nedit --region-allow-remove Example.NET'
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail '区域自定义例外增删失败未显示状态错误并保留菜单'
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
         fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
@@ -2108,7 +2144,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '12. 替换 Block 域名阻断' '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' '17. 关闭 BT 协议阻断' \
             '18. 区域阻断策略' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
-            '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' '19. IPv6 域名出站' \
+            '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' \
+            '5. 追加自定义直连例外' '6. 删除自定义直连例外' '19. IPv6 域名出站' \
             '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' \
             '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
             '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \

@@ -730,12 +730,13 @@ dockerMenuSites() {
 }
 
 dockerMenuRegion() {
-    local choice mode extra
+    local choice mode extra action
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 区域阻断策略\n'
         printf '%s\n' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
-            '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' '0. 返回'
+            '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' \
+            '5. 追加自定义直连例外' '6. 删除自定义直连例外' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -756,6 +757,18 @@ dockerMenuRegion() {
             fi
             ;;
         4) dockerMenuRun edit --region-off || true ;;
+        5|6)
+            if [[ "${choice}" == 5 ]]; then
+                action=--region-allow-add
+                dockerSetupRead extra '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                    [[ -n "${extra}" ]] || continue
+            else
+                action=--region-allow-remove
+                dockerSetupRead extra '删除自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                    [[ -n "${extra}" ]] || continue
+            fi
+            dockerMenuRun edit "${action}" "${extra}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

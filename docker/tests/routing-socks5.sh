@@ -1632,6 +1632,23 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
     runEdit 2 --region-off --direct-off --preview
     runEdit 2 --region both --spec "${TEST_ROOT}/base.json" --preview
     runEdit 2 --region both --http01 enable --preview
+    for option in --region-allow-add --region-allow-remove; do
+        runEdit 15 "${option}" example.com --preview
+        runEdit 2 "${option}"
+        runEdit 2 "${option}" '' --preview
+        runEdit 2 "${option}" 'regexp:.*' --preview
+        runEdit 2 "${option}" example.com
+        runEdit 2 "${option}" example.com --confirm invalid
+        runEdit 2 "${option}" example.com "${option}" other.com --preview
+        runEdit 2 "${option}" example.com --region both --preview
+        runEdit 2 --region both "${option}" example.com --preview
+        runEdit 2 "${option}" example.com --region-allow other.com --preview
+        runEdit 2 "${option}" example.com --direct-off --preview
+        runEdit 2 "${option}" example.com --warp-global --preview
+        runEdit 2 "${option}" example.com --spec "${TEST_ROOT}/base.json" --preview
+        runEdit 2 "${option}" example.com --http01 enable --preview
+    done
+    runEdit 2 --region-allow-add example.com --region-allow-remove example.com --preview
     runEdit 15 --spec "${TEST_ROOT}/region-both.json" --confirm PADM-DOCKER-EDIT
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
@@ -1686,6 +1703,83 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
         [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 区域未恢复完整部署及流量"
     done
     MODE=ok
+    regionAddCsv=' FULL:EXACT.EXAMPLE.COM , APPLE.COM , Exact.Example.COM , keyword:Video , geosite:CN , domain:exact.example.com '
+    regionAdded='["full:exact.example.com","domain:apple.com","full:custom-region.example.com","domain:exact.example.com","keyword:video","geosite:cn"]'
+    before=$(snapshot)
+    runEdit 0 --region-allow-add "${regionAddCsv}" --preview
+    jq --argjson domains "${regionAdded}" '.routing.region.allow_domains=$domains' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/region-allow-import.json"
+    runEdit 15 --spec "${TEST_ROOT}/region-allow-import.json" --confirm PADM-DOCKER-EDIT
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerSetupRead() { printf -v "$1" '%s' n; }
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/region-allow-import.json" '' '' interactive
+    ) >"${LOG}" 2>&1 || fail '区域自定义例外确认取消失败'
+    assertClean
+    [[ "$(snapshot)" == "${before}" ]] || fail '区域追加预览、普通导入或取消改变部署'
+    runEdit 0 --region-allow-add "${regionAddCsv}" --confirm PADM-DOCKER-EDIT
+    runEdit 0 --region-allow-add "${regionAddCsv}" --confirm PADM-DOCKER-EDIT
+    jq -en --argjson domains "${regionAdded}" --slurpfile old "${TEST_ROOT}/region-owner.json" \
+        --slurpfile new "${root}/config/spec.json" '
+      $new[0] == ($old[0] | .routing.region.allow_domains=$domains)
+    ' >/dev/null || fail '区域追加未稳定去重或改变模式、其它策略和规格'
+    regionRemoval=' Full:Exact.Example.Com , APPLE.COM , KEYWORD:Video , apple.com '
+    regionRemaining='["full:custom-region.example.com","domain:exact.example.com","geosite:cn"]'
+    before=$(snapshot)
+    runEdit 0 --region-allow-remove "${regionRemoval}" --preview
+    runEdit 15 --region-allow-remove "${regionRemoval},missing.example.com" --confirm PADM-DOCKER-EDIT
+    runEdit 15 --region-allow-remove dl.google.com --confirm PADM-DOCKER-EDIT
+    for failure in health-fail term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        case "${failure}" in
+        health-fail) runEdit 14 --region-allow-add replacement.example.org --confirm PADM-DOCKER-EDIT ;;
+        term) runEdit 143 --region-allow-remove "${regionRemoval}" --confirm PADM-DOCKER-EDIT ;;
+        esac
+        [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 区域自定义例外未恢复完整部署及流量"
+    done
+    MODE=ok
+    [[ "$(snapshot)" == "${before}" ]] || fail '区域删除预览或整批缺项拒绝改变部署'
+    runEdit 0 --region-allow-remove "${regionRemoval}" --confirm PADM-DOCKER-EDIT
+    jq -en --argjson domains "${regionRemaining}" --slurpfile old "${TEST_ROOT}/region-owner.json" \
+        --slurpfile new "${root}/config/spec.json" '
+      $new[0] == ($old[0] | .routing.region.allow_domains=$domains)
+    ' >/dev/null || fail '区域删除混淆 full/domain、丢失次序或改变模式和其它策略'
+    runStatus 0
+    jq -e --argjson allow "${regionRemaining}" --argjson defaults "${REGION_DEFAULTS}" '
+      .region == {mode:"both",allow_domains:$allow,default_allow_domains:$defaults}
+    ' "${LOG}" >/dev/null || fail '删除同名自定义例外改变固定默认例外'
+    regionBoundaryCsv=$(jq -nr '[range(0;253) | "region-boundary-\(.).example.com"] | join(",")')
+    regionOverlimitCsv=$(jq -nr '[range(0;257) | "region-overlimit-\(.).example.com"] | join(",")')
+    before=$(snapshot)
+    runEdit 15 --region-allow-add "${regionBoundaryCsv},region-boundary-253.example.com" --preview
+    runEdit 2 --region-allow-add "${regionOverlimitCsv}" --preview
+    runEdit 2 --region-allow-remove "${regionOverlimitCsv}" --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail '区域自定义例外超限改变部署'
+    runEdit 0 --region-allow-add "${regionBoundaryCsv}" --confirm PADM-DOCKER-EDIT
+    jq -en --argjson domains "${regionRemaining}" --slurpfile old "${TEST_ROOT}/region-owner.json" \
+        --slurpfile new "${root}/config/spec.json" '
+      $new[0] == ($old[0] | .routing.region.allow_domains =
+        ($domains + [range(0;253) | "domain:region-boundary-\(.).example.com"]))
+    ' >/dev/null || fail '区域自定义例外 256 项上界未保留历史次序与完整规格'
+    before=$(snapshot)
+    runEdit 0 --region-allow-add 'FULL:CUSTOM-REGION.EXAMPLE.COM,region-boundary-252.example.com' --preview
+    runEdit 15 --region-allow-add region-boundary-253.example.com --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '区域上界重复预览或新增超限改变部署'
+    runEdit 0 --region-allow-remove "${regionBoundaryCsv}" --confirm PADM-DOCKER-EDIT
+    runEdit 0 --region-allow-remove 'full:custom-region.example.com,exact.example.com,geosite:cn' \
+        --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile old "${TEST_ROOT}/region-owner.json" --slurpfile new "${root}/config/spec.json" '
+      $new[0] == ($old[0] | .routing.region.allow_domains=[])
+    ' >/dev/null || fail '删除末条区域自定义例外未保留空列表、模式和其它策略'
+    before=$(snapshot)
+    runEdit 15 --region-allow-remove exact.example.com --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '区域重复删除改变部署'
+    runEdit 0 --region-allow-add 'full:exact.example.com,apple.com,full:custom-region.example.com' \
+        --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/region-owner.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail '区域增删未恢复已有自定义名单'
     runEdit 0 --region-off --confirm PADM-DOCKER-EDIT
     jq -en --slurpfile expected "${TEST_ROOT}/routing-bt-policy.json" --slurpfile actual "${root}/config/spec.json" \
         '$actual == $expected' >/dev/null || fail '区域关闭删除 generic 同 CN 或其它子项'

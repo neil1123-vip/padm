@@ -2252,6 +2252,27 @@ Linux amd64 `docker-routing-domains-workflow` 入口 `115.538` 秒通过，证�
 证据沿用对应段落，不重复未变探针。重复归档/清单清理，日志/result 和
 `.tmp-5b-routing-publishing-close/snapshot-inputs.json` 保留；不升级完整能力状态。
 
+#### 5B.3j 已有 CN 预设自定义直连例外增删
+
+CLI `--region-allow-add/remove <CSV>` 和区域菜单追加两个管理入口；
+仅接受已有合法 `.routing.region`，只修改自定义 `allow_domains`。
+追加复用四类规则规范化，按首次出现稳定去重，总量最多 256；
+删除要求每条完整规范化规则都在自定义列表中，任一缺项整组拒绝。
+最后一项删除后仍保留 `mode` 和 `allow_domains:[]`，固定八条例外不受影响，
+不删除手工 Direct/Block、修改其它路由或凭据，也不新增 schema 或渲染合同。
+动作互斥、预览/确认及失败恢复沿用现有专项编辑事务。
+Linux amd64 `docker-routing-region` 入口 51760 ms、内部 50806 ms，
+`docker-menu` 入口 60345 ms、内部 59404 ms；Jobs 2、排队 200/201 ms，
+均实际执行、未命中缓存，两个源码快照摘要一致。
+覆盖未启用拒绝、参数互斥、四类规则、默认同名规则的自定义归属、
+完整字段保持、256/257 上界、整批缺项拒绝、末项空列表、
+预览/取消及 health/TERM 恢复；PTY 覆盖空/0/EOF、非法输入和失败后继续。
+源码复核无确定 P1/P2，证据
+`.tmp-regression-docker-a265f71f3457447aa23397dc1c590e10/`、
+`.tmp-regression-docker-e38058e96b384fba82a27fdf6bd37cd8/`。
+完整合同随自动同步真实夹具收口后集中执行；本阶段不改核心渲染，
+不重复未变真实路由矩阵，完整区域策略和适用公网/宿主/arm64 仍 deferred。
+
 #### 5B.3h DNS 分流直接录入
 
 功能签名提交 `5c7e1961`。菜单 `17` 的 `6` 改为依次输入字面服务器 IP、

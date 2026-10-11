@@ -1612,6 +1612,14 @@ dockerEditCommand() {
             regionAllowSet=1
             shift 2
             ;;
+        --region-allow-add|--region-allow-remove)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingDomains=$(dockerSocks5DomainsNormalize "$2") || return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=region routingAction=${1#--region-}
+            routingAction=${routingAction//-/_}
+            shift 2
+            ;;
         --ipv6)
             [[ "$#" -ge 2 && -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             case "$2" in selective|global) ipv6Mode=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
@@ -2014,6 +2022,23 @@ dockerEditCommand() {
         elif [[ "${routingKind}" == region && "${routingAction}" == enable ]]; then
             jq --arg mode "${regionMode}" --argjson allow "${regionAllow}" \
                 '.routing.region = {mode:$mode,allow_domains:$allow}' "${draft}" >"${draft}.next"
+        elif [[ "${routingKind}" == region && "${routingAction}" == allow_* ]]; then
+            jq -e '.routing.region != null' "${draft}" >/dev/null || {
+                dockerError '请先启用区域策略，再增删自定义直连例外'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            # 只操作自定义名单，默认例外由生成器保持，删空后仍保留区域模式。
+            jq --arg action "${routingAction}" --argjson domains "${routingDomains}" '
+              .routing.region.allow_domains as $existing |
+              if $action == "allow_add" then
+                (reduce $domains[] as $rule ($existing;
+                  if index($rule) == null then . + [$rule] else . end)) as $merged |
+                if ($merged | length) <= 256 then .routing.region.allow_domains = $merged
+                else error("自定义直连例外合并后超过 256 项，未提交配置") end
+              elif ($domains - $existing | length) != 0 then
+                error("待删除规则必须全部存在于区域自定义直连例外，未提交配置")
+              else .routing.region.allow_domains = ($existing - $domains) end
+            ' "${draft}" >"${draft}.next"
         elif [[ "${routingKind}" == ipv6 && "${routingAction}" == enable ]]; then
             jq --arg mode "${ipv6Mode}" --argjson domains "${ipv6Domains}" \
                 '.routing.ipv6 = {mode:$mode,domains:$domains}' "${draft}" >"${draft}.next"
@@ -2255,6 +2280,8 @@ dockerEditCommand() {
           if $routing_action == "warp_family" then del(.routing.warp.family)
           else del(.routing.warp.mode, .routing.warp.domains) end;
         ($old | without_warp_edit) == ($new | without_warp_edit)
+       elif $routing_kind == "region" and ($routing_action | startswith("allow_")) then
+        ($old | del(.routing.region.allow_domains)) == ($new | del(.routing.region.allow_domains))
        elif $routing_kind != "" then
         ($old | del(.routing[$routing_kind]) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing[$routing_kind]) | if .routing == {} then del(.routing) else . end)
