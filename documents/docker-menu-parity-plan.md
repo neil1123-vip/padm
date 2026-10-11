@@ -4038,6 +4038,57 @@ driver 在完整并发中 11/11、3.334 秒，preflight 同时通过。
 真实 OpenSSH 的独立身份等待/收容、collector/jail 和宿主验收仍未完成，
 `authoritative/jail_ready=false` 保持。
 
+#### 5C.8c.2j 原 pidfd 等待与清理屏障
+
+driver 为自建 master 和父创建事件确认的 child 独立持有 pidfd，正常停点改为
+`waitid(P_PIDFD, WSTOPPED|WEXITED|WNOHANG|__WALL)` 精确消费。
+`CLD_TRAPPED` 保留内核 `si_status` 的 ptrace event 位，终局按真实 si_code
+转换；未知类型拒绝。每次数字 ptrace 前核对原 fd、已消费停点和真实 `t` 状态，
+采样不再以 `pgrp == master` 作为身份条件；等待轮转已知 fd，避免父 syscall
+饿死 child。正常和异常路径均不使用负 PGID、全局 wait 或裸 PID 信号。
+
+child 的内核首停即使先到，也保留到已知父的真实 FORK 停点被消费后；
+GETEVENTMSG 取得 child PID 后立即固定原 fd，再验证首末代次、父链、
+TracerPid、namespace 与 exe。创建 entry/FORK/父 exit/child 首停四段和
+accepted 继承闭合后才正常恢复。独审补正固定 fd 后校验失败的路径：
+先把原 child 绑定到父创建停点，后续校验失败只供 cleanup 复用，不能重复登记或放行。
+
+清理在原 2 秒期限内先形成停止屏障：仍运行的已知 task 收到原 pidfd SIGSTOP，
+精确消费创建事件并固定全部新 child，所有 live task 保持真实停点后才
+pidfd SIGKILL。SIGKILL 可异步唤醒旧停点，故丢弃旧状态，只对重新消费的新
+EXIT 停点 CONT(SIGKILL)。原 fd 跨 Ledger 关闭独立持有；terminal 移入
+retired 后由 P_PIDFD 真回收或 fdinfo `Pid=-1` 确认原 task 已回收，
+不操作复用的数字 PID。成功与失败均核 owned/stopped/retired、FD 与 subreaper 终局。
+
+独立 Linux amd64 探针逐项核对 255 个真实停点，含 243 个 syscall：
+FORK `261 -> 66943`、EXEC `1029 -> 263551`、EXIT `1541 -> 394623`。
+child setsid 后再 fork，grandchild setpgid 后 exec，原 P_PIDFD 均可消费；
+无关 child 的退出 37 留给原 caller。两次故障探针分别覆盖未消费 FORK，
+以及创建 entry 恢复后父为 R、尚无 wait 结果的窗口：
+SIGSTOP 后精确父 FORK -> 固定 childfd -> SIGKILL -> EXIT/真正 terminal，
+原 pidfd `Pid=-1`、proc 消失、ECHILD、FD 4 -> 4 和 subreaper 恢复。
+探针仅单次真实时序，不宣称 SIGSTOP 总先返回 FORK；其它停点仍由状态机处理。
+复用现有工具镜像、network none、SYS_PTRACE；源码在容器 Linux 文件系统执行，
+HOME/TMPDIR 同在容器内，实验容器清理后留 `.tmp-ssh-task-wait-8c2j/` 小证据。
+
+定向合同新增同 PGID caller 的正常/失败 × 停住/已退出 4 个隔离场景，
+保留创建、跨 exe、ABI/flags 拒绝、deadline、retired 和 EXITKILL 断言，
+并新增 child 已固定后父链校验失败的原身份清理合同。
+最终定向 13/13、3.497 秒；入口 4521 ms、内部 3584 ms、Jobs 2、
+cache_hit=false，证据 `.tmp-regression-docker-c798692947da4bab81a93a0a93cd1a8d/`。
+初轮 12/12 不作为后来新增故障合同的验证。集中完整 Docker 合同 47/47、
+exit 0、内部 284284 ms、入口 285291 ms、排队 5500 ms、Jobs 6/占 2 槽、
+cache_hit=false；driver 在完整并发中 13/13、3.641 秒，preflight 同时通过。
+证据 `.tmp-regression-docker-d276a18e5b564226899cba6ead3e744f/`。
+完整快照的 297 个输入文件与工作区逐项 SHA-256 一致；结果补写后仅本计划变化，
+执行源码保持匹配。复用工具镜像与三槽队列，不据单轮 elapsed 宣称整体提速。
+
+本阶段 109/112 仍在正常执行 entry 拒绝；跨 PGID 正例只属于独立观察器。
+未成功取得 pidfd 的工具/资源错误（EMFILE/EPERM 等）尚无完整收容合同，
+不能把已固定后的校验失败合同写成所有 pin 失败均能清理。
+真实 OpenSSH/unit 子树、raw fork 57、vfork、arm64、多线程、collector/jail、
+菜单启停及宿主验收仍未完成，`authoritative/jail_ready=false`。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

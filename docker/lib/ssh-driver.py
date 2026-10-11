@@ -22,6 +22,7 @@ TRACEME, CONT, SYSCALL, SETOPTIONS, GETEVENTMSG, GET_SYSCALL_INFO = 0, 7, 24, 0x
 FORK, VFORK, CLONE, EXEC, EXIT = 1, 2, 3, 4, 6
 OPTIONS = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x40 | 0x00100000
 WAIT_FLAGS = os.WNOHANG | 0x40000000
+WAIT_ID_FLAGS = os.WEXITED | os.WSTOPPED | WAIT_FLAGS
 PR_SET_CHILD_SUBREAPER, PR_GET_CHILD_SUBREAPER = 36, 37
 AUDIT_ARCH_X86_64, X32_BIT = 0xC000003E, 0x40000000
 SYS_CLONE, SYS_FORK, SYS_VFORK, SYS_CLONE3 = 56, 57, 58, 435
@@ -95,6 +96,8 @@ def process_snapshot(pid):
         "cgroup": (root / "cgroup").read_text().splitlines(),
         "threads": int(next(line.split(":", 1)[1] for line in status
                             if line.startswith("Threads:"))),
+        "tracer_pid": int(next(line.split(":", 1)[1] for line in status
+                              if line.startswith("TracerPid:"))),
         "socket_fds": fds,
     }
 
@@ -113,6 +116,8 @@ class ControlledDriver:
         self.expected_tuple = copy.deepcopy(expected_tuple)
         self.master = None
         self.tracked = set()
+        self.owned = {}
+        self.stopped_tasks = {}
         self.retired = {}
         self.registered = set()
         self.pending_children = {}
@@ -126,25 +131,115 @@ class ControlledDriver:
             "scope": "只用于可信 amd64 fork fixture；不支持任意 OpenSSH 或 arm64",
             "events": [], "first_stops": [], "continues": [], "cleanup": [],
             "creations": [], "syscall_stop_count": 0, "normal_resume_count": 0,
+            "task_pins": [], "wait_pidfd_count": 0,
             "expected_tuple": copy.deepcopy(expected_tuple),
         }
 
     def _check(self):
         self.ledger._check()
 
+    def _pidfd_pid(self, descriptor):
+        fields = dict(line.split(":", 1) for line in
+                      Path(f"/proc/self/fdinfo/{descriptor}").read_text().splitlines()
+                      if ":" in line)
+        return int(fields.get("Pid", "-2"))
+
+    def _pin(self, pid, parent=None, source="run"):
+        if type(pid) is not int or pid <= 0 or pid in self.owned or pid in self.retired:
+            raise Failure("受控 SSH driver 拒绝重复或无效的原 task 身份")
+        descriptor = os.pidfd_open(pid)
+        try:
+            if self._pidfd_pid(descriptor) != pid:
+                raise Failure("受控 SSH driver 固定的 pidfd 身份无效")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        self.owned[pid] = descriptor
+        self.tracked.add(pid)
+        if parent is not None:
+            parent_stop = self.stopped_tasks.get(parent)
+            if parent_stop is None:
+                raise Failure("受控 SSH 创建 child 缺少已消费的父停点")
+            # pidfd 已固定后先绑定父创建停点，失败路径只能由 cleanup 复用原身份。
+            parent_stop["child_pid"] = pid
+            self._require_stop(parent)
+            parent_process = process_snapshot(parent)
+            first = process_snapshot(pid)
+            confirmed = process_snapshot(pid)
+            if (self._pidfd_pid(descriptor) != pid
+                    or self.ledger._generation(first) != self.ledger._generation(confirmed)
+                    or any(process["ppid"] != parent or process["tracer_pid"] != os.getpid()
+                           or process["pid_ns"] != parent_process["pid_ns"]
+                           or process["net_ns"] != parent_process["net_ns"]
+                           or process["exe"] != parent_process["exe"]
+                           for process in (first, confirmed))):
+                raise Failure("受控 SSH 创建 child 的原 task、父链或 namespace 无效")
+        row = {"pid": pid, "parent_pid": parent, "source": source,
+               "pinned_monotonic_ns": time.monotonic_ns()}
+        self.evidence["task_pins"].append(row)
+        if source == "cleanup":
+            self.evidence["cleanup"].append({"kind": "pin-child", **row})
+
+    def _require_stop(self, pid):
+        descriptor = self.owned.get(pid)
+        if descriptor is None or pid not in self.stopped_tasks or self._pidfd_pid(descriptor) != pid:
+            raise Failure("受控 SSH ptrace 缺少原 task 的 pidfd 或已消费停点")
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()
+        if fields[0] != "t":
+            raise Failure("受控 SSH ptrace 的原 task 不在真实停点")
+
+    def _creation_child(self, pid, source="run"):
+        self._require_stop(pid)
+        stopped = self.stopped_tasks[pid]
+        if stopped["status"] >> 16 not in (FORK, VFORK, CLONE):
+            raise Failure("受控 SSH child 身份缺少原父创建停点")
+        if "child_pid" not in stopped:
+            child = event_message(pid)
+            if child <= 0:
+                raise Failure("受控 SSH 创建事件缺少有效 child PID")
+            self._pin(child, pid, source)
+        return stopped["child_pid"]
+
+    def _wait_original(self, pid):
+        descriptor = self.owned[pid]
+        result = os.waitid(os.P_PIDFD, descriptor, WAIT_ID_FLAGS)
+        if result is None:
+            return None
+        if result.si_pid != pid:
+            raise Failure("受控 SSH pidfd 等待返回了其它 task")
+        if result.si_code == os.CLD_TRAPPED:
+            # 内核 si_status 含 ptrace event 位，保留实测的 waitpid 状态编码。
+            status = (result.si_status << 8) | 0x7F
+            self.stopped_tasks[pid] = {"status": status}
+            self._require_stop(pid)
+            # 轮转原身份，避免持续产生 syscall 停点的父进程饿死 child。
+            self.owned[pid] = self.owned.pop(pid)
+        elif result.si_code in (os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED):
+            status = (result.si_status << 8) if result.si_code == os.CLD_EXITED else (
+                result.si_status | (0x80 if result.si_code == os.CLD_DUMPED else 0))
+            self.retired[pid] = self.owned.pop(pid)
+            self.stopped_tasks.pop(pid, None)
+            self.tracked.discard(pid)
+        else:
+            raise Failure(f"受控 SSH pidfd 等待拒绝未知 si_code {result.si_code}")
+        self.evidence["wait_pidfd_count"] += 1
+        return pid, status
+
     def _wait(self, initial=False):
         while True:
             self._check()
-            pid, status = os.waitpid(self.master if initial else -self.master, WAIT_FLAGS)
-            if pid:
-                return pid, status
+            for pid in [self.master] if initial else list(self.owned):
+                result = self._wait_original(pid)
+                if result is not None:
+                    return result
             time.sleep(0)
 
     def _sample(self, pid):
         self._check()
+        self._require_stop(pid)
         process = process_snapshot(pid)
-        if process["threads"] != 1 or process["pgrp"] != self.master or process["state"] != "t":
-            raise Failure("受控 SSH task 的单线程、进程组或真实停点无效")
+        if process["threads"] != 1 or process["state"] != "t":
+            raise Failure("受控 SSH task 的单线程或真实停点无效")
         inodes = {value[8:-1] for _fd, value in process["socket_fds"]}
         rows = []
         for line in Path(f"/proc/{pid}/net/tcp").read_text().splitlines()[1:]:
@@ -165,7 +260,9 @@ class ControlledDriver:
             raise Failure("受控 SSH driver 拒绝继续未登记 task")
         # finish_stop 返回后仍可能超时，实际恢复执行前再检查总期限。
         self._check()
+        self._require_stop(pid)
         ptrace(SYSCALL, pid, delivered_signal)
+        del self.stopped_tasks[pid]
         resumed = time.monotonic_ns()
         self.evidence["normal_resume_count"] += 1
         self.evidence["last_normal_resume_monotonic_ns"] = resumed
@@ -220,6 +317,7 @@ class ControlledDriver:
     def _syscall(self, pid, row):
         if pid not in self.registered:
             raise Failure("受控 SSH syscall task 未登记")
+        self._require_stop(pid)
         info = syscall_info(pid)
         self.evidence["syscall_stop_count"] += 1
         if info["op"] == 1:
@@ -232,7 +330,7 @@ class ControlledDriver:
                 current = self._sample(pid)
                 row["current"] = current
                 self._registered_process(pid, current["process"])
-                # 等待范围固定为自有进程组，脱组 syscall 必须在恢复执行前拒绝。
+                # 进程组或会话改变的授权合同尚未验证，下一阶段通过后再开放。
                 raise Failure(f"受控 SSH driver 拒绝未支持的进程组或会话改变 syscall {info['nr']}")
             if info["nr"] in (SYS_CLONE, SYS_FORK, SYS_VFORK, SYS_CLONE3):
                 row.update({"kind": "creation-entry", "syscall": info})
@@ -306,9 +404,8 @@ class ControlledDriver:
                     self.tracked.add(pid)
                     raise Failure("受控 SSH 退出 task 未登记")
                 row.update({"kind": "reaped", "exit_code": os.waitstatus_to_exitcode(status)})
-                # ptrace 通知不等于真正父进程已回收；独立 pidfd 跨账本关闭保留原 task 身份。
                 if pid not in self.retired:
-                    self.retired[pid] = os.dup(self.ledger.registry[pid]["held_pidfd"])
+                    raise Failure("受控 SSH 退出 task 缺少原 pidfd 身份")
                 self.tracked.discard(pid)
                 self.active_syscalls.pop(pid, None)
                 self.first_syscall_exit.discard(pid)
@@ -317,10 +414,7 @@ class ControlledDriver:
                 raise Failure("受控 SSH driver 拒绝未知 wait 状态")
             self.tracked.add(pid)
             if event in (FORK, VFORK, CLONE):
-                child = event_message(pid)
-                if child <= 0:
-                    raise Failure("受控 SSH 创建事件缺少有效 child PID")
-                self.tracked.add(child)
+                child = self._creation_child(pid)
                 row["child_pid"] = child
             # 已消费的 wait 结果必须先保留已知 task，超时不能丢失待清理 child。
             self._check()
@@ -369,6 +463,7 @@ class ControlledDriver:
                 if pid in self.creations:
                     raise Failure("受控 SSH 创建 syscall 未关联完成却发生 EXEC/EXIT")
                 current = self._sample(pid)
+                self._require_stop(pid)
                 row.update({"kind": "exec-stop" if event == EXEC else "exit-stop",
                             "current": current, "event_message": event_message(pid)})
                 row["ledger"] = copy.deepcopy(self.ledger.finish_stop(self.receiver, pid, event, current))
@@ -397,85 +492,76 @@ class ControlledDriver:
                 self.evidence["events"].append(copy.deepcopy(row))
 
     def _cleanup(self):
-        if self.tracked:
-            try:
-                os.killpg(self.master, signal.SIGKILL)
-                self.evidence["cleanup"].append({"kind": "kill-process-group", "pgrp": self.master})
-            except ProcessLookupError:
-                pass
-        for pid in sorted(self.tracked):
-            try:
-                os.kill(pid, signal.SIGKILL)
-                self.evidence["cleanup"].append({"kind": "kill-known-task", "pid": pid})
-            except ProcessLookupError:
-                self.evidence["cleanup"].append({"kind": "known-task-already-gone", "pid": pid})
         end = time.monotonic() + 2
+        stop_sent = set()
+
+        def send(pid, delivered, kind):
+            try:
+                signal.pidfd_send_signal(self.owned[pid], delivered)
+                self.evidence["cleanup"].append({"kind": kind, "pid": pid,
+                                                "signal": delivered,
+                                                "sent_monotonic_ns": time.monotonic_ns()})
+            except ProcessLookupError:
+                self.evidence["cleanup"].append({"kind": "original-task-already-exited", "pid": pid})
+            if delivered == signal.SIGKILL:
+                # SIGKILL 可唤醒旧停点；后续只能恢复重新消费的真实停点。
+                self.stopped_tasks.pop(pid, None)
+
+        # 先停止原 task 并消费创建事件，不能先杀父再丢掉尚未登记的 child。
+        while self.owned and time.monotonic() < end:
+            progressed = False
+            for pid in list(self.owned):
+                if pid not in self.stopped_tasks:
+                    result = self._wait_original(pid)
+                    if result is not None:
+                        progressed = True
+                    elif pid not in stop_sent:
+                        send(pid, signal.SIGSTOP, "stop-original-task")
+                        stop_sent.add(pid)
+                if pid in self.stopped_tasks:
+                    status = self.stopped_tasks[pid]["status"]
+                    if status >> 16 in (FORK, VFORK, CLONE):
+                        self._creation_child(pid, "cleanup")
+            if all(pid in self.stopped_tasks for pid in self.owned):
+                break
+            if not progressed:
+                time.sleep(0.001)
+        if any(pid not in self.stopped_tasks for pid in self.owned):
+            raise Failure("受控 SSH 清理无法在原 task 身份下完成停止屏障")
+        for pid in list(self.owned):
+            send(pid, signal.SIGKILL, "kill-original-task")
 
         def consume(pid, status):
             row = {"pid": pid, "status": status, "normal": False}
             if os.WIFEXITED(status) or os.WIFSIGNALED(status):
-                if pid in self.retired:
-                    self.tracked.discard(pid)
-                    row.update({"kind": "cleanup-retired-exit-observed",
-                                "exit_code": os.waitstatus_to_exitcode(status)})
-                    self.evidence["cleanup"].append(row)
-                    return
-                # ptrace 退出通知可能早于真实父进程回收；保留 task 直到 /proc 消失。
-                missing = not Path(f"/proc/{pid}").exists()
-                if missing:
-                    self.tracked.discard(pid)
-                row.update({"kind": "cleanup-reaped" if missing else "cleanup-exit-observed",
-                            "exit_code": os.waitstatus_to_exitcode(status), "proc_missing": missing})
+                if pid not in self.retired:
+                    raise Failure("受控 SSH 清理终局缺少原 pidfd 身份")
+                row.update({"kind": "cleanup-retired-exit-observed",
+                            "exit_code": os.waitstatus_to_exitcode(status)})
             elif os.WIFSTOPPED(status):
-                self.tracked.add(pid)
                 if status >> 16 in (FORK, VFORK, CLONE):
-                    child = event_message(pid)
-                    self.tracked.add(child)
+                    child = self._creation_child(pid, "cleanup")
                     row["discovered_child"] = child
-                    try:
-                        os.kill(child, signal.SIGKILL)
-                    except ProcessLookupError:
-                        row["child_already_gone"] = True
+                    send(child, signal.SIGKILL, "kill-original-task")
                 try:
+                    self._require_stop(pid)
                     ptrace(CONT, pid, signal.SIGKILL)
+                    del self.stopped_tasks[pid]
                     row.update({"kind": "cleanup-continue", "signal": signal.SIGKILL})
                 except ProcessLookupError:
+                    self.stopped_tasks.pop(pid, None)
                     row["kind"] = "cleanup-kill-in-progress"
             self.evidence["cleanup"].append(row)
 
-        group_finished = not self.tracked
-        while (self.tracked or self.retired or not group_finished) and time.monotonic() < end:
+        while (self.owned or self.retired) and time.monotonic() < end:
             progressed = False
-            # 总期限可能在消费创建事件前到达；清理也要发现进程组内的新 task。
-            if not group_finished:
-                try:
-                    pid, status = os.waitpid(-self.master, WAIT_FLAGS)
-                    if pid:
-                        consume(pid, status)
-                        progressed = True
-                except ChildProcessError:
-                    group_finished = True
-            for task in sorted(self.tracked):
-                try:
-                    pid, status = os.waitpid(task, WAIT_FLAGS)
-                except ChildProcessError:
-                    # 线程随其 thread group 回收后可能不再有独立 wait 结果。
-                    if not Path(f"/proc/{task}").exists():
-                        self.tracked.discard(task)
-                        self.evidence["cleanup"].append({
-                            "kind": "kernel-reaped-task", "pid": task, "proc_missing": True,
-                        })
-                        progressed = True
-                    continue
-                if not pid:
-                    continue
-                progressed = True
-                consume(pid, status)
+            for pid in list(self.owned):
+                result = self._wait_original(pid)
+                if result is not None:
+                    progressed = True
+                    consume(*result)
             for task, descriptor in list(self.retired.items()):
-                fields = dict(line.split(":", 1) for line in
-                              Path(f"/proc/self/fdinfo/{descriptor}").read_text().splitlines()
-                              if ":" in line)
-                held_pid = int(fields.get("Pid", "-2"))
+                held_pid = self._pidfd_pid(descriptor)
                 if held_pid == -1:
                     os.close(descriptor)
                     del self.retired[task]
@@ -502,11 +588,11 @@ class ControlledDriver:
                         else -result.si_status,
                     })
                     progressed = True
-            if not self.tracked and not self.retired and group_finished:
+            if not self.owned and not self.retired:
                 break
             if not progressed:
                 time.sleep(0.001)
-        if self.tracked or self.retired or not group_finished:
+        if self.owned or self.retired:
             raise Failure(f"受控 SSH 清理仍有未回收 task：{sorted(self.tracked | self.retired.keys())}")
         self.evidence["discarded_early_stops"] = sorted(self.early_stops)
         self.evidence["discarded_parent_confirmations"] = sorted(self.pending_children)
@@ -552,7 +638,7 @@ class ControlledDriver:
                 except BaseException:
                     os._exit(111)
                 os._exit(0)
-            self.tracked.add(self.master)
+            self._pin(self.master)
             pid, status = self._wait(initial=True)
             if (pid != self.master or not os.WIFSTOPPED(status)
                     or status >> 16 or os.WSTOPSIG(status) != signal.SIGSTOP
@@ -565,6 +651,7 @@ class ControlledDriver:
             self.ledger.register(initial["process"])
             self.registered.add(pid)
             self.first_syscall_exit.add(pid)
+            self._require_stop(pid)
             ptrace(SETOPTIONS, pid, OPTIONS)
             self.evidence["exitkill_set_monotonic_ns"] = time.monotonic_ns()
             self._normal_continue(pid)
@@ -587,7 +674,7 @@ class ControlledDriver:
                 self.evidence["cleanup_error"] = str(caught)
                 error = caught
             finally:
-                for descriptor in self.retired.values():
+                for descriptor in list(self.owned.values()) + list(self.retired.values()):
                     os.close(descriptor)
             if previous_subreaper is not None:
                 if libc.prctl(PR_SET_CHILD_SUBREAPER, previous_subreaper, 0, 0, 0) != 0:
@@ -599,6 +686,8 @@ class ControlledDriver:
             self.evidence.update({
                 "messages": copy.deepcopy(self.ledger.messages), "ledger_closed": self.ledger.closed,
                 "ledger_poisoned": self.ledger.poisoned, "remaining_tracees": sorted(self.tracked),
+                "remaining_owned_tasks": sorted(self.owned),
+                "remaining_stopped_tasks": sorted(self.stopped_tasks),
                 "remaining_retired_tasks": sorted(self.retired),
                 "remaining_early_stops": sorted(self.early_stops),
                 "remaining_parent_confirmations": sorted(self.pending_children),

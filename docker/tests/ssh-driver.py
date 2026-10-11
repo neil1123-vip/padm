@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -97,6 +98,9 @@ class DriverContracts(unittest.TestCase):
         self.assertFalse(evidence["remaining_syscall_tasks"])
         self.assertFalse(evidence["remaining_first_exit_tasks"])
         self.assertFalse(evidence["remaining_waiting_parent_exit"])
+        self.assertFalse(evidence["remaining_owned_tasks"])
+        self.assertFalse(evidence["remaining_stopped_tasks"])
+        self.assertGreater(evidence["wait_pidfd_count"], 0)
         self.assertFalse(evidence["open_received_fds"])
         self.assertEqual(evidence["fd_count_before"], evidence["fd_count_after"])
         self.assertFalse(evidence["authoritative"])
@@ -106,39 +110,63 @@ class DriverContracts(unittest.TestCase):
     def test_python_to_c_epoch_history_and_frozen_trace(self):
         self.driver = driver_module.ControlledDriver(time.monotonic() + 5, self.receiver, self.expected)
         original_wait = self.driver._wait
-        forced_child_first_stop = []
+        early_child, forced_child_first_stop = {}, []
 
         def child_before_parent_exit(initial=False):
             creation = self.driver.creations.get(self.driver.master)
             if (not initial and creation and "event_child" not in creation
-                    and not forced_child_first_stop):
+                    and not early_child):
                 deadline = self.driver.ledger.deadline
                 while time.monotonic() < deadline:
-                    children = Path(
-                        f"/proc/{self.driver.master}/task/{self.driver.master}/children"
-                    ).read_text().split()
-                    if children:
-                        pid, status = os.waitpid(int(children[0]), driver_module.WAIT_FLAGS)
-                        if pid:
-                            forced_child_first_stop.append(pid)
-                            return pid, status
+                    observed = os.waitid(
+                        os.P_PIDFD, self.driver.owned[self.driver.master],
+                        os.WSTOPPED | os.WNOHANG | os.WNOWAIT | 0x40000000)
+                    if (observed and observed.si_code == os.CLD_TRAPPED
+                            and observed.si_status >> 8 == driver_module.FORK):
+                        child = driver_module.event_message(self.driver.master)
+                        current = driver_module.process_snapshot(child)
+                        if current["state"] == "t":
+                            # 未消费父 FORK 前只观察真实首停，不等待未知 PID。
+                            self.assertNotIn(child, self.driver.owned)
+                            early_child.update({"pid": child, "snapshot": current,
+                                                "observed_ns": time.monotonic_ns()})
+                            break
                     time.sleep(0)
-                raise TimeoutError("真实 child 首停等待超时")
+                else:
+                    raise TimeoutError("真实 child 首停等待超时")
+            if (not initial and early_child and not forced_child_first_stop
+                    and creation and creation.get("event_child") == early_child["pid"]):
+                child = early_child["pid"]
+                self.assertIn(child, self.driver.owned)
+                while time.monotonic() < self.driver.ledger.deadline:
+                    result = self.driver._wait_original(child)
+                    if result:
+                        forced_child_first_stop.append(child)
+                        return result
+                    time.sleep(0)
+                raise TimeoutError("已固定 child 的真实首停等待超时")
             return original_wait(initial)
 
         self.driver._wait = child_before_parent_exit
         evidence = self.driver.run(self.cross_exec)
         self.assert_clean(evidence)
         self.assertEqual(len(evidence["first_stops"]), 1)
+        self.assertTrue(early_child)
         self.assertTrue(forced_child_first_stop)
         first_stop_event = next(row for row in evidence["events"]
                                 if row.get("kind") == "child-first-stop")
         self.assertTrue(first_stop_event["held_without_continue"])
         fork_event = next(row for row in evidence["events"] if row.get("kind") == "fork-parent-stop")
-        self.assertLess(first_stop_event["wait_monotonic_ns"], fork_event["wait_monotonic_ns"])
+        pinned = next(row for row in evidence["task_pins"] if row["pid"] == early_child["pid"])
+        self.assertLess(early_child["observed_ns"], fork_event["wait_monotonic_ns"])
+        self.assertLess(fork_event["wait_monotonic_ns"], pinned["pinned_monotonic_ns"])
+        self.assertLess(pinned["pinned_monotonic_ns"], first_stop_event["wait_monotonic_ns"])
         creation = evidence["creations"][0]
         self.assertIn(creation["entry"]["nr"], (driver_module.SYS_CLONE, driver_module.SYS_FORK))
         self.assertEqual(creation["event_child"], creation["exit_rval"])
+        self.assertEqual(early_child["pid"], creation["event_child"])
+        self.assertEqual(early_child["snapshot"]["starttime_ticks"],
+                         evidence["first_stops"][0]["snapshot"]["process"]["starttime_ticks"])
         self.assertLess(creation["entry_monotonic_ns"], creation["event_monotonic_ns"])
         self.assertLess(creation["event_monotonic_ns"], creation["exit_monotonic_ns"])
         self.assertLess(creation["exit_monotonic_ns"],
@@ -186,6 +214,133 @@ class DriverContracts(unittest.TestCase):
             "syscall_stop_count": evidence["syscall_stop_count"],
             "normal_resume_count": evidence["normal_resume_count"],
         }, sort_keys=True, separators=(",", ":")), flush=True)
+
+    def test_unrelated_caller_child_in_same_group_keeps_wait_status(self):
+        for index, (failed, stopped) in enumerate((
+                (False, True), (False, False), (True, True), (True, False))):
+            with self.subTest(failed=failed, stopped=stopped):
+                if index:
+                    self.client.close()
+                    self.client = socket.socket()
+                    self.client.connect(self.listener.getsockname())
+                    self.expected["remote"] = list(self.client.getsockname())
+                read_fd, write_fd = os.pipe()
+                unrelated = os.fork()
+                if unrelated == 0:
+                    try:
+                        os.close(write_fd)
+                        self.receiver.close()
+                        self.listener.close()
+                        self.client.close()
+                        group = int(os.read(read_fd, 64))
+                        os.close(read_fd)
+                        os.setpgid(0, group)
+                        os.kill(os.getpid(), signal.SIGSTOP)
+                        os._exit(29)
+                    except BaseException:
+                        os._exit(115)
+                os.close(read_fd)
+                descriptor = os.pidfd_open(unrelated)
+                self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                             self.receiver, self.expected)
+                original_wait = self.driver._wait
+                original_continue = self.driver._normal_continue
+                observed, injection = {}, {}
+                reaped = False
+                try:
+                    def same_group_caller(initial=False):
+                        result = original_wait(initial)
+                        if initial:
+                            os.write(write_fd, str(self.driver.master).encode())
+                            while time.monotonic() < self.driver.ledger.deadline:
+                                state = os.waitid(
+                                    os.P_PIDFD, descriptor,
+                                    os.WSTOPPED | os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                                if state:
+                                    self.assertEqual(state.si_pid, unrelated)
+                                    if state.si_code == os.CLD_STOPPED:
+                                        self.assertEqual(os.getpgid(unrelated), self.driver.master)
+                                        observed["pgrp"] = self.driver.master
+                                    if not stopped and state.si_code == os.CLD_STOPPED:
+                                        self.assertEqual(state.si_status, signal.SIGSTOP)
+                                        os.waitid(os.P_PIDFD, descriptor, os.WSTOPPED | os.WNOHANG)
+                                        signal.pidfd_send_signal(descriptor, signal.SIGCONT)
+                                        continue
+                                    self.assertEqual(state.si_code,
+                                                     os.CLD_STOPPED if stopped else os.CLD_EXITED)
+                                    self.assertEqual(state.si_status, signal.SIGSTOP if stopped else 29)
+                                    self.assertEqual(observed["pgrp"], self.driver.master)
+                                    observed.update({"si_code": state.si_code,
+                                                     "si_status": state.si_status})
+                                    break
+                                time.sleep(0.001)
+                            else:
+                                raise TimeoutError("同组 caller child 未达到真实停点或退出状态")
+                        return result
+
+                    def fail_after_child_pin(pid, delivered_signal=0, record=True):
+                        creation = self.driver.creations.get(pid)
+                        if failed and creation and "event_child" in creation and not injection:
+                            self.assertIn(creation["event_child"], self.driver.owned)
+                            injection["at"] = time.monotonic_ns()
+                            raise driver_module.Failure("测试注入已固定 child 后的失败")
+                        return original_continue(pid, delivered_signal, record)
+
+                    self.driver._wait = same_group_caller
+                    self.driver._normal_continue = fail_after_child_pin
+                    if failed:
+                        with self.assertRaisesRegex(driver_module.Failure, "测试注入已固定 child"):
+                            self.driver.run(self.cross_exec)
+                        self.assertTrue(injection)
+                    else:
+                        self.driver.run(self.cross_exec)
+                    evidence = self.driver.evidence
+                    self.assert_clean(evidence)
+                    self.assertTrue(observed)
+                    self.assertFalse(any(row["pid"] == unrelated for row in evidence["events"]))
+                    self.assertFalse(any(row.get("pid") == unrelated for row in evidence["cleanup"]))
+                    # caller 的真实等待结果必须在 driver 正常或异常结束后仍未被消费。
+                    state = os.waitid(os.P_PIDFD, descriptor, os.WSTOPPED | os.WEXITED | os.WNOHANG)
+                    self.assertIsNotNone(state)
+                    self.assertEqual(state.si_pid, unrelated)
+                    self.assertEqual((state.si_code, state.si_status),
+                                     (observed["si_code"], observed["si_status"]))
+                    if stopped:
+                        signal.pidfd_send_signal(descriptor, signal.SIGCONT)
+                        while time.monotonic() < self.driver.ledger.deadline:
+                            state = os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
+                            if state:
+                                break
+                            time.sleep(0.001)
+                        self.assertIsNotNone(state)
+                        self.assertEqual((state.si_pid, state.si_code, state.si_status),
+                                         (unrelated, os.CLD_EXITED, 29))
+                    reaped = True
+                    self.assertFalse(Path(f"/proc/{unrelated}").exists())
+                    with self.assertRaises(ChildProcessError):
+                        os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
+                    print(json.dumps({
+                        "kind": "unrelated-caller-wait-preserved", "failed": failed,
+                        "stopped": stopped, "pid": unrelated, "master": self.driver.master,
+                        **observed, "exit_code": state.si_status,
+                    }, sort_keys=True, separators=(",", ":")), flush=True)
+                finally:
+                    if not reaped:
+                        try:
+                            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        end = time.monotonic() + 2
+                        while time.monotonic() < end:
+                            try:
+                                state = os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
+                            except ChildProcessError:
+                                break
+                            if state:
+                                break
+                            time.sleep(0.001)
+                    os.close(descriptor)
+                    os.close(write_fd)
 
     def test_parent_exits_without_reaping_child_restores_state(self):
         def unreaped_child_fixture():
@@ -326,6 +481,40 @@ class DriverContracts(unittest.TestCase):
                 self.assertTrue(injection)
                 self.assertFalse(evidence["first_stops"])
                 self.assertLess(evidence["last_normal_resume_monotonic_ns"], injection["at"])
+
+    def test_failed_child_pin_validation_keeps_identity_for_cleanup(self):
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                     self.receiver, self.expected)
+        original_snapshot = driver_module.process_snapshot
+        samples, injection = {}, {}
+
+        def changed_child_parent(pid):
+            current = original_snapshot(pid)
+            if pid != self.driver.master and current["ppid"] == self.driver.master:
+                samples[pid] = samples.get(pid, 0) + 1
+                if samples[pid] == 2 and not injection:
+                    # pidfd 已固定后令首末父链校验失败，清理仍须保留该原身份。
+                    self.assertIn(pid, self.driver.owned)
+                    injection.update({"child": pid, "at": time.monotonic_ns()})
+                    current["ppid"] += 1
+            return current
+
+        with patch.object(driver_module, "process_snapshot", changed_child_parent):
+            with self.assertRaisesRegex(driver_module.Failure, "原 task、父链或 namespace 无效"):
+                self.driver.run(self.cross_exec)
+        self.assertTrue(injection)
+        evidence = self.driver.evidence
+        self.assert_clean(evidence)
+        self.assertTrue(evidence["ledger_poisoned"])
+        self.assertNotIn("cleanup_error", evidence)
+        self.assertFalse(evidence["first_stops"])
+        self.assertLess(evidence["last_normal_resume_monotonic_ns"], injection["at"])
+        for pid in (injection["child"], self.driver.master):
+            self.assertFalse(Path(f"/proc/{pid}").exists(), f"task {pid} 仍未真正回收")
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(pid, os.WNOHANG)
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(-1, os.WNOHANG)
 
     def test_child_process_group_and_session_changes_are_rejected_at_entry(self):
         marker = Path(self.temp.name) / "group-change-executed"
@@ -518,6 +707,7 @@ class DriverContracts(unittest.TestCase):
                 injection["deadline"] = self.driver.ledger.deadline
                 self.assertLess(injection["before"], injection["deadline"])
                 self.assertNotIn(injection["child"], self.driver.tracked)
+                self.assertNotIn(injection["child"], self.driver.owned)
                 time.sleep(injection["deadline"] - time.monotonic() + 0.025)
                 injection["after"] = time.monotonic()
             return original(initial)
@@ -529,9 +719,17 @@ class DriverContracts(unittest.TestCase):
         self.assert_clean(evidence)
         self.assertGreaterEqual(injection["after"], injection["deadline"])
         self.assertFalse(Path(f"/proc/{injection['child']}").exists())
-        cleanup_pids = {row.get("pid") for row in evidence["cleanup"]
-                        if row["kind"] in ("cleanup-reaped", "kernel-reaped-task")}
-        self.assertIn(injection["child"], cleanup_pids)
+        cleanup = evidence["cleanup"]
+        pinned = next(index for index, row in enumerate(cleanup)
+                      if row["kind"] == "pin-child" and row["pid"] == injection["child"])
+        self.assertEqual(cleanup[pinned]["parent_pid"], self.driver.master)
+        self.assertEqual(cleanup[pinned]["source"], "cleanup")
+        killed = [index for index, row in enumerate(cleanup) if row["kind"] == "kill-original-task"]
+        self.assertTrue(killed)
+        self.assertLess(pinned, min(killed))
+        reaped = {row.get("pid") for row in cleanup
+                  if row["kind"] in ("pidfd-reaped-task", "retired-original-task-reaped")}
+        self.assertIn(injection["child"], reaped)
         self.assertLess(evidence["last_normal_resume_monotonic_ns"], int(injection["before"] * 1e9))
 
     def test_running_tracer_exitkill_reaps_subtree(self):
