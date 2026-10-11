@@ -69,23 +69,25 @@ protocolEntryMenu() {
         menuLine "这里集中管理客户端入口、入站协议和订阅中的连接地址"
         menuLine "证书/静态站点去 站点与证书；分流/阻断去 路由与访问控制"
         menuLine "已有 Xray 时，Hysteria2/Tuic 可增量启用 sing-box 辅助核心，不会删除 Xray"
-        menuItem 1 "REALITY 管理" "目标站、密钥、443 共存分流和 Reality 参数"
-        menuItem 2 "XHTTP 管理" "普通/高级/实验分层调整 Reality XHTTP"
-        menuItem 3 "Hysteria2 管理" "安装、卸载或管理 UDP 端口跳跃"
-        menuItem 4 "Tuic 管理" "安装、卸载和高级参数"
-        menuItem 5 "入口端口管理" "为已安装 Xray 追加或移除入口端口"
-        menuItem 6 "CDN 入口管理" "订阅入口地址覆盖、CDN/H3 使用说明"
-        menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
+        menuItem 1 "查看全部协议链接" "本机自用链接和二维码；无需域名或订阅发布服务"
+        menuItem 2 "REALITY 管理" "目标站、密钥、443 共存分流和 Reality 参数"
+        menuItem 3 "XHTTP 管理" "普通/高级/实验分层调整 Reality XHTTP"
+        menuItem 4 "Hysteria2 管理" "安装、卸载或管理 UDP 端口跳跃"
+        menuItem 5 "Tuic 管理" "安装、卸载和高级参数"
+        menuItem 6 "入口端口管理" "为已安装 Xray 追加或移除入口端口"
+        menuItem 7 "CDN 入口管理" "订阅入口地址覆盖、CDN/H3 使用说明"
+        menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
         menuClose
         menuReadChoice protocol_entry_menu "请选择:" selectProtocolMenuType || return 0
         case "${selectProtocolMenuType}" in
-        1) manageReality 1 || true ;;
-        2) manageXHTTP || true ;;
-        3) manageHysteria || true ;;
-        4) manageTuic || true ;;
-        5) addCorePort 1 || true ;;
-        6) manageCDN 1 || true ;;
-        7) return 0 ;;
+        1) showLocalProtocolLinks || true ;;
+        2) manageReality 1 || true ;;
+        3) manageXHTTP || true ;;
+        4) manageHysteria || true ;;
+        5) manageTuic || true ;;
+        6) addCorePort 1 || true ;;
+        7) manageCDN 1 || true ;;
+        8) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -553,7 +555,7 @@ menu() {
         menuSection "├─ 任务入口 ───────────────────────────────────────"
         menuItem 1 "安装与重装" "含新手选择指引；推荐直连/CDN/无域名 Reality、NaiveProxy、自定义和传统 TLS"
         menuItem 2 "订阅与用户" "发布链接、创建和维护分享订阅、流量限额与多服务器同步"
-        menuItem 3 "协议与入口" "REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口"
+        menuItem 3 "协议与入口" "本机协议链接与二维码、REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口"
         menuItem 4 "站点与证书" "传统 TLS fallback 站点、302、ALPN 和 TLS 证书"
         menuItem 5 "路由与访问控制" "分流、BT、域名/IP 阻断、直连例外和区域阻断"
         menuItem 6 "核心与服务" "核心生命周期、服务运行态、日志诊断和 Xray Geo 数据"

@@ -1716,7 +1716,7 @@ subscriptionControlRenderSubscribeAccounts() (
         padmRemoveCleanupPath "${subscribeRoot}"
         return 1
     }
-    showAccounts >/dev/null 2>&1 || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
+    protocolLinkOutputQuiet=true showAccounts >/dev/null 2>&1 || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
     localBase=$(subscribeLocalBaseDir)
     while IFS= read -r id; do
         [[ -n "${id}" ]] || continue

@@ -5303,6 +5303,108 @@ runLocaleEchoContentUnsetPrintNRegression() {
     )
 }
 
+runLocalProtocolLinksRegression() (
+    set -euo pipefail
+    source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+    local root="${TMP_DIR}/local-protocol-links" configRoot output qrLog unexpectedAction before after link
+    configRoot="${root}/xray"
+    output="${root}/output"
+    qrLog="${root}/qr-input"
+    unexpectedAction="${root}/unexpected-action"
+    mkdir -p "${configRoot}" "${root}/tmp"
+    TMPDIR="${root}/tmp"
+    PADM_SUBSCRIBE_LOCAL_DIR="${root}/subscribe_local"
+    PADM_SUBSCRIBE_DIR="${root}/subscribe"
+    export TMPDIR PADM_SUBSCRIBE_LOCAL_DIR PADM_SUBSCRIBE_DIR
+    mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_DIR}/default"
+    printf 'old-cache\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/self"
+    printf 'old-public\n' >"${PADM_SUBSCRIBE_DIR}/default/token"
+    cat >"${configRoot}/07_VLESS_vision_reality_inbounds.json" <<'JSON'
+{"inbounds":[{"port":443},{"settings":{"clients":[{"email":"self-vless_reality_vision","id":"11111111-1111-1111-1111-111111111111"},{"email":"sub_guest-vless_reality_vision","id":"22222222-2222-2222-2222-222222222222"}]},"streamSettings":{"realitySettings":{"serverNames":["www.ibm.com"],"publicKey":"public-key","privateKey":"private-key","target":"www.ibm.com:443"}}}]}
+JSON
+    cat >"${configRoot}/12_VLESS_XHTTP_inbounds.json" <<'JSON'
+{"inbounds":[{"port":8443,"settings":{"clients":[{"email":"self-vless_xhttp","id":"11111111-1111-1111-1111-111111111111"}]},"streamSettings":{"realitySettings":{"serverNames":["www.ibm.com"],"publicKey":"public-key","privateKey":"private-key","target":"www.ibm.com:443"},"xhttpSettings":{"path":"/testxHTTP","mode":"auto"}}}]}
+JSON
+    readInstallType() {
+        coreInstallType=1
+        configPath="${configRoot}/"
+        singBoxConfigPath=
+    }
+    readConfigHostPathUUID() {
+        currentHost= currentPath=test currentCDNAddress= currentDefaultPort=
+        xrayVLESSRealityVisionPort=443
+        realityEntryHost=203.0.113.10
+    }
+    readSingBoxConfig() { :; }
+    realityStreamPublicPortForProtocol() { :; }
+    corePortSubscriptionPort() { printf '%s\n' "${2:-$1}"; }
+    echoContent() { printf '%b\n' "$2"; }
+    qrencode() {
+        [[ "$*" == '-m 2 -t UTF8' ]] || return 1
+        local content
+        content=$(cat)
+        printf '%s\n' "${content}" >>"${qrLog}"
+        printf 'qr-rendered\n'
+    }
+    runSubscriptionGroupSync() { printf 'sync\n' >>"${unexpectedAction}"; return 99; }
+    installSubscribe() { printf 'install\n' >>"${unexpectedAction}"; return 99; }
+    serviceQueueApply() { printf 'service\n' >>"${unexpectedAction}"; return 99; }
+
+    # 无域名双协议采用当前配置，排除分享账号，并保持已有产物和配置。
+    before=$(find "${configRoot}" "${PADM_SUBSCRIBE_LOCAL_DIR}" "${PADM_SUBSCRIBE_DIR}" -type f -exec sha256sum {} + | sort)
+    showLocalProtocolLinks >"${output}"
+    [[ ! -e "${unexpectedAction}" ]]
+    grep -q 'type=tcp' "${output}"
+    grep -q 'type=xhttp' "${output}"
+    grep -q '@203.0.113.10:443' "${output}"
+    grep -q '@203.0.113.10:8443' "${output}"
+    ! grep -q 'sub_guest\|22222222-2222-2222-2222-222222222222' "${output}"
+    [[ "$(wc -l <"${qrLog}")" == 2 ]]
+    [[ "$(sed -n 's/^    \(vless:\/\/.*\)$/\1/p' "${output}")" == "$(<"${qrLog}")" ]]
+    after=$(find "${configRoot}" "${PADM_SUBSCRIBE_LOCAL_DIR}" "${PADM_SUBSCRIBE_DIR}" -type f -exec sha256sum {} + | sort)
+    [[ "${before}" == "${after}" ]]
+    [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+
+    # 安装输出逐节点复用同一函数，二维码内容与完整链接一致。
+    : >"${qrLog}"
+    showAccounts >"${output}"
+    [[ "$(wc -l <"${qrLog}")" == 3 ]]
+    [[ "$(sed -n 's/^    \(vless:\/\/.*\)$/\1/p' "${output}")" == "$(<"${qrLog}")" ]]
+    : >"${qrLog}"
+    protocolLinkOutputQuiet=true showAccounts >"${output}"
+    [[ ! -s "${qrLog}" ]]
+
+    # 编码失败或工具缺失都不丢完整链接。
+    link=$(serializeVlessRealityVisionLink 11111111-1111-1111-1111-111111111111 203.0.113.10 443 www.ibm.com public-key "" self none)
+    : >"${qrLog}"
+    showProtocolShareLink "${link}" >"${output}"
+    grep -qF "${link}" "${output}"
+    [[ "$(<"${qrLog}")" == "${link}" ]]
+    qrencode() { return 1; }
+    warnCard() { printf '%s\n' "$1"; }
+    showProtocolShareLink "${link}" >"${output}"
+    grep -qF "${link}" "${output}"
+    grep -q '二维码生成失败' "${output}"
+    (
+        command() {
+            [[ "$*" != '-v qrencode' ]] || return 1
+            builtin command "$@"
+        }
+        showProtocolShareLink "${link}" >"${output}"
+        grep -qF "${link}" "${output}"
+        grep -q '二维码不可用' "${output}"
+    )
+
+    showAccounts() { return 1; }
+    regressionExpectStatus 1 showLocalProtocolLinks >"${output}"
+    [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+    showAccounts() { initSubscribeLocalConfig; }
+    statusCard() { printf '%s\n' "$1"; }
+    showLocalProtocolLinks >"${output}"
+    grep -q '当前没有可用的本机自用协议链接' "${output}"
+    [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+)
+
 runShowAccountsOptionalStepRegression() {
     (
         set -euo pipefail
@@ -7778,6 +7880,7 @@ runRegressionFastOnlyOutputRest() {
         client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression \
         subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression \
         subscription-output-random-user runSubscriptionOutputRandomUserRegression \
+        local-protocol-links runLocalProtocolLinksRegression \
         show-accounts-optional-step runShowAccountsOptionalStepRegression \
         subscription-account-port-fallback runSubscriptionAccountPortFallbackRegression \
         dual-core-shared-protocol-dispatch runDualCoreSharedProtocolDispatchRegression \

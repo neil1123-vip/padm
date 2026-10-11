@@ -55,7 +55,7 @@ EOF
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}") || return 1
 
     subscribeOutputTitle "通用格式：VLESS TCP TLS Vision"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：VLESS TCP TLS Vision"
     echoContent green "协议类型:VLESS，地址:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证），传输方式:tcp，flow:xtls-rprx-vision，账户名:${email}\n"
@@ -73,7 +73,7 @@ emitVmessWsSubscribeOutput() {
     subscribeOutputTitle "通用 JSON：VMess WS TLS"
     echoContent green "    ${vmessJson}\n"
     subscribeOutputTitle "通用链接：VMess WS TLS"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
@@ -124,7 +124,7 @@ EOF
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},multiplex:{enabled:false,protocol:"smux",max_streams:32},packet_encoding:"xudp",transport:{type:"ws",path:$path,headers:{Host:$host}}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}" --arg host "${currentHost}") || return 1
 
     subscribeOutputTitle "通用格式：VLESS WS TLS"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：VLESS WS TLS"
     echoContent green "    协议类型:VLESS，地址:${add}，TLS域名/SNI:${currentHost}，端口:${port}，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证）,用户ID:${id}，安全:tls，传输方式:ws，路径:${path}，账户名:${email}\n"
@@ -181,7 +181,7 @@ emitVlessXHTTPSubscribeOutput() {
     defaultLink=$(serializeVlessRealityXHTTPLink "${id}" "${add}" "${port}" "${realitySNI}" "${path}" "${publicKey}" "${email}" "${vlessEncryption}" "${xhttpHost}" "${xhttpMode}" "${realityMldsa65Verify}") || return 1
 
     subscribeOutputTitle "通用格式：VLESS Reality XHTTP Vision XMUX"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：VLESS Reality XHTTP Vision XMUX"
     echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2${realityMldsa65Verify:+，pqv=${realityMldsa65Verify}}，serverNames：${realitySNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${realitySNI}，用户ID:${id}，传输方式:xhttp，账户名:${email}\n"
@@ -235,7 +235,7 @@ EOF
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:$service}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg service "${currentPath}grpc") || return 1
 
     subscribeOutputTitle "通用格式：VLESS gRPC TLS"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：VLESS gRPC TLS"
     echoContent green "    协议类型:VLESS，地址:${add}，TLS域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:gRPC，alpn:h2，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证）,serviceName:${currentPath}grpc，账户名:${email}\n"
@@ -252,7 +252,7 @@ emitTrojanSubscribeOutput() {
     yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${host}"):${port}?peer=${host}&fp=chrome&sni=${host}&alpn=http/1.1#${email}_Trojan"
     subscribeOutputTitle "通用链接：Trojan TLS"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
@@ -278,7 +278,7 @@ emitTrojanGrpcSubscribeOutput() {
     defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
 
     subscribeOutputTitle "通用链接：Trojan gRPC TLS"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     server: ${add}
@@ -366,7 +366,7 @@ EOF
         --arg up "${hysteria2ClientUploadSpeed:-}" --arg down "${hysteria2ClientDownloadSpeed:-}" \
         --arg password "${id}" --arg sni "${currentHost}" --arg obfs_type "${hysteria2ObfsType:-}" --arg obfs_password "${hysteria2ObfsPassword:-}") || return 1
 
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}" || return 1
     subscribeOutputTitle "v2rayN：Hysteria2 TLS"
     jq -n \
@@ -414,7 +414,7 @@ emitVlessRealitySubscribeOutput() {
     local singBoxFilter
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     subscribeOutputTitle "通用格式：VLESS Reality Vision"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：VLESS Reality Vision"
     echoContent green "协议类型:VLESS reality，地址:${entryHost}，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2${realityMldsa65Verify:+，pqv=${realityMldsa65Verify}}，Reality目标SNI：${realitySNI}，端口:${port}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
@@ -464,7 +464,7 @@ emitVlessRealityGrpcSubscribeOutput() {
     local singBoxFilter
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:"grpc"}}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     subscribeOutputTitle "通用格式：VLESS Reality gRPC"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：VLESS Reality gRPC"
     echoContent green "协议类型:VLESS reality，serviceName:grpc，地址:${entryHost}，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2，Reality目标SNI：${realitySNI}，端口:${port}，用户ID:${id}，传输方式:gRPC，client-fingerprint：chrome（兼容模拟，Reality 伪装不依赖该项），账户名:${email}\n"
@@ -510,7 +510,7 @@ emitTuicSubscribeOutput() {
     fi
 
     subscribeOutputTitle "通用链接：Tuic TLS"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：Tuic TLS"
     echoContent green "    协议类型:Tuic，地址:${currentHost}，端口：${port}，uuid：${tuicUUID}，password：${tuicPassword}，congestion-controller:${tuicAlgorithm}，alpn: h3，账户名:${email}\n"
@@ -567,7 +567,7 @@ EOF
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"shadowsocks",server:$server,server_port:$port,method:$method,password:$password}' --arg tag "${email}" --arg server "${host}" --argjson port "${port}" --arg method "${method}" --arg password "${id}") || return 1
 
     subscribeOutputTitle "通用链接：Shadowsocks"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：Shadowsocks"
     echoContent green "协议类型:Shadowsocks，地址:${host}，端口:${port}，method:${method}，账户名:${email}\n"
@@ -586,7 +586,7 @@ emitNaiveSubscribeOutput() {
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     defaultLink="naive+https://${encodedEmail}:${encodedId}@$(formatUriAuthorityHost "${host}"):${port}?padding=true#${email}"
 
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
     appendDefaultSubscribeLine "${user}" "${defaultLink}"
 }
 
@@ -600,7 +600,7 @@ emitVmessHTTPUpgradeSubscribeOutput() {
     subscribeOutputTitle "通用 JSON：VMess HTTPUpgrade TLS"
     echoContent green "    ${vmessJson}\n"
     subscribeOutputTitle "通用链接：VMess HTTPUpgrade TLS"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
@@ -635,7 +635,7 @@ emitAnyTlsSubscribeOutput() {
     yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="anytls://${encodedId}@$(formatUriAuthorityHost "${host}"):${singBoxAnyTLSPort}?peer=${host}&insecure=0&sni=${host}#${email}"
     subscribeOutputTitle "通用链接：AnyTLS"
-    echoContent green "    ${defaultLink}\n"
+    showProtocolShareLink "${defaultLink}"
 
     subscribeOutputTitle "格式化明文：AnyTLS"
     echoContent green "协议类型:anytls，地址:${host}，端口:${singBoxAnyTLSPort}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"

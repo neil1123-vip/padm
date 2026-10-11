@@ -145,7 +145,7 @@ refreshLocalSubscriptions() {
         restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "刷新 ${featureName} 本地订阅失败：清理本地订阅目录失败"
         return 1
     fi
-    if ! showAccounts >/dev/null; then
+    if ! protocolLinkOutputQuiet=true showAccounts >/dev/null; then
         restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "刷新 ${featureName} 本地订阅失败：重建本地订阅失败"
         return 1
     fi
@@ -3109,7 +3109,7 @@ generateSubscribeOutputsUnlocked() {
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：清理本地订阅目录失败" "${previousSubscribeSalt}" true
             return 1
         fi
-        if ! showAccounts >/dev/null; then
+        if ! protocolLinkOutputQuiet=true showAccounts >/dev/null; then
             padmRemoveCleanupPath "${publishStage}"
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：重建本地订阅失败" "${previousSubscribeSalt}" true
             return 1
@@ -3174,7 +3174,7 @@ showSubscriptionUrlCard() {
     menuLine "订阅地址：${url}"
     menuClose
     if [[ "${release}" != "alpine" ]] && command -v qrencode >/dev/null 2>&1; then
-        echo "${url}" | qrencode -s 10 -m 1 -t UTF8
+        showShareLinkQRCode "${url}"
     fi
 }
 

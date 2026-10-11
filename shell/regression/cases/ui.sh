@@ -2021,8 +2021,19 @@ EOF
         installMenu <<<"5"
         assertMenuAction selectCoreInstall
         resetMenuActions
-        protocolEntryMenu <<<"7"
+        protocolEntryMenu <<<"8"
         ! assertMenuAction menu
+        (
+            showLocalProtocolLinks() { recordMenuAction showLocalProtocolLinks; }
+            resetMenuActions
+            output=
+            protocolEntryMenu <<< $'1\n8'
+            assertMenuAction showLocalProtocolLinks
+            grep -q "查看全部协议链接" <<<"${output}"
+            ! assertMenuAction showAccounts
+            ! assertMenuAction installSubscribe
+            ! assertMenuAction runSubscriptionGroupSync
+        )
         (
             local protocolMenuRenderLog="${TMP_DIR}/protocol-menu-render.log"
             echoContent() { printf '%s\n' "$*" >>"${protocolMenuRenderLog}"; }
@@ -2034,8 +2045,9 @@ EOF
             manageCDN() { recordMenuAction manageCDN; }
             : >"${protocolMenuRenderLog}"
             resetMenuActions
-            protocolEntryMenu <<< $'bad\n7'
+            protocolEntryMenu <<< $'bad\n8'
             assertMenuAction 'errorCard:选择错误'
+            ! assertMenuAction showLocalProtocolLinks
             ! assertMenuAction manageReality
             ! assertMenuAction manageXHTTP
             ! assertMenuAction manageHysteria
@@ -2064,11 +2076,11 @@ EOF
         resolveRealityTargetIPv4() { : >"${realityMenuNetworkMarker}"; return 1; }
         lookupRealityTargetAsn() { : >"${realityMenuNetworkMarker}"; return 1; }
         currentRealityNetworkProfile() { : >"${realityMenuNetworkMarker}"; return 1; }
-        protocolEntryMenu <<<"1
+        protocolEntryMenu <<<"2
 2
 10
 6
-7"
+8"
         grep -q "检测当前目标" <<<"${output}"
         grep -q "目标 ASN（缓存）" <<<"${output}"
         grep -q "网络关系（缓存）" <<<"${output}"

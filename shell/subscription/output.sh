@@ -254,6 +254,23 @@ subscribeOutputTitle() {
     menuClose
 }
 
+showShareLinkQRCode() {
+    if ! command -v qrencode >/dev/null 2>&1; then
+        warnCard "二维码不可用" "未安装 qrencode；完整链接仍可复制导入"
+        return 0
+    fi
+    if ! printf '%s' "$1" | qrencode -m 2 -t UTF8; then
+        warnCard "二维码生成失败" "完整链接仍可复制导入"
+    fi
+    return 0
+}
+
+showProtocolShareLink() {
+    [[ "${protocolLinkOutputQuiet:-false}" != true ]] || return 0
+    echoContent green "    $1\n"
+    showShareLinkQRCode "$1"
+}
+
 realityEntryHost() {
     if [[ -n "${realityEntryHost:-}" ]]; then
         printf '%s' "${realityEntryHost}"
