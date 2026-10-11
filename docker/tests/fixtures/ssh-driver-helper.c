@@ -83,6 +83,17 @@ static int baseline_shared_clone(const char *marker) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 3 && (strcmp(argv[1], "setpgid") == 0 || strcmp(argv[1], "setsid") == 0)) {
+        long nr = strcmp(argv[1], "setpgid") == 0 ? SYS_setpgid : SYS_setsid;
+        pid_t before_group = getpgrp(), before_session = getsid(0);
+        long result = syscall(nr, 0L, 0L, 0L, 0L, 0L, 0L);
+        if (result < 0) return 114;
+        printf("{\"nr\":%ld,\"pid\":%d,\"before_group\":%d,\"before_session\":%d,"
+               "\"after_group\":%d,\"after_session\":%d,\"result\":%ld}\n",
+               nr, getpid(), before_group, before_session, getpgrp(), getsid(0), result);
+        fflush(stdout);
+        return clone_child(argv[2]);
+    }
 #if defined(__x86_64__)
     if (argc == 3 && strcmp(argv[1], "x32") == 0) {
         (void)syscall(0x40000000L | SYS_getpid);

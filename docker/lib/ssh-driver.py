@@ -25,6 +25,7 @@ WAIT_FLAGS = os.WNOHANG | 0x40000000
 PR_SET_CHILD_SUBREAPER, PR_GET_CHILD_SUBREAPER = 36, 37
 AUDIT_ARCH_X86_64, X32_BIT = 0xC000003E, 0x40000000
 SYS_CLONE, SYS_FORK, SYS_VFORK, SYS_CLONE3 = 56, 57, 58, 435
+SYS_SETPGID, SYS_SETSID = 109, 112
 CHILD_CLEARTID, CHILD_SETTID = 0x00200000, 0x01000000
 libc = ctypes.CDLL(None, use_errno=True)
 libc.ptrace.argtypes = [ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_void_p]
@@ -86,7 +87,8 @@ def process_snapshot(pid):
         if target.startswith("socket:["):
             fds.append([int(entry.name), target])
     return {
-        "pid": pid, "ppid": int(fields[1]), "pgrp": int(fields[2]), "state": fields[0],
+        "pid": pid, "ppid": int(fields[1]), "pgrp": int(fields[2]), "sid": int(fields[3]),
+        "state": fields[0],
         "starttime_ticks": int(fields[19]), "exe": os.readlink(root / "exe"),
         "pid_ns": os.readlink(root / "ns/pid"), "net_ns": os.readlink(root / "ns/net"),
         "mount_ns": os.readlink(root / "ns/mnt"),
@@ -225,6 +227,13 @@ class ControlledDriver:
                 raise Failure("受控 SSH syscall entry 重入或缺少 exit")
             self.first_syscall_exit.discard(pid)
             self.active_syscalls[pid] = info["nr"]
+            if info["nr"] in (SYS_SETPGID, SYS_SETSID):
+                row.update({"kind": "group-change-entry", "syscall": info})
+                current = self._sample(pid)
+                row["current"] = current
+                self._registered_process(pid, current["process"])
+                # 等待范围固定为自有进程组，脱组 syscall 必须在恢复执行前拒绝。
+                raise Failure(f"受控 SSH driver 拒绝未支持的进程组或会话改变 syscall {info['nr']}")
             if info["nr"] in (SYS_CLONE, SYS_FORK, SYS_VFORK, SYS_CLONE3):
                 row.update({"kind": "creation-entry", "syscall": info})
                 if pid in self.creations:

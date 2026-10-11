@@ -4007,6 +4007,37 @@ subreaper 恢复，unit inactive/dead、全实例 LISTEN 空。
 本阶段仅文档，不重复完整回归；IPv6、原生宿主、异常 tracer 和生产
 collector/jail 未验收，`authoritative/jail_ready=false` 保持。
 
+#### 5C.8c.2i 受控 driver 的进程组边界保护
+
+针对 h2 的真实脱组证据，保持现有单进程组 fixture 范围：
+native amd64 的 `setpgid` 109、`setsid` 112 在实际 syscall entry、
+正常恢复执行前明确拒绝。停点保存真实 nr/args、PGID/SID，并核对已登记代次；
+不把临时 observer 的 `waitpid(-1)` 移入生产，不改变等待、Ledger 授权、
+live 清理或 retired task 的独立 pidfd 回收路径。
+driver 初始化的 setpgid 位于 TRACEME 首停前，原正例继续使用。
+两个 syscall 当前包括不改变组的调用也保守拒绝，不代表支持真实 SSH 子树。
+
+新增两个 raw syscall 场景。裸 baseline 的非组长进程均实际脱组且执行 marker；
+受控场景在已登记、继承唯一 accepted socket 的 fork child 中尝试同一 syscall。
+原实现红合同 11 项中两个子场景因总窗口超时失败，内部 7.396 秒；
+其错误断言先失败，后续清理断言未执行，不宣称红完整终局已独立验收。
+修改后定向 11/11、3.310 秒，入口 4308 ms、排队 206 ms、cache_hit=false。
+两种拒绝均停在 entry，PGID 仍为 master、SID 与首停相同，
+最后正常恢复早于拒绝、marker 不可达、Ledger poisoned；
+集合/FD/subreaper、child/master proc 消失及逐 PID/全局 ECHILD 断言通过。
+原创建、跨 exe、retired pidfd 和运行中 EXITKILL 合同继续通过。
+
+证据 `.tmp-ssh-group-guard-8c2i/` 保留红源、哈希、原始日志和清理记录。
+红/绿两个快照的 3 个目标文件逐项匹配；清理重复归档与清单 18730616 bytes，
+两个定向回归容器无残留。集成后集中完整 Docker 合同 47/47、退出 0，
+内部 304599 ms、入口 305522 ms、排队 393 ms、Jobs 6、cache_hit=false，
+driver 在完整并发中 11/11、3.334 秒，preflight 同时通过。
+297 个输入文件核对后，仅计划与并行任务 README 文档变化，执行源码保持一致；
+完整输入哈希与结果保留在阶段证据中。另清理完整归档/清单及 297 个解包文件
+18495697 bytes，完整回归容器无残留。不据本次耗时宣称整体提速。
+真实 OpenSSH 的独立身份等待/收容、collector/jail 和宿主验收仍未完成，
+`authoritative/jail_ready=false` 保持。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

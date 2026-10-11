@@ -327,6 +327,89 @@ class DriverContracts(unittest.TestCase):
                 self.assertFalse(evidence["first_stops"])
                 self.assertLess(evidence["last_normal_resume_monotonic_ns"], injection["at"])
 
+    def test_child_process_group_and_session_changes_are_rejected_at_entry(self):
+        marker = Path(self.temp.name) / "group-change-executed"
+        for index, (mode, nr) in enumerate((("setpgid", 109), ("setsid", 112))):
+            with self.subTest(mode=mode):
+                baseline = subprocess.run([self.helper, mode, str(marker)], check=True,
+                                          capture_output=True, text=True, timeout=3)
+                raw = json.loads(baseline.stdout)
+                self.assertEqual(raw["nr"], nr)
+                self.assertNotEqual(raw["before_group"], raw["pid"])
+                self.assertEqual(raw["after_group"], raw["pid"])
+                self.assertEqual(raw["after_session"],
+                                 raw["pid"] if mode == "setsid" else raw["before_session"])
+                self.assertTrue(marker.exists())
+                marker.unlink()
+                print(json.dumps({"kind": "raw-group-change-baseline", **raw},
+                                 sort_keys=True, separators=(",", ":")), flush=True)
+                if index:
+                    self.client.close()
+                    self.client = socket.socket()
+                    self.client.connect(self.listener.getsockname())
+                    self.expected["remote"] = list(self.client.getsockname())
+
+                def fixture():
+                    self.client.close()
+                    accepted, _ = self.listener.accept()
+                    self.listener.close()
+                    accepted.set_inheritable(True)
+                    child = os.fork()
+                    if child == 0:
+                        os.execv(self.helper, [self.helper, mode, str(marker)])
+                    accepted.close()
+                    os.waitpid(child, 0)
+
+                self.driver = driver_module.ControlledDriver(time.monotonic() + 2,
+                                                             self.receiver, self.expected)
+                try:
+                    self.driver.run(fixture)
+                except driver_module.Failure as error:
+                    print(json.dumps({"kind": "group-change-driver-result", "mode": mode,
+                                      "error": str(error)}, sort_keys=True,
+                                     separators=(",", ":")), flush=True)
+                    self.assertRegex(str(error), "未支持的进程组或会话改变")
+                else:
+                    self.fail("受控 child 的进程组或会话改变未被拒绝")
+                evidence = self.driver.evidence
+                self.assert_clean(evidence)
+                rejected = next(row for row in evidence["events"] if "rejection" in row)
+                self.assertEqual(rejected["kind"], "group-change-entry")
+                self.assertEqual(rejected["syscall"]["op"], 1)
+                self.assertEqual(rejected["syscall"]["arch"], driver_module.AUDIT_ARCH_X86_64)
+                self.assertEqual(rejected["syscall"]["nr"], nr)
+                self.assertEqual(rejected["syscall"]["args"], [0] * 6)
+                first = evidence["first_stops"][0]
+                child = first["pid"]
+                self.assertEqual(rejected["pid"], child)
+                self.assertNotEqual(child, self.driver.master)
+                self.assertEqual(len(first["snapshot"]["accepted_matches"]), 1)
+                self.assertEqual(rejected["current"]["process"]["pgrp"], self.driver.master)
+                self.assertEqual(rejected["current"]["process"]["sid"],
+                                 first["snapshot"]["process"]["sid"])
+                self.assertLess(evidence["last_normal_resume_monotonic_ns"],
+                                rejected["rejected_monotonic_ns"])
+                self.assertFalse(marker.exists())
+                self.assertTrue(evidence["ledger_poisoned"])
+                for pid in (child, self.driver.master):
+                    self.assertFalse(Path(f"/proc/{pid}").exists(), f"task {pid} 仍未真正回收")
+                    with self.assertRaises(ChildProcessError):
+                        os.waitpid(pid, os.WNOHANG)
+                self.assertFalse(Path(f"/proc/self/task/{os.getpid()}/children").read_text().strip())
+                with self.assertRaises(ChildProcessError):
+                    os.waitpid(-1, os.WNOHANG)
+                print(json.dumps({
+                    "kind": "group-change-entry-rejection", "mode": mode,
+                    "pid": child, "master": self.driver.master,
+                    "syscall": {key: rejected["syscall"][key] for key in ("nr", "args", "arch")},
+                    "pgrp": rejected["current"]["process"]["pgrp"],
+                    "sid": rejected["current"]["process"]["sid"],
+                    "first_sid": first["snapshot"]["process"]["sid"],
+                    "marker_exists": marker.exists(), "ledger_poisoned": evidence["ledger_poisoned"],
+                    "remaining_tracees": evidence["remaining_tracees"],
+                    "remaining_retired_tasks": evidence["remaining_retired_tasks"],
+                }, sort_keys=True, separators=(",", ":")), flush=True)
+
     def test_real_x32_and_i386_abi_are_rejected(self):
         marker = str(Path(self.temp.name) / "unverified-abi-executed")
         for index, mode in enumerate(("x32", "i386")):
