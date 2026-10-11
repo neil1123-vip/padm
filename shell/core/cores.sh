@@ -21,20 +21,21 @@ coreArchiveExpandedSizeIsSafe() {
     local archiveType=$1
     local archiveFile=$2
     local entryList=$3
+    local maxEntries=${4:-4096} maxBytes=${5:-268435456}
     local entryCount expandedBytes
 
     entryCount=$(wc -l <"${entryList}") || return 1
     [[ "${entryCount}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ ]] || return 1
     entryCount=${entryCount//[[:space:]]/}
-    ((entryCount <= 4096)) || return 1
+    ((entryCount <= maxEntries)) || return 1
     case "${archiveType}" in
     zip) expandedBytes=$(set -o pipefail; { unzip -p "${archiveFile}" 2>/dev/null || true; } | head -c 268435457 | wc -c) || return 1 ;;
-    tar) expandedBytes=$(set -o pipefail; { tar -xOzf "${archiveFile}" 2>/dev/null || true; } | head -c 268435457 | wc -c) || return 1 ;;
+    tar) expandedBytes=$(set -o pipefail; { tar -xOzf "${archiveFile}" 2>/dev/null || true; } | head -c "$((maxBytes + 1))" | wc -c) || return 1 ;;
     *) return 1 ;;
     esac
     [[ "${expandedBytes}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ ]] || return 1
     expandedBytes=${expandedBytes//[[:space:]]/}
-    ((expandedBytes <= 268435456))
+    ((expandedBytes <= maxBytes))
 }
 
 validateCoreZipArchive() {
@@ -71,6 +72,7 @@ validateCoreZipArchive() {
 
 validateCoreTarArchive() {
     local archiveFile=$1
+    local maxEntries=${2:-4096} maxBytes=${3:-268435456}
     local entryList detailList entry line lineType
     padmCreateTempPath entryList "$(coreTmpFilePath padm-core-tar-entries.XXXXXX)" || return 1
     padmCreateTempPath detailList "$(coreTmpFilePath padm-core-tar-details.XXXXXX)" || { padmRemoveCleanupPath "${entryList}"; return 1; }
@@ -94,7 +96,7 @@ validateCoreTarArchive() {
         *) padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1 ;;
         esac
     done <"${detailList}"
-    coreArchiveExpandedSizeIsSafe tar "${archiveFile}" "${entryList}" || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    coreArchiveExpandedSizeIsSafe tar "${archiveFile}" "${entryList}" "${maxEntries}" "${maxBytes}" || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     padmRemoveCleanupPath "${entryList}"
     padmRemoveCleanupPath "${detailList}"
 }
@@ -151,6 +153,138 @@ downloadSingBoxReleaseBinaryToTempDir() {
         return 4
     fi
 }
+
+checkSingBoxStatsReleaseAsset() {
+    local version=$1 tmpDir=$2 metadata count
+    local asset="sing-box-${version#v}${singBoxCoreCPUVendor}.tar.gz"
+    local url="https://api.github.com/repos/neil1123-vip/padm/releases/tags/sing-box-${version}"
+    [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]] || return 1
+    # 只有明确的 404 或缺资产才提供编译入口，网络、限流和校验失败不能改走来源。
+    if ! metadata=$(fetchUrlToStdout "${url}" 1); then
+        local status
+        status=$(curl -sSL --connect-timeout 10 --max-time 30 -o /dev/null -w '%{http_code}' "${url}") || return 1
+        [[ "${status}" == 404 ]] && return 5
+        return 1
+    fi
+    count=$(jq -ser --arg tag "sing-box-${version}" --arg asset "${asset}" '
+        select(length == 1) | .[0] |
+        select(type == "object" and .tag_name == $tag and .draft == false and
+            (.assets | type) == "array") |
+        [.assets[] | select(.name == $asset)] | length
+    ' <<<"${metadata}") || return 1
+    [[ "${count}" == 0 ]] && return 5
+    [[ "${count}" == 1 ]]
+}
+
+prepareSingBoxUpgradeBinary() {
+    local version=$1 tmpDir=$2 status=0 answer=
+    checkSingBoxStatsReleaseAsset "${version}" "${tmpDir}" || status=$?
+    case "${status}" in
+    0) downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}" ;;
+    5)
+        statusCard "sing-box 本机编译" "该版本尚无统计包：${version}" "编译期间当前服务继续运行，失败保留当前核心"
+        autoRead sing_box_local_build_confirm "是否下载源码和 Go 工具链并在本机编译？[y/N]:" answer || return 1
+        [[ "${answer}" == y ]] || { coreCancelledStatusCard "未更新 sing-box"; return 1; }
+        local logFile
+        padmCreateTmpRootPath logFile padm-sing-box-build.XXXXXX || return 1
+        padmForgetCleanupPath "${logFile}"
+        statusCard "sing-box 本机编译" "目标版本：${version}" "构建日志：${logFile}"
+        if ! padmRunCancelableCommand buildSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}" >"${logFile}" 2>&1; then
+            errorCard "sing-box 本机编译失败，已保留当前核心" "排查日志：${logFile}"
+            return 1
+        fi
+        ;;
+    *) errorCard "sing-box 统计包状态查询失败，已取消更新"; return 1 ;;
+    esac
+}
+
+ensureSingBoxBuildGo() {
+    local sourceDir=$1 cacheDir=$2 arch=$3 outVar=$4
+    local goVersion metadata digest archive toolRoot
+    goVersion=$(awk '$1 == "go" {print $2} $1 == "toolchain" && $2 != "default" {sub(/^go/, "", $2); print $2}' \
+        "${sourceDir}/go.mod" | sort -V | tail -n 1) || return 1
+    [[ ! "${goVersion}" =~ ^[0-9]+\.[0-9]+$ ]] || goVersion+=.0
+    [[ "${goVersion}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    toolRoot="${cacheDir}/toolchains/go${goVersion}-${arch}"
+    local cachedPath
+    for cachedPath in "${cacheDir}/toolchains" "${toolRoot}" "${toolRoot}/go" "${toolRoot}/go/bin" "${toolRoot}/go/bin/go"; do
+        [[ ! -L "${cachedPath}" ]] || return 1
+    done
+    if [[ ! -x "${toolRoot}/go/bin/go" ]]; then
+        metadata=$(fetchUrlToStdout 'https://go.dev/dl/?mode=json&include=all' 3) || return 1
+        digest=$(jq -ser --arg version "go${goVersion}" --arg arch "${arch}" '
+            select(length == 1 and (.[0] | type) == "array") | .[0] |
+            [.[] | select(.version == $version) | .files[] |
+                select(.os == "linux" and .arch == $arch and .kind == "archive")] |
+            select(length == 1) | .[0].sha256 | select(test("^[0-9a-f]{64}$"))
+        ' <<<"${metadata}") || return 1
+        padmCreateTempPath archive "${cacheDir}/.go-download.XXXXXX" || return 1
+        downloadUrlToFileBounded "https://go.dev/dl/go${goVersion}.linux-${arch}.tar.gz" "${archive}" 134217728 300 || return 1
+        printf '%s  %s\n' "${digest}" "${archive}" | sha256sum --check --strict - || return 1
+        validateCoreTarArchive "${archive}" 30000 805306368 || return 1
+        local stage
+        padmCreateTempPath stage -d "${cacheDir}/.go.XXXXXX" || return 1
+        tar -xzf "${archive}" -C "${stage}" || return 1
+        padmEnsureSafeDirectory "$(dirname -- "${toolRoot}")" || return 1
+        [[ ! -e "${toolRoot}" ]] || return 1
+        mv -T -- "${stage}" "${toolRoot}" || return 1
+        padmForgetCleanupPath "${stage}"
+        rm -f -- "${archive}" || return 1
+    fi
+    [[ ! -L "${toolRoot}" && ! -L "${toolRoot}/go" && ! -L "${toolRoot}/go/bin" &&
+        -f "${toolRoot}/go/bin/go" && ! -L "${toolRoot}/go/bin/go" ]] || return 1
+    [[ "$("${toolRoot}/go/bin/go" version)" == "go version go${goVersion} linux/${arch}" ]] || return 1
+    printf -v "${outVar}" '%s' "${toolRoot}/go/bin"
+}
+
+buildSingBoxReleaseBinaryToTempDir() (
+    set -euo pipefail
+    local version=$1 tmpDir=$2 arch sourceCommit sourceDir goBin cacheParent cacheMode cachePath
+    case "$(uname -s):$(uname -m):${singBoxCoreCPUVendor}" in
+    Linux:x86_64:-linux-amd64) arch=amd64 ;;
+    Linux:aarch64:-linux-arm64) arch=arm64 ;;
+    *) errorCard "本机编译仅支持原生 Linux amd64/arm64"; return 1 ;;
+    esac
+    [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]] || return 1
+    local cacheDir="${PADM_SINGBOX_BUILD_CACHE:-/etc/padm/cache/sing-box-build}"
+    local asset="sing-box-${version#v}-linux-${arch}.tar.gz"
+    local extractedDir="${tmpDir}/${asset%.tar.gz}"
+    cacheDir=$(padmRequireSafeAbsolutePath "${cacheDir}") || return 1
+    cacheParent="${cacheDir}"
+    while [[ "${cacheParent}" != / ]]; do
+        [[ ! -L "${cacheParent}" ]] || return 1
+        cacheParent=$(dirname -- "${cacheParent}")
+    done
+    for cachePath in "${cacheDir}" "${cacheDir}/toolchains" "${cacheDir}/modules" "${cacheDir}/build" "${cacheDir}/gopath"; do
+        [[ ! -L "${cachePath}" ]] || return 1
+        padmEnsureSafeDirectory "${cachePath}" || return 1
+        [[ "$(stat -c %u -- "${cachePath}")" == "${EUID}" ]] || return 1
+        cacheMode=$(stat -c %a -- "${cachePath}") || return 1
+        (( (8#${cacheMode} & 0022) == 0 )) || return 1
+        chmod 700 "${cachePath}" || return 1
+    done
+    sourceCommit=$(resolveGitHubCommitRef SagerNet/sing-box "${version}") || return 1
+    sourceDir="${tmpDir}/source"
+    downloadUrlToFileBounded "https://codeload.github.com/SagerNet/sing-box/tar.gz/${sourceCommit}" \
+        "${tmpDir}/source.tar.gz" 52428800 300 || return 1
+    validateCoreTarArchive "${tmpDir}/source.tar.gz" || return 1
+    padmEnsureSafeDirectory "${sourceDir}" || return 1
+    tar -xzf "${tmpDir}/source.tar.gz" --strip-components=1 -C "${sourceDir}" || return 1
+    ensureSingBoxBuildGo "${sourceDir}" "${cacheDir}" "${arch}" goBin || return 1
+    downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}" || return 1
+    validateCoreTarArchive "${tmpDir}/${asset}" || return 1
+    padmEnsureSafeDirectory "${extractedDir}" || return 1
+    tar -xOzf "${tmpDir}/${asset}" "${asset%.tar.gz}/libcronet.so" >"${extractedDir}/libcronet.so" || return 1
+    [[ -s "${extractedDir}/libcronet.so" ]] || return 1
+    chmod 644 "${extractedDir}/libcronet.so" || return 1
+    # 工具链和 Go 缓存独立保存，候选源码与二进制仍随本次事务清理。
+    export PATH="${goBin}:${PATH}" GOMODCACHE="${cacheDir}/modules" GOCACHE="${cacheDir}/build"
+    export GOPATH="${cacheDir}/gopath" TMPDIR="${tmpDir}"
+    buildSingBoxStatsBinary "${version}" "${arch}" "${sourceDir}" "${extractedDir}/sing-box" || return 1
+    [[ "$(singBoxBinaryVersion "${extractedDir}/sing-box")" == "${version}" ]] || return 1
+    [[ "$(singBoxV2rayApiCapability "${extractedDir}/sing-box")" == supported ]] || return 1
+    printf '目标版本：%s\n源码提交：%s\n' "${version}" "${sourceCommit}"
+)
 
 downloadXrayGeoFilesToStage() {
     local stageDir=$1
@@ -516,12 +650,13 @@ coreReleaseTags() {
     local repo=$1
     local prerelease=${2:-false}
     local limit=${3:-20}
+    local source=${4:-stats}
     local metadata page=1 pageSize=5 pageCount tagCount=0 tag
     local releaseRepo=${repo} tagPrefix= collectedTags=
     [[ "${repo}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 1
     [[ "${prerelease}" == "true" || "${prerelease}" == "false" || "${prerelease}" == "all" ]] || return 1
     [[ "${limit}" =~ ^[0-9]+$ && "${limit}" -gt 0 && "${limit}" -le 100 ]] || return 1
-    if [[ "${repo}" == "SagerNet/sing-box" ]]; then
+    if [[ "${repo}" == "SagerNet/sing-box" && "${source}" != upstream ]]; then
         releaseRepo=neil1123-vip/padm
         tagPrefix=sing-box-
         pageSize=50
@@ -559,6 +694,10 @@ coreReleaseTags() {
         return
     fi
     ((tagCount > 0))
+}
+
+coreUpstreamReleaseTags() {
+    coreReleaseTags "$1" "${2:-false}" "${3:-20}" upstream
 }
 
 coreLatestReleaseTag() {
@@ -1427,7 +1566,8 @@ checkSingBoxPrereleaseCompatibility() {
     local version=${1:-}
     local logFile=${2:-$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)}
     local retainedTmpDirVar=${3:-}
-    local downloadedBinary= downloadTmpDir= resolvedVersion= actualVersion=
+    local downloadTmpDir=${4:-}
+    local downloadedBinary= resolvedVersion= actualVersion=
     local validateLog="${logFile}.validate"
     local validateRc=0
 
@@ -1449,7 +1589,9 @@ checkSingBoxPrereleaseCompatibility() {
         return 1
     fi
     printf '\n目标版本: %s\n' "${resolvedVersion}" >>"${logFile}" || return 1
-    if ! downloadSingBoxReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
+    if [[ -n "${downloadTmpDir}" ]]; then
+        downloadedBinary="${downloadTmpDir}/sing-box-${resolvedVersion#v}${singBoxCoreCPUVendor}/sing-box"
+    elif ! downloadSingBoxReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
         printf '失败: 预发布二进制下载失败\n' >>"${logFile}"
         singBoxPrereleaseCompatibilityCard "失败" "预发布二进制下载失败" "排查日志: ${logFile}"
         return 1
@@ -2157,8 +2299,8 @@ upgradeCore() {
     shift 5
     local prerelease=${1:-false}
     local version=${2:-}
+    local preparedDir=${3:-}
     local channel="正式版"
-    local preparedDir=
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
     [[ -n "${version}" ]] || padmCaptureCancelableCommand version coreLatestReleaseTag "${repo}" "${prerelease}" || version=
     if [[ -z "${version}" || "${version}" == "null" ]]; then
@@ -2166,7 +2308,8 @@ upgradeCore() {
         return 1
     fi
     if [[ "${prerelease}" == "true" ]]; then
-        if ! "${compatibilityFn}" "${version}" "$(coreTmpFilePath "padm-core-${auditName}-prerelease-audit.log")" preparedDir; then
+        if ! "${compatibilityFn}" "${version}" "$(coreTmpFilePath "padm-core-${auditName}-prerelease-audit.log")" preparedDir "${preparedDir}"; then
+            [[ -z "${preparedDir}" ]] || padmRemoveCleanupPath "${preparedDir}"
             return 1
         fi
     fi
@@ -2183,7 +2326,16 @@ upgradeXrayCore() {
 }
 
 upgradeSingBoxCore() {
-    upgradeCore "sing-box" SagerNet/sing-box sing-box checkSingBoxPrereleaseCompatibility installDownloadedSingBoxBinary "$@"
+    local prerelease=${1:-false} version=${2:-} candidateDir
+    [[ -n "${version}" ]] || padmCaptureCancelableCommand version coreUpstreamReleaseTags SagerNet/sing-box "${prerelease}" 1 || version=
+    [[ -n "${version}" ]] || { errorCard "无法获取 sing-box 目标版本"; return 1; }
+    padmCreateTempPath candidateDir -d "$(coreTmpFilePath padm-sing-box-upgrade.XXXXXX)" || return 1
+    if ! prepareSingBoxUpgradeBinary "${version}" "${candidateDir}"; then
+        padmRemoveCleanupPath "${candidateDir}"
+        return 1
+    fi
+    upgradeCore "sing-box" SagerNet/sing-box sing-box checkSingBoxPrereleaseCompatibility installDownloadedSingBoxBinary \
+        "${prerelease}" "${version}" "${candidateDir}"
 }
 
 selectCoreVersion() {
@@ -2194,7 +2346,9 @@ selectCoreVersion() {
     local selection selectedVersion selectedPrerelease versions metadata releaseRepo=${repo} releaseTag
     printf -v "${resultVar}" '%s' ""
     printf -v "${prereleaseResultVar}" '%s' false
-    if ! padmCaptureCancelableCommand versions coreReleaseTags "${repo}" all 20 || [[ -z "${versions}" ]]; then
+    local listFn=coreReleaseTags
+    [[ "${repo}" != SagerNet/sing-box ]] || listFn=coreUpstreamReleaseTags
+    if ! padmCaptureCancelableCommand versions "${listFn}" "${repo}" all 20 || [[ -z "${versions}" ]]; then
         errorCard "获取版本列表失败，请稍后重试"
         return 2
     fi
@@ -2213,10 +2367,6 @@ selectCoreVersion() {
         [[ "${selectedVersion}" != 0 ]] || return 3
         selectedVersion="v${selectedVersion#v}"
         releaseTag=${selectedVersion}
-        [[ "${repo}" != SagerNet/sing-box ]] || {
-            releaseRepo=neil1123-vip/padm
-            releaseTag="sing-box-${selectedVersion}"
-        }
         if [[ ! "${selectedVersion}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] ||
             ! validateGitHubReleaseTag "${releaseTag}"; then
             errorCard "版本号格式无效，请输入发布版本号"

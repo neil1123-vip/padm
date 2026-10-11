@@ -64,12 +64,9 @@ chmod 644 "${package_dir}/libcronet.so"
 
 build_tags="$(<"${source_dir}/release/DEFAULT_BUILD_TAGS"),with_purego,with_v2ray_api"
 ldflags="-X github.com/sagernet/sing-box/constant.Version=${version#v} $(<"${source_dir}/release/LDFLAGS") -s -w -buildid="
-(
-    cd -- "${source_dir}"
-    GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" \
-        go build -mod=readonly -trimpath -buildvcs=false -tags "${build_tags}" \
-        -ldflags "${ldflags}" -o "${package_dir}/sing-box" ./cmd/sing-box
-)
+# shellcheck source=core/singbox_build.sh
+source "${project_root}/shell/core/singbox_build.sh"
+buildSingBoxStatsBinary "${version}" "${arch}" "${source_dir}" "${package_dir}/sing-box"
 binary="${package_dir}/sing-box"
 version_output=$("${binary}" version)
 printf '%s\n' "${version_output}"

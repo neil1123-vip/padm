@@ -13,6 +13,7 @@ on:
       - 'versions.lock'
       - '.github/workflows/build-sing-box.yml'
       - 'shell/build-sing-box.sh'
+      - 'shell/core/singbox_build.sh'
       - 'shell/subscription/traffic.sh'
       - 'shell/core/stats_grpc.sh'
       - 'docker-bake.hcl'
@@ -63,7 +64,7 @@ jobs:
           if [[ "${GITHUB_EVENT_NAME}" == push && "${BEFORE_SHA}" =~ ^[0-9a-f]{40}$ &&
             "${BEFORE_SHA}" != 0000000000000000000000000000000000000000 ]] &&
             git cat-file -e "${BEFORE_SHA}:versions.lock"; then
-            if git diff --quiet "${BEFORE_SHA}" HEAD -- .github/workflows/build-sing-box.yml shell/build-sing-box.sh \
+            if git diff --quiet "${BEFORE_SHA}" HEAD -- .github/workflows/build-sing-box.yml shell/build-sing-box.sh shell/core/singbox_build.sh \
               shell/subscription/traffic.sh shell/core/stats_grpc.sh docker-bake.hcl docker/images/sing-box \
               docker/tests/image-smoke.sh docker/tests/sing-box-build.cjs; then
               runtime_keys='^PADM_LOCK_(ALPINE_BASE|CA_CERTIFICATES_VERSION|GCOMPAT_VERSION|LIBGCC_VERSION)='

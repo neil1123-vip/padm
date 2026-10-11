@@ -279,7 +279,7 @@ coreLifecycleMenu() {
         title=sing-box repo=SagerNet/sing-box menuKey=singbox_lifecycle_menu
         installedFn=singBoxInstalled upgradeFn=upgradeSingBoxCore checkFn=showSingBoxConfigValidation
         auditFn=showSingBoxCompatibilityAudit prereleaseFn=checkSingBoxPrereleaseCompatibility
-        upgradeText="选择已发布的统计版，支持升级与回退"
+        upgradeText="选择正式版或预发布版，缺包时可本机编译"
         checkText="执行 merge + check"
         riskText="只读扫描 1.13/1.14 迁移风险"
         ;;

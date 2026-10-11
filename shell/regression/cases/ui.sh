@@ -1629,6 +1629,7 @@ EOF
     singBoxConfigInstalled() { return 1; }
     crontab() { return 1; }
     coreReleaseTags() { recordMenuAction "unexpected-network-version-fetch"; printf 'v1.2.3\n'; }
+    coreUpstreamReleaseTags() { recordMenuAction "unexpected-network-version-fetch"; printf 'v1.2.3\n'; }
     downloadXrayReleaseBinaryToTemp() {
         local version=$1
         local outVar=$2
@@ -3306,9 +3307,17 @@ ${mainCredential}"
             local versionListLog="${TMP_DIR}/lifecycle-version-list.log"
             local versionMetadataLog="${TMP_DIR}/lifecycle-version-metadata.log"
             local versionOutput="${TMP_DIR}/lifecycle-version-output.log"
-            local listState=ok metadataState=ok menuFn upgradeLabel repo input state
+            local listState=ok metadataState=ok menuFn upgradeLabel repo listSource input state
             coreReleaseTags() {
-                printf '%s|%s|%s\n' "$1" "$2" "$3" >>"${versionListLog}"
+                printf 'release|%s|%s|%s\n' "$1" "$2" "$3" >>"${versionListLog}"
+                [[ "$2" == all && "$3" == 20 ]] || return 1
+                [[ "${listState}" != failed ]] || return 1
+                [[ "${listState}" != empty ]] || return 0
+                printf 'v1.2.3|false\nv1.3.0-beta.1|true\nv1.2.2|false\n'
+            }
+            coreUpstreamReleaseTags() {
+                printf 'upstream|%s|%s|%s\n' "$1" "$2" "$3" >>"${versionListLog}"
+                [[ "$1" == SagerNet/sing-box ]] || return 1
                 [[ "$2" == all && "$3" == 20 ]] || return 1
                 [[ "${listState}" != failed ]] || return 1
                 [[ "${listState}" != empty ]] || return 0
@@ -3342,8 +3351,8 @@ ${mainCredential}"
             }
             for menuFn in xrayVersionManageMenu singBoxVersionManageMenu; do
                 case "${menuFn}" in
-                xrayVersionManageMenu) upgradeLabel=upgradeXrayCore repo=XTLS/Xray-core ;;
-                *) upgradeLabel=upgradeSingBoxCore repo=SagerNet/sing-box ;;
+                xrayVersionManageMenu) upgradeLabel=upgradeXrayCore repo=XTLS/Xray-core listSource=release ;;
+                *) upgradeLabel=upgradeSingBoxCore repo=SagerNet/sing-box listSource=upstream ;;
                 esac
                 : >"${versionListLog}"
                 : >"${versionMetadataLog}"
@@ -3356,19 +3365,17 @@ ${mainCredential}"
                 "${menuFn}" <<< $'1\n3\n1\n2\n5'
                 assertMenuAction "${upgradeLabel}:false v1.2.2"
                 assertMenuAction "${upgradeLabel}:true v1.3.0-beta.1"
-                [[ "$(grep -cxF "${repo}|all|20" "${versionListLog}")" == 3 ]]
+                [[ "$(grep -cxF "${listSource}|${repo}|all|20" "${versionListLog}")" == 3 ]]
+                [[ "$(wc -l <"${versionListLog}")" == 3 ]]
                 [[ ! -s "${versionMetadataLog}" ]]
 
                 resetMenuActions
                 "${menuFn}" <<< $'1\nm\n1.2.1\n1\nM\nv1.4.0-beta.1\n5'
                 assertMenuAction "${upgradeLabel}:false v1.2.1"
                 assertMenuAction "${upgradeLabel}:true v1.4.0-beta.1"
-                if [[ "${repo}" == SagerNet/sing-box ]]; then
-                    grep -qxF 'https://api.github.com/repos/neil1123-vip/padm/releases/tags/sing-box-v1.2.1' "${versionMetadataLog}"
-                    grep -qxF 'https://api.github.com/repos/neil1123-vip/padm/releases/tags/sing-box-v1.4.0-beta.1' "${versionMetadataLog}"
-                else
-                    grep -qxF 'https://api.github.com/repos/XTLS/Xray-core/releases/tags/v1.2.1' "${versionMetadataLog}"
-                fi
+                grep -qxF "https://api.github.com/repos/${repo}/releases/tags/v1.2.1" "${versionMetadataLog}"
+                grep -qxF "https://api.github.com/repos/${repo}/releases/tags/v1.4.0-beta.1" "${versionMetadataLog}"
+                [[ "$(wc -l <"${versionMetadataLog}")" == 2 ]]
 
                 for input in $'1\n0\n5' $'1\nm\n0\n5'; do
                     resetMenuActions

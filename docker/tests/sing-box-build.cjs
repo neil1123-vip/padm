@@ -55,6 +55,7 @@ function commit() {
 async function main() {
     const detect = script('Detect sing-box build input changes');
     const inputs = ['.github/workflows/build-sing-box.yml', 'shell/build-sing-box.sh',
+        'shell/core/singbox_build.sh',
         'shell/subscription/traffic.sh', 'shell/core/stats_grpc.sh', 'docker-bake.hcl',
         'docker/images/sing-box/Dockerfile', 'docker/tests/image-smoke.sh', 'docker/tests/sing-box-build.cjs'];
     write('.gitignore', 'output\n');

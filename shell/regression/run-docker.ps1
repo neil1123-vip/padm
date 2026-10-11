@@ -306,8 +306,24 @@ try {
         # 仅自建受控子树的 driver 合同需要 ptrace，不挂载宿主进程或 Socket。
         @('--cap-add', 'SYS_PTRACE')
     } else { @() }
+    $networkMode = if ($Selector -eq 'sing-box-local-build-real') { 'bridge' } else { 'none' }
+    $networkEnvironment = @()
+    if ($Selector -eq 'sing-box-local-build-real') {
+        foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if (-not $value) { continue }
+            if ($name -ne 'NO_PROXY') {
+                $proxyUri = [UriBuilder]::new($value)
+                if ($proxyUri.Host -in @('localhost', '127.0.0.1', '::1')) {
+                    $proxyUri.Host = 'host.docker.internal'
+                    $value = $proxyUri.Uri.AbsoluteUri
+                }
+            }
+            $networkEnvironment += @('--env', "$name=$value")
+        }
+    }
     $container = & $docker create --name "padm-regression-$runId" --platform $platform @slotLabels @networkCapabilities `
-        --network none --init `
+        --network $networkMode --init @networkEnvironment `
         --env "PADM_REGRESSION_PARALLEL_JOBS=$Jobs" `
         --env "PADM_REGRESSION_ALL_PARALLEL_JOBS=$Jobs" `
         --env "PADM_REGRESSION_CI_PARALLEL_JOBS=$Jobs" `

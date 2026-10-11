@@ -366,6 +366,388 @@ runSingBoxStatsBuildRegression() (
             done
         ) || return 1
     )
+    (
+        # 坏元数据、重复资产与限流均不是缺包，只有明确 404 或空资产列表返回 5。
+        local fixtureMetadata fetchRc=0 httpStatus=500 curlRc=0
+        local metadataCalls="${root}/local-build-metadata-calls"
+        fetchUrlToStdout() { printf '%s\n' "${fixtureMetadata}"; return "${fetchRc}"; }
+        curl() { printf 'curl\n' >>"${metadataCalls}"; printf '%s' "${httpStatus}"; return "${curlRc}"; }
+        fixtureMetadata=$(jq -cn --arg tag "sing-box-${version}" --arg asset "${packageDir}.tar.gz" \
+            '{tag_name:$tag,draft:false,assets:[{name:$asset}]}')
+        : >"${metadataCalls}"
+        checkSingBoxStatsReleaseAsset "${version}" "${root}" || return 1
+        [[ ! -s "${metadataCalls}" ]] || return 1
+        fixtureMetadata=$(jq '.assets=[]' <<<"${fixtureMetadata}")
+        regressionExpectStatus 5 checkSingBoxStatsReleaseAsset "${version}" "${root}" || return 1
+        for fixtureMetadata in '{}' 'null' 'not-json' \
+            '{"tag_name":"sing-box-v1.14.0","draft":true,"assets":[]}' \
+            '{"tag_name":"sing-box-v1.13.0","draft":false,"assets":[]}' \
+            "$(jq -cn --arg tag "sing-box-${version}" --arg asset "${packageDir}.tar.gz" \
+                '{tag_name:$tag,draft:false,assets:[{name:$asset},{name:$asset}]}')" \
+            $'{"tag_name":"sing-box-v1.14.0","draft":false,"assets":[]}\n{}'; do
+            regressionExpectStatus 1 checkSingBoxStatsReleaseAsset "${version}" "${root}" 2>/dev/null || return 1
+        done
+        fetchRc=1
+        regressionExpectStatus 1 checkSingBoxStatsReleaseAsset "${version}" "${root}" || return 1
+        httpStatus=404
+        regressionExpectStatus 5 checkSingBoxStatsReleaseAsset "${version}" "${root}" || return 1
+        curlRc=1
+        regressionExpectStatus 1 checkSingBoxStatsReleaseAsset "${version}" "${root}" || return 1
+    ) || return 1
+    (
+        # 仅确认缺包才询问编译；下载失败、网络失败和拒绝不会改变旧核心。
+        local scenario assetRc downloadRc buildRc confirmRc confirmChoice expectedEvents
+        local events="${root}/local-build-prepare-events" candidate="${root}/local-build-prepare"
+        printf '%s\n' "${originalBinary}" >"${PADM_SINGBOX_BINARY}"
+        printf 'old-cronet\n' >"${root}/installed/libcronet.so"
+        checkSingBoxStatsReleaseAsset() {
+            [[ "$1" == "${version}" && "$2" == "${candidate}" ]] || return 99
+            printf 'check\n' >>"${events}"
+            return "${assetRc}"
+        }
+        downloadSingBoxReleaseBinaryToTempDir() {
+            [[ "$1" == "${version}" && "$2" == "${candidate}" ]] || return 99
+            printf 'download\n' >>"${events}"
+            return "${downloadRc}"
+        }
+        buildSingBoxReleaseBinaryToTempDir() {
+            [[ "$1" == "${version}" && "$2" == "${candidate}" ]] || return 99
+            printf 'build\n' >>"${events}"
+            return "${buildRc}"
+        }
+        padmRunCancelableCommand() {
+            [[ "$1" == buildSingBoxReleaseBinaryToTempDir ]] || return 99
+            printf 'cancelable\n' >>"${events}"
+            "$@"
+        }
+        autoRead() {
+            [[ "$1" == sing_box_local_build_confirm ]] || return 99
+            printf 'prompt\n' >>"${events}"
+            printf -v "$3" '%s' "${confirmChoice}"
+            return "${confirmRc}"
+        }
+        runCoreServiceActionAllowFailure() { printf 'service\n' >>"${events}"; return 99; }
+        for scenario in packaged declined aborted network-broken package-invalid compile-failed compiled; do
+            assetRc=0 downloadRc=0 buildRc=0 confirmRc=0 confirmChoice=y
+            case "${scenario}" in
+            packaged) expectedEvents=$'check\ndownload' ;;
+            declined) assetRc=5; confirmChoice=n; expectedEvents=$'check\nprompt' ;;
+            aborted) assetRc=5; confirmRc=1; expectedEvents=$'check\nprompt' ;;
+            network-broken) assetRc=9; expectedEvents=check ;;
+            package-invalid) downloadRc=4; expectedEvents=$'check\ndownload' ;;
+            compile-failed) assetRc=5; buildRc=7; expectedEvents=$'check\nprompt\ncancelable\nbuild' ;;
+            compiled) assetRc=5; expectedEvents=$'check\nprompt\ncancelable\nbuild' ;;
+            esac
+            : >"${events}"
+            if [[ "${scenario}" == packaged || "${scenario}" == compiled ]]; then
+                prepareSingBoxUpgradeBinary "${version}" "${candidate}" || return 1
+            else
+                regressionExpectFailure prepareSingBoxUpgradeBinary "${version}" "${candidate}" || return 1
+            fi
+            [[ "$(<"${events}")" == "${expectedEvents}" &&
+                "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" &&
+                "$(<"${root}/installed/libcronet.so")" == old-cronet ]] || return 1
+        done
+    ) || return 1
+    (
+        # 升级入口只构建一次，预发布配置预检和最终安装复用同一候选目录。
+        local targetVersion=v1.16.0-alpha.1 upgradeCandidate expectedBinary buildRc=0 validationRc=0
+        local fixedBuildLog sentinel
+        local events="${root}/local-build-upgrade-events"
+        printf '%s\n' "${originalBinary}" >"${PADM_SINGBOX_BINARY}"
+        chmod 755 "${PADM_SINGBOX_BINARY}"
+        printf 'old-cronet\n' >"${root}/installed/libcronet.so"
+        padmCreateTempPath() {
+            local resultVar=$1 path
+            if [[ "${2:-}" == -d ]]; then
+                upgradeCandidate=$(mktemp -d "${PADM_TMP_DIR}/local-build-upgrade.XXXXXX") || return 1
+                printf -v "${resultVar}" '%s' "${upgradeCandidate}"
+                return 0
+            fi
+            path=$(mktemp "${2:-${PADM_TMP_DIR}/local-build-log.XXXXXX}") || return 1
+            printf -v "${resultVar}" '%s' "${path}"
+        }
+        checkSingBoxStatsReleaseAsset() {
+            [[ "$1" == "${targetVersion}" && "$2" == "${upgradeCandidate}" ]] || return 99
+            return 5
+        }
+        downloadSingBoxReleaseBinaryToTempDir() { printf 'download\n' >>"${events}"; return 99; }
+        buildSingBoxReleaseBinaryToTempDir() {
+            [[ "$1" == "${targetVersion}" && "$2" == "${upgradeCandidate}" ]] || return 99
+            printf 'build\n' >>"${events}"
+            [[ "${buildRc}" == 0 ]] || return "${buildRc}"
+            local extractedDir="$2/sing-box-${1#v}${singBoxCoreCPUVendor}"
+            mkdir -p "${extractedDir}"
+            printf '#!/usr/bin/env bash\nprintf "sing-box version %s\\nTags: with_v2ray_api\\n"\n' "${1#v}" >"${extractedDir}/sing-box"
+            chmod 755 "${extractedDir}/sing-box"
+            printf 'new-cronet\n' >"${extractedDir}/libcronet.so"
+            expectedBinary="${extractedDir}/sing-box"
+        }
+        padmRunCancelableCommand() { "$@"; }
+        autoRead() {
+            [[ "$1" == sing_box_local_build_confirm || "$1" == core_upgrade_confirm ]] || return 99
+            printf -v "$3" y
+        }
+        validateSingBoxPrereleaseConfigWithMigration() {
+            [[ "$1" == "${expectedBinary}" && "$2" == "${targetVersion}" ]] || return 99
+            printf 'validate\n' >>"${events}"
+            : >"$3"
+            return "${validationRc}"
+        }
+        installDownloadedSingBoxBinary() {
+            [[ "$1" == "${targetVersion}" && "$2" == "${upgradeCandidate}" &&
+                -x "$2/sing-box-${1#v}${singBoxCoreCPUVendor}/sing-box" ]] || return 99
+            printf 'install\n' >>"${events}"
+        }
+        runCoreServiceActionAllowFailure() { printf 'service\n' >>"${events}"; return 99; }
+        : >"${events}"
+        buildRc=7
+        regressionExpectFailure upgradeSingBoxCore true "${targetVersion}" || return 1
+        [[ "$(<"${events}")" == build && ! -e "${upgradeCandidate}" ]] || return 1
+        : >"${events}"
+        buildRc=0 validationRc=1
+        regressionExpectFailure upgradeSingBoxCore true "${targetVersion}" || return 1
+        [[ "$(<"${events}")" == $'build\nvalidate' && ! -e "${upgradeCandidate}" ]] || return 1
+        : >"${events}"
+        validationRc=0
+        upgradeSingBoxCore true "${targetVersion}" || return 1
+        [[ "$(<"${events}")" == $'build\nvalidate\ninstall' &&
+            "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" &&
+            "$(<"${root}/installed/libcronet.so")" == old-cronet ]] || return 1
+        padmRemoveCleanupPath "${upgradeCandidate}"
+        (
+            # 构建日志必须使用新建临时文件，固定日志路径即使是符号链接也不能覆盖目标。
+            fixedBuildLog="${root}/fixed-build.log"
+            sentinel="${root}/fixed-build-sentinel"
+            printf 'sentinel\n' >"${sentinel}"
+            ln -s -- "${sentinel}" "${fixedBuildLog}"
+            padmTmpFilePath() {
+                [[ "$1" != padm-sing-box-build.log ]] || { printf '%s\n' "${fixedBuildLog}"; return 0; }
+                printf '%s/%s\n' "${root}" "$1"
+            }
+            checkSingBoxStatsReleaseAsset() { return 5; }
+            autoRead() { printf -v "$3" y; }
+            prepareSingBoxUpgradeBinary "${targetVersion}" "${upgradeCandidate}" || return 1
+            [[ "$(<"${sentinel}")" == sentinel && -L "${fixedBuildLog}" ]] || return 1
+        ) || return 1
+    ) || return 1
+    (
+        # CI 与运行时共享统计标签与上游参数，失败必须返回构建器状态。
+        source "${PROJECT_ROOT}/shell/core/singbox_build.sh"
+        local sourceDir="${root}/local-build-source" args="${root}/local-build-go-args"
+        local binary="${root}/local-build-result" goRc=0
+        mkdir -p "${sourceDir}/release"
+        printf 'module example.test\n\ngo 1.24.3\n' >"${sourceDir}/go.mod"
+        printf 'fixture-checksum\n' >"${sourceDir}/go.sum"
+        printf 'with_quic,with_clash_api\n' >"${sourceDir}/release/DEFAULT_BUILD_TAGS"
+        printf -- '-X example.test.Flavor=upstream\n' >"${sourceDir}/release/LDFLAGS"
+        go() {
+            printf '%s\n' "$@" >"${args}"
+            printf '%s\n' "${GOOS}:${GOARCH}:${CGO_ENABLED}:${GOTOOLCHAIN}" >"${args}.environment"
+            return "${goRc}"
+        }
+        buildSingBoxStatsBinary "${version}" amd64 "${sourceDir}" "${binary}" || return 1
+        [[ "$(<"${args}.environment")" == linux:amd64:0:local ]] || return 1
+        grep -Fxq -- 'with_quic,with_clash_api,with_purego,with_v2ray_api' "${args}" || return 1
+        grep -Fq -- '-X example.test.Flavor=upstream' "${args}" || return 1
+        grep -Fq -- "constant.Version=${version#v}" "${args}" || return 1
+        grep -Fxq -- -mod=readonly "${args}" || return 1
+        grep -Fxq -- "${binary}" "${args}" || return 1
+        goRc=37
+        regressionExpectStatus 37 buildSingBoxStatsBinary "${version}" arm64 "${sourceDir}" "${binary}" || return 1
+        : >"${args}"
+        regressionExpectFailure buildSingBoxStatsBinary bad amd64 "${sourceDir}" "${binary}" || return 1
+        regressionExpectFailure buildSingBoxStatsBinary "${version}" 386 "${sourceDir}" "${binary}" || return 1
+        [[ ! -s "${args}" ]] || return 1
+    ) || return 1
+    (
+        # Go 工具链按源码选择并复用；下载内容 SHA 不符时不能写入缓存。
+        local sourceDir="${root}/local-build-toolchain-source" cache="${root}/local-build-cache"
+        local payload="${root}/local-build-toolchain-payload" fixtureArchive="${root}/local-build-toolchain.tar.gz"
+        local goPath= fixtureMetadata fixtureDigest downloadCalls="${root}/local-build-toolchain-downloads"
+        mkdir -p "${sourceDir}" "${cache}" "${payload}/go/bin"
+        printf 'module example.test\n\ngo 1.24.0\n\ntoolchain go1.24.3\n' >"${sourceDir}/go.mod"
+        printf '#!/usr/bin/env bash\nprintf "go version go1.24.3 linux/amd64\\n"\n' >"${payload}/go/bin/go"
+        chmod 755 "${payload}/go/bin/go"
+        tar -czf "${fixtureArchive}" -C "${payload}" go
+        fixtureDigest=$(sha256sum "${fixtureArchive}")
+        fixtureDigest=${fixtureDigest%% *}
+        fixtureMetadata=$(jq -cn --arg digest "${fixtureDigest}" \
+            '[{version:"go1.24.3",files:[{os:"linux",arch:"amd64",kind:"archive",sha256:$digest}]}]')
+        fetchUrlToStdout() {
+            [[ "$1" == 'https://go.dev/dl/?mode=json&include=all' ]] || return 99
+            printf '%s\n' "${fixtureMetadata}"
+        }
+        downloadUrlToFileBounded() {
+            [[ "$1" == 'https://go.dev/dl/go1.24.3.linux-amd64.tar.gz' ]] || return 99
+            printf 'download\n' >>"${downloadCalls}"
+            cp "${fixtureArchive}" "$2"
+        }
+        : >"${downloadCalls}"
+        ensureSingBoxBuildGo "${sourceDir}" "${cache}" amd64 goPath || return 1
+        [[ "${goPath}" == "${cache}/toolchains/go1.24.3-amd64/go/bin" &&
+            "$(wc -l <"${downloadCalls}")" == 1 ]] || return 1
+        fetchUrlToStdout() { return 99; }
+        ensureSingBoxBuildGo "${sourceDir}" "${cache}" amd64 goPath || return 1
+        [[ "$(wc -l <"${downloadCalls}")" == 1 ]] || return 1
+        cache="${root}/local-build-bad-sha-cache"
+        mkdir -p "${cache}"
+        fixtureMetadata=$(jq '.[0].files[0].sha256 = ("0" * 64)' <<<"${fixtureMetadata}")
+        fetchUrlToStdout() { printf '%s\n' "${fixtureMetadata}"; }
+        regressionExpectFailure ensureSingBoxBuildGo "${sourceDir}" "${cache}" amd64 goPath >/dev/null 2>&1 || return 1
+        [[ ! -e "${cache}/toolchains/go1.24.3-amd64" && "$(wc -l <"${downloadCalls}")" == 2 ]] || return 1
+    ) || return 1
+    (
+        # Go 的三个缓存入口拒绝符号链接，必须在解析源码或下载之前失败。
+        local singBoxCoreCPUVendor cacheName cacheRoot externalDir sentinel
+        local sourceCalls="${root}/local-build-cache-source-calls"
+        local PADM_SINGBOX_BUILD_CACHE=
+        case "$(uname -s):$(uname -m)" in
+        Linux:x86_64) singBoxCoreCPUVendor=-linux-amd64 ;;
+        Linux:aarch64) singBoxCoreCPUVendor=-linux-arm64 ;;
+        *) printf '缓存安全回归需要原生 Linux amd64/arm64\n' >&2; return 1 ;;
+        esac
+        resolveGitHubCommitRef() { printf 'resolve\n' >>"${sourceCalls}"; return 99; }
+        downloadUrlToFileBounded() { printf 'download\n' >>"${sourceCalls}"; return 99; }
+        downloadGitHubReleaseAsset() { printf 'asset\n' >>"${sourceCalls}"; return 99; }
+        for cacheName in modules build gopath; do
+            cacheRoot="${root}/cache-symlink-${cacheName}"
+            externalDir="${root}/cache-external-${cacheName}"
+            sentinel="${externalDir}/sentinel"
+            mkdir -p "${cacheRoot}" "${externalDir}"
+            printf 'sentinel\n' >"${sentinel}"
+            ln -s -- "${externalDir}" "${cacheRoot}/${cacheName}"
+            PADM_SINGBOX_BUILD_CACHE="${cacheRoot}"
+            : >"${sourceCalls}"
+            regressionExpectFailure buildSingBoxReleaseBinaryToTempDir "${version}" "${root}/cache-candidate" || return 1
+            [[ ! -s "${sourceCalls}" && -L "${cacheRoot}/${cacheName}" &&
+                "$(<"${sentinel}")" == sentinel && "$(find "${externalDir}" -mindepth 1 -maxdepth 1 | wc -l)" == 1 ]] || return 1
+        done
+    ) || return 1
+)
+
+runSingBoxLocalBuildRealRegression() (
+    set -euo pipefail
+    source "${PROJECT_ROOT}/versions.lock"
+    local version="${PADM_LOCK_SING_BOX_VERSION}" arch singBoxCoreCPUVendor
+    case "$(uname -s):$(uname -m)" in
+    Linux:x86_64) arch=amd64 ;;
+    Linux:aarch64) arch=arm64 ;;
+    *) printf '真实编译回归仅支持原生 Linux amd64/arm64\n' >&2; return 1 ;;
+    esac
+    singBoxCoreCPUVendor="-linux-${arch}"
+    local root="${TMP_DIR}/sing-box-local-build-real"
+    local PADM_SINGBOX_BINARY="${root}/installed/sing-box" PADM_TMP_DIR="${root}/tmp"
+    local PADM_SINGBOX_BUILD_CACHE="${root}/cache" serviceCalls="${root}/service-calls"
+    local oldPid= monitorPid= candidatePid= oldHashes phase candidateDir binary binaryDir buildLog
+    local startMs endMs buildRc=0 apiPort= attempt
+    mkdir -p "${root}/installed" "${PADM_TMP_DIR}"
+    padmRegisterCleanupPath "${root}"
+    cleanupSingBoxLocalBuildRealRegression() {
+        local status=$? pid log
+        trap - EXIT
+        for pid in "${candidatePid}" "${monitorPid}" "${oldPid}"; do
+            [[ -n "${pid}" ]] || continue
+            kill "${pid}" 2>/dev/null || true
+            wait "${pid}" 2>/dev/null || true
+        done
+        if [[ "${status}" != 0 ]]; then
+            for log in "${root}"/*.log "${root}/old-core-changed"; do
+                [[ ! -f "${log}" ]] || cat "${log}" >&2
+            done
+        fi
+        padmCleanupTempPaths "" "${status}"
+    }
+    trap cleanupSingBoxLocalBuildRealRegression EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    printf '#!/usr/bin/env bash\nexec sleep 86400\n' >"${PADM_SINGBOX_BINARY}"
+    chmod 755 "${PADM_SINGBOX_BINARY}"
+    printf 'installed-cronet-fixture\n' >"${root}/installed/libcronet.so"
+    oldHashes=$(sha256sum "${PADM_SINGBOX_BINARY}" "${root}/installed/libcronet.so")
+    : >"${serviceCalls}"
+    runCoreServiceActionAllowFailure() { printf '%s\n' "$*" >>"${serviceCalls}"; return 99; }
+    runServiceAction() { printf '%s\n' "$*" >>"${serviceCalls}"; return 99; }
+    handleSingBox() { printf '%s\n' "$*" >>"${serviceCalls}"; return 99; }
+    "${PADM_SINGBOX_BINARY}" &
+    oldPid=$!
+    (
+        trap - EXIT INT TERM
+        while kill -0 "${oldPid}" 2>/dev/null; do
+            if [[ "$(sha256sum "${PADM_SINGBOX_BINARY}" "${root}/installed/libcronet.so")" != "${oldHashes}" ||
+                -s "${serviceCalls}" ]]; then
+                printf '编译期间旧核心文件或服务被修改\n' >"${root}/old-core-changed"
+                exit 1
+            fi
+            sleep 1
+        done
+        printf '编译期间旧核心进程退出\n' >"${root}/old-core-changed"
+    ) &
+    monitorPid=$!
+    buildSingBoxWarmCandidate() (
+        local goBin sourceDir="${root}/cold/source"
+        local binaryDir="${candidateDir}/sing-box-${version#v}${singBoxCoreCPUVendor}"
+        ensureSingBoxBuildGo "${sourceDir}" "${PADM_SINGBOX_BUILD_CACHE}" "${arch}" goBin || return 1
+        mkdir -p "${binaryDir}" || return 1
+        cp "${root}/cold/sing-box-${version#v}${singBoxCoreCPUVendor}/libcronet.so" "${binaryDir}/libcronet.so" || return 1
+        export PATH="${goBin}:${PATH}" GOMODCACHE="${PADM_SINGBOX_BUILD_CACHE}/modules"
+        export GOCACHE="${PADM_SINGBOX_BUILD_CACHE}/build" GOPATH="${PADM_SINGBOX_BUILD_CACHE}/gopath" TMPDIR="${candidateDir}"
+        buildSingBoxStatsBinary "${version}" "${arch}" "${sourceDir}" "${binaryDir}/sing-box"
+    )
+    for phase in cold warm; do
+        candidateDir="${root}/${phase}"
+        mkdir -p "${candidateDir}"
+        buildLog="${root}/${phase}-build.log"
+        startMs=$(regressionNowMs)
+        buildRc=0
+        if [[ "${phase}" == cold ]]; then
+            padmRunCancelableCommand buildSingBoxReleaseBinaryToTempDir "${version}" "${candidateDir}" \
+                >"${buildLog}" 2>&1 || buildRc=$?
+        else
+            # 热构建复用本次已校验源码和动态库，只量测 Go 工具链及编译缓存。
+            padmRunCancelableCommand buildSingBoxWarmCandidate >"${buildLog}" 2>&1 || buildRc=$?
+        fi
+        endMs=$(regressionNowMs)
+        printf 'sing-box-local-build-real:%s:%s:%s:%sms:rc=%s\n' \
+            "${phase}" "${version}" "${arch}" "$((endMs - startMs))" "${buildRc}"
+        [[ "${buildRc}" == 0 ]] || return "${buildRc}"
+        [[ ! -e "${root}/old-core-changed" && ! -s "${serviceCalls}" ]] || return 1
+        kill -0 "${oldPid}" 2>/dev/null || return 1
+        [[ "$(sha256sum "${PADM_SINGBOX_BINARY}" "${root}/installed/libcronet.so")" == "${oldHashes}" ]] || return 1
+        binaryDir="${candidateDir}/sing-box-${version#v}${singBoxCoreCPUVendor}"
+        binary="${binaryDir}/sing-box"
+        [[ "$(singBoxBinaryVersion "${binary}")" == "${version}" &&
+            "$(singBoxV2rayApiCapability "${binary}")" == supported ]] || return 1
+    done
+    cmp "${root}/cold/sing-box-${version#v}${singBoxCoreCPUVendor}/sing-box" "${binary}" || return 1
+    # 复用 CI 的 Naive/Cronet 启动模式，随机监听端口避免并行回归冲突。
+    jq -n '{
+        log:{level:"info",timestamp:false},
+        route:{final:"direct"},
+        outbounds:[
+            {type:"direct",tag:"direct"},
+            {type:"naive",tag:"cronet-smoke",server:"127.0.0.1",server_port:9,
+                username:"padm-build",password:"padm-build-smoke",
+                tls:{enabled:true,server_name:"localhost"}}
+        ],
+        experimental:{v2ray_api:{listen:"127.0.0.1:0",stats:{enabled:true,users:["padm-build"]}}}
+    }' >"${root}/config.json"
+    "${binary}" check -c "${root}/config.json" >"${root}/check.log" 2>&1 || return 1
+    "${binary}" run -c "${root}/config.json" >"${root}/run.log" 2>&1 &
+    candidatePid=$!
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        kill -0 "${candidatePid}" 2>/dev/null || return 1
+        apiPort=$(sed -n 's/.*grpc server started at 127\.0\.0\.1:\([0-9][0-9]*\).*/\1/p' "${root}/run.log")
+        [[ "${apiPort}" =~ ^[0-9]+$ ]] && break
+        sleep 0.1
+    done
+    [[ "${apiPort}" =~ ^[0-9]+$ ]] || return 1
+    grep -q 'NaiveProxy started, version:' "${root}/run.log" || return 1
+    timeout 2 bash -c ': >"/dev/tcp/127.0.0.1/$1"' _ "${apiPort}" || return 1
+    [[ ! -e "${root}/old-core-changed" && ! -s "${serviceCalls}" ]] || return 1
+    kill -0 "${oldPid}" 2>/dev/null || return 1
+    [[ "$(sha256sum "${PADM_SINGBOX_BINARY}" "${root}/installed/libcronet.so")" == "${oldHashes}" ]] || return 1
+    printf 'sing-box-local-build-real:cronet-and-api:ok\n'
 )
 
 runSingBoxCustomPathsRegression() (
