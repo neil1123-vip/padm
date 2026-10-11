@@ -3674,6 +3674,81 @@ fork 初停的唯一 accepted inode/tuple 保留；提交时
 `runtime_configuration_verified=false`、`jail_ready=false` 保持；
 未推送或发布，5C 与总目标 active。
 
+#### 5C.8c.2d 内部 Ledger 与跨不同 exe 积压消息
+
+2026-10-11，新增内部 `docker/lib/ssh-ledger.py`，并接入既有
+`docker-ssh-preflight` selector；未新增分片或生产 CLI。
+`Ledger(deadline)` 固定总窗口和 32 条消息上限，提供 register、drain、
+finish_stop 和幂等 close。它复用现有来源异常类型，保留 source/journal
+的 live witness 语义；cgroup 只记录，不认证宿主 unit。
+真实首停、父 FORK 关系和完整 ptrace 事件观察由可信 driver 提供，
+外部 JSON 或 `state=t` 不取得停点证明。
+
+收到的 FD 先登记再解析，credentials 精确 12 bytes、同消息 pidfd 精确
+4 bytes 且各唯一；非法 UTF-8、截断、SCM_RIGHTS、unknown、terminal、
+负 pidfd 和缺 accepted anchor 均拒绝，合法正文不授予来源身份。
+排空到真实 EAGAIN 后 pending 冻结 sender generation、旧 epoch/exe 和
+fork accepted anchor，并保留消息 pidfd。sender 自身 EXEC/EXIT 停点
+先提交旧 pending，双 pidfd 前后活性和末尾 generation 复核通过后，
+关闭消息 FD，再更新 epoch/终结；driver 仅成功返回后 CONT。
+超限、总 deadline、代次变化或资源读取异常毒化整个账本，关闭全部
+held/pending FD，后续调用拒绝。当前持 FD 与 TCP ESTAB 分开记录，
+历史锚点不能冒充当前 live socket；始终 `authoritative=false`、
+`jail_ready=false`。
+
+新增 5 组内部合同使用真实 Linux ancillary/pidfd、accepted TCP inode 和
+受控 SIGSTOP 子进程。覆盖快照冻结、CLOEXEC、未知/回收/截断/非法 UTF-8/
+额外 FD 拒绝、代次/epoch/deadline/重复 PID 毒化和关闭幂等。
+32/33 边界先保存真实 sender 的 pending，再补到 32；第 33 条同时证明
+held/message FD 全关、pending/accepted 取消。合同中的 event 4/6 是
+直接 API 调用，真实 EXEC/EXIT 停点由下述独立 driver 实证。
+
+跨不同 exe 原型直接导入同一冻结模块，一次 10/10、18.236 ms：
+普通 fork child 首停与父 FORK 停点继承同一 accepted inode；
+Python libc 旧日志在 SIGSTOP barrier 入 pending，真实 EXEC 到 C helper
+后仍归 epoch 0、`epoch_exe=/usr/bin/python3.13`，不套用当前 helper 身份。
+helper 新日志和关闭 accepted FD 后的日志归 epoch 1。
+EXIT 当前 `socket_fds=[]`、owned TCP 为空、`owns_anchor_fd=false`、
+`live_socket_verified=false`，仍保留历史连接事实。
+另一个真实 unknown libc sender 明确拒绝，FD 计数不增。
+9 条 trace 含 1 次 EXEC、2 次 EXIT，终局 FD 6 -> 6，
+tracee、未登记停点和消息 FD 均为空，主代理及独审复核一致。
+基础 SSH 镜像缺 GCC 时，仅在独立联网容器从 Debian 官方源补齐
+gcc/libc6-dev，缓存工具镜像后回到无网络、私有 PID、零宿主挂载的
+实测容器；privileged 仅用于私有 mount/syslog 原型。
+工具镜像 `sha256:bd610ac50a49c93807285e1d8d8ef620d268563aa8ddcbb691708017bf7acb1e`
+保留复用，容器、binary、socket 和私有 `/dev/log` 已清理。
+
+最终定向 source 20、journal 9、Ledger 5、client 通过，入口 1910 ms，
+内部 956 ms；完整合同首轮 45/46，唯一失败是既有 released-lock
+测试的 1 秒时钟竞争。同源码单跑 phase1 通过，确定性红绿检查强制
+首轮 mkdir 竞争等待 1.1 秒，旧时钟失败、固定测试时钟通过。
+`0352508a` 仅固定该 fixture 的 SECONDS 和 sleep，并用外层真实
+timeout 3 防止死循环，增加竞争触发/锁已释放断言；生产锁校验和
+真实超时负例未改。修复后 phase1 定向 48934 ms 通过，
+集中完整合同 46/46、入口 315950 ms、内部 314817 ms、排队 394 ms。
+各次 `exit_code=0` 的成功结果均 `cache_hit=false`，复用工具镜像，
+保持完整 Jobs 6、三槽预算中的 2 槽，没有扩大并发。
+两轮负载不同，最终耗时不作为整体回归提速证明。
+
+最终完整快照启动时 294 个文件逐一 SHA256 与工作区一致；
+提交前本阶段 4 个代码/测试输入仍相同，两个并行订阅菜单文件随后
+变化，未计入本阶段验收或提交。证据：
+`.tmp-ssh-ledger-8c2d/evidence.md`、
+`.tmp-ssh-epoch-cross-exec-8c2d/evidence.md`、
+`.tmp-phase1-clock-8c2d/evidence.md`、
+`.tmp-regression-docker-a47c9f94875144a3891415fb6a3f768e/`、
+`.tmp-regression-docker-abc5db0079e3435eb92107c18198a79e/`。
+本轮清理 6 套回归的归档/清单共 12 文件、55,512,372 bytes，
+保留结果、日志、复现源及哈希；未删除其它任务临时文件。
+
+下一步 8c.2e 验证 drain/pidfd/commit 阶段 deadline、未知 ptrace event
+拒绝与停止 CONT、tracer 突然退出的 EXITKILL；当前原型的未支持事件
+可能落入普通信号继续分支，不能用于生产 observer。
+多线程、共享 clone/创建 flags、unit、故障恢复、LSM、arm64、原生
+systemd、公网、重启卸载仍未验收；collector/jail 与 5C 保持未完成，
+不放宽现有 owner 或 live witness，不宣称完成菜单功能对齐。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
