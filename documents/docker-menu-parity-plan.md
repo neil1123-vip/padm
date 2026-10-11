@@ -3742,12 +3742,58 @@ timeout 3 防止死循环，增加竞争触发/锁已释放断言；生产锁校
 本轮清理 6 套回归的归档/清单共 12 文件、55,512,372 bytes，
 保留结果、日志、复现源及哈希；未删除其它任务临时文件。
 
-下一步 8c.2e 验证 drain/pidfd/commit 阶段 deadline、未知 ptrace event
-拒绝与停止 CONT、tracer 突然退出的 EXITKILL；当前原型的未支持事件
-可能落入普通信号继续分支，不能用于生产 observer。
+8c.2e 故障拒绝证据见下一节。8c.2d 原始探针的未支持事件仍可能落入
+普通信号继续分支；本轮未覆盖或修改它，不能用于生产 observer。
 多线程、共享 clone/创建 flags、unit、故障恢复、LSM、arm64、原生
 systemd、公网、重启卸载仍未验收；collector/jail 与 5C 保持未完成，
 不放宽现有 owner 或 live witness，不宣称完成菜单功能对齐。
+
+#### 5C.8c.2e Ledger 故障拒绝与 tracer 消失证据
+
+独立故障原型直接导入 8c.2d 的冻结 Ledger/source，不修改生产模块或
+原始 cross-exec 探针。Docker Desktop Linux amd64、WSL2 内核
+`6.6.87.2-microsoft-standard-WSL2`、glibc 2.41，复用前阶段 GCC
+工具镜像；独立容器 `network=none`、`SYS_PTRACE`、无宿主挂载，
+源码复制到 Linux 文件系统。最终 5/5、6088.581 ms，主代理与独审一致。
+
+| 故障 | 实际注入与首次拒绝 | 拒绝后的资源与控制 |
+| --- | --- | --- |
+| drain deadline | 真实 recvmsg 附件先进入 `_fds`，跨未修改的总期限；首次 `_receive:150` | 全部 held/received FD 为 EBADF，FD 7 -> 7 |
+| received pidfd deadline | 真实 pidfd 读取成功后跨总期限；首次 `_pidfd:60` | 同上，FD 7 -> 7 |
+| EXEC commit deadline | 真实 EXEC 停点提交读取 received pidfd 后跨总期限；首次 `_pidfd:60` | 同上，FD 7 -> 7 |
+| 未支持 event | SEIZE/INTERRUPT 产生真实 event 128；首次登记并 CONT 后，第二次 128 在普通信号分支前拒绝 | held pidfd 为 EBADF，FD 5 -> 5 |
+| tracer SIGKILL | 独立 subreaper 先杀已设置 EXITKILL 的 tracer | tracer/首停 tracee 均 -9，FD 4 -> 4 |
+
+三个 deadline 场景均保留真实 monotonic 时钟，原绝对期限不变；
+约 2019 ms 的等待发生在真实系统调用成功以后，不伪造 recvmsg、pidfd
+或停点。账本 poison/closed，pending/accepted 全取消，epoch 保持 0，
+后续调用拒绝；故障后实际普通 CONT 为 0，tracee SIGKILL 回收且
+`/proc` 消失。ptrace 成功调用单独记载，正常 CONT 与清理动作分开。
+
+未知 event guard 仅在本轮临时 fixture 中；原始 driver 未修。
+EXITKILL 由 tracee pidfd 从未就绪变为 POLLIN、回收后 `Pid:-1`、
+两个 `/proc` 消失及 subreaper `ECHILD` 共同证明，supervisor 未先杀
+tracee。该场景只覆盖首停，不能外推运行态 tracer 故障恢复。
+顶层保持 `authoritative=false`、`jail_ready=false`。
+
+首轮同样 5/5、6092.046 ms，但首次拒绝位置被后续“关闭后再次调用”
+覆盖；保留 `first-attempt/`，修正 instrumentation 后只复跑本套
+6 秒检查。另一次启动因镜像 `/bin/sh` ENTRYPOINT 把 sleep 当脚本，
+退出 2 且未执行探针；保留原始原因，改 `--entrypoint sleep` 后执行。
+生产输入未变，不重复已通过的完整合同。
+
+证据 `.tmp-ssh-faults-8c2e/evidence.md`、`probe.py`、`result.json`：
+probe SHA256 `AEA78CBA75AAABFBEA0293CFB16EB03A2DC9898E5695138A97E56533D01CD042`，
+result `4ACBFE78329BDF1FC3A0E7A991B281927FF3E4B95283D03FE5A724812732C6C4`，
+evidence `BBC9076904D42A282B37522834BAFB136D96ADE63D41122F28424A5A0F8EA6BA`。
+Ledger/source 及 8c.2d 原始证据哈希不变。实验容器、socket、binary、
+pidfd 和缓存已清理，只留 5 个复现源/证据文件。
+
+下一步 8c.2f 沉淀受控单线程内部 driver，直接调用 Ledger 并拒绝未知
+event，补运行态 EXITKILL；先限定自身创建的已知普通 fork 测试子树。
+event 1 或 Threads=1 快照不能单独证明创建 flags 安全；共享 clone、
+多线程、创建参数、unit 前置与任意 OpenSSH 接入仍是后续门槛。
+本轮不接菜单、collector 或 jail，不修改宿主 SSH。
 
 ## 第六步：发布与完整验收
 
