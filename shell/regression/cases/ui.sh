@@ -3305,9 +3305,8 @@ ${mainCredential}"
 
         (
             local versionListLog="${TMP_DIR}/lifecycle-version-list.log"
-            local versionMetadataLog="${TMP_DIR}/lifecycle-version-metadata.log"
             local versionOutput="${TMP_DIR}/lifecycle-version-output.log"
-            local listState=ok metadataState=ok menuFn upgradeLabel repo listSource input state
+            local listState=ok menuFn upgradeLabel repo listSource input
             coreReleaseTags() {
                 printf 'release|%s|%s|%s\n' "$1" "$2" "$3" >>"${versionListLog}"
                 [[ "$2" == all && "$3" == 20 ]] || return 1
@@ -3323,88 +3322,39 @@ ${mainCredential}"
                 [[ "${listState}" != empty ]] || return 0
                 printf 'v1.2.3|false\nv1.3.0-beta.1|true\nv1.2.2|false\n'
             }
-            fetchUrlToStdout() {
-                local tag="${1##*/}" prerelease=false draft=false
-                printf '%s\n' "$1" >>"${versionMetadataLog}"
-                [[ "${tag}" != *beta* ]] || prerelease=true
-                case "${metadataState}" in
-                missing) return 1 ;;
-                bad-json) printf '{'; return 0 ;;
-                array) printf '[]\n'; return 0 ;;
-                wrong-tag) tag=v0.0.0 ;;
-                draft) draft=true ;;
-                missing-prerelease)
-                    jq -cn --arg tag "${tag}" '{tag_name:$tag,draft:false}'
-                    return
-                    ;;
-                string-prerelease)
-                    jq -cn --arg tag "${tag}" '{tag_name:$tag,draft:false,prerelease:"false"}'
-                    return
-                    ;;
-                multiple)
-                    printf '{"tag_name":"%s","draft":false,"prerelease":false}\n{}\n' "${tag}"
-                    return 0
-                    ;;
-                esac
-                jq -cn --arg tag "${tag}" --argjson draft "${draft}" --argjson prerelease "${prerelease}" \
-                    '{tag_name:$tag,draft:$draft,prerelease:$prerelease}'
-            }
             for menuFn in xrayVersionManageMenu singBoxVersionManageMenu; do
                 case "${menuFn}" in
                 xrayVersionManageMenu) upgradeLabel=upgradeXrayCore repo=XTLS/Xray-core listSource=release ;;
                 *) upgradeLabel=upgradeSingBoxCore repo=SagerNet/sing-box listSource=upstream ;;
                 esac
                 : >"${versionListLog}"
-                : >"${versionMetadataLog}"
                 resetMenuActions
+                resetMenuRender
                 "${menuFn}" <<< $'1\n\n5' >"${versionOutput}"
                 assertMenuAction "${upgradeLabel}:false "
                 grep -qF 'v1.2.3 [正式版]' "${versionOutput}"
                 grep -qF 'v1.3.0-beta.1 [预发布版]' "${versionOutput}"
+                ! grep -qF '手动输入版本号' <<<"${menuItems}"
                 resetMenuActions
-                "${menuFn}" <<< $'1\n3\n1\n2\n5'
+                "${menuFn}" <<< $'1\n1\n1\n3\n1\n2\n5'
+                assertMenuAction "${upgradeLabel}:false v1.2.3"
                 assertMenuAction "${upgradeLabel}:false v1.2.2"
                 assertMenuAction "${upgradeLabel}:true v1.3.0-beta.1"
-                [[ "$(grep -cxF "${listSource}|${repo}|all|20" "${versionListLog}")" == 3 ]]
-                [[ "$(wc -l <"${versionListLog}")" == 3 ]]
-                [[ ! -s "${versionMetadataLog}" ]]
+                [[ "$(grep -cxF "${listSource}|${repo}|all|20" "${versionListLog}")" == 4 ]]
+                [[ "$(wc -l <"${versionListLog}")" == 4 ]]
 
                 resetMenuActions
-                "${menuFn}" <<< $'1\nm\n1.2.1\n1\nM\nv1.4.0-beta.1\n5'
-                assertMenuAction "${upgradeLabel}:false v1.2.1"
-                assertMenuAction "${upgradeLabel}:true v1.4.0-beta.1"
-                grep -qxF "https://api.github.com/repos/${repo}/releases/tags/v1.2.1" "${versionMetadataLog}"
-                grep -qxF "https://api.github.com/repos/${repo}/releases/tags/v1.4.0-beta.1" "${versionMetadataLog}"
-                [[ "$(wc -l <"${versionMetadataLog}")" == 2 ]]
-
-                for input in $'1\n0\n5' $'1\nm\n0\n5'; do
-                    resetMenuActions
-                    "${menuFn}" <<<"${input}"
-                    [[ -z "${actions}" ]]
-                done
+                "${menuFn}" <<< $'1\n0\n5'
+                [[ -z "${actions}" ]]
                 resetMenuActions
                 "${menuFn}" < <(printf '1\n')
                 [[ -z "${actions}" ]]
-                "${menuFn}" < <(printf '1\nm\n')
-                [[ -z "${actions}" ]]
-                resetMenuActions
-                "${menuFn}" <<< $'1\n999\n5'
-                assertMenuAction 'errorCard:输入有误，请重新输入'
-                ! grep -q "^${upgradeLabel}:" <<<"${actions}"
-                : >"${versionMetadataLog}"
-                resetMenuActions
-                "${menuFn}" <<< $'1\nm\n1/2\n5'
-                assertMenuAction 'errorCard:版本号格式无效，请输入发布版本号'
-                [[ ! -s "${versionMetadataLog}" ]]
-                ! grep -q "^${upgradeLabel}:" <<<"${actions}"
-
-                for metadataState in missing bad-json array wrong-tag draft missing-prerelease string-prerelease multiple; do
+                for input in $'1\n999\n5' $'1\nm\n5' $'1\nM\n5' $'1\nv1.2.1\n5'; do
                     resetMenuActions
-                    "${menuFn}" <<< $'1\nm\n1.2.1\n5'
-                    assertMenuAction 'errorCard:目标版本不可用'
+                    "${menuFn}" <<<"${input}"
+                    assertMenuAction 'errorCard:输入有误，请重新输入'
                     ! grep -q "^${upgradeLabel}:" <<<"${actions}"
                 done
-                metadataState=ok
                 for listState in failed empty; do
                     resetMenuActions
                     "${menuFn}" <<< $'1\n5'
@@ -3416,7 +3366,6 @@ ${mainCredential}"
 
             # 文件记录可跨捕获命令的子 shell，未安装和首页都不能取远端版本。
             : >"${versionListLog}"
-            : >"${versionMetadataLog}"
             xrayInstalledState=false
             singBoxInstalledState=false
             resetMenuActions
@@ -3431,7 +3380,7 @@ ${mainCredential}"
             ! assertMenuAction showSingBoxConfigValidation
             resetMenuRender
             coreVersionManageMenu <<<"6"
-            [[ ! -s "${versionListLog}" && ! -s "${versionMetadataLog}" ]]
+            [[ ! -s "${versionListLog}" ]]
         )
 
         resetMenuActions

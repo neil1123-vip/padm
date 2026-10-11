@@ -2343,7 +2343,7 @@ selectCoreVersion() {
     local title=$2
     local resultVar=$3
     local prereleaseResultVar=$4
-    local selection selectedVersion selectedPrerelease versions metadata releaseRepo=${repo} releaseTag
+    local selection selectedVersion selectedPrerelease versions
     printf -v "${resultVar}" '%s' ""
     printf -v "${prereleaseResultVar}" '%s' false
     local listFn=coreReleaseTags
@@ -2355,33 +2355,12 @@ selectCoreVersion() {
     echoContent title "\n┌─ ${title} 版本选择 ─────────────────────────────────"
     menuLine "回车使用最新正式版；选择序号可升级或回退"
     awk -F'|' '{printf "│ %d. %s [%s]\n", NR, $1, $2 == "true" ? "预发布版" : "正式版"}' <<<"${versions}"
-    menuItem m "手动输入版本号"
     menuReturnItem 0 "返回"
     menuClose
-    menuReadChoice core_upgrade_version "请选择版本 [回车最新正式版/m 手动/0 返回]:" selection true || return 3
+    menuReadChoice core_upgrade_version "请选择版本编号 [回车最新正式版/0 返回]:" selection true || return 3
     case "${selection}" in
     "") return 0 ;;
     0) return 3 ;;
-    m | M)
-        menuReadChoice core_upgrade_version_tag "请输入版本号（可省略 v 前缀，0 返回）:" selectedVersion || return 3
-        [[ "${selectedVersion}" != 0 ]] || return 3
-        selectedVersion="v${selectedVersion#v}"
-        releaseTag=${selectedVersion}
-        if [[ ! "${selectedVersion}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] ||
-            ! validateGitHubReleaseTag "${releaseTag}"; then
-            errorCard "版本号格式无效，请输入发布版本号"
-            return 2
-        fi
-        padmCaptureCancelableCommand metadata fetchUrlToStdout "https://api.github.com/repos/${releaseRepo}/releases/tags/${releaseTag}" 3 || metadata=
-        if ! selectedPrerelease=$(jq -ser --arg tag "${releaseTag}" '
-            select(length == 1) | .[0] |
-            select(type == "object" and .tag_name == $tag and .draft == false and
-                (.prerelease | type) == "boolean") | .prerelease | tostring
-        ' <<<"${metadata}" 2>/dev/null); then
-            errorCard "目标版本不可用" "请检查 ${selectedVersion} 的发布状态"
-            return 2
-        fi
-        ;;
     *)
         [[ "${selection}" =~ ^[1-9][0-9]{0,2}$ ]] || return 1
         IFS='|' read -r selectedVersion selectedPrerelease <<<"$(awk -v selected="${selection}" 'NR==selected {print $0}' <<<"${versions}")"
