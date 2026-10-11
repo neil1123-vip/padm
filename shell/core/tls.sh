@@ -385,13 +385,27 @@ acmeInstallSSL() {
 runAcmeIssueLogged() {
     local acmeLogFile=$1
     shift
+    local acmeLogBytes=0 acmeReason
     local -a acmeStatuses=()
+    if [[ -f "${acmeLogFile}" ]]; then
+        acmeLogBytes=$(wc -c <"${acmeLogFile}") || return 1
+    fi
     if "$@" 2>&1 | tee -a "${acmeLogFile}" >/dev/null; then
         acmeStatuses=("${PIPESTATUS[@]}")
     else
         acmeStatuses=("${PIPESTATUS[@]}")
     fi
-    [[ "${acmeStatuses[1]:-1}" == 0 ]] || return "${acmeStatuses[1]:-1}"
+    if [[ "${acmeStatuses[1]:-1}" != 0 ]]; then
+        errorCard "TLS 签发日志写入失败（退出码: ${acmeStatuses[1]:-1}）" "日志路径: ${acmeLogFile}"
+        return "${acmeStatuses[1]:-1}"
+    fi
+    if [[ "${acmeStatuses[0]:-1}" != 0 ]]; then
+        # 仅摘取本次签发末尾两行原因，跳过 ACME 通用调试提示和历史错误。
+        acmeReason=$(tail -c "+$((acmeLogBytes + 1))" "${acmeLogFile}" 2>/dev/null |
+            sed -E 's/^\[[^]]*\][[:space:]]*//; /^[[:space:]]*$/d; /Please (add|check)|See: https?:/d' |
+            tail -n 2) || acmeReason=
+        errorCard "TLS 证书签发失败（退出码: ${acmeStatuses[0]:-1}）" "${acmeReason:-未返回错误详情；日志: ${acmeLogFile}}"
+    fi
     return "${acmeStatuses[0]:-1}"
 }
 
@@ -409,14 +423,14 @@ acmeInstallSSLApply() {
     fi
 
     if [[ "${dnsAPIType:-}" == "cloudflare" ]]; then
-        successCard "DNS API 生成证书中"
+        statusCard "TLS 证书签发" "DNS API 生成证书中"
         if [[ -n "${cfZoneID:-}" ]]; then
             CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" padmRunCancelableCommand runAcmeIssueLogged "${acmeLogFile}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-}
         else
             CF_Token="${cfAPIToken}" padmRunCancelableCommand runAcmeIssueLogged "${acmeLogFile}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-}
         fi
     elif [[ "${dnsAPIType:-}" == "aliyun" ]]; then
-        successCard "DNS API 生成证书中"
+        statusCard "TLS 证书签发" "DNS API 生成证书中"
         Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" padmRunCancelableCommand runAcmeIssueLogged "${acmeLogFile}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-}
     else
         allowPort 80 || return 1
@@ -430,7 +444,7 @@ acmeInstallSSLApply() {
             errorCard "Nginx 服务停止失败，已取消 TLS 签发"
             return 1
         fi
-        successCard "生成证书中"
+        statusCard "TLS 证书签发" "生成证书中"
         local issueStatus=0
         padmRunCancelableCommand runAcmeIssueLogged "${acmeLogFile}" sudo "${acmeBin}" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} || issueStatus=$?
         [[ "${issueStatus}" == 0 ]] || padmRunRollback restoreTLSIssueServiceOnExit

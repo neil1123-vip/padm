@@ -573,6 +573,53 @@ EOF
     )
 
     (
+        # 签发过程保持安静，失败时只显示简短原因并保留退出码。
+        local acmeLogFile="${root}/issue-output.log" outputFile="${root}/issue-output.txt"
+        local issueRc rc suffix
+        errorCard() { printf '%s\n' "$@" >&2; }
+        tlsIssueTool() {
+            printf 'acme progress\n'
+            printf '[time] DNS API rejected token\n[time] Error adding txt record\n[time] \n' >&2
+            printf "Please add '--debug' or '--log' to check more details.\nSee: https://example.com/debug\n"
+            return "${issueRc}"
+        }
+        for issueRc in 0 7; do
+            rc=0
+            runAcmeIssueLogged "${acmeLogFile}" tlsIssueTool >"${outputFile}" 2>&1 || rc=$?
+            [[ "${rc}" == "${issueRc}" ]]
+            ! grep -Fq 'acme progress' "${outputFile}"
+            ! grep -Fq 'Please add' "${outputFile}"
+            if [[ "${issueRc}" == 0 ]]; then
+                [[ ! -s "${outputFile}" ]]
+            else
+                grep -Fq 'TLS 证书签发失败（退出码: 7）' "${outputFile}"
+                grep -Fxq 'DNS API rejected token' "${outputFile}"
+                grep -Fxq 'Error adding txt record' "${outputFile}"
+            fi
+            grep -Fxq 'acme progress' "${acmeLogFile}"
+            grep -Fxq '[time] DNS API rejected token' "${acmeLogFile}"
+        done
+        [[ "$(grep -Fxc 'acme progress' "${acmeLogFile}")" == 2 ]]
+        for suffix in $'\n' ''; do
+            printf 'DNS API rejected token%s' "${suffix}" >"${acmeLogFile}"
+            rc=0
+            runAcmeIssueLogged "${acmeLogFile}" false >"${outputFile}" 2>&1 || rc=$?
+            [[ "${rc}" == 1 ]]
+            grep -Fq '未返回错误详情' "${outputFile}"
+            grep -Fq "${acmeLogFile}" "${outputFile}"
+            ! grep -Fq 'DNS API rejected token' "${outputFile}"
+        done
+        (
+            tee() { command tee "$@"; return 9; }
+            rc=0
+            runAcmeIssueLogged "${acmeLogFile}" tlsIssueTool >"${outputFile}" 2>&1 || rc=$?
+            [[ "${rc}" == 9 ]]
+            grep -Fq 'TLS 签发日志写入失败（退出码: 9）' "${outputFile}"
+            grep -Fq "${acmeLogFile}" "${outputFile}"
+        )
+    )
+
+    (
         # 邮箱纠错必须重新签发一次，其他错误和用户取消不能重试或读取半份证书。
         local PADM_TLS_DIR="${root}/issue-retry" tlsDomain=retry.example.com sslType=zerossl
         local ipType=4 dnsAPIType= dnsAPIStatus=n installedDNSAPIStatus=saved
