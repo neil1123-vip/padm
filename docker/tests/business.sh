@@ -159,4 +159,37 @@ dockerBusinessCommand preview "${BACKUP}" --strategy merge >/dev/null ||
     fail 'preview 改写规格'
 
 reject dockerBusinessCommand restore "${BACKUP}" --strategy merge
+
+# SSH 活动期只拒绝实际恢复，不能误伤备份和只读预览或落入配置事务。
+restoreStatus=0
+dockerBusinessCommand restore "${BACKUP}" --strategy merge --yes >"${TEST_ROOT}/restore.log" 2>&1 ||
+    restoreStatus=$?
+[[ "${restoreStatus}" == 23 && "$(<"${TEST_ROOT}/apply-mode")" == configure ]] ||
+    fail '无 SSH 的业务恢复未进入配置事务'
+jq '.host_integrations = [{
+  type:"fail2ban-ssh",profile:"net-fail2ban-ssh",firewall_rules:["INPUT"],devices:[],schedules:[],
+  settings:{unit:"sshd-padm.service",target:"192.0.2.10",port:2222,
+    max_retry:6,find_time:600,ban_time:3600}}]' "${SPEC}" >"${TEST_ROOT}/ssh-spec.json"
+cp -- "${TEST_ROOT}/ssh-spec.json" "${SPEC}"
+dockerConfigureSpecValidate "${SPEC}" || fail 'SSH 业务夹具无效'
+before=$(sha256sum "${SPEC}" "${SHARES}" "${TRAFFIC}")
+for strategy in merge replace; do
+    rm -f -- "${TEST_ROOT}/apply-mode"
+    restoreStatus=0
+    dockerBusinessCommand restore "${BACKUP}" --strategy "${strategy}" --yes \
+        >"${TEST_ROOT}/restore.log" 2>&1 || restoreStatus=$?
+    [[ "${restoreStatus}" == "${PADM_DOCKER_RC_STATE}" ]] || fail 'SSH 业务恢复未明确拒绝'
+    grep -Fq '请先通过 SSH 防护入口停用' "${TEST_ROOT}/restore.log" ||
+        fail 'SSH 业务恢复缺少可操作的拒绝原因'
+    [[ ! -e "${TEST_ROOT}/apply-mode" &&
+        "$(sha256sum "${SPEC}" "${SHARES}" "${TRAFFIC}")" == "${before}" ]] ||
+        fail 'SSH 业务恢复拒绝前已派发配置或改写在线业务'
+done
+dockerBusinessCommand backup "${TEST_ROOT}/ssh-backup.json" >/dev/null ||
+    fail 'SSH 防护误伤业务备份'
+dockerBusinessCommand preview "${BACKUP}" --strategy merge >/dev/null ||
+    fail 'SSH 防护误伤业务预览'
+[[ "$(<"${TEST_ROOT}/apply-mode")" == preview &&
+    "$(sha256sum "${SPEC}" "${SHARES}" "${TRAFFIC}")" == "${before}" ]] ||
+    fail 'SSH 备份或预览改写在线业务'
 printf 'docker-business-regression-ok\n'

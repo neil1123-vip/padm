@@ -189,6 +189,11 @@ dockerBusinessCommand() (
     trap 'exit 130' INT
     trap 'exit 143' TERM
     spec=$(dockerSubscriptionSpecFile) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == restore ]] &&
+        jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${spec}" >/dev/null; then
+        dockerError 'SSH 防护启用期间暂不支持业务恢复，请先通过 SSH 防护入口停用'
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
     if [[ "${action}" == backup ]]; then
         dockerBusinessExport "${file}" "${spec}"
         return $?
