@@ -5339,8 +5339,9 @@ JSON
     realityStreamPublicPortForProtocol() { :; }
     corePortSubscriptionPort() { printf '%s\n' "${2:-$1}"; }
     echoContent() { printf '%b\n' "$2"; }
+    tput() { [[ "$*" == cols ]] || return 1; printf '122\n'; }
     qrencode() {
-        [[ "$*" == '-m 2 -t UTF8' ]] || return 1
+        [[ "$*" == '-m 2 -t ANSIUTF8' ]] || return 1
         local content
         content=$(cat)
         printf '%s\n' "${content}" >>"${qrLog}"
@@ -5380,6 +5381,30 @@ JSON
     showProtocolShareLink "${link}" >"${output}"
     grep -qF "${link}" "${output}"
     [[ "$(<"${qrLog}")" == "${link}" ]]
+    (
+        # 按可见列数判断，ANSI 转义序列不占宽度，超宽时不得折行输出。
+        warnCard() { printf '%s\n' "$@"; }
+        qrencode() { cat >/dev/null; printf '\033[47m▀▄█ \033[40m    \033[0m\n'; }
+        tput() { printf '8\n'; }
+        showProtocolShareLink "${link}" >"${output}"
+        grep -q $'\033\\[47m' "${output}"
+        ! grep -q '二维码超过显示宽度' "${output}"
+        tput() { printf '7\n'; }
+        showProtocolShareLink "${link}" >"${output}"
+        grep -q '需要 8 列' "${output}"
+        ! grep -q $'\033\\[47m' "${output}"
+        grep -qF "${link}" "${output}"
+        tput() { return 1; }
+        COLUMNS=7 showProtocolShareLink "${link}" >"${output}"
+        grep -q '需要 8 列' "${output}"
+        COLUMNS=invalid showProtocolShareLink "${link}" >"${output}"
+        grep -q $'\033\\[47m' "${output}"
+        qrencode() { cat >/dev/null; printf '%81s\n' ''; }
+        tput() { printf '122\n'; }
+        showProtocolShareLink "${link}" >"${output}"
+        grep -q '最多显示 80 列' "${output}"
+        grep -qF "${link}" "${output}"
+    )
     qrencode() { return 1; }
     warnCard() { printf '%s\n' "$1"; }
     showProtocolShareLink "${link}" >"${output}"

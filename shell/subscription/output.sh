@@ -255,13 +255,29 @@ subscribeOutputTitle() {
 }
 
 showShareLinkQRCode() {
+    local qr columns width
     if ! command -v qrencode >/dev/null 2>&1; then
         warnCard "二维码不可用" "未安装 qrencode；完整链接仍可复制导入"
         return 0
     fi
-    if ! printf '%s' "$1" | qrencode -m 2 -t UTF8; then
+    # 半块字符将两行码点合为一行，并显式设置黑白背景。
+    if ! qr=$(printf '%s' "$1" | qrencode -m 2 -t ANSIUTF8); then
         warnCard "二维码生成失败" "完整链接仍可复制导入"
+        return 0
     fi
+    columns=$(tput cols 2>/dev/null || true)
+    [[ "${columns}" =~ ^[1-9][0-9]{0,3}$ ]] || columns=${COLUMNS:-80}
+    [[ "${columns}" =~ ^[1-9][0-9]{0,3}$ ]] || columns=80
+    ((columns <= 80)) || columns=80
+    # shortcut: 半块按单列统计；双宽终端需先调整字符宽度设置。
+    width=$(printf '%s\n' "${qr}" | LC_ALL=C awk '
+        { gsub(/\033\[[0-9;]*m/, ""); gsub(/▀|▄|█/, "x"); if (length > width) width = length }
+        END { print width + 0 }')
+    if ((width > columns)); then
+        warnCard "二维码超过显示宽度" "该链接需要 ${width} 列，当前最多显示 ${columns} 列；请复制完整链接导入"
+        return 0
+    fi
+    printf '%s\n' "${qr}"
     return 0
 }
 
