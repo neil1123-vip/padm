@@ -264,41 +264,39 @@ showCoreStatusOverview() {
 
 coreLifecycleMenu() {
     local core=$1 title repo menuKey installedFn upgradeFn checkFn auditFn prereleaseFn
-    local stableText prereleaseText rollbackText checkText riskText
-    local selection version rollbackStatus
+    local upgradeText checkText riskText
+    local selection version versionStatus prerelease
     case "${core}" in
     xray)
         title=Xray-core repo=XTLS/Xray-core menuKey=xray_lifecycle_menu
         installedFn=xrayInstalled upgradeFn=upgradeXrayCore checkFn=showXrayConfigHealthCheck
         auditFn=showXrayCompatibilityAudit prereleaseFn=checkXrayPrereleaseCompatibility
-        stableText="下载并校验最新稳定版后替换" prereleaseText="下载、试跑并确认后替换"
-        rollbackText="选择最近的稳定版本回退" checkText="执行运行检查和内部严格检查"
+        upgradeText="选择正式版或预发布版，支持升级与回退"
+        checkText="执行运行检查和内部严格检查"
         riskText="只读扫描已知不兼容配置"
         ;;
     sing-box)
         title=sing-box repo=SagerNet/sing-box menuKey=singbox_lifecycle_menu
         installedFn=singBoxInstalled upgradeFn=upgradeSingBoxCore checkFn=showSingBoxConfigValidation
         auditFn=showSingBoxCompatibilityAudit prereleaseFn=checkSingBoxPrereleaseCompatibility
-        stableText="下载并校验最新统计版后替换" prereleaseText="下载统计版、试跑并确认后替换"
-        rollbackText="选择已发布的统计版本回退" checkText="执行 merge + check"
+        upgradeText="选择已发布的统计版，支持升级与回退"
+        checkText="执行 merge + check"
         riskText="只读扫描 1.13/1.14 迁移风险"
         ;;
     *) return 1 ;;
     esac
     while true; do
         echoContent title "\n┌─ ${title} 生命周期 ─────────────────────────────────"
-        menuItem 1 "升级稳定版" "${stableText}"
-        menuItem 2 "升级预发布版" "${prereleaseText}"
-        menuItem 3 "回退稳定版" "${rollbackText}"
-        menuItem 4 "检查当前配置" "${checkText}"
-        menuItem 5 "扫描升级风险" "${riskText}"
-        menuItem 6 "试跑预发布版" "不替换二进制，不操作服务"
-        menuReturnItem 7 "返回核心与服务" "回到核心与服务"
+        menuItem 1 "升级/切换版本" "${upgradeText}"
+        menuItem 2 "检查当前配置" "${checkText}"
+        menuItem 3 "扫描升级风险" "${riskText}"
+        menuItem 4 "试跑预发布版" "不替换二进制，不操作服务"
+        menuReturnItem 5 "返回核心与服务" "回到核心与服务"
         menuClose
         selection=
         menuReadChoice "${menuKey}" "请选择:" selection || return 0
         case "${selection}" in
-        1 | 2 | 3 | 4)
+        1 | 2)
             if ! "${installedFn}"; then
                 statusCard "${title} 生命周期" "无法检查" "未安装 ${title}；请返回主菜单使用安装与重装"
                 continue
@@ -306,22 +304,21 @@ coreLifecycleMenu() {
             ;;
         esac
         case "${selection}" in
-        1) "${upgradeFn}" false || true ;;
-        2) "${upgradeFn}" true || true ;;
-        3)
+        1)
             version=
-            rollbackStatus=0
-            selectRollbackVersion "${repo}" "${title}" version || rollbackStatus=$?
-            if [[ "${rollbackStatus}" -eq 0 ]]; then
-                "${upgradeFn}" false "${version}" || true
-            elif [[ "${rollbackStatus}" -eq 1 ]]; then
+            prerelease=false
+            versionStatus=0
+            selectCoreVersion "${repo}" "${title}" version prerelease || versionStatus=$?
+            if [[ "${versionStatus}" -eq 0 ]]; then
+                "${upgradeFn}" "${prerelease}" "${version}" || true
+            elif [[ "${versionStatus}" -eq 1 ]]; then
                 coreInvalidInputErrorCard
             fi
             ;;
-        4) "${checkFn}" || true ;;
-        5) "${auditFn}" || true ;;
-        6) "${prereleaseFn}" || true ;;
-        7) return 0 ;;
+        2) "${checkFn}" || true ;;
+        3) "${auditFn}" || true ;;
+        4) "${prereleaseFn}" || true ;;
+        5) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done
@@ -511,8 +508,8 @@ coreVersionManageMenu() {
         showCoreStatusOverview
         echoContent title "\n┌─ 核心与服务 ───────────────────────────────────────"
         menuLine "安装与重装只在主菜单；未安装时仍可查看状态和只读扫描"
-        menuItem 1 "Xray-core 生命周期" "升级、回退和三项配置检查"
-        menuItem 2 "sing-box 生命周期" "升级、回退和三项配置检查"
+        menuItem 1 "Xray-core 生命周期" "版本切换和三项配置检查"
+        menuItem 2 "sing-box 生命周期" "版本切换和三项配置检查"
         menuItem 3 "服务运行态" "Xray、sing-box 和 padm 依赖的 Nginx"
         menuItem 4 "日志与诊断" "Xray、sing-box 日志和 Nginx 配置检查"
         menuItem 5 "Xray Geo 数据" "更新、查看状态或设置自动更新"

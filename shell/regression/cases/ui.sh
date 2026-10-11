@@ -3285,12 +3285,12 @@ ${mainCredential}"
     fi
 
     if menuSmokePartSelected core-maintenance; then
-        local expectedLifecycleItems=$'升级稳定版\n升级预发布版\n回退稳定版\n检查当前配置\n扫描升级风险\n试跑预发布版\n返回核心与服务\n'
+        local expectedLifecycleItems=$'升级/切换版本\n检查当前配置\n扫描升级风险\n试跑预发布版\n返回核心与服务\n'
         local xrayLifecycleItems=
 
         resetMenuActions
         resetMenuRender
-        xrayVersionManageMenu <<<"7"
+        xrayVersionManageMenu <<<"5"
         xrayLifecycleItems=${menuItems}
         [[ "${xrayLifecycleItems}" == "${expectedLifecycleItems}" ]]
         ! grep -Eq '普通模式|严格模式' <<<"${output}"
@@ -3298,36 +3298,151 @@ ${mainCredential}"
 
         resetMenuActions
         resetMenuRender
-        singBoxVersionManageMenu <<<"7"
+        singBoxVersionManageMenu <<<"5"
         [[ "${menuItems}" == "${xrayLifecycleItems}" ]]
         [[ -z "${actions}" ]]
 
         (
-            coreReleaseTags() { printf 'v1.2.3\nv1.2.2\n'; }
+            local versionListLog="${TMP_DIR}/lifecycle-version-list.log"
+            local versionMetadataLog="${TMP_DIR}/lifecycle-version-metadata.log"
+            local versionOutput="${TMP_DIR}/lifecycle-version-output.log"
+            local listState=ok metadataState=ok menuFn upgradeLabel repo input state
+            coreReleaseTags() {
+                printf '%s|%s|%s\n' "$1" "$2" "$3" >>"${versionListLog}"
+                [[ "$2" == all && "$3" == 20 ]] || return 1
+                [[ "${listState}" != failed ]] || return 1
+                [[ "${listState}" != empty ]] || return 0
+                printf 'v1.2.3|false\nv1.3.0-beta.1|true\nv1.2.2|false\n'
+            }
+            fetchUrlToStdout() {
+                local tag="${1##*/}" prerelease=false draft=false
+                printf '%s\n' "$1" >>"${versionMetadataLog}"
+                [[ "${tag}" != *beta* ]] || prerelease=true
+                case "${metadataState}" in
+                missing) return 1 ;;
+                bad-json) printf '{'; return 0 ;;
+                array) printf '[]\n'; return 0 ;;
+                wrong-tag) tag=v0.0.0 ;;
+                draft) draft=true ;;
+                missing-prerelease)
+                    jq -cn --arg tag "${tag}" '{tag_name:$tag,draft:false}'
+                    return
+                    ;;
+                string-prerelease)
+                    jq -cn --arg tag "${tag}" '{tag_name:$tag,draft:false,prerelease:"false"}'
+                    return
+                    ;;
+                multiple)
+                    printf '{"tag_name":"%s","draft":false,"prerelease":false}\n{}\n' "${tag}"
+                    return 0
+                    ;;
+                esac
+                jq -cn --arg tag "${tag}" --argjson draft "${draft}" --argjson prerelease "${prerelease}" \
+                    '{tag_name:$tag,draft:$draft,prerelease:$prerelease}'
+            }
+            for menuFn in xrayVersionManageMenu singBoxVersionManageMenu; do
+                case "${menuFn}" in
+                xrayVersionManageMenu) upgradeLabel=upgradeXrayCore repo=XTLS/Xray-core ;;
+                *) upgradeLabel=upgradeSingBoxCore repo=SagerNet/sing-box ;;
+                esac
+                : >"${versionListLog}"
+                : >"${versionMetadataLog}"
+                resetMenuActions
+                "${menuFn}" <<< $'1\n\n5' >"${versionOutput}"
+                assertMenuAction "${upgradeLabel}:false "
+                grep -qF 'v1.2.3 [正式版]' "${versionOutput}"
+                grep -qF 'v1.3.0-beta.1 [预发布版]' "${versionOutput}"
+                resetMenuActions
+                "${menuFn}" <<< $'1\n3\n1\n2\n5'
+                assertMenuAction "${upgradeLabel}:false v1.2.2"
+                assertMenuAction "${upgradeLabel}:true v1.3.0-beta.1"
+                [[ "$(grep -cxF "${repo}|all|20" "${versionListLog}")" == 3 ]]
+                [[ ! -s "${versionMetadataLog}" ]]
+
+                resetMenuActions
+                "${menuFn}" <<< $'1\nm\n1.2.1\n1\nM\nv1.4.0-beta.1\n5'
+                assertMenuAction "${upgradeLabel}:false v1.2.1"
+                assertMenuAction "${upgradeLabel}:true v1.4.0-beta.1"
+                if [[ "${repo}" == SagerNet/sing-box ]]; then
+                    grep -qxF 'https://api.github.com/repos/neil1123-vip/padm/releases/tags/sing-box-v1.2.1' "${versionMetadataLog}"
+                    grep -qxF 'https://api.github.com/repos/neil1123-vip/padm/releases/tags/sing-box-v1.4.0-beta.1' "${versionMetadataLog}"
+                else
+                    grep -qxF 'https://api.github.com/repos/XTLS/Xray-core/releases/tags/v1.2.1' "${versionMetadataLog}"
+                fi
+
+                for input in $'1\n0\n5' $'1\nm\n0\n5'; do
+                    resetMenuActions
+                    "${menuFn}" <<<"${input}"
+                    [[ -z "${actions}" ]]
+                done
+                resetMenuActions
+                "${menuFn}" < <(printf '1\n')
+                [[ -z "${actions}" ]]
+                "${menuFn}" < <(printf '1\nm\n')
+                [[ -z "${actions}" ]]
+                resetMenuActions
+                "${menuFn}" <<< $'1\n999\n5'
+                assertMenuAction 'errorCard:输入有误，请重新输入'
+                ! grep -q "^${upgradeLabel}:" <<<"${actions}"
+                : >"${versionMetadataLog}"
+                resetMenuActions
+                "${menuFn}" <<< $'1\nm\n1/2\n5'
+                assertMenuAction 'errorCard:版本号格式无效，请输入发布版本号'
+                [[ ! -s "${versionMetadataLog}" ]]
+                ! grep -q "^${upgradeLabel}:" <<<"${actions}"
+
+                for metadataState in missing bad-json array wrong-tag draft missing-prerelease string-prerelease multiple; do
+                    resetMenuActions
+                    "${menuFn}" <<< $'1\nm\n1.2.1\n5'
+                    assertMenuAction 'errorCard:目标版本不可用'
+                    ! grep -q "^${upgradeLabel}:" <<<"${actions}"
+                done
+                metadataState=ok
+                for listState in failed empty; do
+                    resetMenuActions
+                    "${menuFn}" <<< $'1\n5'
+                    assertMenuAction 'errorCard:获取版本列表失败，请稍后重试'
+                    ! grep -q "^${upgradeLabel}:" <<<"${actions}"
+                done
+                listState=ok
+            done
+
+            # 文件记录可跨捕获命令的子 shell，未安装和首页都不能取远端版本。
+            : >"${versionListLog}"
+            : >"${versionMetadataLog}"
+            xrayInstalledState=false
+            singBoxInstalledState=false
             resetMenuActions
-            xrayVersionManageMenu <<<$'3\n2\n7'
-            assertMenuAction 'upgradeXrayCore:false v1.2.2'
-            resetMenuActions
-            singBoxVersionManageMenu <<<$'3\n2\n7'
-            assertMenuAction 'upgradeSingBoxCore:false v1.2.2'
+            xrayVersionManageMenu <<< $'1\n2\n3\n4\n5'
+            assertMenuAction 'statusCard:Xray-core 生命周期'
+            assertMenuAction showXrayCompatibilityAudit
+            assertMenuAction checkXrayPrereleaseCompatibility
+            singBoxVersionManageMenu <<< $'1\n2\n5'
+            assertMenuAction 'statusCard:sing-box 生命周期'
+            ! grep -q '^upgradeXrayCore:\|^upgradeSingBoxCore:' <<<"${actions}"
+            ! assertMenuAction showXrayConfigHealthCheck
+            ! assertMenuAction showSingBoxConfigValidation
+            resetMenuRender
+            coreVersionManageMenu <<<"6"
+            [[ ! -s "${versionListLog}" && ! -s "${versionMetadataLog}" ]]
         )
 
         resetMenuActions
         resetMenuRender
-        xrayVersionManageMenu <<<'4
-5
-6
-7'
+        xrayVersionManageMenu <<<'2
+3
+4
+5'
         assertMenuAction showXrayConfigHealthCheck
         assertMenuAction showXrayCompatibilityAudit
         assertMenuAction checkXrayPrereleaseCompatibility
 
         resetMenuActions
         resetMenuRender
-        singBoxVersionManageMenu <<<'4
-5
-6
-7'
+        singBoxVersionManageMenu <<<'2
+3
+4
+5'
         assertMenuAction showSingBoxConfigValidation
         assertMenuAction showSingBoxCompatibilityAudit
         assertMenuAction checkSingBoxPrereleaseCompatibility
@@ -3335,28 +3450,28 @@ ${mainCredential}"
         checkActionShouldFail=showXrayConfigHealthCheck
         resetMenuActions
         resetMenuRender
-        xrayVersionManageMenu <<<'4
-7'
+        xrayVersionManageMenu <<<'2
+5'
         checkActionShouldFail=
         assertMenuAction showXrayConfigHealthCheck
-        [[ "$(grep -c '^升级稳定版$' <<<"${menuItems}")" == "2" ]]
+        [[ "$(grep -c '^升级/切换版本$' <<<"${menuItems}")" == "2" ]]
 
         resetMenuActions
         resetMenuRender
         xrayVersionManageMenu <<<'invalid
 still-invalid
-7'
+5'
         [[ "$(grep -cF 'errorCard:输入有误，请重新输入' <<<"${actions}")" == "2" ]]
-        [[ "$(grep -c '^升级稳定版$' <<<"${menuItems}")" == "3" ]]
+        [[ "$(grep -c '^升级/切换版本$' <<<"${menuItems}")" == "3" ]]
         xrayVersionManageMenu </dev/null
 
         xrayInstalledState=false
         resetMenuActions
         resetMenuRender
         xrayVersionManageMenu <<<'1
-5
-6
-7'
+3
+4
+5'
         ! grep -q '^upgradeXrayCore:' <<<"${actions}"
         assertMenuAction 'statusCard:Xray-core 生命周期'
         assertMenuAction showXrayCompatibilityAudit

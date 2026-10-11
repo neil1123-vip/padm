@@ -519,7 +519,7 @@ coreReleaseTags() {
     local metadata page=1 pageSize=5 pageCount tagCount=0 tag
     local releaseRepo=${repo} tagPrefix= collectedTags=
     [[ "${repo}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 1
-    [[ "${prerelease}" == "true" || "${prerelease}" == "false" ]] || return 1
+    [[ "${prerelease}" == "true" || "${prerelease}" == "false" || "${prerelease}" == "all" ]] || return 1
     [[ "${limit}" =~ ^[0-9]+$ && "${limit}" -gt 0 && "${limit}" -le 100 ]] || return 1
     if [[ "${repo}" == "SagerNet/sing-box" ]]; then
         releaseRepo=neil1123-vip/padm
@@ -529,10 +529,16 @@ coreReleaseTags() {
     while ((tagCount < limit && page <= 20)); do
         metadata=$(fetchUrlToStdout "https://api.github.com/repos/${releaseRepo}/releases?per_page=${pageSize}&page=${page}" 3) || return 1
         pageCount=$(jq -ser 'if length == 1 and (.[0] | type == "array") then .[0] | length else error("release metadata is not a single array") end' <<<"${metadata}") || return 1
-        tag=$(jq -r --argjson prerelease "${prerelease}" --arg prefix "${tagPrefix}" '
-          .[] | select(.draft != true and .prerelease == $prerelease) | .tag_name |
+        tag=$(jq -r --arg prerelease "${prerelease}" --arg prefix "${tagPrefix}" '
+          .[] | select(.draft != true and (.prerelease == true or .prerelease == false)) |
+          select($prerelease != "all" or .draft == false) |
+          select($prerelease == "all" or .prerelease == ($prerelease == "true")) |
+          . as $release | .tag_name |
           select(type == "string" and length > 0 and startswith($prefix)) | ltrimstr($prefix) |
-          select($prefix == "" or test("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$"))
+          select($prefix == "" or test("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$")) |
+          if $prerelease == "all" then
+            select(test("^[A-Za-z0-9._+-]{1,128}$")) + "|" + ($release.prerelease | tostring)
+          else . end
         ' <<<"${metadata}") || return 1
         while IFS= read -r tag; do
             [[ -n "${tag}" ]] || continue
@@ -2151,7 +2157,7 @@ upgradeCore() {
     shift 5
     local prerelease=${1:-false}
     local version=${2:-}
-    local channel="稳定版"
+    local channel="正式版"
     local preparedDir=
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
     [[ -n "${version}" ]] || padmCaptureCancelableCommand version coreLatestReleaseTag "${repo}" "${prerelease}" || version=
@@ -2180,27 +2186,60 @@ upgradeSingBoxCore() {
     upgradeCore "sing-box" SagerNet/sing-box sing-box checkSingBoxPrereleaseCompatibility installDownloadedSingBoxBinary "$@"
 }
 
-selectRollbackVersion() {
+selectCoreVersion() {
     local repo=$1
     local title=$2
-    local resultVar=${3:-}
-    local selection selectedVersion versions
-    versions=$(coreReleaseTags "${repo}" false 20) || {
-        errorCard "获取稳定版本列表失败，请稍后重试"
+    local resultVar=$3
+    local prereleaseResultVar=$4
+    local selection selectedVersion selectedPrerelease versions metadata releaseRepo=${repo} releaseTag
+    printf -v "${resultVar}" '%s' ""
+    printf -v "${prereleaseResultVar}" '%s' false
+    if ! padmCaptureCancelableCommand versions coreReleaseTags "${repo}" all 20 || [[ -z "${versions}" ]]; then
+        errorCard "获取版本列表失败，请稍后重试"
         return 2
-    }
-    echoContent title "\n┌─ ${title} 版本回退 ─────────────────────────────────"
-    menuLine "只列出最近稳定版本；回退前会使用目标二进制校验当前配置"
-    awk '{print "│ "NR". "$0}' <<<"${versions}"
-    menuClose
-    menuReadChoice core_rollback_version "请输入要回退的版本序号:" selection || return 1
-    selectedVersion=$(awk -v selected="${selection}" 'NR==selected {print $0}' <<<"${versions}")
-    [[ -n "${selectedVersion}" ]] || return 1
-    if [[ -n "${resultVar}" ]]; then
-        printf -v "${resultVar}" '%s' "${selectedVersion}"
-    else
-        printf '%s\n' "${selectedVersion}"
     fi
+    echoContent title "\n┌─ ${title} 版本选择 ─────────────────────────────────"
+    menuLine "回车使用最新正式版；选择序号可升级或回退"
+    awk -F'|' '{printf "│ %d. %s [%s]\n", NR, $1, $2 == "true" ? "预发布版" : "正式版"}' <<<"${versions}"
+    menuItem m "手动输入版本号"
+    menuReturnItem 0 "返回"
+    menuClose
+    menuReadChoice core_upgrade_version "请选择版本 [回车最新正式版/m 手动/0 返回]:" selection true || return 3
+    case "${selection}" in
+    "") return 0 ;;
+    0) return 3 ;;
+    m | M)
+        menuReadChoice core_upgrade_version_tag "请输入版本号（可省略 v 前缀，0 返回）:" selectedVersion || return 3
+        [[ "${selectedVersion}" != 0 ]] || return 3
+        selectedVersion="v${selectedVersion#v}"
+        releaseTag=${selectedVersion}
+        [[ "${repo}" != SagerNet/sing-box ]] || {
+            releaseRepo=neil1123-vip/padm
+            releaseTag="sing-box-${selectedVersion}"
+        }
+        if [[ ! "${selectedVersion}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] ||
+            ! validateGitHubReleaseTag "${releaseTag}"; then
+            errorCard "版本号格式无效，请输入发布版本号"
+            return 2
+        fi
+        padmCaptureCancelableCommand metadata fetchUrlToStdout "https://api.github.com/repos/${releaseRepo}/releases/tags/${releaseTag}" 3 || metadata=
+        if ! selectedPrerelease=$(jq -ser --arg tag "${releaseTag}" '
+            select(length == 1) | .[0] |
+            select(type == "object" and .tag_name == $tag and .draft == false and
+                (.prerelease | type) == "boolean") | .prerelease | tostring
+        ' <<<"${metadata}" 2>/dev/null); then
+            errorCard "目标版本不可用" "请检查 ${selectedVersion} 的发布状态"
+            return 2
+        fi
+        ;;
+    *)
+        [[ "${selection}" =~ ^[1-9][0-9]{0,2}$ ]] || return 1
+        IFS='|' read -r selectedVersion selectedPrerelease <<<"$(awk -v selected="${selection}" 'NR==selected {print $0}' <<<"${versions}")"
+        [[ -n "${selectedVersion}" && ("${selectedPrerelease}" == true || "${selectedPrerelease}" == false) ]] || return 1
+        ;;
+    esac
+    printf -v "${resultVar}" '%s' "${selectedVersion}"
+    printf -v "${prereleaseResultVar}" '%s' "${selectedPrerelease}"
 }
 
 updateGeoSite() {

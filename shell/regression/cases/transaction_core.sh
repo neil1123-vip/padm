@@ -29,15 +29,23 @@ runSingBoxStatsBuildRegression() (
     fetchUrlToStdout() {
         case "$1" in
         'https://api.github.com/repos/neil1123-vip/padm/releases?per_page=50&page=1')
-            jq -cn '[{tag_name:"sing-box-v1.13.0",prerelease:false},
-              {tag_name:"sing-box-v1.16.0-alpha.1",prerelease:true},
+            jq -cn '[{tag_name:"sing-box-v1.13.0",prerelease:false,draft:false},
+              {tag_name:"sing-box-v1.16.0-alpha.1",prerelease:true,draft:false},
               {tag_name:"sing-box-v9.0.0",prerelease:false,draft:true},
               {tag_name:"sing-box-invalid",prerelease:false}] +
               [range(46) | {tag_name:"v3.7.6",prerelease:false}]' ;;
         'https://api.github.com/repos/neil1123-vip/padm/releases?per_page=50&page=2')
-            printf '%s\n' '[{"tag_name":"sing-box-v1.14.0","prerelease":false}]' ;;
+            printf '%s\n' '[{"tag_name":"sing-box-v1.14.0","prerelease":false,"draft":false}]' ;;
         'https://api.github.com/repos/XTLS/Xray-core/releases/latest')
             printf '%s\n' '{"tag_name":"v26.3.27"}' ;;
+        'https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5&page=1')
+            printf '%s\n' '[{"tag_name":"v26.4.1-beta.1","prerelease":true,"draft":false},
+              {"tag_name":"v26.3.27","prerelease":false,"draft":false},
+              {"tag_name":"v26.3.1","prerelease":false,"draft":false},
+              {"tag_name":"bad|false","prerelease":true,"draft":false},
+              {"tag_name":"v26.1.1","prerelease":"false","draft":false}]' ;;
+        'https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5&page=2')
+            printf '[]\n' ;;
         *) return 1 ;;
         esac
     }
@@ -45,6 +53,10 @@ runSingBoxStatsBuildRegression() (
     [[ "$(coreReleaseTags SagerNet/sing-box false 20)" == $'v1.14.0\nv1.13.0' ]]
     [[ "$(coreLatestReleaseTag SagerNet/sing-box true)" == v1.16.0-alpha.1 ]]
     [[ "$(coreLatestReleaseTag XTLS/Xray-core)" == v26.3.27 ]]
+    [[ "$(coreReleaseTags SagerNet/sing-box all 20)" == $'v1.16.0-alpha.1|true\nv1.14.0|false\nv1.13.0|false' ]]
+    [[ "$(coreReleaseTags SagerNet/sing-box all 2)" == $'v1.16.0-alpha.1|true\nv1.14.0|false' ]]
+    [[ "$(coreReleaseTags XTLS/Xray-core all 20)" == $'v26.4.1-beta.1|true\nv26.3.27|false\nv26.3.1|false' ]]
+    [[ "$(coreReleaseTags XTLS/Xray-core false 2)" == $'v26.3.27\nv26.3.1' ]]
     (
         local latestMetadata
         fetchUrlToStdout() {
@@ -64,6 +76,8 @@ runSingBoxStatsBuildRegression() (
         for releaseRepo in XTLS/Xray-core SagerNet/sing-box; do
             for releaseMetadata in '' '{}' 'null' $'[]\n[{"tag_name":"sing-box-v1.14.0","prerelease":false}]'; do
                 regressionExpectStatus 1 coreReleaseTags "${releaseRepo}" false 1 >"${root}/invalid-release-tags" 2>/dev/null || return 1
+                [[ ! -s "${root}/invalid-release-tags" ]] || return 1
+                regressionExpectStatus 1 coreReleaseTags "${releaseRepo}" all 1 >"${root}/invalid-release-tags" 2>/dev/null || return 1
                 [[ ! -s "${root}/invalid-release-tags" ]] || return 1
             done
         done
