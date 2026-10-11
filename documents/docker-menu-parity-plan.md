@@ -1,6 +1,6 @@
 # Docker 菜单与功能对齐实施计划
 
-修订日期：2026-10-10
+修订日期：2026-10-11
 
 本计划替代聊天中的六步菜单对齐方案，落实该方案的审计修正。它是
 [功能对照表](docker-feature-matrix.md)之后的实施路线，不是重做
@@ -3934,6 +3934,42 @@ driver 在完整并发中 10/10、3.270 秒，preflight 同时通过。
 同一 deadline 复用 8c.2a 的 pre/post unit、invocation、cgroup 和 listener 锚点；
 现有 Python master 不能直接套 unit JSON 冒充真实 SSH 来源。
 任意 OpenSSH、collector/jail、菜单启停、arm64、原生宿主和公网仍未开放或验收。
+
+#### 5C.8c.2h1 自有 systemd/sshd MainPID 移交原型
+
+先独立验证真实 sshd 的启动归属，不把已有 Python callback master 套 unit JSON
+当作 SSH 来源。临时可信 tracer 是自有 `Type=notify` unit 的 ExecStart，
+自行 fork/TRACEME、首停设置独立 PGID，再 exec `/usr/sbin/sshd -D`
+与专属 loopback `127.0.0.1:22218` 配置；实际 LISTEN 出现后由原 tracer
+使用 `NotifyAccess=main` 发送 READY/MAINPID。只有 manager 的实际
+`read_unit` 返回 active/running、MainPID 等于该已知 child，才认定移交成功。
+客户端之前复用原 `unit_snapshot` 两次，unit、invocation、cgroup、
+主进程安全 exe 身份/代次及两族完整唯一 listener 必须全部相同。
+
+2026-10-11，复用原生 amd64 镜像
+`sha256:0698b0ffcad3c265ab623b5bce0fcb9ef6cf9ed038811ba6b34162eee5d76f00`，
+已有 systemd `257.13-1~deb13u1`、OpenSSH `10.0p2 Debian-7+deb13u4`、
+Paramiko 与 ss，无新工具安装。低权限 systemd 原型 exit 255 且无日志，
+随后只在私有 cgroup、network none、无宿主挂载/Socket 的隔离 privileged
+实例验收，不代替原生宿主验收。首轮 MainPID 已成功，但镜像默认 22/80
+服务触发停止后全实例无 LISTEN 断言；原失败证据保留。
+第二轮以 `systemd --unit=basic.target` 避免这些默认服务，保持原断言后通过。
+
+最终 tracer 99 自建 child 101，初停到真实 sshd EXEC、LISTEN 和通知时
+start tick 47401、pgrp 101、sid 99 保持一致；systemd 实际 MainPID 101、
+InvocationID `848c02c7d9004edaab648e5d3679a13c`、unit active/running。
+唯一 LISTEN inode 26972/fd 6，原严格 snapshot 首尾相同；未放宽 single-owner。
+停止返回 0、inactive/dead、全实例监听为空，trace 记录 SIGKILL/-9 真回收、
+child proc 消失与 ECHILD。本次启动未观察到 setsid/setpgid syscall，
+只证明该启动窗口的 pgrp/sid 未变，不把它当作连接子树不会脱组的证明。
+
+证据和小复现源 `.tmp-ssh-unit-driver-8c2h/`，保留首轮和最终
+evidence/trace、输入哈希与隔离条件；本任务 unit、进程、容器完成清理。
+本阶段仅补文档，不重复 8c.2g 的完整回归，也不宣称 driver 已接真实 sshd。
+下一步仍需真实失败认证连接的创建 nr/flags、accepted/LISTEN 继承、
+短命 sender 与 setsid/setpgid 后完整收容及回收；不将观察工具当生产 driver。
+`authoritative/jail_ready=false`，任意 PID attach、collector/jail、
+菜单、arm64、公网和原生宿主验收继续未开放或未完成。
 
 ## 第六步：发布与完整验收
 
