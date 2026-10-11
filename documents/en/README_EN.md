@@ -698,11 +698,30 @@ Repeat `--listener` to map multiple existing entries. Join confirms once and ini
 mapping and the initial account sync in one transaction. Failure preserves the original role, accounts
 and traffic; retrying the same revision/content does not rebuild services. Identity, connection addresses
 and mapping are then fixed; a different invitation cannot reclaim them. After rotation, securely transfer
-the new invitation and sync again. Every sync explicitly reads a root-private invitation outside the managed
+the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.
 The raw token is not stored in specs, backups, arguments, environment or ordinary logs. The capability-free
 client binds its private source address and connects directly, without proxies, redirects or public fallback.
-Status exposes connection metadata, not remote health. New control APIs write both managed
+Status exposes connection metadata, not remote health. Existing controlled nodes can enable checks
+every five minutes from the control menu or these commands:
+
+```bash
+padm-docker control sync-schedule enable --invite /root/padm-control-invite.json --yes
+padm-docker control sync-schedule status
+padm-docker control sync-schedule disable --yes
+```
+
+Scheduling is off by default. Enabling or replacing credentials imports a validated invitation without
+applying accounts. The root-private `secrets/control-sync/` stores this host's invitation and fixed
+identity, connection and entry mapping; configuration and business backups exclude it.
+Disabling removes the persistent token. Import a rotated invitation with the same `enable` command.
+Expired, revoked or unreachable authorization prevents a commit but still allows status and disabling.
+The fixed job runs `control auto-sync`, exits `12` on deployment-lock contention, and skips normally
+stopped services without starting them. Starting services reinstalls the job. Updates, rollbacks and
+restores retain local registration and reject incompatible bundles or identity drift before stopping.
+Only existing single-peer controlled connections are supported; multiple peers, role rebinding and
+WS/SSH protection requiring fresh external source proof are rejected.
+New control APIs write both managed
 `logs/control/auth.log` and stdout, recording only a UTC timestamp
 with milliseconds, status, and the actual socket source, target and port. Forwarding headers are ignored;
 request paths, headers, accounts, credentials and exception text are never logged.
@@ -770,7 +789,7 @@ backup or stopping services. It rejects lower sync revisions and requires matchi
 at the same revision. Compatible release snapshots with unchanged sync state can still be restored.
 Controlled specs require a bundle declaring sync rollback protection, so older unprotected scripts are rejected.
 Failed or interrupted join/sync transactions still restore their pre-transaction state without inventing
-upstream revisions locally. Automatic sync, role rebinding, arbitrary historical-account restoration and
+upstream revisions locally. Multiple Peers, role rebinding, arbitrary historical-account restoration and
 a WireGuard connection wizard are not provided.
 4C.4a verifies real WireGuard handshakes and encrypted traffic between two independent network
 namespaces in an isolated Linux container. The production API and capability-free client cover join

@@ -400,7 +400,12 @@ runDockerControlSyncRegression() {
 
 runDockerControlClientRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-client.py" &&
-        bash "${PROJECT_ROOT}/docker/tests/control-join.sh"
+        bash "${PROJECT_ROOT}/docker/tests/control-join.sh" &&
+        runDockerControlSyncScheduleRegression
+}
+
+runDockerControlSyncScheduleRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/control-sync-schedule.sh"
 }
 
 runDockerControlTwoNodeRealRegression() {
@@ -555,6 +560,7 @@ registerRegressionFunctionLeaf docker-control-state runDockerControlStateRegress
 registerRegressionFunctionLeaf docker-control-cli runDockerControlCliRegression
 registerRegressionFunctionLeaf docker-control-log-schedule runDockerControlLogScheduleRegression
 registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegression
+registerRegressionFunctionLeaf docker-control-sync-schedule runDockerControlSyncScheduleRegression
 registerRegressionFunctionLeaf docker-control-two-node-real runDockerControlTwoNodeRealRegression
 registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerControlTwoDeploymentRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression

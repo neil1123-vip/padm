@@ -4,6 +4,153 @@ if [[ "${PADM_DOCKER_CONTROL_SYNC_LOADED:-}" == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
 PADM_DOCKER_CONTROL_SYNC_LOADED=1
+readonly PADM_DOCKER_CONTROL_SYNC_SCHEDULE_SCHEMA=1
+DOCKER_CONTROL_SYNC_SCHEDULE_STAGE=
+DOCKER_CONTROL_SYNC_SCHEDULE_SWITCHED=0
+
+dockerControlSyncScheduleJsonCheck() {
+    # 值路径与结束时的容器路径均须唯一，正常数组按数字路径区分。
+    jq --stream -es '
+      [.[] | if length == 2 then .[0] else .[0][:-1] end | select(length > 0)] |
+      length == (unique | length)
+    ' "$1" >/dev/null 2>&1
+}
+
+dockerControlSyncScheduleValidate() {
+    local root=$1 directory="${1}/secrets/control-sync" file parent mode
+    dockerTrafficSafePath "${root}" "${directory}" || return 1
+    [[ -e "${directory}" ]] || return 0
+    [[ -d "${directory}" && "$(stat -c '%u:%g:%a' "${directory}")" == 0:0:700 &&
+        -z "$(find "${directory}" -mindepth 1 -maxdepth 1 \
+            ! -path "${directory}/request.json" ! -path "${directory}/invite.json" -print -quit)" ]] || return 1
+    parent=${directory}
+    while :; do
+        [[ -d "${parent}" && ! -L "${parent}" && "$(stat -c %u "${parent}")" == 0 ]] || return 1
+        mode=$(stat -c %a "${parent}") || return 1
+        (( (8#${mode} & 022) == 0 )) || return 1
+        [[ "${parent}" != / ]] || break
+        parent=$(dirname -- "${parent}")
+    done
+    for file in request.json invite.json; do
+        [[ -f "${directory}/${file}" && ! -L "${directory}/${file}" &&
+            "$(stat -c '%u:%g:%a:%h' "${directory}/${file}")" == 0:0:600:1 &&
+            "$(stat -c %s "${directory}/${file}")" -le 1048576 ]] || return 1
+    done
+    jq -es '
+      def uuid: type == "string" and
+        test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$");
+      def private_address: type == "string" and
+        (split(".") as $parts | ($parts | length) == 4 and
+          all($parts[]; test("^(0|[1-9][0-9]{0,2})$") and tonumber <= 255)) and
+        test("^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)");
+      length == 1 and (.[0] | type == "object" and
+      keys == ["connection","controller_id","enabled","listener_ids","node_id","schema_version"] and
+      .schema_version == 1 and .enabled == true and
+      (.node_id | uuid) and (.controller_id | uuid) and .node_id != .controller_id and
+      (.listener_ids | type == "array" and length > 0 and length <= 16 and
+        length == (unique | length) and all(.[]; type == "string" and
+          test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$"))) and
+      (.connection | type == "object" and keys == ["listen","peer_address"] and
+        (.peer_address | private_address) and
+        (.listen | type == "object" and keys == ["address","interface","port"] and
+          .interface == "wg-padm" and (.address | private_address) and
+          (.port | type == "number" and floor == . and . >= 1024 and . <= 65535)) and
+        .listen.address != .peer_address))' \
+        "${directory}/request.json" >/dev/null 2>&1 &&
+        jq -es 'length == 1 and (.[0] | type == "object" and
+          keys == ["controller_id","expires_at","format","listen","node_id","peer_address","schema_version","token"] and
+          .schema_version == 1 and .format == "padm-docker-control-invite" and
+          (.token | type == "string" and test("^[a-f0-9]{48}$")) and
+          (.expires_at | type == "number" and floor == . and . > 0 and . <= 9007199254740991))' \
+            "${directory}/invite.json" >/dev/null 2>&1 &&
+        jq -en --slurpfile request "${directory}/request.json" --slurpfile invite "${directory}/invite.json" '
+          $request[0] as $r | $invite[0] as $i |
+          $r.node_id == $i.node_id and $r.controller_id == $i.controller_id and
+          $r.connection == {listen:$i.listen,peer_address:$i.peer_address}
+        ' >/dev/null 2>&1 &&
+        dockerControlSyncScheduleJsonCheck "${directory}/request.json" &&
+        dockerControlSyncScheduleJsonCheck "${directory}/invite.json"
+}
+
+dockerControlSyncScheduleSpecCheck() {
+    local spec=$1 root directory
+    root=$(dockerInstallRoot) || return 1
+    directory="${root}/secrets/control-sync"
+    dockerControlSyncScheduleValidate "${root}" || return 1
+    [[ -d "${directory}" ]] || return 0
+    jq -en --slurpfile request "${directory}/request.json" --slurpfile spec "${spec}" '
+      ($spec | length) == 1 and ($spec[0].control_sync as $s | $request[0] as $r |
+        $spec[0].control == null and $s.role == "controlled" and
+        $s.node_id == $r.node_id and $s.controller_id == $r.controller_id and
+        $s.connection == $r.connection and $s.listener_ids == $r.listener_ids and
+        all($spec[0].host_integrations[]; .type != "fail2ban" and
+          .type != "fail2ban-control" and .type != "fail2ban-ssh"))
+    ' >/dev/null 2>&1 || {
+        dockerError '自动同步登记身份、连接、入口或防护组合不支持，请先停用自动同步'
+        return 1
+    }
+}
+
+dockerControlSyncScheduleBundleCheck() {
+    local bundle=$1 root
+    root=$(dockerInstallRoot) || return 1
+    dockerControlSyncScheduleValidate "${root}" || return 1
+    [[ -d "${root}/secrets/control-sync" ]] || return 0
+    [[ -f "${bundle}/docker/lib/control-sync.sh" && ! -L "${bundle}/docker/lib/control-sync.sh" ]] &&
+        grep -qxF 'readonly PADM_DOCKER_CONTROL_SYNC_SCHEDULE_SCHEMA=1' \
+            "${bundle}/docker/lib/control-sync.sh" || {
+        dockerError '目标控制 bundle 不支持已启用的被控自动同步，请先停用自动同步或选择兼容版本'
+        return 1
+    }
+}
+
+dockerControlSyncScheduleRemove() {
+    local unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system} content
+    if [[ ! -e "${unitDir}/padm-docker-control-sync.service" && ! -L "${unitDir}/padm-docker-control-sync.service" &&
+        ! -e "${unitDir}/padm-docker-control-sync.timer" && ! -L "${unitDir}/padm-docker-control-sync.timer" ]]; then
+        command -v crontab >/dev/null 2>&1 || return 0
+        content=$(dockerTrafficReadCrontab) || return 1
+        [[ "${content}" == *'# padm-docker 被控账号自动同步'* ]] || return 0
+    fi
+    dockerMaintenanceScheduleApply remove control-sync
+}
+
+dockerControlSyncScheduleInstall() {
+    local root role
+    root=$(dockerInstallRoot) || return 1
+    dockerControlSyncScheduleValidate "${root}" || return 1
+    if [[ ! -d "${root}/secrets/control-sync" ]]; then
+        dockerControlSyncScheduleRemove
+        return $?
+    fi
+    role=$(dockerControlLogRole "${root}") || return 1
+    if [[ "${role}" == unconfigured ]]; then
+        dockerControlSyncScheduleRemove
+        return $?
+    fi
+    dockerControlSyncScheduleSpecCheck "${root}/config/spec.json" &&
+        dockerMaintenanceScheduleApply install control-sync
+}
+
+dockerControlSyncScheduleInterrupted() {
+    local root directory stage=${DOCKER_CONTROL_SYNC_SCHEDULE_STAGE:-}
+    dockerMaintenanceScheduleInterrupted control-sync || return 1
+    [[ -n "${stage}" ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    directory="${root}/secrets/control-sync"
+    dockerTrafficSafePath "${root}" "${stage}" &&
+        [[ "${stage}" == "${root}/locks/control-sync-state."* && -d "${stage}" && -O "${stage}" &&
+            -z "$(find "${stage}" ! -type f ! -type d -print -quit)" ]] || return 1
+    if [[ "${DOCKER_CONTROL_SYNC_SCHEDULE_SWITCHED:-0}" == 1 ]]; then
+        dockerTrafficSafePath "${root}" "${directory}" || return 1
+        [[ ! -e "${directory}" ]] || dockerControlSyncScheduleValidate "${root}" || return 1
+        [[ ! -d "${directory}" ]] || dockerRemoveManagedTree "${root}" "${directory}" || return 1
+        [[ ! -d "${stage}/previous" ]] || cp -a -- "${stage}/previous" "${directory}" || return 1
+        DOCKER_CONTROL_SYNC_SCHEDULE_SWITCHED=0
+    fi
+    dockerRemoveManagedTree "${root}" "${stage}" || return 1
+    DOCKER_CONTROL_SYNC_SCHEDULE_STAGE=
+}
 
 dockerControlSyncSpecValidate() {
     jq -e '

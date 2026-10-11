@@ -479,20 +479,170 @@ finally:
     assert not result
 
 
-def interrupted_sync(node, invitation, number=None):
+def peer_requests(controller):
+    expected = f" source={ADDRESS[1]} target={ADDRESS[0]} port=39778".encode()
+    return [line for line in (controller["path"] / "deployment/logs/control/auth.log").read_bytes().splitlines()
+            if expected in line]
+
+
+def sync_schedule_cron(controller, controlled, invitation):
+    root = controlled["path"] / "deployment"
+    directory = root / "secrets/control-sync"
+    before, previous = state(controlled), services(controlled)
+    for _ in range(2):
+        cli(controlled, "control", "sync-schedule", "enable", "--invite", str(invitation), "--yes")
+    sync = before["control_sync"]
+    expected = {"schema_version": 1, "enabled": True,
+                **{key: sync[key] for key in ("node_id", "controller_id", "connection", "listener_ids")}}
+    assert set(path.name for path in directory.iterdir()) == {"request.json", "invite.json"}
+    assert json.loads((directory / "request.json").read_text()) == expected
+    assert json.loads((directory / "invite.json").read_text()) == json.loads(invitation.read_text())
+    metadata = directory.stat()
+    assert (metadata.st_mode & 0o7777, metadata.st_uid, metadata.st_gid) == (0o700, 0, 0)
+    registration = {}
+    for path in directory.iterdir():
+        metadata = path.stat()
+        assert (metadata.st_mode & 0o7777, metadata.st_uid, metadata.st_gid, metadata.st_nlink) == (0o600, 0, 0, 1)
+        registration[path.name] = path.read_bytes()
+    status = cli(controlled, "control", "sync-schedule", "status")
+    assert json.loads(status.stdout) == {"enabled": True, "backend": "cron", "installed": True, "active": True}
+    # 私有 bind mount 下 cron 不一定看到 crontab(1) 的原子替换，强制重载测试登记。
+    command(controlled["enter"] + ["pkill", "-HUP", "-x", "cron"])
+    cron = command(controlled["enter"] + ["crontab", "-l"]).decode()
+    scheduled = [line for line in cron.splitlines() if "control auto-sync" in line]
+    assert len(scheduled) == 1 and scheduled[0].startswith("*/5 * * * * ")
+    token = json.loads(invitation.read_text())["token"].encode()
+    assert token not in cron.encode() and token not in (directory / "request.json").read_bytes()
+    assert token not in (root / "config/spec.json").read_bytes()
+    cli(controlled, "control", "auto-sync")
+    assert state(controlled) == before and services(controlled) == previous, "同版本自动同步重建服务"
+
+    # 用生产锁持有者验证立即冲突，竞争入口不能访问主控或改写本机状态。
+    ready = controlled["path"] / "sync-lock-ready"
+    lock = subprocess.Popen(controlled["enter"] + ["bash", "-c", """
+source "$1"
+dockerHostPreflight && dockerLockInstalledDeployment || exit "$?"
+trap 'dockerReleaseDeploymentLock' EXIT
+printf 'ready\\n' >"$2"
+read -r release
+""", "sync-lock", str(root / "bundle/install-docker.sh"), str(ready)],
+        env=controlled["env"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists():
+            assert lock.poll() is None and time.monotonic() < deadline, "生产部署锁持有者未准备好"
+            time.sleep(0.05)
+        requests = peer_requests(controller)
+        conflict = cli(controlled, "control", "auto-sync", accepted=False)
+        assert conflict.returncode == 12, "自动同步锁竞争未立即返回 12"
+        assert state(controlled) == before and peer_requests(controller) == requests
+        stdout, stderr = lock.communicate(input=b"release\n", timeout=10)
+        assert lock.returncode == 0, diagnostic(controlled, (stdout + stderr).decode(errors="replace"))
+    finally:
+        stop(lock)
+        for stream in (lock.stdin, lock.stdout, lock.stderr):
+            if stream is not None:
+                stream.close()
+        ready.unlink(missing_ok=True)
+
+    revision = state(controller)["control"]["revision"]
+    wall_started = time.time()
+    cli(controller, "account", "edit", identity(20), "--name", "cron-managed-account")
+    target = state(controller)["control"]["revision"]
+    assert target == revision + 1
+    started = time.monotonic()
+    deadline, progress = started + 360, started
+    rotated_logs = 300 - time.time() % 300 > 90
+    if rotated_logs:
+        log_rotate(controller, controlled, invitation)
+    # 不调用 auto-sync；只允许真实 cron 在固定五分钟边界提交新版本。
+    while True:
+        current = state(controlled)
+        assert current["control_sync"]["last_revision"] in (sync["last_revision"], target)
+        assert registration == {path.name: path.read_bytes() for path in directory.iterdir()}
+        if current["control_sync"]["last_revision"] == target and not (root / "locks/deployment.lock").exists():
+            break
+        if controlled["cron"].poll() is not None or time.monotonic() >= deadline:
+            processes = command(controlled["enter"] + ["ps", "-eo", "pid,ppid,comm"]).decode()
+            raise AssertionError("真实五分钟 cron 未提交新版本；节点进程：\n" + processes)
+        if time.monotonic() >= progress:
+            # 避开临近调度边界，状态查询仍走生产只读入口。
+            if not (root / "locks/deployment.lock").exists() and 300 - time.time() % 300 > 20:
+                cli(controlled, "control", "sync-schedule", "status")
+                cli(controlled, "control", "status", "--json")
+            print(f"docker-control-two-deployment-cron-wait:elapsed={time.monotonic()-started:.3f}s", flush=True)
+            progress = time.monotonic() + 30
+        time.sleep(0.2)
+    assert int(time.time() // 300) > int(wall_started // 300), "新版本提交未经过真实 cron 边界"
+    current = state(controlled)
+    assert current["accounts"][0] == before["accounts"][0] and current["accounts"][1]["name"] == "cron-managed-account"
+    actual = services(controlled)
+    assert actual["xray"]["id"] != previous["xray"]["id"], "定时新版本未应用到真实核心"
+    cli(controlled, "control", "auto-sync")
+    assert state(controlled) == current and services(controlled) == actual, "定时提交后的同版本检查重建服务"
+    print(f"docker-control-two-deployment-cron-autonomous-revision-ok:revision={target}:"
+          f"elapsed={time.monotonic()-started:.3f}s", flush=True)
+    if not rotated_logs:
+        log_rotate(controller, controlled, invitation)
+    return current, actual
+
+
+def sync_schedule_disable(controller, controlled):
+    root = controlled["path"] / "deployment"
+    directory = root / "secrets/control-sync"
+    before = state(controlled)
+    registration = {path.name: path.read_bytes() for path in directory.iterdir()}
+    requests = peer_requests(controller)
+    cli(controlled, "down")
+    assert registration == {path.name: path.read_bytes() for path in directory.iterdir()}
+    assert "control auto-sync" not in command(controlled["enter"] + ["crontab", "-l"]).decode()
+    assert not command(controlled["docker"] + ["ps", "--all", "--quiet"])
+    cli(controlled, "control", "auto-sync")
+    assert state(controlled) == before and not command(controlled["docker"] + ["ps", "--all", "--quiet"])
+    assert peer_requests(controller) == requests, "down 后自动同步仍发起网络请求"
+    cli(controlled, "control", "sync-schedule", "disable", "--yes")
+    assert not directory.exists()
+    status = cli(controlled, "control", "sync-schedule", "status")
+    assert json.loads(status.stdout) == {"enabled": False, "backend": "none", "installed": False, "active": False}
+    cli(controlled, "control", "auto-sync")
+    assert state(controlled) == before and not command(controlled["docker"] + ["ps", "--all", "--quiet"])
+    assert peer_requests(controller) == requests, "停用后的自动同步仍发起网络请求"
+    cli(controlled, "up")
+    assert state(controlled) == before
+    deadline = time.monotonic() + 15
+    # 普通 up 不等待健康；只容许新容器的 starting 窗口，不吞掉 unhealthy 或停止。
+    while True:
+        ids = command(controlled["docker"] + ["ps", "--all", "--quiet"]).decode().split()
+        assert ids, "up 后没有真实容器"
+        inspected = json.loads(command(controlled["docker"] + ["inspect", *ids]))
+        statuses = [item["State"]["Health"]["Status"] for item in inspected]
+        assert all(item["State"]["Running"] for item in inspected) and \
+            all(value in ("starting", "healthy") for value in statuses), "up 后服务停止或不健康"
+        if all(value == "healthy" for value in statuses):
+            break
+        assert time.monotonic() < deadline, "up 后真实容器健康检查超时"
+        time.sleep(0.2)
+    services(controlled)
+    print("docker-control-two-deployment-sync-schedule-down-disable-zero-network-ok", flush=True)
+
+
+def interrupted_sync(node, invitation, number=None, *, automatic=False):
     before = state(node)
     previous = services(node)["xray"]["id"]
     root = node["path"] / "deployment"
     originals = {path: path.read_bytes() for path in (
         root / "config/xray/config.json", root / "deployment.json", root / "compose.json", root / "images.env",
     )}
+    registration = {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mode)
+                    for path in (root / "secrets/control-sync").glob("*.json")}
     started = time.monotonic()
     # 主控重建后先确认隧道已重新握手，再把故障注入限定到应用事务。
     reachable(node, invitation)
     with (node["path"] / "cli.log").open("ab") as output:
+        arguments = ["control", "auto-sync"] if automatic else ["control", "sync", "--invite", str(invitation)]
         process = subprocess.Popen(
             node["enter"] + ["setsid", "--wait", "--", "bash", str(node["path"] / "bin/padm-docker"),
-                             "control", "sync", "--invite", str(invitation)],
+                             *arguments],
             env=node["env"], stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
         )
         transaction_pid = None
@@ -550,6 +700,9 @@ def interrupted_sync(node, invitation, number=None):
                     process.wait(timeout=5)
     assert state(node) == before, "真实同步失败未恢复原规格"
     assert all(path.read_bytes() == content for path, content in originals.items()), "真实同步失败未恢复部署文件"
+    assert registration == {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mode)
+                            for path in (root / "secrets/control-sync").glob("*.json")}, \
+        "真实同步失败改动自动同步私有登记"
     services(node)
     assert not list(root.glob(".candidate.*")) and not list(root.glob(".control-client.*"))
     assert not (root / "locks/deployment.lock").exists()
@@ -664,6 +817,13 @@ def main():
                                        ("cron.d", "/etc/cron.d")):
                     command(ns + ["mount", "--bind", str(node / source), target])
                 command(ns + ["ip", "link", "set", "lo", "up"])
+                # 真实 cron 子进程仅继承测试节点私有路径，不把邀请或 token 放入环境。
+                command(ns + ["crontab", "-"], content=(
+                    # 工具镜像的静态 Docker/jq 位于 /usr/local/bin，cron 默认路径不含它。
+                    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+                    f"PADM_DOCKER_BIN_DIR={node}/bin\nHOME={node}/home\nTMPDIR={node}/tmp\n"
+                    "PADM_DOCKER_HEALTH_TIMEOUT=8\nPYTHONDONTWRITEBYTECODE=1\nMAILTO=\"\"\n"
+                ).encode())
                 with (node / "cron.log").open("wb") as output:
                     cron = subprocess.Popen(ns + ["cron", "-f"], stdout=output, stderr=subprocess.STDOUT)
                 crons.append(cron)
@@ -706,7 +866,8 @@ def main():
                     "TMPDIR": str(node / "tmp"), "PYTHONDONTWRITEBYTECODE": "1",
                     "PADM_DOCKER_HEALTH_TIMEOUT": "8",
                 }
-                nodes.append({"path": node, "pid": pid, "enter": ns, "docker": client, "env": env})
+                nodes.append({"path": node, "pid": pid, "enter": ns, "docker": client,
+                              "env": env, "cron": cron, "cron_paused": False})
                 proofs.append({"role": role, "engine_id": info["ID"],
                                "netns": os.readlink(f"/proc/{pid}/ns/net")})
             assert proofs[0]["engine_id"] != proofs[1]["engine_id"]
@@ -810,8 +971,11 @@ def main():
             assert services(controlled) == before_services, "真实幂等同步重建了服务"
             assert state(controlled) == joined
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
-            log_rotate(controller, controlled, controlled_invite)
             traffic_before = traffic(controlled, images["sing-box"])
+            joined, before_services = sync_schedule_cron(controller, controlled, controlled_invite)
+            # 后续故障注入复用自动入口；暂停私有 cron，避免五分钟重试与恢复断言竞争。
+            command(controlled["enter"] + ["pkill", "-STOP", "-x", "cron"])
+            controlled["cron_paused"] = True
             command(controlled["enter"] + ["ip", "route", "replace", ADDRESS[0] + "/32", "dev", "underlay"])
             cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)
             command(controlled["enter"] + ["ip", "route", "replace", ADDRESS[0] + "/32",
@@ -819,16 +983,16 @@ def main():
             alias = json.loads(command(controlled["enter"] + ["ip", "-d", "-j", "link", "show", "wg-padm"]))[
                 0]["ifalias"]
             command(controlled["enter"] + ["ip", "link", "set", "wg-padm", "alias", "outside-owner"])
-            cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)
+            cli(controlled, "control", "auto-sync", accepted=False)
             command(controlled["enter"] + ["ip", "link", "set", "wg-padm", "alias", alias])
             assert state(controlled) == joined and services(controlled) == before_services
             command(controlled["enter"] + ["ip", "link", "set", "underlay", "down"])
             started = time.monotonic()
-            cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)
+            cli(controlled, "control", "auto-sync", accepted=False)
             assert time.monotonic() - started < 20, "真实断网同步超出总时限"
             assert state(controlled) == joined and services(controlled) == before_services
             command(controlled["enter"] + ["ip", "link", "set", "underlay", "up"])
-            cli(controlled, "control", "sync", "--invite", str(controlled_invite))
+            cli(controlled, "control", "auto-sync")
             assert state(controlled) == joined and services(controlled) == before_services
             upstream_path = controller["path"] / "deployment/config/control/state.json"
             upstream = upstream_path.read_bytes()
@@ -836,22 +1000,22 @@ def main():
                 conflict = json.loads(upstream)
                 conflict["accounts"][0]["name"] = "same-version-conflict"
                 upstream_path.write_text(json.dumps(conflict), encoding="ascii")
-                cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)
+                cli(controlled, "control", "auto-sync", accepted=False)
                 assert state(controlled) == joined and services(controlled) == before_services
                 conflict = json.loads(upstream)
                 conflict["revision"] -= 1
                 upstream_path.write_text(json.dumps(conflict), encoding="ascii")
-                cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)
+                cli(controlled, "control", "auto-sync", accepted=False)
                 assert state(controlled) == joined and services(controlled) == before_services
             finally:
                 upstream_path.write_bytes(upstream)
-            cli(controlled, "control", "sync", "--invite", str(controlled_invite))
+            cli(controlled, "control", "auto-sync")
             assert state(controlled) == joined and services(controlled) == before_services
             print("docker-control-two-deployment-network-conflict-recovery-ok", flush=True)
             cli(controller, "account", "disable", identity(20))
             for number in (None, signal.SIGINT, signal.SIGTERM):
-                interrupted_sync(controlled, controlled_invite, number)
-            cli(controlled, "control", "sync", "--invite", str(controlled_invite))
+                interrupted_sync(controlled, controlled_invite, number, automatic=True)
+            cli(controlled, "control", "auto-sync")
             updated = state(controlled)
             assert updated["accounts"][0] == original_local
             assert updated["control_sync"]["last_revision"] > joined["control_sync"]["last_revision"]
@@ -867,16 +1031,28 @@ def main():
             cli(controller, "control", "invite", "--output", str(rotated), "--yes")
             reachable(controlled, controlled_invite)
             unauthorized(controlled, controlled_invite)
-            cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)
+            persisted = controlled["path"] / "deployment/secrets/control-sync/invite.json"
+            old_token = json.loads(persisted.read_text())["token"]
+            cli(controlled, "control", "auto-sync", accepted=False)
             assert state(controlled) == updated
             save(controlled_invite, json.loads(rotated.read_text()))
             cli(controlled, "control", "sync", "--invite", str(controlled_invite))
             assert state(controlled) == updated
+            assert json.loads(persisted.read_text())["token"] == old_token
+            cli(controlled, "control", "auto-sync", accepted=False)
+            cli(controlled, "control", "sync-schedule", "enable", "--invite", str(controlled_invite), "--yes")
+            assert json.loads(persisted.read_text()) == json.loads(controlled_invite.read_text())
+            previous = services(controlled)
+            cli(controlled, "control", "auto-sync")
+            assert state(controlled) == updated and services(controlled) == previous
             cli(controller, "control", "revoke", "--yes")
             reachable(controlled, controlled_invite)
             unauthorized(controlled, controlled_invite)
-            cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)
+            cli(controlled, "control", "auto-sync", accepted=False)
             assert state(controlled) == updated
+            sync_schedule_disable(controller, controlled)
+            command(controlled["enter"] + ["pkill", "-CONT", "-x", "cron"])
+            controlled["cron_paused"] = False
             services(controller)
             services(controlled)
             control_fail2ban(controller, controlled, controlled_invite)
@@ -887,6 +1063,7 @@ def main():
                 logs = (node["path"] / "cli.log").read_bytes()
                 logs += (node["path"] / "seed.log").read_bytes()
                 logs += (node["path"] / "seed-private.log").read_bytes()
+                logs += (node["path"] / "cron.log").read_bytes()
                 for service, item in services(node).items():
                     logs += command(node["docker"] + ["logs", item["id"]])
                 secrets = [json.loads(path.read_text())["token"] for path in (invite, rotated)]
@@ -900,11 +1077,20 @@ def main():
                     secrets += [(member["path"] / "secrets/tls" /
                                  f"{state(member)['tls']['domain']}.key").read_text().strip()]
                 assert all(secret.encode() not in logs for secret in secrets), "真实 CLI 日志泄露秘密"
+                assert all(json.loads(path.read_text())["token"].encode() not in
+                           (node["path"] / "deployment/config/spec.json").read_bytes()
+                           for path in (invite, rotated)), "自动同步 token 进入部署规格"
             proofs[0]["scope"] = "real-compose-control-transactions-from-installed-fixture"
             print("docker-control-two-deployment-sync-rotation-revoke-ok", flush=True)
         finally:
             failed = sys.exc_info()[0] is not None
             cleanup_errors = []
+            for node in nodes:
+                if node["cron_paused"]:
+                    try:
+                        command(node["enter"] + ["pkill", "-CONT", "-x", "cron"])
+                    except Exception as error:
+                        cleanup_errors.append(f"节点 {node['path'].name} cron 恢复：{type(error).__name__}")
             for node in reversed(nodes):
                 try:
                     containers = command(node["docker"] + ["ps", "--all", "--quiet"]).decode().split()

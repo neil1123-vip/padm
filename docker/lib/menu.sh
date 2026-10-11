@@ -619,7 +619,8 @@ dockerMenuControl() {
         printf '\nDocker 控制连接\n'
         printf '%s\n' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' '4. 撤销授权' \
             '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' \
-            '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' '0. 返回'
+            '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
+            '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -660,6 +661,13 @@ dockerMenuControl() {
         9) dockerMenuRun control log-schedule status || true ;;
         10) dockerMenuRun control log-schedule enable || true ;;
         11) dockerMenuRun control log-schedule disable || true ;;
+        12) dockerMenuRun control sync-schedule status || true ;;
+        13)
+            dockerSetupRead invitation '外部私有邀请文件绝对路径（0 返回）: ' &&
+                [[ -n "${invitation}" ]] || continue
+            dockerMenuRun control sync-schedule enable --invite "${invitation}" || true
+            ;;
+        14) dockerMenuRun control sync-schedule disable || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

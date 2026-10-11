@@ -1136,6 +1136,191 @@ dockerControlClientApply() (
 dockerControlJoin() { dockerControlClientApply join "$@"; }
 dockerControlSync() { dockerControlClientApply sync "$@"; }
 
+dockerControlSyncScheduleCommand() (
+    local action=${1:-} invitation= yes=0 answer root spec stage= draft= enabled=false result status label
+    shift || true
+    case "${action}" in enable|disable|status) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+        --invite)
+            [[ "${action}" == enable && -z "${invitation}" && "$#" -ge 2 &&
+                -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
+            invitation=$2; shift 2
+            ;;
+        --yes)
+            [[ "${action}" != status && "${yes}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            yes=1; shift
+            ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+    done
+    [[ "${action}" != enable || -n "${invitation}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "${action}" != status && "${yes}" != 1 ]]; then
+        [[ -t 0 && -t 1 ]] || {
+            dockerError '更改被控自动同步需要 --yes 确认'
+            return "${PADM_DOCKER_RC_USAGE}"
+        }
+        if [[ "${action}" == enable ]]; then label=启用; else label=停用; fi
+        dockerSetupRead answer "确认${label}被控账号每 5 分钟自动同步？[y/N]: " n ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    fi
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'status=$?; dockerControlSyncScheduleInterrupted || status=15;
+      [[ -z "${draft}" ]] || dockerRemoveManagedTree "${root}" "${draft}" || status=15;
+      dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+    dockerControlSyncScheduleValidate "${root}" || return "${PADM_DOCKER_RC_STATE}"
+    [[ ! -d "${root}/secrets/control-sync" ]] || enabled=true
+    if [[ "${action}" == status ]]; then
+        result=$(dockerMaintenanceScheduleApply check control-sync) || return "${PADM_DOCKER_RC_STATE}"
+        jq -c --argjson enabled "${enabled}" '. + {enabled:$enabled}' <<<"${result}"
+        return $?
+    fi
+    if [[ "${action}" == enable ]]; then
+        spec=$(dockerAccountSpecFile) || return $?
+        dockerControlRecoveryCheck &&
+            dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
+            dockerControlSyncScheduleSpecCheck "${spec}" || return "${PADM_DOCKER_RC_STATE}"
+        jq -e '.control == null and .control_sync.role == "controlled" and
+          .control_sync.connection != null and all(.host_integrations[];
+            .type != "fail2ban" and .type != "fail2ban-control" and .type != "fail2ban-ssh")' \
+            "${spec}" >/dev/null || {
+            dockerError '自动同步仅支持已有私网连接的单 Peer 被控角色，拒绝 WS/SSH 防护来源组合'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        dockerControlInviteInputCheck "${invitation}" "${root}" || {
+            dockerError '邀请须为受管目录外的 root 私有普通文件，祖先目录不得可写或含链接'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        draft=$(mktemp -d "${root}/.control-client.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+        chmod 0700 "${draft}" &&
+            cp -- "${invitation}" "${draft}/invite.json" &&
+            chmod 0600 "${draft}/invite.json" &&
+            (umask 077; dockerConfigureSpecMigrate "${spec}" "${draft}/spec.json") ||
+            return "${PADM_DOCKER_RC_STATE}"
+        dockerControlClientRuntimeCheck "${draft}/invite.json" || return $?
+        (umask 077; dockerControlClientBuildDraft "${draft}" >"${draft}/next.json") &&
+            dockerConfigureSpecValidate "${draft}/next.json" || {
+            status=$?
+            [[ "${status}" != 130 && "${status}" != 143 ]] || return "${status}"
+            dockerError '私网认证或同步规划失败，保留原自动同步登记'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
+    fi
+    [[ -z "${DOCKER_CONTROL_SYNC_SCHEDULE_STAGE:-}" ]] || return "${PADM_DOCKER_RC_STATE}"
+    DOCKER_CONTROL_SYNC_SCHEDULE_STAGE=$(mktemp -d "${root}/locks/control-sync-state.XXXXXX") ||
+        return "${PADM_DOCKER_RC_STATE}"
+    stage=${DOCKER_CONTROL_SYNC_SCHEDULE_STAGE}
+    chmod 0700 "${stage}" || return "${PADM_DOCKER_RC_STATE}"
+    [[ ! -d "${root}/secrets/control-sync" ]] ||
+        cp -a -- "${root}/secrets/control-sync" "${stage}/previous" || return "${PADM_DOCKER_RC_STATE}"
+    DOCKER_CONTROL_SYNC_SCHEDULE_SWITCHED=1
+    if [[ "${action}" == enable ]]; then
+        mkdir -m 0700 "${stage}/next" &&
+            cp -- "${draft}/invite.json" "${stage}/next/invite.json" &&
+            (umask 077; jq '.control_sync |
+              {schema_version:1,enabled:true,node_id,controller_id,listener_ids,connection}' \
+                "${draft}/spec.json" >"${stage}/next/request.json") &&
+            chmod 0600 "${stage}/next/"*.json &&
+            chown -R 0:0 "${stage}/next" || return "${PADM_DOCKER_RC_STATE}"
+        dockerMaintenanceScheduleApply install control-sync || return "${PADM_DOCKER_RC_STATE}"
+    else
+        dockerControlSyncScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
+    fi
+    # 私有登记与调度共享恢复窗口；TERM 或发布失败恢复原凭据和原作业。
+    [[ ! -d "${root}/secrets/control-sync" ]] ||
+        dockerRemoveManagedTree "${root}" "${root}/secrets/control-sync" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == enable ]]; then
+        mv -T -- "${stage}/next" "${root}/secrets/control-sync" &&
+            dockerControlSyncScheduleValidate "${root}" || return "${PADM_DOCKER_RC_STATE}"
+        enabled=true
+    else
+        enabled=false
+    fi
+    dockerMaintenanceScheduleCommit control-sync &&
+        dockerControlSyncScheduleInterrupted || return "${PADM_DOCKER_RC_STATE}"
+    printf '被控账号自动同步 enabled=%s\n' "${enabled}"
+)
+
+dockerControlSyncScheduleRuntimeState() {
+    local root=$1 ids inspected expected
+    local -a containers=()
+    ids=$(docker ps --all --quiet --no-trunc \
+        --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}") || return 1
+    if [[ -z "${ids}" ]]; then printf 'down\n'; return 0; fi
+    mapfile -t containers <<<"${ids}"
+    [[ "${#containers[@]}" -le 32 ]] || return 1
+    for ids in "${containers[@]}"; do [[ "${ids}" =~ ^[a-f0-9]{64}$ ]] || return 1; done
+    expected=$(jq -ce --slurpfile deployment "${root}/deployment.json" '
+      [.services | to_entries[] |
+        select((.value.profiles // [] | index("net-check")) == null) |
+        select((.value.profiles // [] | length) == 0 or
+          any(.value.profiles[]; . as $p | $deployment[0].compose.profiles | index($p))) |
+        .key] | sort | select(length > 0 and index("net-wireguard") != null)
+    ' "${root}/compose.json") &&
+        inspected=$(docker container inspect "${containers[@]}") || return 1
+    jq -e --arg root "${root}" --arg project "${PADM_DOCKER_PROJECT}" --argjson expected "${expected}" \
+        --slurpfile compose "${root}/compose.json" '
+      ([.[].Config.Labels["com.docker.compose.service"]] | sort) == $expected and
+      all(.[]; . as $c | $compose[0].services[$c.Config.Labels["com.docker.compose.service"]] as $service |
+        .State.Status == "running" and .State.Running == true and
+        .State.Paused == false and .State.Restarting == false and .State.Dead == false and
+        (if $service.healthcheck != null then .State.Health.Status == "healthy" else true end) and
+        .Config.Labels["com.docker.compose.project"] == $project and
+        .Config.Labels["com.docker.compose.project.working_dir"] == $root and
+        .Config.Labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+        .Config.Labels["com.docker.compose.oneoff"] == "False" and
+        .Config.Labels["io.padm.mode"] == "docker" and .Config.Labels["io.padm.project"] == $project)
+    ' <<<"${inspected}" >/dev/null || return 1
+    printf 'running\n'
+}
+
+dockerControlAutoSync() (
+    local root spec draft= runtime status=0
+    [[ "$#" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    PADM_DOCKER_LOCK_TIMEOUT=0 dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'status=$?; dockerConfigurationInterrupted || status=15;
+      [[ -z "${draft}" ]] || dockerRemoveManagedTree "${root}" "${draft}" || status=15;
+      dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+    dockerControlSyncScheduleValidate "${root}" || return "${PADM_DOCKER_RC_STATE}"
+    [[ -d "${root}/secrets/control-sync" ]] || return 0
+    spec=$(dockerAccountSpecFile) || return $?
+    dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
+        dockerControlSyncScheduleSpecCheck "${spec}" &&
+        dockerControlRecoveryCheck current || return "${PADM_DOCKER_RC_STATE}"
+    runtime=$(dockerControlSyncScheduleRuntimeState "${root}") || {
+        dockerError '被控自动同步发现容器状态、服务集合或归属漂移，保留当前配置'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    [[ "${runtime}" != down ]] || return 0
+    draft=$(mktemp -d "${root}/.control-client.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+    chmod 0700 "${draft}" &&
+        cp -- "${root}/secrets/control-sync/invite.json" "${draft}/invite.json" &&
+        chmod 0600 "${draft}/invite.json" &&
+        (umask 077; dockerConfigureSpecMigrate "${spec}" "${draft}/spec.json") ||
+        return "${PADM_DOCKER_RC_STATE}"
+    dockerControlClientRuntimeCheck "${draft}/invite.json" || return $?
+    (umask 077; dockerControlClientBuildDraft "${draft}" >"${draft}/next.json") &&
+        dockerConfigureSpecValidate "${draft}/next.json" || {
+        status=$?
+        [[ "${status}" != 130 && "${status}" != 143 ]] || return "${status}"
+        dockerError '被控自动同步认证或规划失败，本轮保留当前账号和配置'
+        return "${PADM_DOCKER_RC_CONFLICT}"
+    }
+    jq -en --slurpfile current "${spec}" --slurpfile next "${draft}/next.json" \
+        '$current == $next' >/dev/null && return 0
+    DOCKER_CONTROL_SYNC_TRANSACTION=1
+    dockerAccountApplyDraft "${draft}/next.json"
+)
+
 dockerControlStatus() (
     local json=${1:-0} spec root role healthy=null result
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
@@ -1201,8 +1386,10 @@ dockerControlCommand() {
     log-rotate) dockerControlLogRotate "$@" ;;
     log-schedule) dockerControlLogScheduleCommand "$@" ;;
     auto-log-rotate) dockerControlAutoLogRotate "$@" ;;
+    sync-schedule) dockerControlSyncScheduleCommand "$@" ;;
+    auto-sync) dockerControlAutoSync "$@" ;;
     *)
-        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex> | log-rotate [--yes] | log-schedule enable|disable [--yes] | log-schedule status | auto-log-rotate'
+        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex> | log-rotate [--yes] | log-schedule enable|disable [--yes] | log-schedule status | auto-log-rotate | sync-schedule enable --invite <私有文件> [--yes] | sync-schedule disable [--yes] | sync-schedule status | auto-sync'
         return "${PADM_DOCKER_RC_USAGE}"
         ;;
     esac

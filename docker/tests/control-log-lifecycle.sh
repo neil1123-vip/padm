@@ -20,6 +20,7 @@ chmod 0600 "${lifecycleRoot}/data/control-log/schedule.json"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
 eval "$(declare -f dockerValidateConfigurationBackup | sed '1s/dockerValidateConfigurationBackup/dockerProductionValidateConfigurationBackup/')"
+eval "$(declare -f dockerBackupConfiguration | sed '1s/dockerBackupConfiguration/dockerProductionBackupConfiguration/')"
 
 calls="${TEST_ROOT}/calls.log"
 : >"${calls}"
@@ -45,6 +46,11 @@ dockerGeoScheduleInstall() { record geo-install; }
 dockerGeoScheduleRemove() { record geo-remove; }
 dockerControlLogScheduleInstall() { record control-log-install; }
 dockerControlLogScheduleRemove() { record control-log-remove; }
+dockerControlSyncScheduleInstall() { record control-sync-install; }
+dockerControlSyncScheduleRemove() { record control-sync-remove; }
+dockerControlSyncScheduleValidate() { record control-sync-validate; }
+dockerControlSyncScheduleSpecCheck() { record control-sync-binding; [[ "${FAIL_SYNC_SPEC:-0}" != 1 ]]; }
+dockerControlSyncScheduleBundleCheck() { record control-sync-bundle; [[ "${FAIL_SYNC_BUNDLE:-0}" != 1 ]]; }
 dockerComposeRun() { record "compose:$*"; }
 dockerComposeExecute() { record "compose-execute:$*"; }
 dockerDeploymentState() { printf '%s\n' installed; }
@@ -181,21 +187,25 @@ assert_registration
 reset_calls
 dockerLifecycleCommand up
 has_call control-log-install || fail 'up 未安装控制日志调度'
+has_call control-sync-install || fail 'up 未安装自动同步调度'
 has_call 'compose:up -d' || fail 'up 未启动 Compose'
 
 reset_calls
 dockerLifecycleCommand restart
 has_call control-log-install || fail 'restart 未安装控制日志调度'
+has_call control-sync-install || fail 'restart 未安装自动同步调度'
 has_call 'compose:restart' || fail 'restart 未重启 Compose'
 
 reset_calls
 dockerLifecycleCommand down
 has_call control-log-remove || fail 'down 未移除控制日志调度'
+has_call control-sync-remove || fail 'down 未移除自动同步调度'
 has_call 'compose:down' || fail 'down 未停止 Compose'
 
 reset_calls
 dockerUninstallCommand
 has_call control-log-remove || fail 'uninstall 未移除控制日志调度'
+has_call control-sync-remove || fail 'uninstall 未移除自动同步调度'
 has_call 'compose:down' || fail 'uninstall 未停止 Compose'
 assert_registration
 
@@ -226,6 +236,7 @@ dockerCleanupConfigurationCandidate() { :; }
 reset_calls
 dockerConfigureApply "${spec}" '' '' configure
 has_call control-log-install || fail 'configure 提交后未安装控制日志调度'
+has_call control-sync-install || fail 'configure 提交后未安装自动同步调度'
 
 backup="${lifecycleRoot}/backups/restore.lifecycle"
 mkdir -p "${backup}"
@@ -235,6 +246,62 @@ DOCKER_CONFIG_SWITCHED=1
 reset_calls
 dockerRestoreConfiguration
 has_call control-log-install || fail 'restore 完成后未安装控制日志调度'
+has_call control-sync-install || fail 'restore 完成后未安装自动同步调度'
+assert_registration
+
+# 同步绑定和能力检查失败须发生在流量采集、停服或切换之前。
+FAIL_SYNC_SPEC=1
+reset_calls
+DOCKER_CONFIG_SWITCHED=1
+if dockerRestoreConfiguration; then fail '空恢复点绕过自动同步绑定门禁'; fi
+! grep -Eq '^(compose:|compose-execute:|traffic-before$)' "${calls}" ||
+    fail '空恢复点同步绑定拒绝前已采集或修改服务'
+for action in up restart; do
+    reset_calls
+    status=0
+    dockerLifecycleCommand "${action}" || status=$?
+    [[ "${status}" == "${PADM_DOCKER_RC_STATE}" ]] || fail '生命周期漏过自动同步绑定门禁'
+    ! grep -Eq '^(compose:|traffic-before$|control-sync-install$)' "${calls}" ||
+        fail '同步绑定拒绝前已采集或修改服务'
+done
+reset_calls
+status=0
+dockerConfigureApply "${spec}" '' '' configure || status=$?
+[[ "${status}" == "${PADM_DOCKER_RC_CONFLICT}" ]] || fail '配置漏过自动同步候选绑定门禁'
+! grep -Eq '^(compose:|traffic-before$|control-sync-install$)' "${calls}" ||
+    fail '同步候选绑定拒绝前已采集或修改服务'
+FAIL_SYNC_SPEC=0
+FAIL_SYNC_BUNDLE=1
+dockerStageReleaseBundle() { DOCKER_STAGED_BUNDLE_PATH="${currentBundle}"; record stage; }
+dockerStageBundle() { DOCKER_STAGED_BUNDLE_PATH="${currentBundle}"; record stage-bundle; }
+reset_calls
+status=0
+dockerUpdateCommand || status=$?
+[[ "${status}" == "${PADM_DOCKER_RC_BUNDLE}" ]] || fail '更新漏过自动同步能力门禁'
+! grep -Eq '^(compose:|traffic-before$|pull$|control-sync-install$)' "${calls}" ||
+    fail '同步能力拒绝前已采集或修改服务'
+reset_calls
+if dockerInstallBundle "${PROJECT_ROOT}"; then fail '安装漏过自动同步能力门禁'; fi
+! has_call activate-bundle || fail '同步能力拒绝前已切换 bundle'
+
+# 本机邀请不进入配置或业务快照；有登记时无规格恢复点必须拒绝。
+syncDirectory="${lifecycleRoot}/secrets/control-sync"
+mkdir -p "${syncDirectory}"
+chmod 0700 "${syncDirectory}"
+printf '%s\n' '{"schema_version":1,"enabled":true}' >"${syncDirectory}/request.json"
+printf '%s\n' '{"token":"private-test-token"}' >"${syncDirectory}/invite.json"
+chmod 0600 "${syncDirectory}/request.json" "${syncDirectory}/invite.json"
+syncRegistration=$(sha256sum "${syncDirectory}/request.json" "${syncDirectory}/invite.json")
+reset_calls
+if dockerProductionValidateConfigurationBackup "${legacy}"; then fail '同步登记接受无规格恢复点'; fi
+! grep -Eq '^(compose:|compose-execute:)' "${calls}" || fail '无规格恢复点拒绝前已修改服务'
+FAIL_SYNC_BUNDLE=0
+for prefix in configure business; do
+    dockerProductionBackupConfiguration "${prefix}"
+    [[ ! -e "${DOCKER_CONFIG_BACKUP}/secrets/control-sync" ]] || fail '自动同步邀请进入备份'
+done
+[[ "$(sha256sum "${syncDirectory}/request.json" "${syncDirectory}/invite.json")" == "${syncRegistration}" ]] ||
+    fail '生命周期改动本机邀请'
 assert_registration
 
 printf 'docker-control-log-lifecycle-ok\n'

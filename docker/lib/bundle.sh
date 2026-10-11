@@ -570,6 +570,7 @@ dockerInstallBundle() {
     dockerRenewalBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return 1
     dockerGeoBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return 1
     dockerControlLogScheduleBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return 1
+    dockerControlSyncScheduleBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return 1
     dockerActivateStagedBundle
 }
 

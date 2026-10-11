@@ -5435,6 +5435,8 @@ dockerRestoreConfiguration() {
     local legacyFail2ban=0 expectedCompose=
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
+    # 首配空恢复点也不能绕过本机自动同步的身份门禁。
+    dockerControlSyncScheduleSpecCheck "${backup}/config/spec.json" || return 1
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
         [[ -f "${backup}/bundle.target" && ! -L "${backup}/bundle.target" && -O "${backup}/bundle.target" ]] || return 1
         bundleTarget=$(<"${backup}/bundle.target")
@@ -5601,7 +5603,7 @@ dockerRestoreConfiguration() {
     # 中继恢复可能只停止部分服务；关闭 IPv6 后再清理已无容器的受管网络。
     [[ "${ipv6Cleanup}" != 1 ]] || dockerIPv6NetworkManage cleanup || return 1
     dockerRenewalScheduleInstall && dockerGeoScheduleInstall &&
-        dockerControlLogScheduleInstall || return 1
+        dockerControlLogScheduleInstall && dockerControlSyncScheduleInstall || return 1
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
@@ -5736,6 +5738,7 @@ dockerConfigureApply() {
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
     dockerAcmeWebrootTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     dockerControlSyncTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
+    dockerControlSyncScheduleSpecCheck "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     dockerControlTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityStreamDeploymentCheck "${sourceSpec}" "${root}/config/spec.json" ||
@@ -5828,7 +5831,8 @@ dockerConfigureApply() {
         ! dockerTrafficScheduleInstall ||
         ! dockerRenewalScheduleInstall ||
         ! dockerGeoScheduleInstall ||
-        ! dockerControlLogScheduleInstall; then
+        ! dockerControlLogScheduleInstall ||
+        ! dockerControlSyncScheduleInstall; then
         if [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 1 ]]; then
             dockerError '候选部署启动或健康检查失败，正在恢复旧配置'
             if ! dockerRestoreConfiguration; then

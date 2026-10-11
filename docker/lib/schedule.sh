@@ -11,7 +11,7 @@ DOCKER_MAINTENANCE_CHANGED=0
 
 dockerMaintenanceScheduleRestore() {
     local snapshot=$1 unitDir=$2 systemdReady=$3 timerEnabled=$4 timerActive=$5 job=$6 file failed=0
-    case "${job}" in renewal|geo|traffic|control-log) ;; *) return 1 ;; esac
+    case "${job}" in renewal|geo|traffic|control-log|control-sync) ;; *) return 1 ;; esac
     if [[ "${systemdReady}" == 1 ]]; then
         [[ ! -f "${unitDir}/padm-docker-${job}.timer" ]] ||
             systemctl disable --now "padm-docker-${job}.timer" >/dev/null 2>&1 || return 1
@@ -64,6 +64,7 @@ dockerMaintenanceScheduleCommit() {
     renewal) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_RENEWAL_SWITCHED=0 ;;
     geo) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_GEO_SWITCHED=0 ;;
     control-log) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_CONTROL_LOG_SWITCHED=0 ;;
+    control-sync) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_CONTROL_SYNC_SCHEDULE_SWITCHED=0 ;;
     traffic) DOCKER_MAINTENANCE_CHANGED=0 ;;
     *) return 1 ;;
     esac
@@ -74,10 +75,10 @@ dockerMaintenanceScheduleApply() {
     [[ "$#" -eq 2 ]] || return 1
     local action=$1 job=$2 root cli bashPath unitDir file fragment snapshot= cronText= cronLine line
     local marker cronMarker command calendar cronSchedule description timerDescription expected
-    local controlLogService= controlLogTimer= dropIns= backend=none active=false
+    local controlLogService= controlLogTimer= dropIns= loaded= prefix= backend=none active=false
     local timeout=1800 timerOptions='RandomizedDelaySec=300' legacy=0
     local systemdReady=0 cronReady=0 timerEnabled=0 timerActive=0 haveUnits=0 haveCron=0
-    case "${action}" in install|remove) ;; check) [[ "${job}" == control-log ]] || return 1 ;; *) return 1 ;; esac
+    case "${action}" in install|remove) ;; check) [[ "${job}" == control-log || "${job}" == control-sync ]] || return 1 ;; *) return 1 ;; esac
     case "${job}" in
     renewal)
         marker='# padm-docker TLS 自动续期'
@@ -114,6 +115,16 @@ dockerMaintenanceScheduleApply() {
         timerDescription='Check padm Docker control authentication log hourly'
         timeout=0
         ;;
+    control-sync)
+        marker='# padm-docker 被控账号自动同步'
+        command='control auto-sync'
+        calendar='*-*-* *:0/5:00'
+        cronSchedule='*/5 * * * *'
+        description='padm Docker controlled account synchronization'
+        timerDescription='Synchronize padm Docker controlled accounts every five minutes'
+        timeout=0
+        timerOptions='AccuracySec=1s'
+        ;;
     *) return 1 ;;
     esac
     [[ -z "${DOCKER_MAINTENANCE_SNAPSHOT:-}" ]] || return 1
@@ -123,7 +134,7 @@ dockerMaintenanceScheduleApply() {
     unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system}
     [[ "${root}" =~ ^/[A-Za-z0-9._/-]+$ && "${cli}" =~ ^/[A-Za-z0-9._/-]+$ &&
         "${bashPath}" =~ ^/[A-Za-z0-9._/-]+$ && "${unitDir}" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
-    if [[ "${job}" == control-log ]]; then
+    if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
         # 新任务完整核对模板，不能把同 marker 的改写任务当作受管调度。
         controlLogService=$(cat <<EOF
 ${marker}
@@ -149,7 +160,7 @@ Description=${timerDescription}
 OnCalendar=${calendar}
 ${timerOptions}
 Persistent=true
-Unit=padm-docker-control-log.service
+Unit=padm-docker-${job}.service
 [Install]
 WantedBy=timers.target
 EOF
@@ -184,13 +195,13 @@ EOF
     for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
         legacy=0
         [[ ! -L "${unitDir}/${file}" ]] || return 1
-        if [[ "${job}" == control-log ]]; then
+        if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
             [[ ! -e "${unitDir}/${file}.d" && ! -L "${unitDir}/${file}.d" ]] || return 1
         fi
         if [[ -e "${unitDir}/${file}" ]]; then
             [[ -f "${unitDir}/${file}" && -O "${unitDir}/${file}" ]] &&
                 grep -qxF "${marker}" "${unitDir}/${file}" || return 1
-            if [[ "${job}" == control-log ]]; then
+            if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
                 [[ "$(stat -c '%u:%g:%a:%h' "${unitDir}/${file}")" == 0:0:644:1 ]] || return 1
                 if [[ "${file}" == *.service ]]; then expected=${controlLogService};
                 else expected=${controlLogTimer}; fi
@@ -248,9 +259,23 @@ EOF
             fragment=$(systemctl show --property=FragmentPath --value "${file}" 2>/dev/null) || return 1
             [[ -z "${fragment}" ||
                 ( "${fragment}" == "${unitDir}/${file}" && -f "${unitDir}/${file}" ) ]] || return 1
-            if [[ "${job}" == control-log ]]; then
+            if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
                 dropIns=$(systemctl show --property=DropInPaths --value "${file}" 2>/dev/null) || return 1
                 [[ -z "${dropIns}" ]] || return 1
+            fi
+            if [[ "${job}" == control-sync && -n "${fragment}" ]]; then
+                [[ "$(systemctl show --property=NeedDaemonReload --value "${file}" 2>/dev/null)" == no ]] ||
+                    return 1
+            fi
+            if [[ "${job}" == control-sync && -n "${fragment}" && "${file}" == *.service ]]; then
+                # 文件模板正确仍可能加载旧命令；确认实际执行定义后才允许幂等跳过。
+                [[ "$(systemctl show --property=Environment --value "${file}" 2>/dev/null)" == "PADM_DOCKER_INSTALL_DIR=${root}" ]] ||
+                    return 1
+                loaded=$(systemctl show --property=ExecStart --value "${file}" 2>/dev/null) || return 1
+                prefix="{ path=${bashPath} ; argv[]=${bashPath} ${cli} ${command} ; ignore_errors=no ; "
+                [[ "${loaded}" == "${prefix}"* ]] || return 1
+                loaded=${loaded#"${prefix}"}
+                [[ "${loaded}" != *'path='* && "${loaded}" != *'argv[]='* ]] || return 1
             fi
         fi
     done
@@ -271,8 +296,8 @@ EOF
     fi
     if [[ "${action}" == check ]]; then
         if [[ "${haveUnits}" == 1 ]]; then
-            [[ -f "${unitDir}/padm-docker-control-log.service" &&
-                -f "${unitDir}/padm-docker-control-log.timer" ]] || return 1
+            [[ -f "${unitDir}/padm-docker-${job}.service" &&
+                -f "${unitDir}/padm-docker-${job}.timer" ]] || return 1
             backend=systemd
             [[ "${timerActive}" != 1 ]] || active=true
         fi
@@ -283,6 +308,14 @@ EOF
         jq -cn --arg backend "${backend}" --argjson active "${active}" \
             '{backend:$backend,installed:($backend != "none"),active:$active}'
         return $?
+    fi
+    if [[ "${action}" == install && "${job}" == control-sync ]]; then
+        # 同步提交和失败恢复均会重装调度；完整核验后的原任务不得停止自身。
+        if [[ "${systemdReady}" == 1 && "${haveCron}" == 0 &&
+            -f "${unitDir}/padm-docker-${job}.service" && -f "${unitDir}/padm-docker-${job}.timer" &&
+            "${timerEnabled}" == 1 && "${timerActive}" == 1 ]]; then return 0; fi
+        if [[ "${systemdReady}" == 0 && "${cronReady}" == 1 &&
+            "${haveUnits}" == 0 && "${haveCron}" == 1 ]]; then return 0; fi
     fi
     dockerManagedPathIsSafe "${root}" "${root}/locks" &&
         [[ -d "${root}/locks" && ! -L "${root}/locks" && -O "${root}/locks" ]] || return 1
@@ -316,7 +349,7 @@ EOF
         printf '%s\n' "${cronText}" | awk -v owned="${cronLine}" '$0 != owned' | crontab - || exit 1
     fi
     if [[ "${action}" == install && "${systemdReady}" == 1 ]]; then
-        if [[ "${job}" == control-log ]]; then
+        if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
             printf '%s\n' "${controlLogService}" >"${snapshot}/new.service" &&
                 printf '%s\n' "${controlLogTimer}" >"${snapshot}/new.timer" || exit 1
         else
@@ -370,6 +403,11 @@ EOF
         control-log)
             [[ -z "${DOCKER_CONTROL_LOG_STAGE:-}" || "${DOCKER_CONTROL_LOG_SWITCHED:-0}" != 1 ]] || return 0
             dockerMaintenanceScheduleCommit control-log
+            ;;
+        control-sync)
+            [[ -z "${DOCKER_CONTROL_SYNC_SCHEDULE_STAGE:-}" ||
+                "${DOCKER_CONTROL_SYNC_SCHEDULE_SWITCHED:-0}" != 1 ]] || return 0
+            dockerMaintenanceScheduleCommit control-sync
             ;;
         traffic) dockerMaintenanceScheduleCommit traffic ;;
         esac

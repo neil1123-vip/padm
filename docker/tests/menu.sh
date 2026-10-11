@@ -611,6 +611,47 @@ runControlDriver() {
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
+    sync-schedule|sync-schedule-input-cancel|sync-schedule-input-eof|sync-schedule-confirm-cancel|sync-schedule-confirm-eof|sync-schedule-failed)
+        if [[ "${scenario}" == sync-schedule-input-cancel ]]; then
+            targetReply 'Docker 控制连接' $'13\n'
+            targetReply '外部私有邀请文件绝对路径（0 返回）' $'0\n'
+            targetReply 'Docker 控制连接' $'13\n'
+            targetReply '外部私有邀请文件绝对路径（0 返回）' $'\n'
+        elif [[ "${scenario}" == sync-schedule-input-eof ]]; then
+            targetReply 'Docker 控制连接' $'13\n'
+            targetReply '外部私有邀请文件绝对路径（0 返回）' $'\004'
+        else
+            if [[ "${scenario}" == sync-schedule || "${scenario}" == sync-schedule-failed ]]; then
+                targetReply 'Docker 控制连接' $'12\n'
+            fi
+            targetReply 'Docker 控制连接' $'13\n'
+            targetReply '外部私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
+            case "${scenario}" in
+            sync-schedule-confirm-cancel) targetReply 'fixture-control-sync-schedule-confirm [y/N]' $'n\n' ;;
+            sync-schedule-confirm-eof) targetReply 'fixture-control-sync-schedule-confirm [y/N]' $'\004' ;;
+            *) targetReply 'fixture-control-sync-schedule-confirm [y/N]' $'y\n' ;;
+            esac
+            if [[ "${scenario}" == sync-schedule ]]; then
+                targetReply 'Docker 控制连接' $'13\n'
+                targetReply '外部私有邀请文件绝对路径（0 返回）' $'/root/padm-rotated.json\n'
+                targetReply 'fixture-control-sync-schedule-confirm [y/N]' $'y\n'
+            fi
+            targetReply 'Docker 控制连接' $'14\n'
+            case "${scenario}" in
+            sync-schedule-confirm-cancel) targetReply 'fixture-control-sync-schedule-confirm [y/N]' $'n\n' ;;
+            sync-schedule-confirm-eof) targetReply 'fixture-control-sync-schedule-confirm [y/N]' $'\004' ;;
+            *) targetReply 'fixture-control-sync-schedule-confirm [y/N]' $'y\n' ;;
+            esac
+            if [[ "${scenario}" == sync-schedule-failed ]]; then
+                targetReply 'Docker 控制连接' $'1\n'
+            else
+                targetReply 'Docker 控制连接' $'12\n'
+            fi
+        fi
+        targetReply 'Docker 控制连接' $'0\n'
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+        ;;
     log-schedule|log-schedule-cancel|log-schedule-eof|log-schedule-failed)
         if [[ "${scenario}" == log-schedule || "${scenario}" == log-schedule-failed ]]; then
             targetReply 'Docker 控制连接' $'9\n'
@@ -1600,6 +1641,27 @@ control)
         *) exit 2 ;;
         esac
         ;;
+    sync-schedule)
+        case "${3:-}" in
+        status)
+            [[ "$#" -eq 3 ]] || exit 2
+            printf 'fixture-control-sync-schedule-status\n'
+            exit "${CONTROL_SYNC_SCHEDULE_STATUS:-0}"
+            ;;
+        enable) [[ "$#" -eq 5 && "$4" == --invite && -n "$5" ]] || exit 2 ;;
+        disable) [[ "$#" -eq 3 ]] || exit 2 ;;
+        *) exit 2 ;;
+        esac
+        printf 'fixture-control-sync-schedule-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction control-sync-schedule-confirm "$3" eof
+            exit 2
+        fi
+        recordAction control-sync-schedule-confirm "$3" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${CONTROL_SYNC_SCHEDULE_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_SYNC_SCHEDULE_STATUS}"
+        recordAction control-sync-schedule-commit "$3"
+        ;;
     init|invite|revoke|join)
         printf 'fixture-control-confirm [y/N]: '
         if ! IFS= read -r confirmation; then
@@ -1998,7 +2060,8 @@ unset SITE_EDIT_STATUS ROUTING_STATUS
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
 for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
     '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' \
-    '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' '0. 返回'; do
+    '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
+    '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -2145,6 +2208,54 @@ for controlCase in log-schedule log-schedule-cancel log-schedule-eof log-schedul
         fail "自动轮转 ${controlCase} 未显示后端状态"
 done
 unset CONTROL_LOG_SCHEDULE_STATUS
+
+for controlCase in sync-schedule sync-schedule-input-cancel sync-schedule-input-eof \
+    sync-schedule-confirm-cancel sync-schedule-confirm-eof sync-schedule-failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export CONTROL_SYNC_SCHEDULE_STATUS=0
+    [[ "${controlCase}" != sync-schedule-failed ]] || CONTROL_SYNC_SCHEDULE_STATUS=17
+    runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
+    expectedControl= expectedConfirmations=0
+    case "${controlCase}" in
+    sync-schedule)
+        expectedControl=$'control sync-schedule status\ncontrol sync-schedule enable --invite /root/padm-invite.json\ncontrol-sync-schedule-confirm enable y\ncontrol-sync-schedule-commit enable'
+        expectedControl+=$'\ncontrol sync-schedule enable --invite /root/padm-rotated.json\ncontrol-sync-schedule-confirm enable y\ncontrol-sync-schedule-commit enable'
+        expectedControl+=$'\ncontrol sync-schedule disable\ncontrol-sync-schedule-confirm disable y\ncontrol-sync-schedule-commit disable\ncontrol sync-schedule status'
+        expectedConfirmations=3
+        ;;
+    sync-schedule-confirm-cancel|sync-schedule-confirm-eof|sync-schedule-failed)
+        expectedConfirmations=2
+        case "${controlCase}" in
+        sync-schedule-confirm-cancel) scheduleConfirmation=n ;;
+        sync-schedule-confirm-eof) scheduleConfirmation=eof ;;
+        sync-schedule-failed)
+            scheduleConfirmation=y
+            expectedControl=$'control sync-schedule status\n'
+            ;;
+        esac
+        expectedControl+='control sync-schedule enable --invite /root/padm-invite.json'
+        expectedControl+=$'\n'"control-sync-schedule-confirm enable ${scheduleConfirmation}"
+        expectedControl+=$'\ncontrol sync-schedule disable\n'"control-sync-schedule-confirm disable ${scheduleConfirmation}"
+        if [[ "${controlCase}" == sync-schedule-failed ]]; then
+            expectedControl+=$'\ncontrol status'
+            [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 3 ]] ||
+                fail '自动同步状态或启停失败未保留退出码'
+            grep -Fq 'fixture-control-status' "${CONTROL_LOG}" || fail '自动同步失败后未继续菜单'
+        else
+            expectedControl+=$'\ncontrol sync-schedule status'
+        fi
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
+        fail "自动同步 ${controlCase} 参数分发错误、重复执行或取消后提交"
+    [[ "$(grep -Fc 'fixture-control-sync-schedule-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${expectedConfirmations}" ]] ||
+        fail "自动同步 ${controlCase} 确认次数错误"
+    if [[ "${expectedConfirmations}" -gt 0 ]]; then
+        grep -Fq 'fixture-control-sync-schedule-status' "${CONTROL_LOG}" ||
+            fail "自动同步 ${controlCase} 未显示后端状态"
+    fi
+done
+unset CONTROL_SYNC_SCHEDULE_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty geo-dispatch geo flow "${TLS_WIZARD_CLI}" menu
