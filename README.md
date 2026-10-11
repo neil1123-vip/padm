@@ -331,8 +331,17 @@ Direct 保持优先；不推断域名包含、分类成员或区域合成，不�
 ```bash
 padm-docker edit --block-ips /root/padm-block-ips.json --preview
 padm-docker edit --block-ips /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-add /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-remove /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-off --confirm PADM-DOCKER-EDIT
 ```
+
+菜单 `17` 的 `26/27` 分别追加和精确删除 IP 阻断规则，沿用同一私有 JSON 格式。
+追加保留原顺序，再按输入顺序添加新规则；不存在的手工名单会创建，合并后最多 256 项。
+删除要求请求中的每条完整字符串都在手工名单中，缺一条即整组拒绝；
+不按 CIDR 包含关系匹配，也不合并 IPv6 的大小写、压缩写法或 CIDR 主机位。
+空数组、重复项或非法输入在合并前拒绝。删空只移除手工 IP 子项，
+保留区域预设生成的 `geoip:cn` 和其它路由，预览与取消不切换配置。
 
 IP 规则只匹配客户端提供的字面目的 IP，TCP/UDP 拒绝发生在 SOCKS/DNS/hosts 前。
 Direct 域名例外（包括识别出的 HTTP Host/TLS SNI）优先且不改目的地址。

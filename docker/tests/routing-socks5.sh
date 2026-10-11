@@ -37,6 +37,7 @@ HOSTS='{"exact.example.com":"203.0.113.10","ipv6.example.com":"2001:db8::10"}'
 DIRECT_INPUT=${PRIVATE_ROOT}/direct.json
 BLOCK_INPUT=${PRIVATE_ROOT}/block.json
 BLOCK_IPS_INPUT=${PRIVATE_ROOT}/block-ips.json
+IP_DELTA_INPUT=${PRIVATE_ROOT}/block-ips-delta.json
 BLOCK_IPS='{"ips":["192.0.2.10","2001:db8::10","198.51.100.0/24","2001:db8::/64","geoip:cn"]}'
 REGION_ALLOW='["full:exact.example.com","domain:apple.com","full:custom-region.example.com"]'
 REGION_DEFAULTS='["domain:dl.google.com","domain:apple.com","domain:bing.com","domain:microsoft.com","domain:gstatic.com","domain:xn--ngstr-lra8j.com","domain:googleapis.com","domain:googleapis.cn"]'
@@ -2349,11 +2350,112 @@ runEdit 0 --hosts "${HOSTS_INPUT}" --confirm PADM-DOCKER-EDIT
 runEdit 0 --socks5 "${INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '开启旧子项丢弃 Direct/Block'
-runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --block-ips-add "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile actual "${root}/config/spec.json" \
-    '$actual == $expected' >/dev/null || fail '开启 IP 阻断改变已有子项'
+    '$actual == $expected' >/dev/null || fail 'IP 追加未创建缺失名单或改变已有子项'
 [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
     fail 'IP 阻断规格未保留私有权限'
+# 此段同样由 domains-direct-block 执行，不依赖上方被定向入口跳过的旧输入矩阵。
+ipAdded='["192.0.2.10","2001:db8::10","198.51.100.0/24","2001:db8::/64","geoip:cn","2001:DB8::10","2001:db8:0:0:0:0:0:10","198.51.100.17/24","203.0.113.9"]'
+ipRemaining='["192.0.2.10","2001:db8::/64","geoip:cn","2001:DB8::10","2001:db8:0:0:0:0:0:10","198.51.100.17/24","203.0.113.9"]'
+printf '%s\n' '{"ips":["192.0.2.10","2001:DB8::10","2001:db8:0:0:0:0:0:10","198.51.100.17/24","203.0.113.9"]}' \
+    >"${IP_DELTA_INPUT}"
+chmod 0600 "${IP_DELTA_INPUT}"
+before=$(snapshot)
+runEdit 0 --block-ips-add "${IP_DELTA_INPUT}" --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'IP 追加预览改变在线部署'
+runEdit 0 --block-ips-add "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --argjson ips "${ipAdded}" --slurpfile old "${TEST_ROOT}/routing-ip-policy.json" \
+    --slurpfile actual "${root}/config/spec.json" '
+  $actual[0] == ($old[0] | .routing.block_ips.ips=$ips)
+' >/dev/null || fail 'IP 追加未保持首次次序、去除已有项或保留 IPv6/CIDR 完整字符串身份'
+runStatus 0
+jq -e --argjson ips "${ipAdded}" '.block_ips.ip_rules==$ips' "${LOG}" >/dev/null ||
+    fail 'IP 增量状态未投影有序手工名单'
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+for action in add remove; do
+    runEdit 2 "--block-ips-${action}"
+    runEdit 2 "--block-ips-${action}" "${IP_DELTA_INPUT}" --block-ips-off --preview
+    chmod 0640 "${IP_DELTA_INPUT}"
+    runEdit 15 "--block-ips-${action}" "${IP_DELTA_INPUT}" --preview
+    chmod 0600 "${IP_DELTA_INPUT}"
+    ln -s "${IP_DELTA_INPUT}" "${PRIVATE_ROOT}/ip-delta-link.json"
+    runEdit 15 "--block-ips-${action}" "${PRIVATE_ROOT}/ip-delta-link.json" --preview
+    rm -- "${PRIVATE_ROOT}/ip-delta-link.json"
+    for invalid in '{"ips":[]}' '{"ips":["192.0.2.10","192.0.2.10"]}' \
+        '{"ips":["geoip:CN"]}' '{"ips":["198.51.100.0/33"]}' '{"ips":["2001:db8:::1"]}' \
+        '{"ips":["192.0.2.10"],"extra":true}'; do
+        printf '%s\n' "${invalid}" >"${IP_DELTA_INPUT}"
+        runEdit 15 "--block-ips-${action}" "${IP_DELTA_INPUT}" --preview
+    done
+done
+# 合法请求中有一项缺失时整组拒绝，不能先删除已存在的项或停服。
+printf '%s\n' '{"ips":["2001:db8::10","203.0.113.250"]}' >"${IP_DELTA_INPUT}"
+runEdit 15 --block-ips-remove "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'IP 坏输入、私有文件边界或部分缺项拒绝改变部署或调用 Compose'
+for action in add remove; do
+    if [[ "${action}" == add ]]; then
+        printf '%s\n' '{"ips":["203.0.113.250"]}' >"${IP_DELTA_INPUT}"
+    else
+        printf '%s\n' '{"ips":["2001:db8::10","198.51.100.0/24"]}' >"${IP_DELTA_INPUT}"
+    fi
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        expected=14
+        [[ "${failure}" != int ]] || expected=130
+        [[ "${failure}" != term ]] || expected=143
+        runEdit "${expected}" "--block-ips-${action}" "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+        [[ "$(snapshot)" == "${before}" ]] ||
+            fail "${action}/${failure}: IP 增量未恢复路由、核心、订阅和非空流量"
+    done
+done
+MODE=ok
+runEdit 0 --block-ips-remove "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --argjson ips "${ipRemaining}" --slurpfile old "${TEST_ROOT}/routing-ip-policy.json" \
+    --slurpfile actual "${root}/config/spec.json" '
+  $actual[0] == ($old[0] | .routing.block_ips.ips=$ips)
+' >/dev/null || fail 'IP 删除未精确匹配字符串、保留其余次序或改动其它策略'
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 15 --block-ips-remove "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail '重复 IP 删除改变部署或调用 Compose'
+jq -n '{ips:[range(0;249) | "203.0.114.\(.)"]}' >"${IP_DELTA_INPUT}"
+runEdit 0 --block-ips-add "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -e --argjson ips "${ipRemaining}" '
+  .routing.block_ips.ips == ($ips + [range(0;249) | "203.0.114.\(.)"])
+' "${root}/config/spec.json" >/dev/null || fail 'IP 联合 256 项未保留历史和追加次序'
+before=$(snapshot)
+runEdit 0 --block-ips-add "${IP_DELTA_INPUT}" --preview
+composeBefore=$(cat "${COMPOSE_LOG}")
+printf '%s\n' '{"ips":["203.0.114.249"]}' >"${IP_DELTA_INPUT}"
+runEdit 15 --block-ips-add "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'IP 合并超过 256 项时改变部署或调用 Compose'
+runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --region ip --confirm PADM-DOCKER-EDIT
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/ip-region.before"
+runEdit 0 --block-ips-remove "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/ip-region.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual[0] == ($old[0] | del(.routing.block_ips))' >/dev/null ||
+    fail '删除全部手工 IP 未清理子项或改变区域策略和其它路由'
+jq -e 'any(.routing.rules[]; .ip==["geoip:cn"] and .outboundTag=="blocked")' \
+    "${root}/config/xray/config.json" >/dev/null || fail '删空手工 IP 误删区域合成 GeoIP 阻断'
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+printf '%s\n' '{"ips":["geoip:cn"]}' >"${IP_DELTA_INPUT}"
+runEdit 15 --block-ips-remove "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'IP 删除把区域合成项当作手工名单或调用 Compose'
+runEdit 0 --block-ips-add "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --region-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" \
+    --slurpfile actual "${root}/config/spec.json" '$actual==$expected' >/dev/null ||
+    fail 'IP 增量合同结束没有恢复原路由夹具'
+printf 'docker-routing-block-ips-incremental-regression-ok\n'
 # CSV 是整组替换；其它子项、核心身份、分享内容与累计流量保持原样。
 csvReplacement=' geosite:CN , KEYWORD:Next_Video , Full:New.Example.ORG , New.Example.NET , full:new.example.org '
 csvReplacementDomains='["geosite:cn","keyword:next_video","full:new.example.org","domain:new.example.net"]'
@@ -2546,13 +2648,13 @@ runEdit 15 --block-domains-remove "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail '未启用 Block 删除规则改变部署'
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail 'Direct/Block 事务清空流量'
-runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --block-ips-add "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/block-ips-only.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '独立 IP 阻断开启改变其它规格'
 runStatus 0
 jq -e --argjson input "${BLOCK_IPS}" '.enabled == true and .block_ips.ip_rules == $input.ips' \
     "${LOG}" >/dev/null || fail 'IP 阻断状态没有保留有效列表'
-runEdit 0 --block-ips-off --confirm PADM-DOCKER-EDIT
+runEdit 0 --block-ips-remove "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
     '$new == $old' >/dev/null || fail '关闭最后 IP 阻断没有删除空 routing'
 runStatus 0

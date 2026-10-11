@@ -1473,6 +1473,17 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 2
             ;;
+        --block-ips-add|--block-ips-remove)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=block_ips routingFile=$2
+            if [[ "$1" == --block-ips-add ]]; then
+                routingAction=ips_add
+            else
+                routingAction=ips_remove
+            fi
+            shift 2
+            ;;
         --http-relay)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${httpRelay}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -2088,6 +2099,44 @@ dockerEditCommand() {
                 if .routing == {} then del(.routing) else . end
               end
             ' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == ips_add || "${routingAction}" == ips_remove ]]; then
+            dockerEditPrivateInputCopy "${routingFile}" "${workspace}/block_ips.json" block_ips || {
+                dockerError 'IP/CIDR 增量输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，且必须是合法 block_ips 规格'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            # 先把增量输入放入临时完整规格，复用统一 schema 检查，避免合并时吞掉坏值。
+            jq --slurpfile input "${workspace}/block_ips.json" \
+                '.routing.block_ips = $input[0]' "${draft}" >"${workspace}/block_ips_input.json" 2>/dev/null &&
+                chmod 0600 "${workspace}/block_ips_input.json" &&
+                dockerConfigureSpecValidate "${workspace}/block_ips_input.json" || {
+                dockerError 'IP/CIDR 增量输入不符合现有 block_ips 合同，未提交配置'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            if [[ "${routingAction}" == ips_add ]]; then
+                jq --slurpfile input "${workspace}/block_ips.json" '
+                  (.routing.block_ips.ips // []) as $existing |
+                  (reduce $input[0].ips[] as $rule ($existing;
+                    if index($rule) == null then . + [$rule] else . end)) as $merged |
+                  if ($merged | length) <= 256 then
+                    .routing.block_ips.ips = $merged
+                  else error("合并后 IP/CIDR 阻断规则超过 256 项，未提交配置") end
+                ' "${draft}" >"${draft}.next"
+            else
+                jq --slurpfile input "${workspace}/block_ips.json" '
+                  (.routing.block_ips.ips // []) as $existing |
+                  if (($input[0].ips - $existing) | length) != 0 then
+                    error("待删除 IP/CIDR 规则必须全部存在于当前阻断名单，未提交配置")
+                  else
+                    ($existing - $input[0].ips) as $remaining |
+                    if ($remaining | length) == 0 then
+                      del(.routing.block_ips) |
+                      if .routing == {} then del(.routing) else . end
+                    else
+                      .routing.block_ips.ips = $remaining
+                    end
+                  end
+                ' "${draft}" >"${draft}.next"
+            fi
         elif [[ "${routingAction}" == domains ]]; then
             jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" \
                 '.routing[$kind].domains = $domains' "${draft}" >"${draft}.next"

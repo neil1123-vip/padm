@@ -1312,6 +1312,21 @@ not resolve domain targets just to match an IP or recheck addresses after DNS/ho
 These changes retain the same private-input and deployment transaction boundaries.
 SOCKS ingress, WARP and complete routing management remain deferred.
 
+Menu `17`, options `26/27`, appends or removes manual IP-block rules through
+`--block-ips-add/--block-ips-remove <private JSON file>`. The input keeps the existing
+`{"ips":[...]}` format and root-owned `0600` file requirements. Append retains existing
+order, then adds unseen strings in input order, with at most 256 rules after merging.
+Remove requires every complete requested string to exist in the manual list; a missing
+item rejects the whole operation. CIDR containment, IPv6 spelling and host bits are not
+normalized or merged. Empty arrays, duplicate items and invalid rules are rejected before
+merging. Removing the last manual rule preserves region-generated `geoip:cn` and other routes.
+Preview and cancellation leave the deployment unchanged.
+
+```bash
+padm-docker edit --block-ips-add /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-remove /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+```
+
 Menu `17`, option `6`, accepts a literal UDP DNS server IP, a port (blank defaults
 to `53`), and domain-rule CSV. `--dns-rules <IP> <port> <CSV>` creates or replaces
 the same DNS object using existing CSV normalization and transaction checks;

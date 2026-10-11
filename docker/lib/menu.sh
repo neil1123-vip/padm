@@ -816,7 +816,8 @@ dockerMenuRouting() {
             '17. 关闭 BT 协议阻断' '18. 区域阻断策略' '19. IPv6 域名出站' '20. WARP 出站' \
             '21. HTTP 中继入站' '22. 追加 Direct 直连例外' \
             '23. 追加 Block 域名阻断' '24. 删除 Direct 直连例外' \
-            '25. 删除 Block 域名阻断' '0. 返回'
+            '25. 删除 Block 域名阻断' '26. 追加 IP/CIDR 阻断' \
+            '27. 精确删除 IP/CIDR 阻断' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -863,10 +864,14 @@ dockerMenuRouting() {
             ;;
         11) dockerMenuRun edit --direct-off || true ;;
         13) dockerMenuRun edit --block-off || true ;;
-        14)
+        14|26|27)
             dockerSetupRead input 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
-            dockerMenuRun edit --block-ips "${input}" || true
+            case "${choice}" in
+            14) dockerMenuRun edit --block-ips "${input}" || true ;;
+            26) dockerMenuRun edit --block-ips-add "${input}" || true ;;
+            27) dockerMenuRun edit --block-ips-remove "${input}" || true ;;
+            esac
             ;;
         15) dockerMenuRun edit --block-ips-off || true ;;
         16) dockerMenuRun edit --block-bt || true ;;
