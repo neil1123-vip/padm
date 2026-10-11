@@ -3869,6 +3869,72 @@ unit 归属不能补创建模型缺口；多线程、任意 OpenSSH、故障恢�
 LSM/arm64/宿主 systemd、公网和重启卸载仍待验收，collector/jail、
 菜单启停与 5C 不因本内部 driver 通过而开放。
 
+#### 5C.8c.2g 创建 syscall、FORK 与真实回收关联
+
+受控 driver 正常恢复改用 `PTRACE_SYSCALL` 与 `TRACESYSGOOD`，
+通过 `PTRACE_GET_SYSCALL_INFO` 的实际 op 区分 entry/exit，不猜停点奇偶。
+逐 syscall 停点核验 native `AUDIT_ARCH_X86_64`，拒绝 x32、i386、
+未知 ABI 或不完整信息。仅允许 fork 57 或保守 clone 56 模型：
+clone flags 只能为 SIGCHLD 与 CHILD_SETTID/CHILD_CLEARTID 的子集，
+stack、parent_tid、tls 必须为 0，child_tid 与 childtid flags 对应。
+vfork、clone3、共享状态、UNTRACED、未知 flags/参数在 entry 恢复前拒绝。
+
+创建 entry 冻结父代次、epoch、exe、nr/args 和 live accepted 锚点，
+与真实 FORK event 的 child PID、父 syscall exit 的正返回 PID、
+child 首停逐项关联后才登记和放行 child；父返回停点缺 child 首停时也冻结。
+创建失败只在负返回且没有 FORK event 时清证明；无对应 entry 的首 exit 0
+仅给初始 master 与新登记 child 一次资格。普通 syscall 只保留停点总数和
+最后恢复时间，不逐项保存事件或读取完整 proc；创建及生命周期证据仍深拷贝。
+
+整合 CI `38117132117` 的同步修正：driver 执行期保存/启用 subreaper，
+结束恢复原值；cleanup 的 ptrace 退出通知不再直接充当真正回收证明，
+EXITKILL 测试对 pidfd 退出后尚未转交的 ECHILD 作有限等待。
+Ledger 测试接受内核交付差异下的 invalid_pidfd/unknown_sender 两种拒绝原因，
+仍断言 accepted/pending 为 false、FD 数不变及附件关闭；生产 Ledger 未改。
+
+独审进一步发现正常退出路径也可能丢失未回收 child，新增真实合同先取得红证据：
+父进程不回收 child 就退出，10 项中仅该项失败，返回后 `/proc/567` 仍在。
+修复在已登记终局通知时复制原 held pidfd，live 调度继续运行；
+统一清理通过 `waitid(P_PIDFD)` 真回收，或 fdinfo `Pid=-1` 确认原 task
+已由真实父进程回收，绝不向 retired 数字 PID 发信号或等待复用后的 task。
+pidfd 跨 Ledger 关闭独立持有，最终关闭；未登记终局纳入清理后拒绝。
+异常进程组发现仍等待真实 ECHILD，保持原 2 秒 cleanup 期限。
+成功与失败终局核验创建、syscall、首 exit、父确认和 FD 等全部内部状态。
+正例用父 `WNOWAIT` 仅观察终止而不回收，替代固定 sleep 保证负载下顺序稳定。
+
+最终 driver 为 10 个真实合同，包含早到 child 首停先于父 FORK 被消费、
+缺 entry/错配 PID 拒绝、共享 clone/UNTRACED/clone3 entry 拒绝、
+真实 x32 syscall 与 `int $0x80` i386 ABI、三类 deadline、跨 exec、
+父未回收 child 和运行态 EXITKILL。拒绝后核最后正常恢复时间不晚于拒绝，
+所有合同核 tracee/retired 清空、FD 基线和 subreaper 恢复。
+本机实际正例为 clone 56，arch `0xC000003E`、flags `0x1200011`；
+raw fork 57 尚未单独实测。原始共享 clone 对照为 flags `0x111`、
+event 1/status 66943，证明 FORK event 1 本身无法排除 CLONE_VM。
+
+2026-10-11，Docker Desktop Linux amd64，复用工具镜像
+`sha256:0e727d5230441005929d896a73b9dd140360045e3d5dc8850de0e6ab7b2ff0f5`。
+最终定向 10/10、3.265 秒，入口 4280 ms、内部 3316 ms、排队 198 ms，
+exit 0、cache_hit=false、Jobs 2；
+`.tmp-regression-docker-1fa13814a52546d9b1018bc64fb42cf5/`。
+集中完整合同 47/47、exit 0、cache_hit=false，入口 293360 ms、
+内部 292378 ms、排队 380 ms、Jobs 6/占 2 槽，未扩大三槽预算；
+driver 在完整并发中 10/10、3.270 秒，preflight 同时通过。
+完整证据 `.tmp-regression-docker-43285496efd2432eab2af0a583877913/`，
+未复用此前不同源码的成功结果，不据不同负载 elapsed 宣称整体提速。
+证据 `.tmp-ssh-driver-flags-8c2g/evidence.md`，失败输入保留
+`before-reap-fix/` 及哈希；完整快照初核 297 个文件与工作区逐项 SHA256 一致，
+最终只有本实施文档补写结果，全部运行输入保持匹配。
+清理本轮 4 套入口的 8 个归档/清单共 37,381,872 bytes，
+及 297 个已核验解包文件 9,111,863 bytes；日志、result、哈希与失败源码保留，
+本阶段回归容器无残留，不清理其它任务临时文件或 worktree。
+
+仍只接受可信自建 amd64 callback，`authoritative/jail_ready=false`；
+当前进程组模型不证明真实 sshd 在 setsid/setpgid 后仍被完整收容。
+下一阶段先在自有受控 systemd/sshd 实例证明所选 unit MainPID 与完整子树，
+同一 deadline 复用 8c.2a 的 pre/post unit、invocation、cgroup 和 listener 锚点；
+现有 Python master 不能直接套 unit JSON 冒充真实 SSH 来源。
+任意 OpenSSH、collector/jail、菜单启停、arm64、原生宿主和公网仍未开放或验收。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

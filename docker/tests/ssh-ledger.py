@@ -196,8 +196,18 @@ class LedgerContracts(unittest.TestCase):
         self.children.discard(pid)
         ledger = Ledger(time.monotonic() + 5)
         self.ledger = ledger
+        before = len(os.listdir("/proc/self/fd"))
         row = ledger.drain(self.sock)["messages"][0]
-        self.assertEqual(row["rejection"], "invalid_pidfd")
+        self.assertFalse(row["accepted"])
+        self.assertFalse(row["pending"])
+        # 已回收 sender 的消息可能仍携带 pidfd，未登记身份同样必须拒绝。
+        self.assertIn(row["rejection"], ("invalid_pidfd", "unknown_sender"))
+        self.assertEqual(before, len(os.listdir("/proc/self/fd")))
+        self.assertFalse(ledger.open_received_fds)
+        for descriptor in row.get("pidfd", []):
+            if descriptor["value"] >= 0:
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor["value"])
         ledger.close()
 
     def test_close_is_idempotent_and_deadline_poison_closes_held_pidfd(self):

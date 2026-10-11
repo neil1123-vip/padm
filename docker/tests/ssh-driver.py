@@ -38,6 +38,10 @@ class DriverContracts(unittest.TestCase):
         cls.build.cleanup()
 
     def setUp(self):
+        self.subreaper_before = driver_module.ctypes.c_int()
+        if driver_module.libc.prctl(driver_module.PR_GET_CHILD_SUBREAPER,
+                                   driver_module.ctypes.byref(self.subreaper_before), 0, 0, 0) != 0:
+            raise OSError("不能读取测试 subreaper 状态")
         self.temp = tempfile.TemporaryDirectory(prefix="padm-ssh-driver-")
         self.path = str(Path(self.temp.name) / "receiver.sock")
         self.receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -79,9 +83,20 @@ class DriverContracts(unittest.TestCase):
         os._exit(0 if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 23 else 112)
 
     def assert_clean(self, evidence):
+        current = driver_module.ctypes.c_int()
+        self.assertEqual(driver_module.libc.prctl(driver_module.PR_GET_CHILD_SUBREAPER,
+                                                 driver_module.ctypes.byref(current), 0, 0, 0), 0)
+        self.assertEqual(current.value, self.subreaper_before.value)
+        self.assertEqual(evidence["subreaper_before"], self.subreaper_before.value)
+        self.assertTrue(evidence["subreaper_restored"])
         self.assertFalse(evidence["remaining_tracees"])
+        self.assertFalse(evidence["remaining_retired_tasks"])
         self.assertFalse(evidence["remaining_early_stops"])
         self.assertFalse(evidence["remaining_parent_confirmations"])
+        self.assertFalse(evidence["remaining_creation_proofs"])
+        self.assertFalse(evidence["remaining_syscall_tasks"])
+        self.assertFalse(evidence["remaining_first_exit_tasks"])
+        self.assertFalse(evidence["remaining_waiting_parent_exit"])
         self.assertFalse(evidence["open_received_fds"])
         self.assertEqual(evidence["fd_count_before"], evidence["fd_count_after"])
         self.assertFalse(evidence["authoritative"])
@@ -90,9 +105,46 @@ class DriverContracts(unittest.TestCase):
 
     def test_python_to_c_epoch_history_and_frozen_trace(self):
         self.driver = driver_module.ControlledDriver(time.monotonic() + 5, self.receiver, self.expected)
+        original_wait = self.driver._wait
+        forced_child_first_stop = []
+
+        def child_before_parent_exit(initial=False):
+            creation = self.driver.creations.get(self.driver.master)
+            if (not initial and creation and "event_child" not in creation
+                    and not forced_child_first_stop):
+                deadline = self.driver.ledger.deadline
+                while time.monotonic() < deadline:
+                    children = Path(
+                        f"/proc/{self.driver.master}/task/{self.driver.master}/children"
+                    ).read_text().split()
+                    if children:
+                        pid, status = os.waitpid(int(children[0]), driver_module.WAIT_FLAGS)
+                        if pid:
+                            forced_child_first_stop.append(pid)
+                            return pid, status
+                    time.sleep(0)
+                raise TimeoutError("真实 child 首停等待超时")
+            return original_wait(initial)
+
+        self.driver._wait = child_before_parent_exit
         evidence = self.driver.run(self.cross_exec)
         self.assert_clean(evidence)
         self.assertEqual(len(evidence["first_stops"]), 1)
+        self.assertTrue(forced_child_first_stop)
+        first_stop_event = next(row for row in evidence["events"]
+                                if row.get("kind") == "child-first-stop")
+        self.assertTrue(first_stop_event["held_without_continue"])
+        fork_event = next(row for row in evidence["events"] if row.get("kind") == "fork-parent-stop")
+        self.assertLess(first_stop_event["wait_monotonic_ns"], fork_event["wait_monotonic_ns"])
+        creation = evidence["creations"][0]
+        self.assertIn(creation["entry"]["nr"], (driver_module.SYS_CLONE, driver_module.SYS_FORK))
+        self.assertEqual(creation["event_child"], creation["exit_rval"])
+        self.assertLess(creation["entry_monotonic_ns"], creation["event_monotonic_ns"])
+        self.assertLess(creation["event_monotonic_ns"], creation["exit_monotonic_ns"])
+        self.assertLess(creation["exit_monotonic_ns"],
+                        evidence["first_stops"][0]["first_continue_monotonic_ns"])
+        self.assertTrue(evidence["syscall_stop_count"])
+        self.assertLess(len(evidence["events"]), evidence["syscall_stop_count"])
         child = evidence["first_stops"][0]["pid"]
         barriers = [row for row in evidence["events"] if row.get("kind") == "message-barrier"]
         self.assertEqual(len(barriers), 1)
@@ -128,8 +180,52 @@ class DriverContracts(unittest.TestCase):
         original = copy.deepcopy(evidence["events"])
         self.driver.ledger.messages[0]["body"] = "later-mutation"
         self.assertEqual(evidence["events"], original)
+        print(json.dumps({
+            "kind": "verified-creation-syscall",
+            "creation_entry": {key: creation["entry"][key] for key in ("nr", "args", "arch")},
+            "syscall_stop_count": evidence["syscall_stop_count"],
+            "normal_resume_count": evidence["normal_resume_count"],
+        }, sort_keys=True, separators=(",", ":")), flush=True)
 
-    def test_real_clone_is_rejected_before_any_normal_continue(self):
+    def test_parent_exits_without_reaping_child_restores_state(self):
+        def unreaped_child_fixture():
+            self.client.close()
+            accepted, _ = self.listener.accept()
+            self.listener.close()
+            child = os.fork()
+            if child == 0:
+                os._exit(23)
+            # 只观察终止，不回收 child；父退出后必须由 driver subreaper 真正回收。
+            os.waitid(os.P_PID, child, os.WEXITED | os.WNOWAIT)
+            os._exit(0)
+
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                     self.receiver, self.expected)
+        try:
+            evidence = self.driver.run(unreaped_child_fixture)
+            self.assert_clean(evidence)
+            child = evidence["creations"][0]["event_child"]
+            reaped = [(row["pid"], row["exit_code"]) for row in evidence["events"]
+                      if row.get("kind") == "reaped"]
+            self.assertEqual(reaped, [(child, 23), (self.driver.master, 0)])
+            pidfd_reaped = [row for row in evidence["cleanup"] if row["kind"] == "pidfd-reaped-task"]
+            self.assertEqual([(row["pid"], row["exit_code"]) for row in pidfd_reaped], [(child, 23)])
+            for pid in (child, self.driver.master):
+                self.assertFalse(Path(f"/proc/{pid}").exists(), f"task {pid} 仍未真正回收")
+                with self.assertRaises(ChildProcessError):
+                    os.waitpid(pid, os.WNOHANG)
+            self.assertFalse(Path(f"/proc/self/task/{os.getpid()}/children").read_text().strip())
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(-1, os.WNOHANG)
+        finally:
+            # 红合同也要回收已退出 child，避免僵尸污染后续测试。
+            for row in self.driver.evidence["creations"]:
+                try:
+                    os.waitpid(row["event_child"], os.WNOHANG)
+                except ChildProcessError:
+                    pass
+
+    def test_real_pthread_creation_is_rejected_before_execution(self):
         def clone_fixture():
             self.client.close()
             accepted, _ = self.listener.accept()
@@ -137,21 +233,126 @@ class DriverContracts(unittest.TestCase):
             os.execv(self.helper, [self.helper, "clone"])
 
         self.driver = driver_module.ControlledDriver(time.monotonic() + 5, self.receiver, self.expected)
-        with self.assertRaisesRegex(driver_module.Failure, "event 3"):
+        with self.assertRaisesRegex(driver_module.Failure, "创建 syscall 435|不安全 clone"):
             self.driver.run(clone_fixture)
         evidence = self.driver.evidence
         self.assert_clean(evidence)
-        rejected = next(row for row in evidence["events"] if row["event"] == 3)
-        self.assertGreater(rejected["child_pid"], 0)
+        rejected = next(row for row in evidence["events"] if "rejection" in row)
+        self.assertEqual(rejected["kind"], "creation-entry")
         self.assertTrue(evidence["ledger_poisoned"])
         self.assertFalse(any(row["returned_monotonic_ns"] >= rejected["rejected_monotonic_ns"]
                              for row in evidence["continues"]))
-        cleanup_pids = {row.get("pid") for row in evidence["cleanup"]
-                        if row["kind"] in ("cleanup-reaped", "kernel-reaped-task")}
-        self.assertIn(rejected["child_pid"], cleanup_pids)
-        self.assertFalse(Path(f"/proc/{rejected['child_pid']}").exists())
+        self.assertFalse(any(row["event"] in (1, 2, 3) for row in evidence["events"]))
         self.assertTrue(all(row.get("signal") == signal.SIGKILL
                             for row in evidence["cleanup"] if row["kind"] == "cleanup-continue"))
+
+    def test_shared_untraced_clone_and_clone3_are_rejected_at_entry(self):
+        marker = str(Path(self.temp.name) / "child-executed")
+        baseline = subprocess.run([self.helper, "baseline-shared-clone", marker],
+                                  check=True, capture_output=True, text=True, timeout=3)
+        raw = json.loads(baseline.stdout)
+        self.assertEqual(raw["event"], driver_module.FORK)
+        self.assertEqual(raw["status"] >> 16, driver_module.FORK)
+        self.assertEqual(raw["flags"], 0x100 | signal.SIGCHLD)
+        self.assertGreater(raw["child"], 0)
+        self.assertFalse(Path(marker).exists())
+        print(json.dumps({"kind": "raw-shared-clone-baseline", **raw},
+                         sort_keys=True, separators=(",", ":")), flush=True)
+        for index, (mode, nr, flags) in enumerate((
+                ("shared-clone", driver_module.SYS_CLONE, 0x111),
+                ("untraced-clone", driver_module.SYS_CLONE, 0x800011),
+                ("clone3", driver_module.SYS_CLONE3, None))):
+            with self.subTest(mode=mode):
+                if index:
+                    self.client.close()
+                    self.client = socket.socket()
+                    self.client.connect(self.listener.getsockname())
+                    self.expected["remote"] = list(self.client.getsockname())
+                def fixture():
+                    self.client.close()
+                    accepted, _ = self.listener.accept()
+                    self.listener.close()
+                    os.execv(self.helper, [self.helper, mode, marker])
+
+                self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                             self.receiver, self.expected)
+                with self.assertRaisesRegex(driver_module.Failure, "创建 syscall 435|不安全 clone"):
+                    self.driver.run(fixture)
+                evidence = self.driver.evidence
+                self.assert_clean(evidence)
+                rejected = next(row for row in evidence["events"] if "rejection" in row)
+                self.assertEqual(rejected["kind"], "creation-entry")
+                self.assertEqual(rejected["syscall"]["nr"], nr)
+                if flags is not None:
+                    self.assertEqual(rejected["syscall"]["args"][0], flags)
+                self.assertFalse(any(row["event"] in (1, 2, 3) for row in evidence["events"]))
+                self.assertLess(evidence["last_normal_resume_monotonic_ns"],
+                                rejected["rejected_monotonic_ns"])
+                self.assertFalse(Path(marker).exists())
+                self.assertTrue(evidence["ledger_poisoned"])
+
+    def test_missing_or_mismatched_creation_proof_refuses_child_resume(self):
+        for index, mode in enumerate(("missing-entry", "wrong-event-pid")):
+            with self.subTest(mode=mode):
+                if index:
+                    self.client.close()
+                    self.client = socket.socket()
+                    self.client.connect(self.listener.getsockname())
+                    self.expected["remote"] = list(self.client.getsockname())
+                self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                             self.receiver, self.expected)
+                original = self.driver._wait
+                injection = {}
+
+                def corrupt(initial=False):
+                    pid, status = original(initial)
+                    creation = self.driver.creations.get(pid)
+                    if creation and not injection:
+                        if mode == "missing-entry" and status >> 16 == driver_module.FORK:
+                            del self.driver.creations[pid]
+                            injection["at"] = time.monotonic_ns()
+                        elif (mode == "wrong-event-pid" and "event_child" in creation
+                              and os.WIFSTOPPED(status)
+                              and os.WSTOPSIG(status) == (signal.SIGTRAP | 0x80)):
+                            creation["event_child"] += 1
+                            injection["at"] = time.monotonic_ns()
+                    return pid, status
+
+                self.driver._wait = corrupt
+                with self.assertRaisesRegex(driver_module.Failure, "entry 证据|PID 与 FORK"):
+                    self.driver.run(self.cross_exec)
+                evidence = self.driver.evidence
+                self.assert_clean(evidence)
+                self.assertTrue(injection)
+                self.assertFalse(evidence["first_stops"])
+                self.assertLess(evidence["last_normal_resume_monotonic_ns"], injection["at"])
+
+    def test_real_x32_and_i386_abi_are_rejected(self):
+        marker = str(Path(self.temp.name) / "unverified-abi-executed")
+        for index, mode in enumerate(("x32", "i386")):
+            with self.subTest(mode=mode):
+                if index:
+                    self.client.close()
+                    self.client = socket.socket()
+                    self.client.connect(self.listener.getsockname())
+                    self.expected["remote"] = list(self.client.getsockname())
+
+                def fixture():
+                    self.client.close()
+                    accepted, _ = self.listener.accept()
+                    self.listener.close()
+                    os.execv(self.helper, [self.helper, mode, marker])
+
+                self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                             self.receiver, self.expected)
+                with self.assertRaisesRegex(driver_module.Failure, "x32 syscall|ABI"):
+                    self.driver.run(fixture)
+                evidence = self.driver.evidence
+                self.assert_clean(evidence)
+                rejected = next(row for row in evidence["events"] if "rejection" in row)
+                self.assertLess(evidence["last_normal_resume_monotonic_ns"],
+                                rejected["rejected_monotonic_ns"])
+                self.assertFalse(Path(marker).exists())
 
     def test_deadline_after_finish_refuses_continue_and_closes_fds(self):
         self.driver = driver_module.ControlledDriver(time.monotonic() + 1,
@@ -159,7 +360,7 @@ class DriverContracts(unittest.TestCase):
         original = self.driver._normal_continue
         injection, held_and_received = {}, set()
 
-        def delayed(pid, delivered_signal=0):
+        def delayed(pid, delivered_signal=0, record=True):
             identity = self.driver.ledger.registry[pid]
             if identity["epoch"] == 1 and not injection:
                 injection["before"] = time.monotonic()
@@ -169,7 +370,7 @@ class DriverContracts(unittest.TestCase):
                 held_and_received.update(row["pidfd"][0]["value"] for row in self.driver.ledger.messages)
                 time.sleep(injection["deadline"] - time.monotonic() + 0.025)
                 injection["after"] = time.monotonic()
-            return original(pid, delivered_signal)
+            return original(pid, delivered_signal, record)
 
         self.driver._normal_continue = delayed
         with self.assertRaisesRegex(driver_module.Failure, "总窗口已超时"):
@@ -180,8 +381,7 @@ class DriverContracts(unittest.TestCase):
         self.assertEqual(self.driver.ledger.deadline, injection["deadline"])
         self.assertTrue(evidence["ledger_poisoned"])
         self.assertFalse(any(row["accepted"] or row["pending"] for row in evidence["messages"]))
-        self.assertFalse(any(row["returned_monotonic_ns"] >= int(injection["before"] * 1e9)
-                             for row in evidence["continues"]))
+        self.assertLess(evidence["last_normal_resume_monotonic_ns"], int(injection["before"] * 1e9))
         for descriptor in held_and_received:
             with self.assertRaises(OSError) as error:
                 os.fstat(descriptor)
@@ -212,8 +412,7 @@ class DriverContracts(unittest.TestCase):
         fork = next(row for row in evidence["events"] if row["event"] == driver_module.FORK)
         self.assertGreater(fork["child_pid"], 0)
         self.assertFalse(Path(f"/proc/{fork['child_pid']}").exists())
-        self.assertFalse(any(row["returned_monotonic_ns"] >= int(injection["before"] * 1e9)
-                             for row in evidence["continues"]))
+        self.assertLess(evidence["last_normal_resume_monotonic_ns"], int(injection["before"] * 1e9))
 
     def test_unconsumed_fork_timeout_discovers_child_during_cleanup(self):
         self.driver = driver_module.ControlledDriver(time.monotonic() + 1,
@@ -222,7 +421,8 @@ class DriverContracts(unittest.TestCase):
         injection = {}
 
         def delayed(initial=False):
-            if not initial and not injection:
+            if (not initial and not injection
+                    and self.driver.creations.get(self.driver.master)):
                 ready_deadline = self.driver.ledger.deadline
                 while time.monotonic() < ready_deadline:
                     children = Path(f"/proc/{self.driver.master}/task/{self.driver.master}/children").read_text()
@@ -249,14 +449,14 @@ class DriverContracts(unittest.TestCase):
         cleanup_pids = {row.get("pid") for row in evidence["cleanup"]
                         if row["kind"] in ("cleanup-reaped", "kernel-reaped-task")}
         self.assertIn(injection["child"], cleanup_pids)
-        self.assertFalse(any(row["returned_monotonic_ns"] >= int(injection["before"] * 1e9)
-                             for row in evidence["continues"]))
+        self.assertLess(evidence["last_normal_resume_monotonic_ns"], int(injection["before"] * 1e9))
 
     def test_running_tracer_exitkill_reaps_subtree(self):
         previous = driver_module.ctypes.c_int()
-        if driver_module.libc.prctl(37, driver_module.ctypes.byref(previous), 0, 0, 0) != 0:
+        if driver_module.libc.prctl(driver_module.PR_GET_CHILD_SUBREAPER,
+                                   driver_module.ctypes.byref(previous), 0, 0, 0) != 0:
             raise OSError("不能读取测试 subreaper 状态")
-        if driver_module.libc.prctl(36, 1, 0, 0, 0) != 0:
+        if driver_module.libc.prctl(driver_module.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
             raise OSError("不能启用测试 subreaper")
         read_fd, write_fd = os.pipe()
         baseline = len(os.listdir("/proc/self/fd"))
@@ -319,7 +519,11 @@ class DriverContracts(unittest.TestCase):
             self.assertEqual(notified, set(descriptors))
             for pid in (info["master"], info["child"]):
                 while time.monotonic() < deadline:
-                    waited, status = os.waitpid(pid, os.WNOHANG)
+                    try:
+                        waited, status = os.waitpid(pid, os.WNOHANG)
+                    except ChildProcessError:
+                        # pidfd 已通知退出，但后代可能尚未转交到本测试 subreaper。
+                        waited = 0
                     if waited:
                         reaped.add(pid)
                         self.assertTrue(os.WIFSIGNALED(status))
@@ -349,7 +553,8 @@ class DriverContracts(unittest.TestCase):
             for descriptor in descriptors:
                 os.close(descriptor)
             os.close(read_fd)
-            if driver_module.libc.prctl(36, previous.value, 0, 0, 0) != 0:
+            if driver_module.libc.prctl(driver_module.PR_SET_CHILD_SUBREAPER,
+                                       previous.value, 0, 0, 0) != 0:
                 raise OSError("不能恢复测试 subreaper 状态")
         self.assertEqual(len(os.listdir("/proc/self/fd")), baseline - 2)
 
