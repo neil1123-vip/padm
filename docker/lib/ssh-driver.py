@@ -125,6 +125,7 @@ class ControlledDriver:
         self.early_stops = {}
         self.active_syscalls = {}
         self.first_syscall_exit = set()
+        self.group_changes = {}
         self.creations = {}
         self.waiting_parent_exit = set()
         self.evidence = {
@@ -327,12 +328,28 @@ class ControlledDriver:
             self.first_syscall_exit.discard(pid)
             self.active_syscalls[pid] = info["nr"]
             if info["nr"] in (SYS_SETPGID, SYS_SETSID):
-                row.update({"kind": "group-change-entry", "syscall": info})
                 current = self._sample(pid)
-                row["current"] = current
                 self._registered_process(pid, current["process"])
-                # 进程组或会话改变的授权合同尚未验证，下一阶段通过后再开放。
-                raise Failure(f"受控 SSH driver 拒绝未支持的进程组或会话改变 syscall {info['nr']}")
+                identity = self.ledger.registry[pid]
+                row.update({
+                    "kind": "group-change-entry", "syscall": copy.deepcopy(info),
+                    "current": copy.deepcopy(current),
+                    "before": {"pgrp": current["process"]["pgrp"], "sid": current["process"]["sid"]},
+                    "generation": copy.deepcopy(identity["generation"]),
+                    "epoch": identity["epoch"], "exe": identity["epoch_exe"],
+                    "entry_monotonic_ns": time.monotonic_ns(),
+                })
+                if info["nr"] == SYS_SETPGID and info["args"][:2] != [0, 0]:
+                    raise Failure("受控 SSH driver 仅支持当前 task 的 setpgid(0, 0)")
+                if pid in self.group_changes:
+                    raise Failure("受控 SSH 进程组改变缺少前次 exit 证明")
+                self.group_changes[pid] = {
+                    "entry": copy.deepcopy(info), "before": copy.deepcopy(row["before"]),
+                    "generation": copy.deepcopy(identity["generation"]),
+                    "epoch": identity["epoch"], "exe": identity["epoch_exe"],
+                    "accepted_matches": copy.deepcopy(current["accepted_matches"]),
+                    "entry_monotonic_ns": row["entry_monotonic_ns"],
+                }
             if info["nr"] in (SYS_CLONE, SYS_FORK, SYS_VFORK, SYS_CLONE3):
                 row.update({"kind": "creation-entry", "syscall": info})
                 if pid in self.creations:
@@ -359,11 +376,42 @@ class ControlledDriver:
                 }
         else:
             nr = self.active_syscalls.pop(pid, None)
+            group_change = self.group_changes.get(pid)
             if nr is None:
                 if pid not in self.first_syscall_exit or info["rval"] != 0 or info["is_error"]:
                     raise Failure("受控 SSH syscall exit 缺少对应 entry")
                 self.first_syscall_exit.discard(pid)
-            if pid in self.creations:
+            if nr in (SYS_SETPGID, SYS_SETSID) and group_change is None:
+                raise Failure("受控 SSH 进程组改变 exit 缺少对应 entry")
+            if group_change is not None:
+                row.update({
+                    "kind": "group-change-exit", "syscall": copy.deepcopy(info),
+                    "nr": nr, "before": copy.deepcopy(group_change["before"]),
+                    "generation": copy.deepcopy(group_change["generation"]),
+                    "epoch": group_change["epoch"], "exe": group_change["exe"],
+                    "entry_monotonic_ns": group_change["entry_monotonic_ns"],
+                    "exit_monotonic_ns": time.monotonic_ns(),
+                })
+                current = self._sample(pid)
+                after = {"pgrp": current["process"]["pgrp"], "sid": current["process"]["sid"]}
+                row.update({"current": copy.deepcopy(current), "after": after})
+                self._registered_process(pid, current["process"])
+                identity = self.ledger.registry[pid]
+                if (nr != group_change["entry"]["nr"]
+                        or self.ledger._generation(current["process"]) != group_change["generation"]
+                        or identity["epoch"] != group_change["epoch"]
+                        or identity["epoch_exe"] != group_change["exe"]
+                        or current["accepted_matches"] != group_change["accepted_matches"]):
+                    raise Failure("受控 SSH 进程组改变 exit 的代次或 accepted 锚点已改变")
+                valid = ((nr == SYS_SETPGID and not info["is_error"] and info["rval"] == 0
+                          and after["pgrp"] == pid and after["sid"] == group_change["before"]["sid"])
+                         or (nr == SYS_SETSID and not info["is_error"] and info["rval"] == pid
+                             and after["pgrp"] == pid and after["sid"] == pid)
+                         or (info["is_error"] and after == group_change["before"]))
+                if not valid:
+                    raise Failure("受控 SSH 进程组改变返回值或终态无效")
+                del self.group_changes[pid]
+            elif pid in self.creations:
                 creation = self.creations[pid]
                 row.update({"kind": "creation-exit", "syscall": info})
                 if nr != creation["entry"]["nr"]:
@@ -463,6 +511,8 @@ class ControlledDriver:
                     raise Failure("受控 SSH EXEC/EXIT task 未登记")
                 if pid in self.creations:
                     raise Failure("受控 SSH 创建 syscall 未关联完成却发生 EXEC/EXIT")
+                if pid in self.group_changes:
+                    raise Failure("受控 SSH 进程组改变未关联完成却发生 EXEC/EXIT")
                 current = self._sample(pid)
                 self._require_stop(pid)
                 row.update({"kind": "exec-stop" if event == EXEC else "exit-stop",
@@ -605,6 +655,8 @@ class ControlledDriver:
         self.creations.clear()
         self.evidence["discarded_syscall_tasks"] = sorted(self.active_syscalls)
         self.active_syscalls.clear()
+        self.evidence["discarded_group_proofs"] = sorted(self.group_changes)
+        self.group_changes.clear()
         self.first_syscall_exit.clear()
         self.waiting_parent_exit.clear()
 
@@ -709,7 +761,8 @@ class ControlledDriver:
             while self.tracked:
                 self._event(*self._wait())
             if (self.early_stops or self.pending_children or self.creations
-                    or self.active_syscalls or self.first_syscall_exit or self.waiting_parent_exit):
+                    or self.active_syscalls or self.first_syscall_exit or self.waiting_parent_exit
+                    or self.group_changes):
                 raise Failure("受控 SSH driver 存在未完成的 syscall 或 child 关联")
             self.evidence["final_drain"] = copy.deepcopy(self.ledger.drain(self.receiver))
         except BaseException as caught:
@@ -749,6 +802,7 @@ class ControlledDriver:
                 "remaining_parent_confirmations": sorted(self.pending_children),
                 "remaining_creation_proofs": sorted(self.creations),
                 "remaining_syscall_tasks": sorted(self.active_syscalls),
+                "remaining_group_changes": sorted(self.group_changes),
                 "remaining_first_exit_tasks": sorted(self.first_syscall_exit),
                 "remaining_waiting_parent_exit": sorted(self.waiting_parent_exit),
                 "open_received_fds": sorted(self.ledger.open_received_fds),

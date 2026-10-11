@@ -68,13 +68,23 @@ class DriverContracts(unittest.TestCase):
         self.receiver.close()
         self.temp.cleanup()
 
-    def cross_exec(self):
+    def cross_exec(self, group_change=None):
         self.client.close()
         accepted, _ = self.listener.accept()
         self.listener.close()
         accepted.set_inheritable(True)
         child = os.fork()
         if child == 0:
+            if group_change is not None:
+                if group_change == "setpgid":
+                    os.setpgid(0, 0)
+                else:
+                    os.setsid()
+                grandchild = os.fork()
+                if grandchild:
+                    accepted.close()
+                    _, status = os.waitpid(grandchild, 0)
+                    os._exit(0 if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 23 else 112)
             sender = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
             sender.sendto(b"old-epoch-zero", self.path)
             sender.close()
@@ -82,7 +92,8 @@ class DriverContracts(unittest.TestCase):
             os.execv(self.helper, [self.helper, "cross-exec", self.path, str(accepted.fileno())])
         accepted.close()
         _, status = os.waitpid(child, 0)
-        os._exit(0 if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 23 else 112)
+        expected = 0 if group_change is not None else 23
+        os._exit(0 if os.WIFEXITED(status) and os.WEXITSTATUS(status) == expected else 112)
 
     def assert_clean(self, evidence):
         current = driver_module.ctypes.c_int()
@@ -96,6 +107,7 @@ class DriverContracts(unittest.TestCase):
         self.assertFalse(evidence["remaining_early_stops"])
         self.assertFalse(evidence["remaining_parent_confirmations"])
         self.assertFalse(evidence["remaining_creation_proofs"])
+        self.assertFalse(evidence["remaining_group_changes"])
         self.assertFalse(evidence["remaining_syscall_tasks"])
         self.assertFalse(evidence["remaining_first_exit_tasks"])
         self.assertFalse(evidence["remaining_waiting_parent_exit"])
@@ -107,6 +119,38 @@ class DriverContracts(unittest.TestCase):
         self.assertFalse(evidence["authoritative"])
         self.assertFalse(evidence["jail_ready"])
         self.assertTrue(evidence["ledger_closed"])
+
+    def assert_tasks_reaped(self, *pids):
+        for pid in pids:
+            self.assertFalse(Path(f"/proc/{pid}").exists(), f"task {pid} 仍未真正回收")
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(pid, os.WNOHANG)
+
+    def assert_exec_history(self, evidence, pid):
+        old, new, closed = evidence["messages"]
+        self.assertEqual([row["body"] for row in (old, new, closed)],
+                         ["old-epoch-zero", "new-epoch-one", "closed-accepted-fd"])
+        self.assertTrue(all(row["accepted"] for row in evidence["messages"]))
+        self.assertTrue(all(row["sender_pid"] == pid for row in evidence["messages"]))
+        self.assertEqual([row["exec_epoch"] for row in (old, new, closed)], [0, 1, 1])
+        self.assertEqual(old["task_generation"], new["task_generation"])
+        self.assertNotEqual(old["epoch_exe"], old["current_stop_exe"])
+        self.assertEqual(old["current_stop_exe"], self.helper)
+        self.assertEqual(new["epoch_exe"], self.helper)
+        self.assertFalse(closed["owns_anchor_fd"])
+        self.assertFalse(closed["established_tuple_live"])
+        self.assertTrue(closed["historical_anchor"]["accepted_matches"])
+        transitions = [row for row in evidence["events"]
+                       if row["pid"] == pid and row["event"] in (4, 6)]
+        self.assertEqual([row["event"] for row in transitions], [4, 6])
+        self.assertEqual(transitions[0]["ledger"]["order"],
+                         ["drain-eagain", "pending-commit", "epoch-update"])
+        self.assertEqual(transitions[1]["ledger"]["order"],
+                         ["drain-eagain", "pending-commit", "epoch-terminal"])
+        for row in transitions:
+            self.assertTrue(row["ledger"]["drain"]["ended_with_eagain"])
+            self.assertLess(row["finish_return_monotonic_ns"], row["continued_monotonic_ns"])
+        return transitions
 
     def test_python_to_c_epoch_history_and_frozen_trace(self):
         self.driver = driver_module.ControlledDriver(time.monotonic() + 5, self.receiver, self.expected)
@@ -184,28 +228,7 @@ class DriverContracts(unittest.TestCase):
         self.assertFalse(frozen["accepted"])
         self.assertEqual(frozen["exec_epoch"], 0)
         self.assertEqual(len(barriers[0]["received_fds_at_barrier"]), 1)
-        old, new, closed = evidence["messages"]
-        self.assertEqual([row["body"] for row in (old, new, closed)],
-                         ["old-epoch-zero", "new-epoch-one", "closed-accepted-fd"])
-        self.assertTrue(all(row["accepted"] for row in evidence["messages"]))
-        self.assertEqual([row["exec_epoch"] for row in evidence["messages"]], [0, 1, 1])
-        self.assertNotEqual(old["epoch_exe"], old["current_stop_exe"])
-        self.assertEqual(old["current_stop_exe"], self.helper)
-        self.assertEqual(new["epoch_exe"], self.helper)
-        self.assertFalse(closed["owns_anchor_fd"])
-        self.assertFalse(closed["established_tuple_live"])
-        self.assertTrue(closed["historical_anchor"]["accepted_matches"])
-        self.assertEqual(old["task_generation"], new["task_generation"])
-        transitions = [row for row in evidence["events"]
-                       if row["pid"] == child and row["event"] in (4, 6)]
-        self.assertEqual([row["event"] for row in transitions], [4, 6])
-        for row in transitions:
-            self.assertTrue(row["ledger"]["drain"]["ended_with_eagain"])
-            self.assertLess(row["finish_return_monotonic_ns"], row["continued_monotonic_ns"])
-        self.assertEqual(transitions[0]["ledger"]["order"],
-                         ["drain-eagain", "pending-commit", "epoch-update"])
-        self.assertEqual(transitions[1]["ledger"]["order"],
-                         ["drain-eagain", "pending-commit", "epoch-terminal"])
+        self.assert_exec_history(evidence, child)
         reaped = [row["exit_code"] for row in evidence["events"] if row.get("kind") == "reaped"]
         self.assertEqual(sorted(reaped), [0, 23])
         original = copy.deepcopy(evidence["events"])
@@ -746,7 +769,7 @@ class DriverContracts(unittest.TestCase):
         with self.assertRaises(ChildProcessError):
             os.waitpid(-1, os.WNOHANG)
 
-    def test_child_process_group_and_session_changes_are_rejected_at_entry(self):
+    def test_self_group_changes_preserve_multigeneration_exec_history(self):
         marker = Path(self.temp.name) / "group-change-executed"
         for index, (mode, nr) in enumerate((("setpgid", 109), ("setsid", 112))):
             with self.subTest(mode=mode):
@@ -768,65 +791,314 @@ class DriverContracts(unittest.TestCase):
                     self.client.connect(self.listener.getsockname())
                     self.expected["remote"] = list(self.client.getsockname())
 
+                self.driver = driver_module.ControlledDriver(time.monotonic() + 10,
+                                                             self.receiver, self.expected)
+                evidence = self.driver.run(lambda: self.cross_exec(mode))
+                self.assert_clean(evidence)
+                self.assertEqual(len(evidence["first_stops"]), 2)
+                child_stop, grandchild_stop = evidence["first_stops"]
+                child, grandchild = child_stop["pid"], grandchild_stop["pid"]
+                self.assertEqual(child_stop["parent_pid"], self.driver.master)
+                self.assertEqual(grandchild_stop["parent_pid"], child)
+                entry, exited = [row for row in evidence["events"]
+                                 if row.get("kind") in ("group-change-entry", "group-change-exit")]
+                self.assertEqual((entry["pid"], exited["pid"]), (child, child))
+                self.assertEqual((entry["syscall"]["op"], exited["syscall"]["op"]), (1, 2))
+                self.assertEqual(entry["syscall"]["arch"], driver_module.AUDIT_ARCH_X86_64)
+                self.assertEqual((entry["syscall"]["nr"], exited["nr"]), (nr, nr))
+                if mode == "setpgid":
+                    self.assertEqual(entry["syscall"]["args"][:2], [0, 0])
+                before = {"pgrp": self.driver.master,
+                          "sid": child_stop["snapshot"]["process"]["sid"]}
+                after = {"pgrp": child, "sid": child if mode == "setsid" else before["sid"]}
+                self.assertEqual(entry["before"], before)
+                self.assertEqual(exited["before"], before)
+                self.assertEqual(exited["after"], after)
+                self.assertEqual(exited["syscall"]["rval"], child if mode == "setsid" else 0)
+                self.assertFalse(exited["syscall"]["is_error"])
+                for key in ("generation", "epoch", "exe"):
+                    self.assertEqual(entry[key], exited[key])
+                self.assertEqual(entry["epoch"], 0)
+                self.assertEqual(entry["generation"],
+                                 self.driver.ledger._generation(child_stop["snapshot"]["process"]))
+                self.assertEqual(entry["current"]["accepted_matches"],
+                                 exited["current"]["accepted_matches"])
+                self.assertEqual(len(exited["current"]["accepted_matches"]), 1)
+                self.assertLess(entry["wait_monotonic_ns"], exited["entry_monotonic_ns"])
+                self.assertEqual(entry["entry_monotonic_ns"], exited["entry_monotonic_ns"])
+                self.assertLess(exited["entry_monotonic_ns"], exited["wait_monotonic_ns"])
+                self.assertLess(exited["wait_monotonic_ns"], exited["exit_monotonic_ns"])
+                self.assertLess(exited["exit_monotonic_ns"],
+                                grandchild_stop["creation"]["entry_monotonic_ns"])
+                for start, end in (
+                        (entry["entry_monotonic_ns"], exited["wait_monotonic_ns"]),
+                        (exited["exit_monotonic_ns"],
+                         grandchild_stop["creation"]["entry_monotonic_ns"])):
+                    resumes = [row for row in evidence["continues"] if row["pid"] == child
+                               and start < row["returned_monotonic_ns"] < end]
+                    self.assertEqual(len(resumes), 1)
+                    self.assertTrue(resumes[0]["normal"])
+                for first in (child_stop, grandchild_stop):
+                    creation = first["creation"]
+                    self.assertEqual((creation["event_child"], creation["exit_rval"]),
+                                     (first["pid"], first["pid"]))
+                    self.assertEqual(creation["parent_pid"], first["parent_pid"])
+                    self.assertLess(creation["entry_monotonic_ns"], creation["event_monotonic_ns"])
+                    self.assertLess(creation["event_monotonic_ns"], creation["exit_monotonic_ns"])
+                    self.assertLess(creation["exit_monotonic_ns"],
+                                    first["first_continue_monotonic_ns"])
+                    self.assertEqual(len(first["snapshot"]["accepted_matches"]), 1)
+                    self.assertEqual(first["snapshot"]["accepted_matches"],
+                                     first["parent_fork_anchor"]["accepted_matches"])
+                for snapshot in (grandchild_stop["snapshot"],
+                                 grandchild_stop["parent_fork_anchor"]):
+                    self.assertEqual({key: snapshot["process"][key] for key in ("pgrp", "sid")},
+                                     after)
+                self.assertNotEqual(after["pgrp"], self.driver.master)
+                for row in self.assert_exec_history(evidence, grandchild):
+                    self.assertEqual({key: row["current"]["process"][key]
+                                      for key in ("pgrp", "sid")}, after)
+                reaped = [row["exit_code"] for row in evidence["events"]
+                          if row.get("kind") == "reaped"]
+                self.assertEqual(sorted(reaped), [0, 0, 23])
+                self.assertFalse(marker.exists())
+                self.assert_tasks_reaped(grandchild, child, self.driver.master)
+                print(json.dumps({
+                    "kind": "self-group-change-exec-chain", "mode": mode, "pid": child,
+                    "grandchild": grandchild, "master": self.driver.master,
+                    "syscall": {key: entry["syscall"][key] for key in ("nr", "args", "arch")},
+                    "before": before, "after": after, "rval": exited["syscall"]["rval"],
+                    "epochs": [row["exec_epoch"] for row in evidence["messages"]],
+                    "reaped": sorted(reaped), "remaining_group_changes": evidence["remaining_group_changes"],
+                }, sort_keys=True, separators=(",", ":")), flush=True)
+
+    def test_group_leader_setsid_eperm_preserves_identity_and_continues(self):
+        def fixture():
+            before = (os.getpgrp(), os.getsid(0))
+            try:
+                os.setsid()
+            except OSError as error:
+                if error.errno != errno.EPERM or (os.getpgrp(), os.getsid(0)) != before:
+                    os._exit(116)
+            else:
+                os._exit(117)
+            self.cross_exec()
+
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                     self.receiver, self.expected)
+        evidence = self.driver.run(fixture)
+        self.assert_clean(evidence)
+        entry, exited = [row for row in evidence["events"]
+                         if row.get("kind") in ("group-change-entry", "group-change-exit")]
+        self.assertEqual((entry["pid"], exited["pid"]), (self.driver.master, self.driver.master))
+        self.assertEqual((entry["syscall"]["op"], entry["syscall"]["nr"]), (1, 112))
+        self.assertEqual((exited["syscall"]["op"], exited["nr"]), (2, 112))
+        self.assertEqual(exited["syscall"]["rval"], -errno.EPERM)
+        self.assertTrue(exited["syscall"]["is_error"])
+        self.assertEqual(entry["before"]["pgrp"], self.driver.master)
+        self.assertEqual(entry["before"], exited["before"])
+        self.assertEqual(entry["before"], exited["after"])
+        for key in ("generation", "epoch", "exe"):
+            self.assertEqual(entry[key], exited[key])
+        self.assertEqual(entry["current"]["accepted_matches"], exited["current"]["accepted_matches"])
+        self.assertLess(exited["exit_monotonic_ns"],
+                        evidence["first_stops"][0]["creation"]["entry_monotonic_ns"])
+        self.assert_exec_history(evidence, evidence["first_stops"][0]["pid"])
+        self.assertEqual(sorted(row["exit_code"] for row in evidence["events"]
+                                if row.get("kind") == "reaped"), [0, 23])
+        self.assert_tasks_reaped(evidence["first_stops"][0]["pid"], self.driver.master)
+        print(json.dumps({
+            "kind": "group-leader-setsid-eperm", "pid": self.driver.master,
+            "before": entry["before"], "after": exited["after"],
+            "rval": exited["syscall"]["rval"], "is_error": exited["syscall"]["is_error"],
+            "continued_to_cross_exec": True,
+        }, sort_keys=True, separators=(",", ":")), flush=True)
+
+    def test_group_exit_invalid_return_keeps_proof_for_cleanup(self):
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                     self.receiver, self.expected)
+        original_info = driver_module.syscall_info
+        injected = {}
+
+        def invalid_setsid_return(pid):
+            info = original_info(pid)
+            pending = self.driver.group_changes.get(pid)
+            if (info["op"] == 2 and pending
+                    and pending["entry"]["nr"] == driver_module.SYS_SETSID and not injected):
+                self.driver._require_stop(pid)
+                self.assertFalse(info["is_error"])
+                self.assertEqual(info["rval"], pid)
+                current = driver_module.process_snapshot(pid)
+                self.assertEqual((current["pgrp"], current["sid"]), (pid, pid))
+                injected.update({"pid": pid, "real_exit": copy.deepcopy(info),
+                                 "observed": {"pgrp": current["pgrp"], "sid": current["sid"]},
+                                 "at": time.monotonic_ns()})
+                info = {**info, "rval": pid + 1}
+            return info
+
+        with patch.object(driver_module, "syscall_info", side_effect=invalid_setsid_return):
+            with self.assertRaisesRegex(driver_module.Failure, "返回值或终态无效"):
+                self.driver.run(lambda: self.cross_exec("setsid"))
+        evidence = self.driver.evidence
+        self.assert_clean(evidence)
+        self.assertTrue(injected)
+        child = injected["pid"]
+        rejected = next(row for row in evidence["events"] if "rejection" in row)
+        self.assertEqual((rejected["kind"], rejected["pid"], rejected["nr"]),
+                         ("group-change-exit", child, driver_module.SYS_SETSID))
+        self.assertEqual(rejected["syscall"]["rval"], child + 1)
+        self.assertEqual(rejected["after"], {"pgrp": child, "sid": child})
+        self.assertEqual(evidence["discarded_group_proofs"], [child])
+        self.assertEqual(len(evidence["first_stops"]), 1)
+        self.assertEqual(len(evidence["creations"]), 1)
+        self.assertFalse(evidence["messages"])
+        self.assertLess(evidence["last_normal_resume_monotonic_ns"], injected["at"])
+        self.assertFalse(any(row["returned_monotonic_ns"] >= injected["at"]
+                             for row in evidence["continues"]))
+        self.assertTrue(evidence["ledger_poisoned"])
+        self.assert_tasks_reaped(child, self.driver.master)
+        print(json.dumps({
+            "kind": "invalid-group-exit-proof-rejection", **injected,
+            "injected_rval": rejected["syscall"]["rval"],
+            "discarded_group_proofs": evidence["discarded_group_proofs"],
+            "remaining_group_changes": evidence["remaining_group_changes"],
+        }, sort_keys=True, separators=(",", ":")), flush=True)
+
+    def test_other_process_or_group_setpgid_is_rejected_at_entry(self):
+        marker = Path(self.temp.name) / "other-group-change-executed"
+        for index, mode in enumerate(("other-process", "other-group")):
+            with self.subTest(mode=mode):
+                if index:
+                    self.client.close()
+                    self.client = socket.socket()
+                    self.client.connect(self.listener.getsockname())
+                    self.expected["remote"] = list(self.client.getsockname())
+
                 def fixture():
                     self.client.close()
                     accepted, _ = self.listener.accept()
                     self.listener.close()
-                    accepted.set_inheritable(True)
                     child = os.fork()
                     if child == 0:
-                        os.execv(self.helper, [self.helper, mode, str(marker)])
+                        try:
+                            if mode == "other-process":
+                                os.setpgid(os.getppid(), 0)
+                            else:
+                                os.setpgid(0, os.getpgrp())
+                        except OSError:
+                            pass
+                        marker.write_text("executed")
+                        os._exit(0)
                     accepted.close()
                     os.waitpid(child, 0)
 
-                self.driver = driver_module.ControlledDriver(time.monotonic() + 2,
+                self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
                                                              self.receiver, self.expected)
-                try:
+                with self.assertRaisesRegex(driver_module.Failure, "setpgid"):
                     self.driver.run(fixture)
-                except driver_module.Failure as error:
-                    print(json.dumps({"kind": "group-change-driver-result", "mode": mode,
-                                      "error": str(error)}, sort_keys=True,
-                                     separators=(",", ":")), flush=True)
-                    self.assertRegex(str(error), "未支持的进程组或会话改变")
-                else:
-                    self.fail("受控 child 的进程组或会话改变未被拒绝")
                 evidence = self.driver.evidence
                 self.assert_clean(evidence)
                 rejected = next(row for row in evidence["events"] if "rejection" in row)
                 self.assertEqual(rejected["kind"], "group-change-entry")
-                self.assertEqual(rejected["syscall"]["op"], 1)
+                self.assertEqual((rejected["syscall"]["op"], rejected["syscall"]["nr"]), (1, 109))
                 self.assertEqual(rejected["syscall"]["arch"], driver_module.AUDIT_ARCH_X86_64)
-                self.assertEqual(rejected["syscall"]["nr"], nr)
-                self.assertEqual(rejected["syscall"]["args"], [0] * 6)
-                first = evidence["first_stops"][0]
-                child = first["pid"]
+                args = [self.driver.master, 0] if mode == "other-process" else [0, self.driver.master]
+                self.assertEqual(rejected["syscall"]["args"][:2], args)
+                child = evidence["first_stops"][0]["pid"]
                 self.assertEqual(rejected["pid"], child)
-                self.assertNotEqual(child, self.driver.master)
-                self.assertEqual(len(first["snapshot"]["accepted_matches"]), 1)
                 self.assertEqual(rejected["current"]["process"]["pgrp"], self.driver.master)
-                self.assertEqual(rejected["current"]["process"]["sid"],
-                                 first["snapshot"]["process"]["sid"])
+                self.assertFalse(any(row.get("kind") == "group-change-exit"
+                                     for row in evidence["events"]))
                 self.assertLess(evidence["last_normal_resume_monotonic_ns"],
                                 rejected["rejected_monotonic_ns"])
+                self.assertFalse(any(row["returned_monotonic_ns"] >= rejected["rejected_monotonic_ns"]
+                                     for row in evidence["continues"]))
                 self.assertFalse(marker.exists())
                 self.assertTrue(evidence["ledger_poisoned"])
-                for pid in (child, self.driver.master):
-                    self.assertFalse(Path(f"/proc/{pid}").exists(), f"task {pid} 仍未真正回收")
-                    with self.assertRaises(ChildProcessError):
-                        os.waitpid(pid, os.WNOHANG)
-                self.assertFalse(Path(f"/proc/self/task/{os.getpid()}/children").read_text().strip())
-                with self.assertRaises(ChildProcessError):
-                    os.waitpid(-1, os.WNOHANG)
+                self.assert_tasks_reaped(child, self.driver.master)
                 print(json.dumps({
-                    "kind": "group-change-entry-rejection", "mode": mode,
-                    "pid": child, "master": self.driver.master,
+                    "kind": "other-setpgid-entry-rejection", "mode": mode, "pid": child,
                     "syscall": {key: rejected["syscall"][key] for key in ("nr", "args", "arch")},
-                    "pgrp": rejected["current"]["process"]["pgrp"],
-                    "sid": rejected["current"]["process"]["sid"],
-                    "first_sid": first["snapshot"]["process"]["sid"],
-                    "marker_exists": marker.exists(), "ledger_poisoned": evidence["ledger_poisoned"],
-                    "remaining_tracees": evidence["remaining_tracees"],
-                    "remaining_retired_tasks": evidence["remaining_retired_tasks"],
+                    "marker_exists": marker.exists(),
+                    "remaining_group_changes": evidence["remaining_group_changes"],
+                }, sort_keys=True, separators=(",", ":")), flush=True)
+
+    def test_detached_group_failure_reaps_pinned_grandchild(self):
+        for index, mode in enumerate(("setpgid", "setsid")):
+            with self.subTest(mode=mode):
+                if index:
+                    self.client.close()
+                    self.client = socket.socket()
+                    self.client.connect(self.listener.getsockname())
+                    self.expected["remote"] = list(self.client.getsockname())
+                self.driver = driver_module.ControlledDriver(time.monotonic() + 10,
+                                                             self.receiver, self.expected)
+                original_continue = self.driver._normal_continue
+                original_kill = os.kill
+                original_pidfd_signal = signal.pidfd_send_signal
+                tracer, injection, sent = os.getpid(), {}, []
+
+                def fail_after_grandchild_pin(pid, delivered_signal=0, record=True):
+                    creation = self.driver.creations.get(pid)
+                    if (pid != self.driver.master and creation and "event_child" in creation
+                            and not injection):
+                        grandchild = creation["event_child"]
+                        self.assertIn(grandchild, self.driver.owned)
+                        current = driver_module.process_snapshot(pid)
+                        self.assertEqual(current["pgrp"], pid)
+                        injection.update({"pid": pid, "grandchild": grandchild,
+                                          "pgrp": current["pgrp"], "sid": current["sid"],
+                                          "at": time.monotonic_ns()})
+                        raise driver_module.Failure("测试注入脱组 grandchild 已固定后的失败")
+                    return original_continue(pid, delivered_signal, record)
+
+                def deny_driver_numeric_signal(pid, delivered):
+                    # fixture 的自停仍由真实 syscall 产生，主 tracer 只能用原 pidfd 发信号。
+                    if os.getpid() != tracer and pid == os.getpid() and delivered == signal.SIGSTOP:
+                        return original_kill(pid, delivered)
+                    raise AssertionError("脱组清理禁止数字 PID 发信号")
+
+                def send_original_pidfd(descriptor, delivered, siginfo=None, flags=0):
+                    pid = next(task for task, held in self.driver.owned.items() if held == descriptor)
+                    self.assertEqual(self.driver._pidfd_pid(descriptor), pid)
+                    sent.append({"pid": pid, "signal": delivered, "at": time.monotonic_ns()})
+                    return original_pidfd_signal(descriptor, delivered, siginfo, flags)
+
+                self.driver._normal_continue = fail_after_grandchild_pin
+                with patch.object(driver_module.os, "kill", side_effect=deny_driver_numeric_signal), \
+                        patch.object(driver_module.os, "killpg",
+                                     side_effect=AssertionError("脱组清理禁止进程组发信号")), \
+                        patch.object(driver_module.signal, "pidfd_send_signal",
+                                     side_effect=send_original_pidfd):
+                    with self.assertRaisesRegex(driver_module.Failure, "脱组 grandchild 已固定"):
+                        self.driver.run(lambda: self.cross_exec(mode))
+                evidence = self.driver.evidence
+                self.assert_clean(evidence)
+                self.assertTrue(injection)
+                child, grandchild = injection["pid"], injection["grandchild"]
+                self.assertNotEqual(injection["pgrp"], self.driver.master)
+                exited = next(row for row in evidence["events"]
+                              if row.get("kind") == "group-change-exit")
+                self.assertEqual(injection["sid"], child if mode == "setsid" else exited["before"]["sid"])
+                rejected = next(row for row in evidence["events"] if "rejection" in row)
+                self.assertEqual((rejected["kind"], rejected["pid"], rejected["child_pid"]),
+                                 ("fork-parent-stop", child, grandchild))
+                pinned = next(row for row in evidence["task_pins"] if row["pid"] == grandchild)
+                self.assertLess(exited["exit_monotonic_ns"], pinned["pinned_monotonic_ns"])
+                self.assertLess(pinned["pinned_monotonic_ns"], injection["at"])
+                self.assertLess(evidence["last_normal_resume_monotonic_ns"],
+                                rejected["rejected_monotonic_ns"])
+                self.assertFalse(any(row["returned_monotonic_ns"] >= injection["at"]
+                                     for row in evidence["continues"]))
+                kills = [row for row in sent if row["signal"] == signal.SIGKILL]
+                self.assertEqual({row["pid"] for row in kills}, {self.driver.master, child, grandchild})
+                self.assertLess(pinned["pinned_monotonic_ns"], min(row["at"] for row in kills))
+                self.assertFalse(evidence["messages"])
+                self.assert_tasks_reaped(grandchild, child, self.driver.master)
+                print(json.dumps({
+                    "kind": "detached-group-pinned-grandchild-cleanup", "mode": mode,
+                    **injection, "master": self.driver.master, "pidfd_signals": sent,
+                    "remaining_group_changes": evidence["remaining_group_changes"],
                 }, sort_keys=True, separators=(",", ":")), flush=True)
 
     def test_real_x32_and_i386_abi_are_rejected(self):

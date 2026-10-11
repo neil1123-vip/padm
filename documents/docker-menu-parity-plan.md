@@ -4128,6 +4128,38 @@ SA_NOCLDWAIT flags，atfork child 钩子早于闸门，异步 reaper、继承的
 109/112 正常执行、真实 OpenSSH/unit 子树、collector/jail 和宿主验收仍待推进，
 `authoritative/jail_ready=false` 保持。
 
+#### 5C.8c.2l 自身进程组与会话合同
+
+本阶段仅验证可信 task 的 `setpgid(0,0)` 与 `setsid()`；109 指定其它
+target 或 group 的参数继续在 entry 拒绝，112 的无意义寄存器参数不作零值要求。
+启动 master 的独立 PGID 前置保留，不把 PGID/SID 提升为 Ledger 身份。
+真实 entry/exit 配对并核原 pidfd、停点、generation、exe、epoch 和 accepted 锚点；
+109 成功须返回 0、PGID 为自身 PID、SID 不变，112 成功须返回自身 PID、
+PGID/SID 均为自身 PID。真实 errno 返回须保留原 PGID/SID，不改变授权或 epoch。
+未闭合的组变化 entry 必须拒绝正常完成，失败清理后保留被丢弃的证明记录。
+
+正例复用 Python fork、已有消息与 C cross-exec：child 自身变组后再创建
+grandchild，继续验证四段创建、accepted 继承、跨 exe、FD 关闭及三代真正回收。
+另验组长 setsid 的真实 EPERM 后继续、109 非自身参数拒绝，以及脱组后
+grandchild 已固定但父尚未恢复时的故障收容。
+新增真实 setsid exit 基础上的损坏 rval 负例，拒绝后无正常恢复或新后代，
+未闭合证明留给 `discarded_group_proofs`。原跨 exec 消息/epoch/FD/finish-stop
+断言提为共享检查，保留全部关键断言并增加 sender 身份，不重复消息 fixture。
+
+定向 19/19、5.822 秒，内部 5945 ms、入口 7005 ms、排队 197 ms，
+Jobs 2、cache_hit=false；`.tmp-regression-docker-bd1f53a810fc4ff8a2e8debb195033dd/`。
+集中完整 Docker 合同 47/47、exit 0，内部 344334 ms、入口 345322 ms，
+排队 390 ms、Jobs 6/占 2 槽、cache_hit=false；driver 19/19、5.770 秒，
+preflight 同时通过，`.tmp-regression-docker-9d8637b06b0a4dffbb24ec4bad59168d/`。
+两个归档各 298 输入，本阶段 driver/tests/计划冻结匹配；最终差异仅其它任务的
+原生事务 case/suite 和 Docker 回归入口，不能把归档结论扩展到这些后来改动。
+结果补写后仅本计划更新；流式核对不重复解包，清理重复归档、清单、核对脚本
+18931291 bytes，两个回归容器无残留，小证据在 `.tmp-ssh-self-group-8c2l/`。
+本轮复用工具镜像和三槽队列，不据两轮完整 elapsed 宣称整体提速。
+
+本阶段不开放任意 OpenSSH/unit、collector/jail，创建事件 child 的首次
+pidfd 固定失败仍待闭合；`authoritative/jail_ready=false`。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
