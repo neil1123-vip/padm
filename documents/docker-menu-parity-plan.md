@@ -3971,6 +3971,42 @@ evidence/trace、输入哈希与隔离条件；本任务 unit、进程、容器�
 `authoritative/jail_ready=false`，任意 PID attach、collector/jail、
 菜单、arm64、公网和原生宿主验收继续未开放或未完成。
 
+#### 5C.8c.2h2 自有 unit 的真实失败认证子树
+
+2026-10-11，复用 h1 同一原生 amd64 工具镜像和隔离条件，仅运行一个
+固定临时 host key、随机无效用户名的真实 publickey 认证连接。
+首次实测退出 0，客户端取得 `AuthenticationException`、`authenticated=false`；
+Docker exec 耗时 1.457 秒，不作为容器建立或完整阶段耗时。
+自有 observer 97 创建 sshd MainPID 101，InvocationID
+`37a512aa079b4cd286eea4dbe201f68b`，连接前后原严格 `unit_snapshot` 相同。
+
+两个创建均为实际 amd64 clone 56、flags `0x1200011`、FORK event 1：
+101 -> 116、116 -> 123 的 entry、父事件、返回 child PID 与 child 首停关联完成，
+首停保持到父返回获证后才恢复；第二个 child 首停实际早于父 FORK 消费。
+本次无 `initial-syscall-exit` 记录，不宣称 child 初始 exit 0 已实测。
+首个 child 116 继承 LISTEN inode 55836/fd 6 与 accepted inode 55839/fd 7，
+后者四元组为 `127.0.0.1:22219 <- 127.0.0.1:38714`。
+冻结窗口实际 LISTEN owners 为 101 与 116，原 `unit_snapshot` 拒绝
+“SSH unit 必须只有一个唯一显式 TCP 监听”；未放宽生产 single-owner gate。
+
+child 116 恢复后实际调用 `setsid` syscall 112，返回 116、非错误，
+PGID 从 101 变为 116，SID 从 97 变为 116，然后 EXEC 到 `sshd-session`；
+其 child 123 再 EXEC 到 `sshd-auth`。这直接确认现 driver 的
+`waitpid(-master)` 与 `pgrp == master` 模型不能接入该真实连接子树。
+临时 observer 的 `waitpid(-1)` 仅用于自己创建且不含客户端的诊断树，
+不作为生产独立身份收容或 Ledger 授权实现。
+
+两条真实日志是 root session PID 116 的 `Invalid user` 与
+`Connection closed ... [preauth]`，unit/invocation 字段与自有树停点交叉一致；
+未观察到 `Failed publickey` 文本。journald 的 PID/exe/时间只作诊断，
+没有同消息 credentials/pidfd、发送时 epoch 或 Ledger 历史端口授权。
+两个后代实际 exit 255，EXIT 时仍持 accepted FD、TCP 为 CLOSE_WAIT；
+最终原 pidfd 全部确认原 task 回收，`/proc` 消失、ECHILD、FD 4 -> 4、
+subreaper 恢复，unit inactive/dead、全实例 LISTEN 空。
+证据和小复现源保留在 `.tmp-ssh-unit-driver-8c2h2/`；临时容器完成清理。
+本阶段仅文档，不重复完整回归；IPv6、原生宿主、异常 tracer 和生产
+collector/jail 未验收，`authoritative/jail_ready=false` 保持。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
