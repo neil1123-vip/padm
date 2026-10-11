@@ -394,6 +394,10 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].port_aliases[]?; has("share_default")) then
             $schema[0]["x-padm-port-alias-default"] == true
           else true end) and
+          (if $spec[0] | has("cdn_entries") then
+            ($schema[0].properties | has("cdn_entries")) and
+              $schema[0]["x-padm-cdn-entry-addresses"] == true
+          else true end) and
           (if ($spec[0].routing.socks5 // {}) | has("domains") then
             $schema[0]["x-padm-routing-domains"] == true
           else true end) and

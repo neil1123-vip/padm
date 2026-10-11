@@ -152,9 +152,23 @@ dockerConfigureSpecValidate() {
         (if has("control") then ["control"] else [] end) +
         (if has("relay") then ["relay"] else [] end) +
         (if has("port_aliases") then ["port_aliases"] else [] end) +
+        (if has("cdn_entries") then ["cdn_entries"] else [] end) +
         (if has("routing") then ["routing"] else [] end) +
         (if has("site") then ["site"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
+      (if has("cdn_entries") then
+        .schema_version == 3 and
+        (.cdn_entries | type == "array" and length >= 1 and length <= 16 and
+          ([.[].listener_id] | length == (unique | length)) and
+          all(.[]; exact(["listener_id", "addresses"]) and
+            (.listener_id as $id |
+              [$request.core.protocols[] | select(.listener_id == $id)] as $entries |
+              ($entries | length) == 1 and
+              ($entries[0].id == 21 or $entries[0].id == 22 or $entries[0].id == 23)) and
+            (.addresses | type == "array" and length >= 1 and length <= 16 and
+              length == (unique | length) and
+              all(.[]; hostname or routing_ipv4 or routing_ipv6))))
+       else true end) and
       (if has("port_aliases") then
         .schema_version == 3 and
         (.port_aliases | type == "array" and length >= 1 and length <= 16 and
@@ -1168,7 +1182,11 @@ dockerEditBaselineValidate() {
                 }
             done
         else
-            diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1 || {
+            if [[ "${directory}" == config/nginx ]]; then
+                dockerNginxDirectoryMatches "${specFile}" "${baseline}/${directory}" "${root}/${directory}"
+            else
+                diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1
+            fi || {
                 dockerError '存在完整规格之外的站点、订阅或宿主配置，不能无损接入编辑'
                 return 1
             }
@@ -1227,7 +1245,7 @@ dockerFallbackAlpnStatus() {
     dockerGenerateNginxConfig "${specFile}" "${workspace}/alpn-nginx/default.conf" &&
         dockerGenerateRealityStreamConfig "${specFile}" "${workspace}/alpn-nginx/stream/reality.conf" &&
         dockerGenerateRealityStreamMain "${specFile}" "${workspace}/alpn-nginx/stream/host-main" || return 1
-    diff -qr -- "${workspace}/alpn-nginx" "${root}/config/nginx" >/dev/null 2>&1 &&
+    dockerNginxDirectoryMatches "${specFile}" "${workspace}/alpn-nginx" "${root}/config/nginx" &&
         nginxMatches=true
     : >"${workspace}/alpn-status.jsonl"
     while IFS= read -r key; do
@@ -2416,7 +2434,8 @@ EOF
 
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
-    local httpPort http2Port
+    local httpPort http2Port hostMode=${3:-strict}
+    case "${hostMode}" in strict|legacy-host) ;; *) return 1 ;; esac
     jq -e '.reality_stream != null or any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)' "${specFile}" >/dev/null || return 0
     domain=$(jq -r '.tls.domain' "${specFile}") || return 1
     token=$(jq -r '.subscription.token' "${specFile}") || return 1
@@ -2509,6 +2528,11 @@ server {
     ssl_certificate_key /etc/padm/secrets/tls/${domain}.key;
     ssl_protocols TLSv1.2 TLSv1.3;
 EOF
+        if [[ "${hostMode}" == strict &&
+            ( "${protocolId}" == 21 || "${protocolId}" == 22 || "${protocolId}" == 23 ) ]]; then
+            # 在 HTTPUpgrade 改写 Host 前拒绝错误域名，避免转发成有效认证请求。
+            printf '\n    if ($host != %s) { return 404; }\n' "${domain,,}" >>"${target}" || return 1
+        fi
         if [[ "${protocolId}" == 21 ]]; then
             cat >>"${target}" <<'EOF'
 
@@ -2565,6 +2589,23 @@ EOF
       [(if .id == 24 or .id == 25 then "/" + $transport.service_name + "/"
         else "/" + $transport.path + (if .id == 23 then "" else "ws" end) end),
        ($transport.backend_port // 31297), ($transport.tls_port // 8443), (.core // $core), .id] | @tsv' "${specFile}")
+}
+
+dockerNginxConfigMatches() {
+    local specFile=$1 actual=$2
+    cmp -s -- "${actual}" <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) && return 0
+    # 旧生成器没有 CDN 字段或新 Host 校验；仅接受完整旧正文，不能逐入口放宽。
+    jq -e 'has("cdn_entries") | not' "${specFile}" >/dev/null &&
+        cmp -s -- "${actual}" <(dockerGenerateNginxConfig "${specFile}" /dev/stdout legacy-host)
+}
+
+dockerNginxDirectoryMatches() {
+    local specFile=$1 expected=$2 actual=$3
+    diff -qr -- "${expected}" "${actual}" >/dev/null 2>&1 && return 0
+    # expected 是私有校验草稿，在线目录与下一次提交的默认生成模式均不变。
+    jq -e 'has("cdn_entries") | not' "${specFile}" >/dev/null &&
+        dockerGenerateNginxConfig "${specFile}" "${expected}/default.conf" legacy-host &&
+        diff -qr -- "${expected}" "${actual}" >/dev/null 2>&1
 }
 
 dockerGenerateRealityStreamConfig() {
@@ -2663,6 +2704,13 @@ dockerGenerateSubscription() {
       .listener_id as $listener |
       .public_port = ([$request.port_aliases[]? |
         select(.listener_id == $listener and .share_default == true) | .public_port][0] // .public_port) |
+      # CDN 只替换分享连接地址，保留原入口的端口、认证与 TLS/HTTP 域名。
+      ([$request.cdn_entries[]? | select(.listener_id == $listener) | .addresses][0] // []) as $addresses |
+      if ($addresses | length) > 0 then
+        . as $entry | range(0; $addresses | length) as $index |
+        $entry | .server = $addresses[$index] |
+        if ($addresses | length) > 1 then .name += "-" + (($index + 1) | tostring) else . end
+      else . end |
       if .id == 1 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
       elif .id == 2 then
@@ -3660,8 +3708,7 @@ dockerFail2banSourceContainer() (
         cmp -s -- "${root}/compose.json" <(dockerGenerateCompose "${spec}" /dev/stdout "${root}") &&
         [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] &&
         [[ -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit)" ]] &&
-        cmp -s -- "${root}/config/nginx/default.conf" \
-            <(dockerGenerateNginxConfig "${spec}" /dev/stdout) || {
+        dockerNginxConfigMatches "${spec}" "${root}/config/nginx/default.conf" || {
         dockerError '来源见证需要完整且一致的受管 Nginx 配置'
         return 1
     }
@@ -6087,8 +6134,7 @@ dockerTlsConsumers() {
             [[ -z "${unsafe}" ]] &&
                 cmp -s -- "${root}/config/nginx/stream/reality.conf" \
                     <(dockerGenerateRealityStreamConfig "${specFile}" /dev/stdout) &&
-                cmp -s -- "${root}/config/nginx/default.conf" \
-                    <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) &&
+                dockerNginxConfigMatches "${specFile}" "${root}/config/nginx/default.conf" &&
                 jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout "${root}") '
                   (.services.nginx.volumes | sort_by(.target)) ==
                     ($expected[0].services.nginx.volumes | sort_by(.target)) and
@@ -6128,8 +6174,7 @@ dockerTlsConsumers() {
         fi
         elif ! jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
             # 明文 fallback 只接受受管生成结果和固定挂载，拒绝配置漂移及主配置覆盖。
-            cmp -s -- "${root}/config/nginx/default.conf" \
-                <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) &&
+            dockerNginxConfigMatches "${specFile}" "${root}/config/nginx/default.conf" &&
                 jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout "${root}") '
                   (.services.nginx.volumes | sort_by(.target)) ==
                     ($expected[0].services.nginx.volumes | sort_by(.target))' \
@@ -6702,8 +6747,7 @@ dockerAcmeWebrootDeploymentCheck() {
         [[ -f "${root}/config/nginx/default.conf" ]] &&
         unsafe=$(find "${root}/config/nginx" ! -type f ! -type d -print -quit) &&
         [[ -z "${unsafe}" ]] &&
-        cmp -s -- "${root}/config/nginx/default.conf" \
-            <(dockerGenerateNginxConfig "${root}/config/spec.json" /dev/stdout) || return 1
+        dockerNginxConfigMatches "${root}/config/spec.json" "${root}/config/nginx/default.conf" || return 1
     owners=$(dockerAcmePortOwners) || return 1
     jq -e 'length == 1 and .[0].Config.Labels["com.docker.compose.service"] == "nginx"' \
         <<<"${owners}" >/dev/null && dockerAcmeOwnersValidate "${owners}" || {

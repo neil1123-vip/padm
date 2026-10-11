@@ -296,7 +296,7 @@
       "profiles": ["core-xray", "core-sing-box", "subscription"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "4A.1 支持完整 v3 规格声明 1–256 个独立账号，分离稳定身份与认证凭据并关联现有入口，追加到自用账号；users.base 和 spec 为 root 私有，运行配置按启停和额度过滤；CRUD 菜单、分享组和独立发布授权仍未迁移。"
+      "reason": "4A.1–4A.4 已提供 v3 独立账号、名称/入口关联编辑、复制、启停、删除及凭据轮换，分享组筛选、独立 token 与发布授权、纯内容和 HTTPS 链接输出，以及账号/组/额度/累计的业务备份与 merge/replace 恢复；菜单与 CLI 复用候选事务，users.base 和 spec 为 root 私有，运行配置按启停和额度过滤，轮换及恢复不回退最新累计。"
     },
     "subscription-multiserver": {
       "status": "deferred",
@@ -305,7 +305,7 @@
       "profiles": ["subscription", "net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "4C.1–4C.3d4 已提供私网 API、主控初始化与邀请/轮换/撤销、被控接入和手动同步 CLI/菜单及事务/回滚保护；核验已有受管单 Peer WireGuard 的归属、地址和唯一 /32 Peer，不创建接口/密钥/路由。token 仅写外部 root 私有邀请，不进入规格/备份/普通日志；独立只读服务与客户端零能力，无公网端口映射。4C.4a 已通过真实双网络空间加密链路及 API/客户端规划验收；真实双部署 Compose 应用/恢复待 4C.4b，自动同步、多 Peer、角色重绑定与完整灾备未交付。"
+      "reason": "4C.1–4C.3d4 已提供私网 API、主控初始化与邀请/轮换/撤销、被控接入和手动同步 CLI/菜单及事务/回滚保护；核验已有受管单 Peer WireGuard 的归属、地址和唯一 /32 Peer，不创建接口/密钥/路由。token 仅写外部 root 私有邀请，不进入规格/备份/普通日志；独立只读服务与客户端零能力，无公网端口映射。4C.4a 真实加密链路及规划、4C.4b 隔离 amd64 双 Docker Engine 的生产 CLI/Compose 接入同步、WS/TLS 流量、账号/累计保持和健康失败/INT/TERM 恢复已验；自动同步、多 Peer、网络向导、角色重绑定、迁移与完整灾备未交付，可信发布、原生双机/arm64 和宿主重启待验，完整状态保持 deferred。"
     },
     "acme-webroot": {
       "status": "deferred",
@@ -341,7 +341,7 @@
       "profiles": ["core-xray"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v2/v3 已支持最多 16 个入口、同协议复制/删除及端口事务，v3 明确核心归属；既有身份和内部端口冻结，Fail2ban 联动及 443 共存等完整管理仍未交付。"
+      "reason": "v2/v3 已支持最多 16 个入口、复制/删除及端口事务，v3 明确核心归属；5B.5c–5B.5d 额外公开端口的菜单/CLI 增删、状态与默认分享选择已交付，沿用原认证、统计和 TLS/SNI 前端，候选失败恢复，本地真实发布已验。受管/桥接可达宿主网站的 Reality 443 共存可使用别名；拒绝 WS/SSH Fail2ban、TUN/TProxy 与 host-network 组合，允许已有 WireGuard/控制面 Fail2ban。既有身份和内部端口冻结，端口跳跃、适用公网/IPv6/原生宿主/arm64 及完整管理仍待交付或验收。"
     },
     "reality-target-management": {
       "status": "supported",
@@ -377,7 +377,7 @@
       "profiles": ["subscription"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "Docker 尚未暴露独立的订阅 entry 覆盖及 CDN 参数管理。"
+      "reason": "4A.5 提供协议 21/22/23 WS/HTTPUpgrade TLS 的逐入口多连接地址覆盖、菜单/CLI 状态、设置和清除，统一刷新本地链接、主订阅及分享组，保留 SNI、Host、端口与认证并复用候选和失败恢复。Reality XHTTP/gRPC、gRPC TLS、H3 参数及公网 CDN 验收尚未交付，完整管理保持 deferred。"
     },
     "fail2ban": {
       "status": "host-integrated",
@@ -386,7 +386,7 @@
       "profiles": ["net-fail2ban", "net-fail2ban-control", "net-fail2ban-ssh"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "WS 站点扫描、主控 WireGuard INPUT 认证防护和单 unit、单目标地址与端口的 SSH collector/jail 分别管理。SSH 仅接受固定可信来源格式、当前运行证明与独立 INPUT owner，禁止与控制 jail 共存及恢复旧封禁数据库；真实宿主启停、重启、卸载与封禁仍需验收。"
+      "reason": "WS DOCKER-USER、控制面 INPUT 与专用 SSH INPUT 分别提供独立 owner、菜单/CLI 启停、状态、单 IP 解封与参数编辑。8c.3 SSH collector/jail 限 root systemd/cgroup v2 下无存量会话、禁止 reload 的单 service/单显式监听，只消费启动后的可信密码失败；来源失效停 jail 并按 token 清理，禁自动重启、SSH/control 共存及旧封禁恢复。SSH 启用期间 update/rollback/业务恢复拒绝，须先受管停用。隔离 amd64 systemd/OpenSSH 10/Fail2ban 1.1 的实际启停、封禁、连接 DROP、解封、新 token 重启和来源失效清理已验；原生宿主/arm64/公网/整机重启/完整卸载及完整管理仍待验收。"
     },
     "wireguard": {
       "status": "host-integrated",
@@ -422,7 +422,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已提供交互菜单、状态、启停日志、可信首配、规格编辑/完整旧输入接入、多入口及主副核心共存；完整协议、用户及维护管理尚未迁移，真实发布和双架构连通待验。"
+      "reason": "已提供交互菜单、状态/启停/日志、可信首配、规格编辑与多入口/双核心、Reality 目标/参数/443 共存、TLS/ACME、账号与分享组、额度和业务备份恢复、核心/Geo 维护、主控/被控手动同步、站点/路由及 WS/控制面/有限 SSH Fail2ban 管理；各入口只开放已交付组合并复用部署事务。完整协议管理、多服务器自动同步/迁移/灾备、剩余宿主能力及可信发布/原生双架构完整生命周期仍待交付或验收，整体保持 deferred。"
     },
     "routing-tools": {
       "status": "deferred",
@@ -494,7 +494,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.5c–5B.5d 提供已有受管入口的额外 Compose 发布端口：独立 v3 port_aliases、菜单/CLI 添加/删除/状态与默认分享选择、候选验证和失败恢复，复用原入口认证、账号/统计以及 TLS/完整 SNI 前端，不加核心或任意目的转发。share_default 只切换该入口的 URI、主订阅和分享组；恢复 base 或删除默认别名回退原公开入口。拒绝 Fail2ban、TUN/TProxy 和 host-network 组合。宿主集成、公网、IPv6 发布、原生宿主和 arm64 尚未验收，207 完整状态保持 deferred。"
+      "reason": "5B.5c–5B.5d 提供已有受管入口的额外 Compose 发布端口：独立 v3 port_aliases、菜单/CLI 添加/删除/状态与默认分享选择、候选验证和失败恢复，复用原入口认证、账号/统计以及 TLS/完整 SNI 前端，不加核心或任意目的转发。share_default 只切换该入口的 URI、主订阅和分享组；恢复 base 或删除默认别名回退原公开入口。拒绝 WS/SSH Fail2ban、TUN/TProxy 和 host-network 组合，允许已有 WireGuard/控制面 Fail2ban；适用公网、IPv6 发布、原生宿主和 arm64 尚未验收，207 完整状态保持 deferred。"
     },
     "core-lifecycle": {
       "status": "supported",

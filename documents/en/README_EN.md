@@ -300,14 +300,44 @@ or changing accounts or credentials. `base` or deleting the selected alias resto
 original public entry, including the SNI frontend on port 443 during Reality coexistence,
 not the private backend. Other listeners, including TCP/UDP uses of the same number,
 remain unchanged. Conflicting published TCP or UDP ports are rejected; separate
-TCP and UDP uses of the same number are allowed. Fail2ban, TUN/TProxy and host-network
-coexistence reject aliases for now. Ordinary spec editing cannot add or replace aliases;
+TCP and UDP uses of the same number are allowed. WS/SSH Fail2ban, TUN/TProxy and host-network
+coexistence reject aliases for now; existing WireGuard/control-plane Fail2ban can coexist with aliases.
+Ordinary spec editing cannot add or replace aliases;
 deleting a listener removes its aliases, while copying does not inherit them.
 Older control bundles without `x-padm-port-aliases` reject alias-bearing configuration,
 updates and restoration. Default-share markers also require `x-padm-port-alias-default`;
 rollback to an older bundle that ignores the selection is rejected.
 Public/IPv6 publishing, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
+
+The protocol menu's CDN address manager overrides client connection addresses for
+existing `21/22/23` WS/HTTPUpgrade TLS listeners in local links, the main subscription
+and share groups. Optional v3 `cdn_entries` contains up to 16 `{listener_id, addresses}`
+records, each with 1–16 unique IP addresses or domain names. URLs, ports, whitespace
+and empty items are rejected. Without an override, links use the original server.
+Multiple addresses produce nodes in input order with `-1`, `-2` name suffixes.
+Accounts, effective share ports, SNI, Host and paths remain unchanged; HTTPS subscription
+URLs retain the original TLS domain.
+
+```bash
+padm-docker protocol cdn-status
+padm-docker edit --cdn-entry entry-ws edge.example.com,203.0.113.8 --preview
+padm-docker edit --cdn-entry entry-ws edge.example.com,203.0.113.8 --confirm PADM-DOCKER-EDIT
+padm-docker edit --cdn-entry-clear entry-ws --confirm PADM-DOCKER-EDIT
+```
+
+Clearing restores the original address. Listener deletion removes its override;
+copying does not inherit it. Changes use the existing candidate, confirmation and
+failure recovery transaction, which recreates services on commit. Ordinary spec
+editing cannot replace CDN overrides. Bundles without `x-padm-cdn-entry-addresses`
+reject configuration, updates and restoration containing the field.
+Reality XHTTP/gRPC, gRPC TLS, other TCP/UDP protocols and H3 parameter management
+are outside this stage; complete CDN management remains `deferred`.
+
+Newly generated `21/22/23` TLS frontends reject an incorrect Host. Without CDN
+fields, the complete legacy Nginx output remains valid for reads and edit baselines;
+the next confirmed configuration edit generates the new output. CDN fields require
+the new output. Partial Host-gate removal or other manual drift is rejected.
 
 `--preview` does not commit, collect traffic, or start/stop application services.
 Validation still verifies the release, pulls images, and runs candidate checks.

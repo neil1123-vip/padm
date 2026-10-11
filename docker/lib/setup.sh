@@ -761,7 +761,8 @@ dockerEditPreview() {
     ' || return 1
     jq -r '.core.protocols[] |
       "  入口 \(.listener_id // (.id | tostring))，核心 \(.core // "未迁移")，协议 \(.id): \(.server):\(.public_port) [\(.address_families | join(","))]"' \
-        "${draft}"
+        "${draft}" || return 1
+    jq -r '.cdn_entries[]? | "  CDN 入口 \(.listener_id): \(.addresses | join(","))"' "${draft}"
 }
 
 dockerEditPrivateInputCopy() (
@@ -821,7 +822,7 @@ dockerProtocolCommand() (
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     list|stream-status|routing-status|port-alias-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
-    links|alpn-status|targets|check-target|target-status|select-target|block-current-target)
+    links|cdn-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
         if [[ "${action}" == select-target ]]; then
@@ -891,6 +892,23 @@ dockerProtocolCommand() (
     dockerEditBaselineValidate "${original}" "${workspace}" &&
         dockerConfigureSpecMigrate "${original}" "${normalized}" &&
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == cdn-status ]]; then
+        jq --arg listener "${listener}" '
+          . as $request |
+          [.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23) |
+            select($listener == "" or .listener_id == $listener) |
+            . as $entry |
+            ([$request.cdn_entries[]? | select(.listener_id == $entry.listener_id)][0]) as $cdn |
+            {listener_id,protocol:.id,server,overridden:($cdn != null),
+             addresses:($cdn.addresses // [.server])}] as $entries |
+          if $listener != "" and ($entries | length) == 0 then error("入口不支持 CDN 地址覆盖")
+          else {enabled:has("cdn_entries"),entries:$entries} end
+        ' "${normalized}" || {
+            dockerError 'CDN 地址覆盖只支持已有协议 21/22/23 入口'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        return 0
+    fi
     if [[ "${action}" == port-alias-status ]]; then
         jq '. as $request | {enabled:has("port_aliases"), aliases:[
           .port_aliases[]? | . as $alias |
@@ -1081,12 +1099,25 @@ dockerEditFields() {
                 return 1
             fi
             if [[ "${choice}" == 10 ]]; then
+                if jq -e --arg key "${listener}" '
+                  any(.accounts[]?; .listeners == [$key])
+                ' "${draft}" >/dev/null; then
+                    dockerError '该入口是账号的最后一个关联，请先调整或删除该账号'
+                    return 1
+                fi
                 jq --arg key "${listener}" '
                   .core.type as $primary |
                   .core.protocols |= map(select(.listener_id != $key)) |
+                  if has("accounts") then
+                    .accounts |= map(.listeners |= map(select(. != $key)))
+                  else . end |
                    if has("port_aliases") then
                      .port_aliases |= map(select(.listener_id != $key)) |
                      if .port_aliases == [] then del(.port_aliases) else . end
+                   else . end |
+                   if has("cdn_entries") then
+                     .cdn_entries |= map(select(.listener_id != $key)) |
+                     if .cdn_entries == [] then del(.cdn_entries) else . end
                    else . end |
                   if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
                   elif any(.core.protocols[]; .id == 21) then .
@@ -1349,6 +1380,7 @@ dockerEditCommand() {
     local routingDomains='[]'
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
+    local cdnAction= cdnListener= cdnAddresses=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local fail2banAction= fail2banType=fail2ban fail2banPorts= fail2banMaxRetry= fail2banFindTime= fail2banBanTime=
@@ -1503,6 +1535,18 @@ dockerEditCommand() {
             [[ "$1" != --fail2ban-ssh-off ]] || fail2banType=fail2ban-ssh
             fail2banAction=off
             shift
+            ;;
+        --cdn-entry)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
+                "${#3}" -le 4096 && -z "${cdnAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            cdnAction=set cdnListener=$2 cdnAddresses=$3
+            shift 3
+            ;;
+        --cdn-entry-clear)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${cdnAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            cdnAction=clear cdnListener=$2
+            shift 2
             ;;
         --port-alias|--port-alias-remove|--port-alias-default)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* &&
@@ -1689,6 +1733,14 @@ dockerEditCommand() {
         dockerError 'Fail2ban 专项动作不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${cdnAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${fail2banAction}" ) ]] || {
+        dockerError 'CDN 地址专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1700,7 +1752,8 @@ dockerEditCommand() {
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${routingKind}" && -z "${httpRelay}" && -z "${fail2banAction}" ) ||
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${cdnAction}" && -z "${fail2banAction}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -1763,7 +1816,8 @@ dockerEditCommand() {
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" && -z "${fail2banAction}" ]]; then
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${cdnAction}" && -z "${fail2banAction}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1827,6 +1881,26 @@ dockerEditCommand() {
         ' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ -n "${cdnAction}" ]]; then
+        jq --arg listener "${cdnListener}" --arg action "${cdnAction}" --arg addresses "${cdnAddresses}" '
+          if ([.core.protocols[] | select(.listener_id == $listener and
+            (.id == 21 or .id == 22 or .id == 23))] | length) != 1 then
+            error("入口不支持 CDN 地址覆盖")
+          elif $action == "clear" then
+            if has("cdn_entries") then
+              .cdn_entries |= map(select(.listener_id != $listener)) |
+              if .cdn_entries == [] then del(.cdn_entries) else . end
+            else . end
+          else
+            .cdn_entries = ((.cdn_entries // []) | map(select(.listener_id != $listener))) +
+              [{listener_id:$listener,addresses:($addresses | split(","))}]
+          end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError 'CDN 地址覆盖只支持已有协议 21/22/23 入口，未提交配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
     fi
     if [[ -n "${portAlias}" ]]; then
         jq --arg listener "${portAliasListener}" --arg port "${portAliasPort}" --arg action "${portAlias}" '
@@ -2062,6 +2136,7 @@ dockerEditCommand() {
         --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
         --arg http_relay "${httpRelay}" \
         --arg port_alias "${portAlias}" \
+        --arg cdn_listener "${cdnListener}" \
         --arg fail2ban_action "${fail2banAction}" \
         --arg fail2ban_type "${fail2banType}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
@@ -2081,6 +2156,11 @@ dockerEditCommand() {
           del(.settings.ports, .settings.max_retry, .settings.find_time, .settings.ban_time) |
           if $fail2ban_type == "fail2ban-ssh" then del(.settings.unit, .settings.target, .settings.port) else . end
           else . end);
+      def without_cdn:
+        if has("cdn_entries") then
+          .cdn_entries |= map(select(.listener_id != $cdn_listener)) |
+          if .cdn_entries == [] then del(.cdn_entries) else . end
+        else . end;
       def special: .core.protocols |= map(
         if $regenerate != "" and .listener_id == $regenerate then
           del(.reality.private_key, .reality.public_key, .reality.short_id)
@@ -2112,6 +2192,8 @@ dockerEditCommand() {
         ([$old.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ([$new.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ($old | without_fail2ban_settings) == ($new | without_fail2ban_settings)
+       elif $cdn_listener != "" then
+        ($old | without_cdn) == ($new | without_cdn)
        elif $port_alias != "" then
         ($old | del(.port_aliases)) == ($new | del(.port_aliases))
        elif $http_relay != "" then
@@ -2142,7 +2224,13 @@ dockerEditCommand() {
       # 普通编辑只随入口删除清理别名，不允许借规格导入新增或更换公开别名。
       ([($old.port_aliases // [])[] | select(.listener_id as $id | ($newIds | index($id)) != null)] | sort_by(.listener_id,.public_port)) ==
         (($new.port_aliases // []) | sort_by(.listener_id,.public_port)) and
-      ($old | root | del(.port_aliases)) == ($new | root | del(.port_aliases)) and
+      ([($old.cdn_entries // [])[] | select(.listener_id as $id | ($newIds | index($id)) != null)] | sort_by(.listener_id)) ==
+        (($new.cdn_entries // []) | sort_by(.listener_id)) and
+      # 删除入口只裁剪账号关联，账号身份、凭据与其它字段仍冻结。
+      ($old | if has("accounts") then
+        .accounts |= map(.listeners |= map(select(. as $id | ($newIds | index($id)) != null)))
+        else . end | root | del(.port_aliases, .cdn_entries)) ==
+        ($new | root | del(.port_aliases, .cdn_entries)) and
       ($new.tls | del(.http01)) == (if any($new.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29 or .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 31) then ($old.tls | del(.http01)) else null end) and
       all($new.core.protocols[];
         . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
@@ -2171,7 +2259,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持 Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持 CDN 地址/Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"

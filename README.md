@@ -479,11 +479,36 @@ padm-docker edit --port-alias-remove entry-reality 8444 --confirm PADM-DOCKER-ED
 `base` 恢复原入口，删除被选别名也自动回退；443 共存恢复到公开 SNI 前端，
 不改容器后端。选择只影响指定入口，不联动同数字的 TCP/UDP 其它入口。
 重复 TCP 或 UDP 发布端口会拒绝，同一数字的 TCP/UDP 可分别使用；
-Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名。
+WS/SSH Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名；
+已有 WireGuard/控制面 Fail2ban 可与别名组合。
 普通 `edit --spec` 不能新增或改写别名；删除入口同步清理其别名，复制不继承。
 旧控制 bundle 缺少 `x-padm-port-aliases` 时拒绝配置、更新或恢复带别名的规格。
 带默认分享标记的规格还要求 `x-padm-port-alias-default`，不能回滚到忽略该标记的旧 bundle。
 公网、IPv6 发布、原生宿主及 arm64 仍需独立验收，完整 `207` 保持 `deferred`。
+
+菜单“协议与入口 → CDN 连接地址”可为已有 `21/22/23` WS/HTTPUpgrade TLS
+入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。
+v3 可选 `cdn_entries` 保存最多 16 项 `{listener_id, addresses}`，每项 1–16 个唯一地址；
+不含该字段时使用原服务器地址。地址不接受 URL、端口、空白或空项。
+多个地址按输入顺序生成节点，名称追加 `-1`、`-2`；账号、有效分享端口、
+SNI、Host 和路径保持，HTTPS 订阅 URL 仍使用原 TLS 域名。
+
+```bash
+padm-docker protocol cdn-status
+padm-docker edit --cdn-entry entry-ws edge.example.com,203.0.113.8 --preview
+padm-docker edit --cdn-entry entry-ws edge.example.com,203.0.113.8 --confirm PADM-DOCKER-EDIT
+padm-docker edit --cdn-entry-clear entry-ws --confirm PADM-DOCKER-EDIT
+```
+
+清除后恢复原地址；删除入口同步清理覆盖，复制入口不继承。
+专项编辑沿用候选、确认和失败恢复事务，提交会按现有流程重建服务。
+普通规格编辑不能改写 CDN 覆盖；旧 bundle 缺少 `x-padm-cdn-entry-addresses`
+时拒绝带该字段的配置、更新和恢复。本阶段拒绝 Reality XHTTP/gRPC、gRPC TLS、
+其它 TCP/UDP 协议及 H3 参数管理；完整 CDN 管理仍为 `deferred`。
+
+新生成的 `21/22/23` TLS 前端拒绝错误 Host；无 CDN 字段的完整旧 Nginx
+正文可继续通过只读和编辑基线，下一次确认配置编辑会生成新正文。
+带 CDN 字段要求新正文；缺失部分 Host 校验或其它手写漂移仍拒绝。
 
 菜单新增“协议与入口”，可查看稳定入口 ID、核心、协议、地址/端口及地址族，
 查看全部或指定入口的分享链接，并进入现有编辑器修改、复制或删除入口。

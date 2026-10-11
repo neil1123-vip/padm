@@ -80,6 +80,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-routing-dns-hosts-workflow \
         docker-phase6 \
         docker-entry-port-alias \
+        docker-cdn-entries \
         docker-fail2ban-ownership \
         docker-routing-core-network-lifecycle \
         docker-control-state \
@@ -120,7 +121,7 @@ listRegressionDockerContractsFastChildSelectors() {
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
-    printf '%s\n' docker-sites docker-entry-port-alias docker-menu docker-control-state
+    printf '%s\n' docker-sites docker-entry-port-alias docker-cdn-entries docker-menu docker-control-state
 }
 
 listRegressionDockerContractsFastRestChildSelectors() {
@@ -218,6 +219,14 @@ runDockerHttpRelayPublishedRealRegression() {
 
 runDockerEntryPortAliasRegression() {
     bash "${PROJECT_ROOT}/docker/tests/entry-port-alias.sh"
+}
+
+runDockerCdnEntriesRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/cdn-entries.sh"
+}
+
+runDockerCdnEntriesRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/cdn-entries-real.sh"
 }
 
 runDockerEntryPortAliasRealRegression() {
@@ -488,6 +497,8 @@ registerRegressionFunctionLeaf docker-http-relay runDockerHttpRelayRegression
 registerRegressionFunctionLeaf docker-http-relay-real runDockerHttpRelayRealRegression
 registerRegressionFunctionLeaf docker-http-relay-published-real runDockerHttpRelayPublishedRealRegression
 registerRegressionFunctionLeaf docker-entry-port-alias runDockerEntryPortAliasRegression
+registerRegressionFunctionLeaf docker-cdn-entries runDockerCdnEntriesRegression
+registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRegression
 registerRegressionFunctionLeaf docker-entry-port-alias-real runDockerEntryPortAliasRealRegression
 registerRegressionFunctionLeaf docker-routing-dns-hosts runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-dns-hosts-real runDockerRoutingDnsHostsRealRegression

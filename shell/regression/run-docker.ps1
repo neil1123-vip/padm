@@ -297,7 +297,7 @@ try {
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real')) {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
     } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real',
-        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-fail2ban-real',
+        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-cdn-entries-real', 'docker-fail2ban-real',
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real')) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
         @('--privileged', '--mount', 'type=volume,dst=/n')
@@ -370,7 +370,7 @@ try {
         $result.routing_images = $coreInputs
     }
     if ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real',
-        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-fail2ban-real',
+        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-cdn-entries-real', 'docker-fail2ban-real',
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real')) {
         # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。
         $references = [ordered]@{
@@ -382,6 +382,8 @@ try {
         }
         if ($Selector -in @('docker-fail2ban-real', 'docker-tproxy-real')) {
             $references = [ordered]@{ net = 'padm-local/padm-net:control-4c4b' }
+        } elseif ($Selector -eq 'docker-cdn-entries-real') {
+            $references.Remove('net')
         } elseif ($Selector -eq 'docker-fail2ban-source-real') {
             $references = [ordered]@{
                 xray = 'padm-local/padm-xray:control-4c4b'

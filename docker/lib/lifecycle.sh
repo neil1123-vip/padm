@@ -37,6 +37,8 @@ dockerUsage() {
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-default <入口 ID> <已有额外端口|base> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --cdn-entry <入口 ID> <IP或域名,...> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --cdn-entry-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-rules <IPv4/IPv6> <DNS 端口> <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -67,6 +69,7 @@ dockerUsage() {
   padm-docker protocol alpn-status [入口 ID]
   padm-docker protocol routing-status
   padm-docker protocol port-alias-status
+  padm-docker protocol cdn-status [入口 ID]
   padm-docker account list [--json]
   padm-docker account create [--name <名称>] [--listeners <入口 ID,...>] [--disabled]
   padm-docker account edit <账号 ID> [--name <名称>] [--listeners <入口 ID,...>]

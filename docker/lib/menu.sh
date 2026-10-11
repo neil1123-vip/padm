@@ -111,7 +111,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -147,6 +147,38 @@ dockerMenuProtocols() {
         6) dockerMenuRealityStream ;;
         7) dockerMenuSubscriptions ;;
         8) dockerMenuPortAliases ;;
+        9) dockerMenuCdnEntries ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuCdnEntries() {
+    local choice listener addresses
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker CDN 连接地址\n'
+        printf '%s\n' '1. 查看状态' '2. 设置地址（WS/HTTPUpgrade TLS）' '3. 清除覆盖' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun protocol cdn-status || true ;;
+        2|3)
+            dockerMenuRun protocol cdn-status || continue
+            dockerSetupRead listener '入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" && "${listener}" != 0 ]] || continue
+            if [[ "${choice}" == 2 ]]; then
+                dockerSetupRead addresses '连接地址（IP 或域名，多个用逗号分隔，0 返回）: ' &&
+                    [[ -n "${addresses}" && "${addresses}" != 0 ]] || continue
+                dockerMenuRun edit --cdn-entry "${listener}" "${addresses}" || true
+            else
+                dockerMenuRun edit --cdn-entry-clear "${listener}" || true
+            fi
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

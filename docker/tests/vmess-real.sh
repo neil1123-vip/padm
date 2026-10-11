@@ -1,35 +1,48 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
+stage=arguments
+# 保留失败位置和原退出码，避免清理日志掩盖没有标准错误的断言。
+trap 'status=$?; printf "vmess-real-fail: protocol=%s core=%s stage=%s line=%s rc=%s command=%s\n" "${PROTOCOL:-unset}" "${CORE:-unset}" "${stage}" "${LINENO}" "${status}" "${BASH_COMMAND}" >&2; exit "${status}"' ERR
 
 # 仅使用隔离项目、网络和命名卷，传统 TLS 传输复用同一验证流程。
 [[ "$#" == 4 || "$#" == 6 ]] || {
-    printf 'usage: vmess-real.sh <local-xray> <local-sing-box> <local-ops> <local-nginx> [22|23|24|25|27|29 xray|sing-box]\n' >&2
+    printf 'usage: vmess-real.sh <local-xray> <local-sing-box> <local-ops> <local-nginx> [21|22|23|24|25|27|29 xray|sing-box]\n' >&2
     exit 2
 }
 [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || { printf 'vmess-real.sh requires Linux root\n' >&2; exit 1; }
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 XRAY_REF=$1 SING_REF=$2 OPS_REF=$3 NGINX_REF=$4
 PROTOCOL=${5:-22} CORE=${6:-xray}
-[[ "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:xray ||
+CDN_ENTRIES=${PADM_TEST_CDN_ENTRIES:-0}
+[[ "${CDN_ENTRIES}" == 0 || "${CDN_ENTRIES}" == 1 ]] || exit 2
+[[ "${PROTOCOL}:${CORE}" == 21:xray || "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:xray ||
     "${PROTOCOL}:${CORE}" == 23:sing-box || "${PROTOCOL}:${CORE}" == 24:xray ||
     "${PROTOCOL}:${CORE}" == 25:xray || "${PROTOCOL}:${CORE}" == 27:xray ||
     "${PROTOCOL}:${CORE}" == 29:xray ]] || exit 2
 TRANSPORT=ws TRANSPORT_KEY=websocket BACKEND_PORT=31297 TEST_NAME=vmess-real APP_PROTOCOL=vmess
 case "${PROTOCOL}" in
+21) TEST_NAME=vless-ws-real APP_PROTOCOL=vless ;;
 23) TRANSPORT=httpupgrade TRANSPORT_KEY=httpupgrade BACKEND_PORT=31306 TEST_NAME=httpupgrade-real ;;
 24) TRANSPORT=grpc TRANSPORT_KEY=grpc_tls BACKEND_PORT=31301 TEST_NAME=vless-grpc-tls-real APP_PROTOCOL=vless ;;
 25) TRANSPORT=grpc TRANSPORT_KEY=grpc_tls BACKEND_PORT=31304 TEST_NAME=trojan-grpc-tls-real APP_PROTOCOL=trojan ;;
 27) TRANSPORT=tcp TRANSPORT_KEY=fallback_tls BACKEND_PORT=35468 TEST_NAME=vless-tls-vision-real APP_PROTOCOL=vless ;;
 29) TRANSPORT=tcp TRANSPORT_KEY=fallback_tls BACKEND_PORT=35468 TEST_NAME=trojan-tls-fallback-real APP_PROTOCOL=trojan ;;
 esac
+TLS_PORT=8443
+if [[ "${CDN_ENTRIES}" == 1 ]]; then
+    [[ "${PROTOCOL}" == 21 || "${PROTOCOL}" == 22 || "${PROTOCOL}" == 23 ]] || exit 2
+    # 分享端口就是实际 TLS 端口，客户端不得用容器端口替换生产链接。
+    TLS_PORT=35469 TEST_NAME="${TEST_NAME}-cdn"
+fi
 for tool in docker jq python3 sha256sum tar openssl awk; do command -v "${tool}" >/dev/null; done
+stage=images
 XRAY_ID=$(docker image inspect --format '{{.Id}}' "${XRAY_REF}")
 SING_ID=$(docker image inspect --format '{{.Id}}' "${SING_REF}")
 OPS_ID=$(docker image inspect --format '{{.Id}}' "${OPS_REF}")
 NGINX_ID=$(docker image inspect --format '{{.Id}}' "${NGINX_REF}")
 CURL_ID=
-if [[ "${CORE}" == sing-box || "${TRANSPORT}" == tcp ]]; then
+if [[ ( "${CORE}" == sing-box && "${CDN_ENTRIES}" == 0 ) || "${TRANSPORT}" == tcp ]]; then
     [[ -n "${PADM_TEST_HTTP2_CURL_REF:-}" ]] || {
         printf 'sing-box stats or fallback h2 requires PADM_TEST_HTTP2_CURL_REF (local HTTP2 curl image)\n' >&2
         exit 2
@@ -83,6 +96,7 @@ if [[ "${TRANSPORT}" == tcp ]]; then
         grep -Eq '^Features:.*[[:space:]]HTTP2([[:space:]]|$)'
 fi
 docker volume create --label "io.padm.test=${project}" "${volume}" >/dev/null
+stage=bundle
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state" PADM_DOCKER_SKIP_CHOWN=0 PADM_DOCKER_LOCK_TIMEOUT=1
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
@@ -96,6 +110,7 @@ DOMAIN=vmess.padm.test
 [[ "${TRANSPORT}" != grpc ]] || DOMAIN=grpc-tls.padm.test
 [[ "${TRANSPORT}" != tcp ]] || DOMAIN=fallback-tls.padm.test
 UUID=11111111-1111-4111-8111-111111111111
+stage=certificates
 TLS_DIR="${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
 mkdir -p "${TEST_ROOT}/certs" "${TLS_DIR}" "${TEST_ROOT}/runtime/"{client,origin}
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=padm-vmess-test-ca \
@@ -110,7 +125,8 @@ openssl x509 -req -in "${TEST_ROOT}/certs/server.csr" -days 1 -set_serial 1 \
 openssl verify -CAfile "${TEST_ROOT}/certs/ca.crt" "${TLS_DIR}/${DOMAIN}.crt" >/dev/null
 SPEC="${TEST_ROOT}/spec.json"
 jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" --arg core "${CORE}" --arg name "${TEST_NAME}" \
-    --arg key "${TRANSPORT_KEY}" --argjson protocol "${PROTOCOL}" --argjson backend "${BACKEND_PORT}" '
+    --arg key "${TRANSPORT_KEY}" --argjson protocol "${PROTOCOL}" --argjson backend "${BACKEND_PORT}" \
+    --argjson tls_port "${TLS_PORT}" --argjson cdn "${CDN_ENTRIES}" '
   def image($name): "ghcr.io/example/padm-"+$name+":test@sha256:"+("a"*64);
   {schema_version:3,
    release:{version:"3.9.9",manifest_sha256:("a"*64),signature_identity:"local-test-only"},
@@ -118,15 +134,19 @@ jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" --arg core "${CORE}" --arg n
      {id:$protocol,listener_id:"entry-vmess",core:$core,server:$domain,public_port:35468,
       address_families:["ipv4","ipv6"],name:$name,uuid:$uuid,
       ($key):(if $protocol == 27 or $protocol == 29 then {domain:$domain,http_port:31300,http2_port:31302}
-        else {domain:$domain,backend_port:$backend,tls_port:8443} +
+        else {domain:$domain,backend_port:$backend,tls_port:$tls_port} +
           if $protocol == 24 or $protocol == 25 then {service_name:"padm_grpc-1"} else {path:"padmvmess"} end
         end)}]},
    tls:{domain:$domain},subscription:{enabled:false,token:"0123456789abcdef"},
    images:{xray:image("xray"),"sing-box":image("sing-box"),nginx:image("nginx"),ops:image("ops"),net:image("net")},
-   host_integrations:[]}
+    host_integrations:[]} +
+      if $cdn == 1 then {port_aliases:[{listener_id:"entry-vmess",public_port:35469,share_default:true}]}
+      else {} end
 ' >"${SPEC}"
 chmod 0600 "${SPEC}"
+stage=spec
 dockerConfigureSpecValidate "${SPEC}"
+stage=candidate
 dockerCreateConfigurationCandidate
 candidate=${DOCKER_CONFIG_CANDIDATE}
 dockerGenerateCandidate "${SPEC}" "${candidate}"
@@ -156,9 +176,12 @@ if [[ "${TRANSPORT}" == grpc ]]; then
     grep -qF 'location ^~ /padm_grpc-1/ {' "${candidate}/config/nginx/default.conf"
     grep -qF "grpc_pass grpc://xray:${BACKEND_PORT};" "${candidate}/config/nginx/default.conf"
 fi
-jq -e --arg transport "${TRANSPORT}" '.listeners == [{listener_id:"entry-vmess",
+jq -e --arg transport "${TRANSPORT}" --argjson tls_port "${TLS_PORT}" --argjson cdn "${CDN_ENTRIES}" '
+  .listeners == ([{listener_id:"entry-vmess",
   service:(if $transport == "tcp" then "xray" else "nginx" end),public_port:35468,
-  container_port:(if $transport == "tcp" then 35468 else 8443 end),transport:"tcp",address_families:["ipv4","ipv6"]}]' \
+  container_port:(if $transport == "tcp" then 35468 else $tls_port end),transport:"tcp",address_families:["ipv4","ipv6"]}] +
+    if $cdn == 1 then [{listener_id:"alias-35469-tcp",target_listener_id:"entry-vmess",service:"nginx",
+      public_port:35469,container_port:$tls_port,transport:"tcp",address_families:["ipv4","ipv6"]}] else [] end)' \
     "${candidate}/deployment.json" >/dev/null
 cp -a "${candidate}/config/." "${PADM_DOCKER_INSTALL_DIR}/config/"
 cp -a "${candidate}/data/." "${PADM_DOCKER_INSTALL_DIR}/data/"
@@ -172,12 +195,13 @@ dockerEnsureRuntimeDataPermissions
 dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
     "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env"
 dockerTrafficAccounts "${CORE}" | jq -e --arg uuid "${UUID}" 'length == 1 and .[0].account == $uuid' >/dev/null
-for file in config.json users.base; do
-    [[ "$(stat -c '%u:%g:%a' "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/${file}")" == 0:10001:640 ]]
-done
+[[ "$(stat -c '%u:%g:%a' "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json")" == 0:10001:640 ]]
+[[ "$(stat -c '%u:%g:%a' "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")" == 0:0:600 ]]
 base_hash=$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")
+stage=original-links
 dockerProtocolCommand links >"${TEST_ROOT}/links.txt"
 [[ "$(wc -l <"${TEST_ROOT}/links.txt")" == 1 ]]
+[[ "${CDN_ENTRIES}" == 0 ]] || cp -- "${TEST_ROOT}/links.txt" "${TEST_ROOT}/original.links.txt"
 cp -a "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" \
     "${PADM_DOCKER_INSTALL_DIR}/logs" "${PADM_DOCKER_INSTALL_DIR}/secrets" "${TEST_ROOT}/runtime/"
 cp "${TEST_ROOT}/certs/ca.crt" "${TEST_ROOT}/runtime/client/ca.crt"
@@ -227,12 +251,14 @@ tar -cpf - -C "${TEST_ROOT}" runtime |
         --mount "type=volume,source=${volume},target=/test" --entrypoint tar "${OPS_ID}" -xpf - -C /test
 COMPOSE="${TEST_ROOT}/compose.json"
 jq --arg project "${project}" --arg volume "${volume}" --arg core "${CORE}" --arg xray "${XRAY_ID}" \
-    --arg sing "${SING_ID}" --arg ops "${OPS_ID}" --arg nginx "${NGINX_ID}" --arg subnet "${subnet}" '
+    --arg sing "${SING_ID}" --arg ops "${OPS_ID}" --arg nginx "${NGINX_ID}" --arg subnet "${subnet}" \
+    --arg domain "${DOMAIN}" --argjson cdn "${CDN_ENTRIES}" '
   .name = $project | .networks.default.name = $project |
   .networks.default.labels["io.padm.test"] = $project |
   .networks.default.enable_ipv6 = true | .networks.default.ipam = {config:[{subnet:$subnet}]} |
   del(.services.acme) | .volumes = {files:{external:true,name:$volume}} |
   .services[$core].image = (if $core == "xray" then $xray else $sing end) | .services.nginx.image = $nginx |
+  (if $cdn == 1 then .services.nginx.networks = {default:{aliases:[$domain,"edge.padm.test"]}} else . end) |
   .services |= with_entries(.value.ports = [] | .value.init = true | .value.pull_policy = "never" |
     .value.labels["io.padm.test"] = $project |
     .value.volumes |= map(.source as $source |
@@ -252,6 +278,7 @@ jq --arg project "${project}" --arg volume "${volume}" --arg core "${CORE}" --ar
       volume:{nocopy:true,subpath:"runtime/client"}}]}
 ' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >"${COMPOSE}"
 compose() { docker compose --project-name "${project}" --file "${COMPOSE}" --profile '*' "$@" </dev/null; }
+stage=services
 compose config --format json >/dev/null
 if [[ "${CORE}" == xray ]]; then
     compose run --rm --no-deps xray -test -config /etc/padm/xray/config.json >/dev/null
@@ -274,7 +301,47 @@ endpointService=nginx
 [[ "${TRANSPORT}" != tcp ]] || endpointService=xray
 addresses=$(docker inspect "$(compose ps -q "${endpointService}")" |
     jq -cer --arg project "${project}" '.[0].NetworkSettings.Networks[$project] | [.IPAddress,.GlobalIPv6Address]')
-python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" "${TRANSPORT}" "${TEST_NAME}" "${DOMAIN}" "${APP_PROTOCOL}" <<'PY'
+cdnRenderConfiguration() {
+    local phase=$1 request="${TEST_ROOT}/cdn-${1}.json" file
+    stage="cdn-${phase}"
+    case "${phase}" in
+    override)
+        jq --argjson addresses "$(jq -c '. + ["edge.padm.test"]' <<<"${addresses}")" '
+          .cdn_entries = [{listener_id:"entry-vmess",addresses:$addresses}]
+        ' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${request}"
+        ;;
+    clear)
+        jq 'del(.cdn_entries)' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${request}"
+        ;;
+    *) return 2 ;;
+    esac
+    chmod 0600 "${request}"
+    dockerConfigureSpecValidate "${request}"
+    dockerCreateConfigurationCandidate
+    dockerGenerateCandidate "${request}" "${DOCKER_CONFIG_CANDIDATE}"
+    for file in "config/${CORE}/config.json" "config/${CORE}/users.base" config/nginx/default.conf; do
+        cmp -s -- "${TEST_ROOT}/runtime/${file}" "${DOCKER_CONFIG_CANDIDATE}/${file}"
+    done
+    # 编辑事务由 cdn-entries.sh 验证；这里核对生产生成器与真实连接，不替换在线前置检查。
+    cp -- "${DOCKER_CONFIG_CANDIDATE}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    dockerCleanupConfigurationCandidate
+    dockerProtocolCommand links >"${TEST_ROOT}/links.txt"
+    if [[ "${phase}" == clear ]]; then
+        cmp -s -- "${TEST_ROOT}/original.links.txt" "${TEST_ROOT}/links.txt"
+    fi
+    printf 'docker-cdn-entries-generation-ok: protocol=%s core=%s phase=%s core-users-nginx=unchanged\n' \
+        "${PROTOCOL}" "${CORE}" "${phase}"
+}
+cdnPhase=base
+if [[ "${CDN_ENTRIES}" == 1 ]]; then
+    cdnPhase=override
+    cdnRenderConfiguration "${cdnPhase}"
+fi
+generateClient() {
+stage="client-${cdnPhase}"
+python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" \
+    "${TRANSPORT}" "${TEST_NAME}" "${DOMAIN}" "${APP_PROTOCOL}" "${CDN_ENTRIES}" "${cdnPhase}" <<'PY'
 import base64
 import ipaddress
 import json
@@ -286,9 +353,14 @@ import uuid
 lines = pathlib.Path(sys.argv[1]).read_text().splitlines()
 endpoints = json.loads(sys.argv[3])
 transport, name, domain, app = sys.argv[4:8]
-assert len(lines) == 1 and [ipaddress.ip_address(x).version for x in endpoints] == [4, 6]
-def parse(line):
-    if transport in ("grpc","tcp"):
+cdn, cdn_phase = sys.argv[8] == "1", sys.argv[9]
+share_port = 35469 if cdn else 35468
+assert [ipaddress.ip_address(x).version for x in endpoints] == [4, 6]
+servers = endpoints + ["edge.padm.test"] if cdn and cdn_phase == "override" else [domain]
+names = [name+"-"+str(index+1) for index in range(len(servers))] if len(servers) > 1 else [name]
+assert len(lines) == len(servers)
+def parse(line, server=servers[0], label=names[0]):
+    if app != "vmess":
         uri = urllib.parse.urlsplit(line)
         pairs = urllib.parse.parse_qsl(uri.query, keep_blank_values=True)
         query = dict(pairs)
@@ -297,16 +369,20 @@ def parse(line):
                          "fp":"chrome"} if app == "vless" else
                         {"peer":domain,"security":"tls","fp":"chrome","sni":domain})
             expected.update(alpn="h2,http/1.1",type="tcp")
-        else:
+        elif transport == "grpc":
             expected = ({"encryption":"none","security":"tls","sni":domain} if app == "vless" else
                         {"peer":domain,"fp":"chrome","sni":domain})
             expected.update(type="grpc", alpn="h2", serviceName="padm_grpc-1")
+        else:
+            expected = {"encryption":"none","security":"tls","sni":domain,"type":"ws",
+                        "host":domain,"path":"/padmvmessws"}
         assert uri.scheme == app and uri.username == "11111111-1111-4111-8111-111111111111"
-        assert uri.password is None and uri.hostname == domain and uri.port == 35468 and not uri.path
-        assert urllib.parse.unquote(uri.fragment) == name
+        assert uri.password is None and uri.hostname == server and uri.port == share_port and not uri.path
+        assert urllib.parse.unquote(uri.fragment) == label
         assert pairs == list(expected.items())
         assert str(uuid.UUID(uri.username)) == uri.username
-        return dict(query,id=uri.username,service=query.get("serviceName"),flow=query.get("flow"))
+        return dict(query,id=uri.username,service=query.get("serviceName"),flow=query.get("flow"),
+                    add=uri.hostname,port=str(uri.port),net=query["type"])
     assert line.startswith("vmess://") and "#" not in line and "?" not in line
     payload = line.removeprefix("vmess://")
     raw = base64.b64decode(payload, validate=True)
@@ -314,17 +390,20 @@ def parse(line):
     value = json.loads(raw)
     assert list(value) == ["v","ps","add","port","id","aid","scy","net","type","host","path","tls","sni"]
     assert raw.decode() == json.dumps(value, separators=(",", ":"), ensure_ascii=False)
-    assert value == {"v":"2","ps":name,"add":domain,"port":"35468",
+    assert value == {"v":"2","ps":label,"add":server,"port":str(share_port),
                      "id":"11111111-1111-4111-8111-111111111111","aid":"0","scy":"auto","net":transport,
                      "type":"none","host":domain,"path":"/padmvmess"+("ws" if transport == "ws" else ""),
                      "tls":"tls","sni":domain}
     assert str(uuid.UUID(value["id"])) == value["id"]
     return value
-value = parse(lines[0])
-if transport in ("grpc","tcp"):
+values = [parse(line, server, label) for line, server, label in zip(lines, servers, names)]
+value = values[0]
+if app != "vmess":
     sample = urllib.parse.urlsplit(lines[0])
     invalids = []
-    fields = (("alpn","http/1.1"),("type","ws"),("sni","wrong.test"))
+    fields = ((("encryption","wrong"),("type","tcp"),("host","wrong.test"),("path","/wrong"))
+              if transport == "ws" else (("alpn","http/1.1"),("type","ws")))
+    fields += (("sni","wrong.test"),)
     fields += (("flow","wrong"),) if transport == "tcp" and app == "vless" else ()
     fields += (("serviceName","wrong"),) if transport == "grpc" else ()
     for field, bad in fields:
@@ -344,14 +423,24 @@ for uri in invalids:
     else:
         raise AssertionError("invalid transport URI accepted")
 config = {"log":{"level":"warn"},"inbounds":[],"outbounds":[],"route":{"rules":[]}}
-for wrong in (False, True):
-    for family, endpoint in zip((4,6), endpoints):
-        tag = "vmess-v"+str(family)+("-wrong" if wrong else "")
+if cdn:
+    config["dns"] = {"servers":[{"type":"local","tag":"local"}]}
+    config["route"]["default_domain_resolver"] = "local"
+targets = list(zip(values, servers, ("ipv4","ipv6","domain"))) if cdn else [
+    (value, endpoint, "ipv"+str(family)) for family, endpoint in zip((4,6), endpoints)]
+if cdn and cdn_phase == "clear":
+    targets = [(value, domain, "origin-domain")]
+variants = ("valid","wrong-auth","wrong-sni","wrong-host","wrong-path") if cdn else ("valid","wrong-auth")
+probes = []
+for variant in variants:
+    for value, endpoint, label in targets:
+        tag = "vmess-"+label+"-"+variant
         port = 2081+len(config["inbounds"])
         config["inbounds"].append({"type":"socks","tag":"socks-"+tag,"listen":"0.0.0.0","listen_port":port})
-        outbound = {"type":app,"tag":tag,"server":endpoint,"server_port":35468 if transport == "tcp" else 8443,
+        outbound = {"type":app,"tag":tag,"server":value["add"] if cdn else endpoint,
+            "server_port":int(value["port"]) if cdn else (35468 if transport == "tcp" else 8443),
             ("password" if app == "trojan" else "uuid"):
-                ("22222222-2222-4222-8222-222222222222" if wrong else value["id"]),
+                ("22222222-2222-4222-8222-222222222222" if variant == "wrong-auth" else value["id"]),
             "tls":{"enabled":True,"server_name":value["sni"],"certificate_path":"/etc/padm/client/ca.crt"}}
         if transport == "tcp":
             outbound["tls"].update(alpn=value["alpn"].split(","),
@@ -364,19 +453,35 @@ for wrong in (False, True):
             if app == "vless":
                 outbound["packet_encoding"] = "xudp"
         else:
-            outbound.update(security=value["scy"], alter_id=int(value["aid"]),
-                transport=dict({"type":value["net"],"path":value["path"]},
-                    **({"headers":{"Host":value["host"]}} if transport == "ws" else {"host":value["host"]})))
+            if app == "vmess":
+                outbound.update(security=value["scy"], alter_id=int(value["aid"]))
+            else:
+                outbound["packet_encoding"] = "xudp"
+            outbound["transport"] = dict({"type":value["net"],"path":value["path"]},
+                **({"headers":{"Host":value["host"]}} if transport == "ws" else {"host":value["host"]}))
+        if variant == "wrong-sni":
+            outbound["tls"]["server_name"] = "wrong.padm.test"
+        elif variant == "wrong-host":
+            if transport == "ws":
+                outbound["transport"]["headers"]["Host"] = "wrong.padm.test"
+            else:
+                outbound["transport"]["host"] = "wrong.padm.test"
+        elif variant == "wrong-path":
+            outbound["transport"]["path"] = "/wrong"
         config["outbounds"].append(outbound)
         config["route"]["rules"].append({"inbound":["socks-"+tag],"action":"route","outbound":tag})
+        probes.append([port, variant, label])
 pathlib.Path(sys.argv[2]).write_text(json.dumps(config))
+pathlib.Path(sys.argv[2]).with_name("probes.json").write_text(json.dumps(probes))
 PY
-chmod 0640 "${TEST_ROOT}/runtime/client/config.json"
-chown 0:10001 "${TEST_ROOT}/runtime/client/config.json"
+chmod 0640 "${TEST_ROOT}/runtime/client/"{config,probes}.json
+chown 0:10001 "${TEST_ROOT}/runtime/client/"{config,probes}.json
 tar -cpf - -C "${TEST_ROOT}" runtime/client |
     docker run --rm -i --pull=never --label "io.padm.test=${project}" --user 0 \
         --mount "type=volume,source=${volume},target=/test" --entrypoint tar "${OPS_ID}" -xpf - -C /test
 compose run --rm --no-deps client check -c /etc/padm/client/config.json >/dev/null
+}
+generateClient
 compose up -d --pull never client
 client=$(compose ps -q client)
 fallbackProbe() {
@@ -434,10 +539,13 @@ fallbackProbe() {
 }
 probe() {
     docker run --rm --init --pull=never --read-only --cap-drop ALL --user 10001:10001 \
-        --network "${project}" --label "io.padm.test=${project}" --entrypoint python3 "${OPS_ID}" -c '
+        --network "${project}" --label "io.padm.test=${project}" \
+        --mount "type=volume,source=${volume},target=/etc/padm/client,readonly,volume-subpath=runtime/client" \
+        --entrypoint python3 "${OPS_ID}" -c '
 import concurrent.futures
 import ipaddress
 import json
+import pathlib
 import socket
 import struct
 import sys
@@ -516,24 +624,41 @@ def udp(port):
 def counts():
     return json.loads(urllib.request.urlopen("http://origin:8088/counts",timeout=5).read())
 def check(item):
-    port,transport = item
-    expected = phase == "allow" and port < 2083
+    port,variant,label,transport = item
+    expected = phase == "allow" and variant == "valid"
     try: accepted = (tcp if transport == "tcp" else udp)(port)
     except (OSError,EOFError,ValueError): accepted = False
-    assert accepted == expected,(phase,port,transport,accepted)
-    return str(port)+"/"+transport
+    assert accepted == expected,(phase,port,variant,label,transport,accepted)
+    return str(port)+"/"+variant+"/"+label+"/"+transport
 before = counts()
-items = [(port,transport) for port in range(2081,2085) for transport in ("tcp","udp")]
+probes = json.loads(pathlib.Path("/etc/padm/client/probes.json").read_text())
+items = [(*probe,transport) for probe in probes for transport in ("tcp","udp")]
 with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
     results = list(pool.map(check,items))
 after = counts()
-expected_delta = 2 if phase == "allow" else 0
+expected_delta = sum(variant == "valid" for _,variant,_ in probes) if phase == "allow" else 0
 assert {key:after[key]-before[key] for key in before} == {"tcp":expected_delta,"udp":expected_delta}
 print("docker-"+test_name+"-probe-ok: core="+core+" phase="+phase+" source=protocol-links tls="+
       (core if transport_name == "tcp" else "nginx")+"-"+
-      transport_name+" family=ipv4,ipv6 socks="+",".join(results))
-' "$1" "${TEST_NAME}" "${CORE}" "${TRANSPORT}"
+      transport_name+" share-phase="+sys.argv[5]+" socks="+",".join(results))
+' "$1" "${TEST_NAME}" "${CORE}" "${TRANSPORT}" "${cdnPhase}"
 }
+if [[ "${CDN_ENTRIES}" == 1 ]]; then
+    serverStates=$(docker inspect "$(compose ps -q "${CORE}")" "$(compose ps -q nginx)" |
+        jq -c '[.[] | {id:.Id,started_at:.State.StartedAt}]')
+    probe allow
+    compose stop client
+    cdnPhase=clear
+    cdnRenderConfiguration "${cdnPhase}"
+    generateClient
+    compose up -d --pull never client
+    probe allow
+    [[ "$(docker inspect "$(compose ps -q "${CORE}")" "$(compose ps -q nginx)" |
+        jq -c '[.[] | {id:.Id,started_at:.State.StartedAt}]')" == "${serverStates}" ]]
+    printf 'docker-cdn-entries-real-ok: protocol=%s core=%s addresses=ipv4,ipv6,domain clear=original-domain effective-port=35469 auth-sni-host-path=deny servers=unchanged\n' \
+        "${PROTOCOL}" "${CORE}"
+    exit 0
+fi
 # 只适配命名卷与隔离网络，额度/验证/重启/恢复仍走生产函数。
 dockerComposeRun() {
     local action=$1
