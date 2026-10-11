@@ -386,7 +386,7 @@
       "profiles": ["net-fail2ban", "net-fail2ban-control", "net-fail2ban-ssh"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "WS DOCKER-USER、控制面 INPUT 与专用 SSH INPUT 分别提供独立 owner、菜单/CLI 启停、状态、单 IP 解封与参数编辑。8c.3 SSH collector/jail 限 root systemd/cgroup v2 下无存量会话、禁止 reload 的单 service/单显式监听，只消费启动后的可信密码失败；来源失效停 jail 并按 token 清理，禁自动重启、SSH/control 共存及旧封禁恢复。SSH 启用期间 update/rollback/业务恢复拒绝，须先受管停用。隔离 amd64 systemd/OpenSSH 10/Fail2ban 1.1 的实际启停、封禁、连接 DROP、解封、新 token 重启和来源失效清理已验；原生宿主/arm64/公网/整机重启/完整卸载及完整管理仍待验收。"
+      "reason": "WS DOCKER-USER、控制面 INPUT 与专用 SSH INPUT 分别提供独立 owner、菜单/CLI 启停、状态、单 IP 解封与参数编辑。WS 保护端口专项迁移限单直接 WS 21、单集成、单保护端口，仅联动公开端口与 jail 端口；新端口和失败恢复均需 fresh 来源，拒绝别名、Reality stream、其它宿主集成及组合编辑。8c.3 SSH collector/jail 限 root systemd/cgroup v2 下无存量会话、禁止 reload 的单 service/单显式监听，只消费启动后的可信密码失败；来源失效停 jail 并按 token 清理，禁自动重启、SSH/control 共存及旧封禁恢复。SSH 启用期间 update/rollback/业务恢复拒绝，须先受管停用。隔离 amd64 systemd/OpenSSH 10/Fail2ban 1.1 的实际启停、封禁、连接 DROP、解封、新 token 重启和来源失效清理已验；原生宿主/arm64/公网/整机重启/完整卸载及完整管理仍待验收。"
     },
     "wireguard": {
       "status": "host-integrated",

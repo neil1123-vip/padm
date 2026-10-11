@@ -2,6 +2,59 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+# 初装和发布信任仅适配本地夹具；后续已安装 CLI 不替换任何防护事务函数。
+if [[ "${1:-}" == --seed ]]; then
+    [[ "$#" == 2 && "$(id -u)" == 0 && -f /.dockerenv ]]
+    TEST_ROOT=$(cd -- "$2" && pwd -P)
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/deployment" PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin"
+    source "${PROJECT_ROOT}/install-docker.sh"
+    MOCK_BIN="${TEST_ROOT}/bin" IMAGE_DIGEST=$(printf '%064d' 0)
+    OPS_IMAGE=$(jq -r '.ops.reference' "${TEST_ROOT}/images.json")
+    source "${PROJECT_ROOT}/docker/tests/configure-fixture.sh"
+    dockerConfigureTestFixture
+    jq --slurpfile images "${TEST_ROOT}/images.json" '
+      .images = ($images[0] | with_entries(
+        .value.reference as $ref | ($ref | split("@")[1]) as $digest |
+        .value = {reference:$ref,index_digest:$digest,
+          platforms:{"linux/amd64":$digest,"linux/arm64":$digest}}))
+    ' "${CONFIGURE_MANIFEST}" >"${CONFIGURE_MANIFEST}.next"
+    mv -- "${CONFIGURE_MANIFEST}.next" "${CONFIGURE_MANIFEST}"
+    CONFIGURE_MANIFEST_SHA=$(sha256sum "${CONFIGURE_MANIFEST}" | cut -d ' ' -f 1)
+    jq --arg sha "${CONFIGURE_MANIFEST_SHA}" '.manifest_sha256 = $sha' \
+        "${CONFIGURE_BUNDLE}" >"${CONFIGURE_BUNDLE}.next"
+    mv -- "${CONFIGURE_BUNDLE}.next" "${CONFIGURE_BUNDLE}"
+    jq --arg sha "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTITY}" \
+        --slurpfile images "${TEST_ROOT}/images.json" '
+      .release = {version:"3.1.8",manifest_sha256:$sha,signature_identity:$identity} |
+      .images = ($images[0] | with_entries(.value = .value.reference))
+    ' "${TEST_ROOT}/spec.json" >"${TEST_ROOT}/request.json"
+    chmod 0600 "${TEST_ROOT}/request.json"
+    dockerHostPreflight
+    dockerAssertInstallAllowed
+    dockerAcquireDeploymentLock
+    trap 'dockerCleanupConfigurationCandidate; dockerCleanupStagedBundle; dockerReleaseDeploymentLock' EXIT
+    dockerInitializeStateRoot
+    dockerInstallBundle "${PROJECT_ROOT}"
+    dockerInstallCli
+    dockerRequireInstalledBundle
+    mkdir -p "${PADM_DOCKER_INSTALL_DIR}/secrets/tls" "${PADM_DOCKER_INSTALL_DIR}/data/static"
+    cp -a -- "${TEST_ROOT}/secrets/." "${PADM_DOCKER_INSTALL_DIR}/secrets/"
+    printf '<!doctype html><title>Source Test</title>source-ok\n' \
+        >"${PADM_DOCKER_INSTALL_DIR}/data/static/index.html"
+    dockerCreateConfigurationCandidate
+    dockerGenerateCandidate "${TEST_ROOT}/request.json" "${DOCKER_CONFIG_CANDIDATE}"
+    dockerValidateCandidate "${DOCKER_CONFIG_CANDIDATE}/config/spec.json" "${DOCKER_CONFIG_CANDIDATE}"
+    dockerBackupConfiguration
+    dockerInstallCandidate "${DOCKER_CONFIG_CANDIDATE}" "${DOCKER_CONFIG_BACKUP}"
+    dockerEnsureRuntimeDataPermissions
+    dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-8}"
+    dockerTrafficScheduleInstall
+    dockerRenewalScheduleInstall
+    dockerGeoScheduleInstall
+    DOCKER_CONFIG_SWITCHED=0
+    printf 'ws-port-seed-scope=local-test-only-not-release-verified\n'
+    exit 0
+fi
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-fail2ban-source-real.XXXXXX")
 cleanup() {
     local status=$? file
@@ -80,7 +133,9 @@ for family in ipv4 dual; do
         "${target}/data" "${target}/data/"{xray,static} "${target}/logs" "${target}/logs/nginx" \
         "${target}/secrets" "${target}/secrets/tls"
     chmod 0644 "${target}/config/xray/config.json" "${target}/config/nginx/default.conf" \
-        "${target}/secrets/tls/source.padm.test.crt" "${target}/logs/nginx/access.log"
+        "${target}/secrets/tls/source.padm.test.crt"
+    chmod 0750 "${target}/logs/nginx"
+    chmod 0640 "${target}/logs/nginx/access.log"
     chmod 0600 "${target}/secrets/tls/source.padm.test.key"
 done
 python3 "${PROJECT_ROOT}/docker/tests/fail2ban-source-real.py" "${TEST_ROOT}"

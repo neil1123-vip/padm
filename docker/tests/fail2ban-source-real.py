@@ -8,6 +8,7 @@ import runpy
 import selectors
 import shutil
 import socket
+import sqlite3
 import ssl
 import subprocess
 import sys
@@ -77,7 +78,7 @@ dockerFail2banContainer() {
       length == 1 and (.[0] | .Image == $image and .State.Running == true and
         .State.Restarting == false and .HostConfig.NetworkMode == "host" and
         .HostConfig.ReadonlyRootfs == true and .HostConfig.Privileged == false and
-        .Config.User == "0:0" and
+        .Config.User == "0:10001" and
         (.HostConfig.CapAdd | map(ltrimstr("CAP_"))) == ["NET_ADMIN"] and
         .HostConfig.CapDrop == ["ALL"])
     ' >/dev/null &&
@@ -127,7 +128,7 @@ def namespaces():
     processes = []
     try:
         for number in range(2):
-            process = subprocess.Popen(["unshare", "--net", "--", "sleep", "360"])
+            process = subprocess.Popen(["unshare", "--net", "--", "sleep", "infinity"])
             processes.append(process)
             wait_ready(lambda: Path(f"/proc/{process.pid}/ns/net").readlink() !=
                        Path("/proc/self/ns/net").readlink(), "客户端 netns 未隔离")
@@ -384,15 +385,336 @@ dockerFail2banSourceWitness "$2" "$3"
                 process.communicate()
 
 
+def installed_port_transaction(docker, node, inputs, clients, output_root):
+    fixture = node / "ws-port"
+    fixture.mkdir(mode=0o700)
+    for relative in ("bin", "home", "tmp", "secrets/tls", "net-image"):
+        (fixture / relative).mkdir(parents=True, mode=0o700)
+    # 只烘入当前源码，避免额外 bind mount 绕过生产容器归属审计。
+    context = fixture / "net-image"
+    shutil.copyfile(ROOT / "docker/images/net/entrypoint.sh", context / "entrypoint.sh")
+    (context / "entrypoint.sh").chmod(0o755)
+    test_tag = "padm-local/padm-net:ws-port-source"
+    overlay = command(docker + ["create", "--network", "none", inputs["net"]["reference"]]).decode().strip()
+    try:
+        command(docker + ["cp", str(context / "entrypoint.sh"), overlay + ":/usr/local/bin/padm-entrypoint"])
+        command(docker + ["commit", overlay, test_tag], timeout=60)
+    finally:
+        command(docker + ["rm", overlay])
+    current = json.loads(command(docker + ["image", "inspect", test_tag]))[0]
+    digest = current["Descriptor"]["digest"]
+    assert digest.startswith("sha256:") and len(digest) == 71, current
+    actual = dict(inputs, net=dict(reference=test_tag + "@" + digest, image_id=current["Id"]))
+    (fixture / "images.json").write_text(json.dumps(actual))
+    spec = json.loads((output_root / "dual/config/spec.json").read_text())
+    spec["core"]["protocols"] = spec["core"]["protocols"][:1]
+    spec["host_integrations"] = []
+    (fixture / "spec.json").write_text(json.dumps(spec))
+    for suffix in ("crt", "key"):
+        shutil.copyfile(output_root / f"dual/secrets/tls/source.padm.test.{suffix}",
+                        fixture / f"secrets/tls/source.padm.test.{suffix}")
+    environment = dict(
+        os.environ, DOCKER_HOST=docker[-1], HOME=str(fixture / "home"),
+        TMPDIR=str(fixture / "tmp"), PADM_DOCKER_INSTALL_DIR=str(fixture / "deployment"),
+        PADM_DOCKER_BIN_DIR=str(fixture / "bin"), PADM_DOCKER_HEALTH_TIMEOUT="8",
+        PADM_DOCKER_FAIL2BAN_SOURCE_IPV4=SOURCES["ipv4"][1],
+        PADM_DOCKER_FAIL2BAN_SOURCE_IPV6=SOURCES["ipv6"][1])
+    result = subprocess.run(
+        ["bash", str(SCRIPT.with_suffix(".sh")), "--seed", str(fixture)],
+        env=environment, capture_output=True, timeout=120)
+    (output_root / "ws-port.seed.log").write_bytes(result.stdout + result.stderr)
+    assert result.returncode == 0, (result.stdout + result.stderr).decode(errors="replace")
+    deployment = fixture / "deployment"
+    for family in SOURCES:
+        assert client(clients[0], family) == {"status": 200}
+    cli = fixture / "bin/padm-docker"
+    assert cli.is_symlink() and cli.resolve().is_relative_to(deployment)
+    real_docker = shutil.which("docker")
+    assert real_docker and not Path(real_docker).is_relative_to(fixture)
+    # 发布信任适配只允许已载入的五个精确摘要；Compose、exec 和所有防护审计均透传。
+    wrapper = fixture / "bin/docker"
+    wrapper.write_text(r'''#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "$#" == 2 && "$1" == pull ]]; then
+    expected=$(jq -er --arg ref "$2" '
+      [.[] | select(.reference == $ref)] | select(length == 1) | .[0].image_id
+    ' "$PADM_TEST_WS_IMAGES") || exit 1
+    "$PADM_TEST_REAL_DOCKER" image inspect "$2" |
+        jq -e --arg ref "$2" --arg id "$expected" '
+          length == 1 and .[0].Id == $id and
+          .[0].Descriptor.digest == ($ref | split("@")[1])
+        ' >/dev/null
+    printf 'local-test-only-offline-pull=%s\n' "$2"
+    exit 0
+fi
+exec "$PADM_TEST_REAL_DOCKER" "$@"
+''')
+    wrapper.chmod(0o755)
+    environment.update(PATH=str(fixture / "bin") + ":" + os.environ["PATH"],
+                       PADM_TEST_REAL_DOCKER=real_docker,
+                       PADM_TEST_WS_IMAGES=str(fixture / "images.json"))
+    release = ["--manifest", str(fixture / "configure-release-manifest.json"),
+               "--bundle", str(fixture / "configure-release-manifest.sigstore.json"),
+               "--control-bundle", str(fixture / "configure-control.tar.gz")]
+    used_nonces = set()
+    transactions = []
+
+    def service(name):
+        return command(docker + ["ps", "-aq", "--filter",
+                       "label=com.docker.compose.project=padm-docker", "--filter",
+                       f"label=com.docker.compose.service={name}", "--filter",
+                       "label=com.docker.compose.oneoff=False"]).decode().strip()
+
+    def state():
+        return json.loads((deployment / "config/spec.json").read_text())
+
+    def run_cli(label, arguments, failure=None):
+        previous_nginx = service("nginx")
+        release_inputs = release if arguments[0] == "edit" else []
+        process = subprocess.Popen(["bash", str(cli), *arguments, *release_inputs], env=environment,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, bufsize=0)
+        transcript, pending, challenges, proofs = bytearray(), b"", [], []
+        rejected, paused = False, None
+        deadline = time.monotonic() + 150
+        try:
+            with selectors.DefaultSelector() as reader:
+                reader.register(process.stderr, selectors.EVENT_READ)
+                while reader.get_map():
+                    assert time.monotonic() < deadline, f"{label} 真实 CLI 超时"
+                    try:
+                        monitored_port = state()["core"]["protocols"][0]["public_port"] if failure == "health" else None
+                    except FileNotFoundError:
+                        # 安装和恢复会短暂移走 spec，最终断言仍要求完整原配置。
+                        monitored_port = None
+                    if failure == "health" and paused is None and monitored_port == 25444:
+                        candidates = []
+                        for identity in service("nginx").split():
+                            if identity == previous_nginx:
+                                continue
+                            result = subprocess.run(docker + ["inspect", identity], capture_output=True)
+                            if result.returncode:
+                                # Compose 重建会同时列出旧、新容器，旧 ID 随即消失。
+                                assert result.returncode == 1 and (
+                                    b"no such object:" in result.stderr.lower() or
+                                    b"no such container:" in result.stderr.lower()), result.stderr
+                                continue
+                            current_nginx = json.loads(result.stdout)[0]
+                            if current_nginx["State"]["Running"] and (
+                                current_nginx["HostConfig"]["PortBindings"].get("8443/tcp") == [
+                                    dict(HostIp="0.0.0.0", HostPort="25444"),
+                                    dict(HostIp="::", HostPort="25444")]):
+                                candidates.append(identity)
+                        assert len(candidates) <= 1, candidates
+                        if candidates:
+                            paused = candidates[0]
+                            command(docker + ["pause", paused])
+                            print(f"ws-port-health-real-paused={paused}", flush=True)
+                    if paused and monitored_port == PORT:
+                        existing = subprocess.run(docker + ["inspect", paused], capture_output=True)
+                        if existing.returncode == 0 and json.loads(existing.stdout)[0]["State"]["Paused"]:
+                            command(docker + ["unpause", paused])
+                    if not reader.select(timeout=0.05):
+                        continue
+                    block = os.read(process.stderr.fileno(), 65536)
+                    if not block:
+                        reader.unregister(process.stderr)
+                        break
+                    transcript.extend(block)
+                    pending += block
+                    while b"\n" in pending:
+                        raw, pending = pending.split(b"\n", 1)
+                        line = raw.decode(errors="replace")
+                        if paused and "正在恢复旧配置" in line:
+                            # 真实健康失败已发生；释放注入故障，让生产恢复能正常停止候选。
+                            existing = subprocess.run(docker + ["inspect", paused], capture_output=True)
+                            if existing.returncode == 0 and json.loads(existing.stdout)[0]["State"]["Paused"]:
+                                command(docker + ["unpause", paused])
+                        if line.startswith("source-challenge="):
+                            challenge = json.loads(line.removeprefix("source-challenge="))
+                            port, family, uri = (challenge[name] for name in ("public_port", "family", "uri"))
+                            assert port in (PORT, 25444) and family in SOURCES, challenge
+                            assert challenge["domain"] == "source.padm.test"
+                            assert uri.startswith("/.well-known/padm-source/") and len(uri.rsplit("/", 1)[1]) == 48
+                            assert uri not in used_nonces, "事务复用了旧来源 nonce"
+                            used_nonces.add(uri)
+                            jail_absent(docker)
+                            identity = service("nginx")
+                            assert uri.encode() not in command(docker + ["logs", identity])
+                            client_number = 1
+                            if failure == "source" and port == 25444 and not rejected:
+                                client_number, rejected = 0, True
+                            address = HOST[family] if family == "ipv4" else f"[{HOST[family]}]"
+                            response = command([
+                                "nsenter", "--target", str(clients[client_number].pid), "--net", "--",
+                                "curl", "-4" if family == "ipv4" else "-6", "--fail", "--show-error",
+                                "--silent", "--noproxy", "*", "--max-time", "3", "--cacert",
+                                str(deployment / "secrets/tls/source.padm.test.crt"), "--resolve",
+                                f"source.padm.test:{port}:{address}", "--header",
+                                f"X-Forwarded-For: {SOURCES[family][1-client_number]}", "--header",
+                                f"Forwarded: for=\"{SOURCES[family][1-client_number]}\"",
+                                "--output", "/dev/null", "--write-out", "%{http_code}",
+                                f"https://source.padm.test:{port}{uri}"], timeout=5)
+                            assert response == b"204", (challenge, response)
+                            challenges.append(challenge)
+                        elif line.startswith("source-verified="):
+                            proof = json.loads(line.removeprefix("source-verified="))
+                            assert proof["listener_id"] == "entry-source-ws" and proof["internal_port"] == 8443
+                            assert ipaddress.ip_address(proof["source"]) == ipaddress.ip_address(
+                                SOURCES[proof["family"]][1]), proof
+                            proofs.append(proof)
+            status = process.wait(timeout=5)
+            assert status == (14 if failure else 0), (label, status, transcript.decode(errors="replace"))
+            if failure:
+                assert state()["core"]["protocols"][0]["public_port"] == PORT
+                assert {row["family"] for row in proofs if row["public_port"] == PORT} == set(SOURCES)
+                if failure == "source":
+                    assert rejected and not any(row["public_port"] == 25444 for row in proofs)
+                    assert "来源" in transcript.decode(errors="replace")
+                else:
+                    assert paused and not any(row["public_port"] == 25444 for row in challenges)
+                    assert any(word in transcript for word in (
+                        b"paused", b"unhealthy", b"not healthy", b"timeout")), transcript
+            else:
+                assert len(challenges) == len(proofs) == 2
+                assert {row["family"] for row in proofs} == set(SOURCES)
+            assert not (deployment / "locks/deployment.lock").exists()
+            assert not list(deployment.glob(".candidate.*"))
+            transactions.append(dict(case=label, status=status, challenges=challenges,
+                                     proofs=proofs, real_health_failure=paused is not None))
+            print(f"ws-port-transaction-passed={label}:rc={status}:proofs={len(proofs)}", flush=True)
+        finally:
+            (output_root / f"ws-port.{label}.log").write_bytes(transcript)
+            if process.poll() is None:
+                stop(process)
+
+    def bans():
+        response = json.loads(command(docker + [
+            "exec", service("net-fail2ban"), "python3", "-c",
+            "import json; from fail2ban.client.csocket import CSocket; "
+            "s=CSocket('/run/fail2ban/fail2ban.sock'); "
+            "r=s.send(['get','padm-nginx','banip']); s.close(); print(json.dumps(r))"]))
+        assert response[0] == 0, response
+        return {str(ipaddress.ip_address(address)) for address in response[1]}
+
+    database = deployment / "data/net/fail2ban/fail2ban.sqlite3"
+
+    def database_bans():
+        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+            return {str(ipaddress.ip_address(row[0])) for row in connection.execute(
+                "SELECT DISTINCT ip FROM bans WHERE jail='padm-nginx'")}
+
+    expected_bans = {str(ipaddress.ip_address(SOURCES[family][0])) for family in SOURCES}
+
+    def enforce(port):
+        wait_ready(lambda: bans() == expected_bans, "旧 SQLite 双栈封禁没有恢复")
+        assert database_bans() >= expected_bans
+        assert database.stat().st_ino == database_inode, "端口事务替换了 SQLite"
+        for family, table in (("ipv4", "iptables"), ("ipv6", "ip6tables")):
+            net = service("net-fail2ban")
+            rules = command(docker + ["exec", net, table + "-save", "-c"]).decode()
+            hook = next(line for line in rules.splitlines() if "-A DOCKER-USER " in line and "padm-f2b" in line)
+            assert f"--ctorigdstport {port}" in hook, hook
+            assert f"--ctorigdstport {PORT if port == 25444 else 25444}" not in rules, rules
+            address = str(ipaddress.ip_address(SOURCES[family][0]))
+            line = next(row for row in rules.splitlines() if f"-s {address}/" in row and "-j DROP" in row)
+            count = int(line.split(":", 1)[0].lstrip("["))
+            access = deployment / "logs/nginx/access.log"
+            before = access.read_bytes()
+            assert client(clients[0], family, port=port) == {"timeout": True}
+            after = command(docker + ["exec", net, table + "-save", "-c"]).decode()
+            line = next(row for row in after.splitlines() if f"-s {address}/" in row and "-j DROP" in row)
+            assert int(line.split(":", 1)[0].lstrip("[")) > count
+            assert access.read_bytes() == before
+            assert client(clients[1], family, port=port) == {"status": 200}
+        environment_check = subprocess.run(
+            ["bash", str(cli), "fail2ban", "status"], env=environment, capture_output=True, timeout=30)
+        assert environment_check.returncode == 0, environment_check.stderr.decode()
+
+    run_cli("enable", ["edit", "--fail2ban-enable", str(PORT), "3", "600", "3600",
+                       "--confirm", "PADM-DOCKER-EDIT"])
+    dns_probe = json.loads(command(docker + [
+        "exec", service("net-fail2ban"), "python3", "-c",
+        "import json,socket,time; from pathlib import Path; "
+        "from fail2ban.server.ipdns import DNSUtils; "
+        "started=time.monotonic(); addresses=DNSUtils.getSelfIPs(); "
+        "print(json.dumps(dict(hostname=socket.gethostname(),fqdn=socket.getfqdn(),"
+        "hosts=Path('/etc/hosts').read_text(),addresses=sorted(map(str,addresses)),"
+        "elapsed=round(time.monotonic()-started,3))))"], timeout=5))
+    assert dns_probe["elapsed"] < 3 and not expected_bans & set(dns_probe["addresses"]), dns_probe
+    (output_root / "ws-port.dns.json").write_text(json.dumps(dns_probe, indent=2))
+    print("ws-port-native-self-dns=" + json.dumps(dns_probe, sort_keys=True), flush=True)
+    for family in SOURCES:
+        for attempt in range(3):
+            assert client(clients[0], family, f"/.env?port={attempt}") == {"status": 404}
+        access = deployment / "logs/nginx/access.log"
+        print(f"ws-port-baseline-{family}-access=" + access.read_text(), flush=True)
+        print(command(docker + ["exec", service("net-fail2ban"), "fail2ban-regex",
+                               "--print-all-matched", "/var/log/padm/nginx/access.log",
+                               "/etc/fail2ban/filter.d/padm-nginx.conf"]).decode(), flush=True)
+        wait_ready(lambda: str(ipaddress.ip_address(SOURCES[family][0])) in bans(),
+                   f"{family} 初始日志封禁失败")
+    wait_ready(lambda: database_bans() >= expected_bans, "真实日志封禁没有写入 SQLite")
+    database_inode = database.stat().st_ino
+    enforce(PORT)
+    frozen = {name: (deployment / name).read_bytes() for name in (
+        "config/spec.json", "compose.json", "deployment.json", "images.env",
+        "config/nginx/default.conf", "config/xray/config.json")}
+    for failure in ("source", "health"):
+        run_cli(f"{failure}-rollback", ["edit", "--fail2ban-port", "entry-source-ws", "25444",
+                                      "--confirm", "PADM-DOCKER-EDIT"], failure)
+        assert all((deployment / name).read_bytes() == value for name, value in frozen.items())
+        enforce(PORT)
+    before = state()
+    run_cli("migrate", ["edit", "--fail2ban-port", "entry-source-ws", "25444",
+                       "--confirm", "PADM-DOCKER-EDIT"])
+    after = state()
+    expected = json.loads(json.dumps(before))
+    expected["core"]["protocols"][0]["public_port"] = 25444
+    expected["host_integrations"][0]["settings"]["ports"] = [25444]
+    assert after == expected, "端口事务修改了无关规格"
+    enforce(25444)
+    nginx = inspect(docker, service("nginx"))
+    assert nginx["HostConfig"]["PortBindings"]["8443/tcp"] == [
+        dict(HostIp="0.0.0.0", HostPort="25444"), dict(HostIp="::", HostPort="25444")]
+    for family in SOURCES:
+        refused = subprocess.run(
+            ["nsenter", "--target", str(clients[1].pid), "--net", "--", "python3", str(SCRIPT),
+             "client", family, "/", SOURCES[family][0], str(PORT)], capture_output=True, timeout=5)
+        assert refused.returncode != 0 and b"ConnectionRefusedError" in refused.stderr, refused.stderr
+    result = subprocess.run(["bash", str(cli), "down"], env=environment, capture_output=True, timeout=35)
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert database_bans() >= expected_bans and database.stat().st_ino == database_inode
+    for table in ("iptables-save", "ip6tables-save"):
+        assert b"padm-f2b" not in command(docker + [
+            "run", "--rm", "--network", "host", "--cap-drop", "ALL", "--cap-add", "NET_ADMIN",
+            "--entrypoint", table, actual["net"]["reference"]])
+    evidence = dict(scope="local-test-only-not-release-verified", images=actual,
+                    net_entrypoint_sha256=hashlib.sha256((context / "entrypoint.sh").read_bytes()).hexdigest(),
+                    sqlite_bans=sorted(database_bans()), transactions=transactions,
+                    old_port_closed=True, old_rules_removed=True)
+    (output_root / "ws-port.evidence.json").write_text(json.dumps(evidence, indent=2))
+    print("fail2ban-ws-port-transaction-evidence=" + json.dumps(evidence, sort_keys=True), flush=True)
+
+
 def run(root):
     assert os.getuid() == 0 and sys.platform == "linux" and Path("/.dockerenv").is_file()
     assert {item["ifname"] for item in json.loads(command(["ip", "-j", "link", "show"]))} == {
         "lo"}, "不得借用宿主接口或已有网络"
+    # 隔离宿主只解析自己的机名，避免离线 DNS 阻塞原生 ignoreSelf 检查。
+    hostname = socket.gethostname()
+    assert hostname and not any(character.isspace() for character in hostname)
+    with Path("/etc/hosts").open("a") as hosts:
+        hosts.write(f"\n127.0.0.1\t{hostname}\n")
+    assert all(ipaddress.ip_address(row[4][0]).is_loopback
+               for row in socket.getaddrinfo(hostname, None))
+    host_dns = dict(hostname=hostname, fqdn=socket.getfqdn(), hosts=Path("/etc/hosts").read_text())
+    (root / "isolated-host.dns.json").write_text(json.dumps(host_dns, indent=2))
+    print("fail2ban-isolated-host-dns=" + json.dumps(host_dns, sort_keys=True), flush=True)
     inputs = json.loads(Path("/node-images.json").read_text())
-    assert {"xray", "nginx", "net"} <= inputs.keys()
+    assert {"xray", "sing-box", "nginx", "ops", "net"} <= inputs.keys()
     node = Path(tempfile.mkdtemp(prefix=".tmp-fail2ban-source-", dir="/n"))
     node.chmod(0o755)
-    daemon, clients = None, []
+    daemon, cron, clients = None, None, []
     docker = ["docker", "--host", f"unix://{node}/docker.sock"]
     started = time.monotonic()
     with (node / "daemon.log").open("wb") as log:
@@ -409,6 +731,9 @@ def run(root):
             for item in inputs.values():
                 image = json.loads(command(docker + ["image", "inspect", item["reference"]]))[0]
                 assert image["Id"] == item["image_id"]
+            cron = subprocess.Popen(["cron", "-f"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            wait_ready(lambda: cron.poll() is None and subprocess.run(
+                ["pgrep", "-x", "cron"], capture_output=True).returncode == 0, "隔离 cron 未就绪")
             clients = namespaces()
             entrypoint = node / "entrypoint.sh"
             shutil.copyfile(ROOT / "docker/images/net/entrypoint.sh", entrypoint)
@@ -550,6 +875,8 @@ def run(root):
                         "--cap-add", "NET_ADMIN", "--read-only", "--security-opt",
                         "no-new-privileges:true", "--entrypoint", table, inputs["net"]["image_id"]])
                     assert b"padm-f2b" not in remaining, f"停止后残留 {table} Fail2ban 资源"
+            installed_port_transaction(docker, node, inputs, clients, root)
+            evidence["ws_port_transaction"] = "passed"
             evidence["elapsed"] = round(time.monotonic() - started, 3)
             print("fail2ban-source-real-evidence=" + json.dumps(evidence, sort_keys=True), flush=True)
             assert all(evidence[family] == "passed" for family in (
@@ -558,13 +885,58 @@ def run(root):
             result = subprocess.run(docker + ["ps", "-aq"], capture_output=True, timeout=10)
             for identity in result.stdout.decode().split() if not result.returncode else []:
                 diagnostic = subprocess.run(docker + ["logs", identity], capture_output=True, timeout=10)
+                metadata = inspect(docker, identity)
+                name = metadata["Config"]["Labels"].get("com.docker.compose.service")
+                if name in ("nginx", "net-fail2ban"):
+                    (root / f"ws-port.{name}.log").write_bytes(diagnostic.stdout + diagnostic.stderr)
                 print((diagnostic.stdout + diagnostic.stderr).decode(errors="replace"), file=sys.stderr)
+                if name == "net-fail2ban":
+                    diagnostic = subprocess.run(docker + ["exec", identity, "python3", "-c", r'''
+import json, os, sqlite3
+from pathlib import Path
+from fail2ban.client.csocket import CSocket
+queries={}
+for field in ("banip","logpath","maxretry","findtime","bantime","ignoreip","failregex","idle"):
+    client=CSocket("/run/fail2ban/fail2ban.sock")
+    queries[field]=client.send(["get","padm-nginx",field])
+    client.close()
+files={}
+for name in ("/var/log/padm/nginx/access.log","/etc/fail2ban/jail.d/padm.local",
+             "/etc/fail2ban/filter.d/padm-nginx.conf","/etc/fail2ban/fail2ban.local"):
+    path=Path(name)
+    files[name]={"stat":list(path.stat()),"text":path.read_text()}
+with sqlite3.connect("file:/var/lib/padm/net/fail2ban.sqlite3?mode=ro",uri=True) as database:
+    schema=list(database.execute("SELECT name,sql FROM sqlite_master WHERE type='table'"))
+    rows=list(database.execute("SELECT * FROM bans"))
+processes={}
+for process in Path("/proc").iterdir():
+    if not process.name.isdigit():
+        continue
+    try:
+        command=(process/"cmdline").read_bytes().replace(b"\0",b" ").decode()
+        if "fail2ban-server" in command:
+            processes[process.name]={"command":command,"status":(process/"status").read_text()}
+    except FileNotFoundError:
+        pass
+print(json.dumps({"uid":os.getuid(),"gid":os.getgid(),"queries":queries,"files":files,
+                  "sqlite_schema":schema,"sqlite_bans":rows,"processes":processes}))
+'''], capture_output=True, timeout=10)
+                    runtime = diagnostic.stdout + diagnostic.stderr
+                    (root / "ws-port.runtime.log").write_bytes(runtime)
+                    print(runtime.decode(errors="replace"), file=sys.stderr)
+            managed = node / "ws-port/deployment"
+            access = managed / "logs/nginx/access.log"
+            if access.is_file():
+                (root / "ws-port.access.log").write_bytes(access.read_bytes())
+                print("ws-port-host-access=" + access.read_text(), file=sys.stderr)
             raise
         finally:
             active_error = sys.exc_info()[0] is not None
             cleanup_error = None
             for client_process in clients:
                 stop(client_process)
+            if cron is not None:
+                stop(cron)
             if daemon is not None:
                 try:
                     result = subprocess.run(docker + ["ps", "-aq"], capture_output=True, timeout=5)

@@ -3036,6 +3036,7 @@ dockerGenerateCompose() {
             image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
             restart: "no",
             profiles: ["net-fail2ban"],
+            user: "0:10001",
             command: ["fail2ban", ($fail2ban[0].settings.ports | join(","))],
             network_mode: "host",
             cap_add: ["NET_ADMIN"],
@@ -3953,7 +3954,14 @@ dockerFail2banConfigurationCheck() (
             <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") ||
             { [[ "${mode}" == owner && "${scope}" == ws ]] && cmp -s -- "${root}/compose.json" \
                 <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}" |
-                  jq '.services["net-fail2ban"].restart = "unless-stopped"'); }; } &&
+                  jq '.services["net-fail2ban"].restart = "unless-stopped"'); } ||
+            { [[ "${mode}" == owner && "${scope}" == ws ]] && cmp -s -- "${root}/compose.json" \
+                <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}" |
+                  jq 'del(.services["net-fail2ban"].user)'); } ||
+            { [[ "${mode}" == owner && "${scope}" == ws ]] && cmp -s -- "${root}/compose.json" \
+                <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}" |
+                  jq 'del(.services["net-fail2ban"].user) |
+                    .services["net-fail2ban"].restart = "unless-stopped"'); }; } &&
         jq -e --arg type "${type}" 'any(.host_integrations[]; .type == $type)' \
             "${root}/config/spec.json" >/dev/null || {
         dockerError '当前部署未配置 Fail2ban 或受管配置不一致'
@@ -4169,17 +4177,22 @@ dockerFail2banStartVerified() {
 }
 
 dockerFail2banContainer() (
-    local root ids container image mode=${1:-running} scope=${2:-ws} service=net-fail2ban user=0:0
+    local root ids container image mode=${1:-running} scope=${2:-ws} service=net-fail2ban user=0:10001
     [[ "$#" -le 2 ]] || return 1
     case "${mode}" in running|exited) ;; *) return 1 ;; esac
     case "${scope}" in
     ws) ;;
     control) service=net-fail2ban-control user=0:10001 ;;
-    ssh) service=net-fail2ban-ssh ;;
+    ssh) service=net-fail2ban-ssh user=0:0 ;;
     *) return 1 ;;
     esac
     root=$(dockerInstallRoot) || return 1
     dockerFail2banConfigurationCheck owner "${scope}" || return 1
+    # 仅整份旧模板验证通过后，才按固定镜像身份审计未声明用户的旧 WS owner。
+    if [[ "${scope}" == ws ]] &&
+        jq -e '.services["net-fail2ban"] | has("user") | not' "${root}/compose.json" >/dev/null; then
+        user=0:0
+    fi
     ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
         --filter "label=com.docker.compose.service=${service}" \
         --filter label=com.docker.compose.oneoff=False) || return 1
@@ -5073,6 +5086,13 @@ dockerCreateUpdateCandidate() {
         { cmp -s -- "${root}/compose.json" <(printf '%s\n' "${expected}") ||
             cmp -s -- "${root}/compose.json" \
                 <(jq -e 'select(.services["net-fail2ban"] != null) |
+                    .services["net-fail2ban"].restart = "unless-stopped"' <<<"${expected}") ||
+            cmp -s -- "${root}/compose.json" \
+                <(jq -e 'select(.services["net-fail2ban"] != null) |
+                    del(.services["net-fail2ban"].user)' <<<"${expected}") ||
+            cmp -s -- "${root}/compose.json" \
+                <(jq -e 'select(.services["net-fail2ban"] != null) |
+                    del(.services["net-fail2ban"].user) |
                     .services["net-fail2ban"].restart = "unless-stopped"' <<<"${expected}"); } || return 1
         mkdir -p -- "${candidate}/logs/control" "${candidate}/data/control-source" || return 1
     fi
@@ -5469,7 +5489,12 @@ dockerRestoreConfiguration() {
             if ! cmp -s -- "${backup}/compose.json" \
                 <(printf '%s\n' "${expectedCompose}"); then
                 cmp -s -- "${backup}/compose.json" \
-                    <(jq '.services["net-fail2ban"].restart = "unless-stopped"' <<<"${expectedCompose}") || {
+                    <(jq '.services["net-fail2ban"].restart = "unless-stopped"' <<<"${expectedCompose}") ||
+                cmp -s -- "${backup}/compose.json" \
+                    <(jq 'del(.services["net-fail2ban"].user)' <<<"${expectedCompose}") ||
+                cmp -s -- "${backup}/compose.json" \
+                    <(jq 'del(.services["net-fail2ban"].user) |
+                      .services["net-fail2ban"].restart = "unless-stopped"' <<<"${expectedCompose}") || {
                     dockerError 'Fail2ban 恢复编排不受管，尚未停止或修改服务'
                     return 1
                 }
@@ -5559,7 +5584,7 @@ dockerRestoreConfiguration() {
                 "${root}/config/control/state.json" || return 1
     fi
     if [[ "${legacyFail2ban}" == 1 ]]; then
-        # 备份原文不变，仅规范化已验证的旧自动重启策略，再重新取得现场证明。
+        # 备份原文不变，仅规范化已验证的旧用户与重启策略，再重新取得现场证明。
         printf '%s\n' "${expectedCompose}" >"${root}/compose.json" || return 1
     fi
     [[ -z "${bundleTarget}" ]] || dockerActivateBundle "${bundleTarget}" || return 1

@@ -96,7 +96,7 @@ compose)
               Paused: false, Dead: false, OOMKilled: false, ExitCode: 0, Error: ""},
             Config: {
               Image: $spec[0].images.net, Cmd: $service.command,
-              Entrypoint: ["/usr/local/bin/padm-entrypoint"], User: "0:0",
+              Entrypoint: ["/usr/local/bin/padm-entrypoint"], User: ($service.user // "0:0"),
               Labels: ($service.labels + {
                 "com.docker.compose.project": "padm-docker",
                 "com.docker.compose.project.working_dir": $root,
@@ -186,6 +186,12 @@ exec)
     fi
     if [[ "$*" == "exec ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?} sh /usr/local/bin/padm-entrypoint fail2ban-health" ]]; then
         [[ "${FAKE_DOCKER_MODE:-ok}" != fail2ban-owner-drift ]] || exit 1
+        if [[ "${FAKE_DOCKER_MODE:-ok}" == fail2ban-port-health-once &&
+            "$(jq -r '.core.protocols[0].public_port' "${FAKE_DOCKER_ROOT}/config/spec.json")" == 25444 &&
+            ! -e "${FAKE_DOCKER_FAIL_ONCE:?}" ]]; then
+            : >"${FAKE_DOCKER_FAIL_ONCE}"
+            exit 1
+        fi
         exit 0
     fi
     [[ "${2:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
@@ -255,6 +261,14 @@ dockerFail2banSourceWitness() {
     printf 'source-witness %s %s %s %048x\n' "${listener}" "${family}" "${address}" "${number}" \
         >>"${FAKE_DOCKER_LOG:?}"
     printf 'source-challenge=%s\n' "${snapshot}" >&2
+    if [[ ( "${FAKE_DOCKER_MODE:-ok}" == fail2ban-port-source-once ||
+        "${FAKE_DOCKER_MODE:-ok}" == fail2ban-port-term ) &&
+        "$(jq -r '.public_port' <<<"${snapshot}")" == 25444 &&
+        ! -e "${FAKE_DOCKER_SOURCE_FAIL_ONCE:?}" ]]; then
+        : >"${FAKE_DOCKER_SOURCE_FAIL_ONCE}"
+        [[ "${FAKE_DOCKER_MODE}" != fail2ban-port-term ]] || kill -TERM "${BASHPID}"
+        return 1
+    fi
     if [[ "${listener}" == entry-alt-ws ]]; then
         case "${FAKE_DOCKER_MODE:-ok}" in
         fail2ban-source-last-fail) return 1 ;;
@@ -617,6 +631,8 @@ grep -q '^logtarget = STDOUT$' "${DOCKER_ROOT}/config/net/fail2ban/fail2ban.loca
     fail 'Fail2ban does not log to stdout on a read-only root'
 jq -e '
   .services["net-fail2ban"].network_mode == "host" and
+  .services["net-fail2ban"].user == "0:10001" and
+  .services["net-fail2ban"].cap_drop == ["ALL"] and
   .services["net-fail2ban"].cap_add == ["NET_ADMIN"] and
   ((.services.nginx.cap_add // []) | length) == 0
 ' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Fail2ban privilege boundary is wrong'
@@ -1365,46 +1381,229 @@ PY
 [[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
     fail 'Fail2ban enable or settings changed persistent SQLite'
 
+# 专项端口迁移保留通用导入拒绝，只允许一个 WS 入口和一个受管 jail。
+for args in \
+    '--fail2ban-port' \
+    '--fail2ban-port entry-main-ws' \
+    '--fail2ban-port entry-main-ws 0 --preview' \
+    '--fail2ban-port entry-main-ws 65536 --preview' \
+    '--fail2ban-port entry-main-ws 025444 --preview' \
+    '--fail2ban-port entry-main-ws not-a-port --preview' \
+    '--fail2ban-port entry-main-ws 25444 extra --preview' \
+    '--fail2ban-port entry-main-ws 25444' \
+    '--fail2ban-port entry-main-ws 25444 --fail2ban-off --preview' \
+    '--fail2ban-port entry-main-ws 25444 --site-default --preview' \
+    '--fail2ban-port entry-main-ws 25444 --cdn-entry-clear entry-main-ws --preview'; do
+    read -r -a portArgs <<<"${args}"
+    rejectFail2ban 2 fail2ban-port-usage edit "${portArgs[@]}"
+done
+rejectFail2ban 15 fail2ban-port-multiple-listeners edit \
+    --fail2ban-port entry-main-ws 25444 --preview
+FAIL2BAN_PORT_BASE="${TEST_ROOT}/fail2ban-port-base.json"
+jq '.core.protocols = [.core.protocols[0]] |
+  .host_integrations |= map(select(.type == "fail2ban")) |
+  .host_integrations[0].settings.ports = [24444]' \
+    "${TEST_ROOT}/fail2ban-settings-subset.json" >"${FAIL2BAN_PORT_BASE}"
+runControl 0 fail2ban-port-base configure --spec "${FAIL2BAN_PORT_BASE}"
+cp -p -- "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/fail2ban-port-before.json"
+FAIL2BAN_PORT_BEFORE=$(fail2banManagedSnapshot)
+rejectFail2ban 2 fail2ban-port-import edit --fail2ban-port entry-main-ws 25444 \
+    --spec "${FAIL2BAN_PORT_BASE}" --preview
+rejectFail2ban 15 fail2ban-port-wrong-listener edit --fail2ban-port entry-alt-ws 25444 --preview
+rejectFail2ban 15 fail2ban-port-unchanged edit --fail2ban-port entry-main-ws 24444 --preview
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-port-preview edit --fail2ban-port entry-main-ws 25444 --preview
+! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|down|restart)( |$)' "${DOCKER_LOG}" ||
+    fail '单入口端口预览改变运行服务'
+PADM_DOCKER_FAIL2BAN_SOURCE_IPV4='' runControl 15 fail2ban-port-missing-source edit \
+    --fail2ban-port entry-main-ws 25444 --confirm PADM-DOCKER-EDIT
+! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|down|restart)( |$)' "${DOCKER_LOG}" ||
+    fail '单入口端口缺来源时已停止服务'
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_PORT_BEFORE}" ]] ||
+    fail '单入口端口预览或缺来源改变受管文件'
+
+# 仅替换部署归属边界；不兼容组合必须在取发布输入或触达运行服务前拒绝。
+mkdir -p "${TEST_ROOT}/port-reject/config"
+for rejected in \
+    '.host_integrations[0].settings.ports += [24445]' \
+    '.host_integrations += [.host_integrations[0]]' \
+    '.host_integrations += [{type:"fail2ban-control",profile:"net-fail2ban-control",firewall_rules:["INPUT"],devices:[],schedules:[],settings:{max_retry:6,find_time:600,ban_time:3600}}]' \
+    '.host_integrations += [{type:"fail2ban-ssh",profile:"net-fail2ban-ssh",firewall_rules:["INPUT"],devices:[],schedules:[],settings:{unit:"sshd.service",target:"192.0.2.10",port:22,max_retry:6,find_time:600,ban_time:3600}}]' \
+    '.port_aliases = [{listener_id:"entry-main-ws",public_port:26444}]' \
+    '.reality_stream = {}' \
+    '.core.protocols[0].id = 22'; do
+    jq "${rejected}" "${TEST_ROOT}/fail2ban-port-before.json" >"${TEST_ROOT}/port-reject/config/spec.json"
+    chmod 0600 "${TEST_ROOT}/port-reject/config/spec.json"
+    (
+        source "${PROJECT_ROOT}/install-docker.sh"
+        dockerHostPreflight() { return 0; }
+        dockerLockInstalledDeployment() { return 0; }
+        dockerComposeFile() { printf '%s\n' "${TEST_ROOT}/port-reject/compose.json"; }
+        dockerEditBaselineValidate() { return 0; }
+        dockerConfigureReleasePrepare() { fail '不兼容端口联动组合进入发布准备'; }
+        PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/port-reject"
+        status=0
+        dockerEditCommand --fail2ban-port entry-main-ws 25444 --preview \
+            --manifest "${CONFIGURE_MANIFEST}" || status=$?
+        [[ "${status}" -eq 15 ]] || fail '端口联动未拒绝不兼容组合'
+        dockerSetupCleanup
+    ) >"${TEST_ROOT}/fail2ban-port-reject.log" 2>&1 || {
+        cat "${TEST_ROOT}/fail2ban-port-reject.log" >&2
+        fail '单入口端口组合边界检查失败'
+    }
+done
+
+# 注入冻结字段漂移，验证专项豁免不能顺带修改地址族、路径或封禁参数。
+for drift in \
+    '.core.protocols[0].address_families = ["ipv4","ipv6"]' \
+    '.core.protocols[0].websocket.path = "changed_path"' \
+    '.host_integrations[0].settings.max_retry = 9'; do
+    (
+        source "${PROJECT_ROOT}/install-docker.sh"
+        dockerHostPreflight() { return 0; }
+        dockerLockInstalledDeployment() { return 0; }
+        dockerComposeFile() { printf '%s\n' "${DOCKER_ROOT}/compose.json"; }
+        dockerEditBaselineValidate() { return 0; }
+        dockerConfigureReleasePrepare() { return 0; }
+        dockerConfigureReleaseValidate() { return 0; }
+        dockerAcmeWebrootTransitionValidate() { return 0; }
+        dockerEditPreview() {
+            jq "${drift}" "$2" >"$2.next" && mv -- "$2.next" "$2"
+        }
+        dockerConfigureApply() { fail '单入口端口专项允许冻结字段漂移'; }
+        PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}"
+        status=0
+        dockerEditCommand --fail2ban-port entry-main-ws 25444 --preview \
+            --manifest "${CONFIGURE_MANIFEST}" || status=$?
+        [[ "${status}" -eq 15 ]] || fail '单入口端口冻结守卫未拒绝漂移'
+        dockerSetupCleanup
+    ) >"${TEST_ROOT}/fail2ban-port-freeze.log" 2>&1 || {
+        cat "${TEST_ROOT}/fail2ban-port-freeze.log" >&2
+        fail '单入口端口冻结检查失败'
+    }
+done
+: >"${DOCKER_LOG}"
+rm -f -- "${TEST_ROOT}/source-fail-once"
+FAKE_DOCKER_MODE=fail2ban-port-source-once runControl 14 fail2ban-port-source-rollback edit \
+    --fail2ban-port entry-main-ws 25444 --confirm PADM-DOCKER-EDIT
+cmp -s "${TEST_ROOT}/fail2ban-port-before.json" "${DOCKER_ROOT}/config/spec.json" ||
+    fail '单入口端口来源失败未恢复旧规格'
+python3 - "${DOCKER_LOG}" <<'PY'
+import sys
+commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
+witnesses = [(i, line.split()) for i, line in enumerate(commands) if line.startswith("source-witness ")]
+jails = [i for i, line in enumerate(commands) if " up -d " in line and " net-fail2ban --remove-orphans" in line]
+assert len(witnesses) == 2 and len({line[4] for _, line in witnesses}) == 2
+assert len(jails) == 1 and jails[0] > witnesses[-1][0], "恢复 jail 未等待新的旧端口来源"
+PY
+for failureMode in fail2ban-port-health-once fail2ban-port-term; do
+    rm -f -- "${TEST_ROOT}/fail-once" "${TEST_ROOT}/source-fail-once"
+    : >"${DOCKER_LOG}"
+    expectedStatus=14
+    [[ "${failureMode}" != fail2ban-port-term ]] || expectedStatus=143
+    FAKE_DOCKER_MODE="${failureMode}" runControl "${expectedStatus}" fail2ban-port-failure-rollback edit \
+        --fail2ban-port entry-main-ws 25444 --confirm PADM-DOCKER-EDIT
+    cmp -s "${TEST_ROOT}/fail2ban-port-before.json" "${DOCKER_ROOT}/config/spec.json" ||
+        fail '单入口端口健康失败或 TERM 未恢复旧规格'
+    python3 - "${DOCKER_LOG}" <<'PY'
+import sys
+commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
+witnesses = [(i, line.split()) for i, line in enumerate(commands) if line.startswith("source-witness ")]
+jails = [i for i, line in enumerate(commands) if " up -d " in line and " net-fail2ban --remove-orphans" in line]
+assert len(witnesses) == 2 and len({line[4] for _, line in witnesses}) == 2
+assert jails[-1] > witnesses[-1][0], "健康失败或 TERM 恢复未重新见证旧端口"
+PY
+done
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-port-success edit --fail2ban-port entry-main-ws 25444 \
+    --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile before "${TEST_ROOT}/fail2ban-port-before.json" \
+    --slurpfile after "${DOCKER_ROOT}/config/spec.json" '
+  ($before[0] | .core.protocols[0].public_port = 25444 |
+    .host_integrations[0].settings.ports = [25444]) == $after[0]
+' >/dev/null || fail '单入口端口专项改写其它字段'
+python3 - "${DOCKER_LOG}" "${FAIL2BAN_CONTAINER}" <<'PY'
+import sys
+commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
+stop = commands.index("stop " + sys.argv[2])
+remove = commands.index("rm " + sys.argv[2])
+witness = next(i for i, line in enumerate(commands) if line.startswith("source-witness "))
+start = next(i for i, line in enumerate(commands) if " up -d " in line and " net-fail2ban --remove-orphans" in line)
+assert stop < remove < witness < start
+assert sum(line.startswith("source-witness ") for line in commands) == 1
+PY
+grep -qF 'port="25444"' "${DOCKER_ROOT}/config/net/fail2ban/padm.local" ||
+    fail '单入口端口专项未更新 jail 保护端口'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
+    fail '单入口端口专项改变持久封禁数据库'
+
 runControl 0 fail2ban-restore-for-other-contracts configure --spec "${FAIL2BAN_SPEC}"
 rm -f -- "${TEST_ROOT}/fail2ban-stopped"
 
-# 旧策略只可经配置事务清理；当前启动和 Nginx reload 不得先停 owner 再尝试修复。
-jq '.services["net-fail2ban"].restart = "unless-stopped"' "${DOCKER_ROOT}/compose.json" \
-    >"${TEST_ROOT}/legacy-restart.compose"
-cp -p -- "${TEST_ROOT}/legacy-restart.compose" "${DOCKER_ROOT}/compose.json"
-jq '.[0].HostConfig.RestartPolicy.Name = "unless-stopped"' "${FAIL2BAN_INSPECT}" \
-    >"${TEST_ROOT}/legacy-restart.inspect"
-cp -p -- "${TEST_ROOT}/legacy-restart.inspect" "${FAIL2BAN_INSPECT}"
-FAIL2BAN_LEGACY_BEFORE=$(fail2banManagedSnapshot)
-: >"${DOCKER_LOG}"
-runControl 15 legacy-restart-up up
-runControl 15 legacy-restart-restart restart
-runControl 15 legacy-restart-reload shared-compose exec -T nginx nginx -e /dev/stderr -s reload
-! grep -Eq '^(stop|rm) |^compose .* (up|restart|down|exec)( |$)' "${DOCKER_LOG}" ||
-    fail 'Legacy restart policy was not rejected before changing owner or runtime services'
-[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_LEGACY_BEFORE}" ]] ||
-    fail 'Legacy restart refusal changed managed files'
-: >"${DOCKER_LOG}"
-runControl 0 legacy-restart-normalize configure --spec "${FAIL2BAN_SPEC}"
-grep -qxF "stop ${FAIL2BAN_CONTAINER}" "${DOCKER_LOG}" ||
-    fail 'Standard configure did not use owner-mode cleanup for legacy restart policy'
-grep -qxF "rm ${FAIL2BAN_CONTAINER}" "${DOCKER_LOG}" ||
-    fail 'Standard configure retained the audited legacy owner'
-jq -e '.services["net-fail2ban"].restart == "no"' "${DOCKER_ROOT}/compose.json" >/dev/null ||
-    fail 'Standard configure did not normalize legacy restart policy'
-LEGACY_RESTART_BACKUP=$(sed -n 's/^Docker 配置已提交，回滚快照: //p' "${CONTROL_LOG}")
-[[ -n "${LEGACY_RESTART_BACKUP}" ]] || fail 'Legacy normalization did not preserve its rollback snapshot'
-cmp -s -- "${TEST_ROOT}/legacy-restart.compose" "${LEGACY_RESTART_BACKUP}/compose.json" ||
-    fail 'Legacy normalization modified the saved Compose evidence'
-LEGACY_RESTART_BACKUP_HASH=$(sha256sum "${LEGACY_RESTART_BACKUP}/compose.json")
-: >"${DOCKER_LOG}"
-runControl 0 legacy-restart-backup-restore restore-backup "${LEGACY_RESTART_BACKUP}"
-jq -e '.services["net-fail2ban"].restart == "no"' "${DOCKER_ROOT}/compose.json" >/dev/null ||
-    fail 'Legacy backup restore republished automatic jail restart'
-[[ "$(sha256sum "${LEGACY_RESTART_BACKUP}/compose.json")" == "${LEGACY_RESTART_BACKUP_HASH}" ]] ||
-    fail 'Legacy backup restore rewrote the saved Compose evidence'
-[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
-    fail 'Legacy backup restore skipped fresh source evidence'
+# 新模板必须按日志组审计容器身份，不能把旧 root 组容器当作当前部署。
+FAKE_DOCKER_INSPECT_FILTER='.[0].Config.User = "0:0"' \
+    rejectFail2ban 15 fail2ban-current-root-group fail2ban status
+
+# 仅固定旧用户与重启策略可经事务迁移，备份恢复也须发布新用户并取新来源证明。
+for legacy in restart user user-restart; do
+    composeFilter=. inspectFilter=.
+    if [[ "${legacy}" == *user* ]]; then
+        composeFilter+=' | del(.services["net-fail2ban"].user)'
+        inspectFilter+=' | .[0].Config.User = "0:0"'
+    fi
+    if [[ "${legacy}" == *restart* ]]; then
+        composeFilter+=' | .services["net-fail2ban"].restart = "unless-stopped"'
+        inspectFilter+=' | .[0].HostConfig.RestartPolicy.Name = "unless-stopped"'
+    fi
+    jq "${composeFilter}" "${DOCKER_ROOT}/compose.json" >"${TEST_ROOT}/legacy-${legacy}.compose"
+    cp -p -- "${TEST_ROOT}/legacy-${legacy}.compose" "${DOCKER_ROOT}/compose.json"
+    jq "${inspectFilter}" "${FAIL2BAN_INSPECT}" >"${TEST_ROOT}/legacy-${legacy}.inspect"
+    cp -p -- "${TEST_ROOT}/legacy-${legacy}.inspect" "${FAIL2BAN_INSPECT}"
+    FAIL2BAN_LEGACY_BEFORE=$(fail2banManagedSnapshot)
+    : >"${DOCKER_LOG}"
+    runControl 15 "legacy-${legacy}-up" up
+    runControl 15 "legacy-${legacy}-restart" restart
+    runControl 15 "legacy-${legacy}-reload" shared-compose exec -T nginx nginx -e /dev/stderr -s reload
+    ! grep -Eq '^(stop|rm) |^compose .* (up|restart|down|exec)( |$)' "${DOCKER_LOG}" ||
+        fail '旧模板启动拒绝前改变了 owner 或运行服务'
+    [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_LEGACY_BEFORE}" ]] ||
+        fail '旧模板启动拒绝改变了受管文件'
+    if [[ "${legacy}" == user ]]; then
+        for userValue in '"0:0"' null '"0:10002"'; do
+            jq --argjson user "${userValue}" '.services["net-fail2ban"].user = $user' \
+                "${TEST_ROOT}/legacy-user.compose" >"${TEST_ROOT}/legacy-user-drift.compose"
+            cp -p -- "${TEST_ROOT}/legacy-user-drift.compose" "${DOCKER_ROOT}/compose.json"
+            USER_DRIFT_BEFORE=$(fail2banManagedSnapshot)
+            rejectFail2ban 15 "legacy-user-drift-${userValue}" fail2ban status
+            [[ "$(fail2banManagedSnapshot)" == "${USER_DRIFT_BEFORE}" ]] ||
+                fail '未知旧用户拒绝改变了受管文件'
+        done
+        cp -p -- "${TEST_ROOT}/legacy-user.compose" "${DOCKER_ROOT}/compose.json"
+        FAKE_DOCKER_INSPECT_FILTER='.[0].Config.User = "0:10001"' \
+            rejectFail2ban 15 legacy-user-container-drift fail2ban status
+    fi
+    : >"${DOCKER_LOG}"
+    runControl 0 "legacy-${legacy}-normalize" configure --spec "${FAIL2BAN_SPEC}"
+    grep -qxF "stop ${FAIL2BAN_CONTAINER}" "${DOCKER_LOG}" ||
+        fail '配置事务未按 owner 门禁停止旧 jail'
+    grep -qxF "rm ${FAIL2BAN_CONTAINER}" "${DOCKER_LOG}" ||
+        fail '配置事务保留了旧 jail 容器'
+    jq -e '.services["net-fail2ban"] | .restart == "no" and .user == "0:10001"' \
+        "${DOCKER_ROOT}/compose.json" >/dev/null || fail '配置事务未规范化旧用户或重启策略'
+    LEGACY_BACKUP=$(sed -n 's/^Docker 配置已提交，回滚快照: //p' "${CONTROL_LOG}")
+    [[ -n "${LEGACY_BACKUP}" ]] || fail '旧模板迁移未保留回滚快照'
+    cmp -s -- "${TEST_ROOT}/legacy-${legacy}.compose" "${LEGACY_BACKUP}/compose.json" ||
+        fail '旧模板迁移改变了备份的 Compose 证据'
+    LEGACY_BACKUP_HASH=$(sha256sum "${LEGACY_BACKUP}/compose.json")
+    : >"${DOCKER_LOG}"
+    runControl 0 "legacy-${legacy}-backup-restore" restore-backup "${LEGACY_BACKUP}"
+    jq -e '.services["net-fail2ban"] | .restart == "no" and .user == "0:10001"' \
+        "${DOCKER_ROOT}/compose.json" >/dev/null || fail '旧备份恢复发布了旧用户或自动重启'
+    [[ "$(sha256sum "${LEGACY_BACKUP}/compose.json")" == "${LEGACY_BACKUP_HASH}" ]] ||
+        fail '旧备份恢复改写了保存的 Compose 证据'
+    [[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
+        fail '旧备份恢复跳过了 fresh 来源证明'
+done
 
 # 明确的核心无依赖操作继续可用，未知 Compose 参数不能绕过来源门禁。
 : >"${DOCKER_LOG}"

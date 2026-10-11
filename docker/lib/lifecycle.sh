@@ -69,6 +69,7 @@ dockerUsage() {
   padm-docker edit --warp-global [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --warp-family <ipv4|ipv6> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --warp-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --fail2ban-port <单个 WS 入口 ID> <新公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --alpn <入口 ID> <h2,http/1.1|http/1.1,h2|http/1.1> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker protocol list
   padm-docker protocol links [入口 ID]

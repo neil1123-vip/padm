@@ -1388,6 +1388,7 @@ dockerEditCommand() {
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
     local fail2banAction= fail2banType=fail2ban fail2banPorts= fail2banMaxRetry= fail2banFindTime= fail2banBanTime=
+    local fail2banPortListener= fail2banNewPort=
     local fail2banSshUnit= fail2banSshTarget= fail2banSshPort=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
@@ -1482,6 +1483,13 @@ dockerEditCommand() {
             [[ -z "${httpRelay}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             httpRelay=disable
             shift
+            ;;
+        --fail2ban-port)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${fail2banAction}" &&
+                "$3" =~ ^[1-9][0-9]{0,4}$ && "$3" -le 65535 ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            fail2banAction=port fail2banPortListener=$2 fail2banNewPort=$3
+            shift 3
             ;;
         --fail2ban-enable|--fail2ban-settings|--fail2ban-control-enable|--fail2ban-control-settings|--fail2ban-ssh-enable|--fail2ban-ssh-settings)
             local fail2banArgCount=5 retryInput= findInput= banInput=
@@ -1861,7 +1869,27 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
-    if [[ "${fail2banAction}" == off ]]; then
+    if [[ "${fail2banAction}" == port ]]; then
+        dockerFail2banSourcePlan "${draft}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+        jq --arg listener "${fail2banPortListener}" --argjson port "${fail2banNewPort}" '
+          [.core.protocols[] | select(.id == 21)] as $entries |
+          if (.host_integrations | length) != 1 or .host_integrations[0].type != "fail2ban" or
+            (.host_integrations[0].settings.ports | length) != 1 or
+            ($entries | length) != 1 or $entries[0].listener_id != $listener or
+            .host_integrations[0].settings.ports != [$entries[0].public_port] or
+            $entries[0].public_port == $port or
+            (.port_aliases // [] | length) != 0 or .reality_stream != null
+          then error("only one direct protected WS listener is supported")
+          else
+            .core.protocols |= map(if .listener_id == $listener then .public_port = $port else . end) |
+            .host_integrations[0].settings.ports = [$port]
+          end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError '端口联动仅支持一个直接受管 WS 21 入口、一个 Fail2ban 集成和一个保护端口，新端口必须不同；不支持别名、Reality 共存或其它宿主集成'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    elif [[ "${fail2banAction}" == off ]]; then
         jq -e --arg type "${fail2banType}" 'any(.host_integrations[]; .type == $type)' "${draft}" >/dev/null || {
             dockerError '当前规格未启用受管 Fail2ban 站点扫描防护'
             return "${PADM_DOCKER_RC_STATE}"
@@ -2169,7 +2197,7 @@ dockerEditCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${fail2banType}" == fail2ban &&
-        ( "${fail2banAction}" == enable || "${fail2banAction}" == settings ) ]]; then
+        ( "${fail2banAction}" == enable || "${fail2banAction}" == settings || "${fail2banAction}" == port ) ]]; then
         dockerFail2banSourcePlan "${draft}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     fi
     dockerAcmeWebrootTransitionValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
@@ -2212,6 +2240,7 @@ dockerEditCommand() {
         --arg cdn_listener "${cdnListener}" \
         --arg fail2ban_action "${fail2banAction}" \
         --arg fail2ban_type "${fail2banType}" \
+        --arg fail2ban_listener "${fail2banPortListener}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -2254,7 +2283,13 @@ dockerEditCommand() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-      (if $fail2ban_action == "off" then
+       (if $fail2ban_action == "port" then
+         # 端口专项只豁免选中入口公开端口与唯一 jail 的保护端口，其余规格逐字冻结。
+         def without_fail2ban_port:
+           .core.protocols |= map(if .listener_id == $fail2ban_listener then del(.public_port) else . end) |
+           .host_integrations |= map(if .type == "fail2ban" then del(.settings.ports) else . end);
+         ($old | without_fail2ban_port) == ($new | without_fail2ban_port)
+        elif $fail2ban_action == "off" then
         $new.host_integrations == [$old.host_integrations[] | select(.type != $fail2ban_type)] and
         ($old | del(.host_integrations)) == ($new | del(.host_integrations))
        elif $fail2ban_action == "enable" then

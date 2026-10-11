@@ -971,7 +971,8 @@ dockerMenuFail2ban() {
             '10. 启用控制面防护' '11. 修改控制面防护参数' '12. SSH 宿主只读预检' \
             '13. 核对 SSH 实时来源' '14. 核对 SSH unit 实时来源' \
             '15. 查看 SSH 防护状态' '16. 解封 SSH 单个 IP' '17. 停用 SSH 防护' \
-            '18. 启用专用 SSH service 防护' '19. 修改 SSH 防护参数' '0. 返回'
+            '18. 启用专用 SSH service 防护' '19. 修改 SSH 防护参数' \
+            '20. 修改单入口 WS 保护端口' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1031,6 +1032,16 @@ dockerMenuFail2ban() {
                 dockerSetupRead address '外部客户端 IPv4/IPv6（0 返回）: ' &&
                 [[ -n "${address}" ]] || continue
             dockerMenuRun fail2ban verify-source "${listener}" "${address}" || true
+            ;;
+        20)
+            dockerMenuRun protocol list || continue
+            dockerSetupRead listener '受保护 WS 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" ]] &&
+                dockerSetupRead port '新 WS 公开端口（0 返回）: ' &&
+                [[ -n "${port}" ]] || continue
+            dockerSetupRead answer '确认修改单入口 WS 保护端口？[y/N]: ' n || continue
+            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+            dockerMenuRun edit --fail2ban-port "${listener}" "${port}" --confirm PADM-DOCKER-EDIT || true
             ;;
         5|6|10|11|18|19)
             local -a scopeArgs=() portArgs=()

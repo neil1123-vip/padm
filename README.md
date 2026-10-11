@@ -643,6 +643,8 @@ padm-docker fail2ban settings 443,8443 8 900 7200 --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban disable --preview
 padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban verify-source entry-ws 203.0.113.7
+padm-docker edit --fail2ban-port entry-ws 8443 --preview
+padm-docker edit --fail2ban-port entry-ws 8443 --confirm PADM-DOCKER-EDIT
 ```
 
 状态与解封只操作当前运行且规格、镜像、标签及挂载一致的 `net-fail2ban` 容器和固定
@@ -661,6 +663,17 @@ IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部�
 菜单启用的数字默认值为 `6 / 600 / 3600`，修改参数须逐项显式填写。
 两项复用专项编辑和配置事务，只改变该 Fail2ban 条目，保留其它集成、账号及持久数据；
 不是对运行 jail 直接 reload。预览或取消不启停服务，确认后的更新也必须重新完成来源挑战。
+Fail2ban 子菜单第 20 项提供单入口 WS 保护端口迁移，CLI 为
+`edit --fail2ban-port <入口 ID> <新公开端口>`。仅接受一个直接 WS 21 入口、
+一个 Fail2ban 集成和一个保护端口，新端口必须与旧端口不同；别名、Reality 共存、
+SSH/控制面或其它宿主集成及额外编辑组合均拒绝。
+专项只联动入口公开端口和 jail 的端口，其余规格冻结；普通导入或通用端口编辑仍拒绝此变更。
+确认后先证明旧 jail 清理，再验证新端口的各地址族真实来源，最后启动防护；
+失败恢复旧端口也须新挑战。账号、证书、内部端口和 SQLite 封禁历史保留，
+客户端需改用新公开端口；预览不切换服务。
+WS jail 以 `0:10001` 读取受管 Nginx 日志，目录和文件保持 `0750/0640`；
+精确旧无 `user` 编排只用于归属清理和受管迁移，正常启动要求新编排。
+旧 WS 与控制面防护并存的部署须先用旧受管入口停用 WS，再升级。
 停用复用配置编辑事务及既有规格迁移，只移除 Fail2ban 条目，其它宿主集成和业务数据保持不变。
 预览或取消不停止容器；确认后先审计旧拥有者，只停止该容器并保留退出证据，
 确认正常退出、私密 state 和两族受管规则均已清理，才安装新配置。

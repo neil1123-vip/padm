@@ -397,12 +397,6 @@ try {
             if ($Selector -eq 'docker-alpn-real') {
                 $references['curl'] = 'padm-local/padm-static-site-h3-client:20261012'
             }
-        } elseif ($Selector -eq 'docker-fail2ban-source-real') {
-            $references = [ordered]@{
-                xray = 'padm-local/padm-xray:control-4c4b'
-                nginx = 'padm-local/padm-nginx:control-4c4b'
-                net = 'padm-local/padm-net:control-4c4b'
-            }
         } elseif ($Selector -eq 'docker-control-fail2ban-real') {
             $references = [ordered]@{
                 ops = 'padm-local/padm-ops:control-4c4b'

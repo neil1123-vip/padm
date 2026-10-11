@@ -441,7 +441,25 @@ padm-docker fail2ban settings 443,8443 8 900 7200 --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban disable --preview
 padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban verify-source entry-ws 203.0.113.7
+padm-docker edit --fail2ban-port entry-ws 8443 --preview
+padm-docker edit --fail2ban-port entry-ws 8443 --confirm PADM-DOCKER-EDIT
 ```
+
+Fail2ban submenu item 20 migrates a protected WS public port through
+`edit --fail2ban-port <listener ID> <new public port>`. It requires exactly one direct WS 21
+listener, one Fail2ban integration and one protected port. The new port must differ; aliases,
+Reality stream coexistence, SSH/control or other host integrations and combined edits are rejected.
+Only the listener public port and jail port change. Other specification fields stay fixed;
+ordinary imports and general port edits still reject this transition. The transaction verifies
+old jail cleanup, obtains fresh source proof for every address family on the new port, then starts
+protection. Rollback also requires a new challenge on the old port. Accounts, certificates,
+internal ports and SQLite ban history remain; clients must use the new public port.
+Preview does not switch services.
+The WS jail runs as `0:10001` to read managed Nginx logs; directory and file permissions
+remain `0750/0640`. The exact legacy Compose body without `user` is accepted only for
+ownership cleanup and managed migration. Normal startup requires the new body.
+Deployments combining legacy WS and control protection must disable WS through the old
+managed entry point before upgrading.
 
 Fail2ban submenu item 12 and `padm-docker fail2ban ssh preflight [--json]`
 provide a read-only host check. The usual Linux/root and local rootful Docker

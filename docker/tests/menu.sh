@@ -515,6 +515,38 @@ runMaintenanceDriver() {
                 printf '\003' >&3
             fi
             ;;
+        fail2ban-port-cancel)
+            for field in listener port; do
+                for answer in $'0\n' $'\n' $'\004'; do
+                    targetReply 'Docker Fail2ban 维护' $'20\n'
+                    [[ "${field}" != port ]] ||
+                        targetReply '受保护 WS 入口 ID（0 返回）' $'entry-fixture\n'
+                    if [[ "${field}" == listener ]]; then
+                        targetReply '受保护 WS 入口 ID（0 返回）' "${answer}"
+                    else
+                        targetReply '新 WS 公开端口（0 返回）' "${answer}"
+                    fi
+                done
+            done
+            for answer in $'n\n' $'\n' $'0\n' $'\004'; do
+                targetReply 'Docker Fail2ban 维护' $'20\n'
+                targetReply '受保护 WS 入口 ID（0 返回）' $'entry-fixture\n'
+                targetReply '新 WS 公开端口（0 返回）' $'25444\n'
+                targetReply '确认修改单入口 WS 保护端口？[y/N]' "${answer}"
+            done
+            ;;
+        fail2ban-port*)
+            targetReply 'Docker Fail2ban 维护' $'20\n'
+            if [[ "${scenario}" != fail2ban-port-list-failed ]]; then
+                targetReply '受保护 WS 入口 ID（0 返回）' $'entry-fixture\n'
+                port=25444
+                [[ "${scenario}" != fail2ban-port-invalid ]] || port=not-a-port
+                targetReply '新 WS 公开端口（0 返回）' "${port}"$'\n'
+                targetReply '确认修改单入口 WS 保护端口？[y/N]' $'y\n'
+            fi
+            # 后端失败后仍能进行下一次只读操作。
+            targetReply 'Docker Fail2ban 维护' $'1\n'
+            ;;
         fail2ban-enable*|fail2ban-settings*)
             action=${scenario#fail2ban-}
             action=${action%%-*}
@@ -1571,7 +1603,11 @@ protocol)
     ;;
 edit)
     recordAction "$@"
-    if [[ "${2:-}" == --warp-domains || "${2:-}" == --warp-global ||
+    if [[ "${2:-}" == --fail2ban-port ]]; then
+        [[ "$#" -eq 6 && "$3" == entry-fixture && "$4" != not-a-port &&
+            "$5" == --confirm && "$6" == PADM-DOCKER-EDIT ]] || exit 2
+        exit "${FAIL2BAN_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --warp-domains || "${2:-}" == --warp-global ||
         "${2:-}" == --warp-family ]]; then
         case "$2" in
         --warp-domains)
@@ -1780,13 +1816,14 @@ esac
 EOF
 # 启动与恢复共用来源输入；直接验证生产动作分组，不重复业务菜单的导航矩阵。
 export SOURCE_INPUT_CHECK=1
-for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable fail2ban-settings \
+for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable fail2ban-settings fail2ban-port \
     fail2ban-control-disable fail2ban-control-enable fail2ban-control-settings business-restore \
     control-source-check control-log-rotate; do
     case "${sourceAction}" in
     fail2ban-disable) sourceCommand=(fail2ban disable --confirm PADM-DOCKER-EDIT) ;;
     fail2ban-enable) sourceCommand=(fail2ban enable 24444,24445 6 600 3600 --confirm PADM-DOCKER-EDIT) ;;
     fail2ban-settings) sourceCommand=(fail2ban settings 24444,24445 6 600 3600 --confirm PADM-DOCKER-EDIT) ;;
+    fail2ban-port) sourceCommand=(edit --fail2ban-port entry-fixture 25444 --confirm PADM-DOCKER-EDIT) ;;
     fail2ban-control-disable) sourceCommand=(fail2ban control disable --confirm PADM-DOCKER-EDIT) ;;
     fail2ban-control-enable) sourceCommand=(fail2ban control enable 6 600 3600 --confirm PADM-DOCKER-EDIT) ;;
     fail2ban-control-settings) sourceCommand=(fail2ban control settings 6 600 3600 --confirm PADM-DOCKER-EDIT) ;;
@@ -1850,6 +1887,7 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
     verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term \
     enable enable-cancel enable-invalid enable-failed enable-list-failed enable-int enable-term \
     settings settings-cancel settings-invalid settings-failed settings-list-failed settings-int settings-term \
+    port port-cancel port-invalid port-failed port-list-failed \
     ssh-preflight ssh-preflight-failed ssh-source ssh-source-failed ssh-source-cancel \
     ssh-unit ssh-unit-failed ssh-unit-cancel-unit ssh-unit-cancel-target \
     ssh-unit-cancel-port ssh-unit-cancel-source; do
@@ -1863,8 +1901,8 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
     [[ "${fail2banCase}" != disable-failed ]] || FAIL2BAN_DISABLE_STATUS=17
     [[ "${fail2banCase}" != verify-failed ]] || FAIL2BAN_VERIFY_STATUS=17
     [[ "${fail2banCase}" != verify-list-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=17
-    case "${fail2banCase}" in enable-failed|settings-failed) FAIL2BAN_EDIT_STATUS=17 ;; esac
-    case "${fail2banCase}" in enable-list-failed|settings-list-failed) FAIL2BAN_PROTOCOL_LIST_STATUS=17 ;; esac
+    case "${fail2banCase}" in enable-failed|settings-failed|port-failed) FAIL2BAN_EDIT_STATUS=17 ;; esac
+    case "${fail2banCase}" in enable-list-failed|settings-list-failed|port-list-failed) FAIL2BAN_PROTOCOL_LIST_STATUS=17 ;; esac
     case "${fail2banCase}" in int|term|*-int|*-term) FAIL2BAN_WAIT=1 ;; esac
     runPty "fail2ban-${fail2banCase}" maintenance "fail2ban-${fail2banCase}" "${TLS_WIZARD_CLI}" menu
     expectedFail2ban=
@@ -1951,6 +1989,25 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
                 fail "Fail2ban ${fail2banCase} 后 CLI 进程仍存活"
         fi
         ;;
+    port-cancel)
+        expectedFail2ban=$(printf 'protocol list\n%.0s' {1..10})
+        ;;
+    port-list-failed)
+        expectedFail2ban=$'protocol list\nfail2ban status'
+        grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" ||
+            fail 'WS 端口入口列表失败未留在菜单'
+        ! grep -Fq '受保护 WS 入口 ID（0 返回）' "${CONTROL_LOG}" ||
+            fail 'WS 端口入口列表失败仍接受写操作输入'
+        ;;
+    port|port-invalid|port-failed)
+        port=25444
+        [[ "${fail2banCase}" != port-invalid ]] || port=not-a-port
+        expectedFail2ban=$'protocol list\nedit --fail2ban-port entry-fixture '"${port}"$' --confirm PADM-DOCKER-EDIT\nfail2ban status'
+        [[ "${fail2banCase}" != port-invalid ]] ||
+            grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail 'WS 非法端口未保留用法错误'
+        [[ "${fail2banCase}" != port-failed ]] ||
+            grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'WS 端口变更失败未留在菜单'
+        ;;
     enable*|settings*)
         action=${fail2banCase%%-*}
         case "${fail2banCase}" in
@@ -1982,7 +2039,7 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
     for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看 WS 状态' \
         '2. 解封 WS 单个 IP' '3. 停用 WS 站点扫描防护' '4. 核对 WS 真实来源' \
         '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数' '12. SSH 宿主只读预检' \
-        '13. 核对 SSH 实时来源' '14. 核对 SSH unit 实时来源'; do
+        '13. 核对 SSH 实时来源' '14. 核对 SSH unit 实时来源' '20. 修改单入口 WS 保护端口'; do
         grep -Fq "${fail2banLabel}" "${CONTROL_LOG}" || fail "Fail2ban 菜单缺少: ${fail2banLabel}"
     done
 done
