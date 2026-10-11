@@ -4298,6 +4298,48 @@ subreaper 恢复，所有 remaining/open_received_fds 空，unit inactive/dead�
 collector/jail，不宣称 Failed publickey 文案、多线程、未知创建模型、
 arm64、公网或原生宿主验收已完成。
 
+#### 5C.8c.2q 真实运行态 tracer 异常退出与子树收养
+
+本阶段保持 driver/source/ledger/journal 四源冻结，复用 8c.2p 工具镜像；
+仅在固定私有 unit fixture 增加真实祖先 supervisor/subreaper。supervisor
+自身 fork tracer，原 driver 自建 sshd master，再由真实 SSH 创建 session/auth。
+unit 的 `NotifyAccess=main` 通知来自实际 ExecStart supervisor，
+真实 MainPID 移交给 master；不修改生产授权、不 attach 外部 PID。
+
+2026-10-11 attempt1 首次通过，入口 11890 ms，linux/amd64；
+supervisor 107、tracer 108、master 109、session 116、auth 122，
+invocation `909163e9b53246cca487ac8c196a34ae`。原 unit 两次稳定快照相同，
+首代共享 LISTEN 仍被既有唯一 owner gate 拒绝。原 accepted
+`127.0.0.1:22221 <- 127.0.0.1:36647`、inode 17489，
+故障前 session/auth 为同一 ESTAB socket 的两个实际 owner。
+
+supervisor 持续持有四个原 pidfd，在真实 auth EXEC 停点固定原代次，
+释放后完成失败认证并保持客户端。两轮实际运行态采样中，三 tracee 均为
+`S`、单线程、`TracerPid=108`、原 PID/net namespace 与 exe；session 已
+`setsid`，auth UID 996/GID 65534。仅向 tracer 原 pidfd 发送一次 SIGKILL，
+不先杀 tracee，不把 POLLIN 或 `systemctl stop` 当作回收证明。
+
+依次对 tracer/auth/session/master 使用原 `P_PIDFD` 的 WEXITED|WNOWAIT，
+终局均为 CLD_KILLED/SIGKILL；先保存实际 `Z`、PPid 107、TracerPid 0、
+原 starttime 和可读 PID namespace，再精确消费同一终局。僵尸阶段 net/mnt
+已释放，保留实际 ENOENT；回收后四个 pidfd 均 `Pid=-1`、原 `/proc` 消失。
+最后一个原 task 回收距离发信号约 1.582 ms，外层无剩余 child，
+FD `4 -> 4`、subreaper 恢复。tracer SIGKILL 未执行 Python finally，
+仅保存真实 crash 前 checkpoint，不伪造正常 driver/Ledger 关闭证据；
+checkpoint 中 1 条 session 消息仍 pending，不宣称崩溃后提交。
+
+systemd 在后续 stop 前已为 inactive/dead、MainPID 0、invocation 清空，
+原空 cgroup 已移除且无 TCP LISTEN；据实保存 ENOENT，不冒充读到空清单。
+后续 stop 只清临时 unit，不计入原 task 回收。容器已删除，
+manager 两条对原 MainPID 的 SIGKILL 日志均晚于四次真实回收，
+首次晚约 5.017 ms，不能替代 EXITKILL/收养证明。
+10 个源输入全部冻结匹配，小证据与复现源保留在
+`.tmp-ssh-unit-driver-8c2q/`；没有重复未变生产源码的完整回归。
+
+本阶段只证明固定自建 SSH 子树的运行态 EXITKILL 收容，不实现默认 SSH
+服务恢复、持续 collector/jail 或任意 OpenSSH 兼容；运行态采样不是原子冻结。
+公网、原生宿主、arm64、多线程及恢复仍待验收，5C 与总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
