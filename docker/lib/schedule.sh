@@ -11,7 +11,7 @@ DOCKER_MAINTENANCE_CHANGED=0
 
 dockerMaintenanceScheduleRestore() {
     local snapshot=$1 unitDir=$2 systemdReady=$3 timerEnabled=$4 timerActive=$5 job=$6 file failed=0
-    case "${job}" in renewal|geo|traffic) ;; *) return 1 ;; esac
+    case "${job}" in renewal|geo|traffic|control-log) ;; *) return 1 ;; esac
     if [[ "${systemdReady}" == 1 ]]; then
         [[ ! -f "${unitDir}/padm-docker-${job}.timer" ]] ||
             systemctl disable --now "padm-docker-${job}.timer" >/dev/null 2>&1 || return 1
@@ -63,6 +63,7 @@ dockerMaintenanceScheduleCommit() {
     case "${job}" in
     renewal) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_RENEWAL_SWITCHED=0 ;;
     geo) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_GEO_SWITCHED=0 ;;
+    control-log) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_CONTROL_LOG_SWITCHED=0 ;;
     traffic) DOCKER_MAINTENANCE_CHANGED=0 ;;
     *) return 1 ;;
     esac
@@ -73,9 +74,10 @@ dockerMaintenanceScheduleApply() {
     [[ "$#" -eq 2 ]] || return 1
     local action=$1 job=$2 root cli bashPath unitDir file fragment snapshot= cronText= cronLine line
     local marker cronMarker command calendar cronSchedule description timerDescription expected
+    local controlLogService= controlLogTimer= dropIns= backend=none active=false
     local timeout=1800 timerOptions='RandomizedDelaySec=300' legacy=0
     local systemdReady=0 cronReady=0 timerEnabled=0 timerActive=0 haveUnits=0 haveCron=0
-    case "${action}" in install|remove) ;; *) return 1 ;; esac
+    case "${action}" in install|remove) ;; check) [[ "${job}" == control-log ]] || return 1 ;; *) return 1 ;; esac
     case "${job}" in
     renewal)
         marker='# padm-docker TLS 自动续期'
@@ -103,6 +105,15 @@ dockerMaintenanceScheduleApply() {
         timeout=90
         timerOptions='AccuracySec=1s'
         ;;
+    control-log)
+        marker='# padm-docker 控制认证日志自动轮转'
+        command='control auto-log-rotate'
+        calendar='*-*-* *:19:00'
+        cronSchedule='19 * * * *'
+        description='padm Docker control authentication log rotation'
+        timerDescription='Check padm Docker control authentication log hourly'
+        timeout=0
+        ;;
     *) return 1 ;;
     esac
     [[ -z "${DOCKER_MAINTENANCE_SNAPSHOT:-}" ]] || return 1
@@ -112,6 +123,38 @@ dockerMaintenanceScheduleApply() {
     unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system}
     [[ "${root}" =~ ^/[A-Za-z0-9._/-]+$ && "${cli}" =~ ^/[A-Za-z0-9._/-]+$ &&
         "${bashPath}" =~ ^/[A-Za-z0-9._/-]+$ && "${unitDir}" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
+    if [[ "${job}" == control-log ]]; then
+        # 新任务完整核对模板，不能把同 marker 的改写任务当作受管调度。
+        controlLogService=$(cat <<EOF
+${marker}
+# padm-docker root=${root}
+[Unit]
+Description=${description}
+After=docker.service
+[Service]
+Type=oneshot
+Environment=PADM_DOCKER_INSTALL_DIR=${root}
+ExecStart=${bashPath} ${cli} ${command}
+TimeoutStartSec=0
+TimeoutStopSec=0
+SuccessExitStatus=12
+EOF
+)
+        controlLogTimer=$(cat <<EOF
+${marker}
+# padm-docker root=${root}
+[Unit]
+Description=${timerDescription}
+[Timer]
+OnCalendar=${calendar}
+${timerOptions}
+Persistent=true
+Unit=padm-docker-control-log.service
+[Install]
+WantedBy=timers.target
+EOF
+)
+    fi
     if command -v systemctl >/dev/null 2>&1 && systemctl show-environment >/dev/null 2>&1; then
         systemdReady=1
     fi
@@ -141,9 +184,18 @@ dockerMaintenanceScheduleApply() {
     for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
         legacy=0
         [[ ! -L "${unitDir}/${file}" ]] || return 1
+        if [[ "${job}" == control-log ]]; then
+            [[ ! -e "${unitDir}/${file}.d" && ! -L "${unitDir}/${file}.d" ]] || return 1
+        fi
         if [[ -e "${unitDir}/${file}" ]]; then
             [[ -f "${unitDir}/${file}" && -O "${unitDir}/${file}" ]] &&
                 grep -qxF "${marker}" "${unitDir}/${file}" || return 1
+            if [[ "${job}" == control-log ]]; then
+                [[ "$(stat -c '%u:%g:%a:%h' "${unitDir}/${file}")" == 0:0:644:1 ]] || return 1
+                if [[ "${file}" == *.service ]]; then expected=${controlLogService};
+                else expected=${controlLogTimer}; fi
+                [[ "$(<"${unitDir}/${file}")" == "${expected}" ]] || return 1
+            fi
             if [[ "${job}" == traffic ]] &&
                 ! grep -q '^# padm-docker root=' "${unitDir}/${file}"; then
                 # 旧流量模板只凭精确内容迁移，默认同名 timer 必须仍绑定本 root 的 service。
@@ -196,6 +248,10 @@ EOF
             fragment=$(systemctl show --property=FragmentPath --value "${file}" 2>/dev/null) || return 1
             [[ -z "${fragment}" ||
                 ( "${fragment}" == "${unitDir}/${file}" && -f "${unitDir}/${file}" ) ]] || return 1
+            if [[ "${job}" == control-log ]]; then
+                dropIns=$(systemctl show --property=DropInPaths --value "${file}" 2>/dev/null) || return 1
+                [[ -z "${dropIns}" ]] || return 1
+            fi
         fi
     done
     if [[ "${action}" == install ]]; then
@@ -205,13 +261,28 @@ EOF
             dockerError "${marker#'# padm-docker '}需要正在运行的 systemd 或 cron"
             return 1
         fi
-    elif [[ "${haveUnits}" == 0 && "${haveCron}" == 0 ]]; then
+    elif [[ "${action}" == remove && "${haveUnits}" == 0 && "${haveCron}" == 0 ]]; then
         return 0
     fi
     [[ "${haveUnits}" == 0 ]] || command -v systemctl >/dev/null 2>&1 || return 1
     if [[ -f "${unitDir}/padm-docker-${job}.timer" ]]; then
         if systemctl is-enabled --quiet "padm-docker-${job}.timer"; then timerEnabled=1; fi
         if [[ "${systemdReady}" == 1 ]] && systemctl is-active --quiet "padm-docker-${job}.timer"; then timerActive=1; fi
+    fi
+    if [[ "${action}" == check ]]; then
+        if [[ "${haveUnits}" == 1 ]]; then
+            [[ -f "${unitDir}/padm-docker-control-log.service" &&
+                -f "${unitDir}/padm-docker-control-log.timer" ]] || return 1
+            backend=systemd
+            [[ "${timerActive}" != 1 ]] || active=true
+        fi
+        if [[ "${haveCron}" == 1 ]]; then
+            if [[ "${backend}" == none ]]; then backend=cron; else backend=mixed; fi
+            [[ "${cronReady}" != 1 ]] || active=true
+        fi
+        jq -cn --arg backend "${backend}" --argjson active "${active}" \
+            '{backend:$backend,installed:($backend != "none"),active:$active}'
+        return $?
     fi
     dockerManagedPathIsSafe "${root}" "${root}/locks" &&
         [[ -d "${root}/locks" && ! -L "${root}/locks" && -O "${root}/locks" ]] || return 1
@@ -245,6 +316,10 @@ EOF
         printf '%s\n' "${cronText}" | awk -v owned="${cronLine}" '$0 != owned' | crontab - || exit 1
     fi
     if [[ "${action}" == install && "${systemdReady}" == 1 ]]; then
+        if [[ "${job}" == control-log ]]; then
+            printf '%s\n' "${controlLogService}" >"${snapshot}/new.service" &&
+                printf '%s\n' "${controlLogTimer}" >"${snapshot}/new.timer" || exit 1
+        else
         cat >"${snapshot}/new.service" <<EOF
 ${marker}
 # padm-docker root=${root}
@@ -270,6 +345,7 @@ Unit=padm-docker-${job}.service
 [Install]
 WantedBy=timers.target
 EOF
+        fi
         install -m 0644 "${snapshot}/new.service" "${unitDir}/padm-docker-${job}.service" &&
             install -m 0644 "${snapshot}/new.timer" "${unitDir}/padm-docker-${job}.timer" &&
             systemctl daemon-reload &&
@@ -290,6 +366,10 @@ EOF
         geo)
             [[ -z "${DOCKER_GEO_STAGE:-}" || "${DOCKER_GEO_SWITCHED:-0}" != 1 ]] || return 0
             dockerGeoScheduleCommit
+            ;;
+        control-log)
+            [[ -z "${DOCKER_CONTROL_LOG_STAGE:-}" || "${DOCKER_CONTROL_LOG_SWITCHED:-0}" != 1 ]] || return 0
+            dockerMaintenanceScheduleCommit control-log
             ;;
         traffic) dockerMaintenanceScheduleCommit traffic ;;
         esac

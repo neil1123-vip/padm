@@ -721,8 +721,17 @@ The control menu's manual authentication-log rotation, or `padm-docker control l
 rotates `auth.log` at 10 MiB and retains two fixed archives, `auth.log.1` and `auth.log.2`.
 The API holds a read-only cooperative lock on root-owned `auth.lock`; rotation does not restart the API,
 use copytruncate, or rotate or replace source receipts. Legacy deployments without the lock must
-complete a normal upgrade first. No automatic schedule is installed; 10 MiB is a manual threshold,
-not a live size limit. Failed recovery preserves its private directory and rejects further takeover.
+complete a normal upgrade first. The control menu can enable or disable hourly checks, also available
+through `control log-schedule enable|disable --yes`; `control log-schedule status` reports the
+registration and actual job state separately. Scheduling is off by default. Its root-private
+`data/control-log/schedule.json` stays on this host and is excluded from business backups.
+Stopping services removes the job but retains the setting; starting services reinstalls it.
+`control auto-log-rotate` rechecks the setting and managed controller under the deployment lock,
+skips normally stopped services, and exits `12` on lock contention for the next scheduled attempt.
+Invalid sources or registrations are rejected. While enabled, updates and rollbacks reject an
+older control bundle without this capability before switching; disable the schedule first.
+10 MiB is a check threshold, not a live size limit. Failed recovery preserves its private directory
+and rejects further takeover.
 After a forced kill or power loss, inspect the retained evidence manually; do not delete residual
 files or recreate a missing active log to bypass the check.
 INT/TERM waits for the rotation container to finish and be removed before releasing the deployment lock;

@@ -97,6 +97,8 @@ dockerUsage() {
   padm-docker control source-check
   padm-docker control source-probe --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> --nonce <64 位 hex>
   padm-docker control log-rotate [--yes]
+  padm-docker control log-schedule <enable|disable|status> [--yes]
+  padm-docker control auto-log-rotate
   padm-docker business backup <绝对 JSON 路径>
   padm-docker business preview <备份 JSON 路径> --strategy <merge|replace>
   padm-docker business restore <备份 JSON 路径> --strategy <merge|replace> --yes
@@ -822,11 +824,12 @@ dockerLifecycleCommand() {
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
         dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
         dockerTrafficScheduleInstall && dockerRenewalScheduleInstall &&
-            dockerGeoScheduleInstall && dockerComposeRun up -d
+            dockerGeoScheduleInstall && dockerControlLogScheduleInstall && dockerComposeRun up -d
         ;;
     down)
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
         dockerRenewalScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
+        dockerControlLogScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
         dockerTrafficBeforeChange
         dockerComposeRun down && dockerTrafficScheduleRemove
         ;;
@@ -835,7 +838,7 @@ dockerLifecycleCommand() {
         dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
         dockerTrafficBeforeChange
         dockerTrafficScheduleInstall && dockerRenewalScheduleInstall &&
-            dockerGeoScheduleInstall && dockerComposeRun restart
+            dockerGeoScheduleInstall && dockerControlLogScheduleInstall && dockerComposeRun restart
         ;;
     logs) dockerComposeRun logs "$@" ;;
     esac
@@ -1060,7 +1063,8 @@ dockerAssessCommand() {
     dockerRealityStreamDeploymentCheck "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" || return "${PADM_DOCKER_RC_MANIFEST}"
     dockerStageReleaseBundle && dockerRenewalBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" &&
-        dockerGeoBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" ||
+        dockerGeoBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" &&
+        dockerControlLogScheduleBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" ||
         return "${PADM_DOCKER_RC_BUNDLE}"
     dockerPullManifestImages || return "${PADM_DOCKER_RC_COMPOSE}"
     dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
@@ -1136,6 +1140,7 @@ dockerUpdateCommand() {
     }
     dockerRenewalBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return "${PADM_DOCKER_RC_BUNDLE}"
     dockerGeoBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return "${PADM_DOCKER_RC_BUNDLE}"
+    dockerControlLogScheduleBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return "${PADM_DOCKER_RC_BUNDLE}"
     dockerPullManifestImages || return "${PADM_DOCKER_RC_COMPOSE}"
     dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
     dockerTrafficBeforeChange
@@ -1167,7 +1172,8 @@ dockerUpdateCommand() {
         ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
         ! dockerTrafficScheduleInstall ||
         ! dockerRenewalScheduleInstall ||
-        ! dockerGeoScheduleInstall; then
+        ! dockerGeoScheduleInstall ||
+        ! dockerControlLogScheduleInstall; then
         dockerError '控制脚本切换、启动或健康检查失败，正在恢复旧配置和控制脚本'
         if ! dockerRestoreConfiguration; then
             dockerError "旧版本恢复失败，请检查备份: ${backup}"
@@ -1223,6 +1229,17 @@ dockerValidateConfigurationBackup() {
     grep -qxF compose.json "${backup}/present" || return 1
     grep -qxF images.env "${backup}/present" || return 1
     dockerDeploymentFileValidate "${backup}/deployment.json" || return 1
+    # 本机调度登记不在业务快照中，但启用时仍须约束将要恢复的控制 bundle。
+    dockerControlLogScheduleValidate "${root}" || return 1
+    if [[ -f "${root}/data/control-log/schedule.json" ]] &&
+        jq -e '.enabled == true' "${root}/data/control-log/schedule.json" >/dev/null; then
+        if [[ -f "${backup}/bundle.target" ]]; then
+            bundlePath=$(dockerBundlePathForTarget "$(<"${backup}/bundle.target")") || return 1
+        else
+            bundlePath=$(dockerCurrentBundlePath) || return 1
+        fi
+        dockerControlLogScheduleBundleCheck "${bundlePath}" || return 1
+    fi
     if [[ -e "${backup}/config/share-groups.json" ]]; then
         grep -qxF config/share-groups.json "${backup}/present" &&
             dockerSubscriptionStateValidate "${backup}/config/share-groups.json" || return 1
@@ -1451,6 +1468,7 @@ dockerUninstallCommand() {
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerGeoScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     dockerRenewalScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
+    dockerControlLogScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     if [[ -e "${root}/compose.json" || -e "${root}/deployment.json" || -e "${root}/images.env" ]]; then
         dockerComposeFile >/dev/null || {
             dockerError 'Docker Compose 状态不完整，已拒绝卸载'
@@ -1482,6 +1500,7 @@ dockerCommandInterrupted() {
     dockerAcmeChallengeRestore || true
     dockerAssessCleanup || true
     dockerMaintenanceScheduleInterrupted traffic || true
+    dockerControlLogScheduleInterrupted || true
     dockerGeoScheduleInterrupted || true
     dockerGeoInterrupted || true
     dockerRenewalScheduleInterrupted || true
@@ -1560,6 +1579,7 @@ dockerMain() {
     status=${status:-$?}
     dockerAcmeChallengeRestore || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerMaintenanceScheduleInterrupted traffic || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
+    dockerControlLogScheduleInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerGeoScheduleInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerGeoInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerRenewalScheduleInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}

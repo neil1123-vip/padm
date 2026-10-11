@@ -417,7 +417,13 @@ runDockerControlStateRegression() {
 
 runDockerControlCliRegression() {
     bash "${PROJECT_ROOT}/docker/tests/control-cli.sh" &&
-        bash "${PROJECT_ROOT}/docker/tests/control-invite.sh"
+        bash "${PROJECT_ROOT}/docker/tests/control-invite.sh" &&
+        runDockerControlLogScheduleRegression
+}
+
+runDockerControlLogScheduleRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/control-log-schedule.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/control-log-lifecycle.sh"
 }
 
 runDockerSshPreflightRegression() {
@@ -547,6 +553,7 @@ registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression
 registerRegressionFunctionLeaf docker-control-sync runDockerControlSyncRegression
 registerRegressionFunctionLeaf docker-control-state runDockerControlStateRegression
 registerRegressionFunctionLeaf docker-control-cli runDockerControlCliRegression
+registerRegressionFunctionLeaf docker-control-log-schedule runDockerControlLogScheduleRegression
 registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegression
 registerRegressionFunctionLeaf docker-control-two-node-real runDockerControlTwoNodeRealRegression
 registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerControlTwoDeploymentRealRegression

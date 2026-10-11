@@ -4,6 +4,210 @@ if [[ "${PADM_DOCKER_CONTROL_LOADED:-}" == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
 PADM_DOCKER_CONTROL_LOADED=1
+readonly PADM_DOCKER_CONTROL_LOG_SCHEDULE_SCHEMA=1
+DOCKER_CONTROL_LOG_STAGE=
+DOCKER_CONTROL_LOG_SWITCHED=0
+DOCKER_CONTROL_LOG_HAD_DIRECTORY=0
+
+dockerControlLogScheduleValidate() {
+    local root=$1 directory="${1}/data/control-log" file="${1}/data/control-log/schedule.json" parent mode
+    dockerTrafficSafePath "${root}" "${file}" || return 1
+    for parent in "${root}" "${root}/data"; do
+        [[ -e "${parent}" ]] || continue
+        [[ -d "${parent}" && "$(stat -c %u "${parent}")" == 0 ]] || return 1
+        mode=$(stat -c %a "${parent}") || return 1
+        (( (8#${mode} & 022) == 0 )) || return 1
+    done
+    [[ -e "${directory}" ]] || return 0
+    [[ -d "${directory}" && "$(stat -c '%u:%g:%a' "${directory}")" == 0:0:700 &&
+        -z "$(find "${directory}" -mindepth 1 -maxdepth 1 ! -path "${file}" -print -quit)" ]] || return 1
+    [[ -e "${file}" ]] || return 0
+    [[ -f "${file}" && "$(stat -c '%u:%g:%a:%h' "${file}")" == 0:0:600:1 &&
+        "$(stat -c %s "${file}")" -le 4096 ]] || return 1
+    jq -es 'length == 1 and (.[0] | type == "object" and
+      keys == ["enabled","schema_version"] and .schema_version == 1 and
+      (.enabled | type == "boolean"))' "${file}" >/dev/null 2>&1
+}
+
+dockerControlLogScheduleBundleCheck() {
+    local bundle=$1 root file
+    root=$(dockerInstallRoot) || return 1
+    file="${root}/data/control-log/schedule.json"
+    dockerControlLogScheduleValidate "${root}" || return 1
+    [[ -f "${file}" ]] && jq -e '.enabled == true' "${file}" >/dev/null || return 0
+    [[ -f "${bundle}/docker/lib/control.sh" && ! -L "${bundle}/docker/lib/control.sh" ]] &&
+        grep -qxF 'readonly PADM_DOCKER_CONTROL_LOG_SCHEDULE_SCHEMA=1' "${bundle}/docker/lib/control.sh" || {
+        dockerError '目标控制 bundle 不支持已启用的控制日志调度，请先停用调度或选择兼容版本'
+        return 1
+    }
+}
+
+dockerControlLogRole() {
+    local root=$1 spec file haveInput=0 directory mode
+    for file in config/spec.json deployment.json compose.json images.env; do
+        dockerTrafficSafePath "${root}" "${root}/${file}" || return 1
+        [[ ! -e "${root}/${file}" ]] || haveInput=1
+    done
+    if [[ "${haveInput}" == 0 ]]; then
+        dockerTrafficSafePath "${root}" "${root}/config/control" || return 1
+        for directory in "${root}/config" "${root}/config/control"; do
+            [[ -e "${directory}" ]] || continue
+            [[ -d "${directory}" && "$(stat -c %u "${directory}")" == 0 ]] || return 1
+            mode=$(stat -c %a "${directory}") || return 1
+            (( (8#${mode} & 022) == 0 )) || return 1
+        done
+        [[ ! -d "${root}/config/control" ||
+            -z "$(find "${root}/config/control" -mindepth 1 -print -quit)" ]] || return 1
+        printf 'unconfigured\n'
+        return 0
+    fi
+    spec=$(dockerAccountSpecFile) &&
+        dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
+        dockerControlStateCheck "${root}" || return 1
+    jq -er 'if .control.role == "main" then "main"
+      elif has("control_sync") then "controlled" else "standalone" end' "${spec}"
+}
+
+dockerControlLogScheduleRemove() {
+    local unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system} content
+    if [[ ! -e "${unitDir}/padm-docker-control-log.service" && ! -L "${unitDir}/padm-docker-control-log.service" &&
+        ! -e "${unitDir}/padm-docker-control-log.timer" && ! -L "${unitDir}/padm-docker-control-log.timer" ]]; then
+        command -v crontab >/dev/null 2>&1 || return 0
+        content=$(dockerTrafficReadCrontab) || return 1
+        [[ "${content}" == *'# padm-docker 控制认证日志自动轮转'* ]] || return 0
+    fi
+    dockerMaintenanceScheduleApply remove control-log
+}
+
+dockerControlLogScheduleInstall() {
+    local root file role
+    root=$(dockerInstallRoot) || return 1
+    file="${root}/data/control-log/schedule.json"
+    dockerControlLogScheduleValidate "${root}" || return 1
+    if [[ ! -f "${file}" ]] || ! jq -e '.enabled == true' "${file}" >/dev/null; then
+        dockerControlLogScheduleRemove
+        return $?
+    fi
+    role=$(dockerControlLogRole "${root}") || return 1
+    if [[ "${role}" == main ]]; then dockerMaintenanceScheduleApply install control-log;
+    else dockerControlLogScheduleRemove; fi
+}
+
+dockerControlLogScheduleInterrupted() {
+    local root stage=${DOCKER_CONTROL_LOG_STAGE:-} directory
+    dockerMaintenanceScheduleInterrupted control-log || return 1
+    [[ -n "${stage}" ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    directory="${root}/data/control-log"
+    dockerTrafficSafePath "${root}" "${stage}" &&
+        [[ "${stage}" == "${root}/locks/control-log-state."* && -d "${stage}" && -O "${stage}" &&
+            -z "$(find "${stage}" ! -type f ! -type d -print -quit)" ]] || return 1
+    if [[ "${DOCKER_CONTROL_LOG_SWITCHED:-0}" == 1 ]]; then
+        dockerControlLogScheduleValidate "${root}" || return 1
+        if [[ -f "${stage}/previous" ]]; then
+            cp -p -- "${stage}/previous" "${stage}/restore" &&
+                mv -f -- "${stage}/restore" "${directory}/schedule.json" || return 1
+        else
+            rm -f -- "${directory}/schedule.json" || return 1
+        fi
+        if [[ "${DOCKER_CONTROL_LOG_HAD_DIRECTORY:-0}" == 0 && -d "${directory}" ]]; then
+            rmdir -- "${directory}" || return 1
+        fi
+        DOCKER_CONTROL_LOG_SWITCHED=0
+    fi
+    dockerRemoveManagedTree "${root}" "${stage}" || return 1
+    DOCKER_CONTROL_LOG_STAGE= DOCKER_CONTROL_LOG_HAD_DIRECTORY=0
+}
+
+dockerControlLogInputsCheck() {
+    local root=$1 file path metadata mode
+    for file in auth.log auth.lock source.receipt; do
+        [[ -f "${root}/logs/control/${file}" && ! -L "${root}/logs/control/${file}" ]] || return 1
+    done
+    [[ -d "${root}/data/control-source" && ! -L "${root}/data/control-source" ]] || return 1
+    # Python 轮转 helper 会核对日志目录的全部祖先，启用前先拒绝 /tmp 等可写路径。
+    path="${root}/logs/control"
+    while :; do
+        metadata=$(stat -c '%u:%a' "${path}") || return 1
+        [[ "${metadata%%:*}" == 0 ]] || return 1
+        mode=${metadata#*:}
+        (( (8#${mode} & 022) == 0 )) || return 1
+        [[ "${path}" == / ]] && break
+        path=$(dirname -- "${path}")
+    done
+    [[ "$(stat -c '%u:%g:%a' "${root}/logs/control")" == 0:10001:750 ]] || return 1
+    # 已有完整日志才允许校验，不能由首次创建空文件替代来源证据。
+    dockerControlAccessLogEnsure "${root}" &&
+        [[ -d "${root}/data/control-source" &&
+            "$(stat -c '%a:%u:%g' "${root}/data/control-source")" == "750:0:10001" &&
+            -z "$(find "${root}/data/control-source" -mindepth 1 -print -quit)" ]]
+}
+
+dockerControlLogScheduleCommand() (
+    local action=${1:-} yes=0 answer root stage enabled=false current=false result status label
+    shift || true
+    case "${action}" in enable|disable|status) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    if [[ "$#" == 1 && "$1" == --yes && "${action}" != status ]]; then yes=1; shift; fi
+    [[ "$#" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "${action}" != status ]]; then
+        [[ "${yes}" == 1 || ( -t 0 && -t 1 ) ]] || {
+            dockerError '更改控制日志自动轮转需要 --yes 确认'
+            return "${PADM_DOCKER_RC_USAGE}"
+        }
+        if [[ "${yes}" == 0 ]]; then
+            if [[ "${action}" == enable ]]; then label=启用; else label=停用; fi
+            dockerSetupRead answer "确认${label}控制日志每小时检查，满 10 MiB 轮转并保留两份历史？[y/N]: " n ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+        fi
+    fi
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerControlLogScheduleValidate "${root}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'status=$?; dockerControlLogScheduleInterrupted || status=15;
+      dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+    dockerControlLogScheduleValidate "${root}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -f "${root}/data/control-log/schedule.json" ]]; then
+        current=$(jq -r .enabled "${root}/data/control-log/schedule.json") || return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ "${action}" == status ]]; then
+        result=$(dockerMaintenanceScheduleApply check control-log) || return "${PADM_DOCKER_RC_STATE}"
+        jq -c --argjson enabled "${current}" '. + {enabled:$enabled}' <<<"${result}"
+        return $?
+    fi
+    if [[ "${action}" == enable ]]; then
+        enabled=true
+        dockerControlSourceSnapshot >/dev/null && dockerControlLogInputsCheck "${root}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
+    [[ -z "${DOCKER_CONTROL_LOG_STAGE:-}" ]] || return "${PADM_DOCKER_RC_STATE}"
+    DOCKER_CONTROL_LOG_STAGE=$(mktemp -d "${root}/locks/control-log-state.XXXXXX") ||
+        return "${PADM_DOCKER_RC_STATE}"
+    stage=${DOCKER_CONTROL_LOG_STAGE}
+    chmod 0700 "${stage}" || return "${PADM_DOCKER_RC_STATE}"
+    DOCKER_CONTROL_LOG_HAD_DIRECTORY=0
+    if [[ -d "${root}/data/control-log" ]]; then DOCKER_CONTROL_LOG_HAD_DIRECTORY=1; fi
+    [[ ! -f "${root}/data/control-log/schedule.json" ]] ||
+        cp -p -- "${root}/data/control-log/schedule.json" "${stage}/previous" ||
+        return "${PADM_DOCKER_RC_STATE}"
+    jq -n --argjson enabled "${enabled}" '{schema_version:1,enabled:$enabled}' >"${stage}/next" &&
+        chmod 0600 "${stage}/next" && chown 0:0 "${stage}/next" || return "${PADM_DOCKER_RC_STATE}"
+    # 登记和固定作业共用恢复窗口，任一步失败都回到原登记和原调度。
+    DOCKER_CONTROL_LOG_SWITCHED=1
+    if [[ "${action}" == enable ]]; then dockerMaintenanceScheduleApply install control-log;
+    else dockerControlLogScheduleRemove; fi || return "${PADM_DOCKER_RC_STATE}"
+    if [[ ! -d "${root}/data/control-log" ]]; then
+        mkdir -m 0700 -- "${root}/data/control-log" &&
+            chown 0:0 "${root}/data/control-log" || return "${PADM_DOCKER_RC_STATE}"
+    fi
+    mv -f -- "${stage}/next" "${root}/data/control-log/schedule.json" &&
+        dockerMaintenanceScheduleCommit control-log &&
+        dockerControlLogScheduleInterrupted || return "${PADM_DOCKER_RC_STATE}"
+    printf '控制日志自动轮转 enabled=%s\n' "${enabled}"
+)
 
 dockerControlPrivateAddressIsValid() {
     jq -en --arg address "$1" '
@@ -713,8 +917,7 @@ except Exception:
 )
 
 dockerControlLogRotate() (
-    local yes=0 answer root image snapshot current receiptIdentity receiptHash container= status=0 interrupted=0
-    local inspected remaining cleanupWarned=0
+    local yes=0 answer
     [[ "$#" == 0 || ( "$#" == 1 && "$1" == --yes ) ]] || return "${PADM_DOCKER_RC_USAGE}"
     [[ "$#" == 0 ]] || yes=1
     [[ "${yes}" == 1 || ( -t 0 && -t 1 ) ]] || {
@@ -726,14 +929,32 @@ dockerControlLogRotate() (
             return "${PADM_DOCKER_RC_USAGE}"
         case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     fi
+    dockerControlLogRotateWorker manual
+)
+
+dockerControlAutoLogRotate() {
+    [[ "$#" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    dockerControlLogRotateWorker auto
+}
+
+dockerControlLogRotateWorker() (
+    local mode=$1 root image snapshot current receiptIdentity receiptHash container= status=0 interrupted=0
+    local inspected remaining cleanupWarned=0 role ids controlIds wireguardIds
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
-    dockerTrafficSafePath "${root}" "${root}/data/control-source" &&
-        [[ -d "${root}/data/control-source" &&
-            "$(stat -c '%a:%u:%g' "${root}/data/control-source")" == "750:0:10001" &&
-            -z "$(find "${root}/data/control-source" -mindepth 1 -print -quit)" ]] ||
-        return "${PADM_DOCKER_RC_STATE}"
-    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    if [[ "${mode}" == manual ]]; then
+        dockerTrafficSafePath "${root}" "${root}/data/control-source" &&
+            [[ -d "${root}/data/control-source" &&
+                "$(stat -c '%a:%u:%g' "${root}/data/control-source")" == "750:0:10001" &&
+                -z "$(find "${root}/data/control-source" -mindepth 1 -print -quit)" ]] ||
+            return "${PADM_DOCKER_RC_STATE}"
+        dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    else
+        # 自动任务不等待同锁，调度维护才能在持锁时安全停止尚未启动的服务。
+        PADM_DOCKER_LOCK_TIMEOUT=0 dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    fi
     trap 'status=$?; if [[ -n "${container}" ]]; then
         while ! docker rm "${container}" >/dev/null; do
             if remaining=$(docker ps --all --quiet --no-trunc --filter "id=${container}") &&
@@ -747,6 +968,26 @@ dockerControlLogRotate() (
       fi; dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
     trap 'interrupted=130' INT
     trap 'interrupted=143' TERM
+    if [[ "${mode}" == auto ]]; then
+        dockerControlLogScheduleValidate "${root}" || return "${PADM_DOCKER_RC_STATE}"
+        [[ -f "${root}/data/control-log/schedule.json" ]] &&
+            jq -e '.enabled == true' "${root}/data/control-log/schedule.json" >/dev/null || return 0
+        role=$(dockerControlLogRole "${root}") || return "${PADM_DOCKER_RC_STATE}"
+        [[ "${role}" == main ]] || return 0
+        dockerControlRecoveryCheck current || return "${PADM_DOCKER_RC_STATE}"
+        controlIds=$(docker ps --all --quiet --no-trunc \
+            --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+            --filter label=com.docker.compose.service=control) &&
+            wireguardIds=$(docker ps --all --quiet --no-trunc \
+                --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+                --filter label=com.docker.compose.service=net-wireguard) || return "${PADM_DOCKER_RC_STATE}"
+        # 正常 down 删除两组容器；残留、停止或半套容器须继续严格来源检查。
+        [[ -n "${controlIds}" || -n "${wireguardIds}" ]] || return 0
+        for ids in "${controlIds}" "${wireguardIds}"; do
+            [[ "${ids}" =~ ^[a-f0-9]{64}$ ]] || return "${PADM_DOCKER_RC_STATE}"
+        done
+        dockerControlLogInputsCheck "${root}" || return "${PADM_DOCKER_RC_STATE}"
+    fi
     [[ -z "$(find "${root}/data/control-source" -mindepth 1 -print -quit)" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     snapshot=$(dockerControlSourceSnapshot) || return "${PADM_DOCKER_RC_STATE}"
@@ -958,8 +1199,10 @@ dockerControlCommand() {
     source-check) dockerControlSourceCheck "$@" ;;
     source-probe) dockerControlSourceProbe "$@" ;;
     log-rotate) dockerControlLogRotate "$@" ;;
+    log-schedule) dockerControlLogScheduleCommand "$@" ;;
+    auto-log-rotate) dockerControlAutoLogRotate "$@" ;;
     *)
-        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex> | log-rotate [--yes]'
+        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex> | log-rotate [--yes] | log-schedule enable|disable [--yes] | log-schedule status | auto-log-rotate'
         return "${PADM_DOCKER_RC_USAGE}"
         ;;
     esac

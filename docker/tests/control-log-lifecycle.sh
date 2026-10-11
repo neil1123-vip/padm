@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-control-log-lifecycle.XXXXXX")
+trap 'rm -rf -- "${TEST_ROOT}"' EXIT
+trap 'printf "docker-control-log-lifecycle-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2' ERR
+[[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || exit 1
+for tool in jq stat find sha256sum wc; do command -v "${tool}" >/dev/null; done
+
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state"
+export PADM_DOCKER_SKIP_CHOWN=1
+export PADM_DOCKER_HEALTH_TIMEOUT=1
+lifecycleRoot=${PADM_DOCKER_INSTALL_DIR}
+mkdir -p "${lifecycleRoot}/backups" "${lifecycleRoot}/data/control-log" "${lifecycleRoot}/bundles/valid/docker/lib"
+chmod 0700 "${lifecycleRoot}" "${lifecycleRoot}/data/control-log"
+printf '%s\n' '{"schema_version":1,"enabled":true}' >"${lifecycleRoot}/data/control-log/schedule.json"
+chmod 0600 "${lifecycleRoot}/data/control-log/schedule.json"
+
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/install-docker.sh"
+eval "$(declare -f dockerValidateConfigurationBackup | sed '1s/dockerValidateConfigurationBackup/dockerProductionValidateConfigurationBackup/')"
+
+calls="${TEST_ROOT}/calls.log"
+: >"${calls}"
+record() { printf '%s\n' "$*" >>"${calls}"; }
+fail() { printf 'docker-control-log-lifecycle-fail: %s\n' "$*" >&2; exit 1; }
+reset_calls() { : >"${calls}"; }
+has_call() { grep -Fxq -- "$1" "${calls}"; }
+
+dockerHostPreflight() { record host-preflight; }
+dockerLockInstalledDeployment() { record lock; }
+dockerReleaseDeploymentLock() { record unlock; }
+dockerComposeFile() { printf '%s\n' "${lifecycleRoot}/compose.json"; }
+dockerRealityStreamDeploymentCheck() { record reality; }
+dockerFail2banSourceInputsPrepare() { record fail2ban-source; }
+dockerFail2banSourceInputsCheck() { :; }
+dockerTrafficRuntimeCheck() { record traffic-runtime; }
+dockerTrafficBeforeChange() { record traffic-before; }
+dockerTrafficScheduleInstall() { record traffic-install; }
+dockerTrafficScheduleRemove() { record traffic-remove; }
+dockerRenewalScheduleInstall() { record renewal-install; }
+dockerRenewalScheduleRemove() { record renewal-remove; }
+dockerGeoScheduleInstall() { record geo-install; }
+dockerGeoScheduleRemove() { record geo-remove; }
+dockerControlLogScheduleInstall() { record control-log-install; }
+dockerControlLogScheduleRemove() { record control-log-remove; }
+dockerComposeRun() { record "compose:$*"; }
+dockerComposeExecute() { record "compose-execute:$*"; }
+dockerDeploymentState() { printf '%s\n' installed; }
+dockerRemoveCli() { record remove-cli; }
+dockerControlRecoveryCheck() { :; }
+dockerControlAccessLogEnsure() { :; }
+dockerControlRestorePrepare() { :; }
+dockerFail2banDisablePrepare() { :; }
+dockerControlFail2banDisablePrepare() { :; }
+dockerSshFail2banDisablePrepare() { :; }
+dockerRealityStreamStopServices() { :; }
+dockerRemoveConfigurationTargets() { :; }
+dockerTlsRuntimePermissions() { :; }
+dockerEnsureRuntimeDataPermissions() { :; }
+dockerTrafficPrepareCandidate() { :; }
+dockerValidateConfigurationBackup() { :; }
+dockerError() { record "error:$*"; }
+dockerBundleSupportsSpec() { :; }
+dockerManagedSpecMatchesDeployment() { :; }
+dockerDeploymentFileValidate() { :; }
+dockerControlStateCheck() { :; }
+currentBundle="${lifecycleRoot}/bundles/valid"
+printf '%s\n' 'readonly PADM_DOCKER_CONTROL_LOG_SCHEDULE_SCHEMA=1' >"${currentBundle}/docker/lib/control.sh"
+dockerCurrentBundlePath() { printf '%s\n' "${currentBundle}"; }
+registration=$(stat -c '%d:%i:%u:%g:%a:%h' "${lifecycleRoot}/data/control-log/schedule.json"; sha256sum "${lifecycleRoot}/data/control-log/schedule.json")
+assert_registration() {
+    [[ "$(stat -c '%d:%i:%u:%g:%a:%h' "${lifecycleRoot}/data/control-log/schedule.json"; sha256sum "${lifecycleRoot}/data/control-log/schedule.json")" == "${registration}" ]] ||
+        fail '生命周期改变本机调度登记'
+}
+
+# 旧 bundle 缺少控制日志调度能力时，升级必须在停服前拒绝。
+mkdir -p "${TEST_ROOT}/bundles/old/docker/lib"
+printf '%s\n' '# legacy control bundle' >"${TEST_ROOT}/bundles/old/docker/lib/control.sh"
+reset_calls
+DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/bundles/old"
+if dockerControlLogScheduleBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}"; then
+    fail '旧 bundle enabled 门禁被绕过'
+fi
+if has_call 'compose:down' || has_call control-log-remove; then
+    fail '旧 bundle 拒绝前已停止服务或删除调度'
+fi
+mkdir -p "${lifecycleRoot}/config"
+printf '%s\n' '{"host_integrations":[]}' >"${lifecycleRoot}/config/spec.json"
+chmod 0600 "${lifecycleRoot}/config/spec.json"
+dockerManifestPrepare() { record manifest; }
+dockerStageReleaseBundle() { DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/bundles/old"; record stage; }
+dockerRenewalBundleCheck() { :; }
+dockerGeoBundleCheck() { :; }
+dockerPullManifestImages() { record pull; return 1; }
+reset_calls
+status=0
+dockerUpdateCommand || status=$?
+[[ "${status}" == "${PADM_DOCKER_RC_BUNDLE}" ]] || fail '升级入口未拒绝旧调度 bundle'
+! grep -Eq '^(compose:|compose-execute:|pull$|control-log-remove$)' "${calls}" ||
+    fail '旧 bundle 升级拒绝前执行了部署或调度动作'
+assert_registration
+
+# 配置备份只收录业务目录，本机调度登记必须留在原位置且不能进入快照。
+printf '%s\n' '{"services":{}}' >"${lifecycleRoot}/compose.json"
+printf '%s\n' '{"host_integrations":[]}' >"${lifecycleRoot}/deployment.json"
+: >"${lifecycleRoot}/images.env"
+reset_calls
+for prefix in configure business; do
+    dockerBackupConfiguration "${prefix}"
+    backup=${DOCKER_CONFIG_BACKUP}
+    [[ "${prefix}" != configure ]] || configureBackup=${backup}
+    [[ ! -e "${backup}/data/control-log" ]] || fail '本机调度登记进入业务备份'
+    assert_registration
+done
+backup=${configureBackup}
+dockerProductionValidateConfigurationBackup "${backup}"
+
+# 安装和恢复共享同一能力门禁；不能先切 bundle 或停止在线 Compose。
+dockerStageBundle() { DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/bundles/old"; record stage-bundle; }
+dockerActivateStagedBundle() { record activate-bundle; }
+reset_calls
+if dockerInstallBundle "${PROJECT_ROOT}"; then fail '安装入口接受旧调度 bundle'; fi
+! has_call activate-bundle || fail '安装旧 bundle 拒绝前已切换指针'
+(
+    dockerValidateConfigurationBackup() { dockerProductionValidateConfigurationBackup "$@"; }
+    currentBundle="${TEST_ROOT}/bundles/old"
+    DOCKER_CONFIG_BACKUP="${backup}"
+    DOCKER_CONFIG_SWITCHED=1
+    reset_calls
+    if dockerRestoreConfiguration; then fail '恢复入口接受旧调度 bundle'; fi
+    ! grep -Eq '^(compose:|compose-execute:|activate-bundle$)' "${calls}" ||
+        fail '旧 bundle 恢复拒绝前已启停或切换'
+    cp -a -- "${backup}" "${lifecycleRoot}/backups/update.legacy"
+    if dockerRollbackCommand; then fail '回滚入口接受旧调度 bundle'; fi
+    ! grep -Eq '^(compose:|compose-execute:|activate-bundle$)' "${calls}" ||
+        fail '旧 bundle 回滚拒绝前已启停或切换'
+)
+assert_registration
+
+# 无原始规格的旧备份也必须校验本机登记，target 和 current 两条选择路径都不能漏。
+legacy="${lifecycleRoot}/backups/update.no-spec"
+cp -a -- "${backup}" "${legacy}"
+rm -- "${legacy}/config/spec.json"
+sed '/^config\/spec.json$/d' "${legacy}/present" >"${TEST_ROOT}/legacy.present"
+cp -- "${TEST_ROOT}/legacy.present" "${legacy}/present"
+(
+    dockerValidateConfigurationBackup() { dockerProductionValidateConfigurationBackup "$@"; }
+    dockerBundlePathForTarget() {
+        [[ "$1" == .bundles/legacy ]] || return 1
+        printf '%s\n' "${TEST_ROOT}/bundles/old"
+    }
+    currentBundle="${TEST_ROOT}/bundles/old"
+    for route in target current; do
+        if [[ "${route}" == target ]]; then
+            printf '%s\n' .bundles/legacy >"${legacy}/bundle.target"
+        else
+            rm -- "${legacy}/bundle.target"
+        fi
+        reset_calls
+        if dockerProductionValidateConfigurationBackup "${legacy}"; then
+            fail '无规格旧备份漏过 enabled 调度能力门禁'
+        fi
+        grep -Fq 'error:目标控制 bundle 不支持已启用的控制日志调度' "${calls}" ||
+            fail '无规格旧备份被其它校验拒绝，未证明调度门禁'
+        DOCKER_CONFIG_BACKUP="${legacy}"
+        DOCKER_CONFIG_SWITCHED=1
+        if dockerRestoreConfiguration; then fail '恢复入口接受无规格旧调度 bundle'; fi
+        ! grep -Eq '^(compose:|compose-execute:|activate-bundle$)' "${calls}" ||
+            fail '无规格旧 bundle 恢复拒绝前已启停或切换'
+        printf '%s\n' '{"schema_version":1,"enabled":false}' >"${lifecycleRoot}/data/control-log/schedule.json"
+        dockerProductionValidateConfigurationBackup "${legacy}" ||
+            fail '已关闭调度仍拒绝无规格旧备份'
+        printf '%s\n' '{"schema_version":1,"enabled":true}' >"${lifecycleRoot}/data/control-log/schedule.json"
+    done
+)
+assert_registration
+
+# up/restart/down/uninstall 都必须调用控制日志调度 helper。
+reset_calls
+dockerLifecycleCommand up
+has_call control-log-install || fail 'up 未安装控制日志调度'
+has_call 'compose:up -d' || fail 'up 未启动 Compose'
+
+reset_calls
+dockerLifecycleCommand restart
+has_call control-log-install || fail 'restart 未安装控制日志调度'
+has_call 'compose:restart' || fail 'restart 未重启 Compose'
+
+reset_calls
+dockerLifecycleCommand down
+has_call control-log-remove || fail 'down 未移除控制日志调度'
+has_call 'compose:down' || fail 'down 未停止 Compose'
+
+reset_calls
+dockerUninstallCommand
+has_call control-log-remove || fail 'uninstall 未移除控制日志调度'
+has_call 'compose:down' || fail 'uninstall 未停止 Compose'
+assert_registration
+
+# configure 提交和 restore 完成后都重新安装登记；登记不参与恢复快照复制。
+spec="${TEST_ROOT}/request.json"
+printf '%s\n' '{"core":{"type":"xray","secondary_type":null}}' >"${spec}"
+dockerCreateConfigurationCandidate() {
+    DOCKER_CONFIG_CANDIDATE="${lifecycleRoot}/.candidate.lifecycle"
+    mkdir -p "${DOCKER_CONFIG_CANDIDATE}"
+}
+dockerGenerateCandidate() {
+    mkdir -p "$2/config"
+    cp -- "$1" "$2/config/spec.json"
+}
+dockerValidateCandidate() { :; }
+dockerConfigureSpecValidate() { :; }
+dockerAcmeWebrootTransitionValidate() { :; }
+dockerControlSyncTransitionValidate() { :; }
+dockerControlTransitionValidate() { :; }
+dockerConfigureReleaseValidate() { :; }
+dockerRealityTargetsValidate() { :; }
+dockerHostIntegrationInputsValidate() { :; }
+dockerConfigurePortsAvailable() { :; }
+dockerFail2banSourceInputsPrepare() { :; }
+dockerBackupConfiguration() { DOCKER_CONFIG_BACKUP="${lifecycleRoot}/backups/configure.lifecycle"; mkdir -p "${DOCKER_CONFIG_BACKUP}"; }
+dockerInstallCandidate() { DOCKER_CONFIG_SWITCHED=1; }
+dockerCleanupConfigurationCandidate() { :; }
+reset_calls
+dockerConfigureApply "${spec}" '' '' configure
+has_call control-log-install || fail 'configure 提交后未安装控制日志调度'
+
+backup="${lifecycleRoot}/backups/restore.lifecycle"
+mkdir -p "${backup}"
+: >"${backup}/present"
+DOCKER_CONFIG_BACKUP="${backup}"
+DOCKER_CONFIG_SWITCHED=1
+reset_calls
+dockerRestoreConfiguration
+has_call control-log-install || fail 'restore 完成后未安装控制日志调度'
+assert_registration
+
+printf 'docker-control-log-lifecycle-ok\n'

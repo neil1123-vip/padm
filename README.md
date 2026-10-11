@@ -886,7 +886,13 @@ padm-docker control sync --invite /root/padm-control-invite.json
 `auth.log` 达到 10 MiB 时轮转，固定保留 `auth.log.1`、`auth.log.2` 两份历史。
 API 使用 root 拥有的 `auth.lock` 只读协作锁；轮转不重启 API，不使用 copytruncate，
 不轮转或更换来源回执。旧无协作锁编排拒绝轮转，需先完成正常升级。
-自动调度尚未提供，10 MiB 是手动触发阈值而非实时大小上限；异常恢复失败保留私有目录，
+控制菜单可启停每小时自动检查，也可运行 `control log-schedule enable|disable --yes`，
+`control log-schedule status` 分别显示登记开关与实际任务状态。默认关闭，登记保存在
+本机 root 私有的 `data/control-log/schedule.json`，不随业务备份迁移；停服移除任务并
+保留开关，启动时恢复。自动入口 `control auto-log-rotate` 在同一部署锁内复核登记
+和受管主控，正常停服时跳过，锁冲突时退出 `12`，下次调度重试；来源或登记损坏时拒绝。
+已启用调度时，更新和回滚会在切换前拒绝不支持此任务的旧控制 bundle，需先停用。
+10 MiB 是检查阈值而非实时大小上限；异常恢复失败保留私有目录，
 后续操作拒绝接管。强杀或断电后的现场需人工核对，不能直接删除残留或补建缺失日志。
 INT/TERM 等待轮转容器结束并移除后才释放部署锁；Docker daemon 不可用时保持锁并等待恢复。
 控制面独立 Fail2ban 后端已具备 `padm-control` jail、独立 SQLite 和随机 owner：

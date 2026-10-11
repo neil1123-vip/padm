@@ -5600,7 +5600,8 @@ dockerRestoreConfiguration() {
     fi
     # 中继恢复可能只停止部分服务；关闭 IPv6 后再清理已无容器的受管网络。
     [[ "${ipv6Cleanup}" != 1 ]] || dockerIPv6NetworkManage cleanup || return 1
-    dockerRenewalScheduleInstall && dockerGeoScheduleInstall || return 1
+    dockerRenewalScheduleInstall && dockerGeoScheduleInstall &&
+        dockerControlLogScheduleInstall || return 1
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
@@ -5826,7 +5827,8 @@ dockerConfigureApply() {
         ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
         ! dockerTrafficScheduleInstall ||
         ! dockerRenewalScheduleInstall ||
-        ! dockerGeoScheduleInstall; then
+        ! dockerGeoScheduleInstall ||
+        ! dockerControlLogScheduleInstall; then
         if [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 1 ]]; then
             dockerError '候选部署启动或健康检查失败，正在恢复旧配置'
             if ! dockerRestoreConfiguration; then

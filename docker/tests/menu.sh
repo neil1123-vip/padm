@@ -611,6 +611,31 @@ runControlDriver() {
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
+    log-schedule|log-schedule-cancel|log-schedule-eof|log-schedule-failed)
+        if [[ "${scenario}" == log-schedule || "${scenario}" == log-schedule-failed ]]; then
+            targetReply 'Docker 控制连接' $'9\n'
+        fi
+        targetReply 'Docker 控制连接' $'10\n'
+        case "${scenario}" in
+        log-schedule-cancel) targetReply 'fixture-control-log-schedule-confirm [yes]' $'n\n' ;;
+        log-schedule-eof) targetReply 'fixture-control-log-schedule-confirm [yes]' $'\004' ;;
+        *) targetReply 'fixture-control-log-schedule-confirm [yes]' $'yes\n' ;;
+        esac
+        targetReply 'Docker 控制连接' $'11\n'
+        case "${scenario}" in
+        log-schedule-cancel) targetReply 'fixture-control-log-schedule-confirm [yes]' $'n\n' ;;
+        log-schedule-eof) targetReply 'fixture-control-log-schedule-confirm [yes]' $'\004' ;;
+        *) targetReply 'fixture-control-log-schedule-confirm [yes]' $'yes\n' ;;
+        esac
+        if [[ "${scenario}" == log-schedule-failed ]]; then
+            targetReply 'Docker 控制连接' $'1\n'
+        else
+            targetReply 'Docker 控制连接' $'9\n'
+        fi
+        targetReply 'Docker 控制连接' $'0\n'
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+        ;;
     diagnostics|diagnostics-failed|log-rotate-cancel|log-rotate-eof|source-menu-eof)
         if [[ "${scenario}" != log-rotate-* ]]; then
             targetReply 'Docker 控制连接' $'7\n'
@@ -1554,6 +1579,27 @@ control)
         [[ "${CONTROL_DIAGNOSTIC_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_DIAGNOSTIC_STATUS}"
         recordAction control-rotate-commit
         ;;
+    log-schedule)
+        [[ "$#" -eq 3 ]] || exit 2
+        case "$3" in
+        status)
+            printf 'fixture-control-log-schedule-status\n'
+            exit "${CONTROL_LOG_SCHEDULE_STATUS:-0}"
+            ;;
+        enable|disable)
+            printf 'fixture-control-log-schedule-confirm [yes]: '
+            if ! IFS= read -r confirmation; then
+                recordAction control-log-schedule-confirm "$3" eof
+                exit 2
+            fi
+            recordAction control-log-schedule-confirm "$3" "${confirmation}"
+            [[ "${confirmation}" == yes ]] || exit 2
+            [[ "${CONTROL_LOG_SCHEDULE_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_LOG_SCHEDULE_STATUS}"
+            recordAction control-log-schedule-commit "$3"
+            ;;
+        *) exit 2 ;;
+        esac
+        ;;
     init|invite|revoke|join)
         printf 'fixture-control-confirm [y/N]: '
         if ! IFS= read -r confirmation; then
@@ -1951,7 +1997,8 @@ unset SITE_EDIT_STATUS ROUTING_STATUS
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
 for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
-    '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' '0. 返回'; do
+    '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' \
+    '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -2060,6 +2107,44 @@ for controlCase in diagnostics diagnostics-failed log-rotate-cancel log-rotate-e
     fi
 done
 unset CONTROL_DIAGNOSTIC_STATUS
+
+for controlCase in log-schedule log-schedule-cancel log-schedule-eof log-schedule-failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export CONTROL_LOG_SCHEDULE_STATUS=0
+    [[ "${controlCase}" != log-schedule-failed ]] || CONTROL_LOG_SCHEDULE_STATUS=17
+    runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
+    expectedControl=
+    case "${controlCase}" in
+    log-schedule|log-schedule-failed) expectedControl='control log-schedule status' ;;
+    esac
+    for scheduleAction in enable disable; do
+        [[ -z "${expectedControl}" ]] || expectedControl+=$'\n'
+        expectedControl+="control log-schedule ${scheduleAction}"
+        case "${controlCase}" in
+        log-schedule-cancel) scheduleConfirmation=n ;;
+        log-schedule-eof) scheduleConfirmation=eof ;;
+        *) scheduleConfirmation=yes ;;
+        esac
+        expectedControl+=$'\n'"control-log-schedule-confirm ${scheduleAction} ${scheduleConfirmation}"
+        [[ "${controlCase}" != log-schedule ]] ||
+            expectedControl+=$'\n'"control-log-schedule-commit ${scheduleAction}"
+    done
+    if [[ "${controlCase}" == log-schedule-failed ]]; then
+        expectedControl+=$'\ncontrol status'
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail '自动轮转状态或启停失败未保留退出码'
+        grep -Fq 'fixture-control-status' "${CONTROL_LOG}" || fail '自动轮转失败后未继续菜单'
+    else
+        expectedControl+=$'\ncontrol log-schedule status'
+    fi
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
+        fail "自动轮转 ${controlCase} 参数分发错误、重复执行或取消后提交"
+    [[ "$(grep -Fc 'fixture-control-log-schedule-confirm [yes]' "${CONTROL_LOG}")" -eq 2 ]] ||
+        fail "自动轮转 ${controlCase} 启停未各确认一次"
+    grep -Fq 'fixture-control-log-schedule-status' "${CONTROL_LOG}" ||
+        fail "自动轮转 ${controlCase} 未显示后端状态"
+done
+unset CONTROL_LOG_SCHEDULE_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty geo-dispatch geo flow "${TLS_WIZARD_CLI}" menu

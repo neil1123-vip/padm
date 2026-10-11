@@ -345,6 +345,15 @@ def log_rotate(controller, controlled, invitation):
     receipt_before = receipt.stat()
     receipt_hash = hashlib.sha256(receipt.read_bytes()).digest()
     helper = None
+    cli(controller, "control", "log-schedule", "enable", "--yes")
+    registration = root / "data/control-log/schedule.json"
+    assert json.loads(registration.read_text()) == {"schema_version": 1, "enabled": True}
+    assert (registration.stat().st_mode & 0o7777, registration.stat().st_uid, registration.stat().st_gid) == \
+        (0o600, 0, 0)
+    cron_before = command(controller["enter"] + ["crontab", "-l"]).decode()
+    scheduled = [line for line in cron_before.splitlines() if "control auto-log-rotate" in line]
+    assert len(scheduled) == 1 and scheduled[0].startswith("19 * * * * ")
+    cli(controller, "control", "log-schedule", "status")
     # 持真实协作锁观察生产 helper，释放后由原 CLI 等待提交并清理，API 始终在线。
     with (directory / "auth.lock").open("rb") as lock, \
             concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -357,7 +366,7 @@ def log_rotate(controller, controlled, invitation):
                 output.flush()
                 os.fsync(output.fileno())
             expected = auth.read_bytes()
-            future = executor.submit(cli, controller, "control", "log-rotate", "--yes")
+            future = executor.submit(cli, controller, "control", "auto-log-rotate")
             deadline = time.monotonic() + 5
             while helper is None:
                 if future.done():
@@ -400,6 +409,8 @@ def log_rotate(controller, controlled, invitation):
                 auth.read_bytes() == expected, "持锁期间真实轮转改动原日志"
             assert not (directory / "auth.log.1").exists() and not (directory / "auth.log.2").exists() and \
                 not list(directory.glob(".control-log-rotate.*")), "持锁期间真实轮转创建归档或临时目录"
+            conflict = cli(controller, "control", "auto-log-rotate", accepted=False)
+            assert conflict.returncode == 12, "自动轮转竞争未立即返回部署锁冲突"
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
         future.result(timeout=35)
@@ -423,7 +434,20 @@ def log_rotate(controller, controlled, invitation):
     source_check(controller, controlled)
     assert services(controller) == before and not (root / "locks/deployment.lock").exists()
     assert set(path.name for path in directory.iterdir()) == {"auth.log", "auth.lock", "auth.log.1", "source.receipt"}
+    cli(controller, "control", "log-schedule", "disable", "--yes")
+    assert json.loads(registration.read_text()) == {"schema_version": 1, "enabled": False}
+    cron_after = command(controller["enter"] + ["crontab", "-l"]).decode()
+    assert "control auto-log-rotate" not in cron_after
+    assert [line for line in cron_after.splitlines() if line.strip()] == \
+        [line for line in cron_before.splitlines() if line.strip() and line not in scheduled]
+    unchanged = {path.name: (path.stat().st_ino, hashlib.sha256(path.read_bytes()).digest())
+                 for path in directory.iterdir()}
+    cli(controller, "control", "auto-log-rotate")
+    assert unchanged == {path.name: (path.stat().st_ino, hashlib.sha256(path.read_bytes()).digest())
+                         for path in directory.iterdir()}, "停用后的自动入口仍修改日志"
+    assert services(controller) == before and not (root / "locks/deployment.lock").exists()
     print("docker-control-two-deployment-log-rotate-online-ok", flush=True)
+    print("docker-control-two-deployment-log-schedule-enable-auto-conflict-disable-ok", flush=True)
 
 
 def reachable(node, invitation):

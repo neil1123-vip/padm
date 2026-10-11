@@ -3278,6 +3278,38 @@ ops 离线复用依赖，当前 6 文件镜像内摘要匹配，固定
 仍须人工核对。独立 INPUT action/jail、事务菜单、SSH、原生宿主与双架构
 验收仍待交付，5C 和总目标 active，本阶段不启用控制面防护。
 
+#### 5C.7d1 控制认证日志每小时自动轮转检查
+
+复用 7d 的线上轮转，新增 `control log-schedule enable|disable|status` 和
+`control auto-log-rotate`，控制菜单追加状态/启用/停用。默认关闭，固定每小时
+第 19 分检查 10 MiB 阈值，仍只保留两份历史；systemd 加至多 300 秒随机延迟，
+cron 使用同一固定时间。登记为本机 root 私有 `data/control-log/schedule.json`，
+不进入业务或配置备份，不跟随角色数据迁移。
+
+登记和任务复用既有 maintenance schedule 恢复窗口；来源、完整 unit 模板、
+root 标记、FragmentPath、DropInPaths、cron 行和权限核对后才操作。
+自动入口取得同一部署锁后再读开关、受管角色与实际容器集合；竞争立即退出 `12`，
+systemd 将其作为正常跳过，下轮重试。正常停服或已验证非主控不写日志；
+半套、停止、陌生容器及坏登记仍拒绝。writer 清理保持原 7d 门禁，
+新任务不使用强杀超时，daemon 不可用时继续持锁等待恢复。
+
+up/restart 重新同步任务，down/uninstall 移除任务并保留登记；配置提交、
+更新、恢复同步本机开关。启用期间目标 bundle 必须声明调度能力，旧包在切换前拒绝。
+定向 `docker-control-log-schedule`（含 lifecycle）退出 0，入口 4801 ms；
+`.tmp-regression-docker-83368bc0a512498cadba4f828f17bf38/`。
+菜单 PTY 退出 0，入口 56992 ms；
+`.tmp-regression-docker-073562ccfb264295b160686e4b3e02be/`。
+真实隔离 amd64 双部署自动入口完成协作锁等待、锁竞争退出 12、无丢字节轮转、
+receipt 与服务代次不变、停用后零写入，入口 394100 ms；
+`.tmp-regression-docker-89333dafa7844e50ba38536d7c6de874/`。
+该真实快照早于最后孤立状态门禁；差异仅为无部署四件套时的拒绝分支及其合同，
+已由最新定向覆盖，不影响真实主控分支。
+最终完整 Docker 合同 48/48，Jobs 6，入口 321053 ms，排队 366 ms，退出 0；
+`.tmp-regression-docker-2cbdaad253ed4f43b24df7a600fa7cac/`。
+318 个冻结快照输入逐文件哈希一致；证据在 `.tmp-control-log-close/`。
+未新增阈值/频率选项或扩大完整支持状态。真实 cron/systemd 自动触发、
+原生宿主、arm64、整机重启和 SIGKILL/断电仍未验；手动调用 auto 入口不替代定时触发。
+
 #### 5C.7e 控制面独立 INPUT action/jail 后端
 
 实现 `73499313 feat(docker): add isolated control INPUT Fail2ban backend`，
