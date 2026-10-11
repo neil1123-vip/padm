@@ -4222,6 +4222,42 @@ baseline marker 为真，受控 nr58 entry 拒绝后 marker 为假，
 本步不开放 vfork、任意 OpenSSH/unit 或 collector/jail；arm64、持续全进程
 EMFILE、外部 SIGKILL/ESRCH 竞态、公网及宿主启停仍待验收，5C 与总目标 active。
 
+#### 5C.8c.2o 真实 sshd 子树与受控 driver 兼容探针
+
+本阶段只做固定隔离 fixture，不改生产 driver、source、ledger 或 journal。
+复用原生 amd64 工具镜像
+`sha256:0698b0ffcad3c265ab623b5bce0fcb9ef6cf9ed038811ba6b34162eee5d76f00`，
+私有 cgroup、`network none`、无宿主挂载/Socket/PID；systemd unit 使用
+`NotifyAccess=main` 将真实 `/usr/sbin/sshd` child 作为 MainPID，客户端先
+绑定并保留源端口，认证失败后保持同一连接到 probe 完成创建和组改变核验。
+
+2026-10-11 attempt1 通过，入口 16199 ms，linux/amd64；OpenSSH
+`10.0p1-7+deb13u4`、systemd `257.13-1~deb13u1`、Paramiko `3.5.1-3`、
+iproute2 `6.15.0-1`。真实 MainPID 109、tracer 108；unit invocation
+`ae6f6fce230949898bd4eda965eaa122`，稳定 `unit_snapshot` 前后严格相同。
+首代 shared LISTEN 冻结窗口仍被原 `unit_snapshot` 以唯一 owner 门禁拒绝，
+没有放宽双 owner 或端口来源规则。
+
+受控 driver 记录两个真实 `clone(56)`，flags `0x1200011`，entry/FORK/
+返回 child PID/child 首停四段关联和 accepted FD 继承均通过；首代 child
+实际执行 `setsid(112)`，随后进入 `/usr/lib/openssh/sshd-session` 与
+`/usr/lib/openssh/sshd-auth`。session 保持 UID 0，auth 在退出停点降为
+UID 996/GID 65534；两个后代 EXIT 时连接为 CLOSE_WAIT。真实失败认证产生
+`Invalid user` 与 `Connection closed ... [preauth]` 诊断日志，均绑定同一
+unit/invocation；日志不进入专用 Ledger，也不授权 collector/jail。
+
+测试在两个后代真实退出且原 pidfd 确认回收后，才通过一次原 master pidfd
+`SIGCONT` 取得稳定停点，再注入明确测试异常进入现有 cleanup。driver
+`syscall_stop_count=2655`、FD `5 -> 5`、remaining 集合全空、
+subreaper 恢复、ledger 消息为空；master、session、auth 均按原 pidfd 真回收，
+前后 unit 清理终局为 inactive/dead 且无监听。probe 结果为
+`verified=true`、`authoritative=false`、`jail_ready=false`。
+
+小证据和复现源保留在 `.tmp-ssh-unit-driver-8c2o/attempt1/`，
+9 个输入哈希全部匹配；阶段 runner 元数据中的 `changed_inputs` 已修正为空数组。
+本探针不宣称任意 OpenSSH、多线程、arm64、collector/jail、公网或原生宿主
+验收；下一步仍需按真实拒绝边界推进，不接入生产入口。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
