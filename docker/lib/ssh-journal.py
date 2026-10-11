@@ -2,9 +2,12 @@
 """只读核验当次 SSH 新连接与当前 systemd unit，不授权历史日志或防护动作。"""
 
 import importlib.util
+import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
+import sys
 import time
 
 
@@ -242,3 +245,32 @@ def unit_witness(requested, local, port, source, nonce):
         }
     except (OSError, ValueError, KeyError, IndexError, TypeError):
         raise Failure("SSH unit 核验无法读取完整的宿主证据") from None
+
+
+def main(args):
+    try:
+        if len(args) != 5:
+            raise Failure("SSH unit 核验需要 service、本机地址、端口、外部来源和挑战码", 2)
+        requested = unit_name(args[0])
+        parsed = ssh.parse_args(args[1:])
+        if sys.platform != "linux" or os.geteuid() != 0:
+            raise Failure("SSH unit 核验需要原生 Linux 宿主 root 环境", 10)
+        if any(shutil.which(tool) is None
+               for tool in ("ip", "ss", "docker", "journalctl", "systemctl")):
+            raise Failure("SSH unit 核验缺少宿主只读工具", 10)
+        result = unit_witness(requested, *parsed)
+        print("source-verified=" + json.dumps(result, separators=(",", ":")), flush=True)
+        return 0
+    except Failure as error:
+        print(str(error), file=sys.stderr)
+        return error.code
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        print("SSH unit 核验无法完成宿主证据读取", file=sys.stderr)
+        return 15
+    except KeyboardInterrupt:
+        print("SSH unit 核验已取消", file=sys.stderr)
+        return 15
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

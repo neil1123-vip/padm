@@ -456,6 +456,10 @@ dockerEntryBundleModulesPresent() {
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
         done
     fi
+    if grep -qF '/docker/lib/ssh-journal.py"' "${sourceRoot}/docker/lib/services.sh"; then
+        [[ -f "${sourceRoot}/docker/lib/ssh-journal.py" &&
+            ! -L "${sourceRoot}/docker/lib/ssh-journal.py" ]] || return 1
+    fi
     if grep -qF '/shell/core/cores.sh"' "${sourceRoot}/docker/lib/lifecycle.sh"; then
         [[ -f "${sourceRoot}/shell/core/cores.sh" && ! -L "${sourceRoot}/shell/core/cores.sh" ]] || return 1
     fi

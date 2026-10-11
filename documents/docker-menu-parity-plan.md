@@ -4340,6 +4340,44 @@ manager 两条对原 MainPID 的 SIGKILL 日志均晚于四次真实回收，
 服务恢复、持续 collector/jail 或任意 OpenSSH 兼容；运行态采样不是原子冻结。
 公网、原生宿主、arm64、多线程及恢复仍待验收，5C 与总目标 active。
 
+#### 5C.8c.2r 菜单与 CLI 的明确 unit 来源核验
+
+将既有 `unit_witness` 接入只读生产入口：
+`fail2ban ssh verify-unit <service> <本机 IP> <端口> <外部 IP>`，
+Fail2ban 子菜单第 14 项与帮助同步，旧 `verify-source` 保持三参数入口。
+两者复用地址/端口、Linux/root、宿主工具、随机 nonce 与 helper 门禁；
+unit 名称在宿主前置前按既有正则和 255 字节上限拒绝，unit 模式额外需要
+`systemctl`，薄 Python CLI 保留 Failure 返回码和取消/读取失败 15。
+
+成功仅返回 `scope=ssh-unit-source-only`、`source_verified/unit_verified=true`，
+`runtime_configuration_verified/jail_ready=false`。沿用 fresh challenge，
+完整核对 MainPID、invocation/cgroup、两族唯一显式监听及 live accepted
+代次，不保存证明、不取得部署锁，不启停宿主 sshd 或启用防护。
+alias、socket activation、wildcard、额外监听、不可读 owner/cgroup、
+服务代次变化仍按原 gate 拒绝，不接任意 PID 或持续 collector。
+
+bundle 的安装入口与运行期两套完整性门禁都增加条件 journal 依赖；
+缺模块矩阵逐项验证两套 gate，setup/release/phase6 的手工复制清单同步。
+CLI 合同覆盖参数/长度/字符、缺工具、返回码、安装状态不变；菜单覆盖
+成功、失败与四个字段取消，Python CLI 复用原 unit 合同并补输出/失败断言。
+中英文说明与功能矩阵同步，SSH 完整防护与宿主验收状态不升级。
+
+定向 `docker-ssh-preflight` 通过，source 20/20、journal 11/11、
+Ledger 5/5 与客户端合同通过；内部 1132 ms、入口 2058 ms、排队 209 ms，
+Jobs 2；`.tmp-regression-docker-30b8e8649c6b4e64b3ed3d6b0b800cbb/`。
+菜单 PTY 定向通过，内部 53040 ms、入口 54015 ms、排队 198 ms、Jobs 2；
+`.tmp-regression-docker-d9693f690bdb4c50b2bafec578b57c2e/`。
+集中完整 Docker 合同 47/47、exit 0，内部 288681 ms、入口 289658 ms，
+排队 384 ms、Jobs 6/占 2 槽、cache_hit=false；
+`.tmp-regression-docker-d7ea2b3b6c864b88bf030f3c8d004192/`。
+
+三个归档各 298 输入流式核对；定向归档仅缺随后补写的计划段落，
+完整归档与当前实现全部匹配，结果补写后仅本计划更新。
+复用工具镜像与三槽队列，无重复完整回归，不据单轮耗时宣称普遍提速。
+重复归档/清单和核对脚本已清，小证据留 `.tmp-ssh-unit-cli-8c2r/`。
+本次只验证菜单、CLI 与已有 unit 合同接入，未新做公网/原生宿主/arm64
+的外部挑战；SSH 服务恢复、持续 collector/jail 仍待推进，总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

@@ -1086,10 +1086,15 @@ runControl 13 broken-bundle "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 
 for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh \
     docker/lib/schedule.sh docker/lib/geo.sh docker/lib/control-sync.sh docker/lib/control.sh \
-    docker/lib/ssh-source.py docker/lib/ssh-source-client.py; do
+    docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py; do
     incompleteSource="${TEST_ROOT}/incomplete-${missing//\//-}"
     copyBundleFixture "${incompleteSource}"
     rm -f -- "${incompleteSource}/${missing}"
+    (
+        source "${PROJECT_ROOT}/install-docker.sh" help
+        ! dockerEntryBundleModulesPresent "${incompleteSource}" &&
+            ! dockerBundleSourceIsComplete "${incompleteSource}"
+    ) || fail "incomplete module passed a bundle gate: ${missing}"
     runControl 13 incomplete-target-module "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" \
         install --source "${incompleteSource}"
     [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] ||

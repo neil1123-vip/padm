@@ -697,10 +697,20 @@ python3 -B docker/lib/ssh-source-client.py 198.51.100.10 2222 padm-source-<48位
 `source_verified=true` 只表示本次来源绑定完成，`runtime_configuration_verified`
 和 `jail_ready` 仍为 `false`；本命令不启用 SSH 防护。
 
-内部 unit 来源核验进一步要求 fresh master 等于所选 systemd service 的 MainPID，
+Fail2ban 子菜单第 14 项可核对明确 systemd service 的当次实时来源：
+
+```bash
+padm-docker fail2ban ssh verify-unit sshd.service 198.51.100.10 2222 203.0.113.7
+```
+
+沿用上面的外部挑战客户端，宿主另需 `systemctl` 与可读取的 cgroup v2。
+service 必须是实际 `Id`，不接受仅指向另一 service 的 alias。unit 来源核验
+进一步要求 fresh master 等于所选 systemd service 的 MainPID，
 固定当前 invocation/cgroup，并完整核对两族监听。socket activation、wildcard、
-额外 listener/master、不可读 owner 和代次变化均拒绝。它只证明当次仍存活连接，
-不授权历史日志、连续 collector 或 jail；没有新增菜单/CLI 启用入口。
+额外 listener/master、不可读 owner 和代次变化均拒绝。成功返回
+`scope=ssh-unit-source-only`、`source_verified=true`、`unit_verified=true`；
+`runtime_configuration_verified`、`jail_ready` 仍为 `false`。它只证明当次仍存活
+连接，不授权历史日志、连续 collector 或 jail，不启停宿主 SSH 服务。
 
 已有 TProxy profile 使用私密 `data/net/transparent/tproxy.state` 记录随机链、
 规则 token、mark、路由表和路由身份。预检只读核对当前归属与候选冲突；

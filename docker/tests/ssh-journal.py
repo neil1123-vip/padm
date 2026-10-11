@@ -2,6 +2,8 @@
 import copy
 import importlib.util
 import ipaddress
+import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -68,6 +70,55 @@ EVIDENCE = {
 
 
 class UnitContracts(unittest.TestCase):
+    def test_cli_preserves_unit_scope_and_failure_status(self):
+        args = [UNIT, str(LOCAL), str(PORT), str(SOURCE), NONCE]
+        result = {
+            "scope": "ssh-unit-source-only", "source_verified": True,
+            "unit_verified": True, "runtime_configuration_verified": False,
+            "jail_ready": False,
+        }
+        with patch.object(journal.os, "geteuid", return_value=0), \
+                patch.object(journal.sys, "platform", "linux"), \
+                patch.object(journal.shutil, "which", return_value="/usr/bin/tool"), \
+                patch.object(journal, "unit_witness", return_value=result) as witness, \
+                patch.object(journal.sys, "stdout", new_callable=io.StringIO) as output:
+            self.assertEqual(journal.main(args), 0)
+            witness.assert_called_once_with(UNIT, LOCAL, PORT, SOURCE, NONCE)
+            self.assertEqual(json.loads(output.getvalue().removeprefix("source-verified=")), result)
+        for error, status in ((journal.Failure("拒绝", 10), 10),
+                              (journal.Failure("拒绝", 15), 15),
+                              (KeyboardInterrupt(), 15), (OSError("private-stderr"), 15)):
+            with self.subTest(error=error), \
+                    patch.object(journal.os, "geteuid", return_value=0), \
+                    patch.object(journal.sys, "platform", "linux"), \
+                    patch.object(journal.shutil, "which", return_value="/usr/bin/tool"), \
+                    patch.object(journal, "unit_witness", side_effect=error), \
+                    patch.object(journal.sys, "stdout", new_callable=io.StringIO) as output, \
+                    patch.object(journal.sys, "stderr", new_callable=io.StringIO) as stderr:
+                self.assertEqual(journal.main(args), status)
+                self.assertEqual(output.getvalue(), "")
+                self.assertNotIn("private-stderr", stderr.getvalue())
+
+    def test_cli_rejects_invalid_input_and_missing_host_tools_before_witness(self):
+        args = [UNIT, str(LOCAL), str(PORT), str(SOURCE), NONCE]
+        invalid = (args[:-1], args + ["extra"], ["../sshd.service", *args[1:]],
+                   [UNIT, str(LOCAL), "0", str(SOURCE), NONCE])
+        with patch.object(journal, "unit_witness") as witness, \
+                patch.object(journal.sys, "stderr", new_callable=io.StringIO):
+            for values in invalid:
+                self.assertEqual(journal.main(values), 2)
+            witness.assert_not_called()
+        for tool in ("ip", "ss", "docker", "journalctl", "systemctl"):
+            with self.subTest(tool=tool), \
+                    patch.object(journal.os, "geteuid", return_value=0), \
+                    patch.object(journal.sys, "platform", "linux"), \
+                    patch.object(journal.shutil, "which",
+                                 side_effect=lambda name: None if name == tool else "/usr/bin/tool"), \
+                    patch.object(journal, "unit_witness") as witness, \
+                    patch.object(journal.sys, "stderr", new_callable=io.StringIO):
+                self.assertEqual(journal.main(args), 10)
+                witness.assert_not_called()
+
     def test_strict_systemctl_fields_and_command(self):
         self.assertEqual(journal.parse_unit(unit_text(), UNIT), UNIT_STATE)
         with patch.object(ssh, "run_command", return_value=unit_text()) as command:

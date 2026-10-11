@@ -53,6 +53,7 @@ journalctl() {
     printf 'private-stderr\n' >&2
     return "${JOURNAL_STATUS}"
 }
+systemctl() { forbidden systemctl "$@"; }
 
 # 固定路径发现单独核对；其它用临时普通文件覆盖生产安全检查，不改系统日志。
 (
@@ -99,7 +100,7 @@ stateDigest=$(find "${TEST_ROOT}/state" -type f -exec sha256sum {} + | sort)
     fail '真实 CLI 清理改写安装状态'
 
 beforeCalls=$(wc -l <"${TEST_ROOT}/calls")
-for action in status enable disable settings unban verify-source '' --json; do
+for action in status enable disable settings unban verify-source verify-unit '' --json; do
     expectStatus 2 dockerFail2banCommand ssh "${action}"
 done
 expectStatus 2 dockerFail2banCommand ssh preflight --preview
@@ -167,22 +168,51 @@ fi
 
 # 分发直接使用宿主只读 helper；不要求已有部署，返回码不能被包装吞掉。
 (
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state"
     python3() {
-        [[ "$#" -eq 6 && "$1" == -B &&
-            "$2" == "${PROJECT_ROOT}/docker/lib/ssh-source.py" &&
-            "$3" == 198.51.100.10 && "$4" == 2222 && "$5" == 203.0.113.9 &&
-            "$6" =~ ^[a-f0-9]{48}$ ]] || return 99
-        return "${SOURCE_STATUS:-0}"
+        [[ "$1" == -B ]] || return 99
+        if [[ "$2" == "${PROJECT_ROOT}/docker/lib/ssh-source.py" ]]; then
+            [[ "$#" -eq 6 && "$3" == 198.51.100.10 && "$4" == 2222 &&
+                "$5" == 203.0.113.9 && "$6" =~ ^[a-f0-9]{48}$ ]] || return 99
+            return "${SOURCE_STATUS:-0}"
+        fi
+        [[ "$#" -eq 7 && "$2" == "${PROJECT_ROOT}/docker/lib/ssh-journal.py" &&
+            "$3" == "${EXPECTED_UNIT:-sshd.service}" && "$4" == 198.51.100.10 &&
+            "$5" == 2222 && "$6" == 203.0.113.9 && "$7" =~ ^[a-f0-9]{48}$ ]] || return 99
+        return "${UNIT_STATUS:-0}"
     }
     expectStatus 0 dockerMain fail2ban ssh verify-source 198.51.100.10 2222 203.0.113.9
     SOURCE_STATUS=15 expectStatus 15 dockerMain fail2ban ssh verify-source 198.51.100.10 2222 203.0.113.9
+    expectStatus 0 dockerMain fail2ban ssh verify-unit sshd.service 198.51.100.10 2222 203.0.113.9
+    UNIT_STATUS=15 expectStatus 15 dockerMain fail2ban ssh verify-unit sshd.service 198.51.100.10 2222 203.0.113.9
+    printf -v maxUnit '%0247d.service' 0
+    EXPECTED_UNIT=${maxUnit} expectStatus 0 dockerMain fail2ban ssh verify-unit "${maxUnit}" 198.51.100.10 2222 203.0.113.9
+    EXPECTED_UNIT=ssh@a:0-1_.service expectStatus 0 dockerMain fail2ban ssh verify-unit \
+        ssh@a:0-1_.service 198.51.100.10 2222 203.0.113.9
+    beforeCalls=$(wc -l <"${TEST_ROOT}/calls")
     for values in '198.51.100.10 0 203.0.113.9' '198.51.100.10 65536 203.0.113.9' \
         '198.51.100.10 2222 2001:db8::9' '198.51.100.10 2222 127.0.0.1'; do
         read -r -a args <<<"${values}"
         expectStatus 2 dockerFail2banCommand ssh verify-source "${args[@]}"
+        expectStatus 2 dockerFail2banCommand ssh verify-unit sshd.service "${args[@]}"
     done
     expectStatus 2 dockerFail2banCommand ssh verify-source 198.51.100.10 2222 203.0.113.9 extra
+    expectStatus 2 dockerFail2banCommand ssh verify-unit sshd.service 198.51.100.10 2222
+    expectStatus 2 dockerFail2banCommand ssh verify-unit sshd.service 198.51.100.10 2222 203.0.113.9 extra
+    printf -v longUnit '%0248d.service' 0
+    for unit in '' sshd.socket --sshd.service _sshd.service a/b.service 'sshd .service' \
+        $'sshd.service\n' "${longUnit}"; do
+        expectStatus 2 dockerFail2banCommand ssh verify-unit "${unit}" 198.51.100.10 2222 203.0.113.9
+    done
+    [[ "$(wc -l <"${TEST_ROOT}/calls")" == "${beforeCalls}" ]] ||
+        fail '非法 SSH unit 或来源参数触及宿主预检'
     MISSING_TOOL=python3 expectStatus 10 dockerFail2banCommand ssh verify-source 198.51.100.10 2222 203.0.113.9
+    for tool in python3 ss ip journalctl systemctl; do
+        MISSING_TOOL=${tool} expectStatus 10 dockerMain fail2ban ssh verify-unit sshd.service 198.51.100.10 2222 203.0.113.9
+    done
+    HOST_STATUS=1 expectStatus 10 dockerMain fail2ban ssh verify-unit sshd.service 198.51.100.10 2222 203.0.113.9
 )
+[[ "$(find "${TEST_ROOT}/state" -type f -exec sha256sum {} + | sort)" == "${stateDigest}" ]] ||
+    fail 'SSH 来源或 unit CLI 改写安装状态'
 [[ ! -e "${TEST_ROOT}/forbidden" ]] || fail '来源分发访问安装状态、部署锁或写操作'
 printf 'docker-ssh-preflight-regression-ok\n'

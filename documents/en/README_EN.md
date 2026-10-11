@@ -459,12 +459,22 @@ The result is not saved or reusable across transactions.
 `source_verified=true` describes this observation; `runtime_configuration_verified`
 and `jail_ready` remain `false`. This command does not enable SSH protection.
 
-The internal unit witness additionally requires the fresh master to be the selected
+Fail2ban submenu item 14 verifies a live source for an explicit systemd service:
+
+```bash
+padm-docker fail2ban ssh verify-unit sshd.service 198.51.100.10 2222 203.0.113.7
+```
+
+Use the same external challenge client described above. The host additionally needs
+`systemctl` and readable cgroup v2. The service name must match its actual `Id`;
+an alias pointing to another service is rejected. The unit witness requires the fresh master to be the selected
 systemd service's MainPID, fixes its current invocation/cgroup and checks all TCP
 listeners in both address families. Socket activation, wildcard listeners, extra
-listeners/masters, unreadable owners and generation changes are rejected. It proves
-only this live connection, not historical logs or continuous collector/jail readiness;
-there is no new menu or CLI activation entry.
+listeners/masters, unreadable owners and generation changes are rejected. Success
+returns `scope=ssh-unit-source-only`, `source_verified=true` and `unit_verified=true`;
+`runtime_configuration_verified` and `jail_ready` remain `false`. It proves only this
+live connection, not historical logs or continuous collector/jail readiness, and
+does not start or stop the host SSH service.
 
 Status and unban access only the fixed `padm-nginx` jail in a running `net-fail2ban`
 container whose spec, image, labels and mounts match the current deployment. They

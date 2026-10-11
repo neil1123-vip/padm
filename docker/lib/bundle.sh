@@ -96,6 +96,10 @@ dockerBundleSourceIsComplete() {
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
         done
     fi
+    if grep -qF '/docker/lib/ssh-journal.py"' "${sourceRoot}/docker/lib/services.sh"; then
+        [[ -f "${sourceRoot}/docker/lib/ssh-journal.py" &&
+            ! -L "${sourceRoot}/docker/lib/ssh-journal.py" ]] || return 1
+    fi
     if grep -qF '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh"; then
         for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
             [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1

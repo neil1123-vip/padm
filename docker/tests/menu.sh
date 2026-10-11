@@ -350,7 +350,7 @@ runPortAliasDriver() {
 }
 
 runMaintenanceDriver() {
-    local scenario=$1 choice address answer=n action field previous
+    local scenario=$1 choice address answer=n action field previous prompt value
     local scope=ws statusChoice=1 unbanChoice=2 disableChoice=3 enableChoice=5 settingsChoice=6
     local jail=padm-nginx addressPrompt='待解封 IPv4/IPv6（0 返回）: '
     local disablePrompt='确认停用受管站点扫描防护？[y/N]: '
@@ -424,6 +424,22 @@ runMaintenanceDriver() {
             else
                 targetReply '外部 SSH 客户端 IPv4/IPv6（0 返回）' $'203.0.113.9\n'
             fi
+            ;;
+        fail2ban-ssh-unit|fail2ban-ssh-unit-failed|fail2ban-ssh-unit-cancel-*)
+            targetReply 'Docker Fail2ban 维护' $'14\n'
+            for field in unit target port source; do
+                case "${field}" in
+                unit) prompt='宿主 SSH systemd service（0 返回）'; value=sshd.service ;;
+                target) prompt='宿主 SSH 本机 IPv4/IPv6（0 返回）'; value=198.51.100.10 ;;
+                port) prompt='宿主 SSH 端口（0 返回）'; value=2222 ;;
+                source) prompt='外部 SSH 客户端 IPv4/IPv6（0 返回）'; value=203.0.113.9 ;;
+                esac
+                if [[ "${scenario}" == "fail2ban-ssh-unit-cancel-${field}" ]]; then
+                    targetReply "${prompt}" $'0\n'
+                    break
+                fi
+                targetReply "${prompt}" "${value}"$'\n'
+            done
             ;;
         fail2ban-flow)
             targetReply 'Docker Fail2ban 维护' "${statusChoice}"$'\n'
@@ -1298,6 +1314,8 @@ grep -Fq '用法:' "${CONTROL_LOG}" || fail 'installed non-TTY menu did not show
 runNonTty 0 installed-help "${CLI}" help
 grep -Fq 'padm-docker fail2ban verify-source <WS 入口 ID> <外部客户端 IPv4/IPv6>' "${CONTROL_LOG}" ||
     fail 'Fail2ban 真实来源诊断缺少命令帮助'
+grep -Fq 'padm-docker fail2ban ssh verify-unit <systemd service> <本机 IPv4/IPv6> <SSH 端口> <外部客户端 IPv4/IPv6>' "${CONTROL_LOG}" ||
+    fail 'SSH unit 来源核验缺少命令帮助'
 [[ ! -s "${DOCKER_LOG}" ]] || fail 'installed help touched Docker'
 assertNoLock
 
@@ -1434,10 +1452,14 @@ fail2ban)
         if [[ "${3:-}" == preflight ]]; then
             [[ "$#" -eq 3 ]] || exit 2
             printf 'fixture-ssh-preflight: source_verified=false jail_ready=false\n'
-        else
+        elif [[ "${3:-}" == verify-source ]]; then
             [[ "$#" -eq 6 && "$3" == verify-source && "$4" == 198.51.100.10 &&
                 "$5" == 2222 && "$6" == 203.0.113.9 ]] || exit 2
             printf 'fixture-ssh-source: source_verified=true jail_ready=false\n'
+        else
+            [[ "$#" -eq 7 && "$3" == verify-unit && "$4" == sshd.service &&
+                "$5" == 198.51.100.10 && "$6" == 2222 && "$7" == 203.0.113.9 ]] || exit 2
+            printf 'fixture-ssh-unit: source_verified=true unit_verified=true jail_ready=false\n'
         fi
         exit "${FAIL2BAN_STATUS:-0}"
     fi
@@ -1619,14 +1641,16 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
     verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term \
     enable enable-cancel enable-invalid enable-failed enable-list-failed enable-int enable-term \
     settings settings-cancel settings-invalid settings-failed settings-list-failed settings-int settings-term \
-    ssh-preflight ssh-preflight-failed ssh-source ssh-source-failed ssh-source-cancel; do
+    ssh-preflight ssh-preflight-failed ssh-source ssh-source-failed ssh-source-cancel \
+    ssh-unit ssh-unit-failed ssh-unit-cancel-unit ssh-unit-cancel-target \
+    ssh-unit-cancel-port ssh-unit-cancel-source; do
     : >"${TLS_WIZARD_ACTIONS}"
     export FAIL2BAN_STATUS=0 FAIL2BAN_UNBAN_STATUS=0 FAIL2BAN_DISABLE_STATUS=0 \
         FAIL2BAN_VERIFY_STATUS=0 FAIL2BAN_EDIT_STATUS=0 FAIL2BAN_PROTOCOL_LIST_STATUS=0 FAIL2BAN_WAIT=0 \
         FAIL2BAN_PID="${TEST_ROOT}/fail2ban.pid"
     [[ "${fail2banCase}" != failed ]] || { FAIL2BAN_STATUS=17; FAIL2BAN_UNBAN_STATUS=17; }
     [[ "${fail2banCase}" != ssh-preflight-failed ]] || FAIL2BAN_STATUS=10
-    [[ "${fail2banCase}" != ssh-source-failed ]] || FAIL2BAN_STATUS=15
+    case "${fail2banCase}" in ssh-source-failed|ssh-unit-failed) FAIL2BAN_STATUS=15 ;; esac
     [[ "${fail2banCase}" != disable-failed ]] || FAIL2BAN_DISABLE_STATUS=17
     [[ "${fail2banCase}" != verify-failed ]] || FAIL2BAN_VERIFY_STATUS=17
     [[ "${fail2banCase}" != verify-list-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=17
@@ -1645,6 +1669,16 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
         fi
         ;;
     ssh-source-cancel) ;;
+    ssh-unit|ssh-unit-failed)
+        expectedFail2ban='fail2ban ssh verify-unit sshd.service 198.51.100.10 2222 203.0.113.9'
+        grep -Fq 'fixture-ssh-unit: source_verified=true unit_verified=true jail_ready=false' "${CONTROL_LOG}" ||
+            fail 'SSH unit 来源命令未显示 unit 已核验和 jail 未就绪'
+        if [[ "${fail2banCase}" == ssh-unit-failed ]]; then
+            grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" ||
+                fail 'SSH unit 来源失败未保留退出码或留在菜单'
+        fi
+        ;;
+    ssh-unit-cancel-*) ;;
     ssh-preflight|ssh-preflight-failed)
         expectedFail2ban='fail2ban ssh preflight'
         grep -Fq 'fixture-ssh-preflight: source_verified=false jail_ready=false' "${CONTROL_LOG}" ||
@@ -1739,7 +1773,7 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
     for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看 WS 状态' \
         '2. 解封 WS 单个 IP' '3. 停用 WS 站点扫描防护' '4. 核对 WS 真实来源' \
         '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数' '12. SSH 宿主只读预检' \
-        '13. 核对 SSH 实时来源'; do
+        '13. 核对 SSH 实时来源' '14. 核对 SSH unit 实时来源'; do
         grep -Fq "${fail2banLabel}" "${CONTROL_LOG}" || fail "Fail2ban 菜单缺少: ${fail2banLabel}"
     done
 done

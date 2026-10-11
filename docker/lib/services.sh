@@ -4289,9 +4289,15 @@ dockerSshPreflight() {
 }
 
 dockerSshSourceWitness() (
-    local target=${1:-} port=${2:-} expected=${3:-} nonce tool helper
-    [[ "$#" -eq 3 && "${port}" =~ ^[1-9][0-9]{0,4}$ ]] &&
+    local LC_ALL=C
+    local target=${1:-} port=${2:-} expected=${3:-} unit=${4:-} nonce tool helper
+    local -a helperArgs=()
+    [[ ( "$#" -eq 3 || "$#" -eq 4 ) && "${port}" =~ ^[1-9][0-9]{0,4}$ ]] &&
         ((port <= 65535)) || return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "$#" -eq 4 ]]; then
+        [[ "${#unit}" -le 255 && "${unit}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@:-]*\.service$ ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+    fi
     target=$(dockerFail2banSourceAddress "${target}") &&
         expected=$(dockerFail2banSourceAddress "${expected}") || return "${PADM_DOCKER_RC_USAGE}"
     [[ ( "${target}" == *:* && "${expected}" == *:* ) ||
@@ -4301,11 +4307,16 @@ dockerSshSourceWitness() (
         dockerRequireCommand "${tool}" || return "${PADM_DOCKER_RC_HOST}"
     done
     helper="${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/ssh-source.py"
+    if [[ "$#" -eq 4 ]]; then
+        dockerRequireCommand systemctl || return "${PADM_DOCKER_RC_HOST}"
+        helper="${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/ssh-journal.py"
+        helperArgs=("${unit}")
+    fi
     [[ -f "${helper}" && ! -L "${helper}" ]] || return "${PADM_DOCKER_RC_BUNDLE}"
     nonce=$(dockerSubscriptionRandomHex) &&
         [[ "${nonce}" =~ ^[a-f0-9]{48}$ ]] || return "${PADM_DOCKER_RC_STATE}"
     # 来源证明只读宿主，不保存跨事务凭证，也不取得部署锁或启用 jail。
-    python3 -B "${helper}" "${target}" "${port}" "${expected}" "${nonce}"
+    python3 -B "${helper}" "${helperArgs[@]}" "${target}" "${port}" "${expected}" "${nonce}"
 )
 
 dockerFail2banCommand() {
@@ -4318,7 +4329,14 @@ dockerFail2banCommand() {
         shift 2
         case "${action}" in
         preflight) dockerSshPreflight "$@" ;;
-        verify-source) dockerSshSourceWitness "$@" ;;
+        verify-source)
+            [[ "$#" -eq 3 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            dockerSshSourceWitness "$@"
+            ;;
+        verify-unit)
+            [[ "$#" -eq 4 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            dockerSshSourceWitness "$2" "$3" "$4" "$1"
+            ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
         return $?
