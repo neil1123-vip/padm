@@ -7191,6 +7191,79 @@ JSON
         collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
         [[ ! -s "${warnFile}" ]]
 
+        (
+            local diagnosticRoot="${root}/diagnostic"
+            local singBoxConfigPath="${diagnosticRoot}/conf/config/"
+            local merged="${diagnosticRoot}/conf/config.json"
+            local cardLog="${diagnosticRoot}/cards.log" currentVersion
+            mkdir -p "${singBoxConfigPath}"
+            printf '%s\n' '{"outbounds":[{"type":"wireguard"},{"type":"block"}],"dns":{"servers":[{"address":"local"}],"rules":[{"outbound":"any"},{"strategy":"prefer_ipv4"}]},"inbounds":[{"type":"tun","stack":"system"}]}' >"${merged}"
+            cp -- "${merged}" "${singBoxConfigPath}01.json"
+            cp -- "${merged}" "${singBoxConfigPath}02.json"
+            cp -- "${domainStrategyFile}" "${singBoxConfigPath}03.json"
+
+            collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" diagnostic
+            ! coreCompatibilityAuditHasFailures "${statusFile}"
+            [[ "$(grep -c '.' "${warnFile}")" == 7 ]]
+            [[ "$(grep -c '历史兼容提示' "${warnFile}")" == 5 ]]
+            grep -q 'DNS 规则 strategy.*1.16' "${warnFile}"
+            grep -q 'TUN stack.*1.15.*1.17' "${warnFile}"
+            ! grep -q '无法自动迁移' "${warnFile}"
+            grep -qF "${singBoxConfigPath}02.json" "${logFile}"
+            ! grep -qF "${merged}" "${logFile}"
+            regressionExpectStatus 1 collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+            coreCompatibilityAuditHasFailures "${statusFile}"
+
+            # 分片存在时，失效的旧合并文件不参与菜单诊断。
+            printf 'invalid merged JSON\n' >"${merged}"
+            collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" diagnostic
+            [[ "$(grep -c '.' "${warnFile}")" == 7 ]]
+            printf 'invalid shard JSON\n' >"${singBoxConfigPath}04.json"
+            regressionExpectStatus 1 collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" diagnostic
+            grep -qF "JSON 无法解析：${singBoxConfigPath}04.json" "${statusFile}"
+            rm -- "${singBoxConfigPath}04.json"
+
+            statusCard() { printf '%s\n' "$*" >>"${cardLog}"; }
+            getSingBoxCurrentVersion() { printf '%s\n' "${currentVersion}"; }
+            for currentVersion in v1.14.0 v1.15.0-alpha.1 未安装; do
+                : >"${cardLog}"
+                showSingBoxCompatibilityAudit "${logFile}" "${statusFile}" "${warnFile}"
+                grep -qF "sing-box 兼容提示 需关注 当前版本: ${currentVersion}" "${cardLog}"
+                ! grep -q '1.13/1.14' "${cardLog}"
+            done
+
+            # 跨分片默认 HTTP client 生效，旧合并文件的默认值不能掩盖缺失。
+            rm -- "${singBoxConfigPath}"*.json
+            cp -- "${explicitFile}" "${merged}"
+            printf '%s\n' '{"route":{"rule_set":[{"type":"remote","url":"https://example.com/test.srs"}]}}' >"${singBoxConfigPath}01.json"
+            collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" diagnostic
+            grep -q '隐式默认 HTTP client' "${warnFile}"
+            printf '%s\n' '{"http_clients":[{"tag":"rules"}],"route":{"default_http_client":"rules"}}' >"${singBoxConfigPath}02.json"
+            collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" diagnostic
+            [[ ! -s "${warnFile}" ]]
+            : >"${cardLog}"
+            showSingBoxCompatibilityAudit "${logFile}" "${statusFile}" "${warnFile}"
+            grep -q 'sing-box 兼容提示 通过' "${cardLog}"
+
+            rm -- "${singBoxConfigPath}"*.json
+            printf '%s\n' '{"inbounds":[{"type":"tun","stack":"gvisor"},{"type":"mixed","stack":"custom"}]}' >"${merged}"
+            collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" diagnostic
+            [[ "$(grep -c '.' "${warnFile}")" == 1 ]]
+            grep -qF "${merged}" "${logFile}"
+            printf '%s\n' '{"inbounds":[{"type":"tun"},{"type":"mixed","stack":"custom"}]}' >"${merged}"
+            collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" diagnostic
+            [[ ! -s "${warnFile}" ]]
+
+            printf 'invalid JSON\n' >"${merged}"
+            : >"${cardLog}"
+            regressionExpectStatus 1 showSingBoxCompatibilityAudit "${logFile}" "${statusFile}" "${warnFile}"
+            grep -q 'sing-box 兼容提示 失败' "${cardLog}"
+            rm -- "${merged}"
+            : >"${cardLog}"
+            regressionExpectStatus 2 showSingBoxCompatibilityAudit "${logFile}" "${statusFile}" "${warnFile}"
+            grep -q 'sing-box 兼容提示 无法检查' "${cardLog}"
+        )
+
         printf '%s\n' 'store_rdrc tls.acme' >"${logFile}"
         appendSingBoxCompatibilityHints "${logFile}"
         grep -q 'certificate_provider' "${logFile}"

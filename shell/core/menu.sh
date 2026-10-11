@@ -263,40 +263,34 @@ showCoreStatusOverview() {
 }
 
 coreLifecycleMenu() {
-    local core=$1 title repo menuKey installedFn upgradeFn checkFn auditFn prereleaseFn
-    local upgradeText checkText riskText
+    local core=$1 title repo menuKey installedFn upgradeFn checkFn auditFn
+    local upgradeText
     local selection version versionStatus prerelease
     case "${core}" in
     xray)
         title=Xray-core repo=XTLS/Xray-core menuKey=xray_lifecycle_menu
         installedFn=xrayInstalled upgradeFn=upgradeXrayCore checkFn=showXrayConfigHealthCheck
-        auditFn=showXrayCompatibilityAudit prereleaseFn=checkXrayPrereleaseCompatibility
+        auditFn=showXrayCompatibilityAudit
         upgradeText="选择正式版或预发布版，支持升级与回退"
-        checkText="执行运行检查和内部严格检查"
-        riskText="只读扫描已知不兼容配置"
         ;;
     sing-box)
         title=sing-box repo=SagerNet/sing-box menuKey=singbox_lifecycle_menu
         installedFn=singBoxInstalled upgradeFn=upgradeSingBoxCore checkFn=showSingBoxConfigValidation
-        auditFn=showSingBoxCompatibilityAudit prereleaseFn=checkSingBoxPrereleaseCompatibility
+        auditFn=showSingBoxCompatibilityAudit
         upgradeText="选择正式版或预发布版，缺包时可本机编译"
-        checkText="执行 merge + check"
-        riskText="只读扫描 1.13/1.14 迁移风险"
         ;;
     *) return 1 ;;
     esac
     while true; do
         echoContent title "\n┌─ ${title} 生命周期 ─────────────────────────────────"
         menuItem 1 "升级/切换版本" "${upgradeText}"
-        menuItem 2 "检查当前配置" "${checkText}"
-        menuItem 3 "扫描升级风险" "${riskText}"
-        menuItem 4 "试跑预发布版" "不替换二进制，不操作服务"
-        menuReturnItem 5 "返回核心与服务" "回到核心与服务"
+        menuItem 2 "检查与诊断" "检查当前配置并扫描已知升级风险"
+        menuReturnItem 3 "返回核心与服务" "回到核心与服务"
         menuClose
         selection=
         menuReadChoice "${menuKey}" "请选择:" selection || return 0
         case "${selection}" in
-        1 | 2)
+        1)
             if ! "${installedFn}"; then
                 statusCard "${title} 生命周期" "无法检查" "未安装 ${title}；请返回主菜单使用安装与重装"
                 continue
@@ -315,10 +309,11 @@ coreLifecycleMenu() {
                 coreInvalidInputErrorCard
             fi
             ;;
-        2) "${checkFn}" || true ;;
-        3) "${auditFn}" || true ;;
-        4) "${prereleaseFn}" || true ;;
-        5) return 0 ;;
+        2)
+            "${checkFn}" || true
+            "${auditFn}" || true
+            ;;
+        3) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done

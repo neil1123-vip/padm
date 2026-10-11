@@ -3286,21 +3286,24 @@ ${mainCredential}"
     fi
 
     if menuSmokePartSelected core-maintenance; then
-        local expectedLifecycleItems=$'升级/切换版本\n检查当前配置\n扫描升级风险\n试跑预发布版\n返回核心与服务\n'
+        local expectedLifecycleItems=$'升级/切换版本\n检查与诊断\n返回核心与服务\n'
         local xrayLifecycleItems=
+        local lifecycleMenuFn lifecycleCheckFn lifecycleAuditFn
 
         resetMenuActions
         resetMenuRender
-        xrayVersionManageMenu <<<"5"
+        xrayVersionManageMenu <<<"3"
         xrayLifecycleItems=${menuItems}
         [[ "${xrayLifecycleItems}" == "${expectedLifecycleItems}" ]]
+        [[ "${menuNumbers}" == $'1\n2\n3:return\n' ]]
         ! grep -Eq '普通模式|严格模式' <<<"${output}"
         [[ -z "${actions}" ]]
 
         resetMenuActions
         resetMenuRender
-        singBoxVersionManageMenu <<<"5"
+        singBoxVersionManageMenu <<<"3"
         [[ "${menuItems}" == "${xrayLifecycleItems}" ]]
+        [[ "${menuNumbers}" == $'1\n2\n3:return\n' ]]
         [[ -z "${actions}" ]]
 
         (
@@ -3330,13 +3333,13 @@ ${mainCredential}"
                 : >"${versionListLog}"
                 resetMenuActions
                 resetMenuRender
-                "${menuFn}" <<< $'1\n\n5' >"${versionOutput}"
+                "${menuFn}" <<< $'1\n\n3' >"${versionOutput}"
                 assertMenuAction "${upgradeLabel}:false "
                 grep -qF 'v1.2.3 [正式版]' "${versionOutput}"
                 grep -qF 'v1.3.0-beta.1 [预发布版]' "${versionOutput}"
                 ! grep -qF '手动输入版本号' <<<"${menuItems}"
                 resetMenuActions
-                "${menuFn}" <<< $'1\n1\n1\n3\n1\n2\n5'
+                "${menuFn}" <<< $'1\n1\n1\n3\n1\n2\n3'
                 assertMenuAction "${upgradeLabel}:false v1.2.3"
                 assertMenuAction "${upgradeLabel}:false v1.2.2"
                 assertMenuAction "${upgradeLabel}:true v1.3.0-beta.1"
@@ -3344,12 +3347,12 @@ ${mainCredential}"
                 [[ "$(wc -l <"${versionListLog}")" == 4 ]]
 
                 resetMenuActions
-                "${menuFn}" <<< $'1\n0\n5'
+                "${menuFn}" <<< $'1\n0\n3'
                 [[ -z "${actions}" ]]
                 resetMenuActions
                 "${menuFn}" < <(printf '1\n')
                 [[ -z "${actions}" ]]
-                for input in $'1\n999\n5' $'1\nm\n5' $'1\nM\n5' $'1\nv1.2.1\n5'; do
+                for input in $'1\n999\n3' $'1\nm\n3' $'1\nM\n3' $'1\nv1.2.1\n3'; do
                     resetMenuActions
                     "${menuFn}" <<<"${input}"
                     assertMenuAction 'errorCard:输入有误，请重新输入'
@@ -3357,7 +3360,7 @@ ${mainCredential}"
                 done
                 for listState in failed empty; do
                     resetMenuActions
-                    "${menuFn}" <<< $'1\n5'
+                    "${menuFn}" <<< $'1\n3'
                     assertMenuAction 'errorCard:获取版本列表失败，请稍后重试'
                     ! grep -q "^${upgradeLabel}:" <<<"${actions}"
                 done
@@ -3369,70 +3372,48 @@ ${mainCredential}"
             xrayInstalledState=false
             singBoxInstalledState=false
             resetMenuActions
-            xrayVersionManageMenu <<< $'1\n2\n3\n4\n5'
+            xrayVersionManageMenu <<< $'1\n2\n3'
             assertMenuAction 'statusCard:Xray-core 生命周期'
+            assertMenuAction showXrayConfigHealthCheck
             assertMenuAction showXrayCompatibilityAudit
-            assertMenuAction checkXrayPrereleaseCompatibility
-            singBoxVersionManageMenu <<< $'1\n2\n5'
+            singBoxVersionManageMenu <<< $'1\n2\n3'
             assertMenuAction 'statusCard:sing-box 生命周期'
+            assertMenuAction showSingBoxConfigValidation
+            assertMenuAction showSingBoxCompatibilityAudit
             ! grep -q '^upgradeXrayCore:\|^upgradeSingBoxCore:' <<<"${actions}"
-            ! assertMenuAction showXrayConfigHealthCheck
-            ! assertMenuAction showSingBoxConfigValidation
+            ! assertMenuAction checkXrayPrereleaseCompatibility
+            ! assertMenuAction checkSingBoxPrereleaseCompatibility
             resetMenuRender
             coreVersionManageMenu <<<"6"
             [[ ! -s "${versionListLog}" ]]
         )
 
-        resetMenuActions
-        resetMenuRender
-        xrayVersionManageMenu <<<'2
-3
-4
-5'
-        assertMenuAction showXrayConfigHealthCheck
-        assertMenuAction showXrayCompatibilityAudit
-        assertMenuAction checkXrayPrereleaseCompatibility
-
-        resetMenuActions
-        resetMenuRender
-        singBoxVersionManageMenu <<<'2
-3
-4
-5'
-        assertMenuAction showSingBoxConfigValidation
-        assertMenuAction showSingBoxCompatibilityAudit
-        assertMenuAction checkSingBoxPrereleaseCompatibility
-
-        checkActionShouldFail=showXrayConfigHealthCheck
-        resetMenuActions
-        resetMenuRender
-        xrayVersionManageMenu <<<'2
-5'
+        for lifecycleMenuFn in xrayVersionManageMenu singBoxVersionManageMenu; do
+            case "${lifecycleMenuFn}" in
+            xrayVersionManageMenu) lifecycleCheckFn=showXrayConfigHealthCheck lifecycleAuditFn=showXrayCompatibilityAudit ;;
+            *) lifecycleCheckFn=showSingBoxConfigValidation lifecycleAuditFn=showSingBoxCompatibilityAudit ;;
+            esac
+            for checkActionShouldFail in "" "${lifecycleCheckFn}" "${lifecycleAuditFn}"; do
+                resetMenuActions
+                resetMenuRender
+                "${lifecycleMenuFn}" <<< $'2\n3'
+                [[ "${actions}" == "${lifecycleCheckFn}"$'\n'"${lifecycleAuditFn}"$'\n' ]]
+                [[ "$(grep -c '^升级/切换版本$' <<<"${menuItems}")" == "2" ]]
+            done
+        done
         checkActionShouldFail=
-        assertMenuAction showXrayConfigHealthCheck
-        [[ "$(grep -c '^升级/切换版本$' <<<"${menuItems}")" == "2" ]]
 
         resetMenuActions
         resetMenuRender
         xrayVersionManageMenu <<<'invalid
 still-invalid
-5'
-        [[ "$(grep -cF 'errorCard:输入有误，请重新输入' <<<"${actions}")" == "2" ]]
-        [[ "$(grep -c '^升级/切换版本$' <<<"${menuItems}")" == "3" ]]
-        xrayVersionManageMenu </dev/null
-
-        xrayInstalledState=false
-        resetMenuActions
-        resetMenuRender
-        xrayVersionManageMenu <<<'1
-3
 4
-5'
-        ! grep -q '^upgradeXrayCore:' <<<"${actions}"
-        assertMenuAction 'statusCard:Xray-core 生命周期'
-        assertMenuAction showXrayCompatibilityAudit
-        assertMenuAction checkXrayPrereleaseCompatibility
-        xrayInstalledState=true
+5
+3'
+        [[ "$(grep -cF 'errorCard:输入有误，请重新输入' <<<"${actions}")" == "4" ]]
+        [[ "$(grep -c '^升级/切换版本$' <<<"${menuItems}")" == "5" ]]
+        ! assertMenuAction checkXrayPrereleaseCompatibility
+        xrayVersionManageMenu </dev/null
 
         resetMenuActions
         resetMenuRender

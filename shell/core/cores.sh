@@ -896,7 +896,10 @@ validateSingBoxConfigWithBinary() {
 }
 
 singBoxCompatibilityAuditCard() {
-    statusCard "sing-box 升级风险扫描" "$@"
+    local result=$1 version
+    shift
+    version=$(getSingBoxCurrentVersion) || version=未知
+    statusCard "sing-box 兼容提示" "${result}" "当前版本: ${version:-未知}" "$@"
 }
 
 singBoxPrereleaseCompatibilityCard() {
@@ -964,7 +967,8 @@ singBoxCompatibilityAuditScanJsonFile() {
     local logFile=$3
     local warnFile=${4:-/dev/null}
     local defaultHttpClientConfigured=${5:-false}
-    local finding findings=
+    local mode=${6:-upgrade}
+    local finding findings= message level
 
     if ! findings=$(jq -r --argjson defaultHttpClientConfigured "${defaultHttpClientConfigured}" '
         . as $config |
@@ -1023,6 +1027,7 @@ singBoxCompatibilityAuditScanJsonFile() {
             if any(.route.rule_set[]?; .type? == "remote" and has("download_detour")) then "download-detour" else empty end,
             if any(tls_configs; has("acme")) then "tls-acme" else empty end,
             if any(cache_files; has("store_rdrc")) then "store-rdrc" else empty end,
+            if any(.inbounds[]?; .type? == "tun" and has("stack")) then "tun-stack" else empty end,
             if (($defaultHttpClientConfigured or ((.route.default_http_client? // "") != "")) | not) and
                 any(.route.rule_set[]?; .type? == "remote" and
                     (((has("http_client") | not) or (.http_client? == "")) and ((.download_detour? // "") == "")))
@@ -1034,22 +1039,41 @@ singBoxCompatibilityAuditScanJsonFile() {
     fi
 
     while IFS= read -r finding; do
+        level=warn
         case "${finding}" in
-        wireguard-outbound) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 WireGuard outbound，请改用 endpoints[type=wireguard]：${file}" || return 1 ;;
-        special-outbound) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy special outbound，请改用 route action：${file}" || return 1 ;;
-        domain-strategy) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 domain_strategy，请迁移到 domain_resolver/default_domain_resolver：${file}" || return 1 ;;
-        dns-rule-outbound) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve：${file}" || return 1 ;;
-        dns-server-format) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS server 格式，请迁移到 typed DNS servers：${file}" || return 1 ;;
-        dns-rule-mix) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter：${file}" || return 1 ;;
-        dns-rule-strategy) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到无法自动迁移的 DNS 规则 strategy，请改用 rule items 后重试（1.16 将移除）：${file}" || return 1 ;;
-        dns-rule-set-ip-cidr-empty) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的 DNS 规则 rule_set_ip_cidr_accept_empty，请迁移到 response matching（1.16 将移除）：${file}" || return 1 ;;
-        dns-address-filter) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到未带 match_response 的 DNS 地址过滤字段 ip_cidr/ip_is_private，请迁移到 evaluate + match_response（1.16 将移除）：${file}" || return 1 ;;
-        independent-cache) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 1.14 已弃用的 independent_cache，可直接删除（1.16 将移除）：${file}" || return 1 ;;
-        download-detour) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 1.14 已弃用的 download_detour，请迁移到 http_client（1.16 将移除）：${file}" || return 1 ;;
-        tls-acme) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的内嵌 tls.acme，请迁移到 certificate_provider（1.16 将移除）：${file}" || return 1 ;;
-        store-rdrc) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的 store_rdrc，请改用 store_dns（1.16 将移除）：${file}" || return 1 ;;
-        implicit-http-client) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到远程 rule-set 使用隐式默认 HTTP client，请配置 http_client 或 route.default_http_client（1.16 将移除旧行为）：${file}" || return 1 ;;
+        wireguard-outbound) level=fail; message="检测到旧 WireGuard outbound，请改用 endpoints[type=wireguard]" ;;
+        special-outbound) level=fail; message="检测到 legacy special outbound，请改用 route action" ;;
+        domain-strategy) level=fail; message="检测到旧 domain_strategy，请按字段所在位置迁移到 route action 或 domain_resolver/default_domain_resolver" ;;
+        dns-rule-outbound) level=fail; message="检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve" ;;
+        dns-server-format) level=fail; message="检测到旧 DNS server 格式，请迁移到 typed DNS servers" ;;
+        dns-rule-mix) level=fail; message="检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter" ;;
+        dns-rule-strategy) level=fail; message="检测到无法自动迁移的 DNS 规则 strategy，请改用 rule items 后重试（1.16 将移除）" ;;
+        dns-rule-set-ip-cidr-empty) message="检测到已弃用的 DNS 规则 rule_set_ip_cidr_accept_empty，请迁移到 response matching（1.16 将移除）" ;;
+        dns-address-filter) message="检测到未带 match_response 的 DNS 地址过滤字段 ip_cidr/ip_is_private，请迁移到 evaluate + match_response（1.16 将移除）" ;;
+        independent-cache) message="检测到 1.14 已弃用的 independent_cache，可直接删除（1.16 将移除）" ;;
+        download-detour) message="检测到 1.14 已弃用的 download_detour，请迁移到 http_client（1.16 将移除）" ;;
+        tls-acme) message="检测到已弃用的内嵌 tls.acme，请迁移到 certificate_provider（1.16 将移除）" ;;
+        store-rdrc) message="检测到已弃用的 store_rdrc，请改用 store_dns（1.16 将移除）" ;;
+        implicit-http-client) message="检测到远程 rule-set 使用隐式默认 HTTP client，请配置 http_client 或 route.default_http_client（1.16 将移除旧行为）" ;;
+        tun-stack) message="检测到 TUN stack（1.15 起弃用，1.17 移除），升级到 1.15+ 时删除该选项以使用新协议栈" ;;
+        *) continue ;;
         esac
+        if [[ "${mode}" == diagnostic ]]; then
+            case "${finding}" in
+            wireguard-outbound | special-outbound | domain-strategy | dns-rule-outbound | dns-server-format) message="历史兼容提示：${message}" ;;
+            dns-rule-strategy) message="检测到 1.14 已弃用的 DNS 规则 strategy，请人工迁移到 rule items（1.16 将移除）" ;;
+            esac
+            if grep -qFx -- "${message}" "${warnFile}"; then
+                printf '[WARN 来源] %s：%s\n' "${message}" "${file}" >>"${logFile}" || return 1
+                continue
+            fi
+            coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "${message}" || return 1
+            printf '  来源: %s\n' "${file}" >>"${logFile}" || return 1
+        elif [[ "${level}" == fail ]]; then
+            coreCompatibilityAuditFail "${statusFile}" "${logFile}" "${message}：${file}" || return 1
+        else
+            coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "${message}：${file}" || return 1
+        fi
     done <<<"${findings}"
 }
 
@@ -1388,12 +1412,14 @@ collectSingBoxCompatibilityFindings() {
     local statusFile=$1
     local logFile=$2
     local warnFile=$3
-    local file foundJson=false mergedFile shardDir defaultHttpClientConfigured=false
+    local mode=${4:-upgrade}
+    local file mergedFile shardDir defaultHttpClientConfigured=false
+    local -a files=()
 
     coreCompatibilityAuditReset "${statusFile}" || return 1
     coreCompatibilityAuditReset "${warnFile}" || return 1
     : >"${logFile}" || return 1
-    printf '核心: sing-box\n配置目录: %s\n阶段: 升级风险扫描\n' "$(singBoxConfigShardDir)" >>"${logFile}" || return 1
+    printf '核心: sing-box\n配置目录: %s\n阶段: 兼容扫描（%s）\n' "$(singBoxConfigShardDir)" "${mode}" >>"${logFile}" || return 1
 
     if ! singBoxConfigInstalled; then
         coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 sing-box 配置" || return 1
@@ -1406,30 +1432,34 @@ collectSingBoxCompatibilityFindings() {
 
     mergedFile=$(singBoxMergedConfigFile)
     shardDir=$(singBoxConfigShardDir)
-    for file in "${mergedFile}" "${shardDir}"*.json; do
+    for file in "${shardDir}"*.json; do
         [[ -f "${file}" ]] || continue
+        files+=("${file}")
+    done
+    # 菜单诊断与 merge + check 使用同一配置源，严格预检保留原有扫描范围。
+    if [[ "${mode}" != diagnostic || "${#files[@]}" -eq 0 ]] && [[ -f "${mergedFile}" ]]; then
+        files=("${mergedFile}" "${files[@]}")
+    fi
+    if [[ "${#files[@]}" -eq 0 ]]; then
+        coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件" || return 1
+        return 2
+    fi
+    for file in "${files[@]}"; do
         if jq -e '(.route.default_http_client? // "") != ""' "${file}" >/dev/null 2>&1; then
             defaultHttpClientConfigured=true
             break
         fi
     done
-    if [[ -f "${mergedFile}" ]]; then
-        foundJson=true
-        singBoxCompatibilityAuditScanJsonFile "${mergedFile}" "${statusFile}" "${logFile}" "${warnFile}" "${defaultHttpClientConfigured}" || return 1
-    fi
-    for file in "${shardDir}"*.json; do
-        [[ -f "${file}" ]] || continue
-        foundJson=true
-        singBoxCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}" "${warnFile}" "${defaultHttpClientConfigured}" || return 1
+    for file in "${files[@]}"; do
+        singBoxCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}" "${warnFile}" "${defaultHttpClientConfigured}" "${mode}" || return 1
     done
 
-    if [[ "${foundJson}" != "true" ]]; then
-        coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件" || return 1
-        return 2
-    fi
-
     if [[ ! -s "${statusFile}" ]]; then
-        coreCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到 1.13/1.14 已知兼容风险" || return 1
+        if [[ "${mode}" == diagnostic ]]; then
+            coreCompatibilityAuditPass "${statusFile}" "${logFile}" "兼容提示扫描完成，配置有效性以当前核心 merge + check 为准" || return 1
+        else
+            coreCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到需拦截的已知兼容风险" || return 1
+        fi
     fi
     coreCompatibilityAuditHasFailures "${statusFile}" && return 1
     return 0
@@ -1455,7 +1485,7 @@ showCoreCompatibilityAudit() {
     local collectFn=$1 cardFn=$2 missingMessage=$3 failureHint=$4 successMessage=$5
     local logFile=$6 statusFile=$7 warnFile=$8 rc=0
 
-    "${collectFn}" "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
+    "${collectFn}" "${statusFile}" "${logFile}" "${warnFile}" "${9:-upgrade}" || rc=$?
     if [[ "${rc}" -eq 2 ]]; then
         "${cardFn}" "无法检查" "${missingMessage}" "排查日志: ${logFile}"
     elif [[ "${rc}" -ne 0 ]]; then
@@ -1470,8 +1500,8 @@ showCoreCompatibilityAudit() {
 
 showSingBoxCompatibilityAudit() {
     showCoreCompatibilityAudit collectSingBoxCompatibilityFindings singBoxCompatibilityAuditCard \
-        "未检测到 sing-box 配置" "重点检查 JSON / legacy DNS / WireGuard / special outbounds / domain resolver / HTTP client" "未发现 1.13/1.14 已知兼容风险" \
-        "${1:-$(coreTmpFilePath padm-sing-box-compat-audit.log)}" "${2:-$(coreTmpFilePath padm-sing-box-compat-audit.status)}" "${3:-$(coreTmpFilePath padm-sing-box-compat-audit.warn)}"
+        "未检测到 sing-box 配置" "配置来源无法解析或扫描失败；配置有效性以当前核心 merge + check 为准" "未发现已知兼容提示" \
+        "${1:-$(coreTmpFilePath padm-sing-box-compat-audit.log)}" "${2:-$(coreTmpFilePath padm-sing-box-compat-audit.status)}" "${3:-$(coreTmpFilePath padm-sing-box-compat-audit.warn)}" diagnostic
 }
 
 showSingBoxConfigValidation() {
@@ -1896,7 +1926,7 @@ appendSingBoxCompatibilityHints() {
             printf '\n[padm 兼容性提示]\n'
             printf -- '- sing-box 1.13+ 已移除 legacy special outbounds；阻断规则应使用 route action: reject，不再使用 type=block 出站。\n'
             printf -- '- sing-box 1.13+ 已移除旧 WireGuard outbound；请迁移到 endpoints[type=wireguard]。\n'
-            printf -- '- sing-box 1.14 已移除旧 DNS server 格式与旧 domain_strategy；请使用 typed DNS servers 与 domain_resolver/default_domain_resolver。\n'
+            printf -- '- sing-box 1.14 已移除旧 DNS server 格式与拨号字段 domain_strategy；请使用 typed DNS servers 与 domain_resolver/default_domain_resolver。入站 domain_strategy 自 1.13 移除，应迁移到 route action。\n'
             printf -- '- sing-box 1.14 已弃用 independent_cache、download_detour 与隐式默认 HTTP client；请在 1.16 前迁移。\n'
             printf -- '- sing-box 1.14 已弃用内嵌 tls.acme 与 store_rdrc；请迁移到 certificate_provider 与 store_dns。\n'
             printf -- '- sing-box 1.14 已弃用 DNS 规则 strategy、rule_set_ip_cidr_accept_empty 及未带 match_response 的 ip_cidr/ip_is_private；请迁移到 domain_resolver 或 evaluate + match_response。\n'
