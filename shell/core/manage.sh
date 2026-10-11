@@ -1620,7 +1620,7 @@ corePortApplyAddition() {
 }
 
 addCorePort() {
-    local selectNewPortType newPort defaultPort portIndex port portEntries parsedPorts settingsPort firewallStatus portChanged
+    local selectNewPortType newPort defaultPort portIndex port portEntries displayPorts displayDefaultPort parsedPorts settingsPort firewallStatus portChanged
     readInstallType || return 1
     if [[ "${coreInstallType:-}" != "1" ]]; then
         errorCard "此功能仅支持Xray-core内核"
@@ -1630,15 +1630,14 @@ addCorePort() {
     while true; do
         portChanged=false
         firewallStatus=0
-        echoContent title "\n┌─ 入口端口管理 ─────────────────────────────────────"
-        menuLine "支持批量添加；保留原监听端口"
-        menuLine "查看账号时只展示默认端口账号；端口列表用英文逗号分隔"
-        menuLine "入口变更后自动同步订阅"
-        menuLine "如已安装 Hysteria2，会同时安装 Hysteria2 新端口"
+        echoContent title "\n┌─ 额外入口端口管理 ─────────────────────────────────"
+        menuLine "为 Xray 增加额外 TCP 入口，原入口不变"
+        menuLine "支持批量添加；已安装 Hysteria2 时同步 UDP 入口"
+        menuLine "可设置订阅默认入口，变更后自动同步订阅"
         menuLine "示例：2053,2083,2087"
-        menuItem 1 "查看已添加端口" "列出当前额外端口"
-        menuItem 2 "添加端口" "批量添加新入口端口"
-        menuItem 3 "删除端口" "移除已添加端口"
+        menuItem 1 "查看额外入口" "查看端口和订阅默认入口"
+        menuItem 2 "添加额外入口" "批量添加新端口"
+        menuItem 3 "删除额外入口" "移除已添加端口"
         menuReturnItem 4 "返回协议与入口" "回到上级菜单"
         menuClose
         menuReadChoice core_port_menu "请选择:" selectNewPortType || return 0
@@ -1652,7 +1651,7 @@ addCorePort() {
                 errorCard "端口格式错误"
                 return 1
             }
-            autoRead extra_core_default_port "请输入默认端口（新增列表或原入口），[回车]保留现有默认入口:" defaultPort || return 0
+            autoRead extra_core_default_port "请输入订阅默认入口端口（新增端口或原入口）[回车保留]:" defaultPort || return 0
             settingsPort=$(corePortForwardTarget) || { errorCard "无法唯一确定 Xray TCP 入口，请检查已安装协议与默认入口"; return 1; }
             corePortValidateAddition "${parsedPorts}" "${defaultPort}" "${settingsPort}" || {
                 errorCard "新增端口不能等于原入口；默认端口必须属于新增列表或等于原入口"
@@ -1664,11 +1663,26 @@ addCorePort() {
         1 | 3)
             portEntries=$(corePortListExtra) || { errorCard "入口端口列表读取失败"; return 1; }
             if [[ -z "${portEntries}" ]]; then
-                statusCard "入口端口管理" "暂无额外端口" "原监听端口仍保留"
+                statusCard "额外入口端口" "暂无额外入口" "原监听端口仍保留"
+                continue
+            fi
+            if [[ "${selectNewPortType}" == 1 ]]; then
+                displayPorts=
+                displayDefaultPort=
+                while IFS=: read -r portIndex port; do
+                    if [[ "${port}" == *" 默认" ]]; then
+                        displayDefaultPort="${port%% *}"
+                    fi
+                    port="${port%% *}"
+                    [[ -n "${port}" ]] || continue
+                    displayPorts+="${displayPorts:+,}${port}"
+                done <<<"${portEntries}"
+                statusCard "额外入口端口" \
+                    "额外入口: ${displayPorts}" \
+                    "订阅默认入口: ${displayDefaultPort:-原入口}"
                 continue
             fi
             printf '%s\n' "${portEntries}"
-            [[ "${selectNewPortType}" != 1 ]] || continue
             portIndex=
             autoRead extra_core_delete_port "请输入要删除的端口编号:" portIndex || return 0
             port=$(corePortResolveByIndex "${portIndex}") || { errorCard "入口端口列表读取失败"; return 1; }

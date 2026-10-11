@@ -74,7 +74,7 @@ protocolEntryMenu() {
         menuItem 3 "XHTTP 管理" "普通/高级/实验分层调整 Reality XHTTP"
         menuItem 4 "Hysteria2 管理" "安装、卸载或管理 UDP 端口跳跃"
         menuItem 5 "Tuic 管理" "安装、卸载和高级参数"
-        menuItem 6 "入口端口管理" "为已安装 Xray 追加或移除入口端口"
+        menuItem 6 "额外入口端口管理" "为已安装 Xray 追加或移除入口端口"
         menuItem 7 "CDN 入口管理" "订阅入口地址覆盖、CDN/H3 使用说明"
         menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
         menuClose

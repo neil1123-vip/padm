@@ -2280,6 +2280,7 @@ runCorePortMenuStateRegression() (
     local installReads=0 singBoxReads=0
     local root="${TMP_DIR}/core-port-menu-state"
     local configPath="${root}/config/" cards="${root}/cards.log" output="${root}/output.log" mutations="${root}/mutations.log"
+    local rendered="${root}/menu.log"
     mkdir -p "${root}"
     coreInstallType=1
     readInstallType() {
@@ -2289,10 +2290,10 @@ runCorePortMenuStateRegression() (
         singBoxReads=$((singBoxReads + 1))
         hysteriaPort=
     }
-    echoContent() { :; }
-    menuLine() { :; }
-    menuItem() { :; }
-    menuReturnItem() { :; }
+    echoContent() { printf '%s\n' "$*" >>"${rendered}"; }
+    menuLine() { printf '%s\n' "$*" >>"${rendered}"; }
+    menuItem() { printf 'item:%s:%s\n' "$1" "$2" >>"${rendered}"; }
+    menuReturnItem() { printf 'return:%s:%s\n' "$1" "$2" >>"${rendered}"; }
     menuClose() { :; }
     menuReadChoice() {
         local choice
@@ -2307,8 +2308,14 @@ runCorePortMenuStateRegression() (
 
     addCorePort >"${output}" <<< $'1\n3\n4'
     [[ "${installReads}:${singBoxReads}" == 1:1 ]]
-    [[ "$(grep -c '入口端口管理 暂无额外端口 原监听端口仍保留' "${cards}")" == 2 ]]
+    [[ "$(grep -c '额外入口端口 暂无额外入口 原监听端口仍保留' "${cards}")" == 2 ]]
     [[ ! -s "${mutations}" ]]
+    grep -q '额外入口端口管理' "${rendered}"
+    grep -qx 'item:1:查看额外入口' "${rendered}"
+    grep -qx 'item:2:添加额外入口' "${rendered}"
+    grep -qx 'item:3:删除额外入口' "${rendered}"
+    grep -qx 'return:4:返回协议与入口' "${rendered}"
+    ! grep -q '查看账号时只展示默认端口账号' "${rendered}"
 
     mkdir -p "${configPath}"
     printf '{}\n' >"${configPath}02_dokodemodoor_inbounds_2053.json"
@@ -2316,8 +2323,19 @@ runCorePortMenuStateRegression() (
     : >"${cards}"
     addCorePort >"${output}" <<< $'1\n4'
     [[ "${installReads}:${singBoxReads}" == 2:2 ]]
-    [[ "$(<"${output}")" == $'1:2053\n2:2083 默认' ]]
-    [[ ! -s "${cards}" && ! -s "${mutations}" ]]
+    [[ ! -s "${output}" ]]
+    grep -qx '额外入口端口 额外入口: 2053,2083 订阅默认入口: 2083' "${cards}"
+    [[ ! -s "${mutations}" ]]
+
+    mv -- "${configPath}02_dokodemodoor_inbounds_2083_default.json" "${configPath}02_dokodemodoor_inbounds_2083.json"
+    : >"${cards}"
+    addCorePort >"${output}" <<< $'1\n4'
+    grep -qx '额外入口端口 额外入口: 2053,2083 订阅默认入口: 原入口' "${cards}"
+    [[ ! -s "${output}" && ! -s "${mutations}" ]]
+
+    addCorePort >"${output}" <<< $'3\n'
+    [[ "$(<"${output}")" == $'1:2053\n2:2083' ]]
+    [[ "$(<"${mutations}")" == 'unexpected-input:extra_core_delete_port' ]]
 )
 
 runProtocolEntryStoredInputRegression() (
