@@ -1057,8 +1057,14 @@ PADM_DOCKER_INSTALL_DIR="${LINK_LOCK_ROOT}" PADM_DOCKER_LOCK_TIMEOUT=0 \
 [[ "${lockStatus}" == 1 && -L "${LINK_LOCK_ROOT}/locks/deployment.lock" &&
     "$(<"${LINK_LOCK_TARGET}/pid")" == 99999999 ]] || fail 'lock symlink changed external state'
 PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/released-lock" PADM_DOCKER_LOCK_TIMEOUT=1 \
-    bash -c '
+    timeout 3 bash -c '
         source "$1/docker/lib/bootstrap.sh"
+        # 此项只验证路径消失后的重试，外层真实超时负责阻止死循环。
+        unset SECONDS
+        SECONDS=0
+        sleep() {
+            :
+        }
         raced=false
         mkdir() {
             if [[ "$*" == "-- ${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" && "$raced" == false ]]; then
@@ -1067,7 +1073,8 @@ PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/released-lock" PADM_DOCKER_LOCK_TIMEOUT=1 
             fi
             command mkdir "$@"
         }
-        dockerAcquireDeploymentLock && dockerReleaseDeploymentLock
+        dockerAcquireDeploymentLock && dockerReleaseDeploymentLock &&
+            [[ "$raced" == true && ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]]
     ' bash "${PROJECT_ROOT}" || fail 'released lock was treated as an unsafe path'
 
 BROKEN_SOURCE="${TEST_ROOT}/broken-source"
