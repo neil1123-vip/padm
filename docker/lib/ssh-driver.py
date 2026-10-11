@@ -18,7 +18,9 @@ SPEC = importlib.util.spec_from_file_location(
 ledger_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ledger_module)
 Failure = ledger_module.Failure
-TRACEME, CONT, SYSCALL, SETOPTIONS, GETEVENTMSG, GET_SYSCALL_INFO = 0, 7, 24, 0x4200, 0x4201, 0x420E
+TRACEME, CONT, SYSCALL, SETOPTIONS, GETEVENTMSG, GETSIGINFO, GET_SYSCALL_INFO = (
+    0, 7, 24, 0x4200, 0x4201, 0x4202, 0x420E
+)
 FORK, VFORK, CLONE, EXEC, EXIT = 1, 2, 3, 4, 6
 OPTIONS = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x40 | 0x00100000
 WAIT_FLAGS = os.WNOHANG | 0x40000000
@@ -102,6 +104,19 @@ def process_snapshot(pid):
     }
 
 
+def cleanup_identity(pid):
+    root = Path(f"/proc/{pid}")
+    fields = (root / "stat").read_text().rsplit(") ", 1)[1].split()
+    status = dict(line.split(":", 1) for line in
+                  (root / "status").read_text().splitlines() if ":" in line)
+    result = {
+        "pid": pid, "state": fields[0], "ppid": int(fields[1]),
+        "starttime_ticks": int(fields[19]), "tracer_pid": int(status["TracerPid"]),
+        "threads": int(status["Threads"]),
+    }
+    return result
+
+
 def endpoint(token):
     address, port = token.split(":")
     return [socket.inet_ntoa(bytes.fromhex(address)[::-1]), int(port, 16)]
@@ -119,6 +134,7 @@ class ControlledDriver:
         self.tracked = set()
         self.owned = {}
         self.stopped_tasks = {}
+        self.unfixed_children = {}
         self.retired = {}
         self.registered = set()
         self.pending_children = {}
@@ -133,7 +149,7 @@ class ControlledDriver:
             "scope": "只用于可信 amd64 fork fixture；不支持任意 OpenSSH 或 arm64",
             "events": [], "first_stops": [], "continues": [], "cleanup": [],
             "creations": [], "syscall_stop_count": 0, "normal_resume_count": 0,
-            "task_pins": [], "wait_pidfd_count": 0,
+            "task_pins": [], "child_pin_failures": [], "wait_pidfd_count": 0,
             "expected_tuple": copy.deepcopy(expected_tuple),
         }
 
@@ -149,7 +165,12 @@ class ControlledDriver:
     def _pin(self, pid, parent=None, source="run"):
         if type(pid) is not int or pid <= 0 or pid in self.owned or pid in self.retired:
             raise Failure("受控 SSH driver 拒绝重复或无效的原 task 身份")
-        descriptor = os.pidfd_open(pid)
+        try:
+            descriptor = os.pidfd_open(pid)
+        except OSError:
+            if parent is not None and pid in self.unfixed_children:
+                self.unfixed_children[pid]["pidfd_open_errors"] += 1
+            raise
         try:
             if self._pidfd_pid(descriptor) != pid:
                 raise Failure("受控 SSH driver 固定的 pidfd 身份无效")
@@ -196,11 +217,156 @@ class ControlledDriver:
         if stopped["status"] >> 16 not in (FORK, VFORK, CLONE):
             raise Failure("受控 SSH child 身份缺少原父创建停点")
         if "child_pid" not in stopped:
-            child = event_message(pid)
-            if child <= 0:
-                raise Failure("受控 SSH 创建事件缺少有效 child PID")
-            self._pin(child, pid, source)
+            child = stopped.get("unfixed_child_pid")
+            if child is None:
+                child = event_message(pid)
+                if child <= 0:
+                    raise Failure("受控 SSH 创建事件缺少有效 child PID")
+                summary = {
+                    "child_pid": child, "parent_pid": pid, "parent_pidfd": self.owned[pid],
+                    "parent_status": stopped["status"],
+                    "parent_generation": copy.deepcopy(
+                        self.ledger.registry.get(pid, {}).get("generation")),
+                    "discovered_monotonic_ns": time.monotonic_ns(), "attempts": 0,
+                }
+                # 未固定身份不授予正常运行权限；仅在原父停止屏障内尝试固定或终止。
+                stopped["unfixed_child_pid"] = child
+                self.unfixed_children[child] = {
+                    "parent_stop": stopped, "summary": summary, "pidfd_open_errors": 0,
+                }
+            else:
+                unresolved = self.unfixed_children[child]
+                summary = unresolved["summary"]
+                if source != "cleanup":
+                    raise Failure("受控 SSH 未固定 child 仅允许清理")
+                self._unfixed_parent(child)
+            summary["attempts"] += 1
+            try:
+                self._pin(child, pid, source)
+            except BaseException as caught:
+                if child not in self.owned:
+                    summary.update({"last_errno": getattr(caught, "errno", None),
+                                    "last_error": str(caught)})
+                    if "first_error" not in summary:
+                        summary.update({"first_errno": summary["last_errno"],
+                                        "first_error": summary["last_error"]})
+                        self.evidence["child_pin_failures"].append(summary)
+                raise
+            finally:
+                if child in self.owned:
+                    del self.unfixed_children[child]
+                    del stopped["unfixed_child_pid"]
+                    if "first_error" in summary:
+                        summary["resolved_monotonic_ns"] = time.monotonic_ns()
         return stopped["child_pid"]
+
+    def _unfixed_parent(self, child):
+        unresolved = self.unfixed_children[child]
+        summary = unresolved["summary"]
+        parent = summary["parent_pid"]
+        self._require_stop(parent)
+        stopped = self.stopped_tasks[parent]
+        process = process_snapshot(parent)
+        if (unresolved["parent_stop"] is not stopped
+                or stopped.get("unfixed_child_pid") != child
+                or summary["parent_pidfd"] != self.owned[parent]
+                or summary["parent_status"] != stopped["status"]
+                or summary["parent_generation"] is None
+                or summary["parent_generation"] != self.ledger._generation(process)
+                or event_message(parent) != child):
+            raise Failure("受控 SSH 未固定 child 的原父创建停止屏障已改变")
+        return process
+
+    def _cleanup_unfixed_child(self, child, end):
+        unresolved = self.unfixed_children[child]
+        summary = unresolved["summary"]
+        if unresolved["pidfd_open_errors"] != summary["attempts"]:
+            raise Failure("受控 SSH 未固定 child 缺少真实 pidfd_open 失败证据")
+        parent = self._unfixed_parent(child)
+        first = cleanup_identity(child)
+        unresolved["identity"] = first
+        summary["cleanup_only"] = True
+
+        def confirm():
+            current = cleanup_identity(child)
+            if (current["starttime_ticks"] != first["starttime_ticks"]
+                    or current["ppid"] != summary["parent_pid"]
+                    or current["tracer_pid"] != os.getpid()
+                    or current["threads"] != 1):
+                raise Failure("受控 SSH 未固定 child 的清理身份或停止状态已改变")
+            return current
+
+        while time.monotonic() < end:
+            self._unfixed_parent(child)
+            confirm()
+            try:
+                stopped = os.waitid(os.P_PID, child, os.WSTOPPED | WAIT_FLAGS)
+            except ChildProcessError:
+                # traced zombie 可能没有可等停点；ECHILD 只允许转为终局窥探。
+                stopped = None
+            if stopped is not None:
+                if stopped.si_pid != child or stopped.si_code != os.CLD_TRAPPED:
+                    raise Failure("受控 SSH 未固定 child 清理返回了未知停点")
+                try:
+                    if confirm()["state"] != "t":
+                        raise ProcessLookupError()
+                    if stopped.si_status == signal.SIGSTOP and "first_stop_monotonic_ns" not in summary:
+                        root = Path(f"/proc/{child}/ns")
+                        namespace = {name: os.readlink(root / entry)
+                                     for name, entry in (("pid_ns", "pid"), ("net_ns", "net"))}
+                        self._unfixed_parent(child)
+                        buffer = ctypes.create_string_buffer(128)
+                        ptrace(GETSIGINFO, child, ctypes.addressof(buffer))
+                        signo, error, code = struct.unpack_from("=iii", buffer)
+                        if signo != signal.SIGSTOP or error != 0:
+                            raise Failure("受控 SSH 未固定 child 首停不是已验证的信号递送停点")
+                        if any(namespace[name] != parent[name]
+                               or namespace[name] != os.readlink(root / entry)
+                               for name, entry in (("pid_ns", "pid"), ("net_ns", "net"))):
+                            raise Failure("受控 SSH 未固定 child 首停的 namespace 已改变")
+                        self._unfixed_parent(child)
+                        if confirm()["state"] != "t":
+                            raise ProcessLookupError()
+                        summary.update({"first_stop_monotonic_ns": time.monotonic_ns(),
+                                        "signal_info": {"signo": signo, "errno": error, "code": code},
+                                        "first_identity": {**first, **namespace}})
+                        ptrace(CONT, child, signal.SIGKILL)
+                        kind = "unfixed-child-first-stop"
+                    elif stopped.si_status == signal.SIGTRAP | (EXIT << 8):
+                        self._unfixed_parent(child)
+                        if confirm()["state"] != "t":
+                            raise ProcessLookupError()
+                        ptrace(CONT, child, 0)
+                        kind = "unfixed-child-exit-stop"
+                    else:
+                        raise Failure("受控 SSH 未固定 child 清理拒绝未知 ptrace 停点")
+                    self.evidence["cleanup"].append({
+                        "kind": kind, "pid": child, "si_code": stopped.si_code,
+                        "si_status": stopped.si_status, "normal": False,
+                    })
+                except (ProcessLookupError, FileNotFoundError):
+                    # 外部 SIGKILL 可令刚消费的停点失效；只继续有界终局等待。
+                    pass
+            terminal = os.waitid(os.P_PID, child, os.WEXITED | os.WNOWAIT | WAIT_FLAGS)
+            if terminal is not None:
+                if terminal.si_pid != child:
+                    raise Failure("受控 SSH 未固定 child 终局返回了其它 task")
+                if terminal.si_code != os.CLD_TRAPPED:
+                    if terminal.si_code != os.CLD_KILLED or terminal.si_status != signal.SIGKILL:
+                        raise Failure("受控 SSH 未固定 child 缺少 SIGKILL 终局")
+                    if confirm()["state"] != "Z":
+                        raise Failure("受控 SSH 未固定 child 终局缺少保留的 zombie")
+                    self._unfixed_parent(child)
+                    unresolved["terminal"] = (terminal.si_pid, terminal.si_code, terminal.si_status)
+                    summary["terminal_monotonic_ns"] = time.monotonic_ns()
+                    self.evidence["cleanup"].append({
+                        "kind": "unfixed-child-terminal-retained", "pid": child,
+                        "si_code": terminal.si_code, "si_status": terminal.si_status,
+                        "parent_pid": summary["parent_pid"], "normal": False,
+                    })
+                    return
+            time.sleep(0.001)
+        raise Failure(f"受控 SSH 未固定 child 清理终局超时：{child}")
 
     def _wait_original(self, pid):
         descriptor = self.owned[pid]
@@ -574,11 +740,27 @@ class ControlledDriver:
                 if pid in self.stopped_tasks:
                     status = self.stopped_tasks[pid]["status"]
                     if status >> 16 in (FORK, VFORK, CLONE):
-                        self._creation_child(pid, "cleanup")
-            if all(pid in self.stopped_tasks for pid in self.owned):
+                        retrying = "unfixed_child_pid" in self.stopped_tasks[pid]
+                        if retrying:
+                            child = self.stopped_tasks[pid]["unfixed_child_pid"]
+                            if "terminal" in self.unfixed_children[child]:
+                                continue
+                        try:
+                            self._creation_child(pid, "cleanup")
+                        except OSError:
+                            if "unfixed_child_pid" not in self.stopped_tasks[pid]:
+                                raise
+                            if not retrying:
+                                continue
+                            child = self.stopped_tasks[pid]["unfixed_child_pid"]
+                            self._cleanup_unfixed_child(child, end)
+            if (all("terminal" in item for item in self.unfixed_children.values())
+                    and all(pid in self.stopped_tasks for pid in self.owned)):
                 break
             if not progressed:
                 time.sleep(0.001)
+        if any("terminal" not in item for item in self.unfixed_children.values()):
+            raise Failure(f"受控 SSH 清理仍有未固定 child：{sorted(self.unfixed_children)}")
         if any(pid not in self.stopped_tasks for pid in self.owned):
             raise Failure("受控 SSH 清理无法在原 task 身份下完成停止屏障")
         for pid in list(self.owned):
@@ -589,6 +771,12 @@ class ControlledDriver:
             if os.WIFEXITED(status) or os.WIFSIGNALED(status):
                 if pid not in self.retired:
                     raise Failure("受控 SSH 清理终局缺少原 pidfd 身份")
+                for unresolved in self.unfixed_children.values():
+                    summary = unresolved["summary"]
+                    if summary["parent_pid"] == pid:
+                        if not os.WIFSIGNALED(status) or os.WTERMSIG(status) != signal.SIGKILL:
+                            raise Failure("受控 SSH 未固定 child 的原父缺少 SIGKILL 终局")
+                        summary["parent_terminal_monotonic_ns"] = time.monotonic_ns()
                 row.update({"kind": "cleanup-retired-exit-observed",
                             "exit_code": os.waitstatus_to_exitcode(status)})
             elif os.WIFSTOPPED(status):
@@ -606,7 +794,7 @@ class ControlledDriver:
                     row["kind"] = "cleanup-kill-in-progress"
             self.evidence["cleanup"].append(row)
 
-        while (self.owned or self.retired) and time.monotonic() < end:
+        while (self.owned or self.retired or self.unfixed_children) and time.monotonic() < end:
             progressed = False
             for pid in list(self.owned):
                 result = self._wait_original(pid)
@@ -616,6 +804,12 @@ class ControlledDriver:
             for task, descriptor in list(self.retired.items()):
                 held_pid = self._pidfd_pid(descriptor)
                 if held_pid == -1:
+                    for unresolved in self.unfixed_children.values():
+                        summary = unresolved["summary"]
+                        if summary["parent_pid"] == task:
+                            if "parent_terminal_monotonic_ns" not in summary:
+                                raise Failure("受控 SSH 未固定 child 的原父回收缺少终局证据")
+                            summary["parent_reaped_monotonic_ns"] = time.monotonic_ns()
                     os.close(descriptor)
                     del self.retired[task]
                     self.evidence["cleanup"].append({
@@ -641,10 +835,46 @@ class ControlledDriver:
                         else -result.si_status,
                     })
                     progressed = True
-            if not self.owned and not self.retired:
+            for child, unresolved in list(self.unfixed_children.items()):
+                summary = unresolved["summary"]
+                if "parent_reaped_monotonic_ns" not in summary:
+                    continue
+                adopted = cleanup_identity(child)
+                if (adopted["state"] != "Z" or adopted["ppid"] != os.getpid()
+                        or adopted["tracer_pid"] != os.getpid()
+                        or adopted["starttime_ticks"] != unresolved["identity"]["starttime_ticks"]):
+                    raise Failure("受控 SSH 未固定 child 的收养身份或保留终局已改变")
+                terminal = os.waitid(os.P_PID, child, os.WEXITED | os.WNOWAIT | WAIT_FLAGS)
+                if terminal is None:
+                    continue
+                current = (terminal.si_pid, terminal.si_code, terminal.si_status)
+                if current != unresolved["terminal"]:
+                    raise Failure("受控 SSH 未固定 child 的收养终局与原终局不一致")
+                reaped = os.waitid(os.P_PID, child, os.WEXITED | WAIT_FLAGS)
+                if reaped is None:
+                    continue
+                if reaped.si_code in (os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED):
+                    # 终局一旦消费立即撤销数字权限，错误返回也不能再次操作旧数字身份。
+                    del self.unfixed_children[child]
+                    summary["reaped_monotonic_ns"] = time.monotonic_ns()
+                if (reaped.si_pid, reaped.si_code, reaped.si_status) != current:
+                    summary["unexpected_reaped_terminal"] = {
+                        "pid": reaped.si_pid, "si_code": reaped.si_code, "si_status": reaped.si_status,
+                    }
+                    raise Failure("受控 SSH 未固定 child 精确回收返回了未知终局")
+                summary["resolved_monotonic_ns"] = summary["reaped_monotonic_ns"]
+                self.evidence["cleanup"].append({
+                    "kind": "unfixed-child-reaped", "pid": child,
+                    "si_code": reaped.si_code, "si_status": reaped.si_status,
+                    "adopted_identity": adopted, "normal": False,
+                })
+                progressed = True
+            if not self.owned and not self.retired and not self.unfixed_children:
                 break
             if not progressed:
                 time.sleep(0.001)
+        if self.unfixed_children:
+            raise Failure(f"受控 SSH 清理仍有未固定 child：{sorted(self.unfixed_children)}")
         if self.owned or self.retired:
             raise Failure(f"受控 SSH 清理仍有未回收 task：{sorted(self.tracked | self.retired.keys())}")
         self.evidence["discarded_early_stops"] = sorted(self.early_stops)
@@ -779,7 +1009,7 @@ class ControlledDriver:
                 self._cleanup()
             except BaseException as caught:
                 self.evidence["cleanup_error"] = str(caught)
-                if not self.bootstrap_tasks:
+                if error is None:
                     error = caught
             finally:
                 for descriptor in list(self.owned.values()) + list(self.retired.values()):
@@ -797,6 +1027,7 @@ class ControlledDriver:
                 "remaining_bootstrap_tasks": sorted(self.bootstrap_tasks),
                 "remaining_owned_tasks": sorted(self.owned),
                 "remaining_stopped_tasks": sorted(self.stopped_tasks),
+                "remaining_unfixed_children": sorted(self.unfixed_children),
                 "remaining_retired_tasks": sorted(self.retired),
                 "remaining_early_stops": sorted(self.early_stops),
                 "remaining_parent_confirmations": sorted(self.pending_children),

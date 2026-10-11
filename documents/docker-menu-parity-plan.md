@@ -4160,6 +4160,43 @@ preflight 同时通过，`.tmp-regression-docker-9d8637b06b0a4dffbb24ec4bad59168
 本阶段不开放任意 OpenSSH/unit、collector/jail，创建事件 child 的首次
 pidfd 固定失败仍待闭合；`authoritative/jail_ready=false`。
 
+#### 5C.8c.2m 创建事件 child 首次 pidfd 失败
+
+真实父创建停点的 GETEVENTMSG 先保存 cleanup-only child 身份，
+绑定原父 pidfd、已消费停点、generation 和发现时间，再尝试 child pidfd。
+首次失败保持父/child 停止，保留原 errno/cause；cleanup 在同一停止屏障复核并重试。
+成功后纳入既有 owned、P_PIDFD 信号及真实回收路径。
+
+持续失败的探针已在原生 amd64 Docker Linux 中通过默认与 SIGCHLD IGN 两例：
+child 首停只消费 exact P_PID 的 WSTOPPED，GETSIGINFO 确认自动 SIGSTOP 后注入
+SIGKILL，EXIT 停点只 CONT0；终局 WNOWAIT 保留，原父 pidfd 终止并回收后确认
+child 被 subreaper 收养，再一次 exact WEXITED 真 reap，立即撤销数字等待权限。
+stop-only ECHILD、ptrace ESRCH 或 /proc 消失均不能单独证明成功。
+无关 caller 终局未消费，child marker 未执行，FD 与 subreaper 恢复。
+
+driver 已接入该收容路径，仅实际 pidfd_open 两次失败才进入 cleanup-only。
+新增两个合同方法，瞬态/持续 EMFILE、EPERM、ENOMEM 共 6 个 subtests 共享 caller，
+验证三代脱组子树、IGN 自然父、终局保留顺序和真实回收；EMFILE 真实耗尽 FD，
+EPERM/ENOMEM 为错误注入。GETEVENTMSG 损坏负例保留原 EPERM cause、
+remaining_unfixed_children 与 cleanup_error，无终止信号或正常恢复；解除故障后
+仅测试使用备用原父 pidfd 走真实 cleanup 救场。首个 child pidfd 尝试时不假定已
+调度到 t，首停由实际内核结果核验。单条失败摘要保存首次/末次错误、次数与解决时间。
+
+最终定向 21/21、5.856 秒，内部 5943 ms、入口 7056 ms、排队 202 ms，
+Jobs 2、cache_hit=false；`.tmp-regression-docker-47da71708ce64f49afc479ae5da1412b/`。
+集中完整 Docker 合同 47/47、exit 0，内部 312826 ms、入口 313767 ms，
+排队 396 ms、Jobs 6、cache_hit=false；SSH 21/21、5.904 秒，preflight 同时通过，
+`.tmp-regression-docker-1104d7af452047c7b20eb98dc48db095/`。
+两个最终归档各 298 输入全部冻结匹配；随后本计划仅补结果。复用原工具镜像和三槽队列，
+不因这一轮 elapsed 下降宣称普遍提速；没有重复完整回归。
+已清理本阶段重复归档、清单和核对脚本 28632735 bytes，测试容器无残留；
+结果、日志、输入核对和小探针保留在 `.tmp-ssh-unfixed-child-8c2m/`。
+
+持续全进程 EMFILE 连身份读取也可能失败，未实测；此时保留未闭合 child 与
+cleanup_error，不放宽身份检查。外部 SIGKILL/ESRCH 竞态仅主源及代码审查，
+不宣称已实测；raw fork 57 正例、vfork 58 entry 负例继续下一阶段。
+本步不开放任意 OpenSSH/unit、collector/jail 或菜单启停；5C 与总目标仍 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

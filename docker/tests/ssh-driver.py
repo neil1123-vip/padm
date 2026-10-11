@@ -68,7 +68,7 @@ class DriverContracts(unittest.TestCase):
         self.receiver.close()
         self.temp.cleanup()
 
-    def cross_exec(self, group_change=None):
+    def cross_exec(self, group_change=None, ignore_sigchld=False):
         self.client.close()
         accepted, _ = self.listener.accept()
         self.listener.close()
@@ -80,6 +80,8 @@ class DriverContracts(unittest.TestCase):
                     os.setpgid(0, 0)
                 else:
                     os.setsid()
+                if ignore_sigchld:
+                    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
                 grandchild = os.fork()
                 if grandchild:
                     accepted.close()
@@ -114,6 +116,7 @@ class DriverContracts(unittest.TestCase):
         self.assertFalse(evidence["remaining_owned_tasks"])
         self.assertFalse(evidence["remaining_stopped_tasks"])
         self.assertFalse(evidence["remaining_bootstrap_tasks"])
+        self.assertFalse(evidence["remaining_unfixed_children"])
         self.assertFalse(evidence["open_received_fds"])
         self.assertEqual(evidence["fd_count_before"], evidence["fd_count_after"])
         self.assertFalse(evidence["authoritative"])
@@ -151,6 +154,27 @@ class DriverContracts(unittest.TestCase):
             self.assertTrue(row["ledger"]["drain"]["ended_with_eagain"])
             self.assertLess(row["finish_return_monotonic_ns"], row["continued_monotonic_ns"])
         return transitions
+
+    def real_emfile_pidfd(self, open_pidfd, pid, *args, **kwargs):
+        limits = resource.getrlimit(resource.RLIMIT_NOFILE)
+        limit = max(int(value) for value in os.listdir("/proc/self/fd")) + 4
+        if limits[0] != resource.RLIM_INFINITY:
+            limit = min(limit, limits[0])
+        dummy = []
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (limit, limits[1]))
+            for _ in range(limit):
+                try:
+                    dummy.append(os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC))
+                except OSError as full:
+                    if full.errno != errno.EMFILE:
+                        raise
+                    break
+            return open_pidfd(pid, *args, **kwargs)
+        finally:
+            for opened in dummy:
+                os.close(opened)
+            resource.setrlimit(resource.RLIMIT_NOFILE, limits)
 
     def test_python_to_c_epoch_history_and_frozen_trace(self):
         self.driver = driver_module.ControlledDriver(time.monotonic() + 5, self.receiver, self.expected)
@@ -281,26 +305,8 @@ class DriverContracts(unittest.TestCase):
                                                  ("pid", "state", "tracer_pid")})
                             injected.append(pid)
                             if code == errno.EMFILE:
-                                limits = resource.getrlimit(resource.RLIMIT_NOFILE)
-                                limit = max(int(value) for value in os.listdir("/proc/self/fd")) + 4
-                                if limits[0] != resource.RLIM_INFINITY:
-                                    limit = min(limit, limits[0])
-                                dummy = []
-                                try:
-                                    resource.setrlimit(resource.RLIMIT_NOFILE, (limit, limits[1]))
-                                    for _ in range(limit):
-                                        try:
-                                            dummy.append(os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC))
-                                        except OSError as full:
-                                            if full.errno != errno.EMFILE:
-                                                raise
-                                            break
-                                    before_pidfd["real_syscall_failure"] = True
-                                    return original_pidfd_open(pid, *args, **kwargs)
-                                finally:
-                                    for opened in dummy:
-                                        os.close(opened)
-                                    resource.setrlimit(resource.RLIMIT_NOFILE, limits)
+                                before_pidfd["real_syscall_failure"] = True
+                                return self.real_emfile_pidfd(original_pidfd_open, pid, *args, **kwargs)
                             raise OSError(code, os.strerror(code))
                         return original_pidfd_open(pid, *args, **kwargs)
 
@@ -768,6 +774,285 @@ class DriverContracts(unittest.TestCase):
                 os.waitpid(pid, os.WNOHANG)
         with self.assertRaises(ChildProcessError):
             os.waitpid(-1, os.WNOHANG)
+
+    def test_child_pidfd_failure_cleanup_preserves_caller_stop(self):
+        original_open, original_waitpid, original_waitid = os.pidfd_open, os.waitpid, os.waitid
+        original_kill, original_signal = os.kill, signal.pidfd_send_signal
+        limits = resource.getrlimit(resource.RLIMIT_NOFILE)
+        tracer = os.getpid()
+        unrelated = os.fork()
+        if unrelated == 0:
+            self.receiver.close()
+            self.listener.close()
+            self.client.close()
+            original_kill(os.getpid(), signal.SIGSTOP)
+            os._exit(29)
+        caller_pidfd = original_open(unrelated)
+        caller_reaped = False
+        try:
+            stopped = original_waitid(os.P_PIDFD, caller_pidfd, os.WSTOPPED | os.WNOWAIT)
+            self.assertEqual((stopped.si_pid, stopped.si_code, stopped.si_status),
+                             (unrelated, os.CLD_STOPPED, signal.SIGSTOP))
+            cases = [(persistent, code) for persistent in (False, True)
+                     for code in (errno.EMFILE, errno.EPERM, errno.ENOMEM)]
+            for index, (persistent, code) in enumerate(cases):
+                with self.subTest(errno=code, persistent=persistent):
+                    if index:
+                        self.client.close()
+                        self.client = socket.socket()
+                        self.client.connect(self.listener.getsockname())
+                        self.expected["remote"] = list(self.client.getsockname())
+                    self.driver = driver_module.ControlledDriver(time.monotonic() + 10,
+                                                                 self.receiver, self.expected)
+                    injected, reopened, signals, child_ptrace = {}, [], [], []
+                    original_ptrace = driver_module.ptrace
+
+                    def fail_grandchild_first_pin(pid, *args, **kwargs):
+                        if not injected and pid != self.driver.master:
+                            current = driver_module.process_snapshot(pid)
+                            parent = current["ppid"]
+                            if parent != self.driver.master and parent in self.driver.owned:
+                                self.driver._require_stop(parent)
+                                parent_stop = self.driver.stopped_tasks[parent]
+                                self.assertEqual(parent_stop["status"] >> 16, driver_module.FORK)
+                                self.assertEqual(driver_module.event_message(parent), pid)
+                                self.assertNotIn(pid, self.driver.owned)
+                                self.assertNotIn(pid, self.driver.registered)
+                                self.assertEqual(current["tracer_pid"], tracer)
+                                self.assertNotIn("exit_rval", self.driver.creations[parent])
+                                injected.update({
+                                    "child": pid, "parent": parent, "parent_pidfd": self.driver.owned[parent],
+                                    "parent_status": parent_stop["status"], "stop_object": id(parent_stop),
+                                    "creation": copy.deepcopy(self.driver.creations[parent]),
+                                    "generation": self.driver.ledger._generation(current),
+                                    "at": time.monotonic_ns(),
+                                })
+                        if injected and pid == injected["child"]:
+                            retry = self.driver.ledger.closed
+                            if retry:
+                                self.assertFalse(reopened)
+                                reopened.append(pid)
+                                parent_stop = self.driver.stopped_tasks[injected["parent"]]
+                                self.assertEqual((id(parent_stop), parent_stop["status"]),
+                                                 (injected["stop_object"], injected["parent_status"]))
+                                self.assertEqual(self.driver.owned[injected["parent"]], injected["parent_pidfd"])
+                                self.assertEqual(driver_module.event_message(injected["parent"]), pid)
+                                self.assertEqual(self.driver.creations[injected["parent"]], injected["creation"])
+                                self.assertEqual(self.driver.ledger._generation(driver_module.process_snapshot(pid)),
+                                                 injected["generation"])
+                            if not retry or persistent:
+                                if code == errno.EMFILE:
+                                    return self.real_emfile_pidfd(original_open, pid, *args, **kwargs)
+                                raise OSError(code, os.strerror(code))
+                        return original_open(pid, *args, **kwargs)
+
+                    def cleanup_child_ptrace(request, pid, data=0, address=0):
+                        if pid == injected.get("child"):
+                            self.assertNotIn(pid, self.driver.registered)
+                            if persistent:
+                                self.assertNotIn(pid, self.driver.owned)
+                                self.assertNotEqual(request, driver_module.SYSCALL)
+                                child_ptrace.append((request, data))
+                        return original_ptrace(request, pid, data, address)
+
+                    def original_task_wait(kind, descriptor, flags):
+                        if os.getpid() == tracer:
+                            if persistent and kind == os.P_PID:
+                                self.assertEqual(descriptor, injected["child"])
+                                self.assertTrue(flags & 0x40000000)
+                                self.assertFalse(flags & os.WCONTINUED)
+                            else:
+                                self.assertEqual(kind, os.P_PIDFD)
+                                self.assertNotEqual(descriptor, caller_pidfd)
+                        return original_waitid(kind, descriptor, flags)
+
+                    def fixture_waitpid(pid, flags):
+                        if os.getpid() == tracer:
+                            raise AssertionError("创建 child 失败清理不能消费数字 PID 等待状态")
+                        return original_waitpid(pid, flags)
+
+                    def fixture_stop(pid, delivered):
+                        if os.getpid() != tracer and pid == os.getpid() and delivered == signal.SIGSTOP:
+                            return original_kill(pid, delivered)
+                        raise AssertionError("创建 child 失败清理禁止数字 PID 发信号")
+
+                    def original_task_signal(descriptor, delivered, siginfo=None, flags=0):
+                        self.assertNotEqual(descriptor, caller_pidfd)
+                        pid = next(task for task, held in self.driver.owned.items() if held == descriptor)
+                        self.assertEqual(self.driver._pidfd_pid(descriptor), pid)
+                        signals.append((pid, delivered, time.monotonic_ns()))
+                        return original_signal(descriptor, delivered, siginfo, flags)
+
+                    with (
+                        patch.object(driver_module.os, "pidfd_open", fail_grandchild_first_pin),
+                        patch.object(driver_module.os, "waitid", original_task_wait),
+                        patch.object(driver_module.os, "waitpid", fixture_waitpid),
+                        patch.object(driver_module.os, "kill", fixture_stop),
+                        patch.object(driver_module.os, "killpg",
+                                     side_effect=AssertionError("创建 child 失败清理禁止进程组发信号")),
+                        patch.object(driver_module.signal, "pidfd_send_signal", original_task_signal),
+                        patch.object(driver_module, "ptrace", cleanup_child_ptrace),
+                    ):
+                        with self.assertRaises(driver_module.Failure) as failure:
+                            self.driver.run(lambda: self.cross_exec("setsid", ignore_sigchld=persistent))
+                    self.assertIsInstance(failure.exception.__cause__, OSError)
+                    self.assertEqual(failure.exception.__cause__.errno, code)
+                    self.assertEqual(resource.getrlimit(resource.RLIMIT_NOFILE), limits)
+                    evidence = self.driver.evidence
+                    self.assert_clean(evidence)
+                    self.assertNotIn("cleanup_error", evidence)
+                    self.assertTrue(injected)
+                    child, parent = injected["child"], injected["parent"]
+                    self.assertEqual(reopened, [child])
+                    pin_failure, = evidence["child_pin_failures"]
+                    expected = {"child_pid": child, "parent_pid": parent,
+                                "parent_pidfd": injected["parent_pidfd"],
+                                "parent_status": injected["parent_status"], "first_errno": code, "attempts": 2}
+                    self.assertEqual({key: pin_failure[key] for key in expected}, expected)
+                    self.assertTrue(pin_failure["first_error"])
+                    self.assertEqual(pin_failure["last_errno"], code)
+                    self.assertLess(injected["at"], pin_failure["resolved_monotonic_ns"])
+                    self.assertLess(evidence["last_normal_resume_monotonic_ns"], injected["at"])
+                    self.assertFalse(any(row["returned_monotonic_ns"] >= injected["at"]
+                                         for row in evidence["continues"]))
+                    self.assertEqual(len(evidence["first_stops"]), 1)
+                    self.assertEqual(evidence["discarded_creation_proofs"], [parent])
+                    self.assertFalse(evidence["messages"])
+                    kills = [(pid, at) for pid, delivered, at in signals if delivered == signal.SIGKILL]
+                    if persistent:
+                        self.assertTrue(pin_failure["cleanup_only"])
+                        self.assertFalse(any(row["pid"] == child for row in evidence["task_pins"]))
+                        self.assertNotIn(child, self.driver.registered)
+                        self.assertEqual({pid for pid, _ in kills}, {self.driver.master, parent})
+                        self.assertTrue(any(request == driver_module.GETSIGINFO
+                                            for request, _ in child_ptrace))
+                        self.assertIn((driver_module.CONT, signal.SIGKILL), child_ptrace)
+                        self.assertIn((driver_module.CONT, 0), child_ptrace)
+                        self.assertEqual(pin_failure["signal_info"]["signo"], signal.SIGSTOP)
+                        self.assertEqual(pin_failure["signal_info"]["errno"], 0)
+                        child_cleanup = [row for row in evidence["cleanup"] if row.get("pid") == child]
+                        self.assertEqual([row["kind"] for row in child_cleanup], [
+                            "unfixed-child-first-stop", "unfixed-child-exit-stop",
+                            "unfixed-child-terminal-retained", "unfixed-child-reaped"])
+                        self.assertEqual(child_cleanup[-1]["adopted_identity"]["ppid"], tracer)
+                        self.assertEqual(child_cleanup[-1]["adopted_identity"]["state"], "Z")
+                        self.assertEqual(child_cleanup[-1]["adopted_identity"]["starttime_ticks"],
+                                         injected["generation"]["starttime_ticks"])
+                        self.assertLess(pin_failure["terminal_monotonic_ns"], min(at for _, at in kills))
+                        order = [pin_failure[key] for key in (
+                            "first_stop_monotonic_ns", "terminal_monotonic_ns",
+                            "parent_terminal_monotonic_ns", "parent_reaped_monotonic_ns",
+                            "reaped_monotonic_ns", "resolved_monotonic_ns")]
+                        self.assertEqual(order, sorted(order))
+                    else:
+                        pinned = next(row for row in evidence["task_pins"] if row["pid"] == child)
+                        self.assertEqual((pinned["source"], pinned["parent_pid"]), ("cleanup", parent))
+                        self.assertEqual({pid for pid, _ in kills}, {self.driver.master, parent, child})
+                        self.assertLess(pinned["pinned_monotonic_ns"], min(at for _, at in kills))
+                    self.assert_tasks_reaped(child, parent, self.driver.master)
+                    state = original_waitid(os.P_PIDFD, caller_pidfd,
+                                            os.WSTOPPED | os.WNOHANG | os.WNOWAIT)
+                    self.assertEqual((state.si_pid, state.si_code, state.si_status),
+                                     (unrelated, os.CLD_STOPPED, signal.SIGSTOP))
+                    print(json.dumps({
+                        "kind": "child-first-pidfd-failure-cleanup-retry", "errno": code,
+                        "persistent": persistent,
+                        "child": child, "parent": parent, "master": self.driver.master,
+                        "real_syscall_failure": code == errno.EMFILE,
+                        "pin_failure": pin_failure, "pidfd_signals": signals,
+                        "caller_stop_preserved": True,
+                        "remaining_unfixed_children": evidence["remaining_unfixed_children"],
+                    }, sort_keys=True, separators=(",", ":")), flush=True)
+            original_waitid(os.P_PIDFD, caller_pidfd, os.WSTOPPED)
+            original_signal(caller_pidfd, signal.SIGCONT)
+            state = original_waitid(os.P_PIDFD, caller_pidfd, os.WEXITED)
+            self.assertEqual((state.si_pid, state.si_code, state.si_status),
+                             (unrelated, os.CLD_EXITED, 29))
+            caller_reaped = True
+        finally:
+            if not caller_reaped:
+                try:
+                    original_signal(caller_pidfd, signal.SIGKILL)
+                    original_waitid(os.P_PIDFD, caller_pidfd, os.WEXITED)
+                except (ProcessLookupError, ChildProcessError):
+                    pass
+            os.close(caller_pidfd)
+
+    def test_child_pin_failure_changed_parent_barrier_reports_unfixed_child(self):
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                     self.receiver, self.expected)
+        original_open, original_event = os.pidfd_open, driver_module.event_message
+        injected, rescue = {}, {}
+
+        def unavailable_child(pid, *args, **kwargs):
+            if not injected and pid != self.driver.master:
+                current = driver_module.process_snapshot(pid)
+                parent = current["ppid"]
+                if parent != self.driver.master and parent in self.driver.owned:
+                    injected.update({"child": pid, "parent": parent, "at": time.monotonic_ns()})
+                    rescue.update({task: os.dup(descriptor)
+                                   for task, descriptor in self.driver.owned.items()})
+                    raise OSError(errno.EPERM, os.strerror(errno.EPERM))
+            return original_open(pid, *args, **kwargs)
+
+        def changed_parent_event(pid):
+            child = original_event(pid)
+            if self.driver.ledger.closed and pid == injected.get("parent"):
+                return child + 1
+            return child
+
+        try:
+            with (
+                patch.object(driver_module.os, "pidfd_open", unavailable_child),
+                patch.object(driver_module, "event_message", changed_parent_event),
+            ):
+                with self.assertRaises(driver_module.Failure) as failure:
+                    self.driver.run(lambda: self.cross_exec("setsid"))
+            self.assertIsInstance(failure.exception.__cause__, OSError)
+            self.assertEqual(failure.exception.__cause__.errno, errno.EPERM)
+            evidence = copy.deepcopy(self.driver.evidence)
+            child, parent = injected["child"], injected["parent"]
+            self.assertEqual(evidence["remaining_unfixed_children"], [child])
+            self.assertRegex(evidence["cleanup_error"], "停止屏障已改变")
+            pin_failure, = evidence["child_pin_failures"]
+            self.assertEqual((pin_failure["first_errno"], pin_failure["attempts"]), (errno.EPERM, 1))
+            self.assertNotIn("resolved_monotonic_ns", pin_failure)
+            self.assertFalse(any(row.get("signal") == signal.SIGKILL for row in evidence["cleanup"]))
+            self.assertLess(evidence["last_normal_resume_monotonic_ns"], injected["at"])
+            self.assertNotIn(child, self.driver.registered)
+            self.assertNotIn(child, self.driver.owned)
+            self.assertTrue(Path(f"/proc/{child}").exists())
+            print(json.dumps({
+                "kind": "changed-parent-barrier-unfixed-child", **injected,
+                "cleanup_error": evidence["cleanup_error"],
+                "remaining_unfixed_children": evidence["remaining_unfixed_children"],
+            }, sort_keys=True, separators=(",", ":")), flush=True)
+        finally:
+            if rescue:
+                # 仅测试救场：撤销故障后恢复备用原 pidfd，不能覆盖已被复用的 FD 槽。
+                for task, descriptor in rescue.items():
+                    self.assertEqual(self.driver._pidfd_pid(descriptor), task)
+                    self.driver.owned[task] = descriptor
+                for unresolved in self.driver.unfixed_children.values():
+                    summary = unresolved["summary"]
+                    summary["parent_pidfd"] = rescue[summary["parent_pid"]]
+                previous = driver_module.ctypes.c_int()
+                self.assertEqual(driver_module.libc.prctl(driver_module.PR_GET_CHILD_SUBREAPER,
+                                                         driver_module.ctypes.byref(previous), 0, 0, 0), 0)
+                self.assertEqual(driver_module.libc.prctl(driver_module.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0), 0)
+                try:
+                    self.driver._cleanup()
+                finally:
+                    self.assertEqual(driver_module.libc.prctl(driver_module.PR_SET_CHILD_SUBREAPER,
+                                                             previous.value, 0, 0, 0), 0)
+                    for descriptor in rescue.values():
+                        try:
+                            os.close(descriptor)
+                        except OSError as error:
+                            if error.errno != errno.EBADF:
+                                raise
+                self.assert_tasks_reaped(injected["child"], injected["parent"], self.driver.master)
+                self.assertFalse(self.driver.unfixed_children)
 
     def test_self_group_changes_preserve_multigeneration_exec_history(self):
         marker = Path(self.temp.name) / "group-change-executed"
