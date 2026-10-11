@@ -18,6 +18,8 @@ PASSWORD=http-relay-password-secret-marker
 INPUT=${PRIVATE_ROOT}/http.json
 LOG=${TEST_ROOT}/command.log
 MODE=ok
+: >"${TEST_ROOT}/compose-calls.log"
+: >"${TEST_ROOT}/ipv6-network.log"
 fail() {
     [[ ! -f "${LOG}" ]] || sed 's/^/  /' "${LOG}" >&2
     printf 'docker-http-relay-regression-fail: %s\n' "$*" >&2
@@ -44,7 +46,7 @@ dockerTrafficScheduleInstall() { :; }
 dockerRenewalScheduleInstall() { :; }
 dockerGeoScheduleInstall() { :; }
 dockerTlsValidateCandidate() { :; }
-dockerIPv6NetworkManage() { :; }
+dockerIPv6NetworkManage() { printf '%s\n' "$*" >>"${TEST_ROOT}/ipv6-network.log"; }
 dockerManifestImageReference() {
     jq -er --arg image "$1" '.images[$image]' "${TEST_ROOT}/base.json"
 }
@@ -59,6 +61,7 @@ docker() {
     command docker "$@"
 }
 dockerComposeRun() {
+    printf '%s\n' "$*" >>"${TEST_ROOT}/compose-calls.log"
     [[ -e "${root}/locks/deployment.lock" ]] || fail '发布未持有部署锁'
     if [[ "${1:-}" == up && "${MODE}" == health-fail && ! -e "${TEST_ROOT}/failed-once" ]]; then
         : >"${TEST_ROOT}/failed-once"
@@ -188,6 +191,15 @@ for marker in 'del(."x-padm-relay-http")' '."x-padm-relay-http"=false'; do
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" || fail '旧包拒绝无 relay 规格'
 done
 cp -- "${TEST_ROOT}/schema.saved" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+jq '.relay.http.address_families=["ipv4"]' "${TEST_ROOT}/relay.json" >"${TEST_ROOT}/relay-ipv4.json"
+for marker in 'del(."x-padm-relay-http-ipv6")' '."x-padm-relay-http-ipv6"=false'; do
+    jq "${marker}" "${TEST_ROOT}/schema.saved" >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/relay.json"
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/relay-ipv4.json" ||
+        fail '旧包拒绝 IPv4 HTTP relay'
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" || fail '旧包拒绝无 relay 规格'
+done
+cp -- "${TEST_ROOT}/schema.saved" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
 for core in xray; do
     spec="${TEST_ROOT}/valid-${core}.json"
@@ -222,12 +234,38 @@ for core in xray; do
       [.services[$core].ports[]|select(endswith(":36080:36080/tcp"))]|sort ==
         ["0.0.0.0:36080:36080/tcp","[::]:36080:36080/tcp"]
     ' "${TEST_ROOT}/${core}.compose" >/dev/null
+    jq -e '
+      .networks.ipv6 == {name:"padm-docker-ipv6",enable_ipv6:true,
+        labels:{"io.padm.mode":"docker","io.padm.project":"padm-docker",
+          "io.padm.component":"routing-ipv6"}} and
+      .services.xray.networks == ["default","ipv6"] and .services["sing-box"].networks == null
+    ' "${TEST_ROOT}/${core}.compose" >/dev/null || fail 'HTTP IPv6 未独立附接中继核心'
     dockerGenerateDeployment "${spec}" "${TEST_ROOT}/${core}.deployment"
     jq -e --arg core "${core}" '
       [.listeners[]|select(.listener_id=="relay-http")] as $relay |
       $relay|length==1 and .[0].service==$core and .[0].public_port==36080
     ' "${TEST_ROOT}/${core}.deployment" >/dev/null
 done
+dockerGenerateCompose "${TEST_ROOT}/relay-ipv4.json" "${TEST_ROOT}/relay-ipv4.compose"
+jq -en --slurpfile ipv4 "${TEST_ROOT}/relay-ipv4.compose" --slurpfile dual "${TEST_ROOT}/xray.compose" '
+  $ipv4[0].networks.ipv6 == null and $ipv4[0].services.xray.networks == null and
+  ($dual[0] | del(.networks.ipv6,.services.xray.networks) |
+    .services.xray.ports -= ["[::]:36080:36080/tcp"]) == $ipv4[0]
+' >/dev/null || fail 'IPv4 relay 改变原网络或其它服务'
+jq '.routing.ipv6={mode:"selective",domains:["domain:ipv6.example.com"]}' \
+    "${TEST_ROOT}/relay.json" >"${TEST_ROOT}/relay-routing-ipv6.json"
+dockerConfigureSpecValidate "${TEST_ROOT}/relay-routing-ipv6.json"
+dockerGenerateCompose "${TEST_ROOT}/relay-routing-ipv6.json" "${TEST_ROOT}/relay-routing-ipv6.compose"
+jq -e '.services.xray.networks == ["default","ipv6"] and
+  .services["sing-box"].networks == ["default","ipv6"]' \
+    "${TEST_ROOT}/relay-routing-ipv6.compose" >/dev/null || fail 'HTTP relay 破坏 IPv6 出站附接'
+jq 'del(.relay)' "${TEST_ROOT}/relay-routing-ipv6.json" >"${TEST_ROOT}/routing-ipv6-only.json"
+dockerGenerateCompose "${TEST_ROOT}/routing-ipv6-only.json" "${TEST_ROOT}/routing-ipv6-only.compose"
+jq -en --slurpfile off "${TEST_ROOT}/routing-ipv6-only.compose" \
+    --slurpfile on "${TEST_ROOT}/relay-routing-ipv6.compose" '
+  ($on[0] | .services.xray.ports -=
+    ["0.0.0.0:36080:36080/tcp","[::]:36080:36080/tcp"]) == $off[0]
+' >/dev/null || fail '关闭 HTTP relay 删除仍需使用的 IPv6 出站网络'
 
 snapshot() (
     cd "${root}"
@@ -301,12 +339,29 @@ runStatus
 jq -e '.http_relay=={enabled:true,core:"xray",port:36080,
   address_families:["ipv4","ipv6"],source_ips:["127.0.0.1/32","::1/128"]}' "${LOG}" >/dev/null
 before=$(snapshot)
+composeCalls=$(wc -l <"${TEST_ROOT}/compose-calls.log")
+# 旧发布路径会折叠 IPv6 来源；恢复必须在停止在线服务前拒绝该快照。
+(
+    dockerBackupConfiguration
+    backup=${DOCKER_CONFIG_BACKUP}
+    jq 'del(.networks.ipv6,.services.xray.networks)' "${backup}/compose.json" >"${TEST_ROOT}/plain-bridge.compose"
+    cp -- "${TEST_ROOT}/plain-bridge.compose" "${backup}/compose.json"
+    reject dockerValidateConfigurationBackup "${backup}"
+    DOCKER_CONFIG_SWITCHED=1
+    reject dockerRestoreConfiguration
+) || fail '接受旧 IPv6 HTTP plain bridge 恢复点'
+[[ "$(wc -l <"${TEST_ROOT}/compose-calls.log")" == "${composeCalls}" ]] ||
+    fail '拒绝旧中继恢复点前执行了停服或启动'
+[[ "$(snapshot)" == "${before}" ]] || fail '拒绝旧中继恢复点改变在线部署'
 runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
 MODE=health-fail
 runEdit 14 --http-relay-off --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail '失败事务未恢复 relay、业务规格和流量'
 MODE=ok
+networkCalls=$(wc -l <"${TEST_ROOT}/ipv6-network.log")
 runEdit 0 --http-relay-off --confirm PADM-DOCKER-EDIT
+[[ "$(tail -n +$((networkCalls + 1)) "${TEST_ROOT}/ipv6-network.log")" == cleanup ]] ||
+    fail '关闭 HTTP IPv6 后未清理受管空网络'
 jq -en --slurpfile expected "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \
     '$expected==$actual' >/dev/null || fail '关闭 relay 删除其它 routing/account'
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload==17 and .accounts[$uuid].download==19' \

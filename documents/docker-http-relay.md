@@ -40,6 +40,13 @@ padm-docker edit --http-relay-off --confirm PADM-DOCKER-EDIT
 ```
 
 v3 规格保存为 `.relay.http`，控制包必须声明 `x-padm-relay-http`。
+当 `address_families` 包含 `ipv6` 时，Compose 会创建受管的
+`padm-docker-ipv6` bridge，并只把 HTTP 中继核心接入该网络；普通 IPv4 relay
+继续使用默认 bridge。这样 Docker DNAT 后核心仍能看到 IPv6 客户端来源。
+旧控制 bundle 缺少 `x-padm-relay-http-ipv6` 时拒绝双栈中继；旧 plain bridge
+备份也会在停止服务前拒绝恢复。旧部署升级前请先关闭 HTTP 中继或改为仅 IPv4，
+当前不自动迁移旧 Compose 网络。
+
 普通 `edit --spec` 不能改写已有中继的认证或来源，专项操作不能与其它编辑动作组合。
 配置、更新和回滚使用当前候选校验、备份及失败恢复流程；关闭只删除 HTTP 中继。
 
@@ -65,9 +72,10 @@ CONNECT 的目标 TLS 不会加密客户端到代理的 Basic 认证头。
 定向回归为 `docker-http-relay`、`docker-http-relay-real`、
 `docker-http-relay-published-real`，统一由 `shell/regression/run-docker.ps1` 运行。
 发布专项用隔离 Linux daemon、生产 Compose 端口和外部 veth 客户端验证 DNAT 来源，
-不借真实宿主 Socket 或公网。业务容器维持 UID `10001`、只读根和零 capabilities。
+不借真实宿主 Socket 或公网；当前已覆盖 IPv4/IPv6 发布、真实 veth 来源和白名单。
+业务容器维持 UID `10001`、只读根和零 capabilities。
 
-原生 Linux 宿主生命周期、公网/IPv6 发布、arm64 和可信发布仍需独立验收；
+原生 Linux 宿主生命周期、公网、arm64 和可信发布仍需独立验收；
 `internal-202` 的完整矩阵继续为 `deferred`。SOCKS `201` 仍未交付：
 sing-box UDP ASSOCIATE 返回容器私网地址和动态端口，仅发布固定 TCP/UDP 同端口
 不能保证回包可达，不能删掉 UDP 语义或伪装为完成。

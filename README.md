@@ -291,6 +291,9 @@ CSV 去首尾空白、转小写、按首次出现去重，裸域名补 `domain:`
 菜单 `17` 的 `22/23` 或 `--direct-domains-add/--block-domains-add` 可增量追加：
 保留原规则顺序，再添加首次出现的新项；对应组缺失时创建，合并后超过 256 条拒绝。
 重复追加不重复规则，确认仍沿用部署事务，可能更新回滚元数据。
+菜单 `17` 的 `24/25` 或 `--direct-domains-remove/--block-domains-remove` 可精确删除：
+输入中的每条规范化规则必须已存在于对应手工列表，否则整次操作拒绝；删除保留剩余顺序，
+最后一条删除后清理该子项。不会删除区域策略、IP/CIDR 或其它路由子项。
 仍保留 root 私有 JSON 导入，格式均为
 `{"domains":["full:exact.example.net","domain:example.org","keyword:example","geosite:cn"]}`。
 规则接受 1–256 条唯一小写 `full/domain/keyword/geosite`，四类保持 OR；
@@ -306,6 +309,8 @@ padm-docker edit --direct-domains 'example.org,full:exact.example.net' --preview
 padm-docker edit --block-domains 'keyword:example,geosite:cn' --confirm PADM-DOCKER-EDIT
 padm-docker edit --direct-domains-add 'full:updates.example.org' --preview
 padm-docker edit --block-domains-add 'domain:ads.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --direct-domains-remove 'full:updates.example.org' --preview
+padm-docker edit --block-domains-remove 'domain:ads.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --direct-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-off --confirm PADM-DOCKER-EDIT
 ```
@@ -313,6 +318,8 @@ padm-docker edit --block-off --confirm PADM-DOCKER-EDIT
 v3 `.routing.direct`、`.routing.block` 要求控制包声明 `x-padm-routing-direct-block`。
 各子项独立关闭，最后一项关闭才删除 routing；普通 `--spec` 不能更改路由。
 `routing-status` 追加 Direct/Block 域名规则，不改变现有 SOCKS5 状态字段含义。
+只读 `direct_block_overlaps` 按 Direct 顺序列出手工 Direct/Block 的完整规则字符串交集。
+Direct 保持优先；不推断域名包含、分类成员或区域合成，不把重叠当作配置错误。
 
 菜单 `17` 的 IP/CIDR 阻断使用独立 v3 `.routing.block_ips`，私有 JSON 为
 `{"ips":["192.0.2.8","198.51.100.0/24","2001:db8::/32","geoip:cn"]}`。
@@ -484,7 +491,8 @@ WS/SSH Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名；
 普通 `edit --spec` 不能新增或改写别名；删除入口同步清理其别名，复制不继承。
 旧控制 bundle 缺少 `x-padm-port-aliases` 时拒绝配置、更新或恢复带别名的规格。
 带默认分享标记的规格还要求 `x-padm-port-alias-default`，不能回滚到忽略该标记的旧 bundle。
-公网、IPv6 发布、原生宿主及 arm64 仍需独立验收，完整 `207` 保持 `deferred`。
+双栈发布已在隔离 amd64 Linux daemon 验收；公网、原生宿主及 arm64 仍需独立验收，
+完整 `207` 保持 `deferred`。
 
 菜单“协议与入口 → CDN 连接地址”可为已有 `21/22/23` WS/HTTPUpgrade TLS
 入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。

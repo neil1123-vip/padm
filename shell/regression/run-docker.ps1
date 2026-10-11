@@ -382,6 +382,16 @@ try {
         }
         if ($Selector -in @('docker-fail2ban-real', 'docker-tproxy-real')) {
             $references = [ordered]@{ net = 'padm-local/padm-net:control-4c4b' }
+        } elseif ($Selector -eq 'docker-http-relay-published-real') {
+            $references = [ordered]@{
+                xray = 'padm-local/padm-xray:control-4c4b'
+                ops = 'padm-local/padm-ops:control-4c4b'
+            }
+        } elseif ($Selector -eq 'docker-entry-port-alias-real') {
+            $references = [ordered]@{
+                xray = 'padm-local/padm-xray:control-4c4b'
+                'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
+            }
         } elseif ($Selector -in @('docker-cdn-entries-real', 'docker-alpn-real')) {
             $references.Remove('net')
             if ($Selector -eq 'docker-alpn-real') {

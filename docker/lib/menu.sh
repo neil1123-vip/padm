@@ -790,7 +790,8 @@ dockerMenuRouting() {
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' \
             '17. 关闭 BT 协议阻断' '18. 区域阻断策略' '19. IPv6 域名出站' '20. WARP 出站' \
             '21. HTTP 中继入站' '22. 追加 Direct 直连例外' \
-            '23. 追加 Block 域名阻断' '0. 返回'
+            '23. 追加 Block 域名阻断' '24. 删除 Direct 直连例外' \
+            '25. 删除 Block 域名阻断' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -856,6 +857,15 @@ dockerMenuRouting() {
                 dockerMenuRun edit --direct-domains-add "${input}" || true
             else
                 dockerMenuRun edit --block-domains-add "${input}" || true
+            fi
+            ;;
+        24|25)
+            dockerSetupRead input '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${input}" ]] || continue
+            if [[ "${choice}" == 24 ]]; then
+                dockerMenuRun edit --direct-domains-remove "${input}" || true
+            else
+                dockerMenuRun edit --block-domains-remove "${input}" || true
             fi
             ;;
         *) printf '无效选项，请重新选择。\n' ;;

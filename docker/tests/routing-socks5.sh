@@ -1724,7 +1724,7 @@ fi
 before=$(snapshot)
 runStatus 0
 jq -e '. == {enabled:false,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",domain_rules:[],
-  http_relay:{enabled:false}}' "${LOG}" >/dev/null ||
+  direct_block_overlaps:[],http_relay:{enabled:false}}' "${LOG}" >/dev/null ||
     fail '关闭路由诊断合同错误'
 runStatus 2 unexpected
 runEdit 0 --socks5 "${INPUT}" --preview
@@ -1840,7 +1840,7 @@ runEdit 15 --spec "${TEST_ROOT}/routing-replacement.json" --confirm PADM-DOCKER-
 [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过路由专项冻结'
 runStatus 0
 jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[],
-  http_relay:{enabled:false}}' \
+  direct_block_overlaps:[],http_relay:{enabled:false}}' \
     "${LOG}" >/dev/null || fail '开启路由诊断合同错误'
 runEdit 0 --socks5 "${DOMAINS_INPUT}" --preview
 [[ "$(snapshot)" == "${before}" ]] || fail '选择性启用预览改变在线部署'
@@ -1850,7 +1850,7 @@ jq -en --slurpfile expected "${TEST_ROOT}/domains.json" --slurpfile actual "${ro
 runStatus 0
 jq -e --argjson domains "${DOMAINS}" '
   . == {enabled:true,server:"203.0.113.9",port:1080,tcp:"matched-socks5",
-        udp:"matched-blocked",mode:"domains",domain_rules:$domains,http_relay:{enabled:false}}
+        udp:"matched-blocked",mode:"domains",domain_rules:$domains,direct_block_overlaps:[],http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail '选择性路由诊断合同错误'
 before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/routed.json" --confirm PADM-DOCKER-EDIT
@@ -1870,7 +1870,7 @@ jq -en --argjson domains "${replacementDomains}" --slurpfile old "${TEST_ROOT}/r
 runStatus 0
 jq -e --argjson domains "${replacementDomains}" '
   . == {enabled:true,server:"203.0.113.9",port:1080,tcp:"matched-socks5",
-        udp:"matched-blocked",mode:"domains",domain_rules:$domains,http_relay:{enabled:false}}
+        udp:"matched-blocked",mode:"domains",domain_rules:$domains,direct_block_overlaps:[],http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail '规则替换后状态没有返回规范化数组'
 before=$(snapshot)
 for failure in health-fail int term; do
@@ -1892,7 +1892,7 @@ jq -en --slurpfile expected "${TEST_ROOT}/routed.json" --slurpfile actual "${roo
     '$actual == $expected' >/dev/null || fail '切换全局没有仅删除 domains 或改变凭据'
 runStatus 0
 jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[],
-  http_relay:{enabled:false}}' \
+  direct_block_overlaps:[],http_relay:{enabled:false}}' \
     "${LOG}" >/dev/null || fail '切换全局后状态合同错误'
 runEdit 0 --socks5-domains 'example.net' --confirm PADM-DOCKER-EDIT
 runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
@@ -2021,6 +2021,17 @@ for kind in direct block; do
     runEdit 2 "${addOption}" "${DOMAINS_CSV}" --socks5-off --preview
     runEdit 2 "${addOption}" "${DOMAINS_CSV}" --spec "${TEST_ROOT}/base.json" --preview
     runEdit 2 "${addOption}" "${DOMAINS_CSV}" --http01 enable --preview
+    removeOption="${option}-remove"
+    runEdit 15 "${removeOption}" "${DOMAINS_CSV}" --preview
+    runEdit 2 "${removeOption}"
+    runEdit 2 "${removeOption}" '' --preview
+    runEdit 2 "${removeOption}" --preview
+    runEdit 2 "${removeOption}" 'regexp:.*' --preview
+    runEdit 2 "${removeOption}" "${DOMAINS_CSV}" "${removeOption}" 'other.example.net' --preview
+    runEdit 2 "${removeOption}" "${DOMAINS_CSV}" "${addOption}" 'other.example.net' --preview
+    runEdit 2 "${removeOption}" "${DOMAINS_CSV}" "--${kind}-off" --preview
+    runEdit 2 "${removeOption}" "${DOMAINS_CSV}" --socks5-off --preview
+    runEdit 2 "${removeOption}" "${DOMAINS_CSV}" --spec "${TEST_ROOT}/base.json" --preview
 done
 runEdit 2 --dns "${DNS_INPUT}" --hosts "${HOSTS_INPUT}" --preview
 runEdit 2 --dns-off --hosts-off --preview
@@ -2050,7 +2061,7 @@ runStatus 0
 jq -e --argjson dns "${DNS}" '
   . == {enabled:true,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",
         domain_rules:[],dns:{server:$dns.server,port:$dns.port,domain_rules:$dns.domains},
-        http_relay:{enabled:false}}
+        direct_block_overlaps:[],http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail 'DNS 独立状态合同错误'
 before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
@@ -2136,15 +2147,18 @@ jq -en --slurpfile expected "${TEST_ROOT}/direct-only.json" --slurpfile actual "
     '$actual == $expected' >/dev/null || fail 'Direct CSV 追加缺项未创建规范化规则或改变其它规格'
 runStatus 0
 jq -e --argjson domains "${DOMAINS}" '.enabled == true and .direct == {domain_rules:$domains} and
-  (has("block") | not)' "${LOG}" >/dev/null || fail 'Direct 状态投影错误'
+  .direct_block_overlaps == [] and (has("block") | not)' "${LOG}" >/dev/null || fail 'Direct 状态投影错误'
 before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
 runEdit 15 --spec "${TEST_ROOT}/block-only.json" --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过 Direct/Block 冻结'
 runEdit 0 --block-domains-add "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
+before=$(snapshot)
 runStatus 0
 jq -e --argjson domains "${DOMAINS}" '.direct == {domain_rules:$domains} and
-  .block == {domain_rules:$domains}' "${LOG}" >/dev/null || fail 'Direct/Block 同域状态未保留两项'
+  .block == {domain_rules:$domains} and .direct_block_overlaps == $domains' \
+    "${LOG}" >/dev/null || fail 'Direct/Block 同域状态未保留两项或遗漏精确交集'
+[[ "$(snapshot)" == "${before}" ]] || fail 'Direct/Block 精确交集诊断改变部署'
 [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
     fail 'Direct/Block 规格未保留 root 私有权限'
 before=$(snapshot)
@@ -2173,6 +2187,9 @@ jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile ac
 csvReplacement=' geosite:CN , KEYWORD:Next_Video , Full:New.Example.ORG , New.Example.NET , full:new.example.org '
 csvReplacementDomains='["geosite:cn","keyword:next_video","full:new.example.org","domain:new.example.net"]'
 csvAppendedDomains='["geosite:cn","keyword:next_video","full:new.example.org","domain:new.example.net","full:exact.example.com","full:other.example.com","domain:example.net","keyword:video","geosite:category-ads-all"]'
+csvRemoval=' Full:Exact.Example.Com , Example.NET , KEYWORD:Video , geosite:CN , example.net , FULL:EXACT.EXAMPLE.COM '
+csvRemovedDomains='["keyword:next_video","full:new.example.org","domain:new.example.net","full:other.example.com","geosite:category-ads-all","domain:exact.example.com"]'
+runEdit 0 --region domain --region-allow 'exact.example.com,full:exact.example.com' --confirm PADM-DOCKER-EDIT
 for kind in direct block; do
     option="--${kind}-domains"
     before=$(snapshot)
@@ -2225,22 +2242,74 @@ for kind in direct block; do
     jq -e --arg kind "${kind}" --argjson domains "${csvAppendedDomains}" \
         '.[$kind].domain_rules==$domains' "${LOG}" >/dev/null ||
         fail "${kind}: 追加状态未保留历史和新值的稳定次序"
+    # 删除只匹配手工列表的完整规则；同域的 full/domain 与区域例外各自保留。
+    runEdit 0 "${addOption}" 'Exact.Example.COM' --confirm PADM-DOCKER-EDIT
+    if [[ "${kind}" == direct ]]; then
+        before=$(snapshot)
+        runStatus 0
+        jq -e '.direct_block_overlaps == ["geosite:cn","full:exact.example.com","full:other.example.com",
+          "domain:example.net","keyword:video","geosite:category-ads-all"]' "${LOG}" >/dev/null ||
+            fail '精确交集未保持 Direct 次序或把同主机 full/domain 误报为交集'
+        [[ "$(snapshot)" == "${before}" ]] || fail '有区域策略的精确交集诊断改变部署'
+    fi
+    removeOption="${option}-remove"
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/csv-remove-before.json"
+    before=$(snapshot)
+    runEdit 0 "${removeOption}" "${csvRemoval}" --preview
+    runEdit 15 "${removeOption}" 'missing.example.com' --confirm PADM-DOCKER-EDIT
+    runEdit 15 "${removeOption}" "${csvRemoval},missing.example.com" --confirm PADM-DOCKER-EDIT
+    jq --arg kind "${kind}" --argjson domains "${csvRemovedDomains}" \
+        '.routing[$kind].domains=$domains' "${root}/config/spec.json" >"${TEST_ROOT}/csv-remove-import.json"
+    runEdit 15 --spec "${TEST_ROOT}/csv-remove-import.json" --confirm PADM-DOCKER-EDIT
+    if [[ "${kind}" == direct ]]; then
+        (
+            trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+            dockerSetupRead() { printf -v "$1" '%s' n; }
+            dockerAcquireDeploymentLock
+            dockerConfigureApply "${TEST_ROOT}/csv-remove-import.json" '' '' interactive
+        ) >"${LOG}" 2>&1 || fail 'CSV 删除确认取消失败'
+        assertClean
+        MODE=health-fail
+        rm -f -- "${TEST_ROOT}/failed-once"
+        runEdit 14 "${removeOption}" "${csvRemoval}" --confirm PADM-DOCKER-EDIT
+        MODE=ok
+    fi
+    [[ "$(snapshot)" == "${before}" ]] ||
+        fail "${kind}: CSV 删除预览、缺项、部分缺项、普通导入、取消或健康失败改变部署"
+    runEdit 0 "${removeOption}" "${csvRemoval}" --confirm PADM-DOCKER-EDIT
+    jq -en --arg kind "${kind}" --argjson domains "${csvRemovedDomains}" \
+        --slurpfile old "${TEST_ROOT}/csv-remove-before.json" --slurpfile new "${root}/config/spec.json" '
+      $new[0] == ($old[0] | .routing[$kind].domains=$domains)
+    ' >/dev/null || fail "${kind}: CSV 删除未精确匹配、保留次序与同域 domain 规则，或改变其它策略"
+    before=$(snapshot)
+    runStatus 0
+    jq -e --arg kind "${kind}" --argjson domains "${csvRemovedDomains}" \
+        '.[$kind].domain_rules==$domains' "${LOG}" >/dev/null ||
+        fail "${kind}: CSV 删除状态未反映剩余有序规则"
+    if [[ "${kind}" == direct ]]; then
+        jq -e '.direct_block_overlaps == ["full:other.example.com","geosite:category-ads-all"]' \
+            "${LOG}" >/dev/null || fail '删除后精确交集未更新或混入区域合成、同主机 full/domain 规则'
+    fi
+    [[ "$(snapshot)" == "${before}" ]] || fail "${kind}: 删除后的精确交集诊断改变部署"
+    before=$(snapshot)
+    runEdit 15 "${removeOption}" "${csvRemoval}" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail "${kind}: 重复删除改变部署"
     for core in xray sing-box; do
         jq -en --arg core "${core}" --slurpfile old "${TEST_ROOT}/csv-${core}.before" \
             --slurpfile new "${root}/config/${core}/config.json" '
           if $core == "xray" then ($old[0]|del(.routing)) == ($new[0]|del(.routing))
           else ($old[0]|del(.route)) == ($new[0]|del(.route)) end
-        ' >/dev/null || fail "${kind}: ${core} CSV 替换改变核心认证、监听或其它模板字段"
+        ' >/dev/null || fail "${kind}: ${core} CSV 替换、追加或删除改变核心认证、监听或其它模板字段"
     done
     (dockerMain protocol links) >"${TEST_ROOT}/csv-links.after"
     cmp -s "${TEST_ROOT}/csv-links.before" "${TEST_ROOT}/csv-links.after" ||
-        fail "${kind}: CSV 替换改变分享 URI"
+        fail "${kind}: CSV 替换、追加或删除改变分享 URI"
     sha256sum -c "${TEST_ROOT}/csv-traffic.before" >/dev/null ||
-        fail "${kind}: CSV 替换改变流量累计"
+        fail "${kind}: CSV 替换、追加或删除改变流量累计"
     find "${root}/data/subscription" -type f -print0 | sort -z | xargs -0 -r sha256sum \
         >"${TEST_ROOT}/csv-subscription.after"
     cmp -s "${TEST_ROOT}/csv-subscription.before" "${TEST_ROOT}/csv-subscription.after" ||
-        fail "${kind}: CSV 替换改变已发布订阅"
+        fail "${kind}: CSV 替换、追加或删除改变已发布订阅"
     before=$(snapshot)
     for failure in health-fail int term; do
         MODE=${failure}
@@ -2270,6 +2339,7 @@ for kind in direct block; do
         runEdit 0 "--${kind}" "${PRIVATE_ROOT}/${kind}.json" --confirm PADM-DOCKER-EDIT
     fi
 done
+runEdit 0 --region-off --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail 'CSV 替换后原 JSON 管理接口未恢复规则集合'
 before=$(snapshot)
@@ -2288,18 +2358,21 @@ MODE=ok
 runEdit 0 --block-ips-off --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '关闭 IP 阻断删除其它路由子项'
-runEdit 0 --direct-off --confirm PADM-DOCKER-EDIT
+runEdit 0 --direct-domains-remove "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual[0] == ($expected[0] | del(.routing.direct))' >/dev/null ||
-    fail '关闭 Direct 删除其它路由子项'
+    fail '删除全部 Direct 规则未清理该子项或删除其它路由子项'
 runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
 runEdit 0 --dns-off --confirm PADM-DOCKER-EDIT
 runEdit 0 --hosts-off --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/block-only.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '关闭其它路由子项删除 Block'
-runEdit 0 --block-off --confirm PADM-DOCKER-EDIT
+runEdit 0 --block-domains-remove "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
-    '$new == $old' >/dev/null || fail '关闭最后 Block 没有删除空 routing'
+    '$new == $old' >/dev/null || fail '删除全部 Block 规则没有删除空 routing'
+before=$(snapshot)
+runEdit 15 --block-domains-remove "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail '未启用 Block 删除规则改变部署'
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail 'Direct/Block 事务清空流量'
 runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT

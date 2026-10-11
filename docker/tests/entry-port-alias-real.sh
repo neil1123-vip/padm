@@ -34,13 +34,13 @@ jq -n '
    release:{version:"3.9.9",manifest_sha256:("a"*64),signature_identity:"fixture"},
    core:{type:"xray",secondary_type:"sing-box",protocols:[
      {id:1,core:"xray",listener_id:"entry-xray",server:"alias.padm.test",
-      public_port:35441,address_families:["ipv4"],name:"xray-account",
+      public_port:35441,address_families:["ipv4","ipv6"],name:"xray-account",
       uuid:"11111111-1111-4111-8111-111111111111",
       reality:{server_name:"target.padm.test",target_host:"target.padm.test",target_port:18443,
         private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
         public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",short_id:"1234"}},
      {id:30,core:"sing-box",listener_id:"entry-sing-box",server:"alias.padm.test",
-      public_port:35442,address_families:["ipv4"],name:"sing-box-account",
+      public_port:35442,address_families:["ipv4","ipv6"],name:"sing-box-account",
       uuid:"22222222-2222-4222-8222-222222222222",
       shadowsocks:{method:"2022-blake3-aes-128-gcm",
         server_password:"AAECAwQFBgcICQoLDA0ODw==",
@@ -65,6 +65,14 @@ for phase in off on selected; do
     dockerDeploymentFileValidate "${TEST_ROOT}/${phase}.deployment.json"
     jq '.subscription.enabled=true' "${spec}" >"${TEST_ROOT}/${phase}.links.spec.json"
     dockerGenerateSubscription "${TEST_ROOT}/${phase}.links.spec.json" "${TEST_ROOT}/${phase}.links"
+    for family in ipv4 ipv6; do
+        server=198.18.1.1
+        [[ "${family}" == ipv4 ]] || server=2001:db8:1::1
+        jq --arg server "${server}" '.core.protocols[].server=$server' \
+            "${TEST_ROOT}/${phase}.links.spec.json" >"${TEST_ROOT}/${phase}.${family}.links.spec.json"
+        dockerGenerateSubscription "${TEST_ROOT}/${phase}.${family}.links.spec.json" \
+            "${TEST_ROOT}/${phase}.${family}.links"
+    done
     for core in xray sing-box; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${spec}" "${TEST_ROOT}/${phase}.${core}.base"
@@ -77,6 +85,9 @@ for phase in off on selected; do
 done
 # alias 只增加发布，不生成账号、核心入站或新的分享身份。
 cmp "${TEST_ROOT}/on.links" "${TEST_ROOT}/off.links"
+for family in ipv4 ipv6; do
+    cmp "${TEST_ROOT}/on.${family}.links" "${TEST_ROOT}/off.${family}.links"
+done
 for core in xray sing-box; do
     cmp "${TEST_ROOT}/on.${core}.base" "${TEST_ROOT}/off.${core}.base"
     cmp "${TEST_ROOT}/on.${core}.json" "${TEST_ROOT}/off.${core}.json"
@@ -87,7 +98,7 @@ cmp "${TEST_ROOT}/on.compose.json" "${TEST_ROOT}/selected.compose.json"
 cmp "${TEST_ROOT}/on.deployment.json" "${TEST_ROOT}/selected.deployment.json"
 jq -e '
   [.listeners[] | select(.listener_id | startswith("alias-"))] |
-  length == 3 and
+  length == 3 and all(.[]; .address_families==["ipv4","ipv6"]) and
   any(.[]; .listener_id=="alias-36441-tcp" and .target_listener_id=="entry-xray" and
     .service=="xray" and .container_port==35441) and
   all(.[] | select(.public_port==36442); .target_listener_id=="entry-sing-box" and

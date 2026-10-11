@@ -26,6 +26,7 @@
   "x-padm-routing-ipv6": true,
   "x-padm-routing-warp": true,
   "x-padm-relay-http": true,
+  "x-padm-relay-http-ipv6": true,
   "x-padm-port-aliases": true,
   "x-padm-port-alias-default": true,
   "x-padm-cdn-entry-addresses": true,

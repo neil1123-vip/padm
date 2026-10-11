@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import base64
+import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import shutil
 import signal
@@ -21,6 +23,8 @@ helpers = runpy.run_path(str(SCRIPT.with_name("control-two-deployment-real.py"))
 command, stop = (helpers[name] for name in ("command", "stop"))
 PORT, ORIGIN_PORT = 38180, 18080
 HOST, ALLOWED, DENIED = "198.18.1.1", "198.18.1.2", "198.18.1.3"
+HOST6, ALLOWED6, DENIED6 = "2001:db8:1::1", "2001:db8:1::2", "2001:db8:1::3"
+HOSTS = {"ipv4": HOST, "ipv6": HOST6}
 USER, PASSWORD = "relay-user", "relay:password"
 BODY = b"http-published-origin-ok"
 
@@ -69,7 +73,7 @@ def fixture(root):
         thread.join(1)
 
 
-def request(origin, method, auth):
+def request(origin, method, auth, family):
     credentials = b""
     if auth != "none":
         password = PASSWORD if auth == "valid" else "wrong-password"
@@ -77,11 +81,14 @@ def request(origin, method, auth):
             f"{USER}:{password}".encode()) + b"\r\n"
     destination = f"{origin}:{ORIGIN_PORT}".encode()
     target = destination if method == "CONNECT" else b"http://" + destination + b"/published-check"
-    with socket.create_connection((HOST, PORT), timeout=1.5) as stream:
+    forged = ALLOWED if family == "ipv4" else ALLOWED6
+    forwarded = forged if family == "ipv4" else f'"[{forged}]"'
+    with socket.create_connection((HOSTS[family], PORT), timeout=1.5) as stream:
+        assert stream.family == (socket.AF_INET if family == "ipv4" else socket.AF_INET6)
         # 代理头故意伪造为允许来源，来源判定必须使用真实 Linux TCP 来源。
         stream.sendall(method.encode() + b" " + target + b" HTTP/1.1\r\nHost: " + destination +
-                       b"\r\n" + credentials + b"X-Forwarded-For: " + ALLOWED.encode() +
-                       b"\r\nForwarded: for=" + ALLOWED.encode() +
+                       b"\r\n" + credentials + b"X-Forwarded-For: " + forged.encode() +
+                       b"\r\nForwarded: for=" + forwarded.encode() +
                        b"\r\nConnection: close\r\n\r\n")
         try:
             response = headers(stream)
@@ -131,8 +138,11 @@ def permissions(value, ports):
     assert value["Config"]["User"] == "10001:10001"
     assert "no-new-privileges:true" in host["SecurityOpt"]
     if ports:
-        assert host["PortBindings"][f"{PORT}/tcp"] == [
-            dict(HostIp="0.0.0.0", HostPort=str(PORT))]
+        expected = [dict(HostIp="0.0.0.0", HostPort=str(PORT)),
+                    dict(HostIp="::", HostPort=str(PORT))]
+        assert sorted(host["PortBindings"][f"{PORT}/tcp"],
+                      key=lambda row: row["HostIp"]) == sorted(
+                          expected, key=lambda row: row["HostIp"])
     else:
         assert not host["PortBindings"]
 
@@ -140,7 +150,11 @@ def permissions(value, ports):
 def namespaces():
     processes = []
     try:
-        for number, address, gateway in ((2, ALLOWED, HOST), (3, DENIED, "198.18.1.4")):
+        for scope in ("all", "default"):
+            command(["sysctl", "-q", "-w", f"net.ipv6.conf.{scope}.disable_ipv6=0"])
+        for number, address, gateway, address6, gateway6 in (
+                (2, ALLOWED, HOST, ALLOWED6, HOST6),
+                (3, DENIED, "198.18.1.4", DENIED6, "2001:db8:1::4")):
             process = subprocess.Popen(["unshare", "--net", "--", "sleep", "120"])
             processes.append(process)
             wait_ready(lambda: Path(f"/proc/{process.pid}/ns/net").readlink() !=
@@ -150,18 +164,26 @@ def namespaces():
             command(["ip", "link", "add", host, "type", "veth", "peer", "name", peer])
             command(["ip", "link", "set", peer, "netns", str(process.pid)])
             command(["ip", "address", "add", f"{gateway}/32", "dev", host])
+            command(["ip", "-6", "address", "add", f"{gateway6}/128", "dev", host, "nodad"])
             command(["ip", "link", "set", host, "up"])
             command(["ip", "route", "add", f"{address}/32", "dev", host])
+            command(["ip", "-6", "route", "add", f"{address6}/128", "dev", host])
+            for scope in ("all", "default", peer):
+                command(enter + ["sysctl", "-q", "-w", f"net.ipv6.conf.{scope}.disable_ipv6=0"])
             command(enter + ["ip", "link", "set", "lo", "up"])
             command(enter + ["ip", "address", "add", f"{address}/32", "dev", peer])
+            command(enter + ["ip", "-6", "address", "add", f"{address6}/128", "dev", peer, "nodad"])
             command(enter + ["ip", "link", "set", peer, "up"])
             command(enter + ["ip", "route", "add", f"{gateway}/32", "dev", peer])
             command(enter + ["ip", "route", "add", "default", "via", gateway, "dev", peer])
+            command(enter + ["ip", "-6", "route", "add", f"{gateway6}/128", "dev", peer])
+            command(enter + ["ip", "-6", "route", "add", "default", "via", gateway6, "dev", peer])
             for scope in ("all", "default", peer):
                 command(enter + ["sysctl", "-q", "-w", f"net.ipv4.conf.{scope}.rp_filter=0"])
         for scope in ("all", "default", "prh2", "prh3"):
             command(["sysctl", "-q", "-w", f"net.ipv4.conf.{scope}.rp_filter=0"])
         command(["sysctl", "-q", "-w", "net.ipv4.ip_forward=1"])
+        command(["sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"])
         return processes
     except BaseException:
         for process in processes:
@@ -231,7 +253,14 @@ def run(root):
                 current = json.loads((root / f"{core}.compose.json").read_text())
                 service = current["services"][core]
                 ports = list(service["ports"])
-                assert f"0.0.0.0:{PORT}:{PORT}/tcp" in ports
+                assert all(f"{host}:{PORT}:{PORT}/tcp" in ports for host in ("0.0.0.0", "[::]"))
+                assert not current["networks"]["default"].get("enable_ipv6", False)
+                assert current["networks"]["ipv6"] == dict(
+                    name="padm-docker-ipv6", enable_ipv6=True,
+                    labels={"io.padm.mode": "docker", "io.padm.project": "padm-docker",
+                            "io.padm.component": "routing-ipv6"})
+                assert service["networks"] == ["default", "ipv6"]
+                assert current["services"]["sing-box"].get("networks") is None
                 # 保留生产 ports 和安全限制；仅换离线镜像、当前配置与测试日志入口。
                 service.update(image=inputs[core]["image_id"],
                                volumes=[dict(type="bind", source=str(config_path),
@@ -254,39 +283,47 @@ def run(root):
                 assert fields["Uid"].split() == ["10001"] * 4
                 assert int(fields["CapEff"], 16) == 0 and int(fields["CapBnd"], 16) == 0
                 core_ip = value["NetworkSettings"]["Networks"]["padm-docker"]["IPAddress"]
-                wait_ready(lambda: published_listener(clients[0]))
+                core_ipv6 = value["NetworkSettings"]["Networks"]["padm-docker-ipv6"]["GlobalIPv6Address"]
+                assert ipaddress.ip_address(core_ipv6).version == 6
+                network = json.loads(command(docker + ["network", "inspect", "padm-docker-ipv6"]))[0]
+                assert network["EnableIPv6"] and network["Driver"] == "bridge"
+                assert network["Labels"]["io.padm.component"] == "routing-ipv6"
+                wait_ready(lambda: all(published_listener(clients[0], family) for family in HOSTS))
                 for method in ("GET", "CONNECT"):
-                    for client, auth, accepted in ((clients[0], "valid", True),
-                                                  (clients[1], "valid", False),
-                                                  (clients[0], "wrong", False),
-                                                  (clients[0], "none", False)):
-                        before = len(rows(proof))
-                        output = command(["nsenter", "--target", str(client.pid), "--net", "--",
-                                          "python3", str(SCRIPT), "client", origin_ip, method, auth],
-                                         timeout=5)
-                        result = json.loads(output)
-                        assert result["accepted"] == accepted, (core, method, auth, result)
-                        delta = rows(proof)[before:]
-                        assert len(delta) == int(accepted), (core, method, auth, delta)
-                        if delta:
-                            assert delta[0]["source"] == core_ip, delta
+                    for family in HOSTS:
+                        for index, client in enumerate(clients):
+                            for auth in ("valid", "wrong", "none"):
+                                accepted = index == 0 and auth == "valid"
+                                before = len(rows(proof))
+                                output = command(["nsenter", "--target", str(client.pid), "--net", "--",
+                                                  "python3", str(SCRIPT), "client", origin_ip,
+                                                  method, auth, family], timeout=5)
+                                result = json.loads(output)
+                                assert result["accepted"] == accepted, (core, family, method, index, auth, result)
+                                delta = rows(proof)[before:]
+                                assert len(delta) == int(accepted), (core, family, method, index, auth, delta)
+                                if delta:
+                                    assert delta[0]["source"] == core_ip, delta
                 # Xray 错误日志走 stderr，必须一并读取来源证据。
                 result = subprocess.run(docker + ["logs", identity], capture_output=True, check=True)
                 logs = (result.stdout + result.stderr).decode(errors="replace")
-                assert ALLOWED in logs and DENIED in logs, f"{core}: 未记录真实 veth 客户端来源"
                 (root / f"{core}.published.log").write_text(logs)
-                for address in (ALLOWED, DENIED):
-                    line = next(line for line in logs.splitlines() if address in line)
+                for address in (ALLOWED, DENIED, ALLOWED6, DENIED6):
+                    # 必须匹配含端口的来源，不能用伪造代理头中的裸地址充当见证。
+                    pattern = rf"(?:\[{re.escape(address)}\]|{re.escape(address)}):[0-9]+(?:\s|$)"
+                    line = next((line for line in logs.splitlines() if re.search(pattern, line)), None)
+                    assert line is not None, f"{core}: 未记录真实 veth 客户端来源 {address}"
                     print(f"http-relay-published-source-{core}:" +
                           line.replace(PASSWORD, "[hidden]").replace("wrong-password", "[hidden]"),
                           flush=True)
                 assert inspect(docker, identity)["State"]["Running"]
                 command(core_compose + ["rm", "-s", "-f"], timeout=10)
                 print(f"http-relay-published-{core}: production ports/HTTP/CONNECT/auth/"
-                      f"source-CIDR/forged-proxy-header/UID10001/cap0 passed", flush=True)
+                      f"IPv4+IPv6/source-CIDR/forged-proxy-header/UID10001/cap0 passed", flush=True)
             command(compose + ["rm", "-s", "-f"], timeout=10)
             print("http-relay-published-environment=" + json.dumps(dict(
-                host=HOST, clients=[ALLOWED, DENIED], origin=origin_ip, image_ids=inputs,
+                hosts=HOSTS, clients=[ALLOWED, DENIED, ALLOWED6, DENIED6],
+                origin=origin_ip, image_ids=inputs,
                 elapsed=round(time.monotonic() - started, 3)), sort_keys=True), flush=True)
         except BaseException:
             result = subprocess.run(docker + ["ps", "-aq"], capture_output=True, timeout=10)
@@ -323,9 +360,9 @@ def run(root):
                     raise cleanup_error
 
 
-def published_listener(client):
+def published_listener(client, family):
     result = subprocess.run(["nsenter", "--target", str(client.pid), "--net", "--", "python3", "-c",
-                             f"import socket; socket.create_connection(('{HOST}', {PORT}), .15).close()"],
+                             f"import socket; socket.create_connection(('{HOSTS[family]}', {PORT}), .15).close()"],
                             capture_output=True, timeout=2)
     return result.returncode == 0
 
@@ -334,6 +371,6 @@ if __name__ == "__main__":
     if sys.argv[1] == "fixture":
         fixture(Path(sys.argv[2]))
     elif sys.argv[1] == "client":
-        print(json.dumps(dict(accepted=request(*sys.argv[2:5]) == 200)))
+        print(json.dumps(dict(accepted=request(*sys.argv[2:6]) == 200)))
     else:
         run(Path(sys.argv[1]))

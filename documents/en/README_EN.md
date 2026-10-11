@@ -307,7 +307,8 @@ deleting a listener removes its aliases, while copying does not inherit them.
 Older control bundles without `x-padm-port-aliases` reject alias-bearing configuration,
 updates and restoration. Default-share markers also require `x-padm-port-alias-default`;
 rollback to an older bundle that ignores the selection is rejected.
-Public/IPv6 publishing, native hosts and arm64 remain unverified;
+IPv4/IPv6 publishing is verified in an isolated amd64 Linux daemon;
+public hosting, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
 
 The protocol menu's CDN address manager overrides client connection addresses for
@@ -1282,12 +1283,21 @@ existing order is retained, then previously unseen rules are added in input orde
 A missing group is created; more than 256 unique rules after merging is rejected.
 Repeated additions do not duplicate rules, but confirmation still uses the deployment
 transaction and may update rollback metadata.
+Menu options `24/25` and `--direct-domains-remove/--block-domains-remove` remove exact
+normalized rules. Every requested rule must already exist in the selected manual list;
+otherwise the whole operation is rejected. Remaining order is preserved, and the empty
+manual group is removed. Region policy, IP/CIDR rules, and other routing entries are unchanged.
+The read-only `direct_block_overlaps` status field lists exact manual Direct/Block
+intersections in Direct order. Direct still wins; domain containment, category membership
+and generated region rules are not inferred, and overlap does not make a configuration invalid.
 
 ```bash
 padm-docker edit --direct-domains 'example.org,full:exact.example.net' --preview
 padm-docker edit --block-domains 'keyword:example,geosite:cn' --confirm PADM-DOCKER-EDIT
 padm-docker edit --direct-domains-add 'full:updates.example.org' --preview
 padm-docker edit --block-domains-add 'domain:ads.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --direct-domains-remove 'full:updates.example.org' --preview
+padm-docker edit --block-domains-remove 'domain:ads.example.net' --confirm PADM-DOCKER-EDIT
 ```
 
 Menu `17`, options `16–17`, enables or disables detected BitTorrent blocking.

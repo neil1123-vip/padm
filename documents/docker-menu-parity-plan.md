@@ -2191,6 +2191,32 @@ Linux amd64 路由定向 `177.375` 秒、入口 `178.305` 秒通过，排队 `20
 完成目录只清理 `source.tar/files.list`，保留日志/result、静态证据与共享索引；
 临时检查容器均已删除，不动其它任务原有 8 个临时文件。本任务只本地提交，不推送。
 
+#### 5B.3i Direct/Block 精确删除与重叠诊断
+
+CLI `--direct-domains-remove/--block-domains-remove` 与菜单
+`17` 的 `24/25` 只删除对应手工列表中已存在的完整规范化规则；输入含任一缺项时整组拒绝，
+保留剩余顺序，最后一条删除后清理空子项，不影响区域、IP/CIDR、DNS、hosts、BT 或 WARP。
+`routing-status` 增加只读 `direct_block_overlaps`，按 Direct 原顺序返回手工 Direct 与
+手工 Block 的完整字符串交集；不推断 `full:`/`domain:` 包含关系，不把区域策略合成规则混入，
+不自动拒绝已有重叠，Direct 既有优先级保持不变。
+
+Linux amd64 `docker-routing-domains-workflow` 入口 `115.538` 秒通过，证据
+`.tmp-regression-docker-27d02dc5f0f54337bcc6b82ca745e2b8/`。
+合同覆盖四类规则、整批缺项拒绝、顺序、重复删除、区域排除、状态读取不改快照，
+以及预览、取消、健康失败和信号恢复；随后与 202/207 双栈发布集中完成完整 Docker 合同。
+菜单 PTY 入口 `56.120` 秒通过，证据
+`.tmp-regression-docker-e57712952e884b4fb99784b4f42d6aea/`；生产增量独立复审无 P1/P2 阻断。
+完整区域策略、逐条语义编辑、分类冲突诊断和适用公网验收仍待补。
+
+2026-10-12 集成冻结快照的完整 Docker 合同 `48/48`、exit `0`，
+入口 `316331 ms`、内部 `316826 ms`、Jobs `6`、排队 `368 ms`、占 `2` 槽，
+`cache_hit=false`；证据
+`.tmp-regression-docker-114ec2de759648689555bf86122f0be4/`。
+归档 `316` 个输入流式哈希与当前工作区全部一致；随后只补写本段验收文字。
+202 双栈 HTTP 来源/认证/伪造头和 207 双栈 TCP/UDP on/selected/off 的实链路
+证据沿用对应段落，不重复未变探针。重复归档/清单清理，日志/result 和
+`.tmp-5b-routing-publishing-close/snapshot-inputs.json` 保留；不升级完整能力状态。
+
 #### 5B.3h DNS 分流直接录入
 
 功能签名提交 `5c7e1961`。菜单 `17` 的 `6` 改为依次输入字面服务器 IP、
@@ -2389,7 +2415,12 @@ relay 与 IPv6/WARP 隔离核对生产前置规则，未做组合真实流量对
 证据 `.tmp-docker-http-relay-5b5a-evidence.md`，最终完整合同目录
 `.tmp-regression-docker-856e589c6b244f6497a6029a93a14b93/`；
 日志/result/失败证据保留，本轮归档、核心副本与临时脚本清理。
-HTTP Basic 不加密；原生宿主、公网/IPv6 发布、arm64 与可信发布仍未验，
+HTTP Basic 不加密；新增隔离 amd64 Linux daemon 的 IPv4/IPv6 端口发布、
+真实 veth 来源和来源白名单验收，入口 `8.024` 秒，证据
+`.tmp-regression-docker-6c2144e85faa488f9e4da3a520e6b198/`。
+IPv6 relay 只把 Xray 接入受管 `padm-docker-ipv6` bridge，普通 IPv4 relay
+不启用该网络；plain bridge 的旧双栈备份在停服前拒绝，避免来源折叠。
+原生宿主、公网、arm64 与可信发布仍未验，
 `internal-202` 和完整 routing-tools/206 保持 `deferred`。
 SOCKS UDP 探针确认私网动态 `BND.ADDR/BND.PORT` 不能靠固定同端口发布解决，
 同 bridge 原始 BND 正对照成功；下一步先解决发布可达与真实来源，
@@ -2479,7 +2510,9 @@ UID `10001`、零 capability、只读根，origin 事件按 transport 精确计�
 该修复只属于真实测试夹具，不改变生产服务。
 复用工具/核心镜像和三槽队列，不扩大并发预算；本轮源码归档副本清理，
 日志、result、失败证据与共享成功索引保留，不删除其它任务的临时文件。
-公网、IPv6 发布、原生宿主、arm64、可信发布及默认分享切换仍待验。
+新增隔离 amd64 Linux daemon 的双栈 TCP/UDP 发布和来源族连接验收，入口
+`10.695` 秒，证据 `.tmp-regression-docker-932f701374a840a780febfea975fa8eb/`；
+公网、原生宿主、arm64、可信发布及默认分享切换仍待验。
 本阶段只交付本地验收通过的局部能力，`internal-207-access-control` 仍 `deferred`，
 不等于完整 `207`、routing-tools/206 或 `5B` 完成。
 

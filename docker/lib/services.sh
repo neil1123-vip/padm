@@ -2842,6 +2842,7 @@ dockerGenerateCompose() {
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
       ($r.host_integrations | map(select(.type == "tproxy"))) as $tproxy |
       ($r.routing.ipv6 != null) as $ipv6 |
+      (($r.relay.http.address_families // []) | index("ipv6") != null) as $relayIPv6 |
         ($r.reality_stream.host_website.network_mode == "host") as $hostStream |
       (($tun | length) + ($tproxy | length) == 1) as $transparent |
       ({
@@ -2854,7 +2855,7 @@ dockerGenerateCompose() {
           }
         }
       }
-      | if $ipv6 or $fail2banIPv6 then
+      | if $ipv6 or $relayIPv6 or $fail2banIPv6 then
           .networks.ipv6 = {
             name: "padm-docker-ipv6", enable_ipv6: true,
             labels: {"io.padm.mode": "docker", "io.padm.project": "padm-docker",
@@ -2903,6 +2904,9 @@ dockerGenerateCompose() {
       | if $ipv6 then
           reduce $cores[] as $core (.;
             .services[$core].networks = ["default", "ipv6"])
+        elif $relayIPv6 then
+          # 发布 IPv6 时保留真实来源；仅中继核心接网，不改变其它核心的出站策略。
+          .services[$r.relay.http.core].networks = ["default", "ipv6"]
         else . end
       | if $transparent then
           .services[$r.core.type].profiles += ["net-transparent"]

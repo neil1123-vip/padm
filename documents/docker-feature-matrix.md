@@ -166,11 +166,11 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | ID | 能力 | 原生入口 | Docker 状态 | Docker 边界 |
 | ---: | --- | --- | --- | --- |
 | 201 | Socks 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 5B.1–5B.2 已交付认证 TCP 全局/域名出站；入站仍未交付：sing-box 动态 UDP BND 发布不通，5B.5b Xray 固定发布可达但控制关闭后无认证 UDP 仍可转发。 |
-| 202 | HTTP 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 5B.5a 提供已有受管 Xray 的私有认证 HTTP/CONNECT 入站、来源规则和事务管理；sing-box 来源头绕过导致明确拒绝，公网/宿主/双架构待验。 |
+| 202 | HTTP 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 5B.5a 提供已有受管 Xray 的私有认证 HTTP/CONNECT 入站、来源规则和事务管理；双栈发布与来源已在隔离 amd64 Linux daemon 验证，IPv6 只接受管 bridge 并拒绝旧 plain bridge 恢复；sing-box 来源头绕过导致明确拒绝，公网/宿主/arm64 待验。 |
 | 203 | WireGuard | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard`、host network、`NET_ADMIN`。 |
 | 204 | TUN | 路由与访问控制 | `host-integrated` | `net-transparent`、host network、`NET_ADMIN`、`/dev/net/tun`。 |
 | 205 | Redirect/TProxy | 路由与访问控制 | `host-integrated` | `net-transparent`、host network、`NET_ADMIN`。 |
-| 206 | DNS/Direct/Block | 路由与访问控制 -> DNS/hosts | `deferred` | 5B.3–5B.4 已交付 DNS/hosts、域名 Direct/Block（私有 JSON、CSV 整组替换或增量追加）、目的 IP、明文 BT、CN 预设、IPv6 与 WARP 子合同和事务；完整区域策略、逐条规则编辑与冲突检测待补。 |
+| 206 | DNS/Direct/Block | 路由与访问控制 -> DNS/hosts | `deferred` | 5B.3–5B.4 已交付 DNS/hosts、域名 Direct/Block（私有 JSON、CSV 整组替换、增量追加和精确删除）、目的 IP、明文 BT、CN 预设、IPv6 与 WARP 子合同和事务；完整区域策略、逐条规则编辑与冲突检测待补。 |
 | 207 | Tunnel/dokodemo-door | 路由与访问控制 -> 访问控制 | `deferred` | 5B.5c–5B.5d 提供已有受管入口的额外 Compose 发布端口及逐入口默认分享选择，复用认证/统计及 TLS/SNI 前端；宿主集成和公网/双架构验收未交付，不做任意目的转发。 |
 
 ## 功能和宿主边界
@@ -198,12 +198,12 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙规则。 |
 | `routing-tools` | 路由与访问控制 -> WARP/IPv6/Socks5/DNS/BT/访问控制 | `deferred` | 核心 | bridge | 5B.1–5B.4b 已交付 SOCKS5 TCP 出站、DNS/hosts、域名 Direct/Block、目的 IP、明文 BT、CN 预设、IPv6 和用户态 WARP 子能力及失败恢复，不改宿主；完整区域/访问控制和公网/宿主/双架构验收待补。 |
 | `internal-201-socks-relay` | 路由与访问控制 -> Socks 中继 | `deferred` | 核心 | bridge | 5B.1–5B.2 TCP 出站子能力已交付；5B.5b 确认 sing-box 动态 BND 发布阻塞、Xray 26.3.27 固定 UDP 发布的来源许可在当前进程内不随控制关闭撤销，完整入站不交付、不降为 TCP-only；不作为公网节点。 |
-| `internal-202-http-relay` | 路由与访问控制 -> HTTP 中继 | `deferred` | `core-xray` | bridge | 5B.5a 独立 `relay.http` 合同、私有认证与来源前置规则、菜单/CLI/关闭/回滚；专属直连且不计业务额度。仅已有受管 Xray，拒绝 sing-box 的代理头来源覆盖；公网、IPv6 发布、宿主和 arm64 待验。详见 `docker-http-relay.md`。 |
+| `internal-202-http-relay` | 路由与访问控制 -> HTTP 中继 | `deferred` | `core-xray` | bridge | 5B.5a 独立 `relay.http` 合同、私有认证与来源前置规则、菜单/CLI/关闭/回滚；专属直连且不计业务额度。双栈发布与真实来源已在隔离 amd64 Linux daemon 验证，IPv6 relay 只接受管 bridge，拒绝旧包/旧 plain bridge 恢复；拒绝 sing-box 的代理头来源覆盖，公网、宿主、arm64 和可信发布待验。详见 `docker-http-relay.md`。 |
 | `internal-203-wireguard` | 订阅与用户 / 路由 -> WireGuard | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有；4C.3a 核验真实归属后预检/健康/撤销，活动旧式标记需先正常停止旧容器。 |
 | `internal-204-tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 依赖宿主设备和转发规则。 |
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙。 |
-| `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 核心 | bridge | 5B.3–5B.4 已交付 DNS/hosts、域名 Direct/Block（私有 JSON、CSV 整组替换或增量追加）、目的 IP、明文 BT、CN 预设、IPv6 和 WARP 子合同、双核心适配及专项事务；完整区域策略、逐条规则编辑、冲突检测和适用公网验收待补。 |
-| `internal-207-access-control` | 协议与入口 -> 额外入口端口 | `deferred` | 原业务核心/Nginx | bridge | 5B.5c–5B.5d 独立 `port_aliases`、菜单/CLI 增删/状态/默认分享与候选回滚；同入口认证/统计，TLS/SNI 前端不旁路，URI/主订阅/分享组逐入口选择已有别名，恢复或删除后回退 base，不增加节点。拒绝 WS/SSH Fail2ban、TUN/TProxy 和 host-network，允许已有 WireGuard/控制面 Fail2ban；适用公网/IPv6/原生宿主/arm64 与完整管理验收待补。 |
+| `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 核心 | bridge | 5B.3–5B.4 已交付 DNS/hosts、域名 Direct/Block（私有 JSON、CSV 整组替换、增量追加和精确删除）、目的 IP、明文 BT、CN 预设、IPv6 和 WARP 子合同、双核心适配及专项事务；完整区域策略、逐条规则编辑、冲突检测和适用公网验收待补。 |
+| `internal-207-access-control` | 协议与入口 -> 额外入口端口 | `deferred` | 原业务核心/Nginx | bridge | 5B.5c–5B.5d 独立 `port_aliases`、菜单/CLI 增删/状态/默认分享与候选回滚；双栈 TCP/UDP 发布已在隔离 amd64 Linux daemon 验证，同入口认证/统计，TLS/SNI 前端不旁路，URI/主订阅/分享组逐入口选择已有别名，恢复或删除后回退 base，不增加节点。拒绝 WS/SSH Fail2ban、TUN/TProxy 和 host-network，允许已有 WireGuard/控制面 Fail2ban；适用公网/原生宿主/arm64 与完整管理验收待补。 |
 | `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有状态/启停/日志、可信首配、规格编辑/多入口/双核心、Reality 目标/参数/443 共存、TLS/ACME、账号/分享组/额度/业务备份恢复、核心/Geo、多服务器手动同步、站点/路由与 WS/控制面/有限 SSH Fail2ban 菜单。仅开放已交付组合；完整协议管理、多服务器自动同步/迁移/灾备、剩余宿主能力及可信发布/原生双架构完整生命周期仍待交付或验收。 |
 | `core-lifecycle` | 核心与服务 | `supported` | 核心 profile | 宿主 CLI | 基础 `status/up/down/restart/logs/update/rollback/validate` 已可用，不代表原生全部升级管理。 |
 | `core-upgrade-assessment` | 核心与服务 -> Xray / sing-box 生命周期 | `supported` | 核心 profile | 宿主 CLI | 菜单第 13 项及 `assess` 复用只读风险扫描，使用可信候选镜像/配置副本执行版本检查、双核心配置试跑、Xray 严格模式与能力探针及已启用的 TLS/订阅/宿主前置检查；旧核心不启用严格解析时明确警告，不切换生产状态。要求受管 spec，预发布须提供匹配的可信发布资产；真实客户端连通另验。 |

@@ -920,11 +920,14 @@ dockerProtocolCommand() (
     fi
     if [[ "${action}" == routing-status ]]; then
         jq --argjson region_defaults "${PADM_DOCKER_REGION_DEFAULT_DOMAINS}" '
+          (.routing.block.domains // []) as $block |
           {enabled:(.routing != null), server:(.routing.socks5.server // null),
           port:(.routing.socks5.port // null),
           mode:(if .routing.socks5 == null then "direct"
             elif .routing.socks5 | has("domains") then "domains" else "global" end),
           domain_rules:(.routing.socks5.domains // []),
+          direct_block_overlaps:[(.routing.direct.domains // [])[] |
+            . as $rule | select($block | index($rule) != null)],
           tcp:(if .routing.socks5 == null then "direct"
             elif .routing.socks5 | has("domains") then "matched-socks5" else "socks5" end),
           udp:(if .routing.socks5 == null then "direct"
@@ -1454,12 +1457,14 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 4
             ;;
-        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add)
+        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add|--direct-domains-remove|--block-domains-remove)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingAction=domains
             if [[ "${routingKind}" == *-add ]]; then
                 routingKind=${routingKind%-add} routingAction=domains_add
+            elif [[ "${routingKind}" == *-remove ]]; then
+                routingKind=${routingKind%-remove} routingAction=domains_remove
             fi
             routingKind=${routingKind%-domains}
             routingDomains=$(dockerSocks5DomainsNormalize "$2") ||
@@ -1987,6 +1992,17 @@ dockerEditCommand() {
                 if index($rule) == null then . + [$rule] else . end)) as $merged |
               if ($merged | length) <= 256 then .routing[$kind].domains = $merged
               else error("合并后域名规则超过 256 项，未提交配置") end
+            ' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == domains_remove ]]; then
+            jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" '
+              (.routing[$kind].domains // []) as $existing |
+              if ($domains - $existing | length) != 0 then
+                error("待删除规则必须全部存在于手工 Direct/Block 列表，未提交配置")
+              else
+                .routing[$kind].domains = ($existing - $domains) |
+                if .routing[$kind].domains == [] then del(.routing[$kind]) else . end |
+                if .routing == {} then del(.routing) else . end
+              end
             ' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == domains ]]; then
             jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" \

@@ -47,10 +47,12 @@ dockerUsage() {
   padm-docker edit --direct <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --direct-domains <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --direct-domains-add <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --direct-domains-remove <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --direct-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-domains <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-domains-add <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --block-domains-remove <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-ips <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-ips-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -1188,7 +1190,7 @@ dockerConfigurationBackupAllowed() {
 }
 
 dockerValidateConfigurationBackup() {
-    local backup=$1 root relative entry bundlePath
+    local backup=$1 root relative entry bundlePath expectedCompose
     root=$(dockerInstallRoot) || return 1
     dockerManagedPathIsSafe "${root}" "${backup}" || return 1
     [[ "${backup}" == "${root%/}/backups/"* && -d "${backup}" && ! -L "${backup}" && -O "${backup}" ]] || return 1
@@ -1240,6 +1242,20 @@ dockerValidateConfigurationBackup() {
             bundlePath=$(dockerCurrentBundlePath) || return 1
         fi
         dockerBundleSupportsSpec "${bundlePath}" "${backup}/config/spec.json" || return 1
+        if jq -e '((.relay.http.address_families // []) | index("ipv6")) != null' \
+            "${backup}/config/spec.json" >/dev/null; then
+            # 恢复旧 IPv4 bridge 会折叠 IPv6 来源，须在停服前核对受管网络。
+            expectedCompose=$(dockerGenerateCompose "${backup}/config/spec.json" /dev/stdout "${backup}") || return 1
+            jq -en --slurpfile compose "${backup}/compose.json" --argjson expected "${expectedCompose}" '
+              ($compose | length) == 1 and
+              $compose[0].networks.ipv6 == $expected.networks.ipv6 and
+              $compose[0].services.xray.networks == $expected.services.xray.networks and
+              $compose[0].services.xray.network_mode == null
+            ' >/dev/null || {
+                dockerError 'IPv6 HTTP 中继恢复编排缺少受管来源网络，尚未停止或修改服务'
+                return 1
+            }
+        fi
         dockerGeoBundleCheck "${bundlePath}" "${backup}" || return 1
         dockerControlStateCheck "${backup}" || return 1
         if jq -e 'has("site")' "${backup}/config/spec.json" >/dev/null; then

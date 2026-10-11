@@ -388,6 +388,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0].relay.http != null then
             $schema[0]["x-padm-relay-http"] == true and $spec[0].relay.http.core == "xray"
           else true end) and
+          (if (($spec[0].relay.http.address_families // []) | index("ipv6")) != null then
+            $schema[0]["x-padm-relay-http-ipv6"] == true
+          else true end) and
           (if $spec[0] | has("port_aliases") then
             $schema[0]["x-padm-port-aliases"] == true
           else true end) and
