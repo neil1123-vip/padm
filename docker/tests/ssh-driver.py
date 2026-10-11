@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import resource
 import select
 import signal
 import socket
@@ -100,7 +101,7 @@ class DriverContracts(unittest.TestCase):
         self.assertFalse(evidence["remaining_waiting_parent_exit"])
         self.assertFalse(evidence["remaining_owned_tasks"])
         self.assertFalse(evidence["remaining_stopped_tasks"])
-        self.assertGreater(evidence["wait_pidfd_count"], 0)
+        self.assertFalse(evidence["remaining_bootstrap_tasks"])
         self.assertFalse(evidence["open_received_fds"])
         self.assertEqual(evidence["fd_count_before"], evidence["fd_count_after"])
         self.assertFalse(evidence["authoritative"])
@@ -150,6 +151,8 @@ class DriverContracts(unittest.TestCase):
         self.driver._wait = child_before_parent_exit
         evidence = self.driver.run(self.cross_exec)
         self.assert_clean(evidence)
+        self.assertGreater(evidence["wait_pidfd_count"], 0)
+        self.assertTrue(evidence["bootstrap"]["allowed"])
         self.assertEqual(len(evidence["first_stops"]), 1)
         self.assertTrue(early_child)
         self.assertTrue(forced_child_first_stop)
@@ -214,6 +217,233 @@ class DriverContracts(unittest.TestCase):
             "syscall_stop_count": evidence["syscall_stop_count"],
             "normal_resume_count": evidence["normal_resume_count"],
         }, sort_keys=True, separators=(",", ":")), flush=True)
+
+    def test_master_pidfd_failure_denies_bootstrap_and_preserves_caller_stop(self):
+        marker = Path(self.temp.name) / "bootstrap-callback-executed"
+        original_pidfd_open, original_waitpid = os.pidfd_open, os.waitpid
+        initial_limits = resource.getrlimit(resource.RLIMIT_NOFILE)
+        for code in (errno.EMFILE, errno.EPERM, errno.ENOMEM):
+            with self.subTest(errno=code):
+                unrelated = os.fork()
+                if unrelated == 0:
+                    self.receiver.close()
+                    self.listener.close()
+                    self.client.close()
+                    os.kill(os.getpid(), signal.SIGSTOP)
+                    os._exit(29)
+                descriptor = original_pidfd_open(unrelated)
+                reaped = False
+                try:
+                    deadline = time.monotonic() + 3
+                    while time.monotonic() < deadline:
+                        stopped = os.waitid(os.P_PIDFD, descriptor,
+                                            os.WSTOPPED | os.WNOHANG | os.WNOWAIT)
+                        if stopped:
+                            break
+                        time.sleep(0.001)
+                    self.assertIsNotNone(stopped)
+                    self.assertEqual((stopped.si_pid, stopped.si_code, stopped.si_status),
+                                     (unrelated, os.CLD_STOPPED, signal.SIGSTOP))
+                    self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                                 self.receiver, self.expected)
+                    injected, bootstrap_waits, before_pidfd = [], [], {}
+
+                    def fail_master_pidfd(pid, *args, **kwargs):
+                        if pid == self.driver.master and not injected:
+                            process = driver_module.process_snapshot(pid)
+                            self.assertEqual(process["tracer_pid"], 0)
+                            self.assertNotIn(process["state"], ("t", "T", "Z"))
+                            self.assertNotIn(pid, self.driver.owned)
+                            before_pidfd.update({key: process[key] for key in
+                                                 ("pid", "state", "tracer_pid")})
+                            injected.append(pid)
+                            if code == errno.EMFILE:
+                                limits = resource.getrlimit(resource.RLIMIT_NOFILE)
+                                limit = max(int(value) for value in os.listdir("/proc/self/fd")) + 4
+                                if limits[0] != resource.RLIM_INFINITY:
+                                    limit = min(limit, limits[0])
+                                dummy = []
+                                try:
+                                    resource.setrlimit(resource.RLIMIT_NOFILE, (limit, limits[1]))
+                                    for _ in range(limit):
+                                        try:
+                                            dummy.append(os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC))
+                                        except OSError as full:
+                                            if full.errno != errno.EMFILE:
+                                                raise
+                                            break
+                                    before_pidfd["real_syscall_failure"] = True
+                                    return original_pidfd_open(pid, *args, **kwargs)
+                                finally:
+                                    for opened in dummy:
+                                        os.close(opened)
+                                    resource.setrlimit(resource.RLIMIT_NOFILE, limits)
+                            raise OSError(code, os.strerror(code))
+                        return original_pidfd_open(pid, *args, **kwargs)
+
+                    def exact_bootstrap_wait(pid, flags):
+                        self.assertEqual((pid, flags), (self.driver.master, os.WNOHANG))
+                        bootstrap_waits.append(pid)
+                        return original_waitpid(pid, flags)
+
+                    def child_main():
+                        marker.touch()
+
+                    # 首次固定失败时只收回屏障内的直接 child，不能动 caller 的等待状态。
+                    with (
+                        patch.object(driver_module.os, "pidfd_open", fail_master_pidfd),
+                        patch.object(driver_module.os, "waitpid", exact_bootstrap_wait),
+                        patch.object(driver_module.os, "waitid", side_effect=AssertionError(
+                            "bootstrap 失败不应消费 pidfd 等待状态")),
+                        patch.object(driver_module.os, "kill", side_effect=AssertionError(
+                            "bootstrap 失败不应使用数字 PID 发信号")),
+                        patch.object(driver_module.os, "killpg", side_effect=AssertionError(
+                            "bootstrap 失败不应使用进程组发信号")),
+                        patch.object(driver_module.signal, "pidfd_send_signal",
+                                     side_effect=AssertionError("bootstrap 失败不应发送终止信号")),
+                    ):
+                        with self.assertRaises(driver_module.Failure) as failure:
+                            self.driver.run(child_main)
+                    self.assertIsInstance(failure.exception.__cause__, OSError)
+                    self.assertEqual(failure.exception.__cause__.errno, code)
+                    self.assertEqual(resource.getrlimit(resource.RLIMIT_NOFILE), initial_limits)
+                    evidence = self.driver.evidence
+                    self.assert_clean(evidence)
+                    bootstrap = evidence["bootstrap"]
+                    self.assertFalse(bootstrap["allowed"])
+                    self.assertEqual((bootstrap["pid"], bootstrap["waited_pid"]),
+                                     (self.driver.master, self.driver.master))
+                    self.assertEqual(bootstrap["exit_code"], 113)
+                    self.assertTrue(os.WIFEXITED(bootstrap["status"]))
+                    self.assertEqual(os.WEXITSTATUS(bootstrap["status"]), 113)
+                    self.assertEqual(injected, [self.driver.master])
+                    self.assertTrue(bootstrap_waits)
+                    self.assertEqual(set(bootstrap_waits), {self.driver.master})
+                    self.assertFalse(marker.exists())
+                    self.assertFalse(evidence["task_pins"])
+                    self.assertNotIn("initial_stop", evidence)
+                    self.assertNotIn("exitkill_set_monotonic_ns", evidence)
+                    self.assertEqual(evidence["normal_resume_count"], 0)
+                    self.assertEqual(evidence["wait_pidfd_count"], 0)
+                    self.assertFalse(evidence["events"])
+                    self.assertFalse(evidence["cleanup"])
+                    self.assertNotIn("cleanup_error", evidence)
+                    self.assertTrue(evidence["ledger_poisoned"])
+                    self.assertFalse(Path(f"/proc/{self.driver.master}").exists())
+                    with self.assertRaises(ChildProcessError):
+                        original_waitpid(self.driver.master, os.WNOHANG)
+                    stopped = os.waitid(os.P_PIDFD, descriptor, os.WSTOPPED | os.WNOHANG)
+                    self.assertIsNotNone(stopped)
+                    self.assertEqual((stopped.si_pid, stopped.si_code, stopped.si_status),
+                                     (unrelated, os.CLD_STOPPED, signal.SIGSTOP))
+                    signal.pidfd_send_signal(descriptor, signal.SIGCONT)
+                    deadline = time.monotonic() + 2
+                    while time.monotonic() < deadline:
+                        terminal = os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
+                        if terminal:
+                            break
+                        time.sleep(0.001)
+                    self.assertIsNotNone(terminal)
+                    self.assertEqual((terminal.si_pid, terminal.si_code, terminal.si_status),
+                                     (unrelated, os.CLD_EXITED, 29))
+                    reaped = True
+                    print(json.dumps({
+                        "kind": "master-pidfd-bootstrap-denied", "errno": code,
+                        "master": self.driver.master, "bootstrap_exit": bootstrap["exit_code"],
+                        "caller_pid": unrelated, "caller_exit": terminal.si_status,
+                        "before_pidfd": before_pidfd,
+                        "normal_resume_count": evidence["normal_resume_count"],
+                        "wait_pidfd_count": evidence["wait_pidfd_count"],
+                    }, sort_keys=True, separators=(",", ":")), flush=True)
+                finally:
+                    if not reaped:
+                        try:
+                            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        deadline = time.monotonic() + 2
+                        while time.monotonic() < deadline:
+                            try:
+                                terminal = os.waitid(os.P_PIDFD, descriptor,
+                                                     os.WEXITED | os.WNOHANG)
+                            except ChildProcessError:
+                                break
+                            if terminal:
+                                break
+                            time.sleep(0.001)
+                    os.close(descriptor)
+
+    def test_bootstrap_wait_timeout_reports_unreaped_child(self):
+        marker = Path(self.temp.name) / "bootstrap-timeout-callback"
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                     self.receiver, self.expected)
+        original_pidfd_open, original_waitpid = os.pidfd_open, os.waitpid
+        waits, injected = [], []
+        started = time.monotonic()
+
+        def unavailable_master_pidfd(pid, *args, **kwargs):
+            if pid == self.driver.master and not injected:
+                injected.append(pid)
+                raise OSError(errno.EMFILE, os.strerror(errno.EMFILE))
+            return original_pidfd_open(pid, *args, **kwargs)
+
+        def no_bootstrap_result(pid, flags):
+            self.assertEqual((pid, flags), (self.driver.master, os.WNOHANG))
+            waits.append(pid)
+            return 0, 0
+
+        try:
+            with (
+                patch.object(driver_module.os, "pidfd_open", unavailable_master_pidfd),
+                patch.object(driver_module.os, "waitpid", no_bootstrap_result),
+                patch.object(driver_module.os, "waitid", side_effect=AssertionError(
+                    "bootstrap 超时不应消费 pidfd 等待状态")),
+                patch.object(driver_module.os, "kill", side_effect=AssertionError(
+                    "bootstrap 超时不应使用数字 PID 发信号")),
+                patch.object(driver_module.os, "killpg", side_effect=AssertionError(
+                    "bootstrap 超时不应使用进程组发信号")),
+                patch.object(driver_module.signal, "pidfd_send_signal",
+                             side_effect=AssertionError("bootstrap 超时不应发送终止信号")),
+            ):
+                with self.assertRaises(driver_module.Failure) as failure:
+                    self.driver.run(marker.touch)
+            self.assertEqual(failure.exception.__cause__.errno, errno.EMFILE)
+            evidence = self.driver.evidence
+            self.assertTrue(waits)
+            self.assertGreaterEqual(time.monotonic() - started, 2)
+            self.assertFalse(evidence["bootstrap"]["allowed"])
+            self.assertEqual(evidence["bootstrap"]["unreaped"], [self.driver.master])
+            self.assertEqual(evidence["remaining_bootstrap_tasks"], [self.driver.master])
+            self.assertIn("未回收 child", evidence["cleanup_error"])
+            self.assertEqual(evidence["normal_resume_count"], 0)
+            self.assertEqual(evidence["wait_pidfd_count"], 0)
+            self.assertFalse(marker.exists())
+            self.assertFalse(evidence["remaining_owned_tasks"])
+            self.assertFalse(evidence["remaining_retired_tasks"])
+            self.assertFalse(evidence["remaining_stopped_tasks"])
+            self.assertEqual(evidence["fd_count_before"], evidence["fd_count_after"])
+            self.assertTrue(evidence["subreaper_restored"])
+            current = driver_module.ctypes.c_int()
+            self.assertEqual(driver_module.libc.prctl(driver_module.PR_GET_CHILD_SUBREAPER,
+                                                     driver_module.ctypes.byref(current), 0, 0, 0), 0)
+            self.assertEqual(current.value, self.subreaper_before.value)
+            print(json.dumps({
+                "kind": "bootstrap-reap-timeout", "errno": failure.exception.__cause__.errno,
+                "master": self.driver.master, "unreaped": evidence["remaining_bootstrap_tasks"],
+                "cleanup_error": evidence["cleanup_error"], "callback_executed": marker.exists(),
+            }, sort_keys=True, separators=(",", ":")), flush=True)
+        finally:
+            # 补丁只隐藏等待结果；真实 child 已因拒绝自退，由 caller 精确回收。
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                waited, status = original_waitpid(self.driver.master, os.WNOHANG)
+                if waited:
+                    break
+                time.sleep(0.001)
+            self.assertEqual(waited, self.driver.master)
+            self.assertTrue(os.WIFEXITED(status))
+            self.assertEqual(os.WEXITSTATUS(status), 113)
+            self.assertFalse(Path(f"/proc/{self.driver.master}").exists())
 
     def test_unrelated_caller_child_in_same_group_keeps_wait_status(self):
         for index, (failed, stopped) in enumerate((

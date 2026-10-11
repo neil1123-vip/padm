@@ -115,6 +115,7 @@ class ControlledDriver:
         self.receiver = receiver
         self.expected_tuple = copy.deepcopy(expected_tuple)
         self.master = None
+        self.bootstrap_tasks = set()
         self.tracked = set()
         self.owned = {}
         self.stopped_tasks = {}
@@ -492,6 +493,8 @@ class ControlledDriver:
                 self.evidence["events"].append(copy.deepcopy(row))
 
     def _cleanup(self):
+        if self.bootstrap_tasks:
+            raise Failure(f"受控 SSH 启动闸门仍有未回收 child：{sorted(self.bootstrap_tasks)}")
         end = time.monotonic() + 2
         stop_sent = set()
 
@@ -611,12 +614,15 @@ class ControlledDriver:
         baseline = len(os.listdir("/proc/self/fd"))
         error = None
         previous_subreaper = None
+        gate_read = gate_write = None
         try:
             self._check()
             if process_snapshot(os.getpid())["threads"] != 1:
                 raise Failure("受控 SSH tracer 必须单线程")
             if os.uname().machine != "x86_64":
                 raise Failure("受控 SSH driver 仅验证原生 amd64")
+            if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+                raise Failure("受控 SSH master 启动闸门要求默认 SIGCHLD 回收策略")
             previous = ctypes.c_int()
             if libc.prctl(PR_GET_CHILD_SUBREAPER, ctypes.byref(previous), 0, 0, 0) != 0:
                 code = ctypes.get_errno()
@@ -627,9 +633,17 @@ class ControlledDriver:
             # 异常终止 master 后收养后代，保证本 driver 能完成真正的 wait/reap。
             previous_subreaper = previous.value
             self.evidence["subreaper_before"] = previous_subreaper
+            # shortcut: 仅可信 fixture；排除原生 SIGCHLD flags、atfork、并发 reaper 与外部停止，需要普适保证时改为原子创建。
+            gate_read, gate_write = socket.socketpair()
             self.master = os.fork()
             if self.master == 0:
                 try:
+                    gate_write.close()
+                    # 父固定原 pidfd 前不能进入 TRACEME；EOF 或拒绝字节直接退出。
+                    allowed = gate_read.recv(1)
+                    gate_read.close()
+                    if allowed != b"\x01":
+                        os._exit(113)
                     self.receiver.close()
                     os.setpgid(0, 0)
                     ptrace(TRACEME, 0)
@@ -638,7 +652,44 @@ class ControlledDriver:
                 except BaseException:
                     os._exit(111)
                 os._exit(0)
-            self._pin(self.master)
+            gate_read.close()
+            gate_read = None
+            try:
+                self._pin(self.master)
+            except BaseException as caught:
+                bootstrap = {"pid": self.master, "allowed": False, "pidfd_error": str(caught)}
+                self.evidence["bootstrap"] = bootstrap
+                gate_write.close()
+                gate_write = None
+                if self.master in self.owned:
+                    raise
+                # 尚未允许 ptrace，只在有界期限内精确回收本次直接 fork 的 child。
+                self.bootstrap_tasks.add(self.master)
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    try:
+                        waited, status = os.waitpid(self.master, os.WNOHANG)
+                    except ChildProcessError as wait_error:
+                        bootstrap["wait_error"] = str(wait_error)
+                        break
+                    if waited:
+                        if (waited != self.master
+                                or not (os.WIFEXITED(status) or os.WIFSIGNALED(status))):
+                            bootstrap["wait_error"] = "启动闸门返回未知或非终止 wait 状态"
+                            break
+                        self.bootstrap_tasks.discard(self.master)
+                        bootstrap.update({"waited_pid": waited, "status": status,
+                                          "exit_code": os.waitstatus_to_exitcode(status)})
+                        break
+                    time.sleep(0.001)
+                if self.bootstrap_tasks:
+                    bootstrap["unreaped"] = sorted(self.bootstrap_tasks)
+                raise
+            if gate_write.send(b"\x01", socket.MSG_NOSIGNAL) != 1:
+                raise Failure("受控 SSH 启动闸门未送达完整许可字节")
+            gate_write.close()
+            gate_write = None
+            self.evidence["bootstrap"] = {"pid": self.master, "allowed": True}
             pid, status = self._wait(initial=True)
             if (pid != self.master or not os.WIFSTOPPED(status)
                     or status >> 16 or os.WSTOPSIG(status) != signal.SIGSTOP
@@ -667,12 +718,16 @@ class ControlledDriver:
             self.evidence["failed_monotonic_ns"] = time.monotonic_ns()
             self.ledger.poisoned = True
         finally:
+            for gate in (gate_read, gate_write):
+                if gate is not None:
+                    gate.close()
             self.ledger.close()
             try:
                 self._cleanup()
             except BaseException as caught:
                 self.evidence["cleanup_error"] = str(caught)
-                error = caught
+                if not self.bootstrap_tasks:
+                    error = caught
             finally:
                 for descriptor in list(self.owned.values()) + list(self.retired.values()):
                     os.close(descriptor)
@@ -686,6 +741,7 @@ class ControlledDriver:
             self.evidence.update({
                 "messages": copy.deepcopy(self.ledger.messages), "ledger_closed": self.ledger.closed,
                 "ledger_poisoned": self.ledger.poisoned, "remaining_tracees": sorted(self.tracked),
+                "remaining_bootstrap_tasks": sorted(self.bootstrap_tasks),
                 "remaining_owned_tasks": sorted(self.owned),
                 "remaining_stopped_tasks": sorted(self.stopped_tasks),
                 "remaining_retired_tasks": sorted(self.retired),

@@ -4089,6 +4089,45 @@ cache_hit=false；driver 在完整并发中 13/13、3.641 秒，preflight 同时
 真实 OpenSSH/unit 子树、raw fork 57、vfork、arm64、多线程、collector/jail、
 菜单启停及宿主验收仍未完成，`authoritative/jail_ready=false`。
 
+#### 5C.8c.2k 首次 pidfd 失败的启动闸门
+
+在直接 fork 前创建专用 socketpair，child 先关闭父端并等待精确许可字节；
+父复用 `_pin(master)`，取得并登记原 pidfd 后才以 `MSG_NOSIGNAL` 放行，
+发送结果必须完整 1 byte。child 在此之前不进入 setpgid、TRACEME、
+SIGSTOP 或 callback；父固定身份失败先关闭闸门，child 从 EOF 自退 113。
+已持有 pidfd 后的校验失败沿原身份清理，不重复固定或数字等待。
+
+未取得 pidfd 时只对本次直接 fork 返回的 master 使用
+`waitpid(master, WNOHANG)`，独立 2 秒期限，核真实 terminal 后才确认回收。
+不消费全局、负 PGID 或其它 child 的等待状态，不以裸 PID 信号补救。
+ECHILD、未知终局或超时保留 `remaining_bootstrap_tasks/cleanup_error`，
+仍保留最初失败原因，不能写成清理成功；所有 gate FD 在 Ledger 关闭前释放。
+Python 可见非默认 SIGCHLD 策略在 fork 前拒绝。
+
+新增首次失败 3 个 errno 子场景：EMFILE 由临时降低父 RLIMIT_NOFILE、
+填满 FD 后真实 `pidfd_open` 触发，EPERM/ENOMEM 为首次定点注入。
+核 child 的 TracerPid 0、callback 未执行、真实退出 113、精确回收、
+FD/limit/subreaper 恢复，并保留无关 caller child 的 SIGSTOP 与退出 29。
+另一个合同仅隐藏 bootstrap wait 返回，2 秒后明确报告未回收和原 errno，
+补丁外真实回收已自退 child；不以此代替外部 SIGSTOP 验收。
+定向 15/15、5.672 秒，入口 7101 ms、内部 5807 ms、排队 5076 ms，
+Jobs 2、cache_hit=false；`.tmp-regression-docker-d6800c309f5449e2b1db30a5e6d95ce1/`。
+集中完整 Docker 合同 47/47、exit 0、内部 327220 ms、入口 328169 ms，
+排队 454 ms、Jobs 6/占 2 槽、cache_hit=false；driver 15/15、5.583 秒，
+preflight 同时通过，`.tmp-regression-docker-d0b5e24662d945ba8b06c351c1ff7168/`。
+完整归档 297 个输入最初逐项匹配；完成时仅其它任务的 UI 测试变化，
+本阶段执行源码保持冻结；随后只补写本计划的结果。
+清理自有重复归档、清单及核对脚本 18837025 bytes，日志/结果/哈希保留在
+`.tmp-ssh-bootstrap-8c2k/`；复用工具镜像，无重复解包，不据单轮耗时宣称提速。
+
+本阶段仍限可信单线程 fixture；Python SIGCHLD 检查不能证明原生
+SA_NOCLDWAIT flags，atfork child 钩子早于闸门，异步 reaper、继承的异常
+信号处理器和外部 SIGSTOP 未覆盖。该实现不等同 `CLONE_PIDFD` 原子创建，
+不宣称无条件消除未持有 pidfd 的窗口。
+创建事件 child 的首次 pidfd 固定失败仍未闭合；
+109/112 正常执行、真实 OpenSSH/unit 子树、collector/jail 和宿主验收仍待推进，
+`authoritative/jail_ready=false` 保持。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
