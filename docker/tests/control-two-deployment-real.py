@@ -485,6 +485,61 @@ def peer_requests(controller):
             if expected in line]
 
 
+def install_cron_probe(node):
+    script = node["path"] / "tmp/padm-cron-sync-probe.sh"
+    wrapper = node["path"] / "tmp/padm-cron-shell.sh"
+    wrapper.write_text(
+        """#!/usr/bin/env bash
+set -u
+log=COMMAND_LOG
+case "${2:-}" in
+*" control auto-sync "*) job=auto-sync ;;
+*" traffic collect "*) job=traffic ;;
+*) job=other ;;
+esac
+printf 'command-start:%s:%s:%s\\n' "$(date -u +%s)" "$$" "${job}" >>"${log}"
+/bin/sh "$@"
+status=$?
+printf 'command-end:%s:%s:%s:%s\\n' "$(date -u +%s)" "$$" "${job}" "${status}" >>"${log}"
+exit "${status}"
+""".replace("COMMAND_LOG", str(node["path"] / "tmp/padm-cron-command.log")),
+        encoding="ascii",
+    )
+    wrapper.chmod(0o755)
+    script.write_text(
+        """#!/usr/bin/env bash
+set -u
+log=PROBE_LOG
+started=$(date -u +%s)
+printf 'probe-start:%s:%s\\n' "$started" "$$" >>"${log}"
+status=0
+command -v bash >/dev/null 2>&1 || status=1
+command -v docker >/dev/null 2>&1 || status=1
+command -v jq >/dev/null 2>&1 || status=1
+printf 'probe-end:%s:%s:%s\\n' "$(date -u +%s)" "$$" "${status}" >>"${log}"
+exit "${status}"
+""".replace("PROBE_LOG", str(node["path"] / "tmp/padm-cron-sync-probe.log")),
+        encoding="ascii",
+    )
+    script.chmod(0o755)
+    cron = command(node["enter"] + ["crontab", "-l"]).decode()
+    marker = "# padm-docker-sync-probe"
+    assert marker not in cron and not any(line.startswith("SHELL=") for line in cron.splitlines())
+    command(node["enter"] + ["crontab", "-"], content=(
+        "SHELL=" + str(wrapper) + "\n" + cron.rstrip() +
+        "\n*/5 * * * * /bin/bash " + str(script) + " " + marker + "\n"
+    ).encode())
+    return marker
+
+
+def remove_cron_probe(node, marker):
+    cron = command(node["enter"] + ["crontab", "-l"]).decode()
+    command(node["enter"] + ["crontab", "-"], content=(
+        "\n".join(line for line in cron.splitlines()
+                  if marker not in line and line != "SHELL=" + str(node["path"] / "tmp/padm-cron-shell.sh")) + "\n"
+    ).encode())
+
+
 def sync_schedule_cron(controller, controlled, invitation):
     root = controlled["path"] / "deployment"
     directory = root / "secrets/control-sync"
@@ -506,8 +561,6 @@ def sync_schedule_cron(controller, controlled, invitation):
         registration[path.name] = path.read_bytes()
     status = cli(controlled, "control", "sync-schedule", "status")
     assert json.loads(status.stdout) == {"enabled": True, "backend": "cron", "installed": True, "active": True}
-    # 私有 bind mount 下 cron 不一定看到 crontab(1) 的原子替换，强制重载测试登记。
-    command(controlled["enter"] + ["pkill", "-HUP", "-x", "cron"])
     cron = command(controlled["enter"] + ["crontab", "-l"]).decode()
     scheduled = [line for line in cron.splitlines() if "control auto-sync" in line]
     assert len(scheduled) == 1 and scheduled[0].startswith("*/5 * * * * ")
@@ -516,6 +569,7 @@ def sync_schedule_cron(controller, controlled, invitation):
     assert token not in (root / "config/spec.json").read_bytes()
     cli(controlled, "control", "auto-sync")
     assert state(controlled) == before and services(controlled) == previous, "同版本自动同步重建服务"
+    marker = install_cron_probe(controlled)
 
     # 用生产锁持有者验证立即冲突，竞争入口不能访问主控或改写本机状态。
     ready = controlled["path"] / "sync-lock-ready"
@@ -550,21 +604,48 @@ read -r release
     cli(controller, "account", "edit", identity(20), "--name", "cron-managed-account")
     target = state(controller)["control"]["revision"]
     assert target == revision + 1
+    cron_watch_started = int(time.time())
     started = time.monotonic()
     deadline, progress = started + 360, started
+    retry_boundary = None
     rotated_logs = 300 - time.time() % 300 > 90
     if rotated_logs:
         log_rotate(controller, controlled, invitation)
     # 不调用 auto-sync；只允许真实 cron 在固定五分钟边界提交新版本。
+    commands_path = controlled["path"] / "tmp/padm-cron-command.log"
     while True:
         current = state(controlled)
         assert current["control_sync"]["last_revision"] in (sync["last_revision"], target)
         assert registration == {path.name: path.read_bytes() for path in directory.iterdir()}
-        if current["control_sync"]["last_revision"] == target and not (root / "locks/deployment.lock").exists():
+        commands = commands_path.read_bytes() if commands_path.is_file() else b"missing\n"
+        auto_starts = {pid: int(timestamp) for timestamp, pid in
+                       re.findall(rb"command-start:([0-9]+):([0-9]+):auto-sync(?:\n|$)", commands)}
+        auto_results = [(auto_starts[pid], int(status)) for timestamp, pid, status in
+                        re.findall(rb"command-end:([0-9]+):([0-9]+):auto-sync:([0-9]+)(?:\n|$)", commands)
+                        if pid in auto_starts and int(timestamp) >= cron_watch_started]
+        failure = None
+        if any(status not in (0, 12) for _, status in auto_results):
+            failure = "真实 cron 自动同步退出异常"
+        elif sum(status == 12 for _, status in auto_results) >= 2:
+            failure = "真实 cron 自动同步连续两次锁竞争"
+        elif retry_boundary is None and any(status == 12 for _, status in auto_results):
+            # 只凭首轮实际锁竞争允许下一固定边界重试，兼容受管任务的秒位偏移。
+            first_conflict = next(timestamp for timestamp, status in auto_results if status == 12)
+            retry_boundary = (first_conflict // 300 + 1) * 300
+            deadline = time.monotonic() + max(0, retry_boundary + 90 - time.time())
+            print(f"docker-control-two-deployment-cron-retry:first_rc=12:"
+                  f"second_boundary={retry_boundary}:grace=90s", flush=True)
+        if not failure and current["control_sync"]["last_revision"] == target and \
+                not (root / "locks/deployment.lock").exists() and \
+                any(status == 0 for _, status in auto_results):
             break
-        if controlled["cron"].poll() is not None or time.monotonic() >= deadline:
+        if failure or controlled["cron"].poll() is not None or time.monotonic() >= deadline:
             processes = command(controlled["enter"] + ["ps", "-eo", "pid,ppid,comm"]).decode()
-            raise AssertionError("真实五分钟 cron 未提交新版本；节点进程：\n" + processes)
+            probe_path = controlled["path"] / "tmp/padm-cron-sync-probe.log"
+            probe = probe_path.read_bytes() if probe_path.is_file() else b"missing\n"
+            raise AssertionError((failure or "真实五分钟 cron 未提交新版本") + "；探针：\n" +
+                                 probe.decode(errors="replace") + "任务：\n" +
+                                 commands.decode(errors="replace") + "节点进程：\n" + processes)
         if time.monotonic() >= progress:
             # 避开临近调度边界，状态查询仍走生产只读入口。
             if not (root / "locks/deployment.lock").exists() and 300 - time.time() % 300 > 20:
@@ -578,6 +659,14 @@ read -r release
     assert current["accounts"][0] == before["accounts"][0] and current["accounts"][1]["name"] == "cron-managed-account"
     actual = services(controlled)
     assert actual["xray"]["id"] != previous["xray"]["id"], "定时新版本未应用到真实核心"
+    probe_path = controlled["path"] / "tmp/padm-cron-sync-probe.log"
+    probe = probe_path.read_bytes() if probe_path.is_file() else b"missing\n"
+    assert re.search(rb"probe-end:[0-9]+:[0-9]+:0(?:\n|$)", probe), "真实 cron 探针未成功执行完成"
+    commands = (controlled["path"] / "tmp/padm-cron-command.log").read_bytes()
+    assert re.search(rb"command-end:[0-9]+:[0-9]+:auto-sync:0(?:\n|$)", commands), \
+        "真实 cron 自动同步没有成功退出记录"
+    print(commands.decode(), end="", flush=True)
+    remove_cron_probe(controlled, marker)
     cli(controlled, "control", "auto-sync")
     assert state(controlled) == current and services(controlled) == actual, "定时提交后的同版本检查重建服务"
     print(f"docker-control-two-deployment-cron-autonomous-revision-ok:revision={target}:"
@@ -616,11 +705,15 @@ def sync_schedule_disable(controller, controlled):
         assert ids, "up 后没有真实容器"
         inspected = json.loads(command(controlled["docker"] + ["inspect", *ids]))
         statuses = [item["State"]["Health"]["Status"] for item in inspected]
+        summary = [{"service": item["Config"]["Labels"]["com.docker.compose.service"],
+                    "running": item["State"]["Running"], "health": item["State"]["Health"]["Status"]}
+                   for item in inspected]
         assert all(item["State"]["Running"] for item in inspected) and \
-            all(value in ("starting", "healthy") for value in statuses), "up 后服务停止或不健康"
+            all(value in ("starting", "healthy") for value in statuses), \
+            "up 后服务停止或不健康：" + json.dumps(summary)
         if all(value == "healthy" for value in statuses):
             break
-        assert time.monotonic() < deadline, "up 后真实容器健康检查超时"
+        assert time.monotonic() < deadline, "up 后真实容器健康检查超时：" + json.dumps(summary)
         time.sleep(0.2)
     services(controlled)
     print("docker-control-two-deployment-sync-schedule-down-disable-zero-network-ok", flush=True)

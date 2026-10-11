@@ -167,7 +167,8 @@ systemctl() {
     is-enabled) [[ -e "${TEST_ROOT}/enabled" ]]; return $? ;;
     is-active) [[ -e "${TEST_ROOT}/active" ]]; return $? ;;
     esac
-    if [[ "${MODE}" == failure && ( "$1" == enable || "$1" == disable ) &&
+    if [[ ( "${MODE}" == failure && ( "$1" == enable || "$1" == disable ) ||
+        "${MODE}" == enable-failure && "$1" == enable ) &&
         ! -e "${TEST_ROOT}/failed-once" ]]; then
         : >"${TEST_ROOT}/failed-once"; return 1
     fi
@@ -264,7 +265,7 @@ for BACKEND in systemd cron; do
     jq -e --arg backend "${BACKEND}" \
         '. == {backend:$backend,installed:true,active:true,enabled:true}' "${TEST_ROOT}/status.json" >/dev/null
     if [[ "${BACKEND}" == systemd ]]; then
-        grep -qxF 'OnCalendar=*-*-* *:0/5:00' "${timer}"
+        grep -qxF 'OnCalendar=*-*-* *:0/5:15' "${timer}"
         grep -qxF 'AccuracySec=1s' "${timer}"
         grep -qxF 'TimeoutStopSec=0' "${service}"
         grep -qxF 'SuccessExitStatus=12' "${service}"
@@ -284,8 +285,86 @@ for BACKEND in systemd cron; do
         reject dockerControlSyncScheduleInstall
         ENV_OVERRIDE=
         [[ "$(sha256sum "${spec}")" == "${original}" ]]
+        cp -- "${timer}" "${TEST_ROOT}/new.timer"
+        sed 's/:0\/5:15$/:0\/5:00/' "${timer}" >"${TEST_ROOT}/old.timer"
+        cp -- "${TEST_ROOT}/old.timer" "${timer}"
+        beforeUnits=$(sha256sum "${service}" "${timer}")
+        : >"${TEST_ROOT}/schedule.log"
+        MODE=enable-failure
+        rm -f -- "${TEST_ROOT}/failed-once"
+        reject dockerControlSyncScheduleInstall
+        [[ "$(sha256sum "${service}" "${timer}")" == "${beforeUnits}" &&
+            -e "${TEST_ROOT}/enabled" && -e "${TEST_ROOT}/active" ]] ||
+            fail '旧同步 timer 迁移失败没有恢复原模板和启用状态'
+        ! grep -qxF 'stop padm-docker-control-sync.service' "${TEST_ROOT}/schedule.log" ||
+            fail '旧同步 timer 失败恢复停止当前同步 service'
+        check_clean
+        MODE=normal
+        dockerControlSyncScheduleInstall
+        cmp -- "${TEST_ROOT}/new.timer" "${timer}"
+        ! grep -qxF 'stop padm-docker-control-sync.service' "${TEST_ROOT}/schedule.log" ||
+            fail '旧同步 timer 同 backend 迁移停止当前同步 service'
+        cp -- "${TEST_ROOT}/old.timer" "${timer}"
+        sed 's/:0\/5:00$/:0\/5:14/' "${timer}" >"${TEST_ROOT}/bad.timer"
+        cp -- "${TEST_ROOT}/bad.timer" "${timer}"
+        reject dockerControlSyncScheduleInstall
+        cp -- "${TEST_ROOT}/old.timer" "${timer}"
+        sed "s|# padm-docker root=${root}|# padm-docker root=/foreign|" \
+            "${timer}" >"${TEST_ROOT}/bad.timer"
+        cp -- "${TEST_ROOT}/bad.timer" "${timer}"
+        reject dockerControlSyncScheduleInstall
+        cp -- "${TEST_ROOT}/old.timer" "${timer}"
     else
-        grep -qF '*/5 * * * * PADM_DOCKER_INSTALL_DIR=' "${TEST_ROOT}/crontab"
+        newCron=$(grep -F 'control auto-sync' "${TEST_ROOT}/crontab")
+        grep -qF "*/5 * * * * $(command -v sleep) 15 && PADM_DOCKER_INSTALL_DIR=" "${TEST_ROOT}/crontab"
+        # 执行生成的 cron 命令，短暂占锁必须先结束，CLI 仍只尝试一次且收到正确 root。
+        cat >"${PADM_DOCKER_BIN_DIR}/padm-docker" <<EOF
+#!/usr/bin/env bash
+[[ "\$*" == 'control auto-sync' ]] || exit 2
+source "${PROJECT_ROOT}/install-docker.sh"
+PADM_DOCKER_LOCK_TIMEOUT=0 dockerAcquireDeploymentLock || exit 12
+dockerReleaseDeploymentLock || exit 12
+printf '%s %s\n' "\$(date +%s)" "\${PADM_DOCKER_INSTALL_DIR}" >"${TEST_ROOT}/delayed-cli.log"
+EOF
+        chmod 0700 "${PADM_DOCKER_BIN_DIR}/padm-docker"
+        (
+            trap 'dockerReleaseDeploymentLock' EXIT
+            dockerAcquireDeploymentLock
+            : >"${TEST_ROOT}/traffic-ready"
+            sleep 2
+        ) &
+        trafficPid=$!
+        while [[ ! -e "${TEST_ROOT}/traffic-ready" ]]; do sleep 0.1; done
+        delayedStarted=$(date +%s)
+        env PADM_DOCKER_INSTALL_DIR=/foreign /bin/sh -c "${newCron#'*/5 * * * * '}"
+        wait "${trafficPid}"
+        read -r delayedExecuted delayedRoot <"${TEST_ROOT}/delayed-cli.log"
+        [[ "${delayedRoot}" == "${root}" ]] && ((delayedExecuted - delayedStarted >= 15)) ||
+            fail '生成的同步 cron 未延迟 15 秒、绕开短暂占锁或传入正确 root'
+        oldCron=${newCron/"$(command -v sleep) 15 && "/}
+        printf '# unrelated job\n%s\n' "${oldCron}" >"${TEST_ROOT}/crontab"
+        beforeCron=$(sha256sum "${TEST_ROOT}/crontab")
+        MODE=signal
+        rm -f -- "${TEST_ROOT}/failed-once"
+        reject dockerControlSyncScheduleInstall
+        [[ "$(sha256sum "${TEST_ROOT}/crontab")" == "${beforeCron}" ]] ||
+            fail '旧同步 cron 迁移中断没有恢复原作业'
+        check_clean
+        MODE=normal
+        dockerControlSyncScheduleInstall
+        [[ "$(grep -F 'control auto-sync' "${TEST_ROOT}/crontab")" == "${newCron}" ]] ||
+            fail '旧同步 cron 没有迁移成固定 15 秒延迟'
+        beforeCron=$(sha256sum "${TEST_ROOT}/crontab")
+        dockerControlSyncScheduleInstall
+        [[ "$(sha256sum "${TEST_ROOT}/crontab")" == "${beforeCron}" ]] ||
+            fail '新同步 cron 重装不幂等'
+        for badCron in "${newCron/' 15 && '/' 14 && '}" \
+            "${oldCron/PADM_DOCKER_INSTALL_DIR=${root}/PADM_DOCKER_INSTALL_DIR=/foreign}"; do
+            printf '# unrelated job\n%s\n' "${badCron}" >"${TEST_ROOT}/crontab"
+            reject dockerControlSyncScheduleInstall
+        done
+        # 混存的已知新旧行都归同 root，停用时不能遗留任一份。
+        printf '# unrelated job\n%s\n%s\n' "${oldCron}" "${newCron}" >"${TEST_ROOT}/crontab"
     fi
     reject dockerControlSyncScheduleBundleCheck "${TEST_ROOT}/old-bundle"
     dockerControlSyncScheduleBundleCheck "${PROJECT_ROOT}"
@@ -295,6 +374,11 @@ for BACKEND in systemd cron; do
     dockerControlCommand sync-schedule disable --yes >/dev/null
     rm "${TEST_ROOT}/network-down"
     [[ "$(sha256sum "${TEST_ROOT}/client.log")" == "${beforeClient}" && ! -e "${directory}" ]]
+    ! grep -qF 'control auto-sync' "${TEST_ROOT}/crontab"
+    if [[ "${BACKEND}" == systemd ]]; then
+        grep -qxF 'stop padm-docker-control-sync.service' "${TEST_ROOT}/schedule.log" ||
+            fail '明确停用调度没有停止受管同步 service'
+    fi
     check_clean
 done
 

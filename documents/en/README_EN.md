@@ -717,7 +717,11 @@ identity, connection and entry mapping; configuration and business backups exclu
 Disabling removes the persistent token. Import a rotated invitation with the same `enable` command.
 Expired, revoked or unreachable authorization prevents a commit but still allows status and disabling.
 The fixed job runs `control auto-sync`, exits `12` on deployment-lock contention, and skips normally
-stopped services without starting them. Starting services reinstalls the job. Updates, rollbacks and
+stopped services without starting them. Scheduled execution starts 15 seconds after each five-minute
+boundary, avoiding the fixed start second of minute-by-minute traffic collection. A long transaction
+can still skip an attempt; the direct CLI tries the lock once without waiting or retrying. Exact
+legacy schedules owned by this deployment migrate; edited or foreign jobs are rejected. Starting
+services reinstalls the job. Updates, rollbacks and
 restores retain local registration and reject incompatible bundles or identity drift before stopping.
 Only existing single-peer controlled connections are supported; multiple peers, role rebinding and
 WS/SSH protection requiring fresh external source proof are rejected.

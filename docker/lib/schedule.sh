@@ -8,15 +8,19 @@ PADM_DOCKER_SCHEDULE_LOADED=1
 DOCKER_MAINTENANCE_JOB=
 DOCKER_MAINTENANCE_SNAPSHOT=
 DOCKER_MAINTENANCE_CHANGED=0
+DOCKER_MAINTENANCE_KEEP_SERVICE=0
 
 dockerMaintenanceScheduleRestore() {
     local snapshot=$1 unitDir=$2 systemdReady=$3 timerEnabled=$4 timerActive=$5 job=$6 file failed=0
+    local keepService=${7:-0}
     case "${job}" in renewal|geo|traffic|control-log|control-sync) ;; *) return 1 ;; esac
     if [[ "${systemdReady}" == 1 ]]; then
         [[ ! -f "${unitDir}/padm-docker-${job}.timer" ]] ||
             systemctl disable --now "padm-docker-${job}.timer" >/dev/null 2>&1 || return 1
-        [[ ! -f "${unitDir}/padm-docker-${job}.service" ]] ||
-            systemctl stop "padm-docker-${job}.service" >/dev/null 2>&1 || return 1
+        if [[ "${job}" != control-sync || "${keepService}" != 1 ]]; then
+            [[ ! -f "${unitDir}/padm-docker-${job}.service" ]] ||
+                systemctl stop "padm-docker-${job}.service" >/dev/null 2>&1 || return 1
+        fi
     fi
     for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
         if [[ -f "${snapshot}/${file}" ]]; then
@@ -47,13 +51,14 @@ dockerMaintenanceScheduleInterrupted() {
     if [[ "${DOCKER_MAINTENANCE_CHANGED:-0}" == 1 ]]; then
         dockerMaintenanceScheduleRestore "${snapshot}" "${DOCKER_MAINTENANCE_UNIT_DIR}" \
             "${DOCKER_MAINTENANCE_SYSTEMD_READY}" "${DOCKER_MAINTENANCE_TIMER_ENABLED}" \
-            "${DOCKER_MAINTENANCE_TIMER_ACTIVE}" "${job}" || {
+            "${DOCKER_MAINTENANCE_TIMER_ACTIVE}" "${job}" "${DOCKER_MAINTENANCE_KEEP_SERVICE:-0}" || {
             dockerError "${job} 调度恢复失败，请检查: ${snapshot}"
             return 1
         }
     fi
     dockerRemoveManagedTree "${root}" "${snapshot}" || return 1
-    DOCKER_MAINTENANCE_SNAPSHOT= DOCKER_MAINTENANCE_JOB= DOCKER_MAINTENANCE_CHANGED=0
+    DOCKER_MAINTENANCE_SNAPSHOT= DOCKER_MAINTENANCE_JOB= DOCKER_MAINTENANCE_CHANGED=0 \
+        DOCKER_MAINTENANCE_KEEP_SERVICE=0
 }
 
 dockerMaintenanceScheduleCommit() {
@@ -73,10 +78,10 @@ dockerMaintenanceScheduleCommit() {
 
 dockerMaintenanceScheduleApply() {
     [[ "$#" -eq 2 ]] || return 1
-    local action=$1 job=$2 root cli bashPath unitDir file fragment snapshot= cronText= cronLine line
-    local marker cronMarker command calendar cronSchedule description timerDescription expected
+    local action=$1 job=$2 root cli bashPath sleepPath unitDir file fragment snapshot= cronText= cronLine cronLegacyLine line
+    local marker cronMarker command calendar cronSchedule description timerDescription expected legacyExpected
     local controlLogService= controlLogTimer= dropIns= loaded= prefix= backend=none active=false
-    local timeout=1800 timerOptions='RandomizedDelaySec=300' legacy=0
+    local timeout=1800 timerOptions='RandomizedDelaySec=300' legacy=0 syncLegacy=0 keepService=0
     local systemdReady=0 cronReady=0 timerEnabled=0 timerActive=0 haveUnits=0 haveCron=0
     case "${action}" in install|remove) ;; check) [[ "${job}" == control-log || "${job}" == control-sync ]] || return 1 ;; *) return 1 ;; esac
     case "${job}" in
@@ -118,7 +123,7 @@ dockerMaintenanceScheduleApply() {
     control-sync)
         marker='# padm-docker 被控账号自动同步'
         command='control auto-sync'
-        calendar='*-*-* *:0/5:00'
+        calendar='*-*-* *:0/5:15'
         cronSchedule='*/5 * * * *'
         description='padm Docker controlled account synchronization'
         timerDescription='Synchronize padm Docker controlled accounts every five minutes'
@@ -131,6 +136,10 @@ dockerMaintenanceScheduleApply() {
     root=$(dockerInstallRoot) || return 1
     cli="${PADM_DOCKER_BIN_DIR:-/usr/local/bin}/padm-docker"
     bashPath=$(command -v bash) || return 1
+    if [[ "${job}" == control-sync ]]; then
+        sleepPath=$(command -v sleep) || return 1
+        [[ "${sleepPath}" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
+    fi
     unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system}
     [[ "${root}" =~ ^/[A-Za-z0-9._/-]+$ && "${cli}" =~ ^/[A-Za-z0-9._/-]+$ &&
         "${bashPath}" =~ ^/[A-Za-z0-9._/-]+$ && "${unitDir}" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
@@ -179,13 +188,19 @@ EOF
     if [[ "${job}" == traffic ]]; then
         cronMarker='# padm-docker-traffic'
         cronLine="${cronSchedule} PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} ${command} ${cronMarker}"
+    elif [[ "${job}" == control-sync ]]; then
+        cronLine="${cronSchedule} ${sleepPath} 15 && PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} ${command} ${cronMarker} root=${root}"
+        cronLegacyLine="${cronSchedule} PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} ${command} ${cronMarker} root=${root}"
     else
         cronLine="${cronSchedule} PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} ${command} ${cronMarker} root=${root}"
     fi
     # 全部来源先确认归本部署所有，不能覆盖同名外部 unit 或其它 root 的任务。
     while IFS= read -r line; do
         [[ "${line}" == *"${cronMarker}"* ]] || continue
-        [[ "${line}" == "${cronLine}" ]] || return 1
+        if [[ "${line}" != "${cronLine}" && "${line}" != "${cronLegacyLine:-}" ]]; then
+            return 1
+        fi
+        [[ "${line}" != "${cronLegacyLine:-}" ]] || syncLegacy=1
         haveCron=1
     done <<<"${cronText}"
     if [[ -e "${unitDir}" || -L "${unitDir}" ]]; then
@@ -203,9 +218,21 @@ EOF
                 grep -qxF "${marker}" "${unitDir}/${file}" || return 1
             if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
                 [[ "$(stat -c '%u:%g:%a:%h' "${unitDir}/${file}")" == 0:0:644:1 ]] || return 1
-                if [[ "${file}" == *.service ]]; then expected=${controlLogService};
-                else expected=${controlLogTimer}; fi
-                [[ "$(<"${unitDir}/${file}")" == "${expected}" ]] || return 1
+                if [[ "${file}" == *.service ]]; then
+                    expected=${controlLogService}
+                    [[ "$(<"${unitDir}/${file}")" == "${expected}" ]] || return 1
+                else
+                    expected=${controlLogTimer}
+                    if [[ "$(<"${unitDir}/${file}")" != "${expected}" ]]; then
+                        if [[ "${job}" == control-sync ]]; then
+                            legacyExpected=${controlLogTimer/"OnCalendar=${calendar}"/'OnCalendar=*-*-* *:0/5:00'}
+                            [[ "$(<"${unitDir}/${file}")" == "${legacyExpected}" ]] || return 1
+                            syncLegacy=1
+                        else
+                            return 1
+                        fi
+                    fi
+                fi
             fi
             if [[ "${job}" == traffic ]] &&
                 ! grep -q '^# padm-docker root=' "${unitDir}/${file}"; then
@@ -309,7 +336,7 @@ EOF
             '{backend:$backend,installed:($backend != "none"),active:$active}'
         return $?
     fi
-    if [[ "${action}" == install && "${job}" == control-sync ]]; then
+    if [[ "${action}" == install && "${job}" == control-sync && "${syncLegacy}" == 0 ]]; then
         # 同步提交和失败恢复均会重装调度；完整核验后的原任务不得停止自身。
         if [[ "${systemdReady}" == 1 && "${haveCron}" == 0 &&
             -f "${unitDir}/padm-docker-${job}.service" && -f "${unitDir}/padm-docker-${job}.timer" &&
@@ -319,11 +346,16 @@ EOF
     fi
     dockerManagedPathIsSafe "${root}" "${root}/locks" &&
         [[ -d "${root}/locks" && ! -L "${root}/locks" && -O "${root}/locks" ]] || return 1
+    # 同 backend 的受管 service 命令未变，迁移 timer 和失败恢复都不能终止当前同步。
+    if [[ "${action}" == install && "${job}" == control-sync && "${systemdReady}" == 1 &&
+        "${haveCron}" == 0 && -f "${unitDir}/padm-docker-control-sync.service" ]]; then
+        keepService=1
+    fi
     snapshot=$(mktemp -d "${root}/locks/${job}-schedule.XXXXXX") || return 1
     DOCKER_MAINTENANCE_JOB=${job} DOCKER_MAINTENANCE_SNAPSHOT=${snapshot} \
         DOCKER_MAINTENANCE_UNIT_DIR=${unitDir} DOCKER_MAINTENANCE_SYSTEMD_READY=${systemdReady} \
         DOCKER_MAINTENANCE_TIMER_ENABLED=${timerEnabled} DOCKER_MAINTENANCE_TIMER_ACTIVE=${timerActive} \
-        DOCKER_MAINTENANCE_CHANGED=0
+        DOCKER_MAINTENANCE_CHANGED=0 DOCKER_MAINTENANCE_KEEP_SERVICE=${keepService}
     chmod 0700 "${snapshot}" || return 1
     for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
         [[ ! -f "${unitDir}/${file}" ]] || cp -- "${unitDir}/${file}" "${snapshot}/${file}" || return 1
@@ -338,15 +370,18 @@ EOF
         if [[ "${systemdReady}" == 1 ]]; then
             [[ ! -f "${unitDir}/padm-docker-${job}.timer" ]] ||
                 systemctl disable --now "padm-docker-${job}.timer" >/dev/null || exit 1
-            [[ ! -f "${unitDir}/padm-docker-${job}.service" ]] ||
-                systemctl stop "padm-docker-${job}.service" >/dev/null || exit 1
+            if [[ "${keepService}" != 1 ]]; then
+                [[ ! -f "${unitDir}/padm-docker-${job}.service" ]] ||
+                    systemctl stop "padm-docker-${job}.service" >/dev/null || exit 1
+            fi
         else
             [[ ! -f "${unitDir}/padm-docker-${job}.timer" ]] ||
                 systemctl disable "padm-docker-${job}.timer" >/dev/null || exit 1
         fi
     fi
     if [[ "${haveCron}" == 1 ]]; then
-        printf '%s\n' "${cronText}" | awk -v owned="${cronLine}" '$0 != owned' | crontab - || exit 1
+        printf '%s\n' "${cronText}" | awk -v owned="${cronLine}" -v legacy="${cronLegacyLine:-}" \
+            '$0 != owned && ($0 != legacy || legacy == "")' | crontab - || exit 1
     fi
     if [[ "${action}" == install && "${systemdReady}" == 1 ]]; then
         if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
@@ -387,7 +422,8 @@ EOF
         rm -f -- "${unitDir}/padm-docker-${job}.service" "${unitDir}/padm-docker-${job}.timer" || exit 1
         [[ "${systemdReady}" == 0 || "${haveUnits}" == 0 ]] || systemctl daemon-reload || exit 1
         if [[ "${action}" == install ]]; then
-            { printf '%s\n' "${cronText}" | awk -v owned="${cronLine}" '$0 != owned'; printf '%s\n' "${cronLine}"; } | crontab - || exit 1
+            { printf '%s\n' "${cronText}" | awk -v owned="${cronLine}" -v legacy="${cronLegacyLine:-}" \
+                '$0 != owned && ($0 != legacy || legacy == "")'; printf '%s\n' "${cronLine}"; } | crontab - || exit 1
         fi
     fi
     ); then
