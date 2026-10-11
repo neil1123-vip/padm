@@ -1785,28 +1785,26 @@ runInstallWorkflowRegression() (
     )
 
     (
-        # 完整安装保留已有站点，局部开关不改变独立站点管理的确认行为。
+        # 完整安装与独立调用都保留已有网页，不消耗后续菜单输入。
         local nginxStaticPath="${TMP_DIR}/install-existing-static" lastInstallationConfig= AUTO_INSTALL=
-        local PADM_NGINX_BLOG_REINSTALL_PROMPT=true readCalls=0 installs=0 inputFd nextInput core
+        local readCalls=0 installs=0 inputFd nextInput core
         mkdir -p "${nginxStaticPath}"
-        printf 'existing\n' >"${nginxStaticPath}/check"
-        prepareCoreInstallInputs() { [[ "${PADM_NGINX_BLOG_REINSTALL_PROMPT}" == false ]]; }
+        printf 'existing\n' >"${nginxStaticPath}/index.html"
+        prepareCoreInstallInputs() { :; }
         coreSwitchConfigTransaction() { shift; "$@"; }
         padmRunPortAllowTransaction() { "$@"; }
         autoRead() {
-            [[ "$1" == nginx_blog_reinstall ]] || return 1
             readCalls=$((readCalls + 1))
-            read -r "$3"
+            return 1
         }
-        randomNum() { printf '1\n'; }
         installNginxStaticTemplate() { installs=$((installs + 1)); }
-        exec {inputFd}< <(printf 'y\nnext-parent-action\n')
+        exec {inputFd}< <(printf 'next-parent-action\n')
         for core in xray sing-box; do
             runCoreInstall "${core}" nginxBlog <&"${inputFd}"
-            [[ "${PADM_NGINX_BLOG_REINSTALL_PROMPT}" == true && "${readCalls}" == 0 && "${installs}" == 0 ]]
+            [[ "${readCalls}" == 0 && "${installs}" == 0 ]]
         done
         nginxBlog <&"${inputFd}"
-        [[ "${readCalls}" == 1 && "${installs}" == 1 ]]
+        [[ "${readCalls}" == 0 && "${installs}" == 0 ]]
         read -r -u "${inputFd}" nextInput
         [[ "${nextInput}" == next-parent-action ]]
         exec {inputFd}<&-

@@ -4,6 +4,7 @@ REGRESSION_CASES_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 source "${REGRESSION_CASES_DIR}/shared.sh"
 source "${REGRESSION_CASES_DIR}/fast.sh"
+source "${REGRESSION_CASES_DIR}/static_sites.sh"
 source "${REGRESSION_CASES_DIR}/protocol_capabilities.sh"
 source "${REGRESSION_CASES_DIR}/platform.sh"
 source "${REGRESSION_CASES_DIR}/routing.sh"

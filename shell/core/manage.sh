@@ -931,41 +931,37 @@ traditionalTlsCurrentAlpn() {
 }
 
 manageTraditionalTlsStaticSite() {
-    local selectInstallNginxBlogType=
+    local selectInstallNginxBlogType= sourceDirectory= siteTitle=
     while true; do
-        echoContent title "\n┌─ 传统 TLS fallback 静态站点 ───────────────────────"
-        menuLine "未命中代理协议时展示本机静态页面"
-        menuLine "如需自定义，请手动复制模板文件到 ${nginxStaticPath}"
-        menuItem 1 "现代引导页" "站点模板 1"
-        menuItem 2 "游戏工作室" "站点模板 2"
-        menuItem 3 "个人笔记" "站点模板 3"
-        menuItem 4 "商务服务" "站点模板 4"
-        menuItem 5 "媒体工具" "站点模板 5"
-        menuItem 6 "互动节奏页" "站点模板 6"
-        menuItem 7 "制造企业" "站点模板 7"
-        menuItem 8 "作品集展示" "站点模板 8"
-        menuItem 9 "本地404页面" "站点模板 9"
-        menuItem 10 "服务状态页" "站点模板 10"
-        menuItem 11 "文档索引" "站点模板 11"
-        menuItem 12 "产品简介" "站点模板 12"
-        menuItem 13 "研究实验室" "站点模板 13"
-        menuItem 14 "社区主页" "站点模板 14"
-        menuItem 15 "旅行札记" "站点模板 15"
-        menuItem 16 "食谱收藏" "站点模板 16"
-        menuItem 17 "图片日志" "站点模板 17"
-        menuItem 18 "学习中心" "站点模板 18"
-        menuItem 19 "活动页面" "站点模板 19"
-        menuItem 20 "团队介绍" "站点模板 20"
-        menuReturnItem 21 "返回" "回到传统 TLS fallback 维护"
+        echoContent title "\n┌─ 本地静态站点 ─────────────────────────────────────"
+        menuLine "目录：${nginxStaticPath}；支持 Nginx 与原生 Hysteria2 file://"
+        menuLine "优先维护自己的完整网站；更换自有网页前保存私有备份"
+        menuRecommendedItem import "导入自有网站" "从独立静态目录复制完整内容，保留源文件"
+        menuItem notes "笔记布局起点" "示例文章、阅读记录和完整内页"
+        menuItem photos "摄影布局起点" "示例照片、观察笔记和图集内页"
+        menuItem docs "文档布局起点" "示例目录、入门和配置文档"
+        menuReturnItem 4 "返回" "回到上级菜单"
         menuClose
         selectInstallNginxBlogType=
         menuReadChoice nginx_blog_menu "请选择:" selectInstallNginxBlogType || return 0
 
-        if [[ "${selectInstallNginxBlogType}" =~ ^([1-9]|1[0-9]|20)$ ]]; then
-            if installNginxStaticTemplate "${selectInstallNginxBlogType}"; then
-                successCard "更换传统 TLS fallback 静态站点成功"
+        if [[ "${selectInstallNginxBlogType}" == import ]]; then
+            sourceDirectory=
+            autoRead nginx_site_source "请输入自有静态目录的绝对路径，例如 /srv/my-site:" sourceDirectory || continue
+            if [[ "${sourceDirectory}" != /* ]]; then
+                errorCard "请输入独立静态目录的绝对路径"
+                continue
             fi
-        elif [[ "${selectInstallNginxBlogType}" == "21" ]]; then
+            if installNginxStaticTemplate "${sourceDirectory}" true; then
+                successCard "自有网站导入成功，源文件与卸载时的网页均保留"
+            fi
+        elif [[ "${selectInstallNginxBlogType}" =~ ^(notes|photos|docs)$ ]]; then
+            siteTitle=
+            autoRead nginx_site_title "请输入站名[2-60 个字符，回车保持已有站名或默认值]:" siteTitle || continue
+            if installNginxStaticTemplate "${selectInstallNginxBlogType}" true "${siteTitle}"; then
+                successCard "本地站点更新成功"
+            fi
+        elif [[ "${selectInstallNginxBlogType}" == "4" ]]; then
             return 0
         else
             coreSelectionErrorCard "选择错误"
@@ -1837,7 +1833,6 @@ uninstallShouldStopNginx() {
     [[ -f "${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf" ]] && return 0
     [[ -f "${nginxConfigPath:-/etc/nginx/conf.d/}padm-control-wg.conf" ]] && return 0
     [[ -e "$(realityStreamSplitConfFile)" || -L "$(realityStreamSplitConfFile)" ]] && return 0
-    [[ -d "${nginxStaticPath:-}" && -f "${nginxStaticPath}/check" ]] && return 0
     return 1
 }
 
@@ -2098,15 +2093,11 @@ unInstallApply() {
     if ! removePadmNginxConfigFragments; then
         uninstallFailed=true
     fi
+    nginxStaticSiteRemove || uninstallFailed=true
     cleanupPadmManagedRootOnUninstall || uninstallFailed=true
 
     if ! unInstallSubscribe; then
         uninstallFailed=true
-    fi
-
-    if [[ -d "${nginxStaticPath}" && -f "${nginxStaticPath}/check" ]]; then
-        removeInstallPath "${nginxStaticPath}" "伪装网站" || uninstallFailed=true
-        successCard "删除伪装网站完成"
     fi
 
     removeInstallPath /usr/bin/padm "PADM快捷方式" || uninstallFailed=true

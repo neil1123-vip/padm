@@ -1043,6 +1043,10 @@ server {
     server_name _;
     root ${nginxStaticPath};
 
+    location / {
+        error_page 404 /404.html;
+    }
+
     location /s/control/ {
         access_log ${controlLog};
         client_max_body_size 256k;

@@ -857,114 +857,72 @@ runInstallNginxStaticRejectsUnsafePathRegression() {
     (
         set -euo pipefail
         local root="${TMP_DIR}/install-nginx-static-unsafe-path"
-        local scriptDir="${root}/script"
         local staticDir="${root}/relative-static"
-        local unzipLog="${root}/unzip.log"
-        mkdir -p "${scriptDir}/assets/static-sites/templates" "${staticDir}"
-        printf 'zip\n' >"${scriptDir}/assets/static-sites/templates/html1.zip"
+        local copyLog="${root}/copy.log"
+        mkdir -p "${staticDir}"
+        printf 'keep\n' >"${staticDir}/index.html"
         cd "${root}"
 
-        SCRIPT_DIR="${scriptDir}"
+        SCRIPT_DIR="${PROJECT_ROOT}"
         nginxStaticPath="relative-static/"
-        cleanDirectoryContent() { return 1; }
-        unzip() {
-            printf 'unzip\n' >"${unzipLog}"
-            return 0
-        }
-        renderNginxStaticTemplate() {
-            printf 'render\n' >"${root}/render.log"
-        }
-
-        ! installNginxStaticTemplate 1
-        [[ ! -e "${staticDir}/html1.zip" ]]
-        [[ ! -e "${unzipLog}" ]]
-    )
-}
-
-runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression() {
-    (
-        set -euo pipefail
-        local root="${TMP_DIR}/install-nginx-static-unzip-failure"
-        local scriptDir="${root}/script"
-        local staticDir="${root}/static"
-        mkdir -p "${scriptDir}/assets/static-sites/templates" "${staticDir}"
-        printf 'zip\n' >"${scriptDir}/assets/static-sites/templates/html1.zip"
-        printf 'keep\n' >"${staticDir}/index.html"
-        printf 'marker\n' >"${staticDir}/check"
-
-        SCRIPT_DIR="${scriptDir}"
-        nginxStaticPath="${staticDir}"
-        unzip() {
-            local targetDir=
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -d)
-                    targetDir=$2
-                    shift 2
-                    ;;
-                *)
-                    shift
-                    ;;
-                esac
-            done
-            [[ -n "${targetDir}" ]]
-            printf 'partial\n' >"${targetDir}/index.html"
+        cp() {
+            printf 'copy\n' >"${copyLog}"
             return 1
         }
         renderNginxStaticTemplate() {
             printf 'render\n' >"${root}/render.log"
         }
 
-        ! installNginxStaticTemplate 1
-        [[ "$(<"${staticDir}/index.html")" == "keep" ]]
-        [[ "$(<"${staticDir}/check")" == "marker" ]]
-        [[ ! -e "${root}/render.log" ]]
-        ! compgen -G "${root}/.static.*" >/dev/null
+        ! installNginxStaticTemplate notes
+        [[ "$(<"${staticDir}/index.html")" == keep ]]
+        [[ ! -e "${copyLog}" && ! -e "${root}/render.log" ]]
+    )
+}
 
-        local missingRoot="${TMP_DIR}/install-nginx-static-missing-local-template"
-        local missingScriptDir="${missingRoot}/script"
-        local missingStaticDir="${missingRoot}/static"
-        local downloadMarker="${missingRoot}/download.log"
-        mkdir -p "${missingScriptDir}/assets/static-sites/templates" "${missingStaticDir}"
-        printf 'keep\n' >"${missingStaticDir}/index.html"
-        SCRIPT_DIR="${missingScriptDir}"
-        nginxStaticPath="${missingStaticDir}"
-        downloadFile() {
-            printf 'download\n' >"${downloadMarker}"
-            [[ "$1" == "-O" ]] || return 1
-            printf 'zip\n' >"$2"
+runInstallNginxStaticPreservesLiveSiteOnPreparationFailureRegression() {
+    (
+        set -euo pipefail
+        local release=debian
+        local root="${TMP_DIR}/install-nginx-static-preparation-failure"
+        local scriptDir="${PROJECT_ROOT}"
+        local staticDir="${root}/static"
+        SCRIPT_DIR="${scriptDir}"
+        nginxStaticPath="${staticDir}"
+        PADM_STATIC_SITE_STATE_FILE="${root}/state.json"
+        installNginxStaticTemplate notes
+        local oldIndex oldState
+        oldIndex=$(sha256sum "${staticDir}/index.html")
+        oldState=$(cat "${PADM_STATIC_SITE_STATE_FILE}")
+        cp() {
+            if [[ "$2" == */assets/static-sites/sites/* ]]; then
+                mkdir -p "$3"
+                printf 'partial\n' >"$3/index.html"
+                return 1
+            fi
+            command cp "$@"
         }
-        unzip() {
-            return 0
-        }
-        renderNginxStaticTemplate() {
-            printf 'render\n' >"${missingRoot}/render.log"
-        }
-
-        ! installNginxStaticTemplate 1
-        [[ ! -e "${downloadMarker}" ]]
-        [[ -f "${missingStaticDir}/index.html" ]] || return 1
-        [[ "$(<"${missingStaticDir}/index.html")" == "keep" ]]
+        ! installNginxStaticTemplate photos
+        [[ "$(sha256sum "${staticDir}/index.html")" == "${oldIndex}" ]]
+        [[ "$(cat "${PADM_STATIC_SITE_STATE_FILE}")" == "${oldState}" ]]
+        ! compgen -G "${root}/.padm-site.*" >/dev/null
+        SCRIPT_DIR="${root}/missing-source"
+        ! installNginxStaticTemplate photos
+        [[ "$(sha256sum "${staticDir}/index.html")" == "${oldIndex}" ]]
     )
 
     (
         set -euo pipefail
-        local root scriptDir staticDir rendererFailure sedCalls
+        local root staticDir rendererFailure oldIndex oldState
         local release=debian
-        unzip() {
-            [[ "$1" == -o && "$3" == -d ]] || return 1
-            printf '__SITE_TITLE__\n' >"$4/index.html"
-            printf '__SITE_ACCENT__\n' >"$4/site.css"
-        }
         sed() {
-            sedCalls=$((sedCalls + 1))
-            if [[ "${rendererFailure}" == sed && "${sedCalls}" == 1 ]]; then
+            if [[ "${rendererFailure:-}" == sed ]]; then
+                printf 'failed\n' >>"${root}/sed.log"
                 return 1
             fi
             command sed "$@"
         }
         find() {
-            if [[ "${rendererFailure}" == find ]]; then
+            if [[ "${rendererFailure:-}" == find && "$1" == */.padm-site.*/site ]]; then
                 printf 'partial\n' >"${root}/find.log"
                 printf '%s\n' "${nginxStaticPath}/index.html"
                 return 1
@@ -974,30 +932,31 @@ runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression() {
 
         for rendererFailure in sed find; do
             root="${TMP_DIR}/install-nginx-static-render-${rendererFailure}-failure"
-            scriptDir="${root}/script"
             staticDir="${root}/static"
-            sedCalls=0
-            mkdir -p "${scriptDir}/assets/static-sites/templates" "${staticDir}"
-            printf 'zip\n' >"${scriptDir}/assets/static-sites/templates/html1.zip"
-            printf 'keep\n' >"${staticDir}/index.html"
-            printf 'marker\n' >"${staticDir}/check"
-            SCRIPT_DIR="${scriptDir}"
+            local pendingFailure=${rendererFailure}
+            rendererFailure=
+            SCRIPT_DIR="${PROJECT_ROOT}"
             nginxStaticPath="${staticDir}"
+            PADM_STATIC_SITE_STATE_FILE="${root}/state.json"
+            installNginxStaticTemplate notes
+            oldIndex=$(sha256sum "${staticDir}/index.html")
+            oldState=$(cat "${PADM_STATIC_SITE_STATE_FILE}")
+            rendererFailure=${pendingFailure}
 
-            if installNginxStaticTemplate 1; then
+            if installNginxStaticTemplate photos; then
                 return 1
             fi
             [[ "${nginxStaticPath}" == "${staticDir}" ]] || return 1
-            [[ "$(<"${staticDir}/index.html")" == "keep" ]] || return 1
-            [[ "$(<"${staticDir}/check")" == "marker" ]] || return 1
+            [[ "$(sha256sum "${staticDir}/index.html")" == "${oldIndex}" ]] || return 1
+            [[ "$(cat "${PADM_STATIC_SITE_STATE_FILE}")" == "${oldState}" ]] || return 1
             [[ ! -e "${staticDir}/site.css" ]] || return 1
-            if compgen -G "${root}/.static.*" >/dev/null; then
+            if compgen -G "${root}/.padm-site.*" >/dev/null; then
                 return 1
             fi
             if [[ "${rendererFailure}" == sed ]]; then
-                [[ "${sedCalls}" == 1 ]] || return 1
+                [[ -s "${root}/sed.log" ]] || return 1
             else
-                [[ "${sedCalls}" == 0 ]] || return 1
+                [[ ! -e "${root}/sed.log" ]] || return 1
                 [[ -s "${root}/find.log" ]] || return 1
             fi
         done
@@ -7945,7 +7904,7 @@ runRegressionFastOnlySafety() {
         write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression \
         install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression \
         install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression \
-        install-nginx-static-unzip-failure runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression \
+        install-nginx-static-preparation-failure runInstallNginxStaticPreservesLiveSiteOnPreparationFailureRegression \
         subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression \
         subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression \
         subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression \

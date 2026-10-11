@@ -413,7 +413,7 @@ coreTemplateConfigTransaction() {
         [xrayRestartRunning]="${xrayRestartRunning}" [singBoxRestartRunning]="${singBoxRestartRunning}"
         [manageNginx]="${manageNginx}" [nginxWasRunning]="${nginxWasRunning}"
         [statsBinaryBackupDir]="${statsBinaryBackupDir}" [statsBinary]="${statsBinary}" [statsCronet]="${statsCronet}"
-        [subscribeLocalBase]= [subscribeOutputBackupDir]=
+        [subscribeLocalBase]= [subscribeOutputBackupDir]= [staticSiteBackupDir]= [staticSiteStateFile]=
         [oldStartupService]="${oldStartupService}" [oldStartupWasEnabled]="${oldStartupWasEnabled}" [oldStartupChanged]=false
     )
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
@@ -431,6 +431,9 @@ coreTemplateConfigTransaction() {
         fi
         if [[ -n "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}" ]]; then
             padmRemoveCleanupPath "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}"
+        fi
+        if [[ -n "${PADM_CORE_TEMPLATE_ROLLBACK[staticSiteBackupDir]}" ]]; then
+            padmRemoveCleanupPath "${PADM_CORE_TEMPLATE_ROLLBACK[staticSiteBackupDir]}"
         fi
         [[ -z "${statsBinaryBackupDir}" ]] || padmRemoveCleanupPath "${statsBinaryBackupDir}"
         padmRemoveCleanupPath "${backupDir}"
@@ -455,6 +458,7 @@ coreTemplateConfigRollback() {
     local statsBinary=${PADM_CORE_TEMPLATE_ROLLBACK[statsBinary]} statsCronet=${PADM_CORE_TEMPLATE_ROLLBACK[statsCronet]}
     local subscribeLocalBase=${PADM_CORE_TEMPLATE_ROLLBACK[subscribeLocalBase]:-}
     local subscribeOutputBackupDir=${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]:-}
+    local staticSiteBackupDir=${PADM_CORE_TEMPLATE_ROLLBACK[staticSiteBackupDir]:-}
     local oldStartupService=${PADM_CORE_TEMPLATE_ROLLBACK[oldStartupService]:-}
     local oldStartupWasEnabled=${PADM_CORE_TEMPLATE_ROLLBACK[oldStartupWasEnabled]:-false}
     local oldStartupChanged=${PADM_CORE_TEMPLATE_ROLLBACK[oldStartupChanged]:-false}
@@ -511,6 +515,17 @@ coreTemplateConfigRollback() {
         else
             outputRestored=false
             padmForgetCleanupPath "${subscribeOutputBackupDir}"
+        fi
+    fi
+    if [[ -n "${staticSiteBackupDir}" ]]; then
+        local staticSiteStateFile=${PADM_CORE_TEMPLATE_ROLLBACK[staticSiteStateFile]:-}
+        if [[ "${nginxStopped}" == true && "${newCoreStopped}" == true ]] &&
+            restoreStaticSiteBackup "${staticSiteBackupDir}" "${staticSiteStateFile}"; then
+            padmRemoveCleanupPath "${staticSiteBackupDir}"
+        else
+            cleanupRestored=false
+            padmForgetCleanupPath "${staticSiteBackupDir}"
+            errorCard "网页或站点状态恢复失败，备份保留在：${staticSiteBackupDir}"
         fi
     fi
     if [[ "${oldStartupChanged}" == true && "${configRestored}" == true && "${cleanupRestored}" == true &&
@@ -1363,6 +1378,7 @@ EOF
         readSingBoxProtocolPort result 3 "${singBoxHysteria2Port}" || return 1
         statusCard "Hysteria2端口" "${result[-1]}"
         initHysteria2Network || return 1
+        hysteria2PrepareLocalSite || return 1
         local hysteria2MasqueradeConfig
         local hysteria2ObfsConfig
         local hysteria2BandwidthConfig

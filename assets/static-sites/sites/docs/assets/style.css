@@ -1,0 +1,64 @@
+:root { --accent: #176f74; --accent: __SITE_ACCENT__; color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #fff; color: #252c2c; font: 15px/1.7 system-ui, sans-serif; letter-spacing: 0; overflow-wrap: anywhere; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.skip { position: absolute; top: -80px; left: 20px; padding: 8px 12px; background: #fff; z-index: 2; }
+.skip:focus { top: 10px; }
+.site-header { border-bottom: 1px solid #dce3e3; padding: 18px 30px; display: flex; justify-content: space-between; gap: 24px; align-items: center; flex-wrap: wrap; max-width: 1440px; margin-inline: auto; }
+.brand { color: #252c2c; text-decoration: none; font-size: 21px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.header-meta { color: #627171; font-size: 12px; }
+.layout { display: grid; grid-template-columns: 230px minmax(0, 850px); max-width: 1260px; margin-inline: auto; }
+.sidebar { padding: 32px 24px; border-right: 1px solid #dce3e3; background: #f7f9f9; min-height: 78vh; }
+.sidebar h2 { font-size: 11px; text-transform: uppercase; font-weight: 650; color: #697777; margin: 0 0 14px; }
+.sidebar nav { display: grid; gap: 3px; }
+.sidebar a { display: block; padding: 8px 10px; text-decoration: none; color: #4c5e5e; border-left: 2px solid transparent; }
+.sidebar a[aria-current="page"] { color: var(--accent); border-left-color: var(--accent); background: #ebf1f1; }
+.sidebar a:hover { background: #edf2f2; }
+.sidebar .section { margin-top: 27px; }
+main { padding: 42px 48px 72px; min-width: 0; }
+h1 { font-size: 33px; line-height: 1.2; margin: 0 0 21px; overflow-wrap: anywhere; }
+h2 { font-size: 23px; line-height: 1.35; margin: 36px 0 14px; }
+h3 { font-size: 17px; line-height: 1.4; }
+p { margin: 0 0 20px; }
+.eyebrow, .page-meta { color: #687777; font-size: 12px; margin-bottom: 12px; }
+.lead { font-size: 18px; color: #536666; max-width: 640px; }
+ul, ol { padding-left: 22px; }
+li { margin-block: 8px; }
+code { font: 13px/1.5 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+p code, li code, td code { background: #f1f4f4; padding: 2px 5px; }
+pre { overflow-x: auto; background: #f1f4f4; border: 1px solid #dce3e3; padding: 18px; line-height: 1.6; max-width: 100%; }
+pre code { overflow-wrap: normal; }
+.contents { border-block: 1px solid #dce3e3; margin-top: 30px; }
+.contents a { display: flex; gap: 20px; justify-content: space-between; text-decoration: none; padding: 18px 0; }
+.contents a + a { border-top: 1px solid #e5eaea; }
+.contents span { color: #657777; font-size: 13px; }
+.table-wrap { overflow-x: auto; margin: 24px 0; }
+table { border-collapse: collapse; width: 100%; min-width: 380px; text-align: left; font-size: 14px; }
+th, td { border-bottom: 1px solid #dce3e3; padding: 12px 14px; vertical-align: top; }
+th { background: #f5f7f7; font-weight: 600; }
+.note { border-left: 3px solid var(--accent); padding-left: 18px; margin-block: 28px; color: #4c6060; }
+figure { margin: 30px 0; }
+img { display: block; max-width: 100%; height: auto; }
+figcaption { color: #657777; font-size: 12px; margin-top: 8px; }
+details { border-bottom: 1px solid #dce3e3; padding-block: 14px; }
+summary { cursor: pointer; font-weight: 600; }
+details p { margin: 14px 0 0; }
+.page-nav { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-top: 42px; padding-top: 22px; border-top: 1px solid #dce3e3; font-size: 13px; }
+.site-footer { border-top: 1px solid #dce3e3; padding: 20px 30px; color: #657777; font-size: 12px; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.site-footer p { margin: 0; }
+@media (max-width: 740px) {
+  .site-header { padding: 18px 20px; gap: 8px; }
+  .layout { display: block; }
+  .sidebar { min-height: auto; border-right: 0; border-bottom: 1px solid #dce3e3; padding: 17px 20px; }
+  .sidebar h2, .sidebar .section { display: none; }
+  .sidebar nav { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+  .sidebar a { padding: 5px 7px; border-left: 0; border-bottom: 2px solid transparent; font-size: 13px; }
+  .sidebar a[aria-current="page"] { border-bottom-color: var(--accent); }
+  main { padding: 30px 20px 50px; }
+  h1 { font-size: 29px; }
+  .contents a { display: block; }
+  .contents span { display: block; margin-top: 4px; }
+  .site-footer { padding-inline: 20px; }
+}

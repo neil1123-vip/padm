@@ -742,9 +742,17 @@ installOptionalPackageTracked() {
     trackInstalledPackagesFromFile "${missingPackagesFile}"
 }
 
+collectMissingStaticSitePackages() {
+    local -n staticSitePackages=$1
+    staticSitePackages=()
+    realpath -m -- / >/dev/null 2>&1 || staticSitePackages+=(coreutils)
+    find /dev/null -maxdepth 0 -regextype posix-extended -readable -executable \
+        -links +1 -printf '' >/dev/null 2>&1 || staticSitePackages+=(findutils)
+}
+
 collectMissingBasePackages() {
     local -n packages=$1
-    packages=()
+    collectMissingStaticSitePackages "$1"
 
     ! command -v sudo >/dev/null 2>&1 && packages+=(sudo)
     ! command -v wget >/dev/null 2>&1 && packages+=(wget)

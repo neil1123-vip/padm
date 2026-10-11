@@ -1137,7 +1137,7 @@ padm 不是单个超长 Bash 文件，而是“独立入口 + 分模块运行时
 | `shell/subscription_groups_regression.sh` | 🧪 唯一公开回归分发入口；统一分发 suite、aggregate、contract 和 composition selector。 |
 | `shell/validate_install.sh` | ✅ 安装后的只读验收脚本。 |
 | `documents/` | 📚 示例配置和英文 README。 |
-| `assets/` | 🖼️ 传统 TLS fallback 静态站点模板。 |
+| `assets/` | 🖼️ 三套本地静态站点资产，供 Nginx 或原生 Hysteria2 使用。 |
 
 ## 安装后的控制点
 
@@ -1293,12 +1293,20 @@ XHTTP 在本项目中由 Xray 生成；sing-box 当前没有 XHTTP transport，�
 
 这个入口提供：
 
-- 🖼️ 20 个轻量静态站点模板，并在安装或更换时随机化标题、文案、按钮、卡片和主题色。
+- 🖼️ 优先导入自有静态网站；没有现成网站时，可用 `notes`、`photos`、`docs` 三套内置布局初始化，包含文章、关于页、本地图片和 404 页面。
 - ↪️ 302 重定向维护。
 - 🔎 ALPN 诊断/修复，检查 Xray fallback、`fallbacks[].alpn=h2` 和 Nginx h2 fallback 是否匹配。
 - ✅ 写入后执行 `xray -test -confdir /etc/padm/xray/conf`，失败自动回滚。
 
 Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Reality 的伪装由外部 target 和 SNI 完成。只有你继续使用 VLESS TCP TLS Vision、WS TLS、gRPC TLS、Trojan TLS 等传统 TLS/fallback 协议，或确实要在本机展示网站时，才需要维护这个入口。
+
+`站点与证书` -> `本地静态站点` 可独立维护网页，不要求安装 Xray。首选 `import`：在独立绝对 Linux 目录（如 `/srv/own-site/`）准备完整静态网站，再原样复制到 `nginxStaticPath`（默认 `/usr/share/nginx/html/`）。源与目标不得重叠，源必须含可读 `index.html`；路径和文件名暂限 `A-Za-z0-9_./-`，不接受点文件、符号链接、硬链接、特殊文件、`check` 或 `static-site.json`。导入不改写原文或资源；更新源目录后需再次导入。
+
+导入和内置布局复用暂存、原子替换与失败回滚。自动安装保留已有或修改过的网页；从菜单明确更换自有或修改过的网站时，先将持久私有备份保存到 `/etc/padm/static-site-backups/`。未修改的内置主题只做失败回滚所需的事务临时备份，不为每次切换保存档案。归属状态保存在公开目录之外的 `/etc/padm/static-site.json`，安装或后续配置事务失败时恢复网页与状态；卸载保留自有和导入网站，仅清理归属与内容摘要仍匹配的内置站点。自有网站有 `404.html` 时 Nginx 使用该页面，否则使用默认 404；响应状态均保持 404。
+
+内置布局可配置站名，默认站名与配色固定，同主题重装保持已保存的值。安装后应持续维护真实文章、图片、导航和内页；整套内容与配置可在独立目录准备后导入。同一布局仍共用 HTML/CSS 结构，随机外观或内容差异都不能提供抗识别保证。
+
+原生 Hysteria2 的“认证失败伪装”可直接填写 `file:///srv/own-site/` 使用独立自有网站目录，或填写受你控制的网站 `http://`、`https://` URL 进行反向代理。`local` 使用已有本机网页，`notes`、`photos`、`docs` 初始化内置布局；文件目录须满足上述可读首页及内容限制。sing-box 文件服务的未知路径使用 Go 默认 404 文本。启用混淆后，普通浏览器不能以标准 HTTP/3 访问该入口。Docker 本地网页本轮未接入，仍保持现有远程 HTTPS 伪装。协议细节参见 [Hysteria2 协议](https://v2.hysteria.network/docs/developers/Protocol/) 与 [sing-box Hysteria2 入站](https://sing-box.sagernet.org/configuration/inbound/hysteria2/)。
 
 ## 订阅与用户
 

@@ -82,8 +82,45 @@ hysteria2RequireSingBoxField() {
     fi
 }
 
+hysteria2ValidateMasquerade() {
+    local value=${1:-} allowPending=${2:-false}
+    [[ -n "${value}" ]] || return 0
+    if [[ "${allowPending}" == true && "${value}" =~ ^(local|notes|photos|docs)$ ]]; then
+        return 0
+    fi
+    case "${value}" in
+    http://*|https://*)
+        [[ "${value}" =~ ^https?://[^/[:space:]]+(/[^[:space:]]*)?$ &&
+            "${value}" != *[\"\'\\]* ]]
+        ;;
+    file:///*)
+        nginxStaticSiteValidateDirectory "${value#file://}"
+        ;;
+    *) return 1 ;;
+    esac
+}
+
+hysteria2PrepareLocalSite() {
+    local theme=${hysteria2Masquerade:-} sitePath
+    case "${theme}" in
+    local|notes|photos|docs)
+        sitePath=$(nginxStaticSafePath) || { errorCard "本地站点目录异常"; return 1; }
+        if [[ "${theme}" != local || ! -s "${sitePath}index.html" ]]; then
+            [[ "${theme}" != local ]] || theme=notes
+            installNginxStaticTemplate "${theme}" || return 1
+        fi
+        hysteria2Masquerade="file://${sitePath}"
+        ;;
+    esac
+    if ! hysteria2ValidateMasquerade "${hysteria2Masquerade:-}"; then
+        errorCard "认证失败伪装地址不合法，file:// 必须指向有可读 index.html 的本地目录"
+        return 1
+    fi
+}
+
 hysteria2MasqueradeJson() {
     local value=${1:-}
+    hysteria2ValidateMasquerade "${value}" || return 1
     if [[ -n "${value}" ]]; then
         jq -n --arg value "${value}" '$value'
         return
@@ -126,7 +163,7 @@ initHysteria2Network() {
             fi
         fi
         [[ "${inputsOnly}" == true ]] || hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
-        if [[ -n "${hysteria2Masquerade:-}" && ! "${hysteria2Masquerade}" =~ ^(https?|file):// ]]; then
+        if ! hysteria2ValidateMasquerade "${hysteria2Masquerade:-}" true; then
             errorCard "上次 Hysteria2 masquerade 配置不合法"
             return 1
         fi
@@ -221,21 +258,24 @@ initHysteria2Network() {
     fi
 
     [[ "${inputsOnly}" == true ]] || hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
-    if [[ -n "${existingMasquerade}" && ! "${existingMasquerade}" =~ ^(https?|file):// ]]; then
+    if ! hysteria2ValidateMasquerade "${existingMasquerade}" true; then
         errorCard "上次 Hysteria2 masquerade 不合法，请重新输入"
         [[ -z "${AUTO_INSTALL:-}" ]] || return 1
         existingMasquerade=
     fi
+    if [[ -n "${hysteria2ObfsType:-}" ]]; then
+        menuLine "启用混淆后，普通浏览器无法以标准 HTTP/3 访问这里的网页"
+    fi
     while true; do
-        echoContent yellow "请输入 Hysteria2 认证失败伪装 URL[http/https/file，回车保持 ${existingMasquerade:-固定404响应}，off 恢复固定404响应]"
+        echoContent yellow "请输入 Hysteria2 认证失败伪装[优先 file:///srv/my-site/ 自有静态目录或 http/https 自有网站，local 使用已有本地站点，notes/photos/docs 内置起点，回车保持 ${existingMasquerade:-固定404响应}，off 恢复固定404响应]"
         menuReadChoice hysteria_masquerade "伪装URL:" parameterInput true || return 1
         parameterInput=${parameterInput:-${existingMasquerade}}
         [[ "${parameterInput}" != off && "${parameterInput}" != none ]] || parameterInput=
-        if [[ -z "${parameterInput}" || "${parameterInput}" =~ ^(https?|file):// ]]; then
+        if hysteria2ValidateMasquerade "${parameterInput}" true; then
             hysteria2Masquerade=${parameterInput}
             break
         fi
-        errorCard "Hysteria2 masquerade 仅支持 http://、https:// 或 file:// URL"
+        errorCard "请输入有效的自有网站 URL、file:// 目录或 local、notes、photos、docs；目录需有可读首页且无私有文件、链接或安装标记"
         [[ -z "${AUTO_INSTALL:-}" ]] || return 1
     done
     statusCard "Hysteria2 masquerade" "${hysteria2Masquerade:-固定404响应}"

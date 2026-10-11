@@ -3,6 +3,7 @@
 listRegressionAllParallelChildSelectors() {
     printf '%s\n' \
         subscription \
+        static-sites \
         ui \
         transaction-core-main \
         routing \
@@ -72,6 +73,7 @@ listRegressionAllChildSelectors() {
     printf '%s\n' \
         routing \
         subscription \
+        static-sites \
         runtime \
         transaction \
         remote-control \

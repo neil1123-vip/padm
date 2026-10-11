@@ -667,6 +667,7 @@ ${listenIPv6}
         alias ${subscribePublicBase}/\$1/\$2;
     }
     location / {
+        error_page 404 /404.html;
     }
 }
 EOF

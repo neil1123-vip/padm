@@ -2647,14 +2647,55 @@ SH
     ) || return 1
     (
         local installs=0 successes=0 installStatus=1 menuCalls=0
-        menuReadChoice() { menuCalls=$((menuCalls + 1)); printf -v "$3" '%s' "$((menuCalls == 1 ? 1 : 21))"; }
-        installNginxStaticTemplate() { installs=$((installs + 1)); return "${installStatus}"; }
+        local choice=notes inputValue= inputStatus=0 expectedSource=notes expectedTitle=
+        menuReadChoice() {
+            menuCalls=$((menuCalls + 1))
+            if ((menuCalls == 1)); then printf -v "$3" '%s' "${choice}"; else printf -v "$3" '%s' 4; fi
+        }
+        autoRead() {
+            if [[ "${choice}" == import ]]; then
+                [[ "$1" == nginx_site_source ]] || return 99
+            else
+                [[ "$1" == nginx_site_title ]] || return 99
+            fi
+            [[ "${inputStatus}" == 0 ]] || return "${inputStatus}"
+            printf -v "$3" '%s' "${inputValue}"
+        }
+        installNginxStaticTemplate() {
+            [[ "$1" == "${expectedSource}" && "$2" == true ]] || return 99
+            if [[ "${choice}" == import ]]; then
+                [[ $# == 2 ]] || return 99
+            else
+                [[ $# == 3 && "$3" == "${expectedTitle}" ]] || return 99
+            fi
+            installs=$((installs + 1))
+            return "${installStatus}"
+        }
         successCard() { successes=$((successes + 1)); }
         manageTraditionalTlsStaticSite >/dev/null || return 1
         [[ "${installs}:${successes}" == 1:0 ]] || return 1
         installStatus=0 menuCalls=0
         manageTraditionalTlsStaticSite >/dev/null || return 1
         [[ "${installs}:${successes}" == 2:1 ]] || return 1
+        expectedTitle='个人笔记 & 路线'
+        inputValue="${expectedTitle}" menuCalls=0
+        manageTraditionalTlsStaticSite >/dev/null || return 1
+        [[ "${installs}:${successes}" == 3:2 ]] || return 1
+        choice=import expectedSource=/srv/my-site inputValue=/srv/my-site installStatus=1 menuCalls=0
+        manageTraditionalTlsStaticSite >/dev/null || return 1
+        [[ "${installs}:${successes}" == 4:2 ]] || return 1
+        installStatus=0 menuCalls=0
+        manageTraditionalTlsStaticSite >/dev/null || return 1
+        [[ "${installs}:${successes}" == 5:3 ]] || return 1
+        inputStatus=1 menuCalls=0
+        manageTraditionalTlsStaticSite >/dev/null || return 1
+        [[ "${installs}:${successes}" == 5:3 ]] || return 1
+        inputStatus=0 inputValue=relative-path menuCalls=0
+        manageTraditionalTlsStaticSite >/dev/null || return 1
+        [[ "${installs}:${successes}" == 5:3 ]] || return 1
+        choice=notes inputStatus=1 menuCalls=0
+        manageTraditionalTlsStaticSite >/dev/null || return 1
+        [[ "${installs}:${successes}" == 5:3 ]] || return 1
     ) || return 1
     PATH="${oldPath}"
     unset PADM_FAKE_NGINX_VALIDATE_MODE

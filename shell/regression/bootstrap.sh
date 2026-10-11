@@ -30,6 +30,7 @@ export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
 export PADM_REALITY_TARGET_BLOCKED_FILE="${TMP_DIR}/reality_target_blocked.tsv"
 export PADM_ACCESS_CONTROL_BACKUP_DIR="${TMP_DIR}/access_control_backup"
 export PADM_FIREWALL_STATE_FILE="${TMP_DIR}/firewall.state"
+export PADM_STATIC_SITE_STATE_FILE="${TMP_DIR}/static-site.json"
 export PADM_SUPPRESS_PROGRESS=1
 
 # shellcheck source=/dev/null

@@ -217,7 +217,7 @@ runRegressionUiSmokeSuiteRoot() {
         }
         runMenuLoopSmoke originalManageVlessEncryptionExperiment $'bad\n3'
         runMenuLoopSmoke originalManageTraditionalTlsFallback $'bad\n7'
-        runMenuLoopSmoke originalManageTraditionalTlsStaticSite $'bad\n21'
+        runMenuLoopSmoke originalManageTraditionalTlsStaticSite $'1\n4'
         runMenuLoopSmoke originalManageTraditionalTlsRedirect $'bad\n3'
         runMenuLoopSmoke originalSetTraditionalTlsAlpnManual $'bad\n4'
         coreInstallType="${oldCoreInstallType}"

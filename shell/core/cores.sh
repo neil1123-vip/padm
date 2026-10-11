@@ -1948,7 +1948,6 @@ runCoreInstall() {
     *) return 1 ;;
     esac
     local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
-    local PADM_NGINX_BLOG_REINSTALL_PROMPT=false
     local PADM_INSTALL_REALITY_PROFILE_CACHE=
     local realityPort= realityGrpcPort= xHTTPort=
     local -A PADM_INSTALL_SINGBOX_PORTS=()

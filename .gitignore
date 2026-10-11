@@ -12,6 +12,8 @@ Status.md
 .codebase-memory/
 .worktrees/
 docs/
+!assets/static-sites/sites/docs/
+!assets/static-sites/sites/docs/**
 
 # Local install metadata
 .padm-ref

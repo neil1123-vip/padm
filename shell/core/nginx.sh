@@ -1192,6 +1192,7 @@ server {
 		grpc_pass grpc://127.0.0.1:31304;
 	}
 	location / {
+        error_page 404 /404.html;
     }
 }
 EOF
@@ -1217,6 +1218,7 @@ server {
 		grpc_pass grpc://127.0.0.1:31301;
 	}
 	location / {
+        error_page 404 /404.html;
     }
 }
 EOF
@@ -1242,6 +1244,7 @@ server {
 		grpc_pass grpc://127.0.0.1:31304;
 	}
 	location / {
+        error_page 404 /404.html;
     }
 }
 EOF
@@ -1257,6 +1260,7 @@ server {
 	root ${nginxStaticPath};
 
 	location / {
+        error_page 404 /404.html;
 	}
 }
 EOF
@@ -1272,6 +1276,7 @@ server {
 
 	root ${nginxStaticPath};
 	location / {
+        error_page 404 /404.html;
 	}
 }
 EOF

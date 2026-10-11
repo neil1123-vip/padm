@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A simple folder structure and naming convention for a small photography collection.">
+  <title>Organising files | __SITE_TITLE__</title>
+  <link rel="icon" href="assets/favicon.png" type="image/png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header"><a class="brand" href="index.html">__SITE_TITLE__</a><span class="header-meta">Photography archive handbook</span></header>
+  <div class="layout">
+    <aside class="sidebar"><h2>Handbook</h2><nav aria-label="Documentation"><a href="index.html">Overview</a><a href="organising-files.html" aria-current="page">Organising files</a><a href="backups-and-exports.html">Backups and exports</a><a href="about.html">About</a></nav><div class="section"><h2>On this page</h2><nav aria-label="Page contents"><a href="#folders">Folder structure</a><a href="#names">File names</a><a href="#index">Collection index</a></nav></div></aside>
+    <main id="content">
+      <p class="eyebrow">Working with a collection</p>
+      <h1>Organising files</h1>
+      <p class="lead">Separate the original material from the finished versions, then keep enough context beside them to explain what belongs together.</p>
+      <h2 id="folders">A folder for each collection</h2>
+      <p>Use a collection folder to describe an event or a small body of work. A date at the beginning keeps folders in a predictable order. A short subject makes them readable without opening each one.</p>
+      <pre><code>photographs/
+  2025-09-woodland/
+    originals/
+    working/
+    exports/
+    collection.txt</code></pre>
+      <div class="table-wrap"><table><thead><tr><th>Item</th><th>Purpose</th></tr></thead><tbody><tr><td><code>originals/</code></td><td>Files copied from the camera or source. Keep these unchanged.</td></tr><tr><td><code>working/</code></td><td>Edit instructions and intermediate versions that are still in progress.</td></tr><tr><td><code>exports/</code></td><td>Finished files intended for a specific use, such as web or print.</td></tr><tr><td><code>collection.txt</code></td><td>A plain text note describing the collection and the important versions.</td></tr></tbody></table></div>
+      <p>There is no need to create an empty working folder if the editing application keeps its instructions elsewhere. What matters is being able to identify the originals and exports consistently.</p>
+      <h2 id="names">Names that remain readable</h2>
+      <p>Camera names are often unique only within one card or one camera. Add a collection prefix when importing into the archive, or retain the camera name inside a uniquely named collection folder.</p>
+      <pre><code>2025-09-04_woodland_001.jpg
+2025-09-04_woodland_001_web.jpg
+2025-09-04_woodland_001_print.tif</code></pre>
+      <p>Keep the part that identifies the photograph the same across its versions. Put the intended use at the end. Avoid adding words such as <code>final-final</code>; if revisions matter, use a small version number and record the choice in the index.</p>
+      <h2 id="index">A short collection index</h2>
+      <p>The index should help somebody understand the folder without the original editing application. Include the subject, the approximate dates and any file that deserves special attention.</p>
+      <pre><code>Collection: Woodland light studies
+Date: September 2025
+Originals: unchanged source files
+Web selection: 001, 004, 012
+Print selection: 004
+Notes: web exports use the smaller crop</code></pre>
+      <p>Write enough to be useful after six months, but not so much that maintaining the note becomes another project. When a collection changes, update the index while the decision is still fresh.</p>
+      <div class="page-nav"><a href="index.html">Previous: Overview</a><a href="backups-and-exports.html">Next: Backups and exports</a></div>
+    </main>
+  </div>
+  <footer class="site-footer"><p>__SITE_TITLE__</p><p>Files that make sense tomorrow.</p></footer>
+</body>
+</html>

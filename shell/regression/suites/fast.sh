@@ -9,6 +9,7 @@ listRegressionFastOnlyOutputChildSelectors() {
 listRegressionFastOnlyChildSelectors() {
     printf '%s\n' \
         fast-only-safety \
+        static-sites \
         fast-only-output \
         fast-only-compatibility
 }
@@ -35,6 +36,7 @@ listRegressionCiChildSelectors() {
         fast-smoke \
         platform-refresh \
         install-module-manifest \
+        static-sites \
         subscription-output \
         core-safety-rollback
 }
@@ -439,6 +441,7 @@ runDockerTProxyRealRegression() {
 }
 
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
+registerRegressionFunctionLeaf static-sites runStaticSitesRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
 registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest

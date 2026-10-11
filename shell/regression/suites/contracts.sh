@@ -450,7 +450,7 @@ runRegressionCaseLoaderContract() (
     local compatibilityPattern='LegacyLeafWith''Compat|FastLeafWith''Compat|PADM_REGRESSION_LEGACY_FIXTURES_''LOADED|--re''use([[:space:]]|$)'
     local suiteFile caseFile selector runner runnerArgs
     local -a expectedCases=(
-        shared fast protocol_capabilities platform routing runtime reality tls ui menu_workflow subscription
+        shared fast static_sites protocol_capabilities platform routing runtime reality tls ui menu_workflow subscription
         transaction_core transaction_system remote_control subscription_state
     )
     local -a casePaths=()

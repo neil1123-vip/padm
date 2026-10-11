@@ -186,6 +186,9 @@ server {
         proxy_set_header Host               \$host;
         proxy_redirect                      off;
 	}
+    location / {
+        error_page 404 /404.html;
+    }
 }
 EOF
     fi
@@ -281,194 +284,276 @@ randomPathFunction() {
     echoContent yellow "\n path:${currentPath}"
     menuClose
 }
-# 随机渲染传统 TLS fallback 静态站点变量
+# 站名写入 HTML 前转义，生成后的内容保持稳定，正文由主题自身提供。
 renderNginxStaticTemplate() {
-    local titleOptions=("Northstar Studio" "Blue Harbor" "Evergreen Notes" "Stonebridge Labs" "Silverline Works" "Morning Grid" "Quiet Pixel" "Clearpath Systems" "Open Field" "Urban Archive")
-    local eyebrowOptions=("Welcome" "Studio" "Notes" "Services" "Updates" "Portfolio" "Workspace" "Journal" "Overview" "Status")
-    local headlineOptions=(
-        "A lightweight page for everyday visitors"
-        "Simple updates from a small digital workspace"
-        "Clean static content with a modern responsive layout"
-        "Practical notes, services, and project highlights"
-        "A quiet homepage for useful information"
-        "Focused work, clear pages, and fast loading"
-        "Local-first content for a straightforward website"
-        "A small public page with no external dependencies"
-        "Useful links, brief notes, and current updates"
-        "A calm landing page for regular web traffic"
-    )
-    local bodyOptions=(
-        "This page is intentionally simple, fast, and fully static. It is suitable for traditional TLS fallback scenarios where a normal website response is expected."
-        "The site uses local HTML and CSS only, with a responsive layout that works across common browsers and devices."
-        "A small static page keeps the fallback predictable while avoiding third-party scripts, trackers, and remote assets."
-        "Visitors can load this page quickly, read a few neutral sections, and continue browsing without special client requirements."
-        "This template provides generic public content for a traditional TLS fallback endpoint."
-    )
-    local ctaOptions=("Learn more" "View updates" "Open homepage" "Browse notes" "See details" "Continue")
-    local footerOptions=(
-        "Static fallback page"
-        "Local HTML and CSS only"
-        "No external assets loaded"
-        "Responsive static website"
-        "Traditional TLS fallback content"
-    )
-    local accentOptions=("#2563eb" "#0f766e" "#7c3aed" "#dc2626" "#ea580c" "#4f46e5" "#0891b2" "#16a34a" "#9333ea" "#475569")
-    local cardOneOptions=("Overview" "Updates" "Services" "Projects" "Notes" "Resources")
-    local cardTwoOptions=("Responsive" "Reliable" "Lightweight" "Local" "Accessible" "Portable")
-    local cardThreeOptions=("Contact" "Archive" "Status" "Links" "About" "Support")
-    local cardTextOptions=(
-        "Short neutral copy keeps the page natural without needing any remote dependency."
-        "The layout is responsive and remains readable on phones, tablets, and desktops."
-        "The files are bundled locally so the page can load without external networks."
-        "Simple sections make the page look complete while staying easy to maintain."
-        "The template is generated with small variations during installation."
-    )
-
-    local title=${titleOptions[$(($(randomNum 1 ${#titleOptions[@]}) - 1))]}
-    local eyebrow=${eyebrowOptions[$(($(randomNum 1 ${#eyebrowOptions[@]}) - 1))]}
-    local headline=${headlineOptions[$(($(randomNum 1 ${#headlineOptions[@]}) - 1))]}
-    local body=${bodyOptions[$(($(randomNum 1 ${#bodyOptions[@]}) - 1))]}
-    local cta=${ctaOptions[$(($(randomNum 1 ${#ctaOptions[@]}) - 1))]}
-    local footer=${footerOptions[$(($(randomNum 1 ${#footerOptions[@]}) - 1))]}
-    local accent=${accentOptions[$(($(randomNum 1 ${#accentOptions[@]}) - 1))]}
-    local cardOne=${cardOneOptions[$(($(randomNum 1 ${#cardOneOptions[@]}) - 1))]}
-    local cardTwo=${cardTwoOptions[$(($(randomNum 1 ${#cardTwoOptions[@]}) - 1))]}
-    local cardThree=${cardThreeOptions[$(($(randomNum 1 ${#cardThreeOptions[@]}) - 1))]}
-    local cardTextOne=${cardTextOptions[$(($(randomNum 1 ${#cardTextOptions[@]}) - 1))]}
-    local cardTextTwo=${cardTextOptions[$(($(randomNum 1 ${#cardTextOptions[@]}) - 1))]}
-    local cardTextThree=${cardTextOptions[$(($(randomNum 1 ${#cardTextOptions[@]}) - 1))]}
-
-    local targetFile targetFiles
-    targetFiles=$(find "${nginxStaticPath}" -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" \)) || return 1
+    local title=${staticSiteTitle:-} accent=${staticSiteAccent:-}
+    [[ "${accent}" =~ ^#[0-9a-fA-F]{6}$ ]] &&
+        jq -ne --arg title "${title}" '$title | length >= 2 and length <= 60 and
+            test("[^[:space:]]") and (test("[[:cntrl:]]") | not)' >/dev/null || return 1
+    title=$(printf '%s' "${title}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' \
+        -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&#39;/g" -e 's/[&|\\]/\\&/g') || return 1
+    local targetFile targetFiles placeholderStatus
+    targetFiles=$(find "${nginxStaticPath}" -type f \( -name "*.html" -o -name "*.css" \)) || return 1
     while IFS= read -r targetFile; do
         [[ -f "${targetFile}" ]] || continue
         sed -i \
             -e "s|__SITE_TITLE__|${title}|g" \
-            -e "s|__SITE_EYEBROW__|${eyebrow}|g" \
-            -e "s|__SITE_HEADLINE__|${headline}|g" \
-            -e "s|__SITE_BODY__|${body}|g" \
-            -e "s|__SITE_CTA__|${cta}|g" \
-            -e "s|__SITE_FOOTER__|${footer}|g" \
             -e "s|__SITE_ACCENT__|${accent}|g" \
-            -e "s|__CARD_ONE__|${cardOne}|g" \
-            -e "s|__CARD_TWO__|${cardTwo}|g" \
-            -e "s|__CARD_THREE__|${cardThree}|g" \
-            -e "s|__CARD_TEXT_ONE__|${cardTextOne}|g" \
-            -e "s|__CARD_TEXT_TWO__|${cardTextTwo}|g" \
-            -e "s|__CARD_TEXT_THREE__|${cardTextThree}|g" \
             "${targetFile}" || return 1
+        placeholderStatus=0
+        grep -Eq '__[A-Z_]+__' "${targetFile}" || placeholderStatus=$?
+        [[ "${placeholderStatus}" == 1 ]] || return 1
     done <<<"${targetFiles}"
 }
 
+nginxStaticSiteEnsureTools() {
+    local missingStaticSitePackages=()
+    collectMissingStaticSitePackages missingStaticSitePackages
+    [[ ${#missingStaticSitePackages[@]} -gt 0 ]] || return 0
+    installPackageTracked "静态站点工具" "${missingStaticSitePackages[@]}" >&2 || return 1
+    hash -r
+    collectMissingStaticSitePackages missingStaticSitePackages
+    [[ ${#missingStaticSitePackages[@]} -eq 0 ]] || {
+        errorCard "静态站点需要 GNU coreutils/findutils，安装后仍缺少所需功能"
+        return 1
+    }
+}
+
 nginxStaticSafePath() {
+    nginxStaticSiteEnsureTools || return 1
     local staticPath="${nginxStaticPath:-}"
-    [[ -n "${staticPath}" ]] || return 1
     staticPath="${staticPath%/}"
-    padmIsSafeAbsolutePath "${staticPath}" || return 1
+    padmIsSafeAbsolutePath "${staticPath}" && [[ "${staticPath}" =~ ^/[A-Za-z0-9_./-]+$ ]] || return 1
+    [[ "$(realpath -m -- "${staticPath}")" == "${staticPath}" ]] || return 1
     printf '%s\n' "${staticPath}/"
 }
 
-installNginxStaticTemplate() {
-    local templateIndex=$1
-    local localTemplate="${SCRIPT_DIR:-/etc/padm}/assets/static-sites/templates/html${templateIndex}.zip"
-    local staticPath resolvedStaticPath staticParent staticName
-    local stageRoot stageStaticPath targetZip
-    local oldStaticPath renderStatus=0
-    if ! staticPath=$(nginxStaticSafePath); then
-        errorCard "静态站点目录异常"
-        return 1
-    fi
-    resolvedStaticPath="${staticPath%/}"
-    staticParent=$(dirname -- "${resolvedStaticPath}")
-    staticName=$(basename -- "${resolvedStaticPath}")
-    padmEnsureSafeDirectory "${staticParent}" || { errorCard "静态站点目录异常"; return 1; }
-    padmCreateTempPath stageRoot -d "${staticParent}/.${staticName}.padm-template.XXXXXX" || {
-        errorCard "静态站点模板暂存目录创建失败"
-        return 1
-    }
-    stageStaticPath="${stageRoot}/${staticName}"
-    mkdir -p "${stageStaticPath}" || {
-        cleanupInstallSyncPath "${stageRoot}"
-        errorCard "静态站点模板暂存目录创建失败"
-        return 1
-    }
-    targetZip="${stageStaticPath}/html${templateIndex}.zip"
-    if [[ -f "${localTemplate}" ]]; then
-        cp "${localTemplate}" "${targetZip}" || {
-            cleanupInstallSyncPath "${stageRoot}"
-            errorCard "静态站点模板准备失败"
-            return 1
-        }
-    else
-        cleanupInstallSyncPath "${stageRoot}"
-        errorCard "静态站点模板缺失"
-        return 1
-    fi
-    if [[ ! -f "${targetZip}" ]]; then
-        cleanupInstallSyncPath "${stageRoot}"
-        errorCard "静态站点模板准备失败"
-        return 1
-    fi
-    if ! unzip -o "${targetZip}" -d "${stageStaticPath}" >/dev/null; then
-        cleanupInstallSyncPath "${stageRoot}"
-        errorCard "静态站点模板解压失败"
-        return 1
-    fi
-    removeManagedFileIfPresent "${targetZip}" || {
-        cleanupInstallSyncPath "${stageRoot}"
-        errorCard "静态站点模板清理失败"
-        return 1
-    }
-
-    oldStaticPath="${nginxStaticPath:-}"
-    nginxStaticPath="${stageStaticPath}"
-    renderNginxStaticTemplate || renderStatus=$?
-    nginxStaticPath="${oldStaticPath}"
-    if [[ "${renderStatus}" -ne 0 ]]; then
-        cleanupInstallSyncPath "${stageRoot}"
-        return "${renderStatus}"
-    fi
-
-    if ! syncInstallDirectoryTree "${stageStaticPath}" "${resolvedStaticPath}"; then
-        cleanupInstallSyncPath "${stageRoot}"
-        errorCard "静态站点模板安装失败，已保留旧站点"
-        return 1
-    fi
-    cleanupInstallSyncPath "${stageRoot}"
+nginxStaticSiteStateFile() {
+    local statePath="${PADM_STATIC_SITE_STATE_FILE:-${PADM_INSTALL_DIR:-/etc/padm}/static-site.json}"
+    local sitePath
+    statePath=$(padmRequireSafeAbsolutePath "${statePath}") || return 1
+    [[ "$(realpath -m -- "${statePath}")" == "${statePath}" ]] || return 1
+    sitePath=$(nginxStaticSafePath) || return 1
+    [[ "${statePath}" != "${sitePath%/}" && "${statePath}" != "${sitePath}"* ]] || return 1
+    printf '%s\n' "${statePath}"
 }
 
-# Nginx 传统 TLS fallback 静态站点
+nginxStaticSiteValidateDirectory() {
+    nginxStaticSiteEnsureTools || return 1
+    local path="${1%/}" unsafe
+    padmIsSafeAbsolutePath "${path}" && [[ "${path}" =~ ^/[A-Za-z0-9_./-]+$ ]] || return 1
+    [[ "$(realpath -m -- "${path}")" == "${path}" && -d "${path}" && -r "${path}" && -x "${path}" &&
+        -f "${path}/index.html" && ! -L "${path}/index.html" && -s "${path}/index.html" &&
+        -r "${path}/index.html" && ! -e "${path}/check" && ! -e "${path}/static-site.json" ]] || return 1
+    unsafe=$(find "${path}" -regextype posix-extended -mindepth 1 \
+        \( ! -regex '/[A-Za-z0-9_./-]+' -o -type l -o -name '.*' \
+        -o -name check -o -name static-site.json -o ! -readable \
+        -o \( -type d ! -executable \) -o \( -type f -links +1 \) \
+        -o \( ! -type f ! -type d \) \) -print -quit) || return 1
+    [[ -z "${unsafe}" ]]
+}
+
+nginxStaticSiteDigest() (
+    set -o pipefail
+    cd -- "$1" || exit 1
+    local entries entry
+    entries=$(find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort) || exit 1
+    while IFS= read -r entry; do
+        [[ -n "${entry}" ]] || continue
+        [[ "${entry}" =~ ^[A-Za-z0-9_./-]+$ && ! -L "${entry}" ]] || exit 1
+        if [[ -d "${entry}" ]]; then
+            printf 'dir %s\n' "${entry}"
+        elif [[ -f "${entry}" ]]; then
+            sha256sum -- "${entry}" || exit 1
+        else
+            exit 1
+        fi
+    done <<<"${entries}" | sha256sum | cut -d ' ' -f1
+)
+
+nginxStaticSiteManaged() {
+    local sitePath statePath digest
+    sitePath=$(nginxStaticSafePath) || return 1
+    statePath=$(nginxStaticSiteStateFile) || return 1
+    [[ -f "${statePath}" && ! -L "${statePath}" && -s "${sitePath}index.html" ]] || return 1
+    digest=$(nginxStaticSiteDigest "${sitePath}") || return 1
+    jq -e --arg path "${sitePath%/}" --arg digest "${digest}" '
+        .version == 1 and .path == $path and .digest == $digest and
+        (.theme | IN("notes","photos","docs")) and
+        (.title | type == "string" and length >= 2 and length <= 60 and
+            test("[^[:space:]]") and (test("[[:cntrl:]]") | not)) and
+        (.accent | type == "string" and test("^#[0-9a-fA-F]{6}$"))
+    ' "${statePath}" >/dev/null 2>&1
+}
+
+nginxStaticSiteRemove() {
+    local statePath sitePath
+    statePath=$(nginxStaticSiteStateFile) || return 1
+    sitePath=$(nginxStaticSafePath) || return 1
+    if nginxStaticSiteManaged; then
+        removeManagedPathIfPresent "${sitePath%/}" || return 1
+    fi
+    if [[ -f "${statePath}" ]] &&
+        jq -e --arg path "${sitePath%/}" '.path == $path' "${statePath}" >/dev/null 2>&1; then
+        removeManagedFileIfPresent "${statePath}" || return 1
+    fi
+}
+
+restoreStaticSiteBackup() {
+    local backup=$1 state=$2 status=0
+    adapterRestoreManagedRollbackBackup "${backup}" || status=1
+    # 部分恢复失败时，状态文件仍可能已由通用恢复器写回为 644。
+    if [[ -f "${state}" ]]; then
+        chmod 600 "${state}" || status=1
+    fi
+    return "${status}"
+}
+
+rollbackStaticSiteInstall() {
+    [[ "${PADM_STATIC_SITE_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_STATIC_SITE_ROLLBACK[active]=false
+    local backup=${PADM_STATIC_SITE_ROLLBACK[backup]}
+    if [[ "${PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE:-false}" == true &&
+        "${PADM_CORE_TEMPLATE_ROLLBACK[staticSiteBackupDir]:-}" == "${backup}" ]]; then
+        PADM_CORE_TEMPLATE_ROLLBACK[staticSiteBackupDir]=
+    fi
+    if restoreStaticSiteBackup "${backup}" "${PADM_STATIC_SITE_ROLLBACK[state]}"; then
+        padmRemoveCleanupPath "${backup}"
+    else
+        padmForgetCleanupPath "${backup}"
+        errorCard "网页恢复失败，请手动恢复备份：${backup}"
+        return 1
+    fi
+}
+
+installNginxStaticTemplate() {
+    local theme=$1 preserveExisting=${2:-false}
+    local sitePath statePath sourcePath stageRoot stageStaticPath stagedState siteBackup= preservedSite= backupParent
+    local oldStaticPath="${nginxStaticPath:-}" staticSiteTitle="${3:-}" staticSiteAccent= digest existingEntry rc=0
+    sitePath=$(nginxStaticSafePath) || { errorCard "静态站点目录异常"; return 1; }
+    statePath=$(nginxStaticSiteStateFile) || { errorCard "站点状态必须位于公开目录之外"; return 1; }
+    case "${theme}" in
+    notes|photos|docs)
+        sourcePath="${SCRIPT_DIR:-/etc/padm}/assets/static-sites/sites/${theme}"
+        ;;
+    /*)
+        sourcePath="${theme%/}"
+        theme=custom
+        staticSiteTitle=
+        [[ "${sourcePath}/" != "${sitePath}"* && "${sitePath}" != "${sourcePath}/"* &&
+            "${statePath}" != "${sourcePath}/"* ]] || {
+            errorCard "导入源目录必须独立，不能与公开目录重叠或包含私有状态"; return 1;
+        }
+        backupParent=$(padmRequireSafeAbsolutePath "${PADM_STATIC_SITE_BACKUP_DIR:-${PADM_INSTALL_DIR:-/etc/padm}/static-site-backups}") || return 1
+        [[ "$(realpath -m -- "${backupParent}")" == "${backupParent}" &&
+            "${backupParent}/" != "${sourcePath}/"* ]] || {
+            errorCard "私有备份目录不能位于导入源目录内"; return 1;
+        }
+        ;;
+    *) errorCard "请输入站点主题或独立静态目录的绝对路径"; return 1 ;;
+    esac
+    nginxStaticSiteValidateDirectory "${sourcePath}" || {
+        errorCard "源站点不合法：需要可读首页、规范文件名，且无私有文件、链接、特殊文件或安装标记"
+        return 1
+    }
+    if [[ -e "${sitePath%/}" ]]; then
+        [[ -d "${sitePath}" ]] || return 1
+        existingEntry=$(find "${sitePath}" -mindepth 1 -print -quit) || return 1
+        if [[ -n "${existingEntry}" ]] && ! nginxStaticSiteManaged; then
+            if [[ "${preserveExisting}" != true || "${PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE:-false}" == true ]]; then
+                errorCard "已有网页未受管理或已被修改，已保留；可在站点菜单备份后更换"
+                return 1
+            fi
+            backupParent=${PADM_STATIC_SITE_BACKUP_DIR:-${PADM_INSTALL_DIR:-/etc/padm}/static-site-backups}
+            backupParent=$(padmRequireSafeAbsolutePath "${backupParent}") || return 1
+            [[ "$(realpath -m -- "${backupParent}")" == "${backupParent}" &&
+                "${backupParent}/" != "${sitePath}"* ]] || return 1
+            padmEnsureSafeDirectory "${backupParent}" && chmod 700 "${backupParent}" || return 1
+            padmCreateTempPath preservedSite -d "${backupParent}/site.XXXXXX" || return 1
+            if ! cp -a "${sitePath}." "${preservedSite}/"; then
+                padmRemoveCleanupPath "${preservedSite}"
+                return 1
+            fi
+            # 用户明确更换才保留整份私有档案，安装失败也不自动删除原始网页备份。
+            padmForgetCleanupPath "${preservedSite}"
+            statusCard "原网页已备份" "${preservedSite}"
+        fi
+        if nginxStaticSiteManaged && [[ "$(jq -r .theme "${statePath}")" == "${theme}" ]]; then
+            [[ -n "${staticSiteTitle}" ]] || staticSiteTitle=$(jq -r .title "${statePath}") || return 1
+            staticSiteAccent=$(jq -r .accent "${statePath}") || return 1
+        fi
+    fi
+    case "${theme}" in
+    notes) staticSiteTitle=${staticSiteTitle:-Field Notes}; staticSiteAccent=${staticSiteAccent:-#28624b} ;;
+    photos) staticSiteTitle=${staticSiteTitle:-Light and Distance}; staticSiteAccent=${staticSiteAccent:-#225e91} ;;
+    docs) staticSiteTitle=${staticSiteTitle:-Pagekit}; staticSiteAccent=${staticSiteAccent:-#974338} ;;
+    esac
+    padmEnsureSafeDirectory "$(dirname -- "${sitePath%/}")" || return 1
+    padmEnsureSafeDirectory "$(dirname -- "${statePath}")" || return 1
+    padmCreateTempPath stageRoot -d "$(dirname -- "${sitePath%/}")/.padm-site.XXXXXX" || return 1
+    stageStaticPath="${stageRoot}/site"
+    if ! cp -a "${sourcePath}" "${stageStaticPath}"; then
+        padmRemoveCleanupPath "${stageRoot}"
+        return 1
+    fi
+    if [[ "${theme}" != custom ]]; then
+        nginxStaticPath="${stageStaticPath}"
+        renderNginxStaticTemplate || rc=$?
+        nginxStaticPath="${oldStaticPath}"
+    fi
+    if [[ "${rc}" != 0 ]] || ! nginxStaticSiteValidateDirectory "${stageStaticPath}" ||
+        ! digest=$(nginxStaticSiteDigest "${stageStaticPath}"); then
+        padmRemoveCleanupPath "${stageRoot}"
+        errorCard "网页渲染或资源验证失败，已保留旧站点"
+        return 1
+    fi
+    # 目录交换之外保留一份网页与状态备份，覆盖状态提交及后续服务失败。
+    adapterCreateManagedRollbackBackup siteBackup "${sitePath%/}" "${statePath}" || {
+        padmRemoveCleanupPath "${stageRoot}"; return 1;
+    }
+    local -A PADM_STATIC_SITE_ROLLBACK=([active]=true [backup]="${siteBackup}" [state]="${statePath}")
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback rollbackStaticSiteInstall
+    padmCreateTempFileForTarget stagedState "${statePath}" site-state || {
+        padmRunRollback rollbackStaticSiteInstall || true
+        padmRemoveCleanupPath "${stageRoot}"
+        return 1
+    }
+    if ! jq -n --arg path "${sitePath%/}" --arg theme "${theme}" --arg title "${staticSiteTitle}" \
+        --arg accent "${staticSiteAccent}" --arg digest "${digest}" \
+        '{version:1,path:$path,theme:$theme,title:$title,accent:$accent,digest:$digest}' >"${stagedState}" ||
+        ! find "${stageStaticPath}" -type d -exec chmod 755 {} + ||
+        ! find "${stageStaticPath}" -type f -exec chmod 644 {} + ||
+        ! syncInstallDirectoryTree "${stageStaticPath}" "${sitePath%/}" ||
+        ! commitGeneratedFile "${stagedState}" "${statePath}" 600; then
+        padmRunRollback rollbackStaticSiteInstall || true
+        padmRemoveCleanupPath "${stagedState}"
+        padmRemoveCleanupPath "${stageRoot}"
+        errorCard "站点安装失败，已尝试恢复网页和状态"
+        return 1
+    fi
+    if [[ "${PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE:-false}" == true &&
+        -z "${PADM_CORE_TEMPLATE_ROLLBACK[staticSiteBackupDir]:-}" ]]; then
+        PADM_CORE_TEMPLATE_ROLLBACK[staticSiteBackupDir]=${siteBackup}
+        PADM_CORE_TEMPLATE_ROLLBACK[staticSiteStateFile]=${statePath}
+        PADM_STATIC_SITE_ROLLBACK[active]=false
+    else
+        PADM_STATIC_SITE_ROLLBACK[active]=false
+        padmRemoveCleanupPath "${siteBackup}"
+    fi
+    padmRemoveCleanupPath "${stageRoot}"
+}
+
+# 已有网页始终保留，只有首次空目录才安装默认主题。
 nginxBlog() {
-    local progressIndex=${1:-}
-    if [[ -d "${nginxStaticPath}" && -f "${nginxStaticPath}/check" && "${PADM_NGINX_BLOG_REINSTALL_PROMPT:-true}" != "true" ]]; then
+    [[ -z "${1:-}" ]] || progressCard "$1" "配置本地静态站点"
+    if [[ -s "${nginxStaticPath%/}/index.html" ]]; then
+        statusCard "本地站点" "保留已有网页"
         return 0
     fi
-
-    if [[ -n "${progressIndex}" ]]; then
-        progressCard "${progressIndex}" "添加传统 TLS fallback 静态站点"
-    else
-        echoContent yellow "\n开始添加传统 TLS fallback 静态站点"
-    fi
-
-    if [[ -d "${nginxStaticPath}" && -f "${nginxStaticPath}/check" ]]; then
-        if [[ "${PADM_NGINX_BLOG_REINSTALL_PROMPT:-true}" == "true" && -z "${lastInstallationConfig}" && -z "${AUTO_INSTALL:-}" ]]; then
-            echo
-            autoRead nginx_blog_reinstall "检测到已安装传统 TLS fallback 静态站点，是否需要重新安装[y/n]:" nginxBlogInstallStatus
-        else
-            nginxBlogInstallStatus="n"
-        fi
-
-        if [[ "${nginxBlogInstallStatus}" == "y" ]]; then
-            randomNum=$(randomNum 1 20)
-            installNginxStaticTemplate "${randomNum}" || return 1
-            successCard "添加传统 TLS fallback 静态站点成功"
-        fi
-    else
-        randomNum=$(randomNum 1 20)
-        installNginxStaticTemplate "${randomNum}" || return 1
-        successCard "添加传统 TLS fallback 静态站点成功"
-    fi
-
+    installNginxStaticTemplate notes || return 1
+    successCard "本地静态站点安装成功"
 }
 
 # 更新 SELinux http_port_t 端口
