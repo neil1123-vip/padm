@@ -1882,7 +1882,7 @@ runProtocolEntryMenuSyncRegression() (
     readInstallType() { :; }
     readSingBoxConfig() { :; }
     errorCard() { printf 'error:%s\n' "$1" >>"${log}"; }
-    corePortListExtra() { :; }
+    corePortListExtra() { printf '1:2053\n'; }
     corePortForwardTarget() { printf '443\n'; }
     corePortResolveByIndex() { printf '2053\n'; }
     allowPort() {
@@ -2278,6 +2278,9 @@ runSingBoxProtocolMenuStateRegression() (
 
 runCorePortMenuStateRegression() (
     local installReads=0 singBoxReads=0
+    local root="${TMP_DIR}/core-port-menu-state"
+    local configPath="${root}/config/" cards="${root}/cards.log" output="${root}/output.log" mutations="${root}/mutations.log"
+    mkdir -p "${root}"
     coreInstallType=1
     readInstallType() {
         installReads=$((installReads + 1))
@@ -2296,10 +2299,25 @@ runCorePortMenuStateRegression() (
         IFS= read -r choice || return 1
         printf -v "$3" '%s' "${choice}"
     }
-    corePortListExtra() { :; }
+    statusCard() { printf '%s\n' "$*" >>"${cards}"; }
+    autoRead() { printf 'unexpected-input:%s\n' "$1" >>"${mutations}"; return 1; }
+    corePortApplyReloadTransaction() { printf 'apply\n' >>"${mutations}"; return 1; }
+    denyPort() { printf 'deny\n' >>"${mutations}"; return 1; }
+    refreshManagedProtocolSubscriptions() { printf 'refresh\n' >>"${mutations}"; return 1; }
 
-    addCorePort <<< $'1\n4'
+    addCorePort >"${output}" <<< $'1\n3\n4'
     [[ "${installReads}:${singBoxReads}" == 1:1 ]]
+    [[ "$(grep -c '入口端口管理 暂无额外端口 原监听端口仍保留' "${cards}")" == 2 ]]
+    [[ ! -s "${mutations}" ]]
+
+    mkdir -p "${configPath}"
+    printf '{}\n' >"${configPath}02_dokodemodoor_inbounds_2053.json"
+    printf '{}\n' >"${configPath}02_dokodemodoor_inbounds_2083_default.json"
+    : >"${cards}"
+    addCorePort >"${output}" <<< $'1\n4'
+    [[ "${installReads}:${singBoxReads}" == 2:2 ]]
+    [[ "$(<"${output}")" == $'1:2053\n2:2083 默认' ]]
+    [[ ! -s "${cards}" && ! -s "${mutations}" ]]
 )
 
 runProtocolEntryStoredInputRegression() (

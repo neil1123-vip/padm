@@ -1620,7 +1620,7 @@ corePortApplyAddition() {
 }
 
 addCorePort() {
-    local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus portChanged
+    local selectNewPortType newPort defaultPort portIndex port portEntries parsedPorts settingsPort firewallStatus portChanged
     readInstallType || return 1
     if [[ "${coreInstallType:-}" != "1" ]]; then
         errorCard "此功能仅支持Xray-core内核"
@@ -1643,9 +1643,6 @@ addCorePort() {
         menuClose
         menuReadChoice core_port_menu "请选择:" selectNewPortType || return 0
         case "${selectNewPortType}" in
-        1)
-            corePortListExtra || { errorCard "入口端口列表读取失败"; return 1; }
-            ;;
         2)
             newPort=
             defaultPort=
@@ -1664,8 +1661,14 @@ addCorePort() {
             padmRunPortAllowTransaction corePortApplyAddition "${parsedPorts}" "${defaultPort}" "${settingsPort}" || return 1
             portChanged=true
             ;;
-        3)
-            corePortListExtra || { errorCard "入口端口列表读取失败"; return 1; }
+        1 | 3)
+            portEntries=$(corePortListExtra) || { errorCard "入口端口列表读取失败"; return 1; }
+            if [[ -z "${portEntries}" ]]; then
+                statusCard "入口端口管理" "暂无额外端口" "原监听端口仍保留"
+                continue
+            fi
+            printf '%s\n' "${portEntries}"
+            [[ "${selectNewPortType}" != 1 ]] || continue
             portIndex=
             autoRead extra_core_delete_port "请输入要删除的端口编号:" portIndex || return 0
             port=$(corePortResolveByIndex "${portIndex}") || { errorCard "入口端口列表读取失败"; return 1; }

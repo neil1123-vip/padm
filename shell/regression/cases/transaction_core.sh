@@ -2590,7 +2590,7 @@ runCorePortFileTransactionRegression() {
             [[ "${denyShouldFail}" != "true" && ( "${denyTcpShouldFail}" != "true" || "${2:-tcp}" != "tcp" ) ]]
         }
         errorCard() { printf '%s\n' "$1" >>"${firewallErrorLog}"; }
-        corePortListExtra() { return 0; }
+        corePortListExtra() { printf '1:2555\n'; }
         corePortResolveByIndex() { printf '2555\n'; }
         corePortForwardTarget() { printf '443\n'; }
         corePortApplyReloadTransaction() { [[ "${mode}" == "delete" ]]; }
