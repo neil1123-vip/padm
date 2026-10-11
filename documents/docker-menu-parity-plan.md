@@ -4197,6 +4197,31 @@ cleanup_error，不放宽身份检查。外部 SIGKILL/ESRCH 竞态仅主源及�
 不宣称已实测；raw fork 57 正例、vfork 58 entry 负例继续下一阶段。
 本步不开放任意 OpenSSH/unit、collector/jail 或菜单启停；5C 与总目标仍 active。
 
+#### 5C.8c.2n 真实 fork 与 vfork 创建 ABI 合同
+
+本阶段仅补真实 amd64 syscall 57 正例和 syscall 58 entry 拒绝负例，
+driver 源码与创建授权不变。helper 新增 20 行、合同新增两个方法，共 23 方法。
+raw fork 用 6 个显式零参数，在 exec 后 parent epoch 1 核实际 entry、FORK
+事件、父返回与 child 首停的四段关联；accepted FD 同锚继承，master 0 /
+child 23 均真实回收，不假设 child 首停的调度次序。
+vfork 使用平台 libc 的安全入口，child 仅 _exit(23)，父 wait 后才写 marker；
+baseline marker 为真，受控 nr58 entry 拒绝后 marker 为假，
+无新 child event/pin 或拒绝后的正常恢复，原 master 真实回收。
+
+独审、静态 C 编译、Python AST 与 diff 检查通过。定向 23/23、5.915 秒，
+内部 6041 ms、入口 7010 ms、排队 200 ms、Jobs 2、cache_hit=false；
+`.tmp-regression-docker-3a21c57f68a3417590403d97dfbf0a27/`。
+集中完整 Docker 合同 47/47、exit 0，内部 302450 ms、入口 303396 ms，
+排队 381 ms、Jobs 6、cache_hit=false；SSH 23/23、5.950 秒，preflight 同时通过，
+`.tmp-regression-docker-169d5fe88acb43e7918b901bc8cdf8f5/`。
+两个归档各 298 输入全部冻结匹配；结果补写后仅本计划更新。
+复用原工具镜像与三槽队列，没有重复完整回归，不据单轮耗时宣称普遍提速。
+已清理重复归档、清单与核对脚本 19037718 bytes，测试容器无残留；
+日志、结果、输入核对与清理哈希保留在 `.tmp-ssh-creation-abi-8c2n/`。
+
+本步不开放 vfork、任意 OpenSSH/unit 或 collector/jail；arm64、持续全进程
+EMFILE、外部 SIGKILL/ESRCH 竞态、公网及宿主启停仍待验收，5C 与总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

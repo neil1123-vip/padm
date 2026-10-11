@@ -660,6 +660,97 @@ class DriverContracts(unittest.TestCase):
         self.assertTrue(all(row.get("signal") == signal.SIGKILL
                             for row in evidence["cleanup"] if row["kind"] == "cleanup-continue"))
 
+    def test_raw_fork_syscall_57_links_creation_and_reaps_real_child(self):
+        marker = Path(self.temp.name) / "raw-fork-executed"
+
+        def fixture():
+            self.client.close()
+            accepted, _ = self.listener.accept()
+            self.listener.close()
+            accepted.set_inheritable(True)
+            os.execv(self.helper, [self.helper, "raw-fork", str(marker)])
+
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                     self.receiver, self.expected)
+        evidence = self.driver.run(fixture)
+        self.assert_clean(evidence)
+        creation, = evidence["creations"]
+        first, = evidence["first_stops"]
+        child = first["pid"]
+        self.assertEqual(creation["entry"]["nr"], driver_module.SYS_FORK)
+        self.assertEqual(creation["entry"]["op"], 1)
+        self.assertEqual(creation["entry"]["arch"], driver_module.AUDIT_ARCH_X86_64)
+        self.assertEqual(creation["entry"]["args"], [0] * 6)
+        self.assertEqual((creation["parent_pid"], creation["epoch"], creation["exe"]),
+                         (self.driver.master, 1, self.helper))
+        self.assertEqual((creation["event_child"], creation["exit_rval"]), (child, child))
+        self.assertEqual((first["parent_pid"], first["snapshot"]["process"]["ppid"]),
+                         (self.driver.master, self.driver.master))
+        self.assertEqual(first["snapshot"]["process"]["exe"], self.helper)
+        self.assertEqual(len(first["snapshot"]["accepted_matches"]), 1)
+        self.assertEqual(first["snapshot"]["accepted_matches"],
+                         creation["entry_anchor"]["accepted_matches"])
+        self.assertEqual(first["snapshot"]["accepted_matches"],
+                         first["parent_fork_anchor"]["accepted_matches"])
+        fork_event, = [row for row in evidence["events"] if row.get("kind") == "fork-parent-stop"]
+        self.assertEqual((fork_event["event"], fork_event["child_pid"]), (driver_module.FORK, child))
+        ordering = [creation[key] for key in
+                    ("entry_monotonic_ns", "event_monotonic_ns", "exit_monotonic_ns")]
+        ordering.extend(first[key] for key in ("registered_monotonic_ns", "first_continue_monotonic_ns"))
+        self.assertEqual(ordering, sorted(ordering))
+        self.assertTrue(marker.exists())
+        self.assertEqual(sorted((row["pid"], row["exit_code"]) for row in evidence["events"]
+                                if row.get("kind") == "reaped"),
+                         sorted(((self.driver.master, 0), (child, 23))))
+        self.assert_tasks_reaped(child, self.driver.master)
+        print(json.dumps({
+            "kind": "raw-fork-57-verified", "master": self.driver.master, "child": child,
+            "entry": creation["entry"], "parent_epoch": creation["epoch"],
+            "creation_order": ordering, "marker_exists": marker.exists(),
+        }, sort_keys=True, separators=(",", ":")), flush=True)
+
+    def test_real_vfork_syscall_58_is_rejected_before_child_creation(self):
+        marker = Path(self.temp.name) / "vfork-executed"
+        subprocess.run([self.helper, "vfork", str(marker)], check=True,
+                       capture_output=True, timeout=3)
+        self.assertTrue(marker.exists())
+        marker.unlink()
+
+        def fixture():
+            self.client.close()
+            accepted, _ = self.listener.accept()
+            self.listener.close()
+            accepted.set_inheritable(True)
+            os.execv(self.helper, [self.helper, "vfork", str(marker)])
+
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
+                                                     self.receiver, self.expected)
+        with self.assertRaisesRegex(driver_module.Failure, "创建 syscall 58"):
+            self.driver.run(fixture)
+        evidence = self.driver.evidence
+        self.assert_clean(evidence)
+        rejected = next(row for row in evidence["events"] if "rejection" in row)
+        self.assertEqual(rejected["kind"], "creation-entry")
+        self.assertEqual((rejected["pid"], rejected["syscall"]["op"], rejected["syscall"]["nr"]),
+                         (self.driver.master, 1, driver_module.SYS_VFORK))
+        self.assertEqual(rejected["syscall"]["arch"], driver_module.AUDIT_ARCH_X86_64)
+        self.assertFalse(any(row["event"] in (driver_module.FORK, driver_module.VFORK, driver_module.CLONE)
+                             for row in evidence["events"]))
+        self.assertEqual([row["pid"] for row in evidence["task_pins"]], [self.driver.master])
+        self.assertFalse(evidence["first_stops"])
+        self.assertFalse(evidence["creations"])
+        self.assertFalse(marker.exists())
+        self.assertTrue(evidence["ledger_poisoned"])
+        self.assertLess(evidence["last_normal_resume_monotonic_ns"], rejected["rejected_monotonic_ns"])
+        self.assertFalse(any(row["returned_monotonic_ns"] >= rejected["rejected_monotonic_ns"]
+                             for row in evidence["continues"]))
+        self.assert_tasks_reaped(self.driver.master)
+        print(json.dumps({
+            "kind": "real-vfork-58-entry-rejection", "master": self.driver.master,
+            "entry": rejected["syscall"], "baseline_marker": True, "marker_exists": marker.exists(),
+            "remaining_owned_tasks": evidence["remaining_owned_tasks"],
+        }, sort_keys=True, separators=(",", ":")), flush=True)
+
     def test_shared_untraced_clone_and_clone3_are_rejected_at_entry(self):
         marker = str(Path(self.temp.name) / "child-executed")
         baseline = subprocess.run([self.helper, "baseline-shared-clone", marker],

@@ -95,6 +95,17 @@ int main(int argc, char **argv) {
         return clone_child(argv[2]);
     }
 #if defined(__x86_64__)
+    if (argc == 3 && strcmp(argv[1], "raw-fork") == 0) {
+        long child = syscall(SYS_fork, 0L, 0L, 0L, 0L, 0L, 0L);
+        if (child == 0) {
+            clone_child(argv[2]);
+            _exit(23);
+        }
+        if (child < 0) return 115;
+        int status;
+        return waitpid((pid_t)child, &status, 0) == child &&
+               WIFEXITED(status) && WEXITSTATUS(status) == 23 ? 0 : 116;
+    }
     if (argc == 3 && strcmp(argv[1], "x32") == 0) {
         (void)syscall(0x40000000L | SYS_getpid);
         return clone_child(argv[2]);
@@ -106,6 +117,15 @@ int main(int argc, char **argv) {
         return clone_child(argv[2]);
     }
 #endif
+    if (argc == 3 && strcmp(argv[1], "vfork") == 0) {
+        pid_t child = vfork();
+        if (child == 0) _exit(23);
+        if (child < 0) return 115;
+        int status;
+        if (waitpid(child, &status, 0) != child ||
+            !WIFEXITED(status) || WEXITSTATUS(status) != 23) return 116;
+        return clone_child(argv[2]);
+    }
     if (argc == 3 && strcmp(argv[1], "baseline-shared-clone") == 0) {
         return baseline_shared_clone(argv[2]);
     }
