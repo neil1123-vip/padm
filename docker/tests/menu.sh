@@ -947,6 +947,13 @@ runRoutingDriver() {
         targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'/root/padm-warp.json\n'
         targetReply 'Docker WARP 出站' $'2\n'
         targetReply 'Docker WARP 出站' $'3\n'
+        targetReply 'Docker WARP 出站' $'4\n'
+        targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
+        targetReply 'fixture-warp-daily-confirm [y/N]' $'y\n'
+        for choice in 5 6 7; do
+            targetReply 'Docker WARP 出站' "${choice}"$'\n'
+            targetReply 'fixture-warp-daily-confirm [y/N]' $'y\n'
+        done
         targetReply 'Docker WARP 出站' $'0\n'
         targetReply 'Docker 路由与出站' $'21\n'
         targetReply 'Docker HTTP 中继入站' $'invalid\n'
@@ -1015,6 +1022,10 @@ runRoutingDriver() {
         targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'0\n'
         targetReply 'Docker WARP 出站' $'1\n'
         targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'\n'
+        targetReply 'Docker WARP 出站' $'4\n'
+        targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
+        targetReply 'Docker WARP 出站' $'4\n'
+        targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         targetReply 'Docker WARP 出站' $'0\n'
         targetReply 'Docker 路由与出站' $'21\n'
         targetReply 'Docker HTTP 中继入站' $'1\n'
@@ -1145,6 +1156,24 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'20\n'
         targetReply 'Docker WARP 出站' $'1\n'
         targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'\004'
+        targetReply 'Docker WARP 出站' $'4\n'
+        targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+        targetReply 'Docker WARP 出站' $'0\n'
+        ;;
+    warp-confirm-cancel|warp-confirm-eof)
+        targetReply 'Docker 路由与出站' $'20\n'
+        for choice in 4 5 6; do
+            targetReply 'Docker WARP 出站' "${choice}"$'\n'
+            if [[ "${choice}" == 4 ]]; then
+                targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET\n'
+            fi
+            if [[ "${scenario}" == warp-confirm-cancel ]]; then
+                targetReply 'fixture-warp-daily-confirm [y/N]' $'n\n'
+            else
+                targetReply 'fixture-warp-daily-confirm [y/N]' $'\004'
+            fi
+        done
+        targetReply 'Docker WARP 出站' $'3\n'
         targetReply 'Docker WARP 出站' $'0\n'
         ;;
     http-relay-eof)
@@ -1518,7 +1547,25 @@ protocol)
     ;;
 edit)
     recordAction "$@"
-    if [[ "${2:-}" == --port-alias || "${2:-}" == --port-alias-remove ||
+    if [[ "${2:-}" == --warp-domains || "${2:-}" == --warp-global ||
+        "${2:-}" == --warp-family ]]; then
+        case "$2" in
+        --warp-domains)
+            [[ "$#" -eq 3 ]] && dockerSocks5DomainsNormalize "$3" >/dev/null || exit 2
+            ;;
+        --warp-global) [[ "$#" -eq 2 ]] || exit 2 ;;
+        --warp-family) [[ "$#" -eq 3 && ( "$3" == ipv4 || "$3" == ipv6 ) ]] || exit 2 ;;
+        esac
+        printf 'fixture-warp-daily-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction warp-daily-confirm "$2" eof
+            exit 2
+        fi
+        recordAction warp-daily-confirm "$2" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction warp-daily-commit "$2"
+    elif [[ "${2:-}" == --port-alias || "${2:-}" == --port-alias-remove ||
         "${2:-}" == --port-alias-default ]]; then
         [[ "${2:-}" == --port-alias-default && "${4:-}" == base ]] ||
             [[ "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
@@ -1975,7 +2022,7 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof region-eof ipv6-eof warp-eof http-relay-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof region-eof ipv6-eof warp-eof warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
@@ -1989,10 +2036,28 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --warp /root/padm-warp.json\nedit --warp-off\nprotocol routing-status'
+        for warpAction in '--warp-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN' \
+            '--warp-global' '--warp-family ipv4' '--warp-family ipv6'; do
+            expectedRouting+=$'\nedit '"${warpAction}"
+            expectedRouting+=$'\nwarp-daily-confirm '"${warpAction%% *}"' y'
+            [[ "${routingCase}" != flow ]] || expectedRouting+=$'\nwarp-daily-commit '"${warpAction%% *}"
+        done
         expectedRouting+=$'\nedit --http-relay /root/padm-http-relay.json\nedit --http-relay-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --direct-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --direct-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
+        [[ "$(grep -Fc 'fixture-warp-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 4 ]] ||
+            fail 'WARP 日常编辑没有每次只确认一次'
+        ;;
+    warp-confirm-cancel|warp-confirm-eof)
+        warpConfirmation=n
+        [[ "${routingCase}" != warp-confirm-eof ]] || warpConfirmation=eof
+        expectedRouting="edit --warp-domains Example.NET"$'\n'"warp-daily-confirm --warp-domains ${warpConfirmation}"
+        expectedRouting+=$'\nedit --warp-global\n'"warp-daily-confirm --warp-global ${warpConfirmation}"
+        expectedRouting+=$'\nedit --warp-family ipv4\n'"warp-daily-confirm --warp-family ${warpConfirmation}"
+        expectedRouting+=$'\nprotocol routing-status'
+        [[ "$(grep -Fc 'fixture-warp-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail 'WARP 确认取消或 EOF 后重复确认'
         ;;
     dns-explicit-port)
         expectedRouting='edit --dns-rules 203.0.113.53 5353 Example.NET'
@@ -2045,6 +2110,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '18. 区域阻断策略' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
             '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' '19. IPv6 域名出站' \
             '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' \
+            '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
+            '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \
             '22. 追加 Direct 直连例外' '23. 追加 Block 域名阻断' \
             '24. 删除 Direct 直连例外' '25. 删除 Block 域名阻断' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"

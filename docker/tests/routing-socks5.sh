@@ -1262,6 +1262,7 @@ runEdit() {
     ! grep -Fq "${USERNAME}" "${LOG}" && ! grep -Fq "${PASSWORD}" "${LOG}" ||
         fail '路由编辑泄露 SOCKS5 凭据'
     ! grep -Fq "${WARP_PRIVATE}" "${LOG}" || fail '路由编辑泄露 WARP 私钥'
+    ! grep -Fq 'routing-regression-token' "${LOG}" || fail '路由编辑泄露订阅 token'
 }
 runStatus() {
     local expected=$1 actual=0
@@ -1339,6 +1340,21 @@ if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" ==
     runEdit 2 --warp "${WARP_INPUT}" --socks5-off --preview
     runEdit 2 --warp "${WARP_INPUT}" --spec "${TEST_ROOT}/base.json" --preview
     runEdit 2 --warp "${WARP_INPUT}" --http01 enable --preview
+    runEdit 2 --warp-domains
+    runEdit 2 --warp-domains '' --preview
+    runEdit 2 --warp-domains 'regexp:.*' --preview
+    runEdit 2 --warp-domains 'example.net'
+    runEdit 2 --warp-family
+    runEdit 2 --warp-family both --preview
+    runEdit 2 --warp-global --warp-off --preview
+    runEdit 2 --warp-off --warp-family ipv6 --preview
+    runEdit 2 --warp-domains 'example.net' --warp "${WARP_INPUT}" --preview
+    runEdit 2 --warp-global --socks5-global --preview
+    runEdit 2 --warp-family ipv6 --http01 enable --preview
+    runEdit 2 --warp-global --spec "${TEST_ROOT}/base.json" --preview
+    runEdit 15 --warp-domains 'example.net' --preview
+    runEdit 15 --warp-global --preview
+    runEdit 15 --warp-family ipv6 --preview
     runEdit 15 --spec "${TEST_ROOT}/warp-global.json" --confirm PADM-DOCKER-EDIT
     cp -- "${WARP_INPUT}" "${PRIVATE_ROOT}/warp-bad.json"
     chmod 0640 "${PRIVATE_ROOT}/warp-bad.json"
@@ -1363,6 +1379,55 @@ if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" ==
     jq -e --argjson domains "${IPV6_DOMAINS}" '
       .warp == {mode:"selective",family:"ipv4",domains:$domains}
     ' "${LOG}" >/dev/null || fail 'WARP 状态未按无秘密合同投影'
+    before=$(snapshot)
+    runEdit 2 --warp-domains 'full:changed.example.com' --warp-global --preview
+    runEdit 2 --warp-family ipv4 --warp-family ipv6 --preview
+    runEdit 2 --warp-family IPv6 --preview
+    runEdit 0 --warp-domains ' Full:Changed.Example.Com , domain:example.net ' --preview
+    runEdit 0 --warp-family ipv6 --preview
+    runEdit 0 --warp-global --preview
+    jq '.routing.warp.mode = "global" | .routing.warp.domains = []' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/warp-daily-cancel.json"
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerSetupRead() { printf -v "$1" '%s' n; }
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/warp-daily-cancel.json" '' '' interactive
+    ) >"${LOG}" 2>&1 || fail 'WARP 日常编辑取消失败'
+    assertClean
+    [[ "$(snapshot)" == "${before}" ]] || fail 'WARP 日常编辑预览、取消或参数拒绝改变完整部署'
+    runEdit 0 --warp-domains ' Full:Changed.Example.Com , domain:example.net ' --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile before "${TEST_ROOT}/warp-selective.json" --slurpfile actual "${root}/config/spec.json" '
+      ($before[0] | .routing.warp.mode = "selective" |
+        .routing.warp.domains = ["full:changed.example.com","domain:example.net"]) == $actual[0]
+    ' >/dev/null || fail 'WARP 域名日常编辑未保留私有字段或规范化列表'
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/warp-daily-before.json"
+    runEdit 0 --warp-family ipv6 --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile before "${TEST_ROOT}/warp-daily-before.json" \
+        --slurpfile actual "${root}/config/spec.json" '
+      ($before[0] | .routing.warp.family = "ipv6") == $actual[0]
+    ' >/dev/null || fail 'WARP 地址族日常编辑改写模式、域名或其它规格'
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/warp-daily-before.json"
+    runEdit 0 --warp-global --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile before "${TEST_ROOT}/warp-daily-before.json" \
+        --slurpfile actual "${root}/config/spec.json" '
+      ($before[0] | .routing.warp.mode = "global" | .routing.warp.domains = []) == $actual[0]
+    ' >/dev/null || fail 'WARP 全局日常编辑改写地址族或其它规格'
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/warp-daily-before.json"
+    runEdit 0 --warp-family ipv4 --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile before "${TEST_ROOT}/warp-daily-before.json" \
+        --slurpfile actual "${root}/config/spec.json" '
+      ($before[0] | .routing.warp.family = "ipv4") == $actual[0]
+    ' >/dev/null || fail 'WARP 全局地址族编辑意外改变模式或域名'
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/warp-daily-before.json"
+    runEdit 0 --warp-domains 'Example.NET,Full:Changed.Example.Com,example.net' --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile before "${TEST_ROOT}/warp-daily-before.json" \
+        --slurpfile actual "${root}/config/spec.json" '
+      ($before[0] | .routing.warp.mode = "selective" |
+        .routing.warp.domains = ["domain:example.net","full:changed.example.com"]) == $actual[0]
+    ' >/dev/null || fail 'WARP 全局转域名未稳定去重或保留其它规格'
+    [[ "$(snapshot)" != "${before}" ]] || fail 'WARP 日常编辑未产生预期配置变化'
+    runEdit 0 --warp "${WARP_INPUT}" --confirm PADM-DOCKER-EDIT
     before=$(snapshot)
     runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
     runEdit 15 --spec "${TEST_ROOT}/warp-global.json" --confirm PADM-DOCKER-EDIT
@@ -1389,6 +1454,8 @@ if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" ==
     jq -en --slurpfile expected "${TEST_ROOT}/warp-owner.json" --slurpfile actual "${root}/config/spec.json" \
         '$actual == $expected' >/dev/null || fail '选择性 WARP 未保留 IPv6/generic 路由'
     before=$(snapshot)
+    runEdit 15 --warp-global --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail 'WARP 组合的默认出口竞争改变部署'
     for failure in health-fail int term; do
         MODE=${failure}
         rm -f -- "${TEST_ROOT}/failed-once"
@@ -1398,6 +1465,16 @@ if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" ==
         term) runEdit 143 --warp-off --confirm PADM-DOCKER-EDIT ;;
         esac
         [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: WARP 未恢复全部规则、编排与流量"
+    done
+    for failure in health-fail term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        if [[ "${failure}" == health-fail ]]; then
+            runEdit 14 --warp-family ipv6 --confirm PADM-DOCKER-EDIT
+        else
+            runEdit 143 --warp-domains 'full:changed.example.com' --confirm PADM-DOCKER-EDIT
+        fi
+        [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: WARP 日常编辑未恢复全部规则、编排与流量"
     done
     MODE=ok
     runEdit 0 --warp-off --confirm PADM-DOCKER-EDIT

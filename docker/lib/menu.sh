@@ -916,7 +916,9 @@ dockerMenuWarp() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker WARP 出站\n'
-        printf '%s\n' '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '3. 查看路由状态' '0. 返回'
+        printf '%s\n' '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '3. 查看路由状态' \
+            '4. 替换 WARP 域名规则' '5. 切换 WARP 全局出站' \
+            '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -931,6 +933,14 @@ dockerMenuWarp() {
             ;;
         2) dockerMenuRun edit --warp-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
+        4)
+            dockerSetupRead input 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${input}" ]] || continue
+            dockerMenuRun edit --warp-domains "${input}" || true
+            ;;
+        5) dockerMenuRun edit --warp-global || true ;;
+        6) dockerMenuRun edit --warp-family ipv4 || true ;;
+        7) dockerMenuRun edit --warp-family ipv6 || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

@@ -1386,6 +1386,7 @@ dockerEditCommand() {
     local cdnAction= cdnListener= cdnAddresses=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
+    local warpFamily=
     local fail2banAction= fail2banType=fail2ban fail2banPorts= fail2banMaxRetry= fail2banFindTime= fail2banBanTime=
     local fail2banSshUnit= fail2banSshTarget= fail2banSshPort=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
@@ -1566,6 +1567,24 @@ dockerEditCommand() {
                 portAliasPort=$((10#$3))
             fi
             shift 3
+            ;;
+        --warp-domains)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingDomains=$(dockerSocks5DomainsNormalize "$2") || return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=warp routingAction=warp_domains
+            shift 2
+            ;;
+        --warp-global)
+            [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=warp routingAction=warp_global
+            shift
+            ;;
+        --warp-family)
+            [[ "$#" -ge 2 && -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$2" in ipv4|ipv6) warpFamily=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            routingKind=warp routingAction=warp_family
+            shift 2
             ;;
         --dns|--hosts|--direct|--block|--block-ips|--warp)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
@@ -1978,7 +1997,19 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${routingKind}" ]]; then
-        if [[ "${routingKind}" == block_bt && "${routingAction}" == enable ]]; then
+        if [[ "${routingKind}" == warp && "${routingAction}" == warp_* ]]; then
+            jq -e '.routing.warp != null' "${draft}" >/dev/null || {
+                dockerError '请先导入有效的 WARP 配置，再修改域名、全局模式或地址族'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            # 日常编辑只改选择策略，账号、隧道地址与保留字节沿用原私有输入。
+            jq --arg action "${routingAction}" --arg family "${warpFamily}" \
+                --argjson domains "${routingDomains}" '
+              if $action == "warp_family" then .routing.warp.family = $family
+              elif $action == "warp_global" then .routing.warp.mode = "global" | .routing.warp.domains = []
+              else .routing.warp.mode = "selective" | .routing.warp.domains = $domains end
+            ' "${draft}" >"${draft}.next"
+        elif [[ "${routingKind}" == block_bt && "${routingAction}" == enable ]]; then
             jq '.routing.block_bt = true' "${draft}" >"${draft}.next"
         elif [[ "${routingKind}" == region && "${routingAction}" == enable ]]; then
             jq --arg mode "${regionMode}" --argjson allow "${regionAllow}" \
@@ -2150,6 +2181,7 @@ dockerEditCommand() {
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
         --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
+        --arg routing_action "${routingAction}" \
         --arg http_relay "${httpRelay}" \
         --arg port_alias "${portAlias}" \
         --arg cdn_listener "${cdnListener}" \
@@ -2218,6 +2250,11 @@ dockerEditCommand() {
        elif $socks5 != "" then
         ($old | del(.routing.socks5) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
+       elif $routing_kind == "warp" and ($routing_action | startswith("warp_")) then
+        def without_warp_edit:
+          if $routing_action == "warp_family" then del(.routing.warp.family)
+          else del(.routing.warp.mode, .routing.warp.domains) end;
+        ($old | without_warp_edit) == ($new | without_warp_edit)
        elif $routing_kind != "" then
         ($old | del(.routing[$routing_kind]) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing[$routing_kind]) | if .routing == {} then del(.routing) else . end)

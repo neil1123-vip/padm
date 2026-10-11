@@ -1396,7 +1396,8 @@ Docker daemon or host interfaces. The host still needs working IPv6 routing and
 egress. TUN/TProxy host-network mode, complete WARP and native-host acceptance
 remain outside this stage.
 
-Menu `17`, option `20`, imports, disables or displays WARP egress. Optional v3
+Menu `17`, option `20`, imports, disables or displays WARP egress and manages an existing
+configuration's domains, global mode and address family. Optional v3
 `.routing.warp` has its own `x-padm-routing-warp` gate. Input is a root-owned
 `0600` private JSON file, at most 64 KiB, with the same single-link and safe
 ancestor-directory requirements as other routing inputs. Keys never appear in
@@ -1410,9 +1411,16 @@ domain-rule types; global mode requires an empty `domains` array.
 ```bash
 padm-docker edit --warp /root/warp.json --preview
 padm-docker edit --warp /root/warp.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --warp-domains 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --warp-global --confirm PADM-DOCKER-EDIT
+padm-docker edit --warp-family ipv6 --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-off --confirm PADM-DOCKER-EDIT
 ```
 
+Daily edits require an existing valid WARP configuration. Domain replacement selects
+selective mode, global mode clears domains, and family changes only the address family.
+Keys, Peer, tunnel address and reserved bytes remain unchanged. These actions are mutually
+exclusive; preview/cancellation does not commit, and conflicting default egress is rejected.
 Supply parameters from an existing WARP account; no account registration or
 third-party registration-tool installation is performed. The Peer is fixed at
 `162.159.192.1:2408` and MTU at `1280`. `family` selects one local tunnel address
