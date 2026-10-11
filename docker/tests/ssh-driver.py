@@ -560,7 +560,9 @@ class DriverContracts(unittest.TestCase):
                         time.sleep(0.01)
                 accepted.close()
                 os.close(write_fd)
-                os.waitpid(child, 0)
+                # 回收由外层 subreaper 负责，避免 master 与测试竞争 child 的退出状态。
+                while True:
+                    time.sleep(0.01)
 
             try:
                 driver_module.ControlledDriver(time.monotonic() + 5, self.receiver,
@@ -613,7 +615,8 @@ class DriverContracts(unittest.TestCase):
                         self.assertEqual(os.WTERMSIG(status), signal.SIGKILL)
                         break
                     time.sleep(0.001)
-                self.assertIn(pid, reaped)
+                self.assertIn(pid, reaped,
+                              f"EXITKILL task {pid}: proc_exists={Path(f'/proc/{pid}').exists()}")
                 self.assertFalse(Path(f"/proc/{pid}").exists())
             with self.assertRaises(ChildProcessError):
                 os.waitpid(-1, os.WNOHANG)
@@ -629,7 +632,10 @@ class DriverContracts(unittest.TestCase):
                     try:
                         waited, _status = os.waitpid(pid, os.WNOHANG)
                     except ChildProcessError:
-                        break
+                        # 真实父退出后才转交 subreaper，ECHILD 不能直接判定清理完成。
+                        if not Path(f"/proc/{pid}").exists():
+                            break
+                        waited = 0
                     if waited:
                         break
                     time.sleep(0.001)
