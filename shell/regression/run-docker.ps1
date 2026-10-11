@@ -301,6 +301,10 @@ try {
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real')) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
         @('--privileged', '--mount', 'type=volume,dst=/n')
+    } elseif ($Selector -in @('docker-ssh-driver', 'docker-contracts', 'docker-contracts-fast',
+        'docker-contracts-fast-rest')) {
+        # 仅自建受控子树的 driver 合同需要 ptrace，不挂载宿主进程或 Socket。
+        @('--cap-add', 'SYS_PTRACE')
     } else { @() }
     $container = & $docker create --name "padm-regression-$runId" --platform $platform @slotLabels @networkCapabilities `
         --network none --init `

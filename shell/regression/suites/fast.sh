@@ -103,6 +103,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-subscriptions \
         docker-accounts-cli \
         docker-ssh-preflight \
+        docker-ssh-driver \
         docker-business \
         docker-phase2
 }
@@ -139,6 +140,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-traffic \
         docker-fail2ban-source \
         docker-ssh-preflight \
+        docker-ssh-driver \
         docker-permissions \
         docker-wireguard-runtime \
         docker-accounts-cli \
@@ -406,6 +408,10 @@ runDockerSshPreflightRegression() {
         python3 -B "${PROJECT_ROOT}/docker/tests/ssh-source-client.py"
 }
 
+runDockerSshDriverRegression() {
+    python3 -B "${PROJECT_ROOT}/docker/tests/ssh-driver.py"
+}
+
 runDockerWireGuardRuntimeRegression() {
     bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
 }
@@ -467,6 +473,7 @@ registerRegressionFunctionLeaf docker-control-fail2ban-real runDockerControlFail
 registerRegressionFunctionLeaf docker-fail2ban-ownership runDockerFail2banOwnershipRegression
 registerRegressionFunctionLeaf docker-fail2ban-source runDockerFail2banSourceRegression
 registerRegressionFunctionLeaf docker-ssh-preflight runDockerSshPreflightRegression
+registerRegressionFunctionLeaf docker-ssh-driver runDockerSshDriverRegression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression

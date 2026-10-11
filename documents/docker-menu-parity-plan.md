@@ -3789,11 +3789,85 @@ evidence `BBC9076904D42A282B37522834BAFB136D96ADE63D41122F28424A5A0F8EA6BA`。
 Ledger/source 及 8c.2d 原始证据哈希不变。实验容器、socket、binary、
 pidfd 和缓存已清理，只留 5 个复现源/证据文件。
 
-下一步 8c.2f 沉淀受控单线程内部 driver，直接调用 Ledger 并拒绝未知
-event，补运行态 EXITKILL；先限定自身创建的已知普通 fork 测试子树。
+8c.2f 受控单线程内部 driver 见下一节，直接调用 Ledger 并拒绝未知
+event，补运行态 EXITKILL；限定自身创建的已知普通 fork 测试子树。
 event 1 或 Threads=1 快照不能单独证明创建 flags 安全；共享 clone、
 多线程、创建参数、unit 前置与任意 OpenSSH 接入仍是后续门槛。
 本轮不接菜单、collector 或 jail，不修改宿主 SSH。
+
+#### 5C.8c.2f 受控单线程内部 lifecycle driver
+
+新增 `docker/lib/ssh-driver.py` 的 `ControlledDriver.run(child_main)`，
+仅由自身 fork/TRACEME 创建可信测试子树，不提供外部 PID attach 或
+生产 CLI。复用 Ledger，真实首停登记前核验父链、代次、单线程、
+独立进程组、namespace 和 accepted tuple/inode 继承；早到 child
+首停保持冻结，父 FORK 事件确认后才登记和继续。
+event 2/3 或其它非 allowlist event 在普通信号分支前拒绝；
+创建事件先 GETEVENTMSG 纳入 child 清理范围，再检查期限和事件类别。
+EXEC/EXIT 的 Ledger 提交成功后才 CONT，实际 CONT 前再检查总期限。
+停点、pending 和返回证据深拷贝，不随后续账本改写。
+
+异常毒化并关闭账本，正常 CONT 与 cleanup CONT/SIGKILL 分开；
+清理按自有进程组发现尚未消费的创建停点，再按已知 PID/TID 回收。
+wait 已消费或尚未消费创建状态时超时都不能丢失新 child；
+线程 ECHILD 仅在 `/proc` 确认消失后移除，剩余 task 明确失败。
+设置 `PTRACE_O_EXITKILL`，仍保持 `authoritative=false`、
+`jail_ready=false`；可信 callback 是前提，event 1/Threads=1 本身
+不证明创建 flags 安全，不能把本 driver 接到任意 OpenSSH。
+
+新增 6 个真实 Linux 合同与 C helper，无私有 `/dev/log` mount：
+
+| 合同 | 实际检查 |
+| --- | --- |
+| Python 到 C exec | old pending 快照仍 epoch 0；新/关闭 FD 消息 epoch 1，关闭后仅历史锚点 |
+| pthread clone | 真 event 3 拒绝，后续正常 CONT 为 0，child/TID 回收 |
+| finish 后 deadline | 成功提交后、实际 CONT 前跨未改期限，全关并取消 accepted/pending |
+| 已消费 FORK wait deadline | 取得创建状态后跨期限，新 child 仍进入回收范围 |
+| 未消费 FORK wait deadline | 真父创建停点和 `/proc` child 已出现后跨期限，清理发现并回收 child |
+| 运行态 EXITKILL | master/child 均非 t/T/Z、同 TracerPid 后真杀 tracer，两个 tracee SIGKILL/POLLIN/回收 |
+
+EXITKILL 由独立 subreaper 的原始 `/proc`、pidfd、SIGKILL wait 状态、
+proc 消失、ECHILD 和 FD 基线共同断言；supervisor 在观察前未杀 tracee，
+测试结束恢复 subreaper 原状态。未知新 child 回收和 CONT 最终期限
+是独审发现后新增的实际安全断言，没有伪造时钟、期限或 ptrace 事件。
+
+首跑 driver 6 项过早失败，根因自身 `/proc/fd` 枚举的 scandir FD
+在逐项 readlink 前关闭；只跳过该处 `FileNotFoundError`，其余读取
+异常仍严格失败。原始日志保留，修订后定向 6/6、3.154 秒，
+入口 4121 ms、内部 3204 ms。调度聚合入口 1440 ms/内部 490 ms，
+完整与 CI 分片 leaf 集合断言通过。
+
+新增独立 `docker-ssh-driver` leaf，加入完整合同与 CI fast-rest；
+仅包含该 leaf 的回归 selector/CI 分片增加 SYS_PTRACE，
+无 host PID/network、宿主 Socket 或 privileged。工具 GCC/libc6-dev
+从 Debian 官方 HTTPS 源安装在独立末层，复用原 1–8 层缓存。
+首次误改原安装层触发 131 MB/137 包重下载，约 443 秒后停止本任务
+构建；末层修订仅下载 56.4 MB/34 包、构建 560.4 秒，随后回归复用
+`sha256:d9a9a7ad6ad5a945ab85ee757ed8e32c55e06dd2f9efccf871d0d9a57e895f98`。
+构建和下载耗时不计入回归 elapsed，不称补工具仅花回归入口的 2 秒。
+
+集中完整合同 47/47、exit 0、cache_hit=false，入口 289480 ms、
+内部 288570 ms、排队 375 ms、Jobs 6/占 2 槽，未扩大三槽预算；
+driver 在完整并发中 6/6、3.166 秒。最终 297 个快照文件与当前工作区
+逐一 SHA256 一致，本阶段 8 个新增/修改代码与配置输入及既有
+Ledger/source 哈希均匹配成功快照；后续只补文档，不重复全套。
+未使用不同负载两轮的 elapsed 宣称整体回归提速。
+
+证据 `.tmp-ssh-driver-8c2f/evidence.md`、`input-hashes.json`、
+`snapshot-workspace-differences.json`，
+定向 `.tmp-regression-docker-d06da66b0fa449c08189533d27a7a3d6/`，
+调度 `.tmp-regression-docker-e885dcde2d7244ae8a55497b8e76ca01/`，
+完整 `.tmp-regression-docker-8c8d7176454e42b3912c3c891d72a162/`。
+本阶段清理 6 套入口的 12 个归档/清单共 55,819,461 bytes，
+每项哈希留 `cleanup.json`，日志/result/复现源保留；本任务容器已清理，
+未删除其它任务临时资源。
+
+早到 child 首停分支有源码支持，本新 driver 尚未强制实测该分支。
+下一步先补真实创建 syscall/flags 与 FORK 事件关联，保守授权已证明
+普通 fork，拒绝共享 clone/UNTRACED/未知参数；再接 8c.2a 的 unit 前置。
+unit 归属不能补创建模型缺口；多线程、任意 OpenSSH、故障恢复、
+LSM/arm64/宿主 systemd、公网和重启卸载仍待验收，collector/jail、
+菜单启停与 5C 不因本内部 driver 通过而开放。
 
 ## 第六步：发布与完整验收
 

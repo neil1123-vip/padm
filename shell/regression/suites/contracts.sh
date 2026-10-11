@@ -270,7 +270,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts
         docker-traffic docker-permissions docker-fail2ban-source docker-control-api
         docker-wireguard-runtime docker-subscriptions docker-accounts-cli
-        docker-ssh-preflight docker-business docker-phase2
+        docker-ssh-preflight docker-ssh-driver docker-business docker-phase2
     )
 
     runFrameworkParallelRegressionSelectors() {
