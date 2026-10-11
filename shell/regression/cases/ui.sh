@@ -2172,6 +2172,7 @@ EOF
         resetMenuRender
         manageSubscription <<<"9" || true
         [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n9:return\n' ]]
+        [[ "${menuItems}" == $'安装/更新发布服务\n查看当前订阅链接\n分享订阅\n流量与限额\n立即完整同步\n订阅同步\n'* ]]
         ! assertMenuAction menu
         grep -q "多服务器角色：.*未启用；可直接使用本机订阅" <<<"${output}"
         grep -q "启用主控协同" <<<"${output}"
@@ -2200,21 +2201,21 @@ n"
         manageSubscriptionLocalHome <<<"9"
         [[ -z "${actions}" ]]
         resetMenuActions
-        manageSubscriptionLocalHome <<<"6
+        manageSubscriptionLocalHome <<<"1
 9"
-        [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\n' ]]
+        [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\nrunSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
         resetMenuActions
         manageSubscriptionLocalHome <<< $'10\n9'
         [[ "${actions}" == $'errorCard:选择错误，请重新选择\n' ]]
         (
             resetMenuActions
             initSubscriptionWireGuardMain() { recordMenuAction init-failed; return 1; }
-            manageSubscription <<< $'7\n1\n9'
+            manageSubscription <<< $'7\n2\n9'
             [[ "${actions}" == $'init-failed\nshowPublishedSubscriptionLinks:\n' ]]
         )
         (
             resetMenuActions
-            manageSubscription <<< $'8\ninvalid-invite\n\n1\n9'
+            manageSubscription <<< $'8\ninvalid-invite\n\n2\n9'
             [[ "${actions}" == $'errorCard:主控邀请无效，请复制完整内容后重试\nshowPublishedSubscriptionLinks:\n' ]]
             [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
         )
@@ -2246,7 +2247,7 @@ n"
             setMenuSmokeRole uninitialized
             resetMenuActions
             output=
-            manageSubscription <<< $'7\nn\n1\n9'
+            manageSubscription <<< $'7\nn\n2\n9'
             assertMenuAction initSubscriptionWireGuardMain
             assertMenuAction 'showPublishedSubscriptionLinks:'
             [[ "$(subscriptionCurrentRoleNormalized)" == main ]]
@@ -2332,6 +2333,7 @@ invite-credential"
         resetMenuRender
         manageSubscriptionMainHome <<<"9"
         [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n9:return\n' ]]
+        [[ "${menuItems}" == $'安装/更新发布服务\n查看当前订阅链接\n分享订阅\n流量与限额\n立即完整同步\n订阅同步\n'* ]]
         grep -q "查看当前订阅链接" <<<"${output}"
         ! grep -q "新建并发布订阅" <<<"${output}"
         ! grep -q "刷新并查看我的订阅链接" <<<"${output}"
@@ -2346,16 +2348,15 @@ invite-credential"
             return 1
         fi
         resetMenuActions
-        manageSubscriptionMainHome <<<"6
-9"
-        assertMenuAction installSubscribe
-        assertMenuAction showSubscriptionServiceStatus
-        resetMenuActions
         manageSubscriptionMainHome <<<"1
+9"
+        [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\nrunSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
+        resetMenuActions
+        manageSubscriptionMainHome <<<"2
 9"
         [[ "${actions}" == $'showPublishedSubscriptionLinks:\n' ]]
         resetMenuActions
-        manageSubscriptionMainHome <<<"4
+        manageSubscriptionMainHome <<<"5
 9"
         [[ "${actions}" == $'runSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
         ! assertMenuAction installSubscribe
@@ -2366,18 +2367,18 @@ invite-credential"
             readNginxSubscribe() { recordMenuAction readNginxSubscribe; return 99; }
             installSubscribe() { recordMenuAction installSubscribe; return 99; }
             SUBSCRIPTION_SYNC_PUBLISHED=true
-            manageSubscriptionMainHome <<< $'4\n9'
+            manageSubscriptionMainHome <<< $'5\n9'
             [[ "${actions}" == $'runSubscriptionGroupSync:\nstatusCard:账号同步已完成，未发布订阅链接\n' ]]
             [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == false ]]
         )
         resetMenuActions
-        manageSubscriptionMainHome <<<"3
+        manageSubscriptionMainHome <<<"4
 7
 9"
         [[ "${actions}" == $'showSubscriptionTrafficOverview\n' ]]
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"5
+        manageSubscriptionMainHome <<<"6
 5
 9"
         grep -q "立即完整同步" <<<"${output}"
@@ -2400,7 +2401,7 @@ invite-credential"
         grep -q "查看当前订阅链接" <<<"${output}"
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"2
+        manageSubscriptionMainHome <<<"3
 
 9"
         grep -q "暂无分享订阅" <<<"${output}"
@@ -2415,9 +2416,9 @@ invite-credential"
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         resetMenuActions
-        manageSubscriptionMainHome <<<"2
+        manageSubscriptionMainHome <<<"3
 
-1
+2
 9" || true
         subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
         [[ "${actions}" == $'showPublishedSubscriptionLinks:\n' ]]
@@ -2429,12 +2430,12 @@ invite-credential"
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         resetMenuActions
-        manageSubscriptionMainHome <<<"2
+        manageSubscriptionMainHome <<<"3
 demo-user
 main
 0
 9
-1
+2
 9"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
         assertMenuAction 'showPublishedSubscriptionLinks:'
@@ -2457,7 +2458,7 @@ main
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
-            manageSubscriptionMainHome <<<"2
+            manageSubscriptionMainHome <<<"3
 demo-user
 main
 0
@@ -2466,14 +2467,14 @@ main
         fi
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"2
+        manageSubscriptionMainHome <<<"3
 2
 3
 3
 2
 6
 9
-1
+2
 9"
         grep -q "查看当前已发布链接" <<<"${output}"
         grep -q "立即同步并更新链接" <<<"${output}"
@@ -2494,7 +2495,7 @@ main
         setMenuSmokeRole main
         resetMenuActions
         subscriptionGroupsStateWrite '.user_groups = [] | .sync.enabled = false'
-        manageSubscriptionMainHome <<<"2
+        manageSubscriptionMainHome <<<"3
 team-a
 *
 0
@@ -2515,7 +2516,7 @@ team-a
         rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
         ensureSubscriptionGroupsState
         subscriptionGroupsStateWrite '.sync.enabled = true'
-        manageSubscriptionMainHome <<<"2
+        manageSubscriptionMainHome <<<"3
 team-b
 main
 0

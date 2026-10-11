@@ -526,12 +526,12 @@ manageSubscriptionCatalog() {
         echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
         showSubscriptionServerRoleSummary
         menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和流量。"
-        menuItem 1 "查看当前订阅链接" "只读查看已发布的本机自用和分享订阅"
-        menuItem 2 "分享订阅" "新建或维护已有分享订阅"
-        menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
-        menuItem 4 "立即完整同步" "同步账号及启用来源；已配置发布服务时更新并显示链接"
-        menuItem 5 "订阅同步" "自动同步、同步间隔、状态排障和状态备份"
-        menuItem 6 "安装/更新发布服务" "配置公网发布入口"
+        menuItem 1 "安装/更新发布服务" "配置公网发布入口，随后完整同步并显示链接"
+        menuItem 2 "查看当前订阅链接" "只读查看已发布的本机自用和分享订阅"
+        menuItem 3 "分享订阅" "新建或维护已有分享订阅"
+        menuItem 4 "流量与限额" "查看流量明细，并处理超限和自动限额"
+        menuItem 5 "立即完整同步" "同步账号及启用来源；已配置发布服务时更新并显示链接"
+        menuItem 6 "订阅同步" "自动同步、同步间隔、状态排障和状态备份"
         if [[ "${role}" == "main" ]]; then
             menuItem 7 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停和移除"
             menuItem 8 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
@@ -543,12 +543,12 @@ manageSubscriptionCatalog() {
         menuClose
         menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus || return 0
         case "${subscriptionCatalogStatus}" in
-        1) showPublishedSubscriptionLinks ;;
-        2) manageSharedSubscriptions ;;
-        3) manageTrafficAndQuota ;;
-        4) syncAndShowSubscriptionLinks ;;
-        5) manageSubscriptionSyncSettings ;;
-        6) installSubscribe && showSubscriptionServiceStatus ;;
+        1) installSubscribe && showSubscriptionServiceStatus && syncAndShowSubscriptionLinks ;;
+        2) showPublishedSubscriptionLinks ;;
+        3) manageSharedSubscriptions ;;
+        4) manageTrafficAndQuota ;;
+        5) syncAndShowSubscriptionLinks ;;
+        6) manageSubscriptionSyncSettings ;;
         7)
             if [[ "${role}" == "main" ]]; then
                 manageSubscriptionServers

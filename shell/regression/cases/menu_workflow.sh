@@ -32,6 +32,29 @@ runSubscriptionMenuWorkflowCoreRegression() (
     subscriptionCurrentRoleNormalized() { printf 'uninitialized\n'; }
 
     (
+        local actions= installStatus=0 role
+        showSubscriptionServerRoleSummary() { :; }
+        installSubscribe() { actions+="install "; return "${installStatus}"; }
+        showSubscriptionServiceStatus() { actions+="status "; }
+        runSubscriptionGroupSync() { actions+="sync "; SUBSCRIPTION_SYNC_PUBLISHED=true; }
+        showPublishedSubscriptionLinks() { actions+="links "; }
+        for role in uninitialized main; do
+            actions=
+            manageSubscriptionCatalog "${role}" <<< $'1\n2\n9'
+            [[ "${actions}" == 'install status sync links links ' ]]
+        done
+        actions= installStatus=1
+        manageSubscriptionCatalog uninitialized <<< $'1\n9' || true
+        [[ "${actions}" == 'install ' ]]
+        actions= installStatus=0
+        runSubscriptionGroupSync() { actions+="sync "; return 1; }
+        SUBSCRIPTION_SYNC_PUBLISHED=true
+        manageSubscriptionCatalog uninitialized <<< $'1\n9' || true
+        [[ "${actions}" == 'install status sync ' && "${SUBSCRIPTION_SYNC_PUBLISHED}" == false ]]
+        grep -q '订阅同步失败，未生成新的订阅链接' "${errorLog}"
+    )
+
+    (
         local readLog="${root}/reads.log"
         : >"${readLog}"
         eval "$(declare -f subscriptionActiveGroupRead | sed '1s/^subscriptionActiveGroupRead/originalSubscriptionActiveGroupRead/')"
