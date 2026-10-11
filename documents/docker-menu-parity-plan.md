@@ -4258,6 +4258,46 @@ subreaper 恢复、ledger 消息为空；master、session、auth 均按原 pidfd
 本探针不宣称任意 OpenSSH、多线程、arm64、collector/jail、公网或原生宿主
 验收；下一步仍需按真实拒绝边界推进，不接入生产入口。
 
+#### 5C.8c.2p 真实私有 syslog 与当前 Ledger 交接
+
+本阶段继续保持四个生产模块冻结，在 8c.2o 的固定自建 unit/sshd fixture
+中，仅由原 driver callback 新建 child 私有 mount namespace、私有 tmpfs
+`/dev` 并将 `/dev/log` bind 到专用 receiver；receiver 权限 0600，开启
+`SO_PASSCRED/SO_PASSPIDFD`，全局 `/dev/log` 不替换。原始 bytes 仅在导出
+证据时编码为显式 hex，不改变正文验证或原 Ledger receive/drain/finish_stop。
+
+2026-10-11 attempt1 首次通过，入口 16246 ms；复用 8c.2o 固定镜像，
+linux/amd64、私有 cgroup、network none、无宿主挂载/Socket/PID。
+真实 tracer 108、sshd MainPID 109、session 117、auth 124，
+invocation `e9691d08dd21455480b4d68dcced7d52`；
+`127.0.0.1:22220 <- 127.0.0.1:46823`，accepted inode 22707。
+两次真实 clone、accepted 继承、setsid 和 session/auth EXEC 保持通过，
+稳定 unit 前后严格相同，首代共享 LISTEN 原唯一 owner gate 仍拒绝。
+
+6 条真实 OpenSSH syslog 中，3 条 session 原消息为 `Connection from`、
+`Invalid user`、`Connection closed ... [preauth]`；同条 credentials 为
+`[117,0,0]`，message/held pidfd 在入队和提交前后均指向原活 task，
+绑定冻结 epoch 1、`/usr/lib/openssh/sshd-session` 与 fork accepted anchor。
+3 条 master 消息全部以 `missing_accepted_anchor` 拒绝。session 原消息
+在自身 EXIT 停点提交，原 drain 达 EAGAIN 后才 commit、terminal 与 CONT；
+TCP 已为 CLOSE_WAIT，`owns_anchor_fd=true`、`live_socket_verified=false`，
+不把历史 tuple 当当前 ESTABLISHED。本次没有实际跨 EXEC 的 pending 原消息，
+该场景已有 8c.2d 证据，不将本次空 EXEC 提交扩展为新的跨 exe 实测。
+
+两个后代自然退出 255，原 pidfd 确认真回收后取稳定 checkpoint；
+外部使用启动后持续持有的原 master pidfd 发送 SIGTERM，driver 处理实际
+signal-delivery/EXIT，master 自然退出 0、run 正常返回。Ledger closed 且
+未 poisoned，3 条提交结果保留；2737 个 syscall 停点，FD `5 -> 5`，
+subreaper 恢复，所有 remaining/open_received_fds 空，unit inactive/dead、
+无 TCP LISTEN，容器按本阶段 label 查询无残留。
+
+9 个源输入全部冻结匹配；小证据、raw-log 与复现源保留在
+`.tmp-ssh-unit-driver-8c2p/`，没有重复未变生产源码的完整回归。
+本步只验证固定单连接的可信原 driver/账本交接，持续保持
+`authoritative=false`、`jail_ready=false`；不接生产入口、任意 PID、
+collector/jail，不宣称 Failed publickey 文案、多线程、未知创建模型、
+arm64、公网或原生宿主验收已完成。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
