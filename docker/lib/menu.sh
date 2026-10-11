@@ -817,7 +817,8 @@ dockerMenuRouting() {
             '21. HTTP 中继入站' '22. 追加 Direct 直连例外' \
             '23. 追加 Block 域名阻断' '24. 删除 Direct 直连例外' \
             '25. 删除 Block 域名阻断' '26. 追加 IP/CIDR 阻断' \
-            '27. 精确删除 IP/CIDR 阻断' '0. 返回'
+            '27. 精确删除 IP/CIDR 阻断' '28. 追加 DNS 分流域名' \
+            '29. 精确删除 DNS 分流域名' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -896,6 +897,17 @@ dockerMenuRouting() {
                 dockerMenuRun edit --direct-domains-remove "${input}" || true
             else
                 dockerMenuRun edit --block-domains-remove "${input}" || true
+            fi
+            ;;
+        28|29)
+            if [[ "${choice}" == 28 ]]; then
+                dockerSetupRead input '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                    [[ -n "${input}" ]] || continue
+                dockerMenuRun edit --dns-domains-add "${input}" || true
+            else
+                dockerSetupRead input '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                    [[ -n "${input}" ]] || continue
+                dockerMenuRun edit --dns-domains-remove "${input}" || true
             fi
             ;;
         *) printf '无效选项，请重新选择。\n' ;;

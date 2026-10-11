@@ -922,6 +922,7 @@ runSitesDriver() {
 
 runRoutingDriver() {
     local scenario=$1 choice input
+    local inputPrompt
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
@@ -1010,6 +1011,10 @@ runRoutingDriver() {
         targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-add.json\n'
         targetReply 'Docker 路由与出站' $'27\n'
         targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-remove.json\n'
+        targetReply 'Docker 路由与出站' $'28\n'
+        targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply 'Docker 路由与出站' $'29\n'
+        targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com\n'
         targetReply 'Docker 路由与出站' $'3\n'
         ;;
     cancel)
@@ -1094,6 +1099,14 @@ runRoutingDriver() {
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
             targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         done
+        targetReply 'Docker 路由与出站' $'28\n'
+        targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
+        targetReply 'Docker 路由与出站' $'28\n'
+        targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
+        targetReply 'Docker 路由与出站' $'29\n'
+        targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
+        targetReply 'Docker 路由与出站' $'29\n'
+        targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         ;;
     file-eof)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -1184,6 +1197,32 @@ runRoutingDriver() {
                 targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET\n'
             fi
         done
+        ;;
+    dns-domains-add-eof|dns-domains-remove-eof)
+        if [[ "${scenario}" == dns-domains-add-eof ]]; then
+            targetReply 'Docker 路由与出站' $'28\n'
+            targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+        else
+            targetReply 'Docker 路由与出站' $'29\n'
+            targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+        fi
+        ;;
+    dns-domains-change-invalid|dns-domains-change-failed)
+        for choice in 28 29; do
+            targetReply 'Docker 路由与出站' "${choice}"$'\n'
+            if [[ "${choice}" == 28 ]]; then
+                inputPrompt='追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）'
+            else
+                inputPrompt='删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）'
+            fi
+            if [[ "${scenario}" == dns-domains-change-invalid ]]; then
+                targetReply "${inputPrompt}" $'regexp:bad\n'
+            else
+                targetReply "${inputPrompt}" $'Example.NET\n'
+            fi
+        done
+        [[ "${scenario}" != dns-domains-change-failed ]] || \
+            targetReply 'Docker 路由与出站' $'3\n'
         ;;
     block-ips-file-eof|block-ips-add-eof|block-ips-remove-eof)
         case "${scenario}" in
@@ -1651,6 +1690,7 @@ edit)
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
         "${2:-}" == --direct-domains-add || "${2:-}" == --block-domains-add ||
         "${2:-}" == --direct-domains-remove || "${2:-}" == --block-domains-remove ||
+        "${2:-}" == --dns-domains-add || "${2:-}" == --dns-domains-remove ||
         "${2:-}" == --region-allow-add || "${2:-}" == --region-allow-remove ]]; then
         dockerSocks5DomainsNormalize "${3:-}" >/dev/null || exit 2
     elif [[ "${2:-}" == --block-ips-add || "${2:-}" == --block-ips-remove ]]; then
@@ -2126,13 +2166,14 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed region-eof region-allow-invalid region-allow-failed ipv6-eof warp-eof warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed ipv6-eof warp-eof warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
-        "${routingCase}" != block-ips-change-failed ]] || SITE_EDIT_STATUS=15
+        "${routingCase}" != block-ips-change-failed &&
+        "${routingCase}" != dns-domains-change-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
     case "${routingCase}" in
@@ -2152,6 +2193,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         expectedRouting+=$'\nedit --direct-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --direct-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --block-ips-add /root/padm-block ips-add.json\nedit --block-ips-remove /root/padm-block ips-remove.json\nprotocol routing-status'
+        expectedRouting+=$'\nedit --dns-domains-add Example.NET, full:Exact.Example.Com\nedit --dns-domains-remove Example.NET, full:Exact.Example.Com\nprotocol routing-status'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
         [[ "$(grep -Fc 'fixture-warp-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 4 ]] ||
             fail 'WARP 日常编辑没有每次只确认一次'
@@ -2209,6 +2251,16 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
             fail 'IP/CIDR 增删失败未显示状态错误并继续诊断'
         ;;
+    dns-domains-change-invalid)
+        expectedRouting=$'edit --dns-domains-add regexp:bad\nedit --dns-domains-remove regexp:bad'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'DNS 分流域名增删非法 CSV 未显示用法错误并保留菜单'
+        ;;
+    dns-domains-change-failed)
+        expectedRouting=$'edit --dns-domains-add Example.NET\nedit --dns-domains-remove Example.NET\nprotocol routing-status'
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'DNS 分流域名增删失败未显示状态错误并继续诊断'
+        ;;
     region-allow-invalid)
         expectedRouting=$'edit --region-allow-add regexp:bad\nedit --region-allow-remove regexp:bad'
         [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 2 ]] ||
@@ -2237,7 +2289,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \
             '22. 追加 Direct 直连例外' '23. 追加 Block 域名阻断' \
             '24. 删除 Direct 直连例外' '25. 删除 Block 域名阻断' \
-            '26. 追加 IP/CIDR 阻断' '27. 精确删除 IP/CIDR 阻断' '0. 返回'; do
+            '26. 追加 IP/CIDR 阻断' '27. 精确删除 IP/CIDR 阻断' \
+            '28. 追加 DNS 分流域名' '29. 精确删除 DNS 分流域名' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then
