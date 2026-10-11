@@ -61,7 +61,7 @@ dockerMenuRun() {
         "${1:-}" == up || "${1:-}" == restart || "${1:-}" == update || "${1:-}" == rollback ||
         ( "${1:-}" == fail2ban && ( "${2:-}" == disable ||
           "${2:-}" == enable || "${2:-}" == settings ||
-          ( "${2:-}" == control && ( "${3:-}" == disable ||
+          ( ( "${2:-}" == control || "${2:-}" == ssh ) && ( "${3:-}" == disable ||
             "${3:-}" == enable || "${3:-}" == settings ) ) ) ) ||
         ( "${1:-}" == business && "${2:-}" == restore ) ||
         ( "${1:-}" == account && "${2:-}" != list ) ||
@@ -892,7 +892,9 @@ dockerMenuFail2ban() {
             '4. 核对 WS 真实来源' '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数' \
             '7. 查看控制面状态' '8. 解封控制面单个 IP' '9. 停用控制面防护' \
             '10. 启用控制面防护' '11. 修改控制面防护参数' '12. SSH 宿主只读预检' \
-            '13. 核对 SSH 实时来源' '14. 核对 SSH unit 实时来源' '0. 返回'
+            '13. 核对 SSH 实时来源' '14. 核对 SSH unit 实时来源' \
+            '15. 查看 SSH 防护状态' '16. 解封 SSH 单个 IP' '17. 停用 SSH 防护' \
+            '18. 启用专用 SSH service 防护' '19. 修改 SSH 防护参数' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -902,6 +904,7 @@ dockerMenuFail2ban() {
         0) return 0 ;;
         1) dockerMenuRun fail2ban status || true ;;
         7) dockerMenuRun fail2ban control status || true ;;
+        15) dockerMenuRun fail2ban ssh status || true ;;
         12) dockerMenuRun fail2ban ssh preflight || true ;;
         13|14)
             local -a witnessArgs=()
@@ -920,10 +923,11 @@ dockerMenuFail2ban() {
             dockerMenuRun fail2ban ssh "${action}" "${witnessArgs[@]}" \
                 "${target}" "${port}" "${address}" || true
             ;;
-        2|8)
+        2|8|16)
             local jail=padm-nginx
             local -a scopeArgs=()
             [[ "${choice}" != 8 ]] || { jail=padm-control; scopeArgs=(control); }
+            [[ "${choice}" != 16 ]] || { jail=padm-sshd; scopeArgs=(ssh); }
             local addressPrompt='待解封 IPv4/IPv6（0 返回）: '
             [[ "${choice}" != 8 ]] || addressPrompt='待解封控制面 IPv4（0 返回）: '
             dockerSetupRead address "${addressPrompt}" &&
@@ -932,11 +936,13 @@ dockerMenuFail2ban() {
             case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
             dockerMenuRun fail2ban "${scopeArgs[@]}" unban "${address}" || true
             ;;
-        3|9)
+        3|9|17)
             local -a scopeArgs=()
             [[ "${choice}" != 9 ]] || scopeArgs=(control)
+            [[ "${choice}" != 17 ]] || scopeArgs=(ssh)
             confirmation='确认停用受管站点扫描防护？[y/N]: '
             [[ "${choice}" != 9 ]] || confirmation='确认停用受管控制面防护？[y/N]: '
+            [[ "${choice}" != 17 ]] || confirmation='确认停用受管 SSH 防护？[y/N]: '
             dockerSetupRead answer "${confirmation}" n || continue
             case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
             dockerMenuRun fail2ban "${scopeArgs[@]}" disable --confirm PADM-DOCKER-EDIT || true
@@ -949,27 +955,40 @@ dockerMenuFail2ban() {
                 [[ -n "${address}" ]] || continue
             dockerMenuRun fail2ban verify-source "${listener}" "${address}" || true
             ;;
-        5|6|10|11)
+        5|6|10|11|18|19)
             local -a scopeArgs=() portArgs=()
             if [[ "${choice}" == 10 || "${choice}" == 11 ]]; then
                 scopeArgs=(control)
                 dockerMenuRun control status || continue
+            elif [[ "${choice}" == 18 || "${choice}" == 19 ]]; then
+                scopeArgs=(ssh)
+                printf '%s\n' '仅支持无存量会话、禁止 reload 的专用 systemd SSH service；请从控制台或其它管理通道启用。'
             else
                 dockerMenuRun protocol list || continue
             fi
-            if [[ "${choice}" == 5 || "${choice}" == 10 ]]; then
+            if [[ "${choice}" == 5 || "${choice}" == 10 || "${choice}" == 18 ]]; then
                 action=enable defaultRetry=6 defaultFind=600 defaultBan=3600
                 confirmation='确认启用受管 WS 站点扫描防护？[y/N]: '
                 [[ "${choice}" != 10 ]] || confirmation='确认启用受管控制面防护？[y/N]: '
+                [[ "${choice}" != 18 ]] || confirmation='确认启用受管专用 SSH service 防护？[y/N]: '
             else
                 action=settings defaultRetry= defaultFind= defaultBan=
                 confirmation='确认更新受管 WS 站点扫描参数？[y/N]: '
                 [[ "${choice}" != 11 ]] || confirmation='确认更新受管控制面防护参数？[y/N]: '
+                [[ "${choice}" != 19 ]] || confirmation='确认更新受管 SSH 防护参数？[y/N]: '
             fi
             if [[ "${#scopeArgs[@]}" == 0 ]]; then
                 dockerSetupRead ports '保护 WS 端口（逗号分隔，0 返回）: ' &&
                     [[ -n "${ports}" ]] || continue
                 portArgs=("${ports}")
+            elif [[ "${scopeArgs[0]}" == ssh ]]; then
+                dockerSetupRead unit '专用 SSH systemd service（0 返回）: ' &&
+                    [[ -n "${unit}" ]] &&
+                    dockerSetupRead target '宿主 SSH 本机 IPv4/IPv6（0 返回）: ' &&
+                    [[ -n "${target}" ]] &&
+                    dockerSetupRead port '宿主 SSH 端口（0 返回）: ' &&
+                    [[ -n "${port}" ]] || continue
+                portArgs=("${unit}" "${target}" "${port}")
             fi
             dockerSetupRead maxRetry "失败阈值（1–20，0 返回）${defaultRetry:+ [${defaultRetry}]}: " "${defaultRetry}" &&
                 [[ -n "${maxRetry}" ]] &&

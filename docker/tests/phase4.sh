@@ -1122,6 +1122,9 @@ fi
         'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False')
             [[ "${controlPresent:-0}" != 1 ]] || printf '%s\n' "${controlId}"
             ;;
+        'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-ssh --filter label=com.docker.compose.oneoff=False')
+            [[ "${dualFault:-}" != ssh-orphan ]] || printf '%s\n' "${controlId}"
+            ;;
         "container inspect ${controlId}")
             jq -n --arg id "${controlId}" '[{Id:$id,State:{Running:true}}]'
             ;;
@@ -1180,9 +1183,16 @@ import sys
 lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
 restart = next(i for i, line in enumerate(lines) if line.startswith("compose restart --no-deps "))
 queries = [line for line in lines[:restart] if line.startswith("ps -aq ")]
-assert len(queries) == 2
+assert len(queries) == 3
 assert "service=net-fail2ban " in queries[0] and "service=net-fail2ban-control " in queries[1]
+assert "service=net-fail2ban-ssh " in queries[2]
 PY
+    : >"${dualLog}"
+    dualFault=ssh-orphan
+    if dockerComposeRun up -d --wait; then fail '双 jail 启动未拒绝残留 SSH 容器'; fi
+    ! grep -Eq '^compose (up|restart|down) |^(stop|rm) ' "${dualLog}" ||
+        fail '残留 SSH 容器拒绝后仍变更服务'
+    dualFault=
     for dualFault in witness-once ws-drift final-clean-ws-drift; do
         : >"${dualLog}"
         if dockerComposeRun up -d --wait; then fail "双 scope 未拒绝 ${dualFault}"; fi

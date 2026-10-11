@@ -187,7 +187,7 @@
         "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
         "properties": {
           "type": {
-            "enum": ["fail2ban", "fail2ban-control", "wireguard", "tun", "tproxy"]
+            "enum": ["fail2ban", "fail2ban-control", "fail2ban-ssh", "wireguard", "tun", "tproxy"]
           },
           "profile": {
             "type": "string",
@@ -222,6 +222,29 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "host_integrations": {
+            "contains": {"properties": {"type": {"const": "fail2ban-ssh"}}, "required": ["type"]}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "host_integrations": {
+            "not": {
+              "contains": {"properties": {"type": {"const": "fail2ban-control"}}, "required": ["type"]}
+            },
+            "items": {
+              "if": {"properties": {"type": {"const": "fail2ban-ssh"}}},
+              "then": {"$ref": "#/$defs/fail2ban_ssh_integration"}
+            }
+          },
+          "compose": {"properties": {"profiles": {"contains": {"const": "net-fail2ban-ssh"}}}}
+        }
+      }
+    },
     {
       "properties": {
         "listeners": {
@@ -298,6 +321,32 @@
     }
   ],
   "$defs": {
+    "fail2ban_ssh_integration": {
+      "properties": {
+        "profile": {"const": "net-fail2ban-ssh"},
+        "firewall_rules": {"const": ["INPUT"]},
+        "devices": {"const": []},
+        "schedules": {"const": []},
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unit", "target", "port", "max_retry", "find_time", "ban_time"],
+          "properties": {
+            "unit": {"type": "string", "maxLength": 255, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*\\.service$"},
+            "target": {
+              "anyOf": [
+                {"type": "string", "format": "ipv4"},
+                {"type": "string", "format": "ipv6"}
+              ]
+            },
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "max_retry": {"type": "integer", "minimum": 1, "maximum": 20},
+            "find_time": {"type": "integer", "minimum": 60, "maximum": 86400},
+            "ban_time": {"type": "integer", "minimum": 60, "maximum": 604800}
+          }
+        }
+      }
+    },
     "non_empty_string": {
       "type": "string",
       "minLength": 1

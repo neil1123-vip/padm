@@ -12,6 +12,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/geo.sh" || return 1
 source "$(dirname -- "${BASH_SOURCE[0]}")/control-sync.sh" || return 1
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/control.sh" || return 1
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/ssh-runtime.sh" || return 1
 
 if [[ "${PADM_DOCKER_SERVICES_LOADED:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
@@ -544,6 +546,11 @@ dockerConfigureSpecValidate() {
             (.ban_time | type == "number" and floor == . and . >= 60 and . <= 604800)) and
           $request.control.role == "main" and
           any($request.host_integrations[]; .type == "wireguard")
+        elif .type == "fail2ban-ssh" then
+          $request.schema_version == 3 and
+          .profile == "net-fail2ban-ssh" and .firewall_rules == ["INPUT"] and
+          .devices == [] and .schedules == [] and
+          all($request.host_integrations[]; .type != "fail2ban-control")
         elif .type == "tun" then
           .profile == "net-transparent" and
           .firewall_rules == ["sing-box-auto-redirect"] and
@@ -611,6 +618,49 @@ dockerConfigureSpecValidate() {
         dockerError '主控角色、监听、授权或版本元数据不合法'
         return 1
     }
+    dockerSshFail2banSpecValidate "${specFile}" || {
+        dockerError 'SSH 防护只接受单 unit、单目标地址与端口及有限参数，不能与控制 jail 共存'
+        return 1
+    }
+}
+
+dockerSshFail2banSpecValidate() {
+    local specFile=$1 target
+    jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${specFile}" >/dev/null || return 0
+    target=$(jq -er '
+      def exact($keys): type == "object" and ((keys_unsorted | sort) == ($keys | sort));
+      . as $spec | [.host_integrations[] | select(.type == "fail2ban-ssh")] as $ssh |
+      select(($ssh | length) == 1 and all(.host_integrations[]; .type != "fail2ban-control")) |
+      $ssh[0] | select(
+        exact(["type","profile","firewall_rules","devices","schedules","settings"]) and
+        .profile == "net-fail2ban-ssh" and .firewall_rules == ["INPUT"] and
+        .devices == [] and .schedules == [] and
+        (.settings | exact(["unit","target","port","max_retry","find_time","ban_time"]) and
+          (.unit | type == "string" and length <= 255 and
+            test("^[A-Za-z0-9][A-Za-z0-9_.@:-]*\\.service$")) and
+          (.target | type == "string") and
+          (.port | type == "number" and floor == . and . >= 1 and . <= 65535) and
+          (.max_retry | type == "number" and floor == . and . >= 1 and . <= 20) and
+          (.find_time | type == "number" and floor == . and . >= 60 and . <= 86400) and
+          (.ban_time | type == "number" and floor == . and . >= 60 and . <= 604800))) |
+      .settings.target
+    ' "${specFile}") || return 1
+    # 目标字节须与内核动作一致，拒绝别名、特殊地址和非标准拼写。
+    python3 - "${target}" <<'PY'
+import ipaddress
+import sys
+
+try:
+    target = sys.argv[1]
+    address = ipaddress.ip_address(target)
+    if (str(address) != target or "%" in target or address.is_unspecified
+            or address.is_loopback or address.is_link_local or address.is_multicast
+            or getattr(address, "ipv4_mapped", None)
+            or (address.version == 4 and (int(address) >> 24 == 0 or int(address) >> 24 >= 224))):
+        raise ValueError("invalid SSH target")
+except ValueError:
+    raise SystemExit(1)
+PY
 }
 
 dockerControlSpecValidate() {
@@ -1068,7 +1118,8 @@ dockerEditBaselineValidate() {
         dockerGenerateRealityStreamConfig "${specFile}" "${baseline}/config/nginx/stream/reality.conf" &&
         dockerGenerateRealityStreamMain "${specFile}" "${baseline}/config/nginx/stream/host-main" &&
         dockerGenerateFail2banConfig "${specFile}" "${baseline}" &&
-        dockerGenerateControlFail2banConfig "${specFile}" "${baseline}" || return 1
+        dockerGenerateControlFail2banConfig "${specFile}" "${baseline}" &&
+        dockerGenerateSshFail2banConfig "${specFile}" "${baseline}" || return 1
     dockerGeoPrepareCandidate "${root}" "${baseline}" || return 1
     dockerControlPrepareCandidate "${specFile}" "${baseline}" || return 1
     if jq -e '.subscription.enabled' "${specFile}" >/dev/null; then
@@ -1398,7 +1449,7 @@ dockerCreateConfigurationCandidate() {
     for directory in \
         config/xray config/sing-box config/nginx config/control config/net/fail2ban config/net/transparent \
         data/xray data/sing-box data/static data/subscription data/acme \
-        data/net/wireguard data/net/fail2ban data/net/control-fail2ban data/net/transparent data/control-source \
+        data/net/wireguard data/net/fail2ban data/net/control-fail2ban data/net/ssh-fail2ban data/net/transparent data/control-source \
         secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme logs/control; do
         mkdir -p -- "${candidate}/${directory}" || {
             dockerRemoveManagedTree "${root}" "${candidate}" || true
@@ -1527,6 +1578,71 @@ logtarget = STDOUT
 socket = /run/fail2ban/fail2ban.sock
 pidfile = /run/fail2ban/fail2ban.pid
 dbfile = /var/lib/padm/net/control-fail2ban.sqlite3
+EOF
+}
+
+dockerGenerateSshFail2banConfig() {
+    local specFile=$1 candidate=$2 directory port maxRetry findTime banTime allowIPv6
+    jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${specFile}" >/dev/null || return 0
+    dockerSshFail2banSpecValidate "${specFile}" || return 1
+    port=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") | .settings.port' "${specFile}") &&
+        maxRetry=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") | .settings.max_retry' "${specFile}") &&
+        findTime=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") | .settings.find_time' "${specFile}") &&
+        banTime=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") | .settings.ban_time' "${specFile}") &&
+        allowIPv6=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") |
+          if .settings.target | contains(":") then "yes" else "no" end' "${specFile}") || return 1
+    directory="${candidate}/config/net/ssh-fail2ban"
+    mkdir -p -- "${directory}" "${candidate}/data/net/ssh-fail2ban" \
+        "${candidate}/data/net/ssh-collector" &&
+        chmod 0700 "${candidate}/data/net/ssh-collector" || return 1
+    # 只消费 collector 验证后的固定格式，不让原始认证正文进入 jail。
+    cat >"${directory}/padm-ssh.conf" <<'EOF'
+[Definition]
+datepattern = {^LN-BEG}%%Y-%%m-%%d %%H:%%M:%%S[ ]
+failregex = ^padm-ssh source=<HOST>$
+ignoreregex =
+EOF
+    cat >"${directory}/padm-ssh-input.conf" <<'EOF'
+[INCLUDES]
+before = iptables.conf
+
+[Definition]
+actionstart_on_demand = false
+actionstart = sh /usr/local/bin/padm-entrypoint fail2ban-ssh-action start "$PADM_FAIL2BAN_SSH_TOKEN" <iptables>
+actionstop = sh /usr/local/bin/padm-entrypoint fail2ban-ssh-action stop "$PADM_FAIL2BAN_SSH_TOKEN" <iptables>
+actionflush = sh /usr/local/bin/padm-entrypoint fail2ban-ssh-action flush "$PADM_FAIL2BAN_SSH_TOKEN" <iptables>
+actioncheck = sh /usr/local/bin/padm-entrypoint fail2ban-ssh-action check "$PADM_FAIL2BAN_SSH_TOKEN" <iptables>
+actionban = sh /usr/local/bin/padm-entrypoint fail2ban-ssh-action ban "$PADM_FAIL2BAN_SSH_TOKEN" <iptables> '<ip>'
+actionunban = sh /usr/local/bin/padm-entrypoint fail2ban-ssh-action unban "$PADM_FAIL2BAN_SSH_TOKEN" <iptables> '<ip>'
+EOF
+    cat >"${directory}/padm.local" <<EOF
+[DEFAULT]
+backend = polling
+bantime = ${banTime}
+findtime = ${findTime}
+maxretry = ${maxRetry}
+
+[sshd]
+enabled = false
+
+[sshd-ddos]
+enabled = false
+
+[padm-sshd]
+enabled = true
+filter = padm-ssh
+logpath = /run/padm/ssh-collector/auth.log
+port = ${port}
+action = padm-ssh-input[port="${port}", protocol=tcp]
+EOF
+    # SSH 每次启用都从新来源证明开始，不恢复旧数据库封禁。
+    cat >"${directory}/fail2ban.local" <<EOF
+[Definition]
+allowipv6 = ${allowIPv6}
+logtarget = STDOUT
+socket = /run/fail2ban/fail2ban.sock
+pidfile = /run/fail2ban/fail2ban.pid
+dbfile = None
 EOF
 }
 
@@ -2672,6 +2788,7 @@ dockerGenerateCompose() {
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
       ($r.host_integrations | map(select(.type == "fail2ban-control"))) as $controlFail2ban |
+      ($r.host_integrations | map(select(.type == "fail2ban-ssh"))) as $sshFail2ban |
       (any($websocket[]; .id == 21 and (.address_families | index("ipv6")) != null and
         (.public_port as $port | any($fail2ban[].settings.ports[]; . == $port)))) as $fail2banIPv6 |
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
@@ -2906,6 +3023,35 @@ dockerGenerateCompose() {
             tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"],
             healthcheck: {
               test: ["CMD", "/usr/local/bin/padm-entrypoint", "fail2ban-control-health"],
+              interval: "30s", timeout: "5s", start_period: "5s", retries: 3
+            }
+          })
+        else . end
+      | if ($sshFail2ban | length) == 1 then
+          .services["net-fail2ban-ssh"] = (defaults + {
+            image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
+            restart: "no",
+            profiles: ["net-fail2ban-ssh"],
+            command: ["fail2ban-ssh", $sshFail2ban[0].settings.unit, $sshFail2ban[0].settings.target,
+              ($sshFail2ban[0].settings.port | tostring)],
+            environment: {
+              PADM_SSH_COLLECTOR_TOKEN: "${PADM_SSH_COLLECTOR_TOKEN:-}",
+              PADM_SSH_COLLECTOR_UNIT: $sshFail2ban[0].settings.unit,
+              PADM_SSH_COLLECTOR_TARGET: $sshFail2ban[0].settings.target,
+              PADM_SSH_COLLECTOR_PORT: ($sshFail2ban[0].settings.port | tostring)
+            },
+            network_mode: "host",
+            cap_add: ["NET_ADMIN"],
+            labels: labels("net-fail2ban-ssh"),
+            volumes: (net_mounts("config/net/ssh-fail2ban/padm.local"; "/etc/fail2ban/jail.d/padm.local"; true) +
+              net_mounts("config/net/ssh-fail2ban/fail2ban.local"; "/etc/fail2ban/fail2ban.local"; true) +
+              net_mounts("config/net/ssh-fail2ban/padm-ssh.conf"; "/etc/fail2ban/filter.d/padm-ssh.conf"; true) +
+              net_mounts("config/net/ssh-fail2ban/padm-ssh-input.conf"; "/etc/fail2ban/action.d/padm-ssh-input.conf"; true) +
+              net_mounts("data/net/ssh-collector"; "/run/padm/ssh-collector"; true) +
+              net_mounts("data/net/ssh-fail2ban"; "/var/lib/padm/net"; false)),
+            tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"],
+            healthcheck: {
+              test: ["CMD", "/usr/local/bin/padm-entrypoint", "fail2ban-ssh-health"],
               interval: "30s", timeout: "5s", start_period: "5s", retries: 3
             }
           })
@@ -3165,12 +3311,17 @@ dockerDeploymentFileValidate() {
           ($deployment.compose.profiles | index("control")) != null and
           any($deployment.listeners[]; .listener_id == "host-control" and
             .service == "control" and .transport == "tcp" and .address_families == ["ipv4"])
+        elif .type == "fail2ban-ssh" then
+          .profile == "net-fail2ban-ssh" and .firewall_rules == ["INPUT"] and
+          .devices == [] and .schedules == [] and
+          all($deployment.host_integrations[]; .type != "fail2ban-control")
         elif .type == "tun" then
           .profile == "net-transparent" and .devices == ["/dev/net/tun"]
         elif .type == "tproxy" then
           .profile == "net-transparent" and .firewall_rules == ["padm-tproxy"] and .devices == []
         else false end))
-    ' "$1" >/dev/null 2>&1
+    ' "$1" >/dev/null 2>&1 &&
+        dockerSshFail2banSpecValidate "$1"
 }
 
 dockerTlsRuntimePermissions() {
@@ -3217,6 +3368,9 @@ dockerPrepareCandidatePermissions() {
         chmod 0600 "${candidate}/config/spec.json" || return 1
     fi
     find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type d -exec chmod 0750 {} + || return 1
+    if [[ -d "${candidate}/data/net/ssh-collector" ]]; then
+        chmod 0700 "${candidate}/data/net/ssh-collector" || return 1
+    fi
     find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type f \
         ! -path "${candidate}/config/spec.json" ! -name share-groups.json ! -name users.base -exec chmod 0640 {} + || return 1
     find "${candidate}/secrets" -type d -exec chmod 0750 {} + || return 1
@@ -3275,6 +3429,7 @@ dockerGenerateCandidate() {
     dockerStageHostIntegrationFiles "${specFile}" "${candidate}" || return 1
     dockerGenerateFail2banConfig "${specFile}" "${candidate}" || return 1
     dockerGenerateControlFail2banConfig "${specFile}" "${candidate}" || return 1
+    dockerGenerateSshFail2banConfig "${specFile}" "${candidate}" || return 1
     dockerStageTlsFiles "${specFile}" "${candidate}" "${tlsSource}" || return 1
     [[ -z "${acmeSource}" || ( -d "${acmeSource}" && ! -L "${acmeSource}" ) ]] || return 1
     [[ -n "${acmeSource}" ]] || acmeSource="${root}/data/acme"
@@ -3342,7 +3497,7 @@ dockerCurrentOwnsHostIntegration() {
 dockerFail2banRuntimeAudit() {
     local container=$1 scope=${2:-ws}
     [[ "${container}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
-    case "${scope}" in ws|control) ;; *) return 1 ;; esac
+    case "${scope}" in ws|control|ssh) ;; *) return 1 ;; esac
     # 只通过 Fail2ban 原生只读协议核验已加载动作，不调用任何动作方法。
     docker exec -i "${container}" python3 - "${scope}" <<'PY'
 import re
@@ -3353,8 +3508,11 @@ from fail2ban.client.csocket import CSocket
 from fail2ban.server.action import CommandAction
 from fail2ban.server.server import Server
 
-JAIL = "padm-control" if sys.argv[1] == "control" else "padm-nginx"
-ACTION = "padm-control-input" if sys.argv[1] == "control" else "padm-docker-user"
+JAIL, ACTION = {
+    "ws": ("padm-nginx", "padm-docker-user"),
+    "control": ("padm-control", "padm-control-input"),
+    "ssh": ("padm-sshd", "padm-ssh-input"),
+}[sys.argv[1]]
 
 
 def fail():
@@ -3727,6 +3885,10 @@ dockerFail2banConfigurationCheck() (
         type=fail2ban-control service=net-fail2ban-control directory=control-fail2ban
         files=(padm.local fail2ban.local padm-control.conf padm-control-input.conf)
         ;;
+    ssh)
+        type=fail2ban-ssh service=net-fail2ban-ssh directory=ssh-fail2ban
+        files=(padm.local fail2ban.local padm-ssh.conf padm-ssh-input.conf)
+        ;;
     *) return 1 ;;
     esac
     root=$(dockerInstallRoot) || return 1
@@ -3752,7 +3914,9 @@ dockerFail2banConfigurationCheck() (
     trap 'exit 130' INT
     trap 'exit 143' TERM
     mkdir -p -- "${candidate}/config/net/${directory}" "${candidate}/logs/nginx" || return 1
-    if [[ "${scope}" == control ]]; then
+    if [[ "${scope}" == ssh ]]; then
+        dockerGenerateSshFail2banConfig "${root}/config/spec.json" "${candidate}" || return 1
+    elif [[ "${scope}" == control ]]; then
         dockerGenerateControlFail2banConfig "${root}/config/spec.json" "${candidate}" || return 1
     else
         dockerGenerateFail2banConfig "${root}/config/spec.json" "${candidate}" || return 1
@@ -3775,6 +3939,10 @@ dockerFail2banConfigurationCheck() (
 
 dockerControlFail2banConfigurationCheck() {
     dockerFail2banConfigurationCheck "${1:-current}" control
+}
+
+dockerSshFail2banConfigurationCheck() {
+    dockerFail2banConfigurationCheck "${1:-current}" ssh
 }
 
 dockerFail2banSourcePlan() {
@@ -3837,6 +4005,7 @@ dockerFail2banCleanCheck() {
     case "${scope}" in
     ws) ;;
     control) service=net-fail2ban-control directory=control-fail2ban state=fail2ban-control.state ;;
+    ssh) service=net-fail2ban-ssh directory=ssh-fail2ban state=fail2ban-ssh.state ;;
     *) return 1 ;;
     esac
     root=$(dockerInstallRoot) || return 1
@@ -3848,7 +4017,12 @@ dockerFail2banCleanCheck() {
         dockerError 'Fail2ban 仍有容器或状态，保留现场并拒绝启动'
         return 1
     }
-    if [[ "${scope}" == control ]]; then
+    if [[ "${scope}" == ssh ]]; then
+        arguments=("$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") |
+          .settings.target' "${root}/config/spec.json")") || return 1
+        arguments+=("$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") |
+          .settings.port' "${root}/config/spec.json")") || return 1
+    elif [[ "${scope}" == control ]]; then
         arguments=("$(jq -er '.control.listen.address' "${root}/config/spec.json")") || return 1
         arguments+=("$(jq -er '.control.listen.port' "${root}/config/spec.json")") || return 1
     else
@@ -3862,6 +4036,10 @@ dockerFail2banCleanCheck() {
 
 dockerControlFail2banCleanCheck() {
     dockerFail2banCleanCheck control
+}
+
+dockerSshFail2banCleanCheck() {
+    dockerFail2banCleanCheck ssh
 }
 
 dockerFail2banSourceInputsCheck() {
@@ -3887,7 +4065,8 @@ dockerFail2banStartVerified() {
     case "${1:-}" in ''|restart) ;; recreate) recreate=(--force-recreate) ;; *) return 1 ;; esac
     root=$(dockerInstallRoot) || return 1
     spec="${root}/config/spec.json"
-    jq -e 'all(.host_integrations[]; .type != "fail2ban-control")' "${spec}" >/dev/null || return 1
+    jq -e 'all(.host_integrations[]; .type != "fail2ban-control" and .type != "fail2ban-ssh")' \
+        "${spec}" >/dev/null || return 1
     dockerFail2banSourceInputsCheck "${spec}" &&
         plan=$(dockerFail2banSourcePlan "${spec}") &&
         hash=$(sha256sum -- "${spec}") || return 1
@@ -3945,6 +4124,7 @@ dockerFail2banContainer() (
     case "${scope}" in
     ws) ;;
     control) service=net-fail2ban-control user=0:10001 ;;
+    ssh) service=net-fail2ban-ssh ;;
     *) return 1 ;;
     esac
     root=$(dockerInstallRoot) || return 1
@@ -3988,7 +4168,7 @@ dockerFail2banContainer() (
         $c.HostConfig.ReadonlyRootfs == $service.read_only and $c.HostConfig.Privileged == false and
         ($c.HostConfig.CapAdd | map(sub("^CAP_"; "")) | sort) == ($service.cap_add | sort) and
         ($c.HostConfig.CapDrop | map(sub("^CAP_"; "")) | sort) == ($service.cap_drop | sort) and
-        (if $scope == "control" then
+        (if $scope == "control" or $scope == "ssh" then
           $c.State.Paused == false and $c.State.Dead == false and
           $c.HostConfig.SecurityOpt == $service.security_opt and
           $c.HostConfig.LogConfig.Type == $service.logging.driver and
@@ -4013,12 +4193,17 @@ dockerFail2banContainer() (
             dockerError 'Fail2ban 状态或内核规则归属漂移，未执行维护操作'
             return 1
         }
+        [[ "${scope}" != ssh ]] || dockerSshCollectorCheck "${ids}" || return 1
     fi
     printf '%s\n' "${ids}"
 )
 
 dockerControlFail2banContainer() {
     dockerFail2banContainer "${1:-running}" control
+}
+
+dockerSshFail2banContainer() {
+    dockerFail2banContainer "${1:-running}" ssh
 }
 
 dockerFail2banDisablePrepare() {
@@ -4029,6 +4214,7 @@ dockerFail2banDisablePrepare() {
     case "${scope}" in
     ws) ;;
     control) type=fail2ban-control service=net-fail2ban-control directory=control-fail2ban state=fail2ban-control.state ;;
+    ssh) type=fail2ban-ssh service=net-fail2ban-ssh directory=ssh-fail2ban state=fail2ban-ssh.state ;;
     *) return 1 ;;
     esac
     root=$(dockerInstallRoot) || return 1
@@ -4074,6 +4260,10 @@ dockerFail2banDisablePrepare() {
                 dockerError '存在未清理的 Fail2ban 状态，保留证据并拒绝修改配置'
                 return 1
         }
+        if [[ "${scope}" == ssh &&
+            ( -e "${root}/data/net/ssh-collector" || -L "${root}/data/net/ssh-collector" ) ]]; then
+            dockerSshCollectorStop || return 1
+        fi
         return 0
     fi
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
@@ -4112,11 +4302,22 @@ dockerFail2banDisablePrepare() {
             dockerError '存在未清理的 Fail2ban 状态，保留证据并拒绝修改配置'
             return 1
         }
+        if [[ "${scope}" == ssh &&
+            ( -e "${root}/data/net/ssh-collector" || -L "${root}/data/net/ssh-collector" ) ]]; then
+            dockerSshCollectorStop || return 1
+        fi
         return 0
     fi
     dockerFail2banConfigurationCheck owner "${scope}" || return 1
     if [[ -z "${ids}" ]]; then
-        if [[ "${scope}" == control ]]; then
+        if [[ "${scope}" == ssh ]]; then
+            dockerComposeExecute run --rm --no-deps "${service}" fail2ban-ssh-clean \
+                "$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") |
+                  .settings.target' "${root}/config/spec.json")" \
+                "$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") |
+                  .settings.port' "${root}/config/spec.json")" >/dev/null &&
+                dockerSshCollectorStop
+        elif [[ "${scope}" == control ]]; then
             dockerComposeExecute run --rm --no-deps "${service}" fail2ban-control-clean \
                 "$(jq -er '.control.listen.address' "${root}/config/spec.json")" \
                 "$(jq -er '.control.listen.port' "${root}/config/spec.json")" >/dev/null
@@ -4146,7 +4347,12 @@ dockerFail2banDisablePrepare() {
         dockerError 'Fail2ban 未正常退出或容器归属变化，保留旧配置与恢复状态'
         return 1
     }
-    if [[ "${scope}" == control ]]; then
+    if [[ "${scope}" == ssh ]]; then
+        arguments=("$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") |
+          .settings.target' "${root}/config/spec.json")") || return 1
+        arguments+=("$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") |
+          .settings.port' "${root}/config/spec.json")") || return 1
+    elif [[ "${scope}" == control ]]; then
         arguments=("$(jq -er '.control.listen.address' "${root}/config/spec.json")") || return 1
         arguments+=("$(jq -er '.control.listen.port' "${root}/config/spec.json")") || return 1
     else
@@ -4156,16 +4362,22 @@ dockerFail2banDisablePrepare() {
     fi
     local -a checkArgs=(preflight "${service#net-}" "${arguments[@]}" unowned)
     [[ "${scope}" != control ]] || checkArgs=(fail2ban-control-clean "${arguments[@]}")
+    [[ "${scope}" != ssh ]] || checkArgs=(fail2ban-ssh-clean "${arguments[@]}")
     dockerComposeRun run --rm --no-deps "${service}" "${checkArgs[@]}" >/dev/null || {
         dockerError 'Fail2ban 停止后仍有状态或规则，保留旧配置与恢复证据'
         return 1
     }
     # 只移除刚证明正常退出且清理完成的容器，下一阶段不借旧 release 接管。
     docker rm "${ids}" >/dev/null || return 1
+    [[ "${scope}" != ssh ]] || dockerSshCollectorStop
 }
 
 dockerControlFail2banDisablePrepare() {
     dockerFail2banDisablePrepare "$1" "${2:-normal}" control
+}
+
+dockerSshFail2banDisablePrepare() {
+    dockerFail2banDisablePrepare "$1" "${2:-normal}" ssh
 }
 
 dockerSshLogFileReadable() {
@@ -4322,24 +4534,29 @@ dockerSshSourceWitness() (
 dockerFail2banCommand() {
     local scope=ws type=fail2ban jail=padm-nginx
     local action=${1:-} address='' container
-    local ports maxRetry findTime banTime required
+    local ports maxRetry findTime banTime required unit target port
     if [[ "${action}" == ssh ]]; then
         [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"
         action=$2
         shift 2
         case "${action}" in
-        preflight) dockerSshPreflight "$@" ;;
+        preflight) dockerSshPreflight "$@"; return $? ;;
         verify-source)
             [[ "$#" -eq 3 ]] || return "${PADM_DOCKER_RC_USAGE}"
             dockerSshSourceWitness "$@"
+            return $?
             ;;
         verify-unit)
             [[ "$#" -eq 4 ]] || return "${PADM_DOCKER_RC_USAGE}"
             dockerSshSourceWitness "$2" "$3" "$4" "$1"
+            return $?
+            ;;
+        status|unban|disable|enable|settings)
+            scope=ssh type=fail2ban-ssh jail=padm-sshd
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
-        return $?
+        set -- "${action}" "$@"
     fi
     if [[ "${action}" == control ]]; then
         shift
@@ -4368,8 +4585,10 @@ dockerFail2banCommand() {
     enable|settings)
         required=3
         [[ "${scope}" != ws ]] || required=4
+        [[ "${scope}" != ssh ]] || required=6
         [[ "$#" -ge "${required}" ]] || return "${PADM_DOCKER_RC_USAGE}"
         if [[ "${scope}" == ws ]]; then ports=$1; shift; fi
+        if [[ "${scope}" == ssh ]]; then unit=$1 target=$2 port=$3; shift 3; fi
         maxRetry=$1 findTime=$2 banTime=$3
         shift 3
         if ! [[ "$#" -eq 0 || ( "$#" -eq 1 && "$1" == --preview ) ||
@@ -4379,6 +4598,9 @@ dockerFail2banCommand() {
         if [[ "${scope}" == ws ]]; then
             dockerEditCommand "--${type}-${action}" "${ports}" "${maxRetry}" \
                 "${findTime}" "${banTime}" "$@"
+        elif [[ "${scope}" == ssh ]]; then
+            dockerEditCommand "--${type}-${action}" "${unit}" "${target}" "${port}" \
+                "${maxRetry}" "${findTime}" "${banTime}" "$@"
         else
             dockerEditCommand "--${type}-${action}" "${maxRetry}" "${findTime}" "${banTime}" "$@"
         fi
@@ -4454,6 +4676,19 @@ dockerValidateHostIntegrations() {
                 : > /tmp/padm-control-auth.log
                 fail2ban-client -c /tmp/padm-control-check -t' >/dev/null || {
             dockerError '控制 Fail2ban 候选配置解析失败'
+            return 1
+        }
+    fi
+    if jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${specFile}" >/dev/null; then
+        # 候选只解析配置，collector 的宿主证明与日志在运行事务中创建。
+        dockerCandidateCompose "${candidate}" run --rm --no-deps net-fail2ban-ssh \
+            exec sh -c 'set -eu
+                cp -R /etc/fail2ban /tmp/padm-ssh-check
+                sed -i "s|^logpath = /run/padm/ssh-collector/auth.log$|logpath = /tmp/padm-ssh-auth.log|" \
+                    /tmp/padm-ssh-check/jail.d/padm.local
+                : > /tmp/padm-ssh-auth.log
+                fail2ban-client -c /tmp/padm-ssh-check -t' >/dev/null || {
+            dockerError 'SSH Fail2ban 候选配置解析失败'
             return 1
         }
     fi
@@ -4826,7 +5061,12 @@ dockerCreateUpdateCandidate() {
           .release = $inputs.release | .images = $inputs.images
         ' "${root}/config/spec.json" >"${candidate}/config/spec.json" || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
-        if jq -e '.control != null or any(.host_integrations[]; .type == "fail2ban")' \
+        if jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' \
+            "${candidate}/config/spec.json" >/dev/null; then
+            mkdir -p -- "${candidate}/data/net/ssh-fail2ban" "${candidate}/data/net/ssh-collector" &&
+                chmod 0700 "${candidate}/data/net/ssh-collector" || return 1
+        fi
+        if jq -e '.control != null or any(.host_integrations[]; .type == "fail2ban" or .type == "fail2ban-ssh")' \
             "${candidate}/config/spec.json" >/dev/null; then
             dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.json" "${root}" || return 1
         fi
@@ -4946,9 +5186,9 @@ dockerInstallCandidate() {
             jq -en --slurpfile deployment "${integrationInput}" \
                 --slurpfile compose "${candidate}/compose.json" '
               ($deployment | length) == 1 and ($compose | length) == 1 and
-              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control")) == false and
+              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh")) == false and
               ($compose[0].services | type == "object") and
-              ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control")) == false
+              ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh")) == false
             ' >/dev/null || {
             dockerError '缺少原始规格的候选不能启用 Fail2ban 或存在部署编排漂移'
             return 1
@@ -4966,7 +5206,8 @@ dockerInstallCandidate() {
     trap 'pending=143' TERM
     if dockerFail2banDisablePrepare "${integrationInput}"; then
         DOCKER_CONFIG_SWITCHED=1
-        dockerControlFail2banDisablePrepare "${integrationInput}" && prepareStatus=0
+        dockerControlFail2banDisablePrepare "${integrationInput}" &&
+            dockerSshFail2banDisablePrepare "${integrationInput}" && prepareStatus=0
     fi
     if [[ -n "${intTrap}" ]]; then eval "${intTrap}"; else trap - INT; fi
     if [[ -n "${termTrap}" ]]; then eval "${termTrap}"; else trap - TERM; fi
@@ -5087,7 +5328,7 @@ dockerEnsureRuntimeDataPermissions() {
     fi
     for directory in \
         data/xray data/sing-box data/static data/acme \
-        data/net/wireguard data/net/fail2ban data/net/control-fail2ban data/net/transparent \
+        data/net/wireguard data/net/fail2ban data/net/control-fail2ban data/net/ssh-fail2ban data/net/transparent \
         logs/nginx logs/subscription logs/acme; do
         if [[ -e "${root}/${directory}" || -L "${root}/${directory}" ]]; then
             [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
@@ -5187,9 +5428,9 @@ dockerRestoreConfiguration() {
             --slurpfile compose "${backup}/compose.json" '
           ($deployment | length) == 1 and ($compose | length) == 1 and
           ($deployment[0].host_integrations | type == "array") and
-          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control")) == false and
+          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh")) == false and
           ($compose[0].services | type == "object") and
-          ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control")) == false
+          ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh")) == false
         ' >/dev/null || {
             dockerError '恢复点缺少可验证的 Fail2ban 原始规格，尚未停止或修改服务'
             return 1
@@ -5202,12 +5443,15 @@ dockerRestoreConfiguration() {
     if [[ -f "${backup}/config/spec.json" ]]; then
         dockerFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
         dockerControlFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
+        dockerSshFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
     elif [[ -f "${backup}/deployment.json" ]]; then
         dockerFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
         dockerControlFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
+        dockerSshFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
     else
         dockerFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
         dockerControlFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
+        dockerSshFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
     fi
     if [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
         jq -e '.networks.ipv6 != null' "${root}/compose.json" >/dev/null &&

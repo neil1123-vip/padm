@@ -125,6 +125,11 @@ dockerUsage() {
   padm-docker fail2ban ssh preflight [--json]
   padm-docker fail2ban ssh verify-source <本机 IPv4/IPv6> <SSH 端口> <外部客户端 IPv4/IPv6>
   padm-docker fail2ban ssh verify-unit <systemd service> <本机 IPv4/IPv6> <SSH 端口> <外部客户端 IPv4/IPv6>
+  padm-docker fail2ban ssh status
+  padm-docker fail2ban ssh unban <单个 IPv4/IPv6>
+  padm-docker fail2ban ssh enable <systemd service> <本机 IPv4/IPv6> <SSH 端口> <失败阈值> <检测秒数> <封禁秒数> [--preview | --confirm PADM-DOCKER-EDIT]
+  padm-docker fail2ban ssh settings <systemd service> <本机 IPv4/IPv6> <SSH 端口> <失败阈值> <检测秒数> <封禁秒数> [--preview | --confirm PADM-DOCKER-EDIT]
+  padm-docker fail2ban ssh disable [--preview | --confirm PADM-DOCKER-EDIT]
   padm-docker up
   padm-docker down
   padm-docker restart
@@ -463,7 +468,7 @@ dockerIPv6NetworkManage() {
 }
 
 dockerComposeRun() {
-    local root composeFile enabled controlEnabled specEnabled deployedEnabled argument noDeps=0 recreate='' skipTimeout=0
+    local root composeFile enabled controlEnabled sshEnabled specEnabled deployedEnabled argument noDeps=0 recreate='' skipTimeout=0
     local -a services=()
     case "${1:-}" in up|restart|down|exec) ;; *) dockerComposeExecute "$@"; return $? ;; esac
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
@@ -479,6 +484,8 @@ dockerComposeRun() {
     enabled=$(jq -r '.services | has("net-fail2ban")' "${composeFile}") || return "${PADM_DOCKER_RC_STATE}"
     controlEnabled=$(jq -r '.services | has("net-fail2ban-control")' "${composeFile}") ||
         return "${PADM_DOCKER_RC_STATE}"
+    sshEnabled=$(jq -r '.services | has("net-fail2ban-ssh")' "${composeFile}") ||
+        return "${PADM_DOCKER_RC_STATE}"
     if [[ -f "${root}/config/spec.json" ]]; then
         specEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${root}/config/spec.json") &&
             deployedEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${root}/deployment.json") &&
@@ -492,11 +499,21 @@ dockerComposeRun() {
             dockerError '控制 Fail2ban 规格、部署与编排不一致，拒绝服务变更'
             return "${PADM_DOCKER_RC_STATE}"
         }
-    elif [[ "${enabled}" == true || "${controlEnabled}" == true ]]; then
+        specEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${root}/config/spec.json") &&
+            deployedEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${root}/deployment.json") &&
+            [[ "${sshEnabled}" == "${specEnabled}" && "${sshEnabled}" == "${deployedEnabled}" ]] || {
+            dockerError 'SSH Fail2ban 规格、部署与编排不一致，拒绝服务变更'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    elif [[ "${enabled}" == true || "${controlEnabled}" == true || "${sshEnabled}" == true ]]; then
         dockerError 'Fail2ban 缺少受管规格，拒绝服务变更'
         return "${PADM_DOCKER_RC_STATE}"
     fi
-    if [[ "${enabled}" == true || "${controlEnabled}" == true ]]; then
+    if [[ "${sshEnabled}" == true && "${controlEnabled}" == true ]]; then
+        dockerError 'SSH 与控制面 INPUT 防护暂不支持共存，拒绝服务变更'
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ "${enabled}" == true || "${controlEnabled}" == true || "${sshEnabled}" == true ]]; then
         case "${1:-}" in
         up|restart)
             for argument in "${@:2}"; do
@@ -521,25 +538,29 @@ dockerComposeRun() {
             [[ "$1" != restart ]] || recreate=restart
             if [[ "${noDeps}" == 1 && "${#services[@]}" -gt 0 &&
                 " ${services[*]} " != *' net-fail2ban '* && " ${services[*]} " != *' net-fail2ban-control '* &&
+                " ${services[*]} " != *' net-fail2ban-ssh '* &&
                 " ${services[*]} " != *' nginx '* && " ${services[*]} " != *' control '* &&
                 " ${services[*]} " != *' net-wireguard '* ]]; then
                 dockerComposeExecute "$@"
                 return $?
             fi
             { [[ "${enabled}" != true ]] || dockerFail2banConfigurationCheck; } &&
-                { [[ "${controlEnabled}" != true ]] || dockerControlFail2banConfigurationCheck; } || {
+                { [[ "${controlEnabled}" != true ]] || dockerControlFail2banConfigurationCheck; } &&
+                { [[ "${sshEnabled}" != true ]] || dockerFail2banConfigurationCheck current ssh; } || {
                 dockerError '当前 Fail2ban 编排不是受管新策略，请先通过 update 规范化后再启动'
                 return "${PADM_DOCKER_RC_STATE}"
             }
             dockerFail2banSourceInputsCheck "${root}/config/spec.json" &&
                 dockerFail2banDisablePrepare "${root}/config/spec.json" &&
                 dockerControlFail2banDisablePrepare "${root}/config/spec.json" &&
+                dockerSshFail2banDisablePrepare "${root}/config/spec.json" &&
                 dockerFail2banStartManagedVerified "${recreate}" || return "${PADM_DOCKER_RC_STATE}"
             return 0
             ;;
         down)
             dockerFail2banDisablePrepare "${root}/config/spec.json" &&
-                dockerControlFail2banDisablePrepare "${root}/config/spec.json" ||
+                dockerControlFail2banDisablePrepare "${root}/config/spec.json" &&
+                dockerSshFail2banDisablePrepare "${root}/config/spec.json" ||
                 return "${PADM_DOCKER_RC_STATE}"
             ;;
         exec)
@@ -553,11 +574,13 @@ dockerComposeRun() {
     elif [[ "$1" == up || "$1" == restart || "$1" == down ]]; then
         if [[ -f "${root}/config/spec.json" ]]; then
             dockerFail2banDisablePrepare "${root}/config/spec.json" &&
-                dockerControlFail2banDisablePrepare "${root}/config/spec.json" ||
+                dockerControlFail2banDisablePrepare "${root}/config/spec.json" &&
+                dockerSshFail2banDisablePrepare "${root}/config/spec.json" ||
                 return "${PADM_DOCKER_RC_STATE}"
         else
             dockerFail2banDisablePrepare "${root}/deployment.json" &&
-                dockerControlFail2banDisablePrepare "${root}/deployment.json" ||
+                dockerControlFail2banDisablePrepare "${root}/deployment.json" &&
+                dockerSshFail2banDisablePrepare "${root}/deployment.json" ||
                 return "${PADM_DOCKER_RC_STATE}"
         fi
     fi
@@ -566,17 +589,23 @@ dockerComposeRun() {
 
 dockerFail2banStartManagedVerified() {
     local mf_root mf_spec mf_hash mf_plan mf_tuple mf_listener mf_family mf_source mf_services mf_index
-    local mf_ws mf_control mf_current mf_phase=prepare mf_lockOwner=${BASHPID:-$$}
+    local mf_ws mf_control mf_ssh mf_current mf_phase=prepare mf_lockOwner=${BASHPID:-$$} mf_sshMode=
     local -a mf_starts=() mf_tuples=() mf_snapshots=() mf_recreate=() mf_jails=()
-    case "${1:-}" in ''|restart) ;; recreate) mf_recreate=(--force-recreate) ;; *) return 1 ;; esac
+    case "${1:-}" in
+    ''|restart) ;;
+    recreate) mf_recreate=(--force-recreate); mf_sshMode=recreate ;;
+    *) return 1 ;;
+    esac
     [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
         "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${mf_lockOwner}" ]] || return 1
     mf_root=$(dockerInstallRoot) || return 1
     mf_spec="${mf_root}/config/spec.json"
     mf_ws=$(jq -r '.services | has("net-fail2ban")' "${mf_root}/compose.json") &&
         mf_control=$(jq -r '.services | has("net-fail2ban-control")' "${mf_root}/compose.json") &&
+        mf_ssh=$(jq -r '.services | has("net-fail2ban-ssh")' "${mf_root}/compose.json") &&
         mf_hash=$(sha256sum -- "${mf_spec}") || return 1
-    [[ "${mf_ws}" == true || "${mf_control}" == true ]] || return 1
+    [[ "${mf_ws}" == true || "${mf_control}" == true || "${mf_ssh}" == true ]] || return 1
+    [[ "${mf_ssh}" != true || "${mf_control}" != true ]] || return 1
     if [[ "${mf_ws}" == true ]]; then
         dockerFail2banSourceInputsCheck "${mf_spec}" &&
             mf_plan=$(dockerFail2banSourcePlan "${mf_spec}") &&
@@ -589,21 +618,25 @@ dockerFail2banStartManagedVerified() {
         dockerControlFail2banConfigurationCheck || return 1
         mf_jails+=(net-fail2ban-control)
     fi
+    if [[ "${mf_ssh}" == true ]]; then
+        dockerFail2banConfigurationCheck current ssh || return 1
+    fi
     mf_services=$(jq -er --argjson ws "${mf_ws}" --argjson control "${mf_control}" \
         --slurpfile deployment "${mf_root}/deployment.json" '
       [.services | to_entries[] |
-        select(.key != "net-fail2ban" and .key != "net-fail2ban-control") |
+        select(.key != "net-fail2ban" and .key != "net-fail2ban-control" and .key != "net-fail2ban-ssh") |
         select((.value.profiles // [] | index("net-check")) == null) |
         select((.value.profiles // [] | length) == 0 or
           any(.value.profiles[]; . as $p | $deployment[0].compose.profiles | index($p))) |
-        select((.value.depends_on // {} | has("net-fail2ban") or has("net-fail2ban-control")) | not) |
+        select((.value.depends_on // {} | has("net-fail2ban") or has("net-fail2ban-control") or
+          has("net-fail2ban-ssh")) | not) |
         .key] |
       if length > 0 and (if $ws then index("nginx") != null else true end) and
         (if $control then index("control") != null and index("net-wireguard") != null else true end)
       then .[] else error("missing protection source services") end
     ' "${mf_root}/compose.json") || return 1
     mapfile -t mf_starts <<<"${mf_services}"
-    # 两个 jail 均不进入普通启动列表；所有来源服务先就绪，再分别取得现场证明。
+    # 所有 jail 均不进入普通启动列表；来源先就绪，SSH collector 与 jail 另行联合启动。
     if [[ "${1:-}" == restart ]]; then
         dockerComposeExecute restart --no-deps "${mf_starts[@]}" >/dev/null || return 1
     fi
@@ -645,10 +678,13 @@ dockerFail2banStartManagedCommit() {
     done
     [[ "$(sha256sum -- "${mf_spec}")" == "${mf_hash}" ]] &&
         { [[ "${mf_control}" != true ]] || dockerControlSourceWitnessRecheck; } || return 1
-    dockerComposeExecute up -d --no-deps --wait \
-        --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${mf_jails[@]}" >/dev/null &&
-        { [[ "${mf_ws}" != true ]] || dockerFail2banContainer >/dev/null; } &&
-        { [[ "${mf_control}" != true ]] || dockerControlFail2banContainer >/dev/null; }
+    if [[ "${#mf_jails[@]}" -gt 0 ]]; then
+        dockerComposeExecute up -d --no-deps --wait \
+            --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${mf_jails[@]}" >/dev/null &&
+            { [[ "${mf_ws}" != true ]] || dockerFail2banContainer >/dev/null; } &&
+            { [[ "${mf_control}" != true ]] || dockerControlFail2banContainer >/dev/null; } || return 1
+    fi
+    [[ "${mf_ssh}" != true ]] || dockerSshFail2banStartVerified "${mf_sshMode}"
 }
 
 dockerComposeExecute() {
@@ -1042,7 +1078,7 @@ dockerAssessCommand() {
 }
 
 dockerUpdateCommand() {
-    local manifest= bundle= controlBundle= candidate backup root
+    local manifest= bundle= controlBundle= candidate backup root sshPresent sshInput
     # 升级失败恢复仍须重新挑战，只复用本次预期来源。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
@@ -1076,6 +1112,15 @@ dockerUpdateCommand() {
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    sshInput="${root}/deployment.json"
+    [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] ||
+        sshInput="${root}/config/spec.json"
+    sshPresent=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-ssh")' \
+        "${sshInput}") || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${sshPresent}" == true ]]; then
+        dockerError 'SSH 防护启用期间暂不支持版本更新，请先通过 SSH 防护入口停用'
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
     dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
         return "${PADM_DOCKER_RC_STATE}"
     dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" ||
@@ -1241,7 +1286,7 @@ dockerTrafficRollbackCheck() {
 }
 
 dockerRollbackCommand() {
-    local backup currentBackup bundlePath root
+    local backup currentBackup bundlePath root sshPresent sshInput sshBackupInput
     # 回滚与失败恢复共享输入，现场证明每次重新取得。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
@@ -1257,6 +1302,19 @@ dockerRollbackCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    sshInput="${root}/deployment.json" sshBackupInput="${backup}/deployment.json"
+    [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] ||
+        sshInput="${root}/config/spec.json"
+    [[ ! -e "${backup}/config/spec.json" && ! -L "${backup}/config/spec.json" ]] ||
+        sshBackupInput="${backup}/config/spec.json"
+    sshPresent=$(jq -rn --slurpfile current "${sshInput}" --slurpfile backup "${sshBackupInput}" \
+        'any($current[0].host_integrations[]; .type == "fail2ban-ssh") or
+         any($backup[0].host_integrations[]; .type == "fail2ban-ssh")') ||
+        return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${sshPresent}" == true ]]; then
+        dockerError 'SSH 防护相关版本回滚尚未接入联合清理，未修改当前部署'
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
     if [[ -f "${root}/config/spec.json" ]] &&
         jq -e '.tls.http01 == true' "${root}/config/spec.json" >/dev/null; then
         dockerAcmeWebrootTransitionValidate "${backup}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
@@ -1380,6 +1438,9 @@ dockerUninstallCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
         dockerComposeRun down || return $?
+    elif [[ -e "${root}/data/net/ssh-collector" || -L "${root}/data/net/ssh-collector" ]]; then
+        dockerSshFail2banDisablePrepare <(printf '{"host_integrations":[]}') ||
+            return "${PADM_DOCKER_RC_STATE}"
     fi
     dockerTrafficScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     dockerRemoveCli || return "${PADM_DOCKER_RC_STATE}"

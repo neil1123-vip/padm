@@ -1113,7 +1113,7 @@ validateFeatureMatrix() {
       def metadata:
         (.status | state) and (.native_menu | text) and (.native_action | text) and (.reason | text) and
         (.profiles | names(["core-xray", "core-sing-box", "nginx", "nginx-stream", "acme", "subscription",
-          "net-wireguard", "net-fail2ban", "net-fail2ban-control", "net-transparent"])) and
+          "net-wireguard", "net-fail2ban", "net-fail2ban-control", "net-fail2ban-ssh", "net-transparent"])) and
         (.network_mode == "bridge" or .network_mode == "host" or .network_mode == "host-cli") and
         (.host_capabilities | names(["NET_ADMIN", "/dev/net/tun"])) and
         (if .network_mode != "host" then
@@ -1159,20 +1159,24 @@ validateFeatureMatrix() {
         .value.network_mode == (if ($host_cli | index($entry.key)) != null then "host-cli"
           elif ($host | index($entry.key)) != null then "host" else "bridge" end)) and
       (.host_integrations | type == "object" and
-        keys == (["fail2ban", "fail2ban-control", "tun", "tproxy", "wireguard"] | sort)) and
+        keys == (["fail2ban", "fail2ban-control", "fail2ban-ssh", "tun", "tproxy", "wireguard"] | sort)) and
       all(.host_integrations | to_entries[];
         . as $entry |
         (.value | .status == "host-integrated" and .network_mode == "host" and
           .capabilities == ["NET_ADMIN"] and
           .devices == (if $entry.key == "tun" then ["/dev/net/tun"] else [] end)) and
-        ($matrix.feature_matrix[if $entry.key == "fail2ban-control" then "fail2ban" else $entry.key end] |
+        ($matrix.feature_matrix[if $entry.key == "fail2ban-control" or $entry.key == "fail2ban-ssh"
+          then "fail2ban" else $entry.key end] |
           .status == $entry.value.status and .network_mode == $entry.value.network_mode and
-          .profiles == (if $entry.key == "fail2ban" or $entry.key == "fail2ban-control"
-            then ["net-fail2ban", "net-fail2ban-control"] else [$entry.value.profile] end) and
+          .profiles == (if $entry.key == "fail2ban" or $entry.key == "fail2ban-control" or $entry.key == "fail2ban-ssh"
+            then ["net-fail2ban", "net-fail2ban-control", "net-fail2ban-ssh"] else [$entry.value.profile] end) and
           (.host_capabilities | sort) == ($entry.value.capabilities + $entry.value.devices | sort))) and
       (.host_integrations["fail2ban-control"] |
         .profile == "net-fail2ban-control" and .address_families == ["ipv4"] and
         .services == ["control", "net-wireguard", "net-fail2ban-control"]) and
+      (.host_integrations["fail2ban-ssh"] |
+        .profile == "net-fail2ban-ssh" and .address_families == ["ipv4","ipv6"] and
+        .services == ["net-fail2ban-ssh"]) and
       all({
         nginx: ["nginx"], "tls-files": ["nginx", "acme"], "acme-dns": ["acme"],
         subscription: ["core-xray", "nginx", "subscription"],
@@ -1221,6 +1225,12 @@ del(.feature_matrix["reality-target-management"])
 .host_integrations.wireguard.capabilities = ["SYS_ADMIN"]
 .host_integrations["fail2ban-control"].profile = "net-fail2ban"
 .host_integrations["fail2ban-control"].address_families = ["ipv4","ipv6"]
+del(.host_integrations["fail2ban-ssh"])
+.host_integrations["fail2ban-ssh"].profile = "net-fail2ban-control"
+.host_integrations["fail2ban-ssh"].services = ["control","net-fail2ban-ssh"]
+.host_integrations["fail2ban-ssh"].address_families = ["ipv4","ipv6","dual"]
+.host_integrations["fail2ban-ssh"].capabilities = ["NET_ADMIN","SYS_PTRACE"]
+.feature_matrix.fail2ban.profiles += ["net-fail2ban-ssh-unmanaged"]
 .feature_matrix["internal-203-wireguard"].profiles = ["net-fail2ban"]
 .feature_matrix["internal-204-tun"].host_capabilities = ["NET_ADMIN"]
 .protocols[3].transport = "quic"

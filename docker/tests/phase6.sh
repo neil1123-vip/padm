@@ -97,6 +97,7 @@ copyControlFixture() {
         docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
         docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/schedule.sh docker/lib/geo.sh docker/lib/control-sync.sh docker/lib/control.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/accounts.sh docker/lib/subscriptions.sh docker/lib/business.sh docker/lib/menu.sh docker/lib/reality-targets.sh \
         docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py \
+        docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
         docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
@@ -791,6 +792,26 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
 
 (
     source "${PROJECT_ROOT}/install-docker.sh"
+    capabilityRoot="${TEST_ROOT}/ssh-capability"
+    mkdir -p "${capabilityRoot}/docker/contracts"
+    cp "${PROJECT_ROOT}/docker/contracts/"{configure.schema.json,features.json} \
+        "${capabilityRoot}/docker/contracts/"
+    jq -n '{schema_version:3,core:{type:"xray",protocols:[{id:1,core:"xray"}]},
+      host_integrations:[{type:"fail2ban-ssh"}]}' >"${capabilityRoot}/ssh-spec.json"
+    # 规格版本相同也不能让旧 bundle 接管尚未实现的 SSH 防护。
+    dockerBundleSupportsSpec "${capabilityRoot}" "${capabilityRoot}/ssh-spec.json"
+    jq 'del(."x-padm-ssh-fail2ban")' \
+        "${capabilityRoot}/docker/contracts/configure.schema.json" >"${capabilityRoot}/legacy-schema.json"
+    mv -- "${capabilityRoot}/legacy-schema.json" "${capabilityRoot}/docker/contracts/configure.schema.json"
+    if dockerBundleSupportsSpec "${capabilityRoot}" "${capabilityRoot}/ssh-spec.json"; then
+        fail '缺少 SSH 能力标记的 bundle 接受 SSH 规格'
+    fi
+    jq '.host_integrations = []' "${capabilityRoot}/ssh-spec.json" >"${capabilityRoot}/plain-spec.json"
+    dockerBundleSupportsSpec "${capabilityRoot}" "${capabilityRoot}/plain-spec.json"
+)
+
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
     composeRoot="${TEST_ROOT}/compose-stdin"
     mkdir -p "${composeRoot}"
     : >"${composeRoot}/images.env"
@@ -864,7 +885,9 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     rollbackFixture="${rollbackRoot}/backups/update.test"
     export PADM_DOCKER_INSTALL_DIR="${rollbackRoot}"
     mkdir -p "${rollbackFixture}" "${rollbackRoot}/config/sing-box"
-    printf '%s\n' '{"core":{"type":"sing-box"}}' >"${rollbackFixture}/deployment.json"
+    # 当前部署与备份明确未启用 SSH，保留回滚能力检查的真实前置查询。
+    printf '%s\n' '{"core":{"type":"sing-box"},"host_integrations":[]}' >"${rollbackRoot}/deployment.json"
+    printf '%s\n' '{"core":{"type":"sing-box"},"host_integrations":[]}' >"${rollbackFixture}/deployment.json"
     printf '{}\n' >"${rollbackRoot}/config/sing-box/users.base"
     dockerHostPreflight() { :; }
     dockerLockInstalledDeployment() { :; }

@@ -34,7 +34,8 @@ reject() { if "$@" >"${LOG}" 2>&1; then fail "应拒绝: $*"; fi; }
 source "${PROJECT_ROOT}/install-docker.sh"
 docker() {
     [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ||
-        "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False' ]] ||
+        "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False' ||
+        "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-ssh --filter label=com.docker.compose.oneoff=False' ]] ||
         fail "非预期 Docker 操作: $*"
 }
 dockerHostPreflight() { :; }

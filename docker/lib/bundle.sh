@@ -84,7 +84,7 @@ dockerBundleSourceIsComplete() {
         shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
-    for required in renewal schedule geo control-sync control; do
+    for required in renewal schedule geo control-sync control ssh-runtime; do
         if grep -qF "/${required}.sh\"" "${sourceRoot}/docker/lib/services.sh"; then
             [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
                 ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
@@ -99,6 +99,12 @@ dockerBundleSourceIsComplete() {
     if grep -qF '/docker/lib/ssh-journal.py"' "${sourceRoot}/docker/lib/services.sh"; then
         [[ -f "${sourceRoot}/docker/lib/ssh-journal.py" &&
             ! -L "${sourceRoot}/docker/lib/ssh-journal.py" ]] || return 1
+    fi
+    if grep -qF '/ssh-runtime.sh"' "${sourceRoot}/docker/lib/services.sh"; then
+        for required in ssh-runtime.py ssh-collector.py ssh-source.py ssh-journal.py; do
+            [[ -f "${sourceRoot}/docker/lib/${required}" &&
+                ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
+        done
     fi
     if grep -qF '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh"; then
         for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
@@ -363,6 +369,9 @@ dockerBundleSupportsSpec() {
           else true end) and
           (if any($spec[0].host_integrations[]; .type == "fail2ban-control") then
             $schema[0]["x-padm-control-fail2ban"] == true
+          else true end) and
+          (if any($spec[0].host_integrations[]; .type == "fail2ban-ssh") then
+            $schema[0]["x-padm-ssh-fail2ban"] == true
           else true end) and
           (if $spec[0] | has("site") then
             $schema[0]["x-padm-site-content"] == true

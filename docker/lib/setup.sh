@@ -1352,6 +1352,7 @@ dockerEditCommand() {
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local fail2banAction= fail2banType=fail2ban fail2banPorts= fail2banMaxRetry= fail2banFindTime= fail2banBanTime=
+    local fail2banSshUnit= fail2banSshTarget= fail2banSshPort=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1444,10 +1445,13 @@ dockerEditCommand() {
             httpRelay=disable
             shift
             ;;
-        --fail2ban-enable|--fail2ban-settings|--fail2ban-control-enable|--fail2ban-control-settings)
+        --fail2ban-enable|--fail2ban-settings|--fail2ban-control-enable|--fail2ban-control-settings|--fail2ban-ssh-enable|--fail2ban-ssh-settings)
             local fail2banArgCount=5 retryInput= findInput= banInput=
             [[ -z "${fail2banAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
-            if [[ "$1" == --fail2ban-control-* ]]; then
+            if [[ "$1" == --fail2ban-ssh-* ]]; then
+                fail2banType=fail2ban-ssh fail2banArgCount=7
+                fail2banAction=${1#--fail2ban-ssh-}
+            elif [[ "$1" == --fail2ban-control-* ]]; then
                 fail2banType=fail2ban-control fail2banArgCount=4
                 fail2banAction=${1#--fail2ban-control-}
             else
@@ -1455,7 +1459,15 @@ dockerEditCommand() {
             fi
             [[ "$#" -ge "${fail2banArgCount}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            if [[ "${fail2banType}" == fail2ban ]]; then
+            if [[ "${fail2banType}" == fail2ban-ssh ]]; then
+                [[ "${#2}" -le 255 && "$2" =~ ^[A-Za-z0-9][A-Za-z0-9_.@:-]*\.service$ &&
+                    "$4" =~ ^[1-9][0-9]{0,4}$ ]] &&
+                    ((10#$4 <= 65535)) || return "${PADM_DOCKER_RC_USAGE}"
+                dockerFail2banSourceAddress "$3" >/dev/null ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                fail2banSshUnit=$2 fail2banSshTarget=$3 fail2banSshPort=$4
+                retryInput=$5 findInput=$6 banInput=$7
+            elif [[ "${fail2banType}" == fail2ban ]]; then
                 [[ "$2" =~ ^[0-9]{1,5}(,[0-9]{1,5}){0,15}$ ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
                 local -a fail2banPortValues=()
@@ -1485,9 +1497,10 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift "${fail2banArgCount}"
             ;;
-        --fail2ban-off|--fail2ban-control-off)
+        --fail2ban-off|--fail2ban-control-off|--fail2ban-ssh-off)
             [[ -z "${fail2banAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             [[ "$1" != --fail2ban-control-off ]] || fail2banType=fail2ban-control
+            [[ "$1" != --fail2ban-ssh-off ]] || fail2banType=fail2ban-ssh
             fail2banAction=off
             shift
             ;;
@@ -1727,6 +1740,15 @@ dockerEditCommand() {
     chmod 0600 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${fail2banAction}" == enable || "${fail2banAction}" == settings ]]; then
+        if { [[ "${fail2banType}" == fail2ban-ssh ]] &&
+            jq -e 'any(.host_integrations[]; .type == "fail2ban-control")' "${draft}" >/dev/null; } ||
+            { [[ "${fail2banType}" == fail2ban-control ]] &&
+            jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${draft}" >/dev/null; }; then
+            dockerError 'SSH 与控制面 INPUT 防护暂不支持共存，未修改配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        fi
+    fi
     if jq -en --slurpfile before "${original}" --slurpfile after "${draft}" '
       any($before[0].host_integrations[]; .type == "fail2ban") and
       (([$before[0].core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) | .public_port] | sort) !=
@@ -1767,14 +1789,17 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
         jq --arg type "${fail2banType}" --arg ports "${fail2banPorts}" --argjson max_retry "${fail2banMaxRetry}" \
-            --argjson find_time "${fail2banFindTime}" --argjson ban_time "${fail2banBanTime}" '
-          ($ports | split(",") | map(tonumber)) as $ports |
+            --argjson find_time "${fail2banFindTime}" --argjson ban_time "${fail2banBanTime}" \
+            --arg unit "${fail2banSshUnit}" --arg target "${fail2banSshTarget}" --arg port "${fail2banSshPort}" '
+          ($ports | if . == "" then [] else split(",") | map(tonumber) end) as $ports |
           .host_integrations += [{
             type:$type, profile:("net-" + $type),
             firewall_rules:[if $type == "fail2ban" then "DOCKER-USER" else "INPUT" end],
             devices:[], schedules:[],
             settings:({max_retry:$max_retry,find_time:$find_time,ban_time:$ban_time} +
-              if $type == "fail2ban" then {log_file:"access.log",ports:$ports} else {} end)
+              if $type == "fail2ban" then {log_file:"access.log",ports:$ports}
+              elif $type == "fail2ban-ssh" then {unit:$unit,target:$target,port:($port | tonumber)}
+              else {} end)
           }]
         ' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
@@ -1786,11 +1811,15 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
         jq --arg type "${fail2banType}" --arg ports "${fail2banPorts}" --argjson max_retry "${fail2banMaxRetry}" \
-            --argjson find_time "${fail2banFindTime}" --argjson ban_time "${fail2banBanTime}" '
-          ($ports | split(",") | map(tonumber)) as $ports |
+            --argjson find_time "${fail2banFindTime}" --argjson ban_time "${fail2banBanTime}" \
+            --arg unit "${fail2banSshUnit}" --arg target "${fail2banSshTarget}" --arg port "${fail2banSshPort}" '
+          ($ports | if . == "" then [] else split(",") | map(tonumber) end) as $ports |
           .host_integrations |= map(
             if .type == $type then
               (if $type == "fail2ban" then .settings.ports = $ports else . end) |
+              (if $type == "fail2ban-ssh" then
+                .settings.unit = $unit | .settings.target = $target | .settings.port = ($port | tonumber)
+               else . end) |
               .settings.max_retry = $max_retry |
               .settings.find_time = $find_time |
               .settings.ban_time = $ban_time
@@ -2049,7 +2078,8 @@ dockerEditCommand() {
         .host_integrations |= map(select(.type != $fail2ban_type));
       def without_fail2ban_settings:
         .host_integrations |= map(if .type == $fail2ban_type then
-          del(.settings.ports, .settings.max_retry, .settings.find_time, .settings.ban_time)
+          del(.settings.ports, .settings.max_retry, .settings.find_time, .settings.ban_time) |
+          if $fail2ban_type == "fail2ban-ssh" then del(.settings.unit, .settings.target, .settings.port) else . end
           else . end);
       def special: .core.protocols |= map(
         if $regenerate != "" and .listener_id == $regenerate then

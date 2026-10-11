@@ -290,10 +290,62 @@ fail2ban_ssh_clean() (
     fail2ban_ssh_preflight "$1" "$2" unowned
 )
 
+fail2ban_ssh_configuration_valid() {
+    python3 - "$1" "$2" <<'PY'
+import configparser
+import sys
+
+target, port = sys.argv[1:]
+def read(path):
+    config = configparser.ConfigParser(interpolation=None)
+    with open(path, encoding="ascii") as handle:
+        config.read_file(handle)
+    return config
+
+try:
+    filter_config = read("/etc/fail2ban/filter.d/padm-ssh.conf")
+    if (filter_config.defaults() or filter_config.sections() != ["Definition"]
+            or dict(filter_config["Definition"]) != {
+                "datepattern": "{^LN-BEG}%%Y-%%m-%%d %%H:%%M:%%S[ ]",
+                "failregex": "^padm-ssh source=<HOST>$", "ignoreregex": ""}):
+        raise ValueError("SSH filter changed")
+    server_config = read("/etc/fail2ban/fail2ban.local")
+    if (server_config.defaults() or server_config.sections() != ["Definition"]
+            or dict(server_config["Definition"]) != {
+                "allowipv6": "yes" if ":" in target else "no",
+                "logtarget": "STDOUT", "socket": "/run/fail2ban/fail2ban.sock",
+                "pidfile": "/run/fail2ban/fail2ban.pid", "dbfile": "None"}):
+        raise ValueError("SSH daemon configuration changed")
+    jail = read("/etc/fail2ban/jail.d/padm.local")
+    defaults = dict(jail.defaults())
+    limits = {"maxretry": (1, 20), "findtime": (60, 86400), "bantime": (60, 604800)}
+    if (set(defaults) != {"backend", *limits} or defaults["backend"] != "polling"
+            or jail.sections() != ["sshd", "sshd-ddos", "padm-sshd"]):
+        raise ValueError("SSH jail configuration changed")
+    for key, (minimum, maximum) in limits.items():
+        value = defaults[key]
+        if not value.isascii() or not value.isdigit() or str(int(value)) != value or not minimum <= int(value) <= maximum:
+            raise ValueError("SSH jail limits changed")
+    for section in ("sshd", "sshd-ddos"):
+        if dict(jail[section]) != dict(defaults, enabled="false"):
+            raise ValueError("native SSH jail enabled")
+    if dict(jail["padm-sshd"]) != dict(defaults, enabled="true", filter="padm-ssh",
+            logpath="/run/padm/ssh-collector/auth.log", port=port,
+            action=f'padm-ssh-input[port="{port}", protocol=tcp]'):
+        raise ValueError("SSH jail source changed")
+except (OSError, UnicodeError, configparser.Error, ValueError) as error:
+    print(f"padm-net: SSH configuration refused: {error}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
 fail2ban_ssh_health() (
     fail2ban_ssh_scope
-    # 仅核验规则所有权；尚未建立 SSH jail，不宣称认证日志或 jail 健康。
-    fail2ban_state_read "$STATE_ROOT" && fail2ban_resources health
+    need fail2ban-client
+    fail2ban_state_read "$STATE_ROOT" &&
+        fail2ban_resources guard &&
+        fail2ban-client status padm-sshd >/dev/null 2>&1 &&
+        fail2ban_resources health
 )
 
 fail2ban_control_parameters_valid() {
@@ -428,6 +480,9 @@ import shlex
 import stat
 import subprocess
 import sys
+import json
+import re
+import time
 
 root, token, chain, ports, ipv6, scope, target, operation = sys.argv[1:9]
 tool = sys.argv[9] if len(sys.argv) > 9 else ""
@@ -445,6 +500,63 @@ state_name = "fail2ban-ssh.state" if ssh else "fail2ban-control.state" if contro
 state = (f"schema_version={1 if input_scope else 2}\ntoken={token}\nchain={chain}\n"
          f"ports={','.join(ports)}\nipv6={ipv6}\n" + (f"target={target}\n" if input_scope else "")).encode()
 created = set()
+
+def collector_guard():
+    directory = "/run/padm/ssh-collector"
+    expected = os.environ.get("PADM_SSH_COLLECTOR_TOKEN", "")
+    unit = os.environ.get("PADM_SSH_COLLECTOR_UNIT", "")
+    expected_target = os.environ.get("PADM_SSH_COLLECTOR_TARGET", "")
+    expected_port = os.environ.get("PADM_SSH_COLLECTOR_PORT", "")
+    if (not re.fullmatch("[a-f0-9]{32}", expected)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@:-]*\.service", unit)
+            or len(unit) > 255 or expected_target != target or expected_port != ",".join(ports)):
+        raise ValueError("SSH collector parameters changed")
+    path = "/"
+    for part in directory.split("/")[1:]:
+        path = os.path.join(path, part)
+        metadata = os.lstat(path)
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0
+                or metadata.st_mode & 0o022):
+            raise ValueError("unsafe SSH collector directory")
+    if stat.S_IMODE(metadata.st_mode) != 0o700:
+        raise ValueError("unsafe SSH collector directory mode")
+    if not os.statvfs(directory).f_flag & os.ST_RDONLY:
+        raise ValueError("SSH collector guard mount is writable")
+    descriptor = os.open(directory + "/guard.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(descriptor, "rb") as handle:
+        before = os.fstat(handle.fileno())
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+                or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1
+                or before.st_size > 4096):
+            raise ValueError("unsafe SSH collector guard")
+        data = handle.read(4097)
+        after = os.fstat(handle.fileno())
+    if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+        raise ValueError("SSH collector guard changed while reading")
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate SSH collector guard field")
+            result[key] = value
+        return result
+    guard = json.loads(data, object_pairs_hook=unique)
+    with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as handle:
+        boot = handle.read().strip().replace("-", "")
+    if (not isinstance(guard, dict) or set(guard) != {
+            "schema", "token", "unit", "target", "port", "boot", "invocation", "monotonic_ns"}
+            or type(guard["schema"]) is not int or guard["schema"] != 1
+            or guard["token"] != expected or guard["unit"] != unit
+            or guard["target"] != target or type(guard["port"]) is not int
+            or ports != [str(guard["port"])] or guard["boot"] != boot
+            or not re.fullmatch("[a-f0-9]{32}", boot)
+            or not isinstance(guard["invocation"], str)
+            or not re.fullmatch("[a-f0-9]{32}", guard["invocation"])
+            or guard["invocation"] == "0" * 32
+            or type(guard["monotonic_ns"]) is not int
+            or not 0 <= time.monotonic_ns() - guard["monotonic_ns"] <= 10_000_000_000):
+        raise ValueError("SSH collector guard expired or changed")
 
 def hook(port):
     if input_scope:
@@ -482,6 +594,8 @@ def command(table, args, write=False):
     return result.stdout
 
 def audit():
+    if ssh and operation in {"start", "ban", "check", "guard"}:
+        collector_guard()
     owner()
     snapshots = {}
     if ssh:
@@ -614,6 +728,11 @@ def stop(table):
     created.discard(table)
 
 try:
+    if operation == "guard":
+        if not ssh:
+            raise ValueError("collector guard is only valid for SSH")
+        collector_guard()
+        raise SystemExit(0)
     if operation in {"empty", "audit", "health", "cleanup"}:
         resources = audit()
         if operation == "health" and any((present or input_scope) and (not present or not sentinel or set(hooks) != set(ports))
@@ -732,16 +851,56 @@ fail2ban_action() (
     fail2ban_resources "$action" "$table" "$address"
 )
 
+fail2ban_ssh_watch() {
+    ssh_watch_parent=$1 ssh_watch_sleep=
+    trap - EXIT INT TERM USR1
+    trap '[ -z "$ssh_watch_sleep" ] || { kill -TERM "$ssh_watch_sleep" 2>/dev/null || true; wait "$ssh_watch_sleep" 2>/dev/null || true; }; exit 0' TERM
+    while :; do
+        sleep 1 &
+        ssh_watch_sleep=$!
+        wait "$ssh_watch_sleep" || return 1
+        ssh_watch_sleep=
+        if ! fail2ban_resources guard; then
+            echo "padm-net: SSH collector guard failed; stopping current jail" >&2
+            # 监督只通知持有 server 子进程的入口，由入口停止并等待当前实例。
+            kill -USR1 "$ssh_watch_parent" 2>/dev/null || return 1
+            return 0
+        fi
+    done
+}
+
+fail2ban_ssh_watch_stop() {
+    [ -n "${ssh_watch:-}" ] || return 0
+    kill -TERM "$ssh_watch" 2>/dev/null || true
+    wait "$ssh_watch" 2>/dev/null || true
+    ssh_watch=
+}
+
 fail2ban_run() {
-    [ "$fb_scope" != ssh ] || die "SSH jail requires a fresh managed transaction and is not enabled"
-    if [ "$fb_scope" = control ]; then
+    if [ "$fb_scope" = ssh ]; then
+        requested_unit=$1 requested_target=$2 requested_ports=$3
+        [ "$requested_unit" = "${PADM_SSH_COLLECTOR_UNIT:-}" ] &&
+            [ "$requested_target" = "${PADM_SSH_COLLECTOR_TARGET:-}" ] &&
+            [ "$requested_ports" = "${PADM_SSH_COLLECTOR_PORT:-}" ] ||
+            die "SSH collector command parameters changed"
+        need python3
+        need fail2ban-client
+        fail2ban_ssh_configuration_valid "$requested_target" "$requested_ports" &&
+            fail2ban-client -t >/dev/null 2>&1 || die "SSH jail configuration is invalid"
+        fb_root=$STATE_ROOT fb_target=$requested_target fb_ports=$requested_ports
+        fb_token=00000000000000000000000000000000 fb_chain=${fb_prefix}000000000000
+        case "$requested_target" in *:*) fb_ipv6=yes ;; *) fb_ipv6=no ;; esac
+        fail2ban_resources guard || die "SSH collector guard is not ready"
+    elif [ "$fb_scope" = control ]; then
         requested_target=$1 requested_ports=$2
     else
         requested_ports=$1
     fi
     ownership=unowned
     [ ! -e "$STATE_ROOT/$fb_state" ] && [ ! -L "$STATE_ROOT/$fb_state" ] || ownership=owned
-    if [ "$fb_scope" = control ]; then
+    if [ "$fb_scope" = ssh ]; then
+        fail2ban_ssh_preflight "$requested_target" "$requested_ports" "$ownership"
+    elif [ "$fb_scope" = control ]; then
         fail2ban_preflight "$requested_target" "$requested_ports" "$ownership"
     else
         fail2ban_preflight "$requested_ports" "$ownership"
@@ -751,7 +910,10 @@ fail2ban_run() {
         fail2ban_cleanup || die "Fail2ban previous state could not be revoked"
     fi
     fb_root=$STATE_ROOT fb_ports=$requested_ports fb_ipv6=no
-    if [ "$fb_scope" = control ]; then
+    if [ "$fb_scope" = ssh ]; then
+        fb_target=$requested_target
+        case "$requested_target" in *:*) fb_ipv6=yes ;; esac
+    elif [ "$fb_scope" = control ]; then
         fb_target=$requested_target
     else
         grep -qx 'allowipv6 = yes' /etc/fail2ban/fail2ban.local && fb_ipv6=yes
@@ -761,7 +923,12 @@ fail2ban_run() {
     fb_chain=$fb_prefix$(printf '%s' "$fb_token" | cut -c1-12)
     fail2ban_resources empty || die "Fail2ban resources changed before start"
     run_token=$fb_token
-    if [ "$fb_scope" = control ]; then
+    if [ "$fb_scope" = ssh ]; then
+        unset PADM_FAIL2BAN_TOKEN PADM_FAIL2BAN_CONTROL_TOKEN
+        PADM_FAIL2BAN_SSH_TOKEN=$run_token
+        export PADM_FAIL2BAN_SSH_TOKEN
+        fail2ban_resources guard || die "SSH collector guard changed before start"
+    elif [ "$fb_scope" = control ]; then
         unset PADM_FAIL2BAN_TOKEN
         PADM_FAIL2BAN_CONTROL_TOKEN=$run_token
         export PADM_FAIL2BAN_CONTROL_TOKEN
@@ -770,14 +937,21 @@ fail2ban_run() {
         PADM_FAIL2BAN_TOKEN=$run_token
         export PADM_FAIL2BAN_TOKEN
     fi
-    server= stopped=0
-    trap 'fb_status=$?; trap - EXIT; if [ -e "$STATE_ROOT/$fb_state" ] || [ -L "$STATE_ROOT/$fb_state" ]; then fail2ban_cleanup "$run_token" || fb_status=1; fi; exit "$fb_status"' EXIT
+    server= stopped=0 ssh_watch=
+    trap 'fb_status=$?; trap - EXIT; fail2ban_ssh_watch_stop; if [ -e "$STATE_ROOT/$fb_state" ] || [ -L "$STATE_ROOT/$fb_state" ]; then fail2ban_cleanup "$run_token" || fb_status=1; fi; exit "$fb_status"' EXIT
     trap 'stopped=1; [ -z "$server" ] || { fail2ban-client stop >/dev/null 2>&1 || kill -TERM "$server" >/dev/null 2>&1 || true; }' INT TERM
+    if [ "$fb_scope" = ssh ]; then
+        trap 'stopped=1; [ -z "$server" ] || { fail2ban-client stop >/dev/null 2>&1 || kill -TERM "$server" >/dev/null 2>&1 || true; }' USR1
+    fi
     fail2ban_state_write || die "cannot persist Fail2ban ownership"
     [ "$stopped" -eq 0 ] || return 0
     fail2ban-server -f -x -s /run/fail2ban/fail2ban.sock &
     server=$!
     [ "$stopped" -eq 0 ] || { fail2ban-client stop >/dev/null 2>&1 || kill -TERM "$server" >/dev/null 2>&1 || true; }
+    if [ "$fb_scope" = ssh ] && [ "$stopped" -eq 0 ]; then
+        fail2ban_ssh_watch "$$" &
+        ssh_watch=$!
+    fi
     status=0
     wait "$server" || status=$?
     if [ "$stopped" -eq 1 ]; then
@@ -785,6 +959,7 @@ fail2ban_run() {
         wait "$server" 2>/dev/null || status=$?
     fi
     server=
+    fail2ban_ssh_watch_stop
     return "$status"
 }
 
@@ -1115,6 +1290,10 @@ fail2ban)
 fail2ban-control)
     shift; [ "$#" -eq 2 ] || die "fail2ban-control requires target and port"
     fail2ban_control_scope; fail2ban_run "$@"
+    ;;
+fail2ban-ssh)
+    shift; [ "$#" -eq 3 ] || die "fail2ban-ssh requires unit, target and port"
+    fail2ban_ssh_scope; fail2ban_run "$@"
     ;;
 tproxy)
     shift; [ "$#" -eq 2 ] || die "tproxy requires port and mark"; tproxy_run "$@"

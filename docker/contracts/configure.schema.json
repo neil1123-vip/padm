@@ -12,6 +12,7 @@
   "x-padm-control-client": true,
   "x-padm-control-state": true,
   "x-padm-control-fail2ban": true,
+  "x-padm-ssh-fail2ban": true,
   "x-padm-site-content": true,
   "x-padm-fallback-alpn": true,
   "x-padm-acme-webroot": true,
@@ -614,6 +615,7 @@
           {"$ref": "#/$defs/wireguard_integration"},
           {"$ref": "#/$defs/fail2ban_integration"},
           {"$ref": "#/$defs/fail2ban_control_integration"},
+          {"$ref": "#/$defs/fail2ban_ssh_integration"},
           {"$ref": "#/$defs/tun_integration"},
           {"$ref": "#/$defs/tproxy_integration"}
         ]
@@ -774,6 +776,25 @@
             "contains": {
               "properties": {"type": {"const": "wireguard"}},
               "required": ["type"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "host_integrations": {
+            "contains": {"properties": {"type": {"const": "fail2ban-ssh"}}, "required": ["type"]}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "schema_version": {"const": 3},
+          "host_integrations": {
+            "not": {
+              "contains": {"properties": {"type": {"const": "fail2ban-control"}}, "required": ["type"]}
             }
           }
         }
@@ -1164,6 +1185,41 @@
               "additionalProperties": false,
               "required": ["max_retry", "find_time", "ban_time"],
               "properties": {
+                "max_retry": {"type": "integer", "minimum": 1, "maximum": 20},
+                "find_time": {"type": "integer", "minimum": 60, "maximum": 86400},
+                "ban_time": {"type": "integer", "minimum": 60, "maximum": 604800}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fail2ban_ssh_integration": {
+      "allOf": [
+        {"$ref": "#/$defs/integration_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
+          "properties": {
+            "type": {"const": "fail2ban-ssh"},
+            "profile": {"const": "net-fail2ban-ssh"},
+            "firewall_rules": {"const": ["INPUT"]},
+            "devices": {"const": []},
+            "schedules": {"const": []},
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["unit", "target", "port", "max_retry", "find_time", "ban_time"],
+              "properties": {
+                "unit": {"type": "string", "maxLength": 255, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*\\.service$"},
+                "target": {
+                  "anyOf": [
+                    {"type": "string", "format": "ipv4"},
+                    {"type": "string", "format": "ipv6"}
+                  ]
+                },
+                "port": {"$ref": "#/$defs/port"},
                 "max_retry": {"type": "integer", "minimum": 1, "maximum": 20},
                 "find_time": {"type": "integer", "minimum": 60, "maximum": 86400},
                 "ban_time": {"type": "integer", "minimum": 60, "maximum": 604800}

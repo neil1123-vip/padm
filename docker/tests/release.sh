@@ -120,6 +120,7 @@ copyControl() {
         install-docker.sh docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
         docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/schedule.sh docker/lib/geo.sh docker/lib/control-sync.sh docker/lib/control.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/accounts.sh docker/lib/subscriptions.sh docker/lib/business.sh docker/lib/menu.sh docker/lib/reality-targets.sh \
         docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py \
+        docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
         docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
@@ -366,7 +367,13 @@ printf 'incomplete\n' >"${TEST_ROOT}/incomplete/install-docker.sh"
 tar -czf "${TEST_ROOT}/incomplete-control.tar.gz" -C "${TEST_ROOT}/incomplete" install-docker.sh
 tar -czf "${TEST_ROOT}/unsafe-control.tar.gz" --transform='s|^install-docker.sh$|../outside-control|' \
     -C "${CONTROL_ROOT}" install-docker.sh
-for fault in wrong incomplete unsafe; do
+for module in ssh-runtime.sh ssh-runtime.py ssh-collector.py; do
+    missingSource="${TEST_ROOT}/missing-${module}"
+    copyControl "${missingSource}"
+    rm -f -- "${missingSource}/docker/lib/${module}"
+    tar -czf "${TEST_ROOT}/missing-${module}-control.tar.gz" -C "${missingSource}" install-docker.sh docker shell
+done
+for fault in wrong incomplete unsafe missing-ssh-runtime.sh missing-ssh-runtime.py missing-ssh-collector.py; do
     badControl="${TEST_ROOT}/${fault}-control.tar.gz"
     jq --arg sha "$(sha256sum "${badControl}" | cut -d ' ' -f 1)" \
         '.control.sha256 = $sha' "${MANIFEST}" >"${TEST_ROOT}/bad-control-manifest.json"

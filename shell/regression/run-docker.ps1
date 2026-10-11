@@ -304,7 +304,10 @@ try {
     } elseif ($Selector -in @('docker-ssh-driver', 'docker-contracts', 'docker-contracts-fast',
         'docker-contracts-fast-rest')) {
         # 仅自建受控子树的 driver 合同需要 ptrace，不挂载宿主进程或 Socket。
-        @('--cap-add', 'SYS_PTRACE')
+        @('--cap-add', 'SYS_PTRACE', '--cap-add', 'SYS_ADMIN')
+    } elseif ($Selector -in @('docker-fail2ban-ownership', 'docker-fail2ban-focused')) {
+        # SSH guard 夹具只在容器私有 mount 空间验证真实只读挂载。
+        @('--cap-add', 'SYS_ADMIN')
     } else { @() }
     $networkMode = if ($Selector -eq 'sing-box-local-build-real') { 'bridge' } else { 'none' }
     $networkEnvironment = @()

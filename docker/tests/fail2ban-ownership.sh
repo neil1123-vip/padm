@@ -2,9 +2,20 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+# guard 只读属性用真实挂载证明；私有命名空间不修改其它回归的 /run。
+if [[ "${PADM_TEST_FB_PRIVATE_MOUNT:-0}" != 1 ]]; then
+    exec unshare --mount --propagation private -- \
+        env PADM_TEST_FB_PRIVATE_MOUNT=1 bash "${BASH_SOURCE[0]}"
+fi
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-fail2ban-ownership.XXXXXX")
 cleanup() {
     local status=$?
+    if [[ "${GUARD_MOUNTED:-0}" == 1 ]]; then
+        umount -- /run/padm/ssh-collector || status=1
+    fi
+    if [[ "${RUN_MOUNTED:-0}" == 1 ]]; then
+        umount -- /run || status=1
+    fi
     if [[ "${PADM_TEST_KEEP:-0}" == 1 ]]; then
         printf 'fail2ban-ownership-test-root: %s\n' "${TEST_ROOT}" >&2
     else
@@ -15,7 +26,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'printf "docker-fail2ban-ownership-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2' ERR
 [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || exit 1
-for tool in python3 stat sha256sum; do command -v "${tool}" >/dev/null; done
+for tool in python3 stat sha256sum mount umount; do command -v "${tool}" >/dev/null; done
 export FAKE_FB_ROOT="${TEST_ROOT}/kernel" FAKE_FB_STATE="${TEST_ROOT}/state"
 export FAKE_FB_WRITES="${TEST_ROOT}/writes.log" FAKE_FB_READS="${TEST_ROOT}/reads.log"
 export FAKE_FB_MODE=ok
@@ -27,6 +38,15 @@ SSH_TOKEN=abcdefabcdefabcdefabcdefabcdefab
 SSH_CHAIN=padm-f2bs-abcdefabcdef
 mkdir -p "${TEST_ROOT}/bin" "${FAKE_FB_ROOT}" "${FAKE_FB_STATE}"
 chmod 0700 "${FAKE_FB_STATE}"
+GUARD_ROOT="${TEST_ROOT}/collector"
+mkdir -p "${GUARD_ROOT}"
+chmod 0700 "${GUARD_ROOT}"
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+RUN_MOUNTED=1
+mkdir -p /run/padm/ssh-collector
+mount --bind "${GUARD_ROOT}" /run/padm/ssh-collector
+GUARD_MOUNTED=1
+mount -o remount,bind,ro /run/padm/ssh-collector
 
 # 只替换系统命令，state 解析、资源审计及每个动作均执行生产函数。
 sed '/^case "${1:-idle}" in/,$d' "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" \
@@ -170,7 +190,35 @@ else:
 PY
 chmod 0755 "${TEST_ROOT}/bin/ip"
 export PATH="${TEST_ROOT}/bin:${PATH}"
-run() { sh "${TEST_ROOT}/runner.sh" "${TEST_ROOT}/functions.sh" "$@"; }
+ssh_guard_refresh() {
+    python3 - "${GUARD_ROOT}/guard.json" "${PADM_SSH_COLLECTOR_TOKEN}" \
+        "${PADM_SSH_COLLECTOR_UNIT}" "${PADM_SSH_COLLECTOR_TARGET}" "${PADM_SSH_COLLECTOR_PORT}" <<'PY'
+import json
+import os
+import sys
+import time
+
+path, token, unit, target, port = sys.argv[1:]
+with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as handle:
+    boot = handle.read().strip().replace("-", "")
+guard = dict(schema=1, token=token, unit=unit, target=target, port=int(port),
+             boot=boot, invocation="a" * 32, monotonic_ns=time.monotonic_ns())
+with open(path, "w", encoding="ascii") as handle:
+    json.dump(guard, handle)
+os.chmod(path, 0o600)
+PY
+}
+run() {
+    if [[ "$1" == ssh-seed ]]; then
+        export PADM_SSH_COLLECTOR_TOKEN=13571357135713571357135713571357
+        export PADM_SSH_COLLECTOR_UNIT=ssh.service PADM_SSH_COLLECTOR_TARGET=$3 PADM_SSH_COLLECTOR_PORT=$4
+    fi
+    if [[ "$1" == ssh-seed || ( "$1" == ssh-action &&
+        ( "$2" == start || "$2" == ban || "$2" == check ) ) ]]; then
+        ssh_guard_refresh
+    fi
+    sh "${TEST_ROOT}/runner.sh" "${TEST_ROOT}/functions.sh" "$@"
+}
 reset() {
     rm -f -- "${FAKE_FB_STATE}/fail2ban.state" "${FAKE_FB_STATE}/fail2ban-control.state" \
         "${FAKE_FB_STATE}/fail2ban-ssh.state" "${FAKE_FB_ROOT}/failed"
@@ -179,6 +227,8 @@ reset() {
     : >"${FAKE_FB_WRITES}"
     : >"${FAKE_FB_READS}"
     export FAKE_FB_MODE=ok
+    unset PADM_SSH_COLLECTOR_TOKEN PADM_SSH_COLLECTOR_UNIT \
+        PADM_SSH_COLLECTOR_TARGET PADM_SSH_COLLECTOR_PORT
 }
 snapshot() {
     sha256sum "${FAKE_FB_ROOT}/"* "${FAKE_FB_STATE}/"* "${FAKE_FB_WRITES}" 2>/dev/null || true
@@ -527,11 +577,46 @@ for port in 0 65536 022220 22,23 '22;id'; do
     reject_unchanged ssh-valid 198.51.100.10 "${port}"
 done
 reset
-reject_unchanged ssh-run 198.51.100.10 22220
+reject_unchanged ssh-run ssh.service 198.51.100.10 22220
 before=$(snapshot)
-if sh "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" fail2ban-ssh 198.51.100.10 22220 \
+if sh "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" fail2ban-ssh ssh.service 198.51.100.10 22220 \
     >"${TEST_ROOT}/output.log" 2>&1; then exit 1; fi
 [[ "$(snapshot)" == "${before}" ]]
+
+# guard 失效时没有任何防火墙写入，正确夹具仍须经过生产门禁。
+reset
+run ssh-seed "${SSH_TOKEN}" 198.51.100.10 22220
+for mutation in token unit target port boot invocation expired; do
+    ssh_guard_refresh
+    python3 - "${GUARD_ROOT}/guard.json" "${mutation}" <<'PY'
+import json
+import sys
+
+path, mutation = sys.argv[1:]
+with open(path, encoding="ascii") as handle:
+    guard = json.load(handle)
+changes = dict(token="f" * 32, unit="other.service", target="198.51.100.11",
+               port=22221, boot="f" * 32, invocation="0" * 32,
+               expired=guard["monotonic_ns"] - 11_000_000_000)
+guard["monotonic_ns" if mutation == "expired" else mutation] = changes[mutation]
+with open(path, "w", encoding="ascii") as handle:
+    json.dump(guard, handle)
+PY
+    before=$(snapshot)
+    if sh "${TEST_ROOT}/runner.sh" "${TEST_ROOT}/functions.sh" \
+        ssh-action start "${SSH_TOKEN}" iptables -w >"${TEST_ROOT}/output.log" 2>&1; then exit 1; fi
+    grep -qF 'SSH collector guard expired or changed' "${TEST_ROOT}/output.log"
+    [[ "$(snapshot)" == "${before}" ]]
+done
+ssh_guard_refresh
+mount -o remount,bind,rw /run/padm/ssh-collector
+before=$(snapshot)
+if sh "${TEST_ROOT}/runner.sh" "${TEST_ROOT}/functions.sh" \
+    ssh-action start "${SSH_TOKEN}" iptables -w >"${TEST_ROOT}/output.log" 2>&1; then exit 1; fi
+grep -qF 'SSH collector guard mount is writable' "${TEST_ROOT}/output.log"
+[[ "$(snapshot)" == "${before}" ]]
+mount -o remount,bind,ro /run/padm/ssh-collector
+
 for target in 198.51.100.10 2001:db8::10; do
     table=iptables peer=192.0.2.20 other=ip6tables
     [[ "${target}" != *:* ]] || { table=ip6tables peer=2001:db8::20 other=iptables; }

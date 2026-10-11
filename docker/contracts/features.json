@@ -383,10 +383,10 @@
       "status": "host-integrated",
       "native_menu": "系统与脚本",
       "native_action": "Fail2ban 防护",
-      "profiles": ["net-fail2ban", "net-fail2ban-control"],
+      "profiles": ["net-fail2ban", "net-fail2ban-control", "net-fail2ban-ssh"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "7f 仅接入 WS 站点扫描和主控 WireGuard INPUT 认证防护；控制 jail 的启用与恢复在部署锁内重新证明真实来源，数据库与内核规则独立。封禁属于宿主防火墙，SSH 防护及真实宿主重启、卸载和完整管理尚未验收。"
+      "reason": "WS 站点扫描、主控 WireGuard INPUT 认证防护和单 unit、单目标地址与端口的 SSH collector/jail 分别管理。SSH 仅接受固定可信来源格式、当前运行证明与独立 INPUT owner，禁止与控制 jail 共存及恢复旧封禁数据库；真实宿主启停、重启、卸载与封禁仍需验收。"
     },
     "wireguard": {
       "status": "host-integrated",
@@ -584,6 +584,15 @@
       "profile": "net-fail2ban-control",
       "services": ["control", "net-wireguard", "net-fail2ban-control"],
       "address_families": ["ipv4"],
+      "network_mode": "host",
+      "capabilities": ["NET_ADMIN"],
+      "devices": []
+    },
+    "fail2ban-ssh": {
+      "status": "host-integrated",
+      "profile": "net-fail2ban-ssh",
+      "services": ["net-fail2ban-ssh"],
+      "address_families": ["ipv4", "ipv6"],
       "network_mode": "host",
       "capabilities": ["NET_ADMIN"],
       "devices": []

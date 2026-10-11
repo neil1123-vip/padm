@@ -712,6 +712,33 @@ service 必须是实际 `Id`，不接受仅指向另一 service 的 alias。unit
 `runtime_configuration_verified`、`jail_ready` 仍为 `false`。它只证明当次仍存活
 连接，不授权历史日志、连续 collector 或 jail，不启停宿主 SSH 服务。
 
+Fail2ban 子菜单第 15–19 项管理有限范围的 SSH 防护：
+
+```bash
+padm-docker fail2ban ssh status
+padm-docker fail2ban ssh unban 203.0.113.7
+padm-docker fail2ban ssh enable sshd-padm.service 198.51.100.10 2222 6 600 3600 --preview
+padm-docker fail2ban ssh enable sshd-padm.service 198.51.100.10 2222 6 600 3600 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban ssh settings sshd-padm.service 198.51.100.10 2222 8 900 7200 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban ssh disable --confirm PADM-DOCKER-EDIT
+```
+
+只支持原生 Linux root、systemd/cgroup v2 下无存量会话、禁止 reload 的专用
+OpenSSH service；从控制台或其它管理通道启用。service 须只有 MainPID 和一个
+唯一显式 TCP 监听；拒绝已有子进程、socket activation、别名、wildcard、多监听、
+不可信 journal 身份及代次漂移。仅消费本次启动后可信 `Failed password ... ssh2`
+事件，不读取历史日志、不恢复旧封禁；不支持其它认证失败格式和 SSH/control INPUT 共存。
+单地址族的 INPUT 动作只保护所选目标和端口，WS 防护仍使用独立 DOCKER-USER owner。
+
+启动受管 transient collector 后才启动 `net-fail2ban-ssh`，后者禁自动重启，
+只读挂载 root `0700` 来源目录；每批核验刷新 `0600` guard，过期 10 秒或代次
+失效时停止 jail 并按 token 清理规则。状态和解封核验当前 unit、容器、动作及 guard；
+停止先证明 jail 退出和规则清空，再回收 collector。未证明的残留保留并拒绝接管。
+已配置 SSH 时 update、rollback 和业务恢复明确拒绝，先经受管菜单停用再操作；
+普通 Docker Compose 启动不能代替此入口，宿主 SSH service 本身不由菜单启停。
+隔离 amd64 systemd/OpenSSH/Fail2ban 的实际启停、认证封禁、连接阻断、解封和
+来源失效清理已验；原生宿主、arm64、公网、整机重启及完整卸载仍待验收。
+
 已有 TProxy profile 使用私密 `data/net/transparent/tproxy.state` 记录随机链、
 规则 token、mark、路由表和路由身份。预检只读核对当前归属与候选冲突；
 启动失败及正常停止逐条精确撤销，不 flush 整个链或路由表。
@@ -1369,7 +1396,7 @@ Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官�
 
 - 🔄 更新 padm 脚本；若订阅控制服务已启用或正在运行，会同步刷新并重启。刷新失败不会回滚脚本更新，界面会提示从控制面维护入口重试。
 - 🧾 查看入口校验、版本、ref 和 manifest。
-- 🛡️ 管理 Fail2ban 防护：原生版包含 SSH 和 `/s/control/`；Docker 版提供 WS、控制面防护及 SSH 宿主只读预检。
+- 🛡️ 管理 Fail2ban 防护：原生版包含 SSH 和 `/s/control/`；Docker 版提供 WS、控制面及专用 SSH service 防护，完整宿主验收仍待补。
 - 🚀 查看或启用网络优化 / BBR。
 
 网络优化推荐项只启用当前内核提供的官方 `bbr`，并写入 padm 自己管理的 `/etc/sysctl.d/99-padm-bbr.conf`：

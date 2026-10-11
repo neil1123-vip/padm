@@ -476,6 +476,37 @@ returns `scope=ssh-unit-source-only`, `source_verified=true` and `unit_verified=
 live connection, not historical logs or continuous collector/jail readiness, and
 does not start or stop the host SSH service.
 
+Fail2ban submenu items 15–19 manage a dedicated SSH service:
+
+```bash
+padm-docker fail2ban ssh status
+padm-docker fail2ban ssh unban 203.0.113.7
+padm-docker fail2ban ssh enable sshd-padm.service 198.51.100.10 2222 6 600 3600 --preview
+padm-docker fail2ban ssh enable sshd-padm.service 198.51.100.10 2222 6 600 3600 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban ssh settings sshd-padm.service 198.51.100.10 2222 8 900 7200 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban ssh disable --confirm PADM-DOCKER-EDIT
+```
+
+This requires native Linux root, systemd/cgroup v2 and a dedicated OpenSSH service
+with no existing sessions and no reload. Enable it from a console or another management
+channel. Only MainPID and one explicit TCP listener are accepted; existing children,
+socket activation, aliases, wildcard/multiple listeners and untrusted journal identities
+are rejected. The collector accepts only fresh trusted `Failed password ... ssh2` events.
+Other authentication formats, historical logs, restored bans and SSH/control INPUT
+coexistence are unsupported.
+
+A managed transient collector starts before `net-fail2ban-ssh`. The jail disables
+automatic restart and reads a private collector directory through a read-only mount.
+A verified batch refreshes a `0600` guard; expiry after 10 seconds or source generation
+loss stops the jail and removes only its owned rules. Status/unban verify the current
+unit, container, action and guard. Stop proves jail exit and clean rules before retiring
+the collector; unknown residue is retained. Update, rollback and business restore reject
+enabled SSH protection; disable it through the managed entry first. The host SSH service
+itself is never started or stopped by these commands.
+Isolated amd64 systemd/OpenSSH/Fail2ban startup, authentication bans, blocked connections,
+unban, stop and source-loss cleanup passed. Native hosts, arm64, public networks,
+whole-machine restart and complete uninstall still require acceptance.
+
 Status and unban access only the fixed `padm-nginx` jail in a running `net-fail2ban`
 container whose spec, image, labels and mounts match the current deployment. They
 do not start services, change configuration or add bans. Unban accepts one literal
@@ -1398,7 +1429,7 @@ Maintainers can run the `Build sing-box Traffic Stats` Actions workflow, leaving
 
 - 🔄 Update the padm script; if the subscription control service is enabled or running, the update also refreshes and restarts it. A refresh failure does not roll back the script update and prompts you to retry from control-plane maintenance.
 - 🧾 Inspect entry validation, version, ref, and manifest.
-- 🛡️ Manage Fail2ban protection: native deployments include SSH and `/s/control/`; Docker provides WS, control-plane protection, and read-only SSH host preflight.
+- 🛡️ Manage Fail2ban protection: native deployments include SSH and `/s/control/`; Docker provides WS, control-plane and dedicated SSH service protection, with full native-host acceptance pending.
 - 🚀 Inspect or enable network optimization / BBR.
 
 The recommended network optimization only enables the official `bbr` implementation provided by the current kernel and writes padm's own `/etc/sysctl.d/99-padm-bbr.conf`:

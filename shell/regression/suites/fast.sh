@@ -405,6 +405,11 @@ runDockerSshPreflightRegression() {
         python3 -B "${PROJECT_ROOT}/docker/tests/ssh-source.py" &&
         python3 -B "${PROJECT_ROOT}/docker/tests/ssh-journal.py" &&
         python3 -B "${PROJECT_ROOT}/docker/tests/ssh-ledger.py" &&
+        python3 -B "${PROJECT_ROOT}/docker/tests/ssh-collector.py" &&
+        python3 -B "${PROJECT_ROOT}/docker/tests/ssh-runtime.py" &&
+        bash "${PROJECT_ROOT}/docker/tests/ssh-fail2ban.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/ssh-menu.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/ssh-start.sh" &&
         python3 -B "${PROJECT_ROOT}/docker/tests/ssh-source-client.py"
 }
 

@@ -100,7 +100,7 @@ stateDigest=$(find "${TEST_ROOT}/state" -type f -exec sha256sum {} + | sort)
     fail '真实 CLI 清理改写安装状态'
 
 beforeCalls=$(wc -l <"${TEST_ROOT}/calls")
-for action in status enable disable settings unban verify-source verify-unit '' --json; do
+for action in enable settings unban verify-source verify-unit '' --json; do
     expectStatus 2 dockerFail2banCommand ssh "${action}"
 done
 expectStatus 2 dockerFail2banCommand ssh preflight --preview

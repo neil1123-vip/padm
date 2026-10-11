@@ -444,7 +444,7 @@ dockerEntryBundleModulesPresent() {
         shell/core/deployment_mode.sh shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
-    for required in renewal schedule geo control-sync control; do
+    for required in renewal schedule geo control-sync control ssh-runtime; do
         if grep -qF "/${required}.sh\"" "${sourceRoot}/docker/lib/services.sh"; then
             [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
                 ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
@@ -459,6 +459,12 @@ dockerEntryBundleModulesPresent() {
     if grep -qF '/docker/lib/ssh-journal.py"' "${sourceRoot}/docker/lib/services.sh"; then
         [[ -f "${sourceRoot}/docker/lib/ssh-journal.py" &&
             ! -L "${sourceRoot}/docker/lib/ssh-journal.py" ]] || return 1
+    fi
+    if grep -qF '/ssh-runtime.sh"' "${sourceRoot}/docker/lib/services.sh"; then
+        for required in ssh-runtime.py ssh-collector.py; do
+            [[ -f "${sourceRoot}/docker/lib/${required}" &&
+                ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
+        done
     fi
     if grep -qF '/shell/core/cores.sh"' "${sourceRoot}/docker/lib/lifecycle.sh"; then
         [[ -f "${sourceRoot}/shell/core/cores.sh" && ! -L "${sourceRoot}/shell/core/cores.sh" ]] || return 1

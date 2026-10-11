@@ -29,7 +29,8 @@ dockerRealityStreamContractChecks() {
     )
     streamContainerBoundary() {
         if [[ "$*" == "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False" ||
-            "$*" == "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False" ]]; then
+            "$*" == "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False" ||
+            "$*" == "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban-ssh --filter label=com.docker.compose.oneoff=False" ]]; then
             return 0
         fi
         if [[ "$*" == 'info --format {{.ServerVersion}}' ]]; then

@@ -4478,6 +4478,39 @@ Jobs 6/占 2 槽、排队 482 ms、cache_hit=false；
 先定义一个可验收的有限支持合同，未支持的实例或日志来源明确拒绝，
 复用已有 INPUT 所有权后端与 Fail2ban 管理流程；不再扩展原型枚举。
 
+### 8c.3：有限 SSH collector/jail 与菜单管理
+
+支持合同收敛到原生 Linux root、systemd/cgroup v2 下无存量会话且禁止 reload
+的专用 OpenSSH service，MainPID 与唯一显式 TCP listener 固定。初始化
+checkpoint 前后拒绝任何已有 child，防旧连接认证被归到新监听。只消费本次
+启动后的可信密码失败；额外认证格式、socket activation、wildcard、多监听、
+SSH/control INPUT 共存、历史日志和旧封禁数据库均不支持。
+
+collector 每批前后复核 unit/监听及可信 journald 身份，规范 IP 单行输出；
+root 0700 目录/0600 原子 guard、1 秒轮询、10 秒 TTL。runtime 通过随机
+transient notify unit 启动，独立管理锁、执行路径权限、unit invocation、
+Environment、实际 stdout 与日志路径核验；未知 owner 拒绝接管。
+菜单 15–19 和 CLI 提供状态、解封、启用、停用与六参数编辑；普通服务和 jail
+启动分离，spec/deployment/compose 摘要复核后 no-deps 启 jail。SSH 监督失效
+正常停止 server、精确回收监督和睡眠子进程，按 token 清理 INPUT；
+失败保留证据。未接的 update/rollback/业务恢复明确拒绝，先受管停用。
+
+定向 `docker-ssh-preflight` 通过：来源 20、unit 11、Ledger 5、collector 7、
+runtime 4，加配置合同、菜单 pipe/PTY 和监督失效/TERM/自然退出；
+  最新入口 6182 ms，复用含 Fail2ban 的工具镜像。ownership 真实私有只读挂载
+通过，入口 40873 ms；仅测试容器增加 SYS_ADMIN，不增加生产 capability。
+隔离 amd64 systemd 257/OpenSSH 10.0p2/Fail2ban 1.1.0 实际启停、
+真实失败认证到封禁、外部命名空间连接 DROP、解封、正常清理、新 token
+重启及来源失效清理通过；证据 `.tmp-ssh-managed-8c3/`。
+  集成后 `docker-contracts -Jobs 6` 的 47/47 通过，入口 353130 ms；
+  证据 `.tmp-regression-docker-ce7d154952b8408fabf781d57e865f06/`。
+  修复严格 Docker 夹具的第三 jail 查询与回滚当前部署夹具，保留原审计断言；
+  之后裸安装入口补齐 runtime 模块门，`docker-phase1` 69197 ms 通过；
+  Shell 语法及新增脚本 ShellCheck 通过，菜单与监督脚本修正后定向复验通过。
+  本轮隔离验收容器已删除，日志与摘要保留，重复源码归档清理后不影响取证。
+这是 Docker Desktop 内隔离 systemd/内核验收，不替代原生宿主、
+arm64、公网、整机重启或完整卸载验收，总目标仍 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
