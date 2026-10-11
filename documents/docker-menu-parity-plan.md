@@ -4378,6 +4378,69 @@ Jobs 2；`.tmp-regression-docker-30b8e8649c6b4e64b3ed3d6b0b800cbb/`。
 本次只验证菜单、CLI 与已有 unit 合同接入，未新做公网/原生宿主/arm64
 的外部挑战；SSH 服务恢复、持续 collector/jail 仍待推进，总目标 active。
 
+#### 5C.8c.2s 正常运行期已回收 task 的身份退役
+
+本阶段处理短连接结束后两份 pidfd 与 Ledger registry 一直积累到 run
+finally 的问题。仅在正常事件处理之后、下一次正常等待之前与空闲等待中
+扫描，清理回收流程和创建事件首次固定 child 的屏障保持原合同。
+扫描间隔 10 ms，真实 terminal wait 后立即扫描；不新增 wait 或数字 PID
+回收，不以 EXIT 通知、POLLIN、ECHILD 或 proc 路径消失代替真正回收。
+
+必须同时满足原 driver pidfd 与 Ledger held pidfd 明确 `Pid=-1`、
+Ledger 已处理 EXIT、pending 为空，并且没有自身或父子方向未闭合的
+creation、group、early、pending、unfixed 关联，才关闭两份原 FD，
+移除 retired/registered/registry。历史消息、epoch、32 条总消息上限、
+原 deadline 与 poison 对历史 accepted 的撤销保持原语义。
+
+已退役身份不再占用数值 PID 登记位置；晚到旧消息仍须原 SCM_PIDFD
+匹配当前代次，不能绑定新 task。扫描窗口内若新 FORK child 撞到尚未
+释放的旧 retired 数值 PID，仍安全拒绝；不在首次 pin 前增加可能失败的
+退役操作。该碰撞窗口的完整收容/回收未实测，可能留下 cleanup_error，
+不能以本阶段声明任意 PID 复用时序均可继续。
+
+一个集中合同覆盖 8 轮真实子代：原父 WNOWAIT 保留 zombie 时双原 FD
+仍为原 PID，真 wait 后才退役；逐次核两 FD EBADF、registry/registered
+删除、恒定 FD 数、退役早于下轮创建。terminal/pending、父子双向关系、
+held 仍活与缺 Pid 字段均拒绝；晚到真实旧 SCM_PIDFD 在退役后拒绝，
+模拟数值 PID 映射重新登记新代次后，旧真实 pidfd 触发 poison 并撤销
+8 条既有 accepted 历史。该映射不是实际内核数值 PID 复用。
+
+首轮 driver 合同暴露测试旧 event 字段过滤与限频扫描注入问题，已修复
+测试，未放宽生产门禁或原 8 秒期限。重跑 `docker-ssh-driver` 24/24，
+内部 6100 ms、入口 7044 ms；`.tmp-regression-docker-5b2cff61746d4d1bbc676fb789ddb175/`。
+`docker-ssh-preflight` source 20/20、journal 11/11、Ledger 5/5 与客户端
+合同通过，内部 1143 ms、入口 2107 ms；
+`.tmp-regression-docker-82b0a620cd96477985201f741a409e68/`。均 Jobs 2，
+复用工具镜像，失败原日志保留，不跳过原创建/ABI/故障合同。
+
+真实固定 systemd/OpenSSH 3 轮短连接 attempt1 通过，入口 22485 ms；
+复用镜像 `sha256:0698b0ffcad3c265ab623b5bce0fcb9ef6cf9ed038811ba6b34162eee5d76f00`，
+Linux/amd64、断网、私有 cgroup、无宿主挂载，10 个输入容器内哈希匹配。
+每轮两个子代真回收/退役，FD 完整清单均回到 6、registry/registered/owned
+仅剩 live master，关联与附件为空。9 条 session 原消息保持原 epoch/锚点，
+3 条无 accepted 锚点的 master 消息拒绝，总 12 条未重置 32 条预算。
+轮间 expected_tuple 只在可信夹具的 master 真实停点切换到预绑定客户端，
+不把该更新接口加入生产 driver 或扩大来源授权。
+最后 master 原 pidfd SIGTERM 自然退出 0，六子代各 255；
+最终 FD `5 → 5`、Ledger closed/unpoisoned、所有 remaining 为空，
+systemd stop 后 inactive/dead、监听空，容器已删除。
+复现源与小证据保留 `.tmp-ssh-unit-driver-8c2s/`。
+
+首套集中完整合同 47/47 通过，内部 287207 ms、入口 288119 ms；
+`.tmp-regression-docker-4093bd0eb439402ea734666da7d854d8/`。运行期间另一工作
+拉入发布提交 `2a06a940`，仅 `shell/core/version.sh` 和 `versions.lock`
+从 3.27.0 更新到 3.28.0；保留该提交，不把旧版本快照作为最终输入证明。
+本阶段三个实现/测试文件未变，按输入变化规则在当前版本集中重跑，
+复用工具镜像，不重复定向或真实探针。当前 3.28.0 快照完整合同仍为
+47/47、exit 0，内部 296922 ms、入口 297854 ms、排队 388 ms，
+Jobs 6/占 2 槽、cache_hit=false；
+`.tmp-regression-docker-c8471d4f40b54864a2ed766c126a17ad/`。
+回归前 298 文件流式哈希与工作区全匹配，结果补写后仅本计划更新；
+实现/source/journal 和真实探针冻结输入未变。独审生产、测试及真实夹具
+均无阻断，临时容器无残留；保留失败原日志、回归结果、哈希及真实探针
+的小证据。本轮删除 10 个归档/清单，共 47789496 bytes。
+本阶段不新增持续 collector/jail、宿主 SSH 服务恢复或任意 OpenSSH 兼容承诺。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

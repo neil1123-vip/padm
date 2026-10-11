@@ -296,6 +296,31 @@ class Ledger:
         except Exception as error:
             self._fail(f"SSH 消息账本停点提交失败：{error}")
 
+    def retire_terminal(self, pid, generation, held_pidfd):
+        self._check()
+        try:
+            identity = self.registry[pid]
+            if (not identity["terminal"] or identity["pending"]
+                    or identity["generation"] != generation
+                    or identity["held_pidfd"] != held_pidfd or held_pidfd not in self._fds):
+                raise Failure("SSH 消息账本退役缺少完整终结身份")
+            fields = dict(line.split(":", 1) for line in
+                          Path(f"/proc/self/fdinfo/{held_pidfd}").read_text().splitlines()
+                          if ":" in line)
+            if int(fields.get("Pid", "-2")) != -1:
+                raise Failure("SSH 消息账本原 task 尚未真正回收")
+            self._check()
+            row = {"pid": pid, "generation": copy.deepcopy(identity["generation"]),
+                   "epoch": identity["epoch"], "epoch_exe": identity["epoch_exe"],
+                   "held_pidfd": held_pidfd, "held_pidfd_pid": -1,
+                   "authoritative": False, "jail_ready": False}
+            # 历史消息仍由 poison 撤销；这里只释放已真回收的身份，不重置 epoch 或预算。
+            self._drop(held_pidfd)
+            del self.registry[pid]
+            return row
+        except Exception as error:
+            self._fail(f"SSH 消息账本身份退役失败：{error}")
+
     def close(self):
         if self.closed:
             return

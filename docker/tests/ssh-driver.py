@@ -144,7 +144,7 @@ class DriverContracts(unittest.TestCase):
         self.assertFalse(closed["established_tuple_live"])
         self.assertTrue(closed["historical_anchor"]["accepted_matches"])
         transitions = [row for row in evidence["events"]
-                       if row["pid"] == pid and row["event"] in (4, 6)]
+                       if row["pid"] == pid and row.get("event") in (4, 6)]
         self.assertEqual([row["event"] for row in transitions], [4, 6])
         self.assertEqual(transitions[0]["ledger"]["order"],
                          ["drain-eagain", "pending-commit", "epoch-update"])
@@ -639,6 +639,227 @@ class DriverContracts(unittest.TestCase):
                 except ChildProcessError:
                     pass
 
+    def test_runtime_identity_retirement_preserves_history_and_rejects_stale_pidfd(self):
+        backlog = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        backlog.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+        backlog.setsockopt(socket.SOL_SOCKET, driver_module.ledger_module.SO_PASSPIDFD, 1)
+        backlog.setblocking(False)
+        backlog_path = str(Path(self.temp.name) / "backlog.sock")
+        backlog.bind(backlog_path)
+        self.driver = driver_module.ControlledDriver(time.monotonic() + 8,
+                                                     self.receiver, self.expected)
+        baseline = len(os.listdir("/proc/self/fd"))
+        original_event, original_retire = self.driver._event, self.driver._retire_reaped
+        captured, terminal_seen, released, fd_counts = {}, set(), [], []
+        stale = None
+
+        class DelayedMessage:
+            def __init__(self, message):
+                self.message = message
+
+            def recvmsg(self, *_args):
+                if self.message is None:
+                    raise BlockingIOError(errno.EAGAIN, "已交付真实消息")
+                message, self.message = self.message, None
+                return message
+
+        def observe(pid, status):
+            nonlocal stale
+            if (os.WIFSTOPPED(status) and status >> 16 == 0
+                    and os.WSTOPSIG(status) == signal.SIGSTOP and pid in self.driver.registered):
+                if pid != self.driver.master:
+                    captured[pid] = backlog.recvmsg(4096, 1024, socket.MSG_CMSG_CLOEXEC)
+                elif len(released) == 8:
+                    self.assertEqual(len([row for row in self.driver.ledger.messages
+                                         if row["accepted"]]), 8)
+                    old_pid = released[0]
+                    old = next(row for row in self.driver.evidence["events"]
+                               if row.get("kind") == "identity-retired" and row["pid"] == old_pid)
+                    current = self.driver._sample(pid)
+                    for gate in ("still-live", "missing-Pid"):
+                        ledger = driver_module.ledger_module.Ledger(time.monotonic() + 1)
+                        ledger.register(current["process"], current)
+                        identity = ledger.registry[pid]
+                        identity["terminal"] = True
+                        descriptor = identity["held_pidfd"]
+                        try:
+                            if gate == "missing-Pid":
+                                with patch.object(driver_module.ledger_module.Path, "read_text",
+                                                  return_value="pos:\t0\n"):
+                                    with self.assertRaisesRegex(driver_module.Failure, "尚未真正回收"):
+                                        ledger.retire_terminal(pid, identity["generation"], descriptor)
+                            else:
+                                with self.assertRaisesRegex(driver_module.Failure, "尚未真正回收"):
+                                    ledger.retire_terminal(pid, identity["generation"], descriptor)
+                            self.assertIn(pid, ledger.registry)
+                            self.assertTrue(ledger.closed and ledger.poisoned)
+                            with self.assertRaises(OSError) as error:
+                                os.fstat(descriptor)
+                            self.assertEqual(error.exception.errno, errno.EBADF)
+                        finally:
+                            ledger.close()
+                    new = copy.deepcopy(current)
+                    new["process"]["pid"] = old_pid
+                    new["process"]["starttime_ticks"] = old["generation"]["starttime_ticks"] + 1
+                    process = self.driver.ledger._process
+                    verify_pidfd = self.driver.ledger._pidfd
+                    open_pidfd = os.pidfd_open
+
+                    def alias_process(number):
+                        return copy.deepcopy(new["process"]) if number == old_pid else process(number)
+
+                    def alias_pidfd(descriptor, number):
+                        result = verify_pidfd(descriptor, pid if number == old_pid else number)
+                        result["pid"] = number
+                        return result
+
+                    # 仅数值 PID 复用映射为模拟；新旧 pidfd 都由真实内核创建并保持原身份。
+                    with (
+                        patch.object(self.driver.ledger, "_process", alias_process),
+                        patch.object(self.driver.ledger, "_pidfd", alias_pidfd),
+                        patch.object(driver_module.os, "pidfd_open",
+                                     lambda number: open_pidfd(pid if number == old_pid else number)),
+                    ):
+                        self.driver.ledger.register(new["process"], new)
+                        self.assertNotEqual(self.driver.ledger.registry[old_pid]["generation"],
+                                            old["generation"])
+                        message, stale = stale, None
+                        self.driver.ledger.drain(DelayedMessage(message))
+                    self.fail("旧 pidfd 不得绑定重新登记的新代次")
+            original_event(pid, status)
+            if ((os.WIFEXITED(status) or os.WIFSIGNALED(status))
+                    and pid != self.driver.master):
+                identity = self.driver.ledger.registry[pid]
+                descriptors = (self.driver.retired[pid], identity["held_pidfd"])
+                self.assertTrue(identity["terminal"])
+                self.assertFalse(identity["pending"])
+                # 原父 WNOWAIT 保留真实 zombie，不能拿 ptrace 终局提前关掉两个原 FD。
+                self.assertEqual([self.driver._pidfd_pid(fd) for fd in descriptors], [pid, pid])
+                original_retire(force=True)
+                self.assertIn(pid, self.driver.retired)
+                self.assertIn(pid, self.driver.ledger.registry)
+                terminal_seen.add(pid)
+                (Path(self.temp.name) / f"reap-{pid}").touch()
+
+        def retire(force=False):
+            nonlocal stale
+            candidates = {pid: (fd, self.driver.ledger.registry[pid]["held_pidfd"])
+                          for pid, fd in self.driver.retired.items()}
+            checked = False
+            for pid, descriptors in candidates.items():
+                if pid in terminal_seen and self.driver._pidfd_pid(descriptors[0]) == -1:
+                    checked = True
+                    identity = self.driver.ledger.registry[pid]
+                    for field, value in (("terminal", False), ("pending", [object()])):
+                        saved = identity[field]
+                        identity[field] = value
+                        try:
+                            original_retire(force=True)
+                            self.assertIn(pid, self.driver.retired)
+                        finally:
+                            identity[field] = saved
+                    links = (
+                        (self.driver.creations, pid, {}),
+                        (self.driver.creations, self.driver.master, {"event_child": pid}),
+                        (self.driver.group_changes, pid, {}),
+                        (self.driver.pending_children, pid, (self.driver.master, {})),
+                        (self.driver.pending_children, -1, (pid, {})),
+                        (self.driver.early_stops, pid, ({}, {"process": {"ppid": -1}})),
+                        (self.driver.early_stops, -1, ({}, {"process": {"ppid": pid}})),
+                        (self.driver.unfixed_children, pid, {"summary": {"parent_pid": -1}}),
+                        (self.driver.unfixed_children, -1, {"summary": {"parent_pid": pid}}),
+                    )
+                    for mapping, key, value in links:
+                        self.assertNotIn(key, mapping)
+                        mapping[key] = value
+                        try:
+                            original_retire(force=True)
+                            self.assertIn(pid, self.driver.retired)
+                        finally:
+                            del mapping[key]
+            # 负例已推进限频时钟，矩阵结束后只强制执行一次真实退役。
+            original_retire(force or checked)
+            for pid, descriptors in candidates.items():
+                if pid not in self.driver.retired:
+                    self.assertIn(pid, terminal_seen)
+                    self.assertNotIn(pid, self.driver.registered)
+                    self.assertNotIn(pid, self.driver.ledger.registry)
+                    for descriptor in descriptors:
+                        with self.assertRaises(OSError) as error:
+                            os.fstat(descriptor)
+                        self.assertEqual(error.exception.errno, errno.EBADF)
+                    message = captured.pop(pid)
+                    if not released:
+                        body, ancillary, flags, address = message
+                        duplicate = [(level, kind,
+                                      driver_module.ledger_module.struct.pack(
+                                          "i", os.dup(driver_module.ledger_module.struct.unpack(
+                                              "i", payload)[0]))
+                                      if kind == driver_module.ledger_module.SCM_PIDFD else payload)
+                                     for level, kind, payload in ancillary]
+                        stale = (body, duplicate, flags, address)
+                    row, = self.driver.ledger.drain(DelayedMessage(message))["messages"]
+                    self.assertEqual(row["rejection"], "unknown_sender")
+                    self.assertFalse(row["accepted"] or row["pending"])
+                    self.assertEqual(self.driver.registered, {self.driver.master})
+                    self.assertEqual(set(self.driver.ledger.registry), {self.driver.master})
+                    fd_counts.append(len(os.listdir("/proc/self/fd")))
+                    self.assertEqual(fd_counts[-1], baseline + 3)
+                    released.append(pid)
+                    (Path(self.temp.name) / f"retired-{pid}").touch()
+
+        def repeated_children():
+            self.client.close()
+            accepted, _ = self.listener.accept()
+            self.listener.close()
+            for index in range(8):
+                child = os.fork()
+                if child == 0:
+                    sender = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+                    sender.sendto(f"retire-{index}".encode(), self.path)
+                    sender.sendto(b"late-original", backlog_path)
+                    os.kill(os.getpid(), signal.SIGSTOP)
+                    sender.close()
+                    accepted.close()
+                    os._exit(23)
+                os.waitid(os.P_PID, child, os.WEXITED | os.WNOWAIT)
+                while not (Path(self.temp.name) / f"reap-{child}").exists():
+                    time.sleep(0.001)
+                waited, status = os.waitpid(child, 0)
+                if waited != child or os.waitstatus_to_exitcode(status) != 23:
+                    os._exit(112)
+                while not (Path(self.temp.name) / f"retired-{child}").exists():
+                    time.sleep(0.001)
+            os.kill(os.getpid(), signal.SIGSTOP)
+            accepted.close()
+            os._exit(0)
+
+        self.driver._event, self.driver._retire_reaped = observe, retire
+        try:
+            with self.assertRaisesRegex(driver_module.Failure, "pidfd task 已改变"):
+                self.driver.run(repeated_children)
+            evidence = self.driver.evidence
+            self.assert_clean(evidence)
+            self.assertEqual(len(released), 8)
+            self.assertFalse(captured)
+            self.assertEqual(len(set(fd_counts)), 1)
+            retired = [row for row in evidence["events"] if row.get("kind") == "identity-retired"]
+            self.assertEqual({row["pid"] for row in retired}, set(released))
+            self.assertTrue(all(row["driver_pidfd_pid"] == row["held_pidfd_pid"] == -1
+                                for row in retired))
+            for previous, following in zip(retired, evidence["creations"][1:]):
+                self.assertLess(previous["retired_monotonic_ns"], following["entry_monotonic_ns"])
+            self.assertTrue(evidence["ledger_poisoned"])
+            self.assertFalse(any(row["accepted"] or row["pending"] for row in evidence["messages"]))
+        finally:
+            for message in [*captured.values(), *([stale] if stale is not None else [])]:
+                for level, kind, payload in message[1]:
+                    if level == socket.SOL_SOCKET and kind == driver_module.ledger_module.SCM_PIDFD:
+                        descriptor, = driver_module.ledger_module.struct.unpack("i", payload)
+                        if descriptor >= 0:
+                            os.close(descriptor)
+            backlog.close()
+
     def test_real_pthread_creation_is_rejected_before_execution(self):
         def clone_fixture():
             self.client.close()
@@ -656,7 +877,7 @@ class DriverContracts(unittest.TestCase):
         self.assertTrue(evidence["ledger_poisoned"])
         self.assertFalse(any(row["returned_monotonic_ns"] >= rejected["rejected_monotonic_ns"]
                              for row in evidence["continues"]))
-        self.assertFalse(any(row["event"] in (1, 2, 3) for row in evidence["events"]))
+        self.assertFalse(any(row.get("event") in (1, 2, 3) for row in evidence["events"]))
         self.assertTrue(all(row.get("signal") == signal.SIGKILL
                             for row in evidence["cleanup"] if row["kind"] == "cleanup-continue"))
 
@@ -734,7 +955,7 @@ class DriverContracts(unittest.TestCase):
         self.assertEqual((rejected["pid"], rejected["syscall"]["op"], rejected["syscall"]["nr"]),
                          (self.driver.master, 1, driver_module.SYS_VFORK))
         self.assertEqual(rejected["syscall"]["arch"], driver_module.AUDIT_ARCH_X86_64)
-        self.assertFalse(any(row["event"] in (driver_module.FORK, driver_module.VFORK, driver_module.CLONE)
+        self.assertFalse(any(row.get("event") in (driver_module.FORK, driver_module.VFORK, driver_module.CLONE)
                              for row in evidence["events"]))
         self.assertEqual([row["pid"] for row in evidence["task_pins"]], [self.driver.master])
         self.assertFalse(evidence["first_stops"])
@@ -790,7 +1011,7 @@ class DriverContracts(unittest.TestCase):
                 self.assertEqual(rejected["syscall"]["nr"], nr)
                 if flags is not None:
                     self.assertEqual(rejected["syscall"]["args"][0], flags)
-                self.assertFalse(any(row["event"] in (1, 2, 3) for row in evidence["events"]))
+                self.assertFalse(any(row.get("event") in (1, 2, 3) for row in evidence["events"]))
                 self.assertLess(evidence["last_normal_resume_monotonic_ns"],
                                 rejected["rejected_monotonic_ns"])
                 self.assertFalse(Path(marker).exists())
@@ -1559,7 +1780,7 @@ class DriverContracts(unittest.TestCase):
         evidence = self.driver.evidence
         self.assert_clean(evidence)
         self.assertGreaterEqual(injection["after"], injection["deadline"])
-        fork = next(row for row in evidence["events"] if row["event"] == driver_module.FORK)
+        fork = next(row for row in evidence["events"] if row.get("event") == driver_module.FORK)
         self.assertGreater(fork["child_pid"], 0)
         self.assertFalse(Path(f"/proc/{fork['child_pid']}").exists())
         self.assertLess(evidence["last_normal_resume_monotonic_ns"], int(injection["before"] * 1e9))

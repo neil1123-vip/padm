@@ -144,6 +144,7 @@ class ControlledDriver:
         self.group_changes = {}
         self.creations = {}
         self.waiting_parent_exit = set()
+        self.next_retirement_scan = 0
         self.evidence = {
             "authoritative": False, "jail_ready": False,
             "scope": "只用于可信 amd64 fork fixture；不支持任意 OpenSSH 或 arm64",
@@ -161,6 +162,49 @@ class ControlledDriver:
                       Path(f"/proc/self/fdinfo/{descriptor}").read_text().splitlines()
                       if ":" in line)
         return int(fields.get("Pid", "-2"))
+
+    def _retire_reaped(self, force=False):
+        if not self.retired:
+            return
+        now = time.monotonic()
+        if not force and now < self.next_retirement_scan:
+            return
+        self.next_retirement_scan = now + 0.01
+        self._check()
+        for pid, descriptor in list(self.retired.items()):
+            held_pid = self._pidfd_pid(descriptor)
+            if held_pid == pid:
+                # tracer 终止通知不等于原父已 wait；不能夺取原父的回收。
+                continue
+            if held_pid != -1:
+                raise Failure("受控 SSH 退役的原 pidfd 身份无效")
+            identity = self.ledger.registry.get(pid)
+            if identity is None or pid not in self.registered:
+                raise Failure("受控 SSH 真回收 task 缺少登记身份")
+            if (not identity["terminal"] or identity["pending"]
+                    or pid in self.owned or pid in self.tracked or pid in self.stopped_tasks
+                    or pid in self.creations or pid in self.group_changes
+                    or pid in self.active_syscalls or pid in self.first_syscall_exit
+                    or pid in self.waiting_parent_exit or pid in self.pending_children
+                    or any(parent == pid for parent, _anchor in self.pending_children.values())
+                    or any(creation.get("event_child") == pid or creation.get("exit_rval") == pid
+                           for creation in self.creations.values())
+                    or pid in self.early_stops
+                    or any(frozen["process"]["ppid"] == pid
+                           for _first, frozen in self.early_stops.values())
+                    or pid in self.unfixed_children
+                    or any(unresolved["summary"]["parent_pid"] == pid
+                           for unresolved in self.unfixed_children.values())):
+                continue
+            row = self.ledger.retire_terminal(
+                pid, identity["generation"], identity["held_pidfd"])
+            os.close(descriptor)
+            del self.retired[pid]
+            self.registered.remove(pid)
+            self.evidence["events"].append({
+                "kind": "identity-retired", **row, "driver_pidfd": descriptor,
+                "driver_pidfd_pid": -1, "retired_monotonic_ns": time.monotonic_ns(),
+            })
 
     def _pin(self, pid, parent=None, source="run"):
         if type(pid) is not int or pid <= 0 or pid in self.owned or pid in self.retired:
@@ -396,6 +440,8 @@ class ControlledDriver:
     def _wait(self, initial=False):
         while True:
             self._check()
+            # 仅正常等待扫已处理终局的旧身份；cleanup 仍按原回收流程执行。
+            self._retire_reaped()
             for pid in [self.master] if initial else list(self.owned):
                 result = self._wait_original(pid)
                 if result is not None:
@@ -989,7 +1035,9 @@ class ControlledDriver:
             self.evidence["exitkill_set_monotonic_ns"] = time.monotonic_ns()
             self._normal_continue(pid)
             while self.tracked:
-                self._event(*self._wait())
+                pid, status = self._wait()
+                self._event(pid, status)
+                self._retire_reaped(force=os.WIFEXITED(status) or os.WIFSIGNALED(status))
             if (self.early_stops or self.pending_children or self.creations
                     or self.active_syscalls or self.first_syscall_exit or self.waiting_parent_exit
                     or self.group_changes):
