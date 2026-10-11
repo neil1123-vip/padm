@@ -332,7 +332,7 @@
       "profiles": ["nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5A.1 默认页、静态目录和 302 与 5A.2 逐入口 ALPN 诊断、推荐修复及三种持久化顺序已提供菜单/CLI；内容、规格与生成结果纳入候选、备份及失败/信号恢复。专项仅放行所选 ALPN 字段漂移，拒绝覆盖其它配置；本地真实 Nginx PROXY HTTP/2 已验，不把配置诊断当作 TLS 协商。组合能力仍 deferred：真实 Xray ALPN 协商、公网及原生双架构验收待补；webroot/standalone ACME 另列。"
+      "reason": "5A.1 默认页、静态目录和 302 与 5A.2 逐入口 ALPN 诊断、推荐修复及三种持久化顺序已提供菜单/CLI；内容、规格与生成结果纳入候选、备份及失败/信号恢复。专项仅放行所选 ALPN 字段漂移，拒绝覆盖其它配置；隔离 amd64 27/29 的真实 Xray 双栈 TLS ALPN、h1/h2 fallback/404、PROXY 来源及链接认证已验，不把配置诊断当作 TLS 协商。公网及原生双架构验收待补，组合能力仍 deferred；webroot/standalone ACME 另列。"
     },
     "entry-port-management": {
       "status": "deferred",

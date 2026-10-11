@@ -8,6 +8,7 @@ trap 'status=$?; printf "cdn-entries-real-fail: line=%s rc=%s command=%s\n" "${L
     exit 2
 }
 scriptRoot=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+[[ "${PADM_TEST_ALPN_ORDERS:-0}" == 0 || "${PADM_TEST_ALPN_ORDERS}" == 1 ]] || exit 2
 if [[ "$#" == 0 ]]; then
     python3 - "${scriptRoot}" <<'PY'
 import json
@@ -27,8 +28,10 @@ assert os.getuid() == 0 and sys.platform == "linux" and Path("/.dockerenv").is_f
 assert {item["ifname"] for item in json.loads(command(["ip", "-j", "link", "show"]))} == {"lo"}
 assert not Path("/var/run/docker.sock").exists(), "不得使用宿主 Docker Socket"
 inputs = json.loads(Path("/node-images.json").read_text())
-assert set(inputs) == {"xray", "sing-box", "ops", "nginx"}
-node = Path(tempfile.mkdtemp(prefix=".tmp-cdn-entry-", dir="/n"))
+alpn = os.environ.get("PADM_TEST_ALPN_ORDERS") == "1"
+suite = "alpn" if alpn else "cdn-entries"
+assert set(inputs) == {"xray", "sing-box", "ops", "nginx"} | ({"curl"} if alpn else set())
+node = Path(tempfile.mkdtemp(prefix=f".tmp-{suite}-", dir="/n"))
 docker = ["docker", "--host", f"unix://{node}/docker.sock"]
 daemon = child = None
 
@@ -49,14 +52,17 @@ with (node / "daemon.log").open("wb") as log:
         for item in inputs.values():
             image = json.loads(command(docker + ["image", "inspect", item["reference"]]))[0]
             assert image["Id"] == item["image_id"]
+        environment = dict(os.environ, DOCKER_HOST=docker[-1])
+        if alpn:
+            environment["PADM_TEST_HTTP2_CURL_REF"] = inputs["curl"]["image_id"]
         child = subprocess.Popen([
             "bash", str(scripts / "cdn-entries-real.sh"),
             *(inputs[name]["image_id"] for name in ("xray", "sing-box", "ops", "nginx"))],
-            env=dict(os.environ, DOCKER_HOST=docker[-1]))
+            env=environment)
         child_status = child.wait(timeout=600)
-        assert child_status == 0, f"CDN 实链路子脚本退出码 {child_status}"
+        assert child_status == 0, f"{suite} 实链路子脚本退出码 {child_status}"
         assert not command(docker + ["ps", "-aq"]).strip(), "测试容器未清理"
-        print("docker-cdn-entries-real-images=" + json.dumps(inputs), flush=True)
+        print(f"docker-{suite}-real-images=" + json.dumps(inputs), flush=True)
     finally:
         active_error = sys.exc_info()[0] is not None
         if child is not None:
@@ -70,12 +76,20 @@ with (node / "daemon.log").open("wb") as log:
                 stop(daemon)
         if active_error:
             print((node / "daemon.log").read_text()[-4000:], file=sys.stderr)
-        assert node.parent == Path("/n") and node.name.startswith(".tmp-cdn-entry-")
+        assert node.parent == Path("/n") and node.name.startswith(f".tmp-{suite}-")
         shutil.rmtree(node)
 PY
     exit 0
 fi
 # 事务由合同回归验证；实链路复用现有客户端，不再重复额度验收。
+if [[ "${PADM_TEST_ALPN_ORDERS:-0}" == 1 ]]; then
+    for protocol in 27 29; do
+        printf 'docker-alpn-real-start: protocol=%s core=xray\n' "${protocol}"
+        bash "${scriptRoot}/vmess-real.sh" "$1" "$2" "$3" "$4" "${protocol}" xray
+    done
+    printf 'docker-alpn-real-all-ok\n'
+    exit 0
+fi
 export PADM_TEST_CDN_ENTRIES=1
 for protocol in 21 22 23; do
     printf 'docker-cdn-entries-real-start: protocol=%s core=xray\n' "${protocol}"

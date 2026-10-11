@@ -15,7 +15,9 @@ PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 XRAY_REF=$1 SING_REF=$2 OPS_REF=$3 NGINX_REF=$4
 PROTOCOL=${5:-22} CORE=${6:-xray}
 CDN_ENTRIES=${PADM_TEST_CDN_ENTRIES:-0}
+ALPN_ORDERS=${PADM_TEST_ALPN_ORDERS:-0}
 [[ "${CDN_ENTRIES}" == 0 || "${CDN_ENTRIES}" == 1 ]] || exit 2
+[[ "${ALPN_ORDERS}" == 0 || "${ALPN_ORDERS}" == 1 ]] || exit 2
 [[ "${PROTOCOL}:${CORE}" == 21:xray || "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:xray ||
     "${PROTOCOL}:${CORE}" == 23:sing-box || "${PROTOCOL}:${CORE}" == 24:xray ||
     "${PROTOCOL}:${CORE}" == 25:xray || "${PROTOCOL}:${CORE}" == 27:xray ||
@@ -35,7 +37,12 @@ if [[ "${CDN_ENTRIES}" == 1 ]]; then
     # 分享端口就是实际 TLS 端口，客户端不得用容器端口替换生产链接。
     TLS_PORT=35469 TEST_NAME="${TEST_NAME}-cdn"
 fi
-for tool in docker jq python3 sha256sum tar openssl awk; do command -v "${tool}" >/dev/null; done
+if [[ "${ALPN_ORDERS}" == 1 ]]; then
+    [[ "${CDN_ENTRIES}" == 0 &&
+        ( "${PROTOCOL}:${CORE}" == 27:xray || "${PROTOCOL}:${CORE}" == 29:xray ) ]] || exit 2
+    TEST_NAME="${TEST_NAME}-alpn"
+fi
+for tool in docker jq python3 sha256sum tar openssl awk diff; do command -v "${tool}" >/dev/null; done
 stage=images
 XRAY_ID=$(docker image inspect --format '{{.Id}}' "${XRAY_REF}")
 SING_ID=$(docker image inspect --format '{{.Id}}' "${SING_REF}")
@@ -340,8 +347,11 @@ if [[ "${CDN_ENTRIES}" == 1 ]]; then
 fi
 generateClient() {
 stage="client-${cdnPhase}"
+local alpn
+alpn=$(jq -c '.core.protocols[0].fallback_tls.alpn // ["h2","http/1.1"]' \
+    "${PADM_DOCKER_INSTALL_DIR}/config/spec.json")
 python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" \
-    "${TRANSPORT}" "${TEST_NAME}" "${DOMAIN}" "${APP_PROTOCOL}" "${CDN_ENTRIES}" "${cdnPhase}" <<'PY'
+    "${TRANSPORT}" "${TEST_NAME}" "${DOMAIN}" "${APP_PROTOCOL}" "${CDN_ENTRIES}" "${cdnPhase}" "${alpn}" <<'PY'
 import base64
 import ipaddress
 import json
@@ -354,6 +364,7 @@ lines = pathlib.Path(sys.argv[1]).read_text().splitlines()
 endpoints = json.loads(sys.argv[3])
 transport, name, domain, app = sys.argv[4:8]
 cdn, cdn_phase = sys.argv[8] == "1", sys.argv[9]
+alpn = json.loads(sys.argv[10])
 share_port = 35469 if cdn else 35468
 assert [ipaddress.ip_address(x).version for x in endpoints] == [4, 6]
 servers = endpoints + ["edge.padm.test"] if cdn and cdn_phase == "override" else [domain]
@@ -368,7 +379,7 @@ def parse(line, server=servers[0], label=names[0]):
             expected = ({"encryption":"none","flow":"xtls-rprx-vision","security":"tls","sni":domain,
                          "fp":"chrome"} if app == "vless" else
                         {"peer":domain,"security":"tls","fp":"chrome","sni":domain})
-            expected.update(alpn="h2,http/1.1",type="tcp")
+            expected.update(alpn=",".join(alpn),type="tcp")
         elif transport == "grpc":
             expected = ({"encryption":"none","security":"tls","sni":domain} if app == "vless" else
                         {"peer":domain,"fp":"chrome","sni":domain})
@@ -402,7 +413,7 @@ if app != "vmess":
     sample = urllib.parse.urlsplit(lines[0])
     invalids = []
     fields = ((("encryption","wrong"),("type","tcp"),("host","wrong.test"),("path","/wrong"))
-              if transport == "ws" else (("alpn","http/1.1"),("type","ws")))
+              if transport == "ws" else (("alpn","invalid"),("type","ws")))
     fields += (("sni","wrong.test"),)
     fields += (("flow","wrong"),) if transport == "tcp" and app == "vless" else ()
     fields += (("serviceName","wrong"),) if transport == "grpc" else ()
@@ -486,18 +497,69 @@ compose up -d --pull never client
 client=$(compose ps -q client)
 fallbackProbe() {
     [[ "${TRANSPORT}" == tcp ]] || return 0
-    local body=${1:-$'padm-fallback-static-proof\n'} endpoint authority option version response actual clientAddress
+    local body=${1:-$'padm-fallback-static-proof\n'} endpoint authority option version response actual clientAddress alpn selections proofPath
+    local -a options=(--http1.1 --http2)
+    fallbackProbeCalls=$(( ${fallbackProbeCalls:-0} + 1 ))
+    if [[ "${ALPN_ORDERS}" == 1 ]]; then
+        alpn=$(jq -c '.core.protocols[0].fallback_tls.alpn // ["h2","http/1.1"]' \
+            "${PADM_DOCKER_INSTALL_DIR}/config/spec.json")
+        selections=$(docker run --rm --init -i --pull=never --read-only --cap-drop ALL --user 10001:10001 \
+            --network "${project}" --label "io.padm.test=${project}" \
+            --mount "type=volume,source=${volume},target=/etc/padm/client,readonly,volume-subpath=runtime/client" \
+            --entrypoint python3 "${OPS_ID}" - "${addresses}" "${alpn}" "${DOMAIN}" <<'PY'
+import json
+import socket
+import ssl
+import sys
+
+addresses, allowed, domain = json.loads(sys.argv[1]), json.loads(sys.argv[2]), sys.argv[3]
+results = {}
+for endpoint in addresses:
+    results[endpoint] = {}
+    for label, offered in (("http1", ["http/1.1"]), ("http2", ["h2", "http/1.1"]),
+                           ("h2_only", ["h2"]), ("configured", allowed)):
+        context = ssl.create_default_context(cafile="/etc/padm/client/ca.crt")
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.set_alpn_protocols(offered)
+        try:
+            with socket.create_connection((endpoint, 35468), timeout=5) as connection:
+                with context.wrap_socket(connection, server_hostname=domain) as secure:
+                    selected = secure.selected_alpn_protocol()
+        except ssl.SSLCertVerificationError:
+            raise
+        except ssl.SSLError:
+            assert label == "h2_only" and "h2" not in allowed
+            selected = "rejected"
+        common = set(offered).intersection(allowed)
+        assert (selected in common if common else selected in (None, "rejected")), (
+            endpoint, label, offered, allowed, selected)
+        results[endpoint][label] = selected
+print(json.dumps(results, separators=(",", ":")))
+PY
+)
+        if jq -e 'index("h2") != null' <<<"${alpn}" >/dev/null; then
+            options+=(--http2-prior-knowledge)
+        fi
+    fi
     while IFS= read -r endpoint; do
         authority=${endpoint}; [[ "${endpoint}" != *:* ]] || authority="[${endpoint}]"
-        for option in --http1.1 --http2; do
+        for option in "${options[@]}"; do
+            proofPath="/?padm-proxy-proof-${cdnPhase}-${option#--}-${fallbackProbeCalls}"
             version=1.1; [[ "${option}" != --http2 ]] || version=2
+            if [[ "${ALPN_ORDERS}" == 1 ]]; then
+                version=$(jq -r --arg endpoint "${endpoint}" --arg option "${option}" '
+                  .[$endpoint][if $option == "--http1.1" then "http1"
+                    elif $option == "--http2" then "http2" else "h2_only" end] |
+                    if . == "h2" then "2" elif . == "http/1.1" then "1.1" else error("no HTTP ALPN") end
+                ' <<<"${selections}")
+            fi
             response=$(docker run --rm --init --pull=never --read-only --cap-drop ALL --user 10001:10001 \
                 --network "${project}" --label "io.padm.test=${project}" \
                 --mount "type=volume,source=${volume},target=/etc/padm/client,readonly,volume-subpath=runtime/client" \
                 --entrypoint curl "${CURL_ID}" --fail --silent --show-error --noproxy '*' \
                 --connect-timeout 2 --max-time 5 "${option}" --cacert /etc/padm/client/ca.crt \
                 --resolve "${DOMAIN}:35468:${authority}" --write-out '%{http_version}\n%{local_ip}' \
-                "https://${DOMAIN}:35468/?padm-proxy-proof")
+                "https://${DOMAIN}:35468${proofPath}")
             clientAddress=${response##*$'\n'}
             response=${response%$'\n'*}
             [[ "${response}" == "${body}${version}" ]] || {
@@ -507,7 +569,7 @@ fallbackProbe() {
             }
             jq -e --arg address "${clientAddress}" 'index($address) == null' <<<"${addresses}" >/dev/null
             compose exec -T nginx cat /var/log/nginx/access.log |
-                awk -v address="${clientAddress}" '$1 == address && /GET \/\?padm-proxy-proof / {found=1}
+                awk -v address="${clientAddress}" -v path="${proofPath}" '$1 == address && index($0,"GET " path " ") {found=1}
                   END {exit !found}'
             response=$(docker run --rm --init --pull=never --read-only --cap-drop ALL --user 10001:10001 \
                 --network "${project}" --label "io.padm.test=${project}" \
@@ -535,7 +597,12 @@ fallbackProbe() {
             >"${TEST_ROOT}/wrong-sni-fallback.out" 2>"${TEST_ROOT}/wrong-sni-fallback.err" || actual=$?
         [[ "${actual}" != 0 && ! -s "${TEST_ROOT}/wrong-sni-fallback.out" ]]
     done < <(jq -r '.[]' <<<"${addresses}")
-    printf 'docker-%s-fallback-ok: alpn=h2,http/1.1 family=ipv4,ipv6 strict-ca-sni missing=404 proxy-source=client\n' "${TEST_NAME}"
+    if [[ "${ALPN_ORDERS}" == 1 ]]; then
+        printf 'docker-%s-fallback-ok: alpn=%s selected=%s family=ipv4,ipv6 strict-ca-sni missing=404 proxy-source=client\n' \
+            "${TEST_NAME}" "${alpn}" "${selections}"
+    else
+        printf 'docker-%s-fallback-ok: alpn=h2,http/1.1 family=ipv4,ipv6 strict-ca-sni missing=404 proxy-source=client\n' "${TEST_NAME}"
+    fi
 }
 probe() {
     docker run --rm --init --pull=never --read-only --cap-drop ALL --user 10001:10001 \
@@ -643,6 +710,93 @@ print("docker-"+test_name+"-probe-ok: core="+core+" phase="+phase+" source=proto
       transport_name+" share-phase="+sys.argv[5]+" socks="+",".join(results))
 ' "$1" "${TEST_NAME}" "${CORE}" "${TRANSPORT}" "${cdnPhase}"
 }
+if [[ "${ALPN_ORDERS}" == 1 ]]; then
+    fallbackProbe '<!doctype html><title>Welcome</title><h1>Welcome</h1>'
+    printf 'padm-fallback-static-proof\n' >"${PADM_DOCKER_INSTALL_DIR}/data/static/index.html"
+    chmod 0640 "${PADM_DOCKER_INSTALL_DIR}/data/static/index.html"
+    chown 0:10001 "${PADM_DOCKER_INSTALL_DIR}/data/static/index.html"
+    cp -a -- "${PADM_DOCKER_INSTALL_DIR}/data/static/." "${TEST_ROOT}/runtime/data/static/"
+    tar -cpf - -C "${TEST_ROOT}" runtime/data/static |
+        docker run --rm -i --pull=never --label "io.padm.test=${project}" --user 0 \
+            --mount "type=volume,source=${volume},target=/test" --entrypoint tar "${OPS_ID}" -xpf - -C /test
+    nginxState=$(docker inspect "$(compose ps -q nginx)" | jq -c '.[0] | {id:.Id,started_at:.State.StartedAt}')
+    coreState=$(docker inspect "$(compose ps -q "${CORE}")" | jq -c '.[0] | {id:.Id}')
+    for cdnPhase in reverse http1 recommended; do
+        stage="alpn-${cdnPhase}"
+        case "${cdnPhase}" in
+        reverse) currentAlpn='["http/1.1","h2"]' ;;
+        http1) currentAlpn='["http/1.1"]' ;;
+        recommended) currentAlpn='["h2","http/1.1"]' ;;
+        esac
+        request="${TEST_ROOT}/alpn-${cdnPhase}.json"
+        jq --argjson alpn "${currentAlpn}" '.core.protocols[0].fallback_tls.alpn = $alpn' \
+            "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${request}"
+        chmod 0600 "${request}"
+        dockerConfigureSpecValidate "${request}"
+        dockerCreateConfigurationCandidate
+        dockerGenerateCandidate "${request}" "${DOCKER_CONFIG_CANDIDATE}"
+        candidate=${DOCKER_CONFIG_CANDIDATE}
+        jq -e --argjson alpn "${currentAlpn}" '
+          .core.protocols[0].fallback_tls.alpn == $alpn
+        ' "${candidate}/config/spec.json" >/dev/null
+        cmp -s <(jq -S 'del(.core.protocols[0].fallback_tls.alpn)' "${TEST_ROOT}/spec.json") \
+            <(jq -S 'del(.core.protocols[0].fallback_tls.alpn)' "${candidate}/config/spec.json")
+        for file in config.json users.base; do
+            jq -e --argjson alpn "${currentAlpn}" '
+              [.inbounds[] | select(.tag == "entry-vmess") | .streamSettings.tlsSettings.alpn] == [$alpn]
+            ' "${candidate}/config/${CORE}/${file}" >/dev/null
+            cmp -s <(jq -S '(.inbounds[] | select(.tag == "entry-vmess") |
+                .streamSettings.tlsSettings) |= del(.alpn)' "${TEST_ROOT}/runtime/config/${CORE}/${file}") \
+                <(jq -S '(.inbounds[] | select(.tag == "entry-vmess") |
+                .streamSettings.tlsSettings) |= del(.alpn)' "${candidate}/config/${CORE}/${file}")
+        done
+        for file in compose.json deployment.json images.runtime.env; do
+            target="${PADM_DOCKER_INSTALL_DIR}/${file}"
+            [[ "${file}" != images.runtime.env ]] || target="${PADM_DOCKER_INSTALL_DIR}/images.env"
+            if [[ "${file}" == deployment.json ]]; then
+                # 候选记录当前 manifest 来源；只有此字段按生成器合同更新。
+                jq -e --slurpfile previous "${target}" '
+                  .previous_manifest_sha256 == $previous[0].manifest.sha256
+                ' "${candidate}/${file}" >/dev/null &&
+                    cmp -s <(jq -S 'del(.previous_manifest_sha256)' "${target}") \
+                        <(jq -S 'del(.previous_manifest_sha256)' "${candidate}/${file}")
+            else
+                cmp -s -- "${target}" "${candidate}/${file}"
+            fi || {
+                printf 'alpn preserved file mismatch: phase=%s file=%s\n' "${cdnPhase}" "${file}" >&2
+                exit 1
+            }
+        done
+        for directory in config/nginx secrets data/static; do
+            diff -rq -- "${PADM_DOCKER_INSTALL_DIR}/${directory}" "${candidate}/${directory}" >/dev/null
+        done
+        compose stop client
+        # 事务合同已有定向覆盖；这里只适配隔离卷，真实验证候选配置与链接。
+        cp -a -- "${candidate}/config/${CORE}/." "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/"
+        cp -a -- "${candidate}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+        cp -a -- "${candidate}/config/${CORE}/." "${TEST_ROOT}/runtime/config/${CORE}/"
+        dockerCleanupConfigurationCandidate
+        tar -cpf - -C "${TEST_ROOT}" "runtime/config/${CORE}" |
+            docker run --rm -i --pull=never --label "io.padm.test=${project}" --user 0 \
+                --mount "type=volume,source=${volume},target=/test" --entrypoint tar "${OPS_ID}" -xpf - -C /test
+        compose run --rm --no-deps "${CORE}" -test -config /etc/padm/xray/config.json >/dev/null
+        compose restart "${CORE}"
+        compose up -d --pull never --wait --wait-timeout 60 "${CORE}"
+        dockerProtocolCommand links >"${TEST_ROOT}/links.txt"
+        generateClient
+        compose up -d --pull never client
+        fallbackProbe
+        probe allow
+        [[ "$(docker inspect "$(compose ps -q nginx)" | jq -c '.[0] | {id:.Id,started_at:.State.StartedAt}')" == "${nginxState}" ]]
+        [[ "$(docker inspect "$(compose ps -q "${CORE}")" | jq -c '.[0] | {id:.Id}')" == "${coreState}" ]]
+        [[ "$(docker inspect --format '{{.State.Health.Status}}' "$(compose ps -q "${CORE}")")" == healthy ]]
+        printf 'docker-alpn-orders-phase-ok: protocol=%s core=%s phase=%s alpn=%s spec-core-users-links=consistent identity-fallback-nginx-compose-tls-site=unchanged\n' \
+            "${PROTOCOL}" "${CORE}" "${cdnPhase}" "${currentAlpn}"
+    done
+    printf 'docker-alpn-orders-real-ok: protocol=%s core=%s phases=reverse,http1,recommended family=ipv4,ipv6 auth=deny tcp-udp=allow strict-ca-sni selected=observed\n' \
+        "${PROTOCOL}" "${CORE}"
+    exit 0
+fi
 if [[ "${CDN_ENTRIES}" == 1 ]]; then
     serverStates=$(docker inspect "$(compose ps -q "${CORE}")" "$(compose ps -q nginx)" |
         jq -c '[.[] | {id:.Id,started_at:.State.StartedAt}]')

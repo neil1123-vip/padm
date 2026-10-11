@@ -1734,7 +1734,8 @@ Schema/生产校验同批正反例、能力门禁、三种核心/URI 顺序、�
 运行/完整账号输入漂移、其它配置漂移拒绝、预览/取消/健康/信号恢复定向通过。
 真实 Nginx 在原有 `27`/`29` 启动轮次内用 curl 的 HTTP/2 prior knowledge + PROXY v1
 核对 HTTP 版本、首页及 CSS，不增加服务启动轮次，不改 `21` WS 前端行为。
-真实 Xray TLS ALPN 协商、公网、原生双架构与可信发布仍待适用验收；
+真实 Xray TLS ALPN 协商已在隔离 Linux amd64 Docker Desktop 对 `27/29` 实测；
+公网、原生双架构与可信发布仍待适用验收；
 webroot/standalone ACME 归下一检查点，不升级组合完整管理状态。
 
 Linux amd64 最终定向 `30.654` 秒、快速合同 `19` 项 `73.566` 秒、
@@ -1751,6 +1752,20 @@ INT/TERM 现在精确恢复该原始漂移，不改普通事务的流量收敛�
 不跳过配置验证。Nginx 重建另存唯一 `0600` 恢复文件，启动失败恢复旧配置并重试，
 原缺则清理本次文件；恢复失败保留证据并明确报错，首装离线分支不变。
 对应 Nginx 事务 `1.613` 秒、核心失败传播 `1.004` 秒、UI 冒烟 `0.535` 秒通过。
+
+`docker-alpn-real -Jobs 2` 在当前源码快照上完成 `27:xray` 与 `29:xray`
+的反向 `http/1.1,h2`、仅 `http/1.1`、恢复推荐 `h2,http/1.1` 三阶段，
+181139 ms，入口 182105 ms，排队 189 ms，`cache_hit=false`。
+生产规格、核心完整账号输入和 URI 同步读取当前顺序；除 ALPN 与正常记录
+提交来源的 `previous_manifest_sha256` 外，其它核心、认证、fallback 目标、
+Compose、Nginx、证书与站点保持。实际双栈 TLS 校验私有 CA/SNI，
+记录 h1、h2+h1、h2-only 及配置顺序的 selected ALPN，不预设反向优先级。
+实测反向组合选 h1，h2-only 仍可通过 HTTP/2 fallback；仅 h1 拒绝 h2-only。
+各阶段的首页、404、唯一 PROXY 来源、真实链接 TCP/UDP 和错误认证均有断言。
+复用现有 daemon、命名卷、离线业务镜像与 HTTP/2 curl，普通回归不增加 SSL 探针，
+不重复额度矩阵。Bash/ShellCheck error 与 PowerShell 解析通过；真实发布编辑事务、
+公网、原生宿主和 arm64 不计为已验。证据
+`.tmp-regression-docker-a3516c363c1c4f20ac3c38e143546d39/`。
 
 #### 5A.3a Standalone HTTP-01
 

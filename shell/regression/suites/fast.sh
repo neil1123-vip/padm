@@ -231,6 +231,15 @@ runDockerCdnEntriesRealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/cdn-entries-real.sh"
 }
 
+runDockerAlpnRealRegression() {
+    local file
+    for file in cdn-entries-real vmess-real; do
+        bash -n "${PROJECT_ROOT}/docker/tests/${file}.sh"
+    done
+    shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/"{cdn-entries-real,vmess-real}.sh
+    PADM_TEST_ALPN_ORDERS=1 bash "${PROJECT_ROOT}/docker/tests/cdn-entries-real.sh"
+}
+
 runDockerEntryPortAliasRealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/entry-port-alias-real.sh"
 }
@@ -502,6 +511,7 @@ registerRegressionFunctionLeaf docker-http-relay-published-real runDockerHttpRel
 registerRegressionFunctionLeaf docker-entry-port-alias runDockerEntryPortAliasRegression
 registerRegressionFunctionLeaf docker-cdn-entries runDockerCdnEntriesRegression
 registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRegression
+registerRegressionFunctionLeaf docker-alpn-real runDockerAlpnRealRegression
 registerRegressionFunctionLeaf docker-entry-port-alias-real runDockerEntryPortAliasRealRegression
 registerRegressionFunctionLeaf docker-routing-dns-hosts runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-dns-hosts-real runDockerRoutingDnsHostsRealRegression
