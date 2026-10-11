@@ -4441,6 +4441,43 @@ Jobs 6/占 2 槽、cache_hit=false；
 的小证据。本轮删除 10 个归档/清单，共 47789496 bytes。
 本阶段不新增持续 collector/jail、宿主 SSH 服务恢复或任意 OpenSSH 兼容承诺。
 
+#### 5C.8c.2t 保留旧身份的数字 PID 碰撞拒绝后收容
+
+本阶段补齐 8c.2s 扫描窗口内的拒绝收容：首次固定 child 遇到仍保留的
+retired 数字索引时抛专属 `RetiredIdentityCollision`，保存旧原 FD、
+registry 对象、generation 与 terminal 快照。碰撞后只能进入 cleanup，
+不尝试登记新代或继续正常运行；碰撞次数与真实 pidfd_open OSError 分开。
+不扩大所有 Failure 的捕获范围，不改变 Ledger、消息预算、deadline 或 poison。
+
+仅在旧对象/代次未变、terminal 为真、pending 为空、旧 driver 原 pidfd
+明确 `Pid=-1`，且原父创建停止屏障仍完整时，复用未固定 child 的真实
+首停、SIGKILL、WNOWAIT、父回收、收养 zombie 与精确 reap 流程。
+旧 FD 仍活或证据变化立即拒绝并保留 cleanup_error/未决身份。
+终局证据记录可用的最早清理身份，不把外部 SIGKILL 导致的首停失效
+冒充已验证首停，也不因缺少 first_identity 字段中断终局清理。
+
+集中合同使用真实连续两 child：旧 child 真回收并保留原 pidfd，
+下一次真实 FORK 时仅把旧数字索引映射到新 child。两代 task、pidfd、
+ptrace、wait、SIGKILL 与收养回收均真实；索引映射不是实际内核 PID 复用。
+覆盖成功收容和旧 FD 尚指向活原 task 的拒绝；两者均保留无关 caller
+的真实 SIGSTOP 等待状态，拒绝数字 PID/进程组发信号与泛化等待。
+独立只读审查通过；`docker-ssh-driver` 25/25、exit 0，内部 6381 ms、
+入口 7493 ms、Jobs 2、排队 5728 ms、cache_hit=false，复用原工具镜像；
+`.tmp-regression-docker-5b07edca452349918b3d18f46cf72a45/`。
+集中完整 Docker 合同 47/47、exit 0，内部 315492 ms、入口 316478 ms，
+Jobs 6/占 2 槽、排队 482 ms、cache_hit=false；
+`.tmp-regression-docker-6f393dbedac14cb88a79cada68cbaf69/`。
+两个快照各 298 输入流式哈希核对，定向仅计划补写有差异，完整全匹配；
+结果补写后只更新本计划。生产两文件保持独审冻结哈希。
+本轮清理两个快照的重复归档/清单，共 19168944 bytes，小证据保留
+`.tmp-ssh-collision-8c2t/`；未重跑未修改的真实 OpenSSH 探针。
+真实内核数值 PID 复用、任意 OpenSSH、arm64、原生宿主和服务恢复
+仍未验收，总目标 active。
+
+后续按 collector/jail 接入、菜单管理、实际启停与封禁验收推进。
+先定义一个可验收的有限支持合同，未支持的实例或日志来源明确拒绝，
+复用已有 INPUT 所有权后端与 Fail2ban 管理流程；不再扩展原型枚举。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

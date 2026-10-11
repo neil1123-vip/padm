@@ -1290,6 +1290,311 @@ class DriverContracts(unittest.TestCase):
                     pass
             os.close(caller_pidfd)
 
+    def test_retired_identity_collision_cleanup_preserves_caller_stop(self):
+        original_open, original_waitpid, original_waitid = os.pidfd_open, os.waitpid, os.waitid
+        original_kill, original_signal, original_ptrace = (
+            os.kill, signal.pidfd_send_signal, driver_module.ptrace)
+        tracer = os.getpid()
+        unrelated = os.fork()
+        if unrelated == 0:
+            self.receiver.close()
+            self.listener.close()
+            self.client.close()
+            original_kill(os.getpid(), signal.SIGSTOP)
+            os._exit(29)
+        caller_pidfd = original_open(unrelated)
+        caller_reaped = False
+        try:
+            stopped = original_waitid(os.P_PIDFD, caller_pidfd, os.WSTOPPED | os.WNOWAIT)
+            self.assertEqual((stopped.si_pid, stopped.si_code, stopped.si_status),
+                             (unrelated, os.CLD_STOPPED, signal.SIGSTOP))
+            for index, changed_fd in enumerate((False, True)):
+                with self.subTest(changed_retired_fd=changed_fd):
+                    if index:
+                        self.client.close()
+                        self.client = socket.socket()
+                        self.client.connect(self.listener.getsockname())
+                        self.expected["remote"] = list(self.client.getsockname())
+                    self.driver = driver_module.ControlledDriver(time.monotonic() + 8,
+                                                                 self.receiver, self.expected)
+                    original_pin, original_event, original_cleanup = (
+                        self.driver._pin, self.driver._event, self.driver._cleanup)
+                    old, injected, rescue = {}, {}, {}
+                    opened, child_ptrace, signals = [], [], []
+                    marker = Path(self.temp.name) / f"collision-child-ran-{index}"
+
+                    def sequential_children():
+                        self.client.close()
+                        accepted, _ = self.listener.accept()
+                        self.listener.close()
+                        child = os.fork()
+                        if child == 0:
+                            os._exit(23)
+                        waited, status = original_waitpid(child, 0)
+                        if waited != child or not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 23:
+                            os._exit(112)
+                        time.sleep(0.02)
+                        child = os.fork()
+                        if child == 0:
+                            marker.touch()
+                            os._exit(31)
+                        accepted.close()
+                        original_waitpid(child, 0)
+
+                    def observe_old(pid, status):
+                        original_event(pid, status)
+                        if (pid != self.driver.master
+                                and (os.WIFEXITED(status) or os.WIFSIGNALED(status))):
+                            identity = self.driver.ledger.registry[pid]
+                            old.update({"pid": pid, "pidfd": self.driver.retired[pid],
+                                        "identity": identity,
+                                        "generation": copy.deepcopy(identity["generation"])})
+                            self.assertTrue(identity["terminal"])
+                            self.assertFalse(identity["pending"])
+                            self.assertIn(self.driver._pidfd_pid(old["pidfd"]), (pid, -1))
+
+                    def alias_retired_index(pid, parent=None, source="run"):
+                        if old and not injected and parent == self.driver.master:
+                            self.driver._require_stop(parent)
+                            parent_stop = self.driver.stopped_tasks[parent]
+                            self.assertEqual(parent_stop["status"] >> 16, driver_module.FORK)
+                            self.assertEqual(driver_module.event_message(parent), pid)
+                            self.assertEqual(parent_stop["unfixed_child_pid"], pid)
+                            self.assertIn(pid, self.driver.unfixed_children)
+                            self.assertEqual(self.driver._pidfd_pid(old["pidfd"]), -1)
+                            self.assertNotEqual(pid, old["pid"])
+                            current = driver_module.process_snapshot(pid)
+                            injected.update({
+                                "child": pid, "parent": parent, "parent_pidfd": self.driver.owned[parent],
+                                "generation": self.driver.ledger._generation(current),
+                                "actual_original_identity": copy.deepcopy(old["generation"]),
+                                "at": time.monotonic_ns(),
+                            })
+                            # 只模拟数字索引碰撞；两代 task、原 pidfd、停点和回收都来自真实内核。
+                            self.driver.retired[pid] = self.driver.retired.pop(old["pid"])
+                            if changed_fd:
+                                self.driver.retired[pid] = original_open(parent)
+                            identity = self.driver.ledger.registry.pop(old["pid"])
+                            identity["generation"]["pid"] = pid
+                            self.driver.ledger.registry[pid] = identity
+                            self.driver.registered.remove(old["pid"])
+                            self.driver.registered.add(pid)
+                            self.assertIs(identity, old["identity"])
+                            self.assertNotEqual(identity["generation"], injected["generation"])
+                        return original_pin(pid, parent, source)
+
+                    def record_open(pid, *args, **kwargs):
+                        if os.getpid() == tracer:
+                            opened.append(pid)
+                        return original_open(pid, *args, **kwargs)
+
+                    def child_cleanup_ptrace(request, pid, data=0, address=0):
+                        if pid == injected.get("child"):
+                            self.assertNotIn(pid, self.driver.owned)
+                            self.assertIs(self.driver.ledger.registry[pid], old["identity"])
+                            self.assertTrue(self.driver.ledger.registry[pid]["terminal"])
+                            self.assertNotEqual(self.driver.ledger.registry[pid]["generation"],
+                                                injected["generation"])
+                            unresolved = self.driver.unfixed_children[pid]
+                            self.assertEqual(unresolved["pidfd_open_errors"], 0)
+                            self.assertEqual(unresolved["retired_collision_errors"], 2)
+                            self.assertNotEqual(request, driver_module.SYSCALL)
+                            child_ptrace.append((request, data))
+                        return original_ptrace(request, pid, data, address)
+
+                    def exact_wait(kind, descriptor, flags):
+                        if os.getpid() == tracer:
+                            if kind == os.P_PID:
+                                self.assertEqual(descriptor, injected["child"])
+                                self.assertTrue(flags & 0x40000000)
+                                self.assertFalse(flags & os.WCONTINUED)
+                            else:
+                                self.assertEqual(kind, os.P_PIDFD)
+                                self.assertNotEqual(descriptor, caller_pidfd)
+                        return original_waitid(kind, descriptor, flags)
+
+                    def exact_signal(descriptor, delivered, siginfo=None, flags=0):
+                        self.assertNotEqual(descriptor, caller_pidfd)
+                        pid = next(task for task, held in self.driver.owned.items() if held == descriptor)
+                        self.assertEqual(self.driver._pidfd_pid(descriptor), pid)
+                        signals.append((pid, delivered, time.monotonic_ns()))
+                        return original_signal(descriptor, delivered, siginfo, flags)
+
+                    def no_numeric_wait(pid, flags):
+                        if os.getpid() == tracer:
+                            raise AssertionError("旧身份碰撞清理不能消费其它数字 PID 等待状态")
+                        return original_waitpid(pid, flags)
+
+                    def fixture_stop(pid, delivered):
+                        if os.getpid() != tracer and pid == os.getpid() and delivered == signal.SIGSTOP:
+                            return original_kill(pid, delivered)
+                        raise AssertionError("旧身份碰撞清理禁止数字 PID 发信号")
+
+                    def changed_original_fd():
+                        if changed_fd:
+                            rescue.update({task: os.dup(descriptor)
+                                           for task, descriptor in self.driver.owned.items()})
+                            collision = self.driver.unfixed_children[
+                                injected["child"]]["summary"]["retired_collision"]
+                            self.assertEqual(self.driver.retired[injected["child"]], collision["pidfd"])
+                            injected["collision_pidfd_pid"] = self.driver._pidfd_pid(collision["pidfd"])
+                            self.assertEqual(injected["collision_pidfd_pid"], injected["parent"])
+                        return original_cleanup()
+
+                    try:
+                        with (
+                            patch.object(self.driver, "_retire_reaped", lambda force=False: None),
+                            patch.object(self.driver, "_event", observe_old),
+                            patch.object(self.driver, "_pin", alias_retired_index),
+                            patch.object(self.driver, "_cleanup", changed_original_fd),
+                            patch.object(driver_module.os, "pidfd_open", record_open),
+                            patch.object(driver_module.os, "waitid", exact_wait),
+                            patch.object(driver_module.os, "waitpid", no_numeric_wait),
+                            patch.object(driver_module.os, "kill", fixture_stop),
+                            patch.object(driver_module.os, "killpg",
+                                         side_effect=AssertionError("旧身份碰撞清理禁止进程组发信号")),
+                            patch.object(driver_module.signal, "pidfd_send_signal", exact_signal),
+                            patch.object(driver_module, "ptrace", child_cleanup_ptrace),
+                        ):
+                            with self.assertRaises(driver_module.Failure) as failure:
+                                self.driver.run(sequential_children)
+                        self.assertIsInstance(failure.exception.__cause__,
+                                              driver_module.RetiredIdentityCollision)
+                        evidence = copy.deepcopy(self.driver.evidence)
+                        child, parent = injected["child"], injected["parent"]
+                        self.assertNotIn(child, opened)
+                        self.assertFalse(marker.exists())
+                        self.assertFalse(any(row["pid"] == child for row in evidence["task_pins"]))
+                        self.assertFalse(any(row["pid"] == child for row in evidence["first_stops"]))
+                        self.assertFalse(evidence["messages"])
+                        self.assertLess(evidence["last_normal_resume_monotonic_ns"], injected["at"])
+                        self.assertFalse(any(row["returned_monotonic_ns"] >= injected["at"]
+                                             for row in evidence["continues"]))
+                        pin_failure, = evidence["child_pin_failures"]
+                        unresolved = self.driver.unfixed_children.get(child)
+                        self.assertEqual((pin_failure["first_errno"], pin_failure["last_errno"],
+                                          pin_failure["attempts"]), (None, None, 2))
+                        collision = pin_failure["retired_collision"]
+                        self.assertTrue(collision["terminal"])
+                        self.assertEqual(collision["generation"],
+                                         {**old["generation"], "pid": child})
+                        self.assertEqual(injected["actual_original_identity"]["pid"], old["pid"])
+                        if changed_fd:
+                            self.assertNotEqual(collision["pidfd"], old["pidfd"])
+                            self.assertEqual(injected["collision_pidfd_pid"], parent)
+                            self.assertRegex(evidence["cleanup_error"], "旧原身份碰撞证据已改变")
+                            self.assertEqual(evidence["remaining_unfixed_children"], [child])
+                            self.assertEqual(unresolved["pidfd_open_errors"], 0)
+                            self.assertEqual(unresolved["retired_collision_errors"], 2)
+                            self.assertNotIn("resolved_monotonic_ns", pin_failure)
+                            self.assertFalse(child_ptrace)
+                            self.assertFalse(signals)
+                            self.assertTrue(Path(f"/proc/{child}").exists())
+                        else:
+                            self.assertEqual(collision["pidfd"], old["pidfd"])
+                            self.assert_clean(evidence)
+                            self.assertNotIn("cleanup_error", evidence)
+                            self.assertTrue(pin_failure["cleanup_only"])
+                            self.assertEqual(pin_failure["signal_info"]["signo"], signal.SIGSTOP)
+                            self.assertEqual(pin_failure["signal_info"]["errno"], 0)
+                            self.assertTrue(any(request == driver_module.GETSIGINFO
+                                                for request, _ in child_ptrace))
+                            self.assertIn((driver_module.CONT, signal.SIGKILL), child_ptrace)
+                            self.assertIn((driver_module.CONT, 0), child_ptrace)
+                            child_cleanup = [row for row in evidence["cleanup"]
+                                             if row.get("pid") == child
+                                             and row["kind"].startswith("unfixed-child-")]
+                            self.assertEqual([row["kind"] for row in child_cleanup], [
+                                "unfixed-child-first-stop", "unfixed-child-exit-stop",
+                                "unfixed-child-terminal-retained", "unfixed-child-reaped"])
+                            terminal, adopted = child_cleanup[-2:]
+                            self.assertEqual((terminal["si_code"], terminal["si_status"]),
+                                             (os.CLD_KILLED, signal.SIGKILL))
+                            self.assertEqual(terminal["first_identity"], pin_failure["first_identity"])
+                            self.assertEqual(adopted["adopted_identity"]["starttime_ticks"],
+                                             injected["generation"]["starttime_ticks"])
+                            self.assertEqual((adopted["adopted_identity"]["ppid"],
+                                              adopted["adopted_identity"]["state"]), (tracer, "Z"))
+                            retired = next(row for row in evidence["cleanup"]
+                                           if row.get("pid") == child
+                                           and row["kind"] == "retired-original-task-reaped")
+                            self.assertEqual(retired["pidfd"], old["pidfd"])
+                            self.assertEqual(retired["pidfd_pid"], -1)
+                            self.assertEqual(retired["generation"], collision["generation"])
+                            self.assertNotEqual(retired["generation"], injected["generation"])
+                            with self.assertRaises(OSError) as closed:
+                                os.fstat(old["pidfd"])
+                            self.assertEqual(closed.exception.errno, errno.EBADF)
+                            self.assertEqual({pid for pid, delivered, _ in signals
+                                              if delivered == signal.SIGKILL}, {parent})
+                            order = [pin_failure[key] for key in (
+                                "first_stop_monotonic_ns", "terminal_monotonic_ns",
+                                "parent_terminal_monotonic_ns", "parent_reaped_monotonic_ns",
+                                "reaped_monotonic_ns", "resolved_monotonic_ns")]
+                            self.assertEqual(order, sorted(order))
+                            self.assert_tasks_reaped(old["pid"], child, parent)
+                        state = original_waitid(os.P_PIDFD, caller_pidfd,
+                                                os.WSTOPPED | os.WNOHANG | os.WNOWAIT)
+                        self.assertEqual((state.si_pid, state.si_code, state.si_status),
+                                         (unrelated, os.CLD_STOPPED, signal.SIGSTOP))
+                        print(json.dumps({
+                            "kind": "retired-index-collision-cleanup",
+                            "numeric_pid_collision_simulated": True,
+                            "actual_original_identity": injected["actual_original_identity"],
+                            "new_original_identity": injected["generation"],
+                            "changed_retired_fd": changed_fd, "pin_failure": pin_failure,
+                            "collision_pidfd_pid_before_cleanup": injected.get("collision_pidfd_pid", -1),
+                            "cleanup_error": evidence.get("cleanup_error"),
+                            "remaining_unfixed_children": evidence["remaining_unfixed_children"],
+                            "caller_stop_preserved": True,
+                        }, sort_keys=True, separators=(",", ":")), flush=True)
+                    finally:
+                        if rescue:
+                            # 仅测试救场：恢复备用原父 pidfd 和未关闭的旧原 fd，重走真实收容。
+                            self.driver.owned.update(rescue)
+                            self.driver.retired[injected["child"]] = old["pidfd"]
+                            for unresolved in self.driver.unfixed_children.values():
+                                summary = unresolved["summary"]
+                                summary["parent_pidfd"] = rescue[summary["parent_pid"]]
+                                summary["retired_collision"]["pidfd"] = old["pidfd"]
+                            previous = driver_module.ctypes.c_int()
+                            self.assertEqual(driver_module.libc.prctl(
+                                driver_module.PR_GET_CHILD_SUBREAPER,
+                                driver_module.ctypes.byref(previous), 0, 0, 0), 0)
+                            self.assertEqual(driver_module.libc.prctl(
+                                driver_module.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0), 0)
+                            try:
+                                original_cleanup()
+                            finally:
+                                self.assertEqual(driver_module.libc.prctl(
+                                    driver_module.PR_SET_CHILD_SUBREAPER, previous.value, 0, 0, 0), 0)
+                                for descriptor in (*rescue.values(), old["pidfd"]):
+                                    try:
+                                        os.close(descriptor)
+                                    except OSError as error:
+                                        if error.errno != errno.EBADF:
+                                            raise
+                            self.assert_tasks_reaped(old["pid"], injected["child"], injected["parent"])
+                            self.assertFalse(self.driver.unfixed_children)
+                            self.assertFalse(self.driver.owned)
+                            self.assertFalse(self.driver.retired)
+                            self.assertEqual(len(os.listdir("/proc/self/fd")),
+                                             self.driver.evidence["fd_count_before"])
+            original_waitid(os.P_PIDFD, caller_pidfd, os.WSTOPPED)
+            original_signal(caller_pidfd, signal.SIGCONT)
+            state = original_waitid(os.P_PIDFD, caller_pidfd, os.WEXITED)
+            self.assertEqual((state.si_pid, state.si_code, state.si_status),
+                             (unrelated, os.CLD_EXITED, 29))
+            caller_reaped = True
+        finally:
+            if not caller_reaped:
+                try:
+                    original_signal(caller_pidfd, signal.SIGKILL)
+                    original_waitid(os.P_PIDFD, caller_pidfd, os.WEXITED)
+                except (ProcessLookupError, ChildProcessError):
+                    pass
+            os.close(caller_pidfd)
+
     def test_child_pin_failure_changed_parent_barrier_reports_unfixed_child(self):
         self.driver = driver_module.ControlledDriver(time.monotonic() + 5,
                                                      self.receiver, self.expected)

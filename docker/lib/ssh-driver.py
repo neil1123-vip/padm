@@ -18,6 +18,12 @@ SPEC = importlib.util.spec_from_file_location(
 ledger_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ledger_module)
 Failure = ledger_module.Failure
+
+
+class RetiredIdentityCollision(Failure):
+    """仅表示首次固定前碰到了仍保留的旧原 task 身份。"""
+
+
 TRACEME, CONT, SYSCALL, SETOPTIONS, GETEVENTMSG, GETSIGINFO, GET_SYSCALL_INFO = (
     0, 7, 24, 0x4200, 0x4201, 0x4202, 0x420E
 )
@@ -207,8 +213,10 @@ class ControlledDriver:
             })
 
     def _pin(self, pid, parent=None, source="run"):
-        if type(pid) is not int or pid <= 0 or pid in self.owned or pid in self.retired:
+        if type(pid) is not int or pid <= 0 or pid in self.owned:
             raise Failure("受控 SSH driver 拒绝重复或无效的原 task 身份")
+        if pid in self.retired:
+            raise RetiredIdentityCollision("受控 SSH driver 拒绝保留的旧原 task 身份碰撞")
         try:
             descriptor = os.pidfd_open(pid)
         except OSError:
@@ -286,9 +294,25 @@ class ControlledDriver:
                 self._unfixed_parent(child)
             summary["attempts"] += 1
             try:
+                if "retired_collision" in summary:
+                    # 首次碰撞已撤销新代固定许可；重试只能复核旧身份并进入精确清理。
+                    raise RetiredIdentityCollision("受控 SSH driver 拒绝保留的旧原 task 身份碰撞")
                 self._pin(child, pid, source)
             except BaseException as caught:
                 if child not in self.owned:
+                    if isinstance(caught, RetiredIdentityCollision):
+                        unresolved = self.unfixed_children[child]
+                        if "retired_collision" not in summary:
+                            identity = self.ledger.registry.get(child)
+                            unresolved["retired_identity"] = identity
+                            summary["retired_collision"] = {
+                                "pidfd": self.retired[child],
+                                "generation": copy.deepcopy(
+                                    identity.get("generation") if identity is not None else None),
+                                "terminal": identity.get("terminal") if identity is not None else None,
+                            }
+                        unresolved["retired_collision_errors"] = (
+                            unresolved.get("retired_collision_errors", 0) + 1)
                     summary.update({"last_errno": getattr(caught, "errno", None),
                                     "last_error": str(caught)})
                     if "first_error" not in summary:
@@ -324,7 +348,20 @@ class ControlledDriver:
     def _cleanup_unfixed_child(self, child, end):
         unresolved = self.unfixed_children[child]
         summary = unresolved["summary"]
-        if unresolved["pidfd_open_errors"] != summary["attempts"]:
+        collision = summary.get("retired_collision")
+        if collision is not None:
+            identity = self.ledger.registry.get(child)
+            if (unresolved["pidfd_open_errors"] != 0
+                    or unresolved["retired_collision_errors"] != summary["attempts"]
+                    or self.retired.get(child) != collision["pidfd"]
+                    or identity is None or identity is not unresolved["retired_identity"]
+                    or child not in self.registered
+                    or collision["generation"] is None
+                    or identity["generation"] != collision["generation"]
+                    or collision["terminal"] is not True or identity["terminal"] is not True
+                    or identity["pending"] or self._pidfd_pid(collision["pidfd"]) != -1):
+                raise Failure("受控 SSH 未固定 child 的旧原身份碰撞证据已改变或尚未真正回收")
+        elif unresolved["pidfd_open_errors"] != summary["attempts"]:
             raise Failure("受控 SSH 未固定 child 缺少真实 pidfd_open 失败证据")
         parent = self._unfixed_parent(child)
         first = cleanup_identity(child)
@@ -406,6 +443,7 @@ class ControlledDriver:
                     self.evidence["cleanup"].append({
                         "kind": "unfixed-child-terminal-retained", "pid": child,
                         "si_code": terminal.si_code, "si_status": terminal.si_status,
+                        "first_identity": copy.deepcopy(summary.get("first_identity", first)),
                         "parent_pid": summary["parent_pid"], "normal": False,
                     })
                     return
@@ -793,7 +831,7 @@ class ControlledDriver:
                                 continue
                         try:
                             self._creation_child(pid, "cleanup")
-                        except OSError:
+                        except (OSError, RetiredIdentityCollision):
                             if "unfixed_child_pid" not in self.stopped_tasks[pid]:
                                 raise
                             if not retrying:
@@ -860,6 +898,9 @@ class ControlledDriver:
                     del self.retired[task]
                     self.evidence["cleanup"].append({
                         "kind": "retired-original-task-reaped", "pid": task, "pidfd_pid": -1,
+                        "pidfd": descriptor,
+                        "generation": copy.deepcopy(
+                            self.ledger.registry.get(task, {}).get("generation")),
                         "numeric_proc_exists": Path(f"/proc/{task}").exists(),
                     })
                     progressed = True
