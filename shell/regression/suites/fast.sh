@@ -59,8 +59,9 @@ listRegressionDockerTlsFocusedChildSelectors() {
 }
 
 listRegressionDockerContractsChildSelectors() {
-    # 按最近完整回归的实测耗时优先调度长任务，减少尾部空等。
+    # XHTTP 合同已变成长任务，先调度以减少尾部空等。
     printf '%s\n' \
+        docker-xhttp \
         docker-phase3-edit \
         docker-phase3-entries \
         docker-traditional-tls \
@@ -84,7 +85,6 @@ listRegressionDockerContractsChildSelectors() {
         docker-phase6 \
         docker-entry-port-alias \
         docker-cdn-entries \
-        docker-xhttp \
         docker-fail2ban-ownership \
         docker-control-state \
         docker-reality-targets-selection \
