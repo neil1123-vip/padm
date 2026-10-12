@@ -418,6 +418,13 @@ v3 `.routing.direct`、`.routing.block` 要求控制包声明 `x-padm-routing-di
 只读 `direct_block_overlaps` 按 Direct 顺序列出手工 Direct/Block 的完整规则字符串交集。
 Direct 保持优先；不推断域名包含、分类成员或区域合成，不把重叠当作配置错误。
 
+同一状态另输出 `domain_rule_overlaps`：按完整规则字符串排序，逐项列出 `rule`、
+按 Direct → Block → IPv6 → WARP → SOCKS5 排序的 `policies` 和其中优先的 `winner`。
+这里包含区域默认/自定义 Direct 例外，以及 domain/both 模式合成的 `geosite:cn`；
+同一策略的重复来源只计一次，global 出站不参与。`winner` 只表示相同完整规则的候选优先者，
+不推断其它规则的包含关系、分类成员、字面 IP/BT、HTTP 中继或最终流量去向；
+SOCKS5 策略对 TCP 代理、UDP 拒绝。诊断只读，完整冲突检测仍待交付。
+
 菜单 `17` 的 IP/CIDR 阻断使用独立 v3 `.routing.block_ips`，私有 JSON 为
 `{"ips":["192.0.2.8","198.51.100.0/24","2001:db8::/32","geoip:cn"]}`。
 接受 1–256 条唯一 IPv4/纯 IPv6 字面地址或 CIDR，以及固定 `geoip:cn`；

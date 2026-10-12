@@ -946,6 +946,25 @@ dockerProtocolCommand() (
     fi
     if [[ "${action}" == routing-status ]]; then
         jq --argjson region_defaults "${PADM_DOCKER_REGION_DEFAULT_DOMAINS}" '
+          . as $request |
+          # 仅比较完整域名规则；区域合成与手工规则同属一个策略，先去重。
+          [
+            {policy:"direct",rules:((.routing.direct.domains // []) +
+              (if .routing.region != null then
+                $region_defaults + .routing.region.allow_domains else [] end) | unique)},
+            {policy:"block",rules:((.routing.block.domains // []) +
+              (if .routing.region.mode == "domain" or .routing.region.mode == "both"
+                then ["geosite:cn"] else [] end) | unique)},
+            {policy:"ipv6",rules:(.routing.ipv6.domains // [])},
+            {policy:"warp",rules:(.routing.warp.domains // [])},
+            {policy:"socks5",rules:(.routing.socks5.domains // [])}
+          ] as $policies |
+          [$policies | to_entries[] | . as $entry | .value.rules[] |
+            {rule:.,policy:$entry.value.policy,rank:$entry.key}] |
+          group_by(.rule) |
+          map(select(length > 1) | sort_by(.rank) |
+            {rule:.[0].rule,policies:map(.policy),winner:.[0].policy}) as $overlaps |
+          $request |
           (.routing.block.domains // []) as $block |
           {enabled:(.routing != null), server:(.routing.socks5.server // null),
           port:(.routing.socks5.port // null),
@@ -954,6 +973,7 @@ dockerProtocolCommand() (
           domain_rules:(.routing.socks5.domains // []),
           direct_block_overlaps:[(.routing.direct.domains // [])[] |
             . as $rule | select($block | index($rule) != null)],
+          domain_rule_overlaps:$overlaps,
           tcp:(if .routing.socks5 == null then "direct"
             elif .routing.socks5 | has("domains") then "matched-socks5" else "socks5" end),
           udp:(if .routing.socks5 == null then "direct"

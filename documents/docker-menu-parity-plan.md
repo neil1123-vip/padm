@@ -2915,6 +2915,43 @@ Bash、ShellCheck error 与 JSON 静态检查通过，临时检查容器已清�
 此为有限管理增强，完整区域/冲突检测、原生宿主/arm64、公网与可信发布
 仍 deferred，总目标 active。
 
+#### 5B.4k 有限精确域名规则重叠诊断
+
+现有 `protocol routing-status` 与路由菜单状态入口追加 `domain_rule_overlaps`；
+按完整规范化规则字符串排序，列出 `rule`、按 Direct/Block/IPv6/WARP/SOCKS5
+优先级排列的 `policies` 与首个 `winner`。原 `direct_block_overlaps` 继续只计算手工
+Direct/Block 交集并保留 Direct 次序，现有字段保持兼容。
+
+有效 Direct 包含区域固定八条例外和自定义例外；有效 Block 仅在 region
+domain/both 时补 `geosite:cn`，同一策略重复来源去重。global 无域名选择器，
+不进入该列表。`winner` 只表示同一完整规则的候选策略中优先者，
+不承诺最终流量路径；其它 Block 包含规则、IP/BT 和独立 HTTP 中继仍可能先匹配。
+SOCKS5 策略对 TCP 代理、UDP 拒绝，不推断包含关系或 GeoSite 成员，
+不拒绝已有重叠，不新增编辑入口、状态、schema 或权限。
+
+复用核心合同组合夹具、生产只读命令和快照验证五策略重叠、四种候选优先者、
+区域默认/自定义/两种模式、同策略去重、不同 selector 不误报、关闭和全局空列表；
+保留凭据脱敏、锁/候选清理与完整部署/流量冻结断言。
+Linux amd64 定向核心合同内部/入口 20093/21218 ms、排队 194 ms；
+策略生命周期 118503/119602 ms，菜单 PTY 108865/109884 ms，均 exit 0、Jobs 2、
+cache_hit=false，工具镜像直接复用。证据
+`.tmp-regression-docker-1cae904234b943c39930a46cbe6da2fa/`、
+`.tmp-regression-docker-e9daa52d76f44744ae14451864d62b97/`、
+`.tmp-regression-docker-9349be99e374477eb7d02cb3b7beff40/`。
+Bash、ShellCheck error、JSON 与独立只读复审通过；集中完整合同 53/53 通过，
+内部/入口 547183/548198 ms、排队 382 ms、Jobs 6、cache_hit=false，镜像直接复用；
+证据 `.tmp-regression-docker-45161d143dea43e49ccedad75f79a2cf/`。
+6 个行为/说明文件与 full 快照一致，protocol 仅修正祖先合同的中文注释，
+计划仅追加验收记录；成功输入清理后保留日志与结果。
+完整冲突检测、区域管理、公网、原生宿主/arm64 与可信发布仍 deferred，总目标 active。
+
+本轮回归精简另签名提交 `0d8a8ed9`：Reality 参数/目标 helper 只在 unchanged
+捕获部署快照，省去 full 中 10 份未消费扫描，成功与失败恢复的全部独立断言保持。
+两独立定向内部/入口 227359/228622 与 204676/205769 ms、Jobs 2、exit 0，
+证据 `.tmp-regression-docker-85d80761bcac48f68c07f87100287f00/`、
+`.tmp-regression-docker-0e99c372088c4e65b1e7d47fa173231f/`；
+独立入口包含祖先合同，不能与 full 分项直接比较或据此宣称节省秒数。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

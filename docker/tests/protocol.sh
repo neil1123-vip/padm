@@ -163,7 +163,7 @@ protocolSignalRead() (
     dockerProtocolCommand "$@"
 )
 
-# 完整聚合已由传统 TLS 覆盖共同断言；派生测试仍独立创建真实部署夹具。
+# 完整聚合已由 Reality 合同覆盖共同断言；派生测试仍独立创建真实部署夹具。
 if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" == 1 ]]; then
     dockerConfigureSpecMigrate "${SPEC}" "${TEST_ROOT}/v3.json"
     return 0

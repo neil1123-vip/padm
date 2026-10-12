@@ -34,6 +34,12 @@ DNS/hosts 定向与菜单通过，集中完整 49 项回归通过；这是有限
 冻结精确单键变换之外的完整配置、URI/订阅/累计，不新增 schema/marker/权限/状态。
 Linux amd64 增删定向与菜单 PTY 通过，集中完整 53 项回归通过；完整状态保持 `deferred`。
 
+5B.4k 在现有路由状态追加只读 `domain_rule_overlaps`，按完整规则字符串列出
+Direct/Block/IPv6/WARP/SOCKS5 候选顺序及优先者，包括区域合成的域名规则。
+同策略重复来源去重，global 出站不参与；旧手工 `direct_block_overlaps` 语义保留。
+优先者只针对相同完整 selector，不推断包含关系、分类成员、IP/BT、HTTP 中继或实际流量。
+完整冲突检测、区域管理及原生宿主/arm64/公网验收仍 `deferred`。
+
 3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，
 证据和剩余限制见[真实 TLS 验收基线](docker-tls-real-baseline.md)。
 内部 TLS 夹具不代表新增协议支持；真实 DNS、完整宿主重启、原生 arm64 和可信发布仍待验。
