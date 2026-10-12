@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import shutil
 import signal
@@ -288,6 +289,184 @@ def target_ready():
         return tls.recv(1024).startswith(b"HTTP/1.0 200")
 
 
+def port_range_capabilities(root, image_id):
+    binary = str(root / "sing-box")
+    version = command([binary, "version"]).decode().strip()
+    for protocol in ("hysteria2", "tuic"):
+        outbound = dict(type=protocol, tag="range-client", server=HOST, server_port=36461,
+                        password="11111111-1111-4111-8111-111111111111",
+                        tls=dict(enabled=True, server_name="target.padm.test", alpn=["h3"],
+                                 certificate_path=str(root / "target.crt")))
+        if protocol == "tuic":
+            outbound["uuid"] = "11111111-1111-4111-8111-111111111111"
+        for mode in ("single", "range"):
+            if mode == "range":
+                del outbound["server_port"]
+                outbound["server_ports"] = ["36461:36462"]
+            path = root / "port-range-client.json"
+            path.write_text(json.dumps(dict(outbounds=[outbound])))
+            result = subprocess.run([binary, "check", "-c", str(path)],
+                                    capture_output=True, text=True, timeout=10)
+            print("entry-port-range-capability=" + json.dumps(dict(
+                protocol=protocol, mode=mode, image_id=image_id, version=version,
+                exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr)),
+                  flush=True)
+            # 基线先通过，才能把范围失败归因于客户端字段能力。
+            if mode == "single" or protocol == "hysteria2":
+                assert result.returncode == 0, result.stderr
+            else:
+                assert result.returncode != 0 and "server_ports" in result.stderr and \
+                    "unknown field" in result.stderr, result.stderr
+
+
+def hy2_range_probe(root, node, docker, image_id, enter, processes):
+    cert, key = node / "hy2.crt", node / "hy2.key"
+    command(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+             "-subj", "/CN=hy2.padm.test", "-addext", "subjectAltName=DNS:hy2.padm.test",
+             "-keyout", str(key), "-out", str(cert)])
+    os.chown(key, 10001, 10001)
+    key.chmod(0o600)
+    config_path = node / "hy2.json"
+    config_path.write_bytes((root / "hy2.json").read_bytes())
+    config_path.chmod(0o644)
+    current = json.loads((root / "hy2.compose.json").read_text())
+    service = current["services"]["sing-box"]
+    current["services"] = {"sing-box": service}
+    service.update(image=image_id, entrypoint=["/usr/local/bin/sing-box"],
+                   command=["run", "-c", "/config.json"],
+                   healthcheck=dict(disable=True), restart="no",
+                   volumes=[dict(type="bind", source=str(source), target=target, read_only=True)
+                            for source, target in (
+                                (config_path, "/config.json"),
+                                (cert, "/etc/padm/secrets/tls/hy2.padm.test.crt"),
+                                (key, "/etc/padm/secrets/tls/hy2.padm.test.key"))])
+    compose_path = node / "hy2.compose.json"
+    compose_path.write_text(json.dumps(current))
+    compose = docker + ["compose", "--project-name", "padm-docker", "--file", str(compose_path),
+                       "--profile", "core-sing-box"]
+    command(compose + ["up", "-d", "--pull", "never"], timeout=30)
+    identity = command(compose + ["ps", "-q", "sing-box"]).decode().strip()
+    value = json.loads(command(docker + ["inspect", identity]))[0]
+    host = value["HostConfig"]
+    assert value["State"]["Running"] and value["Config"]["Image"] == image_id
+    assert value["Config"]["User"] == "10001:10001" and host["ReadonlyRootfs"]
+    assert not host["Privileged"] and host["CapDrop"] == ["ALL"] and not host["CapAdd"]
+    assert not host["Devices"] and "no-new-privileges:true" in host["SecurityOpt"]
+    expected = [
+        dict(HostIp=address, HostPort=str(port))
+        for port in (35461, 36461, 36462) for address in ("0.0.0.0", "::")]
+    assert set(host["PortBindings"]) == {"35461/udp"}
+    assert sorted(host["PortBindings"]["35461/udp"],
+                  key=lambda row: (row["HostIp"], row["HostPort"])) == sorted(
+                      expected, key=lambda row: (row["HostIp"], row["HostPort"])), host["PortBindings"]
+    server_address = value["NetworkSettings"]["Networks"]["padm-docker"]["IPAddress"]
+    for mode in ("fixed", "range"):
+        client = dict(log=dict(level="warn"), inbounds=[], outbounds=[], route=dict(rules=[]))
+        items, negative = [], []
+        for family, address in HOSTS.items():
+            for remote_port in ((36461, 36462) if mode == "fixed" else (0,)):
+                cases = ("valid", "wrong", "wrong-sni", "untrusted") if (
+                    mode == "fixed" and remote_port == 36461) else ("valid",)
+                for auth in cases:
+                    local_port = 24001 + len(client["inbounds"])
+                    tag = f"hy2-{family}-{remote_port}-{auth}"
+                    outbound = dict(type="hysteria2", tag=tag, server=address,
+                                    password="33333333-3333-4333-8333-333333333333",
+                                    tls=dict(enabled=True, server_name="hy2.padm.test", alpn=["h3"],
+                                             certificate_path=str(cert)))
+                    if mode == "range":
+                        outbound.update(server_ports=["36461:36462"], hop_interval="5s")
+                    else:
+                        outbound["server_port"] = remote_port
+                    if auth == "wrong":
+                        outbound["password"] = "wrong-password"
+                    elif auth == "wrong-sni":
+                        outbound["tls"]["server_name"] = "wrong.padm.test"
+                    elif auth == "untrusted":
+                        del outbound["tls"]["certificate_path"]
+                    client["inbounds"].append(dict(type="socks", tag=tag, listen="127.0.0.1",
+                                                   listen_port=local_port))
+                    client["outbounds"].append(outbound)
+                    client["route"]["rules"].append(dict(inbound=[tag], action="route", outbound=tag))
+                    rows = [(local_port, "hy2", family, True, auth, transport)
+                            for transport in ("tcp", "udp")]
+                    (items if auth == "valid" else negative).extend(rows)
+        path = root / "hy2-client.json"
+        path.write_text(json.dumps(client))
+        command([str(root / "sing-box"), "check", "-c", str(path)])
+        counters = {}
+        if mode == "range":
+            # 计数链只在本次客户端 netns 内；固定端口进程已退出，不混入其它流量。
+            for family, address in HOSTS.items():
+                table = "iptables" if family == "ipv4" else "ip6tables"
+                chain = "PADM_HY2_RANGE"
+                command(enter + [table, "-w", "-t", "mangle", "-N", chain])
+                for port in (36461, 36462):
+                    command(enter + [table, "-w", "-t", "mangle", "-A", chain, "-p", "udp",
+                                     "-d", address, "--dport", str(port), "-j", "RETURN"])
+                command(enter + [table, "-w", "-t", "mangle", "-A", "OUTPUT", "-p", "udp",
+                                 "-d", address, "--dport", "36461:36462", "-j", chain])
+        log_path = root / f"client-hy2-{mode}.log"
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(enter + [str(root / "sing-box"), "run", "-c", str(path)],
+                                       stdout=log, stderr=log)
+        processes.append(process)
+        wait_ready(lambda: subprocess.run(
+            enter + ["python3", "-c", f"import socket; socket.create_connection(('127.0.0.1',"
+                     f"{items[0][0]}),.2).close()"], capture_output=True).returncode == 0)
+        before = len((root / "events.jsonl").read_text().splitlines())
+        rounds = 2 if mode == "range" else 1
+        started = None
+        for round_number in range(rounds):
+            assert process.poll() is None
+            (root / "probes.json").write_text(json.dumps(items))
+            print(command(enter + ["python3", str(SCRIPT), "probes", str(root), f"hy2-{mode}"],
+                          timeout=5).decode().strip(), flush=True)
+            if mode == "range" and round_number == 0:
+                # 从真实首次回显后计时；只补一轮跨最小间隔的新请求。
+                started = time.monotonic()
+                time.sleep(5.1)
+            elif started is None:
+                started = time.monotonic()
+        if mode == "range":
+            for family in HOSTS:
+                table = "iptables-save" if family == "ipv4" else "ip6tables-save"
+                raw = command(enter + [table, "-c", "-t", "mangle"]).decode()
+                counters[family] = {int(port): int(packets) for packets, port in re.findall(
+                    r"^\[(\d+):\d+\] -A PADM_HY2_RANGE .*--dport (\d+) -j RETURN$", raw, re.M)}
+                assert set(counters[family]) == {36461, 36462}, raw
+                assert sum(counters[family].values()) > 0, counters
+        events = [json.loads(line) for line in (root / "events.jsonl").read_text().splitlines()[before:]]
+        assert {row["source"] for row in events} == {server_address}, events
+        assert {transport: sum(row["transport"] == transport for row in events)
+                for transport in ("tcp", "udp")} == dict(tcp=len(items) // 2 * rounds,
+                                                        udp=len(items) // 2 * rounds), events
+        assert process.poll() is None
+        print("entry-hy2-range-proof=" + json.dumps(dict(
+            mode=mode, counters=counters, rounds=rounds, client_pid=process.pid,
+            same_client_alive=True, events=len(events), destination_family="ipv4",
+            observed_both_ports={family: all(count > 0 for count in ports.values())
+                                 for family, ports in counters.items()},
+            elapsed=round(time.monotonic() - started, 3))), flush=True)
+        if negative:
+            before = len((root / "events.jsonl").read_text().splitlines())
+            (root / "probes.json").write_text(json.dumps(negative))
+            print(command(enter + ["python3", str(SCRIPT), "probes", str(root), "hy2-negative"],
+                          timeout=5).decode().strip(), flush=True)
+            assert len((root / "events.jsonl").read_text().splitlines()) == before
+            diagnostic = log_path.read_text()
+            rejections = []
+            for family in HOSTS:
+                for auth, expected in (("wrong", "auth"), ("wrong-sni", "x509"),
+                                       ("untrusted", "unknown authority")):
+                    matches = [line for line in diagnostic.splitlines()
+                               if f"hy2-{family}-36461-{auth}" in line and expected in line.lower()]
+                    assert matches, diagnostic
+                    rejections.append(dict(family=family, case=auth, diagnostic=matches[0]))
+            print("entry-hy2-rejections=" + json.dumps(rejections), flush=True)
+        stop(process)
+
+
 def run(root):
     assert os.getuid() == 0 and sys.platform == "linux" and Path("/.dockerenv").is_file()
     assert {item["ifname"] for item in json.loads(command(["ip", "-j", "link", "show"]))} == {
@@ -327,6 +506,7 @@ def run(root):
                 command(docker + ["cp", identity + f":/usr/local/bin/{core}", str(root / core)])
                 command(docker + ["rm", identity])
                 (root / core).chmod(0o755)
+            port_range_capabilities(root, inputs["sing-box"]["image_id"])
             for core in PORTS:
                 config = json.loads((root / f"on.{core}.json").read_text())
                 if core == "xray":
@@ -404,6 +584,7 @@ def run(root):
                     stop(client)
                 print(f"entry-port-alias-{phase}: IPv4+IPv6 production ports/NAT/auth/UID10001/cap0/ro passed",
                       flush=True)
+            hy2_range_probe(root, node, docker, inputs["sing-box"]["image_id"], enter, processes)
             print("entry-port-alias-real-environment=" + json.dumps(dict(
                 hosts=HOSTS, destination_family="ipv4", image_ids=inputs,
                 elapsed=round(time.monotonic() - started, 3))),

@@ -642,6 +642,12 @@ WS/SSH Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名；
 双栈发布已在隔离 amd64 Linux daemon 验收；公网、原生宿主及 arm64 仍需独立验收，
 完整 `207` 保持 `deferred`。
 
+Hy2/TUIC 完整端口跳跃继续待迁移。固定 amd64 sing-box 1.14.2 前置实测中，
+Hy2 接受 `server_ports`，TUIC 拒绝该字段；两者单端口检查均通过。
+Hy2 两个现有 UDP 别名分别通过双栈严格 TLS 和 TCP/UDP，
+范围客户端跨 5.1 秒保持业务；短窗口包计数不证明两族都切换或重新握手。
+这些证据不开放跳跃菜单、范围分享或宿主 DNAT 管理。
+
 菜单“协议与入口 → CDN 连接地址”可为已有 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
 入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。
 v3 可选 `cdn_entries` 保存最多 16 项 `{listener_id, addresses}`，每项 1–16 个唯一地址；

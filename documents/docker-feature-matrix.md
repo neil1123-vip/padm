@@ -40,6 +40,12 @@ Direct/Block/IPv6/WARP/SOCKS5 候选顺序及优先者，包括区域合成的�
 优先者只针对相同完整 selector，不推断包含关系、分类成员、IP/BT、HTTP 中继或实际流量。
 完整冲突检测、区域管理及原生宿主/arm64/公网验收仍 `deferred`。
 
+5C.9a 仅补固定 amd64 sing-box 1.14.2 客户端前置：Hy2 接受范围字段，
+TUIC 拒绝 `server_ports`，两者单端口基线均通过。Hy2 两个现有 UDP alias
+分别通过双栈严格 TLS、认证与 TCP/UDP；范围客户端跨 5.1 秒保持业务，
+精确包计数仅记录观察，不证明两族都切换或新 QUIC 握手。
+未新增生产跳跃合同、菜单或宿主规则，完整跳跃和协议管理仍 `deferred`。
+
 3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，
 证据和剩余限制见[真实 TLS 验收基线](docker-tls-real-baseline.md)。
 内部 TLS 夹具不代表新增协议支持；真实 DNS、完整宿主重启、原生 arm64 和可信发布仍待验。

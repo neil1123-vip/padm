@@ -5323,6 +5323,51 @@ runtime 4，加配置合同、菜单 pipe/PTY 和监督失效/TERM/自然退出�
 这是 Docker Desktop 内隔离 systemd/内核验收，不替代原生宿主、
 arm64、公网、整机重启或完整卸载验收，总目标仍 active。
 
+#### 5C.9a Hy2/TUIC 固定客户端与现有 UDP alias 前置
+
+复用 `docker-entry-port-alias-real` 的唯一隔离 daemon、离线固定镜像、
+客户端 netns、TCP/UDP origin；没有新增 selector、生产字段、菜单或宿主权限。
+sing-box 1.14.2（amd64，image ID
+`sha256:5fdff482ad9c65aa0e583a20e27d5f322b2539e673432e2cf78c7f460028fcb3`）
+两协议单 `server_port` 基线均 check 成功；Hy2 的
+`server_ports:["36461:36462"]` 成功，TUIC 明确拒绝 `unknown field "server_ports"`。
+保留退出码、版本、镜像身份与原始诊断；不从 TUIC 原生 URI 范围推断 sing-box 支持。
+
+生产生成 Hy2 单 inbound、双栈基础 UDP 端口 `35461`，两个已有 alias
+`36461/36462` 发布到同一 inbound；核心按原 UID 10001、cap0、
+只读根和只读证书挂载运行。固定两 alias 分别在 IPv4/IPv6 完成新 SOCKS
+TCP/UDP 回显（4 TCP、4 UDP），正确 SAN/信任证书/SNI 均严格核验。
+错误密码、错误 SNI、未信任 CA 在两族分别核对对应错误诊断，
+12 个失败请求的 origin 新事件为 0。
+
+范围客户端保持同一进程，首次成功回显后等待 5.1 秒，再完成一轮新 TCP/UDP
+请求（两轮合计 4 TCP、4 UDP）。客户端 netns 的专有 mangle OUTPUT
+链只计精确目的地址和两个 UDP 端口，输出整数包数与 `observed_both_ports`。
+最终 IPv4 `20/4` 包、IPv6 `4/22` 包，两族均观察到两个目的端口；
+前一快照 IPv4 `24/4`、IPv6 `26/0`，IPv6 未观察到第二端口，业务均成功。
+计数不证明每次尝试成功、新 QUIC 握手或重新认证，
+新 SOCKS socket 仍可能复用原 QUIC 会话；完整自动切换继续待验。
+
+前置两次失败保留原始日志：check 接受 `hop_interval:"1s"`，
+真正拨号要求至少 5 秒，实流量改用 `5s`；
+随后 12 秒双端口硬断言中 IPv4 `73/73`、IPv6 `143/0`，
+业务 24 轮仍全部成功，因此不再把短窗口未观察作为随机失败条件。
+确定性检查精简为跨最小间隔的两轮请求，不延长采样或新增依赖。
+失败证据 `.tmp-regression-docker-c5663ef9e3b44b7ba3500bcccebe88bd/`、
+`.tmp-regression-docker-63d3e89045b94ff29d7ae2e6e8aab897/`。
+
+最终 Linux amd64 定向内部/入口 18566/19633 ms、排队 193 ms、Jobs 2、
+cache_hit=false，工具镜像及离线镜像归档直接复用；旧三阶段 alias 断言全部保持。
+证据 `.tmp-regression-docker-fb123c3fdeea404095ccc90d3b920374/`；
+前一快照 `.tmp-regression-docker-010eb8b51dfa42f3a555945cb82dade6/`。
+两测试文件与最终快照一致，随后仅补验收文档。
+Bash、ShellCheck error、Python AST 与独立只读复审通过；本次只扩展独立真实 selector 的测试，
+生产代码及完整 53 项合同执行路径未变，沿用 5B.4k 集中完整证据。
+成功重复输入清理后保留日志/结果及失败证据。
+宿主 DNAT 双族归属、范围冲突、撤销/重建/重启/卸载、真实自动切换、
+其它客户端、TUIC 范围能力、原生宿主/arm64/公网仍待验；
+完整端口跳跃和协议管理保持 deferred，5C 与总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

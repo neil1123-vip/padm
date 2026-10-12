@@ -358,6 +358,13 @@ IPv4/IPv6 publishing is verified in an isolated amd64 Linux daemon;
 public hosting, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
 
+Complete Hy2/TUIC port hopping remains deferred. Preliminary tests with the fixed amd64
+sing-box 1.14.2 image accept Hy2 `server_ports` and reject that field for TUIC;
+both single-port baselines pass. Two existing Hy2 UDP aliases each pass strict TLS and
+TCP/UDP over IPv4/IPv6, and the range client keeps serving across 5.1 seconds.
+Short-window packet counts do not prove both families switched ports or performed a new
+QUIC handshake. These tests do not open hopping menus, range shares or host DNAT management.
+
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
 and share groups. Optional v3 `cdn_entries` contains up to 16 `{listener_id, addresses}`

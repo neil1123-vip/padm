@@ -17,7 +17,8 @@ cleanup() {
 }
 trap cleanup EXIT
 [[ "$(id -u)" == 0 && "$(uname -s)" == Linux && -f /.dockerenv ]] || exit 1
-for tool in jq python3 docker dockerd nsenter ip unshare sysctl openssl; do
+for tool in jq python3 docker dockerd nsenter ip unshare sysctl openssl \
+    iptables ip6tables iptables-save ip6tables-save; do
     command -v "${tool}" >/dev/null
 done
 [[ -f /node-images.json && -f /node-images.tar && -d /n ]] || {
@@ -104,5 +105,30 @@ jq -e '
   all(.[] | select(.public_port==36442); .target_listener_id=="entry-sing-box" and
     .service=="sing-box" and .container_port==35442)
 ' "${TEST_ROOT}/on.deployment.json" >/dev/null
+# 跳跃前置只复用已有 UDP alias；不增加生产跳跃字段或宿主规则。
+jq '
+  .core = {type:"sing-box",secondary_type:null,protocols:[{
+    id:3,core:"sing-box",listener_id:"entry-hy2",server:"hy2.padm.test",
+    public_port:35461,address_families:["ipv4","ipv6"],name:"hy2-account",
+    uuid:"33333333-3333-4333-8333-333333333333",
+    hy2:{domain:"hy2.padm.test",bandwidth_mode:"bbr",up_mbps:100,down_mbps:50,
+      obfs:null,masquerade:""}}]} |
+  .tls = {domain:"hy2.padm.test"} |
+  .port_aliases = [{listener_id:"entry-hy2",public_port:36461},
+    {listener_id:"entry-hy2",public_port:36462}]
+' "${TEST_ROOT}/off.spec.json" >"${TEST_ROOT}/hy2.spec.json"
+dockerConfigureSpecValidate "${TEST_ROOT}/hy2.spec.json"
+dockerGenerateCompose "${TEST_ROOT}/hy2.spec.json" "${TEST_ROOT}/hy2.compose.json"
+dockerGenerateDeployment "${TEST_ROOT}/hy2.spec.json" "${TEST_ROOT}/hy2.deployment.json"
+dockerDeploymentFileValidate "${TEST_ROOT}/hy2.deployment.json"
+dockerGenerateSingBoxConfig "${TEST_ROOT}/hy2.spec.json" "${TEST_ROOT}/hy2.base"
+dockerTrafficRender sing-box "${TEST_ROOT}/hy2.base" \
+    '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/hy2.json"
+jq -e '
+  (.listeners | length) == 3 and all(.listeners[];
+    .transport=="udp" and .service=="sing-box" and .container_port==35461 and
+    .address_families==["ipv4","ipv6"]) and
+  ([.listeners[].public_port] | sort) == [35461,36461,36462]
+' "${TEST_ROOT}/hy2.deployment.json" >/dev/null
 python3 "${PROJECT_ROOT}/docker/tests/entry-port-alias-real.py" "${TEST_ROOT}"
 printf 'docker-entry-port-alias-real-ok\n'
