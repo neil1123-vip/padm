@@ -319,17 +319,15 @@ def port_range_capabilities(root, image_id):
                     "unknown field" in result.stderr, result.stderr
 
 
-def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
-    # 隔离 netns 由夹具创建规则/state，仅审计与撤销调用生产入口。
+def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address, docker, node, net_image):
+    # 隔离 netns 使用生产启动与信号撤销，目标仍是本轮已发布 Hy2 端口。
     token = os.urandom(16).hex()
     chain = "padm-hop-" + token[:12]
     comment = "padm-hop:" + token
     state_path = Path("/var/lib/padm/net/port-hopping.state")
-    state = (f"schema_version=1\ntoken={token}\nchain={chain}\nstart=36561\nend=36562\n"
-             f"target_port=35461\nipv4={HOSTS['ipv4']}\nipv6={HOSTS['ipv6']}\nphase=active\n").encode()
     state_path.parent.mkdir(parents=True, exist_ok=True)
     assert not state_path.exists() and not state_path.is_symlink()
-    owned, outside = [], []
+    outside, owner_process = [], None
     baseline = {}
     client = dict(log=dict(level="warn"), inbounds=[], outbounds=[], route=dict(rules=[]))
     items = []
@@ -387,10 +385,34 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
     def resources(operation):
         command(["sh", str(SCRIPT.parents[1] / "images/net/entrypoint.sh"),
                  f"port-hopping-{operation}", token])
-        if operation == "clean":
-            assert not state_path.exists()
-            owned.clear()
         print(f"entry-hy2-hopping-owner: {operation} passed", flush=True)
+
+    def start_owner(stage):
+        nonlocal owner_process, token, chain
+        previous_token = token if state_path.exists() else None
+        with (root / f"owner-hy2-dnat-{stage}.log").open("wb") as log:
+            owner_process = subprocess.Popen(
+                ["sh", str(SCRIPT.parents[1] / "images/net/entrypoint.sh"), "port-hopping",
+                 "36561", "36562", "35461", HOSTS["ipv4"], HOSTS["ipv6"]],
+                stdout=log, stderr=log)
+        processes.append(owner_process)
+        def ready():
+            assert owner_process.poll() is None, (root / f"owner-hy2-dnat-{stage}.log").read_text()
+            if not state_path.exists():
+                return False
+            values = dict(line.split("=", 1) for line in state_path.read_text().splitlines())
+            return values["phase"] == "active" and values["token"] != previous_token and subprocess.run(
+                ["sh", str(SCRIPT.parents[1] / "images/net/entrypoint.sh"),
+                 "port-hopping-health", values["token"]], capture_output=True).returncode == 0
+        wait_ready(ready)
+        values = dict(line.split("=", 1) for line in state_path.read_text().splitlines())
+        token, chain = values["token"], values["chain"]
+        resources("health")
+
+    def stop_owner():
+        stop(owner_process)
+        assert owner_process.returncode == 0, owner_process.returncode
+        assert not state_path.exists(), "TERM 未撤销生产归属"
 
     try:
         for family, address in HOSTS.items():
@@ -435,27 +457,23 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
         preflight(True)
         for stage in ("on", "off", "restored"):
             if stage == "off":
-                resources("clean")
+                stop_owner()
                 for table in baseline:
                     assert snapshot(table) == baseline[table], "撤销改变了 Docker 或外部 NAT 规则"
                 preflight(True)
             else:
-                state_path.write_bytes(state)
-                state_path.chmod(0o600)
-                for family, address in HOSTS.items():
-                    table = "iptables" if family == "ipv4" else "ip6tables"
-                    target = f"{address}:35461" if family == "ipv4" else f"[{address}]:35461"
-                    add(table, ["-N", chain], owned)
-                    add(table, ["-A", chain, "-m", "comment", "--comment", comment,
-                                "-j", "RETURN"], owned)
-                    resources("audit")
-                    add(table, ["-I", chain, "1", "-d", address, "-p", "udp", "-m", "udp",
-                                "--dport", "36561:36562", "-m", "comment", "--comment", comment,
-                                "-j", "DNAT", "--to-destination", target], owned)
-                    add(table, ["-I", "PREROUTING", "1", "-d", address, "-p", "udp", "-m", "udp",
-                                "--dport", "36561:36562", "-m", "comment", "--comment", comment,
-                                "-j", chain], owned)
-                resources("health")
+                start_owner(stage)
+                if stage == "restored":
+                    previous_token, previous_chain = token, chain
+                    owner_process.kill()
+                    assert owner_process.wait(timeout=5) == -signal.SIGKILL
+                    assert state_path.exists()
+                    start_owner("kill-recovery")
+                    assert token != previous_token
+                    for table in baseline:
+                        assert previous_chain.encode() not in snapshot(table)
+                    print(f"entry-hy2-hopping-kill-recovery: old={previous_token} new={token}", flush=True)
+                resources("audit")
                 preflight(False)
             # 撤销用此前无跳跃流量的第二来源，避免旧 QUIC/conntrack 掩盖新连接结果。
             stage_enter = enter if stage == "on" else off_enter
@@ -488,10 +506,42 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
                 client_pid=process.pid, fresh_client=True, families=list(HOSTS),
                 client_scope="first-source" if stage == "on" else "second-source",
                 target_port=35461, range=[36561, 36562], backend="iptables-nft")), flush=True)
-        resources("clean")
+        stop_owner()
         for table in baseline:
             assert snapshot(table) == baseline[table], "重建后撤销改变了非本轮规则"
         preflight(True)
+        # 独立容器 PID 1 使用当前入口，docker stop 必须让 Python 收到 TERM 并撤销。
+        pid1_root = node / "pid1-owner"
+        pid1_root.mkdir(mode=0o700)
+        entrypoint = node / "hopping-entrypoint.sh"
+        entrypoint.write_bytes((SCRIPT.parents[1] / "images/net/entrypoint.sh").read_bytes())
+        identity = command(docker + [
+            "run", "-d", "--network", "host", "--cap-add", "NET_ADMIN", "--read-only",
+            "--tmpfs", "/tmp", "--tmpfs", "/run",
+            "--volume", f"{pid1_root}:/var/lib/padm/net",
+            "--volume", f"{entrypoint}:/test-entrypoint:ro", "--entrypoint", "sh",
+            net_image, "/test-entrypoint", "port-hopping", "36981", "36982", "35461",
+            HOSTS["ipv4"], HOSTS["ipv6"]]).decode().strip()
+        try:
+            def pid1_ready():
+                current = pid1_root / "port-hopping.state"
+                return current.exists() and b"phase=active\n" in current.read_bytes()
+            wait_ready(pid1_ready)
+            cmdline = command(docker + ["exec", identity, "cat", "/proc/1/cmdline"])
+            assert cmdline.startswith(b"python3\x00"), cmdline
+            pid1_token = dict(line.split("=", 1) for line in
+                             (pid1_root / "port-hopping.state").read_text().splitlines())["token"]
+            command(docker + ["exec", identity, "sh", "/test-entrypoint",
+                             "port-hopping-health", pid1_token])
+            command(docker + ["stop", "--time", "10", identity], timeout=15)
+            assert command(docker + ["inspect", "--format",
+                                     "{{.State.ExitCode}}", identity]).strip() == b"0"
+            assert not (pid1_root / "port-hopping.state").exists()
+            for table in baseline:
+                assert snapshot(table) == baseline[table], "docker stop 改变了外来 NAT 正文"
+            print("entry-hy2-hopping-pid1-stop-ok", flush=True)
+        finally:
+            command(docker + ["rm", "-f", identity])
         # legacy 实测限 IPv4；表实例化后结束，不把空表遗留计作恢复支持。
         add("iptables-legacy", ["-A", "PREROUTING", "-p", "udp", "--dport", "36562",
                                "-j", "REDIRECT", "--to-ports", "35461"], outside)
@@ -507,14 +557,12 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
             current_table, removal = outside.pop()
             command([current_table, "-w", "-t", "nat"] + removal)
     finally:
-        revoke(owned)
+        if owner_process is not None:
+            stop(owner_process)
         revoke(outside)
-        if state_path.exists():
-            assert state_path.read_bytes() == state, "夹具归属已变化，保留现场"
-            state_path.unlink()
 
 
-def hy2_range_probe(root, node, docker, image_id, enter, off_enter, processes):
+def hy2_range_probe(root, node, docker, image_id, net_image, enter, off_enter, processes):
     cert, key = node / "hy2.crt", node / "hy2.key"
     command(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
              "-subj", "/CN=hy2.padm.test", "-addext", "subjectAltName=DNS:hy2.padm.test",
@@ -660,7 +708,7 @@ def hy2_range_probe(root, node, docker, image_id, enter, off_enter, processes):
                     rejections.append(dict(family=family, case=auth, diagnostic=matches[0]))
             print("entry-hy2-rejections=" + json.dumps(rejections), flush=True)
         stop(process)
-    hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address)
+    hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address, docker, node, net_image)
 
 
 def run(root):
@@ -781,7 +829,7 @@ def run(root):
                 print(f"entry-port-alias-{phase}: IPv4+IPv6 production ports/NAT/auth/UID10001/cap0/ro passed",
                       flush=True)
             off_enter = ["nsenter", "--target", str(clients[1].pid), "--net", "--"]
-            hy2_range_probe(root, node, docker, inputs["sing-box"]["image_id"],
+            hy2_range_probe(root, node, docker, inputs["sing-box"]["image_id"], inputs["net"]["image_id"],
                             enter, off_enter, processes)
             print("entry-port-alias-real-environment=" + json.dumps(dict(
                 hosts=HOSTS, destination_family="ipv4", image_ids=inputs,
@@ -809,6 +857,11 @@ def run(root):
             if active_error:
                 print((root / "daemon.log").read_text()[-4000:], file=sys.stderr)
             assert node.parent == Path("/n") and node.name.startswith(".tmp-entry-alias-")
+            # daemon 退出可能留下 netns 挂载，仅卸载本次隔离目录下的残留。
+            mounts = [line.split()[4] for line in Path("/proc/self/mountinfo").read_text().splitlines()
+                      if line.split()[4].startswith(str(node) + "/")]
+            for mount in sorted(mounts, key=lambda value: value.count("/"), reverse=True):
+                command(["umount", "--lazy", "--", mount], timeout=5)
             shutil.rmtree(node)
 
 

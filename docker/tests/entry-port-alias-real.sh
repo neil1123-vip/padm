@@ -18,7 +18,7 @@ cleanup() {
 trap cleanup EXIT
 [[ "$(id -u)" == 0 && "$(uname -s)" == Linux && -f /.dockerenv ]] || exit 1
 for tool in jq python3 docker dockerd nsenter ip unshare sysctl openssl \
-    iptables ip6tables iptables-save ip6tables-save; do
+    iptables ip6tables iptables-save ip6tables-save umount; do
     command -v "${tool}" >/dev/null
 done
 [[ -f /node-images.json && -f /node-images.tar && -d /n ]] || {

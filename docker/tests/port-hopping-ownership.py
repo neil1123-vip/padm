@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
+from contextlib import contextmanager
 import fcntl
 import itertools
 import json
 import os
 from pathlib import Path
 import shlex
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 
 SCRIPT = Path(__file__).resolve()
@@ -16,6 +20,7 @@ TOKEN = "0123456789abcdef0123456789abcdef"
 CHAIN = "padm-hop-" + TOKEN[:12]
 COMMENT = "padm-hop:" + TOKEN
 FAMILIES = ("iptables", "ip6tables")
+RUN_VALUES = ("36561", "36562", "35461", "198.18.1.1", "2001:db8:1::1")
 STATE = (
     f"schema_version=1\ntoken={TOKEN}\nchain={CHAIN}\n"
     "start=36561\nend=36562\ntarget_port=35461\n"
@@ -37,24 +42,30 @@ BASE = {
 }
 
 
-def rules(family, single=False):
-    address = "198.18.1.1/32" if family == "iptables" else "2001:db8:1::1/128"
-    target = "198.18.1.1:35461" if family == "iptables" else "[2001:db8:1::1]:35461"
-    selected = "36561" if single else "36561:36562"
-    match = f"-d {address} -p udp -m udp --dport {selected} -m comment --comment {COMMENT}"
+def rules(family, single=False, owner=None):
+    owner = owner or dict(line.split("=", 1) for line in STATE.splitlines())
+    chain, comment = owner["chain"], "padm-hop:" + owner["token"]
+    ip = owner["ipv4"] if family == "iptables" else owner["ipv6"]
+    address = ip + ("/32" if family == "iptables" else "/128")
+    target = f"{ip}:{owner['target_port']}" if family == "iptables" else f"[{ip}]:{owner['target_port']}"
+    selected = owner["start"] if single or owner["start"] == owner["end"] else (
+        owner["start"] + ":" + owner["end"])
+    match = f"-d {address} -p udp -m udp --dport {selected} -m comment --comment {comment}"
     return (
-        f"-A PREROUTING {match} -j {CHAIN}",
-        f"-A {CHAIN} {match} -j DNAT --to-destination {target}",
-        f"-A {CHAIN} -m comment --comment {COMMENT} -j RETURN",
+        f"-A PREROUTING {match} -j {chain}",
+        f"-A {chain} {match} -j DNAT --to-destination {target}",
+        f"-A {chain} -m comment --comment {comment} -j RETURN",
     )
 
 
-def table(family, shape, single=False):
+def table(family, shape, single=False, owner=None):
     value = BASE[family].copy()
     if shape == "none":
         return value
-    hook, dnat, sentinel = rules(family, single)
-    value.insert(4, "-N " + CHAIN)
+    hook, dnat, sentinel = rules(family, single, owner)
+    value.insert(4, "-N " + (owner["chain"] if owner else CHAIN))
+    if shape == "empty":
+        return value
     if shape == "full":
         first_rule = next((index for index, line in enumerate(value)
                            if line.startswith("-A PREROUTING ")), len(value))
@@ -71,6 +82,18 @@ def tool():
     family, *args = sys.argv[2:]
     with Path(os.environ["HOP_COMMANDS"]).open("a") as output:
         output.write(json.dumps([family, *args]) + "\n")
+    if family in {"ip", "nft", "ss"}:
+        expected = {"ip": ["-j", "address", "show"], "nft": ["-j", "list", "ruleset"],
+                    "ss": ["-H", "-u", "-a", "-n"]}
+        if args != expected[family]:
+            sys.exit(99)
+        if family == "ip":
+            print(json.dumps([{"ifindex": 1, "ifname": "eth0", "addr_info": [
+                {"family": "inet", "local": RUN_VALUES[3], "prefixlen": 24},
+                {"family": "inet6", "local": RUN_VALUES[4], "prefixlen": 64}]}]))
+        elif family == "nft":
+            print('{"nftables":[]}')
+        return
     if family not in FAMILIES:
         sys.exit(99)
     if args == ["--version"]:
@@ -85,12 +108,25 @@ def tool():
             sys.exit(1)
         if fixture.get("listing_warning") == family:
             print("fixture listing incomplete", file=sys.stderr)
+        if fixture.get("term_on_listing") == family:
+            del fixture["term_on_listing"]
+            fixture_path.write_text(json.dumps(fixture))
+            os.kill(os.getppid(), signal.SIGTERM)
         print("\n".join(fixture[family]))
         return
-    if action not in {"-D", "-X", "-A"} or not arguments:
+    if action not in {"-D", "-X", "-A", "-N", "-I"} or not arguments:
         sys.exit(99)
     current = fixture[family]
-    if action == "-D":
+    if fixture.get("fail_hook") == family and action == "-I" and arguments[0] == "PREROUTING":
+        del fixture["fail_hook"]
+        fixture_path.write_text(json.dumps(fixture))
+        print("fixture insert hook failed", file=sys.stderr)
+        sys.exit(1)
+    if action == "-N":
+        if len(arguments) != 1 or "-N " + arguments[0] in current:
+            sys.exit(1)
+        current.insert(4, "-N " + arguments[0])
+    elif action == "-D":
         wanted = ["-A", *arguments]
         indices = [index for index, line in enumerate(current)
                    if shlex.split(line) == wanted]
@@ -112,9 +148,19 @@ def tool():
             sys.exit(1)
         current.remove("-N " + chain)
     else:
-        if "-N " + arguments[0] not in current:
+        chain = arguments[0]
+        if "-N " + chain not in current and "-P " + chain + " ACCEPT" not in current:
             sys.exit(1)
-        current.append(" ".join(["-A", *arguments]))
+        if action == "-I":
+            if len(arguments) < 3 or arguments[1] != "1":
+                sys.exit(99)
+            fallback = next((index for index, line in enumerate(current)
+                             if chain == "PREROUTING" and line.startswith("-A ")), len(current))
+            position = next((index for index, line in enumerate(current)
+                             if line.startswith("-A " + chain + " ")), fallback)
+            current.insert(position, " ".join(["-A", chain, *arguments[2:]]))
+        else:
+            current.append(" ".join(["-A", *arguments]))
     if fixture.get("replace_state"):
         mode = fixture.pop("replace_state")
         state = Path(os.environ["HOP_STATE"])
@@ -130,7 +176,86 @@ def tool():
         replacement = state_root / ".lock-replacement"
         replacement.touch(mode=0o600)
         os.replace(replacement, state_root / ".port-hopping.lock")
+    gate = fixture.get("gate", {})
+    paused = gate.get("family") == family and gate.get("action") == action and (
+        arguments[0] == "PREROUTING" if gate.get("hook") else
+        arguments[0].startswith("padm-hop-"))
+    if paused:
+        del fixture["gate"]
     fixture_path.write_text(json.dumps(fixture))
+    if paused:
+        # 门禁位于写入之后，信号测试不依赖机器速度推测启动位置。
+        gate_root = fixture_path.parent
+        (gate_root / "gate.entered").write_text(str(os.getpid()))
+        deadline = time.monotonic() + 8
+        while not (gate_root / "gate.release").exists():
+            if time.monotonic() >= deadline:
+                print("fixture gate timed out", file=sys.stderr)
+                sys.exit(1)
+            time.sleep(0.02)
+
+
+def run_python():
+    arguments = sys.argv[2:]
+    state_path = Path(os.environ["HOP_STATE"])
+    fixture = json.loads(Path(os.environ["HOP_FIXTURE"]).read_text())
+    fault = fixture.get("commit_failure")
+    if (len(arguments) != 8 or arguments[:3] != ["-", str(state_path.parent), "run"]
+            or not fault):
+        os.execv("/usr/bin/python3", ["python3", *arguments])
+    body = sys.stdin.read()
+    namespace = {"__name__": "__main__"}
+    original_mkstemp, original_fsync, original_replace = tempfile.mkstemp, os.fsync, os.replace
+    triggered = False
+
+    def inject(point):
+        nonlocal triggered
+        if triggered or point != fault["point"] or namespace.get("phase") != fault["phase"]:
+            return False
+        triggered = True
+        marker = Path(os.environ["HOP_FIXTURE"]).parent / "commit.fault.json"
+        marker.write_text(json.dumps({
+            **fault, "state": namespace["state_text"]().decode("ascii")}))
+        return True
+
+    def mkstemp(*args, **kwargs):
+        if inject("create"):
+            raise OSError("fixture state temporary creation failed")
+        descriptor, stage = original_mkstemp(*args, **kwargs)
+        if inject("write"):
+            # 只替换本次临时文件描述符，使生产 write/flush 遇到真实 EBADF。
+            readonly = os.open(stage, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            os.close(descriptor)
+            descriptor = readonly
+        return descriptor, stage
+
+    def fsync(descriptor):
+        point = "directory-fsync" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else "file-fsync"
+        if inject(point):
+            raise OSError("fixture state " + point + " failed")
+        return original_fsync(descriptor)
+
+    def replace(stage, destination):
+        if os.fspath(destination) != str(state_path):
+            return original_replace(stage, destination)
+        if inject("replace"):
+            raise OSError("fixture state replace failed")
+        original_replace(stage, destination)
+        if inject("replace-state"):
+            # 同字节替换仍改变 inode，读回不能把未知归属刷新为本轮 baseline。
+            descriptor, replacement = original_mkstemp(
+                prefix=".port-hopping-state.replaced.", dir=state_path.parent)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(state_path.read_bytes())
+                original_replace(replacement, state_path)
+            finally:
+                if os.path.lexists(replacement):
+                    os.unlink(replacement)
+
+    tempfile.mkstemp, os.fsync, os.replace = mkstemp, fsync, replace
+    sys.argv = arguments
+    exec(compile(body, "<port-hopping-fixture>", "exec"), namespace)
 
 
 def mutations(commands):
@@ -138,15 +263,28 @@ def mutations(commands):
             and len(row) > 4 and row[4] != "-S"]
 
 
-def expected_cleanup(family, shape, single=False):
-    hook, dnat, sentinel = rules(family, single)
+def expected_cleanup(family, shape, single=False, owner=None):
+    hook, dnat, sentinel = rules(family, single, owner)
     lines = ([hook] if shape == "full" else [])
     lines += [dnat] if shape in {"full", "detached"} else []
-    lines += [sentinel] if shape != "none" else []
+    lines += [sentinel] if shape in {"full", "detached", "sentinel"} else []
     result = [[family, "-w", "-t", "nat", "-D", *shlex.split(line)[1:]]
               for line in lines]
     if shape != "none":
-        result.append([family, "-w", "-t", "nat", "-X", CHAIN])
+        result.append([family, "-w", "-t", "nat", "-X", owner["chain"] if owner else CHAIN])
+    return result
+
+
+def expected_creation(owner):
+    result = []
+    for family in FAMILIES:
+        hook, dnat, sentinel = [shlex.split(line) for line in rules(family, owner=owner)]
+        result.extend([
+            [family, "-w", "-t", "nat", "-N", owner["chain"]],
+            [family, "-w", "-t", "nat", "-A", *sentinel[1:]],
+            [family, "-w", "-t", "nat", "-I", owner["chain"], "1", *dnat[2:]],
+            [family, "-w", "-t", "nat", "-I", "PREROUTING", "1", *hook[2:]],
+        ])
     return result
 
 
@@ -159,10 +297,17 @@ def main():
         functions.write_text(source.split('case "${1:-idle}" in')[0])
         binaries = work / "bin"
         binaries.mkdir()
-        for family in FAMILIES:
+        for family in (*FAMILIES, "ip", "nft", "ss"):
             binary = binaries / family
             binary.write_text(f'#!/bin/sh\nexec python3 "{SCRIPT}" tool "{family}" "$@"\n')
             binary.chmod(0o755)
+        python = binaries / "python3"
+        python.write_text(
+            '#!/bin/sh\n'
+            'if [ -n "${HOP_COMMIT_FAULT:-}" ] && [ "${1:-}" = - ] && [ "${3:-}" = run ]; then\n'
+            f'    exec /usr/bin/python3 "{SCRIPT}" python "$@"\n'
+            'fi\nexec /usr/bin/python3 "$@"\n')
+        python.chmod(0o755)
 
         def fixture(name, shapes=("full", "full"), phase="active", single=False):
             case = work / name
@@ -181,32 +326,43 @@ def main():
             commands.write_text("")
             return state_root, owner, inventory, commands
 
-        def invoke(paths, action, accepted, token=TOKEN):
+        def environment(paths):
+            return dict(os.environ, PATH=f"{binaries}:{os.environ['PATH']}",
+                        HOP_FIXTURE=str(paths[2]), HOP_COMMANDS=str(paths[3]),
+                        HOP_STATE=str(paths[1]), HOP_COMMIT_FAULT=(
+                            "1" if json.loads(paths[2].read_text()).get("commit_failure") else ""))
+
+        def command_rows(paths, running=False):
+            rows = [json.loads(line) for line in paths[3].read_text().splitlines()]
+            extra = {"ip": ["-j", "address", "show"],
+                     "nft": ["-j", "list", "ruleset"], "ss": ["-H", "-u", "-a", "-n"]}
+            flags = ("-D", "-X", "-A", "-N", "-I") if running else ("-D", "-X", "-A")
+            for family, *args in rows:
+                assert (family in FAMILIES and (
+                    args == ["--version"] or args == ["-w", "-t", "nat", "-S"] or
+                    args[:4] in [["-w", "-t", "nat", flag] for flag in flags])
+                    or running and family in extra and args == extra[family]), rows
+            return rows
+
+        def invoke(paths, action, accepted, token=TOKEN, values=RUN_VALUES):
             nonlocal count
             state_root, owner, inventory, commands = paths
             commands.write_text("")
-            environment = dict(os.environ, PATH=f"{binaries}:{os.environ['PATH']}",
-                               HOP_FIXTURE=str(inventory), HOP_COMMANDS=str(commands),
-                               HOP_STATE=str(owner))
             result = subprocess.run(["sh", "-c",
-                '. "$1"; STATE_ROOT=$2; port_hopping_resources "$3" "$4"',
-                "test", str(functions), str(state_root), action, token],
-                env=environment, capture_output=True, text=True, timeout=10)
+                '. "$1"; STATE_ROOT=$2; shift 2; port_hopping_resources "$@"',
+                "test", str(functions), str(state_root), action,
+                *(values if action == "run" else (token,))],
+                env=environment(paths), capture_output=True, text=True, timeout=10)
             assert result.returncode == (0 if accepted else 1), (
                 state_root.parent.name, action, result.returncode, result.stderr)
             assert not result.stdout, (action, result.stdout)
             if not accepted:
                 assert result.stderr, (action, "failure without diagnostic")
-            rows = [json.loads(line) for line in commands.read_text().splitlines()]
-            for family, *args in rows:
-                assert family in FAMILIES and (
-                    args == ["--version"] or args == ["-w", "-t", "nat", "-S"] or
-                    args[:4] in [["-w", "-t", "nat", flag] for flag in ("-D", "-X", "-A")]
-                ), rows
+            rows = command_rows(paths, action == "run")
             count += 1
             return rows
 
-        def readonly(paths, action, accepted, token=TOKEN):
+        def readonly(paths, action, accepted, token=TOKEN, values=RUN_VALUES):
             state_root, owner, inventory, _ = paths
             metadata = owner.lstat()
             before = inventory.read_bytes(), owner.read_bytes(), (
@@ -215,7 +371,7 @@ def main():
                 metadata.st_mtime_ns, metadata.st_ctime_ns)
             lock = state_root / ".port-hopping.lock"
             lock_before = lock.lstat() if lock.exists() else None
-            rows = invoke(paths, action, accepted, token)
+            rows = invoke(paths, action, accepted, token, values)
             assert not mutations(rows), rows
             assert inventory.read_bytes() == before[0] and owner.read_bytes() == before[1]
             metadata = owner.lstat()
@@ -223,6 +379,105 @@ def main():
                     metadata.st_gid, metadata.st_size, metadata.st_nlink,
                     metadata.st_mtime_ns, metadata.st_ctime_ns) == before[2]
             assert (lock.lstat() if lock.exists() else None) == lock_before
+
+        def signal_group(process, signum):
+            try:
+                os.killpg(process.pid, signum)
+            except ProcessLookupError:
+                pass
+
+        @contextmanager
+        def running(paths, values=RUN_VALUES):
+            paths[3].write_text("")
+            process = subprocess.Popen(["sh", "-c",
+                '. "$1"; STATE_ROOT=$2; shift 2; port_hopping_resources "$@"',
+                "test", str(functions), str(paths[0]), "run", *values],
+                env=environment(paths), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, start_new_session=True)
+            try:
+                yield process
+            finally:
+                # 无论断言是否成功，都释放门禁并回收本次创建的进程组。
+                (paths[2].parent / "gate.release").touch()
+                signal_group(process, signal.SIGTERM)
+                try:
+                    process.communicate(timeout=3)
+                except subprocess.TimeoutExpired:
+                    signal_group(process, signal.SIGKILL)
+                    process.communicate(timeout=5)
+
+        def wait_for(process, predicate, label):
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                try:
+                    value = predicate()
+                    if value:
+                        assert process.poll() is None, label
+                        return value
+                except (FileNotFoundError, json.JSONDecodeError):
+                    pass
+                if process.poll() is not None:
+                    output, error = process.communicate(timeout=5)
+                    raise AssertionError((label, process.returncode, output, error))
+                time.sleep(0.02)
+            raise AssertionError((label, "timed out waiting for fixture"))
+
+        def finish(process, accepted=True, signum=None, killed=False):
+            nonlocal count
+            if signum is not None:
+                process.send_signal(signum)
+            output, error = process.communicate(timeout=10)
+            expected = -signal.SIGKILL if killed else (0 if accepted else 1)
+            assert process.returncode == expected, (process.returncode, output, error)
+            assert not output, output
+            if not accepted and not killed:
+                assert error, "failure without diagnostic"
+            count += 1
+
+        def owner_value(paths):
+            return dict(line.split("=", 1) for line in paths[1].read_text().splitlines())
+
+        def active(process, paths, values=RUN_VALUES, previous_token=None):
+            def ready():
+                owner = owner_value(paths)
+                return owner if owner["phase"] == "active" and (
+                    previous_token is None or owner["token"] != previous_token) else None
+            owner = wait_for(process, ready, paths[0].parent.name)
+            assert owner["schema_version"] == "1"
+            assert len(owner["token"]) == 32 and all(
+                character in "0123456789abcdef" for character in owner["token"])
+            assert owner["chain"] == "padm-hop-" + owner["token"][:12]
+            assert tuple(owner[key] for key in
+                         ("start", "end", "target_port", "ipv4", "ipv6")) == tuple(values)
+            value = json.loads(paths[2].read_text())
+            assert all(value[family] == table(family, "full", owner=owner)
+                       for family in FAMILIES), value
+            metadata = paths[1].stat()
+            assert metadata.st_uid == metadata.st_gid == 0
+            assert metadata.st_mode & 0o7777 == 0o600
+            return owner
+
+        def fresh(name, **changes):
+            paths = fixture(name, ("none", "none"))
+            paths[1].unlink()
+            value = json.loads(paths[2].read_text())
+            value.update(changes)
+            paths[2].write_text(json.dumps(value))
+            return paths
+
+        def cleaned(paths):
+            value = json.loads(paths[2].read_text())
+            assert all(value[family] == BASE[family] for family in FAMILIES), value
+            assert not paths[1].exists()
+            metadata = (paths[0] / ".port-hopping.lock").stat()
+            assert metadata.st_uid == metadata.st_gid == 0
+            assert metadata.st_mode & 0o7777 == 0o600
+
+        def crash(process, paths):
+            process.kill()
+            (paths[2].parent / "gate.release").touch()
+            signal_group(process, signal.SIGKILL)
+            finish(process, killed=True)
 
         def clean(paths, shapes, single=False):
             state_root, owner, inventory, _ = paths
@@ -435,11 +690,173 @@ def main():
             before = paths[2].read_bytes(), paths[1].read_bytes()
             rows = invoke(paths, "clean", False)
             assert not mutations(rows) and (paths[2].read_bytes(), paths[1].read_bytes()) == before
-    print(f"docker-port-hopping-ownership-ok: {count} owner and cleanup cases")
+
+        for name, values, signum in (
+            ("run-term", RUN_VALUES, signal.SIGTERM),
+            ("run-single-int", (RUN_VALUES[0], RUN_VALUES[0], *RUN_VALUES[2:]), signal.SIGINT),
+        ):
+            paths = fresh(name)
+            unrelated = paths[0] / "unrelated.state"
+            unrelated.write_text("foreign baseline\n")
+            unknown_stage = paths[0] / ".port-hopping-state.foreign"
+            unknown_stage.write_text("unknown staged owner\n")
+            with running(paths, values) as process:
+                owner = active(process, paths, values)
+                assert mutations(command_rows(paths, True)) == expected_creation(owner)
+                readonly(paths, "health", True, owner["token"])
+                if name == "run-term":
+                    readonly(paths, "run", False)
+                    readonly(paths, "clean", False, owner["token"])
+                paths[3].write_text("")
+                finish(process, signum=signum)
+            assert mutations(command_rows(paths, True)) == sum(
+                (expected_cleanup(family, "full", owner=owner) for family in FAMILIES), [])
+            cleaned(paths)
+            assert unrelated.read_text() == "foreign baseline\n"
+            assert unknown_stage.read_text() == "unknown staged owner\n"
+
+        paths = fresh("run-second-hook-failed", fail_hook="ip6tables")
+        with running(paths) as process:
+            finish(process, accepted=False)
+        rows = mutations(command_rows(paths, True))
+        creation = rows[:8]
+        token = creation[1][creation[1].index("--comment") + 1].removeprefix("padm-hop:")
+        owner = dict(line.split("=", 1) for line in STATE.replace(TOKEN, token).replace(
+            CHAIN, "padm-hop-" + token[:12]).splitlines())
+        assert creation == expected_creation(owner), rows
+        assert rows[8:] == (expected_cleanup("iptables", "full", owner=owner)
+                            + expected_cleanup("ip6tables", "detached", owner=owner)), rows
+        cleaned(paths)
+
+        stages = (("-N", False, "empty"), ("-A", False, "sentinel"),
+                  ("-I", False, "detached"), ("-I", True, "full"))
+        for family_index, family in enumerate(FAMILIES):
+            for stage_index, (action, hook, shape) in enumerate(stages):
+                paths = fresh(f"run-term-{family}-{stage_index}", gate={
+                    "family": family, "action": action, "hook": hook})
+                with running(paths) as process:
+                    wait_for(process, lambda: (paths[2].parent / "gate.entered").exists(),
+                             paths[0].parent.name)
+                    owner = owner_value(paths)
+                    assert owner["phase"] == "intent"
+                    shapes = ("full", shape) if family_index else (shape, "none")
+                    value = json.loads(paths[2].read_text())
+                    assert all(value[current] == table(current, current_shape, owner=owner)
+                               for current, current_shape in zip(FAMILIES, shapes)), value
+                    process.send_signal(signal.SIGTERM)
+                    (paths[2].parent / "gate.release").touch()
+                    finish(process)
+                rows = mutations(command_rows(paths, True))
+                prefix = 4 * family_index + stage_index + 1
+                assert rows[:prefix] == expected_creation(owner)[:prefix], rows
+                assert rows[prefix:] == sum((expected_cleanup(current, current_shape, owner=owner)
+                                            for current, current_shape in zip(FAMILIES, shapes)), []), rows
+                cleaned(paths)
+
+        for phase, shapes in (("intent", ("full", "none")), ("active", ("full", "full"))):
+            gate = {"gate": {"family": "iptables", "action": "-I", "hook": True}} if (
+                phase == "intent") else {}
+            paths = fresh("run-recover-" + phase, **gate)
+            with running(paths) as process:
+                if phase == "intent":
+                    wait_for(process, lambda: (paths[2].parent / "gate.entered").exists(),
+                             paths[0].parent.name)
+                    old = owner_value(paths)
+                    assert old["phase"] == "intent"
+                else:
+                    old = active(process, paths)
+                crash(process, paths)
+            with running(paths) as process:
+                owner = active(process, paths, previous_token=old["token"])
+                assert owner["token"] != old["token"]
+                expected = sum((expected_cleanup(family, shape, owner=old)
+                                for family, shape in zip(FAMILIES, shapes)), [])
+                assert mutations(command_rows(paths, True)) == expected + expected_creation(owner)
+                finish(process, signum=signal.SIGTERM)
+            cleaned(paths)
+
+        for phase, shapes in (("active", ("full", "full")), ("intent", ("detached", "none"))):
+            paths = fixture("recover-term-" + phase, shapes, phase)
+            value = json.loads(paths[2].read_text())
+            value["term_on_listing"] = "ip6tables"
+            paths[2].write_text(json.dumps(value))
+            with running(paths) as process:
+                finish(process)
+            assert mutations(command_rows(paths, True)) == sum(
+                (expected_cleanup(family, shape) for family, shape in zip(FAMILIES, shapes)), [])
+            cleaned(paths)
+
+        paths = fresh("run-crash-empty", gate={"family": "iptables", "action": "-N"})
+        with running(paths) as process:
+            wait_for(process, lambda: (paths[2].parent / "gate.entered").exists(),
+                     paths[0].parent.name)
+            owner = owner_value(paths)
+            crash(process, paths)
+        assert owner["phase"] == "intent"
+        value = json.loads(paths[2].read_text())
+        assert value["iptables"] == table("iptables", "empty", owner=owner)
+        assert value["ip6tables"] == BASE["ip6tables"]
+        readonly(paths, "run", False)
+
+        for phase, shapes in (("active", ("full", "full")), ("intent", ("full", "none"))):
+            for index, changed in enumerate(("36560", "36563", "35462",
+                                             "198.18.1.2", "2001:db8:1::2")):
+                paths = fixture(f"run-tuple-{phase}-{index}", shapes, phase)
+                (paths[0] / ".port-hopping.lock").touch(mode=0o600)
+                values = list(RUN_VALUES)
+                values[index] = changed
+                readonly(paths, "run", False, values=values)
+
+        for kind in ("replace_state", "replace_lock"):
+            paths = fresh("run-" + kind, **{kind: "same" if kind == "replace_state" else True})
+            with running(paths) as process:
+                finish(process, accepted=False)
+            owner = owner_value(paths)
+            assert owner["phase"] == "intent"
+            assert mutations(command_rows(paths, True)) == expected_creation(owner)[:1]
+            value = json.loads(paths[2].read_text())
+            assert value["iptables"] == table("iptables", "empty", owner=owner)
+            assert value["ip6tables"] == BASE["ip6tables"]
+            readonly(paths, "run", False)
+
+        for phase, point in (
+            ("intent", "create"), ("intent", "write"), ("intent", "file-fsync"),
+            ("intent", "replace"), ("intent", "directory-fsync"),
+            ("active", "replace"), ("active", "directory-fsync"), ("active", "replace-state"),
+        ):
+            paths = fresh(f"commit-{phase}-{point}", commit_failure={"phase": phase, "point": point})
+            unknown_stage = paths[0] / ".port-hopping-state.foreign"
+            unknown_stage.write_text("unknown staged owner\n")
+            with running(paths) as process:
+                finish(process, accepted=False)
+            marker = json.loads((paths[2].parent / "commit.fault.json").read_text())
+            assert (marker["phase"], marker["point"]) == (phase, point), marker
+            owner = dict(line.split("=", 1) for line in marker["state"].splitlines())
+            rows = mutations(command_rows(paths, True))
+            if phase == "intent":
+                assert not rows, rows
+                cleaned(paths)
+            elif point == "replace-state":
+                assert rows == expected_creation(owner), rows
+                assert paths[1].read_text() == marker["state"]
+                value = json.loads(paths[2].read_text())
+                assert all(value[family] == table(family, "full", owner=owner)
+                           for family in FAMILIES), value
+            else:
+                assert rows == expected_creation(owner) + sum(
+                    (expected_cleanup(family, "full", owner=owner) for family in FAMILIES), []), rows
+                cleaned(paths)
+            assert unknown_stage.read_text() == "unknown staged owner\n"
+            assert sorted(path.name for path in paths[0].iterdir()) == sorted(
+                [".port-hopping.lock", unknown_stage.name]
+                + (["port-hopping.state"] if point == "replace-state" else []))
+    print(f"docker-port-hopping-ownership-ok: {count} owner, cleanup and lifecycle cases")
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "tool":
         tool()
+    elif len(sys.argv) > 1 and sys.argv[1] == "python":
+        run_python()
     else:
         main()

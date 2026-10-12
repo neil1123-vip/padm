@@ -971,40 +971,71 @@ fail2ban_health() (
 
 port_hopping_preflight() {
     [ "$#" -eq 3 ] || die "port hopping preflight requires start, end and target port"
-    python3 - "$STATE_ROOT" "$@" <<'PY'
+    port_hopping_resources preflight "$@"
+}
+
+port_hopping_resources() {
+    if [ "${1:-}" = run ]; then
+        set -- exec python3 - "$STATE_ROOT" "$@"
+    else
+        set -- python3 - "$STATE_ROOT" "$@"
+    fi
+    "$@" <<'PY'
+import fcntl
+import ipaddress
 import json
 import os
 import re
 import shlex
+import signal
+import stat
 import subprocess
 import sys
+import tempfile
+import time
 
-root, *ports = sys.argv[1:]
+root, operation, *parameters = sys.argv[1:]
+state_path = os.path.join(root, "port-hopping.state")
+keys = ("schema_version", "token", "chain", "start", "end", "target_port", "ipv4", "ipv6", "phase")
+state = state_identity = lock = None
+cleared, created = set(), set()
+stopped = False
 
-def command(args):
-    result = subprocess.run(args, text=True, capture_output=True, timeout=5)
-    if result.returncode or result.stderr.strip():
-        raise ValueError(result.stderr.strip() or "cannot inspect port hopping resources")
-    return result.stdout
+def stop(_signum, _frame):
+    global stopped
+    stopped = True
 
 def port(value):
     if not re.fullmatch(r"[1-9][0-9]{0,4}", value) or int(value) > 65535:
         raise ValueError("invalid or noncanonical UDP port")
     return int(value)
 
-def overlaps(value, start, end):
+def parameters_valid(start, end, target_port, ipv4=None, ipv6=None):
+    first, last, target = map(port, (start, end, target_port))
+    if first > last or first <= target <= last:
+        raise ValueError("UDP range is reversed or includes its target port")
+    for address, version in ((ipv4, 4), (ipv6, 6)):
+        if address is None:
+            continue
+        parsed = ipaddress.ip_address(address)
+        if (parsed.version != version or str(parsed) != address or "%" in address
+                or parsed.is_unspecified or parsed.is_multicast or parsed.is_loopback
+                or parsed.is_link_local or getattr(parsed, "ipv4_mapped", None)):
+            raise ValueError("invalid or noncanonical port hopping destination")
+
+def overlaps(value, first, last):
     for item in value.split(","):
         ends = item.split(":")
         if len(ends) not in {1, 2}:
             raise ValueError("unverified NAT port selector")
-        first, last = port(ends[0]), port(ends[-1])
-        if first > last:
+        low, high = port(ends[0]), port(ends[-1])
+        if low > high:
             raise ValueError("reversed NAT port selector")
-        if first <= end and last >= start:
+        if low <= last and high >= first:
             return True
     return False
 
-def nat_conflicts(dump, start, end):
+def nat_conflicts(dump, first, last):
     chains, rules = set(), []
     for line in dump.splitlines():
         args = shlex.split(line)
@@ -1045,28 +1076,31 @@ def nat_conflicts(dump, start, end):
                 continue
             selected = [values[key] for key in ("--dport", "--destination-port", "--dports")
                         if key in values]
-            if len(selected) == 1 and not overlaps(selected[0], start, end):
+            if len(selected) == 1 and not overlaps(selected[0], first, last):
                 continue
         raise ValueError("UDP range conflicts with existing NAT translation")
 
-try:
-    start, end, target = map(port, ports)
-    if start > end or start <= target <= end:
-        raise ValueError("UDP range is reversed or includes its target port")
-    if os.path.lexists(os.path.join(root, "port-hopping.state")):
-        raise ValueError("existing port hopping state requires verified ownership")
-    # shortcut: 仅核验 iptables-nft 布局，接入其它后端前补齐其冲突与归属合同。
+def backend():
     for tool in ("iptables", "ip6tables"):
         if "(nf_tables)" not in command([tool, "--version"]):
             raise ValueError("port hopping requires the verified iptables-nft backend")
-        nat_conflicts(command([tool, "-w", "-t", "nat", "-S"]), start, end)
+
+def preflight(start, end, target_port):
+    parameters_valid(start, end, target_port)
+    first, last = int(start), int(end)
+    if os.path.lexists(state_path):
+        raise ValueError("existing port hopping state requires verified ownership")
+    # shortcut: 仅核验 iptables-nft 布局，接入其它后端前补齐其冲突与归属合同。
+    backend()
+    for tool in ("iptables", "ip6tables"):
+        nat_conflicts(command([tool, "-w", "-t", "nat", "-S"]), first, last)
     ruleset = json.loads(command(["nft", "-j", "list", "ruleset"]))
     for item in ruleset["nftables"]:
-        chain = item.get("chain", {})
-        if chain.get("type") == "nat" and (
-                chain.get("family") not in {"ip", "ip6"} or
-                chain.get("table") != "nat" or
-                chain.get("name") not in {"PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"}):
+        current = item.get("chain", {})
+        if current.get("type") == "nat" and (
+                current.get("family") not in {"ip", "ip6"} or
+                current.get("table") != "nat" or
+                current.get("name") not in {"PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"}):
             raise ValueError("native nft NAT layout has no verified conflict contract")
         rule = item.get("rule", {})
         if rule.get("table") == "nat" and any(
@@ -1088,29 +1122,8 @@ try:
         if len(fields) != 5 or ":" not in fields[3]:
             raise ValueError("unverified UDP listener listing")
         bound = port(fields[3].rsplit(":", 1)[1])
-        if start <= bound <= end:
+        if first <= bound <= last:
             raise ValueError("UDP range conflicts with a host listener")
-except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
-    print(f"padm-net: port hopping preflight refused: {error}", file=sys.stderr)
-    sys.exit(1)
-PY
-}
-
-port_hopping_resources() {
-    [ "$#" -eq 2 ] || die "port hopping resources requires operation and owner token"
-    python3 - "$STATE_ROOT" "$@" <<'PY'
-import fcntl
-import ipaddress
-import os
-import re
-import shlex
-import stat
-import subprocess
-import sys
-
-root, operation, expected_token = sys.argv[1:]
-state_path = os.path.join(root, "port-hopping.state")
-cleared = set()
 
 def identity(metadata):
     return (metadata.st_dev, metadata.st_ino, metadata.st_size,
@@ -1145,11 +1158,81 @@ def owner():
     data, metadata = read_state()
     if data != state or metadata != state_identity:
         raise ValueError("port hopping owner was replaced")
+    lock_owner()
+
+def lock_owner():
+    directory()
     if lock is not None:
         current = os.lstat(os.path.join(root, ".port-hopping.lock"))
         private_file(current, 0)
         if identity(current) != lock_identity:
             raise ValueError("port hopping lock was replaced")
+
+def acquire_lock():
+    global lock, lock_identity
+    directory()
+    descriptor = os.open(os.path.join(root, ".port-hopping.lock"),
+                         os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+    lock = os.fdopen(descriptor, "rb+")
+    private_file(os.fstat(lock.fileno()), 0)
+    current = os.lstat(os.path.join(root, ".port-hopping.lock"))
+    if identity(current) != identity(os.fstat(lock.fileno())):
+        raise ValueError("port hopping lock was replaced")
+    lock_identity = identity(current)
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+def state_text():
+    values = ("1", token, chain, start, end, target_port, ipv4, ipv6, phase)
+    return "".join(f"{key}={value}\n" for key, value in zip(keys, values)).encode("ascii")
+
+def load_state(expected_token=None):
+    global state, state_identity, token, chain, start, end, target_port, ipv4, ipv6, phase, tools, comment
+    data, metadata = read_state()
+    lines = data.decode("ascii").splitlines()
+    if len(lines) != len(keys) or any(not line.startswith(key + "=") for key, line in zip(keys, lines)):
+        raise ValueError("unverified port hopping state format")
+    values = [line.split("=", 1)[1] for line in lines]
+    schema, token, chain, start, end, target_port, ipv4, ipv6, phase = values
+    if (schema != "1" or not re.fullmatch("[a-f0-9]{32}", token)
+            or expected_token is not None and token != expected_token
+            or chain != "padm-hop-" + token[:12] or phase not in {"intent", "active"}
+            or data != state_text()):
+        raise ValueError("unverified port hopping state owner")
+    parameters_valid(start, end, target_port, ipv4, ipv6)
+    state, state_identity = data, metadata
+    comment = "padm-hop:" + token
+    tools = (("iptables", ipv4), ("ip6tables", ipv6))
+
+def commit_state():
+    global state, state_identity
+    expected = state_text()
+    descriptor, stage = tempfile.mkstemp(prefix=".port-hopping-state.", dir=root)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            private_file(os.fstat(stream.fileno()), 512)
+            stream.write(expected)
+            stream.flush()
+            os.fsync(stream.fileno())
+            staged_identity = identity(os.fstat(stream.fileno()))
+        if state is None:
+            lock_owner()
+            if os.path.lexists(state_path):
+                raise ValueError("port hopping state appeared before commit")
+        else:
+            owner()
+        os.replace(stage, state_path)
+        data, metadata = read_state()
+        if data != expected or metadata[:3] != staged_identity[:3]:
+            raise ValueError("port hopping committed owner was replaced")
+        state, state_identity = data, metadata
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        if os.path.lexists(stage):
+            os.unlink(stage)
 
 def command(args):
     result = subprocess.run(args, capture_output=True, text=True, timeout=5)
@@ -1210,7 +1293,7 @@ def audit():
                 or (present[0] and not present[1]) or (present[1] and not present[2])
                 or (any(present) and not chain_present)):
             raise ValueError("changed port hopping resource order or topology")
-        if chain_present and not present[2] and not (tool in cleared and not any(present)):
+        if chain_present and not present[2] and not (tool in cleared | created and not any(present)):
             raise ValueError("empty or unmarked port hopping chain has no verifiable owner")
         result[tool] = (chain_present, *present)
     owner()
@@ -1221,74 +1304,115 @@ def write(tool, args):
     owner()
     command([tool, "-w", "-t", "nat", *args])
 
-try:
-    if operation not in {"audit", "health", "clean"} or not re.fullmatch("[a-f0-9]{32}", expected_token):
-        raise ValueError("invalid port hopping operation or owner token")
-    state, state_identity = read_state()
-    lines = state.decode("ascii").splitlines()
-    keys = ("schema_version", "token", "chain", "start", "end", "target_port", "ipv4", "ipv6", "phase")
-    if len(lines) != len(keys) or any(not line.startswith(key + "=") for key, line in zip(keys, lines)):
-        raise ValueError("unverified port hopping state format")
-    values = [line.split("=", 1)[1] for line in lines]
-    schema, token, chain, start, end, target_port, ipv4, ipv6, phase = values
-    if (schema != "1" or token != expected_token or chain != "padm-hop-" + token[:12]
-            or phase not in {"intent", "active"}
-            or state != "".join(f"{key}={value}\n" for key, value in zip(keys, values)).encode("ascii")):
-        raise ValueError("unverified port hopping state owner")
-    for value in (start, end, target_port):
-        if not re.fullmatch("[1-9][0-9]{0,4}", value) or int(value) > 65535:
-            raise ValueError("invalid port hopping state port")
-    if int(start) > int(end) or int(start) <= int(target_port) <= int(end):
-        raise ValueError("invalid port hopping state range")
-    for address, version in ((ipv4, 4), (ipv6, 6)):
-        parsed = ipaddress.ip_address(address)
-        if (parsed.version != version or str(parsed) != address or "%" in address
-                or parsed.is_unspecified or parsed.is_multicast or parsed.is_loopback
-                or parsed.is_link_local or getattr(parsed, "ipv4_mapped", None)):
-            raise ValueError("invalid or noncanonical port hopping destination")
-    comment = "padm-hop:" + token
-    tools = (("iptables", ipv4), ("ip6tables", ipv6))
-    lock = None
-    if operation == "clean":
-        descriptor = os.open(os.path.join(root, ".port-hopping.lock"),
-                             os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
-        lock = os.fdopen(descriptor, "rb+")
-        private_file(os.fstat(lock.fileno()), 0)
-        current = os.lstat(os.path.join(root, ".port-hopping.lock"))
-        if identity(current) != identity(os.fstat(lock.fileno())):
-            raise ValueError("port hopping lock was replaced")
-        lock_identity = identity(current)
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        owner()
+def health():
+    if phase != "active" or not all(all(value) for value in audit().values()):
+        raise ValueError("port hopping is not active with complete dual-stack resources")
+
+def clean():
+    global state, state_identity
     for tool, address in tools:
-        if "(nf_tables)" not in command([tool, "--version"]):
-            raise ValueError("port hopping requires the verified iptables-nft backend")
-    presence = audit()
-    if operation == "health":
-        if phase != "active" or not all(all(value) for value in presence.values()):
-            raise ValueError("port hopping is not active with complete dual-stack resources")
-    elif operation == "clean":
+        for index, rule in enumerate(rules(address)):
+            if audit()[tool][index + 1]:
+                write(tool, ["-D", *rule[1:]])
+                if index == 2:
+                    cleared.add(tool)
+        if audit()[tool][0]:
+            try:
+                write(tool, ["-X", chain])
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                # 当前进程刚删的 sentinel 可补回；跨进程同名空链仍拒绝。
+                if audit()[tool][0] and tool in cleared:
+                    write(tool, rules(address)[2])
+                    cleared.remove(tool)
+                raise
+        cleared.discard(tool)
+        created.discard(tool)
+    if any(any(value) for value in audit().values()):
+        raise ValueError("port hopping resources remain after cleanup")
+    owner()
+    os.unlink(state_path)
+    state = state_identity = None
+
+def run():
+    global token, chain, start, end, target_port, ipv4, ipv6, phase, tools, comment
+    parameters_valid(*parameters)
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    acquire_lock()
+    backend()
+    if os.path.lexists(state_path):
+        load_state()
+        if parameters != [start, end, target_port, ipv4, ipv6]:
+            raise ValueError("port hopping tuple migration is unverified")
+        audit()
+        clean()
+    if stopped:
+        return
+    start, end, target_port, ipv4, ipv6 = parameters
+    lock_owner()
+    preflight(start, end, target_port)
+    addresses = json.loads(command(["ip", "-j", "address", "show"]))
+    local = {item["local"] for interface in addresses for item in interface["addr_info"]}
+    if not {ipv4, ipv6} <= local:
+        raise ValueError("port hopping destinations are not current local addresses")
+    if stopped:
+        return
+    token = os.urandom(16).hex()
+    chain, comment = "padm-hop-" + token[:12], "padm-hop:" + token
+    tools = (("iptables", ipv4), ("ip6tables", ipv6))
+    phase = "intent"
+    try:
+        commit_state()
         for tool, address in tools:
-            for index, rule in enumerate(rules(address)):
-                if audit()[tool][index + 1]:
-                    write(tool, ["-D", *rule[1:]])
-                    if index == 2:
-                        cleared.add(tool)
-            if audit()[tool][0]:
-                try:
-                    write(tool, ["-X", chain])
-                except (OSError, RuntimeError, subprocess.SubprocessError):
-                    # 当前进程刚删的 sentinel 可补回；跨进程同名空链仍拒绝。
-                    if audit()[tool][0] and tool in cleared:
-                        write(tool, rules(address)[2])
-                        cleared.remove(tool)
-                    raise
-            cleared.discard(tool)
-        if any(any(value) for value in audit().values()):
-            raise ValueError("port hopping resources remain after cleanup")
-        owner()
-        os.unlink(state_path)
-except (ValueError, UnicodeError, OSError, RuntimeError, subprocess.SubprocessError) as error:
+            if stopped:
+                return
+            write(tool, ["-N", chain])
+            created.add(tool)
+            if stopped:
+                return
+            write(tool, rules(address)[2])
+            created.remove(tool)
+            if stopped:
+                return
+            write(tool, ["-I", chain, "1", *rules(address)[1][2:]])
+            if stopped:
+                return
+            write(tool, ["-I", "PREROUTING", "1", *rules(address)[0][2:]])
+        if not all(all(value) for value in audit().values()):
+            raise ValueError("port hopping resources are incomplete after start")
+        if stopped:
+            return
+        phase = "active"
+        commit_state()
+        health()
+        while not stopped:
+            time.sleep(0.1)
+    finally:
+        # 信号只置标志；整条命令返回后记账，回收过程不被再次中断。
+        if state is not None:
+            clean()
+
+try:
+    lengths = {"preflight": 3, "run": 5, "audit": 1, "health": 1, "clean": 1}
+    if operation not in lengths or len(parameters) != lengths[operation]:
+        raise ValueError("invalid port hopping operation or parameters")
+    if operation == "preflight":
+        preflight(*parameters)
+    elif operation == "run":
+        run()
+    else:
+        if not re.fullmatch("[a-f0-9]{32}", parameters[0]):
+            raise ValueError("invalid port hopping owner token")
+        load_state(parameters[0])
+        if operation == "clean":
+            acquire_lock()
+        backend()
+        audit()
+        if operation == "health":
+            health()
+        elif operation == "clean":
+            clean()
+except (ValueError, KeyError, TypeError, UnicodeError, OSError, RuntimeError, subprocess.SubprocessError) as error:
     print(f"padm-net: port hopping {operation} refused: {error}", file=sys.stderr)
     sys.exit(1)
 PY
@@ -1623,6 +1747,10 @@ fail2ban-ssh)
     ;;
 tproxy)
     shift; [ "$#" -eq 2 ] || die "tproxy requires port and mark"; tproxy_run "$@"
+    ;;
+port-hopping)
+    shift; [ "$#" -eq 5 ] || die "port hopping requires start, end, target and both addresses"
+    port_hopping_resources run "$@"
     ;;
 port-hopping-audit|port-hopping-health|port-hopping-clean)
     operation=${1#port-hopping-}

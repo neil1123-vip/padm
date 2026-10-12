@@ -57,6 +57,13 @@ TUIC 拒绝 `server_ports`，两者单端口基线均通过。Hy2 两个现有 U
 沿用默认 userland-proxy，不证明直达容器 DNAT、生产持久归属、旧会话撤销、
 范围冲突、重启/卸载或自动跳跃，不升级完整支持状态。
 
+5C.9c.1–2b 为内部端口跳跃前置：只读范围冲突检查、固定 state/token 的
+双族 audit/health/clean、全生命周期 flock、原子 intent/active 及 TERM/INT 清理。
+已核验的同参数残留可精确撤销并换 token 重建；不同参数在撤旧前拒绝。
+跨进程无标记空链、state/lock 替换和未知布局保留并拒绝，不删除 conntrack。
+health 只证明自有双族布局；目标发布归属、菜单/Compose 接入、旧会话排空、
+原生宿主/arm64、公网、整机重启和卸载仍待验，完整跳跃与协议管理保持 `deferred`。
+
 3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，
 证据和剩余限制见[真实 TLS 验收基线](docker-tls-real-baseline.md)。
 内部 TLS 夹具不代表新增协议支持；真实 DNS、完整宿主重启、原生 arm64 和可信发布仍待验。

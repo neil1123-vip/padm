@@ -370,6 +370,12 @@ revocation and reconstruction, while Docker and fixture foreign NAT rules stay u
 This path retains the default userland proxy and does not prove direct container DNAT,
 production persistent ownership, existing-session revocation, range conflicts,
 reboot/uninstall behavior or complete automatic hopping.
+The internal 5C.9c prerequisites add range-conflict checks, fixed ownership audits,
+exact cleanup and a locked startup transaction. TERM/INT clean up both families;
+verified remnants with the same parameters can be reconstructed. Replaced state/lock
+files and unmarked chains from another process are rejected and retained for inspection.
+Menus and Compose integration remain deferred, along with target-publication ownership,
+existing-session drainage, whole-machine restart and uninstall acceptance.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription

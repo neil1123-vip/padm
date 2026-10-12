@@ -5537,6 +5537,58 @@ Python AST、diff 检查通过；成功源码副本清理 `12166732 bytes`。
 批量 bundle 暂存优化 `19f68fd8` 已随本次完整快照验证，累计完整入口
 从 `587215 ms` 降至 `484875 ms`，不把单轮采样当作稳定峰值证明。
 
+#### 5C.9c.2b 启动事务与信号恢复
+
+内部 `port-hopping <start> <end> <target> <ipv4> <ipv6>` 复用 2a 的
+同一 Python body，预检/参数/state/audit/clean 不保留第二份实现。
+持锁 Python 通过 exec 成为 PID 1；常驻 flock 且每次写前核对原 state、
+lock 身份和双族资源。同参数旧 owner 先审计、精确撤销，再重新全域预检
+并核对双族本地地址；参数变更在撤旧前拒绝，不提供在线迁移。
+
+随机 token 的 intent/active 用 0600 临时文件写入、flush/fsync、身份复核、
+原子 replace、预期字节与 inode/size 读回、刷新 baseline、目录 fsync 提交。
+双族按链→RETURN sentinel→DNAT 首位→PREROUTING 首位 hook 创建，完整核验后
+才提交 active。TERM/INT 只置标志，命令返回后记账，再统一精确清理；
+恢复旧 owner 的审计期间收到 TERM 也先完成该已核验 owner 的撤销，不另建事务。
+
+仅当前创建链或刚删除 sentinel 的进程允许继续处理无标记空链。
+SIGKILL 在创建链→sentinel 或删除 sentinel→删链窗口仍需人工核对；
+intent/active 的可核验残留可换 token 重建。state/lock 替换停止并保留证据，
+不会将提交读回的未知 owner 认领为新 baseline；不 flush 或删除 conntrack。
+原子文件提交不证明跨特权修改的原子性、整机断电持久恢复或旧会话排空。
+
+现有 selector 保留 61 个范围预检、126 个归属合同，新增生命周期、八处 TERM、
+两处 SIGKILL 重建、未知空链拒绝、参数冻结、锁竞争和 state/lock 替换；
+原子提交额外覆盖 intent 创建/写入/fsync/replace、active replace/目录 fsync
+和 replace 后同字节换 inode，故障只在测试包装器内注入，无生产开关。
+真实 selector 用生产 run 替代手写规则，仍要求新连接事件 8/0/8、完整 NAT
+正文等于外来基线；额外检查 SIGKILL 换 token、旧链消失及 PID 1 docker stop
+退出 0、state 消失。复用离线 net 镜像并只读挂载当前入口，无生产权限新增。
+
+初轮合同/真实失败来自恢复探针误读旧 active 的等待竞态，已改为等待新 token；
+后续真实验证通过全部业务断言，但清理遇到 daemon 的 netns 残留挂载。
+复用已有测试的限定目录卸载方式，保留失败输入，不扩大清理范围。
+真实最终内部/入口 `24052/25100 ms`、Jobs 2、exit 0，证据
+`.tmp-regression-docker-41938d654e5e490194b6bd3d35d165b5/`。
+169 个归属/生命周期/文件故障合同与 61 个预检通过，内部/入口
+`54019/55038 ms`；`.tmp-regression-docker-460a5b36d670462ba61ec091785471ab/`。
+随后补恢复审计期间 TERM 的 active/partial intent 两个合同并修早退，
+最终 61+171 定向内部/入口 `56985/58013 ms`，Jobs 2、exit 0；
+`.tmp-regression-docker-7f129a83c9954f7a9ac1e175dc3408df/`。
+集中完整 54/54 内部/入口 `505260/506319 ms`、排队 `388 ms`、
+Jobs 6、exit 0、cache_hit=false；
+`.tmp-regression-docker-917ae3b3c3ca4ff5918124f7febec88e/`。
+五个关键实现/测试文件与完整输入哈希一致；容器 sh/Bash、ShellCheck error、
+Python AST、PowerShell 解析及 diff 通过，独立复审收口。
+单次资源采样 `610.15% CPU / 363.2 MiB` 不是峰值；新增合同增加约 21 秒
+完整耗时，暂不宣称新的稳定性能收益。本轮工具镜像未重建。
+成功 source.tar/files.list 与核对副本清理，日志/result 与失败输入保留。
+
+五参数仅为内部实验 tuple，尚无受管 listener/core/protocol、实际 container/image、
+UDP PortBindings 和配置账号的可信发布见证。不接菜单、Compose/schema，
+不授予生产 Docker socket；完整端口跳跃与协议管理仍 deferred，总目标 active。
+后续 5C.9c.3 先补受管目标发布的只读核验，再设计受管启停与菜单事务。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

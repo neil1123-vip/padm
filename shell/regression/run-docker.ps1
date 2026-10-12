@@ -432,6 +432,7 @@ try {
             $references = [ordered]@{
                 xray = 'padm-local/padm-xray:control-4c4b'
                 'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
+                net = 'padm-local/padm-net:control-4c4b'
             }
         } elseif ($Selector -in @('docker-cdn-entries-real', 'docker-alpn-real')) {
             $references.Remove('net')
