@@ -164,7 +164,8 @@ dockerConfigureSpecValidate() {
             (.listener_id as $id |
               [$request.core.protocols[] | select(.listener_id == $id)] as $entries |
               ($entries | length) == 1 and
-              ($entries[0].id == 21 or $entries[0].id == 22 or $entries[0].id == 23)) and
+              ($entries[0].id == 21 or $entries[0].id == 22 or $entries[0].id == 23 or
+               $entries[0].id == 24 or $entries[0].id == 25)) and
             (.addresses | type == "array" and length >= 1 and length <= 16 and
               length == (unique | length) and
               all(.[]; hostname or routing_ipv4 or routing_ipv6))))

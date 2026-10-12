@@ -91,7 +91,7 @@ if [[ "${PADM_TEST_ALPN_ORDERS:-0}" == 1 ]]; then
     exit 0
 fi
 export PADM_TEST_CDN_ENTRIES=1
-for protocol in 21 22 23; do
+for protocol in 21 22 23 24 25; do
     printf 'docker-cdn-entries-real-start: protocol=%s core=xray\n' "${protocol}"
     bash "${scriptRoot}/vmess-real.sh" "$1" "$2" "$3" "$4" "${protocol}" xray
 done

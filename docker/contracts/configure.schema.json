@@ -30,6 +30,7 @@
   "x-padm-port-aliases": true,
   "x-padm-port-alias-default": true,
   "x-padm-cdn-entry-addresses": true,
+  "x-padm-cdn-grpc-tls": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {

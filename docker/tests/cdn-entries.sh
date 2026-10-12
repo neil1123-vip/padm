@@ -78,24 +78,26 @@ jq -n --arg uuid "${UUID}" --arg account "${ACCOUNT}" '
       reality:{server_name:"www.debian.org",target_host:"www.debian.org",target_port:443,
         private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
         public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",short_id:"1234"}},
-     (21,22,23 | . as $protocol |
+     (21,22,23,24,25 | . as $protocol |
        {id:$protocol,core:"xray",listener_id:("entry-"+($protocol|tostring)),
         server:"origin.example.com",public_port:(35000+$protocol),
         address_families:["ipv4","ipv6"],name:("Protocol-"+($protocol|tostring)),uuid:$uuid} +
-       {(if $protocol == 23 then "httpupgrade" else "websocket" end):
-         {domain:"tls.example.com",path:("cdn-path"+($protocol|tostring)),
-          backend_port:(40000+$protocol),tls_port:(41000+$protocol)}})
+       {(if $protocol >= 24 then "grpc_tls"
+         elif $protocol == 23 then "httpupgrade" else "websocket" end):
+         ({domain:"tls.example.com",backend_port:(40000+$protocol),tls_port:(41000+$protocol)} +
+          if $protocol >= 24 then {service_name:("cdn_grpc-"+($protocol|tostring))}
+          else {path:("cdn-path"+($protocol|tostring))} end)})
    ]},tls:{domain:"tls.example.com"},subscription:{enabled:true,token:"0123456789abcdef"},
    images:(["xray","sing-box","nginx","ops","net"] | map({key:.,value:
      ("ghcr.io/example/padm-"+.+":test@sha256:"+("a"*64))}) | from_entries),
    host_integrations:[],accounts:[
      {id:$account,name:"Alice",enabled:true,uuid:"44444444-4444-4444-8444-444444444444",
       password:"Alice.-~@+=:Secret",shadowsocks_password:null,
-      listeners:["entry-reality","entry-21","entry-22","entry-23"]},
+      listeners:["entry-reality","entry-21","entry-22","entry-23","entry-24","entry-25"]},
      {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",name:"Disabled",enabled:false,
       uuid:"55555555-5555-4555-8555-555555555555",password:"Disabled-secret01",
-      shadowsocks_password:null,listeners:["entry-21","entry-22","entry-23"]}],
-   port_aliases:[21,22,23 | {listener_id:("entry-"+(tostring)),public_port:(51000+.),share_default:true}]}
+      shadowsocks_password:null,listeners:["entry-21","entry-22","entry-23","entry-24","entry-25"]}],
+   port_aliases:[21,22,23,24,25 | {listener_id:("entry-"+(tostring)),public_port:(51000+.),share_default:true}]}
 ' >"${TEST_ROOT}/base.json"
 
 # Schema 检查字段形状，生产校验还检查唯一入口、协议允许范围和严格地址。
@@ -125,7 +127,9 @@ cdn = copy.deepcopy(base)
 cdn["cdn_entries"] = [
     {"listener_id": "entry-21", "addresses": ["edge.example.com", "2001:db8::21"]},
     {"listener_id": "entry-22", "addresses": ["192.0.2.22", "2001:db8:0:0:0:0:0:22"]},
-    {"listener_id": "entry-23", "addresses": ["edge23.example.com"]}]
+    {"listener_id": "entry-23", "addresses": ["edge23.example.com"]},
+    {"listener_id": "entry-24", "addresses": ["192.0.2.24", "2001:db8::24", "edge24.example.com"]},
+    {"listener_id": "entry-25", "addresses": ["edge25.example.com", "2001:db8::25"]}]
 case("cdn", cdn, True)
 value = copy.deepcopy(cdn)
 value["cdn_entries"][0]["addresses"] = [f"edge{n}.example.com" for n in range(16)]
@@ -196,6 +200,21 @@ jq 'del(."x-padm-cdn-entry-addresses")' "${PROJECT_ROOT}/docker/contracts/config
 reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/cdn.json"
 dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" || fail '旧包拒绝无 CDN 规格'
 cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${TEST_ROOT}/bundle/docker/contracts/"
+jq 'del(."x-padm-cdn-grpc-tls")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/cdn.json"
+for protocol in 24 25; do
+    jq --arg listener "entry-${protocol}" '.cdn_entries |= map(select(.listener_id==$listener))' \
+        "${TEST_ROOT}/cdn.json" >"${TEST_ROOT}/grpc-cdn-${protocol}.json"
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/grpc-cdn-${protocol}.json"
+done
+jq '.cdn_entries |= map(select(.listener_id!="entry-24" and .listener_id!="entry-25"))' \
+    "${TEST_ROOT}/cdn.json" >"${TEST_ROOT}/legacy-cdn.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/legacy-cdn.json" ||
+    fail '缺少 gRPC CDN 能力的旧包拒绝 WS/HTTPUpgrade 覆写'
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" ||
+    fail '缺少 gRPC CDN 能力的旧包拒绝未覆写 gRPC 入口'
+cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${TEST_ROOT}/bundle/docker/contracts/"
 
 # 解码后与无覆盖基线比较，只允许连接地址与多地址名称变化，其余字段必须完全保留。
 cat >"${TEST_ROOT}/assert-links.py" <<'PY'
@@ -216,7 +235,7 @@ def decode(path):
             result.append(json.loads(base64.b64decode(line[8:])))
         else:
             uri = urlsplit(line)
-            assert uri.scheme == "vless", line
+            assert uri.scheme in ("vless", "trojan") and uri.password is None, line
             result.append(dict(scheme=uri.scheme, uuid=unquote(uri.username), add=uri.hostname,
                                port=str(uri.port), query=parse_qs(uri.query),
                                ps=unquote(uri.fragment)))
@@ -228,11 +247,22 @@ overrides = {item["listener_id"]: item["addresses"] for item in spec.get("cdn_en
 for entry in spec["core"]["protocols"]:
     accounts = [a for a in spec.get("accounts", [])
                 if a["enabled"] and entry["listener_id"] in a["listeners"]]
-    names = ([entry["name"]] if spec["subscription"].get("include_base", True) else [])
-    names += [entry["name"] + "-" + a["name"] for a in accounts]
-    for name in names:
+    identities = ([(entry["name"], entry["uuid"])]
+                  if spec["subscription"].get("include_base", True) else [])
+    identities += [(entry["name"] + "-" + a["name"],
+                    a["password"] if entry["id"] == 25 else a["uuid"]) for a in accounts]
+    for name, credential in identities:
         original = next(baseline)
         assert original["ps"] == name
+        assert original["id" if entry["id"] in (22, 23) else "uuid"] == credential
+        if entry["id"] in (24, 25):
+            assert original["scheme"] == ("vless" if entry["id"] == 24 else "trojan")
+            assert original["query"]["sni"] == [entry["grpc_tls"]["domain"]]
+            assert original["query"]["alpn"] == ["h2"]
+            assert original["query"]["serviceName"] == [entry["grpc_tls"]["service_name"]]
+            alias = next(a for a in spec["port_aliases"]
+                         if a["listener_id"] == entry["listener_id"] and a["share_default"])
+            assert original["port"] == str(alias["public_port"])
         addresses = overrides.get(entry["listener_id"], [entry["server"]])
         for index, address in enumerate(addresses, 1):
             value = copy.deepcopy(original)
@@ -255,7 +285,7 @@ for fixture in base cdn sixteen-addresses; do
 done
 group='{"id":"share-cccccccccccccccc","name":"CDN-Team","enabled":true,
   "token":"cdn-transaction-token","account_ids":["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
-  "listener_ids":["entry-21","entry-22"]}'
+  "listener_ids":["entry-21","entry-22","entry-24","entry-25"]}'
 dockerSubscriptionRender "${TEST_ROOT}/cdn.json" "${group}" "${TEST_ROOT}/group.links"
 jq --argjson group "${group}" '.subscription.include_base=false |
   .core.protocols |= map(select(.listener_id as $id | ($group.listener_ids|index($id)) != null)) |
@@ -371,6 +401,12 @@ assertClean() {
     [[ -z "$(find "${root}" -maxdepth 1 \( -name '.candidate.*' -o -name '.edit.*' -o -name '.protocol.*' -o -name '.subscription.*' \) -print -quit)" ]] ||
         fail '事务遗留候选或订阅临时文件'
 }
+cdnProtectedSnapshot() (
+    cd "${root}"
+    jq -S 'del(.cdn_entries)' config/spec.json
+    sha256sum compose.json images.env config/xray/config.json config/xray/users.base \
+        config/nginx/default.conf config/share-groups.json data/traffic/state.json secrets/tls/*
+)
 runEdit() {
     local expected=$1 actual=0
     shift
@@ -412,13 +448,13 @@ grep -qx 'https://tls.example.com/subscriptions/cdn-transaction-token' "${TEST_R
     fail '初始分享 URL 不正确'
 legacyBefore=$(snapshot)
 (dockerMain protocol list) >"${LOG}" 2>&1 || fail '旧 Nginx 不能读取入口列表'
-for listener in entry-reality entry-21 entry-22 entry-23; do
+for listener in entry-reality entry-21 entry-22 entry-23 entry-24 entry-25; do
     grep -q "^${listener}  " "${LOG}" || fail "旧 Nginx 入口列表遗漏 ${listener}"
 done
 (dockerMain protocol links) >"${TEST_ROOT}/legacy.links" || fail '旧 Nginx 不能读取分享链接'
 assertShare "${root}/config/spec.json" "${TEST_ROOT}/legacy.links"
 (dockerMain protocol cdn-status) >"${LOG}"
-jq -e '.enabled==false and (.entries|length)==3 and
+jq -e '.enabled==false and (.entries|length)==5 and
   all(.entries[]; .overridden==false and .addresses==["origin.example.com"])' "${LOG}" >/dev/null
 assertClean
 [[ "$(snapshot)" == "${legacyBefore}" ]] || fail '旧 Nginx 只读菜单修改在线部署'
@@ -456,6 +492,27 @@ cmp -- "${TEST_ROOT}/nginx-installed-strict.conf" "${root}/config/nginx/default.
     fail '首次 CDN 提交未完整升级三个入口的 Host 校验'
 runEdit 0 --cdn-entry entry-22 '192.0.2.22,2001:db8:0:0:0:0:0:22' --confirm PADM-DOCKER-EDIT
 runEdit 0 --cdn-entry entry-23 edge23.example.com --confirm PADM-DOCKER-EDIT
+for protocol in 24 25; do
+    listener="entry-${protocol}"
+    protectedBefore=$(cdnProtectedSnapshot)
+    before=$(snapshot)
+    runEdit 0 --cdn-entry "${listener}" "edge${protocol}.example.com,2001:db8::${protocol}" --preview
+    grep -Fq "edge${protocol}.example.com" "${LOG}" || fail 'gRPC CDN 预览遗漏覆盖地址'
+    ! grep -Fq "${UUID}" "${LOG}" || fail 'gRPC CDN 预览泄露认证'
+    [[ "$(snapshot)" == "${before}" ]] || fail 'gRPC CDN 预览改变在线部署'
+    runEdit 0 --cdn-entry "${listener}" "edge${protocol}.example.com,2001:db8::${protocol}" \
+        --confirm PADM-DOCKER-EDIT
+    [[ "$(cdnProtectedSnapshot)" == "${protectedBefore}" ]] || fail 'gRPC CDN 设置改变其它配置或业务状态'
+    (dockerMain protocol cdn-status "${listener}") >"${LOG}"
+    jq -e --arg listener "${listener}" --argjson protocol "${protocol}" '
+      .=={enabled:true,entries:[{listener_id:$listener,protocol:$protocol,server:"origin.example.com",
+        overridden:true,addresses:[("edge"+($protocol|tostring)+".example.com"),("2001:db8::"+($protocol|tostring))]}]}
+    ' "${LOG}" >/dev/null
+    (dockerMain protocol links "${listener}") >"${TEST_ROOT}/grpc-selected.links"
+    jq --arg listener "${listener}" '.core.protocols |= map(select(.listener_id==$listener))' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/grpc-selected.json"
+    assertShare "${TEST_ROOT}/grpc-selected.json" "${TEST_ROOT}/grpc-selected.links"
+done
 assertInstalledShare
 (dockerMain protocol cdn-status entry-21) >"${LOG}"
 jq -e '.=={enabled:true,entries:[{listener_id:"entry-21",protocol:21,server:"origin.example.com",
@@ -491,7 +548,7 @@ runEdit 14 --cdn-entry entry-21 new.example.com --confirm PADM-DOCKER-EDIT
 MODE=ok
 runEdit 0 --cdn-entry entry-21 new.example.com --confirm PADM-DOCKER-EDIT
 jq '.core.protocols += [(.core.protocols[] | select(.listener_id=="entry-21") |
-  .listener_id="entry-copy" | .public_port=35024 | .name="Copy" |
+  .listener_id="entry-copy" | .public_port=35026 | .name="Copy" |
   .websocket.backend_port=42024 | .websocket.tls_port=43024)]' \
     "${root}/config/spec.json" >"${TEST_ROOT}/copy.json"
 runEdit 0 --spec "${TEST_ROOT}/copy.json" --confirm PADM-DOCKER-EDIT
@@ -524,6 +581,18 @@ jq -e 'all(.cdn_entries[]; .listener_id!="entry-23") and
 assertInstalledShare
 runEdit 0 --cdn-entry-clear entry-21 --confirm PADM-DOCKER-EDIT
 runEdit 0 --cdn-entry-clear entry-22 --confirm PADM-DOCKER-EDIT
+for protocol in 24 25; do
+    listener="entry-${protocol}"
+    protectedBefore=$(cdnProtectedSnapshot)
+    before=$(snapshot)
+    runEdit 0 --cdn-entry-clear "${listener}" --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail 'gRPC CDN 清空预览改变在线部署'
+    runEdit 0 --cdn-entry-clear "${listener}" --confirm PADM-DOCKER-EDIT
+    [[ "$(cdnProtectedSnapshot)" == "${protectedBefore}" ]] || fail 'gRPC CDN 清空改变其它配置或业务状态'
+    (dockerMain protocol cdn-status "${listener}") >"${LOG}"
+    jq -e '.entries[0].overridden==false and .entries[0].addresses==["origin.example.com"]' "${LOG}" >/dev/null
+    assertInstalledShare
+done
 jq -e 'has("cdn_entries")|not' "${root}/config/spec.json" >/dev/null ||
     fail '清空最后一个 CDN 条目后遗留空数组'
 assertInstalledShare
@@ -538,11 +607,11 @@ jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload==17 and .accounts[$uuid].dow
     ! grep -q '^edit ' "${TEST_ROOT}/menu.commands" || fail 'CDN 菜单取消仍派发编辑'
     grep -qx 'protocol cdn-status' "${TEST_ROOT}/menu.commands" || fail 'CDN 状态菜单未派发'
     : >"${TEST_ROOT}/menu.commands"
-    printf '2\nentry-21\nedge.example.com,2001:db8::21\n3\nentry-21\n0\n' |
+    printf '2\nentry-24\nedge.example.com,2001:db8::24\n3\nentry-25\n0\n' |
         dockerMenuCdnEntries >"${LOG}"
-    grep -qx 'edit --cdn-entry entry-21 edge.example.com,2001:db8::21' "${TEST_ROOT}/menu.commands" ||
+    grep -qx 'edit --cdn-entry entry-24 edge.example.com,2001:db8::24' "${TEST_ROOT}/menu.commands" ||
         fail 'CDN 设置菜单参数错误'
-    grep -qx 'edit --cdn-entry-clear entry-21' "${TEST_ROOT}/menu.commands" || fail 'CDN 清空菜单参数错误'
+    grep -qx 'edit --cdn-entry-clear entry-25' "${TEST_ROOT}/menu.commands" || fail 'CDN 清空菜单参数错误'
     : >"${TEST_ROOT}/menu.commands"
     printf '2\nentry-21\n' | dockerMenuCdnEntries >"${LOG}"
     ! grep -q '^edit ' "${TEST_ROOT}/menu.commands" || fail 'CDN 菜单 EOF 仍派发编辑'

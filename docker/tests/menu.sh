@@ -349,6 +349,38 @@ runPortAliasDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runCdnDriver() {
+    local scenario=$1 choice answer
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'9\n'
+    targetReply 'Docker 协议与入口' $'9\n'
+    targetReply 'Docker CDN 连接地址' $'1\n'
+    case "${scenario}" in
+    flow|failed)
+        targetReply 'Docker CDN 连接地址' $'2\n'
+        targetReply '入口 ID（0 返回）' $'entry24\n'
+        targetReply '连接地址（IP 或域名，多个用逗号分隔，0 返回）' $'203.0.113.24,cdn.example.com\n'
+        targetReply 'Docker CDN 连接地址' $'3\n'
+        targetReply '入口 ID（0 返回）' $'entry25\n'
+        ;;
+    cancel)
+        for answer in $'0\n' $'\n' $'\004'; do
+            for choice in 2 3; do
+                targetReply 'Docker CDN 连接地址' "${choice}"$'\n'
+                targetReply '入口 ID（0 返回）' "${answer}"
+            done
+            targetReply 'Docker CDN 连接地址' $'2\n'
+            targetReply '入口 ID（0 返回）' $'entry24\n'
+            targetReply '连接地址（IP 或域名，多个用逗号分隔，0 返回）' "${answer}"
+        done
+        ;;
+    esac
+    targetReply 'Docker CDN 连接地址' $'1\n'
+    targetReply 'Docker CDN 连接地址' $'0\n'
+    targetReply 'Docker 协议与入口' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runMaintenanceDriver() {
     local scenario=$1 choice address answer=n action field previous prompt value
     local scope=ws statusChoice=1 unbanChoice=2 disableChoice=3 enableChoice=5 settingsChoice=6
@@ -1462,6 +1494,8 @@ runPty() {
             runGeoDriver "${input}"
         elif [[ "${driver}" == port-alias ]]; then
             runPortAliasDriver "${input}"
+        elif [[ "${driver}" == cdn ]]; then
+            runCdnDriver "${input}"
         elif [[ "${driver}" == maintenance ]]; then
             runMaintenanceDriver "${input}"
         elif [[ "${driver}" == control ]]; then
@@ -1772,6 +1806,10 @@ edit)
         "${2:-}" == --port-alias-default ]]; then
         [[ "${2:-}" == --port-alias-default && "${4:-}" == base ]] ||
             [[ "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
+    elif [[ "${2:-}" == --cdn-entry ]]; then
+        [[ "$#" -eq 4 && "$3" == entry24 && -n "$4" ]] || exit 2
+    elif [[ "${2:-}" == --cdn-entry-clear ]]; then
+        [[ "$#" -eq 3 && "$3" == entry25 ]] || exit 2
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
         "${2:-}" == --direct-domains-add || "${2:-}" == --block-domains-add ||
         "${2:-}" == --direct-domains-remove || "${2:-}" == --block-domains-remove ||
@@ -2811,6 +2849,33 @@ for aliasCase in flow cancel eof invalid failed default-cancel default-eof base-
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAliases}" ]] ||
         fail "额外入口 ${aliasCase} 参数分发错误或取消后执行操作"
+done
+unset SITE_EDIT_STATUS
+
+# 两种 gRPC TLS 入口共用菜单交互，取消和 EOF 只允许状态读取。
+for cdnCase in flow cancel failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export SITE_EDIT_STATUS=0
+    [[ "${cdnCase}" != failed ]] || SITE_EDIT_STATUS=15
+    runPty "cdn-${cdnCase}" cdn "${cdnCase}" "${TLS_WIZARD_CLI}" menu
+    expectedCdn=$'protocol list\nprotocol cdn-status'
+    if [[ "${cdnCase}" == cancel ]]; then
+        for ((cdnStatus = 0; cdnStatus < 9; cdnStatus++)); do
+            expectedCdn+=$'\nprotocol cdn-status'
+        done
+    else
+        expectedCdn+=$'\nprotocol cdn-status\nedit --cdn-entry entry24 203.0.113.24,cdn.example.com'
+        expectedCdn+=$'\nprotocol cdn-status\nedit --cdn-entry-clear entry25'
+    fi
+    expectedCdn+=$'\nprotocol cdn-status'
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedCdn}" ]] ||
+        fail "CDN ${cdnCase} 参数分发错误或取消后执行编辑"
+    grep -Fq '2. 设置地址（WS/HTTPUpgrade/gRPC TLS）' "${CONTROL_LOG}" ||
+        fail 'CDN 菜单未显示 gRPC TLS 支持范围'
+    if [[ "${cdnCase}" == failed ]]; then
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'gRPC TLS CDN 编辑失败未显示状态错误并继续读取'
+    fi
 done
 unset SITE_EDIT_STATUS
 

@@ -33,7 +33,8 @@ case "${PROTOCOL}" in
 esac
 TLS_PORT=8443
 if [[ "${CDN_ENTRIES}" == 1 ]]; then
-    [[ "${PROTOCOL}" == 21 || "${PROTOCOL}" == 22 || "${PROTOCOL}" == 23 ]] || exit 2
+    [[ "${PROTOCOL}" == 21 || "${PROTOCOL}" == 22 || "${PROTOCOL}" == 23 ||
+        "${PROTOCOL}:${CORE}" == 24:xray || "${PROTOCOL}:${CORE}" == 25:xray ]] || exit 2
     # 分享端口就是实际 TLS 端口，客户端不得用容器端口替换生产链接。
     TLS_PORT=35469 TEST_NAME="${TEST_NAME}-cdn"
 fi
@@ -441,7 +442,8 @@ targets = list(zip(values, servers, ("ipv4","ipv6","domain"))) if cdn else [
     (value, endpoint, "ipv"+str(family)) for family, endpoint in zip((4,6), endpoints)]
 if cdn and cdn_phase == "clear":
     targets = [(value, domain, "origin-domain")]
-variants = ("valid","wrong-auth","wrong-sni","wrong-host","wrong-path") if cdn else ("valid","wrong-auth")
+variants = (("valid","wrong-auth","wrong-sni","wrong-service") if transport == "grpc" else
+            ("valid","wrong-auth","wrong-sni","wrong-host","wrong-path")) if cdn else ("valid","wrong-auth")
 probes = []
 for variant in variants:
     for value, endpoint, label in targets:
@@ -472,6 +474,8 @@ for variant in variants:
                 **({"headers":{"Host":value["host"]}} if transport == "ws" else {"host":value["host"]}))
         if variant == "wrong-sni":
             outbound["tls"]["server_name"] = "wrong.padm.test"
+        elif variant == "wrong-service":
+            outbound["transport"]["service_name"] = "wrong_grpc_service"
         elif variant == "wrong-host":
             if transport == "ws":
                 outbound["transport"]["headers"]["Host"] = "wrong.padm.test"
@@ -614,6 +618,7 @@ import ipaddress
 import json
 import pathlib
 import socket
+import ssl
 import struct
 import sys
 import time
@@ -623,6 +628,8 @@ phase = sys.argv[1]
 test_name, core, transport_name = sys.argv[2:5]
 assert phase in ("allow","deny")
 proof = b"padm-vmess-real-proof\n"
+class ProbeRejected(Exception):
+    pass
 def read(sock, size):
     data = b""
     while len(data) < size:
@@ -641,21 +648,32 @@ def connect(port, command):
         try:
             sock = socket.create_connection(("client",port),timeout=0.2)
             break
-        except OSError:
-            if time.monotonic() >= deadline: raise
+        except OSError as error:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"client unavailable: port={port} command={command}: {error}") from error
             time.sleep(0.05)
     sock.settimeout(4)
     try:
-        sock.sendall(b"\x05\x01\x00")
-        assert read(sock,2) == b"\x05\x00"
+        try:
+            sock.sendall(b"\x05\x01\x00")
+            assert read(sock,2) == b"\x05\x00"
+        except (OSError, EOFError) as error:
+            raise RuntimeError(f"SOCKS greeting failed: port={port} command={command}: {error}") from error
         name = b"origin"
         destination = b"\x03"+bytes([len(name)])+name+struct.pack("!H",8088) if command == 1 else b"\x01"+b"\x00"*6
-        sock.sendall(b"\x05"+bytes([command])+b"\x00"+destination)
-        header = read(sock,4)
-        assert header[0] == 5 and header[2] == 0
-        host = address(sock,header[3])
-        relay_port = struct.unpack("!H",read(sock,2))[0]
-        if header[1] != 0: raise ConnectionRefusedError()
+        try:
+            sock.sendall(b"\x05"+bytes([command])+b"\x00"+destination)
+            header = read(sock,4)
+            assert header[0] == 5 and header[2] == 0
+            if header[1] != 0:
+                assert 1 <= header[1] <= 8
+                raise ProbeRejected(f"socks-rep-{header[1]}")
+            host = address(sock,header[3])
+            relay_port = struct.unpack("!H",read(sock,2))[0]
+        except (EOFError, ConnectionResetError) as error:
+            raise ProbeRejected(f"socks-reply-{type(error).__name__}") from error
+        except TimeoutError as error:
+            raise RuntimeError(f"SOCKS reply timeout: port={port} command={command}") from error
         return sock,host,relay_port
     except BaseException:
         sock.close()
@@ -663,14 +681,22 @@ def connect(port, command):
 def tcp(port):
     sock,_,_ = connect(port,1)
     with sock:
-        sock.sendall(b"GET /proof.txt HTTP/1.1\r\nHost: origin\r\nConnection: close\r\n\r\n")
-        response = b""
-        while True:
-            data = sock.recv(4096)
-            if not data: break
-            response += data
+        try:
+            sock.sendall(b"GET /proof.txt HTTP/1.1\r\nHost: origin\r\nConnection: close\r\n\r\n")
+            response = b""
+            while True:
+                data = sock.recv(4096)
+                if not data: break
+                response += data
+        except ConnectionResetError as error:
+            raise ProbeRejected("upstream-reset") from error
+        except TimeoutError as error:
+            raise RuntimeError(f"TCP proof timeout: port={port}") from error
+    if not response:
+        raise ProbeRejected("upstream-eof")
     head,body = response.split(b"\r\n\r\n",1)
-    return (head.startswith(b"HTTP/1.0 200") or head.startswith(b"HTTP/1.1 200")) and body == proof
+    assert (head.startswith(b"HTTP/1.0 200") or head.startswith(b"HTTP/1.1 200")) and body == proof
+    return True
 def udp(port):
     control,host,relay_port = connect(port,3)
     with control:
@@ -687,28 +713,83 @@ def udp(port):
             offset = {1:8,4:20}.get(response[3])
             if response[3] == 3: offset = 5+response[4]
             assert offset is not None
-            return response[offset+2:] == payload
+            assert response[offset+2:] == payload
+            return True
 def counts():
     return json.loads(urllib.request.urlopen("http://origin:8088/counts",timeout=5).read())
-def check(item):
-    port,variant,label,transport = item
+def check_tcp(item):
+    port,variant,label = item
     expected = phase == "allow" and variant == "valid"
-    try: accepted = (tcp if transport == "tcp" else udp)(port)
-    except (OSError,EOFError,ValueError): accepted = False
-    assert accepted == expected,(phase,port,variant,label,transport,accepted)
-    return str(port)+"/"+variant+"/"+label+"/"+transport
+    try:
+        accepted, reason = tcp(port), "proof"
+    except ProbeRejected as error:
+        accepted, reason = False, str(error)
+    assert accepted == expected,(phase,port,variant,label,"tcp",accepted,reason)
+    return port,(accepted,reason)
+def check_udp(item):
+    port,variant,label = item
+    expected = phase == "allow" and variant == "valid"
+    try:
+        accepted, reason = udp(port), "proof"
+    except ProbeRejected as error:
+        accepted, reason = False, str(error)
+    except TimeoutError:
+        accepted, reason = False, "no-response"
+    assert accepted == expected,(phase,port,variant,label,"udp",accepted,reason)
+    if not expected:
+        assert tcp_results[port][0] is False, (port,"UDP silence without explicit TCP rejection")
+    return str(port)+"/"+variant+"/"+label+"/tcp="+tcp_results[port][1]+"/udp="+reason
 before = counts()
 probes = json.loads(pathlib.Path("/etc/padm/client/probes.json").read_text())
-items = [(*probe,transport) for probe in probes for transport in ("tcp","udp")]
+if transport_name == "grpc":
+    config = json.loads(pathlib.Path("/etc/padm/client/config.json").read_text())
+    assert len(probes) == len(config["outbounds"])
+    selections, rejections = [], []
+    for (_,variant,label), outbound in zip(probes,config["outbounds"]):
+        if variant not in ("valid","wrong-sni"):
+            continue
+        tls = outbound["tls"]
+        assert tls["enabled"] is True and tls["alpn"] == ["h2"] and tls.get("insecure",False) is False
+        if variant == "wrong-sni":
+            assert tls["server_name"] == "wrong.padm.test"
+        context = ssl.create_default_context(cafile=tls["certificate_path"])
+        assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+        context.set_alpn_protocols(tls["alpn"])
+        try:
+            with socket.create_connection((outbound["server"],outbound["server_port"]),timeout=4) as raw:
+                with context.wrap_socket(raw,server_hostname=tls["server_name"]) as secured:
+                    selected = secured.selected_alpn_protocol()
+        except ssl.SSLCertVerificationError as error:
+            assert variant == "wrong-sni" and error.verify_code == 62, (label,variant,error)
+            rejections.append("wrong-sni/"+label+"=hostname-mismatch")
+        else:
+            assert variant == "valid", (label,"wrong SNI handshake succeeded")
+            assert selected == "h2", (label,selected)
+            selections.append(label+"="+selected)
+    print("docker-"+test_name+"-tls-observed: share-phase="+sys.argv[5]+
+          " strict-ca-sni=verified alpn="+",".join(selections))
+    if rejections:
+        print("docker-"+test_name+"-tls-rejected: share-phase="+sys.argv[5]+" "+",".join(rejections))
+    # SNI 用明确证书错误证明，与认证和 serviceName 的 SOCKS 拒绝分开记录。
+    probes = [item for item in probes if item[1] != "wrong-sni"]
 with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-    results = list(pool.map(check,items))
+    tcp_results = dict(pool.map(check_tcp,probes))
+    results = list(pool.map(check_udp,probes))
+    recovery = [item for item in probes if item[1] == "valid"] if phase == "allow" else []
+    recovered_tcp = dict(pool.map(check_tcp,recovery))
+    recovered_udp = list(pool.map(check_udp,recovery))
+    assert all(accepted for accepted,_ in recovered_tcp.values())
 after = counts()
-expected_delta = sum(variant == "valid" for _,variant,_ in probes) if phase == "allow" else 0
+expected_delta = 2*sum(variant == "valid" for _,variant,_ in probes) if phase == "allow" else 0
 assert {key:after[key]-before[key] for key in before} == {"tcp":expected_delta,"udp":expected_delta}
 print("docker-"+test_name+"-probe-ok: core="+core+" phase="+phase+" source=protocol-links tls="+
       (core if transport_name == "tcp" else "nginx")+"-"+
-      transport_name+" share-phase="+sys.argv[5]+" socks="+",".join(results))
+      transport_name+" share-phase="+sys.argv[5]+" recovery="+str(len(recovered_udp))+
+      " socks="+",".join(results))
 ' "$1" "${TEST_NAME}" "${CORE}" "${TRANSPORT}" "${cdnPhase}"
+    docker inspect "$(compose ps -q "${CORE}")" "$(compose ps -q nginx)" "$(compose ps -q client)" |
+        jq -e --arg core "${CORE}" 'all(.[]; .State.Running) and
+          all(.[] | select(.Config.Labels["com.docker.compose.service"] == $core); .State.Health.Status == "healthy")' >/dev/null
 }
 if [[ "${ALPN_ORDERS}" == 1 ]]; then
     fallbackProbe '<!doctype html><title>Welcome</title><h1>Welcome</h1>'
@@ -809,8 +890,10 @@ if [[ "${CDN_ENTRIES}" == 1 ]]; then
     probe allow
     [[ "$(docker inspect "$(compose ps -q "${CORE}")" "$(compose ps -q nginx)" |
         jq -c '[.[] | {id:.Id,started_at:.State.StartedAt}]')" == "${serverStates}" ]]
-    printf 'docker-cdn-entries-real-ok: protocol=%s core=%s addresses=ipv4,ipv6,domain clear=original-domain effective-port=35469 auth-sni-host-path=deny servers=unchanged\n' \
-        "${PROTOCOL}" "${CORE}"
+    negatives=auth-sni-host-path=deny
+    [[ "${TRANSPORT}" != grpc ]] || negatives='auth-service=socks-deny sni=client-tls-hostname-mismatch'
+    printf 'docker-cdn-entries-real-ok: protocol=%s core=%s addresses=ipv4,ipv6,domain clear=original-domain effective-port=35469 %s servers=unchanged\n' \
+        "${PROTOCOL}" "${CORE}" "${negatives}"
     exit 0
 fi
 # 只适配命名卷与隔离网络，额度/验证/重启/恢复仍走生产函数。

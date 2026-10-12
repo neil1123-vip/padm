@@ -1199,7 +1199,7 @@ master 以 root 绑定低端口，worker 降至 `10001:10001`，只增加
 | 4A.2 账号 CLI/菜单事务 | 已交付：新建、名称/关联编辑、复制、启停、删除及凭据轮换；复用候选提交/恢复，未选账号保持，复制生成新身份与凭据，恢复不回退最新累计。 |
 | 4A.3 分享组与内容输出 | 已交付分享组 CRUD、账号/入口筛选、独立 token、启停与 token 轮换、纯订阅内容及 HTTPS 链接输出；CDN 连接地址见 4A.5，H3 仍待后续阶段。 |
 | 4A.4 业务备份恢复 | 已提交 `99ce706c`：账号、组、发布授权、额度、累计和格式版本的备份、冲突预览及 merge/replace 恢复；不以版本 rollback 冒充业务恢复。 |
-| 4A.5 CDN 连接地址 | 已实现协议 21/22/23 的多连接地址覆盖、CLI/菜单、统一链接输出与事务恢复；本地四组合实链路、旧正文兼容定向及完整合同通过；拒绝其它协议，完整 CDN 管理保持 deferred。 |
+| 4A.5–4A.5b CDN 连接地址 | 已实现协议 21/22/23/24/25 的多连接地址覆盖、CLI/菜单、统一链接输出与事务恢复；本地六组合实链路、严格拒绝探针、旧包兼容及完整合同通过；拒绝其余协议，完整 CDN 管理保持 deferred。 |
 
 4A.1 当前实现：v3 可选 `accounts` 接受 1–256 项，每项精确保存
 `id/name/enabled/uuid/password/shadowsocks_password/listeners`；旧无字段规格不新增账号。
@@ -1282,6 +1282,39 @@ Linux amd64 定向 `docker-cdn-entries -Jobs 2` 29222 ms、loader 1212 ms 通过
 补验分别见 `.tmp-regression-docker-cb9c3ef82c914e2baa7c675ade8d9da2/`
 和 `.tmp-regression-docker-422c31fd76a041829d4fb5529d9171da/`。
 公网 CDN、原生宿主、arm64 与可信发布不计为已验，总目标 active。
+
+#### 4A.5b gRPC TLS 的 CDN 连接地址
+
+沿用 v3 `cdn_entries` 和既有地址展开、候选事务及冻结边界，只追加已有
+Xray 协议 `24/25`、受管 Nginx TLS 的连接地址覆盖；Reality gRPC/XHTTP、
+fallback、其它协议与 H3 参数仍拒绝。状态/设置/清除菜单和 CLI 统一五种入口。
+只替换链接连接地址，原账号认证、有效分享端口、TLS SNI、serviceName 与
+`alpn=h2` 保持，本地链接、主订阅与分享组共用输出。
+新增 `x-padm-cdn-grpc-tls` 能力门禁，仅规格有 24/25 CDN 映射时需要；
+原三协议覆盖和无 CDN 映射的 gRPC TLS 可继续处理旧子集，不放宽旧包其它门禁。
+Nginx 仍走既有 HTTP/2 `grpc_pass`，不把 WS Host/path 校验套到 gRPC。
+合同复用原三协议事务和旧正文证据，补 24/25 身份、状态、链接、分享及旧包拒绝。
+真实验收复用双栈边缘域名/IP、生产分享端口和现有认证客户端，
+补 gRPC 错误认证/SNI/serviceName 与有效连接恢复、HTTP/2 协商及服务存活。
+收紧已有探针的超时误判：TCP 拒绝须明确 SOCKS 失败或远端 EOF/reset，
+客户端连接失败或超时直接失败；UDP 无应答仅作为关联 TCP 拒绝的补充观测。
+gRPC 错误 SNI 单独从实际客户端 outbound 读取端点、公开端口、CA 与 SNI，
+严格 TLS 握手须明确返回证书主机名不匹配；该证据不冒充 SOCKS 拒绝、
+客户端内部重试或服务器 SNI 门禁，错误认证/serviceName 仍走实际 gRPC 流量。
+公网 CDN 供应商透传、真实宿主、arm64 与可信发布继续待验，完整状态保持 deferred。
+
+Linux amd64 定向 CDN 合同 49699 ms、菜单 PTY 67510 ms，通过；
+完整合同 48/48、Jobs 6、438536 ms，与六组合真实链路 239769 ms
+使用相同源码归档及工具镜像，均 exit 0、未复用缓存。独立复审无确定缺陷。
+真实链路为 Xray `21/22/23/24/25` 与 sing-box `23`；覆盖 IPv4/IPv6/域名、
+实际分享端口、设置/清除、严格 TLS 与 HTTP/2、明确拒绝和有效连接恢复。
+首轮 gRPC 错误 SNI 的 SOCKS 超时使验收失败，修正后按上述独立 TLS 证据重跑全套。
+未以客户端超时或 UDP 静默替代明确拒绝。
+证据保留在 `.tmp-regression-docker-e3c52196c1f8480a8f072e101b7a927f/`、
+`.tmp-regression-docker-8fd0325ea64d4c369d8b93288dd0689b/` 与
+`.tmp-grpc-cdn-close/`，重复归档在核对输入后清理。
+回归调度将 network-lifecycle 提前到第 7，并补已有 CDN 的顺序合同漏项；
+本次与实链路混跑，完整耗时不作为孤立调度收益证据，不扩大三槽或 Jobs 6。
 
 ### 4B. 日常服务与核心维护
 

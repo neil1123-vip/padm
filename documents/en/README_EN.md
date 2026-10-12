@@ -312,18 +312,19 @@ public hosting, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
 
 The protocol menu's CDN address manager overrides client connection addresses for
-existing `21/22/23` WS/HTTPUpgrade TLS listeners in local links, the main subscription
+existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
 and share groups. Optional v3 `cdn_entries` contains up to 16 `{listener_id, addresses}`
 records, each with 1–16 unique IP addresses or domain names. URLs, ports, whitespace
 and empty items are rejected. Without an override, links use the original server.
 Multiple addresses produce nodes in input order with `-1`, `-2` name suffixes.
-Accounts, effective share ports, SNI, Host and paths remain unchanged; HTTPS subscription
+Accounts, effective share ports, SNI, Host, paths or gRPC serviceName and `h2` remain unchanged; HTTPS subscription
 URLs retain the original TLS domain.
 
 ```bash
 padm-docker protocol cdn-status
 padm-docker edit --cdn-entry entry-ws edge.example.com,203.0.113.8 --preview
 padm-docker edit --cdn-entry entry-ws edge.example.com,203.0.113.8 --confirm PADM-DOCKER-EDIT
+padm-docker edit --cdn-entry entry-grpc edge.example.com,203.0.113.8 --preview
 padm-docker edit --cdn-entry-clear entry-ws --confirm PADM-DOCKER-EDIT
 ```
 
@@ -332,13 +333,18 @@ copying does not inherit it. Changes use the existing candidate, confirmation an
 failure recovery transaction, which recreates services on commit. Ordinary spec
 editing cannot replace CDN overrides. Bundles without `x-padm-cdn-entry-addresses`
 reject configuration, updates and restoration containing the field.
-Reality XHTTP/gRPC, gRPC TLS, other TCP/UDP protocols and H3 parameter management
+Overrides for `24/25` also require `x-padm-cdn-grpc-tls`; older bundles can still
+handle the original three override types and gRPC TLS listeners without overrides.
+Reality XHTTP/gRPC, other TCP/UDP protocols and H3 parameter management
 are outside this stage; complete CDN management remains `deferred`.
 
 Newly generated `21/22/23` TLS frontends reject an incorrect Host. Without CDN
 fields, the complete legacy Nginx output remains valid for reads and edit baselines;
 the next confirmed configuration edit generates the new output. CDN fields require
 the new output. Partial Host-gate removal or other manual drift is rejected.
+Listeners `24/25` retain managed Nginx HTTP/2 gRPC proxying and strict TLS identity.
+The WS Host/path gates do not apply to gRPC. Public CDN provider passthrough still
+requires separate acceptance.
 
 `--preview` does not commit, collect traffic, or start/stop application services.
 Validation still verifies the release, pulls images, and runs candidate checks.
