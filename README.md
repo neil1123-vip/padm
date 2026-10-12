@@ -452,6 +452,7 @@ padm-docker edit --region domain --confirm PADM-DOCKER-EDIT
 padm-docker edit --region ip --region-allow '' --confirm PADM-DOCKER-EDIT
 padm-docker edit --region-allow-add 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --region-allow-remove 'full:api.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --region-allow-replace 'full:api.example.net' 'full:next.example.net' --preview
 padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
 ```
 
@@ -459,6 +460,10 @@ padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
 已有预设可从区域菜单增删自定义直连例外；追加规范化后按首次出现去重，
 自定义列表最多 256 条。删除只匹配完整规范化规则，任一缺项整组拒绝；
 删除最后一项后保留模式和空自定义列表，固定八条例外及其它策略保持。
+区域子菜单 `7` 单条原位替换已有自定义例外，`8` 查看路由状态。替换前先显示状态，
+旧值必须完整规范化匹配一次，新值不能重复现有自定义项；同值、CSV、缺旧项、
+未启用或空自定义名单均拒绝。仅改变所选项，保留次序、区域模式、固定八条例外及
+其它配置；不能借此替换固定默认例外。状态失败、空输入、`0` 和 EOF 不进入编辑。
 关闭仅删除区域预设，保留手工配置的相同 CN 规则、Direct 例外及其它路由能力。
 状态单独输出 `region.mode`、`allow_domains` 和 `default_allow_domains`。
 IP 模式不为域名目标提前解析或在解析后复查；CN 数据沿用现有资源与下载失败恢复门禁，

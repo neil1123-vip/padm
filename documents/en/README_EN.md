@@ -1491,6 +1491,7 @@ padm-docker edit --region domain --confirm PADM-DOCKER-EDIT
 padm-docker edit --region ip --region-allow '' --confirm PADM-DOCKER-EDIT
 padm-docker edit --region-allow-add 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --region-allow-remove 'full:api.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --region-allow-replace 'full:api.example.net' 'full:next.example.net' --preview
 padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
 ```
 
@@ -1500,7 +1501,13 @@ or remove custom Direct exceptions from the regional menu. Additions normalize r
 preserve first occurrence order and keep the custom list at most 256 entries. Removal
 matches complete normalized rules and rejects the entire batch if any item is missing.
 Removing the last custom entry keeps the mode and an empty list; all eight default
-exceptions and other policies remain unchanged. Disabling removes only
+exceptions and other policies remain unchanged. Regional submenu option `7` replaces
+one existing custom exception in place; option `8` shows routing status. Replacement
+first shows status and requires one exact normalized old match and a new rule absent
+from the custom list. Identical values, CSV, missing old rules, disabled policies and
+empty custom lists are rejected. Order, mode, all eight defaults and other settings
+are preserved; default exceptions cannot be replaced. Failed status, empty input,
+`0` and EOF cancel before editing. Disabling removes only
 the preset, preserving identical manually configured CN rules, Direct exceptions
 and other routing policies. Status reports `region.mode`, `allow_domains` and
 `default_allow_domains` separately. IP mode does not resolve domain targets early or

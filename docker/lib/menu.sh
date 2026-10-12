@@ -799,13 +799,14 @@ dockerMenuSites() {
 }
 
 dockerMenuRegion() {
-    local choice mode extra action
+    local choice mode extra action oldRule newRule
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 区域阻断策略\n'
         printf '%s\n' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
             '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' \
-            '5. 追加自定义直连例外' '6. 删除自定义直连例外' '0. 返回'
+            '5. 追加自定义直连例外' '6. 删除自定义直连例外' \
+            '7. 单条替换自定义直连例外' '8. 查看路由状态' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -838,6 +839,15 @@ dockerMenuRegion() {
             fi
             dockerMenuRun edit "${action}" "${extra}" || true
             ;;
+        7)
+            dockerMenuRun protocol routing-status || continue
+            dockerSetupRead oldRule '旧域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${oldRule}" ]] &&
+                dockerSetupRead newRule '新域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${newRule}" ]] || continue
+            dockerMenuRun edit --region-allow-replace "${oldRule}" "${newRule}" || true
+            ;;
+        8) dockerMenuRun protocol routing-status || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

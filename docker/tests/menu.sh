@@ -1120,7 +1120,7 @@ runRoutingDriver() {
     local replaceCase replaceKind oldPrompt newPrompt
     local -A targetPrompts=()
     local -a replaceVariants=(valid)
-    local -a replaceFamilies=(dns direct block ipv6 warp)
+    local -a replaceFamilies=(dns direct block ipv6 warp region)
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
     case "${scenario}" in
@@ -1535,6 +1535,10 @@ runRoutingDriver() {
                 targetReply 'Docker 路由与出站' $'20\n'
                 menuLabel='Docker WARP 出站' choice=10
                 ;;
+            region)
+                targetReply 'Docker 路由与出站' $'18\n'
+                menuLabel='Docker 区域阻断策略' choice=7 statusChoice=8
+                ;;
             esac
             for variant in "${replaceVariants[@]}"; do
                 oldRule=full:Exact.Example.Com newRule=full:Next.Example.NET
@@ -1574,7 +1578,7 @@ runRoutingDriver() {
                 esac
             done
             targetReply "${menuLabel}" "${statusChoice}"$'\n'
-            [[ "${family}" != ipv6 && "${family}" != warp ]] ||
+            [[ "${family}" != ipv6 && "${family}" != warp && "${family}" != region ]] ||
                 targetReply "${menuLabel}" $'0\n'
         done
         ;;
@@ -2014,7 +2018,7 @@ edit)
     elif [[ "${2:-}" == --block-ips-replace ||
         "${2:-}" == --dns-domains-replace || "${2:-}" == --direct-domains-replace ||
         "${2:-}" == --block-domains-replace || "${2:-}" == --warp-domains-replace ||
-        "${2:-}" == --ipv6-domains-replace ]]; then
+        "${2:-}" == --ipv6-domains-replace || "${2:-}" == --region-allow-replace ]]; then
         replaceKind=domain
         if [[ "$2" == --block-ips-replace ]]; then
             # 此处只断言字面参数原样分发，完整 IP/CIDR 校验由路由合同覆盖。
@@ -2646,7 +2650,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         replaceConfirmation= replaceExit=0 replaceFailureCount=0
         replaceCase=${routingCase#*-replace-} replaceKind=domain
         replaceVariants=(valid)
-        replaceFamilies=(dns direct block ipv6 warp)
+        replaceFamilies=(dns direct block ipv6 warp region)
         if [[ "${routingCase}" == ip-replace-* ]]; then
             replaceKind=ip
             replaceFamilies=(ips)
@@ -2669,6 +2673,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         for replaceFamily in "${replaceFamilies[@]}"; do
             replaceFlag="--${replaceFamily}-domains-replace"
             [[ "${replaceFamily}" != ips ]] || replaceFlag=--block-ips-replace
+            [[ "${replaceFamily}" != region ]] || replaceFlag=--region-allow-replace
             for replaceVariant in "${replaceVariants[@]}"; do
                 [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
                 expectedRouting+='protocol routing-status'
@@ -2815,7 +2820,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' '17. 关闭 BT 协议阻断' \
             '18. 区域阻断策略' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
             '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' \
-            '5. 追加自定义直连例外' '6. 删除自定义直连例外' '19. IPv6 域名出站' \
+            '5. 追加自定义直连例外' '6. 删除自定义直连例外' \
+            '7. 单条替换自定义直连例外' '8. 查看路由状态' '19. IPv6 域名出站' \
             '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' \
             '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
             '7. 单条替换 IPv6 域名规则' \
