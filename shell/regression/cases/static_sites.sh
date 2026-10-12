@@ -26,6 +26,14 @@ regressionStaticSiteImportSource() {
     cp "${PROJECT_ROOT}/assets/static-sites/sites/notes/assets/favicon.png" "${path}/assets/photo.png"
 }
 
+regressionStaticSiteNginxDefaultSource() {
+    local path=$1 index=${2:-index.html}
+    local fixtures="${PROJECT_ROOT}/shell/regression/nginx-defaults"
+    mkdir -p "${path}"
+    cp "${fixtures}/${index}.txt" "${path}/index.html"
+    cp "${fixtures}/50x.html.txt" "${path}/50x.html"
+}
+
 runStaticSiteAssetsRegression() (
     set -euo pipefail
     python3 "${PROJECT_ROOT}/shell/regression/static-site-assets.py" "${PROJECT_ROOT}"
@@ -419,6 +427,72 @@ runStaticSiteOwnershipBoundaryRegression() (
     cmp "${backup}/assets/style.css" "${root}/private/original.css"
 )
 
+runStaticSiteNginxDefaultRegression() (
+    set -euo pipefail
+    local base="${TMP_DIR}/static-site-nginx-default" root index errorPage before
+    for index in index.html index-legacy.html; do
+        for errorPage in present absent; do
+            root="${base}/${index%.html}-${errorPage}"
+            regressionStaticSiteFixture "${root}"
+            regressionStaticSiteNginxDefaultSource "${nginxStaticPath}" "${index}"
+            [[ "${errorPage}" != absent ]] || rm "${nginxStaticPath}/50x.html"
+            nginxStaticSiteDefault
+            before=$(nginxStaticSiteDigest "${nginxStaticPath}")
+            nginxBlog </dev/null
+            hysteria2Masquerade=local
+            hysteria2PrepareLocalSite
+            [[ "${hysteria2Masquerade}" == "file://${nginxStaticPath}/" &&
+                "$(nginxStaticSiteDigest "${nginxStaticPath}")" == "${before}" &&
+                ! -e "${PADM_STATIC_SITE_STATE_FILE}" ]]
+            hysteria2Masquerade=docs
+            hysteria2PrepareLocalSite
+            [[ "${hysteria2Masquerade}" == "file://${nginxStaticPath}/" ]]
+            nginxStaticSiteManaged
+            jq -e '.theme == "docs"' "${PADM_STATIC_SITE_STATE_FILE}" >/dev/null
+            [[ ! -e "${nginxStaticPath}/50x.html" && ! -e "${PADM_STATIC_SITE_BACKUP_DIR}" ]]
+        done
+    done
+)
+
+runStaticSiteNginxDefaultBoundaryRegression() (
+    set -euo pipefail
+    local base="${TMP_DIR}/static-site-nginx-default-boundary" root invalid
+    for invalid in changed-index changed-error extra-file extra-directory hidden \
+        named-directory extra-link index-link index-hardlink state broken-state; do
+        root="${base}/${invalid}"
+        regressionStaticSiteFixture "${root}"
+        regressionStaticSiteNginxDefaultSource "${nginxStaticPath}"
+        case "${invalid}" in
+        changed-index) printf '\n<!-- Personal page -->\n' >>"${nginxStaticPath}/index.html" ;;
+        changed-error) printf '\n<!-- Personal error page -->\n' >>"${nginxStaticPath}/50x.html" ;;
+        extra-file) printf 'personal data\n' >"${nginxStaticPath}/personal.txt" ;;
+        extra-directory) mkdir "${nginxStaticPath}/assets" ;;
+        hidden) printf 'private setting\n' >"${nginxStaticPath}/.env" ;;
+        named-directory)
+            rm "${nginxStaticPath}/50x.html"
+            mkdir "${nginxStaticPath}/50x.html"
+            ;;
+        extra-link) ln -s index.html "${nginxStaticPath}/linked.html" ;;
+        index-link)
+            rm "${nginxStaticPath}/index.html"
+            ln -s "${PROJECT_ROOT}/shell/regression/nginx-defaults/index.html.txt" "${nginxStaticPath}/index.html"
+            ;;
+        index-hardlink) ln "${nginxStaticPath}/index.html" "${root}/original-hardlink.html" ;;
+        state) printf '{"personal":"state"}\n' >"${PADM_STATIC_SITE_STATE_FILE}" ;;
+        broken-state) ln -s "${root}/missing-state.json" "${PADM_STATIC_SITE_STATE_FILE}" ;;
+        esac
+        cp -a "${nginxStaticPath}" "${root}/original-site"
+        cp -a "${root}/private" "${root}/original-private"
+        regressionExpectFailure nginxStaticSiteDefault
+        hysteria2Masquerade=photos
+        regressionExpectFailure hysteria2PrepareLocalSite
+        [[ "${hysteria2Masquerade}" == photos ]]
+        diff -r --no-dereference -- "${root}/original-site" "${nginxStaticPath}"
+        diff -r --no-dereference -- "${root}/original-private" "${root}/private"
+        [[ "${invalid}" != index-hardlink || "$(stat -c %h "${nginxStaticPath}/index.html")" == 2 ]]
+    done
+)
+
 runStaticSiteStateFailureRollbackRegression() (
     set -euo pipefail
     local root="${TMP_DIR}/static-site-state-rollback" stateBefore siteBefore originalCommit
@@ -449,6 +523,17 @@ runStaticSiteStateFailureRollbackRegression() (
     failStateCommit=true
     regressionExpectFailure installNginxStaticTemplate docs
     [[ ! -e "${nginxStaticPath}" && ! -e "${PADM_STATIC_SITE_STATE_FILE}" ]]
+    ! compgen -G "${root}/.padm-site.*" >/dev/null
+
+    nginxStaticPath="${root}/nginx-default"
+    PADM_STATIC_SITE_STATE_FILE="${root}/private/nginx-default-state.json"
+    regressionStaticSiteNginxDefaultSource "${nginxStaticPath}"
+    cp -a "${nginxStaticPath}" "${root}/original-default"
+    failStateCommit=true
+    regressionExpectFailure installNginxStaticTemplate notes
+    diff -r -- "${root}/original-default" "${nginxStaticPath}"
+    [[ ! -e "${PADM_STATIC_SITE_STATE_FILE}" && ! -L "${PADM_STATIC_SITE_STATE_FILE}" ]]
+    nginxStaticSiteDefault
     ! compgen -G "${root}/.padm-site.*" >/dev/null
 )
 
@@ -503,6 +588,17 @@ runStaticSiteCoreTransactionRollbackRegression() (
     [[ "$(stat -c %a "${nginxStaticPath}")" == 755 ]]
     [[ "$(find "${nginxStaticPath}" -type f -print0 | sort -z | xargs -0 sha256sum)" == "${siteBefore}" ]]
     nginxStaticSiteManaged
+    ! compgen -G "${root}/.padm-site.*" >/dev/null
+    [[ ! -e "${root}/core-config-backup" ]]
+
+    nginxStaticPath="${root}/nginx-default"
+    PADM_STATIC_SITE_STATE_FILE="${root}/private/nginx-default-state.json"
+    regressionStaticSiteNginxDefaultSource "${nginxStaticPath}" index-legacy.html
+    cp -a "${nginxStaticPath}" "${root}/original-default"
+    regressionExpectStatus 77 coreTemplateConfigTransaction sing-box coreTransactionInstallThenFail
+    diff -r -- "${root}/original-default" "${nginxStaticPath}"
+    [[ ! -e "${PADM_STATIC_SITE_STATE_FILE}" && ! -L "${PADM_STATIC_SITE_STATE_FILE}" ]]
+    nginxStaticSiteDefault
     ! compgen -G "${root}/.padm-site.*" >/dev/null
     [[ ! -e "${root}/core-config-backup" ]]
 )
@@ -702,6 +798,8 @@ runStaticSitesRegression() {
     runRegressionStep static-site-import-rollback runStaticSiteImportRollbackRegression
     runRegressionStep static-site-ownership runStaticSiteOwnershipRegression
     runRegressionStep static-site-ownership-boundary runStaticSiteOwnershipBoundaryRegression
+    runRegressionStep static-site-nginx-default runStaticSiteNginxDefaultRegression
+    runRegressionStep static-site-nginx-default-boundary runStaticSiteNginxDefaultBoundaryRegression
     runRegressionStep static-site-state-rollback runStaticSiteStateFailureRollbackRegression
     runRegressionStep static-site-partial-rollback runStaticSitePartialRollbackRegression
     runRegressionStep static-site-core-transaction-rollback runStaticSiteCoreTransactionRollbackRegression

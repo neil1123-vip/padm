@@ -1,0 +1,17 @@
+这些文件是未经修改的 Nginx 官方默认页面，用于离线验证完整内容指纹。
+使用 .txt 后缀沿用仓库现有 LF 属性，避免 Windows checkout 改变字节。
+测试复制到公开目录时恢复 index.html 和 50x.html 文件名。
+
+index.html.txt 与 50x.html.txt：
+https://raw.githubusercontent.com/nginx/nginx/2b5c2b605b5df669da5dec6749dcc76c07d1315d/docs/html/index.html
+https://raw.githubusercontent.com/nginx/nginx/2b5c2b605b5df669da5dec6749dcc76c07d1315d/docs/html/50x.html
+
+index-legacy.html.txt：
+https://raw.githubusercontent.com/nginx/nginx/release-1.29.2/docs/html/index.html
+
+SHA256：
+201cd1bf3d32e7f5fd8aa22c6de5370852fe03fb654ee22d345dd82f16a246a0  index.html.txt
+fb47468a2cd3953c7131431991afcc6a2703f14640520102eea0a685a7e8d6de  index-legacy.html.txt
+876766b4e80133fd490603e073d3567425b88794828a9292104244c9e40875ed  50x.html.txt
+
+LICENSE.txt 保留两个来源版本的版权声明与相同许可条款。

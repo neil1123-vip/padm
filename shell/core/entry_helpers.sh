@@ -386,6 +386,28 @@ nginxStaticSiteManaged() {
     ' "${statePath}" >/dev/null 2>&1
 }
 
+nginxStaticSiteDefault() {
+    local sitePath statePath unexpected file digest
+    sitePath=$(nginxStaticSafePath) || return 1
+    statePath=$(nginxStaticSiteStateFile) || return 1
+    [[ ! -e "${statePath}" && ! -L "${statePath}" ]] || return 1
+    nginxStaticSiteValidateDirectory "${sitePath}" || return 1
+    unexpected=$(find "${sitePath}" -mindepth 1 ! -name index.html ! -name 50x.html -print -quit) || return 1
+    [[ -z "${unexpected}" ]] || return 1
+    # shortcut: 只放行已核对的官方完整内容, 支持其它默认版本时补指纹与夹具。
+    for file in index.html 50x.html; do
+        [[ -e "${sitePath}${file}" ]] || continue
+        digest=$(sha256sum -- "${sitePath}${file}") || return 1
+        case "${file}:${digest%% *}" in
+        index.html:201cd1bf3d32e7f5fd8aa22c6de5370852fe03fb654ee22d345dd82f16a246a0 | \
+        index.html:fb47468a2cd3953c7131431991afcc6a2703f14640520102eea0a685a7e8d6de | \
+        50x.html:876766b4e80133fd490603e073d3567425b88794828a9292104244c9e40875ed)
+            ;;
+        *) return 1 ;;
+        esac
+    done
+}
+
 nginxStaticSiteRemove() {
     local statePath sitePath
     statePath=$(nginxStaticSiteStateFile) || return 1
@@ -459,7 +481,7 @@ installNginxStaticTemplate() {
     if [[ -e "${sitePath%/}" ]]; then
         [[ -d "${sitePath}" ]] || return 1
         existingEntry=$(find "${sitePath}" -mindepth 1 -print -quit) || return 1
-        if [[ -n "${existingEntry}" ]] && ! nginxStaticSiteManaged; then
+        if [[ -n "${existingEntry}" ]] && ! nginxStaticSiteManaged && ! nginxStaticSiteDefault; then
             if [[ "${preserveExisting}" != true || "${PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE:-false}" == true ]]; then
                 errorCard "已有网页未受管理或已被修改，已保留；可在站点菜单备份后更换"
                 return 1
