@@ -842,6 +842,7 @@ for siteContract in \
     'if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi' \
     '--env PADM_REGRESSION_PARALLEL_JOBS="${jobs}"' \
     '--env PADM_DOCKER_CONTRACTS_SHARED_CHECKS' \
+    'capabilities=(--cap-add SYS_PTRACE --cap-add SYS_ADMIN)' \
     'padm-regression:contracts "${SELECTOR}"'; do
     grep -Fq -- "${siteContract}" "${CONTRACT_WORKFLOW}" ||
         fail '站点合同未复用隔离工具镜像、当前源码快照或有界并发'

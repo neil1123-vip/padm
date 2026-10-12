@@ -611,13 +611,16 @@ runStaticSiteSignalRollbackRegression() (
 
 runStaticSiteNginxHttpRegression() (
     set -euo pipefail
-    local root="${TMP_DIR}/static-site-http" port theme status getLength headLength
+    local root port theme status getLength headLength
     local nginxPid=
+    # 独立夹具放在可遍历的 /tmp 下，不能修改 CI 宿主父目录的权限。
+    root=$(mktemp -d /tmp/padm-static-site-http.XXXXXXXX)
     regressionStaticSiteFixture "${root}"
+    padmRegisterCleanupPath "${root}"
+    trap 'status=$?; [[ -z "${nginxPid}" ]] || { kill "${nginxPid}" 2>/dev/null || :; wait "${nginxPid}" 2>/dev/null || :; }; padmCleanupTempPaths "" "${status}"' EXIT
     command -v nginx >/dev/null
     command -v curl >/dev/null
     port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-    trap '[[ -z "${nginxPid}" ]] || { kill "${nginxPid}" 2>/dev/null || :; wait "${nginxPid}" 2>/dev/null || :; }' EXIT
     printf '%s\n' \
         'user nobody nogroup;' \
         'worker_processes 1;' \
@@ -634,12 +637,8 @@ runStaticSiteNginxHttpRegression() (
         '}' >"${root}/nginx.conf"
     nginx -t -p "${root}/" -c "${root}/nginx.conf"
     installNginxStaticTemplate notes
-    # 非 root worker 要能穿过夹具私有父目录，实际站点权限仍由安装器设置。
-    local parent="${root}"
-    while [[ "${parent}" != / ]]; do
-        chmod o+x "${parent}"
-        parent=$(dirname -- "${parent}")
-    done
+    # root 启动时仍由 nobody worker 验收，实际站点权限由安装器设置。
+    chmod o+x "${root}"
     nginx -p "${root}/" -c "${root}/nginx.conf" -g 'daemon off;' &
     nginxPid=$!
     for theme in notes photos docs; do
