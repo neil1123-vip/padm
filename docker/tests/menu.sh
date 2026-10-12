@@ -1251,11 +1251,11 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'18\n'
         targetReply 'Docker 区域阻断策略' $'invalid\n'
         targetReply 'Docker 区域阻断策略' $'1\n'
-        targetReply '追加直连例外规则' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply '替换自定义直连例外规则' $'Example.NET, full:Exact.Example.Com\n'
         targetReply 'Docker 区域阻断策略' $'2\n'
-        targetReply '追加直连例外规则' $'\n'
+        targetReply '替换自定义直连例外规则' $'\n'
         targetReply 'Docker 区域阻断策略' $'3\n'
-        targetReply '追加直连例外规则' $'\n'
+        targetReply '替换自定义直连例外规则' $'\n'
         targetReply 'Docker 区域阻断策略' $'5\n'
         targetReply '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'Docker 区域阻断策略' $'6\n'
@@ -1379,7 +1379,7 @@ runRoutingDriver() {
         done
         targetReply 'Docker 路由与出站' $'18\n'
         targetReply 'Docker 区域阻断策略' $'1\n'
-        targetReply '追加直连例外规则' $'0\n'
+        targetReply '替换自定义直连例外规则' $'0\n'
         for input in 0 ''; do
             targetReply 'Docker 区域阻断策略' $'5\n'
             targetReply '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
@@ -1577,7 +1577,7 @@ runRoutingDriver() {
     region-eof)
         targetReply 'Docker 路由与出站' $'18\n'
         targetReply 'Docker 区域阻断策略' $'1\n'
-        targetReply '追加直连例外规则' $'\004'
+        targetReply '替换自定义直连例外规则' $'\004'
         targetReply 'Docker 区域阻断策略' $'5\n'
         targetReply '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
         targetReply 'Docker 区域阻断策略' $'6\n'
@@ -1592,6 +1592,26 @@ runRoutingDriver() {
         targetReply '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
         targetReply 'Docker 区域阻断策略' $'6\n'
         targetReply '删除自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
+        targetReply 'Docker 区域阻断策略' $'0\n'
+        ;;
+    region-mode-flow|region-mode-cancel|region-mode-failed)
+        targetReply 'Docker 路由与出站' $'18\n'
+        if [[ "${scenario}" == region-mode-cancel ]]; then
+            for input in 0 '' $'\004' invalid Both; do
+                targetReply 'Docker 区域阻断策略' $'9\n'
+                if [[ "${input}" == $'\004' ]]; then
+                    targetReply '区域模式 [both/domain/ip，0 返回]' "${input}"
+                else
+                    targetReply '区域模式 [both/domain/ip，0 返回]' "${input}"$'\n'
+                fi
+            done
+        else
+            for input in both domain ip; do
+                targetReply 'Docker 区域阻断策略' $'9\n'
+                targetReply '区域模式 [both/domain/ip，0 返回]' "${input}"$'\n'
+            done
+        fi
+        targetReply 'Docker 区域阻断策略' $'8\n'
         targetReply 'Docker 区域阻断策略' $'0\n'
         ;;
     ipv6-eof)
@@ -2267,6 +2287,8 @@ edit)
     elif [[ "${2:-}" == --xhttp-headers-clear ]]; then
         [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
         exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --region-mode ]]; then
+        [[ "$#" -eq 3 && ( "$3" == both || "$3" == domain || "$3" == ip ) ]] || exit 2
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
         "${2:-}" == --direct-domains-add || "${2:-}" == --block-domains-add ||
         "${2:-}" == --direct-domains-remove || "${2:-}" == --block-domains-remove ||
@@ -2777,7 +2799,7 @@ for siteCase in flow cancel static-eof redirect-eof template-eof alpn-diagnose-e
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed ipv6-eof warp-eof \
+for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
     domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \
     ip-replace-flow ip-replace-cancel ip-replace-status-failed ip-replace-state-failed \
@@ -2800,6 +2822,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
+        "${routingCase}" != region-mode-failed &&
         "${routingCase}" != block-ips-change-failed &&
         "${routingCase}" != dns-domains-change-failed &&
         "${routingCase}" != selective-domains-commit-failed &&
@@ -3054,6 +3077,19 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
             fail '区域自定义例外增删失败未显示状态错误并保留菜单'
         ;;
+    region-mode-flow|region-mode-cancel|region-mode-failed)
+        if [[ "${routingCase}" == region-mode-cancel ]]; then
+            expectedRouting='protocol routing-status'
+            [[ "$(grep -Fc '无效模式，请重新选择' "${CONTROL_LOG}")" -eq 2 ]] ||
+                fail '区域非法模式未保留菜单'
+        else
+            expectedRouting=$'edit --region-mode both\nedit --region-mode domain\nedit --region-mode ip\nprotocol routing-status'
+        fi
+        if [[ "${routingCase}" == region-mode-failed ]]; then
+            [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 3 ]] ||
+                fail '区域模式切换失败未显示状态错误并继续诊断'
+        fi
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
         fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
@@ -3067,7 +3103,9 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '18. 区域阻断策略' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
             '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' \
             '5. 追加自定义直连例外' '6. 删除自定义直连例外' \
-            '7. 单条替换自定义直连例外' '8. 查看路由状态' '19. IPv6 域名出站' \
+            '7. 单条替换自定义直连例外' '8. 查看路由状态' \
+            '9. 仅切换已有区域模式（保留自定义例外）' \
+            '替换自定义直连例外规则（逗号分隔，留空清空，0 返回）' '19. IPv6 域名出站' \
             '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' \
             '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
             '7. 单条替换 IPv6 域名规则' \

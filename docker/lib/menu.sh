@@ -850,7 +850,8 @@ dockerMenuRegion() {
         printf '%s\n' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
             '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' \
             '5. 追加自定义直连例外' '6. 删除自定义直连例外' \
-            '7. 单条替换自定义直连例外' '8. 查看路由状态' '0. 返回'
+            '7. 单条替换自定义直连例外' '8. 查看路由状态' \
+            '9. 仅切换已有区域模式（保留自定义例外）' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -863,7 +864,7 @@ dockerMenuRegion() {
             printf '默认直连例外: %s\n' "$(jq -r 'map(ltrimstr("domain:")) | join(",")' \
                 <<<"${PADM_DOCKER_REGION_DEFAULT_DOMAINS}")"
             printf '区域阻断可能影响客户端连接；直连例外优先于其它阻断和 SOCKS5。\n'
-            dockerSetupRead extra '追加直连例外规则（逗号分隔，留空无追加，0 返回）: ' || continue
+            dockerSetupRead extra '替换自定义直连例外规则（逗号分隔，留空清空，0 返回）: ' || continue
             if [[ -n "${extra}" ]]; then
                 dockerMenuRun edit --region "${mode}" --region-allow "${extra}" || true
             else
@@ -892,6 +893,14 @@ dockerMenuRegion() {
             dockerMenuRun edit --region-allow-replace "${oldRule}" "${newRule}" || true
             ;;
         8) dockerMenuRun protocol routing-status || true ;;
+        9)
+            dockerSetupRead mode '区域模式 [both/domain/ip，0 返回]: ' &&
+                [[ -n "${mode}" ]] || continue
+            case "${mode}" in
+            both|domain|ip) dockerMenuRun edit --region-mode "${mode}" || true ;;
+            *) printf '无效模式，请重新选择。\n' ;;
+            esac
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

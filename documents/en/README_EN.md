@@ -1563,14 +1563,19 @@ Direct precedence over domain/IP/BT blocking and SOCKS5, not just the regional p
 padm-docker edit --region both --region-allow 'example.com,full:api.example.net' --preview
 padm-docker edit --region domain --confirm PADM-DOCKER-EDIT
 padm-docker edit --region ip --region-allow '' --confirm PADM-DOCKER-EDIT
+padm-docker edit --region-mode domain --preview
 padm-docker edit --region-allow-add 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --region-allow-remove 'full:api.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --region-allow-replace 'full:api.example.net' 'full:next.example.net' --preview
 padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
 ```
 
-Each mode change replaces the preset and custom exceptions rather than accumulating
-old modes; omitted custom exceptions become an empty list. Existing presets can add
+`--region` replaces the mode and custom exceptions rather than accumulating old modes;
+omitted custom exceptions become an empty list. Menu options `1`–`3` explicitly say
+that custom exceptions are replaced and empty input clears them. Option `9` or
+`--region-mode <both|domain|ip>` changes only an existing `region.mode`, preserving
+custom exceptions, all eight defaults and other configuration. A disabled policy or
+identical mode returns `15`; other mode values return `2`. Existing presets can add
 or remove custom Direct exceptions from the regional menu. Additions normalize rules,
 preserve first occurrence order and keep the custom list at most 256 entries. Removal
 matches complete normalized rules and rejects the entire batch if any item is missing.

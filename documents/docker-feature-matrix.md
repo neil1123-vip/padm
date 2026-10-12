@@ -40,6 +40,11 @@ Direct/Block/IPv6/WARP/SOCKS5 候选顺序及优先者，包括区域合成的�
 优先者只针对相同完整 selector，不推断包含关系、分类成员、IP/BT、HTTP 中继或实际流量。
 完整冲突检测、区域管理及原生宿主/arm64/公网验收仍 `deferred`。
 
+5B.4l 接入区域菜单 `9` 与 `--region-mode <both|domain|ip>`，
+仅切换已有 `.routing.region.mode`，保留自定义例外顺序、固定八条例外及其它配置。
+同模式或未启用返回 `15`，非法值返回 `2`；原 `--region` 整组替换语义保持，
+菜单 `1`–`3` 明示替换自定义例外、留空清空。完整区域管理和整体状态仍 `deferred`。
+
 5C.9a 仅补固定 amd64 sing-box 1.14.2 客户端前置：Hy2 接受范围字段，
 TUIC 拒绝 `server_ports`，两者单端口基线均通过。Hy2 两个现有 UDP alias
 分别通过双栈严格 TLS、认证与 TCP/UDP；范围客户端跨 5.1 秒保持业务，

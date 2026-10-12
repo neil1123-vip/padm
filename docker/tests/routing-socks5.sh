@@ -1991,6 +1991,21 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
     runEdit 2 --region-off --direct-off --preview
     runEdit 2 --region both --spec "${TEST_ROOT}/base.json" --preview
     runEdit 2 --region both --http01 enable --preview
+    runEdit 15 --region-mode domain --preview
+    runEdit 2 --region-mode
+    runEdit 2 --region-mode '' --preview
+    runEdit 2 --region-mode Both --preview
+    runEdit 2 --region-mode domain
+    runEdit 2 --region-mode domain --confirm invalid
+    runEdit 2 --region-mode domain --region-mode ip --preview
+    runEdit 2 --region-mode domain --region both --preview
+    runEdit 2 --region both --region-mode domain --preview
+    runEdit 2 --region-mode domain --region-allow '' --preview
+    runEdit 2 --region-mode domain --region-allow-add example.com --preview
+    runEdit 2 --region-mode domain --region-off --preview
+    runEdit 2 --region-mode domain --direct-off --preview
+    runEdit 2 --region-mode domain --spec "${TEST_ROOT}/base.json" --preview
+    runEdit 2 --region-mode domain --http01 enable --preview
     runEdit 15 --region-allow-replace apple.com replacement.example.org --preview
     for option in --region-allow-add --region-allow-remove; do
         runEdit 15 "${option}" example.com --preview
@@ -2053,11 +2068,27 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
     jq -en --slurpfile expected "${TEST_ROOT}/region-owner.json" --slurpfile actual "${root}/config/spec.json" \
         '$actual == $expected' >/dev/null || fail '区域展开写回或覆盖 generic 同规则'
     before=$(snapshot)
+    runEdit 15 --region-mode both --confirm PADM-DOCKER-EDIT
+    runEdit 0 --region-mode domain --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail '区域模式同值拒绝或预览改变部署'
+    for regionMode in domain ip both; do
+        runEdit 0 --region-mode "${regionMode}" --confirm PADM-DOCKER-EDIT
+        jq -en --arg mode "${regionMode}" --slurpfile old "${TEST_ROOT}/region-owner.json" \
+            --slurpfile actual "${root}/config/spec.json" '
+          $actual[0] == ($old[0] | .routing.region.mode=$mode)
+        ' >/dev/null || fail '区域模式切换改变自定义例外、顺序或其它配置'
+        runStatus 0
+        jq -e --arg mode "${regionMode}" --argjson allow "${REGION_ALLOW}" \
+            --argjson defaults "${REGION_DEFAULTS}" '
+          .region == {mode:$mode,allow_domains:$allow,default_allow_domains:$defaults}
+        ' "${LOG}" >/dev/null || fail '区域模式状态未保留自定义和固定例外'
+    done
+    before=$(snapshot)
     for failure in health-fail int term; do
         MODE=${failure}
         rm -f -- "${TEST_ROOT}/failed-once"
         case "${failure}" in
-        health-fail) runEdit 14 --region domain --confirm PADM-DOCKER-EDIT ;;
+        health-fail) runEdit 14 --region-mode domain --confirm PADM-DOCKER-EDIT ;;
         int) runEdit 130 --region-off --confirm PADM-DOCKER-EDIT ;;
         term) runEdit 143 --region-off --confirm PADM-DOCKER-EDIT ;;
         esac
@@ -2139,6 +2170,10 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
     runEdit 15 --region-allow-remove exact.example.com --confirm PADM-DOCKER-EDIT
     runEdit 15 --region-allow-replace apple.com replacement.example.org --confirm PADM-DOCKER-EDIT
     [[ "$(snapshot)" == "${before}" ]] || fail '区域重复删除改变部署'
+    runEdit 0 --region-mode domain --confirm PADM-DOCKER-EDIT
+    jq -e '.routing.region == {mode:"domain",allow_domains:[]}' "${root}/config/spec.json" >/dev/null ||
+        fail '空自定义例外的区域模式切换改变名单'
+    runEdit 0 --region-mode both --confirm PADM-DOCKER-EDIT
     runEdit 0 --region-allow-add 'full:exact.example.com,apple.com,full:custom-region.example.com' \
         --confirm PADM-DOCKER-EDIT
     jq -en --slurpfile expected "${TEST_ROOT}/region-owner.json" --slurpfile actual "${root}/config/spec.json" \
@@ -2146,6 +2181,9 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
     runEdit 0 --region-off --confirm PADM-DOCKER-EDIT
     jq -en --slurpfile expected "${TEST_ROOT}/routing-bt-policy.json" --slurpfile actual "${root}/config/spec.json" \
         '$actual == $expected' >/dev/null || fail '区域关闭删除 generic 同 CN 或其它子项'
+    before=$(snapshot)
+    runEdit 15 --region-mode domain --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '区域模式切换重新启用已关闭策略'
     for core in xray sing-box; do
         cmp -s "${root}/config/${core}/config.json" "${TEST_ROOT}/runtime-routing-bt-policy-${core}.json" ||
             fail "${core}: 区域关闭未精确恢复 generic 生成"

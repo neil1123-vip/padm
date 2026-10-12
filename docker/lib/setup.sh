@@ -1799,10 +1799,11 @@ dockerEditCommand() {
             routingKind=block_bt routingAction=enable
             shift
             ;;
-        --region)
+        --region|--region-mode)
             [[ "$#" -ge 2 && -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             case "$2" in both|domain|ip) regionMode=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
             routingKind=region routingAction=enable
+            [[ "$1" != --region-mode ]] || routingAction=mode
             shift 2
             ;;
         --region-allow)
@@ -2363,6 +2364,13 @@ dockerEditCommand() {
         elif [[ "${routingKind}" == region && "${routingAction}" == enable ]]; then
             jq --arg mode "${regionMode}" --argjson allow "${regionAllow}" \
                 '.routing.region = {mode:$mode,allow_domains:$allow}' "${draft}" >"${draft}.next"
+        elif [[ "${routingKind}" == region && "${routingAction}" == mode ]]; then
+            jq -e --arg mode "${regionMode}" \
+                '.routing.region != null and .routing.region.mode != $mode' "${draft}" >/dev/null || {
+                dockerError '区域模式切换要求已有区域策略且新模式不同；自定义例外保持'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            jq --arg mode "${regionMode}" '.routing.region.mode = $mode' "${draft}" >"${draft}.next"
         elif [[ "${routingKind}" == region && "${routingAction}" == allow_* ]]; then
             jq -e '.routing.region != null' "${draft}" >/dev/null || {
                 dockerError '请先启用区域策略，再增删自定义直连例外'
@@ -2744,6 +2752,8 @@ dockerEditCommand() {
         ($old | without_warp_edit) == ($new | without_warp_edit)
        elif $routing_kind == "region" and ($routing_action | startswith("allow_")) then
         ($old | del(.routing.region.allow_domains)) == ($new | del(.routing.region.allow_domains))
+       elif $routing_kind == "region" and $routing_action == "mode" then
+        ($old | del(.routing.region.mode)) == ($new | del(.routing.region.mode))
        elif $routing_kind == "socks5" then
         # 非空只豁免域名；删空只能关闭出站，不能改凭据或转成全局代理。
         if $new.routing.socks5 == null then

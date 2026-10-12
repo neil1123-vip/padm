@@ -490,13 +490,17 @@ padm-docker edit --block-bt-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --region both --region-allow 'example.com,full:api.example.net' --preview
 padm-docker edit --region domain --confirm PADM-DOCKER-EDIT
 padm-docker edit --region ip --region-allow '' --confirm PADM-DOCKER-EDIT
+padm-docker edit --region-mode domain --preview
 padm-docker edit --region-allow-add 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --region-allow-remove 'full:api.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --region-allow-replace 'full:api.example.net' 'full:next.example.net' --preview
 padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
 ```
 
-模式切换替换预设及追加例外，不累加旧模式；未指定追加例外时保存空列表。
+`--region` 替换模式及自定义例外，不累加旧模式；未指定例外时保存空列表。
+区域菜单 `1`–`3` 明示替换自定义例外、留空清空；仅切换已有模式并保留例外使用
+菜单 `9` 或 `--region-mode <both|domain|ip>`，只修改 `region.mode`。
+未启用或同模式返回 `15`，其它值返回 `2`；固定八条例外、其它路由和配置保持。
 已有预设可从区域菜单增删自定义直连例外；追加规范化后按首次出现去重，
 自定义列表最多 256 条。删除只匹配完整规范化规则，任一缺项整组拒绝；
 删除最后一项后保留模式和空自定义列表，固定八条例外及其它策略保持。

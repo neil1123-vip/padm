@@ -2952,6 +2952,28 @@ Bash、ShellCheck error、JSON 与独立只读复审通过；集中完整合同 
 `.tmp-regression-docker-0e99c372088c4e65b1e7d47fa173231f/`；
 独立入口包含祖先合同，不能与 full 分项直接比较或据此宣称节省秒数。
 
+#### 5B.4l 已有区域模式保留例外切换与菜单文案修复
+
+新增 CLI `edit --region-mode <both|domain|ip>` 和区域菜单 `9`，
+只改已有 `.routing.region.mode`；保留自定义例外顺序、固定八条例外、
+其它路由与完整规格，复用字段冻结、预览/确认、健康失败和信号恢复。
+同模式或未启用返回 `15`；非法模式或与其它专项动作组合返回 `2`。
+空自定义名单仍可切换，不借此启用区域策略。
+
+修复区域菜单 `1`–`3` 提示“追加、留空无追加”却重建名单的误导：
+改为“替换自定义例外、留空清空”，原 `--region` CLI 整组替换语义保持。
+本步不修改生成器、schema、marker、权限或分类语义，完整区域策略、
+完整冲突检测、公网、原生宿主/arm64 与可信发布仍 deferred，总目标 active。
+Linux amd64 区域合同内部/入口 69785/70890 ms、排队 5123 ms，菜单 PTY
+109495/110510 ms、排队 289 ms，均 exit 0、Jobs 2、cache_hit=false。
+证据 `.tmp-regression-docker-e2c8aaa8b5a844298d41d8a964968364/`、
+`.tmp-regression-docker-9b5181a4238b43578f60fb3920d39cdc/`。
+Bash、ShellCheck error、diff 和独立只读复审通过；集中完整合同 53/53
+通过，内部/入口 614914/615925 ms、排队 388 ms、Jobs 6、cache_hit=false，
+证据 `.tmp-regression-docker-028a4b683ac04ef79037eb4e688c5999/`。
+工具镜像直接复用；完整耗时含独立定向检查混跑，不能据此归因于本次代码。
+行为文件与 full 输入一致，验收后只补说明，日志与结果保留、重复源码输入清理。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP
