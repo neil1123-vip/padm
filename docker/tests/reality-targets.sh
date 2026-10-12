@@ -203,7 +203,7 @@ runTargetRead() {
 runTargetEdit() {
     local expected=$1 name=$2 unchanged=$3 actual=0 before
     shift 3
-    before=$(snapshot)
+    if [[ "${unchanged}" == unchanged ]]; then before=$(snapshot); fi
     : >"${EVENTS}"
     bash -u "${CLI}" edit "$@" "${ASSET_ARGS[@]}" \
         </dev/null >"${STDOUT}" 2>"${STDERR}" || actual=$?
