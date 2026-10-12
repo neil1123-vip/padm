@@ -100,7 +100,8 @@ dockerTrafficAccounts() {
 
 dockerTrafficRender() {
     local core=$1 source=$2 state=$3
-    jq -e --arg core "${core}" --argjson state "${state}" "${DOCKER_TRAFFIC_USERS_JQ}"'
+    jq -e --arg core "${core}" --slurpfile state <(printf '%s\n' "${state}") "${DOCKER_TRAFFIC_USERS_JQ}"'
+      ($state | if length == 1 then .[0] else error("流量状态必须是单个对象") end) as $state |
       def enabled:
         traffic_id as $id | ($state.accounts[$id] // {}) as $account |
         .padm_enabled != false and

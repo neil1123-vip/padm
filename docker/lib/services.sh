@@ -3784,6 +3784,262 @@ dockerFail2banSourceAddress() (
     fi
 )
 
+dockerPortHoppingTargetWitness() (
+    local listener=${1:-} ipv4=${2:-} ipv6=${3:-} root spec entry domain fileProbe before after
+    local baseline state rendered count expectedCompose expectedEnv image ids container imageInfo
+    local networks networkInfo hostAddresses fixed previous= round sourcePath
+    local -a networkIds=()
+    [[ "$#" -eq 3 ]] || return 1
+    dockerHostPreflight && dockerRequireCommand python3 && dockerRequireCommand ip || return 1
+    root=$(dockerInstallRoot) || return 1
+    spec="${root}/config/spec.json"
+    dockerTrafficSafePath "${root}" "${spec}" && [[ -f "${spec}" ]] || return 1
+    entry=$(jq -ec --arg listener "${listener}" '
+      . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
+      if $s.schema_version == 3 and length == 1 and .[0].id == 3 and
+        (.[0].core // $s.core.type) == "sing-box" and
+        (.[0].address_families | sort) == ["ipv4","ipv6"] and
+        all($s.host_integrations[]; .type != "tun" and .type != "tproxy")
+      then {port:.[0].public_port,domain:.[0].hy2.domain}
+      else error("目标见证仅支持受管双族 Hy2 bridge 入口") end
+    ' "${spec}") || return 1
+    domain=$(jq -er '.domain' <<<"${entry}") || return 1
+    # shortcut: 只见证文件与发布快照；内存加载版本、可达性和发布信任须由后续独立门控验收。
+    read -r -d '' fileProbe <<'PY' || [[ -n "${fileProbe}" ]] || return 1
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+root = Path(sys.argv[1])
+domain = sys.argv[2]
+if not domain or "/" in domain or domain in (".", ".."):
+    raise SystemExit("TLS 域名路径无效")
+files = ["config/spec.json", "deployment.json", "images.env", "compose.json",
+         "config/sing-box/users.base", "config/sing-box/config.json",
+         "data/traffic/state.json", "secrets/tls/" + domain + ".crt",
+         "secrets/tls/" + domain + ".key"]
+dirs = ["", "config", "config/sing-box", "secrets", "secrets/tls",
+        "data", "data/sing-box", "data/traffic", "data/static"]
+rows = []
+for parent in root.parents:
+    metadata = parent.lstat()
+    if parent.is_symlink():
+        raise SystemExit("受管根目录祖先不能含符号链接")
+    rows.append(["@ancestor:" + str(parent), metadata.st_dev, metadata.st_ino,
+                 metadata.st_mode, metadata.st_uid, metadata.st_gid])
+for name in [*dirs, *files]:
+    path = root / name
+    for parent in [path, *path.parents]:
+        if parent.is_symlink():
+            raise SystemExit("目标路径不能含符号链接")
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        if name in ("data/traffic/state.json", "data/traffic", "data/static"):
+            rows.append([name, None])
+            continue
+        raise SystemExit("目标快照缺少受管文件或目录")
+    row = [name, metadata.st_dev, metadata.st_ino, metadata.st_mode,
+           metadata.st_uid, metadata.st_gid, metadata.st_nlink]
+    if name in files:
+        if not stat.S_ISREG(metadata.st_mode):
+            raise SystemExit("目标配置与 TLS 必须是普通文件")
+        row += [metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns,
+                hashlib.sha256(path.read_bytes()).hexdigest()]
+    elif not stat.S_ISDIR(metadata.st_mode):
+        raise SystemExit("目标受管路径必须是目录")
+    rows.append(row)
+config = root / "config/sing-box"
+for path in sorted(config.rglob("*")):
+    metadata = path.lstat()
+    if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+        raise SystemExit("核心配置不能含特殊文件或符号链接")
+    if path.suffix == ".json" and path != config / "config.json":
+        raise SystemExit("核心配置含额外 JSON")
+    rows.append([str(path.relative_to(root)), metadata.st_dev, metadata.st_ino,
+                 metadata.st_mode, metadata.st_uid, metadata.st_gid])
+print(json.dumps(rows, separators=(",", ":")))
+PY
+    before=$(python3 -c "${fileProbe}" "${root}" "${domain}") || return 1
+    dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
+        dockerDeploymentFileValidate "${root}/deployment.json" || return 1
+    [[ "$(jq -c --arg listener "${listener}" '
+      . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
+      if $s.schema_version == 3 and length == 1 and .[0].id == 3 and
+        (.[0].core // $s.core.type) == "sing-box" and
+        (.[0].address_families | sort) == ["ipv4","ipv6"] and
+        all($s.host_integrations[]; .type != "tun" and .type != "tproxy")
+      then {port:.[0].public_port,domain:.[0].hy2.domain}
+      else error("目标配置快照已超出双族 Hy2 支持范围") end
+    ' "${spec}")" == "${entry}" ]] || return 1
+    expectedCompose=$(dockerGenerateCompose "${spec}" /dev/stdout "${root}") &&
+        expectedEnv=$(dockerGenerateImagesEnv "${spec}" /dev/stdout "${root}") &&
+        jq -es --argjson expected "${expectedCompose}" 'length == 1 and .[0] == $expected' \
+            "${root}/compose.json" >/dev/null &&
+        [[ "$(LC_ALL=C sort "${root}/images.env")" == "$(LC_ALL=C sort <<<"${expectedEnv}")" ]] || return 1
+    jq -e '.services["sing-box"].network_mode == null' "${root}/compose.json" >/dev/null || return 1
+    while IFS= read -r sourcePath; do
+        sourcePath=${sourcePath/'${PADM_DOCKER_ROOT}'/${root}}
+        dockerTrafficSafePath "${root}" "${sourcePath}" && [[ -d "${sourcePath}" ]] || return 1
+    done < <(jq -r '.services["sing-box"].volumes[].source' "${root}/compose.json")
+    baseline=$(dockerGenerateSingBoxConfig "${spec}" /dev/stdout) &&
+        jq -es --slurpfile expected <(printf '%s\n' "${baseline}") \
+            'length == 1 and ($expected | length) == 1 and .[0] == $expected[0]' \
+            "${root}/config/sing-box/users.base" >/dev/null &&
+        state=$(dockerTrafficReadState) &&
+        rendered=$(dockerTrafficRender sing-box "${root}/config/sing-box/users.base" "${state}") &&
+        jq -es --slurpfile expected <(printf '%s\n' "${rendered}") \
+            'length == 1 and ($expected | length) == 1 and .[0] == $expected[0]' \
+            "${root}/config/sing-box/config.json" >/dev/null || return 1
+    count=$(jq -er --arg listener "${listener}" --argjson entry "${entry}" '
+      [.inbounds[] | select(.tag == $listener)] |
+      if length == 1 and .[0].type == "hysteria2" and .[0].listen == "::" and
+        .[0].listen_port == $entry.port and (.[0].users | type == "array" and length > 0)
+      then .[0].users | length else error("目标 Hy2 没有启用账号") end
+    ' <<<"${rendered}") &&
+        image=$(jq -er '.images["sing-box"]' "${spec}") || return 1
+    for round in 1 2; do
+        hostAddresses=$(ip -j address show) || return 1
+        python3 - "${ipv4}" "${ipv6}" "${hostAddresses}" <<'PY' || return 1
+import ipaddress
+import json
+import sys
+
+host = json.loads(sys.argv[3])
+if not isinstance(host, list):
+    raise SystemExit("主机地址查询无效")
+local = set()
+for interface in host:
+    for item in interface["addr_info"]:
+        if item["family"] not in ("inet", "inet6"):
+            raise SystemExit("主机地址族无效")
+        local.add(str(ipaddress.ip_address(item["local"])))
+for raw, version in zip(sys.argv[1:3], (4, 6)):
+    address = ipaddress.ip_address(raw)
+    if (address.version != version or str(address) != raw or "%" in raw or
+            address.is_unspecified or address.is_multicast or address.is_loopback or
+            address.is_link_local or getattr(address, "ipv4_mapped", None) is not None or
+            raw not in local):
+        raise SystemExit("目标地址必须是本机规范原生双族地址")
+PY
+        ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+            --filter label=com.docker.compose.service=sing-box --filter label=com.docker.compose.oneoff=False) ||
+            return 1
+        [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+        container=$(docker container inspect "${ids}") &&
+            imageInfo=$(docker image inspect "${image}") || return 1
+        jq -e --arg root "${root}" --arg image "${image}" --arg id "${ids}" \
+            --argjson imageInfo "${imageInfo}" --slurpfile spec "${spec}" \
+            --slurpfile compose "${root}/compose.json" '
+          def bindings:
+            map(capture("^(?<host>0\\.0\\.0\\.0|\\[::\\]):(?<public>[0-9]+):(?<private>[0-9]+)/(?<proto>tcp|udp)$") |
+              {key:(.private + "/" + .proto),
+               value:{HostIp:(.host | if . == "[::]" then "::" else . end),HostPort:.public}}) |
+            group_by(.key) | map({key:.[0].key,value:map(.value) | sort_by(.HostIp,.HostPort)}) |
+            from_entries;
+          def sorted_bindings: with_entries(.value |= sort_by(.HostIp,.HostPort));
+          length == 1 and ($imageInfo | length == 1) and
+          (.[0] as $c | $c.Config.Labels as $labels | $compose[0] as $compose |
+            $compose.services["sing-box"] as $service |
+            ($c.Id | type == "string" and test("^[a-f0-9]{64}$") and startswith($id)) and
+            ($c.Image | type == "string" and test("^sha256:[a-f0-9]{64}$")) and
+            $c.Image == $imageInfo[0].Id and
+            $c.State.Status == "running" and $c.State.Running == true and
+            $c.State.Restarting == false and $c.State.Paused == false and $c.State.Dead == false and
+            $c.State.Health.Status == "healthy" and
+            ($c.State.Pid | type == "number" and floor == . and . > 1) and
+            ($c.State.StartedAt | type == "string" and
+              test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$")) and
+            ($c.RestartCount | type == "number" and floor == . and . >= 0) and
+            $labels["com.docker.compose.project"] == "padm-docker" and
+            $labels["com.docker.compose.project.working_dir"] == $root and
+            $labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+            $labels["com.docker.compose.service"] == "sing-box" and
+            $labels["com.docker.compose.oneoff"] == "False" and
+            $labels["io.padm.mode"] == "docker" and $labels["io.padm.project"] == "padm-docker" and
+            $labels["io.padm.component"] == "sing-box" and
+            $labels["io.padm.release"] == $spec[0].release.version and
+            $c.Config.Image == $image and $c.Config.User == "10001:10001" and
+            $c.Config.Entrypoint == ["/usr/local/bin/sing-box"] and
+            $c.Config.Cmd == ["run","-D","/var/lib/padm/sing-box","-c","/etc/padm/sing-box/config.json"] and
+            $c.Config.Healthcheck.Test == $service.healthcheck.test and
+            $imageInfo[0].Config.User == $c.Config.User and
+            $imageInfo[0].Config.Entrypoint == $c.Config.Entrypoint and
+            $imageInfo[0].Config.Cmd == $c.Config.Cmd and
+            $c.HostConfig.NetworkMode == $compose.networks.default.name and
+            $c.HostConfig.ReadonlyRootfs == true and $c.HostConfig.Privileged == false and
+            ($c.HostConfig.CapAdd // []) == [] and ($c.HostConfig.CapDrop | sort) == ["ALL"] and
+            ($c.HostConfig.SecurityOpt | sort) == ($service.security_opt | sort) and
+            $c.HostConfig.Init == $service.init and $c.HostConfig.PidsLimit == $service.pids_limit and
+            $c.HostConfig.PublishAllPorts == false and
+            $c.HostConfig.RestartPolicy == {Name:$service.restart,MaximumRetryCount:0} and
+            ($c.HostConfig.Devices // []) == [] and ($c.HostConfig.DeviceRequests // []) == [] and
+            $c.HostConfig.LogConfig.Type == $service.logging.driver and
+            $c.HostConfig.LogConfig.Config == $service.logging.options and
+            $c.HostConfig.Tmpfs ==
+              ($service.tmpfs | map(split(":") | {key:.[0],value:.[1]}) | from_entries) and
+            all($c.Mounts[]; .Type == "bind") and
+            ($c.Mounts | map({source:.Source,target:.Destination,read_only:(.RW | not)}) | sort_by(.target)) ==
+              ($service.volumes | map({source:(.source | sub("^\\$\\{PADM_DOCKER_ROOT\\}"; $root)),
+                target,read_only}) | sort_by(.target)) and
+            ($c.HostConfig.PortBindings | sorted_bindings) == ($service.ports | bindings) and
+            ($c.NetworkSettings.Ports | sorted_bindings) == ($service.ports | bindings) and
+            ($c.NetworkSettings.Networks | keys | sort) ==
+              ([($service.networks // ["default"])[] | $compose.networks[.].name] | sort) and
+            all($c.NetworkSettings.Networks[];
+              (.NetworkID | type == "string" and test("^[a-f0-9]{64}$")) and
+              (.IPAddress | type == "string") and (.Gateway | type == "string") and
+              (.GlobalIPv6Address | type == "string") and (.IPv6Gateway | type == "string")))
+        ' <<<"${container}" >/dev/null || return 1
+        networks=$(jq -r '.[0].NetworkSettings.Networks | [.[] | .NetworkID] | unique | join(" ")' \
+            <<<"${container}") || return 1
+        read -r -a networkIds <<<"${networks}"
+        [[ "${#networkIds[@]}" -ge 1 ]] || return 1
+        networkInfo=$(docker network inspect "${networkIds[@]}") || return 1
+        jq -e --slurpfile compose "${root}/compose.json" --argjson container "${container}" '
+          length == ($container[0].NetworkSettings.Networks | length) and
+          all(.[]; . as $n |
+            ([($compose[0].services["sing-box"].networks // ["default"])[] as $key |
+              $compose[0].networks[$key] | select(.name == $n.Name)] | length) == 1 and
+            $n.Id == $container[0].NetworkSettings.Networks[$n.Name].NetworkID and
+            $n.Driver == "bridge" and $n.Scope == "local" and
+            $n.Internal == false and $n.Ingress == false and $n.Attachable == false and
+            ([($compose[0].services["sing-box"].networks // ["default"])[] as $key |
+              $compose[0].networks[$key] | select(.name == $n.Name)][0] as $expected |
+              $n.EnableIPv6 == ($expected.enable_ipv6 // false) and
+              all($expected.labels | to_entries[]; $n.Labels[.key] == .value)))
+        ' <<<"${networkInfo}" >/dev/null || return 1
+        fixed=$(jq -Scn --argjson c "${container}" --argjson i "${imageInfo}" \
+            --argjson n "${networkInfo}" '
+          $c[0] | {Id,Image,RestartCount,started_at:.State.StartedAt,pid:.State.Pid,
+            Config,HostConfig:(.HostConfig |
+              .CapDrop |= sort | .SecurityOpt |= sort |
+              .PortBindings |= with_entries(.value |= sort_by(.HostIp,.HostPort)) |
+              if .Binds != null then .Binds |= sort else . end),
+            Mounts:(.Mounts | sort_by(.Destination)),
+            Networks:.NetworkSettings.Networks,
+            Ports:(.NetworkSettings.Ports | with_entries(.value |= sort_by(.HostIp,.HostPort))),
+            image:$i[0],networks:($n | map({Id,Name,Driver,Scope,Labels,EnableIPv6,Internal,Ingress,Attachable}) |
+              sort_by(.Id))}
+        ') || return 1
+        if [[ "${round}" == 1 ]]; then previous=${fixed}
+        else [[ "${fixed}" == "${previous}" ]] || return 1
+        fi
+    done
+    after=$(python3 -c "${fileProbe}" "${root}" "${domain}") || return 1
+    [[ "${after}" == "${before}" ]] || return 1
+    jq -cn --arg listener "${listener}" --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" \
+        --argjson c "${container}" --argjson entry "${entry}" --argjson count "${count}" '
+      {schema_version:1,listener_id:$listener,protocol_id:3,core:"sing-box",
+       container_id:$c[0].Id,image_id:$c[0].Image,started_at:$c[0].State.StartedAt,
+       restart_count:$c[0].RestartCount,target_port:$entry.port,
+       ipv4:$ipv4,ipv6:$ipv6,enabled_accounts:$count}
+    '
+)
+
 dockerFail2banSourceContainer() (
     local listener=$1 family=$2 root spec ids container image entry sourcePath hostAddresses networks networkInfo
     local addresses address

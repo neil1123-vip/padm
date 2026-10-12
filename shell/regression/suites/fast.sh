@@ -533,7 +533,16 @@ runDockerTProxyOwnershipRegression() {
 
 runDockerPortHoppingPreflightRegression() {
     python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
-        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-ownership.py"
+        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-ownership.py" &&
+        runDockerPortHoppingTargetRegression
+}
+
+runDockerPortHoppingTargetRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/port-hopping-target.sh"
+}
+
+runDockerPortHoppingTargetRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh"
 }
 
 runDockerTProxyRealRegression() {
@@ -657,6 +666,8 @@ registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogC
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-port-hopping-preflight runDockerPortHoppingPreflightRegression
+registerRegressionFunctionLeaf docker-port-hopping-target runDockerPortHoppingTargetRegression
+registerRegressionFunctionLeaf docker-port-hopping-target-real runDockerPortHoppingTargetRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
 
 listRegressionDockerTProxyChildSelectors() {

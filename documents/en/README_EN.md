@@ -376,6 +376,14 @@ verified remnants with the same parameters can be reconstructed. Replaced state/
 files and unmarked chains from another process are rejected and retained for inspection.
 Menus and Compose integration remain deferred, along with target-publication ownership,
 existing-session drainage, whole-machine restart and uninstall acceptance.
+The internal read-only 5C.9c.3a snapshot checks an existing dual-stack Hy2 listener's
+complete specification, account/quota-rendered configuration, Compose, image and UDP
+publication by a healthy managed container. It returns identity and an enabled-account
+count without account identifiers or passwords. Matching disk files and publication do
+not prove the process loaded that configuration version. A real standard deployment
+verifies healthy snapshots, changed startup generations and disk-drift refusal.
+Startup version binding remains pending; this snapshot is not an activation gate
+and does not expand complete hopping or protocol-management support.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
