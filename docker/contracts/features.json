@@ -27,7 +27,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理和有限 443 共存。3D.4 支持已有单入口的日常/兼容/流式/单并发预设、客户端 XMUX 三键自定义及清除，菜单/CLI 状态、事务与统一链接发布保持其它入口、认证和额度；显式 XMUX 要求 x-padm-xhttp-xmux 能力。Padding、headers/sc*、downloadSettings、H3/CDN、上下行分离及完整管理尚未开放，性能收益未证明。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理和有限 443 共存。3D.4 支持已有单入口的日常/兼容/流式/单并发预设、客户端 XMUX 三键自定义及清除，菜单/CLI 状态、事务与统一链接发布保持其它入口、认证和额度；显式 XMUX 要求 x-padm-xhttp-xmux 能力。Padding 支持已有 v3 Xray 单入口的 xPaddingBytes 设置与恢复缺省，本阶段范围 1-4096，客户端与服务端一致，显式字段要求 x-padm-xhttp-padding 能力；0/0-0 拒绝，删除恢复缺省 100-1000，不能关闭。headers/sc*、downloadSettings、H3/CDN、上下行分离及完整管理尚未开放，性能和抗识别收益未证明。"
     },
     {
       "id": 3,

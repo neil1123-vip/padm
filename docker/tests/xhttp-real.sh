@@ -142,12 +142,14 @@ dockerConfigureSpecValidate "${SPEC}"
 jq '
   .core.protocols |= map(
     .xhttp.xmux = {maxConcurrency:"16-32",hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"} |
-    if .listener_id == "entry-compatible" then .xhttp.mode = "packet-up"
-    elif .listener_id == "entry-stream" then .xhttp.mode = "stream-up"
+    if .listener_id == "entry-compatible" then
+      .xhttp.mode = "packet-up" | .xhttp.xPaddingBytes = "100-1000"
+    elif .listener_id == "entry-stream" then
+      .xhttp.mode = "stream-up" | .xhttp.xPaddingBytes = 4096
     elif .listener_id == "entry-single" then .xhttp.xmux.maxConcurrency = 1
     elif .listener_id == "entry-custom" then
       .xhttp.xmux = {maxConcurrency:2,hMaxRequestTimes:"7-9",hMaxReusableSecs:"30-40"}
-    else . end)
+    else .xhttp.xPaddingBytes = 1 end)
 ' "${SPEC}" >"${TEST_ROOT}/configured.json"
 mv "${TEST_ROOT}/configured.json" "${SPEC}"
 chmod 0600 "${SPEC}"
@@ -159,6 +161,13 @@ jq -e '
   [.inbounds[] | select(.streamSettings.network == "xhttp") | .streamSettings.xhttpSettings.xmux] |
   length == 5 and all(. == {maxConcurrency:"16-32",hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"})
 ' "${candidate}/config/xray/users.base" >/dev/null
+jq -e --slurpfile spec "${SPEC}" '
+  def padding: if has("xPaddingBytes") then {xPaddingBytes} else {} end;
+  ([.inbounds[] | select(.streamSettings.network == "xhttp") |
+    {id:.tag,padding:(.streamSettings.xhttpSettings | padding)}] | sort_by(.id)) ==
+  ([$spec[0].core.protocols[] | {id:.listener_id,padding:(.xhttp | padding)}] | sort_by(.id))
+' "${candidate}/config/xray/users.base" >/dev/null
+printf 'docker-xhttp-real-padding-config-ok: explicit=1/100-1000/4096 default=2 server=spec\n'
 cp -a "${candidate}/config/." "${PADM_DOCKER_INSTALL_DIR}/config/"
 cp -a "${candidate}/data/." "${PADM_DOCKER_INSTALL_DIR}/data/"
 cp -a "${candidate}/logs/." "${PADM_DOCKER_INSTALL_DIR}/logs/"
@@ -173,15 +182,16 @@ cp -a "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" "${T
 python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" <<'PY'
 import json
 from pathlib import Path
+import re
 import sys
 import urllib.parse
 
 expected = {
-    35501: ("daily", "auto", "16-32", "600-900", "1800-3000"),
-    35502: ("compatible", "packet-up", "16-32", "600-900", "1800-3000"),
-    35503: ("stream", "stream-up", "16-32", "600-900", "1800-3000"),
-    35504: ("single", "auto", 1, "600-900", "1800-3000"),
-    35505: ("custom", "auto", 2, "7-9", "30-40"),
+    35501: ("daily", "auto", "16-32", "600-900", "1800-3000", 1),
+    35502: ("compatible", "packet-up", "16-32", "600-900", "1800-3000", "100-1000"),
+    35503: ("stream", "stream-up", "16-32", "600-900", "1800-3000", 4096),
+    35504: ("single", "auto", 1, "600-900", "1800-3000", None),
+    35505: ("custom", "auto", 2, "7-9", "30-40", None),
 }
 required = {"encryption", "security", "sni", "fp", "pbk", "sid", "type", "path", "host", "mode", "extra"}
 def parse(line):
@@ -193,9 +203,17 @@ def parse(line):
     q = {key: values[0] for key, values in q.items()}
     assert q["encryption"] == "none" and q["security"] == "reality" and q["type"] == "xhttp"
     extra = json.loads(q["extra"])
-    assert isinstance(extra, dict) and set(extra) == {"xmux"}
+    assert isinstance(extra, dict) and {"xmux"} <= set(extra) <= {"xmux", "xPaddingBytes"}
     assert isinstance(extra["xmux"], dict) and set(extra["xmux"]) == {
         "maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"}
+    if "xPaddingBytes" in extra:
+        value = extra["xPaddingBytes"]
+        if isinstance(value, str):
+            assert re.fullmatch(r"[1-9][0-9]{0,3}-[1-9][0-9]{0,3}", value), value
+            lower, upper = map(int, value.split("-"))
+            assert 1 <= lower <= upper <= 4096, value
+        else:
+            assert type(value) is int and 1 <= value <= 4096, value
     return uri, q, extra
 lines = Path(sys.argv[1]).read_text().splitlines()
 assert len(lines) == 5
@@ -206,10 +224,13 @@ for line in lines:
     uri, q, extra = parse(line)
     assert uri.port not in seen
     seen.add(uri.port)
-    name, mode, maximum, requests, seconds = expected[uri.port]
+    name, mode, maximum, requests, seconds, padding = expected[uri.port]
     assert q["path"] == "/padm-"+name and q["host"] == q["sni"] == "reality.target.test"
-    assert q["mode"] == mode and extra == {"xmux":{
+    expected_extra = {"xmux":{
         "maxConcurrency":maximum, "hMaxRequestTimes":requests, "hMaxReusableSecs":seconds}}
+    if padding is not None:
+        expected_extra["xPaddingBytes"] = padding
+    assert q["mode"] == mode and extra == expected_extra
     inbound = "socks-"+name
     outbound = "xhttp-"+name
     config["inbounds"].append({"tag":inbound, "listen":"0.0.0.0",
@@ -222,9 +243,15 @@ for line in lines:
             "xhttpSettings":{"path":q["path"],"host":q["host"],"mode":q["mode"],"extra":extra}}})
     config["routing"]["rules"].append({"type":"field","inboundTag":[inbound],"outboundTag":outbound})
 sample = urllib.parse.urlsplit(lines[0])
-for extra in ("[]", '{"xmux":null}', '{"xmux":{"maxConcurrency":1}}'):
+sample_extra = json.loads(urllib.parse.parse_qs(sample.query)["extra"][0])
+invalid = [[], {"xmux":None}, {"xmux":{"maxConcurrency":1}}, {"xPaddingBytes":1},
+           dict(sample_extra, unknown=True)]
+invalid += [dict(sample_extra, xPaddingBytes=value) for value in
+            (None, 0, -1, True, 1.0, 4097, "1", "0-1", "1-0", "1000-100",
+             "01-2", "1-4097", "1-2\n")]
+for extra in invalid:
     query = urllib.parse.parse_qs(sample.query)
-    query["extra"] = [extra]
+    query["extra"] = [json.dumps(extra)]
     try:
         parse(sample._replace(query=urllib.parse.urlencode(query, doseq=True)).geturl())
     except (AssertionError, ValueError):
@@ -232,7 +259,8 @@ for extra in ("[]", '{"xmux":null}', '{"xmux":{"maxConcurrency":1}}'):
     else:
         raise AssertionError("invalid extra accepted")
 Path(sys.argv[2]).write_text(json.dumps(config))
-print("docker-xhttp-real-links-ok: presets=daily,compatible,stream,single custom=2/7-9/30-40 source=protocol-links")
+print("docker-xhttp-real-links-ok: presets=daily,compatible,stream,single custom=2/7-9/30-40 "
+      "padding=1/100-1000/4096 default=2 source=protocol-links")
 PY
 # 本地 TLS 目标提供 Reality 需要的 TLS 1.3/h2 握手，测试不依赖公网。
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=reality.target.test \
@@ -461,5 +489,5 @@ for port in (35504,35505):
 print("docker-xhttp-real-runtime-ok: h2=5 modes=stream-one/packet-up/stream-up xmux=5 single/custom=maxConcurrency-hit")
 PY
 [[ "$(docker inspect --format '{{.State.Health.Status}}' "$(compose ps -q xray)")" == healthy ]]
-printf 'docker-xhttp-real-ok: target=local-tls13-h2 source=protocol-links server-xmux=unchanged xray=%s ops=%s\n' \
+printf 'docker-xhttp-real-ok: target=local-tls13-h2 source=protocol-links padding=dual-ended/default-compatible server-xmux=unchanged xray=%s ops=%s\n' \
     "${XRAY_ID}" "${OPS_ID}"

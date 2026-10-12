@@ -42,6 +42,8 @@ dockerUsage() {
   padm-docker edit --xhttp-preset <入口 ID> <daily|compatible|stream|single> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-xmux <入口 ID> <并发数或范围> <请求数或范围> <复用秒数或范围> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-xmux-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --xhttp-padding <入口 ID> <1-4096 的整数或正序范围> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --xhttp-padding-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-rules <IPv4/IPv6> <DNS 端口> <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-domains-add <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

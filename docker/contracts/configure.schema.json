@@ -32,6 +32,7 @@
   "x-padm-cdn-entry-addresses": true,
   "x-padm-cdn-grpc-tls": true,
   "x-padm-xhttp-xmux": true,
+  "x-padm-xhttp-padding": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -1472,6 +1473,13 @@
                 },
                 "mode": {
                   "enum": ["auto", "packet-up", "stream-up"]
+                },
+                "xPaddingBytes": {
+                  "description": "本阶段仅支持 1 至 4096 的整数或正序范围；删除字段恢复 Xray 缺省 100-1000，不能关闭 Padding。",
+                  "oneOf": [
+                    {"type": "integer", "minimum": 1, "maximum": 4096},
+                    {"type": "string", "maxLength": 9, "pattern": "^([1-9][0-9]{0,2}|[1-3][0-9]{3}|40[0-8][0-9]|409[0-6])-([1-9][0-9]{0,2}|[1-3][0-9]{3}|40[0-8][0-9]|409[0-6])(?![\\s\\S])"}
+                  ]
                 },
                 "xmux": {
                   "type": "object",

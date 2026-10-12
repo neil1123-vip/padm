@@ -71,13 +71,33 @@ for key in defaults:
     case(f"{key}-overflow", dict(defaults, **{key: "1-2147483648"}), False, True)
 case("zero-concurrency", dict(defaults, maxConcurrency=0), False)
 case("zero-concurrency-range", dict(defaults, maxConcurrency="0-1"), False)
+for index, padding in enumerate((1, 4096, "1-4096", "100-1000")):
+    value = copy.deepcopy(base)
+    next(p for p in value["core"]["protocols"] if p["id"] == 2)["xhttp"]["xPaddingBytes"] = padding
+    assert validator.is_valid(value), padding
+    name = f"padding-valid-{index}"
+    (root / f"case-{name}.json").write_text(json.dumps(value), encoding="utf-8")
+    cases.append((name, 1))
+for index, padding in enumerate((None, True, [], {}, 0, -1, 1.5, 4097, "0-0", "0-1",
+                                 "01-2", "1-02", "1", "", "1-4097", "1-2\n", "2-1")):
+    value = copy.deepcopy(base)
+    next(p for p in value["core"]["protocols"] if p["id"] == 2)["xhttp"]["xPaddingBytes"] = padding
+    assert validator.is_valid(value) == (padding == "2-1"), padding
+    name = f"padding-invalid-{index}"
+    (root / f"case-{name}.json").write_text(json.dumps(value), encoding="utf-8")
+    cases.append((name, 0))
+value = copy.deepcopy(base)
+next(p for p in value["core"]["protocols"] if p["id"] == 2)["xhttp"]["headers"] = {}
+assert not validator.is_valid(value), "未支持的高级字段不能进入规格"
+(root / "case-advanced-unknown.json").write_text(json.dumps(value), encoding="utf-8")
+cases.append(("advanced-unknown", 0))
 (root / "cases.tsv").write_text("".join(f"{name}\t{valid}\n" for name, valid in cases))
 PY
 while IFS=$'\t' read -r name valid; do
     actual=0
     dockerConfigureSpecValidate "${TEST_ROOT}/case-${name}.json" >"${STDOUT}" 2>"${STDERR}" || actual=$?
     [[ ( "${valid}" == 1 && "${actual}" == 0 ) || ( "${valid}" == 0 && "${actual}" != 0 ) ]] ||
-        fail "生产 XMUX 校验不匹配: ${name}"
+        fail "生产 XHTTP 校验不匹配: ${name}"
 done <"${TEST_ROOT}/cases.tsv"
 dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-defaults.json" || fail '当前包拒绝 XMUX'
 jq 'del(."x-padm-xhttp-xmux")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
@@ -86,6 +106,17 @@ if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-defaults.json"
     fail '旧包接受不支持的显式 XMUX'
 fi
 dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${XHTTP_SPEC}" || fail '旧包误拒无显式 XMUX'
+cp "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-padding-valid-0.json" ||
+    fail '当前包拒绝显式 Padding'
+jq 'del(."x-padm-xhttp-padding")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-padding-valid-0.json" 2>/dev/null; then
+    fail '旧包接受不支持的显式 Padding'
+fi
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-defaults.json" ||
+    fail '缺 Padding 能力的旧包误拒只有 XMUX 的规格'
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${XHTTP_SPEC}" || fail '旧包误拒缺省 Padding'
 
 newState xhttp "${XHTTP_SPEC}"
 root=${PADM_DOCKER_INSTALL_DIR}
@@ -124,37 +155,43 @@ xhttpEdit() {
 }
 
 xhttpAssert() {
-    local mode=$1 xmux=$2
-    jq -en --arg mode "${mode}" --argjson xmux "${xmux}" \
+    local mode=$1 xmux=$2 padding=${3:-null}
+    jq -en --arg mode "${mode}" --argjson xmux "${xmux}" --argjson padding "${padding}" \
         --slurpfile before "${TEST_ROOT}/installed-before.json" \
         --slurpfile after "${root}/config/spec.json" '
       def stable: .core.protocols |= map(if .listener_id == "entry-xhttp"
-        then del(.xhttp.mode,.xhttp.xmux) else . end);
+        then del(.xhttp.mode,.xhttp.xmux,.xhttp.xPaddingBytes) else . end);
       ($before[0] | stable) == ($after[0] | stable) and
       any($after[0].core.protocols[]; .listener_id == "entry-xhttp" and
-        .xhttp.mode == $mode and .xhttp.xmux == $xmux and
-        (if $xmux == null then (.xhttp | has("xmux") | not) else true end))
+        .xhttp.mode == $mode and .xhttp.xmux == $xmux and .xhttp.xPaddingBytes == $padding and
+        (if $xmux == null then (.xhttp | has("xmux") | not) else true end) and
+        (if $padding == null then (.xhttp | has("xPaddingBytes") | not) else true end))
     ' >/dev/null || fail 'XHTTP 改写其它规格、账户或端口'
-    jq -en --arg mode "${mode}" --slurpfile before "${TEST_ROOT}/xray-before.json" \
+    jq -en --arg mode "${mode}" --argjson padding "${padding}" \
+        --slurpfile before "${TEST_ROOT}/xray-before.json" \
         --slurpfile after "${root}/config/xray/users.base" '
       def stable: .inbounds |= map(if .tag == "entry-xhttp"
-        then del(.streamSettings.xhttpSettings.mode) else . end);
+        then del(.streamSettings.xhttpSettings.mode,.streamSettings.xhttpSettings.xPaddingBytes) else . end);
       ($before[0] | stable) == ($after[0] | stable) and
-      any($after[0].inbounds[]; .tag == "entry-xhttp" and .streamSettings.xhttpSettings.mode == $mode)
-    ' >/dev/null || fail '客户端 XMUX 改写服务端固定参数或其它核心入口'
+      any($after[0].inbounds[]; .tag == "entry-xhttp" and
+        .streamSettings.xhttpSettings.mode == $mode and
+        .streamSettings.xhttpSettings.xPaddingBytes == $padding and
+        (if $padding == null then (.streamSettings.xhttpSettings | has("xPaddingBytes") | not) else true end))
+    ' >/dev/null || fail 'XHTTP 改写服务端固定 XMUX、其它核心入口或未同步 Padding'
     for pair in 'sing-before.json config/sing-box/users.base' 'traffic-before.json data/traffic/state.json' \
         'compose-before.json compose.json'; do
         read -r original installed <<<"${pair}"
         cmp -s "${TEST_ROOT}/${original}" "${root}/${installed}" || fail "XHTTP 改变 ${installed}"
     done
-    python3 - "${mode}" "${xmux}" "${TEST_ROOT}" "${root}" "${TOKEN}" <<'PY'
+    python3 - "${mode}" "${xmux}" "${padding}" "${TEST_ROOT}" "${root}" "${TOKEN}" <<'PY'
 import json
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-mode, encoded, temp, installed, token = sys.argv[1:]
+mode, encoded, encoded_padding, temp, installed, token = sys.argv[1:]
 xmux = json.loads(encoded)
+padding = json.loads(encoded_padding)
 root, temp = Path(installed), Path(temp)
 for before, after in ((temp / "links-before.txt", root / "data/subscription" / token),
                       (temp / "group-before.txt", root / "data/subscription/xhttp-group-token")):
@@ -168,17 +205,23 @@ for before, after in ((temp / "links-before.txt", root / "data/subscription" / t
         assert a._replace(query="") == b._replace(query="")
         query, actual = parse_qs(a.query), parse_qs(b.query)
         query["mode"] = [mode]
+        extra = {}
         if xmux is not None:
-            query["extra"] = [json.dumps(dict(xmux=xmux), separators=(",", ":"))]
-            assert "extra=%7B" in second and json.loads(actual["extra"][0]) == dict(xmux=xmux)
+            extra["xmux"] = xmux
+        if padding is not None:
+            extra["xPaddingBytes"] = padding
+        if extra:
+            query["extra"] = [json.dumps(extra, separators=(",", ":"))]
+            assert "extra=%7B" in second and json.loads(actual["extra"][0]) == extra
         assert actual == query, (actual, query)
 PY
     dockerProtocolCommand links >"${STDOUT}"
     cmp -s "${STDOUT}" "${root}/data/subscription/${TOKEN}" || fail 'CLI 链接与主订阅不一致'
     runRead 0 xhttp-status dockerProtocolCommand xhttp-status entry-xhttp
-    jq -e --arg mode "${mode}" --argjson xmux "${xmux}" '
+    jq -e --arg mode "${mode}" --argjson xmux "${xmux}" --argjson padding "${padding}" '
       .entries == [{listener_id:"entry-xhttp",protocol:2,mode:$mode,explicit:($xmux != null),
-        xmux:($xmux // {maxConcurrency:"16-32",hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"})}]
+        xmux:($xmux // {maxConcurrency:"16-32",hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"}),
+        xPaddingBytes:($padding // "100-1000"),padding_explicit:($padding != null)}]
     ' "${STDOUT}" >/dev/null || fail 'XHTTP 状态没有区分缺省与显式参数'
     [[ "$(stat -c %a "${root}/config/spec.json")" == 600 &&
         "$(stat -c %a "${root}/data/subscription/${TOKEN}")" == 640 ]] || fail 'XHTTP 更新改变私有权限'
@@ -202,12 +245,50 @@ xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpAssert auto null
 cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" || fail '清除 XMUX 没有恢复旧 URI'
 cmp -s "${TEST_ROOT}/group-before.txt" "${root}/data/subscription/xhttp-group-token" || fail '清除 XMUX 没有恢复分享组'
+# 双端 Padding 可以独立发布；预设与 XMUX 清除不能顺手丢弃它。
+xhttpEdit 0 unchanged --xhttp-padding entry-xhttp 1 --preview
+! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail 'Padding 预览启动候选'
+for padding in 1 4096 100-1000; do
+    xhttpEdit 0 changed --xhttp-padding entry-xhttp "${padding}" --confirm PADM-DOCKER-EDIT
+    expectedPadding=${padding}
+    [[ "${padding}" != *-* ]] || expectedPadding="\"${padding}\""
+    xhttpAssert auto null "${expectedPadding}"
+done
+xhttpEdit 0 changed --xhttp-xmux entry-xhttp 2 7-9 30-40 --confirm PADM-DOCKER-EDIT
+xhttpAssert auto '{"maxConcurrency":2,"hMaxRequestTimes":"7-9","hMaxReusableSecs":"30-40"}' '"100-1000"'
+xhttpEdit 0 changed --xhttp-preset entry-xhttp stream --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up "${defaults}" '"100-1000"'
+xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up null '"100-1000"'
+xhttpEdit 0 changed --xhttp-padding-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up null
+xhttpEdit 0 changed --xhttp-preset entry-xhttp daily --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpAssert auto null
+cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" ||
+    fail '清除 Padding 没有恢复旧 URI'
 for listener in entry-missing vless-reality entry-grpc-sing; do
     runRead 15 "unsupported-${listener}" dockerProtocolCommand xhttp-status "${listener}"
     xhttpEdit 15 unchanged --xhttp-preset "${listener}" daily --preview
+    xhttpEdit 15 unchanged --xhttp-padding "${listener}" 100-1000 --preview
 done
+for bad in 0 0-0 -1 1.5 01 1e2 2-1 0-1 1-02 4097 1-4097 $'1\n' $'1-2\n'; do
+    xhttpEdit 2 unchanged --xhttp-padding entry-xhttp "${bad}" --preview
+done
+xhttpEdit 2 unchanged --xhttp-padding entry-xhttp 100-1000 --xhttp-padding-clear entry-xhttp --preview
+xhttpEdit 2 unchanged --xhttp-padding entry-xhttp 100-1000 --xhttp-preset entry-xhttp daily --preview
+xhttpEdit 2 unchanged --xhttp-padding entry-xhttp 100-1000 --spec "${XHTTP_SPEC}" --preview
+xhttpEdit 2 unchanged --xhttp-padding entry-xhttp 100-1000
 for bad in 0 -1 1.5 01 1e2 2-1 0-1 1-02 2147483648 1-2147483648 $'1\n'; do
     xhttpEdit 2 unchanged --xhttp-xmux entry-xhttp "${bad}" 0 0 --preview
+done
+for mutation in \
+    '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.xPaddingBytes) = 128' \
+    '.core.protocols += [(.core.protocols[] | select(.id == 2) |
+      .listener_id = "entry-new" | .public_port = 45443 | .xhttp.xPaddingBytes = 128)]'; do
+    jq "${mutation}" "${root}/config/spec.json" >"${TEST_ROOT}/manual.json"
+    chmod 0600 "${TEST_ROOT}/manual.json"
+    xhttpEdit 15 unchanged --spec "${TEST_ROOT}/manual.json" --preview
 done
 for bad in -1 1.5 01 2-1 2147483648 $'0-1\n'; do
     xhttpEdit 2 unchanged --xhttp-xmux entry-xhttp 1 "${bad}" 0 --preview
@@ -228,22 +309,23 @@ done
 # 健康失败必须恢复完整旧部署，包括分享组、账号、累计流量和 TLS。
 before=$(liveSnapshot)
 rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
-xhttpEdit 14 changed --xhttp-preset entry-xhttp stream --confirm PADM-DOCKER-EDIT
+xhttpEdit 14 changed --xhttp-padding entry-xhttp 64 --confirm PADM-DOCKER-EDIT
 [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] || fail 'XHTTP 健康失败未完整恢复'
 
-for answer in n eof int term derive; do
-    if [[ "${answer}" == derive ]]; then
+for answer in n eof int term derive copy; do
+    if [[ "${answer}" == derive || "${answer}" == copy ]]; then
         # 仅一个 Reality 来源才能证明派生不会借其它缺省入口绕过 XMUX 冻结。
         jq --argjson xmux "${defaults}" '
-          .core.protocols |= map(select(.listener_id == "entry-xhttp") | .xhttp.xmux = $xmux) |
+          .core.protocols |= map(select(.listener_id == "entry-xhttp") |
+            .xhttp.xmux = $xmux | .xhttp.xPaddingBytes = "100-1000") |
           .core.secondary_type = null | .tls = null | .subscription.enabled = false |
           del(.accounts,.port_aliases)
         ' "${XHTTP_SPEC}" >"${TEST_ROOT}/single-xhttp.json"
-        newState xhttp-derived "${TEST_ROOT}/single-xhttp.json"
+        newState "xhttp-${answer}" "${TEST_ROOT}/single-xhttp.json"
         root=${PADM_DOCKER_INSTALL_DIR}
         commandArgs=(edit)
     else
-        commandArgs=(edit --xhttp-preset entry-xhttp daily)
+        commandArgs=(edit --xhttp-padding entry-xhttp 128-256)
     fi
     before=$(snapshot)
     python3 - "${STDOUT}" "${answer}" bash -u "${CLI}" "${commandArgs[@]}" \
@@ -277,15 +359,17 @@ try:
             if not part:
                 break
             output.extend(part)
-            if sys.argv[2] == "derive" and not editing and "编辑项目: ".encode() in output:
-                os.write(master, b"11\nentry-xhttp\n\n\n45443\n8\n")
+            if sys.argv[2] in ("derive", "copy") and not editing and "编辑项目: ".encode() in output:
+                payload = b"11\nentry-xhttp\n\n\n45443\n8\n" if sys.argv[2] == "derive" \
+                    else b"9\nentry-xhttp\n\n45443\n8\n"
+                os.write(master, payload)
                 editing = True
             if not sent and b"[y/N]: " in output:
                 if sys.argv[2] in ("int", "term"):
                     os.kill(process.pid, signal.SIGINT if sys.argv[2] == "int" else signal.SIGTERM)
                 else:
                     os.write(master, b"\x04" if sys.argv[2] == "eof" else
-                             (b"y\n" if sys.argv[2] == "derive" else b"n\n"))
+                             (b"y\n" if sys.argv[2] in ("derive", "copy") else b"n\n"))
                 sent = True
         elif process.poll() is not None:
             break
@@ -299,12 +383,15 @@ finally:
     Path(sys.argv[1]).write_bytes(output)
 PY
     xhttpClean
-    if [[ "${answer}" == derive ]]; then
-        jq -e --argjson xmux "${defaults}" '
-          .core.protocols | length == 2 and all(.[]; .id == 2 and .xhttp.xmux == $xmux) and
+    if [[ "${answer}" == derive || "${answer}" == copy ]]; then
+        expected_path=/padm/path-1
+        [[ "${answer}" != derive ]] || expected_path=/entry-1xhttp
+        jq -e --argjson xmux "${defaults}" --arg path "${expected_path}" '
+          .core.protocols | length == 2 and all(.[]; .id == 2 and .xhttp.xmux == $xmux and
+            .xhttp.xPaddingBytes == "100-1000") and
           any(.[]; .listener_id == "entry-1" and .public_port == 45443 and
-            .xhttp.path == "/entry-1xhttp" and .xhttp.mode == "auto")
-        ' "${root}/config/spec.json" >/dev/null || fail '菜单派生 XHTTP 丢失客户端 XMUX'
+            .xhttp.mode == "auto" and .xhttp.path == $path)
+        ' "${root}/config/spec.json" >/dev/null || fail '菜单复制或派生 XHTTP 丢失 XMUX/Padding'
     else
         [[ "$(snapshot)" == "${before}" ]] || fail "XHTTP ${answer} 改变未提交部署"
     fi
@@ -317,4 +404,5 @@ root=${PADM_DOCKER_INSTALL_DIR}
 runRead 0 no-xhttp-status dockerProtocolCommand xhttp-status
 jq -e '.entries == []' "${STDOUT}" >/dev/null || fail '没有 XHTTP 入口时状态未返回空集合'
 xhttpEdit 15 unchanged --xhttp-xmux-clear vless-reality --preview
+xhttpEdit 15 unchanged --xhttp-padding-clear vless-reality --preview
 printf 'docker-xhttp-regression-ok\n'

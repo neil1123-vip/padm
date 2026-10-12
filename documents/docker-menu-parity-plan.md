@@ -1203,8 +1203,39 @@ HTTP/2、五组 XMUX 创建及单并发/自定义的并发上限分支。服务�
 以及认证、其它入口、端口别名、额度、主订阅和分享组保持由生产 CLI 合同验证。
 真实脚本的 jq 作用域/必需字段错误和独审发现的派生丢 XMUX 回归均已修复；
 失败日志保留，重复源码归档在验收后清理，证据 `.tmp-xhttp-close/acceptance.md`。
-不据此宣称长时复用或吞吐收益；Padding、headers/sc*、downloadSettings、H3/CDN、
+不据此宣称长时复用或吞吐收益；有限 Padding 见 3D.5，headers/sc*、downloadSettings、H3/CDN、
 上下行分离和完整协议管理仍 `deferred`，公网、原生宿主、arm64 和可信发布仍待验。
+
+#### 3D.5 有限 XHTTP Padding
+
+沿用已有 v3、Xray、协议 `2`、显式选中单入口的事务。
+`edit --xhttp-padding <入口 ID> <值>` 设置可选 `xhttp.xPaddingBytes`，
+`edit --xhttp-padding-clear <入口 ID>` 删除显式值；菜单第 `8` 项设置、第 `9` 项恢复缺省。
+仅接受规范整数或正序范围，端点 `1..4096`，`4096` 是本阶段产品支持边界，
+不宣称为 Xray 官方上限。`0`/`0-0` 在 Xray 会恢复缺省，不能关闭 Padding；
+Docker 明确拒绝零，恢复缺省使用 clear，状态显示缺省 `100-1000`。
+拒绝 null、浮点、负数、倒序、非规范数字、溢出及未知字段。
+
+服务端与客户端 URI `extra` 使用同一个显式值，与现有客户端 XMUX 合并。
+两字段都缺省时保留旧 URI；清除 Padding 保留 XMUX，预设和 XMUX 编辑保留 Padding。
+`protocol xhttp-status` 的 `explicit` 仍表示 XMUX，新增 `xPaddingBytes` 与
+`padding_explicit`；显式 Padding 要求 bundle 能力 `x-padm-xhttp-padding`，
+旧无显式字段的规格不增加门禁。
+专项只豁免选中入口的 Padding，普通导入和新增入口不能绕过冻结；
+同协议复制/派生继承，认证、其它入口、端口别名、额度及累计流量保持。
+主订阅、分享组和本地链接沿原发布事务刷新，预览、确认及失败/信号恢复保持。
+
+Linux amd64 定向合同 `105007 ms`、菜单 PTY `72544 ms`、
+真实客户端/服务端 `24198 ms` 均 exit `0`；集成完整合同 `49/49`、
+Jobs `6`、`416875 ms`、exit `0`，未命中缓存。
+菜单、真实与完整快照各 `10` 个关键生产/测试文件逐项 SHA256 一致。
+独审补回复制/派生的路径断言，由完整合同实际验证；首轮 copy PTY 多余空行已修。
+真实客户端仅从生产 URI 构造，三入口显式 `1`、`100-1000`、`4096`，两入口缺省；
+服务端逐入口等于 spec，原五组 `15` 次初始和 `5` 次恢复请求、精确 `20` 次原点请求，
+TLS 1.3/h2、模式及 XMUX 运行分支断言保持。
+证据 `.tmp-xhttp-padding-close/acceptance.md`，失败日志保留，重复归档清理。
+不证明填充字节分布、抗识别、长时复用或吞吐收益；headers/sc*、downloadSettings、
+H3/CDN、上下行分离和完整管理仍未开放，公网、原生宿主、arm64 与可信发布仍待验。
 
 ## 第四步：用户、订阅与服务维护
 

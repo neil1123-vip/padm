@@ -138,12 +138,12 @@ dockerConfigureSpecValidate() {
       def bandwidth: type == "number" and floor == . and . >= 1 and . <= 1000000;
       def duration: type == "string" and test("^[1-9][0-9]{0,5}(ms|s|m|h)$") and
         (explode | all(. > 32 and . != 127));
-      def xmux_value($min):
-        if type == "number" then floor == . and . >= $min and . <= 2147483647
+      def xhttp_value($min; $max):
+        if type == "number" then floor == . and . >= $min and . <= $max
         elif type == "string" then
           test("^(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})\\z") and
           (split("-") | map(tonumber) |
-            .[0] >= $min and .[0] <= .[1] and .[1] <= 2147483647)
+            .[0] >= $min and .[0] <= .[1] and .[1] <= $max)
         else false end;
       def masquerade: type == "string" and length <= 2048 and
         (. == "" or (test("^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?$") and
@@ -437,17 +437,19 @@ dockerConfigureSpecValidate() {
           (if .id == 2 then
              .core == "xray" and
              (.xhttp | exact(["path", "host", "mode"] +
-                 if has("xmux") then ["xmux"] else [] end) and
+                 (if has("xmux") then ["xmux"] else [] end) +
+                 (if has("xPaddingBytes") then ["xPaddingBytes"] else [] end)) and
                (.path | type == "string" and test("^/[A-Za-z0-9._~/-]{1,128}$") and
                  (explode | all(. > 32 and . != 127))) and
                (.host | hostname and (explode | all(. > 32 and . != 127))) and
                (.mode == "auto" or .mode == "packet-up" or .mode == "stream-up") and
                (if has("xmux") then
                  (.xmux | exact(["maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"]) and
-                   (.maxConcurrency | xmux_value(1)) and
-                   (.hMaxRequestTimes | xmux_value(0)) and
-                   (.hMaxReusableSecs | xmux_value(0)))
-                else true end))
+                   (.maxConcurrency | xhttp_value(1; 2147483647)) and
+                   (.hMaxRequestTimes | xhttp_value(0; 2147483647)) and
+                   (.hMaxReusableSecs | xhttp_value(0; 2147483647)))
+                else true end) and
+               (if has("xPaddingBytes") then (.xPaddingBytes | xhttp_value(1; 4096)) else true end))
            elif .id == 26 then
              (.grpc | exact(["service_name"]) and
                (.service_name | type == "string" and test("^[A-Za-z0-9._-]{1,64}$") and
@@ -1822,7 +1824,8 @@ dockerGenerateXrayConfig() {
               }
             } + (if .id == 2 then {
               xhttpSettings: {path: .xhttp.path, host: .xhttp.host, mode: .xhttp.mode,
-                xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}}
+                xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}} +
+                (if .xhttp | has("xPaddingBytes") then {xPaddingBytes:.xhttp.xPaddingBytes} else {} end)
             } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end)),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
           } elif .id == 27 or .id == 28 or .id == 29 then {
@@ -2730,7 +2733,11 @@ dockerGenerateSubscription() {
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
       elif .id == 2 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
-          (if .xhttp | has("xmux") then "&extra=\({xmux:.xhttp.xmux} | tojson | @uri)" else "" end) +
+          (if .xhttp | has("xmux") or has("xPaddingBytes") then
+            "&extra=\((.xhttp |
+              (if has("xmux") then {xmux} else {} end) +
+              (if has("xPaddingBytes") then {xPaddingBytes} else {} end)) | tojson | @uri)"
+           else "" end) +
           "#\(.name | @uri)"
       elif .id == 26 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"

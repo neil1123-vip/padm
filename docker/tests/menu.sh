@@ -408,11 +408,18 @@ runXhttpDriver() {
         done
         targetReply 'Docker XHTTP 管理' $'7\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        for answer in $'64\n' $'128-256\n' $'\n'; do
+            targetReply 'Docker XHTTP 管理' $'8\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+            targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' "${answer}"
+        done
+        targetReply 'Docker XHTTP 管理' $'9\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         ;;
     cancel)
         targetReply 'Docker XHTTP 管理' $'99\n'
         for answer in $'0\n' $'\n' $'\004' $'--invalid\n'; do
-            for choice in 2 6 7; do
+            for choice in 2 6 7 8 9; do
                 targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
                 targetReply 'XHTTP 入口 ID（0 返回）' "${answer}"
             done
@@ -433,6 +440,9 @@ runXhttpDriver() {
                 targetReply 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]' $'50-100\n'
                 targetReply 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]' "${answer}"
             done
+            targetReply 'Docker XHTTP 管理' $'8\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+            targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' "${answer}"
         done
         ;;
     failed|invalid)
@@ -453,9 +463,20 @@ runXhttpDriver() {
             targetReply 'Docker XHTTP 管理' $'7\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         fi
+        targetReply 'Docker XHTTP 管理' $'8\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        if [[ "${scenario}" == invalid ]]; then
+            targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' $'not-range\n'
+        else
+            targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' $'128-256\n'
+            targetReply 'Docker XHTTP 管理' $'9\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        fi
         ;;
     status-failed)
-        targetReply 'Docker XHTTP 管理' $'2\n'
+        for choice in 2 8 9; do
+            targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
+        done
         ;;
     esac
     targetReply 'Docker XHTTP 管理' $'1\n'
@@ -1906,6 +1927,12 @@ edit)
     elif [[ "${2:-}" == --xhttp-xmux-clear ]]; then
         [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
         exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --xhttp-padding ]]; then
+        [[ "$#" -eq 4 && "$3" == entry-xhttp && -n "$4" ]] || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --xhttp-padding-clear ]]; then
+        [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
         "${2:-}" == --direct-domains-add || "${2:-}" == --block-domains-add ||
         "${2:-}" == --direct-domains-remove || "${2:-}" == --block-domains-remove ||
@@ -2994,9 +3021,13 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp 8-16 0-0 120-180'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp 16-32 600-900 1800-3000'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux-clear entry-xhttp'
+        for xhttpPadding in 64 128-256 100-1000; do
+            expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-padding entry-xhttp '"${xhttpPadding}"
+        done
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-padding-clear entry-xhttp'
         ;;
     cancel)
-        for ((xhttpStatus = 0; xhttpStatus < 18; xhttpStatus++)); do
+        for ((xhttpStatus = 0; xhttpStatus < 28; xhttpStatus++)); do
             expectedXhttp+=$'\nprotocol xhttp-status'
         done
         grep -Fq '无效选项，请重新选择。' "${CONTROL_LOG}" || fail 'XHTTP 无效选项未留在菜单'
@@ -3005,16 +3036,20 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-preset entry-xhttp daily'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp 8-16 50-100 120-180'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux-clear entry-xhttp'
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 3 ]] ||
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-padding entry-xhttp 128-256'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-padding-clear entry-xhttp'
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 5 ]] ||
             fail 'XHTTP 编辑失败未显示错误并继续读取'
         ;;
     invalid)
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp not-range 50-100 120-180'
-        grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail 'XHTTP 非法范围未保留菜单'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-padding entry-xhttp not-range'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'XHTTP 非法范围未保留菜单'
         ;;
     status-failed)
-        expectedXhttp+=$'\nprotocol xhttp-status'
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 3 ]] ||
+        expectedXhttp+=$'\nprotocol xhttp-status\nprotocol xhttp-status\nprotocol xhttp-status'
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 5 ]] ||
             fail 'XHTTP 状态失败仍提示变更或未恢复菜单'
         ! grep -Fq 'XHTTP 入口 ID（0 返回）' "${CONTROL_LOG}" ||
             fail 'XHTTP 状态失败仍读取变更入口'
@@ -3025,6 +3060,8 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         fail "XHTTP ${xhttpCase} 参数分发错误或取消后执行编辑"
     grep -Fq '10. XHTTP 管理' "${CONTROL_LOG}" || fail 'XHTTP 管理未接入协议菜单'
     grep -Fq '已有 Xray Reality 入口' "${CONTROL_LOG}" || fail 'XHTTP 菜单未显示支持范围'
+    grep -Fq '8. 设置 Padding' "${CONTROL_LOG}" &&
+        grep -Fq '9. 恢复缺省 Padding' "${CONTROL_LOG}" || fail 'XHTTP Padding 菜单入口缺失'
 done
 unset XHTTP_EDIT_STATUS XHTTP_STATUS
 
