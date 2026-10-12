@@ -2701,6 +2701,11 @@ runEdit 0 --hosts "${HOSTS_INPUT}" --confirm PADM-DOCKER-EDIT
 runEdit 0 --socks5 "${INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '开启旧子项丢弃 Direct/Block'
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 15 --block-ips-replace 192.0.2.10 203.0.113.20 --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail '未启用手工 IP 阻断时单项替换改变部署或调用 Compose'
 runEdit 0 --block-ips-add "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail 'IP 追加未创建缺失名单或改变已有子项'
@@ -2789,6 +2794,94 @@ runEdit 15 --block-ips-add "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
 runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
 runEdit 0 --region ip --confirm PADM-DOCKER-EDIT
 cp -- "${root}/config/spec.json" "${TEST_ROOT}/ip-region.before"
+# 单项替换只改手工名单；IPv6 写法和 CIDR 宿主位保留原文，不编辑区域合成。
+ipReplaceOld=2001:db8::10 ipReplaceNew=2001:DB8:0:0:0:0:0:10
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 2 --block-ips-replace
+runEdit 2 --block-ips-replace "${ipReplaceOld}" --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}"
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --confirm invalid
+for invalid in '' 'geoip:cn' 'geoip:CN' '192.0.2.256' '192.0.2.01' '2001:db8:::1' \
+    '198.51.100.0/33' '2001:db8::/129' '198.51.100.0/24/1' 'example.com' 'domain:example.com' \
+    ' 2001:db8::10' '2001:db8::10 ' '2001:db8::10,2001:db8::10' \
+    '192.0.2.10,203.0.113.20' ',192.0.2.10' '192.0.2.10,'; do
+    runEdit 2 --block-ips-replace "${invalid}" "${ipReplaceNew}" --preview
+    runEdit 2 --block-ips-replace "${ipReplaceOld}" "${invalid}" --preview
+done
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --block-ips-off --preview
+runEdit 2 --block-ips-off --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --block-ips "${BLOCK_IPS_INPUT}" --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --block-ips-add "${BLOCK_IPS_INPUT}" --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --block-ips-remove "${BLOCK_IPS_INPUT}" --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" \
+    --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --region ip --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --direct-off --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --spec "${TEST_ROOT}/ip-region.before" --preview
+runEdit 2 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --http01 enable --preview
+runEdit 15 --block-ips-replace 203.0.113.250 "${ipReplaceNew}" --confirm PADM-DOCKER-EDIT
+runEdit 15 --block-ips-replace "${ipReplaceNew}" 203.0.113.20 --confirm PADM-DOCKER-EDIT
+runEdit 15 --block-ips-replace 2001:DB8::10 203.0.113.20 --confirm PADM-DOCKER-EDIT
+runEdit 15 --block-ips-replace 2001:db8:0:0:0:0:0:10 203.0.113.20 --confirm PADM-DOCKER-EDIT
+runEdit 15 --block-ips-replace 198.51.100.17/24 203.0.113.0/24 --confirm PADM-DOCKER-EDIT
+runEdit 15 --block-ips-replace "${ipReplaceOld}" 192.0.2.10 --confirm PADM-DOCKER-EDIT
+runEdit 15 --block-ips-replace "${ipReplaceOld}" "${ipReplaceOld}" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'IP 单项替换双侧非法、缺旧、同地址异文、重复新或同值拒绝改变部署或调用 Compose'
+jq --arg ip "${ipReplaceNew}" '.routing.block_ips.ips[1]=$ip' "${TEST_ROOT}/ip-region.before" \
+    >"${TEST_ROOT}/ip-replace-cancel.json"
+runEdit 0 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --preview
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerSetupRead() { printf -v "$1" '%s' n; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/ip-replace-cancel.json" '' '' interactive
+) >"${LOG}" 2>&1 || fail 'IP 单项替换确认取消失败'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail 'IP 单项替换预览或取消改变完整部署'
+MODE=health-fail
+rm -f -- "${TEST_ROOT}/failed-once"
+runEdit 14 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --confirm PADM-DOCKER-EDIT
+MODE=ok
+[[ "$(snapshot)" == "${before}" ]] || fail 'IP 单项替换健康失败未恢复完整配置、区域规则和非空流量'
+for core in xray sing-box; do
+    cp -- "${root}/config/${core}/config.json" "${TEST_ROOT}/ip-replace-${core}.before"
+done
+(dockerMain protocol links) >"${TEST_ROOT}/ip-replace-links.before"
+ipReplaceDataBefore=$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)
+for ipReplaceKind in ipv6 cidr; do
+    ipReplaceIndex=1 ipReplaceOld=2001:db8::10 ipReplaceNew=2001:DB8:0:0:0:0:0:10
+    if [[ "${ipReplaceKind}" == cidr ]]; then
+        ipReplaceIndex=2 ipReplaceOld=198.51.100.0/24 ipReplaceNew=198.51.100.17/24
+    fi
+    runEdit 0 --block-ips-replace "${ipReplaceOld}" "${ipReplaceNew}" --confirm PADM-DOCKER-EDIT
+    jq -en --argjson index "${ipReplaceIndex}" --arg ip "${ipReplaceNew}" \
+        --slurpfile old "${TEST_ROOT}/ip-region.before" --slurpfile actual "${root}/config/spec.json" '
+      $actual[0] == ($old[0] | .routing.block_ips.ips[$index]=$ip)
+    ' >/dev/null || fail "${ipReplaceKind}: 单项替换未保留原文、原位置或改变其它完整规格"
+    runStatus 0
+    jq -e --argjson index "${ipReplaceIndex}" --arg ip "${ipReplaceNew}" \
+        --slurpfile old "${TEST_ROOT}/ip-region.before" '
+      .block_ips.ip_rules == ($old[0].routing.block_ips.ips | .[$index]=$ip) and
+      .region.mode=="ip"
+    ' "${LOG}" >/dev/null || fail "${ipReplaceKind}: 单项替换状态改变原文、顺序或区域策略"
+    for core in xray sing-box; do
+        jq -en --arg core "${core}" --slurpfile old "${TEST_ROOT}/ip-replace-${core}.before" \
+            --slurpfile new "${root}/config/${core}/config.json" '
+          if $core=="xray" then ($old[0]|del(.routing))==($new[0]|del(.routing))
+          else ($old[0]|del(.route))==($new[0]|del(.route)) end
+        ' >/dev/null || fail "${ipReplaceKind}/${core}: 单项替换改变核心认证、监听或其它配置"
+    done
+    (dockerMain protocol links) >"${TEST_ROOT}/ip-replace-links.after"
+    cmp -s "${TEST_ROOT}/ip-replace-links.before" "${TEST_ROOT}/ip-replace-links.after" &&
+        [[ "$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)" == "${ipReplaceDataBefore}" ]] ||
+        fail "${ipReplaceKind}: 单项替换改变分享 URI、订阅或累计流量"
+    runEdit 0 --block-ips-replace "${ipReplaceNew}" "${ipReplaceOld}" --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile old "${TEST_ROOT}/ip-region.before" --slurpfile actual "${root}/config/spec.json" \
+        '$actual==$old' >/dev/null || fail "${ipReplaceKind}: 反向单项替换未还原原组合规格"
+done
+printf 'docker-routing-block-ips-replace-regression-ok\n'
 runEdit 0 --block-ips-remove "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/ip-region.before" --slurpfile actual "${root}/config/spec.json" \
     '$actual[0] == ($old[0] | del(.routing.block_ips))' >/dev/null ||
@@ -2799,6 +2892,7 @@ before=$(snapshot)
 composeBefore=$(cat "${COMPOSE_LOG}")
 printf '%s\n' '{"ips":["geoip:cn"]}' >"${IP_DELTA_INPUT}"
 runEdit 15 --block-ips-remove "${IP_DELTA_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 15 --block-ips-replace 192.0.2.10 203.0.113.20 --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
     fail 'IP 删除把区域合成项当作手工名单或调用 Compose'
 runEdit 0 --block-ips-add "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT

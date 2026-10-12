@@ -397,6 +397,7 @@ padm-docker edit --block-ips /root/padm-block-ips.json --preview
 padm-docker edit --block-ips /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-add /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-remove /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-replace '198.51.100.0/24' '203.0.113.17/24' --preview
 padm-docker edit --block-ips-off --confirm PADM-DOCKER-EDIT
 ```
 
@@ -406,6 +407,12 @@ padm-docker edit --block-ips-off --confirm PADM-DOCKER-EDIT
 不按 CIDR 包含关系匹配，也不合并 IPv6 的大小写、压缩写法或 CIDR 主机位。
 空数组、重复项或非法输入在合并前拒绝。删空只移除手工 IP 子项，
 保留区域预设生成的 `geoip:cn` 和其它路由，预览与取消不切换配置。
+
+菜单 `17` 的 `33` 和 `--block-ips-replace <旧规则> <新规则>` 可单条替换已有手工
+IP/CIDR 名单。先查看当前规则，再输入两个字面地址或 CIDR；原位替换并冻结其它配置。
+两值保持原文，不去空白、不转换 IPv6 写法或 CIDR 宿主位；完整字符串旧项必须
+恰好存在一次，新值不得重复或与旧项相同。不接受 CSV、GeoIP、域名和区域合成项；
+缺失手工名单明确拒绝。两步空输入、`0` 或 EOF 取消，确认及失败恢复沿用原事务。
 
 IP 规则只匹配客户端提供的字面目的 IP，TCP/UDP 拒绝发生在 SOCKS/DNS/hosts 前。
 Direct 域名例外（包括识别出的 HTTP Host/TLS SNI）优先且不改目的地址。

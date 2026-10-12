@@ -1424,6 +1424,7 @@ dockerEditCommand() {
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local routingServer= routingPort=
     local routingDomains='[]' routingOldDomains='[]'
+    local routingOldIp= routingNewIp=
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
     local cdnAction= cdnListener= cdnAddresses=
@@ -1546,6 +1547,13 @@ dockerEditCommand() {
                 routingAction=ips_remove
             fi
             shift 2
+            ;;
+        --block-ips-replace)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && "$2" != *,* && "$2" != geoip:* &&
+                -n "$3" && "$3" != --* && "$3" != *,* && "$3" != geoip:* &&
+                -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=block_ips routingAction=ips_replace routingOldIp=$2 routingNewIp=$3
+            shift 3
             ;;
         --http-relay)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${httpRelay}" ]] ||
@@ -2211,7 +2219,22 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${routingKind}" ]]; then
-        if [[ "${routingAction}" == domains_replace ]]; then
+        if [[ "${routingAction}" == ips_replace ]]; then
+            # 仅临时校验输入去重，同值留给状态检查；实际名单保留字面值和次序。
+            jq --arg old "${routingOldIp}" --arg new "${routingNewIp}" \
+                '.routing.block_ips = {ips:([$old,$new] | unique)}' \
+                "${draft}" >"${workspace}/block_ips_input.json" &&
+                chmod 0600 "${workspace}/block_ips_input.json" ||
+                return "${PADM_DOCKER_RC_STATE}"
+            dockerConfigureSpecValidate "${workspace}/block_ips_input.json" || {
+                dockerError 'IP/CIDR 单条替换只接受两个合法字面地址或前缀，未提交配置'
+                return "${PADM_DOCKER_RC_USAGE}"
+            }
+            jq -e '.routing.block_ips.ips | type == "array" and length > 0' "${draft}" >/dev/null || {
+                dockerError 'IP/CIDR 单条替换要求已有非空手工阻断名单，不能操作区域合成规则'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        elif [[ "${routingAction}" == domains_replace ]]; then
             jq -e --arg kind "${routingKind}" '
               (.routing[$kind].domains | type == "array" and length > 0) and
               (if $kind == "warp" or $kind == "ipv6" then
@@ -2299,6 +2322,16 @@ dockerEditCommand() {
                 if .routing[$kind].domains == [] then del(.routing[$kind]) else . end |
                 if .routing == {} then del(.routing) else . end
               end
+            ' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == ips_replace ]]; then
+            jq --arg old "${routingOldIp}" --arg new "${routingNewIp}" '
+              .routing.block_ips.ips as $existing |
+              if ($existing | map(select(. == $old)) | length) != 1 then
+                error("待替换旧 IP/CIDR 必须恰好存在于当前手工阻断名单一次，未提交配置")
+              elif ($existing | index($new)) != null then
+                error("新 IP/CIDR 不能与当前手工阻断名单中的规则重复，未提交配置")
+              else .routing.block_ips.ips =
+                ($existing | map(if . == $old then $new else . end)) end
             ' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == ips_add || "${routingAction}" == ips_remove ]]; then
             dockerEditPrivateInputCopy "${routingFile}" "${workspace}/block_ips.json" block_ips || {
@@ -2587,6 +2620,8 @@ dockerEditCommand() {
           ($new | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
         elif $routing_action == "domains_replace" then
          ($old | del(.routing[$routing_kind].domains)) == ($new | del(.routing[$routing_kind].domains))
+        elif $routing_action == "ips_replace" then
+         ($old | del(.routing.block_ips.ips)) == ($new | del(.routing.block_ips.ips))
        elif $routing_kind == "warp" and ($routing_action | startswith("warp_")) then
         def without_warp_edit:
           if $routing_action == "warp_family" then del(.routing.warp.family)

@@ -1378,7 +1378,16 @@ Preview and cancellation leave the deployment unchanged.
 ```bash
 padm-docker edit --block-ips-add /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-remove /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-replace '198.51.100.0/24' '203.0.113.17/24' --preview
 ```
+
+Menu `17`, option `33`, and `--block-ips-replace <old rule> <new rule>` replace one
+literal IP/CIDR rule in an existing nonempty manual list. Status is shown before the
+two inputs; blank, `0` or EOF cancels either step. Both strings are kept verbatim,
+including IPv6 spelling and CIDR host bits. The complete old string must exist once;
+the new string cannot duplicate any current item, including the old one. Replacement
+preserves position and all other configuration. CSV, GeoIP, domain and generated
+regional rules are rejected. Preview, confirmation and recovery use the existing transaction.
 
 Menu `17`, option `6`, accepts a literal UDP DNS server IP, a port (blank defaults
 to `53`), and domain-rule CSV. `--dns-rules <IP> <port> <CSV>` creates or replaces
