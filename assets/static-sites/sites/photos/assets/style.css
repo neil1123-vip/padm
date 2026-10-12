@@ -34,6 +34,7 @@ img { display: block; width: 100%; height: auto; }
 .journal-image { aspect-ratio: 3/2; object-fit: cover; }
 figcaption { margin-top: 10px; }
 .prose { max-width: 730px; margin: 38px auto 0; }
+.prose > article + article { margin-top: 36px; }
 .prose h2 { font-size: 25px; margin-top: 35px; }
 .prose p { color: #3d4a42; }
 .article-end { margin-top: 36px; padding-top: 24px; border-top: 1px solid #dce4df; font-size: 14px; }
