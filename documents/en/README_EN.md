@@ -364,6 +364,12 @@ both single-port baselines pass. Two existing Hy2 UDP aliases each pass strict T
 TCP/UDP over IPv4/IPv6, and the range client keeps serving across 5.1 seconds.
 Short-window packet counts do not prove both families switched ports or performed a new
 QUIC handshake. These tests do not open hopping menus, range shares or host DNAT management.
+The 5C.9b isolated prerequisite verifies IPv4/IPv6 iptables-nft DNAT from two range
+ports to an existing Docker host-published port. Fresh-client traffic follows exact
+revocation and reconstruction, while Docker and fixture foreign NAT rules stay unchanged.
+This path retains the default userland proxy and does not prove direct container DNAT,
+production persistent ownership, existing-session revocation, range conflicts,
+reboot/uninstall behavior or complete automatic hopping.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription

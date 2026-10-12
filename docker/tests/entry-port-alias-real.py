@@ -319,7 +319,118 @@ def port_range_capabilities(root, image_id):
                     "unknown field" in result.stderr, result.stderr
 
 
-def hy2_range_probe(root, node, docker, image_id, enter, processes):
+def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
+    # 仅在本轮隔离宿主 netns 验证双栈 DNAT 到已有发布口；不提供生产管理入口。
+    token = os.urandom(16).hex()
+    chain = "PADM_HOP_" + token[:12]
+    comment = "padm-hop:" + token
+    owned, outside = [], []
+    baseline = {}
+    client = dict(log=dict(level="warn"), inbounds=[], outbounds=[], route=dict(rules=[]))
+    items = []
+    for family, address in HOSTS.items():
+        for remote_port in (36561, 36562):
+            tag = f"hy2-dnat-{family}-{remote_port}"
+            local_port = 24101 + len(client["inbounds"])
+            client["inbounds"].append(dict(type="socks", tag=tag, listen="127.0.0.1",
+                                           listen_port=local_port))
+            client["outbounds"].append(dict(
+                type="hysteria2", tag=tag, server=address, server_port=remote_port,
+                password="33333333-3333-4333-8333-333333333333",
+                tls=dict(enabled=True, server_name="hy2.padm.test", alpn=["h3"],
+                         certificate_path=str(cert))))
+            client["route"]["rules"].append(dict(inbound=[tag], action="route", outbound=tag))
+            items.extend((local_port, "hy2", family, True, "valid", transport)
+                         for transport in ("tcp", "udp"))
+    path = root / "hy2-dnat-client.json"
+    path.write_text(json.dumps(client))
+    command([str(root / "sing-box"), "check", "-c", str(path)])
+
+    def add(table, arguments, ledger):
+        command([table, "-w", "-t", "nat"] + arguments)
+        if arguments[0] == "-N":
+            removal = ["-X", arguments[1]]
+        elif arguments[0] == "-I":
+            removal = ["-D", arguments[1]] + arguments[3:]
+        else:
+            removal = ["-D"] + arguments[1:]
+        ledger.append((table, removal))
+
+    def revoke(ledger):
+        while ledger:
+            table, arguments = ledger[-1]
+            command([table, "-w", "-t", "nat"] + arguments)
+            ledger.pop()
+
+    def snapshot(table):
+        return command([table, "-w", "-t", "nat", "-S"])
+
+    try:
+        for family, address in HOSTS.items():
+            table = "iptables" if family == "ipv4" else "ip6tables"
+            assert "(nf_tables)" in command([table, "--version"]).decode()
+            add(table, ["-N", "PADM_HOP_OUTSIDE"], outside)
+            add(table, ["-A", "PADM_HOP_OUTSIDE", "-m", "comment",
+                        "--comment", "outside-hop", "-j", "RETURN"], outside)
+            add(table, ["-A", "PREROUTING", "-i", "prh2", "-p", "udp", "-d", address,
+                        "--dport", "36999", "-j", "PADM_HOP_OUTSIDE"], outside)
+            baseline[table] = snapshot(table)
+        for stage in ("on", "off", "restored"):
+            if stage == "off":
+                revoke(owned)
+                for table in baseline:
+                    assert snapshot(table) == baseline[table], "撤销改变了 Docker 或外部 NAT 规则"
+            else:
+                for family, address in HOSTS.items():
+                    table = "iptables" if family == "ipv4" else "ip6tables"
+                    target = f"{address}:35461" if family == "ipv4" else f"[{address}]:35461"
+                    add(table, ["-N", chain], owned)
+                    add(table, ["-A", chain, "-p", "udp", "-d", address,
+                                "--dport", "36561:36562", "-m", "comment", "--comment", comment,
+                                "-j", "DNAT", "--to-destination", target], owned)
+                    add(table, ["-I", "PREROUTING", "1", "-i", "prh+", "-p", "udp", "-d", address,
+                                "--dport", "36561:36562", "-m", "comment", "--comment", comment,
+                                "-j", chain], owned)
+            # 撤销用此前无跳跃流量的第二来源，避免旧 QUIC/conntrack 掩盖新连接结果。
+            stage_enter = enter if stage == "on" else off_enter
+            log_path = root / f"client-hy2-dnat-{stage}.log"
+            with log_path.open("wb") as log:
+                process = subprocess.Popen(stage_enter + [str(root / "sing-box"), "run", "-c", str(path)],
+                                           stdout=log, stderr=log)
+            processes.append(process)
+            wait_ready(lambda: subprocess.run(
+                stage_enter + ["python3", "-c", "import socket; socket.create_connection("
+                         "('127.0.0.1',24101),.2).close()"], capture_output=True).returncode == 0)
+            before = len((root / "events.jsonl").read_text().splitlines())
+            rows = items if stage != "off" else [
+                (*item[:4], "removed", item[5]) for item in items]
+            (root / "probes.json").write_text(json.dumps(rows))
+            print(command(stage_enter + ["python3", str(SCRIPT), "probes", str(root),
+                                   f"hy2-dnat-{stage}"], timeout=5).decode().strip(), flush=True)
+            events = [json.loads(line) for line in
+                      (root / "events.jsonl").read_text().splitlines()[before:]]
+            if stage == "off":
+                assert not events, events
+            else:
+                assert {row["source"] for row in events} == {server_address}, events
+                assert {transport: sum(row["transport"] == transport for row in events)
+                        for transport in ("tcp", "udp")} == dict(tcp=4, udp=4), events
+            assert process.poll() is None
+            stop(process)
+            print("entry-hy2-dnat-proof=" + json.dumps(dict(
+                stage=stage, token=token, chain=chain, events=len(events),
+                client_pid=process.pid, fresh_client=True, families=list(HOSTS),
+                client_scope="first-source" if stage == "on" else "second-source",
+                target_port=35461, range=[36561, 36562], backend="iptables-nft")), flush=True)
+        revoke(owned)
+        for table in baseline:
+            assert snapshot(table) == baseline[table], "重建后撤销改变了非本轮规则"
+    finally:
+        revoke(owned)
+        revoke(outside)
+
+
+def hy2_range_probe(root, node, docker, image_id, enter, off_enter, processes):
     cert, key = node / "hy2.crt", node / "hy2.key"
     command(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
              "-subj", "/CN=hy2.padm.test", "-addext", "subjectAltName=DNS:hy2.padm.test",
@@ -465,6 +576,7 @@ def hy2_range_probe(root, node, docker, image_id, enter, processes):
                     rejections.append(dict(family=family, case=auth, diagnostic=matches[0]))
             print("entry-hy2-rejections=" + json.dumps(rejections), flush=True)
         stop(process)
+    hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address)
 
 
 def run(root):
@@ -584,7 +696,9 @@ def run(root):
                     stop(client)
                 print(f"entry-port-alias-{phase}: IPv4+IPv6 production ports/NAT/auth/UID10001/cap0/ro passed",
                       flush=True)
-            hy2_range_probe(root, node, docker, inputs["sing-box"]["image_id"], enter, processes)
+            off_enter = ["nsenter", "--target", str(clients[1].pid), "--net", "--"]
+            hy2_range_probe(root, node, docker, inputs["sing-box"]["image_id"],
+                            enter, off_enter, processes)
             print("entry-port-alias-real-environment=" + json.dumps(dict(
                 hosts=HOSTS, destination_family="ipv4", image_ids=inputs,
                 elapsed=round(time.monotonic() - started, 3))),

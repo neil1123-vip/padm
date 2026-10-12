@@ -5398,6 +5398,38 @@ Bash、ShellCheck error、Python AST 与独立只读复审通过；本次只扩�
 其它客户端、TUIC 范围能力、原生宿主/arm64/公网仍待验；
 完整端口跳跃和协议管理保持 deferred，5C 与总目标 active。
 
+#### 5C.9b Hy2 双栈 DNAT 到既有发布端口的启停前置
+
+复用 5C.9a 唯一 daemon、固定 sing-box 1.14.2、受管 TLS/Hy2 服务、
+已有双客户端 netns 和 TCP/UDP origin，不增加 selector 或工具。
+仅在外层隔离 netns 的 iptables-nft/ip6tables-nft NAT 中，
+按精确目的地址、两个 veth 的限定前缀和 UDP 范围 `36561:36562`
+转发到已有宿主发布端口 `35461`。没有修改生产字段、菜单、schema 或权限。
+
+随机 token/短链只用于本轮夹具，新增命令成功后记录精确逆序撤销项；
+不 flush 共享链，注入独立外来 NAT 规则后保存两族完整 `-S` 正文。
+启用和重建各要求严格 TLS 的 `4 TCP + 4 UDP` 回显及单业务容器来源；
+撤销要求新客户端 origin 事件为 0，之后同一第二来源重建恢复 8 事件。
+撤销使用此前无范围流量的第二来源，避免启用期旧 UDP tuple 干扰；
+每阶段重启客户端避免 QUIC 会话复用。关闭与最后清理两次比较完整 NAT
+规则正文，Docker 发布规则及模拟外来规则均保持。
+
+DNAT 目标是已有宿主发布地址/端口，路径保留 daemon 默认 userland-proxy，
+不证明再次遍历 Docker DNAT、直达业务容器或关闭 proxy 的路径可用。
+内存逆序账本不是生产持久归属合同；范围冲突、旧会话/conntrack 撤销、
+异常退出恢复、真实规则漂移、重启/卸载、TUIC 范围能力、自动跳跃、
+原生宿主/arm64/公网和可信发布仍 deferred，总目标 active。
+最终 Linux amd64 `docker-entry-port-alias-real -Jobs 2` 内部/入口
+20890/21943 ms、排队 198 ms、exit 0、cache_hit=false，工具镜像和离线镜像直接复用；
+证据 `.tmp-regression-docker-9e0c69bbea85410bb6c97c86146634a9/`。
+阶段事件 `8/0/8`，最后撤销规则正文等于基线；旧 alias 三阶段、认证/SNI/CA
+负面与 Hy2 客户端字段能力断言保持。成功 Python 文件与最终输入逐行一致，
+Python AST、diff 和独立只读复审通过；仅扩展独立真实测试，
+完整合同路径未变，沿用 5B.4l 的 53/53 证据，不重复跑全套。
+早期成功输入 `.tmp-regression-docker-884f72e1ee70439681079a02114dba52/`、
+`.tmp-regression-docker-e428f5a99ed640a6b8c4e32f1b56358d/` 保留日志和结果，
+验收后清理本轮成功源码副本；未新增生产管理支持。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
