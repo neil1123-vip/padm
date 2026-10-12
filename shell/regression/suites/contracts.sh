@@ -433,6 +433,12 @@ runRegressionDockerContractsAggregateContract() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-real
     printf '%s\n' xhttp.sh xhttp-real.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+
+    : >"${callLog}"
+    python3() { printf '%s\n' "${*}" >>"${callLog}"; }
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-control-log-cron-real
+    printf '%s\n' "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py --log-schedule-cron-only" >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
 )
 
 runRegressionTargetedBatchHelpers() (

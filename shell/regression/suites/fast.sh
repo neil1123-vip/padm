@@ -430,6 +430,10 @@ runDockerControlTwoDeploymentRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py"
 }
 
+runDockerControlLogCronRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --log-schedule-cron-only
+}
+
 runDockerControlStateRegression() {
     bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
 }
@@ -579,6 +583,7 @@ registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegre
 registerRegressionFunctionLeaf docker-control-sync-schedule runDockerControlSyncScheduleRegression
 registerRegressionFunctionLeaf docker-control-two-node-real runDockerControlTwoNodeRealRegression
 registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerControlTwoDeploymentRealRegression
+registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogCronRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression

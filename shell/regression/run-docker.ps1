@@ -47,8 +47,34 @@ $files = @(
 )
 if ($files.Count -eq 0) { throw 'The source snapshot is empty.' }
 [IO.File]::WriteAllText($manifest, ($files -join "`0") + "`0", [Text.UTF8Encoding]::new($false))
-& $tar -cf $snapshot -C $root --null -T $manifest
-if ($LASTEXITCODE -ne 0) { throw 'Source snapshot creation failed.' }
+# 二进制流兼容 PowerShell 7.3，避免归档器把输出文件误识别为输入。
+$archiveStart = [Diagnostics.ProcessStartInfo]::new($tar)
+$archiveStart.UseShellExecute = $false
+$archiveStart.RedirectStandardOutput = $true
+foreach ($argument in @('-cf', '-', '-C', $root, '--null', '-T', $manifest)) {
+    $archiveStart.ArgumentList.Add($argument)
+}
+$archiveProcess = [Diagnostics.Process]::Start($archiveStart)
+try {
+    $archiveOutput = [IO.File]::Create($snapshot)
+    try { $archiveProcess.StandardOutput.BaseStream.CopyTo($archiveOutput) }
+    finally { $archiveOutput.Dispose() }
+    $archiveProcess.WaitForExit()
+    if ($archiveProcess.ExitCode -ne 0) { throw 'Source snapshot creation failed.' }
+}
+catch {
+    if (-not $archiveProcess.HasExited) {
+        $archiveProcess.Kill()
+        $archiveProcess.WaitForExit()
+    }
+    throw
+}
+finally { $archiveProcess.Dispose() }
+$archivedFiles = @(& $tar -tf $snapshot)
+if ($LASTEXITCODE -ne 0 -or $archivedFiles.Count -ne $files.Count -or
+    (Compare-Object -ReferenceObject $files -DifferenceObject $archivedFiles -CaseSensitive)) {
+    throw 'Source snapshot does not match the workspace file list.'
+}
 
 $userKey = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $commonDirectory = & $git -C $root rev-parse --path-format=absolute --git-common-dir
@@ -296,7 +322,7 @@ try {
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real')) {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
-    } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real',
+    } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-control-log-cron-real', 'docker-routing-ipv6-real',
         'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-cdn-entries-real', 'docker-alpn-real', 'docker-xhttp-real', 'docker-fail2ban-real',
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real')) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
@@ -369,7 +395,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Routing binary copy failed.' }
         $result.routing_images = $coreInputs
     }
-    if ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real',
+    if ($Selector -in @('docker-control-two-deployment-real', 'docker-control-log-cron-real', 'docker-routing-ipv6-real',
         'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-cdn-entries-real', 'docker-alpn-real', 'docker-xhttp-real', 'docker-fail2ban-real',
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real')) {
         # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。

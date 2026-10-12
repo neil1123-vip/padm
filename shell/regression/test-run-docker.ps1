@@ -34,13 +34,17 @@ import subprocess
 from pathlib import Path
 status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
 mask = (1 << 12) | (1 << 21)
-nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-routing-ipv6-real",
+nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-log-cron-real", "docker-routing-ipv6-real",
                        "docker-control-fail2ban-real")
-expected = mask if sys.argv[1] in ("docker-control-two-node-real", "docker-routing-warp-real") or nested else 0
+driver = sys.argv[1] in ("docker-ssh-driver", "docker-contracts", "docker-contracts-fast",
+                        "docker-contracts-fast-rest")
+guard = sys.argv[1] in ("docker-fail2ban-ownership", "docker-fail2ban-focused")
+expected = mask if sys.argv[1] in ("docker-control-two-node-real", "docker-routing-warp-real") or nested \
+    else (1 << 21) if driver or guard else 0
 assert int(status["CapEff"].strip(), 16) & mask == expected
 privileged_mask = (1 << 19) | (1 << 25)
 assert int(status["CapEff"].strip(), 16) & privileged_mask == (
-    privileged_mask if nested else 0)
+    privileged_mask if nested else (1 << 19) if driver else 0)
 assert [link["ifname"] for link in json.loads(
     subprocess.check_output(["ip", "-j", "link"])
 )] == ["lo"]
@@ -81,6 +85,8 @@ foreach ($case in @(
     @{ selector = 'docker-control-two-node-real-other'; expected = 0 },
     @{ selector = 'docker-control-two-deployment-real'; expected = 0 },
     @{ selector = 'docker-control-two-deployment-real-other'; expected = 0 },
+    @{ selector = 'docker-control-log-cron-real'; expected = 0 },
+    @{ selector = 'docker-control-log-cron-real-other'; expected = 0 },
     @{ selector = 'docker-routing-ipv6-real'; expected = 0 },
     @{ selector = 'docker-routing-ipv6-real-other'; expected = 0 },
     @{ selector = 'docker-routing-warp-real'; expected = 0 },
@@ -105,6 +111,8 @@ foreach ($case in @(
 $PSVersionTable.PSVersion
 $pwsh = Join-Path $PSHOME 'pwsh.exe'
 $processes = @()
+$fixtureImage = "padm-regression-runner-check:$([guid]::NewGuid().ToString('N'))"
+$fixtureBaseImage = "$fixtureImage-base"
 
 function Start-RunnerCheck {
     param([string]$Selector, [string]$Name, [int]$Jobs = 0, [switch]$ForceRun)
@@ -153,6 +161,21 @@ function Get-RunnerResult {
 }
 
 try {
+    # 队列和复用夹具继承已验证工具，入口变化只重建本次独立镜像。
+    $baseImageId = $result.image_id
+    if ($baseImageId -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'Invalid fixture base image ID.' }
+    & docker image tag $baseImageId $fixtureBaseImage
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot tag fixture base image.' }
+    $runnerSource = [IO.File]::ReadAllText($runner)
+    $imageAssignment = '$image = ''padm-regression:local'''
+    if ([regex]::Matches($runnerSource, [regex]::Escape($imageAssignment)).Count -ne 1) {
+        throw 'Fixture runner image assignment did not match exactly once.'
+    }
+    [IO.File]::WriteAllText($runner,
+        $runnerSource.Replace($imageAssignment, "`$image = '$fixtureImage'"), $utf8)
+    [IO.File]::WriteAllText((Join-Path $runnerDir 'container\Dockerfile'),
+        "FROM $fixtureBaseImage`nCOPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-regression`n", $utf8)
+
     # 三个普通任务必须重叠；第四个等待，并继续使用排队前的快照。
     $first = Start-RunnerCheck hold queue-first
     Wait-RunnerOutput $first current-worktree-snapshot-ok
@@ -259,7 +282,8 @@ try {
     $tools = Start-RunnerCheck all cache-new-tools
     Wait-RunnerExit $tools
     $toolResult = Get-RunnerResult $tools
-    if ($toolResult.cache_hit -or $toolResult.tool_sha256 -eq $baseline.tool_sha256) {
+    if ($toolResult.cache_hit -or $toolResult.tool_sha256 -eq $baseline.tool_sha256 -or
+        $toolResult.image_id -eq $baseline.image_id) {
         throw 'Different tool content reused a result.'
     }
     [IO.File]::WriteAllText($toolEntry, $toolOriginal, $utf8)
@@ -306,6 +330,14 @@ finally {
         if ($leftover) {
             & docker rm --force --volumes $leftover
             if ($LASTEXITCODE -ne 0) { throw 'Fixture container cleanup failed.' }
+        }
+    }
+    foreach ($tag in @($fixtureImage, $fixtureBaseImage)) {
+        $fixtureImageId = & docker image ls --quiet --filter "reference=$tag"
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot check fixture image cleanup.' }
+        if ($fixtureImageId) {
+            & docker image rm $tag
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture image cleanup failed.' }
         }
     }
 }

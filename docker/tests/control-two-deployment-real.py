@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import concurrent.futures
 import fcntl
 import hashlib
@@ -50,6 +51,23 @@ def command(arguments, *, content=None, timeout=30):
     return result.stdout
 
 
+def deployment_lock_diagnostic(node):
+    lock = node["path"] / "deployment/locks/deployment.lock"
+    try:
+        owner = (lock / "pid").read_text().strip()
+        owner = owner if re.fullmatch(r"[0-9]+", owner) else "<invalid>"
+    except FileNotFoundError:
+        owner = "<missing>"
+    events = node["path"] / "tmp/padm-cron-command.log"
+    commands = events.read_text() if events.is_file() else ""
+    commands = "\n".join(line for line in commands.splitlines() if re.fullmatch(
+        r"command-(?:start:[0-9]+:[0-9]+:(?:auto-sync|auto-log-rotate|traffic|other)"
+        r"|end:[0-9]+:[0-9]+:(?:auto-sync|auto-log-rotate|traffic|other):[0-9]+)", line))
+    processes = command(node["enter"] + ["ps", "-eo", "pid,ppid,stat,comm"], timeout=5).decode()
+    return f"node={node['path'].name} lock_exists={lock.exists()} owner={owner}\n" \
+        + "进程：\n" + processes + "cron 任务：\n" + commands[-4000:]
+
+
 def stop(process):
     if process.poll() is None:
         process.terminate()
@@ -98,6 +116,48 @@ def cli(node, *arguments, accepted=True):
 
 def state(node):
     return json.loads((node["path"] / "deployment/config/spec.json").read_text())
+
+
+def scheduled_state(node):
+    lock = node["path"] / "deployment/locks/deployment.lock"
+    if lock.exists():
+        return None
+    try:
+        current = state(node)
+    except FileNotFoundError:
+        # 生产提交持锁删除旧规格再发布候选；仅容忍这个受锁窗口。
+        if lock.exists():
+            return None
+        raise
+    return None if lock.exists() else current
+
+
+def scheduled_state_check():
+    with tempfile.TemporaryDirectory(prefix=".tmp-control-observation-", dir="/n") as directory:
+        node = {"path": Path(directory)}
+        spec = node["path"] / "deployment/config/spec.json"
+        lock = node["path"] / "deployment/locks/deployment.lock"
+        spec.parent.mkdir(parents=True)
+        lock.parent.mkdir()
+        lock.mkdir()
+        assert scheduled_state(node) is None, "持锁发布窗口未跳过规格观测"
+        lock.rmdir()
+        try:
+            scheduled_state(node)
+        except FileNotFoundError:
+            pass
+        else:
+            raise AssertionError("锁外缺失规格被观测夹具掩盖")
+        spec.write_text('{"revision":1}')
+        assert scheduled_state(node) == {"revision": 1}
+        spec.write_text("{")
+        try:
+            scheduled_state(node)
+        except json.JSONDecodeError:
+            pass
+        else:
+            raise AssertionError("损坏规格被观测夹具掩盖")
+    print("docker-control-two-deployment-scheduled-state-check-ok", flush=True)
 
 
 def services(node):
@@ -330,12 +390,59 @@ for _ in range(22):
     assert not (root / "data/net/control-fail2ban/fail2ban-control.state").exists()
     assert "padm-f2bc-" not in rules()
     assert not (root / "data/control-source/challenge.json").exists()
-    assert not (root / "locks/deployment.lock").exists()
+    assert not (root / "locks/deployment.lock").exists(), \
+        "控制防护停用后仍有部署锁：\n" + deployment_lock_diagnostic(controller)
     isolated()
     print("docker-control-two-deployment-fail2ban-enable-ban-unban-restore-disable-ok", flush=True)
 
 
-def log_rotate(controller, controlled, invitation):
+def log_schedule_cron_wait(controller, started_wall):
+    commands_path = controller["path"] / "tmp/padm-cron-command.log"
+    boundary = int(started_wall // 3600) * 3600 + 19 * 60
+    if boundary < started_wall:
+        boundary += 3600
+    first_boundary = boundary
+    started = time.monotonic()
+    deadline = started + boundary - time.time() + 90
+    progress, retried = started, False
+    while True:
+        commands = commands_path.read_bytes() if commands_path.is_file() else b""
+        starts = {pid: int(timestamp) for timestamp, pid in
+                  re.findall(rb"command-start:([0-9]+):([0-9]+):auto-log-rotate(?:\n|$)", commands)
+                  if int(timestamp) >= started_wall}
+        results = [(starts[pid], int(status)) for timestamp, pid, status in
+                   re.findall(rb"command-end:([0-9]+):([0-9]+):auto-log-rotate:([0-9]+)(?:\n|$)", commands)
+                   if pid in starts]
+        assert all(timestamp // 60 in (first_boundary // 60, boundary // 60)
+                   for timestamp in starts.values()), "真实 cron 轮转未在原始 :19 边界启动"
+        assert all(status in (0, 12) for _, status in results), "真实 cron 轮转退出异常：" + commands.decode()
+        conflicts = [(timestamp, status) for timestamp, status in results if status == 12]
+        assert len(conflicts) <= 1, "真实 cron 轮转连续两次部署锁竞争"
+        if conflicts and not retried:
+            # 只因真实首轮锁竞争等待下一原始边界，不改频率或绕开流量任务。
+            assert conflicts[0][0] // 60 == first_boundary // 60
+            retried = True
+            boundary = first_boundary + 3600
+            deadline = time.monotonic() + max(0, boundary + 90 - time.time())
+            print(f"docker-control-two-deployment-log-cron-retry:first_rc=12:"
+                  f"next_boundary={boundary}", flush=True)
+        if any(timestamp // 60 == boundary // 60 and status == 0 for timestamp, status in results):
+            assert time.time() >= boundary, "真实 cron 未经过墙钟边界"
+            print(commands.decode(), end="", flush=True)
+            print(f"docker-control-two-deployment-log-cron-autonomous-ok:"
+                  f"boundary={boundary}:elapsed={time.monotonic()-started:.3f}s", flush=True)
+            return
+        assert controller["cron"].poll() is None, "真实 cron 已退出"
+        if time.monotonic() >= deadline:
+            raise AssertionError("真实 :19 cron 未成功轮转；任务：\n" + commands.decode())
+        if time.monotonic() >= progress:
+            print(f"docker-control-two-deployment-log-cron-wait:wall={int(time.time())}:"
+                  f"boundary={boundary}:elapsed={time.monotonic()-started:.3f}s", flush=True)
+            progress = time.monotonic() + 30
+        time.sleep(0.2)
+
+
+def log_rotate(controller, controlled, invitation, scheduled=False):
     root = controller["path"] / "deployment"
     directory = root / "logs/control"
     auth, receipt = directory / "auth.log", directory / "source.receipt"
@@ -344,21 +451,13 @@ def log_rotate(controller, controlled, invitation):
     previous = auth.stat()
     receipt_before = receipt.stat()
     receipt_hash = hashlib.sha256(receipt.read_bytes()).digest()
+    lock_before = (directory / "auth.lock").stat()
     helper = None
-    cli(controller, "control", "log-schedule", "enable", "--yes")
-    registration = root / "data/control-log/schedule.json"
-    assert json.loads(registration.read_text()) == {"schema_version": 1, "enabled": True}
-    assert (registration.stat().st_mode & 0o7777, registration.stat().st_uid, registration.stat().st_gid) == \
-        (0o600, 0, 0)
-    cron_before = command(controller["enter"] + ["crontab", "-l"]).decode()
-    scheduled = [line for line in cron_before.splitlines() if "control auto-log-rotate" in line]
-    assert len(scheduled) == 1 and scheduled[0].startswith("19 * * * * ")
-    cli(controller, "control", "log-schedule", "status")
-    # 持真实协作锁观察生产 helper，释放后由原 CLI 等待提交并清理，API 始终在线。
-    with (directory / "auth.lock").open("rb") as lock, \
-            concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
+    marker = install_cron_probe(controller) if scheduled else None
+    if scheduled:
+        # 先准备日志再启用，整秒观察起点不能漏掉边界内的真实 cron 启动。
+        with (directory / "auth.lock").open("rb") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
             seeded = auth.read_bytes().splitlines(keepends=True)[0]
             padding = seeded * (10 * 1024 * 1024 // len(seeded) + 1)
             with auth.open("ab") as output:
@@ -366,55 +465,97 @@ def log_rotate(controller, controlled, invitation):
                 output.flush()
                 os.fsync(output.fileno())
             expected = auth.read_bytes()
-            future = executor.submit(cli, controller, "control", "auto-log-rotate")
-            deadline = time.monotonic() + 5
-            while helper is None:
-                if future.done():
-                    future.result()
-                    raise AssertionError("轮转 CLI 未启动持锁等待的真实 helper")
-                containers = command(controller["docker"] + [
-                    "ps", "--quiet", "--filter", "label=io.padm.mode=docker",
-                    "--filter", "label=io.padm.project=padm-docker",
-                ], timeout=max(0.1, deadline - time.monotonic())).decode().split()
-                inspected = []
-                for container in containers:
-                    try:
-                        inspected.extend(json.loads(command(
-                            controller["docker"] + ["inspect", container],
-                            timeout=max(0.1, deadline - time.monotonic()))))
-                    except AssertionError as error:
-                        if "no such object" in str(error).lower():
-                            continue
-                        raise
-                for actual in inspected:
-                    if "--rotate-access-log" not in (actual["Config"].get("Cmd") or []):
-                        continue
-                    assert actual["State"]["Running"]
-                    assert actual["Config"]["User"] == "0:10001"
-                    assert actual["HostConfig"]["ReadonlyRootfs"] and not actual["HostConfig"]["Privileged"]
-                    assert actual["HostConfig"]["CapDrop"] == ["ALL"]
-                    assert [cap.removeprefix("CAP_") for cap in actual["HostConfig"]["CapAdd"]] == ["CHOWN"]
-                    assert actual["HostConfig"]["NetworkMode"] == "none"
-                    assert actual["HostConfig"]["LogConfig"]["Type"] == "none"
-                    assert any(mount["Source"] == str(directory) and mount["Destination"] == "/var/log/padm/control"
-                               and mount["RW"] for mount in actual["Mounts"])
-                    helper = actual["Id"]
-                assert helper is not None or time.monotonic() < deadline, "未观察到真实轮转 helper"
-                if helper is None:
-                    time.sleep(0.02)
-            time.sleep(0.1)
-            assert not future.done(), "真实轮转 CLI 未等待协作锁"
-            locked_auth = auth.stat()
-            assert (locked_auth.st_dev, locked_auth.st_ino) == (previous.st_dev, previous.st_ino) and \
-                auth.read_bytes() == expected, "持锁期间真实轮转改动原日志"
-            assert not (directory / "auth.log.1").exists() and not (directory / "auth.log.2").exists() and \
-                not list(directory.glob(".control-log-rotate.*")), "持锁期间真实轮转创建归档或临时目录"
-            conflict = cli(controller, "control", "auto-log-rotate", accepted=False)
-            assert conflict.returncode == 12, "自动轮转竞争未立即返回部署锁冲突"
-        finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
-        future.result(timeout=35)
-    assert not command(controller["docker"] + ["ps", "--all", "--quiet", "--filter", f"id={helper}"])
+        started_wall = int(time.time())
+    cli(controller, "control", "log-schedule", "enable", "--yes")
+    registration = root / "data/control-log/schedule.json"
+    assert json.loads(registration.read_text()) == {"schema_version": 1, "enabled": True}
+    assert (registration.stat().st_mode & 0o7777, registration.stat().st_uid, registration.stat().st_gid) == \
+        (0o600, 0, 0)
+    cron_before = command(controller["enter"] + ["crontab", "-l"]).decode()
+    scheduled_lines = [line for line in cron_before.splitlines() if "control auto-log-rotate" in line]
+    assert len(scheduled_lines) == 1 and scheduled_lines[0].startswith("19 * * * * ")
+    cli(controller, "control", "log-schedule", "status")
+    if scheduled:
+        # 等待期间不持协作锁，只允许原始 cron 自主调用生产入口。
+        log_schedule_cron_wait(controller, started_wall)
+        containers = command(controller["docker"] + [
+            "ps", "--all", "--quiet", "--filter", "label=io.padm.mode=docker",
+            "--filter", "label=io.padm.project=padm-docker",
+        ]).decode().split()
+        for container in containers:
+            try:
+                inspected = json.loads(command(controller["docker"] + ["inspect", container]))[0]
+            except AssertionError as error:
+                if "no such object" in str(error).lower():
+                    continue
+                raise
+            assert "--rotate-access-log" not in (inspected["Config"].get("Cmd") or []), \
+                "真实 cron 轮转遗留 helper"
+        assert command(controller["enter"] + ["crontab", "-l"]).decode() == cron_before, \
+            "真实 cron 轮转改写了原始任务"
+    else:
+        # 持真实协作锁观察生产 helper，释放后由原 CLI 等待提交并清理，API 始终在线。
+        with (directory / "auth.lock").open("rb") as lock, \
+                concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                seeded = auth.read_bytes().splitlines(keepends=True)[0]
+                padding = seeded * (10 * 1024 * 1024 // len(seeded) + 1)
+                with auth.open("ab") as output:
+                    output.write(padding)
+                    output.flush()
+                    os.fsync(output.fileno())
+                expected = auth.read_bytes()
+                future = executor.submit(cli, controller, "control", "auto-log-rotate")
+                deadline = time.monotonic() + 5
+                while helper is None:
+                    if future.done():
+                        future.result()
+                        raise AssertionError("轮转 CLI 未启动持锁等待的真实 helper")
+                    containers = command(controller["docker"] + [
+                        "ps", "--quiet", "--filter", "label=io.padm.mode=docker",
+                        "--filter", "label=io.padm.project=padm-docker",
+                    ], timeout=max(0.1, deadline - time.monotonic())).decode().split()
+                    inspected = []
+                    for container in containers:
+                        try:
+                            inspected.extend(json.loads(command(
+                                controller["docker"] + ["inspect", container],
+                                timeout=max(0.1, deadline - time.monotonic()))))
+                        except AssertionError as error:
+                            if "no such object" in str(error).lower():
+                                continue
+                            raise
+                    for actual in inspected:
+                        if "--rotate-access-log" not in (actual["Config"].get("Cmd") or []):
+                            continue
+                        assert actual["State"]["Running"]
+                        assert actual["Config"]["User"] == "0:10001"
+                        assert actual["HostConfig"]["ReadonlyRootfs"] and not actual["HostConfig"]["Privileged"]
+                        assert actual["HostConfig"]["CapDrop"] == ["ALL"]
+                        assert [cap.removeprefix("CAP_") for cap in actual["HostConfig"]["CapAdd"]] == ["CHOWN"]
+                        assert actual["HostConfig"]["NetworkMode"] == "none"
+                        assert actual["HostConfig"]["LogConfig"]["Type"] == "none"
+                        assert any(mount["Source"] == str(directory) and mount["Destination"] == "/var/log/padm/control"
+                                   and mount["RW"] for mount in actual["Mounts"])
+                        helper = actual["Id"]
+                    assert helper is not None or time.monotonic() < deadline, "未观察到真实轮转 helper"
+                    if helper is None:
+                        time.sleep(0.02)
+                time.sleep(0.1)
+                assert not future.done(), "真实轮转 CLI 未等待协作锁"
+                locked_auth = auth.stat()
+                assert (locked_auth.st_dev, locked_auth.st_ino) == (previous.st_dev, previous.st_ino) and \
+                    auth.read_bytes() == expected, "持锁期间真实轮转改动原日志"
+                assert not (directory / "auth.log.1").exists() and not (directory / "auth.log.2").exists() and \
+                    not list(directory.glob(".control-log-rotate.*")), "持锁期间真实轮转创建归档或临时目录"
+                conflict = cli(controller, "control", "auto-log-rotate", accepted=False)
+                assert conflict.returncode == 12, "自动轮转竞争未立即返回部署锁冲突"
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+            future.result(timeout=35)
+        assert not command(controller["docker"] + ["ps", "--all", "--quiet", "--filter", f"id={helper}"])
     archive = directory / "auth.log.1"
     archived = archive.stat()
     assert (archived.st_dev, archived.st_ino) == (previous.st_dev, previous.st_ino)
@@ -427,6 +568,11 @@ def log_rotate(controller, controlled, invitation):
     current_receipt = receipt.stat()
     assert (current_receipt.st_dev, current_receipt.st_ino) == (receipt_before.st_dev, receipt_before.st_ino)
     assert hashlib.sha256(receipt.read_bytes()).digest() == receipt_hash, "真实轮转改动来源回执"
+    current_lock = (directory / "auth.lock").stat()
+    assert (current_lock.st_dev, current_lock.st_ino, current_lock.st_mode, current_lock.st_uid,
+            current_lock.st_gid, current_lock.st_nlink) == \
+        (lock_before.st_dev, lock_before.st_ino, lock_before.st_mode, lock_before.st_uid,
+         lock_before.st_gid, lock_before.st_nlink), "真实轮转改动协作锁身份或权限"
     assert services(controller) == before, "真实轮转重建了在线服务"
     reachable(controlled, invitation)
     assert f"control-request status=401 source={ADDRESS[1]}".encode() in auth.read_bytes(), \
@@ -439,15 +585,19 @@ def log_rotate(controller, controlled, invitation):
     cron_after = command(controller["enter"] + ["crontab", "-l"]).decode()
     assert "control auto-log-rotate" not in cron_after
     assert [line for line in cron_after.splitlines() if line.strip()] == \
-        [line for line in cron_before.splitlines() if line.strip() and line not in scheduled]
+        [line for line in cron_before.splitlines() if line.strip() and line not in scheduled_lines]
     unchanged = {path.name: (path.stat().st_ino, hashlib.sha256(path.read_bytes()).digest())
                  for path in directory.iterdir()}
     cli(controller, "control", "auto-log-rotate")
     assert unchanged == {path.name: (path.stat().st_ino, hashlib.sha256(path.read_bytes()).digest())
                          for path in directory.iterdir()}, "停用后的自动入口仍修改日志"
     assert services(controller) == before and not (root / "locks/deployment.lock").exists()
+    if scheduled:
+        remove_cron_probe(controller, marker)
+        print("docker-control-two-deployment-log-cron-disable-manual-noop-ok", flush=True)
     print("docker-control-two-deployment-log-rotate-online-ok", flush=True)
-    print("docker-control-two-deployment-log-schedule-enable-auto-conflict-disable-ok", flush=True)
+    if not scheduled:
+        print("docker-control-two-deployment-log-schedule-enable-auto-conflict-disable-ok", flush=True)
 
 
 def reachable(node, invitation):
@@ -493,6 +643,7 @@ def install_cron_probe(node):
 set -u
 log=COMMAND_LOG
 case "${2:-}" in
+*" control auto-log-rotate "*) job=auto-log-rotate ;;
 *" control auto-sync "*) job=auto-sync ;;
 *" traffic collect "*) job=traffic ;;
 *) job=other ;;
@@ -614,8 +765,8 @@ read -r release
     # 不调用 auto-sync；只允许真实 cron 在固定五分钟边界提交新版本。
     commands_path = controlled["path"] / "tmp/padm-cron-command.log"
     while True:
-        current = state(controlled)
-        assert current["control_sync"]["last_revision"] in (sync["last_revision"], target)
+        current = scheduled_state(controlled)
+        assert current is None or current["control_sync"]["last_revision"] in (sync["last_revision"], target)
         assert registration == {path.name: path.read_bytes() for path in directory.iterdir()}
         commands = commands_path.read_bytes() if commands_path.is_file() else b"missing\n"
         auto_starts = {pid: int(timestamp) for timestamp, pid in
@@ -635,7 +786,7 @@ read -r release
             deadline = time.monotonic() + max(0, retry_boundary + 90 - time.time())
             print(f"docker-control-two-deployment-cron-retry:first_rc=12:"
                   f"second_boundary={retry_boundary}:grace=90s", flush=True)
-        if not failure and current["control_sync"]["last_revision"] == target and \
+        if not failure and current is not None and current["control_sync"]["last_revision"] == target and \
                 not (root / "locks/deployment.lock").exists() and \
                 any(status == 0 for _, status in auto_results):
             break
@@ -869,9 +1020,13 @@ HTTPServer(("0.0.0.0", 38999), Handler).serve_forever()
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--log-schedule-cron-only", action="store_true")
+    options = parser.parse_args()
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
         "测试不得使用宿主或外部网络"
+    scheduled_state_check()
     archive = Path("/node-images.tar")
     assert archive.is_file(), "缺少离线镜像归档"
     inputs = json.loads(Path("/node-images.json").read_text(encoding="utf-8-sig"))
@@ -891,7 +1046,7 @@ def main():
                     (node / relative).mkdir(parents=True, mode=0o700)
                 holder = subprocess.Popen(
                     ["unshare", "--net", "--mount", "--propagation", "private", "--pid", "--fork", "--kill-child",
-                     "--mount-proc", "--", "sleep", "3600"],
+                     "--mount-proc", "--", "sleep", "infinity"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 )
                 holders.append(holder)
@@ -1064,11 +1219,33 @@ def main():
             assert services(controlled) == before_services, "真实幂等同步重建了服务"
             assert state(controlled) == joined
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
+            if options.log_schedule_cron_only:
+                log_rotate(controller, controlled, controlled_invite, scheduled=True)
+                proofs[0]["scope"] = "real-compose-control-log-original-cron-wall-clock"
+                print("docker-control-two-deployment-log-schedule-cron-only-ok", flush=True)
+                return proofs
             traffic_before = traffic(controlled, images["sing-box"])
             joined, before_services = sync_schedule_cron(controller, controlled, controlled_invite)
-            # 后续故障注入复用自动入口；暂停私有 cron，避免五分钟重试与恢复断言竞争。
-            command(controlled["enter"] + ["pkill", "-STOP", "-x", "cron"])
-            controlled["cron_paused"] = True
+            # 自主调度已验，暂停双方 cron，并等待已派生任务结束再进入故障断言。
+            for node in nodes:
+                command(node["enter"] + ["pkill", "-STOP", "-x", "cron"])
+                node["cron_paused"] = True
+            deadline = time.monotonic() + 30
+            for node in nodes:
+                while True:
+                    rows = [line.split(None, 3) for line in command(
+                        node["enter"] + ["ps", "-eo", "pid=,ppid=,stat=,comm="], timeout=5
+                    ).decode().splitlines()]
+                    cron_pids = {pid for pid, _, _, name in rows if name.lower() == "cron"}
+                    # 暂停的父进程暂不能回收僵尸；只等待仍运行的已派生任务。
+                    active = any(parent in cron_pids and not status.startswith("Z")
+                                 for _, parent, status, _ in rows)
+                    assert time.monotonic() < deadline, \
+                        "暂停 cron 后已派生任务未在 30 秒内释放部署锁：\n" + deployment_lock_diagnostic(node)
+                    if not active and not (node["path"] / "deployment/locks/deployment.lock").exists():
+                        break
+                    time.sleep(0.1)
+            print("docker-control-two-deployment-cron-fault-isolation-ok", flush=True)
             command(controlled["enter"] + ["ip", "route", "replace", ADDRESS[0] + "/32", "dev", "underlay"])
             cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)
             command(controlled["enter"] + ["ip", "route", "replace", ADDRESS[0] + "/32",
@@ -1144,8 +1321,6 @@ def main():
             cli(controlled, "control", "auto-sync", accepted=False)
             assert state(controlled) == updated
             sync_schedule_disable(controller, controlled)
-            command(controlled["enter"] + ["pkill", "-CONT", "-x", "cron"])
-            controlled["cron_paused"] = False
             services(controller)
             services(controlled)
             control_fail2ban(controller, controlled, controlled_invite)
@@ -1223,9 +1398,10 @@ def main():
                 print("节点环境清理诊断：" + "\n".join(cleanup_errors), file=sys.stderr)
                 if not failed:
                     raise AssertionError("节点环境清理失败")
-    print("docker-control-two-deployment-environment-proof=" + json.dumps(proofs, sort_keys=True))
-    print("docker-control-two-deployment-environment-ok")
+    return proofs
 
 
 if __name__ == "__main__":
-    main()
+    proofs = main()
+    print("docker-control-two-deployment-environment-proof=" + json.dumps(proofs, sort_keys=True))
+    print("docker-control-two-deployment-environment-ok")
