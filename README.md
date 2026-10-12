@@ -331,6 +331,15 @@ IP 保留原文，包括 IPv6 大小写和写法。空白、末尾换行、CSV�
 原 `--hosts <私有 JSON>` 整组入口保持，不新增 schema、marker、权限或状态。
 这是有限管理增强，不代表原生 hosts 完整迁移；DNS/hosts 定向与菜单已通过，集中完整 49 项回归通过。
 
+菜单 `17 → 38/39` 与 `edit --hosts-add <精确 FQDN> <单字面 IP>` /
+`--hosts-remove <精确 FQDN>` 提供单键新增和精确删除。新增可创建缺省 hosts，
+但已有键不论地址是否相同均返回 `15`，须用替换入口改地址；合并最多 256 项。
+删除要求键已存在，缺键或未启用返回 `15`；删掉最后一键关闭 hosts，
+只在没有其它策略时清理 routing。沿用 ASCII 小写、不去空白及地址原文边界，
+其它映射、完整配置、URI/订阅和累计流量保持。增删专项已通过 Linux amd64
+定向与菜单 PTY 回归，集中完整 53 项回归通过；
+完整区域策略、冲突检测及原生 hosts 完整迁移仍为 `deferred`。
+
 ```bash
 padm-docker edit --dns /root/padm-dns.json --preview
 padm-docker edit --dns /root/padm-dns.json --confirm PADM-DOCKER-EDIT
@@ -340,6 +349,8 @@ padm-docker edit --dns-domains-remove 'full:updates.example.net' --confirm PADM-
 padm-docker edit --hosts /root/padm-hosts.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-replace Exact.Example.NET 2001:0DB8::10 --preview
 padm-docker edit --hosts-replace exact.example.net 192.0.2.11 --confirm PADM-DOCKER-EDIT
+padm-docker edit --hosts-add new.example.net 2001:DB8::11 --preview
+padm-docker edit --hosts-remove new.example.net --confirm PADM-DOCKER-EDIT
 padm-docker edit --dns-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-off --confirm PADM-DOCKER-EDIT
 ```
@@ -1699,6 +1710,9 @@ Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workf
 每次运行的源码快照、日志和结果保存在 `.tmp-regression-docker-*/`，测试失败保留日志并返回原退出码。
 镜像只装工具，不固化项目源码；使用 Debian 官方依赖、固定 digest 的官方静态 jq 1.8.2 和官方 Docker CLI/Buildx/Compose，
 不安装 daemon、不挂 Docker socket，运行时无网络。工具层需要重新安装时使用 `-Rebuild`。
+工具镜像同时登记 `padm-regression:local-<工具内容 SHA256>` 标签；
+不同 worktree 的工具输入各自复用对应标签，避免 `local` 被更新后反复构建。
+复用前仍核对 Linux 原生架构及工具内容标签，本次回归固定镜像 ID。
 同一仓库、同一 Windows 用户的各任务和 worktree 试用三个回归槽位；普通 selector 占一个，
 `ci`、`ci-pr`、`all` 和 `docker-contracts` 占两个。完整回归登记等待后，不再放行新普通任务，
 优先等待所需槽位；取得槽位后，普通任务可以使用剩余一槽。最多三个普通任务或一套完整回归加一个普通任务，

@@ -2760,6 +2760,105 @@ for core in xray sing-box; do
     cmp -s "${TEST_ROOT}/hosts-replace-${core}.before" "${root}/config/${core}/config.json" ||
         fail "${core}: hosts 反向替换未精确恢复原生成"
 done
+# 单键增删沿用组合夹具，只允许映射及其派生的精确域名名单变化。
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 2 --hosts-add
+runEdit 2 --hosts-add added.example.com --preview
+runEdit 2 --hosts-add '' 203.0.113.12 --preview
+runEdit 2 --hosts-add added.example.com '' --preview
+runEdit 2 --hosts-remove
+runEdit 2 --hosts-remove '' --preview
+runEdit 2 --hosts-remove exact.example.com 203.0.113.10 --preview
+for host in 'full:exact.example.com' 'exact.example.com,ipv6.example.com' \
+    ' exact.example.com' $'exact.example.com\n' $'\u212A.example.com'; do
+    runEdit 2 --hosts-add "${host}" 203.0.113.12 --preview
+    runEdit 2 --hosts-remove "${host}" --preview
+done
+runEdit 2 --hosts-add exact.example.com 127.0.0.1 --preview
+runEdit 2 --hosts-add added.example.com '203.0.113.12,203.0.113.13' --preview
+runEdit 2 --hosts-add added.example.com $'203.0.113.12\n' --preview
+runEdit 2 --hosts-add added.example.com 203.0.113.12 --hosts-remove exact.example.com --preview
+runEdit 2 --hosts-remove exact.example.com --hosts-add added.example.com 203.0.113.12 --preview
+runEdit 2 --hosts-remove exact.example.com --hosts-off --preview
+runEdit 15 --hosts-add Exact.Example.Com 203.0.113.10 --confirm PADM-DOCKER-EDIT
+runEdit 15 --hosts-add exact.example.com 203.0.113.12 --confirm PADM-DOCKER-EDIT
+runEdit 15 --hosts-remove missing.example.com --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'hosts 增删参数、格式、重复键或缺键拒绝改变部署或调用 Compose'
+runEdit 0 --hosts-add Added-V4.Example.Com 203.0.113.12 --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'hosts 追加预览改变完整部署'
+MODE=int
+rm -f -- "${TEST_ROOT}/failed-once"
+runEdit 130 --hosts-add Added-V4.Example.Com 203.0.113.12 --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail 'INT: hosts 追加未恢复完整部署和流量'
+MODE=ok
+hostsIncremental=${HOSTS}
+for action in add remove; do
+    if [[ "${action}" == remove ]]; then
+        before=$(snapshot)
+        runEdit 0 --hosts-remove Added-V4.Example.Com --preview
+        [[ "$(snapshot)" == "${before}" ]] || fail 'hosts 删除预览改变完整部署'
+        MODE=term
+        rm -f -- "${TEST_ROOT}/failed-once"
+        runEdit 143 --hosts-remove Added-V4.Example.Com --confirm PADM-DOCKER-EDIT
+        [[ "$(snapshot)" == "${before}" ]] || fail 'TERM: hosts 删除未恢复完整部署和流量'
+        MODE=ok
+    fi
+    for host in added-v4.example.com added-v6.example.com; do
+        address=203.0.113.12
+        [[ "${host}" != added-v6.example.com ]] || address=2001:0DB8::12
+        if [[ "${action}" == add ]]; then
+            runEdit 0 --hosts-add "${host^^}" "${address}" --confirm PADM-DOCKER-EDIT
+            hostsIncremental=$(jq -cn --argjson hosts "${hostsIncremental}" --arg host "${host}" \
+                --arg ip "${address}" '$hosts + {($host):$ip}')
+        else
+            runEdit 0 --hosts-remove "${host^^}" --confirm PADM-DOCKER-EDIT
+            hostsIncremental=$(jq -cn --argjson hosts "${hostsIncremental}" --arg host "${host}" \
+                '$hosts | del(.[$host])')
+        fi
+        jq -en --argjson hosts "${hostsIncremental}" --slurpfile old "${TEST_ROOT}/hosts-replace.before" \
+            --slurpfile actual "${root}/config/spec.json" '$actual[0]==($old[0]|.routing.hosts=$hosts)' \
+            >/dev/null || fail 'hosts 增删未小写域名、保留 IP 原文或改变其它完整规格'
+        runStatus 0
+        jq -e --argjson hosts "${hostsIncremental}" '.hosts==$hosts' "${LOG}" >/dev/null ||
+            fail 'hosts 增删状态未投影精确完整映射'
+        for core in xray sing-box; do
+            jq -en --arg core "${core}" --argjson hosts "${hostsIncremental}" --argjson old_hosts "${HOSTS}" \
+                --slurpfile old "${TEST_ROOT}/hosts-replace-${core}.before" \
+                --slurpfile actual "${root}/config/${core}/config.json" '
+              $actual[0] == ($old[0] | if $core=="xray" then
+                .dns.hosts = ($hosts | with_entries(.key = "full:" + .key))
+              else
+                .dns.servers |= map(if .tag=="padm-hosts" then .predefined=$hosts else . end) |
+                walk(if type=="object" then
+                  if .domain==($old_hosts|keys) then .domain=($hosts|keys) else . end
+                else . end)
+              end)
+            ' >/dev/null || fail "${core}: hosts 增删改变映射和派生名单之外的生成"
+        done
+        (dockerMain protocol links) >"${TEST_ROOT}/hosts-replace-links.after"
+        cmp -s "${TEST_ROOT}/hosts-replace-links.before" "${TEST_ROOT}/hosts-replace-links.after" &&
+            [[ "$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)" == "${hostsReplaceDataBefore}" ]] ||
+            fail 'hosts 增删改变分享 URI、订阅或非空累计流量'
+    done
+done
+jq -n '[range(0;255) | {key:"boundary-\(.).example.com",value:"203.0.113.10"}] | from_entries' \
+    >"${PRIVATE_ROOT}/hosts-boundary.json"
+chmod 0600 "${PRIVATE_ROOT}/hosts-boundary.json"
+runEdit 0 --hosts "${PRIVATE_ROOT}/hosts-boundary.json" --confirm PADM-DOCKER-EDIT
+runEdit 0 --hosts-add boundary-255.example.com 203.0.113.12 --confirm PADM-DOCKER-EDIT
+jq -e '(.routing.hosts|length)==256 and .routing.hosts["boundary-255.example.com"]=="203.0.113.12"' \
+    "${root}/config/spec.json" >/dev/null || fail 'hosts 追加第 256 键被拒绝或未精确保留'
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 15 --hosts-add boundary-256.example.com 203.0.113.12 --confirm PADM-DOCKER-EDIT
+runEdit 2 --hosts-add boundary-256.example.com 127.0.0.1 --preview
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'hosts 第 257 键或非法地址拒绝改变部署或调用 Compose'
+runEdit 0 --hosts "${HOSTS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/hosts-replace.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$old' >/dev/null || fail 'hosts 增删和边界合同未还原原组合规格'
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerAcquireDeploymentLock
@@ -2842,6 +2941,19 @@ jq -e --argjson dns "${DNS}" --argjson domains "${DOMAINS}" '
   .routing == {dns:$dns,socks5:{server:"203.0.113.9",port:1080,
     username:"routing-user-secret-marker",password:"routing-password-secret-marker",domains:$domains}}
 ' "${root}/config/spec.json" >/dev/null || fail '关闭 hosts 破坏 DNS/SOCKS5'
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/hosts-absent.before"
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 15 --hosts-remove exact.example.com --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail '未启用 hosts 的删除改变部署或调用 Compose'
+runEdit 0 --hosts-add Added.Example.Com 2001:0DB8::12 --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/hosts-absent.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual[0]==($old[0]|.routing.hosts={"added.example.com":"2001:0DB8::12"})' >/dev/null ||
+    fail '缺省 hosts 追加未创建单键或改变已有 DNS/SOCKS5'
+runEdit 0 --hosts-remove Added.Example.Com --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/hosts-absent.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$old' >/dev/null || fail 'hosts 删空未清理 hosts 或破坏共存 routing'
 runEdit 0 --hosts "${HOSTS_INPUT}" --confirm PADM-DOCKER-EDIT
 runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
 jq -e --argjson dns "${DNS}" --argjson hosts "${HOSTS}" '.routing == {dns:$dns,hosts:$hosts}' \
@@ -2855,6 +2967,30 @@ jq -e --argjson hosts "${HOSTS}" '.enabled == true and .mode == "direct" and .ho
 runEdit 0 --hosts-off --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
     '$new == $old' >/dev/null || fail '关闭最后一个路由字段未恢复无 routing 规格'
+for core in xray sing-box; do
+    cp -- "${root}/config/${core}/config.json" "${TEST_ROOT}/hosts-empty-${core}.before"
+done
+runEdit 0 --hosts-add Last.Example.Com 203.0.113.12 --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual[0]==($old[0]|.routing={hosts:{"last.example.com":"203.0.113.12"}})' >/dev/null ||
+    fail '无 routing 时 hosts 追加未创建精确规格'
+before=$(snapshot)
+MODE=health-fail
+rm -f -- "${TEST_ROOT}/failed-once"
+runEdit 14 --hosts-remove Last.Example.Com --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail '健康失败: hosts 末键删除未恢复完整部署和流量'
+MODE=ok
+runEdit 0 --hosts-remove Last.Example.Com --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$old' >/dev/null || fail 'hosts 末键删除没有清理空 routing'
+runStatus 0
+jq -e '.enabled==false and (has("hosts")|not)' "${LOG}" >/dev/null ||
+    fail 'hosts 末键删除后状态未关闭 hosts'
+for core in xray sing-box; do
+    cmp -s "${TEST_ROOT}/hosts-empty-${core}.before" "${root}/config/${core}/config.json" ||
+        fail "${core}: hosts 末键删除未恢复无 DNS/hosts 的原生成"
+done
+printf 'docker-routing-hosts-incremental-regression-ok\n'
 runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
 runEdit 0 --dns-domains-remove "${DNS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \

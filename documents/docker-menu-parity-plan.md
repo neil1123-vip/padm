@@ -2861,6 +2861,35 @@ PTY 覆盖分发、双侧取消/EOF、非法输入、状态/前置失败、确�
 其余名单管理、完整区域/冲突检测、
 公网、原生宿主/arm64 和可信发布仍 deferred，总目标 active。
 
+#### 5B.4j hosts 精确新增与删除
+
+菜单 `17 → 38/39` 与 `edit --hosts-add <精确 FQDN> <单字面 IP>` /
+`--hosts-remove <已有精确 FQDN>` 只管理一个键。新增可创建缺省 hosts，
+但已有键无论地址是否相同均返回 `15`，不能覆盖；合并最多 256 项，第 257 项
+返回 `15`。删除要求已有键，缺键/未启用返回 `15`；删掉最后一项移除 hosts，
+只有 routing 也为空才移除 routing，不影响共存 DNS 或其它策略。
+
+沿用 `jq ascii_downcase`、不去空白、IP 原文与精确 FQDN/可路由字面 IP 边界；
+空白、末尾 LF、CSV、规则前缀、Kelvin 符号和坏地址返回 `2`。
+只接受旧完整规格的精确单键新增/删除及必要空容器清理，冻结其它 hosts、路由、
+认证、完整配置、URI/订阅与非空累计。复用已有 schema、marker、生成器、
+候选/预览/确认及恢复事务，不新增状态、依赖、监听或宿主权限。
+
+菜单先显示状态，失败不读输入，各字段空值、0/EOF 取消，CLI 单次确认；
+删除提示最后一项关闭 hosts。Linux amd64 增删定向内部 128739 ms、入口 129847 ms，
+排队 6687 ms、Jobs 2、cache_hit=false；增删、DNS 增量与既有 SOCKS 合同通过，
+证据 `.tmp-regression-docker-3d573a87e20c49a0a0db757750322066/`。
+菜单 PTY 内部 105619 ms、入口 106636 ms、排队 197 ms、Jobs 2、cache_hit=false，
+证据 `.tmp-regression-docker-4f6698384451472aabe33491524924bc/`。
+Bash、ShellCheck error 与 JSON 静态检查通过，临时检查容器已清理。
+集中 `docker-contracts` 53/53 exit 0，内部 554325 ms、入口 555341 ms，
+排队 389 ms、Jobs 6、cache_hit=false，复用相同工具镜像；
+证据 `.tmp-regression-docker-d5e54a5429fb43088d82f1901b86d84d/`。
+10 个暂存文件逐字节匹配该快照，之后仅补验收文字；
+包含 `218dde98` 合入后的全部新调度，5 分钟 CI 目标仍须线上实测。
+此为有限管理增强，完整区域/冲突检测、原生宿主/arm64、公网与可信发布
+仍 deferred，总目标 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

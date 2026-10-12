@@ -1439,9 +1439,22 @@ marker, host privilege or state is added. This is a limited management enhanceme
 complete native hosts migration remains deferred. The focused DNS/hosts and menu
 contracts and integrated Docker contracts pass (49/49).
 
+Menu `17`, options `38/39`, and `edit --hosts-add <exact FQDN> <literal IP>` /
+`--hosts-remove <exact FQDN>` add or remove one exact mapping. Add can create a missing
+hosts map, but any existing key returns `15` regardless of its value; use replacement
+to change an address. The merged map is limited to 256 keys. Remove requires an existing
+key; missing keys or disabled hosts return `15`. Removing the last key disables hosts
+and removes routing only if no other policy remains. ASCII lowercase normalization,
+untrimmed input and verbatim addresses retain their existing boundaries. Other mappings,
+the full configuration, share URIs, subscriptions and cumulative traffic are preserved.
+Focused Linux amd64 and menu PTY verification passes; integrated Docker contracts pass (53/53).
+Complete native hosts migration, region policy and conflict detection remain deferred.
+
 ```bash
 padm-docker edit --hosts-replace Exact.Example.NET 2001:0DB8::10 --preview
 padm-docker edit --hosts-replace exact.example.net 192.0.2.11 --confirm PADM-DOCKER-EDIT
+padm-docker edit --hosts-add new.example.net 2001:DB8::11 --preview
+padm-docker edit --hosts-remove new.example.net --confirm PADM-DOCKER-EDIT
 ```
 
 Existing DNS, Direct, Block, selective IPv6 and selective WARP domain lists support

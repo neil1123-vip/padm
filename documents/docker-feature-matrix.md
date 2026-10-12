@@ -27,6 +27,13 @@ IP 原文保持；空白、尾换行、CSV、规则前缀和坏地址返回 `2`�
 原私有 JSON 整组入口保持，不扩 hosts 语义、schema、marker、权限或状态。
 DNS/hosts 定向与菜单通过，集中完整 49 项回归通过；这是有限管理增强，原生完整迁移及整体状态仍 `deferred`。
 
+5B.4j 接入菜单 `17 → 38/39` 与 `--hosts-add <精确 FQDN> <单字面 IP>` /
+`--hosts-remove <精确 FQDN>`。新增可创建缺省映射，仅接受缺失键；重复键及合并超
+256 项返回 `15`。删除要求已有键，缺键/未启用返回 `15`；删空关闭 hosts，
+其它 routing 存在时保留。ASCII 小写、不去空白、IP 原文及非法输入 `2` 沿用；
+冻结精确单键变换之外的完整配置、URI/订阅/累计，不新增 schema/marker/权限/状态。
+Linux amd64 增删定向与菜单 PTY 通过，集中完整 53 项回归通过；完整状态保持 `deferred`。
+
 3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，
 证据和剩余限制见[真实 TLS 验收基线](docker-tls-real-baseline.md)。
 内部 TLS 夹具不代表新增协议支持；真实 DNS、完整宿主重启、原生 arm64 和可信发布仍待验。

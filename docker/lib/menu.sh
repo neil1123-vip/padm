@@ -921,7 +921,8 @@ dockerMenuRouting() {
             '31. 单条替换 Direct 直连例外' '32. 单条替换 Block 域名阻断' \
             '33. 单条替换 IP/CIDR 阻断' '34. 追加 SOCKS5 域名规则' \
             '35. 精确删除 SOCKS5 域名规则' '36. 单条替换 SOCKS5 域名规则' \
-            '37. 单项替换 hosts 地址' '0. 返回'
+            '37. 单项替换 hosts 地址' '38. 新增 hosts 精确映射' \
+            '39. 精确删除 hosts 映射' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1053,6 +1054,20 @@ dockerMenuRouting() {
                 dockerSetupRead newRule '新 hosts IPv4/IPv6（单个字面地址，0 返回）: ' &&
                 [[ -n "${newRule}" ]] || continue
             dockerMenuRun edit --hosts-replace "${oldRule}" "${newRule}" || true
+            ;;
+        38)
+            dockerMenuRun protocol routing-status || continue
+            dockerSetupRead oldRule '新增 hosts 精确域名（0 返回）: ' &&
+                [[ -n "${oldRule}" ]] &&
+                dockerSetupRead newRule '新 hosts IPv4/IPv6（单个字面地址，0 返回）: ' &&
+                [[ -n "${newRule}" ]] || continue
+            dockerMenuRun edit --hosts-add "${oldRule}" "${newRule}" || true
+            ;;
+        39)
+            dockerMenuRun protocol routing-status || continue
+            dockerSetupRead oldRule '删除 hosts 精确域名（最后一项关闭 hosts，0 返回）: ' &&
+                [[ -n "${oldRule}" ]] || continue
+            dockerMenuRun edit --hosts-remove "${oldRule}" || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

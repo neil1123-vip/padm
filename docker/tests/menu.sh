@@ -1521,7 +1521,7 @@ runRoutingDriver() {
         targetReply '精确删除 WARP 域名规则 CSV' $'\004'
         targetReply 'Docker WARP 出站' $'0\n'
         ;;
-    domain-replace-*|ip-replace-*|hosts-replace-*)
+    domain-replace-*|ip-replace-*|hosts-replace-*|hosts-manage-*)
         replaceCase=${scenario#*-replace-}
         replaceKind=domain oldPrompt='旧域名规则（单条；' newPrompt='新域名规则（单条；'
         if [[ "${scenario}" == ip-replace-* ]]; then
@@ -1530,6 +1530,10 @@ runRoutingDriver() {
         elif [[ "${scenario}" == hosts-replace-* ]]; then
             replaceKind=hosts oldPrompt='已有 hosts 精确域名（0 返回）' newPrompt='新 hosts IPv4/IPv6（单个字面地址，0 返回）'
             replaceFamilies=(hosts)
+        elif [[ "${scenario}" == hosts-manage-* ]]; then
+            replaceCase=${scenario#hosts-manage-}
+            newPrompt='新 hosts IPv4/IPv6（单个字面地址，0 返回）'
+            replaceFamilies=(hosts-add hosts-remove)
         fi
         case "${replaceCase}" in
         cancel)
@@ -1548,6 +1552,18 @@ runRoutingDriver() {
             ips) choice=33 ;;
             socks5) choice=36 ;;
             hosts) choice=37 ;;
+            hosts-add)
+                choice=38 replaceKind=hosts-add oldPrompt='新增 hosts 精确域名（0 返回）'
+                [[ "${replaceCase}" != invalid ]] ||
+                    replaceVariants=(old-invalid new-invalid old-csv new-csv)
+                ;;
+            hosts-remove)
+                choice=39 replaceKind=hosts-remove oldPrompt='删除 hosts 精确域名（最后一项关闭 hosts，0 返回）'
+                [[ "${replaceCase}" != cancel ]] ||
+                    replaceVariants=(old-zero old-empty old-eof)
+                [[ "${replaceCase}" != invalid ]] ||
+                    replaceVariants=(old-invalid old-csv)
+                ;;
             ipv6)
                 targetReply 'Docker 路由与出站' $'19\n'
                 menuLabel='Docker IPv6 域名出站' choice=7 statusChoice=4
@@ -1564,7 +1580,7 @@ runRoutingDriver() {
             for variant in "${replaceVariants[@]}"; do
                 oldRule=full:Exact.Example.Com newRule=full:Next.Example.NET
                 [[ "${family}" != ips ]] || { oldRule=2001:0DB8::1/64; newRule=2001:db8::2/64; }
-                [[ "${family}" != hosts ]] || { oldRule=Exact.Example.Com; newRule=2001:0DB8::10; }
+                [[ "${family}" != hosts* ]] || { oldRule=Exact.Example.Com; newRule=2001:0DB8::10; }
                 case "${variant}" in
                 old-zero) oldRule=0 ;;
                 old-empty) oldRule= ;;
@@ -1584,9 +1600,11 @@ runRoutingDriver() {
                 [[ "${variant}" != old-eof ]] || input=${oldRule}
                 targetReply "${oldPrompt}" "${input}"
                 [[ "${variant}" != old-* || "${replaceCase}" != cancel ]] || continue
-                input=${newRule}$'\n'
-                [[ "${variant}" != new-eof ]] || input=${newRule}
-                targetReply "${newPrompt}" "${input}"
+                if [[ "${family}" != hosts-remove ]]; then
+                    input=${newRule}$'\n'
+                    [[ "${variant}" != new-eof ]] || input=${newRule}
+                    targetReply "${newPrompt}" "${input}"
+                fi
                 case "${replaceCase}" in
                 flow|commit-failed)
                     targetReply "fixture-${replaceKind}-replace-confirm [y/N]" $'y\n'
@@ -2053,16 +2071,23 @@ edit)
         "${2:-}" == --dns-domains-replace || "${2:-}" == --direct-domains-replace ||
         "${2:-}" == --block-domains-replace || "${2:-}" == --warp-domains-replace ||
         "${2:-}" == --ipv6-domains-replace || "${2:-}" == --region-allow-replace ||
-        "${2:-}" == --socks5-domains-replace || "${2:-}" == --hosts-replace ]]; then
+        "${2:-}" == --socks5-domains-replace || "${2:-}" == --hosts-replace ||
+        "${2:-}" == --hosts-add || "${2:-}" == --hosts-remove ]]; then
         replaceKind=domain
         if [[ "$2" == --block-ips-replace ]]; then
             # 此处只断言字面参数原样分发，完整 IP/CIDR 校验由路由合同覆盖。
             [[ "$#" -eq 4 && "$3" == 2001:0DB8::1/64 && "$4" == 2001:db8::2/64 ]] || exit 2
             replaceKind=ip
-        elif [[ "$2" == --hosts-replace ]]; then
-            # 这里只断言两字段原样分发，域名与字面地址的边界由路由合同覆盖。
-            [[ "$#" -eq 4 && "$3" == Exact.Example.Com && "$4" == 2001:0DB8::10 ]] || exit 2
+        elif [[ "$2" == --hosts-* ]]; then
+            # 这里只断言字段原样分发，精确域名、地址与状态边界由路由合同覆盖。
+            [[ "$3" == Exact.Example.Com ]] || exit 2
+            if [[ "$2" == --hosts-remove ]]; then
+                [[ "$#" -eq 3 ]] || exit 2
+            else
+                [[ "$#" -eq 4 && "$4" == 2001:0DB8::10 ]] || exit 2
+            fi
             replaceKind=hosts
+            [[ "$2" == --hosts-replace ]] || replaceKind=${2#--}
         else
             [[ "$#" -eq 4 && "$3" != *,* && "$4" != *,* ]] || exit 2
             oldRule=$(dockerSocks5DomainsNormalize "$3") || exit 2
@@ -2639,14 +2664,18 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     ip-replace-confirm-cancel ip-replace-confirm-eof ip-replace-commit-failed \
     hosts-replace-flow hosts-replace-cancel hosts-replace-invalid hosts-replace-status-failed hosts-replace-state-failed \
     hosts-replace-confirm-cancel hosts-replace-confirm-eof hosts-replace-commit-failed \
+    hosts-manage-flow hosts-manage-cancel hosts-manage-invalid hosts-manage-status-failed hosts-manage-state-failed \
+    hosts-manage-confirm-cancel hosts-manage-confirm-eof hosts-manage-commit-failed \
     selective-domains-invalid selective-domains-state-failed selective-domains-confirm-cancel selective-domains-confirm-eof selective-domains-commit-failed \
     socks5-domains-eof socks5-domains-status-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
     [[ "${routingCase}" != selective-domains-state-failed ]] || SELECTIVE_EDIT_PRECHECK_STATUS=15
-    [[ "${routingCase}" != *-replace-state-failed ]] || DOMAIN_REPLACE_PRECHECK_STATUS=15
-    [[ "${routingCase}" != *-replace-status-failed ]] || ROUTING_STATUS=17
+    [[ "${routingCase}" != *-replace-state-failed && "${routingCase}" != hosts-manage-state-failed ]] ||
+        DOMAIN_REPLACE_PRECHECK_STATUS=15
+    [[ "${routingCase}" != *-replace-status-failed && "${routingCase}" != hosts-manage-status-failed ]] ||
+        ROUTING_STATUS=17
     [[ "${routingCase}" != socks5-domains-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
@@ -2654,7 +2683,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != block-ips-change-failed &&
         "${routingCase}" != dns-domains-change-failed &&
         "${routingCase}" != selective-domains-commit-failed &&
-        "${routingCase}" != *-replace-commit-failed ]] || SITE_EDIT_STATUS=15
+        "${routingCase}" != *-replace-commit-failed &&
+        "${routingCase}" != hosts-manage-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
     case "${routingCase}" in
@@ -2710,7 +2740,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
                 fail 'SOCKS5 增删状态失败未保留菜单'
         fi
         ;;
-    domain-replace-*|ip-replace-*|hosts-replace-*)
+    domain-replace-*|ip-replace-*|hosts-replace-*|hosts-manage-*)
         replaceConfirmation= replaceExit=0 replaceFailureCount=0
         replaceCase=${routingCase#*-replace-} replaceKind=domain
         replaceVariants=(valid)
@@ -2721,6 +2751,9 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         elif [[ "${routingCase}" == hosts-replace-* ]]; then
             replaceKind=hosts
             replaceFamilies=(hosts)
+        elif [[ "${routingCase}" == hosts-manage-* ]]; then
+            replaceCase=${routingCase#hosts-manage-}
+            replaceFamilies=(hosts-add hosts-remove)
         fi
         case "${replaceCase}" in
         flow) replaceConfirmation=y ;;
@@ -2729,7 +2762,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             ;;
         invalid)
             replaceVariants=(old-invalid new-invalid old-csv new-csv same)
-            replaceExit=2 replaceFailureCount=$((${#replaceFamilies[@]} * 5))
+            replaceExit=2
             ;;
         status-failed) replaceExit=17 replaceFailureCount=$((${#replaceFamilies[@]} * 2)) ;;
         state-failed) replaceExit=15 replaceFailureCount=${#replaceFamilies[@]} ;;
@@ -2742,6 +2775,17 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             [[ "${replaceFamily}" != ips ]] || replaceFlag=--block-ips-replace
             [[ "${replaceFamily}" != region ]] || replaceFlag=--region-allow-replace
             [[ "${replaceFamily}" != hosts ]] || replaceFlag=--hosts-replace
+            if [[ "${replaceFamily}" == hosts-add ]]; then
+                replaceFlag=--hosts-add replaceKind=hosts-add
+                [[ "${replaceCase}" != invalid ]] ||
+                    replaceVariants=(old-invalid new-invalid old-csv new-csv)
+            elif [[ "${replaceFamily}" == hosts-remove ]]; then
+                replaceFlag=--hosts-remove replaceKind=hosts-remove
+                [[ "${replaceCase}" != cancel ]] ||
+                    replaceVariants=(old-zero old-empty old-eof)
+                [[ "${replaceCase}" != invalid ]] ||
+                    replaceVariants=(old-invalid old-csv)
+            fi
             for replaceVariant in "${replaceVariants[@]}"; do
                 [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
                 expectedRouting+='protocol routing-status'
@@ -2749,7 +2793,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
                 replaceOld=full:Exact.Example.Com replaceNew=full:Next.Example.NET
                 [[ "${replaceFamily}" != ips ]] ||
                     { replaceOld=2001:0DB8::1/64; replaceNew=2001:db8::2/64; }
-                [[ "${replaceFamily}" != hosts ]] ||
+                [[ "${replaceFamily}" != hosts* ]] ||
                     { replaceOld=Exact.Example.Com; replaceNew=2001:0DB8::10; }
                 case "${replaceVariant}" in
                 old-invalid) replaceOld=regexp:bad ;;
@@ -2758,7 +2802,9 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
                 new-csv) replaceNew=full:Next.Example.NET,full:Second.Example.Com ;;
                 same) replaceNew=${replaceOld} ;;
                 esac
-                expectedRouting+=$'\n'"edit ${replaceFlag} ${replaceOld} ${replaceNew}"
+                expectedRouting+=$'\n'"edit ${replaceFlag} ${replaceOld}"
+                [[ "${replaceFamily}" == hosts-remove ]] || expectedRouting+=" ${replaceNew}"
+                [[ "${replaceCase}" != invalid ]] || replaceFailureCount=$((replaceFailureCount + 1))
                 [[ -z "${replaceConfirmation}" ]] ||
                     expectedRouting+=$'\n'"${replaceKind}-replace-confirm ${replaceFlag} ${replaceConfirmation}"
                 [[ "${replaceCase}" != flow ]] ||
@@ -2768,7 +2814,10 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         done
         replaceConfirmCount=0
         [[ -z "${replaceConfirmation}" ]] || replaceConfirmCount=${#replaceFamilies[@]}
-        [[ "$(grep -Fc "fixture-${replaceKind}-replace-confirm [y/N]" "${CONTROL_LOG}" || true)" -eq "${replaceConfirmCount}" ]] ||
+        replaceConfirmPattern="fixture-${replaceKind}-replace-confirm \\[y/N\\]"
+        [[ "${routingCase}" != hosts-manage-* ]] ||
+            replaceConfirmPattern='fixture-hosts-(add|remove)-replace-confirm \[y/N\]'
+        [[ "$(grep -Ec "${replaceConfirmPattern}" "${CONTROL_LOG}" || true)" -eq "${replaceConfirmCount}" ]] ||
             fail '规则单条替换未保持每次一个 CLI 确认'
         [[ "$(grep -Fc "操作失败，退出码: ${replaceExit}" "${CONTROL_LOG}" || true)" -eq "${replaceFailureCount}" ]] ||
             fail '规则单条替换失败未显示退出码并继续诊断'
@@ -2776,8 +2825,13 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             replacePrompt='旧域名规则（单条；'
             [[ "${replaceKind}" != ip ]] || replacePrompt='旧 IP/CIDR 规则（单条字面'
             [[ "${replaceKind}" != hosts ]] || replacePrompt='已有 hosts 精确域名（0 返回）'
+            [[ "${routingCase}" != hosts-manage-* ]] || replacePrompt='hosts 精确域名（'
             ! grep -Fq "${replacePrompt}" "${CONTROL_LOG}" ||
                 fail '路由状态失败后仍然读取替换规则'
+        fi
+        if [[ "${routingCase}" == hosts-manage-* && "${replaceCase}" != status-failed ]]; then
+            grep -Fq '最后一项关闭 hosts' "${CONTROL_LOG}" ||
+                fail 'hosts 精确删除没有提示最后一项关闭 hosts'
         fi
         ;;
     selective-domains-invalid|selective-domains-state-failed|selective-domains-confirm-cancel|selective-domains-confirm-eof|selective-domains-commit-failed)
@@ -2908,7 +2962,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '30. 单条替换 DNS 分流域名' '31. 单条替换 Direct 直连例外' \
             '32. 单条替换 Block 域名阻断' '33. 单条替换 IP/CIDR 阻断' \
             '34. 追加 SOCKS5 域名规则' '35. 精确删除 SOCKS5 域名规则' \
-            '36. 单条替换 SOCKS5 域名规则' '0. 返回'; do
+            '36. 单条替换 SOCKS5 域名规则' '37. 单项替换 hosts 地址' \
+            '38. 新增 hosts 精确映射' '39. 精确删除 hosts 映射' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then

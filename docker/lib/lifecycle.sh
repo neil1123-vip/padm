@@ -58,6 +58,8 @@ dockerUsage() {
   padm-docker edit --dns-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts-replace <已有精确域名> <新字面 IPv4/IPv6> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --hosts-add <新精确域名> <单个字面 IPv4/IPv6> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --hosts-remove <已有精确域名> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --direct <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --direct-domains <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
