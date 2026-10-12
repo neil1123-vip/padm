@@ -64,7 +64,8 @@ jobs:
             if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi
             capabilities=()
             if [[ "${SELECTOR}" == docker-contracts-fast-rest ]]; then
-              capabilities=(--cap-add SYS_PTRACE --cap-add SYS_ADMIN)
+              # Ubuntu 的 docker-default AppArmor 禁止夹具在私有命名空间挂载。
+              capabilities=(--cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined)
             fi
             git ls-files -z | tar --null -T - -cf "${RUNNER_TEMP}/padm-contracts-source.tar"
             docker run --rm --network none --init "${capabilities[@]}" \
