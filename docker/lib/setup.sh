@@ -1459,7 +1459,7 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 4
             ;;
-        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add|--direct-domains-remove|--block-domains-remove|--dns-domains-add|--dns-domains-remove)
+        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add|--direct-domains-remove|--block-domains-remove|--dns-domains-add|--dns-domains-remove|--warp-domains-add|--warp-domains-remove|--ipv6-domains-add|--ipv6-domains-remove)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingAction=domains
@@ -2048,6 +2048,13 @@ dockerEditCommand() {
             ( "${routingAction}" == domains_add || "${routingAction}" == domains_remove ) ]]; then
             jq -e '.routing.dns != null' "${draft}" >/dev/null || {
                 dockerError '请先启用有效的 DNS 分流，再增删域名规则'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        elif [[ ( "${routingKind}" == warp || "${routingKind}" == ipv6 ) &&
+            ( "${routingAction}" == domains_add || "${routingAction}" == domains_remove ) ]]; then
+            # 增量管理仅操作已有选择性名单；删空由共享分支关闭对应策略。
+            jq -e --arg kind "${routingKind}" '.routing[$kind].mode == "selective"' "${draft}" >/dev/null || {
+                dockerError 'WARP/IPv6 域名增删要求已启用对应的选择性分流，未启用或全局模式不支持'
                 return "${PADM_DOCKER_RC_STATE}"
             }
         fi

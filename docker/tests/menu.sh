@@ -921,8 +921,8 @@ runSitesDriver() {
 }
 
 runRoutingDriver() {
-    local scenario=$1 choice input
-    local inputPrompt
+    local scenario=$1 choice input family
+    local inputPrompt menuLabel familyLabel addChoice removeChoice statusChoice
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
@@ -974,6 +974,12 @@ runRoutingDriver() {
         targetReply 'Docker IPv6 域名出站' $'invalid\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
         targetReply 'IPv6 域名规则' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply 'Docker IPv6 域名出站' $'5\n'
+        targetReply '追加 IPv6 域名规则 CSV' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply 'fixture-ipv6-daily-confirm [y/N]' $'y\n'
+        targetReply 'Docker IPv6 域名出站' $'6\n'
+        targetReply '精确删除 IPv6 域名规则 CSV' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply 'fixture-ipv6-daily-confirm [y/N]' $'y\n'
         targetReply 'Docker IPv6 域名出站' $'2\n'
         targetReply 'Docker IPv6 域名出站' $'3\n'
         targetReply 'Docker IPv6 域名出站' $'4\n'
@@ -987,10 +993,17 @@ runRoutingDriver() {
         targetReply 'Docker WARP 出站' $'4\n'
         targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'fixture-warp-daily-confirm [y/N]' $'y\n'
+        targetReply 'Docker WARP 出站' $'8\n'
+        targetReply '追加 WARP 域名规则 CSV' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply 'fixture-warp-daily-confirm [y/N]' $'y\n'
+        targetReply 'Docker WARP 出站' $'9\n'
+        targetReply '精确删除 WARP 域名规则 CSV' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply 'fixture-warp-daily-confirm [y/N]' $'y\n'
         for choice in 5 6 7; do
             targetReply 'Docker WARP 出站' "${choice}"$'\n'
             targetReply 'fixture-warp-daily-confirm [y/N]' $'y\n'
         done
+        targetReply 'Docker WARP 出站' $'3\n'
         targetReply 'Docker WARP 出站' $'0\n'
         targetReply 'Docker 路由与出站' $'21\n'
         targetReply 'Docker HTTP 中继入站' $'invalid\n'
@@ -1071,6 +1084,12 @@ runRoutingDriver() {
         targetReply 'IPv6 域名规则' $'0\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
         targetReply 'IPv6 域名规则' $'\n'
+        for input in 0 ''; do
+            targetReply 'Docker IPv6 域名出站' $'5\n'
+            targetReply '追加 IPv6 域名规则 CSV' "${input}"$'\n'
+            targetReply 'Docker IPv6 域名出站' $'6\n'
+            targetReply '精确删除 IPv6 域名规则 CSV' "${input}"$'\n'
+        done
         targetReply 'Docker IPv6 域名出站' $'0\n'
         targetReply 'Docker 路由与出站' $'20\n'
         targetReply 'Docker WARP 出站' $'1\n'
@@ -1081,6 +1100,12 @@ runRoutingDriver() {
         targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
         targetReply 'Docker WARP 出站' $'4\n'
         targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
+        for input in 0 ''; do
+            targetReply 'Docker WARP 出站' $'8\n'
+            targetReply '追加 WARP 域名规则 CSV' "${input}"$'\n'
+            targetReply 'Docker WARP 出站' $'9\n'
+            targetReply '精确删除 WARP 域名规则 CSV' "${input}"$'\n'
+        done
         targetReply 'Docker WARP 出站' $'0\n'
         targetReply 'Docker 路由与出站' $'21\n'
         targetReply 'Docker HTTP 中继入站' $'1\n'
@@ -1265,6 +1290,10 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'19\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
         targetReply 'IPv6 域名规则' $'\004'
+        targetReply 'Docker IPv6 域名出站' $'5\n'
+        targetReply '追加 IPv6 域名规则 CSV' $'\004'
+        targetReply 'Docker IPv6 域名出站' $'6\n'
+        targetReply '精确删除 IPv6 域名规则 CSV' $'\004'
         targetReply 'Docker IPv6 域名出站' $'0\n'
         ;;
     warp-eof)
@@ -1273,7 +1302,46 @@ runRoutingDriver() {
         targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'\004'
         targetReply 'Docker WARP 出站' $'4\n'
         targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+        targetReply 'Docker WARP 出站' $'8\n'
+        targetReply '追加 WARP 域名规则 CSV' $'\004'
+        targetReply 'Docker WARP 出站' $'9\n'
+        targetReply '精确删除 WARP 域名规则 CSV' $'\004'
         targetReply 'Docker WARP 出站' $'0\n'
+        ;;
+    selective-domains-invalid|selective-domains-state-failed|selective-domains-confirm-cancel|selective-domains-confirm-eof|selective-domains-commit-failed)
+        for family in ipv6 warp; do
+            if [[ "${family}" == ipv6 ]]; then
+                targetReply 'Docker 路由与出站' $'19\n'
+                menuLabel='Docker IPv6 域名出站' familyLabel=IPv6
+                addChoice=5 removeChoice=6 statusChoice=4
+            else
+                targetReply 'Docker 路由与出站' $'20\n'
+                menuLabel='Docker WARP 出站' familyLabel=WARP
+                addChoice=8 removeChoice=9 statusChoice=3
+            fi
+            for choice in "${addChoice}" "${removeChoice}"; do
+                input=Example.NET
+                [[ "${scenario}" != selective-domains-invalid ]] || input=regexp:bad
+                inputPrompt="追加 ${familyLabel} 域名规则 CSV"
+                [[ "${choice}" == "${addChoice}" ]] ||
+                    inputPrompt="精确删除 ${familyLabel} 域名规则 CSV"
+                targetReply "${menuLabel}" "${choice}"$'\n'
+                targetReply "${inputPrompt}" "${input}"$'\n'
+                case "${scenario}" in
+                selective-domains-confirm-cancel)
+                    targetReply "fixture-${family}-daily-confirm [y/N]" $'n\n'
+                    ;;
+                selective-domains-confirm-eof)
+                    targetReply "fixture-${family}-daily-confirm [y/N]" $'\004'
+                    ;;
+                selective-domains-commit-failed)
+                    targetReply "fixture-${family}-daily-confirm [y/N]" $'y\n'
+                    ;;
+                esac
+            done
+            targetReply "${menuLabel}" "${statusChoice}"$'\n'
+            targetReply "${menuLabel}" $'0\n'
+        done
         ;;
     warp-confirm-cancel|warp-confirm-eof)
         targetReply 'Docker 路由与出站' $'20\n'
@@ -1666,6 +1734,22 @@ edit)
         [[ "$#" -eq 6 && "$3" == entry-fixture && "$4" != not-a-port &&
             "$5" == --confirm && "$6" == PADM-DOCKER-EDIT ]] || exit 2
         exit "${FAIL2BAN_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --warp-domains-add || "${2:-}" == --warp-domains-remove ||
+        "${2:-}" == --ipv6-domains-add || "${2:-}" == --ipv6-domains-remove ]]; then
+        [[ "$#" -eq 3 ]] && dockerSocks5DomainsNormalize "$3" >/dev/null || exit 2
+        [[ "${SELECTIVE_EDIT_PRECHECK_STATUS:-0}" -eq 0 ]] ||
+            exit "${SELECTIVE_EDIT_PRECHECK_STATUS}"
+        family=${2#--}
+        family=${family%%-*}
+        printf 'fixture-%s-daily-confirm [y/N]: ' "${family}"
+        if ! IFS= read -r confirmation; then
+            recordAction "${family}-daily-confirm" "$2" eof
+            exit 2
+        fi
+        recordAction "${family}-daily-confirm" "$2" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction "${family}-daily-commit" "$2"
     elif [[ "${2:-}" == --warp-domains || "${2:-}" == --warp-global ||
         "${2:-}" == --warp-family ]]; then
         case "$2" in
@@ -2167,14 +2251,18 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed ipv6-eof warp-eof warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed ipv6-eof warp-eof \
+    selective-domains-invalid selective-domains-state-failed selective-domains-confirm-cancel selective-domains-confirm-eof selective-domains-commit-failed \
+    warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
-    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
+    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0
+    [[ "${routingCase}" != selective-domains-state-failed ]] || SELECTIVE_EDIT_PRECHECK_STATUS=15
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
         "${routingCase}" != block-ips-change-failed &&
-        "${routingCase}" != dns-domains-change-failed ]] || SITE_EDIT_STATUS=15
+        "${routingCase}" != dns-domains-change-failed &&
+        "${routingCase}" != selective-domains-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
     case "${routingCase}" in
@@ -2182,22 +2270,59 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip'
         expectedRouting+=$'\nedit --region-allow-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-allow-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-off'
-        expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
+        expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com'
+        for ipv6Action in --ipv6-domains-add --ipv6-domains-remove; do
+            expectedRouting+=$'\nedit '"${ipv6Action}"' Example.NET, full:Exact.Example.Com'
+            expectedRouting+=$'\nipv6-daily-confirm '"${ipv6Action}"' y'
+            [[ "${routingCase}" != flow ]] || expectedRouting+=$'\nipv6-daily-commit '"${ipv6Action}"
+        done
+        expectedRouting+=$'\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --warp /root/padm-warp.json\nedit --warp-off\nprotocol routing-status'
         for warpAction in '--warp-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN' \
+            '--warp-domains-add Example.NET, full:Exact.Example.Com' \
+            '--warp-domains-remove Example.NET, full:Exact.Example.Com' \
             '--warp-global' '--warp-family ipv4' '--warp-family ipv6'; do
             expectedRouting+=$'\nedit '"${warpAction}"
             expectedRouting+=$'\nwarp-daily-confirm '"${warpAction%% *}"' y'
             [[ "${routingCase}" != flow ]] || expectedRouting+=$'\nwarp-daily-commit '"${warpAction%% *}"
         done
+        expectedRouting+=$'\nprotocol routing-status'
         expectedRouting+=$'\nedit --http-relay /root/padm-http-relay.json\nedit --http-relay-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --direct-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --direct-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --block-ips-add /root/padm-block ips-add.json\nedit --block-ips-remove /root/padm-block ips-remove.json\nprotocol routing-status'
         expectedRouting+=$'\nedit --dns-domains-add Example.NET, full:Exact.Example.Com\nedit --dns-domains-remove Example.NET, full:Exact.Example.Com\nprotocol routing-status'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
-        [[ "$(grep -Fc 'fixture-warp-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 4 ]] ||
+        [[ "$(grep -Fc 'fixture-warp-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 6 ]] ||
             fail 'WARP 日常编辑没有每次只确认一次'
+        [[ "$(grep -Fc 'fixture-ipv6-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'IPv6 域名增删没有每次只确认一次'
+        ;;
+    selective-domains-invalid|selective-domains-state-failed|selective-domains-confirm-cancel|selective-domains-confirm-eof|selective-domains-commit-failed)
+        selectiveInput=Example.NET selectiveExit=2 selectiveConfirmation=
+        [[ "${routingCase}" != selective-domains-invalid ]] || selectiveInput=regexp:bad
+        case "${routingCase}" in
+        selective-domains-confirm-cancel) selectiveConfirmation=n ;;
+        selective-domains-confirm-eof) selectiveConfirmation=eof ;;
+        selective-domains-commit-failed) selectiveConfirmation=y selectiveExit=15 ;;
+        selective-domains-state-failed) selectiveExit=15 ;;
+        esac
+        for selectiveFamily in ipv6 warp; do
+            for selectiveAction in add remove; do
+                selectiveFlag="--${selectiveFamily}-domains-${selectiveAction}"
+                [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
+                expectedRouting+="edit ${selectiveFlag} ${selectiveInput}"
+                [[ -z "${selectiveConfirmation}" ]] ||
+                    expectedRouting+=$'\n'"${selectiveFamily}-daily-confirm ${selectiveFlag} ${selectiveConfirmation}"
+            done
+            expectedRouting+=$'\nprotocol routing-status'
+            selectiveConfirmCount=0
+            [[ -z "${selectiveConfirmation}" ]] || selectiveConfirmCount=2
+            [[ "$(grep -Fc "fixture-${selectiveFamily}-daily-confirm [y/N]" "${CONTROL_LOG}" || true)" -eq "${selectiveConfirmCount}" ]] ||
+                fail "${selectiveFamily} 域名增删确认次数错误"
+        done
+        [[ "$(grep -Fc "操作失败，退出码: ${selectiveExit}" "${CONTROL_LOG}")" -eq 4 ]] ||
+            fail 'WARP/IPv6 域名增删失败未显示退出码并继续诊断'
         ;;
     warp-confirm-cancel|warp-confirm-eof)
         warpConfirmation=n
@@ -2286,8 +2411,10 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' \
             '5. 追加自定义直连例外' '6. 删除自定义直连例外' '19. IPv6 域名出站' \
             '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' \
+            '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
             '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
             '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \
+            '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' '删空关闭，需要重新导入 WARP' \
             '22. 追加 Direct 直连例外' '23. 追加 Block 域名阻断' \
             '24. 删除 Direct 直连例外' '25. 删除 Block 域名阻断' \
             '26. 追加 IP/CIDR 阻断' '27. 精确删除 IP/CIDR 阻断' \
@@ -2299,7 +2426,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail '路由诊断失败后没有继续菜单'
     fi
 done
-unset SITE_EDIT_STATUS ROUTING_STATUS
+unset SITE_EDIT_STATUS ROUTING_STATUS SELECTIVE_EDIT_PRECHECK_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu

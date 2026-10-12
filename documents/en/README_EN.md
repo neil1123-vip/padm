@@ -1431,9 +1431,18 @@ only the default outbound and does not remove other policies.
 
 ```bash
 padm-docker edit --ipv6 selective --ipv6-domains 'example.com,full:api.example.net' --preview
+padm-docker edit --ipv6-domains-add 'full:updates.example.net' --preview
+padm-docker edit --ipv6-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --ipv6 global --confirm PADM-DOCKER-EDIT
 padm-docker edit --ipv6-off --confirm PADM-DOCKER-EDIT
 ```
+
+IPv6 submenu options `5/6` and `--ipv6-domains-add/--ipv6-domains-remove <CSV>` change
+an existing selective list. Missing or global IPv6 policies are rejected. Additions
+normalize rules, preserve order and deduplicate, with a 256-rule merged limit.
+Removal requires every complete normalized rule to exist or rejects the whole batch.
+Removing the last rule disables IPv6 without switching to global mode; other routes
+and traffic totals are preserved.
 
 Direct exceptions and domain/IP/BT blocking precede selective IPv6, which precedes
 SOCKS5. Global IPv6 preserves explicit SOCKS5 rules, but cannot share the default
@@ -1465,6 +1474,8 @@ domain-rule types; global mode requires an empty `domains` array.
 padm-docker edit --warp /root/warp.json --preview
 padm-docker edit --warp /root/warp.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-domains 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --warp-domains-add 'full:updates.example.net' --preview
+padm-docker edit --warp-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-global --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-family ipv6 --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-off --confirm PADM-DOCKER-EDIT
@@ -1474,6 +1485,13 @@ Daily edits require an existing valid WARP configuration. Domain replacement sel
 selective mode, global mode clears domains, and family changes only the address family.
 Keys, Peer, tunnel address and reserved bytes remain unchanged. These actions are mutually
 exclusive; preview/cancellation does not commit, and conflicting default egress is rejected.
+WARP submenu options `8/9` and `--warp-domains-add/--warp-domains-remove <CSV>` change
+an existing selective list and reject missing or global WARP configurations. They
+use stable normalized additions, a 256-rule merged limit and exact batch removal.
+While rules remain, mode, family, keys, Peer, tunnel address and reserved bytes are
+preserved. Removing the last rule disables WARP and removes its current private
+configuration, so enabling it later requires reimporting the JSON. It never switches
+implicitly to global mode.
 Supply parameters from an existing WARP account; no account registration or
 third-party registration-tool installation is performed. The Peer is fixed at
 `162.159.192.1:2408` and MTU at `1280`. `family` selects one local tunnel address

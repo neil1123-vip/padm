@@ -780,7 +780,8 @@ dockerMenuIPv6() {
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker IPv6 域名出站\n'
         printf '%s\n' '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' \
-            '3. 关闭 IPv6 出站策略' '4. 查看路由状态' '0. 返回'
+            '3. 关闭 IPv6 出站策略' '4. 查看路由状态' \
+            '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -796,6 +797,16 @@ dockerMenuIPv6() {
         2) dockerMenuRun edit --ipv6 global || true ;;
         3) dockerMenuRun edit --ipv6-off || true ;;
         4) dockerMenuRun protocol routing-status || true ;;
+        5)
+            dockerSetupRead domains '追加 IPv6 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${domains}" ]] || continue
+            dockerMenuRun edit --ipv6-domains-add "${domains}" || true
+            ;;
+        6)
+            dockerSetupRead domains '精确删除 IPv6 域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${domains}" ]] || continue
+            dockerMenuRun edit --ipv6-domains-remove "${domains}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -948,7 +959,8 @@ dockerMenuWarp() {
         printf '\nDocker WARP 出站\n'
         printf '%s\n' '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '3. 查看路由状态' \
             '4. 替换 WARP 域名规则' '5. 切换 WARP 全局出站' \
-            '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' '0. 返回'
+            '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \
+            '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -971,6 +983,16 @@ dockerMenuWarp() {
         5) dockerMenuRun edit --warp-global || true ;;
         6) dockerMenuRun edit --warp-family ipv4 || true ;;
         7) dockerMenuRun edit --warp-family ipv6 || true ;;
+        8)
+            dockerSetupRead input '追加 WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${input}" ]] || continue
+            dockerMenuRun edit --warp-domains-add "${input}" || true
+            ;;
+        9)
+            dockerSetupRead input '精确删除 WARP 域名规则 CSV（删空关闭，需要重新导入 WARP；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${input}" ]] || continue
+            dockerMenuRun edit --warp-domains-remove "${input}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

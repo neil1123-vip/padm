@@ -405,10 +405,16 @@ IP 模式不为域名目标提前解析或在解析后复查；CN 数据沿用�
 
 ```bash
 padm-docker edit --ipv6 selective --ipv6-domains 'example.com,full:api.example.net' --preview
+padm-docker edit --ipv6-domains-add 'full:updates.example.net' --preview
+padm-docker edit --ipv6-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --ipv6 global --confirm PADM-DOCKER-EDIT
 padm-docker edit --ipv6-off --confirm PADM-DOCKER-EDIT
 ```
 
+IPv6 子菜单 `5/6` 与 `--ipv6-domains-add/--ipv6-domains-remove <CSV>` 增删已有
+selective 名单，未启用或 global 模式明确拒绝。追加规范化、保留顺序并稳定去重，
+合并最多 256 条；删除要求每条完整规范化规则已存在，否则整组拒绝。
+删空关闭 IPv6 策略，不切全局模式；其它路由和累计流量保持。
 Direct 例外、域名/IP/BT 阻断优先于选择性 IPv6，选择性 IPv6 优先于 SOCKS5；
 全局 IPv6 保留显式 SOCKS5 分流，但不能与全局 SOCKS5 同时定义默认出口。
 匹配的域名仅使用 AAAA 地址，不回退使用 A 地址；系统 resolver 仍可能查询 A。
@@ -431,6 +437,8 @@ TUN/TProxy 的宿主网络模式不属于本阶段支持范围，完整 WARP 和
 padm-docker edit --warp /root/warp.json --preview
 padm-docker edit --warp /root/warp.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-domains 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --warp-domains-add 'full:updates.example.net' --preview
+padm-docker edit --warp-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-global --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-family ipv6 --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-off --confirm PADM-DOCKER-EDIT
@@ -439,6 +447,10 @@ padm-docker edit --warp-off --confirm PADM-DOCKER-EDIT
 日常编辑要求已有合法 WARP 配置，不需重写私有 JSON。域名替换切为 selective，
 全局模式清空域名，地址族只改 family；密钥、Peer、隧道地址和 reserved 保持。
 这些动作互斥，预览和取消不提交，默认出口冲突在写入前拒绝。
+WARP 子菜单 `8/9` 与 `--warp-domains-add/--warp-domains-remove <CSV>` 增删已有
+selective 名单，未启用或 global 模式明确拒绝。稳定追加、256 条上限与精确删除
+沿用域名增量规则，非空时保留 mode、family、密钥、Peer、隧道地址及 reserved。
+删空关闭 WARP 并移除当前私有配置，之后须重新导入；不会隐式切到全局模式。
 账号参数由用户已有的 WARP 配置提供，不自动注册账号或安装第三方注册器。
 固定 Peer 为 `162.159.192.1:2408`、MTU 为 `1280`；`family` 选择单一本地隧道地址及
 匹配域名的解析地址族。IPv4 为 `172.16.0.2/32`，IPv6 为导入的 `ipv6_address/128`；

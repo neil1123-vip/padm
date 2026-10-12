@@ -2484,6 +2484,30 @@ WARP 定向 46272 ms、菜单 PTY 59749 ms，通过未启用/参数/组合拒绝
 未修改渲染或私有 Peer 合同，不重复已有真实两核心出站矩阵。
 域名增量删除、完整区域策略、Cloudflare 公网出口、原生宿主和 arm64 仍 deferred。
 
+#### 5B.4d 已有 selective WARP/IPv6 域名增删
+
+复用共享域名增删分支，新增 `--warp-domains-add/remove <CSV>` 与
+`--ipv6-domains-add/remove <CSV>`；WARP 子菜单追加 8/9、IPv6 子菜单追加 5/6。
+仅已有合法 selective 分流可操作，缺失或 global 模式返回 `15` 且不调用 Compose。
+输入沿用四类域名规则、规范化与稳定去重；追加保留历史顺序，合并最多 256 条，
+删除须所有完整规范化规则都存在，否则整组拒绝；full 与 domain 不能混删。
+非空时仅改 domains，WARP 模式、地址族和所有私有字段及其它规格保持。
+删空关闭对应分流并清空 routing，不自动变全局；WARP 私有配置随子项移除，
+以后启用需重新导入，删除前菜单明确说明。
+缺参、空值、非法 CSV 和专项冲突返回 `2`；预览/取消、健康失败和 INT/TERM
+沿用原候选事务及累计保护，不新增 schema、能力标记、生成器、依赖或网络权限。
+WARP 与 IPv6 各跑自己的定向 selector，菜单和完整合同集中各一次；
+保持三槽预算并复用工具镜像，不重复未变生成器的真实出站矩阵。
+完整区域策略、Cloudflare 公网、真实宿主、arm64 和可信发布仍 deferred。
+2026-10-12 Linux amd64 WARP 定向内部 77408 ms、入口 78406 ms，
+IPv6 定向内部 65313 ms、入口 66341 ms，菜单内部 67316 ms、入口 68294 ms，
+均 Jobs 2、exit 0；两个新增 marker 均实际执行，三次归档同
+`A7D89300...5056E1`。完整合同 48/48、内部 402637 ms、入口 403615 ms，
+Jobs 6、排队 384 ms、cache_hit=false；证据
+`.tmp-regression-docker-7c688448b08c4470a10bfead844d3406/`。
+本阶段 10 个代码/合同/文档输入与完整快照一致；未重复真实 WARP/IPv6
+出站矩阵，公网、宿主、arm64、可信发布与完整区域策略继续 deferred。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP
