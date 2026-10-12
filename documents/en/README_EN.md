@@ -194,7 +194,27 @@ integrity checks. The resulting spec stores only ordinary `site.mode=static`, ne
 the theme identity; old bundles keep their existing default, static-directory, and
 302 workflows.
 
-The same menu offers ALPN diagnostics, recommended repair, and three manual orders
+Docker `Protocols & entry → XHTTP management` manages presets, XMUX, Padding,
+and two header switches for existing v3 Xray protocol `2` listeners:
+
+```bash
+padm-docker protocol xhttp-status entry-xhttp
+padm-docker edit --xhttp-headers entry-xhttp true false --preview
+padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+```
+
+The values are `noGRPCHeader` followed by `noSSEHeader`. `true` removes the
+client stream POST gRPC Content-Type or server download SSE Content-Type,
+respectively. Packet-up requests already lack that gRPC header. Explicit `false`
+is retained; clear deletes both fields and restores defaults. Either explicit
+field requires `x-padm-xhttp-headers`. Menu items `10` and `11` set and clear them.
+Other listeners, XMUX, Padding, credentials, subscription/share groups, quotas,
+and totals are preserved. Arbitrary headers, sc*, downloadSettings, H3/CDN,
+and split upload/download remain unavailable. Header changes do not establish
+camouflage or performance benefits.
+
+The same site menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:
 
 ```bash

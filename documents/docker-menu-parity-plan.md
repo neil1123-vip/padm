@@ -1203,7 +1203,7 @@ HTTP/2、五组 XMUX 创建及单并发/自定义的并发上限分支。服务�
 以及认证、其它入口、端口别名、额度、主订阅和分享组保持由生产 CLI 合同验证。
 真实脚本的 jq 作用域/必需字段错误和独审发现的派生丢 XMUX 回归均已修复；
 失败日志保留，重复源码归档在验收后清理，证据 `.tmp-xhttp-close/acceptance.md`。
-不据此宣称长时复用或吞吐收益；有限 Padding 见 3D.5，headers/sc*、downloadSettings、H3/CDN、
+不据此宣称长时复用或吞吐收益；有限 Padding 见 3D.5，首部开关见 3D.6，任意 headers/sc*、downloadSettings、H3/CDN、
 上下行分离和完整协议管理仍 `deferred`，公网、原生宿主、arm64 和可信发布仍待验。
 
 #### 3D.5 有限 XHTTP Padding
@@ -1234,8 +1234,51 @@ Jobs `6`、`416875 ms`、exit `0`，未命中缓存。
 服务端逐入口等于 spec，原五组 `15` 次初始和 `5` 次恢复请求、精确 `20` 次原点请求，
 TLS 1.3/h2、模式及 XMUX 运行分支断言保持。
 证据 `.tmp-xhttp-padding-close/acceptance.md`，失败日志保留，重复归档清理。
-不证明填充字节分布、抗识别、长时复用或吞吐收益；headers/sc*、downloadSettings、
+不证明填充字节分布、抗识别、长时复用或吞吐收益；有限首部开关见 3D.6，任意 headers/sc*、downloadSettings、
 H3/CDN、上下行分离和完整管理仍未开放，公网、原生宿主、arm64 与可信发布仍待验。
+
+#### 3D.6 有限 XHTTP 首部开关
+
+范围保持已有 v3 Xray 协议 `2` 单入口，不开放自定义 headers。
+CLI `edit --xhttp-headers <入口 ID> <true|false> <true|false>` 按
+`noGRPCHeader`、`noSSEHeader` 顺序设置，`--xhttp-headers-clear <入口 ID>`
+删除两字段恢复缺省；菜单第 `10` 项设置、第 `11` 项恢复缺省。
+规格仅接受可选 boolean，拒绝 null、数值、字符串、数组和未知高级字段。
+显式 `false` 与缺省分开：配置与 URI 保留前者，缺省不补字段或 `extra`；
+任一字段存在都要求 `x-padm-xhttp-headers`，旧包只兼容无显式字段的规格。
+
+固定 Xray `26.3.27` 中，`noGRPCHeader=true` 取消客户端 stream-up/stream-one
+POST 的 `Content-Type: application/grpc`；`packet-up` POST 和分流 GET
+本来没有该首部，开关不改变它们。Reality 的 `auto` 实际选用 `stream-one`。
+`noSSEHeader=true` 取消服务端 stream-one POST 或分流 GET 下载响应的
+`Content-Type: text/event-stream`，不影响上传响应。缺省和 `false` 保持原行为。
+第一门直接运行固定镜像二进制，在独立 `--network none` Linux 容器的回环 TLS/h2
+记录 HTTP/2 HEADERS；三模式、三取值、客户端与服务端共 `18/18` 对照通过，
+另核对上传 POST 非 SSE 控制。客户端固定自签证书摘要，不使用跳过校验开关。
+
+专项只豁免所选入口两字段，保留 mode/XMUX/Padding、其它入口、认证与累计；
+复制、同协议派生继承显式值，普通规格导入或新入口不能绕过冻结。
+服务端生成和客户端 `extra` 同步，同一链接生成器刷新主订阅、分享组和 CLI；
+沿用预览、确认、备份及失败/信号恢复，不增加发布或恢复分支。
+2026-10-12 定向 `docker-xhttp`、菜单 PTY 均 exit 0，入口分别
+204487 / 82124 ms，Jobs 2，同源码快照 `6E303D5C...C22076`。
+正式 `docker-xhttp-real` exit 0、26281 ms；18 组外层首部观察、
+五组 Reality 双端 TT/TF/FT/FF/缺省、严格 URI boolean/存在性、
+原 20 条业务请求、h2/mode/XMUX 命中断言均通过。
+首部观察的 TLS 使用证书固定摘要或受信 CA/主机名校验；
+新增 cid 字节串解码修复后通过，首轮失败日志保留。
+工具层通过 Debian 官方源补 `python3-h2` / `python3-yaml`，复用原镜像大层；
+独立只读生产审查无阻断，容器、卷及临时私钥已清理。
+证据 `.tmp-regression-docker-01ce9bf2a2754806b0eac6ff76712f76/`、
+`.tmp-regression-docker-982c1bb4b8504e2b89a9a6401a1d24d9/`、
+`.tmp-regression-docker-c711111f21064b4a81774a7e5f2e3c70/`。
+集中 `docker-contracts -Jobs 6` 49/49、exit 0，入口 642923 ms、
+排队 3898 ms、cache_hit=false；复用同一工具镜像，不重复完整矩阵。
+证据 `.tmp-regression-docker-f5f002d9b7dc41d798f7d2c7eb94b197/`；
+17 个变更文件与该完整快照逐字节匹配，之后仅补验收文字。
+Bash/ShellCheck error、JSON、Python AST 与 workflow YAML 检查通过。
+任意 headers/sc*、downloadSettings、H3/CDN、上下行分离与完整管理仍 `deferred`；
+首部变化不证明抗识别、长时复用或吞吐收益，公网/原生宿主/arm64/可信发布待验。
 
 ## 第四步：用户、订阅与服务维护
 

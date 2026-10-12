@@ -176,6 +176,25 @@ VLESS/Trojan gRPC TLS 在 Xray 首配中分别选 `14`/`15`，复用 Nginx HTTP/
 使用独立 `grpc_tls` 字段，服务名为 1–64 位字母、数字、下划线或连字符，编辑菜单 `12` 可修改。
 支持通用字段编辑、Xray 内复制/删除及 `vless://`/`trojan://` 链接；不接受 sing-box、宿主集成或 fallback。
 单独部署只提供本地链接，和协议 21 混合时可纳入其 HTTPS 订阅。
+
+Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的预设、
+XMUX、Padding 和两个首部开关：
+
+```bash
+padm-docker protocol xhttp-status entry-xhttp
+padm-docker edit --xhttp-headers entry-xhttp true false --preview
+padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+```
+
+两个值依次为 `noGRPCHeader`、`noSSEHeader`。`true` 分别去掉客户端 stream
+POST 的 gRPC Content-Type 和服务端下载响应的 SSE Content-Type；`packet-up`
+原本没有 gRPC 请求首部。显式 `false` 保留，clear 删除字段恢复缺省；
+任一字段存在要求 `x-padm-xhttp-headers`。菜单 `10` 设置、`11` 恢复缺省，
+修改保持其它入口、XMUX、Padding、认证、主订阅/分享组和额度累计。
+任意 headers、sc*、downloadSettings、H3/CDN 与上下行分离仍未开放，
+首部变化不代表抗识别或性能收益。
+
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；
 `fallback_tls` 固定域名及两个内部端口，默认 `31300`/`31302`，同核复制可共享后端。

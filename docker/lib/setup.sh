@@ -901,7 +901,11 @@ dockerProtocolCommand() (
                hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"}),
              explicit:(.xhttp | has("xmux")),
              xPaddingBytes:(.xhttp.xPaddingBytes // "100-1000"),
-             padding_explicit:(.xhttp | has("xPaddingBytes"))}] as $entries |
+             padding_explicit:(.xhttp | has("xPaddingBytes")),
+             noGRPCHeader:(.xhttp.noGRPCHeader // false),
+             noSSEHeader:(.xhttp.noSSEHeader // false),
+             grpc_header_explicit:(.xhttp | has("noGRPCHeader")),
+             sse_header_explicit:(.xhttp | has("noSSEHeader"))}] as $entries |
           if $listener != "" and ($entries | length) == 0 then error("入口不支持 XHTTP 管理")
           else {entries:$entries} end
         ' "${normalized}" || {
@@ -1211,6 +1215,12 @@ dockerEditFields() {
                         else . end |
                         if $source.id == 2 and ($source.xhttp | has("xPaddingBytes")) then
                           .xhttp.xPaddingBytes = $source.xhttp.xPaddingBytes
+                        else . end |
+                        if $source.id == 2 and ($source.xhttp | has("noGRPCHeader")) then
+                          .xhttp.noGRPCHeader = $source.xhttp.noGRPCHeader
+                        else . end |
+                        if $source.id == 2 and ($source.xhttp | has("noSSEHeader")) then
+                          .xhttp.noSSEHeader = $source.xhttp.noSSEHeader
                         else . end
                       elif .id == 26 then .grpc = {service_name: "grpc"} else . end
                     else . end |
@@ -1409,6 +1419,7 @@ dockerEditCommand() {
     local portAlias= portAliasListener= portAliasPort=
     local cdnAction= cdnListener= cdnAddresses=
     local xhttpAction= xhttpListener= xhttpPreset= xhttpValues='{}' xhttpPadding=null
+    local xhttpNoGrpc=false xhttpNoSse=false
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -1645,6 +1656,20 @@ dockerEditCommand() {
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             xhttpAction=padding-clear xhttpListener=$2
+            shift 2
+            ;;
+        --xhttp-headers)
+            [[ "$#" -ge 4 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            case "$3" in true|false) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            case "$4" in true|false) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            xhttpAction=headers xhttpListener=$2 xhttpNoGrpc=$3 xhttpNoSse=$4
+            shift 4
+            ;;
+        --xhttp-headers-clear)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=headers-clear xhttpListener=$2
             shift 2
             ;;
         --cdn-entry)
@@ -2049,7 +2074,8 @@ dockerEditCommand() {
     fi
     if [[ -n "${xhttpAction}" ]]; then
         jq --arg listener "${xhttpListener}" --arg action "${xhttpAction}" \
-            --arg preset "${xhttpPreset}" --argjson xmux "${xhttpValues}" --argjson padding "${xhttpPadding}" '
+            --arg preset "${xhttpPreset}" --argjson xmux "${xhttpValues}" --argjson padding "${xhttpPadding}" \
+            --argjson noGrpc "${xhttpNoGrpc}" --argjson noSse "${xhttpNoSse}" '
           if .schema_version != 3 or
             ([.core.protocols[] | select(.listener_id == $listener and .id == 2 and .core == "xray")] | length) != 1
           then error("入口不支持 XHTTP 管理")
@@ -2058,6 +2084,8 @@ dockerEditCommand() {
             elif $action == "xmux" then .xhttp.xmux = $xmux
             elif $action == "padding" then .xhttp.xPaddingBytes = $padding
             elif $action == "padding-clear" then del(.xhttp.xPaddingBytes)
+            elif $action == "headers" then .xhttp.noGRPCHeader = $noGrpc | .xhttp.noSSEHeader = $noSse
+            elif $action == "headers-clear" then del(.xhttp.noGRPCHeader,.xhttp.noSSEHeader)
             else
               .xhttp.mode = (if $preset == "compatible" then "packet-up"
                 elif $preset == "stream" then "stream-up" else "auto" end) |
@@ -2492,11 +2520,12 @@ dockerEditCommand() {
         ([$new.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ($old | without_fail2ban_settings) == ($new | without_fail2ban_settings)
        elif $xhttp_listener != "" then
-        # 每个专项只豁免自己的字段；预设调整模式和客户端 XMUX，保留双端 Padding。
+        # 每个专项只豁免自己的字段，预设保留 Padding 与首部开关。
         def without_xhttp:
           .core.protocols |= map(if .listener_id == $xhttp_listener then
             if $xhttp_action == "preset" then del(.xhttp.mode, .xhttp.xmux)
             elif $xhttp_action == "padding" or $xhttp_action == "padding-clear" then del(.xhttp.xPaddingBytes)
+            elif $xhttp_action == "headers" or $xhttp_action == "headers-clear" then del(.xhttp.noGRPCHeader,.xhttp.noSSEHeader)
             else del(.xhttp.xmux) end
           else . end);
         ($old | without_xhttp) == ($new | without_xhttp)
@@ -2567,7 +2596,9 @@ dockerEditCommand() {
             (if reality and ($entry | reality) then
               shared == ($entry | shared) and
               ($entry.id != 2 or (.xhttp.xmux == $entry.xhttp.xmux and
-                .xhttp.xPaddingBytes == $entry.xhttp.xPaddingBytes))
+                .xhttp.xPaddingBytes == $entry.xhttp.xPaddingBytes and
+                .xhttp.noGRPCHeader == $entry.xhttp.noGRPCHeader and
+                .xhttp.noSSEHeader == $entry.xhttp.noSSEHeader))
             else
               (fixed | del(.listener_id, .core, .websocket.backend_port, .websocket.tls_port,
                 .httpupgrade.backend_port, .httpupgrade.tls_port, .grpc_tls.backend_port, .grpc_tls.tls_port)) ==

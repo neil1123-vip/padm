@@ -155,13 +155,14 @@ dockerMenuProtocols() {
 }
 
 dockerMenuXhttp() {
-    local choice listener preset concurrency requests seconds padding
+    local choice listener preset concurrency requests seconds padding noGrpc noSse
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker XHTTP 管理（已有 Xray Reality 入口）\n'
         printf '%s\n' '1. 查看状态' '2. 日常预设' '3. 兼容预设' '4. 流式预设' \
             '5. 单并发预设' '6. 自定义 XMUX' '7. 恢复缺省 XMUX' \
-            '8. 设置 Padding' '9. 恢复缺省 Padding' '0. 返回'
+            '8. 设置 Padding' '9. 恢复缺省 Padding' \
+            '10. 设置首部开关' '11. 恢复缺省首部' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -170,7 +171,7 @@ dockerMenuXhttp() {
         case "${choice}" in
         0) return 0 ;;
         1) dockerMenuRun protocol xhttp-status || true ;;
-        2|3|4|5|6|7|8|9)
+        2|3|4|5|6|7|8|9|10|11)
             dockerMenuRun protocol xhttp-status || continue
             dockerSetupRead listener 'XHTTP 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" && "${listener}" != --* ]] || continue
@@ -187,6 +188,12 @@ dockerMenuXhttp() {
                 dockerMenuRun edit --xhttp-padding "${listener}" "${padding}" || true
             elif [[ "${choice}" == 9 ]]; then
                 dockerMenuRun edit --xhttp-padding-clear "${listener}" || true
+            elif [[ "${choice}" == 10 ]]; then
+                dockerSetupRead noGrpc 'noGRPCHeader（true/false，0 返回）[false]: ' false &&
+                    dockerSetupRead noSse 'noSSEHeader（true/false，0 返回）[false]: ' false || continue
+                dockerMenuRun edit --xhttp-headers "${listener}" "${noGrpc}" "${noSse}" || true
+            elif [[ "${choice}" == 11 ]]; then
+                dockerMenuRun edit --xhttp-headers-clear "${listener}" || true
             else
                 case "${choice}" in
                 2) preset=daily ;;

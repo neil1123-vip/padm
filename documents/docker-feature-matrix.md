@@ -57,7 +57,11 @@ XMUX 三键自定义/清除、CLI/菜单状态和统一链接发布。显式 XMU
 `1..4096`；这是本阶段产品边界。服务端和客户端 URI `extra` 同值并合并 XMUX，
 显式字段要求 `x-padm-xhttp-padding`，缺省旧包和旧链接保持；`0`/`0-0` 拒绝，
 不能关闭，clear 恢复 Xray 缺省 `100-1000`。菜单、状态、冻结与事务已接入。
-完整管理继续 `deferred`，headers/sc*、downloadSettings、H3/CDN 与上下行分离未开放，
+3D.6 增加已有单入口的 `noGRPCHeader`/`noSSEHeader` 布尔开关与清除，
+显式 `false` 保留，缺省不补字段；任一键存在要求 `x-padm-xhttp-headers`。
+客户端 stream POST 的 gRPC 首部与服务端下载 SSE 首部分别控制，
+`packet-up` 原本没有 gRPC 请求首部；三模式的固定 Xray TLS/h2 首部对照通过。
+完整管理继续 `deferred`，任意 headers/sc*、downloadSettings、H3/CDN 与上下行分离未开放，
 填充字节分布、抗识别、长时复用和吞吐收益未证明；本地 amd64 合同、菜单、
 五组真实链路与 49 项完整回归已通过。
 3C.3 新增 sing-box Hysteria2：首配、完整 v3 规格导入、参数编辑、复制/删除及本地分享链接，

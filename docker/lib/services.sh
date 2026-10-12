@@ -438,7 +438,9 @@ dockerConfigureSpecValidate() {
              .core == "xray" and
              (.xhttp | exact(["path", "host", "mode"] +
                  (if has("xmux") then ["xmux"] else [] end) +
-                 (if has("xPaddingBytes") then ["xPaddingBytes"] else [] end)) and
+                 (if has("xPaddingBytes") then ["xPaddingBytes"] else [] end) +
+                 (if has("noGRPCHeader") then ["noGRPCHeader"] else [] end) +
+                 (if has("noSSEHeader") then ["noSSEHeader"] else [] end)) and
                (.path | type == "string" and test("^/[A-Za-z0-9._~/-]{1,128}$") and
                  (explode | all(. > 32 and . != 127))) and
                (.host | hostname and (explode | all(. > 32 and . != 127))) and
@@ -449,7 +451,9 @@ dockerConfigureSpecValidate() {
                    (.hMaxRequestTimes | xhttp_value(0; 2147483647)) and
                    (.hMaxReusableSecs | xhttp_value(0; 2147483647)))
                 else true end) and
-               (if has("xPaddingBytes") then (.xPaddingBytes | xhttp_value(1; 4096)) else true end))
+               (if has("xPaddingBytes") then (.xPaddingBytes | xhttp_value(1; 4096)) else true end) and
+               (if has("noGRPCHeader") then (.noGRPCHeader | type == "boolean") else true end) and
+               (if has("noSSEHeader") then (.noSSEHeader | type == "boolean") else true end))
            elif .id == 26 then
              (.grpc | exact(["service_name"]) and
                (.service_name | type == "string" and test("^[A-Za-z0-9._-]{1,64}$") and
@@ -1831,7 +1835,9 @@ dockerGenerateXrayConfig() {
             } + (if .id == 2 then {
               xhttpSettings: {path: .xhttp.path, host: .xhttp.host, mode: .xhttp.mode,
                 xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}} +
-                (if .xhttp | has("xPaddingBytes") then {xPaddingBytes:.xhttp.xPaddingBytes} else {} end)
+                (if .xhttp | has("xPaddingBytes") then {xPaddingBytes:.xhttp.xPaddingBytes} else {} end) +
+                (if .xhttp | has("noGRPCHeader") then {noGRPCHeader:.xhttp.noGRPCHeader} else {} end) +
+                (if .xhttp | has("noSSEHeader") then {noSSEHeader:.xhttp.noSSEHeader} else {} end)
             } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end)),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
           } elif .id == 27 or .id == 28 or .id == 29 then {
@@ -2775,10 +2781,12 @@ dockerGenerateSubscription() {
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
       elif .id == 2 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
-          (if .xhttp | has("xmux") or has("xPaddingBytes") then
+          (if .xhttp | has("xmux") or has("xPaddingBytes") or has("noGRPCHeader") or has("noSSEHeader") then
             "&extra=\((.xhttp |
               (if has("xmux") then {xmux} else {} end) +
-              (if has("xPaddingBytes") then {xPaddingBytes} else {} end)) | tojson | @uri)"
+              (if has("xPaddingBytes") then {xPaddingBytes} else {} end) +
+              (if has("noGRPCHeader") then {noGRPCHeader} else {} end) +
+              (if has("noSSEHeader") then {noSSEHeader} else {} end)) | tojson | @uri)"
            else "" end) +
           "#\(.name | @uri)"
       elif .id == 26 then

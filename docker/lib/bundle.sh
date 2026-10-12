@@ -414,6 +414,9 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].core.protocols[]; (.xhttp // {}) | has("xPaddingBytes")) then
             $schema[0]["x-padm-xhttp-padding"] == true
           else true end) and
+          (if any($spec[0].core.protocols[]; (.xhttp // {}) | has("noGRPCHeader") or has("noSSEHeader")) then
+            $schema[0]["x-padm-xhttp-headers"] == true
+          else true end) and
           (if ($spec[0].tls // {}) | has("http01") then
             $schema[0]["x-padm-acme-webroot"] == true
           else true end) and

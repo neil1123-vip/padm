@@ -24,6 +24,9 @@ RUN apt-get -o Acquire::Retries=3 update \
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 install -y --no-install-recommends fail2ban \
     && rm -rf /var/lib/apt/lists/*
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends python3-h2 python3-yaml \
+    && rm -rf /var/lib/apt/lists/*
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-regression
 
 WORKDIR /work

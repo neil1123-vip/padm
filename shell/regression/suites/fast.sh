@@ -251,6 +251,14 @@ runDockerXhttpRegression() {
 runDockerXhttpRealRegression() {
     bash -n "${PROJECT_ROOT}/docker/tests/xhttp-real.sh"
     shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/xhttp-real.sh"
+    python3 - "${PROJECT_ROOT}/docker/tests/xhttp-headers-real.py" <<'PY'
+import ast
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+ast.parse(source.read_text(), filename=str(source))
+PY
     bash "${PROJECT_ROOT}/docker/tests/xhttp-real.sh"
 }
 
