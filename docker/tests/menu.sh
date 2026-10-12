@@ -966,7 +966,7 @@ runControlDriver() {
 }
 
 runSitesDriver() {
-    local scenario=$1 alpnOrder alpnAction
+    local scenario=$1 alpnOrder alpnAction themeChoice
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'16\n'
     : >"${TLS_WIZARD_ACTIONS}"
@@ -989,6 +989,10 @@ runSitesDriver() {
             targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
             targetReply '请选择 ALPN 顺序（0 返回）' "${alpnOrder}"$'\n'
         done
+        for themeChoice in 1 2 3; do
+            targetReply 'Docker 站点管理' $'8\n'
+            targetReply '请选择站点主题（0 返回）' "${themeChoice}"$'\n'
+        done
         ;;
     cancel)
         targetReply 'Docker 站点管理' $'2\n'
@@ -1009,6 +1013,14 @@ runSitesDriver() {
         targetReply 'Docker 站点管理' $'7\n'
         targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
         targetReply '请选择 ALPN 顺序（0 返回）' $'invalid\n'
+        for themeChoice in 0 invalid; do
+            targetReply 'Docker 站点管理' $'8\n'
+            targetReply '请选择站点主题（0 返回）' "${themeChoice}"$'\n'
+        done
+        ;;
+    template-eof)
+        targetReply 'Docker 站点管理' $'8\n'
+        targetReply '请选择站点主题（0 返回）' $'\004'
         ;;
     static-eof|redirect-eof)
         if [[ "${scenario}" == static-eof ]]; then
@@ -1049,6 +1061,8 @@ runSitesDriver() {
         targetReply 'Docker 站点管理' $'7\n'
         targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
         targetReply '请选择 ALPN 顺序（0 返回）' $'2\n'
+        targetReply 'Docker 站点管理' $'8\n'
+        targetReply '请选择站点主题（0 返回）' $'1\n'
         targetReply 'Docker 站点管理' $'4\n'
         ;;
     esac
@@ -1723,7 +1737,9 @@ cp -R "${PROJECT_ROOT}/docker/lib" "${SOURCE_ROOT}/docker/lib"
 cp -R "${PROJECT_ROOT}/docker/contracts" "${SOURCE_ROOT}/docker/contracts"
 cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${SOURCE_ROOT}/shell/core/deployment_mode.sh"
 cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${SOURCE_ROOT}/shell/core/stats_grpc.sh"
-cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh} "${SOURCE_ROOT}/shell/core/"
+cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh,static_site_renderer.sh} "${SOURCE_ROOT}/shell/core/"
+mkdir -p "${SOURCE_ROOT}/assets"
+cp -R "${PROJECT_ROOT}/assets/static-sites" "${SOURCE_ROOT}/assets/"
 TEST_REF=1111111111111111111111111111111111111111
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/non-tty-state"
@@ -2383,7 +2399,7 @@ unset FAIL2BAN_STATUS FAIL2BAN_UNBAN_STATUS FAIL2BAN_DISABLE_STATUS \
     FAIL2BAN_VERIFY_STATUS FAIL2BAN_EDIT_STATUS FAIL2BAN_PROTOCOL_LIST_STATUS FAIL2BAN_WAIT FAIL2BAN_PID
 
 export SITE_MENU_RECORD_STATUS=1
-for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recommended-eof \
+for siteCase in flow cancel static-eof redirect-eof template-eof alpn-diagnose-eof alpn-recommended-eof \
     alpn-manual-id-eof alpn-manual-order-eof failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 SITE_ALPN_STATUS=0
@@ -2395,14 +2411,16 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
         expectedSite=$'edit --site-default\nedit --site-static /root/public-site\nedit --site-redirect https://example.com/path?a=1&b=2\nstatus'
         expectedSite+=$'\nprotocol alpn-status\nprotocol alpn-status entry-tls\nedit --alpn entry-tls h2,http/1.1'
         expectedSite+=$'\nedit --alpn entry-tls h2,http/1.1\nedit --alpn entry-tls http/1.1,h2\nedit --alpn entry-tls http/1.1'
+        expectedSite+=$'\nedit --site-template notes\nedit --site-template photos\nedit --site-template docs'
         for label in '16. 站点管理' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' \
             '4. 查看站点模式' '5. ALPN 诊断' '6. 修复为推荐 ALPN' '7. 手动设置 ALPN' \
+            '8. 内置静态站点' '1. 笔记（notes）' '2. 相册（photos）' '3. 文档（docs）' \
             '1. h2,http/1.1' '2. http/1.1,h2' '3. http/1.1' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "站点菜单缺少: ${label}"
         done
         ;;
     failed)
-        expectedSite=$'edit --site-default\nprotocol alpn-status entry-tls\nedit --alpn entry-tls h2,http/1.1\nedit --alpn entry-tls http/1.1,h2\nstatus'
+        expectedSite=$'edit --site-default\nprotocol alpn-status entry-tls\nedit --alpn entry-tls h2,http/1.1\nedit --alpn entry-tls http/1.1,h2\nedit --site-template notes\nstatus'
         grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '站点提交失败未显示退出码'
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'ALPN 诊断失败未显示退出码'
         ;;

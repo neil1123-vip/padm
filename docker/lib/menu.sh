@@ -723,12 +723,12 @@ dockerMenuControl() {
 }
 
 dockerMenuSites() {
-    local choice directory url listener alpnChoice
+    local choice directory url listener alpnChoice templateChoice siteTemplate
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 站点管理\n'
         printf '%s\n' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' '4. 查看站点模式' \
-            '5. ALPN 诊断' '6. 修复为推荐 ALPN' '7. 手动设置 ALPN' '0. 返回'
+            '5. ALPN 诊断' '6. 修复为推荐 ALPN' '7. 手动设置 ALPN' '8. 内置静态站点' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -772,6 +772,18 @@ dockerMenuSites() {
             3) dockerMenuRun edit --alpn "${listener}" http/1.1 || true ;;
             *) printf '无效选项，请重新选择。\n' ;;
             esac
+            ;;
+        8)
+            printf '\nDocker 内置静态站点\n'
+            printf '%s\n' '1. 笔记（notes）' '2. 相册（photos）' '3. 文档（docs）' '0. 返回'
+            dockerSetupRead templateChoice '请选择站点主题（0 返回）: ' || continue
+            case "${templateChoice}" in
+            1) siteTemplate=notes ;;
+            2) siteTemplate=photos ;;
+            3) siteTemplate=docs ;;
+            *) printf '无效选项，请重新选择。\n'; continue ;;
+            esac
+            dockerMenuRun edit --site-template "${siteTemplate}" || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

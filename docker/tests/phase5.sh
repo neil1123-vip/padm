@@ -37,6 +37,29 @@ for file in "${RELEASE_SCRIPT}" "${SCHEMA_FILE}" "${BUILD_WORKFLOW}" "${CONTRACT
     [[ -f "${file}" && ! -L "${file}" ]] || fail "required phase 5 file is missing: ${file}"
 done
 
+# 实际执行发布工作流的装包命令，避免测试夹具完整而正式归档漏掉共享资源。
+CONTROL_PACK_SCRIPT="${TEST_ROOT}/pack-control.sh"
+awk '
+    /^      - name: Build control bundle and release manifest$/ {step = 1; next}
+    step && /^          tar --sort=name / {packing = 1}
+    packing {
+        sub(/^          /, ""); print
+        if ($0 ~ /[|] gzip -n /) exit
+    }
+' "${RELEASE_WORKFLOW}" >"${CONTROL_PACK_SCRIPT}"
+[[ -s "${CONTROL_PACK_SCRIPT}" ]] || fail 'release control packaging command is missing'
+mkdir -p "${TEST_ROOT}/workflow-assets" "${TEST_ROOT}/workflow-control"
+(
+    cd -- "${PROJECT_ROOT}"
+    export assets="${TEST_ROOT}/workflow-assets"
+    bash -euo pipefail "${CONTROL_PACK_SCRIPT}"
+) || fail 'release workflow could not package current control source'
+tar -xzf "${TEST_ROOT}/workflow-assets/padm-docker-bundle.tar.gz" \
+    -C "${TEST_ROOT}/workflow-control"
+bash -u -c 'source "$1/install-docker.sh"; dockerBundleSourceIsComplete "$2"' \
+    bash "${PROJECT_ROOT}" "${TEST_ROOT}/workflow-control" ||
+    fail 'release workflow packaged incomplete control source'
+
 bash -n "${RELEASE_SCRIPT}" "${PROJECT_ROOT}/docker/tests/image-smoke.sh" || fail 'phase 5 shell syntax is invalid'
 jq empty "${SCHEMA_FILE}" || fail 'release manifest schema is invalid JSON'
 bash "${RELEASE_SCRIPT}" validate-lock | grep -qx 'release-lock-ok' || fail 'release lock validation failed'

@@ -33,6 +33,22 @@ reject() { if "$@" >"${LOG}" 2>&1; then fail "应拒绝: $*"; fi; }
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
 docker() {
+    if [[ "${1:-}" == run ]]; then
+        local expectedArg
+        local -a expected=(run --rm -i --read-only --network none --cap-drop ALL
+            --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m
+            --label io.padm.mode=docker --label "io.padm.project=${PADM_DOCKER_PROJECT}"
+            --entrypoint python3 "$(dockerManifestImageReference ops)" -c)
+        [[ "$#" -eq "$((${#expected[@]} + 1))" ]] || fail 'Reality 公钥派生参数数量不符'
+        for expectedArg in "${expected[@]}"; do
+            [[ "$1" == "${expectedArg}" ]] || fail 'Reality 公钥派生参数不符'
+            shift
+        done
+        [[ "$1" == *'private_key = base64.b64decode'* ]] || fail '非预期 Python 派生脚本'
+        # 在测试容器执行生产派生脚本，真实公私钥仍须通过原校验。
+        python3 -c "$1"
+        return
+    fi
     [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ||
         "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False' ||
         "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-ssh --filter label=com.docker.compose.oneoff=False' ]] ||
@@ -41,7 +57,7 @@ docker() {
 dockerHostPreflight() { :; }
 dockerRequireInstalledBundle() { :; }
 dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
-dockerConfigureReleasePrepare() { :; }
+dockerConfigureReleasePrepare() { DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/bundle"; }
 dockerConfigureReleaseValidate() { :; }
 dockerRealityTargetsValidate() { :; }
 dockerConfigurePortsAvailable() { :; }
@@ -55,12 +71,14 @@ dockerManifestImageReference() {
     jq -er --arg image "$1" '.images[$image]' "${TEST_ROOT}/base.json"
 }
 dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
-mkdir -p "${TEST_ROOT}/bundle/docker/contracts"
+mkdir -p "${TEST_ROOT}/bundle/docker/contracts" "${TEST_ROOT}/bundle/shell/core" "${TEST_ROOT}/bundle/assets"
 printf '%s\n' "$(printf 'a%.0s' {1..40})" >"${TEST_ROOT}/bundle/${PADM_DOCKER_BUNDLE_REF}"
 cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 cp -- "${PROJECT_ROOT}/docker/contracts/features.json" \
     "${TEST_ROOT}/bundle/docker/contracts/features.json"
+cp -- "${PROJECT_ROOT}/shell/core/static_site_renderer.sh" "${TEST_ROOT}/bundle/shell/core/"
+cp -a -- "${PROJECT_ROOT}/assets/static-sites" "${TEST_ROOT}/bundle/assets/"
 dockerCandidateCompose() {
     local candidate=$1
     shift
@@ -181,6 +199,37 @@ entry = direct["core"]["protocols"][0]
 entry.pop("websocket")
 entry.update(id=28, trojan=dict(domain="ws.example.com"))
 case("valid-direct", direct, True)
+sing_upgrade = json.loads((root / "valid-23-default.json").read_text())
+del sing_upgrade["site"]
+sing_upgrade["core"]["type"] = "sing-box"
+sing_upgrade["core"]["protocols"][0]["core"] = "sing-box"
+case("valid-sing-upgrade", sing_upgrade, True)
+hy2 = copy.deepcopy(sing_upgrade)
+entry = hy2["core"]["protocols"][0]
+del entry["httpupgrade"]
+entry.update(id=3, hy2=dict(domain=base["tls"]["domain"], bandwidth_mode="bbr",
+                          up_mbps=100, down_mbps=100, obfs=None, masquerade=""))
+case("valid-hy2", hy2, True)
+mixed_reality = copy.deepcopy(base)
+reality = copy.deepcopy(base["core"]["protocols"][0])
+del reality["websocket"]
+reality.update(id=1, listener_id="entry-reality", public_port=25444,
+               reality=dict(server_name="reality.example.com", target_host="reality.example.com",
+                            target_port=443,
+                            private_key="dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
+                            public_key="hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
+                            short_id="abcd"))
+mixed_reality["core"]["protocols"].append(reality)
+case("valid-site-reality", mixed_reality, True)
+for name, extra in (("sing-upgrade", sing_upgrade), ("hy2", hy2)):
+    mixed = copy.deepcopy(base)
+    mixed["core"]["secondary_type"] = "sing-box"
+    entry = copy.deepcopy(extra["core"]["protocols"][0])
+    entry.update(listener_id="entry-other-site", public_port=25444)
+    if "httpupgrade" in entry:
+        entry["httpupgrade"].update(path="otherpath", backend_port=31301, tls_port=8444)
+    mixed["core"]["protocols"].append(entry)
+    case(f"valid-mixed-{name}", mixed, True)
 for index, value in enumerate((False, None, "", "true", 1, [], {})):
     spec = copy.deepcopy(base)
     spec["tls"]["http01"] = value
@@ -393,8 +442,6 @@ jq 'del(.site)' "${TEST_ROOT}/valid-27-static.json" >"${TEST_ROOT}/legacy-fallba
 dockerGenerateNginxConfig "${TEST_ROOT}/legacy-fallback.json" "${TEST_ROOT}/legacy-nginx.conf"
 grep -Fq 'try_files /index.html @padm_fallback;' "${TEST_ROOT}/legacy-nginx.conf" ||
     fail '无 site 的旧规格改变静态首页 fallback'
-python3 "${PROJECT_ROOT}/docker/tests/sites-real.py" "${TEST_ROOT}"
-
 SOURCE=${TEST_ROOT}/public-site
 SECOND=${TEST_ROOT}/second-site
 mkdir -p "${SOURCE}/assets" "${SECOND}"
@@ -459,11 +506,15 @@ printf '<h1>replacement-site</h1>\n' >"${SECOND}/index.html"
 
 snapshot() (
     cd "${root}"
-    find config data secrets -type f -print0 | sort -z | xargs -0 -r sha256sum
+    if [[ "${1:-}" == without-static ]]; then
+        find config data secrets -type f ! -path 'data/static/*' -print0
+    else
+        find config data secrets -type f -print0
+    fi | sort -z | xargs -0 -r sha256sum
     for path in compose.json deployment.json deployment.previous.json images.env; do
         [[ ! -f "${path}" ]] || sha256sum "${path}"
     done
-    find data/static -printf '%P %m %U %G\n' | sort
+    [[ "${1:-}" == without-static ]] || find data/static -printf '%P %m %U %G\n' | sort
 )
 assertClean() {
     [[ ! -e "${root}/locks/deployment.lock" ]] || fail '站点事务遗留部署锁'
@@ -628,6 +679,137 @@ for failure in health-fail int term; do
     grep -Fq 'live:up ' "${COMPOSE_LOG}" || fail "${failure}: 未经过实际事务提交阶段"
 done
 MODE=ok
+
+# 主题只产生普通静态内容；认证、非空累计和发布文件不得随主题变化。
+jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
+  name:"site",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+before=$(snapshot)
+protectedBefore=$(snapshot without-static)
+runEdit 2 --site-template unknown --preview
+runEdit 2 --site-template --preview
+runEdit 2 --site-template notes --site-template photos --preview
+runEdit 2 --site-template notes --site-static "${SOURCE}" --preview
+runEdit 2 --site-template notes --site-default --preview
+runEdit 2 --site-template notes --site-redirect https://example.com --preview
+runEdit 2 --site-template notes --spec "${TEST_ROOT}/base.json" --preview
+runEdit 2 --site-template notes --http01 enable --preview
+runEdit 2 --site-template notes --alpn entry-site h2,http/1.1 --preview
+runEdit 0 --site-template notes --preview
+[[ "$(snapshot)" == "${before}" ]] || fail '主题非法参数或预览改变在线内容和配置'
+
+mkdir -p "${TEST_ROOT}/site-templates"
+while IFS=$'\t' read -r theme title accent; do
+    runEdit 0 --site-template "${theme}" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot without-static)" == "${protectedBefore}" ]] ||
+        fail "${theme}: 主题修改了规格、认证、累计或订阅文件"
+    jq -e '.site == {mode:"static"}' "${root}/config/spec.json" >/dev/null ||
+        fail "${theme}: 主题或资源路径进入受管规格"
+    python3 "${PROJECT_ROOT}/shell/regression/static-site-assets.py" "${PROJECT_ROOT}" \
+        --installed "${root}/data/static" >"${LOG}" 2>&1 || fail "${theme}: 主题公开资源不完整"
+    expectedFiles=$(awk -v prefix="sites/${theme}/" 'index($2,prefix)==1 {
+      print substr($2,length(prefix)+1)}' "${TEST_ROOT}/bundle/assets/static-sites/sites.sha256" | sort)
+    [[ "$(find "${root}/data/static" -type f -printf '%P\n' | sort)" == "${expectedFiles}" ]] ||
+        fail "${theme}: 主题目录遗漏或增加了清单资源"
+    while IFS= read -r resource; do
+        case "${resource}" in
+        *.png|*.jpg)
+            cmp -s "${root}/data/static/${resource}" \
+                "${TEST_ROOT}/bundle/assets/static-sites/sites/${theme}/${resource}" ||
+                fail "${theme}: 主题图片未完整复制: ${resource}"
+            ;;
+        esac
+    done <<<"${expectedFiles}"
+    grep -Fq "${title}" "${root}/data/static/index.html" &&
+        grep -Fq "${accent}" "${root}/data/static/assets/style.css" ||
+        fail "${theme}: 未渲染固定默认站名或配色"
+    [[ "$(stat -c '%a %u %g' "${root}/data/static")" == '750 0 10001' &&
+        "$(stat -c '%a %u %g' "${root}/data/static/index.html")" == '640 0 10001' ]] ||
+        fail "${theme}: 主题资源运行权限改变"
+    cp -a -- "${root}/data/static" "${TEST_ROOT}/site-templates/${theme}"
+done <<'THEMES'
+notes	Field Notes	#28624b
+photos	Light and Distance	#225e91
+docs	Pagekit	#974338
+THEMES
+before=$(snapshot)
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerSetupRead() { printf -v "$1" '%s' n; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${root}/config/spec.json" '' '' interactive '' "${TEST_ROOT}/site-templates/notes"
+) >"${LOG}" 2>&1 || fail '主题候选确认取消失败'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail '主题取消改变静态内容、规格、认证或累计'
+for failure in health-fail int term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    expected=14
+    [[ "${failure}" != int ]] || expected=130
+    [[ "${failure}" != term ]] || expected=143
+    runEdit "${expected}" --site-template notes --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 主题未恢复旧静态内容和完整部署"
+done
+MODE=ok
+
+# 资源必须来自完整可信包，损坏在生成备份或调用线上服务前拒绝。
+templateAssets=${TEST_ROOT}/bundle/assets/static-sites
+cp -a -- "${templateAssets}" "${TEST_ROOT}/template-assets-original"
+for damage in missing-page missing-image missing-css missing-manifest tamper symlink hardlink fifo; do
+    case "${damage}" in
+    missing-page) rm -- "${templateAssets}/sites/notes/about.html" ;;
+    missing-image) rm -- "${templateAssets}/sites/photos/assets/forest.jpg" ;;
+    missing-css) rm -- "${templateAssets}/sites/docs/assets/style.css" ;;
+    missing-manifest) rm -- "${templateAssets}/sites.sha256" ;;
+    tamper) printf '\nmodified-resource\n' >>"${templateAssets}/sites/notes/index.html" ;;
+    symlink|hardlink|fifo)
+        rm -- "${templateAssets}/sites/notes/about.html"
+        case "${damage}" in
+        symlink) ln -s index.html "${templateAssets}/sites/notes/about.html" ;;
+        hardlink) ln "${templateAssets}/sites/notes/index.html" "${templateAssets}/sites/notes/about.html" ;;
+        fifo) mkfifo "${templateAssets}/sites/notes/about.html" ;;
+        esac
+        ;;
+    esac
+    composeBefore=$(wc -l <"${COMPOSE_LOG}")
+    backupsBefore=$(find "${root}/backups" -mindepth 1 -maxdepth 1 -type d | sort)
+    runEdit 15 --site-template notes --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" && "$(wc -l <"${COMPOSE_LOG}")" == "${composeBefore}" &&
+        "$(find "${root}/backups" -mindepth 1 -maxdepth 1 -type d | sort)" == "${backupsBefore}" ]] ||
+        fail "${damage}: 不安全主题在拒绝前改动部署、备份或服务"
+    rm -rf -- "${templateAssets}"
+    cp -a -- "${TEST_ROOT}/template-assets-original" "${templateAssets}"
+done
+
+# 无主题资源的旧包仍能管理原静态内容、默认页和 302。
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" "${TEST_ROOT}/template-schema-current.json"
+jq 'del(."x-padm-site-templates")' "${TEST_ROOT}/template-schema-current.json" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+mv -- "${templateAssets}" "${TEST_ROOT}/template-assets-held"
+mv -- "${TEST_ROOT}/bundle/shell/core/static_site_renderer.sh" "${TEST_ROOT}/template-renderer-held.sh"
+runEdit 15 --site-template notes --preview
+[[ "$(snapshot)" == "${before}" ]] || fail '旧包主题拒绝改变部署'
+runEdit 0 --site-default --confirm PADM-DOCKER-EDIT
+runEdit 0 --site-redirect https://example.com/old-bundle --confirm PADM-DOCKER-EDIT
+runEdit 0 --site-static "${TEST_ROOT}/site-templates/docs" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail '旧包原站点工作流丢失主题生成后的静态内容'
+mv -- "${TEST_ROOT}/template-assets-held" "${templateAssets}"
+mv -- "${TEST_ROOT}/template-renderer-held.sh" "${TEST_ROOT}/bundle/shell/core/static_site_renderer.sh"
+cp -- "${TEST_ROOT}/template-schema-current.json" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
+# 业务恢复继续复制在线静态目录，不新增主题身份或覆盖资源。
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerBusinessExport "${TEST_ROOT}/template-business.json" "${root}/config/spec.json"
+    for strategy in merge replace; do
+        draft="${TEST_ROOT}/template-business-${strategy}"
+        mkdir -p "${draft}"
+        dockerBusinessBuildDraft "${TEST_ROOT}/template-business.json" "${root}/config/spec.json" "${strategy}" "${draft}"
+        dockerConfigureApply "${draft}/spec.json" '' '' configure "${draft}/business.json"
+    done
+) >"${LOG}" 2>&1 || fail '主题站点的业务恢复失败'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail '业务恢复改变主题静态目录或回退认证、累计和发布'
 
 # 旧受管树只拒绝链接和特殊文件，不能按发布 allowlist 删除历史静态资源。
 printf 'legacy-resource\n' >"${root}/data/static/.legacy-resource"
@@ -867,4 +1049,40 @@ for failure in health-fail int term; do
     [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: ALPN 事务未恢复规格、文件、站点和非空流量"
 done
 MODE=ok
+
+# 所有已开放 Xray Nginx 类型使用同一主题入口，其它有效协议部署明确拒绝。
+for protocol in 21 22 23 24 25 27 29; do
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/valid-${protocol}-static.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail "${protocol}: 初始化主题支持范围夹具失败"
+    assertClean
+    before=$(snapshot)
+    runEdit 0 --site-template notes --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail "${protocol}: 主题预览修改已有部署"
+done
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/valid-site-reality.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '初始化主题与 Reality 共存夹具失败'
+assertClean
+before=$(snapshot)
+runEdit 0 --site-template notes --preview
+[[ "$(snapshot)" == "${before}" ]] || fail '主题预览改动共存的 Reality 入口'
+for spec in valid-direct valid-sing-upgrade valid-hy2 valid-mixed-sing-upgrade valid-mixed-hy2; do
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/${spec}.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail "${spec}: 初始化主题拒绝范围夹具失败"
+    assertClean
+    before=$(snapshot)
+    composeBefore=$(wc -l <"${COMPOSE_LOG}")
+    runEdit 15 --site-template notes --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" && "$(wc -l <"${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail "${spec}: 无适用入口的主题拒绝改变已有部署或服务"
+done
+python3 "${PROJECT_ROOT}/docker/tests/sites-real.py" "${TEST_ROOT}"
 printf 'docker-sites-regression-ok\n'

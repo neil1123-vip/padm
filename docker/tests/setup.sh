@@ -288,15 +288,18 @@ for relative in \
     docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py \
     docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py \
     docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
-    docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
+    docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh shell/core/static_site_renderer.sh; do
     mkdir -p "${SOURCE_ROOT}/$(dirname -- "${relative}")"
     cp "${PROJECT_ROOT}/${relative}" "${SOURCE_ROOT}/${relative}"
 done
+# 保留新能力声明，可信控制包必须携带完整站点资源和清单。
+mkdir -p "${SOURCE_ROOT}/assets"
+cp -R -- "${PROJECT_ROOT}/assets/static-sites" "${SOURCE_ROOT}/assets/"
 cat >>"${SOURCE_ROOT}/shell/core/reality_targets.sh" <<'EOF'
 lookupRealityTargetLocation() { printf 'Fixture Location\n'; }
 currentRealityNetworkProfile() { printf '192.0.2.10\tAS64500\tExampleNet\n'; }
 EOF
-tar -czf "${CONTROL}" -C "${SOURCE_ROOT}" install-docker.sh docker shell
+tar -czf "${CONTROL}" -C "${SOURCE_ROOT}" install-docker.sh docker shell assets
 jq -n --arg sha "$(sha256sum "${CONTROL}" | cut -d ' ' -f 1)" '
     def image($name): {
         reference: ("ghcr.io/example/padm-" + $name + ":3.2.0@sha256:" + ("2" * 64)),

@@ -11,6 +11,9 @@ Dockerfile text eol=lf
 *.yaml text eol=lf
 *.md text eol=lf
 *.txt text eol=lf
+assets/static-sites/sites/**/*.html text eol=lf
+assets/static-sites/sites/**/*.css text eol=lf
+assets/static-sites/sites.sha256 text eol=lf
 
 *.zip binary
 *.png binary

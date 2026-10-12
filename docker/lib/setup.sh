@@ -1400,7 +1400,7 @@ dockerEditCommand() {
     local realityTarget= targetHost= targetPort= targetSni=
     local realityStream= streamListener= streamWebsite=
     local streamDomains= streamAddress= streamPort=8443
-    local siteMode= siteSource= siteUrl=
+    local siteMode= siteSource= siteUrl= siteTemplate=
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local routingServer= routingPort=
@@ -1436,6 +1436,12 @@ dockerEditCommand() {
             else
                 siteMode=redirect siteUrl=$2
             fi
+            shift 2
+            ;;
+        --site-template)
+            [[ "$#" -ge 2 && -z "${siteMode}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$2" in notes|photos|docs) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            siteMode=static siteTemplate=$2
             shift 2
             ;;
         --site-default)
@@ -2307,6 +2313,10 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${siteMode}" ]]; then
+        if [[ -n "${siteTemplate}" ]]; then
+            dockerSiteTemplateInputsValidate "${original}" "${siteTemplate}" "$(dockerCurrentBundlePath)" ||
+                return "${PADM_DOCKER_RC_STATE}"
+        fi
         [[ -z "${siteSource}" ]] ||
             siteSource=$(dockerSiteSourceValidate "${siteSource}") || return "${PADM_DOCKER_RC_STATE}"
         jq --arg mode "${siteMode}" --arg url "${siteUrl}" '
@@ -2391,7 +2401,11 @@ dockerEditCommand() {
         # 编辑验证当前部署版本，不被 latest 的新发布隐式升级或阻断。
         manifest="${PADM_DOCKER_RELEASE_MANIFEST_URL_DEFAULT%/latest/download/release-manifest.json}/download/v${version}/release-manifest.json"
     fi
-    dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" "${siteTemplate}" || return $?
+    if [[ -n "${siteTemplate}" ]]; then
+        dockerSiteTemplateInputsValidate "${draft}" "${siteTemplate}" "${DOCKER_STAGED_BUNDLE_PATH:-}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     dockerConfigureReleaseValidate "${draft}" || return "${PADM_DOCKER_RC_MANIFEST}"
     if [[ -n "${regenerateReality}" ]]; then
         dockerEditRegenerateReality "${draft}" "${regenerateReality}" &&
@@ -2405,6 +2419,7 @@ dockerEditCommand() {
     [[ -z "${alpnListener}" ]] ||
         printf '入口 %s 的 TLS ALPN 将设为 %s；仅允许该 ALPN 字段漂移，其它配置须与规格一致。\n' "${alpnListener}" "${alpnOrder}"
     [[ -z "${siteSource}" ]] || printf '静态站点内容将使用已校验目录更新；源路径不会写入规格。\n'
+    [[ -z "${siteTemplate}" ]] || printf '静态站点内容将使用受管 %s 内置模板更新；主题不写入规格。\n' "${siteTemplate}"
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
@@ -2576,5 +2591,5 @@ dockerEditCommand() {
     done < <(jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
       [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
     DOCKER_CONFIG_RESTORE_ALPN_LISTENER=${alpnListener}
-    dockerConfigureApply "${draft}" '' '' "${mode}" '' "${siteSource}"
+    dockerConfigureApply "${draft}" '' '' "${mode}" '' "${siteSource}" "${siteTemplate}"
 }

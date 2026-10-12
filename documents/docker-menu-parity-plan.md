@@ -1862,6 +1862,38 @@ Nginx 工具由 Debian 官方源补入独立缓存层，CI 快速分片复用相
 webroot/standalone ACME 留给后续检查点；
 `site-static-redirect-alpn` 组合能力仍为 `deferred`，不以这次子交付升级完整状态。
 
+#### 5A.1b 受管内置静态站点
+
+复用原生 `notes/photos/docs` 和共享 renderer，不增加网站生成器。
+CLI `edit --site-template <notes|photos|docs>`，菜单 `16 → 8` 提供三主题；
+限定已有 v3 Xray Nginx TLS `21–25` 或 fallback `27/29`，拒绝包含 sing-box `23`
+或 Hysteria2 的部署，无网站的 Reality 入口可共存。未知、重复和互斥参数退出 `2`；
+不适用部署、缺能力或模板资源损坏退出 `15`。
+
+当前执行包和验签后的候选包都要求 `x-padm-site-templates`，随包
+`sites.sha256`、renderer 和全部登记资源进入外层 bundle 摘要及路径完整性合同。
+清单不得在运行时从目录重生成；当前三主题为 `43` 个资源，资源数量不是独立
+版本门禁。缺页、缺图、篡改、额外/重复/越界清单项、私有目录、链接、硬链接
+及特殊文件拒绝。Windows checkout 的主题 HTML/CSS 和清单固定 LF。
+正式 release 工作流及安装、发布、菜单、配置与升级夹具均携带同一资源集合。
+
+主题从受管 staged bundle 复制到候选 `data/static`，复用原生默认站名/配色与
+占位符转义；只持久化普通 `site.mode=static`，不增加主题配置或安装状态。
+沿用预览、确认、锁、站点备份、健康失败与信号恢复，保留认证、额度累计、
+其它入口、主订阅/分享组、WS 和 ACME 路径；后续编辑及业务恢复继续保留静态内容。
+旧无能力包仅拒绝显式主题请求，原默认页、目录发布和 302 不增加能力门禁。
+
+本地 Linux amd64 定向 `static-sites`、`docker-sites`、`docker-phase1` 和
+`docker-phase5` 均通过；三主题各 `11` 页及当前 `43` 个资源完成真实 Nginx
+逐字节验收，包含 h1/h2、404、WS/订阅/ACME 保持、失败/INT/TERM 与业务恢复。
+正式 workflow 的实际 tar 命令经装包合同验证。集成 `docker-contracts -Jobs 6`
+通过 `49/49`，耗时 `523136 ms`、排队 `4662 ms`、`cache_hit=false`；
+最终快照的全部 `29` 个改动或新增文件与工作区逐字节 SHA256 一致。
+证据在 `.tmp-static-templates-close/acceptance.md` 及相应回归目录。
+
+`site-static-redirect-alpn` 完整状态保持 `deferred`；公网、原生宿主、arm64、
+可信发布与整机生命周期仍待验，不以网页内容或外观证明抗识别。
+
 #### 5A.2 ALPN 诊断与限定修复
 
 菜单 `16` 增加全部/指定入口诊断、推荐修复与三种手动顺序；CLI 为

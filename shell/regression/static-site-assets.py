@@ -17,6 +17,10 @@ DISCLOSURE = re.compile(
 )
 TOKEN = re.compile(r"__[A-Z][A-Z0-9_]*__")
 CSS_URL = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE)
+MANIFEST_LINE = re.compile(
+    r"([a-f0-9]{64})  (sites/(?:notes|photos|docs)/"
+    r"(?:[a-z0-9][a-z0-9-]*\.html|assets/[a-z0-9][a-z0-9-]*\.(?:css|jpg|png)))"
+)
 
 
 class Page(HTMLParser):
@@ -133,6 +137,30 @@ def check_site(directory, installed=False):
     return len(pages)
 
 
+def check_manifest(root):
+    manifest = root / "sites.sha256"
+    require(manifest.is_file() and not manifest.is_symlink()
+            and manifest.stat().st_nlink == 1, "missing or unsafe resource manifest")
+    content = manifest.read_bytes()
+    require(content.endswith(b"\n") and b"\r" not in content, "nonstandard resource manifest")
+    expected = {}
+    for line in content.decode("ascii").splitlines():
+        match = MANIFEST_LINE.fullmatch(line)
+        require(match is not None, "invalid resource manifest path or hash")
+        digest, relative = match.groups()
+        require(relative not in expected, f"duplicate resource manifest path {relative}")
+        target = root / relative
+        require(target.is_file() and not target.is_symlink() and target.stat().st_nlink == 1,
+                f"missing or unsafe manifest resource {relative}")
+        require(hashlib.sha256(target.read_bytes()).hexdigest() == digest,
+                f"resource manifest hash mismatch {relative}")
+        expected[relative] = digest
+    actual = {path.relative_to(root).as_posix()
+              for path in (root / "sites").rglob("*") if path.is_file()}
+    require(set(expected) == actual, "resource manifest differs from complete asset set")
+    print(f"static-site-assets: manifest:{len(expected)} files")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("project", type=Path)
@@ -150,6 +178,7 @@ def main():
         fingerprints.add(hashlib.sha256((directory / "index.html").read_bytes()).digest())
         print(f"static-site-assets: {theme}:{count} pages")
     require(len(fingerprints) == 3, "site homepages must differ")
+    check_manifest(sites.parent)
 
 
 if __name__ == "__main__":

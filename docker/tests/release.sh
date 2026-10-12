@@ -122,16 +122,18 @@ copyControl() {
         docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py \
         docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
-        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
+        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh shell/core/static_site_renderer.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
         cp "${PROJECT_ROOT}/${relative}" "${target}/${relative}"
     done
+    mkdir -p "${target}/assets"
+    cp -R "${PROJECT_ROOT}/assets/static-sites" "${target}/assets/"
 }
 
 copyControl "${SOURCE_ROOT}"
 copyControl "${CONTROL_ROOT}"
 printf 'candidate-only\n' >"${CONTROL_ROOT}/docker/release-sentinel"
-tar -czf "${CONTROL_BUNDLE}" -C "${CONTROL_ROOT}" install-docker.sh docker shell
+tar -czf "${CONTROL_BUNDLE}" -C "${CONTROL_ROOT}" install-docker.sh docker shell assets
 CONTROL_SHA=$(sha256sum "${CONTROL_BUNDLE}" | cut -d ' ' -f 1)
 jq -n --arg sha "${CONTROL_SHA}" '
     def image($name): {
@@ -371,9 +373,19 @@ for module in ssh-runtime.sh ssh-runtime.py ssh-collector.py; do
     missingSource="${TEST_ROOT}/missing-${module}"
     copyControl "${missingSource}"
     rm -f -- "${missingSource}/docker/lib/${module}"
-    tar -czf "${TEST_ROOT}/missing-${module}-control.tar.gz" -C "${missingSource}" install-docker.sh docker shell
+    tar -czf "${TEST_ROOT}/missing-${module}-control.tar.gz" -C "${missingSource}" install-docker.sh docker shell assets
 done
-for fault in wrong incomplete unsafe missing-ssh-runtime.sh missing-ssh-runtime.py missing-ssh-collector.py; do
+for missing in shell/core/static_site_renderer.sh assets/static-sites/sites.sha256 \
+    assets/static-sites/sites/photos/assets/ridge.jpg; do
+    fault="missing-template-${missing//\//-}"
+    missingSource="${TEST_ROOT}/${fault}"
+    copyControl "${missingSource}"
+    rm -f -- "${missingSource}/${missing}"
+    tar -czf "${TEST_ROOT}/${fault}-control.tar.gz" -C "${missingSource}" install-docker.sh docker shell assets
+done
+for fault in wrong incomplete unsafe missing-ssh-runtime.sh missing-ssh-runtime.py missing-ssh-collector.py \
+    missing-template-shell-core-static_site_renderer.sh missing-template-assets-static-sites-sites.sha256 \
+    missing-template-assets-static-sites-sites-photos-assets-ridge.jpg; do
     badControl="${TEST_ROOT}/${fault}-control.tar.gz"
     jq --arg sha "$(sha256sum "${badControl}" | cut -d ' ' -f 1)" \
         '.control.sha256 = $sha' "${MANIFEST}" >"${TEST_ROOT}/bad-control-manifest.json"

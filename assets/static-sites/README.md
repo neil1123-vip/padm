@@ -30,16 +30,29 @@ Nginx 在自有网站提供 `404.html` 时使用该页面并保持 HTTP 404 状�
 
 ## 安装占位符
 
+- `sites.sha256` 登记随包资源的路径和摘要，运行时不重新生成；更新资源时同步提交清单。当前三套主题共 43 个资源。
 - `__SITE_TITLE__`：HTML 的页面标题、站点品牌与必要正文；替换值必须经过 HTML 转义。
 - `__SITE_ACCENT__`：CSS 主色，仅接受有效的十六进制颜色。
 - 占位符仅用于初始化内置布局，不处理导入的原始网页。站点主题、站名与配色由安装状态保存。
 - 站点目录不包含安装状态、归属标记或 `check`。本 README 不应复制到公开网页目录。
 
+## Docker 内置站点
+
+Docker 菜单 `16. 站点管理` → `8. 内置静态站点`，或
+`padm-docker edit --site-template notes|photos|docs`，可在已有 v3 Xray Nginx TLS
+`21–25` 或 fallback `27/29` 部署中发布主题。包含 sing-box `23` 或 Hysteria2
+的部署明确拒绝；其它不提供网站的 Reality 入口可共存。
+
+当前和候选控制包都须声明 `x-padm-site-templates` 并完整携带随包清单和资源。
+模板从受管候选包复制，使用默认站名与配色；生成后只保存普通 `site.mode=static`，
+不保存主题身份。预览、取消、备份、恢复及后续静态目录发布沿用站点事务，
+代理、订阅、证书及 ACME 路径保持。旧包仍可使用其已有默认页、静态目录和 302。
+
 ## Hysteria2 接入
 
 原生 Hysteria2 的“认证失败伪装”可以直接填写 `file:///srv/own-site/` 使用独立自有网站目录，也可填写受你控制的网站 `http://` 或 `https://` URL 进行反向代理。填写 `local` 使用当前本机网页，或填写 `notes`、`photos`、`docs` 初始化内置布局。文件目录同样需要可读首页，并满足上面的目录内容限制。
 
-启用混淆后，普通浏览器不能通过标准 HTTP/3 访问该入口。本轮不接入 Docker 本地网页，Docker 保持现有远程 HTTPS 伪装。
+启用混淆后，普通浏览器不能通过标准 HTTP/3 访问该入口。Docker Hysteria2 的本地网页未接入，保持现有远程 HTTPS 伪装。
 
 协议与配置说明：[Hysteria2 协议](https://v2.hysteria.network/docs/developers/Protocol/)、[sing-box Hysteria2 入站](https://sing-box.sagernet.org/configuration/inbound/hysteria2/)。
 

@@ -20,8 +20,26 @@ dockerBundleRelativePathIsSafe() {
     done
 }
 
+dockerBundleSiteTemplatePaths() (
+    local sourceRoot=$1 required
+    [[ -f "${sourceRoot}/docker/contracts/configure.schema.json" &&
+        ! -L "${sourceRoot}/docker/contracts/configure.schema.json" ]] &&
+        jq -e '."x-padm-site-templates" == true' \
+            "${sourceRoot}/docker/contracts/configure.schema.json" >/dev/null 2>&1 || return 1
+    for required in shell shell/core assets assets/static-sites; do
+        [[ -d "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
+    done
+    required="${sourceRoot}/shell/core/static_site_renderer.sh"
+    [[ -f "${required}" && ! -L "${required}" &&
+        "$(stat -c %h -- "${required}")" == 1 ]] || return 1
+    # 每次校验使用目标包的受管清单，不能继承其它包已加载的渲染器。
+    local PADM_STATIC_SITE_RENDERER_LOADED=0
+    source "${required}" || return 1
+    nginxStaticTemplateAssetsValidate "${sourceRoot}/assets/static-sites"
+)
+
 dockerBundlePayloadPaths() {
-    local sourceRoot=$1 path paths
+    local sourceRoot=$1 path paths templatePaths
     [[ -f "${sourceRoot}/install-docker.sh" && ! -L "${sourceRoot}/install-docker.sh" ]] || return 1
     [[ -d "${sourceRoot}/docker" && ! -L "${sourceRoot}/docker" ]] || return 1
     paths=$(find "${sourceRoot}/docker" -type l -print -quit 2>/dev/null) || return 1
@@ -48,6 +66,16 @@ dockerBundlePayloadPaths() {
             [[ -f "${sourceRoot}/${path}" && ! -L "${sourceRoot}/${path}" ]] || return 1
             printf '%s\n' "${path}"
         done
+    fi
+    if jq -e '."x-padm-site-templates" == true' \
+        "${sourceRoot}/docker/contracts/configure.schema.json" >/dev/null 2>&1; then
+        templatePaths=$(dockerBundleSiteTemplatePaths "${sourceRoot}") || return 1
+        printf 'shell/core/static_site_renderer.sh\nassets/static-sites/sites.sha256\n'
+        while IFS= read -r path; do
+            [[ -n "${path}" ]] || continue
+            dockerBundleRelativePathIsSafe "${path}" || return 1
+            printf 'assets/static-sites/%s\n' "${path}"
+        done <<<"${templatePaths}"
     fi
     if [[ -d "${sourceRoot}/documents" && ! -L "${sourceRoot}/documents" ]]; then
         paths=$(find "${sourceRoot}/documents" -maxdepth 1 -type f -name 'docker*.md' -print) || return 1
@@ -111,6 +139,7 @@ dockerBundleSourceIsComplete() {
             [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
         done
     fi
+    # 模板标记开启时，payload 路径检查会同时核实随包清单与全部资源。
     dockerBundlePayloadPaths "${sourceRoot}" >/dev/null
 }
 
@@ -449,7 +478,7 @@ dockerBundleSupportsSpec() {
 }
 
 dockerStageReleaseBundle() {
-    local root tempDir sourceRoot ref
+    local siteTemplate=${1:-} root tempDir sourceRoot ref
     root=$(dockerInstallRoot) || return 1
     tempDir=${PADM_DOCKER_MANIFEST_TEMP_DIR:-}
     dockerManagedPathIsSafe "${root}" "${tempDir}" &&
@@ -464,6 +493,11 @@ dockerStageReleaseBundle() {
     }
     sourceRoot=$(mktemp -d "${tempDir}/control.XXXXXX") || return 1
     tar -xzf "${PADM_DOCKER_CONTROL_BUNDLE}" --no-same-owner -C "${sourceRoot}" || return 1
+    if [[ -n "${siteTemplate}" ]] &&
+        ! dockerBundleSiteTemplatePaths "${sourceRoot}" >/dev/null; then
+        dockerError '目标发布 bundle 缺少受管静态站点模板能力或完整资源，未提交配置'
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
     ref=$(jq -er '.release.commit' "${PADM_DOCKER_MANIFEST_FILE}") || return 1
     dockerStageBundle "${sourceRoot}" "${ref}"
 }

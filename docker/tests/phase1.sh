@@ -372,7 +372,9 @@ copyBundleFixture() {
     cp -R "${PROJECT_ROOT}/docker" "${target}/docker"
     cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${target}/shell/core/deployment_mode.sh"
     cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${target}/shell/core/stats_grpc.sh"
-    cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh} "${target}/shell/core/"
+    cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh,static_site_renderer.sh} "${target}/shell/core/"
+    mkdir -p "${target}/assets"
+    cp -R "${PROJECT_ROOT}/assets/static-sites" "${target}/assets/"
     find "${PROJECT_ROOT}/documents" -maxdepth 1 -type f -name 'docker*.md' -exec cp {} "${target}/documents/" \;
 }
 
@@ -530,6 +532,10 @@ done
 [[ -f "${DOCKER_ROOT}/bundle/shell/core/stats_grpc.sh" ]] || fail 'bundle lacks the shared stats decoder'
 [[ -f "${DOCKER_ROOT}/bundle/shell/core/reality_targets.sh" &&
     -f "${DOCKER_ROOT}/bundle/shell/core/runtime.sh" ]] || fail 'bundle lacks the shared Reality target module'
+[[ -f "${DOCKER_ROOT}/bundle/shell/core/static_site_renderer.sh" &&
+    -f "${DOCKER_ROOT}/bundle/assets/static-sites/sites.sha256" &&
+    "$(find "${DOCKER_ROOT}/bundle/assets/static-sites/sites" -type f | wc -l)" -eq 43 ]] ||
+    fail 'bundle lacks the shared site renderer or complete template resources'
 [[ -L "${CLI_DIR}/padm-docker" ]] || fail 'padm-docker command link is missing'
 [[ "$(readlink "${CLI_DIR}/padm-docker")" == "${DOCKER_ROOT}/bundle/install-docker.sh" ]] ||
     fail 'padm-docker command link has an unexpected target'
@@ -566,7 +572,12 @@ done
     (
         export TMPDIR="${TEST_ROOT}/bundle-hash-tmp"
         mkdir -- "${TMPDIR}"
-        sha256sum() { printf 'partial hash output\n'; return 17; }
+        sha256sum() {
+            # 资源预检正常通过，只在写入外层摘要时模拟部分输出和非零退出。
+            if [[ "${1:-}" == --check ]]; then command sha256sum "$@"; return $?; fi
+            printf 'partial hash output\n'
+            return 17
+        }
         if dockerWriteBundleManifest "${validationRoot}"; then
             fail 'partial hash failure was accepted'
         fi
@@ -1101,6 +1112,22 @@ for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/re
         install --source "${incompleteSource}"
     [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] ||
         fail 'incomplete target module changed the active bundle'
+done
+
+# 新能力包必须完整携带清单和资源；缺省旧包不要求模板资源。
+for missing in shell/core/static_site_renderer.sh assets/static-sites/sites.sha256 \
+    assets/static-sites/sites/docs/backups-and-exports.html; do
+    incompleteSource="${TEST_ROOT}/incomplete-template-${missing//\//-}"
+    copyBundleFixture "${incompleteSource}"
+    rm -f -- "${incompleteSource}/${missing}"
+    (
+        source "${PROJECT_ROOT}/install-docker.sh" help
+        ! dockerBundleSourceIsComplete "${incompleteSource}"
+    ) || fail "incomplete template passed a bundle gate: ${missing}"
+    runControl 13 incomplete-template "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" \
+        install --source "${incompleteSource}"
+    [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] ||
+        fail 'incomplete template changed the active bundle'
 done
 
 # 三类失败逐项取证，不能让首个失败掩盖其它边界。

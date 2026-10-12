@@ -963,9 +963,15 @@ dockerConfigureSpecMigrate() {
 }
 
 dockerConfigureReleasePrepare() {
+    local siteTemplate=${4:-} status=0
     DOCKER_CONFIG_RELEASE_INPUTS=
     dockerManifestPrepare "${1:-}" "${2:-}" "${3:-}" || return "${PADM_DOCKER_RC_MANIFEST}"
-    dockerStageReleaseBundle >&2 || return "${PADM_DOCKER_RC_BUNDLE}"
+    dockerStageReleaseBundle "${siteTemplate}" >&2 || status=$?
+    if [[ "${status}" -ne 0 ]]; then
+        [[ -n "${siteTemplate}" && "${status}" -eq "${PADM_DOCKER_RC_STATE}" ]] &&
+            return "${status}"
+        return "${PADM_DOCKER_RC_BUNDLE}"
+    fi
     dockerPullManifestImages >&2 || return "${PADM_DOCKER_RC_COMPOSE}"
 }
 
@@ -2381,10 +2387,46 @@ dockerSiteStateValidate() {
     fi
 }
 
+dockerSiteTemplateInputsValidate() {
+    local specFile=$1 siteTemplate=$2 bundlePath=$3
+    case "${siteTemplate}" in notes|photos|docs) ;; *) return 1 ;; esac
+    jq -e '
+      .schema_version == 3 and
+      any(.core.protocols[]; .core == "xray" and
+        (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)) and
+      all(.core.protocols[]; .id != 3 and (.id != 23 or .core != "sing-box"))
+    ' "${specFile}" >/dev/null 2>&1 || {
+        dockerError '内置模板需要已有 v3 Xray Nginx TLS 或 fallback 入口，不支持 sing-box 23 或 Hysteria2 共存'
+        return 1
+    }
+    [[ -n "${bundlePath}" ]] &&
+        dockerBundleSiteTemplatePaths "${bundlePath}" >/dev/null || {
+        dockerError '受管 bundle 缺少静态站点模板能力或完整安全资源，未提交配置'
+        return 1
+    }
+}
+
 dockerStageSiteFiles() {
-    local specFile=$1 candidate=$2 source=${3:-} root
+    local specFile=$1 candidate=$2 source=${3:-} siteTemplate=${4:-} root bundlePath
     root=$(dockerInstallRoot) || return 1
-    if [[ -n "${source}" ]]; then
+    if [[ -n "${siteTemplate}" ]]; then
+        bundlePath=${DOCKER_STAGED_BUNDLE_PATH:-}
+        [[ -z "${source}" ]] &&
+            jq -e '.site.mode == "static"' "${specFile}" >/dev/null &&
+            dockerSiteTemplateInputsValidate "${specFile}" "${siteTemplate}" "${bundlePath}" || return 1
+        cp -a -- "${bundlePath}/assets/static-sites/sites/${siteTemplate}/." \
+            "${candidate}/data/static/" || return 1
+        (
+            # 内置模板采用固定默认值，不继承宿主或原生菜单的自定义内容。
+            local staticSiteTitle= staticSiteAccent= nginxStaticPath="${candidate}/data/static"
+            local PADM_STATIC_SITE_RENDERER_LOADED=0
+            source "${bundlePath}/shell/core/static_site_renderer.sh" &&
+                nginxStaticTemplateDefaults "${siteTemplate}" &&
+                renderNginxStaticTemplate
+        ) || return 1
+        dockerSiteStateValidate "${specFile}" "${candidate}"
+        return $?
+    elif [[ -n "${source}" ]]; then
         jq -e '.site.mode == "static"' "${specFile}" >/dev/null &&
             source=$(dockerSiteSourceValidate "${source}") || return 1
     else
@@ -3483,7 +3525,7 @@ dockerPrepareCandidatePermissions() {
 }
 
 dockerGenerateCandidate() {
-    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} siteSource=${6:-} root core token sharesSource=''
+    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} root core token sharesSource=''
     root=$(dockerInstallRoot) || return 1
     local previous=
     if jq -e 'has("control")' "${specFile}" >/dev/null &&
@@ -3516,7 +3558,7 @@ dockerGenerateCandidate() {
             [[ -z "$(find "${acmeSource}" -type l -print -quit)" ]] || return 1
         cp -a -- "${acmeSource}/." "${candidate}/data/acme/" || return 1
     fi
-    dockerStageSiteFiles "${specFile}" "${candidate}" "${siteSource}" || return 1
+    dockerStageSiteFiles "${specFile}" "${candidate}" "${siteSource}" "${siteTemplate}" || return 1
     dockerGenerateNginxConfig "${specFile}" "${candidate}/config/nginx/default.conf" || return 1
     dockerGenerateRealityStreamConfig "${specFile}" "${candidate}/config/nginx/stream/reality.conf" || return 1
     dockerGenerateRealityStreamMain "${specFile}" "${candidate}/config/nginx/stream/host-main" || return 1
@@ -5776,13 +5818,19 @@ dockerRealityStreamTransitionPrepare() {
 }
 
 dockerConfigureApply() {
-    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-}
+    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-}
     local specFile candidate backup answer root backupPrefix=configure
     # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     [[ -z "${businessSource}" ]] || backupPrefix=business
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    if [[ -n "${siteTemplate}" ]]; then
+        [[ -z "${siteSource}" ]] &&
+            dockerSiteTemplateInputsValidate "${sourceSpec}" "${siteTemplate}" "$(dockerCurrentBundlePath)" &&
+            dockerSiteTemplateInputsValidate "${sourceSpec}" "${siteTemplate}" "${DOCKER_STAGED_BUNDLE_PATH:-}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     dockerControlRecoveryCheck || return "${PADM_DOCKER_RC_STATE}"
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
     dockerAcmeWebrootTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
@@ -5822,7 +5870,7 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" "${siteSource}"; then
+    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" "${siteSource}" "${siteTemplate}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     fi

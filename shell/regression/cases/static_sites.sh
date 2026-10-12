@@ -59,6 +59,38 @@ runStaticSiteAssetsRegression() (
     done
 )
 
+runStaticSiteManifestRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/static-site-manifest" broken paths source="${PROJECT_ROOT}/assets/static-sites"
+    source "${PROJECT_ROOT}/shell/core/static_site_renderer.sh"
+    paths=$(nginxStaticTemplateAssetsValidate "${source}")
+    [[ "${paths}" == "$(cut -c 67- "${source}/sites.sha256")" ]]
+    mkdir -p "${root}"
+    for broken in missing-page missing-image missing-manifest omitted changed extra symlink hardlink special duplicate traversal private malformed; do
+        cp -a "${source}" "${root}/${broken}"
+        case "${broken}" in
+        missing-page) rm "${root}/${broken}/sites/notes/about.html" ;;
+        missing-image) rm "${root}/${broken}/sites/photos/assets/ridge.jpg" ;;
+        missing-manifest) rm "${root}/${broken}/sites.sha256" ;;
+        omitted) sed -i '/sites\/notes\/about.html$/d' "${root}/${broken}/sites.sha256" ;;
+        changed) printf '\nchanged\n' >>"${root}/${broken}/sites/docs/index.html" ;;
+        extra) cp "${root}/${broken}/sites/notes/about.html" "${root}/${broken}/sites/notes/extra.html" ;;
+        symlink)
+            rm "${root}/${broken}/sites/docs/about.html"
+            ln -s index.html "${root}/${broken}/sites/docs/about.html"
+            ;;
+        hardlink) ln "${root}/${broken}/sites/docs/about.html" "${root}/${broken}/sites/docs/extra.html" ;;
+        special) mkfifo "${root}/${broken}/sites/notes/extra.html" ;;
+        duplicate) head -n 1 "${root}/${broken}/sites.sha256" >>"${root}/${broken}/sites.sha256" ;;
+        traversal) printf '%064d  ../index.html\n' 0 >>"${root}/${broken}/sites.sha256" ;;
+        private) mkdir "${root}/${broken}/sites/notes/.private" ;;
+        malformed) printf 'not-a-standard-hash-line\n' >>"${root}/${broken}/sites.sha256" ;;
+        esac
+        regressionExpectFailure nginxStaticTemplateAssetsValidate "${root}/${broken}" \
+            >"${root}/${broken}.log" 2>&1
+    done
+)
+
 runStaticSiteToolsRegression() (
     set -euo pipefail
     local root="${TMP_DIR}/static-site-tools" toolsInstalled=false missingBasePackages=() path
@@ -193,9 +225,11 @@ runStaticSiteRendererValidationRegression() (
     before=$(nginxStaticSiteDigest "${nginxStaticPath}")
     stateBefore=$(cat "${PADM_STATIC_SITE_STATE_FILE}")
     SCRIPT_DIR="${root}/source"
-    mkdir -p "${SCRIPT_DIR}/assets/static-sites/sites"
-    cp -a "${PROJECT_ROOT}/assets/static-sites/sites/photos" "${SCRIPT_DIR}/assets/static-sites/sites/"
+    mkdir -p "${SCRIPT_DIR}/assets"
+    cp -a "${PROJECT_ROOT}/assets/static-sites" "${SCRIPT_DIR}/assets/"
     printf '\n__UNSUPPORTED__\n' >>"${SCRIPT_DIR}/assets/static-sites/sites/photos/index.html"
+    (cd "${SCRIPT_DIR}/assets/static-sites" &&
+        find sites -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >sites.sha256)
     regressionExpectFailure installNginxStaticTemplate photos
     SCRIPT_DIR="${PROJECT_ROOT}"
     grep() {
@@ -789,6 +823,7 @@ runStaticSiteNginxHttpRegression() (
 
 runStaticSitesRegression() {
     runRegressionStep static-site-assets runStaticSiteAssetsRegression
+    runRegressionStep static-site-manifest runStaticSiteManifestRegression
     runRegressionStep static-site-tools runStaticSiteToolsRegression
     runRegressionStep static-site-stable-install runStaticSiteStableInstallationRegression
     runRegressionStep static-site-title runStaticSiteTitleRegression

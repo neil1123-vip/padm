@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+source "${BASH_SOURCE[0]%/*}/static_site_renderer.sh" || return 1
+
 PADM_THIRD_PARTY_TCP_REPO="ylx2016/Linux-NetSpeed"
 PADM_THIRD_PARTY_TCP_REF="master"
 PADM_THIRD_PARTY_TCP_SCRIPT_PATH="tcpx.sh"
@@ -284,28 +286,6 @@ randomPathFunction() {
     echoContent yellow "\n path:${currentPath}"
     menuClose
 }
-# 站名写入 HTML 前转义，生成后的内容保持稳定，正文由主题自身提供。
-renderNginxStaticTemplate() {
-    local title=${staticSiteTitle:-} accent=${staticSiteAccent:-}
-    [[ "${accent}" =~ ^#[0-9a-fA-F]{6}$ ]] &&
-        jq -ne --arg title "${title}" '$title | length >= 2 and length <= 60 and
-            test("[^[:space:]]") and (test("[[:cntrl:]]") | not)' >/dev/null || return 1
-    title=$(printf '%s' "${title}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' \
-        -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&#39;/g" -e 's/[&|\\]/\\&/g') || return 1
-    local targetFile targetFiles placeholderStatus
-    targetFiles=$(find "${nginxStaticPath}" -type f \( -name "*.html" -o -name "*.css" \)) || return 1
-    while IFS= read -r targetFile; do
-        [[ -f "${targetFile}" ]] || continue
-        sed -i \
-            -e "s|__SITE_TITLE__|${title}|g" \
-            -e "s|__SITE_ACCENT__|${accent}|g" \
-            "${targetFile}" || return 1
-        placeholderStatus=0
-        grep -Eq '__[A-Z_]+__' "${targetFile}" || placeholderStatus=$?
-        [[ "${placeholderStatus}" == 1 ]] || return 1
-    done <<<"${targetFiles}"
-}
-
 nginxStaticSiteEnsureTools() {
     local missingStaticSitePackages=()
     collectMissingStaticSitePackages missingStaticSitePackages
@@ -457,6 +437,9 @@ installNginxStaticTemplate() {
     case "${theme}" in
     notes|photos|docs)
         sourcePath="${SCRIPT_DIR:-/etc/padm}/assets/static-sites/sites/${theme}"
+        nginxStaticTemplateAssetsValidate "${SCRIPT_DIR:-/etc/padm}/assets/static-sites" >/dev/null || {
+            errorCard "内置站点资源清单不匹配，已保留旧站点"; return 1;
+        }
         ;;
     /*)
         sourcePath="${theme%/}"
@@ -505,11 +488,7 @@ installNginxStaticTemplate() {
             staticSiteAccent=$(jq -r .accent "${statePath}") || return 1
         fi
     fi
-    case "${theme}" in
-    notes) staticSiteTitle=${staticSiteTitle:-Field Notes}; staticSiteAccent=${staticSiteAccent:-#28624b} ;;
-    photos) staticSiteTitle=${staticSiteTitle:-Light and Distance}; staticSiteAccent=${staticSiteAccent:-#225e91} ;;
-    docs) staticSiteTitle=${staticSiteTitle:-Pagekit}; staticSiteAccent=${staticSiteAccent:-#974338} ;;
-    esac
+    [[ "${theme}" == custom ]] || nginxStaticTemplateDefaults "${theme}" || return 1
     padmEnsureSafeDirectory "$(dirname -- "${sitePath%/}")" || return 1
     padmEnsureSafeDirectory "$(dirname -- "${statePath}")" || return 1
     padmCreateTempPath stageRoot -d "$(dirname -- "${sitePath%/}")/.padm-site.XXXXXX" || return 1

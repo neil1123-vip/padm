@@ -185,6 +185,9 @@ Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROX
 Docker 菜单 `16. 站点管理` 管理已有 Nginx TLS 入口 `21–25` 或 fallback `27`/`29` 的站点：
 
 ```bash
+padm-docker edit --site-template notes --preview
+padm-docker edit --site-template photos --confirm PADM-DOCKER-EDIT
+padm-docker edit --site-template docs --confirm PADM-DOCKER-EDIT
 padm-docker edit --site-static /root/public-site --preview
 padm-docker edit --site-static /root/public-site --confirm PADM-DOCKER-EDIT
 padm-docker edit --site-redirect https://example.com/ --confirm PADM-DOCKER-EDIT
@@ -200,6 +203,12 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 删除最后一个 Nginx 入口会清除站点模式，仍保留静态文件及其它 TLS 入口。
 `status` 只报告 `site_mode`，不输出目标 URL。已有旧规格保持兼容，带 `.site` 的 v3
 规格要求控制 bundle 声明 `x-padm-site-content`；受管 webroot 与 standalone HTTP-01 见证书管理。
+
+菜单 `16 → 8. 内置静态站点` 可选择 `notes`、`photos` 或 `docs`。内置主题仅适用于
+已有 v3 Xray Nginx TLS `21–25` 或 fallback `27/29`，包含 sing-box `23` 或
+Hysteria2 的部署明确拒绝；其它不提供网站的 Reality 入口可共存。主题从验签后的
+控制包复制，随包清单和资源完整性校验失败即拒绝；生成后只保存普通 `site.mode=static`，
+不保存主题身份，旧控制包的默认页、静态目录和 302 行为保持。
 
 同一菜单提供 `27`/`29` 的 ALPN 诊断、推荐修复和三种手动顺序：
 

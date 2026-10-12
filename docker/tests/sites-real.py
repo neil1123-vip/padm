@@ -5,6 +5,7 @@ import http.client
 import http.server
 import os
 import re
+import shutil
 import signal
 import socket
 import ssl
@@ -82,6 +83,14 @@ def h2_request(destination, path, fixture):
     return int(status), location, body.read_bytes()
 
 
+def replace_site(source, destination):
+    shutil.rmtree(destination)
+    shutil.copytree(source, destination)
+    for path in (destination, *destination.rglob("*")):
+        os.chown(path, 0, 10001)
+        path.chmod(0o750 if path.is_dir() else 0o640)
+
+
 def main(test_root):
     version = subprocess.run(["curl", "--version"], capture_output=True, text=True, check=True)
     assert re.search(r"^Features:.*\bHTTP2\b", version.stdout, re.MULTILINE), "curl 缺少 HTTP2"
@@ -98,6 +107,8 @@ def main(test_root):
             (site / "assets/site.css").write_bytes(CSS)
             (site / ".env").write_text("hidden-secret")
             (site / "assets/.secret").write_text("hidden-secret")
+            original_site = fixture / "original-static"
+            shutil.copytree(site, original_site)
             webroot = fixture / "acme-webroot"
             challenge = webroot / "active/.well-known/acme-challenge"
             challenge.mkdir(parents=True)
@@ -186,6 +197,7 @@ def main(test_root):
                     assert parsed.returncode == 0, (output.name, parsed.stderr)
                     if not http01 or protocol not in ("21", "27", "29"):
                         continue
+                    replace_site(original_site, site)
                     process = subprocess.Popen(
                         command + ["-g", "daemon off; master_process off;"],
                         stdout=stdout, stderr=subprocess.DEVNULL,
@@ -256,6 +268,49 @@ def main(test_root):
                             assert request(destination, path, **kwargs) == (200, None, body), (
                                 output.name, path,
                             )
+                    if mode == "static":
+                        # 同一真实 Nginx 进程读取生产 CLI 提交的三主题，复用监听和 h2 轮次。
+                        templates = test_root / "site-templates"
+                        assert {path.name for path in templates.iterdir()} == {"notes", "photos", "docs"}
+                        for theme in ("notes", "photos", "docs"):
+                            installed = templates / theme
+                            replace_site(installed, site)
+                            resources = [("/", installed / "index.html")] + [
+                                ("/" + path.relative_to(installed).as_posix(), path)
+                                for path in sorted(installed.rglob("*")) if path.is_file()
+                            ]
+                            assert any(path.suffix == ".png" for _, path in resources), theme
+                            assert any(path.suffix == ".jpg" for _, path in resources), theme
+                            assert any(path.name == "404.html" for _, path in resources), theme
+                            assert any(path.suffix == ".html" and path.name not in ("index.html", "404.html")
+                                       for _, path in resources), theme
+                            for public_path, path in resources:
+                                expected = (200, None, path.read_bytes())
+                                assert request(destination, public_path, **kwargs) == expected, (
+                                    output.name, theme, public_path,
+                                )
+                                if protocol in ("27", "29"):
+                                    assert h2_request(ports["31302"], public_path, fixture) == expected, (
+                                        output.name, theme, public_path,
+                                    )
+                            assert request(destination, "/nested/absent", **kwargs)[0] == 404, (
+                                output.name, theme,
+                            )
+                            if protocol in ("27", "29"):
+                                assert h2_request(ports["31302"], "/nested/absent", fixture)[0] == 404, (
+                                    output.name, theme,
+                                )
+                            else:
+                                for path, body in (
+                                    ("/abcdefghws", b"proxy:/abcdefghws"),
+                                    (f"/subscriptions/{TOKEN}", b"subscription:/" + TOKEN.encode()),
+                                ):
+                                    assert request(destination, path, **kwargs) == (200, None, body), (
+                                        output.name, theme, path,
+                                    )
+                            assert request(ports["8088"], f"/.well-known/acme-challenge/{CHALLENGE}") == (
+                                200, None, KEY_AUTHORIZATION,
+                            ), (output.name, theme)
                 finally:
                     if process.poll() is None:
                         process.terminate()

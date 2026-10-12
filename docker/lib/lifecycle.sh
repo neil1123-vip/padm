@@ -25,6 +25,7 @@ dockerUsage() {
   padm-docker setup [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-static <独立站点目录> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --site-template <notes|photos|docs> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-redirect <HTTP/HTTPS URL> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-default [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http01 <enable|disable> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

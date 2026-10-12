@@ -161,6 +161,9 @@ Menu item `16` manages sites on existing Nginx TLS listeners `21`-`25` or fallba
 listeners `27`/`29`. It supports a built-in default page, a static directory, and HTTP/HTTPS 302:
 
 ```bash
+padm-docker edit --site-template notes --preview
+padm-docker edit --site-template photos --confirm PADM-DOCKER-EDIT
+padm-docker edit --site-template docs --confirm PADM-DOCKER-EDIT
 padm-docker edit --site-static /root/public-site --preview
 padm-docker edit --site-static /root/public-site --confirm PADM-DOCKER-EDIT
 padm-docker edit --site-redirect https://example.com/ --confirm PADM-DOCKER-EDIT
@@ -181,6 +184,15 @@ Deleting the last Nginx listener clears the site mode but retains static files a
 `status` reports only `site_mode`, not the redirect URL. Old specs remain compatible;
 v3 `.site` requires the bundle capability `x-padm-site-content`.
 Managed webroot and standalone HTTP-01 are available through certificate management.
+
+Menu `16 → 8. Built-in static sites` selects `notes`, `photos`, or `docs`. Built-in
+themes require an existing v3 Xray Nginx TLS listener (`21`-`25`) or fallback
+(`27`/`29`); deployments containing sing-box `23` or Hysteria2 are rejected, while
+other Reality listeners without a website may coexist. Themes are copied from the
+verified control bundle and rejected when the bundled manifest or resources fail
+integrity checks. The resulting spec stores only ordinary `site.mode=static`, never
+the theme identity; old bundles keep their existing default, static-directory, and
+302 workflows.
 
 The same menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:

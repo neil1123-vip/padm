@@ -99,10 +99,13 @@ copyControlFixture() {
         docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py \
         docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
-        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
+        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh shell/core/static_site_renderer.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
         cp "${PROJECT_ROOT}/${relative}" "${target}/${relative}"
     done
+    # 版本兼容夹具也携带声明所要求的完整主题，不能靠删除能力绕过装包校验。
+    mkdir -p "${target}/assets"
+    cp -R -- "${PROJECT_ROOT}/assets/static-sites" "${target}/assets/"
     printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s"\n' "${marker}" >"${target}/install-docker.sh"
 }
 copyControlFixture "${CONTROL_SOURCE}" old-control
@@ -115,10 +118,10 @@ copyControlFixture "${TEST_ROOT}/control-v2" compatible-control
 jq '.properties.schema_version = {enum: [1, 2]}' \
     "${TEST_ROOT}/control-v2/docker/contracts/configure.schema.json" >"${TEST_ROOT}/v2-schema.json"
 mv -- "${TEST_ROOT}/v2-schema.json" "${TEST_ROOT}/control-v2/docker/contracts/configure.schema.json"
-tar -czf "${CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-new" install-docker.sh docker shell
-tar -czf "${FAILED_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-failed" install-docker.sh docker shell
-tar -czf "${LEGACY_CONTROL_BUNDLE}" -C "${CONTROL_SOURCE}" install-docker.sh docker shell
-tar -czf "${COMPAT_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-v2" install-docker.sh docker shell
+tar -czf "${CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-new" install-docker.sh docker shell assets
+tar -czf "${FAILED_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-failed" install-docker.sh docker shell assets
+tar -czf "${LEGACY_CONTROL_BUNDLE}" -C "${CONTROL_SOURCE}" install-docker.sh docker shell assets
+tar -czf "${COMPAT_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-v2" install-docker.sh docker shell assets
 
 cat >"${MANIFEST}" <<EOF
 $(jq -n --arg old "${OLD_DIGEST}" --arg new "${NEW_DIGEST}" --arg prefix "${REF_PREFIX}" '

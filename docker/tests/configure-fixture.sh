@@ -7,14 +7,15 @@ dockerConfigureTestFixture() {
     CONFIGURE_BUNDLE="${TEST_ROOT}/configure-release-manifest.sigstore.json"
     CONFIGURE_CONTROL="${TEST_ROOT}/configure-control.tar.gz"
     CONFIGURE_IDENTITY=https://github.com/neil1123-vip/padm/.github/workflows/create_release.yml@refs/heads/main
-    mkdir -p "${source}/docker" "${source}/shell/core"
+    mkdir -p "${source}/docker" "${source}/shell/core" "${source}/assets"
     cp "${PROJECT_ROOT}/install-docker.sh" "${source}/install-docker.sh"
     cp -R "${PROJECT_ROOT}/docker/lib" "${source}/docker/lib"
     cp -R "${PROJECT_ROOT}/docker/contracts" "${source}/docker/contracts"
-    for relative in deployment_mode.sh stats_grpc.sh runtime.sh reality_targets.sh cores.sh; do
+    for relative in deployment_mode.sh stats_grpc.sh runtime.sh reality_targets.sh cores.sh static_site_renderer.sh; do
         cp "${PROJECT_ROOT}/shell/core/${relative}" "${source}/shell/core/${relative}"
     done
-    tar -czf "${CONFIGURE_CONTROL}" -C "${source}" install-docker.sh docker shell
+    cp -R "${PROJECT_ROOT}/assets/static-sites" "${source}/assets/static-sites"
+    tar -czf "${CONFIGURE_CONTROL}" -C "${source}" install-docker.sh docker shell assets
     controlSha=$(sha256sum "${CONFIGURE_CONTROL}" | cut -d ' ' -f 1)
     jq -n --arg sha "${controlSha}" --arg digest "${IMAGE_DIGEST}" --arg ops "${OPS_IMAGE}" '
       def image($name): {
