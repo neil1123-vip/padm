@@ -822,7 +822,7 @@ dockerProtocolCommand() (
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     list|stream-status|routing-status|port-alias-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
-    links|cdn-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
+    links|cdn-status|xhttp-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
         if [[ "${action}" == select-target ]]; then
@@ -892,6 +892,22 @@ dockerProtocolCommand() (
     dockerEditBaselineValidate "${original}" "${workspace}" &&
         dockerConfigureSpecMigrate "${original}" "${normalized}" &&
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == xhttp-status ]]; then
+        jq --arg listener "${listener}" '
+          [.core.protocols[] | select(.id == 2 and .core == "xray") |
+            select($listener == "" or .listener_id == $listener) |
+            {listener_id,protocol:.id,mode:.xhttp.mode,
+             xmux:(.xhttp.xmux // {maxConcurrency:"16-32",
+               hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"}),
+             explicit:(.xhttp | has("xmux"))}] as $entries |
+          if $listener != "" and ($entries | length) == 0 then error("入口不支持 XHTTP 管理")
+          else {entries:$entries} end
+        ' "${normalized}" || {
+            dockerError 'XHTTP 管理只支持已有 v3 Xray 协议 2 入口'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        return 0
+    fi
     if [[ "${action}" == cdn-status ]]; then
         jq --arg listener "${listener}" '
           . as $request |
@@ -1187,7 +1203,10 @@ dockerEditFields() {
                     if $derive then
                       del(.xhttp, .grpc) | .id = $targetProtocol |
                       if .id == 2 then
-                        .xhttp = {path: ("/" + $newId + "xhttp"), host: .reality.server_name, mode: "auto"}
+                        .xhttp = {path: ("/" + $newId + "xhttp"), host: .reality.server_name, mode: "auto"} |
+                        if $source.id == 2 and ($source.xhttp | has("xmux")) then
+                          .xhttp.xmux = $source.xhttp.xmux
+                        else . end
                       elif .id == 26 then .grpc = {service_name: "grpc"} else . end
                     else . end |
                     if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then
@@ -1384,6 +1403,7 @@ dockerEditCommand() {
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
     local cdnAction= cdnListener= cdnAddresses=
+    local xhttpAction= xhttpListener= xhttpPreset= xhttpValues='{}'
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -1560,6 +1580,37 @@ dockerEditCommand() {
             [[ "$1" != --fail2ban-ssh-off ]] || fail2banType=fail2ban-ssh
             fail2banAction=off
             shift
+            ;;
+        --xhttp-preset)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            case "$3" in daily|compatible|stream|single) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            xhttpAction=preset xhttpListener=$2 xhttpPreset=$3
+            shift 3
+            ;;
+        --xhttp-xmux)
+            [[ "$#" -ge 5 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpValues=$(jq -cen --arg concurrency "$3" --arg requests "$4" --arg seconds "$5" '
+              def value($min):
+                if test("^(0|[1-9][0-9]{0,9})\\z") then
+                  tonumber | if . >= $min and . <= 2147483647 then . else error("范围越界") end
+                elif test("^(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})\\z") then
+                  . as $raw | split("-") | map(tonumber) |
+                  if .[0] >= $min and .[0] <= .[1] and .[1] <= 2147483647
+                  then $raw else error("范围越界或反转") end
+                else error("不是规范整数或范围") end;
+              {maxConcurrency:($concurrency | value(1)),hMaxRequestTimes:($requests | value(0)),
+               hMaxReusableSecs:($seconds | value(0))}
+            ' 2>/dev/null) || return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=xmux xhttpListener=$2
+            shift 5
+            ;;
+        --xhttp-xmux-clear)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=clear xhttpListener=$2
+            shift 2
             ;;
         --cdn-entry)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
@@ -1792,6 +1843,14 @@ dockerEditCommand() {
         dockerError 'CDN 地址专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${xhttpAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${fail2banAction}" && -z "${cdnAction}" ) ]] || {
+        dockerError 'XHTTP 专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1804,7 +1863,7 @@ dockerEditCommand() {
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
-        -z "${cdnAction}" && -z "${fail2banAction}" ) ||
+        -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -1868,7 +1927,7 @@ dockerEditCommand() {
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
-        -z "${cdnAction}" && -z "${fail2banAction}" ]]; then
+        -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1952,6 +2011,28 @@ dockerEditCommand() {
         ' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ -n "${xhttpAction}" ]]; then
+        jq --arg listener "${xhttpListener}" --arg action "${xhttpAction}" \
+            --arg preset "${xhttpPreset}" --argjson xmux "${xhttpValues}" '
+          if .schema_version != 3 or
+            ([.core.protocols[] | select(.listener_id == $listener and .id == 2 and .core == "xray")] | length) != 1
+          then error("入口不支持 XHTTP 管理")
+          else .core.protocols |= map(if .listener_id == $listener then
+            if $action == "clear" then del(.xhttp.xmux)
+            elif $action == "xmux" then .xhttp.xmux = $xmux
+            else
+              .xhttp.mode = (if $preset == "compatible" then "packet-up"
+                elif $preset == "stream" then "stream-up" else "auto" end) |
+              .xhttp.xmux = {maxConcurrency:(if $preset == "single" then 1 else "16-32" end),
+                hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"}
+            end
+          else . end) end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError 'XHTTP 管理只支持已有 v3 Xray 协议 2 入口，未提交配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
     fi
     if [[ -n "${cdnAction}" ]]; then
         jq --arg listener "${cdnListener}" --arg action "${cdnAction}" --arg addresses "${cdnAddresses}" '
@@ -2301,6 +2382,7 @@ dockerEditCommand() {
         --arg http_relay "${httpRelay}" \
         --arg port_alias "${portAlias}" \
         --arg cdn_listener "${cdnListener}" \
+        --arg xhttp_listener "${xhttpListener}" --arg xhttp_action "${xhttpAction}" \
         --arg fail2ban_action "${fail2banAction}" \
         --arg fail2ban_type "${fail2banType}" \
         --arg fail2ban_listener "${fail2banPortListener}" \
@@ -2363,6 +2445,14 @@ dockerEditCommand() {
         ([$old.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ([$new.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ($old | without_fail2ban_settings) == ($new | without_fail2ban_settings)
+       elif $xhttp_listener != "" then
+        # XMUX 只描述客户端；专项只豁免选中入口的客户端字段及预设模式。
+        def without_xhttp:
+          .core.protocols |= map(if .listener_id == $xhttp_listener then
+            if $xhttp_action == "preset" then del(.xhttp.mode, .xhttp.xmux)
+            else del(.xhttp.xmux) end
+          else . end);
+        ($old | without_xhttp) == ($new | without_xhttp)
        elif $cdn_listener != "" then
         ($old | without_cdn) == ($new | without_cdn)
        elif $port_alias != "" then
@@ -2427,7 +2517,9 @@ dockerEditCommand() {
            (($entry.id == 21 or $entry.id == 22 or $entry.id == 24 or $entry.id == 25) and $entry.core == "xray")) and
           any($old.core.protocols[];
             .listener_id as $sourceId | any($new.core.protocols[]; .listener_id == $sourceId) and
-            (if reality and ($entry | reality) then shared == ($entry | shared)
+            (if reality and ($entry | reality) then
+              shared == ($entry | shared) and
+              ($entry.id != 2 or .xhttp.xmux == $entry.xhttp.xmux)
             else
               (fixed | del(.listener_id, .core, .websocket.backend_port, .websocket.tls_port,
                 .httpupgrade.backend_port, .httpupgrade.tls_port, .grpc_tls.backend_port, .grpc_tls.tls_port)) ==
@@ -2437,7 +2529,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持 CDN 地址/Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持 XHTTP/CDN 地址/Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"

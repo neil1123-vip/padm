@@ -58,6 +58,7 @@ runRegressionRegistryRunnerArgsContract() (
         'sequential:one two' \
         'parallel:three four' >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+
 )
 
 runRegressionParallelSelectorLimitCompositionRegression() (
@@ -264,7 +265,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-routing-direct-block-workflow docker-routing-core-policy-lifecycle
         docker-setup-core docker-phase1 docker-menu docker-setup-encrypted-tcp
         docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
-        docker-cdn-entries docker-fail2ban-ownership docker-control-state
+        docker-cdn-entries docker-xhttp docker-fail2ban-ownership docker-control-state
         docker-reality-targets-selection docker-reality-target-library docker-control-client
         docker-tproxy-ownership docker-routing-core-contracts docker-http-relay docker-control-cli
         docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts
@@ -419,6 +420,18 @@ runRegressionDockerContractsAggregateContract() (
     runDockerPhase4MaintenanceRegression
     runDockerPhase4LifecycleRegression
     printf '%s\n' full:phase4.sh maintenance:phase4.sh lifecycle:phase4.sh >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+
+    # 合同进入完整集合，真实链路继续使用独立入口。
+    : >"${callLog}"
+    bash() {
+        [[ "$1" != -n ]] || return 0
+        printf '%s\n' "${1##*/}" >>"${callLog}"
+    }
+    shellcheck() { :; }
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-real
+    printf '%s\n' xhttp.sh xhttp-real.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
 )
 

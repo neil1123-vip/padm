@@ -381,6 +381,89 @@ runCdnDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runXhttpDriver() {
+    local scenario=$1 choice answer field
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'9\n'
+    targetReply 'Docker 协议与入口' $'10\n'
+    targetReply 'Docker XHTTP 管理' $'1\n'
+    case "${scenario}" in
+    flow)
+        for choice in 2 3 4 5; do
+            targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        done
+        for answer in custom defaults; do
+            targetReply 'Docker XHTTP 管理' $'6\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+            if [[ "${answer}" == custom ]]; then
+                targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' $'8-16\n'
+                targetReply 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]' $'0-0\n'
+                targetReply 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]' $'120-180\n'
+            else
+                targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' $'\n'
+                targetReply 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]' $'\n'
+                targetReply 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]' $'\n'
+            fi
+        done
+        targetReply 'Docker XHTTP 管理' $'7\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        ;;
+    cancel)
+        targetReply 'Docker XHTTP 管理' $'99\n'
+        for answer in $'0\n' $'\n' $'\004' $'--invalid\n'; do
+            for choice in 2 6 7; do
+                targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
+                targetReply 'XHTTP 入口 ID（0 返回）' "${answer}"
+            done
+        done
+        for answer in $'0\n' $'\004'; do
+            for field in concurrency requests seconds; do
+                targetReply 'Docker XHTTP 管理' $'6\n'
+                targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+                if [[ "${field}" == concurrency ]]; then
+                    targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' "${answer}"
+                    continue
+                fi
+                targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' $'8-16\n'
+                if [[ "${field}" == requests ]]; then
+                    targetReply 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]' "${answer}"
+                    continue
+                fi
+                targetReply 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]' $'50-100\n'
+                targetReply 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]' "${answer}"
+            done
+        done
+        ;;
+    failed|invalid)
+        if [[ "${scenario}" == failed ]]; then
+            targetReply 'Docker XHTTP 管理' $'2\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        fi
+        targetReply 'Docker XHTTP 管理' $'6\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        if [[ "${scenario}" == invalid ]]; then
+            targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' $'not-range\n'
+        else
+            targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' $'8-16\n'
+        fi
+        targetReply 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]' $'50-100\n'
+        targetReply 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]' $'120-180\n'
+        if [[ "${scenario}" == failed ]]; then
+            targetReply 'Docker XHTTP 管理' $'7\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        fi
+        ;;
+    status-failed)
+        targetReply 'Docker XHTTP 管理' $'2\n'
+        ;;
+    esac
+    targetReply 'Docker XHTTP 管理' $'1\n'
+    targetReply 'Docker XHTTP 管理' $'0\n'
+    targetReply 'Docker 协议与入口' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runMaintenanceDriver() {
     local scenario=$1 choice address answer=n action field previous prompt value
     local scope=ws statusChoice=1 unbanChoice=2 disableChoice=3 enableChoice=5 settingsChoice=6
@@ -1496,6 +1579,8 @@ runPty() {
             runPortAliasDriver "${input}"
         elif [[ "${driver}" == cdn ]]; then
             runCdnDriver "${input}"
+        elif [[ "${driver}" == xhttp ]]; then
+            runXhttpDriver "${input}"
         elif [[ "${driver}" == maintenance ]]; then
             runMaintenanceDriver "${input}"
         elif [[ "${driver}" == control ]]; then
@@ -1759,6 +1844,7 @@ protocol)
         ;;
     alpn-status) exit "${SITE_ALPN_STATUS:-0}" ;;
     routing-status) exit "${ROUTING_STATUS:-0}" ;;
+    xhttp-status) exit "${XHTTP_STATUS:-0}" ;;
     esac
     printf 'fixture-protocol-output\n'
     ;;
@@ -1810,6 +1896,16 @@ edit)
         [[ "$#" -eq 4 && "$3" == entry24 && -n "$4" ]] || exit 2
     elif [[ "${2:-}" == --cdn-entry-clear ]]; then
         [[ "$#" -eq 3 && "$3" == entry25 ]] || exit 2
+    elif [[ "${2:-}" == --xhttp-preset ]]; then
+        [[ "$#" -eq 4 && "$3" == entry-xhttp &&
+            ( "$4" == daily || "$4" == compatible || "$4" == stream || "$4" == single ) ]] || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --xhttp-xmux ]]; then
+        [[ "$#" -eq 6 && "$3" == entry-xhttp && -n "$4" && -n "$5" && -n "$6" ]] || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --xhttp-xmux-clear ]]; then
+        [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
         "${2:-}" == --direct-domains-add || "${2:-}" == --block-domains-add ||
         "${2:-}" == --direct-domains-remove || "${2:-}" == --block-domains-remove ||
@@ -2878,6 +2974,59 @@ for cdnCase in flow cancel failed; do
     fi
 done
 unset SITE_EDIT_STATUS
+
+# 菜单只校验取消与参数分发；非法范围由 CLI 拒绝后必须能继续查看状态。
+for xhttpCase in flow cancel failed invalid status-failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export XHTTP_EDIT_STATUS=0 XHTTP_STATUS=0
+    case "${xhttpCase}" in
+    failed) XHTTP_EDIT_STATUS=15 ;;
+    invalid) XHTTP_EDIT_STATUS=2 ;;
+    status-failed) XHTTP_STATUS=15 ;;
+    esac
+    runPty "xhttp-${xhttpCase}" xhttp "${xhttpCase}" "${TLS_WIZARD_CLI}" menu
+    expectedXhttp=$'protocol list\nprotocol xhttp-status'
+    case "${xhttpCase}" in
+    flow)
+        for xhttpPreset in daily compatible stream single; do
+            expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-preset entry-xhttp '"${xhttpPreset}"
+        done
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp 8-16 0-0 120-180'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp 16-32 600-900 1800-3000'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux-clear entry-xhttp'
+        ;;
+    cancel)
+        for ((xhttpStatus = 0; xhttpStatus < 18; xhttpStatus++)); do
+            expectedXhttp+=$'\nprotocol xhttp-status'
+        done
+        grep -Fq '无效选项，请重新选择。' "${CONTROL_LOG}" || fail 'XHTTP 无效选项未留在菜单'
+        ;;
+    failed)
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-preset entry-xhttp daily'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp 8-16 50-100 120-180'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux-clear entry-xhttp'
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail 'XHTTP 编辑失败未显示错误并继续读取'
+        ;;
+    invalid)
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp not-range 50-100 120-180'
+        grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail 'XHTTP 非法范围未保留菜单'
+        ;;
+    status-failed)
+        expectedXhttp+=$'\nprotocol xhttp-status'
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail 'XHTTP 状态失败仍提示变更或未恢复菜单'
+        ! grep -Fq 'XHTTP 入口 ID（0 返回）' "${CONTROL_LOG}" ||
+            fail 'XHTTP 状态失败仍读取变更入口'
+        ;;
+    esac
+    expectedXhttp+=$'\nprotocol xhttp-status'
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedXhttp}" ]] ||
+        fail "XHTTP ${xhttpCase} 参数分发错误或取消后执行编辑"
+    grep -Fq '10. XHTTP 管理' "${CONTROL_LOG}" || fail 'XHTTP 管理未接入协议菜单'
+    grep -Fq '已有 Xray Reality 入口' "${CONTROL_LOG}" || fail 'XHTTP 菜单未显示支持范围'
+done
+unset XHTTP_EDIT_STATUS XHTTP_STATUS
 
 # 按新版八项菜单现场握手，扫描和选择必须真实读取前台终端。
 : >"${TLS_WIZARD_ACTIONS}"

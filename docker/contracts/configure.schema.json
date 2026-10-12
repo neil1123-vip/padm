@@ -31,6 +31,7 @@
   "x-padm-port-alias-default": true,
   "x-padm-cdn-entry-addresses": true,
   "x-padm-cdn-grpc-tls": true,
+  "x-padm-xhttp-xmux": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -1471,6 +1472,31 @@
                 },
                 "mode": {
                   "enum": ["auto", "packet-up", "stream-up"]
+                },
+                "xmux": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"],
+                  "properties": {
+                    "maxConcurrency": {
+                      "oneOf": [
+                        {"type": "integer", "minimum": 1, "maximum": 2147483647},
+                        {"type": "string", "maxLength": 21, "pattern": "^[1-9][0-9]{0,9}-[1-9][0-9]{0,9}(?![\\s\\S])"}
+                      ]
+                    },
+                    "hMaxRequestTimes": {
+                      "oneOf": [
+                        {"type": "integer", "minimum": 0, "maximum": 2147483647},
+                        {"type": "string", "maxLength": 21, "pattern": "^(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})(?![\\s\\S])"}
+                      ]
+                    },
+                    "hMaxReusableSecs": {
+                      "oneOf": [
+                        {"type": "integer", "minimum": 0, "maximum": 2147483647},
+                        {"type": "string", "maxLength": 21, "pattern": "^(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})(?![\\s\\S])"}
+                      ]
+                    }
+                  }
                 }
               }
             }

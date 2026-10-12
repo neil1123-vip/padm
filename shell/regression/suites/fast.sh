@@ -84,6 +84,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-phase6 \
         docker-entry-port-alias \
         docker-cdn-entries \
+        docker-xhttp \
         docker-fail2ban-ownership \
         docker-control-state \
         docker-reality-targets-selection \
@@ -133,6 +134,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-control-client \
         docker-tproxy-ownership \
         docker-http-relay \
+        docker-xhttp \
         docker-control-cli \
         docker-phase5 \
         docker-fail2ban-ownership \
@@ -238,6 +240,18 @@ runDockerAlpnRealRegression() {
     done
     shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/"{cdn-entries-real,vmess-real}.sh
     PADM_TEST_ALPN_ORDERS=1 bash "${PROJECT_ROOT}/docker/tests/cdn-entries-real.sh"
+}
+
+runDockerXhttpRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/xhttp.sh"
+    shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/xhttp.sh"
+    bash "${PROJECT_ROOT}/docker/tests/xhttp.sh"
+}
+
+runDockerXhttpRealRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/xhttp-real.sh"
+    shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/xhttp-real.sh"
+    bash "${PROJECT_ROOT}/docker/tests/xhttp-real.sh"
 }
 
 runDockerEntryPortAliasRealRegression() {
@@ -523,6 +537,8 @@ registerRegressionFunctionLeaf docker-entry-port-alias runDockerEntryPortAliasRe
 registerRegressionFunctionLeaf docker-cdn-entries runDockerCdnEntriesRegression
 registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRegression
 registerRegressionFunctionLeaf docker-alpn-real runDockerAlpnRealRegression
+registerRegressionFunctionLeaf docker-xhttp runDockerXhttpRegression
+registerRegressionFunctionLeaf docker-xhttp-real runDockerXhttpRealRegression
 registerRegressionFunctionLeaf docker-entry-port-alias-real runDockerEntryPortAliasRealRegression
 registerRegressionFunctionLeaf docker-routing-dns-hosts runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-dns-hosts-real runDockerRoutingDnsHostsRealRegression

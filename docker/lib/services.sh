@@ -138,6 +138,13 @@ dockerConfigureSpecValidate() {
       def bandwidth: type == "number" and floor == . and . >= 1 and . <= 1000000;
       def duration: type == "string" and test("^[1-9][0-9]{0,5}(ms|s|m|h)$") and
         (explode | all(. > 32 and . != 127));
+      def xmux_value($min):
+        if type == "number" then floor == . and . >= $min and . <= 2147483647
+        elif type == "string" then
+          test("^(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})\\z") and
+          (split("-") | map(tonumber) |
+            .[0] >= $min and .[0] <= .[1] and .[1] <= 2147483647)
+        else false end;
       def masquerade: type == "string" and length <= 2048 and
         (. == "" or (test("^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?$") and
           (ltrimstr("https://") | split("/")[0] | hostname))) and
@@ -429,11 +436,18 @@ dockerConfigureSpecValidate() {
             (.short_id | test("^(?:[a-f0-9]{2}){1,8}$"))) and
           (if .id == 2 then
              .core == "xray" and
-             (.xhttp | exact(["path", "host", "mode"]) and
+             (.xhttp | exact(["path", "host", "mode"] +
+                 if has("xmux") then ["xmux"] else [] end) and
                (.path | type == "string" and test("^/[A-Za-z0-9._~/-]{1,128}$") and
                  (explode | all(. > 32 and . != 127))) and
                (.host | hostname and (explode | all(. > 32 and . != 127))) and
-               (.mode == "auto" or .mode == "packet-up" or .mode == "stream-up"))
+               (.mode == "auto" or .mode == "packet-up" or .mode == "stream-up") and
+               (if has("xmux") then
+                 (.xmux | exact(["maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"]) and
+                   (.maxConcurrency | xmux_value(1)) and
+                   (.hMaxRequestTimes | xmux_value(0)) and
+                   (.hMaxReusableSecs | xmux_value(0)))
+                else true end))
            elif .id == 26 then
              (.grpc | exact(["service_name"]) and
                (.service_name | type == "string" and test("^[A-Za-z0-9._-]{1,64}$") and
@@ -2715,7 +2729,9 @@ dockerGenerateSubscription() {
       if .id == 1 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
       elif .id == 2 then
-        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)#\(.name | @uri)"
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
+          (if .xhttp | has("xmux") then "&extra=\({xmux:.xhttp.xmux} | tojson | @uri)" else "" end) +
+          "#\(.name | @uri)"
       elif .id == 26 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"
       elif .id == 28 then

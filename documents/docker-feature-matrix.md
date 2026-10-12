@@ -50,6 +50,11 @@ Reality 可跨核心复制，删除副核心最后入口会关闭副核心，主
 首配、完整 v3 规格导入、基础参数编辑、传输派生及本地分享链接已接入。
 Vision/gRPC 可跨核心复制，XHTTP 仅限 Xray；副核心首配仍默认 Vision。
 双核心暂不能组合宿主集成；目标 bundle 版本与协议/核心支持均需匹配。
+3D.4 接入已有 v3 Xray XHTTP 单入口的日常、兼容、流式、单并发预设，以及客户端
+XMUX 三键自定义/清除、CLI/菜单状态和统一链接发布。显式 XMUX 进入 URI `extra`，
+服务端原固定 XMUX 不变；旧规格和无显式 XMUX 的链接保持，旧包仅拒绝显式对象。
+完整管理继续 `deferred`，Padding、headers/sc*、downloadSettings、H3/CDN 与上下行分离未开放，
+长时复用和吞吐收益未证明；本地 amd64 合同、菜单、真实流量与 49 项完整回归已通过。
 3C.3 新增 sing-box Hysteria2：首配、完整 v3 规格导入、参数编辑、复制/删除及本地分享链接，
 支持单 UDP 入口、BBR/Brutal、Salamander 和 HTTPS 伪装；复用 TLS 和 UUID 流量账号。
 带宽为服务端方向，链接转为客户端方向；包含 Hysteria2 时暂不接受宿主集成。
@@ -143,7 +148,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | ID | 能力 | 原生入口 | 配置运行状态 | 管理状态 | 核心 | Compose profile | 网络/监听 | 原因 |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | 支持单核心或主副核心配置、字段编辑及跨核心同协议多入口；完整管理未迁移。 |
-| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；高级 XHTTP 管理未迁移。 |
+| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 已有单入口的四预设、客户端 XMUX 三键自定义/清除及发布事务已接入，本地合同/菜单/五组真实链路通过；其它高级参数和完整管理未开放。 |
 | 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、导入、BBR/Brutal、Salamander/HTTPS 伪装编辑、复制及分享链接；复用受管 TLS 和 UUID 流量账号，端口跳跃与完整管理未开放。 |
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用字段编辑、同核复制/删除及分享链接；复用受管 TLS 与 UUID 流量账号，域名与凭据冻结，宿主集成组合及完整管理未开放。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用编辑、同核复制/删除及原生 URI；入口与 TLS 同域，UUID 用户名/密码共享统计额度；QUIC、独立 IP/SNI 覆盖及完整管理未开放。 |

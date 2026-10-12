@@ -111,7 +111,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -148,6 +148,49 @@ dockerMenuProtocols() {
         7) dockerMenuSubscriptions ;;
         8) dockerMenuPortAliases ;;
         9) dockerMenuCdnEntries ;;
+        10) dockerMenuXhttp ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuXhttp() {
+    local choice listener preset concurrency requests seconds
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker XHTTP 管理（已有 Xray Reality 入口）\n'
+        printf '%s\n' '1. 查看状态' '2. 日常预设' '3. 兼容预设' '4. 流式预设' \
+            '5. 单并发预设' '6. 自定义 XMUX' '7. 恢复缺省 XMUX' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun protocol xhttp-status || true ;;
+        2|3|4|5|6|7)
+            dockerMenuRun protocol xhttp-status || continue
+            dockerSetupRead listener 'XHTTP 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" && "${listener}" != --* ]] || continue
+            if [[ "${choice}" == 6 ]]; then
+                # 0 保留为返回键；需要零值时使用范围 0-0，数值边界交给 CLI。
+                dockerSetupRead concurrency 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]: ' 16-32 &&
+                    dockerSetupRead requests 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]: ' 600-900 &&
+                    dockerSetupRead seconds 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]: ' 1800-3000 || continue
+                dockerMenuRun edit --xhttp-xmux "${listener}" "${concurrency}" "${requests}" "${seconds}" || true
+            elif [[ "${choice}" == 7 ]]; then
+                dockerMenuRun edit --xhttp-xmux-clear "${listener}" || true
+            else
+                case "${choice}" in
+                2) preset=daily ;;
+                3) preset=compatible ;;
+                4) preset=stream ;;
+                5) preset=single ;;
+                esac
+                dockerMenuRun edit --xhttp-preset "${listener}" "${preset}" || true
+            fi
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
