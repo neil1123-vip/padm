@@ -67,6 +67,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.static.outputs.source_sha }}
+      - name: Install pinned jq
+        run: sudo bash shell/regression/install-ci-jq.sh
       - name: Check native regressions
         shell: bash
         run: |
@@ -84,6 +86,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.static.outputs.source_sha }}
+      - name: Install pinned jq
+        run: sudo bash shell/regression/install-ci-jq.sh
       - name: Check Docker TLS transactions and renewal
         shell: bash
         run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused

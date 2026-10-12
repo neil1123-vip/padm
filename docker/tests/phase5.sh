@@ -1045,6 +1045,15 @@ grep -Fq '.github/workflows/docker-contracts.yml; then' "${RELEASE_WORKFLOW}" ||
 for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
     grep -Fxq '        run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused' "${workflow}" ||
         fail "Docker TLS and renewal gate does not use a root-safe temp directory: ${workflow}"
+    for job in native tls; do
+        jobDefinition=$(awk -v job="${job}" '
+            $0 == "  " job ":" {inside = 1; next}
+            inside && /^  [^ ]/ {exit}
+            inside {print}
+        ' "${workflow}")
+        grep -Fq 'run: sudo bash shell/regression/install-ci-jq.sh' <<<"${jobDefinition}" ||
+            fail "CI ${job} 没有安装固定版本的 jq: ${workflow}"
+    done
     triggerPaths=$(awk '/^jobs:/ {exit} {print}' "${workflow}")
     for path in '.github/workflows/**' 'install.sh' 'shell/**' 'assets/**'; do
         grep -Fxq "      - '${path}'" <<<"${triggerPaths}" || fail "CI trigger misses ${path}: ${workflow}"
@@ -1053,6 +1062,8 @@ for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
         fail "CI trigger excludes native tests: ${workflow}"
     fi
 done
+grep -Fq 'run: sudo bash shell/regression/install-ci-jq.sh' "${CONTRACT_WORKFLOW}" ||
+    fail 'CI 合同分片没有安装固定版本的 jq'
 grep -Fq 'uses: docker://rhysd/actionlint:1.7.12' "${PR_WORKFLOW}" || fail 'PR workflow lint gate is missing'
 grep -Fq 'bash shell/subscription_groups_regression.sh "${selector}"' "${PR_WORKFLOW}" ||
     fail 'PR native selector dispatch is missing'
