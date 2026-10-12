@@ -1423,7 +1423,7 @@ dockerEditCommand() {
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local routingServer= routingPort=
-    local routingDomains='[]'
+    local routingDomains='[]' routingOldDomains='[]'
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
     local cdnAction= cdnListener= cdnAddresses=
@@ -1523,6 +1523,18 @@ dockerEditCommand() {
             routingDomains=$(dockerSocks5DomainsNormalize "$2") ||
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 2
+            ;;
+        --dns-domains-replace|--direct-domains-replace|--block-domains-replace|--warp-domains-replace|--ipv6-domains-replace)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && "$2" != *,* &&
+                -n "$3" && "$3" != --* && "$3" != *,* && -z "${routingKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=${1#--} routingKind=${routingKind%-domains-replace} routingAction=domains_replace
+            routingOldDomains=$(dockerSocks5DomainsNormalize "$2") &&
+                routingDomains=$(dockerSocks5DomainsNormalize "$3") &&
+                jq -en --argjson old "${routingOldDomains}" --argjson domains "${routingDomains}" \
+                    '($old | length) == 1 and ($domains | length) == 1' >/dev/null ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            shift 3
             ;;
         --block-ips-add|--block-ips-remove)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
@@ -2199,7 +2211,16 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${routingKind}" ]]; then
-        if [[ "${routingKind}" == dns &&
+        if [[ "${routingAction}" == domains_replace ]]; then
+            jq -e --arg kind "${routingKind}" '
+              (.routing[$kind].domains | type == "array" and length > 0) and
+              (if $kind == "warp" or $kind == "ipv6" then
+                .routing[$kind].mode == "selective" else true end)
+            ' "${draft}" >/dev/null || {
+                dockerError '域名单条替换要求已有非空名单；WARP/IPv6 还须已启用选择性分流'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        elif [[ "${routingKind}" == dns &&
             ( "${routingAction}" == domains_add || "${routingAction}" == domains_remove ) ]]; then
             jq -e '.routing.dns != null' "${draft}" >/dev/null || {
                 dockerError '请先启用有效的 DNS 分流，再增删域名规则'
@@ -2250,6 +2271,17 @@ dockerEditCommand() {
         elif [[ "${routingKind}" == ipv6 && "${routingAction}" == enable ]]; then
             jq --arg mode "${ipv6Mode}" --argjson domains "${ipv6Domains}" \
                 '.routing.ipv6 = {mode:$mode,domains:$domains}' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == domains_replace ]]; then
+            jq --arg kind "${routingKind}" --argjson old "${routingOldDomains}" \
+                --argjson domains "${routingDomains}" '
+              .routing[$kind].domains as $existing |
+              if ($existing | map(select(. == $old[0])) | length) != 1 then
+                error("待替换旧规则必须恰好存在于当前所选手工域名名单一次，未提交配置")
+              elif ($existing | index($domains[0])) != null then
+                error("新规则不能与当前所选手工域名名单中的规则重复，未提交配置")
+              else .routing[$kind].domains =
+                ($existing | map(if . == $old[0] then $domains[0] else . end)) end
+            ' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == domains_add ]]; then
             jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" '
               (reduce $domains[] as $rule ((.routing[$kind].domains // []);
@@ -2553,6 +2585,8 @@ dockerEditCommand() {
        elif $socks5 != "" then
         ($old | del(.routing.socks5) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
+        elif $routing_action == "domains_replace" then
+         ($old | del(.routing[$routing_kind].domains)) == ($new | del(.routing[$routing_kind].domains))
        elif $routing_kind == "warp" and ($routing_action | startswith("warp_")) then
         def without_warp_edit:
           if $routing_action == "warp_family" then del(.routing.warp.family)

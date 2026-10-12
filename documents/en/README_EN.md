@@ -1398,6 +1398,27 @@ padm-docker edit --dns-domains-add 'full:updates.example.net' --preview
 padm-docker edit --dns-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 ```
 
+Existing DNS, Direct, Block, selective IPv6 and selective WARP domain lists support
+single-rule replacement. Menu `17`, options `30/31/32`, handles DNS/Direct/Block;
+IPv6 option `7` and WARP option `10` handle their existing selective lists. Each shows
+the current rules before asking for one old rule and one replacement:
+
+```bash
+padm-docker edit --dns-domains-replace 'full:old.example.net' 'full:new.example.net' --preview
+padm-docker edit --direct-domains-replace 'domain:old.example.net' 'domain:new.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-domains-replace 'keyword:oldword' 'keyword:newword' --preview
+padm-docker edit --ipv6-domains-replace 'full:old.example.net' 'full:new.example.net' --preview
+padm-docker edit --warp-domains-replace 'full:old.example.net' 'full:new.example.net' --preview
+```
+
+Both values must be single rules, without commas. After normalization, the old rule
+must exist exactly once and the new rule must differ from every current item, including
+the old rule. Complete strings are matched; `full:` and `domain:` are distinct.
+Replacement preserves the item's position, DNS server/port, WARP private fields and
+all other configuration. Missing lists and global WARP/IPv6 modes are rejected.
+Preview, cancellation and failure/signal recovery use the existing transaction.
+Complete region and other rule management remain deferred.
+
 Menu `17`, options `10/12`, replaces Direct or Block domain rules using comma-separated
 input. `--direct-domains <CSV>` and `--block-domains <CSV>` use the same normalization:
 trim whitespace, lowercase, preserve first-occurrence order while deduplicating, and

@@ -2717,6 +2717,36 @@ Jobs 6、排队 384 ms、cache_hit=false；证据
 本阶段 10 个代码/合同/文档输入与完整快照一致；未重复真实 WARP/IPv6
 出站矩阵，公网、宿主、arm64、可信发布与完整区域策略继续 deferred。
 
+#### 5B.4e 已有域名单条替换
+
+`edit --dns-domains-replace`、`--direct-domains-replace`、
+`--block-domains-replace`、`--warp-domains-replace`、
+`--ipv6-domains-replace` 接收旧规则、新规则两个单项参数；
+先拒绝任何逗号，再复用既有规范化，各项必须恰为一条。
+只编辑已有非空手工名单，WARP/IPv6 必须为 selective；
+缺失/global、旧规则不存在、重复新值或新旧相同均明确拒绝。
+匹配完整规范化规则，full 与 domain 不互换，原位替换且保留其它次序。
+
+菜单 `17` 追加 30/31/32，IPv6 子菜单追加 7、WARP 子菜单追加 10；
+先显示当前脱敏路由状态，再输入旧/新规则。状态失败不进入编辑，
+两步均支持空输入、0 和 EOF 取消，业务动作仍经独立 CLI 确认。
+只豁免所选 `.routing[kind].domains`，DNS 上游/端口、WARP 模式/地址族/
+密钥/Peer/地址/reserved 及其它配置全部冻结。复用原候选、预览、确认、
+累计流量保护、健康失败与 INT/TERM 恢复，不新建 schema、marker 或生成器。
+
+四定向 exit 0：DNS 78018 ms、Direct/Block 121428 ms、
+WARP/IPv6 124565 ms、菜单 91943 ms，Jobs 2，均未命中缓存。
+五类组合夹具覆盖原位顺序、规范化、其它完整规格冻结、非法拒绝、
+预览/取消及累计数据保持；五次故障合计覆盖健康失败和 INT/TERM 恢复。
+菜单 8 组 PTY 覆盖五类分发、两步取消及失败后继续，生产独审无阻断。
+Bash、ShellCheck error 和 JSON 检查通过；完整合同 49/49、exit 0，
+609649 ms、Jobs 6、排队 376 ms、cache_hit=false，复用工具镜像。
+证据 `.tmp-regression-docker-be71bb46a1f54b7da7dd19bcac6cb174/`；
+源码 SHA256 `2C44564870084BEE9F73C40E742F729F6161E5526072AF366694070D7EE47964`，
+10 个交付文件逐字节匹配完整快照，随后仅补本段验收文字。
+生成器及真实出站行为未变，不重复原矩阵；完整区域策略、其它规则编辑、
+完整冲突检测、公网、宿主/arm64 与可信发布仍 deferred，总目标继续 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

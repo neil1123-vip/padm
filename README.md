@@ -322,6 +322,24 @@ padm-docker edit --dns-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-off --confirm PADM-DOCKER-EDIT
 ```
 
+已有域名名单可单条替换：菜单 `17` 的 `30/31/32` 分别编辑 DNS、Direct、Block，
+IPv6 子菜单 `7` 和 WARP 子菜单 `10` 编辑已有 selective 名单。先查看当前规则，
+再输入旧规则与新规则，沿用预览和确认事务：
+
+```bash
+padm-docker edit --dns-domains-replace 'full:old.example.net' 'full:new.example.net' --preview
+padm-docker edit --direct-domains-replace 'domain:old.example.net' 'domain:new.example.net' --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-domains-replace 'keyword:oldword' 'keyword:newword' --preview
+padm-docker edit --ipv6-domains-replace 'full:old.example.net' 'full:new.example.net' --preview
+padm-docker edit --warp-domains-replace 'full:old.example.net' 'full:new.example.net' --preview
+```
+
+两值各限一条规则，不接受 CSV；规范化后旧规则必须恰好存在一次，新规则不得重复
+或与旧规则相同。按完整规则匹配，`full:` 与 `domain:` 不互换；只替换原位置，
+保留其它项的次序、DNS 服务器/端口、WARP 私有字段及全部其它配置。
+缺失名单、WARP/IPv6 的 global 模式明确拒绝；不会创建或切换分流模式。
+取消、失败和信号恢复沿用原事务，完整区域和其它规则管理仍未开放。
+
 v3 可选 `.routing.dns` 与 `.routing.hosts` 要求控制包声明 `x-padm-routing-dns-hosts`。
 hosts 优先于 DNS 分流；未匹配域名使用容器本地解析，匹配 DNS 失败不回退本地解析。
 SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际 IP 目的地；

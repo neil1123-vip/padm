@@ -844,13 +844,14 @@ dockerMenuRegion() {
 }
 
 dockerMenuIPv6() {
-    local choice domains
+    local choice domains oldRule newRule
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker IPv6 域名出站\n'
         printf '%s\n' '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' \
             '3. 关闭 IPv6 出站策略' '4. 查看路由状态' \
-            '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' '0. 返回'
+            '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
+            '7. 单条替换 IPv6 域名规则' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -876,13 +877,21 @@ dockerMenuIPv6() {
                 [[ -n "${domains}" ]] || continue
             dockerMenuRun edit --ipv6-domains-remove "${domains}" || true
             ;;
+        7)
+            dockerMenuRun protocol routing-status || continue
+            dockerSetupRead oldRule '旧域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${oldRule}" ]] &&
+                dockerSetupRead newRule '新域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${newRule}" ]] || continue
+            dockerMenuRun edit --ipv6-domains-replace "${oldRule}" "${newRule}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
 }
 
 dockerMenuRouting() {
-    local choice input server port
+    local choice input server port oldRule newRule
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 路由与出站\n'
@@ -898,7 +907,8 @@ dockerMenuRouting() {
             '23. 追加 Block 域名阻断' '24. 删除 Direct 直连例外' \
             '25. 删除 Block 域名阻断' '26. 追加 IP/CIDR 阻断' \
             '27. 精确删除 IP/CIDR 阻断' '28. 追加 DNS 分流域名' \
-            '29. 精确删除 DNS 分流域名' '0. 返回'
+            '29. 精确删除 DNS 分流域名' '30. 单条替换 DNS 分流域名' \
+            '31. 单条替换 Direct 直连例外' '32. 单条替换 Block 域名阻断' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -990,6 +1000,18 @@ dockerMenuRouting() {
                 dockerMenuRun edit --dns-domains-remove "${input}" || true
             fi
             ;;
+        30|31|32)
+            dockerMenuRun protocol routing-status || continue
+            dockerSetupRead oldRule '旧域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${oldRule}" ]] &&
+                dockerSetupRead newRule '新域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${newRule}" ]] || continue
+            case "${choice}" in
+            30) dockerMenuRun edit --dns-domains-replace "${oldRule}" "${newRule}" || true ;;
+            31) dockerMenuRun edit --direct-domains-replace "${oldRule}" "${newRule}" || true ;;
+            32) dockerMenuRun edit --block-domains-replace "${oldRule}" "${newRule}" || true ;;
+            esac
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -1022,14 +1044,15 @@ dockerMenuHttpRelay() {
 }
 
 dockerMenuWarp() {
-    local choice input
+    local choice input oldRule newRule
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker WARP 出站\n'
         printf '%s\n' '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '3. 查看路由状态' \
             '4. 替换 WARP 域名规则' '5. 切换 WARP 全局出站' \
             '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \
-            '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' '0. 返回'
+            '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' \
+            '10. 单条替换 WARP 域名规则' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1061,6 +1084,14 @@ dockerMenuWarp() {
             dockerSetupRead input '精确删除 WARP 域名规则 CSV（删空关闭，需要重新导入 WARP；domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --warp-domains-remove "${input}" || true
+            ;;
+        10)
+            dockerMenuRun protocol routing-status || continue
+            dockerSetupRead oldRule '旧域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${oldRule}" ]] &&
+                dockerSetupRead newRule '新域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${newRule}" ]] || continue
+            dockerMenuRun edit --warp-domains-replace "${oldRule}" "${newRule}" || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

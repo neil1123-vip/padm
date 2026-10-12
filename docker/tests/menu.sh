@@ -1115,9 +1115,10 @@ runSitesDriver() {
 }
 
 runRoutingDriver() {
-    local scenario=$1 choice input family
+    local scenario=$1 choice input family variant oldRule newRule
     local inputPrompt menuLabel familyLabel addChoice removeChoice statusChoice
     local -A targetPrompts=()
+    local -a replaceVariants=(valid)
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
     case "${scenario}" in
@@ -1501,6 +1502,71 @@ runRoutingDriver() {
         targetReply 'Docker WARP 出站' $'9\n'
         targetReply '精确删除 WARP 域名规则 CSV' $'\004'
         targetReply 'Docker WARP 出站' $'0\n'
+        ;;
+    domain-replace-*)
+        case "${scenario}" in
+        domain-replace-cancel)
+            replaceVariants=(old-zero old-empty old-eof new-zero new-empty new-eof)
+            ;;
+        domain-replace-invalid)
+            replaceVariants=(old-invalid new-invalid old-csv new-csv same)
+            ;;
+        esac
+        for family in dns direct block ipv6 warp; do
+            menuLabel='Docker 路由与出站' statusChoice=3
+            case "${family}" in
+            dns) choice=30 ;;
+            direct) choice=31 ;;
+            block) choice=32 ;;
+            ipv6)
+                targetReply 'Docker 路由与出站' $'19\n'
+                menuLabel='Docker IPv6 域名出站' choice=7 statusChoice=4
+                ;;
+            warp)
+                targetReply 'Docker 路由与出站' $'20\n'
+                menuLabel='Docker WARP 出站' choice=10
+                ;;
+            esac
+            for variant in "${replaceVariants[@]}"; do
+                oldRule=full:Exact.Example.Com newRule=full:Next.Example.NET
+                case "${variant}" in
+                old-zero) oldRule=0 ;;
+                old-empty) oldRule= ;;
+                old-eof) oldRule=$'\004' ;;
+                new-zero) newRule=0 ;;
+                new-empty) newRule= ;;
+                new-eof) newRule=$'\004' ;;
+                old-invalid) oldRule=regexp:bad ;;
+                new-invalid) newRule=regexp:bad ;;
+                old-csv) oldRule=full:Exact.Example.Com,full:Second.Example.Com ;;
+                new-csv) newRule=full:Next.Example.NET,full:Second.Example.Com ;;
+                same) newRule=${oldRule} ;;
+                esac
+                targetReply "${menuLabel}" "${choice}"$'\n'
+                [[ "${scenario}" != domain-replace-status-failed ]] || continue
+                input=${oldRule}$'\n'
+                [[ "${variant}" != old-eof ]] || input=${oldRule}
+                targetReply '旧域名规则（单条；' "${input}"
+                [[ "${variant}" != old-* || "${scenario}" != domain-replace-cancel ]] || continue
+                input=${newRule}$'\n'
+                [[ "${variant}" != new-eof ]] || input=${newRule}
+                targetReply '新域名规则（单条；' "${input}"
+                case "${scenario}" in
+                domain-replace-flow|domain-replace-commit-failed)
+                    targetReply 'fixture-domain-replace-confirm [y/N]' $'y\n'
+                    ;;
+                domain-replace-confirm-cancel)
+                    targetReply 'fixture-domain-replace-confirm [y/N]' $'n\n'
+                    ;;
+                domain-replace-confirm-eof)
+                    targetReply 'fixture-domain-replace-confirm [y/N]' $'\004'
+                    ;;
+                esac
+            done
+            targetReply "${menuLabel}" "${statusChoice}"$'\n'
+            [[ "${family}" != ipv6 && "${family}" != warp ]] ||
+                targetReply "${menuLabel}" $'0\n'
+        done
         ;;
     selective-domains-invalid|selective-domains-state-failed|selective-domains-confirm-cancel|selective-domains-confirm-eof|selective-domains-commit-failed)
         for family in ipv6 warp; do
@@ -1935,6 +2001,24 @@ edit)
         [[ "$#" -eq 6 && "$3" == entry-fixture && "$4" != not-a-port &&
             "$5" == --confirm && "$6" == PADM-DOCKER-EDIT ]] || exit 2
         exit "${FAIL2BAN_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --dns-domains-replace || "${2:-}" == --direct-domains-replace ||
+        "${2:-}" == --block-domains-replace || "${2:-}" == --warp-domains-replace ||
+        "${2:-}" == --ipv6-domains-replace ]]; then
+        [[ "$#" -eq 4 && "$3" != *,* && "$4" != *,* ]] || exit 2
+        oldRule=$(dockerSocks5DomainsNormalize "$3") || exit 2
+        newRule=$(dockerSocks5DomainsNormalize "$4") || exit 2
+        [[ "${oldRule}" != "${newRule}" ]] || exit 2
+        [[ "${DOMAIN_REPLACE_PRECHECK_STATUS:-0}" -eq 0 ]] ||
+            exit "${DOMAIN_REPLACE_PRECHECK_STATUS}"
+        printf 'fixture-domain-replace-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction domain-replace-confirm "$2" eof
+            exit 2
+        fi
+        recordAction domain-replace-confirm "$2" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction domain-replace-commit "$2"
     elif [[ "${2:-}" == --warp-domains-add || "${2:-}" == --warp-domains-remove ||
         "${2:-}" == --ipv6-domains-add || "${2:-}" == --ipv6-domains-remove ]]; then
         [[ "$#" -eq 3 ]] && dockerSocks5DomainsNormalize "$3" >/dev/null || exit 2
@@ -2487,17 +2571,22 @@ done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
 for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed ipv6-eof warp-eof \
+    domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
+    domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \
     selective-domains-invalid selective-domains-state-failed selective-domains-confirm-cancel selective-domains-confirm-eof selective-domains-commit-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
-    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0
+    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
     [[ "${routingCase}" != selective-domains-state-failed ]] || SELECTIVE_EDIT_PRECHECK_STATUS=15
+    [[ "${routingCase}" != domain-replace-state-failed ]] || DOMAIN_REPLACE_PRECHECK_STATUS=15
+    [[ "${routingCase}" != domain-replace-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
         "${routingCase}" != block-ips-change-failed &&
         "${routingCase}" != dns-domains-change-failed &&
-        "${routingCase}" != selective-domains-commit-failed ]] || SITE_EDIT_STATUS=15
+        "${routingCase}" != selective-domains-commit-failed &&
+        "${routingCase}" != domain-replace-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
     case "${routingCase}" in
@@ -2532,6 +2621,59 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             fail 'WARP 日常编辑没有每次只确认一次'
         [[ "$(grep -Fc 'fixture-ipv6-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 2 ]] ||
             fail 'IPv6 域名增删没有每次只确认一次'
+        ;;
+    domain-replace-*)
+        replaceOld=full:Exact.Example.Com replaceNew=full:Next.Example.NET
+        replaceConfirmation= replaceExit=0 replaceFailureCount=0
+        replaceVariants=(valid)
+        case "${routingCase}" in
+        domain-replace-flow) replaceConfirmation=y ;;
+        domain-replace-cancel)
+            replaceVariants=(old-zero old-empty old-eof new-zero new-empty new-eof)
+            ;;
+        domain-replace-invalid)
+            replaceVariants=(old-invalid new-invalid old-csv new-csv same)
+            replaceExit=2 replaceFailureCount=25
+            ;;
+        domain-replace-status-failed) replaceExit=17 replaceFailureCount=10 ;;
+        domain-replace-state-failed) replaceExit=15 replaceFailureCount=5 ;;
+        domain-replace-confirm-cancel) replaceConfirmation=n replaceExit=2 replaceFailureCount=5 ;;
+        domain-replace-confirm-eof) replaceConfirmation=eof replaceExit=2 replaceFailureCount=5 ;;
+        domain-replace-commit-failed) replaceConfirmation=y replaceExit=15 replaceFailureCount=5 ;;
+        esac
+        for replaceFamily in dns direct block ipv6 warp; do
+            replaceFlag="--${replaceFamily}-domains-replace"
+            for replaceVariant in "${replaceVariants[@]}"; do
+                [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
+                expectedRouting+='protocol routing-status'
+                [[ "${routingCase}" != domain-replace-cancel &&
+                    "${routingCase}" != domain-replace-status-failed ]] || continue
+                replaceOld=full:Exact.Example.Com replaceNew=full:Next.Example.NET
+                case "${replaceVariant}" in
+                old-invalid) replaceOld=regexp:bad ;;
+                new-invalid) replaceNew=regexp:bad ;;
+                old-csv) replaceOld=full:Exact.Example.Com,full:Second.Example.Com ;;
+                new-csv) replaceNew=full:Next.Example.NET,full:Second.Example.Com ;;
+                same) replaceNew=${replaceOld} ;;
+                esac
+                expectedRouting+=$'\n'"edit ${replaceFlag} ${replaceOld} ${replaceNew}"
+                [[ -z "${replaceConfirmation}" ]] ||
+                    expectedRouting+=$'\n'"domain-replace-confirm ${replaceFlag} ${replaceConfirmation}"
+                [[ "${routingCase}" != domain-replace-flow ]] ||
+                    expectedRouting+=$'\n'"domain-replace-commit ${replaceFlag}"
+            done
+            expectedRouting+=$'\nprotocol routing-status'
+        done
+        replaceConfirmCount=0
+        [[ -z "${replaceConfirmation}" ]] || replaceConfirmCount=5
+        [[ "$(grep -Fc 'fixture-domain-replace-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${replaceConfirmCount}" ]] ||
+            fail '域名单条替换未保持每次一个 CLI 确认'
+        [[ "$(grep -Fc "操作失败，退出码: ${replaceExit}" "${CONTROL_LOG}" || true)" -eq "${replaceFailureCount}" ]] ||
+            fail '域名单条替换失败未显示退出码并继续诊断'
+        if [[ "${routingCase}" == domain-replace-status-failed ]]; then
+            ! grep -Fq '旧域名规则（单条；' "${CONTROL_LOG}" ||
+                fail '路由状态失败后仍然读取替换规则'
+        fi
         ;;
     selective-domains-invalid|selective-domains-state-failed|selective-domains-confirm-cancel|selective-domains-confirm-eof|selective-domains-commit-failed)
         selectiveInput=Example.NET selectiveExit=2 selectiveConfirmation=
@@ -2647,13 +2789,17 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '5. 追加自定义直连例外' '6. 删除自定义直连例外' '19. IPv6 域名出站' \
             '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' \
             '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
+            '7. 单条替换 IPv6 域名规则' \
             '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
             '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \
             '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' '删空关闭，需要重新导入 WARP' \
+            '10. 单条替换 WARP 域名规则' \
             '22. 追加 Direct 直连例外' '23. 追加 Block 域名阻断' \
             '24. 删除 Direct 直连例外' '25. 删除 Block 域名阻断' \
             '26. 追加 IP/CIDR 阻断' '27. 精确删除 IP/CIDR 阻断' \
-            '28. 追加 DNS 分流域名' '29. 精确删除 DNS 分流域名' '0. 返回'; do
+            '28. 追加 DNS 分流域名' '29. 精确删除 DNS 分流域名' \
+            '30. 单条替换 DNS 分流域名' '31. 单条替换 Direct 直连例外' \
+            '32. 单条替换 Block 域名阻断' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then
@@ -2661,7 +2807,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail '路由诊断失败后没有继续菜单'
     fi
 done
-unset SITE_EDIT_STATUS ROUTING_STATUS SELECTIVE_EDIT_PRECHECK_STATUS
+unset SITE_EDIT_STATUS ROUTING_STATUS SELECTIVE_EDIT_PRECHECK_STATUS DOMAIN_REPLACE_PRECHECK_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu

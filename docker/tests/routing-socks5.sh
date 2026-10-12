@@ -1277,6 +1277,101 @@ runStatus() {
             fail '路由诊断泄露认证信息'
     done
 }
+# 五类名单共用原位替换检查，结束后还原现有夹具，不另建生命周期。
+domainsReplaceCheck() {
+    local kind=$1 option="--${1}-domains-replace" original="${TEST_ROOT}/${1}-replace.before"
+    local replacement="${TEST_ROOT}/${1}-replace.json" oldRule oldInput firstRule before composeBefore
+    local failure expected core dataBefore
+    local newInput=' Full:Replacement.Example.ORG ' newRule='full:replacement.example.org'
+    cp -- "${root}/config/spec.json" "${original}"
+    oldRule=$(jq -er --arg kind "${kind}" '.routing[$kind].domains[1]' "${original}")
+    firstRule=$(jq -er --arg kind "${kind}" '.routing[$kind].domains[0]' "${original}")
+    oldInput=${oldRule#domain:}
+    oldInput=" ${oldInput^^} "
+    jq --arg kind "${kind}" --arg new "${newRule}" '.routing[$kind].domains[1]=$new' \
+        "${original}" >"${replacement}"
+    before=$(snapshot)
+    composeBefore=$(cat "${COMPOSE_LOG}")
+    runEdit 2 "${option}"
+    runEdit 2 "${option}" "${oldRule}" --preview
+    runEdit 2 "${option}" '' "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" '' --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}"
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" --confirm invalid
+    runEdit 2 "${option}" 'regexp:.*' "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" 'regexp:.*' --preview
+    runEdit 2 "${option}" "${oldRule},${oldRule}" "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newRule},${newRule}" --preview
+    runEdit 2 "${option}" "${oldRule},${firstRule}" "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newRule},other.example.org" --preview
+    runEdit 2 "${option}" "${oldInput}," "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" ",${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" "${option}" "${oldInput}" "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" "--${kind}-domains-add" 'other.example.org' --preview
+    runEdit 2 "--${kind}-domains-add" 'other.example.org' "${option}" "${oldInput}" "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" "--${kind}-domains-remove" "${oldRule}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" --dns-off --preview
+    runEdit 2 --dns-off "${option}" "${oldInput}" "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" --spec "${original}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" --http01 enable --preview
+    runEdit 15 "${option}" 'missing.example.org' "${newInput}" --confirm PADM-DOCKER-EDIT
+    runEdit 15 "${option}" "${firstRule#full:}" "${newInput}" --confirm PADM-DOCKER-EDIT
+    runEdit 15 "${option}" "${oldInput}" "${firstRule^^}" --confirm PADM-DOCKER-EDIT
+    runEdit 15 "${option}" "${oldInput}" "${oldInput}" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail "${kind}: 单项替换参数、缺旧、重复新或同值拒绝改变部署或调用 Compose"
+    runEdit 0 "${option}" "${oldInput}" "${newInput}" --preview
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerSetupRead() { printf -v "$1" '%s' n; }
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${replacement}" '' '' interactive
+    ) >"${LOG}" 2>&1 || fail "${kind}: 单项替换确认取消失败"
+    assertClean
+    [[ "$(snapshot)" == "${before}" ]] || fail "${kind}: 单项替换预览或取消改变部署"
+    # 每类仅注入一个故障，合计覆盖健康失败及两种中断，保留完整恢复证据。
+    case "${kind}" in
+    dns|warp) failure=health-fail; expected=14 ;;
+    direct) failure=int; expected=130 ;;
+    block|ipv6) failure=term; expected=143 ;;
+    esac
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    runEdit "${expected}" "${option}" "${oldInput}" "${newInput}" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] ||
+        fail "${kind}/${failure}: 单项替换未恢复完整规格、私有字段、运行配置与非空流量"
+    MODE=ok
+    for core in xray sing-box; do
+        cp -- "${root}/config/${core}/config.json" "${TEST_ROOT}/${kind}-replace-${core}.before"
+    done
+    (dockerMain protocol links) >"${TEST_ROOT}/${kind}-replace-links.before"
+    dataBefore=$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)
+    runEdit 0 "${option}" "${oldInput}" "${newInput}" --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${replacement}" --slurpfile actual "${root}/config/spec.json" \
+        '$actual==$expected' >/dev/null ||
+        fail "${kind}: 单项替换没有规范化中间项、保持顺序或改写其它完整规格"
+    runStatus 0
+    jq -e --arg kind "${kind}" --slurpfile expected "${replacement}" '
+      (if $kind=="dns" then .dns.domain_rules
+       elif $kind=="direct" or $kind=="block" then .[$kind].domain_rules
+       else .[$kind].domains end) == $expected[0].routing[$kind].domains
+    ' "${LOG}" >/dev/null || fail "${kind}: 单项替换状态未投影有序名单"
+    for core in xray sing-box; do
+        jq -en --arg core "${core}" --slurpfile old "${TEST_ROOT}/${kind}-replace-${core}.before" \
+            --slurpfile new "${root}/config/${core}/config.json" '
+          if $core=="xray" then ($old[0]|del(.routing,.dns))==($new[0]|del(.routing,.dns))
+          else ($old[0]|del(.route,.dns))==($new[0]|del(.route,.dns)) end
+        ' >/dev/null || fail "${kind}/${core}: 单项替换改写核心监听、认证或 WARP 私有字段"
+    done
+    (dockerMain protocol links) >"${TEST_ROOT}/${kind}-replace-links.after"
+    cmp -s "${TEST_ROOT}/${kind}-replace-links.before" "${TEST_ROOT}/${kind}-replace-links.after" &&
+        [[ "$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)" == "${dataBefore}" ]] ||
+        fail "${kind}: 单项替换改变分享 URI、订阅或累计流量"
+    runEdit 0 "${option}" "${newRule}" "${oldRule}" --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile old "${original}" --slurpfile actual "${root}/config/spec.json" \
+        '$actual==$old' >/dev/null || fail "${kind}: 单项替换没有还原原组合规格"
+    printf 'docker-routing-%s-domains-replace-regression-ok\n' "${kind}"
+}
 # WARP 与 IPv6 共用相同增量合同，只在各自 selective 组合夹具中调用。
 selectiveDomainsIncrementalCheck() {
     local kind=$1 retained=$2 option action csv domains failure expected before composeBefore core allCsv
@@ -1293,6 +1388,7 @@ selectiveDomainsIncrementalCheck() {
       .routing[$kind].mode=="selective" and .routing[$kind].domains==$domains and
       (.routing.direct.domains | index("full:other.example.com")) != null
     ' "${original}" >/dev/null || fail "${kind}: 增量合同没有使用既有 selective 组合夹具"
+    domainsReplaceCheck "${kind}"
     before=$(snapshot)
     composeBefore=$(cat "${COMPOSE_LOG}")
     for action in add remove; do
@@ -1471,6 +1567,7 @@ if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" ==
     for action in add remove; do
         runEdit 15 "--warp-domains-${action}" 'example.net' --confirm PADM-DOCKER-EDIT
     done
+    runEdit 15 --warp-domains-replace 'example.net' 'replacement.example.org' --confirm PADM-DOCKER-EDIT
     [[ "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] || fail '未启用 WARP 域名增删调用 Compose'
     runEdit 15 --spec "${TEST_ROOT}/warp-global.json" --confirm PADM-DOCKER-EDIT
     cp -- "${WARP_INPUT}" "${PRIVATE_ROOT}/warp-bad.json"
@@ -1567,6 +1664,7 @@ if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" ==
     for action in add remove; do
         runEdit 15 "--warp-domains-${action}" 'example.net' --confirm PADM-DOCKER-EDIT
     done
+    runEdit 15 --warp-domains-replace 'example.net' 'replacement.example.org' --confirm PADM-DOCKER-EDIT
     [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
         fail '全局 WARP 域名增删未拒绝或触发 Compose'
     runEdit 0 --warp-off --confirm PADM-DOCKER-EDIT
@@ -1669,6 +1767,7 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}"
     for action in add remove; do
         runEdit 15 "--ipv6-domains-${action}" 'example.net' --confirm PADM-DOCKER-EDIT
     done
+    runEdit 15 --ipv6-domains-replace 'example.net' 'replacement.example.org' --confirm PADM-DOCKER-EDIT
     [[ "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] || fail '未启用 IPv6 域名增删调用 Compose'
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
@@ -1708,6 +1807,7 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}"
     for action in add remove; do
         runEdit 15 "--ipv6-domains-${action}" 'example.net' --confirm PADM-DOCKER-EDIT
     done
+    runEdit 15 --ipv6-domains-replace 'example.net' 'replacement.example.org' --confirm PADM-DOCKER-EDIT
     [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
         fail '全局 IPv6 域名增删未拒绝或触发 Compose'
     runStatus 0
@@ -2390,6 +2490,7 @@ for action in add remove; do
     runEdit 2 "${option}" "${DNS_CSV}" --dns-off --preview
     runEdit 2 "${option}" "${DNS_CSV}" "${option}" 'example.net' --preview
 done
+runEdit 15 --dns-domains-replace 'dns.example.net' 'replacement.example.org' --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
     fail 'DNS 未启用增删或无效参数改变部署或调用 Compose'
 runEdit 0 --dns-rules 203.0.113.53 05353 "${DNS_CSV}" --confirm PADM-DOCKER-EDIT
@@ -2457,6 +2558,7 @@ jq -en --slurpfile expected "${TEST_ROOT}/dns-rules.before" --slurpfile actual "
 runEdit 0 --socks5 "${DOMAINS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-all.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '开启 SOCKS5 丢弃 DNS/hosts'
+domainsReplaceCheck dns
 # dns-hosts 定向入口执行这组增量事务，不重复已有 DNS 生成器和真实 UDP 矩阵。
 dnsAddCsv=' GEOSITE:CN , Full:DNS.Example.COM , DNS.Example.NET , Full:Added.Example.ORG , Added.Example.ORG , KEYWORD:Next_DNS , full:added.example.org '
 dnsAdded='["full:dns.example.com","domain:dns.example.net","keyword:dns-video","geosite:cn","full:added.example.org","domain:added.example.org","keyword:next_dns"]'
@@ -2556,6 +2658,13 @@ jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].d
 fi
 # Direct/Block 沿用相同事务，同时验证同域规则允许共存并保留其它路由子项。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts ]]; then
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+for kind in direct block; do
+    runEdit 15 "--${kind}-domains-replace" 'example.net' 'replacement.example.org' --confirm PADM-DOCKER-EDIT
+done
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail '未启用 Direct/Block 的单项替换改变部署或调用 Compose'
 runEdit 0 --direct-domains-add "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/direct-only.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail 'Direct CSV 追加缺项未创建规范化规则或改变其它规格'
@@ -2706,6 +2815,7 @@ csvRemoval=' Full:Exact.Example.Com , Example.NET , KEYWORD:Video , geosite:CN ,
 csvRemovedDomains='["keyword:next_video","full:new.example.org","domain:new.example.net","full:other.example.com","geosite:category-ads-all","domain:exact.example.com"]'
 runEdit 0 --region domain --region-allow 'exact.example.com,full:exact.example.com' --confirm PADM-DOCKER-EDIT
 for kind in direct block; do
+    domainsReplaceCheck "${kind}"
     option="--${kind}-domains"
     before=$(snapshot)
     runEdit 0 "${option}" "${csvReplacement}" --preview
