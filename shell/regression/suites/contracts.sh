@@ -259,12 +259,12 @@ runRegressionDockerContractsAggregateContract() (
     local status=0 selector
     local -a expectedSelectors=(
         docker-phase3-edit docker-phase3-entries docker-traditional-tls docker-setup-transports docker-setup-encrypted-udp
-        docker-phase4-maintenance docker-reality docker-setup-tls docker-phase4-lifecycle
+        docker-phase4-maintenance docker-routing-core-network-lifecycle docker-reality docker-setup-tls docker-phase4-lifecycle
         docker-reality-targets-direct docker-reality-parameters docker-sites
         docker-routing-direct-block-workflow docker-routing-core-policy-lifecycle
         docker-setup-core docker-phase1 docker-menu docker-setup-encrypted-tcp
         docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
-        docker-fail2ban-ownership docker-routing-core-network-lifecycle docker-control-state
+        docker-cdn-entries docker-fail2ban-ownership docker-control-state
         docker-reality-targets-selection docker-reality-target-library docker-control-client
         docker-tproxy-ownership docker-routing-core-contracts docker-http-relay docker-control-cli
         docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts

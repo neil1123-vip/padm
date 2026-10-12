@@ -67,6 +67,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-setup-transports \
         docker-setup-encrypted-udp \
         docker-phase4-maintenance \
+        docker-routing-core-network-lifecycle \
         docker-reality \
         docker-setup-tls \
         docker-phase4-lifecycle \
@@ -84,7 +85,6 @@ listRegressionDockerContractsChildSelectors() {
         docker-entry-port-alias \
         docker-cdn-entries \
         docker-fail2ban-ownership \
-        docker-routing-core-network-lifecycle \
         docker-control-state \
         docker-reality-targets-selection \
         docker-reality-target-library \
