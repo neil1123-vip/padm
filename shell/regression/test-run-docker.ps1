@@ -62,7 +62,7 @@ case "$1" in
 esac
 [[ "$1" != fail ]] || exit 7
 '@
-[IO.File]::WriteAllText($entry, $probe.Replace("`n", "`r`n"), $utf8)
+[IO.File]::WriteAllText($entry, $probe.Replace("`r`n", "`n").Replace("`n", "`r`n"), $utf8)
 [IO.File]::WriteAllText((Join-Path $fixture 'new file.txt'), 'untracked-current', $utf8)
 [IO.File]::WriteAllText((Join-Path $fixture 'probe.lock'), "linux-text`r`n", $utf8)
 [IO.File]::WriteAllBytes((Join-Path $fixture 'probe.bin'), [byte[]]@(0, 13, 10, 255))

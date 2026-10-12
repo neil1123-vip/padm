@@ -90,7 +90,7 @@ dockerBundlePayloadPaths() {
 }
 
 dockerBundleSourceIsComplete() {
-    local sourceRoot=$1 required
+    local sourceRoot=$1 payloadOutput=${2:-/dev/null} required
     [[ -d "${sourceRoot}" && ! -L "${sourceRoot}" ]] || return 1
     for required in \
         install-docker.sh \
@@ -139,8 +139,8 @@ dockerBundleSourceIsComplete() {
             [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
         done
     fi
-    # 模板标记开启时，payload 路径检查会同时核实随包清单与全部资源。
-    dockerBundlePayloadPaths "${sourceRoot}" >/dev/null
+    # 模板标记开启时，同时核实资源；调用方可复用本次已校验的路径清单。
+    dockerBundlePayloadPaths "${sourceRoot}" >"${payloadOutput}"
 }
 
 dockerBundleHashPaths() {
@@ -245,11 +245,11 @@ dockerWriteBundleManifest() {
 }
 
 dockerValidateBundle() {
-    local bundleRoot=$1 manifest expectedList manifestList line expectedHash relativePath status directory directories
+    local bundleRoot=$1 manifest expectedList manifestList line expectedHash relativePath status directory directories payloadPaths
     manifest="${bundleRoot}/${PADM_DOCKER_BUNDLE_MANIFEST}"
     [[ -d "${bundleRoot}" && ! -L "${bundleRoot}" && -O "${bundleRoot}" &&
         -f "${manifest}" && ! -L "${manifest}" && -O "${manifest}" ]] || return 1
-    dockerBundleSourceIsComplete "${bundleRoot}" || return 1
+    payloadPaths=$(dockerBundleSourceIsComplete "${bundleRoot}" /dev/stdout) || return 1
     directories=$(find "${bundleRoot}" -type d -print) || return 1
     while IFS= read -r directory; do
         [[ -O "${directory}" ]] || return 1
@@ -259,7 +259,7 @@ dockerValidateBundle() {
         rm -f -- "${expectedList}"
         return 1
     }
-    if ! dockerBundlePayloadPaths "${bundleRoot}" >"${expectedList}" ||
+    if ! printf '%s\n' "${payloadPaths}" >"${expectedList}" ||
         ! printf '%s\n' "${PADM_DOCKER_BUNDLE_REF}" >>"${expectedList}" ||
         ! LC_ALL=C sort -u "${expectedList}" -o "${expectedList}"; then
         rm -f -- "${expectedList}" "${manifestList}"
@@ -298,10 +298,11 @@ dockerValidateBundle() {
 
 dockerStageBundle() {
     local sourceRoot=$1 requestedRef=${2:-} root bundlesRoot stageDir candidate relativePath ref payloadPaths
+    local -a payloadFiles=()
     root=$(dockerInstallRoot) || return 1
     bundlesRoot="${root}/.bundles"
-    [[ -d "${bundlesRoot}" && ! -L "${bundlesRoot}" ]] || return 1
-    dockerBundleSourceIsComplete "${sourceRoot}" || {
+    [[ "${bundlesRoot}" == /* && -d "${bundlesRoot}" && ! -L "${bundlesRoot}" ]] || return 1
+    payloadPaths=$(dockerBundleSourceIsComplete "${sourceRoot}" /dev/stdout) || {
         dockerError "Docker bundle 源不完整: ${sourceRoot}"
         return 1
     }
@@ -309,7 +310,6 @@ dockerStageBundle() {
         dockerError '无法确定 Docker bundle ref'
         return 1
     }
-    payloadPaths=$(dockerBundlePayloadPaths "${sourceRoot}") || return 1
     stageDir=$(mktemp -d "${bundlesRoot}/.stage.XXXXXX") || return 1
     candidate="${stageDir}/bundle"
     # 创建候选目录前登记，复制或校验中断时统一清理本次 stage。
@@ -324,12 +324,14 @@ dockerStageBundle() {
             dockerRemoveManagedTree "${root}" "${stageDir}" || true
             return 1
         }
-        mkdir -p -- "${candidate}/$(dirname -- "${relativePath}")" &&
-            cp -- "${sourceRoot}/${relativePath}" "${candidate}/${relativePath}" || {
-            dockerRemoveManagedTree "${root}" "${stageDir}" || true
-            return 1
-        }
+        [[ "${relativePath}" == install-docker.sh ]] || payloadFiles+=("${relativePath}")
     done <<<"${payloadPaths}"
+    # 入口单独复制以保留中断边界；其它受管文件一次复制，权限随后统一归一。
+    cp -- "${sourceRoot}/install-docker.sh" "${candidate}/install-docker.sh" &&
+        (cd -- "${sourceRoot}" && cp --parents -- "${payloadFiles[@]}" "${candidate}") || {
+        dockerRemoveManagedTree "${root}" "${stageDir}" || true
+        return 1
+    }
     printf '%s\n' "${ref}" >"${candidate}/${PADM_DOCKER_BUNDLE_REF}" || {
         dockerRemoveManagedTree "${root}" "${stageDir}" || true
         return 1

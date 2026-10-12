@@ -171,6 +171,34 @@ fi
 
 newState v1 "${SPEC}"
 (
+    # 批量创建部分目录后失败，仍须清理整个候选。
+    mkdir() {
+        command mkdir -p -- "$3" || return 1
+        printf 'partial\n' >"${TEST_ROOT}/candidate-mkdir-failed"
+        return 1
+    }
+    if dockerCreateConfigurationCandidate; then
+        fail '候选目录部分创建失败仍被接受'
+    fi
+    [[ -s "${TEST_ROOT}/candidate-mkdir-failed" &&
+        -z "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 1 -name '.candidate.*' -print -quit)" ]] ||
+        fail '候选目录部分创建失败留下残留'
+)
+(
+    # 受管路径批量扫描必须覆盖后面的路径，并保留枚举失败。
+    mkfifo "${PADM_DOCKER_INSTALL_DIR}/logs/acme/nonregular"
+    if dockerEditBaselineValidate "${SPEC}" "${TEST_ROOT}/invalid-baseline"; then
+        fail '编辑基线接受非普通文件'
+    fi
+    rm -- "${PADM_DOCKER_INSTALL_DIR}/logs/acme/nonregular"
+    find() { return 1; }
+    if dockerEditBaselineValidate "${SPEC}" "${TEST_ROOT}/failed-baseline"; then
+        fail '编辑基线忽略受管路径枚举失败'
+    fi
+    [[ ! -e "${TEST_ROOT}/invalid-baseline/baseline" &&
+        ! -e "${TEST_ROOT}/failed-baseline/baseline" ]] || fail '非法基线仍生成候选'
+)
+(
     envFixture="${TEST_ROOT}/images-env-contract"
     expectedEnv="${TEST_ROOT}/images-env-expected"
     printf 'existing=keep\n' >"${expectedEnv}"

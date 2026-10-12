@@ -733,6 +733,28 @@ for signal in INT TERM; do
         fail "stage-copy-${signal}: interrupted staging left temporary bundle or changed state"
 done
 
+# 批量复制中途失败仍须清理候选，保留旧指针和持久数据。
+(
+    cp() {
+        if [[ "${1:-}" == --parents ]]; then
+            command cp --parents -- "$3" "${*: -1}" || return $?
+            printf 'partial-copy\n' >"${PHASE1_BATCH_COPY_MARKER}"
+            return 1
+        fi
+        command cp "$@"
+    }
+    export -f cp
+    export PHASE1_BATCH_COPY_MARKER="${TEST_ROOT}/batch-copy-failed"
+    runControl 13 stage-batch-copy-failure "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" \
+        install --source "${NO_COMPOSE_SOURCE}" --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+)
+[[ -f "${TEST_ROOT}/batch-copy-failed" &&
+    -z "$(find "${DOCKER_ROOT}/.bundles" -maxdepth 1 -name '.stage.*' -print)" &&
+    "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" &&
+    "$(<"${DOCKER_ROOT}/data/sentinel")" == keep &&
+    ! -e "${DOCKER_ROOT}/locks/deployment.lock" ]] ||
+    fail 'stage-batch-copy-failure: partial copying changed persistent deployment'
+
 # 激活临时链接创建后中断，首装撤回指针，重装保留旧控制版本。
 for signal in INT TERM; do
     signalStatus=130
@@ -1181,7 +1203,7 @@ if (
             count=$(<"${stageFindCount}")
             count=$((count + 1))
             printf '%s\n' "${count}" >"${stageFindCount}"
-            [[ "${count}" != 3 ]] || return 1
+            [[ "${count}" != 2 ]] || return 1
         fi
         command find "$@"
     }

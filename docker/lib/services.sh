@@ -1117,7 +1117,8 @@ dockerManagedSpecMatchesDeployment() {
 }
 
 dockerEditBaselineValidate() {
-    local specFile=$1 workspace=$2 alpnListener=${3:-} root baseline core directory state token
+    local specFile=$1 workspace=$2 alpnListener=${3:-} root baseline core directory state token invalidPath
+    local -a managedPaths=()
     root=$(dockerInstallRoot) || return 1
     [[ -z "${alpnListener}" ]] || jq -e --arg listener "${alpnListener}" '
       [.core.protocols[] | select(.listener_id == $listener and .core == "xray" and
@@ -1128,9 +1129,13 @@ dockerEditBaselineValidate() {
         compose.json deployment.json images.env; do
         dockerTrafficSafePath "${root}" "${root}/${token}" || return 1
         if [[ -e "${root}/${token}" ]]; then
-            [[ -z "$(find "${root}/${token}" ! -type f ! -type d -print -quit)" ]] || return 1
+            managedPaths+=("${root}/${token}")
         fi
     done
+    if ((${#managedPaths[@]} > 0)); then
+        invalidPath=$(find "${managedPaths[@]}" ! -type f ! -type d -print -quit) || return 1
+        [[ -z "${invalidPath}" ]] || return 1
+    fi
     dockerManagedSpecMatchesDeployment "${specFile}" "${root}/deployment.json" "${root}/images.env" || {
         dockerError '完整原始规格与部署记录不一致，不能接入编辑'
         return 1
@@ -1490,6 +1495,7 @@ dockerUdpPortIsListening() {
 
 dockerCreateConfigurationCandidate() {
     local root candidate directory
+    local -a directories=()
     root=$(dockerInstallRoot) || return 1
     candidate=$(mktemp -d "${root}/.candidate.XXXXXX") || return 1
     dockerManagedPathIsSafe "${root}" "${candidate}" || return 1
@@ -1498,11 +1504,12 @@ dockerCreateConfigurationCandidate() {
         data/xray data/sing-box data/static data/subscription data/acme \
         data/net/wireguard data/net/fail2ban data/net/control-fail2ban data/net/ssh-fail2ban data/net/transparent data/control-source \
         secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme logs/control; do
-        mkdir -p -- "${candidate}/${directory}" || {
-            dockerRemoveManagedTree "${root}" "${candidate}" || true
-            return 1
-        }
+        directories+=("${candidate}/${directory}")
     done
+    mkdir -p -- "${directories[@]}" || {
+        dockerRemoveManagedTree "${root}" "${candidate}" || true
+        return 1
+    }
     chmod 0750 "${candidate}" || return 1
     DOCKER_CONFIG_BACKUP=
     DOCKER_CONFIG_SWITCHED=0
