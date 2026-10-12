@@ -1277,18 +1277,28 @@ runStatus() {
             fail '路由诊断泄露认证信息'
     done
 }
-# 五类名单共用原位替换检查，结束后还原现有夹具，不另建生命周期。
+# 域名名单共用原位替换检查，结束后还原现有夹具，不另建生命周期。
 domainsReplaceCheck() {
     local kind=$1 option="--${1}-domains-replace" original="${TEST_ROOT}/${1}-replace.before"
-    local replacement="${TEST_ROOT}/${1}-replace.json" oldRule oldInput firstRule before composeBefore
+    local replacement="${TEST_ROOT}/${1}-replace.json" field=domains addOption removeOption
+    local oldRule oldInput firstRule before composeBefore
     local failure expected core dataBefore
     local newInput=' Full:Replacement.Example.ORG ' newRule='full:replacement.example.org'
+    if [[ "${kind}" == region ]]; then
+        option=--region-allow-replace field=allow_domains
+        addOption=--region-allow-add removeOption=--region-allow-remove
+    else
+        addOption="--${kind}-domains-add" removeOption="--${kind}-domains-remove"
+    fi
     cp -- "${root}/config/spec.json" "${original}"
-    oldRule=$(jq -er --arg kind "${kind}" '.routing[$kind].domains[1]' "${original}")
-    firstRule=$(jq -er --arg kind "${kind}" '.routing[$kind].domains[0]' "${original}")
+    oldRule=$(jq -er --arg kind "${kind}" --arg field "${field}" \
+        '.routing[$kind][$field][1]' "${original}")
+    firstRule=$(jq -er --arg kind "${kind}" --arg field "${field}" \
+        '.routing[$kind][$field][0]' "${original}")
     oldInput=${oldRule#domain:}
     oldInput=" ${oldInput^^} "
-    jq --arg kind "${kind}" --arg new "${newRule}" '.routing[$kind].domains[1]=$new' \
+    jq --arg kind "${kind}" --arg field "${field}" --arg new "${newRule}" \
+        '.routing[$kind][$field][1]=$new' \
         "${original}" >"${replacement}"
     before=$(snapshot)
     composeBefore=$(cat "${COMPOSE_LOG}")
@@ -1307,9 +1317,9 @@ domainsReplaceCheck() {
     runEdit 2 "${option}" "${oldInput}," "${newInput}" --preview
     runEdit 2 "${option}" "${oldInput}" ",${newInput}" --preview
     runEdit 2 "${option}" "${oldInput}" "${newInput}" "${option}" "${oldInput}" "${newInput}" --preview
-    runEdit 2 "${option}" "${oldInput}" "${newInput}" "--${kind}-domains-add" 'other.example.org' --preview
-    runEdit 2 "--${kind}-domains-add" 'other.example.org' "${option}" "${oldInput}" "${newInput}" --preview
-    runEdit 2 "${option}" "${oldInput}" "${newInput}" "--${kind}-domains-remove" "${oldRule}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" "${addOption}" 'other.example.org' --preview
+    runEdit 2 "${addOption}" 'other.example.org' "${option}" "${oldInput}" "${newInput}" --preview
+    runEdit 2 "${option}" "${oldInput}" "${newInput}" "${removeOption}" "${oldRule}" --preview
     runEdit 2 "${option}" "${oldInput}" "${newInput}" --dns-off --preview
     runEdit 2 --dns-off "${option}" "${oldInput}" "${newInput}" --preview
     runEdit 2 "${option}" "${oldInput}" "${newInput}" --spec "${original}" --preview
@@ -1318,6 +1328,15 @@ domainsReplaceCheck() {
     runEdit 15 "${option}" "${firstRule#full:}" "${newInput}" --confirm PADM-DOCKER-EDIT
     runEdit 15 "${option}" "${oldInput}" "${firstRule^^}" --confirm PADM-DOCKER-EDIT
     runEdit 15 "${option}" "${oldInput}" "${oldInput}" --confirm PADM-DOCKER-EDIT
+    if [[ "${kind}" == region ]]; then
+        runEdit 15 "${option}" 'dl.google.com' "${newInput}" --confirm PADM-DOCKER-EDIT
+        runEdit 2 "${option}" "${oldInput}" "${newInput}" --region domain --preview
+        runEdit 2 --region domain "${option}" "${oldInput}" "${newInput}" --preview
+        runEdit 2 "${option}" "${oldInput}" "${newInput}" --region-allow other.example.org --preview
+        runEdit 2 "${option}" "${oldInput}" "${newInput}" --region-off --preview
+        runEdit 2 "${option}" "${oldInput}" "${newInput}" --block-bt-off --preview
+        runEdit 2 "${option}" "${oldInput}" "${newInput}" --warp-global --preview
+    fi
     [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
         fail "${kind}: 单项替换参数、缺旧、重复新或同值拒绝改变部署或调用 Compose"
     runEdit 0 "${option}" "${oldInput}" "${newInput}" --preview
@@ -1331,7 +1350,7 @@ domainsReplaceCheck() {
     [[ "$(snapshot)" == "${before}" ]] || fail "${kind}: 单项替换预览或取消改变部署"
     # 每类仅注入一个故障，合计覆盖健康失败及两种中断，保留完整恢复证据。
     case "${kind}" in
-    dns|warp) failure=health-fail; expected=14 ;;
+    dns|warp|region) failure=health-fail; expected=14 ;;
     direct) failure=int; expected=130 ;;
     block|ipv6) failure=term; expected=143 ;;
     esac
@@ -1351,10 +1370,14 @@ domainsReplaceCheck() {
         '$actual==$expected' >/dev/null ||
         fail "${kind}: 单项替换没有规范化中间项、保持顺序或改写其它完整规格"
     runStatus 0
-    jq -e --arg kind "${kind}" --slurpfile expected "${replacement}" '
+    jq -e --arg kind "${kind}" --arg field "${field}" --slurpfile expected "${replacement}" \
+        --argjson defaults "${REGION_DEFAULTS}" '
       (if $kind=="dns" then .dns.domain_rules
        elif $kind=="direct" or $kind=="block" then .[$kind].domain_rules
-       else .[$kind].domains end) == $expected[0].routing[$kind].domains
+       else .[$kind][$field] end) == $expected[0].routing[$kind][$field] and
+      (if $kind=="region" then
+         .region.mode==$expected[0].routing.region.mode and .region.default_allow_domains==$defaults
+       else true end)
     ' "${LOG}" >/dev/null || fail "${kind}: 单项替换状态未投影有序名单"
     for core in xray sing-box; do
         jq -en --arg core "${core}" --slurpfile old "${TEST_ROOT}/${kind}-replace-${core}.before" \
@@ -1362,6 +1385,18 @@ domainsReplaceCheck() {
           if $core=="xray" then ($old[0]|del(.routing,.dns))==($new[0]|del(.routing,.dns))
           else ($old[0]|del(.route,.dns))==($new[0]|del(.route,.dns)) end
         ' >/dev/null || fail "${kind}/${core}: 单项替换改写核心监听、认证或 WARP 私有字段"
+        if [[ "${kind}" == region ]]; then
+            jq -e --arg core "${core}" --argjson defaults "${REGION_DEFAULTS}" '
+              if $core=="xray" then
+                (.routing.rules | map(select(.outboundTag=="direct").domain // []) | add) as $direct |
+                all($defaults[]; . as $rule | ($direct | index($rule)) != null)
+              else
+                ([.. | objects | .domain_suffix? // empty | .[]]) as $direct |
+                all($defaults[] | ltrimstr("domain:"); . as $rule | ($direct | index($rule)) != null)
+              end
+            ' "${root}/config/${core}/config.json" >/dev/null ||
+                fail "region/${core}: 替换默认同名自定义副本改变固定八条例外"
+        fi
     done
     (dockerMain protocol links) >"${TEST_ROOT}/${kind}-replace-links.after"
     cmp -s "${TEST_ROOT}/${kind}-replace-links.before" "${TEST_ROOT}/${kind}-replace-links.after" &&
@@ -1885,6 +1920,7 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
     runEdit 2 --region-off --direct-off --preview
     runEdit 2 --region both --spec "${TEST_ROOT}/base.json" --preview
     runEdit 2 --region both --http01 enable --preview
+    runEdit 15 --region-allow-replace apple.com replacement.example.org --preview
     for option in --region-allow-add --region-allow-remove; do
         runEdit 15 "${option}" example.com --preview
         runEdit 2 "${option}"
@@ -1917,6 +1953,7 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
         fail '区域无自定义例外时没有独立保留空列表'
     before=$(snapshot)
     runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
+    runEdit 15 --region-allow-replace apple.com replacement.example.org --preview
     [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过区域专项冻结'
     runEdit 0 --region domain --region-allow ' Full:Exact.Example.Com , APPLE.COM , full:custom-region.example.com , apple.com ' \
         --confirm PADM-DOCKER-EDIT
@@ -1956,6 +1993,7 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
         [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 区域未恢复完整部署及流量"
     done
     MODE=ok
+    domainsReplaceCheck region
     regionAddCsv=' FULL:EXACT.EXAMPLE.COM , APPLE.COM , Exact.Example.COM , keyword:Video , geosite:CN , domain:exact.example.com '
     regionAdded='["full:exact.example.com","domain:apple.com","full:custom-region.example.com","domain:exact.example.com","keyword:video","geosite:cn"]'
     before=$(snapshot)
@@ -2028,6 +2066,7 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
     ' >/dev/null || fail '删除末条区域自定义例外未保留空列表、模式和其它策略'
     before=$(snapshot)
     runEdit 15 --region-allow-remove exact.example.com --confirm PADM-DOCKER-EDIT
+    runEdit 15 --region-allow-replace apple.com replacement.example.org --confirm PADM-DOCKER-EDIT
     [[ "$(snapshot)" == "${before}" ]] || fail '区域重复删除改变部署'
     runEdit 0 --region-allow-add 'full:exact.example.com,apple.com,full:custom-region.example.com' \
         --confirm PADM-DOCKER-EDIT

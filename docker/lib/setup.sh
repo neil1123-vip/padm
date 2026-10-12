@@ -1423,7 +1423,7 @@ dockerEditCommand() {
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local routingServer= routingPort=
-    local routingDomains='[]' routingOldDomains='[]'
+    local routingDomains='[]' routingOldDomains='[]' routingDomainsField=domains
     local routingOldIp= routingNewIp=
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
@@ -1525,11 +1525,16 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 2
             ;;
-        --dns-domains-replace|--direct-domains-replace|--block-domains-replace|--warp-domains-replace|--ipv6-domains-replace)
+        --dns-domains-replace|--direct-domains-replace|--block-domains-replace|--warp-domains-replace|--ipv6-domains-replace|--region-allow-replace)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && "$2" != *,* &&
                 -n "$3" && "$3" != --* && "$3" != *,* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            routingKind=${1#--} routingKind=${routingKind%-domains-replace} routingAction=domains_replace
+            routingAction=domains_replace
+            if [[ "$1" == --region-allow-replace ]]; then
+                routingKind=region routingDomainsField=allow_domains
+            else
+                routingKind=${1#--} routingKind=${routingKind%-domains-replace}
+            fi
             routingOldDomains=$(dockerSocks5DomainsNormalize "$2") &&
                 routingDomains=$(dockerSocks5DomainsNormalize "$3") &&
                 jq -en --argjson old "${routingOldDomains}" --argjson domains "${routingDomains}" \
@@ -2235,12 +2240,16 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_STATE}"
             }
         elif [[ "${routingAction}" == domains_replace ]]; then
-            jq -e --arg kind "${routingKind}" '
-              (.routing[$kind].domains | type == "array" and length > 0) and
+            jq -e --arg kind "${routingKind}" --arg field "${routingDomainsField}" '
+              (.routing[$kind][$field] | type == "array" and length > 0) and
               (if $kind == "warp" or $kind == "ipv6" then
                 .routing[$kind].mode == "selective" else true end)
             ' "${draft}" >/dev/null || {
-                dockerError '域名单条替换要求已有非空名单；WARP/IPv6 还须已启用选择性分流'
+                if [[ "${routingKind}" == region ]]; then
+                    dockerError '区域自定义直连例外单条替换要求已有非空自定义名单，不能操作固定默认例外'
+                else
+                    dockerError '域名单条替换要求已有非空名单；WARP/IPv6 还须已启用选择性分流'
+                fi
                 return "${PADM_DOCKER_RC_STATE}"
             }
         elif [[ "${routingKind}" == dns &&
@@ -2295,14 +2304,14 @@ dockerEditCommand() {
             jq --arg mode "${ipv6Mode}" --argjson domains "${ipv6Domains}" \
                 '.routing.ipv6 = {mode:$mode,domains:$domains}' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == domains_replace ]]; then
-            jq --arg kind "${routingKind}" --argjson old "${routingOldDomains}" \
+            jq --arg kind "${routingKind}" --arg field "${routingDomainsField}" --argjson old "${routingOldDomains}" \
                 --argjson domains "${routingDomains}" '
-              .routing[$kind].domains as $existing |
+              .routing[$kind][$field] as $existing |
               if ($existing | map(select(. == $old[0])) | length) != 1 then
                 error("待替换旧规则必须恰好存在于当前所选手工域名名单一次，未提交配置")
               elif ($existing | index($domains[0])) != null then
                 error("新规则不能与当前所选手工域名名单中的规则重复，未提交配置")
-              else .routing[$kind].domains =
+              else .routing[$kind][$field] =
                 ($existing | map(if . == $old[0] then $domains[0] else . end)) end
             ' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == domains_add ]]; then
@@ -2531,7 +2540,7 @@ dockerEditCommand() {
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
         --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
-        --arg routing_action "${routingAction}" \
+        --arg routing_action "${routingAction}" --arg routing_domains_field "${routingDomainsField}" \
         --arg http_relay "${httpRelay}" \
         --arg port_alias "${portAlias}" \
         --arg cdn_listener "${cdnListener}" \
@@ -2619,7 +2628,8 @@ dockerEditCommand() {
         ($old | del(.routing.socks5) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
         elif $routing_action == "domains_replace" then
-         ($old | del(.routing[$routing_kind].domains)) == ($new | del(.routing[$routing_kind].domains))
+         ($old | del(.routing[$routing_kind][$routing_domains_field])) ==
+           ($new | del(.routing[$routing_kind][$routing_domains_field]))
         elif $routing_action == "ips_replace" then
          ($old | del(.routing.block_ips.ips)) == ($new | del(.routing.block_ips.ips))
        elif $routing_kind == "warp" and ($routing_action | startswith("warp_")) then
