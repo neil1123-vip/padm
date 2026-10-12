@@ -5484,6 +5484,59 @@ IPv4 legacy 共存拒绝且正文保持。Desktop 内核缺少 IPv6 legacy NAT
 该显式真实 selector 不在完整合同叶子内，其它完整输入未变，不重跑全套。
 独审收口无阻断；本轮成功输入共清理 `84880131 bytes`。
 
+#### 5C.9c.2a 持久归属审计与精确撤销前置
+
+内部 `port-hopping-audit|port-hopping-health|port-hopping-clean <token>`
+仅接受已有固定 state 和资源，不提供创建、启用、Compose 或菜单接口。
+固定 `schema_version=1`、32 hex token、token 派生短链、规范端口、
+IPv4/IPv6 字面目的地址及 intent/active 阶段；原始 ASCII 字节精确比较。
+state 要求 root:root、0600、单硬链接、至多 512 bytes；拒绝链接、
+重复/额外字段、NUL、不规范地址、范围倒置或包含目标。
+
+双族固定资源为 PREROUTING 首位范围 hook、同目的/range 的 DNAT、
+短链末位 token RETURN sentinel；只接受无资源、sentinel、DNAT+sentinel
+或完整布局的中断子集。其它跳跃 owner、外来引用、额外/重复/错序规则、
+无归属标记空链均拒绝。单端口范围按 iptables 规范输出匹配单个端口。
+health 只要求 active state 和双族完整布局，不证明目标发布归属、
+现时流量可达性、其它 nft/legacy 表或全部 UDP socket 无冲突。
+
+clean 使用私有常驻 `.port-hopping.lock` 和非阻塞 flock；
+每次写前重读原 state 的字节、inode/时间/大小及锁身份，再审计双族。
+仅按 hook→DNAT→sentinel→链逐条精确删除，不 flush 或删除 conntrack。
+仅当前进程刚删 sentinel 形成的空链允许继续撤销；删链失败时核验后
+精确补回 sentinel，保留 state 可重试。跨进程同名空链仍拒绝，
+SIGKILL 的删 sentinel→删链窗口不承诺自动恢复。
+
+归属合同与范围预检共用已有 selector，不新增完整叶子或构建镜像；
+真实双族探针由隔离夹具创建 state/规则，生产入口审计和撤销，
+启用/关闭/重建要求既有 8/0/8 新连接路径，撤销正文等于外来基线。
+生产写入启动、原子 intent/active 提交、信号恢复、候选 owned 预检、
+目标发布见证、自动跳跃和菜单接入继续待实施；完整端口跳跃及协议
+管理仍 deferred，总目标 active。预检/核验与内核写入存在非原子窗口，
+不宣称抵御特权并发修改、整机重启持久性或旧会话排空。
+
+定向 `docker-port-hopping-preflight -Jobs 2` 的 61 个范围预检与
+126 个归属/撤销合同通过，内部/入口 `18976/20051 ms`；
+`.tmp-regression-docker-cc1e5b521e6448649e1497c05c34f4f4/`。
+覆盖 state/lock 字节和身份替换、元数据、规则漂移、双族部分残留、
+无标记空链拒绝、删链失败 sentinel 补回重试及锁竞争；
+首次失败是 IPv6 非首位 hook 夹具仍只有一个 hook，修正夹具，
+`.tmp-regression-docker-942a5136825e4eeaa08a50bdd47cf122/` 失败输入保留。
+独审发现单端口范围的 `-S` 规范化误拒，已修根因并补双族合同。
+真实最终内部/入口 `21623/22767 ms`；
+`.tmp-regression-docker-17ffb6e5a56f40ef9d69c22d2aff9581/`。
+既有 TLS/认证拒绝及范围能力断言保持，audit/health/clean 均调用
+本次生产代码，事件 8/0/8、两次撤销全 NAT 正文等于基线。
+fixture 先写 active 再部分创建仅是夹具，不是生产事务证据；
+ledger 故障兜底亦不计生产恢复支持。独立只读复审无剩余阻断。
+随后完整 `docker-contracts -Jobs 6` 的 54/54 叶子通过，内部/入口
+`483875/484875 ms`、排队 `388 ms`、exit 0、cache_hit=false；
+`.tmp-regression-docker-1c43a574cf74428dbaaf03bf4fbc9d3e/`。
+完整快照与四个关键实现/测试文件哈希一致，语法、ShellCheck error、
+Python AST、diff 检查通过；成功源码副本清理 `12166732 bytes`。
+批量 bundle 暂存优化 `19f68fd8` 已随本次完整快照验证，累计完整入口
+从 `587215 ms` 降至 `484875 ms`，不把单轮采样当作稳定峰值证明。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

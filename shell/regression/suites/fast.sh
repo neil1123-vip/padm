@@ -532,7 +532,8 @@ runDockerTProxyOwnershipRegression() {
 }
 
 runDockerPortHoppingPreflightRegression() {
-    python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py"
+    python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
+        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-ownership.py"
 }
 
 runDockerTProxyRealRegression() {

@@ -1096,6 +1096,204 @@ except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as
 PY
 }
 
+port_hopping_resources() {
+    [ "$#" -eq 2 ] || die "port hopping resources requires operation and owner token"
+    python3 - "$STATE_ROOT" "$@" <<'PY'
+import fcntl
+import ipaddress
+import os
+import re
+import shlex
+import stat
+import subprocess
+import sys
+
+root, operation, expected_token = sys.argv[1:]
+state_path = os.path.join(root, "port-hopping.state")
+cleared = set()
+
+def identity(metadata):
+    return (metadata.st_dev, metadata.st_ino, metadata.st_size,
+            metadata.st_mtime_ns, metadata.st_ctime_ns)
+
+def directory():
+    metadata = os.lstat(root)
+    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0
+            or metadata.st_gid != 0 or metadata.st_mode & 0o022):
+        raise ValueError("unsafe port hopping ownership directory")
+
+def private_file(metadata, size):
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+            or metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1 or metadata.st_size > size):
+        raise ValueError("unsafe port hopping ownership file")
+
+def read_state():
+    directory()
+    descriptor = os.open(state_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        private_file(before, 512)
+        data = stream.read(513)
+        after = os.fstat(stream.fileno())
+    current = os.lstat(state_path)
+    if identity(before) != identity(after) or identity(after) != identity(current):
+        raise ValueError("port hopping ownership changed while reading")
+    return data, identity(current)
+
+def owner():
+    data, metadata = read_state()
+    if data != state or metadata != state_identity:
+        raise ValueError("port hopping owner was replaced")
+    if lock is not None:
+        current = os.lstat(os.path.join(root, ".port-hopping.lock"))
+        private_file(current, 0)
+        if identity(current) != lock_identity:
+            raise ValueError("port hopping lock was replaced")
+
+def command(args):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+    if result.returncode or result.stderr.strip():
+        raise RuntimeError(result.stderr.strip() or "cannot inspect port hopping resources")
+    return result.stdout
+
+def rules(address):
+    destination = address + ("/32" if ":" not in address else "/128")
+    target = f"{address}:{target_port}" if ":" not in address else f"[{address}]:{target_port}"
+    selector = start if start == end else f"{start}:{end}"
+    base = ["-d", destination, "-p", "udp", "-m", "udp", "--dport", selector,
+            "-m", "comment", "--comment", comment]
+    return (["-A", "PREROUTING", *base, "-j", chain],
+            ["-A", chain, *base, "-j", "DNAT", "--to-destination", target],
+            ["-A", chain, "-m", "comment", "--comment", comment, "-j", "RETURN"])
+
+def audit():
+    owner()
+    result = {}
+    for tool, address in tools:
+        expected = rules(address)
+        present = [False, False, False]
+        chain_present, prerouting, order = False, [], []
+        chains, policies = set(), set()
+        for line in command([tool, "-w", "-t", "nat", "-S"]).splitlines():
+            args = shlex.split(line)
+            if args[:1] in (["-P"], ["-N"]):
+                if (len(args) != (3 if args[0] == "-P" else 2) or args[1] in chains):
+                    raise ValueError("unverified NAT chain listing")
+                chains.add(args[1])
+                if args[0] == "-P":
+                    policies.add(args[1])
+                if args == ["-N", chain]:
+                    chain_present = True
+                    continue
+            elif args[:1] == ["-A"] and len(args) >= 4:
+                if args[1] == "PREROUTING":
+                    prerouting.append(args)
+                if (args[1] == chain or chain in args or
+                        any(value.startswith(("padm-hop", "PADM_HOP")) for value in args)):
+                    if args not in expected:
+                        raise ValueError("changed or foreign port hopping rule")
+                    which = expected.index(args)
+                    if present[which]:
+                        raise ValueError("duplicate port hopping rule")
+                    present[which] = True
+                    if args[1] == chain:
+                        order.append(which)
+                    continue
+            else:
+                raise ValueError("unverified NAT rule listing")
+            if any(value.startswith(("padm-hop", "PADM_HOP")) for value in args):
+                raise ValueError("unverified other port hopping owner")
+        if not {"PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"} <= policies:
+            raise ValueError("incomplete NAT chain listing")
+        if (order != sorted(order) or (present[0] and prerouting[:1] != [expected[0]])
+                or (present[0] and not present[1]) or (present[1] and not present[2])
+                or (any(present) and not chain_present)):
+            raise ValueError("changed port hopping resource order or topology")
+        if chain_present and not present[2] and not (tool in cleared and not any(present)):
+            raise ValueError("empty or unmarked port hopping chain has no verifiable owner")
+        result[tool] = (chain_present, *present)
+    owner()
+    return result
+
+def write(tool, args):
+    audit()
+    owner()
+    command([tool, "-w", "-t", "nat", *args])
+
+try:
+    if operation not in {"audit", "health", "clean"} or not re.fullmatch("[a-f0-9]{32}", expected_token):
+        raise ValueError("invalid port hopping operation or owner token")
+    state, state_identity = read_state()
+    lines = state.decode("ascii").splitlines()
+    keys = ("schema_version", "token", "chain", "start", "end", "target_port", "ipv4", "ipv6", "phase")
+    if len(lines) != len(keys) or any(not line.startswith(key + "=") for key, line in zip(keys, lines)):
+        raise ValueError("unverified port hopping state format")
+    values = [line.split("=", 1)[1] for line in lines]
+    schema, token, chain, start, end, target_port, ipv4, ipv6, phase = values
+    if (schema != "1" or token != expected_token or chain != "padm-hop-" + token[:12]
+            or phase not in {"intent", "active"}
+            or state != "".join(f"{key}={value}\n" for key, value in zip(keys, values)).encode("ascii")):
+        raise ValueError("unverified port hopping state owner")
+    for value in (start, end, target_port):
+        if not re.fullmatch("[1-9][0-9]{0,4}", value) or int(value) > 65535:
+            raise ValueError("invalid port hopping state port")
+    if int(start) > int(end) or int(start) <= int(target_port) <= int(end):
+        raise ValueError("invalid port hopping state range")
+    for address, version in ((ipv4, 4), (ipv6, 6)):
+        parsed = ipaddress.ip_address(address)
+        if (parsed.version != version or str(parsed) != address or "%" in address
+                or parsed.is_unspecified or parsed.is_multicast or parsed.is_loopback
+                or parsed.is_link_local or getattr(parsed, "ipv4_mapped", None)):
+            raise ValueError("invalid or noncanonical port hopping destination")
+    comment = "padm-hop:" + token
+    tools = (("iptables", ipv4), ("ip6tables", ipv6))
+    lock = None
+    if operation == "clean":
+        descriptor = os.open(os.path.join(root, ".port-hopping.lock"),
+                             os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+        lock = os.fdopen(descriptor, "rb+")
+        private_file(os.fstat(lock.fileno()), 0)
+        current = os.lstat(os.path.join(root, ".port-hopping.lock"))
+        if identity(current) != identity(os.fstat(lock.fileno())):
+            raise ValueError("port hopping lock was replaced")
+        lock_identity = identity(current)
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        owner()
+    for tool, address in tools:
+        if "(nf_tables)" not in command([tool, "--version"]):
+            raise ValueError("port hopping requires the verified iptables-nft backend")
+    presence = audit()
+    if operation == "health":
+        if phase != "active" or not all(all(value) for value in presence.values()):
+            raise ValueError("port hopping is not active with complete dual-stack resources")
+    elif operation == "clean":
+        for tool, address in tools:
+            for index, rule in enumerate(rules(address)):
+                if audit()[tool][index + 1]:
+                    write(tool, ["-D", *rule[1:]])
+                    if index == 2:
+                        cleared.add(tool)
+            if audit()[tool][0]:
+                try:
+                    write(tool, ["-X", chain])
+                except (OSError, RuntimeError, subprocess.SubprocessError):
+                    # 当前进程刚删的 sentinel 可补回；跨进程同名空链仍拒绝。
+                    if audit()[tool][0] and tool in cleared:
+                        write(tool, rules(address)[2])
+                        cleared.remove(tool)
+                    raise
+            cleared.discard(tool)
+        if any(any(value) for value in audit().values()):
+            raise ValueError("port hopping resources remain after cleanup")
+        owner()
+        os.unlink(state_path)
+except (ValueError, UnicodeError, OSError, RuntimeError, subprocess.SubprocessError) as error:
+    print(f"padm-net: port hopping {operation} refused: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 tun_preflight() {
     need ip
     need nft
@@ -1425,6 +1623,11 @@ fail2ban-ssh)
     ;;
 tproxy)
     shift; [ "$#" -eq 2 ] || die "tproxy requires port and mark"; tproxy_run "$@"
+    ;;
+port-hopping-audit|port-hopping-health|port-hopping-clean)
+    operation=${1#port-hopping-}
+    shift; [ "$#" -eq 1 ] || die "port hopping resources requires owner token"
+    port_hopping_resources "$operation" "$1"
     ;;
 wireguard-health)
     shift; [ "$#" -eq 1 ] || exit 1; wireguard_health "$@"

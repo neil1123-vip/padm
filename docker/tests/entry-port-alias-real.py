@@ -320,10 +320,15 @@ def port_range_capabilities(root, image_id):
 
 
 def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
-    # 仅在本轮隔离宿主 netns 验证双栈 DNAT 到已有发布口；不提供生产管理入口。
+    # 隔离 netns 由夹具创建规则/state，仅审计与撤销调用生产入口。
     token = os.urandom(16).hex()
-    chain = "PADM_HOP_" + token[:12]
+    chain = "padm-hop-" + token[:12]
     comment = "padm-hop:" + token
+    state_path = Path("/var/lib/padm/net/port-hopping.state")
+    state = (f"schema_version=1\ntoken={token}\nchain={chain}\nstart=36561\nend=36562\n"
+             f"target_port=35461\nipv4={HOSTS['ipv4']}\nipv6={HOSTS['ipv6']}\nphase=active\n").encode()
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    assert not state_path.exists() and not state_path.is_symlink()
     owned, outside = [], []
     baseline = {}
     client = dict(log=dict(level="warn"), inbounds=[], outbounds=[], route=dict(rules=[]))
@@ -379,6 +384,14 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
         print(f"entry-hy2-hopping-preflight: accepted={accepted} "
               f"diagnostic={result.stderr.strip()}", flush=True)
 
+    def resources(operation):
+        command(["sh", str(SCRIPT.parents[1] / "images/net/entrypoint.sh"),
+                 f"port-hopping-{operation}", token])
+        if operation == "clean":
+            assert not state_path.exists()
+            owned.clear()
+        print(f"entry-hy2-hopping-owner: {operation} passed", flush=True)
+
     try:
         for family, address in HOSTS.items():
             table = "iptables" if family == "ipv4" else "ip6tables"
@@ -422,21 +435,27 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
         preflight(True)
         for stage in ("on", "off", "restored"):
             if stage == "off":
-                revoke(owned)
+                resources("clean")
                 for table in baseline:
                     assert snapshot(table) == baseline[table], "撤销改变了 Docker 或外部 NAT 规则"
                 preflight(True)
             else:
+                state_path.write_bytes(state)
+                state_path.chmod(0o600)
                 for family, address in HOSTS.items():
                     table = "iptables" if family == "ipv4" else "ip6tables"
                     target = f"{address}:35461" if family == "ipv4" else f"[{address}]:35461"
                     add(table, ["-N", chain], owned)
-                    add(table, ["-A", chain, "-p", "udp", "-d", address,
+                    add(table, ["-A", chain, "-m", "comment", "--comment", comment,
+                                "-j", "RETURN"], owned)
+                    resources("audit")
+                    add(table, ["-I", chain, "1", "-d", address, "-p", "udp", "-m", "udp",
                                 "--dport", "36561:36562", "-m", "comment", "--comment", comment,
                                 "-j", "DNAT", "--to-destination", target], owned)
-                    add(table, ["-I", "PREROUTING", "1", "-i", "prh+", "-p", "udp", "-d", address,
+                    add(table, ["-I", "PREROUTING", "1", "-d", address, "-p", "udp", "-m", "udp",
                                 "--dport", "36561:36562", "-m", "comment", "--comment", comment,
                                 "-j", chain], owned)
+                resources("health")
                 preflight(False)
             # 撤销用此前无跳跃流量的第二来源，避免旧 QUIC/conntrack 掩盖新连接结果。
             stage_enter = enter if stage == "on" else off_enter
@@ -469,7 +488,7 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
                 client_pid=process.pid, fresh_client=True, families=list(HOSTS),
                 client_scope="first-source" if stage == "on" else "second-source",
                 target_port=35461, range=[36561, 36562], backend="iptables-nft")), flush=True)
-        revoke(owned)
+        resources("clean")
         for table in baseline:
             assert snapshot(table) == baseline[table], "重建后撤销改变了非本轮规则"
         preflight(True)
@@ -490,6 +509,9 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
     finally:
         revoke(owned)
         revoke(outside)
+        if state_path.exists():
+            assert state_path.read_bytes() == state, "夹具归属已变化，保留现场"
+            state_path.unlink()
 
 
 def hy2_range_probe(root, node, docker, image_id, enter, off_enter, processes):
