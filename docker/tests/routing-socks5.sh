@@ -2225,6 +2225,21 @@ runEdit 15 --spec "${TEST_ROOT}/block-ips-only.json" --confirm PADM-DOCKER-EDIT
 assertClean
 [[ "$(snapshot)" == "${before}" ]] || fail '路由子项预览、无效输入或取消改变完整部署'
 
+# DNS 域名增删只能操作已启用的分流，参数错误和未启用拒绝都不得触发 Compose。
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+for action in add remove; do
+    option="--dns-domains-${action}"
+    runEdit 15 "${option}" "${DNS_CSV}" --confirm PADM-DOCKER-EDIT
+    runEdit 2 "${option}"
+    runEdit 2 "${option}" '' --preview
+    runEdit 2 "${option}" 'regexp:.*' --preview
+    runEdit 2 "${option}" "${overlimitCsv}" --preview
+    runEdit 2 "${option}" "${DNS_CSV}" --dns-off --preview
+    runEdit 2 "${option}" "${DNS_CSV}" "${option}" 'example.net' --preview
+done
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'DNS 未启用增删或无效参数改变部署或调用 Compose'
 runEdit 0 --dns-rules 203.0.113.53 05353 "${DNS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
     --argjson dns "${DNS}" '$new[0] == ($old[0] + {routing:{dns:$dns}})' >/dev/null ||
@@ -2290,6 +2305,76 @@ jq -en --slurpfile expected "${TEST_ROOT}/dns-rules.before" --slurpfile actual "
 runEdit 0 --socks5 "${DOMAINS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-all.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '开启 SOCKS5 丢弃 DNS/hosts'
+# dns-hosts 定向入口执行这组增量事务，不重复已有 DNS 生成器和真实 UDP 矩阵。
+dnsAddCsv=' GEOSITE:CN , Full:DNS.Example.COM , DNS.Example.NET , Full:Added.Example.ORG , Added.Example.ORG , KEYWORD:Next_DNS , full:added.example.org '
+dnsAdded='["full:dns.example.com","domain:dns.example.net","keyword:dns-video","geosite:cn","full:added.example.org","domain:added.example.org","keyword:next_dns"]'
+dnsRemoveCsv=' Full:Added.Example.ORG , DNS.Example.NET , GEOSITE:CN , full:added.example.org '
+dnsRemaining='["full:dns.example.com","keyword:dns-video","domain:added.example.org","keyword:next_dns"]'
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/dns-incremental.before"
+before=$(snapshot)
+runEdit 0 --dns-domains-add "${dnsAddCsv}" --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'DNS 域名追加预览改变部署'
+runEdit 0 --dns-domains-add "${dnsAddCsv}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --dns-domains-add "${dnsAddCsv}" --confirm PADM-DOCKER-EDIT
+jq -en --argjson domains "${dnsAdded}" --slurpfile old "${TEST_ROOT}/dns-incremental.before" \
+    --slurpfile actual "${root}/config/spec.json" '
+  $actual[0] == ($old[0] | .routing.dns.domains=$domains)
+' >/dev/null || fail 'DNS 追加未规范化、稳定去重或改变 server/port、hosts 与其它路由'
+runStatus 0
+jq -e --argjson domains "${dnsAdded}" --argjson hosts "${HOSTS}" '
+  .dns == {server:"203.0.113.53",port:5353,domain_rules:$domains} and .hosts==$hosts
+' "${LOG}" >/dev/null || fail 'DNS 追加状态未保留原上游、端口、hosts 和有序名单'
+before=$(snapshot)
+runEdit 0 --dns-domains-remove "${dnsRemoveCsv}" --preview
+previewCompose=$(cat "${COMPOSE_LOG}")
+runEdit 15 --dns-domains-remove 'dns.example.com' --confirm PADM-DOCKER-EDIT
+runEdit 15 --dns-domains-remove "${dnsRemoveCsv},missing.example.net" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${previewCompose}" ]] ||
+    fail 'DNS 删除缺项或部分缺项改变部署、停服或把 full 规则当作裸域名'
+for action in add remove; do
+    csv=failure.example.net
+    [[ "${action}" != remove ]] || csv=${dnsRemoveCsv}
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        expected=14
+        [[ "${failure}" != int ]] || expected=130
+        [[ "${failure}" != term ]] || expected=143
+        runEdit "${expected}" "--dns-domains-${action}" "${csv}" --confirm PADM-DOCKER-EDIT
+        [[ "$(snapshot)" == "${before}" ]] ||
+            fail "${action}/${failure}: DNS 增量未恢复上游、端口、其它路由及非空流量"
+    done
+done
+MODE=ok
+runEdit 0 --dns-domains-remove "${dnsRemoveCsv}" --confirm PADM-DOCKER-EDIT
+jq -en --argjson domains "${dnsRemaining}" --slurpfile old "${TEST_ROOT}/dns-incremental.before" \
+    --slurpfile actual "${root}/config/spec.json" '
+  $actual[0] == ($old[0] | .routing.dns.domains=$domains)
+' >/dev/null || fail 'DNS 删除未精确匹配完整规则、保留其余次序或改变上游与其它路由'
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 15 --dns-domains-remove "${dnsRemoveCsv}" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail '重复 DNS 删除改变部署或调用 Compose'
+dnsBoundaryCsv=$(jq -nr '[range(0;252) | "dns-boundary-\(.).example.org"] | join(",")')
+runEdit 0 --dns-domains-add "${dnsBoundaryCsv}" --confirm PADM-DOCKER-EDIT
+jq -e --argjson domains "${dnsRemaining}" '
+  .routing.dns.domains == ($domains + [range(0;252) | "domain:dns-boundary-\(.).example.org"])
+' "${root}/config/spec.json" >/dev/null || fail 'DNS 联合 256 项没有保留历史次序'
+before=$(snapshot)
+runEdit 0 --dns-domains-add 'FULL:DNS.EXAMPLE.COM,dns-boundary-251.example.org' --preview
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 15 --dns-domains-add 'dns-boundary-252.example.org' --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'DNS 联合超过 256 项改变部署或调用 Compose'
+dnsAllCsv=$(jq -r '.routing.dns.domains | join(",")' "${root}/config/spec.json")
+runEdit 0 --dns-domains-remove "${dnsAllCsv}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/dns-incremental.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual[0] == ($old[0] | del(.routing.dns))' >/dev/null ||
+    fail 'DNS 删空未删除完整上游设置或破坏其它路由子项'
+runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-all.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$expected' >/dev/null || fail 'DNS 增量合同未恢复原 DNS 与其它路由夹具'
 runEdit 0 --hosts-off --confirm PADM-DOCKER-EDIT
 jq -e --argjson dns "${DNS}" --argjson domains "${DOMAINS}" '
   .routing == {dns:$dns,socks5:{server:"203.0.113.9",port:1080,
@@ -2308,6 +2393,11 @@ jq -e --argjson hosts "${HOSTS}" '.enabled == true and .mode == "direct" and .ho
 runEdit 0 --hosts-off --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
     '$new == $old' >/dev/null || fail '关闭最后一个路由字段未恢复无 routing 规格'
+runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --dns-domains-remove "${DNS_CSV}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
+    '$new == $old' >/dev/null || fail '删除最后 DNS 名单没有清理空 routing'
+printf 'docker-routing-dns-domains-incremental-regression-ok\n'
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail 'DNS/hosts 事务清空流量'
 

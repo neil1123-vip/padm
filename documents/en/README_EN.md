@@ -1331,9 +1331,18 @@ Menu `17`, option `6`, accepts a literal UDP DNS server IP, a port (blank defaul
 to `53`), and domain-rule CSV. `--dns-rules <IP> <port> <CSV>` creates or replaces
 the same DNS object using existing CSV normalization and transaction checks;
 private JSON through `--dns` and all other routing policies remain available.
+Menu options `28/29` and `--dns-domains-add/--dns-domains-remove <CSV>` change the
+domain list of an existing DNS route while keeping its server and port. Additions
+retain existing order and append unseen normalized rules, with a 256-rule limit.
+Removal requires every complete normalized rule to exist; any missing item rejects
+the whole operation. Removing the last rule disables that DNS route and preserves
+other routing policies. Both actions reject a missing DNS route. Repeated additions
+still use the confirmation transaction and may update rollback metadata.
 
 ```bash
 padm-docker edit --dns-rules 192.0.2.53 53 'example.net,full:exact.example.org' --preview
+padm-docker edit --dns-domains-add 'full:updates.example.net' --preview
+padm-docker edit --dns-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 ```
 
 Menu `17`, options `10/12`, replaces Direct or Block domain rules using comma-separated

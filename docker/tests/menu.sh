@@ -1011,6 +1011,7 @@ runRoutingDriver() {
         targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-add.json\n'
         targetReply 'Docker 路由与出站' $'27\n'
         targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-remove.json\n'
+        targetReply 'Docker 路由与出站' $'3\n'
         targetReply 'Docker 路由与出站' $'28\n'
         targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com\n'
         targetReply 'Docker 路由与出站' $'29\n'

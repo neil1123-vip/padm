@@ -263,6 +263,10 @@ DNS 私有 JSON 示例为 `{"server":"192.0.2.53","port":53,"domains":["domain:e
 菜单 `17` 的 `6` 可直接输入服务器 IP、端口（留空默认 `53`）和域名规则 CSV，
 或使用 `--dns-rules <IP> <端口> <CSV>`；CSV 规范化与 Direct/Block 相同。
 此操作创建或整组替换 DNS 分流，保留 `--dns` 私有 JSON CLI 和其它路由子项。
+菜单 `17` 的 `28/29` 与 `--dns-domains-add/--dns-domains-remove <CSV>` 可增删已有
+DNS 分流的域名名单，保留原服务器和端口。追加保留历史顺序并去重，合并后最多 256 条；
+删除按完整规范化规则匹配，任一缺项整次拒绝，删空关闭该 DNS 分流并保留其它路由。
+未启用 DNS 时增删明确拒绝；重复追加仍经过确认事务，可能更新回滚元数据。
 hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–256 个小写精确域名，
 每个域名对应一个可路由字面 IPv4/IPv6；不支持 hosts 后缀、关键字或分类匹配。
 地址示例不可直接用作服务器；文件安全要求与 SOCKS5 输入相同。
@@ -271,6 +275,8 @@ hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–25
 padm-docker edit --dns /root/padm-dns.json --preview
 padm-docker edit --dns /root/padm-dns.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --dns-rules 192.0.2.53 53 'example.net,full:exact.example.org' --preview
+padm-docker edit --dns-domains-add 'full:updates.example.net' --preview
+padm-docker edit --dns-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts /root/padm-hosts.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --dns-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-off --confirm PADM-DOCKER-EDIT

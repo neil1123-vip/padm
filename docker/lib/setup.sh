@@ -1459,7 +1459,7 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 4
             ;;
-        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add|--direct-domains-remove|--block-domains-remove)
+        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add|--direct-domains-remove|--block-domains-remove|--dns-domains-add|--dns-domains-remove)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingAction=domains
@@ -2044,6 +2044,13 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${routingKind}" ]]; then
+        if [[ "${routingKind}" == dns &&
+            ( "${routingAction}" == domains_add || "${routingAction}" == domains_remove ) ]]; then
+            jq -e '.routing.dns != null' "${draft}" >/dev/null || {
+                dockerError '请先启用有效的 DNS 分流，再增删域名规则'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        fi
         if [[ "${routingKind}" == warp && "${routingAction}" == warp_* ]]; then
             jq -e '.routing.warp != null' "${draft}" >/dev/null || {
                 dockerError '请先导入有效的 WARP 配置，再修改域名、全局模式或地址族'
@@ -2092,7 +2099,7 @@ dockerEditCommand() {
             jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" '
               (.routing[$kind].domains // []) as $existing |
               if ($domains - $existing | length) != 0 then
-                error("待删除规则必须全部存在于手工 Direct/Block 列表，未提交配置")
+                error("待删除规则必须全部存在于当前所选手工域名名单，未提交配置")
               else
                 .routing[$kind].domains = ($existing - $domains) |
                 if .routing[$kind].domains == [] then del(.routing[$kind]) else . end |

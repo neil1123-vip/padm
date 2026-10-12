@@ -2350,6 +2350,29 @@ CSV 去空白、转小写、按首次出现去重，裸域名补 `domain:`，1�
 静态证据和共享索引保留，不动其它任务原有临时文件；本任务未推送。
 公网、arm64、宿主和可信发布仍待验，不升级完整 `206` 支持状态。
 
+#### 5B.3h.1 已有 DNS 分流域名增删
+
+路由菜单第 28/29 项与 `--dns-domains-add/--dns-domains-remove <CSV>`
+复用域名规范化和 Direct/Block 增删事务，仅操作已有 `.routing.dns.domains`，
+保留服务器、端口、hosts、其它路由和累计流量；未启用 DNS 返回 `15`。
+追加保持历史次序并稳定去重，合并后最多 256 条。删除按完整规范化规则匹配，
+任一缺项整组拒绝，`full:` 与裸域名不等同；删空清除完整 DNS 子项及空 routing。
+缺参、空值、非法 CSV 和专项冲突返回 `2`，不调用 Compose。
+菜单覆盖成功、0/空/EOF、非法输入和失败后继续状态操作。
+不改 schema、能力标记、生成器或解析优先级，不增加全局 DNS、DoH/DoT。
+定向使用 `docker-routing-dns-hosts-workflow` 与 `docker-menu`，再集中完整合同；
+本阶段不重复未变生成器的真实流量矩阵，完整 `206` 状态与宿主/公网/arm64 待验边界保持。
+2026-10-12 Linux amd64 DNS 定向内部 70886 ms、入口 71862 ms，
+菜单 PTY 内部 62611 ms、入口 63624 ms，Jobs 2、exit 0；
+新增 DNS 增量 marker 确认实际执行，独立静态复审无确定缺陷。
+完整合同 48/48、内部 375249 ms、入口 376257 ms，Jobs 6，
+排队 376 ms、cache_hit=false；证据
+`.tmp-regression-docker-d4fa9af616834368b5cdfb8d60ca3559/`。
+两个定向归档同 `6ECC10E4...6539D094`；完整 `6318C7B4...6A94F23B`
+只多 5 个外部新增静态页面，本阶段 10 个代码/合同/文档输入逐文件一致。
+回归后仅更新验收文字与陈旧自动同步说明，保持对应 deferred 状态；
+源码归档/清单清理，日志/result 和 `.tmp-dns-domain-incremental/` 小证据保留。
+
 #### 5B.4a IPv6 域名出站与受管网络
 
 独立 v3 `.routing.ipv6` 保存 `{mode:"selective|global",domains:[...]}`，
