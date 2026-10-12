@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" in
+full|base|transports) ;;
+*)
+    printf 'docker-traditional-tls-regression-fail: unknown scope: %s\n' \
+        "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE}" >&2
+    exit 1
+    ;;
+esac
+if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == base ]]; then
+    # 两个定向分段各验收一次，完整入口仍按原顺序串接全部协议。
+    # shellcheck source=/dev/null
+    source "$(dirname -- "${BASH_SOURCE[0]}")/trojan.sh"
+    printf 'docker-traditional-tls-base-regression-ok\n'
+    exit 0
+fi
+
 # 已验收链只执行一次，补充两种直接 TLS/fallback 入口。
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/grpc-tls.sh"

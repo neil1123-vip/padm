@@ -2,8 +2,14 @@
 set -euo pipefail
 
 # 完整协议基线只串接一次，CI 不重复运行前置入口。
-# shellcheck source=/dev/null
-source "$(dirname -- "${BASH_SOURCE[0]}")/trojan.sh"
+if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == transports ]]; then
+    # 传输分段只初始化共有夹具，基础协议已由互补分段验收。
+    # shellcheck source=/dev/null
+    PADM_DOCKER_TEST_FIXTURE_ONLY=1 source "$(dirname -- "${BASH_SOURCE[0]}")/reality.sh"
+else
+    # shellcheck source=/dev/null
+    source "$(dirname -- "${BASH_SOURCE[0]}")/trojan.sh"
+fi
 IMAGE_DIGEST=$(printf '1%.0s' {1..64})
 export OPS_IMAGE="ghcr.io/example/padm-ops:test@sha256:${IMAGE_DIGEST}"
 dockerConfigureTestFixture

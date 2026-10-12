@@ -59,12 +59,15 @@ listRegressionDockerTlsFocusedChildSelectors() {
 }
 
 listRegressionDockerContractsChildSelectors() {
-    # XHTTP 合同已变成长任务，先调度以减少尾部空等。
+    # XHTTP 分片优先调度，避免长事务排在完整回归尾部。
     printf '%s\n' \
-        docker-xhttp \
+        docker-xhttp-edit \
+        docker-xhttp-rollback \
+        docker-xhttp-validation \
         docker-phase3-edit \
         docker-phase3-entries \
-        docker-traditional-tls \
+        docker-traditional-tls-transports \
+        docker-traditional-tls-base \
         docker-setup-transports \
         docker-setup-encrypted-udp \
         docker-phase4-maintenance \
@@ -75,7 +78,8 @@ listRegressionDockerContractsChildSelectors() {
         docker-reality-targets-direct \
         docker-reality-parameters \
         docker-sites \
-        docker-routing-direct-block-workflow \
+        docker-routing-direct-block-ip-workflow \
+        docker-routing-direct-block-csv-workflow \
         docker-routing-core-policy-lifecycle \
         docker-setup-core \
         docker-phase1 \
@@ -128,13 +132,13 @@ listRegressionDockerContractsFastHeavyChildSelectors() {
 }
 
 listRegressionDockerContractsFastRestChildSelectors() {
-    # 按云端实测长任务优先，将控制状态移到仍有 worker 空位的分片。
+    # 回滚分片与安装合同先启动，避免短任务把长事务推到队尾。
     printf '%s\n' \
+        docker-xhttp-rollback \
         docker-phase1 \
         docker-control-client \
         docker-tproxy-ownership \
         docker-http-relay \
-        docker-xhttp \
         docker-control-cli \
         docker-phase5 \
         docker-fail2ban-ownership \
@@ -152,7 +156,8 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-subscriptions \
         docker-control-api \
         docker-business \
-        docker-phase2
+        docker-phase2 \
+        docker-xhttp-validation
 }
 
 listRegressionDockerContractsSystemChildSelectors() {
@@ -165,11 +170,12 @@ listRegressionDockerContractsRoutingChildSelectors() {
         docker-routing-core-network-lifecycle \
         docker-routing-core-policy-lifecycle \
         docker-routing-dns-hosts-workflow \
-        docker-routing-direct-block-workflow
+        docker-routing-direct-block-ip-workflow \
+        docker-routing-direct-block-csv-workflow
 }
 
 listRegressionDockerContractsProtocolChildSelectors() {
-    printf '%s\n' docker-traditional-tls docker-reality
+    printf '%s\n' docker-traditional-tls-base docker-traditional-tls-transports docker-reality
 }
 
 listRegressionDockerCoreAssessmentChildSelectors() {
@@ -186,11 +192,11 @@ listRegressionDockerContractsRealityChildSelectors() {
 }
 
 listRegressionDockerContractsRealityMetadataChildSelectors() {
-    printf '%s\n' docker-reality-parameters docker-reality-target-library docker-reality-targets-selection
+    printf '%s\n' docker-xhttp-edit docker-reality-parameters docker-reality-targets-selection docker-reality-target-library
 }
 
 listRegressionDockerContractsSetupBasicChildSelectors() {
-    printf '%s\n' docker-setup-core docker-setup-encrypted-tcp
+    printf '%s\n' docker-traditional-tls-base docker-setup-core docker-setup-encrypted-tcp
 }
 
 listRegressionDockerContractsSystemLightChildSelectors() {
@@ -199,6 +205,10 @@ listRegressionDockerContractsSystemLightChildSelectors() {
 
 listRegressionDockerRoutingCoreNetworkChildSelectors() {
     printf '%s\n' docker-routing-core-contracts docker-routing-core-network-lifecycle
+}
+
+listRegressionDockerRoutingDnsCsvChildSelectors() {
+    printf '%s\n' docker-routing-dns-hosts-workflow docker-routing-direct-block-csv-workflow
 }
 
 runDockerTrafficRegression() {
@@ -246,6 +256,26 @@ runDockerXhttpRegression() {
     bash -n "${PROJECT_ROOT}/docker/tests/xhttp.sh"
     shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/xhttp.sh"
     bash "${PROJECT_ROOT}/docker/tests/xhttp.sh"
+}
+
+runDockerXhttpValidationRegression() {
+    PADM_DOCKER_XHTTP_SCOPE=validation runDockerXhttpRegression
+}
+
+runDockerXhttpEditRegression() {
+    PADM_DOCKER_XHTTP_SCOPE=edit runDockerXhttpRegression
+}
+
+runDockerXhttpRollbackRegression() {
+    PADM_DOCKER_XHTTP_SCOPE=rollback runDockerXhttpRegression
+}
+
+runDockerTraditionalTlsBaseRegression() {
+    PADM_DOCKER_TRADITIONAL_TLS_SCOPE=base runDockerTraditionalTlsRegression
+}
+
+runDockerTraditionalTlsTransportsRegression() {
+    PADM_DOCKER_TRADITIONAL_TLS_SCOPE=transports runDockerTraditionalTlsRegression
 }
 
 runDockerXhttpRealRegression() {
@@ -337,6 +367,14 @@ runDockerRoutingDnsHostsWorkflowRegression() {
 
 runDockerRoutingDirectBlockWorkflowRegression() {
     PADM_DOCKER_ROUTING_SCOPE=domains-direct-block bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingDirectBlockIpWorkflowRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=domains-direct-block-ip bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingDirectBlockCsvWorkflowRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=domains-direct-block-csv bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
 runDockerRoutingIPv6Regression() {
@@ -531,6 +569,8 @@ registerRegressionFunctionLeaf docker-vmess runDockerVmessRegression
 registerRegressionFunctionLeaf docker-httpupgrade runDockerHttpupgradeRegression
 registerRegressionFunctionLeaf docker-grpc-tls runDockerGrpcTlsRegression
 registerRegressionFunctionLeaf docker-traditional-tls runDockerTraditionalTlsRegression
+registerRegressionFunctionLeaf docker-traditional-tls-base runDockerTraditionalTlsBaseRegression
+registerRegressionFunctionLeaf docker-traditional-tls-transports runDockerTraditionalTlsTransportsRegression
 registerRegressionFunctionLeaf docker-permissions runDockerPermissionsRegression
 registerRegressionFunctionLeaf docker-tls runDockerTlsRegression
 registerRegressionFunctionLeaf docker-renewal runDockerRenewalRegression
@@ -559,6 +599,9 @@ registerRegressionFunctionLeaf docker-cdn-entries runDockerCdnEntriesRegression
 registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRegression
 registerRegressionFunctionLeaf docker-alpn-real runDockerAlpnRealRegression
 registerRegressionFunctionLeaf docker-xhttp runDockerXhttpRegression
+registerRegressionFunctionLeaf docker-xhttp-validation runDockerXhttpValidationRegression
+registerRegressionFunctionLeaf docker-xhttp-edit runDockerXhttpEditRegression
+registerRegressionFunctionLeaf docker-xhttp-rollback runDockerXhttpRollbackRegression
 registerRegressionFunctionLeaf docker-xhttp-real runDockerXhttpRealRegression
 registerRegressionFunctionLeaf docker-hy2-sites-real runDockerHy2SitesRealRegression
 registerRegressionFunctionLeaf docker-entry-port-alias-real runDockerEntryPortAliasRealRegression
@@ -582,6 +625,8 @@ registerRegressionFunctionLeaf docker-phase4-maintenance runDockerPhase4Maintena
 registerRegressionFunctionLeaf docker-phase4-lifecycle runDockerPhase4LifecycleRegression
 registerRegressionFunctionLeaf docker-routing-dns-hosts-workflow runDockerRoutingDnsHostsWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-direct-block-workflow runDockerRoutingDirectBlockWorkflowRegression
+registerRegressionFunctionLeaf docker-routing-direct-block-ip-workflow runDockerRoutingDirectBlockIpWorkflowRegression
+registerRegressionFunctionLeaf docker-routing-direct-block-csv-workflow runDockerRoutingDirectBlockCsvWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-ipv6 runDockerRoutingIPv6Regression
 registerRegressionFunctionLeaf docker-routing-ipv6-real runDockerRoutingIPv6RealRegression
 registerRegressionFunctionLeaf docker-routing-warp runDockerRoutingWarpRegression
@@ -654,6 +699,8 @@ registerRegressionParallelSelectorList docker-contracts-system-light runFramewor
     "${TMP_DIR}/docker-contracts-system-light-parallel-${BASHPID:-$$}" listRegressionDockerContractsSystemLightChildSelectors 2
 registerRegressionParallelSelectorList docker-routing-core-network runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-routing-core-network-parallel-${BASHPID:-$$}" listRegressionDockerRoutingCoreNetworkChildSelectors 2
+registerRegressionParallelSelectorList docker-routing-dns-csv runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-routing-dns-csv-parallel-${BASHPID:-$$}" listRegressionDockerRoutingDnsCsvChildSelectors 2
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors
 registerRegressionParallelSelectorList fast-only runFrameworkParallelRegressionSelectorList \

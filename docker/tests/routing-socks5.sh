@@ -204,6 +204,8 @@ jq --slurpfile warp "${WARP_INPUT}" '.routing.warp = ($warp[0] | .mode="global" 
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-csv &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-network-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
@@ -1540,7 +1542,12 @@ selectiveDomainsIncrementalCheck() {
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerAcquireDeploymentLock
-    dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+    # CSV 定向入口直接安装 IP 段结束后的组合夹具，保留原 TLS 和非空流量。
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == domains-direct-block-csv ]]; then
+        dockerConfigureApply "${TEST_ROOT}/routing-ip-policy.json" '' '' configure
+    else
+        dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+    fi
 ) >"${LOG}" 2>&1 || fail '初始化路由夹具失败'
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
@@ -1548,7 +1555,9 @@ jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
 # 域名工作流保留非空流量和原事务断言，只跳过其它能力的生命周期。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts &&
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-csv ]]; then
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
 # 中继交接恢复只 stop 部分服务，没有 Compose down，仍须清理 IPv6→off 的空辅助网络。
 (
@@ -2438,7 +2447,9 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
 fi
 
 # 路由子项共用私有文件与候选事务，每次编辑只替换自己的字段。
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-csv ]]; then
 before=$(snapshot)
 for kind in dns hosts direct block block-ips; do
     input="${PRIVATE_ROOT}/${kind}.json"
@@ -2750,6 +2761,7 @@ jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].d
 fi
 # Direct/Block 沿用相同事务，同时验证同域规则允许共存并保留其它路由子项。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-csv ]]; then
 before=$(snapshot)
 composeBefore=$(cat "${COMPOSE_LOG}")
 for kind in direct block; do
@@ -2803,7 +2815,7 @@ jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile ac
     '$actual == $expected' >/dev/null || fail 'IP 追加未创建缺失名单或改变已有子项'
 [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
     fail 'IP 阻断规格未保留私有权限'
-# 此段同样由 domains-direct-block 执行，不依赖上方被定向入口跳过的旧输入矩阵。
+# 此段同样由 Direct/Block 的 IP 定向入口执行，不依赖上方被跳过的旧输入矩阵。
 ipAdded='["192.0.2.10","2001:db8::10","198.51.100.0/24","2001:db8::/64","geoip:cn","2001:DB8::10","2001:db8:0:0:0:0:0:10","198.51.100.17/24","203.0.113.9"]'
 ipRemaining='["192.0.2.10","2001:db8::/64","geoip:cn","2001:DB8::10","2001:db8:0:0:0:0:0:10","198.51.100.17/24","203.0.113.9"]'
 printf '%s\n' '{"ips":["192.0.2.10","2001:DB8::10","2001:db8:0:0:0:0:0:10","198.51.100.17/24","203.0.113.9"]}' \
@@ -2993,6 +3005,8 @@ jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" \
     --slurpfile actual "${root}/config/spec.json" '$actual==$expected' >/dev/null ||
     fail 'IP 增量合同结束没有恢复原路由夹具'
 printf 'docker-routing-block-ips-incremental-regression-ok\n'
+fi
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip ]]; then
 # CSV 是整组替换；其它子项、核心身份、分享内容与累计流量保持原样。
 csvReplacement=' geosite:CN , KEYWORD:Next_Video , Full:New.Example.ORG , New.Example.NET , full:new.example.org '
 csvReplacementDomains='["geosite:cn","keyword:next_video","full:new.example.org","domain:new.example.net"]'
@@ -3198,8 +3212,11 @@ jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/
 runStatus 0
 jq -e 'has("block_ips") | not' "${LOG}" >/dev/null || fail 'IP 阻断关闭仍显示有效规则'
 fi
+fi
 
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-csv ]]; then
 menuLog="${TEST_ROOT}/routing-menu.log"
 (
     dockerMenuRun() { printf '%s\n' "$*" >>"${menuLog}"; }

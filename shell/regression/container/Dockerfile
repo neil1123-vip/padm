@@ -8,25 +8,14 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     && apt-get -o Acquire::Retries=3 -o Acquire::https::CAInfo=/etc/ssl/certs/ca-certificates.crt update \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::CAInfo=/etc/ssl/certs/ca-certificates.crt install -y --no-install-recommends \
     bash ca-certificates coreutils cron curl diffutils findutils gawk git grep gzip iproute2 iptables \
-    nftables nodejs openssl procps python3 python-is-python3 python3-jsonschema sed shellcheck tar \
+    fail2ban gcc libc6-dev nftables nginx nodejs openssl procps python3 python-is-python3 \
+    python3-h2 python3-jsonschema python3-yaml sed shellcheck tar \
     unzip util-linux wget wireguard-tools xz-utils \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 COPY --from=docker-daemon /usr/local/bin/dockerd /usr/local/bin/containerd /usr/local/bin/containerd-shim-runc-v2 /usr/local/bin/ctr /usr/local/bin/runc /usr/local/bin/docker-init /usr/local/bin/docker-proxy /usr/local/bin/
 COPY --from=jq /jq /usr/local/bin/jq
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends nginx \
-    && rm -rf /var/lib/apt/lists/*
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends gcc libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends fail2ban \
-    && rm -rf /var/lib/apt/lists/*
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends python3-h2 python3-yaml \
-    && rm -rf /var/lib/apt/lists/*
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-regression
 
 WORKDIR /work

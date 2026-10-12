@@ -259,11 +259,12 @@ runRegressionDockerContractsAggregateContract() (
     local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
     local status=0 selector
     local -a expectedSelectors=(
-        docker-xhttp
-        docker-phase3-edit docker-phase3-entries docker-traditional-tls docker-setup-transports docker-setup-encrypted-udp
+        docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
+        docker-phase3-edit docker-phase3-entries docker-traditional-tls-transports docker-traditional-tls-base
+        docker-setup-transports docker-setup-encrypted-udp
         docker-phase4-maintenance docker-routing-core-network-lifecycle docker-reality docker-setup-tls docker-phase4-lifecycle
         docker-reality-targets-direct docker-reality-parameters docker-sites
-        docker-routing-direct-block-workflow docker-routing-core-policy-lifecycle
+        docker-routing-direct-block-ip-workflow docker-routing-direct-block-csv-workflow docker-routing-core-policy-lifecycle
         docker-setup-core docker-phase1 docker-menu docker-setup-encrypted-tcp
         docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
         docker-cdn-entries docker-fail2ban-ownership docker-control-state
@@ -332,7 +333,7 @@ runRegressionDockerContractsAggregateContract() (
         printf '%s\n' "$@" >"${callLog}"
     }
     for selector in docker-contracts-reality-metadata docker-contracts-setup-basic \
-        docker-contracts-system-light docker-routing-core-network; do
+        docker-contracts-system-light docker-routing-core-network docker-routing-dns-csv; do
         : >"${callLog}"
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
         : >"${expectedLog}"
@@ -397,12 +398,26 @@ runRegressionDockerContractsAggregateContract() (
     runDockerRoutingCorePolicyLifecycleRegression
     runDockerRoutingDnsHostsWorkflowRegression
     runDockerRoutingDirectBlockWorkflowRegression
+    runDockerRoutingDirectBlockIpWorkflowRegression
+    runDockerRoutingDirectBlockCsvWorkflowRegression
     printf '%s\n' full:routing-socks5.sh core-workflow:routing-socks5.sh \
         domains-workflow:routing-socks5.sh core-contracts:routing-socks5.sh \
         core-lifecycle:routing-socks5.sh core-network-lifecycle:routing-socks5.sh \
         core-policy-lifecycle:routing-socks5.sh domains-dns-hosts:routing-socks5.sh \
-        domains-direct-block:routing-socks5.sh >"${expectedLog}"
+        domains-direct-block:routing-socks5.sh domains-direct-block-ip:routing-socks5.sh \
+        domains-direct-block-csv:routing-socks5.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+    [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" ]]
+
+    bash() { printf '%s:%s\n' "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
+    : >"${callLog}"
+    unset PADM_DOCKER_TRADITIONAL_TLS_SCOPE
+    runDockerTraditionalTlsRegression
+    runDockerTraditionalTlsBaseRegression
+    runDockerTraditionalTlsTransportsRegression
+    printf '%s\n' full:traditional-tls.sh base:traditional-tls.sh transports:traditional-tls.sh >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+    [[ -z "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-}" ]]
 
     bash() { printf '%s:%s\n' "${PADM_DOCKER_PHASE3_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
     : >"${callLog}"
@@ -423,17 +438,22 @@ runRegressionDockerContractsAggregateContract() (
     printf '%s\n' full:phase4.sh maintenance:phase4.sh lifecycle:phase4.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
 
-    # 合同进入完整集合，真实链路继续使用独立入口。
+    # 新旧 XHTTP 入口必须传递独立 scope，不能污染后续真实链路。
     : >"${callLog}"
     bash() {
         [[ "$1" != -n ]] || return 0
-        printf '%s\n' "${1##*/}" >>"${callLog}"
+        printf '%s:%s\n' "${PADM_DOCKER_XHTTP_SCOPE:-full}" "${1##*/}" >>"${callLog}"
     }
     shellcheck() { :; }
+    unset PADM_DOCKER_XHTTP_SCOPE
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-validation
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-edit
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-rollback
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-real
-    printf '%s\n' xhttp.sh xhttp-real.sh >"${expectedLog}"
+    printf '%s\n' full:xhttp.sh validation:xhttp.sh edit:xhttp.sh rollback:xhttp.sh full:xhttp-real.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+    [[ -z "${PADM_DOCKER_XHTTP_SCOPE:-}" ]]
 
     : >"${callLog}"
     python3() { printf '%s\n' "${*}" >>"${callLog}"; }

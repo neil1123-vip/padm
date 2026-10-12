@@ -28,7 +28,7 @@ jobs:
           - docker-phase3-edit
           - docker-phase3-entries
           - docker-reality-targets-direct
-          - docker-traditional-tls
+          - docker-traditional-tls-transports
           - docker-setup-transports
           - docker-contracts-fast-heavy
           - docker-phase4-maintenance
@@ -38,8 +38,8 @@ jobs:
           - docker-contracts-reality-metadata
           - docker-reality
           - docker-setup-tls
-          - docker-routing-direct-block-workflow
-          - docker-routing-dns-hosts-workflow
+          - docker-routing-direct-block-ip-workflow
+          - docker-routing-dns-csv
           - docker-routing-core-policy-lifecycle
           - docker-routing-core-network
     steps:
@@ -51,11 +51,24 @@ jobs:
       - name: Install pinned jq
         if: ${{ !startsWith(matrix.selector, 'docker-contracts-fast-') && !startsWith(matrix.selector, 'docker-routing-') }}
         run: sudo bash shell/regression/install-ci-jq.sh
+      - name: Cache contract tools
+        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')
+        uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/padm-contract-tools.tar
+          key: padm-contract-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('shell/regression/container/**') }}
       - name: Prepare control and site contract tools
         if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')
         shell: bash
         run: |
-          docker build --tag padm-regression:contracts shell/regression/container
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/padm-contract-tools.tar"
+          if [[ -f "${tools}" ]]; then
+            docker load --input "${tools}"
+          else
+            docker build --tag padm-regression:contracts shell/regression/container
+            docker save --output "${tools}" padm-regression:contracts
+          fi
       - name: Run contract shard
         shell: bash
         env:

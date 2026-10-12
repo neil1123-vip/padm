@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+XHTTP_SCOPE=${PADM_DOCKER_XHTTP_SCOPE:-full}
+case "${XHTTP_SCOPE}" in
+full|validation|edit|rollback) ;;
+*) printf 'docker-xhttp-regression: unknown scope: %s\n' "${XHTTP_SCOPE}" >&2; exit 1 ;;
+esac
+
 # 复用可信发布和生产事务夹具，不重复祖先协议矩阵。
 export PADM_DOCKER_TEST_FIXTURE_ONLY=1
 # shellcheck source=/dev/null
@@ -30,6 +36,7 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg account "${ACCOUNT}" \
 chmod 0600 "${XHTTP_SPEC}"
 dockerConfigureSpecValidate "${XHTTP_SPEC}" || fail 'XHTTP 共享账号、双入口发布夹具无效'
 
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == validation ]]; then
 # Schema 负责形状，生产校验额外拒绝范围反转和字符串数值溢出。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy
@@ -146,7 +153,10 @@ for spec in "${XHTTP_SPEC}" "${TEST_ROOT}/case-defaults.json" "${TEST_ROOT}/case
     dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${spec}" ||
         fail '缺 Header 能力的旧包误拒原 XHTTP/XMUX/Padding 子集'
 done
+fi
 
+if [[ "${XHTTP_SCOPE}" != validation ]]; then
+# 发布与回滚分片各自创建含 TLS、共享组和累计流量的完整部署基线。
 newState xhttp "${XHTTP_SPEC}"
 root=${PADM_DOCKER_INSTALL_DIR}
 dockerSubscriptionStateWrite "${root}/config/share-groups.json" \
@@ -278,6 +288,7 @@ PY
 }
 
 defaults='{"maxConcurrency":"16-32","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}'
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit ]]; then
 runRead 0 xhttp-all-status dockerProtocolCommand xhttp-status
 jq -e '.entries | length == 2 and all(.[]; .explicit == false)' "${STDOUT}" >/dev/null
 for preset in daily compatible stream single; do
@@ -343,6 +354,9 @@ xhttpAssert auto null
 cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" &&
     cmp -s "${TEST_ROOT}/group-before.txt" "${root}/data/subscription/xhttp-group-token" ||
     fail '清除 Header 没有恢复缺省 URI 和分享组'
+fi
+
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == rollback ]]; then
 for listener in entry-missing vless-reality entry-grpc-sing; do
     runRead 15 "unsupported-${listener}" dockerProtocolCommand xhttp-status "${listener}"
     xhttpEdit 15 unchanged --xhttp-preset "${listener}" daily --preview
@@ -506,4 +520,6 @@ jq -e '.entries == []' "${STDOUT}" >/dev/null || fail '没有 XHTTP 入口时状
 xhttpEdit 15 unchanged --xhttp-xmux-clear vless-reality --preview
 xhttpEdit 15 unchanged --xhttp-padding-clear vless-reality --preview
 xhttpEdit 15 unchanged --xhttp-headers-clear vless-reality --preview
+fi
+fi
 printf 'docker-xhttp-regression-ok\n'
