@@ -1424,7 +1424,7 @@ dockerEditCommand() {
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local routingServer= routingPort=
     local routingDomains='[]' routingOldDomains='[]' routingDomainsField=domains
-    local routingOldIp= routingNewIp=
+    local routingOldIp= routingNewIp= routingHost=
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
     local cdnAction= cdnListener= cdnAddresses=
@@ -1558,6 +1558,15 @@ dockerEditCommand() {
                 -n "$3" && "$3" != --* && "$3" != *,* && "$3" != geoip:* &&
                 -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             routingKind=block_ips routingAction=ips_replace routingOldIp=$2 routingNewIp=$3
+            shift 3
+            ;;
+        --hosts-replace)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && "$2" != *[[:space:]]* &&
+                -n "$3" && "$3" != --* && "$3" != *[[:space:]]* &&
+                -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            routingHost=$(jq -nr --arg host "$2" '$host | ascii_downcase') ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=hosts routingAction=host_replace routingNewIp=$3
             shift 3
             ;;
         --http-relay)
@@ -2224,7 +2233,24 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${routingKind}" ]]; then
-        if [[ "${routingAction}" == ips_replace ]]; then
+        if [[ "${routingAction}" == host_replace ]]; then
+            # 用临时完整规格复用精确域名与可路由字面地址校验，不扩展 hosts 合同。
+            jq --arg host "${routingHost}" --arg ip "${routingNewIp}" \
+                '.routing.hosts = {($host):$ip}' \
+                "${draft}" >"${workspace}/hosts_input.json" &&
+                chmod 0600 "${workspace}/hosts_input.json" ||
+                return "${PADM_DOCKER_RC_STATE}"
+            dockerConfigureSpecValidate "${workspace}/hosts_input.json" || {
+                dockerError 'hosts 单项替换只接受精确域名和单个可路由字面 IPv4/IPv6，未提交配置'
+                return "${PADM_DOCKER_RC_USAGE}"
+            }
+            jq -e --arg host "${routingHost}" '
+              .routing.hosts | type == "object" and has($host)
+            ' "${draft}" >/dev/null || {
+                dockerError 'hosts 单项替换要求该精确域名已存在，不能新增映射或启用 hosts'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        elif [[ "${routingAction}" == ips_replace ]]; then
             # 仅临时校验输入去重，同值留给状态检查；实际名单保留字面值和次序。
             jq --arg old "${routingOldIp}" --arg new "${routingNewIp}" \
                 '.routing.block_ips = {ips:([$old,$new] | unique)}' \
@@ -2308,6 +2334,12 @@ dockerEditCommand() {
         elif [[ "${routingKind}" == ipv6 && "${routingAction}" == enable ]]; then
             jq --arg mode "${ipv6Mode}" --argjson domains "${ipv6Domains}" \
                 '.routing.ipv6 = {mode:$mode,domains:$domains}' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == host_replace ]]; then
+            jq --arg host "${routingHost}" --arg ip "${routingNewIp}" '
+              if .routing.hosts[$host] == $ip then
+                error("hosts 新地址不能与当前地址相同，未提交配置")
+              else .routing.hosts[$host] = $ip end
+            ' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == domains_replace ]]; then
             jq --arg kind "${routingKind}" --arg field "${routingDomainsField}" --argjson old "${routingOldDomains}" \
                 --argjson domains "${routingDomains}" '
@@ -2546,6 +2578,7 @@ dockerEditCommand() {
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
         --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
         --arg routing_action "${routingAction}" --arg routing_domains_field "${routingDomainsField}" \
+        --arg routing_host "${routingHost}" \
         --arg http_relay "${httpRelay}" \
         --arg port_alias "${portAlias}" \
         --arg cdn_listener "${cdnListener}" \
@@ -2637,6 +2670,8 @@ dockerEditCommand() {
            ($new | del(.routing[$routing_kind][$routing_domains_field]))
         elif $routing_action == "ips_replace" then
          ($old | del(.routing.block_ips.ips)) == ($new | del(.routing.block_ips.ips))
+        elif $routing_action == "host_replace" then
+         ($old | del(.routing.hosts[$routing_host])) == ($new | del(.routing.hosts[$routing_host]))
        elif $routing_kind == "warp" and ($routing_action | startswith("warp_")) then
         def without_warp_edit:
           if $routing_action == "warp_family" then del(.routing.warp.family)

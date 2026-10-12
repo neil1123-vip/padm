@@ -1424,6 +1424,26 @@ padm-docker edit --dns-domains-add 'full:updates.example.net' --preview
 padm-docker edit --dns-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 ```
 
+Menu `17`, option `37`, and `edit --hosts-replace <existing exact FQDN> <new literal IP>`
+replace one existing hosts value. They do not add, remove or edit mappings in batches.
+Only ASCII letters in the key are lowercased; whitespace is not trimmed. The address
+is kept verbatim, including IPv6 spelling and case. Whitespace, a trailing newline,
+CSV, domain-rule prefixes and invalid addresses return `2`; a missing key, disabled
+hosts or an identical address string returns `15`. Only the selected value may change;
+other mappings, routing and the full configuration are frozen. Share URIs, subscriptions
+and cumulative traffic are retained. Status is shown before either menu input; failed
+status, blank input, `0` and EOF cancel. The CLI confirms once and reuses the existing
+preview, candidate and health-failure/signal recovery transaction.
+Private JSON full-map import through `--hosts` remains available. No schema, capability
+marker, host privilege or state is added. This is a limited management enhancement;
+complete native hosts migration remains deferred. The focused DNS/hosts and menu
+contracts and integrated Docker contracts pass (49/49).
+
+```bash
+padm-docker edit --hosts-replace Exact.Example.NET 2001:0DB8::10 --preview
+padm-docker edit --hosts-replace exact.example.net 192.0.2.11 --confirm PADM-DOCKER-EDIT
+```
+
 Existing DNS, Direct, Block, selective IPv6 and selective WARP domain lists support
 single-rule replacement. Menu `17`, options `30/31/32`, handles DNS/Direct/Block;
 IPv6 option `7` and WARP option `10` handle their existing selective lists. Each shows

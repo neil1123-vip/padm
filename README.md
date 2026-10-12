@@ -322,6 +322,14 @@ DNS 分流的域名名单，保留原服务器和端口。追加保留历史顺�
 hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–256 个小写精确域名，
 每个域名对应一个可路由字面 IPv4/IPv6；不支持 hosts 后缀、关键字或分类匹配。
 地址示例不可直接用作服务器；文件安全要求与 SOCKS5 输入相同。
+菜单 `17 → 37` 与 `edit --hosts-replace <已有精确 FQDN> <新单字面 IP>` 可替换已有
+hosts 的一个地址，不新增、删除或批量编辑映射。域名只将 ASCII 字母转小写，不去空白；
+IP 保留原文，包括 IPv6 大小写和写法。空白、末尾换行、CSV、域名规则前缀或非法地址返回 `2`；
+缺键、未启用 hosts 或地址原文同值返回 `15`。只豁免目标键的值，其它 hosts、路由和完整配置冻结，
+分享 URI、订阅及累计流量保持；预览、确认和健康失败/信号恢复复用原事务。
+菜单先显示状态，状态失败不读输入，空值、`0` 或 EOF 取消；独立 CLI 只确认一次。
+原 `--hosts <私有 JSON>` 整组入口保持，不新增 schema、marker、权限或状态。
+这是有限管理增强，不代表原生 hosts 完整迁移；DNS/hosts 定向与菜单已通过，集中完整 49 项回归通过。
 
 ```bash
 padm-docker edit --dns /root/padm-dns.json --preview
@@ -330,6 +338,8 @@ padm-docker edit --dns-rules 192.0.2.53 53 'example.net,full:exact.example.org' 
 padm-docker edit --dns-domains-add 'full:updates.example.net' --preview
 padm-docker edit --dns-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts /root/padm-hosts.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --hosts-replace Exact.Example.NET 2001:0DB8::10 --preview
+padm-docker edit --hosts-replace exact.example.net 192.0.2.11 --confirm PADM-DOCKER-EDIT
 padm-docker edit --dns-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-off --confirm PADM-DOCKER-EDIT
 ```

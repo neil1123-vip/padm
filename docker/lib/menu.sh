@@ -920,7 +920,8 @@ dockerMenuRouting() {
             '29. 精确删除 DNS 分流域名' '30. 单条替换 DNS 分流域名' \
             '31. 单条替换 Direct 直连例外' '32. 单条替换 Block 域名阻断' \
             '33. 单条替换 IP/CIDR 阻断' '34. 追加 SOCKS5 域名规则' \
-            '35. 精确删除 SOCKS5 域名规则' '36. 单条替换 SOCKS5 域名规则' '0. 返回'
+            '35. 精确删除 SOCKS5 域名规则' '36. 单条替换 SOCKS5 域名规则' \
+            '37. 单项替换 hosts 地址' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1044,6 +1045,14 @@ dockerMenuRouting() {
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --socks5-domains-remove "${input}" || true
             fi
+            ;;
+        37)
+            dockerMenuRun protocol routing-status || continue
+            dockerSetupRead oldRule '已有 hosts 精确域名（0 返回）: ' &&
+                [[ -n "${oldRule}" ]] &&
+                dockerSetupRead newRule '新 hosts IPv4/IPv6（单个字面地址，0 返回）: ' &&
+                [[ -n "${newRule}" ]] || continue
+            dockerMenuRun edit --hosts-replace "${oldRule}" "${newRule}" || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

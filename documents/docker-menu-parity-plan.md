@@ -2790,7 +2790,8 @@ PTY 复用六类域名替换模板，覆盖成功、双侧取消/EOF、非法格
 入口 97762 ms、排队 4728 ms、Jobs 2，复用工具镜像、cache_hit=false；
 证据 `.tmp-regression-docker-8a929fa1f2c14bafad161ca5548127be/`。
 待办调度器合同 exit 0，内部 536 ms、入口 1674 ms、Jobs 2。
-集中完整回归在下个名单管理子项集成后统一运行；完整区域策略、其它规则编辑、完整冲突检测、
+本阶段已随 5B.4h 集成完成集中完整回归，49/49 通过，证据和耗时见下节；
+完整区域策略、其它规则编辑、完整冲突检测、
 公网、原生宿主/arm64 和可信发布仍 deferred，总目标 active。
 
 #### 5B.4h 已有 SOCKS5 域名名单增删与单条替换
@@ -2823,6 +2824,41 @@ queue 62338 ms、Jobs 6、cache_hit=false；工具内容 SHA256 与定向相同�
 证据 `.tmp-regression-docker-ba35b528fd874ecb9c28e01e667a60e1/`；
 本阶段 10 个暂存文件逐字节匹配完整回归快照，之后仅补验收文字。
 完整区域策略、其它规则编辑、完整冲突检测、
+公网、原生宿主/arm64 和可信发布仍 deferred，总目标 active。
+
+#### 5B.4i 已有 hosts 单键地址替换
+
+菜单 `17 → 37` 与 `edit --hosts-replace <已有精确 FQDN> <新单字面 IP>` 只管理
+已有 `.routing.hosts` 键的一个值，不新增、删除或批量编辑映射。key 只将 ASCII 字母
+转小写，不去空白；IP 保留原文，包括 IPv6 大小写和写法。空白、末尾 LF、CSV、
+域名规则前缀和坏地址返回 `2`；缺键、未启用 hosts 和新旧地址原文同值返回 `15`。
+复用完整规格的精确域名/可路由字面 IPv4/IPv6 校验，只豁免目标键的值，
+其它 hosts 键、路由、完整配置、分享 URI、订阅与非空累计流量冻结。
+
+菜单先显示状态，状态失败不读输入，两个输入的空值、0/EOF 均取消；
+独立 CLI 只确认一次。原 `--hosts <root 私有 JSON>` 整组入口保持，
+复用候选/预览/确认、双核心生成器及健康失败、INT/TERM 恢复事务；
+不扩 hosts 解析语义，不新增 schema、marker、权限、监听或状态。
+这是有限管理增强，不能当作原生 hosts 完整迁移或提升整体 `deferred` 状态。
+
+Linux amd64 DNS/hosts 定向 `docker-routing-dns-hosts-workflow` exit 0，
+内部 108214 ms、入口 109337 ms；菜单 PTY exit 0，内部 102772 ms、入口 103950 ms。
+两项均 Jobs 2、cache_hit=false，复用工具镜像，源码 SHA256 `92BAF66F...24523` 相同。
+证据 `.tmp-regression-docker-a8c4290954224618901647866f10f961/` 与
+`.tmp-regression-docker-d3013608ffa24ed281843d9728e324dc/`。
+复审发现 Bash Unicode 小写会把 Kelvin 符号变成 ASCII `k`，已改用
+`jq ascii_downcase` 并补非 ASCII 域名拒绝断言。修正版 DNS/hosts 定向 exit 0，
+内部 124086 ms、入口 125425 ms、排队 241 ms、Jobs 2、cache_hit=false；
+证据 `.tmp-regression-docker-a8bbdb43044d40159434203edcbb4b49/`。
+合同覆盖参数/互斥和精确拒绝码、IPv4/IPv6 原文替换、两核心仅目标值变更、
+完整配置/URI/非空累计保持、预览不写和健康失败/INT/TERM 恢复；
+PTY 覆盖分发、双侧取消/EOF、非法输入、状态/前置失败、确认取消/EOF 与提交失败后继续诊断。
+集中 `docker-contracts` 49/49 exit 0，内部 560303 ms、入口 561363 ms，
+排队 182560 ms、Jobs 6、cache_hit=false，工具内容摘要与定向一致；
+证据 `.tmp-regression-docker-a000fe9083874c6fa74e723ab3b08f87/`。
+该快照早于外来 CI 拆分提交 `218dde98`；生产文件与 hosts 专项断言匹配，
+新测试调度随下一阶段集中验证，不把旧快照当作新调度证据。
+其余名单管理、完整区域/冲突检测、
 公网、原生宿主/arm64 和可信发布仍 deferred，总目标 active。
 
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复

@@ -2594,8 +2594,9 @@ for action in add remove; do
     runEdit 2 "${option}" "${DNS_CSV}" "${option}" 'example.net' --preview
 done
 runEdit 15 --dns-domains-replace 'dns.example.net' 'replacement.example.org' --confirm PADM-DOCKER-EDIT
+runEdit 15 --hosts-replace Exact.Example.Com 203.0.113.11 --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
-    fail 'DNS 未启用增删或无效参数改变部署或调用 Compose'
+    fail 'DNS/hosts 未启用管理或无效参数改变部署或调用 Compose'
 runEdit 0 --dns-rules 203.0.113.53 05353 "${DNS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
     --argjson dns "${DNS}" '$new[0] == ($old[0] + {routing:{dns:$dns}})' >/dev/null ||
@@ -2662,6 +2663,110 @@ runEdit 0 --socks5 "${DOMAINS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-all.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '开启 SOCKS5 丢弃 DNS/hosts'
 domainsReplaceCheck dns
+# hosts 单键替换复用已有组合夹具，保留其它映射、路由、私有字段与非空流量。
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/hosts-replace-resume.json"
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/warp-owner.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '初始化 hosts 替换组合夹具失败'
+assertClean
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/hosts-replace.before"
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 2 --hosts-replace
+runEdit 2 --hosts-replace exact.example.com --preview
+runEdit 2 --hosts-replace '' 203.0.113.11 --preview
+runEdit 2 --hosts-replace exact.example.com '' --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --confirm invalid
+for host in 'regexp:bad' 'full:exact.example.com' 'domain:exact.example.com' \
+    'exact.example.com,ipv6.example.com' 'exact.example.com.' '-bad.example.com' \
+    'exact example.com' ' exact.example.com' $'exact.example.com\n' $'\u212A.example.com'; do
+    runEdit 2 --hosts-replace "${host}" 203.0.113.11 --preview
+done
+for address in 127.0.0.1 0.0.0.0 169.254.1.1 224.0.0.1 203.0.113.999 203.0.113.011 \
+    203.0.113.11/32 resolver.example.com host.docker.internal ::1 fe80::10 \
+    2001:db8::1::10 '[2001:db8::10]' '2001:db8::10%eth0' '203.0.113.11,203.0.113.12' \
+    $'203.0.113.11\n' $'2001:db8::10\n'; do
+    runEdit 2 --hosts-replace exact.example.com "${address}" --preview
+done
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --hosts-replace ipv6.example.com 203.0.113.12 --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --hosts "${HOSTS_INPUT}" --preview
+runEdit 2 --hosts "${HOSTS_INPUT}" --hosts-replace exact.example.com 203.0.113.11 --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --hosts-off --preview
+runEdit 2 --hosts-off --hosts-replace exact.example.com 203.0.113.11 --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --dns-off --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --socks5-off --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --warp-global --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --ipv6 global --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --spec "${TEST_ROOT}/hosts-replace.before" --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --http01 enable --preview
+runEdit 2 --hosts-replace exact.example.com 203.0.113.11 --http-relay-off --preview
+runEdit 15 --hosts-replace missing.example.com 203.0.113.11 --confirm PADM-DOCKER-EDIT
+runEdit 15 --hosts-replace Exact.Example.Com 203.0.113.10 --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'hosts 替换参数、格式、缺键或同值拒绝改变部署或调用 Compose'
+runEdit 0 --hosts-replace Exact.Example.Com 203.0.113.11 --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'hosts 替换预览改变完整部署'
+# 本动作只分配三次故障，分别证明健康失败、INT 和 TERM 的完整恢复。
+for failure in health-fail int term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    expected=14
+    [[ "${failure}" != int ]] || expected=130
+    [[ "${failure}" != term ]] || expected=143
+    runEdit "${expected}" --hosts-replace Exact.Example.Com 203.0.113.11 --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] ||
+        fail "${failure}: hosts 单键替换未恢复完整规格、私有字段、运行配置与非空流量"
+done
+MODE=ok
+for core in xray sing-box; do
+    cp -- "${root}/config/${core}/config.json" "${TEST_ROOT}/hosts-replace-${core}.before"
+done
+(dockerMain protocol links) >"${TEST_ROOT}/hosts-replace-links.before"
+hostsReplaceDataBefore=$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)
+for address in 203.0.113.11 2001:0DB8::10; do
+    runEdit 0 --hosts-replace Exact.Example.Com "${address}" --confirm PADM-DOCKER-EDIT
+    jq -en --arg ip "${address}" --slurpfile old "${TEST_ROOT}/hosts-replace.before" \
+        --slurpfile actual "${root}/config/spec.json" '
+      $actual[0] == ($old[0] | .routing.hosts["exact.example.com"]=$ip)
+    ' >/dev/null || fail 'hosts 单键替换未小写域名、保留地址原文或改写其它完整规格'
+    runStatus 0
+    jq -e --arg ip "${address}" --slurpfile old "${TEST_ROOT}/hosts-replace.before" '
+      .hosts == ($old[0].routing.hosts | .["exact.example.com"]=$ip)
+    ' "${LOG}" >/dev/null || fail 'hosts 单键替换状态改变其它映射或地址原文'
+    for core in xray sing-box; do
+        jq -en --arg core "${core}" --arg ip "${address}" \
+            --slurpfile old "${TEST_ROOT}/hosts-replace-${core}.before" \
+            --slurpfile actual "${root}/config/${core}/config.json" '
+          if $core=="xray" then
+            $actual[0] == ($old[0] | .dns.hosts["full:exact.example.com"]=$ip)
+          else
+            $actual[0] == ($old[0] | .dns.servers |= map(
+              if .tag=="padm-hosts" then .predefined["exact.example.com"]=$ip else . end))
+          end
+        ' >/dev/null || fail "${core}: hosts 替换生成未仅修改目标地址"
+    done
+    (dockerMain protocol links) >"${TEST_ROOT}/hosts-replace-links.after"
+    cmp -s "${TEST_ROOT}/hosts-replace-links.before" "${TEST_ROOT}/hosts-replace-links.after" &&
+        [[ "$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)" == "${hostsReplaceDataBefore}" ]] ||
+        fail 'hosts 单键替换改变分享 URI、订阅或累计流量'
+done
+runEdit 0 --hosts-replace Exact.Example.Com 203.0.113.10 --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/hosts-replace.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$old' >/dev/null || fail 'hosts 反向替换未还原原组合规格'
+for core in xray sing-box; do
+    cmp -s "${TEST_ROOT}/hosts-replace-${core}.before" "${root}/config/${core}/config.json" ||
+        fail "${core}: hosts 反向替换未精确恢复原生成"
+done
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/hosts-replace-resume.json" '' '' configure
+) >"${LOG}" 2>&1 || fail 'hosts 替换合同未恢复原 DNS/hosts 流程'
+assertClean
+printf 'docker-routing-hosts-replace-regression-ok\n'
 # dns-hosts 定向入口执行这组增量事务，不重复已有 DNS 生成器和真实 UDP 矩阵。
 dnsAddCsv=' GEOSITE:CN , Full:DNS.Example.COM , DNS.Example.NET , Full:Added.Example.ORG , Added.Example.ORG , KEYWORD:Next_DNS , full:added.example.org '
 dnsAdded='["full:dns.example.com","domain:dns.example.net","keyword:dns-video","geosite:cn","full:added.example.org","domain:added.example.org","keyword:next_dns"]'
