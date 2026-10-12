@@ -2793,6 +2793,38 @@ PTY 复用六类域名替换模板，覆盖成功、双侧取消/EOF、非法格
 集中完整回归在下个名单管理子项集成后统一运行；完整区域策略、其它规则编辑、完整冲突检测、
 公网、原生宿主/arm64 和可信发布仍 deferred，总目标 active。
 
+#### 5B.4h 已有 SOCKS5 域名名单增删与单条替换
+
+`edit --socks5-domains-add/remove <CSV>` 和
+`--socks5-domains-replace <旧规则> <新规则>` 仅管理已有非空 selective
+`.routing.socks5.domains`；未启用、global 或空名单拒绝。追加复用四类
+域名规范化与稳定去重，合并最多 256 条；删除按完整规范化规则匹配，
+任一缺项整批拒绝，保留剩余次序。单条替换拒绝 CSV、缺旧、重复新与
+同值，完整匹配旧项并保留原位置。非空动作只改 domains，
+server/port/username/password 和其它路由、完整配置冻结。
+
+删空只允许 remove 关闭整个 SOCKS5，清理空 routing，保留其它策略；
+重新启用须导入私有凭据，不自动转为 global。原整组替换/global 入口保持。
+菜单 `17` 追加 `34/35/36`，先显示状态，状态失败不读输入，
+空输入、0/EOF 取消，独立 CLI 只确认一次；删除提示明确删空关闭和重新导入。
+复用双核心生成器、既有候选/预览/确认、累计数据保护及健康/信号恢复事务，
+不新增 schema、marker、依赖、监听端口或宿主权限。
+Linux amd64 定向 `docker-routing-core-policy-lifecycle` exit 0，内部 130186 ms、
+入口 131295 ms；最新菜单 PTY exit 0，内部 103186 ms、入口 104558 ms；
+两项均 Jobs 2、cache_hit=false，复用工具镜像，源码快照 SHA256 一致。
+证据 `.tmp-regression-docker-caa4daf16cea43119063cde4f0c56e9d/` 与
+`.tmp-regression-docker-ac45b05ab0804d179f9c69a2a880d525/`；
+Bash、ShellCheck error 与 JSON 静态检查通过。
+首轮合同误断言删空后总 routing enabled=false；共存 DNS 仍启用，故应断言
+mode=direct、server/port=null、domain_rules=[]。仅修测试后重跑通过，
+生产代码未改，失败证据 `.tmp-regression-docker-76ef844f6cd74f459c4a31a5a1227deb/` 保留。
+集中 `docker-contracts` 49/49 exit 0，内部 616610 ms、入口 617738 ms，
+queue 62338 ms、Jobs 6、cache_hit=false；工具内容 SHA256 与定向相同。
+证据 `.tmp-regression-docker-ba35b528fd874ecb9c28e01e667a60e1/`；
+本阶段 10 个暂存文件逐字节匹配完整回归快照，之后仅补验收文字。
+完整区域策略、其它规则编辑、完整冲突检测、
+公网、原生宿主/arm64 和可信发布仍 deferred，总目标 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

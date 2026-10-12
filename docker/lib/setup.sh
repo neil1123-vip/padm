@@ -1511,7 +1511,7 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 4
             ;;
-        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add|--direct-domains-remove|--block-domains-remove|--dns-domains-add|--dns-domains-remove|--warp-domains-add|--warp-domains-remove|--ipv6-domains-add|--ipv6-domains-remove)
+        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add|--direct-domains-remove|--block-domains-remove|--dns-domains-add|--dns-domains-remove|--warp-domains-add|--warp-domains-remove|--ipv6-domains-add|--ipv6-domains-remove|--socks5-domains-add|--socks5-domains-remove)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingAction=domains
@@ -1525,7 +1525,7 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 2
             ;;
-        --dns-domains-replace|--direct-domains-replace|--block-domains-replace|--warp-domains-replace|--ipv6-domains-replace|--region-allow-replace)
+        --dns-domains-replace|--direct-domains-replace|--block-domains-replace|--warp-domains-replace|--ipv6-domains-replace|--region-allow-replace|--socks5-domains-replace)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && "$2" != *,* &&
                 -n "$3" && "$3" != --* && "$3" != *,* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -2252,6 +2252,11 @@ dockerEditCommand() {
                 fi
                 return "${PADM_DOCKER_RC_STATE}"
             }
+        elif [[ "${routingKind}" == socks5 ]]; then
+            jq -e '.routing.socks5.domains | type == "array" and length > 0' "${draft}" >/dev/null || {
+                dockerError 'SOCKS5 域名增删要求已有非空选择性名单，未启用或全局模式不支持'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
         elif [[ "${routingKind}" == dns &&
             ( "${routingAction}" == domains_add || "${routingAction}" == domains_remove ) ]]; then
             jq -e '.routing.dns != null' "${draft}" >/dev/null || {
@@ -2639,6 +2644,14 @@ dockerEditCommand() {
         ($old | without_warp_edit) == ($new | without_warp_edit)
        elif $routing_kind == "region" and ($routing_action | startswith("allow_")) then
         ($old | del(.routing.region.allow_domains)) == ($new | del(.routing.region.allow_domains))
+       elif $routing_kind == "socks5" then
+        # 非空只豁免域名；删空只能关闭出站，不能改凭据或转成全局代理。
+        if $new.routing.socks5 == null then
+          $routing_action == "domains_remove" and
+          $new == ($old | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
+        else
+          ($old | del(.routing.socks5.domains)) == ($new | del(.routing.socks5.domains))
+        end
        elif $routing_kind != "" then
         ($old | del(.routing[$routing_kind]) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing[$routing_kind]) | if .routing == {} then del(.routing) else . end)

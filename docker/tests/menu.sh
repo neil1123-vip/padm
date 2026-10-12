@@ -1120,7 +1120,7 @@ runRoutingDriver() {
     local replaceCase replaceKind oldPrompt newPrompt
     local -A targetPrompts=()
     local -a replaceVariants=(valid)
-    local -a replaceFamilies=(dns direct block ipv6 warp region)
+    local -a replaceFamilies=(dns direct block ipv6 warp region socks5)
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
     case "${scenario}" in
@@ -1227,6 +1227,14 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'29\n'
         targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com\n'
         targetReply 'Docker 路由与出站' $'3\n'
+        for choice in 34 35; do
+            targetReply 'Docker 路由与出站' "${choice}"$'\n'
+            [[ "${scenario}" != failed ]] || continue
+            inputPrompt='追加 SOCKS5 域名规则 CSV'
+            [[ "${choice}" != 35 ]] || inputPrompt='精确删除 SOCKS5 域名规则 CSV'
+            targetReply "${inputPrompt}" $'Example.NET, full:Exact.Example.Com\n'
+            targetReply 'fixture-socks5-daily-confirm [y/N]' $'y\n'
+        done
         ;;
     cancel)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -1237,6 +1245,14 @@ runRoutingDriver() {
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'4\n'
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'\n'
+        for choice in 34 35; do
+            inputPrompt='追加 SOCKS5 域名规则 CSV'
+            [[ "${choice}" != 35 ]] || inputPrompt='精确删除 SOCKS5 域名规则 CSV'
+            for input in 0 ''; do
+                targetReply 'Docker 路由与出站' "${choice}"$'\n'
+                targetReply "${inputPrompt}" "${input}"$'\n'
+            done
+        done
         targetReply 'Docker 路由与出站' $'6\n'
         targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'6\n'
@@ -1527,6 +1543,7 @@ runRoutingDriver() {
             direct) choice=31 ;;
             block) choice=32 ;;
             ips) choice=33 ;;
+            socks5) choice=36 ;;
             ipv6)
                 targetReply 'Docker 路由与出站' $'19\n'
                 menuLabel='Docker IPv6 域名出站' choice=7 statusChoice=4
@@ -1582,16 +1599,28 @@ runRoutingDriver() {
                 targetReply "${menuLabel}" $'0\n'
         done
         ;;
+    socks5-domains-eof|socks5-domains-status-failed)
+        for choice in 34 35; do
+            targetReply 'Docker 路由与出站' "${choice}"$'\n'
+            [[ "${scenario}" != socks5-domains-status-failed ]] || continue
+            inputPrompt='追加 SOCKS5 域名规则 CSV'
+            [[ "${choice}" != 35 ]] || inputPrompt='精确删除 SOCKS5 域名规则 CSV'
+            targetReply "${inputPrompt}" $'\004'
+        done
+        ;;
     selective-domains-invalid|selective-domains-state-failed|selective-domains-confirm-cancel|selective-domains-confirm-eof|selective-domains-commit-failed)
-        for family in ipv6 warp; do
+        for family in ipv6 warp socks5; do
             if [[ "${family}" == ipv6 ]]; then
                 targetReply 'Docker 路由与出站' $'19\n'
                 menuLabel='Docker IPv6 域名出站' familyLabel=IPv6
                 addChoice=5 removeChoice=6 statusChoice=4
-            else
+            elif [[ "${family}" == warp ]]; then
                 targetReply 'Docker 路由与出站' $'20\n'
                 menuLabel='Docker WARP 出站' familyLabel=WARP
                 addChoice=8 removeChoice=9 statusChoice=3
+            else
+                menuLabel='Docker 路由与出站' familyLabel=SOCKS5
+                addChoice=34 removeChoice=35 statusChoice=3
             fi
             for choice in "${addChoice}" "${removeChoice}"; do
                 input=Example.NET
@@ -1614,7 +1643,7 @@ runRoutingDriver() {
                 esac
             done
             targetReply "${menuLabel}" "${statusChoice}"$'\n'
-            targetReply "${menuLabel}" $'0\n'
+            [[ "${family}" == socks5 ]] || targetReply "${menuLabel}" $'0\n'
         done
         ;;
     warp-confirm-cancel|warp-confirm-eof)
@@ -2018,7 +2047,8 @@ edit)
     elif [[ "${2:-}" == --block-ips-replace ||
         "${2:-}" == --dns-domains-replace || "${2:-}" == --direct-domains-replace ||
         "${2:-}" == --block-domains-replace || "${2:-}" == --warp-domains-replace ||
-        "${2:-}" == --ipv6-domains-replace || "${2:-}" == --region-allow-replace ]]; then
+        "${2:-}" == --ipv6-domains-replace || "${2:-}" == --region-allow-replace ||
+        "${2:-}" == --socks5-domains-replace ]]; then
         replaceKind=domain
         if [[ "$2" == --block-ips-replace ]]; then
             # 此处只断言字面参数原样分发，完整 IP/CIDR 校验由路由合同覆盖。
@@ -2042,7 +2072,8 @@ edit)
         [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
         recordAction "${replaceKind}-replace-commit" "$2"
     elif [[ "${2:-}" == --warp-domains-add || "${2:-}" == --warp-domains-remove ||
-        "${2:-}" == --ipv6-domains-add || "${2:-}" == --ipv6-domains-remove ]]; then
+        "${2:-}" == --ipv6-domains-add || "${2:-}" == --ipv6-domains-remove ||
+        "${2:-}" == --socks5-domains-add || "${2:-}" == --socks5-domains-remove ]]; then
         [[ "$#" -eq 3 ]] && dockerSocks5DomainsNormalize "$3" >/dev/null || exit 2
         [[ "${SELECTIVE_EDIT_PRECHECK_STATUS:-0}" -eq 0 ]] ||
             exit "${SELECTIVE_EDIT_PRECHECK_STATUS}"
@@ -2598,12 +2629,14 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     ip-replace-flow ip-replace-cancel ip-replace-status-failed ip-replace-state-failed \
     ip-replace-confirm-cancel ip-replace-confirm-eof ip-replace-commit-failed \
     selective-domains-invalid selective-domains-state-failed selective-domains-confirm-cancel selective-domains-confirm-eof selective-domains-commit-failed \
+    socks5-domains-eof socks5-domains-status-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
     [[ "${routingCase}" != selective-domains-state-failed ]] || SELECTIVE_EDIT_PRECHECK_STATUS=15
     [[ "${routingCase}" != *-replace-state-failed ]] || DOMAIN_REPLACE_PRECHECK_STATUS=15
     [[ "${routingCase}" != *-replace-status-failed ]] || ROUTING_STATUS=17
+    [[ "${routingCase}" != socks5-domains-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
@@ -2640,17 +2673,37 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         expectedRouting+=$'\nedit --direct-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --block-ips-add /root/padm-block ips-add.json\nedit --block-ips-remove /root/padm-block ips-remove.json\nprotocol routing-status'
         expectedRouting+=$'\nedit --dns-domains-add Example.NET, full:Exact.Example.Com\nedit --dns-domains-remove Example.NET, full:Exact.Example.Com\nprotocol routing-status'
+        for socksAction in add remove; do
+            expectedRouting+=$'\nprotocol routing-status'
+            [[ "${routingCase}" != failed ]] || continue
+            expectedRouting+=$'\nedit --socks5-domains-'"${socksAction}"' Example.NET, full:Exact.Example.Com'
+            expectedRouting+=$'\nsocks5-daily-confirm --socks5-domains-'"${socksAction}"' y'
+            [[ "${routingCase}" != flow ]] ||
+                expectedRouting+=$'\nsocks5-daily-commit --socks5-domains-'"${socksAction}"
+        done
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
         [[ "$(grep -Fc 'fixture-warp-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 6 ]] ||
             fail 'WARP 日常编辑没有每次只确认一次'
         [[ "$(grep -Fc 'fixture-ipv6-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 2 ]] ||
             fail 'IPv6 域名增删没有每次只确认一次'
         ;;
+    cancel)
+        expectedRouting=$'protocol routing-status\nprotocol routing-status\nprotocol routing-status\nprotocol routing-status'
+        ;;
+    socks5-domains-eof|socks5-domains-status-failed)
+        expectedRouting=$'protocol routing-status\nprotocol routing-status'
+        if [[ "${routingCase}" == socks5-domains-status-failed ]]; then
+            ! grep -Fq 'SOCKS5 域名规则 CSV' "${CONTROL_LOG}" ||
+                fail 'SOCKS5 状态失败仍读取域名增删输入'
+            [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 2 ]] ||
+                fail 'SOCKS5 增删状态失败未保留菜单'
+        fi
+        ;;
     domain-replace-*|ip-replace-*)
         replaceConfirmation= replaceExit=0 replaceFailureCount=0
         replaceCase=${routingCase#*-replace-} replaceKind=domain
         replaceVariants=(valid)
-        replaceFamilies=(dns direct block ipv6 warp region)
+        replaceFamilies=(dns direct block ipv6 warp region socks5)
         if [[ "${routingCase}" == ip-replace-* ]]; then
             replaceKind=ip
             replaceFamilies=(ips)
@@ -2718,10 +2771,11 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         selective-domains-commit-failed) selectiveConfirmation=y selectiveExit=15 ;;
         selective-domains-state-failed) selectiveExit=15 ;;
         esac
-        for selectiveFamily in ipv6 warp; do
+        for selectiveFamily in ipv6 warp socks5; do
             for selectiveAction in add remove; do
                 selectiveFlag="--${selectiveFamily}-domains-${selectiveAction}"
                 [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
+                [[ "${selectiveFamily}" != socks5 ]] || expectedRouting+='protocol routing-status'$'\n'
                 expectedRouting+="edit ${selectiveFlag} ${selectiveInput}"
                 [[ -z "${selectiveConfirmation}" ]] ||
                     expectedRouting+=$'\n'"${selectiveFamily}-daily-confirm ${selectiveFlag} ${selectiveConfirmation}"
@@ -2732,8 +2786,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             [[ "$(grep -Fc "fixture-${selectiveFamily}-daily-confirm [y/N]" "${CONTROL_LOG}" || true)" -eq "${selectiveConfirmCount}" ]] ||
                 fail "${selectiveFamily} 域名增删确认次数错误"
         done
-        [[ "$(grep -Fc "操作失败，退出码: ${selectiveExit}" "${CONTROL_LOG}")" -eq 4 ]] ||
-            fail 'WARP/IPv6 域名增删失败未显示退出码并继续诊断'
+        [[ "$(grep -Fc "操作失败，退出码: ${selectiveExit}" "${CONTROL_LOG}")" -eq 6 ]] ||
+            fail '选择性出站域名增删失败未显示退出码并继续诊断'
         ;;
     warp-confirm-cancel|warp-confirm-eof)
         warpConfirmation=n
@@ -2834,7 +2888,9 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '26. 追加 IP/CIDR 阻断' '27. 精确删除 IP/CIDR 阻断' \
             '28. 追加 DNS 分流域名' '29. 精确删除 DNS 分流域名' \
             '30. 单条替换 DNS 分流域名' '31. 单条替换 Direct 直连例外' \
-            '32. 单条替换 Block 域名阻断' '33. 单条替换 IP/CIDR 阻断' '0. 返回'; do
+            '32. 单条替换 Block 域名阻断' '33. 单条替换 IP/CIDR 阻断' \
+            '34. 追加 SOCKS5 域名规则' '35. 精确删除 SOCKS5 域名规则' \
+            '36. 单条替换 SOCKS5 域名规则' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then

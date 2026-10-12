@@ -1333,6 +1333,9 @@ padm-docker edit --socks5 /root/padm-socks5.json --confirm PADM-DOCKER-EDIT
 padm-docker protocol routing-status
 padm-docker edit --socks5-domains 'example.net,full:exact.example.com,keyword:video,geosite:cn' --preview
 padm-docker edit --socks5-domains 'example.net,full:exact.example.com,keyword:video,geosite:cn' --confirm PADM-DOCKER-EDIT
+padm-docker edit --socks5-domains-add 'full:next.example.net' --preview
+padm-docker edit --socks5-domains-remove 'full:exact.example.com' --confirm PADM-DOCKER-EDIT
+padm-docker edit --socks5-domains-replace 'full:exact.example.com' 'full:next.example.net' --preview
 padm-docker edit --socks5-global --confirm PADM-DOCKER-EDIT
 padm-docker edit --socks5-off --confirm PADM-DOCKER-EDIT
 ```
@@ -1349,6 +1352,20 @@ bare domains get `domain:`, but category names are never guessed.
 Matcher types use OR: matching TCP uses SOCKS5, matching UDP is blocked, and unmatched
 TCP/UDP is direct. IP traffic without a usable supplied or sniffed domain is also direct;
 this is not enforced global proxying. `--socks5-global` removes only the rules.
+Menu `17`, options `34/35/36`, and `--socks5-domains-add/remove/replace` edit only
+an existing nonempty domain-selective list; disabled and global modes are rejected.
+Additions normalize and deduplicate in first-seen order, with at most 256 merged rules.
+Removal matches complete normalized rules, rejects the whole batch if any item is missing,
+and preserves remaining order. Removing the last rule disables the entire SOCKS5 outbound;
+enabling it again requires reimporting private credentials and never happens by switching to global.
+Single-rule replacement keeps the position and rejects CSV, missing old rules, duplicate new rules
+and identical values. Nonempty edits change only `domains`; `server/port/username/password`,
+other routing policies and settings are frozen. Only last-rule removal may delete the whole subitem.
+These menu actions show routing status first; failed status, empty input, `0` and EOF cancel
+before editing. The independent CLI confirms once. Full-list replacement and global switching
+remain available. Both core generators and the existing transaction are reused, with no new
+schema, capability marker or host privilege.
+The focused SOCKS5 list contract, menu PTY checks and all 49 integrated contracts pass.
 Domain mode additionally requires `x-padm-routing-domains`. Xray uses managed or bundled
 Geo data; sing-box downloads selected categories directly from the fixed SagerNet source.
 Missing resources or failed downloads reject candidate startup and restore the old configuration.

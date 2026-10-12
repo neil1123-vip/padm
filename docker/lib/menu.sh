@@ -919,7 +919,8 @@ dockerMenuRouting() {
             '27. 精确删除 IP/CIDR 阻断' '28. 追加 DNS 分流域名' \
             '29. 精确删除 DNS 分流域名' '30. 单条替换 DNS 分流域名' \
             '31. 单条替换 Direct 直连例外' '32. 单条替换 Block 域名阻断' \
-            '33. 单条替换 IP/CIDR 阻断' '0. 返回'
+            '33. 单条替换 IP/CIDR 阻断' '34. 追加 SOCKS5 域名规则' \
+            '35. 精确删除 SOCKS5 域名规则' '36. 单条替换 SOCKS5 域名规则' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1011,7 +1012,7 @@ dockerMenuRouting() {
                 dockerMenuRun edit --dns-domains-remove "${input}" || true
             fi
             ;;
-        30|31|32)
+        30|31|32|36)
             dockerMenuRun protocol routing-status || continue
             dockerSetupRead oldRule '旧域名规则（单条；domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${oldRule}" ]] &&
@@ -1021,6 +1022,7 @@ dockerMenuRouting() {
             30) dockerMenuRun edit --dns-domains-replace "${oldRule}" "${newRule}" || true ;;
             31) dockerMenuRun edit --direct-domains-replace "${oldRule}" "${newRule}" || true ;;
             32) dockerMenuRun edit --block-domains-replace "${oldRule}" "${newRule}" || true ;;
+            36) dockerMenuRun edit --socks5-domains-replace "${oldRule}" "${newRule}" || true ;;
             esac
             ;;
         33)
@@ -1030,6 +1032,18 @@ dockerMenuRouting() {
                 dockerSetupRead newRule '新 IP/CIDR 规则（单条字面 IP/CIDR，0 返回）: ' &&
                 [[ -n "${newRule}" ]] || continue
             dockerMenuRun edit --block-ips-replace "${oldRule}" "${newRule}" || true
+            ;;
+        34|35)
+            dockerMenuRun protocol routing-status || continue
+            if [[ "${choice}" == 34 ]]; then
+                dockerSetupRead input '追加 SOCKS5 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                    [[ -n "${input}" ]] || continue
+                dockerMenuRun edit --socks5-domains-add "${input}" || true
+            else
+                dockerSetupRead input '精确删除 SOCKS5 域名规则 CSV（删空关闭，需重新导入；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                    [[ -n "${input}" ]] || continue
+                dockerMenuRun edit --socks5-domains-remove "${input}" || true
+            fi
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

@@ -273,6 +273,9 @@ padm-docker edit --socks5 /root/padm-socks5.json --confirm PADM-DOCKER-EDIT
 padm-docker protocol routing-status
 padm-docker edit --socks5-domains 'example.net,full:exact.example.com,keyword:video,geosite:cn' --preview
 padm-docker edit --socks5-domains 'example.net,full:exact.example.com,keyword:video,geosite:cn' --confirm PADM-DOCKER-EDIT
+padm-docker edit --socks5-domains-add 'full:next.example.net' --preview
+padm-docker edit --socks5-domains-remove 'full:exact.example.com' --confirm PADM-DOCKER-EDIT
+padm-docker edit --socks5-domains-replace 'full:exact.example.com' 'full:next.example.net' --preview
 padm-docker edit --socks5-global --confirm PADM-DOCKER-EDIT
 padm-docker edit --socks5-off --confirm PADM-DOCKER-EDIT
 ```
@@ -286,6 +289,15 @@ CSV 输入去除首尾空白、转小写并按首次出现去重，裸域名补 
 私有 JSON 中规则须已规范化。各类规则之间为 OR，匹配 TCP 经上游、匹配 UDP 阻断，
 未匹配 TCP/UDP 直连；无域名且无法嗅探的 IP 流量也直连，不是强制全局代理。
 `--socks5-global` 仅删除域名规则、保留上游及凭据，恢复全局出站。
+菜单 `17` 的 `34/35/36` 和 `--socks5-domains-add/remove/replace` 管理已有非空域名名单；
+未启用或全局模式拒绝。追加规范化后稳定去重，合并最多 256 条；
+删除按完整规范化规则匹配，缺项整批拒绝，保留剩余次序。删空关闭整个 SOCKS5，
+以后启用须重新导入私有凭据，不自动切为全局。单条替换保留原位置，
+拒绝 CSV、缺旧项、重复新项和同值；非空编辑仅修改 `domains`，
+`server/port/username/password` 及其它路由和配置冻结，只有删除末条允许移除整个子项。
+三项菜单先显示路由状态，状态失败不读输入；空输入、`0` 和 EOF 取消，独立 CLI 只确认一次。
+原整组替换和全局入口保持；复用双核心生成与既有事务，不新增 schema、marker 或宿主权限。
+SOCKS5 名单定向合同、菜单 PTY 与集中完整 49 项回归已通过。
 域名模式另要求 `x-padm-routing-domains`；Xray 使用受管或镜像 Geo 数据，
 sing-box 从固定 SagerNet 源直连下载所选分类，资源缺失或下载失败拒绝候选启动并恢复旧配置。
 状态返回 `mode` 和 `domain_rules`，不显示凭据；嗅探只选择路由，不改写实际目的地址。

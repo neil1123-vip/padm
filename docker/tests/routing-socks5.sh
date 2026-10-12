@@ -1218,7 +1218,7 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ||
         dockerGenerateXrayConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-v3-xray.json"
         dockerGenerateSingBoxConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-sing-box.json"
     fi
-    for fixture in ipv6-owner routing-bt-policy; do
+    for fixture in ipv6-owner routing-bt-policy dns-only; do
         [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle || "${fixture}" != ipv6-owner ]] ||
             continue
         for core in xray sing-box; do
@@ -1352,7 +1352,7 @@ domainsReplaceCheck() {
     case "${kind}" in
     dns|warp|region) failure=health-fail; expected=14 ;;
     direct) failure=int; expected=130 ;;
-    block|ipv6) failure=term; expected=143 ;;
+    block|ipv6|socks5) failure=term; expected=143 ;;
     esac
     MODE=${failure}
     rm -f -- "${TEST_ROOT}/failed-once"
@@ -1372,7 +1372,8 @@ domainsReplaceCheck() {
     runStatus 0
     jq -e --arg kind "${kind}" --arg field "${field}" --slurpfile expected "${replacement}" \
         --argjson defaults "${REGION_DEFAULTS}" '
-      (if $kind=="dns" then .dns.domain_rules
+      (if $kind=="socks5" then .domain_rules
+       elif $kind=="dns" then .dns.domain_rules
        elif $kind=="direct" or $kind=="block" then .[$kind].domain_rules
        else .[$kind][$field] end) == $expected[0].routing[$kind][$field] and
       (if $kind=="region" then
@@ -1407,7 +1408,7 @@ domainsReplaceCheck() {
         '$actual==$old' >/dev/null || fail "${kind}: 单项替换没有还原原组合规格"
     printf 'docker-routing-%s-domains-replace-regression-ok\n' "${kind}"
 }
-# WARP 与 IPv6 共用相同增量合同，只在各自 selective 组合夹具中调用。
+# 选择性出站共用增量合同，SOCKS5 以非空域名数组表示选择性模式。
 selectiveDomainsIncrementalCheck() {
     local kind=$1 retained=$2 option action csv domains failure expected before composeBefore core allCsv
     local original="${TEST_ROOT}/${kind}-incremental.before"
@@ -1420,8 +1421,10 @@ selectiveDomainsIncrementalCheck() {
     overlimitCsv=$(jq -nr '[range(0;257) | "selective-boundary-\(.).example.org"] | join(",")')
     cp -- "${root}/config/spec.json" "${original}"
     jq -e --arg kind "${kind}" --argjson domains "${IPV6_DOMAINS}" '
-      .routing[$kind].mode=="selective" and .routing[$kind].domains==$domains and
-      (.routing.direct.domains | index("full:other.example.com")) != null
+      .routing[$kind].domains==$domains and
+      (if $kind=="socks5" then .routing.dns != null else
+        .routing[$kind].mode=="selective" and
+        (.routing.direct.domains | index("full:other.example.com")) != null end)
     ' "${original}" >/dev/null || fail "${kind}: 增量合同没有使用既有 selective 组合夹具"
     domainsReplaceCheck "${kind}"
     before=$(snapshot)
@@ -1435,6 +1438,12 @@ selectiveDomainsIncrementalCheck() {
         runEdit 2 "${option}" 'example.net' "--${kind}-off" --preview
         runEdit 2 "${option}" 'example.net' "${option}" 'example.org' --preview
         runEdit 2 "${option}" 'example.net' --dns-off --preview
+        if [[ "${kind}" == socks5 ]]; then
+            runEdit 2 "${option}" 'example.net' --spec "${original}" --preview
+            runEdit 2 "${option}" 'example.net' --http01 enable --preview
+            runEdit 2 "${option}" 'example.net' --socks5 "${INPUT}" --preview
+            runEdit 2 --socks5 "${INPUT}" "${option}" 'example.net' --preview
+        fi
     done
     [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
         fail "${kind}: 无效增量参数改变部署或调用 Compose"
@@ -1464,6 +1473,9 @@ selectiveDomainsIncrementalCheck() {
                 fail "${kind}: 缺项/部分跨 owner 缺项删除停服或把 full 当作 domain 规则"
         fi
         for failure in health-fail int term; do
+            # SOCKS5 两个动作和替换合同各验一种故障，避免重复整套恢复。
+            [[ "${kind}" != socks5 || ( "${action}" == add && "${failure}" == health-fail ) ||
+                ( "${action}" == remove && "${failure}" == int ) ]] || continue
             MODE=${failure}
             rm -f -- "${TEST_ROOT}/failed-once"
             expected=14
@@ -1482,7 +1494,8 @@ selectiveDomainsIncrementalCheck() {
         ' >/dev/null || fail "${kind}/${action}: 未保持四类规则稳定次序、完整身份或改写模式/私有字段"
         runStatus 0
         jq -e --arg kind "${kind}" --argjson domains "${domains}" '
-          .[$kind].mode=="selective" and .[$kind].domains==$domains
+          if $kind=="socks5" then .mode=="domains" and .domain_rules==$domains
+          else .[$kind].mode=="selective" and .[$kind].domains==$domains end
         ' "${LOG}" >/dev/null || fail "${kind}/${action}: 状态没有投影剩余有序规则"
     done
     runEdit 0 "--${kind}-domains-add" "${boundaryCsv}" --confirm PADM-DOCKER-EDIT
@@ -1503,13 +1516,18 @@ selectiveDomainsIncrementalCheck() {
       $actual[0] == ($old[0] | del(.routing[$kind]))
     ' >/dev/null || fail "${kind}: 删空没有关闭该子项或改变其它策略"
     runStatus 0
-    jq -e --arg kind "${kind}" 'has($kind) | not' "${LOG}" >/dev/null ||
+    jq -e --arg kind "${kind}" '
+      if $kind=="socks5" then .mode=="direct" and .domain_rules==[] and .server==null and .port==null
+      else has($kind) | not end
+    ' "${LOG}" >/dev/null ||
         fail "${kind}: 删空后状态仍保留对应子项"
     for core in xray sing-box; do
         cmp -s "${root}/config/${core}/config.json" "${TEST_ROOT}/runtime-${retained}-${core}.json" ||
             fail "${kind}/${core}: 删空遗留核心规则、出站或改变其它路由"
     done
-    if [[ "${kind}" == warp ]]; then
+    if [[ "${kind}" == socks5 ]]; then
+        runEdit 0 --socks5 "${PRIVATE_ROOT}/socks5-selective.json" --confirm PADM-DOCKER-EDIT
+    elif [[ "${kind}" == warp ]]; then
         runEdit 0 --warp "${WARP_INPUT}" --confirm PADM-DOCKER-EDIT
     else
         runEdit 0 --ipv6 selective --ipv6-domains 'full:exact.example.com,example.net,keyword:video,geosite:cn' \
@@ -2194,6 +2212,17 @@ runEdit 0 --socks5 "${INPUT}" --preview
 runEdit 0 --socks5 "${DOMAINS_INPUT}" --preview
 runEdit 15 --socks5-domains 'example.net' --preview
 runEdit 15 --socks5-global --preview
+for option in --socks5-domains-add --socks5-domains-remove --socks5-domains-replace; do
+    args=('example.net')
+    [[ "${option}" != *-replace ]] || args+=('replacement.example.org')
+    runEdit 15 "${option}" "${args[@]}" --preview
+    for originalOption in --socks5-global --socks5-off; do
+        runEdit 2 "${option}" "${args[@]}" "${originalOption}" --preview
+        runEdit 2 "${originalOption}" "${option}" "${args[@]}" --preview
+    done
+    runEdit 2 "${option}" "${args[@]}" --socks5-domains example.org --preview
+    runEdit 2 --socks5-domains example.org "${option}" "${args[@]}" --preview
+done
 runEdit 2 --socks5 "${INPUT}" --socks5-off --preview
 runEdit 2 --socks5 "${INPUT}" --spec "${TEST_ROOT}/routed.json" --preview
 runEdit 2 --socks5 "${INPUT}" --http01 enable --preview
@@ -2305,6 +2334,13 @@ runStatus 0
 jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[],
   direct_block_overlaps:[],http_relay:{enabled:false}}' \
     "${LOG}" >/dev/null || fail '开启路由诊断合同错误'
+before=$(snapshot)
+for option in --socks5-domains-add --socks5-domains-remove --socks5-domains-replace; do
+    args=('example.net')
+    [[ "${option}" != *-replace ]] || args+=('replacement.example.org')
+    runEdit 15 "${option}" "${args[@]}" --preview
+done
+[[ "$(snapshot)" == "${before}" ]] || fail '全局 SOCKS5 被名单编辑改变'
 runEdit 0 --socks5 "${DOMAINS_INPUT}" --preview
 [[ "$(snapshot)" == "${before}" ]] || fail '选择性启用预览改变在线部署'
 runEdit 0 --socks5 "${DOMAINS_INPUT}" --confirm PADM-DOCKER-EDIT
@@ -2358,7 +2394,7 @@ jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"block
   direct_block_overlaps:[],http_relay:{enabled:false}}' \
     "${LOG}" >/dev/null || fail '切换全局后状态合同错误'
 runEdit 0 --socks5-domains 'example.net' --confirm PADM-DOCKER-EDIT
-runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
+runEdit 0 --socks5-domains-remove 'example.net' --confirm PADM-DOCKER-EDIT
 jq -e 'has("routing") | not' "${root}/config/spec.json" >/dev/null ||
     fail '关闭 SOCKS5 没有删除可选 routing 字段'
 runStatus 0
@@ -2374,6 +2410,23 @@ for core in xray sing-box; do
 done
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail '路由编辑清空流量累计'
+jq --argjson domains "${IPV6_DOMAINS}" '.domains=$domains' "${INPUT}" >"${PRIVATE_ROOT}/socks5-selective.json"
+chmod 0600 "${PRIVATE_ROOT}/socks5-selective.json"
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/dns-only.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '初始化 SOCKS5 选择性增量组合失败'
+assertClean
+runEdit 0 --socks5 "${PRIVATE_ROOT}/socks5-selective.json" --confirm PADM-DOCKER-EDIT
+selectiveDomainsIncrementalCheck socks5 dns-only
+runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '恢复 SOCKS5 增量前基线失败'
+assertClean
 fi
 
 # 核心入口在生命周期结束退出，域名子项由独立事务夹具覆盖。
