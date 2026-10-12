@@ -175,7 +175,7 @@ xhttpClean() {
 xhttpEdit() {
     local expected=$1 unchanged=$2 actual=0 before
     shift 2
-    before=$(snapshot)
+    if [[ "${unchanged}" == unchanged ]]; then before=$(snapshot); fi
     : >"${EVENTS}"
     bash -u "${CLI}" edit "$@" "${ASSET_ARGS[@]}" </dev/null >"${STDOUT}" 2>"${STDERR}" || actual=$?
     [[ "${actual}" == "${expected}" ]] || fail "XHTTP edit $*: 预期 ${expected}，实际 ${actual}"
