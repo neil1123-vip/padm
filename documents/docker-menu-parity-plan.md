@@ -2974,6 +2974,14 @@ Bash、ShellCheck error、diff 和独立只读复审通过；集中完整合同 
 工具镜像直接复用；完整耗时含独立定向检查混跑，不能据此归因于本次代码。
 行为文件与 full 输入一致，验收后只补说明，日志与结果保留、重复源码输入清理。
 
+回归精简单独提交：`runStatus` 对 stdout/stderr 的四个固定敏感值从
+8 次 `grep` 合为一次 `grep -Fq`，仍为任一文件出现任一值就拒绝。
+容器内 1 个干净场景和 4 值 × 2 文件的 8 个泄漏场景等价性检查通过；
+`docker-routing-core-contracts -Jobs 2` 的真实只读/脱敏合同内部/入口
+25004/26263 ms、排队 245 ms、exit 0、cache_hit=false，证据
+`.tmp-regression-docker-0fbc12b87e8c4a50a8c762abce47c21e/`。
+生产路径与断言范围保持，完整集中回归沿用本节证据，不以单次耗时推断收益。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

@@ -1268,11 +1268,8 @@ runStatus() {
     (dockerMain protocol routing-status "$@") >"${LOG}" 2>"${TEST_ROOT}/status.stderr" || actual=$?
     [[ "${actual}" == "${expected}" ]] || fail "routing-status: 预期 ${expected}，实际 ${actual}"
     assertClean
-    for output in "${LOG}" "${TEST_ROOT}/status.stderr"; do
-        ! grep -Fq "${USERNAME}" "${output}" && ! grep -Fq "${PASSWORD}" "${output}" &&
-            ! grep -Fq "${UUID}" "${output}" && ! grep -Fq "${WARP_PRIVATE}" "${output}" ||
-            fail '路由诊断泄露认证信息'
-    done
+    ! grep -Fq -e "${USERNAME}" -e "${PASSWORD}" -e "${UUID}" -e "${WARP_PRIVATE}" \
+        "${LOG}" "${TEST_ROOT}/status.stderr" || fail '路由诊断泄露认证信息'
 }
 # 精确重叠诊断复用组合夹具与生产只读入口，只在核心合同分片运行一次。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-contracts || -z "${PADM_DOCKER_ROUTING_SCOPE:-}" ]]; then
