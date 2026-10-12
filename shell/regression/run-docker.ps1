@@ -225,8 +225,9 @@ $containerContext = Get-ChildItem -LiteralPath $containerDirectory -File -Recurs
     "$([IO.Path]::GetRelativePath($containerDirectory, $_.FullName))`n$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
 }
 $containerContextHash = Get-TextHash ($containerContext -join "`n")
+$contextImage = "$image-$($containerContextHash.ToLowerInvariant())"
 $buildArgs = @(
-    'build', '--load', '--platform', $platform, '--tag', $image,
+    'build', '--load', '--platform', $platform, '--tag', $image, '--tag', $contextImage,
     '--label', "padm.regression.tools-context-sha256=$containerContextHash"
 )
 if ($Rebuild) { $buildArgs += '--no-cache' }
@@ -243,14 +244,21 @@ try {
     try {
         $imageInfo = $null
         if (-not $Rebuild) {
-            $candidate = & $docker image inspect $image 2>$null
-            if ($LASTEXITCODE -eq 0) {
+            # 按工具内容保留共享标签，避免其它 worktree 更新 local 后重复构建。
+            foreach ($candidateTag in @($contextImage, $image)) {
+                $candidate = & $docker image inspect $candidateTag 2>$null
+                if ($LASTEXITCODE -ne 0) { continue }
                 $candidate = $candidate | ConvertFrom-Json | Select-Object -First 1
                 $labels = $candidate.Config.Labels
                 if ($candidate.Os -eq 'linux' -and $candidate.Architecture -eq ($platform -replace '^linux/', '') -and
                     $labels.'padm.regression.tools-context-sha256' -eq $containerContextHash) {
                     $imageInfo = $candidate
-                    Write-Host "Regression image: reusing $image ($containerContextHash)"
+                    if ($candidateTag -eq $image) {
+                        & $docker image tag $candidate.Id $contextImage
+                        if ($LASTEXITCODE -ne 0) { throw "Cannot register regression context tag: $contextImage" }
+                    }
+                    Write-Host "Regression image: reusing $candidateTag ($containerContextHash)"
+                    break
                 }
             }
         }

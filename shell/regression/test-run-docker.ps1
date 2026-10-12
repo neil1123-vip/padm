@@ -287,6 +287,14 @@ try {
         throw 'Different tool content reused a result.'
     }
     [IO.File]::WriteAllText($toolEntry, $toolOriginal, $utf8)
+    # 恢复工具上下文应直接命中原镜像，不能靠 BuildKit 重建得到同一 ID。
+    $restoredTools = Start-RunnerCheck all cache-restored-tools
+    Wait-RunnerExit $restoredTools
+    $restoredToolResult = Get-RunnerResult $restoredTools
+    if (-not $restoredToolResult.cache_hit -or $restoredToolResult.image_id -ne $baseline.image_id -or
+        -not (Select-String -Quiet -LiteralPath $restoredTools.Output -Pattern '^Regression image: reusing ')) {
+        throw 'Restored tool content did not reuse the original image/result.'
+    }
 
     # 失败的完整回归不得进入成功结果复用。
     $originalProbe = [IO.File]::ReadAllText($entry)
@@ -332,7 +340,16 @@ finally {
             if ($LASTEXITCODE -ne 0) { throw 'Fixture container cleanup failed.' }
         }
     }
-    foreach ($tag in @($fixtureImage, $fixtureBaseImage)) {
+    $fixtureContextTags = @(& docker image ls --format '{{.Repository}}:{{.Tag}}' --filter "reference=$fixtureImage-*")
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot list fixture context tags for cleanup.' }
+    foreach ($tag in $fixtureContextTags) {
+        if (-not $tag.StartsWith("$fixtureImage-", [StringComparison]::Ordinal) -or
+            $tag.Substring("$fixtureImage-".Length) -cnotmatch '^[0-9a-f]{64}$') {
+            if ($tag -eq $fixtureBaseImage) { continue }
+            throw "Unexpected fixture context tag: $tag"
+        }
+    }
+    foreach ($tag in @($fixtureImage, $fixtureBaseImage) + $fixtureContextTags | Select-Object -Unique) {
         $fixtureImageId = & docker image ls --quiet --filter "reference=$tag"
         if ($LASTEXITCODE -ne 0) { throw 'Cannot check fixture image cleanup.' }
         if ($fixtureImageId) {
