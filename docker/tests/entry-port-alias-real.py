@@ -365,21 +365,67 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
     def snapshot(table):
         return command([table, "-w", "-t", "nat", "-S"])
 
+    def preflight(accepted, native=False):
+        def rules():
+            return command(["nft", "-s", "list", "ruleset"]) if native else {
+                table: snapshot(table) for table in baseline}
+        before = rules()
+        result = subprocess.run(["sh", str(SCRIPT.parents[1] / "images/net/entrypoint.sh"),
+                                 "preflight", "port-hopping", "36561", "36562", "35461"],
+                                text=True, capture_output=True, timeout=10)
+        assert (result.returncode == 0) == accepted, (result.stderr, before)
+        assert not result.stdout
+        assert rules() == before, "生产预检修改了 NAT 规则"
+        print(f"entry-hy2-hopping-preflight: accepted={accepted} "
+              f"diagnostic={result.stderr.strip()}", flush=True)
+
     try:
         for family, address in HOSTS.items():
             table = "iptables" if family == "ipv4" else "ip6tables"
             assert "(nf_tables)" in command([table, "--version"]).decode()
-            add(table, ["-N", "PADM_HOP_OUTSIDE"], outside)
-            add(table, ["-A", "PADM_HOP_OUTSIDE", "-m", "comment",
+            add(table, ["-N", "OUTSIDE_HOP"], outside)
+            add(table, ["-A", "OUTSIDE_HOP", "-m", "comment",
                         "--comment", "outside-hop", "-j", "RETURN"], outside)
             add(table, ["-A", "PREROUTING", "-i", "prh2", "-p", "udp", "-d", address,
-                        "--dport", "36999", "-j", "PADM_HOP_OUTSIDE"], outside)
+                        "--dport", "36999", "-j", "OUTSIDE_HOP"], outside)
             baseline[table] = snapshot(table)
+        preflight(True)
+        for table in baseline:
+            add(table, ["-A", "OUTSIDE_HOP", "-p", "udp", "--dport", "36562",
+                        "-j", "REDIRECT", "--to-ports", "35461"], outside)
+            preflight(False)
+            current_table, removal = outside.pop()
+            command([current_table, "-w", "-t", "nat"] + removal)
+        for family, address in HOSTS.items():
+            with socket.socket(socket.AF_INET if family == "ipv4" else socket.AF_INET6,
+                               socket.SOCK_DGRAM) as listener:
+                if family == "ipv6":
+                    listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                listener.bind((address, 36561))
+                preflight(False)
+                listener.connect((address, 36999))
+                preflight(False)
+        for family in ("ip", "ip6"):
+            command(["nft", "add", "rule", family, "nat", "PREROUTING",
+                     "udp", "dport", "36562", "redirect", "to", ":35461",
+                     "comment", json.dumps(comment)])
+            try:
+                preflight(False, native=True)
+            finally:
+                rules = json.loads(command(["nft", "-j", "list", "chain",
+                                             family, "nat", "PREROUTING"]))["nftables"]
+                added = [row["rule"]["handle"] for row in rules
+                         if row.get("rule", {}).get("comment") == comment]
+                assert len(added) == 1, added
+                command(["nft", "delete", "rule", family, "nat", "PREROUTING",
+                         "handle", str(added[0])])
+        preflight(True)
         for stage in ("on", "off", "restored"):
             if stage == "off":
                 revoke(owned)
                 for table in baseline:
                     assert snapshot(table) == baseline[table], "撤销改变了 Docker 或外部 NAT 规则"
+                preflight(True)
             else:
                 for family, address in HOSTS.items():
                     table = "iptables" if family == "ipv4" else "ip6tables"
@@ -391,6 +437,7 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
                     add(table, ["-I", "PREROUTING", "1", "-i", "prh+", "-p", "udp", "-d", address,
                                 "--dport", "36561:36562", "-m", "comment", "--comment", comment,
                                 "-j", chain], owned)
+                preflight(False)
             # 撤销用此前无跳跃流量的第二来源，避免旧 QUIC/conntrack 掩盖新连接结果。
             stage_enter = enter if stage == "on" else off_enter
             log_path = root / f"client-hy2-dnat-{stage}.log"
@@ -425,6 +472,21 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address):
         revoke(owned)
         for table in baseline:
             assert snapshot(table) == baseline[table], "重建后撤销改变了非本轮规则"
+        preflight(True)
+        # legacy 实测限 IPv4；表实例化后结束，不把空表遗留计作恢复支持。
+        add("iptables-legacy", ["-A", "PREROUTING", "-p", "udp", "--dport", "36562",
+                               "-j", "REDIRECT", "--to-ports", "35461"], outside)
+        try:
+            # save 的生成时间会跨秒变化；只比较完整规则正文。
+            def legacy_rules():
+                return [line for line in command(["iptables-legacy-save", "-t", "nat"])
+                        .splitlines() if not line.startswith(b"#")]
+            saved = legacy_rules()
+            preflight(False)
+            assert legacy_rules() == saved
+        finally:
+            current_table, removal = outside.pop()
+            command([current_table, "-w", "-t", "nat"] + removal)
     finally:
         revoke(owned)
         revoke(outside)

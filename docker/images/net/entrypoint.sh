@@ -969,6 +969,133 @@ fail2ban_health() (
         fail2ban_state_read "$STATE_ROOT" && fail2ban_resources health
 )
 
+port_hopping_preflight() {
+    [ "$#" -eq 3 ] || die "port hopping preflight requires start, end and target port"
+    python3 - "$STATE_ROOT" "$@" <<'PY'
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+
+root, *ports = sys.argv[1:]
+
+def command(args):
+    result = subprocess.run(args, text=True, capture_output=True, timeout=5)
+    if result.returncode or result.stderr.strip():
+        raise ValueError(result.stderr.strip() or "cannot inspect port hopping resources")
+    return result.stdout
+
+def port(value):
+    if not re.fullmatch(r"[1-9][0-9]{0,4}", value) or int(value) > 65535:
+        raise ValueError("invalid or noncanonical UDP port")
+    return int(value)
+
+def overlaps(value, start, end):
+    for item in value.split(","):
+        ends = item.split(":")
+        if len(ends) not in {1, 2}:
+            raise ValueError("unverified NAT port selector")
+        first, last = port(ends[0]), port(ends[-1])
+        if first > last:
+            raise ValueError("reversed NAT port selector")
+        if first <= end and last >= start:
+            return True
+    return False
+
+def nat_conflicts(dump, start, end):
+    chains, rules = set(), []
+    for line in dump.splitlines():
+        args = shlex.split(line)
+        if args[:1] == ["-N"] and len(args) == 2:
+            chains.add(args[1])
+        elif args[:1] == ["-P"] and len(args) == 3:
+            chains.add(args[1])
+        elif args[:1] == ["-A"] and len(args) >= 4:
+            rules.append(args)
+        else:
+            raise ValueError("unverified NAT listing")
+        if any(value.startswith(("padm-hop", "PADM_HOP")) for value in args):
+            raise ValueError("unverified existing port hopping owner")
+    for args in rules:
+        values, index = {}, 2
+        while index < len(args):
+            key = args[index]
+            if key in {"!", "--random", "--random-fully", "--persistent"}:
+                index += 1
+                continue
+            if index + 1 >= len(args) or not key.startswith("-"):
+                raise ValueError("unverified NAT rule option")
+            if key != "-m":
+                if key in values:
+                    raise ValueError("duplicate NAT rule option")
+                values[key] = args[index + 1]
+            index += 2
+        target = values.get("-j", values.get("-g"))
+        if target in chains or target in {"ACCEPT", "RETURN", "DROP", "REJECT",
+                                         "SNAT", "MASQUERADE", "LOG", "NFLOG"}:
+            continue
+        if target not in {"DNAT", "REDIRECT", "NETMAP"}:
+            raise ValueError("unverified NAT target")
+        # 地址、接口和来源限制不授予共享范围；仅协议或端口取反会使范围证明失效。
+        negated = {args[index + 1] for index, value in enumerate(args[:-1]) if value == "!"}
+        if not negated & {"-p", "--protocol", "--dport", "--destination-port", "--dports"}:
+            if values.get("-p") in {"tcp", "6"}:
+                continue
+            selected = [values[key] for key in ("--dport", "--destination-port", "--dports")
+                        if key in values]
+            if len(selected) == 1 and not overlaps(selected[0], start, end):
+                continue
+        raise ValueError("UDP range conflicts with existing NAT translation")
+
+try:
+    start, end, target = map(port, ports)
+    if start > end or start <= target <= end:
+        raise ValueError("UDP range is reversed or includes its target port")
+    if os.path.lexists(os.path.join(root, "port-hopping.state")):
+        raise ValueError("existing port hopping state requires verified ownership")
+    # shortcut: 仅核验 iptables-nft 布局，接入其它后端前补齐其冲突与归属合同。
+    for tool in ("iptables", "ip6tables"):
+        if "(nf_tables)" not in command([tool, "--version"]):
+            raise ValueError("port hopping requires the verified iptables-nft backend")
+        nat_conflicts(command([tool, "-w", "-t", "nat", "-S"]), start, end)
+    ruleset = json.loads(command(["nft", "-j", "list", "ruleset"]))
+    for item in ruleset["nftables"]:
+        chain = item.get("chain", {})
+        if chain.get("type") == "nat" and (
+                chain.get("family") not in {"ip", "ip6"} or
+                chain.get("table") != "nat" or
+                chain.get("name") not in {"PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"}):
+            raise ValueError("native nft NAT layout has no verified conflict contract")
+        rule = item.get("rule", {})
+        if rule.get("table") == "nat" and any(
+                not isinstance(expression, dict) or len(expression) != 1 or
+                not set(expression) <= {"match", "counter", "xt", "jump", "goto", "return",
+                                         "accept", "drop", "reject", "log"}
+                for expression in rule.get("expr", [])):
+            raise ValueError("native nft NAT expression has no verified conflict contract")
+    for family in ("ip", "ip6"):
+        path = f"/proc/net/{family}_tables_names"
+        if os.path.exists(path):
+            with open(path, encoding="ascii") as source:
+                if "nat" in source.read().splitlines():
+                    dump = command([f"{family}tables-legacy-save", "-t", "nat"])
+                    if any(line.startswith(("-A ", ":")) for line in dump.splitlines()):
+                        raise ValueError("legacy NAT coexistence is unverified")
+    for line in command(["ss", "-H", "-u", "-a", "-n"]).splitlines():
+        fields = line.split()
+        if len(fields) != 5 or ":" not in fields[3]:
+            raise ValueError("unverified UDP listener listing")
+        bound = port(fields[3].rsplit(":", 1)[1])
+        if start <= bound <= end:
+            raise ValueError("UDP range conflicts with a host listener")
+except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
+    print(f"padm-net: port hopping preflight refused: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 tun_preflight() {
     need ip
     need nft
@@ -1278,6 +1405,7 @@ preflight)
     fail2ban-ssh) shift; fail2ban_ssh_preflight "$@" ;;
     tun) shift; tun_preflight "$@" ;;
     tproxy) shift; tproxy_preflight "$@" ;;
+    port-hopping) shift; port_hopping_preflight "$@" ;;
     *) die "unsupported preflight" ;;
     esac
     ;;

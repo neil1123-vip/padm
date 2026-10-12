@@ -5430,6 +5430,60 @@ Python AST、diff 和独立只读复审通过；仅扩展独立真实测试，
 `.tmp-regression-docker-e428f5a99ed640a6b8c4e32f1b56358d/` 保留日志和结果，
 验收后清理本轮成功源码副本；未新增生产管理支持。
 
+#### 5C.9c.1 跳跃范围的生产只读预检
+
+net 镜像内部 `preflight port-hopping <start> <end> <target>` 复用现有
+入口，先提供无写操作的范围合同；不接 CLI、菜单或规则启用。
+端口必须为规范十进制 `1..65535`，范围不能倒置或包含目标。
+检查 iptables-nft 两族完整 NAT、nft NAT 布局和全部宿主 UDP 套接字
+（含已 connect 的 ESTAB）；已有 `port-hopping.state` 或未知跳跃链/
+comment 均拒绝，不由同名资源推断归属。
+
+转换规则覆盖单端口、闭区间及 multiport；两族重叠、端口/协议取反、
+无端口范围、重复/未知选择器、工具失败或不完整输出均拒绝。
+来源、地址和接口限制不授予共享范围；Docker 的接口取反不妨碍
+独立非重叠端口证明。legacy NAT 共存、未验证原生 nft NAT 布局和
+原生转换表达式继续拒绝；预检只是一时快照，写入前仍须锁与再次核验。
+
+本轮 `docker-port-hopping-preflight -Jobs 2` 的 61 个只读合同通过，
+内部/入口 `7016/8595 ms`；
+`.tmp-regression-docker-8e84eae1e2c64f188ef1a3d840a126de/`。
+真实双栈 selector 复用 5C.9b 的唯一 daemon/离线镜像，确认外来
+IPv4/IPv6 转换与两族 UNCONN/ESTAB 套接字冲突被生产入口拒绝，
+每次预检前后完整 NAT 正文相同；既有 `8/0/8` 流量证据保持。
+同时验证双族原生 nft 转换拒绝并精确按 handle 移除本轮规则，
+IPv4 legacy 共存拒绝且正文保持。Desktop 内核缺少 IPv6 legacy NAT
+表（rc=3），不计该族真实证据，不加载宿主模块或扩大权限。
+内部/入口 `24093/25470 ms`、排队见结果；
+`.tmp-regression-docker-5cb8f5812e184571a3ccebc678a79944/`。
+首次两份失败快照保留，原因是将 Docker `! -i` 错当端口取反；
+已修根因并补合同，不删失败证据。
+新增真实探针初次暴露 nft comment 引用及 IPv6 legacy 内核边界，
+修正夹具并限定证据，相关失败快照继续保留。
+
+新 selector 接完整与 fast-rest 集合；不为本子项重复构建工具镜像。
+顺手删除 alias 合同中被覆盖且未读取的一次目录遍历/哈希，
+原幂等、预览和失败恢复断言保持；不宣称已测得显著耗时收益。
+`docker-entry-port-alias -Jobs 2` 内部/入口 `45851/46966 ms`；
+`.tmp-regression-docker-3b3bba5f4bd34e8d82ca73769f7785c9/`。
+持久归属、写入竞态、精确撤销、旧 conntrack、异常/重启/卸载及
+自动跳跃继续待交付，完整端口跳跃/协议管理仍 deferred，总目标 active。
+
+最终完整 `docker-contracts -Jobs 6` 的 54/54 叶子通过，
+内部/入口 `586127/587215 ms`、排队 `45567 ms`、exit 0、cache_hit=false；
+`.tmp-regression-docker-2fe7234e2e7b435c99f0e69938f3072a/`。
+复用工具镜像，无重新构建；运行中单次采样 `625.99% CPU / 474.5 MiB`，
+不是峰值，不用单轮时长变化证明稳定性能收益。完整输入与最终六个
+实现/测试文件哈希一致，sh/Bash 语法、ShellCheck error、Python AST
+和 diff 检查通过。菜单别名、CDN、XHTTP、区域输入及参数派发只读复核
+未发现新的可复现缺陷，未追加无效改动或重复测试。
+本轮成功归档仅清理 source.tar/files.list，日志、结果及失败输入保留。
+独审发现 legacy-save 时间戳可能跨秒误报，改为去除生成注释后比较完整
+规则正文；修复后真实 selector 内部/入口 `23238/24516 ms`、排队 `214 ms`，
+`.tmp-regression-docker-8e4f2efc2dfc4914abd4b68f8b7872bf/` 通过。
+该显式真实 selector 不在完整合同叶子内，其它完整输入未变，不重跑全套。
+独审收口无阻断；本轮成功输入共清理 `84880131 bytes`。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

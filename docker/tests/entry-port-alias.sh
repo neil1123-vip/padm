@@ -641,7 +641,6 @@ jq -e '(.services.xray.ports | index("0.0.0.0:36661:35444/tcp")) != null' \
     "${root}/compose.json" >/dev/null || fail 'base 端口变更后 alias 未跟随容器入口'
 jq -e 'any(.listeners[]; .listener_id=="alias-36661-tcp" and .container_port==35444)' \
     "${root}/deployment.json" >/dev/null || fail 'base 端口变更后 alias 部署记录未跟随'
-before=$(snapshot)
 captureEditOutputs
 runEdit 0 --port-alias entry-xray 36661 --confirm PADM-DOCKER-EDIT
 assertEditOutputs

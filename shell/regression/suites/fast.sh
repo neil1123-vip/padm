@@ -95,6 +95,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-reality-target-library \
         docker-control-client \
         docker-tproxy-ownership \
+        docker-port-hopping-preflight \
         docker-routing-core-contracts \
         docker-http-relay \
         docker-control-cli \
@@ -138,6 +139,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-phase1 \
         docker-control-client \
         docker-tproxy-ownership \
+        docker-port-hopping-preflight \
         docker-http-relay \
         docker-control-cli \
         docker-phase5 \
@@ -529,6 +531,10 @@ runDockerTProxyOwnershipRegression() {
     bash "${PROJECT_ROOT}/docker/tests/tproxy-ownership.sh"
 }
 
+runDockerPortHoppingPreflightRegression() {
+    python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py"
+}
+
 runDockerTProxyRealRegression() {
     PADM_NET_REAL_CASE=tproxy bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
 }
@@ -649,6 +655,7 @@ registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerContr
 registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogCronRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
+registerRegressionFunctionLeaf docker-port-hopping-preflight runDockerPortHoppingPreflightRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
 
 listRegressionDockerTProxyChildSelectors() {
