@@ -789,6 +789,23 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         test -d "$root"
         dockerUninstallCommand
         test -d "$root"
+        # 删除镜像后必须如实提示，且只删除记录中的五个引用并保留状态。
+        before=$(tar --sort=name --numeric-owner -cf - -C "$root" \
+            config secrets data backups deployment.json compose.json images.env mode bundle | sha256sum)
+        expectedImages=$(
+            for key in PADM_XRAY_IMAGE PADM_SINGBOX_IMAGE PADM_NGINX_IMAGE PADM_OPS_IMAGE PADM_NET_IMAGE; do
+                reference=$(sed -n "s/^${key}=//p" "$root/images.env")
+                printf "image rm %s\n" "$reference"
+            done
+        )
+        logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+        output=$(dockerUninstallCommand --remove-images)
+        test "$output" == "Docker 控制命令及记录的镜像已卸载；状态、配置、数据和备份均已保留"
+        commands=$(tail -n "+$((logBefore + 1))" "$FAKE_DOCKER_LOG")
+        test "$(printf "%s\n" "$commands" | grep "^image ")" == "$expectedImages"
+        test -d "$root"
+        test "$before" == "$(tar --sort=name --numeric-owner -cf - -C "$root" \
+            config secrets data backups deployment.json compose.json images.env mode bundle | sha256sum)"
         dockerUninstallCommand --purge --confirm PADM-DOCKER-PURGE
         test ! -e "$root"
     ' || fail 'phase 6 transaction contract failed'

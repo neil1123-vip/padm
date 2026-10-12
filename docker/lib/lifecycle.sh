@@ -1544,6 +1544,8 @@ dockerUninstallCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
         printf 'Docker 状态、控制 bundle、配置和数据已清理\n'
+    elif ((removeImages)); then
+        printf 'Docker 控制命令及记录的镜像已卸载；状态、配置、数据和备份均已保留\n'
     else
         printf 'Docker 控制命令已卸载；状态、配置、数据、备份和镜像均已保留\n'
     fi
