@@ -129,6 +129,101 @@ targetReply() {
     printf '%s' "${input}" >&3
 }
 
+runTrafficDriver() {
+    local scenario=$1 action value accountId=alpha
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'10\n'
+    targetReply 'Docker 账号管理' $'9\n'
+    case "${scenario}" in
+    flow)
+        targetReply 'Docker 流量与额度' $'1\n'
+        targetReply 'Docker 流量与额度' $'2\n'
+        for value in 0 0.5 000.500000; do
+            targetReply 'Docker 流量与额度' $'3\n'
+            targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
+            targetReply '额度 GiB（0 不限额，空输入/r 返回）' "${value}"$'\n'
+            targetReply '确认设置账号' $'y\n'
+        done
+        targetReply 'Docker 流量与额度' $'4\n'
+        targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
+        targetReply '确认清零账号' $'y\n'
+        ;;
+    cancel)
+        for action in 3 4; do
+            for value in 0 ''; do
+                targetReply 'Docker 流量与额度' "${action}"$'\n'
+                targetReply '流量账号 ID（空输入/0 返回）' "${value}"$'\n'
+            done
+        done
+        for value in '' r R; do
+            targetReply 'Docker 流量与额度' $'3\n'
+            targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
+            targetReply '额度 GiB（0 不限额，空输入/r 返回）' "${value}"$'\n'
+        done
+        for action in 3 4; do
+            for value in '' 0 n; do
+                targetReply 'Docker 流量与额度' "${action}"$'\n'
+                targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
+                if [[ "${action}" == 3 ]]; then
+                    targetReply '额度 GiB（0 不限额，空输入/r 返回）' $'1\n'
+                    targetReply '确认设置账号' "${value}"$'\n'
+                else
+                    targetReply '确认清零账号' "${value}"$'\n'
+                fi
+            done
+        done
+        ;;
+    eof)
+        for action in 3 4; do
+            targetReply 'Docker 流量与额度' "${action}"$'\n'
+            targetReply '流量账号 ID（空输入/0 返回）' $'\004'
+        done
+        targetReply 'Docker 流量与额度' $'3\n'
+        targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
+        targetReply '额度 GiB（0 不限额，空输入/r 返回）' $'\004'
+        for action in 3 4; do
+            targetReply 'Docker 流量与额度' "${action}"$'\n'
+            targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
+            if [[ "${action}" == 3 ]]; then
+                targetReply '额度 GiB（0 不限额，空输入/r 返回）' $'1\n'
+                targetReply '确认设置账号' $'\004'
+            else
+                targetReply '确认清零账号' $'\004'
+            fi
+        done
+        ;;
+    status-failed)
+        targetReply 'Docker 流量与额度' $'3\n'
+        targetReply 'Docker 流量与额度' $'4\n'
+        ;;
+    invalid|unknown|failed)
+        [[ "${scenario}" != unknown ]] || accountId=missing-account
+        [[ "${scenario}" != failed ]] || targetReply 'Docker 流量与额度' $'2\n'
+        for action in 3 4; do
+            [[ "${scenario}" != invalid || "${action}" == 3 ]] || continue
+            targetReply 'Docker 流量与额度' "${action}"$'\n'
+            targetReply '流量账号 ID（空输入/0 返回）' "${accountId}"$'\n'
+            if [[ "${action}" == 3 ]]; then
+                value=0.5
+                [[ "${scenario}" != invalid ]] || value=not-a-limit
+                targetReply '额度 GiB（0 不限额，空输入/r 返回）' "${value}"$'\n'
+                targetReply '确认设置账号' $'y\n'
+            else
+                targetReply '确认清零账号' $'y\n'
+            fi
+        done
+        ;;
+    esac
+    targetReply 'Docker 流量与额度' $'1\n'
+    if [[ "${scenario}" == eof ]]; then
+        targetReply 'Docker 流量与额度' $'\004'
+    else
+        targetReply 'Docker 流量与额度' $'0\n'
+    fi
+    targetReply 'Docker 账号管理' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runTargetsDriver() {
     local scenario=$1
     local -A targetPrompts=()
@@ -1800,6 +1895,8 @@ runPty() {
             runSitesDriver "${input}"
         elif [[ "${driver}" == routing ]]; then
             runRoutingDriver "${input}"
+        elif [[ "${driver}" == traffic ]]; then
+            runTrafficDriver "${input}"
         elif [[ "${driver}" == accounts ]]; then
             local accountMenuCount=1
             printf '10\n' >&3
@@ -2188,6 +2285,29 @@ edit)
     exit "${SITE_EDIT_STATUS:-0}"
     ;;
 account) recordAction "$@" ;;
+traffic)
+    recordAction "$@"
+    case "${2:-}" in
+    show)
+        [[ "$#" -eq 2 ]] || exit 2
+        exit "${TRAFFIC_SHOW_STATUS:-0}"
+        ;;
+    collect)
+        [[ "$#" -eq 2 ]] || exit 2
+        ;;
+    limit|reset)
+        # 只验证菜单传参和退出码；实际采集、额度恢复由流量合同覆盖。
+        if [[ "$2" == limit ]]; then
+            [[ "$#" -eq 4 && "$4" =~ ^[0-9]+([.][0-9]{1,6})?$ ]] || exit 2
+        else
+            [[ "$#" -eq 3 ]] || exit 2
+        fi
+        [[ "$3" == alpha ]] || exit 1
+        ;;
+    *) exit 2 ;;
+    esac
+    exit "${TRAFFIC_ACTION_STATUS:-0}"
+    ;;
 assess) recordAction "$@" ;;
 validate|update|rollback|uninstall)
     recordAction "$@"
@@ -3516,6 +3636,68 @@ printf '{"name":"padm-docker","services":{}}\n' >"${PADM_DOCKER_INSTALL_DIR}/com
 runPty accounts accounts '' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'account list\naccount create --name Bob --listeners entry-reality --disabled\naccount edit alpha --name Alpha-Edited --listeners entry-reality\naccount copy alpha --name Alpha-Copy\naccount enable alpha\naccount disable alpha\naccount delete alpha --yes\naccount rotate alpha --yes' ]] ||
     fail 'account menu dispatched incorrect actions'
+
+# 七个 PTY 会话复用同一夹具，不重复流量后端或展开协议矩阵。
+for trafficCase in flow cancel eof status-failed invalid unknown failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export TRAFFIC_SHOW_STATUS=0 TRAFFIC_ACTION_STATUS=0
+    [[ "${trafficCase}" != status-failed ]] || TRAFFIC_SHOW_STATUS=17
+    [[ "${trafficCase}" != failed ]] || TRAFFIC_ACTION_STATUS=17
+    runPty "traffic-${trafficCase}" traffic "${trafficCase}" "${TLS_WIZARD_CLI}" menu
+    limitConfirmations=0 resetConfirmations=0
+    case "${trafficCase}" in
+    flow)
+        expectedTraffic=$'traffic show\ntraffic collect\ntraffic show\ntraffic limit alpha 0\ntraffic show\ntraffic limit alpha 0.5\ntraffic show\ntraffic limit alpha 000.500000\ntraffic show\ntraffic reset alpha\ntraffic show'
+        limitConfirmations=3 resetConfirmations=1
+        ;;
+    cancel)
+        expectedTraffic=$(printf 'traffic show\n%.0s' {1..14})
+        limitConfirmations=3 resetConfirmations=3
+        ;;
+    eof)
+        expectedTraffic=$(printf 'traffic show\n%.0s' {1..6})
+        limitConfirmations=1 resetConfirmations=1
+        ;;
+    status-failed)
+        expectedTraffic=$'traffic show\ntraffic show\ntraffic show'
+        ! grep -Fq '流量账号 ID' "${CONTROL_LOG}" ||
+            fail 'traffic 状态失败后仍读取账号 ID'
+        ;;
+    invalid)
+        expectedTraffic=$'traffic show\ntraffic limit alpha not-a-limit\ntraffic show'
+        limitConfirmations=1
+        grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" ||
+            fail 'traffic 非法额度未保留 CLI 退出码'
+        ;;
+    unknown)
+        expectedTraffic=$'traffic show\ntraffic limit missing-account 0.5\ntraffic show\ntraffic reset missing-account\ntraffic show'
+        limitConfirmations=1 resetConfirmations=1
+        [[ "$(grep -Fc '操作失败，退出码: 1' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'traffic 未知账号失败未返回菜单'
+        ;;
+    failed)
+        expectedTraffic=$'traffic collect\ntraffic show\ntraffic limit alpha 0.5\ntraffic show\ntraffic reset alpha\ntraffic show'
+        limitConfirmations=1 resetConfirmations=1
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail 'traffic 操作失败未保留退出码或不能继续诊断'
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedTraffic}" ]] ||
+        fail "traffic ${trafficCase} 参数分发错误或取消后仍执行操作"
+    [[ "$(grep -Fc '确认设置账号' "${CONTROL_LOG}" || true)" -eq "${limitConfirmations}" &&
+        "$(grep -Fc '确认清零账号' "${CONTROL_LOG}" || true)" -eq "${resetConfirmations}" ]] ||
+        fail "traffic ${trafficCase} 确认次数不正确"
+    grep -Fq '9. 流量与额度' "${CONTROL_LOG}" &&
+        grep -Fq '1. 查看已存流量与额度' "${CONTROL_LOG}" &&
+        grep -Fq '2. 立即采集并检查额度' "${CONTROL_LOG}" &&
+        grep -Fq '3. 设置账号额度' "${CONTROL_LOG}" &&
+        grep -Fq '4. 重置账号累计' "${CONTROL_LOG}" ||
+        fail 'traffic 菜单入口缺失'
+    [[ "${resetConfirmations}" -eq 0 ]] ||
+        grep -Fq '上传和下载累计（保留额度）' "${CONTROL_LOG}" ||
+        fail 'traffic 重置确认未说明保留额度'
+done
+unset TRAFFIC_SHOW_STATUS TRAFFIC_ACTION_STATUS
 
 : >"${COMPOSE_LOG}"
 runPty repeated-status-restart menu $'1\n1\n5\n1\n0\n' "${CLI}" menu

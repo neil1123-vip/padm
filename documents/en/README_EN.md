@@ -981,6 +981,13 @@ On success, stdout contains only JSON with `release` and `images`. It is emitted
 
 ### User Traffic and Quotas
 
+The Docker menu exposes `10. Account Management -> 9. Traffic and Quotas`.
+Saved-counter display does not collect implicitly. Collection also checks quotas;
+quota changes and resets require one confirmation, and reset retains the limit.
+Enter `0` for unlimited, or an empty value or `r` to return; use the exact displayed
+account ID. Collection, core restarts, locking and recovery retain CLI semantics.
+Failure may occur after sampling or quota state has been saved.
+
 `configure` and `update` configure user statistics for the active core and install a host collection task that runs every minute. The task prefers `padm-docker-traffic.timer`, with a running cron daemon as the fallback. Both Xray and sing-box accumulate upload and download bytes by stable account ID. The same UUID across protocol inbounds shares one total, while display names are preserved separately.
 
 ```bash

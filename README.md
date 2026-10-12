@@ -1195,6 +1195,11 @@ padm-docker release --manifest /path/release-manifest.json \
 
 ### 用户流量与额度
 
+Docker 菜单 `10. 账号管理 → 9. 流量与额度` 可查看已保存计数、立即采集并检查额度、
+设置账号额度或重置累计。查看不隐式采集；设置和重置各确认一次，重置保留额度。
+额度 `0` 表示不限额，空输入或 `r` 返回；账号 ID 使用查看结果原文。
+采集、核心重启、锁和恢复语义沿用 CLI，失败可能已保存采样或额度状态。
+
 `configure` 和 `update` 会为当前核心配置用户统计，并安装每分钟执行的宿主采集任务：优先使用 `padm-docker-traffic.timer`，无 systemd 时使用已运行的 cron。Xray 和 sing-box 均按稳定账号 ID 累计上传、下载流量；同一 UUID 在多个协议入口中合并计量，显示名称独立保留。
 
 ```bash

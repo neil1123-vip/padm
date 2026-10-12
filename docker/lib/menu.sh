@@ -437,6 +437,7 @@ dockerMenuAccounts() {
             '6. 停用账号' \
             '7. 删除账号' \
             '8. 轮换凭据' \
+            '9. 流量与额度' \
             '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -500,6 +501,49 @@ dockerMenuAccounts() {
             n|N|no|NO) ;;
             *) printf '请输入 y 或 n。\n' ;;
             esac
+            ;;
+        9) dockerMenuTraffic ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuTraffic() {
+    local choice accountId limit answer confirmation
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 流量与额度\n'
+        printf '%s\n' '1. 查看已存流量与额度' '2. 立即采集并检查额度' \
+            '3. 设置账号额度' '4. 重置账号累计' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun traffic show || true ;;
+        2) dockerMenuRun traffic collect || true ;;
+        3|4)
+            dockerMenuRun traffic show || continue
+            dockerSetupRead accountId '流量账号 ID（空输入/0 返回）: ' &&
+                [[ -n "${accountId}" ]] || continue
+            if [[ "${choice}" == 3 ]]; then
+                # 额度 0 表示不限额，不能使用把 0 当返回键的共用输入函数。
+                printf '额度 GiB（0 不限额，空输入/r 返回）: '
+                IFS= read -r limit || continue
+                case "${limit}" in ''|r|R) continue ;; esac
+                confirmation="确认设置账号 ${accountId} 的额度为 ${limit} GiB（0 不限额）？[y/N]: "
+            else
+                confirmation="确认清零账号 ${accountId} 的上传和下载累计（保留额度）？[y/N]: "
+            fi
+            dockerSetupRead answer "${confirmation}" n || continue
+            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+            if [[ "${choice}" == 3 ]]; then
+                dockerMenuRun traffic limit "${accountId}" "${limit}" || true
+            else
+                dockerMenuRun traffic reset "${accountId}" || true
+            fi
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
