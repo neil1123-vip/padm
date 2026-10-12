@@ -201,7 +201,8 @@ Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROX
 默认首页不写入站点目录，已有 `/etc/padm-docker/data/static/index.html` 优先；
 支持通用字段编辑、同核复制/删除与链接；默认页、静态目录、302 和 ALPN 已支持事务管理，宿主集成及独立 HTTPS 发布尚未开放。
 
-Docker 菜单 `16. 站点管理` 管理已有 Nginx TLS 入口 `21–25` 或 fallback `27`/`29` 的站点：
+Docker 菜单 `16. 站点管理` 管理已有 Nginx TLS 入口 `21–25`、fallback `27`/`29`
+或 Hysteria2 的静态网页：
 
 ```bash
 padm-docker edit --site-template notes --preview
@@ -219,15 +220,26 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 发布时复制内容；切换默认页/302 或不提供新目录的编辑均保留原静态文件。
 站点模式适用于部署中所有上述 Nginx 入口，不改变代理、订阅、端口、TLS 或 ALPN；
 失败和 INT/TERM 同时恢复站点及规格，旧无站点快照保留当前静态目录。
-删除最后一个 Nginx 入口会清除站点模式，仍保留静态文件及其它 TLS 入口。
+删除最后一个 Nginx 入口时，仍有 Hysteria2 则保留静态模式；没有站点消费者时清除模式，
+静态文件及其它 TLS 入口仍保留。
 `status` 只报告 `site_mode`，不输出目标 URL。已有旧规格保持兼容，带 `.site` 的 v3
 规格要求控制 bundle 声明 `x-padm-site-content`；受管 webroot 与 standalone HTTP-01 见证书管理。
 
 菜单 `16 → 8. 内置静态站点` 可选择 `notes`、`photos` 或 `docs`。内置主题仅适用于
-已有 v3 Xray Nginx TLS `21–25` 或 fallback `27/29`，包含 sing-box `23` 或
-Hysteria2 的部署明确拒绝；其它不提供网站的 Reality 入口可共存。主题从验签后的
+已有 v3 Xray Nginx TLS `21–25`、fallback `27/29` 或 sing-box Hysteria2，
+包含 sing-box `23` 的部署明确拒绝；其它不提供网站的 Reality 入口可共存。主题从验签后的
 控制包复制，随包清单和资源完整性校验失败即拒绝；生成后只保存普通 `site.mode=static`，
 不保存主题身份，旧控制包的默认页、静态目录和 302 行为保持。
+
+Hysteria2 先通过上面的模板或目录命令发布网页，再在 `协议与入口 → 编辑已有入口`
+选择 Hysteria2 参数，将混淆关闭，伪装设置为 `local`；CLI 可用完整受管规格的
+`edit --spec <root 私有文件>` 将已有入口的 `hy2.masquerade` 改为 `local`。
+只挂载受管 `data/static` 到固定只读 `/srv/padm/`，拒绝任意 `file://` 输入；
+所有 local 入口与 Nginx 共用该网页。local 要求 `site.mode=static`、`obfs=null`，
+启用期间切换默认页、302 或开启混淆均拒绝。先把伪装设为 `off` 或 HTTPS 可关闭
+本地网页，静态文件保留；纯 Hysteria2 不提供默认页/302，首配不接受 local。
+local 与纯 Hysteria2 静态准备规格要求 `x-padm-hy2-local-site`；旧默认/HTTPS
+规格及无 local 的 Nginx 静态组合保持旧包兼容。网页外观不证明抗识别能力。
 
 同一菜单提供 `27`/`29` 的 ALPN 诊断、推荐修复和三种手动顺序：
 
@@ -1421,7 +1433,7 @@ Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Re
 
 内置布局可配置站名，默认站名与配色固定，同主题重装保持已保存的值。安装后应持续维护真实文章、图片、导航和内页；整套内容与配置可在独立目录准备后导入。同一布局仍共用 HTML/CSS 结构，随机外观或内容差异都不能提供抗识别保证。
 
-原生 Hysteria2 的“认证失败伪装”可直接填写 `file:///srv/own-site/` 使用独立自有网站目录，或填写受你控制的网站 `http://`、`https://` URL 进行反向代理。`local` 使用已有本机网页，`notes`、`photos`、`docs` 初始化内置布局；文件目录须满足上述可读首页及内容限制。sing-box 文件服务的未知路径使用 Go 默认 404 文本。启用混淆后，普通浏览器不能以标准 HTTP/3 访问该入口。Docker 本地网页本轮未接入，仍保持现有远程 HTTPS 伪装。协议细节参见 [Hysteria2 协议](https://v2.hysteria.network/docs/developers/Protocol/) 与 [sing-box Hysteria2 入站](https://sing-box.sagernet.org/configuration/inbound/hysteria2/)。
+原生 Hysteria2 的“认证失败伪装”可直接填写 `file:///srv/own-site/` 使用独立自有网站目录，或填写受你控制的网站 `http://`、`https://` URL 进行反向代理。`local` 使用已有本机网页，`notes`、`photos`、`docs` 初始化内置布局；文件目录须满足上述可读首页及内容限制。sing-box 文件服务的未知路径使用 Go 默认 404 文本。启用混淆后，普通浏览器不能以标准 HTTP/3 访问该入口。Docker 仅支持受管静态网页加 `local`，使用固定只读目录并要求关闭混淆。协议细节参见 [Hysteria2 协议](https://v2.hysteria.network/docs/developers/Protocol/) 与 [sing-box Hysteria2 入站](https://sing-box.sagernet.org/configuration/inbound/hysteria2/)。
 
 ## 订阅与用户
 

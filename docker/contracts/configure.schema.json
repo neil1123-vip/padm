@@ -15,6 +15,7 @@
   "x-padm-ssh-fail2ban": true,
   "x-padm-site-content": true,
   "x-padm-site-templates": true,
+  "x-padm-hy2-local-site": true,
   "x-padm-fallback-alpn": true,
   "x-padm-acme-webroot": true,
   "x-padm-routing-socks5": true,
@@ -778,14 +779,54 @@
     {
       "if": {"required": ["site"]},
       "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "core": {
+                "properties": {
+                  "protocols": {"contains": {"properties": {"id": {"enum": [21, 22, 23, 24, 25, 27, 29]}}}}
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "site": {"properties": {"mode": {"const": "static"}}},
+              "core": {
+                "properties": {
+                  "protocols": {"contains": {"properties": {"id": {"const": 3}}}}
+                }
+              }
+            }
+          }
+        ],
+        "properties": {"schema_version": {"const": 3}}
+      }
+    },
+    {
+      "if": {
         "properties": {
-          "schema_version": {"const": 3},
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [21, 22, 23, 24, 25, 27, 29]}}}}
+              "protocols": {
+                "contains": {
+                  "required": ["hy2"],
+                  "properties": {
+                    "id": {"const": 3},
+                    "hy2": {
+                      "required": ["masquerade"],
+                      "properties": {"masquerade": {"const": "local"}}
+                    }
+                  }
+                }
+              }
             }
           }
         }
+      },
+      "then": {
+        "required": ["site"],
+        "properties": {"site": {"properties": {"mode": {"const": "static"}}}}
       }
     },
     {
@@ -1631,6 +1672,12 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["domain", "bandwidth_mode", "up_mbps", "down_mbps", "obfs", "masquerade"],
+              "allOf": [
+                {
+                  "if": {"properties": {"masquerade": {"const": "local"}}},
+                  "then": {"properties": {"obfs": {"type": "null"}}}
+                }
+              ],
               "properties": {
                 "domain": {
                   "$ref": "#/$defs/hostname",
@@ -1660,7 +1707,7 @@
                 "masquerade": {
                   "type": "string",
                   "maxLength": 2048,
-                  "pattern": "^(?:|https://(?=.{1,253}(?:/|$))(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?)$",
+                  "pattern": "^(?:|local|https://(?=.{1,253}(?:/|$))(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?)$",
                   "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
                 }
               }

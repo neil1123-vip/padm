@@ -9,6 +9,8 @@ set -euo pipefail
 }
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 XRAY_REF=$1 SING_REF=$2 OPS_REF=$3
+HY2_SITES=${PADM_TEST_HY2_SITES:-0}
+[[ "${HY2_SITES}" == 0 || "${HY2_SITES}" == 1 ]] || exit 2
 for tool in docker jq python3 sha256sum tar openssl; do command -v "${tool}" >/dev/null; done
 # 不接受缺失镜像或隐式拉取，所有容器固定到本机 inspect 得到的不可变 image ID。
 XRAY_ID=$(docker image inspect --format '{{.Id}}' "${XRAY_REF}")
@@ -17,6 +19,12 @@ OPS_ID=$(docker image inspect --format '{{.Id}}' "${OPS_REF}")
 for image in "${XRAY_ID}" "${SING_ID}" "${OPS_ID}"; do
     [[ "${image}" =~ ^sha256:[a-f0-9]{64}$ ]]
 done
+CURL_ID=
+if [[ "${HY2_SITES}" == 1 ]]; then
+    [[ -n "${PADM_TEST_HY2_CURL_REF:-}" ]] || exit 2
+    CURL_ID=$(docker image inspect --format '{{.Id}}' "${PADM_TEST_HY2_CURL_REF}")
+    [[ "${CURL_ID}" =~ ^sha256:[a-f0-9]{64}$ ]]
+fi
 project="padm-hysteria2-$(date +%s)-$$-${RANDOM}"
 volume="${project}-files"
 subnet=$(printf 'fd42:7061:646d:%x::/64' "${RANDOM}")
@@ -167,6 +175,7 @@ tar -cpf - -C "${TEST_ROOT}" runtime |
     docker run --rm -i --pull=never --label "io.padm.test=${project}" --user 0 \
         --mount "type=volume,source=${volume},target=/test" --entrypoint tar "${OPS_ID}" -xpf - -C /test
 COMPOSE="${TEST_ROOT}/compose.json"
+generateCompose() {
 jq --arg project "${project}" --arg volume "${volume}" --arg sing "${SING_ID}" \
     --arg ops "${OPS_ID}" --arg subnet "${subnet}" '
   .name = $project | .networks.default.name = $project |
@@ -190,6 +199,8 @@ jq --arg project "${project}" --arg volume "${volume}" --arg sing "${SING_ID}" \
     volumes:[{type:"volume",source:"files",target:"/etc/padm/client",read_only:true,
       volume:{nocopy:true,subpath:"runtime/client"}}]}
 ' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >"${COMPOSE}"
+}
+generateCompose
 compose() {
     docker compose --project-name "${project}" --file "${COMPOSE}" --profile '*' "$@"
 }
@@ -289,6 +300,7 @@ tar -cpf - -C "${TEST_ROOT}" runtime/client |
 compose run --rm --no-deps client check -c /etc/padm/client/config.json >/dev/null
 compose up -d --pull never client
 # ops 镜像不含 curl，复用 stdlib SOCKS 请求；只等待监听，不重试已发送的真实握手。
+businessProbe() {
 docker run --rm --pull=never --network "${project}" --label "io.padm.test=${project}" \
     --entrypoint python3 "${OPS_ID}" -c '
 import concurrent.futures
@@ -346,5 +358,186 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
     results=list(pool.map(probe,range(2081,2087)))
 print("docker-hysteria2-real-probe-ok: source=protocol-links transport=udp family=ipv4,ipv6 modes=bbr,brutal,salamander socks="+",".join(results))
 '
+}
+businessProbe
+
+if [[ "${HY2_SITES}" == 1 ]]; then
+    siteSpec="${TEST_ROOT}/site.json"
+    DOCKER_STAGED_BUNDLE_PATH=$(dockerCurrentBundlePath)
+    siteProbe() {
+        local theme=$1 enabled=$2
+        server=$(compose ps -q sing-box)
+        addresses=$(docker inspect "${server}" |
+            jq -cer --arg project "${project}" '.[0].NetworkSettings.Networks[$project] | [.IPAddress,.GlobalIPv6Address]')
+        docker inspect "${server}" | jq -e --argjson enabled "${enabled}" '
+          .[0] | .State.Running == true and .State.Health.Status == "healthy" and
+          ([.Mounts[] | select(.Destination == "/srv/padm")] |
+            if $enabled then length == 1 and .[0].RW == false else length == 0 end)
+        ' >/dev/null
+        docker run --rm --init -i --pull=never --read-only --cap-drop ALL --user 10001:10001 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=32m --network "${project}" \
+            --label "io.padm.test=${project}" \
+            --mount "type=volume,source=${volume},target=/site,readonly,volume-subpath=runtime/data/static" \
+            --mount "type=volume,source=${volume},target=/client,readonly,volume-subpath=runtime/client" \
+            --entrypoint python3 "${CURL_ID}" - "${theme}" "${addresses}" "${enabled}" <<'PY'
+import ipaddress
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+theme, endpoints, enabled = sys.argv[1], json.loads(sys.argv[2]), sys.argv[3] == "true"
+assert [ipaddress.ip_address(value).version for value in endpoints] == [4, 6]
+site = Path("/site")
+articles = {
+    "notes": ("a-reading-notebook.html", "assets/woodland.jpg"),
+    "photos": ("reading-a-ridgeline.html", "assets/ridge.jpg"),
+    "docs": ("checking-file-integrity.html", "assets/ridge.jpg"),
+}
+cases = [
+    ("GET", "/", 200, "index.html"),
+    ("HEAD", "/", 200, "index.html"),
+    ("GET", "/index.html", 301, None),
+    ("GET", "/"+articles[theme][0], 200, articles[theme][0]),
+    ("GET", "/assets/style.css", 200, "assets/style.css"),
+    ("GET", "/assets/favicon.png", 200, "assets/favicon.png"),
+    ("GET", "/"+articles[theme][1], 200, articles[theme][1]),
+    ("GET", "/404.html", 200, "404.html"),
+]
+cases += [("GET", path, 404, None) for path in (
+    "/missing-page", "/check", "/static-site.json", "/.env", "/.padm-site",
+    "/api", "/api/status", "/config/spec.json", "/deployment.json",
+    "/secrets/tls/hy2.padm.test.key", "/../../secrets/tls/hy2.padm.test.key")]
+cases.append(("POST", "/auth", 404, None))
+records = []
+with tempfile.TemporaryDirectory(prefix="hy2-site-") as work:
+    for endpoint in endpoints:
+        authority = f"[{endpoint}]" if ":" in endpoint else endpoint
+        base = [
+            "curl", "--http3-only", "--silent", "--show-error", "--noproxy", "*",
+            "--path-as-is", "--connect-timeout", "2", "--max-time", "10",
+            "--cacert", "/client/ca.crt", "--resolve", f"hy2.padm.test:35461:{authority}",
+        ]
+        for method, path, expected, asset in cases:
+            headers_path, body_path = Path(work)/"headers", Path(work)/"body"
+            arguments = base + ["--dump-header", str(headers_path), "--output", str(body_path),
+                                "--write-out", "%{http_code} %{http_version}"]
+            if method == "HEAD":
+                arguments += ["--head"]
+            elif method == "POST":
+                arguments += ["--request", "POST", "--header", "Hysteria-Auth: incorrect-password"]
+            if path.startswith("/../"):
+                # 跟随路径规范化后仍须拒绝私有文件，不能只检查首个跳转。
+                arguments += ["--location", "--max-redirs", "3"]
+            arguments += [f"https://hy2.padm.test:35461{path}"]
+            response = subprocess.run(arguments, capture_output=True, text=True, check=True)
+            status, version = response.stdout.split()
+            status = int(status)
+            headers = {}
+            for line in headers_path.read_text().splitlines()[1:]:
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    headers[key.lower()] = value.strip()
+            body = b"" if method == "HEAD" else body_path.read_bytes()
+            wanted = expected if enabled else 404
+            record = dict(theme=theme, enabled=enabled, family=ipaddress.ip_address(endpoint).version,
+                          method=method, path=path, status=status, http_version=version, bytes=len(body))
+            assert version == "3" and status == wanted, record
+            if enabled and asset is not None:
+                expected_body = (site/asset).read_bytes()
+                if method == "HEAD":
+                    assert int(headers["content-length"]) == len(expected_body), record
+                else:
+                    assert body == expected_body, record
+            if enabled and path == "/index.html":
+                assert headers["location"] == "./", record
+            assert all(secret not in body for secret in (
+                b"11111111-1111-4111-8111-111111111111", b"salamander-real-123456",
+                b"PRIVATE KEY", b'"private_key"', b'"manifest_sha256"')), record
+            if path == "/auth":
+                assert "hysteria-udp" not in headers and "hysteria-cc-rx" not in headers, record
+            records.append(record)
+        if enabled:
+            for host, ca in (("hy2.padm.test", None), ("wrong.padm.test", "/client/ca.crt")):
+                arguments = [
+                    "curl", "--http3-only", "--silent", "--show-error", "--noproxy", "*",
+                    "--connect-timeout", "2", "--max-time", "5", "--output", "/dev/null",
+                    "--resolve", f"{host}:35461:{authority}", f"https://{host}:35461/",
+                ]
+                if ca:
+                    arguments[1:1] = ["--cacert", ca]
+                response = subprocess.run(arguments, capture_output=True)
+                assert response.returncode == 60, (host, response.returncode, response.stderr)
+print("docker-hy2-sites-h3-ok: "+json.dumps(records, separators=(",", ":")), flush=True)
+PY
+    }
+    installSiteCandidate() {
+        compose stop sing-box >/dev/null
+        [[ "${PADM_DOCKER_INSTALL_DIR}" == "${TEST_ROOT}/state" ]]
+        rm -rf -- "${PADM_DOCKER_INSTALL_DIR}/data/static" "${TEST_ROOT}/runtime/data/static"
+        cp -a "${candidate}/config/." "${PADM_DOCKER_INSTALL_DIR}/config/"
+        cp -a "${candidate}/data/." "${PADM_DOCKER_INSTALL_DIR}/data/"
+        cp -a "${candidate}/secrets/." "${PADM_DOCKER_INSTALL_DIR}/secrets/"
+        cp "${candidate}/compose.json" "${candidate}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/"
+        cp "${candidate}/images.runtime.env" "${PADM_DOCKER_INSTALL_DIR}/images.env"
+        cp -a "${candidate}/config" "${candidate}/data" "${candidate}/secrets" "${TEST_ROOT}/runtime/"
+        dockerCleanupConfigurationCandidate
+        tar -cpf - -C "${TEST_ROOT}" runtime/config runtime/data runtime/secrets |
+            docker run --rm -i --pull=never --label "io.padm.test=${project}" --user 0 \
+                --mount "type=volume,source=${volume},target=/test" --entrypoint sh "${OPS_ID}" \
+                -c 'rm -rf -- /test/runtime/data/static && tar -xpf - -C /test'
+        generateCompose
+        compose config --format json >/dev/null
+        compose run --rm --no-deps sing-box check -D /var/lib/padm/sing-box \
+            -c /etc/padm/sing-box/config.json >/dev/null
+        compose up -d --force-recreate --pull never --wait --wait-timeout 60 sing-box
+        compose restart client >/dev/null
+    }
+    for theme in notes photos docs; do
+        # 先用生产模板落盘，再用普通规格字段启用 local，保留已有认证与混淆入口。
+        jq '.site = {mode:"static"}' "${SPEC}" >"${siteSpec}"
+        chmod 0600 "${siteSpec}"
+        dockerCreateConfigurationCandidate
+        candidate=${DOCKER_CONFIG_CANDIDATE}
+        dockerGenerateCandidate "${siteSpec}" "${candidate}" '' '' '' '' "${theme}"
+        jq -e 'all(.inbounds[]; has("masquerade") | not)' \
+            "${candidate}/config/sing-box/config.json" >/dev/null
+        [[ "${PADM_DOCKER_INSTALL_DIR}" == "${TEST_ROOT}/state" ]]
+        rm -rf -- "${PADM_DOCKER_INSTALL_DIR}/data/static"
+        cp -a "${candidate}/data/static" "${PADM_DOCKER_INSTALL_DIR}/data/"
+        dockerCleanupConfigurationCandidate
+        jq '.core.protocols |= map(if .hy2.obfs == null then .hy2.masquerade = "local" else . end)' \
+            "${siteSpec}" >"${siteSpec}.next"
+        mv "${siteSpec}.next" "${siteSpec}"
+        chmod 0600 "${siteSpec}"
+        dockerConfigureSpecValidate "${siteSpec}"
+        dockerCreateConfigurationCandidate
+        candidate=${DOCKER_CONFIG_CANDIDATE}
+        dockerGenerateCandidate "${siteSpec}" "${candidate}"
+        jq -e 'all(.inbounds[] | select(.tag != "entry-hy2-salamander");
+          .masquerade == "file:///srv/padm/" and (has("obfs") | not)) and
+          all(.inbounds[] | select(.tag == "entry-hy2-salamander"); has("masquerade") | not)' \
+            "${candidate}/config/sing-box/config.json" >/dev/null
+        jq -e '.services["sing-box"].volumes |
+          [.[] | select(.target == "/srv/padm" and .source == "${PADM_DOCKER_ROOT}/data/static" and .read_only == true)] |
+          length == 1' "${candidate}/compose.json" >/dev/null
+        installSiteCandidate
+        siteProbe "${theme}" true
+        businessProbe
+    done
+    jq '.core.protocols |= map(.hy2.masquerade = "")' "${siteSpec}" >"${siteSpec}.next"
+    mv "${siteSpec}.next" "${siteSpec}"
+    chmod 0600 "${siteSpec}"
+    dockerCreateConfigurationCandidate
+    candidate=${DOCKER_CONFIG_CANDIDATE}
+    dockerGenerateCandidate "${siteSpec}" "${candidate}"
+    jq -e 'all(.inbounds[]; has("masquerade") | not)' \
+        "${candidate}/config/sing-box/config.json" >/dev/null
+    installSiteCandidate
+    siteProbe docs false
+    businessProbe
+    printf 'docker-hy2-sites-real-ok: themes=notes,photos,docs family=ipv4,ipv6 ca-sni=verified mount=readonly disabled=404 auth=preserved\n'
+fi
 printf 'docker-hysteria2-real-ok: endpoint=isolated-compose xray=%s sing-box=%s ops=%s\n' \
     "${XRAY_ID}" "${SING_ID}" "${OPS_ID}"

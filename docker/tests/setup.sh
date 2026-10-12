@@ -1025,6 +1025,13 @@ done
 fi
 
 if [[ "${SECTION}" != encrypted-tcp ]]; then
+newState hy2-local-first
+runPty 2 hy2-local-first "${HY2_INPUT/$'n\n\n2\n'/$'n\nlocal\n2\n'}" setup "${ASSET_ARGS[@]}"
+[[ ! -f "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" &&
+    ! -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/hy2.example.com.crt" ]] ||
+    fail 'Hy2 首配 local 被拒绝后仍提交配置或 TLS'
+grep -Fq '首配完成后，先发布静态站点' "${CONTROL_LOG}" || fail 'Hy2 首配 local 拒绝缺少后续操作提示'
+
 for hy2Case in hy2-default dual-hy2; do
     newState "${hy2Case}"
     if [[ "${hy2Case}" == hy2-default ]]; then input=${HY2_INPUT}; else input=${DUAL_HY2_INPUT}; fi
@@ -1098,6 +1105,28 @@ jq -e '.core.protocols[0] as $first | .core.protocols[1] as $copy |
 runPty 0 hy2-clear $'13\nentry-1\n4\n1\n13\nentry-1\n5\noff\n13\nentry-1\n1\nbbr\n8\ny\n' edit "${ASSET_ARGS[@]}"
 jq -e '.core.protocols[1].hy2 | .bandwidth_mode == "bbr" and .obfs == null and .masquerade == ""' \
     "${SPEC}" >/dev/null || fail 'Hysteria2 clearing of obfuscation or masquerade failed'
+# 已有入口先安装主题，取消不提交；local 必须复用发布好的普通静态站点。
+before=$(snapshot)
+runPty 15 hy2-local-without-site $'13\nentry-1\n5\nlocal\n8\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail '缺少静态网页的 local 编辑改变部署'
+grep -Fq 'local 使用已发布的受管静态网页；请先在站点菜单发布目录或内置主题，并关闭混淆。' \
+    "${CONTROL_LOG}" || fail 'Hy2 参数菜单未说明 local 的前置步骤'
+runPty 0 hy2-site-template '' edit --site-template notes --confirm PADM-DOCKER-EDIT "${ASSET_ARGS[@]}"
+before=$(snapshot)
+runPty 0 hy2-local-cancel $'13\nentry-1\n5\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail '取消 Hy2 local 参数编辑改变静态内容或部署'
+runPty 0 hy2-local $'13\nentry-1\n5\nlocal\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.site == {mode:"static"} and
+  (.core.protocols[] | select(.listener_id == "entry-1") | .hy2 |
+    .masquerade == "local" and .obfs == null)' "${SPEC}" >/dev/null ||
+    fail 'Hy2 参数菜单没有保留静态模式或提交 local'
+jq -e 'any(.inbounds[]; .tag == "entry-1" and .type == "hysteria2" and
+  .masquerade == "file:///srv/padm/")' "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/users.base" >/dev/null ||
+    fail 'Hy2 参数菜单没有生成固定本地网页路径'
+runPty 0 hy2-local-off $'13\nentry-1\n5\noff\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.site == {mode:"static"} and
+  (.core.protocols[] | select(.listener_id == "entry-1") | .hy2.masquerade) == ""' \
+    "${SPEC}" >/dev/null || fail '关闭 Hy2 local 丢失准备好的网页'
 before=$(snapshot)
 runPty 15 hy2-copy-xray $'9\n3\n1\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'copying Hysteria2 to Xray changed deployment'

@@ -157,8 +157,9 @@ The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` wi
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
 The spec contains secrets and must not be printed or published.
 
-Menu item `16` manages sites on existing Nginx TLS listeners `21`-`25` or fallback
-listeners `27`/`29`. It supports a built-in default page, a static directory, and HTTP/HTTPS 302:
+Menu item `16` manages sites on existing Nginx TLS listeners `21`-`25`, fallback
+listeners `27`/`29`, or Hysteria2. Nginx supports a built-in default page, a static
+directory, and HTTP/HTTPS 302; Hysteria2 supports managed static content:
 
 ```bash
 padm-docker edit --site-template notes --preview
@@ -180,19 +181,33 @@ not saved in the spec. Default-page/302 changes and edits without a new source r
 existing static files. The mode applies to all these Nginx listeners without changing
 proxy/subscription routes, ports, TLS, or ALPN. Failure and INT/TERM restore content and
 spec together; old snapshots without static content retain the current directory.
-Deleting the last Nginx listener clears the site mode but retains static files and other TLS listeners.
+Deleting the last Nginx listener retains static mode when Hysteria2 remains.
+When no site consumer remains, the mode is cleared while static files and other TLS listeners stay.
 `status` reports only `site_mode`, not the redirect URL. Old specs remain compatible;
 v3 `.site` requires the bundle capability `x-padm-site-content`.
 Managed webroot and standalone HTTP-01 are available through certificate management.
 
 Menu `16 → 8. Built-in static sites` selects `notes`, `photos`, or `docs`. Built-in
-themes require an existing v3 Xray Nginx TLS listener (`21`-`25`) or fallback
-(`27`/`29`); deployments containing sing-box `23` or Hysteria2 are rejected, while
+themes require an existing v3 Xray Nginx TLS listener (`21`-`25`), fallback
+(`27`/`29`), or sing-box Hysteria2; deployments containing sing-box `23` are rejected, while
 other Reality listeners without a website may coexist. Themes are copied from the
 verified control bundle and rejected when the bundled manifest or resources fail
 integrity checks. The resulting spec stores only ordinary `site.mode=static`, never
 the theme identity; old bundles keep their existing default, static-directory, and
 302 workflows.
+
+For Hysteria2, publish a template or static directory first, then edit the existing
+listener's Hysteria2 parameters: disable obfuscation and set masquerade to `local`.
+The CLI can edit `hy2.masquerade` through `edit --spec <root-private-file>`.
+Only managed `data/static` is mounted read-only at `/srv/padm/`; arbitrary `file://`
+inputs are rejected. All local listeners share this content with Nginx.
+Local requires `site.mode=static` and `obfs=null`; default-page/302 changes or enabling
+obfuscation are rejected while it is active. Set masquerade to `off` or HTTPS to
+disable local serving; files remain. Hysteria2-only deployments offer static content
+without default-page/302, and first setup does not accept local.
+Local and Hysteria2-only static preparation require `x-padm-hy2-local-site`.
+Old default/HTTPS specs and Nginx static combinations without local keep their
+existing bundle compatibility. Website appearance provides no anti-detection proof.
 
 Docker `Protocols & entry → XHTTP management` manages presets, XMUX, Padding,
 and two header switches for existing v3 Xray protocol `2` listeners:
@@ -1260,7 +1275,7 @@ Imports and built-in layouts share staging, atomic directory replacement, and ro
 
 The built-in layouts accept a site name. Default names and accent colors are fixed, and reinstalling the same layout keeps the saved values. Maintain real articles, images, navigation, and inner pages after installation. To replace content and configuration together, prepare the complete site in a separate directory and import it. Installations of the same layout still share HTML/CSS structure; randomized appearance or different content does not guarantee resistance to identification.
 
-For native Hysteria2 authentication-failure masquerade, use `file:///srv/own-site/` directly for a separate directory containing your website, or an `http://` or `https://` URL to reverse proxy a website you control. `local` uses the current local site; `notes`, `photos`, and `docs` initialize built-in layouts. File directories must meet the index and content restrictions above. Unknown paths in the sing-box file server use Go's default 404 text. With obfuscation enabled, ordinary browsers cannot access this entry over standard HTTP/3. Local websites in Docker are not connected in this iteration; Docker retains its existing remote HTTPS masquerade support. See the [Hysteria2 protocol](https://v2.hysteria.network/docs/developers/Protocol/) and [sing-box Hysteria2 inbound configuration](https://sing-box.sagernet.org/configuration/inbound/hysteria2/) for protocol details.
+For native Hysteria2 authentication-failure masquerade, use `file:///srv/own-site/` directly for a separate directory containing your website, or an `http://` or `https://` URL to reverse proxy a website you control. `local` uses the current local site; `notes`, `photos`, and `docs` initialize built-in layouts. File directories must meet the index and content restrictions above. Unknown paths in the sing-box file server use Go's default 404 text. With obfuscation enabled, ordinary browsers cannot access this entry over standard HTTP/3. Docker supports managed static content with `local`, using a fixed read-only directory and requiring obfuscation to be disabled. See the [Hysteria2 protocol](https://v2.hysteria.network/docs/developers/Protocol/) and [sing-box Hysteria2 inbound configuration](https://sing-box.sagernet.org/configuration/inbound/hysteria2/) for protocol details.
 
 ## Subscriptions and Users
 

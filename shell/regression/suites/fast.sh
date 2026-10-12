@@ -262,6 +262,15 @@ PY
     bash "${PROJECT_ROOT}/docker/tests/xhttp-real.sh"
 }
 
+runDockerHy2SitesRealRegression() {
+    local file
+    for file in hysteria2-real hy2-sites-real; do
+        bash -n "${PROJECT_ROOT}/docker/tests/${file}.sh"
+    done
+    shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/"{hysteria2-real,hy2-sites-real}.sh
+    bash "${PROJECT_ROOT}/docker/tests/hy2-sites-real.sh"
+}
+
 runDockerEntryPortAliasRealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/entry-port-alias-real.sh"
 }
@@ -551,6 +560,7 @@ registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRe
 registerRegressionFunctionLeaf docker-alpn-real runDockerAlpnRealRegression
 registerRegressionFunctionLeaf docker-xhttp runDockerXhttpRegression
 registerRegressionFunctionLeaf docker-xhttp-real runDockerXhttpRealRegression
+registerRegressionFunctionLeaf docker-hy2-sites-real runDockerHy2SitesRealRegression
 registerRegressionFunctionLeaf docker-entry-port-alias-real runDockerEntryPortAliasRealRegression
 registerRegressionFunctionLeaf docker-routing-dns-hosts runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-dns-hosts-real runDockerRoutingDnsHostsRealRegression

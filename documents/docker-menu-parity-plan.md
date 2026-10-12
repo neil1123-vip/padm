@@ -1937,6 +1937,42 @@ CLI `edit --site-template <notes|photos|docs>`，菜单 `16 → 8` 提供三主�
 `site-static-redirect-alpn` 完整状态保持 `deferred`；公网、原生宿主、arm64、
 可信发布与整机生命周期仍待验，不以网页内容或外观证明抗识别。
 
+#### 5A.1c Hysteria2 受管本地网页
+
+已有 v3 sing-box Hysteria2 先用站点菜单或 `--site-template` / `--site-static`
+发布受管网页，再在已有入口参数中关闭混淆、将伪装设置为精确 `local`；
+完整私有规格 `edit --spec` 使用相同编辑事务。首配不开放 local，
+不接受用户 file URL 或任意宿主目录挂载，所有 local 入口与 Nginx 共用受管网页。
+生成器只输出固定 `file:///srv/padm/`，仅 local 存在时给 sing-box 增加
+`data/static` 只读挂载；沿用原目录权限、首页/资源校验、随包清单和 renderer。
+
+local 要求 `site.mode=static`、`obfs=null`；启用期间默认页/302/混淆拒绝。
+纯 Hy2 仅开放静态模式，可先准备网页而不启用 local，此时无静态目录挂载。
+关闭 local 改为 off/HTTPS 后移除该挂载，文件保留。删除最后一个 Nginx
+仍有 Hy2 时保留静态模式，没有站点消费者时清模式并保留内容。
+模板允许已有 Xray Nginx/Hy2 混合，sing-box 23 模板继续拒绝。
+`x-padm-hy2-local-site` 门禁 local 与无 Nginx 的纯 Hy2 静态准备规格，
+防止目标旧包接受其无法校验的新形状；旧无 site 默认/HTTPS 与 Nginx
+静态混合且无 local 的规格保持兼容。内容、规格、挂载纳入原候选与恢复事务。
+
+Linux amd64 的 sites/menu/hysteria2/setup-tls 定向 exit 0，Jobs 2；
+当前锁定 sing-box 1.14.3 的真实生产候选三主题及关闭场景共 160 次 H3、
+30 次双栈认证业务请求、12 次 CA/hostname 拒绝通过。实际只读挂载、
+字节内容、首页跳转、敏感路径/错误认证及关闭后的 404 均符合合同。
+独审补齐 configure 的已有受管 static 部署及旧 Hy2 listener 门禁，
+拒绝在流量处理和候选生成前发生；无部署残留网页和 Nginx/static 新增
+local 拒绝、已有 Hy2 正例补验 123759 ms 通过，二次独审无阻断。
+
+完整 `docker-contracts -Jobs 6` 49/49 exit 0，628572 ms，queue 394 ms，
+cache_hit=false；18 文件逐字节匹配快照
+`826B2AB590D98C283F12322E05C07B3B8FFDD4A9B20FDC1D4FC7C4E623208AAD`。
+Bash/ShellCheck error、JSON、Python/PowerShell AST 通过，之后仅补本验收文字。
+完整证据 `.tmp-regression-docker-e6b3055354444157ad585d69917277f2/`，
+真实证据 `.tmp-regression-docker-4976f013ff5349168abfcd7452d02dd5/`，
+汇总 `.tmp-hy2-local-sites-close/`。测试容器、卷和临时私钥已清理。
+完整管理、公网、原生宿主、arm64、可信发布与整机生命周期仍 deferred；
+网页外观不证明抗识别。
+
 #### 5A.2 ALPN 诊断与限定修复
 
 菜单 `16` 增加全部/指定入口诊断、推荐修复与三种手动顺序；CLI 为

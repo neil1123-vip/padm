@@ -91,6 +91,18 @@ jq -e --arg uuid "${UUID}" '.inbounds[] | select(.type == "hysteria2") |
     key_path:"/etc/padm/secrets/tls/ws.example.com.key"}' "${BASE}" >/dev/null ||
     fail 'Hysteria2 BBR 配置或账号/TLS 生成错误'
 HY2_URI="hysteria2://${UUID}@[2001:db8::1]:27443?peer=ws.example.com&insecure=0&sni=ws.example.com&alpn=h3#Hysteria2"
+# 本地网页仅改变服务端伪装，账号、TLS 与分享 URI 保持原值。
+jq '.site = {mode:"static"} | .core.protocols[0].hy2.masquerade = "local"' \
+    "${HY2_SPEC}" >"${TEST_ROOT}/file-hy2.json"
+dockerConfigureSpecValidate "${TEST_ROOT}/file-hy2.json"
+dockerGenerateSingBoxConfig "${TEST_ROOT}/file-hy2.json" "${TEST_ROOT}/file-hy2-core.json"
+jq -e --arg uuid "${UUID}" '.inbounds[0] |
+  .masquerade == "file:///srv/padm/" and (has("obfs") | not) and
+  .users == [{name:$uuid,password:$uuid}] and .tls.alpn == ["h3"]' \
+    "${TEST_ROOT}/file-hy2-core.json" >/dev/null || fail 'Hy2 local 改变账号/TLS 或固定伪装路径'
+jq '.subscription.enabled = true' "${TEST_ROOT}/file-hy2.json" >"${TEST_ROOT}/file-hy2-share.json"
+dockerGenerateSubscription "${TEST_ROOT}/file-hy2-share.json" "${TEST_ROOT}/file-hy2-link.txt"
+[[ "$(<"${TEST_ROOT}/file-hy2-link.txt")" == "${HY2_URI}" ]] || fail 'Hy2 local 改变分享 URI'
 runRead 0 hy2-links dockerProtocolCommand links entry-hy2
 [[ "$(<"${STDOUT}")" == "${HY2_URI}" ]] || fail 'Hysteria2 单链接不精确或泄漏额外输出'
 runRead 0 hy2-list dockerProtocolCommand list

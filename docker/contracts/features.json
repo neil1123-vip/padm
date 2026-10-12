@@ -41,7 +41,7 @@
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box Hysteria2 首配、完整规格导入、入口与带宽模式编辑、Salamander 混淆、HTTPS 伪装及分享链接；复用受管证书和 UUID 流量账号，端口跳跃尚未开放，宿主集成组合暂不接受。"
+      "reason": "v3 支持 sing-box Hysteria2 首配、完整规格导入、入口与带宽模式编辑、Salamander 混淆、HTTPS 伪装及分享链接。5A.1c 为已有入口提供受管静态网页：先发布目录或 notes/photos/docs，再将伪装设置 local；固定只读 /srv/padm/，site.static 且 obfs=null，Nginx 可共用网页，拒绝任意 file URL。local 及纯 Hy2 静态准备规格要求 x-padm-hy2-local-site，旧默认/HTTPS 子集保持兼容；local 启用时 default/302/混淆拒绝，关闭保留文件。复用受管证书和 UUID 流量账号，端口跳跃尚未开放，宿主集成组合暂不接受，网页外观不证明抗识别。"
     },
     {
       "id": 4,
@@ -332,7 +332,7 @@
       "profiles": ["nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5A.1 默认页、静态目录和 302、5A.1b 受管 notes/photos/docs 内置模板与 5A.2 逐入口 ALPN 诊断、推荐修复及三种持久化顺序提供菜单/CLI；模板仅限已有 v3 Xray 21–25/27/29，拒绝 sing-box 23 或 Hysteria2 共存，随包资源清单纳入 bundle 验证，主题不写入规格。内容、规格与生成结果纳入候选、备份及失败/信号恢复。专项仅放行所选 ALPN 字段漂移，拒绝覆盖其它配置；隔离 amd64 27/29 的真实 Xray 双栈 TLS ALPN、h1/h2 fallback/404、PROXY 来源及链接认证已验，不把配置诊断当作 TLS 协商。公网及原生双架构验收待补，组合能力仍 deferred；webroot/standalone ACME 另列。"
+      "reason": "5A.1 默认页、静态目录和 302、5A.1b 受管 notes/photos/docs 内置模板与 5A.2 逐入口 ALPN 诊断、推荐修复及三种持久化顺序提供菜单/CLI；模板用于已有 v3 Xray 21–25/27/29 或 Hysteria2，拒绝 sing-box 23。5A.1c Hysteria2 local 使用共享受管静态目录、固定只读挂载且无混淆，local 启用时 default/302 拒绝，纯 Hy2 只开放静态网页。随包资源清单纳入 bundle 验证，主题不写入规格。内容、规格与生成结果纳入候选、备份及失败/信号恢复。专项仅放行所选 ALPN 字段漂移，拒绝覆盖其它配置；隔离 amd64 27/29 的真实 Xray 双栈 TLS ALPN、h1/h2 fallback/404、PROXY 来源及链接认证已验，不把配置诊断当作 TLS 协商。公网及原生双架构验收待补，组合能力仍 deferred；webroot/standalone ACME 另列。"
     },
     "entry-port-management": {
       "status": "deferred",

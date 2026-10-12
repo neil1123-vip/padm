@@ -210,6 +210,28 @@ del entry["httpupgrade"]
 entry.update(id=3, hy2=dict(domain=base["tls"]["domain"], bandwidth_mode="bbr",
                           up_mbps=100, down_mbps=100, obfs=None, masquerade=""))
 case("valid-hy2", hy2, True)
+hy2_static = copy.deepcopy(hy2)
+hy2_static["site"] = dict(mode="static")
+case("valid-hy2-static", hy2_static, True)
+hy2_local = copy.deepcopy(hy2_static)
+hy2_local["core"]["protocols"][0]["hy2"]["masquerade"] = "local"
+case("valid-hy2-local", hy2_local, True)
+for mode in ("absent", "default", "redirect"):
+    value = copy.deepcopy(hy2_local)
+    if mode == "absent":
+        del value["site"]
+    else:
+        value["site"] = dict(mode=mode)
+        if mode == "redirect":
+            value["site"]["url"] = "https://example.com"
+    case(f"invalid-hy2-local-{mode}", value, False)
+value = copy.deepcopy(hy2_local)
+value["core"]["protocols"][0]["hy2"]["obfs"] = dict(type="salamander", password="0123456789abcdef")
+case("invalid-hy2-local-obfs", value, False)
+for index, masquerade in enumerate(("LOCAL", "local/", "file:///srv/padm/")):
+    value = copy.deepcopy(hy2_local)
+    value["core"]["protocols"][0]["hy2"]["masquerade"] = masquerade
+    case(f"invalid-hy2-local-value-{index}", value, False)
 mixed_reality = copy.deepcopy(base)
 reality = copy.deepcopy(base["core"]["protocols"][0])
 del reality["websocket"]
@@ -230,6 +252,11 @@ for name, extra in (("sing-upgrade", sing_upgrade), ("hy2", hy2)):
         entry["httpupgrade"].update(path="otherpath", backend_port=31301, tls_port=8444)
     mixed["core"]["protocols"].append(entry)
     case(f"valid-mixed-{name}", mixed, True)
+    if name == "hy2":
+        mixed["site"] = dict(mode="static")
+        case("valid-mixed-hy2-static", mixed, True)
+        mixed["core"]["protocols"][-1]["hy2"]["masquerade"] = "local"
+        case("valid-mixed-hy2-local", mixed, True)
 for index, value in enumerate((False, None, "", "true", 1, [], {})):
     spec = copy.deepcopy(base)
     spec["tls"]["http01"] = value
@@ -307,6 +334,22 @@ jq 'del(."x-padm-site-content")' \
 reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/valid-21-static.json"
 dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" ||
     fail '无 site 的旧规格被新能力 gate 误拒绝'
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
+# 纯 Hy2 准备静态网页和启用 local 都要求新能力；原 Nginx 静态网页保持兼容。
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-hy2-local-site")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/valid-hy2-local.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/valid-hy2-static.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/valid-mixed-hy2-local.json"
+for spec in valid-hy2 valid-mixed-hy2 valid-mixed-hy2-static; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${spec}.json" ||
+        fail "${spec}: 未启用 local 的旧规格被新能力 gate 误拒绝"
+done
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
@@ -528,6 +571,38 @@ runEdit() {
     [[ "${actual}" == "${expected}" ]] || fail "edit $*: 预期 ${expected}，实际 ${actual}"
     assertClean
 }
+# 可读网页不能替代已有受管 Hy2 部署，完整规格导入也须遵守两步边界。
+: >"${COMPOSE_LOG}"
+(
+    originalRoot=${root}
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/unmanaged-local"
+    root=${PADM_DOCKER_INSTALL_DIR}
+    dockerInitializeStateRoot
+    cp -a -- "${originalRoot}/secrets/tls" "${root}/secrets/"
+    mkdir -p "${root}/data/static"
+    cp -- "${SOURCE}/index.html" "${root}/data/static/index.html"
+    chmod 0750 "${root}/data/static"
+    chmod 0640 "${root}/data/static/index.html"
+    chown -R 0:10001 "${root}/data/static"
+    [[ ! -e "${root}/deployment.json" && ! -e "${root}/config/spec.json" ]] ||
+        fail '无部署 local 夹具意外已有受管规格'
+    before=$(snapshot)
+    composeBefore=$(wc -l <"${COMPOSE_LOG}")
+    actual=0
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerTrafficBeforeChange() { fail 'configure local 首配拒绝前触发流量处理'; }
+        dockerCreateConfigurationCandidate() { fail 'configure local 首配拒绝前创建候选'; }
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/valid-hy2-local.json" '' '' configure
+    ) >"${LOG}" 2>&1 || actual=$?
+    grep -Fq 'configure local 需要已有受管部署，不能首次导入本地网页入口' "${LOG}" ||
+        fail 'configure local 首配未经过受管部署门禁'
+    [[ "${actual}" == 15 && "$(snapshot)" == "${before}" &&
+        "$(wc -l <"${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail 'configure local 首配拒绝改变网页、规格或调用 Compose'
+    assertClean
+)
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerAcquireDeploymentLock
@@ -654,6 +729,30 @@ dockerSiteStateValidate "${root}/config/spec.json" "${root}" || fail '已提交�
 [[ "$(stat -c '%a %u %g' "${root}/data/static")" == '750 0 10001' &&
     "$(stat -c '%a %u %g' "${root}/data/static/index.html")" == '640 0 10001' ]] ||
     fail '静态资源运行权限不正确'
+# Nginx 已有静态网页，也不能经 configure 新增一个 local Hy2 入口。
+jq --slurpfile hy2 "${TEST_ROOT}/valid-hy2.json" '
+  .core.secondary_type = "sing-box" |
+  .core.protocols += [($hy2[0].core.protocols[0] |
+    .listener_id = "entry-hy2-new" | .public_port = 25444 | .hy2.masquerade = "local")]
+' "${root}/config/spec.json" >"${TEST_ROOT}/nginx-new-local-hy2.json"
+dockerConfigureSpecValidate "${TEST_ROOT}/nginx-new-local-hy2.json" ||
+    fail '新增 local 的 Nginx 夹具本身违反静态合同'
+before=$(snapshot)
+composeBefore=$(wc -l <"${COMPOSE_LOG}")
+actual=0
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerTrafficBeforeChange() { fail 'configure 新增 local Hy2 拒绝前触发流量处理'; }
+    dockerCreateConfigurationCandidate() { fail 'configure 新增 local Hy2 拒绝前创建候选'; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/nginx-new-local-hy2.json" '' '' configure
+) >"${LOG}" 2>&1 || actual=$?
+grep -Fq 'configure local 仅支持已有 Hysteria2 入口及已发布的受管静态网页' "${LOG}" ||
+    fail 'configure 新增 local Hy2 未经过已有入口门禁'
+[[ "${actual}" == 15 && "$(snapshot)" == "${before}" &&
+    "$(wc -l <"${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'configure 新增 local Hy2 拒绝改变规格、静态内容或调用 Compose'
+assertClean
 printf '<h1>source-changed</h1>\n' >"${SOURCE}/index.html"
 grep -Fq original-site "${root}/data/static/index.html" || fail '在线站点仍引用外部源'
 staticBefore=$(find "${root}/data/static" -type f -print0 | sort -z | xargs -0 sha256sum)
@@ -1050,7 +1149,7 @@ for failure in health-fail int term; do
 done
 MODE=ok
 
-# 所有已开放 Xray Nginx 类型使用同一主题入口，其它有效协议部署明确拒绝。
+# Xray Nginx 类型继续使用同一主题入口，直连和 sing-box 23 仍明确拒绝。
 for protocol in 21 22 23 24 25 27 29; do
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
@@ -1071,7 +1170,7 @@ assertClean
 before=$(snapshot)
 runEdit 0 --site-template notes --preview
 [[ "$(snapshot)" == "${before}" ]] || fail '主题预览改动共存的 Reality 入口'
-for spec in valid-direct valid-sing-upgrade valid-hy2 valid-mixed-sing-upgrade valid-mixed-hy2; do
+for spec in valid-direct valid-sing-upgrade valid-mixed-sing-upgrade; do
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
         dockerAcquireDeploymentLock
@@ -1083,6 +1182,110 @@ for spec in valid-direct valid-sing-upgrade valid-hy2 valid-mixed-sing-upgrade v
     runEdit 15 --site-template notes --confirm PADM-DOCKER-EDIT
     [[ "$(snapshot)" == "${before}" && "$(wc -l <"${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
         fail "${spec}: 无适用入口的主题拒绝改变已有部署或服务"
+done
+
+# Hy2 先准备普通静态站点，再编辑已有入口启用 local；混合 Nginx 共用同一目录。
+for spec in valid-hy2 valid-mixed-hy2; do
+    if [[ "${spec}" == valid-mixed-hy2 ]]; then
+        jq --slurpfile reality "${TEST_ROOT}/valid-site-reality.json" '
+          .core.protocols += [($reality[0].core.protocols[] | select(.id == 1) | .public_port = 25445)]
+        ' "${TEST_ROOT}/${spec}.json" >"${TEST_ROOT}/hy2-site-topology.json"
+    else
+        cp -- "${TEST_ROOT}/${spec}.json" "${TEST_ROOT}/hy2-site-topology.json"
+    fi
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/hy2-site-topology.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail "${spec}: 初始化 Hy2 站点夹具失败"
+    assertClean
+    before=$(snapshot)
+    runEdit 0 --site-template notes --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail "${spec}: Hy2 主题预览改变部署"
+    runEdit 0 --site-template notes --confirm PADM-DOCKER-EDIT
+    jq -e '.site == {mode:"static"} and
+      all(.core.protocols[] | select(.id == 3); .hy2.masquerade == "" and .hy2.obfs == null)' \
+        "${root}/config/spec.json" >/dev/null || fail "${spec}: 主题提前启用 Hy2 local"
+    jq -e 'all(.services["sing-box"].volumes[]; .target != "/srv/padm")' \
+        "${root}/compose.json" >/dev/null || fail "${spec}: 未启用 local 就挂载网页"
+    jq -e 'all(.inbounds[] | select(.type == "hysteria2"); has("masquerade") | not)' \
+        "${root}/config/sing-box/users.base" >/dev/null || fail "${spec}: 准备阶段改变 Hy2 伪装"
+    staticBefore=$(find "${root}/data/static" -type f -print0 | sort -z | xargs -0 sha256sum)
+    jq '(.core.protocols[] | select(.id == 3) | .hy2.masquerade) = "local"' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/hy2-site-local.json"
+    before=$(snapshot)
+    runEdit 0 --spec "${TEST_ROOT}/hy2-site-local.json" --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail "${spec}: local 预览修改线上状态"
+    if [[ "${spec}" == valid-hy2 ]]; then
+        (
+            trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+            dockerAcquireDeploymentLock
+            dockerConfigureApply "${TEST_ROOT}/hy2-site-local.json" '' '' configure
+        ) >"${LOG}" 2>&1 || fail '已有 Hy2/static 的 configure local 被误拒绝'
+        assertClean
+    fi
+    runEdit 0 --spec "${TEST_ROOT}/hy2-site-local.json" --confirm PADM-DOCKER-EDIT
+    [[ "$(find "${root}/data/static" -type f -print0 | sort -z | xargs -0 sha256sum)" == "${staticBefore}" ]] ||
+        fail "${spec}: local 编辑改写已发布网页"
+    jq -e 'all(.inbounds[] | select(.type == "hysteria2");
+      .masquerade == "file:///srv/padm/" and (has("obfs") | not))' \
+        "${root}/config/sing-box/users.base" >/dev/null || fail "${spec}: local 未生成固定文件路径"
+    jq -e '[.services["sing-box"].volumes[] | select(.target == "/srv/padm")] ==
+      [{type:"bind",source:"${PADM_DOCKER_ROOT}/data/static",target:"/srv/padm",read_only:true}]' \
+        "${root}/compose.json" >/dev/null || fail "${spec}: local 网页挂载未固定只读目录"
+    if [[ "${spec}" == valid-mixed-hy2 ]]; then
+        jq -e 'any(.services.nginx.volumes[];
+          .source == "${PADM_DOCKER_ROOT}/data/static" and .target == "/srv/padm" and .read_only)' \
+            "${root}/compose.json" >/dev/null || fail '混合 Hy2/Nginx 没有共用静态目录'
+    else
+        jq -e '.services | has("nginx") | not' "${root}/compose.json" >/dev/null ||
+            fail '纯 Hy2 local 新增无用 Nginx 服务'
+    fi
+    before=$(snapshot)
+    composeBefore=$(wc -l <"${COMPOSE_LOG}")
+    runEdit 15 --site-default --confirm PADM-DOCKER-EDIT
+    runEdit 15 --site-redirect https://example.com --confirm PADM-DOCKER-EDIT
+    jq '(.core.protocols[] | select(.id == 3) | .hy2.obfs) =
+      {type:"salamander",password:"0123456789abcdef"}' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/hy2-local-obfs.json"
+    runEdit 15 --spec "${TEST_ROOT}/hy2-local-obfs.json" --preview
+    [[ "$(snapshot)" == "${before}" && "$(wc -l <"${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail "${spec}: local 的 default/302/混淆拒绝改变线上状态"
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        expected=14
+        [[ "${failure}" != int ]] || expected=130
+        [[ "${failure}" != term ]] || expected=143
+        runEdit "${expected}" --site-template photos --confirm PADM-DOCKER-EDIT
+        [[ "$(snapshot)" == "${before}" ]] || fail "${spec}/${failure}: 未恢复 local 网页、配置和流量"
+    done
+    MODE=ok
+    if [[ "${spec}" == valid-mixed-hy2 ]]; then
+        # 删除消费者只调整其配置，剩余 Hy2 local 继续服务同一份网页。
+        cp -- "${root}/config/spec.json" "${TEST_ROOT}/hy2-delete-nginx.json"
+        printf '10\nentry-site\n8\n' |
+            dockerEditFields "${TEST_ROOT}/hy2-delete-nginx.json" >"${LOG}" 2>&1 ||
+            fail '删除最后 Nginx 入口被 Hy2 local 站点阻止'
+        jq -e '.site == {mode:"static"} and (.tls | has("http01") | not) and
+          any(.core.protocols[]; .id == 3 and .hy2.masquerade == "local")' \
+            "${TEST_ROOT}/hy2-delete-nginx.json" >/dev/null || fail '删除 Nginx 清掉 Hy2 local 站点模式'
+        runEdit 0 --spec "${TEST_ROOT}/hy2-delete-nginx.json" --confirm PADM-DOCKER-EDIT
+        jq -e '(.services | has("nginx") | not) and
+          any(.services["sing-box"].volumes[]; .target == "/srv/padm" and .read_only)' \
+            "${root}/compose.json" >/dev/null || fail '删除 Nginx 丢失 Hy2 local 只读挂载'
+        cp -- "${root}/config/spec.json" "${TEST_ROOT}/hy2-delete-last-consumer.json"
+        printf '10\nentry-other-site\n8\n' |
+            dockerEditFields "${TEST_ROOT}/hy2-delete-last-consumer.json" >"${LOG}" 2>&1 ||
+            fail '删除最后 Hy2 站点消费者失败'
+        jq -e '(has("site") | not) and .core.type == "xray" and .core.secondary_type == null and
+          (.core.protocols | length == 1 and .[0].id == 1)' \
+            "${TEST_ROOT}/hy2-delete-last-consumer.json" >/dev/null ||
+            fail '删除最后站点消费者没有清理模式或改变剩余 Reality'
+        runEdit 0 --spec "${TEST_ROOT}/hy2-delete-last-consumer.json" --confirm PADM-DOCKER-EDIT
+        [[ "$(find "${root}/data/static" -type f -print0 | sort -z | xargs -0 sha256sum)" == "${staticBefore}" ]] ||
+            fail '删除站点消费者丢失已发布静态内容'
+    fi
 done
 python3 "${PROJECT_ROOT}/docker/tests/sites-real.py" "${TEST_ROOT}"
 printf 'docker-sites-regression-ok\n'

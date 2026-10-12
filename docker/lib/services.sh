@@ -146,7 +146,7 @@ dockerConfigureSpecValidate() {
             .[0] >= $min and .[0] <= .[1] and .[1] <= $max)
         else false end;
       def masquerade: type == "string" and length <= 2048 and
-        (. == "" or (test("^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?$") and
+        (. == "" or . == "local" or (test("^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?$") and
           (ltrimstr("https://") | split("/")[0] | hostname))) and
         (explode | all(. > 32 and . != 127));
       . as $request |
@@ -314,7 +314,8 @@ dockerConfigureSpecValidate() {
        else true end) and
       (if has("site") then
         .schema_version == 3 and
-        any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) and
+        any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29 or
+          (.id == 3 and $request.site.mode == "static")) and
         (.site |
           if .mode == "default" or .mode == "static" then exact(["mode"])
           elif .mode == "redirect" then exact(["mode", "url"]) and
@@ -485,7 +486,8 @@ dockerConfigureSpecValidate() {
             (.obfs == null or (.obfs | exact(["type", "password"]) and .type == "salamander" and
               (.password | type == "string" and test("^[A-Za-z0-9_-]{16,128}$") and
                 (explode | all(. > 32 and . != 127))))) and
-            (.masquerade | masquerade))
+            (.masquerade | masquerade) and
+            (if .masquerade == "local" then .obfs == null and $request.site.mode == "static" else true end))
         elif .id == 4 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "anytls"]) and
@@ -2119,7 +2121,8 @@ dockerGenerateSingBoxConfig() {
           } + (if .hy2.bandwidth_mode == "bbr" then {ignore_client_bandwidth: true}
             else {up_mbps: .hy2.up_mbps, down_mbps: .hy2.down_mbps} end) +
             (if .hy2.obfs != null then {obfs: .hy2.obfs} else {} end) +
-            (if .hy2.masquerade != "" then {masquerade: .hy2.masquerade} else {} end)
+            (if .hy2.masquerade == "local" then {masquerade: "file:///srv/padm/"}
+             elif .hy2.masquerade != "" then {masquerade: .hy2.masquerade} else {} end)
           elif .id == 4 then {
             type: "anytls",
             tag: .listener_id,
@@ -2398,11 +2401,12 @@ dockerSiteTemplateInputsValidate() {
     case "${siteTemplate}" in notes|photos|docs) ;; *) return 1 ;; esac
     jq -e '
       .schema_version == 3 and
-      any(.core.protocols[]; .core == "xray" and
-        (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)) and
-      all(.core.protocols[]; .id != 3 and (.id != 23 or .core != "sing-box"))
+      any(.core.protocols[]; (.core == "xray" and
+        (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)) or
+        (.core == "sing-box" and .id == 3)) and
+      all(.core.protocols[]; .id != 23 or .core != "sing-box")
     ' "${specFile}" >/dev/null 2>&1 || {
-        dockerError '内置模板需要已有 v3 Xray Nginx TLS 或 fallback 入口，不支持 sing-box 23 或 Hysteria2 共存'
+        dockerError '内置模板需要已有 v3 Xray Nginx TLS、fallback 或 Hysteria2 入口，不支持 sing-box 23 共存'
         return 1
     }
     [[ -n "${bundlePath}" ]] &&
@@ -2964,8 +2968,10 @@ dockerGenerateCompose() {
             labels: labels("sing-box"),
             volumes: (mounts("config/sing-box"; "/etc/padm/sing-box"; true) +
                 mounts("data/sing-box"; "/var/lib/padm/sing-box"; false) +
-                if ($tlsCores | index("sing-box")) != null then
-                  mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end),
+                (if ($tlsCores | index("sing-box")) != null then
+                  mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end) +
+                (if any($r.core.protocols[]; .id == 3 and .hy2.masquerade == "local") then
+                  mounts("data/static"; "/srv/padm"; true) else [] end)),
             ports: [$direct[] | select((.core // $r.core.type) == "sing-box") |
               . as $protocol | ports($protocol; $protocol.public_port)[]],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
@@ -5827,7 +5833,7 @@ dockerRealityStreamTransitionPrepare() {
 
 dockerConfigureApply() {
     local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-}
-    local specFile candidate backup answer root backupPrefix=configure
+    local specFile candidate backup answer root managedFile backupPrefix=configure
     # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
@@ -5846,6 +5852,30 @@ dockerConfigureApply() {
     dockerControlSyncScheduleSpecCheck "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     dockerControlTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${mode}" == configure ]] &&
+        jq -e 'any(.core.protocols[]; .id == 3 and .hy2.masquerade == "local")' "${sourceSpec}" >/dev/null; then
+        for managedFile in config/spec.json deployment.json images.env compose.json; do
+            dockerTrafficSafePath "${root}" "${root}/${managedFile}" &&
+                [[ -f "${root}/${managedFile}" && -O "${root}/${managedFile}" ]] || {
+                dockerError 'configure local 需要已有受管部署，不能首次导入本地网页入口'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        done
+        dockerPrivateFileIsRestricted "${root}/config/spec.json" &&
+            dockerComposeFile >/dev/null &&
+            dockerManagedSpecMatchesDeployment "${root}/config/spec.json" "${root}/deployment.json" "${root}/images.env" &&
+            dockerTrafficSafePath "${root}" "${root}/data/static" &&
+            dockerSiteStateValidate "${root}/config/spec.json" "${root}" &&
+            jq -en --slurpfile current "${root}/config/spec.json" --slurpfile next "${sourceSpec}" '
+              $current[0].site.mode == "static" and
+              all($next[0].core.protocols[] | select(.id == 3 and .hy2.masquerade == "local");
+                . as $entry | any($current[0].core.protocols[];
+                  .id == 3 and .core == "sing-box" and .listener_id == $entry.listener_id))
+            ' >/dev/null 2>&1 || {
+            dockerError 'configure local 仅支持已有 Hysteria2 入口及已发布的受管静态网页'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     dockerRealityStreamDeploymentCheck "${sourceSpec}" "${root}/config/spec.json" ||
         return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficRuntimeCheck "$(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${sourceSpec}")" ||

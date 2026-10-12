@@ -782,6 +782,7 @@ dockerMenuSites() {
             ;;
         8)
             printf '\nDocker 内置静态站点\n'
+            printf 'Hysteria2 发布后，在已有入口参数中关闭混淆并将伪装设置为 local。\n'
             printf '%s\n' '1. 笔记（notes）' '2. 相册（photos）' '3. 文档（docs）' '0. 返回'
             dockerSetupRead templateChoice '请选择站点主题（0 返回）: ' || continue
             case "${templateChoice}" in

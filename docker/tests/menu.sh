@@ -2477,6 +2477,12 @@ for siteCase in flow cancel static-eof redirect-eof template-eof alpn-diagnose-e
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedSite}" ]] ||
         fail "站点 ${siteCase} 参数分发错误或取消后仍执行编辑"
+    case "${siteCase}" in
+    flow|cancel|template-eof|failed)
+        grep -Fq 'Hysteria2 发布后，在已有入口参数中关闭混淆并将伪装设置为 local。' \
+            "${CONTROL_LOG}" || fail "站点 ${siteCase} 未说明 Hy2 local 的两步流程"
+        ;;
+    esac
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 

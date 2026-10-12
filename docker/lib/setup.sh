@@ -609,6 +609,10 @@ dockerSetupCommand() {
             *) return "${PADM_DOCKER_RC_USAGE}" ;;
             esac
             dockerSetupRead hy2Masquerade '伪装 HTTPS 地址（空输入不启用，0 取消）: ' || return 0
+            [[ "${hy2Masquerade}" != local ]] || {
+                dockerError '本地网页请在首配完成后，先发布静态站点，再编辑已有 Hysteria2 入口设置 local'
+                return "${PADM_DOCKER_RC_USAGE}"
+            }
         elif [[ "${protocols}" == 7 ]]; then
             dockerSetupRead wsPort "AnyTLS TCP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         elif [[ "${protocols}" == 8 ]]; then
@@ -1150,7 +1154,11 @@ dockerEditFields() {
                   else .tls = null | .subscription.enabled = false end |
                   .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null) |
                   if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)
-                  then . else del(.site, .tls.http01) end
+                  then . else
+                    del(.tls.http01) |
+                    if .site.mode == "static" and any(.core.protocols[]; .id == 3)
+                    then . else del(.site) end
+                  end
                 ' "${draft}" >"${temporary}" 2>/dev/null || {
                     dockerError '主核心至少保留一个入口；删除副核心的最后入口会关闭副核心'
                     return 1
@@ -1293,7 +1301,7 @@ dockerEditFields() {
                     dockerError '仅支持编辑已有 Hysteria2 入口；安装新 Hysteria2 请导入完整 configure 规格'
                     return 1
                 }
-                dockerSetupRead value 'Hysteria2 参数 [1=拥塞模式, 2=服务端上行 Mbps, 3=服务端下行 Mbps, 4=混淆, 5=伪装 HTTPS 地址]: ' || return 3
+                dockerSetupRead value 'Hysteria2 参数 [1=拥塞模式, 2=服务端上行 Mbps, 3=服务端下行 Mbps, 4=混淆, 5=伪装 HTTPS/local]: ' || return 3
                 case "${value}" in
                 1) field=hy2.bandwidth_mode ;;
                 2) field=hy2.up_mbps ;;
@@ -1354,7 +1362,8 @@ dockerEditFields() {
                 dockerSetupRead value "拥塞模式 [bbr=自适应, brutal=固定带宽，空输入保留 ${defaultValue}]: " "${defaultValue}" || return 3
                 [[ "${value}" == bbr || "${value}" == brutal ]] || return 1
             elif [[ "${field}" == hy2.masquerade ]]; then
-                dockerSetupRead value '伪装 HTTPS 地址（空输入保留，off 关闭，0 取消）: ' "${defaultValue}" || return 3
+                printf 'local 使用已发布的受管静态网页；请先在站点菜单发布目录或内置主题，并关闭混淆。\n'
+                dockerSetupRead value '伪装 HTTPS 地址或 local（空输入保留，off 关闭，0 取消）: ' "${defaultValue}" || return 3
                 [[ "${value}" != off ]] || value=
             elif [[ "${field}" == tuic.congestion_control ]]; then
                 dockerSetupRead value "拥塞控制 [cubic/bbr/new_reno，空输入保留 ${defaultValue}]: " "${defaultValue}" || return 3
@@ -2356,10 +2365,15 @@ dockerEditCommand() {
     jq -en --arg mode "${siteMode}" --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       if $mode != "" or $before[0].site != $after[0].site then
         any($before[0].core.protocols[];
-          .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)
+          .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29 or
+          (.id == 3 and .core == "sing-box" and
+            ($mode == "static" or ($mode == "" and $after[0].site == null and
+              all($after[0].core.protocols[];
+                .id != 3 and .id != 21 and .id != 22 and .id != 23 and .id != 24 and
+                .id != 25 and .id != 27 and .id != 29)))))
       else true end
     ' >/dev/null 2>&1 || {
-        dockerError '站点管理需要已有 Nginx TLS 或 fallback 入口'
+        dockerError '站点管理需要已有 Nginx TLS/fallback 入口；Hysteria2 仅支持受管静态网页'
         return "${PADM_DOCKER_RC_STATE}"
     }
     if [[ -n "${realityStream}" ]]; then
