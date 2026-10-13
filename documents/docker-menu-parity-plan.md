@@ -5903,6 +5903,49 @@ UDP 占用、nft 布局变化、读取失败和锁替换；注入前核验完整
 StartManaged 实际采用的 state/live 精确版本，不能把 3e.1 诊断 JSON 加 nonce
 当写授权。菜单/schema/Compose、生产 Docker socket 及整体对齐继续 deferred。
 
+##### 5C.9c.3e.2b.1 启动版本受限诊断出口
+
+StartManaged 只接受原三参数或固定第四参数 `bound`，PrepareActivation 只接受
+原五参数或固定第六参数 `bound`；其它模式或额外参数在采集前拒绝。
+普通路径保持允许后续累计变化的诊断合同。bound 路径在启动成功、清理 stage 前，
+从实际渲染/安装采用的 `ph_files/ph_stateFile/ph_live/ph_lock` 构造 startup_binding，
+只返回路径身份、元数据及摘要；不输出账号、密码或配置正文，不重读累计或渲染。
+
+清理前后复用 BindingCheck，严格比对原固定输入、state/live 和部署锁；
+流量目录必须 0700，固定 CID/Image/StartedAt/RestartCount 与 healthy，
+容器检查前后文件快照一致。同字节替换仍因 inode/ctime 漂移拒绝；
+准备层也在内层返回后、清理前后使用原绑定复验，不能刷新为新基线。
+成功后的绑定拒绝不进入原启动失败恢复，不额外 recreate 或回退累计。
+清理前失败保留已有 stage；清理后失败只保留诊断与当前受管状态，
+不能承诺已经删除的 stage 仍有完整材料。INT/TERM 返回 130/143，失败 stdout 为空。
+
+定向先通过 43 个绑定场景、86 个锁身份及材料、38 个启动和38个准备场景，
+内部/入口 `129904/131389 ms`、Jobs 2：
+`.tmp-regression-docker-4c91cbf759df46e5bc50411e52f5daee/`。
+初轮仅新增夹具错误要求 live 快照为单行，实际含完整元数据和目录遍历条目，
+修正断言后通过；失败输入留在
+`.tmp-regression-docker-476772880d5945f480c85ccdae722b52/`。
+随后去掉重复跨阶段组合，保留正常/额度、非法模式、state/live 同字节替换、
+检查期间漂移、清理前后锁/固定输入/权限/容器/健康及 INT/TERM，最终 27 场景。
+标准真实 bound 准备的 state/live 完整元数据及摘要与磁盘一致，
+双族刚跨额度撤销、失败安全恢复、NAT/jumpstate 不变通过，
+内部/入口 `62974/64342 ms`、Jobs 2：
+`.tmp-regression-docker-b395743146e243f88649f2b7556c5323/`。
+最终集中完整 54/54 无遗漏重复，含27个绑定场景，内部/入口
+`523638/524695 ms`、Jobs 6、排队 `110471 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-a811beaf4b7846a0b0ec987e5d43fef1/`。
+两测试文件原始字节 SHA256 与完整输入一致；实现仅在快照后改两条 stderr，
+逐字核对除此无差异，最终源码另在 Linux 工具容器通过 Bash 解析。
+独立只读复审及 diff 通过；三份成功输入清理 `37,171,200 bytes`，
+保留日志、清单、result、失败输入。入口较上一阶段减少 `19453 ms`，
+输入亦变化，未证稳定提速，仍维持三槽预算。
+
+本出口始终是诊断，不是跨事务授权凭据。后续实时父子通道必须在当前持锁 Bash
+直接调用 bound 入口，仅消费本次控制流产生的结果，再绑定本轮子容器与随机挑战；
+保存 JSON、环境变量、调用方输入或旧五参数 tuple 都不能授权写规则。
+只读 child、写门控、菜单/schema/Compose、原生宿主/arm64 与公网继续 deferred，
+整体目标保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

@@ -903,12 +903,42 @@ dockerPortHoppingTargetStartPrepare() {
         dockerPortHoppingTargetStartRecreate && [[ "${ph_signal}" == 0 ]]
 }
 
+dockerPortHoppingTargetBindingCheck() {
+    local witness=$1 binding=$2 domain=$3 current container
+    local ph_owner=${BASHPID:-$$} ph_lock ph_stage=${ph_stage:-}
+    ph_lock=$(jq -ec '.lock' <<<"${binding}") &&
+        dockerPortHoppingTargetStartLockCheck &&
+        current=$(dockerPortHoppingTargetFileSnapshot "${domain}" "$(jq -er '.started_at' <<<"${witness}")") &&
+        jq -e --argjson binding "${binding}" '
+          . as $rows |
+          {files:map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
+            if .[0] == "data/traffic" then .[3] = 0 else . end),
+           state:[.[] | select(.[0] == "data/traffic/state.json")],
+           live:[.[] | select(.[0] == "config/sing-box/config.json")]} ==
+            ($binding | {files,state,live}) and
+          any($rows[]; .[0] == "data/traffic" and .[3] == 16832)
+        ' <<<"${current}" >/dev/null &&
+        dockerPortHoppingTargetProjectCheck "$(dockerInstallRoot)" &&
+        container=$(docker container inspect "$(jq -er '.container_id' <<<"${witness}")") &&
+        jq -e --argjson witness "${witness}" '
+          length == 1 and (.[0] |
+            .Id == $witness.container_id and .Image == $witness.image_id and
+            .State.StartedAt == $witness.started_at and .RestartCount == $witness.restart_count and
+            .State.Status == "running" and .State.Running == true and
+            .State.Restarting == false and .State.Paused == false and .State.Dead == false and
+            .State.Health.Status == "healthy")
+        ' <<<"${container}" >/dev/null &&
+        [[ "$(dockerPortHoppingTargetFileSnapshot "${domain}" \
+            "$(jq -er '.started_at' <<<"${witness}")")" == "${current}" ]] &&
+        dockerPortHoppingTargetStartLockCheck
+}
+
 dockerPortHoppingTargetStartManaged() {
     local ph_owner=${BASHPID:-$$} ph_root ph_stage= ph_lock ph_domain ph_files ph_live ph_raw ph_trafficMode
     local ph_listener=${1:-} ph_ipv4=${2:-} ph_ipv6=${3:-} ph_initial= ph_witness= ph_candidateHash=
     local ph_snapshot=false ph_verified=false ph_runtime=false ph_installed=false ph_stateFile= ph_signal=0 ph_status=1
-    local ph_int ph_term ph_state
-    [[ "$#" -eq 3 ]] || return 1
+    local ph_int ph_term ph_state ph_binding= ph_bound=${4:-}
+    [[ "$#" -eq 3 || ( "$#" -eq 4 && "${ph_bound}" == bound ) ]] || return 1
     ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") || {
         DOCKER_DEPLOYMENT_LOCK_DIR=
         return 1
@@ -955,9 +985,27 @@ dockerPortHoppingTargetStartManaged() {
             fi
         fi
     else
-        [[ "${ph_signal}" == 0 ]] && dockerPortHoppingTargetStartLockCheck &&
+        # 绑定沿用实际渲染和安装的版本，后置快照不得刷新为新基线。
+        if [[ "${ph_bound}" == bound ]]; then
+            dockerPortHoppingTargetStartFilesCheck &&
+                ph_binding=$(jq -cn --argjson lock "${ph_lock}" --argjson files "${ph_files}" \
+                    --argjson state "${ph_stateFile}" --argjson live "${ph_live}" \
+                    '{lock:$lock,files:$files,state:$state,live:$live}') &&
+                dockerPortHoppingTargetBindingCheck "${ph_witness}" "${ph_binding}" "${ph_domain}" ||
+                ph_status=1
+        fi
+        [[ "${ph_status}" == 0 && "${ph_signal}" == 0 ]] && dockerPortHoppingTargetStartLockCheck &&
             dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&
-            dockerPortHoppingTargetStartLockCheck && [[ "${ph_signal}" == 0 ]] || ph_status=1
+            dockerPortHoppingTargetStartLockCheck && [[ "${ph_signal}" == 0 ]] &&
+            { [[ "${ph_bound}" != bound ]] ||
+                dockerPortHoppingTargetBindingCheck "${ph_witness}" "${ph_binding}" "${ph_domain}"; } &&
+            [[ "${ph_signal}" == 0 ]] || ph_status=1
+        if [[ "${ph_status}" == 0 && "${ph_bound}" == bound ]]; then
+            ph_witness=$(jq -c --argjson binding "${ph_binding}" \
+                '. + {startup_binding:$binding}' <<<"${ph_witness}") || ph_status=1
+        elif [[ "${ph_status}" != 0 && "${ph_bound}" == bound ]]; then
+            dockerError "启动版本绑定未提交，已启动核心不再次重建，累计不回退；证据目录可能已清理: ${ph_stage}"
+        fi
     fi
     trap - INT TERM
     [[ -z "${ph_int}" ]] || eval "${ph_int}"
@@ -972,6 +1020,7 @@ dockerPortHoppingTargetPrepareActivation() {
     local ph_owner=${BASHPID:-$$} ph_root ph_lock ph_stage= ph_domain
     local listener=${1:-} start=${2:-} end=${3:-} ipv4=${4:-} ipv6=${5:-}
     local entry current files witness container started status=1 signal=0 intTrap termTrap
+    local -a startupArgs=()
     local entryFilter='
       . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
       if $s.schema_version == 3 and $s.core.type == "sing-box" and
@@ -985,7 +1034,9 @@ dockerPortHoppingTargetPrepareActivation() {
     local fixedFilter='
       map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
         if .[0] == "data/traffic" then .[3] = 0 else . end)'
-    [[ "$#" -eq 5 && "${start}" =~ ^[1-9][0-9]{0,4}$ && "${end}" =~ ^[1-9][0-9]{0,4}$ &&
+    [[ "$#" -eq 5 || ( "$#" -eq 6 && "$6" == bound ) ]] || return 1
+    [[ "$#" -eq 5 ]] || startupArgs=(bound)
+    [[ "${start}" =~ ^[1-9][0-9]{0,4}$ && "${end}" =~ ^[1-9][0-9]{0,4}$ &&
         "${start}" -le "${end}" && "${end}" -le 65535 ]] || return 1
     ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") || {
         DOCKER_DEPLOYMENT_LOCK_DIR=
@@ -1023,7 +1074,8 @@ PY
     trap 'signal=143' TERM
     # 必须直接调用；命令替换会丢失当前持锁 Bash 身份。
     if dockerPortHoppingTargetStartLockCheck && [[ "${signal}" == 0 ]] &&
-        dockerPortHoppingTargetStartManaged "${listener}" "${ipv4}" "${ipv6}" >"${ph_stage}/started.json" &&
+        dockerPortHoppingTargetStartManaged "${listener}" "${ipv4}" "${ipv6}" "${startupArgs[@]}" \
+            >"${ph_stage}/started.json" &&
         [[ "${signal}" == 0 ]] && dockerPortHoppingTargetStartLockCheck &&
         witness=$(jq -ec --arg listener "${listener}" --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" \
             --argjson entry "${entry}" '
@@ -1048,13 +1100,20 @@ PY
         jq -e '.[] | select(.[0] == "data/traffic") | .[3] == 16832' <<<"${current}" >/dev/null &&
         [[ "$(jq -c "${fixedFilter}" <<<"${current}")" == "${files}" && "${signal}" == 0 ]] &&
         dockerPortHoppingTargetStartLockCheck &&
+        { [[ "${#startupArgs[@]}" == 0 ]] ||
+            dockerPortHoppingTargetBindingCheck "${witness}" \
+                "$(jq -ec '.startup_binding' <<<"${witness}")" "${ph_domain}"; } &&
         jq -c --argjson start "${start}" --argjson end "${end}" '
           . + {range_start:$start,range_end:$end}
         ' <<<"${witness}" >"${ph_stage}/prepared.json" &&
         [[ "${signal}" == 0 ]] && dockerPortHoppingTargetStartLockCheck; then
         witness=$(<"${ph_stage}/prepared.json")
         dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&
-            dockerPortHoppingTargetStartLockCheck && [[ "${signal}" == 0 ]] && status=0
+            dockerPortHoppingTargetStartLockCheck && [[ "${signal}" == 0 ]] &&
+            { [[ "${#startupArgs[@]}" == 0 ]] ||
+                dockerPortHoppingTargetBindingCheck "${witness}" \
+                    "$(jq -ec '.startup_binding' <<<"${witness}")" "${ph_domain}"; } &&
+            [[ "${signal}" == 0 ]] && status=0
     else status=$?; fi
     trap - INT TERM
     [[ -z "${intTrap}" ]] || eval "${intTrap}"
@@ -1062,7 +1121,7 @@ PY
     [[ "${signal}" == 0 ]] || status=${signal}
     if [[ "${status}" != 0 ]]; then
         dockerPortHoppingTargetStartLockCheck || :
-        dockerError "跳跃启用准备未提交；累计不回退，检查证据: ${ph_stage}"
+        dockerError "跳跃启用准备未提交；累计不回退，证据目录可能已清理: ${ph_stage}"
         return "${status}"
     fi
     # 准备诊断不能作为后续 net 写规则的授权，也不证明端口范围当前空闲。

@@ -309,10 +309,17 @@ dockerTlsRuntimePermissions "$2/secrets/tls"
 . "$1"
 dockerAcquireDeploymentLock
 trap dockerReleaseDeploymentLock EXIT
-dockerPortHoppingTargetPrepareActivation entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1
+dockerPortHoppingTargetPrepareActivation entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 bound
 """, "test", str(ROOT / "install-docker.sh")], timeout=60)
             quota_after = json.loads(result)
             assert quota_after["range_start"] == 30000 and quota_after["range_end"] == 30001
+            binding = quota_after["startup_binding"]
+            assert set(binding) == {"lock", "files", "state", "live"}
+            current_files = {row[0]: row for row in tree(root)}
+            assert binding["state"] == [current_files["data/traffic/state.json"]]
+            assert [row for row in binding["live"] if len(row) == 11] == [
+                current_files["config/sing-box/config.json"]]
+            assert binding["lock"][-1][-1].isdigit()
             assert not jumpstate.exists()
             assert {tool: command([tool, "-w", "-t", "nat", "-S"])
                     for tool in nat_before} == nat_before, "启用准备改变了两族 NAT 正文"
@@ -356,7 +363,8 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
             fresh_dual_family_auth_reversed=True, backdated_tls_replacement_refused=True,
             traffic_state_update_allowed=True, locked_witness_tree_unchanged=True,
             managed_start_quota_revoked=True, failed_start_safe_recovered=True,
-            activation_prepared=True, dual_family_nat_unchanged=True, jumpstate_unchanged=True,
+            activation_prepared=True, startup_file_versions_bound=True,
+            dual_family_nat_unchanged=True, jumpstate_unchanged=True,
             elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
     except BaseException:
         if daemon is not None and daemon.poll() is None:

@@ -415,6 +415,11 @@ Foreign conflicts do not block cleanup of verified owned rules. The net lock doe
 reserve the range against outside writers; active state is not a final activation ACK.
 Live parent/child authorization, menu/schema integration and production enablement
 remain pending.
+Internal 3e.2b.1 adds a fixed `bound` startup/preparation mode that returns the lock,
+fixed-input and state/live identities and hashes actually used for startup. It rechecks
+those versions before and after cleanup, including same-byte file replacements.
+Existing entry points keep their semantics. This diagnostic contains no account content
+and grants no net write authority; the live parent/child channel remains pending.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
