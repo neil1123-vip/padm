@@ -90,6 +90,8 @@ active state 不能作为最终启用成功，生产启用及管理状态不变�
 状态和停止走 root Unix socket 新挑战及 pidfd，不借用调用者旧锁或保存的 JSON 授权。
 commit 前断流不启动持锁 Bash，失败会话保留；commit 后 ACK 丢失可实时查询同一 owner。
 停止须净撤销回执、Bash 实际退出和原锁释放后才确认，不自动恢复未知 owner。
+3d.1 已验 started 后 HUP 续期、manager TERM 净清理与 manager SIGKILL 后
+规则撤销/旧 owner 拒绝；不覆盖初始化、Bash SIGKILL 或统一撤销时限。
 仅限内部入口，菜单/schema/Compose、启用期更新/重启、旧 conntrack 排空、
 真实自动跳跃、原生宿主/arm64/公网与完整协议管理继续 `deferred`；阶段验收见实施计划。
 

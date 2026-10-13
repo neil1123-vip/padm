@@ -612,6 +612,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
     stages = set(root.glob(".hopping-guarded.*"))
     descriptors = []
     active = False
+    failed_owner_retained = False
     primary_error = None
     calls = []
 
@@ -793,6 +794,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             session / "owner.json") == owner_before, "重复启动覆盖了原会话"
         assert tree(root / "locks/deployment.lock") == parent_lock
         evidence["duplicate_start_refused"] = True
+        signal.pidfd_send_signal(manager_fd, signal.SIGHUP)
         observed = time.monotonic()
         authentication(node, root, enter, "independent-initial", self_password,
                        alice_password, "old", server_port=30000)
@@ -825,6 +827,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             assert tree(session / "owner.json") == owner_before
             time.sleep(1)
         assert checks >= 2 and previous["seq"] > running["seq"]
+        evidence["hup_verified"] = True
         authentication(node, root, enter, "independent-renewed", self_password,
                        alice_password, "old", server_port=30001)
         assert {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
@@ -874,13 +877,79 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
                         stale_token_refused=True, fresh_owner_restart=True,
                         nat_restored=True, state_removed=True, child_removed=True,
                         deployment_lock_released=True, session_removed=True)
+        _, terminated = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
+                               "30001", "198.18.1.1", "2001:db8:1::1")
+        active = True
+        term_owner = ack(terminated, "started")
+        term_manager = process_identity(term_owner["manager"])
+        term_bash = process_identity(term_owner["bash"])
+        term_started = time.monotonic()
+        signal.pidfd_send_signal(term_manager, signal.SIGTERM)
+        wait_ready(lambda: not alive(term_manager) and not alive(term_bash), 90)
+        assert not session.exists() and not state.exists()
+        assert not (root / "locks/deployment.lock").exists()
+        assert tree(lock) == net_lock and set(root.glob(".hopping-guarded.*")) == stages
+        assert {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
+                for tool in nat_before} == nat_before
+        assert not command(docker + [
+            "ps", "-aq", "--filter", "label=io.padm.hopping-supervised"]).strip()
+        active = False
+        evidence["manager_term"] = dict(
+            owner=term_owner, elapsed=round(time.monotonic() - term_started, 3),
+            child_removed=True, state_removed=True, nat_restored=True,
+            deployment_lock_released=True, stage_removed=True, session_removed=True,
+            uniform_revocation_deadline_verified=False)
+        _, killed = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
+                           "30001", "198.18.1.1", "2001:db8:1::1")
+        active = True
+        kill_owner = ack(killed, "started")
+        kill_manager = process_identity(kill_owner["manager"])
+        kill_bash = process_identity(kill_owner["bash"])
+        kill_stage = Path(kill_owner["stage"])
+        kill_child = frame(killed["payload"]["running"])["child_id"]
+        retained_owner = tree(session / "owner.json")
+        retained_session = session.stat().st_ino
+        killed_at = time.monotonic()
+        signal.pidfd_send_signal(kill_manager, signal.SIGKILL)
+        wait_ready(lambda: not alive(kill_manager) and not alive(kill_bash), 90)
+        assert not state.exists() and not (root / "locks/deployment.lock").exists()
+        assert tree(lock) == net_lock
+        assert {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
+                for tool in nat_before} == nat_before
+        assert not command(docker + [
+            "ps", "-aq", "--filter", "label=io.padm.hopping-supervised"]).strip()
+        assert session.stat().st_ino == retained_session
+        assert tree(session / "owner.json") == retained_owner
+        assert json.loads((session / "owner.json").read_text()) == kill_owner
+        assert set(root.glob(".hopping-guarded.*")) == stages | {kill_stage}
+        assert (kill_stage / "cid").read_text().strip() == kill_child
+        assert (kill_stage / "supervised.json").is_file()
+        # SIGKILL 后旧 active JSON 只作失败证据，不能授权查询、停止或新一代接管。
+        for function, arguments in (
+            ("dockerPortHoppingSupervisorStatus", ()),
+            ("dockerPortHoppingSupervisorStop", ()),
+            ("dockerPortHoppingSupervisorStart",
+             ("entry-hy2", "30000", "30001", "198.18.1.1", "2001:db8:1::1")),
+        ):
+            invoke(function, *arguments, accepted=False)
+            assert session.stat().st_ino == retained_session
+            assert tree(session / "owner.json") == retained_owner and kill_stage.is_dir()
+            assert not state.exists() and not (root / "locks/deployment.lock").exists()
+        evidence["manager_kill"] = dict(
+            owner=kill_owner, elapsed=round(time.monotonic() - killed_at, 3),
+            child_removed=True, state_removed=True, nat_restored=True,
+            deployment_lock_released=True, session_retained=True, stage_retained=True,
+            stale_status_stop_start_refused=True, automatic_recovery_verified=False,
+            uniform_revocation_deadline_verified=False)
+        active = False
+        failed_owner_retained = True
         return evidence
     except BaseException as error:
         primary_error = error
         evidence.update(failed=True, error=repr(error))
         raise
     finally:
-        if primary_error:
+        if primary_error or failed_owner_retained:
             try:
                 evidence["calls"] = calls
                 if session.exists():
@@ -898,9 +967,12 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
                 (work / "independent-supervisor-evidence.log").write_text(
                     json.dumps(evidence, sort_keys=True))
             except BaseException as error:
-                primary_error.add_note("独立监督证据保存失败: " + repr(error))
+                if primary_error:
+                    primary_error.add_note("独立监督证据保存失败: " + repr(error))
+                else:
+                    raise
         try:
-            if active or session.exists():
+            if active or (session.exists() and not failed_owner_retained):
                 try:
                     invoke("dockerPortHoppingSupervisorStop")
                 except BaseException as error:

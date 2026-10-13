@@ -6261,6 +6261,33 @@ started seq 2、最终 seq 31；调用者退出后仍存活，双族新连接与
 重启卸载、启用期更新/重启、菜单/schema/Compose、旧 conntrack、
 真实自动跳跃和完整协议管理继续 deferred，整体目标保持 active。
 
+##### 5C.9c.3e.2b.3d.1 运行态监督信号验收
+
+复用上阶段真实双族网络与独立监督夹具，只增加收到 `started` ACK 后的信号断言：
+manager HUP 后跨两次帧租约，原 owner、部署锁、规则 state 和 child 投影保持，
+新挑战查询确认 seq 增长并继续验证双族新连接/额度拒绝。
+manager TERM 通过原 pidfd 触发 Bash TERM，观察原 child、state、NAT、
+部署锁、stage 和 session 净清理；不伪造 CLI stopped ACK。
+manager SIGKILL 后等待本轮 Bash 因控制通道 EOF/EPIPE 关闭 child 输入；
+规则/state 净撤销、child 回收且原部署锁释放，session/owner/stage 保留。
+旧 active JSON 仅作失败证据；status、stop 和新 start 均拒绝并不覆盖证据。
+
+`docker-port-hopping-target-real` Jobs 2 通过：
+`.tmp-regression-docker-f136ce591d0a4e1ab5c7d5e35a687152/`，
+入口 241294 ms、排队 4955 ms、cache_hit=false，复用与 3d 相同的工具镜像。
+真实验收 238.825 秒，本次 manager TERM 观察 1.666 秒、SIGKILL 观察 1.722 秒；
+这些耗时不是撤销上界。八个相关文件与真实快照原始 SHA 一致，
+六个生产文件与 3d 完整回归核验一致，见本目录 `verification.json`。
+仅改真实夹具和文档，因此不重复 54 项完整合同；差异检查通过，
+成功重复归档与提取副本清理，结果、日志和核验保留。
+
+范围限于运行态：初始化期间的 HUP/TERM、Bash SIGKILL、daemon 重启、
+整机重启、systemd、原生宿主/arm64/公网仍未验收。
+manager 异常退出的 finally 先关闭控制通道再 TERM Bash，Bash 可能已删 stage
+后发送 cleaned 失败；session/log 保留，不承诺所有异常都保留全部目录，
+也不以丢失的清理回执确认 stopped 或自动接管。
+90 秒仅作 manager 等待预算，仍无统一撤销/事务时限；整体计划保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
