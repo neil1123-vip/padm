@@ -64,6 +64,19 @@ wget -O /root/install.sh "https://raw.githubusercontent.com/neil1123-vip/padm/ma
 padm
 ```
 
+### 短链二维码
+
+可选组件：通过 Cloudflare Worker 保存完整协议链接，并在终端显示短 HTTPS 地址的二维码。
+适用于完整链接二维码超出终端宽度的场景。以 root 登录 VPS，执行以下命令部署：
+
+```bash
+mkdir -p -m 700 /root/padm-shortlink && wget -O /root/padm-shortlink/deploy.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/tools/shortlink-worker/deploy.sh" && test -s /root/padm-shortlink/deploy.sh && chmod 700 /root/padm-shortlink/deploy.sh && bash /root/padm-shortlink/deploy.sh
+```
+
+按提示输入 Cloudflare API Token 和 Account ID，脚本自动安装依赖、部署 Worker 并保存配置；
+已安装的 padm 随后自动使用短链。协议内容存于 Cloudflare KV，短链接应按节点凭据保管。
+系统要求、授权权限、客户端导入和本地源码部署见 [部署说明](tools/shortlink-worker/README.md)。
+
 ### 非交互安装
 
 查看脚本当前支持的参数和示例：

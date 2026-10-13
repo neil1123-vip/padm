@@ -254,14 +254,48 @@ subscribeOutputTitle() {
     menuClose
 }
 
+subscribeOutputReadShortenerConfig() {
+    [[ -z "${PADM_QR_SHORTENER_URL:-}" && -z "${PADM_QR_SHORTENER_API_KEY:-}" ]] || return 0
+    local configFile="${PADM_INSTALL_DIR:-/etc/padm}/qr-shortener.json"
+    local fileOwner fileMode configData
+    [[ -e "${configFile}" || -L "${configFile}" ]] || return 0
+    [[ -f "${configFile}" && ! -L "${configFile}" && -r "${configFile}" ]] || return 1
+    fileOwner=$(stat -c '%u' "${configFile}") || return 1
+    fileMode=$(stat -c '%a' "${configFile}") || return 1
+    [[ "${fileOwner}" == 0 || "${fileOwner}" == "${EUID}" ]] || return 1
+    [[ "${fileMode}" =~ ^[0-7]{3,4}$ ]] && (( (8#${fileMode} & 077) == 0 )) || return 1
+    # 只解析数据，不执行配置文件中的 shell 内容。
+    configData=$(jq -er '
+        if type == "object" and (.url | type == "string") and (.api_key | type == "string")
+        then [.url, .api_key] | @tsv else error("invalid shortener config") end
+    ' "${configFile}" 2>/dev/null) || return 1
+    [[ -n "${configData}" && "${configData}" != *$'\n'* ]] || return 1
+    IFS=$'\t' read -r PADM_QR_SHORTENER_URL PADM_QR_SHORTENER_API_KEY <<<"${configData}"
+    [[ -n "${PADM_QR_SHORTENER_URL}" && -n "${PADM_QR_SHORTENER_API_KEY}" ]]
+}
+
 showShareLinkQRCode() {
-    local qr columns width
+    local qr columns width shareLink=$1 shortLink=
+    local PADM_QR_SHORTENER_URL=${PADM_QR_SHORTENER_URL:-}
+    local PADM_QR_SHORTENER_API_KEY=${PADM_QR_SHORTENER_API_KEY:-}
     if ! command -v qrencode >/dev/null 2>&1; then
         warnCard "二维码不可用" "未安装 qrencode；完整链接仍可复制导入"
         return 0
     fi
+    if [[ "${shareLink}" != http://* && "${shareLink}" != https://* ]]; then
+        if ! subscribeOutputReadShortenerConfig; then
+            warnCard "短链接配置不可用" "请重新运行 Worker 部署脚本；使用完整链接生成二维码"
+        elif [[ -z "${PADM_QR_SHORTENER_URL}" && -z "${PADM_QR_SHORTENER_API_KEY}" ]]; then
+            :
+        elif shortLink=$(subscribeOutputCreateShortLink "$1" 2>/dev/null); then
+            shareLink=${shortLink}
+            menuLine "二维码地址：${shareLink}"
+        else
+            warnCard "短链接生成失败" "使用完整链接生成二维码；请检查 Worker 地址和 API Key"
+        fi
+    fi
     # 半块字符将两行码点合为一行，并显式设置黑白背景。
-    if ! qr=$(printf '%s' "$1" | qrencode -m 2 -t ANSIUTF8); then
+    if ! qr=$(printf '%s' "${shareLink}" | qrencode -m 2 -t ANSIUTF8); then
         warnCard "二维码生成失败" "完整链接仍可复制导入"
         return 0
     fi
@@ -279,6 +313,40 @@ showShareLinkQRCode() {
     fi
     printf '%s\n' "${qr}"
     return 0
+}
+
+subscribeOutputCreateShortLink() {
+    local link=$1
+    local baseUrl=${PADM_QR_SHORTENER_URL:-}
+    local apiKey=${PADM_QR_SHORTENER_API_KEY:-}
+    local shortId shortUrl headerFile httpCode
+    baseUrl=${baseUrl%/}
+    [[ "${baseUrl}" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || return 1
+    [[ "${apiKey}" =~ ^[A-Za-z0-9_-]{32,128}$ ]] || return 1
+    shortId=$(initRandomSalt) || return 1
+    [[ "${shortId}" =~ ^[0-9a-f]{32}$ ]] || return 1
+    shortUrl="${baseUrl}/s/${shortId}"
+    padmCreateTmpRootPath headerFile padm-qr-shortener-auth.XXXXXX || return 1
+    chmod 600 "${headerFile}" || {
+        padmRemoveCleanupPath "${headerFile}"
+        return 1
+    }
+    printf 'Authorization: Bearer %s\n' "${apiKey}" >"${headerFile}" || {
+        padmRemoveCleanupPath "${headerFile}"
+        return 1
+    }
+    if ! httpCode=$(printf '%s' "${link}" | curl -q --fail --silent --show-error \
+        --proto '=https' --connect-timeout 5 --max-time 15 \
+        --request PUT \
+        -H "@${headerFile}" \
+        -H 'Content-Type: text/plain; charset=utf-8' \
+        --data-binary @- --output /dev/null --write-out '%{http_code}' "${shortUrl}" 2>/dev/null); then
+        padmRemoveCleanupPath "${headerFile}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${headerFile}"
+    [[ "${httpCode}" == 201 ]] || return 1
+    printf '%s\n' "${shortUrl}"
 }
 
 showProtocolShareLink() {

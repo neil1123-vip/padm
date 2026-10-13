@@ -5259,6 +5259,20 @@ runLocaleEchoContentUnsetPrintNRegression() {
         source "${PROJECT_ROOT}/shell/core/locale.sh"
         output=$(echoContent text "locale-smoke")
         [[ "${output}" == *"locale-smoke"* ]]
+        NO_COLOR=1
+        output=$(successCard "配置已保存")
+        [[ "${output}" == *"执行结果"* && "${output}" == *"配置已保存"* && "${output}" != *$'\033'* ]]
+        output=$(progressCard 2 "保存配置" 4)
+        [[ "${output}" == $'\n  [2/4] 保存配置' && "${output}" != *"┌"* ]]
+        unset NO_COLOR PADM_NO_COLOR
+        output=$(successCard "配置已保存")
+        [[ "${output}" == *$'\033[32m└'* && "${output}" != *$'\033[K'* ]]
+        output=$(warnCard "配置待确认")
+        [[ "${output}" == *$'\033[33m└'* ]]
+        output=$(errorCard "保存失败")
+        [[ "${output}" == *$'\033[1;31m└'* ]]
+        output=$(menuClose)
+        [[ "${output}" == *$'\033[1;36m└'* ]]
     )
 }
 
@@ -5266,6 +5280,7 @@ runLocalProtocolLinksRegression() (
     set -euo pipefail
     source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
     local root="${TMP_DIR}/local-protocol-links" configRoot output qrLog unexpectedAction before after link
+    local PADM_INSTALL_DIR="${root}/padm"
     configRoot="${root}/xray"
     output="${root}/output"
     qrLog="${root}/qr-input"
@@ -5340,6 +5355,112 @@ JSON
     showProtocolShareLink "${link}" >"${output}"
     grep -qF "${link}" "${output}"
     [[ "$(<"${qrLog}")" == "${link}" ]]
+    # Worker 成功时，上传仍发送完整协议链接，二维码只编码短地址。
+    local shortenerRoot="${root}/shortener"
+    local shortenerArgs="${shortenerRoot}/curl-args"
+    local shortenerBody="${shortenerRoot}/body"
+    local shortenerHeader="${shortenerRoot}/header"
+    local shortenerMode="${shortenerRoot}/header-mode"
+    mkdir -p "${shortenerRoot}"
+    curl() {
+        printf '%s\n' "$*" >"${shortenerArgs}"
+        local headerFile=
+        while (($#)); do
+            case "$1" in
+            -H)
+                case "${2:-}" in
+                @*) headerFile=${2#@} ;;
+                'Content-Type: text/plain; charset=utf-8') ;;
+                *) return 91 ;;
+                esac
+                shift 2
+                ;;
+            --data-binary)
+                [[ "${2:-}" == @- ]] || return 92
+                shift 2
+                ;;
+            *) shift ;;
+            esac
+        done
+        [[ -n "${headerFile}" && -f "${headerFile}" ]] || return 93
+        cat "${headerFile}" >"${shortenerHeader}"
+        stat -c '%a' "${headerFile}" >"${shortenerMode}"
+        cat >"${shortenerBody}"
+        printf '201'
+    }
+    PADM_QR_SHORTENER_URL=https://short.example.test
+    PADM_QR_SHORTENER_API_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    export PADM_QR_SHORTENER_URL PADM_QR_SHORTENER_API_KEY
+    : >"${qrLog}"
+    showProtocolShareLink "${link}" >"${output}"
+    local shortLink
+    shortLink=$(<"${qrLog}")
+    [[ "${shortLink}" =~ ^https://short.example.test/s/[0-9a-f]{32}$ ]]
+    [[ "$(<"${shortenerBody}")" == "${link}" ]]
+    grep -q -- '--request PUT' "${shortenerArgs}"
+    ! grep -qF "${PADM_QR_SHORTENER_API_KEY}" "${shortenerArgs}"
+    [[ "$(<"${shortenerHeader}")" == "Authorization: Bearer ${PADM_QR_SHORTENER_API_KEY}" ]]
+    [[ "$(<"${shortenerMode}")" == 600 ]]
+    [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+    # 自动配置使用 JSON 数据读取，重连后无需 source；环境变量仍优先。
+    mkdir -p "${PADM_INSTALL_DIR}"
+    jq -n --arg url https://short.example.test --arg key "${PADM_QR_SHORTENER_API_KEY}" \
+        '{url:$url, api_key:$key}' >"${PADM_INSTALL_DIR}/qr-shortener.json"
+    chmod 600 "${PADM_INSTALL_DIR}/qr-shortener.json"
+    (
+        unset PADM_QR_SHORTENER_URL PADM_QR_SHORTENER_API_KEY
+        : >"${qrLog}"
+        showProtocolShareLink "${link}" >"${output}"
+        [[ "$(<"${qrLog}")" =~ ^https://short.example.test/s/[0-9a-f]{32}$ ]]
+        [[ "$(<"${shortenerBody}")" == "${link}" ]]
+        [[ -z "${PADM_QR_SHORTENER_URL:-}${PADM_QR_SHORTENER_API_KEY:-}" ]]
+    )
+    : >"${qrLog}"
+    PADM_QR_SHORTENER_URL=https://override.example.test showProtocolShareLink "${link}" >"${output}"
+    [[ "$(<"${qrLog}")" =~ https://override.example.test/s/[0-9a-f]{32}$ ]]
+    (
+        unset PADM_QR_SHORTENER_URL PADM_QR_SHORTENER_API_KEY
+        warnCard() { printf '%s\n' "$*"; }
+        curl() { printf 'unexpected-upload\n' >>"${unexpectedAction}"; return 99; }
+        chmod 644 "${PADM_INSTALL_DIR}/qr-shortener.json"
+        : >"${qrLog}"
+        showProtocolShareLink "${link}" >"${output}"
+        [[ "$(<"${qrLog}")" == "${link}" && ! -e "${unexpectedAction}" ]]
+        grep -q '短链接配置不可用' "${output}"
+        printf '$(touch %s)\n' "${unexpectedAction}" >"${PADM_INSTALL_DIR}/qr-shortener.json"
+        chmod 600 "${PADM_INSTALL_DIR}/qr-shortener.json"
+        : >"${qrLog}"
+        showProtocolShareLink "${link}" >"${output}"
+        [[ "$(<"${qrLog}")" == "${link}" && ! -e "${unexpectedAction}" ]]
+        grep -q '短链接配置不可用' "${output}"
+    )
+    rm -f -- "${PADM_INSTALL_DIR}/qr-shortener.json"
+    # 已发布的订阅 URL 不得上传成另一条文本 URL。
+    local subscriptionUrl=https://subscribe.example.test/s/default/token
+    curl() { printf 'unexpected-upload\n' >>"${unexpectedAction}"; return 99; }
+    : >"${qrLog}"
+    release=debian showSubscriptionUrlCard "订阅" self "${subscriptionUrl}" >"${output}"
+    [[ "$(<"${qrLog}")" == "${subscriptionUrl}" && ! -e "${unexpectedAction}" ]]
+    # 非 HTTPS 地址和换行密钥必须在发请求前拒绝。
+    PADM_QR_SHORTENER_URL=http://short.example.test \
+        regressionExpectStatus 1 subscribeOutputCreateShortLink "${link}"
+    PADM_QR_SHORTENER_API_KEY=$'invalid\nheader' \
+        regressionExpectStatus 1 subscribeOutputCreateShortLink "${link}"
+    [[ ! -e "${unexpectedAction}" ]]
+    warnCard() { printf '%s\n' "$*"; }
+    curl() { cat >/dev/null; printf '302'; }
+    : >"${qrLog}"
+    showProtocolShareLink "${link}" >"${output}"
+    [[ "$(<"${qrLog}")" == "${link}" ]]
+    grep -q '短链接生成失败' "${output}"
+    curl() { return 22; }
+    : >"${qrLog}"
+    showProtocolShareLink "${link}" >"${output}"
+    [[ "$(<"${qrLog}")" == "${link}" ]]
+    grep -q '短链接生成失败' "${output}"
+    [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+    unset PADM_QR_SHORTENER_URL PADM_QR_SHORTENER_API_KEY
+    unset -f curl
     (
         # 按可见列数判断，ANSI 转义序列不占宽度，超宽时不得折行输出。
         warnCard() { printf '%s\n' "$@"; }
@@ -5388,6 +5509,14 @@ JSON
     grep -q '当前没有可用的本机自用协议链接' "${output}"
     [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
 )
+
+runShortlinkWorkerRegression() {
+    node --experimental-default-type=module "${PROJECT_ROOT}/tools/shortlink-worker/worker.test.mjs"
+}
+
+runShortlinkDeployScriptRegression() {
+    bash "${PROJECT_ROOT}/tools/shortlink-worker/deploy.test.sh"
+}
 
 runShowAccountsOptionalStepRegression() {
     (
@@ -7938,6 +8067,8 @@ runRegressionFastOnlyOutputRest() {
         subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression \
         subscription-output-random-user runSubscriptionOutputRandomUserRegression \
         local-protocol-links runLocalProtocolLinksRegression \
+        shortlink-worker runShortlinkWorkerRegression \
+        shortlink-deploy-script runShortlinkDeployScriptRegression \
         show-accounts-optional-step runShowAccountsOptionalStepRegression \
         subscription-account-port-fallback runSubscriptionAccountPortFallbackRegression \
         dual-core-shared-protocol-dispatch runDualCoreSharedProtocolDispatchRegression \

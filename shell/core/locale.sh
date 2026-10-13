@@ -99,13 +99,15 @@ statusCard() {
     local title=$1
     shift
     local color=${PADM_STATUS_CARD_COLOR:-title}
-    printf '\r\033[K'
+    if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${PADM_NO_COLOR:-}" && -z "${NO_COLOR:-}" ]]; then
+        printf '\r\033[K'
+    fi
     echoContent "${color}" "\n┌─ ${title} ─────────────────────────────────────────"
     local line
     for line in "$@"; do
         menuLine "${line}"
     done
-    menuClose
+    PADM_STATUS_CARD_COLOR="${color}" menuClose
 }
 
 successCard() {
@@ -124,11 +126,9 @@ progressCard() {
     local step=$1
     local title=$2
     local total=${3:-${totalProgress}}
-    echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
-    menuLine "进度 $(uiStyle recommended "${step}/${total}")"
-    menuClose
+    uiPrintLine "\n  $(uiStyle title "[${step}/${total}]") $(uiStyle value "${title}")"
 }
 
 menuClose() {
-    echoContent title "└──────────────────────────────────────────────────"
+    echoContent "${PADM_STATUS_CARD_COLOR:-title}" "└──────────────────────────────────────────────────"
 }

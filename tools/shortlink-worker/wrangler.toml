@@ -1,0 +1,10 @@
+name = "padm-shortlink"
+main = "worker.js"
+compatibility_date = "2026-10-13"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "KV"
+
+[secrets]
+required = ["API_KEY"]
