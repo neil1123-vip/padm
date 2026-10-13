@@ -6469,6 +6469,37 @@ SIGKILL 证据行为均通过。最终真实与集中归档的 14 份文件核�
 清理成功重复归档、核验脚本及诊断副本，保留结果、日志、核验与失败输入。
 菜单启停与 schema/Compose 持久化继续推进，整体目标保持 active。
 
+#### 5C.9c.3e.2b.3d.7 手动跳跃菜单与持久规格
+
+v3 增加可选 `port_hopping` 保存字段，并同步写入 deployment 与 Compose
+`x-padm-port-hopping`；旧 bundle 缺少 `x-padm-port-hopping-manual` 时拒绝带字段
+的规格。当前范围固定为单个 sing-box、单个双族 Hy2、无宿主集成和其它常驻运行服务；
+默认未运行的 ACME profile 可以保留。范围起止、监听器、规范 IPv4/IPv6 及目标端口
+在保存和启用前重复校验，保存不会自动启动监督。
+
+协议菜单提供状态、保存、手动启用、停止和清除；CLI 提供
+`edit --port-hopping`、`edit --port-hopping-clear` 及
+`port-hopping status|start|stop`。活动监督通过原控制通道查询，普通 status 不占用
+持续部署锁；启动在预约部署锁内读取保存参数并再次核对，避免编辑竞态。清除、
+失败恢复、更新、回滚均保持三份材料一致，参数不匹配时不采集累计或重建核心。
+
+本阶段不开放自动恢复、普通 up/daemon/systemd/整机重启接管、范围分享、真实自动
+跳跃、TUIC、旧会话排空、原生宿主、arm64、公网或其它多监听场景；整体目标保持
+active。配置、完整合同和真实双族变更回归集中验收，避免重复已通过的监督长集合。
+
+Linux amd64 配置定向通过，入口 14551 ms：
+`.tmp-regression-docker-4942dda4a9b64169ac0b319648003c95/`；
+规格差分 185 案例通过，入口 13158 ms：
+`.tmp-regression-docker-c1690690985c4ec4b3db4c4a11dc227f/`。
+集中合同 54/54 通过，Jobs 6，入口 364096 ms、排队 302 ms、cache=false：
+`.tmp-regression-docker-859d2c526a074ff28da8d5a9ac323cad/`。
+真实双族变更定向通过，场景 258.079 秒、入口 261132 ms、排队 157 ms：
+`.tmp-regression-docker-7e17d3a1a87141949f06502155d7f86a/`。
+两份归档各 13 份阶段代码与测试均匹配，见各自 `verification.json`；
+文档在打包后精简，不属于回归快照，不为文档重复回归。
+清理成功输入归档和清单，保留结果、日志及核验；下一组合继续范围分享与真实自动跳跃，
+不得将手动菜单完成当作完整跳跃或整体计划完成。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

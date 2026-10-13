@@ -1447,6 +1447,8 @@ dockerEditCommand() {
     local routingOldIp= routingNewIp= routingHost=
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
+    local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
+    local portHoppingIpv4= portHoppingIpv6=
     local cdnAction= cdnListener= cdnAddresses=
     local xhttpAction= xhttpListener= xhttpPreset= xhttpValues='{}' xhttpPadding=null
     local xhttpNoGrpc=false xhttpNoSse=false
@@ -1769,6 +1771,22 @@ dockerEditCommand() {
             fi
             shift 3
             ;;
+        --port-hopping)
+            [[ "$#" -ge 6 && -z "${portHoppingAction}" &&
+                -n "$2" && "$2" != --* &&
+                "$3" =~ ^[1-9][0-9]{0,4}$ && "$4" =~ ^[1-9][0-9]{0,4}$ &&
+                "$3" -le "$4" && "$4" -le 65535 &&
+                -n "$5" && "$5" != --* && -n "$6" && "$6" != --* ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            portHoppingAction=set portHoppingListener=$2 portHoppingStart=$3 portHoppingEnd=$4
+            portHoppingIpv4=$5 portHoppingIpv6=$6
+            shift 6
+            ;;
+        --port-hopping-clear)
+            [[ -z "${portHoppingAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            portHoppingAction=clear
+            shift
+            ;;
         --warp-domains)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -1983,6 +2001,14 @@ dockerEditCommand() {
         dockerError 'XHTTP 专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${portHoppingAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${fail2banAction}" && -z "${cdnAction}" && -z "${xhttpAction}" ) ]] || {
+        dockerError '端口跳跃专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1995,7 +2021,8 @@ dockerEditCommand() {
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
-        -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" ) ||
+        -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
+        -z "${portHoppingAction}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -2061,7 +2088,8 @@ dockerEditCommand() {
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
-        -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" ]]; then
+        -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
+        -z "${portHoppingAction}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -2192,6 +2220,18 @@ dockerEditCommand() {
             dockerError 'CDN 地址覆盖只支持已有协议 21/22/23/24/25 入口，未提交配置'
             return "${PADM_DOCKER_RC_STATE}"
         }
+    fi
+    if [[ -n "${portHoppingAction}" ]]; then
+        # 专项只改持久规格，地址与支持范围统一交给完整规格校验。
+        jq --arg action "${portHoppingAction}" --arg listener "${portHoppingListener}" \
+            --argjson start "${portHoppingStart}" --argjson end "${portHoppingEnd}" \
+            --arg ipv4 "${portHoppingIpv4}" --arg ipv6 "${portHoppingIpv6}" '
+          if $action == "clear" then del(.port_hopping)
+          else .port_hopping = {listener_id:$listener,range_start:$start,range_end:$end,
+            ipv4:$ipv4,ipv6:$ipv6} end
+        ' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${portAlias}" ]]; then
         jq --arg listener "${portAliasListener}" --arg port "${portAliasPort}" --arg action "${portAlias}" '
@@ -2650,6 +2690,7 @@ dockerEditCommand() {
         --arg routing_host "${routingHost}" --arg routing_ip "${routingNewIp}" \
         --arg http_relay "${httpRelay}" \
         --arg port_alias "${portAlias}" \
+        --arg port_hopping "${portHoppingAction}" \
         --arg cdn_listener "${cdnListener}" \
         --arg xhttp_listener "${xhttpListener}" --arg xhttp_action "${xhttpAction}" \
         --arg fail2ban_action "${fail2banAction}" \
@@ -2697,7 +2738,9 @@ dockerEditCommand() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-       (if $fail2ban_action == "port" then
+       (if $port_hopping != "" then
+        ($old | del(.port_hopping)) == ($new | del(.port_hopping))
+       elif $fail2ban_action == "port" then
          # 端口专项只豁免选中入口公开端口与唯一 jail 的保护端口，其余规格逐字冻结。
          def without_fail2ban_port:
            .core.protocols |= map(if .listener_id == $fail2ban_listener then del(.public_port) else . end) |
@@ -2826,7 +2869,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持 XHTTP/CDN 地址/Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持端口跳跃/XHTTP/CDN 地址/Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"

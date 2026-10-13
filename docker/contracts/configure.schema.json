@@ -36,11 +36,24 @@
   "x-padm-xhttp-xmux": true,
   "x-padm-xhttp-padding": true,
   "x-padm-xhttp-headers": true,
+  "x-padm-port-hopping-manual": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
     "schema_version": {
       "enum": [1, 2, 3]
+    },
+    "port_hopping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listener_id", "range_start", "range_end", "ipv4", "ipv6"],
+      "properties": {
+        "listener_id": {"type": "string", "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"},
+        "range_start": {"$ref": "#/$defs/port"},
+        "range_end": {"$ref": "#/$defs/port"},
+        "ipv4": {"type": "string", "format": "ipv4"},
+        "ipv6": {"type": "string", "format": "ipv6"}
+      }
     },
     "cdn_entries": {
       "type": "array",
@@ -669,6 +682,34 @@
     }
   },
   "allOf": [
+    {
+      "if": {"required": ["port_hopping"]},
+      "then": {
+        "properties": {
+          "schema_version": {"const": 3},
+          "host_integrations": {"maxItems": 0},
+          "subscription": {"properties": {"enabled": {"const": false}}},
+          "tls": {"properties": {"http01": {"const": false}}},
+          "core": {
+            "properties": {
+              "type": {"const": "sing-box"},
+              "secondary_type": {"type": "null"},
+              "protocols": {
+                "minItems": 1, "maxItems": 1,
+                "items": {"properties": {
+                  "id": {"const": 3},
+                  "address_families": {"minItems": 2, "maxItems": 2}
+                }}
+              }
+            }
+          }
+        },
+        "not": {"anyOf": [
+          {"required": ["port_aliases"]}, {"required": ["control"]},
+          {"required": ["relay"]}, {"required": ["reality_stream"]}
+        ]}
+      }
+    },
     {
       "if": {"required": ["port_aliases"]},
       "then": {

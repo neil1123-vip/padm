@@ -60,7 +60,7 @@ dockerConfigureSpecValidate() {
     local specInput specJson matrixJson validationFilter hasCdnEntries hasPortAliases hasRelay hasRouting hasSite hasAccounts
     local snapshot protocolPrefix=if hasReality hasTrojan hasFallbackTls hasHy2 hasAnyTls
     local hasNaive hasShadowsocks hasTuic hasGrpcTls hasWebsocket
-    local hasHostIntegrations hasRealityStream hasTls
+    local hasHostIntegrations hasRealityStream hasTls hasPortHopping
     schemaFile=$(dockerConfigureSchemaFile) || return 1
     matrixFile=$(dockerFeatureMatrixFile) || return 1
     [[ -f "${specFile}" && ! -L "${specFile}" && -s "${specFile}" ]] || {
@@ -76,7 +76,7 @@ dockerConfigureSpecValidate() {
         ([$spec | has("cdn_entries"), has("port_aliases"), has("relay"),
           has("routing"), has("site"), has("accounts"),
           .host_integrations != [], has("reality_stream"),
-          ((has("tls") and .tls == null) | not)] +
+          ((has("tls") and .tls == null) | not), has("port_hopping")] +
           ($spec |
             if (.core | type) != "object" then [range(10) | true]
             elif (.core.protocols | type) != "array" then [range(10) | true]
@@ -102,7 +102,7 @@ dockerConfigureSpecValidate() {
     }
     specJson=${specInput%$'\n'*}
     IFS='|' read -r hasCdnEntries hasPortAliases hasRelay hasRouting hasSite hasAccounts \
-        hasHostIntegrations hasRealityStream hasTls \
+        hasHostIntegrations hasRealityStream hasTls hasPortHopping \
         hasReality hasTrojan hasFallbackTls hasHy2 hasAnyTls hasNaive hasShadowsocks \
         hasTuic hasGrpcTls hasWebsocket \
         <<<"${specInput##*$'\n'}"
@@ -203,8 +203,27 @@ dockerConfigureSpecValidate() {
         (if has("port_aliases") then ["port_aliases"] else [] end) +
         (if has("cdn_entries") then ["cdn_entries"] else [] end) +
         (if has("routing") then ["routing"] else [] end) +
-        (if has("site") then ["site"] else [] end)) and
+        (if has("site") then ["site"] else [] end) +
+        (if has("port_hopping") then ["port_hopping"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
+    '
+    validationFilter+='
+      (if has("port_hopping") then
+        .schema_version == 3 and .core.type == "sing-box" and
+        .core.secondary_type == null and (.core.protocols | length) == 1 and
+        .host_integrations == [] and (has("port_aliases") | not) and (has("control") | not) and
+        (has("relay") | not) and .subscription.enabled == false and .tls.http01 != true and
+        (has("reality_stream") | not) and
+        (.port_hopping | exact(["listener_id","range_start","range_end","ipv4","ipv6"]) and
+          (.range_start | port) and (.range_end | port) and .range_start <= .range_end and
+          (.ipv4 | routing_ipv4) and (.ipv6 | routing_ipv6) and
+          (.listener_id | listener_id)) and
+        (.core.protocols[0] | .id == 3 and .core == "sing-box" and
+          (.address_families | sort) == ["ipv4","ipv6"] and
+          .listener_id == $request.port_hopping.listener_id and
+          (.public_port < $request.port_hopping.range_start or
+           .public_port > $request.port_hopping.range_end))
+       else true end) and
     '
     if [[ "${hasCdnEntries}" == true ]]; then
         validationFilter+='
@@ -835,6 +854,11 @@ dockerConfigureSpecValidate() {
         DOCKER_SPEC_VALIDATED_FLAGS=${validation}
     fi
     IFS='|' read -r hasControlSync hasControl hasSsh <<<"${validation}"
+    if [[ "${hasPortHopping}" == true ]]; then
+        dockerPortHoppingAddressesValidate \
+            "$(jq -er '.port_hopping.ipv4' <<<"${specJson}")" \
+            "$(jq -er '.port_hopping.ipv6' <<<"${specJson}")" || return 1
+    fi
     [[ "${hasControlSync}" != false || "${hasControl}" != false || "${hasSsh}" != false ]] || return 0
     (
         umask 077
@@ -1260,6 +1284,7 @@ dockerManagedSpecMatchesDeployment() {
         [if .control != null then "control" else empty end] +
         [.host_integrations[].profile] | sort) == ($d.compose.profiles | sort) and
       (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
+      .port_hopping == $d.port_hopping and
       ([.core.protocols[].id] | unique) == ($d.core.protocol_ids | sort) and
       (if .schema_version >= 2 then
         [.core.protocols[] |
@@ -1461,7 +1486,7 @@ dockerEditBaselineValidate() {
             --slurpfile actual "${root}/deployment.json" '
           def input: {core: (.core | .protocol_ids |= sort),
             listeners: (.listeners | sort_by(.service, .public_port, .transport)),
-            profiles: (.compose.profiles | sort), host_integrations, formats};
+              profiles: (.compose.profiles | sort), host_integrations, formats, port_hopping};
           ($actual | length) == 1 and ($expected[0] | input) == ($actual[0] | input)
         ' >/dev/null 2>&1 || {
         dockerError '监听器、编排或宿主集成不能从完整规格无损重建，已拒绝编辑'
@@ -3177,6 +3202,9 @@ dockerGenerateCompose() {
           }
         }
       }
+      | if $r.port_hopping != null then
+          .["x-padm-port-hopping"] = $r.port_hopping
+        else . end
       | if $ipv6 or $relayIPv6 or $fail2banIPv6 then
           .networks.ipv6 = {
             name: "padm-docker-ipv6", enable_ipv6: true,
@@ -3631,7 +3659,7 @@ dockerGenerateDeployment() {
         host_integrations: [$r.host_integrations[] | {
           type, profile, firewall_rules, devices, schedules, settings
         }]
-      }
+      } + if $r.port_hopping != null then {port_hopping:$r.port_hopping} else {} end
     ' >"${target}"
 }
 
@@ -3649,6 +3677,21 @@ dockerDeploymentFileValidate() {
         (.compose.profiles | index("core-sing-box")) != null
        else true end) and
       (.core.protocol_ids | type == "array" and length >= 1 and (unique | length) == length) and
+      (if has("port_hopping") then
+        .core.type == "sing-box" and .core.secondary_type == null and
+        .core.protocol_ids == [3] and .host_integrations == [] and
+        (.port_hopping | exact(["listener_id","range_start","range_end","ipv4","ipv6"]) and
+          (.range_start | type == "number" and floor == . and . >= 1) and
+          (.range_end | type == "number" and floor == . and . <= 65535) and
+          .range_start <= .range_end and
+          (.ipv4 | type == "string") and (.ipv6 | type == "string")) and
+        (. as $d | .listeners | length == 1 and
+          .[0].listener_id == $d.port_hopping.listener_id and
+          .[0].service == "sing-box" and .[0].transport == "udp" and
+          (.[0].address_families | sort) == ["ipv4","ipv6"] and
+          (.[0].public_port < $d.port_hopping.range_start or
+           .[0].public_port > $d.port_hopping.range_end))
+       else true end) and
       (.listeners | type == "array" and length >= 1 and
         all(.[]; (.public_port | type == "number" and floor == . and . >= 1 and . <= 65535) and
           (.container_port | type == "number" and floor == . and . >= 1 and . <= 65535) and
@@ -4063,6 +4106,22 @@ dockerFail2banSourceAddress() (
         printf '%s\n' "${address}"
     fi
 )
+
+dockerPortHoppingAddressesValidate() {
+    python3 - "$@" <<'PY'
+import ipaddress
+import sys
+
+if len(sys.argv) != 3:
+    raise SystemExit("跳跃配置需要原生双族地址")
+for raw, version in zip(sys.argv[1:], (4, 6)):
+    address = ipaddress.ip_address(raw)
+    if (address.version != version or str(address) != raw or "%" in raw or
+            address.is_unspecified or address.is_multicast or address.is_loopback or
+            address.is_link_local or getattr(address, "ipv4_mapped", None) is not None):
+        raise SystemExit("跳跃配置需要规范原生双族地址")
+PY
+}
 
 dockerPortHoppingTargetWitness() {
     dockerPortHoppingTargetInspect snapshot "$@"

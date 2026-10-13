@@ -290,12 +290,17 @@ def reservation_cases(base, entrypoint):
     count = 0
     installation = base / "reservation-wait"
     (installation / "data/net").mkdir(parents=True, mode=0o700)
+    saved_values = ["hy2-main", "36561", "36562", "198.18.1.1", "2001:db8:1::1"]
+    (installation / "saved-arguments.json").write_text(json.dumps(
+        ["stale-entry", "35000", "35001", "198.18.1.2", "2001:db8:1::2"]))
     holder = subprocess.Popen([
         "bash", "-Eeuo", "pipefail", "-c",
         'source "$1"; trap dockerReleaseDeploymentLock EXIT; '
-        'dockerAcquireDeploymentLock; printf "locked\\n"; read -r release; [[ "$release" == release ]]',
+        'dockerAcquireDeploymentLock; printf "locked\\n"; read -r release; [[ "$release" == release ]]; '
+        'printf "%s\\n" "$TEST_SAVED_VALUES" >"$PADM_DOCKER_INSTALL_DIR/saved-arguments.json"',
         "test", str(ROOT / "install-docker.sh")],
-        env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(installation)),
+        env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(installation),
+                 TEST_SAVED_VALUES=json.dumps(saved_values)),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     services, peers = [], []
     try:
@@ -307,8 +312,7 @@ def reservation_cases(base, entrypoint):
             waited = installation / f"reservation-waited-{index}"
             manager = subprocess.Popen([
                 sys.executable, str(HELPER), "_service", str(peer.fileno()),
-                str(installation), str(entrypoint), "hy2-main", "36561", "36562",
-                "198.18.1.1", "2001:db8:1::1"], pass_fds=(peer.fileno(),),
+                str(installation), str(entrypoint)], pass_fds=(peer.fileno(),),
                 env=dict(os.environ, TEST_RESERVATION_WAIT=str(waited)),
                 start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             peer.close()
@@ -342,6 +346,8 @@ def reservation_cases(base, entrypoint):
                 results.append(result)
         assert sum(result is not None for result in results) == 1
         winner = next(result for result in results if result is not None)
+        assert (installation / "selected-arguments").read_text().splitlines() == saved_values, (
+            "保存启动采用了取锁前的旧参数")
         assert MODULE["control"]("status", str(installation))["owner"] == winner["owner"]
         deployment_command(installation, "dockerLockInstalledDeployment")
         stopped = MODULE["control"]("stop", str(installation))
@@ -362,6 +368,15 @@ def reservation_cases(base, entrypoint):
             manager.communicate(timeout=8)
         if holder.poll() is None:
             holder.communicate(b"release\n", timeout=5)
+    installation = base / "missing-saved"
+    (installation / "data/net").mkdir(parents=True, mode=0o700)
+    failed = subprocess.run([
+        sys.executable, str(HELPER), "start", str(installation), str(entrypoint)],
+        capture_output=True, timeout=8)
+    assert failed.returncode == 1 and not failed.stdout and failed.stderr
+    assert not (installation / "data/net/.hopping-supervisor").exists()
+    assert not (installation / "locks/deployment.lock").exists()
+    count += 1
     for fault in ("changed-pid", "occupied-lock", "replaced-session"):
         installation = base / fault
         (installation / "data/net").mkdir(parents=True, mode=0o700)
@@ -550,6 +565,11 @@ def main():
         entrypoint = base / "entrypoint.sh"
         entrypoint.write_text(
             f'source "{ROOT / "install-docker.sh"}"\n'
+            'dockerPortHoppingSavedArguments() {\n'
+            '  [[ -d "$PADM_DOCKER_INSTALL_DIR/locks/deployment.lock" &&\n'
+            '     "$(cat "$PADM_DOCKER_INSTALL_DIR/locks/deployment.lock/pid")" == "$$" ]] || return 1\n'
+            '  jq -ec "." "$PADM_DOCKER_INSTALL_DIR/saved-arguments.json"\n'
+            '}\n'
             'if [[ "$0" == padm-hopping-reservation && -n "${TEST_RESERVATION_WAIT:-}" ]]; then\n'
             '  mkdir() {\n'
             '    local status=0 target="${@: -1}"\n'
@@ -580,6 +600,7 @@ def main():
             '  esac\n'
             'fi\n'
             'dockerPortHoppingTargetSupervisedOwned() {\n'
+            '  printf "%s\\n" "${@:2:5}" >"$PADM_DOCKER_INSTALL_DIR/selected-arguments"\n'
             f'  exec "{sys.executable}" "{SCRIPT}" fake-owned "$1" "$PADM_DOCKER_INSTALL_DIR" '
             '"${7:-}" "${@:8}"\n'
             '}\n')

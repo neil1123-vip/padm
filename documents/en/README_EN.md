@@ -358,68 +358,38 @@ IPv4/IPv6 publishing is verified in an isolated amd64 Linux daemon;
 public hosting, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
 
-Complete Hy2/TUIC port hopping remains deferred. Preliminary tests with the fixed amd64
-sing-box 1.14.2 image accept Hy2 `server_ports` and reject that field for TUIC;
-both single-port baselines pass. Two existing Hy2 UDP aliases each pass strict TLS and
-TCP/UDP over IPv4/IPv6, and the range client keeps serving across 5.1 seconds.
-Short-window packet counts do not prove both families switched ports or performed a new
-QUIC handshake. These tests do not open hopping menus, range shares or host DNAT management.
-The 5C.9b isolated prerequisite verifies IPv4/IPv6 iptables-nft DNAT from two range
-ports to an existing Docker host-published port. Fresh-client traffic follows exact
-revocation and reconstruction, while Docker and fixture foreign NAT rules stay unchanged.
-This path retains the default userland proxy and does not prove direct container DNAT,
-production persistent ownership, existing-session revocation, range conflicts,
-reboot/uninstall behavior or complete automatic hopping.
-The internal 5C.9c prerequisites add range-conflict checks, fixed ownership audits,
-exact cleanup and a locked startup transaction. TERM/INT clean up both families;
-verified remnants with the same parameters can be reconstructed. Replaced state/lock
-files and unmarked chains from another process are rejected and retained for inspection.
-Menus and Compose integration remain deferred, along with target-publication ownership,
-existing-session drainage, whole-machine restart and uninstall acceptance.
-The internal read-only 5C.9c.3a snapshot checks an existing dual-stack Hy2 listener's
-complete specification, account/quota-rendered configuration, Compose, image and UDP
-publication by a healthy managed container. It returns identity and an enabled-account
-count without account identifiers or passwords. Matching disk files and publication do
-not prove the process loaded that configuration version. A real standard deployment
-verifies healthy snapshots, changed startup generations and disk-drift refusal.
-The separate read-only 3c startup check rejects runtime configuration or selected TLS
-files whose mtime/ctime follows the fixed container start time, including restored
-mtimes or same-byte replacements. Normal traffic-state updates are not time constrained.
-It does not prove loaded versions, the container's mount view or consistency after
-clock rollback. Internal 3d.1–2 adds current-Bash lock identity checks and a managed
-startup transaction, limited to an existing traffic directory, one healthy sing-box,
-one dual-stack Hy2 listener, no host integrations and no other project containers. The default
-inactive ACME profile may remain defined. It strictly collects cumulative traffic,
-renders one new candidate and recreates once on success, verifying new container and
-file identities. Failure or INT/TERM recovery uses only the validated safe candidate;
-otherwise it verifies ownership and stops the core. Cumulative traffic never rolls
-back, and failure evidence remains. A Linux amd64 private daemon verifies fresh
-dual-family quota revocation and safe recovery after publication fails. SIGKILL,
-noncooperative replacement, native hosts/arm64, public networks, old-session draining
-and the complete net/menu/schema gate remain pending. Complete hopping and
-protocol-management support are unchanged.
-Internal 3e.1 activation preparation derives the target from the unique listener and
-rejects noncanonical, reversed or target-containing port ranges and non-dual-stack
-inputs before collection. It directly calls the startup transaction once, then checks
-fixed inputs and the new container generation without regenerating, rereading traffic
-state or rendering. Its range and target output is diagnostic only: it writes neither
-jumpstate nor NAT, proves no current range availability and grants no net activation
-authority. Failure preserves evidence and committed cumulative traffic.
-The account count reflects the quota version used for this startup; later traffic-state
-changes do not imply account restrictions have been reapplied.
-Internal 3e.2a also rechecks global conflicts before and after the experimental net
-owner commits active state. It first verifies complete owned resources from the same
-dual-family NAT snapshots, then excludes only those exact rules and chain declarations.
-Native nft layouts, legacy NAT and UDP listeners retain their existing refusal checks.
-Foreign conflicts do not block cleanup of verified owned rules. The net lock does not
-reserve the range against outside writers; active state is not a final activation ACK.
-Live parent/child authorization, menu/schema integration and production enablement
-remain pending.
-Internal 3e.2b.1 adds a fixed `bound` startup/preparation mode that returns the lock,
-fixed-input and state/live identities and hashes actually used for startup. It rechecks
-those versions before and after cleanup, including same-byte file replacements.
-Existing entry points keep their semantics. This diagnostic contains no account content
-and grants no net write authority; the live parent/child channel remains pending.
+The protocol menu's port-hopping manager configures, starts, stops and clears manual Hy2 range DNAT.
+Optional v3 `port_hopping` stores `{listener_id, range_start, range_end, ipv4, ipv6}`
+in the specification, deployment record and Compose `x-padm-port-hopping` metadata.
+The current scope is one sing-box core,
+one dual-stack Hy2 listener, an existing traffic directory, no host integrations and
+no additional running services. An inactive ACME profile may remain defined.
+Aliases, the control plane, HTTP relay, HTTP-01 and enabled subscriptions are rejected.
+The range must exclude the target public port, and both addresses must be canonical
+native IPv4/IPv6 addresses assigned to the host.
+
+Saving does not enable rules; run `start` explicitly. Startup checks the configuration
+and actual container, collects cumulative traffic and applies quotas; an independent
+supervisor maintains the dual-family rules. Run `stop` and confirm cleanup before editing
+or clearing the settings. `restart/update/rollback/down/uninstall` use supervisor coordination;
+unconfirmed shutdown or handoff refuses further changes and preserves cumulative traffic
+and failure evidence. Replace the listener and addresses below with local values:
+
+```bash
+padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 --preview
+padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 --confirm PADM-DOCKER-EDIT
+padm-docker port-hopping status
+padm-docker port-hopping start
+padm-docker port-hopping stop
+padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
+```
+
+`up`, Docker daemon restarts, systemd and whole-machine reboots do not automatically
+restore supervision. SIGKILL, noncooperative replacement and unknown remnants preserve
+evidence without automatic takeover. Conflict checks cannot exclude simultaneous outside
+rule changes. Acceptance is limited to isolated Linux amd64; native hosts, arm64, public
+networks, range sharing, real-client automatic hopping, TUIC, old-session drainage and
+complete Hy2/TUIC hopping remain `deferred`. The manual menu does not establish complete support.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription

@@ -32,7 +32,7 @@ blocks = re.findall(
     r"'(?P<body>\n.*?)\n    '",
     function, re.S,
 )
-if len(blocks) != 27 or sum(bool(prefix) for prefix, _ in blocks) != 10:
+if len(blocks) != 28 or sum(bool(prefix) for prefix, _ in blocks) != 10:
     raise RuntimeError("all static validation blocks must be included")
 baseline = ""
 protocol_prefix = "if"
@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要来自改动前 38101 字节的完整原谓词，仅忽略拼接新增的空白。
+# 摘要锁定含手动跳跃合同的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "a5a21d9d97f053003f1ab6c5d07f4c49d90f8908c5d3aa833456e0d6033bf070"
+    "08e45c01ed130f38e889cd87e397dcfed03cf4209d608534c9498e5bad9497b5"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -123,6 +123,17 @@ for protocol_id in protocol_ids:
     spec["core"]["protocols"] = [entry]
     spec["tls"] = None if protocol_id in (1, 2, 26, 30) else {"domain": domain}
     cases[f"valid-protocol-{protocol_id}"] = spec
+spec = copy.deepcopy(cases["valid-protocol-3"])
+spec["core"]["protocols"][0]["address_families"] = ["ipv4", "ipv6"]
+spec["port_hopping"] = {
+    "listener_id": "entry-p3", "range_start": 36000, "range_end": 36002,
+    "ipv4": "198.18.1.1", "ipv6": "2001:db8:1::1",
+}
+cases["valid-port-hopping"] = spec
+for field, value in (("range_start", 36003), ("ipv4", "127.0.0.1"), ("extra", True)):
+    invalid = copy.deepcopy(spec)
+    invalid["port_hopping"][field] = value
+    cases[f"invalid-port-hopping-{field}"] = invalid
 for name, ids in (("xray", (1, 21, 27, 28)), ("sing-box", (3, 4, 5, 30, 31))):
     spec = copy.deepcopy(cases[f"valid-protocol-{ids[1]}"])
     spec["core"]["protocols"] = []
@@ -259,6 +270,11 @@ baselineValidate() {
         --slurpfile matrix "$(dockerFeatureMatrixFile)" \
         -f "${TEST_ROOT}/baseline.jq" "${file}" 2>/dev/null) || return 1
     IFS='|' read -r hasSync hasMain hasSsh <<<"${flags}"
+    if command jq -e 'has("port_hopping")' "${file}" >/dev/null; then
+        dockerPortHoppingAddressesValidate \
+            "$(command jq -er '.port_hopping.ipv4' "${file}")" \
+            "$(command jq -er '.port_hopping.ipv6' "${file}")" || return 1
+    fi
     [[ "${hasSync}" == false ]] || dockerControlSyncSpecValidate "${file}" || return 1
     [[ "${hasMain}" == false ]] || dockerControlSpecValidate "${file}" || return 1
     [[ "${hasSsh}" == false ]] || dockerSshFail2banSpecValidate "${file}" || return 1

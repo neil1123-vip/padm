@@ -166,7 +166,8 @@ padm-docker status
 WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01/HTTP-01 standalone；
 私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布仍要求 Xray、协议 21 VLESS WS TLS 和受管证书。
 Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander 混淆和 HTTPS 伪装；
-带宽按服务端方向输入，分享链接自动转换为客户端方向。端口跳跃及 Gecko 尚未开放。
+带宽按服务端方向输入，分享链接自动转换为客户端方向。
+端口跳跃仅开放下述手动双族 Hy2 范围管理；自动跳跃及 Gecko 尚未开放。
 AnyTLS 使用 sing-box 直连 TCP/TLS 入口，不经过 Nginx；首配选择 sing-box 后选 `7=AnyTLS`。
 复用 UUID 作为密码及流量账号，可输出 `anytls://` 分享链接；AnyTLS 单独部署不提供 HTTPS 订阅发布。
 NaiveProxy 在 sing-box 首配中选 `8`，使用 TCP/TLS 直连入口；服务器地址必须与 TLS 域名一致。
@@ -661,50 +662,32 @@ WS/SSH Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名；
 双栈发布已在隔离 amd64 Linux daemon 验收；公网、原生宿主及 arm64 仍需独立验收，
 完整 `207` 保持 `deferred`。
 
-Hy2/TUIC 完整端口跳跃继续待迁移。固定 amd64 sing-box 1.14.2 前置实测中，
-Hy2 接受 `server_ports`，TUIC 拒绝该字段；两者单端口检查均通过。
-Hy2 两个现有 UDP 别名分别通过双栈严格 TLS 和 TCP/UDP，
-范围客户端跨 5.1 秒保持业务；短窗口包计数不证明两族都切换或重新握手。
-这些证据不开放跳跃菜单、范围分享或宿主 DNAT 管理。
-5C.9b 隔离前置已验证双栈 iptables-nft 将两个范围端口 DNAT 到已有 Docker 发布口，
-精确撤销和重建后新客户端业务符合预期，Docker 与模拟外来 NAT 规则正文保持。
-该路径沿用默认 userland-proxy，不证明直接 DNAT 到容器、生产持久归属、
-已有会话撤销、范围冲突、重启/卸载或完整自动跳跃。
-5C.9c 内部前置已补范围冲突预检、固定归属审计/精确撤销及持锁启动事务。
-双族规则只由本轮 token 认领；TERM/INT 清理，已核验的同参数残留可重建。
-state/lock 被替换或跨进程无标记空链仍拒绝，保留证据供人工核对。
-这不开放菜单/Compose 接入；目标发布归属、旧会话排空、整机重启及卸载仍待验。
-5C.9c.3a 内部只读快照核对已有双族 Hy2 的完整规格、账号/额度渲染配置、
-Compose、镜像与实际健康容器的 UDP 发布，返回身份和启用账号数量，不输出账号或密码。
-标准真实部署已验证健康快照、重启代次变化及磁盘漂移拒绝。
-3c 另有只读启动检查，以固定启动时间拒绝运行配置或所选 TLS 文件的后续
-`mtime/ctime` 改动，恢复旧修改时间或同字节替换也拒绝；正常流量累计不受此时间限制。
-时间检查不证明内存加载版本、容器挂载视图或时钟回退下的一致性，
-3d.1–2 增加当前 Bash 持锁身份与内部受管启动事务：仅已有统计目录、健康单
-sing-box、单个双族 Hy2 入口、无宿主集成及其它运行服务；默认未运行的 ACME profile 可保留。
-严格采集新累计后只渲染一次候选，正常重建一次，复验新容器代次和文件身份。
-失败及 INT/TERM 仅恢复已验证的安全候选，不能确认时核对归属后停止核心；
-累计不回退，失败证据保留。Linux amd64 私有 daemon 已验两族新连接的刚跨额度撤销
-及发布失败恢复。SIGKILL、非合作替换、原生宿主/arm64、公网、旧会话排空及完整
-net/菜单/schema 门控继续待验或待实施，不改变完整跳跃或协议管理的支持范围。
-3e.1 内部同锁启用准备从唯一 listener 推导目标，提前拒绝非规范、倒置或包含目标
-的端口范围及非双族输入；直接调用启动事务一次，后验固定输入和新容器代次，
-不重复生成、读取累计或渲染。返回范围及目标诊断，不写 jumpstate 或 NAT，
-不证明范围当前空闲，也不授权 net 启用；失败保留证据及已提交累计。
-账号数反映本次启动使用的额度版本，后续累计变化不代表已重新应用账号限制。
-3e.2a 实验 net 启动在 active 提交前后重新检查全域冲突，只扣除同快照核验完整的
-精确自有链与规则，外来冲突仍允许安全清理自有资源。net 锁不提供对外部写入的原子
-范围预留，暂态 active 不是最终启用 ACK；实时父子授权及生产菜单/schema 继续待实施。
-3e.2b.1 内部启动/准备入口的固定 `bound` 模式返回实际启动采用的锁、固定输入及
-state/live 元数据与摘要；清理前后严格复验，同字节替换也拒绝，普通入口语义不变。
-诊断不含账号正文，不授予 net 写权限。
-3e.2b.2 内部只读 `Probe` 在当前持锁 Bash 直接准备 bound 目标，绑定原父锁、实际
-启动文件版本、net 数据目录及本轮子容器。net 持 flock 发送随机挑战，父端复验后
-发送单帧请求并关闭输入，子端复验无 state、本地地址及全域冲突后返回唯一 ACK；
-父端核对 ACK、EOF、退出码、最终绑定及容器归属，再回收本轮子容器。
-net 仅可能新建空的 0600 锁文件，不写 NAT 或跳跃 state；无生产 Docker socket，
-不证明原子范围预留或进程内存一致。实时写门控、菜单/schema/Compose 与生产启用
-继续待实施；回归派生 net 镜像复用离线依赖，只验当前标准入口，不替代发布净构建。
+菜单“协议与入口 → 端口跳跃”提供手动 Hy2 范围 DNAT 的配置、启停和清除。
+v3 可选 `port_hopping` 保存 `{listener_id, range_start, range_end, ipv4, ipv6}`，
+同步到部署记录和 Compose 的 `x-padm-port-hopping` 元数据。
+当前范围限于单 sing-box、单个双族 Hy2 入口、已有流量统计目录，
+无宿主集成或额外运行服务；未运行的 ACME profile 可保留。
+不接受别名、控制面、HTTP relay、HTTP-01 或启用的订阅组合。
+范围须排除目标公开端口，地址须为本机规范原生 IPv4/IPv6。
+
+保存后须显式 `start`，不会自动启用。启动核对配置和实际容器、采集流量累计并应用额度，
+由独立监督维护双族规则。编辑或清除前须 `stop` 并确认清理完成。
+`restart/update/rollback/down/uninstall` 通过监督协调；无法确认停止或交接时拒绝继续，
+保留累计和失败证据。以下入口和地址须换为本机实际值：
+
+```bash
+padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 --preview
+padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 --confirm PADM-DOCKER-EDIT
+padm-docker port-hopping status
+padm-docker port-hopping start
+padm-docker port-hopping stop
+padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
+```
+
+`up`、Docker daemon、systemd 或整机重启均不自动恢复监督。
+SIGKILL、非合作替换或未知残留保留证据，不自动接管；冲突检查无法排除外部同时修改规则。
+当前只经过隔离 Linux amd64 验收；原生宿主、arm64、公网、范围分享、真实客户端自动跳跃、
+TUIC、旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`，手动菜单不代表完整支持。
 
 菜单“协议与入口 → CDN 连接地址”可为已有 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
 入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。

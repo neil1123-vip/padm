@@ -534,13 +534,22 @@ runDockerTProxyOwnershipRegression() {
 }
 
 runDockerPortHoppingPreflightRegression() {
-    runRegressionStep hopping-read-only python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
+    runRegressionStep hopping-config runDockerPortHoppingConfigRegression &&
+        runRegressionStep hopping-read-only python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
         PADM_REGRESSION_PARALLEL_JOBS=4 runParallelRegressionRunners \
             "${TMP_DIR}/hopping-preflight-${BASHPID:-$$}" \
             hopping-ownership runDockerPortHoppingOwnershipRegression \
             hopping-target runDockerPortHoppingTargetRegression \
             hopping-probe runDockerPortHoppingProbeRegression \
             hopping-guarded runDockerPortHoppingGuardedRegression
+}
+
+runDockerPortHoppingConfigRegression() {
+    shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/menu.sh" \
+        "${PROJECT_ROOT}/docker/lib/setup.sh" "${PROJECT_ROOT}/docker/lib/bundle.sh" \
+        "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" \
+        "${PROJECT_ROOT}/docker/tests/port-hopping-config.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/port-hopping-config.sh"
 }
 
 runDockerPortHoppingOwnershipRegression() {
@@ -818,6 +827,7 @@ runDockerSpecValidationRegression() {
     bash "${PROJECT_ROOT}/docker/tests/spec-validation.sh"
 }
 registerRegressionFunctionLeaf docker-spec-validation runDockerSpecValidationRegression
+registerRegressionFunctionLeaf docker-port-hopping-config runDockerPortHoppingConfigRegression
 
 runDockerGenerationMetadataRegression() {
     bash -n "${PROJECT_ROOT}/docker/tests/generation-metadata.sh"

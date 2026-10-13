@@ -19,6 +19,18 @@
     "host_integrations"
   ],
   "properties": {
+    "port_hopping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listener_id", "range_start", "range_end", "ipv4", "ipv6"],
+      "properties": {
+        "listener_id": {"type": "string", "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"},
+        "range_start": {"$ref": "#/$defs/port"},
+        "range_end": {"$ref": "#/$defs/port"},
+        "ipv4": {"type": "string", "format": "ipv4"},
+        "ipv6": {"type": "string", "format": "ipv6"}
+      }
+    },
     "schema_version": {
       "const": 1
     },

@@ -38,6 +38,10 @@ trap 'if [[ -n "${original}" ]] &&
     fi' EXIT
 dockerAcquireDeploymentLock || exit "${PADM_DOCKER_RC_LOCK:-12}"
 original=$(dockerPortHoppingTargetLockSnapshot "${owner}") || exit 1
+if [[ "${5:-}" == --saved ]]; then
+    values=$(dockerPortHoppingSavedArguments) || exit 1
+    exec "$3" -B "$4" _reserve "${PADM_DOCKER_INSTALL_DIR}" "$1" "${original}" "${values}"
+fi
 exec "$3" -B "$4" _reserve "${PADM_DOCKER_INSTALL_DIR}" "$1" "${original}"
 '''
 LOCK_BODY = r'''
@@ -283,13 +287,18 @@ class Directory:
         self.held = []
 
 
-def reserve(root, entrypoint, raw):
+def reserve(root, entrypoint, raw, saved=None):
     original = json.loads(raw, object_pairs_hook=unique)
     owner = str(os.getpid())
     if (not isinstance(original, list) or len(original) < 4 or
             original[-1][0] != root + "/locks/deployment.lock/pid" or
             original[-1][-1] != owner):
         raise Failure("监督预约锁不属于当前进程")
+    values = None if saved is None else json.loads(saved, object_pairs_hook=unique)
+    if values is not None and (
+            not isinstance(values, list) or len(values) != 5 or
+            any(not isinstance(value, str) or not value for value in values)):
+        raise Failure("监督预约保存参数无效")
 
     def unchanged():
         result = subprocess.run(
@@ -332,7 +341,10 @@ def reserve(root, entrypoint, raw):
             pass
         else:
             raise Failure("监督预约原锁未净释放")
-        return {"directory": directory.projection, "session": directory.original}
+        result = {"directory": directory.projection, "session": directory.original}
+        if values is not None:
+            result["values"] = values
+        return result
     finally:
         for descriptor in (lock, locks):
             if descriptor is not None:
@@ -447,8 +459,8 @@ def service(initial_fd, root, entrypoint, values):
         directory.write_owner(owner)
 
     try:
-        if os.geteuid() != 0 or len(values) != 5:
-            raise Failure("监督服务仅支持 root 和五参数")
+        if os.geteuid() != 0 or len(values) not in {0, 5}:
+            raise Failure("监督服务仅支持 root、保存配置或内部五参数")
         peer_pid(initial)
         own = identity(os.getpid())
         if own["session_id"] != own["pid"]:
@@ -460,12 +472,16 @@ def service(initial_fd, root, entrypoint, values):
         proof = challenge(initial, "start")
         reservation = subprocess.run(
             ["bash", "-Eeuo", "pipefail", "-c", RESERVE_BODY, "padm-hopping-reservation",
-             entrypoint, root, sys.executable, str(Path(__file__).resolve())],
+             entrypoint, root, sys.executable, str(Path(__file__).resolve()),
+             *(["--saved"] if not values else [])],
+            # 保存模式在预约锁内读取参数，不采用调用端较早读取的元组。
             capture_output=True)
         if reservation.returncode:
             raise Failure("监督会话预约失败: " + reservation.stderr.decode("utf-8", errors="replace"))
         reserved = shape(json.loads(reservation.stdout.decode("ascii"), object_pairs_hook=unique),
-                         ("directory", "session"))
+                         ("directory", "session", "values") if not values else ("directory", "session"))
+        if not values:
+            values = reserved.pop("values")
         directory = Directory(root)
         directory.session()
         # 原锁只用于预约，不转交给监督 Bash；替换预约路径后保留证据并拒绝启动。
@@ -864,12 +880,12 @@ def main(arguments):
     if operation in {"gate", "notify"} and len(args) == 2:
         helper(operation, *args)
         return
-    if operation == "_service" and len(args) == 8:
+    if operation == "_service" and len(args) in {3, 8}:
         service(int(args[0]), args[1], args[2], args[3:])
         return
-    if operation == "_reserve" and len(args) == 3:
+    if operation == "_reserve" and len(args) in {3, 4}:
         result = reserve(*args)
-    elif operation == "start" and len(args) == 7:
+    elif operation == "start" and len(args) in {2, 7}:
         result = start(args[0], args[1], args[2:])
     elif operation == "status" and len(args) == 1:
         result = control("status", args[0])

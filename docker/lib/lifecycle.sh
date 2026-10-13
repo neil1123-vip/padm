@@ -41,6 +41,9 @@ dockerUsage() {
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-default <入口 ID> <已有额外端口|base> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --port-hopping <Hy2 入口 ID> <起始端口> <结束端口> <本机 IPv4> <本机 IPv6> [--preview|--confirm PADM-DOCKER-EDIT]
+  padm-docker edit --port-hopping-clear [--preview|--confirm PADM-DOCKER-EDIT]
+  padm-docker port-hopping <status|start|stop>
   padm-docker edit --cdn-entry <入口 ID> <IP或域名,...> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --cdn-entry-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-preset <入口 ID> <daily|compatible|stream|single> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -1051,7 +1054,7 @@ dockerPortHoppingTargetPrepareActivation() {
         (.[0].core // $s.core.type) == "sing-box" and
         (.[0].address_families | sort) == ["ipv4","ipv6"] and
         (.[0].public_port | type == "number" and floor == . and . >= 1 and . <= 65535)
-      then {port:.[0].public_port,domain:.[0].hy2.domain}
+      then {port:.[0].public_port,domain:.[0].hy2.domain,port_hopping:$s.port_hopping}
       else error("启用准备仅支持单个受管双族 Hy2 入口") end'
     local fixedFilter='
       map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
@@ -1071,17 +1074,13 @@ dockerPortHoppingTargetPrepareActivation() {
         ph_domain=$(jq -er '.domain' <<<"${entry}") || {
             dockerPortHoppingTargetStartLockCheck; return 1
         }
-    python3 - "${ipv4}" "${ipv6}" <<'PY' || { dockerPortHoppingTargetStartLockCheck; return 1; }
-import ipaddress
-import sys
-
-for raw, version in zip(sys.argv[1:], (4, 6)):
-    address = ipaddress.ip_address(raw)
-    if (address.version != version or str(address) != raw or "%" in raw or
-            address.is_unspecified or address.is_multicast or address.is_loopback or
-            address.is_link_local or getattr(address, "ipv4_mapped", None) is not None):
-        raise SystemExit("启用准备需要规范原生双族地址")
-PY
+    jq -e --arg listener "${listener}" --argjson start "${start}" --argjson end "${end}" \
+        --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" '
+      .port_hopping == null or .port_hopping ==
+        {listener_id:$listener,range_start:$start,range_end:$end,ipv4:$ipv4,ipv6:$ipv6}
+    ' <<<"${entry}" >/dev/null &&
+        dockerPortHoppingAddressesValidate "${ipv4}" "${ipv6}" ||
+        { dockerPortHoppingTargetStartLockCheck; return 1; }
     current=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") &&
         jq -e '.[] | select(.[0] == "data/traffic") | .[1] != null' <<<"${current}" >/dev/null &&
         files=$(jq -c "${fixedFilter}" <<<"${current}") &&
@@ -1506,7 +1505,7 @@ dockerPortHoppingTargetSupervised() {
 
 dockerPortHoppingSupervisorStart() {
     local root
-    [[ "$#" -eq 5 ]] || return 1
+    [[ "$#" -eq 0 || "$#" -eq 5 ]] || return 1
     root=$(dockerInstallRoot) &&
         python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" start "${root}" \
             "${DOCKER_BUNDLE_SOURCE_ROOT}/install-docker.sh" "$@"
@@ -1524,6 +1523,67 @@ dockerPortHoppingSupervisorStop() {
     [[ "$#" -eq 0 ]] || return 1
     root=$(dockerInstallRoot) &&
         python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" stop "${root}"
+}
+
+dockerPortHoppingSavedArguments() {
+    local root spec expected
+    root=$(dockerInstallRoot) || return 1
+    spec="${root}/config/spec.json"
+    dockerTrafficSafePath "${root}" "${spec}" &&
+        [[ -f "${spec}" && -O "${spec}" ]] &&
+        dockerPrivateFileIsRestricted "${spec}" &&
+        dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
+        expected=$(dockerGenerateCompose "${spec}" /dev/stdout "${root}") &&
+        jq -es --argjson expected "${expected}" 'length == 1 and .[0] == $expected' \
+            "${root}/compose.json" >/dev/null &&
+        jq -ec 'select(.port_hopping != null) | .port_hopping |
+          [.listener_id, (.range_start|tostring), (.range_end|tostring), .ipv4, .ipv6]' "${spec}"
+}
+
+dockerPortHoppingCommand() {
+    local action=${1:-status} root result
+    [[ "$#" -le 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    case "${action}" in status|start|stop) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    case "${action}" in
+    start)
+        dockerPortHoppingSavedArguments >/dev/null || {
+            dockerError '缺少有效的受管端口跳跃配置，请先保存单个双族 Hy2 配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        result=$(dockerPortHoppingSupervisorStart) || return $?
+        printf '端口跳跃已启用。\n'
+        ;;
+    stop)
+        result=$(dockerPortHoppingSupervisorStop) || return $?
+        printf '端口跳跃已停止；保存配置保留。\n'
+        ;;
+    status)
+        if [[ ! -e "${root}/data/net/.hopping-supervisor" &&
+            ! -L "${root}/data/net/.hopping-supervisor" ]]; then
+            dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+                dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+                    "${root}/deployment.json" "${root}/images.env" &&
+                result=$(jq -c '{state:"stopped",saved:(.port_hopping // null)}' \
+                    "${root}/config/spec.json") || return "${PADM_DOCKER_RC_STATE}"
+            if [[ ! -e "${root}/data/net/.hopping-supervisor" &&
+                ! -L "${root}/data/net/.hopping-supervisor" ]]; then
+                [[ ! -e "${root}/data/net/port-hopping.state" &&
+                    ! -L "${root}/data/net/port-hopping.state" ]] || {
+                    dockerError '存在未经停止核验的跳跃规则状态，请保留证据排查'
+                    return "${PADM_DOCKER_RC_STATE}"
+                }
+                printf '%s\n' "${result}"
+                return 0
+            fi
+        fi
+        result=$(dockerPortHoppingSupervisorStatus) || return $?
+        jq -c '.payload.target | {state:"active",saved:{
+          listener_id,range_start,range_end,ipv4,ipv6}}' <<<"${result}"
+        ;;
+    esac
 }
 
 dockerPortHoppingSupervisorStopIfActive() {
@@ -1815,6 +1875,7 @@ dockerPortHoppingSupervisorChangeBundleCheck() {
       .schema_version == 3 and .core.type == "sing-box" and .core.secondary_type == null and
       (.core.protocols | length) == 1 and
       .host_integrations == [] and
+      .port_hopping == $current[0].port_hopping and
       ([.core.protocols[] | select(.listener_id == $listener and .id == 3)] | length) == 1 and
       ([.core.protocols[] | select(.listener_id == $listener) |
         {public_port,address_families,domain:.hy2.domain}] ==
@@ -1830,7 +1891,7 @@ dockerPortHoppingSupervisorChangeCheck() {
 }
 
 dockerStatusCommand() {
-    local state bundlePath ref root siteMode=unknown
+    local state bundlePath ref root siteMode=unknown result
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     state=$(dockerDeploymentState) || return "${PADM_DOCKER_RC_STATE}"
@@ -1842,6 +1903,14 @@ dockerStatusCommand() {
         dockerError 'state=ambiguous'
         return "${PADM_DOCKER_RC_STATE}"
     }
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -e "${root}/data/net/.hopping-supervisor" ||
+        -L "${root}/data/net/.hopping-supervisor" ]]; then
+        dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+        result=$(dockerPortHoppingSupervisorStatus) || return $?
+        jq -er '.payload.target | "state=installed\nconfigured=yes\nport_hopping=active\nlistener=\(.listener_id)\nrange=\(.range_start)-\(.range_end)"' <<<"${result}"
+        return $?
+    fi
     dockerLockInstalledDeployment || return $?
     state=$(dockerDeploymentState) || return "${PADM_DOCKER_RC_STATE}"
     bundlePath=$(dockerCurrentBundlePath) || return "${PADM_DOCKER_RC_BUNDLE}"
@@ -2706,6 +2775,7 @@ dockerMain() {
     validate) dockerValidateInstalledCommand "$@" ;;
     status) dockerStatusCommand "$@" ;;
     traffic) dockerTrafficCommand "$@" ;;
+    port-hopping) dockerPortHoppingCommand "$@" ;;
     fail2ban) dockerFail2banCommand "$@" ;;
     up | down | restart | logs) dockerLifecycleCommand "${command}" "$@" ;;
     assess) dockerAssessCommand "$@" ;;

@@ -111,7 +111,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '11. 端口跳跃（双族 Hy2）' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -149,6 +149,43 @@ dockerMenuProtocols() {
         8) dockerMenuPortAliases ;;
         9) dockerMenuCdnEntries ;;
         10) dockerMenuXhttp ;;
+        11) dockerMenuPortHopping ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuPortHopping() {
+    local choice listener start end ipv4 ipv6 answer
+    while :; do
+        printf '\nDocker 端口跳跃（单个双族 Hy2）\n'
+        printf '%s\n' '1. 查看状态' '2. 保存配置' '3. 启用已保存配置' \
+            '4. 停止跳跃' '5. 清除保存配置' '0. 返回'
+        dockerSetupRead choice '请选择: ' || return 0
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun port-hopping status || true ;;
+        2)
+            dockerSetupRead listener 'Hy2 入口 ID（0 返回）: ' || continue
+            [[ -n "${listener}" && "${listener}" != 0 ]] || continue
+            dockerSetupRead start '起始端口（0 返回）: ' || continue
+            [[ -n "${start}" && "${start}" != 0 ]] || continue
+            dockerSetupRead end '结束端口（0 返回）: ' || continue
+            [[ -n "${end}" && "${end}" != 0 ]] || continue
+            dockerSetupRead ipv4 '本机 IPv4（0 返回）: ' || continue
+            [[ -n "${ipv4}" && "${ipv4}" != 0 ]] || continue
+            dockerSetupRead ipv6 '本机 IPv6（0 返回）: ' || continue
+            [[ -n "${ipv6}" && "${ipv6}" != 0 ]] || continue
+            dockerMenuRun edit --port-hopping "${listener}" "${start}" "${end}" "${ipv4}" "${ipv6}" || true
+            ;;
+        3)
+            dockerSetupRead answer '确认启用已保存的跳跃范围？[y/N]: ' n || continue
+            case "${answer}" in
+            y|Y|yes|YES) dockerMenuRun port-hopping start || true ;;
+            esac
+            ;;
+        4) dockerMenuRun port-hopping stop || true ;;
+        5) dockerMenuRun edit --port-hopping-clear || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

@@ -623,6 +623,9 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
     command(["tar", "-czf", str(control), "-C", str((root / "bundle").resolve()),
              "install-docker.sh", "docker", "shell", "assets"], timeout=30)
     configured = json.loads((root / "config/spec.json").read_text())
+    saved_hopping = dict(listener_id="entry-hy2", range_start=30000, range_end=30001,
+                        ipv4="198.18.1.1", ipv6="2001:db8:1::1")
+    assert configured["port_hopping"] == saved_hopping
     manifest = dict(
         schema_version=1,
         release=dict(version="3.9.10", commit="a" * 40, created_at="2026-10-14T00:00:00Z"),
@@ -810,13 +813,21 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         wait_ready(lambda: cron.poll() is None and subprocess.run(
             ["pgrep", "-x", "cron"], capture_output=True).returncode == 0, 5)
         # 每次 CLI 均由短命调用者发起，调用者不取得独立 owner 持有的部署锁。
-        caller, started = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
-                                 "30001", "198.18.1.1", "2001:db8:1::1")
+        _, stopped_status = invoke("dockerMain", "port-hopping", "status")
+        assert stopped_status == dict(state="stopped", saved=saved_hopping)
+        caller, output = invoke("dockerMain", "port-hopping", "start", json_output=False)
+        assert output.strip() == "端口跳跃已启用。"
         active = True
+        _, started = invoke("dockerPortHoppingSupervisorStatus")
         evidence["started"] = started
         evidence["caller_pid"] = caller
         assert not Path(f"/proc/{caller}").exists(), "启动调用者尚未退出"
-        owner = ack(started, "started")
+        owner = ack(started, "status")
+        _, public_status = invoke("dockerMain", "port-hopping", "status")
+        assert public_status == dict(state="active", saved=saved_hopping)
+        _, status_output = invoke("dockerMain", "status", json_output=False)
+        assert "port_hopping=active" in status_output
+        evidence["saved_public_start_status"] = True
         manager_fd = process_identity(owner["manager"])
         bash_fd = process_identity(owner["bash"])
         assert owner["manager"]["pid"] != owner["bash"]["pid"]
@@ -1000,6 +1011,9 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             new_owner = ack(changed, "updated" if operation == "update" else "rolled_back")
             current_spec = json.loads((root / "config/spec.json").read_text())
             current_compose = json.loads((root / "compose.json").read_text())
+            assert current_spec["port_hopping"] == saved_hopping
+            assert current_compose["x-padm-port-hopping"] == saved_hopping
+            assert json.loads((root / "deployment.json").read_text())["port_hopping"] == saved_hopping
             assert current_compose["services"]["sing-box"]["labels"]["io.padm.release"] == (
                 current_spec["release"]["version"])
             assert changed["previous_owner"] == previous_owner
@@ -1046,8 +1060,21 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
                         nat_restored=True, state_removed=True, child_removed=True,
                         deployment_lock_released=True, session_removed=True)
         lifecycle_resume("lifecycle-down-resumed")
-        _, terminated = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
-                               "30001", "198.18.1.1", "2001:db8:1::1")
+        _, stopped = invoke("dockerPortHoppingSupervisorStart")
+        active = True
+        stopped_owner = ack(stopped, "started")
+        stopped_manager = process_identity(stopped_owner["manager"])
+        stopped_bash = process_identity(stopped_owner["bash"])
+        _, stop_output = invoke("dockerMain", "port-hopping", "stop", json_output=False)
+        assert stop_output.strip() == "端口跳跃已停止；保存配置保留。"
+        wait_ready(lambda: not alive(stopped_manager) and not alive(stopped_bash), 90)
+        assert not session.exists() and not state.exists()
+        assert not (root / "locks/deployment.lock").exists()
+        assert json.loads((root / "config/spec.json").read_text())["port_hopping"] == saved_hopping
+        assert tree(lock) == net_lock and set(root.glob(".hopping-guarded.*")) == stages
+        evidence["saved_public_stop"] = True
+        active = False
+        _, terminated = invoke("dockerPortHoppingSupervisorStart")
         active = True
         term_owner = ack(terminated, "started")
         term_manager = process_identity(term_owner["manager"])
@@ -1264,6 +1291,9 @@ def run(work):
             spec = root / "config/spec.json"
             configured = json.loads(spec.read_text())
             configured["images"]["net"] = net_reference
+            configured["port_hopping"] = dict(
+                listener_id="entry-hy2", range_start=30000, range_end=30001,
+                ipv4="198.18.1.1", ipv6="2001:db8:1::1")
             spec.write_text(json.dumps(configured))
             # 生成材料与 bind 源均属于本次私有节点，保持完整生产 Compose。
             command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
