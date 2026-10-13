@@ -77,6 +77,40 @@ assertRuntimeSecrets() {
     ) || fail 'container UID could not use the restored ACME account'
 }
 
+# 合并遍历仍须按原谓词处理特殊文件与 .key 目录，并传播批量工具错误。
+(
+    tls="${TEST_ROOT}/tls-batch"
+    mkdir -p "${tls}/directory.key"
+    printf 'certificate\n' >"${tls}/example.crt"
+    printf 'private-key\n' >"${tls}/example.key"
+    mkfifo "${tls}/special" "${tls}/special.key"
+    chmod 0777 "${tls}"
+    chmod 2777 "${tls}/directory.key"
+    chmod 4777 "${tls}/example.crt" "${tls}/example.key"
+    chmod 0611 "${tls}/special" "${tls}/special.key"
+    chown -R 12345:12345 "${tls}"
+    dockerTlsRuntimePermissions "${tls}" || fail 'TLS 批处理失败'
+    assertMetadata "${tls}" '750 0 10001'
+    assertMetadata "${tls}/example.crt" '640 0 10001'
+    assertMetadata "${tls}/example.key" '600 10001 10001'
+    assertMetadata "${tls}/directory.key" '2750 12345 12345'
+    assertMetadata "${tls}/special" '611 0 10001'
+    assertMetadata "${tls}/special.key" '611 12345 12345'
+    ln -s example.crt "${tls}/unsafe"
+    chmod 0600 "${tls}/example.crt"
+    ! dockerTlsRuntimePermissions "${tls}" || fail 'TLS 批处理接受符号链接'
+    assertMetadata "${tls}/example.crt" '600 0 10001'
+    rm -- "${tls}/unsafe"
+    for failedTool in chmod chown; do
+        mockBin="${TEST_ROOT}/tls-${failedTool}"
+        mkdir -- "${mockBin}"
+        printf '#!/bin/sh\nexit 17\n' >"${mockBin}/${failedTool}"
+        chmod 0755 "${mockBin}/${failedTool}"
+        ! PATH="${mockBin}:${PATH}" dockerTlsRuntimePermissions "${tls}" ||
+            fail "TLS 批处理吞掉 ${failedTool} 错误"
+    done
+) || fail 'TLS 批处理边界检查失败'
+
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/configured"
 dockerInitializeStateRoot
 dockerInstallBundle "${PROJECT_ROOT}" "$(printf 'a%.0s' {1..40})"
@@ -106,6 +140,41 @@ printf '{"name":"padm-docker","services":{}}\n' >"${PADM_DOCKER_INSTALL_DIR}/com
 jq -r '.images | "PADM_XRAY_IMAGE=" + .xray, "PADM_SINGBOX_IMAGE=" + ."sing-box",
     "PADM_NGINX_IMAGE=" + .nginx, "PADM_OPS_IMAGE=" + .ops, "PADM_NET_IMAGE=" + .net' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${PADM_DOCKER_INSTALL_DIR}/images.env"
+dockerEnsureRuntimeDataPermissions
+# 后段路径和批量工具失败均须拒绝，私密文件不得因此放宽权限。
+for permissionFailure in late-link mkdir chmod find; do
+    (
+        runtimeRoot=${PADM_DOCKER_INSTALL_DIR}
+        case "${permissionFailure}" in
+        late-link)
+            mv -- "${runtimeRoot}/logs/acme" "${runtimeRoot}/logs/acme.saved"
+            ln -s acme.saved "${runtimeRoot}/logs/acme"
+            trap 'rm -- "${runtimeRoot}/logs/acme"; mv -- "${runtimeRoot}/logs/acme.saved" "${runtimeRoot}/logs/acme"' EXIT
+            ;;
+        mkdir)
+            rmdir -- "${runtimeRoot}/logs/acme"
+            trap '[[ -d "${runtimeRoot}/logs/acme" ]] || command mkdir -- "${runtimeRoot}/logs/acme"; command chmod 0750 "${runtimeRoot}/logs/acme"' EXIT
+            mkdir() { command mkdir "$@" || return $?; return 17; }
+            ;;
+        chmod)
+            chmod() {
+                command chmod "$@" || return $?
+                [[ "$*" != *"${runtimeRoot}/logs/acme"* ]] || return 17
+            }
+            ;;
+        find)
+            find() {
+                command find "$@" || return $?
+                [[ "$*" != *"${runtimeRoot}/config ${runtimeRoot}/data/subscription"* ]] || return 17
+            }
+            ;;
+        esac
+        if dockerEnsureRuntimeDataPermissions >"${TEST_ROOT}/permissions-failure.log" 2>&1; then
+            fail "权限批处理故障未拒绝: ${permissionFailure}"
+        fi
+        assertMetadata "${runtimeRoot}/config/spec.json" '600 0 0'
+    ) || fail "权限批处理合同失败: ${permissionFailure}"
+done
 dockerEnsureRuntimeDataPermissions
 # 两个范围的运行数据库不属于配置恢复点，恢复须保留各自最新内容。
 mkdir -p "${PADM_DOCKER_INSTALL_DIR}/data/net/"{fail2ban,control-fail2ban}

@@ -203,6 +203,7 @@ quota=$(jq --arg uuid "${UUID}" '.accounts[$uuid].limit_bytes = 1' "${root}/data
 printf '%s\n' "${quota}" | dockerTrafficWriteState
 dockerTrafficPrepareCandidate "${root}"
 : >"${FAKE_REALITY_FAIL_MARKER}"
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit ]]; then
 cp "${root}/config/spec.json" "${TEST_ROOT}/installed-before.json"
 cp "${root}/config/xray/users.base" "${TEST_ROOT}/xray-before.json"
 cp "${root}/config/sing-box/users.base" "${TEST_ROOT}/sing-before.json"
@@ -210,6 +211,7 @@ cp "${root}/data/traffic/state.json" "${TEST_ROOT}/traffic-before.json"
 cp "${root}/compose.json" "${TEST_ROOT}/compose-before.json"
 cp "${root}/data/subscription/${TOKEN}" "${TEST_ROOT}/links-before.txt"
 cp "${root}/data/subscription/xhttp-group-token" "${TEST_ROOT}/group-before.txt"
+fi
 
 xhttpClean() {
     [[ ! -e "${root}/locks/deployment.lock" ]] || fail 'XHTTP 遗留部署锁'

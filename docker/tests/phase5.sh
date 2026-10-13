@@ -865,6 +865,7 @@ for siteContract in \
     'if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi' \
     '--env PADM_REGRESSION_PARALLEL_JOBS="${jobs}"' \
     '--env PADM_DOCKER_CONTRACTS_SHARED_CHECKS' \
+    '--env PADM_REGRESSION_VERBOSE=1' \
     'capabilities=(--cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined)' \
     'padm-regression:contracts "${SELECTOR}"'; do
     grep -Fq -- "${siteContract}" "${CONTRACT_WORKFLOW}" ||
@@ -879,6 +880,11 @@ done
 grep -Fq "if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')" "${CONTRACT_WORKFLOW}" &&
     grep -Fq '"${SELECTOR}" == docker-contracts-fast-*' "${CONTRACT_WORKFLOW}" ||
     fail 'fast 分片没有同时使用隔离工具镜像和源码快照'
+[[ "$(grep -Fc "|| matrix.selector == 'docker-port-hopping-preflight'" "${CONTRACT_WORKFLOW}")" -eq 2 ]] &&
+    grep -Fq '&& matrix.selector != '\''docker-port-hopping-preflight'\''' "${CONTRACT_WORKFLOW}" &&
+    grep -Fq '"${SELECTOR}" == docker-routing-* || "${SELECTOR}" == docker-port-hopping-preflight' "${CONTRACT_WORKFLOW}" &&
+    grep -Fq '"${SELECTOR}" == docker-contracts-fast-rest || "${SELECTOR}" == docker-port-hopping-preflight' "${CONTRACT_WORKFLOW}" ||
+    fail '端口跳跃独立分片未沿用隔离工具镜像、当前源码或所需能力'
 grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
 grep -Fq 'max-parallel: 18' "${CONTRACT_WORKFLOW}" ||

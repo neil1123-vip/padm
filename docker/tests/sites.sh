@@ -325,6 +325,62 @@ while IFS=$'\t' read -r name valid; do
     fi
 done <"${TEST_ROOT}/cases.tsv"
 
+# 固定正文使用内建输出后，条件调用也必须传播实际写入失败。
+reject dockerGenerateNginxConfig "${TEST_ROOT}/base.json" /dev/full
+reject dockerGenerateSiteLocations "${TEST_ROOT}/valid-21-default.json" /dev/full
+(
+    # 站点正文已经输出时的读取失败仍须拒绝，不能缓存部分输出。
+    jq() {
+        command jq "$@" || return $?
+        [[ "${1:-}" != -r || "${2:-}" != '.site.mode // "legacy"' ]] || return 17
+    }
+    reject dockerGenerateNginxConfig "${TEST_ROOT}/valid-21-default.json" "${TEST_ROOT}/failed-site.conf"
+) || fail '站点正文读取故障未传播'
+
+# 批量读取必须传播 jq 的非零退出，不能把已打印的正常字段当作成功。
+(
+    jq() {
+        command jq "$@" || return $?
+        [[ "$*" != *'join("|")'* ]] || return 17
+    }
+    reject dockerGenerateNginxConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/failed-metadata.conf"
+    [[ ! -e "${TEST_ROOT}/failed-metadata.conf" ]] || fail '元数据失败仍写入 Nginx 候选'
+    reject dockerValidateHostIntegrations "${TEST_ROOT}/base.json" "${TEST_ROOT}/unused"
+    reject dockerValidateCandidate "${TEST_ROOT}/base.json" "${TEST_ROOT}/unused"
+    dockerCreateConfigurationCandidate
+    trap dockerCleanupConfigurationCandidate EXIT
+    reject dockerGenerateCandidate "${TEST_ROOT}/base.json" "${DOCKER_CONFIG_CANDIDATE}"
+) || fail '元数据批量读取故障合同失败'
+(
+    dockerCreateConfigurationCandidate
+    trap dockerCleanupConfigurationCandidate EXIT
+    dockerGenerateCandidate "${TEST_ROOT}/base.json" "${DOCKER_CONFIG_CANDIDATE}"
+    # Compose 已输出正常开关后，后段 JSON 解析或工具失败仍须拒绝候选。
+    printf '{invalid\n' >"${DOCKER_CONFIG_CANDIDATE}/deployment.json"
+    reject dockerValidateCandidate "${TEST_ROOT}/base.json" "${DOCKER_CONFIG_CANDIDATE}"
+    grep -Fq '候选 JSON 配置无效' "${LOG}" || fail '后段候选 JSON 错误未传播'
+    dockerGenerateDeployment "${TEST_ROOT}/base.json" "${DOCKER_CONFIG_CANDIDATE}/deployment.json"
+    jq() {
+        command jq "$@" || return $?
+        [[ "$*" != *'input_filename == $compose'* ]] || return 17
+    }
+    reject dockerValidateCandidate "${TEST_ROOT}/base.json" "${DOCKER_CONFIG_CANDIDATE}"
+    grep -Fq '候选 JSON 配置无效' "${LOG}" || fail '候选 JSON 批量工具错误未传播'
+) || fail '候选 JSON 批量校验故障合同失败'
+(
+    printf '{invalid\n' >"${TEST_ROOT}/broken-contract.json"
+    dockerConfigureSchemaFile() { printf '%s\n' "${TEST_ROOT}/broken-contract.json"; }
+    reject dockerConfigureSpecValidate "${TEST_ROOT}/base.json"
+) || fail '非法 schema 未拒绝'
+(
+    dockerFeatureMatrixFile() { printf '%s\n' "${TEST_ROOT}/broken-contract.json"; }
+    reject dockerConfigureSpecValidate "${TEST_ROOT}/base.json"
+) || fail '非法支持矩阵未拒绝'
+cat "${TEST_ROOT}/base.json" "${TEST_ROOT}/base.json" >"${TEST_ROOT}/multiple-specs.json"
+printf '[]\n' >"${TEST_ROOT}/nonobject-spec.json"
+reject dockerConfigureSpecValidate "${TEST_ROOT}/multiple-specs.json"
+reject dockerConfigureSpecValidate "${TEST_ROOT}/nonobject-spec.json"
+
 # bundle 缺少站点能力声明时，真实 bundle gate 必须拒绝含 site 的规格。
 cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
@@ -485,6 +541,70 @@ jq 'del(.site)' "${TEST_ROOT}/valid-27-static.json" >"${TEST_ROOT}/legacy-fallba
 dockerGenerateNginxConfig "${TEST_ROOT}/legacy-fallback.json" "${TEST_ROOT}/legacy-nginx.conf"
 grep -Fq 'try_files /index.html @padm_fallback;' "${TEST_ROOT}/legacy-nginx.conf" ||
     fail '无 site 的旧规格改变静态首页 fallback'
+(
+    # 同次生成包含多种入口；每个 server 都须完整复用独立入口正文，包括末尾换行与空正文。
+    localSpec="${TEST_ROOT}/multi-site.json"
+    siteCalls="${TEST_ROOT}/multi-site-calls"
+    eval "$(declare -f dockerGenerateSiteLocations | sed '1s/dockerGenerateSiteLocations/dockerGenerateSiteLocationsOriginal/')"
+    dockerGenerateSiteLocations() {
+        printf '%s\n' "${3:-tls}" >>"${siteCalls}"
+        dockerGenerateSiteLocationsOriginal "$@"
+    }
+    for mode in legacy default static redirect; do
+        jq -n --arg mode "${mode}" \
+            --slurpfile base "${TEST_ROOT}/base.json" \
+            --slurpfile p21 "${TEST_ROOT}/valid-21-default.json" \
+            --slurpfile p22 "${TEST_ROOT}/valid-22-default.json" \
+            --slurpfile p23 "${TEST_ROOT}/valid-23-default.json" \
+            --slurpfile p24 "${TEST_ROOT}/valid-24-default.json" \
+            --slurpfile p25 "${TEST_ROOT}/valid-25-default.json" \
+            --slurpfile p27 "${TEST_ROOT}/valid-27-default.json" \
+            --slurpfile p29 "${TEST_ROOT}/valid-29-default.json" '
+          $base[0] |
+          .core.protocols = [$p21[0].core.protocols[0], $p22[0].core.protocols[0],
+            $p23[0].core.protocols[0], $p24[0].core.protocols[0],
+            $p25[0].core.protocols[0], $p27[0].core.protocols[0],
+            ($p29[0].core.protocols[0] | .fallback_tls.http_port = 31304 |
+              .fallback_tls.http2_port = 31306)] |
+          if $mode == "legacy" then del(.site)
+          elif $mode == "redirect" then .site = {mode:$mode,url:"https://example.com/path?a=1&b=2#part"}
+          else .site = {mode:$mode} end
+        ' >"${localSpec}" || fail "${mode}: 多入口规格生成失败"
+        : >"${siteCalls}"
+        : >"${TEST_ROOT}/expected-tls-${mode}"
+        : >"${TEST_ROOT}/expected-fallback-${mode}"
+        dockerGenerateSiteLocationsOriginal "${localSpec}" "${TEST_ROOT}/expected-tls-${mode}" ||
+            fail "${mode}: TLS 站点正文生成失败"
+        dockerGenerateSiteLocationsOriginal "${localSpec}" "${TEST_ROOT}/expected-fallback-${mode}" fallback ||
+            fail "${mode}: fallback 站点正文生成失败"
+        dockerGenerateNginxConfig "${localSpec}" "${TEST_ROOT}/multi-nginx-${mode}.conf" ||
+            fail "${mode}: 多入口 Nginx 生成失败"
+        [[ "$(<"${siteCalls}")" == $'fallback\ntls' ]] || fail "${mode}: 重复读取多入口站点正文"
+        python3 - "${TEST_ROOT}" "${mode}" <<'PY' || fail "${mode}: 多入口正文与独立入口不同"
+import re
+import sys
+from pathlib import Path
+
+root, mode = Path(sys.argv[1]), sys.argv[2]
+text = (root / f"multi-nginx-{mode}.conf").read_bytes()
+expected = {
+    b"tls": (root / f"expected-tls-{mode}").read_bytes(),
+    b"fallback": (root / f"expected-fallback-{mode}").read_bytes(),
+}
+counts = {b"tls": 0, b"fallback": 0}
+for match in re.finditer(rb"(?ms)^server \{\n(.*?)^\}\n", text):
+    body = match.group(1)
+    kind = b"fallback" if b" proxy_protocol;\n" in body else b"tls" if b" ssl;\n" in body else None
+    if kind is None:
+        continue
+    counts[kind] += 1
+    assert body.endswith(expected[kind]), (mode, kind, "站点正文与独立入口不同")
+    if not expected[kind]:
+        assert b"location = / {\n" not in body, (mode, "空正文改变")
+assert counts == {b"tls": 5, b"fallback": 4}, (mode, counts)
+PY
+    done
+) || fail '多入口站点正文差分失败'
 SOURCE=${TEST_ROOT}/public-site
 SECOND=${TEST_ROOT}/second-site
 mkdir -p "${SOURCE}/assets" "${SECOND}"
@@ -609,6 +729,23 @@ runEdit() {
     dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
 ) >"${LOG}" 2>&1 || fail '初始化站点夹具失败'
 assertClean
+# 批量移动只完成首目录便失败时，真实恢复仍须还原全部配置和内容。
+before=$(snapshot)
+(
+    mv() {
+        if [[ "${1:-}" == -- && "${2:-}" == "${root}"/.candidate.*/config/xray &&
+            "${@: -1}" == "${root}/config/" ]]; then
+            command mv -- "$2" "${@: -1}" || return $?
+            return 17
+        fi
+        command mv "$@"
+    }
+    actual=0
+    (dockerMain edit --site-default --confirm PADM-DOCKER-EDIT) >"${LOG}" 2>&1 || actual=$?
+    [[ "${actual}" == 14 ]] || fail "部分批量移动失败没有进入恢复: ${actual}"
+) || fail '批量安装故障合同失败'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail '部分批量移动失败没有恢复完整原部署'
 before=$(snapshot)
 composeBefore=$(grep -c '^live:' "${COMPOSE_LOG}")
 runEdit 0 --http01 enable --preview
@@ -955,6 +1092,31 @@ assertClean
 ln "${root}/data/static/index.html" "${root}/data/static/hardlink"
 reject dockerBackupConfiguration
 rm -- "${root}/data/static/hardlink"
+
+# 多根枚举或批量复制失败时不能发布恢复点，也不能触碰在线配置。
+for backupFailure in find cp; do
+    before=$(snapshot)
+    (
+        DOCKER_CONFIG_BACKUP=
+        find() {
+            if [[ "${backupFailure}" == find && "$*" == *"${root}/deployment.json"* ]]; then
+                command find "$@" || return $?
+                return 17
+            fi
+            command find "$@"
+        }
+        cp() {
+            if [[ "${backupFailure}" == cp && "$*" == *--parents* ]]; then
+                command cp -a --parents -- deployment.json "${@: -1}" || return $?
+                return 17
+            fi
+            command cp "$@"
+        }
+        reject dockerBackupConfiguration
+        [[ -z "${DOCKER_CONFIG_BACKUP}" && "$(snapshot)" == "${before}" ]] ||
+            fail '失败的批量备份被发布或改变在线内容'
+    ) || fail "备份批处理故障未拒绝: ${backupFailure}"
+done
 
 # 删除最后一个 Nginx 入口只清除站点模式，仍保留内容和其它 TLS 入口。
 (

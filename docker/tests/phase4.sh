@@ -43,12 +43,21 @@ cat >"${MOCK_BIN}/id" <<'EOF'
 #!/usr/bin/env bash
 [[ "${1:-}" == "-u" ]] && printf '0\n'
 EOF
+if [[ "$(uname -s)" != Linux ]]; then
 cat >"${MOCK_BIN}/stat" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--format=%a" ]]; then printf '600\n'; else command -p stat "$@"; fi
 EOF
+chmod 0755 "${MOCK_BIN}/stat"
+fi
 cat >"${MOCK_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
+phase4DockerMock() (
+set +e
+set +o pipefail
+trap - EXIT ERR INT TERM
+local FAKE_PHASE4_MOCK_CALLER=$1 FAKE_PHASE4_MOCK_PATH=$2
+shift 2
 set -u
 printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG:?}"
 case "${1:-}" in
@@ -69,11 +78,11 @@ compose)
             "${FAKE_DOCKER_ROOT:?}/config/spec.json" >/dev/null || exit 1
         case "${FAKE_DOCKER_MODE:-ok}" in
         fail2ban-cleanup-proof-fail) exit 1 ;;
-        fail2ban-cleanup-proof-term-fail) kill -TERM "${PPID}"; exit 1 ;;
+        fail2ban-cleanup-proof-term-fail) kill -TERM "${FAKE_PHASE4_MOCK_CALLER}"; exit 1 ;;
         fail2ban-cleanup-proof-term)
             if [[ ! -e "${FAKE_DOCKER_SIGNAL_ONCE:?}" ]]; then
                 : >"${FAKE_DOCKER_SIGNAL_ONCE}"
-                kill -TERM "${PPID}"
+                kill -TERM "${FAKE_PHASE4_MOCK_CALLER}"
             fi
             ;;
         esac
@@ -161,7 +170,7 @@ rm)
     [[ "$*" == "rm ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
         ! -e "${FAKE_DOCKER_ROOT:?}/data/net/fail2ban/fail2ban.state" &&
         ! -L "${FAKE_DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" ]] || exit 1
-    "${BASH_SOURCE[0]}" container inspect "${FAKE_DOCKER_FAIL2BAN_CONTAINER}" |
+    "${FAKE_PHASE4_MOCK_PATH}" container inspect "${FAKE_DOCKER_FAIL2BAN_CONTAINER}" |
         jq -e 'length == 1 and (.[0].State |
           .Status == "exited" and .Running == false and .Restarting == false and
           .Paused == false and .Dead == false and .OOMKilled == false and
@@ -230,14 +239,48 @@ run)
     ;;
 *) exit 1 ;;
 esac
+)
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    phase4DockerMock "${PPID}" "${BASH_SOURCE[0]}" "$@"
+else
+    docker() { phase4DockerMock "${BASHPID}" "${FAKE_PHASE4_DOCKER_MOCK:?}" "$@"; }
+    export -n -f phase4DockerMock docker
+fi
 EOF
-chmod 0755 "${MOCK_BIN}/uname" "${MOCK_BIN}/id" "${MOCK_BIN}/stat" "${MOCK_BIN}/docker"
+chmod 0755 "${MOCK_BIN}/uname" "${MOCK_BIN}/id" "${MOCK_BIN}/docker"
+# 每个测试执行 shell 加载一次；外部 Bash 工具不导入模拟函数，文件入口保留递归调用。
+export FAKE_PHASE4_DOCKER_MOCK="${MOCK_BIN}/docker"
+source "${FAKE_PHASE4_DOCKER_MOCK}"
+(
+    export FAKE_DOCKER_LOG
+    bash -c '[[ "$(type -t phase4DockerMock || true)" != function &&
+        "$(type -t docker || true)" != function ]]' || exit 1
+    for backend in function fallback; do
+        commandStatus=0
+        FAKE_DOCKER_LOG="${TEST_ROOT}/docker-${backend}.argv"
+        : >"${FAKE_DOCKER_LOG}"
+        if [[ "${backend}" == function ]]; then
+            docker compose version '' $'space\nquote\'"\\'
+            docker unknown-command || commandStatus=$?
+        else
+            "${FAKE_PHASE4_DOCKER_MOCK}" compose version '' $'space\nquote\'"\\'
+            "${FAKE_PHASE4_DOCKER_MOCK}" unknown-command || commandStatus=$?
+        fi >"${TEST_ROOT}/docker-${backend}.stdout" 2>"${TEST_ROOT}/docker-${backend}.stderr"
+        [[ "${commandStatus}" == 1 &&
+            "$(<"${TEST_ROOT}/docker-${backend}.stdout")" == v2.29.1 ]] || exit 1
+    done
+    for evidence in argv stdout stderr; do
+        cmp -s "${TEST_ROOT}/docker-function.${evidence}" \
+            "${TEST_ROOT}/docker-fallback.${evidence}" || exit 1
+    done
+) || fail 'Docker 模拟函数改变了包装入口的参数、输出或退出码'
 printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
 chmod 0755 "${MOCK_BIN}/systemctl"
 cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
 
 # 只替换 Nginx 现场边界，来源计划、输入校验、停止证明和两阶段启动仍走生产函数。
 cat >"${SOURCE_BOUNDARY}" <<'EOF'
+source "${FAKE_PHASE4_DOCKER_MOCK:?}"
 dockerFail2banSourceContainer() {
     local listener=$1 family=$2
     jq -ec --arg listener "${listener}" --arg family "${family}" '

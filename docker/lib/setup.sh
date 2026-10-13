@@ -2030,7 +2030,7 @@ dockerEditCommand() {
         specFile=$(dockerResolveRegularFile "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
         cp -- "${specFile}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     else
-        cp -- "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+        cp -- "${normalized}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     fi
     chmod 0600 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
@@ -2052,8 +2052,10 @@ dockerEditCommand() {
         dockerError '带 Fail2ban 的 WS 入口端口需联动封禁规则，本阶段未开放端口或入口数量修改'
         return "${PADM_DOCKER_RC_STATE}"
     fi
-    dockerConfigureSpecMigrate "${draft}" "${draft}.v3" &&
-        mv -f -- "${draft}.v3" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${specFile}" && "${imported}" -eq 0 ]]; then
+        dockerConfigureSpecMigrate "${draft}" "${draft}.v3" &&
+            mv -f -- "${draft}.v3" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    fi
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&

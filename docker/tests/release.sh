@@ -410,7 +410,7 @@ unset FAKE_DOWNLOAD_FAIL
 NO_COSIGN_BIN="${TEST_ROOT}/no-cosign-bin"
 mkdir "${NO_COSIGN_BIN}"
 for tool in bash uname id docker curl wget jq sha256sum tar readlink dirname basename \
-    mkdir chmod find sort cp awk cut mktemp rm rmdir cat date stat sleep cmp wc head uniq tr sed env; do
+    mkdir chmod find sort cp awk cut mktemp rm rmdir cat date stat sleep cmp wc head uniq tr sed grep env; do
     ln -s "$(command -v "${tool}")" "${NO_COSIGN_BIN}/${tool}"
 done
 PATH="${NO_COSIGN_BIN}" runRelease 16 missing-cosign --manifest "${MANIFEST}" \

@@ -99,8 +99,16 @@ dockerTrafficAccounts() {
 }
 
 dockerTrafficRender() {
-    local core=$1 source=$2 state=$3
-    jq -e --arg core "${core}" --slurpfile state <(printf '%s\n' "${state}") "${DOCKER_TRAFFIC_USERS_JQ}"'
+    local core=$1 source=$2 state=$3 inputFilter=''
+    local -a inputOptions=()
+    # 候选私密输入的单对象校验与渲染同次解析，普通调用保留原逐对象行为。
+    if [[ "${4:-}" == --single-object ]]; then
+        inputOptions=(-s)
+        inputFilter='if length == 1 and (.[0] | type == "object") then .[0]
+          else error("核心配置必须是单个对象") end | '
+    fi
+    jq -e "${inputOptions[@]}" --arg core "${core}" --slurpfile state <(printf '%s\n' "${state}") \
+        "${inputFilter}${DOCKER_TRAFFIC_USERS_JQ}"'
       ($state | if length == 1 then .[0] else error("流量状态必须是单个对象") end) as $state |
       def enabled:
         traffic_id as $id | ($state.accounts[$id] // {}) as $account |
@@ -179,8 +187,8 @@ dockerTrafficPrepareCandidate() (
             cp -- "${directory}/config.json" "${source}" || return 1
         fi
         [[ -f "${source}" ]] || return 1
-        jq -es 'length == 1 and (.[0] | type == "object")' "${source}" >/dev/null || return 1
-        dockerTrafficRender "${core}" "${source}" "${state}" >"${stage}/${core}/config.json" || return 1
+        dockerTrafficRender "${core}" "${source}" "${state}" --single-object \
+            >"${stage}/${core}/config.json" || return 1
         chmod 0600 "${source}" && chmod 0640 "${stage}/${core}/config.json" || return 1
         prepared+=("${core}")
     done

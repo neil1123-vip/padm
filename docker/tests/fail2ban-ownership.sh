@@ -189,7 +189,102 @@ else:
     raise SystemExit(99)
 PY
 chmod 0755 "${TEST_ROOT}/bin/ip"
+cat >"${TEST_ROOT}/adapter.py" <<'PY'
+import contextlib
+import io
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import traceback
+
+
+def install():
+    original_run = subprocess.run
+    binaries = Path(os.environ["FAKE_FB_ROOT"]).parent / "bin"
+    firewall = binaries / "firewall"
+    tool_source = compile(firewall.read_text(), str(firewall), "exec")
+
+    def run(args, *positional, **keywords):
+        if (not isinstance(args, (list, tuple)) or not args
+                or args[0] not in {"iptables", "ip6tables"} or positional
+                or keywords != {"text": True, "capture_output": True}
+                or shutil.which(args[0]) != str(binaries / args[0])):
+            return original_run(args, *positional, **keywords)
+        output, error = io.StringIO(), io.StringIO()
+        saved, status = sys.argv, 0
+        try:
+            sys.argv = [str(binaries / args[0]), *args[1:]]
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(error):
+                try:
+                    exec(tool_source, {"__name__": "__main__"})
+                except SystemExit as stopped:
+                    status = stopped.code or 0
+                except Exception:
+                    traceback.print_exc()
+                    status = 1
+        finally:
+            sys.argv = saved
+        return subprocess.CompletedProcess(args, status, output.getvalue(), error.getvalue())
+
+    subprocess.run = run
+    return original_run
+
+
+if __name__ == "__main__":
+    arguments = sys.argv[1:]
+    if (len(arguments) < 9 or arguments[0] != "-"
+            or arguments[1] != os.environ.get("FAKE_FB_STATE")):
+        os.execv("/usr/bin/python3", ["python3", *arguments])
+    body = sys.stdin.read()
+    # 仅本夹具的资源审计内联 mock；每次工具调用仍读取当前内核 JSON。
+    if "root, token, chain, ports, ipv6, scope, target, operation = sys.argv[1:9]" in body:
+        install()
+    sys.argv = arguments
+    exec(compile(body, "<fail2ban-resources-fixture>", "exec"), {"__name__": "__main__"})
+PY
+printf '#!/bin/sh\nexec /usr/bin/python3 "%s/adapter.py" "$@"\n' "${TEST_ROOT}" \
+    >"${TEST_ROOT}/bin/python3"
+chmod 0755 "${TEST_ROOT}/bin/python3"
 export PATH="${TEST_ROOT}/bin:${PATH}"
+# 与原工具子进程逐次比较标准流、失败码、读取记录和实际 JSON 写入。
+/usr/bin/python3 - "${TEST_ROOT}" <<'PY'
+import json
+import os
+from pathlib import Path
+import runpy
+import subprocess
+import sys
+
+root = Path(sys.argv[1])
+original = runpy.run_path(str(root / "adapter.py"))["install"]()
+files = [root / "kernel/iptables.json", Path(os.environ["FAKE_FB_READS"]),
+         Path(os.environ["FAKE_FB_WRITES"])]
+try:
+    for args, inventory in (
+        (["iptables", "-w", "-S"], {"INPUT": []}),
+        (["iptables", "-w", "-S"], {"INPUT": [["-j", "ACCEPT"]]}),
+        (["iptables", "-w", "-N", "new"], {"INPUT": []}),
+        (["iptables", "-w", "-X", "missing"], {"INPUT": []}),
+        (["iptables", "", "quoted ' value", "line\nbreak"], {"INPUT": []}),
+    ):
+        contents = [json.dumps(inventory).encode(), b"", b""]
+        for path, value in zip(files, contents):
+            path.write_bytes(value)
+        expected = original(args, text=True, capture_output=True)
+        expected_files = [path.read_bytes() for path in files]
+        for path, value in zip(files, contents):
+            path.write_bytes(value)
+        actual = subprocess.run(args, text=True, capture_output=True)
+        assert (actual.returncode, actual.stdout, actual.stderr) == (
+            expected.returncode, expected.stdout, expected.stderr), args
+        assert [path.read_bytes() for path in files] == expected_files, args
+finally:
+    subprocess.run = original
+    for path in files:
+        path.unlink()
+PY
 ssh_guard_refresh() {
     python3 - "${GUARD_ROOT}/guard.json" "${PADM_SSH_COLLECTOR_TOKEN}" \
         "${PADM_SSH_COLLECTOR_UNIT}" "${PADM_SSH_COLLECTOR_TARGET}" "${PADM_SSH_COLLECTOR_PORT}" <<'PY'

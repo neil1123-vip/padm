@@ -53,6 +53,7 @@ cat >"${MOCK_BIN}/id" <<'EOF'
 [[ "${1:-}" == "-u" ]] && printf '0\n'
 EOF
 
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" != Linux ]]; then
 cat >"${MOCK_BIN}/stat" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--format=%a" ]]; then
@@ -61,6 +62,8 @@ else
     exec "${FAKE_PHASE3_HOST_STAT}" "$@"
 fi
 EOF
+chmod 0755 "${MOCK_BIN}/stat"
+fi
 
 cat >"${MOCK_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -167,7 +170,7 @@ run)
 *) exit 1 ;;
 esac
 EOF
-chmod 0755 "${MOCK_BIN}/uname" "${MOCK_BIN}/id" "${MOCK_BIN}/stat" "${MOCK_BIN}/docker"
+chmod 0755 "${MOCK_BIN}/uname" "${MOCK_BIN}/id" "${MOCK_BIN}/docker"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
 chmod 0755 "${MOCK_BIN}/systemctl"
 cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
@@ -309,6 +312,60 @@ jq --slurpfile reality "${REALITY_XRAY_SPEC}" '.core.protocols += $reality[0].co
     "${WS_SPEC}" >"${MIXED_WS_SPEC}"
 jq '.core.protocols[0].id = 31' "${REALITY_XRAY_SPEC}" >"${UNSUPPORTED_SPEC}"
 writeRealitySpec "${ROLLBACK_SPEC}" xray changed-after-failure 24444
+
+# 完整集合只在 edit 验收公共迁移自检，独立 entries 仍保留原覆盖。
+if [[ "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" != 1 || "${PHASE3_SCOPE}" != entries ]]; then
+(
+    # 真实迁移与草稿校验保留，只隔离宿主门禁并在后续事务开始前停止。
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/normalized-reuse"
+    source "${PROJECT_ROOT}/install-docker.sh"
+    mkdir -p "${PADM_DOCKER_INSTALL_DIR}/config"
+    cp -- "${REALITY_XRAY_SPEC}" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    originalMigrate=$(declare -f dockerConfigureSpecMigrate)
+    eval "${originalMigrate/dockerConfigureSpecMigrate/phase3OriginalMigrate}"
+    dockerConfigureSpecMigrate() {
+        printf '%s\n' "$2" >>"${TEST_ROOT}/reuse-migrations"
+        phase3OriginalMigrate "$@"
+    }
+    dockerHostPreflight() { :; }
+    dockerLockInstalledDeployment() { :; }
+    dockerComposeFile() { :; }
+    dockerEditBaselineValidate() { :; }
+    dockerAcmeWebrootTransitionValidate() {
+        [[ "$(stat -c %a "$1")" == 600 &&
+            "$(stat -c %a "${1%/*}/original.json")" == 600 &&
+            "$(stat -c %a "${1%/*}")" == 700 ]] || fail '复用草稿放宽私密输入权限'
+        printf 'validated\n' >>"${TEST_ROOT}/reuse-validated"
+        return 1
+    }
+    cp() {
+        if [[ "${reuseCase}" == copy-fail && "${2##*/}" == normalized.json &&
+            "${3##*/}" == draft.json ]]; then return 17; fi
+        command cp "$@"
+    }
+    for reuseCase in normal external invalid-external copy-fail; do
+        : >"${TEST_ROOT}/reuse-migrations"
+        : >"${TEST_ROOT}/reuse-validated"
+        arguments=(--preview)
+        expectedMigrations=1 expectedValidated=1
+        case "${reuseCase}" in
+        external) arguments+=(--spec "${REALITY_XRAY_SPEC}"); expectedMigrations=2 ;;
+        invalid-external)
+            arguments+=(--spec "${UNSUPPORTED_SPEC}")
+            expectedMigrations=2 expectedValidated=0 ;;
+        copy-fail) expectedValidated=0 ;;
+        esac
+        actual=0
+        dockerEditCommand "${arguments[@]}" >"${TEST_ROOT}/reuse.log" 2>&1 || actual=$?
+        [[ "${actual}" == "${PADM_DOCKER_RC_STATE}" &&
+            "$(wc -l <"${TEST_ROOT}/reuse-migrations")" == "${expectedMigrations}" &&
+            "$(wc -l <"${TEST_ROOT}/reuse-validated")" == "${expectedValidated}" ]] ||
+            fail "normalized 复用、外部输入迁移或复制失败边界错误: ${reuseCase}"
+        dockerSetupCleanup || fail '复用草稿未清理'
+    done
+)
+fi
 
 if [[ "${PHASE3_SCOPE}" != entries ]]; then
 SUBSCRIPTION_UNIT_ROOT="${TEST_ROOT}/subscription-unit"

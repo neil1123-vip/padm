@@ -1,39 +1,53 @@
 #!/usr/bin/env python3
-import copy
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
-import tempfile
 
 
 SCRIPT = Path(__file__).resolve()
 ROOT = SCRIPT.parents[2]
 
-if len(sys.argv) > 1 and sys.argv[1] == "tool":
+def tool():
     fixture = json.loads(Path(os.environ["HOP_FIXTURE"]).read_text())
-    tool, *args = sys.argv[2:]
+    name, *args = sys.argv[2:]
     with Path(os.environ["HOP_COMMANDS"]).open("a") as output:
-        output.write(json.dumps([tool, *args]) + "\n")
-    if fixture.get("fail") == tool:
+        output.write(json.dumps([name, *args]) + "\n")
+    if fixture.get("fail") == name:
         print("fixture tool failure", file=sys.stderr)
         sys.exit(1)
-    if fixture.get("warning") == tool:
+    if fixture.get("warning") == name:
         print("fixture incomplete listing", file=sys.stderr)
-    if tool in {"iptables", "ip6tables"}:
+    if name in {"iptables", "ip6tables"}:
         print(fixture.get("version", "iptables v1.8.11 (nf_tables)") if args == ["--version"]
-              else fixture[tool])
-    elif tool == "nft":
+              else fixture[name])
+    elif name == "nft":
         print(json.dumps(fixture["nft"]))
-    elif tool == "ss":
+    elif name == "ss":
         print(fixture["ss"])
     else:
         sys.exit(99)
-    sys.exit(0)
+
+
+def python():
+    import runpy
+
+    arguments = sys.argv[2:]
+    assert len(arguments) == 6 and arguments[0] == "/dev/fd/3" and arguments[2] == "preflight"
+    body = Path(arguments[0]).read_text()
+    fixture = Path(os.environ["HOP_FIXTURE"])
+    install = runpy.run_path(str(SCRIPT.with_name("port-hopping-ownership.py")))[
+        "install_tool_mock_runner"]
+    install(tool, fixture.parent / "bin")
+    sys.argv = arguments
+    exec(compile(body, "<port-hopping-preflight-fixture>", "exec"), {"__name__": "__main__"})
 
 
 def main():
+    import copy
+    import subprocess
+    import tempfile
+
     source = (ROOT / "docker/images/net/entrypoint.sh").read_text()
     base = {
         "iptables": "-P PREROUTING ACCEPT\n-P INPUT ACCEPT\n-P OUTPUT ACCEPT\n"
@@ -115,10 +129,16 @@ def main():
         functions.write_text(source.split('case "${1:-idle}" in')[0])
         binaries = work / "bin"
         binaries.mkdir()
-        for tool in ("iptables", "ip6tables", "nft", "ss"):
-            path = binaries / tool
-            path.write_text(f'#!/bin/sh\nexec python3 "{SCRIPT}" tool "{tool}" "$@"\n')
+        for name in ("iptables", "ip6tables", "nft", "ss"):
+            path = binaries / name
+            path.write_text(f'#!/bin/sh\nexec /usr/bin/python3 -S "{SCRIPT}" tool "{name}" "$@"\n')
             path.chmod(0o755)
+        adapter = binaries / "python3"
+        adapter.write_text(
+            '#!/bin/sh\nif [ "${1:-}" = /dev/fd/3 ] && [ "${3:-}" = preflight ]; then\n'
+            f'    exec /usr/bin/python3 -S "{SCRIPT}" python "$@"\n'
+            'fi\nexec /usr/bin/python3 "$@"\n')
+        adapter.chmod(0o755)
         fixture, commands = work / "fixture.json", work / "commands.jsonl"
         environment = dict(os.environ, PATH=f"{binaries}:{os.environ['PATH']}",
                            HOP_FIXTURE=str(fixture), HOP_COMMANDS=str(commands))
@@ -154,4 +174,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "tool":
+        tool()
+    elif len(sys.argv) > 1 and sys.argv[1] == "python":
+        python()
+    else:
+        main()

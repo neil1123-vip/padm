@@ -303,6 +303,14 @@ rm "${TEST_ROOT}/deployment-drift"
 dockerControlLogScheduleInstall
 
 cp "${state}" "${TEST_ROOT}/state.previous"
+(
+    # 工具输出了完整元数据后失败，也不能授权调度状态。
+    stat() {
+        command stat "$@" || return $?
+        [[ "${!#}" != "${state}" ]]
+    }
+    reject dockerControlLogScheduleValidate "${root}"
+)
 printf '{"schema_version":1,"enabled":true,"command":"foreign"}\n' >"${state}"
 expectCode 15 dockerControlCommand auto-log-rotate
 reject dockerControlCommand log-schedule disable --yes

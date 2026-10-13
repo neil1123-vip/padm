@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
-from contextlib import contextmanager
-import fcntl
-import itertools
 import json
 import os
 from pathlib import Path
 import shlex
 import signal
-import stat
-import subprocess
 import sys
-import tempfile
 import time
 
 
@@ -233,15 +227,79 @@ def post_change(fixture, kind):
         raise AssertionError(kind)
 
 
+def install_tool_mock_runner(tool_runner=tool, binaries=None):
+    import contextlib
+    import io
+    import shutil
+    import subprocess
+    import traceback
+
+    original_run = subprocess.run
+    binaries = Path(binaries) if binaries is not None else Path(os.environ["HOP_STATE"]).parents[2] / "bin"
+
+    def run(args, *positional, **keywords):
+        if (not isinstance(args, (list, tuple)) or not args
+                or args[0] not in {*FAMILIES, "ip", "nft", "ss"} or positional
+                or keywords != {"capture_output": True, "text": True, "timeout": 5}
+                or shutil.which(args[0]) != str(binaries / args[0])):
+            return original_run(args, *positional, **keywords)
+        fixture = json.loads(Path(os.environ["HOP_FIXTURE"]).read_text())
+        # 门禁与信号夹具依赖工具进程及其父 PID，继续执行原 mock 子进程。
+        if fixture.get("gate") or fixture.get("term_on_listing"):
+            return original_run(args, *positional, **keywords)
+        output, error = io.StringIO(), io.StringIO()
+        arguments, status = sys.argv, 0
+        handlers, signal_stopped = {}, False
+        stdout, stderr = sys.stdout, sys.stderr
+
+        def handle(signum, frame):
+            nonlocal signal_stopped
+            # 生产 handler 的诊断和退出属于当前进程，不能算作 mock 子进程结果。
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                try:
+                    handlers[signum](signum, frame)
+                except SystemExit:
+                    signal_stopped = True
+                    raise
+
+        try:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                handler = signal.getsignal(signum)
+                if callable(handler):
+                    handlers[signum] = handler
+                    signal.signal(signum, handle)
+            sys.argv = [str(SCRIPT), "tool", *args]
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(error):
+                try:
+                    tool_runner()
+                except SystemExit as stopped:
+                    if signal_stopped:
+                        raise
+                    status = stopped.code or 0
+                except Exception:
+                    traceback.print_exc()
+                    status = 1
+        finally:
+            sys.argv = arguments
+            for signum, handler in handlers.items():
+                signal.signal(signum, handler)
+        return subprocess.CompletedProcess(args, status, output.getvalue(), error.getvalue())
+
+    subprocess.run = run
+
+
 def run_python():
+    import stat
+    import tempfile
+
     arguments = sys.argv[2:]
     state_path = Path(os.environ["HOP_STATE"])
     fixture = json.loads(Path(os.environ["HOP_FIXTURE"]).read_text())
     fault = fixture.get("commit_failure")
     post_commit = fixture.get("post_commit")
-    if (len(arguments) != 8 or arguments[:3] != ["/dev/fd/3", str(state_path.parent), "run"]
-            or not (fault or post_commit)):
+    if len(arguments) < 3 or arguments[:2] != ["/dev/fd/3", str(state_path.parent)]:
         os.execv("/usr/bin/python3", ["python3", *arguments])
+    install_tool_mock_runner()
     body = Path(arguments[0]).read_text()
     namespace = {"__name__": "__main__"}
     original_mkstemp, original_fsync, original_replace = tempfile.mkstemp, os.fsync, os.replace
@@ -337,6 +395,12 @@ def expected_creation(owner):
 
 
 def main():
+    from contextlib import contextmanager
+    import fcntl
+    import itertools
+    import subprocess
+    import tempfile
+
     source = (ROOT / "docker/images/net/entrypoint.sh").read_text()
     count = 0
     with tempfile.TemporaryDirectory(prefix="padm-hopping-ownership.") as directory:
@@ -347,15 +411,118 @@ def main():
         binaries.mkdir()
         for family in (*FAMILIES, "ip", "nft", "ss"):
             binary = binaries / family
-            binary.write_text(f'#!/bin/sh\nexec python3 "{SCRIPT}" tool "{family}" "$@"\n')
+            binary.write_text(f'#!/bin/sh\nexec /usr/bin/python3 -S "{SCRIPT}" tool "{family}" "$@"\n')
             binary.chmod(0o755)
         python = binaries / "python3"
         python.write_text(
             '#!/bin/sh\n'
-            'if [ -n "${HOP_COMMIT_FAULT:-}" ] && [ "${1:-}" = /dev/fd/3 ] && [ "${3:-}" = run ]; then\n'
+            'if [ "${1:-}" = /dev/fd/3 ]; then\n'
             f'    exec /usr/bin/python3 "{SCRIPT}" python "$@"\n'
             'fi\nexec /usr/bin/python3 "$@"\n')
         python.chmod(0o755)
+
+        # 与真实 mock 子进程比较参数、逐次文件读取、输出及非零状态。
+        check = work / "mock-runner-check"
+        (check / "state").mkdir(parents=True)
+        check_fixture, check_commands = check / "fixture.json", check / "commands.jsonl"
+        original_environment, original_run = os.environ.copy(), subprocess.run
+        original_arguments = sys.argv
+        try:
+            os.environ.update(PATH=f"{binaries}:{os.environ['PATH']}",
+                              HOP_STATE=str(check / "state/port-hopping.state"),
+                              HOP_FIXTURE=str(check_fixture), HOP_COMMANDS=str(check_commands))
+            install_tool_mock_runner()
+            for args, changes in (
+                (["iptables", "--version"], {}),
+                (["iptables", "-w", "-t", "nat", "-S"], {"listing_failure": "iptables"}),
+                (["ip6tables", "-w", "-t", "nat", "-S"], {"listing_warning": "ip6tables"}),
+                (["ss", "-H", "-u", "-a", "-n"], {"ss": "line one\nline two\\end\n"}),
+                (["iptables", "", "quoted ' value", "line\nbreak"], {}),
+            ):
+                check_fixture.write_text(json.dumps({**BASE, **changes}))
+                check_commands.write_text("")
+                expected = original_run(args, capture_output=True, text=True, timeout=5)
+                expected_files = check_fixture.read_bytes(), check_commands.read_bytes()
+                check_fixture.write_text(json.dumps({**BASE, **changes}))
+                check_commands.write_text("")
+                actual = subprocess.run(args, capture_output=True, text=True, timeout=5)
+                assert (actual.returncode, actual.stdout, actual.stderr) == (
+                    expected.returncode, expected.stdout, expected.stderr), args
+                assert (check_fixture.read_bytes(), check_commands.read_bytes()) == expected_files
+                assert sys.argv is original_arguments
+            def ordinary_exit():
+                raise SystemExit(143)
+
+            install_tool_mock_runner(ordinary_exit)
+            result = subprocess.run(
+                ["iptables", "--version"], capture_output=True, text=True, timeout=5)
+            assert result.returncode == 143 and not result.stdout and not result.stderr
+
+            for disposition in (signal.SIG_DFL, signal.SIG_IGN):
+                previous = signal.signal(signal.SIGTERM, disposition)
+                try:
+                    result = subprocess.run(
+                        ["iptables", "--version"], capture_output=True, text=True, timeout=5)
+                    assert result.returncode == 143
+                finally:
+                    signal.signal(signal.SIGTERM, previous)
+        finally:
+            subprocess.run = original_run
+            os.environ.clear()
+            os.environ.update(original_environment)
+
+        # 独立生产 probe 在工具执行窗口收到信号，内联与原进程退出及诊断必须一致。
+        signal_bin = check / "signal-bin"
+        signal_bin.mkdir()
+        signal_driver = check / "signal-driver.py"
+        signal_driver.write_text('''
+import json
+import os
+from pathlib import Path
+import runpy
+import signal
+import sys
+
+mode = sys.argv[1]
+def tool():
+    with open(os.environ["HOP_COMMANDS"], "a") as stream:
+        stream.write(json.dumps(sys.argv[2:]) + "\\n")
+    os.kill(os.getpid() if mode == "inline" else os.getppid(),
+            int(os.environ["HOP_TOOL_SIGNAL"]))
+if mode == "tool":
+    tool()
+    raise SystemExit(0)
+arguments = sys.argv[2:]
+body = Path(arguments[0]).read_text()
+if mode == "inline":
+    runpy.run_path(os.environ["HOP_DRIVER_SOURCE"])["install_tool_mock_runner"](
+        tool, os.environ["HOP_DRIVER_BIN"])
+sys.argv = arguments
+exec(compile(body, "<port-hopping-signal-fixture>", "exec"), {"__name__": "__main__"})
+''')
+        for name, mode in (("ip", "tool"), ("python3", '"${HOP_DRIVER_BACKEND:?}"')):
+            binary = signal_bin / name
+            binary.write_text(f'#!/bin/sh\nexec /usr/bin/python3 "{signal_driver}" {mode} '
+                              + ('ip ' if name == "ip" else '') + '"$@"\n')
+            binary.chmod(0o755)
+        for signum, expected_status in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
+            evidence = []
+            for backend in ("external", "inline"):
+                check_fixture.write_text(json.dumps(BASE))
+                check_commands.write_text("")
+                result = original_run(["sh", "-c",
+                    '. "$1"; STATE_ROOT=$2; shift 2; port_hopping_resources probe "$@"',
+                    "test", str(functions), str(check / "state"), *RUN_VALUES],
+                    env=dict(os.environ, PATH=f"{signal_bin}:{os.environ['PATH']}",
+                             HOP_FIXTURE=str(check_fixture), HOP_COMMANDS=str(check_commands),
+                             HOP_TOOL_SIGNAL=str(signum), HOP_DRIVER_BACKEND=backend,
+                             HOP_DRIVER_SOURCE=str(SCRIPT), HOP_DRIVER_BIN=str(signal_bin)),
+                    capture_output=True, text=True, timeout=5)
+                assert result.returncode == expected_status and not result.stdout
+                assert result.stderr == "padm-net: port hopping probe interrupted\n"
+                evidence.append((result.returncode, result.stdout, result.stderr,
+                                 check_commands.read_bytes(), check_fixture.read_bytes()))
+            assert evidence[0] == evidence[1]
 
         def fixture(name, shapes=("full", "full"), phase="active", single=False):
             case = work / name

@@ -1223,6 +1223,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ||
     for fixture in ipv6-owner routing-bt-policy dns-only; do
         [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle || "${fixture}" != ipv6-owner ]] ||
             continue
+        [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-network-lifecycle || "${fixture}" != dns-only ]] ||
+            continue
         for core in xray sing-box; do
             if [[ "${core}" == xray ]]; then
                 dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" \
@@ -1956,14 +1958,17 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}"
     jq -e 'has("ipv6") | not' "${LOG}" >/dev/null || fail 'IPv6 关闭仍显示有效规则'
     jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
         "${root}/data/traffic/state.json" >/dev/null || fail 'IPv6 事务清空流量累计'
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-network-lifecycle ]]; then
+        printf 'docker-routing-%s-regression-ok\n' "${PADM_DOCKER_ROUTING_SCOPE}"
+        exit 0
+    fi
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
         dockerAcquireDeploymentLock
         dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
     ) >"${LOG}" 2>&1 || fail '重置 IPv6 夹具失败'
     assertClean
-    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == ipv6 ||
-        "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-network-lifecycle ]]; then
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == ipv6 ]]; then
         printf 'docker-routing-%s-regression-ok\n' "${PADM_DOCKER_ROUTING_SCOPE}"
         exit 0
     fi
@@ -2509,6 +2514,10 @@ assertClean
 runEdit 0 --socks5 "${PRIVATE_ROOT}/socks5-selective.json" --confirm PADM-DOCKER-EDIT
 selectiveDomainsIncrementalCheck socks5 dns-only
 runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-policy-lifecycle ]]; then
+    printf 'docker-routing-%s-regression-ok\n' "${PADM_DOCKER_ROUTING_SCOPE}"
+    exit 0
+fi
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerAcquireDeploymentLock
@@ -2519,8 +2528,7 @@ fi
 
 # 核心入口在生命周期结束退出，域名子项由独立事务夹具覆盖。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ||
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-policy-lifecycle ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ]]; then
     printf 'docker-routing-%s-regression-ok\n' "${PADM_DOCKER_ROUTING_SCOPE}"
     exit 0
 fi

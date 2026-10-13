@@ -98,14 +98,27 @@ jq -n --arg uuid "${UUID}" --arg private "${PRIVATE_KEY}" --arg public "${PUBLIC
 chmod 0600 "${SPEC}"
 
 newState() {
-    local name=$1 spec=$2 candidate
+    local name=$1 spec=$2 candidate bundleFixture="${TEST_ROOT}/protocol-bundle-fixture"
     export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/${name}"
     export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-${name}"
     mkdir "${PADM_DOCKER_SYSTEMD_DIR}"
     dockerInitializeStateRoot
-    dockerStageBundle "${SOURCE_ROOT}" ffffffffffffffffffffffffffffffffffffffff
-    dockerActivateStagedBundle
-    dockerCleanupStagedBundle
+    # 同一进程的固定源/ref 只初始化一次；每个状态复制独立文件，真实事务仍执行生产校验。
+    if [[ ! -d "${bundleFixture}" ]]; then
+        dockerStageBundle "${SOURCE_ROOT}" ffffffffffffffffffffffffffffffffffffffff
+        dockerActivateStagedBundle
+        dockerCleanupStagedBundle
+        mkdir "${bundleFixture}"
+        cp -a -- "${PADM_DOCKER_INSTALL_DIR}/.bundles" "${PADM_DOCKER_INSTALL_DIR}/bundle" \
+            "${bundleFixture}/" || fail '无法保存初始 bundle 夹具'
+    else
+        cp -a -- "${bundleFixture}/." "${PADM_DOCKER_INSTALL_DIR}/" ||
+            fail '无法复制初始 bundle 夹具'
+    fi
+    [[ -L "${PADM_DOCKER_INSTALL_DIR}/bundle" &&
+        "$(readlink -- "${PADM_DOCKER_INSTALL_DIR}/bundle")" == "$(readlink -- "${bundleFixture}/bundle")" &&
+        ! "${PADM_DOCKER_INSTALL_DIR}/bundle/install-docker.sh" -ef "${bundleFixture}/bundle/install-docker.sh" ]] ||
+        fail 'bundle 夹具指针漂移或共享可写文件'
     dockerConfigureSpecValidate "${spec}" || fail '非法规格夹具'
     mkdir -p "${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
     if jq -e '.tls != null' "${spec}" >/dev/null; then
@@ -168,6 +181,30 @@ if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" == 1 ]]; then
     dockerConfigureSpecMigrate "${SPEC}" "${TEST_ROOT}/v3.json"
     return 0
 fi
+
+bash "${PROJECT_ROOT}/docker/tests/spec-validation.sh"
+bash "${PROJECT_ROOT}/docker/tests/generation-metadata.sh"
+(
+    # 当前格式恒等迁移只校验私密快照；源文件后续变更不能改变本次输入。
+    dockerConfigureSpecMigrate "${SPEC}" "${TEST_ROOT}/migration-v3.json"
+    cp -- "${TEST_ROOT}/migration-v3.json" "${TEST_ROOT}/migration-source.json"
+    originalValidator=$(declare -f dockerConfigureSpecValidate)
+    eval "${originalValidator/dockerConfigureSpecValidate/migrationOriginalValidate}"
+    dockerConfigureSpecValidate() {
+        migrationOriginalValidate "$@" || return 1
+        printf '%s\n' "$1" >>"${TEST_ROOT}/migration-checks"
+        jq '.core.type = "unsupported"' "${TEST_ROOT}/migration-source.json" \
+            >"${TEST_ROOT}/migration-mutated.json" &&
+            cp -- "${TEST_ROOT}/migration-mutated.json" "${TEST_ROOT}/migration-source.json"
+    }
+    dockerConfigureSpecMigrate "${TEST_ROOT}/migration-source.json" "${TEST_ROOT}/migration-output.json" ||
+        fail '当前格式私密快照迁移失败'
+    [[ "$(wc -l <"${TEST_ROOT}/migration-checks")" == 1 &&
+        "$(stat -c %a "${TEST_ROOT}/migration-output.json")" == 600 ]] ||
+        fail '恒等迁移重复校验或放宽权限'
+    cmp -s -- "${TEST_ROOT}/migration-v3.json" "${TEST_ROOT}/migration-output.json" ||
+        fail '恒等迁移重新读取了变更后的源文件'
+)
 
 newState v1 "${SPEC}"
 (

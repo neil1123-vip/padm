@@ -126,6 +126,7 @@ runRegressionDockerContracts() {
 listRegressionDockerContractsFastChildSelectors() {
     listRegressionDockerContractsFastHeavyChildSelectors
     listRegressionDockerContractsFastRestChildSelectors
+    printf '%s\n' docker-port-hopping-preflight
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
@@ -139,7 +140,6 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-phase1 \
         docker-control-client \
         docker-tproxy-ownership \
-        docker-port-hopping-preflight \
         docker-http-relay \
         docker-control-cli \
         docker-phase5 \
@@ -198,7 +198,8 @@ listRegressionDockerContractsRealityMetadataChildSelectors() {
 }
 
 listRegressionDockerContractsSetupBasicChildSelectors() {
-    printf '%s\n' docker-traditional-tls-base docker-setup-core docker-setup-encrypted-tcp
+    printf '%s\n' docker-traditional-tls-base docker-setup-core \
+        docker-traditional-tls-transports docker-setup-encrypted-tcp
 }
 
 listRegressionDockerContractsSystemLightChildSelectors() {
@@ -492,7 +493,8 @@ runDockerControlLogCronRealRegression() {
 }
 
 runDockerControlStateRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-metadata.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
 }
 
 runDockerControlCliRegression() {
@@ -532,11 +534,17 @@ runDockerTProxyOwnershipRegression() {
 }
 
 runDockerPortHoppingPreflightRegression() {
-    python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
-        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-ownership.py" &&
-        runDockerPortHoppingTargetRegression &&
-        runDockerPortHoppingProbeRegression &&
-        runDockerPortHoppingGuardedRegression
+    runRegressionStep hopping-read-only python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
+        PADM_REGRESSION_PARALLEL_JOBS=4 runParallelRegressionRunners \
+            "${TMP_DIR}/hopping-preflight-${BASHPID:-$$}" \
+            hopping-ownership runDockerPortHoppingOwnershipRegression \
+            hopping-target runDockerPortHoppingTargetRegression \
+            hopping-probe runDockerPortHoppingProbeRegression \
+            hopping-guarded runDockerPortHoppingGuardedRegression
+}
+
+runDockerPortHoppingOwnershipRegression() {
+    python3 "${PROJECT_ROOT}/docker/tests/port-hopping-ownership.py"
 }
 
 runDockerPortHoppingGuardedRegression() {
@@ -552,7 +560,7 @@ import sys
 for path in sys.argv[1:]:
     ast.parse(Path(path).read_text(), filename=path)
 PY
-        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded.py" &&
+        runRegressionStep hopping-guarded-cases python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded.py" &&
         PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
             "${TMP_DIR}/hopping-parent-${BASHPID:-$$}" \
             hopping-finite-parent runDockerPortHoppingGuardedParentRegression \
@@ -575,8 +583,8 @@ runDockerPortHoppingSupervisorParentRegression() {
 runDockerPortHoppingProbeRegression() {
     bash -n "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
-        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-probe.py" &&
-        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-handshake.py"
+        runRegressionStep hopping-probe-cases python3 "${PROJECT_ROOT}/docker/tests/port-hopping-probe.py" &&
+        runRegressionStep hopping-handshake python3 "${PROJECT_ROOT}/docker/tests/port-hopping-handshake.py"
 }
 
 runDockerPortHoppingTargetRegression() {
@@ -598,8 +606,8 @@ import sys
 path = Path(sys.argv[1])
 ast.parse(path.read_text(), filename=str(path))
 PY
-    bash "${PROJECT_ROOT}/docker/tests/port-hopping-target.sh" &&
-        bash "${PROJECT_ROOT}/docker/tests/port-hopping-start.sh"
+    runRegressionStep hopping-target-cases bash "${PROJECT_ROOT}/docker/tests/port-hopping-target.sh" &&
+        runRegressionStep hopping-start bash "${PROJECT_ROOT}/docker/tests/port-hopping-start.sh"
 }
 
 runDockerPortHoppingTargetRealRegression() {
@@ -798,3 +806,18 @@ registerRegressionParallelSelectorList ci runFrameworkParallelRegressionSelector
     "${TMP_DIR}/ci-parallel-${BASHPID:-$$}" listRegressionCiChildSelectors "${PADM_REGRESSION_CI_PARALLEL_JOBS:-3}"
 registerRegressionParallelSelectorList ci-pr runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/ci-pr-parallel-${BASHPID:-$$}" listRegressionCiPrChildSelectors "${PADM_REGRESSION_CI_PARALLEL_JOBS:-3}"
+
+runDockerSpecValidationRegression() {
+    bash -n "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/tests/spec-validation.sh"
+    shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/services.sh" \
+        "${PROJECT_ROOT}/docker/tests/spec-validation.sh"
+    bash "${PROJECT_ROOT}/docker/tests/spec-validation.sh"
+}
+registerRegressionFunctionLeaf docker-spec-validation runDockerSpecValidationRegression
+
+runDockerGenerationMetadataRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/generation-metadata.sh"
+    shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/generation-metadata.sh"
+    bash "${PROJECT_ROOT}/docker/tests/generation-metadata.sh"
+}
+registerRegressionFunctionLeaf docker-generation-metadata runDockerGenerationMetadataRegression

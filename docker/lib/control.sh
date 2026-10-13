@@ -10,20 +10,25 @@ DOCKER_CONTROL_LOG_SWITCHED=0
 DOCKER_CONTROL_LOG_HAD_DIRECTORY=0
 
 dockerControlLogScheduleValidate() {
-    local root=$1 directory="${1}/data/control-log" file="${1}/data/control-log/schedule.json" parent mode
+    local root=$1 directory="${1}/data/control-log" file="${1}/data/control-log/schedule.json" parent mode metadata
     dockerTrafficSafePath "${root}" "${file}" || return 1
     for parent in "${root}" "${root}/data"; do
         [[ -e "${parent}" ]] || continue
-        [[ -d "${parent}" && "$(stat -c %u "${parent}")" == 0 ]] || return 1
-        mode=$(stat -c %a "${parent}") || return 1
+        [[ -d "${parent}" ]] || return 1
+        metadata=$(stat -c '%u:%a' "${parent}") || return 1
+        [[ "${metadata}" == 0:* ]] || return 1
+        mode=${metadata#*:}
         (( (8#${mode} & 022) == 0 )) || return 1
     done
     [[ -e "${directory}" ]] || return 0
-    [[ -d "${directory}" && "$(stat -c '%u:%g:%a' "${directory}")" == 0:0:700 &&
+    [[ -d "${directory}" ]] || return 1
+    metadata=$(stat -c '%u:%g:%a' "${directory}") || return 1
+    [[ "${metadata}" == 0:0:700 &&
         -z "$(find "${directory}" -mindepth 1 -maxdepth 1 ! -path "${file}" -print -quit)" ]] || return 1
     [[ -e "${file}" ]] || return 0
-    [[ -f "${file}" && "$(stat -c '%u:%g:%a:%h' "${file}")" == 0:0:600:1 &&
-        "$(stat -c %s "${file}")" -le 4096 ]] || return 1
+    [[ -f "${file}" ]] || return 1
+    metadata=$(stat -c '%u:%g:%a:%h:%s' "${file}") || return 1
+    [[ "${metadata%:*}" == 0:0:600:1 && "${metadata##*:}" -le 4096 ]] || return 1
     jq -es 'length == 1 and (.[0] | type == "object" and
       keys == ["enabled","schema_version"] and .schema_version == 1 and
       (.enabled | type == "boolean"))' "${file}" >/dev/null 2>&1

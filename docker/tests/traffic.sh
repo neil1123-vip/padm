@@ -425,6 +425,10 @@ printf '{}\n' >"${PADM_DOCKER_INSTALL_DIR}/candidate/config/sing-box/config.json
 reject dockerTrafficPrepareCandidate "${PADM_DOCKER_INSTALL_DIR}/candidate"
 cmp -s "${STATE}" "${TEST_ROOT}/before-state" || fail '无效候选修改累计状态'
 cmp -s "${CONFIG}" "${TEST_ROOT}/before-config" || fail '无效候选修改运行配置'
+cat "${BASE}" "${BASE}" >"${PADM_DOCKER_INSTALL_DIR}/candidate/config/sing-box/config.json"
+reject dockerTrafficPrepareCandidate "${PADM_DOCKER_INSTALL_DIR}/candidate"
+cmp -s "${STATE}" "${TEST_ROOT}/before-state" || fail '多对象候选修改累计状态'
+cmp -s "${CONFIG}" "${TEST_ROOT}/before-config" || fail '多对象候选修改运行配置'
 
 # 实际符号链接依赖宿主能力；MSYS2 的 sys 链接可保留与 Linux 相同的检查语义。
 mv "${STATE}" "${STATE}.real"

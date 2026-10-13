@@ -105,11 +105,11 @@ runNonTty() {
 
 waitForText() {
     local pattern=$1 file=$2 count=${3:-1} attempt
-    for ((attempt = 0; attempt < 1800; attempt++)); do
+    for ((attempt = 0; attempt < 9000; attempt++)); do
         if [[ -f "${file}" ]] && [[ "$(grep -Fc "${pattern}" "${file}" || true)" -ge "${count}" ]]; then
             return 0
         fi
-        sleep 0.05
+        sleep 0.01
     done
     return 1
 }

@@ -24,11 +24,11 @@ jobs:
       max-parallel: 18
       matrix:
         selector:
+          - docker-port-hopping-preflight
           - docker-contracts-fast-rest
           - docker-phase3-edit
           - docker-phase3-entries
           - docker-reality-targets-direct
-          - docker-traditional-tls-transports
           - docker-setup-transports
           - docker-contracts-fast-heavy
           - docker-phase4-maintenance
@@ -49,16 +49,16 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 1
       - name: Install pinned jq
-        if: ${{ !startsWith(matrix.selector, 'docker-contracts-fast-') && !startsWith(matrix.selector, 'docker-routing-') }}
+        if: ${{ !startsWith(matrix.selector, 'docker-contracts-fast-') && !startsWith(matrix.selector, 'docker-routing-') && matrix.selector != 'docker-port-hopping-preflight' }}
         run: sudo bash shell/regression/install-ci-jq.sh
       - name: Cache contract tools
-        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')
+        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight'
         uses: actions/cache@v6.1.0
         with:
           path: ${{ runner.temp }}/padm-contract-tools.tar
           key: padm-contract-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('shell/regression/container/**') }}
       - name: Prepare control and site contract tools
-        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')
+        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight'
         shell: bash
         run: |
           set -euo pipefail
@@ -75,11 +75,11 @@ jobs:
           SELECTOR: ${{ matrix.selector }}
         run: |
           set -euo pipefail
-          if [[ "${SELECTOR}" == docker-contracts-fast-* || "${SELECTOR}" == docker-routing-* ]]; then
+          if [[ "${SELECTOR}" == docker-contracts-fast-* || "${SELECTOR}" == docker-routing-* || "${SELECTOR}" == docker-port-hopping-preflight ]]; then
             jobs=2
             if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi
             capabilities=()
-            if [[ "${SELECTOR}" == docker-contracts-fast-rest ]]; then
+            if [[ "${SELECTOR}" == docker-contracts-fast-rest || "${SELECTOR}" == docker-port-hopping-preflight ]]; then
               # Ubuntu 的 docker-default AppArmor 禁止夹具在私有命名空间挂载。
               capabilities=(--cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined)
             fi
@@ -87,6 +87,7 @@ jobs:
             docker run --rm --network none --init "${capabilities[@]}" \
               --env PADM_REGRESSION_PARALLEL_JOBS="${jobs}" \
               --env PADM_DOCKER_CONTRACTS_SHARED_CHECKS \
+              --env PADM_REGRESSION_VERBOSE=1 \
               --mount "type=bind,src=${RUNNER_TEMP}/padm-contracts-source.tar,dst=/snapshot.tar,readonly" \
               padm-regression:contracts "${SELECTOR}"
           else

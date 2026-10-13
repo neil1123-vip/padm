@@ -5,8 +5,7 @@ if [[ "${PADM_DOCKER_SUBSCRIPTIONS_LOADED:-}" == "1" ]]; then
 fi
 PADM_DOCKER_SUBSCRIPTIONS_LOADED=1
 
-dockerSubscriptionStateValidate() {
-    jq -es '
+DOCKER_SUBSCRIPTION_STATE_JQ='
       length == 1 and (.[0] |
       type == "object" and keys == ["groups","schema_version"] and .schema_version == 1 and
       (.groups | type == "array" and length <= 256 and
@@ -25,7 +24,10 @@ dockerSubscriptionStateValidate() {
          (.listener_ids | type == "array" and length >= 1 and unique == . and
           all(.[]; type == "string" and test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$")))
        )))
-    ' "$1" >/dev/null 2>&1
+'
+
+dockerSubscriptionStateValidate() {
+    jq -es "${DOCKER_SUBSCRIPTION_STATE_JQ}" "$1" >/dev/null 2>&1
 }
 
 dockerSubscriptionReadState() {
@@ -38,9 +40,9 @@ dockerSubscriptionReadState() {
         return 0
     fi
     [[ -f "${path}" && -O "${path}" ]] &&
-        dockerPrivateFileIsRestricted "${path}" &&
-        dockerSubscriptionStateValidate "${path}" || return 1
-    jq -c . "${path}"
+        dockerPrivateFileIsRestricted "${path}" || return 1
+    jq -ces 'select('"${DOCKER_SUBSCRIPTION_STATE_JQ}"') | .[0]' \
+        "${path}" 2>/dev/null || return 1
 }
 
 dockerSubscriptionStatePath() {
@@ -72,8 +74,8 @@ dockerSubscriptionStatePath() {
 dockerSubscriptionPrepareCandidate() {
     local specFile=$1 candidate=$2 source=${3:-} state group token
     if [[ -n "${source}" ]]; then
-        dockerSubscriptionStateValidate "${source}" || return 1
-        state=$(jq -c . "${source}") || return 1
+        state=$(jq -ces 'select('"${DOCKER_SUBSCRIPTION_STATE_JQ}"') | .[0]' \
+            "${source}" 2>/dev/null) || return 1
     else
         state=$(dockerSubscriptionReadState) || return 1
     fi

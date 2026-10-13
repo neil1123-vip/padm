@@ -91,6 +91,18 @@ BASE_FILE="${TEST_ROOT}/base-subscription.txt"
 dockerGenerateSubscription "${SPEC}" "${BASE_FILE}" || fail '主订阅生成失败'
 grep -q "${MAIN_UUID}" "${BASE_FILE}" || fail '主订阅默认未包含入口 URI'
 
+STATE_FILE="${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json"
+for STATE_INPUT in '' null '{}' '{"schema_version":1,"groups":[]} {"schema_version":1,"groups":[]}'; do
+    printf '%s\n' "${STATE_INPUT}" >"${STATE_FILE}"
+    chmod 0600 "${STATE_FILE}"
+    reject dockerSubscriptionStateValidate "${STATE_FILE}"
+    reject dockerSubscriptionReadState
+done
+printf '%s\n' '{"schema_version":1,"groups":[]}' >"${STATE_FILE}"
+[[ "$(dockerSubscriptionReadState)" == '{"schema_version":1,"groups":[]}' ]] ||
+    fail '合并校验读取没有返回单个规范化分享组对象'
+rm -- "${STATE_FILE}"
+
 reject dockerSubscriptionCommand list --json extra
 reject dockerSubscriptionCommand create --accounts "${ALICE},${ALICE}"
 reject dockerSubscriptionCommand create --listeners entry-missing

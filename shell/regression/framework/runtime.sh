@@ -112,6 +112,9 @@ runFrameworkParallelRegressionSelectors() (
     while [[ "${nextIndex}" -lt "${#selectors[@]}" || "${running}" -gt 0 ]]; do
         while [[ "${nextIndex}" -lt "${#selectors[@]}" && "${running}" -lt "${maxJobs}" ]]; do
             i=${nextIndex}
+            if [[ "${PADM_REGRESSION_VERBOSE:-}" == "1" ]]; then
+                printf 'regression-dispatch:%s\n' "${labels[$i]}"
+            fi
             (
                 trap - EXIT INT TERM
                 set +m

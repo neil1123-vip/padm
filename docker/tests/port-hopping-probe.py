@@ -53,9 +53,15 @@ def tool():
 
 
 def python():
+    import runpy
+
     arguments = sys.argv[2:]
     assert arguments[0] == "/dev/fd/3" and arguments[2] == "probe", arguments
     body = Path(arguments[0]).read_text()
+    fixture = Path(os.environ["HOP_FIXTURE"])
+    install = runpy.run_path(str(SCRIPT.with_name("port-hopping-ownership.py")))[
+        "install_tool_mock_runner"]
+    install(tool, fixture.parents[1] / "bin")
     socket.gethostname = lambda: HOST
     sys.argv = arguments
     exec(compile(body, "<port-hopping-probe-fixture>", "exec"), {"__name__": "__main__"})

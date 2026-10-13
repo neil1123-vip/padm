@@ -40,6 +40,7 @@ def python():
     assert arguments[0] == "/dev/fd/3" and arguments[2] in {"guarded", "supervised"}, arguments
     body = Path(arguments[0]).read_text()
     namespace = {"__name__": "__main__"}
+    OWNERSHIP["install_tool_mock_runner"](tool)
     socket.gethostname = lambda: HOST
     original_replace = os.replace
     if os.environ.get("HOP_FAST_TIMEOUT"):
@@ -270,9 +271,10 @@ def main():
                         if fault == "tail":
                             process.stdin.write(b"{}\n")
                             process.stdin.flush()
-                        # close 帧完整到达仍不能报告 closed，必须等待 EOF。
-                        assert not select.select([process.stdout], [], [], 0.1)[0], (name, phases)
-                        assert process.poll() is None
+                        if fault not in {"nonce", "tail"}:
+                            # 合法 close 帧到达仍须等待 EOF；错误输入允许立即拒绝。
+                            assert not select.select([process.stdout], [], [], 0.1)[0], (name, phases)
+                            assert process.poll() is None
                         process.stdin.close()
                         process.stdin = None
                 output, error = process.communicate(timeout=10)

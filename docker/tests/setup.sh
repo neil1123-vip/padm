@@ -8,7 +8,7 @@ all|core|encrypted|encrypted-udp|encrypted-tcp|transports|tls) ;;
 *) printf 'unknown setup section: %s\n' "${SECTION}" >&2; exit 2 ;;
 esac
 
-for tool in script timeout mkfifo find; do
+for tool in script timeout mkfifo find gcc; do
     command -v "${tool}" >/dev/null 2>&1 || { printf 'missing tool: %s\n' "${tool}" >&2; exit 1; }
 done
 find . -maxdepth 0 -printf '' 2>/dev/null ||
@@ -44,6 +44,8 @@ fail() {
     exit 1
 }
 
+# 完整集合由 core 验收公共自检，独立分段仍保留原覆盖。
+if [[ "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" != 1 || "${SECTION}" == all || "${SECTION}" == core ]]; then
 # 直接执行生产中的派生脚本，固定 RFC 7748 向量不依赖假 Docker 输出。
 PYTHON=
 for pythonCandidate in python3 python; do
@@ -77,6 +79,7 @@ else
     fi
     printf 'docker-setup-derivation-skip: Python 3 or OpenSSL is unavailable\n' >&2
 fi
+fi
 
 cat >"${MOCK_BIN}/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -89,6 +92,7 @@ cat >"${MOCK_BIN}/id" <<'EOF'
 #!/usr/bin/env bash
 [[ "${1:-}" == -u ]] && printf '0\n'
 EOF
+if [[ "${FAKE_SETUP_HOST_SYSTEM}" != Linux ]]; then
 cat >"${MOCK_BIN}/stat" <<'EOF'
 #!/usr/bin/env bash
 # MSYS2 的权限显示受 Windows ACL 影响；Linux 仍检查真实权限。
@@ -98,13 +102,12 @@ else
     exec "${FAKE_SETUP_HOST_STAT}" "$@"
 fi
 EOF
+fi
 cat >"${MOCK_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
 set -u
 mode=${FAKE_SETUP_MODE:-ok}
-printf 'docker' >>"${FAKE_SETUP_ARGV_LOG:?}"
-printf ' %q' "$@" >>"${FAKE_SETUP_ARGV_LOG}"
-printf '\n' >>"${FAKE_SETUP_ARGV_LOG}"
+printf '%s\0' docker "$@" >>"${FAKE_SETUP_ARGV_LOG:?}"
 case "${1:-}" in
 info)
     if [[ "${2:-}" == --format ]]; then
@@ -253,15 +256,10 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
 cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
 chmod 0755 "${MOCK_BIN}/"*
 
-REAL_JQ=$(command -v jq)
+REAL_JQ=$(type -P jq)
 export FAKE_SETUP_REAL_JQ="${REAL_JQ}"
-cat >"${MOCK_BIN}/jq" <<'EOF'
-#!/usr/bin/env bash
-printf 'jq' >>"${FAKE_SETUP_ARGV_LOG:?}"
-printf ' %q' "$@" >>"${FAKE_SETUP_ARGV_LOG}"
-printf '\n' >>"${FAKE_SETUP_ARGV_LOG}"
-exec "${FAKE_SETUP_REAL_JQ:?}" "$@"
-EOF
+gcc -std=c11 -O2 -Wall -Wextra -Werror \
+    "${PROJECT_ROOT}/docker/tests/fixtures/jq-argv.c" -o "${MOCK_BIN}/jq"
 chmod 0755 "${MOCK_BIN}/jq"
 
 export PATH="${MOCK_BIN}:${PATH}" MSYS=winsymlinks:sys DOCKER_HOST='' SHELL
@@ -272,6 +270,49 @@ export PADM_DOCKER_LOCK_TIMEOUT=1 PADM_DOCKER_HEALTH_TIMEOUT=1 PADM_DOCKER_SKIP_
 export FAKE_SETUP_EVENTS="${EVENTS}" FAKE_SETUP_VERIFY_LOG="${VERIFY_LOG}"
 export FAKE_SETUP_ARGV_LOG="${ARGV_LOG}" FAKE_SETUP_CHILD_PID="${TEST_ROOT}/child.pid"
 
+if [[ "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" != 1 || "${SECTION}" == all || "${SECTION}" == core ]]; then
+# 外部记录器保留逐字参数和真实退出码，让 CLI 沿用正常纯谓词缓存路径。
+(
+    args=(-ne --arg value $'space\nquote\'"\\' --arg empty '' '$value | false')
+    childStatus=0 directStatus=0
+    FAKE_SETUP_ARGV_LOG="${TEST_ROOT}/jq-child.argv" \
+        bash -c '[[ "$(type -t jq)" == file ]] || exit 19; jq "$@"' \
+            test "${args[@]}" >"${TEST_ROOT}/jq-child.stdout" ||
+        childStatus=$?
+    FAKE_SETUP_ARGV_LOG="${TEST_ROOT}/jq-direct.argv" \
+        "${MOCK_BIN}/jq" "${args[@]}" >"${TEST_ROOT}/jq-direct.stdout" ||
+        directStatus=$?
+    printf '%s\0' jq "${args[@]}" >"${TEST_ROOT}/jq-expected.argv"
+    [[ "${childStatus}" == 1 && "${directStatus}" == 1 ]] &&
+        cmp -s "${TEST_ROOT}/jq-expected.argv" "${TEST_ROOT}/jq-child.argv" &&
+        cmp -s "${TEST_ROOT}/jq-child.argv" "${TEST_ROOT}/jq-direct.argv" &&
+        cmp -s "${TEST_ROOT}/jq-child.stdout" "${TEST_ROOT}/jq-direct.stdout" ||
+        fail 'jq 参数记录器改变了证据或退出码'
+    mapfile -d '' -t childArgs <"${TEST_ROOT}/jq-child.argv"
+    mapfile -d '' -t directArgs <"${TEST_ROOT}/jq-direct.argv"
+    [[ "${#childArgs[@]}" == "$((${#args[@]} + 1))" &&
+        "${#directArgs[@]}" == "$((${#args[@]} + 1))" &&
+        "${childArgs[0]}" == jq && "${directArgs[0]}" == jq ]] ||
+        fail 'jq NUL 参数证据数量或命令名错误'
+    for index in "${!args[@]}"; do
+        [[ "${childArgs[index + 1]}" == "${args[index]}" &&
+            "${directArgs[index + 1]}" == "${args[index]}" ]] ||
+            fail 'jq NUL 参数证据未逐字恢复'
+    done
+    for filter in '$value' 'false' 'error("fixture failure")'; do
+        args=(-nre --arg value $'space\nquote\'"\\' "${filter}")
+        childStatus=0 realStatus=0
+        "${MOCK_BIN}/jq" "${args[@]}" >"${TEST_ROOT}/jq-adapter.stdout" \
+            2>"${TEST_ROOT}/jq-adapter.stderr" || childStatus=$?
+        "${REAL_JQ}" "${args[@]}" >"${TEST_ROOT}/jq-real.stdout" \
+            2>"${TEST_ROOT}/jq-real.stderr" || realStatus=$?
+        [[ "${childStatus}" == "${realStatus}" ]] &&
+            cmp -s "${TEST_ROOT}/jq-adapter.stdout" "${TEST_ROOT}/jq-real.stdout" &&
+            cmp -s "${TEST_ROOT}/jq-adapter.stderr" "${TEST_ROOT}/jq-real.stderr" ||
+            fail 'jq 参数记录器改变了真实输出或失败诊断'
+    done
+) || fail 'jq 参数记录器未通过子进程验证'
+
 # 输出变量恰好叫 answer 时也必须传回调用者；确认与订阅共用该路径。
 (
     source "${PROJECT_ROOT}/docker/lib/setup.sh"
@@ -281,6 +322,7 @@ export FAKE_SETUP_ARGV_LOG="${ARGV_LOG}" FAKE_SETUP_CHILD_PID="${TEST_ROOT}/chil
     dockerSetupRead answer '' n <<<''
     [[ "${answer}" == n ]]
 ) || fail 'prompt helper shadowed the answer output variable'
+fi
 
 for relative in \
     install-docker.sh docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
@@ -369,7 +411,7 @@ assertNoSecrets() {
         -e MDEyMzQ1Njc4OWFiY2RlZh==
     )
     ! grep -Fq "${secrets[@]}" "${CONTROL_LOG}" || fail 'setup printed a secret'
-    ! grep -Fq "${secrets[@]}" "${ARGV_LOG}" || fail 'setup passed a secret through process arguments'
+    ! grep -aFq "${secrets[@]}" "${ARGV_LOG}" || fail 'setup passed a secret through process arguments'
 }
 
 runPty() {
@@ -533,7 +575,7 @@ mkdir "${NO_COSIGN_BIN}"
 for tool in bash uname id docker curl wget jq sha256sum tar readlink dirname basename \
     mkdir chmod find sort cp awk cut mktemp rm rmdir cat date stat sleep cmp wc head uniq tr sed env \
     script timeout grep stty ps mkfifo; do
-    ln -s "$(command -v "${tool}")" "${NO_COSIGN_BIN}/${tool}"
+    ln -s "$(type -P "${tool}")" "${NO_COSIGN_BIN}/${tool}"
 done
 PATH="${NO_COSIGN_BIN}" runPty 16 missing-cosign "${REALITY_INPUT}" setup "${ASSET_ARGS[@]}"
 assertUnconfigured
@@ -842,7 +884,7 @@ for tlsProtocolCase in anytls-default dual-anytls naive-default dual-naive; do
     [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
         fail "${tlsProtocolCase}: cancellation reached credentials, TLS or deployment writes"
     runPty 0 "${tlsProtocolCase}" "${input}" setup "${ASSET_ARGS[@]}"
-    ! grep -Fq '11111111-1111-4111-8111-111111111111' "${ARGV_LOG}" "${CONTROL_LOG}" ||
+    ! grep -aFq '11111111-1111-4111-8111-111111111111' "${ARGV_LOG}" "${CONTROL_LOG}" ||
         fail "${tlsProtocolCase}: the generated password appeared in arguments or output"
     ! grep -Eq '拥塞模式|上行带宽|下行带宽|Salamander|伪装 HTTPS|启用 HTTPS 订阅' "${CONTROL_LOG}" ||
         fail "${tlsProtocolCase}: setup collected unrelated Hysteria2 or publication parameters"

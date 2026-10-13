@@ -98,6 +98,7 @@ runRegressionParallelSelectorLimitCompositionRegression() (
 runFrameworkParallelInterruptCleansChildrenContract() (
     set -euo pipefail
     local childPidFile="${TMP_DIR}/framework-parallel-interrupt-child.pid"
+    local runnerLog="${TMP_DIR}/framework-parallel-interrupt.log"
     local orchestrationPid=
     local childPid=
     local leafPid=
@@ -121,8 +122,8 @@ runFrameworkParallelInterruptCleansChildrenContract() (
     trap cleanupInterruptFixture EXIT
     : >"${childPidFile}"
     set -m
-    PADM_REGRESSION_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/framework-parallel-interrupt" fixture &
+    PADM_REGRESSION_VERBOSE=1 PADM_REGRESSION_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/framework-parallel-interrupt" fixture >"${runnerLog}" 2>&1 &
     orchestrationPid=$!
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
         [[ -s "${childPidFile}" ]] && break
@@ -130,6 +131,8 @@ runFrameworkParallelInterruptCleansChildrenContract() (
     done
     [[ -s "${childPidFile}" ]]
     read -r childPid leafPid <"${childPidFile}"
+    grep -qx 'regression-dispatch:fixture' "${runnerLog}"
+    ! grep -q '^regression-ok:fixture:' "${runnerLog}"
 
     kill -TERM -- "-${orchestrationPid}"
     set +e
@@ -263,13 +266,13 @@ runRegressionDockerContractsAggregateContract() (
         docker-phase3-edit docker-phase3-entries docker-traditional-tls-transports docker-traditional-tls-base
         docker-setup-transports docker-setup-encrypted-udp
         docker-phase4-maintenance docker-routing-core-network-lifecycle docker-reality docker-setup-tls docker-phase4-lifecycle
-        docker-reality-targets-direct docker-reality-parameters docker-sites
+        docker-reality-targets-direct docker-port-hopping-preflight docker-reality-parameters docker-sites
         docker-routing-direct-block-ip-workflow docker-routing-direct-block-csv-workflow docker-routing-core-policy-lifecycle
         docker-setup-core docker-phase1 docker-menu docker-setup-encrypted-tcp
         docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
         docker-cdn-entries docker-fail2ban-ownership docker-control-state
         docker-reality-targets-selection docker-reality-target-library docker-control-client
-        docker-tproxy-ownership docker-port-hopping-preflight docker-routing-core-contracts docker-http-relay docker-control-cli
+        docker-tproxy-ownership docker-routing-core-contracts docker-http-relay docker-control-cli
         docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts
         docker-traffic docker-permissions docker-fail2ban-source docker-control-api
         docker-wireguard-runtime docker-subscriptions docker-accounts-cli
@@ -324,6 +327,8 @@ runRegressionDockerContractsAggregateContract() (
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
     [[ "${shardCount}" -eq 18 ]]
+    ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
+    [[ "$(listRegressionDockerContractsFastChildSelectors | grep -c '^docker-port-hopping-preflight$')" -eq 1 ]]
 
     # 短任务组合沿用两个 worker，给原生与 TLS 留出 runner，不依赖矩阵创建顺序。
     runFrameworkParallelRegressionSelectors() {
@@ -527,6 +532,31 @@ runRegressionCaseLoaderContract() (
     done
 )
 
+runDockerPortHoppingParallelContract() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/hopping-parallel-contract.log"
+    local expectedLog="${TMP_DIR}/hopping-parallel-contract.expected"
+    local status=0
+    runRegressionStep() {
+        [[ "$*" == "hopping-read-only python3 ${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" ]] || return 8
+        printf '%s\n' hopping-read-only >"${callLog}"
+    }
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 4 ]] || return 8
+        shift
+        printf '%s\n' "$@" >>"${callLog}"
+        return 7
+    }
+    runDockerPortHoppingPreflightRegression || status=$?
+    [[ "${status}" == 7 ]]
+    printf '%s\n' hopping-read-only \
+        hopping-ownership runDockerPortHoppingOwnershipRegression \
+        hopping-target runDockerPortHoppingTargetRegression \
+        hopping-probe runDockerPortHoppingProbeRegression \
+        hopping-guarded runDockerPortHoppingGuardedRegression >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+)
+
 runRegressionDispatcherContracts() {
     runRegressionStep registry-runner-args runRegressionRegistryRunnerArgsContract
     runRegressionStep parallel-selector-limit runRegressionParallelSelectorLimitCompositionRegression
@@ -535,6 +565,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep transaction-system-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract
     runRegressionStep parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract
     runRegressionStep docker-contracts-aggregate runRegressionDockerContractsAggregateContract
+    runRegressionStep hopping-parallel runDockerPortHoppingParallelContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts

@@ -14,6 +14,18 @@ fail() {
     exit 1
 }
 
+# 路径拆分改为模式匹配，保留原有空段、点段及空白拒绝边界。
+(
+    source "${PROJECT_ROOT}/install-docker.sh" help
+    source "${PROJECT_ROOT}/docker/lib/bundle.sh"
+    for path in docker/lib/bundle.sh docker/.keep .hidden 'a/.../b' 'a/'; do
+        dockerBundleRelativePathIsSafe "${path}" || fail "safe bundle path rejected: ${path}"
+    done
+    for path in '' /absolute a//b a/./b a/../b . .. ./a ../a 'a b' $'a\tb' $'a\nb'; do
+        if dockerBundleRelativePathIsSafe "${path}"; then fail "unsafe bundle path accepted: ${path}"; fi
+    done
+)
+
 cat >"${MOCK_BIN}/uname" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -367,9 +379,12 @@ env PHASE1_PROJECT_ROOT="${PROJECT_ROOT}" PADM_NATIVE_INSTALL_DIR="${NATIVE_RESI
 
 copyBundleFixture() {
     local target=$1
-    mkdir -p "${target}/shell/core" "${target}/documents"
+    mkdir -p "${target}/docker" "${target}/shell/core" "${target}/documents"
     cp "${PROJECT_ROOT}/install-docker.sh" "${target}/install-docker.sh"
-    cp -R "${PROJECT_ROOT}/docker" "${target}/docker"
+    cp -R "${PROJECT_ROOT}/docker/"{lib,contracts} "${target}/docker/"
+    if [[ -f "${PROJECT_ROOT}/docker/compose.yaml" ]]; then
+        cp "${PROJECT_ROOT}/docker/compose.yaml" "${target}/docker/compose.yaml"
+    fi
     cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${target}/shell/core/deployment_mode.sh"
     cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${target}/shell/core/stats_grpc.sh"
     cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh,static_site_renderer.sh} "${target}/shell/core/"
@@ -1136,6 +1151,28 @@ for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/re
     [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] ||
         fail 'incomplete target module changed the active bundle'
 done
+
+(
+    source "${PROJECT_ROOT}/install-docker.sh" help
+    # 二进制源码中的引用仍要求依赖，枚举工具失败不能被视作无引用。
+    binarySource="${TEST_ROOT}/binary-services-source"
+    copyBundleFixture "${binarySource}"
+    printf 'before\0/renewal.sh"\0after\n' >"${binarySource}/docker/lib/services.sh"
+    dockerBundleSourceIsComplete "${binarySource}" || fail 'binary reference lost a complete source'
+    rm -- "${binarySource}/docker/lib/renewal.sh"
+    ! dockerBundleSourceIsComplete "${binarySource}" || fail 'binary reference accepted a missing dependency'
+    printf 'no optional module reference\n' >"${binarySource}/docker/lib/services.sh"
+    dockerBundleSourceIsComplete "${binarySource}" || fail 'no-match scan rejected an optional-free source'
+    cp -- "${PROJECT_ROOT}/docker/lib/renewal.sh" "${binarySource}/docker/lib/renewal.sh"
+    grep() {
+        [[ "${1:-}" != -aoF ]] || {
+            printf '/renewal.sh"\n'
+            return 2
+        }
+        command grep "$@"
+    }
+    ! dockerBundleSourceIsComplete "${binarySource}" || fail 'reference scan failure was accepted'
+) || fail 'bundle reference scan contract failed'
 
 # 新能力包必须完整携带清单和资源；缺省旧包不要求模板资源。
 for missing in shell/core/static_site_renderer.sh assets/static-sites/sites.sha256 \

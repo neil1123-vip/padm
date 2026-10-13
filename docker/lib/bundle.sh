@@ -11,13 +11,9 @@ DOCKER_BUNDLE_LINK_TEMP_PATH=
 DOCKER_BUNDLE_LINK_TEMP_TARGET=
 
 dockerBundleRelativePathIsSafe() {
-    local path=$1 segment
-    local -a segments=()
-    [[ -n "${path}" && "${path}" != /* && "${path}" != *[[:space:]]* ]] || return 1
-    IFS='/' read -r -a segments <<<"${path}"
-    for segment in "${segments[@]}"; do
-        [[ -n "${segment}" && "${segment}" != "." && "${segment}" != ".." ]] || return 1
-    done
+    local path=$1
+    [[ -n "${path}" && "${path}" != /* && "${path}" != *[[:space:]]* &&
+        "${path}" != *//* && "/${path}/" != */./* && "/${path}/" != */../* ]]
 }
 
 dockerBundleSiteTemplatePaths() (
@@ -90,7 +86,7 @@ dockerBundlePayloadPaths() {
 }
 
 dockerBundleSourceIsComplete() {
-    local sourceRoot=$1 payloadOutput=${2:-/dev/null} required
+    local sourceRoot=$1 payloadOutput=${2:-/dev/null} required serviceReferences status=0
     [[ -d "${sourceRoot}" && ! -L "${sourceRoot}" ]] || return 1
     for required in \
         install-docker.sh \
@@ -112,23 +108,29 @@ dockerBundleSourceIsComplete() {
         shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
+    serviceReferences=$(LC_ALL=C grep -aoF \
+        -e '/renewal.sh"' -e '/schedule.sh"' -e '/geo.sh"' \
+        -e '/control-sync.sh"' -e '/control.sh"' -e '/ssh-runtime.sh"' \
+        -e '/docker/lib/ssh-source.py"' -e '/docker/lib/ssh-journal.py"' \
+        -e '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh") || status=$?
+    ((status <= 1)) || return 1
     for required in renewal schedule geo control-sync control ssh-runtime; do
-        if grep -qF "/${required}.sh\"" "${sourceRoot}/docker/lib/services.sh"; then
+        if [[ "${serviceReferences}" == *"/${required}.sh\""* ]]; then
             [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
                 ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
         fi
     done
-    if grep -qF '/docker/lib/ssh-source.py"' "${sourceRoot}/docker/lib/services.sh"; then
+    if [[ "${serviceReferences}" == *'/docker/lib/ssh-source.py"'* ]]; then
         for required in ssh-source.py ssh-source-client.py; do
             [[ -f "${sourceRoot}/docker/lib/${required}" &&
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
         done
     fi
-    if grep -qF '/docker/lib/ssh-journal.py"' "${sourceRoot}/docker/lib/services.sh"; then
+    if [[ "${serviceReferences}" == *'/docker/lib/ssh-journal.py"'* ]]; then
         [[ -f "${sourceRoot}/docker/lib/ssh-journal.py" &&
             ! -L "${sourceRoot}/docker/lib/ssh-journal.py" ]] || return 1
     fi
-    if grep -qF '/ssh-runtime.sh"' "${sourceRoot}/docker/lib/services.sh"; then
+    if [[ "${serviceReferences}" == *'/ssh-runtime.sh"'* ]]; then
         for required in ssh-runtime.py ssh-collector.py ssh-source.py ssh-journal.py; do
             [[ -f "${sourceRoot}/docker/lib/${required}" &&
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
@@ -140,7 +142,7 @@ dockerBundleSourceIsComplete() {
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
         fi
     done
-    if grep -qF '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh"; then
+    if [[ "${serviceReferences}" == *'/reality-targets.sh"'* ]]; then
         for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
             [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
         done
@@ -273,12 +275,13 @@ dockerValidateBundle() {
     fi
     : >"${manifestList}"
     while IFS= read -r line || [[ -n "${line}" ]]; do
-        if [[ ! "${line}" =~ ^([0-9a-f]{64})[[:space:]][[:space:]]([^[:space:]]+)$ ]]; then
+        expectedHash=${line:0:64}
+        relativePath=${line:66}
+        if [[ "${#expectedHash}" != 64 || "${expectedHash}" == *[!0-9a-f]* ||
+            "${line:64:2}" != [[:space:]][[:space:]] ]]; then
             rm -f -- "${expectedList}" "${manifestList}"
             return 1
         fi
-        expectedHash=${BASH_REMATCH[1]}
-        relativePath=${BASH_REMATCH[2]}
         dockerBundleRelativePathIsSafe "${relativePath}" || {
             rm -f -- "${expectedList}" "${manifestList}"
             return 1

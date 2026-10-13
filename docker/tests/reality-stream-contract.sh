@@ -342,6 +342,30 @@ dockerRealityStreamContractChecks() {
     dockerBundleSupportsSpec "${oldBundle}" "${nullSpec}" || fail '旧部署合同拒绝无共存的 v3 规格'
     dockerRealityStreamDeploymentCheck "${enabled}" "${base}" "${nullSpec}" ||
         fail '当前控制包拒绝合法共存部署规格'
+    (
+        # 防护全关也必须每次核对规格与部署，首个冲突仍先报告 WS。
+        local composeRoot="${TEST_ROOT}/stream-compose-flags" calls="${TEST_ROOT}/stream-compose-flags.calls"
+        local status=0
+        mkdir -p "${composeRoot}/config"
+        cp "${base}" "${composeRoot}/config/spec.json"
+        printf '{"host_integrations":[]}\n' >"${composeRoot}/deployment.json"
+        printf '{"services":{}}\n' >"${composeRoot}/compose.json"
+        : >"${calls}"
+        dockerInstallRoot() { printf '%s\n' "${composeRoot}"; }
+        dockerComposeFile() { printf '%s\n' "${composeRoot}/compose.json"; }
+        dockerComposeExecute() { printf 'compose\n' >>"${calls}"; }
+        dockerFail2banDisablePrepare() { :; }
+        dockerControlFail2banDisablePrepare() { :; }
+        dockerSshFail2banDisablePrepare() { :; }
+        dockerComposeRun down || fail '关闭防护的合法编排被拒绝'
+        printf '{"host_integrations":[{"type":"fail2ban"},{"type":"fail2ban-control"},{"type":"fail2ban-ssh"}]}\n' \
+            >"${composeRoot}/deployment.json"
+        dockerComposeRun down >"${STDOUT}" 2>"${STDERR}" || status=$?
+        [[ "${status}" == "${PADM_DOCKER_RC_STATE}" && "$(<"${calls}")" == compose &&
+            "$(<"${STDERR}")" == *'Fail2ban 规格、部署与编排不一致，拒绝服务变更'* &&
+            "$(<"${STDERR}")" != *'控制 Fail2ban'* && "$(<"${STDERR}")" != *'SSH Fail2ban'* ]] ||
+            fail '关闭防护后未复验部署或改变首个冲突顺序'
+    )
 
     newState stream "${enabled}"
     currentBundle=$(dockerCurrentBundlePath)

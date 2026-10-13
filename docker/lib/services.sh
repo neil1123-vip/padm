@@ -25,6 +25,10 @@ readonly PADM_DOCKER_CONTAINER_GID=10001
 readonly PADM_DOCKER_SUBSCRIPTION_PORT=8081
 readonly PADM_DOCKER_REGION_DEFAULT_DOMAINS='["domain:dl.google.com","domain:apple.com","domain:bing.com","domain:microsoft.com","domain:gstatic.com","domain:xn--ngstr-lra8j.com","domain:googleapis.com","domain:googleapis.cn"]'
 
+DOCKER_SPEC_VALIDATED_JSON=
+DOCKER_SPEC_VALIDATED_MATRIX=
+DOCKER_SPEC_VALIDATED_FLAGS=
+export -n DOCKER_SPEC_VALIDATED_JSON DOCKER_SPEC_VALIDATED_MATRIX DOCKER_SPEC_VALIDATED_FLAGS
 DOCKER_CONFIG_CANDIDATE=
 DOCKER_CONFIG_BACKUP=
 DOCKER_CONFIG_SWITCHED=0
@@ -52,16 +56,43 @@ dockerFeatureMatrixFile() {
 }
 
 dockerConfigureSpecValidate() {
-    local specFile=$1 schemaFile matrixFile
+    local specFile=$1 schemaFile matrixFile validation hasControlSync hasControl hasSsh
+    local specInput specJson matrixJson validationFilter hasCdnEntries hasPortAliases hasRelay hasRouting hasSite hasAccounts
+    local snapshot protocolPrefix=if hasReality hasTrojan hasFallbackTls hasHy2 hasAnyTls
+    local hasNaive hasShadowsocks hasTuic hasGrpcTls hasWebsocket
+    local hasHostIntegrations hasRealityStream hasTls
     schemaFile=$(dockerConfigureSchemaFile) || return 1
     matrixFile=$(dockerFeatureMatrixFile) || return 1
     [[ -f "${specFile}" && ! -L "${specFile}" && -s "${specFile}" ]] || {
         dockerError "配置规格不是安全的普通文件: ${specFile}"
         return 1
     }
-    jq -en --slurpfile schema "${schemaFile}" \
-        --slurpfile matrix "${matrixFile}" --slurpfile spec "${specFile}" \
-        '$spec | length == 1 and (.[0] | type == "object")' >/dev/null 2>&1 || {
+    # 同一次解析同时产生规范化规格与分支标记，后续校验不重新读取可变源文件。
+    specInput=$(jq -enrc --slurpfile schema "${schemaFile}" \
+        --slurpfile matrix "${matrixFile}" --slurpfile spec "${specFile}" '
+      $spec |
+      if length == 1 and (.[0] | type) == "object" then
+        .[0] as $spec | ($spec | tojson),
+        ([$spec | has("cdn_entries"), has("port_aliases"), has("relay"),
+          has("routing"), has("site"), has("accounts"),
+          .host_integrations != [], has("reality_stream"),
+          ((has("tls") and .tls == null) | not)] +
+          ($spec |
+            if (.core | type) != "object" then [range(10) | true]
+            elif (.core.protocols | type) != "array" then [range(10) | true]
+            elif all(.core.protocols[];
+              if type == "object" then (.id | type) == "number" else false end) then
+              [.core.protocols[].id] as $ids | [
+                any($ids[]; . == 1 or . == 2 or . == 26),
+                any($ids[]; . == 28), any($ids[]; . == 27 or . == 29),
+                any($ids[]; . == 3), any($ids[]; . == 4), any($ids[]; . == 5),
+                any($ids[]; . == 30), any($ids[]; . == 31),
+                any($ids[]; . == 24 or . == 25),
+                any($ids[]; . == 21 or . == 22 or . == 23)
+              ]
+            else [range(10) | true] end) | map(tostring) | join("|"))
+      else false end
+    ' 2>/dev/null) || {
         if [[ "$?" -eq 1 ]]; then
             dockerError '配置规格必须是单个 JSON 对象'
         else
@@ -69,7 +100,14 @@ dockerConfigureSpecValidate() {
         fi
         return 1
     }
-    jq -e --slurpfile matrix "${matrixFile}" '
+    specJson=${specInput%$'\n'*}
+    IFS='|' read -r hasCdnEntries hasPortAliases hasRelay hasRouting hasSite hasAccounts \
+        hasHostIntegrations hasRealityStream hasTls \
+        hasReality hasTrojan hasFallbackTls hasHy2 hasAnyTls hasNaive hasShadowsocks \
+        hasTuic hasGrpcTls hasWebsocket \
+        <<<"${specInput##*$'\n'}"
+    # 缺失字段的条件恒为 true；保留存在字段的完整原条件与原执行顺序。
+    validationFilter='
       def exact($keys): type == "object" and ((keys_unsorted | sort) == ($keys | sort));
       def port: type == "number" and floor == . and . >= 1 and . <= 65535;
       def hostname: type == "string" and test("^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$");
@@ -151,9 +189,11 @@ dockerConfigureSpecValidate() {
         (. == "" or . == "local" or (test("^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?$") and
           (ltrimstr("https://") | split("/")[0] | hostname))) and
         (explode | all(. > 32 and . != 127));
+      (if length == 1 and (.[0] | type == "object") then .[0]
+       else error("配置规格必须是单个 JSON 对象") end) |
       . as $request |
       ($matrix[0]) as $features |
-      ([.. | strings] | all(.[]; explode | all(. >= 32 and . != 127))) and
+      (([.. | strings] | all(.[]; explode | all(. >= 32 and . != 127))) and
       exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"] +
         (if has("reality_stream") then ["reality_stream"] else [] end) +
         (if has("accounts") then ["accounts"] else [] end) +
@@ -165,6 +205,9 @@ dockerConfigureSpecValidate() {
         (if has("routing") then ["routing"] else [] end) +
         (if has("site") then ["site"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
+    '
+    if [[ "${hasCdnEntries}" == true ]]; then
+        validationFilter+='
       (if has("cdn_entries") then
         .schema_version == 3 and
         (.cdn_entries | type == "array" and length >= 1 and length <= 16 and
@@ -179,6 +222,10 @@ dockerConfigureSpecValidate() {
               length == (unique | length) and
               all(.[]; hostname or routing_ipv4 or routing_ipv6))))
        else true end) and
+    '
+    fi
+    if [[ "${hasPortAliases}" == true ]]; then
+        validationFilter+='
       (if has("port_aliases") then
         .schema_version == 3 and
         (.port_aliases | type == "array" and length >= 1 and length <= 16 and
@@ -204,6 +251,10 @@ dockerConfigureSpecValidate() {
           [if $request.control != null then [$request.control.listen.port, "tcp"] else empty end]) as $published |
         ($published | length) == ($published | unique | length))
        else true end) and
+    '
+    fi
+    if [[ "${hasRelay}" == true ]]; then
+        validationFilter+='
       (if has("relay") then
         .schema_version == 3 and
         (.relay | exact(["http"]) and
@@ -231,6 +282,10 @@ dockerConfigureSpecValidate() {
           (.reality_stream == null or ($port != 443 and $port != 15443)) and
           .reality_stream.host_website.port != $port)
        else true end) and
+    '
+    fi
+    if [[ "${hasRouting}" == true ]]; then
+        validationFilter+='
       (if has("routing") then
         .schema_version == 3 and
         (.routing | type == "object" and length >= 1 and
@@ -314,6 +369,10 @@ dockerConfigureSpecValidate() {
            else true end)) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
+    '
+    fi
+    if [[ "${hasSite}" == true ]]; then
+        validationFilter+='
       (if has("site") then
         .schema_version == 3 and
         any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29 or
@@ -325,6 +384,10 @@ dockerConfigureSpecValidate() {
               test("^https?://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[A-Fa-f0-9:]+\\])(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?#][A-Za-z0-9._~:/?#@!&(),%+=-]*)?$"))
           else false end)
        else true end) and
+    '
+    fi
+    if [[ "${hasAccounts}" == true ]]; then
+        validationFilter+='
       (if has("accounts") then
         .schema_version == 3 and
         (.accounts | type == "array" and length >= 1 and length <= 256 and
@@ -353,7 +416,13 @@ dockerConfigureSpecValidate() {
             (.shadowsocks_password | ss_key)
            else .shadowsocks_password == null end))
        else true end) and
+    '
+    fi
+    validationFilter+='
       (if has("reality_stream") then .schema_version == 3 else true end) and
+    '
+    if [[ "${hasRealityStream}" == true ]]; then
+        validationFilter+='
       (if .reality_stream != null then
         [.core.protocols[] | select(.listener_id == $request.reality_stream.listener_id)] as $realities |
         [.core.protocols[] | select(.listener_id == $request.reality_stream.website_listener_id)] as $websites |
@@ -396,6 +465,9 @@ dockerConfigureSpecValidate() {
         all(.core.protocols[]; .public_port != 443 or
           .listener_id == $reality.listener_id or .listener_id == $website.listener_id)
        else true end) and
+    '
+    fi
+    validationFilter+='
       (.release | exact(["version", "manifest_sha256", "signature_identity"]) and
         (.version | type == "string" and length > 0) and
         (.manifest_sha256 | test("^[a-f0-9]{64}$")) and
@@ -426,7 +498,11 @@ dockerConfigureSpecValidate() {
           (.id == 1 and .listener_id == "vless-reality") or
           (.id == 21 and .listener_id == "vless-ws")
          else true end) and
-        if .id == 1 or .id == 2 or .id == 26 then
+    '
+    # 协议分支只拼接固定原文；未知 ID 仍进入 else false，畸形输入保留全部分支。
+    if [[ "${hasReality}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 1 or .id == 2 or .id == 26 then
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "reality"] +
             if $request.schema_version >= 2 then ["listener_id"] else [] end +
             if $request.schema_version == 3 then ["core"] else [] end +
@@ -462,13 +538,23 @@ dockerConfigureSpecValidate() {
                (.service_name | type == "string" and test("^[A-Za-z0-9._-]{1,64}$") and
                  (explode | all(. > 32 and . != 127))))
            else true end)
-        elif .id == 28 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasTrojan}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 28 then
           $request.schema_version == 3 and
           (.core == "xray" or .core == "sing-box") and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "trojan"]) and
           (.trojan | exact(["domain"]) and
             (.domain | hostname and (explode | all(. > 32 and . != 127))))
-        elif .id == 27 or .id == 29 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasFallbackTls}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 27 or .id == 29 then
           $request.schema_version == 3 and .core == "xray" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "fallback_tls"]) and
           (.fallback_tls | exact(["domain", "http_port", "http2_port"] +
@@ -478,7 +564,12 @@ dockerConfigureSpecValidate() {
             (if has("alpn") then
               .alpn == ["h2", "http/1.1"] or .alpn == ["http/1.1", "h2"] or .alpn == ["http/1.1"]
              else true end))
-        elif .id == 3 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasHy2}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 3 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "hy2"]) and
           (.hy2 | exact(["domain", "bandwidth_mode", "up_mbps", "down_mbps", "obfs", "masquerade"]) and
@@ -490,24 +581,44 @@ dockerConfigureSpecValidate() {
                 (explode | all(. > 32 and . != 127))))) and
             (.masquerade | masquerade) and
             (if .masquerade == "local" then .obfs == null and $request.site.mode == "static" else true end))
-        elif .id == 4 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasAnyTls}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 4 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "anytls"]) and
           (.anytls | exact(["domain"]) and
             (.domain | hostname and (explode | all(. > 32 and . != 127))))
-        elif .id == 5 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasNaive}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 5 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "naive"]) and
           (.naive | exact(["domain"]) and
             (.domain | hostname and (explode | all(. > 32 and . != 127)))) and
           .server == .naive.domain
-        elif .id == 30 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasShadowsocks}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 30 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "shadowsocks"]) and
           (.shadowsocks | exact(["method", "server_password", "user_password"]) and
             .method == "2022-blake3-aes-128-gcm" and
             (.server_password | ss_key) and (.user_password | ss_key))
-        elif .id == 31 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasTuic}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 31 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "tuic"]) and
           (.tuic | exact(["domain", "congestion_control", "auth_timeout", "heartbeat", "zero_rtt_handshake"]) and
@@ -515,14 +626,24 @@ dockerConfigureSpecValidate() {
             (.congestion_control == "cubic" or .congestion_control == "new_reno" or .congestion_control == "bbr") and
             (.auth_timeout | duration) and (.heartbeat | duration) and
             (.zero_rtt_handshake | type == "boolean"))
-        elif .id == 24 or .id == 25 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasGrpcTls}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 24 or .id == 25 then
           $request.schema_version == 3 and .core == "xray" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "grpc_tls"]) and
           (.grpc_tls | exact(["domain", "service_name", "backend_port", "tls_port"]) and
             (.domain | hostname) and
             (.service_name | type == "string" and test("^[A-Za-z0-9_-]{1,64}$")) and
             (.backend_port | port) and (.tls_port | port) and .tls_port != 8080)
-        elif .id == 21 or .id == 22 or .id == 23 then
+    '
+        protocolPrefix=elif
+    fi
+    if [[ "${hasWebsocket}" == true ]]; then
+        validationFilter+="${protocolPrefix}"'
+        .id == 21 or .id == 22 or .id == 23 then
           (if .id == 22 then $request.schema_version == 3 and .core == "xray"
            elif .id == 23 then $request.schema_version == 3 else true end) and
           exact(["id", "server", "public_port", "address_families", "name", "uuid"] +
@@ -535,12 +656,20 @@ dockerConfigureSpecValidate() {
               (.backend_port | port) and (.tls_port | port) and .tls_port != 8080
              else true end) and (.domain | hostname) and
             (.path | test("^[A-Za-z0-9_-]{8,64}$")))
+    '
+        protocolPrefix=elif
+    fi
+    [[ "${protocolPrefix}" != if ]] || validationFilter+='if false then false'
+    validationFilter+='
         else false end) and
       all(.core.protocols[];
         . as $protocol |
         any($features.protocols[];
           .id == $protocol.id and .status == "supported" and
           (.cores | index($protocol.core // $request.core.type)) != null)) and
+    '
+    if [[ "${hasTls}" == true ]]; then
+        validationFilter+='
       (.tls == null or (.tls | exact(["domain"] +
           if has("http01") then ["http01"] else [] end) and (.domain | hostname) and
         (if has("http01") then .http01 == true else true end))) and
@@ -550,6 +679,9 @@ dockerConfigureSpecValidate() {
         all(.core.protocols[]; .public_port != 80 or .id == 3 or .id == 31) and
         all(.host_integrations[] | select(.type == "tproxy"); .settings.port != 80)
        else true end) and
+    '
+    fi
+    validationFilter+='
       (.subscription | exact(["enabled", "token"]) and (.enabled | type == "boolean") and
         (.token | test("^[A-Za-z0-9_-]{16,128}$"))) and
       (.images | exact(["xray", "sing-box", "nginx", "ops", "net"]) and
@@ -557,6 +689,10 @@ dockerConfigureSpecValidate() {
       (.host_integrations | type == "array" and length <= 3 and
         ([.[].type] | unique | length) == length and
         ([.[] | select(.type == "tun" or .type == "tproxy")] | length) <= 1) and
+    '
+    # 只有精确空数组省略逐项条件；缺失、畸形与非空输入仍保留完整宿主校验。
+    if [[ "${hasHostIntegrations}" == true ]]; then
+        validationFilter+='
       all(.host_integrations[];
         exact(["type", "profile", "firewall_rules", "devices", "schedules", "settings"]) and
         (.firewall_rules | safe_names(16)) and (.devices | safe_names(4)) and
@@ -602,6 +738,9 @@ dockerConfigureSpecValidate() {
           (.settings | exact(["port", "mark"]) and (.port | port) and
             (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
         else false end) and
+    '
+    fi
+    validationFilter+='
       if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 31) then
         .tls != null and
         all(.core.protocols[] | select(.id == 21 or .id == 22); (.core // $request.core.type) == "xray") and
@@ -617,6 +756,9 @@ dockerConfigureSpecValidate() {
       end and
       if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
       if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
+    '
+    if [[ "${hasHostIntegrations}" == true ]]; then
+        validationFilter+='
       if any(.host_integrations[]; .type == "fail2ban") then
         any(.core.protocols[]; .id == 21) and
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
@@ -628,6 +770,9 @@ dockerConfigureSpecValidate() {
       else true end and
       all(.host_integrations[] | select(.type == "tproxy");
         .settings.port as $port | all($request.core.protocols[]; .public_port != $port)) and
+    '
+    fi
+    validationFilter+='
       # 内部监听按实际核心网络空间检查，公开端口仍在宿主全局唯一。
       (all([.core.type, .core.secondary_type] | map(select(. != null))[];
         . as $core |
@@ -644,23 +789,71 @@ dockerConfigureSpecValidate() {
           [.fallback_tls.http_port, .fallback_tls.http2_port]] | unique | flatten) +
         [8080] + [if .tls.http01 == true then 8088 else empty end] +
         [if .reality_stream != null then 15443 else empty end]) as $tlsPorts |
-      ($tlsPorts | unique | length) == ($tlsPorts | length)))
-    ' "${specFile}" >/dev/null 2>&1 || {
-        dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
-        return 1
-    }
-    dockerControlSyncSpecValidate "${specFile}" || {
-        dockerError '被控同步角色、归属或入口映射不合法'
-        return 1
-    }
-    dockerControlSpecValidate "${specFile}" || {
-        dockerError '主控角色、监听、授权或版本元数据不合法'
-        return 1
-    }
-    dockerSshFail2banSpecValidate "${specFile}" || {
-        dockerError 'SSH 防护只接受单 unit、单目标地址与端口及有限参数，不能与控制 jail 共存'
-        return 1
-    }
+      ($tlsPorts | unique | length) == ($tlsPorts | length)))) |
+      if . then
+        [$request | has("control_sync"), has("control"),
+          any(.host_integrations[]; .type == "fail2ban-ssh")] |
+        map(tostring) | join("|")
+      else false end
+    '
+    if declare -F jq >/dev/null; then
+        validation=$(jq -ers --slurpfile matrix "${matrixFile}" \
+            "${validationFilter}" <<<"${specJson}" 2>/dev/null) || {
+            dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
+            return 1
+        }
+    else
+        # 每次重读完整输入；仅复用最近一次纯谓词结果，不缓存文件、权限或辅助校验。
+        if [[ -n "${DOCKER_SPEC_VALIDATED_FLAGS}" &&
+            "${specJson}" == "${DOCKER_SPEC_VALIDATED_JSON}" ]]; then
+            matrixJson=$(jq -nc --slurpfile matrix "${matrixFile}" '$matrix' 2>/dev/null) || {
+                dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
+                return 1
+            }
+            if [[ "${matrixJson}" == "${DOCKER_SPEC_VALIDATED_MATRIX}" ]]; then
+                validation=${DOCKER_SPEC_VALIDATED_FLAGS}
+            else
+                validation=$(jq -ers '.[0][0] as $matrix | .[0][1:] | '"${validationFilter}" \
+                    <<<"[${matrixJson},${specJson}]" 2>/dev/null) || {
+                    dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
+                    return 1
+                }
+            fi
+        else
+            # 新规格必然未命中；同次谓词校验取得晚读矩阵，末项仍决定 jq 的退出码。
+            validation=$(jq -ers --slurpfile matrix "${matrixFile}" \
+                '('"${validationFilter}"') as $flags | ($matrix | tojson), $flags' \
+                <<<"${specJson}" 2>/dev/null) || {
+                dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
+                return 1
+            }
+            matrixJson=${validation%$'\n'*}
+            validation=${validation##*$'\n'}
+        fi
+        DOCKER_SPEC_VALIDATED_JSON=${specJson}
+        DOCKER_SPEC_VALIDATED_MATRIX=${matrixJson}
+        DOCKER_SPEC_VALIDATED_FLAGS=${validation}
+    fi
+    IFS='|' read -r hasControlSync hasControl hasSsh <<<"${validation}"
+    [[ "${hasControlSync}" != false || "${hasControl}" != false || "${hasSsh}" != false ]] || return 0
+    (
+        umask 077
+        snapshot=$(mktemp "${TMPDIR:-/tmp}/padm-spec-validate.XXXXXX") || return 1
+        trap 'rm -f -- "${snapshot}"' EXIT
+        printf '%s\n' "${specJson}" >"${snapshot}" || return 1
+        [[ "${hasControlSync}" == false ]] || dockerControlSyncSpecValidate "${snapshot}" || {
+            dockerError '被控同步角色、归属或入口映射不合法'
+            return 1
+        }
+        [[ "${hasControl}" == false ]] || dockerControlSpecValidate "${snapshot}" || {
+            dockerError '主控角色、监听、授权或版本元数据不合法'
+            return 1
+        }
+        [[ "${hasSsh}" == false ]] || dockerSshFail2banSpecValidate "${snapshot}" || {
+            dockerError 'SSH 防护只接受单 unit、单目标地址与端口及有限参数，不能与控制 jail 共存'
+            return 1
+        }
+    )
 }
 
 dockerSshFail2banSpecValidate() {
@@ -952,9 +1145,15 @@ dockerControlRestorePrepare() {
     DOCKER_CONTROL_RESTORE_PLAN=${directory}
 }
 
-dockerConfigureSpecMigrate() {
-    local source=$1 target=$2
-    dockerConfigureSpecValidate "${source}" || return 1
+dockerConfigureSpecMigrate() (
+    local source=$1 target=$2 snapshot version
+    [[ -f "${source}" && ! -L "${source}" && -s "${source}" ]] || return 1
+    snapshot=$(mktemp "${TMPDIR:-/tmp}/padm-spec-migrate.XXXXXX") || return 1
+    trap 'rm -f -- "${snapshot}"' EXIT
+    cp -- "${source}" "${snapshot}" &&
+        dockerConfigureSpecValidate "${snapshot}" || return 1
+    version=$(jq -r '.schema_version' "${snapshot}") || return 1
+    # 当前格式仅重新排版；转换前后的校验使用同一私密快照。
     jq '
       (if .schema_version == 1 then
         .schema_version = 2 |
@@ -966,9 +1165,10 @@ dockerConfigureSpecMigrate() {
         .schema_version = 3 | .core.type as $core |
         .core.secondary_type = null | .core.protocols |= map(.core = $core)
       else . end
-    ' "${source}" >"${target}" &&
-        chmod 0600 "${target}" && dockerConfigureSpecValidate "${target}"
-}
+    ' "${snapshot}" >"${target}" &&
+        chmod 0600 "${target}" || return 1
+    [[ "${version}" == 3 ]] || dockerConfigureSpecValidate "${target}"
+)
 
 dockerConfigureReleasePrepare() {
     local siteTemplate=${4:-} status=0
@@ -1000,18 +1200,17 @@ dockerConfigureReleaseReuseInstalled() {
     }
     bundlePath=$(dockerCurrentBundlePath) || return "${PADM_DOCKER_RC_BUNDLE}"
     dockerBundleSupportsSpec "${bundlePath}" "${specFile}" || return "${PADM_DOCKER_RC_BUNDLE}"
-    inputs=$(jq -c '
-      {release: .release, images: .images}
-    ' "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
-    jq -e '
-      (.release | type == "object" and
+    inputs=$(jq -ce '
+      {release: .release, images: .images} |
+      if (.release | type == "object" and
         (.version | type == "string" and length > 0) and
         (.manifest_sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
         (.signature_identity | type == "string" and length > 0)) and
       (.images | type == "object" and
         (keys | sort) == ["net", "nginx", "ops", "sing-box", "xray"] and
         all(.[]; type == "string"))
-    ' <<<"${inputs}" >/dev/null 2>&1 || return "${PADM_DOCKER_RC_STATE}"
+      then . else error("当前发布输入不完整") end
+    ' "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
     dockerCleanupStagedBundle || return "${PADM_DOCKER_RC_BUNDLE}"
     DOCKER_STAGED_BUNDLE_PATH=${bundlePath}
     DOCKER_CONFIG_RELEASE_INPUTS=${inputs}
@@ -1120,6 +1319,7 @@ dockerManagedSpecMatchesDeployment() {
 
 dockerEditBaselineValidate() {
     local specFile=$1 workspace=$2 alpnListener=${3:-} root baseline core directory state token invalidPath
+    local metadata http01 subscriptionEnabled integrationTypes realityStream hostStream coreTypes
     local -a managedPaths=()
     root=$(dockerInstallRoot) || return 1
     [[ -z "${alpnListener}" ]] || jq -e --arg listener "${alpnListener}" '
@@ -1142,7 +1342,17 @@ dockerEditBaselineValidate() {
         dockerError '完整原始规格与部署记录不一致，不能接入编辑'
         return 1
     }
-    if jq -e '.tls.http01 == true' "${specFile}" >/dev/null; then
+    metadata=$(jq -r '[
+      (.tls.http01 == true), (.subscription.enabled == true), .subscription.token,
+      ([.core.type, .core.secondary_type] | map(select(. != null)) | join(",")),
+      ([.host_integrations[].type] | join(",")),
+      (.reality_stream != null), (.reality_stream.host_website.network_mode == "host")
+    ] | map(tostring) |
+      if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+        error("基线元数据包含非法分隔符")
+      else join("|") end' "${specFile}") || return 1
+    IFS='|' read -r http01 subscriptionEnabled token coreTypes integrationTypes realityStream hostStream <<<"${metadata}"
+    if [[ "${http01}" == true ]]; then
         dockerAcmeWebrootTreeValidate "${root}" "${root}/data/acme-webroot" || return 1
     fi
     baseline="${workspace}/baseline"
@@ -1163,17 +1373,21 @@ dockerEditBaselineValidate() {
             dockerError '旧部署有流量记录但缺少完整账号输入，不能无损接入编辑'
             return 1
         fi
-    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
-    dockerGenerateNginxConfig "${specFile}" "${baseline}/config/nginx/default.conf" &&
-        dockerGenerateRealityStreamConfig "${specFile}" "${baseline}/config/nginx/stream/reality.conf" &&
-        dockerGenerateRealityStreamMain "${specFile}" "${baseline}/config/nginx/stream/host-main" &&
-        dockerGenerateFail2banConfig "${specFile}" "${baseline}" &&
-        dockerGenerateControlFail2banConfig "${specFile}" "${baseline}" &&
+    done <<<"${coreTypes//,/$'\n'}"
+    dockerGenerateNginxConfig "${specFile}" "${baseline}/config/nginx/default.conf" || return 1
+    [[ "${realityStream}" != true ]] ||
+        dockerGenerateRealityStreamConfig "${specFile}" "${baseline}/config/nginx/stream/reality.conf" || return 1
+    [[ "${hostStream}" != true ]] ||
+        dockerGenerateRealityStreamMain "${specFile}" "${baseline}/config/nginx/stream/host-main" || return 1
+    [[ ",${integrationTypes}," != *,fail2ban,* ]] ||
+        dockerGenerateFail2banConfig "${specFile}" "${baseline}" || return 1
+    [[ ",${integrationTypes}," != *,fail2ban-control,* ]] ||
+        dockerGenerateControlFail2banConfig "${specFile}" "${baseline}" || return 1
+    [[ ",${integrationTypes}," != *,fail2ban-ssh,* ]] ||
         dockerGenerateSshFail2banConfig "${specFile}" "${baseline}" || return 1
     dockerGeoPrepareCandidate "${root}" "${baseline}" || return 1
     dockerControlPrepareCandidate "${specFile}" "${baseline}" || return 1
-    if jq -e '.subscription.enabled' "${specFile}" >/dev/null; then
-        token=$(jq -r '.subscription.token' "${specFile}") || return 1
+    if [[ "${subscriptionEnabled}" == true ]]; then
         dockerGenerateSubscription "${specFile}" "${baseline}/data/subscription/${token}" || return 1
     fi
     dockerSubscriptionPrepareCandidate "${specFile}" "${baseline}" || return 1
@@ -1566,12 +1780,23 @@ dockerStageHostIntegrationFiles() {
 }
 
 dockerGenerateControlFail2banConfig() {
-    local specFile=$1 candidate=$2 maxRetry=${3:-} findTime=${4:-} banTime=${5:-} address port directory
+    local specFile=$1 candidate=$2 maxRetry=${3:-} findTime=${4:-} banTime=${5:-} address port directory metadata
     if [[ "$#" -eq 2 ]]; then
         jq -e 'any(.host_integrations[]; .type == "fail2ban-control")' "${specFile}" >/dev/null || return 0
-        maxRetry=$(jq -er '.host_integrations[] | select(.type == "fail2ban-control") | .settings.max_retry' "${specFile}") &&
-            findTime=$(jq -er '.host_integrations[] | select(.type == "fail2ban-control") | .settings.find_time' "${specFile}") &&
-            banTime=$(jq -er '.host_integrations[] | select(.type == "fail2ban-control") | .settings.ban_time' "${specFile}") || return 1
+        metadata=$(jq -er '
+          . as $spec |
+          .host_integrations[] | select(.type == "fail2ban-control") | .settings as $settings |
+          ($spec.control | select(.role == "main" and .listen.interface == "wg-padm") |
+            .listen.address | select(type == "string")) as $address |
+          ($spec.control.listen.port |
+            select(type == "number" and floor == . and . >= 1024 and . <= 65535)) as $port |
+          [$settings.max_retry, $settings.find_time, $settings.ban_time, $address, $port] |
+          map(tostring) |
+          if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+            error("控制防护元数据包含非法分隔符")
+          else join("|") end' "${specFile}") || return 1
+        [[ "${metadata}" != *$'\n'* ]] || return 1
+        IFS='|' read -r maxRetry findTime banTime address port <<<"${metadata}"
     elif [[ "$#" -ne 5 ]]; then
         return 1
     fi
@@ -1580,11 +1805,21 @@ dockerGenerateControlFail2banConfig() {
         "${#maxRetry}" -le 2 && "${#findTime}" -le 5 && "${#banTime}" -le 6 ]] &&
         ((maxRetry <= 20 && findTime >= 60 && findTime <= 86400 &&
           banTime >= 60 && banTime <= 604800)) || return 1
-    address=$(jq -er '.control | select(.role == "main" and .listen.interface == "wg-padm") |
-        .listen.address | select(type == "string")' "${specFile}") &&
-        dockerControlPrivateAddressIsValid "${address}" &&
-        port=$(jq -er '.control.listen.port |
-          select(type == "number" and floor == . and . >= 1024 and . <= 65535)' "${specFile}") || return 1
+    if [[ "$#" -eq 5 ]]; then
+        metadata=$(jq -er '
+          . as $spec |
+          (.control | select(.role == "main" and .listen.interface == "wg-padm") |
+            .listen.address | select(type == "string")) as $address |
+          ($spec.control.listen.port |
+            select(type == "number" and floor == . and . >= 1024 and . <= 65535)) as $port |
+          [$address, $port] | map(tostring) |
+          if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+            error("控制防护元数据包含非法分隔符")
+          else join("|") end' "${specFile}") || return 1
+        [[ "${metadata}" != *$'\n'* ]] || return 1
+        IFS='|' read -r address port <<<"${metadata}"
+    fi
+    dockerControlPrivateAddressIsValid "${address}" || return 1
     directory="${candidate}/config/net/control-fail2ban"
     mkdir -p -- "${directory}" || return 1
     # 只读取独立认证日志；目标和端口精确绑定，不把来源回执当作认证失败。
@@ -1638,15 +1873,18 @@ EOF
 }
 
 dockerGenerateSshFail2banConfig() {
-    local specFile=$1 candidate=$2 directory port maxRetry findTime banTime allowIPv6
+    local specFile=$1 candidate=$2 directory port maxRetry findTime banTime allowIPv6 metadata
     jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${specFile}" >/dev/null || return 0
     dockerSshFail2banSpecValidate "${specFile}" || return 1
-    port=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") | .settings.port' "${specFile}") &&
-        maxRetry=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") | .settings.max_retry' "${specFile}") &&
-        findTime=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") | .settings.find_time' "${specFile}") &&
-        banTime=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") | .settings.ban_time' "${specFile}") &&
-        allowIPv6=$(jq -er '.host_integrations[] | select(.type == "fail2ban-ssh") |
-          if .settings.target | contains(":") then "yes" else "no" end' "${specFile}") || return 1
+    metadata=$(jq -er '
+      .host_integrations[] | select(.type == "fail2ban-ssh") | .settings |
+      [.port, .max_retry, .find_time, .ban_time,
+       (if .target | contains(":") then "yes" else "no" end)] | map(tostring) |
+      if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+        error("SSH 防护元数据包含非法分隔符")
+      else join("|") end' "${specFile}") || return 1
+    [[ "${metadata}" != *$'\n'* ]] || return 1
+    IFS='|' read -r port maxRetry findTime banTime allowIPv6 <<<"${metadata}"
     directory="${candidate}/config/net/ssh-fail2ban"
     mkdir -p -- "${directory}" "${candidate}/data/net/ssh-fail2ban" \
         "${candidate}/data/net/ssh-collector" &&
@@ -1703,18 +1941,20 @@ EOF
 }
 
 dockerGenerateFail2banConfig() {
-    local specFile=$1 candidate=$2 ports maxRetry findTime banTime allowIPv6
+    local specFile=$1 candidate=$2 ports maxRetry findTime banTime allowIPv6 metadata
     jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}" >/dev/null || return 0
-    ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' "${specFile}") || return 1
-    maxRetry=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.max_retry' "${specFile}") || return 1
-    findTime=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.find_time' "${specFile}") || return 1
-    banTime=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ban_time' "${specFile}") || return 1
-    allowIPv6=$(jq -r '
-      [.host_integrations[] | select(.type == "fail2ban") | .settings.ports[]] as $ports |
-      if any(.core.protocols[]; .id == 21 and
-        (.public_port as $port | ($ports | index($port)) != null) and
-        (.address_families | index("ipv6")) != null) then "yes" else "no" end
-    ' "${specFile}") || return 1
+    metadata=$(jq -r '
+      . as $spec |
+      .host_integrations[] | select(.type == "fail2ban") | .settings as $settings |
+      [($settings.ports | join(",")), $settings.max_retry, $settings.find_time, $settings.ban_time,
+       (if any($spec.core.protocols[]; .id == 21 and
+         (.public_port as $port | ($settings.ports | index($port)) != null) and
+         (.address_families | index("ipv6")) != null) then "yes" else "no" end)] | map(tostring) |
+      if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+        error("Web 防护元数据包含非法分隔符")
+      else join("|") end' "${specFile}") || return 1
+    [[ "${metadata}" != *$'\n'* ]] || return 1
+    IFS='|' read -r ports maxRetry findTime banTime allowIPv6 <<<"${metadata}"
     cat >"${candidate}/config/net/fail2ban/padm-nginx.conf" <<'EOF'
 [Definition]
 failregex = ^<HOST> - .* "(GET|POST|HEAD) /(?:\.env(?:\.[^/?"]+)?|\.git|wp-login\.php|wp-admin|phpmyadmin|cgi-bin|manager/html|actuator|boaform)(?:/[^ ?"]*)?(?:\?[^ "]*)? HTTP/[^"]*" (40[34]|444)\b
@@ -2343,9 +2583,8 @@ dockerStageTlsFiles() {
 dockerSiteTreeValidate() {
     local directory=$1 unsafe
     [[ -d "${directory}" && ! -L "${directory}" ]] &&
-        unsafe=$(find "${directory}" \( ! -type f ! -type d \) -print -quit) &&
-        [[ -z "${unsafe}" ]] &&
-        unsafe=$(find "${directory}" -type f -links +1 -print -quit) &&
+        unsafe=$(find "${directory}" \( \( ! -type f ! -type d \) -o \
+            \( -type f -links +1 \) \) -print -quit) &&
         [[ -z "${unsafe}" ]]
 }
 
@@ -2468,66 +2707,64 @@ dockerGenerateSiteLocations() {
     fi
     if [[ "${mode}" == redirect ]]; then
         url=$(jq -er '.site.url' "${specFile}") || return 1
-        printf '\n    location / {\n        return 302 "%s";\n    }\n' "${url}" >>"${target}"
+        printf '\n    location / {\n        return 302 "%s";\n    }\n' "${url}" >>"${target}" || return 1
     elif [[ "${mode}" == default ]]; then
-        cat >>"${target}" <<'EOF'
-
+        printf '%s\n' "
     location / {
         default_type text/html;
         return 200 '<!doctype html><title>Welcome</title><h1>Welcome</h1>';
-    }
-EOF
+    }" >>"${target}" || return 1
     else
         if [[ "${mode}" == static ]]; then
-            cat >>"${target}" <<'EOF'
-    root /srv/padm;
+            printf '%s\n' '    root /srv/padm;
 
     location ~ (^|/)\. {
         return 404;
-    }
-EOF
+    }' >>"${target}" || return 1
         fi
-        cat >>"${target}" <<'EOF'
-
+        printf '%s\n' '
     location = / {
         try_files /index.html @padm_fallback;
     }
 
     location / {
         try_files $uri =404;
-    }
-EOF
+    }' >>"${target}" || return 1
         if [[ "${mode}" == static ]]; then
-            printf '\n    location @padm_fallback {\n        return 404;\n    }\n' >>"${target}"
+            printf '\n    location @padm_fallback {\n        return 404;\n    }\n' >>"${target}" || return 1
         else
-            cat >>"${target}" <<'EOF'
-
+            printf '%s\n' "
     location @padm_fallback {
         default_type text/html;
         return 200 '<!doctype html><title>Welcome</title><h1>Welcome</h1>';
-    }
-EOF
+    }" >>"${target}" || return 1
         fi
     fi
 }
 
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
-    local httpPort http2Port hostMode=${3:-strict}
+    local httpPort http2Port hostMode=${3:-strict} metadata enabled sourceLogEnabled http01 fallbackEnabled
+    local fallbackSite= tlsSite=
     case "${hostMode}" in strict|legacy-host) ;; *) return 1 ;; esac
-    jq -e '.reality_stream != null or any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)' "${specFile}" >/dev/null || return 0
-    domain=$(jq -r '.tls.domain' "${specFile}") || return 1
-    token=$(jq -r '.subscription.token' "${specFile}") || return 1
-    subscriptionEnabled=$(jq -r '.subscription.enabled' "${specFile}") || return 1
-    fail2banEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}") || return 1
+    metadata=$(jq -r '[
+      (.reality_stream != null or any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)),
+      .tls.domain, .subscription.token, .subscription.enabled,
+      any(.host_integrations[]; .type == "fail2ban"),
+      any(.core.protocols[]; .id == 21), (.tls.http01 == true),
+      any(.core.protocols[]; .id == 27 or .id == 29)
+    ] | map(tostring) |
+      if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+        error("Nginx 元数据包含非法分隔符")
+      else join("|") end' "${specFile}") || return 1
+    IFS='|' read -r enabled domain token subscriptionEnabled fail2banEnabled sourceLogEnabled http01 fallbackEnabled <<<"${metadata}"
+    [[ "${enabled}" == true ]] || return 0
     : >"${target}" || return 1
-    if jq -e 'any(.core.protocols[]; .id == 21)' "${specFile}" >/dev/null; then
-        cat >>"${target}" <<'EOF'
-log_format padm_source escape=json 'padm-source {"source":"$remote_addr","port":"$server_port","host":"$host","method":"$request_method","uri":"$request_uri"}';
-EOF
+    if [[ "${sourceLogEnabled}" == true ]]; then
+        printf '%s\n' "log_format padm_source escape=json 'padm-source {\"source\":\"\$remote_addr\",\"port\":\"\$server_port\",\"host\":\"\$host\",\"method\":\"\$request_method\",\"uri\":\"\$request_uri\"}';" \
+            >>"${target}" || return 1
     fi
-    cat >>"${target}" <<EOF
-server {
+    printf '%s\n' 'server {
     listen 8080;
     listen [::]:8080;
     server_name _;
@@ -2537,11 +2774,9 @@ server {
         default_type text/plain;
         return 200 "ok\n";
     }
-}
-EOF
-    if jq -e '.tls.http01 == true' "${specFile}" >/dev/null; then
-        cat >>"${target}" <<EOF
-
+}' >>"${target}" || return 1
+    if [[ "${http01}" == true ]]; then
+        printf '%s\n' "
 server {
     listen 8088;
     listen [::]:8088;
@@ -2552,52 +2787,49 @@ server {
     default_type text/plain;
 
     if (\$host != ${domain,,}) { return 404; }
-    if (\$request_uri !~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$") { return 404; }
+    if (\$request_uri !~ \"^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$\") { return 404; }
 
-    location ~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$" {
+    location ~ \"^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$\" {
         try_files \$uri =404;
     }
 
     location / { return 404; }
-}
-EOF
+}" >>"${target}" || return 1
     fi
-    if jq -e 'any(.core.protocols[]; .id == 27 or .id == 29)' "${specFile}" >/dev/null; then
-        cat >>"${target}" <<'EOF'
-
-log_format padm_fallback '$proxy_protocol_addr - $remote_user [$time_local] "$request" '
-                         '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
-EOF
+    if [[ "${fallbackEnabled}" == true ]]; then
+        printf '%s\n' "
+log_format padm_fallback '\$proxy_protocol_addr - \$remote_user [\$time_local] \"\$request\" '
+                         '\$status \$body_bytes_sent \"\$http_referer\" \"\$http_user_agent\"';" >>"${target}" || return 1
     fi
     while IFS=$'\t' read -r httpPort http2Port; do
-        cat >>"${target}" <<EOF
-
+        # 哨兵保留正文末尾换行；同次生成的所有入口复用各自模式的完整站点片段。
+        [[ -n "${fallbackSite}" ]] ||
+            fallbackSite=$(dockerGenerateSiteLocations "${specFile}" /dev/stdout fallback &&
+                printf '.') || return 1
+        printf '%s\n' "
 server {
     listen ${httpPort} proxy_protocol;
     listen [::]:${httpPort} proxy_protocol;
-    server_name ${domain};
-EOF
-        dockerGenerateSiteLocations "${specFile}" "${target}" fallback || return 1
-        cat >>"${target}" <<EOF
-}
+    server_name ${domain};" >>"${target}" || return 1
+        printf '%s' "${fallbackSite%.}" >>"${target}" || return 1
+        printf '%s\n' "}
 
 server {
     listen ${http2Port} proxy_protocol;
     listen [::]:${http2Port} proxy_protocol;
     http2 on;
-    server_name ${domain};
-EOF
-        dockerGenerateSiteLocations "${specFile}" "${target}" fallback || return 1
-        cat >>"${target}" <<EOF
-}
-EOF
+    server_name ${domain};" >>"${target}" || return 1
+        printf '%s' "${fallbackSite%.}" >>"${target}" || return 1
+        printf '}\n' >>"${target}" || return 1
     done < <(jq -r '[.core.protocols[] | select(.id == 27 or .id == 29) |
       [.fallback_tls.http_port, .fallback_tls.http2_port]] | unique[] | @tsv' "${specFile}")
     while IFS=$'\t' read -r path backendPort tlsPort backendCore protocolId; do
+        [[ -n "${tlsSite}" ]] ||
+            tlsSite=$(dockerGenerateSiteLocations "${specFile}" /dev/stdout &&
+                printf '.') || return 1
         hostHeader='$host'
         [[ "${protocolId}" != 23 ]] || hostHeader=${domain}
-        cat >>"${target}" <<EOF
-
+        printf '%s\n' "
 server {
     listen ${tlsPort} ssl;
     listen [::]:${tlsPort} ssl;
@@ -2605,21 +2837,18 @@ server {
 
     ssl_certificate /etc/padm/secrets/tls/${domain}.crt;
     ssl_certificate_key /etc/padm/secrets/tls/${domain}.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-EOF
+    ssl_protocols TLSv1.2 TLSv1.3;" >>"${target}" || return 1
         if [[ "${hostMode}" == strict &&
             ( "${protocolId}" == 21 || "${protocolId}" == 22 || "${protocolId}" == 23 ) ]]; then
             # 在 HTTPUpgrade 改写 Host 前拒绝错误域名，避免转发成有效认证请求。
             printf '\n    if ($host != %s) { return 404; }\n' "${domain,,}" >>"${target}" || return 1
         fi
         if [[ "${protocolId}" == 21 ]]; then
-            cat >>"${target}" <<'EOF'
-
+            printf '%s\n' '
     location ~ "^/\.well-known/padm-source/[a-f0-9]{48}$" {
         access_log /dev/stdout padm_source;
         return 204;
-    }
-EOF
+    }' >>"${target}" || return 1
         fi
     if [[ "${protocolId}" == 24 || "${protocolId}" == 25 ]]; then
         printf '    http2 on;\n' >>"${target}" || return 1
@@ -2628,39 +2857,33 @@ EOF
         printf '    access_log /var/log/nginx/access.log combined;\n\n' >>"${target}" || return 1
     fi
     if [[ "${protocolId}" == 24 || "${protocolId}" == 25 ]]; then
-        cat >>"${target}" <<EOF
-    location ^~ ${path} {
+        printf '%s\n' "    location ^~ ${path} {
         grpc_pass grpc://${backendCore}:${backendPort};
         grpc_set_header Host ${domain};
         client_max_body_size 0;
         client_body_timeout 5d;
         grpc_read_timeout 5d;
         grpc_send_timeout 5d;
-    }
-EOF
+    }" >>"${target}" || return 1
     else
-        cat >>"${target}" <<EOF
-    location = ${path} {
+        printf '%s\n' "    location = ${path} {
         proxy_pass http://${backendCore}:${backendPort};
         proxy_http_version 1.1;
         proxy_read_timeout 5d;
         proxy_set_header Host ${hostHeader};
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-EOF
+        proxy_set_header Connection \"upgrade\";
+    }" >>"${target}" || return 1
     fi
     if [[ "${subscriptionEnabled}" == "true" ]]; then
-        cat >>"${target}" <<EOF
-
-    location ~ "^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})\$" {
+        printf '%s\n' "
+    location ~ \"^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})\$\" {
         access_log off;
         proxy_pass http://subscription:${PADM_DOCKER_SUBSCRIPTION_PORT}/\$padm_subscription_token;
         proxy_pass_request_headers off;
-    }
-EOF
+    }" >>"${target}" || return 1
     fi
-        dockerGenerateSiteLocations "${specFile}" "${target}" || return 1
+        printf '%s' "${tlsSite%.}" >>"${target}" || return 1
         printf '}\n' >>"${target}" || return 1
     done < <(jq -r '.core.type as $core |
       .core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) |
@@ -2855,21 +3078,33 @@ dockerGenerateImagesEnv() {
 }
 
 dockerGenerateCompose() {
-    local specFile=$1 target=$2 core domains directory=${3:-} tlsCores='[]'
+    local specFile=$1 target=$2 core domains cores directory=${3:-}
+    local metadata specJson hostIntegrations composeFilter
+    local -a tlsCores=()
     [[ -n "${directory}" ]] || directory=$(dirname -- "${target}")
+    metadata=$(jq -r -s 'tojson, (.[0].host_integrations != [] | tostring),
+      (.[] | [.core.type, .core.secondary_type] | .[] | select(. != null))
+    ' "${specFile}") || return 1
+    specJson=${metadata%%$'\n'*}
+    metadata=${metadata#*$'\n'}
+    hostIntegrations=${metadata%%$'\n'*}
+    cores=
+    [[ "${metadata}" != *$'\n'* ]] || cores=${metadata#*$'\n'}
     while IFS= read -r core; do
         [[ -e "${directory}/config/${core}/config.json" ]] || continue
         domains=$(dockerCoreTlsDomains "${core}" "${directory}/config/${core}/config.json") || return 1
         if [[ "${domains}" != '[]' ]]; then
-            tlsCores=$(jq -c --arg core "${core}" '. + [$core]' <<<"${tlsCores}") || return 1
+            tlsCores+=("${core}")
         fi
-    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
+    done <<<"${cores}"
     local managedGeo=false
     if [[ -e "${directory}/config/xray/geo" || -L "${directory}/config/xray/geo" ]]; then
         dockerGeoStateValidate "${directory}/config/xray/geo" || return 1
         managedGeo=true
     fi
-    jq -n --slurpfile request "${specFile}" --argjson tlsCores "${tlsCores}" --argjson managedGeo "${managedGeo}" '
+    composeFilter='
+      . as $request |
+      $ARGS.positional as $tlsCores |
       $request[0] as $r |
       def defaults: {
         init: true,
@@ -3079,6 +3314,10 @@ dockerGenerateCompose() {
             mounts("secrets/tls"; "/etc/padm/secrets/tls"; true)),
           tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
         })
+    '
+    # 精确空数组时网络服务恒为关闭，仅省去固定分支的编译。
+    if [[ "${hostIntegrations}" == true ]]; then
+        composeFilter+='
       | if ($wireguard | length) == 1 then
           .services["net-wireguard"] = (defaults + {
             image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
@@ -3096,6 +3335,9 @@ dockerGenerateCompose() {
             }
           })
         else . end
+    '
+    fi
+    composeFilter+='
       | if $r.control != null then
           .services.control = (defaults + {
             image: "${PADM_OPS_IMAGE:?PADM_OPS_IMAGE is required}",
@@ -3120,6 +3362,9 @@ dockerGenerateCompose() {
             }
           })
         else . end
+    '
+    if [[ "${hostIntegrations}" == true ]]; then
+        composeFilter+='
       | if ($fail2ban | length) == 1 then
           .services["net-fail2ban"] = (defaults + {
             image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
@@ -3229,8 +3474,13 @@ dockerGenerateCompose() {
             tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"]
           })
         else . end
+    '
+    fi
+    composeFilter+='
       )
-    ' >"${target}"
+    '
+    jq --argjson managedGeo "${managedGeo}" --args "${composeFilter}" \
+        "${tlsCores[@]}" <<<"${specJson}" >"${target}"
 }
 
 dockerGenerateCompatibleControlCompose() {
@@ -3468,24 +3718,27 @@ dockerDeploymentFileValidate() {
 
 dockerTlsRuntimePermissions() {
     local directory=$1 unsafe
+    local -a ownership=()
     [[ -e "${directory}" || -L "${directory}" ]] || return 0
     [[ -d "${directory}" && ! -L "${directory}" ]] &&
         unsafe=$(find "${directory}" -type l -print -quit) &&
         [[ -z "${unsafe}" ]] || return 1
-    find "${directory}" -type d -exec chmod 0750 {} + || return 1
-    find "${directory}" -type f ! -name '*.key' -exec chmod 0640 {} + || return 1
-    find "${directory}" -type f -name '*.key' -exec chmod 0600 {} + || return 1
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
-        find "${directory}" ! -name '*.key' \
-            -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         # 私钥仅供实际运行的容器用户读取，不赋予整个容器组读取权限。
-        find "${directory}" -type f -name '*.key' \
-            -exec chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
+        ownership=(, '(' '(' ! -name '*.key' -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" '{}' + ')'
+            -o '(' -type f -name '*.key'
+            -exec chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" '{}' + ')' ')')
     fi
+    find "${directory}" \
+        \( \( -type d -exec chmod 0750 {} + \) -o \
+            \( -type f ! -name '*.key' -exec chmod 0640 {} + \) -o \
+            \( -type f -name '*.key' -exec chmod 0600 {} + \) \) \
+        "${ownership[@]}" || return 1
 }
 
 dockerPrepareCandidatePermissions() {
     local candidate=$1 directory privateFile
+    local -a privateFiles=()
     [[ -d "${candidate}" && ! -L "${candidate}" &&
         -z "$(find "${candidate}" -type l -print -quit)" ]] || {
         dockerError '候选权限准备拒绝符号链接'
@@ -3509,14 +3762,15 @@ dockerPrepareCandidatePermissions() {
         [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
     fi
-    find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type d -exec chmod 0750 {} + || return 1
+    find "${candidate}/config" "${candidate}/data" "${candidate}/logs" \
+        \( -type d -exec chmod 0750 {} + \) -o \
+        \( -type f ! -path "${candidate}/config/spec.json" ! -name share-groups.json ! -name users.base \
+            -exec chmod 0640 {} + \) || return 1
+    find "${candidate}/secrets" \( -type d -exec chmod 0750 {} + \) -o \
+        \( -type f -exec chmod 0640 {} + \) || return 1
     if [[ -d "${candidate}/data/net/ssh-collector" ]]; then
         chmod 0700 "${candidate}/data/net/ssh-collector" || return 1
     fi
-    find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type f \
-        ! -path "${candidate}/config/spec.json" ! -name share-groups.json ! -name users.base -exec chmod 0640 {} + || return 1
-    find "${candidate}/secrets" -type d -exec chmod 0750 {} + || return 1
-    find "${candidate}/secrets" -type f -exec chmod 0640 {} + || return 1
     chmod 0640 "${candidate}/deployment.json" "${candidate}/compose.json" \
         "${candidate}/images.env" "${candidate}/images.runtime.env" || return 1
     if [[ -f "${candidate}/secrets/net/wireguard/wg-padm.conf" ]]; then
@@ -3527,28 +3781,31 @@ dockerPrepareCandidatePermissions() {
             -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/subscription" "${candidate}/data/static" \
             "${candidate}/logs" "${candidate}/secrets" || return 1
-        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
-            "${candidate}/logs/nginx" || return 1
         if [[ -d "${candidate}/data/control-source" ]]; then
             chown "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/control-source" || return 1
         fi
-        for directory in "${candidate}/data/xray" "${candidate}/data/sing-box" "${candidate}/data/acme"; do
-            chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
-        done
+        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
+            "${candidate}/data/xray" "${candidate}/data/sing-box" "${candidate}/data/acme" \
+            "${candidate}/logs/nginx" || return 1
     fi
     # 完整输入含停用账号凭据，只允许宿主 root 读取，不交给容器组。
     for privateFile in config/spec.json config/share-groups.json config/xray/users.base config/sing-box/users.base; do
         [[ -e "${candidate}/${privateFile}" || -L "${candidate}/${privateFile}" ]] || continue
         [[ -f "${candidate}/${privateFile}" && ! -L "${candidate}/${privateFile}" ]] || return 1
-        chmod 0600 "${candidate}/${privateFile}" || return 1
-        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
-            chown 0:0 "${candidate}/${privateFile}" || return 1
+        privateFiles+=("${candidate}/${privateFile}")
     done
+    if ((${#privateFiles[@]} > 0)); then
+        chmod 0600 "${privateFiles[@]}" || return 1
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
+            chown 0:0 "${privateFiles[@]}" || return 1
+    fi
     dockerTlsRuntimePermissions "${candidate}/secrets/tls"
 }
 
 dockerGenerateCandidate() {
     local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} root core token sharesSource=''
+    local metadata http01 subscriptionEnabled coreTypes integrationTypes realityStream hostStream
+    local -a cores=()
     root=$(dockerInstallRoot) || return 1
     local previous=
     if jq -e 'has("control")' "${specFile}" >/dev/null &&
@@ -3558,20 +3815,40 @@ dockerGenerateCandidate() {
     fi
     dockerControlPrepareCandidate "${specFile}" "${candidate}" "${previous}" || return 1
     specFile="${candidate}/config/spec.json"
-    if jq -e '.tls.http01 == true' "${specFile}" >/dev/null; then
+    metadata=$(jq -r '
+      . as $spec |
+      ([.core.type, .core.secondary_type] | map(select(. != null))) as $cores |
+      if all($cores[]; . == "xray" or . == "sing-box") then $spec
+      else error("候选核心类型无效") end |
+      [
+      (.tls.http01 == true), (.subscription.enabled == true), .subscription.token,
+      ($cores | join(",")),
+      ([.host_integrations[].type] | join(",")),
+      (.reality_stream != null), (.reality_stream.host_website.network_mode == "host")
+    ] | map(tostring) |
+      if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+        error("候选元数据包含非法分隔符")
+      else join("|") end' "${specFile}") || return 1
+    IFS='|' read -r http01 subscriptionEnabled token coreTypes integrationTypes realityStream hostStream <<<"${metadata}"
+    IFS=',' read -r -a cores <<<"${coreTypes}"
+    if [[ "${http01}" == true ]]; then
         mkdir -p -- "${candidate}/data/acme-webroot" || return 1
     fi
-    while IFS= read -r core; do
+    for core in "${cores[@]}"; do
         case "${core}" in
         xray) dockerGenerateXrayConfig "${specFile}" "${candidate}/config/xray/config.json" || return 1 ;;
         sing-box) dockerGenerateSingBoxConfig "${specFile}" "${candidate}/config/sing-box/config.json" || return 1 ;;
         *) return 1 ;;
         esac
-    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
-    dockerStageHostIntegrationFiles "${specFile}" "${candidate}" || return 1
-    dockerGenerateFail2banConfig "${specFile}" "${candidate}" || return 1
-    dockerGenerateControlFail2banConfig "${specFile}" "${candidate}" || return 1
-    dockerGenerateSshFail2banConfig "${specFile}" "${candidate}" || return 1
+    done
+    [[ ",${integrationTypes}," != *,wireguard,* ]] ||
+        dockerStageHostIntegrationFiles "${specFile}" "${candidate}" || return 1
+    [[ ",${integrationTypes}," != *,fail2ban,* ]] ||
+        dockerGenerateFail2banConfig "${specFile}" "${candidate}" || return 1
+    [[ ",${integrationTypes}," != *,fail2ban-control,* ]] ||
+        dockerGenerateControlFail2banConfig "${specFile}" "${candidate}" || return 1
+    [[ ",${integrationTypes}," != *,fail2ban-ssh,* ]] ||
+        dockerGenerateSshFail2banConfig "${specFile}" "${candidate}" || return 1
     dockerStageTlsFiles "${specFile}" "${candidate}" "${tlsSource}" || return 1
     [[ -z "${acmeSource}" || ( -d "${acmeSource}" && ! -L "${acmeSource}" ) ]] || return 1
     [[ -n "${acmeSource}" ]] || acmeSource="${root}/data/acme"
@@ -3583,10 +3860,11 @@ dockerGenerateCandidate() {
     fi
     dockerStageSiteFiles "${specFile}" "${candidate}" "${siteSource}" "${siteTemplate}" || return 1
     dockerGenerateNginxConfig "${specFile}" "${candidate}/config/nginx/default.conf" || return 1
-    dockerGenerateRealityStreamConfig "${specFile}" "${candidate}/config/nginx/stream/reality.conf" || return 1
-    dockerGenerateRealityStreamMain "${specFile}" "${candidate}/config/nginx/stream/host-main" || return 1
-    if jq -e '.subscription.enabled == true' "${specFile}" >/dev/null; then
-        token=$(jq -r '.subscription.token' "${specFile}") || return 1
+    [[ "${realityStream}" != true ]] ||
+        dockerGenerateRealityStreamConfig "${specFile}" "${candidate}/config/nginx/stream/reality.conf" || return 1
+    [[ "${hostStream}" != true ]] ||
+        dockerGenerateRealityStreamMain "${specFile}" "${candidate}/config/nginx/stream/host-main" || return 1
+    if [[ "${subscriptionEnabled}" == true ]]; then
         dockerGenerateSubscription "${specFile}" "${candidate}/data/subscription/${token}" || return 1
     fi
     if [[ -n "${businessSource}" ]]; then
@@ -3794,83 +4072,172 @@ dockerPortHoppingTargetStartupWitness() {
     dockerPortHoppingTargetInspect startup "$@"
 }
 
-dockerPortHoppingTargetLockSnapshot() {
-    local owner=${1:-} root
-    [[ "$#" -eq 1 && "${owner}" =~ ^[1-9][0-9]*$ ]] || return 1
+dockerPortHoppingTargetSnapshot() {
+    local mode=${1:-} owner=${2:-} domain=${3:-} started=${4:-} expected=${5:-} root
+    case "${mode}:$#" in lock:2|files:4|start:5) ;; *) return 1 ;; esac
+    [[ "${mode}" == files || "${owner}" =~ ^[1-9][0-9]*$ ]] || return 1
     root=$(dockerInstallRoot) || return 1
-    [[ "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" == "${root}/locks/deployment.lock" ]] || return 1
-    dockerRequireCommand python3 || return 1
-    python3 - "${root}" "${owner}" <<'PY'
+    if [[ "${mode}" != files ]]; then
+        [[ "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" == "${root}/locks/deployment.lock" ]] || return 1
+        dockerRequireCommand python3 || return 1
+    fi
+    python3 - "${mode}" "${root}" "${owner}" "${domain}" "${started}" "${expected}" <<'PY'
 import json
-import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import stat
 import sys
 
-root = sys.argv[1]
-owner = sys.argv[2]
-if (root != str(PurePosixPath(root)) or PurePosixPath(root).anchor != "/" or
-        root == "/"):
-    raise SystemExit("部署锁根路径必须规范且不能为 /")
-parts = PurePosixPath(root).parts[1:]
-if any(part in (".", "..") for part in parts):
-    raise SystemExit("部署锁根路径不能含相对路径")
-flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-held = []
 
+def lock_snapshot(root, owner):
+    import os
 
-def identity(metadata):
-    return [metadata.st_dev, metadata.st_ino, metadata.st_mode,
-            metadata.st_uid, metadata.st_gid]
+    if (root != str(PurePosixPath(root)) or PurePosixPath(root).anchor != "/" or
+            root == "/"):
+        raise SystemExit("部署锁根路径必须规范且不能为 /")
+    parts = PurePosixPath(root).parts[1:]
+    if any(part in (".", "..") for part in parts):
+        raise SystemExit("部署锁根路径不能含相对路径")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    held = []
 
+    def identity(metadata):
+        return [metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                metadata.st_uid, metadata.st_gid]
 
-def pid_identity(metadata):
-    return [*identity(metadata), metadata.st_nlink, metadata.st_size,
-            metadata.st_mtime_ns, metadata.st_ctime_ns]
+    def pid_identity(metadata):
+        return [*identity(metadata), metadata.st_nlink, metadata.st_size,
+                metadata.st_mtime_ns, metadata.st_ctime_ns]
 
-
-def snapshot():
-    rows = []
-    descriptor = os.open("/", flags)
-    held.append(descriptor)
-    rows.append(["/", *identity(os.fstat(descriptor))])
-    path = ""
-    for part in [*parts, "locks", "deployment.lock"]:
-        descriptor = os.open(part, flags, dir_fd=descriptor)
+    def snapshot():
+        rows = []
+        descriptor = os.open("/", flags)
         held.append(descriptor)
-        path += "/" + part
-        metadata = os.fstat(descriptor)
-        if path in (root, root + "/locks", root + "/locks/deployment.lock"):
-            if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o750:
-                raise SystemExit("部署锁受管目录 owner 或权限无效")
-        rows.append([path, *identity(metadata)])
-    pid = os.open("pid", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
-                  dir_fd=descriptor)
-    held.append(pid)
-    metadata = os.fstat(pid)
-    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or
-            metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o640):
-        raise SystemExit("部署锁 pid 必须是当前 owner 的单链接普通文件")
-    expected = (owner + "\n").encode("ascii")
-    if metadata.st_size != len(expected) or os.read(pid, len(expected) + 1) != expected:
-        raise SystemExit("部署锁不属于当前 Bash 进程")
-    if pid_identity(metadata) != pid_identity(os.fstat(pid)):
-        raise SystemExit("读取部署锁 pid 时文件发生变化")
-    rows.append([root + "/locks/deployment.lock/pid", *pid_identity(metadata), owner])
+        rows.append(["/", *identity(os.fstat(descriptor))])
+        path = ""
+        for part in [*parts, "locks", "deployment.lock"]:
+            descriptor = os.open(part, flags, dir_fd=descriptor)
+            held.append(descriptor)
+            path += "/" + part
+            metadata = os.fstat(descriptor)
+            if path in (root, root + "/locks", root + "/locks/deployment.lock"):
+                if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o750:
+                    raise SystemExit("部署锁受管目录 owner 或权限无效")
+            rows.append([path, *identity(metadata)])
+        pid = os.open("pid", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                      dir_fd=descriptor)
+        held.append(pid)
+        metadata = os.fstat(pid)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or
+                metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o640):
+            raise SystemExit("部署锁 pid 必须是当前 owner 的单链接普通文件")
+        expected_pid = (owner + "\n").encode("ascii")
+        if metadata.st_size != len(expected_pid) or os.read(pid, len(expected_pid) + 1) != expected_pid:
+            raise SystemExit("部署锁不属于当前 Bash 进程")
+        if pid_identity(metadata) != pid_identity(os.fstat(pid)):
+            raise SystemExit("读取部署锁 pid 时文件发生变化")
+        rows.append([root + "/locks/deployment.lock/pid", *pid_identity(metadata), owner])
+        return rows
+
+    try:
+        before = snapshot()
+        if snapshot() != before:
+            raise SystemExit("读取部署锁时路径身份发生变化")
+        return json.dumps(before, separators=(",", ":"))
+    except OSError as error:
+        raise SystemExit("部署锁路径读取失败: " + str(error))
+    finally:
+        for descriptor in reversed(held):
+            os.close(descriptor)
+
+
+def file_snapshot(root, domain, started):
+    import hashlib
+
+    root = Path(root)
+    started_ns = None
+    if started:
+        import calendar
+        import datetime
+        import re
+
+        match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z",
+                             started)
+        if not match:
+            raise SystemExit("目标启动时间格式无效")
+        try:
+            timestamp = datetime.datetime(*map(int, match.groups()[:6]))
+        except ValueError:
+            raise SystemExit("目标启动时间日期无效")
+        started_ns = (calendar.timegm(timestamp.timetuple()) * 1_000_000_000 +
+                      int((match[7] or "").ljust(9, "0")))
+    if not domain or "/" in domain or domain in (".", ".."):
+        raise SystemExit("TLS 域名路径无效")
+    files = ["config/spec.json", "deployment.json", "images.env", "compose.json",
+             "config/sing-box/users.base", "config/sing-box/config.json",
+             "data/traffic/state.json", "secrets/tls/" + domain + ".crt",
+             "secrets/tls/" + domain + ".key"]
+    dirs = ["", "config", "config/sing-box", "secrets", "secrets/tls",
+            "data", "data/sing-box", "data/traffic", "data/static"]
+    startup_files = ["config/sing-box/config.json", "secrets/tls/" + domain + ".crt",
+                     "secrets/tls/" + domain + ".key"]
+    rows = []
+    for parent in root.parents:
+        metadata = parent.lstat()
+        if parent.is_symlink():
+            raise SystemExit("受管根目录祖先不能含符号链接")
+        rows.append(["@ancestor:" + str(parent), metadata.st_dev, metadata.st_ino,
+                     metadata.st_mode, metadata.st_uid, metadata.st_gid])
+    for name in [*dirs, *files]:
+        path = root / name
+        for parent in [path, *path.parents]:
+            if parent.is_symlink():
+                raise SystemExit("目标路径不能含符号链接")
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            if name in ("data/traffic/state.json", "data/traffic", "data/static"):
+                rows.append([name, None])
+                continue
+            raise SystemExit("目标快照缺少受管文件或目录")
+        row = [name, metadata.st_dev, metadata.st_ino, metadata.st_mode,
+               metadata.st_uid, metadata.st_gid]
+        if name in files:
+            if not stat.S_ISREG(metadata.st_mode):
+                raise SystemExit("目标配置与 TLS 必须是普通文件")
+            if (started_ns is not None and name in startup_files and
+                    max(metadata.st_mtime_ns, metadata.st_ctime_ns) > started_ns):
+                raise SystemExit("目标启动后核心配置或 TLS 发生改动")
+            row += [metadata.st_nlink, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns,
+                    hashlib.sha256(path.read_bytes()).hexdigest()]
+        elif not stat.S_ISDIR(metadata.st_mode):
+            raise SystemExit("目标受管路径必须是目录")
+        rows.append(row)
+    config = root / "config/sing-box"
+    for path in sorted(config.rglob("*")):
+        metadata = path.lstat()
+        if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+            raise SystemExit("核心配置不能含特殊文件或符号链接")
+        if path.suffix == ".json" and path != config / "config.json":
+            raise SystemExit("核心配置含额外 JSON")
+        rows.append([str(path.relative_to(root)), metadata.st_dev, metadata.st_ino,
+                     metadata.st_mode, metadata.st_uid, metadata.st_gid])
     return rows
 
 
-try:
-    before = snapshot()
-    if snapshot() != before:
-        raise SystemExit("读取部署锁时路径身份发生变化")
-    print(json.dumps(before, separators=(",", ":")))
-except OSError as error:
-    raise SystemExit("部署锁路径读取失败: " + str(error))
-finally:
-    for descriptor in reversed(held):
-        os.close(descriptor)
+mode, root, owner, domain, started, expected = sys.argv[1:]
+if mode in ("lock", "start"):
+    current = lock_snapshot(root, owner)
+    print(current, flush=True)
+    if mode == "start" and current != expected:
+        raise SystemExit(1)
+if mode in ("files", "start"):
+    print(json.dumps(file_snapshot(root, domain, started), separators=(",", ":")))
 PY
+}
+
+dockerPortHoppingTargetLockSnapshot() {
+    [[ "$#" -eq 1 ]] || return 1
+    dockerPortHoppingTargetSnapshot lock "$1"
 }
 
 dockerPortHoppingTargetLockedWitness() {
@@ -3885,86 +4252,8 @@ dockerPortHoppingTargetLockedWitness() {
 }
 
 dockerPortHoppingTargetFileSnapshot() {
-    local root
     [[ "$#" -eq 2 ]] || return 1
-    root=$(dockerInstallRoot) || return 1
-    python3 - "${root}" "$1" "$2" <<'PY'
-import calendar
-import datetime
-import hashlib
-import json
-from pathlib import Path
-import re
-import stat
-import sys
-
-root = Path(sys.argv[1])
-domain = sys.argv[2]
-started_ns = None
-if sys.argv[3]:
-    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z",
-                         sys.argv[3])
-    if not match:
-        raise SystemExit("目标启动时间格式无效")
-    try:
-        started = datetime.datetime(*map(int, match.groups()[:6]))
-    except ValueError:
-        raise SystemExit("目标启动时间日期无效")
-    started_ns = (calendar.timegm(started.timetuple()) * 1_000_000_000 +
-                  int((match[7] or "").ljust(9, "0")))
-if not domain or "/" in domain or domain in (".", ".."):
-    raise SystemExit("TLS 域名路径无效")
-files = ["config/spec.json", "deployment.json", "images.env", "compose.json",
-         "config/sing-box/users.base", "config/sing-box/config.json",
-         "data/traffic/state.json", "secrets/tls/" + domain + ".crt",
-         "secrets/tls/" + domain + ".key"]
-dirs = ["", "config", "config/sing-box", "secrets", "secrets/tls",
-        "data", "data/sing-box", "data/traffic", "data/static"]
-startup_files = ["config/sing-box/config.json", "secrets/tls/" + domain + ".crt",
-                 "secrets/tls/" + domain + ".key"]
-rows = []
-for parent in root.parents:
-    metadata = parent.lstat()
-    if parent.is_symlink():
-        raise SystemExit("受管根目录祖先不能含符号链接")
-    rows.append(["@ancestor:" + str(parent), metadata.st_dev, metadata.st_ino,
-                 metadata.st_mode, metadata.st_uid, metadata.st_gid])
-for name in [*dirs, *files]:
-    path = root / name
-    for parent in [path, *path.parents]:
-        if parent.is_symlink():
-            raise SystemExit("目标路径不能含符号链接")
-    try:
-        metadata = path.lstat()
-    except FileNotFoundError:
-        if name in ("data/traffic/state.json", "data/traffic", "data/static"):
-            rows.append([name, None])
-            continue
-        raise SystemExit("目标快照缺少受管文件或目录")
-    row = [name, metadata.st_dev, metadata.st_ino, metadata.st_mode,
-           metadata.st_uid, metadata.st_gid]
-    if name in files:
-        if not stat.S_ISREG(metadata.st_mode):
-            raise SystemExit("目标配置与 TLS 必须是普通文件")
-        if (started_ns is not None and name in startup_files and
-                max(metadata.st_mtime_ns, metadata.st_ctime_ns) > started_ns):
-            raise SystemExit("目标启动后核心配置或 TLS 发生改动")
-        row += [metadata.st_nlink, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns,
-                hashlib.sha256(path.read_bytes()).hexdigest()]
-    elif not stat.S_ISDIR(metadata.st_mode):
-        raise SystemExit("目标受管路径必须是目录")
-    rows.append(row)
-config = root / "config/sing-box"
-for path in sorted(config.rglob("*")):
-    metadata = path.lstat()
-    if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
-        raise SystemExit("核心配置不能含特殊文件或符号链接")
-    if path.suffix == ".json" and path != config / "config.json":
-        raise SystemExit("核心配置含额外 JSON")
-    rows.append([str(path.relative_to(root)), metadata.st_dev, metadata.st_ino,
-                 metadata.st_mode, metadata.st_uid, metadata.st_gid])
-print(json.dumps(rows, separators=(",", ":")))
-PY
+    dockerPortHoppingTargetSnapshot files '' "$1" "$2"
 }
 
 dockerPortHoppingTargetInspect() (
@@ -4775,7 +5064,7 @@ dockerSshFail2banContainer() {
 
 dockerFail2banDisablePrepare() {
     local nextSpec=$1 restoreMode=${2:-normal} scope=${3:-ws}
-    local root oldEnabled newEnabled deployedEnabled composeEnabled ids before mode audited ports corruptSpec=0
+    local root oldEnabled newEnabled ids before mode audited ports corruptSpec=0
     local type=fail2ban service=net-fail2ban directory=fail2ban state=fail2ban.state
     local -a arguments=()
     case "${scope}" in
@@ -4805,16 +5094,17 @@ dockerFail2banDisablePrepare() {
         if [[ -e "${root}/deployment.json" || -L "${root}/deployment.json" ]]; then
             dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
                 [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] &&
-                  oldEnabled=$(jq -r --arg type "${type}" '
-                  if type == "object" and (.host_integrations | type == "array")
-                    then any(.host_integrations[]; .type == $type)
-                  else error("invalid host integration state") end
-                ' "${root}/deployment.json") && [[ "${oldEnabled}" == false ]] &&
                 dockerTrafficSafePath "${root}" "${root}/compose.json" &&
                 [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
-                  jq -e --arg service "${service}" '(.services | type == "object") and
-                    (.services | has($service) | not)' \
-                    "${root}/compose.json" >/dev/null || return 1
+                jq -e --slurpfile deployment "${root}/deployment.json" \
+                    --arg type "${type}" --arg service "${service}" '
+                  def enabled:
+                    if type == "object" and (.host_integrations | type == "array")
+                    then any(.host_integrations[]; .type == $type)
+                    else error("invalid host integration state") end;
+                  ($deployment | map(enabled | tostring) | join("\n")) == "false" and
+                  (.services | type == "object") and (.services | has($service) | not)
+                ' "${root}/compose.json" >/dev/null || return 1
         else
             [[ "${corruptSpec}" == 0 ]] || return 1
         fi
@@ -4844,17 +5134,21 @@ dockerFail2banDisablePrepare() {
         # 未启用的结论也须与旧部署和编排一致，不能借改写 spec 绕过停用审计。
         dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
             [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] &&
-              deployedEnabled=$(jq -r --arg type "${type}" '
-              if type == "object" and (.host_integrations | type == "array")
-                then any(.host_integrations[]; .type == $type)
-              else error("invalid host integration state") end
-            ' "${root}/deployment.json") && [[ "${deployedEnabled}" == "${oldEnabled}" ]] &&
             dockerTrafficSafePath "${root}" "${root}/compose.json" &&
             [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
-              composeEnabled=$(jq -r --arg service "${service}" '
-              if type == "object" and (.services | type == "object")
-                then .services | has($service) else error("invalid compose state") end
-            ' "${root}/compose.json") && [[ "${composeEnabled}" == "${oldEnabled}" ]] || {
+            jq -en --slurpfile deployment "${root}/deployment.json" \
+                --slurpfile compose "${root}/compose.json" --arg enabled "${oldEnabled}" \
+                --arg type "${type}" --arg service "${service}" '
+              def enabled:
+                if type == "object" and (.host_integrations | type == "array")
+                then any(.host_integrations[]; .type == $type)
+                else error("invalid host integration state") end;
+              def composed:
+                if type == "object" and (.services | type == "object")
+                then .services | has($service) else error("invalid compose state") end;
+              ($deployment | map(enabled | tostring) | join("\n")) == $enabled and
+              ($compose | map(composed | tostring) | join("\n")) == $enabled
+            ' >/dev/null || {
             dockerError '旧规格、部署或编排的 Fail2ban 状态不一致，未修改配置'
             return 1
         }
@@ -5196,8 +5490,18 @@ dockerFail2banCommand() {
 }
 
 dockerValidateHostIntegrations() {
-    local specFile=$1 candidate=$2 ownership port mark ports root
-    if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
+    local specFile=$1 candidate=$2 ownership port mark ports root metadata integrationTypes
+    metadata=$(jq -r '[
+      ([.host_integrations[].type] | join(",")),
+      ([.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")] | join(",")),
+      ([.host_integrations[] | select(.type == "tproxy") | .settings.port | tostring] | join(",")),
+      ([.host_integrations[] | select(.type == "tproxy") | .settings.mark | tostring] | join(","))
+    ] |
+      if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+        error("宿主集成元数据包含非法分隔符")
+      else join("|") end' "${specFile}") || return 1
+    IFS='|' read -r integrationTypes ports port mark <<<"${metadata}"
+    if [[ ",${integrationTypes}," == *,wireguard,* ]]; then
         ownership=unowned
         local -a ownershipMount=()
         if dockerCurrentOwnsHostIntegration wireguard; then
@@ -5215,8 +5519,7 @@ dockerValidateHostIntegrations() {
             return 1
         }
     fi
-    if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}" >/dev/null; then
-        ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' "${specFile}") || return 1
+    if [[ ",${integrationTypes}," == *,fail2ban,* ]]; then
         ownership=unowned
         local -a ownershipMount=() ownershipArgs=("${ownership}")
         if dockerCurrentOwnsHostIntegration fail2ban; then
@@ -5233,7 +5536,7 @@ dockerValidateHostIntegrations() {
             return 1
         }
     fi
-    if jq -e 'any(.host_integrations[]; .type == "fail2ban-control")' "${specFile}" >/dev/null; then
+    if [[ ",${integrationTypes}," == *,fail2ban-control,* ]]; then
         # 候选不要求尚未启动的 WireGuard，也不运行 action；现场门禁在普通服务就绪后执行。
         dockerCandidateCompose "${candidate}" run --rm --no-deps net-fail2ban-control \
             exec sh -c 'set -eu
@@ -5246,7 +5549,7 @@ dockerValidateHostIntegrations() {
             return 1
         }
     fi
-    if jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${specFile}" >/dev/null; then
+    if [[ ",${integrationTypes}," == *,fail2ban-ssh,* ]]; then
         # 候选只解析配置，collector 的宿主证明与日志在运行事务中创建。
         dockerCandidateCompose "${candidate}" run --rm --no-deps net-fail2ban-ssh \
             exec sh -c 'set -eu
@@ -5259,16 +5562,14 @@ dockerValidateHostIntegrations() {
             return 1
         }
     fi
-    if jq -e 'any(.host_integrations[]; .type == "tun")' "${specFile}" >/dev/null; then
+    if [[ ",${integrationTypes}," == *,tun,* ]]; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps net-tun-check \
             preflight tun >/dev/null || {
             dockerError 'TUN 设备或内核前置检查失败'
             return 1
         }
     fi
-    if jq -e 'any(.host_integrations[]; .type == "tproxy")' "${specFile}" >/dev/null; then
-        port=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.port' "${specFile}") || return 1
-        mark=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.mark' "${specFile}") || return 1
+    if [[ ",${integrationTypes}," == *,tproxy,* ]]; then
         ownership=unowned
         local -a ownershipMount=() ownershipArgs=("${ownership}")
         if dockerCurrentOwnsHostIntegration tproxy; then
@@ -5288,33 +5589,59 @@ dockerValidateHostIntegrations() {
 }
 
 dockerValidateCandidate() {
-    local specFile=$1 candidate=$2 core domain jsonFile image tlsDomains='[]' domains
+    local specFile=$1 candidate=$2 core domain jsonFile image tlsDomains='' domains jsonPaths
+    local metadata http01 hasSite hasTls subscriptionEnabled hasControl coreTypes nginxEnabled streamEnabled tlsDomain
+    local -a cores=() jsonFiles=()
     local nginxCheckFile="${2}/compose.nginx-check.json" nginxStatus=0
     local -a nginxCheckArgs=()
-    if jq -e '.tls.http01 == true' "${specFile}" >/dev/null; then
+    metadata=$(jq -r '
+      . as $spec |
+      ([.core.type, .core.secondary_type] | map(select(. != null))) as $cores |
+      if all($cores[]; . == "xray" or . == "sing-box") then $spec
+      else error("候选核心类型无效") end |
+      [
+      (.tls.http01 == true), has("site"), (.tls != null), .tls.domain, .images.ops,
+      (.subscription.enabled == true), has("control"),
+      ($cores | join(","))
+    ] | map(tostring) |
+      if any(.[]; contains("|") or contains("\n") or contains("\r")) then
+        error("候选元数据包含非法分隔符")
+      else join("|") end' "${specFile}") || return 1
+    IFS='|' read -r http01 hasSite hasTls tlsDomain image subscriptionEnabled hasControl coreTypes <<<"${metadata}"
+    IFS=',' read -r -a cores <<<"${coreTypes}"
+    if [[ "${http01}" == true ]]; then
         dockerAcmeWebrootTreeValidate "${candidate}" "${candidate}/data/acme-webroot" true || {
             dockerError '候选 ACME webroot 目录不安全或非空'
             return 1
         }
     fi
     if [[ -e "${candidate}/data/static" || -L "${candidate}/data/static" ]] ||
-        jq -e 'has("site")' "${specFile}" >/dev/null; then
+        [[ "${hasSite}" == true ]]; then
         dockerSiteStateValidate "${specFile}" "${candidate}" || {
             dockerError '候选站点目录或静态首页无效'
             return 1
         }
     fi
+    jsonPaths=$(find "${candidate}/config" -type f -name '*.json' -print) || return 1
     while IFS= read -r jsonFile; do
-        [[ -s "${jsonFile}" ]] && jq empty "${jsonFile}" >/dev/null 2>&1 || {
+        [[ -n "${jsonFile}" ]] || continue
+        [[ -s "${jsonFile}" ]] || {
             dockerError "候选 JSON 配置无效: ${jsonFile}"
             return 1
         }
-    done < <(find "${candidate}/config" -type f -name '*.json' -print)
+        jsonFiles+=("${jsonFile}")
+    done <<<"${jsonPaths}"
+    # 同一次解析检查全部候选 JSON，并读取 Compose 开关；任何后段文件错误都必须拒绝。
     [[ -s "${candidate}/compose.json" && -s "${candidate}/deployment.json" ]] &&
-        jq empty "${candidate}/compose.json" "${candidate}/deployment.json" 2>/dev/null || {
+        metadata=$(jq -r --arg compose "${candidate}/compose.json" '
+          if input_filename == $compose then
+            [.services | has("nginx"), has("nginx-stream")] | map(tostring) | join("|")
+          else empty end
+        ' "${jsonFiles[@]}" "${candidate}/compose.json" "${candidate}/deployment.json" 2>/dev/null) || {
         dockerError '候选 JSON 配置无效'
         return 1
     }
+    IFS='|' read -r nginxEnabled streamEnabled <<<"${metadata}"
     dockerDeploymentFileValidate "${candidate}/deployment.json" || {
         dockerError '候选 deployment.json 无效'
         return 1
@@ -5328,9 +5655,9 @@ dockerValidateCandidate() {
         return 1
     }
     dockerValidateHostIntegrations "${specFile}" "${candidate}" || return 1
-    while IFS= read -r core; do
+    for core in "${cores[@]}"; do
         domains=$(dockerCoreTlsDomains "${core}" "${candidate}/config/${core}/config.json") || return 1
-        tlsDomains=$(jq -c --argjson domains "${domains}" '. + $domains | unique' <<<"${tlsDomains}") || return 1
+        tlsDomains+="${domains}"$'\n'
         case "${core}" in
         xray)
             dockerCandidateCompose "${candidate}" run --rm --no-deps xray \
@@ -5348,19 +5675,18 @@ dockerValidateCandidate() {
             ;;
         *) return 1 ;;
         esac
-    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
-    if jq -e '.tls != null' "${specFile}" >/dev/null; then
-        domain=$(jq -r '.tls.domain' "${specFile}") || return 1
-        tlsDomains=$(jq -c --arg domain "${domain}" '. + [$domain] | unique' <<<"${tlsDomains}") || return 1
-    fi
-    image=$(jq -r '.images.ops' "${specFile}") || return 1
+    done
+    domains=$(jq -rs --arg domain "${tlsDomain}" --arg hasTls "${hasTls}" '
+      (add // []) + (if $hasTls == "true" then [$domain] else [] end) | unique | .[]
+    ' <<<"${tlsDomains}") || return 1
     while IFS= read -r domain; do
+        [[ -n "${domain}" ]] || continue
         dockerTlsValidateCandidate "${image}" "${candidate}/secrets/tls" "${domain}" || {
             dockerError 'TLS 证书、私钥或域名校验失败'
             return 1
         }
-    done < <(jq -r '.[]' <<<"${tlsDomains}")
-    if jq -e '.services | has("nginx")' "${candidate}/compose.json" >/dev/null; then
+    done <<<"${domains}"
+    if [[ "${nginxEnabled}" == true ]]; then
         # 仅解析候选配置，不启动候选核心；实际后端仍由项目网络解析。
         jq '{services:{nginx:{extra_hosts:
           ((.services.nginx.extra_hosts // []) +
@@ -5375,14 +5701,14 @@ dockerValidateCandidate() {
             return 1
         }
     fi
-    if jq -e '.subscription.enabled == true' "${specFile}" >/dev/null; then
+    if [[ "${subscriptionEnabled}" == true ]]; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps subscription \
             subscription --check >/dev/null || {
             dockerError '订阅控制服务候选配置校验失败'
             return 1
         }
     fi
-    if jq -e 'has("control")' "${specFile}" >/dev/null; then
+    if [[ "${hasControl}" == true ]]; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps control \
             control --state /etc/padm/control/state.json \
             --access-log /var/log/padm/control/auth.log \
@@ -5393,7 +5719,7 @@ dockerValidateCandidate() {
             return 1
         }
     fi
-    if jq -e '.services | has("nginx-stream")' "${candidate}/compose.json" >/dev/null; then
+    if [[ "${streamEnabled}" == true ]]; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps nginx-stream \
             -t -c /etc/nginx/stream.d/host-main >/dev/null || {
             dockerError '宿主分流入口候选配置校验失败'
@@ -5466,7 +5792,8 @@ dockerRealityStreamHostRuntimeCheck() {
 }
 
 dockerBackupConfiguration() {
-    local root backup relative source bundlePath prefix=${1:-configure}
+    local root backup relative source bundlePath unsafe prefix=${1:-configure}
+    local -a sources=() payloads=()
     root=$(dockerInstallRoot) || return 1
     [[ "${prefix}" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
     dockerControlRecoveryCheck || return 1
@@ -5492,10 +5819,8 @@ dockerBackupConfiguration() {
         source="${root}/${relative}"
         [[ -e "${source}" || -L "${source}" ]] || continue
         [[ ! -L "${source}" ]] || return 1
-        [[ -z "$(find "${source}" -type l -print -quit 2>/dev/null)" ]] || return 1
-        mkdir -p -- "${backup}/$(dirname -- "${relative}")" || return 1
-        cp -a -- "${source}" "${backup}/${relative}" || return 1
-        printf '%s\n' "${relative}" >>"${backup}/present" || return 1
+        sources+=("${source}")
+        payloads+=("${relative}")
     done <<'EOF'
 deployment.json
 deployment.previous.json
@@ -5513,6 +5838,12 @@ data/static
 secrets/tls
 data/acme
 EOF
+    if ((${#sources[@]} > 0)); then
+        unsafe=$(find "${sources[@]}" -type l -print -quit 2>/dev/null) &&
+            [[ -z "${unsafe}" ]] || return 1
+        (cd -- "${root}" && cp -a --parents -- "${payloads[@]}" "${backup}") || return 1
+        printf '%s\n' "${payloads[@]}" >"${backup}/present" || return 1
+    fi
     if [[ "${prefix}" == business ]]; then
         mkdir -p -- "${backup}/data/traffic" || return 1
         dockerTrafficReadState >"${backup}/data/traffic/state.json" || return 1
@@ -5699,18 +6030,15 @@ dockerValidateUpdateCandidate() {
 
 dockerRemoveConfigurationTargets() {
     local root relative target includeStatic=${1:-1}
+    local -a targets=()
     root=$(dockerInstallRoot) || return 1
     while IFS= read -r relative; do
         [[ "${relative}" != data/static || "${includeStatic}" == 1 ]] || continue
         target="${root}/${relative}"
         [[ -e "${target}" || -L "${target}" ]] || continue
-        [[ ! -L "${target}" ]] || return 1
-        if [[ -d "${target}" ]]; then
-            dockerRemoveManagedTree "${root}" "${target}" || return 1
-        else
+        [[ ! -L "${target}" ]] &&
             dockerManagedPathIsSafe "${root}" "${target}" || return 1
-            rm -f -- "${target}" || return 1
-        fi
+        targets+=("${target}")
     done <<'EOF'
 deployment.json
 deployment.previous.json
@@ -5728,6 +6056,7 @@ data/static
 secrets/tls
 data/acme
 EOF
+    ((${#targets[@]} == 0)) || rm -rf -- "${targets[@]}"
 }
 
 dockerInstallCandidate() {
@@ -5799,12 +6128,11 @@ dockerInstallCandidate() {
         cp -- "${backup}/deployment.json" "${root}/deployment.previous.json" || return 1
         chmod 0640 "${root}/deployment.previous.json" || return 1
     fi
-    for relative in config/xray config/sing-box config/nginx config/net config/control data/subscription data/static secrets/tls data/acme; do
-        source="${candidate}/${relative}"
-        target="${root}/${relative}"
-        mkdir -p -- "$(dirname -- "${target}")" || return 1
-        mv -- "${source}" "${target}" || return 1
-    done
+    # 各目标已清理；同一父目录一起移动，任何失败仍进入原恢复流程。
+    mkdir -p -- "${root}/config" "${root}/data" "${root}/secrets" &&
+        mv -- "${candidate}/config/"{xray,sing-box,nginx,net,control} "${root}/config/" &&
+        mv -- "${candidate}/data/"{subscription,static,acme} "${root}/data/" &&
+        mv -- "${candidate}/secrets/tls" "${root}/secrets/" || return 1
     if [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]]; then
         mv -- "${candidate}/config/spec.json" "${root}/config/spec.json" || return 1
     fi
@@ -5894,7 +6222,8 @@ dockerControlAccessLogEnsure() {
 }
 
 dockerEnsureRuntimeDataPermissions() {
-    local root directory privateFile
+    local root directory privateFile unsafe
+    local -a directories=() missingDirectories=() privateFiles=()
     root=$(dockerInstallRoot) || return 1
     dockerControlAccessLogEnsure "${root}" || return 1
     if jq -e '.tls.http01 == true' "${root}/config/spec.json" >/dev/null 2>&1; then
@@ -5907,13 +6236,16 @@ dockerEnsureRuntimeDataPermissions() {
         if [[ -e "${root}/${directory}" || -L "${root}/${directory}" ]]; then
             [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
         else
-            mkdir -p -- "${root}/${directory}" || return 1
+            missingDirectories+=("${root}/${directory}")
         fi
-        chmod 0750 "${root}/${directory}" || return 1
+        directories+=("${root}/${directory}")
     done
+    ((${#missingDirectories[@]} == 0)) ||
+        mkdir -p -- "${missingDirectories[@]}" || return 1
+    chmod 0750 "${directories[@]}" || return 1
     dockerSiteTreeValidate "${root}/data/static" &&
-        find "${root}/data/static" -type d -exec chmod 0750 {} + &&
-        find "${root}/data/static" -type f -exec chmod 0640 {} + || return 1
+        find "${root}/data/static" \( -type d -exec chmod 0750 {} + \) -o \
+            \( -type f -exec chmod 0640 {} + \) || return 1
     if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${root}/config/spec.json" >/dev/null 2>&1; then
         dockerTrafficSafePath "${root}" "${root}/logs/nginx/access.log" || return 1
         if [[ ! -e "${root}/logs/nginx/access.log" && ! -L "${root}/logs/nginx/access.log" ]]; then
@@ -5925,37 +6257,42 @@ dockerEnsureRuntimeDataPermissions() {
     fi
     for directory in config data/subscription; do
         [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
-        [[ -z "$(find "${root}/${directory}" -type l -print -quit)" ]] || return 1
-        find "${root}/${directory}" -type d -exec chmod 0750 {} + || return 1
-        find "${root}/${directory}" -type f ! -path "${root}/config/spec.json" ! -name share-groups.json ! -name users.base \
-            -exec chmod 0640 {} + || return 1
     done
+    unsafe=$(find "${root}/config" "${root}/data/subscription" -type l -print -quit) &&
+        [[ -z "${unsafe}" ]] || return 1
+    find "${root}/config" "${root}/data/subscription" \
+        \( -type d -exec chmod 0750 {} + \) -o \
+        \( -type f ! -path "${root}/config/spec.json" ! -name share-groups.json ! -name users.base \
+            -exec chmod 0640 {} + \) || return 1
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
-            "${root}/data/xray" "${root}/data/sing-box" "${root}/data/acme" || return 1
+            "${root}/data/xray" "${root}/data/sing-box" "${root}/data/acme" \
+            "${root}/logs/nginx" || return 1
         find "${root}/config" ! -path "${root}/config/spec.json" ! -name share-groups.json ! -name users.base \
             -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/static" \
             "${root}/logs/subscription" "${root}/logs/acme" \
             "${root}/data/subscription" || return 1
-        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
-            "${root}/logs/nginx" || return 1
         chown -R 0:0 "${root}/data/net" || return 1
     fi
     for privateFile in config/spec.json config/share-groups.json config/xray/users.base config/sing-box/users.base; do
         [[ -e "${root}/${privateFile}" || -L "${root}/${privateFile}" ]] || continue
         [[ -f "${root}/${privateFile}" && ! -L "${root}/${privateFile}" ]] || return 1
-        chmod 0600 "${root}/${privateFile}" || return 1
-        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
-            chown 0:0 "${root}/${privateFile}" || return 1
+        privateFiles+=("${root}/${privateFile}")
     done
+    if ((${#privateFiles[@]} > 0)); then
+        chmod 0600 "${privateFiles[@]}" || return 1
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
+            chown 0:0 "${privateFiles[@]}" || return 1
+    fi
     dockerTlsRuntimePermissions "${root}/secrets/tls"
 }
 
 dockerRestoreConfiguration() {
     local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic includeStatic=0
     local alpnListener=${DOCKER_CONFIG_RESTORE_ALPN_LISTENER:-} alpnTemporary= ipv6Cleanup=0
-    local legacyFail2ban=0 expectedCompose=
+    local legacyFail2ban=0 expectedCompose= parent
+    local -a restorePaths=() restoreParents=()
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     # 首配空恢复点也不能绕过本机自动同步的身份门禁。
@@ -6077,9 +6414,17 @@ dockerRestoreConfiguration() {
             continue
         fi
         [[ -e "${backup}/${relative}" ]] || return 1
-        mkdir -p -- "${root}/$(dirname -- "${relative}")" || return 1
-        cp -a -- "${backup}/${relative}" "${root}/${relative}" || return 1
+        parent=${relative%/*}
+        [[ "${parent}" != "${relative}" ]] || parent=.
+        restorePaths+=("${relative}")
+        restoreParents+=("${root}/${parent}")
     done <"${backup}/present"
+    if ((${#restorePaths[@]} > 0)); then
+        mkdir -p -- "${restoreParents[@]}" || return 1
+        for relative in "${restorePaths[@]}"; do
+            cp -a -- "${backup}/${relative}" "${root}/${relative}" || return 1
+        done
+    fi
     if [[ -n "${DOCKER_CONTROL_RESTORE_PLAN:-}" ]]; then
         mkdir -p -- "${root}/config/control" &&
             cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/spec.json" "${root}/config/spec.json" &&
@@ -6176,16 +6521,20 @@ dockerConfigurationInterrupted() {
 }
 
 dockerRealityStreamDeploymentCheck() {
-    local specFile
+    local specFile realityStream
     for specFile in "$@"; do
         [[ -e "${specFile}" || -L "${specFile}" ]] || continue
         if ! [[ -f "${specFile}" && ! -L "${specFile}" ]] ||
-            ! jq -es 'length == 1 and (.[0] | type == "object")' \
-                "${specFile}" >/dev/null 2>&1; then
+            ! realityStream=$(jq -r -s '
+                if length == 1 and (.[0] | type == "object")
+                then (.[0].reality_stream != null)
+                else error("规格必须是单个对象")
+                end
+            ' "${specFile}" 2>/dev/null); then
             dockerError '受管配置规格损坏或不安全，拒绝部署'
             return 1
         fi
-        if jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
+        if [[ "${realityStream}" == true ]]; then
             dockerConfigureSpecValidate "${specFile}" || return 1
             jq -e '.["x-padm-reality-stream-deployment"] == true' \
                 "$(dockerConfigureSchemaFile)" >/dev/null || return 1
@@ -7052,24 +7401,31 @@ dockerTlsInstallCommand() {
 }
 
 dockerAcmeWebrootParentValidate() {
-    local root=$1 directory=$2 cursor mode
+    local root=$1 directory=$2 cursor mode metadata
+    local -a parents=() metadataRows=()
     [[ "${directory}" == "${root}/data/acme-webroot" ]] &&
         dockerTrafficSafePath "${root}" "${directory}" || return 1
     cursor=${directory%/*}
     while [[ -n "${cursor}" ]]; do
         [[ -d "${cursor}" && ! -L "${cursor}" ]] || return 1
-        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 || "$(stat -c %u -- "${cursor}")" == 0 ]] || return 1
-        mode=$(stat -c %a -- "${cursor}") || return 1
-        # root 所有的 sticky 临时目录保护下级归属，部署目录仍禁止外部写入。
-        (( (8#${mode} & 022) == 0 || (8#${mode} & 01000) != 0 )) || return 1
+        parents+=("${cursor}")
         [[ "${cursor}" != / ]] || break
         cursor=${cursor%/*}
         [[ -n "${cursor}" ]] || cursor=/
     done
+    metadata=$(stat -c %u:%a -- "${parents[@]}") || return 1
+    mapfile -t metadataRows <<<"${metadata}"
+    ((${#metadataRows[@]} == ${#parents[@]})) || return 1
+    for metadata in "${metadataRows[@]}"; do
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 || "${metadata%%:*}" == 0 ]] || return 1
+        mode=${metadata#*:}
+        # root 所有的 sticky 临时目录保护下级归属，部署目录仍禁止外部写入。
+        (( (8#${mode} & 022) == 0 || (8#${mode} & 01000) != 0 )) || return 1
+    done
 }
 
 dockerAcmeWebrootTreeValidate() {
-    local root=$1 directory=$2 empty=${3:-false} entry relative owner mode value unsafe
+    local root=$1 directory=$2 empty=${3:-false} entry relative owner group mode value unsafe metadata links size
     dockerAcmeWebrootParentValidate "${root}" "${directory}" &&
         [[ -d "${directory}" ]] || return 1
     unsafe=$(find "${directory}" ! -type d ! -type f -print -quit) &&
@@ -7080,17 +7436,16 @@ dockerAcmeWebrootTreeValidate() {
     fi
     while IFS= read -r -d '' entry; do
         relative=${entry#"${directory}"}
-        owner=$(stat -c %u:%g -- "${entry}") &&
-            mode=$(stat -c %a -- "${entry}") || return 1
-        [[ "${owner}" == "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" ||
+        metadata=$(stat -c %u:%g:%a:%h:%s -- "${entry}") || return 1
+        IFS=: read -r owner group mode links size <<<"${metadata}"
+        [[ "${owner}:${group}" == "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" ||
             "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] || return 1
         (( (8#${mode} & 022) == 0 )) || return 1
         if [[ -d "${entry}" ]]; then
             case "${relative}" in ''|/active|/active/.well-known|/active/.well-known/acme-challenge) ;; *) return 1 ;; esac
         else
             [[ "${relative}" =~ ^/active/\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}$ &&
-                "$(stat -c %h -- "${entry}")" == 1 &&
-                "$(stat -c %s -- "${entry}")" -le 512 ]] || return 1
+                "${links}" == 1 && "${size}" -le 512 ]] || return 1
             value=$(<"${entry}")
             [[ "${value}" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || return 1
             # 原始字节只允许 key authorization 和最多一个换行，不能接受 Bash 丢弃的 NUL。

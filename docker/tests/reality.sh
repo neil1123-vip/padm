@@ -10,6 +10,27 @@ export OPS_IMAGE="ghcr.io/example/padm-ops:test@sha256:${IMAGE_DIGEST}"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/docker/tests/configure-fixture.sh"
 dockerConfigureTestFixture
+if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" != 1 ]]; then
+    (
+        controlSha=$(sha256sum "${CONFIGURE_CONTROL}" | cut -d ' ' -f 1)
+        manifestSha=${CONFIGURE_MANIFEST_SHA}
+        tar() { fail '固定控制夹具被重复打包'; }
+        IMAGE_DIGEST=$(printf '3%.0s' {1..64})
+        export OPS_IMAGE="ghcr.io/example/padm-ops:test@sha256:${IMAGE_DIGEST}"
+        dockerConfigureTestFixture
+        [[ "$(sha256sum "${CONFIGURE_CONTROL}" | cut -d ' ' -f 1)" == "${controlSha}" &&
+            "${CONFIGURE_MANIFEST_SHA}" != "${manifestSha}" ]] ||
+            fail '控制包复用改变归档或复用旧清单摘要'
+        jq -e --arg sha "${controlSha}" --arg digest "sha256:${IMAGE_DIGEST}" \
+            --arg ops "${OPS_IMAGE}" --arg manifest "${CONFIGURE_MANIFEST_SHA}" \
+            --slurpfile signature "${CONFIGURE_BUNDLE}" '
+          .control.sha256 == $sha and all(.images[]; .index_digest == $digest) and
+          .images.ops.reference == $ops and $signature[0].manifest_sha256 == $manifest
+        ' "${CONFIGURE_MANIFEST}" >/dev/null ||
+            fail '控制包复用未重建新镜像清单和匹配签名'
+    )
+    dockerConfigureTestFixture
+fi
 REALITY_SPEC="${TEST_ROOT}/reality-v3.json"
 jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTITY}" \
     --arg digest "${IMAGE_DIGEST}" '
