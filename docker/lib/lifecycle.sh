@@ -1313,8 +1313,14 @@ dockerPortHoppingGuardedSend() {
         printf '%s\n' "$1" >&"${ph_write}"
 }
 
+dockerPortHoppingSupervisorControl() {
+    [[ -n "${ph_control:-}" ]] || return 1
+    python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" "$@" <&"${ph_control}"
+}
+
 dockerPortHoppingGuardedExchange() {
     local challenge nonce request digest current phase frame action descriptor duration=150 seq=1
+    local supervisorPayload supervisorPhase
     local -a nonces=() command=(
         docker run --interactive --sig-proxy=false --pull never --cidfile "${ph_stage}/cid"
         --label "io.padm.hopping-${ph_operation}=${ph_label}" --network host --hostname "${ph_host}" --user 0:0
@@ -1375,9 +1381,30 @@ dockerPortHoppingGuardedExchange() {
                 nonce=$(jq -er '.nonce' <<<"${frame}") || return 1
             # 固定初始 nonce 与上一轮即可防止当前帧重放，不累计会话历史。
             for current in "${nonces[@]}"; do [[ "${nonce}" != "${current}" ]] || return 1; done
+            if [[ -n "${ph_control:-}" && "${seq}" -ge 2 ]]; then
+                current=$(dockerPortHoppingGuardedContainer live) &&
+                    [[ "${current}" == "${ph_projection}" ]] &&
+                    dockerPortHoppingProbeCheck &&
+                    supervisorPayload=$(jq -cn --argjson target "${ph_witness}" \
+                        --argjson running "${frame}" --argjson child "${ph_projection}" \
+                        --argjson directory "${ph_directory}" --arg stage "${ph_stage}" \
+                        '{target:$target,running:$running,child:$child,directory:$directory,stage:$stage}') ||
+                    return 1
+                supervisorPhase=running
+                [[ "${seq}" != 2 ]] || supervisorPhase=ready
+                dockerPortHoppingSupervisorControl gate "${supervisorPhase}" "${supervisorPayload}" ||
+                    return 1
+            fi
             action=$(jq -c '.phase="continue"' <<<"${frame}") &&
-                dockerPortHoppingGuardedSend "${action}" &&
-                jq -cn --argjson target "${ph_witness}" --argjson running "${frame}" \
+                dockerPortHoppingGuardedSend "${action}" || return 1
+            if [[ -n "${ph_control:-}" && "${seq}" == 2 ]]; then
+                # 第二轮已发送仍须复验原绑定；ready 和 started 使用同一份正文。
+                current=$(dockerPortHoppingGuardedContainer live) &&
+                    [[ "${current}" == "${ph_projection}" ]] &&
+                    dockerPortHoppingProbeCheck &&
+                    dockerPortHoppingSupervisorControl gate started "${supervisorPayload}" || return 1
+            fi
+            jq -cn --argjson target "${ph_witness}" --argjson running "${frame}" \
                     '{target:$target,running:$running}' >"${ph_stage}/supervised.next" &&
                 chmod 0600 "${ph_stage}/supervised.next" &&
                 mv -f -- "${ph_stage}/supervised.next" "${ph_stage}/supervised.json" || return 1
@@ -1449,11 +1476,83 @@ dockerPortHoppingGuardedCleanup() {
 }
 
 dockerPortHoppingTargetGuarded() {
+    local ph_control=
     dockerPortHoppingTargetTransaction guarded "$@"
 }
 
 dockerPortHoppingTargetSupervised() {
+    local ph_control=
     dockerPortHoppingTargetTransaction supervised "$@"
+}
+
+dockerPortHoppingSupervisorStart() {
+    local root
+    [[ "$#" -eq 5 ]] || return 1
+    root=$(dockerInstallRoot) &&
+        python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" start "${root}" \
+            "${DOCKER_BUNDLE_SOURCE_ROOT}/install-docker.sh" "$@"
+}
+
+dockerPortHoppingSupervisorStatus() {
+    local root
+    [[ "$#" -eq 0 ]] || return 1
+    root=$(dockerInstallRoot) &&
+        python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" status "${root}"
+}
+
+dockerPortHoppingSupervisorStop() {
+    local root
+    [[ "$#" -eq 0 ]] || return 1
+    root=$(dockerInstallRoot) &&
+        python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" stop "${root}"
+}
+
+dockerPortHoppingTargetSupervisedOwned() {
+    local ph_control=${1:-} owner=${BASHPID:-$$} original= current root status=1
+    local released=false ownerSignal=0 intTrap termTrap pipeTrap payload
+    local DOCKER_DEPLOYMENT_LOCK_DIR=
+    [[ "$#" -eq 6 && "${ph_control}" =~ ^[1-9][0-9]*$ && "${ph_control}" -ge 3 ]] || return 1
+    shift
+    python3 -B -c 'import fcntl,os,stat
+if not stat.S_ISSOCK(os.fstat(0).st_mode) or fcntl.fcntl(0,fcntl.F_GETFL)&os.O_ACCMODE != os.O_RDWR:
+    raise SystemExit("监督控制 fd 必须是双向 socket")' \
+        <&"${ph_control}" || return 1
+    intTrap=$(trap -p INT)
+    termTrap=$(trap -p TERM)
+    pipeTrap=$(trap -p PIPE)
+    trap 'ownerSignal=130' INT
+    trap 'ownerSignal=143' TERM
+    trap '' PIPE
+    # 不接收调用方的锁；完整原快照形成前失败时保留目录，不只按 pid 删除。
+    if root=$(dockerInstallRoot) && dockerAcquireDeploymentLock; then
+        if original=$(dockerPortHoppingTargetLockSnapshot "${owner}"); then
+            if [[ "${ownerSignal}" == 0 ]]; then
+                if dockerPortHoppingTargetTransaction supervised "$@"; then status=0; else status=$?; fi
+            fi
+        fi
+    else
+        status=${PADM_DOCKER_RC_LOCK:-12}
+    fi
+    [[ "${ownerSignal}" == 0 ]] || status=${ownerSignal}
+    if [[ -n "${original}" ]] &&
+        current=$(dockerPortHoppingTargetLockSnapshot "${owner}") && [[ "${current}" == "${original}" ]]; then
+        if dockerReleaseDeploymentLock &&
+            [[ ! -e "${root}/locks/deployment.lock" && ! -L "${root}/locks/deployment.lock" ]]; then
+            released=true
+        fi
+    else
+        DOCKER_DEPLOYMENT_LOCK_DIR=
+    fi
+    [[ "${ownerSignal}" == 0 ]] || status=${ownerSignal}
+    payload=$(jq -cn --argjson status "${status}" --argjson released "${released}" \
+        '{status:$status,lock_released:$released}') &&
+        dockerPortHoppingSupervisorControl notify finished "${payload}" || :
+    trap - INT TERM PIPE
+    [[ -z "${intTrap}" ]] || eval "${intTrap}"
+    [[ -z "${termTrap}" ]] || eval "${termTrap}"
+    [[ -z "${pipeTrap}" ]] || eval "${pipeTrap}"
+    [[ "${ownerSignal}" == 0 ]] || status=${ownerSignal}
+    return "${status}"
 }
 
 dockerPortHoppingTargetTransaction() {
@@ -1463,8 +1562,11 @@ dockerPortHoppingTargetTransaction() {
     local ph_start=${2:-} ph_end=${3:-} ph_ipv4=${4:-} ph_ipv6=${5:-} ph_target ph_image
     local ph_helper="${DOCKER_LIB_DIR}/port-hopping-probe.py" ph_directory ph_label ph_child=
     local ph_host= ph_projection= ph_read= ph_write= ph_transport= ph_closed= ph_signal=0
-    local status=1 intTrap termTrap pipeTrap image ph_guarded=true
+    local status=1 intTrap termTrap pipeTrap image ph_guarded=true cleanupStatus=0 savedSignal payload
+    local ph_control=${ph_control:-}
+    [[ "${FUNCNAME[1]:-}" == dockerPortHoppingTargetSupervisedOwned ]] || ph_control=
     [[ "$#" -eq 5 && ( "${ph_operation}" == guarded || "${ph_operation}" == supervised ) ]] || return 1
+    [[ -z "${ph_control}" || "${ownerSignal:-0}" == 0 ]] || return "${ownerSignal}"
     ph_root=$(dockerInstallRoot) &&
         ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") || {
             DOCKER_DEPLOYMENT_LOCK_DIR=; return 1;
@@ -1477,8 +1579,9 @@ dockerPortHoppingTargetTransaction() {
     trap 'ph_signal=143' TERM
     # EPIPE 必须返回失败并进入撤销，不能让 SIGPIPE 直接终止持锁父端。
     trap '' PIPE
+    [[ -z "${ph_control}" || "${ownerSignal:-0}" == 0 ]] || ph_signal=${ownerSignal}
     # 每道写门只用当前持锁 Bash 的新准备结果，原绑定全程不能刷新。
-    if dockerPortHoppingTargetStartLockCheck &&
+    if [[ "${ph_signal}" == 0 ]] && dockerPortHoppingTargetStartLockCheck &&
         dockerPortHoppingTargetPrepareActivation "$@" bound >"${ph_stage}/prepared.json" &&
         ph_witness=$(jq -ec '.' "${ph_stage}/prepared.json") &&
         ph_binding=$(jq -ec '.startup_binding' <<<"${ph_witness}") &&
@@ -1497,7 +1600,29 @@ dockerPortHoppingTargetTransaction() {
         dockerPortHoppingGuardedExchange; then status=0; else status=$?; fi
     [[ "${status}" != 130 && "${status}" != 143 ]] || ph_signal=${status}
     [[ "${ph_signal}" == 0 ]] || status=${ph_signal}
-    dockerPortHoppingGuardedCleanup || status=1
+    if dockerPortHoppingGuardedCleanup; then cleanupStatus=0; else cleanupStatus=$?; status=1; fi
+    if [[ -n "${ph_control}" && "${cleanupStatus}" == 0 && "${ph_signal}" == 143 &&
+        -n "${ph_child}" && -n "${ph_projection}" ]]; then
+        savedSignal=${ph_signal}
+        ph_signal=0
+        # 仅独立监督的正常 TERM 可确认净撤销；漂移或未知退出保留原证据。
+        if dockerPortHoppingProbeCheck &&
+            [[ ! -e "${ph_root}/data/net/port-hopping.state" &&
+                ! -L "${ph_root}/data/net/port-hopping.state" ]] &&
+            dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&
+            dockerPortHoppingProbeCheck &&
+            [[ ! -e "${ph_root}/data/net/port-hopping.state" &&
+                ! -L "${ph_root}/data/net/port-hopping.state" && "${ph_signal}" == 0 ]] &&
+            payload=$(jq -cn --argjson target "${ph_witness}" --arg child "${ph_child}" \
+                --arg stage "${ph_stage}" '{target:$target,child_id:$child,stage:$stage}'); then
+            if dockerPortHoppingSupervisorControl notify cleaned "${payload}"; then
+                status=${savedSignal}
+            else
+                status=1
+            fi
+        else status=1; fi
+        [[ "${ph_signal}" != 0 ]] || ph_signal=${savedSignal}
+    fi
     if [[ "${status}" == 0 ]]; then
         dockerPortHoppingProbeCheck &&
             dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&

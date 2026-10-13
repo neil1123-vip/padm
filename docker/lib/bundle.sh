@@ -134,6 +134,12 @@ dockerBundleSourceIsComplete() {
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
         done
     fi
+    for required in port-hopping-probe.py port-hopping-supervisor.py; do
+        if grep -qF "/${required}\"" "${sourceRoot}/docker/lib/lifecycle.sh"; then
+            [[ -f "${sourceRoot}/docker/lib/${required}" &&
+                ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
+        fi
+    done
     if grep -qF '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh"; then
         for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
             [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1

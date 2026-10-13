@@ -466,6 +466,12 @@ dockerEntryBundleModulesPresent() {
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
         done
     fi
+    for required in port-hopping-probe.py port-hopping-supervisor.py; do
+        if grep -qF "/${required}\"" "${sourceRoot}/docker/lib/lifecycle.sh"; then
+            [[ -f "${sourceRoot}/docker/lib/${required}" &&
+                ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
+        fi
+    done
     if grep -qF '/shell/core/cores.sh"' "${sourceRoot}/docker/lib/lifecycle.sh"; then
         [[ -f "${sourceRoot}/shell/core/cores.sh" && ! -L "${sourceRoot}/shell/core/cores.sh" ]] || return 1
     fi

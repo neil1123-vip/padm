@@ -6194,24 +6194,72 @@ Probe helper/lifecycle 也与最终源码一致，核验保存在完整目录
 继续 deferred；当前仅交付父端存活且全程持锁的内部持续会话，
 整体目标保持 active。
 
-##### 5C.9c.3e.2b.3d 独立监督归属与实时交接（待实施）
+##### 5C.9c.3e.2b.3d 独立监督归属与实时交接
 
-下一步先定义监督进程自己的锁 owner 与停止协议，不把现有函数简单后台化：
-监督进程须自己取得新部署锁、直接完成 bound 准备并固定自身进程/运行代次；
-调用者保存的 JSON、旧 binding/tuple、环境变量不授予规则写入或恢复权限。
-启动控制端使用本次随机挑战及明确 commit 线性点：commit 前断流撤销，
-commit 后 ACK 丢失保留已运行 owner，调用者以新挑战查询，禁止自动再启一套。
-最终 ACK 至少观察 running seq 2 并复验原投影；现有 seq 1 收据仅证明
-父端已发送续期，不单独证明子端消费了该续期。
+内部 `dockerPortHoppingSupervisorStart/Status/Stop` 复用原持续事务。
+manager 以独立 session 启动持锁 Bash，Bash 自取新部署锁并直接 freshly bound；
+调用者的旧锁、JSON、binding/tuple 和环境变量不授予写入或恢复权限。
+owner 固定 manager/Bash 的 PID、starttime、boot ID、PID/net namespace 和 session，
+以 pidfd 固定代次，私有 0700 会话目录和 0600 owner/socket 不自动恢复旧 owner。
+Unix socket 使用固定目录 fd 的短路径，避免临时根超过 Linux 地址长度限制；
+每次连接仍检查 SO_PEERCRED、进程代次、完整目录链和原 socket 身份。
 
-停止入口不得先取得监督进程全程持有的部署锁；通过受管控制通道核对
-新挑战、owner token、当前进程/运行代次和目录后请求原监督进程关闭输入。
-仅退出 0、规则/state 净撤销、容器投影/退出双复验和原锁释放确证后，
-才允许新代次自己取锁准备。超时、SIGKILL、非零、归属漂移与状态不明
-保留 owner/child/state/stage，不用同名 unit、数字 PID 或旧文件自动接管。
-选择宿主 supervisor 后须在匹配的原生 Linux 环境验收其生命周期；
-普通容器合同不能代替 systemd、重启和公网验收。内部 owner/control/ACK
-先交付，不扩菜单、schema、Compose、在线更新/重启或完整支持状态。
+启动 hello/随机挑战/commit 完成后才生成持锁 Bash。commit 前断流不写规则，
+保留已创建的 starting owner/session 作为失败证据；commit 后 ACK 丢失不重建，
+调用者可用新挑战查询原 owner。ready 必须来自 running seq 2，manager 确认后
+Bash 发送续期并再次核原业务绑定/child 投影，started 用同一 payload；
+seq 1 收据只证明父端发送，不作为最终 ACK。后续 running 要求连续 seq/新 nonce
+及固定 target/child/directory/stage；owner 保存当前代次，不作为新的写授权。
+
+停止不预取持续占用的部署锁。挑战 commit 后重核 owner、目录和 Bash pidfd，
+再向固定 Bash 发 TERM；Bash 关闭输入，由原 child 退出 0 并精确净撤销，
+双复验容器投影/退出、复验业务绑定及无 state、删除本轮 stage 后通知 cleaned。
+原锁快照仍一致且安全释放才通知 finished 143/true；manager 必须观察 Bash
+实际终止并严格核通知 nonce、字段和类型，确认会话/原锁/state 净清理后返回 stopped。
+非零、SIGKILL、超时、归属漂移或未知停止保留证据，不按数字 PID 或旧文件接管。
+
+root status/stop 的 hello/commit 同步等待各 2 秒，最多 4 秒暂时阻塞续期；
+这不是固定续期间隔或统一撤销上界。原子目录独占拒绝重复启动。
+manager 异常关闭通道并通过原 pidfd TERM Bash，90 秒仅作等待回收预算，
+不能把超时当作净撤销。仍无事务总时限或自动旧 owner 恢复。
+
+本阶段 Docker Desktop Linux amd64 当前源码快照验证通过，均复用工具镜像
+`sha256:44edfa2f5437bd852b0249fcf5fde85913ac29e2d56d744fa4d4728ad00bf978`：
+
+| selector | `.tmp-regression-docker-` 结果目录后缀 | 入口耗时 ms |
+| --- | --- | ---: |
+| `docker-port-hopping-supervisor` | `cc45d6fefe0445f1a042baa6de9e1515` | 2005 |
+| `docker-port-hopping-guarded` | `3afdf8b3e82a4fc483a1c303058dcdae` | 116473 |
+| `docker-phase1` | `b9d18f30705d4d2dbaf7eee032e54d7c` | 48977 |
+| `docker-port-hopping-target-real` | `d8d8a811e5d2499f89e079d49ce3fb49` | 213088 |
+| `docker-setup-core` | `864f23e9a9bc4486b01c525a290b2ccd` | 67998 |
+| `docker-release` | `c8cbbf4b9c394faab5113fed59902a1a` | 21568 |
+| `docker-phase6` | `a6972e2a239b4b9985ea29eefffcf2b2` | 54528 |
+| `docker-contracts` | `52c8333e8a1741abad44c85429cb2963` | 535325 |
+
+定向 Jobs 2；guarded 70、有限父端 54、持续父端 41、独立监督父端 13 项通过。
+三个父端夹具共用两个 worker，独立监督有聚焦 selector，完整回归沿原 preflight
+链覆盖，不增重复顶层叶子。缺 Probe/supervisor helper 的控制包拒绝；
+setup/release/phase6 三份包夹具同步补全，定向和完整均通过。
+
+真实验收总耗时 210.631 秒；独立监督持续 43.27 秒、观察 29 次续期，
+started seq 2、最终 seq 31；调用者退出后仍存活，双族新连接与 Alice 额度拒绝、
+重复启动和旧 token 拒绝、正常停止净撤销、第二代独立启动/停止均通过。
+原持续父端 41.354 秒/34 次续期及绑定漂移拒绝保持通过。
+长路径 socket、目录身份和 Windows 快照入口权限的失败输入保留；
+入口权限只在容器私有夹具规范为 0750，并断言源码字节不变。
+
+完整 Jobs 6、54/54 唯一叶子通过，cache_hit=false、排队 400 ms；
+39 条非全程资源采样最高观察 719.43% CPU / 725.6 MiB，不称真实峰值。
+入口较上一阶段 548773 ms 少 13448 ms，输入和负载不同，不作稳定提速结论。
+八份成功快照的相关源码原始 SHA 与最终文件一致，核验保存在完整目录
+`verification.md`；Bash syntax/ShellCheck error、Python AST 和差异检查通过。
+首轮完整发现包夹具缺 helper 后主动停止，修正后集中重跑本次完整；
+失败输入及日志保留，成功重复源码归档、提取副本和本轮临时脚本清理。
+
+仅交付内部 Linux root owner/control/ACK；systemd、原生宿主/arm64/公网、
+重启卸载、启用期更新/重启、菜单/schema/Compose、旧 conntrack、
+真实自动跳跃和完整协议管理继续 deferred，整体目标保持 active。
 
 ## 第六步：发布与完整验收
 

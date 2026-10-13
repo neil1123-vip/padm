@@ -544,17 +544,20 @@ runDockerPortHoppingGuardedRegression() {
         bash -n "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
-        python3 - "${PROJECT_ROOT}/docker/lib/port-hopping-probe.py" <<'PY' &&
+        python3 - "${PROJECT_ROOT}/docker/lib/port-hopping-probe.py" \
+            "${PROJECT_ROOT}/docker/lib/port-hopping-supervisor.py" <<'PY' &&
 import ast
 from pathlib import Path
 import sys
-ast.parse(Path(sys.argv[1]).read_text(), filename=sys.argv[1])
+for path in sys.argv[1:]:
+    ast.parse(Path(path).read_text(), filename=path)
 PY
         python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded.py" &&
         PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
             "${TMP_DIR}/hopping-parent-${BASHPID:-$$}" \
             hopping-finite-parent runDockerPortHoppingGuardedParentRegression \
-            hopping-supervised-parent runDockerPortHoppingSupervisedParentRegression
+            hopping-supervised-parent runDockerPortHoppingSupervisedParentRegression \
+            hopping-supervisor-parent runDockerPortHoppingSupervisorParentRegression
 }
 
 runDockerPortHoppingGuardedParentRegression() {
@@ -563,6 +566,10 @@ runDockerPortHoppingGuardedParentRegression() {
 
 runDockerPortHoppingSupervisedParentRegression() {
     python3 "${PROJECT_ROOT}/docker/tests/port-hopping-supervised-parent.py"
+}
+
+runDockerPortHoppingSupervisorParentRegression() {
+    python3 "${PROJECT_ROOT}/docker/tests/port-hopping-supervisor-parent.py"
 }
 
 runDockerPortHoppingProbeRegression() {
@@ -722,6 +729,7 @@ registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipR
 registerRegressionFunctionLeaf docker-port-hopping-preflight runDockerPortHoppingPreflightRegression
 registerRegressionFunctionLeaf docker-port-hopping-probe runDockerPortHoppingProbeRegression
 registerRegressionFunctionLeaf docker-port-hopping-guarded runDockerPortHoppingGuardedRegression
+registerRegressionFunctionLeaf docker-port-hopping-supervisor runDockerPortHoppingSupervisorParentRegression
 registerRegressionFunctionLeaf docker-port-hopping-target runDockerPortHoppingTargetRegression
 registerRegressionFunctionLeaf docker-port-hopping-target-real runDockerPortHoppingTargetRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression

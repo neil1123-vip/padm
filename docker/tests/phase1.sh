@@ -1121,7 +1121,8 @@ runControl 13 broken-bundle "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh \
     docker/lib/schedule.sh docker/lib/geo.sh docker/lib/control-sync.sh docker/lib/control.sh \
     docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py \
-    docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py; do
+    docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py \
+    docker/lib/port-hopping-probe.py docker/lib/port-hopping-supervisor.py; do
     incompleteSource="${TEST_ROOT}/incomplete-${missing//\//-}"
     copyBundleFixture "${incompleteSource}"
     rm -f -- "${incompleteSource}/${missing}"

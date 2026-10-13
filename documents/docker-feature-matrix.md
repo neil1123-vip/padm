@@ -84,7 +84,14 @@ Linux amd64 私有 daemon 已验两族新连接的刚跨额度撤销及发布失
 链与规则；外来冲突不阻止精确自有清理。无全域原子预留或实时父子授权，
 active state 不能作为最终启用成功，生产启用及管理状态不变。
 3e.2b.1 固定 bound 诊断出口绑定实际启动采用的锁、固定输入及 state/live，
-前后严格拒绝版本漂移，不重渲染；它不授予 net 写权限，实时父子交接继续待实施。
+前后严格拒绝版本漂移，不重渲染；它不授予 net 写权限。
+后续内部只读 Probe、同锁有限写门与持锁持续会话分别验证新挑战、固定投影和失败撤销。
+3e.2b.3d 增加 Linux root 独立监督、自取锁与本轮 bound，seq 2 后复验才返回启动 ACK；
+状态和停止走 root Unix socket 新挑战及 pidfd，不借用调用者旧锁或保存的 JSON 授权。
+commit 前断流不启动持锁 Bash，失败会话保留；commit 后 ACK 丢失可实时查询同一 owner。
+停止须净撤销回执、Bash 实际退出和原锁释放后才确认，不自动恢复未知 owner。
+仅限内部入口，菜单/schema/Compose、启用期更新/重启、旧 conntrack 排空、
+真实自动跳跃、原生宿主/arm64/公网与完整协议管理继续 `deferred`；阶段验收见实施计划。
 
 3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，
 证据和剩余限制见[真实 TLS 验收基线](docker-tls-real-baseline.md)。
