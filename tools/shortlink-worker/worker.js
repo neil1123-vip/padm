@@ -1,4 +1,7 @@
+import qrImage from "qr-image";
+
 const MAX_BODY_BYTES = 128 * 1024;
+const MAX_QR_BYTES = 2953;
 const SHORT_PATH = /^\/s\/([0-9a-f]{32})$/;
 
 function response(body, status = 200, contentType = "text/plain; charset=utf-8") {
@@ -8,6 +11,8 @@ function response(body, status = 200, contentType = "text/plain; charset=utf-8")
             "Content-Type": contentType,
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Vary": "Accept",
         },
     });
 }
@@ -38,7 +43,22 @@ export default {
         try {
             if (request.method === "GET") {
                 const value = await env.KV.get(match[1]);
-                return value === null ? response("Not found\n", 404) : response(value);
+                if (value === null) return response("Not found\n", 404);
+                if (url.searchParams.get("format") === "png" ||
+                    (url.searchParams.get("format") !== "text" &&
+                     (request.headers.get("Accept") || "").split(",").some((type) =>
+                         /^\s*text\/html\s*(?:;|$)/i.test(type) &&
+                         !/;\s*q\s*=\s*0(?:\.0*)?\s*(?:;|$)/i.test(type)))) {
+                    if (new TextEncoder().encode(value).length > MAX_QR_BYTES) {
+                        return response("完整协议超过单张二维码容量；在短链后加 ?format=text 获取文本并复制导入。\n", 422);
+                    }
+                    const image = response(qrImage.imageSync(value, {
+                        type: "png", ec_level: "L", size: 8, margin: 4,
+                    }), 200, "image/png");
+                    image.headers.set("Content-Disposition", 'inline; filename="padm-node.png"');
+                    return image;
+                }
+                return response(value);
             }
             if (request.method === "DELETE") {
                 await env.KV.delete(match[1]);

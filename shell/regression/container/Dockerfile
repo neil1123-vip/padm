@@ -19,9 +19,11 @@ COPY --from=docker-daemon /usr/local/bin/dockerd /usr/local/bin/containerd /usr/
 COPY --from=jq /jq /usr/local/bin/jq
 COPY --from=node /usr/local/ /usr/local/
 RUN npm install --global --no-audit --no-fund wrangler@4.149.0
+RUN npm cache add --cache /opt/padm-npm-cache qr-image@3.2.0 jsqr@1.4.0 pngjs@7.0.0
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-regression
 
 WORKDIR /work
 ENV HOME=/tmp/padm-regression-home TMPDIR=/tmp/padm-regression-tmp
+ENV NPM_CONFIG_CACHE=/opt/padm-npm-cache
 ENTRYPOINT ["bash", "/usr/local/bin/padm-regression"]
 CMD ["fast"]

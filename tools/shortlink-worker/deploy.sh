@@ -5,6 +5,7 @@ scriptDir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 stateDir="${scriptDir}/.state"
 keyFile="${stateDir}/api-key"
 configFile="${stateDir}/wrangler.toml"
+domainFile="${stateDir}/custom-domain"
 wrangler=(npx --yes wrangler@4.149.0)
 
 deployLine() {
@@ -44,8 +45,8 @@ deployLine '90' '└────────────────────
 deployStage 1 环境准备
 
 umask 077
-[[ ! -L "${stateDir}" && ! -L "${keyFile}" && ! -L "${configFile}" ]] || {
-    deployLine '1;31' '  .state、API Key 和部署配置不能是符号链接' >&2
+[[ ! -L "${stateDir}" && ! -L "${keyFile}" && ! -L "${configFile}" && ! -L "${domainFile}" ]] || {
+    deployLine '1;31' '  .state、API Key、部署配置和域名文件不能是符号链接' >&2
     exit 1
 }
 mkdir -p "${stateDir}"
@@ -55,6 +56,7 @@ runDir=$(mktemp -d "${stateDir}/.tmp-deploy.XXXXXX")
 nodeReady() {
     command -v node >/dev/null 2>&1 &&
         command -v npx >/dev/null 2>&1 &&
+        command -v npm >/dev/null 2>&1 &&
         node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' >/dev/null 2>&1
 }
 
@@ -139,9 +141,13 @@ command -v openssl >/dev/null 2>&1 || {
     exit 1
 }
 deployStage 2 'Cloudflare 授权'
+terminalReady=false
+if { exec 3<>/dev/tty; } 2>/dev/null; then
+    terminalReady=true
+fi
 if [[ "${system}" == Linux ]]; then
     if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
-        if ! { exec 3<>/dev/tty; } 2>/dev/null; then
+        if [[ "${terminalReady}" != true ]]; then
             deployLine '1;31' '  无交互终端，请设置 CLOUDFLARE_API_TOKEN 和 CLOUDFLARE_ACCOUNT_ID' >&2
             exit 1
         fi
@@ -160,13 +166,14 @@ if [[ "${system}" == Linux ]]; then
             '  Account ID：Workers & Pages（Workers 与 Pages）→ Account Details（账户详情）' \
             '  → Account ID（账户 ID）' >&3
         if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-            read -r -s -u 3 -p '  Cloudflare API Token（隐藏输入）: ' CLOUDFLARE_API_TOKEN
+            printf '%s' '  Cloudflare API Token（隐藏输入）: ' >&3
+            read -r -s -u 3 CLOUDFLARE_API_TOKEN
             printf '\n' >&3
         fi
         if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
-            read -r -u 3 -p '  Cloudflare Account ID: ' CLOUDFLARE_ACCOUNT_ID
+            printf '%s' '  Cloudflare Account ID: ' >&3
+            read -r -u 3 CLOUDFLARE_ACCOUNT_ID
         fi
-        exec 3>&-
     fi
     [[ "${CLOUDFLARE_API_TOKEN}" =~ ^[A-Za-z0-9_-]+$ &&
         "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[0-9a-fA-F]{32}$ ]] || {
@@ -175,17 +182,54 @@ if [[ "${system}" == Linux ]]; then
     }
     export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
 fi
+customDomain=
+if [[ -e "${domainFile}" ]]; then
+    [[ -f "${domainFile}" ]] || { deployLine '1;31' '  自定义域名路径不是普通文件' >&2; exit 1; }
+    customDomain=$(<"${domainFile}")
+fi
+if [[ "${terminalReady}" == true ]]; then
+    printf '%s\n' \
+        '  可选：填写当前 Cloudflare 账户下已激活域名的专用子域名' \
+        '  例如 go.example.com；无需手动添加 DNS 或证书' >&3
+    if [[ -n "${customDomain}" ]]; then
+        printf '  已保存域名：%s\n' "${customDomain}" >&3
+        printf '%s' '  自定义域名（回车复用）: ' >&3
+    else
+        printf '%s' '  自定义域名（可选，回车使用 workers.dev）: ' >&3
+    fi
+    read -r -u 3 domainInput
+    customDomain=${domainInput:-${customDomain}}
+fi
+if [[ -n "${customDomain}" ]]; then
+    customDomain=$(node - "${customDomain}" <<'NODE'
+const domain = process.argv[2].toLowerCase();
+const labels = domain.split(".");
+if (domain.length > 253 || labels.length < 2 ||
+    !labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
+    !/[a-z]/.test(labels.at(-1))) {
+  console.error("自定义域名无效：仅填写域名，不含协议、路径、端口或通配符");
+  process.exit(1);
+}
+process.stdout.write(domain);
+NODE
+    )
+    [[ "${terminalReady}" == true ]] || {
+        deployLine '1;31' '  自定义域名部署需要交互终端，请在 SSH 终端重新运行' >&2
+        exit 1
+    }
+fi
 
 deployStage 3 'Worker 部署'
 sourceDir=${scriptDir}
-if [[ ! -f "${scriptDir}/worker.js" || ! -f "${scriptDir}/wrangler.toml" ]]; then
+if [[ ! -f "${scriptDir}/worker.js" || ! -f "${scriptDir}/wrangler.toml" ||
+      ! -f "${scriptDir}/package.json" || ! -f "${scriptDir}/package-lock.json" ]]; then
     deployLine '90' '  下载 Worker 源码和部署模板…'
     curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 60 \
         https://api.github.com/repos/neil1123-vip/padm/commits/main -o "${runDir}/commit.json"
     sourceRef=$(node -e 'const s = require(process.argv[1]).sha; if (!/^[0-9a-f]{40}$/.test(s)) process.exit(1); process.stdout.write(s)' \
         "${runDir}/commit.json")
-    # 两个文件固定到同一提交，避免下载期间分支更新导致混用版本。
-    for sourceFile in worker.js wrangler.toml; do
+    # 源码、模板和依赖锁定到同一提交，避免下载期间分支更新导致混用版本。
+    for sourceFile in worker.js wrangler.toml package.json package-lock.json; do
         curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 60 \
             "https://raw.githubusercontent.com/neil1123-vip/padm/${sourceRef}/tools/shortlink-worker/${sourceFile}" \
             -o "${runDir}/${sourceFile}"
@@ -216,29 +260,41 @@ chmod 600 "${keyFile}"
 if [[ ! -e "${configFile}" ]]; then
     cp -- "${sourceDir}/wrangler.toml" "${configFile}"
 fi
-cp -- "${sourceDir}/worker.js" "${stateDir}/worker.js"
+cp -- "${sourceDir}/"{worker.js,package.json,package-lock.json} "${stateDir}/"
+deployLine '90' '  安装 PNG 二维码依赖…'
+npm ci --prefix "${stateDir}" --omit=dev --ignore-scripts --no-audit --no-fund
 secretsFile="${runDir}/secrets.env"
 outputFile="${runDir}/wrangler-output.jsonl"
 printf 'API_KEY=%s\n' "${apiKey}" >"${secretsFile}"
 : >"${outputFile}"
 
 deployLine '90' '  发布 Worker，下面显示 Cloudflare 部署输出'
+deployArgs=(deploy --config "${configFile}" --secrets-file "${secretsFile}" --keep-vars)
+[[ -z "${customDomain}" ]] || deployArgs+=(--domains "${customDomain}")
 (
     cd -- "${stateDir}"
     # Wrangler 负责浏览器授权或读取 CLOUDFLARE_API_TOKEN，不解析登录日志。
-    WRANGLER_OUTPUT_FILE_PATH="${outputFile}" \
-        "${wrangler[@]}" deploy --config "${configFile}" --secrets-file "${secretsFile}" --keep-vars
+    if [[ -n "${customDomain}" ]]; then
+        # 域名冲突必须由终端确认，防止重定向输出或 CI 默认覆盖已有绑定。
+        CI=false WRANGLER_OUTPUT_FILE_PATH="${outputFile}" \
+            "${wrangler[@]}" "${deployArgs[@]}" <&3 >&3 2>&3
+    else
+        WRANGLER_OUTPUT_FILE_PATH="${outputFile}" "${wrangler[@]}" "${deployArgs[@]}"
+    fi
 )
 
 workerUrl=$(
-    node - "${outputFile}" <<'NODE'
+    node - "${outputFile}" "${customDomain}" <<'NODE'
 const fs = require("node:fs");
 const entries = fs.readFileSync(process.argv[2], "utf8").split(/\r?\n/).filter(Boolean).map(JSON.parse);
 const deployment = entries.reverse().find((entry) => entry.type === "deploy" && entry.version === 1);
-const url = deployment?.targets?.find((value) =>
-  /^https:\/\/[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]{1,5})?\/?$/.test(value));
+const domain = process.argv[3];
+const url = domain
+  ? (deployment?.targets?.includes(`${domain} (custom domain)`) ? `https://${domain}` : undefined)
+  : deployment?.targets?.find((value) =>
+      /^https:\/\/[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]{1,5})?\/?$/.test(value));
 if (!url) {
-  console.error("Worker 已部署，但未取得有效 HTTPS 地址；请到 Cloudflare 控制台确认，原 VPS 配置保留");
+  console.error("Worker 已部署，但未确认目标地址；请到 Cloudflare 控制台确认，原 VPS 配置保留");
   process.exit(1);
 }
 process.stdout.write(url.replace(/\/$/, ""));
@@ -277,6 +333,10 @@ try {
 NODE
 fi
 mv -- "${runDir}/vps.env" "${stateDir}/vps.env"
+if [[ -n "${customDomain}" ]]; then
+    printf '%s\n' "${customDomain}" >"${runDir}/custom-domain"
+    mv -- "${runDir}/custom-domain" "${domainFile}"
+fi
 printf '\n'
 deployLine '1;32' '┌─ 部署完成 ──────────────────────────────────'
 printf '│ Worker 地址\n│ %s\n' "${workerUrl}"

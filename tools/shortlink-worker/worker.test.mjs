@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import worker from "./worker.js";
+import jsQR from "jsqr";
+import { PNG } from "pngjs";
 
 const id = "0123456789abcdef0123456789abcdef";
 const url = `https://short.example.test/s/${id}`;
@@ -13,10 +15,10 @@ const env = {
         async delete(key) { values.delete(key); },
     },
 };
-const send = (method = "GET", body, key = apiKey, bindings = env, target = url) =>
+const send = (method = "GET", body, key = apiKey, bindings = env, target = url, accept = "") =>
     worker.fetch(new Request(target, {
         method, body,
-        headers: key ? { Authorization: `Bearer ${key}` } : {},
+        headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), Accept: accept },
     }), bindings);
 
 for (const method of ["PUT", "DELETE"]) {
@@ -33,6 +35,43 @@ result = await send("GET", undefined, "");
 assert.equal(await result.text(), content);
 assert.equal(result.headers.get("Content-Type"), "text/plain; charset=utf-8");
 assert.equal(result.headers.get("Cache-Control"), "no-store");
+for (const [target, accept] of [
+    [url, "text/html,application/xhtml+xml"],
+    [url, "TEXT/HTML;q=0.8"],
+    [url, "text/html ,text/plain"],
+    [`${url}?format=png`, "text/html;q=0"],
+]) {
+    result = await send("GET", undefined, "", env, target, accept);
+    assert.equal(result.status, 200);
+    assert.equal(result.headers.get("Content-Type"), "image/png");
+    assert.equal(result.headers.get("Cache-Control"), "no-store");
+    assert.equal(result.headers.get("Vary"), "Accept");
+    assert.equal(result.headers.get("Referrer-Policy"), "no-referrer");
+    const image = PNG.sync.read(Buffer.from(await result.arrayBuffer()));
+    assert.equal(image.width, image.height);
+    assert.equal(jsQR(new Uint8ClampedArray(image.data), image.width, image.height)?.data, content);
+}
+assert.equal(await (await send("GET", undefined, "", env, `${url}?format=text`, "text/html")).text(), content);
+for (const accept of ["text/plain,text/html;q=0", "text/html; q=0.000", "text/html-other"]) {
+    result = await send("GET", undefined, "", env, url, accept);
+    assert.equal(result.headers.get("Content-Type"), "text/plain; charset=utf-8");
+    assert.equal(await result.text(), content);
+}
+const longProtocol = `vless://uuid@example.test:443?type=xhttp&extra=${"x".repeat(1800)}#中文`;
+const boundaryProtocol = longProtocol + "x".repeat(2953 - new TextEncoder().encode(longProtocol).length);
+for (const protocol of [longProtocol, boundaryProtocol]) {
+    await send("PUT", protocol);
+    result = await send("GET", undefined, "", env, url, "text/html");
+    assert.equal(result.status, 200);
+    const image = PNG.sync.read(Buffer.from(await result.arrayBuffer()));
+    assert.equal(jsQR(new Uint8ClampedArray(image.data), image.width, image.height)?.data, protocol);
+}
+await send("PUT", `${boundaryProtocol}x`);
+result = await send("GET", undefined, "", env, `${url}?format=png`);
+assert.equal(result.status, 422);
+assert.match(await result.text(), /format=text/);
+assert.equal(await (await send()).text(), `${boundaryProtocol}x`);
+await send("PUT", content);
 assert.equal((await send("PUT", "")).status, 400);
 assert.equal((await send("PUT", " ")).status, 400);
 assert.equal((await send("PUT", new Uint8Array([255]))).status, 400);
@@ -41,6 +80,10 @@ assert.equal(values.get(id), content);
 assert.equal((await send("PUT", "x".repeat(131072))).status, 201);
 assert.equal((await send("PUT", "x".repeat(131073))).status, 413);
 assert.equal(values.get(id).length, 131072);
+result = await send("GET", undefined, "", env, `${url}?format=png`);
+assert.equal(result.status, 422);
+assert.match(await result.text(), /format=text/);
+assert.equal((await send()).status, 200);
 assert.equal((await send("DELETE")).status, 200);
 assert.equal((await send()).status, 404);
 for (const method of ["GET", "PUT", "DELETE"]) {

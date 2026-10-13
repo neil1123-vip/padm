@@ -12,32 +12,42 @@ DEPLOY_TEST_REAL_NODE=$(command -v node)
 export CLOUDFLARE_API_TOKEN=test-cloudflare-token
 export CLOUDFLARE_ACCOUNT_ID=0123456789abcdef0123456789abcdef
 export PADM_INSTALL_DIR="${tmp}/padm"
-cp -- "${root}/"{deploy.sh,worker.js,wrangler.toml} "${project}/"
+cp -- "${root}/"{deploy.sh,worker.js,wrangler.toml,package.json,package-lock.json} "${project}/"
+npm ci --prefix "${project}" --omit=dev --ignore-scripts --no-audit --no-fund
 printf 'API_KEY=%064d\n' 0 >"${tmp}/dryrun.env"
 WRANGLER_SEND_METRICS=false wrangler deploy --dry-run --config "${project}/wrangler.toml" \
     --outdir "${tmp}/bundle" --secrets-file "${tmp}/dryrun.env" --keep-vars
 [[ -s "${tmp}/bundle/worker.js" ]]
+! grep -q 'require("qr-image")' "${tmp}/bundle/worker.js"
+"${DEPLOY_TEST_REAL_NODE}" "${root}/worker.runtime.test.mjs" "${project}"
 export DEPLOY_TEST_LOG="${tmp}/calls"
 cat >"${fakeBin}/npx" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 [[ "$1" == --yes && "$2" == wrangler@4.149.0 && "$3" == deploy ]]
 shift 3
-configFile= secretsFile=
+configFile= secretsFile= customDomain=
 while (($#)); do
     case "$1" in
     --secrets-file) secretsFile=$2; shift 2 ;;
     --config) configFile=$2; shift 2 ;;
+    --domains) customDomain=$2; shift 2 ;;
     --keep-vars) shift ;;
     *) printf 'unexpected option: %s\n' "$1" >&2; exit 90 ;;
     esac
 done
 [[ -f "${configFile}" && -f "${secretsFile}" && -f worker.js ]]
+[[ -f package.json && -f package-lock.json ]]
 [[ "${CLOUDFLARE_API_TOKEN}" == test-cloudflare-token ]]
 [[ "${CLOUDFLARE_ACCOUNT_ID}" == 0123456789abcdef0123456789abcdef ]]
 [[ "$(stat -c '%a' "${secretsFile}")" == 600 ]]
 grep -q '^API_KEY=[0-9a-f]\{64\}$' "${secretsFile}"
 printf 'deploy\n' >>"${DEPLOY_TEST_LOG}"
+if [[ -n "${customDomain}" ]]; then
+    [[ "${customDomain}" == go.example.com && "${CI:-}" == false ]]
+    [[ -t 0 && -t 1 && -t 2 ]]
+    printf 'domain=%s\n' "${customDomain}" >>"${DEPLOY_TEST_LOG}"
+fi
 [[ "${DEPLOY_TEST_MODE:-}" != failure ]] || { printf 'deploy failed\n' >&2; exit 17; }
 if ! grep -q '^id =' "${configFile}"; then
     awk '{ print } /^binding = "KV"$/ { print "id = \"0123456789abcdef0123456789abcdef\"" }' \
@@ -46,10 +56,22 @@ if ! grep -q '^id =' "${configFile}"; then
     printf 'created-kv\n' >>"${DEPLOY_TEST_LOG}"
 fi
 [[ "${DEPLOY_TEST_MODE:-}" != missing-url ]] || exit 0
-printf '%s\n' '{"type":"deploy","version":1,"targets":["https://padm-shortlink.example.workers.dev"]}' \
-    >"${WRANGLER_OUTPUT_FILE_PATH:?}"
+targets='["https://padm-shortlink.example.workers.dev"]'
+if [[ -n "${customDomain}" && "${DEPLOY_TEST_MODE:-}" != missing-domain ]]; then
+    targets='["https://padm-shortlink.example.workers.dev","go.example.com (custom domain)"]'
+fi
+printf '{"type":"deploy","version":1,"targets":%s}\n' "${targets}" >"${WRANGLER_OUTPUT_FILE_PATH:?}"
 SH
 chmod 755 "${fakeBin}/npx"
+cat >"${fakeBin}/npm" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == ci && "$2" == --prefix && "$4" == --omit=dev &&
+   "$5" == --ignore-scripts && "$6" == --no-audit && "$7" == --no-fund ]]
+[[ -f "$3/package.json" && -f "$3/package-lock.json" ]]
+[[ "${DEPLOY_TEST_MODE:-}" != dependency-failure ]] || exit 19
+SH
+chmod 755 "${fakeBin}/npm"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${fakeBin}/qrencode"
 chmod 755 "${fakeBin}/qrencode"
 export PATH="${fakeBin}:${PATH}"
@@ -105,12 +127,13 @@ bash "${project}/deploy.sh" >"${tmp}/output"
 [[ "$(<"${stateDir}/api-key")" == "${key}" ]]
 [[ "$(stat -c '%a' "${stateDir}/api-key")" == 600 ]]
 [[ "$(grep -c 'created-kv' "${DEPLOY_TEST_LOG}")" == 1 ]]
-for mode in failure missing-url; do
+for mode in failure missing-url dependency-failure; do
     status=0
     DEPLOY_TEST_MODE="${mode}" bash "${project}/deploy.sh" >"${tmp}/output" 2>"${tmp}/error" || status=$?
     [[ "${status}" != 0 ]]
     grep -q '部署中止 · Worker 部署' "${tmp}/error"
     if [[ "${mode}" == failure ]]; then [[ "${status}" == 17 ]]; fi
+    if [[ "${mode}" == dependency-failure ]]; then [[ "${status}" == 19 ]]; fi
     ! grep -q '部署完成' "${tmp}/output"
     cmp "${tmp}/previous.env" "${stateDir}/vps.env"
     cmp "${tmp}/previous.json" "${PADM_INSTALL_DIR}/qr-shortener.json"
@@ -168,9 +191,10 @@ cmp "${tmp}/previous.env" "${stateDir}/vps.env"
 
 # 真实 80 列终端检查颜色开关、隐藏输入及 Token 不落盘。
 mkdir -p "${tmp}/prompt-project"
-cp -- "${root}/"{deploy.sh,worker.js,wrangler.toml} "${tmp}/prompt-project/"
+cp -- "${root}/"{deploy.sh,worker.js,wrangler.toml,package.json,package-lock.json} "${tmp}/prompt-project/"
 python3 - "${tmp}/prompt-project" <<'PY'
 import fcntl
+import json
 import os
 import pathlib
 import pty
@@ -186,7 +210,26 @@ import unicodedata
 project = pathlib.Path(sys.argv[1])
 token = b"test-cloudflare-token"
 account = b"0123456789abcdef0123456789abcdef"
-for mode in ("color", "no-color", "dumb"):
+cases = [(mode, "") for mode in ("color", "no-color", "dumb")]
+cases += [("invalid", domain) for domain in (
+    "https://go.example.com", "go.example.com/s", "go.example.com:443",
+    "*.example.com", "go..example.com", "-go.example.com", "go.example.com?x=1",
+    "user@go.example.com", "go example.com", "127.0.0.1", "a" * 64 + ".example.com",
+)]
+cases += [
+    ("domain-failure", "go.example.com"),
+    ("domain-missing", "go.example.com"),
+    ("custom", "GO.Example.COM"),
+    ("reuse", ""),
+    ("custom-env", ""),
+    ("custom-redirect", ""),
+]
+for mode, domain in cases:
+    saved = {name: (project / ".state" / name).read_bytes()
+             for name in ("vps.env", "custom-domain") if (project / ".state" / name).exists()}
+    config = pathlib.Path(os.environ["PADM_INSTALL_DIR"]) / "qr-shortener.json"
+    previous_config = config.read_bytes()
+    calls = pathlib.Path(os.environ["DEPLOY_TEST_LOG"]).read_bytes()
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
     pid = os.fork()
@@ -197,17 +240,27 @@ for mode in ("color", "no-color", "dumb"):
         for fd in range(3):
             os.dup2(slave, fd)
         os.close(slave)
-        env = dict(os.environ, CLOUDFLARE_API_TOKEN="", CLOUDFLARE_ACCOUNT_ID="",
+        env = dict(os.environ, CLOUDFLARE_API_TOKEN=token.decode() if mode == "custom-env" else "",
+                   CLOUDFLARE_ACCOUNT_ID=account.decode() if mode == "custom-env" else "",
                    TERM="dumb" if mode == "dumb" else "xterm-256color",
-                   NO_COLOR="1" if mode == "no-color" else "", PADM_NO_COLOR="")
+                   NO_COLOR="1" if mode == "no-color" else "", PADM_NO_COLOR="", CI="true",
+                   DEPLOY_TEST_MODE={"domain-failure": "failure", "domain-missing": "missing-domain"}.get(mode, ""))
+        if mode in ("custom-env", "custom-redirect"):
+            fd = os.open(project / "redirected.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            os.dup2(fd, 1)
+            os.dup2(fd, 2)
+            os.close(fd)
         os.execve("/bin/bash", ["bash", str(project / "deploy.sh")], env)
     os.close(slave)
     output = b""
     try:
-        for prompt, value in [(b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account)]:
+        prompts = [] if mode == "custom-env" else [
+            (b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account)]
+        prompts.append(("  自定义域名（".encode(), domain.encode()))
+        for prompt, value in prompts:
             deadline = time.monotonic() + 20
             while prompt not in output or not output.endswith(b": "):
-                assert time.monotonic() < deadline, "credential prompt timed out"
+                assert time.monotonic() < deadline, f"prompt timed out: {mode}: {output!r}"
                 if select.select([master], [], [], 1)[0]:
                     output += os.read(master, 65536)
             os.write(master, value + b"\n")
@@ -224,11 +277,14 @@ for mode in ("color", "no-color", "dumb"):
                 output += chunk
         _, status = os.waitpid(pid, 0)
         pid = None
-        assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors="replace")
+        if mode in ("custom-env", "custom-redirect"):
+            output += (project / "redirected.log").read_bytes()
+        expected_success = mode not in ("invalid", "domain-failure", "domain-missing")
+        assert (os.waitstatus_to_exitcode(status) == 0) == expected_success, output.decode(errors="replace")
         assert token not in output, "deployment Token echoed"
-        assert (b"\x1b[" in output) == (mode == "color"), f"wrong color mode: {mode}"
+        assert (b"\x1b[" in output) == (mode not in ("no-color", "dumb", "custom-env", "custom-redirect")), f"wrong color mode: {mode}"
         plain = re.sub(rb"\x1b\[[0-9;]*m", b"", output).decode()
-        for instruction in (
+        instructions = (
             "https://dash.cloudflare.com/profile/api-tokens",
             "Create Token（创建令牌）",
             "Create Custom Token（创建自定义令牌）",
@@ -238,13 +294,34 @@ for mode in ("color", "no-color", "dumb"):
             "Continue to summary（继续查看摘要）",
             "Account Details（账户详情）",
             "只显示一次",
-        ):
+        ) if mode != "custom-env" else ()
+        for instruction in instructions:
             assert instruction in plain, f"missing authorization instruction: {instruction}"
-        for number, title in enumerate(("环境准备", "Cloudflare 授权", "Worker 部署", "保存配置"), 1):
-            assert f"[{number}/4] {title}" in plain
+        if expected_success:
+            for number, title in enumerate(("环境准备", "Cloudflare 授权", "Worker 部署", "保存配置"), 1):
+                assert f"[{number}/4] {title}" in plain
         for line in plain.splitlines():
             width = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line)
-            assert width <= 80, f"line exceeds 80 columns: {line!r}"
+            if mode != "invalid":
+                assert width <= 80, f"line exceeds 80 columns: {line!r}"
+        if not expected_success:
+            assert config.read_bytes() == previous_config, "failed deployment replaced VPS config"
+            for name in ("vps.env", "custom-domain"):
+                path = project / ".state" / name
+                assert path.read_bytes() == saved[name] if name in saved else not path.exists()
+            assert "部署完成" not in plain
+            if mode == "invalid":
+                assert "自定义域名无效" in plain
+                assert pathlib.Path(os.environ["DEPLOY_TEST_LOG"]).read_bytes() == calls
+            if mode == "domain-failure":
+                assert os.waitstatus_to_exitcode(status) == 17
+        elif mode in ("custom", "reuse", "custom-env", "custom-redirect"):
+            assert (project / ".state/custom-domain").read_text().strip() == "go.example.com"
+            assert json.loads(config.read_text())["url"] == "https://go.example.com"
+            assert "https://go.example.com" in (project / ".state/vps.env").read_text()
+            assert pathlib.Path(os.environ["DEPLOY_TEST_LOG"]).read_bytes()[len(calls):].count(b"domain=go.example.com") == 1
+        else:
+            assert not (project / ".state/custom-domain").exists()
         assert (project / ".state/vps.env").is_file()
         for path in (project / ".state").rglob("*"):
             if path.is_file():
@@ -260,6 +337,12 @@ for mode in ("color", "no-color", "dumb"):
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
 PY
+cp -- "${PADM_INSTALL_DIR}/qr-shortener.json" "${tmp}/domain-previous.json"
+status=0
+setsid --wait bash "${tmp}/prompt-project/deploy.sh" >"${tmp}/output" 2>"${tmp}/error" || status=$?
+[[ "${status}" != 0 ]]
+grep -q '自定义域名部署需要交互终端' "${tmp}/error"
+cmp "${tmp}/domain-previous.json" "${PADM_INSTALL_DIR}/qr-shortener.json"
 
 # 模拟全新 VPS，用真实 tar 和 SHA-256 验证下载、安装及失败路径。
 for arch in x64 arm64; do
@@ -267,7 +350,7 @@ for arch in x64 arm64; do
     mkdir -p "${tmp}/archive/${nodeName}/bin"
     printf '#!/usr/bin/env bash\nexec "${DEPLOY_TEST_REAL_NODE}" "$@"\n' \
         >"${tmp}/archive/${nodeName}/bin/node"
-    cp -- "${fakeBin}/npx" "${tmp}/archive/${nodeName}/bin/npx"
+    cp -- "${fakeBin}/"{npx,npm} "${tmp}/archive/${nodeName}/bin/"
     chmod 755 "${tmp}/archive/${nodeName}/bin/node"
     tar -cJf "${tmp}/node-${arch}.tar.xz" -C "${tmp}/archive" "${nodeName}"
 done
@@ -313,7 +396,7 @@ chmod 755 "${fakeBin}/"{curl,apt-get,dnf,yum}
 command() {
     if [[ "${DEPLOY_TEST_BOOTSTRAP:-}" == true && "$1" == -v ]]; then
         case "$2" in
-        node | npx)
+        node | npx | npm)
             if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" != old-node &&
                 "${PATH}" != "${DEPLOY_TEST_PROJECT}/.state/node-v22.23.3-linux-"* ]]; then
                 return 1
@@ -350,7 +433,7 @@ for spec in apt-get:fresh:x64 dnf:old-node:arm64 yum:standalone:x64 \
     mkdir -p "${DEPLOY_TEST_PROJECT}"
     cp -- "${root}/deploy.sh" "${DEPLOY_TEST_PROJECT}/"
     if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE}" != standalone ]]; then
-        cp -- "${root}/"{worker.js,wrangler.toml} "${DEPLOY_TEST_PROJECT}/"
+        cp -- "${root}/"{worker.js,wrangler.toml,package.json,package-lock.json} "${DEPLOY_TEST_PROJECT}/"
     fi
     if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE}" == *failure ]]; then
         mkdir -p "${DEPLOY_TEST_PROJECT}/.state"
@@ -384,6 +467,7 @@ for spec in apt-get:fresh:x64 dnf:old-node:arm64 yum:standalone:x64 \
         if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE}" == standalone ]]; then
             grep -q '/0123456789abcdef0123456789abcdef01234567/tools/shortlink-worker/worker.js' "${tmp}/downloads"
             grep -q '/0123456789abcdef0123456789abcdef01234567/tools/shortlink-worker/wrangler.toml' "${tmp}/downloads"
+            grep -q '/0123456789abcdef0123456789abcdef01234567/tools/shortlink-worker/package-lock.json' "${tmp}/downloads"
         fi
         ;;
     esac

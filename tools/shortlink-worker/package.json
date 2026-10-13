@@ -1,0 +1,13 @@
+{
+  "name": "padm-shortlink-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "qr-image": "3.2.0"
+  },
+  "devDependencies": {
+    "jsqr": "1.4.0",
+    "pngjs": "7.0.0"
+  }
+}

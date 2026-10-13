@@ -5511,6 +5511,7 @@ JSON
 )
 
 runShortlinkWorkerRegression() {
+    npm ci --prefix "${PROJECT_ROOT}/tools/shortlink-worker" --ignore-scripts --no-audit --no-fund
     node --experimental-default-type=module "${PROJECT_ROOT}/tools/shortlink-worker/worker.test.mjs"
 }
 

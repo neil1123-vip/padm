@@ -2,7 +2,7 @@
 
 此组件将完整协议链接保存到 Cloudflare KV，并提供短 HTTPS 地址。padm 将短地址生成为终端
 字符二维码，适用于完整链接二维码超出显示宽度的场景，无需在 VPS 上另建订阅服务。
-短地址返回协议文本，客户端可将其作为订阅地址使用。
+在浏览器中打开短地址会显示完整协议的 PNG 二维码；订阅客户端读取时返回协议文本。
 
 ## 快速部署
 
@@ -27,8 +27,12 @@ bash tools/shortlink-worker/deploy.sh
   权限；Account ID 可从 Cloudflare 账号概览获取。
 
 脚本交互收集 Token 和 Account ID，Token 隐藏输入且不写入部署状态目录。
+随后询问可选的自定义域名，例如 `go.example.com`。首次部署直接回车使用 `workers.dev`；
+填写时只输入域名，不加 `https://`、路径或端口。域名所属站点须已在同一 Cloudflare 账户激活，
+建议使用专用子域名。Wrangler 自动绑定域名、创建 DNS 记录及证书，成功后 padm 使用该域名生成短链二维码。
+已有 DNS 或 Worker 绑定冲突时，按终端提示确认或取消。
 自动部署可通过环境变量 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID` 提供凭据。
-未启用 `workers.dev` 子域名时，按 Wrangler 提示完成设置。
+使用自定义域名时仍须在交互终端运行；未启用 `workers.dev` 子域名时，按 Wrangler 提示完成设置。
 
 缺少 `wget` 时，Debian/Ubuntu 可执行
 `apt-get update && apt-get install -y ca-certificates wget`；Rocky/AlmaLinux 可执行
@@ -69,8 +73,14 @@ padm
 环境变量仅作用于当前 shell 及其子进程。停用时删除自动配置，并清除已设置的环境变量。
 控制台部署不会安装 VPS 的 `qrencode`，需自行安装。
 
-v2rayN/v2rayNG 使用短地址时，将其添加为订阅并更新。扫码自动添加订阅的行为取决于客户端版本
-及扫码入口，客户端实机兼容性尚未验证。Worker 返回协议文本，不执行 HTTP 重定向。
+直接导入节点时，用手机相机扫描终端小二维码并在浏览器打开，保存显示的 PNG，
+再使用客户端的图片识别入口导入。图片编码的是完整协议链接。用 v2rayNG 自带扫描器
+直接扫终端的短 HTTPS 地址，仍会添加订阅；更新订阅后取得节点。
+
+浏览器访问通过 `Accept: text/html` 返回 PNG；在地址后加 `?format=png` 可强制取图，
+加 `?format=text` 可强制获取协议文本。单张 PNG 最多容纳 2953 字节的 UTF-8 文本，
+超限返回 `422` 并提示改用文本导入。二维码在 Worker 内生成，不调用第三方制码服务。
+手机实机导入尚未验证。
 
 ## 部署状态与更新
 
@@ -84,11 +94,15 @@ v2rayN/v2rayNG 使用短地址时，将其添加为订阅并更新。扫码自�
 | --- | --- |
 | `api-key` | Worker 写入及删除密钥，权限为 `600` |
 | `wrangler.toml` | Worker 配置和账号专属的 KV 绑定 |
+| `custom-domain` | 成功部署的自定义域名，后续回车复用，权限为 `600` |
 | `worker.js` | 本次部署使用的 Worker 源码 |
+| `package.json` / `package-lock.json` | PNG 生成依赖及锁定版本 |
 | `vps.env` | VPS 环境变量配置备份，权限为 `600` |
 
 重复部署复用 API Key 和 KV 绑定。首次部署前可修改模板 `wrangler.toml` 的 Worker 名称；
-后续修改名称或域名配置应编辑 `.state/wrangler.toml`。
+后续修改名称应编辑 `.state/wrangler.toml`。自定义域名每次部署都会询问，回车复用已保存值；
+也可输入新域名替换。仅在控制台添加的其他自定义域名，应同步写入 `.state/wrangler.toml` 的
+`routes`，否则下次部署可能移除这些绑定。
 从控制台部署迁入脚本时，先将原密钥保存到 `.state/api-key`，并将含 KV ID 的原配置
 保存到 `.state/wrangler.toml`。已有配置但密钥丢失时，脚本停止并要求恢复密钥。
 部署或配置保存失败时，不替换已有 VPS 配置。`.state/` 已加入 `.gitignore`，仍需妥善备份和保管。
@@ -106,11 +120,11 @@ KV 使用最终一致性，新记录及删除操作的跨地区可见性可能�
 新地址暂时无法读取时，可稍后重试；删除记录也不保证所有地区立即失效。
 二维码尺寸取决于地址长度，较短的自定义域名可进一步减少显示宽度。
 
-## 控制台部署
+## 控制台配置
 
-1. 在 Workers & Pages 创建 Worker，粘贴 `worker.js` 的完整源码并部署。
-2. 在 Workers KV 创建 namespace，并在 Worker 的 Bindings 中以 `KV` 为变量名绑定。
-3. 在 Settings → Variables and Secrets 添加 Secret `API_KEY`，保存并重新部署。
+此版本依赖 `qr-image`，请使用部署脚本发布，不能仅粘贴 `worker.js` 源码。
+脚本创建 KV 并以 `KV` 为变量名绑定，密钥写入 Secret `API_KEY`。
+部署后可在 Worker 的 Bindings（绑定）及 Settings（设置）中查看这些配置。
 
 API Key 应为 32–128 个字母、数字、下划线或连字符，可用 `openssl rand -hex 32` 生成。
 VPS 配置方式见上文“配置与使用”。
@@ -122,7 +136,9 @@ Worker 接口使用 `/s/<id>`，`id` 为随机生成的 32 位小写十六进制
 | 方法与路径 | 鉴权 | 成功响应 |
 | --- | --- | --- |
 | `PUT /s/<id>` | `Authorization: Bearer <API_KEY>` | `201`，正文为短地址 |
-| `GET /s/<id>` | 无 | `200`，正文为保存的原始文本 |
+| `GET /s/<id>` | 无 | `200`，浏览器请求返回 PNG，其他请求返回原始文本 |
+| `GET /s/<id>?format=png` | 无 | `200`，完整协议 PNG；超限返回 `422` |
+| `GET /s/<id>?format=text` | 无 | `200`，保存的原始文本 |
 | `DELETE /s/<id>` | `Authorization: Bearer <API_KEY>` | `200`，删除对应记录 |
 | `GET /` | 无 | `200`，正文为 `ok` |
 
@@ -131,7 +147,8 @@ Worker 接口使用 `/s/<id>`，`id` 为随机生成的 32 位小写十六进制
 
 部署脚本固定使用 `wrangler@4.149.0`。Linux 优先复用 Node.js 22+ 和 npm；缺少可用运行时
 则下载 Node.js `22.23.3`，校验固定 SHA-256 后安装到 `.state/`，不替换系统 Node.js。
-缺少配套源码或模板时，从 `main` 分支的同一提交下载 `worker.js` 和 `wrangler.toml`。
+缺少配套文件时，从 `main` 分支的同一提交下载源码、模板、依赖清单和锁文件。
+部署前执行 `npm ci --omit=dev --ignore-scripts`，由 Wrangler 将 PNG 依赖打包到 Worker。
 
 仓库根目录通过 PowerShell 7.3+ 和 Docker Desktop 的 Linux 引擎执行定向回归：
 
@@ -142,6 +159,9 @@ Worker 接口使用 `/s/<id>`，`id` 为随机生成的 32 位小写十六进制
 回归覆盖 Worker 鉴权、文本读写、大小限制、错误响应和删除；VPS 上传、失败回退、
 订阅地址保留及配置权限；部署首次运行、状态复用、依赖安装、下载与校验失败、
 隐藏输入、80 列输出和颜色开关。文档中的一行下载入口也纳入验证。
+自定义域名回归覆盖首次绑定、回车复用、凭据已设置及输出重定向时的交互、非法输入、
+绑定失败或缺少目标地址时保留原配置。
+PNG 回归使用独立识别库解码含中文及长协议链接的图片，检查浏览器/订阅响应、容量限制及旧记录兼容。
 测试不调用 Cloudflare，不能替代实际发布、客户端扫码或跨地区 KV 验收。
 
 相关资料：[KV 部署](https://developers.cloudflare.com/kv/get-started/)、
