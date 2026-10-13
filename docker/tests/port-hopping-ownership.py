@@ -87,12 +87,23 @@ def tool():
                     "ss": ["-H", "-u", "-a", "-n"]}
         if args != expected[family]:
             sys.exit(99)
+        if family == "nft":
+            scans = fixture.get("conflict_scans", 0) + 1
+            fixture["conflict_scans"] = scans
+            fixture_path.write_text(json.dumps(fixture))
+        if fixture.get("post_failure") == family:
+            print("fixture post-start inspection failed", file=sys.stderr)
+            sys.exit(1)
         if family == "ip":
             print(json.dumps([{"ifindex": 1, "ifname": "eth0", "addr_info": [
                 {"family": "inet", "local": RUN_VALUES[3], "prefixlen": 24},
                 {"family": "inet6", "local": RUN_VALUES[4], "prefixlen": 64}]}]))
         elif family == "nft":
-            print('{"nftables":[]}')
+            print(json.dumps(fixture.get("nft", {"nftables": []})))
+        else:
+            sys.stdout.write(fixture.get("ss", ""))
+            if fixture.get("conflict_scans", 0) >= 3:
+                (fixture_path.parent / "post-ss.done").touch()
         return
     if family not in FAMILIES:
         sys.exit(99)
@@ -113,6 +124,8 @@ def tool():
             fixture_path.write_text(json.dumps(fixture))
             os.kill(os.getppid(), signal.SIGTERM)
         print("\n".join(fixture[family]))
+        if family == "ip6tables" and (fixture_path.parent / "post-ss.done").exists():
+            (fixture_path.parent / "post-audit.done").touch()
         return
     if action not in {"-D", "-X", "-A", "-N", "-I"} or not arguments:
         sys.exit(99)
@@ -176,6 +189,9 @@ def tool():
         replacement = state_root / ".lock-replacement"
         replacement.touch(mode=0o600)
         os.replace(replacement, state_root / ".port-hopping.lock")
+    if action == "-I" and arguments[0] == "PREROUTING" and family == "ip6tables":
+        if fixture.get("post_conflict") and not fixture.get("post_commit"):
+            post_change(fixture, fixture["post_conflict"])
     gate = fixture.get("gate", {})
     paused = gate.get("family") == family and gate.get("action") == action and (
         arguments[0] == "PREROUTING" if gate.get("hook") else
@@ -194,14 +210,37 @@ def tool():
                 sys.exit(1)
             time.sleep(0.02)
 
+def post_change(fixture, kind):
+    if kind in FAMILIES:
+        fixture[kind].append(
+            "-A OUTPUT -p udp -m udp --dport 36561 -j DNAT --to-destination 192.0.2.1:9")
+    elif kind == "udp":
+        fixture["ss"] = "UNCONN 0 0 0.0.0.0:36562 0.0.0.0:*"
+    elif kind == "nft":
+        fixture["nft"] = {"nftables": [{"chain": {
+            "family": "inet", "table": "foreign", "name": "foreign-nat",
+            "type": "nat", "hook": "prerouting", "prio": -100}}]}
+    elif kind == "read-fail":
+        fixture["post_failure"] = "nft"
+    elif kind == "lock":
+        replacement = Path(os.environ["HOP_STATE"]).parent / ".post-lock"
+        replacement.touch(mode=0o600)
+        os.replace(replacement, replacement.parent / ".port-hopping.lock")
+        metadata = (replacement.parent / ".port-hopping.lock").stat()
+        replacement.parent.parent.joinpath("post-lock.json").write_text(
+            json.dumps([metadata.st_dev, metadata.st_ino]))
+    else:
+        raise AssertionError(kind)
+
 
 def run_python():
     arguments = sys.argv[2:]
     state_path = Path(os.environ["HOP_STATE"])
     fixture = json.loads(Path(os.environ["HOP_FIXTURE"]).read_text())
     fault = fixture.get("commit_failure")
+    post_commit = fixture.get("post_commit")
     if (len(arguments) != 8 or arguments[:3] != ["-", str(state_path.parent), "run"]
-            or not fault):
+            or not (fault or post_commit)):
         os.execv("/usr/bin/python3", ["python3", *arguments])
     body = sys.stdin.read()
     namespace = {"__name__": "__main__"}
@@ -210,7 +249,7 @@ def run_python():
 
     def inject(point):
         nonlocal triggered
-        if triggered or point != fault["point"] or namespace.get("phase") != fault["phase"]:
+        if not fault or triggered or point != fault["point"] or namespace.get("phase") != fault["phase"]:
             return False
         triggered = True
         marker = Path(os.environ["HOP_FIXTURE"]).parent / "commit.fault.json"
@@ -241,6 +280,15 @@ def run_python():
         if inject("replace"):
             raise OSError("fixture state replace failed")
         original_replace(stage, destination)
+        if post_commit and namespace.get("phase") == "active":
+            inventory = Path(os.environ["HOP_FIXTURE"])
+            current = json.loads(inventory.read_text())
+            owner = dict(line.split("=", 1) for line in namespace["state_text"]().decode().splitlines())
+            assert all(current[family] == table(family, "full", owner=owner)
+                       for family in FAMILIES), current
+            post_change(current, current["post_conflict"])
+            inventory.write_text(json.dumps(current))
+            inventory.with_name("post-commit.done").touch()
         if inject("replace-state"):
             # 同字节替换仍改变 inode，读回不能把未知归属刷新为本轮 baseline。
             descriptor, replacement = original_mkstemp(
@@ -330,7 +378,8 @@ def main():
             return dict(os.environ, PATH=f"{binaries}:{os.environ['PATH']}",
                         HOP_FIXTURE=str(paths[2]), HOP_COMMANDS=str(paths[3]),
                         HOP_STATE=str(paths[1]), HOP_COMMIT_FAULT=(
-                            "1" if json.loads(paths[2].read_text()).get("commit_failure") else ""))
+                            "1" if any(json.loads(paths[2].read_text()).get(key)
+                                       for key in ("commit_failure", "post_commit")) else ""))
 
         def command_rows(paths, running=False):
             rows = [json.loads(line) for line in paths[3].read_text().splitlines()]
@@ -389,6 +438,11 @@ def main():
         @contextmanager
         def running(paths, values=RUN_VALUES):
             paths[3].write_text("")
+            value = json.loads(paths[2].read_text())
+            value["conflict_scans"] = 0
+            paths[2].write_text(json.dumps(value))
+            for marker in ("post-ss.done", "post-audit.done"):
+                (paths[2].parent / marker).unlink(missing_ok=True)
             process = subprocess.Popen(["sh", "-c",
                 '. "$1"; STATE_ROOT=$2; shift 2; port_hopping_resources "$@"',
                 "test", str(functions), str(paths[0]), "run", *values],
@@ -441,7 +495,8 @@ def main():
             def ready():
                 owner = owner_value(paths)
                 return owner if owner["phase"] == "active" and (
-                    previous_token is None or owner["token"] != previous_token) else None
+                    previous_token is None or owner["token"] != previous_token) and (
+                    paths[2].parent / "post-audit.done").exists() else None
             owner = wait_for(process, ready, paths[0].parent.name)
             assert owner["schema_version"] == "1"
             assert len(owner["token"]) == 32 and all(
@@ -727,6 +782,49 @@ def main():
         assert rows[8:] == (expected_cleanup("iptables", "full", owner=owner)
                             + expected_cleanup("ip6tables", "detached", owner=owner)), rows
         cleaned(paths)
+
+        # 外来冲突不改变精确归属，拒绝启用后仍可回收本轮资源。
+        for kind in (*FAMILIES, "udp", "nft", "read-fail", "lock"):
+            paths = fresh("run-post-" + kind, post_conflict=kind)
+            with running(paths) as process:
+                finish(process, accepted=False)
+            value = json.loads(paths[2].read_text())
+            if kind == "lock":
+                assert paths[1].exists() and owner_value(paths)["phase"] == "intent"
+                assert all(value[family] == table(family, "full", owner=owner_value(paths))
+                           for family in FAMILIES), value
+                metadata = (paths[0] / ".port-hopping.lock").stat()
+                assert [metadata.st_dev, metadata.st_ino] == json.loads(
+                    (paths[2].parent / "post-lock.json").read_text())
+            else:
+                assert not paths[1].exists()
+                for family in FAMILIES:
+                    expected = BASE[family].copy()
+                    if kind == family:
+                        expected.append("-A OUTPUT -p udp -m udp --dport 36561 "
+                                        "-j DNAT --to-destination 192.0.2.1:9")
+                    assert value[family] == expected, value
+        for kind in (*FAMILIES, "udp", "nft", "read-fail", "lock"):
+            paths = fresh("run-commit-post-" + kind, post_conflict=kind, post_commit=True)
+            with running(paths) as process:
+                finish(process, accepted=False)
+            value = json.loads(paths[2].read_text())
+            assert (paths[2].parent / "post-commit.done").exists()
+            if kind == "lock":
+                assert paths[1].exists() and owner_value(paths)["phase"] == "active"
+                assert all(value[family] == table(family, "full", owner=owner_value(paths))
+                           for family in FAMILIES), value
+                metadata = (paths[0] / ".port-hopping.lock").stat()
+                assert [metadata.st_dev, metadata.st_ino] == json.loads(
+                    (paths[2].parent / "post-lock.json").read_text())
+            else:
+                assert not paths[1].exists()
+                for family in FAMILIES:
+                    expected = BASE[family].copy()
+                    if kind == family:
+                        expected.append("-A OUTPUT -p udp -m udp --dport 36561 "
+                                        "-j DNAT --to-destination 192.0.2.1:9")
+                    assert value[family] == expected, value
 
         stages = (("-N", False, "empty"), ("-A", False, "sentinel"),
                   ("-I", False, "detached"), ("-I", True, "full"))

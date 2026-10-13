@@ -5865,6 +5865,44 @@ result 和失败输入保留；复用工具镜像，全套仍约 9 分钟，不�
 环境变量及旧五参数 tuple 都不能授权写规则。菜单/schema/Compose 自动启用、
 原生宿主/arm64、公网、旧会话排空等继续 deferred，整体目标 active。
 
+##### 5C.9c.3e.2a 实验 net 启动前后冲突复验
+
+复用既有 `port_hopping_resources(run)` 的 net flock 和归属审计，抽出共用
+`conflicts(start,end,owned)`。初始 preflight 仍拒绝已有 state 并检查完整资源；
+两族规则写成后，在 active 原子提交前和提交后各执行一次全域冲突检查。
+owned 模式对同一份两族 NAT `-S` 快照先 audit，必须所有自有资源完整，
+再逐行精确扣除 `["-N",chain]` 及已核验的三条 rules；其余正文保留。
+继续使用原 nft/legacy NAT/UDP 监听检查，不按 chain/comment 前缀宽泛豁免；
+当前 iptables-nft 自产 xt DNAT 表示可接受，其它未核表示仍拒绝。
+末尾复验 owner/完整资源。删除重复的提交后 health 扫描，独立 health 命令不变。
+
+冲突检查仅用于启动门控，不放入 audit/write/clean；外来冲突出现后，
+finally 仍只按精确归属清理自有资源，外来规则保留。锁被替换时拒绝继续清理，
+保留原 state、两族规则及替换锁供人工核对，不能宣称已经撤销。
+12 个新增合同在最后规则写入或 active 真实原子提交之后注入两族外来 DNAT、
+UDP 占用、nft 布局变化、读取失败和锁替换；注入前核验完整自有库存，
+拒绝后核对外来正文、state/规则回收或替换锁 dev/inode 保留。
+测试就绪等待本次提交后复验，不再凭暂态 active 文件与只读断言并发。
+
+最终定向 61 个只读预检、183 个归属/清理/生命周期场景、86 个锁身份及材料、
+38 个启动事务和 38 个准备场景通过，内部/入口 `172812/174060 ms`、Jobs 2：
+`.tmp-regression-docker-a4a9a7b29d5f4aa78fd133bf37fabf48/`。
+标准真实双族跳跃、撤销、kill-recovery、PID 1 清理与外来 NAT 保留通过，
+内部/入口 `25981/27071 ms`、Jobs 2：
+`.tmp-regression-docker-796a845a512c4f0391ac0676ebeb9a15/`。
+集中完整 54/54 无重复遗漏，内部/入口 `543044/544148 ms`、Jobs 6，
+排队 `613 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-2c53f3226ade402f879d60c65cc4786d/`。
+两份关键源码原始字节 SHA256 与最终定向、真实和完整输入一致；
+独立只读复审及 diff 通过。三份成功 source.tar 清理 `37,109,760 bytes`，
+保留日志、清单、result 和失败输入；完整回归约 9 分钟，未证稳定提速。
+
+本阶段仍是旧五参数实验入口，不能据此生产启用。net flock 不排斥非合作写入，
+前后检查不能证明全域原子范围预留；active 文件可能先于后验拒绝暂时出现，
+最终实时 ACK 必须等全部门控通过。实时父子交接须绑定当前父锁、本轮子容器、
+StartManaged 实际采用的 state/live 精确版本，不能把 3e.1 诊断 JSON 加 nonce
+当写授权。菜单/schema/Compose、生产 Docker socket 及整体对齐继续 deferred。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

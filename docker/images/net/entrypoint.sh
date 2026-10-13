@@ -1087,13 +1087,26 @@ def backend():
 
 def preflight(start, end, target_port):
     parameters_valid(start, end, target_port)
-    first, last = int(start), int(end)
     if os.path.lexists(state_path):
         raise ValueError("existing port hopping state requires verified ownership")
+    conflicts(start, end)
+
+def conflicts(start, end, owned=False):
+    first, last = int(start), int(end)
     # shortcut: 仅核验 iptables-nft 布局，接入其它后端前补齐其冲突与归属合同。
     backend()
+    dumps = {tool: command([tool, "-w", "-t", "nat", "-S"])
+             for tool in ("iptables", "ip6tables")}
+    if owned and not all(all(value) for value in audit(dumps).values()):
+        raise ValueError("port hopping conflict check requires complete owned resources")
     for tool in ("iptables", "ip6tables"):
-        nat_conflicts(command([tool, "-w", "-t", "nat", "-S"]), first, last)
+        dump = dumps[tool]
+        if owned:
+            address = ipv4 if tool == "iptables" else ipv6
+            expected = (["-N", chain], *rules(address))
+            # 只扣除同一快照中已经精确核验的自有资源，外来正文逐行保留。
+            dump = "\n".join(line for line in dump.splitlines() if shlex.split(line) not in expected)
+        nat_conflicts(dump, first, last)
     ruleset = json.loads(command(["nft", "-j", "list", "ruleset"]))
     for item in ruleset["nftables"]:
         current = item.get("chain", {})
@@ -1124,6 +1137,8 @@ def preflight(start, end, target_port):
         bound = port(fields[3].rsplit(":", 1)[1])
         if first <= bound <= last:
             raise ValueError("UDP range conflicts with a host listener")
+    if owned and not all(all(value) for value in audit().values()):
+        raise ValueError("port hopping resources changed during conflict check")
 
 def identity(metadata):
     return (metadata.st_dev, metadata.st_ino, metadata.st_size,
@@ -1250,7 +1265,7 @@ def rules(address):
             ["-A", chain, *base, "-j", "DNAT", "--to-destination", target],
             ["-A", chain, "-m", "comment", "--comment", comment, "-j", "RETURN"])
 
-def audit():
+def audit(dumps=None):
     owner()
     result = {}
     for tool, address in tools:
@@ -1258,7 +1273,8 @@ def audit():
         present = [False, False, False]
         chain_present, prerouting, order = False, [], []
         chains, policies = set(), set()
-        for line in command([tool, "-w", "-t", "nat", "-S"]).splitlines():
+        dump = dumps[tool] if dumps is not None else command([tool, "-w", "-t", "nat", "-S"])
+        for line in dump.splitlines():
             args = shlex.split(line)
             if args[:1] in (["-P"], ["-N"]):
                 if (len(args) != (3 if args[0] == "-P" else 2) or args[1] in chains):
@@ -1378,13 +1394,12 @@ def run():
             if stopped:
                 return
             write(tool, ["-I", "PREROUTING", "1", *rules(address)[0][2:]])
-        if not all(all(value) for value in audit().values()):
-            raise ValueError("port hopping resources are incomplete after start")
+        conflicts(start, end, owned=True)
         if stopped:
             return
         phase = "active"
         commit_state()
-        health()
+        conflicts(start, end, owned=True)
         while not stopped:
             time.sleep(0.1)
     finally:

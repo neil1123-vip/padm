@@ -407,6 +407,14 @@ jumpstate nor NAT, proves no current range availability and grants no net activa
 authority. Failure preserves evidence and committed cumulative traffic.
 The account count reflects the quota version used for this startup; later traffic-state
 changes do not imply account restrictions have been reapplied.
+Internal 3e.2a also rechecks global conflicts before and after the experimental net
+owner commits active state. It first verifies complete owned resources from the same
+dual-family NAT snapshots, then excludes only those exact rules and chain declarations.
+Native nft layouts, legacy NAT and UDP listeners retain their existing refusal checks.
+Foreign conflicts do not block cleanup of verified owned rules. The net lock does not
+reserve the range against outside writers; active state is not a final activation ACK.
+Live parent/child authorization, menu/schema integration and production enablement
+remain pending.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
