@@ -541,8 +541,17 @@ runDockerPortHoppingPreflightRegression() {
 
 runDockerPortHoppingGuardedRegression() {
     sh -n "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" &&
+        bash -n "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" &&
-        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded.py"
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
+        python3 - "${PROJECT_ROOT}/docker/lib/port-hopping-probe.py" <<'PY' &&
+import ast
+from pathlib import Path
+import sys
+ast.parse(Path(sys.argv[1]).read_text(), filename=sys.argv[1])
+PY
+        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded.py" &&
+        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded-parent.py"
 }
 
 runDockerPortHoppingProbeRegression() {

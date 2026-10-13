@@ -6074,6 +6074,61 @@ Jobs 2、排队 `209 ms`、exit 0、cache_hit=false：
 不得复用只读 transport 的 65 秒总时限与 `stop --time 2` 直接处置写事务。
 有限写后撤销不交付持续启用、旧会话排空或自动跳跃，整体目标保持 active。
 
+##### 5C.9c.3e.2b.3b 同锁父端有限写门与关闭确证
+
+内部 `dockerPortHoppingTargetGuarded` 在当前持锁 Bash 直接调用
+`PrepareActivation bound`，固定原锁、startup_binding、受管目录和子容器投影。
+新增固定 `port-hopping-guarded` net 入口，仍不接 CLI、菜单、schema 或 Compose。
+challenge/prepare、ready/write、written/finalize、active/close 每次发送前
+复验原业务 state/live、部署锁、目录、固定 child 和信号；任何漂移停止授权，
+不刷新绑定或用保存 JSON 代替实际准备。
+
+各中间 nonce 必须新鲜并绑定原请求摘要与 CID；closed 回显最终 active nonce，
+严格要求唯一帧、EOF、transport 退出 0、原 child exited/ExitCode 0。
+关闭输入后由子端精确撤销；不使用 stop/kill 强杀容器。退出后两次核对
+child 投影与退出码 0 才删除容器，再删除本轮 stage 并复验原业务绑定。
+非零退出、归属漂移或状态不明保留容器及 stage，不凭 exited 推断撤销完成。
+成功只返回 `guarded_closed`，有限 active 窗口不报告持续部署成功。
+
+父端保存、忽略并恢复 PIPE trap，使真实 EPIPE 进入失败回收；
+INT/TERM 在清理期间仍置标志并最终返回 130/143，恢复调用方原 trap。
+wait 被信号中断时保留 transport；回收仅向当前 Bash 的运行作业发 TERM，
+等待已保存的客户端退出，不按已退出数字 PID 的 kill-0 结果判断归属。
+transport 使用 `timeout -k 2 150` 和 `--sig-proxy=false`；150 秒仅限客户端，
+不构成准备阶段总事务时限。写门 Docker 查询分别限时 5 秒，
+清理轮询预算 25 秒，各查询和 rm 另有限时；不把轮询预算称严格总时限。
+
+Linux amd64、固定工具镜像、定向 Jobs 2，子端 47 + 父端/helper 54 个检查通过，
+覆盖各门业务/child 漂移、旧 nonce、closed 缺失/重复/尾随、非零退出保留、
+真实 EPIPE、查询超时、写后/清理期间/wait 中断 INT/TERM、transport 回收及 trap 恢复。
+内部/入口 `69574/70638 ms`、排队 `218 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-e4eb3dc365eb46ccaeacf5dbc3175aac/`。
+前次查询超时实际退出 4，修正过窄的退出 1 预期；失败输入保留，
+未改变生产错误传播或绕过无授权、证据保留和小于 8 秒的限时断言。
+旧 Probe 21 + 93 检查通过，内部/入口 `11605/12759 ms`、排队 `210 ms`：
+`.tmp-regression-docker-33d817e5be8d4dddbdc287b22d0260fd/`。
+
+标准 entrypoint 与当前持锁父端真实验收通过：closed 后 child/stage 消失，
+双族 NAT 正文恢复、state 消失、原 net 锁 inode 保持，额度撤销仍生效；
+原内部 payload 的新双族连接及安全恢复断言保持。内部/入口
+`74672/75870 ms`、排队 `219 ms`、Jobs 2、exit 0、cache_hit=false：
+`.tmp-regression-docker-f8794d605be745a2ab95d93441ef00a3/`。
+内部 payload 不证明真实父锁，其记录保持相应 false；新增实际父端证据单独报告。
+七个阶段实现/测试文件已与定向、真实和集中完整快照按原始字节核对一致。
+集中完整 54/54，无重复叶子，内部/入口 `550331/551344 ms`、Jobs 6、
+排队 `405 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-9ee1e1591a0241618806c59c5f7aa93f/`。
+54 条容器采样观察到最高 `840.82% CPU / 1.041 GiB`；采样未覆盖完整运行期，
+不宣称真实全程峰值或稳定性能收益。相对 3a 入口增加 `8262 ms`，
+输入与父端检查均增加；继续复用工具镜像、两个定向 worker 和三槽预算，
+未扩大并发或重复全套。原始字节核验在完整目录 `verification.md`，
+仅文档在回归后补验收记录；成功归档核验后清理，保留日志/result/清单与失败输入。
+
+持续启用、父端退出后的接管与最终部署 ACK 仍 deferred；下一步先复用原协议
+实施同锁父端监督的持续会话和失败撤销，不能复用旧五参数 run 作为写授权。
+更新/重启的旧代次撤销、菜单/schema/Compose、原生宿主/arm64、公网、
+旧 conntrack 与完整自动跳跃继续待交付，整体目标保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

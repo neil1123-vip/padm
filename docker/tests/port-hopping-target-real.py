@@ -657,6 +657,31 @@ dockerPortHoppingTargetProbe entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1
             authentication(node, root, enter, "quota-after", new_password, alice_password, "old")
             guarded = guarded_resources(node, work, root, docker, net_image["Id"], quota_after,
                                         nat_before, enter, new_password, alice_password)
+            # 当前持锁 Bash 逐门授权；有限 closed 后必须恢复双族 NAT 与 state。
+            result = command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
+                              "DOCKER_HOST=" + docker[-1], "bash", "-Eeuo", "pipefail", "-c", """
+. "$1"
+dockerAcquireDeploymentLock
+trap dockerReleaseDeploymentLock EXIT
+dockerPortHoppingTargetGuarded entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1
+""", "test", str(ROOT / "install-docker.sh")], timeout=150)
+            guarded_parent = json.loads(result)
+            closed = guarded_parent["guarded_closed"]
+            assert set(closed) == {"v", "phase", "nonce", "child_id", "request_sha256"}
+            assert type(closed["v"]) is int and closed["v"] == 1 and closed["phase"] == "closed"
+            assert all(re.fullmatch(r"[a-f0-9]{64}", closed[key])
+                       for key in ("nonce", "child_id", "request_sha256"))
+            assert guarded_parent["enabled_accounts"] == 1
+            assert guarded_parent["container_id"] != quota_after["container_id"]
+            assert not command(docker + ["ps", "-aq", "--filter",
+                                        "label=io.padm.hopping-guarded"]).strip()
+            assert not list(root.glob(".hopping-guarded.*"))
+            assert not jumpstate.exists()
+            assert {tool: command([tool, "-w", "-t", "nat", "-S"])
+                    for tool in nat_before} == nat_before
+            assert lock.lstat().st_ino == lock_metadata.st_ino and lock.read_bytes() == b""
+            authentication(node, root, enter, "guarded-parent-closed", new_password,
+                           alice_password, "old")
             # 发布已删旧 CID 后故障，真实恢复仍只加载安全候选字节。
             result = subprocess.run([
                 "env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
@@ -678,7 +703,7 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
 """, "test", str(ROOT / "install-docker.sh")], capture_output=True, timeout=90)
             assert result.returncode != 0 and not result.stdout, result.stderr.decode()
             recovered = checked_witness(root, docker, startup=True)
-            assert recovered["container_id"] != quota_after["container_id"]
+            assert recovered["container_id"] != guarded_parent["container_id"]
             assert recovered["enabled_accounts"] == 1
             accumulated_after = json.loads(state.read_text())["accounts"][alice]
             assert (accumulated_after["upload"] + accumulated_after["download"] >=
@@ -699,6 +724,9 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
             guarded_nat_restored=True, guarded_state_removed=True, guarded_child_removed=True,
             guarded_old_conntrack_revocation_verified=False,
             guarded_protocol=guarded,
+            guarded_parent_lock_gates_verified=True, guarded_parent_closed=closed,
+            guarded_parent_child_removed=True, guarded_parent_nat_restored=True,
+            guarded_parent_state_removed=True,
             net_image=dict(base=inputs["net"], reference=net_reference, image_id=net_image["Id"],
                            entrypoint_sha256=hashlib.sha256(
                                (context / "entrypoint.sh").read_bytes()).hexdigest()),

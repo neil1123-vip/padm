@@ -1983,6 +1983,10 @@ port-hopping-probe)
     shift; [ "$#" -eq 5 ] || die "port hopping probe requires start, end, target and both addresses"
     port_hopping_resources probe "$@"
     ;;
+port-hopping-guarded)
+    shift; [ "$#" -eq 5 ] || die "port hopping guarded requires start, end, target and both addresses"
+    port_hopping_resources guarded "$@"
+    ;;
 port-hopping-audit|port-hopping-health|port-hopping-clean)
     operation=${1#port-hopping-}
     shift; [ "$#" -eq 1 ] || die "port hopping resources requires owner token"

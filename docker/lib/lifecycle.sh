@@ -736,12 +736,13 @@ dockerFail2banStartManagedCommit() {
 
 dockerPortHoppingTargetProjectCheck() {
     local root=$1 ids metadata
-    local -a containers=()
-    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}") || return 1
+    local -a containers=() timed=()
+    [[ "${ph_guarded:-false}" != true ]] || timed=(timeout -k 2 5)
+    ids=$("${timed[@]}" docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}") || return 1
     [[ -n "${ids}" ]] || return 0
     mapfile -t containers <<<"${ids}"
     [[ "${#containers[@]}" -eq 1 && "${containers[0]}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
-    metadata=$(docker container inspect "${containers[@]}") || return 1
+    metadata=$("${timed[@]}" docker container inspect "${containers[@]}") || return 1
     jq -e --arg root "${root}" --arg id "${containers[0]}" '
       length == 1 and (.[0] |
         (.Id | test("^[a-f0-9]{64}$") and startswith($id)) and
@@ -906,6 +907,8 @@ dockerPortHoppingTargetStartPrepare() {
 dockerPortHoppingTargetBindingCheck() {
     local witness=$1 binding=$2 domain=$3 current container
     local ph_owner=${BASHPID:-$$} ph_lock ph_stage=${ph_stage:-}
+    local -a timed=()
+    [[ "${ph_guarded:-false}" != true ]] || timed=(timeout -k 2 5)
     ph_lock=$(jq -ec '.lock' <<<"${binding}") &&
         dockerPortHoppingTargetStartLockCheck &&
         current=$(dockerPortHoppingTargetFileSnapshot "${domain}" "$(jq -er '.started_at' <<<"${witness}")") &&
@@ -919,7 +922,7 @@ dockerPortHoppingTargetBindingCheck() {
           any($rows[]; .[0] == "data/traffic" and .[3] == 16832)
         ' <<<"${current}" >/dev/null &&
         dockerPortHoppingTargetProjectCheck "$(dockerInstallRoot)" &&
-        container=$(docker container inspect "$(jq -er '.container_id' <<<"${witness}")") &&
+        container=$("${timed[@]}" docker container inspect "$(jq -er '.container_id' <<<"${witness}")") &&
         jq -e --argjson witness "${witness}" '
           length == 1 and (.[0] |
             .Id == $witness.container_id and .Image == $witness.image_id and
@@ -1288,6 +1291,198 @@ dockerPortHoppingTargetProbe() {
     fi
     # ACK 仅报告实时只读交接；不写 NAT 或跳跃 state，不授予后续写权限。
     jq -c --argjson ack "${ph_ack}" '. + {probe_ack:$ack}' <<<"${ph_witness}"
+}
+
+dockerPortHoppingGuardedContainer() {
+    local mode=$1 current child
+    [[ -f "${ph_stage}/cid" && ! -L "${ph_stage}/cid" ]] || return 1
+    child=$(<"${ph_stage}/cid")
+    [[ "${child}" =~ ^[a-f0-9]{64}$ ]] || return 1
+    current=$(timeout -k 2 5 docker container inspect "${child}") &&
+        python3 "${ph_helper}" guarded-container "${ph_root}" "${child}" "${ph_image}" \
+            "${ph_label}" "${ph_start}" "${ph_end}" "${ph_target}" "${ph_ipv4}" "${ph_ipv6}" \
+            "${ph_host}" "${mode}" <<<"${current}"
+}
+
+dockerPortHoppingGuardedSend() {
+    local current
+    current=$(dockerPortHoppingGuardedContainer live) &&
+        [[ "${current}" == "${ph_projection}" ]] &&
+        dockerPortHoppingProbeCheck &&
+        [[ "${ph_signal}" == 0 ]] &&
+        printf '%s\n' "$1" >&"${ph_write}"
+}
+
+dockerPortHoppingGuardedExchange() {
+    local challenge nonce request digest current phase frame action descriptor
+    local -a nonces=() command=(
+        docker run --interactive --sig-proxy=false --pull never --cidfile "${ph_stage}/cid"
+        --label "io.padm.hopping-guarded=${ph_label}" --network host --hostname "${ph_host}" --user 0:0
+        --read-only --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges
+        --no-healthcheck --restart no --log-driver none
+        --tmpfs /tmp:rw,nosuid,nodev,size=16m,mode=1777
+        --tmpfs /run:rw,nosuid,nodev,size=16m,mode=0755
+        --mount "type=bind,source=${ph_root}/data/net,target=/var/lib/padm/net"
+        "${ph_image}" port-hopping-guarded "${ph_start}" "${ph_end}" "${ph_target}"
+        "${ph_ipv4}" "${ph_ipv6}"
+    )
+    dockerPortHoppingProbeCheck || return 1
+    # 时限只约束 Docker 客户端；关闭输入后由写子端自行撤销，禁止强杀容器。
+    coproc PADM_HOPPING_TRANSPORT {
+        exec timeout -k 2 150 "${command[@]}" 2>"${ph_stage}/child.log"
+    }
+    ph_transport=$!
+    descriptor=${PADM_HOPPING_TRANSPORT[0]:-}
+    [[ -n "${descriptor}" ]] || return 1
+    exec {ph_read}<&"${descriptor}" || return 1
+    exec {descriptor}<&-
+    descriptor=${PADM_HOPPING_TRANSPORT[1]:-}
+    [[ -n "${descriptor}" ]] || return 1
+    exec {ph_write}>&"${descriptor}" || return 1
+    exec {descriptor}>&-
+    challenge=$(python3 "${ph_helper}" frame challenge <&"${ph_read}") &&
+        nonce=$(jq -er '.nonce' <<<"${challenge}") &&
+        [[ "$(jq -er '.host' <<<"${challenge}")" == "${ph_host}" ]] &&
+        ph_projection=$(dockerPortHoppingGuardedContainer live) &&
+        ph_child=$(jq -er '.Id' <<<"${ph_projection}") || return 1
+    request=$(jq -cn --arg nonce "${nonce}" --argjson pid "${ph_owner}" \
+        --arg lock "$(printf '%s' "${ph_lock}" | sha256sum | cut -d ' ' -f1)" \
+        --arg startup "$(printf '%s' "${ph_binding}" | sha256sum | cut -d ' ' -f1)" \
+        --arg child "${ph_child}" --arg image "${ph_image}" --argjson witness "${ph_witness}" '
+      {v:1,nonce:$nonce,parent_pid:$pid,parent_lock_sha256:$lock,startup_sha256:$startup,
+       child_id:$child,image_id:$image,target:($witness |
+        {container_id,image_id,started_at,restart_count,listener_id,
+         range_start,range_end,target_port,ipv4,ipv6})}
+    ') &&
+        digest=$(printf '%s' "${request}" | sha256sum | cut -d ' ' -f1) &&
+        dockerPortHoppingGuardedSend "${request}" || return 1
+    nonces=("${nonce}")
+    for phase in ready written active; do
+        frame=$(python3 "${ph_helper}" guarded-frame "${phase}" "${ph_child}" "${digest}" \
+            "${nonces[@]}" <&"${ph_read}") &&
+            nonce=$(jq -er '.nonce' <<<"${frame}") || return 1
+        nonces+=("${nonce}")
+        case "${phase}" in ready) action=write ;; written) action=finalize ;; active) action=close ;; esac
+        frame=$(jq -c --arg action "${action}" '.phase=$action' <<<"${frame}") &&
+            dockerPortHoppingGuardedSend "${frame}" || return 1
+    done
+    exec {ph_write}>&-
+    ph_write=
+    ph_closed=$(python3 "${ph_helper}" guarded-frame closed "${ph_child}" "${digest}" \
+        "${nonce}" <&"${ph_read}") || return 1
+    exec {ph_read}<&-
+    ph_read=
+    if wait "${ph_transport}"; then ph_transport=; else return 1; fi
+    current=$(dockerPortHoppingGuardedContainer any) &&
+        [[ "${current}" == "${ph_projection}" ]] &&
+        timeout -k 2 5 docker container inspect "${ph_child}" | jq -e '
+          length == 1 and (.[0].State |
+            .Status == "exited" and .Running == false and .ExitCode == 0)' >/dev/null &&
+        dockerPortHoppingProbeCheck
+}
+
+dockerPortHoppingGuardedCleanup() {
+    local current confirmed child state deadline status=0
+    [[ -z "${ph_write}" ]] || { exec {ph_write}>&-; ph_write=; }
+    [[ -z "${ph_read}" ]] || { exec {ph_read}<&-; ph_read=; }
+    if [[ -e "${ph_stage}/cid" || -L "${ph_stage}/cid" ]]; then
+        deadline=$(($(date +%s) + 25))
+        while true; do
+            if ! current=$(dockerPortHoppingGuardedContainer any) ||
+                { [[ -n "${ph_projection}" ]] && [[ "${current}" != "${ph_projection}" ]]; } ||
+                ! child=$(jq -er '.Id' <<<"${current}") ||
+                ! state=$(timeout -k 2 5 docker container inspect "${child}"); then
+                status=1; break
+            fi
+            if jq -e 'length == 1 and (.[0].State |
+                .Status == "exited" and .Running == false)' <<<"${state}" >/dev/null; then
+                # 非零退出不能证明 finally 完成撤销，连同容器保留恢复证据。
+                jq -e '.[0].State.ExitCode == 0' <<<"${state}" >/dev/null ||
+                    { status=1; break; }
+                confirmed=$(dockerPortHoppingGuardedContainer any) &&
+                    [[ "${confirmed}" == "${current}" ]] &&
+                    state=$(timeout -k 2 5 docker container inspect "${child}") &&
+                    jq -e 'length == 1 and (.[0].State |
+                      .Status == "exited" and .Running == false and .ExitCode == 0)' <<<"${state}" >/dev/null &&
+                    timeout -k 2 10 docker container rm "${child}" >/dev/null || status=1
+                break
+            fi
+            [[ "$(date +%s)" -lt "${deadline}" ]] || { status=1; break; }
+            sleep 0.1
+        done
+    elif [[ -n "${ph_transport}" ]]; then
+        # cidfile 尚未形成时不能证明没有启动子端，保留本轮证据。
+        status=1
+    fi
+    if [[ -n "${ph_transport}" ]]; then
+        # 中断 wait 后仍保留本 Bash 作业；已退出的数字 PID 不能再发信号。
+        if jobs -pr | grep -Fxq -- "${ph_transport}"; then
+            kill -TERM "${ph_transport}" 2>/dev/null || :
+        fi
+        while ! wait "${ph_transport}" 2>/dev/null; do
+            jobs -pr | grep -Fxq -- "${ph_transport}" || break
+        done
+        ph_transport=
+    fi
+    return "${status}"
+}
+
+dockerPortHoppingTargetGuarded() {
+    local ph_owner=${BASHPID:-$$} ph_root ph_lock ph_stage= ph_domain ph_witness ph_binding
+    local ph_start=${2:-} ph_end=${3:-} ph_ipv4=${4:-} ph_ipv6=${5:-} ph_target ph_image
+    local ph_helper="${DOCKER_LIB_DIR}/port-hopping-probe.py" ph_directory ph_label ph_child=
+    local ph_host= ph_projection= ph_read= ph_write= ph_transport= ph_closed= ph_signal=0
+    local status=1 intTrap termTrap pipeTrap image ph_guarded=true
+    [[ "$#" -eq 5 ]] || return 1
+    ph_root=$(dockerInstallRoot) &&
+        ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") || {
+            DOCKER_DEPLOYMENT_LOCK_DIR=; return 1;
+        }
+    ph_stage=$(mktemp -d "${ph_root}/.hopping-guarded.XXXXXX") || return 1
+    intTrap=$(trap -p INT)
+    termTrap=$(trap -p TERM)
+    pipeTrap=$(trap -p PIPE)
+    trap 'ph_signal=130' INT
+    trap 'ph_signal=143' TERM
+    # EPIPE 必须返回失败并进入撤销，不能让 SIGPIPE 直接终止持锁父端。
+    trap '' PIPE
+    # 每道写门只用当前持锁 Bash 的新准备结果，原绑定全程不能刷新。
+    if dockerPortHoppingTargetStartLockCheck &&
+        dockerPortHoppingTargetPrepareActivation "$@" bound >"${ph_stage}/prepared.json" &&
+        ph_witness=$(jq -ec '.' "${ph_stage}/prepared.json") &&
+        ph_binding=$(jq -ec '.startup_binding' <<<"${ph_witness}") &&
+        [[ "$(jq -ec '.lock' <<<"${ph_binding}")" == "${ph_lock}" ]] &&
+        ph_domain=$(jq -er --arg listener "$1" '
+          .core.protocols[] | select(.listener_id == $listener) | .hy2.domain
+        ' "${ph_root}/config/spec.json") &&
+        ph_target=$(jq -er '.target_port' <<<"${ph_witness}") &&
+        ph_directory=$(python3 "${ph_helper}" directory "${ph_root}") &&
+        image=$(jq -er '.images.net' "${ph_root}/config/spec.json") &&
+        ph_image=$(timeout -k 2 5 docker image inspect "${image}" | jq -er '
+          if length == 1 and (.[0].Id | test("^sha256:[a-f0-9]{64}$"))
+          then .[0].Id else error("net 镜像身份无效") end') &&
+        ph_label=$(python3 -c 'import os; print(os.urandom(32).hex())') &&
+        ph_host=$(python3 -c 'import os; print(os.urandom(6).hex())') &&
+        dockerPortHoppingGuardedExchange; then status=0; else status=$?; fi
+    [[ "${status}" != 130 && "${status}" != 143 ]] || ph_signal=${status}
+    [[ "${ph_signal}" == 0 ]] || status=${ph_signal}
+    dockerPortHoppingGuardedCleanup || status=1
+    if [[ "${status}" == 0 ]]; then
+        dockerPortHoppingProbeCheck &&
+            dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&
+            dockerPortHoppingProbeCheck || status=1
+    fi
+    trap - INT TERM PIPE
+    [[ -z "${intTrap}" ]] || eval "${intTrap}"
+    [[ -z "${termTrap}" ]] || eval "${termTrap}"
+    [[ -z "${pipeTrap}" ]] || eval "${pipeTrap}"
+    [[ "${ph_signal}" == 0 ]] || status=${ph_signal}
+    if [[ "${status}" != 0 ]]; then
+        dockerPortHoppingTargetStartLockCheck || :
+        dockerError "跳跃有限写事务未完成；规则撤销未确证时保留证据与容器: ${ph_stage}"
+        return "${status}"
+    fi
+    jq -c --argjson closed "${ph_closed}" '. + {guarded_closed:$closed}' <<<"${ph_witness}"
 }
 
 dockerComposeExecute() {

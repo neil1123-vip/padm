@@ -29,7 +29,7 @@ def timestamp(value):
     datetime.datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")
 
 
-def frame(phase, *expected):
+def frame(phase, *expected, guarded=False):
     deadline = time.monotonic() + 20
     data = b""
 
@@ -56,7 +56,18 @@ def frame(phase, *expected):
             type(value["v"]) is not int or value["v"] != 1 or value["phase"] != phase or
             not text(value["nonce"], r"[a-f0-9]{64}")):
         raise ValueError("跳跃握手帧身份无效")
-    if phase == "challenge":
+    if guarded:
+        counts = {"ready": 3, "written": 4, "active": 5, "closed": 3}
+        if (phase not in counts or len(expected) != counts[phase] or
+                any(not text(item, r"[a-f0-9]{64}") for item in expected) or
+                value["child_id"] != expected[0] or value["request_sha256"] != expected[1]):
+            raise ValueError("跳跃写门帧阶段或绑定无效")
+        seen = expected[2:]
+        if (len(set(seen)) != len(seen) or
+                (phase == "closed" and (value["nonce"] != seen[0] or byte() != b"")) or
+                (phase != "closed" and value["nonce"] in seen)):
+            raise ValueError("跳跃写门 nonce 重用、关闭帧不匹配或含额外输出")
+    elif phase == "challenge":
         if expected or not text(value["host"], r"[a-f0-9]{12}"):
             raise ValueError("跳跃挑战主机名无效")
     elif phase == "ack":
@@ -96,7 +107,8 @@ def directory(root):
             os.close(descriptor)
 
 
-def container(root, cid, image, label, start, end, target, ipv4, ipv6, host, mode):
+def container(root, cid, image, label, start, end, target, ipv4, ipv6, host, mode,
+              guarded=False):
     items = json.load(sys.stdin, object_pairs_hook=unique)
     if (not isinstance(items, list) or len(items) != 1 or
             not text(cid, r"[a-f0-9]{64}") or not text(image, r"sha256:[a-f0-9]{64}")):
@@ -104,15 +116,17 @@ def container(root, cid, image, label, start, end, target, ipv4, ipv6, host, mod
     value = items[0]
     config, runtime, state = value["Config"], value["HostConfig"], value["State"]
     hostname = host
+    command = "port-hopping-guarded" if guarded else "port-hopping-probe"
+    label_key = "io.padm.hopping-guarded" if guarded else "io.padm.hopping-probe"
     tmpfs = {"/tmp": "rw,nosuid,nodev,size=16m,mode=1777",
              "/run": "rw,nosuid,nodev,size=16m,mode=0755"}
     mounts = value["Mounts"]
     if (value["Id"] != cid or value["Image"] != image or
             config["Entrypoint"] != ["/usr/local/bin/padm-entrypoint"] or
-            config["Cmd"] != ["port-hopping-probe", start, end, target, ipv4, ipv6] or
+            config["Cmd"] != [command, start, end, target, ipv4, ipv6] or
             not text(hostname, r"[a-f0-9]{12}") or config["Hostname"] != hostname or
             config["User"] != "0:0" or config["Healthcheck"]["Test"] != ["NONE"] or
-            config["Labels"].get("io.padm.hopping-probe") != label or
+            config["Labels"].get(label_key) != label or
             config["Tty"] is not False or config["OpenStdin"] is not True or
             runtime["NetworkMode"] != "host" or runtime["ReadonlyRootfs"] is not True or
             runtime["Privileged"] is not False or runtime["CapAdd"] != ["CAP_NET_ADMIN"] or
@@ -148,10 +162,14 @@ try:
     operation, *arguments = sys.argv[1:]
     if operation == "frame":
         result = frame(*arguments)
+    elif operation == "guarded-frame":
+        result = frame(*arguments, guarded=True)
     elif operation == "directory" and len(arguments) == 1:
         result = directory(*arguments)
     elif operation == "container" and len(arguments) == 11:
         result = container(*arguments)
+    elif operation == "guarded-container" and len(arguments) == 11:
+        result = container(*arguments, guarded=True)
     else:
         raise ValueError("跳跃诊断参数无效")
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))

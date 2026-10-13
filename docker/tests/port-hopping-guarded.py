@@ -65,7 +65,10 @@ def python():
 
 def main():
     source = (ROOT / "docker/images/net/entrypoint.sh").read_text()
-    assert "port-hopping-guarded)" not in source, "有限内部协议不得先开放持续启用入口"
+    assert source.count("\nport-hopping-guarded)\n") == 1
+    guarded_case = source.split("\nport-hopping-guarded)\n", 1)[1].split("\n    ;;", 1)[0]
+    assert '    port_hopping_resources guarded "$@"' in guarded_case
+    assert '    port_hopping_resources run "$@"' not in guarded_case
     with tempfile.TemporaryDirectory(prefix="padm-hopping-guarded.") as directory:
         work = Path(directory)
         functions = work / "functions.sh"
