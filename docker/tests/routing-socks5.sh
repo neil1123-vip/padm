@@ -2210,12 +2210,105 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt &&
     jq -e 'has("region") | not' "${LOG}" >/dev/null || fail '区域关闭后仍显示有效预设'
     jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
         "${root}/data/traffic/state.json" >/dev/null || fail '区域事务清空累计流量'
+    # 组合撤销只跑一次完整事务矩阵，复用已有全部出站与解析夹具。
+    jq --argjson allow "${REGION_ALLOW}" '.routing.region = {mode:"both",allow_domains:$allow}' \
+        "${TEST_ROOT}/warp-owner6.json" >"${TEST_ROOT}/access-control-before.json"
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/access-control-before.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化访问控制组合夹具失败'
+    assertClean
+    jq '.routing |= {socks5,dns,hosts,block_bt,ipv6,warp}' \
+        "${TEST_ROOT}/access-control-before.json" >"${TEST_ROOT}/access-control-after.json"
+    (dockerMain protocol links) >"${TEST_ROOT}/access-control-links.before"
+    dataBefore=$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)
+    before=$(snapshot)
+    composeBefore=$(grep '^live:' "${COMPOSE_LOG}" || true)
+    runEdit 0 --access-control-off --preview
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerSetupRead() { printf -v "$1" '%s' n; }
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/access-control-after.json" '' '' interactive
+    ) >"${LOG}" 2>&1 || fail '访问控制确认取消失败'
+    assertClean
+    [[ "$(snapshot)" == "${before}" && "$(grep '^live:' "${COMPOSE_LOG}" || true)" == "${composeBefore}" ]] ||
+        fail '访问控制预览或取消改变受管文件或触发部署'
+    composeBefore=$(cat "${COMPOSE_LOG}")
+    runEdit 2 --access-control-off
+    runEdit 2 --access-control-off --confirm invalid
+    runEdit 2 --access-control-off --access-control-off --preview
+    runEdit 2 --access-control-off --region-off --preview
+    runEdit 2 --direct-off --access-control-off --preview
+    runEdit 2 --access-control-off --socks5-off --preview
+    runEdit 2 --access-control-off --spec "${TEST_ROOT}/base.json" --preview
+    [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail '访问控制非法组合改变受管文件或调用 Compose'
+    (
+        routingKind=access_control routingAction=disable
+        dockerEditCompatibilityValidate "${TEST_ROOT}/access-control-before.json" \
+            "${TEST_ROOT}/access-control-after.json" || exit $?
+        for change in '.routing.block_bt=false' '.routing.dns.port=53' \
+            '.routing.warp.family="ipv4"' '.core.protocols[0].public_port=12345' \
+            '.routing.direct={domains:["domain:replacement.example.com"]}'; do
+            jq "${change}" "${TEST_ROOT}/access-control-after.json" >"${TEST_ROOT}/access-control-tampered.json"
+            reject dockerEditCompatibilityValidate "${TEST_ROOT}/access-control-before.json" \
+                "${TEST_ROOT}/access-control-tampered.json"
+        done
+    ) || fail '访问控制专项放宽其它字段冻结或允许重新添加规则'
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        case "${failure}" in
+        health-fail) expected=14 ;;
+        int) expected=130 ;;
+        term) expected=143 ;;
+        esac
+        runEdit "${expected}" --access-control-off --confirm PADM-DOCKER-EDIT
+        [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 访问控制组合未完整恢复"
+    done
+    MODE=ok
+    runEdit 0 --access-control-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/access-control-after.json" \
+        --slurpfile actual "${root}/config/spec.json" '$actual == $expected' >/dev/null ||
+        fail '访问控制组合移除不完整或改变其它规格'
+    for core in xray sing-box; do
+        if [[ "${core}" == xray ]]; then
+            dockerGenerateXrayConfig "${TEST_ROOT}/access-control-after.json" "${TEST_ROOT}/access-control-${core}.json"
+        else
+            dockerGenerateSingBoxConfig "${TEST_ROOT}/access-control-after.json" "${TEST_ROOT}/access-control-${core}.json"
+        fi
+        dockerTrafficRender "${core}" "${TEST_ROOT}/access-control-${core}.json" \
+            '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/access-control-runtime-${core}.json"
+        cmp -s "${root}/config/${core}/config.json" "${TEST_ROOT}/access-control-runtime-${core}.json" ||
+            fail "${core}: 访问控制撤销未同步运行配置"
+    done
+    (dockerMain protocol links) >"${TEST_ROOT}/access-control-links.after"
+    cmp -s "${TEST_ROOT}/access-control-links.before" "${TEST_ROOT}/access-control-links.after" &&
+        [[ "$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)" == "${dataBefore}" ]] ||
+        fail '访问控制撤销改变分享、私有数据或累计流量'
+    before=$(snapshot)
+    composeBefore=$(cat "${COMPOSE_LOG}")
+    runEdit 15 --access-control-off --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail '重复撤销无访问控制的部署触发重启'
+    runEdit 0 --region ip --confirm PADM-DOCKER-EDIT
+    runEdit 0 --access-control-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/access-control-after.json" \
+        --slurpfile actual "${root}/config/spec.json" '$actual == $expected' >/dev/null ||
+        fail '仅区域预设撤销改变无关出站'
+    printf 'docker-routing-access-control-off-regression-ok\n'
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
         dockerAcquireDeploymentLock
         dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
     ) >"${LOG}" 2>&1 || fail '恢复区域前基线失败'
     assertClean
+    runEdit 0 --region domain --confirm PADM-DOCKER-EDIT
+    runEdit 0 --access-control-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail '访问控制最后项撤销未删除空 routing'
     if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == region || "${ROUTING_BRANCH}" == region ]]; then
         printf 'docker-routing-region-regression-ok\n'
         exit 0

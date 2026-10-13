@@ -1614,6 +1614,18 @@ runRoutingDriver() {
         targetReply 'Docker 区域阻断策略' $'8\n'
         targetReply 'Docker 区域阻断策略' $'0\n'
         ;;
+    access-control-flow|access-control-cancel|access-control-failed)
+        if [[ "${scenario}" == access-control-cancel ]]; then
+            for input in $'n\n' $'\004'; do
+                targetReply 'Docker 路由与出站' $'40\n'
+                targetReply 'fixture-access-control-confirm [y/N]' "${input}"
+            done
+        else
+            targetReply 'Docker 路由与出站' $'40\n'
+            targetReply 'fixture-access-control-confirm [y/N]' $'y\n'
+        fi
+        targetReply 'Docker 路由与出站' $'3\n'
+        ;;
     ipv6-eof)
         targetReply 'Docker 路由与出站' $'19\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
@@ -2184,6 +2196,17 @@ edit)
         [[ "$#" -eq 6 && "$3" == entry-fixture && "$4" != not-a-port &&
             "$5" == --confirm && "$6" == PADM-DOCKER-EDIT ]] || exit 2
         exit "${FAIL2BAN_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --access-control-off ]]; then
+        [[ "$#" -eq 2 ]] || exit 2
+        printf 'fixture-access-control-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction access-control-confirm eof
+            exit 2
+        fi
+        recordAction access-control-confirm "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction access-control-commit
     elif [[ "${2:-}" == --block-ips-replace ||
         "${2:-}" == --dns-domains-replace || "${2:-}" == --direct-domains-replace ||
         "${2:-}" == --block-domains-replace || "${2:-}" == --warp-domains-replace ||
@@ -2810,6 +2833,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     hosts-manage-confirm-cancel hosts-manage-confirm-eof hosts-manage-commit-failed \
     selective-domains-invalid selective-domains-state-failed selective-domains-confirm-cancel selective-domains-confirm-eof selective-domains-commit-failed \
     socks5-domains-eof socks5-domains-status-failed \
+    access-control-flow access-control-cancel access-control-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
@@ -2827,6 +2851,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != dns-domains-change-failed &&
         "${routingCase}" != selective-domains-commit-failed &&
         "${routingCase}" != *-replace-commit-failed &&
+        "${routingCase}" != access-control-failed &&
         "${routingCase}" != hosts-manage-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
@@ -3090,6 +3115,25 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
                 fail '区域模式切换失败未显示状态错误并继续诊断'
         fi
         ;;
+    access-control-flow|access-control-cancel|access-control-failed)
+        accessControlConfirmCount=1 accessControlFailureCount=0 accessControlExit=2
+        if [[ "${routingCase}" == access-control-cancel ]]; then
+            expectedRouting=$'edit --access-control-off\naccess-control-confirm n\nedit --access-control-off\naccess-control-confirm eof'
+            accessControlConfirmCount=2 accessControlFailureCount=2
+        else
+            expectedRouting=$'edit --access-control-off\naccess-control-confirm y'
+            if [[ "${routingCase}" == access-control-flow ]]; then
+                expectedRouting+=$'\naccess-control-commit'
+            else
+                accessControlFailureCount=1 accessControlExit=15
+            fi
+        fi
+        expectedRouting+=$'\nprotocol routing-status'
+        [[ "$(grep -Fc 'fixture-access-control-confirm [y/N]' "${CONTROL_LOG}")" -eq "${accessControlConfirmCount}" ]] ||
+            fail '移除全部访问控制没有每次只确认一次'
+        [[ "$(grep -Fc "操作失败，退出码: ${accessControlExit}" "${CONTROL_LOG}" || true)" -eq "${accessControlFailureCount}" ]] ||
+            fail '移除全部访问控制取消或提交失败后未显示退出码并继续诊断'
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
         fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
@@ -3121,7 +3165,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '32. 单条替换 Block 域名阻断' '33. 单条替换 IP/CIDR 阻断' \
             '34. 追加 SOCKS5 域名规则' '35. 精确删除 SOCKS5 域名规则' \
             '36. 单条替换 SOCKS5 域名规则' '37. 单项替换 hosts 地址' \
-            '38. 新增 hosts 精确映射' '39. 精确删除 hosts 映射' '0. 返回'; do
+            '38. 新增 hosts 精确映射' '39. 精确删除 hosts 映射' \
+            '40. 移除全部访问控制' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then

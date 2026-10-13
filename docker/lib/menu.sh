@@ -1013,7 +1013,7 @@ dockerMenuRouting() {
             '33. 单条替换 IP/CIDR 阻断' '34. 追加 SOCKS5 域名规则' \
             '35. 精确删除 SOCKS5 域名规则' '36. 单条替换 SOCKS5 域名规则' \
             '37. 单项替换 hosts 地址' '38. 新增 hosts 精确映射' \
-            '39. 精确删除 hosts 映射' '0. 返回'
+            '39. 精确删除 hosts 映射' '40. 移除全部访问控制' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1159,6 +1159,10 @@ dockerMenuRouting() {
             dockerSetupRead oldRule '删除 hosts 精确域名（最后一项关闭 hosts，0 返回）: ' &&
                 [[ -n "${oldRule}" ]] || continue
             dockerMenuRun edit --hosts-remove "${oldRule}" || true
+            ;;
+        40)
+            printf '移除手工 Direct、域名/IP 阻断和区域预设；保留 BT、DNS/hosts 与出站配置。\n'
+            dockerMenuRun edit --access-control-off || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

@@ -2982,6 +2982,27 @@ Bash、ShellCheck error、diff 和独立只读复审通过；集中完整合同 
 `.tmp-regression-docker-0fbc12b87e8c4a50a8c762abce47c21e/`。
 生产路径与断言范围保持，完整集中回归沿用本节证据，不以单次耗时推断收益。
 
+#### 5B.4m 一次移除访问控制
+
+路由菜单 `17 → 40` 与 `edit --access-control-off` 在一次候选事务中删除手工
+Direct、域名/IP Block 与区域预设，清理空 routing；保留 BT、DNS/hosts、
+IPv6、WARP、SOCKS5、认证、分享和累计。不存在可删除项返回 `15`，
+非法组合返回 `2`；复用单次确认、字段冻结、预览及健康失败/INT/TERM 恢复。
+本阶段不扩 schema、生成器、权限或支持状态，完整区域策略与冲突检测仍 deferred。
+
+Linux amd64 定向路由入口 47352 ms、排队 150 ms；菜单 PTY 49747 ms，
+均 Jobs 2、exit 0、cache_hit=false，复用工具镜像。证据分别为
+`.tmp-regression-docker-4b999e940bb64d58a6ab0990c1c11d14/`、
+`.tmp-regression-docker-fc3144cd60e8456ebf3599e2bb619740/`。
+首次测试把候选校验误判为部署，改为检查 live 调用及受管文件不变；
+非法组合仍要求完全不调用 Compose，失败输入保留。
+集中合同 54/54 通过，Jobs 6、入口 283077 ms、排队 309 ms、cache_hit=false：
+`.tmp-regression-docker-619e8fc5687f4692a4c38e77aca81bd1/`。
+定向与完整回归源码归档相同，5 份阶段代码和测试匹配当前工作区；
+核验见完整结果目录 `verification.json`。清理成功输入与核验临时目录，
+保留结果、日志、核验及失败输入；文档更新不重复回归。
+本阶段交付不等于整体完成，总目标保持 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

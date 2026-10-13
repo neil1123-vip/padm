@@ -1854,7 +1854,7 @@ dockerEditCommand() {
             ipv6DomainsSet=1
             shift 2
             ;;
-        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off|--region-off|--ipv6-off|--warp-off)
+        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off|--region-off|--ipv6-off|--warp-off|--access-control-off)
             [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingKind=${routingKind%-off} routingAction=disable
             routingKind=${routingKind//-/_}
@@ -2387,7 +2387,16 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_STATE}"
             }
         fi
-        if [[ "${routingKind}" == warp && "${routingAction}" == warp_* ]]; then
+        if [[ "${routingKind}" == access_control ]]; then
+            # 一次候选移除访问控制，保留独立的 BT 与出站、解析配置。
+            jq '
+              if .routing.direct != null or .routing.block != null or
+                .routing.block_ips != null or .routing.region != null then
+                del(.routing.direct,.routing.block,.routing.block_ips,.routing.region) |
+                if .routing == {} then del(.routing) else . end
+              else error("当前未启用可移除的访问控制，未提交配置") end
+            ' "${draft}" >"${draft}.next"
+        elif [[ "${routingKind}" == warp && "${routingAction}" == warp_* ]]; then
             jq -e '.routing.warp != null' "${draft}" >/dev/null || {
                 dockerError '请先导入有效的 WARP 配置，再修改域名、全局模式或地址族'
                 return "${PADM_DOCKER_RC_STATE}"
@@ -2800,6 +2809,10 @@ dockerEditCompatibilityValidate() {
        elif $socks5 != "" then
         ($old | del(.routing.socks5) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
+       elif $routing_kind == "access_control" then
+        $routing_action == "disable" and
+        $new == ($old | del(.routing.direct,.routing.block,.routing.block_ips,.routing.region) |
+          if .routing == {} then del(.routing) else . end)
         elif $routing_action == "domains_replace" then
          ($old | del(.routing[$routing_kind][$routing_domains_field])) ==
            ($new | del(.routing[$routing_kind][$routing_domains_field]))
