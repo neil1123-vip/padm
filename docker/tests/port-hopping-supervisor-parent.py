@@ -174,6 +174,153 @@ def fake_owned(fd, root):
     raise SystemExit(143)
 
 
+def reservation_cases(base, entrypoint):
+    count = 0
+    installation = base / "reservation-wait"
+    (installation / "data/net").mkdir(parents=True, mode=0o700)
+    holder = subprocess.Popen([
+        "bash", "-Eeuo", "pipefail", "-c",
+        'source "$1"; trap dockerReleaseDeploymentLock EXIT; '
+        'dockerAcquireDeploymentLock; printf "locked\\n"; read -r release; [[ "$release" == release ]]',
+        "test", str(ROOT / "install-docker.sh")],
+        env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(installation)),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    services, peers = [], []
+    try:
+        assert holder.stdout.readline() == b"locked\n"
+        lock = installation / "locks/deployment.lock"
+        before = file_identity(lock), file_identity(lock / "pid"), (lock / "pid").read_bytes()
+        for index in range(2):
+            caller, peer = socket.socketpair()
+            waited = installation / f"reservation-waited-{index}"
+            manager = subprocess.Popen([
+                sys.executable, str(HELPER), "_service", str(peer.fileno()),
+                str(installation), str(entrypoint), "hy2-main", "36561", "36562",
+                "198.18.1.1", "2001:db8:1::1"], pass_fds=(peer.fileno(),),
+                env=dict(os.environ, TEST_RESERVATION_WAIT=str(waited)),
+                start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            peer.close()
+            services.append(manager)
+            peers.append(caller)
+            MODULE["send"](caller, {"v": 1, "phase": "hello", "action": "start",
+                                    "client_nonce": "e" * 64})
+            proof = MODULE["receive"](caller)
+            MODULE["send"](caller, {"v": 1, "phase": "commit", "action": "start",
+                                    "nonce": proof["nonce"], "client_nonce": "e" * 64})
+            deadline = time.monotonic() + 5
+            while not waited.exists():
+                assert manager.poll() is None and time.monotonic() < deadline
+                time.sleep(0.01)
+            # 两个预约都实际进入取锁等待；普通事务完成前没有 starting 目录。
+            assert not (installation / "data/net/.hopping-supervisor").exists()
+            assert (file_identity(lock), file_identity(lock / "pid"),
+                    (lock / "pid").read_bytes()) == before
+            count += 1
+        output, error = holder.communicate(b"release\n", timeout=5)
+        assert holder.returncode == 0 and not output and not error
+        results = []
+        for caller in peers:
+            try:
+                result = MODULE["receive"](caller, timeout=8)
+            except MODULE["Failure"]:
+                results.append(None)
+            else:
+                assert result["phase"] == "started"
+                MODULE["owner_check"](result["owner"])
+                results.append(result)
+        assert sum(result is not None for result in results) == 1
+        winner = next(result for result in results if result is not None)
+        assert MODULE["control"]("status", str(installation))["owner"] == winner["owner"]
+        deployment_command(installation, "dockerLockInstalledDeployment")
+        stopped = MODULE["control"]("stop", str(installation))
+        assert stopped["owner"] == winner["owner"] and stopped["finished"]["lock_released"]
+        assert not (installation / "data/net/.hopping-supervisor").exists()
+        assert not lock.exists()
+        for index, manager in enumerate(services):
+            output, error = manager.communicate(timeout=8)
+            assert manager.returncode == (0 if results[index] else 1) and not output
+            assert (not error) == bool(results[index]), error
+        count += 1
+    finally:
+        for caller in peers:
+            caller.close()
+        for manager in services:
+            if manager.poll() is None:
+                manager.terminate()
+            manager.communicate(timeout=8)
+        if holder.poll() is None:
+            holder.communicate(b"release\n", timeout=5)
+    for fault in ("changed-pid", "occupied-lock", "replaced-session"):
+        installation = base / fault
+        (installation / "data/net").mkdir(parents=True, mode=0o700)
+        failed = subprocess.run([
+            sys.executable, str(HELPER), "start", str(installation), str(entrypoint),
+            "hy2-main", "36561", "36562", "198.18.1.1", "2001:db8:1::1"],
+            env=dict(os.environ, TEST_RESERVATION_FAULT=fault), capture_output=True, timeout=8)
+        assert failed.returncode == 1 and not failed.stdout and failed.stderr
+        session = installation / "data/net/.hopping-supervisor"
+        lock = installation / "locks/deployment.lock"
+        assert session.is_dir() and not (session / "owner.json").exists()
+        assert not (installation / "data/net/fixture-running").exists()
+        if fault == "changed-pid":
+            assert (lock / "pid").read_text() == "2147483647\n"
+        elif fault == "occupied-lock":
+            assert (lock / "foreign").is_dir() and not (lock / "pid").exists()
+        else:
+            assert (lock / "pid").is_file()
+            assert (installation / "data/net/.hopping-supervisor.previous").is_dir()
+        evidence = file_identity(session), file_identity(lock) if lock.exists() else None
+        deployment_command(installation, "dockerLockInstalledDeployment")
+        assert (file_identity(session), file_identity(lock) if lock.exists() else None) == evidence
+        count += 1
+    for phase in ("before", "after"):
+        installation = base / f"reservation-kill-{phase}"
+        (installation / "data/net").mkdir(parents=True, mode=0o700)
+        barrier = installation / "reservation-check"
+        os.mkfifo(str(barrier) + ".fifo", 0o600)
+        starting = subprocess.Popen([
+            sys.executable, str(HELPER), "start", str(installation), str(entrypoint),
+            "hy2-main", "36561", "36562", "198.18.1.1", "2001:db8:1::1"],
+            env=dict(os.environ, TEST_RESERVATION_PAUSE=str(barrier),
+                     TEST_RESERVATION_PHASE=phase),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        descriptor = None
+        try:
+            deadline = time.monotonic() + 5
+            while not Path(str(barrier) + ".ready").exists():
+                assert starting.poll() is None and time.monotonic() < deadline
+                time.sleep(0.01)
+            session = installation / "data/net/.hopping-supervisor"
+            lock = installation / "locks/deployment.lock"
+            assert session.exists() == (phase == "after")
+            before = file_identity(lock), file_identity(lock / "pid"), (lock / "pid").read_bytes()
+            # 真正终止 exec 后的锁 owner；只读见证子进程放行后也不能创建预约。
+            descriptor = MODULE["pin"](MODULE["identity"](int((lock / "pid").read_text())))
+            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            assert MODULE["select"].select([descriptor], [], [], 5)[0]
+            with Path(str(barrier) + ".fifo").open("w") as stream:
+                stream.write("continue\n")
+            output, error = starting.communicate(timeout=8)
+            assert starting.returncode == 1 and not output and error
+            assert (file_identity(lock), file_identity(lock / "pid"),
+                    (lock / "pid").read_bytes()) == before
+            deployment_command(installation, "dockerLockInstalledDeployment", accepted=phase == "before")
+            if phase == "before":
+                assert not session.exists() and not lock.exists()
+            else:
+                assert session.is_dir() and not (session / "owner.json").exists()
+                assert (file_identity(lock), file_identity(lock / "pid"),
+                        (lock / "pid").read_bytes()) == before
+            count += 1
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            if starting.poll() is None:
+                starting.terminate()
+                starting.communicate(timeout=8)
+    return count
+
+
 def line(value):
     return canonical(value) + b"\n"
 
@@ -278,10 +425,41 @@ def main():
         base = Path(directory)
         entrypoint = base / "entrypoint.sh"
         entrypoint.write_text(
+            f'source "{ROOT / "install-docker.sh"}"\n'
+            'if [[ "$0" == padm-hopping-reservation && -n "${TEST_RESERVATION_WAIT:-}" ]]; then\n'
+            '  mkdir() {\n'
+            '    local status=0 target="${@: -1}"\n'
+            '    command mkdir "$@" || status=$?\n'
+            '    if [[ "$target" == "$PADM_DOCKER_INSTALL_DIR/locks/deployment.lock" && '
+            '"$status" != 0 ]]; then : >"$TEST_RESERVATION_WAIT"; fi\n'
+            '    return "$status"\n'
+            '  }\n'
+            'fi\n'
+            'if [[ "$0" == padm-hopping-reservation-check && -n "${TEST_RESERVATION_PAUSE:-}" ]]; then\n'
+            '  if [[ "$TEST_RESERVATION_PHASE" == before && '
+            '! -e "$PADM_DOCKER_INSTALL_DIR/data/net/.hopping-supervisor" || '
+            '"$TEST_RESERVATION_PHASE" == after && '
+            '-d "$PADM_DOCKER_INSTALL_DIR/data/net/.hopping-supervisor" ]]; then\n'
+            '    printf "%s\\n" "$$" >"$TEST_RESERVATION_PAUSE.ready"\n'
+            '    IFS= read -r token <"$TEST_RESERVATION_PAUSE.fifo"\n'
+            '  fi\n'
+            'fi\n'
+            'if [[ "$0" == padm-hopping-reservation-check && '
+            '-d "$PADM_DOCKER_INSTALL_DIR/data/net/.hopping-supervisor" ]]; then\n'
+            '  case "${TEST_RESERVATION_FAULT:-}" in\n'
+            '    changed-pid) printf "2147483647\\n" >"$PADM_DOCKER_INSTALL_DIR/locks/deployment.lock/pid" ;;\n'
+            '    occupied-lock) mkdir "$PADM_DOCKER_INSTALL_DIR/locks/deployment.lock/foreign" ;;\n'
+            '    replaced-session)\n'
+            '      mv "$PADM_DOCKER_INSTALL_DIR/data/net/.hopping-supervisor" '
+            '"$PADM_DOCKER_INSTALL_DIR/data/net/.hopping-supervisor.previous"\n'
+            '      mkdir -m 700 "$PADM_DOCKER_INSTALL_DIR/data/net/.hopping-supervisor" ;;\n'
+            '  esac\n'
+            'fi\n'
             'dockerPortHoppingTargetSupervisedOwned() {\n'
             f'  exec "{sys.executable}" "{SCRIPT}" fake-owned "$1" "$PADM_DOCKER_INSTALL_DIR"\n'
             '}\n')
         entrypoint.chmod(0o600)
+        count += reservation_cases(base, entrypoint)
         for case in ("clean", "ack-lost", "invalid-finished", "precommit-eof"):
             installation = base / case
             (installation / "data/net").mkdir(parents=True, mode=0o700)
@@ -308,7 +486,8 @@ def main():
                     output, error = manager.communicate(timeout=5)
                     assert manager.returncode == 1 and not output and error
                     assert not (installation / "data/net/fixture-running").exists()
-                    assert (installation / "data/net/.hopping-supervisor/owner.json").is_file()
+                    assert not (installation / "data/net/.hopping-supervisor").exists()
+                    assert not (installation / "locks").exists()
                     count += 1
                     continue
                 deadline = time.monotonic() + 8

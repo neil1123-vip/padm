@@ -6336,6 +6336,48 @@ install、普通启动/停止/重启、更新、回滚及其它共用取锁入�
 通道。菜单/schema/Compose、自动恢复、真实自动跳跃、完整协议管理及
 原生宿主/arm64/公网/systemd/整机重启仍待交付，总目标保持 active。
 
+##### 5C.9c.3e.2b.3d.3 同锁会话预约
+
+独立 manager 先完成原 start 挑战，再用短 Bash 通过普通部署锁入口预约。
+普通事务仍持锁时只等待，不提前创建 `.hopping-supervisor`，不消耗 hello
+帧预算；两个同时启动者沿用相同锁和部署门禁，仅一个能创建会话。
+预约 Bash 固定真实 owner 后形成原锁快照，随后 `exec` Python 保持内核 PID，
+由锁 owner 本身创建目录，避免 Bash 退出后孤儿 helper 再创建 marker 的竞争。
+
+预约仅复用本轮锁的实时见证：当前 PID、创建前后原锁快照、完整目录链、
+命名路径与已打开锁 fd、原 pid 元数据均核对，随后只 unlink 原锁的 pid，
+再 rmdir 原锁并确认路径消失。manager 重新打开预约目录，严格比对 canonical
+目录与 session 投影后才创建控制端和 owner、启动监督 Bash。
+保存的预约快照不授权目标事务，也不向新 Bash 转交锁；它仍独立自取锁并
+freshly bound。目录、原锁或 pid 漂移及删除失败保留会话/锁证据，不删 state/stage。
+commit 前 EOF 不再留下未建立的会话；移除未被读取的 committed 标志。
+
+定向 `docker-port-hopping-supervisor`，Docker Linux amd64、Jobs 2，48 项通过，
+入口 5919 ms，复用同一工具镜像：
+`.tmp-regression-docker-56869a3d956e4c31a99cacfe3edc559b/`。
+新增确定性场景同时覆盖两个预约已进入等待、普通原锁不变、释放后仅一个启用、
+pid 变化/锁内额外目录/预约目录替换留证，以及锁 owner 在创建 marker 前后
+真实 SIGKILL：前者没有孤儿写入且普通入口可回收死锁，后者保留会话与锁并拒绝
+普通操作。
+
+真实 `docker-port-hopping-target-real`，Jobs 2，exit 0，验收 259.382 秒，
+入口 261877 ms、排队 167 ms，独立监督持续 43.792 秒、续期 28 次，
+活动/净停止/KILL 留证门禁 45/52/46 ms，净清理及 TERM/KILL 边界均通过：
+`.tmp-regression-docker-33eaed9f919845bd9a968e844af9395d/`。
+集中 `docker-contracts`，Jobs 6，54/54 顶层叶子唯一且与实际归档声明一致，
+exit 0，入口 534164 ms、排队 27790 ms，cache=false：
+`.tmp-regression-docker-c2b6c0c4d2d0458a8e8e7f249ab06911/`。
+两归档 SHA-256 相同，补录文档前 370/370 文件逐项匹配当前工作区；
+三次回归的本轮两个代码/测试文件均匹配。定向归档仅计划文档和另一个任务的
+`contracts.sh` 后续修改不同，差异记录于 `verification.json/md`，未扩大本轮提交。
+本轮保留结果、日志、逐项核验及多余构建停止说明，清理成功重复归档和核验脚本。
+工具镜像在 Docker 初始化后恢复，停止多余构建并复用原 ID，没有重复下载工具。
+
+这是合作部署入口之间的会话预约，仍不宣称抵御最后 syscall 前任意特权替换；
+manager 初始化信号的完整矩阵与无人值守恢复未交付。普通部署入口继续拒绝
+已启用会话，在线 restart/update/rollback/down/uninstall 协调仍待实施。
+菜单/schema/Compose、真实自动跳跃和原生宿主等范围不扩大，总目标保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

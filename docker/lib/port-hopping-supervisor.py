@@ -24,6 +24,29 @@ export PADM_DOCKER_INSTALL_DIR
 shift
 if dockerPortHoppingTargetSupervisedOwned "$@"; then exit 0; else exit $?; fi
 '''
+RESERVE_BODY = r'''
+source "$1"
+PADM_DOCKER_INSTALL_DIR=$2
+export PADM_DOCKER_INSTALL_DIR
+owner=${BASHPID:-$$}
+original=
+current=
+trap 'if [[ -n "${original}" ]] &&
+    current=$(dockerPortHoppingTargetLockSnapshot "${owner}") &&
+    [[ "${current}" == "${original}" ]]; then
+        dockerReleaseDeploymentLock
+    fi' EXIT
+dockerAcquireDeploymentLock || exit "${PADM_DOCKER_RC_LOCK:-12}"
+original=$(dockerPortHoppingTargetLockSnapshot "${owner}") || exit 1
+exec "$3" -B "$4" _reserve "${PADM_DOCKER_INSTALL_DIR}" "$1" "${original}"
+'''
+LOCK_BODY = r'''
+source "$1"
+PADM_DOCKER_INSTALL_DIR=$2
+DOCKER_DEPLOYMENT_LOCK_DIR=$2/locks/deployment.lock
+export PADM_DOCKER_INSTALL_DIR
+dockerPortHoppingTargetLockSnapshot "$3"
+'''
 
 
 class Failure(Exception):
@@ -253,6 +276,63 @@ class Directory:
         self.held = []
 
 
+def reserve(root, entrypoint, raw):
+    original = json.loads(raw, object_pairs_hook=unique)
+    owner = str(os.getpid())
+    if (not isinstance(original, list) or len(original) < 4 or
+            original[-1][0] != root + "/locks/deployment.lock/pid" or
+            original[-1][-1] != owner):
+        raise Failure("监督预约锁不属于当前进程")
+
+    def unchanged():
+        result = subprocess.run(
+            ["bash", "-Eeuo", "pipefail", "-c", LOCK_BODY, "padm-hopping-reservation-check",
+             entrypoint, root, owner], capture_output=True)
+        if (result.returncode or
+                json.loads(result.stdout.decode("ascii"), object_pairs_hook=unique) != original):
+            raise Failure("监督预约原锁身份变化")
+
+    directory = Directory(root)
+    locks = lock = None
+    try:
+        unchanged()
+        # exec 保持锁 PID；创建预约的进程退出前，普通入口不能按死 PID 清理原锁。
+        directory.session(create=True)
+        directory.check()
+        unchanged()
+        directory.check()
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        locks = os.open("locks", flags, dir_fd=directory.root_fd)
+        lock = os.open("deployment.lock", flags, dir_fd=locks)
+        if ([root + "/locks", *path_identity(os.fstat(locks))[:5]] != original[-3] or
+                [root + "/locks/deployment.lock", *path_identity(os.fstat(lock))[:5]] != original[-2]):
+            raise Failure("监督预约释放时原锁目录变化")
+        if (path_identity(os.stat("locks", dir_fd=directory.root_fd, follow_symlinks=False)) !=
+                path_identity(os.fstat(locks)) or
+                path_identity(os.stat("deployment.lock", dir_fd=locks, follow_symlinks=False)) !=
+                path_identity(os.fstat(lock))):
+            raise Failure("监督预约释放时原锁名址变化")
+        metadata = os.stat("pid", dir_fd=lock, follow_symlinks=False)
+        if ([root + "/locks/deployment.lock/pid", *path_identity(metadata), metadata.st_size,
+             metadata.st_mtime_ns, metadata.st_ctime_ns, owner] != original[-1]):
+            raise Failure("监督预约释放时原 pid 文件变化")
+        os.unlink("pid", dir_fd=lock)
+        os.rmdir("deployment.lock", dir_fd=locks)
+        directory.check()
+        try:
+            os.stat("deployment.lock", dir_fd=locks, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise Failure("监督预约原锁未净释放")
+        return {"directory": directory.projection, "session": directory.original}
+    finally:
+        for descriptor in (lock, locks):
+            if descriptor is not None:
+                os.close(descriptor)
+        directory.close()
+
+
 def challenge(peer, action, owner=None):
     hello = shape(receive(peer), ("v", "phase", "action", "client_nonce"))
     if hello["phase"] != "hello" or hello["action"] != action or not nonce(hello["client_nonce"]):
@@ -318,8 +398,8 @@ def owner_check(value):
 def service(initial_fd, root, entrypoint, values):
     directory, listener, channel, process, process_fd, log = None, None, None, None, None, None
     initial = socket.socket(fileno=initial_fd)
-    committed, stopping, proof, ready, latest, cleaned, finished, stop_peer = (
-        False, False, None, None, None, None, None, None)
+    stopping, proof, ready, latest, cleaned, finished, stop_peer = (
+        False, None, None, None, None, None, None)
     try:
         if os.geteuid() != 0 or len(values) != 5:
             raise Failure("监督服务仅支持 root 和五参数")
@@ -327,8 +407,26 @@ def service(initial_fd, root, entrypoint, values):
         own = identity(os.getpid())
         if own["session_id"] != own["pid"]:
             raise Failure("监督服务必须属于独立会话")
+        # 先完成挑战；等待普通部署锁不消耗 hello 帧预算，commit 前不创建会话。
         directory = Directory(root)
-        directory.session(create=True)
+        directory.close()
+        directory = None
+        proof = challenge(initial, "start")
+        reservation = subprocess.run(
+            ["bash", "-Eeuo", "pipefail", "-c", RESERVE_BODY, "padm-hopping-reservation",
+             entrypoint, root, sys.executable, str(Path(__file__).resolve())],
+            capture_output=True)
+        if reservation.returncode:
+            raise Failure("监督会话预约失败: " + reservation.stderr.decode("utf-8", errors="replace"))
+        reserved = shape(json.loads(reservation.stdout.decode("ascii"), object_pairs_hook=unique),
+                         ("directory", "session"))
+        directory = Directory(root)
+        directory.session()
+        # 原锁只用于预约，不转交给监督 Bash；替换预约路径后保留证据并拒绝启动。
+        if canonical(reserved) != canonical({
+                "directory": directory.projection, "session": directory.original}):
+            raise Failure("监督会话预约目录身份变化")
+        directory.check()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(f"/proc/self/fd/{directory.fd}/control.sock")
         os.chmod(directory.path + "/control.sock", 0o600)
@@ -340,8 +438,6 @@ def service(initial_fd, root, entrypoint, values):
         owner = {"v": 1, "token": os.urandom(32).hex(), "root": root, "manager": own,
                  "bash": None, "stage": None, "stage_sha256": None, "state": "starting"}
         directory.write_owner(owner)
-        proof = challenge(initial, "start")
-        committed = True
         channel, child = socket.socketpair()
         # 独立 Bash 自取锁并 freshly bound；环境变量只提供安装路径，不提供授权。
         process = subprocess.Popen(["bash", "-c", BODY, "padm-hopping-owner",
@@ -643,7 +739,9 @@ def main(arguments):
     if operation == "_service" and len(args) == 8:
         service(int(args[0]), args[1], args[2], args[3:])
         return
-    if operation == "start" and len(args) == 7:
+    if operation == "_reserve" and len(args) == 3:
+        result = reserve(*args)
+    elif operation == "start" and len(args) == 7:
         result = start(args[0], args[1], args[2:])
     elif operation == "status" and len(args) == 1:
         result = control("status", args[0])
