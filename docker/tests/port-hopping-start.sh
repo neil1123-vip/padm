@@ -10,7 +10,8 @@ export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state" DOCKER_HOST=unix:///var/run/
 source "${PROJECT_ROOT}/install-docker.sh"
 
 for function in dockerGenerateSingBoxConfig dockerTrafficRender dockerTrafficReadState \
-    dockerTrafficWriteState dockerTrafficSnapshot dockerPortHoppingTargetProjectCheck; do
+    dockerTrafficWriteState dockerTrafficSnapshot dockerPortHoppingTargetProjectCheck \
+    dockerPortHoppingTargetStartManaged dockerRemoveManagedTree; do
     eval "$(declare -f "${function}" | sed "1s/${function}/${function}Original/")"
 done
 fail() { printf 'docker-port-hopping-start-fail: %s\n' "$*" >&2; exit 1; }
@@ -98,6 +99,21 @@ dockerPortHoppingTargetProjectCheck() {
     record project-checked
     [[ "${ph_verified:-false}" != true ]] || inject project-checked
 }
+dockerPortHoppingTargetStartManaged() {
+    local status=0
+    record start-managed
+    dockerPortHoppingTargetStartManagedOriginal "$@" || status=$?
+    [[ "${status}" != 0 ]] || inject prepared-started
+    return "${status}"
+}
+dockerRemoveManagedTree() {
+    if [[ "$2" == "${root}"/.hopping-start.* ]]; then
+        record startup-cleanup
+        inject startup-cleanup
+        [[ "${ph_signal:-0}" == 0 ]] || return 1
+    fi
+    dockerRemoveManagedTreeOriginal "$@"
+}
 dockerTrafficContainerState() {
     record container-state "$@"
     local started=${STARTED}
@@ -151,6 +167,29 @@ inject() {
         printf '{}\n' >"${root}/config/sing-box/config.json"
         cp -a -- "${root}/config/sing-box/config.json" "${TEST_ROOT}/foreign-input"
         ;;
+    prepare-*-race:prepared-started)
+        case "${SCENARIO}" in
+        prepare-lock-race)
+            cp -a -- "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" "${TEST_ROOT}/pid.replacement"
+            mv -f -- "${TEST_ROOT}/pid.replacement" "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+            ;;
+        prepare-live-race) printf '{}\n' >"${root}/config/sing-box/config.json" ;;
+        prepare-spec-race) printf '\n ' >>"${root}/config/spec.json" ;;
+        prepare-baseline-race) printf '\n ' >>"${root}/config/sing-box/users.base" ;;
+        prepare-compose-race) printf '\n ' >>"${root}/compose.json" ;;
+        prepare-deployment-race) printf '\n ' >>"${root}/deployment.json" ;;
+        prepare-images-race) printf '\n ' >>"${root}/images.env" ;;
+        prepare-tls-race) printf 'foreign certificate\n' >"${root}/secrets/tls/proxy.example.com.crt" ;;
+        prepare-permissions-race) chmod 0777 "${root}/data/traffic" ;;
+        esac
+        ;;
+    prepare-state-update:prepared-started)
+        jq --arg alice "${ALICE}" '.accounts[$alice].upload += 1' \
+            "${root}/data/traffic/state.json" >"${TEST_ROOT}/state.foreign"
+        cp -- "${TEST_ROOT}/state.foreign" "${root}/data/traffic/state.json"
+        ;;
+    prepare-signal-INT:prepared-started) kill -INT "${TX_OWNER}" ;;
+    prepare-signal-TERM:prepared-started) kill -TERM "${TX_OWNER}" ;;
     signal-INT-${point}:${point}) kill -INT "${TX_OWNER}" ;;
     signal-TERM-${point}:${point}) kill -TERM "${TX_OWNER}" ;;
     *) return 0 ;;
@@ -330,6 +369,14 @@ docker() {
               .[].State.Health += {Log:[{tick:$tick}]}
             ' <<<"${rows}") || return 1
         fi
+        if [[ -e "${TEST_ROOT}/injected" ]]; then
+            case "${SCENARIO}" in
+            prepare-cid-race) rows=$(jq --arg id "${ID}" '.[0].Id = $id' <<<"${rows}") ;;
+            prepare-started-race) rows=$(jq --arg started "${STARTED}" '.[0].State.StartedAt = $started' <<<"${rows}") ;;
+            prepare-image-race) rows=$(jq '.[0].Image = ("sha256:" + ("e" * 64))' <<<"${rows}") ;;
+            prepare-health-race) rows=$(jq '.[0].State.Health.Status = "unhealthy"' <<<"${rows}") ;;
+            esac
+        fi
         printf '%s\n' "${rows}"
         ;;
     stop)
@@ -345,6 +392,7 @@ docker() {
 
 runCase() {
     local scenario=$1 expected=$2 up_count=$3 stop_count=$4 alice_value=${5:-1} status=0
+    local operation=${6:-start} range_start=${7:-30000} range_end=${8:-30001}
     (
         SCENARIO=${scenario}
         ALICE_VALUE=${alice_value}
@@ -364,12 +412,30 @@ runCase() {
             SELF_VALUE=1
         fi
         dockerAcquireDeploymentLock || fail "${SCENARIO}: 未取得夹具部署锁"
+        listener=entry-hy2
+        ipv4=${IPV4}
+        ipv6=${IPV6}
+        case "${SCENARIO}" in
+        prepare-invalid-listener) listener=foreign-hy2 ;;
+        prepare-invalid-ipv4) ipv4=198.018.1.1 ;;
+        prepare-invalid-ipv6) ipv6= ;;
+        prepare-invalid-family)
+            jq '.core.protocols[0].address_families = ["ipv4"]' "${root}/config/spec.json" \
+                >"${TEST_ROOT}/single-family.json"
+            cp -- "${TEST_ROOT}/single-family.json" "${root}/config/spec.json"
+            ;;
+        esac
         trap 'record original-INT' INT
         trap 'record original-TERM' TERM
         traps_before=$(trap -p INT TERM)
         status=0
-        dockerPortHoppingTargetStartManaged entry-hy2 "${IPV4}" "${IPV6}" \
-            >"${TEST_ROOT}/result.json" 2>"${TEST_ROOT}/error.log" || status=$?
+        if [[ "${operation}" == prepare ]]; then
+            dockerPortHoppingTargetPrepareActivation "${listener}" "${range_start}" "${range_end}" \
+                "${ipv4}" "${ipv6}" >"${TEST_ROOT}/result.json" 2>"${TEST_ROOT}/error.log" || status=$?
+        else
+            dockerPortHoppingTargetStartManaged entry-hy2 "${IPV4}" "${IPV6}" \
+                >"${TEST_ROOT}/result.json" 2>"${TEST_ROOT}/error.log" || status=$?
+        fi
         [[ "${status}" == "${expected}" || ( "${expected}" == reject && "${status}" != 0 ) ]] ||
             fail "${SCENARIO}: 状态 ${status}，预期 ${expected}: $(cat "${TEST_ROOT}/error.log")"
         [[ "$(eventCount up)" == "${up_count}" ]] ||
@@ -382,34 +448,48 @@ runCase() {
         [[ "$(trap -p INT TERM)" == "${traps_before}" ]] ||
             fail "${SCENARIO}: 启动事务没有恢复调用方 INT/TERM trap"
         if [[ "${expected}" == 0 ]]; then
-            jq -e --arg id "${NEXT_ID}" --argjson count "$((2 - alice_value))" '
+            jq -e --arg id "${NEXT_ID}" --arg operation "${operation}" --argjson count "$((2 - alice_value))" \
+                --argjson start "${range_start}" --argjson end "${range_end}" '
               keys == (["schema_version","listener_id","protocol_id","core","container_id","image_id",
-                "started_at","restart_count","target_port","ipv4","ipv6","enabled_accounts"] | sort) and
-              .container_id == $id and .enabled_accounts == $count
+                "started_at","restart_count","target_port","ipv4","ipv6","enabled_accounts"] +
+                (if $operation == "prepare" then ["range_start","range_end"] else [] end) | sort) and
+              .container_id == $id and .enabled_accounts == $count and
+              (if $operation == "prepare" then .range_start == $start and .range_end == $end else true end)
             ' "${TEST_ROOT}/result.json" >/dev/null || fail "${SCENARIO}: 成功未返回唯一见证"
             [[ "$(eventCount generate)" == 1 && "$(eventCount render)" == 2 &&
                 "$(eventCount read-state)" == 3 &&
                 "$(eventCount query)" == 1 && "$(eventCount write-state)" == 1 &&
                 "$(eventCount validate)" == 1 ]] || fail "${SCENARIO}: 事务重复生成、采集或渲染"
-            [[ -z "$(find "${root}" -maxdepth 1 -name '.hopping-start.*' -print)" ]] ||
+            [[ -z "$(find "${root}" -maxdepth 1 \( -name '.hopping-start.*' -o -name '.hopping-prepare.*' \) -print)" ]] ||
                 fail "${SCENARIO}: 成功后仍保留临时 stage"
         else
             [[ ! -s "${TEST_ROOT}/result.json" ]] || fail "${SCENARIO}: 失败输出了见证或命令噪声"
         fi
         if [[ "${SCENARIO}" == query-fail || "${SCENARIO}" == container-drift ||
-            "${SCENARIO}" == orphan ]]; then
+            "${SCENARIO}" == orphan || "${SCENARIO}" == prepare-invalid-* ]]; then
             cmp -s -- "${root}/data/traffic/state.json" "${TEST_ROOT}/baseline/data/traffic/state.json" &&
                 cmp -s -- "${root}/config/sing-box/config.json" \
                     "${TEST_ROOT}/baseline/config/sing-box/config.json" ||
                 fail "${SCENARIO}: 未采集成功却改动累计或 live"
             [[ "$(eventCount state-committed)" == 0 ]] || fail "${SCENARIO}: 错误提交采集"
+            if [[ "${SCENARIO}" == prepare-invalid-* ]]; then
+                [[ "$(eventCount start-managed)" == 0 && "$(eventCount query)" == 0 &&
+                    "$(eventCount write-state)" == 0 && "$(eventCount compose)" == 0 &&
+                    -z "$(find "${root}" -maxdepth 1 -name '.hopping-*' -print)" ]] ||
+                    fail "${SCENARIO}: 非法输入仍调用启动、采集或创建 stage"
+            fi
         elif [[ "${SCENARIO}" == state-race ]]; then
             cmp -s -- "${TEST_ROOT}/state.foreign" "${root}/data/traffic/state.json" ||
                 fail '失败覆盖了外来累计'
         else
-            jq -e --arg alice "${ALICE}" --argjson value "$((4 + alice_value))" \
+            extra=0
+            [[ "${SCENARIO}" != prepare-state-update ]] || extra=1
+            jq -e --arg alice "${ALICE}" --argjson value "$((4 + alice_value + extra))" \
                 '.accounts[$alice].upload == $value' "${root}/data/traffic/state.json" >/dev/null ||
                 fail "${SCENARIO}: 已提交累计被回退或遗失"
+        fi
+        if [[ "${operation}" == prepare && "${SCENARIO}" != prepare-invalid-* ]]; then
+            [[ "$(eventCount start-managed)" == 1 ]] || fail "${SCENARIO}: 准备没有恰好调用一次启动"
         fi
         if [[ -s "${TEST_ROOT}/started-users" && "${ALICE_VALUE}" == 1 ]]; then
             jq -es --arg alice "${ALICE}" 'all(.[]; index($alice) == null)' \
@@ -419,15 +499,18 @@ runCase() {
             [[ "$(eventCount candidate-copied)" == 2 && "$(eventCount live-renamed)" == 1 ]] ||
                 fail "${SCENARIO}: 收到复制节点信号后仍继续原流程 rename"
         fi
-        cmp -s -- "${root}/config/sing-box/users.base" \
+        [[ "${SCENARIO}" == prepare-baseline-race ]] || cmp -s -- "${root}/config/sing-box/users.base" \
             "${TEST_ROOT}/baseline/config/sing-box/users.base" ||
             fail "${SCENARIO}: 启动事务改变了账号基线"
         for file in deployment.json compose.json images.env secrets/tls/proxy.example.com.key; do
+            [[ "${SCENARIO}:${file}" != prepare-deployment-race:deployment.json &&
+                "${SCENARIO}:${file}" != prepare-compose-race:compose.json &&
+                "${SCENARIO}:${file}" != prepare-images-race:images.env ]] || continue
             cmp -s -- "${root}/${file}" "${TEST_ROOT}/baseline/${file}" ||
                 fail "${SCENARIO}: 启动事务改变了 ${file}"
         done
         case "${SCENARIO}" in
-        lock-race)
+        lock-race|prepare-lock-race)
             [[ -z "${DOCKER_DEPLOYMENT_LOCK_DIR}" ]] || fail '锁变化后未阻止通用 Release'
             dockerReleaseDeploymentLock
             [[ -f "${root}/locks/deployment.lock/pid" ]] || fail '外来锁被 Release 删除'
@@ -457,7 +540,11 @@ runCase() {
         if [[ "${SCENARIO}" == stop-health-tick ]]; then
             [[ -s "${TEST_ROOT}/stopped" ]] || fail '健康日志 tick 阻止安全停止'
         fi
-        [[ "${SCENARIO}" == lock-race ]] || dockerReleaseDeploymentLock
+        if [[ "${operation}" == prepare && "${expected}" != 0 && "${SCENARIO}" != prepare-invalid-* ]]; then
+            [[ -n "$(find "${root}" -maxdepth 1 -name '.hopping-prepare.*' -type d -print)" ]] ||
+                fail "${SCENARIO}: 失败没有保留准备证据"
+        fi
+        [[ "${SCENARIO}" == lock-race || "${SCENARIO}" == prepare-lock-race ]] || dockerReleaseDeploymentLock
     ) || status=$?
     [[ "${status}" == 0 ]] || fail "场景失败: ${scenario}"
     cases=$((cases + 1))
@@ -497,5 +584,33 @@ for signal in INT TERM; do
     runCase "signal-${signal}-renamed" "${expected}" 1 0
     runCase "signal-${signal}-compose" "${expected}" 2 0
     runCase "signal-${signal}-commit" "${expected}" 2 0
+    runCase "signal-${signal}-startup-cleanup" "${expected}" 1 0
 done
 printf 'docker-port-hopping-start-ok: %s transaction cases\n' "${cases}"
+
+# 准备层复用启动事务；非法输入必须在采集前拒绝，后验不重算材料。
+cases=0
+runCase prepare-normal 0 1 0 0 prepare
+runCase prepare-quota 0 1 0 1 prepare
+runCase prepare-state-update 0 1 0 1 prepare
+runCase prepare-single-port 0 1 0 0 prepare 65535 65535
+for range in '0 30001' '030000 30001' '30000 +30001' '30001 30000' \
+    '30000 65536' '1 27443' '27443 30000' '27443 27443' '1 65535'; do
+    read -r start end <<<"${range}"
+    runCase prepare-invalid-range reject 0 0 1 prepare "${start}" "${end}"
+done
+for kind in listener ipv4 ipv6 family; do
+    runCase "prepare-invalid-${kind}" reject 0 0 1 prepare
+done
+for kind in lock spec baseline compose deployment images tls live cid started image health permissions; do
+    runCase "prepare-${kind}-race" reject 1 0 1 prepare
+done
+runCase prepare-signal-INT 130 1 0 1 prepare
+runCase prepare-signal-TERM 143 1 0 1 prepare
+runCase query-fail reject 0 0 1 prepare
+runCase compose-fail reject 2 0 1 prepare
+runCase signal-INT-validation 130 1 0 1 prepare
+runCase signal-TERM-commit 143 2 0 1 prepare
+runCase signal-INT-startup-cleanup 130 1 0 1 prepare
+runCase signal-TERM-startup-cleanup 143 1 0 1 prepare
+printf 'docker-port-hopping-prepare-ok: %s preparation cases\n' "${cases}"

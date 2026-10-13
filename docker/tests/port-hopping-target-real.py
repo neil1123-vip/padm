@@ -300,14 +300,22 @@ dockerTlsRuntimePermissions "$2/secrets/tls"
             authentication(node, root, enter, "quota-before", new_password, alice_password,
                            ("old", "new"))
             quota_before = checked_witness(root, docker, startup=True)
+            nat_before = {tool: command([tool, "-w", "-t", "nat", "-S"])
+                          for tool in ("iptables", "ip6tables")}
+            jumpstate = root / "data/net/port-hopping.state"
+            assert not jumpstate.exists()
             result = command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
                               "DOCKER_HOST=" + docker[-1], "bash", "-Eeuo", "pipefail", "-c", """
 . "$1"
 dockerAcquireDeploymentLock
 trap dockerReleaseDeploymentLock EXIT
-dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
+dockerPortHoppingTargetPrepareActivation entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1
 """, "test", str(ROOT / "install-docker.sh")], timeout=60)
             quota_after = json.loads(result)
+            assert quota_after["range_start"] == 30000 and quota_after["range_end"] == 30001
+            assert not jumpstate.exists()
+            assert {tool: command([tool, "-w", "-t", "nat", "-S"])
+                    for tool in nat_before} == nat_before, "启用准备改变了两族 NAT 正文"
             assert quota_after["container_id"] != quota_before["container_id"]
             assert quota_after["started_at"] != quota_before["started_at"]
             assert quota_after["enabled_accounts"] == 1
@@ -348,6 +356,7 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
             fresh_dual_family_auth_reversed=True, backdated_tls_replacement_refused=True,
             traffic_state_update_allowed=True, locked_witness_tree_unchanged=True,
             managed_start_quota_revoked=True, failed_start_safe_recovered=True,
+            activation_prepared=True, dual_family_nat_unchanged=True, jumpstate_unchanged=True,
             elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
     except BaseException:
         if daemon is not None and daemon.poll() is None:

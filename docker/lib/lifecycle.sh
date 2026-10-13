@@ -935,10 +935,10 @@ dockerPortHoppingTargetStartManaged() {
     trap 'ph_signal=143' TERM
     if dockerPortHoppingTargetStartPrepare; then ph_status=0; else ph_status=$?; fi
     # 恢复不继续原流程；已提交 state 从不回退，旧配置只作为证据。
-    trap '' INT TERM
     [[ "${ph_signal}" == 0 ]] || ph_status=${ph_signal}
-    ph_signal=0
     if [[ "${ph_status}" != 0 ]]; then
+        trap '' INT TERM
+        ph_signal=0
         if dockerPortHoppingTargetStartLockCheck && [[ "${ph_snapshot}" == true ]]; then
             ph_state=$(dockerTrafficReadState) || ph_state=
             if [[ -z "${ph_state}" || "${ph_state}" != "$(<"${ph_stage}/state.initial.json")" ||
@@ -955,16 +955,118 @@ dockerPortHoppingTargetStartManaged() {
             fi
         fi
     else
-        dockerPortHoppingTargetStartLockCheck &&
+        [[ "${ph_signal}" == 0 ]] && dockerPortHoppingTargetStartLockCheck &&
             dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&
-            dockerPortHoppingTargetStartLockCheck || ph_status=1
+            dockerPortHoppingTargetStartLockCheck && [[ "${ph_signal}" == 0 ]] || ph_status=1
     fi
     trap - INT TERM
     [[ -z "${ph_int}" ]] || eval "${ph_int}"
     [[ -z "${ph_term}" ]] || eval "${ph_term}"
+    [[ "${ph_signal}" == 0 ]] || ph_status=${ph_signal}
     [[ "${ph_status}" == 0 ]] || return "${ph_status}"
     dockerPortHoppingTargetStartLockCheck || return 1
     printf '%s\n' "${ph_witness}"
+}
+
+dockerPortHoppingTargetPrepareActivation() {
+    local ph_owner=${BASHPID:-$$} ph_root ph_lock ph_stage= ph_domain
+    local listener=${1:-} start=${2:-} end=${3:-} ipv4=${4:-} ipv6=${5:-}
+    local entry current files witness container started status=1 signal=0 intTrap termTrap
+    local entryFilter='
+      . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
+      if $s.schema_version == 3 and $s.core.type == "sing-box" and
+        $s.core.secondary_type == null and ($s.core.protocols | length) == 1 and
+        ($s.host_integrations | length) == 0 and length == 1 and .[0].id == 3 and
+        (.[0].core // $s.core.type) == "sing-box" and
+        (.[0].address_families | sort) == ["ipv4","ipv6"] and
+        (.[0].public_port | type == "number" and floor == . and . >= 1 and . <= 65535)
+      then {port:.[0].public_port,domain:.[0].hy2.domain}
+      else error("启用准备仅支持单个受管双族 Hy2 入口") end'
+    local fixedFilter='
+      map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
+        if .[0] == "data/traffic" then .[3] = 0 else . end)'
+    [[ "$#" -eq 5 && "${start}" =~ ^[1-9][0-9]{0,4}$ && "${end}" =~ ^[1-9][0-9]{0,4}$ &&
+        "${start}" -le "${end}" && "${end}" -le 65535 ]] || return 1
+    ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") || {
+        DOCKER_DEPLOYMENT_LOCK_DIR=
+        return 1
+    }
+    ph_root=$(dockerInstallRoot) &&
+        entry=$(jq -ec --arg listener "${listener}" "${entryFilter}" "${ph_root}/config/spec.json") &&
+        jq -e --argjson start "${start}" --argjson end "${end}" '
+          .port < $start or .port > $end' <<<"${entry}" >/dev/null &&
+        ph_domain=$(jq -er '.domain' <<<"${entry}") || {
+            dockerPortHoppingTargetStartLockCheck; return 1
+        }
+    python3 - "${ipv4}" "${ipv6}" <<'PY' || { dockerPortHoppingTargetStartLockCheck; return 1; }
+import ipaddress
+import sys
+
+for raw, version in zip(sys.argv[1:], (4, 6)):
+    address = ipaddress.ip_address(raw)
+    if (address.version != version or str(address) != raw or "%" in raw or
+            address.is_unspecified or address.is_multicast or address.is_loopback or
+            address.is_link_local or getattr(address, "ipv4_mapped", None) is not None):
+        raise SystemExit("启用准备需要规范原生双族地址")
+PY
+    current=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") &&
+        jq -e '.[] | select(.[0] == "data/traffic") | .[1] != null' <<<"${current}" >/dev/null &&
+        files=$(jq -c "${fixedFilter}" <<<"${current}") &&
+        [[ "$(jq -ec --arg listener "${listener}" "${entryFilter}" "${ph_root}/config/spec.json")" == \
+            "${entry}" ]] && dockerPortHoppingTargetStartLockCheck ||
+        { dockerPortHoppingTargetStartLockCheck; return 1; }
+    ph_stage=$(mktemp -d "${ph_root}/.hopping-prepare.XXXXXX") ||
+        { dockerPortHoppingTargetStartLockCheck; return 1; }
+    intTrap=$(trap -p INT)
+    termTrap=$(trap -p TERM)
+    trap 'signal=130' INT
+    trap 'signal=143' TERM
+    # 必须直接调用；命令替换会丢失当前持锁 Bash 身份。
+    if dockerPortHoppingTargetStartLockCheck && [[ "${signal}" == 0 ]] &&
+        dockerPortHoppingTargetStartManaged "${listener}" "${ipv4}" "${ipv6}" >"${ph_stage}/started.json" &&
+        [[ "${signal}" == 0 ]] && dockerPortHoppingTargetStartLockCheck &&
+        witness=$(jq -ec --arg listener "${listener}" --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" \
+            --argjson entry "${entry}" '
+          if .listener_id == $listener and .target_port == $entry.port and
+          .ipv4 == $ipv4 and .ipv6 == $ipv6 and .protocol_id == 3 and .core == "sing-box" and
+          (.container_id | test("^[a-f0-9]{64}$")) and
+          (.image_id | test("^sha256:[a-f0-9]{64}$")) and .enabled_accounts > 0
+          then . else error("启用准备目标代次不匹配") end
+        ' "${ph_stage}/started.json") &&
+        started=$(jq -er '.started_at' <<<"${witness}") &&
+        dockerPortHoppingTargetProjectCheck "${ph_root}" &&
+        container=$(docker container inspect "$(jq -er '.container_id' <<<"${witness}")") &&
+        jq -e --argjson witness "${witness}" '
+          length == 1 and (.[0] |
+            .Id == $witness.container_id and .Image == $witness.image_id and
+            .State.StartedAt == $witness.started_at and .RestartCount == $witness.restart_count and
+            .State.Status == "running" and .State.Running == true and
+            .State.Restarting == false and .State.Paused == false and .State.Dead == false and
+            .State.Health.Status == "healthy")
+        ' <<<"${container}" >/dev/null &&
+        current=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "${started}") &&
+        jq -e '.[] | select(.[0] == "data/traffic") | .[3] == 16832' <<<"${current}" >/dev/null &&
+        [[ "$(jq -c "${fixedFilter}" <<<"${current}")" == "${files}" && "${signal}" == 0 ]] &&
+        dockerPortHoppingTargetStartLockCheck &&
+        jq -c --argjson start "${start}" --argjson end "${end}" '
+          . + {range_start:$start,range_end:$end}
+        ' <<<"${witness}" >"${ph_stage}/prepared.json" &&
+        [[ "${signal}" == 0 ]] && dockerPortHoppingTargetStartLockCheck; then
+        witness=$(<"${ph_stage}/prepared.json")
+        dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&
+            dockerPortHoppingTargetStartLockCheck && [[ "${signal}" == 0 ]] && status=0
+    else status=$?; fi
+    trap - INT TERM
+    [[ -z "${intTrap}" ]] || eval "${intTrap}"
+    [[ -z "${termTrap}" ]] || eval "${termTrap}"
+    [[ "${signal}" == 0 ]] || status=${signal}
+    if [[ "${status}" != 0 ]]; then
+        dockerPortHoppingTargetStartLockCheck || :
+        dockerError "跳跃启用准备未提交；累计不回退，检查证据: ${ph_stage}"
+        return "${status}"
+    fi
+    # 准备诊断不能作为后续 net 写规则的授权，也不证明端口范围当前空闲。
+    printf '%s\n' "${witness}"
 }
 
 dockerComposeExecute() {

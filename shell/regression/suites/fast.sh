@@ -76,6 +76,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-setup-tls \
         docker-phase4-lifecycle \
         docker-reality-targets-direct \
+        docker-port-hopping-preflight \
         docker-reality-parameters \
         docker-sites \
         docker-routing-direct-block-ip-workflow \
@@ -95,7 +96,6 @@ listRegressionDockerContractsChildSelectors() {
         docker-reality-target-library \
         docker-control-client \
         docker-tproxy-ownership \
-        docker-port-hopping-preflight \
         docker-routing-core-contracts \
         docker-http-relay \
         docker-control-cli \

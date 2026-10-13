@@ -5826,6 +5826,45 @@ result 和失败输入保留；复用工具镜像，全套仍约 9 分钟，不�
 原生宿主/arm64、公网、重启/卸载、真实自动跳跃及 TUIC 范围仍 deferred；
 完整 net 启用门控及菜单/schema 是下一步，整体计划保持 active。
 
+##### 5C.9c.3e.1 同锁启用准备
+
+内部 `dockerPortHoppingTargetPrepareActivation listener start end ipv4 ipv6`
+冻结当前 Bash 的部署锁及输入身份，只从唯一受管双族 Hy2 listener 推导目标，
+调用者不能传入 target 或见证。范围必须是规范十进制 `1..65535`、正序且不含目标；
+错误 listener、单族、非规范地址或范围在采集、写累计、Compose 及 stage 创建前拒绝。
+既有统计目录、健康单 sing-box、无宿主集成及其它项目容器的限制沿用 3d.2。
+
+使用重定向直接调用 StartManaged 一次，避免命令替换冒用父进程锁。
+成功后轻量复验锁、spec/baseline/deployment/images.env/Compose/TLS 及目录身份，
+精确检查 CID、StartedAt、Image、RestartCount 和 healthy，再执行
+`FileSnapshot(domain, StartedAt)`。live/state 允许随启动更新，不要求等于初始版本；
+不再调用 LockedWitness/StartupWitness 或重复 Generate/ReadState/Render。
+诊断仅增加 `range_start/range_end`；失败 stdout 为空，130/143 原样传播，
+还原调用方 trap，保留证据及已提交累计，锁漂移阻止通用 Release 删除外来锁。
+账号数只反映本次启动采用的额度版本，允许后续 state 更新不等于已经重新应用
+限制；该诊断不能证明输出时全部账号仍满足最新额度。
+
+38 个准备合同覆盖规范范围、非法输入零启动/采集/重建、一次调用、后置锁/输入/
+权限/容器代次/健康漂移、state 合法变化、内层失败与信号原样传播及 trap 还原。
+另补启动成功清理节点 INT/TERM 合同，原事务合计 38 场景，修复此前忽略信号后
+仍可能成功返回的问题；失败恢复期间仍忽略后续信号以完成受限恢复。
+集中完整 54/54 无重复或遗漏，内部/入口 `521278/522353 ms`，Jobs 6，
+排队 `218328 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-6b5e18288cfb49959939648d86e9f2a1/`。
+七个关键实现/测试/入口文件 SHA256 与本次快照一致。
+最终真实双族准备、跨额度撤销、安全恢复、NAT 正文和 jumpstate 不变通过，
+内部/入口 `61253/62765 ms`、Jobs 2：
+`.tmp-regression-docker-5f32558f8fc24616970021a72c31bee6/`。
+独立只读复审及语法/ShellCheck error/Python AST/diff 通过。
+完整合同中长耗时跳跃分片从第 35 位前移至第 16 位，数量仍为 54，并发不变；
+本轮入口较上轮减少 `23135 ms`（约 4.2%），测试内容亦变化，不宣称稳定提速。
+本轮七份成功 source.tar 清理 `86,446,080 bytes`，保留日志、清单和 result。
+
+本阶段不调用 net run、不写 jumpstate/NAT，不证明 UDP 范围当前空闲。
+3e.2 再实现实时单次父子交接、net 锁及前后全域冲突预检；静态 JSON、
+环境变量及旧五参数 tuple 都不能授权写规则。菜单/schema/Compose 自动启用、
+原生宿主/arm64、公网、旧会话排空等继续 deferred，整体目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

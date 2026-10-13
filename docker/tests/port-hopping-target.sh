@@ -585,6 +585,11 @@ dockerAcquireDeploymentLock
 if managed=$(dockerPortHoppingTargetStartManaged entry-hy2 "${IPV4}" "${IPV6}" \
     2>"${TEST_ROOT}/managed-substitution.log"); then fail '启动入口命令替换冒用了父进程锁'; fi
 [[ -z "${managed}" ]] || fail '启动入口拒绝后仍输出见证'
+prepareTree=$(treeSnapshot)
+if prepared=$(dockerPortHoppingTargetPrepareActivation entry-hy2 30000 30001 "${IPV4}" "${IPV6}" \
+    2>"${TEST_ROOT}/prepare-substitution.log"); then fail '准备入口命令替换冒用了父进程锁'; fi
+[[ -z "${prepared}" && "$(treeSnapshot)" == "${prepareTree}" ]] ||
+    fail '准备入口拒绝命令替换后仍输出或修改受管树'
 mv -- "${root}/data/traffic" "${TEST_ROOT}/missing-traffic"
 missingTree=$(treeSnapshot)
 dockerTrafficSnapshot() { fail '累计目录缺失仍执行采集'; }

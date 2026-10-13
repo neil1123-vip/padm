@@ -398,6 +398,15 @@ dual-family quota revocation and safe recovery after publication fails. SIGKILL,
 noncooperative replacement, native hosts/arm64, public networks, old-session draining
 and the complete net/menu/schema gate remain pending. Complete hopping and
 protocol-management support are unchanged.
+Internal 3e.1 activation preparation derives the target from the unique listener and
+rejects noncanonical, reversed or target-containing port ranges and non-dual-stack
+inputs before collection. It directly calls the startup transaction once, then checks
+fixed inputs and the new container generation without regenerating, rereading traffic
+state or rendering. Its range and target output is diagnostic only: it writes neither
+jumpstate nor NAT, proves no current range availability and grants no net activation
+authority. Failure preserves evidence and committed cumulative traffic.
+The account count reflects the quota version used for this startup; later traffic-state
+changes do not imply account restrictions have been reapplied.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
