@@ -59,12 +59,14 @@ dockerConfigureSpecValidate() {
         dockerError "配置规格不是安全的普通文件: ${specFile}"
         return 1
     }
-    jq empty "${schemaFile}" "${matrixFile}" "${specFile}" >/dev/null 2>&1 || {
-        dockerError '配置规格或阶段 4 契约不是有效 JSON'
-        return 1
-    }
-    jq -es 'length == 1 and (.[0] | type == "object")' "${specFile}" >/dev/null 2>&1 || {
-        dockerError '配置规格必须是单个 JSON 对象'
+    jq -en --slurpfile schema "${schemaFile}" \
+        --slurpfile matrix "${matrixFile}" --slurpfile spec "${specFile}" \
+        '$spec | length == 1 and (.[0] | type == "object")' >/dev/null 2>&1 || {
+        if [[ "$?" -eq 1 ]]; then
+            dockerError '配置规格必须是单个 JSON 对象'
+        else
+            dockerError '配置规格或阶段 4 契约不是有效 JSON'
+        fi
         return 1
     }
     jq -e --slurpfile matrix "${matrixFile}" '

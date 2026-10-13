@@ -37,6 +37,42 @@ chmod 0600 "${XHTTP_SPEC}"
 dockerConfigureSpecValidate "${XHTTP_SPEC}" || fail 'XHTTP 共享账号、双入口发布夹具无效'
 
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == validation ]]; then
+# 三份材料每次均须解析，语法错误优先于单对象形状诊断。
+for guardCase in whitespace null array multiple spec-syntax trailing-syntax schema-syntax matrix-syntax parse-first; do
+    (
+        guardSpec="${TEST_ROOT}/guard-${guardCase}.json"
+        guardSchema=$(dockerConfigureSchemaFile)
+        guardMatrix=$(dockerFeatureMatrixFile)
+        expected='配置规格必须是单个 JSON 对象'
+        cp -- "${XHTTP_SPEC}" "${guardSpec}"
+        case "${guardCase}" in
+        whitespace) printf ' \n' >"${guardSpec}" ;;
+        null) printf 'null\n' >"${guardSpec}" ;;
+        array) printf '[]\n' >"${guardSpec}" ;;
+        multiple) cat -- "${XHTTP_SPEC}" "${XHTTP_SPEC}" >"${guardSpec}" ;;
+        spec-syntax) printf '{\n' >"${guardSpec}" ;;
+        trailing-syntax) printf 'not-json\n' >>"${guardSpec}" ;;
+        schema-syntax|parse-first)
+            guardSchema="${TEST_ROOT}/guard-schema.json"
+            printf '{\n' >"${guardSchema}"
+            [[ "${guardCase}" != parse-first ]] || printf 'null\n' >"${guardSpec}"
+            ;;
+        matrix-syntax)
+            guardMatrix="${TEST_ROOT}/guard-matrix.json"
+            printf '{\n' >"${guardMatrix}"
+            ;;
+        esac
+        [[ "${guardCase}" != *syntax && "${guardCase}" != parse-first ]] ||
+            expected='配置规格或阶段 4 契约不是有效 JSON'
+        dockerConfigureSchemaFile() { printf '%s\n' "${guardSchema}"; }
+        dockerFeatureMatrixFile() { printf '%s\n' "${guardMatrix}"; }
+        actual=0
+        dockerConfigureSpecValidate "${guardSpec}" >"${STDOUT}" 2>"${STDERR}" || actual=$?
+        [[ "${actual}" == 1 && ! -s "${STDOUT}" && "$(<"${STDERR}")" == "${expected}" ]] ||
+            fail "JSON 前置校验退出码或诊断不匹配: ${guardCase}"
+    )
+done
+
 # Schema 负责形状，生产校验额外拒绝范围反转和字符串数值溢出。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy

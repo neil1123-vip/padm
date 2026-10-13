@@ -5680,6 +5680,52 @@ Jobs 6、exit 0、cache_hit=false；
 PowerShell AST、diff 及独立复审通过。静态临时文件和成功输入已清理，
 日志/result 与失败输入保留；完整跳跃/协议管理仍 deferred，总目标 active。
 
+#### 5C.9c.3c.1 公共规格前置校验提速
+
+`dockerConfigureSpecValidate` 合并 JSON 语法与单对象形状的两次 jq 启动，
+每次仍完整解析 schema、matrix、spec，不缓存成功或删减完整语义与控制/SSH
+下游校验。形状 false 保留原单对象诊断；读取或语法失败仍优先 JSON 诊断。
+已有 XHTTP validation 新增 4 个形状、4 个语法与语法优先共 9 个拒绝边界，
+核对退出码 1、空 stdout 和精确 stderr，保持原有效规格和协议语义矩阵。
+
+同容器同材料、各 100 次按 old/new/new/old 的 A/B，中位耗时
+`381.2175 -> 240.4935 ms`，jq 启动 `200 -> 100`，只证明该前置约减少 37%，
+不推算全套收益。输入摘要、样本与 9 边界通过证据：
+`.tmp-regression-docker-eda4520f31e147179180787b0c9b34f4/`，
+内部/入口 `5793/7079 ms`；计时代码取得证据后删除。
+6 种传统 TLS 的定向验证内部/入口 `195718/196927 ms`，Jobs 2，
+`.tmp-regression-docker-ac296344a6e547dcb48225fe195fcc00/`。
+此混跑耗时不用于前后性能比较。删除计时代码后集中完整 54/54，
+内部/入口 `530229/531402 ms`、排队 `228323 ms`、Jobs 6、
+exit 0、cache_hit=false；
+`.tmp-regression-docker-7070fe0301884d9f94e1ed8dd210ca09/`。
+services/xhttp 两实现文件与本次输入原始字节 SHA256 一致，静态与独立复审通过。
+单次资源采样 `523.37% CPU / 229.5 MiB` 不是峰值；全套未形成可确认提速，
+仍约 8.9 分钟，维持三槽预算，不扩大并发或宣称五分钟目标完成。
+本轮成功输入累计清理 `98,133,520 bytes`；日志/result、输入哈希及失败证据保留。
+支持范围不变，3d 与整体计划继续待实施。
+
+#### 5C.9c.3d 受管启动事务，待实施
+
+首个内部入口限已持有部署锁的当前 Bash 进程、健康单 sing-box 与已有双族
+Hy2，不接 CLI、菜单、schema 或 net 服务。固定 root、lock 目录、pid 文件的
+路径、dev/inode、权限与 owner；采集后、文件切换前、Compose 前、提交和恢复
+均复验，锁身份变化即保留证据。只检查 pid 内容不构成同一锁的证明。
+
+直接严格 `dockerTrafficSnapshot sing-box`，失败不改运行配置或执行 Compose。
+现有 `dockerTrafficBeforeChange` 吞采集失败且总返回 0，不能用于此门控。
+生成与核对 baseline 一次，读取新累计 state 并渲染一次、验证候选；正常路径
+仅一次受管 `up -d --force-recreate --no-deps --wait … sing-box`，
+不先 ApplyQuotas 再额外 restart/recreate。启动前后固定文件版本、
+新容器代次和健康身份，成功后仍持同一锁继续后续启用，不留跨事务成功标记。
+
+恢复保留新累计；若本次已撤销超额账号，不能重启会重新启用该账号的旧配置。
+Compose 一旦开始就按 runtime 可能变化处理，即使 CLI 失败；旧 CID 可能消失，
+不能仅按旧 CID restart。INT/TERM 停止推进并在同锁内执行受限恢复，
+恢复失败或状态不明保留备份与证据；SIGKILL、非合作替换和 daemon 异步变化
+不宣称自动崩溃恢复。实现时补采集失败、刚跨额度、一次渲染/正常重建、
+锁替换、文件/健康/启动失败、信号及恢复失败合同与标准真实新连接验收。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
