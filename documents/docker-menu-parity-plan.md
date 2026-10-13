@@ -6006,6 +6006,19 @@ net flock 仍不排斥非合作写入；SIGKILL/daemon 状态不明保留证据�
 旧五参数 run 作为生产授权。菜单/schema/Compose、原生宿主/arm64、公网、
 旧会话排空及完整跳跃继续 deferred，整体目标 active。
 
+##### 菜单取消判断精简
+
+CDN 地址及额外端口菜单的 7 处 `变量 != 0` 判断删除；这些输入均先经过
+dockerSetupRead，输入 0 已返回失败。保留空输入检查及直接 read 的协议菜单判断，
+不改变添加、删除、默认分享端口与取消语义。既有真实 PTY 菜单合同含取消、EOF、
+非法输入、CLI 失败及信号，通过后不新增等价测试或重复全套。
+Linux amd64 `docker-menu` 内部/入口 `106653/107891 ms`、Jobs 2、排队 `243 ms`、
+exit 0、cache_hit=false：
+`.tmp-regression-docker-832cd57aa53f4860b282975b6e87b473/`。
+menu.sh 原始字节 SHA256 与本轮输入一致；diff 通过。成功 source.tar 清理
+`12,472,320 bytes`，日志/清单/result 保留。外来订阅短链及工具镜像改动未暂存。
+本次复审未确认新的菜单 bug，整体对齐及 3e.2b.3 写门控继续 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

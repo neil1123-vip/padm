@@ -226,10 +226,10 @@ dockerMenuCdnEntries() {
         2|3)
             dockerMenuRun protocol cdn-status || continue
             dockerSetupRead listener '入口 ID（0 返回）: ' &&
-                [[ -n "${listener}" && "${listener}" != 0 ]] || continue
+                [[ -n "${listener}" ]] || continue
             if [[ "${choice}" == 2 ]]; then
                 dockerSetupRead addresses '连接地址（IP 或域名，多个用逗号分隔，0 返回）: ' &&
-                    [[ -n "${addresses}" && "${addresses}" != 0 ]] || continue
+                    [[ -n "${addresses}" ]] || continue
                 dockerMenuRun edit --cdn-entry "${listener}" "${addresses}" || true
             else
                 dockerMenuRun edit --cdn-entry-clear "${listener}" || true
@@ -258,9 +258,9 @@ dockerMenuPortAliases() {
         2|3)
             dockerMenuRun protocol list || continue
             dockerSetupRead listener '入口 ID（0 返回）: ' &&
-                [[ -n "${listener}" && "${listener}" != 0 ]] &&
+                [[ -n "${listener}" ]] &&
                 dockerSetupRead port '额外端口（0 返回）: ' &&
-                [[ -n "${port}" && "${port}" != 0 ]] || continue
+                [[ -n "${port}" ]] || continue
             if [[ "${choice}" == 2 ]]; then
                 dockerMenuRun edit --port-alias "${listener}" "${port}" || true
             else
@@ -271,15 +271,15 @@ dockerMenuPortAliases() {
             dockerMenuRun protocol port-alias-status || continue
             dockerMenuRun protocol list || continue
             dockerSetupRead listener '入口 ID（0 返回）: ' &&
-                [[ -n "${listener}" && "${listener}" != 0 ]] &&
+                [[ -n "${listener}" ]] &&
                 dockerSetupRead port '默认分享端口（已有额外端口，0 返回）: ' &&
-                [[ -n "${port}" && "${port}" != 0 ]] || continue
+                [[ -n "${port}" ]] || continue
             dockerMenuRun edit --port-alias-default "${listener}" "${port}" || true
             ;;
         5)
             dockerMenuRun protocol list || continue
             dockerSetupRead listener '入口 ID（0 返回）: ' &&
-                [[ -n "${listener}" && "${listener}" != 0 ]] || continue
+                [[ -n "${listener}" ]] || continue
             dockerMenuRun edit --port-alias-default "${listener}" base || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
