@@ -1285,6 +1285,72 @@ runStatus() {
     ! grep -Fq -e "${USERNAME}" -e "${PASSWORD}" -e "${UUID}" -e "${WARP_PRIVATE}" \
         "${LOG}" "${TEST_ROOT}/status.stderr" || fail '路由诊断泄露认证信息'
 }
+upstreamEditCheck() {
+    local kind option oldServer oldPort before composeBefore failure expected trafficBefore
+    for kind in dns socks5; do
+        runEdit 15 "--${kind}-upstream" 2001:db8::54 5354 --preview
+    done
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/warp-owner.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化上游编辑组合夹具失败'
+    assertClean
+    for kind in dns socks5; do
+        option="--${kind}-upstream"
+        cp -- "${root}/config/spec.json" "${TEST_ROOT}/upstream.before"
+        oldServer=$(jq -r --arg kind "${kind}" '.routing[$kind].server' "${TEST_ROOT}/upstream.before")
+        oldPort=$(jq -r --arg kind "${kind}" '.routing[$kind].port' "${TEST_ROOT}/upstream.before")
+        before=$(snapshot)
+        trafficBefore=$(sha256sum "${root}/data/traffic/state.json")
+        composeBefore=$(cat "${COMPOSE_LOG}")
+        runEdit 2 "${option}"
+        runEdit 2 "${option}" 2001:db8::54 --preview
+        for port in 0 65536 -1 53.5; do
+            runEdit 2 "${option}" 2001:db8::54 "${port}" --preview
+        done
+        runEdit 2 "${option}" 2001:db8::54 5354 --dns-off --preview
+        runEdit 2 "${option}" 2001:db8::54 5354 --socks5-off --preview
+        runEdit 2 "${option}" 2001:db8::54 5354 --spec "${TEST_ROOT}/upstream.before" --preview
+        runEdit 2 "${option}" 2001:db8::54 5354 "${option}" 203.0.113.54 5354 --preview
+        for server in proxy.example.com host.docker.internal 127.0.0.1 ::1 '2001:db8::54%eth0'; do
+            runEdit 15 "${option}" "${server}" 5354 --preview
+        done
+        runEdit 15 "${option}" "${oldServer}" "${oldPort}" --preview
+        [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+            fail "${kind}: 拒绝上游输入改变部署或调用 Compose"
+        runEdit 0 "${option}" 2001:db8::54 05354 --preview
+        [[ "$(snapshot)" == "${before}" ]] || fail "${kind}: 上游预览改变部署"
+        failure=health-fail expected=14
+        [[ "${kind}" != socks5 ]] || { failure=term expected=143; }
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        runEdit "${expected}" "${option}" 2001:db8::54 5354 --confirm PADM-DOCKER-EDIT
+        MODE=ok
+        [[ "$(snapshot)" == "${before}" ]] || fail "${kind}: 上游编辑失败未恢复完整部署"
+        runEdit 0 "${option}" 2001:0DB8::54 05354 --confirm PADM-DOCKER-EDIT
+        jq -en --arg kind "${kind}" --slurpfile old "${TEST_ROOT}/upstream.before" \
+            --slurpfile new "${root}/config/spec.json" '
+          $new[0] == ($old[0] | .routing[$kind].server="2001:0DB8::54" | .routing[$kind].port=5354)
+        ' >/dev/null || fail "${kind}: 上游编辑改变名单、私有参数或其它规格"
+        runStatus 0
+        jq -e --arg kind "${kind}" '
+          (if $kind == "dns" then .dns else . end) |
+          .server == "2001:0DB8::54" and .port == 5354
+        ' "${LOG}" >/dev/null || fail "${kind}: 上游状态未显示实际地址和端口"
+        runEdit 0 "${option}" "${oldServer}" "${oldPort}" --confirm PADM-DOCKER-EDIT
+        cmp -s "${root}/config/spec.json" "${TEST_ROOT}/upstream.before" &&
+            [[ "$(sha256sum "${root}/data/traffic/state.json")" == "${trafficBefore}" ]] ||
+            fail "${kind}: 上游往返未保留完整规格和累计"
+    done
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '恢复上游编辑前基线失败'
+    assertClean
+    printf 'docker-routing-upstreams-regression-ok\n'
+}
 # 精确重叠诊断复用组合夹具与生产只读入口，只在核心合同分片运行一次。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-contracts || -z "${PADM_DOCKER_ROUTING_SCOPE:-}" ]]; then
     jq '.routing.direct.domains = ["full:all.example.com","full:suffix.example.net","geosite:category-ads-all"] |
@@ -1607,6 +1673,10 @@ selectiveDomainsIncrementalCheck() {
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"routing",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
+    ( "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-policy-lifecycle && "${ROUTING_BRANCH}" == socks5 ) ]]; then
+    upstreamEditCheck
+fi
 # 域名工作流保留非空流量和原事务断言，只跳过其它能力的生命周期。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts &&

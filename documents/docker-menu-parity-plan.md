@@ -3003,6 +3003,28 @@ Linux amd64 定向路由入口 47352 ms、排队 150 ms；菜单 PTY 49747 ms，
 保留结果、日志、核验及失败输入；文档更新不重复回归。
 本阶段交付不等于整体完成，总目标保持 active。
 
+#### 5B.4n 已有 DNS/SOCKS5 上游编辑
+
+同阶段交付 `edit --dns-upstream <IP> <端口>` 与
+`--socks5-upstream <IP> <端口>`，菜单 `17 → 41/42` 先展示状态再录入。
+共用一个候选分支，仅豁免对应 server/port；域名顺序、SOCKS5 认证、
+WARP 私有字段、其它路由、业务配置与累计保留，不增加 schema 或生成器。
+要求已有合法配置，SOCKS5 选择性/全局均可用；同原文字面地址与端口返回 `15`。
+地址复用现有可路由 IPv4/IPv6 校验并保留原文，端口 `1–65535` 显式填写，
+CLI 前导零按十进制规范化。菜单空值/0/EOF 取消，状态失败停止读取，
+提交只确认一次，失败或信号恢复沿用原事务。
+
+共享合同合并检查双上游的缺失/无变化、参数与非法组合拒绝、
+IPv6 与非默认端口、预览、失败恢复、名单/凭据/累计保持及原值往返；
+PTY 合并覆盖正确派发、取消、状态失败和提交失败后继续诊断。
+Linux amd64 定向 `docker-routing-core-policy-lifecycle` 通过，入口 38629 ms、
+排队 3844 ms、Jobs 2、cache=false：`.tmp-regression-docker-a567650b82e84f49a118a6fbfab3932d/`。
+集中 Docker 合同 54/54 通过，入口 297679 ms、排队 305 ms、Jobs 6、
+cache=false：`.tmp-regression-docker-31040289f61b47ac9e99139d9ece3708/`；
+其中菜单入口通过并保留 `docker-routing-upstreams-regression-ok` 证据。
+完整区域策略、SOCKS UDP 会话撤销、TUIC 跳跃及原生宿主/arm64/公网仍 deferred，
+总目标 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

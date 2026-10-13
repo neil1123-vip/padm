@@ -1626,6 +1626,35 @@ runRoutingDriver() {
         fi
         targetReply 'Docker 路由与出站' $'3\n'
         ;;
+    upstream-flow|upstream-cancel|upstream-status-failed|upstream-commit-failed)
+        for choice in 41 42; do
+            if [[ "${scenario}" == upstream-cancel ]]; then
+                for input in 0 '' $'\004'; do
+                    targetReply 'Docker 路由与出站' "${choice}"$'\n'
+                    inputPrompt='上游服务器 IPv4/IPv6（0 返回）'
+                    # 两类上游分担六种取消输入，避免重复展开相同分支。
+                    if [[ ( "${choice}" == 41 && -z "${input}" ) ||
+                        ( "${choice}" == 42 && -n "${input}" ) ]]; then
+                        targetReply "${inputPrompt}" $'203.0.113.53\n'
+                        inputPrompt='上游端口（1–65535，0 返回）'
+                    fi
+                    [[ "${input}" == $'\004' ]] || input+=$'\n'
+                    targetReply "${inputPrompt}" "${input}"
+                done
+                continue
+            fi
+            targetReply 'Docker 路由与出站' "${choice}"$'\n'
+            [[ "${scenario}" != upstream-status-failed ]] || continue
+            input=$'2001:0DB8::53\n'
+            [[ "${choice}" != 42 ]] || input=$'203.0.113.108\n'
+            targetReply '上游服务器 IPv4/IPv6（0 返回）' "${input}"
+            input=$'5353\n'
+            [[ "${choice}" != 42 ]] || input=$'1088\n'
+            targetReply '上游端口（1–65535，0 返回）' "${input}"
+            targetReply 'fixture-upstream-confirm [y/N]' $'y\n'
+        done
+        targetReply 'Docker 路由与出站' $'3\n'
+        ;;
     ipv6-eof)
         targetReply 'Docker 路由与出站' $'19\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
@@ -2207,6 +2236,19 @@ edit)
         [[ "${confirmation}" == y ]] || exit 2
         [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
         recordAction access-control-commit
+    elif [[ "${2:-}" == --dns-upstream || "${2:-}" == --socks5-upstream ]]; then
+        [[ "$#" -eq 4 ]] || exit 2
+        if [[ "$2" == --dns-upstream ]]; then
+            [[ "$3" == 2001:0DB8::53 && "$4" == 5353 ]] || exit 2
+        else
+            [[ "$3" == 203.0.113.108 && "$4" == 1088 ]] || exit 2
+        fi
+        printf 'fixture-upstream-confirm [y/N]: '
+        IFS= read -r confirmation || exit 2
+        recordAction upstream-confirm "$2" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction upstream-commit "$2"
     elif [[ "${2:-}" == --block-ips-replace ||
         "${2:-}" == --dns-domains-replace || "${2:-}" == --direct-domains-replace ||
         "${2:-}" == --block-domains-replace || "${2:-}" == --warp-domains-replace ||
@@ -2834,6 +2876,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     selective-domains-invalid selective-domains-state-failed selective-domains-confirm-cancel selective-domains-confirm-eof selective-domains-commit-failed \
     socks5-domains-eof socks5-domains-status-failed \
     access-control-flow access-control-cancel access-control-failed \
+    upstream-flow upstream-cancel upstream-status-failed upstream-commit-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
@@ -2843,6 +2886,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     [[ "${routingCase}" != *-replace-status-failed && "${routingCase}" != hosts-manage-status-failed ]] ||
         ROUTING_STATUS=17
     [[ "${routingCase}" != socks5-domains-status-failed ]] || ROUTING_STATUS=17
+    [[ "${routingCase}" != upstream-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
@@ -2852,6 +2896,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != selective-domains-commit-failed &&
         "${routingCase}" != *-replace-commit-failed &&
         "${routingCase}" != access-control-failed &&
+        "${routingCase}" != upstream-commit-failed &&
         "${routingCase}" != hosts-manage-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
@@ -3134,6 +3179,35 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         [[ "$(grep -Fc "操作失败，退出码: ${accessControlExit}" "${CONTROL_LOG}" || true)" -eq "${accessControlFailureCount}" ]] ||
             fail '移除全部访问控制取消或提交失败后未显示退出码并继续诊断'
         ;;
+    upstream-flow|upstream-cancel|upstream-status-failed|upstream-commit-failed)
+        if [[ "${routingCase}" == upstream-cancel ]]; then
+            expectedRouting=$(printf 'protocol routing-status\n%.0s' {1..7})
+        elif [[ "${routingCase}" == upstream-status-failed ]]; then
+            expectedRouting=$'protocol routing-status\nprotocol routing-status\nprotocol routing-status'
+            ! grep -Fq '上游服务器 IPv4/IPv6（0 返回）' "${CONTROL_LOG}" ||
+                fail '上游状态失败后仍然读取编辑输入'
+            [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 3 ]] ||
+                fail '上游状态失败未显示退出码并继续诊断'
+        else
+            for upstreamFamily in dns socks5; do
+                upstreamServer=2001:0DB8::53 upstreamPort=5353
+                [[ "${upstreamFamily}" != socks5 ]] ||
+                    { upstreamServer=203.0.113.108; upstreamPort=1088; }
+                [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
+                expectedRouting+=$'protocol routing-status\n'"edit --${upstreamFamily}-upstream ${upstreamServer} ${upstreamPort}"
+                expectedRouting+=$'\n'"upstream-confirm --${upstreamFamily}-upstream y"
+                [[ "${routingCase}" != upstream-flow ]] ||
+                    expectedRouting+=$'\n'"upstream-commit --${upstreamFamily}-upstream"
+            done
+            expectedRouting+=$'\nprotocol routing-status'
+            [[ "$(grep -Fc 'fixture-upstream-confirm [y/N]' "${CONTROL_LOG}")" -eq 2 ]] ||
+                fail '上游编辑没有每次只确认一次'
+            if [[ "${routingCase}" == upstream-commit-failed ]]; then
+                [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
+                    fail '上游提交失败未显示退出码并继续诊断'
+            fi
+        fi
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
         fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
@@ -3166,7 +3240,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '34. 追加 SOCKS5 域名规则' '35. 精确删除 SOCKS5 域名规则' \
             '36. 单条替换 SOCKS5 域名规则' '37. 单项替换 hosts 地址' \
             '38. 新增 hosts 精确映射' '39. 精确删除 hosts 映射' \
-            '40. 移除全部访问控制' '0. 返回'; do
+            '40. 移除全部访问控制' '41. 修改已有 DNS 上游' '42. 修改已有 SOCKS5 上游' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then

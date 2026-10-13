@@ -1533,6 +1533,15 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 4
             ;;
+        --dns-upstream|--socks5-upstream)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${routingKind}" &&
+                "$3" =~ ^[0-9]{1,5}$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$((10#$3))" -ge 1 && "$((10#$3))" -le 65535 ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=${1#--} routingKind=${routingKind%-upstream}
+            routingAction=upstream routingServer=$2 routingPort=$((10#$3))
+            shift 3
+            ;;
         --direct-domains|--block-domains|--direct-domains-add|--block-domains-add|--direct-domains-remove|--block-domains-remove|--dns-domains-add|--dns-domains-remove|--warp-domains-add|--warp-domains-remove|--ipv6-domains-add|--ipv6-domains-remove|--socks5-domains-add|--socks5-domains-remove)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -2368,6 +2377,15 @@ dockerEditCommand() {
                 fi
                 return "${PADM_DOCKER_RC_STATE}"
             }
+        elif [[ "${routingAction}" == upstream ]]; then
+            jq -e --arg kind "${routingKind}" --arg server "${routingServer}" \
+                --argjson port "${routingPort}" '
+              .routing[$kind] != null and
+              (.routing[$kind].server != $server or .routing[$kind].port != $port)
+            ' "${draft}" >/dev/null || {
+                dockerError '上游编辑要求已启用对应的 DNS/SOCKS5 配置且地址或端口有变化'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
         elif [[ "${routingKind}" == socks5 ]]; then
             jq -e '.routing.socks5.domains | type == "array" and length > 0' "${draft}" >/dev/null || {
                 dockerError 'SOCKS5 域名增删要求已有非空选择性名单，未启用或全局模式不支持'
@@ -2536,6 +2554,10 @@ dockerEditCommand() {
         elif [[ "${routingAction}" == domains ]]; then
             jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" \
                 '.routing[$kind].domains = $domains' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == upstream ]]; then
+            jq --arg kind "${routingKind}" --arg server "${routingServer}" --argjson port "${routingPort}" \
+                '.routing[$kind].server = $server | .routing[$kind].port = $port' \
+                "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == rules ]]; then
             jq --arg server "${routingServer}" --argjson port "${routingPort}" \
                 --argjson domains "${routingDomains}" \
@@ -2813,6 +2835,10 @@ dockerEditCompatibilityValidate() {
         $routing_action == "disable" and
         $new == ($old | del(.routing.direct,.routing.block,.routing.block_ips,.routing.region) |
           if .routing == {} then del(.routing) else . end)
+        elif $routing_action == "upstream" then
+         # 上游编辑只豁免地址和端口，域名名单、认证及其它配置冻结。
+         ($old | del(.routing[$routing_kind].server,.routing[$routing_kind].port)) ==
+           ($new | del(.routing[$routing_kind].server,.routing[$routing_kind].port))
         elif $routing_action == "domains_replace" then
          ($old | del(.routing[$routing_kind][$routing_domains_field])) ==
            ($new | del(.routing[$routing_kind][$routing_domains_field]))

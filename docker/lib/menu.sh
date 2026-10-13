@@ -992,7 +992,7 @@ dockerMenuIPv6() {
 }
 
 dockerMenuRouting() {
-    local choice input server port oldRule newRule
+    local choice input server port oldRule newRule action
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 路由与出站\n'
@@ -1013,7 +1013,8 @@ dockerMenuRouting() {
             '33. 单条替换 IP/CIDR 阻断' '34. 追加 SOCKS5 域名规则' \
             '35. 精确删除 SOCKS5 域名规则' '36. 单条替换 SOCKS5 域名规则' \
             '37. 单项替换 hosts 地址' '38. 新增 hosts 精确映射' \
-            '39. 精确删除 hosts 映射' '40. 移除全部访问控制' '0. 返回'
+            '39. 精确删除 hosts 映射' '40. 移除全部访问控制' \
+            '41. 修改已有 DNS 上游' '42. 修改已有 SOCKS5 上游' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1028,6 +1029,16 @@ dockerMenuRouting() {
             ;;
         2) dockerMenuRun edit --socks5-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
+        41|42)
+            dockerMenuRun protocol routing-status || continue
+            dockerSetupRead server '上游服务器 IPv4/IPv6（0 返回）: ' &&
+                [[ -n "${server}" ]] &&
+                dockerSetupRead port '上游端口（1–65535，0 返回）: ' &&
+                [[ -n "${port}" ]] || continue
+            action=--dns-upstream
+            [[ "${choice}" != 42 ]] || action=--socks5-upstream
+            dockerMenuRun edit "${action}" "${server}" "${port}" || true
+            ;;
         4)
             dockerSetupRead input 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue

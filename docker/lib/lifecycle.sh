@@ -55,6 +55,8 @@ dockerUsage() {
   padm-docker edit --xhttp-headers-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-rules <IPv4/IPv6> <DNS 端口> <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --dns-upstream <IPv4/IPv6> <端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --socks5-upstream <IPv4/IPv6> <端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-domains-add <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-domains-remove <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-domains-replace <旧规则> <新规则> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
