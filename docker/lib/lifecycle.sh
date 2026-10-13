@@ -1524,7 +1524,8 @@ if not stat.S_ISSOCK(os.fstat(0).st_mode) or fcntl.fcntl(0,fcntl.F_GETFL)&os.O_A
     trap 'ownerSignal=143' TERM
     trap '' PIPE
     # 不接收调用方的锁；完整原快照形成前失败时保留目录，不只按 pid 删除。
-    if root=$(dockerInstallRoot) && dockerAcquireDeploymentLock; then
+    # 专用参数只避开自身会话占用检查；控制 fd、原锁及 freshly bound 仍独立核验。
+    if root=$(dockerInstallRoot) && dockerAcquireDeploymentLock --hopping-owner; then
         if original=$(dockerPortHoppingTargetLockSnapshot "${owner}"); then
             if [[ "${ownerSignal}" == 0 ]]; then
                 if dockerPortHoppingTargetTransaction supervised "$@"; then status=0; else status=$?; fi

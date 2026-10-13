@@ -19,6 +19,111 @@ canonical = MODULE["canonical"]
 digest = MODULE["digest"]
 FRAME_LIMIT = MODULE["FRAME_LIMIT"]
 
+def file_identity(path):
+    metadata = path.lstat()
+    # 解析链接或读内容可能更新 atime，仍严格保留 inode、权限及写入时间。
+    return (*MODULE["path_identity"](metadata), metadata.st_size,
+            metadata.st_mtime_ns, metadata.st_ctime_ns)
+
+DEPLOYMENT_BODY = r'''
+source "$1"
+shift
+dockerHostPreflight() { :; }
+dockerRequireInstalledBundle() { :; }
+dockerDeploymentState() { printf 'installed\n'; }
+dockerAssertInstallAllowed() { :; }
+dockerPrepareInstallSource() { :; }
+trap dockerReleaseDeploymentLock EXIT
+if [[ -n "${TEST_GATE_CASE:-}" ]]; then
+    mkdir() {
+        local status=0 target="${@: -1}"
+        command mkdir "$@" || status=$?
+        if [[ "${target}" == "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" &&
+            ( "${TEST_GATE_CASE}" == acquired && "${status}" == 0 ||
+              "${TEST_GATE_CASE}" == waiting && "${status}" != 0 ) ]]; then
+            command mkdir "${PADM_DOCKER_INSTALL_DIR}/data/net/.hopping-supervisor"
+        fi
+        return "${status}"
+    }
+fi
+"$@"
+'''
+
+
+def deployment_command(root, function, *arguments, accepted=False, boundary=""):
+    result = subprocess.run([
+        "bash", "-Eeuo", "pipefail", "-c", DEPLOYMENT_BODY, "test",
+        str(ROOT / "install-docker.sh"), function, *arguments],
+        env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root), PADM_DOCKER_LOCK_TIMEOUT="30",
+                 TEST_GATE_CASE=boundary),
+        capture_output=True, timeout=5)
+    assert result.returncode == (0 if accepted else 12), (
+        function, result.returncode, result.stdout, result.stderr)
+    assert not result.stdout
+    if accepted:
+        assert not result.stderr
+    else:
+        assert "跳跃监督会话存在或停止未核验".encode() in result.stderr, result.stderr
+
+
+def deployment_gate_cases(base):
+    count = 0
+    commands = (
+        ("dockerLifecycleCommand", ("up",)), ("dockerLifecycleCommand", ("restart",)),
+        ("dockerLifecycleCommand", ("down",)), ("dockerUpdateCommand", ()),
+        ("dockerRollbackCommand", ()), ("dockerUninstallCommand", ()),
+        ("dockerInstallCommand", ("--source", str(ROOT), "--ref", "f" * 40, "--no-menu")),
+    )
+    for kind in ("directory", "file", "dangling-link"):
+        root = base / kind
+        (root / "data/net").mkdir(parents=True, mode=0o700)
+        root.chmod(0o750)
+        session = root / "data/net/.hopping-supervisor"
+        if kind == "directory":
+            session.mkdir(mode=0o700)
+            (session / "owner.json").write_text("unverified owner\n")
+        elif kind == "file":
+            session.write_text("unknown session\n")
+        else:
+            session.symlink_to(root / "missing")
+        before = file_identity(session)
+        for function, arguments in commands:
+            deployment_command(root, function, *arguments)
+            assert file_identity(session) == before
+            assert not (root / "locks").exists(), "拒绝前创建了部署锁目录"
+            count += 1
+        if kind == "directory":
+            assert (session / "owner.json").read_text() == "unverified owner\n"
+        elif kind == "file":
+            assert session.read_text() == "unknown session\n"
+        else:
+            assert session.is_symlink() and not session.exists()
+    for boundary in ("waiting", "acquired"):
+        root = base / boundary
+        (root / "data/net").mkdir(parents=True, mode=0o700)
+        root.chmod(0o750)
+        lock = root / "locks/deployment.lock"
+        (root / "locks").mkdir(mode=0o750)
+        if boundary == "waiting":
+            lock.mkdir(mode=0o750)
+            # 死 PID 也不能触发残留清理；会话恰在失败 mkdir 后出现。
+            (lock / "pid").write_text("2147483647\n")
+            before = file_identity(lock), file_identity(lock / "pid")
+        deployment_command(root, "dockerLockInstalledDeployment", boundary=boundary)
+        if boundary == "waiting":
+            assert (file_identity(lock), file_identity(lock / "pid")) == before
+            assert (lock / "pid").read_text() == "2147483647\n"
+        else:
+            assert not lock.exists(), "竞争拒绝后没有释放本次取得的锁"
+        assert (root / "data/net/.hopping-supervisor").is_dir()
+        count += 1
+    root = base / "absent"
+    (root / "data/net").mkdir(parents=True, mode=0o700)
+    root.chmod(0o750)
+    deployment_command(root, "dockerLockInstalledDeployment", accepted=True)
+    assert not (root / "locks/deployment.lock").exists()
+    return count + 1
+
 
 def fake_owned(fd, root):
     peer = socket.socket(fileno=fd)
@@ -113,6 +218,8 @@ def invoke(command, phase, payload, accepted=True, response=None):
 
 def main():
     count = 0
+    with tempfile.TemporaryDirectory(prefix="padm-hopping-deployment-gate.") as directory:
+        count += deployment_gate_cases(Path(directory))
     payload = {"target": {"listener_id": "hy2-main"}, "running": {
         "v": 1, "phase": "running", "nonce": "a" * 64,
         "child_id": "b" * 64, "request_sha256": "c" * 64, "seq": 2,
@@ -232,11 +339,21 @@ def main():
                 assert stale.returncode == 1 and not stale.stdout and stale.stderr
                 current = MODULE["control"]("status", str(installation))
                 assert current["owner"] == owner and current["payload"]["running"]["seq"] >= 2
+                lock = installation / "locks/deployment.lock"
+                original_pid = (lock / "pid").read_bytes()
+                original_lock = file_identity(lock), file_identity(lock / "pid"), original_pid
+                deployment_command(installation, "dockerLockInstalledDeployment")
+                assert (file_identity(lock), file_identity(lock / "pid"),
+                        (lock / "pid").read_bytes()) == original_lock
+                assert MODULE["control"]("status", str(installation))["owner"] == owner
+                count += 1
                 stopped = subprocess.run([sys.executable, str(HELPER), "stop", str(installation)],
                                          capture_output=True, timeout=12)
                 if case == "invalid-finished":
                     assert stopped.returncode == 1 and not stopped.stdout and stopped.stderr
                     assert (installation / "data/net/.hopping-supervisor/owner.json").exists()
+                    deployment_command(installation, "dockerLockInstalledDeployment")
+                    assert not lock.exists()
                 else:
                     assert stopped.returncode == 0 and not stopped.stderr
                     result = json.loads(stopped.stdout)
@@ -244,6 +361,7 @@ def main():
                     assert result["finished"] == {"status": 143, "lock_released": True}
                     assert not (installation / "data/net/.hopping-supervisor").exists()
                     assert not (installation / "locks/deployment.lock").exists()
+                    deployment_command(installation, "dockerLockInstalledDeployment", accepted=True)
                 assert not (installation / "data/net/fixture-running").exists()
                 count += 1
             finally:

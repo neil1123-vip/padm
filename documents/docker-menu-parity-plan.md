@@ -6288,6 +6288,54 @@ manager 异常退出的 finally 先关闭控制通道再 TERM Bash，Bash 可能
 也不以丢失的清理回执确认 stopped 或自动接管。
 90 秒仅作 manager 等待预算，仍无统一撤销/事务时限；整体计划保持 active。
 
+##### 5C.9c.3e.2b.3d.2 监督启用期部署门禁
+
+共用 `dockerAcquireDeploymentLock` 在创建锁前、等待循环中且清理旧锁前、
+本轮锁 PID 写入后检查 `.hopping-supervisor` 任意现存路径或悬空符号链接。
+活动、starting 或停止未核验的残留均拒绝普通部署操作，既不读取旧 JSON 授权，
+也不因死 PID 自动清除会话或原锁证据。后置检查遇到会话竞争只释放本轮新锁。
+install、普通启动/停止/重启、更新、回滚及其它共用取锁入口沿用该检查，
+失败返回原锁错误，不调用 Compose、不误报更新/停止成功或等待完整 30 秒。
+
+持锁监督 Bash 经双向控制 fd 检查后使用内部 `--hopping-owner` 取锁；
+参数仅豁免自身会话占用检查，原锁快照、freshly bound 和 manager 新挑战仍独立
+决定授权，不接收环境变量或旧 owner 作授权。正常 stop 净清理 session/原锁后，
+普通取锁恢复；SIGKILL 留下的会话继续阻断部署，不自动接管或删除。
+
+定向合同覆盖三种会话路径、七个生命周期入口、死 PID 锁证据、
+等待期间/成功取锁后会话出现、活动监督续期与停止成功/失败后的门禁。
+证据比对固定 inode、权限、owner、link count、size、mtime/ctime 和内容；
+解析链接或读取产生的 atime 变化不判为写入。真实夹具复用双族网络，
+刻意保留 SIGKILL 的独立监督验收置于最后；外部 live inode 漂移之后复用真实
+重启见证形成新 StartedAt，再验下一会话，不删除失败证据或放宽生产检查。
+
+验证均使用 Docker Linux amd64、同一当前源码归档与工具镜像
+`sha256:44edfa2f5437bd852b0249fcf5fde85913ac29e2d56d744fa4d4728ad00bf978`：
+
+- 定向 `docker-port-hopping-supervisor`，Jobs 2，40 项通过，入口 3352 ms：
+  `.tmp-regression-docker-901d7270ee384970976aa93254b3ddbe/`。
+- 真实 `docker-port-hopping-target-real`，Jobs 2，exit 0，验收 261.977 秒、
+  入口 264434 ms、排队 199 ms：
+  `.tmp-regression-docker-7bf65c02fce54844a27f0af6843b05c2/`。
+  独立监督续期 28 次，活动/净停止/KILL 残留门禁分别耗时 50/56/47 ms；
+  正常 stop、manager TERM 净清理，以及 KILL 会话和 stage 留证均通过。
+- 集中 `docker-contracts`，Jobs 6，54/54 顶层叶子唯一且与源码声明一致，
+  exit 0，入口 572615 ms、排队 427 ms、cache=false：
+  `.tmp-regression-docker-61d340d4bf004384ba45f2d6eba4748b/`。
+
+三归档 SHA-256 相同；流式逐项核对 370 个文件，369 个与当前工作区一致，
+仅计划文档在验证后补写。结果目录保留 `verification.json/md`、日志和结果，
+成功重复归档及本轮核验脚本清理。失败输入仍保留：安装夹具 ref 长度、
+误将读访问 atime 当成写入、KILL 留证后再次启动及 drift 后旧启动见证均已修正；
+未通过删除失败证据或放宽生产检查绕过门禁。
+
+该检查不是原子会话预约：普通事务通过后置检查后，manager 仍可能创建 session；
+已有事务持原锁完成，监督 Bash 等待新锁，未并发激活。长事务可能超过监督帧
+等待预算并留下 starting 证据；并发启动可用性和在线更新/重启协调仍 deferred。
+普通 status/logs 等共用锁入口也会拒绝该会话，专用监督 Status/Stop 沿用原控制
+通道。菜单/schema/Compose、自动恢复、真实自动跳跃、完整协议管理及
+原生宿主/arm64/公网/systemd/整机重启仍待交付，总目标保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

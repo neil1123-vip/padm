@@ -238,11 +238,25 @@ dockerAssertInstallAllowed() {
     esac
 }
 
+dockerPortHoppingSessionAbsent() {
+    local root=$1
+    [[ ! -e "${root}/data/net/.hopping-supervisor" && ! -L "${root}/data/net/.hopping-supervisor" ]] || {
+        dockerError '跳跃监督会话存在或停止未核验，已拒绝部署操作；请先通过原监督控制通道停止并确认净清理'
+        return 1
+    }
+}
+
 dockerAcquireDeploymentLock() {
-    local root lockDir timeout deadline ownerPid lockMtime now
+    local root lockDir timeout deadline ownerPid lockMtime now hoppingOwner=0
+    case "$#" in
+    0) ;;
+    1) [[ "$1" == --hopping-owner ]] || return 1; hoppingOwner=1 ;;
+    *) return 1 ;;
+    esac
     root=$(dockerInstallRoot) || return 1
     dockerPathIsSafeAbsolute "${root}" || return 1
     [[ ! -L "${root}" ]] || return 1
+    ((hoppingOwner)) || dockerPortHoppingSessionAbsent "${root}" || return 1
     mkdir -p -- "${root}/locks" || return 1
     [[ -d "${root}/locks" && ! -L "${root}/locks" ]] || return 1
     chmod 0750 "${root}" "${root}/locks" || return 1
@@ -251,6 +265,7 @@ dockerAcquireDeploymentLock() {
     [[ "${timeout}" =~ ^[0-9]+$ ]] || return 1
     deadline=$((SECONDS + timeout))
     while ! mkdir -- "${lockDir}" 2>/dev/null; do
+        ((hoppingOwner)) || dockerPortHoppingSessionAbsent "${root}" || return 1
         [[ ! -L "${lockDir}" && ( ! -e "${lockDir}" || -d "${lockDir}" ) ]] || {
             dockerError 'Docker 部署锁路径异常'
             return 1
@@ -284,6 +299,11 @@ dockerAcquireDeploymentLock() {
         DOCKER_DEPLOYMENT_LOCK_DIR=
         return 1
     }
+    # 会话可在等待期间出现；未知残留只阻断，不按旧 owner 自动恢复或清除。
+    if ((!hoppingOwner)) && ! dockerPortHoppingSessionAbsent "${root}"; then
+        dockerReleaseDeploymentLock || return 1
+        return 1
+    fi
 }
 
 dockerReleaseDeploymentLock() {

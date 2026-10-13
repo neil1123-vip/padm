@@ -616,6 +616,24 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
     primary_error = None
     calls = []
 
+    def admission(accepted):
+        started_at = time.monotonic()
+        result = subprocess.run([
+            "bash", "-Eeuo", "pipefail", "-c",
+            '. "$1"; trap dockerReleaseDeploymentLock EXIT; dockerAcquireDeploymentLock',
+            "test", str(ROOT / "install-docker.sh")],
+            env=dict(environment, PADM_DOCKER_LOCK_TIMEOUT="30"),
+            capture_output=True, timeout=5)
+        assert result.returncode == (0 if accepted else 1) and not result.stdout, (
+            result.returncode, result.stdout, result.stderr)
+        if accepted:
+            assert not result.stderr
+        else:
+            assert "跳跃监督会话存在或停止未核验".encode() in result.stderr, result.stderr
+        evidence.setdefault("deployment_admission", []).append(dict(
+            accepted=accepted, elapsed_ms=round((time.monotonic() - started_at) * 1000),
+            returncode=result.returncode, stderr=result.stderr.decode()))
+
     def invoke(function, *arguments, accepted=True):
         with (work / "independent-supervisor.log").open("ab") as log:
             process = subprocess.Popen([
@@ -794,6 +812,9 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             session / "owner.json") == owner_before, "重复启动覆盖了原会话"
         assert tree(root / "locks/deployment.lock") == parent_lock
         evidence["duplicate_start_refused"] = True
+        admission(False)
+        assert tree(root / "locks/deployment.lock") == parent_lock
+        assert tree(session / "owner.json") == owner_before and state.read_text() == state_text
         signal.pidfd_send_signal(manager_fd, signal.SIGHUP)
         observed = time.monotonic()
         authentication(node, root, enter, "independent-initial", self_password,
@@ -836,6 +857,8 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         assert stopped["nonce"] not in challenges and stopped["client_nonce"] not in challenges
         stopped_clean(stopped, owner, target, running, manager_fd, bash_fd)
         active = False
+        admission(True)
+        assert not (root / "locks/deployment.lock").exists()
         assert tree(lock) == net_lock
         assert set(root.glob(".hopping-guarded.*")) == stages
         evidence.update(final_running=previous, observed_renewals=checks,
@@ -924,6 +947,10 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         assert set(root.glob(".hopping-guarded.*")) == stages | {kill_stage}
         assert (kill_stage / "cid").read_text().strip() == kill_child
         assert (kill_stage / "supervised.json").is_file()
+        retained_stage = tree(kill_stage)
+        admission(False)
+        assert tree(kill_stage) == retained_stage and tree(session / "owner.json") == retained_owner
+        assert not (root / "locks/deployment.lock").exists()
         # SIGKILL 后旧 active JSON 只作失败证据，不能授权查询、停止或新一代接管。
         for function, arguments in (
             ("dockerPortHoppingSupervisorStatus", ()),
@@ -1312,13 +1339,17 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
             assert (accumulated_after["upload"] + accumulated_after["download"] >=
                     accumulated["upload"] + accumulated["download"])
             authentication(node, root, enter, "quota-recovered", new_password, alice_password, "old")
-            independent = independent_supervisor(
-                node, work, root, docker, net_image["Id"], nat_before, enter,
-                new_password, alice_password)
             # 绑定漂移会替换 live inode，放在依赖原启动版本的故障恢复验收之后。
             supervised_drift = supervised_session(
                 node, work, root, docker, net_image["Id"], nat_before, enter,
                 new_password, alice_password, drift=True)
+            # 外部替换后的 live inode 必须由新 StartedAt 重新加载，沿用真实重启见证。
+            drift_target = supervised_drift["initial"]["target"]
+            restart_witness(root, docker, compose, drift_target["container_id"], drift_target)
+            # 独立监督最后保留 SIGKILL 证据，后续生产取锁必须拒绝。
+            independent = independent_supervisor(
+                node, work, root, docker, net_image["Id"], nat_before, enter,
+                new_password, alice_password)
         command(compose + ["rm", "-s", "-f"], timeout=15)
         print("docker-port-hopping-target-real-snapshot=" + json.dumps(dict(
             initial=proof, restarted=changed, tls_restarted=tls_changed, image=inputs["sing-box"],
