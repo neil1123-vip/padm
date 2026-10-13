@@ -29,7 +29,7 @@ def timestamp(value):
     datetime.datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")
 
 
-def frame(phase, *expected, guarded=False):
+def frame(phase, *expected, mode="probe"):
     deadline = time.monotonic() + 20
     data = b""
 
@@ -52,11 +52,21 @@ def frame(phase, *expected, guarded=False):
     value = json.loads(data[:-1].decode("ascii"), object_pairs_hook=unique)
     keys = {"v", "phase", "nonce", "host"} if phase == "challenge" else {
         "v", "phase", "nonce", "child_id", "request_sha256"}
+    if mode == "supervised" and phase == "running":
+        keys.add("seq")
     if (not isinstance(value, dict) or set(value) != keys or
             type(value["v"]) is not int or value["v"] != 1 or value["phase"] != phase or
             not text(value["nonce"], r"[a-f0-9]{64}")):
         raise ValueError("跳跃握手帧身份无效")
-    if guarded:
+    if mode == "supervised":
+        if (phase != "running" or len(expected) != 4 or
+                any(not text(item, r"[a-f0-9]{64}") for item in expected[:3]) or
+                not text(expected[3], r"[1-9][0-9]*") or
+                value["child_id"] != expected[0] or value["request_sha256"] != expected[1] or
+                value["nonce"] == expected[2] or type(value["seq"]) is not int or
+                value["seq"] != int(expected[3])):
+            raise ValueError("跳跃续期帧序号、nonce 或绑定无效")
+    elif mode == "guarded":
         counts = {"ready": 3, "written": 4, "active": 5, "closed": 3}
         if (phase not in counts or len(expected) != counts[phase] or
                 any(not text(item, r"[a-f0-9]{64}") for item in expected) or
@@ -108,7 +118,7 @@ def directory(root):
 
 
 def container(root, cid, image, label, start, end, target, ipv4, ipv6, host, mode,
-              guarded=False):
+              operation="probe"):
     items = json.load(sys.stdin, object_pairs_hook=unique)
     if (not isinstance(items, list) or len(items) != 1 or
             not text(cid, r"[a-f0-9]{64}") or not text(image, r"sha256:[a-f0-9]{64}")):
@@ -116,8 +126,8 @@ def container(root, cid, image, label, start, end, target, ipv4, ipv6, host, mod
     value = items[0]
     config, runtime, state = value["Config"], value["HostConfig"], value["State"]
     hostname = host
-    command = "port-hopping-guarded" if guarded else "port-hopping-probe"
-    label_key = "io.padm.hopping-guarded" if guarded else "io.padm.hopping-probe"
+    command = "port-hopping-" + operation
+    label_key = "io.padm.hopping-" + operation
     tmpfs = {"/tmp": "rw,nosuid,nodev,size=16m,mode=1777",
              "/run": "rw,nosuid,nodev,size=16m,mode=0755"}
     mounts = value["Mounts"]
@@ -163,13 +173,17 @@ try:
     if operation == "frame":
         result = frame(*arguments)
     elif operation == "guarded-frame":
-        result = frame(*arguments, guarded=True)
+        result = frame(*arguments, mode="guarded")
+    elif operation == "supervised-frame":
+        result = frame(*arguments, mode="supervised")
     elif operation == "directory" and len(arguments) == 1:
         result = directory(*arguments)
     elif operation == "container" and len(arguments) == 11:
         result = container(*arguments)
     elif operation == "guarded-container" and len(arguments) == 11:
-        result = container(*arguments, guarded=True)
+        result = container(*arguments, operation="guarded")
+    elif operation == "supervised-container" and len(arguments) == 11:
+        result = container(*arguments, operation="supervised")
     else:
         raise ValueError("跳跃诊断参数无效")
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))

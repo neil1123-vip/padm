@@ -1299,7 +1299,7 @@ dockerPortHoppingGuardedContainer() {
     child=$(<"${ph_stage}/cid")
     [[ "${child}" =~ ^[a-f0-9]{64}$ ]] || return 1
     current=$(timeout -k 2 5 docker container inspect "${child}") &&
-        python3 "${ph_helper}" guarded-container "${ph_root}" "${child}" "${ph_image}" \
+        python3 "${ph_helper}" "${ph_operation}-container" "${ph_root}" "${child}" "${ph_image}" \
             "${ph_label}" "${ph_start}" "${ph_end}" "${ph_target}" "${ph_ipv4}" "${ph_ipv6}" \
             "${ph_host}" "${mode}" <<<"${current}"
 }
@@ -1314,22 +1314,23 @@ dockerPortHoppingGuardedSend() {
 }
 
 dockerPortHoppingGuardedExchange() {
-    local challenge nonce request digest current phase frame action descriptor
+    local challenge nonce request digest current phase frame action descriptor duration=150 seq=1
     local -a nonces=() command=(
         docker run --interactive --sig-proxy=false --pull never --cidfile "${ph_stage}/cid"
-        --label "io.padm.hopping-guarded=${ph_label}" --network host --hostname "${ph_host}" --user 0:0
+        --label "io.padm.hopping-${ph_operation}=${ph_label}" --network host --hostname "${ph_host}" --user 0:0
         --read-only --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges
         --no-healthcheck --restart no --log-driver none
         --tmpfs /tmp:rw,nosuid,nodev,size=16m,mode=1777
         --tmpfs /run:rw,nosuid,nodev,size=16m,mode=0755
         --mount "type=bind,source=${ph_root}/data/net,target=/var/lib/padm/net"
-        "${ph_image}" port-hopping-guarded "${ph_start}" "${ph_end}" "${ph_target}"
+        "${ph_image}" "port-hopping-${ph_operation}" "${ph_start}" "${ph_end}" "${ph_target}"
         "${ph_ipv4}" "${ph_ipv6}"
     )
     dockerPortHoppingProbeCheck || return 1
-    # 时限只约束 Docker 客户端；关闭输入后由写子端自行撤销，禁止强杀容器。
+    [[ "${ph_operation}" != supervised ]] || duration=0
+    # 有限模式限制客户端时长；持续模式按帧续期，关闭输入后由子端自行撤销。
     coproc PADM_HOPPING_TRANSPORT {
-        exec timeout -k 2 150 "${command[@]}" 2>"${ph_stage}/child.log"
+        exec timeout -k 2 "${duration}" "${command[@]}" 2>"${ph_stage}/child.log"
     }
     ph_transport=$!
     descriptor=${PADM_HOPPING_TRANSPORT[0]:-}
@@ -1363,9 +1364,26 @@ dockerPortHoppingGuardedExchange() {
             nonce=$(jq -er '.nonce' <<<"${frame}") || return 1
         nonces+=("${nonce}")
         case "${phase}" in ready) action=write ;; written) action=finalize ;; active) action=close ;; esac
+        [[ "${phase}" != active || "${ph_operation}" != supervised ]] || action=continue
         frame=$(jq -c --arg action "${action}" '.phase=$action' <<<"${frame}") &&
             dockerPortHoppingGuardedSend "${frame}" || return 1
     done
+    if [[ "${ph_operation}" == supervised ]]; then
+        while true; do
+            frame=$(python3 "${ph_helper}" supervised-frame running "${ph_child}" "${digest}" \
+                "${nonce}" "${seq}" <&"${ph_read}") &&
+                nonce=$(jq -er '.nonce' <<<"${frame}") || return 1
+            # 固定初始 nonce 与上一轮即可防止当前帧重放，不累计会话历史。
+            for current in "${nonces[@]}"; do [[ "${nonce}" != "${current}" ]] || return 1; done
+            action=$(jq -c '.phase="continue"' <<<"${frame}") &&
+                dockerPortHoppingGuardedSend "${action}" &&
+                jq -cn --argjson target "${ph_witness}" --argjson running "${frame}" \
+                    '{target:$target,running:$running}' >"${ph_stage}/supervised.next" &&
+                chmod 0600 "${ph_stage}/supervised.next" &&
+                mv -f -- "${ph_stage}/supervised.next" "${ph_stage}/supervised.json" || return 1
+            seq=$((seq + 1))
+        done
+    fi
     exec {ph_write}>&-
     ph_write=
     ph_closed=$(python3 "${ph_helper}" guarded-frame closed "${ph_child}" "${digest}" \
@@ -1384,7 +1402,9 @@ dockerPortHoppingGuardedExchange() {
 dockerPortHoppingGuardedCleanup() {
     local current confirmed child state deadline status=0
     [[ -z "${ph_write}" ]] || { exec {ph_write}>&-; ph_write=; }
-    [[ -z "${ph_read}" ]] || { exec {ph_read}<&-; ph_read=; }
+    # 持续子端可能正在发下一挑战；保留输出读端直到其按输入 EOF 撤销。
+    [[ "${ph_operation}" == supervised || -z "${ph_read}" ]] ||
+        { exec {ph_read}<&-; ph_read=; }
     if [[ -e "${ph_stage}/cid" || -L "${ph_stage}/cid" ]]; then
         deadline=$(($(date +%s) + 25))
         while true; do
@@ -1414,6 +1434,7 @@ dockerPortHoppingGuardedCleanup() {
         # cidfile 尚未形成时不能证明没有启动子端，保留本轮证据。
         status=1
     fi
+    [[ -z "${ph_read}" ]] || { exec {ph_read}<&-; ph_read=; }
     if [[ -n "${ph_transport}" ]]; then
         # 中断 wait 后仍保留本 Bash 作业；已退出的数字 PID 不能再发信号。
         if jobs -pr | grep -Fxq -- "${ph_transport}"; then
@@ -1428,12 +1449,22 @@ dockerPortHoppingGuardedCleanup() {
 }
 
 dockerPortHoppingTargetGuarded() {
+    dockerPortHoppingTargetTransaction guarded "$@"
+}
+
+dockerPortHoppingTargetSupervised() {
+    dockerPortHoppingTargetTransaction supervised "$@"
+}
+
+dockerPortHoppingTargetTransaction() {
+    local ph_operation=${1:-}
+    shift || return 1
     local ph_owner=${BASHPID:-$$} ph_root ph_lock ph_stage= ph_domain ph_witness ph_binding
     local ph_start=${2:-} ph_end=${3:-} ph_ipv4=${4:-} ph_ipv6=${5:-} ph_target ph_image
     local ph_helper="${DOCKER_LIB_DIR}/port-hopping-probe.py" ph_directory ph_label ph_child=
     local ph_host= ph_projection= ph_read= ph_write= ph_transport= ph_closed= ph_signal=0
     local status=1 intTrap termTrap pipeTrap image ph_guarded=true
-    [[ "$#" -eq 5 ]] || return 1
+    [[ "$#" -eq 5 && ( "${ph_operation}" == guarded || "${ph_operation}" == supervised ) ]] || return 1
     ph_root=$(dockerInstallRoot) &&
         ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") || {
             DOCKER_DEPLOYMENT_LOCK_DIR=; return 1;
@@ -1479,7 +1510,7 @@ dockerPortHoppingTargetGuarded() {
     [[ "${ph_signal}" == 0 ]] || status=${ph_signal}
     if [[ "${status}" != 0 ]]; then
         dockerPortHoppingTargetStartLockCheck || :
-        dockerError "跳跃有限写事务未完成；规则撤销未确证时保留证据与容器: ${ph_stage}"
+        dockerError "跳跃写事务未完成；规则撤销未确证时保留证据与容器: ${ph_stage}"
         return "${status}"
     fi
     jq -c --argjson closed "${ph_closed}" '. + {guarded_closed:$closed}' <<<"${ph_witness}"

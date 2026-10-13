@@ -975,7 +975,7 @@ port_hopping_preflight() {
 }
 
 port_hopping_resources() {
-    if [ "${1:-}" = run ] || [ "${1:-}" = probe ] || [ "${1:-}" = guarded ]; then
+    if [ "${1:-}" = run ] || [ "${1:-}" = probe ] || [ "${1:-}" = guarded ] || [ "${1:-}" = supervised ]; then
         set -- exec python3 /dev/fd/3 "$STATE_ROOT" "$@"
     else
         set -- python3 /dev/fd/3 "$STATE_ROOT" "$@"
@@ -1363,24 +1363,26 @@ def probe_stop(signum, _frame):
     print("padm-net: port hopping probe interrupted", file=sys.stderr)
     sys.exit(128 + signum)
 
-def frame_bytes(eof):
+def frame_bytes(eof, allow_empty=False):
     deadline = time.monotonic() + 20
     data = b""
     while True:
-        if operation == "guarded":
+        if operation in {"guarded", "supervised"}:
             guarded_signal_check()
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise ValueError("port hopping probe request timed out")
-        if not select.select([0], [], [], min(remaining, 0.1) if operation == "guarded"
+        if not select.select([0], [], [], min(remaining, 0.1) if operation in {"guarded", "supervised"}
                              else remaining)[0]:
             continue
         # 中间帧逐字节读，保留下一阶段输入；只读请求仍必须等 EOF。
         chunk = os.read(0, 1)
-        if operation == "guarded":
+        if operation in {"guarded", "supervised"}:
             guarded_signal_check()
         if not chunk:
             if not eof:
+                if allow_empty and not data:
+                    return None
                 raise ValueError("port hopping guarded input closed before its gate")
             break
         data += chunk
@@ -1492,20 +1494,28 @@ def guarded_signal_check():
         print("padm-net: port hopping guarded interrupted", file=sys.stderr)
         raise SystemExit(128 + stop_signal)
 
-def guarded_gate(phase, action, request, digest):
+def guarded_gate(phase, action, request, digest, seq=None, previous_nonce=None, allow_empty=False):
     guarded_signal_check()
     nonce = os.urandom(32).hex()
+    while nonce == previous_nonce:
+        nonce = os.urandom(32).hex()
     value = {"v": 1, "phase": phase, "nonce": nonce,
              "child_id": request["child_id"], "request_sha256": digest}
+    if seq is not None:
+        value["seq"] = seq
     print(json.dumps(value, separators=(",", ":")), flush=True)
-    received = frame_value(frame_bytes(False))
+    data = frame_bytes(False, allow_empty=allow_empty)
+    if data is None:
+        return None
+    received = frame_value(data)
     if (not isinstance(received, dict) or type(received.get("v")) is not int
+            or seq is not None and type(received.get("seq")) is not int
             or received != {**value, "phase": action}):
         raise ValueError("port hopping guarded phase or binding mismatch")
     guarded_signal_check()
     return nonce
 
-def guarded():
+def guarded(supervised=False):
     global token, chain, start, end, target_port, ipv4, ipv6, phase, tools, comment, stop_signal
     parameters_valid(*parameters)
     stop_signal = 0
@@ -1526,8 +1536,9 @@ def guarded():
     preflight(*parameters[:3])
     local_addresses(*parameters[3:])
     lock_owner()
-    guarded_gate("ready", "write", request, digest)
-    # shortcut: 仅验有限子协议，接持续启用前须由同锁父端复验真实启动版本。
+    nonce = guarded_gate("ready", "write", request, digest,
+                         previous_nonce=nonce if supervised else None)
+    # shortcut: 子端摘要不证明真实父锁，启用仍须同锁父端逐门复验启动版本。
     preflight(*parameters[:3])
     local_addresses(*parameters[3:])
     lock_owner()
@@ -1544,7 +1555,8 @@ def guarded():
         conflicts(start, end, owned=True)
         local_addresses(ipv4, ipv6)
         owner()
-        guarded_gate("written", "finalize", request, digest)
+        nonce = guarded_gate("written", "finalize", request, digest,
+                             previous_nonce=nonce if supervised else None)
         conflicts(start, end, owned=True)
         local_addresses(ipv4, ipv6)
         owner()
@@ -1554,8 +1566,24 @@ def guarded():
         conflicts(start, end, owned=True)
         local_addresses(ipv4, ipv6)
         owner()
-        nonce = guarded_gate("active", "close", request, digest)
-        if frame_bytes(True):
+        nonce = guarded_gate("active", "continue" if supervised else "close", request, digest,
+                             previous_nonce=nonce if supervised else None, allow_empty=supervised)
+        if supervised:
+            seq = 0
+            while nonce is not None:
+                # 续期窗口只允许空 EOF 停止，提前授权不能替代下一道新挑战。
+                if select.select([0], [], [], 1)[0]:
+                    if frame_bytes(False, allow_empty=True) is None:
+                        break
+                    raise ValueError("port hopping supervised received an early continuation")
+                guarded_signal_check()
+                conflicts(start, end, owned=True)
+                local_addresses(ipv4, ipv6)
+                owner()
+                seq += 1
+                nonce = guarded_gate("running", "continue", request, digest, seq=seq,
+                                     previous_nonce=nonce, allow_empty=True)
+        elif frame_bytes(True):
             raise ValueError("port hopping guarded close contains extra input")
         guarded_signal_check()
     finally:
@@ -1567,9 +1595,10 @@ def guarded():
         raise ValueError("port hopping guarded state remains after cleanup")
     lock_owner()
     guarded_signal_check()
-    print(json.dumps({"v": 1, "phase": "closed", "nonce": nonce,
-                      "child_id": request["child_id"], "request_sha256": digest},
-                     separators=(",", ":")), flush=True)
+    if not supervised:
+        print(json.dumps({"v": 1, "phase": "closed", "nonce": nonce,
+                          "child_id": request["child_id"], "request_sha256": digest},
+                         separators=(",", ":")), flush=True)
     guarded_signal_check()
 
 def run():
@@ -1615,7 +1644,7 @@ def run():
             clean()
 
 try:
-    lengths = {"preflight": 3, "run": 5, "probe": 5, "guarded": 5,
+    lengths = {"preflight": 3, "run": 5, "probe": 5, "guarded": 5, "supervised": 5,
                "audit": 1, "health": 1, "clean": 1}
     if operation not in lengths or len(parameters) != lengths[operation]:
         raise ValueError("invalid port hopping operation or parameters")
@@ -1625,8 +1654,8 @@ try:
         run()
     elif operation == "probe":
         probe()
-    elif operation == "guarded":
-        guarded()
+    elif operation in {"guarded", "supervised"}:
+        guarded(supervised=operation == "supervised")
     else:
         if not re.fullmatch("[a-f0-9]{32}", parameters[0]):
             raise ValueError("invalid port hopping owner token")
@@ -1986,6 +2015,10 @@ port-hopping-probe)
 port-hopping-guarded)
     shift; [ "$#" -eq 5 ] || die "port hopping guarded requires start, end, target and both addresses"
     port_hopping_resources guarded "$@"
+    ;;
+port-hopping-supervised)
+    shift; [ "$#" -eq 5 ] || die "port hopping supervised requires start, end, target and both addresses"
+    port_hopping_resources supervised "$@"
     ;;
 port-hopping-audit|port-hopping-health|port-hopping-clean)
     operation=${1#port-hopping-}

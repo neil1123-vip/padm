@@ -551,7 +551,18 @@ import sys
 ast.parse(Path(sys.argv[1]).read_text(), filename=sys.argv[1])
 PY
         python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded.py" &&
-        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded-parent.py"
+        PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+            "${TMP_DIR}/hopping-parent-${BASHPID:-$$}" \
+            hopping-finite-parent runDockerPortHoppingGuardedParentRegression \
+            hopping-supervised-parent runDockerPortHoppingSupervisedParentRegression
+}
+
+runDockerPortHoppingGuardedParentRegression() {
+    python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded-parent.py"
+}
+
+runDockerPortHoppingSupervisedParentRegression() {
+    python3 "${PROJECT_ROOT}/docker/tests/port-hopping-supervised-parent.py"
 }
 
 runDockerPortHoppingProbeRegression() {

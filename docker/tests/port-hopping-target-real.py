@@ -9,6 +9,7 @@ import runpy
 import select
 import shlex
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -136,7 +137,8 @@ import sys
 text = Path("/usr/local/bin/padm-entrypoint").read_text()
 block = text.split("port_hopping_resources() {\\n", 1)[1]
 assert block.startswith(
-    '    if [ "${1:-}" = run ] || [ "${1:-}" = probe ] || [ "${1:-}" = guarded ]; then\\n'
+    '    if [ "${1:-}" = run ] || [ "${1:-}" = probe ] || [ "${1:-}" = guarded ] || '
+    '[ "${1:-}" = supervised ]; then\\n'
     '        set -- exec python3 /dev/fd/3 "$STATE_ROOT" "$@"\\n')
 code = block.split('    "$@" 3<<\\'PY\\'\\n', 1)[1].split("\\nPY\\n", 1)[0]
 assert os.getpid() == 1
@@ -399,6 +401,203 @@ exec(compile(code, "/usr/local/bin/padm-entrypoint:port_hopping_resources", "exe
                 raise cleanup_errors[0]
 
 
+def supervised_session(node, work, root, docker, image, nat_before, enter,
+                       self_password, alice_password, drift=False):
+    phase = "drift" if drift else "term"
+    state, lock = (root / "data/net" / name for name in
+                   ("port-hopping.state", ".port-hopping.lock"))
+    stages = set(root.glob(".hopping-guarded.*"))
+    environment = dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root), DOCKER_HOST=docker[-1])
+    evidence = dict(scope="supervised-hopping-session", stop=phase,
+                    detached_deployment_verified=False, old_conntrack_revocation_verified=False)
+    log_path = work / f"supervised-{phase}.log"
+    primary_error = None
+    with log_path.open("wb") as log:
+        process = subprocess.Popen(["bash", "-Eeuo", "pipefail", "-c", """
+. "$1"
+dockerAcquireDeploymentLock
+trap dockerReleaseDeploymentLock EXIT
+dockerPortHoppingTargetSupervised entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1
+""", "test", str(ROOT / "install-docker.sh")], env=environment,
+                                   stdout=subprocess.PIPE, stderr=log)
+        try:
+            def receipt():
+                current = set(root.glob(".hopping-guarded.*")) - stages
+                if not current:
+                    return None
+                assert len(current) == 1, "supervised 本轮证据目录不唯一"
+                stage = current.pop()
+                path = stage / "supervised.json"
+                metadata = path.lstat()
+                assert (stat.S_ISREG(metadata.st_mode) and
+                        stat.S_IMODE(metadata.st_mode) == 0o600 and
+                        metadata.st_uid == metadata.st_gid == 0 and metadata.st_nlink == 1)
+                value = json.loads(path.read_text())
+                assert set(value) == {"target", "running"}
+                frame = value["running"]
+                assert set(frame) == {"v", "phase", "nonce", "child_id", "request_sha256", "seq"}
+                assert type(frame["v"]) is int and frame["v"] == 1 and frame["phase"] == "running"
+                assert type(frame["seq"]) is int and frame["seq"] >= 1
+                assert all(re.fullmatch(r"[a-f0-9]{64}", frame[key])
+                           for key in ("nonce", "child_id", "request_sha256"))
+                return stage, value
+
+            first = None
+
+            def ready():
+                nonlocal first
+                if process.poll() is not None:
+                    return True
+                try:
+                    first = receipt()
+                    return first is not None
+                except (OSError, json.JSONDecodeError):
+                    return False
+
+            wait_ready(ready, 90)
+            assert process.poll() is None, "supervised 父端在 receipt 前退出"
+            stage, initial = first
+            frame, target = initial["running"], initial["target"]
+            child = frame["child_id"]
+            assert (stage / "cid").read_text().strip() == child
+            assert target["range_start"] == 30000 and target["range_end"] == 30001
+            assert target["enabled_accounts"] == 1
+            child_before = inspect(docker, child)
+            assert child_before["Image"] == image and child_before["State"]["Running"]
+            assert child_before["Config"]["Entrypoint"] == ["/usr/local/bin/padm-entrypoint"]
+            assert re.fullmatch(r"[a-f0-9]{64}",
+                                child_before["Config"]["Labels"]["io.padm.hopping-supervised"])
+            assert child_before["Config"]["Cmd"] == [
+                "port-hopping-supervised", "30000", "30001", "27443",
+                "198.18.1.1", "2001:db8:1::1"]
+            projection = {key: child_before[key] for key in
+                          ("Id", "Image", "Created", "Config", "HostConfig", "Mounts")} | {
+                              "StartedAt": child_before["State"]["StartedAt"]}
+            parent_pid = root / "locks/deployment.lock/pid"
+            assert parent_pid.read_text() == str(process.pid) + "\n"
+            parent_lock = tree(root / "locks/deployment.lock")
+            net_lock = tree(lock)
+            owner = state.read_text()
+            owned = dict(line.split("=", 1) for line in owner.splitlines())
+            token = owned["token"]
+            assert re.fullmatch(r"[a-f0-9]{32}", token)
+            assert owned == dict(schema_version="1", token=token,
+                                 chain="padm-hop-" + token[:12], start="30000", end="30001",
+                                 target_port="27443", ipv4="198.18.1.1",
+                                 ipv6="2001:db8:1::1", phase="active")
+            metadata = state.lstat()
+            assert (stat.S_ISREG(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o600
+                    and metadata.st_uid == metadata.st_gid == 0 and metadata.st_nlink == 1)
+            command(docker + ["exec", child, "/usr/local/bin/padm-entrypoint",
+                              "port-hopping-health", token], timeout=10)
+            active_nat = {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5).decode()
+                          for tool in nat_before}
+            started = time.monotonic()
+            evidence.update(initial=initial, child=projection, parent_lock=parent_lock,
+                            net_lock=net_lock, owner=owner,
+                            active_nat=active_nat,
+                            traffic_auto_collector_verified=False)
+            if drift:
+                live = root / "config/sing-box/config.json"
+                metadata = live.stat()
+                data = live.read_bytes()
+                replacement = live.with_name(".tmp-supervised-live")
+                replacement.write_bytes(data)
+                os.chown(replacement, metadata.st_uid, metadata.st_gid)
+                replacement.chmod(stat.S_IMODE(metadata.st_mode))
+                os.utime(replacement, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+                replacement.replace(live)
+                assert live.read_bytes() == data and live.stat().st_ino != metadata.st_ino
+                evidence["live_same_bytes_replaced"] = True
+            else:
+                authentication(node, root, enter, "supervised-initial", self_password,
+                               alice_password, "old", server_port=30000)
+                previous, checks = frame, 0
+                # 跨过两次完整帧租约，不能只把暂态 active 作为持续运行证据。
+                while time.monotonic() - started <= 41:
+                    assert process.poll() is None
+                    _, current = receipt()
+                    assert current["target"] == target
+                    fresh = current["running"]
+                    assert fresh["child_id"] == child
+                    assert fresh["request_sha256"] == frame["request_sha256"]
+                    assert fresh["seq"] >= previous["seq"]
+                    if fresh["seq"] > previous["seq"]:
+                        assert fresh["nonce"] != previous["nonce"]
+                        checks += 1
+                        value = inspect(docker, child)
+                        assert value["State"]["Running"]
+                        assert {key: value[key] for key in
+                                ("Id", "Image", "Created", "Config", "HostConfig", "Mounts")} | {
+                                    "StartedAt": value["State"]["StartedAt"]} == projection
+                    else:
+                        assert fresh == previous
+                    previous = fresh
+                    assert parent_pid.read_text() == str(process.pid) + "\n"
+                    assert tree(root / "locks/deployment.lock") == parent_lock
+                    assert tree(lock) == net_lock and state.read_text() == owner
+                    time.sleep(0.5)
+                assert checks >= 2 and previous["seq"] > frame["seq"]
+                command(docker + ["exec", child, "/usr/local/bin/padm-entrypoint",
+                                  "port-hopping-health", token], timeout=10)
+                assert {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5).decode()
+                        for tool in nat_before} == active_nat
+                authentication(node, root, enter, "supervised-renewed", self_password,
+                               alice_password, "old", server_port=30001)
+                evidence.update(final_running=previous, observed_renewals=checks,
+                                duration=round(time.monotonic() - started, 3),
+                                fresh_dual_family_self_accepted=True, alice_revoked=True)
+                process.send_signal(signal.SIGTERM)
+            output, _ = process.communicate(timeout=45)
+            assert process.returncode == (1 if drift else 143), process.returncode
+            assert not output, "supervised 会话不得输出部署成功"
+            assert not state.exists()
+            assert tree(lock) == net_lock
+            assert {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
+                    for tool in nat_before} == nat_before
+            assert not command(docker + [
+                "ps", "-aq", "--filter", "label=io.padm.hopping-supervised"]).strip()
+            assert stage.is_dir() and (stage / "cid").read_text().strip() == child
+            assert (stage / "supervised.json").is_file()
+            assert not (root / "locks/deployment.lock").exists()
+            evidence.update(parent_returncode=process.returncode, stdout_empty=True,
+                            nat_restored=True, state_removed=True, child_removed=True,
+                            evidence_retained=True)
+            return evidence
+        except BaseException as error:
+            primary_error = error
+            evidence.update(failed=True, error=repr(error))
+            raise
+        finally:
+            cleanup_errors = []
+            if process.poll() is None:
+                try:
+                    process.send_signal(signal.SIGTERM)
+                    process.communicate(timeout=45)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+                    process.kill()
+                    process.communicate(timeout=5)
+            if primary_error:
+                evidence["cleanup_errors"] = [repr(error) for error in cleanup_errors]
+                for error in cleanup_errors:
+                    primary_error.add_note("supervised 父端回收失败: " + repr(error))
+                for stage in set(root.glob(".hopping-guarded.*")) - stages:
+                    child_log = stage / "child.log"
+                    if child_log.exists():
+                        shutil.copyfile(child_log, work / f"supervised-{phase}-child.log")
+                    try:
+                        evidence["latest_receipt"] = json.loads(
+                            (stage / "supervised.json").read_text())
+                    except (OSError, json.JSONDecodeError) as error:
+                        evidence["receipt_diagnostic_error"] = repr(error)
+                evidence["remaining_state"] = state.read_text() if state.exists() else None
+                (work / f"supervised-{phase}-evidence.log").write_text(
+                    json.dumps(evidence, sort_keys=True))
+            elif cleanup_errors:
+                raise cleanup_errors[0]
+
+
 def restart_witness(root, docker, compose, identity, previous):
     command(compose + ["restart", "sing-box"], timeout=45)
     wait_ready(lambda: (value := inspect(docker, identity))["State"].get("Health", {}).get(
@@ -422,6 +621,7 @@ def run(work):
     daemon = None
     origin = None
     clients = []
+    namespace_keepers = []
     started = time.monotonic()
     try:
         shutil.copytree(work / "state", root)
@@ -489,6 +689,15 @@ dockerGenerateDeployment "$2/config/spec.json" "$2/deployment.json"
 dockerTlsRuntimePermissions "$2/secrets/tls"
 """, "test", str(ROOT / "install-docker.sh"), str(root), str(work / "bundle")])
             clients = namespaces()
+            # 持续会话验收超过原 120 秒，保留现有 netns 而不重建网络夹具。
+            for index, client in enumerate(clients):
+                keeper = subprocess.Popen(["nsenter", "--target", str(client.pid),
+                                           "--net", "--", "sleep", "360"])
+                namespace_keepers.append(keeper)
+                wait_ready(lambda: Path(f"/proc/{keeper.pid}/ns/net").readlink() ==
+                           Path(f"/proc/{client.pid}/ns/net").readlink())
+                clients[index] = keeper
+                stop(client)
             compose = docker + ["compose", "--project-name", "padm-docker",
                                 "--env-file", str(root / "images.env"),
                                 "--file", str(root / "compose.json"),
@@ -682,6 +891,8 @@ dockerPortHoppingTargetGuarded entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1
             assert lock.lstat().st_ino == lock_metadata.st_ino and lock.read_bytes() == b""
             authentication(node, root, enter, "guarded-parent-closed", new_password,
                            alice_password, "old")
+            supervised = supervised_session(node, work, root, docker, net_image["Id"],
+                                            nat_before, enter, new_password, alice_password)
             # 发布已删旧 CID 后故障，真实恢复仍只加载安全候选字节。
             result = subprocess.run([
                 "env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
@@ -703,12 +914,16 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
 """, "test", str(ROOT / "install-docker.sh")], capture_output=True, timeout=90)
             assert result.returncode != 0 and not result.stdout, result.stderr.decode()
             recovered = checked_witness(root, docker, startup=True)
-            assert recovered["container_id"] != guarded_parent["container_id"]
+            assert recovered["container_id"] != supervised["initial"]["target"]["container_id"]
             assert recovered["enabled_accounts"] == 1
             accumulated_after = json.loads(state.read_text())["accounts"][alice]
             assert (accumulated_after["upload"] + accumulated_after["download"] >=
                     accumulated["upload"] + accumulated["download"])
             authentication(node, root, enter, "quota-recovered", new_password, alice_password, "old")
+            # 绑定漂移会替换 live inode，放在依赖原启动版本的故障恢复验收之后。
+            supervised_drift = supervised_session(
+                node, work, root, docker, net_image["Id"], nat_before, enter,
+                new_password, alice_password, drift=True)
         command(compose + ["rm", "-s", "-f"], timeout=15)
         print("docker-port-hopping-target-real-snapshot=" + json.dumps(dict(
             initial=proof, restarted=changed, tls_restarted=tls_changed, image=inputs["sing-box"],
@@ -727,6 +942,7 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
             guarded_parent_lock_gates_verified=True, guarded_parent_closed=closed,
             guarded_parent_child_removed=True, guarded_parent_nat_restored=True,
             guarded_parent_state_removed=True,
+            supervised_session=supervised, supervised_binding_drift=supervised_drift,
             net_image=dict(base=inputs["net"], reference=net_reference, image_id=net_image["Id"],
                            entrypoint_sha256=hashlib.sha256(
                                (context / "entrypoint.sh").read_bytes()).hexdigest()),
@@ -751,6 +967,8 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
                 stop(origin)
             for client in clients:
                 stop(client)
+            for keeper in namespace_keepers:
+                stop(keeper)
             if daemon is not None:
                 try:
                     result = subprocess.run(docker + ["ps", "-aq"], capture_output=True, timeout=5)

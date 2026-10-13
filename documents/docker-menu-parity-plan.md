@@ -6124,10 +6124,94 @@ Linux amd64、固定工具镜像、定向 Jobs 2，子端 47 + 父端/helper 54 
 未扩大并发或重复全套。原始字节核验在完整目录 `verification.md`，
 仅文档在回归后补验收记录；成功归档核验后清理，保留日志/result/清单与失败输入。
 
-持续启用、父端退出后的接管与最终部署 ACK 仍 deferred；下一步先复用原协议
-实施同锁父端监督的持续会话和失败撤销，不能复用旧五参数 run 作为写授权。
+本阶段持续启用、父端退出后的接管与最终部署 ACK 仍 deferred；同锁父端监督
+的持续会话和失败撤销见 3c，不能复用旧五参数 run 作为写授权。
 更新/重启的旧代次撤销、菜单/schema/Compose、原生宿主/arm64、公网、
 旧 conntrack 与完整自动跳跃继续待交付，整体目标保持 active。
+
+##### 5C.9c.3e.2b.3c 同锁父端监督持续会话
+
+内部 `dockerPortHoppingTargetSupervised` 与有限入口共用同一事务实现；
+只接受当前持锁 Bash 的本轮 `PrepareActivation bound`，不刷新原
+startup_binding、部署锁、目录或 child 投影。固定独立
+`port-hopping-supervised` Cmd 与 `io.padm.hopping-supervised` label，
+旧 run、Probe 与有限 guarded 均不授予持续写权限，不接外部 CLI、
+菜单、schema、Compose 或脱离父端的部署成功 ACK。
+
+初始 challenge/prepare、ready/write、written/finalize 门沿用原复验。
+active 仅接受精确 continue；之后 running 帧要求严格整数 seq 从 1
+连续增长、原 CID/请求摘要与新 nonce。每轮发送前复验原业务 state/live、
+部署锁、目录及固定 child，拒绝前一轮和固定初始 nonce 重用，
+不无限保存会话历史。发送成功后原子替换 0600 `supervised.json`，
+只记录原 target 及最新 running 帧，不作为新会话的写授权。
+
+子端每轮等待 1 秒，再复验冲突、地址与归属后发新挑战；
+窗口只允许空 EOF 停止，提前续期、半帧、跳号、bool 和旧帧均拒绝。
+active/running 空 EOF 自行精确撤销，退出 0，不发有限 closed。
+父端失败或信号先关闭输入，保留输出读端到退出/回收轮询结束，
+避免下一挑战因 EPIPE 把正常 EOF 撤销变成非零。双复验退出 0 才 rm；
+非零、归属漂移或停止不明仍保留 child/state/stage，原 trap 恢复。
+
+持续 transport 使用 `timeout -k 2 0`，会话全程持部署锁。
+20 秒只限制单帧读取；1 秒窗口另加子端规则复验和父端绑定复验，
+不是固定续期间隔或硬撤销上界。父端前台 helper 期间的信号可延迟到
+本帧返回后处理。Docker 查询 5 秒、清理轮询 25 秒与各 rm 预算保持；
+没有会话总时长、准备总时限或统一撤销总时限。当前原 state/live
+变化即终止；持续期间在线更新、重启及自动流量采集不在交付范围。
+
+Linux amd64 固定工具镜像，Jobs 2 定向通过子端 70（原 47 + 新 23）、
+有限父端/helper 54 和持续父端/helper 41 检查。复用现有调度器，
+子端完成后让两个独立父端夹具并行，不增加本机槽位：
+内部/入口 `114411/115452 ms`，排队 `200 ms`，exit 0、cache_hit=false，
+证据 `.tmp-regression-docker-53b903f126e14a87a40aed59f19290d3/`。
+串行首次入口 `127846 ms`；本次少 `12394 ms`，输入和同机负载并非
+严格控制实验，不声称稳定收益。旧 Probe 21 + 93 检查通过，
+内部/入口 `10732/11796 ms`，排队 `213 ms`：
+`.tmp-regression-docker-64e2174a1c6841139763d9dd7d33fa9a/`。
+
+真实标准 entrypoint 与同锁父端持续 `41.336 s`，观察 34 次续期，
+同 CID/token/父锁/net 锁/固定投影不变，初末两个范围端口的双族新连接
+self 可达、Alice 额度拒绝。TERM 返回 143；第二会话同字节、同权限
+live 换 inode 后原绑定拒绝，返回 1。两者均无部署成功 stdout，
+双族 NAT 正文恢复、state 消失、child 回收、stage/收据保留。
+既有安全候选恢复与累计不回退检查保持，漂移场景末置避免污染该夹具。
+内部/入口 `139877/140927 ms`、排队 `201 ms`、Jobs 2、exit 0：
+`.tmp-regression-docker-b8e4cb4a412542a996af717432a7878a/`。
+首轮夹具顺序失败输入保留：
+`.tmp-regression-docker-a389c35180c744d18065dfbb3980dea3/`。
+
+集中完整 54/54 唯一叶子通过，无遗漏或重复，Jobs 6、三槽预算，
+内部/入口 `547727/548773 ms`、排队 `411 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-f1625d799a1b41cba277ed4a77ec4d58/`。
+八个相关源码/入口/测试与最终定向、真实、完整快照原始字节一致；
+Probe helper/lifecycle 也与最终源码一致，核验保存在完整目录
+`verification.md`。42 条非全程资源样本最高观察值为
+`851.03% CPU / 723.8 MiB`，不称真实全程峰值。较 3b 完整入口少
+`2571 ms`，测试输入与同机条件变化，不据此宣称稳定提速。
+验收后清理成功源码归档和提取副本，保留日志、结果、清单及失败输入。
+父退出接管/最终部署 ACK、启用期更新/重启、菜单/schema/Compose、
+旧 conntrack、真实自动跳跃、原生宿主/arm64/公网和完整协议管理
+继续 deferred；当前仅交付父端存活且全程持锁的内部持续会话，
+整体目标保持 active。
+
+##### 5C.9c.3e.2b.3d 独立监督归属与实时交接（待实施）
+
+下一步先定义监督进程自己的锁 owner 与停止协议，不把现有函数简单后台化：
+监督进程须自己取得新部署锁、直接完成 bound 准备并固定自身进程/运行代次；
+调用者保存的 JSON、旧 binding/tuple、环境变量不授予规则写入或恢复权限。
+启动控制端使用本次随机挑战及明确 commit 线性点：commit 前断流撤销，
+commit 后 ACK 丢失保留已运行 owner，调用者以新挑战查询，禁止自动再启一套。
+最终 ACK 至少观察 running seq 2 并复验原投影；现有 seq 1 收据仅证明
+父端已发送续期，不单独证明子端消费了该续期。
+
+停止入口不得先取得监督进程全程持有的部署锁；通过受管控制通道核对
+新挑战、owner token、当前进程/运行代次和目录后请求原监督进程关闭输入。
+仅退出 0、规则/state 净撤销、容器投影/退出双复验和原锁释放确证后，
+才允许新代次自己取锁准备。超时、SIGKILL、非零、归属漂移与状态不明
+保留 owner/child/state/stage，不用同名 unit、数字 PID 或旧文件自动接管。
+选择宿主 supervisor 后须在匹配的原生 Linux 环境验收其生命周期；
+普通容器合同不能代替 systemd、重启和公网验收。内部 owner/control/ACK
+先交付，不扩菜单、schema、Compose、在线更新/重启或完整支持状态。
 
 ## 第六步：发布与完整验收
 

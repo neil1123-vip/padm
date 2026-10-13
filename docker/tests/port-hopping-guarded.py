@@ -37,7 +37,7 @@ def tool():
 
 def python():
     arguments = sys.argv[2:]
-    assert arguments[0] == "/dev/fd/3" and arguments[2] == "guarded", arguments
+    assert arguments[0] == "/dev/fd/3" and arguments[2] in {"guarded", "supervised"}, arguments
     body = Path(arguments[0]).read_text()
     namespace = {"__name__": "__main__"}
     socket.gethostname = lambda: HOST
@@ -69,6 +69,9 @@ def main():
     guarded_case = source.split("\nport-hopping-guarded)\n", 1)[1].split("\n    ;;", 1)[0]
     assert '    port_hopping_resources guarded "$@"' in guarded_case
     assert '    port_hopping_resources run "$@"' not in guarded_case
+    assert source.count("\nport-hopping-supervised)\n") == 1
+    supervised_case = source.split("\nport-hopping-supervised)\n", 1)[1].split("\n    ;;", 1)[0]
+    assert '    port_hopping_resources supervised "$@"' in supervised_case
     with tempfile.TemporaryDirectory(prefix="padm-hopping-guarded.") as directory:
         work = Path(directory)
         functions = work / "functions.sh"
@@ -82,12 +85,12 @@ def main():
             binary.chmod(0o755)
         adapter = binaries / "python3"
         adapter.write_text(
-            '#!/bin/sh\nif [ "${1:-}" = /dev/fd/3 ] && [ "${3:-}" = guarded ]; then\n'
+            '#!/bin/sh\nif [ "${1:-}" = /dev/fd/3 ] && [ "${3:-}" = guarded -o "${3:-}" = supervised ]; then\n'
             f'    exec /usr/bin/python3 "{SCRIPT}" python "$@"\n'
             'fi\nexec /usr/bin/python3 "$@"\n')
         adapter.chmod(0o755)
 
-        def run(name, point=None, fault=None, signum=None, injection=None):
+        def run(name, point=None, fault=None, signum=None, injection=None, operation="guarded"):
             case = work / name
             case.mkdir()
             root = case / "state"
@@ -100,14 +103,16 @@ def main():
                                HOP_FIXTURE=str(inventory), HOP_COMMANDS=str(commands),
                                HOP_STATE=str(state), HOP_FAST_TIMEOUT="1" if fault == "timeout" else "")
             process = subprocess.Popen(["sh", "-c",
-                '. "$1"; STATE_ROOT=$2; shift 2; port_hopping_resources guarded "$@"',
-                "test", str(functions), str(root), *VALUES],
+                '. "$1"; STATE_ROOT=$2; operation=$3; shift 3; port_hopping_resources "$operation" "$@"',
+                "test", str(functions), str(root), operation, *VALUES],
                 env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, start_new_session=True)
-            phases, nonces = [], []
+            phases, nonces, sequences = [], [], []
+            supervised = operation == "supervised"
             digest, request = None, None
             changed = signalled = replayed = False
-            retained_lock = retained_state = None
+            retained_lock = retained_state = retained_rules = None
+            previous_response = None
 
             def send(value):
                 raw = json.dumps(value, separators=(",", ":")).encode("ascii") + b"\n"
@@ -116,7 +121,7 @@ def main():
                 return raw
 
             def change():
-                nonlocal retained_lock, retained_state
+                nonlocal retained_lock, retained_state, retained_rules
                 value = json.loads(inventory.read_text())
                 if fault == "conflict":
                     OWNERSHIP["post_change"](value, "ip6tables")
@@ -139,6 +144,9 @@ def main():
                     value["listing_failure"] = "iptables"
                 elif fault == "cleanup-signal":
                     value["term_on_listing"] = "iptables"
+                elif fault == "rules":
+                    value["ip6tables"].append(value["ip6tables"][-1])
+                    retained_rules = value["ip6tables"].copy()
                 inventory.write_text(json.dumps(value))
 
             try:
@@ -152,7 +160,16 @@ def main():
                     phases.append(phase)
                     assert type(frame["v"]) is int and frame["v"] == 1
                     assert len(frame["nonce"]) == 64
+                    if phase == "running":
+                        assert supervised and type(frame["seq"]) is int
+                        assert frame["seq"] == len(sequences) + 1, (name, frame, sequences)
+                        sequences.append(frame["seq"])
+                        assert set(frame) == {
+                            "v", "phase", "nonce", "child_id", "request_sha256", "seq"}
+                    elif phase != "challenge":
+                        assert set(frame) == {"v", "phase", "nonce", "child_id", "request_sha256"}
                     if phase == "closed":
+                        assert not supervised, (name, "supervised emitted finite closed")
                         assert not state.exists(), (name, "closed before cleanup")
                         assert frame["nonce"] == nonces[-1]
                         break
@@ -168,7 +185,9 @@ def main():
                         assert frame["child_id"] == request["child_id"]
                         assert frame["request_sha256"] == digest
                         response = {**frame, "phase": {
-                            "ready": "write", "written": "finalize", "active": "close"}[phase]}
+                            "ready": "write", "written": "finalize",
+                            "active": "continue" if supervised else "close",
+                            "running": "continue"}[phase]}
                     if replayed:
                         break
                     with lock.open("rb") as held:
@@ -178,7 +197,7 @@ def main():
                             pass
                         else:
                             raise AssertionError((name, "gate released net flock"))
-                    if phase in {"written", "active"}:
+                    if phase in {"written", "active", "running"}:
                         owner = dict(line.split("=", 1) for line in state.read_text().splitlines())
                         assert owner["phase"] == ("intent" if phase == "written" else "active")
                         value = json.loads(inventory.read_text())
@@ -188,7 +207,8 @@ def main():
                         assert not state.exists()
                         assert not OWNERSHIP["mutations"]([
                             json.loads(row) for row in commands.read_text().splitlines()])
-                    if phase == point:
+                    if (phase == point and not changed and
+                            (fault != "seq-replay" or len(sequences) == 2)):
                         changed = True
                         if signum:
                             process.send_signal(signum)
@@ -206,6 +226,18 @@ def main():
                             response = {**response, "nonce": "0" * 64}
                         elif fault == "digest":
                             response = {**response, "request_sha256": "0" * 64}
+                        elif fault == "seq":
+                            response = {**response, "seq": frame["seq"] + 1}
+                        elif fault == "seq-bool":
+                            response = {**response, "seq": True}
+                        elif fault == "seq-replay":
+                            response = previous_response
+                        elif fault == "half":
+                            process.stdin.write(b"{")
+                            process.stdin.flush()
+                            process.stdin.close()
+                            process.stdin = None
+                            break
                         elif fault == "order":
                             response = {**response, "phase": "finalize" if phase == "ready" else "write"}
                         elif fault == "bool":
@@ -225,7 +257,16 @@ def main():
                         else:
                             change()
                     send(response)
-                    if phase == "active":
+                    previous_response = response
+                    if supervised and phase == "running" and not point and len(sequences) == 4:
+                        process.stdin.close()
+                        process.stdin = None
+                        break
+                    if supervised and phase == "active" and fault == "window-eof":
+                        process.stdin.close()
+                        process.stdin = None
+                        break
+                    if phase == "active" and not supervised:
                         if fault == "tail":
                             process.stdin.write(b"{}\n")
                             process.stdin.flush()
@@ -235,28 +276,40 @@ def main():
                         process.stdin.close()
                         process.stdin = None
                 output, error = process.communicate(timeout=10)
-                success = name == "success" or (
-                    point == "active" and fault in {"conflict", "address"})
+                success = (name == "success" or (
+                    point == "active" and fault in {"conflict", "address"})) if not supervised else (
+                        fault == "window-eof" or not point or
+                        point in {"active", "running"} and fault == "eof")
                 expected = 128 + signum if signalled else (
                     143 if fault == "cleanup-signal" else 0 if success else 1)
                 assert process.returncode == expected, (
                     name, process.returncode, phases, output, error)
                 assert not output
                 if success:
-                    assert phases == ["challenge", "ready", "written", "active", "closed"]
+                    expected_phases = ["challenge", "ready", "written", "active"]
+                    if supervised:
+                        if point == "running":
+                            expected_phases.append("running")
+                        elif not point and fault != "window-eof":
+                            expected_phases.extend(["running"] * 4)
+                    else:
+                        expected_phases.append("closed")
+                    assert phases == expected_phases, (name, phases)
                     assert not error
                 else:
                     assert "closed" not in phases and error, (name, phases, error)
                     if point:
                         assert changed, (name, point, phases)
                 current = json.loads(inventory.read_text())
-                if retained_lock or retained_state or fault == "cleanup" or (
+                if retained_lock or retained_state or retained_rules or fault == "cleanup" or (
                         injection and injection.get("active_injection") == "lock"):
                     assert state.exists(), (name, "lost ownership evidence")
                     if retained_lock:
                         assert (lock.stat().st_dev, lock.stat().st_ino) == retained_lock
                     if retained_state:
                         assert (state.stat().st_dev, state.stat().st_ino, state.read_bytes()) == retained_state
+                    if retained_rules:
+                        assert current["ip6tables"] == retained_rules
                 else:
                     assert not state.exists(), (name, state.read_bytes() if state.exists() else b"")
                     for family in FAMILIES:
@@ -305,11 +358,27 @@ def main():
             ("written-read-fail", "written", "read-fail"),
             ("written-timeout", "written", "timeout"),
         ])
+        supervised_cases = [
+            ("supervised-success", None, None),
+            ("supervised-active-eof", "active", "eof"),
+            ("supervised-window-eof", "active", "window-eof"),
+            ("supervised-running-eof", "running", "eof"),
+            ("supervised-ready-eof", "ready", "eof"),
+            ("supervised-active-half", "active", "half"),
+            ("supervised-window-replay", "active", "replay"),
+        ]
+        for fault in ("seq", "seq-bool", "seq-replay", "nonce", "digest", "half", "conflict",
+                      "address", "lock", "state", "rules", "timeout", "cleanup", "cleanup-signal"):
+            supervised_cases.append(("supervised-running-" + fault, "running", fault))
+        cases.extend([(*arguments, None, None, "supervised") for arguments in supervised_cases])
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            cases.append((f"supervised-running-signal-{signum}", "running", None,
+                          signum, None, "supervised"))
         # 场景目录与进程组各自独立；固定两个 worker，不扩大本机回归槽位。
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             for result in pool.map(lambda arguments: run(*arguments), cases):
                 assert result is None
-    print(f"docker-port-hopping-guarded-ok: {len(cases)} finite write, gate and cleanup cases")
+    print(f"docker-port-hopping-guarded-ok: {len(cases)} finite/supervised gate and cleanup cases")
 
 
 if __name__ == "__main__":
