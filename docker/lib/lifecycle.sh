@@ -43,7 +43,7 @@ dockerUsage() {
   padm-docker edit --port-alias-default <入口 ID> <已有额外端口|base> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-hopping <Hy2 入口 ID> <起始端口> <结束端口> <本机 IPv4> <本机 IPv6> [--preview|--confirm PADM-DOCKER-EDIT]
   padm-docker edit --port-hopping-clear [--preview|--confirm PADM-DOCKER-EDIT]
-  padm-docker port-hopping <status|start|stop>
+  padm-docker port-hopping <status|start|stop|share>
   padm-docker edit --cdn-entry <入口 ID> <IP或域名,...> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --cdn-entry-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-preset <入口 ID> <daily|compatible|stream|single> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -1560,9 +1560,9 @@ dockerPortHoppingSavedArguments() {
 }
 
 dockerPortHoppingCommand() {
-    local action=${1:-status} root result
+    local action=${1:-status} root result saved spec uri
     [[ "$#" -le 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
-    case "${action}" in status|start|stop) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    case "${action}" in status|start|stop|share) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
@@ -1601,6 +1601,34 @@ dockerPortHoppingCommand() {
         result=$(dockerPortHoppingSupervisorStatus) || return $?
         jq -c '.payload.target | {state:"active",saved:{
           listener_id,range_start,range_end,ipv4,ipv6}}' <<<"${result}"
+        ;;
+    share)
+        saved=$(dockerPortHoppingSavedArguments) || {
+            dockerError '缺少有效的受管端口跳跃配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        result=$(dockerPortHoppingSupervisorStatus) || return $?
+        spec="${root}/config/spec.json"
+        uri=$(jq -er --argjson saved "${saved}" --argjson status "${result}" '
+          def authority: if contains(":") then "[\(.)]" else . end;
+          $status.payload.target as $target |
+          select([$target.listener_id, ($target.range_start|tostring),
+            ($target.range_end|tostring), $target.ipv4, $target.ipv6] == $saved) |
+          .port_hopping as $h |
+          [.core.protocols[] | select(.id == 3 and .listener_id == $h.listener_id)] as $entries |
+          select(($entries | length) == 1 and
+            $entries[0].public_port == $target.target_port) |
+          $entries[0] as $entry |
+          "hysteria2://\($entry.uuid | @uri)@\($entry.server | authority):\($h.range_start)-\($h.range_end)/?sni=\($entry.hy2.domain | @uri)&insecure=0" +
+            (if $entry.hy2.obfs != null then
+              "&obfs=\($entry.hy2.obfs.type | @uri)&obfs-password=\($entry.hy2.obfs.password | @uri)"
+             else "" end) +
+            "#\($entry.name | @uri)"
+        ' "${spec}") || {
+            dockerError '活动跳跃范围与当前受管 Hy2 配置不一致，拒绝生成分享链接'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        printf '%s\n' "${uri}"
         ;;
     esac
 }

@@ -160,7 +160,7 @@ dockerMenuPortHopping() {
     while :; do
         printf '\nDocker 端口跳跃（单个双族 Hy2）\n'
         printf '%s\n' '1. 查看状态' '2. 保存配置' '3. 启用已保存配置' \
-            '4. 停止跳跃' '5. 清除保存配置' '0. 返回'
+            '4. 停止跳跃' '5. 清除保存配置' '6. 输出活动范围分享链接' '0. 返回'
         dockerSetupRead choice '请选择: ' || return 0
         case "${choice}" in
         0) return 0 ;;
@@ -186,6 +186,7 @@ dockerMenuPortHopping() {
             ;;
         4) dockerMenuRun port-hopping stop || true ;;
         5) dockerMenuRun edit --port-hopping-clear || true ;;
+        6) dockerMenuRun port-hopping share || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

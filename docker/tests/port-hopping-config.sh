@@ -251,9 +251,19 @@ jq -e --argjson saved "${SAVED}" '.=={state:"stopped",saved:$saved}' "${LOG}" >/
 (
     dockerPortHoppingSupervisorStart() { [[ "$#" == 0 ]] || fail '启动仍从 CLI 接收 tuple'; }
     dockerPortHoppingSupervisorStop() { [[ "$#" == 0 ]] || fail '停止接收额外参数'; }
+    dockerPortHoppingSupervisorStatus() {
+        jq -n --argjson saved "${SAVED}" --argjson end "${STATUS_END:-36002}" \
+            '{payload:{target:($saved + {range_end:$end,target_port:35442})}}'
+    }
     [[ "$(dockerMain port-hopping start)" == '端口跳跃已启用。' ]] || fail '启动缺少成功提示'
     [[ "$(dockerMain port-hopping stop)" == '端口跳跃已停止；保存配置保留。' ]] || fail '停止缺少成功提示'
-    for action in status start stop; do
+    [[ "$(dockerMain port-hopping share)" == \
+        "hysteria2://${UUID}@proxy.example.com:36000-36002/?sni=tls.example.com&insecure=0#hy2" ]] ||
+        fail '活动范围分享链接不正确'
+    STATUS_END=36003
+    if dockerMain port-hopping share >"${LOG}" 2>&1; then fail '活动范围漂移仍生成分享链接'; fi
+    unset STATUS_END
+    for action in status start stop share; do
         actual=0
         dockerMain port-hopping "${action}" unexpected >"${LOG}" 2>&1 || actual=$?
         [[ "${actual}" == 2 ]] || fail "${action} 未拒绝额外参数"
@@ -293,11 +303,11 @@ dockerMenuProtocols
 SH
 : >"${TEST_ROOT}/menu.calls"
 : >"${TEST_ROOT}/menu.writes"
-printf '%s\n' 11 1 2 entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1 y \
+printf '%s\n' 11 1 6 2 entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1 y \
     3 n 3 y 4 5 n 2 0 2 entry-hy2 0 0 0 |
     timeout 10 script -qefc "bash '${TEST_ROOT}/menu-driver.sh'" /dev/null >"${LOG}" 2>&1 ||
     fail '端口跳跃菜单 PTY 分发失败'
-printf '%s\n' 'protocol list' 'port-hopping status' \
+printf '%s\n' 'protocol list' 'port-hopping status' 'port-hopping share' \
     'edit --port-hopping entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1' \
     'port-hopping start' 'port-hopping stop' 'edit --port-hopping-clear' \
     >"${TEST_ROOT}/menu.expected"
