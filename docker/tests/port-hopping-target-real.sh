@@ -30,6 +30,7 @@ source "${PROJECT_ROOT}/install-docker.sh"
 
 mkdir -p "${PADM_DOCKER_INSTALL_DIR}/config/sing-box" \
     "${PADM_DOCKER_INSTALL_DIR}/data/sing-box" \
+    "${PADM_DOCKER_INSTALL_DIR}/data/subscription" \
     "${PADM_DOCKER_INSTALL_DIR}/data/traffic" \
     "${PADM_DOCKER_INSTALL_DIR}/data/net" \
     "${PADM_DOCKER_INSTALL_DIR}/secrets/tls" "${TEST_ROOT}/bundle"
@@ -45,7 +46,8 @@ chmod 0644 "${certificate}"
 chmod 0600 "${key}"
 sing_box_image=$(jq -er '.["sing-box"].reference' /node-images.json)
 net_image=$(jq -er '.net.reference' /node-images.json)
-jq --arg image "${sing_box_image}" --arg net "${net_image}" '
+ops_image=$(jq -er '.ops.reference' /node-images.json)
+jq --arg image "${sing_box_image}" --arg net "${net_image}" --arg ops "${ops_image}" '
   {schema_version:3,
    release:{version:"3.9.9",manifest_sha256:("a"*64),signature_identity:"fixture"},
    core:{type:"sing-box",secondary_type:null,protocols:[{
@@ -55,7 +57,7 @@ jq --arg image "${sing_box_image}" --arg net "${net_image}" '
      hy2:{domain:"target.padm.test",bandwidth_mode:"bbr",up_mbps:100,down_mbps:50,
        obfs:null,masquerade:""}}]},
    tls:{domain:"target.padm.test"},subscription:{enabled:false,token:"0123456789abcdef"},
-   images:{"sing-box":$image,"xray":$image,"nginx":$image,"ops":$image,"net":$net},
+   images:{"sing-box":$image,"xray":$image,"nginx":$image,"ops":$ops,"net":$net},
    host_integrations:[]}
 ' "${PROJECT_ROOT}/docker/configure.example.json" >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 dockerConfigureSpecValidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"

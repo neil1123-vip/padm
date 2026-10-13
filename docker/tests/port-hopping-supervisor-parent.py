@@ -86,7 +86,7 @@ def deployment_command(root, function, *arguments, accepted=False, boundary="",
     elif not usage:
         assert any(message.encode() in result.stderr for message in (
             "跳跃监督会话存在或停止未核验", "跳跃监督重启未确认",
-            "跳跃监督会话未能通过原控制通道停止")), result.stderr
+            "跳跃监督会话未能通过原控制通道停止", "跳跃独立监督拒绝")), result.stderr
 
 
 def deployment_gate_cases(base):
@@ -148,7 +148,67 @@ def deployment_gate_cases(base):
     return count + 1
 
 
-def fake_owned(fd, root, restart=False):
+def rollback_scope_cases(base):
+    root = base / "rollback-scope"
+    (root / "config").mkdir(parents=True)
+    spec = {"schema_version": 3, "core": {"type": "sing-box", "secondary_type": None,
+            "protocols": [{"listener_id": "hy2-main", "id": 3, "public_port": 27443,
+                           "address_families": ["ipv4", "ipv6"], "hy2": {"domain": "fixture.test"}}]},
+            "host_integrations": []}
+    (root / "config/spec.json").write_text(json.dumps(spec))
+    backup = root / "backup.json"
+    body = r'''
+source "$1"
+dockerRollbackCommand() { dockerPortHoppingSupervisorChangeBundleCheck "$1" "$2"; }
+dockerPortHoppingTargetSupervisedOwned() {
+    local -a targets=(hy2-main)
+    dockerRollbackCommand "$@"
+}
+dockerPortHoppingTargetSupervisedOwned "$2" "$3"
+'''
+    for case in ("valid", "multi", "schema", "port"):
+        candidate = json.loads(json.dumps(spec))
+        if case == "multi":
+            candidate["core"]["protocols"].append(
+                dict(candidate["core"]["protocols"][0], listener_id="other"))
+        elif case == "schema":
+            candidate["schema_version"] = 2
+        elif case == "port":
+            candidate["core"]["protocols"][0]["public_port"] += 1
+        backup.write_text(json.dumps(candidate))
+        result = subprocess.run(
+            ["bash", "-Eeuo", "pipefail", "-c", body, "test", str(ROOT / "install-docker.sh"),
+             str(ROOT), str(backup)], env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root)),
+            capture_output=True, timeout=5)
+        assert (result.returncode == 0) == (case == "valid"), (case, result.stderr)
+        assert json.loads((root / "config/spec.json").read_text()) == spec
+    saved = root / "backup"
+    (saved / "config").mkdir(parents=True)
+    (saved / "config/spec.json").write_text(json.dumps(spec))
+    body = r'''
+source "$1"
+dockerHostPreflight() { :; }
+dockerLockInstalledDeployment() { :; }
+dockerComposeFile() { printf '%s/compose.json\n' "$PADM_DOCKER_INSTALL_DIR"; }
+dockerLatestUpdateBackup() { printf '%s/backup\n' "$PADM_DOCKER_INSTALL_DIR"; }
+dockerCurrentBundlePath() { printf '%s\n' "$TEST_CURRENT_BUNDLE"; }
+dockerControlSyncRollbackCheck() { printf 'checked\n'; return 1; }
+dockerPortHoppingTargetSupervisedOwned() {
+    local -a targets=(hy2-main)
+    dockerRollbackCommand
+}
+dockerPortHoppingTargetSupervisedOwned
+'''
+    result = subprocess.run(
+        ["bash", "-Eeuo", "pipefail", "-c", body, "test", str(ROOT / "install-docker.sh")],
+        env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root), TEST_CURRENT_BUNDLE=str(ROOT)),
+        capture_output=True, timeout=5)
+    assert result.returncode == 15 and result.stdout == b"checked\n", result.stderr
+    assert not (saved / "bundle.target").exists()
+    return 5
+
+
+def fake_owned(fd, root, action="", arguments=None):
     peer = socket.socket(fileno=fd)
     installation = Path(root)
     lock = installation / "locks/deployment.lock"
@@ -178,18 +238,28 @@ def fake_owned(fd, root, restart=False):
                  "payload": value if payload is None else payload}
         MODULE["send"](peer, event)
         response = MODULE["receive"](peer)
-        assert response == {"v": 1, "phase": "commit" if phase in {"ready", "restart"} else "continue",
+        assert response == {"v": 1, "phase": "commit" if phase in {
+            "ready", "restart", "update", "rollback", "changed"} else "continue",
                             "nonce": event["nonce"]} or stopping[0], response
 
-    if restart:
+    if action:
         current = subprocess.run([
             "bash", "-Eeuo", "pipefail", "-c", MODULE["LOCK_BODY"], "test",
             str(ROOT / "install-docker.sh"), str(installation), str(os.getpid())],
             capture_output=True, check=True)
         original = json.loads(current.stdout)
-        if (installation / "invalid-restart-gate").exists():
+        if (installation / "invalid-restart-gate").exists() or (
+                installation / "invalid-update-gate").exists():
             original = []
-        gate("restart", {"bash_pid": os.getpid(), "lock": original})
+        gate(action, {"bash_pid": os.getpid(), "lock": original})
+        if action in {"update", "rollback"}:
+            (installation / "fixture-change").write_text(json.dumps([action, arguments]))
+            changed = {"status": 11 if (installation / "change-failed").exists() else 0}
+            if (installation / "invalid-changed").exists():
+                changed["status"] = True
+            gate("changed", changed)
+            value["target"]["container_id"] = f"{os.getpid():064x}"
+            value["target"]["image_id"] = "sha256:" + f"{os.getpid():064x}"
     # 只有新写门通过后才模拟核心与规则启用。
     stage.mkdir(mode=0o700)
     marker.write_text(str(os.getpid()))
@@ -409,6 +479,7 @@ def main():
     count = 0
     with tempfile.TemporaryDirectory(prefix="padm-hopping-deployment-gate.") as directory:
         count += deployment_gate_cases(Path(directory))
+        count += rollback_scope_cases(Path(directory))
     payload = {"target": {"listener_id": "hy2-main"}, "running": {
         "v": 1, "phase": "running", "nonce": "a" * 64,
         "child_id": "b" * 64, "request_sha256": "c" * 64, "seq": 2,
@@ -510,18 +581,21 @@ def main():
             'fi\n'
             'dockerPortHoppingTargetSupervisedOwned() {\n'
             f'  exec "{sys.executable}" "{SCRIPT}" fake-owned "$1" "$PADM_DOCKER_INSTALL_DIR" '
-            '"${7:-}"\n'
+            '"${7:-}" "${@:8}"\n'
             '}\n')
         entrypoint.chmod(0o600)
         count += reservation_cases(base, entrypoint)
         for case in ("clean", "ack-lost", "invalid-finished", "invalid-finished-restart",
                      "invalid-restart-gate", "precommit-eof", "lifecycle-down",
-                     "lifecycle-uninstall", "invalid-finished-down", "invalid-finished-uninstall"):
+                     "lifecycle-uninstall", "invalid-finished-down", "invalid-finished-uninstall",
+                     "changes", "change-failed", "invalid-update-gate", "invalid-changed"):
             installation = base / case
             (installation / "data/net").mkdir(parents=True, mode=0o700)
             installation.chmod(0o700)
             if case.startswith("invalid-finished"):
                 (installation / "invalid-finished").touch()
+            if case in {"change-failed", "invalid-update-gate", "invalid-changed"}:
+                (installation / case).touch()
             manager = manager_fd = None
             if case in {"ack-lost", "precommit-eof"}:
                 caller, service = socket.socketpair()
@@ -582,18 +656,27 @@ def main():
                         (lock / "pid").read_bytes()) == original_lock
                 assert MODULE["control"]("status", str(installation))["owner"] == owner
                 count += 1
-                if case == "clean":
+                if case in {"clean", "changes", "change-failed"}:
                     session = installation / "data/net/.hopping-supervisor"
                     session_id = MODULE["path_identity"](session.stat())
-                    for _ in range(2):
+                    for action in (("restart", "restart") if case == "clean" else ("update", "rollback")):
                         previous = current
                         old_bash = MODULE["pin"](owner["bash"])
                         try:
-                            restarted = MODULE["control"]("restart", str(installation))
+                            arguments = ["--manifest", "/tmp/private manifest.json"] if action == "update" else []
+                            restarted = MODULE["control"](action, str(installation), arguments=arguments)
                             assert set(restarted) == {
                                 "v", "phase", "nonce", "client_nonce", "owner", "owner_sha256",
-                                "payload", "previous_owner", "cleaned", "finished"}
-                            assert restarted["phase"] == "restarted"
+                                "payload", "previous_owner", "cleaned", "finished",
+                                *({"change"} if action != "restart" else set())}
+                            assert restarted["phase"] == {
+                                "restart": "restarted", "update": "updated", "rollback": "rolled_back"}[action]
+                            if action != "restart":
+                                assert restarted["change"] == {
+                                    "action": action, "arguments": arguments,
+                                    "status": 11 if case == "change-failed" else 0}
+                                assert json.loads((installation / "fixture-change").read_text()) == [
+                                    action, arguments]
                             assert restarted["previous_owner"] == owner
                             assert restarted["finished"] == {"status": 143, "lock_released": True}
                             assert restarted["cleaned"] == {
@@ -609,18 +692,26 @@ def main():
                             "token", "bash", "stage", "stage_sha256"))
                         assert MODULE["path_identity"](session.stat()) == session_id
                         assert json.loads((session / "owner.json").read_text()) == new_owner
-                        assert restarted["payload"]["target"]["container_id"] == (
-                            previous["payload"]["target"]["container_id"])
+                        assert (restarted["payload"]["target"]["container_id"] ==
+                                previous["payload"]["target"]["container_id"]) == (action == "restart")
                         assert restarted["payload"]["target"]["started_at"] != (
                             previous["payload"]["target"]["started_at"])
                         assert restarted["payload"]["child"]["Id"] != (
                             previous["payload"]["child"]["Id"])
                         assert (lock / "pid").read_text() == str(new_owner["bash"]["pid"]) + "\n"
-                        for action in ("restart", "stop"):
-                            rejected = subprocess.run([
-                                sys.executable, str(HELPER), action, str(installation), owner["token"]],
-                                capture_output=True, timeout=8)
-                            assert rejected.returncode == 1 and not rejected.stdout and rejected.stderr
+                        for rejected_action in ("restart", "stop", "update", "rollback"):
+                            if rejected_action in {"update", "rollback"}:
+                                try:
+                                    MODULE["control"](rejected_action, str(installation), owner["token"])
+                                except MODULE["Failure"]:
+                                    pass
+                                else:
+                                    raise AssertionError("旧 token 通过事务挑战")
+                            else:
+                                rejected = subprocess.run([
+                                    sys.executable, str(HELPER), rejected_action, str(installation), owner["token"]],
+                                    capture_output=True, timeout=8)
+                                assert rejected.returncode == 1 and not rejected.stdout and rejected.stderr
                             assert json.loads((session / "owner.json").read_text()) == new_owner
                         owner = new_owner
                         current = MODULE["control"]("status", str(installation))
@@ -657,15 +748,18 @@ def main():
                         assert not (installation / "actions").exists()
                     count += 2
                     continue
-                elif case in {"invalid-finished-restart", "invalid-restart-gate"}:
+                elif case in {"invalid-finished-restart", "invalid-restart-gate",
+                              "invalid-update-gate", "invalid-changed"}:
                     session = installation / "data/net/.hopping-supervisor"
                     session_id = MODULE["path_identity"](session.stat())
                     if case == "invalid-restart-gate":
                         (installation / case).touch()
                     rejected = subprocess.run([
-                        sys.executable, str(HELPER), "restart", str(installation)],
+                        sys.executable, str(HELPER), "update" if case in {
+                            "invalid-update-gate", "invalid-changed"} else "restart", str(installation)],
                         capture_output=True, timeout=12)
-                    assert rejected.returncode == 1 and not rejected.stdout and rejected.stderr
+                    assert rejected.returncode == (12 if case in {
+                        "invalid-update-gate", "invalid-changed"} else 1) and not rejected.stdout and rejected.stderr
                     assert MODULE["select"].select([manager_fd], [], [], 5)[0]
                     assert MODULE["path_identity"](session.stat()) == session_id
                     assert not (installation / "data/net/fixture-running").exists()
@@ -722,8 +816,9 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) in {4, 5} and sys.argv[1] == "fake-owned":
-        assert len(sys.argv) == 4 or sys.argv[4] in {"", "--restart"}
-        fake_owned(int(sys.argv[2]), sys.argv[3], len(sys.argv) == 5 and sys.argv[4] == "--restart")
+    if len(sys.argv) >= 4 and sys.argv[1] == "fake-owned":
+        action = sys.argv[4].removeprefix("--") if len(sys.argv) >= 5 else ""
+        assert action in {"", "restart", "update", "rollback"}
+        fake_owned(int(sys.argv[2]), sys.argv[3], action, sys.argv[5:])
     else:
         main()

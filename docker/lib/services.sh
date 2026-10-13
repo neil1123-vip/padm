@@ -5930,10 +5930,12 @@ dockerCreateUpdateCandidate() {
                     .services["net-fail2ban"].restart = "unless-stopped"' <<<"${expected}"); } || return 1
         mkdir -p -- "${candidate}/logs/control" "${candidate}/data/control-source" || return 1
     fi
-    cp -- "${root}/compose.json" "${candidate}/compose.json" || return 1
     dockerUpdateRenderImagesEnv "${root}/images.env" "${candidate}/images.env" "${candidate}" || return 1
     dockerUpdateRenderImagesEnv "${root}/images.env" "${candidate}/images.runtime.env" "${root}" || return 1
     version=$(dockerManifestReleaseVersion) || return 1
+    # 保留现有编排，只同步发布标签，避免新规格与实际容器的版本见证不一致。
+    jq --arg version "${version}" '.services |= with_entries(.value.labels["io.padm.release"] = $version)' \
+        "${root}/compose.json" >"${candidate}/compose.json" || return 1
     manifestSha=${PADM_DOCKER_MANIFEST_SHA256:-}
     [[ "${manifestSha}" =~ ^[0-9a-f]{64}$ ]] || return 1
     previous=$(jq -r '.manifest.sha256 // empty' "${root}/deployment.json") || return 1

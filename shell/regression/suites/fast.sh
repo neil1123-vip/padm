@@ -740,6 +740,10 @@ registerRegressionFunctionLeaf docker-port-hopping-guarded runDockerPortHoppingG
 registerRegressionFunctionLeaf docker-port-hopping-supervisor runDockerPortHoppingSupervisorParentRegression
 registerRegressionFunctionLeaf docker-port-hopping-target runDockerPortHoppingTargetRegression
 registerRegressionFunctionLeaf docker-port-hopping-target-real runDockerPortHoppingTargetRealRegression
+runDockerPortHoppingChangeRealRegression() {
+    PADM_DOCKER_HOPPING_CHANGE_ONLY=1 runDockerPortHoppingTargetRealRegression
+}
+registerRegressionFunctionLeaf docker-port-hopping-change-real runDockerPortHoppingChangeRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
 
 listRegressionDockerTProxyChildSelectors() {

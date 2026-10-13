@@ -617,6 +617,54 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
     primary_error = None
     calls = []
     cron = None
+    release = node / "hopping-release"
+    release.mkdir(mode=0o700)
+    control = release / "control.tar.gz"
+    command(["tar", "-czf", str(control), "-C", str((root / "bundle").resolve()),
+             "install-docker.sh", "docker", "shell", "assets"], timeout=30)
+    configured = json.loads((root / "config/spec.json").read_text())
+    manifest = dict(
+        schema_version=1,
+        release=dict(version="3.9.10", commit="a" * 40, created_at="2026-10-14T00:00:00Z"),
+        control=dict(bundle_url="https://fixture.invalid/control.tar.gz",
+                     sha256=hashlib.sha256(control.read_bytes()).hexdigest(), min_version="3.9.9"),
+        images={key: dict(reference=value, index_digest=value.split("@")[-1],
+                          platforms={"linux/amd64": value.split("@")[-1],
+                                     "linux/arm64": "sha256:" + "a" * 64})
+                for key, value in configured["images"].items()},
+        upstream=dict(alpine="fixture", xray="fixture", sing_box="fixture",
+                      nginx="fixture", acme_sh="fixture"),
+        formats=dict(compose=1, config=1, data=1),
+        compatibility=dict(host=["linux", "rootful-docker", "compose-v2"],
+                           architectures=["amd64", "arm64"], profiles=["core-sing-box"],
+                           features_version=1), migrations=[])
+    manifest_path = release / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    (release / "signature.json").write_text("{}")
+    entrypoint = release / "install-docker.sh"
+    entrypoint.write_text(
+        f'source {shlex.quote(str(ROOT / "install-docker.sh"))}\n'
+        'dockerPortHoppingSupervisorStart() {\n'
+        '  python3 -B "$DOCKER_LIB_DIR/port-hopping-supervisor.py" start "$PADM_DOCKER_INSTALL_DIR" '
+        f'{shlex.quote(str(entrypoint))} "$@"\n'
+        '}\n'
+        # 私有离线发布只核本轮固定内容；真实发布验签仍由独立合同负责。
+        'dockerManifestVerifierCheck() { :; }\n'
+        f'dockerManifestVerifySignature() {{ [[ "$(sha256sum "$1" | cut -d" " -f1)" == '
+        f'{hashlib.sha256(manifest_path.read_bytes()).hexdigest()} ]]; }}\n'
+        'dockerPullManifestImages() {\n'
+        '  local name; for name in "${PADM_DOCKER_MANIFEST_IMAGE_NAMES[@]}"; do\n'
+        '    docker image inspect "$(dockerManifestImageReference "$name")" >/dev/null || return 1\n'
+        '  done\n'
+        '}\n'
+        'eval "$(declare -f dockerComposeRun | sed "1s/dockerComposeRun/hoppingFixtureComposeRun/")"\n'
+        'dockerComposeRun() {\n'
+        f'  if [[ "$1" == up && -e {shlex.quote(str(release / "fail-up"))} ]]; then\n'
+        f'    rm -- {shlex.quote(str(release / "fail-up"))}; return 11\n'
+        '  fi\n'
+        '  hoppingFixtureComposeRun "$@"\n'
+        '}\n')
+    entrypoint.chmod(0o600)
 
     def admission(accepted):
         started_at = time.monotonic()
@@ -636,26 +684,26 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             accepted=accepted, elapsed_ms=round((time.monotonic() - started_at) * 1000),
             returncode=result.returncode, stderr=result.stderr.decode()))
 
-    def invoke(function, *arguments, accepted=True, json_output=True):
+    def invoke(function, *arguments, accepted=True, json_output=True, status=0):
         with (work / "independent-supervisor.log").open("ab") as log:
             process = subprocess.Popen([
                 "bash", "-Eeuo", "pipefail", "-c",
                 '. "$1"; shift; trap dockerReleaseDeploymentLock EXIT; "$@"',
-                "test", str(ROOT / "install-docker.sh"), function, *arguments],
+                "test", str(entrypoint), function, *arguments],
                 env=environment, stdout=subprocess.PIPE, stderr=log)
             try:
-                output, _ = process.communicate(timeout=150)
+                output, _ = process.communicate(timeout=900)
             except BaseException:
                 process.kill()
                 process.communicate(timeout=5)
                 raise
         calls.append(dict(function=function, arguments=list(arguments), caller_pid=process.pid,
                           returncode=process.returncode,
-                          stdout=output.decode(errors="replace")))
+                          stdout=output[:512].decode(errors="replace"), stdout_bytes=len(output)))
         if not accepted:
             assert process.returncode != 0 and not output, calls[-1]
             return None
-        assert process.returncode == 0, calls[-1]
+        assert process.returncode == status, calls[-1]
         return process.pid, json.loads(output) if json_output else output.decode()
 
     def alive(descriptor):
@@ -676,6 +724,8 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             "v", "phase", "nonce", "client_nonce", "owner", "owner_sha256",
             *({"cleaned", "finished"} if phase == "stopped" else
               {"payload", "previous_owner", "cleaned", "finished"} if phase == "restarted" else
+              {"payload", "previous_owner", "cleaned", "finished", "change"} if phase in {
+                  "updated", "rolled_back"} else
               {"payload"})}
         assert type(value["v"]) is int and value["v"] == 1 and value["phase"] == phase
         assert all(re.fullmatch(r"[a-f0-9]{64}", value[key])
@@ -932,6 +982,58 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         _, status = invoke("dockerPortHoppingSupervisorStatus")
         ack(status, "status", second_owner)
         assert frame(status["payload"]["running"])["child_id"] == second_frame["child_id"]
+        # 同一真实会话完成更新、回滚及更新失败恢复，逐轮验证双族新连接。
+        previous_change = second
+        evidence["changes"] = []
+        for operation, failure in (("update", False), ("rollback", False), ("update", True)):
+            previous_owner = previous_change["owner"]
+            previous_target = previous_change["payload"]["target"]
+            previous_bash = process_identity(previous_owner["bash"])
+            before_state = json.loads((root / "data/traffic/state.json").read_text())
+            before_bundle = os.readlink(root / "bundle")
+            if failure:
+                (release / "fail-up").touch()
+            arguments = (("--manifest", str(manifest_path), "--bundle", str(release / "signature.json"),
+                          "--control-bundle", str(control)) if operation == "update" else ())
+            _, changed = invoke("dockerUpdateCommand" if operation == "update" else "dockerRollbackCommand",
+                                *arguments, status=14 if failure else 0)
+            new_owner = ack(changed, "updated" if operation == "update" else "rolled_back")
+            current_spec = json.loads((root / "config/spec.json").read_text())
+            current_compose = json.loads((root / "compose.json").read_text())
+            assert current_compose["services"]["sing-box"]["labels"]["io.padm.release"] == (
+                current_spec["release"]["version"])
+            assert changed["previous_owner"] == previous_owner
+            assert changed["change"] == dict(action=operation, arguments=list(arguments),
+                                             status=14 if failure else 0)
+            assert changed["finished"] == dict(status=143, lock_released=True)
+            assert changed["cleaned"] == dict(target=previous_target,
+                child_id=previous_change["payload"]["child"]["Id"], stage=previous_owner["stage"])
+            assert alive(second_manager) and not alive(previous_bash)
+            assert new_owner["manager"] == second_owner["manager"]
+            assert all(new_owner[key] != previous_owner[key] for key in ("token", "bash", "stage"))
+            assert session.stat().st_ino == session_inode
+            after_state = json.loads((root / "data/traffic/state.json").read_text())
+            for account, counters in before_state["accounts"].items():
+                for counter in ("upload", "download"):
+                    assert after_state["accounts"][account][counter] >= counters[counter]
+            assert changed["payload"]["target"]["container_id"] != previous_target["container_id"]
+            assert changed["payload"]["target"]["enabled_accounts"] == 1
+            if failure:
+                assert os.readlink(root / "bundle") == before_bundle
+            authentication(node, root, enter, f"independent-{operation}-{failure}", self_password,
+                           alice_password, "old", server_port=30000)
+            admission(False)
+            evidence["changes"].append(changed)
+            previous_change = changed
+        second_owner = previous_change["owner"]
+        second_bash = process_identity(second_owner["bash"])
+        # 失败事务按约定保留证据 stage，后续 stop 只清理活动代次。
+        stages = set(root.glob(".hopping-guarded.*")) - {Path(second_owner["stage"])}
+        changed_lock = tree(lock)
+        # 运行态 chown 合法改变 ctime，原 inode、权限、修改时间与内容仍须一致。
+        assert [row[:9] + row[10:] for row in changed_lock] == (
+            [row[:9] + row[10:] for row in net_lock])
+        net_lock = changed_lock
         _, down_output = invoke("dockerLifecycleCommand", "down", json_output=False)
         assert not down_output
         lifecycle_stopped(second_manager, second_bash)
@@ -1175,7 +1277,7 @@ dockerGenerateCompose "$2/config/spec.json" "$2/compose.json" "$2"
 : >"$2/images.env"
 dockerGenerateImagesEnv "$2/config/spec.json" "$2/images.env" "$2"
 dockerGenerateDeployment "$2/config/spec.json" "$2/deployment.json"
-dockerTlsRuntimePermissions "$2/secrets/tls"
+dockerEnsureRuntimeDataPermissions
 """, "test", str(ROOT / "install-docker.sh"), str(root)])
             clients = namespaces()
             # 持续会话验收超过原 120 秒，保留现有 netns 而不重建网络夹具。
@@ -1234,6 +1336,17 @@ dockerReleaseDeploymentLock
             current = json.loads(spec.read_text())
             old_password = current["core"]["protocols"][0]["uuid"]
             new_password = "44444444-4444-4444-8444-444444444444"
+            if os.environ.get("PADM_DOCKER_HOPPING_CHANGE_ONLY") == "1":
+                # 复用真实节点与全部生命周期断言，省去已验的配置漂移和额度前置。
+                nat_before = {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
+                              for tool in ("iptables", "ip6tables")}
+                independent = independent_supervisor(
+                    node, work, root, docker, net_image["Id"], nat_before, enter,
+                    old_password, new_password)
+                print("docker-port-hopping-change-real-snapshot=" + json.dumps(dict(
+                    independent_supervisor=independent,
+                    elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
+                return
             authentication(node, root, enter, "initial", old_password, new_password, "old")
             times = {path: (path.stat().st_atime_ns, path.stat().st_mtime_ns)
                      for path in (spec, baseline, live)}

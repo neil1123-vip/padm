@@ -1544,11 +1544,19 @@ dockerPortHoppingSupervisorStopIfActive() {
 dockerPortHoppingTargetSupervisedOwned() {
     local ph_control=${1:-} owner=${BASHPID:-$$} original= current root status=1
     local released=false ownerSignal=0 intTrap termTrap pipeTrap payload ph_restart=false
+    local ph_change= changeStatus=0
     local DOCKER_DEPLOYMENT_LOCK_DIR=
-    [[ ( "$#" -eq 6 || ( "$#" -eq 7 && "$7" == --restart ) ) &&
+    [[ "$#" -ge 6 &&
         "${ph_control}" =~ ^[1-9][0-9]*$ && "${ph_control}" -ge 3 ]] || return 1
     shift
-    if [[ "$#" -eq 6 ]]; then ph_restart=true; set -- "${@:1:5}"; fi
+    local -a targets=("${@:1:5}") changeArguments=("${@:7}")
+    case "${6:-}" in
+    '') [[ "$#" -eq 5 ]] || return 1 ;;
+    --restart) [[ "$#" -eq 6 ]] || return 1; ph_restart=true; ph_change=restart ;;
+    --update) ph_change=update ;;
+    --rollback) [[ "$#" -eq 6 ]] || return 1; ph_change=rollback ;;
+    *) return 1 ;;
+    esac
     python3 -B -c 'import fcntl,os,stat
 if not stat.S_ISSOCK(os.fstat(0).st_mode) or fcntl.fcntl(0,fcntl.F_GETFL)&os.O_ACCMODE != os.O_RDWR:
     raise SystemExit("监督控制 fd 必须是双向 socket")' \
@@ -1564,12 +1572,40 @@ if not stat.S_ISSOCK(os.fstat(0).st_mode) or fcntl.fcntl(0,fcntl.F_GETFL)&os.O_A
     if root=$(dockerInstallRoot) && dockerAcquireDeploymentLock --hopping-owner; then
         if original=$(dockerPortHoppingTargetLockSnapshot "${owner}"); then
             if [[ "${ownerSignal}" == 0 ]]; then
-                if { [[ "${ph_restart}" != true ]] ||
+                if { [[ -z "${ph_change}" ]] ||
                     { payload=$(jq -cn --argjson pid "${owner}" --argjson lock "${original}" \
                         '{bash_pid:$pid,lock:$lock}') &&
-                      dockerPortHoppingSupervisorControl gate restart "${payload}"; }; } &&
-                    [[ "${ownerSignal}" == 0 ]] &&
-                    dockerPortHoppingTargetTransaction supervised "$@"; then status=0; else status=$?; fi
+                      dockerPortHoppingSupervisorControl gate "${ph_change}" "${payload}"; }; }; then
+                    if [[ "${ownerSignal}" == 0 && ( "${ph_change}" == update || "${ph_change}" == rollback ) ]]; then
+                        # 事务失败仍由原实现恢复；重新绑定当前业务后保留原失败状态。
+                        trap 'dockerCommandInterrupted 130' INT
+                        trap 'dockerCommandInterrupted 143' TERM
+                        if [[ "${ph_change}" == update ]]; then
+                            dockerUpdateCommand "${changeArguments[@]}" >&2 || changeStatus=$?
+                        else
+                            dockerRollbackCommand >&2 || changeStatus=$?
+                        fi
+                        trap 'ownerSignal=130' INT
+                        trap 'ownerSignal=143' TERM
+                        dockerCleanupBundleLinkTemp &&
+                            dockerCleanupStagedBundle && dockerManifestCleanup &&
+                            dockerEntryCleanup || ownerSignal=1
+                        [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 0 ]] || ownerSignal=1
+                        current=$(dockerPortHoppingTargetLockSnapshot "${owner}") &&
+                            [[ "${current}" == "${original}" && "${ownerSignal}" == 0 ]] &&
+                            payload=$(jq -cn --argjson status "${changeStatus}" '{status:$status}') &&
+                            dockerPortHoppingSupervisorControl gate changed "${payload}" || ownerSignal=1
+                    fi
+                    if [[ "${ownerSignal}" == 0 ]]; then
+                        if dockerPortHoppingTargetTransaction supervised "${targets[@]}"; then
+                            status=0
+                        else
+                            status=$?
+                        fi
+                    else
+                        status=${ownerSignal}
+                    fi
+                fi
             fi
         fi
     else
@@ -1752,8 +1788,45 @@ dockerComposeExecute() {
 
 dockerLockInstalledDeployment() {
     dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${FUNCNAME[2]:-}" == dockerPortHoppingTargetSupervisedOwned &&
+        ( "${FUNCNAME[1]:-}" == dockerUpdateCommand && "${ph_change:-}" == update ||
+          "${FUNCNAME[1]:-}" == dockerRollbackCommand && "${ph_change:-}" == rollback ) ]]; then
+        # 仅原监督 owner 的直接调用复用本 Bash 的锁，环境标记不能绕开普通取锁。
+        [[ "$(dockerPortHoppingTargetLockSnapshot "${owner}")" == "${original}" ]] ||
+            return "${PADM_DOCKER_RC_LOCK}"
+        return 0
+    fi
     dockerAcquireDeploymentLock || return "${PADM_DOCKER_RC_LOCK}"
     dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+}
+
+dockerPortHoppingSupervisorChangeBundleCheck() {
+    local bundlePath=$1 spec=${2:-}
+    [[ "${FUNCNAME[2]:-}" == dockerPortHoppingTargetSupervisedOwned ]] || return 0
+    # shortcut: 活动会话仅跨相同监督实现升级，协议版本协商接入后再放宽。
+    cmp -s -- "${DOCKER_LIB_DIR}/lifecycle.sh" "${bundlePath}/docker/lib/lifecycle.sh" &&
+        cmp -s -- "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" \
+            "${bundlePath}/docker/lib/port-hopping-supervisor.py" || {
+        dockerError '目标控制 bundle 与当前跳跃监督实现不兼容，未切换部署'
+        return "${PADM_DOCKER_RC_BUNDLE}"
+    }
+    [[ -z "${spec}" ]] || jq -e --arg listener "${targets[0]}" \
+        --slurpfile current "$(dockerInstallRoot)/config/spec.json" '
+      .schema_version == 3 and .core.type == "sing-box" and .core.secondary_type == null and
+      (.core.protocols | length) == 1 and
+      .host_integrations == [] and
+      ([.core.protocols[] | select(.listener_id == $listener and .id == 3)] | length) == 1 and
+      ([.core.protocols[] | select(.listener_id == $listener) |
+        {public_port,address_families,domain:.hy2.domain}] ==
+       [$current[0].core.protocols[] | select(.listener_id == $listener) |
+        {public_port,address_families,domain:.hy2.domain}])
+    ' "${spec}" >/dev/null
+}
+
+dockerPortHoppingSupervisorChangeCheck() {
+    [[ "${FUNCNAME[2]:-}" == dockerPortHoppingTargetSupervisedOwned ]] || return 0
+    [[ "${ownerSignal}" == 0 &&
+        "$(dockerPortHoppingTargetLockSnapshot "${owner}")" == "${original}" ]]
 }
 
 dockerStatusCommand() {
@@ -2112,6 +2185,7 @@ dockerAssessCommand() {
 
 dockerUpdateCommand() {
     local manifest= bundle= controlBundle= candidate backup root sshPresent sshInput
+    local -a updateArguments=("$@")
     # 升级失败恢复仍须重新挑战，只复用本次预期来源。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
@@ -2139,6 +2213,13 @@ dockerUpdateCommand() {
         esac
     done
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${FUNCNAME[1]:-}" != dockerPortHoppingTargetSupervisedOwned &&
+        ( -e "${root}/data/net/.hopping-supervisor" || -L "${root}/data/net/.hopping-supervisor" ) ]]; then
+        dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+        python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" update "${root}" "${updateArguments[@]}"
+        return $?
+    fi
     dockerLockInstalledDeployment || return $?
     dockerComposeFile >/dev/null || {
         dockerError 'Docker 服务尚未配置，请先执行 configure'
@@ -2167,6 +2248,8 @@ dockerUpdateCommand() {
     dockerGeoBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return "${PADM_DOCKER_RC_BUNDLE}"
     dockerControlLogScheduleBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return "${PADM_DOCKER_RC_BUNDLE}"
     dockerControlSyncScheduleBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return "${PADM_DOCKER_RC_BUNDLE}"
+    dockerPortHoppingSupervisorChangeBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" ||
+        return "${PADM_DOCKER_RC_BUNDLE}"
     dockerPullManifestImages || return "${PADM_DOCKER_RC_COMPOSE}"
     dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
     dockerTrafficBeforeChange
@@ -2192,15 +2275,18 @@ dockerUpdateCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     backup=${DOCKER_CONFIG_BACKUP}
+    dockerPortHoppingSupervisorChangeCheck || return "${PADM_DOCKER_RC_STATE}"
     if ! dockerInstallCandidate "${candidate}" "${backup}" ||
         ! dockerEnsureRuntimeDataPermissions ||
         ! dockerActivateStagedBundle ||
+        ! dockerPortHoppingSupervisorChangeCheck ||
         ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
         ! dockerTrafficScheduleInstall ||
         ! dockerRenewalScheduleInstall ||
         ! dockerGeoScheduleInstall ||
         ! dockerControlLogScheduleInstall ||
-        ! dockerControlSyncScheduleInstall; then
+        ! dockerControlSyncScheduleInstall ||
+        ! dockerPortHoppingSupervisorChangeCheck; then
         dockerError '控制脚本切换、启动或健康检查失败，正在恢复旧配置和控制脚本'
         if ! dockerRestoreConfiguration; then
             dockerError "旧版本恢复失败，请检查备份: ${backup}"
@@ -2362,6 +2448,13 @@ dockerRollbackCommand() {
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${FUNCNAME[1]:-}" != dockerPortHoppingTargetSupervisedOwned &&
+        ( -e "${root}/data/net/.hopping-supervisor" || -L "${root}/data/net/.hopping-supervisor" ) ]]; then
+        dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+        python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" rollback "${root}"
+        return $?
+    fi
     dockerLockInstalledDeployment || return $?
     dockerComposeFile >/dev/null || {
         dockerError 'Docker 服务尚未配置，无法回滚'
@@ -2371,6 +2464,18 @@ dockerRollbackCommand() {
         dockerError '没有可用的更新回滚快照'
         return "${PADM_DOCKER_RC_STATE}"
     }
+    if [[ "${FUNCNAME[1]:-}" == dockerPortHoppingTargetSupervisedOwned ]]; then
+        if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
+            [[ -f "${backup}/bundle.target" && ! -L "${backup}/bundle.target" &&
+                -O "${backup}/bundle.target" ]] || return "${PADM_DOCKER_RC_BUNDLE}"
+            bundlePath=$(dockerBundlePathForTarget "$(<"${backup}/bundle.target")") ||
+                return "${PADM_DOCKER_RC_BUNDLE}"
+        else
+            bundlePath=$(dockerCurrentBundlePath) || return "${PADM_DOCKER_RC_BUNDLE}"
+        fi
+        dockerPortHoppingSupervisorChangeBundleCheck "${bundlePath}" "${backup}/config/spec.json" ||
+            return "${PADM_DOCKER_RC_BUNDLE}"
+    fi
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     sshInput="${root}/deployment.json" sshBackupInput="${backup}/deployment.json"
     [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] ||
@@ -2414,9 +2519,11 @@ dockerRollbackCommand() {
     dockerTrafficBeforeChange
     dockerBackupConfiguration rollback || return "${PADM_DOCKER_RC_STATE}"
     currentBackup=${DOCKER_CONFIG_BACKUP}
+    dockerPortHoppingSupervisorChangeCheck || return "${PADM_DOCKER_RC_STATE}"
     DOCKER_CONFIG_BACKUP=${backup}
     DOCKER_CONFIG_SWITCHED=1
-    if dockerRestoreConfiguration && dockerTrafficScheduleInstall; then
+    if dockerRestoreConfiguration && dockerTrafficScheduleInstall &&
+        dockerPortHoppingSupervisorChangeCheck; then
         DOCKER_CONFIG_BACKUP=${currentBackup}
         dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
         printf 'Docker 已回滚到: %s\n' "${backup}"

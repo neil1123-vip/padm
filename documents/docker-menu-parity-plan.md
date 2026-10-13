@@ -6433,6 +6433,42 @@ Docker Linux amd64 定向 69 项通过，入口 13882 ms：
 保留各目录核验、结果和日志，清理成功重复归档及本轮核验脚本。
 本阶段不升级公开支持范围，完整 purge、原生宿主等验收仍 deferred。
 
+#### 5C.9c.3e.2b.3d.6 update/rollback 协调
+
+更新和回滚复用在线 restart 的原控制挑战和净停止交接，同一 manager/session
+覆盖整个事务，新 Bash 自取锁并通过写门执行已有候选、备份及失败恢复流程。
+事务结束后以当前部署重新形成跳跃启动绑定；事务失败但恢复成功仍返回失败，
+并确认恢复后的跳跃业务。未知残留、非法停止回执及新写门漂移拒绝并保留证据。
+范围限定在内部监督、单 sing-box、双族 Hy2、无宿主集成，不升级无人值守恢复
+或完整公开端口跳跃支持。
+
+活动会话只允许目标 bundle 的 `lifecycle.sh`、`port-hopping-supervisor.py`
+与当前执行版本逐字节一致；跨监督版本需要协议协商后再开放。
+回滚切换前拒绝不同 schema、多入口、不同端口/双族/domain；旧备份未记录
+`bundle.target` 时沿用当前 bundle。保留原监听、范围与目标地址，更新/回滚允许
+核心 CID/image 改变，restart 仍要求同 CID/image。修复公共更新候选的
+Compose 发布标签同步，使新规格与实际容器版本见证一致。
+
+新增 `docker-port-hopping-change-real` 复用真实节点和独立监督生命周期断言，
+省去配置漂移、额度及有限父子场景的重复前置；标准真实入口继续覆盖完整集合。
+夹具使用真实 ops 镜像，并按 configure 准备运行态目录与权限。
+离线 manifest 只核本轮固定内容，不代表真实发布验签通过。
+
+Docker Linux amd64 复用工具镜像
+`sha256:0f7d1c14744a66023ae528226890eb84d0d607114ce5a1f0157216cb6bfdd722`：
+监督定向 86 项通过，入口 15895 ms，证据在
+`.tmp-regression-docker-93ad8d1c68f84dd8a10a05382d9af9d1/`。
+集中合同 54/54 通过，Jobs 6，入口 357766 ms、排队 48102 ms、cache=false：
+`.tmp-regression-docker-fdb14d74a0d946faaea99455b594baec/`。
+最终真实定向通过，场景 218.018 秒、入口 220710 ms、排队 159 ms：
+`.tmp-regression-docker-2c2978627df14e40beeabd76b008b0f1/`。
+更新、回滚和注入更新启动失败的 ACK 分别为 0、0、14；每轮双族新连接、
+同 session/manager、新 owner/child、累计不回退及随后 down/TERM/uninstall/
+SIGKILL 证据行为均通过。最终真实与集中归档的 14 份文件核验匹配，详见真实
+目录 `verification.json`；标准真实入口未重复整套执行，最终夹具由缩短入口验收。
+清理成功重复归档、核验脚本及诊断副本，保留结果、日志、核验与失败输入。
+菜单启停与 schema/Compose 持久化继续推进，整体目标保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
