@@ -19,6 +19,11 @@ for core in xray sing-box; do
     dockerConfigureSpecValidate "${TEST_ROOT}/valid-trojan-${core}.json" ||
         fail "${core}: Trojan 有效合同被拒绝"
 done
+if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == base &&
+    -n "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" &&
+    "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP}" != tuic-trojan ]]; then
+    return 0
+fi
 for mutation in \
     '.tls = null' \
     '.core.protocols[0].trojan.domain = "other.example.com"' \

@@ -16,6 +16,11 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTI
       auth_timeout:"3s",heartbeat:"10s",zero_rtt_handshake:false})
 ' "${HY2_SPEC}" >"${TUIC_SPEC}"
 dockerConfigureSpecValidate "${TUIC_SPEC}" || fail 'TUIC 有效合同被拒绝'
+if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == base &&
+    -n "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" &&
+    "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP}" != tuic-trojan ]]; then
+    return 0
+fi
 
 for mutation in \
     '.core.protocols[0].core = "xray" | .core.type = "xray"' \

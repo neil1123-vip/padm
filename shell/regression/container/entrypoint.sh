@@ -20,4 +20,13 @@ for path in Path("/work").rglob("*"):
     path.write_bytes(data.replace(b"\r\n", b"\n"))
 PY
 cd /work
+if [[ "${1:-fast}" == docker-contracts || "${1:-fast}" == docker-port-hopping-preflight ]]; then
+    # 完整合同及独立跳跃 CI 分片复用解释器启动，生产仍使用原入口。
+    # shellcheck source=/dev/null
+    source shell/regression/container/snapshot-fork-runtime.sh
+    if ! padmSnapshotForkStart; then
+        printf 'snapshot fork adapter 启动失败，使用原 Python 入口\n' >&2
+        unset PADM_SNAPSHOT_FORK_CLIENT PADM_SNAPSHOT_FORK_SOCKET PADM_SNAPSHOT_FORK_PID
+    fi
+fi
 exec bash shell/subscription_groups_regression.sh "${1:-fast}"

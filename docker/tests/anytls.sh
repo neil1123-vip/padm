@@ -14,6 +14,11 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTI
     .public_port = 28443 | .name = "AnyTLS" | .anytls = {domain:"ws.example.com"})
 ' "${HY2_SPEC}" >"${ANYTLS_SPEC}"
 dockerConfigureSpecValidate "${ANYTLS_SPEC}" || fail 'AnyTLS 有效合同被拒绝'
+if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == base &&
+    -n "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" &&
+    "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP}" != hy2-anytls ]]; then
+    return 0
+fi
 
 for mutation in \
     '.core.protocols[0].core = "xray" | .core.type = "xray"' \

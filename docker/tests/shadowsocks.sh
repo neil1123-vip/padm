@@ -7,8 +7,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/naive.sh"
 IMAGE_DIGEST=$(printf '1%.0s' {1..64})
 export OPS_IMAGE="ghcr.io/example/padm-ops:test@sha256:${IMAGE_DIGEST}"
 dockerConfigureTestFixture
-# 独立记录完整 Docker 参数，避免只读检查清空事件日志后漏掉先前事务。
-docker() { printf '%s\n' "$@" >>"${TEST_ROOT}/shadowsocks-docker-argv"; command docker "$@"; }
 SS_SPEC="${TEST_ROOT}/shadowsocks.json"
 SS_SERVER_PASSWORD='AAECAwQFBgcICQoLDA0ODw=='
 SS_USER_PASSWORD='+/v7+/v7+/v7+/v7+/v7+w=='
@@ -22,6 +20,13 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTI
       server_password:$serverPassword,user_password:$userPassword})
 ' "${NAIVE_SPEC}" >"${SS_SPEC}"
 dockerConfigureSpecValidate "${SS_SPEC}" || fail 'Shadowsocks 有效合同被拒绝'
+if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == base &&
+    -n "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" &&
+    "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP}" != naive-shadowsocks ]]; then
+    return 0
+fi
+# 独立记录完整 Docker 参数，避免只读检查清空事件日志后漏掉先前事务。
+docker() { printf '%s\n' "$@" >>"${TEST_ROOT}/shadowsocks-docker-argv"; command docker "$@"; }
 
 for mutation in \
     '.core.protocols[0].core = "xray" | .core.type = "xray"' \

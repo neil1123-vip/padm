@@ -70,13 +70,13 @@ listRegressionDockerContractsChildSelectors() {
         docker-traditional-tls-base \
         docker-setup-transports \
         docker-setup-encrypted-udp \
+        docker-port-hopping-preflight \
         docker-phase4-maintenance \
         docker-routing-core-network-lifecycle \
         docker-reality \
         docker-setup-tls \
         docker-phase4-lifecycle \
         docker-reality-targets-direct \
-        docker-port-hopping-preflight \
         docker-reality-parameters \
         docker-sites \
         docker-routing-direct-block-ip-workflow \
@@ -266,7 +266,25 @@ runDockerXhttpValidationRegression() {
 }
 
 runDockerXhttpEditRegression() {
-    PADM_DOCKER_XHTTP_SCOPE=edit runDockerXhttpRegression
+    bash -n "${PROJECT_ROOT}/docker/tests/xhttp.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/xhttp.sh" &&
+        PADM_REGRESSION_PARALLEL_JOBS=3 runParallelRegressionRunners \
+            "${TMP_DIR}/xhttp-edit-${BASHPID:-$$}" \
+            xhttp-preset runDockerXhttpPresetRegression \
+            xhttp-padding runDockerXhttpPaddingRegression \
+            xhttp-headers runDockerXhttpHeadersRegression
+}
+
+runDockerXhttpPresetRegression() {
+    PADM_DOCKER_XHTTP_SCOPE=edit-preset bash "${PROJECT_ROOT}/docker/tests/xhttp.sh"
+}
+
+runDockerXhttpPaddingRegression() {
+    PADM_DOCKER_XHTTP_SCOPE=edit-padding bash "${PROJECT_ROOT}/docker/tests/xhttp.sh"
+}
+
+runDockerXhttpHeadersRegression() {
+    PADM_DOCKER_XHTTP_SCOPE=edit-headers bash "${PROJECT_ROOT}/docker/tests/xhttp.sh"
 }
 
 runDockerXhttpRollbackRegression() {
@@ -274,11 +292,58 @@ runDockerXhttpRollbackRegression() {
 }
 
 runDockerTraditionalTlsBaseRegression() {
-    PADM_DOCKER_TRADITIONAL_TLS_SCOPE=base runDockerTraditionalTlsRegression
+    if [[ "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" != 1 ]]; then
+        PADM_DOCKER_TRADITIONAL_TLS_SCOPE=base runDockerTraditionalTlsRegression
+        return
+    fi
+    PADM_REGRESSION_PARALLEL_JOBS=3 runParallelRegressionRunners \
+        "${TMP_DIR}/traditional-tls-base-${BASHPID:-$$}" \
+        tls-hy2-anytls runDockerTraditionalTlsHy2AnyTlsRegression \
+        tls-naive-shadowsocks runDockerTraditionalTlsNaiveShadowsocksRegression \
+        tls-tuic-trojan runDockerTraditionalTlsTuicTrojanRegression
+}
+
+runDockerTraditionalTlsHy2AnyTlsRegression() {
+    PADM_DOCKER_TRADITIONAL_TLS_SCOPE=base \
+        PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP=hy2-anytls runDockerTraditionalTlsRegression
+}
+
+runDockerTraditionalTlsNaiveShadowsocksRegression() {
+    PADM_DOCKER_TRADITIONAL_TLS_SCOPE=base \
+        PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP=naive-shadowsocks runDockerTraditionalTlsRegression
+}
+
+runDockerTraditionalTlsTuicTrojanRegression() {
+    PADM_DOCKER_TRADITIONAL_TLS_SCOPE=base \
+        PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP=tuic-trojan runDockerTraditionalTlsRegression
 }
 
 runDockerTraditionalTlsTransportsRegression() {
     PADM_DOCKER_TRADITIONAL_TLS_SCOPE=transports runDockerTraditionalTlsRegression
+}
+
+runDockerSetupTransportsRegression() {
+    if [[ "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" != 1 ]]; then
+        runDockerSetupRegression transports
+        return
+    fi
+    PADM_REGRESSION_PARALLEL_JOBS=3 runParallelRegressionRunners \
+        "${TMP_DIR}/setup-transports-${BASHPID:-$$}" \
+        setup-ws-vmess runDockerSetupWsVmessRegression \
+        setup-trojan runDockerSetupTrojanRegression \
+        setup-httpupgrade runDockerSetupHttpupgradeRegression
+}
+
+runDockerSetupWsVmessRegression() {
+    PADM_DOCKER_SETUP_TRANSPORT_GROUP=ws-vmess runDockerSetupRegression transports
+}
+
+runDockerSetupTrojanRegression() {
+    PADM_DOCKER_SETUP_TRANSPORT_GROUP=trojan runDockerSetupRegression transports
+}
+
+runDockerSetupHttpupgradeRegression() {
+    PADM_DOCKER_SETUP_TRANSPORT_GROUP=httpupgrade runDockerSetupRegression transports
 }
 
 runDockerXhttpRealRegression() {
@@ -333,11 +398,43 @@ runDockerRoutingCoreLifecycleRegression() {
 }
 
 runDockerRoutingCoreNetworkLifecycleRegression() {
-    PADM_DOCKER_ROUTING_SCOPE=core-network-lifecycle bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+        "${TMP_DIR}/routing-network-${BASHPID:-$$}" \
+        routing-warp runDockerRoutingWarpLifecycleRegression \
+        routing-ipv6 runDockerRoutingIpv6LifecycleRegression
 }
 
 runDockerRoutingCorePolicyLifecycleRegression() {
-    PADM_DOCKER_ROUTING_SCOPE=core-policy-lifecycle bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+    PADM_REGRESSION_PARALLEL_JOBS=3 runParallelRegressionRunners \
+        "${TMP_DIR}/routing-policy-${BASHPID:-$$}" \
+        routing-region runDockerRoutingRegionLifecycleRegression \
+        routing-bt runDockerRoutingBtLifecycleRegression \
+        routing-socks5 runDockerRoutingSocks5LifecycleRegression
+}
+
+runDockerRoutingWarpLifecycleRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-network-lifecycle PADM_DOCKER_ROUTING_BRANCH=warp \
+        bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingIpv6LifecycleRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-network-lifecycle PADM_DOCKER_ROUTING_BRANCH=ipv6 \
+        bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingRegionLifecycleRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-policy-lifecycle PADM_DOCKER_ROUTING_BRANCH=region \
+        bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingBtLifecycleRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-policy-lifecycle PADM_DOCKER_ROUTING_BRANCH=bt \
+        bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingSocks5LifecycleRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-policy-lifecycle PADM_DOCKER_ROUTING_BRANCH=socks5 \
+        bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
 runDockerPhase4MaintenanceRegression() {
@@ -353,7 +450,26 @@ runDockerPhase3EntriesRegression() {
 }
 
 runDockerPhase4LifecycleRegression() {
-    PADM_DOCKER_PHASE4_SCOPE=lifecycle bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
+    PADM_REGRESSION_PARALLEL_JOBS=3 runParallelRegressionRunners \
+        "${TMP_DIR}/phase4-lifecycle-${BASHPID:-$$}" \
+        lifecycle-settings runDockerPhase4SettingsRegression \
+        lifecycle-port runDockerPhase4PortRegression \
+        lifecycle-recovery runDockerPhase4RecoveryRegression
+}
+
+runDockerPhase4SettingsRegression() {
+    PADM_DOCKER_PHASE4_SCOPE=lifecycle PADM_DOCKER_PHASE4_BRANCH=settings \
+        bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
+}
+
+runDockerPhase4PortRegression() {
+    PADM_DOCKER_PHASE4_SCOPE=lifecycle PADM_DOCKER_PHASE4_BRANCH=port \
+        bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
+}
+
+runDockerPhase4RecoveryRegression() {
+    PADM_DOCKER_PHASE4_SCOPE=lifecycle PADM_DOCKER_PHASE4_BRANCH=recovery \
+        bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
 }
 
 runDockerRealityTargetsDirectRegression() {
@@ -365,7 +481,20 @@ runDockerRealityTargetsSelectionRegression() {
 }
 
 runDockerRoutingDnsHostsWorkflowRegression() {
-    PADM_DOCKER_ROUTING_SCOPE=domains-dns-hosts bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+        "${TMP_DIR}/routing-dns-hosts-${BASHPID:-$$}" \
+        routing-dns runDockerRoutingDnsWorkflowRegression \
+        routing-hosts runDockerRoutingHostsWorkflowRegression
+}
+
+runDockerRoutingDnsWorkflowRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=domains-dns-hosts PADM_DOCKER_ROUTING_BRANCH=dns \
+        bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingHostsWorkflowRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=domains-dns-hosts PADM_DOCKER_ROUTING_BRANCH=hosts \
+        bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
 runDockerRoutingDirectBlockWorkflowRegression() {
@@ -615,8 +744,18 @@ import sys
 path = Path(sys.argv[1])
 ast.parse(path.read_text(), filename=str(path))
 PY
-    runRegressionStep hopping-target-cases bash "${PROJECT_ROOT}/docker/tests/port-hopping-target.sh" &&
-        runRegressionStep hopping-start bash "${PROJECT_ROOT}/docker/tests/port-hopping-start.sh"
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+        "${TMP_DIR}/hopping-target-${BASHPID:-$$}" \
+        hopping-target-cases runDockerPortHoppingTargetCasesRegression \
+        hopping-start runDockerPortHoppingStartRegression
+}
+
+runDockerPortHoppingTargetCasesRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/port-hopping-target.sh"
+}
+
+runDockerPortHoppingStartRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/port-hopping-start.sh"
 }
 
 runDockerPortHoppingTargetRealRegression() {
@@ -644,7 +783,7 @@ registerRegressionFunctionLeaf docker-setup-core runDockerSetupRegression core
 registerRegressionFunctionLeaf docker-setup-encrypted runDockerSetupRegression encrypted
 registerRegressionFunctionLeaf docker-setup-encrypted-udp runDockerSetupRegression encrypted-udp
 registerRegressionFunctionLeaf docker-setup-encrypted-tcp runDockerSetupRegression encrypted-tcp
-registerRegressionFunctionLeaf docker-setup-transports runDockerSetupRegression transports
+registerRegressionFunctionLeaf docker-setup-transports runDockerSetupTransportsRegression
 registerRegressionFunctionLeaf docker-setup-tls runDockerSetupRegression tls
 registerRegressionFunctionLeaf docker-protocol runDockerProtocolRegression
 registerRegressionFunctionLeaf docker-reality runDockerRealityRegression

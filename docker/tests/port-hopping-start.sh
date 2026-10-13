@@ -229,14 +229,16 @@ inject() {
 }
 
 proof() {
-    local identity=${1:-${ID}} count started=${STARTED}
+    local identity=${1:-${ID}} started=${STARTED}
     [[ ! -s "${TEST_ROOT}/started" ]] || started=$(<"${TEST_ROOT}/started")
-    count=$(jq '[.inbounds[].users[]?] | length' "${root}/config/sing-box/config.json")
     jq -cn --arg id "${identity}" --arg image "${IMAGE_ID}" --arg started "${started}" \
-        --arg ipv4 "${IPV4}" --arg ipv6 "${IPV6}" --argjson count "${count}" '
+        --arg ipv4 "${IPV4}" --arg ipv6 "${IPV6}" \
+        --slurpfile live "${root}/config/sing-box/config.json" '
+      ($live | if length == 1 then .[0] else error("live 配置必须是单个对象") end) as $live |
       {schema_version:1,listener_id:"entry-hy2",protocol_id:3,core:"sing-box",
        container_id:$id,image_id:$image,started_at:$started,restart_count:0,
-       target_port:27443,ipv4:$ipv4,ipv6:$ipv6,enabled_accounts:$count}
+       target_port:27443,ipv4:$ipv4,ipv6:$ipv6,
+       enabled_accounts:([$live.inbounds[].users[]?] | length)}
     '
 }
 
@@ -372,7 +374,7 @@ cp() {
 }
 
 docker() {
-    local identity requested running=true service=sing-box rows='[]' row started=${STARTED}
+    local identity requested running=true service=sing-box rows='[]' started=${STARTED}
     record docker "$@"
     case "${1:-}" in
     ps)
@@ -399,10 +401,11 @@ docker() {
             if [[ "${SCENARIO}" == orphan && "${NEXT_ID}" == "${requested}"* ]]; then
                 service=rogue
             else [[ "${identity}" == "${requested}"* ]] || return 1; fi
-            row=$(jq -cn --arg id "${requested}" --arg root "${root}" --arg image "${IMAGE_ID}" \
+            rows=$(jq -cn --arg id "${requested}" --arg root "${root}" --arg image "${IMAGE_ID}" \
                 --arg service "${service}" --arg started "${started}" --argjson running "${running}" \
+                --argjson rows "${rows}" \
                 --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
-          {Id:$id,Image:$image,RestartCount:0,
+          $rows + [{Id:$id,Image:$image,RestartCount:0,
             State:{Running:$running,Status:(if $running then "running" else "exited" end),
               Restarting:false,Paused:false,Dead:false,Pid:(if $running then 100 else 0 end),
               StartedAt:$started,Health:{Status:"healthy"}},
@@ -411,9 +414,8 @@ docker() {
                 "com.docker.compose.project":"padm-docker",
                 "com.docker.compose.project.working_dir":$root,
                 "com.docker.compose.project.config_files":($root+"/compose.json"),
-                "com.docker.compose.service":$service,"com.docker.compose.oneoff":"False"})}}
+                "com.docker.compose.service":$service,"com.docker.compose.oneoff":"False"})}}]
         ') || return 1
-            rows=$(jq -c --argjson row "${row}" '. + [$row]' <<<"${rows}") || return 1
         done
         if [[ "${SCENARIO}" == stop-health-tick ]]; then
             rows=$(jq -c --argjson tick "$(eventCount docker)" '
@@ -650,6 +652,68 @@ runCase() {
 }
 
 cp -a -- "${root}" "${TEST_ROOT}/baseline"
+
+# 同进程核验须区分锁漂移与文件失败，不能让子进程吞掉父 Bash 的清锁动作。
+for failure in missing-tls replaced-lock invalid-lock; do
+    (
+        SCENARIO="snapshot-${failure}"
+        rm -rf -- "${root}"
+        cp -a -- "${TEST_ROOT}/baseline" "${root}"
+        : >"${TEST_ROOT}/events"
+        dockerAcquireDeploymentLock || fail "${failure}: 未取得夹具锁"
+        ph_owner=${BASHPID}
+        ph_root=${root}
+        ph_domain=proxy.example.com
+        ph_stage="${root}/snapshot-evidence"
+        ph_verified=false
+        ph_installed=false
+        ph_stateFile=
+        ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") ||
+            fail "${failure}: 单独锁快照失败"
+        files=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") ||
+            fail "${failure}: 单独文件快照失败"
+        output=$(dockerPortHoppingTargetSnapshot start "${ph_owner}" "${ph_domain}" "" "${ph_lock}") ||
+            fail "${failure}: 合并快照失败"
+        [[ "${output}" == "${ph_lock}"$'\n'"${files}" ]] ||
+            fail "${failure}: 合并快照改变原输出"
+        case "${failure}" in
+        missing-tls) rm -- "${root}/secrets/tls/proxy.example.com.crt" ;;
+        replaced-lock)
+            cp -a -- "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" "${TEST_ROOT}/snapshot-pid"
+            mv -f -- "${TEST_ROOT}/snapshot-pid" "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+            ;;
+        invalid-lock) chmod 0600 "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" ;;
+        esac
+        status=0
+        output=$(dockerPortHoppingTargetSnapshot start "${ph_owner}" "${ph_domain}" "" "${ph_lock}" \
+            2>"${TEST_ROOT}/snapshot-error") || status=$?
+        [[ "${status}" != 0 ]] || fail "${failure}: 合并快照接受失败边界"
+        case "${failure}" in
+        missing-tls)
+            [[ "${output}" == "${ph_lock}" ]] || fail '文件失败没有保留唯一锁行'
+            ;;
+        replaced-lock)
+            [[ -n "${output}" && "${output}" != *$'\n'* && "${output}" != "${ph_lock}" ]] ||
+                fail '锁替换未在读取文件前拒绝'
+            ;;
+        invalid-lock) [[ -z "${output}" ]] || fail '无效锁仍输出快照' ;;
+        esac
+        if dockerPortHoppingTargetStartFilesCheck >"${TEST_ROOT}/snapshot-check" \
+            2>"${TEST_ROOT}/snapshot-error"; then
+            fail "${failure}: StartFilesCheck 接受失败边界"
+        fi
+        if [[ "${failure}" == missing-tls ]]; then
+            [[ "${DOCKER_DEPLOYMENT_LOCK_DIR}" == "${root}/locks/deployment.lock" ]] ||
+                fail '文件失败错误清除了锁标记'
+            dockerReleaseDeploymentLock
+        else
+            [[ -z "${DOCKER_DEPLOYMENT_LOCK_DIR}" ]] || fail '锁失败没有清除父 Bash 锁标记'
+            dockerReleaseDeploymentLock
+            [[ -f "${root}/locks/deployment.lock/pid" ]] || fail '锁失败误删了现场'
+        fi
+    )
+done
+printf 'docker-port-hopping-snapshot-ok: 3 failure boundaries\n'
 cases=0
 runCase normal 0 1 0 0
 runCase quota 0 1 0

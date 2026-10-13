@@ -2,9 +2,15 @@
 set -euo pipefail
 
 PHASE4_SCOPE=${PADM_DOCKER_PHASE4_SCOPE:-full}
+PHASE4_BRANCH=${PADM_DOCKER_PHASE4_BRANCH:-}
 case "${PHASE4_SCOPE}" in
 full|maintenance|lifecycle) ;;
 *) printf 'docker-phase4-regression-fail: unknown scope %s\n' "${PHASE4_SCOPE}" >&2; exit 1 ;;
+esac
+case "${PHASE4_SCOPE}:${PHASE4_BRANCH}" in
+full:|maintenance:|lifecycle:|lifecycle:settings|lifecycle:port|lifecycle:recovery) ;;
+*) printf 'docker-phase4-regression-fail: invalid scope/branch: %s/%s\n' \
+    "${PHASE4_SCOPE}" "${PHASE4_BRANCH}" >&2; exit 1 ;;
 esac
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -1020,6 +1026,7 @@ if [[ "${PHASE4_SCOPE}" == maintenance ]]; then
     exit 0
 fi
 
+if [[ -z "${PHASE4_BRANCH}" || "${PHASE4_BRANCH}" == settings ]]; then
 # 流量调度只能处理本 root 的任务，同名 marker 不能证明另一部署归本次操作所有。
 (
     source "${PROJECT_ROOT}/install-docker.sh"
@@ -1423,7 +1430,38 @@ assert len(jails) == 1 and jails[0] > witnesses[-1][0], "settings jail started w
 PY
 [[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
     fail 'Fail2ban enable or settings changed persistent SQLite'
+fi
+if [[ "${PHASE4_BRANCH}" == settings ]]; then
+    printf 'docker-phase4-settings-regression-ok\n'
+    exit 0
+fi
 
+if [[ "${PHASE4_BRANCH}" == port || "${PHASE4_BRANCH}" == recovery ]]; then
+    # 独立分支真实安装原参数事务结束后的规格，不借用其它组的部署或 owner。
+    jq --slurpfile wireguard "${WIREGUARD_SPEC}" '
+      .host_integrations += ($wireguard[0].host_integrations + [{
+        type:"fail2ban",profile:"net-fail2ban",firewall_rules:["DOCKER-USER"],devices:[],schedules:[],
+        settings:{log_file:"access.log",ports:[24444],max_retry:7,find_time:900,ban_time:7200}
+      }])
+    ' "${FAIL2BAN_DISABLED_SPEC}" >"${TEST_ROOT}/fail2ban-settings-subset.json"
+    lifecycleInput="${TEST_ROOT}/fail2ban-settings-subset.json"
+    if [[ "${PHASE4_BRANCH}" == recovery ]]; then
+        # 恢复组从原端口成功提交后的单入口规格开始，仍走旧 owner 的恢复转换。
+        lifecycleInput="${TEST_ROOT}/fail2ban-port-recovery.json"
+        jq '.core.protocols = [.core.protocols[0]] |
+          .host_integrations |= map(select(.type == "fail2ban")) |
+          .core.protocols[0].public_port = 25444 |
+          .host_integrations[0].settings.ports = [25444]' \
+            "${TEST_ROOT}/fail2ban-settings-subset.json" >"${lifecycleInput}"
+    fi
+    runControl 0 "fail2ban-${PHASE4_BRANCH}-initialize" configure --spec "${lifecycleInput}"
+    jq -en --slurpfile expected "${lifecycleInput}" --slurpfile actual "${DOCKER_ROOT}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail '独立生命周期夹具没有精确安装'
+    [[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
+        fail '独立生命周期初始化改变持久封禁数据库'
+fi
+
+if [[ -z "${PHASE4_BRANCH}" || "${PHASE4_BRANCH}" == port ]]; then
 # 专项端口迁移保留通用导入拒绝，只允许一个 WS 入口和一个受管 jail。
 for args in \
     '--fail2ban-port' \
@@ -1579,6 +1617,11 @@ grep -qF 'port="25444"' "${DOCKER_ROOT}/config/net/fail2ban/padm.local" ||
     fail '单入口端口专项未更新 jail 保护端口'
 [[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
     fail '单入口端口专项改变持久封禁数据库'
+fi
+if [[ "${PHASE4_BRANCH}" == port ]]; then
+    printf 'docker-phase4-port-regression-ok\n'
+    exit 0
+fi
 
 runControl 0 fail2ban-restore-for-other-contracts configure --spec "${FAIL2BAN_SPEC}"
 rm -f -- "${TEST_ROOT}/fail2ban-stopped"
@@ -1832,4 +1875,8 @@ runControl 15 reject-nginx-tproxy configure --spec "${INVALID_SPEC}"
 
 sh -n "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" || fail 'net entrypoint syntax is invalid'
 grep -q 'padm-tproxy' "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" || fail 'TProxy rule ownership is missing'
+if [[ "${PHASE4_BRANCH}" == recovery ]]; then
+    printf 'docker-phase4-recovery-regression-ok\n'
+    exit 0
+fi
 printf 'docker-phase4-regression-ok\n'

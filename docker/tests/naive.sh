@@ -15,6 +15,11 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTI
     .naive = {domain:"ws.example.com"})
 ' "${ANYTLS_SPEC}" >"${NAIVE_SPEC}"
 dockerConfigureSpecValidate "${NAIVE_SPEC}" || fail 'NaiveProxy 有效合同被拒绝'
+if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == base &&
+    -n "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" &&
+    "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP}" != naive-shadowsocks ]]; then
+    return 0
+fi
 
 for mutation in \
     '.core.protocols[0].core = "xray" | .core.type = "xray"' \

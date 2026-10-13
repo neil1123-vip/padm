@@ -264,9 +264,9 @@ runRegressionDockerContractsAggregateContract() (
     local -a expectedSelectors=(
         docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
         docker-phase3-edit docker-phase3-entries docker-traditional-tls-transports docker-traditional-tls-base
-        docker-setup-transports docker-setup-encrypted-udp
+        docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
         docker-phase4-maintenance docker-routing-core-network-lifecycle docker-reality docker-setup-tls docker-phase4-lifecycle
-        docker-reality-targets-direct docker-port-hopping-preflight docker-reality-parameters docker-sites
+        docker-reality-targets-direct docker-reality-parameters docker-sites
         docker-routing-direct-block-ip-workflow docker-routing-direct-block-csv-workflow docker-routing-core-policy-lifecycle
         docker-setup-core docker-phase1 docker-menu docker-setup-encrypted-tcp
         docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
@@ -355,6 +355,17 @@ runRegressionDockerContractsAggregateContract() (
     done
     printf '%s\n' core encrypted encrypted-udp encrypted-tcp transports tls >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+    : >"${callLog}"
+    unset PADM_DOCKER_SETUP_TRANSPORT_GROUP
+    runDockerSetupRegression() {
+        printf '%s:%s\n' "${PADM_DOCKER_SETUP_TRANSPORT_GROUP:-all}" "$*" >>"${callLog}"
+    }
+    runDockerSetupWsVmessRegression
+    runDockerSetupTrojanRegression
+    runDockerSetupHttpupgradeRegression
+    printf '%s\n' ws-vmess:transports trojan:transports httpupgrade:transports >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+    [[ -z "${PADM_DOCKER_SETUP_TRANSPORT_GROUP:-}" ]]
 
     # 独立 selector 仍执行祖先合同，只有完整集合或 CI 矩阵才共享它们。
     runFrameworkParallelRegressionSelectors() {
@@ -391,38 +402,59 @@ runRegressionDockerContractsAggregateContract() (
     [[ -z "${PADM_DOCKER_REALITY_TARGETS_SCOPE:-}" ]]
 
     # 注册集合相同还不够，新旧路由入口都必须把正确 scope 传给原脚本。
-    bash() { printf '%s:%s\n' "${PADM_DOCKER_ROUTING_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
+    bash() {
+        printf '%s:%s:%s\n' "${PADM_DOCKER_ROUTING_SCOPE:-full}" \
+            "${PADM_DOCKER_ROUTING_BRANCH:-all}" "${1##*/}" >>"${callLog}"
+    }
     : >"${callLog}"
     unset PADM_DOCKER_ROUTING_SCOPE
+    unset PADM_DOCKER_ROUTING_BRANCH
     runDockerRoutingSocks5Regression
     runDockerRoutingCoreWorkflowRegression
     runDockerRoutingDomainsWorkflowRegression
     runDockerRoutingCoreContractsRegression
     runDockerRoutingCoreLifecycleRegression
-    runDockerRoutingCoreNetworkLifecycleRegression
-    runDockerRoutingCorePolicyLifecycleRegression
-    runDockerRoutingDnsHostsWorkflowRegression
+    runDockerRoutingWarpLifecycleRegression
+    runDockerRoutingIpv6LifecycleRegression
+    runDockerRoutingRegionLifecycleRegression
+    runDockerRoutingBtLifecycleRegression
+    runDockerRoutingSocks5LifecycleRegression
+    runDockerRoutingDnsWorkflowRegression
+    runDockerRoutingHostsWorkflowRegression
     runDockerRoutingDirectBlockWorkflowRegression
     runDockerRoutingDirectBlockIpWorkflowRegression
     runDockerRoutingDirectBlockCsvWorkflowRegression
-    printf '%s\n' full:routing-socks5.sh core-workflow:routing-socks5.sh \
-        domains-workflow:routing-socks5.sh core-contracts:routing-socks5.sh \
-        core-lifecycle:routing-socks5.sh core-network-lifecycle:routing-socks5.sh \
-        core-policy-lifecycle:routing-socks5.sh domains-dns-hosts:routing-socks5.sh \
-        domains-direct-block:routing-socks5.sh domains-direct-block-ip:routing-socks5.sh \
-        domains-direct-block-csv:routing-socks5.sh >"${expectedLog}"
+    printf '%s\n' full:all:routing-socks5.sh core-workflow:all:routing-socks5.sh \
+        domains-workflow:all:routing-socks5.sh core-contracts:all:routing-socks5.sh \
+        core-lifecycle:all:routing-socks5.sh core-network-lifecycle:warp:routing-socks5.sh \
+        core-network-lifecycle:ipv6:routing-socks5.sh core-policy-lifecycle:region:routing-socks5.sh \
+        core-policy-lifecycle:bt:routing-socks5.sh core-policy-lifecycle:socks5:routing-socks5.sh \
+        domains-dns-hosts:dns:routing-socks5.sh domains-dns-hosts:hosts:routing-socks5.sh \
+        domains-direct-block:all:routing-socks5.sh \
+        domains-direct-block-ip:all:routing-socks5.sh domains-direct-block-csv:all:routing-socks5.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" ]]
+    [[ -z "${PADM_DOCKER_ROUTING_BRANCH:-}" ]]
 
-    bash() { printf '%s:%s\n' "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
+    bash() {
+        printf '%s:%s:%s\n' "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" \
+            "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-all}" "${1##*/}" >>"${callLog}"
+    }
     : >"${callLog}"
     unset PADM_DOCKER_TRADITIONAL_TLS_SCOPE
+    unset PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP
     runDockerTraditionalTlsRegression
     runDockerTraditionalTlsBaseRegression
+    runDockerTraditionalTlsHy2AnyTlsRegression
+    runDockerTraditionalTlsNaiveShadowsocksRegression
+    runDockerTraditionalTlsTuicTrojanRegression
     runDockerTraditionalTlsTransportsRegression
-    printf '%s\n' full:traditional-tls.sh base:traditional-tls.sh transports:traditional-tls.sh >"${expectedLog}"
+    printf '%s\n' full:all:traditional-tls.sh base:all:traditional-tls.sh base:hy2-anytls:traditional-tls.sh \
+        base:naive-shadowsocks:traditional-tls.sh base:tuic-trojan:traditional-tls.sh \
+        transports:all:traditional-tls.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-}" ]]
+    [[ -z "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" ]]
 
     bash() { printf '%s:%s\n' "${PADM_DOCKER_PHASE3_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
     : >"${callLog}"
@@ -434,14 +466,22 @@ runRegressionDockerContractsAggregateContract() (
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_PHASE3_SCOPE:-}" ]]
 
-    bash() { printf '%s:%s\n' "${PADM_DOCKER_PHASE4_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
+    bash() {
+        printf '%s:%s:%s\n' "${PADM_DOCKER_PHASE4_SCOPE:-full}" \
+            "${PADM_DOCKER_PHASE4_BRANCH:-all}" "${1##*/}" >>"${callLog}"
+    }
     : >"${callLog}"
     unset PADM_DOCKER_PHASE4_SCOPE
+    unset PADM_DOCKER_PHASE4_BRANCH
     runDockerPhase4Regression
     runDockerPhase4MaintenanceRegression
-    runDockerPhase4LifecycleRegression
-    printf '%s\n' full:phase4.sh maintenance:phase4.sh lifecycle:phase4.sh >"${expectedLog}"
+    runDockerPhase4SettingsRegression
+    runDockerPhase4PortRegression
+    runDockerPhase4RecoveryRegression
+    printf '%s\n' full:all:phase4.sh maintenance:all:phase4.sh lifecycle:settings:phase4.sh \
+        lifecycle:port:phase4.sh lifecycle:recovery:phase4.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+    [[ -z "${PADM_DOCKER_PHASE4_SCOPE:-}" && -z "${PADM_DOCKER_PHASE4_BRANCH:-}" ]]
 
     # 新旧 XHTTP 入口必须传递独立 scope，不能污染后续真实链路。
     : >"${callLog}"
@@ -453,10 +493,13 @@ runRegressionDockerContractsAggregateContract() (
     unset PADM_DOCKER_XHTTP_SCOPE
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-validation
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-edit
+    runDockerXhttpPresetRegression
+    runDockerXhttpPaddingRegression
+    runDockerXhttpHeadersRegression
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-rollback
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-real
-    printf '%s\n' full:xhttp.sh validation:xhttp.sh edit:xhttp.sh rollback:xhttp.sh full:xhttp-real.sh >"${expectedLog}"
+    printf '%s\n' full:xhttp.sh validation:xhttp.sh edit-preset:xhttp.sh \
+        edit-padding:xhttp.sh edit-headers:xhttp.sh rollback:xhttp.sh full:xhttp-real.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_XHTTP_SCOPE:-}" ]]
 
@@ -538,8 +581,11 @@ runDockerPortHoppingParallelContract() (
     local expectedLog="${TMP_DIR}/hopping-parallel-contract.expected"
     local status=0
     runRegressionStep() {
-        [[ "$*" == "hopping-read-only python3 ${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" ]] || return 8
-        printf '%s\n' hopping-read-only >"${callLog}"
+        case "$*" in
+        "hopping-config runDockerPortHoppingConfigRegression"|"hopping-read-only python3 ${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py")
+            printf '%s\n' "$1" >>"${callLog}" ;;
+        *) return 8 ;;
+        esac
     }
     runParallelRegressionRunners() {
         [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 4 ]] || return 8
@@ -547,14 +593,114 @@ runDockerPortHoppingParallelContract() (
         printf '%s\n' "$@" >>"${callLog}"
         return 7
     }
+    : >"${callLog}"
     runDockerPortHoppingPreflightRegression || status=$?
     [[ "${status}" == 7 ]]
-    printf '%s\n' hopping-read-only \
+    printf '%s\n' hopping-config hopping-read-only \
         hopping-ownership runDockerPortHoppingOwnershipRegression \
         hopping-target runDockerPortHoppingTargetRegression \
         hopping-probe runDockerPortHoppingProbeRegression \
         hopping-guarded runDockerPortHoppingGuardedRegression >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+)
+
+runDockerPortHoppingTargetParallelContract() (
+    local callLog="${TMP_DIR}/hopping-target-parallel.log" status=0
+    bash() { [[ "$1" == -n ]]; }
+    shellcheck() { :; }
+    python3() { :; }
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 2 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+    runDockerPortHoppingTargetRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'hopping-target-cases\nrunDockerPortHoppingTargetCasesRegression\nhopping-start\nrunDockerPortHoppingStartRegression' ]]
+    status=0
+    shellcheck() { return 9; }
+    : >"${callLog}"
+    runDockerPortHoppingTargetRegression || status=$?
+    [[ "${status}" == 1 && ! -s "${callLog}" ]]
+)
+
+runDockerXhttpParallelContract() (
+    local callLog="${TMP_DIR}/xhttp-edit-parallel.log" status=0
+    bash() { [[ "$1" == -n ]]; }
+    shellcheck() { :; }
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 3 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+    runDockerXhttpEditRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'xhttp-preset\nrunDockerXhttpPresetRegression\nxhttp-padding\nrunDockerXhttpPaddingRegression\nxhttp-headers\nrunDockerXhttpHeadersRegression' ]]
+)
+
+runDockerRoutingParallelContract() (
+    local callLog="${TMP_DIR}/routing-lifecycle-parallel.log" status=0
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == "${expectedJobs}" ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+    local expectedJobs=2
+    runDockerRoutingCoreNetworkLifecycleRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'routing-warp\nrunDockerRoutingWarpLifecycleRegression\nrouting-ipv6\nrunDockerRoutingIpv6LifecycleRegression' ]]
+    expectedJobs=3
+    status=0
+    runDockerRoutingCorePolicyLifecycleRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'routing-region\nrunDockerRoutingRegionLifecycleRegression\nrouting-bt\nrunDockerRoutingBtLifecycleRegression\nrouting-socks5\nrunDockerRoutingSocks5LifecycleRegression' ]]
+    expectedJobs=2
+    status=0
+    runDockerRoutingDnsHostsWorkflowRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'routing-dns\nrunDockerRoutingDnsWorkflowRegression\nrouting-hosts\nrunDockerRoutingHostsWorkflowRegression' ]]
+)
+
+runDockerTraditionalTlsParallelContract() (
+    local callLog="${TMP_DIR}/traditional-tls-base-parallel.log" status=0
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 3 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+    PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerTraditionalTlsBaseRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'tls-hy2-anytls\nrunDockerTraditionalTlsHy2AnyTlsRegression\ntls-naive-shadowsocks\nrunDockerTraditionalTlsNaiveShadowsocksRegression\ntls-tuic-trojan\nrunDockerTraditionalTlsTuicTrojanRegression' ]]
+)
+
+runDockerPhase4ParallelContract() (
+    local callLog="${TMP_DIR}/phase4-lifecycle-parallel.log" status=0
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 3 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+    runDockerPhase4LifecycleRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'lifecycle-settings\nrunDockerPhase4SettingsRegression\nlifecycle-port\nrunDockerPhase4PortRegression\nlifecycle-recovery\nrunDockerPhase4RecoveryRegression' ]]
+)
+
+runDockerSetupTransportsParallelContract() (
+    local callLog="${TMP_DIR}/setup-transports-parallel.log" status=0
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 3 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+    PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerSetupTransportsRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'setup-ws-vmess\nrunDockerSetupWsVmessRegression\nsetup-trojan\nrunDockerSetupTrojanRegression\nsetup-httpupgrade\nrunDockerSetupHttpupgradeRegression' ]]
 )
 
 runRegressionDispatcherContracts() {
@@ -566,6 +712,12 @@ runRegressionDispatcherContracts() {
     runRegressionStep parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract
     runRegressionStep docker-contracts-aggregate runRegressionDockerContractsAggregateContract
     runRegressionStep hopping-parallel runDockerPortHoppingParallelContract
+    runRegressionStep hopping-target-parallel runDockerPortHoppingTargetParallelContract
+    runRegressionStep xhttp-parallel runDockerXhttpParallelContract
+    runRegressionStep routing-parallel runDockerRoutingParallelContract
+    runRegressionStep traditional-tls-parallel runDockerTraditionalTlsParallelContract
+    runRegressionStep phase4-parallel runDockerPhase4ParallelContract
+    runRegressionStep setup-transports-parallel runDockerSetupTransportsParallelContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts

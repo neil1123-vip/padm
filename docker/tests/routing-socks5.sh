@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+ROUTING_BRANCH=${PADM_DOCKER_ROUTING_BRANCH:-}
+case "${PADM_DOCKER_ROUTING_SCOPE:-}:${ROUTING_BRANCH}" in
+*:) ;;
+core-network-lifecycle:warp|core-network-lifecycle:ipv6|\
+core-policy-lifecycle:region|core-policy-lifecycle:bt|core-policy-lifecycle:socks5|\
+domains-dns-hosts:dns|domains-dns-hosts:hosts) ;;
+*)
+    printf 'docker-routing-socks5-regression-fail: invalid scope/branch: %s/%s\n' \
+        "${PADM_DOCKER_ROUTING_SCOPE:-}" "${ROUTING_BRANCH}" >&2
+    exit 1
+    ;;
+esac
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-routing-socks5.XXXXXX")
 PRIVATE_ROOT=
@@ -1601,7 +1613,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-csv ]]; then
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle &&
+    ( -z "${ROUTING_BRANCH}" || "${ROUTING_BRANCH}" == ipv6 ) ]]; then
 # 中继交接恢复只 stop 部分服务，没有 Compose down，仍须清理 IPv6→off 的空辅助网络。
 (
     trap 'dockerReleaseDeploymentLock' EXIT
@@ -1637,10 +1650,11 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
 )
 assertClean
 fi
-if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ||
+if [[ ( -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ||
     "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
     "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ||
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-network-lifecycle ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-network-lifecycle ) &&
+    ( -z "${ROUTING_BRANCH}" || "${ROUTING_BRANCH}" == warp ) ]]; then
     before=$(snapshot)
     runEdit 0 --warp "${WARP_INPUT}" --preview
     runEdit 0 --warp-off --preview
@@ -1831,14 +1845,15 @@ if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" ==
         dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
     ) >"${LOG}" 2>&1 || fail '重置 WARP 夹具失败'
     assertClean
-    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ]]; then
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp || "${ROUTING_BRANCH}" == warp ]]; then
         printf 'docker-routing-warp-regression-ok\n'
         exit 0
     fi
 fi
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}" != region &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != warp &&
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle &&
+    ( -z "${ROUTING_BRANCH}" || "${ROUTING_BRANCH}" == ipv6 ) ]]; then
     before=$(snapshot)
     runEdit 0 --ipv6 selective --ipv6-domains 'example.net' --preview
     runEdit 0 --ipv6-domains 'example.net' --ipv6 selective --preview
@@ -1973,7 +1988,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}"
         exit 0
     fi
 fi
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt &&
+    ( -z "${ROUTING_BRANCH}" || "${ROUTING_BRANCH}" == region ) ]]; then
     before=$(snapshot)
     runEdit 0 --region both --preview
     runEdit 0 --region ip --region-allow '' --preview
@@ -2200,11 +2216,12 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
         dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
     ) >"${LOG}" 2>&1 || fail '恢复区域前基线失败'
     assertClean
-    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == region ]]; then
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == region || "${ROUTING_BRANCH}" == region ]]; then
         printf 'docker-routing-region-regression-ok\n'
         exit 0
     fi
 fi
+if [[ -z "${ROUTING_BRANCH}" || "${ROUTING_BRANCH}" == bt ]]; then
 before=$(snapshot)
 runEdit 0 --block-bt --preview
 runEdit 0 --block-bt-off --preview
@@ -2291,9 +2308,10 @@ assertClean
 printf 'edit --block-bt\nedit --block-bt-off\n' >"${TEST_ROOT}/bt-menu.expected"
 cmp -s "${TEST_ROOT}/bt-menu.log" "${TEST_ROOT}/bt-menu.expected" ||
     fail 'BT 菜单没有映射到专项 CLI 事务'
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == bt ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == bt || "${ROUTING_BRANCH}" == bt ]]; then
     printf 'docker-routing-block-bt-regression-ok\n'
     exit 0
+fi
 fi
 before=$(snapshot)
 runStatus 0
@@ -2537,6 +2555,7 @@ fi
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-csv ]]; then
+if [[ "${ROUTING_BRANCH}" != hosts ]]; then
 before=$(snapshot)
 for kind in dns hosts direct block block-ips; do
     input="${PRIVATE_ROOT}/${kind}.json"
@@ -2750,6 +2769,17 @@ runEdit 0 --socks5 "${DOMAINS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-all.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '开启 SOCKS5 丢弃 DNS/hosts'
 domainsReplaceCheck dns
+fi
+if [[ "${ROUTING_BRANCH}" == hosts ]]; then
+    # hosts 分支安装原 DNS 前置结束后的组合规格，保留真实事务和非空流量。
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/routing-all.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化独立 hosts 组合夹具失败'
+    assertClean
+fi
+if [[ "${ROUTING_BRANCH}" != dns ]]; then
 # hosts 单键替换复用已有组合夹具，保留其它映射、路由、私有字段与非空流量。
 cp -- "${root}/config/spec.json" "${TEST_ROOT}/hosts-replace-resume.json"
 (
@@ -2953,6 +2983,8 @@ jq -en --slurpfile old "${TEST_ROOT}/hosts-replace.before" --slurpfile actual "$
 ) >"${LOG}" 2>&1 || fail 'hosts 替换合同未恢复原 DNS/hosts 流程'
 assertClean
 printf 'docker-routing-hosts-replace-regression-ok\n'
+fi
+if [[ "${ROUTING_BRANCH}" != hosts ]]; then
 # dns-hosts 定向入口执行这组增量事务，不重复已有 DNS 生成器和真实 UDP 矩阵。
 dnsAddCsv=' GEOSITE:CN , Full:DNS.Example.COM , DNS.Example.NET , Full:Added.Example.ORG , Added.Example.ORG , KEYWORD:Next_DNS , full:added.example.org '
 dnsAdded='["full:dns.example.com","domain:dns.example.net","keyword:dns-video","geosite:cn","full:added.example.org","domain:added.example.org","keyword:next_dns"]'
@@ -3023,6 +3055,8 @@ jq -en --slurpfile old "${TEST_ROOT}/dns-incremental.before" --slurpfile actual 
 runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-all.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual==$expected' >/dev/null || fail 'DNS 增量合同未恢复原 DNS 与其它路由夹具'
+fi
+if [[ "${ROUTING_BRANCH}" != dns ]]; then
 runEdit 0 --hosts-off --confirm PADM-DOCKER-EDIT
 jq -e --argjson dns "${DNS}" --argjson domains "${DOMAINS}" '
   .routing == {dns:$dns,socks5:{server:"203.0.113.9",port:1080,
@@ -3078,13 +3112,29 @@ for core in xray sing-box; do
         fail "${core}: hosts 末键删除未恢复无 DNS/hosts 的原生成"
 done
 printf 'docker-routing-hosts-incremental-regression-ok\n'
+fi
+if [[ "${ROUTING_BRANCH}" != hosts ]]; then
+if [[ "${ROUTING_BRANCH}" == dns ]]; then
+    # DNS 分支恢复原 hosts 末键删除后的基线，再验证 DNS 删除清空 routing。
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '恢复独立 DNS 末项删除前基线失败'
+    assertClean
+fi
 runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
 runEdit 0 --dns-domains-remove "${DNS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
     '$new == $old' >/dev/null || fail '删除最后 DNS 名单没有清理空 routing'
 printf 'docker-routing-dns-domains-incremental-regression-ok\n'
+fi
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail 'DNS/hosts 事务清空流量'
+if [[ "${ROUTING_BRANCH}" == hosts ]]; then
+    printf 'docker-routing-hosts-regression-ok\n'
+    exit 0
+fi
 
 fi
 # Direct/Block 沿用相同事务，同时验证同域规则允许共存并保留其它路由子项。
@@ -3559,5 +3609,9 @@ printf 'edit --dns-rules 203.0.113.53 53 %s\nedit --dns-off\nedit --hosts %s\ned
     "${DNS_CSV}" "${HOSTS_INPUT}" >"${TEST_ROOT}/routing-menu.expected"
 cmp -s "${menuLog}" "${TEST_ROOT}/routing-menu.expected" ||
     fail 'DNS/hosts 菜单没有映射到 CLI 事务'
+fi
+if [[ "${ROUTING_BRANCH}" == dns ]]; then
+    printf 'docker-routing-dns-regression-ok\n'
+    exit 0
 fi
 printf 'docker-routing-socks5-regression-ok\n'

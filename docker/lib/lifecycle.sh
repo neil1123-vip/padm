@@ -518,7 +518,8 @@ dockerIPv6NetworkManage() {
 }
 
 dockerComposeRun() {
-    local root composeFile enabled controlEnabled sshEnabled specEnabled deployedEnabled argument noDeps=0 recreate='' skipTimeout=0
+    local root composeFile enabled controlEnabled sshEnabled argument composeFlags integrationFlags noDeps=0 recreate='' skipTimeout=0
+    local specEnabled deployedEnabled specControlEnabled deployedControlEnabled specSshEnabled deployedSshEnabled
     local -a services=()
     case "${1:-}" in up|restart|down|exec) ;; *) dockerComposeExecute "$@"; return $? ;; esac
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
@@ -529,29 +530,40 @@ dockerComposeRun() {
         ;;
     esac
     composeFile=$(dockerComposeFile) || return "${PADM_DOCKER_RC_COMPOSE}"
-    jq -e 'type == "object" and (.services | type == "object")' \
-        "${composeFile}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
-    enabled=$(jq -r '.services | has("net-fail2ban")' "${composeFile}") || return "${PADM_DOCKER_RC_STATE}"
-    controlEnabled=$(jq -r '.services | has("net-fail2ban-control")' "${composeFile}") ||
-        return "${PADM_DOCKER_RC_STATE}"
-    sshEnabled=$(jq -r '.services | has("net-fail2ban-ssh")' "${composeFile}") ||
-        return "${PADM_DOCKER_RC_STATE}"
+    composeFlags=$(jq -er -s '
+      if length == 1 and (.[0] | type == "object" and (.services | type == "object")) then
+        .[0].services |
+        [has("net-fail2ban"), has("net-fail2ban-control"), has("net-fail2ban-ssh")] | @tsv
+      else error("编排文件结构无效") end
+    ' "${composeFile}") || return "${PADM_DOCKER_RC_STATE}"
+    IFS=$'\t' read -r enabled controlEnabled sshEnabled <<<"${composeFlags}"
     if [[ -f "${root}/config/spec.json" ]]; then
-        specEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${root}/config/spec.json") &&
-            deployedEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${root}/deployment.json") &&
-            [[ "${enabled}" == "${specEnabled}" && "${enabled}" == "${deployedEnabled}" ]] || {
+        integrationFlags=$(jq -er -s --slurpfile deployed "${root}/deployment.json" '
+          if length == 1 and (.[0] | type == "object") and
+              ($deployed | length == 1) and ($deployed[0] | type == "object") then
+            def spec_enabled($kind): try any(.[0].host_integrations[]; .type == $kind) catch "error";
+            def deployed_enabled($kind): try any($deployed[0].host_integrations[]; .type == $kind) catch "error";
+            [spec_enabled("fail2ban"), deployed_enabled("fail2ban"),
+             spec_enabled("fail2ban-control"), deployed_enabled("fail2ban-control"),
+             spec_enabled("fail2ban-ssh"), deployed_enabled("fail2ban-ssh")] | @tsv
+          else error("Fail2ban 规格或部署结构无效") end
+        ' "${root}/config/spec.json") || {
             dockerError 'Fail2ban 规格、部署与编排不一致，拒绝服务变更'
             return "${PADM_DOCKER_RC_STATE}"
         }
-        specEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-control")' "${root}/config/spec.json") &&
-            deployedEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-control")' "${root}/deployment.json") &&
-            [[ "${controlEnabled}" == "${specEnabled}" && "${controlEnabled}" == "${deployedEnabled}" ]] || {
+        IFS=$'\t' read -r specEnabled deployedEnabled specControlEnabled deployedControlEnabled \
+            specSshEnabled deployedSshEnabled <<<"${integrationFlags}"
+        [[ "${enabled}" == "${specEnabled}" && "${enabled}" == "${deployedEnabled}" ]] || {
+            dockerError 'Fail2ban 规格、部署与编排不一致，拒绝服务变更'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        [[ "${controlEnabled}" == "${specControlEnabled}" &&
+            "${controlEnabled}" == "${deployedControlEnabled}" ]] || {
             dockerError '控制 Fail2ban 规格、部署与编排不一致，拒绝服务变更'
             return "${PADM_DOCKER_RC_STATE}"
         }
-        specEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${root}/config/spec.json") &&
-            deployedEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${root}/deployment.json") &&
-            [[ "${sshEnabled}" == "${specEnabled}" && "${sshEnabled}" == "${deployedEnabled}" ]] || {
+        [[ "${sshEnabled}" == "${specSshEnabled}" &&
+            "${sshEnabled}" == "${deployedSshEnabled}" ]] || {
             dockerError 'SSH Fail2ban 规格、部署与编排不一致，拒绝服务变更'
             return "${PADM_DOCKER_RC_STATE}"
         }
@@ -805,21 +817,28 @@ dockerPortHoppingTargetStartLockCheck() {
 }
 
 dockerPortHoppingTargetStartFilesCheck() {
-    local current immutable live stateFile trafficMode
-    dockerPortHoppingTargetStartLockCheck || return 1
-    current=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") || return 1
-    trafficMode=$(jq -er '.[] | select(.[0] == "data/traffic") | .[3]' <<<"${current}") &&
-        [[ "${trafficMode}" == "${ph_trafficMode}" || "${trafficMode}" == 16832 ]] || return 1
-    immutable=$(jq -c '
-      map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
-        if .[0] == "data/traffic" then .[3] = 0 else . end)
-    ' <<<"${current}") &&
-        live=$(jq -c '[.[] | select(.[0] == "config/sing-box/config.json")]' <<<"${current}") &&
-        [[ "${immutable}" == "${ph_files}" && "${live}" == "${ph_live}" ]] || return 1
-    if [[ -n "${ph_stateFile}" ]]; then
-        stateFile=$(jq -c '[.[] | select(.[0] == "data/traffic/state.json")]' <<<"${current}") &&
-            [[ "${stateFile}" == "${ph_stateFile}" ]] || return 1
+    local current output status=0
+    local -a snapshots=()
+    output=$(dockerPortHoppingTargetSnapshot start "${ph_owner}" "${ph_domain}" "" "${ph_lock}") ||
+        status=$?
+    [[ -z "${output}" ]] || mapfile -t snapshots <<<"${output}"
+    if [[ "${#snapshots[@]}" == 0 || "${snapshots[0]}" != "${ph_lock}" ]]; then
+        # 仅锁采样失败或身份漂移清标记；文件失败仍保留已核对的锁。
+        DOCKER_DEPLOYMENT_LOCK_DIR=
+        dockerError "跳跃目标部署锁身份变化，保留事务证据: ${ph_stage}"
+        return 1
     fi
+    [[ "${status}" == 0 && "${#snapshots[@]}" == 2 ]] || return 1
+    current=${snapshots[1]}
+    jq -e --arg mode "${ph_trafficMode}" --argjson files "${ph_files}" \
+        --argjson live "${ph_live}" --argjson state "${ph_stateFile:-null}" '
+      any(.[]; .[0] == "data/traffic" and .[3] != null and .[3] != false and
+        ((.[3] | tostring) == $mode or .[3] == 16832)) and
+      (map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
+        if .[0] == "data/traffic" then .[3] = 0 else . end) == $files) and
+      ([.[] | select(.[0] == "config/sing-box/config.json")] == $live) and
+      ($state == null or [.[] | select(.[0] == "data/traffic/state.json")] == $state)
+    ' <<<"${current}" >/dev/null || return 1
     if [[ "${ph_verified}" == true ]]; then
         dockerTrafficSafePath "${ph_root}" "${ph_stage}/config.safe.expected" &&
             [[ -f "${ph_stage}/config.safe.expected" &&

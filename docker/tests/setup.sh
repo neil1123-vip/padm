@@ -7,6 +7,14 @@ case "${SECTION}" in
 all|core|encrypted|encrypted-udp|encrypted-tcp|transports|tls) ;;
 *) printf 'unknown setup section: %s\n' "${SECTION}" >&2; exit 2 ;;
 esac
+TRANSPORT_GROUP=
+if [[ "${SECTION}" == transports ]]; then
+    TRANSPORT_GROUP=${PADM_DOCKER_SETUP_TRANSPORT_GROUP:-}
+    case "${TRANSPORT_GROUP}" in
+    ""|ws-vmess|trojan|httpupgrade) ;;
+    *) printf 'unknown setup transport group: %s\n' "${TRANSPORT_GROUP}" >&2; exit 2 ;;
+    esac
+fi
 
 for tool in script timeout mkfifo find gcc; do
     command -v "${tool}" >/dev/null 2>&1 || { printf 'missing tool: %s\n' "${tool}" >&2; exit 1; }
@@ -365,6 +373,9 @@ export PADM_DOCKER_INSTALL_DIR="${BASE_ROOT}" PADM_DOCKER_BIN_DIR="${TEST_ROOT}/
 CONTROL_LOG="${TEST_ROOT}/install.log"
 bash -u "${PROJECT_ROOT}/install-docker.sh" install --no-menu --source "${SOURCE_ROOT}" \
     --ref ffffffffffffffffffffffffffffffffffffffff >"${CONTROL_LOG}" 2>&1 || fail 'fixture install failed'
+# 变异矩阵直接调用同一生产校验，公共 CLI 门禁仍由各协议的一条拒绝案例验收。
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/install-docker.sh"
 
 newState() {
     local name=$1
@@ -412,6 +423,25 @@ assertNoSecrets() {
     )
     ! grep -Fq "${secrets[@]}" "${CONTROL_LOG}" || fail 'setup printed a secret'
     ! grep -aFq "${secrets[@]}" "${ARGV_LOG}" || fail 'setup passed a secret through process arguments'
+}
+
+assertEditCompatibility() {
+    CONTROL_LOG="${TEST_ROOT}/${1}-compatibility-positive.log"
+    dockerConfigureSpecValidate "${SPEC}" >"${CONTROL_LOG}" 2>&1 &&
+        dockerEditCompatibilityValidate "${SPEC}" "${SPEC}" >>"${CONTROL_LOG}" 2>&1 ||
+        fail "$1: 相同受管输入被编辑兼容校验误拒绝"
+    assertClean
+    assertNoSecrets
+}
+
+runRejectedEdit() {
+    local rejectedSpec=$1 rejectionCase=$2
+    if [[ "${rejectionCase}" == uuid || "${rejectionCase}" == existing-id ]]; then
+        bash -u "${CLI}" edit --spec "${rejectedSpec}" --preview "${ASSET_ARGS[@]}"
+    else
+        dockerConfigureSpecValidate "${rejectedSpec}" || return "${PADM_DOCKER_RC_STATE}"
+        dockerEditCompatibilityValidate "${SPEC}" "${rejectedSpec}"
+    fi
 }
 
 runPty() {
@@ -602,6 +632,71 @@ if [[ "${FAKE_SETUP_HOST_SYSTEM}" == Linux ]]; then
 fi
 [[ "$(grep -c '^pull ' "${EVENTS}")" -eq 5 ]] || fail 'setup did not use the five verified image references'
 ! grep -Fq AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "${CONTROL_LOG}" || fail 'setup printed the private key'
+
+# 用真实已配置夹具检查门禁顺序，不允许取消或身份拒绝触发昂贵且有副作用的后段。
+cat >"${TEST_ROOT}/edit-order-driver.sh" <<'EOF'
+#!/usr/bin/env bash
+set -u
+# shellcheck source=/dev/null
+source "${FAKE_SETUP_EDIT_ORDER_SOURCE:?}/install-docker.sh"
+dockerEditBaselineValidate() {
+    printf 'baseline\n' >>"${FAKE_SETUP_EDIT_ORDER_EVENTS:?}"
+    return 1
+}
+dockerConfigureReleasePrepare() {
+    printf 'release\n' >>"${FAKE_SETUP_EDIT_ORDER_EVENTS:?}"
+    return 17
+}
+dockerEditPreview() {
+    printf 'preview\n' >>"${FAKE_SETUP_EDIT_ORDER_EVENTS:?}"
+    return 17
+}
+dockerEditRegenerateReality() {
+    printf 'regenerate\n' >>"${FAKE_SETUP_EDIT_ORDER_EVENTS:?}"
+    return 17
+}
+if [[ "${FAKE_SETUP_EDIT_ORDER_CASE:?}" == cancel ]]; then
+    dockerEditFields() { return 3; }
+fi
+dockerMain "$@"
+EOF
+export FAKE_SETUP_EDIT_ORDER_SOURCE="${PROJECT_ROOT}"
+export FAKE_SETUP_EDIT_ORDER_EVENTS="${TEST_ROOT}/edit-order.events"
+savedCli=${CLI}
+CLI="${TEST_ROOT}/edit-order-driver.sh"
+before=$(snapshot)
+for orderCase in cancel identity baseline; do
+    export FAKE_SETUP_EDIT_ORDER_CASE="${orderCase}"
+    : >"${FAKE_SETUP_EDIT_ORDER_EVENTS}"
+    case "${orderCase}" in
+    cancel)
+        runPty 0 edit-order-cancel $'1\n1\n0\n' edit "${ASSET_ARGS[@]}"
+        [[ ! -s "${FAKE_SETUP_EDIT_ORDER_EVENTS}" ]] ||
+            fail '取消编辑仍触发基线、发布、预览或密钥生成'
+        ;;
+    identity)
+        jq '.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' \
+            "${SPEC}" >"${TEST_ROOT}/edit-order-identity.json"
+        chmod 0600 "${TEST_ROOT}/edit-order-identity.json"
+        dockerConfigureSpecValidate "${TEST_ROOT}/edit-order-identity.json" ||
+            fail '编辑顺序的身份变异夹具不符合 Schema'
+        runPty 15 edit-order-identity '' edit --spec "${TEST_ROOT}/edit-order-identity.json" \
+            --preview "${ASSET_ARGS[@]}"
+        grep -Fq '账号、密钥、已有入口身份' "${CONTROL_LOG}" &&
+            [[ ! -s "${FAKE_SETUP_EDIT_ORDER_EVENTS}" ]] ||
+            fail '身份非法草稿没有经过兼容拒绝或仍触发后段'
+        ;;
+    baseline)
+        runPty 15 edit-order-baseline '' edit --regenerate-reality vless-reality \
+            --preview "${ASSET_ARGS[@]}"
+        [[ "$(<"${FAKE_SETUP_EDIT_ORDER_EVENTS}")" == baseline ]] ||
+            fail '有效预览绕过基线，或基线失败仍触发发布、预览或密钥生成'
+        ;;
+    esac
+    [[ "$(snapshot)" == "${before}" ]] || fail "${orderCase}: 编辑门禁顺序改变在线部署"
+done
+CLI=${savedCli}
+unset FAKE_SETUP_EDIT_ORDER_SOURCE FAKE_SETUP_EDIT_ORDER_EVENTS FAKE_SETUP_EDIT_ORDER_CASE
 
 # 既有部署不能通过向导覆盖，CLI 的自报发布字段同样不能绕过验签门禁。
 before=$(snapshot)
@@ -814,6 +909,7 @@ jq -e '.core.protocols[0] as $first | .core.protocols[1] as $copy |
 before=$(snapshot)
 runPty 15 ss-copy-xray $'9\nentry-shadowsocks\n1\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'copying Shadowsocks to Xray changed deployment'
+assertEditCompatibility ss
 for rejectedEdit in uuid method server-password user-password core listener new-account new-naive; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -832,7 +928,7 @@ for rejectedEdit in uuid method server-password user-password core listener new-
     chmod 0600 "${TEST_ROOT}/ss-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/ss-rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/ss-rejected.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/ss-rejected.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: Shadowsocks edit bypassed the identity boundary"
@@ -982,6 +1078,7 @@ runPty 15 naive-copy-xray $'9\nentry-naive\n1\n' edit "${ASSET_ARGS[@]}"
 runPty 15 naive-edit-server $'2\nentry-naive\nnext.example.com\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'changing NaiveProxy server away from its TLS domain changed deployment'
 ! grep -Fq '配置差异' "${CONTROL_LOG}" || fail 'NaiveProxy server mismatch reached confirmation preview'
+assertEditCompatibility naive
 for rejectedEdit in uuid domain core listener server new-account new-anytls new-shadowsocks; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -1001,7 +1098,7 @@ for rejectedEdit in uuid domain core listener server new-account new-anytls new-
     chmod 0600 "${TEST_ROOT}/naive-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/naive-rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/naive-rejected.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/naive-rejected.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: NaiveProxy edit bypassed the identity boundary"
@@ -1039,6 +1136,7 @@ jq -e '.core.protocols[0] as $first | .core.protocols[1] as $copy |
 before=$(snapshot)
 runPty 15 anytls-copy-xray $'9\nentry-anytls\n1\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'copying AnyTLS to Xray changed deployment'
+assertEditCompatibility anytls
 for rejectedEdit in uuid domain core listener new-account new-hy2 new-naive; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -1058,7 +1156,7 @@ for rejectedEdit in uuid domain core listener new-account new-hy2 new-naive; do
     chmod 0600 "${TEST_ROOT}/anytls-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/anytls-rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/anytls-rejected.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/anytls-rejected.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: AnyTLS edit bypassed the identity boundary"
@@ -1175,6 +1273,7 @@ runPty 15 hy2-copy-xray $'9\n3\n1\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'copying Hysteria2 to Xray changed deployment'
 runPty 15 hy2-invalid-speed $'13\nentry-1\n2\n1000001\n8\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'out-of-range Hysteria2 bandwidth changed deployment'
+assertEditCompatibility hy2
 for rejectedEdit in uuid domain core listener new-account new-anytls new-naive; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -1193,7 +1292,7 @@ for rejectedEdit in uuid domain core listener new-account new-anytls new-naive; 
     chmod 0600 "${TEST_ROOT}/hy2-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/hy2-rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/hy2-rejected.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/hy2-rejected.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: Hysteria2 edit bypassed the identity boundary"
@@ -1244,7 +1343,8 @@ jq -e '.tls == null and (.subscription.enabled | not) and
 fi
 fi
 
-if [[ "${SECTION}" == all || "${SECTION}" == transports ]]; then
+if [[ "${SECTION}" == all || ("${SECTION}" == transports &&
+    (-z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == ws-vmess)) ]]; then
 printf -v WS_INPUT '1\n2\nproxy.example.com\n1\nws.example.com\n24444\n2\n%s\n%s\ny\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for tlsCase in tls-fail ws-success; do
@@ -1421,6 +1521,7 @@ jq -e '.core.protocols[2].grpc.service_name == "custom-grpc"' "${SPEC}" >/dev/nu
 before=$(snapshot)
 runPty 15 copy-xhttp-singbox $'9\nentry-1\n2\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'copying XHTTP to sing-box changed state'
+assertEditCompatibility reality
 for rejectedEdit in existing-id new-credential invalid-transport; do
     case "${rejectedEdit}" in
     existing-id) filter='.core.protocols[1] |= (.id = 26 | del(.xhttp) | .grpc = {service_name: "grpc"})' ;;
@@ -1432,7 +1533,7 @@ for rejectedEdit in existing-id new-credential invalid-transport; do
     chmod 0600 "${TEST_ROOT}/rejected-edit.json"
     CONTROL_LOG="${TEST_ROOT}/rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/rejected-edit.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/rejected-edit.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: rejected edit changed state or bypassed identity/transport validation"
@@ -1516,6 +1617,7 @@ before=$(snapshot)
 runPty 15 tuic-copy-xray $'9\nentry-tuic\n1\n' edit "${ASSET_ARGS[@]}"
 runPty 15 tuic-invalid-duration $'14\nentry-tuic\n2\n0s\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'TUIC 非法编辑或跨核复制改变部署'
+assertEditCompatibility tuic
 for rejectedEdit in uuid domain core listener new-account new-anytls; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -1531,7 +1633,7 @@ for rejectedEdit in uuid domain core listener new-account new-anytls; do
     chmod 0600 "${TEST_ROOT}/tuic-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/tuic-rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/tuic-rejected.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/tuic-rejected.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: TUIC 编辑绕过身份边界"
@@ -1577,6 +1679,7 @@ export FAKE_SETUP_MODE=ok
 fi
 
 if [[ "${SECTION}" == all || "${SECTION}" == transports ]]; then
+if [[ -z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == trojan ]]; then
 # Trojan direct 在两核心共用 UUID/password，复制和删除沿用受管编辑事务。
 printf -v TROJAN_INPUT '1\n11\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
@@ -1660,6 +1763,7 @@ jq -e '.core.protocols[0] as $source | .core.secondary_type == "sing-box" and
   (.core.protocols[2] | .core == "sing-box" and .listener_id == "entry-2" and .public_port == 24479)
 ' "${SPEC}" >/dev/null || fail 'Trojan 同核/跨核复制改变原始身份或 TLS'
 before=$(snapshot)
+assertEditCompatibility trojan
 for rejectedEdit in uuid domain core listener new-account new-anytls; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -1675,7 +1779,7 @@ for rejectedEdit in uuid domain core listener new-account new-anytls; do
     chmod 0600 "${TEST_ROOT}/trojan-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/trojan-rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/trojan-rejected.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/trojan-rejected.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: Trojan 编辑绕过身份边界"
@@ -1720,7 +1824,9 @@ for trojanFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+fi
 
+if [[ -z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == ws-vmess ]]; then
 # VMess WS TLS 复用现有 WS 事务，aid 固定为零，单入口不开放 HTTPS 发布。
 printf -v VMESS_INPUT '1\n12\nproxy.example.com\n3\nvmess.example.com\n24481\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
@@ -1792,6 +1898,7 @@ before=$(snapshot)
 printf -v input '9\n%s\n2\n24484\n' "${VMESS_LISTENER}"
 runPty 15 vmess-copy-sing "${input}" edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'VMess 错误复制到 sing-box'
+assertEditCompatibility vmess
 for rejectedEdit in uuid domain backend tls-port core aid; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -1805,7 +1912,7 @@ for rejectedEdit in uuid domain backend tls-port core aid; do
     chmod 0600 "${TEST_ROOT}/vmess-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/vmess-rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/vmess-rejected.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/vmess-rejected.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: VMess 编辑绕过身份冻结"
@@ -1823,7 +1930,9 @@ for vmessFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+fi
 
+if [[ -z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == httpupgrade ]]; then
 # HTTPUpgrade 与 WS 共用受管 TLS，但入口路径及两核后端保持独立。
 printf -v HTTPUPGRADE_INPUT '1\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
@@ -1914,6 +2023,7 @@ jq -e '.core.protocols[0] as $source | .core.secondary_type == "sing-box" and
     .httpupgrade.backend_port == 31306 and .httpupgrade.tls_port == 8445)' \
     "${SPEC}" >/dev/null || fail 'HTTPUpgrade 同核/跨核复制丢失身份或端口隔离'
 before=$(snapshot)
+assertEditCompatibility httpupgrade
 for rejectedEdit in uuid domain backend tls-port core aid id; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -1928,7 +2038,7 @@ for rejectedEdit in uuid domain backend tls-port core aid id; do
     chmod 0600 "${TEST_ROOT}/httpupgrade-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/httpupgrade-rejected-${rejectedEdit}.log"
     actual=0
-    bash -u "${CLI}" edit --spec "${TEST_ROOT}/httpupgrade-rejected.json" --preview "${ASSET_ARGS[@]}" \
+    runRejectedEdit "${TEST_ROOT}/httpupgrade-rejected.json" "${rejectedEdit}" \
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
         fail "${rejectedEdit}: HTTPUpgrade 编辑绕过身份冻结"
@@ -1949,6 +2059,7 @@ for httpupgradeFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+fi
 fi
 
 if [[ "${SECTION}" == all || "${SECTION}" == tls ]]; then
@@ -2037,6 +2148,7 @@ for grpcProtocol in 24 25; do
     printf -v input '9\n%s\n2\n24494\n' "${listener}"
     runPty 15 "grpc-tls-${grpcProtocol}-copy-sing" "${input}" edit "${ASSET_ARGS[@]}"
     [[ "$(snapshot)" == "${before}" ]] || fail "${grpcProtocol}: gRPC TLS 被复制到 sing-box"
+    assertEditCompatibility "grpc-tls-${grpcProtocol}"
     for rejectedEdit in uuid domain backend tls-port core id new-protocol; do
         case "${rejectedEdit}" in
         uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
@@ -2053,7 +2165,7 @@ for grpcProtocol in 24 25; do
         chmod 0600 "${TEST_ROOT}/grpc-tls-rejected.json"
         CONTROL_LOG="${TEST_ROOT}/grpc-tls-${grpcProtocol}-${rejectedEdit}.log"
         actual=0
-        bash -u "${CLI}" edit --spec "${TEST_ROOT}/grpc-tls-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        runRejectedEdit "${TEST_ROOT}/grpc-tls-rejected.json" "${rejectedEdit}" \
             >"${CONTROL_LOG}" 2>&1 || actual=$?
         [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
             fail "${grpcProtocol}/${rejectedEdit}: gRPC TLS 编辑绕过身份冻结"
@@ -2142,6 +2254,8 @@ for fallbackProtocol in 27 29; do
     printf -v input '9\n%s\n2\n24504\n' "${listener}"
     runPty 15 "fallback-${fallbackProtocol}-copy-sing" "${input}" edit "${ASSET_ARGS[@]}"
     [[ "$(snapshot)" == "${before}" ]] || fail "${fallbackProtocol}: 复制接受 sing-box"
+    assertEditCompatibility "fallback-${fallbackProtocol}"
+    rejectedEdit=uuid
     for filter in \
         '.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' \
         '.tls.domain = "next.example.com" | .core.protocols |= map(.fallback_tls.domain = "next.example.com")' \
@@ -2151,10 +2265,11 @@ for fallbackProtocol in 27 29; do
         chmod 0600 "${TEST_ROOT}/fallback-rejected.json"
         CONTROL_LOG="${TEST_ROOT}/fallback-${fallbackProtocol}-rejected.log"
         actual=0
-        bash -u "${CLI}" edit --spec "${TEST_ROOT}/fallback-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        runRejectedEdit "${TEST_ROOT}/fallback-rejected.json" "${rejectedEdit}" \
             >"${CONTROL_LOG}" 2>&1 || actual=$?
         [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] || fail "${fallbackProtocol}: 编辑绕过固定身份"
         assertClean
+        rejectedEdit=contract
     done
     runPty 0 "fallback-${fallbackProtocol}-delete-copy" $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
     jq -e '.tls.domain == "fallback.example.com" and (.core.protocols | length) == 1' "${SPEC}" >/dev/null ||

@@ -2049,8 +2049,6 @@ dockerEditCommand() {
         imported=1
     fi
     chmod 0600 "${original}" || return "${PADM_DOCKER_RC_STATE}"
-    dockerEditBaselineValidate "${original}" "${workspace}" "${alpnListener}" ||
-        return "${PADM_DOCKER_RC_STATE}"
     normalized="${workspace}/normalized.json"
     dockerConfigureSpecMigrate "${original}" "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${specFile}" && "${imported}" -eq 0 ]]; then
@@ -2657,6 +2655,10 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
+    # 取消与非法草稿先结束；合法输入仍须先核对在线基线，再准备发布或生成凭据。
+    dockerEditCompatibilityValidate "${normalized}" "${draft}" || return $?
+    dockerEditBaselineValidate "${original}" "${workspace}" "${alpnListener}" ||
+        return "${PADM_DOCKER_RC_STATE}"
     if [[ -z "${manifest}" ]]; then
         version=$(jq -r '.release.version' "${original}") || return "${PADM_DOCKER_RC_STATE}"
         [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return "${PADM_DOCKER_RC_STATE}"
@@ -2678,25 +2680,44 @@ dockerEditCommand() {
         printf '仅重生成入口 %s 的 Reality 密钥及 short ID；提交后需重新导入该入口链接。\n' "${regenerateReality}"
     fi
     dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    # 发布准备、重生成与预览之后再冻结草稿，保留提交前的最后一道兼容门禁。
+    dockerEditCompatibilityValidate "${normalized}" "${draft}" || return $?
     [[ -z "${alpnListener}" ]] ||
         printf '入口 %s 的 TLS ALPN 将设为 %s；仅允许该 ALPN 字段漂移，其它配置须与规格一致。\n' "${alpnListener}" "${alpnOrder}"
     [[ -z "${siteSource}" ]] || printf '静态站点内容将使用已校验目录更新；源路径不会写入规格。\n'
     [[ -z "${siteTemplate}" ]] || printf '静态站点内容将使用受管 %s 内置模板更新；主题不写入规格。\n' "${siteTemplate}"
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
-    jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
-        --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
-        --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
-        --arg routing_action "${routingAction}" --arg routing_domains_field "${routingDomainsField}" \
-        --arg routing_host "${routingHost}" --arg routing_ip "${routingNewIp}" \
-        --arg http_relay "${httpRelay}" \
-        --arg port_alias "${portAlias}" \
-        --arg port_hopping "${portHoppingAction}" \
-        --arg cdn_listener "${cdnListener}" \
-        --arg xhttp_listener "${xhttpListener}" --arg xhttp_action "${xhttpAction}" \
-        --arg fail2ban_action "${fail2banAction}" \
-        --arg fail2ban_type "${fail2banType}" \
-        --arg fail2ban_listener "${fail2banPortListener}" \
-        --slurpfile before "${normalized}" --slurpfile after "${draft}" '
+    opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
+    while IFS=$'\t' read -r privateKey publicKey; do
+        [[ -n "${privateKey}" ]] || continue
+        derivedKey=$(printf '%s\n' "${privateKey}" | dockerSetupRealityPublicKey "${opsImage}") || derivedKey=
+        [[ "${derivedKey}" == "${publicKey}" ]] || {
+            dockerError 'Reality 公私钥不匹配，拒绝提交'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    done < <(jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
+      [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
+    DOCKER_CONFIG_RESTORE_ALPN_LISTENER=${alpnListener}
+    dockerConfigureApply "${draft}" '' '' "${mode}" '' "${siteSource}" "${siteTemplate}"
+}
+
+dockerEditCompatibilityValidate() {
+    local editBefore=$1 editAfter=$2
+    # 专项上下文沿用调用者的 Bash 局部变量；普通编辑与独立合同使用空默认值。
+    jq -en --arg regenerate "${regenerateReality:-}" --arg target "${realityTarget:-}" --arg stream "${realityStream:-}" \
+        --arg site "${siteMode:-}" --arg alpn "${alpnListener:-}" --arg http01 "${http01:-}" \
+        --arg socks5 "${socks5:-}" --arg routing_kind "${routingKind:-}" \
+        --arg routing_action "${routingAction:-}" --arg routing_domains_field "${routingDomainsField:-domains}" \
+        --arg routing_host "${routingHost:-}" --arg routing_ip "${routingNewIp:-}" \
+        --arg http_relay "${httpRelay:-}" \
+        --arg port_alias "${portAlias:-}" \
+        --arg port_hopping "${portHoppingAction:-}" \
+        --arg cdn_listener "${cdnListener:-}" \
+        --arg xhttp_listener "${xhttpListener:-}" --arg xhttp_action "${xhttpAction:-}" \
+        --arg fail2ban_action "${fail2banAction:-}" \
+        --arg fail2ban_type "${fail2banType:-fail2ban}" \
+        --arg fail2ban_listener "${fail2banPortListener:-}" \
+        --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
         .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name, .grpc_tls.service_name,
@@ -2725,6 +2746,8 @@ dockerEditCommand() {
           del(.reality.target_host, .reality.target_port, .reality.server_name)
         else . end);
       $before[0] as $old | $after[0] as $new |
+      if $old.release != $new.release or $old.images != $new.images
+      then "" | halt_error(16) else . end |
       [$old.core.protocols[].listener_id] as $oldIds |
       [$new.core.protocols[].listener_id] as $newIds |
       ($old.tls.http01 == $new.tls.http01 or
@@ -2869,19 +2892,11 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
+        if [[ "$?" -eq "${PADM_DOCKER_RC_MANIFEST}" ]]; then
+            dockerError '配置中的版本、签名摘要或镜像与已安装发布输入不一致'
+            return "${PADM_DOCKER_RC_MANIFEST}"
+        fi
         dockerError '仅支持端口跳跃/XHTTP/CDN 地址/Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
-    opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
-    while IFS=$'\t' read -r privateKey publicKey; do
-        [[ -n "${privateKey}" ]] || continue
-        derivedKey=$(printf '%s\n' "${privateKey}" | dockerSetupRealityPublicKey "${opsImage}") || derivedKey=
-        [[ "${derivedKey}" == "${publicKey}" ]] || {
-            dockerError 'Reality 公私钥不匹配，拒绝提交'
-            return "${PADM_DOCKER_RC_STATE}"
-        }
-    done < <(jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
-      [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
-    DOCKER_CONFIG_RESTORE_ALPN_LISTENER=${alpnListener}
-    dockerConfigureApply "${draft}" '' '' "${mode}" '' "${siteSource}" "${siteTemplate}"
 }

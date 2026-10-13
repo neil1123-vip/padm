@@ -11,6 +11,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $fullRegression = $Selector -in @('all', 'ci', 'ci-pr', 'docker-contracts')
+$memoryWorkspace = $Selector -eq 'docker-contracts'
 if (-not $PSBoundParameters.ContainsKey('Jobs')) {
     $Jobs = if ($Selector -eq 'docker-contracts') { 6 } elseif ($fullRegression) { 3 } else { 2 }
 }
@@ -293,11 +294,13 @@ try {
         exit_code = 0
         source_sha256 = (Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash
         cache_hit = $false
+        workspace_storage = if ($memoryWorkspace) { 'tmpfs' } else { 'overlay' }
     }
     $cachePath = $null
     if ($fullRegression) {
         $result.source_content_sha256 = Get-SnapshotContentHash
-        $cacheKey = Get-TextHash (@('v1', $Selector, $platform, $Jobs, $toolHash, $result.source_content_sha256) -join "`n")
+        $cacheKey = Get-TextHash (@('v2', $Selector, $platform, $Jobs, $toolHash, $result.workspace_storage,
+            $result.source_content_sha256) -join "`n")
         $cachePath = Join-Path $sharedDirectory "$cacheKey.json"
         if (-not $ForceRun -and (Test-Path -LiteralPath $cachePath)) {
             try {
@@ -308,6 +311,7 @@ try {
                     $original = Get-Content -Raw -LiteralPath $completed.result_path | ConvertFrom-Json
                     if ($original.exit_code -eq 0 -and $original.selector -eq $Selector -and
                         $original.platform -eq $platform -and $original.jobs -eq $Jobs -and
+                        $original.workspace_storage -eq $result.workspace_storage -and
                         $original.tool_sha256 -eq $toolHash -and
                         $original.source_content_sha256 -eq $result.source_content_sha256) {
                         Copy-Item -LiteralPath $completed.log_path -Destination $log
@@ -359,7 +363,11 @@ try {
             $networkEnvironment += @('--env', "$name=$value")
         }
     }
-    $container = & $docker create --name "padm-regression-$runId" --platform $platform @slotLabels @networkCapabilities `
+    # 完整合同的小文件密集操作在容器内 tmpfs 执行，源码快照与结果仍保留在宿主。
+    $workspaceMounts = if ($memoryWorkspace) {
+        @('--tmpfs', '/work:rw,exec,mode=0755', '--tmpfs', '/tmp:rw,exec,mode=1777')
+    } else { @() }
+    $container = & $docker create --name "padm-regression-$runId" --platform $platform @slotLabels @networkCapabilities @workspaceMounts `
         --network $networkMode --init @networkEnvironment `
         --env "PADM_REGRESSION_PARALLEL_JOBS=$Jobs" `
         --env "PADM_REGRESSION_ALL_PARALLEL_JOBS=$Jobs" `

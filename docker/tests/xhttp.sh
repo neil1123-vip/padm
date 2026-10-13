@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 XHTTP_SCOPE=${PADM_DOCKER_XHTTP_SCOPE:-full}
 case "${XHTTP_SCOPE}" in
-full|validation|edit|rollback) ;;
+full|validation|edit|edit-preset|edit-padding|edit-headers|rollback) ;;
 *) printf 'docker-xhttp-regression: unknown scope: %s\n' "${XHTTP_SCOPE}" >&2; exit 1 ;;
 esac
 
@@ -203,7 +203,7 @@ quota=$(jq --arg uuid "${UUID}" '.accounts[$uuid].limit_bytes = 1' "${root}/data
 printf '%s\n' "${quota}" | dockerTrafficWriteState
 dockerTrafficPrepareCandidate "${root}"
 : >"${FAKE_REALITY_FAIL_MARKER}"
-if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit ]]; then
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit* ]]; then
 cp "${root}/config/spec.json" "${TEST_ROOT}/installed-before.json"
 cp "${root}/config/xray/users.base" "${TEST_ROOT}/xray-before.json"
 cp "${root}/config/sing-box/users.base" "${TEST_ROOT}/sing-before.json"
@@ -326,7 +326,7 @@ PY
 }
 
 defaults='{"maxConcurrency":"16-32","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}'
-if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit ]]; then
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit || "${XHTTP_SCOPE}" == edit-preset ]]; then
 runRead 0 xhttp-all-status dockerProtocolCommand xhttp-status
 jq -e '.entries | length == 2 and all(.[]; .explicit == false)' "${STDOUT}" >/dev/null
 for preset in daily compatible stream single; do
@@ -344,6 +344,9 @@ xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpAssert auto null
 cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" || fail '清除 XMUX 没有恢复旧 URI'
 cmp -s "${TEST_ROOT}/group-before.txt" "${root}/data/subscription/xhttp-group-token" || fail '清除 XMUX 没有恢复分享组'
+fi
+
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit || "${XHTTP_SCOPE}" == edit-padding ]]; then
 # 双端 Padding 可以独立发布；预设与 XMUX 清除不能顺手丢弃它。
 xhttpEdit 0 unchanged --xhttp-padding entry-xhttp 1 --preview
 ! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail 'Padding 预览启动候选'
@@ -366,6 +369,9 @@ xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpAssert auto null
 cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" ||
     fail '清除 Padding 没有恢复旧 URI'
+fi
+
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit || "${XHTTP_SCOPE}" == edit-headers ]]; then
 # 显式 false 与缺省分开保存，只有两键也必须进入统一发布的 extra。
 xhttpEdit 0 unchanged --xhttp-headers entry-xhttp true false --preview
 ! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail 'Header 预览启动候选'

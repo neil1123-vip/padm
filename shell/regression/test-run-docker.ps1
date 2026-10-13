@@ -30,12 +30,37 @@ python3 -c 'from pathlib import Path; assert Path("probe.bin").read_bytes() == b
 python3 - "$1" <<'PY'
 import sys
 import json
+import os
 import subprocess
 from pathlib import Path
 status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
 mask = (1 << 12) | (1 << 21)
 nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-log-cron-real", "docker-routing-ipv6-real",
                        "docker-control-fail2ban-real")
+memory_workspace = sys.argv[1] == "docker-contracts"
+
+def filesystem_type(path):
+    mounts = {}
+    for line in Path("/proc/self/mountinfo").read_text().splitlines():
+        left, right = line.split(" - ", 1)
+        fields = left.split()
+        mount = fields[4]
+        if path == mount or path.startswith(mount.rstrip("/") + "/"):
+            mounts[mount] = right.split()[0]
+    return mounts[max(mounts, key=len)]
+
+assert (filesystem_type("/work") == "tmpfs") == memory_workspace
+assert (filesystem_type("/tmp") == "tmpfs") == memory_workspace
+
+probe = Path(os.environ["TMPDIR"]) / "runner-probe.sh"
+probe.write_text("#!/bin/sh\nexit 0\n")
+os.chmod(probe, 0o700)
+assert probe.stat().st_mode & 0o777 == 0o700
+os.chown(probe, 10001, 10001)
+assert (probe.stat().st_uid, probe.stat().st_gid) == (10001, 10001)
+os.chown(probe, os.getuid(), os.getgid())
+assert subprocess.run([str(probe)], check=False).returncode == 0
+
 driver = sys.argv[1] in ("docker-ssh-driver", "docker-contracts", "docker-contracts-fast",
                         "docker-contracts-fast-rest")
 guard = sys.argv[1] in ("docker-fail2ban-ownership", "docker-fail2ban-focused")
@@ -80,6 +105,7 @@ if (-not $rejected -or (Get-ChildItem -Directory -LiteralPath $fixture -Filter '
 }
 foreach ($case in @(
     @{ selector = 'fast'; expected = 0 },
+    @{ selector = 'docker-contracts-other'; expected = 0 },
     @{ selector = 'fail'; expected = 7 },
     @{ selector = 'docker-control-two-node-real'; expected = 0 },
     @{ selector = 'docker-control-two-node-real-other'; expected = 0 },
@@ -100,7 +126,9 @@ foreach ($case in @(
         Sort-Object CreationTime -Descending | Select-Object -First 1
     $result = Get-Content -Raw -LiteralPath (Join-Path $artifacts.FullName 'result.json') | ConvertFrom-Json
     if ($result.exit_code -ne $case.expected) { throw 'Wrong saved exit code.' }
-    if ($result.jobs -ne 2 -or $result.cache_hit) { throw 'Wrong ordinary regression defaults.' }
+    if ($result.jobs -ne 2 -or $result.cache_hit -or $result.workspace_storage -ne 'overlay') {
+        throw 'Wrong ordinary regression defaults.'
+    }
     if ($result.queue_slots -ne 1 -or $result.queue_budget -ne 3 -or $result.image_id -notmatch '^sha256:') {
         throw 'Missing queue or image evidence.'
     }
@@ -217,12 +245,13 @@ try {
     Wait-RunnerExit $queued
     $heavyResult = Get-RunnerResult $heavy
     if ($heavyResult.jobs -ne 6 -or $heavyResult.queue_slots -ne 2 -or
-        $heavyResult.queue_budget -ne 3 -or $heavyResult.cache_hit) {
+        $heavyResult.queue_budget -ne 3 -or $heavyResult.cache_hit -or $heavyResult.workspace_storage -ne 'tmpfs') {
         throw 'Wrong Docker contracts defaults.'
     }
     $contractReuse = Start-RunnerCheck docker-contracts cache-contracts
     Wait-RunnerExit $contractReuse
-    if (-not (Get-RunnerResult $contractReuse).cache_hit) {
+    $contractReuseResult = Get-RunnerResult $contractReuse
+    if (-not $contractReuseResult.cache_hit -or $contractReuseResult.workspace_storage -ne 'tmpfs') {
         throw 'Identical Docker contracts were not reused.'
     }
 
@@ -240,7 +269,7 @@ try {
 
     # 内容不变、时间戳变化仍复用；参数、内容或工具变化必须重跑。
     $baseline = Get-RunnerResult $recovery
-    if ($baseline.jobs -ne 3 -or $baseline.queue_slots -ne 2) {
+    if ($baseline.jobs -ne 3 -or $baseline.queue_slots -ne 2 -or $baseline.workspace_storage -ne 'overlay') {
         throw 'Wrong full regression defaults.'
     }
     (Get-Item -LiteralPath (Join-Path $fixture 'probe.lock')).LastWriteTime = (Get-Date).AddMinutes(1)

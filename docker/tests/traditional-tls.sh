@@ -10,9 +10,26 @@ full|base|transports) ;;
     ;;
 esac
 if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == base ]]; then
-    # 两个定向分段各验收一次，完整入口仍按原顺序串接全部协议。
-    # shellcheck source=/dev/null
-    source "$(dirname -- "${BASH_SOURCE[0]}")/trojan.sh"
+    # 分组只复用祖先的有效 SPEC，各组独立执行完整协议断言。
+    case "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" in
+    hy2-anytls)
+        # shellcheck source=/dev/null
+        source "$(dirname -- "${BASH_SOURCE[0]}")/anytls.sh"
+        ;;
+    naive-shadowsocks)
+        # shellcheck source=/dev/null
+        source "$(dirname -- "${BASH_SOURCE[0]}")/shadowsocks.sh"
+        ;;
+    ""|tuic-trojan)
+        # shellcheck source=/dev/null
+        source "$(dirname -- "${BASH_SOURCE[0]}")/trojan.sh"
+        ;;
+    *)
+        printf 'docker-traditional-tls-regression-fail: unknown base group: %s\n' \
+            "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP}" >&2
+        exit 1
+        ;;
+    esac
     printf 'docker-traditional-tls-base-regression-ok\n'
     exit 0
 fi
