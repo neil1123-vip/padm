@@ -975,19 +975,23 @@ port_hopping_preflight() {
 }
 
 port_hopping_resources() {
-    if [ "${1:-}" = run ]; then
-        set -- exec python3 - "$STATE_ROOT" "$@"
+    if [ "${1:-}" = run ] || [ "${1:-}" = probe ]; then
+        set -- exec python3 /dev/fd/3 "$STATE_ROOT" "$@"
     else
-        set -- python3 - "$STATE_ROOT" "$@"
+        set -- python3 /dev/fd/3 "$STATE_ROOT" "$@"
     fi
-    "$@" <<'PY'
+    "$@" 3<<'PY'
+import datetime
 import fcntl
+import hashlib
 import ipaddress
 import json
 import os
 import re
+import select
 import shlex
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -1349,6 +1353,100 @@ def clean():
     os.unlink(state_path)
     state = state_identity = None
 
+def local_addresses(ipv4, ipv6):
+    addresses = json.loads(command(["ip", "-j", "address", "show"]))
+    local = {item["local"] for interface in addresses for item in interface["addr_info"]}
+    if not {ipv4, ipv6} <= local:
+        raise ValueError("port hopping destinations are not current local addresses")
+
+def probe_stop(signum, _frame):
+    print("padm-net: port hopping probe interrupted", file=sys.stderr)
+    sys.exit(128 + signum)
+
+def probe_request(nonce, host):
+    deadline = time.monotonic() + 20
+    data = b""
+    # 必须等到父端关闭输入；一行请求和新鲜 nonce 都不授予规则写入权限。
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([0], [], [], remaining)[0]:
+            raise ValueError("port hopping probe request timed out")
+        chunk = os.read(0, 4097 - len(data))
+        if not chunk:
+            break
+        data += chunk
+        if len(data) > 4096:
+            raise ValueError("port hopping probe request is oversized")
+    if not data.endswith(b"\n") or data.count(b"\n") != 1 or b"\0" in data or b"\r" in data:
+        raise ValueError("port hopping probe requires exactly one LF terminated request")
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate port hopping probe request key")
+            result[key] = value
+        return result
+
+    request = json.loads(data[:-1].decode("ascii"), object_pairs_hook=unique)
+    expected = {"v", "nonce", "parent_pid", "parent_lock_sha256", "startup_sha256",
+                "child_id", "image_id", "target"}
+    if (not isinstance(request, dict) or set(request) != expected
+            or type(request["v"]) is not int or request["v"] != 1
+            or request["nonce"] != nonce or type(request["parent_pid"]) is not int
+            or request["parent_pid"] <= 1):
+        raise ValueError("unverified port hopping probe request")
+
+    def text(value, pattern):
+        return isinstance(value, str) and re.fullmatch(pattern, value) is not None
+
+    for key in ("parent_lock_sha256", "startup_sha256", "child_id"):
+        if not text(request[key], r"[a-f0-9]{64}"):
+            raise ValueError("invalid port hopping probe identity or digest")
+    if not text(request["image_id"], r"sha256:[a-f0-9]{64}"):
+        raise ValueError("unverified port hopping probe child")
+    target = request["target"]
+    expected = {"container_id", "image_id", "started_at", "restart_count", "listener_id",
+                "range_start", "range_end", "target_port", "ipv4", "ipv6"}
+    if (not isinstance(target, dict) or set(target) != expected
+            or not text(target["container_id"], r"[a-f0-9]{64}")
+            or not text(target["image_id"], r"sha256:[a-f0-9]{64}")
+            or not text(target["started_at"], r"[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+                        r"[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z")
+            or type(target["restart_count"]) is not int or target["restart_count"] < 0
+            or not text(target["listener_id"], r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+            or any(type(target[key]) is not int for key in
+                   ("range_start", "range_end", "target_port"))
+            or [target["range_start"], target["range_end"], target["target_port"],
+                target["ipv4"], target["ipv6"]] != [*map(int, parameters[:3]), *parameters[3:]]):
+        raise ValueError("unverified port hopping probe target")
+    datetime.datetime.strptime(target["started_at"][:19], "%Y-%m-%dT%H:%M:%S")
+    return request, hashlib.sha256(data[:-1]).hexdigest()
+
+def probe():
+    parameters_valid(*parameters)
+    signal.signal(signal.SIGTERM, probe_stop)
+    signal.signal(signal.SIGINT, probe_stop)
+    local_addresses(*parameters[3:])
+    acquire_lock()
+    preflight(*parameters[:3])
+    lock_owner()
+    host = socket.gethostname()
+    if not re.fullmatch(r"[a-f0-9]{12}", host):
+        raise ValueError("unverified port hopping probe hostname")
+    nonce = os.urandom(32).hex()
+    print(json.dumps({"v": 1, "phase": "challenge", "nonce": nonce, "host": host},
+                     separators=(",", ":")), flush=True)
+    request, digest = probe_request(nonce, host)
+    preflight(*parameters[:3])
+    local_addresses(*parameters[3:])
+    lock_owner()
+    if os.path.lexists(state_path):
+        raise ValueError("port hopping state appeared during probe")
+    print(json.dumps({"v": 1, "phase": "ack", "nonce": nonce,
+                      "child_id": request["child_id"], "request_sha256": digest},
+                     separators=(",", ":")), flush=True)
+
 def run():
     global token, chain, start, end, target_port, ipv4, ipv6, phase, tools, comment
     parameters_valid(*parameters)
@@ -1367,10 +1465,7 @@ def run():
     start, end, target_port, ipv4, ipv6 = parameters
     lock_owner()
     preflight(start, end, target_port)
-    addresses = json.loads(command(["ip", "-j", "address", "show"]))
-    local = {item["local"] for interface in addresses for item in interface["addr_info"]}
-    if not {ipv4, ipv6} <= local:
-        raise ValueError("port hopping destinations are not current local addresses")
+    local_addresses(ipv4, ipv6)
     if stopped:
         return
     token = os.urandom(16).hex()
@@ -1408,13 +1503,15 @@ def run():
             clean()
 
 try:
-    lengths = {"preflight": 3, "run": 5, "audit": 1, "health": 1, "clean": 1}
+    lengths = {"preflight": 3, "run": 5, "probe": 5, "audit": 1, "health": 1, "clean": 1}
     if operation not in lengths or len(parameters) != lengths[operation]:
         raise ValueError("invalid port hopping operation or parameters")
     if operation == "preflight":
         preflight(*parameters)
     elif operation == "run":
         run()
+    elif operation == "probe":
+        probe()
     else:
         if not re.fullmatch("[a-f0-9]{32}", parameters[0]):
             raise ValueError("invalid port hopping owner token")
@@ -1766,6 +1863,10 @@ tproxy)
 port-hopping)
     shift; [ "$#" -eq 5 ] || die "port hopping requires start, end, target and both addresses"
     port_hopping_resources run "$@"
+    ;;
+port-hopping-probe)
+    shift; [ "$#" -eq 5 ] || die "port hopping probe requires start, end, target and both addresses"
+    port_hopping_resources probe "$@"
     ;;
 port-hopping-audit|port-hopping-health|port-hopping-clean)
     operation=${1#port-hopping-}

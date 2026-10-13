@@ -1128,6 +1128,168 @@ PY
     printf '%s\n' "${witness}"
 }
 
+dockerPortHoppingProbeContainer() {
+    local mode=$1 current child
+    [[ -f "${ph_stage}/cid" && ! -L "${ph_stage}/cid" ]] || return 1
+    child=$(<"${ph_stage}/cid")
+    [[ "${child}" =~ ^[a-f0-9]{64}$ ]] || return 1
+    current=$(docker container inspect "${child}") &&
+        python3 "${ph_helper}" container "${ph_root}" "${child}" "${ph_image}" \
+            "${ph_label}" "${ph_start}" "${ph_end}" "${ph_target}" "${ph_ipv4}" "${ph_ipv6}" \
+            "${ph_host}" "${mode}" <<<"${current}"
+}
+
+dockerPortHoppingProbeCheck() {
+    local current
+    [[ "${ph_signal}" == 0 ]] &&
+        dockerPortHoppingTargetBindingCheck "${ph_witness}" "${ph_binding}" "${ph_domain}" &&
+        current=$(python3 "${ph_helper}" directory "${ph_root}") &&
+        [[ "${current}" == "${ph_directory}" ]]
+}
+
+dockerPortHoppingProbeExchange() {
+    local challenge nonce request digest ack current descriptor
+    local -a command=(
+        docker run --interactive --pull never --cidfile "${ph_stage}/cid"
+        --label "io.padm.hopping-probe=${ph_label}" --network host --hostname "${ph_host}" --user 0:0
+        --read-only --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges
+        --no-healthcheck --restart no --log-driver none
+        --tmpfs /tmp:rw,nosuid,nodev,size=16m,mode=1777
+        --tmpfs /run:rw,nosuid,nodev,size=16m,mode=0755
+        --mount "type=bind,source=${ph_root}/data/net,target=/var/lib/padm/net"
+        "${ph_image}" port-hopping-probe "${ph_start}" "${ph_end}" "${ph_target}"
+        "${ph_ipv4}" "${ph_ipv6}"
+    )
+    dockerPortHoppingProbeCheck || return 1
+    # coproc 仅承载 Docker；持部署锁的准备函数始终在当前 Bash 直接调用。
+    coproc PADM_HOPPING_TRANSPORT {
+        exec timeout -k 2 65 "${command[@]}" 2>"${ph_stage}/child.log"
+    }
+    ph_transport=$!
+    descriptor=${PADM_HOPPING_TRANSPORT[0]:-}
+    [[ -n "${descriptor}" ]] || return 1
+    exec {ph_read}<&"${descriptor}" || return 1
+    exec {descriptor}<&-
+    descriptor=${PADM_HOPPING_TRANSPORT[1]:-}
+    [[ -n "${descriptor}" ]] || return 1
+    exec {ph_write}>&"${descriptor}" || return 1
+    exec {descriptor}>&-
+    challenge=$(python3 "${ph_helper}" frame challenge <&"${ph_read}") &&
+        nonce=$(jq -er '.nonce' <<<"${challenge}") &&
+        [[ "$(jq -er '.host' <<<"${challenge}")" == "${ph_host}" ]] &&
+        ph_projection=$(dockerPortHoppingProbeContainer live) &&
+        ph_child=$(jq -er '.Id' <<<"${ph_projection}") &&
+        dockerPortHoppingProbeCheck || return 1
+    request=$(jq -cn --arg nonce "${nonce}" --argjson pid "${ph_owner}" \
+        --arg lock "$(printf '%s' "${ph_lock}" | sha256sum | cut -d ' ' -f1)" \
+        --arg startup "$(printf '%s' "${ph_binding}" | sha256sum | cut -d ' ' -f1)" \
+        --arg child "${ph_child}" --arg image "${ph_image}" --argjson witness "${ph_witness}" '
+      {v:1,nonce:$nonce,parent_pid:$pid,parent_lock_sha256:$lock,startup_sha256:$startup,
+       child_id:$child,image_id:$image,target:($witness |
+        {container_id,image_id,started_at,restart_count,listener_id,
+         range_start,range_end,target_port,ipv4,ipv6})}
+    ') &&
+        digest=$(printf '%s' "${request}" | sha256sum | cut -d ' ' -f1) &&
+        current=$(dockerPortHoppingProbeContainer live) &&
+        [[ "${current}" == "${ph_projection}" ]] &&
+        dockerPortHoppingProbeCheck &&
+        printf '%s\n' "${request}" >&"${ph_write}" || return 1
+    exec {ph_write}>&-
+    ph_write=
+    ack=$(python3 "${ph_helper}" frame ack "${nonce}" "${ph_child}" "${digest}" <&"${ph_read}") ||
+        return 1
+    exec {ph_read}<&-
+    ph_read=
+    if wait "${ph_transport}"; then ph_transport=; else ph_transport=; return 1; fi
+    current=$(dockerPortHoppingProbeContainer any) &&
+        [[ "${current}" == "${ph_projection}" ]] &&
+        docker container inspect "${ph_child}" | jq -e 'length == 1 and (.[0].State |
+          .Status == "exited" and .Running == false and .ExitCode == 0)' >/dev/null &&
+        dockerPortHoppingProbeCheck || return 1
+    ph_ack=${ack}
+}
+
+dockerPortHoppingProbeCleanup() {
+    local current confirmed child status=0
+    [[ -z "${ph_write}" ]] || { exec {ph_write}>&-; ph_write=; }
+    [[ -z "${ph_read}" ]] || { exec {ph_read}<&-; ph_read=; }
+    if [[ -f "${ph_stage}/cid" ]]; then
+        if current=$(dockerPortHoppingProbeContainer any) &&
+            { [[ -z "${ph_projection}" ]] || [[ "${current}" == "${ph_projection}" ]]; } &&
+            confirmed=$(dockerPortHoppingProbeContainer any) &&
+            [[ "${current}" == "${confirmed}" ]] &&
+            child=$(jq -er '.Id' <<<"${current}"); then
+            docker container stop --time 2 "${child}" >/dev/null &&
+                confirmed=$(dockerPortHoppingProbeContainer any) &&
+                [[ "${current}" == "${confirmed}" ]] &&
+                docker container rm "${child}" >/dev/null || status=1
+        else status=1; fi
+    fi
+    if [[ -n "${ph_transport}" ]]; then
+        kill -TERM "${ph_transport}" 2>/dev/null || :
+        # wait 只回收已保存的 transport；失败不作为只读握手成功。
+        wait "${ph_transport}" 2>/dev/null || :
+        ph_transport=
+    fi
+    return "${status}"
+}
+
+dockerPortHoppingTargetProbe() {
+    local ph_owner=${BASHPID:-$$} ph_root ph_lock ph_stage= ph_domain ph_witness ph_binding
+    local ph_start=${2:-} ph_end=${3:-} ph_ipv4=${4:-} ph_ipv6=${5:-} ph_target ph_image
+    local ph_helper="${DOCKER_LIB_DIR}/port-hopping-probe.py" ph_directory ph_label ph_child=
+    local ph_host= ph_projection= ph_read= ph_write= ph_transport= ph_ack= ph_signal=0
+    local status=1 intTrap termTrap image
+    [[ "$#" -eq 5 ]] || return 1
+    ph_root=$(dockerInstallRoot) &&
+        ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") || {
+            DOCKER_DEPLOYMENT_LOCK_DIR=; return 1;
+        }
+    ph_stage=$(mktemp -d "${ph_root}/.hopping-probe.XXXXXX") || return 1
+    intTrap=$(trap -p INT)
+    termTrap=$(trap -p TERM)
+    trap 'ph_signal=130' INT
+    trap 'ph_signal=143' TERM
+    # 结果来自本轮直接调用；不接受保存 JSON、环境变量或旧 tuple 作为授权。
+    if dockerPortHoppingTargetStartLockCheck &&
+        dockerPortHoppingTargetPrepareActivation "$@" bound >"${ph_stage}/prepared.json" &&
+        ph_witness=$(jq -ec '.' "${ph_stage}/prepared.json") &&
+        ph_binding=$(jq -ec '.startup_binding' <<<"${ph_witness}") &&
+        [[ "$(jq -ec '.lock' <<<"${ph_binding}")" == "${ph_lock}" ]] &&
+        ph_domain=$(jq -er --arg listener "$1" '
+          .core.protocols[] | select(.listener_id == $listener) | .hy2.domain
+        ' "${ph_root}/config/spec.json") &&
+        ph_target=$(jq -er '.target_port' <<<"${ph_witness}") &&
+        ph_directory=$(python3 "${ph_helper}" directory "${ph_root}") &&
+        image=$(jq -er '.images.net' "${ph_root}/config/spec.json") &&
+        ph_image=$(docker image inspect "${image}" | jq -er '
+          if length == 1 and (.[0].Id | test("^sha256:[a-f0-9]{64}$"))
+          then .[0].Id else error("net 镜像身份无效") end') &&
+        ph_label=$(python3 -c 'import os; print(os.urandom(32).hex())') &&
+        ph_host=$(python3 -c 'import os; print(os.urandom(6).hex())') &&
+        dockerPortHoppingProbeExchange; then status=0; else status=$?; fi
+    [[ "${status}" != 130 && "${status}" != 143 ]] || ph_signal=${status}
+    [[ "${ph_signal}" == 0 ]] || status=${ph_signal}
+    trap '' INT TERM
+    dockerPortHoppingProbeCleanup || status=1
+    if [[ "${status}" == 0 ]]; then
+        dockerPortHoppingProbeCheck &&
+            dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&
+            dockerPortHoppingProbeCheck || status=1
+    fi
+    trap - INT TERM
+    [[ -z "${intTrap}" ]] || eval "${intTrap}"
+    [[ -z "${termTrap}" ]] || eval "${termTrap}"
+    [[ "${ph_signal}" == 0 ]] || status=${ph_signal}
+    if [[ "${status}" != 0 ]]; then
+        dockerPortHoppingTargetStartLockCheck || :
+        dockerError "跳跃只读握手未完成；累计不回退，证据目录可能已清理: ${ph_stage}"
+        return "${status}"
+    fi
+    # ACK 仅报告实时只读交接；不写 NAT 或跳跃 state，不授予后续写权限。
+    jq -c --argjson ack "${ph_ack}" '. + {probe_ack:$ack}' <<<"${ph_witness}"
+}
+
 dockerComposeExecute() {
     local composeFile composeDir root profile
     local -a commandArgs=() extraArgs=()

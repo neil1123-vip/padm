@@ -417,7 +417,10 @@ try {
         if ($Selector -in @('docker-fail2ban-real', 'docker-tproxy-real')) {
             $references = [ordered]@{ net = 'padm-local/padm-net:control-4c4b' }
         } elseif ($Selector -eq 'docker-port-hopping-target-real') {
-            $references = [ordered]@{ 'sing-box' = 'padm-local/padm-sing-box:tls-3b4' }
+            $references = [ordered]@{
+                'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
+                net = 'padm-local/padm-net:control-4c4b'
+            }
         } elseif ($Selector -eq 'docker-hy2-sites-real') {
             $references = [ordered]@{
                 xray = 'padm-local/padm-xray:control-4c4b'

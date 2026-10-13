@@ -4,9 +4,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -159,18 +161,8 @@ def run(work):
             os.chown(root / name, 0, 0)
             (root / name).chmod(0o600)
         os.chown(root / "data/sing-box", 10001, 10001)
-        # 生成材料与 bind 源均属于本次私有节点，保持完整生产 Compose。
-        command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
-                 "bash", "-Eeuo", "pipefail", "-c", """
-. "$1"
-bundle=$3
-dockerCurrentBundlePath() { printf '%s\\n' "${bundle}"; }
-dockerGenerateCompose "$2/config/spec.json" "$2/compose.json" "$2"
-: >"$2/images.env"
-dockerGenerateImagesEnv "$2/config/spec.json" "$2/images.env" "$2"
-dockerGenerateDeployment "$2/config/spec.json" "$2/deployment.json"
-dockerTlsRuntimePermissions "$2/secrets/tls"
-""", "test", str(ROOT / "install-docker.sh"), str(root), str(work / "bundle")])
+        os.chown(root / "data/net", 0, 0)
+        (root / "data/net").chmod(0o700)
         with (node / "daemon.log").open("wb") as log:
             daemon = subprocess.Popen([
                 "dockerd", "--host", docker[-1], "--data-root", str(node / "docker"),
@@ -183,6 +175,44 @@ dockerTlsRuntimePermissions "$2/secrets/tls"
             for item in inputs.values():
                 actual = json.loads(command(docker + ["image", "inspect", item["reference"]]))[0]
                 assert actual["Id"] == item["image_id"]
+            # shortcut: 复用离线基镜像依赖，只验当前标准入口；发布 Dockerfile 净构建另行验收。
+            context = node / "net-image"
+            context.mkdir(mode=0o700)
+            shutil.copyfile(ROOT / "docker/images/net/entrypoint.sh", context / "entrypoint.sh")
+            (context / "Dockerfile").write_text(
+                f"FROM {inputs['net']['reference']}\n"
+                "COPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-entrypoint\n")
+            net_tag = "padm-local/padm-net:hopping-probe-source"
+            build = subprocess.run(
+                ["env", "DOCKER_BUILDKIT=1", *docker, "build", "--pull=false",
+                 "--network", "none", "--progress", "plain", "--tag", net_tag, str(context)],
+                capture_output=True, timeout=120)
+            (work / "net-image-build.log").write_bytes(build.stdout + build.stderr)
+            assert build.returncode == 0, build.stderr.decode(errors="replace")
+            net_image = json.loads(command(docker + ["image", "inspect", net_tag]))[0]
+            net_digest = net_image["Descriptor"]["digest"]
+            assert re.fullmatch(r"sha256:[a-f0-9]{64}", net_digest), net_image
+            assert net_image["Config"]["Entrypoint"] == ["/usr/local/bin/padm-entrypoint"]
+            assert net_image["Config"]["User"] == "0:0"
+            net_reference = net_tag + "@" + net_digest
+            assert json.loads(command(docker + ["image", "inspect", net_reference]))[0][
+                "Id"] == net_image["Id"]
+            spec = root / "config/spec.json"
+            configured = json.loads(spec.read_text())
+            configured["images"]["net"] = net_reference
+            spec.write_text(json.dumps(configured))
+            # 生成材料与 bind 源均属于本次私有节点，保持完整生产 Compose。
+            command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
+                     "bash", "-Eeuo", "pipefail", "-c", """
+. "$1"
+bundle=$3
+dockerCurrentBundlePath() { printf '%s\\n' "${bundle}"; }
+dockerGenerateCompose "$2/config/spec.json" "$2/compose.json" "$2"
+: >"$2/images.env"
+dockerGenerateImagesEnv "$2/config/spec.json" "$2/images.env" "$2"
+dockerGenerateDeployment "$2/config/spec.json" "$2/deployment.json"
+dockerTlsRuntimePermissions "$2/secrets/tls"
+""", "test", str(ROOT / "install-docker.sh"), str(root), str(work / "bundle")])
             clients = namespaces()
             compose = docker + ["compose", "--project-name", "padm-docker",
                                 "--env-file", str(root / "images.env"),
@@ -304,15 +334,36 @@ dockerTlsRuntimePermissions "$2/secrets/tls"
                           for tool in ("iptables", "ip6tables")}
             jumpstate = root / "data/net/port-hopping.state"
             assert not jumpstate.exists()
+            net_before = tree(root / "data/net")
+            assert len(net_before) == 1
             result = command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
                               "DOCKER_HOST=" + docker[-1], "bash", "-Eeuo", "pipefail", "-c", """
 . "$1"
 dockerAcquireDeploymentLock
 trap dockerReleaseDeploymentLock EXIT
-dockerPortHoppingTargetPrepareActivation entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 bound
-""", "test", str(ROOT / "install-docker.sh")], timeout=60)
+dockerPortHoppingTargetProbe entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1
+""", "test", str(ROOT / "install-docker.sh")], timeout=90)
             quota_after = json.loads(result)
             assert quota_after["range_start"] == 30000 and quota_after["range_end"] == 30001
+            ack = quota_after["probe_ack"]
+            assert set(ack) == {"v", "phase", "nonce", "child_id", "request_sha256"}
+            assert type(ack["v"]) is int and ack["v"] == 1 and ack["phase"] == "ack"
+            assert all(re.fullmatch(r"[a-f0-9]{64}", ack[key])
+                       for key in ("nonce", "child_id", "request_sha256"))
+            assert not command(docker + ["ps", "-aq", "--filter",
+                                        "label=io.padm.hopping-probe"]).strip()
+            assert command(docker + ["ps", "-aq"]).decode().split() == [
+                quota_after["container_id"][:12]], "握手没有回收本轮子容器"
+            net_after = tree(root / "data/net")
+            assert [row[0] for row in net_after] == [".", ".port-hopping.lock"]
+            assert net_after[0][:6] == net_before[0][:6], "握手改变了 net 目录身份或权限"
+            lock = root / "data/net/.port-hopping.lock"
+            lock_metadata = lock.lstat()
+            assert (stat.S_ISREG(lock_metadata.st_mode) and
+                    stat.S_IMODE(lock_metadata.st_mode) == 0o600 and
+                    lock_metadata.st_uid == lock_metadata.st_gid == 0 and
+                    lock_metadata.st_nlink == 1 and lock.read_bytes() == b"")
+            assert not list(root.glob(".hopping-probe.*")), "成功握手仍保留父端临时目录"
             binding = quota_after["startup_binding"]
             assert set(binding) == {"lock", "files", "state", "live"}
             current_files = {row[0]: row for row in tree(root)}
@@ -364,6 +415,11 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
             traffic_state_update_allowed=True, locked_witness_tree_unchanged=True,
             managed_start_quota_revoked=True, failed_start_safe_recovered=True,
             activation_prepared=True, startup_file_versions_bound=True,
+            parent_child_probe_verified=True, probe_child_removed=True,
+            probe_empty_lock_only=True, probe_ack=ack,
+            net_image=dict(base=inputs["net"], reference=net_reference, image_id=net_image["Id"],
+                           entrypoint_sha256=hashlib.sha256(
+                               (context / "entrypoint.sh").read_bytes()).hexdigest()),
             dual_family_nat_unchanged=True, jumpstate_unchanged=True,
             elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
     except BaseException:

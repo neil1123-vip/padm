@@ -534,7 +534,15 @@ runDockerTProxyOwnershipRegression() {
 runDockerPortHoppingPreflightRegression() {
     python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
         python3 "${PROJECT_ROOT}/docker/tests/port-hopping-ownership.py" &&
-        runDockerPortHoppingTargetRegression
+        runDockerPortHoppingTargetRegression &&
+        runDockerPortHoppingProbeRegression
+}
+
+runDockerPortHoppingProbeRegression() {
+    bash -n "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
+        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-probe.py" &&
+        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-handshake.py"
 }
 
 runDockerPortHoppingTargetRegression() {
@@ -685,6 +693,7 @@ registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogC
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-port-hopping-preflight runDockerPortHoppingPreflightRegression
+registerRegressionFunctionLeaf docker-port-hopping-probe runDockerPortHoppingProbeRegression
 registerRegressionFunctionLeaf docker-port-hopping-target runDockerPortHoppingTargetRegression
 registerRegressionFunctionLeaf docker-port-hopping-target-real runDockerPortHoppingTargetRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression

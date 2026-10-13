@@ -239,10 +239,10 @@ def run_python():
     fixture = json.loads(Path(os.environ["HOP_FIXTURE"]).read_text())
     fault = fixture.get("commit_failure")
     post_commit = fixture.get("post_commit")
-    if (len(arguments) != 8 or arguments[:3] != ["-", str(state_path.parent), "run"]
+    if (len(arguments) != 8 or arguments[:3] != ["/dev/fd/3", str(state_path.parent), "run"]
             or not (fault or post_commit)):
         os.execv("/usr/bin/python3", ["python3", *arguments])
-    body = sys.stdin.read()
+    body = Path(arguments[0]).read_text()
     namespace = {"__name__": "__main__"}
     original_mkstemp, original_fsync, original_replace = tempfile.mkstemp, os.fsync, os.replace
     triggered = False
@@ -352,7 +352,7 @@ def main():
         python = binaries / "python3"
         python.write_text(
             '#!/bin/sh\n'
-            'if [ -n "${HOP_COMMIT_FAULT:-}" ] && [ "${1:-}" = - ] && [ "${3:-}" = run ]; then\n'
+            'if [ -n "${HOP_COMMIT_FAULT:-}" ] && [ "${1:-}" = /dev/fd/3 ] && [ "${3:-}" = run ]; then\n'
             f'    exec /usr/bin/python3 "{SCRIPT}" python "$@"\n'
             'fi\nexec /usr/bin/python3 "$@"\n')
         python.chmod(0o755)

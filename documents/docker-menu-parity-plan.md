@@ -5946,6 +5946,66 @@ StartManaged 只接受原三参数或固定第四参数 `bound`，PrepareActivat
 只读 child、写门控、菜单/schema/Compose、原生宿主/arm64 与公网继续 deferred，
 整体目标保持 active。
 
+##### 5C.9c.3e.2b.2 一次性实时父子只读握手
+
+内部 `dockerPortHoppingTargetProbe listener start end ipv4 ipv6` 仅由当前持部署锁
+Bash 直接调用 PrepareActivation 的固定 bound 模式，结果写本轮私有目录再读取；
+不接受保存 JSON、环境变量或外部 tuple 授予写权限。初始父锁必须等于准备绑定锁，
+请求摘要与后续复验均沿用实际启动采用的版本，锁替换不能刷新为新基线。
+
+coproc 仅启动 Docker transport，立即保存 PID、复制并关闭原读写 FD；
+父端固定随机 12 位 hex hostname、唯一 probe 标签、CID/Image/Created/StartedAt、
+标准 entrypoint/五参数 tuple、完整 Config/HostConfig/Mounts。容器使用 host 网络、
+root、只读根、cap-drop ALL 与唯一 CAP_NET_ADMIN、no-new-privileges、关闭 healthcheck，
+只挂 net 数据目录与固定 /tmp、/run tmpfs，不给 net Docker socket 或设备。
+固定 net 目录及全部祖先 dev/inode/mode/uid/gid，在请求前、退出后及清理后复验；
+目录时间不固定，允许 flock 创建空锁文件改变目录时间。
+
+子端复用当前本地双族地址、net flock、无跳跃 state 和全域冲突预检，发送随机挑战。
+父端复验原启动绑定、目录和完整子容器投影后，只发送一行请求并关闭所有写端；
+子端须读到 EOF，再核精确键、类型、nonce、CID/Image/目标 tuple 与摘要形状，
+重新检查锁、地址、无 state 和全域冲突，输出唯一 ACK 后退出。
+双方每帧限 4096 字节、20 秒；父逐字节读取，不能吞掉下一帧或噪声；
+ACK 后限时确认 EOF，并核请求原始行摘要、transport 退出 0、子 exited/ExitCode 0、
+原绑定与目录。回收只接受私有 cidfile、唯一标签与完整投影二次匹配的本轮容器；
+无法核验归属时保留证据。准备或握手 INT/TERM 保持 130/143，失败 stdout 为空。
+读取子 stdin 的 Python 使用 FD 3 源码，run/probe 仍 exec 为 PID 1，原命令路径保留。
+
+新增聚焦 selector `docker-port-hopping-probe`，完整 preflight 复用该函数；
+没有向完整集合重复加入同一叶子。21 个子端只读协议与身份场景、93 个帧/目录/
+容器/父流程检查通过，含直接 Bash 身份、原锁基线替换、绑定和目录漂移、
+错 nonce、重复 ACK、未挑战容器回收、替换配置保留与两阶段信号传播。
+最终定向内部/入口 `10460/11582 ms`、Jobs 2、排队 `201 ms`：
+`.tmp-regression-docker-ebb1a9c6eb554aca95bd694d658424dc/`。
+首轮 ss 夹具多写空行、后续父夹具未含新锁字段均只修夹具，失败输入保留；
+真实首轮暴露 host 网络默认 hostname 继承宿主、CapAdd 规范为 CAP_NET_ADMIN，
+据实际 inspect 修正，使用显式随机 hostname 而非 CID 前缀假设。
+
+最终真实双族握手、唯一 ACK、子回收、唯一 root:root/0600/单链接空锁、NAT/jumpstate
+不变、刚跨额度撤销和失败安全恢复通过，内部/入口 `61822/62878 ms`、Jobs 2、
+排队 `206 ms`：
+`.tmp-regression-docker-dd3c8c61e4974e63b156c33a285155d1/`。
+工具/业务基镜像与离线包复用，nested daemon 只复制当前标准 net 入口生成派生镜像，
+固定其实际 digest 后生成部署材料；此证据不替代发布 Dockerfile 的净构建验收。
+最终集中完整 54/54，无遗漏重复，内部/入口 `545510/546564 ms`、Jobs 6、
+排队 `413 ms`、exit 0、cache_hit=false，证据：
+`.tmp-regression-docker-af595a8c67ec466580b2936650876aea/`。
+定向、真实和完整源码归档摘要相同，10 个当前关键实现/测试/入口原始字节
+SHA256 与完整输入一致；独立只读复审、Bash/ShellCheck error 与 diff 通过。
+聚焦修复反馈约 11.6 秒，完整入口较上阶段增加 `21869 ms`，测试内容亦增加，
+未证稳定提速，不扩大三槽预算。中途采样 CPU 551.67%、内存 357.4 MiB，
+采样时 cgroup memory.peak `1160847360 bytes`；不当作最终 CPU/内存峰值，
+原始采样保留在完整证据的 `runtime-metrics.json`。
+五份成功 source.tar 清理 `62,300,160 bytes`，保留日志/清单/result/核验摘要与失败输入。
+
+本阶段只读；net 唯一可能写入是取得 flock 时新建空锁文件，不写 NAT/jumpstate。
+父先准备受管核心，失败不回退累计或再次重建；诊断 ACK 不授予写入权限，
+不证明全域原子范围预留、锁全生命周期、进程内存或完整 bind 视图一致。
+net flock 仍不排斥非合作写入；SIGKILL/daemon 状态不明保留证据，不承诺自动恢复。
+下一阶段 3e.2b.3 实施同锁实时写门控及最终启用 ACK，不能直接复用诊断 JSON 或
+旧五参数 run 作为生产授权。菜单/schema/Compose、原生宿主/arm64、公网、
+旧会话排空及完整跳跃继续 deferred，整体目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
