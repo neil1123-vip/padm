@@ -203,6 +203,17 @@ dockerTlsRuntimePermissions "$2/secrets/tls"
             assert proof["ipv4"] == "198.18.1.1" and proof["ipv6"] == "2001:db8:1::1"
             assert proof["enabled_accounts"] == 1
             assert checked_witness(root, docker, startup=True) == proof
+            command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
+                     "bash", "-Eeuo", "pipefail", "-c", """
+. "$1"
+dockerAcquireDeploymentLock
+python3 "$3" tree "$2" >"$4/locked-before.json"
+dockerPortHoppingTargetLockedWitness entry-hy2 198.18.1.1 2001:db8:1::1 >"$4/locked.json"
+python3 "$3" tree "$2" >"$4/locked-after.json"
+cmp "$4/locked-before.json" "$4/locked-after.json"
+dockerReleaseDeploymentLock
+""", "test", str(ROOT / "install-docker.sh"), str(root), str(SCRIPT), str(work)], timeout=30)
+            assert json.loads((work / "locked.json").read_text()) == proof
             image_container = command(docker + ["create", inputs["sing-box"]["image_id"]]).decode().strip()
             command(docker + ["cp", image_container + ":/usr/local/bin/sing-box",
                               str(node / "sing-box")])
@@ -268,7 +279,7 @@ dockerTrafficRender sing-box "$2/config/sing-box/users.base" "$(dockerTrafficRea
             initial=proof, restarted=changed, tls_restarted=tls_changed, image=inputs["sing-box"],
             disk_drift_refused=True, backdated_config_refused=True,
             fresh_dual_family_auth_reversed=True, backdated_tls_replacement_refused=True,
-            traffic_state_update_allowed=True,
+            traffic_state_update_allowed=True, locked_witness_tree_unchanged=True,
             elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
     except BaseException:
         if daemon is not None and daemon.poll() is None:
@@ -307,7 +318,9 @@ dockerTrafficRender sing-box "$2/config/sing-box/users.base" "$(dockerTrafficRea
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "auth-probes":
+    if sys.argv[1] == "tree":
+        print(json.dumps(tree(Path(sys.argv[2])), separators=(",", ":")))
+    elif sys.argv[1] == "auth-probes":
         checks = json.loads((Path(sys.argv[2]) / "auth-probes.json").read_text())
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(checks)) as pool:
             list(pool.map(auth_probe, checks))

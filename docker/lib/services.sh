@@ -3794,6 +3794,96 @@ dockerPortHoppingTargetStartupWitness() {
     dockerPortHoppingTargetInspect startup "$@"
 }
 
+dockerPortHoppingTargetLockSnapshot() {
+    local owner=${1:-} root
+    [[ "$#" -eq 1 && "${owner}" =~ ^[1-9][0-9]*$ ]] || return 1
+    root=$(dockerInstallRoot) || return 1
+    [[ "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" == "${root}/locks/deployment.lock" ]] || return 1
+    dockerRequireCommand python3 || return 1
+    python3 - "${root}" "${owner}" <<'PY'
+import json
+import os
+from pathlib import PurePosixPath
+import stat
+import sys
+
+root = sys.argv[1]
+owner = sys.argv[2]
+if (root != str(PurePosixPath(root)) or PurePosixPath(root).anchor != "/" or
+        root == "/"):
+    raise SystemExit("部署锁根路径必须规范且不能为 /")
+parts = PurePosixPath(root).parts[1:]
+if any(part in (".", "..") for part in parts):
+    raise SystemExit("部署锁根路径不能含相对路径")
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+held = []
+
+
+def identity(metadata):
+    return [metadata.st_dev, metadata.st_ino, metadata.st_mode,
+            metadata.st_uid, metadata.st_gid]
+
+
+def pid_identity(metadata):
+    return [*identity(metadata), metadata.st_nlink, metadata.st_size,
+            metadata.st_mtime_ns, metadata.st_ctime_ns]
+
+
+def snapshot():
+    rows = []
+    descriptor = os.open("/", flags)
+    held.append(descriptor)
+    rows.append(["/", *identity(os.fstat(descriptor))])
+    path = ""
+    for part in [*parts, "locks", "deployment.lock"]:
+        descriptor = os.open(part, flags, dir_fd=descriptor)
+        held.append(descriptor)
+        path += "/" + part
+        metadata = os.fstat(descriptor)
+        if path in (root, root + "/locks", root + "/locks/deployment.lock"):
+            if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o750:
+                raise SystemExit("部署锁受管目录 owner 或权限无效")
+        rows.append([path, *identity(metadata)])
+    pid = os.open("pid", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                  dir_fd=descriptor)
+    held.append(pid)
+    metadata = os.fstat(pid)
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or
+            metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o640):
+        raise SystemExit("部署锁 pid 必须是当前 owner 的单链接普通文件")
+    expected = (owner + "\n").encode("ascii")
+    if metadata.st_size != len(expected) or os.read(pid, len(expected) + 1) != expected:
+        raise SystemExit("部署锁不属于当前 Bash 进程")
+    if pid_identity(metadata) != pid_identity(os.fstat(pid)):
+        raise SystemExit("读取部署锁 pid 时文件发生变化")
+    rows.append([root + "/locks/deployment.lock/pid", *pid_identity(metadata), owner])
+    return rows
+
+
+try:
+    before = snapshot()
+    if snapshot() != before:
+        raise SystemExit("读取部署锁时路径身份发生变化")
+    print(json.dumps(before, separators=(",", ":")))
+except OSError as error:
+    raise SystemExit("部署锁路径读取失败: " + str(error))
+finally:
+    for descriptor in reversed(held):
+        os.close(descriptor)
+PY
+}
+
+dockerPortHoppingTargetLockedWitness() {
+    local owner=${BASHPID:-$$} before after witness
+    [[ "$#" -eq 3 ]] || return 1
+    before=$(dockerPortHoppingTargetLockSnapshot "${owner}") &&
+        witness=$(dockerPortHoppingTargetStartupWitness "$@") &&
+        after=$(dockerPortHoppingTargetLockSnapshot "${owner}") &&
+        [[ "${after}" == "${before}" ]] || return 1
+    # 锁快照仅在本次调用内使用；后续启停事务须在每个写入节点继续复验。
+    printf '%s\n' "${witness}"
+}
+
 dockerPortHoppingTargetInspect() (
     local mode=${1:-} listener=${2:-} ipv4=${3:-} ipv6=${4:-} root spec entry domain fileProbe before after
     local baseline state rendered count expectedCompose expectedEnv image ids container imageInfo

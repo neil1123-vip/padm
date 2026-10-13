@@ -152,6 +152,26 @@ IMAGE_FILTER=.
 NETWORK_FILTER=.
 IP_FILTER=.
 snapshotRace() {
+    if [[ "${MODE}" == lock-race-* && ! -e "${TEST_ROOT}/replaced" ]]; then
+        case "${MODE}" in
+        lock-race-pid)
+            cp -a -- "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" "${TEST_ROOT}/pid.replacement"
+            mv -f -- "${TEST_ROOT}/pid.replacement" "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+            ;;
+        lock-race-directory)
+            mv -- "${DOCKER_DEPLOYMENT_LOCK_DIR}" "${TEST_ROOT}/old-lock"
+            mkdir -m 0750 -- "${DOCKER_DEPLOYMENT_LOCK_DIR}"
+            cp -a -- "${TEST_ROOT}/old-lock/pid" "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+            ;;
+        lock-race-parent)
+            mv -- "${root}/locks" "${TEST_ROOT}/old-locks"
+            mkdir -m 0750 -- "${root}/locks"
+            cp -a -- "${TEST_ROOT}/old-locks/deployment.lock" "${root}/locks/"
+            ;;
+        esac
+        touch "${TEST_ROOT}/replaced"
+        treeSnapshot >"${TEST_ROOT}/expected-after-race.json"
+    fi
     [[ "${MODE}" == replace-live && ! -e "${TEST_ROOT}/replaced" ]] || return 0
     cp -a -- "${root}/config/sing-box/config.json" "${TEST_ROOT}/config.replacement"
     mv -f -- "${TEST_ROOT}/config.replacement" "${root}/config/sing-box/config.json"
@@ -226,7 +246,7 @@ runWitness() {
     GUARD_SECRET_ARGV=1 "${WITNESS_FUNCTION}" "${listener}" "${ipv4}" "${ipv6}" \
         >"${TEST_ROOT}/result.json" 2>"${TEST_ROOT}/error.log" || status=$?
     [[ ! -e "${TEST_ROOT}/unexpected.log" ]] || fail "非只读或未知调用: $(cat "${TEST_ROOT}/unexpected.log")"
-    if [[ "${MODE}" == replace-live || "${MODE}" == scope-race ]]; then
+    if [[ "${MODE}" == replace-live || "${MODE}" == scope-race || "${MODE}" == lock-race-* ]]; then
         before=$(<"${TEST_ROOT}/expected-after-race.json")
     fi
     [[ "$(treeSnapshot)" == "${before}" ]] || fail '见证改变了受管文件、元数据或目录'
@@ -415,3 +435,75 @@ change data/traffic/state.json '.accounts["11111111-1111-4111-8111-111111111111"
 chmod 0750 "${root}"
 runWitness ok
 printf 'docker-port-hopping-target-ok: %s read-only target cases\n' "${cases}"
+
+# 直接在持锁进程调用；命令替换和子 shell 不得冒用父进程部署锁。
+dockerAcquireDeploymentLock
+WITNESS_FUNCTION=dockerPortHoppingTargetLockedWitness
+runWitness ok
+(
+    runWitness reject
+)
+runWitness reject 0 missing
+if locked=$(dockerPortHoppingTargetLockedWitness entry-hy2 "${IPV4}" "${IPV6}" \
+    2>"${TEST_ROOT}/substitution.log"); then fail '命令替换冒用了父进程部署锁'; fi
+[[ -z "${locked}" ]] || fail '拒绝后仍输出目标见证'
+owner=${BASHPID}
+dockerPortHoppingTargetLockSnapshot "${owner}" >"${TEST_ROOT}/lock.json"
+jq -e --arg pid "${root}/locks/deployment.lock/pid" --arg owner "${owner}" \
+    '.[-1][0] == $pid and .[-1][-1] == $owner' "${TEST_ROOT}/lock.json" >/dev/null
+
+for file in "${root}" "${root}/locks" "${DOCKER_DEPLOYMENT_LOCK_DIR}" \
+    "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"; do
+    permissions=$(stat -c %a -- "${file}")
+    chmod 0777 "${file}"
+    runWitness reject
+    chmod "${permissions}" "${file}"
+    chown 10001 "${file}"
+    runWitness reject
+    chown "$(id -u)" "${file}"
+done
+for value in 1 "${owner}x" "${owner}"$'\n'; do
+    printf '%s\n' "${value}" >"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+    runWitness reject
+done
+printf '%s\n' "${owner}" >"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+ln -- "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" "${TEST_ROOT}/pid.hardlink"
+runWitness reject
+rm -- "${TEST_ROOT}/pid.hardlink"
+mv -- "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" "${TEST_ROOT}/pid"
+runWitness reject
+ln -s -- "${TEST_ROOT}/pid" "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+runWitness reject
+rm -- "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+mkfifo -m 0640 "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+runWitness reject
+rm -- "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+mv -- "${TEST_ROOT}/pid" "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+lockDir=${DOCKER_DEPLOYMENT_LOCK_DIR}
+for value in '' "${root}/locks/foreign"; do
+    DOCKER_DEPLOYMENT_LOCK_DIR=${value}
+    runWitness reject
+done
+DOCKER_DEPLOYMENT_LOCK_DIR=${lockDir}
+mv -- "${root}/locks" "${TEST_ROOT}/linked-locks"
+ln -s -- "${TEST_ROOT}/linked-locks" "${root}/locks"
+runWitness reject
+rm -- "${root}/locks"
+mv -- "${TEST_ROOT}/linked-locks" "${root}/locks"
+(
+    export PADM_DOCKER_INSTALL_DIR="/${root}"
+    DOCKER_DEPLOYMENT_LOCK_DIR="${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock"
+    if dockerPortHoppingTargetLockSnapshot "${owner}" >"${TEST_ROOT}/double-slash.json" \
+        2>"${TEST_ROOT}/double-slash.log"; then fail '双前导斜杠绕过了锁权限核对'; fi
+    [[ ! -s "${TEST_ROOT}/double-slash.json" ]] || fail '拒绝后仍输出锁快照'
+)
+for MODE in lock-race-pid lock-race-directory lock-race-parent; do
+    runWitness reject
+    # 只清理本合同制造的锁路径，不调用仅按 pid 内容释放的通用入口。
+    rm -rf -- "${root}/locks" "${TEST_ROOT}/old-lock" "${TEST_ROOT}/old-locks"
+    dockerAcquireDeploymentLock
+done
+MODE=ok
+runWitness ok
+dockerReleaseDeploymentLock
+printf 'docker-port-hopping-target-locked-ok: %s total target cases\n' "${cases}"
