@@ -1,6 +1,6 @@
 # Docker 菜单与功能对齐实施计划
 
-修订日期：2026-10-13
+修订日期：2026-10-14
 
 本计划替代聊天中的六步菜单对齐方案，落实该方案的审计修正。它是
 [功能对照表](docker-feature-matrix.md)之后的实施路线，不是重做
@@ -3024,6 +3024,40 @@ cache=false：`.tmp-regression-docker-31040289f61b47ac9e99139d9ece3708/`；
 其中菜单入口通过并保留 `docker-routing-upstreams-regression-ok` 证据。
 完整区域策略、SOCKS UDP 会话撤销、TUIC 跳跃及原生宿主/arm64/公网仍 deferred，
 总目标 active。
+
+#### 5B.4o 域名层级覆盖诊断
+
+现有 CLI/菜单 `routing-status` 同批增加 `domain_rule_coverages`，保留原精确
+重叠字段。使用规则索引逐层查域名后缀，避免所有规则两两比较；报告跨策略
+`full/domain` 与 `domain/domain` 覆盖、参与策略和优先者，复用区域有效规则。
+按标签边界匹配，同策略去重与 global 排除；不联网，不更改配置或写入门禁。
+共用组合夹具检查五策略、区域固定例外、多层后缀、相似域名边界、
+同策略覆盖不误报、旧字段及部署/凭据/累计不变。
+Linux amd64 定向 `docker-routing-core-contracts` 通过，入口 14481 ms、排队
+3861 ms、Jobs 2：`.tmp-regression-docker-b5e1cdeb2d82410494bdfc3e8079b785/`。
+集中 Docker 合同 54/54 通过，入口 283386 ms、排队 294 ms、Jobs 6、
+cache=false：`.tmp-regression-docker-e51561f3975f43658e2a995117b10d9f/`。
+keyword/GeoSite 语义、IP/BT、完整区域与冲突检测仍 deferred，总目标 active。
+
+#### 5B.4p 域名解析后 IP 阻断的真实门槛
+
+复用两核心双栈字面 IP/CIDR/GeoIP 实测，在固定 Xray `26.3.27 d2758a0`
+上增加 `IPOnDemand` 候选策略对照，不修改生产生成器或开放菜单。
+指定 DNS 返回被禁 IP 的正对照实际拒绝，DNS 有请求、目的和代理零接入；
+本地 DNS 返回未禁 `127.0.0.2`、上游系统解析为被禁 `127.0.0.1` 时，
+代理及目的各接入一次。指定 DNS 返回 SERVFAIL 后，同域名仍经代理连到被禁 IP。
+两项均完成真实 HTTP 回包，不能以路由诊断、失败 DNS 或客户端超时代替。
+
+直接开启本地解析不能完成迁移；生产合同须绑定经过 IP 判定的实际连接地址，
+解析失败明确拒绝，并保持 Direct 例外、hosts/指定 DNS 来源和双族 TCP/UDP 语义。
+本轮将固定核心的已知行为留作探针，核心变化后重新评估门槛。
+最终 `docker-routing-block-ips-real` 通过，入口 50003 ms、排队 167 ms、Jobs 2、
+cache=false：`.tmp-regression-docker-c2bee5386ade42dba1108c67e27efd04/`；
+与集中合同使用相同源码归档，6 份阶段文件与工作区逐文件匹配。
+已通过证据复用，不因验收文字更新重跑；本轮重复源码归档、清单及核验副本清理，
+日志和 result 保留，工具镜像沿用上一阶段。
+未开放解析后 IP 阻断，不将字面 IP 阻断、域名覆盖诊断或局部探针当作完整 5B；
+原生宿主/arm64/公网仍未验，总目标 active。
 
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 

@@ -947,7 +947,7 @@ dockerProtocolCommand() (
     if [[ "${action}" == routing-status ]]; then
         jq --argjson region_defaults "${PADM_DOCKER_REGION_DEFAULT_DOMAINS}" '
           . as $request |
-          # 仅比较完整域名规则；区域合成与手工规则同属一个策略，先去重。
+          # 区域合成与手工规则同属一个策略，先去重。
           [
             {policy:"direct",rules:((.routing.direct.domains // []) +
               (if .routing.region != null then
@@ -961,9 +961,22 @@ dockerProtocolCommand() (
           ] as $policies |
           [$policies | to_entries[] | . as $entry | .value.rules[] |
             {rule:.,policy:$entry.value.policy,rank:$entry.key}] |
-          group_by(.rule) |
-          map(select(length > 1) | sort_by(.rank) |
-            {rule:.[0].rule,policies:map(.policy),winner:.[0].policy}) as $overlaps |
+          group_by(.rule) as $groups |
+          ($groups | map(select(length > 1) | sort_by(.rank) |
+            {rule:.[0].rule,policies:map(.policy),winner:.[0].policy})) as $overlaps |
+          # 按域名层级查后缀索引，避免规则两两比较；不推断 keyword/GeoSite。
+          INDEX($groups[]; .[0].rule) as $by_rule |
+          [$groups[] | . as $narrow |
+            (.[0].rule | capture("^(?<kind>full|domain):(?<name>.+)$")?) as $selector |
+            ($selector.name | split(".")) as $labels |
+            range((if $selector.kind == "full" then 0 else 1 end); $labels | length) as $start |
+            ($by_rule["domain:" + ($labels[$start:] | join("."))] // []) as $broad |
+            select($broad | length > 0) |
+            ($narrow + $broad | unique_by(.policy) | sort_by(.rank)) as $entries |
+            select($entries | length > 1) |
+            {narrow_rule:$narrow[0].rule,broad_rule:$broad[0].rule,
+             policies:($entries | map(.policy)),winner:$entries[0].policy}
+          ] | sort_by(.narrow_rule,.broad_rule) as $coverages |
           $request |
           (.routing.block.domains // []) as $block |
           {enabled:(.routing != null), server:(.routing.socks5.server // null),
@@ -974,6 +987,7 @@ dockerProtocolCommand() (
           direct_block_overlaps:[(.routing.direct.domains // [])[] |
             . as $rule | select($block | index($rule) != null)],
           domain_rule_overlaps:$overlaps,
+          domain_rule_coverages:$coverages,
           tcp:(if .routing.socks5 == null then "direct"
             elif .routing.socks5 | has("domains") then "matched-socks5" else "socks5" end),
           udp:(if .routing.socks5 == null then "direct"

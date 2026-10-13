@@ -446,6 +446,14 @@ Direct 保持优先；不推断域名包含、分类成员或区域合成，不�
 不推断其它规则的包含关系、分类成员、字面 IP/BT、HTTP 中继或最终流量去向；
 SOCKS5 策略对 TCP 代理、UDP 拒绝。诊断只读，完整冲突检测仍待交付。
 
+`domain_rule_coverages` 补充不同策略之间可确定的域名覆盖：`domain:` 覆盖同名
+`full:`、子域 `full:` 和子域 `domain:`，按 `narrow_rule/broad_rule` 排序，
+列出参与这对规则的 `policies/winner`，包含区域直连例外，同策略覆盖不报告。
+域名按标签边界比较，不把 `notexample.net` 归入 `example.net`；不推断 keyword、
+GeoSite 成员或 IP/BT。`winner` 仅针对所列规则，不表示最终流量路径。
+域名解析后 IP 阻断继续待交付：本地解析结果不能代替代理实际连接地址，
+切换 Xray `IPOnDemand` 也不保证解析失败拒绝，不能据此宣称阻断有效。
+
 菜单 `17` 的 IP/CIDR 阻断使用独立 v3 `.routing.block_ips`，私有 JSON 为
 `{"ips":["192.0.2.8","198.51.100.0/24","2001:db8::/32","geoip:cn"]}`。
 接受 1–256 条唯一 IPv4/纯 IPv6 字面地址或 CIDR，以及固定 `geoip:cn`；

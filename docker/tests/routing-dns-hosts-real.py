@@ -150,6 +150,8 @@ class Dns(socketserver.BaseRequestHandler):
         if status == 0 and kind == self.server.answer_kind:
             family = socket.AF_INET if kind == 1 else socket.AF_INET6
             address = "127.0.0.1" if kind == 1 else "::1"
+            if name.startswith("split-") and kind == 1:
+                address = "127.0.0.2"
             value = socket.inet_pton(family, address)
             answer = b"\xc0\x0c" + struct.pack("!HHIH", kind, 1, 30, len(value)) + value
         header = request[:2] + struct.pack("!HHHHH", 0x8180 | status, 1, int(bool(answer)), 0, 0)
@@ -182,7 +184,8 @@ def system_hosts(family, host):
     names = [f"{prefix}-{suffix}.padm.invalid" for prefix in ("unmatched", "proxy", "error", "timeout")]
     path = Path("/etc/hosts")
     address_names = names + helpers["domain_names"](family) + block_names(family) + [
-        f"hosts-{suffix}.padm.invalid", f"allowbt-{suffix}.padm.invalid"]
+        f"hosts-{suffix}.padm.invalid", f"allowbt-{suffix}.padm.invalid",
+        f"split-{suffix}.padm.invalid"]
     if os.environ.get("PADM_ROUTING_REAL_SCOPE") == "region":
         address_names += ["cn-region.padm.invalid", "allow-region.padm.invalid", "dl.google.com",
                           "persist-region.padm.invalid"]
@@ -579,6 +582,38 @@ def check_ips(root, core, family, host):
                         helpers["failed_start"](command, path, root / f"{core}.geoip-404.log", root,
                                                 "rule-set", "404")
                         assert "/missing-geoip.srs" in resource.requested_paths, "GeoIP 404 未触达 HTTP fixture"
+            if core == "xray" and family == "ipv4":
+                # 只探测待迁移策略，不把本地 DNS 校验当作代理实际目的的授权。
+                probe = copy.deepcopy(config)
+                split = f"split-{suffix}.padm.invalid"
+                failed = fallback[2]
+                probe["routing"]["domainStrategy"] = "IPOnDemand"
+                probe["dns"]["servers"][0]["domains"] += ["full:" + split]
+                for rule in probe["routing"]["rules"]:
+                    if rule.get("outboundTag") == "padm-socks5":
+                        rule["domain"] += ["full:" + split, "full:" + failed]
+                upstream.destination_hosts += [split, failed]
+                path = root / "xray.resolved-ip-probe.json"
+                write_config(path, probe)
+                with running(command, path, host, local, root / "xray.resolved-ip-probe.log"):
+                    for target in (names[1], split, failed):
+                        before = (destination.accepted, len(dns.requests), upstream.connects)
+                        connected = False
+                        try:
+                            connected = request(host, local, upstream.destination, target,
+                                                pipelined=True)
+                        except (EOFError, ConnectionResetError):
+                            pass
+                        result = dict(target=target, connected=connected,
+                                      origin=destination.accepted - before[0],
+                                      dns=dns.requests[before[1]:],
+                                      proxy=upstream.connects - before[2])
+                        print("routing-resolved-ip-probe:" + json.dumps(result), flush=True)
+                        # 固定核心仍有这两个绕过；核心行为变化后重新评估生产门槛。
+                        forwarded = int(target != names[1])
+                        assert (connected, result["origin"], result["proxy"]) == (
+                            bool(forwarded), forwarded, forwarded), "解析策略探针行为已变化"
+                        assert target in result["dns"], "探针未经过生产 DNS 来源"
         finally:
             for server in servers:
                 server.shutdown()

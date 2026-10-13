@@ -1351,7 +1351,7 @@ upstreamEditCheck() {
     assertClean
     printf 'docker-routing-upstreams-regression-ok\n'
 }
-# 精确重叠诊断复用组合夹具与生产只读入口，只在核心合同分片运行一次。
+# 重叠与域名覆盖诊断复用生产只读入口，只在核心合同分片运行一次。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-contracts || -z "${PADM_DOCKER_ROUTING_SCOPE:-}" ]]; then
     jq '.routing.direct.domains = ["full:all.example.com","full:suffix.example.net","geosite:category-ads-all"] |
       .routing.block.domains = ["full:all.example.com","full:block.example.com","domain:apple.com",
@@ -1363,7 +1363,16 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-contracts || -z "${PADM_DOCKER_RO
       .routing.region = {mode:"both",allow_domains:["full:region.example.com","domain:apple.com"]}
     ' "${TEST_ROOT}/warp-owner.json" >"${TEST_ROOT}/overlap-both.json"
     jq '.routing.region.mode = "ip"' "${TEST_ROOT}/overlap-both.json" >"${TEST_ROOT}/overlap-ip.json"
-    for fixture in base overlap-both overlap-ip routed ipv6-global warp-global; do
+    jq '.routing.direct.domains = ["full:edge.example.net","domain:api.example.net",
+        "domain:same.example.org","full:same.example.org","full:notexample.net",
+        "full:example.net.evil","keyword:example","geosite:category-ads-all"] |
+      .routing.block.domains = ["domain:example.net","domain:private.example.net","full:login.apple.com"] |
+      .routing.ipv6.domains = ["full:node.api.example.net"] |
+      .routing.warp.domains = ["domain:private.example.net"] |
+      .routing.socks5.domains = ["full:client.private.example.net"] |
+      .routing.region = {mode:"both",allow_domains:["full:custom.apple.com"]}
+    ' "${TEST_ROOT}/warp-owner.json" >"${TEST_ROOT}/coverage.json"
+    for fixture in base overlap-both overlap-ip coverage routed ipv6-global warp-global; do
         (
             trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
             dockerAcquireDeploymentLock
@@ -1389,9 +1398,37 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-contracts || -z "${PADM_DOCKER_RO
               ] + if $fixture == "overlap-both" then
                 [{rule:"geosite:cn",policies:["block","socks5"],winner:"block"}] else [] end)
             ' "${LOG}" >/dev/null || fail "${fixture}: 精确重叠、优先级或区域合成错误"
+            jq -e '.domain_rule_coverages == [{
+              narrow_rule:"full:suffix.example.net",broad_rule:"domain:suffix.example.net",
+              policies:["direct","block"],winner:"direct"}]' "${LOG}" >/dev/null ||
+                fail "${fixture}: 精确域名与后缀覆盖未被诊断"
+        elif [[ "${fixture}" == coverage ]]; then
+            jq -e '
+              .domain_rule_overlaps == [{rule:"domain:private.example.net",
+                policies:["block","warp"],winner:"block"}] and
+              .domain_rule_coverages == ([
+                {narrow_rule:"domain:api.example.net",broad_rule:"domain:example.net",
+                  policies:["direct","block"],winner:"direct"},
+                {narrow_rule:"domain:private.example.net",broad_rule:"domain:example.net",
+                  policies:["block","warp"],winner:"block"},
+                {narrow_rule:"full:client.private.example.net",broad_rule:"domain:example.net",
+                  policies:["block","socks5"],winner:"block"},
+                {narrow_rule:"full:client.private.example.net",broad_rule:"domain:private.example.net",
+                  policies:["block","warp","socks5"],winner:"block"},
+                {narrow_rule:"full:edge.example.net",broad_rule:"domain:example.net",
+                  policies:["direct","block"],winner:"direct"},
+                {narrow_rule:"full:login.apple.com",broad_rule:"domain:apple.com",
+                  policies:["direct","block"],winner:"direct"},
+                {narrow_rule:"full:node.api.example.net",broad_rule:"domain:api.example.net",
+                  policies:["direct","ipv6"],winner:"direct"},
+                {narrow_rule:"full:node.api.example.net",broad_rule:"domain:example.net",
+                  policies:["block","ipv6"],winner:"block"}
+              ] | sort_by(.narrow_rule,.broad_rule))
+            ' "${LOG}" >/dev/null ||
+                fail '域名层级、五策略、区域默认例外、边界或同策略去重诊断错误'
         else
-            jq -e '.domain_rule_overlaps == []' "${LOG}" >/dev/null ||
-                fail "${fixture}: 关闭或全局出站被误报为域名重叠"
+            jq -e '.domain_rule_overlaps == [] and .domain_rule_coverages == []' "${LOG}" >/dev/null ||
+                fail "${fixture}: 关闭或全局出站被误报为域名重叠或覆盖"
         fi
         [[ "$(snapshot)" == "${before}" ]] || fail "${fixture}: 只读诊断改变部署"
     done
@@ -2479,7 +2516,7 @@ fi
 before=$(snapshot)
 runStatus 0
 jq -e '. == {enabled:false,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",domain_rules:[],
-  direct_block_overlaps:[],domain_rule_overlaps:[],http_relay:{enabled:false}}' "${LOG}" >/dev/null ||
+  direct_block_overlaps:[],domain_rule_overlaps:[],domain_rule_coverages:[],http_relay:{enabled:false}}' "${LOG}" >/dev/null ||
     fail '关闭路由诊断合同错误'
 runStatus 2 unexpected
 runEdit 0 --socks5 "${INPUT}" --preview
@@ -2606,7 +2643,7 @@ runEdit 15 --spec "${TEST_ROOT}/routing-replacement.json" --confirm PADM-DOCKER-
 [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过路由专项冻结'
 runStatus 0
 jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[],
-  direct_block_overlaps:[],domain_rule_overlaps:[],http_relay:{enabled:false}}' \
+  direct_block_overlaps:[],domain_rule_overlaps:[],domain_rule_coverages:[],http_relay:{enabled:false}}' \
     "${LOG}" >/dev/null || fail '开启路由诊断合同错误'
 before=$(snapshot)
 for option in --socks5-domains-add --socks5-domains-remove --socks5-domains-replace; do
@@ -2623,7 +2660,7 @@ jq -en --slurpfile expected "${TEST_ROOT}/domains.json" --slurpfile actual "${ro
 runStatus 0
 jq -e --argjson domains "${DOMAINS}" '
   . == {enabled:true,server:"203.0.113.9",port:1080,tcp:"matched-socks5",
-        udp:"matched-blocked",mode:"domains",domain_rules:$domains,direct_block_overlaps:[],domain_rule_overlaps:[],http_relay:{enabled:false}}
+        udp:"matched-blocked",mode:"domains",domain_rules:$domains,direct_block_overlaps:[],domain_rule_overlaps:[],domain_rule_coverages:[],http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail '选择性路由诊断合同错误'
 before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/routed.json" --confirm PADM-DOCKER-EDIT
@@ -2643,7 +2680,7 @@ jq -en --argjson domains "${replacementDomains}" --slurpfile old "${TEST_ROOT}/r
 runStatus 0
 jq -e --argjson domains "${replacementDomains}" '
   . == {enabled:true,server:"203.0.113.9",port:1080,tcp:"matched-socks5",
-        udp:"matched-blocked",mode:"domains",domain_rules:$domains,direct_block_overlaps:[],domain_rule_overlaps:[],http_relay:{enabled:false}}
+        udp:"matched-blocked",mode:"domains",domain_rules:$domains,direct_block_overlaps:[],domain_rule_overlaps:[],domain_rule_coverages:[],http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail '规则替换后状态没有返回规范化数组'
 before=$(snapshot)
 for failure in health-fail int term; do
@@ -2665,7 +2702,7 @@ jq -en --slurpfile expected "${TEST_ROOT}/routed.json" --slurpfile actual "${roo
     '$actual == $expected' >/dev/null || fail '切换全局没有仅删除 domains 或改变凭据'
 runStatus 0
 jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[],
-  direct_block_overlaps:[],domain_rule_overlaps:[],http_relay:{enabled:false}}' \
+  direct_block_overlaps:[],domain_rule_overlaps:[],domain_rule_coverages:[],http_relay:{enabled:false}}' \
     "${LOG}" >/dev/null || fail '切换全局后状态合同错误'
 runEdit 0 --socks5-domains 'example.net' --confirm PADM-DOCKER-EDIT
 runEdit 0 --socks5-domains-remove 'example.net' --confirm PADM-DOCKER-EDIT
@@ -2874,7 +2911,7 @@ runStatus 0
 jq -e --argjson dns "${DNS}" '
   . == {enabled:true,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",
         domain_rules:[],dns:{server:$dns.server,port:$dns.port,domain_rules:$dns.domains},
-        direct_block_overlaps:[],domain_rule_overlaps:[],http_relay:{enabled:false}}
+        direct_block_overlaps:[],domain_rule_overlaps:[],domain_rule_coverages:[],http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail 'DNS 独立状态合同错误'
 before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
