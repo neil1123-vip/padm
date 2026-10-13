@@ -603,7 +603,8 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
     session = root / "data/net/.hopping-supervisor"
     state = root / "data/net/port-hopping.state"
     lock = root / "data/net/.port-hopping.lock"
-    environment = dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root), DOCKER_HOST=docker[-1])
+    environment = dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root), DOCKER_HOST=docker[-1],
+                       PADM_DOCKER_BIN_DIR=str(node / "bin"))
     evidence = dict(scope="independent-hopping-supervisor",
                     native_host_verified=False, systemd_reboot_verified=False,
                     hup_verified=False, arm64_verified=False,
@@ -635,10 +636,11 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             accepted=accepted, elapsed_ms=round((time.monotonic() - started_at) * 1000),
             returncode=result.returncode, stderr=result.stderr.decode()))
 
-    def invoke(function, *arguments, accepted=True):
+    def invoke(function, *arguments, accepted=True, json_output=True):
         with (work / "independent-supervisor.log").open("ab") as log:
             process = subprocess.Popen([
-                "bash", "-Eeuo", "pipefail", "-c", '. "$1"; shift; "$@"',
+                "bash", "-Eeuo", "pipefail", "-c",
+                '. "$1"; shift; trap dockerReleaseDeploymentLock EXIT; "$@"',
                 "test", str(ROOT / "install-docker.sh"), function, *arguments],
                 env=environment, stdout=subprocess.PIPE, stderr=log)
             try:
@@ -654,7 +656,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             assert process.returncode != 0 and not output, calls[-1]
             return None
         assert process.returncode == 0, calls[-1]
-        return process.pid, json.loads(output)
+        return process.pid, json.loads(output) if json_output else output.decode()
 
     def alive(descriptor):
         poller = select.poll()
@@ -724,19 +726,31 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
                 ("Id", "Image", "Created", "Config", "HostConfig", "Mounts")} | {
                     "StartedAt": value["State"]["StartedAt"]}
 
-    def stopped_clean(value, owner, target, running, manager_fd, bash_fd):
-        ack(value, "stopped", owner)
-        assert value["finished"] == dict(status=143, lock_released=True)
-        assert value["cleaned"] == dict(target=target, child_id=running["child_id"],
-                                        stage=owner["stage"])
+    def lifecycle_stopped(manager_fd, bash_fd):
         wait_ready(lambda: not alive(manager_fd) and not alive(bash_fd), 5)
-        assert not alive(manager_fd) and not alive(bash_fd), "停止 ACK 前仍有本轮监督任务"
         assert not session.exists() and not state.exists()
         assert not (root / "locks/deployment.lock").exists()
-        assert {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
-                for tool in nat_before} == nat_before
+        assert all(b"padm-hop-" not in command([tool, "-w", "-t", "nat", "-S"], timeout=5)
+                   for tool in nat_before)
         assert not command(docker + [
             "ps", "-aq", "--filter", "label=io.padm.hopping-supervised"]).strip()
+        assert not command(docker + [
+            "ps", "-aq", "--filter", "label=com.docker.compose.project=padm-docker"]).strip()
+        assert tree(lock) == net_lock and set(root.glob(".hopping-guarded.*")) == stages
+
+    def lifecycle_resume(phase):
+        invoke("dockerLifecycleCommand", "up", json_output=False)
+        core_id = command(docker + [
+            "compose", "--project-name", "padm-docker", "--env-file",
+            str(root / "images.env"), "--file", str(root / "compose.json"),
+            "ps", "-q", "sing-box"]).decode().strip()
+        assert core_id
+        wait_ready(lambda: inspect(docker, core_id)["State"].get("Health", {}).get(
+            "Status") == "healthy", 45)
+        authentication(node, root, enter, phase, self_password, alice_password, "old")
+        # Compose down/up 可能重建 bridge；业务恢复后固定新的普通部署 NAT 基线。
+        nat_before.update({tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
+                           for tool in nat_before})
 
     try:
         assert not session.exists() and not state.exists()
@@ -918,17 +932,18 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         _, status = invoke("dockerPortHoppingSupervisorStatus")
         ack(status, "status", second_owner)
         assert frame(status["payload"]["running"])["child_id"] == second_frame["child_id"]
-        _, second_stopped = invoke("dockerPortHoppingSupervisorStop")
-        stopped_clean(second_stopped, second_owner, second["payload"]["target"], second_frame,
-                      second_manager, second_bash)
+        _, down_output = invoke("dockerLifecycleCommand", "down", json_output=False)
+        assert not down_output
+        lifecycle_stopped(second_manager, second_bash)
         active = False
         admission(True)
-        assert tree(lock) == net_lock and set(root.glob(".hopping-guarded.*")) == stages
-        evidence.update(second_started=second, second_stopped=second_stopped,
+        assert (root / "config/spec.json").is_file() and (root / "bundle").is_symlink()
+        evidence.update(second_started=second, lifecycle_down=True,
                         stale_token_refused=True, online_lifecycle_restart=True,
                         fresh_owner_restart=True, session_preserved=True,
                         nat_restored=True, state_removed=True, child_removed=True,
                         deployment_lock_released=True, session_removed=True)
+        lifecycle_resume("lifecycle-down-resumed")
         _, terminated = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
                                "30001", "198.18.1.1", "2001:db8:1::1")
         active = True
@@ -951,6 +966,25 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             child_removed=True, state_removed=True, nat_restored=True,
             deployment_lock_released=True, stage_removed=True, session_removed=True,
             uniform_revocation_deadline_verified=False)
+        _, uninstalling = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
+                                 "30001", "198.18.1.1", "2001:db8:1::1")
+        active = True
+        uninstall_owner = ack(uninstalling, "started")
+        uninstall_manager = process_identity(uninstall_owner["manager"])
+        uninstall_bash = process_identity(uninstall_owner["bash"])
+        cli = node / "bin/padm-docker"
+        assert cli.is_symlink()
+        _, uninstall_output = invoke("dockerUninstallCommand", json_output=False)
+        assert uninstall_output.strip() == (
+            "Docker 控制命令已卸载；状态、配置、数据、备份和镜像均已保留")
+        lifecycle_stopped(uninstall_manager, uninstall_bash)
+        active = False
+        assert not cli.exists() and not cli.is_symlink()
+        assert (root / "config/spec.json").is_file() and (root / "bundle").is_symlink()
+        invoke("dockerInstallCli", json_output=False)
+        lifecycle_resume("lifecycle-uninstall-resumed")
+        evidence.update(lifecycle_uninstall=True, uninstall_state_retained=True,
+                        lifecycle_business_restored=True)
         _, killed = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
                            "30001", "198.18.1.1", "2001:db8:1::1")
         active = True
@@ -985,6 +1019,8 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             ("dockerPortHoppingSupervisorStatus", ()),
             ("dockerPortHoppingSupervisorStop", ()),
             ("dockerLifecycleCommand", ("restart",)),
+            ("dockerLifecycleCommand", ("down",)),
+            ("dockerUninstallCommand", ()),
             ("dockerPortHoppingSupervisorStart",
              ("entry-hy2", "30000", "30001", "198.18.1.1", "2001:db8:1::1")),
         ):
@@ -1129,16 +1165,18 @@ def run(work):
             spec.write_text(json.dumps(configured))
             # 生成材料与 bind 源均属于本次私有节点，保持完整生产 Compose。
             command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
+                     "PADM_DOCKER_BIN_DIR=" + str(node / "bin"),
                      "bash", "-Eeuo", "pipefail", "-c", """
 . "$1"
-bundle=$3
-dockerCurrentBundlePath() { printf '%s\\n' "${bundle}"; }
+dockerInitializeStateRoot
+dockerInstallBundle "$(dirname "$1")" ffffffffffffffffffffffffffffffffffffffff
+dockerInstallCli
 dockerGenerateCompose "$2/config/spec.json" "$2/compose.json" "$2"
 : >"$2/images.env"
 dockerGenerateImagesEnv "$2/config/spec.json" "$2/images.env" "$2"
 dockerGenerateDeployment "$2/config/spec.json" "$2/deployment.json"
 dockerTlsRuntimePermissions "$2/secrets/tls"
-""", "test", str(ROOT / "install-docker.sh"), str(root), str(work / "bundle")])
+""", "test", str(ROOT / "install-docker.sh"), str(root)])
             clients = namespaces()
             # 持续会话验收超过原 120 秒，保留现有 netns 而不重建网络夹具。
             for index, client in enumerate(clients):

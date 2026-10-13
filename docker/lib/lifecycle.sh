@@ -1526,6 +1526,21 @@ dockerPortHoppingSupervisorStop() {
         python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" stop "${root}"
 }
 
+dockerPortHoppingSupervisorStopIfActive() {
+    local root
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -e "${root}/data/net/.hopping-supervisor" ||
+        -L "${root}/data/net/.hopping-supervisor" ]]; then
+        dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+        dockerPortHoppingSupervisorStop >/dev/null || {
+            dockerError '跳跃监督会话未能通过原控制通道停止，已拒绝生命周期操作'
+            return "${PADM_DOCKER_RC_LOCK}"
+        }
+        dockerPortHoppingSessionAbsent "${root}" || return "${PADM_DOCKER_RC_LOCK}"
+    fi
+    return 0
+}
+
 dockerPortHoppingTargetSupervisedOwned() {
     local ph_control=${1:-} owner=${BASHPID:-$$} original= current root status=1
     local released=false ownerSignal=0 intTrap termTrap pipeTrap payload ph_restart=false
@@ -1791,6 +1806,10 @@ dockerLifecycleCommand() {
             return "${PADM_DOCKER_RC_LOCK}"
         }
         return 0
+    fi
+    if [[ "${operation}" == down ]]; then
+        [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerPortHoppingSupervisorStopIfActive || return $?
     fi
     dockerLockInstalledDeployment || return $?
     dockerComposeFile >/dev/null || {
@@ -2474,6 +2493,7 @@ dockerUninstallCommand() {
         printf 'Docker 版 padm 未安装，无需卸载\n'
         return 0
     fi
+    dockerPortHoppingSupervisorStopIfActive || return $?
     dockerLockInstalledDeployment || return $?
     dockerTrafficBeforeChange
     if ((purge)); then

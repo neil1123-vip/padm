@@ -6408,6 +6408,31 @@ Docker Linux amd64 验收通过，复用工具镜像
 原生宿主/systemd/整机重启/arm64/公网及可信发布仍未交付或未验；
 支持状态仍 deferred，总目标 active。
 
+#### 5C.9c.3e.2b.3d.5 down/uninstall 协调
+
+既有 `down` CLI/菜单和卸载在参数、宿主与当前 bundle 检查后，经原监督控制
+通道净停止活动会话，再复用普通部署锁及原生命周期事务。停止 ACK 仅在旧 Bash
+退出、规则 state 和原锁净清理后成立；随后重新检查 marker 消失并正常取锁，
+竞争中新会话仍由原门禁拒绝。未知残留、非法净停止回执或停止失败不继续
+Compose、计划删除或卸载，不删除证据。普通 `up`、status、更新、回滚等
+仍沿用部署门禁；更新/回滚中的恢复与重新启用协调继续 deferred。
+
+定向复用实际 manager 与确定性 owner 夹具，覆盖 down/uninstall 成功、
+非法参数不停止会话及停止失败不修改部署。真实夹具安装当前源码受管 bundle、
+独立 CLI，验证 down/uninstall 后监督与核心清理、状态保留和恢复业务。
+Docker Linux amd64 定向 69 项通过，入口 13882 ms：
+`.tmp-regression-docker-162070a784e44678930b5eb096bc3f96/`。
+真实验收 312.077 秒、入口 314859 ms、排队 170 ms，退出与业务恢复通过：
+`.tmp-regression-docker-950ee6b285fa43fbaf5fcfa7b3e1d34e/`。
+两次复用同一工具镜像，定向生产逻辑/监督测试及真实的 3 个交付文件
+均匹配相应源码归档；定向未执行的真实夹具后续改动由真实验收覆盖。
+集中 `docker-contracts` 54/54 顶层叶子唯一匹配实际归档，入口 563566 ms、
+排队 74763 ms，Jobs 6、cache=false：
+`.tmp-regression-docker-cb5a5dc485554261a18fb01c2edef2b1/`。
+真实与集中归档 SHA-256 相同，本轮 3 个代码/测试文件匹配当前工作区；
+保留各目录核验、结果和日志，清理成功重复归档及本轮核验脚本。
+本阶段不升级公开支持范围，完整 purge、原生宿主等验收仍 deferred。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

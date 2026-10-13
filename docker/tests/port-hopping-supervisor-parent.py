@@ -46,25 +46,47 @@ if [[ -n "${TEST_GATE_CASE:-}" ]]; then
         return "${status}"
     }
 fi
+if [[ "${TEST_LIFECYCLE:-}" == true ]]; then
+    dockerComposeFile() { printf '%s/compose.json\n' "$PADM_DOCKER_INSTALL_DIR"; }
+    dockerTrafficBeforeChange() { printf 'traffic\n' >>"$PADM_DOCKER_INSTALL_DIR/actions"; }
+    dockerRenewalScheduleRemove() { printf 'renewal\n' >>"$PADM_DOCKER_INSTALL_DIR/actions"; }
+    dockerGeoScheduleRemove() { printf 'geo\n' >>"$PADM_DOCKER_INSTALL_DIR/actions"; }
+    dockerControlLogScheduleRemove() { printf 'log\n' >>"$PADM_DOCKER_INSTALL_DIR/actions"; }
+    dockerControlSyncScheduleRemove() { printf 'sync\n' >>"$PADM_DOCKER_INSTALL_DIR/actions"; }
+    dockerTrafficScheduleRemove() { printf 'schedule\n' >>"$PADM_DOCKER_INSTALL_DIR/actions"; }
+    dockerRemoveCli() { printf 'cli\n' >>"$PADM_DOCKER_INSTALL_DIR/actions"; }
+    dockerComposeRun() {
+        [[ "$#" -eq 1 && "$1" == down &&
+            ! -e "$PADM_DOCKER_INSTALL_DIR/data/net/.hopping-supervisor" &&
+            ! -e "$PADM_DOCKER_INSTALL_DIR/data/net/fixture-running" &&
+            -d "$DOCKER_DEPLOYMENT_LOCK_DIR" ]] || return 1
+        printf 'compose:down\n' >>"$PADM_DOCKER_INSTALL_DIR/actions"
+    }
+fi
 "$@"
 '''
 
 
-def deployment_command(root, function, *arguments, accepted=False, boundary=""):
+def deployment_command(root, function, *arguments, accepted=False, boundary="",
+                       lifecycle=False, usage=False):
     result = subprocess.run([
         "bash", "-Eeuo", "pipefail", "-c", DEPLOYMENT_BODY, "test",
         str(ROOT / "install-docker.sh"), function, *arguments],
         env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root), PADM_DOCKER_LOCK_TIMEOUT="30",
-                 TEST_GATE_CASE=boundary),
+                 TEST_GATE_CASE=boundary, TEST_LIFECYCLE="true" if lifecycle else ""),
         capture_output=True, timeout=5)
-    assert result.returncode == (0 if accepted else 12), (
+    assert result.returncode == (2 if usage else 0 if accepted else 12), (
         function, result.returncode, result.stdout, result.stderr)
-    assert not result.stdout
+    if accepted and function == "dockerUninstallCommand":
+        assert result.stdout.decode().strip() == "Docker 控制命令已卸载；状态、配置、数据、备份和镜像均已保留"
+    else:
+        assert not result.stdout
     if accepted:
         assert not result.stderr
-    else:
+    elif not usage:
         assert any(message.encode() in result.stderr for message in (
-            "跳跃监督会话存在或停止未核验", "跳跃监督重启未确认")), result.stderr
+            "跳跃监督会话存在或停止未核验", "跳跃监督重启未确认",
+            "跳跃监督会话未能通过原控制通道停止")), result.stderr
 
 
 def deployment_gate_cases(base):
@@ -493,7 +515,8 @@ def main():
         entrypoint.chmod(0o600)
         count += reservation_cases(base, entrypoint)
         for case in ("clean", "ack-lost", "invalid-finished", "invalid-finished-restart",
-                     "invalid-restart-gate", "precommit-eof"):
+                     "invalid-restart-gate", "precommit-eof", "lifecycle-down",
+                     "lifecycle-uninstall", "invalid-finished-down", "invalid-finished-uninstall"):
             installation = base / case
             (installation / "data/net").mkdir(parents=True, mode=0o700)
             installation.chmod(0o700)
@@ -606,6 +629,34 @@ def main():
                         deployment_command(installation, "dockerLockInstalledDeployment")
                         count += 1
                     assert len((installation / "fixture-launches").read_text().splitlines()) == 3
+                elif case.endswith(("-down", "-uninstall")):
+                    uninstall = case.endswith("-uninstall")
+                    function = "dockerUninstallCommand" if uninstall else "dockerLifecycleCommand"
+                    arguments = () if uninstall else ("down",)
+                    deployment_command(
+                        installation, function, *(("--purge",) if uninstall else ("down", "extra")),
+                        lifecycle=True, usage=True)
+                    assert MODULE["control"]("status", str(installation))["owner"] == owner
+                    assert not (installation / "actions").exists()
+                    if uninstall:
+                        (installation / "compose.json").write_text("{}")
+                    valid = not case.startswith("invalid")
+                    deployment_command(installation, function, *arguments,
+                                       lifecycle=True, accepted=valid)
+                    assert len((installation / "fixture-launches").read_text().splitlines()) == 1
+                    assert not (installation / "data/net/fixture-running").exists()
+                    assert not lock.exists()
+                    if valid:
+                        assert not (installation / "data/net/.hopping-supervisor").exists()
+                        expected = (["traffic", "geo", "renewal", "log", "sync",
+                                     "compose:down", "schedule", "cli"] if uninstall else
+                                    ["renewal", "log", "sync", "traffic", "compose:down", "schedule"])
+                        assert (installation / "actions").read_text().splitlines() == expected
+                    else:
+                        assert (installation / "data/net/.hopping-supervisor/owner.json").exists()
+                        assert not (installation / "actions").exists()
+                    count += 2
+                    continue
                 elif case in {"invalid-finished-restart", "invalid-restart-gate"}:
                     session = installation / "data/net/.hopping-supervisor"
                     session_id = MODULE["path_identity"](session.stat())
