@@ -975,7 +975,7 @@ port_hopping_preflight() {
 }
 
 port_hopping_resources() {
-    if [ "${1:-}" = run ] || [ "${1:-}" = probe ]; then
+    if [ "${1:-}" = run ] || [ "${1:-}" = probe ] || [ "${1:-}" = guarded ]; then
         set -- exec python3 /dev/fd/3 "$STATE_ROOT" "$@"
     else
         set -- python3 /dev/fd/3 "$STATE_ROOT" "$@"
@@ -1363,20 +1363,34 @@ def probe_stop(signum, _frame):
     print("padm-net: port hopping probe interrupted", file=sys.stderr)
     sys.exit(128 + signum)
 
-def probe_request(nonce, host):
+def frame_bytes(eof):
     deadline = time.monotonic() + 20
     data = b""
-    # 必须等到父端关闭输入；一行请求和新鲜 nonce 都不授予规则写入权限。
     while True:
+        if operation == "guarded":
+            guarded_signal_check()
         remaining = deadline - time.monotonic()
-        if remaining <= 0 or not select.select([0], [], [], remaining)[0]:
+        if remaining <= 0:
             raise ValueError("port hopping probe request timed out")
-        chunk = os.read(0, 4097 - len(data))
+        if not select.select([0], [], [], min(remaining, 0.1) if operation == "guarded"
+                             else remaining)[0]:
+            continue
+        # 中间帧逐字节读，保留下一阶段输入；只读请求仍必须等 EOF。
+        chunk = os.read(0, 1)
+        if operation == "guarded":
+            guarded_signal_check()
         if not chunk:
+            if not eof:
+                raise ValueError("port hopping guarded input closed before its gate")
             break
         data += chunk
         if len(data) > 4096:
             raise ValueError("port hopping probe request is oversized")
+        if not eof and chunk == b"\n":
+            break
+    return data
+
+def frame_value(data):
     if not data.endswith(b"\n") or data.count(b"\n") != 1 or b"\0" in data or b"\r" in data:
         raise ValueError("port hopping probe requires exactly one LF terminated request")
 
@@ -1388,7 +1402,11 @@ def probe_request(nonce, host):
             result[key] = value
         return result
 
-    request = json.loads(data[:-1].decode("ascii"), object_pairs_hook=unique)
+    return json.loads(data[:-1].decode("ascii"), object_pairs_hook=unique)
+
+def probe_request(nonce, host, eof=True):
+    data = frame_bytes(eof)
+    request = frame_value(data)
     expected = {"v", "nonce", "parent_pid", "parent_lock_sha256", "startup_sha256",
                 "child_id", "image_id", "target"}
     if (not isinstance(request, dict) or set(request) != expected
@@ -1447,6 +1465,113 @@ def probe():
                       "child_id": request["child_id"], "request_sha256": digest},
                      separators=(",", ":")), flush=True)
 
+def install_rules():
+    for tool, address in tools:
+        if stopped:
+            return False
+        write(tool, ["-N", chain])
+        created.add(tool)
+        if stopped:
+            return False
+        write(tool, rules(address)[2])
+        created.remove(tool)
+        if stopped:
+            return False
+        write(tool, ["-I", chain, "1", *rules(address)[1][2:]])
+        if stopped:
+            return False
+        write(tool, ["-I", "PREROUTING", "1", *rules(address)[0][2:]])
+    return True
+
+def guarded_stop(signum, _frame):
+    global stopped, stop_signal
+    stopped, stop_signal = True, signum
+
+def guarded_signal_check():
+    if stopped:
+        print("padm-net: port hopping guarded interrupted", file=sys.stderr)
+        raise SystemExit(128 + stop_signal)
+
+def guarded_gate(phase, action, request, digest):
+    guarded_signal_check()
+    nonce = os.urandom(32).hex()
+    value = {"v": 1, "phase": phase, "nonce": nonce,
+             "child_id": request["child_id"], "request_sha256": digest}
+    print(json.dumps(value, separators=(",", ":")), flush=True)
+    received = frame_value(frame_bytes(False))
+    if (not isinstance(received, dict) or type(received.get("v")) is not int
+            or received != {**value, "phase": action}):
+        raise ValueError("port hopping guarded phase or binding mismatch")
+    guarded_signal_check()
+    return nonce
+
+def guarded():
+    global token, chain, start, end, target_port, ipv4, ipv6, phase, tools, comment, stop_signal
+    parameters_valid(*parameters)
+    stop_signal = 0
+    signal.signal(signal.SIGTERM, guarded_stop)
+    signal.signal(signal.SIGINT, guarded_stop)
+    local_addresses(*parameters[3:])
+    acquire_lock()
+    preflight(*parameters[:3])
+    lock_owner()
+    host = socket.gethostname()
+    if not re.fullmatch(r"[a-f0-9]{12}", host):
+        raise ValueError("unverified port hopping guarded hostname")
+    guarded_signal_check()
+    nonce = os.urandom(32).hex()
+    print(json.dumps({"v": 1, "phase": "challenge", "nonce": nonce, "host": host},
+                     separators=(",", ":")), flush=True)
+    request, digest = probe_request(nonce, host, eof=False)
+    preflight(*parameters[:3])
+    local_addresses(*parameters[3:])
+    lock_owner()
+    guarded_gate("ready", "write", request, digest)
+    # shortcut: 仅验有限子协议，接持续启用前须由同锁父端复验真实启动版本。
+    preflight(*parameters[:3])
+    local_addresses(*parameters[3:])
+    lock_owner()
+    guarded_signal_check()
+    start, end, target_port, ipv4, ipv6 = parameters
+    token = os.urandom(16).hex()
+    chain, comment = "padm-hop-" + token[:12], "padm-hop:" + token
+    tools = (("iptables", ipv4), ("ip6tables", ipv6))
+    phase = "intent"
+    try:
+        commit_state()
+        install_rules()
+        guarded_signal_check()
+        conflicts(start, end, owned=True)
+        local_addresses(ipv4, ipv6)
+        owner()
+        guarded_gate("written", "finalize", request, digest)
+        conflicts(start, end, owned=True)
+        local_addresses(ipv4, ipv6)
+        owner()
+        guarded_signal_check()
+        phase = "active"
+        commit_state()
+        conflicts(start, end, owned=True)
+        local_addresses(ipv4, ipv6)
+        owner()
+        nonce = guarded_gate("active", "close", request, digest)
+        if frame_bytes(True):
+            raise ValueError("port hopping guarded close contains extra input")
+        guarded_signal_check()
+    finally:
+        # 整条写命令返回并记账后才响应信号；外来冲突不阻断精确自有回收。
+        if state is not None:
+            clean()
+    guarded_signal_check()
+    if os.path.lexists(state_path):
+        raise ValueError("port hopping guarded state remains after cleanup")
+    lock_owner()
+    guarded_signal_check()
+    print(json.dumps({"v": 1, "phase": "closed", "nonce": nonce,
+                      "child_id": request["child_id"], "request_sha256": digest},
+                     separators=(",", ":")), flush=True)
+    guarded_signal_check()
+
 def run():
     global token, chain, start, end, target_port, ipv4, ipv6, phase, tools, comment
     parameters_valid(*parameters)
@@ -1474,21 +1599,8 @@ def run():
     phase = "intent"
     try:
         commit_state()
-        for tool, address in tools:
-            if stopped:
-                return
-            write(tool, ["-N", chain])
-            created.add(tool)
-            if stopped:
-                return
-            write(tool, rules(address)[2])
-            created.remove(tool)
-            if stopped:
-                return
-            write(tool, ["-I", chain, "1", *rules(address)[1][2:]])
-            if stopped:
-                return
-            write(tool, ["-I", "PREROUTING", "1", *rules(address)[0][2:]])
+        if not install_rules():
+            return
         conflicts(start, end, owned=True)
         if stopped:
             return
@@ -1503,7 +1615,8 @@ def run():
             clean()
 
 try:
-    lengths = {"preflight": 3, "run": 5, "probe": 5, "audit": 1, "health": 1, "clean": 1}
+    lengths = {"preflight": 3, "run": 5, "probe": 5, "guarded": 5,
+               "audit": 1, "health": 1, "clean": 1}
     if operation not in lengths or len(parameters) != lengths[operation]:
         raise ValueError("invalid port hopping operation or parameters")
     if operation == "preflight":
@@ -1512,6 +1625,8 @@ try:
         run()
     elif operation == "probe":
         probe()
+    elif operation == "guarded":
+        guarded()
     else:
         if not re.fullmatch("[a-f0-9]{32}", parameters[0]):
             raise ValueError("invalid port hopping owner token")

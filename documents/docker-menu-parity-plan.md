@@ -6019,6 +6019,61 @@ menu.sh 原始字节 SHA256 与本轮输入一致；diff 通过。成功 source.
 `12,472,320 bytes`，日志/清单/result 保留。外来订阅短链及工具镜像改动未暂存。
 本次复审未确认新的菜单 bug，整体对齐及 3e.2b.3 写门控继续 active。
 
+##### 5C.9c.3e.2b.3a 有限 net 写入与撤销协议
+
+内部 `port_hopping_resources guarded` 复用原 net flock、state 原子提交、
+精确归属审计和清理，不开放 entrypoint case、菜单、schema 或 Compose。
+子端先预检地址、无 state 和全域冲突，再 challenge；prepare 仅绑定当前
+请求材料。ready/write、written/finalize、active/close 各使用新随机 nonce，
+后续帧严格回显 phase、CID 和原请求摘要，拒绝预先重放下一阶段。
+中间帧逐字节读取，保留下一帧；每帧最多 4096 字节、等待 20 秒。
+
+write 后再次核锁、地址和完整冲突，才写 intent 与两族规则；finalize 前、
+active 提交后均复验完整自有资源、地址和全域冲突。active 是有限窗口，
+不是持续启用成功。close 后必须唯一 EOF；finally 精确回收自有资源、
+state 消失、原锁仍匹配且无信号，才输出 closed。INT/TERM 仅置标志，
+命令返回完成记账后清理，清理完成仍退出 130/143，不输出成功 closed。
+关闭期间地址消失或普通外来冲突不阻断自有撤销；锁/state 替换或清理失败
+保留证据并拒绝成功，不删外来规则或 conntrack。
+
+抽出原规则建立顺序供 run/guarded 共用，保留原 run 的错误传播与逐步记账。
+47 个独立场景覆盖阶段 EOF/旧 nonce/摘要/乱序/额外键/超长/重放、INT/TERM、
+两族写失败、written 超时、地址/冲突变化、锁/state 同字节替换、active
+提交后的冲突与归属漂移、清理失败及清理期间信号。初轮 EOF/信号竞争及
+关闭期间地址消失的夹具期望已修正，失败输入保留。
+
+同一工具镜像、Linux amd64、Jobs 2，47 场景串行内部/入口
+`123419/124552 ms`：
+`.tmp-regression-docker-973c9814876a47b99880b0c5844eb3ef/`。
+固定两个 worker、独立目录和进程组，同 47 场景 `68688/69832 ms`，
+排队 `4903 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-e7fb414181e446bcbda770616f42d6c5/`。
+随后让工具夹具直接复用既有 ownership 驱动，减少重复脚本加载；最终
+同 47 场景内部/入口 `47179/48265 ms`、排队 `3844 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-7ec834c9fab14ad5a9290b9bf8a616d4/`。
+相对串行入口约减少 61%，不推算完整回归或宣称稳定提速；三槽预算不变。
+既有只读 Probe 21 + 93 场景通过，内部/入口 `10430/11509 ms`，
+Jobs 2、排队 `209 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-3cd84c7db0a147c38d7edebb1c7fcff0/`。
+最终三个关键源码原始字节与定向输入一致，摘要见最终目录 `verification.md`。
+四份成功 source.tar 核对后清理 `50,063,360 bytes`，失败输入/日志/result 保留。
+真实双族新连接、额度撤销、NAT/state 恢复、子容器回收及失败启动安全恢复通过，
+内部/入口 `69228/70698 ms`、Jobs 2、排队 `241 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-25a990311700412ab36ac9ad3a120436/`。
+前次两次自动审批超时未启动命令；2026-10-13 Docker 只读检查恢复后实际执行。
+集中完整 54/54，无重复叶子，内部/入口 `541946/543082 ms`、Jobs 6、
+排队 `103353 ms`、exit 0、cache_hit=false：
+`.tmp-regression-docker-25d6f4f771d74837a8dd4b4065bd55f1/`。
+四个阶段源码原始字节与真实及完整输入一致；独立复审及 diff 通过。
+入口较上一阶段减少 `3482 ms`，输入亦变化，未证完整回归稳定提速；
+本轮未取得 CPU/内存峰值，不推算峰值或扩大三槽预算。
+两份新成功输入核对后清理，保留日志、清单、result 与 SHA256 核验记录。
+
+本阶段子端只校验摘要形状，不证明真实父锁或实际启动 state/live。
+下一步仍须由当前持锁父端逐门复验原 startup_binding、锁和子容器；
+不得复用只读 transport 的 65 秒总时限与 `stop --time 2` 直接处置写事务。
+有限写后撤销不交付持续启用、旧会话排空或自动跳跃，整体目标保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

@@ -535,7 +535,14 @@ runDockerPortHoppingPreflightRegression() {
     python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
         python3 "${PROJECT_ROOT}/docker/tests/port-hopping-ownership.py" &&
         runDockerPortHoppingTargetRegression &&
-        runDockerPortHoppingProbeRegression
+        runDockerPortHoppingProbeRegression &&
+        runDockerPortHoppingGuardedRegression
+}
+
+runDockerPortHoppingGuardedRegression() {
+    sh -n "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" &&
+        python3 "${PROJECT_ROOT}/docker/tests/port-hopping-guarded.py"
 }
 
 runDockerPortHoppingProbeRegression() {
@@ -694,6 +701,7 @@ registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntim
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-port-hopping-preflight runDockerPortHoppingPreflightRegression
 registerRegressionFunctionLeaf docker-port-hopping-probe runDockerPortHoppingProbeRegression
+registerRegressionFunctionLeaf docker-port-hopping-guarded runDockerPortHoppingGuardedRegression
 registerRegressionFunctionLeaf docker-port-hopping-target runDockerPortHoppingTargetRegression
 registerRegressionFunctionLeaf docker-port-hopping-target-real runDockerPortHoppingTargetRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
