@@ -3784,12 +3784,20 @@ dockerFail2banSourceAddress() (
     fi
 )
 
-dockerPortHoppingTargetWitness() (
-    local listener=${1:-} ipv4=${2:-} ipv6=${3:-} root spec entry domain fileProbe before after
+dockerPortHoppingTargetWitness() {
+    dockerPortHoppingTargetInspect snapshot "$@"
+}
+
+dockerPortHoppingTargetStartupWitness() {
+    dockerPortHoppingTargetInspect startup "$@"
+}
+
+dockerPortHoppingTargetInspect() (
+    local mode=${1:-} listener=${2:-} ipv4=${3:-} ipv6=${4:-} root spec entry domain fileProbe before after
     local baseline state rendered count expectedCompose expectedEnv image ids container imageInfo
-    local networks networkInfo hostAddresses fixed previous= round sourcePath
+    local networks networkInfo hostAddresses fixed previous= round sourcePath startedAt=
     local -a networkIds=()
-    [[ "$#" -eq 3 ]] || return 1
+    [[ "$#" -eq 4 && ( "${mode}" == snapshot || "${mode}" == startup ) ]] || return 1
     dockerHostPreflight && dockerRequireCommand python3 && dockerRequireCommand ip || return 1
     root=$(dockerInstallRoot) || return 1
     spec="${root}/config/spec.json"
@@ -3804,17 +3812,31 @@ dockerPortHoppingTargetWitness() (
       else error("目标见证仅支持受管双族 Hy2 bridge 入口") end
     ' "${spec}") || return 1
     domain=$(jq -er '.domain' <<<"${entry}") || return 1
-    # shortcut: 只见证文件与发布快照；内存加载版本、可达性和发布信任须由后续独立门控验收。
+    # shortcut: 启动时间只拒绝后续文件改动；内存版本、挂载视图和时钟回退须由部署锁内启动事务验收。
     read -r -d '' fileProbe <<'PY' || [[ -n "${fileProbe}" ]] || return 1
+import calendar
+import datetime
 import hashlib
 import json
-import os
 from pathlib import Path
+import re
 import stat
 import sys
 
 root = Path(sys.argv[1])
 domain = sys.argv[2]
+started_ns = None
+if sys.argv[3]:
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z",
+                         sys.argv[3])
+    if not match:
+        raise SystemExit("目标启动时间格式无效")
+    try:
+        started = datetime.datetime(*map(int, match.groups()[:6]))
+    except ValueError:
+        raise SystemExit("目标启动时间日期无效")
+    started_ns = (calendar.timegm(started.timetuple()) * 1_000_000_000 +
+                  int((match[7] or "").ljust(9, "0")))
 if not domain or "/" in domain or domain in (".", ".."):
     raise SystemExit("TLS 域名路径无效")
 files = ["config/spec.json", "deployment.json", "images.env", "compose.json",
@@ -3823,6 +3845,8 @@ files = ["config/spec.json", "deployment.json", "images.env", "compose.json",
          "secrets/tls/" + domain + ".key"]
 dirs = ["", "config", "config/sing-box", "secrets", "secrets/tls",
         "data", "data/sing-box", "data/traffic", "data/static"]
+startup_files = ["config/sing-box/config.json", "secrets/tls/" + domain + ".crt",
+                 "secrets/tls/" + domain + ".key"]
 rows = []
 for parent in root.parents:
     metadata = parent.lstat()
@@ -3847,6 +3871,9 @@ for name in [*dirs, *files]:
     if name in files:
         if not stat.S_ISREG(metadata.st_mode):
             raise SystemExit("目标配置与 TLS 必须是普通文件")
+        if (started_ns is not None and name in startup_files and
+                max(metadata.st_mtime_ns, metadata.st_ctime_ns) > started_ns):
+            raise SystemExit("目标启动后核心配置或 TLS 发生改动")
         row += [metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns,
                 hashlib.sha256(path.read_bytes()).hexdigest()]
     elif not stat.S_ISDIR(metadata.st_mode):
@@ -3863,7 +3890,7 @@ for path in sorted(config.rglob("*")):
                  metadata.st_mode, metadata.st_uid, metadata.st_gid])
 print(json.dumps(rows, separators=(",", ":")))
 PY
-    before=$(python3 -c "${fileProbe}" "${root}" "${domain}") || return 1
+    before=$(python3 -c "${fileProbe}" "${root}" "${domain}" "") || return 1
     dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
         dockerDeploymentFileValidate "${root}/deployment.json" || return 1
     [[ "$(jq -c --arg listener "${listener}" '
@@ -4029,7 +4056,10 @@ PY
         else [[ "${fixed}" == "${previous}" ]] || return 1
         fi
     done
-    after=$(python3 -c "${fileProbe}" "${root}" "${domain}") || return 1
+    if [[ "${mode}" == startup ]]; then
+        startedAt=$(jq -er '.[0].State.StartedAt' <<<"${container}") || return 1
+    fi
+    after=$(python3 -c "${fileProbe}" "${root}" "${domain}" "${startedAt}") || return 1
     [[ "${after}" == "${before}" ]] || return 1
     jq -cn --arg listener "${listener}" --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" \
         --argjson c "${container}" --argjson entry "${entry}" --argjson count "${count}" '

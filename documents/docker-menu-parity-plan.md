@@ -5617,7 +5617,7 @@ listener 与规范本地 IPv4/IPv6；目标端口来自规格，不允许另传�
 内部/入口 `8040/9050 ms`；`.tmp-regression-docker-0b6fbc8bdbd544dcaa7e7bc1853abde1/`。
 共享 `docker-traffic -Jobs 2` 内部/入口 `3820/4863 ms`；
 `.tmp-regression-docker-07ec23fbe18e4a21aff2bf6ee54389e6/`。
-不改变支持矩阵或整体 deferred 状态；集中完整验收待收口。
+不改变支持矩阵或整体 deferred 状态；集中完整验收已通过，见 3b。
 
 #### 5C.9c.3b 标准真实部署只读验收
 
@@ -5644,6 +5644,41 @@ Jobs 6、exit 0、cache_hit=false；
 它只证明标准配置与发布诊断路径，不证明配置加载版本绑定、账号内存
 撤销、可达或完整自动跳跃。后续 3c 继续启动配置版本绑定，再设计
 受管启停/菜单事务；整体目标仍 active。
+
+#### 5C.9c.3c 启动后文件改动拒绝
+
+保留 3a 的只读诊断 `dockerPortHoppingTargetWitness`，新增独立
+`dockerPortHoppingTargetStartupWitness`，共用同一个实现及完整双轮固定容器、
+镜像、网络和文件快照。只将运行配置 `config/sing-box/config.json` 与所选
+TLS crt/key 的 `mtime_ns`、`ctime_ns` 同固定容器 `StartedAt` 比较，纳秒解析
+不经过浮点数；恢复旧修改时间、同字节替换及无效日期拒绝。
+流量 state、目录和锁的正常后续变化不适用启动时间限制；见证期间漂移仍拒绝。
+
+这是更严格的文件诊断，不是加载版本绑定或生产启用门控。墙钟回退、
+启动前父目录替换后容器仍引用旧 bind 目录、进程先读入旧文件等情形未由
+时间比较证明。不给生产 net 服务新增 socket、schema、菜单或 Compose 开关。
+后续受管启停需在已有部署锁内整合一次流量采集/额度重渲染、启动前快照、
+新容器强制启动、健康与固定身份、相同文件快照，再继续启用事务；
+不能靠跨事务成功标记或单独 recreate 绕过流量保留。
+
+定向新增纳秒边界、恢复旧 mtime 的完整账号更新、TLS crt/key 同字节替换、
+固定启动代次与正常累计/目录变更，共 62 个只读合同通过，内部/入口
+`12294/13360 ms`、Jobs 2；
+`.tmp-regression-docker-c1a7337694674bb38a78f0067f855109/`。
+初轮失败仅新增流量夹具将无限额度写成 null，按现有合同改为 0，保留失败证据
+`.tmp-regression-docker-d2de3fb82fd54523b65bed1eb810b979/`。
+标准真实验收内部/入口 `28232/29391 ms`，Jobs 2；
+`.tmp-regression-docker-132b6f65bc084293b9cc32ea442b7c36/`。
+覆盖双族旧/新密码认证反转、恢复旧 mtime 的配置更新拒绝、
+crt/key 同字节替换拒绝、重启后恢复、正常 traffic state 更新和全树只读；
+最终定向含 Bash、ShellCheck error 与 Python AST，62 合同内部/入口
+`17906/19179 ms`；`.tmp-regression-docker-994fd000e5f84f5187e324f6d3e58725/`。
+集中完整 54/54 内部/入口 `519459/520506 ms`、排队 `230415 ms`，
+Jobs 6、exit 0、cache_hit=false；
+`.tmp-regression-docker-f4f28a076c3046e997e3925d2545e888/`。
+四个关键实现/测试/入口文件与完整输入一致（仅规范化 CRLF 比较），
+PowerShell AST、diff 及独立复审通过。静态临时文件和成功输入已清理，
+日志/result 与失败输入保留；完整跳跃/协议管理仍 deferred，总目标 active。
 
 ## 第六步：发布与完整验收
 

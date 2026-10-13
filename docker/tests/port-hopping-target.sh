@@ -15,7 +15,7 @@ jq() {
     local argument
     if [[ "${GUARD_SECRET_ARGV:-0}" == 1 ]]; then
         for argument in "$@"; do
-            [[ "${argument}" != *Alice.SecretPass* && "${argument}" != *"${SELF}"* &&
+            [[ "${argument}" != *Alice.SecretPass* && "${argument}" != *Alice.NewSecretPass* && "${argument}" != *"${SELF}"* &&
                 "${argument}" != *"${ALICE}"* ]] || {
                 printf '目标见证泄漏密码到外部参数\n' >&2
                 return 99
@@ -215,13 +215,15 @@ ip() {
 }
 
 cases=0
+WITNESS_FUNCTION=dockerPortHoppingTargetWitness
 runWitness() {
     local expected=$1 count=${2:-2} listener=${3:-entry-hy2} ipv4=${4:-${IPV4}} ipv6=${5:-${IPV6}}
-    local before status=0
+    local before status=0 expectedStart
     before=$(treeSnapshot)
+    expectedStart=$(jq -r '.[0].State.StartedAt' "${TEST_ROOT}/inspect.json")
     : >"${TEST_ROOT}/commands.log"
     rm -f -- "${TEST_ROOT}/replaced" "${TEST_ROOT}/scope-changed" "${TEST_ROOT}/expected-after-race.json"
-    GUARD_SECRET_ARGV=1 dockerPortHoppingTargetWitness "${listener}" "${ipv4}" "${ipv6}" \
+    GUARD_SECRET_ARGV=1 "${WITNESS_FUNCTION}" "${listener}" "${ipv4}" "${ipv6}" \
         >"${TEST_ROOT}/result.json" 2>"${TEST_ROOT}/error.log" || status=$?
     [[ ! -e "${TEST_ROOT}/unexpected.log" ]] || fail "非只读或未知调用: $(cat "${TEST_ROOT}/unexpected.log")"
     if [[ "${MODE}" == replace-live || "${MODE}" == scope-race ]]; then
@@ -231,12 +233,12 @@ runWitness() {
     if [[ "${expected}" == ok ]]; then
         [[ "${status}" == 0 ]] || fail "正例被拒绝: $(cat "${TEST_ROOT}/error.log")"
         jq -e --arg listener "${listener}" --arg id "${ID}" --arg image "${IMAGE_ID}" \
-            --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" --argjson count "${count}" '
+            --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" --arg started "${expectedStart}" --argjson count "${count}" '
           keys == (["schema_version","listener_id","protocol_id","core","container_id","image_id",
             "started_at","restart_count","target_port","ipv4","ipv6","enabled_accounts"] | sort) and
           .schema_version == 1 and .listener_id == $listener and .protocol_id == 3 and
           .core == "sing-box" and .container_id == $id and .image_id == $image and
-          .started_at == "2026-10-13T01:00:00.000000000Z" and .restart_count == 0 and
+          .started_at == $started and .restart_count == 0 and
           .target_port == 27443 and .ipv4 == $ipv4 and .ipv6 == $ipv6 and
           .enabled_accounts == $count
         ' "${TEST_ROOT}/result.json" >/dev/null || fail '目标 JSON 不符合固定合同'
@@ -340,5 +342,76 @@ for file in config/spec.json config/sing-box/config.json secrets/tls/proxy.examp
     rm -- "${root}/${file}"
     mv -- "${TEST_ROOT}/linked" "${root}/${file}"
 done
+runWitness ok
+
+# 用文件实际纳秒时间构造启动夹具，避免等待整秒或依赖固定日期。
+startupTime() {
+    local started
+    started=$(python3 - "${root}" "${1:-0}" <<'PY'
+import datetime
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+files = [root / "config/sing-box/config.json", *sorted((root / "secrets/tls").iterdir())]
+cutoff = max(max(path.stat().st_mtime_ns, path.stat().st_ctime_ns) for path in files) + int(sys.argv[2])
+seconds, nanos = divmod(cutoff, 1_000_000_000)
+print(datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") +
+      f".{nanos:09d}Z")
+PY
+    )
+    jq --arg started "${started}" '.[0].State.StartedAt = $started' \
+        "${TEST_ROOT}/inspect.json" >"${TEST_ROOT}/started.json"
+    mv -- "${TEST_ROOT}/started.json" "${TEST_ROOT}/inspect.json"
+}
+WITNESS_FUNCTION=dockerPortHoppingTargetStartupWitness
+startupTime
+runWitness ok
+startupTime -1
+runWitness reject
+startupTime 1
+runWitness ok
+INSPECT_FILTER='.[0].State.StartedAt = "2026-02-30T01:00:00.000000000Z"'
+runWitness reject
+INSPECT_FILTER=.
+MODE=restart-drift
+runWitness reject
+MODE=replace-live
+runWitness reject
+MODE=ok
+restore
+startupTime
+old_mtime=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime_ns)' \
+    "${root}/config/sing-box/config.json")
+change config/spec.json '.accounts[0].password = "Alice.NewSecretPass"'
+generate
+python3 - "${root}/config/sing-box/config.json" "${old_mtime}" <<'PY'
+import os
+import sys
+
+os.utime(sys.argv[1], ns=(int(sys.argv[2]), int(sys.argv[2])))
+PY
+WITNESS_FUNCTION=dockerPortHoppingTargetWitness
+runWitness ok
+WITNESS_FUNCTION=dockerPortHoppingTargetStartupWitness
+runWitness reject
+startupTime
+runWitness ok
+restore
+for file in secrets/tls/proxy.example.com.crt secrets/tls/proxy.example.com.key; do
+    startupTime
+    cp -a -- "${root}/${file}" "${TEST_ROOT}/tls.replacement"
+    mv -f -- "${TEST_ROOT}/tls.replacement" "${root}/${file}"
+    WITNESS_FUNCTION=dockerPortHoppingTargetWitness
+    runWitness ok
+    WITNESS_FUNCTION=dockerPortHoppingTargetStartupWitness
+    runWitness reject
+    startupTime
+    runWitness ok
+done
+startupTime
+change data/traffic/state.json '.accounts["11111111-1111-4111-8111-111111111111"] = {
+  name:"self",upload:1,download:0,limit_bytes:0,baseline:{}}'
+chmod 0750 "${root}"
 runWitness ok
 printf 'docker-port-hopping-target-ok: %s read-only target cases\n' "${cases}"

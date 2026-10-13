@@ -382,8 +382,12 @@ publication by a healthy managed container. It returns identity and an enabled-a
 count without account identifiers or passwords. Matching disk files and publication do
 not prove the process loaded that configuration version. A real standard deployment
 verifies healthy snapshots, changed startup generations and disk-drift refusal.
-Startup version binding remains pending; this snapshot is not an activation gate
-and does not expand complete hopping or protocol-management support.
+The separate read-only 3c startup check rejects runtime configuration or selected TLS
+files whose mtime/ctime follows the fixed container start time, including restored
+mtimes or same-byte replacements. Normal traffic-state updates are not time constrained.
+It does not prove loaded versions, the container's mount view or consistency after
+clock rollback. Startup version binding and the activation gate remain pending;
+complete hopping and protocol-management support are unchanged.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription

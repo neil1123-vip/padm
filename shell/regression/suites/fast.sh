@@ -538,6 +538,20 @@ runDockerPortHoppingPreflightRegression() {
 }
 
 runDockerPortHoppingTargetRegression() {
+    bash -n "${PROJECT_ROOT}/docker/lib/services.sh" &&
+        bash -n "${PROJECT_ROOT}/docker/tests/port-hopping-target.sh" &&
+        bash -n "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/services.sh" \
+            "${PROJECT_ROOT}/docker/tests/port-hopping-target.sh" \
+            "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh" &&
+        python3 - "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.py" <<'PY' || return 1
+import ast
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+ast.parse(path.read_text(), filename=str(path))
+PY
     bash "${PROJECT_ROOT}/docker/tests/port-hopping-target.sh"
 }
 
