@@ -172,8 +172,9 @@ def automatic_hopping(node, work, root, docker, enter, password):
         assert invoke("port-hopping", "start").decode().strip() == "端口跳跃已启用。"
         active = True
         uri = invoke("port-hopping", "share").decode().strip()
-        assert uri == (f"hysteria2://{password}@target.padm.test:30000-30001/"
-                       "?sni=target.padm.test&insecure=0#Hysteria2"), uri
+        assert uri == (f"hysteria2://{password}@target.padm.test:30000-30001"
+                       "?peer=target.padm.test&insecure=0&sni=target.padm.test"
+                       "&alpn=h3#Hysteria2"), uri
         initial = json.loads(invoke("port-hopping", "status"))
         with (node / "client-auto.log").open("wb") as log:
             process = subprocess.Popen(enter + [binary, "run", "-c", str(path)],

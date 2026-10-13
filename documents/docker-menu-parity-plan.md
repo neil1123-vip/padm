@@ -6521,15 +6521,30 @@ sing-box 镜像；只跑保存配置的 CLI 启用、分享、双族自动跳跃
 两族都实际发送到两个端口后才通过，不以等待时间或静态规则代替跳跃证据。
 定向分支不改变原真实生命周期集合的前置或断言，避免重复跑长集合。
 
-Docker Linux amd64、Jobs 2 通过，入口 42535 ms、排队 150 ms、cache=false：
-`.tmp-regression-docker-f42d21116c344a138bf36169acd73ba7/`。
-首轮事件文件未初始化的夹具失败已修正，失败输入保留。成功采样第 2 轮 IPv6、
-第 3 轮 IPv4 已跨端口，采样 10.386 秒；停止后双族 NAT 正文恢复、state、
+Docker Linux amd64、Jobs 2 通过，入口 38493 ms、排队 153 ms、cache=false：
+`.tmp-regression-docker-5100a126d133496f954e9413f543d476/`。
+早期事件文件未初始化的夹具失败已修正，失败输入保留。成功采样第 2 轮双族
+已跨端口，采样 5.226 秒；停止后双族 NAT 正文恢复、state、
 session、部署锁和子容器清理，新的 QUIC 连接拒绝。
 
 中英文说明同步活动范围分享和本地真实客户端证据；范围 URI 外部导入、
 原生宿主/arm64/公网、自动恢复、TUIC、旧 conntrack 排空仍待验或待交付。
 支持范围仍是内部监督、单 sing-box、单个双族 Hy2；整体目标保持 active。
+
+#### 5C.9c.3e.2b.3g 跳跃分享复用协议生成器
+
+活动范围分享复用 `dockerGenerateSubscription`，仅投影已核对的目标入口与端口范围；
+保留 TLS、ALPN、Brutal 带宽方向和混淆参数，删除重复 URI 拼接。
+生成器需要重复读取规格，使用权限 0600 的临时文件并随命令退出清理；
+不写受管规格、静态订阅或其它账号。活动目标与保存配置的一致性门禁保留。
+
+Docker Linux amd64、Jobs 2、cache=false：配置定向 14594 ms、排队 150 ms，
+`.tmp-regression-docker-7b6f5c2fd2064dc193b8727d5c07518c/`；
+真实双族自动跳跃 53626 ms、排队 152 ms，
+`.tmp-regression-docker-10abca8b93524bcdbc49f91108e8a544/`。
+配置断言覆盖 BBR、Brutal 上下行交换、混淆保留及分享前后受管文件不变；
+真实专项复验同一客户端跨端口、停止清理和新连接拒绝。未重复完整长集合，
+未新增外部客户端 URI 导入证据；既有支持范围与 deferred 保留，整体目标仍 active。
 
 ## 第六步：发布与完整验收
 

@@ -1609,8 +1609,7 @@ dockerPortHoppingCommand() {
         }
         result=$(dockerPortHoppingSupervisorStatus) || return $?
         spec="${root}/config/spec.json"
-        uri=$(jq -er --argjson saved "${saved}" --argjson status "${result}" '
-          def authority: if contains(":") then "[\(.)]" else . end;
+        result=$(jq -ec --argjson saved "${saved}" --argjson status "${result}" '
           $status.payload.target as $target |
           select([$target.listener_id, ($target.range_start|tostring),
             ($target.range_end|tostring), $target.ipv4, $target.ipv6] == $saved) |
@@ -1618,14 +1617,21 @@ dockerPortHoppingCommand() {
           [.core.protocols[] | select(.id == 3 and .listener_id == $h.listener_id)] as $entries |
           select(($entries | length) == 1 and
             $entries[0].public_port == $target.target_port) |
-          $entries[0] as $entry |
-          "hysteria2://\($entry.uuid | @uri)@\($entry.server | authority):\($h.range_start)-\($h.range_end)/?sni=\($entry.hy2.domain | @uri)&insecure=0" +
-            (if $entry.hy2.obfs != null then
-              "&obfs=\($entry.hy2.obfs.type | @uri)&obfs-password=\($entry.hy2.obfs.password | @uri)"
-             else "" end) +
-            "#\($entry.name | @uri)"
+          {core:{protocols:[($entries[0] |
+            .public_port = "\($h.range_start)-\($h.range_end)")]},
+           subscription:{enabled:true}}
         ' "${spec}") || {
             dockerError '活动跳跃范围与当前受管 Hy2 配置不一致，拒绝生成分享链接'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        uri=$(
+            spec=$(mktemp "${TMPDIR:-/tmp}/padm-hopping-share.XXXXXX") || exit 1
+            trap 'rm -f -- "${spec}"' EXIT
+            printf '%s\n' "${result}" >"${spec}" &&
+                dockerGenerateSubscription "${spec}" /dev/stdout
+        ) &&
+            [[ -n "${uri}" ]] || {
+            dockerError '活动跳跃分享链接生成失败'
             return "${PADM_DOCKER_RC_STATE}"
         }
         printf '%s\n' "${uri}"

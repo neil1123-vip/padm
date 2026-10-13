@@ -258,8 +258,17 @@ jq -e --argjson saved "${SAVED}" '.=={state:"stopped",saved:$saved}' "${LOG}" >/
     [[ "$(dockerMain port-hopping start)" == '端口跳跃已启用。' ]] || fail '启动缺少成功提示'
     [[ "$(dockerMain port-hopping stop)" == '端口跳跃已停止；保存配置保留。' ]] || fail '停止缺少成功提示'
     [[ "$(dockerMain port-hopping share)" == \
-        "hysteria2://${UUID}@proxy.example.com:36000-36002/?sni=tls.example.com&insecure=0#hy2" ]] ||
+        "hysteria2://${UUID}@proxy.example.com:36000-36002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3#hy2" ]] ||
         fail '活动范围分享链接不正确'
+    jq '.core.protocols[0].hy2 |= (.bandwidth_mode="brutal" | .up_mbps=120 |
+      .down_mbps=60 | .obfs={type:"salamander",password:"hy2-obfs-private_1234"})' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/brutal-share.json"
+    runEdit 0 --spec "${TEST_ROOT}/brutal-share.json" --confirm PADM-DOCKER-EDIT
+    before=$(snapshot)
+    [[ "$(dockerMain port-hopping share)" == \
+        "hysteria2://${UUID}@proxy.example.com:36000-36002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3&upmbps=60&downmbps=120&obfs=salamander&obfs-password=hy2-obfs-private_1234#hy2" ]] ||
+        fail '活动范围分享未保留带宽方向或混淆参数'
+    [[ "$(snapshot)" == "${before}" ]] || fail '活动范围分享改变受管文件'
     STATUS_END=36003
     if dockerMain port-hopping share >"${LOG}" 2>&1; then fail '活动范围漂移仍生成分享链接'; fi
     unset STATUS_END
