@@ -358,7 +358,7 @@ IPv4/IPv6 publishing is verified in an isolated amd64 Linux daemon;
 public hosting, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
 
-The protocol menu's port-hopping manager configures, starts, stops and clears manual Hy2 range DNAT.
+The protocol menu's port-hopping manager configures, starts, stops, clears and shares active Hy2 range DNAT.
 Optional v3 `port_hopping` stores `{listener_id, range_start, range_end, ipv4, ipv6}`
 in the specification, deployment record and Compose `x-padm-port-hopping` metadata.
 The current scope is one sing-box core,
@@ -380,6 +380,7 @@ padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 -
 padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 --confirm PADM-DOCKER-EDIT
 padm-docker port-hopping status
 padm-docker port-hopping start
+padm-docker port-hopping share
 padm-docker port-hopping stop
 padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
 ```
@@ -387,9 +388,12 @@ padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
 `up`, Docker daemon restarts, systemd and whole-machine reboots do not automatically
 restore supervision. SIGKILL, noncooperative replacement and unknown remnants preserve
 evidence without automatic takeover. Conflict checks cannot exclude simultaneous outside
-rule changes. Acceptance is limited to isolated Linux amd64; native hosts, arm64, public
-networks, range sharing, real-client automatic hopping, TUIC, old-session drainage and
-complete Hy2/TUIC hopping remain `deferred`. The manual menu does not establish complete support.
+rule changes. `share` emits a range URI only when the active target matches the saved
+specification; it does not write static subscriptions. A sing-box client using
+`server_ports` and `hop_interval=5s` passed dual-family requests across both ports
+in the same process on isolated Linux amd64. External client URI import remains unverified.
+Native hosts, arm64, public networks, TUIC, old-session drainage and complete
+Hy2/TUIC hopping remain `deferred`.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription

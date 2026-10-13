@@ -892,6 +892,10 @@ runDockerPortHoppingChangeRealRegression() {
     PADM_DOCKER_HOPPING_CHANGE_ONLY=1 runDockerPortHoppingTargetRealRegression
 }
 registerRegressionFunctionLeaf docker-port-hopping-change-real runDockerPortHoppingChangeRealRegression
+runDockerPortHoppingAutoRealRegression() {
+    PADM_DOCKER_HOPPING_AUTO_ONLY=1 runDockerPortHoppingTargetRealRegression
+}
+registerRegressionFunctionLeaf docker-port-hopping-auto-real runDockerPortHoppingAutoRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
 
 listRegressionDockerTProxyChildSelectors() {

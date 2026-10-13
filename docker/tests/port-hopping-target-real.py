@@ -128,6 +128,112 @@ def authentication(node, root, enter, phase, old_password, new_password, accepte
         stop(process)
 
 
+def automatic_hopping(node, work, root, docker, enter, password):
+    def invoke(*arguments):
+        return command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
+                        "bash", "-Eeuo", "pipefail", "-c",
+                        '. "$1"; shift; trap dockerReleaseDeploymentLock EXIT; dockerMain "$@"',
+                        "test", str(ROOT / "install-docker.sh"), *arguments],
+                       timeout=100)
+
+    tables = {"ipv4": "iptables", "ipv6": "ip6tables"}
+    nat_before = {table: command([table, "-w", "-t", "nat", "-S"])
+                  for table in tables.values()}
+    config = dict(log=dict(level="warn"), inbounds=[], outbounds=[], route=dict(rules=[]))
+    checks = []
+    for family, address in helpers["HOSTS"].items():
+        port = 24001 + len(checks)
+        config["inbounds"].append(dict(type="socks", tag=family, listen="127.0.0.1",
+                                       listen_port=port))
+        config["outbounds"].append(dict(
+            type="hysteria2", tag=family, server=address, server_ports=["30000:30001"],
+            hop_interval="5s", password=password,
+            tls=dict(enabled=True, server_name="target.padm.test", alpn=["h3"],
+                     certificate_path=str(root / "secrets/tls/target.padm.test.crt"))))
+        config["route"]["rules"].append(dict(inbound=[family], action="route", outbound=family))
+        checks.append((port, True))
+        # 只在客户端 netns 计数，不把服务端的转发或其它测试流量算作跳跃。
+        command(enter + [tables[family], "-w", "-t", "mangle", "-N", "PADM_HOP_CLIENT"])
+        for remote in (30000, 30001):
+            command(enter + [tables[family], "-w", "-t", "mangle", "-A", "PADM_HOP_CLIENT",
+                             "-p", "udp", "-d", address, "--dport", str(remote), "-j", "RETURN"])
+        command(enter + [tables[family], "-w", "-t", "mangle", "-A", "OUTPUT",
+                         "-p", "udp", "-d", address, "--dport", "30000:30001",
+                         "-j", "PADM_HOP_CLIENT"])
+    path = node / "client-auto.json"
+    path.write_text(json.dumps(config))
+    path.chmod(0o600)
+    (node / "auth-probes.json").write_text(json.dumps(checks))
+    binary = str(node / "sing-box")
+    command([binary, "check", "-c", str(path)])
+    process = None
+    active = False
+    try:
+        assert invoke("port-hopping", "start").decode().strip() == "端口跳跃已启用。"
+        active = True
+        uri = invoke("port-hopping", "share").decode().strip()
+        assert uri == (f"hysteria2://{password}@target.padm.test:30000-30001/"
+                       "?sni=target.padm.test&insecure=0#Hysteria2"), uri
+        initial = json.loads(invoke("port-hopping", "status"))
+        with (node / "client-auto.log").open("wb") as log:
+            process = subprocess.Popen(enter + [binary, "run", "-c", str(path)],
+                                       stdout=log, stderr=log)
+        wait_ready(lambda: process.poll() is None and subprocess.run(
+            enter + ["python3", "-c", "import socket; "
+                     "socket.create_connection(('127.0.0.1',24001),.2).close()"],
+            capture_output=True).returncode == 0)
+        started = time.monotonic()
+        (node / "events.jsonl").touch(exist_ok=True)
+        before = len((node / "events.jsonl").read_text().splitlines())
+        samples = []
+        while True:
+            assert process.poll() is None
+            command(enter + ["python3", str(SCRIPT), "auth-probes", str(node)], timeout=8)
+            counters = {}
+            for family, table in tables.items():
+                raw = command(enter + [table + "-save", "-c", "-t", "mangle"]).decode()
+                counters[family] = {int(port): int(packets) for packets, port in re.findall(
+                    r"^\[(\d+):\d+\] -A PADM_HOP_CLIENT .*--dport (\d+) -j RETURN$", raw, re.M)}
+                assert set(counters[family]) == {30000, 30001}, raw
+            samples.append(dict(elapsed=round(time.monotonic() - started, 3), counters=counters))
+            if len(samples) >= 2 and all(all(row.values()) for row in counters.values()):
+                break
+            assert time.monotonic() - started < 40, samples
+            time.sleep(5.1)
+        assert process.poll() is None and json.loads(path.read_text()) == config
+        client_pid = process.pid
+        assert json.loads(invoke("port-hopping", "status")) == initial
+        assert len((node / "events.jsonl").read_text().splitlines()) - before == 2 * len(samples)
+        stop(process)
+        process = None
+        assert invoke("port-hopping", "stop").decode().strip() == "端口跳跃已停止；保存配置保留。"
+        active = False
+        assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
+                   for table, previous in nat_before.items())
+        assert not (root / "data/net/port-hopping.state").exists()
+        assert not (root / "data/net/.hopping-supervisor").exists()
+        assert not (root / "locks/deployment.lock").exists()
+        assert not list(root.glob(".hopping-guarded.*"))
+        assert not command(docker + ["ps", "-aq", "--filter",
+                                    "label=io.padm.hopping-supervised"]).strip()
+        # 新进程形成新 QUIC 连接；不把既有 conntrack 会话的排空算作已验。
+        authentication(node, root, enter, "auto-stopped", password, "wrong-password", (),
+                       server_port=30000)
+        evidence = dict(scope="supervised-hy2-client-auto-hopping", client_config=config,
+                        client_pid=client_pid, same_client_alive=True,
+                        samples=samples, dual_family_both_ports=True,
+                        stopped_new_connections_refused=True, nat_restored=True,
+                        native_host_verified=False, arm64_verified=False,
+                        old_conntrack_revocation_verified=False)
+        (work / "automatic-hopping.json").write_text(json.dumps(evidence, sort_keys=True))
+        return evidence
+    finally:
+        if process is not None:
+            stop(process)
+        if active:
+            invoke("port-hopping", "stop")
+
+
 def guarded_resources(node, work, root, docker, image, target, nat_before, enter,
                       self_password, alice_password):
     # 仅运行内部有限子协议；这些测试摘要不证明真实同锁父端授权。
@@ -1366,6 +1472,12 @@ dockerReleaseDeploymentLock
             current = json.loads(spec.read_text())
             old_password = current["core"]["protocols"][0]["uuid"]
             new_password = "44444444-4444-4444-8444-444444444444"
+            if os.environ.get("PADM_DOCKER_HOPPING_AUTO_ONLY") == "1":
+                automatic = automatic_hopping(node, work, root, docker, enter, old_password)
+                print("docker-port-hopping-auto-real-snapshot=" + json.dumps(dict(
+                    automatic_hopping=automatic,
+                    elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
+                return
             if os.environ.get("PADM_DOCKER_HOPPING_CHANGE_ONLY") == "1":
                 # 复用真实节点与全部生命周期断言，省去已验的配置漂移和额度前置。
                 nat_before = {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)

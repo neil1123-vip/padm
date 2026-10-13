@@ -167,7 +167,7 @@ WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy�
 私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布仍要求 Xray、协议 21 VLESS WS TLS 和受管证书。
 Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander 混淆和 HTTPS 伪装；
 带宽按服务端方向输入，分享链接自动转换为客户端方向。
-端口跳跃仅开放下述手动双族 Hy2 范围管理；自动跳跃及 Gecko 尚未开放。
+端口跳跃提供下述手动双族 Hy2 范围管理；客户端范围自动跳跃已在隔离 amd64 验收，Gecko 尚未开放。
 AnyTLS 使用 sing-box 直连 TCP/TLS 入口，不经过 Nginx；首配选择 sing-box 后选 `7=AnyTLS`。
 复用 UUID 作为密码及流量账号，可输出 `anytls://` 分享链接；AnyTLS 单独部署不提供 HTTPS 订阅发布。
 NaiveProxy 在 sing-box 首配中选 `8`，使用 TCP/TLS 直连入口；服务器地址必须与 TLS 域名一致。
@@ -662,7 +662,7 @@ WS/SSH Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名；
 双栈发布已在隔离 amd64 Linux daemon 验收；公网、原生宿主及 arm64 仍需独立验收，
 完整 `207` 保持 `deferred`。
 
-菜单“协议与入口 → 端口跳跃”提供手动 Hy2 范围 DNAT 的配置、启停和清除。
+菜单“协议与入口 → 端口跳跃”提供手动 Hy2 范围 DNAT 的配置、启停、清除及活动范围分享。
 v3 可选 `port_hopping` 保存 `{listener_id, range_start, range_end, ipv4, ipv6}`，
 同步到部署记录和 Compose 的 `x-padm-port-hopping` 元数据。
 当前范围限于单 sing-box、单个双族 Hy2 入口、已有流量统计目录，
@@ -680,14 +680,17 @@ padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 -
 padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 --confirm PADM-DOCKER-EDIT
 padm-docker port-hopping status
 padm-docker port-hopping start
+padm-docker port-hopping share
 padm-docker port-hopping stop
 padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
 ```
 
 `up`、Docker daemon、systemd 或整机重启均不自动恢复监督。
 SIGKILL、非合作替换或未知残留保留证据，不自动接管；冲突检查无法排除外部同时修改规则。
-当前只经过隔离 Linux amd64 验收；原生宿主、arm64、公网、范围分享、真实客户端自动跳跃、
-TUIC、旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`，手动菜单不代表完整支持。
+`share` 只在活动目标与保存规格一致时输出范围 URI，不写静态订阅。
+sing-box 客户端 `server_ports` 与 `hop_interval=5s` 已在隔离 Linux amd64
+验证同一进程的双族跨端口请求；范围 URI 的外部客户端导入尚未验收。
+原生宿主、arm64、公网、TUIC、旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`。
 
 菜单“协议与入口 → CDN 连接地址”可为已有 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
 入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。

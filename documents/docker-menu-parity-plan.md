@@ -6512,6 +6512,25 @@ Docker Linux amd64 定向 `docker-port-hopping-config` 通过，入口 13940 ms�
 `.tmp-regression-docker-1a819c8cf72b4f41a56da2b18c27b55f/`。
 未做真实客户端导入或外部网络验收，不扩大支持状态。
 
+#### 5C.9c.3e.2b.3f 真实客户端自动跳跃定向验收
+
+新增 `docker-port-hopping-auto-real` 复用已有隔离 daemon、当前 net 入口与真实
+sing-box 镜像；只跑保存配置的 CLI 启用、分享、双族自动跳跃、停止和新连接拒绝。
+服务端继续转发完整范围，客户端以 `server_ports` 和 `hop_interval=5s` 自动切换，
+无需新增服务端轮换逻辑。客户端 netns 按目标端口计数，同一进程持续请求；
+两族都实际发送到两个端口后才通过，不以等待时间或静态规则代替跳跃证据。
+定向分支不改变原真实生命周期集合的前置或断言，避免重复跑长集合。
+
+Docker Linux amd64、Jobs 2 通过，入口 42535 ms、排队 150 ms、cache=false：
+`.tmp-regression-docker-f42d21116c344a138bf36169acd73ba7/`。
+首轮事件文件未初始化的夹具失败已修正，失败输入保留。成功采样第 2 轮 IPv6、
+第 3 轮 IPv4 已跨端口，采样 10.386 秒；停止后双族 NAT 正文恢复、state、
+session、部署锁和子容器清理，新的 QUIC 连接拒绝。
+
+中英文说明同步活动范围分享和本地真实客户端证据；范围 URI 外部导入、
+原生宿主/arm64/公网、自动恢复、TUIC、旧 conntrack 排空仍待验或待交付。
+支持范围仍是内部监督、单 sing-box、单个双族 Hy2；整体目标保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
