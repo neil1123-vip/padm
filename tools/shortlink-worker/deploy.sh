@@ -146,8 +146,19 @@ if [[ "${system}" == Linux ]]; then
             exit 1
         fi
         printf '%s\n' \
-            '  Token 权限：Workers Scripts Edit、Workers KV Storage Edit' \
-            '  Account ID：Cloudflare 账号概览中的 32 位 ID' >&3
+            '  获取 Token：打开 https://dash.cloudflare.com/profile/api-tokens' \
+            '  选择 Create Token（创建令牌）→ Create Custom Token（创建自定义令牌）' \
+            '  名称填 padm-shortlink' \
+            '  权限 1：Account（账户）→ Workers Scripts（Workers 脚本）' \
+            '  → Edit（编辑）' \
+            '  权限 2：Account（账户）→ Workers KV Storage（Workers KV 存储）' \
+            '  → Edit（编辑）' \
+            '  Account Resources（账户资源）：Include（包含）→ Specific account（指定账户）' \
+            '  → 目标 Cloudflare 账户' \
+            '  Continue to summary（继续查看摘要）→ Create Token（创建令牌）' \
+            '  复制 Token（只显示一次）' \
+            '  Account ID：Workers & Pages（Workers 与 Pages）→ Account Details（账户详情）' \
+            '  → Account ID（账户 ID）' >&3
         if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
             read -r -s -u 3 -p '  Cloudflare API Token（隐藏输入）: ' CLOUDFLARE_API_TOKEN
             printf '\n' >&3

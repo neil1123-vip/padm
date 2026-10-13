@@ -228,6 +228,18 @@ for mode in ("color", "no-color", "dumb"):
         assert token not in output, "deployment Token echoed"
         assert (b"\x1b[" in output) == (mode == "color"), f"wrong color mode: {mode}"
         plain = re.sub(rb"\x1b\[[0-9;]*m", b"", output).decode()
+        for instruction in (
+            "https://dash.cloudflare.com/profile/api-tokens",
+            "Create Token（创建令牌）",
+            "Create Custom Token（创建自定义令牌）",
+            "Account（账户）→ Workers Scripts（Workers 脚本）",
+            "Workers KV Storage（Workers KV 存储）",
+            "Account Resources（账户资源）：Include（包含）→ Specific account（指定账户）",
+            "Continue to summary（继续查看摘要）",
+            "Account Details（账户详情）",
+            "只显示一次",
+        ):
+            assert instruction in plain, f"missing authorization instruction: {instruction}"
         for number, title in enumerate(("环境准备", "Cloudflare 授权", "Worker 部署", "保存配置"), 1):
             assert f"[{number}/4] {title}" in plain
         for line in plain.splitlines():
