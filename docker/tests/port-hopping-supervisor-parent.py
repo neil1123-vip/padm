@@ -63,7 +63,8 @@ def deployment_command(root, function, *arguments, accepted=False, boundary=""):
     if accepted:
         assert not result.stderr
     else:
-        assert "跳跃监督会话存在或停止未核验".encode() in result.stderr, result.stderr
+        assert any(message.encode() in result.stderr for message in (
+            "跳跃监督会话存在或停止未核验", "跳跃监督重启未确认")), result.stderr
 
 
 def deployment_gate_cases(base):
@@ -125,32 +126,51 @@ def deployment_gate_cases(base):
     return count + 1
 
 
-def fake_owned(fd, root):
+def fake_owned(fd, root, restart=False):
     peer = socket.socket(fileno=fd)
     installation = Path(root)
     lock = installation / "locks/deployment.lock"
     lock.mkdir(parents=True, mode=0o750)
     (lock / "pid").write_text(str(os.getpid()) + "\n")
-    stage = installation / ".hopping-guarded.fixture"
-    stage.mkdir(mode=0o700)
+    (lock / "pid").chmod(0o640)
+    with (installation / "fixture-launches").open("a") as stream:
+        stream.write(str(os.getpid()) + "\n")
+    stage = installation / f".hopping-guarded.fixture.{os.getpid()}"
+    child_id = f"{os.getpid():064x}"
     token = MODULE["identity"](os.getpid())
     marker = installation / "data/net/fixture-running"
-    marker.write_text(str(os.getpid()))
     stopping = [False]
     signal.signal(signal.SIGTERM, lambda *_: stopping.__setitem__(0, True))
-    value = {"target": {"listener_id": "hy2-main"}, "running": {
-        "v": 1, "phase": "running", "nonce": "2" * 64, "child_id": "b" * 64,
+    value = {"target": {"listener_id": "hy2-main", "container_id": "d" * 64,
+        "image_id": "sha256:" + "e" * 64,
+        "started_at": f"2026-10-14T00:00:00.{os.getpid():09d}Z",
+        "range_start": 36561, "range_end": 36562, "target_port": 27443,
+        "ipv4": "198.18.1.1", "ipv6": "2001:db8:1::1"}, "running": {
+        "v": 1, "phase": "running", "nonce": "2" * 64, "child_id": child_id,
         "request_sha256": "c" * 64, "seq": 2,
-    }, "child": {"Id": "b" * 64}, "directory": [["/", 1, 2, 0o755, 0, 0]],
+    }, "child": {"Id": child_id}, "directory": [["/", 1, 2, 0o755, 0, 0]],
     "stage": str(stage)}
 
-    def gate(phase):
-        event = {"v": 1, "phase": phase, "nonce": os.urandom(32).hex(), "payload": value}
+    def gate(phase, payload=None):
+        event = {"v": 1, "phase": phase, "nonce": os.urandom(32).hex(),
+                 "payload": value if payload is None else payload}
         MODULE["send"](peer, event)
         response = MODULE["receive"](peer)
-        assert response == {"v": 1, "phase": "commit" if phase == "ready" else "continue",
+        assert response == {"v": 1, "phase": "commit" if phase in {"ready", "restart"} else "continue",
                             "nonce": event["nonce"]} or stopping[0], response
 
+    if restart:
+        current = subprocess.run([
+            "bash", "-Eeuo", "pipefail", "-c", MODULE["LOCK_BODY"], "test",
+            str(ROOT / "install-docker.sh"), str(installation), str(os.getpid())],
+            capture_output=True, check=True)
+        original = json.loads(current.stdout)
+        if (installation / "invalid-restart-gate").exists():
+            original = []
+        gate("restart", {"bash_pid": os.getpid(), "lock": original})
+    # 只有新写门通过后才模拟核心与规则启用。
+    stage.mkdir(mode=0o700)
+    marker.write_text(str(os.getpid()))
     gate("ready")
     gate("started")
     while not stopping[0]:
@@ -380,6 +400,10 @@ def main():
         "gate", "running", payload, response=lambda value: {
             "v": 1, "phase": "continue", "nonce": value["nonce"]})
     count += 1
+    invoke(
+        "gate", "restart", {"bash_pid": os.getpid(), "lock": []}, response=lambda value: {
+            "v": 1, "phase": "commit", "nonce": value["nonce"]})
+    count += 1
     invoke("notify", "cleaned", {"target": payload["target"], "child_id": "b" * 64,
                                  "stage": payload["stage"]})
     count += 1
@@ -392,6 +416,13 @@ def main():
         count += 1
     invoke("notify", "running", payload, accepted=False)
     count += 1
+    for response in (
+        lambda value: {"v": 1, "phase": "commit", "nonce": "d" * 64},
+        lambda value: {"v": 1, "phase": "continue", "nonce": value["nonce"]},
+    ):
+        invoke("gate", "restart", {"bash_pid": os.getpid(), "lock": []},
+               accepted=False, response=response)
+        count += 1
     with tempfile.TemporaryDirectory(prefix="padm-hopping-supervisor.") as directory:
         root = Path(directory)
         (root / "data/net").mkdir(parents=True, mode=0o700)
@@ -456,15 +487,17 @@ def main():
             '  esac\n'
             'fi\n'
             'dockerPortHoppingTargetSupervisedOwned() {\n'
-            f'  exec "{sys.executable}" "{SCRIPT}" fake-owned "$1" "$PADM_DOCKER_INSTALL_DIR"\n'
+            f'  exec "{sys.executable}" "{SCRIPT}" fake-owned "$1" "$PADM_DOCKER_INSTALL_DIR" '
+            '"${7:-}"\n'
             '}\n')
         entrypoint.chmod(0o600)
         count += reservation_cases(base, entrypoint)
-        for case in ("clean", "ack-lost", "invalid-finished", "precommit-eof"):
+        for case in ("clean", "ack-lost", "invalid-finished", "invalid-finished-restart",
+                     "invalid-restart-gate", "precommit-eof"):
             installation = base / case
             (installation / "data/net").mkdir(parents=True, mode=0o700)
             installation.chmod(0o700)
-            if case == "invalid-finished":
+            if case.startswith("invalid-finished"):
                 (installation / "invalid-finished").touch()
             manager = manager_fd = None
             if case in {"ack-lost", "precommit-eof"}:
@@ -526,6 +559,78 @@ def main():
                         (lock / "pid").read_bytes()) == original_lock
                 assert MODULE["control"]("status", str(installation))["owner"] == owner
                 count += 1
+                if case == "clean":
+                    session = installation / "data/net/.hopping-supervisor"
+                    session_id = MODULE["path_identity"](session.stat())
+                    for _ in range(2):
+                        previous = current
+                        old_bash = MODULE["pin"](owner["bash"])
+                        try:
+                            restarted = MODULE["control"]("restart", str(installation))
+                            assert set(restarted) == {
+                                "v", "phase", "nonce", "client_nonce", "owner", "owner_sha256",
+                                "payload", "previous_owner", "cleaned", "finished"}
+                            assert restarted["phase"] == "restarted"
+                            assert restarted["previous_owner"] == owner
+                            assert restarted["finished"] == {"status": 143, "lock_released": True}
+                            assert restarted["cleaned"] == {
+                                "target": previous["payload"]["target"],
+                                "child_id": previous["payload"]["child"]["Id"],
+                                "stage": owner["stage"]}
+                            assert MODULE["select"].select([old_bash], [], [], 0)[0]
+                        finally:
+                            os.close(old_bash)
+                        new_owner = restarted["owner"]
+                        assert new_owner["manager"] == owner["manager"]
+                        assert all(new_owner[key] != owner[key] for key in (
+                            "token", "bash", "stage", "stage_sha256"))
+                        assert MODULE["path_identity"](session.stat()) == session_id
+                        assert json.loads((session / "owner.json").read_text()) == new_owner
+                        assert restarted["payload"]["target"]["container_id"] == (
+                            previous["payload"]["target"]["container_id"])
+                        assert restarted["payload"]["target"]["started_at"] != (
+                            previous["payload"]["target"]["started_at"])
+                        assert restarted["payload"]["child"]["Id"] != (
+                            previous["payload"]["child"]["Id"])
+                        assert (lock / "pid").read_text() == str(new_owner["bash"]["pid"]) + "\n"
+                        for action in ("restart", "stop"):
+                            rejected = subprocess.run([
+                                sys.executable, str(HELPER), action, str(installation), owner["token"]],
+                                capture_output=True, timeout=8)
+                            assert rejected.returncode == 1 and not rejected.stdout and rejected.stderr
+                            assert json.loads((session / "owner.json").read_text()) == new_owner
+                        owner = new_owner
+                        current = MODULE["control"]("status", str(installation))
+                        assert current["owner"] == owner and current["payload"]["running"]["seq"] >= 2
+                        assert current["payload"]["target"] == restarted["payload"]["target"]
+                        deployment_command(installation, "dockerLockInstalledDeployment")
+                        count += 1
+                    assert len((installation / "fixture-launches").read_text().splitlines()) == 3
+                elif case in {"invalid-finished-restart", "invalid-restart-gate"}:
+                    session = installation / "data/net/.hopping-supervisor"
+                    session_id = MODULE["path_identity"](session.stat())
+                    if case == "invalid-restart-gate":
+                        (installation / case).touch()
+                    rejected = subprocess.run([
+                        sys.executable, str(HELPER), "restart", str(installation)],
+                        capture_output=True, timeout=12)
+                    assert rejected.returncode == 1 and not rejected.stdout and rejected.stderr
+                    assert MODULE["select"].select([manager_fd], [], [], 5)[0]
+                    assert MODULE["path_identity"](session.stat()) == session_id
+                    assert not (installation / "data/net/fixture-running").exists()
+                    launches = (installation / "fixture-launches").read_text().splitlines()
+                    if case == "invalid-finished-restart":
+                        assert launches == [str(owner["bash"]["pid"])]
+                        assert json.loads((session / "owner.json").read_text()) == owner
+                        assert not lock.exists()
+                    else:
+                        assert len(launches) == 2 and launches[0] == str(owner["bash"]["pid"])
+                        assert (lock / "pid").read_text().strip() == launches[1]
+                        new_owner = json.loads((session / "owner.json").read_text())
+                        assert new_owner["state"] == "starting" and new_owner["stage"] is None
+                    deployment_command(installation, "dockerLockInstalledDeployment")
+                    count += 1
+                    continue
                 stopped = subprocess.run([sys.executable, str(HELPER), "stop", str(installation)],
                                          capture_output=True, timeout=12)
                 if case == "invalid-finished":
@@ -566,7 +671,8 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 4 and sys.argv[1] == "fake-owned":
-        fake_owned(int(sys.argv[2]), sys.argv[3])
+    if len(sys.argv) in {4, 5} and sys.argv[1] == "fake-owned":
+        assert len(sys.argv) == 4 or sys.argv[4] in {"", "--restart"}
+        fake_owned(int(sys.argv[2]), sys.argv[3], len(sys.argv) == 5 and sys.argv[4] == "--restart")
     else:
         main()

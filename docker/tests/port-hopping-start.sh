@@ -230,8 +230,7 @@ inject() {
 
 proof() {
     local identity=${1:-${ID}} count started=${STARTED}
-    [[ "${identity}" != "${NEXT_ID}" || ! -s "${TEST_ROOT}/started" ]] ||
-        started=$(<"${TEST_ROOT}/started")
+    [[ ! -s "${TEST_ROOT}/started" ]] || started=$(<"${TEST_ROOT}/started")
     count=$(jq '[.inbounds[].users[]?] | length' "${root}/config/sing-box/config.json")
     jq -cn --arg id "${identity}" --arg image "${IMAGE_ID}" --arg started "${started}" \
         --arg ipv4 "${IPV4}" --arg ipv6 "${IPV6}" --argjson count "${count}" '
@@ -291,26 +290,35 @@ dockerComposeExecute() {
         [[ "${SCENARIO}" != validate-fail && "${SCENARIO}" != stop-health-tick ]] || return 1
         printf 'validation-noise\n'
         ;;
-    up)
-        [[ "$*" == "up -d --force-recreate --no-deps --wait --wait-timeout 60 sing-box" ]] ||
-            { record unexpected-compose "$@"; return 99; }
-        record up
+    up|restart)
+        if [[ "$1" == restart ]]; then
+            [[ "$#" == 1 ]] || { record unexpected-compose "$@"; return 99; }
+        else
+            [[ "$*" == "up -d --force-recreate --no-deps --wait --wait-timeout 60 sing-box" ]] ||
+                { record unexpected-compose "$@"; return 99; }
+        fi
+        record "$1"
         up_count=$(eventCount up)
         jq -c '[.inbounds[].users[]?.name]' "${root}/config/sing-box/config.json" \
             >>"${TEST_ROOT}/started-users"
-        # 真实 Compose 可能已删旧容器再失败，恢复不得只对旧 CID restart。
-        rm -f -- "${TEST_ROOT}/active"
-        rm -f -- "${TEST_ROOT}/stopped"
-        if [[ "${SCENARIO}" == recovery-fail && "${up_count}" -gt 1 ]]; then
-            printf '%s\n' "${NEXT_ID}" >"${TEST_ROOT}/active"
-        fi
-        inject compose
-        [[ "${SCENARIO}" != compose-fail && "${SCENARIO}" != recovery-fail ||
-            "${up_count}" -gt 1 ]] || return 1
-        [[ "${SCENARIO}" != recovery-fail ]] || return 1
-        if [[ "${SCENARIO}" == up-no-recreate && "${up_count}" == 1 ]]; then
+        if [[ "$1" == restart ]]; then
+            [[ "${SCENARIO}" != restart-fail ]] || return 1
             printf '%s\n' "${ID}" >"${TEST_ROOT}/active"
-        else printf '%s\n' "${NEXT_ID}" >"${TEST_ROOT}/active"; fi
+        else
+            # 真实 Compose 可能已删旧容器再失败，恢复不得只对旧 CID restart。
+            rm -f -- "${TEST_ROOT}/active"
+            rm -f -- "${TEST_ROOT}/stopped"
+            if [[ "${SCENARIO}" == recovery-fail && "${up_count}" -gt 1 ]]; then
+                printf '%s\n' "${NEXT_ID}" >"${TEST_ROOT}/active"
+            fi
+            inject compose
+            [[ "${SCENARIO}" != compose-fail && "${SCENARIO}" != recovery-fail ||
+                "${up_count}" -gt 1 ]] || return 1
+            [[ "${SCENARIO}" != recovery-fail ]] || return 1
+            if [[ "${SCENARIO}" == up-no-recreate && "${up_count}" == 1 ]]; then
+                printf '%s\n' "${ID}" >"${TEST_ROOT}/active"
+            else printf '%s\n' "${NEXT_ID}" >"${TEST_ROOT}/active"; fi
+        fi
         python3 - "${root}" >"${TEST_ROOT}/started" <<'PY'
 import datetime
 from pathlib import Path
@@ -323,13 +331,26 @@ seconds, nanos = divmod(cutoff, 1_000_000_000)
 print(datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") +
       f".{nanos:09d}Z")
 PY
-        if [[ "${SCENARIO}" == up-no-recreate && "${up_count}" == 1 ]]; then
+        if [[ "${SCENARIO}" == restart-no-change ||
+            ( "${SCENARIO}" == up-no-recreate && "${up_count}" == 1 ) ]]; then
             printf '%s\n' "${STARTED}" >"${TEST_ROOT}/started"
         fi
         printf 'compose-noise\n'
         ;;
     *) record unexpected-compose "$@"; return 99 ;;
     esac
+}
+
+# 仅替换调度动作；安全渲染、累计与启动后绑定继续走真实事务。
+dockerLifecycleRestart() { dockerComposeExecute restart; }
+
+timeout() {
+    if [[ "${1:-}" == -k && "${2:-}" == 2 && "${3:-}" == 5 && "${4:-}" == docker ]]; then
+        shift 4
+        docker "$@"
+    else
+        command timeout "$@"
+    fi
 }
 
 mv() {
@@ -370,8 +391,7 @@ docker() {
             identity=$(<"${TEST_ROOT}/stopped")
             running=false
         else return 1; fi
-        [[ "${identity}" != "${NEXT_ID}" || ! -s "${TEST_ROOT}/started" ]] ||
-            started=$(<"${TEST_ROOT}/started")
+        [[ ! -s "${TEST_ROOT}/started" ]] || started=$(<"${TEST_ROOT}/started")
         for requested in "$@"; do
             [[ "${requested}" =~ ^[a-f0-9]{12,64}$ ]] ||
                 { record unexpected-docker inspect "${requested}"; return 99; }
@@ -425,11 +445,12 @@ docker() {
 runCase() {
     local scenario=$1 expected=$2 up_count=$3 stop_count=$4 alice_value=${5:-1} status=0
     local operation=${6:-start} range_start=${7:-30000} range_end=${8:-30001}
-    local isPrepare=false isBound=false
+    local isPrepare=false isBound=false ph_restart=false expected_id=${NEXT_ID}
     local -a extra=()
     case "${operation}" in
     prepare) isPrepare=true ;;
     bound-start) isBound=true; extra=(bound) ;;
+    bound-restart) isBound=true; ph_restart=true; expected_id=${ID}; extra=(bound) ;;
     bound-prepare) isPrepare=true; isBound=true; extra=(bound) ;;
     invalid-start) extra=(invalid) ;;
     invalid-prepare) isPrepare=true; extra=(bound extra) ;;
@@ -484,13 +505,15 @@ runCase() {
             fail "${SCENARIO}: 重建次数 $(eventCount up)，预期 ${up_count}"
         [[ "$(eventCount stop)" == "${stop_count}" ]] ||
             fail "${SCENARIO}: 停止次数 $(eventCount stop)，预期 ${stop_count}"
+        [[ "${ph_restart}" != true || "$(eventCount restart)" == 1 ]] ||
+            fail "${SCENARIO}: 重启没有恰好执行一次"
         [[ "$(eventCount unexpected-inspect)" == 0 && "$(eventCount unexpected-compose)" == 0 &&
             "$(eventCount unexpected-docker)" == 0 && "$(eventCount secret-argv)" == 0 ]] ||
             fail "${SCENARIO}: 存在未知系统动作或认证 argv 泄漏"
         [[ "$(trap -p INT TERM)" == "${traps_before}" ]] ||
             fail "${SCENARIO}: 启动事务没有恢复调用方 INT/TERM trap"
         if [[ "${expected}" == 0 ]]; then
-            jq -e --arg id "${NEXT_ID}" --argjson prepare "${isPrepare}" --argjson bound "${isBound}" \
+            jq -e --arg id "${expected_id}" --argjson prepare "${isPrepare}" --argjson bound "${isBound}" \
                 --argjson count "$((2 - alice_value))" \
                 --argjson start "${range_start}" --argjson end "${range_end}" '
               keys == (["schema_version","listener_id","protocol_id","core","container_id","image_id",
@@ -500,6 +523,11 @@ runCase() {
               .container_id == $id and .enabled_accounts == $count and
               (if $prepare then .range_start == $start and .range_end == $end else true end)
             ' "${TEST_ROOT}/result.json" >/dev/null || fail "${SCENARIO}: 成功未返回唯一见证"
+            if [[ "${ph_restart}" == true ]]; then
+                jq -e --arg started "${STARTED}" '.started_at != $started' \
+                    "${TEST_ROOT}/result.json" >/dev/null ||
+                    fail "${SCENARIO}: 重启后启动代次没有更新"
+            fi
             if [[ "${isBound}" == true ]]; then
                 binding=$(jq -ec '.startup_binding' "${TEST_ROOT}/result.json")
                 jq -e 'keys == ["files","live","lock","state"] and
@@ -521,6 +549,12 @@ runCase() {
                 fail "${SCENARIO}: 成功后仍保留临时 stage"
         else
             [[ ! -s "${TEST_ROOT}/result.json" ]] || fail "${SCENARIO}: 失败输出了见证或命令噪声"
+            if [[ "${ph_restart}" == true ]]; then
+                [[ -s "${TEST_ROOT}/stopped" && "$(<"${TEST_ROOT}/stopped")" == "${ID}" &&
+                    ! -e "${TEST_ROOT}/active" &&
+                    -n "$(find "${root}" -maxdepth 1 -name '.hopping-start.*' -type d -print)" ]] ||
+                    fail "${SCENARIO}: 重启失败未停止原受管核心或保留证据"
+            fi
         fi
         if [[ "${SCENARIO}" == query-fail || "${SCENARIO}" == container-drift ||
             "${SCENARIO}" == orphan || "${SCENARIO}" == prepare-invalid-* ||
@@ -706,3 +740,10 @@ for phase in before middle after prepare; do
     runCase "bound-${phase}-TERM" 143 1 0 1 "${operation}"
 done
 printf 'docker-port-hopping-bound-ok: %s startup binding cases\n' "${cases}"
+
+# 重启只执行一次；失败保留累计和证据，不能借恢复再次启动核心。
+cases=0
+runCase restart-quota 0 0 0 1 bound-restart
+runCase restart-fail reject 0 1 1 bound-restart
+runCase restart-no-change reject 0 1 1 bound-restart
+printf 'docker-port-hopping-restart-ok: %s restart transaction cases\n' "${cases}"

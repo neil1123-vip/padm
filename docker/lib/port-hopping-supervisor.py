@@ -243,7 +243,7 @@ class Directory:
         os.replace("owner.next", "owner.json", src_dir_fd=self.fd, dst_dir_fd=self.fd)
         self.check()
 
-    def cleanup(self, owner, socket_id, log_id):
+    def check_stopped(self, owner, socket_id, log_id):
         self.check()
         if self.read_owner() != owner or set(os.listdir(self.fd)) != {
                 "owner.json", "control.sock", "service.log"}:
@@ -260,11 +260,18 @@ class Directory:
                 raise Failure("监督规则 state 仍存在")
         locks = self.open_dir("locks", self.root_fd)
         try:
-            os.stat("deployment.lock", dir_fd=locks, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            raise Failure("监督原部署锁未释放")
+            try:
+                os.stat("deployment.lock", dir_fd=locks, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise Failure("监督原部署锁未释放")
+        finally:
+            os.close(self.held.pop())
+            self.projection.pop()
+
+    def cleanup(self, owner, socket_id, log_id):
+        self.check_stopped(owner, socket_id, log_id)
         for name in ("control.sock", "owner.json", "service.log"):
             os.unlink(name, dir_fd=self.fd)
         self.check()
@@ -395,11 +402,37 @@ def owner_check(value):
     return value
 
 
+def restarted_target(value, cleaned):
+    target = value["target"]
+    if (any(target.get(key) != cleaned["target"].get(key) for key in (
+            "container_id", "image_id", "listener_id", "range_start", "range_end",
+            "target_port", "ipv4", "ipv6")) or
+            target.get("started_at") == cleaned["target"].get("started_at") or
+            value["child"]["Id"] == cleaned["child_id"]):
+        raise Failure("监督重启未证明新代次与原目标")
+
+
 def service(initial_fd, root, entrypoint, values):
     directory, listener, channel, process, process_fd, log = None, None, None, None, None, None
     initial = socket.socket(fileno=initial_fd)
     stopping, proof, ready, latest, cleaned, finished, stop_peer = (
         False, None, None, None, None, None, None)
+    restarting, restart_receipt, restart_gate = False, None, False
+
+    def launch(restart=False):
+        nonlocal channel, process, process_fd
+        channel, child = socket.socketpair()
+        try:
+            process = subprocess.Popen(
+                ["bash", "-c", BODY, "padm-hopping-owner", entrypoint, root,
+                 str(child.fileno()), *values, *(["--restart"] if restart else [])],
+                pass_fds=(child.fileno(),), stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+        finally:
+            child.close()
+        owner["bash"] = identity(process.pid)
+        process_fd = pin(owner["bash"])
+        directory.write_owner(owner)
+
     try:
         if os.geteuid() != 0 or len(values) != 5:
             raise Failure("监督服务仅支持 root 和五参数")
@@ -438,16 +471,8 @@ def service(initial_fd, root, entrypoint, values):
         owner = {"v": 1, "token": os.urandom(32).hex(), "root": root, "manager": own,
                  "bash": None, "stage": None, "stage_sha256": None, "state": "starting"}
         directory.write_owner(owner)
-        channel, child = socket.socketpair()
         # 独立 Bash 自取锁并 freshly bound；环境变量只提供安装路径，不提供授权。
-        process = subprocess.Popen(["bash", "-c", BODY, "padm-hopping-owner",
-                                    entrypoint, root, str(child.fileno()), *values],
-                                   pass_fds=(child.fileno(),), stdin=subprocess.DEVNULL,
-                                   stdout=log, stderr=log)
-        child.close()
-        owner["bash"] = identity(process.pid)
-        process_fd = pin(owner["bash"])
-        directory.write_owner(owner)
+        launch()
         last_gate = None
         pending_signal = [False]
         signal.signal(signal.SIGTERM, lambda *_: pending_signal.__setitem__(0, True))
@@ -465,10 +490,29 @@ def service(initial_fd, root, entrypoint, values):
                     raise Failure("监督门 nonce 重复")
                 last_gate = event["nonce"]
                 phase, value = event["phase"], event["payload"]
-                if stopping and phase in {"ready", "started", "running"}:
+                if stopping and phase in {"restart", "ready", "started", "running"}:
                     send(channel, {"v": 1, "phase": "stop", "nonce": event["nonce"]})
+                elif (phase == "restart" and restart_receipt is not None and
+                      not restart_gate and ready is None and latest is None and not stopping):
+                    shape(value, ("bash_pid", "lock"))
+                    if type(value["bash_pid"]) is not int or value["bash_pid"] != process.pid:
+                        raise Failure("监督重启写门 Bash 不匹配")
+                    result = subprocess.run(
+                        ["bash", "-Eeuo", "pipefail", "-c", LOCK_BODY, "padm-hopping-restart-check",
+                         entrypoint, root, str(process.pid)], capture_output=True)
+                    if (result.returncode or
+                            json.loads(result.stdout, object_pairs_hook=unique) != value["lock"] or
+                            directory.read_owner() != owner or
+                            select.select([process_fd], [], [], 0)[0]):
+                        raise Failure("监督重启写门原锁或 owner 不匹配")
+                    restart_gate = True
+                    send(channel, {"v": 1, "phase": "commit", "nonce": event["nonce"]})
                 elif phase == "ready" and ready is None and latest is None and not stopping:
+                    if restart_receipt is not None and not restart_gate:
+                        raise Failure("监督重启未经过新写门")
                     ready = payload_check(value)
+                    if restart_receipt is not None:
+                        restarted_target(ready, restart_receipt["cleaned"])
                     if (PurePosixPath(ready["stage"]).parent != PurePosixPath(root) or
                             not PurePosixPath(ready["stage"]).name.startswith(".hopping-guarded.")):
                         raise Failure("监督 stage 超出受管根")
@@ -482,12 +526,21 @@ def service(initial_fd, root, entrypoint, values):
                     directory.write_owner(owner)
                     send(channel, {"v": 1, "phase": "continue", "nonce": event["nonce"]})
                     try:
-                        send(initial, ack("started", proof, owner, payload=latest))
+                        if restart_receipt is None:
+                            send(initial, ack("started", proof, owner, payload=latest))
+                        else:
+                            send(stop_peer, ack("restarted", proof, owner,
+                                                payload=latest, **restart_receipt))
                     except (BrokenPipeError, ConnectionResetError):
                         # commit 后调用者退出不撤销；之后只能按新挑战读取当前状态。
                         pass
-                    initial.close()
-                    initial = None
+                    if initial is not None:
+                        initial.close()
+                        initial = None
+                    if stop_peer is not None:
+                        stop_peer.close()
+                        stop_peer = None
+                    restart_receipt = None
                 elif phase == "running" and latest is not None and not stopping:
                     latest = payload_check(value, latest, latest["running"]["seq"] + 1)
                     directory.check()
@@ -515,7 +568,7 @@ def service(initial_fd, root, entrypoint, values):
                     if latest is None or directory.read_owner() != owner:
                         raise Failure("监督尚未启用或 owner 已变化")
                     hello = shape(receive(peer, timeout=2), ("v", "phase", "action", "client_nonce"))
-                    if hello["action"] not in {"status", "stop"}:
+                    if hello["action"] not in {"status", "stop", "restart"}:
                         raise Failure("监督控制动作无效")
                     # 仅把已读取的 hello 交给同一挑战函数，连接没有重复读取。
                     action = hello["action"]
@@ -528,6 +581,7 @@ def service(initial_fd, root, entrypoint, values):
                     else:
                         signal.pidfd_send_signal(process_fd, signal.SIGTERM)
                         stopping, stop_peer, proof = True, peer, control_proof
+                        restarting = action == "restart"
                         peer = None
                 except (Failure, OSError, ValueError) as error:
                     os.write(log, (str(error) + "\n").encode("utf-8"))
@@ -558,6 +612,20 @@ def service(initial_fd, root, entrypoint, values):
                         "target": latest["target"], "child_id": latest["child"]["Id"],
                         "stage": latest["stage"]} and finished == {
                         "status": 143, "lock_released": True} and status == 143):
+                    if restarting and not pending_signal[0]:
+                        # 会话目录覆盖整个交接窗口；旧净停止回执不授权新 Bash 写入。
+                        directory.check_stopped(owner, socket_id, log_id)
+                        restart_receipt = dict(previous_owner=owner, cleaned=cleaned, finished=finished)
+                        channel.close()
+                        os.close(process_fd)
+                        channel, process_fd = None, None
+                        owner = {**owner, "token": os.urandom(32).hex(), "bash": None,
+                                 "stage": None, "stage_sha256": None, "state": "starting"}
+                        directory.write_owner(owner)
+                        stopping, restarting, restart_gate = False, False, False
+                        ready, latest, cleaned, finished, last_gate = None, None, None, None, None
+                        launch(restart=True)
+                        continue
                     directory.cleanup(owner, socket_id, log_id)
                     if stop_peer:
                         send(stop_peer, ack("stopped", proof, owner, cleaned=cleaned, finished=finished))
@@ -624,28 +692,39 @@ def client(peer, action, owner=None, token=None):
     send(peer, request)
     result = receive(peer, timeout=150)
     keys = ("v", "phase", "nonce", "client_nonce", "owner", "owner_sha256")
-    shape(result, (*keys, "cleaned", "finished") if action == "stop" else (*keys, "payload"))
-    expected_phase = "started" if action == "start" else "stopped" if action == "stop" else "status"
+    shape(result, (*keys, "cleaned", "finished") if action == "stop" else
+          (*keys, "payload", "previous_owner", "cleaned", "finished") if action == "restart" else
+          (*keys, "payload"))
+    expected_phase = {"start": "started", "stop": "stopped", "restart": "restarted",
+                      "status": "status"}[action]
     if (result["phase"] != expected_phase or result["nonce"] != proof["nonce"] or
             result["client_nonce"] != proof["client_nonce"] or
             result["owner_sha256"] != digest(result["owner"]) or
-            owner is not None and result["owner"] != owner):
+            owner is not None and action != "restart" and result["owner"] != owner):
         raise Failure("监督 ACK 不匹配")
     active_owner = owner_check(result["owner"])
-    if action == "stop":
+    if action in {"stop", "restart"}:
         finished = shape(result["finished"], ("status", "lock_released"))
         cleaned = shape(result["cleaned"], ("target", "child_id", "stage"))
         if (type(finished["status"]) is not int or finished["status"] != 143 or
                 type(finished["lock_released"]) is not bool or not finished["lock_released"] or
-                cleaned["stage"] != active_owner["stage"] or not nonce(cleaned["child_id"]) or
+                cleaned["stage"] != (owner if action == "restart" else active_owner)["stage"] or
+                not nonce(cleaned["child_id"]) or
                 not isinstance(cleaned["target"], dict)):
             raise Failure("监督停止 ACK 未证明净撤销")
-    else:
+    if action != "stop":
         value = payload_check(result["payload"], seq=result["payload"]["running"]["seq"])
         if (value["running"]["seq"] < 2 or value["stage"] != active_owner["stage"] or
                 digest({key: value[key] for key in (
                     "target", "child", "directory", "stage")}) != active_owner["stage_sha256"]):
             raise Failure("监督 ACK 原 stage 投影不匹配")
+        if action == "restart":
+            if (result["previous_owner"] != owner or
+                    any(active_owner[key] != owner[key] for key in ("root", "manager")) or
+                    any(active_owner[key] == owner[key] for key in ("token", "bash", "stage")) or
+                    active_owner["bash"]["starttime_ticks"] <= owner["bash"]["starttime_ticks"]):
+                raise Failure("监督重启 ACK 未证明新代次与原目标")
+            restarted_target(value, cleaned)
     return result
 
 
@@ -697,8 +776,9 @@ def control(action, root, token=None):
                 "control.sock", dir_fd=directory.fd, follow_symlinks=False)):
             raise Failure("连接时监督 socket 被替换")
         result = client(peer, action, owner, token)
-        if action == "status":
-            if select.select([descriptor], [], [], 0)[0] or directory.read_owner() != owner:
+        if action in {"status", "restart"}:
+            if (select.select([descriptor], [], [], 0)[0] or
+                    directory.read_owner() != result["owner"]):
                 raise Failure("监督状态 ACK 后身份变化")
         return result
     finally:
@@ -717,10 +797,10 @@ def helper(command, phase, raw):
         proof = {"v": 1, "phase": phase, "nonce": os.urandom(32).hex(), "payload": value}
         send(peer, proof)
         if command == "gate":
-            if phase not in {"ready", "started", "running"}:
+            if phase not in {"restart", "ready", "started", "running"}:
                 raise Failure("监督 gate 阶段无效")
             response = shape(receive(peer), ("v", "phase", "nonce"))
-            if response != {"v": 1, "phase": "commit" if phase == "ready" else "continue",
+            if response != {"v": 1, "phase": "commit" if phase in {"ready", "restart"} else "continue",
                             "nonce": proof["nonce"]}:
                 raise Failure("监督 gate 授权不匹配")
         elif phase not in {"cleaned", "finished"}:
@@ -745,8 +825,8 @@ def main(arguments):
         result = start(args[0], args[1], args[2:])
     elif operation == "status" and len(args) == 1:
         result = control("status", args[0])
-    elif operation == "stop" and len(args) in {1, 2}:
-        result = control("stop", args[0], args[1] if len(args) == 2 else None)
+    elif operation in {"stop", "restart"} and len(args) in {1, 2}:
+        result = control(operation, args[0], args[1] if len(args) == 2 else None)
     else:
         raise Failure("监督入口参数无效")
     print(canonical(result).decode("ascii"))

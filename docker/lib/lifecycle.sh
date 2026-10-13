@@ -843,22 +843,40 @@ dockerPortHoppingTargetStartInstall() {
 }
 
 dockerPortHoppingTargetStartRecreate() {
-    local witness
+    local witness current deadline identityFilter='.container_id != $initial.container_id'
+    local healthTimeout=${PADM_DOCKER_HEALTH_TIMEOUT:-60}
     dockerPortHoppingTargetStartFilesCheck &&
         dockerPortHoppingTargetProjectCheck "${ph_root}" &&
         dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
     # Compose 失败前可能已删旧 CID，恢复从此节点起必须核对当前服务归属。
     ph_runtime=true
-    dockerComposeExecute up -d --force-recreate --no-deps --wait \
-        --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" sing-box >&2 || return 1
+    if [[ "${ph_restart:-false}" == true ]]; then
+        [[ "${healthTimeout}" =~ ^[1-9][0-9]{0,2}$ ]] || return 1
+        # 快照与安全配置已在同一事务形成；重启不再次采集，也不再重建核心。
+        dockerLifecycleRestart >&2 || return 1
+        identityFilter='.container_id == $initial.container_id'
+        deadline=$(($(date +%s) + healthTimeout))
+        while true; do
+            dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
+            current=$(timeout -k 2 5 docker container inspect \
+                "$(jq -er '.container_id' <<<"${ph_initial}")") || return 1
+            if jq -e 'length == 1 and .[0].State.Health.Status == "healthy"' \
+                <<<"${current}" >/dev/null; then break; fi
+            [[ "$(date +%s)" -lt "${deadline}" ]] || return 1
+            sleep 0.1
+        done
+    else
+        dockerComposeExecute up -d --force-recreate --no-deps --wait \
+            --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" sing-box >&2 || return 1
+    fi
     dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
     witness=$(dockerPortHoppingTargetInspect start-after "${ph_listener}" "${ph_ipv4}" "${ph_ipv6}" "${ph_stage}") &&
         dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
-    jq -e --argjson initial "${ph_initial}" '
-      .container_id != $initial.container_id and .started_at != $initial.started_at and
-      .image_id == $initial.image_id and .listener_id == $initial.listener_id and
-      .target_port == $initial.target_port and .ipv4 == $initial.ipv4 and .ipv6 == $initial.ipv6
-    ' <<<"${witness}" >/dev/null || return 1
+    jq -e --argjson initial "${ph_initial}" "
+      ${identityFilter} and .started_at != \$initial.started_at and
+      .image_id == \$initial.image_id and .listener_id == \$initial.listener_id and
+      .target_port == \$initial.target_port and .ipv4 == \$initial.ipv4 and .ipv6 == \$initial.ipv6
+    " <<<"${witness}" >/dev/null || return 1
     ph_witness=${witness}
 }
 
@@ -976,7 +994,8 @@ dockerPortHoppingTargetStartManaged() {
             ph_state=$(dockerTrafficReadState) || ph_state=
             if [[ -z "${ph_state}" || "${ph_state}" != "$(<"${ph_stage}/state.initial.json")" ||
                 "${ph_runtime}" == true ]]; then
-                if [[ "${ph_verified}" == true ]] && dockerPortHoppingTargetStartInstall &&
+                if [[ "${ph_restart:-false}" != true && "${ph_verified}" == true ]] &&
+                    dockerPortHoppingTargetStartInstall &&
                     dockerPortHoppingTargetStartRecreate; then
                     dockerError "跳跃目标启动未提交，已恢复安全候选并保留累计；证据: ${ph_stage}"
                 elif dockerPortHoppingTargetStartLockCheck &&
@@ -1509,10 +1528,12 @@ dockerPortHoppingSupervisorStop() {
 
 dockerPortHoppingTargetSupervisedOwned() {
     local ph_control=${1:-} owner=${BASHPID:-$$} original= current root status=1
-    local released=false ownerSignal=0 intTrap termTrap pipeTrap payload
+    local released=false ownerSignal=0 intTrap termTrap pipeTrap payload ph_restart=false
     local DOCKER_DEPLOYMENT_LOCK_DIR=
-    [[ "$#" -eq 6 && "${ph_control}" =~ ^[1-9][0-9]*$ && "${ph_control}" -ge 3 ]] || return 1
+    [[ ( "$#" -eq 6 || ( "$#" -eq 7 && "$7" == --restart ) ) &&
+        "${ph_control}" =~ ^[1-9][0-9]*$ && "${ph_control}" -ge 3 ]] || return 1
     shift
+    if [[ "$#" -eq 6 ]]; then ph_restart=true; set -- "${@:1:5}"; fi
     python3 -B -c 'import fcntl,os,stat
 if not stat.S_ISSOCK(os.fstat(0).st_mode) or fcntl.fcntl(0,fcntl.F_GETFL)&os.O_ACCMODE != os.O_RDWR:
     raise SystemExit("监督控制 fd 必须是双向 socket")' \
@@ -1528,7 +1549,12 @@ if not stat.S_ISSOCK(os.fstat(0).st_mode) or fcntl.fcntl(0,fcntl.F_GETFL)&os.O_A
     if root=$(dockerInstallRoot) && dockerAcquireDeploymentLock --hopping-owner; then
         if original=$(dockerPortHoppingTargetLockSnapshot "${owner}"); then
             if [[ "${ownerSignal}" == 0 ]]; then
-                if dockerPortHoppingTargetTransaction supervised "$@"; then status=0; else status=$?; fi
+                if { [[ "${ph_restart}" != true ]] ||
+                    { payload=$(jq -cn --argjson pid "${owner}" --argjson lock "${original}" \
+                        '{bash_pid:$pid,lock:$lock}') &&
+                      dockerPortHoppingSupervisorControl gate restart "${payload}"; }; } &&
+                    [[ "${ownerSignal}" == 0 ]] &&
+                    dockerPortHoppingTargetTransaction supervised "$@"; then status=0; else status=$?; fi
             fi
         fi
     else
@@ -1565,7 +1591,10 @@ dockerPortHoppingTargetTransaction() {
     local ph_host= ph_projection= ph_read= ph_write= ph_transport= ph_closed= ph_signal=0
     local status=1 intTrap termTrap pipeTrap image ph_guarded=true cleanupStatus=0 savedSignal payload
     local ph_control=${ph_control:-}
-    [[ "${FUNCNAME[1]:-}" == dockerPortHoppingTargetSupervisedOwned ]] || ph_control=
+    local ph_restart=${ph_restart:-false}
+    if [[ "${FUNCNAME[1]:-}" != dockerPortHoppingTargetSupervisedOwned ]]; then
+        ph_control=; ph_restart=false
+    fi
     [[ "$#" -eq 5 && ( "${ph_operation}" == guarded || "${ph_operation}" == supervised ) ]] || return 1
     [[ -z "${ph_control}" || "${ownerSignal:-0}" == 0 ]] || return "${ownerSignal}"
     ph_root=$(dockerInstallRoot) &&
@@ -1753,6 +1782,16 @@ dockerLifecycleCommand() {
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     shift
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${operation}" == restart &&
+        ( -e "${root}/data/net/.hopping-supervisor" || -L "${root}/data/net/.hopping-supervisor" ) ]]; then
+        [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" restart "${root}" || {
+            dockerError '跳跃监督重启未确认；已保留会话证据，拒绝普通重启'
+            return "${PADM_DOCKER_RC_LOCK}"
+        }
+        return 0
+    fi
     dockerLockInstalledDeployment || return $?
     dockerComposeFile >/dev/null || {
         dockerError 'Docker 服务尚未配置，请先执行 configure'
@@ -1789,12 +1828,23 @@ dockerLifecycleCommand() {
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
         dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
         dockerTrafficBeforeChange
-        dockerTrafficScheduleInstall && dockerRenewalScheduleInstall &&
-            dockerGeoScheduleInstall && dockerControlLogScheduleInstall &&
-            dockerControlSyncScheduleInstall && dockerComposeRun restart
+        dockerLifecycleRestart
         ;;
     logs) dockerComposeRun logs "$@" ;;
     esac
+}
+
+dockerLifecycleRestart() {
+    local root
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerControlSyncScheduleSpecCheck "${root}/config/spec.json" &&
+        dockerRealityStreamDeploymentCheck "${root}/config/spec.json" &&
+        dockerFail2banSourceInputsPrepare "${root}/config/spec.json" ||
+        return "${PADM_DOCKER_RC_STATE}"
+    dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
+    dockerTrafficScheduleInstall && dockerRenewalScheduleInstall &&
+        dockerGeoScheduleInstall && dockerControlLogScheduleInstall &&
+        dockerControlSyncScheduleInstall && dockerComposeRun restart
 }
 
 dockerPullManifestImages() {

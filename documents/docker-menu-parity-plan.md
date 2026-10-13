@@ -6378,6 +6378,36 @@ manager 初始化信号的完整矩阵与无人值守恢复未交付。普通部
 已启用会话，在线 restart/update/rollback/down/uninstall 协调仍待实施。
 菜单/schema/Compose、真实自动跳跃和原生宿主等范围不扩大，总目标保持 active。
 
+#### 5C.9c.3e.2b.3d.4 在线 restart 集成
+
+已有活动独立监督时，现有 `restart` CLI/菜单经原控制挑战协调交接。
+旧规则净撤销、`finished 143/true`、Bash 实际退出及原锁释放全部确证后，
+同一 manager、socket 和会话目录启动新 Bash；目录贯穿交接，普通部署不能插入。
+新 Bash 自取锁并通过新 restart 写门，复用原累计采集、额度安全渲染及配置检查，
+执行共享生命周期 restart，核心 CID 保持、StartedAt 更新；不再额外 recreate。
+随后重新形成启动绑定和持续监督，新 token/Bash/stage/子端及 ACK 必须匹配。
+旧 token、非法净停止回执和新锁漂移拒绝；重启失败不重复重启，
+按已有恢复路径保留累计、会话与事务证据，不能把旧 active JSON 当作成功。
+连续两次控制重启、额度边界、失败单次重启和实际双族业务验证复用现有夹具，
+定向通过后集中完整回归，不为每个控制子步骤重复跑全套。
+
+Docker Linux amd64 验收通过，复用工具镜像
+`sha256:44edfa2f5437bd852b0249fcf5fde85913ac29e2d56d744fa4d4728ad00bf978`：
+定向 target 含 3 项 restart 事务，入口 125580 ms；
+真实验收 268.615 秒、入口 271186 ms，在线交接及双族认证恢复通过；
+集中合同 54/54 顶层叶子与归档声明唯一匹配，含 57 项监督检查，
+入口 527066 ms、排队 267555 ms，cache=false。
+证据分别在 `.tmp-regression-docker-5c36e47f49ba4a99b4ebe0480f0a4ab6/`、
+`.tmp-regression-docker-1b0d6bae269443418db5fad4e0915a1a/`、
+`.tmp-regression-docker-8a0f34f406a64d2fbf0961b1c3c89259/`；
+三份归档的本轮 5 个代码/测试文件 SHA-256 均匹配，详见各目录
+`verification.json`。清理成功归档和核验脚本，保留日志、结果及失败输入。
+
+当前仅覆盖既有单 sing-box、双族 Hy2、无宿主集成的内部监督范围。
+菜单启用、schema/Compose 持久化、其它生命周期协调、TUIC、自动恢复与真实自动跳跃，
+原生宿主/systemd/整机重启/arm64/公网及可信发布仍未交付或未验；
+支持状态仍 deferred，总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

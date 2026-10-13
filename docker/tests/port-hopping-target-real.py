@@ -615,6 +615,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
     failed_owner_retained = False
     primary_error = None
     calls = []
+    cron = None
 
     def admission(accepted):
         started_at = time.monotonic()
@@ -671,7 +672,9 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
     def ack(value, phase, owner=None):
         assert set(value) == {
             "v", "phase", "nonce", "client_nonce", "owner", "owner_sha256",
-            *({"cleaned", "finished"} if phase == "stopped" else {"payload"})}
+            *({"cleaned", "finished"} if phase == "stopped" else
+              {"payload", "previous_owner", "cleaned", "finished"} if phase == "restarted" else
+              {"payload"})}
         assert type(value["v"]) is int and value["v"] == 1 and value["phase"] == phase
         assert all(re.fullmatch(r"[a-f0-9]{64}", value[key])
                    for key in ("nonce", "client_nonce", "owner_sha256"))
@@ -737,6 +740,11 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
 
     try:
         assert not session.exists() and not state.exists()
+        # lifecycle 的调度前置也使用真实工具，cron 只在本次隔离容器内运行。
+        with (work / "independent-supervisor.log").open("ab") as log:
+            cron = subprocess.Popen(["cron", "-f"], stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+        wait_ready(lambda: cron.poll() is None and subprocess.run(
+            ["pgrep", "-x", "cron"], capture_output=True).returncode == 0, 5)
         # 每次 CLI 均由短命调用者发起，调用者不取得独立 owner 持有的部署锁。
         caller, started = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
                                  "30001", "198.18.1.1", "2001:db8:1::1")
@@ -853,35 +861,54 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
                        alice_password, "old", server_port=30001)
         assert {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
                 for tool in nat_before} == active_nat
-        _, stopped = invoke("dockerPortHoppingSupervisorStop")
-        assert stopped["nonce"] not in challenges and stopped["client_nonce"] not in challenges
-        stopped_clean(stopped, owner, target, running, manager_fd, bash_fd)
-        active = False
-        admission(True)
-        assert not (root / "locks/deployment.lock").exists()
-        assert tree(lock) == net_lock
-        assert set(root.glob(".hopping-guarded.*")) == stages
         evidence.update(final_running=previous, observed_renewals=checks,
                         duration=round(time.monotonic() - observed, 3),
                         caller_exit_survived=True, fresh_dual_family_self_accepted=True,
-                        alice_revoked=True, stopped=stopped)
-        _, second = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000", "30001",
-                           "198.18.1.1", "2001:db8:1::1")
-        active = True
-        second_owner = ack(second, "started")
+                        alice_revoked=True)
+        # 实际 lifecycle restart 贯穿同一会话；轮询部署门禁捕捉锁交接空档。
+        pending_restart = [True]
+        def check_restart_admission():
+            count = 0
+            while pending_restart[0]:
+                admission(False)
+                assert session.stat().st_ino == session_inode
+                count += 1
+                time.sleep(0.02)
+            return count
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            observed_admission = executor.submit(check_restart_admission)
+            try:
+                _, second = invoke("dockerLifecycleCommand", "restart")
+            finally:
+                pending_restart[0] = False
+            assert observed_admission.result(timeout=5) > 1
+        second_owner = ack(second, "restarted")
+        assert second["previous_owner"] == owner
+        assert second["finished"] == dict(status=143, lock_released=True)
+        assert second["cleaned"] == dict(target=target, child_id=running["child_id"],
+                                         stage=owner["stage"])
+        assert second["nonce"] not in challenges and second["client_nonce"] not in challenges
+        assert session.stat().st_ino == session_inode
+        assert alive(manager_fd) and not alive(bash_fd)
         assert second_owner["token"] != owner["token"]
-        assert second_owner["manager"]["pid"] != owner["manager"]["pid"]
+        assert second_owner["manager"] == owner["manager"]
         assert second_owner["bash"]["pid"] != owner["bash"]["pid"]
-        assert second_owner["manager"]["starttime_ticks"] > owner["manager"]["starttime_ticks"]
         assert second_owner["bash"]["starttime_ticks"] > owner["bash"]["starttime_ticks"]
+        assert second_owner["stage"] != owner["stage"] and not stage.exists()
         second_manager = process_identity(second_owner["manager"])
         second_bash = process_identity(second_owner["bash"])
         second_frame = frame(second["payload"]["running"])
         assert second_frame["child_id"] != running["child_id"]
-        assert second["payload"]["target"]["container_id"] != target["container_id"]
+        assert second["payload"]["target"]["container_id"] == target["container_id"]
+        assert second["payload"]["target"]["started_at"] != target["started_at"]
+        assert second["payload"]["target"]["enabled_accounts"] == 1
+        assert (root / "locks/deployment.lock/pid").read_text() == (
+            str(second_owner["bash"]["pid"]) + "\n")
+        authentication(node, root, enter, "independent-restarted", self_password,
+                       alice_password, "old", server_port=30000)
         # 旧 token 只用于拒绝检查，不能借用旧 ACK 授权本轮停止。
         result = subprocess.run(
-            ["python3", "-B", str(ROOT / "docker/lib/port-hopping-supervisor.py"), "stop",
+            ["python3", "-B", str(ROOT / "docker/lib/port-hopping-supervisor.py"), "restart",
              str(root), owner["token"]], env=environment, capture_output=True, timeout=60)
         with (work / "independent-supervisor.log").open("ab") as log:
             log.write(result.stderr)
@@ -895,9 +922,11 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         stopped_clean(second_stopped, second_owner, second["payload"]["target"], second_frame,
                       second_manager, second_bash)
         active = False
+        admission(True)
         assert tree(lock) == net_lock and set(root.glob(".hopping-guarded.*")) == stages
         evidence.update(second_started=second, second_stopped=second_stopped,
-                        stale_token_refused=True, fresh_owner_restart=True,
+                        stale_token_refused=True, online_lifecycle_restart=True,
+                        fresh_owner_restart=True, session_preserved=True,
                         nat_restored=True, state_removed=True, child_removed=True,
                         deployment_lock_released=True, session_removed=True)
         _, terminated = invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000",
@@ -955,6 +984,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         for function, arguments in (
             ("dockerPortHoppingSupervisorStatus", ()),
             ("dockerPortHoppingSupervisorStop", ()),
+            ("dockerLifecycleCommand", ("restart",)),
             ("dockerPortHoppingSupervisorStart",
              ("entry-hy2", "30000", "30001", "198.18.1.1", "2001:db8:1::1")),
         ):
@@ -1010,6 +1040,8 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         finally:
             for descriptor in descriptors:
                 os.close(descriptor)
+            if cron is not None:
+                stop(cron)
 
 
 def restart_witness(root, docker, compose, identity, previous):
