@@ -386,8 +386,18 @@ The separate read-only 3c startup check rejects runtime configuration or selecte
 files whose mtime/ctime follows the fixed container start time, including restored
 mtimes or same-byte replacements. Normal traffic-state updates are not time constrained.
 It does not prove loaded versions, the container's mount view or consistency after
-clock rollback. Startup version binding and the activation gate remain pending;
-complete hopping and protocol-management support are unchanged.
+clock rollback. Internal 3d.1–2 adds current-Bash lock identity checks and a managed
+startup transaction, limited to an existing traffic directory, one healthy sing-box,
+one dual-stack Hy2 listener, no host integrations and no other project containers. The default
+inactive ACME profile may remain defined. It strictly collects cumulative traffic,
+renders one new candidate and recreates once on success, verifying new container and
+file identities. Failure or INT/TERM recovery uses only the validated safe candidate;
+otherwise it verifies ownership and stops the core. Cumulative traffic never rolls
+back, and failure evidence remains. A Linux amd64 private daemon verifies fresh
+dual-family quota revocation and safe recovery after publication fails. SIGKILL,
+noncooperative replacement, native hosts/arm64, public networks, old-session draining
+and the complete net/menu/schema gate remain pending. Complete hopping and
+protocol-management support are unchanged.
 
 The protocol menu's CDN address manager overrides client connection addresses for
 existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription

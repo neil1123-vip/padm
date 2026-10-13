@@ -507,3 +507,95 @@ MODE=ok
 runWitness ok
 dockerReleaseDeploymentLock
 printf 'docker-port-hopping-target-locked-ok: %s total target cases\n' "${cases}"
+
+# 使用实际五参数见证，材料写入仅限本次 stage，默认 acme profile 保持关闭。
+restore
+startupTime
+WITNESS_FUNCTION=dockerPortHoppingTargetStartupWitness
+runWitness ok
+expectedMaterialProof=$(jq -Sc . "${TEST_ROOT}/result.json")
+materialStage=$(mktemp -d "${root}/.hopping-material.XXXXXX")
+jq -e '(.services | del(.acme) | keys) == ["sing-box"] and
+    .services.acme.profiles == ["acme"]' "${root}/compose.json" >/dev/null ||
+    fail '实际生成器夹具缺少默认 acme profile'
+materialTree() {
+    treeSnapshot | jq -c --arg stage "${materialStage##*/}" '
+      map(select(.[0] != $stage and (.[0] | startswith($stage + "/") | not)))
+    '
+}
+runMaterial() {
+    local mode=$1 expected=$2 before status=0
+    before=$(materialTree)
+    : >"${TEST_ROOT}/commands.log"
+    GUARD_SECRET_ARGV=1 dockerPortHoppingTargetInspect "${mode}" entry-hy2 \
+        "${IPV4}" "${IPV6}" "${materialStage}" \
+        >"${TEST_ROOT}/material.json" 2>"${TEST_ROOT}/material.log" || status=$?
+    [[ "$(materialTree)" == "${before}" ]] || fail "${mode}: 材料见证改变 stage 之外的受管树"
+    [[ ! -e "${TEST_ROOT}/unexpected.log" ]] || fail "${mode}: 出现未知 Docker 调用"
+    if [[ "${expected}" == ok ]]; then
+        [[ "${status}" == 0 && "$(jq -Sc . "${TEST_ROOT}/material.json")" == "${expectedMaterialProof}" ]] ||
+            fail "${mode}: 实际材料正例被拒绝: $(cat "${TEST_ROOT}/material.log")"
+        for kind in 'container inspect ' 'image inspect ' 'network inspect ' 'ip -j address show'; do
+            [[ $(grep -c "^${kind}" "${TEST_ROOT}/commands.log") == 2 ]] ||
+                fail "${mode}: ${kind} 未执行两轮"
+        done
+    else
+        [[ "${status}" != 0 && ! -s "${TEST_ROOT}/material.json" ]] ||
+            fail "${mode}: 非法材料见证成功或失败后输出"
+    fi
+}
+runMaterial start-before ok
+for pair in 'users.base.expected|config/sing-box/users.base' \
+    'config.initial.expected|config/sing-box/config.json' \
+    'state.initial.json|data/traffic/state.json'; do
+    jq -es 'length == 2 and .[0] == .[1]' "${materialStage}/${pair%%|*}" \
+        "${root}/${pair#*|}" >/dev/null || fail '初始材料与受管配置或累计不一致'
+done
+cp -- "${materialStage}/config.initial.expected" "${materialStage}/config.safe.expected"
+# 后验只复用已验证材料；任何再次读取、生成或渲染都让合同失败。
+(
+    dockerTrafficReadState() { fail '材料后验重复读取累计'; }
+    dockerGenerateSingBoxConfig() { fail '材料后验重复生成账号基线'; }
+    dockerTrafficRender() { fail '材料后验重复渲染配置'; }
+    runMaterial start-after ok
+)
+for pair in \
+    'compose.json|.services.rogue = .services["sing-box"]' \
+    'compose.json|.services.acme.profiles = []' \
+    'config/spec.json|.core.secondary_type = "xray"' \
+    'config/spec.json|.core.protocols += [(.core.protocols[0] | .listener_id = "other-hy2" | .public_port = 27444 | .hy2.domain = "other.example.com")]' \
+    'config/spec.json|.host_integrations = [{type:"tun",settings:{}}]'; do
+    change "${pair%%|*}" "${pair#*|}"
+    runMaterial start-before reject
+    runMaterial start-after reject
+    restore
+    startupTime
+    expectedMaterialProof=$(jq -Sc --arg started \
+        "$(jq -r '.[0].State.StartedAt' "${TEST_ROOT}/inspect.json")" \
+        '.started_at = $started' <<<"${expectedMaterialProof}")
+done
+cp -- "${materialStage}/config.safe.expected" "${TEST_ROOT}/material.safe"
+printf '{}\n' >"${materialStage}/config.safe.expected"
+runMaterial start-after reject
+cp -- "${TEST_ROOT}/material.safe" "${materialStage}/config.safe.expected"
+runMaterial start-after ok
+
+# 缺少累计目录必须在采集及 Compose 前拒绝；缺少 state 文件仍由首次采集创建。
+dockerAcquireDeploymentLock
+if managed=$(dockerPortHoppingTargetStartManaged entry-hy2 "${IPV4}" "${IPV6}" \
+    2>"${TEST_ROOT}/managed-substitution.log"); then fail '启动入口命令替换冒用了父进程锁'; fi
+[[ -z "${managed}" ]] || fail '启动入口拒绝后仍输出见证'
+mv -- "${root}/data/traffic" "${TEST_ROOT}/missing-traffic"
+missingTree=$(treeSnapshot)
+dockerTrafficSnapshot() { fail '累计目录缺失仍执行采集'; }
+dockerComposeExecute() { fail '累计目录缺失仍执行 Compose'; }
+status=0
+dockerPortHoppingTargetStartManaged entry-hy2 "${IPV4}" "${IPV6}" \
+    >"${TEST_ROOT}/missing-traffic.json" 2>"${TEST_ROOT}/missing-traffic.log" || status=$?
+[[ "${status}" != 0 && ! -s "${TEST_ROOT}/missing-traffic.json" ]] ||
+    fail '累计目录缺失未拒绝启动入口'
+[[ "$(treeSnapshot)" == "${missingTree}" ]] || fail '累计目录缺失时启动入口修改了受管树'
+mv -- "${TEST_ROOT}/missing-traffic" "${root}/data/traffic"
+dockerReleaseDeploymentLock
+rm -rf -- "${materialStage}"
+printf 'docker-port-hopping-target-material-ok: before/after, scope, reuse and missing-traffic\n'

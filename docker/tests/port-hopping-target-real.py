@@ -99,7 +99,8 @@ def authentication(node, root, enter, phase, old_password, new_password, accepte
                 tls=dict(enabled=True, server_name="target.padm.test", alpn=["h3"],
                          certificate_path=str(root / "secrets/tls/target.padm.test.crt"))))
             config["route"]["rules"].append(dict(inbound=[tag], action="route", outbound=tag))
-            checks.append((port, role == accepted_role))
+            checks.append((port, role in accepted_role if isinstance(accepted_role, tuple)
+                           else role == accepted_role))
     path = node / "client.json"
     path.write_text(json.dumps(config))
     path.chmod(0o600)
@@ -274,12 +275,79 @@ dockerTrafficRender sing-box "$2/config/sing-box/users.base" "$(dockerTrafficRea
             checked_witness(root, docker, accepted=False)
             checked_witness(root, docker, startup=True, accepted=False)
             live.write_bytes(original)
+            alice = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            alice_password = "55555555-5555-4555-8555-555555555555"
+            current["accounts"] = [dict(
+                id=alice, name="Alice", enabled=True, uuid=alice_password,
+                password=alice_password, shadowsocks_password=None,
+                listeners=["entry-hy2"])]
+            spec.write_text(json.dumps(current))
+            state.write_text(json.dumps(dict(schema_version=1, accounts={
+                new_password: dict(name="self", upload=1, download=0, limit_bytes=0, baseline={}),
+                alice: dict(name="Alice", upload=0, download=0, limit_bytes=1, baseline={})})))
+            command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
+                     "bash", "-Eeuo", "pipefail", "-c", """
+. "$1"
+dockerGenerateSingBoxConfig "$2/config/spec.json" "$2/config/sing-box/users.base"
+dockerTrafficRender sing-box "$2/config/sing-box/users.base" "$(dockerTrafficReadState)" \
+    >"$2/config/sing-box/config.json"
+dockerTlsRuntimePermissions "$2/secrets/tls"
+""", "test", str(ROOT / "install-docker.sh"), str(root)])
+            command(compose + ["up", "-d", "--force-recreate", "--no-deps", "sing-box"], timeout=45)
+            identity = command(compose + ["ps", "-q", "sing-box"]).decode().strip()
+            wait_ready(lambda: inspect(docker, identity)["State"].get("Health", {}).get(
+                "Status") == "healthy", 45)
+            authentication(node, root, enter, "quota-before", new_password, alice_password,
+                           ("old", "new"))
+            quota_before = checked_witness(root, docker, startup=True)
+            result = command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
+                              "DOCKER_HOST=" + docker[-1], "bash", "-Eeuo", "pipefail", "-c", """
+. "$1"
+dockerAcquireDeploymentLock
+trap dockerReleaseDeploymentLock EXIT
+dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
+""", "test", str(ROOT / "install-docker.sh")], timeout=60)
+            quota_after = json.loads(result)
+            assert quota_after["container_id"] != quota_before["container_id"]
+            assert quota_after["started_at"] != quota_before["started_at"]
+            assert quota_after["enabled_accounts"] == 1
+            accumulated = json.loads(state.read_text())["accounts"][alice]
+            assert accumulated["upload"] + accumulated["download"] >= accumulated["limit_bytes"]
+            authentication(node, root, enter, "quota-after", new_password, alice_password, "old")
+            # 发布已删旧 CID 后故障，真实恢复仍只加载安全候选字节。
+            result = subprocess.run([
+                "env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
+                "bash", "-Eeuo", "pipefail", "-c", """
+. "$1"
+eval "$(declare -f dockerComposeExecute | sed '1s/dockerComposeExecute/dockerComposeExecuteOriginal/')"
+failed=false
+dockerComposeExecute() {
+    if [[ "$1" == up && "${failed}" == false ]]; then
+        failed=true
+        dockerComposeExecuteOriginal "$@" || return $?
+        return 1
+    fi
+    dockerComposeExecuteOriginal "$@"
+}
+dockerAcquireDeploymentLock
+trap dockerReleaseDeploymentLock EXIT
+dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
+""", "test", str(ROOT / "install-docker.sh")], capture_output=True, timeout=90)
+            assert result.returncode != 0 and not result.stdout, result.stderr.decode()
+            recovered = checked_witness(root, docker, startup=True)
+            assert recovered["container_id"] != quota_after["container_id"]
+            assert recovered["enabled_accounts"] == 1
+            accumulated_after = json.loads(state.read_text())["accounts"][alice]
+            assert (accumulated_after["upload"] + accumulated_after["download"] >=
+                    accumulated["upload"] + accumulated["download"])
+            authentication(node, root, enter, "quota-recovered", new_password, alice_password, "old")
         command(compose + ["rm", "-s", "-f"], timeout=15)
         print("docker-port-hopping-target-real-snapshot=" + json.dumps(dict(
             initial=proof, restarted=changed, tls_restarted=tls_changed, image=inputs["sing-box"],
             disk_drift_refused=True, backdated_config_refused=True,
             fresh_dual_family_auth_reversed=True, backdated_tls_replacement_refused=True,
             traffic_state_update_allowed=True, locked_witness_tree_unchanged=True,
+            managed_start_quota_revoked=True, failed_start_safe_recovered=True,
             elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
     except BaseException:
         if daemon is not None and daemon.poll() is None:

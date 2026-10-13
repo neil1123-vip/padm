@@ -3884,28 +3884,11 @@ dockerPortHoppingTargetLockedWitness() {
     printf '%s\n' "${witness}"
 }
 
-dockerPortHoppingTargetInspect() (
-    local mode=${1:-} listener=${2:-} ipv4=${3:-} ipv6=${4:-} root spec entry domain fileProbe before after
-    local baseline state rendered count expectedCompose expectedEnv image ids container imageInfo
-    local networks networkInfo hostAddresses fixed previous= round sourcePath startedAt=
-    local -a networkIds=()
-    [[ "$#" -eq 4 && ( "${mode}" == snapshot || "${mode}" == startup ) ]] || return 1
-    dockerHostPreflight && dockerRequireCommand python3 && dockerRequireCommand ip || return 1
+dockerPortHoppingTargetFileSnapshot() {
+    local root
+    [[ "$#" -eq 2 ]] || return 1
     root=$(dockerInstallRoot) || return 1
-    spec="${root}/config/spec.json"
-    dockerTrafficSafePath "${root}" "${spec}" && [[ -f "${spec}" ]] || return 1
-    entry=$(jq -ec --arg listener "${listener}" '
-      . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
-      if $s.schema_version == 3 and length == 1 and .[0].id == 3 and
-        (.[0].core // $s.core.type) == "sing-box" and
-        (.[0].address_families | sort) == ["ipv4","ipv6"] and
-        all($s.host_integrations[]; .type != "tun" and .type != "tproxy")
-      then {port:.[0].public_port,domain:.[0].hy2.domain}
-      else error("目标见证仅支持受管双族 Hy2 bridge 入口") end
-    ' "${spec}") || return 1
-    domain=$(jq -er '.domain' <<<"${entry}") || return 1
-    # shortcut: 启动时间只拒绝后续文件改动；内存版本、挂载视图和时钟回退须由部署锁内启动事务验收。
-    read -r -d '' fileProbe <<'PY' || [[ -n "${fileProbe}" ]] || return 1
+    python3 - "${root}" "$1" "$2" <<'PY'
 import calendar
 import datetime
 import hashlib
@@ -3959,14 +3942,14 @@ for name in [*dirs, *files]:
             continue
         raise SystemExit("目标快照缺少受管文件或目录")
     row = [name, metadata.st_dev, metadata.st_ino, metadata.st_mode,
-           metadata.st_uid, metadata.st_gid, metadata.st_nlink]
+           metadata.st_uid, metadata.st_gid]
     if name in files:
         if not stat.S_ISREG(metadata.st_mode):
             raise SystemExit("目标配置与 TLS 必须是普通文件")
         if (started_ns is not None and name in startup_files and
                 max(metadata.st_mtime_ns, metadata.st_ctime_ns) > started_ns):
             raise SystemExit("目标启动后核心配置或 TLS 发生改动")
-        row += [metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns,
+        row += [metadata.st_nlink, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns,
                 hashlib.sha256(path.read_bytes()).hexdigest()]
     elif not stat.S_ISDIR(metadata.st_mode):
         raise SystemExit("目标受管路径必须是目录")
@@ -3982,7 +3965,44 @@ for path in sorted(config.rglob("*")):
                  metadata.st_mode, metadata.st_uid, metadata.st_gid])
 print(json.dumps(rows, separators=(",", ":")))
 PY
-    before=$(python3 -c "${fileProbe}" "${root}" "${domain}" "") || return 1
+}
+
+dockerPortHoppingTargetInspect() (
+    local mode=${1:-} listener=${2:-} ipv4=${3:-} ipv6=${4:-} stage=${5:-} root spec entry domain before after
+    local baseline state rendered count expectedCompose expectedEnv image ids container imageInfo
+    local networks networkInfo hostAddresses fixed previous= round sourcePath startedAt=
+    local checkpoint=arguments
+    local -a networkIds=()
+    trap 'status=$?; [[ "${status}" == 0 || "${mode}" != start-* ]] ||
+        dockerError "目标启动见证检查失败: ${checkpoint}"; exit "${status}"' EXIT
+    case "${mode}:$#" in snapshot:4|startup:4|start-before:5|start-after:5) ;; *) return 1 ;; esac
+    dockerHostPreflight && dockerRequireCommand python3 && dockerRequireCommand ip || return 1
+    root=$(dockerInstallRoot) || return 1
+    spec="${root}/config/spec.json"
+    dockerTrafficSafePath "${root}" "${spec}" && [[ -f "${spec}" ]] || return 1
+    if [[ -n "${stage}" ]]; then
+        dockerTrafficSafePath "${root}" "${stage}" && [[ -d "${stage}" && -O "${stage}" ]] &&
+            jq -e '.core.type == "sing-box" and .core.secondary_type == null and
+              (.core.protocols | length) == 1 and
+              (.host_integrations | length) == 0' "${spec}" >/dev/null &&
+            jq -e '(.services | del(.acme) | keys) == ["sing-box"] and
+              .services.acme.profiles == ["acme"]' "${root}/compose.json" >/dev/null || {
+                dockerError '启动事务只支持无宿主集成的单 sing-box 单 Hy2 入口部署'
+                return 1
+            }
+    fi
+    entry=$(jq -ec --arg listener "${listener}" '
+      . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
+      if $s.schema_version == 3 and length == 1 and .[0].id == 3 and
+        (.[0].core // $s.core.type) == "sing-box" and
+        (.[0].address_families | sort) == ["ipv4","ipv6"] and
+        all($s.host_integrations[]; .type != "tun" and .type != "tproxy")
+      then {port:.[0].public_port,domain:.[0].hy2.domain}
+      else error("目标见证仅支持受管双族 Hy2 bridge 入口") end
+    ' "${spec}") || return 1
+    domain=$(jq -er '.domain' <<<"${entry}") || return 1
+    before=$(dockerPortHoppingTargetFileSnapshot "${domain}" "") || return 1
+    checkpoint=deployment
     dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
         dockerDeploymentFileValidate "${root}/deployment.json" || return 1
     [[ "$(jq -c --arg listener "${listener}" '
@@ -4000,16 +4020,22 @@ PY
             "${root}/compose.json" >/dev/null &&
         [[ "$(LC_ALL=C sort "${root}/images.env")" == "$(LC_ALL=C sort <<<"${expectedEnv}")" ]] || return 1
     jq -e '.services["sing-box"].network_mode == null' "${root}/compose.json" >/dev/null || return 1
+    checkpoint=accounts
     while IFS= read -r sourcePath; do
         sourcePath=${sourcePath/'${PADM_DOCKER_ROOT}'/${root}}
         dockerTrafficSafePath "${root}" "${sourcePath}" && [[ -d "${sourcePath}" ]] || return 1
     done < <(jq -r '.services["sing-box"].volumes[].source' "${root}/compose.json")
-    baseline=$(dockerGenerateSingBoxConfig "${spec}" /dev/stdout) &&
-        jq -es --slurpfile expected <(printf '%s\n' "${baseline}") \
+    if [[ "${mode}" == start-after ]]; then
+        baseline=$(cat -- "${stage}/users.base.expected") &&
+            rendered=$(cat -- "${stage}/config.safe.expected") || return 1
+    else
+        baseline=$(dockerGenerateSingBoxConfig "${spec}" /dev/stdout) &&
+            state=$(dockerTrafficReadState) &&
+            rendered=$(dockerTrafficRender sing-box "${root}/config/sing-box/users.base" "${state}") || return 1
+    fi
+    jq -es --slurpfile expected <(printf '%s\n' "${baseline}") \
             'length == 1 and ($expected | length) == 1 and .[0] == $expected[0]' \
             "${root}/config/sing-box/users.base" >/dev/null &&
-        state=$(dockerTrafficReadState) &&
-        rendered=$(dockerTrafficRender sing-box "${root}/config/sing-box/users.base" "${state}") &&
         jq -es --slurpfile expected <(printf '%s\n' "${rendered}") \
             'length == 1 and ($expected | length) == 1 and .[0] == $expected[0]' \
             "${root}/config/sing-box/config.json" >/dev/null || return 1
@@ -4021,6 +4047,7 @@ PY
     ' <<<"${rendered}") &&
         image=$(jq -er '.images["sing-box"]' "${spec}") || return 1
     for round in 1 2; do
+        checkpoint=runtime
         hostAddresses=$(ip -j address show) || return 1
         python3 - "${ipv4}" "${ipv6}" "${hostAddresses}" <<'PY' || return 1
 import ipaddress
@@ -4148,11 +4175,22 @@ PY
         else [[ "${fixed}" == "${previous}" ]] || return 1
         fi
     done
-    if [[ "${mode}" == startup ]]; then
+    if [[ "${mode}" != snapshot ]]; then
         startedAt=$(jq -er '.[0].State.StartedAt' <<<"${container}") || return 1
     fi
-    after=$(python3 -c "${fileProbe}" "${root}" "${domain}" "${startedAt}") || return 1
+    # shortcut: 时间边界只拒绝启动后的文件改动，不能独立证明进程内存或挂载视图。
+    checkpoint=files
+    after=$(dockerPortHoppingTargetFileSnapshot "${domain}" "${startedAt}") || return 1
     [[ "${after}" == "${before}" ]] || return 1
+    if [[ "${mode}" == start-before ]]; then
+        checkpoint=materials
+        printf '%s\n' "${baseline}" >"${stage}/users.base.expected" &&
+            printf '%s\n' "${state}" >"${stage}/state.initial.json" &&
+            printf '%s\n' "${rendered}" >"${stage}/config.initial.expected" || {
+                dockerError '启动事务初始材料写入失败'
+                return 1
+            }
+    fi
     jq -cn --arg listener "${listener}" --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" \
         --argjson c "${container}" --argjson entry "${entry}" --argjson count "${count}" '
       {schema_version:1,listener_id:$listener,protocol_id:3,core:"sing-box",

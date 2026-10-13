@@ -263,7 +263,7 @@ dockerTrafficSnapshot() {
     next=${state}
     while IFS= read -r core; do
         generation=$(jq -r '.id + ":" + .started_at' <<<"${before[${core}]}") || return 1
-        counters=$(jq -ce --argjson accounts "${accounts[${core}]}" '
+        counters=$(jq -ce --slurpfile accounts <(printf '%s\n' "${accounts[${core}]}") '
       def count: type == "number" and . >= 0 and . <= 9007199254740991 and . == floor;
       if type != "object" then error("统计响应格式无效") else . end |
       (if has("stat") then .stat else [] end) |
@@ -271,7 +271,7 @@ dockerTrafficSnapshot() {
       reduce .[] as $item ({};
         if ($item.name | type) != "string" then error("统计项名称无效") else . end |
         (($item.name | capture("^user>>>(?<account>[A-Za-z0-9_.@+-]{1,128})>>>traffic>>>(?<direction>uplink|downlink)$")?) // null) as $key |
-        if $key == null or ([$accounts[].account] | index($key.account)) == null then .
+        if $key == null or ([$accounts[0][].account] | index($key.account)) == null then .
         else ((if $item | has("value") then $item.value else 0 end) |
             if type == "string" and test("^[0-9]+$") then tonumber else . end) as $value |
           (if $key.direction == "uplink" then "upload" else "download" end) as $direction |
@@ -279,12 +279,14 @@ dockerTrafficSnapshot() {
           else .[$key.account][$direction] = $value end
         end)
         ' <<<"${stats[${core}]}") || return 1
-        next=$(jq -c --arg core "${core}" --arg generation "${generation}" --argjson accounts "${accounts[${core}]}" --argjson counters "${counters}" '
-      reduce $accounts[] as $account (.;
+        next=$(jq -c --arg core "${core}" --arg generation "${generation}" \
+            --slurpfile accounts <(printf '%s\n' "${accounts[${core}]}") \
+            --slurpfile counters <(printf '%s\n' "${counters}") '
+      reduce $accounts[0][] as $account (.;
         .accounts[$account.account] = ((.accounts[$account.account] //
           {upload:0, download:0, limit_bytes:0, baseline:{}}) + {name:$account.name}) |
         reduce ["upload", "download"][] as $direction (.;
-          ($counters[$account.account][$direction] // null) as $value |
+          ($counters[0][$account.account][$direction] // null) as $value |
           if $value == null then . else
             (.accounts[$account.account].baseline[$core][$direction] // {}) as $previous |
             .accounts[$account.account][$direction] +=

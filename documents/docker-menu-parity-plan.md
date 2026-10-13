@@ -5705,14 +5705,15 @@ services/xhttp 两实现文件与本次输入原始字节 SHA256 一致，静态
 本轮成功输入累计清理 `98,133,520 bytes`；日志/result、输入哈希及失败证据保留。
 支持范围不变，3d 与整体计划继续待实施。
 
-#### 5C.9c.3d 受管启动事务，部分前置已交付
+#### 5C.9c.3d 受管启动事务，内部入口已交付
 
 首个内部入口限已持有部署锁的当前 Bash 进程、健康单 sing-box 与已有双族
 Hy2，不接 CLI、菜单、schema 或 net 服务。固定 root、lock 目录、pid 文件的
 路径、dev/inode、权限与 owner；采集后、文件切换前、Compose 前、提交和恢复
 均复验，锁身份变化即保留证据。只检查 pid 内容不构成同一锁的证明。
 
-直接严格 `dockerTrafficSnapshot sing-box`，失败不改运行配置或执行 Compose。
+直接严格 `dockerTrafficSnapshot sing-box`；确认未提交新累计的采集失败
+不改运行配置或执行 Compose，已经原子提交时按下文安全恢复。
 现有 `dockerTrafficBeforeChange` 吞采集失败且总返回 0，不能用于此门控。
 生成与核对 baseline 一次，读取新累计 state 并渲染一次、验证候选；正常路径
 仅一次受管 `up -d --force-recreate --no-deps --wait … sing-box`，
@@ -5768,6 +5769,62 @@ Jobs 6、exit 0、cache_hit=false；
 不抵御非合作进程中途换出又换回，不接生产启用门控，也不证明内存或挂载
 内容一致。完整采集、一次渲染/重建、额度安全恢复和信号事务继续待实施；
 3d 及整体计划仍 active。
+
+##### 5C.9c.3d.2 严格采集与额度安全启动
+
+内部 `dockerPortHoppingTargetStartManaged` 仅由当前持锁 Bash 直接调用；
+已有 `data/traffic` 目录、健康单 sing-box、单个双族 Hy2 入口、无宿主集成及其它
+项目容器。生成器默认未运行的 ACME profile 允许保留；额外服务、oneoff、
+同项目孤儿先拒绝，避免 `up --remove-orphans` 扩大影响。未接 CLI、菜单、
+schema 或 net 自动启用，不接受外层命令替换冒用锁。
+
+复用只读见证，将文件快照提取为同一 helper；目录固定 dev/inode/mode/owner，
+文件另含 nlink、纳秒 mtime/ctime 和摘要，避免 stage/query 合法创建影响目录
+链接数。生成 baseline 与初始账号配置一次；严格 `dockerTrafficSnapshot sing-box`
+后复验初始 CID/StartedAt，读取新 state 一次、渲染安全候选一次并核对 state
+对应版本。候选放受管核心目录外，验证时挂载到已有只读 `config.json` 路径，
+不在只读目录新建挂载点。复制前后校验候选摘要及内容，原子切换后复验。
+正常仅一次 `up -d --force-recreate --no-deps --wait … sing-box`；
+后置见证复用已验证 baseline/候选，要求新 CID、StartedAt 和相同目标/镜像。
+
+已提交累计永不回退；采集返回非 0 或信号也按实际 state 决定恢复。
+候选未验证、无启用账号、输入或 state 漂移时核对受管核心身份后受限停止；
+验证通过后失败只恢复安全候选字节，旧 live 留证据，不能重新启用超额账号。
+Compose 开始即按旧 CID 可能已删除处理；恢复失败核对当前归属尝试停止，
+daemon 或停止不明保留证据，不声称已撤销。停止前固定身份复验排除正常健康
+日志 tick。INT/TERM 停止原流程推进、同锁恢复后还原调用方 trap；
+锁漂移清本 Bash 的释放入口变量，避免外层按相同 pid 删除替换锁。
+
+36 个事务合同覆盖采集/读/渲染/验证失败、提交后返回失败、刚跨额度、
+全部超额、锁/spec/TLS/state/live/候选漂移、未实际重建、健康 tick、
+已删旧 CID 的启动/恢复失败、7 个 INT/TERM 边界及 trap 还原。
+正常断言 Generate 1、Render 2、Read 3、Query/Write/Validate/Up 各 1；
+计入初始见证，新增累计与候选仅各处理一次。结合既有 86 个身份场景，
+定向内部/入口 `43883/45062 ms`、Jobs 2：
+`.tmp-regression-docker-86a2a50a5e1c4e2c9cb7182e0ea7ad82/`。
+标准私有 daemon 两族新客户端均先成功；采集跨 Alice 额度后仅 self
+能新建连接；真实发布完成后注入非 0，安全恢复仍拒绝 Alice 且累计不减。
+内部/入口 `55959/56983 ms`、Jobs 2：
+`.tmp-regression-docker-f88fa83ee6404cdaa4509bf97efef475/`。
+同时消除 Snapshot 账号对象中的主认证 UUID 经 jq argv 外泄，改用 slurpfile；
+累计算法保持原样，事务合同有 argv 守卫。
+
+最终材料合同补默认 ACME profile 正例、额外服务/多入口拒绝、后验不重新
+读取累计或生成/渲染、候选漂移、缺少累计目录及命令替换冒用拒绝。
+最终定向内部/入口 `46016/47061 ms`、Jobs 2、exit 0、cache_hit=false：
+`.tmp-regression-docker-34a67b75852741a89f755d20fcddd21f/`。
+集中完整 Docker 合同 54/54，内部/入口 `544423/545488 ms`、排队 `394 ms`、
+Jobs 6、exit 0、cache_hit=false：
+`.tmp-regression-docker-3b8e6590e6f6431b8dd975ed9170de4d/`。
+七个实现/测试/回归入口文件与完整快照原始字节 SHA256 一致，
+语法、ShellCheck error、Python AST、diff 及独立只读复审通过。
+本轮成功源码归档及核对副本清理 `62,214,216 bytes`，日志、文件清单、
+result 和失败输入保留；复用工具镜像，全套仍约 9 分钟，不宣称稳定提速。
+
+不保证非合作进程中途替换再换回、SIGKILL、墙钟回退或全锁生命周期，
+不证明全部 worker 内存或旧会话排空。首次统计目录初始化、其它服务集成、
+原生宿主/arm64、公网、重启/卸载、真实自动跳跃及 TUIC 范围仍 deferred；
+完整 net 启用门控及菜单/schema 是下一步，整体计划保持 active。
 
 ## 第六步：发布与完整验收
 

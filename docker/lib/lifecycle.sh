@@ -734,6 +734,239 @@ dockerFail2banStartManagedCommit() {
     [[ "${mf_ssh}" != true ]] || dockerSshFail2banStartVerified "${mf_sshMode}"
 }
 
+dockerPortHoppingTargetProjectCheck() {
+    local root=$1 ids metadata
+    local -a containers=()
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}") || return 1
+    [[ -n "${ids}" ]] || return 0
+    mapfile -t containers <<<"${ids}"
+    [[ "${#containers[@]}" -eq 1 && "${containers[0]}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    metadata=$(docker container inspect "${containers[@]}") || return 1
+    jq -e --arg root "${root}" --arg id "${containers[0]}" '
+      length == 1 and (.[0] |
+        (.Id | test("^[a-f0-9]{64}$") and startswith($id)) and
+        (.Config.Labels as $l |
+          $l["com.docker.compose.project"] == "padm-docker" and
+          $l["com.docker.compose.service"] == "sing-box" and
+          $l["com.docker.compose.oneoff"] == "False" and
+          $l["com.docker.compose.project.working_dir"] == $root and
+          $l["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+          $l["io.padm.mode"] == "docker" and $l["io.padm.project"] == "padm-docker" and
+          $l["io.padm.component"] == "sing-box"))
+    ' <<<"${metadata}" >/dev/null
+}
+
+dockerPortHoppingTargetStopOwned() {
+    local root=$1 initial=$2 replacement=$3 ids metadata confirmed
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=sing-box --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ -n "${ids}" ]] || return 0
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    metadata=$(docker container inspect "${ids}") || return 1
+    jq -e --arg root "${root}" --arg id "${ids}" --arg replacement "${replacement}" \
+        --argjson initial "${initial}" '
+      length == 1 and (.[0] |
+        (.Id | test("^[a-f0-9]{64}$") and startswith($id)) and .Image == $initial.image_id and
+        (if $replacement == "true" then true else
+          .Id == $initial.container_id and .State.StartedAt == $initial.started_at end) and
+        (.Config.Labels as $l |
+          $l["com.docker.compose.project"] == "padm-docker" and
+          $l["com.docker.compose.service"] == "sing-box" and
+          $l["com.docker.compose.oneoff"] == "False" and
+          $l["com.docker.compose.project.working_dir"] == $root and
+          $l["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+          $l["io.padm.mode"] == "docker" and $l["io.padm.project"] == "padm-docker" and
+          $l["io.padm.component"] == "sing-box"))
+    ' <<<"${metadata}" >/dev/null || return 1
+    confirmed=$(docker container inspect "${ids}") &&
+        [[ "$(jq -Sc '.[0] | {Id,Image,Config,started_at:.State.StartedAt}' <<<"${confirmed}")" == \
+            "$(jq -Sc '.[0] | {Id,Image,Config,started_at:.State.StartedAt}' <<<"${metadata}")" ]] || return 1
+    dockerPortHoppingTargetStartLockCheck &&
+        docker stop -t 10 "${ids}" >/dev/null &&
+        dockerPortHoppingTargetStartLockCheck || return 1
+    confirmed=$(docker container inspect "${ids}") || return 1
+    jq -e --arg id "${ids}" 'length == 1 and (.[0] |
+      (.Id | startswith($id)) and .State.Running == false and .State.Restarting == false and
+      (.State.Status == "exited" or .State.Status == "dead"))' <<<"${confirmed}" >/dev/null
+}
+
+dockerPortHoppingTargetStartLockCheck() {
+    local current
+    current=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") &&
+        [[ "${current}" == "${ph_lock}" ]] && return 0
+    # 外层清理只核对 pid，锁身份漂移时必须阻止其删除替换锁。
+    DOCKER_DEPLOYMENT_LOCK_DIR=
+    dockerError "跳跃目标部署锁身份变化，保留事务证据: ${ph_stage}"
+    return 1
+}
+
+dockerPortHoppingTargetStartFilesCheck() {
+    local current immutable live stateFile trafficMode
+    dockerPortHoppingTargetStartLockCheck || return 1
+    current=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") || return 1
+    trafficMode=$(jq -er '.[] | select(.[0] == "data/traffic") | .[3]' <<<"${current}") &&
+        [[ "${trafficMode}" == "${ph_trafficMode}" || "${trafficMode}" == 16832 ]] || return 1
+    immutable=$(jq -c '
+      map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
+        if .[0] == "data/traffic" then .[3] = 0 else . end)
+    ' <<<"${current}") &&
+        live=$(jq -c '[.[] | select(.[0] == "config/sing-box/config.json")]' <<<"${current}") &&
+        [[ "${immutable}" == "${ph_files}" && "${live}" == "${ph_live}" ]] || return 1
+    if [[ -n "${ph_stateFile}" ]]; then
+        stateFile=$(jq -c '[.[] | select(.[0] == "data/traffic/state.json")]' <<<"${current}") &&
+            [[ "${stateFile}" == "${ph_stateFile}" ]] || return 1
+    fi
+    if [[ "${ph_verified}" == true ]]; then
+        dockerTrafficSafePath "${ph_root}" "${ph_stage}/config.safe.expected" &&
+            [[ -f "${ph_stage}/config.safe.expected" &&
+                "$(sha256sum -- "${ph_stage}/config.safe.expected")" == "${ph_candidateHash}" ]] || return 1
+    fi
+    [[ "${ph_installed}" != true ]] ||
+        cmp -s -- "${ph_root}/config/sing-box/config.json" "${ph_stage}/config.safe.expected"
+}
+
+dockerPortHoppingTargetStartInstall() {
+    local current
+    dockerPortHoppingTargetStartFilesCheck &&
+        [[ "$(sha256sum -- "${ph_stage}/config.safe.expected")" == "${ph_candidateHash}" ]] || return 1
+    cp -p -- "${ph_stage}/config.safe.expected" "${ph_stage}/config.next" || return 1
+    dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] &&
+        [[ "$(sha256sum -- "${ph_stage}/config.safe.expected")" == "${ph_candidateHash}" ]] &&
+        cmp -s -- "${ph_stage}/config.next" "${ph_stage}/config.safe.expected" || return 1
+    mv -f -- "${ph_stage}/config.next" "${ph_root}/config/sing-box/config.json" || return 1
+    ph_installed=true
+    cmp -s -- "${ph_root}/config/sing-box/config.json" "${ph_stage}/config.safe.expected" || return 1
+    current=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") &&
+        ph_live=$(jq -c '[.[] | select(.[0] == "config/sing-box/config.json")]' <<<"${current}") || return 1
+    dockerPortHoppingTargetStartFilesCheck
+}
+
+dockerPortHoppingTargetStartRecreate() {
+    local witness
+    dockerPortHoppingTargetStartFilesCheck &&
+        dockerPortHoppingTargetProjectCheck "${ph_root}" &&
+        dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
+    # Compose 失败前可能已删旧 CID，恢复从此节点起必须核对当前服务归属。
+    ph_runtime=true
+    dockerComposeExecute up -d --force-recreate --no-deps --wait \
+        --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" sing-box >&2 || return 1
+    dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
+    witness=$(dockerPortHoppingTargetInspect start-after "${ph_listener}" "${ph_ipv4}" "${ph_ipv6}" "${ph_stage}") &&
+        dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
+    jq -e --argjson initial "${ph_initial}" '
+      .container_id != $initial.container_id and .started_at != $initial.started_at and
+      .image_id == $initial.image_id and .listener_id == $initial.listener_id and
+      .target_port == $initial.target_port and .ipv4 == $initial.ipv4 and .ipv6 == $initial.ipv6
+    ' <<<"${witness}" >/dev/null || return 1
+    ph_witness=${witness}
+}
+
+dockerPortHoppingTargetStartPrepare() {
+    local current state count
+    ph_initial=$(dockerPortHoppingTargetInspect start-before "${ph_listener}" "${ph_ipv4}" "${ph_ipv6}" "${ph_stage}") &&
+        dockerPortHoppingTargetProjectCheck "${ph_root}" &&
+        dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
+    cp -p -- "${ph_root}/config/sing-box/config.json" "${ph_stage}/config.old.evidence" || return 1
+    dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
+    ph_snapshot=true
+    dockerTrafficSnapshot sing-box >&2 || return 1
+    dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
+    current=$(dockerTrafficContainerState sing-box) &&
+        jq -e --argjson initial "${ph_initial}" '
+          .id == $initial.container_id and .started_at == $initial.started_at
+        ' <<<"${current}" >/dev/null || return 1
+    state=$(dockerTrafficReadState) &&
+        printf '%s\n' "${state}" >"${ph_stage}/state.new.json" &&
+        dockerTrafficRender sing-box "${ph_stage}/users.base.expected" "${state}" \
+            >"${ph_stage}/config.safe.expected" || return 1
+    current=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") &&
+        ph_stateFile=$(jq -c '[.[] | select(.[0] == "data/traffic/state.json")]' <<<"${current}") &&
+        jq -es --slurpfile state "${ph_stage}/state.new.json" 'length == 1 and .[0] == $state[0]' \
+            "${ph_root}/data/traffic/state.json" >/dev/null || return 1
+    count=$(jq -er --arg listener "${ph_listener}" '
+      [.inbounds[] | select(.tag == $listener and .type == "hysteria2") | .users[]] | length
+    ' "${ph_stage}/config.safe.expected") &&
+        [[ "${count}" -gt 0 ]] || return 1
+    chmod 0640 "${ph_stage}/config.safe.expected" || return 1
+    if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
+        chown 10001:10001 "${ph_stage}/config.safe.expected" || return 1
+    fi
+    ph_candidateHash=$(sha256sum -- "${ph_stage}/config.safe.expected") || return 1
+    dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] || return 1
+    dockerComposeExecute run --rm --no-deps --entrypoint /usr/local/bin/sing-box \
+        --volume "${ph_stage}/config.safe.expected:/etc/padm/sing-box/config.json:ro" \
+        sing-box check -c /etc/padm/sing-box/config.json >&2 || return 1
+    [[ "$(sha256sum -- "${ph_stage}/config.safe.expected")" == "${ph_candidateHash}" ]] || return 1
+    ph_verified=true
+    dockerPortHoppingTargetStartFilesCheck && [[ "${ph_signal}" == 0 ]] &&
+        dockerPortHoppingTargetStartInstall && [[ "${ph_signal}" == 0 ]] &&
+        dockerPortHoppingTargetStartRecreate && [[ "${ph_signal}" == 0 ]]
+}
+
+dockerPortHoppingTargetStartManaged() {
+    local ph_owner=${BASHPID:-$$} ph_root ph_stage= ph_lock ph_domain ph_files ph_live ph_raw ph_trafficMode
+    local ph_listener=${1:-} ph_ipv4=${2:-} ph_ipv6=${3:-} ph_initial= ph_witness= ph_candidateHash=
+    local ph_snapshot=false ph_verified=false ph_runtime=false ph_installed=false ph_stateFile= ph_signal=0 ph_status=1
+    local ph_int ph_term ph_state
+    [[ "$#" -eq 3 ]] || return 1
+    ph_lock=$(dockerPortHoppingTargetLockSnapshot "${ph_owner}") || {
+        DOCKER_DEPLOYMENT_LOCK_DIR=
+        return 1
+    }
+    ph_root=$(dockerInstallRoot) &&
+        ph_domain=$(jq -er --arg listener "${ph_listener}" '
+          [.core.protocols[] | select(.listener_id == $listener) | .hy2.domain] |
+          if length == 1 then .[0] else error("目标入口不唯一") end
+        ' "${ph_root}/config/spec.json") || { dockerPortHoppingTargetStartLockCheck; return 1; }
+    ph_raw=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") &&
+        ph_trafficMode=$(jq -er '.[] | select(.[0] == "data/traffic") | .[3]' <<<"${ph_raw}") &&
+        ph_files=$(jq -c '
+          map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
+            if .[0] == "data/traffic" then .[3] = 0 else . end)
+        ' <<<"${ph_raw}") &&
+        ph_live=$(jq -c '[.[] | select(.[0] == "config/sing-box/config.json")]' <<<"${ph_raw}") ||
+        { dockerPortHoppingTargetStartLockCheck; return 1; }
+    ph_stage=$(mktemp -d "${ph_root}/.hopping-start.XXXXXX") ||
+        { dockerPortHoppingTargetStartLockCheck; return 1; }
+    dockerPortHoppingTargetStartLockCheck || return 1
+    ph_int=$(trap -p INT)
+    ph_term=$(trap -p TERM)
+    trap 'ph_signal=130' INT
+    trap 'ph_signal=143' TERM
+    if dockerPortHoppingTargetStartPrepare; then ph_status=0; else ph_status=$?; fi
+    # 恢复不继续原流程；已提交 state 从不回退，旧配置只作为证据。
+    trap '' INT TERM
+    [[ "${ph_signal}" == 0 ]] || ph_status=${ph_signal}
+    ph_signal=0
+    if [[ "${ph_status}" != 0 ]]; then
+        if dockerPortHoppingTargetStartLockCheck && [[ "${ph_snapshot}" == true ]]; then
+            ph_state=$(dockerTrafficReadState) || ph_state=
+            if [[ -z "${ph_state}" || "${ph_state}" != "$(<"${ph_stage}/state.initial.json")" ||
+                "${ph_runtime}" == true ]]; then
+                if [[ "${ph_verified}" == true ]] && dockerPortHoppingTargetStartInstall &&
+                    dockerPortHoppingTargetStartRecreate; then
+                    dockerError "跳跃目标启动未提交，已恢复安全候选并保留累计；证据: ${ph_stage}"
+                elif dockerPortHoppingTargetStartLockCheck &&
+                    dockerPortHoppingTargetStopOwned "${ph_root}" "${ph_initial}" "${ph_runtime}"; then
+                    dockerError "跳跃目标启动失败，已停止受管核心并保留累计；证据: ${ph_stage}"
+                else
+                    dockerError "跳跃目标恢复或停止状态未确认，请检查证据: ${ph_stage}"
+                fi
+            fi
+        fi
+    else
+        dockerPortHoppingTargetStartLockCheck &&
+            dockerRemoveManagedTree "${ph_root}" "${ph_stage}" &&
+            dockerPortHoppingTargetStartLockCheck || ph_status=1
+    fi
+    trap - INT TERM
+    [[ -z "${ph_int}" ]] || eval "${ph_int}"
+    [[ -z "${ph_term}" ]] || eval "${ph_term}"
+    [[ "${ph_status}" == 0 ]] || return "${ph_status}"
+    dockerPortHoppingTargetStartLockCheck || return 1
+    printf '%s\n' "${ph_witness}"
+}
+
 dockerComposeExecute() {
     local composeFile composeDir root profile
     local -a commandArgs=() extraArgs=()
