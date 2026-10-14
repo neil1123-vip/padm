@@ -28,10 +28,13 @@ bash tools/shortlink-worker/deploy.sh
 
 首次运行时，脚本交互收集 Token 和 Account ID，Token 隐藏输入。
 随后用 `age` 口令加密保存凭据，设置口令时需输入两次；直接回车会生成口令，请妥善记录。
+设置、确认和解锁口令使用中文提示，输入不会回显。
 再次部署只需输入口令解锁，无需重复输入 Token 和 Account ID。日常运行 `padm` 不询问口令。
 随后询问可选的自定义域名，例如 `go.example.com`。首次部署直接回车使用 `workers.dev`；
-填写时只输入域名，不加 `https://`、路径或端口。域名所属站点须已在同一 Cloudflare 账户激活，
-建议使用专用子域名。Wrangler 自动绑定域名、创建 DNS 记录及证书，成功后 padm 使用该域名生成短链二维码。
+填写时只输入域名，不加 `https://`、路径或端口。
+输入格式有误时会提示原因并重新询问，无需重新解锁凭据；回车仍使用原默认值。
+域名所属站点须已在同一 Cloudflare 账户激活，建议使用专用子域名。
+Wrangler 自动绑定域名、创建 DNS 记录及证书，成功后 padm 使用该域名生成短链二维码。
 已有 DNS 或 Worker 绑定冲突时，按终端提示确认或取消。
 自动部署可通过环境变量 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID` 提供凭据；
 同时提供时直接使用，不保存或解锁凭据。已有密文时只设置其中一项会被拒绝，以免混用账号。

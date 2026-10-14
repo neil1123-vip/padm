@@ -216,6 +216,9 @@ project = pathlib.Path(sys.argv[1])
 token = b"test-cloudflare-token"
 account = b"0123456789abcdef0123456789abcdef"
 passphrase = b"test-age-passphrase-never-echo"
+encrypt_prompt = "请输入加密口令（回车自动生成安全口令）: ".encode()
+confirm_prompt = "请再次输入口令: ".encode()
+decrypt_prompt = "请输入解锁口令: ".encode()
 cipher = project / ".state/cloudflare.age"
 config = pathlib.Path(os.environ["PADM_INSTALL_DIR"]) / "qr-shortener.json"
 calls_file = pathlib.Path(os.environ["DEPLOY_TEST_LOG"])
@@ -282,14 +285,16 @@ def run_terminal(command, env, prompts, redirected=False, data=None):
 
 cases = [(mode, "") for mode in ("color", "no-color", "dumb")]
 cases += [("invalid", domain) for domain in (
-    "https://go.example.com", "go.example.com/s", "go.example.com:443",
+    "url", "https://go.example.com", "go.example.com/s", "go.example.com:443",
     "*.example.com", "go..example.com", "-go.example.com", "go.example.com?x=1",
     "user@go.example.com", "go example.com", "127.0.0.1", "a" * 64 + ".example.com",
 )]
 cases += [
+    ("retry-eof", "url"),
     ("domain-failure", "go.example.com"),
     ("domain-missing", "go.example.com"),
-    ("custom", "GO.Example.COM"),
+    ("custom", "url"),
+    ("retry-reuse", "url"),
     ("reuse", ""),
     ("custom-env", ""),
     ("custom-redirect", ""),
@@ -306,18 +311,24 @@ for mode, domain in cases:
                DEPLOY_TEST_MODE={"domain-failure": "failure", "domain-missing": "missing-domain"}.get(mode, ""))
     if mode == "color":
         prompts = [(b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account),
-                   (b"Enter passphrase", passphrase), (b"Confirm passphrase", passphrase)]
+                   (encrypt_prompt, passphrase), (confirm_prompt, passphrase)]
     elif mode == "custom-env":
         prompts = []
     else:
-        prompts = [(b"Enter passphrase", passphrase)]
+        prompts = [(decrypt_prompt, passphrase)]
     prompts.append(("  自定义域名（".encode(), domain.encode()))
+    if mode in ("invalid", "retry-reuse", "retry-eof"):
+        prompts.append(("  自定义域名（".encode(), b"\x04" if mode == "retry-eof" else b""))
+    elif mode == "custom":
+        prompts += [("  自定义域名（".encode(), b"https://go.example.com"),
+                    ("  自定义域名（".encode(), b"GO.Example.COM")]
     status, output = run_terminal(["bash", str(project / "deploy.sh")], env, prompts,
                                   redirected=mode in ("custom-env", "custom-redirect"))
-    expected_success = mode not in ("invalid", "domain-failure", "domain-missing")
+    expected_success = mode not in ("retry-eof", "domain-failure", "domain-missing")
     assert (status == 0) == expected_success, output.decode(errors="replace")
     assert token not in output, "deployment Token echoed"
-    assert passphrase not in output, "age passphrase echoed"
+    assert passphrase not in output, f"age passphrase echoed: {output.replace(passphrase, b'<unexpected passphrase>')!r}"
+    assert b"Enter passphrase" not in output and b"Confirm passphrase" not in output
     assert (b"\x1b[1;36m" in output) == (mode not in ("no-color", "dumb", "custom-env", "custom-redirect")), f"wrong color mode: {mode}"
     plain = re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", output).decode()
     instructions = (
@@ -335,10 +346,16 @@ for mode, domain in cases:
         assert instruction in plain, f"missing authorization instruction: {instruction}"
     if mode not in ("color", "custom-env"):
         assert "Cloudflare API Token" not in plain
-        assert output.count(b"Enter passphrase") == 1, "saved credentials not unlocked exactly once"
+        assert output.count(decrypt_prompt) == 1, "saved credentials not unlocked exactly once"
     if mode == "custom-env":
-        assert b"Enter passphrase" not in output
+        assert decrypt_prompt not in output and encrypt_prompt not in output
+    retries = 2 if mode == "custom" else 1 if mode in ("invalid", "retry-reuse", "retry-eof") else 0
+    assert plain.count("  自定义域名（") == 1 + retries
+    assert plain.count("自定义域名无效") == retries
+    assert plain.count("请重新输入域名") == retries
     if expected_success:
+        assert "部署中止" not in plain
+        assert calls_file.read_bytes()[len(calls):].count(b"deploy\n") == 1
         for number, title in enumerate(("环境准备", "Cloudflare 授权", "Worker 部署", "保存配置"), 1):
             assert f"[{number}/4] {title}" in plain
     for line in plain.splitlines():
@@ -351,17 +368,18 @@ for mode, domain in cases:
             path = project / ".state" / name
             assert path.read_bytes() == saved[name] if name in saved else not path.exists()
         assert "部署完成" not in plain
-        if mode == "invalid":
-            assert "自定义域名无效" in plain
-            assert calls_file.read_bytes() == calls
+        if mode == "retry-eof":
+            assert calls_file.read_bytes() == calls, "closed input reached Cloudflare"
         if mode == "domain-failure":
             assert status == 17
-    elif mode in ("custom", "reuse", "custom-env", "custom-redirect"):
+    elif mode in ("custom", "retry-reuse", "reuse", "custom-env", "custom-redirect"):
         assert (project / ".state/custom-domain").read_text().strip() == "go.example.com"
         assert json.loads(config.read_text())["url"] == "https://go.example.com"
         assert calls_file.read_bytes()[len(calls):].count(b"domain=go.example.com") == 1
     else:
         assert not (project / ".state/custom-domain").exists()
+        assert json.loads(config.read_text())["url"] == "https://padm-shortlink.example.workers.dev"
+        assert b"domain=" not in calls_file.read_bytes()[len(calls):]
     assert cipher.is_file() and (cipher.stat().st_mode & 0o777) == 0o600
     assert cipher.read_bytes().startswith(b"age-encryption.org/v1\n")
     if "cloudflare.age" in saved:
@@ -397,7 +415,7 @@ for mode in ("wrong-passphrase", "corrupt", "invalid-json", "partial-env", "no-t
         status, output = result.returncode, result.stdout + result.stderr
     else:
         prompts = [] if mode == "partial-env" else [
-            (b"Enter passphrase", b"wrong-passphrase" if mode == "wrong-passphrase" else passphrase)]
+            (decrypt_prompt, b"wrong-passphrase" if mode == "wrong-passphrase" else passphrase)]
         case_env = dict(env, CLOUDFLARE_API_TOKEN=token.decode()) if mode == "partial-env" else env
         status, output = run_terminal(["bash", str(project / "deploy.sh")], case_env, prompts)
     assert status != 0, f"invalid credential case accepted: {mode}"
@@ -421,7 +439,7 @@ cipher.write_bytes(b"broken ciphertext\n")
 env = dict(env, CLOUDFLARE_API_TOKEN=token.decode(), CLOUDFLARE_ACCOUNT_ID=account.decode())
 status, output = run_terminal(["bash", str(project / "deploy.sh")], env,
                               [("  自定义域名（".encode(), b"")])
-assert status == 0 and b"Enter passphrase" not in output, output
+assert status == 0 and decrypt_prompt not in output and encrypt_prompt not in output, output
 assert cipher.read_bytes() == b"broken ciphertext\n"
 cipher.write_bytes(saved_cipher)
 
@@ -435,8 +453,8 @@ previous_config = config.read_bytes()
 case_env = dict(env, CLOUDFLARE_API_TOKEN="", CLOUDFLARE_ACCOUNT_ID="")
 status, output = run_terminal(["bash", str(failed_project / "deploy.sh")], case_env, [
     (b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account),
-    (b"Enter passphrase", passphrase), (b"Confirm passphrase", b"different-passphrase")])
-assert status != 0 and b"passphrases didn't match" in output, output
+    (encrypt_prompt, passphrase), (confirm_prompt, b"different-passphrase")])
+assert status != 0 and "两次输入的口令不一致".encode() in output, output
 assert not (failed_project / ".state/cloudflare.age").exists()
 assert not any((failed_project / ".state").glob(".tmp-deploy.*"))
 assert calls_file.read_bytes() == calls and config.read_bytes() == previous_config
@@ -484,11 +502,11 @@ for mode in ("fresh", "reuse", "download-failure", "checksum-failure"):
                     DEPLOY_TEST_AGE_PROJECT=str(install_project), DEPLOY_TEST_AGE_ARCHIVE=str(archive),
                     DEPLOY_TEST_AGE_MODE=mode)
     if mode == "reuse":
-        prompts = [(b"Enter passphrase", passphrase), ("  自定义域名（".encode(), b"")]
+        prompts = [(decrypt_prompt, passphrase), ("  自定义域名（".encode(), b"")]
     else:
         prompts = [(b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account)]
         if mode == "fresh":
-            prompts += [(b"Enter passphrase", passphrase), (b"Confirm passphrase", passphrase),
+            prompts += [(encrypt_prompt, passphrase), (confirm_prompt, passphrase),
                         ("  自定义域名（".encode(), b"")]
     calls = calls_file.read_bytes()
     previous_config = config.read_bytes()
