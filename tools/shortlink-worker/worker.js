@@ -53,7 +53,7 @@ export default {
                         return response("完整协议超过单张二维码容量；在短链后加 ?format=text 获取文本并复制导入。\n", 422);
                     }
                     const image = response(qrImage.imageSync(value, {
-                        type: "png", ec_level: "L", size: 8, margin: 4,
+                        type: "png", ec_level: "L", size: 4, margin: 4,
                     }), 200, "image/png");
                     image.headers.set("Content-Disposition", 'inline; filename="padm-node.png"');
                     return image;

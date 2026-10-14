@@ -49,7 +49,9 @@ for (const [target, accept] of [
     assert.equal(result.headers.get("Referrer-Policy"), "no-referrer");
     const image = PNG.sync.read(Buffer.from(await result.arrayBuffer()));
     assert.equal(image.width, image.height);
-    assert.equal(jsQR(new Uint8ClampedArray(image.data), image.width, image.height)?.data, content);
+    const decoded = jsQR(new Uint8ClampedArray(image.data), image.width, image.height);
+    assert.equal(decoded?.data, content);
+    assert.equal(image.width, (17 + 4 * decoded.version + 8) * 4);
 }
 assert.equal(await (await send("GET", undefined, "", env, `${url}?format=text`, "text/html")).text(), content);
 for (const accept of ["text/plain,text/html;q=0", "text/html; q=0.000", "text/html-other"]) {
@@ -64,7 +66,10 @@ for (const protocol of [longProtocol, boundaryProtocol]) {
     result = await send("GET", undefined, "", env, url, "text/html");
     assert.equal(result.status, 200);
     const image = PNG.sync.read(Buffer.from(await result.arrayBuffer()));
-    assert.equal(jsQR(new Uint8ClampedArray(image.data), image.width, image.height)?.data, protocol);
+    const decoded = jsQR(new Uint8ClampedArray(image.data), image.width, image.height);
+    assert.equal(decoded?.data, protocol);
+    assert.equal(image.width, image.height);
+    assert.equal(image.width, (17 + 4 * decoded.version + 8) * 4);
 }
 await send("PUT", `${boundaryProtocol}x`);
 result = await send("GET", undefined, "", env, `${url}?format=png`);
