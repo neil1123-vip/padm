@@ -197,12 +197,19 @@ def initialization_cancel(work, root, docker, *, deadline=False):
 
 
 def automatic_hopping(node, work, root, docker, enter, password):
-    def invoke(*arguments):
-        return command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
-                        "bash", "-Eeuo", "pipefail", "-c",
-                        '. "$1"; shift; trap dockerReleaseDeploymentLock EXIT; dockerMain "$@"',
-                        "test", str(ROOT / "install-docker.sh"), *arguments],
-                       timeout=100)
+    def invoke(*arguments, accepted=True):
+        result = subprocess.run([
+            "env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
+            "bash", "-Eeuo", "pipefail", "-c",
+            '. "$1"; shift; trap dockerReleaseDeploymentLock EXIT; dockerMain "$@"',
+            "test", str(ROOT / "install-docker.sh"), *arguments],
+            capture_output=True, timeout=100)
+        if accepted:
+            assert result.returncode == 0, result.stderr.decode()
+        else:
+            assert result.returncode != 0 and not result.stdout, (
+                arguments, result.returncode, result.stdout, result.stderr)
+        return result.stdout
 
     tables = {"ipv4": "iptables", "ipv6": "ip6tables"}
     nat_before = {table: command([table, "-w", "-t", "nat", "-S"])
@@ -290,12 +297,54 @@ def automatic_hopping(node, work, root, docker, enter, password):
         # 新进程形成新 QUIC 连接；不把既有 conntrack 会话的排空算作已验。
         authentication(node, root, enter, "auto-stopped", password, "wrong-password", (),
                        server_port=30000)
+        assert invoke("port-hopping", "start").decode().strip() == "端口跳跃已启用。"
+        active = True
+        session = root / "data/net/.hopping-supervisor"
+        owner = json.loads((session / "owner.json").read_text())
+        stage = Path(owner["stage"])
+        child_id = (stage / "cid").read_text().strip()
+        retained_owner = tree(session / "owner.json")
+        retained_lock = tree(root / "locks/deployment.lock")
+        module = runpy.run_path(str(ROOT / "docker/lib/port-hopping-supervisor.py"))
+        descriptors = []
+        try:
+            for key in ("manager", "bash"):
+                descriptors.append(module["pin"](owner[key]))
+            # Bash 无法处理 KILL；只观察原 pidfd 和真实子端，不伪造净停止回执。
+            signal.pidfd_send_signal(descriptors[1], signal.SIGKILL)
+            active = False
+            wait_ready(lambda: all(select.select([fd], [], [], 0)[0] for fd in descriptors), 15)
+            wait_ready(lambda: not inspect(docker, child_id)["State"]["Running"], 15)
+        finally:
+            for descriptor in descriptors:
+                os.close(descriptor)
+        child_state = inspect(docker, child_id)["State"]
+        assert child_state["Status"] == "exited"
+        assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
+                   for table, previous in nat_before.items())
+        assert not (root / "data/net/port-hopping.state").exists()
+        assert tree(session / "owner.json") == retained_owner
+        assert tree(root / "locks/deployment.lock") == retained_lock
+        retained_stage = tree(stage)
+        for arguments in (("port-hopping", "status"), ("port-hopping", "stop"),
+                          ("port-hopping", "start"), ("restart",), ("down",), ("uninstall",)):
+            invoke(*arguments, accepted=False)
+            assert tree(session / "owner.json") == retained_owner and tree(stage) == retained_stage
+            assert tree(root / "locks/deployment.lock") == retained_lock
+            assert inspect(docker, child_id)["State"] == child_state
+        shutil.copyfile(session / "service.log", work / "bash-kill-supervisor.log")
+        (work / "bash-kill-stage.json").write_text(json.dumps(retained_stage, sort_keys=True))
         evidence = dict(scope="supervised-hy2-client-auto-hopping", initialization_cancel=canceled,
                         initialization_deadline=expired,
                         client_config=config,
                         client_pid=client_pid, same_client_alive=True,
                         samples=samples, dual_family_both_ports=True,
                         stopped_new_connections_refused=True, nat_restored=True,
+                        bash_kill=dict(owner=owner, child_id=child_id, child_state=child_state,
+                                       child_retained=True, state_removed=True, nat_restored=True,
+                                       session_retained=True, stage_retained=True,
+                                       deployment_lock_retained=True, stale_commands_refused=True,
+                                       automatic_recovery_verified=False),
                         native_host_verified=False, arm64_verified=False,
                         old_conntrack_revocation_verified=False)
         (work / "automatic-hopping.json").write_text(json.dumps(evidence, sort_keys=True))
@@ -1774,6 +1823,9 @@ dockerPortHoppingTargetStartManaged entry-hy2 198.18.1.1 2001:db8:1::1
             probe_dual_family_nat_unchanged=True, probe_jumpstate_unchanged=True,
             elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
     except BaseException:
+        session_log = root / "data/net/.hopping-supervisor/service.log"
+        if session_log.is_file():
+            shutil.copyfile(session_log, work / "supervisor-failure.log")
         if daemon is not None and daemon.poll() is None:
             result = subprocess.run(docker + ["ps", "-aq"], capture_output=True, timeout=5)
             for identity in result.stdout.decode().split() if result.returncode == 0 else []:

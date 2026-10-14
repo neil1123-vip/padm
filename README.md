@@ -748,6 +748,9 @@ padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
 
 `up`、Docker daemon、systemd 或整机重启均不自动恢复监督。
 SIGKILL、非合作替换或未知残留保留证据，不自动接管；冲突检查无法排除外部同时修改规则。
+隔离 amd64 已验直接 SIGKILL 持锁 Bash：子端退出并撤销双族 NAT/state，
+退出容器、owner、stage 和原部署锁保留；查询、停止、启用及生命周期操作拒绝接管。
+应在原生 Linux 上核对原拥有者和残留，不能删除 owner/锁强行继续。
 `share` 只在活动目标与保存规格一致时输出范围 URI，不写静态订阅。
 sing-box 客户端 `server_ports` 与 `hop_interval=5s` 已在隔离 Linux amd64
 验证同一进程的双族跨端口请求；范围 URI 的外部客户端导入尚未验收。

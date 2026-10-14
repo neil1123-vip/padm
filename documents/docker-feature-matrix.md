@@ -109,7 +109,9 @@ commit 前断流不启动持锁 Bash，失败会话保留；commit 后 ACK 丢�
 3i 监督启动/重启共用 120 秒推进预算，更新/回滚 840 秒，交接不重置；
 到期停止授权/成功 ACK，原 Bash TERM 与 finally 共用 90 秒停止等待。
 活动会话无总时长限制，等待到期保留未核验证据，不承诺内核撤销上界。
-Bash SIGKILL、自动恢复、外部 URI 导入、TUIC、旧 conntrack 排空及
+3j 已验真实 Bash SIGKILL 后双族 NAT/state 撤销、退出容器和 owner/stage/锁留证，
+查询/停止/新启用及生命周期命令拒绝接管，不将其当作正常净停止。
+自动恢复、外部 URI 导入、TUIC、旧 conntrack 排空及
 原生宿主/arm64/公网与完整协议管理继续 `deferred`；阶段验收见实施计划。
 
 3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，

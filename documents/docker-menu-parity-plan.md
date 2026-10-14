@@ -1,6 +1,6 @@
 # Docker 菜单与功能对齐实施计划
 
-修订日期：2026-10-14
+修订日期：2026-10-15
 
 本计划替代聊天中的六步菜单对齐方案，落实该方案的审计修正。它是
 [功能对照表](docker-feature-matrix.md)之后的实施路线，不是重做
@@ -7057,6 +7057,29 @@ Docker Linux amd64、Jobs 2，复用工具镜像且 cache=false：
 范围仍限内部监督、单 sing-box、双族 Hy2；自动恢复、TUIC、
 外部 URI 导入、Bash SIGKILL、原生宿主/arm64/公网、整机重启、
 完整卸载和可信发布继续待交付或验收，整体目标保持 active。
+
+#### 5C.9c.3e.2b.3j 持锁 Bash SIGKILL 真实故障闭环
+
+复用 `docker-port-hopping-auto-real` 的现有私有 daemon/双族节点，
+正常停止后新启一代，按 owner 严格核 manager/Bash 身份并绑定 pidfd，
+仅向本代持锁 Bash 发送 SIGKILL。原 Bash/manager 退出，子端在控制输入
+关闭后正常退出 0，双族 NAT 正文恢复且 state 消失；
+缺少 cleaned/finished 回执，不确认净停止、不回收退出容器或清旧 owner。
+session/owner、stage、退出子容器和原部署锁保留，
+status/stop/start/restart/down/uninstall 全部失败且证据身份/内容不变。
+这验证故障拒绝与留证，不开放旧 owner 自动接管或恢复。
+
+Docker Linux amd64、Jobs 2、cache=false，工具镜像复用：
+入口 82729 ms、排队 4081 ms，
+`.tmp-regression-docker-e191d9052295426abf0227da5c9e3036/`。
+同节点已有 ready TERM/到期取消、同进程双族两端口跳跃及新连接拒绝同时通过；
+新增故障验收不重跑已有 update/rollback/down/uninstall 长生命周期集合。
+仅改真实夹具与中英文边界说明，AST/diff 通过，不重复无变化合同。
+成功输入由入口清理，日志/result 保留，未创建宿主依赖或临时源码副本。
+
+自动恢复、TUIC、外部 URI 导入、旧会话排空、原生宿主/arm64/公网、
+systemd/整机重启、完整卸载和可信发布继续待交付或验收；
+支持范围与整体 deferred 保持，总目标 active。
 
 ## 第六步：发布与完整验收
 

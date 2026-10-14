@@ -402,8 +402,13 @@ padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
 `up`, Docker daemon restarts, systemd and whole-machine reboots do not automatically
 restore supervision. SIGKILL, noncooperative replacement and unknown remnants preserve
 evidence without automatic takeover. Conflict checks cannot exclude simultaneous outside
-rule changes. `share` emits a range URI only when the active target matches the saved
-specification; it does not write static subscriptions. A sing-box client using
+rule changes.
+SIGKILL of the lock-owning Bash was verified on isolated amd64: the child exits and
+removes dual-family NAT/state, while its exited container, owner, stage and deployment
+lock remain. Status, stop, start and lifecycle operations refuse takeover. Inspect the
+original owner and remnants on native Linux rather than deleting owner/lock evidence.
+`share` emits a range URI only when the active target matches the saved specification;
+it does not write static subscriptions. A sing-box client using
 `server_ports` and `hop_interval=5s` passed dual-family requests across both ports
 in the same process on isolated Linux amd64. External client URI import remains unverified.
 Native hosts, arm64, public networks, TUIC, old-session drainage and complete
