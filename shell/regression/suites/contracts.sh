@@ -272,7 +272,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
         docker-cdn-entries docker-fail2ban-ownership docker-control-state
         docker-reality-targets-selection docker-reality-target-library docker-control-client
-        docker-tproxy-ownership docker-tun-management docker-routing-core-contracts docker-http-relay docker-control-cli
+        docker-tproxy-ownership docker-tun-management docker-routing-block-ips-resolved docker-routing-core-contracts docker-http-relay docker-control-cli
         docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts
         docker-traffic docker-permissions docker-fail2ban-source docker-control-api
         docker-wireguard-runtime docker-subscriptions docker-accounts-cli

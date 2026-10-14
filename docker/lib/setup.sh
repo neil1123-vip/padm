@@ -1023,7 +1023,10 @@ dockerProtocolCommand() (
           (if .routing.hosts != null then {hosts:.routing.hosts} else {} end) +
           (if .routing.direct != null then {direct:{domain_rules:.routing.direct.domains}} else {} end) +
           (if .routing.block != null then {block:{domain_rules:.routing.block.domains}} else {} end) +
-          (if .routing.block_ips != null then {block_ips:{ip_rules:.routing.block_ips.ips}} else {} end) +
+          (if .routing.block_ips != null then
+            {block_ips:({ip_rules:.routing.block_ips.ips} +
+              if .routing.block_ips.resolve_domains == true then {resolve_domains:true} else {} end)}
+           else {} end) +
           (if .routing.block_bt == true then {block_bt:true} else {} end) +
           (if .routing.region != null then {region:(.routing.region +
             {default_allow_domains:$region_defaults})} else {} end) +
@@ -1631,6 +1634,12 @@ dockerEditCommand() {
                 -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             routingKind=block_ips routingAction=ips_replace routingOldIp=$2 routingNewIp=$3
             shift 3
+            ;;
+        --block-ips-resolve|--block-ips-literal)
+            [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=block_ips routingAction=${1#--block-ips-}
+            routingAction=ips_${routingAction}
+            shift
             ;;
         --hosts-replace|--hosts-add)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && "$2" != *[[:space:]]* &&
@@ -2542,6 +2551,14 @@ dockerEditCommand() {
                 dockerError 'hosts 删除要求该精确域名已存在，不能操作未启用或缺失映射'
                 return "${PADM_DOCKER_RC_STATE}"
             }
+        elif [[ "${routingAction}" == ips_resolve || "${routingAction}" == ips_literal ]]; then
+            jq -e --arg action "${routingAction}" '
+              (.routing.block_ips.ips | type == "array" and length > 0) and
+              ((.routing.block_ips.resolve_domains == true) != ($action == "ips_resolve"))
+            ' "${draft}" >/dev/null || {
+                dockerError 'IP 阻断模式切换要求已有手工名单且模式有变化'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
         elif [[ "${routingAction}" == ips_replace ]]; then
             # 仅临时校验输入去重，同值留给状态检查；实际名单保留字面值和次序。
             jq --arg old "${routingOldIp}" --arg new "${routingNewIp}" \
@@ -2621,6 +2638,11 @@ dockerEditCommand() {
             ' "${draft}" >"${draft}.next"
         elif [[ "${routingKind}" == block_bt && "${routingAction}" == enable ]]; then
             jq '.routing.block_bt = true' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == ips_resolve || "${routingAction}" == ips_literal ]]; then
+            jq --arg action "${routingAction}" '
+              if $action == "ips_resolve" then .routing.block_ips.resolve_domains = true
+              else del(.routing.block_ips.resolve_domains) end
+            ' "${draft}" >"${draft}.next"
         elif [[ "${routingKind}" == region && "${routingAction}" == enable ]]; then
             jq --arg mode "${regionMode}" --argjson allow "${regionAllow}" \
                 '.routing.region = {mode:$mode,allow_domains:$allow}' "${draft}" >"${draft}.next"
@@ -2762,7 +2784,9 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_STATE}"
             }
             jq --arg kind "${routingKind}" --slurpfile input "${workspace}/${routingKind}.json" \
-                '.routing[$kind] = $input[0]' "${draft}" >"${draft}.next" 2>/dev/null
+                '.routing[$kind] = ($input[0] +
+                  if $kind == "block_ips" and .routing.block_ips.resolve_domains == true then
+                    {resolve_domains:true} else {} end)' "${draft}" >"${draft}.next" 2>/dev/null
         else
             jq --arg kind "${routingKind}" 'del(.routing[$kind]) |
               if .routing == {} then del(.routing) else . end' "${draft}" >"${draft}.next"
@@ -3071,6 +3095,9 @@ dockerEditCompatibilityValidate() {
            ($new | del(.routing[$routing_kind][$routing_domains_field]))
         elif $routing_action == "ips_replace" then
          ($old | del(.routing.block_ips.ips)) == ($new | del(.routing.block_ips.ips))
+        elif $routing_action == "ips_resolve" or $routing_action == "ips_literal" then
+         ($old | del(.routing.block_ips.resolve_domains)) ==
+           ($new | del(.routing.block_ips.resolve_domains))
         elif $routing_action == "host_replace" then
          ($old | del(.routing.hosts[$routing_host])) == ($new | del(.routing.hosts[$routing_host]))
         elif $routing_action == "host_add" then

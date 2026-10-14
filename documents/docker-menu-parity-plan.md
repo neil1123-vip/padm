@@ -3088,6 +3088,33 @@ Jobs 6、入口 298695 ms、排队 308 ms、cache=false：
 未改渲染或真实出站，不重复既有客户端矩阵。GeoSite、解析后 IP 门槛、SOCKS UDP、
 TUIC/自动恢复及原生宿主/arm64/公网仍 deferred，整体目标 active。
 
+#### 5B.4r sing-box 解析后 IP 阻断
+
+菜单 `17 → 45/46` 与 `edit --block-ips-resolve/--block-ips-literal` 切换已有手工
+IP 名单的解析模式。仅单 sing-box、无副核心，拒绝 WARP/IPv6 出站策略组合；
+目的 IP 支持双族。缺省保持字面模式，新字段只接受 `resolve_domains:true`，
+独立 `x-padm-routing-block-ips-resolve` marker 阻止旧包接受新配置。
+hosts/指定 DNS/local 选择来源，选路前统一解析并重查 IP，代理必须使用经判定的
+字面地址，解析失败拒绝；Direct 例外保持优先。模式同值/未名单返回 `15`，
+只允许模式字段漂移，名单编辑保持模式，复用候选、预览及健康失败/INT/TERM 恢复。
+状态仅新模式追加 flag，不增权限、监听或依赖。Xray 5B.4p 门槛继续 deferred。
+
+复用原路由测试夹具建立轻 scope，跳过旧双核心大矩阵；菜单只跑新增两个 PTY 场景。
+真实 sing-box 定向通过，入口 10140 ms：
+`.tmp-regression-docker-ec06c8fb26df44f397a25b4cd44516e3/`。
+覆盖 IPv4 字面/CIDR/GeoIP、IPv6 字面、DNS/hosts/local、Direct TCP/UDP 和 SERVFAIL；
+split DNS 正例的 SOCKS CONNECT 使用 `127.0.0.2` 字面地址，诱饵禁目的零接入。
+轻合同及新增菜单 PTY 通过，入口 8049 ms：
+`.tmp-regression-docker-926996ba41914e8985a95e0051f86d01/`。
+集中合同 55/56、292843 ms，唯一失败为旧规格谓词摘要；同步摘要及新样本后
+规格差分 199 例通过（15011 ms），不重复已通过的 55 个叶子。
+证据 `f059cc788c9a46a489b8673647e6886e` 与 `1eeb6a85555b43a6a2d68e1172d5cb59`。
+`docker-reality` 补验通过（64252 ms）：
+`.tmp-regression-docker-5ec54ddaedca458fa3eebd5899121871/`。
+19 个批次文件匹配集中快照；真实 scope 的生成器/schema/夹具 5 文件匹配。
+Bash、ShellCheck error、Python/JSON 和 PowerShell AST 静态检查通过。
+完整区域/冲突检测、SOCKS UDP 会话撤销及原生宿主/arm64/公网仍未完成，总目标 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

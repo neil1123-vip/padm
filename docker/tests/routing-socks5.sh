@@ -219,6 +219,7 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-csv &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != block-ips-resolved &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-network-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
@@ -534,6 +535,8 @@ for integration in ("tun", "tproxy"):
     entry.update(id=1, core=core, reality=dict(server_name="www.example.com",
                  target_host="www.example.com", target_port=443, private_key="A" * 43,
                  public_key="B" * 43, short_id="1234abcd"))
+    if integration == "tun":
+        entry["address_families"] = ["ipv4"]
     value["core"] = dict(type=core, secondary_type=None, protocols=[entry])
     value["tls"] = None
     value["host_integrations"] = [dict(
@@ -545,6 +548,10 @@ for integration in ("tun", "tproxy"):
     legacy = copy.deepcopy(value)
     del legacy["routing"]
     case(f"valid-integration-{integration}", legacy, True)
+    if integration == "tun":
+        dual_stack = copy.deepcopy(legacy)
+        dual_stack["core"]["protocols"][0]["address_families"] = ["ipv4", "ipv6"]
+        case("invalid-integration-tun-dual-stack", dual_stack, False)
     case(f"invalid-integration-{integration}", value, False)
     value["routing"] = ipv6["routing"]
     case(f"invalid-ipv6-integration-{integration}", value, False)
@@ -1286,6 +1293,140 @@ runStatus() {
     ! grep -Fq -e "${USERNAME}" -e "${PASSWORD}" -e "${UUID}" -e "${WARP_PRIVATE}" \
         "${LOG}" "${TEST_ROOT}/status.stderr" || fail '路由诊断泄露认证信息'
 }
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == block-ips-resolved ]]; then
+    # 只验证新开关；原双核心路由矩阵由既有 selector 保留。
+    jq '.core = {type:"sing-box",secondary_type:null,protocols:
+      [.core.protocols[] | select(.core=="sing-box")]} |
+      del(.routing.ipv6,.routing.warp)' "${TEST_ROOT}/routing-bt-policy.json" \
+        >"${TEST_ROOT}/resolved-literal.json"
+    jq '.routing.block_ips.resolve_domains=true' "${TEST_ROOT}/resolved-literal.json" \
+        >"${TEST_ROOT}/resolved.json"
+    python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
+import copy
+import json
+from pathlib import Path
+import sys
+from jsonschema import Draft202012Validator, FormatChecker
+
+project, root = map(Path, sys.argv[1:])
+value = json.loads((root / "resolved.json").read_text())
+schema = json.loads((project / "docker/contracts/configure.schema.json").read_text())
+validator = Draft202012Validator(schema, format_checker=FormatChecker())
+assert validator.is_valid(value), "resolved sing-box specification rejected"
+cases = []
+for bad in (False, None, 1, "true"):
+    invalid = copy.deepcopy(value)
+    invalid["routing"]["block_ips"]["resolve_domains"] = bad
+    cases.append(invalid)
+for source, field in (("base.json", "core"), ("ipv6-owner.json", "ipv6"),
+                       ("warp-selective.json", "warp")):
+    invalid = copy.deepcopy(value)
+    supplied = json.loads((root / source).read_text())
+    if field == "core":
+        invalid[field] = supplied[field]
+    else:
+        invalid["routing"][field] = supplied["routing"][field]
+    cases.append(invalid)
+invalid = copy.deepcopy(value)
+invalid["routing"]["block_ips"]["ips"] = []
+cases.append(invalid)
+for index, invalid in enumerate(cases):
+    assert not validator.is_valid(invalid), f"invalid resolved case {index}"
+    (root / f"resolved-invalid-{index}.json").write_text(json.dumps(invalid))
+PY
+    dockerConfigureSpecValidate "${TEST_ROOT}/resolved.json"
+    for invalid in "${TEST_ROOT}"/resolved-invalid-*.json; do
+        reject dockerConfigureSpecValidate "${invalid}"
+    done
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/resolved.json" ||
+        fail '当前 bundle 拒绝解析后 IP 阻断'
+    jq 'del(."x-padm-routing-block-ips-resolve")' \
+        "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" >"${TEST_ROOT}/old-schema.json"
+    cp -- "${TEST_ROOT}/old-schema.json" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/resolved.json"
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/resolved-literal.json" ||
+        fail '旧 bundle 不应拒绝字面 IP 阻断'
+    cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+        "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+    dockerGenerateSingBoxConfig "${TEST_ROOT}/resolved.json" "${TEST_ROOT}/resolved.config.json"
+    jq -e '[.route.rules[]|select(.action=="resolve")]|length==1' \
+        "${TEST_ROOT}/resolved.config.json" >/dev/null || fail '必须只生成一次统一解析'
+    jq -e '
+      .route.rules as $rules |
+      ([$rules | to_entries[] | select(.value.action=="resolve") | .key][0]) as $resolve |
+      ([$rules | to_entries[] | select(.value.outbound=="padm-socks5") | .key][0]) as $proxy |
+      $rules[$resolve]=={action:"resolve"} and $resolve < $proxy and
+      all($rules[($resolve+1):$proxy][] | select(.action=="reject");
+        .type=="logical" and .rules[1].invert==true) and
+      any($rules[($resolve+1):$proxy][]; .rules[0].ip_cidr!=null) and
+      any($rules[($resolve+1):$proxy][]; .rules[0].rule_set==["padm-geoip-cn"]) and
+      .dns.final=="padm-local" and .dns.rules[0].server=="padm-hosts" and
+      all(.dns.rules[1:][]; .server=="padm-dns")
+    ' "${TEST_ROOT}/resolved.config.json" >/dev/null || fail '解析后拒绝、Direct 排除或 DNS 来源顺序错误'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/resolved-literal.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化解析后 IP 阻断夹具失败'
+    assertClean
+    jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
+      name:"fixture",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+    before=$(snapshot)
+    composeBefore=$(cat "${COMPOSE_LOG}")
+    runEdit 15 --block-ips-literal --preview
+    runEdit 2 --block-ips-resolve --block-ips-literal --preview
+    runEdit 2 --block-ips-resolve --dns-off --preview
+    runEdit 2 --block-ips-resolve --spec "${TEST_ROOT}/resolved.json" --preview
+    runEdit 2 --block-ips-resolve unexpected --preview
+    [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail '开关拒绝改变部署或调用 Compose'
+    liveBefore=$(grep '^live:' "${COMPOSE_LOG}" || true)
+    runEdit 0 --block-ips-resolve --preview
+    [[ "$(snapshot)" == "${before}" && "$(grep '^live:' "${COMPOSE_LOG}" || true)" == "${liveBefore}" ]] ||
+        fail '开关预览改变部署或运行在线 Compose'
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        expected=14
+        [[ "${failure}" != int ]] || expected=130
+        [[ "${failure}" != term ]] || expected=143
+        runEdit "${expected}" --block-ips-resolve --confirm PADM-DOCKER-EDIT
+        [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 新开关未恢复完整部署及流量"
+    done
+    MODE=ok
+    runEdit 0 --block-ips-resolve --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile old "${TEST_ROOT}/resolved-literal.json" \
+        --slurpfile actual "${root}/config/spec.json" '
+      $actual[0]==($old[0]|.routing.block_ips.resolve_domains=true)
+    ' >/dev/null || fail '解析开关改写名单或其它配置'
+    runStatus 0
+    jq -e --argjson ips "${BLOCK_IPS}" '.block_ips=={ip_rules:$ips.ips,resolve_domains:true}' \
+        "${LOG}" >/dev/null || fail '解析模式状态缺少 flag 或改变名单'
+    runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile old "${TEST_ROOT}/resolved.json" \
+        --slurpfile actual "${root}/config/spec.json" '$actual==$old' >/dev/null ||
+        fail '整组 IP 名单替换丢失解析开关或改变其它配置'
+    runEdit 15 --block-ips-resolve --preview
+    runEdit 0 --block-ips-literal --confirm PADM-DOCKER-EDIT
+    cmp -s "${TEST_ROOT}/resolved-literal.json" "${root}/config/spec.json" ||
+        fail '字面模式往返没有保留规格'
+    runStatus 0
+    jq -e --argjson ips "${BLOCK_IPS}" '.block_ips=={ip_rules:$ips.ips}' "${LOG}" >/dev/null ||
+        fail '缺省字面状态改变'
+    runEdit 0 --block-ips-off --confirm PADM-DOCKER-EDIT
+    before=$(snapshot)
+    runEdit 15 --block-ips-resolve --preview
+    runEdit 15 --block-ips-literal --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail '未启用名单时开关改变部署'
+    (
+        dockerMenuRun() { printf '%s\n' "$*" >>"${TEST_ROOT}/resolved-menu.log"; }
+        dockerMenuRouting < <(printf '45\n46\n0\n')
+    ) >"${LOG}" 2>&1
+    [[ "$(cat "${TEST_ROOT}/resolved-menu.log")" == "$(printf 'edit --block-ips-resolve\nedit --block-ips-literal')" ]] ||
+        fail '解析模式菜单未映射 CLI'
+    printf 'docker-routing-block-ips-resolved-regression-ok\n'
+    exit 0
+fi
 upstreamEditCheck() {
     local kind option oldServer oldPort before composeBefore failure expected trafficBefore
     for kind in dns socks5; do

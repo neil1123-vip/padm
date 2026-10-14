@@ -97,6 +97,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-control-client \
         docker-tproxy-ownership \
         docker-tun-management \
+        docker-routing-block-ips-resolved \
         docker-routing-core-contracts \
         docker-http-relay \
         docker-control-cli \
@@ -142,6 +143,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-control-client \
         docker-tproxy-ownership \
         docker-tun-management \
+        docker-routing-block-ips-resolved \
         docker-http-relay \
         docker-control-cli \
         docker-phase5 \
@@ -573,6 +575,15 @@ runDockerRoutingBlockIpsRealRegression() {
     PADM_ROUTING_REAL_SCOPE=ips bash "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.sh"
 }
 
+runDockerRoutingBlockIpsResolvedRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=block-ips-resolved bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+    PADM_DOCKER_MENU_SCOPE=block-ips-resolved bash "${PROJECT_ROOT}/docker/tests/menu.sh"
+}
+
+runDockerRoutingBlockIpsResolvedRealRegression() {
+    PADM_ROUTING_REAL_SCOPE=ips-resolved bash "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.sh"
+}
+
 runDockerRoutingBlockBtRealRegression() {
     PADM_ROUTING_REAL_SCOPE=bt bash "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.sh"
 }
@@ -890,6 +901,8 @@ registerRegressionFunctionLeaf docker-routing-direct-block runDockerRoutingSocks
 registerRegressionFunctionLeaf docker-routing-direct-block-real runDockerRoutingDnsHostsRealRegression
 registerRegressionFunctionLeaf docker-routing-block-ips runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-block-ips-real runDockerRoutingBlockIpsRealRegression
+registerRegressionFunctionLeaf docker-routing-block-ips-resolved runDockerRoutingBlockIpsResolvedRegression
+registerRegressionFunctionLeaf docker-routing-block-ips-resolved-real runDockerRoutingBlockIpsResolvedRealRegression
 registerRegressionFunctionLeaf docker-routing-block-bt runDockerRoutingBlockBtRegression
 registerRegressionFunctionLeaf docker-routing-block-bt-real runDockerRoutingBlockBtRealRegression
 registerRegressionFunctionLeaf docker-routing-region runDockerRoutingRegionRegression

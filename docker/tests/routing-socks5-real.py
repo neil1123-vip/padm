@@ -71,6 +71,8 @@ class Socks(socketserver.BaseRequestHandler):
                 assert kind == 3
                 host = exact(conn, exact(conn, 1)[0]).decode("ascii")
             port = struct.unpack("!H", exact(conn, 2))[0]
+            if hasattr(self.server, "destinations"):
+                self.server.destinations.append((kind, host, port))
             assert host in self.server.destination_hosts and port == self.server.destination
             self.server.connects += 1
             with socket.create_connection((host, port), timeout=2) as target:

@@ -621,6 +621,116 @@ def check_ips(root, core, family, host):
                 thread.join(timeout=2)
 
 
+def check_ips_resolved(root, core, family, host):
+    suffix = "v6" if family == "ipv6" else "v4"
+    mapped, allowed, split = (f"{name}-{suffix}.padm.invalid"
+                              for name in ("hosts", "allowip", "split"))
+    dns_name = helpers["domain_names"](family)[1]
+    with (Server((host, 0), Destination) as destination, DnsServer((host, 0)) as dns,
+          Server((host, 0), Socks) as upstream, Server(("127.0.0.1", 0), RuleResource) as resource,
+          system_hosts(family, host) as fallback,
+          socket.socket(socket.AF_INET6 if family == "ipv6" else socket.AF_INET,
+                        socket.SOCK_DGRAM) as datagram):
+        destination.received, destination.accepted = [], 0
+        dns.answer_kind = 28 if family == "ipv6" else 1
+        upstream.destination_hosts = [host, "127.0.0.2", mapped, dns_name, *fallback]
+        upstream.destination = destination.server_address[1]
+        upstream.auth = upstream.connects = 0
+        upstream.destinations = []
+        upstream.reject = False
+        resource.requests = resource.successes = 0
+        resource.resources = {f"/{asset}.srs": (root / f"{asset}.srs").read_bytes()
+                              for asset in ("test", "geoip-cn")}
+        datagram.bind((host, 0))
+        datagram.settimeout(0.4)
+        # 127.0.0.2 是本地 DNS 的放行目的；代理系统将同名解析到被禁 127.0.0.1。
+        alternate = Server(("127.0.0.2", upstream.destination), Destination) if family == "ipv4" else None
+        if alternate is not None:
+            alternate.received, alternate.accepted = [], 0
+        servers = [destination, dns, upstream, resource] + ([alternate] if alternate else [])
+        threads = [threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=0.05),
+                                    daemon=True) for server in servers]
+        for thread in threads:
+            thread.start()
+        try:
+            local = port(host)
+            command = ["/routing-cores/sing-box", "run", "-c"]
+            least = ["setpriv", "--reuid=10001", "--regid=10001", "--clear-groups",
+                     "--bounding-set=-all", "--no-new-privs"]
+            modes = ["ip-literal", "ip-resolved-literal"]
+            if family == "ipv4":
+                modes += ["ip-resolved-cidr", "ip-resolved-geoip"]
+            for mode in modes:
+                config = runtime(root, core, family, host, local, dns, upstream, resource, mode)
+                path = root / f"{core}.{family}.{mode}.runtime.json"
+                write_config(path, config)
+                subprocess.run(least + ["/routing-cores/sing-box", "check", "-c", str(path)],
+                               check=True, stdout=subprocess.DEVNULL)
+                with running(command, path, host, local, root / f"{core}.{family}.{mode}.log") as process:
+                    if mode == "ip-literal":
+                        # 缺省仍将域名交上游解析，不把新增行为施加到旧规格。
+                        before = len(dns.requests), upstream.connects
+                        for target in (mapped, dns_name):
+                            assert request(host, local, upstream.destination, target), (
+                                "旧字面 IP 模式误阻断域名")
+                        assert before == (len(dns.requests), upstream.connects - 2)
+                        assert [item[0] for item in upstream.destinations[-2:]] == [3, 3]
+                        continue
+                    for target, source in ((host, "literal"), (dns_name, "dns"), (mapped, "hosts"),
+                                           (fallback[1], "hosts"), (fallback[0], "local"),
+                                           (fallback[2], "error")):
+                        before = destination.accepted, upstream.auth, upstream.connects, len(dns.requests)
+                        try:
+                            assert not request(host, local, upstream.destination, target, timeout=8), (
+                                f"{mode}: {source} 解析后 TCP 未拒绝")
+                        except (EOFError, ConnectionResetError):
+                            pass
+                        except socket.timeout:
+                            raise AssertionError(f"{mode}: {source} 仅客户端超时")
+                        assert before[:3] == (destination.accepted, upstream.auth, upstream.connects), (
+                            f"{mode}: {source} 拒绝前连接了目的或代理")
+                        queried = dns.requests[before[3]:]
+                        if source in ("dns", "error"):
+                            assert target in queried, f"{source} 未经过指定 DNS"
+                        else:
+                            assert not queried, f"{source} 优先级改变或重复解析"
+                    for target in (dns_name, mapped, fallback[2]):
+                        before = upstream.auth, upstream.connects
+                        helpers["udp"](host, local, datagram.getsockname()[1], target)
+                        with contextlib.suppress(socket.timeout):
+                            raise AssertionError(f"{mode}: 解析后 UDP 泄漏 {target}: {datagram.recv(4096)!r}")
+                        assert before == (upstream.auth, upstream.connects), (
+                            "阻断或 DNS 失败的 UDP 触达 SOCKS5")
+                    before = destination.accepted, upstream.auth, upstream.connects
+                    assert request(host, local, upstream.destination, allowed), (
+                        "Direct 域名例外被解析后 IP 阻断")
+                    assert (destination.accepted, upstream.auth, upstream.connects) == (
+                        before[0] + 1, *before[1:])
+                    helpers["udp"](host, local, datagram.getsockname()[1], allowed)
+                    assert datagram.recv(4096) == b"udp-leak", "Direct UDP 例外未放行"
+                    if alternate is not None:
+                        before = destination.accepted, alternate.accepted, upstream.connects
+                        assert request(host, local, upstream.destination, split), (
+                            "审计放行的 split DNS 目的不可达")
+                        assert (destination.accepted, alternate.accepted, upstream.connects) == (
+                            before[0], before[1] + 1, before[2] + 1), (
+                            "SOCKS5 重新解析 split 域名后连接了被禁 IP")
+                        assert upstream.destinations[-1] == (1, "127.0.0.2", upstream.destination), (
+                            "SOCKS CONNECT 必须绑定经审计的 literal IPv4，不能发送 ATYP3")
+                        assert split in dns.requests, "split 正例未经过指定 DNS"
+                    assert process.poll() is None, "解析拒绝导致核心退出"
+                print(f"routing-block-ips-resolved-real-{family}-{mode}: "
+                      "DNS/hosts/local/Direct/TCP/UDP/fail-closed/literal-proxy checks passed",
+                      flush=True)
+        finally:
+            for server in servers:
+                server.shutdown()
+            for thread in threads:
+                thread.join(timeout=2)
+            if alternate is not None:
+                alternate.server_close()
+
+
 def check(root, core, family, host):
     suffix = "v6" if family == "ipv6" else "v4"
     names = helpers["domain_names"](family)
@@ -855,6 +965,7 @@ if __name__ == "__main__":
         policy_assets(root)
         ip_assets(root)
     for family, host in (("ipv4", "127.0.0.1"), ("ipv6", "::1")):
-        for core in ("xray", "sing-box"):
+        for core in (("sing-box",) if scope == "ips-resolved" else ("xray", "sing-box")):
             (check_region if scope == "region" else check_bt if scope == "bt" else
+             check_ips_resolved if scope == "ips-resolved" else
              check_ips if scope == "ips" else check)(root, core, family, host)

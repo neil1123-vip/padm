@@ -1084,7 +1084,8 @@ dockerMenuRouting() {
             '35. 精确删除 SOCKS5 域名规则' '36. 单条替换 SOCKS5 域名规则' \
             '37. 单项替换 hosts 地址' '38. 新增 hosts 精确映射' \
             '39. 精确删除 hosts 映射' '40. 移除全部访问控制' \
-            '41. 修改已有 DNS 上游' '42. 修改已有 SOCKS5 上游' '43. TProxy 管理' '44. TUN 管理' '0. 返回'
+            '41. 修改已有 DNS 上游' '42. 修改已有 SOCKS5 上游' '43. TProxy 管理' '44. TUN 管理' \
+            '45. IP 阻断加入域名解析结果（sing-box）' '46. IP 阻断仅匹配字面地址' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1099,6 +1100,8 @@ dockerMenuRouting() {
             ;;
         2) dockerMenuRun edit --socks5-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
+        45) dockerMenuRun edit --block-ips-resolve || true ;;
+        46) dockerMenuRun edit --block-ips-literal || true ;;
         41|42)
             dockerMenuRun protocol routing-status || continue
             dockerSetupRead server '上游服务器 IPv4/IPv6（0 返回）: ' &&

@@ -467,8 +467,8 @@ GeoSite 成员或 IP/BT。`winner` 仅针对所列规则，不表示最终流量
 例如 `full:ads.example.net` 被 `keyword:ads` 覆盖，`keyword:advert` 被
 `keyword:ad` 覆盖；同策略关系不报告。只比较规范字符串，不查询 GeoSite、
 DNS 或最终目的地址，不把诊断升级成配置拒绝或完整冲突检测。
-域名解析后 IP 阻断继续待交付：本地解析结果不能代替代理实际连接地址，
-切换 Xray `IPOnDemand` 也不保证解析失败拒绝，不能据此宣称阻断有效。
+单 sing-box 已提供显式解析后 IP 阻断，见下文；Xray 继续待交付。
+本地解析结果不能代替代理实际连接地址，Xray `IPOnDemand` 不满足此门槛。
 
 菜单 `17` 的 IP/CIDR 阻断使用独立 v3 `.routing.block_ips`，私有 JSON 为
 `{"ips":["192.0.2.8","198.51.100.0/24","2001:db8::/32","geoip:cn"]}`。
@@ -499,14 +499,32 @@ IP/CIDR 名单。先查看当前规则，再输入两个字面地址或 CIDR；�
 恰好存在一次，新值不得重复或与旧项相同。不接受 CSV、GeoIP、域名和区域合成项；
 缺失手工名单明确拒绝。两步空输入、`0` 或 EOF 取消，确认及失败恢复沿用原事务。
 
-IP 规则只匹配客户端提供的字面目的 IP，TCP/UDP 拒绝发生在 SOCKS/DNS/hosts 前。
+缺省 IP 规则只匹配客户端提供的字面目的 IP，TCP/UDP 拒绝发生在 SOCKS/DNS/hosts 前。
 Direct 域名例外（包括识别出的 HTTP Host/TLS SNI）优先且不改目的地址。
 客户端以域名提交的目标不会为了 IP 匹配而提前解析；DNS/hosts 解析后的地址
 不重新匹配本阶段 IP 规则，因此它不是最终拨号 IP 或宿主防火墙过滤。
 Xray 复用受管/镜像 GeoIP；sing-box 从固定官方地址经直连下载 `geoip-cn`，
 缺资产或下载失败拒绝候选启动并恢复原部署，词法合法不等于分类资源可用。
 关闭仅删除 IP 子项，保留域名 Block、Direct、SOCKS、DNS/hosts。
-状态追加 `block_ips.ip_rules`，完整区域策略向导与最终目的过滤仍待迁移。
+状态追加 `block_ips.ip_rules`，完整区域策略向导与宿主目的过滤仍待迁移。
+
+菜单 `17 → 45/46` 或 `--block-ips-resolve/--block-ips-literal` 可切换已有手工
+IP 名单的解析模式。新模式要求单 sing-box、无副核心，不能组合 WARP 或
+`.routing.ipv6` 出站策略；目的地址仍可为 IPv4/IPv6。v3
+`.routing.block_ips.resolve_domains:true` 需控制包声明
+`x-padm-routing-block-ips-resolve`；旧包拒绝，恢复字面模式删除该字段。
+解析按精确 hosts、指定 DNS、local 顺序选择来源，选路前重新执行 IP 阻断，
+代理使用已解析字面 IP，解析失败拒绝且不交给远端回退。Direct 例外仍优先。
+同值或未启用名单返回 `15`；名单、其它配置与流量累计保持，沿用预览和失败恢复。
+整组替换、增删和单条替换名单保留已启用的解析开关，删空或关闭名单则一并移除。
+只在新模式的 `routing-status.block_ips` 追加 `resolve_domains:true`。
+Xray、WARP/IPv6 组合、完整区域策略与宿主过滤继续待交付。
+
+```bash
+padm-docker edit --block-ips-resolve --preview
+padm-docker edit --block-ips-resolve --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-literal --confirm PADM-DOCKER-EDIT
+```
 
 菜单 `17` 的 `16–17` 管理 BT 协议阻断，v3 `.routing.block_bt:true` 启用，
 关闭删除字段，不接受 `false` 或其它类型；控制包须声明 `x-padm-routing-block-bt`。

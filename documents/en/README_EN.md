@@ -1466,10 +1466,10 @@ combinations are not enabled. Changes use the existing candidate/backup/recovery
 Status and previews omit credentials, but private specs, core configurations and backups
 retain them. SOCKS5 authentication is not encrypted; use a trusted upstream network.
 Docker also provides independent DNS/hosts, domain Direct/Block and literal-destination
-IP/CIDR/`geoip:cn` policies. Direct domain exceptions have priority; IP policies do
+IP/CIDR/`geoip:cn` policies. Direct domain exceptions have priority; default IP policies do
 not resolve domain targets just to match an IP or recheck addresses after DNS/hosts.
 These changes retain the same private-input and deployment transaction boundaries.
-SOCKS ingress, WARP and complete routing management remain deferred.
+SOCKS ingress, public WARP acceptance and complete routing management remain deferred.
 
 Menu `17`, options `26/27`, appends or removes manual IP-block rules through
 `--block-ips-add/--block-ips-remove <private JSON file>`. The input keeps the existing
@@ -1617,8 +1617,31 @@ text, such as `full:ads.example.net` covered by `keyword:ads`, or `keyword:adver
 covered by `keyword:ad`. Both use `narrow_rule`, `broad_rule`, `policies` and `winner`,
 sorted by the two rules; same-policy containment is omitted. They compare normalized
 strings, exclude GeoSite membership and DNS results, and do not predict the final route
-or reject configurations. Resolved IP blocking still requires actual connection-address
-binding and rejection on DNS failure; Xray `IPOnDemand` alone does not satisfy that gate.
+or reject configurations. Single sing-box deployments can explicitly enable resolved IP
+blocking as described below. Xray remains deferred: `IPOnDemand` alone does not bind
+the proxy's actual connection address or guarantee rejection on DNS failure.
+
+Menu `17 → 45/46` and `--block-ips-resolve/--block-ips-literal` switch an existing
+manual IP list between resolved and default literal-only matching. Resolved mode requires
+one sing-box core, no secondary core, and no WARP or `.routing.ipv6` egress policy;
+destination IPs may still be IPv4 or IPv6. Optional v3
+`.routing.block_ips.resolve_domains:true` requires the bundle capability
+`x-padm-routing-block-ips-resolve`; older bundles reject it. Returning to literal mode
+removes the field. Resolution selects exact hosts, configured DNS, then local; IP rejection
+runs again before routing, and proxies receive the checked literal address. DNS failure
+is rejected without remote fallback. Direct exceptions retain precedence.
+Unchanged modes and missing lists return `15`. The list, other configuration and traffic
+totals are preserved through the existing preview and recovery transaction. Status adds
+`block_ips.resolve_domains:true` only in resolved mode. Xray, WARP/IPv6 combinations,
+complete regional policies and host firewall filtering remain deferred.
+Replacing or editing the list preserves resolved mode; removing the final item or
+disabling the list also removes the mode.
+
+```bash
+padm-docker edit --block-ips-resolve --preview
+padm-docker edit --block-ips-resolve --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-literal --confirm PADM-DOCKER-EDIT
+```
 
 ```bash
 padm-docker edit --direct-domains 'example.org,full:exact.example.net' --preview

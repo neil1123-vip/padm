@@ -3,7 +3,7 @@ set -euo pipefail
 
 MENU_SCOPE=${PADM_DOCKER_MENU_SCOPE:-full}
 case "${MENU_SCOPE}" in
-full|routing|port-alias|tun) ;;
+full|routing|port-alias|tun|block-ips-resolved) ;;
 *) printf 'docker-menu-regression-fail: invalid scope: %s\n' "${MENU_SCOPE}" >&2; exit 1 ;;
 esac
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -1920,6 +1920,13 @@ runRoutingDriver() {
         targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'\004'
         targetReply 'Docker HTTP 中继入站' $'0\n'
         ;;
+    block-ips-mode-flow|block-ips-mode-failed)
+        for choice in 45 46; do
+            targetReply 'Docker 路由与出站' "${choice}"$'\n'
+            targetReply 'fixture-block-ips-mode-confirm [y/N]' $'y\n'
+        done
+        targetReply 'Docker 路由与出站' $'3\n'
+        ;;
     tun-flow|tun-cancel|tun-status-failed|tun-commit-failed)
         targetReply 'Docker 路由与出站' $'44\n'
         if [[ "${scenario}" == tun-status-failed ]]; then
@@ -2421,6 +2428,14 @@ edit)
         [[ "${confirmation}" == y ]] || exit 2
         [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
         recordAction http-relay-commit "$2"
+    elif [[ "${2:-}" == --block-ips-resolve || "${2:-}" == --block-ips-literal ]]; then
+        [[ "$#" -eq 2 ]] || exit 2
+        printf 'fixture-block-ips-mode-confirm [y/N]: '
+        IFS= read -r confirmation || exit 2
+        recordAction block-ips-mode-confirm "$2" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction block-ips-mode-commit "$2"
     elif [[ "${2:-}" == --tun-enable || "${2:-}" == --tun-off ]]; then
         # 固定配置只核对原样分发与一次确认；归属和事务恢复由 TUN 合同覆盖。
         [[ "$#" -eq 2 ]] || exit 2
@@ -3110,8 +3125,10 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     http-relay-flow http-relay-cancel http-relay-status-failed http-relay-commit-failed \
     tproxy-flow tproxy-cancel tproxy-status-failed tproxy-commit-failed \
     tun-flow tun-cancel tun-status-failed tun-commit-failed \
+    block-ips-mode-flow block-ips-mode-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     [[ "${MENU_SCOPE}" != tun || "${routingCase}" == tun-* ]] || continue
+    [[ "${MENU_SCOPE}" != block-ips-resolved || "${routingCase}" == block-ips-mode-* ]] || continue
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 TPROXY_STATUS=0 TUN_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
     [[ "${routingCase}" != selective-domains-state-failed ]] || SELECTIVE_EDIT_PRECHECK_STATUS=15
@@ -3137,6 +3154,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != http-relay-commit-failed &&
         "${routingCase}" != tproxy-commit-failed &&
         "${routingCase}" != tun-commit-failed &&
+        "${routingCase}" != block-ips-mode-failed &&
         "${routingCase}" != hosts-manage-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
@@ -3483,6 +3501,22 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "HTTP 中继菜单缺少: ${label}"
         done
         ;;
+    block-ips-mode-flow|block-ips-mode-failed)
+        for flag in --block-ips-resolve --block-ips-literal; do
+            expectedRouting+="${expectedRouting:+$'\n'}edit ${flag}"
+            expectedRouting+=$'\nblock-ips-mode-confirm '"${flag} y"
+            [[ "${routingCase}" != block-ips-mode-flow ]] ||
+                expectedRouting+=$'\nblock-ips-mode-commit '"${flag}"
+        done
+        expectedRouting+=$'\nprotocol routing-status'
+        if [[ "${routingCase}" == block-ips-mode-failed ]]; then
+            [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
+                fail 'IP 模式失败未报告退出码或没有返回菜单'
+        fi
+        for label in '45. IP 阻断加入域名解析结果（sing-box）' '46. IP 阻断仅匹配字面地址'; do
+            grep -Fq "${label}" "${CONTROL_LOG}" || fail "IP 模式菜单缺少: ${label}"
+        done
+        ;;
     tun-flow|tun-cancel|tun-status-failed|tun-commit-failed)
         tunConfirmCount=2 tunFailureCount=0 tunExit=15
         expectedRouting='protocol tun-status'
@@ -3593,7 +3627,7 @@ done
 unset SITE_EDIT_STATUS ROUTING_STATUS TPROXY_STATUS TUN_STATUS SELECTIVE_EDIT_PRECHECK_STATUS DOMAIN_REPLACE_PRECHECK_STATUS
 fi
 
-if [[ "${MENU_SCOPE}" == routing || "${MENU_SCOPE}" == tun ]]; then
+if [[ "${MENU_SCOPE}" == routing || "${MENU_SCOPE}" == tun || "${MENU_SCOPE}" == block-ips-resolved ]]; then
     printf 'docker-menu-%s-regression-ok\n' "${MENU_SCOPE}"
     exit 0
 fi

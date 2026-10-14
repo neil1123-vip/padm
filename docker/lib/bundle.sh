@@ -479,6 +479,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0].routing.block_ips != null then
             $schema[0]["x-padm-routing-block-ips"] == true
           else true end) and
+          (if $spec[0].routing.block_ips.resolve_domains == true then
+            $schema[0]["x-padm-routing-block-ips-resolve"] == true
+          else true end) and
           (if ($spec[0].routing // {}) | has("block_bt") then
             $schema[0]["x-padm-routing-block-bt"] == true
           else true end) and

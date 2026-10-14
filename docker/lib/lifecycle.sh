@@ -90,6 +90,7 @@ dockerUsage() {
   padm-docker edit --block-ips-remove <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-ips-replace <旧字面 IP/CIDR> <新字面 IP/CIDR> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-ips-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --block-ips-resolve|--block-ips-literal [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-bt [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-bt-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --region <both|domain|ip> [--region-allow <域名规则 CSV>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

@@ -23,6 +23,7 @@
   "x-padm-routing-dns-hosts": true,
   "x-padm-routing-direct-block": true,
   "x-padm-routing-block-ips": true,
+  "x-padm-routing-block-ips-resolve": true,
   "x-padm-routing-block-bt": true,
   "x-padm-routing-region": true,
   "x-padm-routing-ipv6": true,
@@ -563,6 +564,7 @@
           "additionalProperties": false,
           "required": ["ips"],
           "properties": {
+            "resolve_domains": {"const": true},
             "ips": {
               "type": "array",
               "minItems": 1,
@@ -768,6 +770,22 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": ["routing"],
+        "properties": {"routing": {
+          "required": ["block_ips"],
+          "properties": {"block_ips": {"required": ["resolve_domains"]}}
+        }}
+      },
+      "then": {"properties": {
+        "core": {"properties": {
+          "type": {"const": "sing-box"},
+          "secondary_type": {"type": "null"}
+        }},
+        "routing": {"not": {"anyOf": [{"required": ["ipv6"]}, {"required": ["warp"]}]}}
+      }}
     },
     {
       "if": {

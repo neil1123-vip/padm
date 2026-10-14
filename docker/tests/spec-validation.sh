@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含跳跃、TProxy 和有限 TUN 合同的完整谓词，仅忽略拼接空白。
+# 摘要锁定含跳跃、TUN 和解析后 IP 阻断的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "c9533b3dabada45e011504948c1d56343aa8784d6c50375928beb99f97c3d565"
+    "ea6d9e2c666810d48859bc97394d00515890c2834cd8bf1ec1d83bf4c85bacc5"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -134,6 +134,16 @@ for field, value in (("range_start", 36003), ("ipv4", "127.0.0.1"), ("extra", Tr
     invalid = copy.deepcopy(spec)
     invalid["port_hopping"][field] = value
     cases[f"invalid-port-hopping-{field}"] = invalid
+spec = copy.deepcopy(cases["valid-protocol-4"])
+spec["routing"] = {"block_ips": {"ips": ["192.0.2.1"], "resolve_domains": True}}
+cases["valid-block-ips-resolved"] = spec
+for field, value in (("false", False), ("null", None), ("number", 1)):
+    invalid = copy.deepcopy(spec)
+    invalid["routing"]["block_ips"]["resolve_domains"] = value
+    cases[f"invalid-block-ips-resolved-{field}"] = invalid
+invalid = copy.deepcopy(cases["reality-v3"])
+invalid["routing"] = copy.deepcopy(spec["routing"])
+cases["invalid-block-ips-resolved-xray"] = invalid
 for name, ids in (("xray", (1, 21, 27, 28)), ("sing-box", (3, 4, 5, 30, 31))):
     spec = copy.deepcopy(cases[f"valid-protocol-{ids[1]}"])
     spec["core"]["protocols"] = []

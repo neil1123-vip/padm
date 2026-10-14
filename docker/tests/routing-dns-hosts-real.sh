@@ -18,18 +18,22 @@ cleanup() {
 trap cleanup EXIT
 [[ "$(id -u)" == 0 && "$(uname -s)" == Linux ]] || exit 1
 for tool in jq python3 setpriv; do command -v "${tool}" >/dev/null; done
-[[ -f /routing-cores/xray && -f /routing-cores/sing-box ]] || {
-    printf 'routing-dns-hosts-real: 缺少本机镜像传入的两核心程序\n' >&2
-    exit 1
-}
-chmod 0755 /routing-cores/xray /routing-cores/sing-box
+cores=(xray sing-box)
+[[ "${PADM_ROUTING_REAL_SCOPE:-}" != ips-resolved ]] || cores=(sing-box)
+for core in "${cores[@]}"; do
+    [[ -f "/routing-cores/${core}" ]] || {
+        printf 'routing-dns-hosts-real: 缺少本机镜像传入的核心程序 %s\n' "${core}" >&2
+        exit 1
+    }
+    chmod 0755 "/routing-cores/${core}"
+done
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
 for family in ipv4 ipv6; do
     suffix=v4
     [[ "${family}" != ipv6 ]] || suffix=v6
-    jq -n --arg suffix "${suffix}" '
+    jq -n --arg suffix "${suffix}" --arg scope "${PADM_ROUTING_REAL_SCOPE:-}" '
       def entry($core; $port): {
         id:1,core:$core,listener_id:("entry-"+$core),server:"proxy.example.com",public_port:$port,
         address_families:["ipv4"],name:$core,uuid:"11111111-1111-4111-8111-111111111111",
@@ -50,16 +54,25 @@ for family in ipv4 ipv6; do
            ("full:proxy-"+$suffix+".padm.invalid"),("full:error-"+$suffix+".padm.invalid"),
            ("full:timeout-"+$suffix+".padm.invalid")]},
          hosts:{("hosts-"+$suffix+".padm.invalid"):"203.0.113.80",
-           ("proxy-"+$suffix+".padm.invalid"):"203.0.113.81"}}}
+           ("proxy-"+$suffix+".padm.invalid"):"203.0.113.81"}}} |
+      if $scope == "ips-resolved" then
+        .core = {type:"sing-box",secondary_type:null,protocols:[entry("sing-box";35442)]}
+      else . end
     ' >"${TEST_ROOT}/${family}.spec.json"
     dockerConfigureSpecValidate "${TEST_ROOT}/${family}.spec.json"
-    dockerGenerateXrayConfig "${TEST_ROOT}/${family}.spec.json" "${TEST_ROOT}/xray.${family}.base"
-    dockerGenerateSingBoxConfig "${TEST_ROOT}/${family}.spec.json" "${TEST_ROOT}/sing-box.${family}.base"
-    for core in xray sing-box; do
+    for core in "${cores[@]}"; do
+        if [[ "${core}" == xray ]]; then
+            dockerGenerateXrayConfig "${TEST_ROOT}/${family}.spec.json" "${TEST_ROOT}/${core}.${family}.base"
+        else
+            dockerGenerateSingBoxConfig "${TEST_ROOT}/${family}.spec.json" "${TEST_ROOT}/${core}.${family}.base"
+        fi
         dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.${family}.base" \
             '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.${family}.json"
     done
-    if [[ "${PADM_ROUTING_REAL_SCOPE:-}" == ips ]]; then
+    if [[ "${PADM_ROUTING_REAL_SCOPE:-}" == ips-resolved ]]; then
+        modes=(ip-literal ip-resolved-literal)
+        [[ "${family}" != ipv4 ]] || modes+=(ip-resolved-cidr ip-resolved-geoip)
+    elif [[ "${PADM_ROUTING_REAL_SCOPE:-}" == ips ]]; then
         modes=(ip-control ip-literal ip-cidr ip-geoip)
     elif [[ "${PADM_ROUTING_REAL_SCOPE:-}" == bt ]]; then
         modes=(bt-control bt)
@@ -80,13 +93,24 @@ for family in ipv4 ipv6; do
             address=127.0.0.1
             network=127.0.0.0/8
             [[ "${family}" != ipv6 ]] || { address=::1; network=::/64; }
-            jq --arg suffix "${suffix}" --arg mode "${mode}" --arg address "${address}" --arg network "${network}" '
+            [[ "${PADM_ROUTING_REAL_SCOPE:-}:${family}" != ips-resolved:ipv4 ]] ||
+                network=127.0.0.0/31
+            jq --arg suffix "${suffix}" --arg mode "${mode}" --arg scope "${PADM_ROUTING_REAL_SCOPE:-}" \
+                --arg address "${address}" --arg network "${network}" '
               .routing.direct = {domains:[("full:allowip-"+$suffix+".padm.invalid")]} |
               if $mode == "ip-control" then .
               else .routing.block_ips = {ips:[
-                if $mode == "ip-literal" then $address
-                elif $mode == "ip-cidr" then $network
+                if $mode | endswith("literal") then $address
+                elif $mode | endswith("cidr") then $network
                 else "geoip:cn" end]} end
+              | if $scope == "ips-resolved" then
+                  .routing.socks5.domains = ["domain:padm.invalid"] |
+                  .routing.dns.domains += [
+                    ("full:allowip-"+$suffix+".padm.invalid"),("full:split-"+$suffix+".padm.invalid")] |
+                  if $mode | startswith("ip-resolved-") then
+                    .routing.block_ips.resolve_domains = true
+                  else . end
+                else . end
             ' "${TEST_ROOT}/${family}.spec.json"
         elif [[ "${mode}" == bt* ]]; then
             jq --arg suffix "${suffix}" --arg mode "${mode}" '
@@ -127,11 +151,14 @@ for family in ipv4 ipv6; do
             ' "${TEST_ROOT}/${family}.spec.json"
         fi >"${TEST_ROOT}/${family}.${mode}.spec.json"
         dockerConfigureSpecValidate "${TEST_ROOT}/${family}.${mode}.spec.json"
-        dockerGenerateXrayConfig "${TEST_ROOT}/${family}.${mode}.spec.json" \
-            "${TEST_ROOT}/xray.${family}.${mode}.base"
-        dockerGenerateSingBoxConfig "${TEST_ROOT}/${family}.${mode}.spec.json" \
-            "${TEST_ROOT}/sing-box.${family}.${mode}.base"
-        for core in xray sing-box; do
+        for core in "${cores[@]}"; do
+            if [[ "${core}" == xray ]]; then
+                dockerGenerateXrayConfig "${TEST_ROOT}/${family}.${mode}.spec.json" \
+                    "${TEST_ROOT}/${core}.${family}.${mode}.base"
+            else
+                dockerGenerateSingBoxConfig "${TEST_ROOT}/${family}.${mode}.spec.json" \
+                    "${TEST_ROOT}/${core}.${family}.${mode}.base"
+            fi
             dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.${family}.${mode}.base" \
                 '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.${family}.${mode}.json"
         done

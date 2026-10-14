@@ -16,9 +16,13 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 只读 `routing-status` 已提供跨策略 `full/domain` 域名层级覆盖诊断，
 按标签边界比较并保留原精确重叠；另报告跨策略 `full/domain/keyword`
 正文包含 `keyword` 的确定关系，不查询 GeoSite 成员、DNS 或最终流量。
-域名解析后 IP 阻断仍未交付：固定 Xray 的 `IPOnDemand` 探针证实
-代理再次解析不同地址、指定 DNS 失败后的远端回退均可绕过本地 IP 判定，
-不能只切换该参数开放安全开关；实施门槛为实际连接地址绑定和解析失败拒绝。
+5B.4r 菜单 `17 → 45/46` 与 CLI 提供已有手工 IP 名单的显式解析后阻断，
+限单 sing-box、无副核心，不组合 WARP/IPv6 出站策略，目的 IP 可为双族。
+hosts/指定 DNS/local 只解析一次，选路前重新阻断，代理使用经检查的字面 IP；
+DNS 失败拒绝，Direct 例外优先，缺省字面模式及其它配置保持。
+新字段 `block_ips.resolve_domains:true` 由独立 bundle marker 保护。
+Xray `IPOnDemand` 的代理重解析与 DNS 失败回退可绕过判定，继续 deferred；
+WARP/IPv6 组合、完整区域及宿主过滤也不升级支持状态。
 
 5B.4h 已接入菜单 `17 → 34/35/36` 与 CLI 的已有非空 selective SOCKS5 域名增删/单条替换。
 未启用/global 拒绝；追加稳定去重、合并最多 256 条，删除缺项整批拒绝，
