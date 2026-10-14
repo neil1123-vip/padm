@@ -534,6 +534,17 @@ runRegressionDockerContractsAggregateContract() (
     cmp -s "${expectedLog}" "${callLog}"
 
     : >"${callLog}"
+    bash() {
+        printf '%s:%s\n' "${PADM_DOCKER_HOPPING_TUIC_ONLY:-0}" "${1##*/}" >>"${callLog}"
+    }
+    unset PADM_DOCKER_HOPPING_TUIC_ONLY
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-port-hopping-tuic-real
+    runDockerPortHoppingTargetRealRegression
+    printf '%s\n' 1:port-hopping-target-real.sh 0:port-hopping-target-real.sh >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+    [[ -z "${PADM_DOCKER_HOPPING_TUIC_ONLY:-}" ]]
+
+    : >"${callLog}"
     python3() { printf '%s\n' "${*}" >>"${callLog}"; }
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-control-log-cron-real
     printf '%s\n' "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py --log-schedule-cron-only" >"${expectedLog}"

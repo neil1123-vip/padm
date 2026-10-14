@@ -7251,6 +7251,42 @@ Docker Linux amd64、Jobs 2、cache=false，工具镜像复用：
 systemd/整机重启、完整卸载和可信发布继续待交付或验收；
 支持范围与整体 deferred 保持，总目标 active。
 
+#### 5C.9d TUIC 范围转发与活动单端口分享
+
+把已有 Hy2 范围管理扩展到单 sing-box、单个双族 TUIC 入口，一批接通持久规格、
+菜单/CLI、实际目标核验、启停清除和 restart/update/rollback 协调。
+沿用内部监督、双族 DNAT、部署锁、账号/额度渲染、失败净撤销或保留证据；
+不增加宿主权限、核心、进程监督机制或第二套状态模型。
+目标投影从协议 ID 严格选择 domain 和真实入站类型，witness 保留结构并逐代核对
+`protocol_id`；更新/回滚不允许换协议、入口身份、端口、地址族或 TLS 域名。
+新 TUIC 跳跃规格要求 `x-padm-port-hopping-tuic`，旧 Hy2 子集兼容；
+仍拒绝别名、控制面、HTTP relay、HTTP-01、订阅发布、副核心及其它宿主集成。
+
+`port-hopping share` 的 Hy2 无参数范围 URI 保持；TUIC 默认输出范围首端口的普通
+`tuic://`。两协议均可 `share <端口>`，菜单 `7` 输入活动范围内端口，
+复用已有协议生成器与认证/TLS，未启用、目标漂移、非规范或范围外端口拒绝，
+不改静态订阅。固定 sing-box TUIC 不接受 `server_ports`，本阶段只交付范围转发，
+客户端可选择范围内任一端口；不生成非标准范围 URI 或宣称客户端自动换端口。
+TUIC 客户端自动跳跃、自动恢复、外部 URI 导入、旧会话排空、原生宿主/arm64/
+公网、整机重启、完整卸载及可信发布仍 deferred，整体目标保持 active。
+
+本批验收在 Docker Linux amd64 当前源码快照、复用工具镜像下完成：
+定向 preflight 93310 ms、TUIC 真实 124339 ms、Hy2 真实自动跳跃保护 105247 ms，
+均 Jobs 2；完整合同一次 57/57 通过，Jobs 6，入口 357253 ms、内部 355334 ms、
+排队 332 ms、cache=false，未扩大共享三槽并发。
+四份结果源码 SHA-256 均为
+`3EF4EE38DB217026293E111F0467745D5BB1A1197655DF9B9296DB592622DBDD`；
+随后仅补本文验收文字。完整证据
+`.tmp-regression-docker-4f2341a09df6416eba6d34089297a3ab/`，
+TUIC 真实证据 `.tmp-regression-docker-0e57ff8708fe4ce48892fbd65631a1f7/`。
+TUIC 已验双族基础口和范围首尾、分享、restart、update、rollback、失败更新恢复，
+逐代保持 ID 31、入口身份、保存配置和累计；public stop 后双族范围新 QUIC 拒绝，
+基础口仍通，NAT/state、子容器、会话和部署锁净撤销。
+停止断言以当前代次为基线，精确扣除四条跳跃规则后比较全表，避免把 Compose
+更新的普通 NAT 变化当残留；补齐三个旧握手夹具的协议 ID。
+菜单 `7` 的 `0 返回` 已修复并由现有 PTY 覆盖；输入归档已清理，日志/result 保留。
+未重复 TUIC 上游阻塞探针或长生命周期矩阵，不升级完整协议管理状态。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

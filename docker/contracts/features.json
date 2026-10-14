@@ -223,7 +223,7 @@
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box TUIC 首配、完整规格导入、入口与拥塞控制/认证超时/心跳/0-RTT 参数编辑、同核复制与删除及分享链接。3D.8 提供菜单 13、tuic-status 和单入口拥塞/连接/0-RTT 专项；恢复推荐 cubic/3s/10s/false，时长为 1-6 位正整数加 ms/s/m/h，开启 0-RTT 菜单确认重放风险。仅选中字段解冻，其它入口、认证、TLS、统计与额度保持，复用发布和失败恢复；单 UDP 入口双栈，端口跳跃、宿主集成组合及完整管理仍 deferred。"
+      "reason": "v3 支持 sing-box TUIC 首配、完整规格导入、入口与拥塞控制/认证超时/心跳/0-RTT 参数编辑、同核复制与删除及分享链接。3D.8 提供菜单 13、tuic-status 和单入口拥塞/连接/0-RTT 专项；恢复推荐 cubic/3s/10s/false，时长为 1-6 位正整数加 ms/s/m/h，开启 0-RTT 菜单确认重放风险。仅选中字段解冻，其它入口、认证、TLS、统计与额度保持，复用发布和失败恢复。5C.9d 接通单 sing-box、单个双族 TUIC 入口的监督范围 DNAT、保存/启停/清除及 restart/update/rollback 协调，要求 x-padm-port-hopping-tuic；活动 share 默认范围首端口，指定端口仅接受活动范围并复用普通 tuic URI，静态订阅保持。固定客户端无 server_ports/hop_interval，不宣称自动换端口；自动恢复、宿主集成组合及完整管理仍 deferred。"
     }
   ],
   "features": {

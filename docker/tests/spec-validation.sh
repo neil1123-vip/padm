@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含透明转发、解析后 IP 出站组合、Gecko 和 XHTTP 四参数的完整谓词，仅忽略拼接空白。
+# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 和 Hy2/TUIC 跳跃的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "70183b24c5aa43e5f0e12543c08a85808a7b73b9837364955aefb5a0a824cf9b"
+    "1f13fddf34f2c7fcd46ee9ce90f8babbf4ff13455a65ad9de8d8186b1fcd7a1b"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -155,10 +155,20 @@ spec["port_hopping"] = {
     "ipv4": "198.18.1.1", "ipv6": "2001:db8:1::1",
 }
 cases["valid-port-hopping"] = spec
+tuic_hopping = copy.deepcopy(cases["valid-protocol-31"])
+tuic_hopping["core"]["protocols"][0]["address_families"] = ["ipv4", "ipv6"]
+tuic_hopping["port_hopping"] = {
+    "listener_id": "entry-p31", "range_start": 36000, "range_end": 36002,
+    "ipv4": "198.18.1.1", "ipv6": "2001:db8:1::1",
+}
+cases["valid-port-hopping-tuic"] = tuic_hopping
 for field, value in (("range_start", 36003), ("ipv4", "127.0.0.1"), ("extra", True)):
     invalid = copy.deepcopy(spec)
     invalid["port_hopping"][field] = value
     cases[f"invalid-port-hopping-{field}"] = invalid
+invalid = copy.deepcopy(tuic_hopping)
+invalid["port_hopping"]["listener_id"] = "entry-p3"
+cases["invalid-port-hopping-tuic-listener"] = invalid
 spec = copy.deepcopy(cases["valid-protocol-4"])
 spec["routing"] = {"block_ips": {"ips": ["192.0.2.1"], "resolve_domains": True}}
 cases["valid-block-ips-resolved"] = spec
@@ -492,6 +502,7 @@ for file in "${TEST_ROOT}"/*.json; do
     [[ ( "${file##*/}" != invalid-tproxy-* && "${file##*/}" != invalid-redirect-* &&
         "${file##*/}" != invalid-block-ips-resolved-* &&
         "${file##*/}" != invalid-hy2-gecko-* &&
+        "${file##*/}" != invalid-port-hopping-* &&
         "${file##*/}" != invalid-xhttp-limits-* ) ||
         "${actual}" != 0 ]] || fail "无效透明/解析后 IP 规格被接受: ${file##*/}"
     count=$((count + 1))

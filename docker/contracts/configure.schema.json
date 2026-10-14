@@ -46,6 +46,7 @@
   "x-padm-xhttp-headers": true,
   "x-padm-xhttp-limits": true,
   "x-padm-port-hopping-manual": true,
+  "x-padm-port-hopping-tuic": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -758,7 +759,7 @@
               "protocols": {
                 "minItems": 1, "maxItems": 1,
                 "items": {"properties": {
-                  "id": {"const": 3},
+                  "id": {"enum": [3, 31]},
                   "address_families": {"minItems": 2, "maxItems": 2}
                 }}
               }

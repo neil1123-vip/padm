@@ -218,7 +218,7 @@ dockerConfigureSpecValidate() {
           (.range_start | port) and (.range_end | port) and .range_start <= .range_end and
           (.ipv4 | routing_ipv4) and (.ipv6 | routing_ipv6) and
           (.listener_id | listener_id)) and
-        (.core.protocols[0] | .id == 3 and .core == "sing-box" and
+        (.core.protocols[0] | (.id == 3 or .id == 31) and .core == "sing-box" and
           (.address_families | sort) == ["ipv4","ipv6"] and
           .listener_id == $request.port_hopping.listener_id and
           (.public_port < $request.port_hopping.range_start or
@@ -3759,7 +3759,7 @@ dockerDeploymentFileValidate() {
       (.core.protocol_ids | type == "array" and length >= 1 and (unique | length) == length) and
       (if has("port_hopping") then
         .core.type == "sing-box" and .core.secondary_type == null and
-        .core.protocol_ids == [3] and .host_integrations == [] and
+        (.core.protocol_ids == [3] or .core.protocol_ids == [31]) and .host_integrations == [] and
         (.port_hopping | exact(["listener_id","range_start","range_end","ipv4","ipv6"]) and
           (.range_start | type == "number" and floor == . and . >= 1) and
           (.range_end | type == "number" and floor == . and . <= 65535) and
@@ -4401,6 +4401,16 @@ dockerPortHoppingTargetInspect() (
     local networks networkInfo hostAddresses fixed previous= round sourcePath startedAt=
     local checkpoint=arguments
     local -a networkIds=()
+    local entryFilter='
+      . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
+      if $s.schema_version == 3 and length == 1 and (.[0].id == 3 or .[0].id == 31) and
+        (.[0].core // $s.core.type) == "sing-box" and
+        (.[0].address_families | sort) == ["ipv4","ipv6"] and
+        all($s.host_integrations[]; .type != "tun" and .type != "tproxy" and .type != "redirect")
+      then .[0] | {port:.public_port,protocol_id:.id,
+        domain:(if .id == 3 then .hy2.domain else .tuic.domain end),
+        type:(if .id == 3 then "hysteria2" else "tuic" end)}
+      else error("目标见证仅支持受管双族 Hy2/TUIC bridge 入口") end'
     trap 'status=$?; [[ "${status}" == 0 || "${mode}" != start-* ]] ||
         dockerError "目标启动见证检查失败: ${checkpoint}"; exit "${status}"' EXIT
     case "${mode}:$#" in snapshot:4|startup:4|start-before:5|start-after:5) ;; *) return 1 ;; esac
@@ -4415,33 +4425,17 @@ dockerPortHoppingTargetInspect() (
               (.host_integrations | length) == 0' "${spec}" >/dev/null &&
             jq -e '(.services | del(.acme) | keys) == ["sing-box"] and
               .services.acme.profiles == ["acme"]' "${root}/compose.json" >/dev/null || {
-                dockerError '启动事务只支持无宿主集成的单 sing-box 单 Hy2 入口部署'
+                dockerError '启动事务只支持无宿主集成的单 sing-box 单 Hy2/TUIC 入口部署'
                 return 1
             }
     fi
-    entry=$(jq -ec --arg listener "${listener}" '
-      . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
-      if $s.schema_version == 3 and length == 1 and .[0].id == 3 and
-        (.[0].core // $s.core.type) == "sing-box" and
-        (.[0].address_families | sort) == ["ipv4","ipv6"] and
-        all($s.host_integrations[]; .type != "tun" and .type != "tproxy" and .type != "redirect")
-      then {port:.[0].public_port,domain:.[0].hy2.domain}
-      else error("目标见证仅支持受管双族 Hy2 bridge 入口") end
-    ' "${spec}") || return 1
+    entry=$(jq -ec --arg listener "${listener}" "${entryFilter}" "${spec}") || return 1
     domain=$(jq -er '.domain' <<<"${entry}") || return 1
     before=$(dockerPortHoppingTargetFileSnapshot "${domain}" "") || return 1
     checkpoint=deployment
     dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
         dockerDeploymentFileValidate "${root}/deployment.json" || return 1
-    [[ "$(jq -c --arg listener "${listener}" '
-      . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
-      if $s.schema_version == 3 and length == 1 and .[0].id == 3 and
-        (.[0].core // $s.core.type) == "sing-box" and
-        (.[0].address_families | sort) == ["ipv4","ipv6"] and
-        all($s.host_integrations[]; .type != "tun" and .type != "tproxy" and .type != "redirect")
-      then {port:.[0].public_port,domain:.[0].hy2.domain}
-      else error("目标配置快照已超出双族 Hy2 支持范围") end
-    ' "${spec}")" == "${entry}" ]] || return 1
+    [[ "$(jq -c --arg listener "${listener}" "${entryFilter}" "${spec}")" == "${entry}" ]] || return 1
     expectedCompose=$(dockerGenerateCompose "${spec}" /dev/stdout "${root}") &&
         expectedEnv=$(dockerGenerateImagesEnv "${spec}" /dev/stdout "${root}") &&
         jq -es --argjson expected "${expectedCompose}" 'length == 1 and .[0] == $expected' \
@@ -4469,9 +4463,9 @@ dockerPortHoppingTargetInspect() (
             "${root}/config/sing-box/config.json" >/dev/null || return 1
     count=$(jq -er --arg listener "${listener}" --argjson entry "${entry}" '
       [.inbounds[] | select(.tag == $listener)] |
-      if length == 1 and .[0].type == "hysteria2" and .[0].listen == "::" and
+      if length == 1 and .[0].type == $entry.type and .[0].listen == "::" and
         .[0].listen_port == $entry.port and (.[0].users | type == "array" and length > 0)
-      then .[0].users | length else error("目标 Hy2 没有启用账号") end
+      then .[0].users | length else error("目标 Hy2/TUIC 没有启用账号") end
     ' <<<"${rendered}") &&
         image=$(jq -er '.images["sing-box"]' "${spec}") || return 1
     for round in 1 2; do
@@ -4621,7 +4615,7 @@ PY
     fi
     jq -cn --arg listener "${listener}" --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" \
         --argjson c "${container}" --argjson entry "${entry}" --argjson count "${count}" '
-      {schema_version:1,listener_id:$listener,protocol_id:3,core:"sing-box",
+      {schema_version:1,listener_id:$listener,protocol_id:$entry.protocol_id,core:"sing-box",
        container_id:$c[0].Id,image_id:$c[0].Image,started_at:$c[0].State.StartedAt,
        restart_count:$c[0].RestartCount,target_port:$entry.port,
        ipv4:$ipv4,ipv6:$ipv6,enabled_accounts:$count}

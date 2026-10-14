@@ -249,7 +249,7 @@ a menu confirmation of replay risk. These edits cannot combine with spec imports
 or other focused edits. Only selected fields change; credentials, TLS, other
 listeners, other parameters, quotas, and totals remain fixed. Preview,
 confirmation, publication, and recovery reuse the existing transaction.
-Full protocol management, TUIC hopping, and host integration combinations remain deferred.
+Full protocol management and host integration combinations remain deferred; TUIC range forwarding is described below.
 
 Docker `Protocols & entry → XHTTP management` manages mode, path/Host, presets,
 XMUX, Padding, two header switches, and four native packet/stream limits for
@@ -328,7 +328,7 @@ Select `10=TUIC` for a single UDP listener with dual-stack support and managed T
 UUID is the user ID, password, and traffic identity. Congestion control supports
 `cubic`, `bbr`, and `new_reno`; editor item `14` changes congestion, authentication
 timeout, heartbeat, and 0-RTT. Defaults are `cubic`, `3s`, `10s`, and disabled 0-RTT.
-`tuic://` uses `h3`, native UDP relay, and strict TLS verification. Port hopping remains unavailable.
+`tuic://` uses `h3`, native UDP relay, and strict TLS verification. A single dual-stack listener can use the range-forwarding manager below.
 
 Complete v3 `configure` specs may include `accounts` to append 1-256 independent
 accounts without replacing the original self-use credentials. Each account requires
@@ -431,15 +431,17 @@ IPv4/IPv6 publishing is verified in an isolated amd64 Linux daemon;
 public hosting, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
 
-The protocol menu's port-hopping manager configures, starts, stops, clears and shares active Hy2 range DNAT.
+The protocol menu's port-hopping manager configures, starts, stops, clears and shares active Hy2/TUIC range DNAT.
 Optional v3 `port_hopping` stores `{listener_id, range_start, range_end, ipv4, ipv6}`
 in the specification, deployment record and Compose `x-padm-port-hopping` metadata.
 The current scope is one sing-box core,
-one dual-stack Hy2 listener, an existing traffic directory, no host integrations and
+one dual-stack Hy2 or TUIC listener, an existing traffic directory, no host integrations and
 no additional running services. An inactive ACME profile may remain defined.
 Aliases, the control plane, HTTP relay, HTTP-01 and enabled subscriptions are rejected.
 The range must exclude the target public port, and both addresses must be canonical
 native IPv4/IPv6 addresses assigned to the host.
+TUIC hopping configurations require bundle capability `x-padm-port-hopping-tuic`;
+old bundles retain compatibility with the original Hy2 subset.
 
 Saving does not enable rules; run `start` explicitly. Startup checks the configuration
 and actual container, collects cumulative traffic and applies quotas; an independent
@@ -462,6 +464,7 @@ padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 -
 padm-docker port-hopping status
 padm-docker port-hopping start
 padm-docker port-hopping share
+padm-docker port-hopping share 30001
 padm-docker port-hopping stop
 padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
 ```
@@ -474,11 +477,16 @@ SIGKILL of the lock-owning Bash was verified on isolated amd64: the child exits 
 removes dual-family NAT/state, while its exited container, owner, stage and deployment
 lock remain. Status, stop, start and lifecycle operations refuse takeover. Inspect the
 original owner and remnants on native Linux rather than deleting owner/lock evidence.
-`share` emits a range URI only when the active target matches the saved specification;
-it does not write static subscriptions. A sing-box client using
+`share` emits a link only when the active target matches the saved specification;
+it does not write static subscriptions. Without an argument, Hy2 uses a range URI,
+while TUIC uses a normal `tuic://` link for the first port. `share <port>` or menu
+item `7` emits a normal single-port link for either protocol within the active range,
+preserving authentication and TLS. TUIC range DNAT lets clients choose any port;
+the fixed sing-box TUIC client lacks `server_ports`/`hop_interval`, so no nonstandard
+range URI or automatic client hopping is offered. A Hy2 sing-box client using
 `server_ports` and `hop_interval=5s` passed dual-family requests across both ports
 in the same process on isolated Linux amd64. External client URI import remains unverified.
-Native hosts, arm64, public networks, TUIC, old-session drainage and complete
+Native hosts, arm64, public networks, automatic TUIC client hopping, old-session drainage and complete
 Hy2/TUIC hopping remain `deferred`.
 
 The protocol menu's CDN address manager overrides client connection addresses for

@@ -47,7 +47,8 @@ chmod 0600 "${key}"
 sing_box_image=$(jq -er '.["sing-box"].reference' /node-images.json)
 net_image=$(jq -er '.net.reference' /node-images.json)
 ops_image=$(jq -er '.ops.reference' /node-images.json)
-jq --arg image "${sing_box_image}" --arg net "${net_image}" --arg ops "${ops_image}" '
+jq --arg image "${sing_box_image}" --arg net "${net_image}" --arg ops "${ops_image}" \
+    --arg tuic "${PADM_DOCKER_HOPPING_TUIC_ONLY:-0}" '
   {schema_version:3,
    release:{version:"3.9.9",manifest_sha256:("a"*64),signature_identity:"fixture"},
    core:{type:"sing-box",secondary_type:null,protocols:[{
@@ -59,6 +60,11 @@ jq --arg image "${sing_box_image}" --arg net "${net_image}" --arg ops "${ops_ima
    tls:{domain:"target.padm.test"},subscription:{enabled:false,token:"0123456789abcdef"},
    images:{"sing-box":$image,"xray":$image,"nginx":$image,"ops":$ops,"net":$net},
    host_integrations:[]}
+  | if $tuic == "1" then .core.protocols[0] |=
+      (del(.hy2) | .id=31 | .listener_id="entry-tuic" | .name="TUIC" |
+       .tuic={domain:"target.padm.test",congestion_control:"cubic",auth_timeout:"3s",
+              heartbeat:"10s",zero_rtt_handshake:false})
+    else . end
 ' "${PROJECT_ROOT}/docker/configure.example.json" >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 dockerConfigureSpecValidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 dockerGenerateSingBoxConfig "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \

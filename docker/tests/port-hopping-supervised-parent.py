@@ -340,7 +340,7 @@ exit "$status"
             (work / "prepared.json").write_text(json.dumps(prepared))
             (installation / "config").mkdir(mode=0o700)
             (installation / "config/spec.json").write_text(json.dumps({
-                "core": {"protocols": [{"listener_id": "hy2-main", "hy2": {"domain": "example.test"}}]},
+                "core": {"protocols": [{"id": 3, "listener_id": "hy2-main", "hy2": {"domain": "example.test"}}]},
                 "images": {"net": "fixture-net"},
             }))
             (work / "events.jsonl").write_text("")

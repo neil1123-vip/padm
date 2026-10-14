@@ -111,7 +111,12 @@ commit 前断流不启动持锁 Bash，失败会话保留；commit 后 ACK 丢�
 活动会话无总时长限制，等待到期保留未核验证据，不承诺内核撤销上界。
 3j 已验真实 Bash SIGKILL 后双族 NAT/state 撤销、退出容器和 owner/stage/锁留证，
 查询/停止/新启用及生命周期命令拒绝接管，不将其当作正常净停止。
-自动恢复、外部 URI 导入、TUIC、旧 conntrack 排空及
+5C.9d 将同一范围管理扩展到单个双族 TUIC，协议身份、真实入站类型和 TLS 逐代核对；
+保存、启停、清除、restart/update/rollback 沿用既有监督和净撤销。
+新 TUIC 配置要求 `x-padm-port-hopping-tuic`，Hy2 旧包子集保持。
+活动 `share` 默认 TUIC 范围首端口，`share <端口>` 为两协议输出普通单端口 URI，
+只允许活动范围内端口，不改静态订阅；固定 TUIC 客户端无原生范围字段，不宣称自动跳跃。
+自动恢复、外部 URI 导入、TUIC 客户端自动跳跃、旧 conntrack 排空及
 原生宿主/arm64/公网与完整协议管理继续 `deferred`；阶段验收见实施计划。
 
 3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，
@@ -219,7 +224,7 @@ AnyTLS 单独部署不能发布 HTTPS 订阅，组合 Xray WS TLS 后可包含 A
 凭据轮换、用户 CRUD、宿主集成与完整管理尚未开放。
 3C.7 新增 sing-box TUIC：v3 首配、导入、通用字段与拥塞/认证超时/心跳/0-RTT 参数编辑、
 同核复制/删除及分享链接；单 UDP 双栈入口，复用受管 TLS 与 UUID 流量账号。
-默认 `cubic`、`3s`、`10s` 和关闭 0-RTT；端口跳跃、宿主集成及完整管理尚未开放。
+默认 `cubic`、`3s`、`10s` 和关闭 0-RTT；有限范围转发见 5C.9d，宿主集成及完整管理尚未开放。
 3D.8 合批提供协议菜单 `12/13` 与 `hy2-status/tuic-status`：
 Hy2 单入口 BBR/Brutal 带宽专项，Brutal 一次设置模式和服务端双向速率，
 BBR 保留原速率；TUIC 单入口拥塞、连接参数、0-RTT 和推荐值恢复。
@@ -321,7 +326,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | 28 | Trojan TCP TLS direct | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 两核首配、导入、通用编辑、跨核心复制/删除及 URI；受管 TLS、UUID 密码共享流量额度，fallback、宿主集成及完整管理未开放。 |
 | 29 | Trojan TCP TLS fallback | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + fallback | v3 首配、导入、通用编辑、同核复制/删除及 URI；Trojan 直接终止 TLS，无额外 VLESS 前端，PROXY v1 HTTP/1.1、HTTP/2 回落，UUID 共享额度；默认页/静态/302 与逐入口 ALPN 可事务管理，宿主集成与完整管理未开放。 |
 | 30 | Shadowsocks | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP + UDP | v3 SS2022 AES-128 多用户首配、导入、通用编辑、同核复制/删除及 SIP002 链接；无需 TLS，UUID 共享统计额度，凭据/身份冻结，宿主集成及完整管理未开放。 |
-| 31 | TUIC | 协议与入口 -> Tuic 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 首配、导入、入口/拥塞/认证超时/心跳/0-RTT 编辑、同核复制/删除及 URI；3D.8 菜单 13 提供状态、各参数专项和推荐值恢复，开启 0-RTT 确认重放风险；受管 TLS、UUID 共享额度，端口跳跃与完整管理尚未开放。 |
+| 31 | TUIC | 协议与入口 -> Tuic 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 首配、导入、入口/拥塞/认证超时/心跳/0-RTT 编辑、同核复制/删除及 URI；3D.8 菜单 13 提供状态、各参数专项和推荐值恢复，开启 0-RTT 确认重放风险；受管 TLS、UUID 共享额度。5C.9d 提供单核心、单个双族入口的监督范围 DNAT 和活动单端口分享，要求新 bundle marker；固定客户端自动换端口与完整管理仍 deferred。 |
 
 ### 内部服务端能力
 

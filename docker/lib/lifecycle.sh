@@ -54,9 +54,10 @@ dockerUsage() {
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-replace <入口 ID> <旧公开端口> <新公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-default <入口 ID> <已有额外端口|base> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
-  padm-docker edit --port-hopping <Hy2 入口 ID> <起始端口> <结束端口> <本机 IPv4> <本机 IPv6> [--preview|--confirm PADM-DOCKER-EDIT]
+  padm-docker edit --port-hopping <Hy2/TUIC 入口 ID> <起始端口> <结束端口> <本机 IPv4> <本机 IPv6> [--preview|--confirm PADM-DOCKER-EDIT]
   padm-docker edit --port-hopping-clear [--preview|--confirm PADM-DOCKER-EDIT]
   padm-docker port-hopping <status|start|stop|share>
+  padm-docker port-hopping share <活动范围内端口>
   padm-docker edit --cdn-entry <入口 ID> <IP或域名,...> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --cdn-entry-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-preset <入口 ID> <daily|compatible|stream|single> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -1093,8 +1094,10 @@ dockerPortHoppingTargetStartPrepare() {
         ph_stateFile=$(jq -c '[.[] | select(.[0] == "data/traffic/state.json")]' <<<"${current}") &&
         jq -es --slurpfile state "${ph_stage}/state.new.json" 'length == 1 and .[0] == $state[0]' \
             "${ph_root}/data/traffic/state.json" >/dev/null || return 1
-    count=$(jq -er --arg listener "${ph_listener}" '
-      [.inbounds[] | select(.tag == $listener and .type == "hysteria2") | .users[]] | length
+    count=$(jq -er --arg listener "${ph_listener}" --argjson initial "${ph_initial}" '
+      [.inbounds[] | select(.tag == $listener and
+        .type == (if $initial.protocol_id == 3 then "hysteria2" elif $initial.protocol_id == 31 then "tuic"
+          else error("跳跃目标协议无效") end)) | .users[]] | length
     ' "${ph_stage}/config.safe.expected") &&
         [[ "${count}" -gt 0 ]] || return 1
     chmod 0640 "${ph_stage}/config.safe.expected" || return 1
@@ -1157,7 +1160,9 @@ dockerPortHoppingTargetStartManaged() {
     }
     ph_root=$(dockerInstallRoot) &&
         ph_domain=$(jq -er --arg listener "${ph_listener}" '
-          [.core.protocols[] | select(.listener_id == $listener) | .hy2.domain] |
+          [.core.protocols[] | select(.listener_id == $listener) |
+            if .id == 3 then .hy2.domain elif .id == 31 then .tuic.domain
+            else error("跳跃目标协议无效") end] |
           if length == 1 then .[0] else error("目标入口不唯一") end
         ' "${ph_root}/config/spec.json") || { dockerPortHoppingTargetStartLockCheck; return 1; }
     ph_raw=$(dockerPortHoppingTargetFileSnapshot "${ph_domain}" "") &&
@@ -1238,12 +1243,13 @@ dockerPortHoppingTargetPrepareActivation() {
       . as $s | [.core.protocols[] | select(.listener_id == $listener)] |
       if $s.schema_version == 3 and $s.core.type == "sing-box" and
         $s.core.secondary_type == null and ($s.core.protocols | length) == 1 and
-        ($s.host_integrations | length) == 0 and length == 1 and .[0].id == 3 and
+        ($s.host_integrations | length) == 0 and length == 1 and (.[0].id == 3 or .[0].id == 31) and
         (.[0].core // $s.core.type) == "sing-box" and
         (.[0].address_families | sort) == ["ipv4","ipv6"] and
         (.[0].public_port | type == "number" and floor == . and . >= 1 and . <= 65535)
-      then {port:.[0].public_port,domain:.[0].hy2.domain,port_hopping:$s.port_hopping}
-      else error("启用准备仅支持单个受管双族 Hy2 入口") end'
+      then {port:.[0].public_port,protocol_id:.[0].id,
+        domain:(if .[0].id == 3 then .[0].hy2.domain else .[0].tuic.domain end),port_hopping:$s.port_hopping}
+      else error("启用准备仅支持单个受管双族 Hy2/TUIC 入口") end'
     local fixedFilter='
       map(select(.[0] != "data/traffic/state.json" and .[0] != "config/sing-box/config.json") |
         if .[0] == "data/traffic" then .[3] = 0 else . end)'
@@ -1289,7 +1295,7 @@ dockerPortHoppingTargetPrepareActivation() {
         witness=$(jq -ec --arg listener "${listener}" --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" \
             --argjson entry "${entry}" '
           if .listener_id == $listener and .target_port == $entry.port and
-          .ipv4 == $ipv4 and .ipv6 == $ipv6 and .protocol_id == 3 and .core == "sing-box" and
+          .ipv4 == $ipv4 and .ipv6 == $ipv6 and .protocol_id == $entry.protocol_id and .core == "sing-box" and
           (.container_id | test("^[a-f0-9]{64}$")) and
           (.image_id | test("^sha256:[a-f0-9]{64}$")) and .enabled_accounts > 0
           then . else error("启用准备目标代次不匹配") end
@@ -1466,7 +1472,9 @@ dockerPortHoppingTargetProbe() {
         ph_binding=$(jq -ec '.startup_binding' <<<"${ph_witness}") &&
         [[ "$(jq -ec '.lock' <<<"${ph_binding}")" == "${ph_lock}" ]] &&
         ph_domain=$(jq -er --arg listener "$1" '
-          .core.protocols[] | select(.listener_id == $listener) | .hy2.domain
+          .core.protocols[] | select(.listener_id == $listener) |
+            if .id == 3 then .hy2.domain elif .id == 31 then .tuic.domain
+            else error("跳跃目标协议无效") end
         ' "${ph_root}/config/spec.json") &&
         ph_target=$(jq -er '.target_port' <<<"${ph_witness}") &&
         ph_directory=$(python3 "${ph_helper}" directory "${ph_root}") &&
@@ -1729,16 +1737,21 @@ dockerPortHoppingSavedArguments() {
 }
 
 dockerPortHoppingCommand() {
-    local action=${1:-status} root result saved spec uri
-    [[ "$#" -le 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    local action=${1:-status} root result saved spec uri port=${2:-}
+    [[ "$#" -le 1 || ( "${action}" == share && "$#" -eq 2 ) ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
     case "${action}" in status|start|stop|share) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    if [[ "$#" -eq 2 ]]; then
+        [[ "${port}" =~ ^[1-9][0-9]{0,4}$ && "${port}" -le 65535 ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+    fi
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     case "${action}" in
     start)
         dockerPortHoppingSavedArguments >/dev/null || {
-            dockerError '缺少有效的受管端口跳跃配置，请先保存单个双族 Hy2 配置'
+            dockerError '缺少有效的受管端口跳跃配置，请先保存单个双族 Hy2/TUIC 配置'
             return "${PADM_DOCKER_RC_STATE}"
         }
         result=$(dockerPortHoppingSupervisorStart) || return $?
@@ -1778,19 +1791,21 @@ dockerPortHoppingCommand() {
         }
         result=$(dockerPortHoppingSupervisorStatus) || return $?
         spec="${root}/config/spec.json"
-        result=$(jq -ec --argjson saved "${saved}" --argjson status "${result}" '
+        result=$(jq -ec --argjson saved "${saved}" --argjson status "${result}" --arg port "${port}" '
           $status.payload.target as $target |
           select([$target.listener_id, ($target.range_start|tostring),
             ($target.range_end|tostring), $target.ipv4, $target.ipv6] == $saved) |
           .port_hopping as $h |
-          [.core.protocols[] | select(.id == 3 and .listener_id == $h.listener_id)] as $entries |
+          [.core.protocols[] | select((.id == 3 or .id == 31) and .listener_id == $h.listener_id)] as $entries |
           select(($entries | length) == 1 and
-            $entries[0].public_port == $target.target_port) |
+            $entries[0].id == $target.protocol_id and $entries[0].public_port == $target.target_port) |
+          select($port == "" or (($port | tonumber) >= $h.range_start and ($port | tonumber) <= $h.range_end)) |
           {core:{protocols:[($entries[0] |
-            .public_port = "\($h.range_start)-\($h.range_end)")]},
+            .public_port = (if $port != "" then ($port | tonumber)
+              elif .id == 31 then $h.range_start else "\($h.range_start)-\($h.range_end)" end))]},
            subscription:{enabled:true}}
         ' "${spec}") || {
-            dockerError '活动跳跃范围与当前受管 Hy2 配置不一致，拒绝生成分享链接'
+            dockerError '活动跳跃范围、目标协议或所选端口与当前受管 Hy2/TUIC 配置不一致，拒绝生成分享链接'
             return "${PADM_DOCKER_RC_STATE}"
         }
         uri=$(
@@ -1950,7 +1965,9 @@ dockerPortHoppingTargetTransaction() {
         ph_binding=$(jq -ec '.startup_binding' <<<"${ph_witness}") &&
         [[ "$(jq -ec '.lock' <<<"${ph_binding}")" == "${ph_lock}" ]] &&
         ph_domain=$(jq -er --arg listener "$1" '
-          .core.protocols[] | select(.listener_id == $listener) | .hy2.domain
+          .core.protocols[] | select(.listener_id == $listener) |
+            if .id == 3 then .hy2.domain elif .id == 31 then .tuic.domain
+            else error("跳跃目标协议无效") end
         ' "${ph_root}/config/spec.json") &&
         ph_target=$(jq -er '.target_port' <<<"${ph_witness}") &&
         ph_directory=$(python3 "${ph_helper}" directory "${ph_root}") &&
@@ -2098,11 +2115,11 @@ dockerPortHoppingSupervisorChangeBundleCheck() {
       (.core.protocols | length) == 1 and
       .host_integrations == [] and
       .port_hopping == $current[0].port_hopping and
-      ([.core.protocols[] | select(.listener_id == $listener and .id == 3)] | length) == 1 and
+      ([.core.protocols[] | select(.listener_id == $listener and (.id == 3 or .id == 31))] | length) == 1 and
       ([.core.protocols[] | select(.listener_id == $listener) |
-        {public_port,address_families,domain:.hy2.domain}] ==
+        {id,public_port,address_families,domain:(if .id == 3 then .hy2.domain else .tuic.domain end)}] ==
        [$current[0].core.protocols[] | select(.listener_id == $listener) |
-        {public_port,address_families,domain:.hy2.domain}])
+        {id,public_port,address_families,domain:(if .id == 3 then .hy2.domain else .tuic.domain end)}])
     ' "${spec}" >/dev/null
 }
 

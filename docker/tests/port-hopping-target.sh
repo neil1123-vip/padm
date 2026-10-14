@@ -24,7 +24,7 @@ jq() {
     fi
     # 首次入口投影返回后完整切到单族，验证快照开始后的作用域复查。
     if [[ "${MODE:-ok}" == scope-race && ! -e "${TEST_ROOT}/scope-changed" &&
-        "$*" == *'目标见证仅支持受管双族 Hy2 bridge 入口'* ]]; then
+        "$*" == *'目标见证仅支持受管双族 Hy2/TUIC bridge 入口'* ]]; then
         command jq "$@" || return $?
         scopeRace
     else
@@ -237,7 +237,7 @@ ip() {
 cases=0
 WITNESS_FUNCTION=dockerPortHoppingTargetWitness
 runWitness() {
-    local expected=$1 count=${2:-2} listener=${3:-entry-hy2} ipv4=${4:-${IPV4}} ipv6=${5:-${IPV6}}
+    local expected=$1 count=${2:-2} listener=${3:-${LISTENER:-entry-hy2}} ipv4=${4:-${IPV4}} ipv6=${5:-${IPV6}}
     local before status=0 expectedStart
     before=$(treeSnapshot)
     expectedStart=$(jq -r '.[0].State.StartedAt' "${TEST_ROOT}/inspect.json")
@@ -253,10 +253,11 @@ runWitness() {
     if [[ "${expected}" == ok ]]; then
         [[ "${status}" == 0 ]] || fail "正例被拒绝: $(cat "${TEST_ROOT}/error.log")"
         jq -e --arg listener "${listener}" --arg id "${ID}" --arg image "${IMAGE_ID}" \
-            --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" --arg started "${expectedStart}" --argjson count "${count}" '
+            --arg ipv4 "${ipv4}" --arg ipv6 "${ipv6}" --arg started "${expectedStart}" \
+            --argjson count "${count}" --argjson protocol "${PROTOCOL_ID:-3}" '
           keys == (["schema_version","listener_id","protocol_id","core","container_id","image_id",
             "started_at","restart_count","target_port","ipv4","ipv6","enabled_accounts"] | sort) and
-          .schema_version == 1 and .listener_id == $listener and .protocol_id == 3 and
+          .schema_version == 1 and .listener_id == $listener and .protocol_id == $protocol and
           .core == "sing-box" and .container_id == $id and .image_id == $image and
           .started_at == $started and .restart_count == 0 and
           .target_port == 27443 and .ipv4 == $ipv4 and .ipv6 == $ipv6 and
@@ -527,7 +528,7 @@ runMaterial() {
     local mode=$1 expected=$2 before status=0
     before=$(materialTree)
     : >"${TEST_ROOT}/commands.log"
-    GUARD_SECRET_ARGV=1 dockerPortHoppingTargetInspect "${mode}" entry-hy2 \
+    GUARD_SECRET_ARGV=1 dockerPortHoppingTargetInspect "${mode}" "${LISTENER:-entry-hy2}" \
         "${IPV4}" "${IPV6}" "${materialStage}" \
         >"${TEST_ROOT}/material.json" 2>"${TEST_ROOT}/material.log" || status=$?
     [[ "$(materialTree)" == "${before}" ]] || fail "${mode}: 材料见证改变 stage 之外的受管树"
@@ -604,3 +605,41 @@ mv -- "${TEST_ROOT}/missing-traffic" "${root}/data/traffic"
 dockerReleaseDeploymentLock
 rm -rf -- "${materialStage}"
 printf 'docker-port-hopping-target-material-ok: before/after, scope, reuse and missing-traffic\n'
+
+# TUIC 只验证新增的协议身份和认证差异，文件、锁与快照矩阵复用 Hy2。
+change config/spec.json '
+  .core.protocols[0] |= (del(.hy2) | .id=31 | .listener_id="entry-tuic" | .name="TUIC" |
+    .tuic={domain:"proxy.example.com",congestion_control:"bbr",auth_timeout:"3s",
+      heartbeat:"10s",zero_rtt_handshake:false}) |
+  .accounts[0].listeners=["entry-tuic"]
+'
+dockerConfigureSpecValidate "${root}/config/spec.json"
+generate
+LISTENER=entry-tuic
+PROTOCOL_ID=31
+startupTime
+cp -a -- "${root}" "${TEST_ROOT}/tuic-baseline"
+runWitness ok
+for pair in \
+    'config/sing-box/users.base|.inbounds[0].type="hysteria2"' \
+    'config/sing-box/config.json|.inbounds[0].type="hysteria2"' \
+    'config/sing-box/config.json|.inbounds[0].users[0].uuid="foreign"' \
+    'deployment.json|.core.protocol_ids=[3]'; do
+    change "${pair%%|*}" "${pair#*|}"
+    runWitness reject
+    cp -a -- "${TEST_ROOT}/tuic-baseline/." "${root}/"
+    startupTime
+done
+runWitness ok
+materialStage=$(mktemp -d "${root}/.hopping-material.XXXXXX")
+expectedMaterialProof=$(jq -Sc . "${TEST_ROOT}/result.json")
+runMaterial start-before ok
+cp -- "${materialStage}/config.initial.expected" "${materialStage}/config.safe.expected"
+(
+    dockerTrafficReadState() { fail 'TUIC 材料后验重复读取累计'; }
+    dockerGenerateSingBoxConfig() { fail 'TUIC 材料后验重复生成账号基线'; }
+    dockerTrafficRender() { fail 'TUIC 材料后验重复渲染配置'; }
+    runMaterial start-after ok
+)
+rm -rf -- "${materialStage}"
+printf 'docker-port-hopping-target-tuic-ok: protocol identity, users and material reuse\n'

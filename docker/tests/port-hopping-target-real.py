@@ -43,8 +43,11 @@ def inspect(client, identity):
     return json.loads(command(client + ["container", "inspect", identity]))[0]
 
 
-def witness(root, client, listener="entry-hy2", ipv4="198.18.1.1", ipv6="2001:db8:1::1",
+def witness(root, client, listener=None, ipv4="198.18.1.1", ipv6="2001:db8:1::1",
             startup=False):
+    if listener is None:
+        listener = json.loads((root / "config/spec.json").read_text())["core"]["protocols"][0][
+            "listener_id"]
     environment = dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root),
                        DOCKER_HOST=client[-1])
     function = "dockerPortHoppingTargetStartupWitness" if startup else "dockerPortHoppingTargetWitness"
@@ -92,6 +95,7 @@ def auth_probe(item):
 
 def authentication(node, root, enter, phase, old_password, new_password, accepted_role,
                    server_port=27443):
+    protocol = json.loads((root / "config/spec.json").read_text())["core"]["protocols"][0]
     config = dict(log=dict(level="warn"), inbounds=[], outbounds=[], route=dict(rules=[]))
     checks = []
     for address in ("198.18.1.1", "2001:db8:1::1"):
@@ -100,10 +104,15 @@ def authentication(node, root, enter, phase, old_password, new_password, accepte
             tag = f"auth-{port}"
             config["inbounds"].append(dict(type="socks", tag=tag, listen="127.0.0.1",
                                            listen_port=port))
-            config["outbounds"].append(dict(
+            outbound = dict(
                 type="hysteria2", tag=tag, server=address, server_port=server_port, password=password,
                 tls=dict(enabled=True, server_name="target.padm.test", alpn=["h3"],
-                         certificate_path=str(root / "secrets/tls/target.padm.test.crt"))))
+                         certificate_path=str(root / "secrets/tls/target.padm.test.crt")))
+            if protocol["id"] == 31:
+                outbound.update(type="tuic", uuid=password,
+                                congestion_control=protocol["tuic"]["congestion_control"],
+                                udp_relay_mode="native", zero_rtt_handshake=False)
+            config["outbounds"].append(outbound)
             config["route"]["rules"].append(dict(inbound=[tag], action="route", outbound=tag))
             checks.append((port, role in accepted_role if isinstance(accepted_role, tuple)
                            else role == accepted_role))
@@ -851,7 +860,10 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
     command(["tar", "-czf", str(control), "-C", str((root / "bundle").resolve()),
              "install-docker.sh", "docker", "shell", "assets"], timeout=30)
     configured = json.loads((root / "config/spec.json").read_text())
-    saved_hopping = dict(listener_id="entry-hy2", range_start=30000, range_end=30001,
+    protocol = configured["core"]["protocols"][0]
+    tuic = protocol["id"] == 31
+    listener = protocol["listener_id"]
+    saved_hopping = dict(listener_id=listener, range_start=30000, range_end=30001,
                         ipv4="198.18.1.1", ipv6="2001:db8:1::1")
     assert configured["port_hopping"] == saved_hopping
     manifest = dict(
@@ -1053,6 +1065,23 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         owner = ack(started, "status")
         _, public_status = invoke("dockerMain", "port-hopping", "status")
         assert public_status == dict(state="active", saved=saved_hopping)
+        if tuic:
+            expected_uri = (
+                f"tuic://{self_password}:{self_password}@target.padm.test:30000"
+                "?congestion_control=cubic&alpn=h3&sni=target.padm.test"
+                "&udp_relay_mode=native&allow_insecure=0#TUIC")
+            _, default_uri = invoke("dockerMain", "port-hopping", "share", json_output=False)
+            _, last_uri = invoke("dockerMain", "port-hopping", "share", "30001",
+                                 json_output=False)
+            assert default_uri.strip() == expected_uri
+            assert last_uri.strip() == expected_uri.replace(":30000?", ":30001?")
+            for outside in ("29999", "30002"):
+                invoke("dockerMain", "port-hopping", "share", outside, accepted=False)
+            evidence.update(scope="supervised-tuic-port-range-management", protocol_id=31,
+                            default_single_port_uri=default_uri.strip(),
+                            range_end_single_port_uri=last_uri.strip(),
+                            outside_range_share_refused=True,
+                            automatic_client_hopping_verified=False)
         _, status_output = invoke("dockerMain", "status", json_output=False)
         assert "port_hopping=active" in status_output
         evidence["saved_public_start_status"] = True
@@ -1075,6 +1104,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         payload = started["payload"]
         assert set(payload) == {"target", "running", "child", "directory", "stage"}
         target, running = payload["target"], frame(payload["running"])
+        assert target["protocol_id"] == protocol["id"] and target["listener_id"] == listener
         assert payload["stage"] == owner["stage"]
         assert owner["stage_sha256"] == hashlib.sha256(json.dumps(
             {key: payload[key] for key in ("target", "child", "directory", "stage")},
@@ -1117,7 +1147,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
                       for tool in nat_before}
         owner_before = tree(session / "owner.json")
         session_inode = session.stat().st_ino
-        invoke("dockerPortHoppingSupervisorStart", "entry-hy2", "30000", "30001",
+        invoke("dockerPortHoppingSupervisorStart", listener, "30000", "30001",
                "198.18.1.1", "2001:db8:1::1", accepted=False)
         assert session.stat().st_ino == session_inode and tree(
             session / "owner.json") == owner_before, "重复启动覆盖了原会话"
@@ -1132,8 +1162,8 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
                        alice_password, "old", server_port=30000)
         previous, challenges, checks = running, {
             started["nonce"], started["client_nonce"]}, 0
-        # 调用者已退出后跨两次帧租约，只以新挑战 ACK 确认实时续期。
-        while time.monotonic() - observed <= 41:
+        # TUIC 复用已验监督链路，只补新协议范围管理；Hy2 保留跨租约断言。
+        while not tuic and time.monotonic() - observed <= 41:
             _, status = invoke("dockerPortHoppingSupervisorStatus")
             ack(status, "status", owner)
             assert status["nonce"] not in challenges and status["client_nonce"] not in challenges
@@ -1158,8 +1188,9 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             assert tree(lock) == net_lock and state.read_text() == state_text
             assert tree(session / "owner.json") == owner_before
             time.sleep(1)
-        assert checks >= 2 and previous["seq"] > running["seq"]
-        evidence["hup_verified"] = True
+        if not tuic:
+            assert checks >= 2 and previous["seq"] > running["seq"]
+            evidence["hup_verified"] = True
         authentication(node, root, enter, "independent-renewed", self_password,
                        alice_password, "old", server_port=30001)
         assert {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
@@ -1205,6 +1236,10 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         assert second["payload"]["target"]["container_id"] == target["container_id"]
         assert second["payload"]["target"]["started_at"] != target["started_at"]
         assert second["payload"]["target"]["enabled_accounts"] == 1
+        assert second["payload"]["target"]["protocol_id"] == protocol["id"]
+        assert second["payload"]["target"]["listener_id"] == listener
+        if tuic:
+            assert json.loads((root / "config/spec.json").read_text())["port_hopping"] == saved_hopping
         assert (root / "locks/deployment.lock/pid").read_text() == (
             str(second_owner["bash"]["pid"]) + "\n")
         authentication(node, root, enter, "independent-restarted", self_password,
@@ -1240,6 +1275,7 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
             current_spec = json.loads((root / "config/spec.json").read_text())
             current_compose = json.loads((root / "compose.json").read_text())
             assert current_spec["port_hopping"] == saved_hopping
+            assert current_spec["core"]["protocols"] == configured["core"]["protocols"]
             assert current_compose["x-padm-port-hopping"] == saved_hopping
             assert json.loads((root / "deployment.json").read_text())["port_hopping"] == saved_hopping
             assert current_compose["services"]["sing-box"]["labels"]["io.padm.release"] == (
@@ -1260,6 +1296,8 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
                     assert after_state["accounts"][account][counter] >= counters[counter]
             assert changed["payload"]["target"]["container_id"] != previous_target["container_id"]
             assert changed["payload"]["target"]["enabled_accounts"] == 1
+            assert changed["payload"]["target"]["protocol_id"] == protocol["id"]
+            assert changed["payload"]["target"]["listener_id"] == listener
             if failure:
                 assert os.readlink(root / "bundle") == before_bundle
             authentication(node, root, enter, f"independent-{operation}-{failure}", self_password,
@@ -1276,6 +1314,43 @@ def independent_supervisor(node, work, root, docker, image, nat_before, enter,
         assert [row[:9] + row[10:] for row in changed_lock] == (
             [row[:9] + row[10:] for row in net_lock])
         net_lock = changed_lock
+        if tuic:
+            # 更新可能重建 Compose NAT；停止只移除当前代次的四条跳跃规则。
+            current = dict(line.split("=", 1) for line in state.read_text().splitlines())
+            chain, comment = current["chain"].encode(), ("padm-hop:" + current["token"]).encode()
+            stop_baseline = {}
+            for tool in nat_before:
+                rows = command([tool, "-w", "-t", "nat", "-S"], timeout=5).splitlines(keepends=True)
+                owned = [row for row in rows if chain in row.split() or comment in row]
+                ordinary = [row for row in rows if row not in owned]
+                assert len(owned) == 4 and not any(b"padm-hop" in row for row in ordinary)
+                stop_baseline[tool] = b"".join(ordinary)
+            _, stop_output = invoke("dockerMain", "port-hopping", "stop", json_output=False)
+            assert stop_output.strip() == "端口跳跃已停止；保存配置保留。"
+            wait_ready(lambda: not alive(second_manager) and not alive(second_bash), 90)
+            assert not session.exists() and not state.exists()
+            assert not (root / "locks/deployment.lock").exists()
+            assert json.loads((root / "config/spec.json").read_text())["port_hopping"] == saved_hopping
+            assert tree(lock) == net_lock and set(root.glob(".hopping-guarded.*")) == stages
+            stopped_nat = {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
+                           for tool in nat_before}
+            assert stopped_nat == stop_baseline, (stopped_nat, stop_baseline)
+            assert not command(docker + [
+                "ps", "-aq", "--filter", "label=io.padm.hopping-supervised"]).strip()
+            active = False
+            for port in (30000, 30001):
+                authentication(node, root, enter, f"tuic-stopped-{port}", self_password,
+                               alice_password, (), server_port=port)
+            authentication(node, root, enter, "tuic-stopped-base", self_password,
+                           alice_password, "old")
+            admission(True)
+            evidence.update(second_started=second, online_lifecycle_restart=True,
+                            fresh_owner_restart=True, session_preserved=True,
+                            dual_family_range_endpoints_verified=True, saved_public_stop=True,
+                            stopped_new_connections_refused=True, base_port_retained=True,
+                            nat_restored=True, state_removed=True, child_removed=True,
+                            deployment_lock_released=True, session_removed=True)
+            return evidence
         _, down_output = invoke("dockerLifecycleCommand", "down", json_output=False)
         assert not down_output
         lifecycle_stopped(second_manager, second_bash)
@@ -1518,9 +1593,10 @@ def run(work):
                 "Id"] == net_image["Id"]
             spec = root / "config/spec.json"
             configured = json.loads(spec.read_text())
+            protocol = configured["core"]["protocols"][0]
             configured["images"]["net"] = net_reference
             configured["port_hopping"] = dict(
-                listener_id="entry-hy2", range_start=30000, range_end=30001,
+                listener_id=protocol["listener_id"], range_start=30000, range_end=30001,
                 ipv4="198.18.1.1", ipv6="2001:db8:1::1")
             spec.write_text(json.dumps(configured))
             # 生成材料与 bind 源均属于本次私有节点，保持完整生产 Compose。
@@ -1561,7 +1637,8 @@ dockerEnsureRuntimeDataPermissions
             assert value["Config"]["User"] == "10001:10001"
             assert value["HostConfig"]["ReadonlyRootfs"] and not value["HostConfig"]["Privileged"]
             proof = checked_witness(root, docker)
-            assert proof["listener_id"] == "entry-hy2" and proof["protocol_id"] == 3
+            assert proof["listener_id"] == protocol["listener_id"]
+            assert proof["protocol_id"] == protocol["id"]
             assert proof["core"] == "sing-box" and proof["container_id"] == value["Id"]
             assert proof["image_id"] == value["Image"] and proof["target_port"] == 27443
             assert proof["ipv4"] == "198.18.1.1" and proof["ipv6"] == "2001:db8:1::1"
@@ -1572,11 +1649,12 @@ dockerEnsureRuntimeDataPermissions
 . "$1"
 dockerAcquireDeploymentLock
 python3 "$3" tree "$2" >"$4/locked-before.json"
-dockerPortHoppingTargetLockedWitness entry-hy2 198.18.1.1 2001:db8:1::1 >"$4/locked.json"
+dockerPortHoppingTargetLockedWitness "$5" 198.18.1.1 2001:db8:1::1 >"$4/locked.json"
 python3 "$3" tree "$2" >"$4/locked-after.json"
 cmp "$4/locked-before.json" "$4/locked-after.json"
 dockerReleaseDeploymentLock
-""", "test", str(ROOT / "install-docker.sh"), str(root), str(SCRIPT), str(work)], timeout=30)
+""", "test", str(ROOT / "install-docker.sh"), str(root), str(SCRIPT), str(work),
+                     protocol["listener_id"]], timeout=30)
             assert json.loads((work / "locked.json").read_text()) == proof
             image_container = command(docker + ["create", inputs["sing-box"]["image_id"]]).decode().strip()
             command(docker + ["cp", image_container + ":/usr/local/bin/sing-box",
@@ -1594,6 +1672,18 @@ dockerReleaseDeploymentLock
             current = json.loads(spec.read_text())
             old_password = current["core"]["protocols"][0]["uuid"]
             new_password = "44444444-4444-4444-8444-444444444444"
+            if os.environ.get("PADM_DOCKER_HOPPING_TUIC_ONLY") == "1":
+                assert protocol["id"] == 31
+                authentication(node, root, enter, "tuic-initial", old_password, new_password, "old")
+                nat_before = {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
+                              for tool in ("iptables", "ip6tables")}
+                independent = independent_supervisor(
+                    node, work, root, docker, net_image["Id"], nat_before, enter,
+                    old_password, new_password)
+                print("docker-port-hopping-tuic-real-snapshot=" + json.dumps(dict(
+                    initial=proof, independent_supervisor=independent,
+                    elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
+                return
             if os.environ.get("PADM_DOCKER_HOPPING_AUTO_ONLY") == "1":
                 automatic = automatic_hopping(node, work, root, docker, enter, old_password)
                 print("docker-port-hopping-auto-real-snapshot=" + json.dumps(dict(

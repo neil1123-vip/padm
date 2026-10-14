@@ -42,7 +42,7 @@ from pathlib import Path
 status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
 mask = (1 << 12) | (1 << 21)
 nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-log-cron-real", "docker-routing-ipv6-real",
-                       "docker-control-fail2ban-real")
+                       "docker-control-fail2ban-real", "docker-port-hopping-tuic-real")
 memory_workspace = sys.argv[1] == "docker-contracts"
 
 def filesystem_type(path):
@@ -133,7 +133,9 @@ $ordinaryCases = if ($Scope -eq 'artifacts') {
     @{ selector = 'docker-routing-block-ips-resolved-egress-real'; expected = 0 },
     @{ selector = 'docker-routing-block-ips-resolved-egress-real-other'; expected = 0 },
     @{ selector = 'docker-control-fail2ban-real'; expected = 0 },
-    @{ selector = 'docker-control-fail2ban-real-other'; expected = 0 }
+    @{ selector = 'docker-control-fail2ban-real-other'; expected = 0 },
+    @{ selector = 'docker-port-hopping-tuic-real'; expected = 0 },
+    @{ selector = 'docker-port-hopping-tuic-real-other'; expected = 0 }
 ) }
 foreach ($case in $ordinaryCases) {
     & $runner -Selector $case.selector

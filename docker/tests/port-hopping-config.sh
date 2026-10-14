@@ -126,10 +126,34 @@ for name, update in (
     invalid = copy.deepcopy(saved)
     update(invalid)
     case(name, invalid)
+tuic_base = copy.deepcopy(base)
+entry = tuic_base["core"]["protocols"][0]
+del entry["hy2"]
+entry.update(id=31, listener_id="entry-tuic", name="tuic",
+             tuic=dict(domain="tls.example.com", congestion_control="cubic",
+                       auth_timeout="3s", heartbeat="10s", zero_rtt_handshake=False))
+tuic_saved = copy.deepcopy(tuic_base)
+tuic_saved["port_hopping"] = dict(saved["port_hopping"], listener_id="entry-tuic")
+for name, value in (("tuic-base", tuic_base), ("tuic-saved", tuic_saved)):
+    validator.validate(value)
+    (root / f"{name}.json").write_text(json.dumps(value))
+# TUIC 只补协议支持边界，通用字段类型和数值矩阵复用上面的 Hy2 案例。
+for name, update in (
+        ("single-family", lambda value: value["core"]["protocols"][0].update(address_families=["ipv4"])),
+        ("multiple-listeners", lambda value: value["core"]["protocols"].append(
+            dict(value["core"]["protocols"][0], listener_id="entry-second", public_port=35443))),
+        ("subscription", lambda value: value["subscription"].update(enabled=True)),
+        ("aliases", lambda value: value.update(
+            port_aliases=[dict(listener_id="entry-tuic", public_port=37000)])),
+        ("legacy", lambda value: value.update(schema_version=2))):
+    invalid = copy.deepcopy(tuic_saved)
+    update(invalid)
+    case(f"tuic-{name}", invalid)
 (root / "invalid-cases").write_text("\n".join(cases) + "\n")
 PY
 dockerConfigureSpecValidate "${TEST_ROOT}/base.json" >"${LOG}" 2>&1 || fail '基线规格无效'
 dockerConfigureSpecValidate "${TEST_ROOT}/saved.json" >"${LOG}" 2>&1 || fail '保存规格无效'
+dockerConfigureSpecValidate "${TEST_ROOT}/tuic-saved.json" >"${LOG}" 2>&1 || fail 'TUIC 保存规格无效'
 while IFS= read -r name; do
     reject dockerConfigureSpecValidate "${TEST_ROOT}/${name}.json"
 done <"${TEST_ROOT}/invalid-cases"
@@ -138,6 +162,16 @@ jq 'del(."x-padm-port-hopping-manual")' "${PROJECT_ROOT}/docker/contracts/config
     >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/saved.json"
 dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" || fail '旧 bundle 拒绝普通规格'
+cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${TEST_ROOT}/bundle/docker/contracts/"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/tuic-saved.json" ||
+    fail '当前 bundle 拒绝 TUIC 跳跃配置'
+jq 'del(."x-padm-port-hopping-tuic")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/tuic-saved.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/saved.json" ||
+    fail '缺少 TUIC 跳跃能力仍应兼容已有 Hy2 跳跃配置'
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/tuic-base.json" ||
+    fail '缺少 TUIC 跳跃能力错误拒绝普通 TUIC 规格'
 cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${TEST_ROOT}/bundle/docker/contracts/"
 
 snapshot() (
@@ -253,7 +287,7 @@ jq -e --argjson saved "${SAVED}" '.=={state:"stopped",saved:$saved}' "${LOG}" >/
     dockerPortHoppingSupervisorStop() { [[ "$#" == 0 ]] || fail '停止接收额外参数'; }
     dockerPortHoppingSupervisorStatus() {
         jq -n --argjson saved "${SAVED}" --argjson end "${STATUS_END:-36002}" \
-            '{payload:{target:($saved + {range_end:$end,target_port:35442})}}'
+            '{payload:{target:($saved + {range_end:$end,target_port:35442,protocol_id:3})}}'
     }
     [[ "$(dockerMain port-hopping start)" == '端口跳跃已启用。' ]] || fail '启动缺少成功提示'
     [[ "$(dockerMain port-hopping stop)" == '端口跳跃已停止；保存配置保留。' ]] || fail '停止缺少成功提示'
@@ -268,6 +302,9 @@ jq -e --argjson saved "${SAVED}" '.=={state:"stopped",saved:$saved}' "${LOG}" >/
     [[ "$(dockerMain port-hopping share)" == \
         "hysteria2://${UUID}@proxy.example.com:36000-36002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3&upmbps=60&downmbps=120&obfs=salamander&obfs-password=hy2-obfs-private_1234#hy2" ]] ||
         fail '活动范围分享未保留带宽方向或混淆参数'
+    [[ "$(dockerMain port-hopping share 36001)" == \
+        "hysteria2://${UUID}@proxy.example.com:36001?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3&upmbps=60&downmbps=120&obfs=salamander&obfs-password=hy2-obfs-private_1234#hy2" ]] ||
+        fail 'Hy2 指定活动端口分享未保留认证、带宽或混淆参数'
     [[ "$(snapshot)" == "${before}" ]] || fail '活动范围分享改变受管文件'
     STATUS_END=36003
     if dockerMain port-hopping share >"${LOG}" 2>&1; then fail '活动范围漂移仍生成分享链接'; fi
@@ -287,6 +324,79 @@ jq -e 'has("x-padm-port-hopping")|not' "${root}/compose.json" >/dev/null ||
 reject dockerMain port-hopping start
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload==17 and .accounts[$uuid].download==19' \
     "${root}/data/traffic/state.json" >/dev/null || fail '配置事务改写累计流量'
+
+# TUIC 完整编辑事务复用同一夹具和恢复断言，不复制通用的非法数值矩阵。
+SAVED=$(jq -cn --argjson saved "${SAVED}" '$saved | .listener_id="entry-tuic"')
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/tuic-base.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '初始化受管 TUIC 夹具失败'
+assertClean
+before=$(snapshot)
+runEdit 0 --port-hopping entry-tuic 36000 36002 198.18.1.1 2001:db8:1::1 --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'TUIC 跳跃预览改变在线状态'
+runEdit 0 --port-hopping entry-tuic 36000 36002 198.18.1.1 2001:db8:1::1 --confirm PADM-DOCKER-EDIT
+assertSaved
+python3 - "${PROJECT_ROOT}/docker/contracts/deployment.schema.json" "${root}/deployment.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+from jsonschema import Draft202012Validator, FormatChecker
+
+schema, value = (json.loads(Path(path).read_text()) for path in sys.argv[1:])
+Draft202012Validator(schema, format_checker=FormatChecker()).validate(value)
+assert value["core"]["protocol_ids"] == [31]
+PY
+before=$(snapshot)
+MODE=health-fail
+rm -f -- "${TEST_ROOT}/failed-once"
+runEdit 14 --port-hopping-clear --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail 'TUIC 清除启动失败未恢复全部受管文件'
+assertSaved
+MODE=ok
+(
+    dockerPortHoppingSupervisorStart() { [[ "$#" == 0 ]] || fail 'TUIC 启动接收额外 tuple'; }
+    dockerPortHoppingSupervisorStop() { [[ "$#" == 0 ]] || fail 'TUIC 停止接收额外参数'; }
+    dockerPortHoppingSupervisorStatus() {
+        [[ "${STATUS_STOPPED:-0}" == 0 ]] || return 1
+        jq -n --argjson saved "${SAVED}" --argjson end "${STATUS_END:-36002}" \
+            --argjson protocol "${STATUS_PROTOCOL:-31}" \
+            '{payload:{target:($saved + {range_end:$end,target_port:35442,protocol_id:$protocol})}}'
+    }
+    [[ "$(dockerMain port-hopping start)" == '端口跳跃已启用。' ]] || fail 'TUIC 启动缺少成功提示'
+    [[ "$(dockerMain port-hopping stop)" == '端口跳跃已停止；保存配置保留。' ]] || fail 'TUIC 停止缺少成功提示'
+    uri="tuic://${UUID}:${UUID}@proxy.example.com:36000?congestion_control=cubic&alpn=h3&sni=tls.example.com&udp_relay_mode=native&allow_insecure=0#tuic"
+    [[ "$(dockerMain port-hopping share)" == "${uri}" ]] || fail 'TUIC 默认分享没有使用普通首端口 URI'
+    [[ "$(dockerMain port-hopping share 36001)" == "${uri/:36000?/:36001?}" ]] ||
+        fail 'TUIC 指定活动端口分享丢失参数或输出范围 URI'
+    [[ "$(snapshot)" == "${before}" ]] || fail 'TUIC 分享改变受管文件'
+    for port in 0 01 65536 abc -1; do
+        actual=0
+        dockerMain port-hopping share "${port}" >"${LOG}" 2>&1 || actual=$?
+        [[ "${actual}" == 2 ]] || fail "分享接受非法端口: ${port}"
+    done
+    actual=0
+    dockerMain port-hopping share 36003 >"${LOG}" 2>&1 || actual=$?
+    [[ "${actual}" == 15 ]] || fail '分享接受范围外端口'
+    STATUS_END=36003
+    reject dockerMain port-hopping share
+    reject dockerMain port-hopping share 36001
+    unset STATUS_END
+    STATUS_PROTOCOL=3
+    reject dockerMain port-hopping share
+    reject dockerMain port-hopping share 36001
+    unset STATUS_PROTOCOL
+    STATUS_STOPPED=1
+    reject dockerMain port-hopping share
+    reject dockerMain port-hopping share 36001
+)
+runEdit 0 --port-hopping-clear --confirm PADM-DOCKER-EDIT
+for file in "${root}/config/spec.json" "${root}/deployment.json"; do
+    jq -e 'has("port_hopping")|not' "${file}" >/dev/null || fail 'TUIC 清除后遗留保存配置'
+done
+jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload==17 and .accounts[$uuid].download==19' \
+    "${root}/data/traffic/state.json" >/dev/null || fail 'TUIC 跳跃事务改写累计流量'
 
 # 单个 PTY 会话验证真实菜单进程分发与编辑前台输入，不重复完整菜单矩阵。
 command -v script >/dev/null || fail '菜单检查需要 util-linux script'
@@ -313,17 +423,18 @@ dockerMenuProtocols
 SH
 : >"${TEST_ROOT}/menu.calls"
 : >"${TEST_ROOT}/menu.writes"
-printf '%s\n' 11 1 6 2 entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1 y \
+printf '%s\n' 11 1 6 7 0 7 36001 2 entry-tuic 36000 36002 198.18.1.1 2001:db8:1::1 y \
     3 n 3 y 4 5 n 2 0 2 entry-hy2 0 0 0 |
     timeout 10 script -qefc "bash '${TEST_ROOT}/menu-driver.sh'" /dev/null >"${LOG}" 2>&1 ||
     fail '端口跳跃菜单 PTY 分发失败'
 printf '%s\n' 'protocol list' 'port-hopping status' 'port-hopping share' \
-    'edit --port-hopping entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1' \
+    'port-hopping share 36001' \
+    'edit --port-hopping entry-tuic 36000 36002 198.18.1.1 2001:db8:1::1' \
     'port-hopping start' 'port-hopping stop' 'edit --port-hopping-clear' \
     >"${TEST_ROOT}/menu.expected"
 cmp -s "${TEST_ROOT}/menu.calls" "${TEST_ROOT}/menu.expected" || fail '菜单分发或取消行为错误'
 [[ "$(cat "${TEST_ROOT}/menu.writes")" == \
-    'edit --port-hopping entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1' ]] ||
+    'edit --port-hopping entry-tuic 36000 36002 198.18.1.1 2001:db8:1::1' ]] ||
     fail '取消清除仍写入保存配置'
 
 # 复用已有 PTY 驱动方式，真实 SIGINT 后必须仍在子菜单并能继续查看状态。
@@ -365,7 +476,7 @@ try:
     os.killpg(os.getpgid(process.pid), signal.SIGINT)
     expect("fixture-int-ready")
     os.write(master, b"1\n")
-    expect("Docker 端口跳跃（单个双族 Hy2）", 2)
+    expect("Docker 端口跳跃（单个双族 Hy2/TUIC）", 2)
     expect("请选择: ", 3)
     os.write(master, b"0\n0\n")
     assert process.wait(timeout=3) == 0, output.decode()
@@ -378,7 +489,7 @@ finally:
 PY
 [[ "$(cat "${TEST_ROOT}/menu.calls")" == $'protocol list\nport-hopping status' ]] ||
     fail '菜单中断后未在当前子菜单继续操作'
-for input in $'11\n' $'11\n2\n' $'11\n3\n' $'11\n2\nentry-hy2\n'; do
+for input in $'11\n' $'11\n2\n' $'11\n3\n' $'11\n2\nentry-hy2\n' $'11\n7\n'; do
     : >"${TEST_ROOT}/menu.calls"
     printf '%s' "${input}" | timeout 5 bash "${TEST_ROOT}/menu-driver.sh" >"${LOG}" 2>&1 ||
         fail '菜单 EOF 未返回'

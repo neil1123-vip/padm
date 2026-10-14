@@ -181,7 +181,7 @@ Shadowsocks 在 sing-box 首配中选 `9`，固定为 `2022-blake3-aes-128-gcm` 
 TUIC 在 sing-box 首配中选 `10`，使用单 UDP 双栈入口和受管 TLS；
 UUID 同时作为用户 ID、密码及流量账号。拥塞控制支持 `cubic`、`bbr`、`new_reno`，
 认证超时、心跳和 0-RTT 可在 `协议与入口 → 13. TUIC 管理` 或编辑菜单 `14` 管理，默认 `3s`、`10s`、关闭 0-RTT。
-`tuic://` 使用 `h3`、原生 UDP 中继及严格 TLS 校验；端口跳跃尚未开放。
+`tuic://` 使用 `h3`、原生 UDP 中继及严格 TLS 校验；单个双族入口可使用下述范围转发管理。
 Direct Trojan 在 Xray 或 sing-box 首配中选 `11`，使用 TCP/TLS 双栈入口，不经过 Nginx；
 UUID 作为密码及流量账号，可输出 `trojan://` 链接。服务器地址可与 TLS 域名不同，链接保留独立 SNI。
 TLS 域名与凭据冻结；支持通用字段编辑、跨核心复制和删除，不包含 fallback 或独立 HTTPS 发布。
@@ -223,7 +223,7 @@ Hy2 带宽按服务端方向填写，整数范围 `1..1000000` Mbps；Brutal 菜
 TUIC 时长接受 1–6 位正整数加 `ms/s/m/h`，恢复推荐值为 `cubic/3s/10s/false`。
 0-RTT 默认关闭，开启菜单要求确认重放风险。专项不能与规格导入或其它专项混用，
 仅改选中字段，保留认证、TLS、其它入口、其它参数和累计额度；
-沿用预览、确认、发布和失败恢复。完整协议管理、TUIC 跳跃及宿主集成组合仍未开放。
+沿用预览、确认、发布和失败恢复。完整协议管理及宿主集成组合仍未开放；TUIC 范围转发见下文。
 
 Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的模式、
 路径/Host、预设、XMUX、Padding、两个首部开关及四项原生 packet/stream limits：
@@ -769,13 +769,14 @@ WS/SSH Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名；
 双栈发布已在隔离 amd64 Linux daemon 验收；公网、原生宿主及 arm64 仍需独立验收，
 完整 `207` 保持 `deferred`。
 
-菜单“协议与入口 → 端口跳跃”提供手动 Hy2 范围 DNAT 的配置、启停、清除及活动范围分享。
+菜单“协议与入口 → 端口跳跃”提供 Hy2/TUIC 范围 DNAT 的配置、启停、清除及活动端口分享。
 v3 可选 `port_hopping` 保存 `{listener_id, range_start, range_end, ipv4, ipv6}`，
 同步到部署记录和 Compose 的 `x-padm-port-hopping` 元数据。
-当前范围限于单 sing-box、单个双族 Hy2 入口、已有流量统计目录，
+当前范围限于单 sing-box、单个双族 Hy2 或 TUIC 入口、已有流量统计目录，
 无宿主集成或额外运行服务；未运行的 ACME profile 可保留。
 不接受别名、控制面、HTTP relay、HTTP-01 或启用的订阅组合。
 范围须排除目标公开端口，地址须为本机规范原生 IPv4/IPv6。
+TUIC 跳跃配置要求 bundle 能力 `x-padm-port-hopping-tuic`，旧包继续接受原有 Hy2 子集。
 
 保存后须显式 `start`，不会自动启用。启动核对配置和实际容器、采集流量累计并应用额度，
 由独立监督维护双族规则。编辑或清除前须 `stop` 并确认清理完成。
@@ -794,6 +795,7 @@ padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 -
 padm-docker port-hopping status
 padm-docker port-hopping start
 padm-docker port-hopping share
+padm-docker port-hopping share 30001
 padm-docker port-hopping stop
 padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
 ```
@@ -803,10 +805,14 @@ SIGKILL、非合作替换或未知残留保留证据，不自动接管；冲突�
 隔离 amd64 已验直接 SIGKILL 持锁 Bash：子端退出并撤销双族 NAT/state，
 退出容器、owner、stage 和原部署锁保留；查询、停止、启用及生命周期操作拒绝接管。
 应在原生 Linux 上核对原拥有者和残留，不能删除 owner/锁强行继续。
-`share` 只在活动目标与保存规格一致时输出范围 URI，不写静态订阅。
+`share` 只在活动目标与保存规格一致时输出链接，不写静态订阅。
+Hy2 无参数输出范围 URI，TUIC 无参数输出范围起始端口的普通 `tuic://`；
+`share <端口>` 或菜单 `7` 为两协议输出范围内指定单端口的普通链接，保留认证和 TLS。
+TUIC 的范围 DNAT 让客户端可选择其中任一端口，当前固定 sing-box TUIC 客户端
+没有 `server_ports`/`hop_interval`，不输出非标准范围 URI，也不宣称客户端自动换端口。
 sing-box 客户端 `server_ports` 与 `hop_interval=5s` 已在隔离 Linux amd64
 验证同一进程的双族跨端口请求；范围 URI 的外部客户端导入尚未验收。
-原生宿主、arm64、公网、TUIC、旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`。
+原生宿主、arm64、公网、TUIC 客户端自动跳跃、旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`。
 
 菜单“协议与入口 → CDN 连接地址”可为已有 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
 入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。

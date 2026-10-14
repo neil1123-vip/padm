@@ -111,7 +111,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '11. 端口跳跃（双族 Hy2）' '12. Hysteria2 管理' '13. TUIC 管理' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '11. 端口跳跃（双族 Hy2/TUIC）' '12. Hysteria2 管理' '13. TUIC 管理' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -158,17 +158,18 @@ dockerMenuProtocols() {
 }
 
 dockerMenuPortHopping() {
-    local choice listener start end ipv4 ipv6 answer
+    local choice listener start end ipv4 ipv6 answer port
     while :; do
-        printf '\nDocker 端口跳跃（单个双族 Hy2）\n'
+        printf '\nDocker 端口跳跃（单个双族 Hy2/TUIC）\n'
         printf '%s\n' '1. 查看状态' '2. 保存配置' '3. 启用已保存配置' \
-            '4. 停止跳跃' '5. 清除保存配置' '6. 输出活动范围分享链接' '0. 返回'
+            '4. 停止跳跃' '5. 清除保存配置' \
+            '6. 输出活动分享链接（Hy2 范围/TUIC 首端口）' '7. 输出指定活动端口链接' '0. 返回'
         dockerSetupRead choice '请选择: ' || return 0
         case "${choice}" in
         0) return 0 ;;
         1) dockerMenuRun port-hopping status || true ;;
         2)
-            dockerSetupRead listener 'Hy2 入口 ID（0 返回）: ' || continue
+            dockerSetupRead listener 'Hy2/TUIC 入口 ID（0 返回）: ' || continue
             [[ -n "${listener}" && "${listener}" != 0 ]] || continue
             dockerSetupRead start '起始端口（0 返回）: ' || continue
             [[ -n "${start}" && "${start}" != 0 ]] || continue
@@ -189,6 +190,11 @@ dockerMenuPortHopping() {
         4) dockerMenuRun port-hopping stop || true ;;
         5) dockerMenuRun edit --port-hopping-clear || true ;;
         6) dockerMenuRun port-hopping share || true ;;
+        7)
+            dockerSetupRead port '活动范围内的端口（0 返回）: ' &&
+                [[ -n "${port}" && "${port}" != 0 ]] || continue
+            dockerMenuRun port-hopping share "${port}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
