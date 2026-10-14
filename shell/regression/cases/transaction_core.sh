@@ -2082,10 +2082,58 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
 runCoreCleanupFailurePropagationRegression() (
     coreStartupServiceEnabled() { return 1; }
     (
-        autoRead() { IFS= read -r "$3"; }
-        regressionExpectStatus 1 confirmCoreUpgrade Xray v1 stable </dev/null || return 1
-        printf '%s' y | regressionExpectStatus 1 confirmCoreUpgrade Xray v1 stable || return 1
-        regressionExpectStatus 0 confirmCoreUpgrade Xray v1 stable <<<y || return 1
+        local prompt installedVersion=v26.10.1 singBoxVersion=v1.13.0 releasePrerelease=false
+        coreXrayCurrentVersion() { printf '%s\n' "${installedVersion}"; }
+        getSingBoxCurrentVersion() { printf '%s\n' "${singBoxVersion}"; }
+        fetchUrlToStdout() {
+            [[ "$2" == 1 && "$3" == 10 ]] || return 99
+            local tag
+            case "$1" in
+            "https://api.github.com/repos/XTLS/Xray-core/releases/tags/${installedVersion}") tag=${installedVersion} ;;
+            "https://api.github.com/repos/SagerNet/sing-box/releases/tags/${singBoxVersion}") tag=${singBoxVersion} ;;
+            *) return 99 ;;
+            esac
+            jq -cn --arg tag "${tag}" --argjson prerelease "${releasePrerelease}" \
+                '{tag_name:$tag, draft:false, prerelease:$prerelease}'
+        }
+        autoRead() {
+            prompt=$2
+            IFS= read -r "$3"
+        }
+        regressionExpectStatus 1 confirmCoreUpgrade Xray-core v26.10.10 预发布版 </dev/null || return 1
+        printf '%s' y | regressionExpectStatus 1 confirmCoreUpgrade Xray-core v26.10.10 预发布版 || return 1
+        regressionExpectStatus 0 confirmCoreUpgrade Xray-core v26.10.10 预发布版 <<<y || return 1
+        [[ "${prompt}" == 'Xray-core 将 正式版 v26.10.1 切换到 预发布版 v26.10.10，是否继续？[y/n]:' ]] || return 1
+        regressionExpectStatus 0 confirmCoreUpgrade sing-box v1.14.0 正式版 <<<y || return 1
+        [[ "${prompt}" == 'sing-box 将 正式版 v1.13.0 切换到 正式版 v1.14.0，是否继续？[y/n]:' ]] || return 1
+        releasePrerelease=true
+        regressionExpectStatus 0 confirmCoreUpgrade Xray-core v26.10.10 正式版 <<<y || return 1
+        [[ "${prompt}" == 'Xray-core 将 预发布版 v26.10.1 切换到 正式版 v26.10.10，是否继续？[y/n]:' ]] || return 1
+        singBoxVersion=v1.14.0-alpha.1
+        regressionExpectStatus 0 confirmCoreUpgrade sing-box v1.14.0 正式版 <<<y || return 1
+        [[ "${prompt}" == 'sing-box 将 预发布版 v1.14.0-alpha.1 切换到 正式版 v1.14.0，是否继续？[y/n]:' ]] || return 1
+        fetchUrlToStdout() { return 1; }
+        regressionExpectStatus 0 confirmCoreUpgrade Xray-core v26.10.10 预发布版 <<<y || return 1
+        [[ "${prompt}" == 'Xray-core 将 类型未知 v26.10.1 切换到 预发布版 v26.10.10，是否继续？[y/n]:' ]] || return 1
+        local invalidMetadata
+        fetchUrlToStdout() { printf '%s\n' "${invalidMetadata}"; }
+        for invalidMetadata in '{}' '{"tag_name":"v26.10.1","draft":false,"prerelease":"false"}' \
+            '{"tag_name":"v26.10.2","draft":false,"prerelease":false}' \
+            '{"tag_name":"v26.10.1","draft":true,"prerelease":false}' \
+            $'{"tag_name":"v26.10.1","draft":false,"prerelease":false}\n{}'; do
+            regressionExpectStatus 0 confirmCoreUpgrade Xray-core v26.10.10 预发布版 <<<y || return 1
+            [[ "${prompt}" == 'Xray-core 将 类型未知 v26.10.1 切换到 预发布版 v26.10.10，是否继续？[y/n]:' ]] || return 1
+        done
+        fetchUrlToStdout() { return 99; }
+        installedVersion=未安装
+        regressionExpectStatus 0 confirmCoreUpgrade Xray-core v26.10.10 预发布版 <<<y || return 1
+        [[ "${prompt}" == 'Xray-core 将 未安装 切换到 预发布版 v26.10.10，是否继续？[y/n]:' ]] || return 1
+        installedVersion=
+        regressionExpectStatus 0 confirmCoreUpgrade Xray-core v26.10.10 预发布版 <<<y || return 1
+        [[ "${prompt}" == 'Xray-core 将 未知 切换到 预发布版 v26.10.10，是否继续？[y/n]:' ]] || return 1
+        coreXrayCurrentVersion() { printf 'v不完整版本\n'; return 1; }
+        regressionExpectStatus 0 confirmCoreUpgrade Xray-core v26.10.10 预发布版 <<<y || return 1
+        [[ "${prompt}" == 'Xray-core 将 未知 切换到 预发布版 v26.10.10，是否继续？[y/n]:' ]] || return 1
     ) || return 1
     local root="${TMP_DIR}/core-cleanup-failure"
     local serviceLog="${root}/service.log"

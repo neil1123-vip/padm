@@ -2314,8 +2314,27 @@ confirmCoreUpgrade() {
     local core=$1
     local version=$2
     local channel=$3
-    local confirmVar
-    autoRead core_upgrade_confirm "${core} 将切换到 ${channel} ${version}，是否继续？[y/n]:" confirmVar || return 1
+    local confirmVar currentVersion repo metadata currentChannel=类型未知
+    if [[ "${core}" == "sing-box" ]]; then
+        repo=SagerNet/sing-box
+        currentVersion=$(getSingBoxCurrentVersion) || currentVersion=
+    else
+        repo=XTLS/Xray-core
+        currentVersion=$(coreXrayCurrentVersion) || currentVersion=
+    fi
+    if [[ -n "${currentVersion}" && "${currentVersion}" != 未安装 ]]; then
+        if [[ "${currentVersion}" =~ ^[A-Za-z0-9._+-]{1,128}$ ]] &&
+            padmCaptureCancelableCommand metadata fetchUrlToStdout "https://api.github.com/repos/${repo}/releases/tags/${currentVersion}" 1 10; then
+            currentChannel=$(jq -ser --arg tag "${currentVersion}" '
+                select(length == 1) | .[0] |
+                select(type == "object" and .tag_name == $tag and .draft == false) |
+                if .prerelease == true then "预发布版"
+                elif .prerelease == false then "正式版" else empty end
+            ' <<<"${metadata}" 2>/dev/null) || currentChannel=类型未知
+        fi
+        currentVersion="${currentChannel} ${currentVersion}"
+    fi
+    autoRead core_upgrade_confirm "${core} 将 ${currentVersion:-未知} 切换到 ${channel} ${version}，是否继续？[y/n]:" confirmVar || return 1
     [[ "${confirmVar}" == "y" ]]
 }
 
