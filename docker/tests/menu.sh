@@ -703,6 +703,56 @@ runXhttpDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runUdpManagementDriver() {
+    local kind=$1 scenario=$2 menu listener choice answer
+    local -A targetPrompts=()
+    if [[ "${kind}" == hy2 ]]; then
+        menu='Docker Hysteria2 管理' listener='Hysteria2 入口 ID（0 返回）' choice=12
+    else
+        menu='Docker TUIC 管理' listener='TUIC 入口 ID（0 返回）' choice=13
+    fi
+    targetReply 'Docker 管理菜单' $'9\n'
+    targetReply 'Docker 协议与入口' "${choice}"$'\n'
+    targetReply "${menu}" $'1\n'
+    if [[ "${scenario}" == cancel ]]; then
+        targetReply "${menu}" $'2\n'
+        targetReply "${listener}" $'0\n'
+        if [[ "${kind}" == hy2 ]]; then
+            targetReply "${menu}" $'3\n'
+            targetReply "${listener}" $'entry-hy2\n'
+            targetReply '服务端上行带宽 Mbps（服务端→客户端）[100]' $'\004'
+        else
+            for answer in $'n\n' $'\004'; do
+                targetReply "${menu}" $'6\n'
+                targetReply "${listener}" $'entry-tuic\n'
+                targetReply '确认启用 TUIC 0-RTT？[y/N]' "${answer}"
+            done
+        fi
+    elif [[ "${kind}" == hy2 ]]; then
+        targetReply "${menu}" $'2\n'
+        targetReply "${listener}" $'entry-hy2\n'
+        targetReply "${menu}" $'3\n'
+        targetReply "${listener}" $'entry-hy2\n'
+        targetReply '服务端上行带宽 Mbps（服务端→客户端）[100]' $'\n'
+        targetReply '服务端下行带宽 Mbps（客户端→服务端）[50]' $'\n'
+    else
+        for choice in 2 3 4 5 6 7 8; do
+            targetReply "${menu}" "${choice}"$'\n'
+            targetReply "${listener}" $'entry-tuic\n'
+            if [[ "${choice}" == 5 ]]; then
+                targetReply '认证超时 auth_timeout（正整数+ms/s/m/h）[3s]' $'\n'
+                targetReply '心跳间隔 heartbeat（正整数+ms/s/m/h）[10s]' $'\n'
+            elif [[ "${choice}" == 6 ]]; then
+                targetReply '确认启用 TUIC 0-RTT？[y/N]' $'y\n'
+            fi
+        done
+    fi
+    targetReply "${menu}" $'1\n'
+    targetReply "${menu}" $'0\n'
+    targetReply 'Docker 协议与入口' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runMaintenanceDriver() {
     local scenario=$1 choice address answer=n action field previous prompt value
     local scope=ws statusChoice=1 unbanChoice=2 disableChoice=3 enableChoice=5 settingsChoice=6
@@ -2172,6 +2222,8 @@ runPty() {
             runCdnDriver "${input}"
         elif [[ "${driver}" == xhttp ]]; then
             runXhttpDriver "${input}"
+        elif [[ "${driver}" == hy2 || "${driver}" == tuic ]]; then
+            runUdpManagementDriver "${driver}" "${input}"
         elif [[ "${driver}" == maintenance ]]; then
             runMaintenanceDriver "${input}"
         elif [[ "${driver}" == control ]]; then
@@ -2454,6 +2506,7 @@ protocol)
         exit 0
         ;;
     xhttp-status) exit "${XHTTP_STATUS:-0}" ;;
+    hy2-status|tuic-status) exit "${UDP_PROTOCOL_STATUS:-0}" ;;
     esac
     printf 'fixture-protocol-output\n'
     ;;
@@ -2671,6 +2724,23 @@ edit)
     elif [[ "${2:-}" == --xhttp-limits-clear ]]; then
         [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
         exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --hy2-bandwidth ]]; then
+        [[ "$3" == entry-hy2 && ( ( "$#" -eq 4 && "$4" == bbr ) ||
+            ( "$#" -eq 6 && "$4" == brutal && "$5" == 100 && "$6" == 50 ) ) ]] || exit 2
+        exit "${UDP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --tuic-congestion ]]; then
+        [[ "$#" -eq 4 && "$3" == entry-tuic &&
+            ( "$4" == cubic || "$4" == bbr || "$4" == new_reno ) ]] || exit 2
+        exit "${UDP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --tuic-connection ]]; then
+        [[ "$#" -eq 5 && "$3" == entry-tuic && "$4" == 3s && "$5" == 10s ]] || exit 2
+        exit "${UDP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --tuic-zero-rtt ]]; then
+        [[ "$#" -eq 4 && "$3" == entry-tuic && ( "$4" == true || "$4" == false ) ]] || exit 2
+        exit "${UDP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --tuic-defaults ]]; then
+        [[ "$#" -eq 3 && "$3" == entry-tuic ]] || exit 2
+        exit "${UDP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --region-mode ]]; then
         [[ "$#" -eq 3 && ( "$3" == both || "$3" == domain || "$3" == ip ) ]] || exit 2
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
@@ -4269,6 +4339,50 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         grep -Fq '13. 恢复缺省 packet/stream' "${CONTROL_LOG}" || fail 'XHTTP packet/stream 菜单入口缺失'
 done
 unset XHTTP_EDIT_STATUS XHTTP_STATUS
+
+# 仅覆盖参数分发和确认返回，真实事务由 Hy2/TUIC 合同验证。
+for kind in hy2 tuic; do
+    for udpCase in flow cancel failed; do
+        : >"${TLS_WIZARD_ACTIONS}"
+        export UDP_EDIT_STATUS=0 UDP_PROTOCOL_STATUS=0
+        [[ "${udpCase}" != failed ]] || UDP_EDIT_STATUS=15
+        runPty "${kind}-${udpCase}" "${kind}" "${udpCase}" "${TLS_WIZARD_CLI}" menu
+        expectedUdp=$'protocol list\nprotocol '"${kind}"'-status'
+        if [[ "${udpCase}" == cancel ]]; then
+            readCount=2
+            [[ "${kind}" != tuic ]] || readCount=3
+            for ((udpRead = 0; udpRead < readCount; udpRead++)); do
+                expectedUdp+=$'\nprotocol '"${kind}"'-status'
+            done
+        elif [[ "${kind}" == hy2 ]]; then
+            expectedUdp+=$'\nprotocol hy2-status\nedit --hy2-bandwidth entry-hy2 bbr'
+            expectedUdp+=$'\nprotocol hy2-status\nedit --hy2-bandwidth entry-hy2 brutal 100 50'
+        else
+            for algorithm in cubic bbr new_reno; do
+                expectedUdp+=$'\nprotocol tuic-status\nedit --tuic-congestion entry-tuic '"${algorithm}"
+            done
+            expectedUdp+=$'\nprotocol tuic-status\nedit --tuic-connection entry-tuic 3s 10s'
+            expectedUdp+=$'\nprotocol tuic-status\nedit --tuic-zero-rtt entry-tuic true'
+            expectedUdp+=$'\nprotocol tuic-status\nedit --tuic-zero-rtt entry-tuic false'
+            expectedUdp+=$'\nprotocol tuic-status\nedit --tuic-defaults entry-tuic'
+        fi
+        expectedUdp+=$'\nprotocol '"${kind}"'-status'
+        [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedUdp}" ]] ||
+            fail "${kind} ${udpCase} 菜单参数分发错误或取消仍执行编辑"
+        if [[ "${udpCase}" == failed ]]; then
+            failures=2
+            [[ "${kind}" != tuic ]] || failures=7
+            [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq "${failures}" ]] ||
+                fail "${kind} 后端失败没有返回菜单并继续读取状态"
+        fi
+        grep -Fq '12. Hysteria2 管理' "${CONTROL_LOG}" &&
+            grep -Fq '13. TUIC 管理' "${CONTROL_LOG}" &&
+            grep -Fq '已有 sing-box v3 入口' "${CONTROL_LOG}" || fail 'Hy2/TUIC 菜单缺少支持边界'
+        [[ "${kind}" != tuic ]] || grep -Fq '重放攻击风险' "${CONTROL_LOG}" ||
+            fail 'TUIC 开启 0-RTT 没有明确风险提示'
+    done
+done
+unset UDP_EDIT_STATUS UDP_PROTOCOL_STATUS
 
 # 按新版八项菜单现场握手，扫描和选择必须真实读取前台终端。
 : >"${TLS_WIZARD_ACTIONS}"

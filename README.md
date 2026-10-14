@@ -180,7 +180,7 @@ Shadowsocks 在 sing-box 首配中选 `9`，固定为 `2022-blake3-aes-128-gcm` 
 `ss://` 按 SIP002 百分号编码组合密码；超额时撤销运行入站，解除额度后恢复原密钥和监听。
 TUIC 在 sing-box 首配中选 `10`，使用单 UDP 双栈入口和受管 TLS；
 UUID 同时作为用户 ID、密码及流量账号。拥塞控制支持 `cubic`、`bbr`、`new_reno`，
-认证超时、心跳和 0-RTT 可在编辑菜单 `14` 管理，默认 `3s`、`10s`、关闭 0-RTT。
+认证超时、心跳和 0-RTT 可在 `协议与入口 → 13. TUIC 管理` 或编辑菜单 `14` 管理，默认 `3s`、`10s`、关闭 0-RTT。
 `tuic://` 使用 `h3`、原生 UDP 中继及严格 TLS 校验；端口跳跃尚未开放。
 Direct Trojan 在 Xray 或 sing-box 首配中选 `11`，使用 TCP/TLS 双栈入口，不经过 Nginx；
 UUID 作为密码及流量账号，可输出 `trojan://` 链接。服务器地址可与 TLS 域名不同，链接保留独立 SNI。
@@ -195,6 +195,27 @@ VLESS/Trojan gRPC TLS 在 Xray 首配中分别选 `14`/`15`，复用 Nginx HTTP/
 使用独立 `grpc_tls` 字段，服务名为 1–64 位字母、数字、下划线或连字符，编辑菜单 `12` 可修改。
 支持通用字段编辑、Xray 内复制/删除及 `vless://`/`trojan://` 链接；不接受 sing-box、宿主集成或 fallback。
 单独部署只提供本地链接，和协议 21 混合时可纳入其 HTTPS 订阅。
+
+Docker `协议与入口 → 12. Hysteria2 管理` 与 `13. TUIC 管理` 为已有 v3
+sing-box 单入口提供专项编辑：
+
+```bash
+padm-docker protocol hy2-status entry-hy2
+padm-docker edit --hy2-bandwidth entry-hy2 brutal 100 50 --preview
+padm-docker edit --hy2-bandwidth entry-hy2 bbr --confirm PADM-DOCKER-EDIT
+padm-docker protocol tuic-status entry-tuic
+padm-docker edit --tuic-congestion entry-tuic bbr --preview
+padm-docker edit --tuic-connection entry-tuic 3s 10s --preview
+padm-docker edit --tuic-zero-rtt entry-tuic false --confirm PADM-DOCKER-EDIT
+padm-docker edit --tuic-defaults entry-tuic --confirm PADM-DOCKER-EDIT
+```
+
+Hy2 带宽按服务端方向填写，整数范围 `1..1000000` Mbps；Brutal 菜单默认
+`100/50`，BBR 保留规格中的速率，分享链接自动转换客户端方向。
+TUIC 时长接受 1–6 位正整数加 `ms/s/m/h`，恢复推荐值为 `cubic/3s/10s/false`。
+0-RTT 默认关闭，开启菜单要求确认重放风险。专项不能与规格导入或其它专项混用，
+仅改选中字段，保留认证、TLS、其它入口、Hy2 混淆/伪装和累计额度；
+沿用预览、确认、发布和失败恢复。完整协议管理、TUIC 跳跃及宿主集成组合仍未开放。
 
 Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的预设、
 XMUX、Padding、两个首部开关；3D.7 已在本地 Linux `amd64` 容器完成验收，

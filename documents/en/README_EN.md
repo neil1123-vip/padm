@@ -217,6 +217,30 @@ Local and Hysteria2-only static preparation require `x-padm-hy2-local-site`.
 Old default/HTTPS specs and Nginx static combinations without local keep their
 existing bundle compatibility. Website appearance provides no anti-detection proof.
 
+Docker protocol menu items `12. Hysteria2` and `13. TUIC` provide focused edits
+for one existing v3 sing-box listener:
+
+```bash
+padm-docker protocol hy2-status entry-hy2
+padm-docker edit --hy2-bandwidth entry-hy2 brutal 100 50 --preview
+padm-docker edit --hy2-bandwidth entry-hy2 bbr --confirm PADM-DOCKER-EDIT
+padm-docker protocol tuic-status entry-tuic
+padm-docker edit --tuic-congestion entry-tuic bbr --preview
+padm-docker edit --tuic-connection entry-tuic 3s 10s --preview
+padm-docker edit --tuic-zero-rtt entry-tuic false --confirm PADM-DOCKER-EDIT
+padm-docker edit --tuic-defaults entry-tuic --confirm PADM-DOCKER-EDIT
+```
+
+Hy2 rates are server upload/download integers in `1..1000000` Mbps. Brutal menu
+defaults are `100/50`; BBR retains the stored rates, and links convert them to the
+client direction. TUIC durations accept 1–6 positive digits followed by
+`ms/s/m/h`; recommended defaults are `cubic/3s/10s/false`. Enabling 0-RTT requires
+a menu confirmation of replay risk. These edits cannot combine with spec imports
+or other focused edits. Only selected fields change; credentials, TLS, other
+listeners, Hy2 obfuscation/masquerade, quotas, and totals remain fixed. Preview,
+confirmation, publication, and recovery reuse the existing transaction.
+Full protocol management, TUIC hopping, and host integration combinations remain deferred.
+
 Docker `Protocols & entry → XHTTP management` manages presets, XMUX, Padding,
 and two header switches for existing v3 Xray protocol `2` listeners. The four
 native packet/stream limits in 3D.7 were accepted in the local Linux `amd64`

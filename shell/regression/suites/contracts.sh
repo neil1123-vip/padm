@@ -526,6 +526,13 @@ runRegressionDockerContractsAggregateContract() (
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_XHTTP_SCOPE:-}" ]]
 
+    # TUIC 定向入口继续串接 Hy2 基线，新增管理测试不另建重复 selector。
+    : >"${callLog}"
+    bash() { printf '%s\n' "${1##*/}" >>"${callLog}"; }
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-tuic
+    printf '%s\n' tuic.sh >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+
     : >"${callLog}"
     python3() { printf '%s\n' "${*}" >>"${callLog}"; }
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-control-log-cron-real

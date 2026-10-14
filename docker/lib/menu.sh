@@ -111,7 +111,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '11. 端口跳跃（双族 Hy2）' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '11. 端口跳跃（双族 Hy2）' '12. Hysteria2 管理' '13. TUIC 管理' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -150,6 +150,8 @@ dockerMenuProtocols() {
         9) dockerMenuCdnEntries ;;
         10) dockerMenuXhttp ;;
         11) dockerMenuPortHopping ;;
+        12) dockerMenuHysteria2 ;;
+        13) dockerMenuTuic ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -254,6 +256,86 @@ dockerMenuXhttp() {
                 esac
                 dockerMenuRun edit --xhttp-preset "${listener}" "${preset}" || true
             fi
+            ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuHysteria2() {
+    local choice listener up down
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker Hysteria2 管理（已有 sing-box v3 入口）\n'
+        printf '%s\n' '1. 查看状态' '2. BBR 自适应' '3. Brutal 固定带宽' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun protocol hy2-status || true ;;
+        2|3)
+            dockerMenuRun protocol hy2-status || continue
+            dockerSetupRead listener 'Hysteria2 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" && "${listener}" != --* ]] || continue
+            if [[ "${choice}" == 2 ]]; then
+                dockerMenuRun edit --hy2-bandwidth "${listener}" bbr || true
+            else
+                dockerSetupRead up '服务端上行带宽 Mbps（服务端→客户端）[100]: ' 100 &&
+                    dockerSetupRead down '服务端下行带宽 Mbps（客户端→服务端）[50]: ' 50 || continue
+                dockerMenuRun edit --hy2-bandwidth "${listener}" brutal "${up}" "${down}" || true
+            fi
+            ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuTuic() {
+    local choice listener algorithm authTimeout heartbeat answer
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker TUIC 管理（已有 sing-box v3 入口）\n'
+        printf '%s\n' '1. 查看状态' '2. cubic' '3. bbr' '4. new_reno' \
+            '5. 连接参数' '6. 开启 0-RTT' '7. 关闭 0-RTT' '8. 恢复推荐默认' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun protocol tuic-status || true ;;
+        2|3|4|5|6|7|8)
+            dockerMenuRun protocol tuic-status || continue
+            dockerSetupRead listener 'TUIC 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" && "${listener}" != --* ]] || continue
+            case "${choice}" in
+            2|3|4)
+                case "${choice}" in
+                2) algorithm=cubic ;;
+                3) algorithm=bbr ;;
+                4) algorithm=new_reno ;;
+                esac
+                dockerMenuRun edit --tuic-congestion "${listener}" "${algorithm}" || true
+                ;;
+            5)
+                dockerSetupRead authTimeout '认证超时 auth_timeout（正整数+ms/s/m/h）[3s]: ' 3s &&
+                    dockerSetupRead heartbeat '心跳间隔 heartbeat（正整数+ms/s/m/h）[10s]: ' 10s || continue
+                dockerMenuRun edit --tuic-connection "${listener}" "${authTimeout}" "${heartbeat}" || true
+                ;;
+            6)
+                printf '启用 0-RTT 会增加重放攻击风险，默认关闭。\n'
+                dockerSetupRead answer '确认启用 TUIC 0-RTT？[y/N]: ' n || continue
+                case "${answer}" in
+                y|Y|yes|YES) dockerMenuRun edit --tuic-zero-rtt "${listener}" true || true ;;
+                esac
+                ;;
+            7) dockerMenuRun edit --tuic-zero-rtt "${listener}" false || true ;;
+            8) dockerMenuRun edit --tuic-defaults "${listener}" || true ;;
+            esac
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

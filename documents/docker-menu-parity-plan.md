@@ -1353,6 +1353,51 @@ CLI `edit --xhttp-limits <入口 ID> <post> <interval> <buffered> <secs>` 设置
 downloadSettings、H3/CDN、上下行分离、完整管理及公网/原生宿主/arm64/可信发布
 仍待实施或验收，不宣称吞吐、填充分布、长时复用或抗识别收益。
 
+#### 3D.8 Hy2 带宽与 TUIC 参数专项合批
+
+复用已有 v3 sing-box 规格、生成器、URI 和编辑事务，协议菜单新增 `12`
+Hysteria2 管理、`13` TUIC 管理。`protocol hy2-status/tuic-status [入口 ID]`
+先核验在线基线，状态不输出密码。
+`edit --hy2-bandwidth <入口 ID> bbr` 仅修改模式并保留速率；
+`brutal <up> <down>` 一次设置模式和服务端上下行整数 `1..1000000` Mbps，
+菜单默认 `100/50`，URI 转换为客户端方向。
+TUIC 提供 `--tuic-congestion`、`--tuic-connection`、`--tuic-zero-rtt`、
+`--tuic-defaults`，推荐恢复 `cubic/3s/10s/false`；时长沿用 1–6 位
+正整数加 `ms/s/m/h`。CLI 沿用 `--preview/--confirm PADM-DOCKER-EDIT`，
+开启 0-RTT 菜单保留默认否与重放风险确认。
+
+每次只改已有单入口的选中字段，不能组合规格导入或其它专项；
+其它入口、身份/认证、TLS、Hy2 混淆和伪装、统计与额度保持冻结。
+菜单 `0`、EOF、INT 和 0-RTT 拒绝不调用编辑；状态失败不进入写入。
+候选、链接发布、健康失败及信号恢复复用现有事务，不新增依赖或能力标记。
+定向合同复用 `docker-tuic` 已串接的 Hy2 基线，菜单合并验证，
+集成后集中一次 `docker-contracts`，不重复既有真实客户端参数矩阵。
+
+2026-10-15 本地 Linux `amd64` 定向验收 exit `0`，复用工具镜像：
+
+| 验收 | 入口耗时 | 证据目录 |
+| --- | ---: | --- |
+| `docker-tuic`（串接 Hy2） | `152468 ms` | `.tmp-regression-docker-f2d3d4f340714d28a7d74dac15dc3631/` |
+| `docker-menu` | `59860 ms` | `.tmp-regression-docker-2a19e6e644c54892b91f911179b20c48/` |
+| `regression-dispatcher-contract` | `1630 ms` | `.tmp-regression-docker-3d01499056d648a8b4bb476c1e654402/` |
+
+新增合同覆盖 BBR 保留速率、Brutal 客户端方向、TUIC 四专项/default、
+私密状态、非法/互斥、字段篡改拒绝、预览/交互取消和健康失败恢复；
+菜单合并覆盖成功、返回/EOF 和失败继续诊断，原信号合同保持。
+首次 TUIC 测试误用 `users.base` 作为 `config.json` 基线；改为各自保存原文件，
+其它字段精确冻结未放松，补跑通过。失败证据
+`.tmp-regression-docker-c01b0c570b8a4eda8e84dbb99bd2e0df/` 保留日志/result。
+当前源码复制到容器 Linux 文件系统后的 Bash/ShellCheck error/JSON 检查通过，
+独立只读复核通过，无新依赖。
+完整 `docker-contracts -Jobs 6` 一次通过，入口 `393961 ms`、内部
+`391886 ms`、排队 `363 ms`、`cache_hit=false`，345 项规格差分通过；
+证据 `.tmp-regression-docker-e9356036913948ecb3db54dd2a4d684d/`。
+完整与修正后的 TUIC 定向源码摘要一致，随后仅补验收文字；
+成功输入归档由入口清理，本轮静态脚本与失败输入已清，保留日志/result。
+
+完整协议管理、TUIC 跳跃、自动恢复、重装/卸载、宿主集成组合、
+原生宿主/arm64/公网仍 deferred，整体计划保持 active。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

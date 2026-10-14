@@ -19,6 +19,26 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTI
   .tls = {domain:"ws.example.com"}
 ' "${REALITY_SPEC}" >"${HY2_SPEC}"
 dockerConfigureSpecValidate "${HY2_SPEC}" || fail 'Hysteria2 有效合同被拒绝'
+
+udpManagementEdit() {
+    local expected=$1 unchanged=$2 actual=0 before
+    shift 2
+    [[ "${unchanged}" != unchanged ]] || before=$(snapshot)
+    : >"${EVENTS}"
+    bash -u "${CLI}" edit "$@" --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
+        --control-bundle "${CONFIGURE_CONTROL}" </dev/null >"${STDOUT}" 2>"${STDERR}" || actual=$?
+    if [[ "${actual}" != "${expected}" ]]; then
+        cat "${STDERR}" >&2
+        fail "UDP 参数编辑 $*: 预期 ${expected}，实际 ${actual}"
+    fi
+    [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" &&
+        -z "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 1 \
+          \( -name '.edit.*' -o -name '.candidate.*' -o -name '.protocol.*' \) -print -quit)" ]] ||
+        fail 'UDP 参数编辑遗留锁或私密草稿'
+    [[ "${unchanged}" != unchanged || "$(snapshot)" == "${before}" ]] ||
+        fail 'UDP 参数预览、拒绝或取消改变部署'
+}
+
 if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == base &&
     -n "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" &&
     "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP}" != hy2-anytls ]]; then
@@ -198,6 +218,89 @@ liveSnapshot() {
         "${PADM_DOCKER_INSTALL_DIR}/secrets" -type f -exec sha256sum {} + | LC_ALL=C sort
     sha256sum "${PADM_DOCKER_INSTALL_DIR}/"{deployment.json,compose.json,images.env}
 }
+
+# 独立混淆夹具覆盖专项事务，不改后续更新与回滚的双核心基线。
+(
+    newState hy2-management "${TEST_ROOT}/gecko-brutal.json"
+    : >"${FAKE_REALITY_FAIL_MARKER}"
+    cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/hy2-management-before.json"
+    cp "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" "${TEST_ROOT}/hy2-management-traffic.json"
+    (
+        protocolKind=hy2 protocolListener=entry-hy2
+        protocolPatch='{"bandwidth_mode":"brutal","up_mbps":250,"down_mbps":125}'
+        jq '.core.protocols |= map(if .listener_id == "entry-hy2" then
+          .hy2.bandwidth_mode = "brutal" | .hy2.up_mbps = 250 | .hy2.down_mbps = 125
+          else . end)' "${TEST_ROOT}/hy2-management-before.json" >"${TEST_ROOT}/hy2-management-expected.json"
+        dockerEditCompatibilityValidate "${TEST_ROOT}/hy2-management-before.json" \
+            "${TEST_ROOT}/hy2-management-expected.json" || fail 'Hy2 速率专项兼容门禁误拒'
+        jq '.core.protocols[0].hy2.obfs.password = "tampered"' \
+            "${TEST_ROOT}/hy2-management-expected.json" >"${TEST_ROOT}/hy2-management-tampered.json"
+        if dockerEditCompatibilityValidate "${TEST_ROOT}/hy2-management-before.json" \
+            "${TEST_ROOT}/hy2-management-tampered.json" 2>/dev/null; then
+            fail 'Hy2 速率专项兼容门禁接受混淆篡改'
+        fi
+    )
+    runRead 0 hy2-status bash -u "${CLI}" protocol hy2-status entry-hy2
+    jq -e '.entries == [{listener_id:"entry-hy2",protocol:3,public_port:27443,
+      bandwidth_mode:"brutal",up_mbps:100,down_mbps:50,obfs_type:"gecko",
+      masquerade:"https://www.example.com/path-1"}]' "${STDOUT}" >/dev/null ||
+        fail 'Hy2 状态遗漏速率或暴露混淆密码'
+    udpManagementEdit 0 unchanged --hy2-bandwidth entry-hy2 brutal 250 125 --preview
+    ! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail 'Hy2 带宽预览启动候选'
+    for mode in brutal bbr; do
+        bandwidthArgs=(entry-hy2 "${mode}")
+        [[ "${mode}" != brutal ]] || bandwidthArgs+=(250 125)
+        udpManagementEdit 0 changed --hy2-bandwidth "${bandwidthArgs[@]}" --confirm PADM-DOCKER-EDIT
+        jq -en --arg mode "${mode}" --slurpfile old "${TEST_ROOT}/hy2-management-before.json" \
+            --slurpfile actual "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '
+          def stable: .core.protocols |= map(if .listener_id == "entry-hy2"
+            then del(.hy2.bandwidth_mode,.hy2.up_mbps,.hy2.down_mbps) else . end);
+          ($old[0] | stable) == ($actual[0] | stable) and
+          any($actual[0].core.protocols[]; .listener_id == "entry-hy2" and
+            .hy2.bandwidth_mode == $mode and .hy2.up_mbps == 250 and .hy2.down_mbps == 125)
+        ' >/dev/null || fail 'Hy2 专项丢失速率或改变混淆、伪装和身份'
+        for config in users.base config.json; do
+            jq -e --arg mode "${mode}" '.inbounds[] | select(.type == "hysteria2") |
+              .obfs == {type:"gecko",password:"gecko-0123456789abcdef"} and
+              .masquerade == "https://www.example.com/path-1" and
+              (if $mode == "bbr" then .ignore_client_bandwidth == true and
+                (has("up_mbps") or has("down_mbps") | not)
+               else .up_mbps == 250 and .down_mbps == 125 and
+                 (has("ignore_client_bandwidth") | not) end)
+            ' "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/${config}" >/dev/null ||
+                fail "Hy2 ${mode} 未投影到 ${config}"
+        done
+        runRead 0 hy2-status-after bash -u "${CLI}" protocol hy2-status
+        jq -e --arg mode "${mode}" '.entries | length == 1 and
+          .[0].bandwidth_mode == $mode and .[0].up_mbps == 250 and .[0].down_mbps == 125' \
+            "${STDOUT}" >/dev/null || fail 'Hy2 状态没有保留 BBR 隐藏速率'
+        runRead 0 hy2-links-after dockerProtocolCommand links entry-hy2
+        if [[ "${mode}" == bbr ]]; then
+            ! grep -Fq upmbps "${STDOUT}" || fail 'Hy2 BBR 链接仍发布 Brutal 速率'
+        else
+            grep -Fq '&upmbps=125&downmbps=250&obfs=gecko' "${STDOUT}" ||
+                fail 'Hy2 Brutal 客户端带宽方向错误'
+        fi
+    done
+    cmp -s "${TEST_ROOT}/hy2-management-traffic.json" "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" ||
+        fail 'Hy2 带宽专项改变累计或额度'
+    runRead 15 hy2-missing bash -u "${CLI}" protocol hy2-status missing
+    runRead 15 hy2-other bash -u "${CLI}" protocol tuic-status entry-hy2
+    for args in 'entry-hy2 auto' 'entry-hy2 bbr 100 50' 'entry-hy2 brutal 0 50' \
+        'entry-hy2 brutal 01 50' 'entry-hy2 brutal 100 1000001'; do
+        read -r -a bandwidthArgs <<<"${args}"
+        udpManagementEdit 2 unchanged --hy2-bandwidth "${bandwidthArgs[@]}" --preview
+    done
+    udpManagementEdit 15 unchanged --hy2-bandwidth missing bbr --preview
+    udpManagementEdit 2 unchanged --hy2-bandwidth entry-hy2 bbr --spec "${HY2_SPEC}" --preview
+    udpManagementEdit 2 unchanged --hy2-bandwidth entry-hy2 bbr --tuic-defaults entry-hy2 --preview
+    before=$(liveSnapshot)
+    rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
+    udpManagementEdit 14 changed --hy2-bandwidth entry-hy2 brutal 200 100 --confirm PADM-DOCKER-EDIT
+    [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] ||
+        fail 'Hy2 专项健康失败未恢复配置、凭据和累计'
+)
+
 before=$(liveSnapshot)
 rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
 jq '(.core.protocols[] | select(.id == 3) | .public_port) = 27444' \

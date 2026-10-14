@@ -828,7 +828,7 @@ dockerProtocolCommand() (
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     list|stream-status|routing-status|port-alias-status|tproxy-status|redirect-status|tun-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
-    links|cdn-status|xhttp-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
+    links|cdn-status|xhttp-status|hy2-status|tuic-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
         if [[ "${action}" == select-target ]]; then
@@ -916,6 +916,24 @@ dockerProtocolCommand() (
           {enabled:($tun != null),interface:($tun.settings.interface // null),
            address:($tun.settings.address // null),family:"ipv4",scope:"global",ipv6:"reject"}' "${normalized}"
         return $?
+    fi
+    if [[ "${action}" == hy2-status || "${action}" == tuic-status ]]; then
+        jq --arg listener "${listener}" --arg kind "${action%-status}" '
+          [.core.protocols[] | select(.core == "sing-box" and
+            .id == (if $kind == "hy2" then 3 else 31 end)) |
+            select($listener == "" or .listener_id == $listener) |
+            {listener_id,protocol:.id,public_port} +
+            (if $kind == "hy2" then
+              (.hy2 | {bandwidth_mode,up_mbps,down_mbps,obfs_type:(.obfs.type // null),masquerade})
+             else .tuic | {congestion_control,auth_timeout,heartbeat,zero_rtt_handshake} end)
+          ] as $entries |
+          if $listener != "" and ($entries | length) == 0 then error("入口不支持该协议管理")
+          else {entries:$entries} end
+        ' "${normalized}" || {
+            dockerError 'Hy2/TUIC 管理只支持已有 v3 sing-box 协议 3/31 入口'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        return 0
     fi
     if [[ "${action}" == xhttp-status ]]; then
         jq --arg listener "${listener}" '
@@ -1508,6 +1526,7 @@ dockerEditCommand() {
     local cdnAction= cdnListener= cdnAddresses=
     local xhttpAction= xhttpListener= xhttpPreset= xhttpValues='{}' xhttpPadding=null
     local xhttpNoGrpc=false xhttpNoSse=false xhttpLimits='{}'
+    local protocolKind= protocolListener= protocolPatch='{}' protocolId=0
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -1828,6 +1847,58 @@ dockerEditCommand() {
             [[ "$1" != --fail2ban-ssh-off ]] || fail2banType=fail2ban-ssh
             fail2banAction=off
             shift
+            ;;
+        --hy2-bandwidth)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${protocolKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            protocolKind=hy2 protocolId=3 protocolListener=$2
+            case "$3" in
+            bbr)
+                protocolPatch='{"bandwidth_mode":"bbr"}'
+                shift 3
+                ;;
+            brutal)
+                [[ "$#" -ge 5 && "$4" =~ ^[1-9][0-9]{0,6}$ && "$5" =~ ^[1-9][0-9]{0,6}$ &&
+                    "$4" -le 1000000 && "$5" -le 1000000 ]] || return "${PADM_DOCKER_RC_USAGE}"
+                protocolPatch=$(jq -cn --argjson up "$4" --argjson down "$5" \
+                    '{bandwidth_mode:"brutal",up_mbps:$up,down_mbps:$down}') ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                shift 5
+                ;;
+            *) return "${PADM_DOCKER_RC_USAGE}" ;;
+            esac
+            ;;
+        --tuic-congestion|--tuic-connection|--tuic-zero-rtt|--tuic-defaults)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${protocolKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            protocolKind=tuic protocolId=31 protocolListener=$2
+            case "$1" in
+            --tuic-congestion)
+                [[ "$#" -ge 3 ]] || return "${PADM_DOCKER_RC_USAGE}"
+                case "$3" in cubic|bbr|new_reno) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+                protocolPatch=$(jq -cn --arg value "$3" '{congestion_control:$value}') ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                shift 3
+                ;;
+            --tuic-connection)
+                [[ "$#" -ge 4 && "$3" =~ ^[1-9][0-9]{0,5}(ms|s|m|h)$ &&
+                    "$4" =~ ^[1-9][0-9]{0,5}(ms|s|m|h)$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+                protocolPatch=$(jq -cn --arg timeout "$3" --arg heartbeat "$4" \
+                    '{auth_timeout:$timeout,heartbeat:$heartbeat}') || return "${PADM_DOCKER_RC_USAGE}"
+                shift 4
+                ;;
+            --tuic-zero-rtt)
+                [[ "$#" -ge 3 ]] || return "${PADM_DOCKER_RC_USAGE}"
+                case "$3" in true|false) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+                protocolPatch=$(jq -cn --argjson value "$3" '{zero_rtt_handshake:$value}') ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                shift 3
+                ;;
+            --tuic-defaults)
+                protocolPatch='{"congestion_control":"cubic","auth_timeout":"3s","heartbeat":"10s","zero_rtt_handshake":false}'
+                shift 2
+                ;;
+            esac
             ;;
         --xhttp-limits)
             [[ "$#" -ge 6 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
@@ -2217,10 +2288,23 @@ dockerEditCommand() {
         dockerError 'TUN 专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${protocolKind}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${fail2banAction}" && -z "${cdnAction}" && -z "${xhttpAction}" &&
+        -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" ) ]] || {
+        dockerError 'Hy2/TUIC 专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    if [[ "${protocolKind}" == tuic ]] &&
+        jq -e '.zero_rtt_handshake == true' <<<"${protocolPatch}" >/dev/null 2>&1; then
+        printf '启用 TUIC 0-RTT 会增加重放攻击风险，默认关闭。\n'
+    fi
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
     dockerComposeFile >/dev/null || return "${PADM_DOCKER_RC_STATE}"
@@ -2230,7 +2314,8 @@ dockerEditCommand() {
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
-        -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" ) ||
+        -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
+        -z "${protocolKind}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -2295,7 +2380,8 @@ dockerEditCommand() {
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
-        -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" ]]; then
+        -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
+        -z "${protocolKind}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -2435,6 +2521,19 @@ dockerEditCommand() {
         ' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ -n "${protocolKind}" ]]; then
+        jq --arg kind "${protocolKind}" --arg listener "${protocolListener}" \
+            --argjson id "${protocolId}" --argjson patch "${protocolPatch}" '
+          if .schema_version != 3 or
+            ([.core.protocols[] | select(.listener_id == $listener and .id == $id and .core == "sing-box")] | length) != 1
+          then error("入口不支持该协议管理")
+          else .core.protocols |= map(if .listener_id == $listener then .[$kind] += $patch else . end) end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError 'Hy2/TUIC 管理只支持已有 v3 sing-box 协议 3/31 入口，未提交配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
     fi
     if [[ -n "${xhttpAction}" ]]; then
         jq --arg listener "${xhttpListener}" --arg action "${xhttpAction}" \
@@ -3070,6 +3169,8 @@ dockerEditCompatibilityValidate() {
         --arg port_hopping "${portHoppingAction:-}" \
         --arg cdn_listener "${cdnListener:-}" \
         --arg xhttp_listener "${xhttpListener:-}" --arg xhttp_action "${xhttpAction:-}" \
+        --arg protocol_kind "${protocolKind:-}" --arg protocol_listener "${protocolListener:-}" \
+        --argjson protocol_patch "${protocolPatch:-"{}"}" \
         --arg fail2ban_action "${fail2banAction:-}" \
         --arg fail2ban_type "${fail2banType:-fail2ban}" \
         --arg fail2ban_listener "${fail2banPortListener:-}" \
@@ -3158,6 +3259,13 @@ dockerEditCompatibilityValidate() {
         ([$old.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ([$new.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ($old | without_fail2ban_settings) == ($new | without_fail2ban_settings)
+       elif $protocol_kind != "" then
+        # 可信解析的补丁键只豁免选中字段，身份、混淆及其它入口保持冻结。
+        def without_protocol_patch:
+          .core.protocols |= map(if .listener_id == $protocol_listener then
+            .[$protocol_kind] |= delpaths($protocol_patch | keys | map([.]))
+            else . end);
+        ($old | without_protocol_patch) == ($new | without_protocol_patch)
        elif $xhttp_listener != "" then
         # 每个专项只豁免自己的字段，其余高级参数冻结。
         def without_xhttp:

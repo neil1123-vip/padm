@@ -234,6 +234,158 @@ jq -e --arg uuid "${UUID}" 'any(.inbounds[]; .type == "tuic" and
     dockerConfigurePortsAvailable "${TUIC_SPEC}" || fail '自有 TUIC UDP 监听不能复用'
 )
 
+# 参数专项复用部署事务，服务端专用字段不应混入 TUIC URI。
+(
+    newState tuic-management "${TEST_ROOT}/topology-tuic.json"
+    : >"${FAKE_REALITY_FAIL_MARKER}"
+    cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/tuic-management-before.json"
+    for config in users.base config.json; do
+        cp "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/${config}" "${TEST_ROOT}/tuic-management-${config}.json"
+    done
+    cp "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base" "${TEST_ROOT}/tuic-management-xray.json"
+    cp "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" "${TEST_ROOT}/tuic-management-traffic.json"
+    (
+        protocolKind=tuic protocolListener=entry-tuic
+        protocolPatch='{"congestion_control":"new_reno"}'
+        jq '.core.protocols |= map(if .listener_id == "entry-tuic" then
+          .tuic.congestion_control = "new_reno" else . end)' \
+            "${TEST_ROOT}/tuic-management-before.json" >"${TEST_ROOT}/tuic-management-expected.json"
+        dockerEditCompatibilityValidate "${TEST_ROOT}/tuic-management-before.json" \
+            "${TEST_ROOT}/tuic-management-expected.json" || fail 'TUIC 拥塞专项兼容门禁误拒'
+        jq '.core.protocols[0].tuic.domain = "tampered.example.com"' \
+            "${TEST_ROOT}/tuic-management-expected.json" >"${TEST_ROOT}/tuic-management-tampered.json"
+        if dockerEditCompatibilityValidate "${TEST_ROOT}/tuic-management-before.json" \
+            "${TEST_ROOT}/tuic-management-tampered.json" 2>/dev/null; then
+            fail 'TUIC 专项兼容门禁接受域名篡改'
+        fi
+    )
+    runRead 0 tuic-status bash -u "${CLI}" protocol tuic-status entry-tuic
+    jq -e '.entries == [{listener_id:"entry-tuic",protocol:31,public_port:31443,
+      congestion_control:"cubic",auth_timeout:"3s",heartbeat:"10s",zero_rtt_handshake:false}]' \
+        "${STDOUT}" >/dev/null || fail 'TUIC 状态遗漏参数或暴露凭据'
+    udpManagementEdit 0 unchanged --tuic-zero-rtt entry-tuic true --preview
+    grep -Fq '0-RTT' "${STDOUT}" "${STDERR}" || fail 'TUIC 开启预览没有风险提示'
+    ! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail 'TUIC 参数预览启动候选'
+    for step in congestion connection zero-rtt defaults; do
+        case "${step}" in
+        congestion)
+            expected='{"congestion_control":"new_reno","auth_timeout":"3s","heartbeat":"10s","zero_rtt_handshake":false}'
+            editArgs=(--tuic-congestion entry-tuic new_reno)
+            ;;
+        connection)
+            expected='{"congestion_control":"new_reno","auth_timeout":"5s","heartbeat":"15s","zero_rtt_handshake":false}'
+            editArgs=(--tuic-connection entry-tuic 5s 15s)
+            ;;
+        zero-rtt)
+            expected='{"congestion_control":"new_reno","auth_timeout":"5s","heartbeat":"15s","zero_rtt_handshake":true}'
+            editArgs=(--tuic-zero-rtt entry-tuic true)
+            ;;
+        defaults)
+            expected='{"congestion_control":"cubic","auth_timeout":"3s","heartbeat":"10s","zero_rtt_handshake":false}'
+            editArgs=(--tuic-defaults entry-tuic)
+            ;;
+        esac
+        udpManagementEdit 0 changed "${editArgs[@]}" --confirm PADM-DOCKER-EDIT
+        jq -en --argjson expected "${expected}" \
+            --slurpfile old "${TEST_ROOT}/tuic-management-before.json" \
+            --slurpfile actual "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '
+          def stable: .core.protocols |= map(if .listener_id == "entry-tuic"
+            then del(.tuic.congestion_control,.tuic.auth_timeout,.tuic.heartbeat,.tuic.zero_rtt_handshake) else . end);
+          ($old[0] | stable) == ($actual[0] | stable) and
+          any($actual[0].core.protocols[]; .listener_id == "entry-tuic" and
+            (.tuic | del(.domain)) == $expected)
+        ' >/dev/null || fail "TUIC ${step} 改变未选字段、认证、TLS 或其它入口"
+        for config in users.base config.json; do
+            jq -en --argjson expected "${expected}" --slurpfile old "${TEST_ROOT}/tuic-management-${config}.json" \
+                --slurpfile actual "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/${config}" '
+              def stable: .inbounds |= map(if .tag == "entry-tuic"
+                then del(.congestion_control,.auth_timeout,.heartbeat,.zero_rtt_handshake) else . end);
+              ($old[0] | stable) == ($actual[0] | stable) and
+              any($actual[0].inbounds[]; .tag == "entry-tuic" and
+                {congestion_control,auth_timeout,heartbeat,zero_rtt_handshake} == $expected)
+            ' >/dev/null || fail "TUIC ${step} 没有完整投影 ${config}"
+        done
+        runRead 0 tuic-status-after bash -u "${CLI}" protocol tuic-status
+        jq -e --argjson expected "${expected}" '.entries ==
+          [($expected + {listener_id:"entry-tuic",protocol:31,public_port:31443})]' "${STDOUT}" >/dev/null ||
+            fail "TUIC ${step} 状态未同步"
+        algorithm=$(jq -r '.congestion_control' <<<"${expected}")
+        runRead 0 tuic-links-after dockerProtocolCommand links entry-tuic
+        [[ "$(<"${STDOUT}")" == "${TUIC_URI/congestion_control=cubic/congestion_control=${algorithm}}" ]] ||
+            fail "TUIC ${step} URI 夹带服务端专用字段或认证漂移"
+    done
+    for pair in 'tuic-management-xray.json config/xray/users.base' \
+        'tuic-management-traffic.json data/traffic/state.json'; do
+        read -r original installed <<<"${pair}"
+        cmp -s "${TEST_ROOT}/${original}" "${PADM_DOCKER_INSTALL_DIR}/${installed}" ||
+            fail "TUIC 参数修改改变 ${installed}"
+    done
+    runRead 15 tuic-missing bash -u "${CLI}" protocol tuic-status missing
+    runRead 15 tuic-other bash -u "${CLI}" protocol hy2-status entry-tuic
+    for args in '--tuic-congestion entry-tuic reno' '--tuic-connection entry-tuic 0s 10s' \
+        '--tuic-connection entry-tuic 3s 01s' '--tuic-connection entry-tuic 1000000s 10s' \
+        '--tuic-zero-rtt entry-tuic TRUE'; do
+        read -r -a editArgs <<<"${args}"
+        udpManagementEdit 2 unchanged "${editArgs[@]}" --preview
+    done
+    udpManagementEdit 15 unchanged --tuic-defaults missing --preview
+    udpManagementEdit 15 unchanged --tuic-defaults vless-reality --preview
+    udpManagementEdit 2 unchanged --tuic-congestion entry-tuic bbr --tuic-defaults entry-tuic --preview
+    udpManagementEdit 2 unchanged --tuic-connection entry-tuic 4s 12s --spec "${TUIC_SPEC}" --preview
+    udpManagementEdit 2 unchanged --tuic-zero-rtt entry-tuic true
+    before=$(snapshot)
+    python3 - "${STDOUT}" bash -u "${CLI}" edit --tuic-zero-rtt entry-tuic true \
+        --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
+        --control-bundle "${CONFIGURE_CONTROL}" <<'PY'
+import errno
+import os
+import pty
+import select
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+master, slave = pty.openpty()
+process = subprocess.Popen(sys.argv[2:], stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+os.close(slave)
+output = bytearray()
+sent = False
+deadline = time.monotonic() + 60
+try:
+    while time.monotonic() < deadline:
+        if select.select([master], [], [], 0.1)[0]:
+            try:
+                part = os.read(master, 65536)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                break
+            if not part:
+                break
+            output.extend(part)
+            if not sent and b"[y/N]" in output:
+                os.write(master, b"n\n")
+                sent = True
+        elif process.poll() is not None:
+            break
+    assert sent and b"0-RTT" in output, output.decode(errors="replace")
+    assert process.wait(timeout=10) == 0, output.decode(errors="replace")
+finally:
+    if process.poll() is None:
+        process.kill()
+        process.wait()
+    os.close(master)
+    Path(sys.argv[1]).write_bytes(output)
+PY
+    [[ "$(snapshot)" == "${before}" ]] || fail 'TUIC 0-RTT 取消仍改变部署'
+    before=$(liveSnapshot)
+    rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
+    udpManagementEdit 14 changed --tuic-connection entry-tuic 4s 12s --confirm PADM-DOCKER-EDIT
+    [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] ||
+        fail 'TUIC 专项健康失败未恢复配置、认证和累计'
+)
+
 before=$(liveSnapshot)
 rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
 jq '(.core.protocols[] | select(.id == 31) | .public_port) = 31444' \

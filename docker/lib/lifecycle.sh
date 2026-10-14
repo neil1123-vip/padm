@@ -68,6 +68,12 @@ dockerUsage() {
   padm-docker edit --xhttp-headers-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-limits <入口 ID> <POST字节数> <间隔毫秒> <缓冲POST数> <流式秒数或范围> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-limits-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --hy2-bandwidth <入口 ID> bbr [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --hy2-bandwidth <入口 ID> brutal <服务端上行 Mbps> <服务端下行 Mbps> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tuic-congestion <入口 ID> <cubic|bbr|new_reno> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tuic-connection <入口 ID> <auth_timeout> <heartbeat> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tuic-zero-rtt <入口 ID> <true|false> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tuic-defaults <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-rules <IPv4/IPv6> <DNS 端口> <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-upstream <IPv4/IPv6> <端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -126,6 +132,8 @@ dockerUsage() {
   padm-docker protocol list
   padm-docker protocol links [入口 ID]
   padm-docker protocol xhttp-status [入口 ID]
+  padm-docker protocol hy2-status [入口 ID]
+  padm-docker protocol tuic-status [入口 ID]
   padm-docker protocol stream-status
   padm-docker protocol alpn-status [入口 ID]
   padm-docker protocol routing-status
