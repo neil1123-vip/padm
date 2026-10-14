@@ -62,7 +62,7 @@ dockerAccountRandomUuid() {
         value=$(dockerSetupTool "${image}" uuid 2>/dev/null) || continue
         dockerAccountIdIsValid "${value}" || continue
         [[ -z "${excluded}" || "${value}" != "${excluded}" ]] || continue
-        jq -e --arg value "${value}" '
+        printf '%s' "${value}" | jq -e --rawfile value /dev/stdin '
           (any(.core.protocols[]; .uuid == $value) | not) and
           (any((.accounts // [])[]; .id == $value or .uuid == $value) | not)
         ' "${specFile}" >/dev/null 2>&1 || continue
@@ -79,7 +79,7 @@ dockerAccountRandomPassword() {
     for attempt in {1..32}; do
         value=$(dockerSetupRandomHex "${image}" 24 2>/dev/null) || continue
         [[ "${value}" =~ ^[A-Fa-f0-9]{16,128}$ ]] || continue
-        jq -e --arg value "${value}" '
+        printf '%s' "${value}" | jq -e --rawfile value /dev/stdin '
           (any(.core.protocols[]; .uuid == $value) | not) and
           (any((.accounts // [])[]; .password == $value) | not)
         ' "${specFile}" >/dev/null 2>&1 || continue
@@ -91,7 +91,7 @@ dockerAccountRandomPassword() {
 }
 
 dockerAccountRandomSsPassword() {
-    local image=$1 value
+    local image=${1:-} value
     image=${image:-$(dockerAccountImage ops)} || return 1
     value=$(docker run --rm --read-only --network none --cap-drop ALL \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
@@ -115,8 +115,7 @@ dockerAccountListenersJson() {
     listeners=$(jq -cn --arg raw "${raw}" '
       ($raw | split(",")) as $items |
       if ($items | length) >= 1 and
-         ($items | unique | length) == ($items | length) and
-         all($items[]; test("^entry-[a-z0-9][a-z0-9-]{0,47}$"))
+         ($items | unique | length) == ($items | length)
       then $items else error("invalid listeners") end
     ') || return 1
     jq -e --argjson listeners "${listeners}" '
@@ -218,7 +217,7 @@ dockerAccountPrintCredentials() {
 }
 
 dockerAccountCommand() {
-    local action=${1:-} specFile accountId name listenersRaw listeners enabled=1 json=0
+    local action=${1:-} specFile accountId name= listenersRaw listeners enabled=1 json=0
     local sourceId id uuid password ssPassword yes=0 arg seenName=0 seenListeners=0 status
     shift || true
     case "${action}" in
@@ -266,11 +265,13 @@ dockerAccountCommand() {
         fi
         dockerAccountNameIsValid "${name:-account-${sourceId:0:8}}" || return "${PADM_DOCKER_RC_USAGE}"
         [[ -n "${name}" ]] || name="account-${sourceId:0:8}"
+        # 凭据经匿名管道传入，避免出现在 jq 进程参数中。
         dockerAccountMutate \
             '.accounts += [{id:$id,name:$name,enabled:$enabled,uuid:$uuid,password:$password,
               shadowsocks_password:(if $ss == "null" then null else $ss end),listeners:$listeners}]' \
             --arg id "${sourceId}" --arg name "${name}" --argjson enabled "$([[ "${enabled}" -eq 1 ]] && printf true || printf false)" \
-            --arg uuid "${uuid}" --arg password "${password}" --arg ss "${ssPassword}" --argjson listeners "${listeners}" ||
+            --rawfile uuid <(printf '%s' "${uuid}") --rawfile password <(printf '%s' "${password}") \
+            --rawfile ss <(printf '%s' "${ssPassword}") --argjson listeners "${listeners}" ||
             return $?
         dockerAccountPrintCredentials 创建 "${sourceId}" "${uuid}" "${password}" "${ssPassword}"
         ;;
@@ -329,7 +330,7 @@ dockerAccountCommand() {
                    else . end)' \
                 --arg id "${sourceId}" --arg name "${name}" --argjson nameSet "$([[ "${seenName}" -eq 1 ]] && printf true || printf false)" \
                 --argjson listenersSet "$([[ "${seenListeners}" -eq 1 ]] && printf true || printf false)" \
-                --argjson listeners "${listeners:-[]}" --arg ss "${ssPassword}"
+                --argjson listeners "${listeners:-[]}" --rawfile ss <(printf '%s' "${ssPassword}")
         else
             [[ "${seenName}" -eq 0 ]] || dockerAccountNameIsValid "${name}" ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -355,8 +356,8 @@ dockerAccountCommand() {
                  .accounts += [{id:$id,name:$name,enabled:$source.enabled,uuid:$uuid,password:$password,
                    shadowsocks_password:(if $ss == "null" then null else $ss end),listeners:$listeners}]' \
                 --arg sourceId "${sourceId}" --arg id "${id}" \
-                --arg name "${name}" --argjson listeners "${listeners}" --arg uuid "${uuid}" \
-                --arg password "${password}" --arg ss "${ssPassword}" ||
+                --arg name "${name}" --argjson listeners "${listeners}" --rawfile uuid <(printf '%s' "${uuid}") \
+                --rawfile password <(printf '%s' "${password}") --rawfile ss <(printf '%s' "${ssPassword}") ||
                 return $?
             dockerAccountPrintCredentials 复制 "${id}" "${uuid}" "${password}" "${ssPassword}"
         fi
@@ -406,7 +407,8 @@ dockerAccountCommand() {
                 '(.accounts[] | select(.id == $id)) |=
                   (.uuid = $uuid | .password = $password |
                    .shadowsocks_password = (if $ss == "null" then null else $ss end))' \
-                --arg id "${accountId}" --arg uuid "${uuid}" --arg password "${password}" --arg ss "${ssPassword}" ||
+                --arg id "${accountId}" --rawfile uuid <(printf '%s' "${uuid}") \
+                --rawfile password <(printf '%s' "${password}") --rawfile ss <(printf '%s' "${ssPassword}") ||
                 return $?
             dockerAccountPrintCredentials 轮换 "${accountId}" "${uuid}" "${password}" "${ssPassword}"
         fi
