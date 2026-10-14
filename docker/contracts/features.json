@@ -450,7 +450,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.1–5B.2 已交付认证 SOCKS5 TCP 全局及域名分流出站；公网 SOCKS 入站和完整中继管理尚未交付，201 不作为公开节点协议。"
+      "reason": "5B.1–5B.2 已交付认证 SOCKS5 TCP 全局及域名分流出站；公网 SOCKS 入站和完整中继管理尚未交付，201 不作为公开节点协议。固定 sing-box v1.14.2 的动态 BND 不能直接用 bridge 固定端口发布，活动 UDP 关联还会把真实数据报来源替换为已认证 TCP 来源，使未认证及来源名单之外的 IP 借用关联；关闭 TCP 后监听撤销，但 host-network 无法修复活动会话鉴权。Xray 26.3.27 的 UDP 来源许可不随控制关闭撤销；两核心均不满足完整入站要求，不开放菜单或降为 TCP-only。"
     },
     "internal-202-http-relay": {
       "status": "deferred",
