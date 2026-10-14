@@ -235,6 +235,7 @@ if ($Rebuild) { $buildArgs += '--no-cache' }
 
 $container = $null
 $exitCode = 1
+$successful = $false
 $watch = [Diagnostics.Stopwatch]::new()
 $queueWatch = [Diagnostics.Stopwatch]::StartNew()
 try {
@@ -321,6 +322,7 @@ try {
                         Write-Host "Regression: reusing successful $Selector result: $($completed.result_path)"
                         Write-Host "Artifacts: $runDir"
                         $exitCode = 0
+                        $successful = $true
                         exit $exitCode
                     }
                 }
@@ -541,12 +543,26 @@ try {
         [IO.File]::Move("$cachePath.$runId.tmp", $cachePath, $true)
     }
     Write-Host "Exit: $exitCode, elapsed: $($watch.ElapsedMilliseconds) ms"
+    $successful = $exitCode -eq 0
 }
 finally {
     try {
         if ($container) {
             & $docker rm --force --volumes $container
             if ($LASTEXITCODE -ne 0) { throw "Container cleanup failed: $container" }
+        }
+        if ($successful) {
+            # 成功仅保留结果与日志；失败输入继续保留，方便直接复现。
+            $inputRoot = [IO.Path]::GetFullPath($runDir).TrimEnd('\') + '\'
+            foreach ($name in @('source.tar', 'files.list', 'routing-cores')) {
+                $inputPath = Join-Path $runDir $name
+                if (-not (Test-Path -LiteralPath $inputPath)) { continue }
+                $resolvedInput = (Resolve-Path -LiteralPath $inputPath).ProviderPath
+                if (-not $resolvedInput.StartsWith($inputRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Regression input cleanup escaped its result directory: $resolvedInput"
+                }
+                Remove-Item -LiteralPath $resolvedInput -Recurse -Force
+            }
         }
     }
     finally {

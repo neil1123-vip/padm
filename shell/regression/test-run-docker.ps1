@@ -1,4 +1,10 @@
 #requires -Version 7.3
+[CmdletBinding()]
+param(
+    [ValidateSet('all', 'artifacts')]
+    [string]$Scope = 'all'
+)
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $fixture = Join-Path $root ".tmp-regression-runner-check-$([guid]::NewGuid().ToString('N'))\workspace with spaces"
@@ -104,7 +110,13 @@ catch {
 if (-not $rejected -or (Get-ChildItem -Directory -LiteralPath $fixture -Filter '.tmp-regression-docker-*')) {
     throw 'High concurrency was not rejected before creating a snapshot.'
 }
-foreach ($case in @(
+$ordinaryCases = if ($Scope -eq 'artifacts') {
+    @(
+        @{ selector = 'fast'; expected = 0 },
+        @{ selector = 'fail'; expected = 7 },
+        @{ selector = 'routing-socks5-source-real'; expected = 0 }
+    )
+} else { @(
     @{ selector = 'fast'; expected = 0 },
     @{ selector = 'docker-contracts-other'; expected = 0 },
     @{ selector = 'fail'; expected = 7 },
@@ -122,7 +134,8 @@ foreach ($case in @(
     @{ selector = 'docker-routing-block-ips-resolved-egress-real-other'; expected = 0 },
     @{ selector = 'docker-control-fail2ban-real'; expected = 0 },
     @{ selector = 'docker-control-fail2ban-real-other'; expected = 0 }
-)) {
+) }
+foreach ($case in $ordinaryCases) {
     & $runner -Selector $case.selector
     if ($LASTEXITCODE -ne $case.expected) { throw "Wrong exit code for $($case.selector): $LASTEXITCODE" }
     $artifacts = Get-ChildItem -Directory -LiteralPath $fixture -Filter '.tmp-regression-docker-*' |
@@ -137,6 +150,34 @@ foreach ($case in @(
     }
     if (-not (Select-String -Quiet -LiteralPath (Join-Path $artifacts.FullName 'regression.log') `
         -SimpleMatch 'current-worktree-snapshot-ok')) { throw 'Missing snapshot proof in saved log.' }
+    foreach ($name in @('source.tar', 'files.list')) {
+        if ((Test-Path -LiteralPath (Join-Path $artifacts.FullName $name)) -ne ($case.expected -ne 0)) {
+            throw "Wrong input retention for $($case.selector): $name"
+        }
+    }
+    if ($case.selector -eq 'routing-socks5-source-real' -and
+        (Test-Path -LiteralPath (Join-Path $artifacts.FullName 'routing-cores'))) {
+        throw 'Successful routing regression retained extracted core binaries.'
+    }
+}
+
+if ($Scope -eq 'artifacts') {
+    # 复用成功结果后，新快照也必须清理，不重复队列和工具重建矩阵。
+    & $runner -Selector ci
+    if ($LASTEXITCODE -ne 0) { throw 'Artifact cache baseline failed.' }
+    & $runner -Selector ci
+    if ($LASTEXITCODE -ne 0) { throw 'Artifact cache reuse failed.' }
+    $artifacts = Get-ChildItem -Directory -LiteralPath $fixture -Filter '.tmp-regression-docker-*' |
+        Sort-Object CreationTime -Descending | Select-Object -First 1
+    $cached = Get-Content -Raw -LiteralPath (Join-Path $artifacts.FullName 'result.json') | ConvertFrom-Json
+    if (-not $cached.cache_hit -or
+        (Test-Path -LiteralPath (Join-Path $artifacts.FullName 'source.tar')) -or
+        (Test-Path -LiteralPath (Join-Path $artifacts.FullName 'files.list')) -or
+        -not (Test-Path -LiteralPath $cached.reused_from)) {
+        throw 'Cached regression did not clean inputs or retain its original evidence.'
+    }
+    Write-Host 'regression-docker-artifacts-check-ok'
+    exit 0
 }
 
 $PSVersionTable.PSVersion
