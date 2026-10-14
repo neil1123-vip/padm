@@ -1001,8 +1001,16 @@ grep -Fq 'source_ref: ${{ needs.prepare.outputs.release_sha }}' "${RELEASE_WORKF
     fail 'Release images do not use the resolved build commit'
 grep -Eq '^  static:' "${RELEASE_WORKFLOW}" || fail 'Release static gate is not a separate job'
 grep -Eq '^  native:' "${RELEASE_WORKFLOW}" || fail 'Release native gate is not a separate job'
-grep -Fq 'needs: [static, native, tls]' "${RELEASE_WORKFLOW}" ||
-    fail 'Release resolution can bypass static, native or TLS gates'
+# 版本提交必须等全部回归成功，失败或取消时保留主分支版本。
+prepareDefinition=$(awk '
+    /^  prepare:$/ {inside = 1; next}
+    inside && /^  [^ ]/ {exit}
+    inside {print}
+' "${RELEASE_WORKFLOW}")
+grep -Fxq '    needs: [static, native, tls, contracts]' <<<"${prepareDefinition}" ||
+    fail 'Release resolution can bypass static, native, TLS or Docker contract gates'
+grep -Fxq "    if: github.ref == 'refs/heads/main'" <<<"${prepareDefinition}" ||
+    fail 'Release resolution overrides the dependency success guard'
 # 拆分 job 后固定到静态门槛检出的提交，避免并发推送绕过原生回归。
 grep -Fq 'source_sha: ${{ steps.checked.outputs.source_sha }}' "${RELEASE_WORKFLOW}" ||
     fail 'Release static gate does not expose the checked source commit'

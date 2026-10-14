@@ -102,7 +102,7 @@ jobs:
 
   prepare:
     name: Resolve release
-    needs: [static, native, tls]
+    needs: [static, native, tls, contracts]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
