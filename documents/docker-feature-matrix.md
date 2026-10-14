@@ -36,10 +36,20 @@ Linux amd64 三项定向及一次完整合同 57/57、347 项规格差分通过�
 显式选择受管/导入/DNS-01/HTTP-01 standalone 证书。
 仅改变 TLS 域名和等于旧域名的 TLS 连接地址，其余规格、账号、分享 token、
 累计和独立资产保持；失败沿用现有恢复。ACME 预览不申请证书。
-不迁移自动续期登记，活跃 webroot 续期须先停用；宿主集成、Reality 共存、
+旧续期登记不迁移，活跃 webroot 续期须先停用；宿主集成、Reality 共存、
 跳跃及控制角色继续拒绝。验证结果见实施计划，公网 CA 验收继续 `deferred`。
 Linux amd64 entries/menu 定向、同快照静态检查和完整 57/57、
 347 项规格差分通过；完整入口 `382722 ms`、Jobs 6，本批无失败重跑。
+
+3D.16 将 ACME 成功后的续期入口接入首配/重新选择、首个 TLS 安装、
+域名迁移和证书菜单申请/续期；交互默认否，可复用原参数直接启用。
+非交互编辑显式加 `--tls-auto-renew`，仅 DNS-01/standalone 接受；
+预览和取消不登记，受管/导入证书保持原流程。
+登记沿用独立恢复事务，失败返回错误并明确保留成功配置与证书。
+不迁移旧登记、不暗中开放 webroot；完整状态仍按现有边界。
+Linux amd64 `docker-setup-tls`、`docker-menu`、`docker-phase3-entries` 定向，
+同快照静态检查及一次 `docker-contracts -Jobs 6` 通过；合同 57/57、规格差分 347 项，
+完整入口 `409194 ms`，本批无失败重跑。公网 CA、真实宿主调度和新部署 webroot 引导继续 `deferred`。
 
 5B.4g 已接入区域子菜单 `7` 与 CLI 的自定义直连例外单条原位替换，`8` 查看路由状态。
 仅修改已有非空 `.routing.region.allow_domains`；保留次序、区域模式、固定八条例外及
@@ -326,7 +336,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`reinstall`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；3D.11–3D.13 提供旧规格迁移后的增量新增、核心选择、新 SS 密钥、首个 TLS 证书联动以及 v3 删除/保身份重建。3D.14 提供重新选择和完整规格重装，并撤销旧分享授权、保留累计及失败恢复；3D.15 提供保身份 TLS 域名迁移，不迁移自动续期登记。真实发布连通未完成。 |
+| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`reinstall`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；3D.11–3D.13 提供旧规格迁移后的增量新增、核心选择、新 SS 密钥、首个 TLS 证书联动以及 v3 删除/保身份重建。3D.14 提供重新选择和完整规格重装，并撤销旧分享授权、保留累计及失败恢复；3D.15 提供保身份 TLS 域名迁移，3D.16 可在 ACME 成功后显式登记新域名续期，旧登记不迁移。真实发布连通未完成。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号与双核心认证/统计、账号/分享组及业务备份恢复、主控管理与被控接入/手动同步、已有单 Peer 被控自动同步 CLI/菜单、WireGuard 宿主集成 | HTTPS 链接仍要求受管 TLS；H3 和完整多服务器工作流未迁移。隔离 amd64 双部署事务及真实 cron 自主同步已验，WireGuard 需 `net-wireguard`；原生双机、arm64 和重启另验。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`23` VMess HTTPUpgrade TLS、`24` VLESS gRPC TLS、`25` Trojan gRPC TLS、`26` Reality gRPC、`27` TLS Vision fallback、`28` direct Trojan、`29` Trojan TLS fallback、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口、Reality 传输派生、参数重生成和目标站管理；有限 Reality 443 共存及 21/22/23/24/25 CDN 连接地址覆盖 | XHTTP、VMess WS、gRPC TLS 和传统 TLS fallback 仅限 Xray，Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；HTTPUpgrade 支持两核心；完整协议管理、UDP 端口跳跃、其余 CDN 和完整内部路由工作流尚未开放；Fail2ban WS 增删及通用端口编辑拒绝，单入口保护端口专项见 5C.6d。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、保身份域名迁移、DNS-01 与 HTTP-01 standalone/受管 webroot 本地事务、Nginx WebSocket/HTTPUpgrade/gRPC HTTP/2 入口及传统 TLS fallback；默认页、静态目录、302、受管三主题、Hysteria2 local 与逐入口 ALPN 事务管理 | 域名迁移不迁移续期登记；隔离 amd64 TLS ALPN 和 H3 已有实测；公网 CA、宿主生命周期及原生双架构验收待补。 |

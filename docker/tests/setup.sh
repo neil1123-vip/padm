@@ -215,7 +215,7 @@ run)
             printf 'standalone-private-input-empty\n' >>"${FAKE_SETUP_EVENTS}"
         fi
         [[ "${mode}" != acme-fail ]] || exit 1
-        output= account= domain= previous=
+        output= account= domain= provider=no previous=
         for argument in "$@"; do
             if [[ "${previous}" == --volume && "${argument}" == *:/var/lib/padm/tls-output ]]; then
                 output=${argument%:/var/lib/padm/tls-output}
@@ -223,10 +223,18 @@ run)
                 account=${argument%:/var/lib/padm/acme}
             elif [[ "${previous}" == -d ]]; then
                 domain=${argument}
+            elif [[ "${previous}" == --dns ]]; then
+                provider=${argument}
             fi
             previous=${argument}
         done
         [[ -n "${account}" ]] && printf 'candidate-acme-account\n' >"${account}/account.conf"
+        if [[ " $* " == *' --issue '* ]]; then
+            mkdir -p -- "${account}/${domain}"
+            printf "Le_Domain='%s'\nLe_Webroot='%s'\n" "${domain}" "${provider}" \
+                >"${account}/${domain}/${domain}.conf"
+            chmod 0600 "${account}/${domain}/${domain}.conf"
+        fi
         if [[ " $* " == *' --install-cert '* ]]; then
             printf 'fake-acme-cert\n' >"${output}/${domain}.crt"
             printf 'fake-acme-key\n' >"${output}/${domain}.key"
@@ -265,8 +273,15 @@ cat >"${MOCK_BIN}/wget" <<'EOF'
 printf 'download %s\n' "$*" >>"${FAKE_SETUP_EVENTS:?}"
 exit 1
 EOF
-printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
-cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
+cat >"${MOCK_BIN}/systemctl" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${FAKE_SETUP_MODE:-}" == renewal-schedule-fail && "${1:-}" == enable &&
+    "${*: -1}" == padm-docker-renewal.timer ]]; then
+    exit 1
+fi
+exit 0
+EOF
+printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/nsenter"
 chmod 0755 "${MOCK_BIN}/"*
 
 REAL_JQ=$(type -P jq)
@@ -427,6 +442,7 @@ assertNoSecrets() {
         -e cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
         -e hy2-obfs-private-1234 -e MDEyMzQ1Njc4OWFiY2RlZg== -e ZmVkY2JhOTg3NjU0MzIxMA==
         -e MDEyMzQ1Njc4OWFiY2RlZh==
+        -e DNS_TOKEN=fake -e fake-acme-key
     )
     ! grep -Fq "${secrets[@]}" "${CONTROL_LOG}" || fail 'setup printed a secret'
     ! grep -aFq "${secrets[@]}" "${ARGV_LOG}" || fail 'setup passed a secret through process arguments'
@@ -1542,7 +1558,7 @@ printf 'DNS_TOKEN=fake\n' >"${TEST_ROOT}/dns.env"
 chmod 0600 "${TEST_ROOT}/dns.env"
 printf -v DNS_INPUT '1\n2\nproxy.example.com\n1\nws.example.com\n24444\n3\nadmin@example.com\ndns_cf\n%s\ny\ny\n' \
     "${TEST_ROOT}/dns.env"
-for dnsCase in acme-fail dns-success; do
+for dnsCase in acme-fail dns-success dns-renewal-cancel dns-renewal-fail; do
     newState "${dnsCase}"
     if [[ "${dnsCase}" == acme-fail ]]; then
         export FAKE_SETUP_MODE=acme-fail
@@ -1552,10 +1568,42 @@ for dnsCase in acme-fail dns-success; do
             fail 'failed DNS-01 retained candidate ACME account'
         unset FAKE_SETUP_MODE
     else
-        runPty 0 "${dnsCase}" "${DNS_INPUT}" setup "${ASSET_ARGS[@]}"
+        expected=0
+        input="${DNS_INPUT}"$'y\n'
+        if [[ "${dnsCase}" == dns-renewal-cancel ]]; then
+            input="${DNS_INPUT}"$'n\n'
+        elif [[ "${dnsCase}" == dns-renewal-fail ]]; then
+            export FAKE_SETUP_MODE=renewal-schedule-fail
+            expected=15
+        fi
+        runPty "${expected}" "${dnsCase}" "${input}" setup "${ASSET_ARGS[@]}"
+        unset FAKE_SETUP_MODE
         [[ -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" &&
-            -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" ]] ||
+            -f "${PADM_DOCKER_INSTALL_DIR}/deployment.json" &&
+            -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" &&
+            -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key" ]] ||
             fail 'DNS-01 setup did not commit certificate and ACME account together'
+        jq -e '.tls.domain == "ws.example.com" and .core.protocols[0].id == 21 and
+            .subscription.enabled' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null ||
+            fail "${dnsCase}: 自动续期选择改变了已完成的首配"
+        request="${PADM_DOCKER_INSTALL_DIR}/secrets/renewal/ws.example.com"
+        if [[ "${dnsCase}" == dns-success ]]; then
+            jq -e '.schema_version == 1 and .enabled and .domain == "ws.example.com" and
+                .email == "admin@example.com" and .provider == "dns_cf"' \
+                "${request}/request.json" >/dev/null &&
+                cmp -s "${TEST_ROOT}/dns.env" "${request}/credentials.env" &&
+                [[ "$(stat -c '%a' "${request}/credentials.env")" == 600 &&
+                    -f "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.timer" ]] ||
+                fail 'DNS-01 首配未登记私密续期输入和调度'
+        else
+            [[ ! -e "${request}" &&
+                ! -e "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.timer" ]] ||
+                fail "${dnsCase}: 取消或失败保留了续期登记"
+            if [[ "${dnsCase}" == dns-renewal-fail ]]; then
+                grep -Fq '现有证书和配置已保留' "${CONTROL_LOG}" ||
+                    fail '续期登记失败没有说明已保留首配'
+            fi
+        fi
     fi
 done
 
@@ -1578,13 +1626,20 @@ for standaloneCase in cancel acme-fail success; do
         unset FAKE_SETUP_MODE
         ;;
     success)
-        runPty 0 standalone-success "${STANDALONE_INPUT}" setup "${ASSET_ARGS[@]}"
+        runPty 0 standalone-success "${STANDALONE_INPUT}"$'y\n' setup "${ASSET_ARGS[@]}"
         [[ -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" &&
             -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" &&
             -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key" ]] ||
             fail 'standalone did not commit its certificate and ACME account together'
         grep -qF 'standalone-private-input-empty' "${EVENTS}" ||
             fail 'standalone did not publish both families or invented DNS credentials'
+        request="${PADM_DOCKER_INSTALL_DIR}/secrets/renewal/ws.example.com"
+        jq -e '.schema_version == 2 and .enabled and .domain == "ws.example.com" and
+            .email == "admin@example.com" and .provider == "standalone"' \
+            "${request}/request.json" >/dev/null &&
+            [[ ! -e "${request}/credentials.env" &&
+                -f "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.timer" ]] ||
+            fail 'standalone 首配未登记续期，或错误保存了 DNS 凭据'
         ;;
     esac
 done
@@ -1610,6 +1665,7 @@ for naiveTlsCase in managed dns-success dns-fail; do
             fail 'failed NaiveProxy DNS-01 retained candidate ACME state'
         unset FAKE_SETUP_MODE
     else
+        [[ "${naiveTlsCase}" != dns-success ]] || input+=$'n\n'
         runPty 0 "naive-${naiveTlsCase}" "${input}" setup "${ASSET_ARGS[@]}"
         [[ -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/naive.example.com.crt" &&
             -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/naive.example.com.key" ]] ||
@@ -1621,6 +1677,8 @@ for naiveTlsCase in managed dns-success dns-fail; do
         [[ "${naiveTlsCase}" != dns-success ||
             -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" ]] ||
             fail 'NaiveProxy DNS-01 did not commit its ACME account'
+        [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/secrets/renewal/naive.example.com" ]] ||
+            fail 'NaiveProxy 首配未选择启用却登记了自动续期'
     fi
 done
 fi

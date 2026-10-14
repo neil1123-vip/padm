@@ -161,12 +161,26 @@ run)
         exit 0
     fi
     output=
+    account=
+    domain=
+    webroot=
+    keylength=
     fullchain=
     keyfile=
     previous=
     for argument in "$@"; do
         if [[ "${previous}" == "--volume" && "${argument}" == *:/var/lib/padm/tls-output ]]; then
             output=${argument%:/var/lib/padm/tls-output}
+        elif [[ "${previous}" == "--volume" && "${argument}" == *:/var/lib/padm/acme ]]; then
+            account=${argument%:/var/lib/padm/acme}
+        elif [[ "${previous}" == -d ]]; then
+            domain=${argument}
+        elif [[ "${previous}" == --dns || "${previous}" == --webroot ]]; then
+            webroot=${argument}
+        elif [[ "${argument}" == --standalone ]]; then
+            webroot=no
+        elif [[ "${previous}" == --keylength ]]; then
+            keylength=${argument}
         elif [[ "${previous}" == "--fullchain-file" ]]; then
             fullchain=${argument}
         elif [[ "${previous}" == "--key-file" ]]; then
@@ -174,6 +188,13 @@ run)
         fi
         previous=${argument}
     done
+    if [[ " ${*} " == *' --issue '* && "${mode}" != acme-account-missing ]]; then
+        directory="${account}/${domain}"
+        [[ "${keylength}" != ec-* ]] || directory+='_ecc'
+        mkdir -p "${directory}"
+        printf "Le_Domain='%s'\nLe_Webroot='%s'\n" "${domain}" "${webroot}" >"${directory}/${domain}.conf"
+        chmod 0600 "${directory}/${domain}.conf"
+    fi
     if [[ -n "${output}" && -n "${fullchain}" && -n "${keyfile}" ]]; then
         printf 'fake-acme-certificate\n' >"${output}/${fullchain##*/}"
         printf 'fake-acme-private-key\n' >"${output}/${keyfile##*/}"
@@ -1584,15 +1605,27 @@ firstTlsEdit 15 protocol-first-tls-dns-credentials-missing --protocol-add entry-
     --tls-domain first-dns.example.com --tls-dns admin@example.com dns_cf "${TEST_ROOT}/missing.env" --preview
 firstTlsEdit 2 protocol-first-tls-dns-provider-invalid --protocol-add entry-1 31 32445 \
     --tls-domain first-dns.example.com --tls-dns admin@example.com invalid "${CREDENTIALS}" --preview
+firstTlsEdit 2 protocol-first-tls-renewal-needs-acme --protocol-add entry-1 31 32445 \
+    --tls-domain first-dns.example.com --tls-auto-renew --preview
+for source in existing import; do
+    tlsArgs=(--tls-existing)
+    [[ "${source}" != import ]] || tlsArgs=(--tls-import "${CERT_FILE}" "${KEY_FILE}")
+    firstTlsEdit 2 "protocol-first-tls-renewal-reject-${source}" --protocol-add entry-1 31 32445 \
+        --tls-domain first-dns.example.com --tls-auto-renew "${tlsArgs[@]}" --preview
+done
+firstTlsEdit 2 protocol-first-tls-renewal-duplicate --protocol-add entry-1 31 32445 \
+    --tls-domain first-dns.example.com --tls-dns admin@example.com dns_cf "${CREDENTIALS}" \
+    --tls-auto-renew --tls-auto-renew --preview
 for source in dns standalone; do
     tlsArgs=(--tls-dns admin@example.com dns_cf "${CREDENTIALS}")
     [[ "${source}" != standalone ]] || tlsArgs=(--tls-standalone admin@example.com)
     firstTlsEdit 0 "protocol-first-tls-${source}-preview" --protocol-add entry-1 31 32445 \
-        --tls-domain first-dns.example.com "${tlsArgs[@]}" --preview
+        --tls-domain first-dns.example.com "${tlsArgs[@]}" --tls-auto-renew --preview
     grep -qF '预览未申请证书或提交' "${CONTROL_LOG}" ||
         fail 'ACME 预览未明确保留计划验收范围'
     ! grep -Eq ' --issue | --install-cert |--publish 0.0.0.0:80:' "${DOCKER_LOG}" ||
         fail 'ACME 预览调用 CA 或占用挑战端口'
+    [[ ! -e "${DOCKER_ROOT}/secrets/renewal" ]] || fail 'ACME 预览提前登记自动续期'
 done
 if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     firstTlsCancelHash=$(editLiveHash)
@@ -1613,10 +1646,12 @@ for acmeFailure in acme-issue-fail acme-install-fail; do
 done
 if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     : >"${DOCKER_LOG}"
-    printf -v input 'first-dns.example.com\n3\nadmin@example.com\ndns_cf\n%s\ny\n' "${CREDENTIALS}"
+    printf -v input 'first-dns.example.com\n3\nadmin@example.com\ndns_cf\n%s\ny\nn\n' "${CREDENTIALS}"
     runEditPty "${input}" 0 --protocol-add entry-1 31 32445
     [[ "$(grep -Fc '确认申请证书并在完整候选验证后提交？[y/N]' "${CONTROL_LOG}")" == 1 ]] ||
         fail 'DNS 首个 TLS 没有仅确认一次'
+    [[ "$(grep -Fc '为该 ACME 证书启用自动续期？[y/N]' "${CONTROL_LOG}")" == 1 &&
+        ! -e "${DOCKER_ROOT}/secrets/renewal" ]] || fail 'DNS 首个 TLS 未询问续期或忽略拒绝选择'
     assertEditCleanup
 else
     firstTlsEdit 0 protocol-first-tls-dns-commit --protocol-add entry-1 31 32445 \
@@ -1628,24 +1663,49 @@ grep -q -- '--issue --dns dns_cf --keylength ec-256 -d first-dns.example.com' "$
     grep -qxF 'fake-acme-certificate' "${DOCKER_ROOT}/secrets/tls/first-dns.example.com.crt" ||
     fail 'SS 新增 sing-box TLS 未实际申请或提交证书'
 assertSsPrivate
+firstTlsEdit 0 protocol-first-tls-confirm-without-renewal --tls-migrate first-manual.example.com \
+    --tls-dns admin@example.com dns_cf "${CREDENTIALS}" --confirm PADM-DOCKER-EDIT
+jq -e '.tls.domain=="first-manual.example.com"' "${DOCKER_ROOT}/config/spec.json" >/dev/null &&
+    [[ ! -e "${DOCKER_ROOT}/secrets/renewal" ]] &&
+    ! grep -Fq '为该 ACME 证书启用自动续期' "${CONTROL_LOG}" ||
+    fail '普通非交互确认隐式启用或询问自动续期'
 runControl 0 protocol-first-tls-standalone-baseline configure --spec "${FIRST_TLS_SS}"
 if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     : >"${DOCKER_LOG}"
-    runEditPty $'first-http.example.com\n4\nadmin@example.com\ny\n' 0 \
-        --protocol-add entry-1 21 32446 --protocol-core xray
+    runEditPty $'y\n' 0 --protocol-add entry-1 21 32446 --protocol-core xray \
+        --tls-domain first-http.example.com --tls-standalone admin@example.com --tls-auto-renew
     [[ "$(grep -Fc '确认申请证书并在完整候选验证后提交？[y/N]' "${CONTROL_LOG}")" == 1 ]] ||
         fail 'standalone 首个 TLS 没有仅确认一次'
     assertEditCleanup
 else
     firstTlsEdit 0 protocol-first-tls-standalone-commit --protocol-add entry-1 21 32446 \
         --protocol-core xray --tls-domain first-http.example.com --tls-standalone admin@example.com \
-        --confirm PADM-DOCKER-EDIT
+        --tls-auto-renew --confirm PADM-DOCKER-EDIT
 fi
 assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 first-http.example.com 21 xray 32446 sing-box
 grep -q -- '--issue --standalone --httpport 8080 --keylength ec-256 -d first-http.example.com' "${DOCKER_LOG}" &&
     grep -q -- '--publish 0.0.0.0:80:8080' "${DOCKER_LOG}" ||
     fail '跨核心首个 TLS 未复用 standalone 挑战'
 assertSsPrivate
+jq -e '.schema_version==2 and .enabled==true and .domain=="first-http.example.com" and
+  .email=="admin@example.com" and .provider=="standalone"' \
+    "${DOCKER_ROOT}/secrets/renewal/first-http.example.com/request.json" >/dev/null &&
+    [[ -f "${TEST_ROOT}/systemd/padm-docker-renewal.timer" ]] ||
+    fail '显式 ACME 续期选择未登记实际参数或安装调度'
+! grep -Fq '为该 ACME 证书启用自动续期' "${CONTROL_LOG}" || fail '显式续期参数仍重复询问'
+renewalRequestHash=$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-http.example.com/request.json" | cut -d ' ' -f 1)
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=acme-account-missing runControl 15 protocol-first-tls-renewal-failure \
+    edit --tls-migrate first-renewal-fail.example.com --tls-dns admin@example.com dns_cf "${CREDENTIALS}" \
+    --tls-auto-renew --confirm PADM-DOCKER-EDIT
+assertEditCleanup
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 first-renewal-fail.example.com 21 xray 32446 sing-box
+grep -qF '操作已完成，但自动续期登记失败；现有证书和配置已保留' "${CONTROL_LOG}" &&
+    grep -qxF 'fake-acme-certificate' "${DOCKER_ROOT}/secrets/tls/first-renewal-fail.example.com.crt" &&
+    grep -qxF 'fake-acme-private-key' "${DOCKER_ROOT}/secrets/tls/first-renewal-fail.example.com.key" &&
+    [[ ! -e "${DOCKER_ROOT}/secrets/renewal/first-renewal-fail.example.com" &&
+        "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-http.example.com/request.json" | cut -d ' ' -f 1)" == "${renewalRequestHash}" ]] ||
+    fail '续期登记失败回滚了成功配置、丢失明确错误或改写旧登记'
 
 (
     export PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}"

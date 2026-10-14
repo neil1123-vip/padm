@@ -1600,6 +1600,33 @@ Jobs 6/cache=false，工具镜像复用。本批无失败重跑。
 之后仅补本文和矩阵的验收文字。成功输入由入口清理，仅保留日志/result；
 不新增宿主临时脚本、依赖或额外回归容器。
 
+#### 3D.16 ACME 成功后的续期登记衔接
+
+首配与重新选择、首个 TLS 协议安装、TLS 域名迁移，以及证书菜单申请/续期，
+成功后可复用本次邮箱、验证方式和凭据启用自动续期。
+交互默认否，`0`/EOF 跳过，不重复录入参数；导入和已有受管来源不询问。
+非交互编辑提供 `--tls-auto-renew`，只接受本次 DNS-01/standalone 来源，
+预览不登记，取消与配置失败不进入续期；未带参数的显式确认保持原行为。
+调用已有 `dockerRenewalChange`，继续由现有独立登记/调度事务恢复。
+登记失败返回 `15`，明确告知配置或证书已成功且仍保留，可从证书菜单重试；
+不把成功配置回滚，也不重新申请证书。旧域名登记保持，不自动迁移。
+证书菜单已启用 webroot 的申请/续期同样可接续登记，
+新部署 webroot 引导、活跃旧域名 webroot 转换及真实宿主调度仍按原边界。
+不新增 schema、依赖或第二套事务，整体计划保持 active。
+
+2026-10-15 Docker Linux amd64：`docker-setup-tls`、`docker-menu`、
+`docker-phase3-entries` 定向均通过，耗时 `46073/60119/217025 ms`，Jobs 2；
+同快照 Bash/ShellCheck error 通过。集中 `docker-contracts -Jobs 6` 一次通过，
+57/57 合同和 347 项规格差分通过，入口 `409194 ms`、排队 `318 ms`、
+`cache_hit=false`，源码 `source_content_sha256=9FB37C0A34A11D9E5E86C2B04533E73B1B508761426873E7F42A13D305DBCC74`。
+完整证据 `.tmp-regression-docker-2235a489d93b40eebfbd7ab34a7f0ded/`，
+三项定向与完整源码归档 SHA-256 均为
+`3602F2120B00D9B0FB2A3576D9B35D34D171D008C8DFDD0831044CF32E301DE5`；
+静态检查复用 entries 容器，之后仅补验收文字。
+续期登记成功、取消、EOF、失败保留、ACME 失败不询问、预览不登记及参数拒绝均已覆盖；
+公网 CA、真实宿主调度和新部署 webroot 引导仍按原边界 deferred。
+成功输入已由入口清理，仅保留日志/result；整体计划继续 active。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

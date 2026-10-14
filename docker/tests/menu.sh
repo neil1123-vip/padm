@@ -2345,6 +2345,10 @@ runPty() {
                 printf '3\n\nadmin@example.com\n' >&3
                 waitForText '验证方式 [1=DNS-01' "${CONTROL_LOG}" || exit 17
                 printf '\004' >&3
+            elif [[ "${input}" == offer-eof ]]; then
+                printf '3\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\n' >&3
+                waitForText '为该 ACME 证书启用自动续期？[y/N]' "${CONTROL_LOG}" || exit 17
+                printf '\004' >&3
             elif [[ "${input}" == migrate-source-eof ]]; then
                 printf '10\nother.example.com\n' >&3
                 waitForText '证书 [1=已有受管' "${CONTROL_LOG}" || exit 17
@@ -2622,8 +2626,9 @@ recordAction() {
 }
 dockerTlsValidateCommand() { recordAction validate "$@"; }
 dockerTlsInstallCommand() { recordAction install "$@"; }
-dockerAcmeCommand() { recordAction acme "$@"; }
+dockerAcmeCommand() { recordAction acme "$@"; return "${TLS_ACME_STATUS:-0}"; }
 dockerRenewalCommand() { recordAction schedule "$@"; }
+dockerRenewalChange() { recordAction renewal "$@"; return "${TLS_RENEWAL_STATUS:-0}"; }
 dockerEditCommand() {
     if [[ "${1:-}" == --tls-migrate ]]; then
         [[ "${2:-}" == other.example.com ]] || return 2
@@ -4286,6 +4291,7 @@ done
 unset GEO_STATUS GEO_UPDATE_STATUS GEO_UPDATE_WAIT GEO_UPDATE_PID
 
 for tlsCase in cancel final-no eof validate install issue renew \
+    offer-dns offer-standalone offer-webroot offer-cancel offer-eof offer-failed acme-failed \
     renewal-status renewal-enable renewal-disable renewal-final-no renewal-eof \
     standalone-issue standalone-renew standalone-enable standalone-final-no \
     standalone-renew-final-no standalone-enable-final-no standalone-eof method-cancel method-eof \
@@ -4296,7 +4302,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
     : >"${TLS_WIZARD_ACTIONS}"
     printf '{"tls":{"domain":"ws.example.com","http01":true}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
     expectedAction=
-    export TLS_MIGRATE_STATUS=0
+    export TLS_MIGRATE_STATUS=0 TLS_RENEWAL_STATUS=0 TLS_ACME_STATUS=0
     case "${tlsCase}" in
     cancel) input=$'0\n' ;;
     final-no) input=$'3\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\nn\n' ;;
@@ -4308,8 +4314,34 @@ for tlsCase in cancel final-no eof validate install issue renew \
         ;;
     issue|renew)
         if [[ "${tlsCase}" == issue ]]; then choice=3; else choice=4; fi
-        printf -v input '%s\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\n' "${choice}"
+        printf -v input '%s\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\nn\n' "${choice}"
         expectedAction="acme ${tlsCase} --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env"
+        ;;
+    offer-dns|offer-standalone|offer-webroot|offer-cancel|offer-eof|offer-failed|acme-failed)
+        input=$'3\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\n'
+        expectedAction='acme issue --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env'
+        provider=dns_cf credentials=credentials.env
+        case "${tlsCase}" in
+        offer-standalone)
+            input=$'3\n\nadmin@example.com\n2\ny\n'
+            expectedAction='acme issue --domain ws.example.com --email admin@example.com --standalone'
+            provider=standalone credentials= ;;
+        offer-webroot)
+            input=$'4\n\nadmin@example.com\n3\ny\n'
+            expectedAction='acme renew --domain ws.example.com --email admin@example.com --webroot'
+            provider=webroot credentials= ;;
+        offer-failed) TLS_RENEWAL_STATUS=17 ;;
+        acme-failed) TLS_ACME_STATUS=17 ;;
+        esac
+        case "${tlsCase}" in
+        offer-cancel) input+=$'0\n' ;;
+        offer-eof) input=offer-eof ;;
+        acme-failed) ;;
+        *)
+            input+=$'y\n'
+            expectedAction+=$'\n'"renewal enable ws.example.com admin@example.com ${provider} ${credentials}"
+            ;;
+        esac
         ;;
     renewal-status) input=$'5\n\ny\n'; expectedAction='schedule status' ;;
     renewal-enable)
@@ -4334,6 +4366,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
                 expectedAction='schedule enable --domain ws.example.com --email admin@example.com --standalone'
             else
                 expectedAction="acme ${action} --domain ws.example.com --email admin@example.com --standalone"
+                input+=$'n\n'
             fi
         fi
         ;;
@@ -4353,6 +4386,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
                 expectedAction='schedule enable --domain ws.example.com --email admin@example.com --webroot'
             else
                 expectedAction="acme ${action} --domain ws.example.com --email admin@example.com --webroot"
+                input+=$'n\n'
             fi
         fi
         ;;
@@ -4396,6 +4430,17 @@ for tlsCase in cancel final-no eof validate install issue renew \
     runPty "tls-${tlsCase}" tls "${input}" "${TLS_WIZARD_CLI}" menu
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAction}" ]] ||
         fail "TLS ${tlsCase} bypassed confirmation or dispatched incorrect arguments"
+    if [[ "${tlsCase}" == offer-failed ]]; then
+        grep -Fq '操作已完成，但自动续期登记失败；现有证书和配置已保留' "${CONTROL_LOG}" &&
+            grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" ||
+            fail '续期登记失败未保留成功操作说明或退出码'
+    elif [[ "${tlsCase}" == acme-failed ]]; then
+        ! grep -Fq '为该 ACME 证书启用自动续期' "${CONTROL_LOG}" &&
+            grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" ||
+            fail 'ACME 失败仍询问自动续期或丢失退出码'
+    elif [[ "${tlsCase}" == offer-dns || "${tlsCase}" == offer-standalone || "${tlsCase}" == offer-webroot ]]; then
+        grep -Fq '自动续期已启用: ws.example.com' "${CONTROL_LOG}" || fail '续期登记成功未说明结果'
+    fi
     if [[ "${tlsCase}" == migrate-* ]]; then
         grep -Fq '10. 迁移入口 TLS 域名' "${CONTROL_LOG}" || fail '证书菜单未开放 TLS 域名迁移'
         ! grep -Fq '确认执行证书操作？[y/N]' "${CONTROL_LOG}" || fail 'TLS 迁移在 edit 前重复确认'
@@ -4425,7 +4470,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
         fi
     fi
 done
-unset TLS_MIGRATE_STATUS
+unset TLS_MIGRATE_STATUS TLS_RENEWAL_STATUS TLS_ACME_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty protocols-dispatch protocols read "${TLS_WIZARD_CLI}" menu

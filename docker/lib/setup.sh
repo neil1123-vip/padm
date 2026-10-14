@@ -372,6 +372,21 @@ dockerSetupStageCertificate() {
     dockerTlsValidateCandidate "${opsImage}" "${candidate}/tls" "${domain}"
 }
 
+dockerSetupRenewalOffer() {
+    local domain=$1 email=$2 provider=$3 credentials=$4 mode=${5:-interactive} answer
+    if [[ "${mode}" != confirmed ]]; then
+        [[ -t 0 && -t 1 ]] || return 0
+        dockerSetupRead answer '为该 ACME 证书启用自动续期？[y/N]: ' n || return 0
+        case "${answer}" in y|Y|yes|YES) ;; *) return 0 ;; esac
+    fi
+    # 证书操作已成功；登记使用独立恢复事务，失败不能冒充配置也已回滚。
+    dockerRenewalChange enable "${domain}" "${email}" "${provider}" "${credentials}" || {
+        dockerError '操作已完成，但自动续期登记失败；现有证书和配置已保留，请从证书菜单重新启用'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    printf '自动续期已启用: %s\n' "${domain}"
+}
+
 dockerTlsManageCommand() {
     local root currentDomain domain choice method answer cert= key= email= provider= credentials= action
     local -a challengeArgs=()
@@ -498,7 +513,8 @@ dockerTlsManageCommand() {
     3|4)
         if [[ "${choice}" == 3 ]]; then action=issue; else action=renew; fi
         dockerAcmeCommand "${action}" --domain "${domain}" --email "${email}" \
-            "${challengeArgs[@]}"
+            "${challengeArgs[@]}" || return $?
+        dockerSetupRenewalOffer "${domain}" "${email}" "${provider}" "${credentials}"
         ;;
     5) dockerRenewalCommand status ;;
     6)
@@ -841,6 +857,9 @@ dockerSetupCommand() {
         dockerConfigureApply "${candidate}/spec.json" "${candidate}/tls" "${candidate}/acme" "${applyMode}" '' '' '' "${sharesSource}" || status=$?
     else
         dockerConfigureApply "${candidate}/spec.json" '' '' "${applyMode}" '' '' '' "${sharesSource}" || status=$?
+    fi
+    if [[ "${status}" == 0 && ( "${tlsMode}" == 3 || "${tlsMode}" == 4 ) ]]; then
+        dockerSetupRenewalOffer "${domain}" "${email}" "${provider}" "${credentials}" || status=$?
     fi
     return "${status}"
 }
@@ -1870,6 +1889,7 @@ dockerEditCommand() {
     local entrySsGenerate=0 entrySsReady=0 entrySsServer= entrySsUser= entrySsImage= entrySsAttempt=
     local entryTlsDomain= entryTlsMode= entryTlsCert= entryTlsKey= entryTlsEmail=
     local entryTlsProvider= entryTlsCredentials= entryTlsSource= answer
+    local entryTlsRenewal=0 entryTlsRenewalOffer=0
     local tlsMigrateDomain=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
@@ -1915,6 +1935,11 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             tlsMigrateDomain=$2
             shift 2
+            ;;
+        --tls-auto-renew)
+            [[ "${entryTlsRenewal}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            entryTlsRenewal=1
+            shift
             ;;
         --tls-existing|--tls-import|--tls-dns|--tls-standalone)
             [[ -z "${entryTlsMode}" ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -2758,6 +2783,8 @@ dockerEditCommand() {
         [[ "${entryAction}" == add ]] || return "${PADM_DOCKER_RC_USAGE}"
         case "${entryProtocol}" in 1|2|26|30) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     fi
+    [[ "${entryTlsRenewal}" == 0 || "${entryTlsMode}" == 3 || "${entryTlsMode}" == 4 ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -3798,12 +3825,14 @@ dockerEditCommand() {
       [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
     if [[ -n "${entryTlsMode}" ]]; then
         if [[ -n "${tlsMigrateDomain}" ]]; then
-            printf 'TLS 域名迁移至 %s，证书方式: %s；保留账号、分享 token 和累计，客户端需重新导入链接；自动续期登记须另行管理。\n' \
+            printf 'TLS 域名迁移至 %s，证书方式: %s；保留账号、分享 token 和累计，客户端需重新导入链接；旧域名续期登记保持。\n' \
                 "${entryTlsDomain}" "${entryTlsMode}"
         else
             printf '新增 TLS 域名: %s，证书方式: %s；保留已有入口、账号授权和订阅状态。\n' \
                 "${entryTlsDomain}" "${entryTlsMode}"
         fi
+        [[ "${entryTlsRenewal}" == 0 ]] ||
+            printf '配置成功后将使用本次 ACME 参数启用自动续期；登记失败保留成功配置并返回错误。\n'
         if [[ "${entryTlsMode}" == 3 || "${entryTlsMode}" == 4 ]]; then
             # 申请前先完成无证书即可验证的门禁；预览和取消不触发 CA 或暂停服务。
             dockerControlRecoveryCheck &&
@@ -3827,6 +3856,7 @@ dockerEditCommand() {
                 return 0
             fi
             if [[ "${mode}" == interactive ]]; then
+                entryTlsRenewalOffer=1
                 dockerSetupRead answer '确认申请证书并在完整候选验证后提交？[y/N]: ' n || answer=n
                 case "${answer}" in
                 y|Y|yes|YES) mode=confirmed ;;
@@ -3843,7 +3873,14 @@ dockerEditCommand() {
     fi
     DOCKER_CONFIG_RESTORE_ALPN_LISTENER=${alpnListener}
     dockerConfigureApply "${draft}" "${entryTlsSource:+${entryTlsSource}/tls}" \
-        "${entryTlsSource:+${entryTlsSource}/acme}" "${mode}" '' "${siteSource}" "${siteTemplate}"
+        "${entryTlsSource:+${entryTlsSource}/acme}" "${mode}" '' "${siteSource}" "${siteTemplate}" || return $?
+    if [[ "${entryTlsRenewal}" == 1 ]]; then
+        dockerSetupRenewalOffer "${entryTlsDomain}" "${entryTlsEmail}" "${entryTlsProvider}" \
+            "${entryTlsCredentials}" confirmed
+    elif [[ "${entryTlsRenewalOffer}" == 1 ]]; then
+        dockerSetupRenewalOffer "${entryTlsDomain}" "${entryTlsEmail}" "${entryTlsProvider}" \
+            "${entryTlsCredentials}"
+    fi
 }
 
 dockerEditCompatibilityValidate() {
