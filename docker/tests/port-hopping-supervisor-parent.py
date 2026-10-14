@@ -25,6 +25,137 @@ def file_identity(path):
     return (*MODULE["path_identity"](metadata), metadata.st_size,
             metadata.st_mtime_ns, metadata.st_ctime_ns)
 
+
+def init_barrier(phase):
+    if os.environ.get("TEST_INIT_PHASE") != phase:
+        return
+    prefix = Path(os.environ["TEST_INIT_BARRIER"])
+    ready = prefix.with_suffix(".ready")
+    if ready.exists():
+        return
+    ready.write_text(str(os.getpid()) + "\n")
+    deadline = time.monotonic() + 15
+    while not prefix.with_suffix(".release").exists():
+        assert time.monotonic() < deadline, ("初始化阻断未放行", phase)
+        time.sleep(0.01)
+
+
+def initialization_wrapper(arguments):
+    namespace = MODULE["service"].__globals__
+    namespace["__file__"] = str(SCRIPT)
+    operation = arguments[0]
+    prefix = Path(os.environ["TEST_INIT_BARRIER"])
+    native_signal = signal.signal
+
+    def tracked_signal(number, handler):
+        if number in {signal.SIGINT, signal.SIGTERM} and callable(handler):
+            original_handler = handler
+            def received(signum, frame):
+                Path(str(prefix) + f".caught-{os.getpid()}").touch()
+                return original_handler(signum, frame)
+            handler = received
+        return native_signal(number, handler)
+
+    signal.signal = tracked_signal
+    if operation == "_service":
+        native_challenge = namespace["challenge"]
+        native_send = namespace["send"]
+        native_popen = subprocess.Popen
+        native_pin = namespace["pin"]
+        native_write_owner = MODULE["Directory"].write_owner
+        native_socket = socket.socket
+
+        def challenged(*args, **kwargs):
+            init_barrier("hello")
+            return native_challenge(*args, **kwargs)
+
+        def sent(peer, value):
+            result = native_send(peer, value)
+            if value.get("phase") == "challenge":
+                init_barrier("commit")
+            return result
+
+        def created(*args, **kwargs):
+            process = native_popen(*args, **kwargs)
+            command = args[0]
+            if len(command) > 3 and command[3] in {
+                    "padm-hopping-owner", "padm-hopping-reservation"}:
+                with (prefix.parent / "init-children").open("a") as stream:
+                    stream.write(str(process.pid) + "\n")
+                if command[3] == "padm-hopping-owner":
+                    (prefix.parent / "init-owned-pid").write_text(str(process.pid) + "\n")
+                    init_barrier("launch-created")
+            return process
+
+        def pinned(expected):
+            recorded = prefix.parent / "init-owned-pid"
+            owned = recorded.exists() and expected["pid"] == int(recorded.read_text())
+            if owned and os.environ.get("TEST_INIT_PHASE") == "launch-pin-failed":
+                init_barrier("launch-pin-failed")
+                raise MODULE["Failure"]("测试 pidfd 绑定失败")
+            descriptor = native_pin(expected)
+            if owned:
+                init_barrier("launch-pinned")
+            return descriptor
+
+        def written(directory, owner):
+            result = native_write_owner(directory, owner)
+            if owner["bash"] is None:
+                init_barrier("owner-written")
+            elif owner["stage"] is not None:
+                init_barrier("ready" if owner["state"] == "starting" else "started")
+            return result
+
+        class InitializedSocket(native_socket):
+            def bind(self, address):
+                result = super().bind(address)
+                if isinstance(address, str) and address.endswith("/control.sock"):
+                    init_barrier("socket-bound")
+                return result
+
+        namespace["challenge"], namespace["send"], namespace["pin"] = challenged, sent, pinned
+        MODULE["Directory"].write_owner = written
+        subprocess.Popen, socket.socket = created, InitializedSocket
+    elif operation == "_reserve":
+        native_session = MODULE["Directory"].session
+        native_unlink, native_rmdir = os.unlink, os.rmdir
+        native_check_signal = namespace["check_signal"]
+
+        def checked(pending):
+            caller = sys._getframe(1)
+            directory = caller.f_locals.get("directory")
+            if caller.f_code.co_name == "reserve" and directory is not None and directory.fd is None:
+                init_barrier("marker-before")
+            return native_check_signal(pending)
+
+        def reserved(directory, create=False):
+            result = native_session(directory, create)
+            if create:
+                init_barrier("marker-after")
+            return result
+
+        def unlinked(path, *args, **kwargs):
+            result = native_unlink(path, *args, **kwargs)
+            if path == "pid":
+                init_barrier("pid-unlinked")
+            return result
+
+        def removed(path, *args, **kwargs):
+            result = native_rmdir(path, *args, **kwargs)
+            if path == "deployment.lock":
+                init_barrier("lock-released")
+            return result
+
+        MODULE["Directory"].session = reserved
+        os.unlink, os.rmdir = unlinked, removed
+        namespace["check_signal"] = checked
+    try:
+        namespace["main"](arguments)
+    except (MODULE["Failure"], ValueError, KeyError, TypeError, UnicodeError, OSError) as error:
+        print("跳跃独立监督拒绝: " + str(error), file=sys.stderr)
+        raise SystemExit(1)
+
+
 DEPLOYMENT_BODY = r'''
 source "$1"
 shift
@@ -237,7 +368,17 @@ def fake_owned(fd, root, action="", arguments=None):
         event = {"v": 1, "phase": phase, "nonce": os.urandom(32).hex(),
                  "payload": value if payload is None else payload}
         MODULE["send"](peer, event)
-        response = MODULE["receive"](peer)
+        try:
+            response = MODULE["receive"](peer)
+        except (MODULE["Failure"], OSError):
+            if not os.environ.get("TEST_INIT_PHASE"):
+                raise
+            stopping[0] = True
+            return
+        if response == {"v": 1, "phase": "stop", "nonce": event["nonce"]} and os.environ.get(
+                "TEST_INIT_PHASE"):
+            stopping[0] = True
+            return
         assert response == {"v": 1, "phase": "commit" if phase in {
             "ready", "restart", "update", "rollback", "changed"} else "continue",
                             "nonce": event["nonce"]} or stopping[0], response
@@ -264,7 +405,8 @@ def fake_owned(fd, root, action="", arguments=None):
     stage.mkdir(mode=0o700)
     marker.write_text(str(os.getpid()))
     gate("ready")
-    gate("started")
+    if not (stopping[0] and os.environ.get("TEST_INIT_PHASE")):
+        gate("started")
     while not stopping[0]:
         time.sleep(0.1)
         if stopping[0]:
@@ -273,15 +415,23 @@ def fake_owned(fd, root, action="", arguments=None):
         gate("running")
     marker.unlink()
     stage.rmdir()
-    MODULE["send"](peer, {"v": 1, "phase": "cleaned", "nonce": os.urandom(32).hex(), "payload": {
-        "target": value["target"], "child_id": value["child"]["Id"], "stage": str(stage)}})
+    try:
+        MODULE["send"](peer, {"v": 1, "phase": "cleaned", "nonce": os.urandom(32).hex(), "payload": {
+            "target": value["target"], "child_id": value["child"]["Id"], "stage": str(stage)}})
+    except OSError:
+        if not os.environ.get("TEST_INIT_PHASE"):
+            raise
     (lock / "pid").unlink()
     lock.rmdir()
     finished = {"status": 143, "lock_released": True}
     if (installation / "invalid-finished").exists():
         finished["lock_released"] = 1
-    MODULE["send"](peer, {"v": 1, "phase": "finished", "nonce": os.urandom(32).hex(),
-                         "payload": finished})
+    try:
+        MODULE["send"](peer, {"v": 1, "phase": "finished", "nonce": os.urandom(32).hex(),
+                             "payload": finished})
+    except OSError:
+        if not os.environ.get("TEST_INIT_PHASE"):
+            raise
     assert MODULE["identity"](os.getpid()) == token
     raise SystemExit(143)
 
@@ -448,6 +598,172 @@ def reservation_cases(base, entrypoint):
     return count
 
 
+def initialization_signal_cases(base, entrypoint):
+    count = 0
+    phases = ("hello", "commit", "reservation-wait", "marker-before", "marker-after",
+              "pid-unlinked", "lock-released", "socket-bound", "owner-written",
+              "launch-created", "launch-pin-failed", "launch-pinned", "ready", "started")
+    reserved_phases = {"marker-before", "marker-after", "pid-unlinked", "lock-released"}
+    for number in (signal.SIGINT, signal.SIGTERM):
+        for phase in phases:
+            installation = base / f"initialization-{number}-{phase}"
+            net = installation / "data/net"
+            net.mkdir(parents=True, mode=0o700)
+            prefix = installation / "init-barrier"
+            evidence = installation / "foreign-evidence"
+            evidence.write_bytes(b"unrelated installation evidence\n")
+            preserved = [(evidence, file_identity(evidence), evidence.read_bytes())]
+            if phase not in {"ready", "started"}:
+                state = net / "port-hopping.state"
+                state.write_bytes(b"unverified external state\n")
+                preserved.append((state, file_identity(state), state.read_bytes()))
+            lock = installation / "locks/deployment.lock"
+            session = net / ".hopping-supervisor"
+            holder = None
+            manager = None
+            descriptors = []
+            caller, service = socket.socketpair()
+            try:
+                held = None
+                if phase == "reservation-wait":
+                    holder = subprocess.Popen([
+                        "bash", "-Eeuo", "pipefail", "-c",
+                        'source "$1"; trap dockerReleaseDeploymentLock EXIT; '
+                        'dockerAcquireDeploymentLock; printf "locked\\n"; read -r release; '
+                        '[[ "$release" == release ]]',
+                        "test", str(ROOT / "install-docker.sh")],
+                        env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(installation)),
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    assert MODULE["select"].select([holder.stdout], [], [], 5)[0]
+                    assert holder.stdout.readline() == b"locked\n"
+                    held = file_identity(lock), file_identity(lock / "pid"), (lock / "pid").read_bytes()
+                manager = subprocess.Popen([
+                    sys.executable, str(SCRIPT), "_service", str(service.fileno()),
+                    str(installation), str(entrypoint), "hy2-main", "36561", "36562",
+                    "198.18.1.1", "2001:db8:1::1"], pass_fds=(service.fileno(),),
+                    env=dict(os.environ, TEST_INIT_PHASE=phase, TEST_INIT_BARRIER=str(prefix)),
+                    start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                service.close()
+                manager_fd = MODULE["pin"](MODULE["identity"](manager.pid))
+                descriptors.append(manager_fd)
+                if phase != "hello":
+                    MODULE["send"](caller, {"v": 1, "phase": "hello", "action": "start",
+                                            "client_nonce": "e" * 64})
+                    proof = MODULE["receive"](caller, timeout=5)
+                    if phase != "commit":
+                        MODULE["send"](caller, {"v": 1, "phase": "commit", "action": "start",
+                                                "nonce": proof["nonce"], "client_nonce": "e" * 64})
+                deadline = time.monotonic() + 5
+                while not prefix.with_suffix(".ready").exists():
+                    assert manager.poll() is None and time.monotonic() < deadline, (
+                        phase, manager.poll())
+                    time.sleep(0.01)
+                blocked_pid = int(prefix.with_suffix(".ready").read_text())
+                blocked_fd = None
+                if blocked_pid != manager.pid:
+                    blocked_fd = MODULE["pin"](MODULE["identity"](blocked_pid))
+                    descriptors.append(blocked_fd)
+                children = installation / "init-children"
+                for pid in set(map(int, children.read_text().splitlines())) if children.exists() else ():
+                    if pid != blocked_pid:
+                        try:
+                            descriptors.append(MODULE["pin"](MODULE["identity"](pid)))
+                        except (FileNotFoundError, MODULE["Failure"]):
+                            pass
+                session_id = MODULE["path_identity"](session.stat()) if session.exists() else None
+                owner_path = session / "owner.json"
+                original_owner = owner_path.read_bytes() if owner_path.exists() else None
+                if phase in {"hello", "commit", "reservation-wait", "marker-before"}:
+                    assert not session.exists()
+                else:
+                    assert session.is_dir()
+                if phase == "reservation-wait":
+                    assert (file_identity(lock), file_identity(lock / "pid"),
+                            (lock / "pid").read_bytes()) == held
+                if phase in {"marker-before", "marker-after"}:
+                    assert (lock / "pid").read_text() == str(blocked_pid) + "\n"
+                if phase == "pid-unlinked":
+                    assert lock.is_dir() and not (lock / "pid").exists()
+                if phase in {"lock-released", "socket-bound", "owner-written"}:
+                    assert not lock.exists()
+                if phase == "socket-bound":
+                    assert (session / "control.sock").exists() and not owner_path.exists()
+                if phase == "owner-written":
+                    assert set(os.listdir(session)) == {"control.sock", "service.log", "owner.json"}
+                    assert json.loads(original_owner)["bash"] is None
+                if phase in {"ready", "started"}:
+                    bound = json.loads(original_owner)
+                    assert bound["stage"] is not None
+                    assert bound["state"] == ("starting" if phase == "ready" else "active")
+                    assert (net / "fixture-running").exists()
+                # 先确认信号进入本代 handler，再放行阻断；预约 child 也必须收到终止或已退出。
+                signal.pidfd_send_signal(manager_fd, number)
+                deadline = time.monotonic() + 5
+                caught = Path(str(prefix) + f".caught-{manager.pid}")
+                while not caught.exists():
+                    assert not MODULE["select"].select([manager_fd], [], [], 0)[0]
+                    assert time.monotonic() < deadline, ("manager 未处理信号", phase, number)
+                    time.sleep(0.01)
+                if phase in reserved_phases:
+                    child_caught = Path(str(prefix) + f".caught-{blocked_pid}")
+                    while not child_caught.exists() and not MODULE["select"].select(
+                            [blocked_fd], [], [], 0)[0]:
+                        assert time.monotonic() < deadline, ("预约 child 未终止", phase, number)
+                        time.sleep(0.01)
+                prefix.with_suffix(".release").touch()
+                output, error = manager.communicate(timeout=10)
+                assert manager.returncode in {0, 1} and not output, (
+                    phase, number, manager.returncode, output, error)
+                for descriptor in descriptors:
+                    assert MODULE["select"].select([descriptor], [], [], 5)[0], (
+                        "初始化中断遗留真实子进程", phase, number)
+                assert not (net / "fixture-running").exists(), (phase, number)
+                assert not list(installation.glob(".hopping-guarded.fixture.*")), (phase, number)
+                for path, identity, content in preserved:
+                    assert (file_identity(path), path.read_bytes()) == (identity, content), (
+                        "初始化中断更改外来证据", phase, number, path)
+                if phase in {"hello", "commit"}:
+                    assert not session.exists() and not (installation / "locks").exists()
+                elif phase == "reservation-wait":
+                    assert (file_identity(lock), file_identity(lock / "pid"),
+                            (lock / "pid").read_bytes()) == held
+                    output, error = holder.communicate(b"release\n", timeout=5)
+                    assert holder.returncode == 0 and not output and not error
+                    assert not lock.exists() and not session.exists(), "释放旧锁后孤儿预约继续写入"
+                elif phase == "marker-before":
+                    assert not session.exists()
+                elif session.exists():
+                    assert MODULE["path_identity"](session.stat()) == session_id
+                    if phase in {"owner-written", "ready", "started"}:
+                        assert owner_path.read_bytes() == original_owner
+                    deployment_command(installation, "dockerLockInstalledDeployment")
+                if phase in {"ready", "started"}:
+                    assert not lock.exists()
+                try:
+                    frame = MODULE["receive"](caller, timeout=0.2)
+                except (MODULE["Failure"], OSError):
+                    pass
+                else:
+                    assert frame.get("phase") != "started", (
+                        "信号已送达后仍确认启动", phase, number, frame)
+                count += 1
+            finally:
+                prefix.with_suffix(".release").touch()
+                caller.close()
+                service.close()
+                if manager is not None and manager.poll() is None:
+                    manager.terminate()
+                    manager.communicate(timeout=10)
+                if holder is not None and holder.poll() is None:
+                    holder.communicate(b"release\n", timeout=5)
+                for descriptor in descriptors:
+                    if not MODULE["select"].select([descriptor], [], [], 0)[0]:
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                        MODULE["select"].select([descriptor], [], [], 5)
+                    os.close(descriptor)
+    return count
+
+
 def line(value):
     return canonical(value) + b"\n"
 
@@ -570,12 +886,18 @@ def main():
             '     "$(cat "$PADM_DOCKER_INSTALL_DIR/locks/deployment.lock/pid")" == "$$" ]] || return 1\n'
             '  jq -ec "." "$PADM_DOCKER_INSTALL_DIR/saved-arguments.json"\n'
             '}\n'
-            'if [[ "$0" == padm-hopping-reservation && -n "${TEST_RESERVATION_WAIT:-}" ]]; then\n'
+            'if [[ "$0" == padm-hopping-reservation && '
+            '( -n "${TEST_RESERVATION_WAIT:-}" || "${TEST_INIT_PHASE:-}" == reservation-wait ) ]]; then\n'
             '  mkdir() {\n'
             '    local status=0 target="${@: -1}"\n'
             '    command mkdir "$@" || status=$?\n'
             '    if [[ "$target" == "$PADM_DOCKER_INSTALL_DIR/locks/deployment.lock" && '
-            '"$status" != 0 ]]; then : >"$TEST_RESERVATION_WAIT"; fi\n'
+            '"$status" != 0 ]]; then\n'
+            '      if [[ -n "${TEST_RESERVATION_WAIT:-}" ]]; then : >"$TEST_RESERVATION_WAIT"; fi\n'
+            '      if [[ "${TEST_INIT_PHASE:-}" == reservation-wait ]]; then\n'
+            '        printf "%s\\n" "$$" >"$TEST_INIT_BARRIER.ready"\n'
+            '      fi\n'
+            '    fi\n'
             '    return "$status"\n'
             '  }\n'
             'fi\n'
@@ -606,6 +928,7 @@ def main():
             '}\n')
         entrypoint.chmod(0o600)
         count += reservation_cases(base, entrypoint)
+        count += initialization_signal_cases(base, entrypoint)
         for case in ("clean", "ack-lost", "invalid-finished", "invalid-finished-restart",
                      "invalid-restart-gate", "precommit-eof", "lifecycle-down",
                      "lifecycle-uninstall", "invalid-finished-down", "invalid-finished-uninstall",
@@ -841,5 +1164,7 @@ if __name__ == "__main__":
         action = sys.argv[4].removeprefix("--") if len(sys.argv) >= 5 else ""
         assert action in {"", "restart", "update", "rollback"}
         fake_owned(int(sys.argv[2]), sys.argv[3], action, sys.argv[5:])
+    elif sys.argv[1:2] in (["_service"], ["_reserve"]) and os.environ.get("TEST_INIT_PHASE"):
+        initialization_wrapper(sys.argv[1:])
     else:
         main()

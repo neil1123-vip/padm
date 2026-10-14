@@ -379,7 +379,10 @@ and actual container, collects cumulative traffic and applies quotas; an indepen
 supervisor maintains the dual-family rules. Run `stop` and confirm cleanup before editing
 or clearing the settings. `restart/update/rollback/down/uninstall` use supervisor coordination;
 unconfirmed shutdown or handoff refuses further changes and preserves cumulative traffic
-and failure evidence. Replace the listener and addresses below with local values:
+and failure evidence. INT/TERM during initialization stops further writes and reaps direct
+children. The session is removed only after resource verification and a clean shutdown
+receipt; earlier interruption retains unverified evidence and blocks ordinary changes.
+Replace the listener and addresses below with local values:
 
 ```bash
 padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 --preview

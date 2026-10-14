@@ -57,6 +57,47 @@ class Failure(Exception):
     pass
 
 
+def stop_signals():
+    pending = [0]
+    # 信号只登记；Popen、原子替换和删锁操作结束后再检查，避免丢失本次归属。
+    def record(number, _):
+        pending[0] = 128 + number
+    signal.signal(signal.SIGTERM, record)
+    signal.signal(signal.SIGINT, record)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    return pending
+
+
+def check_signal(pending):
+    if pending[0]:
+        raise Failure(f"监督初始化收到信号 {pending[0]}，停止后续写入并保留未核验现场")
+
+
+def run_interruptible(arguments, pending):
+    check_signal(pending)
+    process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        while True:
+            check_signal(pending)
+            try:
+                output, error = process.communicate(timeout=0.2)
+                check_signal(pending)
+                return subprocess.CompletedProcess(arguments, process.returncode, output, error)
+            except subprocess.TimeoutExpired:
+                continue
+    finally:
+        if process.poll() is None:
+            # 直接子进程未回收前 PID 不会复用；预约失败不能留下随后继续写入的 owner。
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        process.stdout.close()
+        process.stderr.close()
+
+
 def unique(pairs):
     result = {}
     for key, value in pairs:
@@ -93,11 +134,17 @@ def send(peer, value):
     peer.sendall(raw)
 
 
-def receive(peer, timeout=20):
+def receive(peer, timeout=20, pending=None):
     deadline, raw = time.monotonic() + timeout, b""
     while not raw.endswith(b"\n"):
+        if pending is not None:
+            check_signal(pending)
         remaining = deadline - time.monotonic()
-        if remaining <= 0 or not select.select([peer], [], [], remaining)[0]:
+        if remaining <= 0:
+            raise Failure("监督帧超时")
+        if not select.select([peer], [], [], min(remaining, 0.2) if pending is not None else remaining)[0]:
+            if pending is not None:
+                continue
             raise Failure("监督帧超时")
         byte = peer.recv(1)
         if not byte:
@@ -288,6 +335,8 @@ class Directory:
 
 
 def reserve(root, entrypoint, raw, saved=None):
+    pending = stop_signals()
+    check_signal(pending)
     original = json.loads(raw, object_pairs_hook=unique)
     owner = str(os.getpid())
     if (not isinstance(original, list) or len(original) < 4 or
@@ -301,9 +350,9 @@ def reserve(root, entrypoint, raw, saved=None):
         raise Failure("监督预约保存参数无效")
 
     def unchanged():
-        result = subprocess.run(
+        result = run_interruptible(
             ["bash", "-Eeuo", "pipefail", "-c", LOCK_BODY, "padm-hopping-reservation-check",
-             entrypoint, root, owner], capture_output=True)
+             entrypoint, root, owner], pending)
         if (result.returncode or
                 json.loads(result.stdout.decode("ascii"), object_pairs_hook=unique) != original):
             raise Failure("监督预约原锁身份变化")
@@ -313,7 +362,9 @@ def reserve(root, entrypoint, raw, saved=None):
     try:
         unchanged()
         # exec 保持锁 PID；创建预约的进程退出前，普通入口不能按死 PID 清理原锁。
+        check_signal(pending)
         directory.session(create=True)
+        check_signal(pending)
         directory.check()
         unchanged()
         directory.check()
@@ -332,8 +383,11 @@ def reserve(root, entrypoint, raw, saved=None):
         if ([root + "/locks/deployment.lock/pid", *path_identity(metadata), metadata.st_size,
              metadata.st_mtime_ns, metadata.st_ctime_ns, owner] != original[-1]):
             raise Failure("监督预约释放时原 pid 文件变化")
+        check_signal(pending)
         os.unlink("pid", dir_fd=lock)
+        check_signal(pending)
         os.rmdir("deployment.lock", dir_fd=locks)
+        check_signal(pending)
         directory.check()
         try:
             os.stat("deployment.lock", dir_fd=locks, follow_symlinks=False)
@@ -352,8 +406,8 @@ def reserve(root, entrypoint, raw, saved=None):
         directory.close()
 
 
-def challenge(peer, action, owner=None):
-    hello = shape(receive(peer), ("v", "phase", "action", "client_nonce"))
+def challenge(peer, action, owner=None, pending=None):
+    hello = shape(receive(peer, pending=pending), ("v", "phase", "action", "client_nonce"))
     if hello["phase"] != "hello" or hello["action"] != action or not nonce(hello["client_nonce"]):
         raise Failure("监督 hello 无效")
     value = {"v": 1, "phase": "challenge", "nonce": os.urandom(32).hex(),
@@ -365,7 +419,7 @@ def challenge(peer, action, owner=None):
         expected.update(token=owner["token"], manager_pid=owner["manager"]["pid"],
                         manager_starttime=owner["manager"]["starttime_ticks"],
                         stage_sha256=owner["stage_sha256"], owner_sha256=digest(owner))
-    if shape(receive(peer), expected) != expected:
+    if shape(receive(peer, pending=pending), expected) != expected:
         raise Failure("监督 commit 身份或挑战不匹配")
     return value
 
@@ -437,6 +491,7 @@ def change_arguments(action, arguments):
 
 
 def service(initial_fd, root, entrypoint, values):
+    pending_signal = stop_signals()
     directory, listener, channel, process, process_fd, log = None, None, None, None, None, None
     initial = socket.socket(fileno=initial_fd)
     stopping, proof, ready, latest, cleaned, finished, stop_peer = (
@@ -446,6 +501,7 @@ def service(initial_fd, root, entrypoint, values):
 
     def launch(action=None):
         nonlocal channel, process, process_fd
+        check_signal(pending_signal)
         channel, child = socket.socketpair()
         try:
             process = subprocess.Popen(
@@ -456,9 +512,20 @@ def service(initial_fd, root, entrypoint, values):
             child.close()
         owner["bash"] = identity(process.pid)
         process_fd = pin(owner["bash"])
+        check_signal(pending_signal)
         directory.write_owner(owner)
 
+    def request_stop():
+        nonlocal stopping
+        if not stopping:
+            try:
+                signal.pidfd_send_signal(process_fd, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            stopping = True
+
     try:
+        check_signal(pending_signal)
         if os.geteuid() != 0 or len(values) not in {0, 5}:
             raise Failure("监督服务仅支持 root、保存配置或内部五参数")
         peer_pid(initial)
@@ -469,19 +536,20 @@ def service(initial_fd, root, entrypoint, values):
         directory = Directory(root)
         directory.close()
         directory = None
-        proof = challenge(initial, "start")
-        reservation = subprocess.run(
+        proof = challenge(initial, "start", pending=pending_signal)
+        reservation = run_interruptible(
             ["bash", "-Eeuo", "pipefail", "-c", RESERVE_BODY, "padm-hopping-reservation",
              entrypoint, root, sys.executable, str(Path(__file__).resolve()),
              *(["--saved"] if not values else [])],
             # 保存模式在预约锁内读取参数，不采用调用端较早读取的元组。
-            capture_output=True)
+            pending_signal)
         if reservation.returncode:
             raise Failure("监督会话预约失败: " + reservation.stderr.decode("utf-8", errors="replace"))
         reserved = shape(json.loads(reservation.stdout.decode("ascii"), object_pairs_hook=unique),
                          ("directory", "session", "values") if not values else ("directory", "session"))
         if not values:
             values = reserved.pop("values")
+        check_signal(pending_signal)
         directory = Directory(root)
         directory.session()
         # 原锁只用于预约，不转交给监督 Bash；替换预约路径后保留证据并拒绝启动。
@@ -489,36 +557,38 @@ def service(initial_fd, root, entrypoint, values):
                 "directory": directory.projection, "session": directory.original}):
             raise Failure("监督会话预约目录身份变化")
         directory.check()
+        check_signal(pending_signal)
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(f"/proc/self/fd/{directory.fd}/control.sock")
+        check_signal(pending_signal)
         os.chmod(directory.path + "/control.sock", 0o600)
         listener.listen(4)
         socket_id = path_identity(os.stat("control.sock", dir_fd=directory.fd, follow_symlinks=False))
         log = os.open("service.log", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                       0o600, dir_fd=directory.fd)
+        check_signal(pending_signal)
         log_id = path_identity(os.fstat(log))
         owner = {"v": 1, "token": os.urandom(32).hex(), "root": root, "manager": own,
                  "bash": None, "stage": None, "stage_sha256": None, "state": "starting"}
         directory.write_owner(owner)
+        check_signal(pending_signal)
         # 独立 Bash 自取锁并 freshly bound；环境变量只提供安装路径，不提供授权。
         launch()
         last_gate = None
-        pending_signal = [False]
-        signal.signal(signal.SIGTERM, lambda *_: pending_signal.__setitem__(0, True))
-        signal.signal(signal.SIGINT, lambda *_: pending_signal.__setitem__(0, True))
-        signal.signal(signal.SIGHUP, signal.SIG_IGN)
         while True:
-            if pending_signal[0] and not stopping:
-                signal.pidfd_send_signal(process_fd, signal.SIGTERM)
-                stopping = True
+            if pending_signal[0]:
+                request_stop()
             watched = [listener, process_fd] + ([channel] if finished is None else [])
             readable = select.select(watched, [], [], 0.2)[0]
             if channel in readable:
                 event = shape(receive(channel), ("v", "phase", "nonce", "payload"))
+                if pending_signal[0]:
+                    request_stop()
                 if not nonce(event["nonce"]) or event["nonce"] == last_gate:
                     raise Failure("监督门 nonce 重复")
                 last_gate = event["nonce"]
                 phase, value = event["phase"], event["payload"]
+                witness = latest or ready
                 if stopping and phase in {"restart", "update", "rollback", "changed", "ready", "started", "running"}:
                     send(channel, {"v": 1, "phase": "stop", "nonce": event["nonce"]})
                 elif (phase == change_action and restart_receipt is not None and
@@ -557,14 +627,22 @@ def service(initial_fd, root, entrypoint, values):
                     owner.update(stage=ready["stage"], stage_sha256=digest({
                         key: ready[key] for key in ("target", "child", "directory", "stage")}))
                     directory.write_owner(owner)
-                    send(channel, {"v": 1, "phase": "commit", "nonce": event["nonce"]})
+                    if pending_signal[0]:
+                        request_stop()
+                    send(channel, {"v": 1, "phase": "stop" if stopping else "commit",
+                                   "nonce": event["nonce"]})
                 elif phase == "started" and latest is None and value == ready and not stopping:
                     latest = ready
                     owner["state"] = "active"
                     directory.write_owner(owner)
-                    send(channel, {"v": 1, "phase": "continue", "nonce": event["nonce"]})
+                    if pending_signal[0]:
+                        request_stop()
+                    send(channel, {"v": 1, "phase": "stop" if stopping else "continue",
+                                   "nonce": event["nonce"]})
                     try:
-                        if restart_receipt is None:
+                        if stopping:
+                            pass
+                        elif restart_receipt is None:
                             send(initial, ack("started", proof, owner, payload=latest))
                         else:
                             receipt = dict(restart_receipt)
@@ -591,10 +669,10 @@ def service(initial_fd, root, entrypoint, values):
                     if directory.read_owner() != owner:
                         raise Failure("监督 owner 在运行中变化")
                     send(channel, {"v": 1, "phase": "continue", "nonce": event["nonce"]})
-                elif phase == "cleaned" and stopping and cleaned is None and latest is not None:
+                elif phase == "cleaned" and stopping and cleaned is None and witness is not None:
                     shape(value, ("target", "child_id", "stage"))
-                    if value != {"target": latest["target"], "child_id": latest["child"]["Id"],
-                                 "stage": latest["stage"]}:
+                    if value != {"target": witness["target"], "child_id": witness["child"]["Id"],
+                                 "stage": witness["stage"]}:
                         raise Failure("监督净清理回执投影不匹配")
                     cleaned = value
                 elif phase == "finished" and finished is None:
@@ -639,6 +717,7 @@ def service(initial_fd, root, entrypoint, values):
                         peer.close()
             if process_fd in readable:
                 # Bash 退出后先消费已排队的 notify；不能把 pidfd 终止当作净撤销。
+                witness = latest or ready
                 while finished is None and select.select([channel], [], [], 0)[0]:
                     event = shape(receive(channel), ("v", "phase", "nonce", "payload"))
                     if not nonce(event["nonce"]) or event["nonce"] == last_gate:
@@ -649,17 +728,17 @@ def service(initial_fd, root, entrypoint, values):
                         if (type(finished["status"]) is not int or
                                 type(finished["lock_released"]) is not bool):
                             raise Failure("监督退出回执类型无效")
-                    elif event["phase"] == "cleaned" and cleaned is None and stopping and latest is not None:
+                    elif event["phase"] == "cleaned" and cleaned is None and stopping and witness is not None:
                         cleaned = shape(event["payload"], ("target", "child_id", "stage"))
-                        if cleaned != {"target": latest["target"], "child_id": latest["child"]["Id"],
-                                       "stage": latest["stage"]}:
+                        if cleaned != {"target": witness["target"], "child_id": witness["child"]["Id"],
+                                       "stage": witness["stage"]}:
                             raise Failure("监督净清理回执投影不匹配")
                     else:
                         raise Failure("监督退出后出现未知通知")
                 status = process.wait(timeout=2)
-                if (stopping and latest is not None and cleaned == {
-                        "target": latest["target"], "child_id": latest["child"]["Id"],
-                        "stage": latest["stage"]} and finished == {
+                if (stopping and witness is not None and cleaned == {
+                        "target": witness["target"], "child_id": witness["child"]["Id"],
+                        "stage": witness["stage"]} and finished == {
                         "status": 143, "lock_released": True} and status == 143):
                     if restarting and not pending_signal[0]:
                         # 会话目录覆盖整个交接窗口；旧净停止回执不授权新 Bash 写入。
@@ -687,16 +766,19 @@ def service(initial_fd, root, entrypoint, values):
     finally:
         if channel is not None:
             channel.close()
-        if process_fd is not None:
-            if process is not None and process.poll() is None:
-                try:
+        if process is not None and process.poll() is None:
+            try:
+                if process_fd is not None:
                     signal.pidfd_send_signal(process_fd, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
-                    process.wait(timeout=90)
-                except subprocess.TimeoutExpired:
-                    pass
+                else:
+                    process.terminate()
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=90)
+            except subprocess.TimeoutExpired:
+                pass
+        if process_fd is not None:
             os.close(process_fd)
         for peer in (initial, stop_peer, listener):
             if peer is not None:

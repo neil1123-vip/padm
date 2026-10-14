@@ -6946,6 +6946,33 @@ Docker Linux amd64、Jobs 2、cache=false：配置定向 14594 ms、排队 150 m
 真实专项复验同一客户端跨端口、停止清理和新连接拒绝。未重复完整长集合，
 未新增外部客户端 URI 导入证据；既有支持范围与 deferred 保留，整体目标仍 active。
 
+#### 5C.9c.3e.2b.3h 监督初始化信号处理
+
+manager 在初始握手、预约或 Popen 前登记 INT/TERM，handler 只置停止标志；
+原子创建、写入及释放锁完成后检查，避免丢失本次归属。预约等待可取消，
+取消时回收直接预约子进程，Popen 后 identity/pin 失败也回收尚无 pidfd 的 Bash。
+ready/started 的 owner 持久化后再次检查信号，不确认启动或开放下一写门。
+已有 ready 见证、净撤销回执、Bash 状态 143 与原锁释放全部成立才清会话；
+较早中断保留未核验现场并拒绝普通部署变更，不自动恢复。
+
+定向复用真实 service/reserve 子进程和 pidfd，覆盖 14 个初始化边界的 INT/TERM，
+共 28 例，加原控制/归属合同合计 115 项。Docker Linux amd64、Jobs 2 通过，
+入口 25139 ms，排队 165 ms：
+`.tmp-regression-docker-0e57f24f01754229a4d1cd19bb5e0435/`。
+最初 marker-before 夹具阻断放在安全检查之后，已调整，旧失败输入保留。
+同快照真实生产入口的 ready TERM 与正常双族自动跳跃合用节点，入口 64027 ms，
+排队 158 ms：`.tmp-regression-docker-eaedc71dbb1444c786668a08758bbe96/`。
+TERM 后双族 NAT、state、stage、子容器、session 和部署锁净清理且无启动 ACK；
+保存配置逐字节保持，随后同一客户端跨双族两个端口及停止后新连接拒绝通过。
+
+集中合同 57/57 通过，Jobs 6，入口 359780 ms、排队 315 ms、cache=false：
+`.tmp-regression-docker-0874d178bb9942b485ce0c9f337b7118/`。
+三份归档各 3 份生产/测试文件与最终源码一致，见各自 `verification.json`；
+文档在打包后同步，不重复已通过的代码回归。成功输入归档及清单清理，
+保留日志/result/verification 与失败输入。支持范围仍限内部监督、单 sing-box、
+单个双族 Hy2；自动恢复、TUIC、旧会话排空、原生宿主/arm64/公网、
+整机重启及完整卸载仍待交付或验收，整体目标保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

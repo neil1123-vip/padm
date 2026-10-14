@@ -728,7 +728,9 @@ v3 可选 `port_hopping` 保存 `{listener_id, range_start, range_end, ipv4, ipv
 保存后须显式 `start`，不会自动启用。启动核对配置和实际容器、采集流量累计并应用额度，
 由独立监督维护双族规则。编辑或清除前须 `stop` 并确认清理完成。
 `restart/update/rollback/down/uninstall` 通过监督协调；无法确认停止或交接时拒绝继续，
-保留累计和失败证据。以下入口和地址须换为本机实际值：
+保留累计和失败证据。初始化收到 INT/TERM 后停止后续写入并回收直接子进程；
+只有已核验资源且取得净撤销回执才清除会话，较早中断保留未核验现场并拒绝普通变更。
+以下入口和地址须换为本机实际值：
 
 ```bash
 padm-docker edit --port-hopping entry-hy2 30000 30001 198.18.1.1 2001:db8:1::1 --preview
