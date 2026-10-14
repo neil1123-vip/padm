@@ -866,6 +866,7 @@ padm-docker protocol links vless-reality
 padm-docker edit --protocol-add vless-reality 2 28443 --preview
 padm-docker edit --protocol-add entry-hy2 31 29443 --confirm PADM-DOCKER-EDIT
 padm-docker edit --protocol-add vless-reality 30 30443 --protocol-core sing-box --preview
+padm-docker edit --protocol-add vless-reality 21 30444 --tls-domain proxy.example.com --tls-import /root/fullchain.pem /root/key.pem --preview
 padm-docker edit --protocol-remove entry-1 --preview
 padm-docker edit --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
 ```
@@ -874,10 +875,16 @@ padm-docker edit --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
 主核心保持，必要时启用副核心，跨核心不能与宿主集成组合。
 沿用源 UUID、服务器及地址族，只追加一个稳定身份的入口，
 不改变已有账号关联、订阅授权或累计流量。Reality 只能从已有 Reality 派生；
-TLS 协议要求已有受管 TLS，Naive 使用该证书域名作为服务器。
+已有 TLS 部署沿用原域名，Naive 使用该证书域名作为服务器。
+无 TLS 部署新增首个 TLS 协议时，菜单会询问域名和证书来源；
+CLI 使用 `--tls-domain` 以及互斥的 `--tls-existing`、`--tls-import <证书链> <私钥>`、
+`--tls-dns <邮箱> <dns_provider> <私密凭据文件>` 或 `--tls-standalone <邮箱>`。
+已有受管/导入证书可做完整候选预览；ACME 预览只校验计划，不申请证书或暂停服务，
+交互确认或显式 `--confirm` 后才申请，再验证完整候选并提交。
+证书和 ACME 数据沿用现有备份/恢复事务，保留其它域名和账户；本操作不登记自动续期。
 Shadowsocks2022 不需要 TLS，首次新增在基线和发布验签通过后生成独立服务器/用户密钥，
 密钥通过私密候选文件传入，不进入命令参数或预览；同 UUID 已有 SS 则保留原密钥。
-v1/v2 沿用现有迁移器生成 v3 草稿，确认成功后才更新部署，不自动申请证书。
+v1/v2 沿用现有迁移器生成 v3 草稿，确认成功后才更新部署；证书申请须显式选择。
 删除会清理该入口的账号关联、额外端口和 CDN 覆盖；账号最后关联、
 主核心最后入口、Reality 共存及 Fail2ban 保护仍须先处理。
 重建保留完整规格与身份，并沿用候选验证、确认和失败恢复；

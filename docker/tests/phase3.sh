@@ -114,6 +114,12 @@ run)
         printf '%s\n' "${value}"
         exit 0
     fi
+    if [[ "${mode}" == acme-issue-fail && " ${*} " == *' --issue '* ]]; then
+        exit 1
+    fi
+    if [[ "${mode}" == acme-install-fail && " ${*} " == *' --install-cert '* ]]; then
+        exit 1
+    fi
     if [[ " ${*} " == *'ssl.cert_time_to_seconds'* ]]; then
         [[ "${mode}" != "tls-validity-fail" ]]
         exit $?
@@ -1454,6 +1460,233 @@ jq -e --slurpfile before "${TEST_ROOT}/protocol-ss-installed.json" '
 ) || fail 'Shadowsocks 复制身份失败'
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '旧版迁移、跨核心或 Shadowsocks 增量改变累计与额度'
+
+# 首个 TLS 协议只追加本次入口和域名；四种来源复用已有证书事务。
+FIRST_TLS_REALITY="${TEST_ROOT}/protocol-ss-base.json"
+FIRST_TLS_SS="${TEST_ROOT}/protocol-ss-installed.json"
+mkdir -p "${DOCKER_ROOT}/data/acme/unrelated"
+printf 'keep-acme-account\n' >"${DOCKER_ROOT}/data/acme/unrelated/account.conf"
+chmod 0600 "${DOCKER_ROOT}/data/acme/unrelated/account.conf"
+FIRST_TLS_UNRELATED_HASH=$(sha256sum "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" \
+    "${DOCKER_ROOT}/secrets/tls/proxy.example.com.key" \
+    "${DOCKER_ROOT}/data/acme/unrelated/account.conf" | sha256sum | cut -d ' ' -f 1)
+firstTlsEdit() {
+    local expected=$1 name=$2 acmeHash
+    shift 2
+    acmeHash=$(find "${DOCKER_ROOT}/data/acme" -type f -print0 | sort -z |
+        xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)
+    protocolEdit "${expected}" "${name}" "$@"
+    if [[ "${expected}" != 0 || " $* " == *' --preview '* ]]; then
+        [[ "$(find "${DOCKER_ROOT}/data/acme" -type f -print0 | sort -z |
+            xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)" == "${acmeHash}" ]] ||
+            fail "${name}: 预览或失败改写 ACME 账号"
+    fi
+    [[ "$(sha256sum "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" \
+        "${DOCKER_ROOT}/secrets/tls/proxy.example.com.key" \
+        "${DOCKER_ROOT}/data/acme/unrelated/account.conf" | sha256sum | cut -d ' ' -f 1)" == \
+        "${FIRST_TLS_UNRELATED_HASH}" ]] || fail "${name}: 改写其它证书或 ACME 账号"
+}
+assertFirstTlsSpec() {
+    local before=$1 source=$2 domain=$3 protocol=$4 core=$5 port=$6 secondary=$7
+    jq -e --slurpfile before "${before}" --arg source "${source}" --arg domain "${domain}" \
+        --arg core "${core}" --arg secondary "${secondary}" --argjson protocol "${protocol}" \
+        --argjson port "${port}" '
+      (.core.protocols[-1]) as $new |
+      ($before[0].core.protocols[] | select(.listener_id==$source)) as $source |
+      .tls=={domain:$domain} and
+      .core.secondary_type==(if $secondary=="" then null else $secondary end) and
+      (.core.protocols[0:-1])==$before[0].core.protocols and
+      (. | del(.tls,.core.protocols,.core.secondary_type))==
+        ($before[0] | del(.tls,.core.protocols,.core.secondary_type)) and
+      $new.id==$protocol and $new.core==$core and $new.public_port==$port and
+      $new.uuid==$source.uuid and $new.name==$source.name and $new.server==$source.server and
+      $new.address_families==$source.address_families and
+      ($new.websocket.domain // $new.trojan.domain // $new.tuic.domain)==$domain
+    ' "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '首个 TLS 增量改变其它规格或账号授权'
+}
+runControl 0 protocol-first-tls-baseline configure --spec "${FIRST_TLS_REALITY}"
+firstTlsEdit 15 protocol-first-tls-input-missing --protocol-add vless-reality 21 32443 --preview
+firstTlsEdit 15 protocol-first-tls-source-missing --protocol-add vless-reality 21 32443 \
+    --tls-domain proxy.example.com --preview
+firstTlsEdit 15 protocol-first-tls-domain-missing --protocol-add vless-reality 21 32443 \
+    --tls-existing --preview
+firstTlsEdit 2 protocol-first-tls-source-exclusive --protocol-add vless-reality 21 32443 \
+    --tls-domain proxy.example.com --tls-existing --tls-import "${CERT_FILE}" "${KEY_FILE}" --preview
+firstTlsEdit 2 protocol-first-tls-domain-duplicate --protocol-add vless-reality 21 32443 \
+    --tls-domain proxy.example.com --tls-domain other.example.com --tls-existing --preview
+firstTlsEdit 2 protocol-first-tls-needs-add --protocol-rebuild vless-reality \
+    --tls-domain proxy.example.com --tls-existing --preview
+firstTlsEdit 2 protocol-first-tls-target-reality --protocol-add vless-reality 2 32443 \
+    --tls-domain proxy.example.com --tls-existing --preview
+firstTlsEdit 2 protocol-first-tls-domain-invalid --protocol-add vless-reality 21 32443 \
+    --tls-domain bad/domain --tls-existing --preview
+firstTlsEdit 15 protocol-first-tls-existing-missing --protocol-add vless-reality 21 32443 \
+    --tls-domain missing.example.com --tls-existing --preview
+firstTlsEdit 15 protocol-first-tls-import-missing --protocol-add vless-reality 21 32443 \
+    --tls-domain first-import.example.com --tls-import "${TEST_ROOT}/missing.crt" "${KEY_FILE}" --preview
+FAKE_DOCKER_MODE=tls-validate-fail firstTlsEdit 15 protocol-first-tls-invalid-certificate \
+    --protocol-add vless-reality 21 32443 --tls-domain proxy.example.com --tls-existing --preview
+firstTlsEdit 0 protocol-first-tls-existing-preview --protocol-add vless-reality 21 32443 \
+    --tls-domain proxy.example.com --tls-existing --preview
+grep -qF '候选配置校验通过，预览未提交。' "${CONTROL_LOG}" ||
+    fail '已有证书预览没有完成候选校验'
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    firstTlsCancelHash=$(editLiveHash)
+    for input in $'0\n' $'proxy.example.com\n0\n' $'proxy.example.com\n1\nn\n' \
+        $'proxy.example.com\n\004'; do
+        : >"${DOCKER_LOG}"
+        runEditPty "${input}" 0 --protocol-add vless-reality 21 32443
+        [[ "$(editLiveHash)" == "${firstTlsCancelHash}" ]] || fail '首个 TLS 交互取消或 EOF 改写线上'
+        ! grep -Eq ' (up|down|restart|exec) | --issue | --install-cert ' "${DOCKER_LOG}" ||
+            fail '首个 TLS 交互取消或 EOF 改动服务或申请证书'
+        assertEditCleanup
+    done
+fi
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up firstTlsEdit 14 protocol-first-tls-up-failure \
+    --protocol-add vless-reality 21 32443 --tls-domain proxy.example.com \
+    --tls-existing --confirm PADM-DOCKER-EDIT
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    : >"${DOCKER_LOG}"
+    runEditPty $'proxy.example.com\n1\ny\n' 0 --protocol-add vless-reality 21 32443
+    assertEditCleanup
+else
+    firstTlsEdit 0 protocol-first-tls-existing-commit --protocol-add vless-reality 21 32443 \
+        --tls-domain proxy.example.com --tls-existing --confirm PADM-DOCKER-EDIT
+fi
+assertFirstTlsSpec "${FIRST_TLS_REALITY}" vless-reality proxy.example.com 21 xray 32443 ''
+grep -q 'proxy_pass http://xray:31297;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
+    fail 'Reality 新增首个 WS 没有生成实际 Nginx 后端'
+firstTlsEdit 2 protocol-first-tls-already-managed --protocol-add vless-reality 28 32444 \
+    --tls-domain other.example.com --tls-import "${CERT_FILE}" "${KEY_FILE}" --preview
+
+runControl 0 protocol-first-tls-import-baseline configure --spec "${FIRST_TLS_REALITY}"
+firstTlsEdit 0 protocol-first-tls-import-preview --protocol-add vless-reality 28 32444 \
+    --tls-domain first-import.example.com --tls-import "${CERT_FILE}" "${KEY_FILE}" --preview
+grep -qF '候选配置校验通过，预览未提交。' "${CONTROL_LOG}" ||
+    fail '导入证书预览没有完成候选校验'
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    : >"${DOCKER_LOG}"
+    printf -v input 'first-import.example.com\n2\n%s\n%s\ny\n' "${CERT_FILE}" "${KEY_FILE}"
+    runEditPty "${input}" 0 --protocol-add vless-reality 28 32444
+    assertEditCleanup
+else
+    firstTlsEdit 0 protocol-first-tls-import-commit --protocol-add vless-reality 28 32444 \
+        --tls-domain first-import.example.com --tls-import "${CERT_FILE}" "${KEY_FILE}" --confirm PADM-DOCKER-EDIT
+fi
+assertFirstTlsSpec "${FIRST_TLS_REALITY}" vless-reality first-import.example.com 28 xray 32444 ''
+cmp -s "${CERT_FILE}" "${DOCKER_ROOT}/secrets/tls/first-import.example.com.crt" &&
+    cmp -s "${KEY_FILE}" "${DOCKER_ROOT}/secrets/tls/first-import.example.com.key" ||
+    fail '导入首个 TLS 证书未提交原始输入'
+
+runControl 0 protocol-first-tls-dns-baseline configure --spec "${FIRST_TLS_SS}"
+firstTlsEdit 15 protocol-first-tls-dns-credentials-missing --protocol-add entry-1 31 32445 \
+    --tls-domain first-dns.example.com --tls-dns admin@example.com dns_cf "${TEST_ROOT}/missing.env" --preview
+firstTlsEdit 2 protocol-first-tls-dns-provider-invalid --protocol-add entry-1 31 32445 \
+    --tls-domain first-dns.example.com --tls-dns admin@example.com invalid "${CREDENTIALS}" --preview
+for source in dns standalone; do
+    tlsArgs=(--tls-dns admin@example.com dns_cf "${CREDENTIALS}")
+    [[ "${source}" != standalone ]] || tlsArgs=(--tls-standalone admin@example.com)
+    firstTlsEdit 0 "protocol-first-tls-${source}-preview" --protocol-add entry-1 31 32445 \
+        --tls-domain first-dns.example.com "${tlsArgs[@]}" --preview
+    grep -qF '预览未申请证书或提交' "${CONTROL_LOG}" ||
+        fail 'ACME 预览未明确保留计划验收范围'
+    ! grep -Eq ' --issue | --install-cert |--publish 0.0.0.0:80:' "${DOCKER_LOG}" ||
+        fail 'ACME 预览调用 CA 或占用挑战端口'
+done
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    firstTlsCancelHash=$(editLiveHash)
+    for input in $'n\n' $'\004'; do
+        : >"${DOCKER_LOG}"
+        runEditPty "${input}" 0 --protocol-add entry-1 31 32445 --tls-domain first-dns.example.com \
+            --tls-dns admin@example.com dns_cf "${CREDENTIALS}"
+        [[ "$(editLiveHash)" == "${firstTlsCancelHash}" ]] || fail 'ACME 确认取消或 EOF 改写线上'
+        ! grep -Eq ' --issue | --install-cert | (up|down|restart|exec) ' "${DOCKER_LOG}" ||
+            fail 'ACME 确认取消或 EOF 仍申请或变更服务'
+        assertEditCleanup
+    done
+fi
+for acmeFailure in acme-issue-fail acme-install-fail; do
+    FAKE_DOCKER_MODE="${acmeFailure}" firstTlsEdit 15 "protocol-first-tls-${acmeFailure}" \
+        --protocol-add entry-1 31 32445 --tls-domain first-dns.example.com \
+        --tls-dns admin@example.com dns_cf "${CREDENTIALS}" --confirm PADM-DOCKER-EDIT
+done
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    : >"${DOCKER_LOG}"
+    printf -v input 'first-dns.example.com\n3\nadmin@example.com\ndns_cf\n%s\ny\n' "${CREDENTIALS}"
+    runEditPty "${input}" 0 --protocol-add entry-1 31 32445
+    [[ "$(grep -Fc '确认申请证书并在完整候选验证后提交？[y/N]' "${CONTROL_LOG}")" == 1 ]] ||
+        fail 'DNS 首个 TLS 没有仅确认一次'
+    assertEditCleanup
+else
+    firstTlsEdit 0 protocol-first-tls-dns-commit --protocol-add entry-1 31 32445 \
+        --tls-domain first-dns.example.com --tls-dns admin@example.com dns_cf "${CREDENTIALS}" \
+        --confirm PADM-DOCKER-EDIT
+fi
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 first-dns.example.com 31 sing-box 32445 sing-box
+grep -q -- '--issue --dns dns_cf --keylength ec-256 -d first-dns.example.com' "${DOCKER_LOG}" &&
+    grep -qxF 'fake-acme-certificate' "${DOCKER_ROOT}/secrets/tls/first-dns.example.com.crt" ||
+    fail 'SS 新增 sing-box TLS 未实际申请或提交证书'
+assertSsPrivate
+runControl 0 protocol-first-tls-standalone-baseline configure --spec "${FIRST_TLS_SS}"
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    : >"${DOCKER_LOG}"
+    runEditPty $'first-http.example.com\n4\nadmin@example.com\ny\n' 0 \
+        --protocol-add entry-1 21 32446 --protocol-core xray
+    [[ "$(grep -Fc '确认申请证书并在完整候选验证后提交？[y/N]' "${CONTROL_LOG}")" == 1 ]] ||
+        fail 'standalone 首个 TLS 没有仅确认一次'
+    assertEditCleanup
+else
+    firstTlsEdit 0 protocol-first-tls-standalone-commit --protocol-add entry-1 21 32446 \
+        --protocol-core xray --tls-domain first-http.example.com --tls-standalone admin@example.com \
+        --confirm PADM-DOCKER-EDIT
+fi
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 first-http.example.com 21 xray 32446 sing-box
+grep -q -- '--issue --standalone --httpport 8080 --keylength ec-256 -d first-http.example.com' "${DOCKER_LOG}" &&
+    grep -q -- '--publish 0.0.0.0:80:8080' "${DOCKER_LOG}" ||
+    fail '跨核心首个 TLS 未复用 standalone 挑战'
+assertSsPrivate
+
+(
+    export PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}"
+    source "${PROJECT_ROOT}/install-docker.sh"
+    entryAction=add entryListener=vless-reality entryProtocol=21 entryCore=xray entryPort=32443
+    entryTlsDomain=proxy.example.com
+    generated="${TEST_ROOT}/protocol-first-tls-expected.json"
+    dockerEditEntryAdd "${FIRST_TLS_REALITY}" "${entryListener}" "${entryProtocol}" "${entryCore}" \
+        "${entryPort}" protocol "${generated}" '' "${entryTlsDomain}" &&
+        dockerConfigureSpecValidate "${generated}" &&
+        dockerEditCompatibilityValidate "${FIRST_TLS_REALITY}" "${generated}" ||
+        fail '首个 TLS 完整 expected 门禁拒绝合法草稿'
+    cp -- "${generated}" "${TEST_ROOT}/protocol-first-tls-foreign.json"
+    for mutation in '.tls.domain="other.example.com" | .core.protocols[-1].websocket.domain="other.example.com"' \
+        '.accounts[0].name="foreign"' '.core.protocols[0].public_port+=1' \
+        '.subscription.enabled=true' '.tls.http01=true'; do
+        jq "${mutation}" "${generated}" >"${TEST_ROOT}/protocol-first-tls-drift.json"
+        if dockerEditCompatibilityValidate "${FIRST_TLS_REALITY}" "${TEST_ROOT}/protocol-first-tls-drift.json" \
+            >"${TEST_ROOT}/protocol-helper.log" 2>&1; then
+            fail '首个 TLS 专项放行额外域名、账号、入口或订阅漂移'
+        fi
+    done
+    recoveryCandidate=$(mktemp -d "${DOCKER_ROOT}/.edit.recovery.XXXXXX")
+    chmod 0700 "${recoveryCandidate}"
+    printf '[]\n' >"${recoveryCandidate}/challenge.json"
+    chmod 0600 "${recoveryCandidate}/challenge.json"
+    DOCKER_SETUP_CANDIDATE="${recoveryCandidate}"
+    DOCKER_ACME_RECOVERY="${recoveryCandidate}/challenge.json"
+    DOCKER_ACME_CONTAINER=fixture-challenge
+    if dockerSetupCleanup >"${TEST_ROOT}/protocol-helper.log" 2>&1; then
+        fail '活动 ACME 恢复状态仍删除配置草稿'
+    fi
+    [[ -f "${recoveryCandidate}/challenge.json" ]] || fail '临时清理删除 ACME 恢复证据'
+    DOCKER_ACME_RECOVERY= DOCKER_ACME_CONTAINER= DOCKER_ACME_WEBROOT= DOCKER_ACME_STOPPED=()
+    dockerSetupCleanup && [[ ! -e "${recoveryCandidate}" ]] || fail 'ACME 恢复完成后仍遗留草稿'
+) || fail '首个 TLS 门禁或 ACME 恢复证据保护失败'
+runControl 0 protocol-first-tls-foreign-baseline configure --spec "${FIRST_TLS_REALITY}"
+firstTlsEdit 15 protocol-first-tls-import-not-authorized \
+    --spec "${TEST_ROOT}/protocol-first-tls-foreign.json" --preview
+[[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
+    "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '首个 TLS 增量改变累计流量或额度'
 
 runControl 0 restart-persistence status
 grep -qxF 'configured=yes' "${CONTROL_LOG}" || fail 'configured status was not restored'

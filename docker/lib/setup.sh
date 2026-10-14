@@ -10,6 +10,11 @@ dockerSetupCleanup() {
     local root candidate=${DOCKER_SETUP_CANDIDATE:-}
     [[ -n "${candidate}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
+    # 挑战未恢复时保留挂载目录和恢复记录，不能把清理失败变成丢失恢复点。
+    [[ -z "${DOCKER_ACME_RECOVERY:-}${DOCKER_ACME_CONTAINER:-}${DOCKER_ACME_WEBROOT:-}${DOCKER_ACME_STOPPED[*]:-}" ]] || {
+        dockerError "ACME 挑战尚未恢复，保留配置候选: ${candidate}"
+        return 1
+    }
     dockerRemoveManagedTree "${root}" "${candidate}" || return 1
     DOCKER_SETUP_CANDIDATE=
 }
@@ -1264,7 +1269,7 @@ dockerEditEntryAdd() {
     local draft=$1 listener=$2 targetProtocol=$3 targetCore=$4 port=$5 action=$6 output=$7
     jq --arg key "${listener}" --arg targetCore "${targetCore}" --argjson port "${port}" \
         --argjson targetProtocol "${targetProtocol}" --arg action "${action}" \
-        --slurpfile ssCredentials "${8:-/dev/null}" '
+        --slurpfile ssCredentials "${8:-/dev/null}" --arg tlsDomain "${9:-}" '
       def reality: . == 1 or . == 2 or . == 26;
       def nginx: . == 21 or . == 22 or . == 23 or . == 24 or . == 25;
       def available($start; $used):
@@ -1277,6 +1282,10 @@ dockerEditEntryAdd() {
         elif $id == 3 or $id == 4 or $id == 5 or $id == 30 or $id == 31 then $core == "sing-box"
         else false end;
       def ss_key: type == "string" and test("^[A-Za-z0-9+/]{21}[AQgw]==\\z");
+      if $tlsDomain == "" then . else
+        if $action != "protocol" or .tls != null or ($targetProtocol | reality) or $targetProtocol == 30
+        then error("只能为新增 TLS 协议设置首个证书域名") else .tls = {domain:$tlsDomain} end
+      end |
       . as $r |
       [.core.protocols[] | select(.listener_id == $key)] as $selected |
       if ($selected | length) != 1 or (.core.protocols | length) >= 16
@@ -1666,6 +1675,8 @@ dockerEditCommand() {
     local protocolPatchFile= hy2ObfsType= hy2ObfsFile= hy2ObfsPassword=
     local entryAction= entryListener= entryProtocol=0 entryPort=0 entryCore= entrySsCredentials=
     local entrySsGenerate=0 entrySsReady=0 entrySsServer= entrySsUser= entrySsImage= entrySsAttempt=
+    local entryTlsDomain= entryTlsMode= entryTlsCert= entryTlsKey= entryTlsEmail=
+    local entryTlsProvider= entryTlsCredentials= entryTlsSource= answer
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -1698,6 +1709,33 @@ dockerEditCommand() {
             [[ "$#" -ge 2 && -z "${entryCore}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             case "$2" in xray|sing-box) entryCore=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
             shift 2
+            ;;
+        --tls-domain)
+            [[ "$#" -ge 2 && -z "${entryTlsDomain}" && -n "$2" && "$2" != --* ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            entryTlsDomain=$2
+            shift 2
+            ;;
+        --tls-existing|--tls-import|--tls-dns|--tls-standalone)
+            [[ -z "${entryTlsMode}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$1" in
+            --tls-existing) entryTlsMode=1; shift ;;
+            --tls-import)
+                [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* ]] ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                entryTlsMode=2 entryTlsCert=$2 entryTlsKey=$3
+                shift 3 ;;
+            --tls-dns)
+                [[ "$#" -ge 4 && -n "$4" && "$4" != --* ]] ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                entryTlsMode=3 entryTlsEmail=$2 entryTlsProvider=$3 entryTlsCredentials=$4
+                shift 4 ;;
+            --tls-standalone)
+                [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                entryTlsMode=4 entryTlsEmail=$2 entryTlsProvider=standalone
+                shift 2 ;;
+            esac
             ;;
         --protocol-remove|--protocol-rebuild)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${entryAction}" ]] ||
@@ -2506,6 +2544,10 @@ dockerEditCommand() {
     }
     [[ -z "${entryCore}" || "${entryAction}" == add ]] ||
         return "${PADM_DOCKER_RC_USAGE}"
+    if [[ -n "${entryTlsDomain}${entryTlsMode}" ]]; then
+        [[ "${entryAction}" == add ]] || return "${PADM_DOCKER_RC_USAGE}"
+        case "${entryProtocol}" in 1|2|26|30) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    fi
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -2621,6 +2663,65 @@ dockerEditCommand() {
             entryCore=${entryCore:-$(jq -er --arg listener "${entryListener}" '
               .core.protocols[] | select(.listener_id == $listener) | .core
             ' "${draft}")} || return "${PADM_DOCKER_RC_STATE}"
+            if jq -e '.tls != null' "${normalized}" >/dev/null; then
+                [[ -z "${entryTlsDomain}${entryTlsMode}" ]] || {
+                    dockerError '已有 TLS 部署沿用原域名；证书更新请使用证书管理'
+                    return "${PADM_DOCKER_RC_USAGE}"
+                }
+            else
+                case "${entryProtocol}" in
+                1|2|26|30) ;;
+                *)
+                    if [[ "${mode}" == interactive ]]; then
+                        [[ -n "${entryTlsDomain}" ]] ||
+                            dockerSetupRead entryTlsDomain '新增协议的 TLS 域名（0 取消）: ' || return 0
+                        [[ -n "${entryTlsMode}" ]] ||
+                            dockerSetupRead entryTlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 0=取消]: ' 1 || return 0
+                        case "${entryTlsMode}" in
+                        1) ;;
+                        2)
+                            [[ -n "${entryTlsCert}" ]] ||
+                                dockerSetupRead entryTlsCert '完整证书链文件（0 取消）: ' || return 0
+                            [[ -n "${entryTlsKey}" ]] ||
+                                dockerSetupRead entryTlsKey '私钥文件（0 取消）: ' || return 0 ;;
+                        3)
+                            [[ -n "${entryTlsEmail}" ]] ||
+                                dockerSetupRead entryTlsEmail 'ACME 邮箱（0 取消）: ' || return 0
+                            [[ -n "${entryTlsProvider}" ]] ||
+                                dockerSetupRead entryTlsProvider 'DNS provider（dns_*，0 取消）: ' || return 0
+                            [[ -n "${entryTlsCredentials}" ]] ||
+                                dockerSetupRead entryTlsCredentials 'DNS 凭据文件（0 取消）: ' || return 0 ;;
+                        4)
+                            entryTlsProvider=standalone
+                            [[ -n "${entryTlsEmail}" ]] ||
+                                dockerSetupRead entryTlsEmail 'ACME 邮箱（0 取消）: ' || return 0 ;;
+                        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+                        esac
+                    fi
+                    [[ -n "${entryTlsDomain}" && -n "${entryTlsMode}" ]] || {
+                        dockerError '新增首个 TLS 协议需要 --tls-domain 和证书来源'
+                        return "${PADM_DOCKER_RC_STATE}"
+                    }
+                    dockerDomainIsValid "${entryTlsDomain}" || return "${PADM_DOCKER_RC_USAGE}"
+                    case "${entryTlsMode}" in
+                    1|2) ;;
+                    3)
+                        dockerEmailIsValid "${entryTlsEmail}" &&
+                            [[ "${entryTlsProvider}" =~ ^dns_[a-z0-9_]+$ ]] ||
+                            return "${PADM_DOCKER_RC_USAGE}"
+                        entryTlsCredentials=$(dockerResolveRegularFile "${entryTlsCredentials}") &&
+                            dockerRenewalCredentialsValidate "${entryTlsCredentials}" || {
+                            dockerError 'DNS 凭据必须为私密普通文件，内容须符合现有 ACME 环境变量约束'
+                            return "${PADM_DOCKER_RC_STATE}"
+                        } ;;
+                    4)
+                        dockerEmailIsValid "${entryTlsEmail}" || return "${PADM_DOCKER_RC_USAGE}"
+                        printf 'HTTP-01 需要域名解析到本机且公网 80 可达；确认后临时使用宿主 80，冲突时不停止无关服务。\n' ;;
+                    *) return "${PADM_DOCKER_RC_USAGE}" ;;
+                    esac
+                    ;;
+                esac
+            fi
             if [[ "${entryProtocol}" == 30 ]] && ! jq -e --arg listener "${entryListener}" '
               (.core.protocols[] | select(.listener_id == $listener) | .uuid) as $uuid |
               any(.core.protocols[]; .id == 30 and .uuid == $uuid)
@@ -2628,7 +2729,7 @@ dockerEditCommand() {
                 entrySsGenerate=1
             fi
             dockerEditEntryAdd "${draft}" "${entryListener}" "${entryProtocol}" "${entryCore}" \
-                "${entryPort}" protocol "${draft}.next" &&
+                "${entryPort}" protocol "${draft}.next" '' "${entryTlsDomain}" &&
                 chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
                 return "${PADM_DOCKER_RC_STATE}"
         elif [[ "${entryAction}" == remove ]]; then
@@ -3468,8 +3569,43 @@ dockerEditCommand() {
         }
     done < <(jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
       [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
+    if [[ -n "${entryTlsMode}" ]]; then
+        printf '新增 TLS 域名: %s，证书方式: %s；保留已有入口、账号授权和订阅状态。\n' \
+            "${entryTlsDomain}" "${entryTlsMode}"
+        if [[ "${entryTlsMode}" == 3 || "${entryTlsMode}" == 4 ]]; then
+            # 申请前先完成无证书即可验证的门禁；预览和取消不触发 CA 或暂停服务。
+            dockerControlRecoveryCheck &&
+                dockerControlSyncTransitionValidate "${draft}" &&
+                dockerControlSyncScheduleSpecCheck "${draft}" &&
+                dockerControlTransitionValidate "${draft}" &&
+                dockerRealityTargetsValidate "${draft}" &&
+                dockerHostIntegrationInputsValidate "${draft}" ||
+                return "${PADM_DOCKER_RC_STATE}"
+            dockerTrafficRuntimeCheck "$(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${draft}")" ||
+                return "${PADM_DOCKER_RC_HOST}"
+            dockerConfigurePortsAvailable "${draft}" || return "${PADM_DOCKER_RC_CONFLICT}"
+            if [[ "${mode}" == preview ]]; then
+                printf '新增协议计划已校验；预览未申请证书或提交，证书及完整候选将在确认后验证。\n'
+                return 0
+            fi
+            if [[ "${mode}" == interactive ]]; then
+                dockerSetupRead answer '确认申请证书并在完整候选验证后提交？[y/N]: ' n || answer=n
+                case "${answer}" in
+                y|Y|yes|YES) mode=confirmed ;;
+                *) printf '已取消配置编辑。\n'; return 0 ;;
+                esac
+            fi
+        fi
+        entryTlsSource="${workspace}/certificate"
+        mkdir -m 0700 "${entryTlsSource}" &&
+            dockerSetupStageCertificate "${entryTlsSource}" "${entryTlsMode}" "${entryTlsDomain}" \
+                "${entryTlsCert}" "${entryTlsKey}" "${entryTlsEmail}" \
+                "${entryTlsProvider}" "${entryTlsCredentials}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     DOCKER_CONFIG_RESTORE_ALPN_LISTENER=${alpnListener}
-    dockerConfigureApply "${draft}" '' '' "${mode}" '' "${siteSource}" "${siteTemplate}"
+    dockerConfigureApply "${draft}" "${entryTlsSource:+${entryTlsSource}/tls}" \
+        "${entryTlsSource:+${entryTlsSource}/acme}" "${mode}" '' "${siteSource}" "${siteTemplate}"
 }
 
 dockerEditCompatibilityValidate() {
@@ -3481,7 +3617,7 @@ dockerEditCompatibilityValidate() {
         if [[ "${entryAction}" == add ]]; then
             # 从原规格再生成唯一允许的追加结果，不能用豁免字段放行其它入口或根字段漂移。
             dockerEditEntryAdd "${editBefore}" "${entryListener}" "${entryProtocol}" "${entryCore}" \
-                "${entryPort}" protocol "${editAfter}.expected" "${entrySsCredentials:-}" &&
+                "${entryPort}" protocol "${editAfter}.expected" "${entrySsCredentials:-}" "${entryTlsDomain:-}" &&
                 chmod 0600 "${editAfter}.expected" &&
                 jq -e --slurpfile expected "${editAfter}.expected" '. == $expected[0]' \
                     "${editAfter}" >/dev/null 2>&1 || {

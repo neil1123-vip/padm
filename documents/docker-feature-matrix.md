@@ -9,12 +9,14 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 后续实施顺序和验收门槛见
 [Docker 菜单与功能对齐实施计划](docker-menu-parity-plan.md)。计划安排不改变本表的当前支持状态。
 
-3D.11–3D.12 提供协议菜单 `14/15/16` 与
+3D.11–3D.13 提供协议菜单 `14/15/16` 与
 `edit --protocol-add/--protocol-remove/--protocol-rebuild`。
 新增接受已有受管 v1/v2/v3，旧规格仅在成功确认后迁移；
 默认源核心，可选 Xray/sing-box 并启用副核心，主核心保持，跨核心拒绝宿主集成。
 复用源 UUID、地址和已有 TLS，只追加一个入口，不扩账号授权；
-Reality 仅从 Reality 派生，不申请新证书。
+Reality 仅从 Reality 派生。无 TLS 部署新增首个 TLS 协议可显式选择受管/导入/
+DNS-01/HTTP-01 standalone 证书，复用候选证书和配置恢复事务，不迁移已有 TLS 域名。
+ACME 预览只校验计划，确认后才申请并验证完整候选，不自动登记续期。
 首次 SS2022 新增生成独立服务器/用户密钥，私密候选文件冻结复验，不进 argv/预览；
 同 UUID 已有 SS 保留原密钥。删除与重建仍要求 v3。
 删除沿用账号最后关联、主核心、共存和 Fail2ban 门禁并清理入口附属配置；
@@ -307,7 +309,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；3D.11–3D.12 提供旧规格迁移后的增量新增、核心选择、新 SS 密钥以及 v3 删除/保身份重建。完整重装、新证书联动及真实发布连通未完成。 |
+| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；3D.11–3D.13 提供旧规格迁移后的增量新增、核心选择、新 SS 密钥、首个 TLS 证书联动以及 v3 删除/保身份重建。完整重装、已有 TLS 域名迁移及真实发布连通未完成。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号与双核心认证/统计、账号/分享组及业务备份恢复、主控管理与被控接入/手动同步、已有单 Peer 被控自动同步 CLI/菜单、WireGuard 宿主集成 | HTTPS 链接仍要求受管 TLS；H3 和完整多服务器工作流未迁移。隔离 amd64 双部署事务及真实 cron 自主同步已验，WireGuard 需 `net-wireguard`；原生双机、arm64 和重启另验。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`23` VMess HTTPUpgrade TLS、`24` VLESS gRPC TLS、`25` Trojan gRPC TLS、`26` Reality gRPC、`27` TLS Vision fallback、`28` direct Trojan、`29` Trojan TLS fallback、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口、Reality 传输派生、参数重生成和目标站管理；有限 Reality 443 共存及 21/22/23/24/25 CDN 连接地址覆盖 | XHTTP、VMess WS、gRPC TLS 和传统 TLS fallback 仅限 Xray，Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；HTTPUpgrade 支持两核心；完整协议管理、UDP 端口跳跃、其余 CDN 和完整内部路由工作流尚未开放；Fail2ban WS 增删及通用端口编辑拒绝，单入口保护端口专项见 5C.6d。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 与 HTTP-01 standalone/受管 webroot 本地事务、Nginx WebSocket/HTTPUpgrade/gRPC HTTP/2 入口及传统 TLS fallback；默认页、静态目录、302、受管三主题、Hysteria2 local 与逐入口 ALPN 事务管理 | 隔离 amd64 TLS ALPN 和 H3 已有实测；公网 CA、宿主生命周期及原生双架构验收待补。 |
