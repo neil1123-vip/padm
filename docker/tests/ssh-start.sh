@@ -121,7 +121,8 @@ for _ in range(100):
             try:
                 if Path(f"/proc/{watcher}/task/{watcher}/children").read_text().split():
                     break
-            except FileNotFoundError:
+            # 进程在 /proc 文件打开后退出也可能返回 ESRCH。
+            except (FileNotFoundError, ProcessLookupError):
                 pass
     time.sleep(0.02)
 else:
@@ -134,7 +135,7 @@ while pending:
     try:
         identities[pid] = path.joinpath("stat").read_text().split(") ", 1)[1].split()[19]
         pending.extend(path.joinpath(f"task/{pid}/children").read_text().split())
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         pass
 (root / "children.json").write_text(json.dumps(identities))
 PY
@@ -157,7 +158,7 @@ for _ in range(200):
     try:
         if path.read_text().split(") ", 1)[1].split()[0] == "Z":
             break
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         break
     time.sleep(0.02)
 else:
@@ -189,7 +190,7 @@ import sys
 for pid, identity in json.loads(Path(sys.argv[1]).read_text()).items():
     try:
         current = Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1].split()[19]
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         continue
     if current == identity:
         raise SystemExit(f"SSH child survived exit: {pid}")
