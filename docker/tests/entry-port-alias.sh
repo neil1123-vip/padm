@@ -55,8 +55,10 @@ docker() {
 }
 dockerComposeRun() {
     [[ -e "${root}/locks/deployment.lock" ]] || fail '发布未持有部署锁'
-    if [[ "${1:-}" == up && "${MODE}" == health-fail && ! -e "${TEST_ROOT}/failed-once" ]]; then
+    if [[ "${1:-}" == up && "${MODE}" != ok && ! -e "${TEST_ROOT}/failed-once" ]]; then
         : >"${TEST_ROOT}/failed-once"
+        [[ "${MODE}" != interrupt-int ]] || kill -INT "${BASHPID}"
+        [[ "${MODE}" != interrupt-term ]] || kill -TERM "${BASHPID}"
         return 1
     fi
 }
@@ -665,6 +667,81 @@ assertShare "${root}/config/spec.json" "${TEST_ROOT}/links.selected" "${root}/da
 captureEditOutputs
 runEdit 0 --port-alias-default entry-xray 36661 --confirm PADM-DOCKER-EDIT
 assertEditOutputs
+# 原位替换只改变命中端口，独立保存现场以复用后续已有默认与删除合同。
+cp -a -- "${root}" "${TEST_ROOT}/replace-state.before"
+(
+    trap 'rm -rf -- "${root}"; cp -a -- "${TEST_ROOT}/replace-state.before" "${root}"' EXIT
+    runEdit 0 --port-alias entry-xray 36664 --confirm PADM-DOCKER-EDIT
+    runEdit 0 --port-alias entry-sing-box 36662 --confirm PADM-DOCKER-EDIT
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/replace.before.json"
+    before=$(snapshot)
+    runEdit 0 --port-alias-replace entry-xray 36661 36663 --preview
+    runEdit 2 --port-alias-replace entry-xray 36661
+    for oldPort in 0 65536 invalid; do
+        runEdit 2 --port-alias-replace entry-xray "${oldPort}" 36663 --preview
+        runEdit 2 --port-alias-replace entry-xray 36661 "${oldPort}" --preview
+    done
+    runEdit 2 --port-alias-replace entry-xray 36661 36663 --port-alias entry-xray 36665 --preview
+    runEdit 2 --port-alias-replace entry-xray 36661 36663 --spec "${TEST_ROOT}/alias.json" --preview
+    runEdit 2 --port-alias-replace entry-xray 36661 36663 --block-bt --preview
+    runEdit 15 --port-alias-replace entry-no-such 36661 36663 --preview
+    runEdit 15 --port-alias-replace entry-xray 36660 36663 --preview
+    runEdit 15 --port-alias-replace entry-xray 36661 36661 --preview
+    for newPort in 35444 35442 36664 36662; do
+        runEdit 15 --port-alias-replace entry-xray 36661 "${newPort}" --preview
+    done
+    [[ "$(snapshot)" == "${before}" ]] || fail '端口替换预览或拒绝输入改变在线部署'
+    (
+        portAlias=port-alias-replace portAliasListener=entry-xray
+        portAliasOldPort=36661 portAliasPort=36663
+        jq '.port_aliases |= map(if .listener_id=="entry-xray" and .public_port==36661
+          then .public_port=36663 else . end)' "${root}/config/spec.json" >"${TEST_ROOT}/replace.expected.json"
+        dockerEditCompatibilityValidate "${root}/config/spec.json" "${TEST_ROOT}/replace.expected.json" ||
+            fail '端口精确替换被兼容门禁拒绝'
+        for mutation in '.port_aliases[0].share_default=null' '.port_aliases[1].public_port=36665' \
+            '.port_aliases|=reverse' '.core.protocols[0].name="changed"' '.subscription.enabled=false'; do
+            jq "${mutation}" "${TEST_ROOT}/replace.expected.json" >"${TEST_ROOT}/replace.tampered.json"
+            reject dockerEditCompatibilityValidate "${root}/config/spec.json" "${TEST_ROOT}/replace.tampered.json"
+        done
+    ) >"${LOG}" 2>&1 || fail '端口替换未精确冻结其它规格字段'
+    for MODE in health-fail interrupt-int interrupt-term; do
+        rm -f -- "${TEST_ROOT}/failed-once"
+        case "${MODE}" in
+        health-fail) runEdit 14 --port-alias-replace entry-xray 36661 36663 --confirm PADM-DOCKER-EDIT ;;
+        interrupt-int) runEdit 130 --port-alias-replace entry-xray 36661 36663 --confirm PADM-DOCKER-EDIT ;;
+        interrupt-term) runEdit 143 --port-alias-replace entry-xray 36661 36663 --confirm PADM-DOCKER-EDIT ;;
+        esac
+        [[ "$(snapshot)" == "${before}" ]] || fail '端口替换失败或信号未完整恢复现场'
+    done
+    MODE=ok
+    sha256sum "${root}/config/xray/"{config.json,users.base} \
+        "${root}/config/sing-box/"{config.json,users.base} "${root}/config/share-groups.json" \
+        "${root}/data/traffic/state.json" "${root}/secrets/tls/"* >"${TEST_ROOT}/replace-fixed.before"
+    runEdit 0 --port-alias-replace entry-xray 36661 36663 --confirm PADM-DOCKER-EDIT
+    jq -e --slurpfile old "${TEST_ROOT}/replace.before.json" '
+      . == ($old[0] | .port_aliases |= map(
+        if .listener_id=="entry-xray" and .public_port==36661 then .public_port=36663 else . end))
+    ' "${root}/config/spec.json" >/dev/null || fail '端口替换改变非目标字段、次序或默认分享标记'
+    sha256sum "${root}/config/xray/"{config.json,users.base} \
+        "${root}/config/sing-box/"{config.json,users.base} "${root}/config/share-groups.json" \
+        "${root}/data/traffic/state.json" "${root}/secrets/tls/"* >"${TEST_ROOT}/replace-fixed.after"
+    cmp "${TEST_ROOT}/replace-fixed.before" "${TEST_ROOT}/replace-fixed.after" ||
+        fail '端口替换改写核心、账号、分享组、流量或私有文件'
+    jq -e '
+      (.services.xray.ports | index("0.0.0.0:36663:35444/tcp")) != null and
+      (.services.xray.ports | index("[::]:36663:35444/tcp")) != null and
+      all(.services.xray.ports[]; contains(":36661:") | not)
+    ' "${root}/compose.json" >/dev/null || fail '端口替换未双栈发布新端口或遗留旧端口'
+    jq -e '
+      any(.listeners[]; .listener_id=="alias-36663-tcp" and .target_listener_id=="entry-xray" and
+        .public_port==36663 and .container_port==35444) and
+      all(.listeners[]; .public_port != 36661)
+    ' "${root}/deployment.json" >/dev/null || fail '端口替换未更新部署记录'
+    assertInstalledShare
+    (dockerMain protocol links) >"${TEST_ROOT}/replace.links"
+    grep -Fq ':36663' "${TEST_ROOT}/replace.links" || fail '默认分享 URI 未使用替换后的端口'
+    ! grep -Fq ':36661' "${TEST_ROOT}/replace.links" || fail '默认分享 URI 遗留旧额外端口'
+)
 before=$(snapshot)
 jq '.port_aliases[0] |= del(.share_default)' "${root}/config/spec.json" >"${TEST_ROOT}/frozen-clear.json"
 runEdit 15 --spec "${TEST_ROOT}/frozen-clear.json" --confirm PADM-DOCKER-EDIT

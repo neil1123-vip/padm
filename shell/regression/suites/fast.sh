@@ -226,6 +226,10 @@ runDockerMenuRoutingRegression() {
     PADM_DOCKER_MENU_SCOPE=routing runDockerMenuRegression
 }
 
+runDockerMenuPortAliasRegression() {
+    PADM_DOCKER_MENU_SCOPE=port-alias runDockerMenuRegression
+}
+
 runDockerHttpRelayRegression() {
     bash "${PROJECT_ROOT}/docker/tests/http-relay.sh"
 }
@@ -792,6 +796,7 @@ registerRegressionFunctionLeaf install-sync-signal-rollback runInstallSyncSignal
 registerRegressionFunctionLeaf docker-phase1 runDockerPhase1Regression
 registerRegressionFunctionLeaf docker-menu runDockerMenuRegression
 registerRegressionFunctionLeaf docker-menu-routing runDockerMenuRoutingRegression
+registerRegressionFunctionLeaf docker-menu-port-alias runDockerMenuPortAliasRegression
 registerRegressionFunctionLeaf docker-release runDockerReleaseRegression
 registerRegressionFunctionLeaf docker-setup runDockerSetupRegression
 registerRegressionFunctionLeaf docker-setup-core runDockerSetupRegression core

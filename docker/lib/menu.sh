@@ -279,12 +279,12 @@ dockerMenuCdnEntries() {
 }
 
 dockerMenuPortAliases() {
-    local choice listener port
+    local choice listener port oldPort
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 额外入口端口\n'
         printf '%s\n' '1. 查看额外端口' '2. 添加端口' '3. 删除端口' \
-            '4. 选择默认分享端口' '5. 恢复原入口' '0. 返回'
+            '4. 选择默认分享端口' '5. 恢复原入口' '6. 修改额外端口' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -319,6 +319,16 @@ dockerMenuPortAliases() {
             dockerSetupRead listener '入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" ]] || continue
             dockerMenuRun edit --port-alias-default "${listener}" base || true
+            ;;
+        6)
+            dockerMenuRun protocol port-alias-status || continue
+            dockerSetupRead listener '入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" ]] &&
+                dockerSetupRead oldPort '旧额外端口（0 返回）: ' &&
+                [[ -n "${oldPort}" ]] &&
+                dockerSetupRead port '新额外端口（0 返回）: ' &&
+                [[ -n "${port}" ]] || continue
+            dockerMenuRun edit --port-alias-replace "${listener}" "${oldPort}" "${port}" || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

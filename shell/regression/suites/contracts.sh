@@ -401,16 +401,18 @@ runRegressionDockerContractsAggregateContract() (
     [[ -z "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-}" ]]
     [[ -z "${PADM_DOCKER_REALITY_TARGETS_SCOPE:-}" ]]
 
-    # 完整菜单保留原集合，路由定向只向同一脚本传入 scope。
+    # 完整菜单保留原集合，定向入口只向同一脚本传入 scope。
     bash() { printf '%s:%s\n' "${PADM_DOCKER_MENU_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
     : >"${callLog}"
     unset PADM_DOCKER_MENU_SCOPE
     runDockerMenuRegression
     runDockerMenuRoutingRegression
-    printf '%s\n' full:menu.sh routing:menu.sh >"${expectedLog}"
+    runDockerMenuPortAliasRegression
+    printf '%s\n' full:menu.sh routing:menu.sh port-alias:menu.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_MENU_SCOPE:-}" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-routing]}" == function ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-port-alias]}" == function ]]
 
     # 注册集合相同还不够，新旧路由入口都必须把正确 scope 传给原脚本。
     bash() {

@@ -3345,6 +3345,40 @@ Schema 正负例、JSON、PowerShell AST 和 diff 检查通过。
 日志/result 和共享成功索引保留。
 公网、IPv6 发布、arm64、原生宿主及完整 `207` 验收未补，不升级支持状态。
 
+#### 5B.5e 额外入口端口原位修改
+
+CLI `edit --port-alias-replace LISTENER OLDPORT NEWPORT` 和协议菜单 `9 → 8 → 6`
+复用已有规格校验、预览、一次确认与候选回滚。旧别名必须存在，新端口必须不同、
+合法且没有发布冲突；与规格导入及其它专项编辑互斥。
+只原位修改选中项的 `public_port`，完整规格必须等于这一项精确变换；
+保留别名顺序、`share_default`、其它入口、认证、账号及累计流量。
+已选默认别名的 URI、主订阅与分享组随事务切换，不先删除再新增。
+
+范围仍为已有受管 bridge 入口，不增加 schema、核心、权限或任意目的转发。
+本批定向核对 Compose/deployment/链接投影和菜单取消/EOF/失败恢复；
+`docker-menu-port-alias` 复用原菜单脚本的全部别名 PTY 断言，
+完整菜单和完整合同的集合保持不变，避免定向重复其它菜单与信号长集合。
+发布生成器未变，复用 5B.5c–5B.5d 的本地真实双栈证据，不重复相同矩阵。
+公网、原生宿主、arm64 与完整 207 仍待验，支持状态保持 `deferred`，总目标继续 active。
+
+2026-10-14 Docker Desktop Linux amd64 验收，全部实际执行、cache=false：
+
+| 检查 | 内部 / 入口毫秒 | 证据目录 |
+| --- | --- | --- |
+| `docker-entry-port-alias`，Jobs 2 | 38597 / 39701 | `.tmp-regression-docker-ee44495ec9654668845f030464b2dd01` |
+| `docker-menu-port-alias`，Jobs 2，14 个 PTY 场景 | 1669 / 2695 | `.tmp-regression-docker-8a750f1be1334631823a361173380382` |
+| `regression-dispatcher-contract`，Jobs 2 | 577 / 1582 | `.tmp-regression-docker-b0d150f191e44d928567f462479e68b0` |
+| 集中 `docker-contracts`，Jobs 6，54/54 | 307208 / 309253 | `.tmp-regression-docker-70f4eb4d2b0e4068a7d519b96b58ed64` |
+
+四次源码归档摘要相同：
+`141C525932D0AD20B19D5568B162C8355EB18F9E332C5222E1F7DBB50DAC2C58`。
+7 份代码/测试/派发文件逐文件匹配完整快照，Bash/ShellCheck error 和 diff 检查通过；
+之后仅补验收文字，不重复回归。预览/缺旧/同值/新冲突/非法组合均不改部署，
+健康失败、INT、TERM 恢复完整快照；成功仅改目标端口，核心/账号/流量/私有材料保持，
+Compose 双栈旧端口消失、新端口发布，deployment 与 URI/主订阅/分享组一致切换。
+完整集合内菜单为 57067 ms，定向为 1669 ms；覆盖范围和负载不同，不推算全套提速比例。
+成功源码归档和清单清理，保留日志/result；下一批继续 TUN 归属与日常管理。
+
 ### 5C. 宿主集成与端口跳跃
 
 - 完善 WireGuard、TUN/TProxy、Fail2ban 的管理流程及内部 `203`、`204`、`205`；

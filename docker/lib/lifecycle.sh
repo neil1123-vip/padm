@@ -45,6 +45,7 @@ dockerUsage() {
   padm-docker edit --tproxy-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --port-alias-replace <入口 ID> <旧公开端口> <新公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-default <入口 ID> <已有额外端口|base> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-hopping <Hy2 入口 ID> <起始端口> <结束端口> <本机 IPv4> <本机 IPv6> [--preview|--confirm PADM-DOCKER-EDIT]
   padm-docker edit --port-hopping-clear [--preview|--confirm PADM-DOCKER-EDIT]

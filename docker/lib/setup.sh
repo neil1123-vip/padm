@@ -1481,7 +1481,7 @@ dockerEditCommand() {
     local routingOldIp= routingNewIp= routingHost=
     local httpRelay= httpRelayFile= httpRelayPort=0 httpRelaySources='[]'
     local tproxyAction= tproxyPort=0 tproxyMark=0
-    local portAlias= portAliasListener= portAliasPort=
+    local portAlias= portAliasListener= portAliasPort= portAliasOldPort=
     local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
     local portHoppingIpv4= portHoppingIpv6=
     local cdnAction= cdnListener= cdnAddresses=
@@ -1835,7 +1835,7 @@ dockerEditCommand() {
             cdnAction=clear cdnListener=$2
             shift 2
             ;;
-        --port-alias|--port-alias-remove|--port-alias-default)
+        --port-alias|--port-alias-remove|--port-alias-default|--port-alias-replace)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* &&
                 -z "${portAlias}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             portAlias=${1#--} portAliasListener=$2
@@ -1847,7 +1847,14 @@ dockerEditCommand() {
                     return "${PADM_DOCKER_RC_USAGE}"
                 portAliasPort=$((10#$3))
             fi
-            shift 3
+            if [[ "${portAlias}" == port-alias-replace ]]; then
+                [[ "$#" -ge 4 && "$4" =~ ^[0-9]{1,5}$ ]] &&
+                    ((10#$4 >= 1 && 10#$4 <= 65535)) || return "${PADM_DOCKER_RC_USAGE}"
+                portAliasOldPort=${portAliasPort} portAliasPort=$((10#$4))
+                shift 4
+            else
+                shift 3
+            fi
             ;;
         --port-hopping)
             [[ "$#" -ge 6 && -z "${portHoppingAction}" &&
@@ -2345,7 +2352,8 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${portAlias}" ]]; then
-        jq --arg listener "${portAliasListener}" --arg port "${portAliasPort}" --arg action "${portAlias}" '
+        jq --arg listener "${portAliasListener}" --arg port "${portAliasPort}" \
+            --arg old_port "${portAliasOldPort}" --arg action "${portAlias}" '
           ($port | if . == "base" then null else tonumber end) as $port |
           if any(.core.protocols[]; .listener_id == $listener) then .
           else error("入口 ID 不存在") end |
@@ -2357,6 +2365,13 @@ dockerEditCommand() {
               .port_aliases |= map(select(.listener_id != $listener or .public_port != $port)) |
               if .port_aliases == [] then del(.port_aliases) else . end
             else error("额外端口不存在") end
+          elif $action == "port-alias-replace" then
+            ($old_port | tonumber) as $old |
+            if $old != $port and any(.port_aliases[]?;
+              .listener_id == $listener and .public_port == $old) then
+              .port_aliases |= map(if .listener_id == $listener and .public_port == $old
+                then .public_port = $port else . end)
+            else error("旧额外端口不存在或端口没有变化") end
           else
             if $port == null or any(.port_aliases[]?; .listener_id == $listener and .public_port == $port) then
               if has("port_aliases") then
@@ -2885,6 +2900,8 @@ dockerEditCompatibilityValidate() {
         --arg http_relay "${httpRelay:-}" \
         --arg tproxy_action "${tproxyAction:-}" \
         --arg port_alias "${portAlias:-}" \
+        --arg alias_listener "${portAliasListener:-}" --arg alias_port "${portAliasPort:-}" \
+        --arg alias_old_port "${portAliasOldPort:-}" \
         --arg port_hopping "${portHoppingAction:-}" \
         --arg cdn_listener "${cdnListener:-}" \
         --arg xhttp_listener "${xhttpListener:-}" --arg xhttp_action "${xhttpAction:-}" \
@@ -2981,6 +2998,10 @@ dockerEditCompatibilityValidate() {
         ($old | without_xhttp) == ($new | without_xhttp)
        elif $cdn_listener != "" then
         ($old | without_cdn) == ($new | without_cdn)
+       elif $port_alias == "port-alias-replace" then
+        $new == ($old | .port_aliases |= map(
+          if .listener_id == $alias_listener and .public_port == ($alias_old_port | tonumber)
+          then .public_port = ($alias_port | tonumber) else . end))
        elif $port_alias != "" then
         ($old | del(.port_aliases)) == ($new | del(.port_aliases))
        elif $http_relay == "port" then

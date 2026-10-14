@@ -3,7 +3,7 @@ set -euo pipefail
 
 MENU_SCOPE=${PADM_DOCKER_MENU_SCOPE:-full}
 case "${MENU_SCOPE}" in
-full|routing) ;;
+full|routing|port-alias) ;;
 *) printf 'docker-menu-regression-fail: invalid scope: %s\n' "${MENU_SCOPE}" >&2; exit 1 ;;
 esac
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -387,7 +387,7 @@ runGeoDriver() {
 }
 
 runPortAliasDriver() {
-    local scenario=$1
+    local scenario=$1 field input
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'9\n'
     targetReply 'Docker 协议与入口' $'8\n'
@@ -444,6 +444,42 @@ runPortAliasDriver() {
     base-eof)
         targetReply 'Docker 额外入口端口' $'5\n'
         targetReply '入口 ID（0 返回）' $'\004'
+        ;;
+    replace-flow|replace-failed)
+        targetReply 'Docker 额外入口端口' $'6\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply '旧额外端口（0 返回）' $'2053\n'
+        targetReply '新额外端口（0 返回）' $'2083\n'
+        targetReply 'fixture-port-alias-replace-confirm [y/N]' $'y\n'
+        targetReply 'Docker 额外入口端口' $'1\n'
+        ;;
+    replace-cancel|replace-eof)
+        for field in listener old new; do
+            for input in $'0\n' $'\n'; do
+                [[ "${scenario}" != replace-eof ]] || input=$'\004'
+                targetReply 'Docker 额外入口端口' $'6\n'
+                if [[ "${field}" == listener ]]; then
+                    targetReply '入口 ID（0 返回）' "${input}"
+                else
+                    targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+                    if [[ "${field}" == old ]]; then
+                        targetReply '旧额外端口（0 返回）' "${input}"
+                    else
+                        targetReply '旧额外端口（0 返回）' $'2053\n'
+                        targetReply '新额外端口（0 返回）' "${input}"
+                    fi
+                fi
+                [[ "${scenario}" != replace-eof ]] || break
+            done
+        done
+        targetReply 'Docker 额外入口端口' $'6\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply '旧额外端口（0 返回）' $'2053\n'
+        targetReply '新额外端口（0 返回）' $'2083\n'
+        input=$'n\n'
+        [[ "${scenario}" != replace-eof ]] || input=$'\004'
+        targetReply 'fixture-port-alias-replace-confirm [y/N]' "${input}"
+        targetReply 'Docker 额外入口端口' $'1\n'
         ;;
     esac
     targetReply 'Docker 额外入口端口' $'0\n'
@@ -2464,6 +2500,17 @@ edit)
         [[ "${confirmation}" == y ]] || exit 2
         [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
         recordAction warp-daily-commit "$2"
+    elif [[ "${2:-}" == --port-alias-replace ]]; then
+        [[ "$#" -eq 5 && "$3" == entry-fixture && "$4" == 2053 && "$5" == 2083 ]] || exit 2
+        printf 'fixture-port-alias-replace-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction port-alias-replace-confirm eof
+            exit 2
+        fi
+        recordAction port-alias-replace-confirm "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction port-alias-replace-commit
     elif [[ "${2:-}" == --port-alias || "${2:-}" == --port-alias-remove ||
         "${2:-}" == --port-alias-default ]]; then
         [[ "${2:-}" == --port-alias-default && "${4:-}" == base ]] ||
@@ -3008,6 +3055,7 @@ done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 fi
 
+if [[ "${MENU_SCOPE}" != port-alias ]]; then
 for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
     domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \
@@ -3469,12 +3517,14 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     fi
 done
 unset SITE_EDIT_STATUS ROUTING_STATUS TPROXY_STATUS SELECTIVE_EDIT_PRECHECK_STATUS DOMAIN_REPLACE_PRECHECK_STATUS
+fi
 
 if [[ "${MENU_SCOPE}" == routing ]]; then
     printf 'docker-menu-routing-regression-ok\n'
     exit 0
 fi
 
+if [[ "${MENU_SCOPE}" == full ]]; then
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
 for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
@@ -3815,12 +3865,15 @@ runPty protocols-dispatch protocols read "${TLS_WIZARD_CLI}" menu
 runPty protocols-links-cancel protocols cancel "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == 'protocol list' ]] ||
     fail 'cancelled protocol link selection dispatched a business command'
+fi
 
 # 额外入口菜单使用真实 PTY，取消与 EOF 不向 CLI 提交端口变更。
-for aliasCase in flow cancel eof invalid failed default-cancel default-eof base-eof default-invalid default-failed; do
+for aliasCase in flow cancel eof invalid failed default-cancel default-eof base-eof default-invalid default-failed \
+    replace-flow replace-cancel replace-eof replace-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0
-    [[ "${aliasCase}" != failed && "${aliasCase}" != default-failed ]] || SITE_EDIT_STATUS=15
+    [[ "${aliasCase}" != failed && "${aliasCase}" != default-failed && "${aliasCase}" != replace-failed ]] ||
+        SITE_EDIT_STATUS=15
     runPty "port-alias-${aliasCase}" port-alias "${aliasCase}" "${TLS_WIZARD_CLI}" menu
     expectedAliases='protocol list'
     case "${aliasCase}" in
@@ -3855,11 +3908,43 @@ for aliasCase in flow cancel eof invalid failed default-cancel default-eof base-
         expectedAliases+=$'\nprotocol port-alias-status\nprotocol list\nedit --port-alias-default entry-fixture 2053'
         grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '默认分享端口 CLI 失败未保留菜单'
         ;;
+    replace-flow|replace-cancel|replace-eof|replace-failed)
+        aliasConfirmation=y aliasFailureCount=0 aliasExit=2
+        case "${aliasCase}" in
+        replace-cancel)
+            for ((aliasStatus = 0; aliasStatus < 6; aliasStatus++)); do
+                expectedAliases+=$'\nprotocol port-alias-status'
+            done
+            aliasConfirmation=n aliasFailureCount=1
+            ;;
+        replace-eof)
+            for ((aliasStatus = 0; aliasStatus < 3; aliasStatus++)); do
+                expectedAliases+=$'\nprotocol port-alias-status'
+            done
+            aliasConfirmation=eof aliasFailureCount=1
+            ;;
+        replace-failed) aliasFailureCount=1 aliasExit=15 ;;
+        esac
+        expectedAliases+=$'\nprotocol port-alias-status\nedit --port-alias-replace entry-fixture 2053 2083'
+        expectedAliases+=$'\nport-alias-replace-confirm '"${aliasConfirmation}"
+        [[ "${aliasCase}" != replace-flow ]] || expectedAliases+=$'\nport-alias-replace-commit'
+        expectedAliases+=$'\nprotocol port-alias-status'
+        [[ "$(grep -Fc 'fixture-port-alias-replace-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq 1 ]] ||
+            fail '额外端口替换没有仅由 CLI 确认一次'
+        [[ "$(grep -Fc "操作失败，退出码: ${aliasExit}" "${CONTROL_LOG}" || true)" -eq "${aliasFailureCount}" ]] ||
+            fail '额外端口替换取消或失败未显示退出码并继续状态'
+        grep -Fq '6. 修改额外端口' "${CONTROL_LOG}" || fail '额外端口替换菜单未接入'
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAliases}" ]] ||
         fail "额外入口 ${aliasCase} 参数分发错误或取消后执行操作"
 done
 unset SITE_EDIT_STATUS
+
+if [[ "${MENU_SCOPE}" == port-alias ]]; then
+    printf 'docker-menu-port-alias-regression-ok\n'
+    exit 0
+fi
 
 # 两种 gRPC TLS 入口共用菜单交互，取消和 EOF 只允许状态读取。
 for cdnCase in flow cancel failed; do

@@ -324,7 +324,7 @@ padm-docker protocol links
 padm-docker protocol links vless-reality
 ```
 
-The protocol/listener menu also manages extra published ports for existing listeners.
+The protocol/listener menu adds, removes and replaces extra published ports for existing listeners.
 Optional v3 `port_aliases` contains up to 16 `{listener_id, public_port}` entries.
 Each alias retains the listener's TCP/UDP transports, address families, authentication,
 account identity and traffic counters. TLS still terminates at the existing Nginx frontend;
@@ -335,11 +335,17 @@ No extra core, certificate, host privilege or arbitrary destination forwarding i
 padm-docker protocol port-alias-status
 padm-docker edit --port-alias entry-reality 8444 --preview
 padm-docker edit --port-alias entry-reality 8444 --confirm PADM-DOCKER-EDIT
-padm-docker edit --port-alias-default entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-replace entry-reality 8444 8445 --preview
+padm-docker edit --port-alias-replace entry-reality 8444 8445 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-default entry-reality 8445 --confirm PADM-DOCKER-EDIT
 padm-docker edit --port-alias-default entry-reality base --confirm PADM-DOCKER-EDIT
-padm-docker edit --port-alias-remove entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-remove entry-reality 8445 --confirm PADM-DOCKER-EDIT
 ```
 
+Replacement requires an existing alias and a different, nonconflicting new port.
+It preserves alias order, the default-share marker and all other spec fields.
+Replacing a selected alias updates its links in the same transaction;
+preview, cancellation and failed application leave the current deployment unchanged.
 Share links retain the original public port unless an existing alias is selected.
 The selected alias stores `share_default: true`, at most once per listener. Local URIs,
 the main subscription and share groups use the same selected port without adding nodes
@@ -1899,6 +1905,8 @@ For Direct/Block CSV or Docker menu dispatch changes on Windows, run
 `.\shell\regression\run-docker.ps1 -Selector docker-routing-domains-workflow`
 and `docker-menu` first. The focused selector reuses the transaction assertions;
 it does not replace Schema, generator, other routing matrices, or real traffic checks.
+For extra listener ports, use `docker-entry-port-alias` and `docker-menu-port-alias`.
+The menu selector reuses every alias PTY assertion; `docker-menu` retains the full set.
 
 | Level | Command | Purpose |
 | --- | --- | --- |

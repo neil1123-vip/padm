@@ -662,7 +662,7 @@ padm-docker edit --spec /root/original-spec.json --preview
 padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 ```
 
-菜单“协议与入口”的“额外入口端口”可给已有受管入口添加或删除额外公开端口。
+菜单“协议与入口”的“额外入口端口”可给已有受管入口添加、删除或修改额外公开端口。
 v3 可选顶层 `port_aliases` 保存最多 16 项 `{listener_id, public_port}`；
 TCP/UDP 和地址族继承目标入口，多个发布端口仍使用同一认证、入口 ID、账号与累计流量。
 TLS 入口继续经 Nginx TLS 前端；bridge 的 Reality 443 共存别名继承完整 SNI 分流，
@@ -672,11 +672,15 @@ TLS 入口继续经 Nginx TLS 前端；bridge 的 Reality 443 共存别名继承
 padm-docker protocol port-alias-status
 padm-docker edit --port-alias entry-reality 8444 --preview
 padm-docker edit --port-alias entry-reality 8444 --confirm PADM-DOCKER-EDIT
-padm-docker edit --port-alias-default entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-replace entry-reality 8444 8445 --preview
+padm-docker edit --port-alias-replace entry-reality 8444 8445 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-default entry-reality 8445 --confirm PADM-DOCKER-EDIT
 padm-docker edit --port-alias-default entry-reality base --confirm PADM-DOCKER-EDIT
-padm-docker edit --port-alias-remove entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-remove entry-reality 8445 --confirm PADM-DOCKER-EDIT
 ```
 
+修改要求旧别名存在、新端口不同且不冲突；原位保留别名顺序、默认分享标记和其它规格。
+若旧别名已选为默认，链接随事务切换到新端口；预览、取消或失败不保留变更。
 默认分享链接使用原公开端口，不自动生成别名节点。
 可将已有别名选为该入口的默认分享端口：对应项保存 `share_default: true`，
 每个入口最多一项；本地 URI、主订阅和分享组一致切换，账号、凭据和节点数量不变。
@@ -1809,6 +1813,8 @@ Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回
 完整 `docker-contracts` 默认 `-Jobs 6`（支持 1–8）。
 Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workflow` 和 `docker-menu`；
 工作流定向复用原事务断言，不替代 Schema、生成器、其它路由矩阵和真实流量验收。
+额外入口端口改动使用 `docker-entry-port-alias` 与 `docker-menu-port-alias`；
+菜单定向复用完整入口的全部别名 PTY 断言，完整 `docker-menu` 保留原集合。
 各任务先运行匹配改动的定向回归，集成完成后集中执行完整回归。
 入口归档当前工作区的已跟踪文件和未忽略的新文件，包含未提交修改，不包含 `.git`
 和 `.tmp-*`；源码、`TMPDIR`、`HOME` 在容器内部，不挂载 Windows 工作目录。
