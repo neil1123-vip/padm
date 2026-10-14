@@ -502,7 +502,7 @@ runEditPty() {
     local feeder actual=0 feederStatus=0
     rm -f -- "${fifo}" "${completed}"
     mkfifo "${fifo}"
-    printf -v command '%q ' bash -u "${PROJECT_ROOT}/install-docker.sh" edit \
+    printf -v command '%q ' bash -u "${PROJECT_ROOT}/install-docker.sh" edit "${@:3}" \
         --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
         --control-bundle "${CONFIGURE_CONTROL}"
     printf -v command '%s; status=$?; printf "%%s\\n" "$status" >%q; exit "$status"' "${command}" "${completed}"
@@ -1145,6 +1145,167 @@ grep -q -- '--issue --dns dns_cf --keylength ec-256 -d proxy.example.com' "${DOC
 grep -q -- '--install-cert -d proxy.example.com --ecc' "${DOCKER_LOG}" || fail 'ECC ACME install-cert was not run'
 grep -qxF 'fake-acme-certificate' "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ||
     fail 'ACME certificate was not committed'
+
+# 新增、删除和保身份重建复用 entries 的真实候选事务，不重复核心与协议矩阵。
+protocolEdit() {
+    local expected=$1 name=$2 before
+    shift 2
+    before=$(editLiveHash)
+    : >"${DOCKER_LOG}"
+    runControl "${expected}" "${name}" edit "$@"
+    assertEditCleanup
+    if [[ "${expected}" != 0 || " $* " == *' --preview '* ]]; then
+        [[ "$(editLiveHash)" == "${before}" ]] || fail "${name}: 拒绝、预览或失败恢复改变在线状态"
+    fi
+    if [[ " $* " == *' --preview '* ]]; then
+        ! grep -Eq ' (up|down|restart|exec) ' "${DOCKER_LOG}" ||
+            fail "${name}: 预览改变服务或采集流量"
+    fi
+}
+PROTOCOL_BASE="${TEST_ROOT}/protocol-base.json"
+jq '.schema_version=3 | .core.secondary_type=null | .core.protocols |= map(.core="xray") |
+  .accounts=[{id:"33333333-3333-4333-8333-333333333333",name:"business",enabled:true,
+    uuid:"44444444-4444-4444-8444-444444444444",password:"Business.Password1",
+    shadowsocks_password:null,listeners:["vless-reality","vless-ws"]}]' \
+    "${EDIT_SPEC}" >"${PROTOCOL_BASE}"
+runControl 0 protocol-management-baseline configure --spec "${PROTOCOL_BASE}"
+PROTOCOL_TRAFFIC_HASH=$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)
+protocolEdit 2 protocol-add-usage --protocol-add vless-reality 2 0 --preview
+protocolEdit 2 protocol-actions-exclusive --protocol-add vless-reality 2 28443 \
+    --protocol-remove vless-ws --preview
+protocolEdit 15 protocol-add-core-boundary --protocol-add vless-ws 31 28443 --preview
+protocolEdit 0 protocol-add-preview --protocol-add vless-reality 2 28443 --preview
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    PROTOCOL_CANCEL_HASH=$(editLiveHash)
+    : >"${DOCKER_LOG}"
+    runEditPty $'n\n' 0 --protocol-add vless-reality 2 28443
+    [[ "$(editLiveHash)" == "${PROTOCOL_CANCEL_HASH}" ]] || fail '取消新增协议改变在线状态'
+    ! grep -Eq ' (up|down|restart|exec) ' "${DOCKER_LOG}" || fail '取消新增协议改变服务或采集流量'
+    assertEditCleanup
+fi
+protocolEdit 0 protocol-add-reality --protocol-add vless-reality 2 28443 --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_BASE}" '
+  (.core.protocols[] | select(.listener_id == "vless-reality")) as $source |
+  (.core.protocols | length) == 3 and
+  (.core.protocols | map(select(.listener_id != "entry-1"))) == $before[0].core.protocols and
+  (. | del(.core.protocols)) == ($before[0] | del(.core.protocols)) and
+  any(.core.protocols[]; .listener_id == "entry-1" and .id == 2 and .core == $source.core and
+    .uuid == $source.uuid and .server == $source.server and .name == $source.name and
+    .address_families == $source.address_families and .reality == $source.reality and
+    .public_port == 28443 and
+    .xhttp == {path:"/entry-1xhttp",host:$source.reality.server_name,mode:"auto"})
+' "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
+    fail '新增 Reality 传输改变既有身份、账号关联、TLS、发布或模板参数'
+jq -e 'any(.inbounds[]; .tag=="entry-1" and .port==28443 and .streamSettings.network=="xhttp")' \
+    "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail '新增协议未进入实际核心配置'
+grep -q '@proxy.example.com:28443.*type=xhttp' "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
+    fail '新增协议未进入既有订阅'
+cp -- "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/protocol-added.json"
+# 普通规格导入仍不能新增不同 TLS 协议，专项豁免也不能借外部规格改其它字段。
+jq '.core.protocols += [(.core.protocols[] | select(.listener_id=="vless-ws") |
+  del(.websocket) | .id=28 | .listener_id="entry-foreign" | .public_port=29443 |
+  .trojan={domain:"proxy.example.com"})]' "${TEST_ROOT}/protocol-added.json" \
+    >"${TEST_ROOT}/protocol-foreign.json"
+protocolEdit 15 protocol-import-not-authorized --spec "${TEST_ROOT}/protocol-foreign.json" --preview
+protocolEdit 2 protocol-add-cannot-import --protocol-add vless-reality 26 29443 \
+    --spec "${TEST_ROOT}/protocol-foreign.json" --preview
+protocolEdit 0 protocol-rebuild-preview --protocol-rebuild entry-1 --preview
+PROTOCOL_REBUILD_HASH=$(editLiveHash)
+protocolEdit 0 protocol-rebuild-identity --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
+[[ "$(editLiveHash)" == "${PROTOCOL_REBUILD_HASH}" ]] || fail '保身份重建改变规格、凭据或业务文件'
+grep -q ' run --rm --no-deps xray -test ' "${DOCKER_LOG}" &&
+    grep -q -- ' up -d .*--force-recreate' "${DOCKER_LOG}" || fail '重建未重新验证并重建核心'
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up protocolEdit 14 protocol-rebuild-failure \
+    --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
+protocolEdit 0 protocol-remove-preview --protocol-remove entry-1 --preview
+protocolEdit 0 protocol-remove-reality --protocol-remove entry-1 --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_BASE}" '.==$before[0]' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '直接删除派生入口没有恢复原完整规格'
+protocolEdit 0 protocol-remove-account-link --protocol-remove vless-ws --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_BASE}" '
+  .accounts == ($before[0].accounts | map(.listeners=["vless-reality"])) and
+  .subscription.token==$before[0].subscription.token and .tls==null and
+  .subscription.enabled==false and (.core.protocols | length)==1
+' "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '删除入口未精确裁剪账号关联或保留订阅身份'
+protocolEdit 15 protocol-remove-last-account-link --protocol-remove vless-reality --preview
+[[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
+    "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '协议增删或重建改变累计流量与额度'
+
+PROTOCOL_TLS="${TEST_ROOT}/protocol-tls.json"
+jq '.core.type="sing-box" | .core.secondary_type=null |
+  .core.protocols=[(.core.protocols[] | select(.listener_id=="vless-reality") |
+    del(.reality) | .id=3 | .core="sing-box" | .listener_id="entry-hy2" |
+    .server="node.example.com" |
+    .hy2={domain:"proxy.example.com",bandwidth_mode:"bbr",up_mbps:100,down_mbps:50,
+      obfs:null,masquerade:""})] |
+  .accounts |= map(.listeners=["entry-hy2"]) | .subscription.enabled=false' \
+    "${PROTOCOL_BASE}" >"${PROTOCOL_TLS}"
+runControl 0 protocol-tls-management-baseline configure --spec "${PROTOCOL_TLS}"
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    generated="${TEST_ROOT}/protocol-generated.json"
+    dockerEditEntryAdd "${PROTOCOL_TLS}" entry-hy2 5 sing-box 29445 protocol "${generated}" &&
+        dockerConfigureSpecValidate "${generated}" || fail 'Naive 派生草稿无效'
+    jq -e '.core.protocols[-1].id==5 and
+      .core.protocols[-1].server=="proxy.example.com" and
+      .core.protocols[-1].naive.domain=="proxy.example.com"' "${generated}" >/dev/null ||
+        fail 'Naive 新增没有使用已有 TLS 域名作为服务器'
+    dockerEditEntryAdd "${PROTOCOL_BASE}" vless-ws 23 xray 29446 protocol "${generated}" &&
+        dockerConfigureSpecValidate "${generated}" || fail 'HTTPUpgrade 派生草稿无效'
+    jq -e '.core.protocols[-1].httpupgrade=={domain:"proxy.example.com",path:"entry-1path",
+      backend_port:31306,tls_port:8444}' "${generated}" >/dev/null ||
+        fail '不同 Nginx 协议新增没有分配独立内部端口'
+    jq '.core.protocols |= map(if .id==21 then
+      del(.websocket) | .id=27 | .listener_id="entry-fallback" | .fallback_tls={domain:"proxy.example.com",
+        http_port:31300,http2_port:31302} else . end) |
+      .accounts |= map(.listeners |= map(if .=="vless-ws" then "entry-fallback" else . end)) |
+      .subscription.enabled=false' "${PROTOCOL_BASE}" >"${TEST_ROOT}/protocol-fallback.json"
+    dockerEditEntryAdd "${TEST_ROOT}/protocol-fallback.json" entry-fallback 27 xray 29448 copy "${generated}" &&
+        dockerConfigureSpecValidate "${generated}" &&
+        dockerEditCompatibilityValidate "${TEST_ROOT}/protocol-fallback.json" "${generated}" ||
+        fail 'fallback 复制草稿或普通兼容门禁无效'
+    jq -e '.core.protocols[-1].fallback_tls==
+      (.core.protocols[] | select(.listener_id=="entry-fallback") | .fallback_tls)' \
+        "${generated}" >/dev/null || fail '复制 fallback 没有保留共享后端'
+    dockerEditEntryAdd "${TEST_ROOT}/protocol-fallback.json" entry-fallback 29 xray 29449 protocol \
+        "${generated}" && dockerConfigureSpecValidate "${generated}" ||
+        fail '新增不同 fallback 协议的草稿无效'
+    jq -e '[.core.protocols[] | select(.id==27 or .id==29) |
+      .fallback_tls.http_port,.fallback_tls.http2_port] | length==4 and (unique | length)==4' \
+        "${generated}" >/dev/null || fail '不同 fallback 协议新增没有避开两条内部监听'
+    jq '.tls=null' "${PROTOCOL_TLS}" >"${TEST_ROOT}/protocol-no-tls.json"
+    for entryCase in no-tls new-core new-shadowsocks; do
+        spec="${PROTOCOL_TLS}" core=sing-box target=31
+        case "${entryCase}" in
+        no-tls) spec="${TEST_ROOT}/protocol-no-tls.json" ;;
+        new-core) core=xray target=28 ;;
+        new-shadowsocks) target=30 ;;
+        esac
+        if dockerEditEntryAdd "${spec}" entry-hy2 "${target}" "${core}" 29447 protocol \
+            "${generated}" >"${TEST_ROOT}/protocol-helper.log" 2>&1; then
+            fail "新增协议突破支持边界: ${entryCase}"
+        fi
+    done
+) || fail '协议新增模板或核心/TLS 支持边界错误'
+protocolEdit 0 protocol-add-tuic-preview --protocol-add entry-hy2 31 29443 --preview
+protocolEdit 0 protocol-add-tuic --protocol-add entry-hy2 31 29443 --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_TLS}" '
+  .core.protocols[0] as $source |
+  (. | del(.core.protocols))==($before[0] | del(.core.protocols)) and
+  (.core.protocols | map(select(.listener_id!="entry-1")))==$before[0].core.protocols and
+  any(.core.protocols[]; .listener_id=="entry-1" and .id==31 and .core=="sing-box" and
+    .server==$source.server and .uuid==$source.uuid and .address_families==$source.address_families and
+    .public_port==29443 and .tuic=={domain:"proxy.example.com",congestion_control:"cubic",
+      auth_timeout:"3s",heartbeat:"10s",zero_rtt_handshake:false})
+' "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '已有 TLS 新增 TUIC 未保持原部署身份'
+jq -e 'any(.inbounds[]; .tag=="entry-1" and .type=="tuic" and .listen_port==29443)' \
+    "${DOCKER_ROOT}/config/sing-box/config.json" >/dev/null || fail '新增 TUIC 未进入实际核心配置'
+protocolEdit 0 protocol-remove-tuic --protocol-remove entry-1 --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_TLS}" '.==$before[0]' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'TUIC 删除没有保留已有 TLS 和账号'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
+    "${PROTOCOL_TRAFFIC_HASH}" ]] || fail 'TLS 协议增删改变累计流量与额度'
 
 runControl 0 restart-persistence status
 grep -qxF 'configured=yes' "${CONTROL_LOG}" || fail 'configured status was not restored'

@@ -1214,6 +1214,156 @@ dockerEditHy2PasswordRead() {
     printf -v "${variable}" '%s' "${password}"
 }
 
+dockerEditEntryRemove() {
+    local draft=$1 listener=$2 output=$3
+    jq -e --arg key "${listener}" '
+      ([.core.protocols[] | select(.listener_id == $key)] | length) == 1 and
+      all(.accounts[]?; .listeners != [$key]) and
+      (.reality_stream == null or
+        (.reality_stream.listener_id != $key and .reality_stream.website_listener_id != $key)) and
+      (all(.host_integrations[]; .type != "fail2ban") or
+        all(.core.protocols[] | select(.listener_id == $key);
+          .id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25))
+    ' "${draft}" >/dev/null 2>&1 || {
+        dockerError '删除需要唯一入口；请先处理账号最后关联、Reality 共存或 Fail2ban 保护'
+        return 1
+    }
+    jq --arg key "${listener}" '
+      .core.type as $primary |
+      .core.protocols |= map(select(.listener_id != $key)) |
+      if has("accounts") then
+        .accounts |= map(.listeners |= map(select(. != $key)))
+      else . end |
+      if has("port_aliases") then
+        .port_aliases |= map(select(.listener_id != $key)) |
+        if .port_aliases == [] then del(.port_aliases) else . end
+      else . end |
+      if has("cdn_entries") then
+        .cdn_entries |= map(select(.listener_id != $key)) |
+        if .cdn_entries == [] then del(.cdn_entries) else . end
+      else . end |
+      if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
+      elif any(.core.protocols[]; .id == 21) then .
+      elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 31)
+      then .subscription.enabled = false
+      else .tls = null | .subscription.enabled = false end |
+      .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null) |
+      if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)
+      then . else
+        del(.tls.http01) |
+        if .site.mode == "static" and any(.core.protocols[]; .id == 3)
+        then . else del(.site) end
+      end
+    ' "${draft}" >"${output}" 2>/dev/null || {
+        dockerError '主核心至少保留一个入口；删除副核心的最后入口会关闭副核心'
+        return 1
+    }
+}
+
+dockerEditEntryAdd() {
+    local draft=$1 listener=$2 targetProtocol=$3 targetCore=$4 port=$5 action=$6 output=$7
+    jq --arg key "${listener}" --arg targetCore "${targetCore}" --argjson port "${port}" \
+        --argjson targetProtocol "${targetProtocol}" --arg action "${action}" '
+      def reality: . == 1 or . == 2 or . == 26;
+      def nginx: . == 21 or . == 22 or . == 23 or . == 24 or . == 25;
+      def available($start; $used):
+        first(range($start; 65536) | . as $p | select(($used | index($p)) == null)) //
+          error("没有空闲内部端口");
+      def supported($id; $core):
+        if $id == 1 or $id == 26 or $id == 23 or $id == 28
+        then $core == "xray" or $core == "sing-box"
+        elif $id == 2 or ($id | nginx) or $id == 27 or $id == 29 then $core == "xray"
+        elif $id == 3 or $id == 4 or $id == 5 or $id == 30 or $id == 31 then $core == "sing-box"
+        else false end;
+      . as $r |
+      [.core.protocols[] | select(.listener_id == $key)] as $selected |
+      if ($selected | length) != 1 or (.core.protocols | length) >= 16
+      then error("需要唯一源入口且最多16个入口") else . end |
+      $selected[0] as $source |
+      if (supported($targetProtocol; $targetCore) | not) or
+        ($targetCore != .core.type and (.host_integrations | length) != 0) or
+        (($targetProtocol | nginx) and any(.host_integrations[]; .type == "fail2ban")) or
+        ($action == "copy" and $targetProtocol != $source.id) or
+        ($action == "derive" and
+          (($source.id | reality | not) or ($targetProtocol | reality | not))) or
+        ($action == "protocol" and (.schema_version != 3 or $targetCore != $source.core or
+          (($targetProtocol | reality) and ($source.id | reality | not)) or
+          (($targetProtocol | reality | not) and
+            ($targetProtocol == 30 or (.tls.domain | type) != "string" or .tls.domain == ""))))
+      then error("协议、核心或 TLS 前提不支持") else . end |
+      first(range(1; 18) | "entry-\(.)" | . as $id |
+        select(all($r.core.protocols[]; .listener_id != $id))) as $newId |
+      (if $action == "copy" or ($action == "protocol" and $targetProtocol == $source.id) then $source
+       elif ($targetProtocol | reality) then
+         $source | del(.xhttp, .grpc) | .id = $targetProtocol |
+         if .id == 2 then
+           .xhttp = {path: ("/" + $newId + "xhttp"), host: .reality.server_name, mode: "auto"} |
+           if $source.id == 2 then .xhttp += ($source.xhttp | del(.path,.host,.mode)) else . end
+         elif .id == 26 then .grpc = {service_name: "grpc"} else . end
+       else
+         ($source | {id:$targetProtocol,core:.core,server:.server,public_port:$port,
+           address_families:.address_families,name:.name,uuid:.uuid}) +
+         if $targetProtocol == 3 then
+           {hy2:{domain:$r.tls.domain,bandwidth_mode:"bbr",up_mbps:100,down_mbps:50,
+             obfs:null,masquerade:""}}
+         elif $targetProtocol == 4 then {anytls:{domain:$r.tls.domain}}
+         elif $targetProtocol == 5 then {server:$r.tls.domain,naive:{domain:$r.tls.domain}}
+         elif $targetProtocol == 31 then
+           {tuic:{domain:$r.tls.domain,congestion_control:"cubic",auth_timeout:"3s",
+             heartbeat:"10s",zero_rtt_handshake:false}}
+         elif $targetProtocol == 28 then {trojan:{domain:$r.tls.domain}}
+         elif $targetProtocol == 21 or $targetProtocol == 22 then
+           {websocket:{domain:$r.tls.domain,path:($newId+"path")}}
+         elif $targetProtocol == 23 then {httpupgrade:{domain:$r.tls.domain,path:($newId+"path")}}
+         elif $targetProtocol == 24 or $targetProtocol == 25 then
+           {grpc_tls:{domain:$r.tls.domain,service_name:"grpc"}}
+         elif $targetProtocol == 27 or $targetProtocol == 29 then
+           {fallback_tls:{domain:$r.tls.domain}}
+         else error("目标协议不支持") end
+       end |
+       .listener_id = $newId | .core = $targetCore | .public_port = $port |
+       # 核心内部监听与 Nginx 监听分别分配，复制和新增使用同一套冲突检查。
+       if (.id | nginx) then
+         (if .id == 23 then "httpupgrade"
+          elif .id == 24 or .id == 25 then "grpc_tls" else "websocket" end) as $transport |
+         ([$r.core.protocols[] | select(.core == $targetCore) |
+           if .id == 21 or .id == 22 then .websocket.backend_port
+           elif .id == 23 then .httpupgrade.backend_port
+           elif .id == 24 or .id == 25 then .grpc_tls.backend_port else .public_port end] +
+          [$r.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.port] +
+          [if $targetCore == "xray" then 10085 else 10087 end]) as $used |
+         .[$transport].backend_port = available(
+           (if .id == 23 then 31306 elif .id == 24 then 31301
+            elif .id == 25 then 31304 else 31297 end); $used)
+       else . end |
+       if (.id | nginx) or
+         (($action == "protocol" and $targetProtocol != $source.id) and (.id == 27 or .id == 29)) then
+         ([$r.core.protocols[] |
+           if .id == 21 or .id == 22 then .websocket.tls_port
+           elif .id == 23 then .httpupgrade.tls_port
+           elif .id == 24 or .id == 25 then .grpc_tls.tls_port
+           elif .id == 27 or .id == 29 then .fallback_tls.http_port, .fallback_tls.http2_port
+           else empty end] + [8080]) as $used |
+         if .id == 27 or .id == 29 then
+           .fallback_tls.http_port = available(31300; $used) |
+           .fallback_tls.http2_port = available(31302; $used + [.fallback_tls.http_port])
+         else
+           (if .id == 23 then "httpupgrade"
+            elif .id == 24 or .id == 25 then "grpc_tls" else "websocket" end) as $transport |
+           .[$transport].tls_port = available(8443; $used)
+         end
+       else . end) as $new |
+      .core.protocols += [$new] |
+      if $action == "protocol" then . else
+        .core.type as $primary |
+        .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null)
+      end
+    ' "${draft}" >"${output}" 2>/dev/null || {
+        dockerError '新增需唯一源入口、空闲入口身份和匹配核心；TLS 协议沿用受管域名，不启新核心或证书'
+        return 1
+    }
+}
+
 dockerEditFields() {
     local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
     local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice= zeroRttChoice
@@ -1246,41 +1396,7 @@ dockerEditFields() {
                 return 1
             fi
             if [[ "${choice}" == 10 ]]; then
-                if jq -e --arg key "${listener}" '
-                  any(.accounts[]?; .listeners == [$key])
-                ' "${draft}" >/dev/null; then
-                    dockerError '该入口是账号的最后一个关联，请先调整或删除该账号'
-                    return 1
-                fi
-                jq --arg key "${listener}" '
-                  .core.type as $primary |
-                  .core.protocols |= map(select(.listener_id != $key)) |
-                  if has("accounts") then
-                    .accounts |= map(.listeners |= map(select(. != $key)))
-                  else . end |
-                   if has("port_aliases") then
-                     .port_aliases |= map(select(.listener_id != $key)) |
-                     if .port_aliases == [] then del(.port_aliases) else . end
-                   else . end |
-                   if has("cdn_entries") then
-                     .cdn_entries |= map(select(.listener_id != $key)) |
-                     if .cdn_entries == [] then del(.cdn_entries) else . end
-                   else . end |
-                  if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
-                  elif any(.core.protocols[]; .id == 21) then .
-                  elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 31) then .subscription.enabled = false
-                  else .tls = null | .subscription.enabled = false end |
-                  .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null) |
-                  if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)
-                  then . else
-                    del(.tls.http01) |
-                    if .site.mode == "static" and any(.core.protocols[]; .id == 3)
-                    then . else del(.site) end
-                  end
-                ' "${draft}" >"${temporary}" 2>/dev/null || {
-                    dockerError '主核心至少保留一个入口；删除副核心的最后入口会关闭副核心'
-                    return 1
-                }
+                dockerEditEntryRemove "${draft}" "${listener}" "${temporary}" || return 1
             elif [[ "${choice}" == 9 || "${choice}" == 11 ]]; then
                 targetProtocol=${protocol}
                 if [[ "${choice}" == 11 ]]; then
@@ -1324,47 +1440,8 @@ dockerEditFields() {
                 fi
                 dockerSetupRead value '新入口端口（0 取消）: ' || return 3
                 [[ "${value}" =~ ^[0-9]{1,5}$ ]] || return 1
-                jq --arg key "${listener}" --arg targetCore "${targetCore}" --argjson port "${value}" \
-                    --argjson targetProtocol "${targetProtocol}" --argjson derive "$([[ "${choice}" == 11 ]] && printf true || printf false)" '
-                  . as $r |
-                  if (.core.protocols | length) >= 16 then error("最多16个入口") else . end |
-                  first(range(1; 18) | "entry-\(.)" | . as $id |
-                    select(all($r.core.protocols[]; .listener_id != $id))) as $newId |
-                  (.core.protocols[] | select(.listener_id == $key)) as $source |
-                  ($source | .listener_id = $newId | .core = $targetCore | .public_port = $port |
-                    if $derive then
-                      del(.xhttp, .grpc) | .id = $targetProtocol |
-                      if .id == 2 then
-                        .xhttp = {path: ("/" + $newId + "xhttp"), host: .reality.server_name, mode: "auto"} |
-                        if $source.id == 2 then
-                          .xhttp += ($source.xhttp | del(.path,.host,.mode))
-                        else . end
-                      elif .id == 26 then .grpc = {service_name: "grpc"} else . end
-                    else . end |
-                    if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then
-                      (if .id == 23 then "httpupgrade"
-                       elif .id == 24 or .id == 25 then "grpc_tls" else "websocket" end) as $transport |
-                      ([$r.core.protocols[] | select(.core == $targetCore) |
-                        if .id == 21 or .id == 22 then .websocket.backend_port
-                        elif .id == 23 then .httpupgrade.backend_port
-                        elif .id == 24 or .id == 25 then .grpc_tls.backend_port else .public_port end] +
-                       [$r.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.port] +
-                       [if $targetCore == "xray" then 10085 else 10087 end]) as $used |
-                      .[$transport].backend_port = first(range(
-                        (if .id == 23 then 31306 elif .id == 24 then 31301
-                         elif .id == 25 then 31304 else 31297 end); 65536) |
-                        . as $p | select(($used | index($p)) == null)) |
-                      ([$r.core.protocols[] | if .id == 21 or .id == 22 then .websocket.tls_port
-                        elif .id == 23 then .httpupgrade.tls_port
-                        elif .id == 24 or .id == 25 then .grpc_tls.tls_port
-                        elif .id == 27 or .id == 29 then .fallback_tls.http_port, .fallback_tls.http2_port
-                        else empty end] + [8080]) as $tls |
-                      .[$transport].tls_port = first(range(8443; 65536) | . as $p | select(($tls | index($p)) == null))
-                    else . end) as $new |
-                  .core.protocols += [$new] |
-                  .core.type as $primary |
-                  .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null)
-                ' "${draft}" >"${temporary}" 2>/dev/null || return 1
+                dockerEditEntryAdd "${draft}" "${listener}" "${targetProtocol}" "${targetCore}" "${value}" \
+                    "$([[ "${choice}" == 11 ]] && printf derive || printf copy)" "${temporary}" || return 1
             else
             case "${choice}" in
             1)
@@ -1565,6 +1642,7 @@ dockerEditCommand() {
     local xhttpNoGrpc=false xhttpNoSse=false xhttpLimits='{}'
     local protocolKind= protocolListener= protocolPatch='{}' protocolId=0
     local protocolPatchFile= hy2ObfsType= hy2ObfsFile= hy2ObfsPassword=
+    local entryAction= entryListener= entryProtocol=0 entryPort=0 entryCore=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -1582,6 +1660,21 @@ dockerEditCommand() {
             --bundle) bundle=$2 ;;
             --control-bundle) controlBundle=$2 ;;
             esac
+            shift 2
+            ;;
+        --protocol-add)
+            [[ "$#" -ge 4 && -n "$2" && "$2" != --* && -z "${entryAction}" &&
+                "$3" =~ ^[1-9][0-9]?$ && "$4" =~ ^[1-9][0-9]{0,4}$ &&
+                "$4" -le 65535 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$3" in 1|2|3|4|5|21|22|23|24|25|26|27|28|29|31) ;;
+                *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            entryAction=add entryListener=$2 entryProtocol=$3 entryPort=$4
+            shift 4
+            ;;
+        --protocol-remove|--protocol-rebuild)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${entryAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            entryAction=${1#--protocol-} entryListener=$2
             shift 2
             ;;
         --site-static|--site-redirect)
@@ -2373,6 +2466,16 @@ dockerEditCommand() {
         dockerError 'Hy2/TUIC 专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${entryAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${fail2banAction}" && -z "${cdnAction}" && -z "${xhttpAction}" &&
+        -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
+        -z "${protocolKind}" ) ]] || {
+        dockerError '协议入口专项不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -2396,7 +2499,7 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
-        -z "${protocolKind}" ) ||
+        -z "${protocolKind}" && -z "${entryAction}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -2462,7 +2565,7 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
-        -z "${protocolKind}" ]]; then
+        -z "${protocolKind}" && -z "${entryAction}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -2474,6 +2577,30 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${entryAction}" ]]; then
+        jq -e --arg listener "${entryListener}" '
+          .schema_version == 3 and
+          ([.core.protocols[] | select(.listener_id == $listener)] | length) == 1
+        ' "${original}" >/dev/null 2>&1 || {
+            dockerError '协议入口管理需要已有 v3 部署和唯一入口 ID'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        if [[ "${entryAction}" == add ]]; then
+            entryCore=$(jq -er --arg listener "${entryListener}" '
+              .core.protocols[] | select(.listener_id == $listener) | .core
+            ' "${draft}") || return "${PADM_DOCKER_RC_STATE}"
+            dockerEditEntryAdd "${draft}" "${entryListener}" "${entryProtocol}" "${entryCore}" \
+                "${entryPort}" protocol "${draft}.next" &&
+                chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+                return "${PADM_DOCKER_RC_STATE}"
+        elif [[ "${entryAction}" == remove ]]; then
+            dockerEditEntryRemove "${draft}" "${entryListener}" "${draft}.next" &&
+                chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+                return "${PADM_DOCKER_RC_STATE}"
+        else
+            printf '保留入口 %s 的完整参数和身份，重新生成部署；配置事务可能统一重建所有核心。\n' "${entryListener}"
+        fi
+    fi
     if [[ -n "${tproxyAction}" ]]; then
         jq --arg action "${tproxyAction}" --argjson port "${tproxyPort}" --argjson mark "${tproxyMark}" \
             --arg kind "${tproxyKind:-tproxy}" --arg family "${tproxyFamily}" --arg output "${tproxyOutput}" '
@@ -3275,6 +3402,30 @@ dockerEditCommand() {
 
 dockerEditCompatibilityValidate() {
     local editBefore=$1 editAfter=$2
+    if [[ "${entryAction:-}" == add || "${entryAction:-}" == rebuild ]]; then
+        jq -en --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '
+          $before[0].release == $after[0].release and $before[0].images == $after[0].images
+        ' >/dev/null 2>&1 || return "${PADM_DOCKER_RC_MANIFEST}"
+        if [[ "${entryAction}" == add ]]; then
+            # 从原规格再生成唯一允许的追加结果，不能用豁免字段放行其它入口或根字段漂移。
+            dockerEditEntryAdd "${editBefore}" "${entryListener}" "${entryProtocol}" "${entryCore}" \
+                "${entryPort}" protocol "${editAfter}.expected" &&
+                chmod 0600 "${editAfter}.expected" &&
+                jq -e --slurpfile expected "${editAfter}.expected" '. == $expected[0]' \
+                    "${editAfter}" >/dev/null 2>&1 || {
+                dockerError '协议新增仅允许追加本次生成的一个入口，其它规格必须完整保持'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        else
+            jq -en --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '
+              $before[0] == $after[0]
+            ' >/dev/null 2>&1 || {
+                dockerError '协议重建必须保留完整规格、账号、身份和参数'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        fi
+        return 0
+    fi
     # 专项上下文沿用调用者的 Bash 局部变量；普通编辑与独立合同使用空默认值。
     jq -en --arg regenerate "${regenerateReality:-}" --arg target "${realityTarget:-}" --arg stream "${realityStream:-}" \
         --arg site "${siteMode:-}" --arg alpn "${alpnListener:-}" --arg http01 "${http01:-}" \

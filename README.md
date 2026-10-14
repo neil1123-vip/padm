@@ -855,6 +855,25 @@ padm-docker protocol links
 padm-docker protocol links vless-reality
 ```
 
+已有 v3 部署可用协议菜单 `14` 增量安装、`15` 直接删除、`16` 保留参数重建：
+
+```bash
+padm-docker edit --protocol-add vless-reality 2 28443 --preview
+padm-docker edit --protocol-add entry-hy2 31 29443 --confirm PADM-DOCKER-EDIT
+padm-docker edit --protocol-remove entry-1 --preview
+padm-docker edit --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
+```
+
+新增沿用源入口的核心、UUID、服务器及地址族，只追加一个稳定身份的入口，
+不改变已有账号关联、订阅授权或累计流量。Reality 只能从已有 Reality 派生；
+TLS 协议要求已有受管 TLS，Naive 使用该证书域名作为服务器。
+不自动启用新核心、申请证书或创建 Shadowsocks 服务端密钥。
+删除会清理该入口的账号关联、额外端口和 CDN 覆盖；账号最后关联、
+主核心最后入口、Reality 共存及 Fail2ban 保护仍须先处理。
+重建保留完整规格与身份，并沿用候选验证、确认和失败恢复；
+现有事务可能统一重建所有核心，要求当前部署与受管规格匹配。
+完整协议管理继续为 `deferred`。
+
 `--preview` 不提交、不采集流量、不启停业务服务；验证仍会验签发布、拉取镜像并运行候选检查。
 `edit` 默认验证当前部署版本而非 latest，也可传入下述同版本发布资产参数。
 首次配置输出 `schema_version: 3`；`configure` 和备份恢复继续接受 v1/v2。
@@ -876,7 +895,7 @@ gRPC TLS 对应 `grpc_tls.backend_port` 与 `grpc_tls.tls_port`，
 删除最后一个 VLESS WS 入口会关闭订阅；仍有 VMess WS/HTTPUpgrade、gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 或 direct Trojan 时保留规格中的 TLS，
 否则将 `tls` 设为 `null`，受管 TLS/ACME 文件与 token 均保留。
 Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan/VMess WS/HTTPUpgrade/gRPC TLS/传统 TLS fallback 基础入口已交付；
-逐入口 Reality 参数重生成已交付；高级 XHTTP 参数、Reality 目标库/扫描/443 共存与完整协议管理仍未开放。
+逐入口 Reality 参数重生成、目标库/扫描、有限 443 共存与 XHTTP 管理已交付，具体边界见各专项说明；完整协议管理仍为 `deferred`。
 更新或回滚的目标 bundle 必须同时支持规格版本及每个入口的协议/核心组合。
 带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。
 3A.3 已通过本地双核心事务、PTY、流量、更新/回滚和 Linux 权限回归；真实签名发布、业务镜像及双架构客户端连通仍待验。

@@ -2213,6 +2213,40 @@ runRoutingDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runProtocolManagementDriver() {
+    local scenario=$1 action
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'9\n'
+    if [[ "${scenario}" == flow ]]; then
+        targetReply 'Docker 协议与入口' $'14\n'
+        targetReply '源入口 ID（沿用核心、账号、地址；0 返回）' $'0\n'
+        targetReply 'Docker 协议与入口' $'14\n'
+        targetReply '源入口 ID（沿用核心、账号、地址；0 返回）' $'entry-fixture\n'
+        targetReply '目标协议 ID（0 返回）' $'0\n'
+        targetReply 'Docker 协议与入口' $'14\n'
+        targetReply '源入口 ID（沿用核心、账号、地址；0 返回）' $'entry-fixture\n'
+        targetReply '目标协议 ID（0 返回）' $'31\n'
+        targetReply '新公开端口（0 返回）' $'0\n'
+        for action in 15 16; do
+            targetReply 'Docker 协议与入口' "${action}"$'\n'
+            targetReply '入口 ID（0 返回）' $'0\n'
+        done
+    fi
+    for action in 14 15 16; do
+        targetReply 'Docker 协议与入口' "${action}"$'\n'
+        [[ "${scenario}" != status-failed ]] || continue
+        if [[ "${action}" == 14 ]]; then
+            targetReply '源入口 ID（沿用核心、账号、地址；0 返回）' $'entry-fixture\n'
+            targetReply '目标协议 ID（0 返回）' $'31\n'
+            targetReply '新公开端口（0 返回）' $'30443\n'
+        else
+            targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        fi
+    done
+    targetReply 'Docker 协议与入口' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runPty() {
     local name=$1 driver=$2 input=$3 entry=$4 actual=0 feederStatus=0 command pipe feeder
     local expected=0
@@ -2299,6 +2333,8 @@ runPty() {
             printf '1\n' >&3
             waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 3 || exit 25
             printf '0\n' >&3
+        elif [[ "${driver}" == protocol-management ]]; then
+            runProtocolManagementDriver "${input}"
         elif [[ "${driver}" == targets ]]; then
             runTargetsDriver "${input}"
         elif [[ "${driver}" == geo ]]; then
@@ -2599,7 +2635,11 @@ protocol)
     ;;
 edit)
     recordAction "$@"
-    if [[ "${2:-}" == --fail2ban-port ]]; then
+    if [[ "${2:-}" == --protocol-add ]]; then
+        [[ "$#" -eq 5 && "$3" == entry-fixture && "$4" == 31 && "$5" == 30443 ]] || exit 2
+    elif [[ "${2:-}" == --protocol-remove || "${2:-}" == --protocol-rebuild ]]; then
+        [[ "$#" -eq 3 && "$3" == entry-fixture ]] || exit 2
+    elif [[ "${2:-}" == --fail2ban-port ]]; then
         [[ "$#" -eq 6 && "$3" == entry-fixture && "$4" != not-a-port &&
             "$5" == --confirm && "$6" == PADM-DOCKER-EDIT ]] || exit 2
         exit "${FAIL2BAN_EDIT_STATUS:-0}"
@@ -4255,6 +4295,23 @@ runPty protocols-dispatch protocols read "${TLS_WIZARD_CLI}" menu
 runPty protocols-links-cancel protocols cancel "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == 'protocol list' ]] ||
     fail 'cancelled protocol link selection dispatched a business command'
+
+# 三个入口共用真实 PTY，取消不下发写操作，失败后仍可继续选择。
+for managementCase in flow failed status-failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export SITE_EDIT_STATUS=0 FAIL2BAN_PROTOCOL_LIST_STATUS=0
+    [[ "${managementCase}" != failed ]] || SITE_EDIT_STATUS=15
+    [[ "${managementCase}" != status-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=15
+    runPty "protocol-management-${managementCase}" protocol-management "${managementCase}" "${TLS_WIZARD_CLI}" menu
+    expectedManagement=$'edit --protocol-add entry-fixture 31 30443\nedit --protocol-remove entry-fixture\nedit --protocol-rebuild entry-fixture'
+    [[ "${managementCase}" != status-failed ]] || expectedManagement=
+    [[ "$(grep -v '^protocol list$' "${TLS_WIZARD_ACTIONS}" || true)" == "${expectedManagement}" ]] ||
+        fail "协议管理 ${managementCase} 分发错误或取消后仍写入"
+    [[ "${managementCase}" == flow ]] ||
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -ge 3 ]] ||
+        fail "协议管理 ${managementCase} 未保留退出码或返回菜单"
+done
+unset SITE_EDIT_STATUS FAIL2BAN_PROTOCOL_LIST_STATUS
 fi
 
 # 额外入口菜单使用真实 PTY，取消与 EOF 不向 CLI 提交端口变更。
