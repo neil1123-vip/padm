@@ -2219,12 +2219,17 @@ runProtocolManagementDriver() {
     targetReply 'Docker 管理菜单' $'9\n'
     if [[ "${scenario}" == flow ]]; then
         targetReply 'Docker 协议与入口' $'14\n'
-        targetReply '源入口 ID（沿用核心、账号、地址；0 返回）' $'0\n'
+        targetReply '源入口 ID（沿用账号、地址；0 返回）' $'0\n'
         targetReply 'Docker 协议与入口' $'14\n'
-        targetReply '源入口 ID（沿用核心、账号、地址；0 返回）' $'entry-fixture\n'
+        targetReply '源入口 ID（沿用账号、地址；0 返回）' $'entry-fixture\n'
+        targetReply '目标核心 [1=Xray，2=sing-box，空输入沿用源核心，0 返回]' $'0\n'
+        targetReply 'Docker 协议与入口' $'14\n'
+        targetReply '源入口 ID（沿用账号、地址；0 返回）' $'entry-fixture\n'
+        targetReply '目标核心 [1=Xray，2=sing-box，空输入沿用源核心，0 返回]' $'\n'
         targetReply '目标协议 ID（0 返回）' $'0\n'
         targetReply 'Docker 协议与入口' $'14\n'
-        targetReply '源入口 ID（沿用核心、账号、地址；0 返回）' $'entry-fixture\n'
+        targetReply '源入口 ID（沿用账号、地址；0 返回）' $'entry-fixture\n'
+        targetReply '目标核心 [1=Xray，2=sing-box，空输入沿用源核心，0 返回]' $'\n'
         targetReply '目标协议 ID（0 返回）' $'31\n'
         targetReply '新公开端口（0 返回）' $'0\n'
         for action in 15 16; do
@@ -2236,13 +2241,23 @@ runProtocolManagementDriver() {
         targetReply 'Docker 协议与入口' "${action}"$'\n'
         [[ "${scenario}" != status-failed ]] || continue
         if [[ "${action}" == 14 ]]; then
-            targetReply '源入口 ID（沿用核心、账号、地址；0 返回）' $'entry-fixture\n'
+            targetReply '源入口 ID（沿用账号、地址；0 返回）' $'entry-fixture\n'
+            targetReply '目标核心 [1=Xray，2=sing-box，空输入沿用源核心，0 返回]' $'\n'
             targetReply '目标协议 ID（0 返回）' $'31\n'
             targetReply '新公开端口（0 返回）' $'30443\n'
         else
             targetReply '入口 ID（0 返回）' $'entry-fixture\n'
         fi
     done
+    if [[ "${scenario}" != status-failed ]]; then
+        for action in 1 2; do
+            targetReply 'Docker 协议与入口' $'14\n'
+            targetReply '源入口 ID（沿用账号、地址；0 返回）' $'entry-fixture\n'
+            targetReply '目标核心 [1=Xray，2=sing-box，空输入沿用源核心，0 返回]' "${action}"$'\n'
+            targetReply '目标协议 ID（0 返回）' "$([[ "${action}" == 1 ]] && printf 28 || printf 30)"$'\n'
+            targetReply '新公开端口（0 返回）' $'30443\n'
+        done
+    fi
     targetReply 'Docker 协议与入口' $'0\n'
     targetReply 'Docker 管理菜单' $'0\n'
 }
@@ -2636,7 +2651,13 @@ protocol)
 edit)
     recordAction "$@"
     if [[ "${2:-}" == --protocol-add ]]; then
-        [[ "$#" -eq 5 && "$3" == entry-fixture && "$4" == 31 && "$5" == 30443 ]] || exit 2
+        [[ "$3" == entry-fixture && "$5" == 30443 ]] || exit 2
+        if [[ "$#" -eq 5 ]]; then
+            [[ "$4" == 31 ]] || exit 2
+        else
+            [[ "$#" -eq 7 && "$6" == --protocol-core &&
+                ( "$4:$7" == 28:xray || "$4:$7" == 30:sing-box ) ]] || exit 2
+        fi
     elif [[ "${2:-}" == --protocol-remove || "${2:-}" == --protocol-rebuild ]]; then
         [[ "$#" -eq 3 && "$3" == entry-fixture ]] || exit 2
     elif [[ "${2:-}" == --fail2ban-port ]]; then
@@ -4303,10 +4324,12 @@ for managementCase in flow failed status-failed; do
     [[ "${managementCase}" != failed ]] || SITE_EDIT_STATUS=15
     [[ "${managementCase}" != status-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=15
     runPty "protocol-management-${managementCase}" protocol-management "${managementCase}" "${TLS_WIZARD_CLI}" menu
-    expectedManagement=$'edit --protocol-add entry-fixture 31 30443\nedit --protocol-remove entry-fixture\nedit --protocol-rebuild entry-fixture'
+    expectedManagement=$'edit --protocol-add entry-fixture 31 30443\nedit --protocol-remove entry-fixture\nedit --protocol-rebuild entry-fixture\nedit --protocol-add entry-fixture 28 30443 --protocol-core xray\nedit --protocol-add entry-fixture 30 30443 --protocol-core sing-box'
     [[ "${managementCase}" != status-failed ]] || expectedManagement=
     [[ "$(grep -v '^protocol list$' "${TLS_WIZARD_ACTIONS}" || true)" == "${expectedManagement}" ]] ||
         fail "协议管理 ${managementCase} 分发错误或取消后仍写入"
+    [[ "${managementCase}" != flow ]] || grep -Fq '30 Shadowsocks2022' "${CONTROL_LOG}" ||
+        fail '协议新增菜单没有 Shadowsocks2022 目标'
     [[ "${managementCase}" == flow ]] ||
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -ge 3 ]] ||
         fail "协议管理 ${managementCase} 未保留退出码或返回菜单"

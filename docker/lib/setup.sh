@@ -1263,7 +1263,8 @@ dockerEditEntryRemove() {
 dockerEditEntryAdd() {
     local draft=$1 listener=$2 targetProtocol=$3 targetCore=$4 port=$5 action=$6 output=$7
     jq --arg key "${listener}" --arg targetCore "${targetCore}" --argjson port "${port}" \
-        --argjson targetProtocol "${targetProtocol}" --arg action "${action}" '
+        --argjson targetProtocol "${targetProtocol}" --arg action "${action}" \
+        --slurpfile ssCredentials "${8:-/dev/null}" '
       def reality: . == 1 or . == 2 or . == 26;
       def nginx: . == 21 or . == 22 or . == 23 or . == 24 or . == 25;
       def available($start; $used):
@@ -1275,6 +1276,7 @@ dockerEditEntryAdd() {
         elif $id == 2 or ($id | nginx) or $id == 27 or $id == 29 then $core == "xray"
         elif $id == 3 or $id == 4 or $id == 5 or $id == 30 or $id == 31 then $core == "sing-box"
         else false end;
+      def ss_key: type == "string" and test("^[A-Za-z0-9+/]{21}[AQgw]==\\z");
       . as $r |
       [.core.protocols[] | select(.listener_id == $key)] as $selected |
       if ($selected | length) != 1 or (.core.protocols | length) >= 16
@@ -1286,10 +1288,10 @@ dockerEditEntryAdd() {
         ($action == "copy" and $targetProtocol != $source.id) or
         ($action == "derive" and
           (($source.id | reality | not) or ($targetProtocol | reality | not))) or
-        ($action == "protocol" and (.schema_version != 3 or $targetCore != $source.core or
+        ($action == "protocol" and (.schema_version != 3 or
           (($targetProtocol | reality) and ($source.id | reality | not)) or
-          (($targetProtocol | reality | not) and
-            ($targetProtocol == 30 or (.tls.domain | type) != "string" or .tls.domain == ""))))
+          (($targetProtocol | reality | not) and $targetProtocol != 30 and
+            ((.tls.domain | type) != "string" or .tls.domain == ""))))
       then error("协议、核心或 TLS 前提不支持") else . end |
       first(range(1; 18) | "entry-\(.)" | . as $id |
         select(all($r.core.protocols[]; .listener_id != $id))) as $newId |
@@ -1319,6 +1321,26 @@ dockerEditEntryAdd() {
            {grpc_tls:{domain:$r.tls.domain,service_name:"grpc"}}
          elif $targetProtocol == 27 or $targetProtocol == 29 then
            {fallback_tls:{domain:$r.tls.domain}}
+         elif $targetProtocol == 30 then
+           ([$r.core.protocols[] | select(.id == 30 and .uuid == $source.uuid) |
+             .shadowsocks][0] // null) as $existing |
+           if $existing != null then {shadowsocks:$existing} else
+             ([$r.core.protocols[] | select(.id == 30) |
+               .shadowsocks.server_password,.shadowsocks.user_password] +
+              [$r.accounts[]?.shadowsocks_password | select(. != null)]) as $used |
+             # 占位仅校验草稿；真正提交前用验签后的随机输入完整重生成。
+             ($ssCredentials[0] // (
+               [limit(2; range(0; 1024) | tostring | ("0000000000" + .)[-10:] |
+                 ("PADMSS" + .) | @base64 | . as $key | select(($used | index($key)) == null))] |
+               {server_password:.[0],user_password:.[1]})) as $credentials |
+             if ($credentials | keys) != ["server_password","user_password"] or
+               ($credentials.server_password | ss_key | not) or
+               ($credentials.user_password | ss_key | not) or
+               $credentials.server_password == $credentials.user_password or
+               any($used[]; . == $credentials.server_password or . == $credentials.user_password)
+             then error("SS 输入无效或凭据冲突")
+             else {shadowsocks:({method:"2022-blake3-aes-128-gcm"} + $credentials)} end
+           end
          else error("目标协议不支持") end
        end |
        .listener_id = $newId | .core = $targetCore | .public_port = $port |
@@ -1354,12 +1376,12 @@ dockerEditEntryAdd() {
          end
        else . end) as $new |
       .core.protocols += [$new] |
-      if $action == "protocol" then . else
+      if $action == "protocol" and $targetCore == .core.type then . else
         .core.type as $primary |
         .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null)
       end
     ' "${draft}" >"${output}" 2>/dev/null || {
-        dockerError '新增需唯一源入口、空闲入口身份和匹配核心；TLS 协议沿用受管域名，不启新核心或证书'
+        dockerError '新增需唯一源入口、空闲入口身份和匹配核心；跨核心拒绝宿主集成，TLS 协议沿用受管域名'
         return 1
     }
 }
@@ -1642,7 +1664,8 @@ dockerEditCommand() {
     local xhttpNoGrpc=false xhttpNoSse=false xhttpLimits='{}'
     local protocolKind= protocolListener= protocolPatch='{}' protocolId=0
     local protocolPatchFile= hy2ObfsType= hy2ObfsFile= hy2ObfsPassword=
-    local entryAction= entryListener= entryProtocol=0 entryPort=0 entryCore=
+    local entryAction= entryListener= entryProtocol=0 entryPort=0 entryCore= entrySsCredentials=
+    local entrySsGenerate=0 entrySsReady=0 entrySsServer= entrySsUser= entrySsImage= entrySsAttempt=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -1666,10 +1689,15 @@ dockerEditCommand() {
             [[ "$#" -ge 4 && -n "$2" && "$2" != --* && -z "${entryAction}" &&
                 "$3" =~ ^[1-9][0-9]?$ && "$4" =~ ^[1-9][0-9]{0,4}$ &&
                 "$4" -le 65535 ]] || return "${PADM_DOCKER_RC_USAGE}"
-            case "$3" in 1|2|3|4|5|21|22|23|24|25|26|27|28|29|31) ;;
+            case "$3" in 1|2|3|4|5|21|22|23|24|25|26|27|28|29|30|31) ;;
                 *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
             entryAction=add entryListener=$2 entryProtocol=$3 entryPort=$4
             shift 4
+            ;;
+        --protocol-core)
+            [[ "$#" -ge 2 && -z "${entryCore}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$2" in xray|sing-box) entryCore=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            shift 2
             ;;
         --protocol-remove|--protocol-rebuild)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${entryAction}" ]] ||
@@ -2476,6 +2504,8 @@ dockerEditCommand() {
         dockerError '协议入口专项不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${entryCore}" || "${entryAction}" == add ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -2578,17 +2608,25 @@ dockerEditCommand() {
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${entryAction}" ]]; then
-        jq -e --arg listener "${entryListener}" '
-          .schema_version == 3 and
+        jq -e --arg listener "${entryListener}" --arg action "${entryAction}" '
+          (.schema_version == 3 or $action == "add") and
           ([.core.protocols[] | select(.listener_id == $listener)] | length) == 1
-        ' "${original}" >/dev/null 2>&1 || {
-            dockerError '协议入口管理需要已有 v3 部署和唯一入口 ID'
+        ' "${normalized}" >/dev/null 2>&1 &&
+            { [[ "${entryAction}" == add ]] ||
+                jq -e '.schema_version == 3' "${original}" >/dev/null; } || {
+            dockerError '协议新增需要受管规格和唯一入口 ID，删除与重建仍需要 v3 部署'
             return "${PADM_DOCKER_RC_STATE}"
         }
         if [[ "${entryAction}" == add ]]; then
-            entryCore=$(jq -er --arg listener "${entryListener}" '
+            entryCore=${entryCore:-$(jq -er --arg listener "${entryListener}" '
               .core.protocols[] | select(.listener_id == $listener) | .core
-            ' "${draft}") || return "${PADM_DOCKER_RC_STATE}"
+            ' "${draft}")} || return "${PADM_DOCKER_RC_STATE}"
+            if [[ "${entryProtocol}" == 30 ]] && ! jq -e --arg listener "${entryListener}" '
+              (.core.protocols[] | select(.listener_id == $listener) | .uuid) as $uuid |
+              any(.core.protocols[]; .id == 30 and .uuid == $uuid)
+            ' "${normalized}" >/dev/null; then
+                entrySsGenerate=1
+            fi
             dockerEditEntryAdd "${draft}" "${entryListener}" "${entryProtocol}" "${entryCore}" \
                 "${entryPort}" protocol "${draft}.next" &&
                 chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
@@ -3370,6 +3408,40 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     dockerConfigureReleaseValidate "${draft}" || return "${PADM_DOCKER_RC_MANIFEST}"
+    if [[ "${entrySsGenerate}" == 1 ]]; then
+        entrySsImage=$(dockerManifestImageReference sing-box) || return "${PADM_DOCKER_RC_MANIFEST}"
+        entrySsCredentials="${workspace}/entry-ss.json"
+        # 两份秘密只经候选内的 0600 文件进入 jq，兼容复验固定复用同一份输入。
+        for entrySsAttempt in {1..32}; do
+            entrySsServer=$(dockerSetupTool "${entrySsImage}" generate rand --base64 16 2>/dev/null) &&
+                entrySsUser=$(dockerSetupTool "${entrySsImage}" generate rand --base64 16 2>/dev/null) || {
+                dockerError 'Shadowsocks 密钥生成失败，未改写已安装配置'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            [[ "${entrySsServer}" =~ ^[A-Za-z0-9+/]{21}[AQgw]==$ &&
+                "${entrySsUser}" =~ ^[A-Za-z0-9+/]{21}[AQgw]==$ ]] || {
+                dockerError 'Shadowsocks 密钥格式无效，未改写已安装配置'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            (
+                umask 077
+                printf '%s\n%s\n' "${entrySsServer}" "${entrySsUser}" |
+                    jq -Rs 'split("\n") | {server_password:.[0],user_password:.[1]}' >"${entrySsCredentials}"
+            ) || return "${PADM_DOCKER_RC_STATE}"
+            entrySsServer= entrySsUser=
+            if dockerEditEntryAdd "${normalized}" "${entryListener}" "${entryProtocol}" "${entryCore}" \
+                "${entryPort}" protocol "${draft}.next" "${entrySsCredentials}"; then
+                entrySsReady=1
+                break
+            fi
+        done
+        [[ "${entrySsReady}" == 1 ]] &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" &&
+            dockerConfigureSpecValidate "${draft}" || {
+            dockerError 'Shadowsocks 密钥冲突或候选校验失败，未改写已安装配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     if [[ -n "${regenerateReality}" ]]; then
         dockerEditRegenerateReality "${draft}" "${regenerateReality}" &&
             dockerConfigureSpecValidate "${draft}" || {
@@ -3409,7 +3481,7 @@ dockerEditCompatibilityValidate() {
         if [[ "${entryAction}" == add ]]; then
             # 从原规格再生成唯一允许的追加结果，不能用豁免字段放行其它入口或根字段漂移。
             dockerEditEntryAdd "${editBefore}" "${entryListener}" "${entryProtocol}" "${entryCore}" \
-                "${entryPort}" protocol "${editAfter}.expected" &&
+                "${entryPort}" protocol "${editAfter}.expected" "${entrySsCredentials:-}" &&
                 chmod 0600 "${editAfter}.expected" &&
                 jq -e --slurpfile expected "${editAfter}.expected" '. == $expected[0]' \
                     "${editAfter}" >/dev/null 2>&1 || {

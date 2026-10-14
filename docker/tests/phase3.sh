@@ -106,6 +106,14 @@ compose)
 ps)
     ;;
 run)
+    if [[ " ${*} " == *' generate rand --base64 16 '* ]]; then
+        [[ "${mode}" != ss-generate-fail ]] || exit 1
+        value=$(python3 -c 'import base64,secrets; print(base64.b64encode(secrets.token_bytes(16)).decode())') || exit 1
+        printf '%s\n' "${value}" >>"${FAKE_DOCKER_LOG}.ss-generated"
+        chmod 0600 "${FAKE_DOCKER_LOG}.ss-generated"
+        printf '%s\n' "${value}"
+        exit 0
+    fi
     if [[ " ${*} " == *'ssl.cert_time_to_seconds'* ]]; then
         [[ "${mode}" != "tls-validity-fail" ]]
         exit $?
@@ -1170,7 +1178,31 @@ jq '.schema_version=3 | .core.secondary_type=null | .core.protocols |= map(.core
     "${EDIT_SPEC}" >"${PROTOCOL_BASE}"
 runControl 0 protocol-management-baseline configure --spec "${PROTOCOL_BASE}"
 PROTOCOL_TRAFFIC_HASH=$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)
+# 旧格式先迁移私密草稿；预览和取消保留线上格式，确认才写入 v3。
+for version in 1 2; do
+    jq --argjson version "${version}" '.schema_version=$version | del(.accounts,.core.secondary_type) |
+      .core.protocols |= map(del(.core) |
+        if $version==1 then del(.listener_id,.websocket.backend_port,.websocket.tls_port) else . end)' \
+        "${PROTOCOL_BASE}" >"${TEST_ROOT}/protocol-legacy.json"
+    runControl 0 "protocol-v${version}-baseline" configure --spec "${TEST_ROOT}/protocol-legacy.json"
+    protocolEdit 0 "protocol-v${version}-preview" --protocol-add vless-reality 2 28443 --preview
+    if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+        legacyHash=$(editLiveHash)
+        runEditPty $'n\n' 0 --protocol-add vless-reality 2 28443
+        [[ "$(editLiveHash)" == "${legacyHash}" ]] || fail "v${version} 取消迁移改变在线格式"
+        assertEditCleanup
+    fi
+    protocolEdit 0 "protocol-v${version}-commit" --protocol-add vless-reality 2 28443 --confirm PADM-DOCKER-EDIT
+    jq -e '.schema_version==3 and .core.secondary_type==null and
+      any(.core.protocols[]; .listener_id=="entry-1" and .id==2) and
+      any(.core.protocols[]; .listener_id=="vless-ws" and .core=="xray" and
+        .websocket.backend_port==31297 and .websocket.tls_port==8443)' \
+        "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "v${version} 增量未迁移固定入口身份"
+done
+runControl 0 protocol-restore-v3-baseline configure --spec "${PROTOCOL_BASE}"
 protocolEdit 2 protocol-add-usage --protocol-add vless-reality 2 0 --preview
+protocolEdit 2 protocol-core-needs-add --protocol-rebuild vless-reality --protocol-core sing-box --preview
+protocolEdit 2 protocol-core-invalid --protocol-add vless-reality 2 28443 --protocol-core invalid --preview
 protocolEdit 2 protocol-actions-exclusive --protocol-add vless-reality 2 28443 \
     --protocol-remove vless-ws --preview
 protocolEdit 15 protocol-add-core-boundary --protocol-add vless-ws 31 28443 --preview
@@ -1275,12 +1307,15 @@ runControl 0 protocol-tls-management-baseline configure --spec "${PROTOCOL_TLS}"
       .fallback_tls.http_port,.fallback_tls.http2_port] | length==4 and (unique | length)==4' \
         "${generated}" >/dev/null || fail '不同 fallback 协议新增没有避开两条内部监听'
     jq '.tls=null' "${PROTOCOL_TLS}" >"${TEST_ROOT}/protocol-no-tls.json"
-    for entryCase in no-tls new-core new-shadowsocks; do
+    jq '.host_integrations=[{type:"wireguard",settings:{}}]' "${PROTOCOL_TLS}" \
+        >"${TEST_ROOT}/protocol-host.json"
+    for entryCase in no-tls unsupported-core xray-shadowsocks host-secondary; do
         spec="${PROTOCOL_TLS}" core=sing-box target=31
         case "${entryCase}" in
         no-tls) spec="${TEST_ROOT}/protocol-no-tls.json" ;;
-        new-core) core=xray target=28 ;;
-        new-shadowsocks) target=30 ;;
+        unsupported-core) core=xray target=31 ;;
+        xray-shadowsocks) core=xray target=30 ;;
+        host-secondary) spec="${TEST_ROOT}/protocol-host.json" core=xray target=28 ;;
         esac
         if dockerEditEntryAdd "${spec}" entry-hy2 "${target}" "${core}" 29447 protocol \
             "${generated}" >"${TEST_ROOT}/protocol-helper.log" 2>&1; then
@@ -1306,6 +1341,119 @@ jq -e --slurpfile before "${PROTOCOL_TLS}" '.==$before[0]' \
     "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'TUIC 删除没有保留已有 TLS 和账号'
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail 'TLS 协议增删改变累计流量与额度'
+
+# 已有受管 TLS 可显式新增副核心，保留主核心、原入口、证书、账号关联和累计。
+runControl 0 protocol-dual-tls-baseline configure --spec "${PROTOCOL_BASE}"
+PROTOCOL_TLS_HASH=$(find "${DOCKER_ROOT}/secrets/tls" -type f -print0 | sort -z |
+    xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)
+protocolEdit 0 protocol-dual-tls-preview --protocol-add vless-ws 31 30443 \
+    --protocol-core sing-box --preview
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-sing-box-up protocolEdit 14 protocol-dual-tls-failure \
+    --protocol-add vless-ws 31 30443 --protocol-core sing-box --confirm PADM-DOCKER-EDIT
+protocolEdit 0 protocol-dual-tls-commit --protocol-add vless-ws 31 30443 \
+    --protocol-core sing-box --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_BASE}" '
+  (.core.protocols | map(select(.listener_id!="entry-1")))==$before[0].core.protocols and
+  (. | del(.core.protocols,.core.secondary_type))==
+    ($before[0] | del(.core.protocols,.core.secondary_type)) and
+  .core.type=="xray" and .core.secondary_type=="sing-box" and
+  any(.core.protocols[]; .listener_id=="entry-1" and .id==31 and .core=="sing-box" and
+    .uuid=="22222222-2222-4222-8222-222222222222" and .public_port==30443 and
+    .tuic.domain=="proxy.example.com")
+' "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '跨核心 TLS 增量改变主核心或既有业务身份'
+jq -e 'any(.inbounds[]; .tag=="entry-1" and .type=="tuic" and .listen_port==30443)' \
+    "${DOCKER_ROOT}/config/sing-box/config.json" >/dev/null || fail '跨核心新增没有生成 TUIC 配置'
+[[ "$(find "${DOCKER_ROOT}/secrets/tls" -type f -print0 | sort -z |
+    xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)" == "${PROTOCOL_TLS_HASH}" ]] ||
+    fail '跨核心新增改写既有证书'
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    dockerEditEntryAdd "${PROTOCOL_BASE}" vless-ws 3 sing-box 30444 protocol \
+        "${TEST_ROOT}/protocol-dual-hy2.json" &&
+        dockerConfigureSpecValidate "${TEST_ROOT}/protocol-dual-hy2.json" ||
+        fail '已有 Xray TLS 不能生成 Hy2 副核心草稿'
+) || fail '跨核心 TLS 模板失败'
+protocolEdit 0 protocol-dual-tls-remove --protocol-remove entry-1 --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_BASE}" '.==$before[0]' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '移除新增副核心未恢复原规格'
+
+# 无 TLS 的 Shadowsocks 增量只生成两把独立 16 字节密钥，复制和重用保持原密钥。
+jq '.core.protocols |= map(select(.id==1)) | .tls=null | .subscription.enabled=false |
+  .accounts |= map(.listeners=["vless-reality"])' "${PROTOCOL_BASE}" \
+    >"${TEST_ROOT}/protocol-ss-base.json"
+runControl 0 protocol-ss-baseline configure --spec "${TEST_ROOT}/protocol-ss-base.json"
+protocolEdit 15 protocol-without-tls-rejected --protocol-add vless-reality 31 31443 \
+    --protocol-core sing-box --preview
+assertSsPrivate() {
+    local secret
+    while IFS= read -r secret; do
+        ! grep -Fq -- "${secret}" "${CONTROL_LOG}" "${DOCKER_LOG}" ||
+            fail 'Shadowsocks 密钥出现在预览、业务输出或外部 argv'
+    done <"${DOCKER_LOG}.ss-generated"
+}
+FAKE_DOCKER_MODE=ss-generate-fail protocolEdit 15 protocol-ss-generation-failure \
+    --protocol-add vless-reality 30 31443 --protocol-core sing-box --confirm PADM-DOCKER-EDIT
+protocolEdit 0 protocol-ss-preview --protocol-add vless-reality 30 31443 --protocol-core sing-box --preview
+assertSsPrivate
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-sing-box-up protocolEdit 14 protocol-ss-start-failure \
+    --protocol-add vless-reality 30 31443 --protocol-core sing-box --confirm PADM-DOCKER-EDIT
+assertSsPrivate
+protocolEdit 0 protocol-ss-commit --protocol-add vless-reality 30 31443 \
+    --protocol-core sing-box --confirm PADM-DOCKER-EDIT
+assertSsPrivate
+python3 - "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/protocol-ss-base.json" \
+    "${DOCKER_ROOT}/config/sing-box/config.json" <<'PY'
+import base64
+import json
+from pathlib import Path
+import sys
+
+spec, original, config = (json.loads(Path(path).read_text()) for path in sys.argv[1:])
+entry = next(entry for entry in spec["core"]["protocols"] if entry["id"] == 30)
+passwords = [entry["shadowsocks"][key] for key in ("server_password", "user_password")]
+assert passwords[0] != passwords[1]
+for password in passwords:
+    decoded = base64.b64decode(password, validate=True)
+    assert len(decoded) == 16 and base64.b64encode(decoded).decode() == password
+assert spec["core"]["type"] == "xray" and spec["core"]["secondary_type"] == "sing-box"
+assert [entry for entry in spec["core"]["protocols"] if entry["id"] != 30] == original["core"]["protocols"]
+for key in ("accounts", "subscription", "release", "tls"):
+    assert spec[key] == original[key], key
+runtime = next(inbound for inbound in config["inbounds"] if inbound["type"] == "shadowsocks")
+assert runtime["password"] == passwords[0] and runtime["users"][0]["password"] == passwords[1]
+PY
+cp -- "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/protocol-ss-installed.json"
+ssGenerations=$(wc -l <"${DOCKER_LOG}.ss-generated")
+protocolEdit 0 protocol-ss-same-protocol --protocol-add entry-1 30 31444 --confirm PADM-DOCKER-EDIT
+[[ "$(wc -l <"${DOCKER_LOG}.ss-generated")" == "${ssGenerations}" ]] ||
+    fail '同协议新增重新生成 Shadowsocks 密钥'
+jq -e --slurpfile before "${TEST_ROOT}/protocol-ss-installed.json" '
+  (.core.protocols | map(select(.listener_id!="entry-2")))==$before[0].core.protocols and
+  (.core.protocols[] | select(.listener_id=="entry-2") | .shadowsocks)==
+    ($before[0].core.protocols[] | select(.listener_id=="entry-1") | .shadowsocks)
+' "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '同协议新增改变已有 Shadowsocks 密钥'
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    dockerEditEntryAdd "${TEST_ROOT}/protocol-ss-installed.json" entry-1 30 sing-box 31445 copy \
+        "${TEST_ROOT}/protocol-ss-copy.json" &&
+        dockerConfigureSpecValidate "${TEST_ROOT}/protocol-ss-copy.json" &&
+        dockerEditCompatibilityValidate "${TEST_ROOT}/protocol-ss-installed.json" \
+            "${TEST_ROOT}/protocol-ss-copy.json" || fail 'Shadowsocks 复制草稿或兼容门禁失败'
+    jq -e '.core.protocols[-1].shadowsocks==
+      (.core.protocols[] | select(.listener_id=="entry-1") | .shadowsocks)' \
+        "${TEST_ROOT}/protocol-ss-copy.json" >/dev/null || fail 'Shadowsocks 复制改写已有密钥'
+    dockerEditEntryAdd "${TEST_ROOT}/protocol-ss-installed.json" vless-reality 30 sing-box 31446 protocol \
+        "${TEST_ROOT}/protocol-ss-reused.json" &&
+        dockerConfigureSpecValidate "${TEST_ROOT}/protocol-ss-reused.json" ||
+        fail '同 UUID 的其它源入口不能复用 Shadowsocks 身份'
+    jq -e '.core.protocols[-1].shadowsocks==
+      (.core.protocols[] | select(.listener_id=="entry-1") | .shadowsocks)' \
+        "${TEST_ROOT}/protocol-ss-reused.json" >/dev/null || fail '同 UUID 来源新增改写原 Shadowsocks 密钥'
+) || fail 'Shadowsocks 复制身份失败'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
+    "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '旧版迁移、跨核心或 Shadowsocks 增量改变累计与额度'
 
 runControl 0 restart-persistence status
 grep -qxF 'configured=yes' "${CONTROL_LOG}" || fail 'configured status was not restored'

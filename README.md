@@ -855,19 +855,24 @@ padm-docker protocol links
 padm-docker protocol links vless-reality
 ```
 
-已有 v3 部署可用协议菜单 `14` 增量安装、`15` 直接删除、`16` 保留参数重建：
+已有受管部署可用协议菜单 `14` 增量安装；v3 部署还可用 `15` 直接删除、`16` 保留参数重建：
 
 ```bash
 padm-docker edit --protocol-add vless-reality 2 28443 --preview
 padm-docker edit --protocol-add entry-hy2 31 29443 --confirm PADM-DOCKER-EDIT
+padm-docker edit --protocol-add vless-reality 30 30443 --protocol-core sing-box --preview
 padm-docker edit --protocol-remove entry-1 --preview
 padm-docker edit --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
 ```
 
-新增沿用源入口的核心、UUID、服务器及地址族，只追加一个稳定身份的入口，
+新增默认沿用源核心，可用 `--protocol-core xray|sing-box` 或菜单显式选择核心；
+主核心保持，必要时启用副核心，跨核心不能与宿主集成组合。
+沿用源 UUID、服务器及地址族，只追加一个稳定身份的入口，
 不改变已有账号关联、订阅授权或累计流量。Reality 只能从已有 Reality 派生；
 TLS 协议要求已有受管 TLS，Naive 使用该证书域名作为服务器。
-不自动启用新核心、申请证书或创建 Shadowsocks 服务端密钥。
+Shadowsocks2022 不需要 TLS，首次新增在基线和发布验签通过后生成独立服务器/用户密钥，
+密钥通过私密候选文件传入，不进入命令参数或预览；同 UUID 已有 SS 则保留原密钥。
+v1/v2 沿用现有迁移器生成 v3 草稿，确认成功后才更新部署，不自动申请证书。
 删除会清理该入口的账号关联、额外端口和 CDN 覆盖；账号最后关联、
 主核心最后入口、Reality 共存及 Fail2ban 保护仍须先处理。
 重建保留完整规格与身份，并沿用候选验证、确认和失败恢复；

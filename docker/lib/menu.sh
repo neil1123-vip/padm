@@ -106,7 +106,8 @@ dockerMenuRun() {
 }
 
 dockerMenuProtocols() {
-    local choice listener protocol port
+    local choice listener protocol port core
+    local -a coreArgs
     dockerMenuRun protocol list || true
     while :; do
         DOCKER_MENU_SIGNAL=0
@@ -154,17 +155,25 @@ dockerMenuProtocols() {
         13) dockerMenuTuic ;;
         14)
             dockerMenuRun protocol list || continue
-            dockerSetupRead listener '源入口 ID（沿用核心、账号、地址；0 返回）: ' &&
+            dockerSetupRead listener '源入口 ID（沿用账号、地址；0 返回）: ' &&
                 [[ -n "${listener}" && "${listener}" != --* ]] || continue
+            dockerSetupRead core '目标核心 [1=Xray，2=sing-box，空输入沿用源核心，0 返回]: ' || continue
+            coreArgs=()
+            case "${core}" in
+            '') ;;
+            1) coreArgs=(--protocol-core xray) ;;
+            2) coreArgs=(--protocol-core sing-box) ;;
+            *) printf '无效核心，请重新选择。\n'; continue ;;
+            esac
             printf '%s\n' '1 Reality Vision / 2 Reality XHTTP / 26 Reality gRPC' \
-                '3 Hy2 / 4 AnyTLS / 5 NaiveProxy / 31 TUIC / 28 Trojan direct' \
+                '3 Hy2 / 4 AnyTLS / 5 NaiveProxy / 30 Shadowsocks2022 / 31 TUIC / 28 Trojan direct' \
                 '21 VLESS WS / 22 VMess WS / 23 VMess HTTPUpgrade / 24 VLESS gRPC TLS / 25 Trojan gRPC TLS' \
                 '27 VLESS TLS Vision / 29 Trojan TLS fallback'
             dockerSetupRead protocol '目标协议 ID（0 返回）: ' &&
                 [[ -n "${protocol}" ]] || continue
             dockerSetupRead port '新公开端口（0 返回）: ' &&
                 [[ -n "${port}" ]] || continue
-            dockerMenuRun edit --protocol-add "${listener}" "${protocol}" "${port}" || true
+            dockerMenuRun edit --protocol-add "${listener}" "${protocol}" "${port}" "${coreArgs[@]}" || true
             ;;
         15|16)
             dockerMenuRun protocol list || continue
