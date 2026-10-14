@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含全主机透明转发和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
+# 摘要锁定含全主机透明转发、解析后 IP 出站组合及 Gecko 的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "30518488ca5d2489df7cc4a851a660dda3b0847da1bd73d5cefbdcfbf3c75e99"
+    "45adc7c217523bfc2406262e94ef79dad548e0b82b024219c4c75cce3fd4d323"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -123,6 +123,15 @@ for protocol_id in protocol_ids:
     spec["core"]["protocols"] = [entry]
     spec["tls"] = None if protocol_id in (1, 2, 26, 30) else {"domain": domain}
     cases[f"valid-protocol-{protocol_id}"] = spec
+spec = copy.deepcopy(cases["valid-protocol-3"])
+spec["core"]["protocols"][0]["hy2"]["obfs"] = {
+    "type": "gecko", "password": "gecko-fixture-1234",
+}
+cases["valid-hy2-gecko"] = spec
+spec = copy.deepcopy(spec)
+spec["site"] = {"mode": "static"}
+spec["core"]["protocols"][0]["hy2"]["masquerade"] = "local"
+cases["invalid-hy2-gecko-local"] = spec
 spec = copy.deepcopy(cases["valid-protocol-3"])
 spec["core"]["protocols"][0]["address_families"] = ["ipv4", "ipv6"]
 spec["port_hopping"] = {
@@ -465,7 +474,8 @@ for file in "${TEST_ROOT}"/*.json; do
         fail "有效协议规格被拒绝: ${file##*/}"
     fi
     [[ ( "${file##*/}" != invalid-tproxy-* && "${file##*/}" != invalid-redirect-* &&
-        "${file##*/}" != invalid-block-ips-resolved-* ) ||
+        "${file##*/}" != invalid-block-ips-resolved-* &&
+        "${file##*/}" != invalid-hy2-gecko-* ) ||
         "${actual}" != 0 ]] || fail "无效透明/解析后 IP 规格被接受: ${file##*/}"
     count=$((count + 1))
 done

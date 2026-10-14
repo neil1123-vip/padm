@@ -166,9 +166,11 @@ padm-docker status
 没有 `cosign` 时停止，不自动从未验证来源安装验证器，也不能跳过验签。
 WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01/HTTP-01 standalone；
 私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布仍要求 Xray、协议 21 VLESS WS TLS 和受管证书。
-Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander 混淆和 HTTPS 伪装；
+Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander/Gecko 混淆和 HTTPS 伪装；
 带宽按服务端方向输入，分享链接自动转换为客户端方向。
-端口跳跃提供下述手动双族 Hy2 范围管理；客户端范围自动跳跃已在隔离 amd64 验收，Gecko 尚未开放。
+首配混淆输入 `y` 选择 Salamander、`gecko` 选择 Gecko、`n` 关闭；已有入口在 Hysteria2 参数菜单切换类型，空密码保留已有值。
+Gecko 规格要求 `x-padm-hy2-gecko`，旧无混淆/Salamander 子集继续兼容；不开放 Gecko 包长参数，`local` 网页仍要求关闭混淆。
+端口跳跃提供下述手动双族 Hy2 范围管理；客户端范围自动跳跃已在隔离 amd64 验收。
 AnyTLS 使用 sing-box 直连 TCP/TLS 入口，不经过 Nginx；首配选择 sing-box 后选 `7=AnyTLS`。
 复用 UUID 作为密码及流量账号，可输出 `anytls://` 分享链接；AnyTLS 单独部署不提供 HTTPS 订阅发布。
 NaiveProxy 在 sing-box 首配中选 `8`，使用 TCP/TLS 直连入口；服务器地址必须与 TLS 域名一致。

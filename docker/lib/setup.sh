@@ -120,6 +120,7 @@ dockerSetupGenerateSpec() {
     local tuicCongestion=${20:-cubic} tuicAuthTimeout=${21:-3s} tuicHeartbeat=${22:-10s} tuicZeroRtt=${23:-false}
     local xrayImage opsImage singBoxImage uuid token shortId= privateKey= publicKey= keyPair wsPath= inputsFile obfsPassword=
     local serverPassword= userPassword= grpcService=
+    [[ "${hy2Obfs}" == false || "${hy2Obfs}" == salamander || "${hy2Obfs}" == gecko ]] || return 1
     xrayImage=$(dockerManifestImageReference xray) || return 1
     opsImage=$(dockerManifestImageReference ops) || return 1
     uuid=$(dockerSetupTool "${xrayImage}" uuid 2>/dev/null) || return 1
@@ -136,7 +137,7 @@ dockerSetupGenerateSpec() {
     if [[ "${protocols}" == 14 || "${protocols}" == 15 ]]; then
         grpcService=$(dockerSetupRandomHex "${opsImage}" 8) || return 1
     fi
-    if [[ "${protocols}" == 6 && "${hy2Obfs}" == true ]]; then
+    if [[ "${protocols}" == 6 && "${hy2Obfs}" != false ]]; then
         obfsPassword=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
     fi
     if [[ "${protocols}" == 9 ]]; then
@@ -160,7 +161,7 @@ dockerSetupGenerateSpec() {
         --arg domain "${domain}" --argjson wsPort "${wsPort:-443}" \
         --arg secondaryCore "${secondaryCore}" --argjson secondaryPort "${secondaryPort}" \
         --arg hy2Mode "${hy2Mode}" --argjson hy2Up "${hy2Up}" --argjson hy2Down "${hy2Down}" \
-        --arg hy2Masquerade "${hy2Masquerade}" \
+        --arg hy2Masquerade "${hy2Masquerade}" --arg hy2Obfs "${hy2Obfs}" \
         --arg tuicCongestion "${tuicCongestion}" --arg tuicAuthTimeout "${tuicAuthTimeout}" \
         --arg tuicHeartbeat "${tuicHeartbeat}" --argjson tuicZeroRtt "${tuicZeroRtt}" \
         --rawfile credentials "${inputsFile}" --argjson subscription "${subscription}" '
@@ -213,7 +214,7 @@ dockerSetupGenerateSpec() {
           id: 3, core: $core, server: $server, public_port: $wsPort, address_families: $families,
           listener_id: "entry-hysteria2", name: "main-hysteria2", uuid: $uuid,
           hy2: {domain: $domain, bandwidth_mode: $hy2Mode, up_mbps: $hy2Up, down_mbps: $hy2Down,
-            obfs: (if $obfsPassword == "" then null else {type: "salamander", password: $obfsPassword} end),
+            obfs: (if $obfsPassword == "" then null else {type: $hy2Obfs, password: $obfsPassword} end),
             masquerade: $hy2Masquerade}
         } else empty end),
         (if $protocols == 7 or $protocols == 8 then {
@@ -602,9 +603,10 @@ dockerSetupCommand() {
                 [[ "${answer}" =~ ^[1-9][0-9]{0,6}$ && "${answer}" -le 1000000 ]] ||
                     return "${PADM_DOCKER_RC_USAGE}"
             done
-            dockerSetupRead answer '启用 Salamander 混淆（确认后随机密码）？[y/N]: ' n || return 0
+            dockerSetupRead answer '混淆类型 [n=关闭, y=Salamander, gecko=Gecko，确认后随机密码]: ' n || return 0
             case "${answer}" in
-            y|Y|yes|YES) hy2Obfs=true ;;
+            y|Y|yes|YES|salamander) hy2Obfs=salamander ;;
+            gecko) hy2Obfs=gecko ;;
             n|N|no|NO) hy2Obfs=false ;;
             *) return "${PADM_DOCKER_RC_USAGE}" ;;
             esac
@@ -1167,7 +1169,7 @@ dockerProtocolCommand() (
 
 dockerEditFields() {
     local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
-    local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice opsImage zeroRttChoice
+    local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice= opsImage zeroRttChoice
     while :; do
         printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS/HTTPUpgrade 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n11. 安装其它 Reality 传输入口\n12. XHTTP/gRPC 参数\n13. Hysteria2 参数\n14. TUIC 参数\n0. 取消\n'
         dockerSetupRead choice '编辑项目: ' || return 3
@@ -1403,11 +1405,14 @@ dockerEditFields() {
               else tostring end
             ' "${draft}") || return 1
             if [[ "${field}" == hy2.obfs ]]; then
-                if [[ "${defaultValue}" == null ]]; then defaultValue=1; else defaultValue=2; fi
-                dockerSetupRead obfsChoice 'Salamander 混淆 [1=关闭, 2=启用或修改密码，空输入保留]: ' "${defaultValue}" || return 3
+                defaultValue=$(jq -r --arg key "${listener}" '
+                  .core.protocols[] | select(.listener_id == $key) | .hy2.obfs.type //
+                    "off" | if . == "off" then "1" elif . == "gecko" then "3" else "2" end
+                ' "${draft}") || return 1
+                dockerSetupRead obfsChoice '混淆 [1=关闭, 2=Salamander, 3=Gecko，空输入保留]: ' "${defaultValue}" || return 3
                 case "${obfsChoice}" in
                 1) value= ;;
-                2)
+                2|3)
                     defaultValue=$(jq -r --arg key "${listener}" '
                       .core.protocols[] | select(.listener_id == $key) | .hy2.obfs.password // ""
                     ' "${draft}") || return 1
@@ -1465,11 +1470,13 @@ dockerEditFields() {
             # 输入值可能含账号或 WS 路径，只经私密文件传给 jq。
             printf '%s' "${value}" >"${valueFile}" || return 1
             chmod 0600 "${valueFile}" || return 1
-            jq --arg key "${listener}" --arg field "${field}" --rawfile value "${valueFile}" '
+            jq --arg key "${listener}" --arg field "${field}" --arg obfsChoice "${obfsChoice}" \
+                --rawfile value "${valueFile}" '
               (if $field == "public_port" or $field == "reality.target_port" or
                   $field == "hy2.up_mbps" or $field == "hy2.down_mbps" then ($value | tonumber)
                elif $field == "hy2.obfs" then
-                 if $value == "" then null else {type: "salamander", password: $value} end
+                 if $value == "" then null else
+                   {type: (if $obfsChoice == "3" then "gecko" else "salamander" end), password: $value} end
                elif $field == "tuic.zero_rtt_handshake" then ($value | fromjson)
                elif $field == "address_families" then
                  if $value == "1" then ["ipv4"] elif $value == "2" then ["ipv6"] else ["ipv4","ipv6"] end

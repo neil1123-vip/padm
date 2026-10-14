@@ -170,14 +170,16 @@ XMUX 三键自定义/清除、CLI/菜单状态和统一链接发布。显式 XMU
 填充字节分布、抗识别、长时复用和吞吐收益未证明；本地 amd64 合同、菜单、
 五组真实链路与 49 项完整回归已通过。
 3C.3 新增 sing-box Hysteria2：首配、完整 v3 规格导入、参数编辑、复制/删除及本地分享链接，
-支持单 UDP 入口、BBR/Brutal、Salamander 和 HTTPS 伪装；复用 TLS 和 UUID 流量账号。
+支持单 UDP 入口、BBR/Brutal、Salamander/Gecko 和 HTTPS 伪装；复用 TLS 和 UUID 流量账号。
+3C.3a 接通 Gecko 首配、已有入口类型切换及分享；要求 `x-padm-hy2-gecko`，
+旧无混淆/Salamander 子集兼容，包长等高级参数不开放。
 5A.1c 接入已有入口的受管本地网页：先发布目录/notes/photos/docs，再设置 `local`；
 固定只读目录、无混淆、静态模式，拒绝任意 file URL；Nginx 混合部署共用网页。
 local 启用期间默认页/302/混淆拒绝，关闭保留内容；纯 Hy2 静态准备与 local
 要求新能力标记，旧默认/HTTPS 子集兼容。
 带宽为服务端方向，链接转为客户端方向；包含 Hysteria2 时暂不接受宿主集成。
-真实 amd64 的 BBR/Brutal/Salamander 各 IPv4/IPv6 共 6 条 HTTP proof 已通过；
-端口跳跃限下述内部监督的单 sing-box、双族 Hy2 手动管理；Gecko、
+真实 amd64 的 BBR/Brutal/Salamander/Gecko 各 IPv4/IPv6 共 8 条 HTTP proof 已通过；
+端口跳跃限下述内部监督的单 sing-box、双族 Hy2 手动管理；
 第三方导入 UI、公网宿主入口和原生 arm64 未验或尚未开放。
 3C.4 新增 sing-box AnyTLS：v3 首配、完整规格导入、通用字段编辑、同核复制/删除及分享链接，
 支持 TCP 双栈，复用受管 TLS 和 UUID 流量账号；TLS 域名与凭据按身份合同冻结。
@@ -268,7 +270,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | 支持单核心或主副核心配置、字段编辑及跨核心同协议多入口；完整管理未迁移。 |
 | 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 四预设、客户端 XMUX 三键自定义/清除和 3D.5 有限 Padding 1..4096 设置/恢复缺省、状态及发布事务已接入。Padding 双端一致，拒绝零且不能关闭，显式字段另需 bundle 能力；本地合同/菜单/五组真实链路通过；其它高级参数和完整管理未开放。 |
-| 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、导入、BBR/Brutal、Salamander/HTTPS 伪装编辑、复制及分享链接；已有入口可两步发布受管静态网页并启用 local，固定只读目录且无混淆。复用受管 TLS 和 UUID 流量账号；端口跳跃限单 sing-box、双族 Hy2 的内部监督手动管理，完整跳跃与协议管理仍 deferred。 |
+| 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、导入、BBR/Brutal、Salamander/Gecko、HTTPS 伪装编辑、复制及分享链接；Gecko 要求新能力标记，不开放包长参数。已有入口可两步发布受管静态网页并启用 local，固定只读目录且无混淆。复用受管 TLS 和 UUID 流量账号；端口跳跃限单 sing-box、双族 Hy2 的内部监督手动管理，完整跳跃与协议管理仍 deferred。 |
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用字段编辑、同核复制/删除及分享链接；复用受管 TLS 与 UUID 流量账号，域名与凭据冻结，宿主集成组合及完整管理未开放。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用编辑、同核复制/删除及原生 URI；入口与 TLS 同域，UUID 用户名/密码共享统计额度；QUIC、独立 IP/SNI 覆盖及完整管理未开放。 |
 | 21 | VLESS WS TLS | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | 已有多入口 Xray 后端、Nginx 反代和同域 TLS；5C.6d 单直接 WS 21/单集成/单保护端口的专项迁移接入菜单和事务，新旧端口均要求 fresh 来源；关联入口增删、通用端口编辑及完整管理仍拒绝。 |

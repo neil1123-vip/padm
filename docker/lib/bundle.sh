@@ -438,6 +438,9 @@ dockerBundleSupportsSpec() {
                 .id == 25 or .id == 27 or .id == 29) | not)) then
             $schema[0]["x-padm-hy2-local-site"] == true
           else true end) and
+          (if any($spec[0].core.protocols[]; .id == 3 and .hy2.obfs.type == "gecko") then
+            $schema[0]["x-padm-hy2-gecko"] == true
+          else true end) and
           (if any($spec[0].core.protocols[]; (.fallback_tls // {}) | has("alpn")) then
             $schema[0]["x-padm-fallback-alpn"] == true
           else true end) and

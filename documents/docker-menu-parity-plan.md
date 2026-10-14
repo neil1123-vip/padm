@@ -499,7 +499,7 @@ HTTPS 伪装仅接受受约束的域名/路径，不接受凭据、查询串或�
 单核心及 Hysteria2 作为主/副核心组合均覆盖。包含 Hysteria2 时暂拒绝宿主集成，
 HTTPS 订阅发布仍要求 Xray WS TLS；本地链接不依赖发布。
 协议 `3` 的配置运行状态为 `supported`，完整管理仍 `deferred`；
-端口跳跃、Gecko、独立用户 CRUD 和其它高级管理尚未开放。
+Gecko 后续由 3C.3a 开放，端口跳跃范围以 5C.9c 为准；完整管理仍待补。
 
 本地验收：固定 Linux 源码快照与 `--init` 工具容器；
 `hysteria2.sh` 复用 Reality/旧协议基线，审计修复后 `22.417` 秒通过，
@@ -533,6 +533,30 @@ bash docker/tests/hysteria2-real.sh \
 未重建或发布镜像，未验公网 UDP 宿主入口、第三方导入 UI、HTTPS 伪装实际响应、
 原生 arm64、真实 DNS 服务商和可信签名发布；隔离传输不代替这些条件。
 3B.4 剩余验收、3C 其它协议、3D、4A 与 5C 仍未完成。
+
+#### 3C.3a Gecko 混淆合批
+
+v3 Hy2 的 `hy2.obfs.type` 接受 `salamander` / `gecko`，密码继续私密输入或确认后
+随机生成，范围为 16–128 位字母/数字/_/-；不增加账号、配置生成器或秘密通道。
+首配保留 y/n，新增 gecko；已有入口可切类型、空输入保留类型和密码，
+复制沿用全部参数，关闭清除混淆，取消不写入。`local` 继续要求无混淆。
+Gecko 规格要求 `x-padm-hy2-gecko`，旧 bundle 拒绝更新/回滚到不支持的 Gecko 规格，
+无混淆和 Salamander 不要求新标记；包长等高级参数不开放。
+
+定向 `docker-hysteria2` 入口 `81.748` 秒、`docker-setup-encrypted-udp` `66.163` 秒通过，
+覆盖 BBR/Brutal、精确 URI、旧 bundle、秘密输入、取消、切换、复制与关闭；
+集中完整 `docker-contracts` 一次通过，入口 `391.578` 秒、排队 `0.360` 秒，
+Jobs 6、工具镜像复用、cache=false；共同祖先校验的 304 项差分含 Gecko/local 拒绝。
+固定本机 sing-box image `d873efd0…` 的实际配置检查与 URI 派生客户端传输通过，
+BBR/Brutal/Salamander/Gecko 各双族共 8 条 HTTP proof；复用现有真实节点，
+保留三主题 H3、只读挂载、CA/SNI、关闭 404 和全部认证，入口 `62.064` 秒。
+证据分别在 `.tmp-regression-docker-f256ddffabce4e21bd105128ddc0b90e/`、
+`b5ed349021c04e6a8701f4e40e84bc7e`、`a775ec4d716d400bb98e8a860c24d5f3`。
+完整合同证据为 `.tmp-regression-docker-8e8da4e6e28d46d995833a6e6a8fada0/`，
+成功输入已由入口自动清理；未重复无变化的实际传输矩阵。
+首轮真实脚本漏改旧链接数断言，在实际启动前退出；修为 4 并补失败行号后重跑通过。
+未重建/发布镜像，未验公网/原生 arm64/第三方客户端 UI 或混淆抗识别收益；
+协议 `management_status` 与总体计划继续 `deferred`，不能以本批完成关闭总目标。
 
 #### 3C.4 AnyTLS 基础入口
 

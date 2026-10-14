@@ -35,10 +35,13 @@ for mutation in \
     '.core.protocols[0].hy2.up_mbps = 0' \
     '.core.protocols[0].hy2.down_mbps = 1.5' \
     '.core.protocols[0].hy2.up_mbps = 1000001' \
-    '.core.protocols[0].hy2.obfs = {type:"gecko",password:"0123456789abcdef"}' \
+    '.core.protocols[0].hy2.obfs = {type:"unknown",password:"0123456789abcdef"}' \
     '.core.protocols[0].hy2.obfs = {type:"salamander",password:"short"}' \
     '.core.protocols[0].hy2.obfs = {type:"salamander",password:"0123456789abcde\n"}' \
     '.core.protocols[0].hy2.obfs = {type:"salamander",password:"0123456789abcdef",extra:true}' \
+    '.core.protocols[0].hy2.obfs = {type:"gecko",password:"short"}' \
+    '.core.protocols[0].hy2.obfs = {type:"gecko",password:"0123456789abcdef",min_packet_size:128}' \
+    '.core.protocols[0].hy2.obfs = {type:"gecko",password:"0123456789abcdef",max_packet_size:1280}' \
     '.core.protocols[0].hy2.masquerade = "http://www.example.com/"' \
     '.core.protocols[0].hy2.masquerade = "https://user@www.example.com/"' \
     '.core.protocols[0].hy2.masquerade = "https://www.example.com/\n"' \
@@ -129,6 +132,46 @@ jq '.subscription.enabled = true' "${TEST_ROOT}/brutal-hy2.json" >"${TEST_ROOT}/
 dockerGenerateSubscription "${TEST_ROOT}/local-hy2.json" "${STDOUT}"
 [[ "$(<"${STDOUT}")" == "${HY2_URI//#Hysteria2/}&upmbps=50&downmbps=100&obfs=salamander&obfs-password=0123456789abcdef#Hysteria2" ]] ||
     fail 'Hysteria2 带宽方向或混淆链接不精确'
+
+# Gecko 只改变混淆字段，账号、TLS、带宽与伪装沿用现有配置。
+dockerGenerateSingBoxConfig "${HY2_SPEC}" "${TEST_ROOT}/bbr-core.json"
+HY2_COMPAT_BUNDLE="${TEST_ROOT}/hy2-compat-bundle"
+mkdir -p "${HY2_COMPAT_BUNDLE}/docker/contracts"
+cp "${PROJECT_ROOT}/docker/contracts/"{configure.schema.json,features.json} \
+    "${HY2_COMPAT_BUNDLE}/docker/contracts/"
+for mode in bbr brutal; do
+    sourceSpec=${HY2_SPEC}
+    [[ "${mode}" != brutal ]] || sourceSpec="${TEST_ROOT}/brutal-hy2.json"
+    jq '.core.protocols[0].hy2.obfs = {type:"gecko",password:"gecko-0123456789abcdef"}' \
+        "${sourceSpec}" >"${TEST_ROOT}/gecko-${mode}.json"
+    dockerConfigureSpecValidate "${TEST_ROOT}/gecko-${mode}.json" ||
+        fail "Gecko ${mode} 合同被拒绝"
+    dockerGenerateSingBoxConfig "${TEST_ROOT}/gecko-${mode}.json" "${TEST_ROOT}/gecko-${mode}-core.json"
+    jq -e --slurpfile expected "${TEST_ROOT}/${mode}-core.json" '.inbounds[0] |
+      .obfs == {type:"gecko",password:"gecko-0123456789abcdef"} and
+      del(.obfs) == ($expected[0].inbounds[0] | del(.obfs))' \
+        "${TEST_ROOT}/gecko-${mode}-core.json" >/dev/null ||
+        fail "Gecko ${mode} 改变认证、TLS、带宽或伪装"
+    jq '.subscription.enabled = true' "${TEST_ROOT}/gecko-${mode}.json" \
+        >"${TEST_ROOT}/gecko-share.json"
+    dockerGenerateSubscription "${TEST_ROOT}/gecko-share.json" "${STDOUT}"
+    bandwidthQuery=
+    [[ "${mode}" != brutal ]] || bandwidthQuery='&upmbps=50&downmbps=100'
+    [[ "$(<"${STDOUT}")" == "${HY2_URI//#Hysteria2/}${bandwidthQuery}&obfs=gecko&obfs-password=gecko-0123456789abcdef#Hysteria2" ]] ||
+        fail "Gecko ${mode} 分享链接不精确"
+    dockerBundleSupportsSpec "${HY2_COMPAT_BUNDLE}" "${TEST_ROOT}/gecko-${mode}.json" ||
+        fail "当前 bundle 拒绝 Gecko ${mode}"
+done
+jq 'del(."x-padm-hy2-gecko")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${HY2_COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+for mode in bbr brutal; do
+    if dockerBundleSupportsSpec "${HY2_COMPAT_BUNDLE}" "${TEST_ROOT}/gecko-${mode}.json" 2>/dev/null; then
+        fail "旧 bundle 接受 Gecko ${mode}"
+    fi
+done
+dockerBundleSupportsSpec "${HY2_COMPAT_BUNDLE}" "${HY2_SPEC}" || fail '旧 bundle 误拒无混淆 Hy2'
+dockerBundleSupportsSpec "${HY2_COMPAT_BUNDLE}" "${TEST_ROOT}/brutal-hy2.json" ||
+    fail '旧 bundle 误拒 Salamander Hy2'
 quota=$(jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{
   ($uuid):{name:"shared",upload:1,download:0,limit_bytes:1,baseline:{}}}}')
 dockerTrafficRender sing-box "${BASE}" "${quota}" >"${TEST_ROOT}/quota-hy2.json"

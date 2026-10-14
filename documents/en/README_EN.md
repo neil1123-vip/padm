@@ -157,6 +157,14 @@ The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` wi
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
 The spec contains secrets and must not be printed or published.
 
+Hysteria2 supports BBR/Brutal, Salamander/Gecko obfuscation, and HTTPS masquerade.
+Bandwidth input uses the server perspective; sharing URIs use the client perspective.
+During setup, enter `y` for Salamander, `gecko` for Gecko, or `n` to disable obfuscation.
+The existing listener's Hysteria2 parameters menu can switch types; a blank password keeps the current value.
+Gecko specs require `x-padm-hy2-gecko`; older unobfuscated/Salamander specs remain compatible.
+Gecko packet-size options are not exposed, and `local` serving still requires obfuscation to be disabled.
+Isolated Linux amd64 checks cover actual IPv4/IPv6 transfers for BBR, Brutal, Salamander, and Gecko.
+
 Menu item `16` manages sites on existing Nginx TLS listeners `21`-`25`, fallback
 listeners `27`/`29`, or Hysteria2. Nginx supports a built-in default page, a static
 directory, and HTTP/HTTPS 302; Hysteria2 supports managed static content:

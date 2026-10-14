@@ -20,6 +20,7 @@
   "x-padm-site-content": true,
   "x-padm-site-templates": true,
   "x-padm-hy2-local-site": true,
+  "x-padm-hy2-gecko": true,
   "x-padm-fallback-alpn": true,
   "x-padm-acme-webroot": true,
   "x-padm-routing-socks5": true,
@@ -1842,7 +1843,7 @@
                       "additionalProperties": false,
                       "required": ["type", "password"],
                       "properties": {
-                        "type": {"const": "salamander"},
+                        "type": {"enum": ["salamander", "gecko"]},
                         "password": {
                           "type": "string",
                           "pattern": "^[A-Za-z0-9_-]{16,128}$",

@@ -1173,9 +1173,13 @@ runPty 2 hy2-local-first "${HY2_INPUT/$'n\n\n2\n'/$'n\nlocal\n2\n'}" setup "${AS
     fail 'Hy2 首配 local 被拒绝后仍提交配置或 TLS'
 grep -Fq '首配完成后，先发布静态站点' "${CONTROL_LOG}" || fail 'Hy2 首配 local 拒绝缺少后续操作提示'
 
-for hy2Case in hy2-default dual-hy2; do
+for hy2Case in hy2-default hy2-gecko dual-hy2; do
     newState "${hy2Case}"
-    if [[ "${hy2Case}" == hy2-default ]]; then input=${HY2_INPUT}; else input=${DUAL_HY2_INPUT}; fi
+    case "${hy2Case}" in
+    hy2-default) input=${HY2_INPUT} ;;
+    hy2-gecko) input=${HY2_INPUT/$'n\n\n2\n'/$'gecko\n\n2\n'} ;;
+    dual-hy2) input=${DUAL_HY2_INPUT} ;;
+    esac
     before=$(snapshot)
     runPty 0 "${hy2Case}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
     [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
@@ -1192,11 +1196,15 @@ for hy2Case in hy2-default dual-hy2; do
         if $mode == "hy2-default" then
           .hy2 == {domain: "hy2.example.com", bandwidth_mode: "bbr",
             up_mbps: 100, down_mbps: 50, obfs: null, masquerade: ""}
+        elif $mode == "hy2-gecko" then
+          .hy2.bandwidth_mode == "bbr" and .hy2.up_mbps == 100 and
+          .hy2.down_mbps == 50 and .hy2.obfs.type == "gecko" and
+          (.hy2.obfs.password | test("^[a-f0-9]{32}$")) and .hy2.masquerade == ""
         else .hy2.bandwidth_mode == "brutal" and .hy2.up_mbps == 120 and
           .hy2.down_mbps == 60 and .hy2.obfs.type == "salamander" and
           (.hy2.obfs.password | test("^[a-f0-9]{32}$")) and
           .hy2.masquerade == "https://www.example.com/health" end) and
-      if $mode == "hy2-default" then
+      if $mode != "dual-hy2" then
         .core.secondary_type == null and (.core.protocols | length) == 1
       else .core.secondary_type == "xray" and (.core.protocols | length) == 2 and
         (.core.protocols[1] | .id == 1 and .core == "xray" and .public_port == 24445 and
@@ -1207,7 +1215,7 @@ for hy2Case in hy2-default dual-hy2; do
     [[ -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/hy2.example.com.crt" &&
         -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/hy2.example.com.key" ]] ||
         fail "${hy2Case}: setup did not commit Hysteria2 TLS"
-    if [[ "${hy2Case}" == hy2-default ]]; then
+    if [[ "${hy2Case}" != dual-hy2 ]]; then
         ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" ||
             fail 'Hysteria2-only setup generated unused Reality keys'
     fi
@@ -1238,6 +1246,14 @@ jq -e --slurpfile before "${TEST_ROOT}/hy2-original.json" '
 ' "${SPEC}" >/dev/null || fail 'Hysteria2 parameter editing changed identity or did not update all selected values'
 [[ "$(jq -r '.core.protocols[0].hy2.obfs.password' "${SPEC}")" == hy2-obfs-private-1234 ]] ||
     fail 'Hysteria2 password editing did not preserve the private input'
+before=$(snapshot)
+runPty 0 hy2-gecko-edit-cancel $'13\n3\n4\n3\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail '取消 Gecko 密码编辑改变部署'
+cp -- "${SPEC}" "${TEST_ROOT}/hy2-before-gecko.json"
+runPty 0 hy2-gecko-edit $'13\n3\n4\n3\n\n13\n3\n4\n\n\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${TEST_ROOT}/hy2-before-gecko.json" '
+  . == ($before[0] | .core.protocols[0].hy2.obfs.type = "gecko")
+' "${SPEC}" >/dev/null || fail '切换或空输入保留 Gecko 改变密码、认证或其它参数'
 runPty 0 hy2-copy $'9\n3\n2\n24450\n8\ny\n' edit "${ASSET_ARGS[@]}"
 jq -e '.core.protocols[0] as $first | .core.protocols[1] as $copy |
   $copy.listener_id == "entry-1" and $copy.public_port == 24450 and

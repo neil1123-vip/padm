@@ -598,7 +598,8 @@ dockerConfigureSpecValidate() {
             (.domain | hostname and (explode | all(. > 32 and . != 127))) and
             (.bandwidth_mode == "bbr" or .bandwidth_mode == "brutal") and
             (.up_mbps | bandwidth) and (.down_mbps | bandwidth) and
-            (.obfs == null or (.obfs | exact(["type", "password"]) and .type == "salamander" and
+            (.obfs == null or (.obfs | exact(["type", "password"]) and
+              (.type == "salamander" or .type == "gecko") and
               (.password | type == "string" and test("^[A-Za-z0-9_-]{16,128}$") and
                 (explode | all(. > 32 and . != 127))))) and
             (.masquerade | masquerade) and

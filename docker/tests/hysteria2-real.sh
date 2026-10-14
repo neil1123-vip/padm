@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'printf "hysteria2-real-fail: line=%s rc=%s\n" "${LINENO}" "$?" >&2' ERR
 
 # 只在本次唯一项目与命名卷中验收，不连接或覆盖现有 padm 部署。
 [[ "$#" == 3 ]] || { printf 'usage: hysteria2-real.sh <local-xray> <local-sing-box> <local-ops>\n' >&2; exit 2; }
@@ -109,7 +110,8 @@ jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" '
    core:{type:"sing-box",secondary_type:null,protocols:[
      entry("entry-hy2-bbr";35461;"bbr";null),
      entry("entry-hy2-brutal";35462;"brutal";null),
-     entry("entry-hy2-salamander";35463;"bbr";{type:"salamander",password:"salamander-real-123456"})]},
+     entry("entry-hy2-salamander";35463;"bbr";{type:"salamander",password:"salamander-real-123456"}),
+     entry("entry-hy2-gecko";35464;"bbr";{type:"gecko",password:"gecko-real-123456"})]},
    tls:{domain:$domain},subscription:{enabled:false,token:"0123456789abcdef"},
    images:{xray:image("xray"),"sing-box":image("sing-box"),nginx:image("nginx"),ops:image("ops"),net:image("net")},
    host_integrations:[]}
@@ -120,7 +122,7 @@ dockerCreateConfigurationCandidate
 candidate=${DOCKER_CONFIG_CANDIDATE}
 dockerGenerateCandidate "${SPEC}" "${candidate}"
 jq -e --arg uuid "${UUID}" --arg domain "${DOMAIN}" '
-  (.inbounds | length) == 3 and
+  (.inbounds | length) == 4 and
   all(.inbounds[]; .type == "hysteria2" and .listen == "::" and
     .users == [{name:$uuid,password:$uuid}] and
     .tls == {enabled:true,server_name:$domain,alpn:["h3"],
@@ -132,18 +134,21 @@ jq -e --arg uuid "${UUID}" --arg domain "${DOMAIN}" '
     .ignore_client_bandwidth == true and (has("up_mbps") | not) and (has("down_mbps") | not)) and
   any(.inbounds[]; .tag == "entry-hy2-salamander" and
     .obfs == {type:"salamander",password:"salamander-real-123456"}) and
+  any(.inbounds[]; .tag == "entry-hy2-gecko" and
+    .obfs == {type:"gecko",password:"gecko-real-123456"}) and
   .experimental.v2ray_api.stats.users == [$uuid]
 ' "${candidate}/config/sing-box/config.json" >/dev/null
 jq -e '
   .services["sing-box"].ports | sort == ([
     "0.0.0.0:35461:35461/udp","[::]:35461:35461/udp",
     "0.0.0.0:35462:35462/udp","[::]:35462:35462/udp",
-    "0.0.0.0:35463:35463/udp","[::]:35463:35463/udp"] | sort)
+    "0.0.0.0:35463:35463/udp","[::]:35463:35463/udp",
+    "0.0.0.0:35464:35464/udp","[::]:35464:35464/udp"] | sort)
 ' "${candidate}/compose.json" >/dev/null
 dockerDeploymentFileValidate "${candidate}/deployment.json"
 jq -e '
   .core.type == "sing-box" and .core.secondary_type == null and .core.protocol_ids == [3] and
-  (.listeners | length) == 3 and
+  (.listeners | length) == 4 and
   all(.listeners[]; .service == "sing-box" and .transport == "udp" and
     .public_port == .container_port and .address_families == ["ipv4","ipv6"])
 ' "${candidate}/deployment.json" >/dev/null
@@ -161,7 +166,7 @@ dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
     "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env"
 dockerTrafficAccounts sing-box | jq -e --arg uuid "${UUID}" 'length == 1 and .[0].account == $uuid' >/dev/null
 dockerProtocolCommand links >"${TEST_ROOT}/links.txt"
-[[ "$(wc -l <"${TEST_ROOT}/links.txt")" == 3 ]]
+[[ "$(wc -l <"${TEST_ROOT}/links.txt")" == 4 ]]
 cp -a "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" \
     "${PADM_DOCKER_INSTALL_DIR}/secrets" "${TEST_ROOT}/runtime/"
 cp "${TEST_ROOT}/certs/ca.crt" "${TEST_ROOT}/runtime/client/ca.crt"
@@ -249,7 +254,7 @@ def parse(line):
         assert q["upmbps"].isdecimal() and 0 < int(q["upmbps"]) <= 1000000
         assert q["downmbps"].isdecimal() and 0 < int(q["downmbps"]) <= 1000000
     if "obfs" in q:
-        assert q["obfs"] == "salamander" and 16 <= len(q["obfs-password"]) <= 128
+        assert q["obfs"] in {"salamander", "gecko"} and 16 <= len(q["obfs-password"]) <= 128
     return uri, q
 
 sample = urllib.parse.urlsplit(lines[0])
@@ -263,7 +268,7 @@ for invalid in (sample._replace(scheme="vless").geturl(),
         pass
     else:
         raise AssertionError("invalid URI accepted")
-expected = {35461:"bbr", 35462:"brutal", 35463:"salamander"}
+expected = {35461:"bbr", 35462:"brutal", 35463:"salamander", 35464:"gecko"}
 seen = set()
 for line in lines:
     uri, q = parse(line)
@@ -274,7 +279,9 @@ for line in lines:
         assert q["upmbps"] == "60" and q["downmbps"] == "120" and "obfs" not in q
     else:
         assert "upmbps" not in q and "downmbps" not in q
-        assert ("obfs" in q) == (mode == "salamander")
+        assert ("obfs" in q) == (mode in {"salamander", "gecko"})
+        if "obfs" in q:
+            assert q["obfs"] == mode and q["obfs-password"] == mode+"-real-123456"
     for family, endpoint in zip((4, 6), endpoints):
         tag = "hy2-"+mode+"-v"+str(family)
         port = 2081 + len(config["inbounds"])
@@ -289,7 +296,7 @@ for line in lines:
             outbound["obfs"] = {"type":q["obfs"], "password":q["obfs-password"]}
         config["outbounds"].append(outbound)
         config["route"]["rules"].append({"inbound":["socks-"+tag], "action":"route", "outbound":tag})
-assert seen == set(expected) and len(config["outbounds"]) == 6
+assert seen == set(expected) and len(config["outbounds"]) == 8
 pathlib.Path(sys.argv[2]).write_text(json.dumps(config))
 PY
 chmod 0640 "${TEST_ROOT}/runtime/client/config.json"
@@ -355,8 +362,8 @@ def probe(port):
         assert body==b"padm-hysteria2-real-proof\n", response
     return str(port)
 with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-    results=list(pool.map(probe,range(2081,2087)))
-print("docker-hysteria2-real-probe-ok: source=protocol-links transport=udp family=ipv4,ipv6 modes=bbr,brutal,salamander socks="+",".join(results))
+    results=list(pool.map(probe,range(2081,2089)))
+print("docker-hysteria2-real-probe-ok: source=protocol-links transport=udp family=ipv4,ipv6 modes=bbr,brutal,salamander,gecko socks="+",".join(results))
 '
 }
 businessProbe
@@ -454,6 +461,7 @@ with tempfile.TemporaryDirectory(prefix="hy2-site-") as work:
                 assert headers["location"] == "./", record
             assert all(secret not in body for secret in (
                 b"11111111-1111-4111-8111-111111111111", b"salamander-real-123456",
+                b"gecko-real-123456",
                 b"PRIVATE KEY", b'"private_key"', b'"manifest_sha256"')), record
             if path == "/auth":
                 assert "hysteria-udp" not in headers and "hysteria-cc-rx" not in headers, record
@@ -515,9 +523,9 @@ PY
         dockerCreateConfigurationCandidate
         candidate=${DOCKER_CONFIG_CANDIDATE}
         dockerGenerateCandidate "${siteSpec}" "${candidate}"
-        jq -e 'all(.inbounds[] | select(.tag != "entry-hy2-salamander");
+        jq -e 'all(.inbounds[] | select(has("obfs") | not);
           .masquerade == "file:///srv/padm/" and (has("obfs") | not)) and
-          all(.inbounds[] | select(.tag == "entry-hy2-salamander"); has("masquerade") | not)' \
+          all(.inbounds[] | select(has("obfs")); has("masquerade") | not)' \
             "${candidate}/config/sing-box/config.json" >/dev/null
         jq -e '.services["sing-box"].volumes |
           [.[] | select(.target == "/srv/padm" and .source == "${PADM_DOCKER_ROOT}/data/static" and .read_only == true)] |
