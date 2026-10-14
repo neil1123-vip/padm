@@ -401,9 +401,37 @@ dockerTlsManageCommand() {
     printf '\nDocker 证书管理\n当前 TLS 域名: %s\n' "${currentDomain}"
     printf '%s\n' '1. 查看/校验受管证书' '2. 导入证书轮换' '3. ACME 申请' '4. ACME 续期' \
         '5. 自动续期状态' '6. 启用自动续期' '7. 停用自动续期' \
-        '8. 启用 Nginx HTTP-01 入口' '9. 关闭 Nginx HTTP-01 入口' '0. 返回'
+        '8. 启用 Nginx HTTP-01 入口' '9. 关闭 Nginx HTTP-01 入口' \
+        '10. 迁移入口 TLS 域名' '0. 返回'
     dockerSetupRead choice '证书操作: ' || return 0
-    [[ "${choice}" =~ ^[1-9]$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+    [[ "${choice}" =~ ^([1-9]|10)$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "${choice}" == 10 ]]; then
+        dockerSetupRead domain '新的 TLS 域名（0 取消）: ' || return 0
+        dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead method '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 0=取消]: ' 1 || return 0
+        case "${method}" in
+        1) challengeArgs=(--tls-existing) ;;
+        2)
+            dockerSetupRead cert '完整证书链文件（0 取消）: ' || return 0
+            dockerSetupRead key '私钥文件（0 取消）: ' || return 0
+            [[ -n "${cert}" && -n "${key}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            challengeArgs=(--tls-import "${cert}" "${key}")
+            ;;
+        3)
+            dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
+            dockerSetupRead provider 'DNS provider（dns_*，0 取消）: ' || return 0
+            dockerSetupRead credentials 'DNS 凭据文件（0 取消）: ' || return 0
+            challengeArgs=(--tls-dns "${email}" "${provider}" "${credentials}")
+            ;;
+        4)
+            dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
+            challengeArgs=(--tls-standalone "${email}")
+            ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+        dockerEditCommand --tls-migrate "${domain}" "${challengeArgs[@]}"
+        return $?
+    fi
     if [[ "${choice}" == 8 || "${choice}" == 9 ]]; then
         if [[ "${choice}" == 8 ]]; then action=enable; else action=disable; fi
         printf 'HTTP-01 入口只服务当前 TLS 域名 %s 的 ACME 验证；启用后持久监听公网 80，关闭后不再提供 webroot 验证。\n' "${currentDomain}"
@@ -1793,6 +1821,29 @@ dockerEditXhttpLimitsParse() {
     ' 2>/dev/null
 }
 
+dockerEditTlsDomainChange() {
+    local specFile=$1 domain=$2 target=$3
+    dockerDomainIsValid "${domain}" || return 1
+    jq --arg domain "${domain}" '
+      ["websocket","httpupgrade","grpc_tls","hy2","anytls","naive",
+       "fallback_tls","trojan","tuic"] as $fields |
+      .tls.domain as $old |
+      if ($old | type) != "string" or $old == $domain or
+        (.host_integrations // []) != [] or .reality_stream != null or
+        .port_hopping != null or .control != null or .control_sync != null
+      then error("不支持此 TLS 域名迁移") else
+        .tls.domain = $domain |
+        .core.protocols |= map(
+          . as $entry |
+          if any($fields[]; . as $kind | $entry | has($kind)) then
+            reduce $fields[] as $kind (.;
+              if has($kind) then .[$kind].domain = $domain else . end) |
+            if .server == $old then .server = $domain else . end
+          else . end)
+      end
+    ' "${specFile}" >"${target}"
+}
+
 dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
     local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
@@ -1819,6 +1870,7 @@ dockerEditCommand() {
     local entrySsGenerate=0 entrySsReady=0 entrySsServer= entrySsUser= entrySsImage= entrySsAttempt=
     local entryTlsDomain= entryTlsMode= entryTlsCert= entryTlsKey= entryTlsEmail=
     local entryTlsProvider= entryTlsCredentials= entryTlsSource= answer
+    local tlsMigrateDomain=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -1856,6 +1908,12 @@ dockerEditCommand() {
             [[ "$#" -ge 2 && -z "${entryTlsDomain}" && -n "$2" && "$2" != --* ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             entryTlsDomain=$2
+            shift 2
+            ;;
+        --tls-migrate)
+            [[ "$#" -ge 2 && -z "${tlsMigrateDomain}" && -n "$2" && "$2" != --* ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            tlsMigrateDomain=$2
             shift 2
             ;;
         --tls-existing|--tls-import|--tls-dns|--tls-standalone)
@@ -2684,9 +2742,19 @@ dockerEditCommand() {
         dockerError '协议入口专项不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    if [[ -n "${tlsMigrateDomain}" ]]; then
+        [[ -n "${entryTlsMode}" &&
+            -z "${specFile}" && -z "${entryAction}" && -z "${entryTlsDomain}" &&
+            -z "${regenerateReality}${realityTarget}${realityStream}${siteMode}${alpnListener}" &&
+            -z "${http01}${socks5}${routingKind}${httpRelay}${portAlias}${fail2banAction}" &&
+            -z "${cdnAction}${xhttpAction}${portHoppingAction}${tproxyAction}${tunAction}${protocolKind}" ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        dockerDomainIsValid "${tlsMigrateDomain}" || return "${PADM_DOCKER_RC_USAGE}"
+        entryTlsDomain=${tlsMigrateDomain}
+    fi
     [[ -z "${entryCore}" || "${entryAction}" == add ]] ||
         return "${PADM_DOCKER_RC_USAGE}"
-    if [[ -n "${entryTlsDomain}${entryTlsMode}" ]]; then
+    if [[ -n "${entryTlsDomain}${entryTlsMode}" && -z "${tlsMigrateDomain}" ]]; then
         [[ "${entryAction}" == add ]] || return "${PADM_DOCKER_RC_USAGE}"
         case "${entryProtocol}" in 1|2|26|30) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     fi
@@ -2713,7 +2781,7 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
-        -z "${protocolKind}" && -z "${entryAction}" ) ||
+        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -2779,7 +2847,7 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
-        -z "${protocolKind}" && -z "${entryAction}" ]]; then
+        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -2791,6 +2859,23 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${tlsMigrateDomain}" ]]; then
+        case "${entryTlsMode}" in
+        3)
+            dockerEmailIsValid "${entryTlsEmail}" &&
+                [[ "${entryTlsProvider}" =~ ^dns_[a-z0-9_]+$ ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            entryTlsCredentials=$(dockerResolveRegularFile "${entryTlsCredentials}") &&
+                dockerRenewalCredentialsValidate "${entryTlsCredentials}" ||
+                return "${PADM_DOCKER_RC_STATE}" ;;
+        4) dockerEmailIsValid "${entryTlsEmail}" || return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+        dockerEditTlsDomainChange "${draft}" "${tlsMigrateDomain}" "${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError 'TLS 域名迁移需要不同的已有 TLS 域名，且暂不支持宿主集成、共存、跳跃或控制角色'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     if [[ -n "${entryAction}" ]]; then
         jq -e --arg listener "${entryListener}" --arg action "${entryAction}" '
           (.schema_version == 3 or $action == "add") and
@@ -3712,8 +3797,13 @@ dockerEditCommand() {
     done < <(jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
       [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
     if [[ -n "${entryTlsMode}" ]]; then
-        printf '新增 TLS 域名: %s，证书方式: %s；保留已有入口、账号授权和订阅状态。\n' \
-            "${entryTlsDomain}" "${entryTlsMode}"
+        if [[ -n "${tlsMigrateDomain}" ]]; then
+            printf 'TLS 域名迁移至 %s，证书方式: %s；保留账号、分享 token 和累计，客户端需重新导入链接；自动续期登记须另行管理。\n' \
+                "${entryTlsDomain}" "${entryTlsMode}"
+        else
+            printf '新增 TLS 域名: %s，证书方式: %s；保留已有入口、账号授权和订阅状态。\n' \
+                "${entryTlsDomain}" "${entryTlsMode}"
+        fi
         if [[ "${entryTlsMode}" == 3 || "${entryTlsMode}" == 4 ]]; then
             # 申请前先完成无证书即可验证的门禁；预览和取消不触发 CA 或暂停服务。
             dockerControlRecoveryCheck &&
@@ -3726,8 +3816,14 @@ dockerEditCommand() {
             dockerTrafficRuntimeCheck "$(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${draft}")" ||
                 return "${PADM_DOCKER_RC_HOST}"
             dockerConfigurePortsAvailable "${draft}" || return "${PADM_DOCKER_RC_CONFLICT}"
+            [[ "${entryTlsMode}" != 4 ]] ||
+                printf 'HTTP-01 需要域名解析到本机且公网 80 可达；确认后临时使用宿主 80，冲突时不停止无关服务。\n'
             if [[ "${mode}" == preview ]]; then
-                printf '新增协议计划已校验；预览未申请证书或提交，证书及完整候选将在确认后验证。\n'
+                if [[ -n "${tlsMigrateDomain}" ]]; then
+                    printf 'TLS 域名迁移计划已校验；预览未申请证书或提交，证书及完整候选将在确认后验证。\n'
+                else
+                    printf '新增协议计划已校验；预览未申请证书或提交，证书及完整候选将在确认后验证。\n'
+                fi
                 return 0
             fi
             if [[ "${mode}" == interactive ]]; then
@@ -3752,6 +3848,17 @@ dockerEditCommand() {
 
 dockerEditCompatibilityValidate() {
     local editBefore=$1 editAfter=$2
+    if [[ -n "${tlsMigrateDomain:-}" ]]; then
+        # 固定新域名从原规格重算全量结果，不允许把额外漂移混入迁移。
+        dockerEditTlsDomainChange "${editBefore}" "${tlsMigrateDomain}" "${editAfter}.expected" &&
+            chmod 0600 "${editAfter}.expected" &&
+            jq -e --slurpfile expected "${editAfter}.expected" '. == $expected[0]' \
+                "${editAfter}" >/dev/null 2>&1 || {
+            dockerError 'TLS 域名迁移仅允许本次域名及关联地址变更，其它完整规格必须保持'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        return 0
+    fi
     if [[ "${entryAction:-}" == add || "${entryAction:-}" == rebuild ]]; then
         jq -en --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '
           $before[0].release == $after[0].release and $before[0].images == $after[0].images

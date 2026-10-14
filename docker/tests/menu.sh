@@ -2345,6 +2345,14 @@ runPty() {
                 printf '3\n\nadmin@example.com\n' >&3
                 waitForText '验证方式 [1=DNS-01' "${CONTROL_LOG}" || exit 17
                 printf '\004' >&3
+            elif [[ "${input}" == migrate-source-eof ]]; then
+                printf '10\nother.example.com\n' >&3
+                waitForText '证书 [1=已有受管' "${CONTROL_LOG}" || exit 17
+                printf '\004' >&3
+            elif [[ "${input}" == migrate-final-eof ]]; then
+                printf '10\nother.example.com\n1\n' >&3
+                waitForText 'fixture-tls-migrate-confirm [y/N]' "${CONTROL_LOG}" || exit 17
+                printf '\004' >&3
             else
                 printf '%s' "${input}" >&3
             fi
@@ -2617,10 +2625,23 @@ dockerTlsInstallCommand() { recordAction install "$@"; }
 dockerAcmeCommand() { recordAction acme "$@"; }
 dockerRenewalCommand() { recordAction schedule "$@"; }
 dockerEditCommand() {
-    printf 'fixture-http01-confirm [y/N]: '
+    if [[ "${1:-}" == --tls-migrate ]]; then
+        [[ "${2:-}" == other.example.com ]] || return 2
+        case "${3:-}" in
+        --tls-existing) [[ "$#" -eq 3 ]] || return 2 ;;
+        --tls-import) [[ "$#" -eq 5 && "$4" == 'certificate file.pem' && "$5" == 'private key.pem' ]] || return 2 ;;
+        --tls-dns) [[ "$#" -eq 6 && "$4" == admin@example.com && "$5" == dns_cf && "$6" == credentials.env ]] || return 2 ;;
+        --tls-standalone) [[ "$#" -eq 4 && "$4" == admin@example.com ]] || return 2 ;;
+        *) return 2 ;;
+        esac
+        printf 'fixture-tls-migrate-confirm [y/N]: '
+    else
+        printf 'fixture-http01-confirm [y/N]: '
+    fi
     IFS= read -r confirmation || return 0
     [[ "${confirmation}" == y ]] || return 0
     recordAction edit "$@"
+    [[ "${1:-}" != --tls-migrate ]] || return "${TLS_MIGRATE_STATUS:-0}"
 }
 PADM_DOCKER_RC_STATE=15
 PADM_DOCKER_RC_USAGE=2
@@ -4269,10 +4290,13 @@ for tlsCase in cancel final-no eof validate install issue renew \
     standalone-issue standalone-renew standalone-enable standalone-final-no \
     standalone-renew-final-no standalone-enable-final-no standalone-eof method-cancel method-eof \
     webroot-issue webroot-renew webroot-enable webroot-final-no webroot-disabled webroot-other-domain \
-    http01-enable http01-disable http01-enable-cancel http01-disable-cancel; do
+    http01-enable http01-disable http01-enable-cancel http01-disable-cancel \
+    migrate-existing migrate-import migrate-dns migrate-standalone migrate-domain-cancel \
+    migrate-source-cancel migrate-source-eof migrate-final-no migrate-final-eof migrate-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     printf '{"tls":{"domain":"ws.example.com","http01":true}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
     expectedAction=
+    export TLS_MIGRATE_STATUS=0
     case "${tlsCase}" in
     cancel) input=$'0\n' ;;
     final-no) input=$'3\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\nn\n' ;;
@@ -4344,10 +4368,44 @@ for tlsCase in cancel final-no eof validate install issue renew \
         printf -v input '%s\n%s\n' "${choice}" "${answer}"
         [[ "${answer}" != y ]] || expectedAction="edit --http01 ${action}"
         ;;
+    migrate-existing|migrate-import|migrate-dns|migrate-standalone|migrate-failed)
+        input=$'10\nother.example.com\n1\ny\n'
+        expectedAction='edit --tls-migrate other.example.com --tls-existing'
+        case "${tlsCase}" in
+        migrate-import)
+            input=$'10\nother.example.com\n2\ncertificate file.pem\nprivate key.pem\ny\n'
+            expectedAction='edit --tls-migrate other.example.com --tls-import certificate file.pem private key.pem'
+            ;;
+        migrate-dns)
+            input=$'10\nother.example.com\n3\nadmin@example.com\ndns_cf\ncredentials.env\ny\n'
+            expectedAction='edit --tls-migrate other.example.com --tls-dns admin@example.com dns_cf credentials.env'
+            ;;
+        migrate-standalone)
+            input=$'10\nother.example.com\n4\nadmin@example.com\ny\n'
+            expectedAction='edit --tls-migrate other.example.com --tls-standalone admin@example.com'
+            ;;
+        migrate-failed) TLS_MIGRATE_STATUS=17 ;;
+        esac
+        ;;
+    migrate-domain-cancel) input=$'10\n0\n' ;;
+    migrate-source-cancel) input=$'10\nother.example.com\n0\n' ;;
+    migrate-source-eof) input=migrate-source-eof ;;
+    migrate-final-no) input=$'10\nother.example.com\n1\nn\n' ;;
+    migrate-final-eof) input=migrate-final-eof ;;
     esac
     runPty "tls-${tlsCase}" tls "${input}" "${TLS_WIZARD_CLI}" menu
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAction}" ]] ||
         fail "TLS ${tlsCase} bypassed confirmation or dispatched incorrect arguments"
+    if [[ "${tlsCase}" == migrate-* ]]; then
+        grep -Fq '10. 迁移入口 TLS 域名' "${CONTROL_LOG}" || fail '证书菜单未开放 TLS 域名迁移'
+        ! grep -Fq '确认执行证书操作？[y/N]' "${CONTROL_LOG}" || fail 'TLS 迁移在 edit 前重复确认'
+        if [[ -n "${expectedAction}" || "${tlsCase}" == migrate-final-* ]]; then
+            [[ "$(grep -Fc 'fixture-tls-migrate-confirm [y/N]' "${CONTROL_LOG}")" == 1 ]] ||
+                fail 'TLS 迁移未仅由 edit 确认一次'
+        fi
+        [[ "${tlsCase}" != migrate-failed ]] ||
+            grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'TLS 迁移失败后未返回主菜单或丢失退出码'
+    fi
     if [[ "${tlsCase}" == standalone-* ]]; then
         grep -Fq 'HTTP-01 需要公网 80 可达' "${CONTROL_LOG}" ||
             fail 'standalone 确认前没有说明公网 80 与短暂停机影响'
@@ -4367,6 +4425,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
         fi
     fi
 done
+unset TLS_MIGRATE_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty protocols-dispatch protocols read "${TLS_WIZARD_CLI}" menu

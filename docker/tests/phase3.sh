@@ -1818,6 +1818,142 @@ runControl 0 reinstall-sharing protocol links entry-hy2
 grep -qF 'hysteria2://55555555-5555-4555-8555-555555555555@node.example.com:33443?' "${CONTROL_LOG}" &&
     ! grep -qF 'vless://' "${CONTROL_LOG}" || fail '重装分享与新协议、凭据或端口不一致'
 
+# 域名迁移只改 TLS 关联字段；小表保留固定连接地址及 Reality、SS 的完整身份。
+TLS_MIGRATE_DOMAIN=migrated.example.com
+TLS_MIGRATE_CERT="${TEST_ROOT}/migrated.crt"
+TLS_MIGRATE_KEY="${TEST_ROOT}/migrated.key"
+printf 'fake-migrated-certificate\n' >"${TLS_MIGRATE_CERT}"
+printf 'fake-migrated-private-key\n' >"${TLS_MIGRATE_KEY}"
+chmod 0600 "${TLS_MIGRATE_KEY}"
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    generated="${TEST_ROOT}/tls-migrate-helper.json"
+    changed="${TEST_ROOT}/tls-migrate-helper-changed.json"
+    tlsMigrateDomain=${TLS_MIGRATE_DOMAIN}
+    for template in '21 websocket xray' '23 httpupgrade xray' '24 grpc_tls xray' \
+        '3 hy2 sing-box' '4 anytls sing-box' '5 naive sing-box' \
+        '27 fallback_tls xray' '28 trojan xray' '31 tuic sing-box'; do
+        read -r protocol field core <<<"${template}"
+        dockerEditEntryAdd "${PROTOCOL_BASE}" vless-ws "${protocol}" "${core}" 34443 protocol "${generated}" ||
+            fail "TLS 迁移模板无法生成: ${field}"
+        jq --slurpfile ss "${FIRST_TLS_SS}" '
+          .core.protocols = [
+            (.core.protocols[-1] | .server="proxy.example.com"),
+            (.core.protocols[-1] | .listener_id="fixed-address" | .server="fixed.example.com"),
+            (.core.protocols[] | select(.id==1)),
+            ($ss[0].core.protocols[] | select(.id==30))]' \
+            "${generated}" >"${TEST_ROOT}/tls-migrate-helper-input.json"
+        dockerEditTlsDomainChange "${TEST_ROOT}/tls-migrate-helper-input.json" "${tlsMigrateDomain}" "${changed}" ||
+            fail "TLS 迁移字段被拒绝: ${field}"
+        jq -e --arg field "${field}" --arg domain "${tlsMigrateDomain}" \
+            --slurpfile before "${TEST_ROOT}/tls-migrate-helper-input.json" '
+          . == ($before[0] | .tls.domain=$domain |
+            .core.protocols[0][$field].domain=$domain | .core.protocols[0].server=$domain |
+            .core.protocols[1][$field].domain=$domain)' "${changed}" >/dev/null ||
+            fail "TLS 迁移改写其它字段或漏改连接域名: ${field}"
+    done
+    dockerEditTlsDomainChange "${PROTOCOL_BASE}" "${tlsMigrateDomain}" "${changed}" &&
+        dockerEditCompatibilityValidate "${PROTOCOL_BASE}" "${changed}" ||
+        fail 'TLS 域名迁移 expected 拒绝合法草稿'
+    for mutation in '.accounts[0].name="foreign"' '.subscription.token="fedcba9876543210"' \
+        '.core.protocols[0].uuid="77777777-7777-4777-8777-777777777777"' \
+        '.core.protocols[1].reality.server_name="other.example.com"' '.tls.http01=true'; do
+        jq "${mutation}" "${changed}" >"${TEST_ROOT}/tls-migrate-helper-drift.json"
+        ! dockerEditCompatibilityValidate "${PROTOCOL_BASE}" "${TEST_ROOT}/tls-migrate-helper-drift.json" \
+            >"${TEST_ROOT}/tls-migrate-helper.log" 2>&1 || fail 'TLS 迁移 expected 放行额外漂移'
+    done
+    for mutation in '.tls=null' '.host_integrations=[{type:"wireguard"}]' \
+        '.reality_stream={}' '.port_hopping={}' '.control={}' '.control_sync={}'; do
+        jq "${mutation}" "${PROTOCOL_BASE}" >"${TEST_ROOT}/tls-migrate-helper-input.json"
+        ! dockerEditTlsDomainChange "${TEST_ROOT}/tls-migrate-helper-input.json" "${tlsMigrateDomain}" "${changed}" \
+            >"${TEST_ROOT}/tls-migrate-helper.log" 2>&1 || fail 'TLS 迁移突破原 TLS 或特殊角色边界'
+    done
+) || fail 'TLS 域名迁移字段、冻结或支持边界错误'
+runControl 0 tls-migrate-baseline configure --spec "${PROTOCOL_BASE}"
+runControl 0 tls-migrate-existing-certificate tls install --domain "${TLS_MIGRATE_DOMAIN}" \
+    --cert "${CERT_FILE}" --key "${KEY_FILE}" --ops-image "${OPS_IMAGE}"
+TLS_MIGRATE_PRESERVED_HASH=$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" \
+    "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" "${DOCKER_ROOT}/secrets/tls/proxy.example.com.key" \
+    "${DOCKER_ROOT}/data/acme/unrelated/account.conf" "${DOCKER_ROOT}/data/reinstall-preserved" |
+    sha256sum | cut -d ' ' -f 1)
+tlsMigrateEdit() {
+    local expected=$1 name=$2
+    shift 2
+    firstTlsEdit "${expected}" "${name}" --tls-migrate "${TLS_MIGRATE_DOMAIN}" "$@"
+    [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" \
+        "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" "${DOCKER_ROOT}/secrets/tls/proxy.example.com.key" \
+        "${DOCKER_ROOT}/data/acme/unrelated/account.conf" "${DOCKER_ROOT}/data/reinstall-preserved" |
+        sha256sum | cut -d ' ' -f 1)" == "${TLS_MIGRATE_PRESERVED_HASH}" ]] ||
+        fail "${name}: TLS 迁移改变累计、旧证书或其它数据"
+}
+tlsMigrateEdit 2 tls-migrate-needs-source --preview
+tlsMigrateEdit 2 tls-migrate-reject-spec --tls-existing --spec "${PROTOCOL_BASE}" --preview
+tlsMigrateEdit 2 tls-migrate-reject-other-action --tls-existing --protocol-rebuild vless-ws --preview
+tlsMigrateEdit 2 tls-migrate-reject-conflicting-sources --tls-existing --tls-import "${CERT_FILE}" "${KEY_FILE}" --preview
+protocolEdit 15 tls-migrate-reject-same-domain --tls-migrate proxy.example.com --tls-existing --preview
+protocolEdit 2 tls-migrate-reject-bad-domain --tls-migrate invalid_domain --tls-existing --preview
+tlsMigrateEdit 0 tls-migrate-existing-preview --tls-existing --preview
+grep -qF '候选配置校验通过，预览未提交。' "${CONTROL_LOG}" || fail 'TLS 迁移预览未验证完整候选'
+FAKE_DOCKER_MODE=tls-validate-fail tlsMigrateEdit 15 tls-migrate-reject-invalid-certificate \
+    --tls-import "${TLS_MIGRATE_CERT}" "${TLS_MIGRATE_KEY}" --preview
+cp -- "${CONFIGURE_BUNDLE}" "${TEST_ROOT}/tls-migrate-valid.sigstore.json"
+jq '.signature="invalid"' "${TEST_ROOT}/tls-migrate-valid.sigstore.json" >"${CONFIGURE_BUNDLE}"
+tlsMigrateEdit 16 tls-migrate-reject-untrusted-release --tls-existing --preview
+cp -- "${TEST_ROOT}/tls-migrate-valid.sigstore.json" "${CONFIGURE_BUNDLE}"
+cp -- "${DOCKER_ROOT}/config/xray/users.base" "${TEST_ROOT}/tls-migrate-users.base"
+jq '.routing.rules += [{type:"field",domain:["unmanaged.example.com"],outboundTag:"direct"}]' \
+    "${TEST_ROOT}/tls-migrate-users.base" >"${DOCKER_ROOT}/config/xray/users.base"
+tlsMigrateEdit 15 tls-migrate-reject-baseline-drift --tls-existing --preview
+cp -- "${TEST_ROOT}/tls-migrate-users.base" "${DOCKER_ROOT}/config/xray/users.base"
+for source in dns standalone; do
+    tlsArgs=(--tls-dns admin@example.com dns_cf "${CREDENTIALS}")
+    [[ "${source}" != standalone ]] || tlsArgs=(--tls-standalone admin@example.com)
+    tlsMigrateEdit 0 "tls-migrate-${source}-preview" "${tlsArgs[@]}" --preview
+    grep -qF '预览未申请证书或提交' "${CONTROL_LOG}" &&
+        ! grep -Eq ' --issue | --install-cert |--publish 0.0.0.0:80:' "${DOCKER_LOG}" ||
+        fail 'TLS 域名迁移 ACME 预览申请证书或占用挑战端口'
+done
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    tlsMigrateCancelHash=$(editLiveHash)
+    for input in $'n\n' $'\004'; do
+        : >"${DOCKER_LOG}"
+        runEditPty "${input}" 0 --tls-migrate "${TLS_MIGRATE_DOMAIN}" --tls-existing
+        [[ "$(editLiveHash)" == "${tlsMigrateCancelHash}" ]] || fail 'TLS 迁移取消或 EOF 改变线上'
+        ! grep -Eq ' (up|down|restart|exec) | --issue | --install-cert ' "${DOCKER_LOG}" ||
+            fail 'TLS 迁移最终确认前改变服务、账本或证书'
+        assertEditCleanup
+    done
+    : >"${DOCKER_LOG}"
+    runEditPty $'n\n' 0 --tls-migrate "${TLS_MIGRATE_DOMAIN}" \
+        --tls-dns admin@example.com dns_cf "${CREDENTIALS}"
+    [[ "$(editLiveHash)" == "${tlsMigrateCancelHash}" ]] || fail 'TLS 迁移 ACME 取消改变线上'
+    ! grep -Eq ' (up|down|restart|exec) | --issue | --install-cert ' "${DOCKER_LOG}" ||
+        fail 'TLS 迁移 ACME 取消仍申请证书或改动服务'
+    assertEditCleanup
+fi
+FAKE_DOCKER_MODE=acme-issue-fail tlsMigrateEdit 15 tls-migrate-acme-failure \
+    --tls-dns admin@example.com dns_cf "${CREDENTIALS}" --confirm PADM-DOCKER-EDIT
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up tlsMigrateEdit 14 tls-migrate-up-failure \
+    --tls-import "${TLS_MIGRATE_CERT}" "${TLS_MIGRATE_KEY}" --confirm PADM-DOCKER-EDIT
+tlsMigrateEdit 0 tls-migrate-import-commit --tls-import "${TLS_MIGRATE_CERT}" "${TLS_MIGRATE_KEY}" \
+    --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_BASE}" --arg domain "${TLS_MIGRATE_DOMAIN}" '
+  . == ($before[0] | .tls.domain=$domain | .core.protocols[0].server=$domain |
+    .core.protocols[0].websocket.domain=$domain)' "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
+    fail 'TLS 迁移改变账号、token、Reality 或未选中规格'
+cmp -s "${TLS_MIGRATE_CERT}" "${DOCKER_ROOT}/secrets/tls/${TLS_MIGRATE_DOMAIN}.crt" &&
+    cmp -s "${TLS_MIGRATE_KEY}" "${DOCKER_ROOT}/secrets/tls/${TLS_MIGRATE_DOMAIN}.key" ||
+    fail 'TLS 迁移未提交新证书原始内容'
+grep -qF "server_name ${TLS_MIGRATE_DOMAIN};" "${DOCKER_ROOT}/config/nginx/default.conf" &&
+    grep -qF "/etc/padm/secrets/tls/${TLS_MIGRATE_DOMAIN}.crt" "${DOCKER_ROOT}/config/nginx/default.conf" ||
+    fail 'TLS 迁移 Nginx SNI 或证书挂载仍指向旧域名'
+grep -q "vless://22222222-2222-4222-8222-222222222222@${TLS_MIGRATE_DOMAIN}:24444.*sni=${TLS_MIGRATE_DOMAIN}" \
+    "${DOCKER_ROOT}/data/subscription/0123456789abcdef" &&
+    grep -qF 'vless://11111111-1111-4111-8111-111111111111@proxy.example.com:25443' \
+        "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
+    fail 'TLS 迁移分享没有更新 TLS 域名/SNI 或改变 Reality 连接地址'
+
 runControl 0 restart-persistence status
 grep -qxF 'configured=yes' "${CONTROL_LOG}" || fail 'configured status was not restored'
 runControl 0 validate-persistence validate

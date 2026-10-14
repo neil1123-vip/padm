@@ -910,6 +910,20 @@ padm-docker reinstall --spec /root/reinstall.json --confirm PADM-DOCKER-REINSTAL
 宿主规则转换仍受对应门禁约束，不能用重装绕开。
 完整协议管理继续为 `deferred`。
 
+已有 TLS 部署可从“证书管理 → 10. 迁移入口 TLS 域名”，或使用：
+
+```bash
+padm-docker edit --tls-migrate new.example.com --tls-import /root/fullchain.pem /root/key.pem --preview
+padm-docker edit --tls-migrate new.example.com --tls-existing --confirm PADM-DOCKER-EDIT
+```
+
+迁移须显式选择上述四种证书来源之一；复用现有证书准备、候选校验和失败恢复。
+仅修改根 TLS 域名、各 TLS 入口域名及等于旧域名的 TLS 连接地址，
+保留独立 IP/地址、Reality、SS、端口、账号、分享 token、累计及其它完整规格。
+客户端须重新导入链接。ACME 预览只校验计划，确认后才申请证书并验证完整候选。
+本操作不迁移自动续期登记；旧域名已启用 webroot 自动续期时须先停用，
+完成后为新域名另行登记。宿主集成、Reality 共存、端口跳跃和控制角色暂不支持。
+
 `--preview` 不提交、不采集流量、不启停业务服务；验证仍会验签发布、拉取镜像并运行候选检查。
 `edit` 默认验证当前部署版本而非 latest，也可传入下述同版本发布资产参数。
 首次配置输出 `schema_version: 3`；`configure` 和备份恢复继续接受 v1/v2。
