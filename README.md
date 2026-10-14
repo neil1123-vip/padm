@@ -74,6 +74,7 @@ mkdir -p -m 700 /root/padm-shortlink && wget -O /root/padm-shortlink/deploy.sh "
 ```
 
 按提示输入 Cloudflare API Token 和 Account ID，脚本自动安装依赖、部署 Worker 并保存配置；
+部署凭据用 `age` 口令加密，再次部署时解锁。日常运行 `padm` 不需要口令。
 已安装的 padm 随后自动使用短链。协议内容存于 Cloudflare KV，短链接应按节点凭据保管。
 用手机相机打开短链可查看完整协议 PNG，保存后由客户端识别图片导入节点；
 v2rayNG 直接扫描短 HTTPS 地址时会作为订阅导入。

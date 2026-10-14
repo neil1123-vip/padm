@@ -6,6 +6,8 @@ stateDir="${scriptDir}/.state"
 keyFile="${stateDir}/api-key"
 configFile="${stateDir}/wrangler.toml"
 domainFile="${stateDir}/custom-domain"
+credentialsFile="${stateDir}/cloudflare.age"
+legacyEnvFile="${stateDir}/vps.env"
 wrangler=(npx --yes wrangler@4.149.0)
 
 deployLine() {
@@ -45,10 +47,17 @@ deployLine '90' '└────────────────────
 deployStage 1 环境准备
 
 umask 077
-[[ ! -L "${stateDir}" && ! -L "${keyFile}" && ! -L "${configFile}" && ! -L "${domainFile}" ]] || {
-    deployLine '1;31' '  .state、API Key、部署配置和域名文件不能是符号链接' >&2
+[[ ! -L "${stateDir}" && ! -L "${keyFile}" && ! -L "${configFile}" &&
+    ! -L "${domainFile}" && ! -L "${credentialsFile}" && ! -L "${legacyEnvFile}" ]] || {
+    deployLine '1;31' '  .state 及其配置、凭据文件不能是符号链接' >&2
     exit 1
 }
+for file in "${credentialsFile}" "${legacyEnvFile}"; do
+    [[ ! -e "${file}" || -f "${file}" ]] || {
+        deployLine '1;31' '  凭据或旧环境配置路径不是普通文件' >&2
+        exit 1
+    }
+done
 mkdir -p "${stateDir}"
 chmod 700 "${stateDir}"
 runDir=$(mktemp -d "${stateDir}/.tmp-deploy.XXXXXX")
@@ -61,6 +70,7 @@ nodeReady() {
 }
 
 system=$(uname -s)
+privilege=()
 if [[ "${system}" == Linux ]]; then
     glibcVersion=$(getconf GNU_LIBC_VERSION 2>/dev/null) || glibcVersion=
     if [[ ! "${glibcVersion}" =~ ^glibc[[:space:]]([0-9]+)\.([0-9]+)$ ]] ||
@@ -73,14 +83,17 @@ if [[ "${system}" == Linux ]]; then
     x86_64 | amd64)
         nodeArch=x64
         nodeHash=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
+        ageArch=amd64
+        ageHash=cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
         ;;
     aarch64 | arm64)
         nodeArch=arm64
         nodeHash=a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f
+        ageArch=arm64
+        ageHash=6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4
         ;;
     *) deployLine '1;31' '  自动部署支持 Linux x86_64 和 ARM64' >&2; exit 1 ;;
     esac
-    privilege=()
     if ((EUID != 0)); then
         command -v sudo >/dev/null 2>&1 || {
             deployLine '1;31' '  安装依赖及保存 padm 配置需要 root 或 sudo' >&2
@@ -94,7 +107,7 @@ if [[ "${system}" == Linux ]]; then
         export PATH="${stateDir}/${nodeName}/bin:${PATH}"
     fi
     missing=false
-    for tool in curl tar xz openssl sha256sum qrencode; do
+    for tool in curl tar gzip xz openssl sha256sum qrencode; do
         command -v "${tool}" >/dev/null 2>&1 || missing=true
     done
     if [[ "${missing}" == true ]] || ! nodeReady ||
@@ -104,13 +117,13 @@ if [[ "${system}" == Linux ]]; then
             "${privilege[@]}" apt-get update
             "${privilege[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 -o DPkg::Lock::Timeout=120 \
-                ca-certificates curl tar xz-utils openssl coreutils libstdc++6 libatomic1 qrencode
+                ca-certificates curl tar gzip xz-utils openssl coreutils libstdc++6 libatomic1 qrencode
         elif command -v dnf >/dev/null 2>&1; then
             "${privilege[@]}" dnf install -y \
-                ca-certificates curl tar xz openssl coreutils libstdc++ libatomic qrencode
+                ca-certificates curl tar gzip xz openssl coreutils libstdc++ libatomic qrencode
         elif command -v yum >/dev/null 2>&1; then
             "${privilege[@]}" yum install -y \
-                ca-certificates curl tar xz openssl coreutils libstdc++ libatomic qrencode
+                ca-certificates curl tar gzip xz openssl coreutils libstdc++ libatomic qrencode
         else
             deployLine '1;31' '  自动安装支持 apt-get、dnf 或 yum' >&2
             exit 1
@@ -140,17 +153,79 @@ command -v openssl >/dev/null 2>&1 || {
     deployLine '1;31' '  缺少 openssl，请先安装 openssl' >&2
     exit 1
 }
+prepareAge() {
+    if command -v age >/dev/null 2>&1; then
+        ageCommand=$(command -v age)
+        return
+    fi
+    local ageDir="${stateDir}/age-v1.3.2"
+    [[ ! -L "${ageDir}" && ! -L "${ageDir}/age" ]] || {
+        deployLine '1;31' '  私有 age 路径不能是符号链接' >&2
+        return 1
+    }
+    if [[ ! -x "${ageDir}/age" ]]; then
+        deployLine '90' '  下载并校验官方 age 1.3.2…'
+        local archive="age-v1.3.2-linux-${ageArch}.tar.gz"
+        curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 180 \
+            "https://github.com/FiloSottile/age/releases/download/v1.3.2/${archive}" -o "${runDir}/${archive}" || return
+        (cd -- "${runDir}"; printf '%s  %s\n' "${ageHash}" "${archive}" | sha256sum -c -) || return
+        tar -xzf "${runDir}/${archive}" -C "${runDir}" age/age || return
+        mkdir -p "${ageDir}"
+        chmod 700 "${ageDir}"
+        mv -- "${runDir}/age/age" "${ageDir}/age"
+    fi
+    ageCommand="${ageDir}/age"
+}
 deployStage 2 'Cloudflare 授权'
 terminalReady=false
 if { exec 3<>/dev/tty; } 2>/dev/null; then
     terminalReady=true
 fi
 if [[ "${system}" == Linux ]]; then
+    saveCredentials=false
+    if [[ -f "${credentialsFile}" && ( -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ) ]]; then
+        [[ -z "${CLOUDFLARE_API_TOKEN:-}" && -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || {
+            deployLine '1;31' '  两项 Cloudflare 环境变量须同时设置，或全部清除后解锁' >&2
+            exit 1
+        }
+        [[ "${terminalReady}" == true ]] || {
+            deployLine '1;31' '  解锁 Cloudflare 凭据需要交互终端，或同时设置两项环境变量' >&2
+            exit 1
+        }
+        prepareAge
+        printf '%s\n' '  已保存 Cloudflare 凭据，输入 age 口令解锁。' >&3
+        if ! credentials=$("${ageCommand}" -d "${credentialsFile}"); then
+            deployLine '1;31' '  凭据解锁失败；请检查口令或恢复 cloudflare.age，原配置保留' >&2
+            exit 1
+        fi
+        if ! credentials=$(printf '%s' "${credentials}" | node -e '
+let data = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  try {
+    const value = JSON.parse(data);
+    if (!/^[A-Za-z0-9_-]+$/.test(value.token) || typeof value.token !== "string" ||
+        !/^[0-9a-fA-F]{32}$/.test(value.account_id) || typeof value.account_id !== "string")
+      throw new Error("invalid credentials");
+    process.stdout.write(`${value.token}\t${value.account_id}`);
+  } catch {
+    console.error("解密内容不是有效的 Cloudflare 凭据");
+    process.exitCode = 1;
+  }
+});'); then
+            exit 1
+        fi
+        IFS=$'\t' read -r CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID <<<"${credentials}"
+        unset credentials
+        chmod 600 "${credentialsFile}"
+    fi
     if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
         if [[ "${terminalReady}" != true ]]; then
             deployLine '1;31' '  无交互终端，请设置 CLOUDFLARE_API_TOKEN 和 CLOUDFLARE_ACCOUNT_ID' >&2
             exit 1
         fi
+        saveCredentials=true
         printf '%s\n' \
             '  获取 Token：打开 https://dash.cloudflare.com/profile/api-tokens' \
             '  选择 Create Token（创建令牌）→ Create Custom Token（创建自定义令牌）' \
@@ -181,6 +256,19 @@ if [[ "${system}" == Linux ]]; then
         exit 1
     }
     export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
+    if [[ "${saveCredentials}" == true ]]; then
+        prepareAge
+        printf '%s\n' \
+            '  用 age 加密保存部署凭据；设置口令后再次输入确认。' \
+            '  直接回车会生成口令，请记下终端显示的口令。' \
+            '  仅再次部署需要解锁，运行 padm 不需要口令。' >&3
+        # 明文只通过管道传递；加密成功后原子替换，失败保留原密文。
+        node -e 'process.stdout.write(JSON.stringify({
+          token: process.env.CLOUDFLARE_API_TOKEN, account_id: process.env.CLOUDFLARE_ACCOUNT_ID
+        }))' | "${ageCommand}" -p -o "${runDir}/cloudflare.age"
+        chmod 600 "${runDir}/cloudflare.age"
+        mv -- "${runDir}/cloudflare.age" "${credentialsFile}"
+    fi
 fi
 customDomain=
 if [[ -e "${domainFile}" ]]; then
@@ -302,13 +390,14 @@ NODE
 )
 
 deployStage 4 保存配置
-printf 'export PADM_QR_SHORTENER_URL=%q\nexport PADM_QR_SHORTENER_API_KEY=%q\n' \
-    "${workerUrl}" "${apiKey}" >"${runDir}/vps.env"
 if [[ "${system}" == Linux ]]; then
     padmConfigDir=${PADM_INSTALL_DIR:-/etc/padm}
     padmConfigDir=${padmConfigDir%/}
-    # 在目标目录原子替换，保存失败时保留原配置；密钥不进入命令参数。
-    "${privilege[@]}" "$(command -v node)" - "${padmConfigDir}" "${workerUrl}" "${keyFile}" <<'NODE'
+else
+    padmConfigDir=${stateDir}
+fi
+# 在目标目录原子替换，保存失败时保留原配置；密钥不进入命令参数。
+"${privilege[@]}" "$(command -v node)" - "${padmConfigDir}" "${workerUrl}" "${keyFile}" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const [dir, url, keyFile] = process.argv.slice(2);
@@ -331,8 +420,7 @@ try {
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
 }
 NODE
-fi
-mv -- "${runDir}/vps.env" "${stateDir}/vps.env"
+[[ ! -f "${legacyEnvFile}" ]] || rm -- "${legacyEnvFile}"
 if [[ -n "${customDomain}" ]]; then
     printf '%s\n' "${customDomain}" >"${runDir}/custom-domain"
     mv -- "${runDir}/custom-domain" "${domainFile}"
@@ -346,7 +434,7 @@ if [[ "${system}" == Linux ]]; then
     deployLine '1;32' '│ 下一步：已安装 padm 时，运行 padm 查看二维码'
     printf '%s\n' '│ 重连 SSH 后仍自动生效'
 else
-    printf '│ VPS 配置文件\n│ %s\n' "${stateDir}/vps.env"
+    printf '│ VPS 配置文件\n│ %s/qr-shortener.json\n' "${stateDir}"
     printf '│\n'
     printf '%s\n' '│ 下一步：将配置传入 VPS 后启用，步骤见 README'
 fi

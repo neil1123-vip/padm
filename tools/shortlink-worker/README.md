@@ -26,12 +26,15 @@ bash tools/shortlink-worker/deploy.sh
 - Cloudflare API Token，具备目标账号的 `Workers Scripts Edit` 和 `Workers KV Storage Edit`
   权限；Account ID 可从 Cloudflare 账号概览获取。
 
-脚本交互收集 Token 和 Account ID，Token 隐藏输入且不写入部署状态目录。
+首次运行时，脚本交互收集 Token 和 Account ID，Token 隐藏输入。
+随后用 `age` 口令加密保存凭据，设置口令时需输入两次；直接回车会生成口令，请妥善记录。
+再次部署只需输入口令解锁，无需重复输入 Token 和 Account ID。日常运行 `padm` 不询问口令。
 随后询问可选的自定义域名，例如 `go.example.com`。首次部署直接回车使用 `workers.dev`；
 填写时只输入域名，不加 `https://`、路径或端口。域名所属站点须已在同一 Cloudflare 账户激活，
 建议使用专用子域名。Wrangler 自动绑定域名、创建 DNS 记录及证书，成功后 padm 使用该域名生成短链二维码。
 已有 DNS 或 Worker 绑定冲突时，按终端提示确认或取消。
-自动部署可通过环境变量 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID` 提供凭据。
+自动部署可通过环境变量 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID` 提供凭据；
+同时提供时直接使用，不保存或解锁凭据。已有密文时只设置其中一项会被拒绝，以免混用账号。
 使用自定义域名时仍须在交互终端运行；未启用 `workers.dev` 子域名时，按 Wrangler 提示完成设置。
 
 缺少 `wget` 时，Debian/Ubuntu 可执行
@@ -56,8 +59,9 @@ padm
 且没有组及其他用户权限。配置无效或上传失败时，padm 提示原因并使用完整协议链接生成二维码。
 已有 HTTP/HTTPS 订阅地址保持原样。
 
-在其他电脑部署时，可通过 SSH/SFTP 将 `.state/vps.env` 传入 VPS 的私有目录，
-保持文件权限为 `600`，在运行 padm 的 shell 中通过 `source` 加载。
+在其他电脑部署时，将生成的 `qr-shortener.json` 通过 SSH/SFTP 传入 VPS 的
+`/etc/padm/qr-shortener.json`，设置所有者为 root、文件权限为 `600`。
+Linux 从配置目录取文件；macOS 从 `.state/qr-shortener.json` 取文件。
 使用 Cloudflare 控制台部署时，可在该 shell 中手动设置：
 
 ```bash
@@ -92,12 +96,13 @@ padm
 
 | 文件 | 用途 |
 | --- | --- |
+| `cloudflare.age` | 口令加密的 Cloudflare Token 和 Account ID，权限为 `600` |
 | `api-key` | Worker 写入及删除密钥，权限为 `600` |
 | `wrangler.toml` | Worker 配置和账号专属的 KV 绑定 |
 | `custom-domain` | 成功部署的自定义域名，后续回车复用，权限为 `600` |
 | `worker.js` | 本次部署使用的 Worker 源码 |
 | `package.json` / `package-lock.json` | PNG 生成依赖及锁定版本 |
-| `vps.env` | VPS 环境变量配置备份，权限为 `600` |
+| `qr-shortener.json` | 仅非 Linux 部署生成，用于传入 VPS，权限为 `600` |
 
 重复部署复用 API Key 和 KV 绑定。首次部署前可修改模板 `wrangler.toml` 的 Worker 名称；
 后续修改名称应编辑 `.state/wrangler.toml`。自定义域名每次部署都会询问，回车复用已保存值；
@@ -106,6 +111,9 @@ padm
 从控制台部署迁入脚本时，先将原密钥保存到 `.state/api-key`，并将含 KV ID 的原配置
 保存到 `.state/wrangler.toml`。已有配置但密钥丢失时，脚本停止并要求恢复密钥。
 部署或配置保存失败时，不替换已有 VPS 配置。`.state/` 已加入 `.gitignore`，仍需妥善备份和保管。
+旧版本的 `.state/vps.env` 在运行配置成功保存后自动删除，不再重复备份环境变量。
+解锁失败时保留密文和运行配置；遗忘口令无法恢复密文，可将 `cloudflare.age` 移出
+`.state/` 后重新输入凭据。保留 `api-key` 和 `wrangler.toml`，以复用原服务。
 
 每次成功上传协议文本都会创建随机短地址，保存当时的文本副本。节点参数变更后需重新生成，
 旧记录不会自动更新或过期。可通过 `DELETE /s/<id>` 或 Cloudflare 控制台删除记录。
@@ -115,6 +123,9 @@ padm
 协议内容以原始文本传输并保存在 Cloudflare KV 中，Cloudflare 及具备相应账号权限的人员
 属于信任范围。短链接本身就是读取凭证，持有者可读取完整协议内容。
 Worker API Key 仅保护写入和删除，与用于部署的 Cloudflare API Token 相互独立。
+Cloudflare 部署凭据以 `age` 口令加密；口令只经终端输入，不保存到磁盘。
+Worker 地址和 API Key 保留在权限为 `600` 的运行配置中，便于 padm 自动使用。
+`.state/api-key` 同样为明文私有文件；具有 root 或这些文件读取权限的用户可取得运行密钥。
 
 KV 使用最终一致性，新记录及删除操作的跨地区可见性可能延迟超过 60 秒。
 新地址暂时无法读取时，可稍后重试；删除记录也不保证所有地区立即失效。
@@ -149,6 +160,8 @@ Worker 接口使用 `/s/<id>`，`id` 为随机生成的 32 位小写十六进制
 则下载 Node.js `22.23.3`，校验固定 SHA-256 后安装到 `.state/`，不替换系统 Node.js。
 缺少配套文件时，从 `main` 分支的同一提交下载源码、模板、依赖清单和锁文件。
 部署前执行 `npm ci --omit=dev --ignore-scripts`，由 Wrangler 将 PNG 依赖打包到 Worker。
+加密或解锁时优先复用已安装的 `age`；Linux 缺少时下载官方 `age 1.3.2`，
+校验固定 SHA-256 后安装到 `.state/age-v1.3.2/`，不替换系统工具。
 
 仓库根目录通过 PowerShell 7.3+ 和 Docker Desktop 的 Linux 引擎执行定向回归：
 
@@ -161,6 +174,8 @@ Worker 接口使用 `/s/<id>`，`id` 为随机生成的 32 位小写十六进制
 隐藏输入、80 列输出和颜色开关。文档中的一行下载入口也纳入验证。
 自定义域名回归覆盖首次绑定、回车复用、凭据已设置及输出重定向时的交互、非法输入、
 绑定失败或缺少目标地址时保留原配置。
+凭据回归使用真实 `age` 和终端，覆盖首次加密、再次解锁、错误口令、损坏密文、
+非法解密内容、非交互环境变量及旧备份清理，并确认 padm 无需解锁即可生成短链。
 PNG 回归使用独立识别库解码含中文及长协议链接的图片，检查浏览器/订阅响应、容量限制及旧记录兼容。
 测试不调用 Cloudflare，不能替代实际发布、客户端扫码或跨地区 KV 验收。
 

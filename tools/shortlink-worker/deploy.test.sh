@@ -82,7 +82,7 @@ bash "${project}/deploy.sh" >"${tmp}/output"
 key=$(<"${stateDir}/api-key")
 [[ "${key}" =~ ^[0-9a-f]{64}$ ]]
 [[ "$(stat -c '%a' "${stateDir}/api-key")" == 600 ]]
-[[ "$(stat -c '%a' "${stateDir}/vps.env")" == 600 ]]
+[[ ! -e "${stateDir}/vps.env" && ! -e "${stateDir}/cloudflare.age" ]]
 [[ "$(stat -c '%a' "${PADM_INSTALL_DIR}/qr-shortener.json")" == 600 ]]
 [[ "$(stat -c '%a' "${PADM_INSTALL_DIR}")" == 755 ]]
 [[ "$(jq -r .api_key "${PADM_INSTALL_DIR}/qr-shortener.json")" == "${key}" ]]
@@ -92,11 +92,9 @@ key=$(<"${stateDir}/api-key")
 grep -q 'https://padm-shortlink.example.workers.dev' "${tmp}/output"
 ! grep -q $'\033' "${tmp}/output"
 grep -qF '[4/4] 保存配置' "${tmp}/output"
-source "${stateDir}/vps.env"
-[[ "${PADM_QR_SHORTENER_API_KEY}" == "${key}" ]]
-[[ "${PADM_QR_SHORTENER_URL}" == https://padm-shortlink.example.workers.dev ]]
 [[ -z "$(find "${stateDir}" -name '.tmp-deploy.*' -print -quit)" ]]
-cp -- "${stateDir}/vps.env" "${tmp}/previous.env"
+printf 'export PADM_QR_SHORTENER_URL=https://old.example.com\nexport PADM_QR_SHORTENER_API_KEY=%s\n' \
+    "${key}" >"${tmp}/previous.env"
 cp -- "${PADM_INSTALL_DIR}/qr-shortener.json" "${tmp}/previous.json"
 # 新进程不继承短链环境变量，也能通过 padm 的实际输出入口使用部署配置。
 env -u PADM_QR_SHORTENER_URL -u PADM_QR_SHORTENER_API_KEY \
@@ -127,6 +125,7 @@ bash "${project}/deploy.sh" >"${tmp}/output"
 [[ "$(<"${stateDir}/api-key")" == "${key}" ]]
 [[ "$(stat -c '%a' "${stateDir}/api-key")" == 600 ]]
 [[ "$(grep -c 'created-kv' "${DEPLOY_TEST_LOG}")" == 1 ]]
+cp -- "${tmp}/previous.env" "${stateDir}/vps.env"
 for mode in failure missing-url dependency-failure; do
     status=0
     DEPLOY_TEST_MODE="${mode}" bash "${project}/deploy.sh" >"${tmp}/output" 2>"${tmp}/error" || status=$?
@@ -140,7 +139,7 @@ for mode in failure missing-url dependency-failure; do
     [[ "$(<"${stateDir}/api-key")" == "${key}" ]]
     [[ -z "$(find "${stateDir}" -name '.tmp-deploy.*' -print -quit)" ]]
 done
-# 配置目录不可写入时保留原配置及备用环境文件，不输出完成。
+# 配置目录不可写入时保留原配置及旧环境文件，不输出完成。
 status=0
 PADM_INSTALL_DIR="${PADM_INSTALL_DIR}/qr-shortener.json" \
     bash "${project}/deploy.sh" >"${tmp}/output" 2>"${tmp}/error" || status=$?
@@ -188,20 +187,26 @@ grep -q 'glibc 2.35+' "${tmp}/error"
 grep -q '部署中止 · 环境准备' "${tmp}/error"
 cmp "${tmp}/previous.env" "${stateDir}/vps.env"
 [[ -z "$(find "${stateDir}" -name '.tmp-deploy.*' -print -quit)" ]]
+bash "${project}/deploy.sh" >"${tmp}/output"
+[[ ! -e "${stateDir}/vps.env" && ! -e "${stateDir}/cloudflare.age" ]]
 
-# 真实 80 列终端检查颜色开关、隐藏输入及 Token 不落盘。
+# 真实 age 和 80 列终端检查凭据加密、解锁、失败保护及隐藏输入。
 mkdir -p "${tmp}/prompt-project"
 cp -- "${root}/"{deploy.sh,worker.js,wrangler.toml,package.json,package-lock.json} "${tmp}/prompt-project/"
 python3 - "${tmp}/prompt-project" <<'PY'
 import fcntl
+import hashlib
 import json
 import os
 import pathlib
 import pty
 import re
 import select
+import shutil
 import signal
+import subprocess
 import sys
+import tarfile
 import termios
 import time
 import struct
@@ -210,6 +215,71 @@ import unicodedata
 project = pathlib.Path(sys.argv[1])
 token = b"test-cloudflare-token"
 account = b"0123456789abcdef0123456789abcdef"
+passphrase = b"test-age-passphrase-never-echo"
+cipher = project / ".state/cloudflare.age"
+config = pathlib.Path(os.environ["PADM_INSTALL_DIR"]) / "qr-shortener.json"
+calls_file = pathlib.Path(os.environ["DEPLOY_TEST_LOG"])
+
+def run_terminal(command, env, prompts, redirected=False, data=None):
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    pipes = os.pipe() if data is not None else None
+    pid = os.fork()
+    if pid == 0:
+        os.close(master)
+        os.setsid()
+        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+        for fd in range(3):
+            os.dup2(slave, fd)
+        os.close(slave)
+        if pipes:
+            os.close(pipes[1])
+            os.dup2(pipes[0], 0)
+            os.close(pipes[0])
+        if redirected:
+            fd = os.open(project / "redirected.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            os.dup2(fd, 1)
+            os.dup2(fd, 2)
+            os.close(fd)
+        os.execvpe(command[0], command, env)
+    os.close(slave)
+    if pipes:
+        os.close(pipes[0])
+        os.write(pipes[1], data)
+        os.close(pipes[1])
+    output = b""
+    try:
+        cursor = 0
+        for prompt, value in prompts:
+            deadline = time.monotonic() + 20
+            while prompt not in output[cursor:] or not output.endswith(b": "):
+                assert time.monotonic() < deadline, f"prompt timed out: {command}: {output!r}"
+                if select.select([master], [], [], 1)[0]:
+                    output += os.read(master, 65536)
+            cursor = len(output)
+            os.write(master, value + b"\n")
+        deadline = time.monotonic() + 20
+        while True:
+            assert time.monotonic() < deadline, f"process timed out: {command}"
+            if select.select([master], [], [], 1)[0]:
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output += chunk
+        _, status = os.waitpid(pid, 0)
+        pid = None
+        if redirected:
+            output += (project / "redirected.log").read_bytes()
+        return os.waitstatus_to_exitcode(status), output
+    finally:
+        os.close(master)
+        if pid is not None:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+
 cases = [(mode, "") for mode in ("color", "no-color", "dumb")]
 cases += [("invalid", domain) for domain in (
     "https://go.example.com", "go.example.com/s", "go.example.com:443",
@@ -226,116 +296,219 @@ cases += [
 ]
 for mode, domain in cases:
     saved = {name: (project / ".state" / name).read_bytes()
-             for name in ("vps.env", "custom-domain") if (project / ".state" / name).exists()}
-    config = pathlib.Path(os.environ["PADM_INSTALL_DIR"]) / "qr-shortener.json"
+             for name in ("cloudflare.age", "custom-domain") if (project / ".state" / name).exists()}
     previous_config = config.read_bytes()
-    calls = pathlib.Path(os.environ["DEPLOY_TEST_LOG"]).read_bytes()
-    master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-    pid = os.fork()
-    if pid == 0:
-        os.close(master)
-        os.setsid()
-        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-        for fd in range(3):
-            os.dup2(slave, fd)
-        os.close(slave)
-        env = dict(os.environ, CLOUDFLARE_API_TOKEN=token.decode() if mode == "custom-env" else "",
-                   CLOUDFLARE_ACCOUNT_ID=account.decode() if mode == "custom-env" else "",
-                   TERM="dumb" if mode == "dumb" else "xterm-256color",
-                   NO_COLOR="1" if mode == "no-color" else "", PADM_NO_COLOR="", CI="true",
-                   DEPLOY_TEST_MODE={"domain-failure": "failure", "domain-missing": "missing-domain"}.get(mode, ""))
-        if mode in ("custom-env", "custom-redirect"):
-            fd = os.open(project / "redirected.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            os.dup2(fd, 1)
-            os.dup2(fd, 2)
-            os.close(fd)
-        os.execve("/bin/bash", ["bash", str(project / "deploy.sh")], env)
-    os.close(slave)
-    output = b""
-    try:
-        prompts = [] if mode == "custom-env" else [
-            (b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account)]
-        prompts.append(("  自定义域名（".encode(), domain.encode()))
-        for prompt, value in prompts:
-            deadline = time.monotonic() + 20
-            while prompt not in output or not output.endswith(b": "):
-                assert time.monotonic() < deadline, f"prompt timed out: {mode}: {output!r}"
-                if select.select([master], [], [], 1)[0]:
-                    output += os.read(master, 65536)
-            os.write(master, value + b"\n")
-        deadline = time.monotonic() + 20
-        while True:
-            assert time.monotonic() < deadline, "deployment timed out"
-            if select.select([master], [], [], 1)[0]:
-                try:
-                    chunk = os.read(master, 65536)
-                except OSError:
-                    break
-                if not chunk:
-                    break
-                output += chunk
-        _, status = os.waitpid(pid, 0)
-        pid = None
-        if mode in ("custom-env", "custom-redirect"):
-            output += (project / "redirected.log").read_bytes()
-        expected_success = mode not in ("invalid", "domain-failure", "domain-missing")
-        assert (os.waitstatus_to_exitcode(status) == 0) == expected_success, output.decode(errors="replace")
-        assert token not in output, "deployment Token echoed"
-        assert (b"\x1b[" in output) == (mode not in ("no-color", "dumb", "custom-env", "custom-redirect")), f"wrong color mode: {mode}"
-        plain = re.sub(rb"\x1b\[[0-9;]*m", b"", output).decode()
-        instructions = (
-            "https://dash.cloudflare.com/profile/api-tokens",
-            "Create Token（创建令牌）",
-            "Create Custom Token（创建自定义令牌）",
-            "Account（账户）→ Workers Scripts（Workers 脚本）",
-            "Workers KV Storage（Workers KV 存储）",
-            "Account Resources（账户资源）：Include（包含）→ Specific account（指定账户）",
-            "Continue to summary（继续查看摘要）",
-            "Account Details（账户详情）",
-            "只显示一次",
-        ) if mode != "custom-env" else ()
-        for instruction in instructions:
-            assert instruction in plain, f"missing authorization instruction: {instruction}"
-        if expected_success:
-            for number, title in enumerate(("环境准备", "Cloudflare 授权", "Worker 部署", "保存配置"), 1):
-                assert f"[{number}/4] {title}" in plain
-        for line in plain.splitlines():
-            width = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line)
-            if mode != "invalid":
-                assert width <= 80, f"line exceeds 80 columns: {line!r}"
-        if not expected_success:
-            assert config.read_bytes() == previous_config, "failed deployment replaced VPS config"
-            for name in ("vps.env", "custom-domain"):
-                path = project / ".state" / name
-                assert path.read_bytes() == saved[name] if name in saved else not path.exists()
-            assert "部署完成" not in plain
-            if mode == "invalid":
-                assert "自定义域名无效" in plain
-                assert pathlib.Path(os.environ["DEPLOY_TEST_LOG"]).read_bytes() == calls
-            if mode == "domain-failure":
-                assert os.waitstatus_to_exitcode(status) == 17
-        elif mode in ("custom", "reuse", "custom-env", "custom-redirect"):
-            assert (project / ".state/custom-domain").read_text().strip() == "go.example.com"
-            assert json.loads(config.read_text())["url"] == "https://go.example.com"
-            assert "https://go.example.com" in (project / ".state/vps.env").read_text()
-            assert pathlib.Path(os.environ["DEPLOY_TEST_LOG"]).read_bytes()[len(calls):].count(b"domain=go.example.com") == 1
-        else:
-            assert not (project / ".state/custom-domain").exists()
-        assert (project / ".state/vps.env").is_file()
-        for path in (project / ".state").rglob("*"):
-            if path.is_file():
-                assert token not in path.read_bytes(), f"deployment Token saved to {path}"
-        if mode == "color":
-            print("shortlink-terminal-preview-start", flush=True)
-            sys.stdout.buffer.write(output.replace(account, b"<Account ID>"))
-            sys.stdout.flush()
-            print("shortlink-terminal-preview-end", flush=True)
-    finally:
-        os.close(master)
-        if pid is not None:
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
+    calls = calls_file.read_bytes()
+    env = dict(os.environ, CLOUDFLARE_API_TOKEN=token.decode() if mode == "custom-env" else "",
+               CLOUDFLARE_ACCOUNT_ID=account.decode() if mode == "custom-env" else "",
+               TERM="dumb" if mode == "dumb" else "xterm-256color",
+               NO_COLOR="1" if mode == "no-color" else "", PADM_NO_COLOR="", CI="true",
+               DEPLOY_TEST_MODE={"domain-failure": "failure", "domain-missing": "missing-domain"}.get(mode, ""))
+    if mode == "color":
+        prompts = [(b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account),
+                   (b"Enter passphrase", passphrase), (b"Confirm passphrase", passphrase)]
+    elif mode == "custom-env":
+        prompts = []
+    else:
+        prompts = [(b"Enter passphrase", passphrase)]
+    prompts.append(("  自定义域名（".encode(), domain.encode()))
+    status, output = run_terminal(["bash", str(project / "deploy.sh")], env, prompts,
+                                  redirected=mode in ("custom-env", "custom-redirect"))
+    expected_success = mode not in ("invalid", "domain-failure", "domain-missing")
+    assert (status == 0) == expected_success, output.decode(errors="replace")
+    assert token not in output, "deployment Token echoed"
+    assert passphrase not in output, "age passphrase echoed"
+    assert (b"\x1b[1;36m" in output) == (mode not in ("no-color", "dumb", "custom-env", "custom-redirect")), f"wrong color mode: {mode}"
+    plain = re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", output).decode()
+    instructions = (
+        "https://dash.cloudflare.com/profile/api-tokens",
+        "Create Token（创建令牌）",
+        "Create Custom Token（创建自定义令牌）",
+        "Account（账户）→ Workers Scripts（Workers 脚本）",
+        "Workers KV Storage（Workers KV 存储）",
+        "Account Resources（账户资源）：Include（包含）→ Specific account（指定账户）",
+        "Continue to summary（继续查看摘要）",
+        "Account Details（账户详情）",
+        "只显示一次",
+    ) if mode == "color" else ()
+    for instruction in instructions:
+        assert instruction in plain, f"missing authorization instruction: {instruction}"
+    if mode not in ("color", "custom-env"):
+        assert "Cloudflare API Token" not in plain
+        assert output.count(b"Enter passphrase") == 1, "saved credentials not unlocked exactly once"
+    if mode == "custom-env":
+        assert b"Enter passphrase" not in output
+    if expected_success:
+        for number, title in enumerate(("环境准备", "Cloudflare 授权", "Worker 部署", "保存配置"), 1):
+            assert f"[{number}/4] {title}" in plain
+    for line in plain.splitlines():
+        width = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line)
+        if mode != "invalid":
+            assert width <= 80, f"line exceeds 80 columns: {line!r}"
+    if not expected_success:
+        assert config.read_bytes() == previous_config, "failed deployment replaced VPS config"
+        for name in ("cloudflare.age", "custom-domain"):
+            path = project / ".state" / name
+            assert path.read_bytes() == saved[name] if name in saved else not path.exists()
+        assert "部署完成" not in plain
+        if mode == "invalid":
+            assert "自定义域名无效" in plain
+            assert calls_file.read_bytes() == calls
+        if mode == "domain-failure":
+            assert status == 17
+    elif mode in ("custom", "reuse", "custom-env", "custom-redirect"):
+        assert (project / ".state/custom-domain").read_text().strip() == "go.example.com"
+        assert json.loads(config.read_text())["url"] == "https://go.example.com"
+        assert calls_file.read_bytes()[len(calls):].count(b"domain=go.example.com") == 1
+    else:
+        assert not (project / ".state/custom-domain").exists()
+    assert cipher.is_file() and (cipher.stat().st_mode & 0o777) == 0o600
+    assert cipher.read_bytes().startswith(b"age-encryption.org/v1\n")
+    if "cloudflare.age" in saved:
+        assert cipher.read_bytes() == saved["cloudflare.age"], "reused credentials were reencrypted"
+    assert not (project / ".state/vps.env").exists()
+    for path in (project / ".state").rglob("*"):
+        if path.is_file():
+            assert token not in path.read_bytes(), f"deployment Token saved to {path}"
+            assert passphrase not in path.read_bytes(), f"age passphrase saved to {path}"
+    if mode == "color":
+        print("shortlink-terminal-preview-start", flush=True)
+        sys.stdout.buffer.write(output.replace(account, b"<Account ID>"))
+        sys.stdout.flush()
+        print("shortlink-terminal-preview-end", flush=True)
+
+saved_cipher = cipher.read_bytes()
+previous_config = config.read_bytes()
+calls = calls_file.read_bytes()
+env = dict(os.environ, CLOUDFLARE_API_TOKEN="", CLOUDFLARE_ACCOUNT_ID="", TERM="dumb", CI="true")
+for mode in ("wrong-passphrase", "corrupt", "invalid-json", "partial-env", "no-terminal"):
+    cipher.write_bytes(saved_cipher)
+    if mode == "corrupt":
+        cipher.write_bytes(saved_cipher[:-1])
+    elif mode == "invalid-json":
+        status, output = run_terminal(["age", "-p", "-o", str(cipher)], env, [
+            (b"Enter passphrase", passphrase), (b"Confirm passphrase", passphrase)],
+            data=b'{"token":"bad token","account_id":"0123456789abcdef0123456789abcdef"}')
+        assert status == 0, output
+    before = cipher.read_bytes()
+    if mode == "no-terminal":
+        result = subprocess.run(["setsid", "--wait", "bash", str(project / "deploy.sh")],
+                                env=env, capture_output=True, timeout=20)
+        status, output = result.returncode, result.stdout + result.stderr
+    else:
+        prompts = [] if mode == "partial-env" else [
+            (b"Enter passphrase", b"wrong-passphrase" if mode == "wrong-passphrase" else passphrase)]
+        case_env = dict(env, CLOUDFLARE_API_TOKEN=token.decode()) if mode == "partial-env" else env
+        status, output = run_terminal(["bash", str(project / "deploy.sh")], case_env, prompts)
+    assert status != 0, f"invalid credential case accepted: {mode}"
+    assert config.read_bytes() == previous_config
+    assert cipher.read_bytes() == before
+    assert calls_file.read_bytes() == calls, "invalid credentials reached Cloudflare"
+    assert not any((project / ".state").glob(".tmp-deploy.*"))
+    assert token not in output and passphrase not in output
+    if mode == "no-terminal":
+        assert "解锁 Cloudflare 凭据需要交互终端" in output.decode()
+    elif mode == "partial-env":
+        assert "两项 Cloudflare 环境变量须同时设置" in output.decode()
+    elif mode == "invalid-json":
+        assert "解密内容不是有效的 Cloudflare 凭据" in output.decode()
+    else:
+        assert "凭据解锁失败" in output.decode()
+cipher.write_bytes(saved_cipher)
+
+# 完整环境变量优先于损坏密文，不解锁也不覆盖已保存文件。
+cipher.write_bytes(b"broken ciphertext\n")
+env = dict(env, CLOUDFLARE_API_TOKEN=token.decode(), CLOUDFLARE_ACCOUNT_ID=account.decode())
+status, output = run_terminal(["bash", str(project / "deploy.sh")], env,
+                              [("  自定义域名（".encode(), b"")])
+assert status == 0 and b"Enter passphrase" not in output, output
+assert cipher.read_bytes() == b"broken ciphertext\n"
+cipher.write_bytes(saved_cipher)
+
+# 口令确认失败时不发布、不保留密文或临时文件。
+failed_project = project.parent / "age-encryption-failure"
+failed_project.mkdir()
+for name in ("deploy.sh", "worker.js", "wrangler.toml", "package.json", "package-lock.json"):
+    shutil.copy(project / name, failed_project / name)
+calls = calls_file.read_bytes()
+previous_config = config.read_bytes()
+case_env = dict(env, CLOUDFLARE_API_TOKEN="", CLOUDFLARE_ACCOUNT_ID="")
+status, output = run_terminal(["bash", str(failed_project / "deploy.sh")], case_env, [
+    (b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account),
+    (b"Enter passphrase", passphrase), (b"Confirm passphrase", b"different-passphrase")])
+assert status != 0 and b"passphrases didn't match" in output, output
+assert not (failed_project / ".state/cloudflare.age").exists()
+assert not any((failed_project / ".state").glob(".tmp-deploy.*"))
+assert calls_file.read_bytes() == calls and config.read_bytes() == previous_config
+assert token not in output and passphrase not in output
+
+# 缺少系统 age 时，通过真实 tar 与 SHA-256 检查私有安装及失败保护。
+archive = project.parent / "age-fixture.tar.gz"
+with tarfile.open(archive, "w:gz") as package:
+    package.add(shutil.which("age"), arcname="age/age")
+archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
+launcher = r'''
+command() {
+    if [[ "$1" == -v && "${2:-}" == age ]]; then return 1; fi
+    builtin command "$@"
+}
+curl() {
+    local output= url=
+    while (($#)); do
+        case "$1" in
+        -o) output=$2; shift 2 ;;
+        https://*) url=$1; shift ;;
+        *) shift ;;
+        esac
+    done
+    [[ "${url}" == https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz ||
+       "${url}" == https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-arm64.tar.gz ]]
+    case "${DEPLOY_TEST_AGE_MODE}" in
+    download-failure) return 22 ;;
+    checksum-failure) printf 'corrupt archive\n' >"${output}" ;;
+    *) cp -- "${DEPLOY_TEST_AGE_ARCHIVE}" "${output}" ;;
+    esac
+}
+export -f command curl
+exec bash "${DEPLOY_TEST_AGE_PROJECT}/deploy.sh"
+'''
+for mode in ("fresh", "reuse", "download-failure", "checksum-failure"):
+    install_project = project.parent / ("age-install" if mode in ("fresh", "reuse") else f"age-{mode}")
+    if mode != "reuse":
+        install_project.mkdir()
+        for name in ("deploy.sh", "worker.js", "wrangler.toml", "package.json", "package-lock.json"):
+            shutil.copy(project / name, install_project / name)
+        script = install_project / "deploy.sh"
+        script.write_text(re.sub(r"ageHash=[0-9a-f]{64}", f"ageHash={archive_hash}", script.read_text()))
+    case_env = dict(env, CLOUDFLARE_API_TOKEN="", CLOUDFLARE_ACCOUNT_ID="",
+                    DEPLOY_TEST_AGE_PROJECT=str(install_project), DEPLOY_TEST_AGE_ARCHIVE=str(archive),
+                    DEPLOY_TEST_AGE_MODE=mode)
+    if mode == "reuse":
+        prompts = [(b"Enter passphrase", passphrase), ("  自定义域名（".encode(), b"")]
+    else:
+        prompts = [(b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account)]
+        if mode == "fresh":
+            prompts += [(b"Enter passphrase", passphrase), (b"Confirm passphrase", passphrase),
+                        ("  自定义域名（".encode(), b"")]
+    calls = calls_file.read_bytes()
+    previous_config = config.read_bytes()
+    status, output = run_terminal(["bash", "-c", launcher], case_env, prompts)
+    assert (status == 0) == (mode in ("fresh", "reuse")), output
+    assert token not in output and passphrase not in output
+    state = install_project / ".state"
+    if mode in ("fresh", "reuse"):
+        assert (state / "age-v1.3.2/age").is_file()
+        assert (state / "age-v1.3.2").stat().st_mode & 0o777 == 0o700
+        assert (state / "cloudflare.age").stat().st_mode & 0o777 == 0o600
+    else:
+        assert not (state / "cloudflare.age").exists()
+        assert config.read_bytes() == previous_config
+        assert calls_file.read_bytes() == calls
+    assert not any(state.glob(".tmp-deploy.*"))
+    for path in state.rglob("*"):
+        if path.is_file():
+            assert token not in path.read_bytes(), f"deployment Token saved to {path}"
+            assert passphrase not in path.read_bytes(), f"age passphrase saved to {path}"
 PY
 cp -- "${PADM_INSTALL_DIR}/qr-shortener.json" "${tmp}/domain-previous.json"
 status=0
@@ -459,7 +632,8 @@ for spec in apt-get:fresh:x64 dnf:old-node:arm64 yum:standalone:x64 \
         ! grep -q '部署完成' "${tmp}/output"
         ;;
     *)
-        [[ "${status}" == 0 && -f "${DEPLOY_TEST_PROJECT}/.state/vps.env" ]]
+        [[ "${status}" == 0 && ! -e "${DEPLOY_TEST_PROJECT}/.state/vps.env" &&
+            ! -e "${DEPLOY_TEST_PROJECT}/.state/cloudflare.age" ]]
         [[ "$(stat -c '%a' "${PADM_INSTALL_DIR}/qr-shortener.json")" == 600 ]]
         [[ -x "${DEPLOY_TEST_PROJECT}/.state/node-v22.23.3-linux-${DEPLOY_TEST_ARCH}/bin/node" ]]
         ! grep -qF "${CLOUDFLARE_API_TOKEN}" "${tmp}/output"
@@ -475,6 +649,24 @@ for spec in apt-get:fresh:x64 dnf:old-node:arm64 yum:standalone:x64 \
 done
 unset DEPLOY_TEST_BOOTSTRAP DEPLOY_TEST_BOOTSTRAP_MODE
 unset -f command node uname
+
+# 非 Linux 部署交付同一 JSON 配置格式，不再生成重复的环境备份。
+nonLinux="${tmp}/non-linux"
+mkdir -p "${nonLinux}/.state"
+cp -- "${root}/"{deploy.sh,worker.js,wrangler.toml,package.json,package-lock.json} "${nonLinux}/"
+cp -- "${tmp}/previous.env" "${nonLinux}/.state/vps.env"
+uname() {
+    if [[ "${1:-}" == -s ]]; then printf 'Darwin\n'; else builtin command uname "$@"; fi
+}
+export -f uname
+bash "${nonLinux}/deploy.sh" >"${tmp}/output"
+unset -f uname
+[[ "$(stat -c '%a' "${nonLinux}/.state/qr-shortener.json")" == 600 ]]
+[[ "$(jq -r .url "${nonLinux}/.state/qr-shortener.json")" == https://padm-shortlink.example.workers.dev ]]
+[[ "$(jq -r .api_key "${nonLinux}/.state/qr-shortener.json")" == "$(<"${nonLinux}/.state/api-key")" ]]
+[[ ! -e "${nonLinux}/.state/vps.env" && ! -e "${nonLinux}/.state/cloudflare.age" ]]
+grep -q 'VPS 配置文件' "${tmp}/output"
+! grep -qF "${CLOUDFLARE_API_TOKEN}" "${tmp}/output"
 
 # 直接验证文档里的一行入口，下载失败或为空时不得启动部署。
 entry="${tmp}/start-from-vps.sh"
