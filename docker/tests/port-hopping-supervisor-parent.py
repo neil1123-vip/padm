@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 
 
 SCRIPT = Path(__file__).resolve()
@@ -63,7 +64,18 @@ def initialization_wrapper(arguments):
         native_popen = subprocess.Popen
         native_pin = namespace["pin"]
         native_write_owner = MODULE["Directory"].write_owner
+        native_read_owner = MODULE["Directory"].read_owner
+        native_cleanup = MODULE["Directory"].cleanup
         native_socket = socket.socket
+        clock_shift = [0]
+        native_monotonic = time.monotonic
+        phase = os.environ["TEST_INIT_PHASE"]
+        if phase.startswith("deadline-"):
+            # 只推进本次服务的时钟；预算保持生产值，边界等待不用真实耗时。
+            namespace["time"] = SimpleNamespace(
+                monotonic=lambda: native_monotonic() + clock_shift[0])
+        if phase == "deadline-stop":
+            namespace["STOP_TIMEOUT"] = 0.05
 
         def challenged(*args, **kwargs):
             init_barrier("hello")
@@ -73,6 +85,8 @@ def initialization_wrapper(arguments):
             result = native_send(peer, value)
             if value.get("phase") == "challenge":
                 init_barrier("commit")
+            elif phase == "deadline-started-ack" and value.get("phase") == "continue":
+                clock_shift[0] = MODULE["START_TIMEOUT"] + 1
             return result
 
         def created(*args, **kwargs):
@@ -100,10 +114,34 @@ def initialization_wrapper(arguments):
 
         def written(directory, owner):
             result = native_write_owner(directory, owner)
+            if owner["stage"] is not None:
+                if phase == "deadline-ready":
+                    clock_shift[0] = MODULE["START_TIMEOUT"] + 1
+                elif phase == "deadline-started":
+                    clock_shift[0] = MODULE["START_TIMEOUT"] + (
+                        1 if owner["state"] == "active" else -1)
+            elif owner["bash"] is None and (Path(directory.root) / "fixture-launches").exists():
+                if phase in {"deadline-restart", "deadline-update", "deadline-rollback"}:
+                    clock_shift[0] = (MODULE["START_TIMEOUT"] if phase == "deadline-restart"
+                                      else MODULE["CHANGE_TIMEOUT"]) + 1
             if owner["bash"] is None:
                 init_barrier("owner-written")
             elif owner["stage"] is not None:
                 init_barrier("ready" if owner["state"] == "starting" else "started")
+            return result
+
+        def read(directory):
+            owner = native_read_owner(directory)
+            launches = Path(directory.root) / "fixture-launches"
+            if (phase == "deadline-restart-gate" and launches.exists() and
+                    len(launches.read_text().splitlines()) == 2 and owner["stage"] is None):
+                clock_shift[0] = MODULE["START_TIMEOUT"] + 1
+            return owner
+
+        def cleaned(*args):
+            result = native_cleanup(*args)
+            if phase == "deadline-stop-cleanup":
+                clock_shift[0] = MODULE["STOP_TIMEOUT"] + 1
             return result
 
         class InitializedSocket(native_socket):
@@ -115,6 +153,8 @@ def initialization_wrapper(arguments):
 
         namespace["challenge"], namespace["send"], namespace["pin"] = challenged, sent, pinned
         MODULE["Directory"].write_owner = written
+        MODULE["Directory"].read_owner = read
+        MODULE["Directory"].cleanup = cleaned
         subprocess.Popen, socket.socket = created, InitializedSocket
     elif operation == "_reserve":
         native_session = MODULE["Directory"].session
@@ -413,6 +453,8 @@ def fake_owned(fd, root, action="", arguments=None):
             break
         value["running"].update(seq=value["running"]["seq"] + 1, nonce=os.urandom(32).hex())
         gate("running")
+    if os.environ.get("TEST_INIT_PHASE") == "deadline-stop":
+        time.sleep(0.1)
     marker.unlink()
     stage.rmdir()
     try:
@@ -768,6 +810,117 @@ def line(value):
     return canonical(value) + b"\n"
 
 
+def deadline_cases():
+    count = 0
+    deadline = time.monotonic() + 0.05
+    assert MODULE["remaining_time"](deadline) > 0
+    time.sleep(0.06)
+    try:
+        MODULE["remaining_time"](deadline)
+    except MODULE["Failure"] as error:
+        assert "总时限" in str(error)
+    else:
+        raise AssertionError("过期监督总时限未拒绝")
+    count += 1
+
+    left, right = socket.socketpair()
+    try:
+        started = time.monotonic()
+        try:
+            MODULE["receive"](left, timeout=30, deadline=started + 0.05)
+        except MODULE["Failure"] as error:
+            assert "监督帧超时" in str(error)
+            assert time.monotonic() - started < 0.5
+        else:
+            raise AssertionError("监督帧未受总时限约束")
+    finally:
+        left.close()
+        right.close()
+    count += 1
+
+    with tempfile.TemporaryDirectory(prefix="padm-hopping-deadline.") as directory:
+        pid_path = Path(directory) / "pid"
+        pending = [0]
+        try:
+            MODULE["run_interruptible"](["touch", str(pid_path)], pending,
+                                        deadline=time.monotonic() - 1)
+        except MODULE["Failure"]:
+            pass
+        else:
+            raise AssertionError("过期监督仍创建子进程")
+        assert not pid_path.exists(), "过期监督子进程执行了写入"
+        count += 1
+        try:
+            MODULE["run_interruptible"](
+                ["bash", "-c", f"printf '%s\n' \"$BASHPID\" >'{pid_path}'; exec sleep 10"],
+                pending, deadline=time.monotonic() + 0.05)
+        except MODULE["Failure"] as error:
+            assert "总时限" in str(error)
+        else:
+            raise AssertionError("监督子进程未受总时限约束")
+        pid = int(pid_path.read_text())
+        assert not Path(f"/proc/{pid}").exists(), "监督总时限后子进程未回收"
+    count += 1
+    return count
+
+
+def service_deadline_cases(base, entrypoint):
+    count = 0
+    for phase in ("ready", "started", "restart", "update", "rollback", "stop",
+                  "restart-gate", "started-ack", "stop-cleanup"):
+        installation = base / f"deadline-{phase}"
+        (installation / "data/net").mkdir(parents=True, mode=0o700)
+        caller, peer = socket.socketpair()
+        manager = subprocess.Popen([
+            sys.executable, str(SCRIPT), "_service", str(peer.fileno()),
+            str(installation), str(entrypoint), "hy2-main", "36561", "36562",
+            "198.18.1.1", "2001:db8:1::1"], pass_fds=(peer.fileno(),),
+            env=dict(os.environ, TEST_INIT_PHASE=f"deadline-{phase}",
+                     TEST_INIT_BARRIER=str(installation / "deadline")),
+            start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        peer.close()
+        try:
+            if phase in {"ready", "started", "started-ack"}:
+                try:
+                    MODULE["client"](caller, "start")
+                except (MODULE["Failure"], OSError):
+                    pass
+                else:
+                    raise AssertionError(("时限到期后仍确认启动", phase))
+            else:
+                started = MODULE["client"](caller, "start")
+                assert started["phase"] == "started"
+                try:
+                    MODULE["control"](phase.split("-")[0], str(installation))
+                except (MODULE["Failure"], OSError):
+                    pass
+                else:
+                    raise AssertionError(("时限到期后仍确认事务", phase))
+            output, error = manager.communicate(timeout=5)
+            assert not output and manager.returncode in {0, 1}, (phase, output, error)
+            launches = (installation / "fixture-launches").read_text().splitlines()
+            assert len(launches) == (2 if phase == "restart-gate" else 1), (
+                "时限到期后创建了新 owner", phase, launches)
+            assert all(not Path(f"/proc/{pid}").exists() for pid in launches), (phase, launches)
+            assert not (installation / "data/net/fixture-running").exists()
+            assert not list(installation.glob(".hopping-guarded.fixture.*"))
+            session = installation / "data/net/.hopping-supervisor"
+            if phase in {"ready", "started", "started-ack", "stop-cleanup"}:
+                assert not session.exists() and not (installation / "locks/deployment.lock").exists()
+            else:
+                assert session.is_dir()
+                owner = json.loads((session / "owner.json").read_text())
+                assert owner["state"] == ("active" if phase == "stop" else "starting")
+                deployment_command(installation, "dockerLockInstalledDeployment")
+            count += 1
+        finally:
+            caller.close()
+            if manager.poll() is None:
+                manager.terminate()
+                manager.communicate(timeout=5)
+    return count
+
+
 def receive(peer, timeout=3):
     peer.settimeout(timeout)
     raw = b""
@@ -808,6 +961,7 @@ def invoke(command, phase, payload, accepted=True, response=None):
 
 def main():
     count = 0
+    count += deadline_cases()
     with tempfile.TemporaryDirectory(prefix="padm-hopping-deployment-gate.") as directory:
         count += deployment_gate_cases(Path(directory))
         count += rollback_scope_cases(Path(directory))
@@ -929,6 +1083,7 @@ def main():
         entrypoint.chmod(0o600)
         count += reservation_cases(base, entrypoint)
         count += initialization_signal_cases(base, entrypoint)
+        count += service_deadline_cases(base, entrypoint)
         for case in ("clean", "ack-lost", "invalid-finished", "invalid-finished-restart",
                      "invalid-restart-gate", "precommit-eof", "lifecycle-down",
                      "lifecycle-uninstall", "invalid-finished-down", "invalid-finished-uninstall",

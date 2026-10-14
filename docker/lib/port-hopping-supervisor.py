@@ -16,6 +16,9 @@ import time
 
 FRAME_LIMIT = 262144
 SESSION = ".hopping-supervisor"
+START_TIMEOUT = 120
+CHANGE_TIMEOUT = 840
+STOP_TIMEOUT = 90
 BODY = r'''
 source "$1"
 shift
@@ -73,15 +76,27 @@ def check_signal(pending):
         raise Failure(f"监督初始化收到信号 {pending[0]}，停止后续写入并保留未核验现场")
 
 
-def run_interruptible(arguments, pending):
+def remaining_time(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise Failure("监督事务总时限已到，停止推进并保留未核验现场")
+    return remaining
+
+
+def run_interruptible(arguments, pending, deadline=None):
     check_signal(pending)
+    if deadline is not None:
+        remaining_time(deadline)
     process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         while True:
             check_signal(pending)
             try:
-                output, error = process.communicate(timeout=0.2)
+                output, error = process.communicate(
+                    timeout=min(0.2, remaining_time(deadline)) if deadline is not None else 0.2)
                 check_signal(pending)
+                if deadline is not None:
+                    remaining_time(deadline)
                 return subprocess.CompletedProcess(arguments, process.returncode, output, error)
             except subprocess.TimeoutExpired:
                 continue
@@ -134,8 +149,10 @@ def send(peer, value):
     peer.sendall(raw)
 
 
-def receive(peer, timeout=20, pending=None):
-    deadline, raw = time.monotonic() + timeout, b""
+def receive(peer, timeout=20, pending=None, deadline=None):
+    frame_deadline = time.monotonic() + timeout
+    deadline = min(frame_deadline, deadline) if deadline is not None else frame_deadline
+    raw = b""
     while not raw.endswith(b"\n"):
         if pending is not None:
             check_signal(pending)
@@ -406,8 +423,9 @@ def reserve(root, entrypoint, raw, saved=None):
         directory.close()
 
 
-def challenge(peer, action, owner=None, pending=None):
-    hello = shape(receive(peer, pending=pending), ("v", "phase", "action", "client_nonce"))
+def challenge(peer, action, owner=None, pending=None, deadline=None):
+    hello = shape(receive(peer, pending=pending, deadline=deadline),
+                  ("v", "phase", "action", "client_nonce"))
     if hello["phase"] != "hello" or hello["action"] != action or not nonce(hello["client_nonce"]):
         raise Failure("监督 hello 无效")
     value = {"v": 1, "phase": "challenge", "nonce": os.urandom(32).hex(),
@@ -419,7 +437,7 @@ def challenge(peer, action, owner=None, pending=None):
         expected.update(token=owner["token"], manager_pid=owner["manager"]["pid"],
                         manager_starttime=owner["manager"]["starttime_ticks"],
                         stage_sha256=owner["stage_sha256"], owner_sha256=digest(owner))
-    if shape(receive(peer, pending=pending), expected) != expected:
+    if shape(receive(peer, pending=pending, deadline=deadline), expected) != expected:
         raise Failure("监督 commit 身份或挑战不匹配")
     return value
 
@@ -492,6 +510,8 @@ def change_arguments(action, arguments):
 
 def service(initial_fd, root, entrypoint, values):
     pending_signal = stop_signals()
+    deadline, stop_deadline = time.monotonic() + START_TIMEOUT, None
+    expired = False
     directory, listener, channel, process, process_fd, log = None, None, None, None, None, None
     initial = socket.socket(fileno=initial_fd)
     stopping, proof, ready, latest, cleaned, finished, stop_peer = (
@@ -502,6 +522,7 @@ def service(initial_fd, root, entrypoint, values):
     def launch(action=None):
         nonlocal channel, process, process_fd
         check_signal(pending_signal)
+        remaining_time(deadline)
         channel, child = socket.socketpair()
         try:
             process = subprocess.Popen(
@@ -516,13 +537,23 @@ def service(initial_fd, root, entrypoint, values):
         directory.write_owner(owner)
 
     def request_stop():
-        nonlocal stopping
+        nonlocal stopping, stop_deadline
         if not stopping:
             try:
                 signal.pidfd_send_signal(process_fd, signal.SIGTERM)
             except ProcessLookupError:
                 pass
             stopping = True
+            stop_deadline = time.monotonic() + STOP_TIMEOUT
+
+    def check_progress():
+        nonlocal expired, restarting
+        if deadline is not None and time.monotonic() >= deadline and not expired:
+            expired, restarting = True, False
+            os.write(log, "监督事务总时限已到，等待原 Bash 净撤销\n".encode("utf-8"))
+            request_stop()
+        if stop_deadline is not None:
+            remaining_time(stop_deadline)
 
     try:
         check_signal(pending_signal)
@@ -536,13 +567,13 @@ def service(initial_fd, root, entrypoint, values):
         directory = Directory(root)
         directory.close()
         directory = None
-        proof = challenge(initial, "start", pending=pending_signal)
+        proof = challenge(initial, "start", pending=pending_signal, deadline=deadline)
         reservation = run_interruptible(
             ["bash", "-Eeuo", "pipefail", "-c", RESERVE_BODY, "padm-hopping-reservation",
              entrypoint, root, sys.executable, str(Path(__file__).resolve()),
              *(["--saved"] if not values else [])],
             # 保存模式在预约锁内读取参数，不采用调用端较早读取的元组。
-            pending_signal)
+            pending_signal, deadline=deadline)
         if reservation.returncode:
             raise Failure("监督会话预约失败: " + reservation.stderr.decode("utf-8", errors="replace"))
         reserved = shape(json.loads(reservation.stdout.decode("ascii"), object_pairs_hook=unique),
@@ -576,12 +607,15 @@ def service(initial_fd, root, entrypoint, values):
         launch()
         last_gate = None
         while True:
+            check_progress()
             if pending_signal[0]:
                 request_stop()
             watched = [listener, process_fd] + ([channel] if finished is None else [])
             readable = select.select(watched, [], [], 0.2)[0]
             if channel in readable:
-                event = shape(receive(channel), ("v", "phase", "nonce", "payload"))
+                event = shape(receive(channel, deadline=stop_deadline if stopping else deadline),
+                              ("v", "phase", "nonce", "payload"))
+                check_progress()
                 if pending_signal[0]:
                     request_stop()
                 if not nonce(event["nonce"]) or event["nonce"] == last_gate:
@@ -596,23 +630,31 @@ def service(initial_fd, root, entrypoint, values):
                     shape(value, ("bash_pid", "lock"))
                     if type(value["bash_pid"]) is not int or value["bash_pid"] != process.pid:
                         raise Failure("监督重启写门 Bash 不匹配")
-                    result = subprocess.run(
+                    result = run_interruptible(
                         ["bash", "-Eeuo", "pipefail", "-c", LOCK_BODY, "padm-hopping-restart-check",
-                         entrypoint, root, str(process.pid)], capture_output=True)
+                         entrypoint, root, str(process.pid)], pending_signal, deadline=deadline)
                     if (result.returncode or
                             json.loads(result.stdout, object_pairs_hook=unique) != value["lock"] or
                             directory.read_owner() != owner or
                             select.select([process_fd], [], [], 0)[0]):
                         raise Failure("监督重启写门原锁或 owner 不匹配")
                     restart_gate = True
-                    send(channel, {"v": 1, "phase": "commit", "nonce": event["nonce"]})
+                    check_progress()
+                    if pending_signal[0]:
+                        request_stop()
+                    send(channel, {"v": 1, "phase": "stop" if stopping else "commit",
+                                   "nonce": event["nonce"]})
                 elif (phase == "changed" and change_action in {"update", "rollback"} and
                       restart_gate and change_status is None and ready is None and not stopping):
                     shape(value, ("status",))
                     if type(value["status"]) is not int or not 0 <= value["status"] <= 255:
                         raise Failure("监督事务返回状态无效")
                     change_status = value["status"]
-                    send(channel, {"v": 1, "phase": "commit", "nonce": event["nonce"]})
+                    check_progress()
+                    if pending_signal[0]:
+                        request_stop()
+                    send(channel, {"v": 1, "phase": "stop" if stopping else "commit",
+                                   "nonce": event["nonce"]})
                 elif phase == "ready" and ready is None and latest is None and not stopping:
                     if restart_receipt is not None and not restart_gate:
                         raise Failure("监督重启未经过新写门")
@@ -627,6 +669,7 @@ def service(initial_fd, root, entrypoint, values):
                     owner.update(stage=ready["stage"], stage_sha256=digest({
                         key: ready[key] for key in ("target", "child", "directory", "stage")}))
                     directory.write_owner(owner)
+                    check_progress()
                     if pending_signal[0]:
                         request_stop()
                     send(channel, {"v": 1, "phase": "stop" if stopping else "commit",
@@ -635,10 +678,14 @@ def service(initial_fd, root, entrypoint, values):
                     latest = ready
                     owner["state"] = "active"
                     directory.write_owner(owner)
+                    check_progress()
                     if pending_signal[0]:
                         request_stop()
                     send(channel, {"v": 1, "phase": "stop" if stopping else "continue",
                                    "nonce": event["nonce"]})
+                    check_progress()
+                    if pending_signal[0]:
+                        request_stop()
                     try:
                         if stopping:
                             pass
@@ -663,12 +710,15 @@ def service(initial_fd, root, entrypoint, values):
                         stop_peer = None
                     restart_receipt = None
                     change_action, arguments, change_status = None, [], None
+                    deadline = None
                 elif phase == "running" and latest is not None and not stopping:
                     latest = payload_check(value, latest, latest["running"]["seq"] + 1)
                     directory.check()
                     if directory.read_owner() != owner:
                         raise Failure("监督 owner 在运行中变化")
-                    send(channel, {"v": 1, "phase": "continue", "nonce": event["nonce"]})
+                    check_progress()
+                    send(channel, {"v": 1, "phase": "stop" if stopping else "continue",
+                                   "nonce": event["nonce"]})
                 elif phase == "cleaned" and stopping and cleaned is None and witness is not None:
                     shape(value, ("target", "child_id", "stage"))
                     if value != {"target": witness["target"], "child_id": witness["child"]["Id"],
@@ -705,8 +755,11 @@ def service(initial_fd, root, entrypoint, values):
                     if action == "status":
                         send(peer, ack("status", control_proof, owner, payload=latest))
                     else:
-                        signal.pidfd_send_signal(process_fd, signal.SIGTERM)
-                        stopping, stop_peer, proof = True, peer, control_proof
+                        deadline = time.monotonic() + (
+                            CHANGE_TIMEOUT if action in {"update", "rollback"} else START_TIMEOUT)
+                        expired = False
+                        request_stop()
+                        stop_peer, proof = peer, control_proof
                         restarting = action in {"restart", "update", "rollback"}
                         change_action, arguments = action, requested
                         peer = None
@@ -719,7 +772,8 @@ def service(initial_fd, root, entrypoint, values):
                 # Bash 退出后先消费已排队的 notify；不能把 pidfd 终止当作净撤销。
                 witness = latest or ready
                 while finished is None and select.select([channel], [], [], 0)[0]:
-                    event = shape(receive(channel), ("v", "phase", "nonce", "payload"))
+                    event = shape(receive(channel, deadline=stop_deadline),
+                                  ("v", "phase", "nonce", "payload"))
                     if not nonce(event["nonce"]) or event["nonce"] == last_gate:
                         raise Failure("监督退出通知 nonce 重复")
                     last_gate = event["nonce"]
@@ -740,7 +794,8 @@ def service(initial_fd, root, entrypoint, values):
                         "target": witness["target"], "child_id": witness["child"]["Id"],
                         "stage": witness["stage"]} and finished == {
                         "status": 143, "lock_released": True} and status == 143):
-                    if restarting and not pending_signal[0]:
+                    check_progress()
+                    if restarting and not pending_signal[0] and not expired:
                         # 会话目录覆盖整个交接窗口；旧净停止回执不授权新 Bash 写入。
                         directory.check_stopped(owner, socket_id, log_id)
                         restart_receipt = dict(previous_owner=owner, cleaned=cleaned, finished=finished)
@@ -751,11 +806,13 @@ def service(initial_fd, root, entrypoint, values):
                                  "stage": None, "stage_sha256": None, "state": "starting"}
                         directory.write_owner(owner)
                         stopping, restarting, restart_gate = False, False, False
+                        stop_deadline = None
                         ready, latest, cleaned, finished, last_gate = None, None, None, None, None
                         launch(action=change_action)
                         continue
                     directory.cleanup(owner, socket_id, log_id)
-                    if stop_peer:
+                    check_progress()
+                    if stop_peer and not expired:
                         send(stop_peer, ack("stopped", proof, owner, cleaned=cleaned, finished=finished))
                     return
                 raise Failure("监督未证明净撤销或原锁释放，保留会话")
@@ -775,7 +832,8 @@ def service(initial_fd, root, entrypoint, values):
             except ProcessLookupError:
                 pass
             try:
-                process.wait(timeout=90)
+                process.wait(timeout=max(0, stop_deadline - time.monotonic())
+                             if stop_deadline is not None else STOP_TIMEOUT)
             except subprocess.TimeoutExpired:
                 pass
         if process_fd is not None:
@@ -810,11 +868,14 @@ def challenge_from_hello(peer, action, owner, hello):
 def client(peer, action, owner=None, token=None, arguments=None):
     changing = action in {"update", "rollback"}
     transitioning = action in {"restart", "update", "rollback"}
+    deadline = time.monotonic() + (
+        CHANGE_TIMEOUT if changing else START_TIMEOUT) + STOP_TIMEOUT
     hello = {"v": 1, "phase": "hello", "action": action, "client_nonce": os.urandom(32).hex()}
     if changing:
         hello["arguments"] = change_arguments(action, [] if arguments is None else arguments)
     send(peer, hello)
-    proof = shape(receive(peer), ("v", "phase", "nonce", "client_nonce", "owner_sha256"))
+    proof = shape(receive(peer, deadline=deadline),
+                  ("v", "phase", "nonce", "client_nonce", "owner_sha256"))
     if (proof["phase"] != "challenge" or not nonce(proof["nonce"]) or
             proof["nonce"] == hello["client_nonce"] or proof["client_nonce"] != hello["client_nonce"] or
             proof["owner_sha256"] != (digest(owner) if owner else None)):
@@ -829,7 +890,8 @@ def client(peer, action, owner=None, token=None, arguments=None):
     if changing:
         request["arguments"] = hello["arguments"]
     send(peer, request)
-    result = receive(peer, timeout=900 if changing else 150)
+    result = receive(peer, timeout=CHANGE_TIMEOUT + STOP_TIMEOUT if changing else
+                     START_TIMEOUT + STOP_TIMEOUT, deadline=deadline)
     keys = ("v", "phase", "nonce", "client_nonce", "owner", "owner_sha256")
     shape(result, (*keys, "cleaned", "finished") if action == "stop" else
           (*keys, "payload", "previous_owner", "cleaned", "finished", "change") if changing else

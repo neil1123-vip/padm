@@ -382,6 +382,11 @@ unconfirmed shutdown or handoff refuses further changes and preserves cumulative
 and failure evidence. INT/TERM during initialization stops further writes and reaps direct
 children. The session is removed only after resource verification and a clean shutdown
 receipt; earlier interruption retains unverified evidence and blocks ordinary changes.
+Startup/restart share a 120-second progress budget; update/rollback share 840 seconds
+across handoff. Expiry stops authorization and successful acknowledgements and requests
+TERM for the original Bash. Shutdown shares one 90-second wait budget; timeout retains
+unverified evidence without forced KILL or automatic takeover. Active sessions have no
+lifetime limit. These budgets bound supervisor progress and waiting, not kernel cleanup.
 Replace the listener and addresses below with local values:
 
 ```bash

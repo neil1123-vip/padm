@@ -128,22 +128,23 @@ def authentication(node, root, enter, phase, old_password, new_password, accepte
         stop(process)
 
 
-def initialization_cancel(work, root, docker):
+def initialization_cancel(work, root, docker, *, deadline=False):
     module = runpy.run_path(str(ROOT / "docker/lib/port-hopping-supervisor.py"))
-    prefix = work / "init-barrier"
+    prefix = work / ("deadline-barrier" if deadline else "init-barrier")
     tables = ("iptables", "ip6tables")
     nat_before = {table: command([table, "-w", "-t", "nat", "-S"]) for table in tables}
     files = ("config/spec.json", "deployment.json", "compose.json")
     saved = {name: (root / name).read_bytes() for name in files}
     caller, service = socket.socketpair()
     descriptor = None
-    with (work / "initialization-cancel.log").open("wb") as log:
+    with (work / ("initialization-deadline.log" if deadline else "initialization-cancel.log")).open("wb") as log:
         manager = subprocess.Popen([
             sys.executable, "-B", str(SCRIPT.with_name("port-hopping-supervisor-parent.py")),
             "_service", str(service.fileno()), str(root), str(ROOT / "install-docker.sh")],
             pass_fds=(service.fileno(),), start_new_session=True, stdout=log, stderr=log,
             env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root), DOCKER_HOST=docker[-1],
-                     TEST_INIT_PHASE="ready", TEST_INIT_BARRIER=str(prefix)))
+                     TEST_INIT_PHASE="deadline-ready" if deadline else "ready",
+                     TEST_INIT_BARRIER=str(prefix)))
     service.close()
     try:
         descriptor = module["pin"](module["identity"](manager.pid))
@@ -151,20 +152,21 @@ def initialization_cancel(work, root, docker):
         proof = module["receive"](caller, timeout=10)
         module["send"](caller, dict(v=1, phase="commit", action="start",
                                     nonce=proof["nonce"], client_nonce="e" * 64))
-        wait_ready(lambda: prefix.with_suffix(".ready").exists(), 30)
         session = root / "data/net/.hopping-supervisor"
-        owner = json.loads((session / "owner.json").read_text())
-        assert owner["state"] == "starting" and owner["stage"] is not None
-        assert (root / "data/net/port-hopping.state").is_file()
-        child = inspect(docker, (Path(owner["stage"]) / "cid").read_text().strip())
-        assert child["State"]["Running"]
-        assert child["Config"]["Entrypoint"] == ["/usr/local/bin/padm-entrypoint"]
-        assert all(command([table, "-w", "-t", "nat", "-S"]) != nat_before[table]
-                   for table in tables)
-        # 用真实入口净撤销回执证明初始化取消；不以管理进程退出代替资源清理。
-        signal.pidfd_send_signal(descriptor, signal.SIGTERM)
-        wait_ready(lambda: Path(str(prefix) + f".caught-{manager.pid}").exists(), 5)
-        prefix.with_suffix(".release").touch()
+        if not deadline:
+            wait_ready(lambda: prefix.with_suffix(".ready").exists(), 30)
+            owner = json.loads((session / "owner.json").read_text())
+            assert owner["state"] == "starting" and owner["stage"] is not None
+            assert (root / "data/net/port-hopping.state").is_file()
+            child = inspect(docker, (Path(owner["stage"]) / "cid").read_text().strip())
+            assert child["State"]["Running"]
+            assert child["Config"]["Entrypoint"] == ["/usr/local/bin/padm-entrypoint"]
+            assert all(command([table, "-w", "-t", "nat", "-S"]) != nat_before[table]
+                       for table in tables)
+            # 用真实入口净撤销回执证明取消，不以管理进程退出代替资源清理。
+            signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+            wait_ready(lambda: Path(str(prefix) + f".caught-{manager.pid}").exists(), 5)
+            prefix.with_suffix(".release").touch()
         assert manager.wait(timeout=45) == 0
         try:
             result = module["receive"](caller, timeout=1)
@@ -180,9 +182,11 @@ def initialization_cancel(work, root, docker):
         assert not command(docker + ["ps", "-aq", "--filter",
                                     "label=io.padm.hopping-supervised"]).strip()
         assert all((root / name).read_bytes() == value for name, value in saved.items())
-        evidence = dict(phase="ready", signal="TERM", started_ack=False, nat_restored=True,
+        evidence = dict(phase="ready", **({"cause": "deadline"} if deadline else {"signal": "TERM"}),
+                        started_ack=False, nat_restored=True,
                         session_removed=True, child_removed=True, saved_config_unchanged=True)
-        (work / "initialization-cancel.json").write_text(json.dumps(evidence, sort_keys=True))
+        (work / ("initialization-deadline.json" if deadline else "initialization-cancel.json")).write_text(
+            json.dumps(evidence, sort_keys=True))
         return evidence
     finally:
         prefix.with_suffix(".release").touch()
@@ -234,6 +238,7 @@ def automatic_hopping(node, work, root, docker, enter, password):
     active = False
     try:
         canceled = initialization_cancel(work, root, docker)
+        expired = initialization_cancel(work, root, docker, deadline=True)
         assert invoke("port-hopping", "start").decode().strip() == "端口跳跃已启用。"
         active = True
         uri = invoke("port-hopping", "share").decode().strip()
@@ -286,6 +291,7 @@ def automatic_hopping(node, work, root, docker, enter, password):
         authentication(node, root, enter, "auto-stopped", password, "wrong-password", (),
                        server_port=30000)
         evidence = dict(scope="supervised-hy2-client-auto-hopping", initialization_cancel=canceled,
+                        initialization_deadline=expired,
                         client_config=config,
                         client_pid=client_pid, same_client_alive=True,
                         samples=samples, dual_family_both_ports=True,

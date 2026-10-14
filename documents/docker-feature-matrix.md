@@ -104,9 +104,13 @@ commit 前断流不启动持锁 Bash，失败会话保留；commit 后 ACK 丢�
 3d.1 已验 started 后 HUP 续期、manager TERM 净清理与 manager SIGKILL 后
 规则撤销/旧 owner 拒绝。3h 补初始化 INT/TERM 写门与直接子进程回收；
 已核验 ready 资源取得净撤销回执后可清会话，较早中断保留未核验证据并拒绝普通变更。
-Bash SIGKILL、统一撤销时限、自动恢复和原生宿主验收仍待补。
-仅限内部入口，菜单/schema/Compose、启用期更新/重启、旧 conntrack 排空、
-真实自动跳跃、原生宿主/arm64/公网与完整协议管理继续 `deferred`；阶段验收见实施计划。
+3d.4–7 已接菜单/CLI、v3 持久规格及 restart/update/rollback/down/uninstall 协调，
+3f 已验同一 sing-box 客户端双族跨两端口自动跳跃，3g 分享复用原协议生成器。
+3i 监督启动/重启共用 120 秒推进预算，更新/回滚 840 秒，交接不重置；
+到期停止授权/成功 ACK，原 Bash TERM 与 finally 共用 90 秒停止等待。
+活动会话无总时长限制，等待到期保留未核验证据，不承诺内核撤销上界。
+Bash SIGKILL、自动恢复、外部 URI 导入、TUIC、旧 conntrack 排空及
+原生宿主/arm64/公网与完整协议管理继续 `deferred`；阶段验收见实施计划。
 
 3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，
 证据和剩余限制见[真实 TLS 验收基线](docker-tls-real-baseline.md)。
