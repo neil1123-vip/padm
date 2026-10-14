@@ -204,9 +204,10 @@ integrity checks. The resulting spec stores only ordinary `site.mode=static`, ne
 the theme identity; old bundles keep their existing default, static-directory, and
 302 workflows.
 
-For Hysteria2, publish a template or static directory first, then edit the existing
-listener's Hysteria2 parameters: disable obfuscation and set masquerade to `local`.
-The CLI can edit `hy2.masquerade` through `edit --spec <root-private-file>`.
+For Hysteria2, publish a template or static directory first, then use protocol menu
+`12. Hysteria2` to disable obfuscation and select the local site. The CLI uses
+`edit --hy2-masquerade <listener-id> local` with `--preview/--confirm PADM-DOCKER-EDIT`.
+It validates the published site first and does not create a site or disable obfuscation automatically.
 Only managed `data/static` is mounted read-only at `/srv/padm/`; arbitrary `file://`
 inputs are rejected. All local listeners share this content with Nginx.
 Local requires `site.mode=static` and `obfs=null`; default-page/302 changes or enabling
@@ -224,6 +225,10 @@ for one existing v3 sing-box listener:
 padm-docker protocol hy2-status entry-hy2
 padm-docker edit --hy2-bandwidth entry-hy2 brutal 100 50 --preview
 padm-docker edit --hy2-bandwidth entry-hy2 bbr --confirm PADM-DOCKER-EDIT
+padm-docker edit --hy2-obfs entry-hy2 gecko /root/hy2-password.json --preview
+padm-docker edit --hy2-obfs entry-hy2 off --confirm PADM-DOCKER-EDIT
+padm-docker edit --hy2-masquerade entry-hy2 https://www.example.com/ --preview
+padm-docker edit --hy2-masquerade entry-hy2 off --confirm PADM-DOCKER-EDIT
 padm-docker protocol tuic-status entry-tuic
 padm-docker edit --tuic-congestion entry-tuic bbr --preview
 padm-docker edit --tuic-connection entry-tuic 3s 10s --preview
@@ -233,11 +238,16 @@ padm-docker edit --tuic-defaults entry-tuic --confirm PADM-DOCKER-EDIT
 
 Hy2 rates are server upload/download integers in `1..1000000` Mbps. Brutal menu
 defaults are `100/50`; BBR retains the stored rates, and links convert them to the
-client direction. TUIC durations accept 1–6 positive digits followed by
+client direction. Obfuscation accepts `salamander/gecko/off`. Noninteractive enabling
+requires a root-owned, mode `0600`, single-link private JSON file with only a
+`password` field containing 16–128 letters, digits, `_`, or `-`. Interactive input is
+hidden; blank retains the old password or generates one if absent, and `0`/EOF cancels.
+Masquerade accepts `off/local/HTTPS_URL`, subject to the local-site prerequisites above.
+TUIC durations accept 1–6 positive digits followed by
 `ms/s/m/h`; recommended defaults are `cubic/3s/10s/false`. Enabling 0-RTT requires
 a menu confirmation of replay risk. These edits cannot combine with spec imports
 or other focused edits. Only selected fields change; credentials, TLS, other
-listeners, Hy2 obfuscation/masquerade, quotas, and totals remain fixed. Preview,
+listeners, other parameters, quotas, and totals remain fixed. Preview,
 confirmation, publication, and recovery reuse the existing transaction.
 Full protocol management, TUIC hopping, and host integration combinations remain deferred.
 

@@ -203,6 +203,10 @@ sing-box 单入口提供专项编辑：
 padm-docker protocol hy2-status entry-hy2
 padm-docker edit --hy2-bandwidth entry-hy2 brutal 100 50 --preview
 padm-docker edit --hy2-bandwidth entry-hy2 bbr --confirm PADM-DOCKER-EDIT
+padm-docker edit --hy2-obfs entry-hy2 gecko /root/hy2-password.json --preview
+padm-docker edit --hy2-obfs entry-hy2 off --confirm PADM-DOCKER-EDIT
+padm-docker edit --hy2-masquerade entry-hy2 https://www.example.com/ --preview
+padm-docker edit --hy2-masquerade entry-hy2 off --confirm PADM-DOCKER-EDIT
 padm-docker protocol tuic-status entry-tuic
 padm-docker edit --tuic-congestion entry-tuic bbr --preview
 padm-docker edit --tuic-connection entry-tuic 3s 10s --preview
@@ -212,9 +216,13 @@ padm-docker edit --tuic-defaults entry-tuic --confirm PADM-DOCKER-EDIT
 
 Hy2 带宽按服务端方向填写，整数范围 `1..1000000` Mbps；Brutal 菜单默认
 `100/50`，BBR 保留规格中的速率，分享链接自动转换客户端方向。
+混淆可选 `salamander/gecko/off`；非交互开启须提供 root 所有、`0600`、
+单链接的私密 JSON，唯一字段为 `password`，值为 16–128 位字母、数字、`_` 或 `-`。
+交互静默输入，空输入保留旧密码，无旧值才随机生成；`0` 或 EOF 取消。
+伪装可选 `off/local/HTTPS_URL`，local 的前置条件见下文。
 TUIC 时长接受 1–6 位正整数加 `ms/s/m/h`，恢复推荐值为 `cubic/3s/10s/false`。
 0-RTT 默认关闭，开启菜单要求确认重放风险。专项不能与规格导入或其它专项混用，
-仅改选中字段，保留认证、TLS、其它入口、Hy2 混淆/伪装和累计额度；
+仅改选中字段，保留认证、TLS、其它入口、其它参数和累计额度；
 沿用预览、确认、发布和失败恢复。完整协议管理、TUIC 跳跃及宿主集成组合仍未开放。
 
 Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的预设、
@@ -282,9 +290,9 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 控制包复制，随包清单和资源完整性校验失败即拒绝；生成后只保存普通 `site.mode=static`，
 不保存主题身份，旧控制包的默认页、静态目录和 302 行为保持。
 
-Hysteria2 先通过上面的模板或目录命令发布网页，再在 `协议与入口 → 编辑已有入口`
-选择 Hysteria2 参数，将混淆关闭，伪装设置为 `local`；CLI 可用完整受管规格的
-`edit --spec <root 私有文件>` 将已有入口的 `hy2.masquerade` 改为 `local`。
+Hysteria2 先通过上面的模板或目录命令发布网页，再在 `协议与入口 → 12. Hysteria2 管理`
+关闭混淆、选择本地网页；CLI 使用 `edit --hy2-masquerade <入口 ID> local`，
+沿用 `--preview/--confirm PADM-DOCKER-EDIT`。操作前校验已发布网页，不自动创建站点或关闭混淆。
 只挂载受管 `data/static` 到固定只读 `/srv/padm/`，拒绝任意 `file://` 输入；
 所有 local 入口与 Nginx 共用该网页。local 要求 `site.mode=static`、`obfs=null`，
 启用期间切换默认页、302 或开启混淆均拒绝。先把伪装设为 `off` 或 HTTPS 可关闭

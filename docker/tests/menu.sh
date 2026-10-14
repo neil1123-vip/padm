@@ -721,6 +721,15 @@ runUdpManagementDriver() {
             targetReply "${menu}" $'3\n'
             targetReply "${listener}" $'entry-hy2\n'
             targetReply '服务端上行带宽 Mbps（服务端→客户端）[100]' $'\004'
+            for choice in 4 5 6 8 9; do
+                targetReply "${menu}" "${choice}"$'\n'
+                targetReply "${listener}" $'0\n'
+            done
+            for answer in $'0\n' $'\004'; do
+                targetReply "${menu}" $'7\n'
+                targetReply "${listener}" $'entry-hy2\n'
+                targetReply '伪装 HTTPS 地址（0 返回）' "${answer}"
+            done
         else
             for answer in $'n\n' $'\004'; do
                 targetReply "${menu}" $'6\n'
@@ -735,6 +744,12 @@ runUdpManagementDriver() {
         targetReply "${listener}" $'entry-hy2\n'
         targetReply '服务端上行带宽 Mbps（服务端→客户端）[100]' $'\n'
         targetReply '服务端下行带宽 Mbps（客户端→服务端）[50]' $'\n'
+        for choice in 4 5 6 7 8 9; do
+            targetReply "${menu}" "${choice}"$'\n'
+            targetReply "${listener}" $'entry-hy2\n'
+            [[ "${choice}" != 7 ]] ||
+                targetReply '伪装 HTTPS 地址（0 返回）' $'https://www.example.com/path-1\n'
+        done
     else
         for choice in 2 3 4 5 6 7 8; do
             targetReply "${menu}" "${choice}"$'\n'
@@ -2728,6 +2743,14 @@ edit)
         [[ "$3" == entry-hy2 && ( ( "$#" -eq 4 && "$4" == bbr ) ||
             ( "$#" -eq 6 && "$4" == brutal && "$5" == 100 && "$6" == 50 ) ) ]] || exit 2
         exit "${UDP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --hy2-obfs ]]; then
+        [[ "$#" -eq 4 && "$3" == entry-hy2 &&
+            ( "$4" == salamander || "$4" == gecko || "$4" == off ) ]] || exit 2
+        exit "${UDP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --hy2-masquerade ]]; then
+        [[ "$#" -eq 4 && "$3" == entry-hy2 &&
+            ( "$4" == https://www.example.com/path-1 || "$4" == local || "$4" == off ) ]] || exit 2
+        exit "${UDP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --tuic-congestion ]]; then
         [[ "$#" -eq 4 && "$3" == entry-tuic &&
             ( "$4" == cubic || "$4" == bbr || "$4" == new_reno ) ]] || exit 2
@@ -4349,7 +4372,7 @@ for kind in hy2 tuic; do
         runPty "${kind}-${udpCase}" "${kind}" "${udpCase}" "${TLS_WIZARD_CLI}" menu
         expectedUdp=$'protocol list\nprotocol '"${kind}"'-status'
         if [[ "${udpCase}" == cancel ]]; then
-            readCount=2
+            readCount=9
             [[ "${kind}" != tuic ]] || readCount=3
             for ((udpRead = 0; udpRead < readCount; udpRead++)); do
                 expectedUdp+=$'\nprotocol '"${kind}"'-status'
@@ -4357,6 +4380,12 @@ for kind in hy2 tuic; do
         elif [[ "${kind}" == hy2 ]]; then
             expectedUdp+=$'\nprotocol hy2-status\nedit --hy2-bandwidth entry-hy2 bbr'
             expectedUdp+=$'\nprotocol hy2-status\nedit --hy2-bandwidth entry-hy2 brutal 100 50'
+            for mode in salamander gecko off; do
+                expectedUdp+=$'\nprotocol hy2-status\nedit --hy2-obfs entry-hy2 '"${mode}"
+            done
+            for mode in https://www.example.com/path-1 local off; do
+                expectedUdp+=$'\nprotocol hy2-status\nedit --hy2-masquerade entry-hy2 '"${mode}"
+            done
         else
             for algorithm in cubic bbr new_reno; do
                 expectedUdp+=$'\nprotocol tuic-status\nedit --tuic-congestion entry-tuic '"${algorithm}"
@@ -4370,7 +4399,7 @@ for kind in hy2 tuic; do
         [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedUdp}" ]] ||
             fail "${kind} ${udpCase} 菜单参数分发错误或取消仍执行编辑"
         if [[ "${udpCase}" == failed ]]; then
-            failures=2
+            failures=8
             [[ "${kind}" != tuic ]] || failures=7
             [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq "${failures}" ]] ||
                 fail "${kind} 后端失败没有返回菜单并继续读取状态"
@@ -4380,6 +4409,15 @@ for kind in hy2 tuic; do
             grep -Fq '已有 sing-box v3 入口' "${CONTROL_LOG}" || fail 'Hy2/TUIC 菜单缺少支持边界'
         [[ "${kind}" != tuic ]] || grep -Fq '重放攻击风险' "${CONTROL_LOG}" ||
             fail 'TUIC 开启 0-RTT 没有明确风险提示'
+        [[ "${kind}" != hy2 ]] || {
+            for label in '4. Salamander 混淆' '5. Gecko 混淆' '6. 关闭混淆' \
+                '7. HTTPS 伪装' '8. 本地网页' '9. 关闭伪装'; do
+                grep -Fq "${label}" "${CONTROL_LOG}" || fail "Hy2 菜单缺少 ${label}"
+            done
+            [[ "${udpCase}" == cancel ]] ||
+                grep -Fq 'local 使用已发布的受管静态网页' "${CONTROL_LOG}" ||
+                fail 'Hy2 local 菜单缺少受管网页前置提示'
+        }
     done
 done
 unset UDP_EDIT_STATUS UDP_PROTOCOL_STATUS

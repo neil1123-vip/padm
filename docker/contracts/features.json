@@ -41,7 +41,7 @@
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box Hysteria2 首配、完整规格导入、入口与带宽模式编辑、Salamander/Gecko 混淆、HTTPS 伪装及分享链接。3D.8 提供菜单 12、hy2-status 和单入口带宽专项；Brutal 一次设置模式及服务端上下行 1..1000000 Mbps，BBR 只改模式并保留速率，其它字段冻结，复用发布和失败恢复。Gecko 要求 x-padm-hy2-gecko，旧无混淆/Salamander 子集兼容，隔离 amd64 双族实际传输已验；包长等高级 Gecko 参数不开放。5A.1c 为已有入口提供受管静态网页：先发布目录或 notes/photos/docs，再将伪装设置 local；固定只读 /srv/padm/，site.static 且 obfs=null，Nginx 可共用网页，拒绝任意 file URL。local 及纯 Hy2 静态准备规格要求 x-padm-hy2-local-site；local 启用时 default/302/混淆拒绝，关闭保留文件。复用受管证书和 UUID 流量账号，端口跳跃限内部监督、单 sing-box 和双族 Hy2，完整跳跃及宿主集成组合仍待补，网页外观不证明抗识别。"
+      "reason": "v3 支持 sing-box Hysteria2 首配、完整规格导入、入口与带宽模式编辑、Salamander/Gecko 混淆、HTTPS 伪装及分享链接。3D.8–3D.9 提供菜单 12、hy2-status 和单入口带宽/混淆/伪装专项；Brutal 一次设置模式及服务端上下行 1..1000000 Mbps，BBR 只改模式并保留速率，密码仅严格私密 JSON 或静默输入，非选中字段冻结，复用发布和失败恢复。Gecko 要求 x-padm-hy2-gecko，旧无混淆/Salamander 子集兼容，隔离 amd64 双族实际传输已验；包长等高级 Gecko 参数不开放。5A.1c 为已有入口提供受管静态网页：先发布目录或 notes/photos/docs，再将伪装设置 local；操作先验证已发布网页，固定只读 /srv/padm/，site.static 且 obfs=null，Nginx 可共用网页，拒绝任意 file URL。local 及纯 Hy2 静态准备规格要求 x-padm-hy2-local-site；local 启用时 default/302/混淆拒绝，关闭保留文件。复用受管证书和 UUID 流量账号，端口跳跃限内部监督、单 sing-box 和双族 Hy2，完整跳跃及宿主集成组合仍待补，网页外观不证明抗识别。"
     },
     {
       "id": 4,

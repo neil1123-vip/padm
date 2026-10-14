@@ -222,6 +222,11 @@ liveSnapshot() {
 # 独立混淆夹具覆盖专项事务，不改后续更新与回滚的双核心基线。
 (
     newState hy2-management "${TEST_ROOT}/gecko-brutal.json"
+    hy2PrivateRoot=$(mktemp -d /root/.padm-hy2.XXXXXX)
+    trap 'rm -rf -- "${hy2PrivateRoot}"' EXIT
+    hy2Secret="${hy2PrivateRoot}/password.json"
+    printf '{"password":"hy2-private-secret-marker"}\n' >"${hy2Secret}"
+    chmod 0600 "${hy2Secret}"
     : >"${FAKE_REALITY_FAIL_MARKER}"
     cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/hy2-management-before.json"
     cp "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" "${TEST_ROOT}/hy2-management-traffic.json"
@@ -294,9 +299,141 @@ liveSnapshot() {
     udpManagementEdit 15 unchanged --hy2-bandwidth missing bbr --preview
     udpManagementEdit 2 unchanged --hy2-bandwidth entry-hy2 bbr --spec "${HY2_SPEC}" --preview
     udpManagementEdit 2 unchanged --hy2-bandwidth entry-hy2 bbr --tuic-defaults entry-hy2 --preview
+    # 通用编辑继续隐藏密码，空输入保留旧值，无旧值时只调用既有随机生成器。
+    (
+        read() {
+            local argument silent=0
+            for argument in "$@"; do
+                [[ "${argument}" != -s ]] || silent=1
+            done
+            [[ "${silent}" == 1 ]] || fail '混淆密码未使用静默输入'
+            builtin read "$@"
+        }
+        secret=
+        dockerEditHy2PasswordRead secret "${TEST_ROOT}/gecko-brutal.json" entry-hy2 <<<'' >"${STDOUT}"
+        [[ "${secret}" == gecko-0123456789abcdef ]] || fail '空密码未保留旧值'
+        dockerResolveOpsImage() { printf '%s\n' "${OPS_IMAGE}"; }
+        dockerSetupRandomHex() { printf '0123456789abcdef0123456789abcdef\n'; }
+        dockerEditHy2PasswordRead secret "${HY2_SPEC}" entry-hy2 <<<'' >>"${STDOUT}"
+        [[ "${secret}" == 0123456789abcdef0123456789abcdef ]] || fail '空密码未生成新值'
+        for input in zero eof; do
+            actual=0
+            if [[ "${input}" == zero ]]; then
+                dockerEditHy2PasswordRead secret "${HY2_SPEC}" entry-hy2 <<<0 >>"${STDOUT}" || actual=$?
+            else
+                dockerEditHy2PasswordRead secret "${HY2_SPEC}" entry-hy2 </dev/null >>"${STDOUT}" || actual=$?
+            fi
+            [[ "${actual}" == 3 ]] || fail '混淆密码 0/EOF 没有取消'
+        done
+        ! grep -Eq 'gecko-0123456789abcdef|0123456789abcdef0123456789abcdef' "${STDOUT}" ||
+            fail '混淆密码回显到终端'
+    )
+    cp "${TEST_ROOT}/gecko-brutal.json" "${TEST_ROOT}/hy2-generic.json"
+    printf '13\nentry-hy2\n4\n2\n\n8\n' |
+        dockerEditFields "${TEST_ROOT}/hy2-generic.json" >"${STDOUT}"
+    jq -e '.core.protocols[0].hy2.obfs ==
+      {type:"salamander",password:"gecko-0123456789abcdef"}' "${TEST_ROOT}/hy2-generic.json" >/dev/null ||
+        fail '通用混淆编辑未保留原密码'
+    printf '13\nentry-hy2\n4\n1\n8\n' |
+        dockerEditFields "${TEST_ROOT}/hy2-generic.json" >"${STDOUT}"
+    jq -e '.core.protocols[0].hy2.obfs == null' "${TEST_ROOT}/hy2-generic.json" >/dev/null &&
+        ! grep -Fq '混淆密码' "${STDOUT}" || fail '关闭混淆仍读取密码'
+
+    # 私密 JSON 复用公共权限校验，仅补新类型的结构和秘密传递边界。
+    for content in '{"password":"short"}' '{"password":7}' \
+        '{"password":"0123456789abcdef","extra":true}' \
+        '{"password":"0123456789abcdef\n"}' '[]' \
+        '{"password":"0123456789abcdef"} {}'; do
+        printf '%s\n' "${content}" >"${hy2PrivateRoot}/invalid.json"
+        chmod 0600 "${hy2PrivateRoot}/invalid.json"
+        if dockerEditPrivateInputCopy "${hy2PrivateRoot}/invalid.json" "${hy2PrivateRoot}/copy.json" hy2_obfs; then
+            fail 'Hy2 私密 JSON 接受非法密码或结构'
+        fi
+    done
+    chmod 0644 "${hy2Secret}"
+    udpManagementEdit 15 unchanged --hy2-obfs entry-hy2 salamander "${hy2Secret}" --preview
+    chmod 0600 "${hy2Secret}"
+    udpManagementEdit 2 unchanged --hy2-obfs entry-hy2 salamander --preview
+    udpManagementEdit 2 unchanged --hy2-obfs entry-hy2 off "${hy2Secret}" --preview
+    udpManagementEdit 2 unchanged --hy2-obfs entry-hy2 off --hy2-masquerade entry-hy2 off --preview
+    udpManagementEdit 2 unchanged --hy2-masquerade entry-hy2 off --spec "${HY2_SPEC}" --preview
+    udpManagementEdit 15 unchanged --hy2-obfs missing salamander "${hy2Secret}" --preview
+    udpManagementEdit 15 unchanged --hy2-masquerade entry-hy2 http://www.example.com/ --preview
+    udpManagementEdit 15 unchanged --hy2-masquerade entry-hy2 local --preview
+    (
+        protocolKind=hy2 protocolListener=entry-hy2 protocolPatch='{"obfs":null}'
+        jq '.core.protocols[0].hy2.obfs = null' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+            >"${TEST_ROOT}/hy2-obfs-expected.json"
+        dockerEditCompatibilityValidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+            "${TEST_ROOT}/hy2-obfs-expected.json" || fail 'Hy2 混淆专项兼容门禁误拒'
+        jq '.core.protocols[0].hy2.masquerade = ""' "${TEST_ROOT}/hy2-obfs-expected.json" \
+            >"${TEST_ROOT}/hy2-obfs-tampered.json"
+        if dockerEditCompatibilityValidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+            "${TEST_ROOT}/hy2-obfs-tampered.json" 2>/dev/null; then
+            fail 'Hy2 混淆专项允许改变伪装'
+        fi
+    )
+    # 记录实际 jq 参数，私密密码只能经文件读取；同一夹具完成切换、关闭和投影。
+    export HY2_JQ_ARGS="${hy2PrivateRoot}/jq-args"
+    jq() { printf '%s\n' "$@" >>"${HY2_JQ_ARGS}"; command jq "$@"; }
+    export -f jq
+    udpManagementEdit 0 unchanged --hy2-obfs entry-hy2 salamander "${hy2Secret}" --preview
+    ! grep -Fq hy2-private-secret-marker "${STDOUT}" "${STDERR}" "${EVENTS}" ||
+        fail 'Hy2 混淆预览暴露密码'
+    for mode in salamander gecko off; do
+        obfsArgs=(--hy2-obfs entry-hy2 "${mode}")
+        [[ "${mode}" == off ]] || obfsArgs+=("${hy2Secret}")
+        cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/hy2-obfs-before.json"
+        udpManagementEdit 0 changed "${obfsArgs[@]}" --confirm PADM-DOCKER-EDIT
+        jq -en --arg mode "${mode}" --slurpfile secret "${hy2Secret}" \
+            --slurpfile old "${TEST_ROOT}/hy2-obfs-before.json" \
+            --slurpfile actual "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '
+          def stable: .core.protocols[0].hy2 |= del(.obfs);
+          ($old[0] | stable) == ($actual[0] | stable) and
+          $actual[0].core.protocols[0].hy2.obfs ==
+            (if $mode == "off" then null else {type:$mode,password:$secret[0].password} end)
+        ' >/dev/null || fail "Hy2 ${mode} 改变非混淆字段或未提交"
+        for config in users.base config.json; do
+            jq -e --arg mode "${mode}" --slurpfile secret "${hy2Secret}" '
+              .inbounds[] | select(.type == "hysteria2") |
+              if $mode == "off" then has("obfs") | not
+              else .obfs == {type:$mode,password:$secret[0].password} end
+            ' "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/${config}" >/dev/null ||
+                fail "Hy2 ${mode} 未投影到 ${config}"
+        done
+        ! grep -Fq hy2-private-secret-marker "${STDOUT}" "${STDERR}" "${EVENTS}" ||
+            fail 'Hy2 混淆编辑暴露密码'
+        runRead 0 hy2-obfs-status bash -u "${CLI}" protocol hy2-status entry-hy2
+        ! grep -Fq hy2-private-secret-marker "${STDOUT}" || fail 'Hy2 状态暴露混淆密码'
+    done
+    ! grep -Fq hy2-private-secret-marker "${HY2_JQ_ARGS}" || fail 'Hy2 密码进入 jq 参数'
+    unset -f jq
+    unset HY2_JQ_ARGS
+    for masquerade in off https://www.example.com/new-path; do
+        cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/hy2-masquerade-before.json"
+        udpManagementEdit 0 changed --hy2-masquerade entry-hy2 "${masquerade}" --confirm PADM-DOCKER-EDIT
+        jq -en --arg value "${masquerade}" --slurpfile old "${TEST_ROOT}/hy2-masquerade-before.json" \
+            --slurpfile actual "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '
+          def stable: .core.protocols[0].hy2 |= del(.masquerade);
+          ($old[0] | stable) == ($actual[0] | stable) and
+          $actual[0].core.protocols[0].hy2.masquerade == (if $value == "off" then "" else $value end)
+        ' >/dev/null || fail 'Hy2 伪装编辑改变其它字段或未提交'
+    done
+    udpManagementEdit 0 changed --site-template notes --confirm PADM-DOCKER-EDIT
+    staticBefore=$(find "${PADM_DOCKER_INSTALL_DIR}/data/static" -type f -exec sha256sum {} + | LC_ALL=C sort)
+    udpManagementEdit 0 changed --hy2-masquerade entry-hy2 local --confirm PADM-DOCKER-EDIT
+    jq -e '.inbounds[] | select(.type == "hysteria2") |
+      .masquerade == "file:///srv/padm/" and (has("obfs") | not)' \
+        "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/users.base" >/dev/null ||
+        fail 'Hy2 local 专项没有生成固定网页路径'
+    [[ "$(find "${PADM_DOCKER_INSTALL_DIR}/data/static" -type f -exec sha256sum {} + | LC_ALL=C sort)" == "${staticBefore}" ]] ||
+        fail 'Hy2 local 专项改写已发布网页'
+    udpManagementEdit 15 unchanged --hy2-obfs entry-hy2 salamander "${hy2Secret}" --preview
+    cmp -s "${TEST_ROOT}/hy2-management-traffic.json" "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" ||
+        fail 'Hy2 混淆/伪装专项改变累计或额度'
     before=$(liveSnapshot)
     rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
-    udpManagementEdit 14 changed --hy2-bandwidth entry-hy2 brutal 200 100 --confirm PADM-DOCKER-EDIT
+    udpManagementEdit 14 changed --hy2-masquerade entry-hy2 off --confirm PADM-DOCKER-EDIT
     [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] ||
         fail 'Hy2 专项健康失败未恢复配置、凭据和累计'
 )

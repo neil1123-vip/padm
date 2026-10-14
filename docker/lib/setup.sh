@@ -806,6 +806,9 @@ dockerEditPrivateInputCopy() (
              keys == ["domains", "family", "ipv6_address", "mode", "peer_public_key", "private_key", "reserved"]
            elif $kind == "http_relay" then
              keys == ["address_families", "core", "password", "port", "source_ips", "username"]
+           elif $kind == "hy2_obfs" then
+             keys == ["password"] and
+             (.password | type == "string" and test("^[A-Za-z0-9_-]{16,128}\\z"))
            else false end))
         ' "${target}" >/dev/null 2>&1
 )
@@ -1193,9 +1196,27 @@ dockerProtocolCommand() (
     dockerGenerateSubscription "${selected}" /dev/stdout
 )
 
+dockerEditHy2PasswordRead() {
+    local variable=$1 draft=$2 listener=$3 password defaultPassword opsImage
+    defaultPassword=$(jq -r --arg key "${listener}" '
+      .core.protocols[] | select(.listener_id == $key) | .hy2.obfs.password // ""
+    ' "${draft}") || return 1
+    printf '混淆密码（16..128 位字母/数字/_/-，空输入保留或随机生成，0 取消）: '
+    IFS= read -r -s password || return 3
+    printf '\n'
+    [[ "${password}" != 0 ]] || return 3
+    password=${password:-${defaultPassword}}
+    if [[ -z "${password}" ]]; then
+        opsImage=$(dockerResolveOpsImage) || return 1
+        password=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
+    fi
+    [[ "${password}" =~ ^[A-Za-z0-9_-]{16,128}$ ]] || return 1
+    printf -v "${variable}" '%s' "${password}"
+}
+
 dockerEditFields() {
     local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
-    local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice= opsImage zeroRttChoice
+    local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice= zeroRttChoice
     while :; do
         printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS/HTTPUpgrade 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n11. 安装其它 Reality 传输入口\n12. XHTTP/gRPC 参数\n13. Hysteria2 参数\n14. TUIC 参数\n0. 取消\n'
         dockerSetupRead choice '编辑项目: ' || return 3
@@ -1430,19 +1451,7 @@ dockerEditFields() {
                 case "${obfsChoice}" in
                 1) value= ;;
                 2|3)
-                    defaultValue=$(jq -r --arg key "${listener}" '
-                      .core.protocols[] | select(.listener_id == $key) | .hy2.obfs.password // ""
-                    ' "${draft}") || return 1
-                    printf '混淆密码（16..128 位字母/数字/_/-，空输入保留或随机生成，0 取消）: '
-                    IFS= read -r -s value || return 3
-                    printf '\n'
-                    [[ "${value}" != 0 ]] || return 3
-                    value=${value:-${defaultValue}}
-                    if [[ -z "${value}" ]]; then
-                        opsImage=$(dockerResolveOpsImage) || return 1
-                        value=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
-                    fi
-                    [[ "${value}" =~ ^[A-Za-z0-9_-]{16,128}$ ]] || return 1
+                    dockerEditHy2PasswordRead value "${draft}" "${listener}" || return $?
                     ;;
                 *) return 1 ;;
                 esac
@@ -1527,6 +1536,7 @@ dockerEditCommand() {
     local xhttpAction= xhttpListener= xhttpPreset= xhttpValues='{}' xhttpPadding=null
     local xhttpNoGrpc=false xhttpNoSse=false xhttpLimits='{}'
     local protocolKind= protocolListener= protocolPatch='{}' protocolId=0
+    local protocolPatchFile= hy2ObfsType= hy2ObfsFile= hy2ObfsPassword=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -1847,6 +1857,25 @@ dockerEditCommand() {
             [[ "$1" != --fail2ban-ssh-off ]] || fail2banType=fail2ban-ssh
             fail2banAction=off
             shift
+            ;;
+        --hy2-obfs|--hy2-masquerade)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
+                -z "${protocolKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            protocolKind=hy2 protocolId=3 protocolListener=$2
+            if [[ "$1" == --hy2-masquerade ]]; then
+                protocolPatch=$(jq -cn --arg value "$3" '{masquerade:(if $value == "off" then "" else $value end)}') ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                shift 3
+            else
+                case "$3" in off|salamander|gecko) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+                hy2ObfsType=$3 protocolPatch='{"obfs":null}'
+                if [[ "${hy2ObfsType}" != off && "$#" -ge 4 && -n "$4" && "$4" != --* ]]; then
+                    hy2ObfsFile=$4
+                    shift 4
+                else
+                    shift 3
+                fi
+            fi
             ;;
         --hy2-bandwidth)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${protocolKind}" ]] ||
@@ -2301,6 +2330,11 @@ dockerEditCommand() {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${hy2ObfsType}" || "${hy2ObfsType}" == off || "${mode}" == interactive ||
+        -n "${hy2ObfsFile}" ]] || {
+        dockerError '非交互开启 Hy2 混淆需要 root 私密 JSON 密码文件'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     if [[ "${protocolKind}" == tuic ]] &&
         jq -e '.zero_rtt_handshake == true' <<<"${protocolPatch}" >/dev/null 2>&1; then
         printf '启用 TUIC 0-RTT 会增加重放攻击风险，默认关闭。\n'
@@ -2523,12 +2557,51 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${protocolKind}" ]]; then
+        jq -e --arg listener "${protocolListener}" --argjson id "${protocolId}" '
+          .schema_version == 3 and
+          ([.core.protocols[] | select(.listener_id == $listener and .id == $id and .core == "sing-box")] | length) == 1
+        ' "${draft}" >/dev/null 2>&1 || {
+            dockerError 'Hy2/TUIC 管理只支持已有 v3 sing-box 协议 3/31 入口，未提交配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        protocolPatchFile="${workspace}/protocol-patch.json"
+        if [[ -n "${hy2ObfsType}" && "${hy2ObfsType}" != off ]]; then
+            if [[ -n "${hy2ObfsFile}" ]]; then
+                dockerEditPrivateInputCopy "${hy2ObfsFile}" "${workspace}/hy2-obfs.json" hy2_obfs || {
+                    dockerError 'Hy2 混淆密码须为 root 0600 单链接私密 JSON 的唯一 password 字段，16..128 位字母/数字/_/-'
+                    return "${PADM_DOCKER_RC_STATE}"
+                }
+            else
+                dockerEditHy2PasswordRead hy2ObfsPassword "${draft}" "${protocolListener}" || {
+                    status=$?
+                    [[ "${status}" -ne 3 ]] || return 0
+                    return "${PADM_DOCKER_RC_STATE}"
+                }
+                printf '%s' "${hy2ObfsPassword}" | jq -Rs '{password:.}' >"${workspace}/hy2-obfs.json" &&
+                    chmod 0600 "${workspace}/hy2-obfs.json" || return "${PADM_DOCKER_RC_STATE}"
+                hy2ObfsPassword=
+            fi
+            # 补丁仅经私密文件进入 jq；兼容门禁只使用公开字段键。
+            jq --arg type "${hy2ObfsType}" '{obfs:{type:$type,password:.password}}' \
+                "${workspace}/hy2-obfs.json" >"${protocolPatchFile}" ||
+                return "${PADM_DOCKER_RC_STATE}"
+        else
+            printf '%s\n' "${protocolPatch}" >"${protocolPatchFile}" || return "${PADM_DOCKER_RC_STATE}"
+        fi
+        chmod 0600 "${protocolPatchFile}" || return "${PADM_DOCKER_RC_STATE}"
+        if [[ "${protocolKind}" == hy2 ]] &&
+            jq -e '.masquerade == "local"' "${protocolPatchFile}" >/dev/null; then
+            jq -e --arg listener "${protocolListener}" '.site.mode == "static" and
+              any(.core.protocols[]; .listener_id == $listener and .hy2.obfs == null)' \
+                "${draft}" >/dev/null &&
+                dockerSiteStateValidate "${original}" "${root}" || {
+                dockerError 'local 需要已发布的受管静态网页及关闭混淆，不自动修改站点或其它参数'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+        fi
         jq --arg kind "${protocolKind}" --arg listener "${protocolListener}" \
-            --argjson id "${protocolId}" --argjson patch "${protocolPatch}" '
-          if .schema_version != 3 or
-            ([.core.protocols[] | select(.listener_id == $listener and .id == $id and .core == "sing-box")] | length) != 1
-          then error("入口不支持该协议管理")
-          else .core.protocols |= map(if .listener_id == $listener then .[$kind] += $patch else . end) end
+            --slurpfile patch "${protocolPatchFile}" '
+          .core.protocols |= map(if .listener_id == $listener then .[$kind] += $patch[0] else . end)
         ' "${draft}" >"${draft}.next" 2>/dev/null &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
             dockerError 'Hy2/TUIC 管理只支持已有 v3 sing-box 协议 3/31 入口，未提交配置'
@@ -3260,7 +3333,7 @@ dockerEditCompatibilityValidate() {
         ([$new.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ($old | without_fail2ban_settings) == ($new | without_fail2ban_settings)
        elif $protocol_kind != "" then
-        # 可信解析的补丁键只豁免选中字段，身份、混淆及其它入口保持冻结。
+        # 可信解析的补丁键只豁免选中字段，身份、其它字段及其它入口保持冻结。
         def without_protocol_patch:
           .core.protocols |= map(if .listener_id == $protocol_listener then
             .[$protocol_kind] |= delpaths($protocol_patch | keys | map([.]))

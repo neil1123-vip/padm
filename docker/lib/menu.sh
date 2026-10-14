@@ -263,11 +263,13 @@ dockerMenuXhttp() {
 }
 
 dockerMenuHysteria2() {
-    local choice listener up down
+    local choice listener up down obfs masquerade
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker Hysteria2 管理（已有 sing-box v3 入口）\n'
-        printf '%s\n' '1. 查看状态' '2. BBR 自适应' '3. Brutal 固定带宽' '0. 返回'
+        printf '%s\n' '1. 查看状态' '2. BBR 自适应' '3. Brutal 固定带宽' \
+            '4. Salamander 混淆' '5. Gecko 混淆' '6. 关闭混淆' \
+            '7. HTTPS 伪装' '8. 本地网页' '9. 关闭伪装' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -276,17 +278,42 @@ dockerMenuHysteria2() {
         case "${choice}" in
         0) return 0 ;;
         1) dockerMenuRun protocol hy2-status || true ;;
-        2|3)
+        2|3|4|5|6|7|8|9)
             dockerMenuRun protocol hy2-status || continue
             dockerSetupRead listener 'Hysteria2 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" && "${listener}" != --* ]] || continue
-            if [[ "${choice}" == 2 ]]; then
+            case "${choice}" in
+            2)
                 dockerMenuRun edit --hy2-bandwidth "${listener}" bbr || true
-            else
+                ;;
+            3)
                 dockerSetupRead up '服务端上行带宽 Mbps（服务端→客户端）[100]: ' 100 &&
                     dockerSetupRead down '服务端下行带宽 Mbps（客户端→服务端）[50]: ' 50 || continue
                 dockerMenuRun edit --hy2-bandwidth "${listener}" brutal "${up}" "${down}" || true
-            fi
+                ;;
+            4|5|6)
+                case "${choice}" in
+                4) obfs=salamander ;;
+                5) obfs=gecko ;;
+                6) obfs=off ;;
+                esac
+                dockerMenuRun edit --hy2-obfs "${listener}" "${obfs}" || true
+                ;;
+            7|8|9)
+                case "${choice}" in
+                7)
+                    dockerSetupRead masquerade '伪装 HTTPS 地址（0 返回）: ' &&
+                        [[ -n "${masquerade}" ]] || continue
+                    ;;
+                8)
+                    printf 'local 使用已发布的受管静态网页；请先在站点菜单发布目录或内置主题，并关闭混淆。\n'
+                    masquerade=local
+                    ;;
+                9) masquerade=off ;;
+                esac
+                dockerMenuRun edit --hy2-masquerade "${listener}" "${masquerade}" || true
+                ;;
+            esac
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

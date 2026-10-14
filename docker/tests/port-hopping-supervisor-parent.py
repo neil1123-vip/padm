@@ -901,6 +901,11 @@ def service_deadline_cases(base, entrypoint):
             launches = (installation / "fixture-launches").read_text().splitlines()
             assert len(launches) == (2 if phase == "restart-gate" else 1), (
                 "时限到期后创建了新 owner", phase, launches)
+            if phase == "stop":
+                # 故障夹具刻意晚于停止预算退出，单独观察其回收，不延长管理器时限。
+                deadline = time.monotonic() + 1
+                while any(Path(f"/proc/{pid}").exists() for pid in launches) and time.monotonic() < deadline:
+                    time.sleep(0.01)
             assert all(not Path(f"/proc/{pid}").exists() for pid in launches), (phase, launches)
             assert not (installation / "data/net/fixture-running").exists()
             assert not list(installation.glob(".hopping-guarded.fixture.*"))

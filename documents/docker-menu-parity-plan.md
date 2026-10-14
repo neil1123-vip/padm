@@ -1398,6 +1398,36 @@ TUIC 提供 `--tuic-congestion`、`--tuic-connection`、`--tuic-zero-rtt`、
 完整协议管理、TUIC 跳跃、自动恢复、重装/卸载、宿主集成组合、
 原生宿主/arm64/公网仍 deferred，整体计划保持 active。
 
+#### 3D.9 Hy2 混淆与伪装专项合批
+
+沿用菜单 `12` 与单入口事务，`--hy2-obfs` 提供 `salamander/gecko/off`，
+`--hy2-masquerade` 提供 `off/local/HTTPS_URL`，不扩规格或依赖。
+非交互开启混淆仅接受 root 0600 单链接私密 JSON 的唯一 `password` 字段，
+16–128 位字母/数字/下划线/连字符；交互复用通用编辑的静默输入，
+空输入保留旧值、无旧值才随机，`0`/EOF 取消不写入。
+密码补丁只经候选私密文件进入 jq，公开冻结比较仅使用字段键。
+每次只豁免选中入口的 `obfs` 或 `masquerade`，其它参数、入口、TLS、
+账号及累计额度冻结；发布、健康失败和信号恢复沿用原事务。
+local 先验证已发布受管 static 网页且混淆已关闭，不自动创建站点或关闭混淆；
+Gecko/local 复用既有 bundle 门禁，不重复未改变的真实客户端参数矩阵。
+2026-10-15 Linux amd64 定向 Hy2 `106702 ms`、菜单 `57549 ms` 通过，
+复用工具镜像，容器内 Bash/ShellCheck error/JSON 及独立复核通过。
+Hy2 首次新增静默读取断言受 `IFS=` 拼接影响，改逐参数检查 `-s` 后补跑；
+菜单已通过且未再修改，不重复单跑。集中完整首轮仅跳跃监督 stop 夹具失败：
+夹具停止预算 50 ms、故意延迟 100 ms 清理，原测试过早检查进程消失。
+仅该故障案例加 1 秒有界观察，不延长生产时限或放松锁/owner/清理断言；
+监督定向 128 项、`29755 ms` 通过，随后重跑集中完整合同。
+证据分别在 `.tmp-regression-docker-db18b429da1a4585b51ee643c78e1757/`、
+`.tmp-regression-docker-55e1433551634fb98ef1ef0f2cb72f94/`、
+`.tmp-regression-docker-8c0dece3a51e420cbb14d666aa99e399/`。
+失败输入归档清理，日志/result 保留，不把失败结果计为通过。
+修正后完整 `docker-contracts -Jobs 6` exit `0`，57/57 顶层检查通过，
+入口 `375917 ms`、内部 `373947 ms`、排队 `332 ms`、cache=false，
+证据 `.tmp-regression-docker-be0a079fc9204172afd4bb9a3d27f238/`。
+源码与修正后的监督定向摘要一致，之后仅补验收文字；
+成功输入由入口清理，失败输入已清，无新增依赖或本机临时脚本。
+完整协议管理及剩余宿主/arm64/公网验收仍 deferred，整体计划 active。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份
