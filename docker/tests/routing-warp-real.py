@@ -23,6 +23,7 @@ Server, exact, request = (helpers[key] for key in ("Server", "exact", "request")
 run, namespace, stop = (node[key] for key in ("run", "namespace", "stop"))
 BT = helpers["BT_HANDSHAKE"]
 ORIGIN4, ORIGIN6 = "198.51.100.80", "2001:db8:80::80"
+BLOCK4, BLOCK6 = "198.51.100.99", "2001:db8:99::99"
 UDP4 = "198.51.100.81"
 LOCAL, HTTP, UDP = 2080, 8088, 8089
 DIRECT4, DIRECT6 = "192.0.2.1", "fd02::1"
@@ -30,6 +31,7 @@ TUNNEL4, TUNNEL6 = "172.16.0.2", "2606:4700:110:8a10::2"
 HTTP_RESPONSE = (b"HTTP/1.1 200 OK\r\nContent-Length: 22\r\nConnection: close\r\n\r\n"
                  b"routing-destination-ok")
 PROOF, LOCK = None, threading.Lock()
+RESOLVED_SCOPE = os.environ.get("PADM_ROUTING_REAL_SCOPE") == "ips-resolved"
 
 
 def event(kind, **values):
@@ -83,17 +85,23 @@ class Dns(socketserver.BaseRequestHandler):
         name, kind = ".".join(parts), struct.unpack("!HH", data[offset + 1:end])[0]
         event("dns", name=name, qtype=kind, server_port=self.server.server_address[1])
         family = int((PROOF / "family").read_text())
-        if name in ("direct.warp.invalid", "unmatched.test", "proxy.test"):
+        if name in ("direct.warp.invalid", "unmatched.test", "proxy.test",
+                    "split.proxy.test", "blocked-ip.proxy.test"):
             family = 4
         if name == "ipv6-first.warp.invalid":
             family = 6
         if name == "dual.warp.invalid":
             family = 4 if kind == 1 else 6
-        value = socket.inet_pton(socket.AF_INET if family == 4 else socket.AF_INET6,
-                                ORIGIN4 if family == 4 else ORIGIN6)
+        blocked = RESOLVED_SCOPE and (name.startswith(("blocked-ip.", "local-block.")) or
+                                    name == "direct.warp.invalid")
+        address = (BLOCK4 if family == 4 else BLOCK6) if blocked else (
+            ORIGIN4 if family == 4 else ORIGIN6)
+        status = 2 if RESOLVED_SCOPE and name == "error.warp.invalid" and (
+            self.server.server_address[1] == 5353) else 0
+        value = socket.inet_pton(socket.AF_INET if family == 4 else socket.AF_INET6, address)
         answer = (b"\xc0\x0c" + struct.pack("!HHIH", kind, 1, 1, len(value)) + value
-                  if kind == (1 if family == 4 else 28) else b"")
-        channel.sendto(data[:2] + struct.pack("!HHHHH", 0x8180, 1, int(bool(answer)), 0, 0) +
+                  if not status and kind == (1 if family == 4 else 28) else b"")
+        channel.sendto(data[:2] + struct.pack("!HHHHH", 0x8180 | status, 1, int(bool(answer)), 0, 0) +
                        data[12:end] + answer, self.client_address)
 
 
@@ -109,11 +117,20 @@ class Proxy(socketserver.BaseRequestHandler):
             user, password = exact(conn, exact(conn, 1)[0]), exact(conn, exact(conn, 1)[0])
             assert (user, password) == (b"fixture-user", b"fixture-password")
             conn.sendall(b"\x01\x00")
-            assert exact(conn, 4) == b"\x05\x01\x00\x03"
-            name = exact(conn, exact(conn, 1)[0]).decode("ascii")
+            version, command, reserved, kind = exact(conn, 4)
+            assert (version, command, reserved) == (5, 1, 0)
+            if kind in (1, 4):
+                name = socket.inet_ntop({1: socket.AF_INET, 4: socket.AF_INET6}[kind],
+                                       exact(conn, {1: 4, 4: 16}[kind]))
+            else:
+                assert kind == 3
+                name = exact(conn, exact(conn, 1)[0]).decode("ascii")
             assert struct.unpack("!H", exact(conn, 2))[0] == HTTP
-            event("proxy", name=name)
-            with socket.create_connection((ORIGIN4, HTTP), timeout=3) as target:
+            event("proxy", name=name, address_kind=kind)
+            # split 的远端域名结果是可达禁用地址，只有传入已审计 literal 才会抵达正例。
+            address = name if kind in (1, 4) else (
+                BLOCK4 if name == "split.proxy.test" else ORIGIN4)
+            with socket.create_connection((address, HTTP), timeout=3) as target:
                 conn.sendall(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
                 target.sendall(conn.recv(4096))
                 while data := target.recv(4096):
@@ -160,7 +177,7 @@ def fixture(path):
         os.setgid(10001)
         os.setuid(10001)
         servers = []
-        for address in (ORIGIN4, ORIGIN6):
+        for address in (ORIGIN4, ORIGIN6, *((BLOCK4, BLOCK6) if RESOLVED_SCOPE else ())):
             servers += [stack.enter_context(Server((address, HTTP), Origin)),
                         stack.enter_context(UdpServer((address, UDP), Datagram))]
         servers += [stack.enter_context(UdpServer(("192.0.2.2", 5353), Dns)),
@@ -177,6 +194,20 @@ def fixture(path):
 
 def rows(path):
     return [json.loads(line) for line in (path / "events.jsonl").read_text().splitlines()]
+
+
+def settled(path):
+    # 正例连接关闭后先排空迟到 ACK，负例窗口仍严格禁止新的 WireGuard 有效载荷。
+    event_file = path / "events.jsonl"
+    size = event_file.stat().st_size
+    quiet_since = time.monotonic()
+    deadline = quiet_since + 1
+    while time.monotonic() - quiet_since < 0.1:
+        assert time.monotonic() < deadline, "负例前事件未稳定"
+        time.sleep(0.02)
+        current = event_file.stat().st_size
+        if current != size:
+            size, quiet_since = current, time.monotonic()
 
 
 def wait(probe, timeout=10):
@@ -229,7 +260,9 @@ def accepted(target, path, source, core):
     return delta
 
 
-def rejected(target, path, core, payload=None):
+def rejected(target, path, core, payload=None, dns_port=None):
+    if RESOLVED_SCOPE:
+        settled(path)
     before = len(rows(path))
     try:
         assert not request("127.0.0.1", LOCAL, HTTP, target, pipelined=core == "xray",
@@ -240,13 +273,19 @@ def rejected(target, path, core, payload=None):
         raise AssertionError(f"{target}: 超时不是实际阻断")
     delta = rows(path)[before:]
     # 已有隧道的空 keepalive 与拒绝目标无关；有效载荷、握手及解析仍不可泄漏。
-    assert not any(row["kind"] in ("tcp", "proxy", "dns") or
+    assert not any(row["kind"] in ("tcp", "udp", "proxy") or
+                   row["kind"] == "dns" and dns_port is None or
                    (row["kind"] == "wireguard" and
                     not (row["packet_type"] == 4 and row["size"] == 32))
                    for row in delta), delta
+    if dns_port is not None:
+        queries = [row for row in delta if row["kind"] == "dns"]
+        assert queries and all(row["name"] == target and row["server_port"] == dns_port
+                               for row in queries), delta
+    return delta
 
 
-def udp(target):
+def udp(target, accepted=True):
     with socket.create_connection(("127.0.0.1", LOCAL), timeout=3) as control:
         control.sendall(b"\x05\x01\x00")
         assert exact(control, 2) == b"\x05\x00"
@@ -259,15 +298,22 @@ def udp(target):
         if address in ("0.0.0.0", "::"):
             address = "127.0.0.1"
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as channel:
-            channel.settimeout(3)
+            channel.settimeout(3 if accepted else 0.3)
             channel.sendto(b"\x00\x00\x00" + helpers["socks_address"](target) +
                            struct.pack("!H", UDP) + b"warp-udp-proof", (address, port))
-            assert channel.recv(65535).endswith(b"warp-udp-proof")
+            if accepted:
+                assert channel.recv(65535).endswith(b"warp-udp-proof")
+            else:
+                try:
+                    leaked = channel.recv(65535)
+                except socket.timeout:
+                    return
+                raise AssertionError(f"{target}: 被禁 UDP 收到响应 {leaked!r}")
 
 
 def runtime(root, core, mode, private, public):
     value = json.loads((root / f"{core}.{mode}.json").read_text())
-    address = ORIGIN6 if mode.endswith("6") else ORIGIN4
+    address = ORIGIN6 if mode.endswith("6") or mode.startswith("ipv6-") else ORIGIN4
     if core == "xray":
         value["dns"]["hosts"]["full:hosts.warp.invalid"] = address
         for rule in value["routing"]["rules"]:
@@ -288,6 +334,12 @@ def runtime(root, core, mode, private, public):
         for server in value["dns"]["servers"]:
             if server["tag"] == "padm-hosts":
                 server["predefined"]["hosts.warp.invalid"] = address
+                if RESOLVED_SCOPE:
+                    server["predefined"]["hosts-block.warp.invalid"] = BLOCK6 if (
+                        mode.endswith("6") or mode.startswith("ipv6-")) else BLOCK4
+        if RESOLVED_SCOPE:
+            value["dns"]["timeout"] = "250ms"
+            value["log"] = dict(disabled=False, level="debug", timestamp=False)
         for endpoint in value.get("endpoints", []):
             if endpoint["tag"] == "padm-warp":
                 endpoint["private_key"] = private
@@ -295,14 +347,86 @@ def runtime(root, core, mode, private, public):
                 assert endpoint["system"] is False
         for rule in value["route"]["rules"]:
             for match in rule.get("rules", [rule]):
-                if match.get("ip_cidr") == ["198.51.100.199"]:
+                if not RESOLVED_SCOPE and match.get("ip_cidr") == ["198.51.100.199"]:
                     match["ip_cidr"] = [ORIGIN4]
-        if mode.startswith("selective"):
+        if not RESOLVED_SCOPE and mode.startswith("selective"):
             value["route"]["rules"].append(
                 dict(ip_cidr=[UDP4 + "/32", ORIGIN6 + "/128"], network="udp",
                      action="route", outbound="padm-warp"))
         value["inbounds"].append(dict(type="socks", tag="fixture-in", listen="127.0.0.1", listen_port=LOCAL))
     return value
+
+
+def resolved_checks(root, mode, family):
+    ipv6 = mode.startswith("ipv6-")
+    source = DIRECT6 if ipv6 else TUNNEL4 if family == 4 else TUNNEL6
+    target = ("default.warp.invalid" if mode.startswith("global") or mode == "ipv6-global"
+              else "matched.warp.invalid")
+    for name in (target, "dual.warp.invalid"):
+        delta = accepted(name, root, source, "sing-box")
+        assert [row["destination"] for row in delta if row["kind"] == "tcp"] == [
+            ORIGIN4 if family == 4 else ORIGIN6], delta
+        queries = [row for row in delta if row["kind"] == "dns"]
+        assert queries and all(row["name"] == name and row["server_port"] == 5353 and
+                               row["qtype"] == (1 if family == 4 else 28) for row in queries), delta
+        assert not any(row["kind"] == "proxy" for row in delta), "WARP/IPv6 选择性被 SOCKS 覆盖"
+    delta = accepted("hosts.warp.invalid", root, source, "sing-box")
+    assert not any(row["kind"] == "dns" for row in delta), "hosts 没有优先于指定 DNS"
+    for name, port in (("blocked-ip.warp.invalid", 5353), ("hosts-block.warp.invalid", None),
+                       ("error.warp.invalid", 5353), ("local-block.test", 53)):
+        delta = rejected(name, root, "sing-box", dns_port=port)
+        if port is not None and name != "local-block.test":
+            assert all(row["qtype"] == (1 if family == 4 else 28)
+                       for row in delta if row["kind"] == "dns"), delta
+    # Direct 与被禁字面目的重叠，仍保留显式 DNS，正例服务确保拒绝并非不可达。
+    delta = accepted("direct.warp.invalid", root, DIRECT4, "sing-box")
+    assert [row["destination"] for row in delta if row["kind"] == "tcp"] == [BLOCK4]
+    assert any(row["kind"] == "dns" and row["server_port"] == 5353 for row in delta)
+    delta = accepted("ipv6-first.warp.invalid", root, DIRECT6, "sing-box")
+    assert not any(row["kind"] == "proxy" for row in delta), "IPv6 选择性没有保持首选"
+    for name, wanted_source, destination in (
+            ("dual.warp.invalid", source, ORIGIN4 if family == 4 else ORIGIN6),
+            ("direct.warp.invalid", DIRECT4, BLOCK4)):
+        count = len(rows(root))
+        udp(name)
+        delta = rows(root)[count:]
+        assert [(row["source"], row["destination"]) for row in delta if row["kind"] == "udp"] == [
+            (wanted_source, destination)], delta
+    # 独立域名避免 DNS 缓存，拒绝日志和可达目的哨兵共同证明 UDP 实际阻断。
+    settled(root)
+    count = len(rows(root))
+    log = root / f"sing-box.{mode}.log"
+    log_size = log.stat().st_size
+    blocked_udp = "blocked-ip.udp.warp.invalid"
+    udp(blocked_udp, accepted=False)
+    delta = rows(root)[count:]
+    queries = [row for row in delta if row["kind"] == "dns"]
+    assert queries and all(row["name"] == blocked_udp and row["server_port"] == 5353 and
+                           row["qtype"] == (1 if family == 4 else 28) for row in queries), delta
+    output = log.read_bytes()[log_size:].decode(errors="replace")
+    assert blocked_udp in output and "reject" in output.lower(), output
+    assert not any(row["kind"] in ("tcp", "udp", "proxy") for row in delta), (
+        "解析后 UDP 阻断泄漏")
+    assert not any(row["kind"] == "wireguard" and
+                   not (row["packet_type"] == 4 and row["size"] == 32) for row in delta), delta
+    if mode == "selective4":
+        delta = accepted("split.proxy.test", root, ORIGIN4, "sing-box")
+        assert [(row["address_kind"], row["name"]) for row in delta if row["kind"] == "proxy"] == [
+            (1, ORIGIN4)], "SOCKS 重新解析了审计放行的域名"
+        assert [row["destination"] for row in delta if row["kind"] == "tcp"] == [ORIGIN4]
+        rejected("blocked-ip.proxy.test", root, "sing-box", dns_port=5353)
+        count = len(rows(root))
+        (root / "peer-off").touch()
+        try:
+            result = request("127.0.0.1", LOCAL, HTTP, "failure.warp.invalid", timeout=1)
+        except (socket.timeout, EOFError, ConnectionResetError):
+            result = False
+        delta = rows(root)[count:]
+        assert not result and any(row["kind"] == "wireguard" for row in delta)
+        assert not any(row["kind"] in ("tcp", "udp", "proxy") for row in delta), (
+            "Peer 失联回退了直连")
+    print(f"routing-ips-resolved-combined-{mode}: "
+          "literal-bound/hosts/DNS/local/Direct/TCP/UDP/no-fallback passed", flush=True)
 
 
 def main(root):
@@ -334,6 +458,11 @@ def main(root):
             run(["ip", "address", "add", ORIGIN4 + "/32", "dev", "lo"], peer)
             run(["ip", "address", "add", UDP4 + "/32", "dev", "lo"], peer)
             run(["ip", "-6", "address", "add", ORIGIN6 + "/128", "dev", "lo", "nodad"], peer)
+            if RESOLVED_SCOPE:
+                run(["ip", "address", "add", BLOCK4 + "/32", "dev", "lo"], peer)
+                run(["ip", "-6", "address", "add", BLOCK6 + "/128", "dev", "lo", "nodad"], peer)
+                run(["ip", "route", "add", BLOCK4 + "/32", "via", "192.0.2.2"])
+                run(["ip", "-6", "route", "add", BLOCK6 + "/128", "via", "fd02::2"])
             run(["ip", "route", "add", ORIGIN4 + "/32", "via", "192.0.2.2"])
             run(["ip", "route", "add", UDP4 + "/32", "via", "192.0.2.2"])
             run(["ip", "-6", "route", "add", ORIGIN6 + "/128", "via", "fd02::2"])
@@ -362,9 +491,12 @@ def main(root):
             wait(lambda: server.poll() is None and (root / "ready").is_file())
             permissions(server)
             expected_links = links()
-            for core in ("xray", "sing-box"):
-                for mode in ("control", "selective4", "selective6", "global4", "global6", "off"):
-                    family = 6 if mode.endswith("6") else 4
+            cores = ("sing-box",) if RESOLVED_SCOPE else ("xray", "sing-box")
+            modes = (("selective4", "selective6", "global4", "global6", "ipv6-selective", "ipv6-global")
+                     if RESOLVED_SCOPE else ("control", "selective4", "selective6", "global4", "global6", "off"))
+            for core in cores:
+                for mode in modes:
+                    family = 6 if mode.endswith("6") or mode.startswith("ipv6-") else 4
                     (root / "family").write_text(str(family))
                     config = root / f"{core}.{mode}.runtime.json"
                     config.write_text(json.dumps(runtime(root, core, mode, private.decode().strip(), peer_public)))
@@ -380,6 +512,10 @@ def main(root):
                             wait(lambda: process.poll() is None and listener())
                             permissions(process)
                             assert links() == expected_links, "userspace 核心创建了宿主接口"
+                            if RESOLVED_SCOPE:
+                                resolved_checks(root, mode, family)
+                                assert process.poll() is None and links() == expected_links
+                                continue
                             if mode in ("control", "off"):
                                 delta = accepted("hosts.warp.invalid", root, DIRECT4, core)
                                 assert not any(row["kind"] == "dns" for row in delta), delta

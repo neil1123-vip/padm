@@ -355,8 +355,7 @@ dockerConfigureSpecValidate() {
               (.ips | type == "array" and length >= 1 and length <= 256 and
                 length == (unique | length) and all(.[]; routing_ip_selector))) and
             (if .block_ips.resolve_domains == true then
-              $request.core.type == "sing-box" and $request.core.secondary_type == null and
-              .ipv6 == null and .warp == null else true end)
+              $request.core.type == "sing-box" and $request.core.secondary_type == null else true end)
            else true end) and
           (if has("block_bt") then .block_bt == true else true end) and
           (if has("region") then
@@ -2321,6 +2320,17 @@ dockerGenerateSingBoxConfig() {
             [exclude_direct($match; $direct) + {action: "route", outbound: $outbound}]
            end)
         end;
+      # 按所选出站地址族解析后立即阻断并选路，避免后续解析覆盖已经检查的目的。
+      def checked_routes($matches; $direct; $outbound; $strategy; $ips):
+        if ($matches | length) == 0 then [] else
+          (if ($matches | length) == 1 then $matches[0]
+           else {type: "logical", mode: "or", rules: $matches} end) as $match |
+          exclude_direct($match; $direct) as $selected |
+          [$selected + {action: "resolve"} +
+            if $strategy == null then {} else {strategy: $strategy} end] +
+          [$ips[] | exclude_direct(.; $direct) + {action: "reject"}] +
+          [$selected + {action: "route", outbound: $outbound}]
+        end;
       # 区域预设只在生成时展开，关闭不会删除用户手工配置的相同规则。
       ($request[0] | if .routing.region != null then
         .routing.region as $region |
@@ -2523,10 +2533,24 @@ dockerGenerateSingBoxConfig() {
                 exclude_direct({protocol: ["bittorrent"]}; $direct_matches) + {action: "reject"}
               ] else [] end) +
               (if $resolve_ips then
-                # 只解析一次并保留实际目的地址，代理不得重新解析绕过 IP 判定。
+                checked_routes($ipv6_matches; $direct_matches; "padm-ipv6"; "ipv6_only"; $ip_matches) +
+                checked_routes($warp_matches; $direct_matches; "padm-warp"; $warp_strategy; $ip_matches) +
+                (if $selective then
+                  [$matches[] | exclude_direct(. + {network: "udp"}; $direct_matches) + {action: "reject"}] +
+                  checked_routes([$matches[] | . + {network: "tcp"}]; $direct_matches;
+                    "padm-socks5"; null; $ip_matches)
+                 elif $r.routing.socks5 != null then
+                  [exclude_direct({network: "udp"}; $direct_matches) + {action: "reject"}] +
+                  checked_routes([{network: "tcp"}]; $direct_matches; "padm-socks5"; null; $ip_matches)
+                 else [] end) +
+                (if $ipv6_global then
+                  checked_routes([{network: ["tcp", "udp"]}]; $direct_matches; "padm-ipv6"; "ipv6_only"; $ip_matches)
+                 elif $warp_global then
+                  checked_routes([{network: ["tcp", "udp"]}]; $direct_matches; "padm-warp"; $warp_strategy; $ip_matches)
+                 else [] end) +
                 [{action: "resolve"}] +
                 [$ip_matches[] | exclude_direct(.; $direct_matches) + {action: "reject"}]
-               else [] end) +
+               else
               resolved_routes($ipv6_matches; $direct_matches; $host_domains; $dns_matches; "padm-ipv6"; "ipv6_only"; false) +
               resolved_routes($warp_matches; $direct_matches; $host_domains; $dns_matches; "padm-warp"; $warp_strategy; true) +
               (if $selective then
@@ -2545,12 +2569,12 @@ dockerGenerateSingBoxConfig() {
               (if $warp_global then
                 resolved_routes([{network: ["tcp", "udp"]}]; $direct_matches; $host_domains; $dns_matches; "padm-warp"; $warp_strategy; true)
                else [] end) +
-              (if ($host_domains | length) > 0 and ($resolve_ips | not) then [
+              (if ($host_domains | length) > 0 then [
                 {domain: $host_domains, action: "resolve", server: "padm-hosts"},
                 {domain: $host_domains, action: "route", outbound: "direct"}
               ] else [] end) +
-              (if $resolve_ips then [] else
-                [$dns_matches[] | . + {action: "resolve", server: "padm-dns"}] end) +
+              [$dns_matches[] | . + {action: "resolve", server: "padm-dns"}]
+              end) +
               [$direct_matches[] | . + {action: "route", outbound: "direct"}])}
            else {} end) +
           (if $dns_enabled then {default_domain_resolver: "padm-local"} else {} end) +

@@ -332,7 +332,8 @@ try {
     }
 
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
-    [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real')) {
+    [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real',
+        'docker-routing-block-ips-resolved-egress-real')) {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
     } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-control-log-cron-real', 'docker-routing-ipv6-real',
         'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real', 'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-cdn-entries-real', 'docker-alpn-real', 'docker-xhttp-real', 'docker-hy2-sites-real', 'docker-fail2ban-real',
@@ -377,7 +378,8 @@ try {
     & $docker cp $snapshot "${container}:/snapshot.tar"
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
     if ($Selector -in @('routing-socks5-source-real', 'docker-routing-socks5-real', 'docker-routing-dns-hosts-real',
-        'docker-routing-direct-block-real', 'docker-routing-block-ips-real', 'docker-routing-block-ips-resolved-real', 'docker-routing-block-bt-real',
+        'docker-routing-direct-block-real', 'docker-routing-block-ips-real', 'docker-routing-block-ips-resolved-real',
+        'docker-routing-block-ips-resolved-egress-real', 'docker-routing-block-bt-real',
         'docker-routing-region-real', 'docker-routing-warp-real', 'docker-http-relay-real')) {
         # 仅复制已有本机镜像的程序到隔离回归容器，不安装宿主工具或挂载 Docker Socket。
         $cores = Join-Path $runDir 'routing-cores'
@@ -387,7 +389,8 @@ try {
             @{ name = 'xray'; reference = 'padm-local/padm-xray:control-4c4b' },
             @{ name = 'sing-box'; reference = 'padm-local/padm-sing-box:tls-3b4' }
         )) {
-            if ($Selector -in @('routing-socks5-source-real', 'docker-routing-block-ips-resolved-real') -and
+            if ($Selector -in @('routing-socks5-source-real', 'docker-routing-block-ips-resolved-real',
+                'docker-routing-block-ips-resolved-egress-real') -and
                 $entry.name -eq 'xray') { continue }
             if ($Selector -eq 'docker-http-relay-real' -and $entry.name -eq 'sing-box') { continue }
             $info = & $docker image inspect $entry.reference

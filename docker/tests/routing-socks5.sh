@@ -1318,15 +1318,31 @@ for bad in (False, None, 1, "true"):
     invalid = copy.deepcopy(value)
     invalid["routing"]["block_ips"]["resolve_domains"] = bad
     cases.append(invalid)
-for source, field in (("base.json", "core"), ("ipv6-owner.json", "ipv6"),
-                       ("warp-selective.json", "warp")):
-    invalid = copy.deepcopy(value)
+invalid = copy.deepcopy(value)
+invalid["core"] = json.loads((root / "base.json").read_text())["core"]
+cases.append(invalid)
+invalid = copy.deepcopy(value)
+invalid["core"] = json.loads((root / "base.json").read_text())["core"]
+invalid["core"]["secondary_type"] = None
+invalid["core"]["protocols"] = [invalid["core"]["protocols"][0]]
+cases.append(invalid)
+for name, source in (("ipv6", "ipv6-owner.json"), ("warp4", "warp-owner.json"),
+                     ("warp6", "warp-owner6.json"), ("ipv6-global", "ipv6-global-owner.json"),
+                     ("warp-global", "warp-global-owner.json")):
+    valid = copy.deepcopy(value)
     supplied = json.loads((root / source).read_text())
-    if field == "core":
-        invalid[field] = supplied[field]
-    else:
-        invalid["routing"][field] = supplied["routing"][field]
-    cases.append(invalid)
+    for field in ("ipv6", "warp", "socks5"):
+        if field in supplied["routing"]:
+            valid["routing"][field] = supplied["routing"][field]
+    assert validator.is_valid(valid), f"valid resolved combination {name}"
+    (root / f"resolved-{name}.json").write_text(json.dumps(valid))
+valid = copy.deepcopy(value)
+valid["routing"]["socks5"].pop("domains", None)
+assert validator.is_valid(valid), "resolved global SOCKS specification rejected"
+(root / "resolved-socks-global.json").write_text(json.dumps(valid))
+invalid = json.loads((root / "resolved-warp-global.json").read_text())
+invalid["routing"]["ipv6"] = dict(mode="global", domains=[])
+cases.append(invalid)
 invalid = copy.deepcopy(value)
 invalid["routing"]["block_ips"]["ips"] = []
 cases.append(invalid)
@@ -1338,6 +1354,23 @@ PY
     for invalid in "${TEST_ROOT}"/resolved-invalid-*.json; do
         reject dockerConfigureSpecValidate "${invalid}"
     done
+    for combination in ipv6 warp4 warp6 ipv6-global warp-global socks-global; do
+        dockerConfigureSpecValidate "${TEST_ROOT}/resolved-${combination}.json"
+        dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/resolved-${combination}.json" ||
+            fail "${combination}: 当前 bundle 拒绝解析后 IP 出站组合"
+        dockerGenerateSingBoxConfig "${TEST_ROOT}/resolved-${combination}.json" \
+            "${TEST_ROOT}/resolved-${combination}.config.json"
+    done
+    jq 'del(."x-padm-routing-block-ips-resolve-egress")' \
+        "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" >"${TEST_ROOT}/old-egress-schema.json"
+    cp -- "${TEST_ROOT}/old-egress-schema.json" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+    for combination in ipv6 warp4 warp6 ipv6-global warp-global; do
+        reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/resolved-${combination}.json"
+    done
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/resolved.json" ||
+        fail '旧 mode-only bundle 不应拒绝原解析后 IP 模式'
+    cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+        "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/resolved.json" ||
         fail '当前 bundle 拒绝解析后 IP 阻断'
     jq 'del(."x-padm-routing-block-ips-resolve")' \
@@ -1349,24 +1382,58 @@ PY
     cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
         "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
     dockerGenerateSingBoxConfig "${TEST_ROOT}/resolved.json" "${TEST_ROOT}/resolved.config.json"
-    jq -e '[.route.rules[]|select(.action=="resolve")]|length==1' \
-        "${TEST_ROOT}/resolved.config.json" >/dev/null || fail '必须只生成一次统一解析'
-    jq -e '
-      .route.rules as $rules |
-      ([$rules | to_entries[] | select(.value.action=="resolve") | .key][0]) as $resolve |
-      ([$rules | to_entries[] | select(.value.outbound=="padm-socks5") | .key][0]) as $proxy |
-      $rules[$resolve]=={action:"resolve"} and $resolve < $proxy and
-      all($rules[($resolve+1):$proxy][] | select(.action=="reject");
-        .type=="logical" and .rules[1].invert==true) and
-      any($rules[($resolve+1):$proxy][]; .rules[0].ip_cidr!=null) and
-      any($rules[($resolve+1):$proxy][]; .rules[0].rule_set==["padm-geoip-cn"]) and
-      .dns.final=="padm-local" and .dns.rules[0].server=="padm-hosts" and
-      all(.dns.rules[1:][]; .server=="padm-dns")
-    ' "${TEST_ROOT}/resolved.config.json" >/dev/null || fail '解析后拒绝、Direct 排除或 DNS 来源顺序错误'
+    python3 - "${TEST_ROOT}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+# 一个结构断言覆盖选路优先级与连续门禁，真实目的绑定另由原生核心验收。
+for name, expected in [
+    ("", [("padm-socks5", None)]),
+    ("ipv6", [("padm-ipv6", "ipv6_only"), ("padm-socks5", None)]),
+    ("warp4", [("padm-ipv6", "ipv6_only"), ("padm-warp", "ipv4_only"),
+               ("padm-socks5", None)]),
+    ("warp6", [("padm-ipv6", "ipv6_only"), ("padm-warp", "ipv6_only"),
+               ("padm-socks5", None)]),
+    ("ipv6-global", [("padm-socks5", None), ("padm-ipv6", "ipv6_only")]),
+    ("warp-global", [("padm-socks5", None), ("padm-warp", "ipv4_only")]),
+    ("socks-global", [("padm-socks5", None)]),
+]:
+    suffix = "-" + name if name else ""
+    config = json.loads((root / f"resolved{suffix}.config.json").read_text())
+    rules = config["route"]["rules"]
+    resolves = [index for index, rule in enumerate(rules) if rule["action"] == "resolve"]
+    assert len(resolves) == len(expected) + 1, f"{name}: 选路路径遗漏或重复解析"
+    for index, (outbound, strategy) in zip(resolves, expected):
+        resolve, route = rules[index], rules[index + 3]
+        assert resolve.get("strategy") == strategy and "server" not in resolve, (
+            f"{name}: 解析族策略错误或绕过统一 DNS 来源")
+        assert {key: value for key, value in resolve.items()
+                if key not in ("action", "strategy")} == {
+                    key: value for key, value in route.items()
+                    if key not in ("action", "outbound")}, f"{name}: 解析和选路 matcher 不同"
+        assert route["action"] == "route" and route["outbound"] == outbound, (
+            f"{name}: 没有按 IPv6/WARP/SOCKS/global 优先级立即选路")
+        assert resolve["rules"][1]["invert"], f"{name}: 选路未排除 Direct"
+    assert rules[resolves[-1]] == {"action": "resolve"}, f"{name}: 默认路径缺少独立门禁"
+    for index in resolves:
+        rejects = rules[index + 1:index + 3]
+        assert all(rule["action"] == "reject" and rule["rules"][1]["invert"]
+                   for rule in rejects), f"{name}: 解析后阻断未连续执行或未保留 Direct"
+        assert rejects[0]["rules"][0].get("ip_cidr") and (
+            rejects[1]["rules"][0].get("rule_set") == ["padm-geoip-cn"]), (
+                f"{name}: 字面/CIDR/GeoIP 门禁遗漏")
+    assert config["dns"]["final"] == "padm-local"
+    assert config["dns"]["rules"][0]["server"] == "padm-hosts"
+    assert all(rule["server"] == "padm-dns" for rule in config["dns"]["rules"][1:])
+PY
+    jq 'del(.routing.block_ips.resolve_domains)' "${TEST_ROOT}/resolved-warp4.json" \
+        >"${TEST_ROOT}/resolved-transaction-literal.json"
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
         dockerAcquireDeploymentLock
-        dockerConfigureApply "${TEST_ROOT}/resolved-literal.json" '' '' configure
+        dockerConfigureApply "${TEST_ROOT}/resolved-transaction-literal.json" '' '' configure
     ) >"${LOG}" 2>&1 || fail '初始化解析后 IP 阻断夹具失败'
     assertClean
     jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
@@ -1395,7 +1462,7 @@ PY
     done
     MODE=ok
     runEdit 0 --block-ips-resolve --confirm PADM-DOCKER-EDIT
-    jq -en --slurpfile old "${TEST_ROOT}/resolved-literal.json" \
+    jq -en --slurpfile old "${TEST_ROOT}/resolved-transaction-literal.json" \
         --slurpfile actual "${root}/config/spec.json" '
       $actual[0]==($old[0]|.routing.block_ips.resolve_domains=true)
     ' >/dev/null || fail '解析开关改写名单或其它配置'
@@ -1403,13 +1470,14 @@ PY
     jq -e --argjson ips "${BLOCK_IPS}" '.block_ips=={ip_rules:$ips.ips,resolve_domains:true}' \
         "${LOG}" >/dev/null || fail '解析模式状态缺少 flag 或改变名单'
     runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
-    jq -en --slurpfile old "${TEST_ROOT}/resolved.json" \
+    jq -en --slurpfile old "${TEST_ROOT}/resolved-warp4.json" \
         --slurpfile actual "${root}/config/spec.json" '$actual==$old' >/dev/null ||
         fail '整组 IP 名单替换丢失解析开关或改变其它配置'
     runEdit 15 --block-ips-resolve --preview
     runEdit 0 --block-ips-literal --confirm PADM-DOCKER-EDIT
-    cmp -s "${TEST_ROOT}/resolved-literal.json" "${root}/config/spec.json" ||
-        fail '字面模式往返没有保留规格'
+    jq -en --slurpfile old "${TEST_ROOT}/resolved-transaction-literal.json" \
+        --slurpfile actual "${root}/config/spec.json" '$actual==$old' >/dev/null ||
+        fail '字面模式往返没有保留 IPv6/WARP 组合规格'
     runStatus 0
     jq -e --argjson ips "${BLOCK_IPS}" '.block_ips=={ip_rules:$ips.ips}' "${LOG}" >/dev/null ||
         fail '缺省字面状态改变'

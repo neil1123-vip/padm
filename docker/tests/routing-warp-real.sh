@@ -6,15 +6,23 @@ TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-routing-warp-real.XXXXXX")
 trap 'rm -rf -- "${TEST_ROOT}"' EXIT
 [[ "$(id -u)" == 0 && "$(uname -s)" == Linux && -f /.dockerenv ]] || exit 1
 for tool in jq python3 setpriv unshare nsenter ip wg; do command -v "${tool}" >/dev/null; done
-[[ -f /routing-cores/xray && -f /routing-cores/sing-box ]] || {
-    printf 'routing-warp-real: 缺少入口传入的固定核心程序\n' >&2
-    exit 1
-}
-chmod 0755 /routing-cores/xray /routing-cores/sing-box
+cores=(xray sing-box)
+modes=(control selective4 selective6 global4 global6 off)
+if [[ "${PADM_ROUTING_REAL_SCOPE:-}" == ips-resolved ]]; then
+    cores=(sing-box)
+    modes=(selective4 selective6 global4 global6 ipv6-selective ipv6-global)
+fi
+for core in "${cores[@]}"; do
+    [[ -f "/routing-cores/${core}" ]] || {
+        printf 'routing-warp-real: 缺少入口传入的固定核心程序 %s\n' "${core}" >&2
+        exit 1
+    }
+    chmod 0755 "/routing-cores/${core}"
+done
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state" PYTHONDONTWRITEBYTECODE=1
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
-jq -n '
+jq -n --arg scope "${PADM_ROUTING_REAL_SCOPE:-}" '
   def entry($core; $port): {
     id:1,core:$core,listener_id:("entry-"+$core),server:"proxy.example.com",public_port:$port,
     address_families:["ipv4"],name:$core,uuid:"11111111-1111-4111-8111-111111111111",
@@ -31,9 +39,16 @@ jq -n '
      direct:{domains:["full:direct.warp.invalid"]},block:{domains:["full:blocked.warp.invalid"]},
      block_ips:{ips:["198.51.100.199"]},block_bt:true,
      socks5:{server:"192.0.2.2",port:1080,username:"fixture-user",password:"fixture-password",
-       domains:["full:matched.warp.invalid","full:proxy.test"]}}}
+       domains:["full:matched.warp.invalid","full:proxy.test"]}}} |
+  if $scope == "ips-resolved" then
+    .core = {type:"sing-box",secondary_type:null,protocols:[entry("sing-box";35442)]} |
+    .routing.block_ips = {ips:["198.51.100.99","2001:db8:99::99"],resolve_domains:true} |
+    .routing.hosts["hosts-block.warp.invalid"] = "198.51.100.99" |
+    .routing.dns.domains += ["full:proxy.test","full:split.proxy.test","full:blocked-ip.proxy.test"] |
+    .routing.socks5.domains += ["full:split.proxy.test","full:blocked-ip.proxy.test"]
+  else . end
 ' >"${TEST_ROOT}/base.json"
-for mode in control selective4 selective6 global4 global6 off; do
+for mode in "${modes[@]}"; do
     jq --arg mode "${mode}" '
       if ($mode | startswith("selective") or startswith("global")) then
         .routing.warp = {
@@ -44,10 +59,13 @@ for mode in control selective4 selective6 global4 global6 off; do
           ipv6_address:"2606:4700:110:8a10::2",reserved:[1,2,255],
           domains:(if $mode | startswith("global") then [] else ["domain:warp.invalid"] end)}
       else . end |
-      .routing.ipv6 = {mode:"selective",domains:["full:ipv6-first.warp.invalid"]}
+      .routing.ipv6 = (
+        if $mode == "ipv6-global" then {mode:"global",domains:[]}
+        elif $mode == "ipv6-selective" then {mode:"selective",domains:["domain:warp.invalid"]}
+        else {mode:"selective",domains:["full:ipv6-first.warp.invalid"]} end)
     ' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/${mode}.spec.json"
     dockerConfigureSpecValidate "${TEST_ROOT}/${mode}.spec.json"
-    for core in xray sing-box; do
+    for core in "${cores[@]}"; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${TEST_ROOT}/${mode}.spec.json" "${TEST_ROOT}/${core}.${mode}.base"
         else

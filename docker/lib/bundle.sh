@@ -480,7 +480,9 @@ dockerBundleSupportsSpec() {
             $schema[0]["x-padm-routing-block-ips"] == true
           else true end) and
           (if $spec[0].routing.block_ips.resolve_domains == true then
-            $schema[0]["x-padm-routing-block-ips-resolve"] == true
+            $schema[0]["x-padm-routing-block-ips-resolve"] == true and
+            (if $spec[0].routing.ipv6 != null or $spec[0].routing.warp != null then
+              $schema[0]["x-padm-routing-block-ips-resolve-egress"] == true else true end)
           else true end) and
           (if ($spec[0].routing // {}) | has("block_bt") then
             $schema[0]["x-padm-routing-block-bt"] == true

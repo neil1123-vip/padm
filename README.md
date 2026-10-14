@@ -509,16 +509,20 @@ Xray 复用受管/镜像 GeoIP；sing-box 从固定官方地址经直连下载 `
 状态追加 `block_ips.ip_rules`，完整区域策略向导与宿主目的过滤仍待迁移。
 
 菜单 `17 → 45/46` 或 `--block-ips-resolve/--block-ips-literal` 可切换已有手工
-IP 名单的解析模式。新模式要求单 sing-box、无副核心，不能组合 WARP 或
-`.routing.ipv6` 出站策略；目的地址仍可为 IPv4/IPv6。v3
+IP 名单的解析模式。新模式要求单 sing-box、无副核心，支持与 WARP 或
+`.routing.ipv6` 出站策略组合；目的地址仍可为 IPv4/IPv6。v3
 `.routing.block_ips.resolve_domains:true` 需控制包声明
 `x-padm-routing-block-ips-resolve`；旧包拒绝，恢复字面模式删除该字段。
+组合 WARP/IPv6 还需 `x-padm-routing-block-ips-resolve-egress`；仅支持基础解析模式的旧包拒绝组合。
 解析按精确 hosts、指定 DNS、local 顺序选择来源，选路前重新执行 IP 阻断，
 代理使用已解析字面 IP，解析失败拒绝且不交给远端回退。Direct 例外仍优先。
+按 IPv6 selective、WARP selective、显式 SOCKS、global 出站顺序选路；
+各路径使用对应地址族解析后立即阻断并选路，保留已检查的目的地址。
 同值或未启用名单返回 `15`；名单、其它配置与流量累计保持，沿用预览和失败恢复。
 整组替换、增删和单条替换名单保留已启用的解析开关，删空或关闭名单则一并移除。
 只在新模式的 `routing-status.block_ips` 追加 `resolve_domains:true`。
-Xray、WARP/IPv6 组合、完整区域策略与宿主过滤继续待交付。
+Xray、完整区域策略与宿主过滤继续待交付。WARP 组合以本地加密 Peer 验证，
+Cloudflare 账号与公网实际出口仍待验收。
 
 ```bash
 padm-docker edit --block-ips-resolve --preview

@@ -64,7 +64,8 @@ assert subprocess.run([str(probe)], check=False).returncode == 0
 driver = sys.argv[1] in ("docker-ssh-driver", "docker-contracts", "docker-contracts-fast",
                         "docker-contracts-fast-rest")
 guard = sys.argv[1] in ("docker-fail2ban-ownership", "docker-fail2ban-focused")
-expected = mask if sys.argv[1] in ("docker-control-two-node-real", "docker-routing-warp-real") or nested \
+expected = mask if sys.argv[1] in ("docker-control-two-node-real", "docker-routing-warp-real",
+                                 "docker-routing-block-ips-resolved-egress-real") or nested \
     else (1 << 21) if driver or guard else 0
 assert int(status["CapEff"].strip(), 16) & mask == expected
 privileged_mask = (1 << 19) | (1 << 25)
@@ -117,6 +118,8 @@ foreach ($case in @(
     @{ selector = 'docker-routing-ipv6-real-other'; expected = 0 },
     @{ selector = 'docker-routing-warp-real'; expected = 0 },
     @{ selector = 'docker-routing-warp-real-other'; expected = 0 },
+    @{ selector = 'docker-routing-block-ips-resolved-egress-real'; expected = 0 },
+    @{ selector = 'docker-routing-block-ips-resolved-egress-real-other'; expected = 0 },
     @{ selector = 'docker-control-fail2ban-real'; expected = 0 },
     @{ selector = 'docker-control-fail2ban-real-other'; expected = 0 }
 )) {

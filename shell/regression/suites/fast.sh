@@ -584,6 +584,10 @@ runDockerRoutingBlockIpsResolvedRealRegression() {
     PADM_ROUTING_REAL_SCOPE=ips-resolved bash "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.sh"
 }
 
+runDockerRoutingBlockIpsResolvedEgressRealRegression() {
+    PADM_ROUTING_REAL_SCOPE=ips-resolved bash "${PROJECT_ROOT}/docker/tests/routing-warp-real.sh"
+}
+
 runDockerRoutingBlockBtRealRegression() {
     PADM_ROUTING_REAL_SCOPE=bt bash "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.sh"
 }
@@ -903,6 +907,7 @@ registerRegressionFunctionLeaf docker-routing-block-ips runDockerRoutingSocks5Re
 registerRegressionFunctionLeaf docker-routing-block-ips-real runDockerRoutingBlockIpsRealRegression
 registerRegressionFunctionLeaf docker-routing-block-ips-resolved runDockerRoutingBlockIpsResolvedRegression
 registerRegressionFunctionLeaf docker-routing-block-ips-resolved-real runDockerRoutingBlockIpsResolvedRealRegression
+registerRegressionFunctionLeaf docker-routing-block-ips-resolved-egress-real runDockerRoutingBlockIpsResolvedEgressRealRegression
 registerRegressionFunctionLeaf docker-routing-block-bt runDockerRoutingBlockBtRegression
 registerRegressionFunctionLeaf docker-routing-block-bt-real runDockerRoutingBlockBtRealRegression
 registerRegressionFunctionLeaf docker-routing-region runDockerRoutingRegionRegression

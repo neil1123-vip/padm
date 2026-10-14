@@ -3115,6 +3115,25 @@ split DNS 正例的 SOCKS CONNECT 使用 `127.0.0.2` 字面地址，诱饵禁目
 Bash、ShellCheck error、Python/JSON 和 PowerShell AST 静态检查通过。
 完整区域/冲突检测、SOCKS UDP 会话撤销及原生宿主/arm64/公网仍未完成，总目标 active。
 
+#### 5B.4s 解析后 IP 阻断与 IPv6/WARP 组合
+
+单 sing-box、无副核心的解析模式支持已有 selective/global IPv6 和双族 WARP。
+Direct 优先，沿用 IPv6 selective、WARP selective、显式 SOCKS、global 出站顺序；
+各路径按出站地址族从 hosts/指定 DNS/local 解析，重查 IP 后立即选路，
+代理使用经检查的字面地址，DNS/Peer 失败不回退。字面模式保持旧生成路径。
+组合另需 `x-padm-routing-block-ips-resolve-egress`，仅支持基础解析的旧包拒绝组合。
+复用原菜单及健康/INT/TERM 事务，不扩权限、监听或依赖，Xray 继续 deferred。
+
+轻合同与菜单通过（8697 ms），证据 `416a8c2df9644e1ca5c16e1e921901a8`；
+一次本地 Peer 覆盖 6 种组合、DNS/hosts/local、Direct、双族 TCP/UDP、
+SOCKS split DNS 字面绑定与失败拒绝，通过（8049 ms），证据 `dbdf3475292e42e19b62aea9158b5faa`。
+首轮夹具混入前次 TCP ACK，改为负例前等待事件稳定；保留实际拒绝日志、
+目的零接入和隧道零有效载荷断言。集中合同 56/56 通过（315608 ms），
+证据 `2a723926a22e4858b55adad738964958`，15 个批次文件与完整快照一致；
+Bash/ShellCheck/Python/JSON/PowerShell AST 检查通过。清理源码归档、清单和核心副本，
+保留日志/result。Cloudflare 账号/公网及原生宿主/arm64 仍未验，
+完整区域、SOCKS UDP 会话撤销等剩余项继续 deferred，整体目标 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

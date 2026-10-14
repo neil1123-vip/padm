@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含跳跃、TUN 和解析后 IP 阻断的完整谓词，仅忽略拼接空白。
+# 摘要锁定含跳跃、TUN 和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "ea6d9e2c666810d48859bc97394d00515890c2834cd8bf1ec1d83bf4c85bacc5"
+    "9224a4d57cb2bf0f06b20e1927cdb614b08edfce51d684f3047e462289b4c2dd"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -144,6 +144,30 @@ for field, value in (("false", False), ("null", None), ("number", 1)):
 invalid = copy.deepcopy(cases["reality-v3"])
 invalid["routing"] = copy.deepcopy(spec["routing"])
 cases["invalid-block-ips-resolved-xray"] = invalid
+ipv6 = dict(mode="selective", domains=["full:ipv6.example.com"])
+warp = dict(mode="selective", family="ipv4",
+            private_key="AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+            peer_public_key="ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0A=",
+            ipv6_address="2606:4700:110:8a10::2", reserved=[1, 2, 255],
+            domains=["full:warp.example.com"])
+for name, family in (("ipv6", None), ("warp4", "ipv4"), ("warp6", "ipv6")):
+    combined = copy.deepcopy(cases["valid-block-ips-resolved"])
+    combined["routing"]["ipv6"] = copy.deepcopy(ipv6)
+    if family:
+        combined["routing"]["warp"] = copy.deepcopy(warp)
+        combined["routing"]["warp"]["family"] = family
+    cases[f"valid-block-ips-resolved-{name}"] = combined
+for field in ("ipv6", "warp"):
+    combined = copy.deepcopy(cases["valid-block-ips-resolved"])
+    combined["routing"][field] = copy.deepcopy(ipv6 if field == "ipv6" else warp)
+    combined["routing"][field].update(mode="global", domains=[])
+    cases[f"valid-block-ips-resolved-{field}-global"] = combined
+invalid = copy.deepcopy(cases["valid-block-ips-resolved-warp-global"])
+invalid["routing"]["ipv6"] = dict(mode="global", domains=[])
+cases["invalid-block-ips-resolved-dual-global"] = invalid
+invalid = copy.deepcopy(cases["valid-block-ips-resolved-warp4"])
+invalid["core"]["secondary_type"] = "xray"
+cases["invalid-block-ips-resolved-secondary"] = invalid
 for name, ids in (("xray", (1, 21, 27, 28)), ("sing-box", (3, 4, 5, 30, 31))):
     spec = copy.deepcopy(cases[f"valid-protocol-{ids[1]}"])
     spec["core"]["protocols"] = []
@@ -334,8 +358,8 @@ for file in "${TEST_ROOT}"/*.json; do
         cat "${TEST_ROOT}/validation.log" >&2
         fail "有效协议规格被拒绝: ${file##*/}"
     fi
-    [[ "${file##*/}" != invalid-tproxy-* || "${actual}" != 0 ]] ||
-        fail "无效 TProxy 规格被接受: ${file##*/}"
+    [[ ( "${file##*/}" != invalid-tproxy-* && "${file##*/}" != invalid-block-ips-resolved-* ) ||
+        "${actual}" != 0 ]] || fail "无效透明/解析后 IP 规格被接受: ${file##*/}"
     count=$((count + 1))
 done
 for file in mixed all-six-optionals ssh; do

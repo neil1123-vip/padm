@@ -24,6 +24,7 @@
   "x-padm-routing-direct-block": true,
   "x-padm-routing-block-ips": true,
   "x-padm-routing-block-ips-resolve": true,
+  "x-padm-routing-block-ips-resolve-egress": true,
   "x-padm-routing-block-bt": true,
   "x-padm-routing-region": true,
   "x-padm-routing-ipv6": true,
@@ -783,8 +784,7 @@
         "core": {"properties": {
           "type": {"const": "sing-box"},
           "secondary_type": {"type": "null"}
-        }},
-        "routing": {"not": {"anyOf": [{"required": ["ipv6"]}, {"required": ["warp"]}]}}
+        }}
       }}
     },
     {

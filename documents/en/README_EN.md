@@ -1623,17 +1623,24 @@ the proxy's actual connection address or guarantee rejection on DNS failure.
 
 Menu `17 → 45/46` and `--block-ips-resolve/--block-ips-literal` switch an existing
 manual IP list between resolved and default literal-only matching. Resolved mode requires
-one sing-box core, no secondary core, and no WARP or `.routing.ipv6` egress policy;
-destination IPs may still be IPv4 or IPv6. Optional v3
+one sing-box core and no secondary core; WARP and `.routing.ipv6` egress policies are supported.
+Destination IPs may still be IPv4 or IPv6. Optional v3
 `.routing.block_ips.resolve_domains:true` requires the bundle capability
 `x-padm-routing-block-ips-resolve`; older bundles reject it. Returning to literal mode
-removes the field. Resolution selects exact hosts, configured DNS, then local; IP rejection
+removes the field.
+WARP/IPv6 combinations also require `x-padm-routing-block-ips-resolve-egress`;
+older bundles supporting only basic resolved mode reject combinations. Resolution selects
+exact hosts, configured DNS, then local; IP rejection
 runs again before routing, and proxies receive the checked literal address. DNS failure
 is rejected without remote fallback. Direct exceptions retain precedence.
+Routes retain selective IPv6, selective WARP, explicit SOCKS, then global egress precedence.
+Each selected path resolves with its egress address family, checks the IP, then routes
+immediately using that checked address.
 Unchanged modes and missing lists return `15`. The list, other configuration and traffic
 totals are preserved through the existing preview and recovery transaction. Status adds
-`block_ips.resolve_domains:true` only in resolved mode. Xray, WARP/IPv6 combinations,
-complete regional policies and host firewall filtering remain deferred.
+`block_ips.resolve_domains:true` only in resolved mode. Xray, complete regional policies
+and host firewall filtering remain deferred. WARP combinations use a local encrypted Peer
+test; Cloudflare account provisioning and public egress still need acceptance.
 Replacing or editing the list preserves resolved mode; removing the final item or
 disabling the list also removes the mode.
 
