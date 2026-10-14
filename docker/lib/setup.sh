@@ -942,7 +942,7 @@ dockerProtocolCommand() (
         jq --arg listener "${listener}" '
           [.core.protocols[] | select(.id == 2 and .core == "xray") |
             select($listener == "" or .listener_id == $listener) |
-            {listener_id,protocol:.id,mode:.xhttp.mode,
+            {listener_id,protocol:.id,path:.xhttp.path,host:.xhttp.host,mode:.xhttp.mode,
              xmux:(.xhttp.xmux // {maxConcurrency:"16-32",
                hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"}),
              explicit:(.xhttp | has("xmux")),
@@ -1515,6 +1515,34 @@ dockerEditFields() {
     done
 }
 
+dockerEditXhttpPaddingParse() {
+    jq -cen --arg value "$1" '
+      $value |
+      if test("^[1-9][0-9]{0,3}\\z") then
+        tonumber | if . <= 4096 then . else error("范围越界") end
+      elif test("^[1-9][0-9]{0,3}-[1-9][0-9]{0,3}\\z") then
+        . as $raw | split("-") | map(tonumber) |
+        if .[0] <= .[1] and .[1] <= 4096 then $raw else error("范围越界或反转") end
+      else error("不是规范正整数或范围") end
+    ' 2>/dev/null
+}
+
+dockerEditXhttpLimitsParse() {
+    jq -cen --arg post "$1" --arg interval "$2" --arg buffered "$3" --arg seconds "$4" '
+      def integer:
+        if test("^(0|[1-9][0-9]{0,9})\\z") then
+          tonumber | if . <= 2147483647 then . else error("范围越界") end
+        else error("不是规范非负整数") end;
+      def seconds:
+        if contains("-") then
+          . as $raw | split("-") | map(integer) |
+          if length == 2 and .[0] <= .[1] then $raw else error("范围反转") end
+        else integer end;
+      {scMaxEachPostBytes:($post | integer),scMinPostsIntervalMs:($interval | integer),
+       scMaxBufferedPosts:($buffered | integer),scStreamUpServerSecs:($seconds | seconds)}
+    ' 2>/dev/null
+}
+
 dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
     local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
@@ -1929,22 +1957,49 @@ dockerEditCommand() {
                 ;;
             esac
             ;;
+        --xhttp-mode)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            case "$3" in auto|packet-up|stream-up) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            xhttpValues=$(jq -cn --arg mode "$3" '{mode:$mode}') || return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=mode xhttpListener=$2
+            shift 3
+            ;;
+        --xhttp-path-host)
+            [[ "$#" -ge 4 && -n "$2" && "$2" != --* && -n "$3" && -n "$4" &&
+                -z "${xhttpAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            xhttpValues=$(jq -cn --arg path "$3" --arg host "$4" '{path:$path,host:$host}') ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=path-host xhttpListener=$2
+            shift 4
+            ;;
+        --xhttp-advanced)
+            [[ "$#" -ge 9 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpPadding=$(dockerEditXhttpPaddingParse "$3") || return "${PADM_DOCKER_RC_USAGE}"
+            xhttpLimits=$(dockerEditXhttpLimitsParse "$4" "$5" "$6" "$7") ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            case "$8" in true|false) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            case "$9" in true|false) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            xhttpValues=$(jq -cn --argjson padding "${xhttpPadding}" --argjson limits "${xhttpLimits}" \
+                --argjson noGrpc "$8" --argjson noSse "$9" \
+                '$limits + {xPaddingBytes:$padding,noGRPCHeader:$noGrpc,noSSEHeader:$noSse}') ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=advanced xhttpListener=$2
+            shift 9
+            ;;
+        --xhttp-defaults)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpValues='{"mode":"auto","xmux":{"maxConcurrency":"16-32","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"},"xPaddingBytes":"100-1000","noGRPCHeader":false,"noSSEHeader":false,"scMaxEachPostBytes":1000000,"scMinPostsIntervalMs":30,"scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80"}'
+            xhttpAction=defaults xhttpListener=$2
+            shift 2
+            ;;
         --xhttp-limits)
             [[ "$#" -ge 6 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            xhttpLimits=$(jq -cen --arg post "$3" --arg interval "$4" --arg buffered "$5" --arg seconds "$6" '
-              def integer:
-                if test("^(0|[1-9][0-9]{0,9})\\z") then
-                  tonumber | if . <= 2147483647 then . else error("范围越界") end
-                else error("不是规范非负整数") end;
-              def seconds:
-                if contains("-") then
-                  . as $raw | split("-") | map(integer) |
-                  if length == 2 and .[0] <= .[1] then $raw else error("范围反转") end
-                else integer end;
-              {scMaxEachPostBytes:($post | integer),scMinPostsIntervalMs:($interval | integer),
-               scMaxBufferedPosts:($buffered | integer),scStreamUpServerSecs:($seconds | seconds)}
-            ' 2>/dev/null) || return "${PADM_DOCKER_RC_USAGE}"
+            xhttpLimits=$(dockerEditXhttpLimitsParse "$3" "$4" "$5" "$6") ||
+                return "${PADM_DOCKER_RC_USAGE}"
             xhttpAction=limits xhttpListener=$2
             shift 6
             ;;
@@ -1988,15 +2043,7 @@ dockerEditCommand() {
         --xhttp-padding)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            xhttpPadding=$(jq -cen --arg value "$3" '
-              $value |
-              if test("^[1-9][0-9]{0,3}\\z") then
-                tonumber | if . <= 4096 then . else error("范围越界") end
-              elif test("^[1-9][0-9]{0,3}-[1-9][0-9]{0,3}\\z") then
-                . as $raw | split("-") | map(tonumber) |
-                if .[0] <= .[1] and .[1] <= 4096 then $raw else error("范围越界或反转") end
-              else error("不是规范正整数或范围") end
-            ' 2>/dev/null) || {
+            xhttpPadding=$(dockerEditXhttpPaddingParse "$3") || {
                 dockerError 'XHTTP Padding 仅支持 1–4096 的整数或正序范围；Xray 的 0/0-0 表示缺省，恢复缺省请使用 --xhttp-padding-clear'
                 return "${PADM_DOCKER_RC_USAGE}"
             }
@@ -2610,14 +2657,16 @@ dockerEditCommand() {
     fi
     if [[ -n "${xhttpAction}" ]]; then
         jq --arg listener "${xhttpListener}" --arg action "${xhttpAction}" \
-            --arg preset "${xhttpPreset}" --argjson xmux "${xhttpValues}" --argjson padding "${xhttpPadding}" \
+            --arg preset "${xhttpPreset}" --argjson values "${xhttpValues}" --argjson padding "${xhttpPadding}" \
             --argjson noGrpc "${xhttpNoGrpc}" --argjson noSse "${xhttpNoSse}" --argjson limits "${xhttpLimits}" '
           if .schema_version != 3 or
             ([.core.protocols[] | select(.listener_id == $listener and .id == 2 and .core == "xray")] | length) != 1
           then error("入口不支持 XHTTP 管理")
           else .core.protocols |= map(if .listener_id == $listener then
             if $action == "clear" then del(.xhttp.xmux)
-            elif $action == "xmux" then .xhttp.xmux = $xmux
+            elif $action == "xmux" then .xhttp.xmux = $values
+            elif $action == "mode" or $action == "path-host" or $action == "advanced" or $action == "defaults"
+              then .xhttp += $values
             elif $action == "padding" then .xhttp.xPaddingBytes = $padding
             elif $action == "padding-clear" then del(.xhttp.xPaddingBytes)
             elif $action == "headers" then .xhttp.noGRPCHeader = $noGrpc | .xhttp.noSSEHeader = $noSse
@@ -3343,7 +3392,17 @@ dockerEditCompatibilityValidate() {
         # 每个专项只豁免自己的字段，其余高级参数冻结。
         def without_xhttp:
           .core.protocols |= map(if .listener_id == $xhttp_listener then
-            if $xhttp_action == "preset" then del(.xhttp.mode, .xhttp.xmux)
+            if $xhttp_action == "mode" then del(.xhttp.mode)
+            elif $xhttp_action == "path-host" then del(.xhttp.path,.xhttp.host)
+            elif $xhttp_action == "advanced" then
+              del(.xhttp.xPaddingBytes,.xhttp.noGRPCHeader,.xhttp.noSSEHeader,
+                .xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,
+                .xhttp.scMaxBufferedPosts,.xhttp.scStreamUpServerSecs)
+            elif $xhttp_action == "defaults" then
+              del(.xhttp.mode,.xhttp.xmux,.xhttp.xPaddingBytes,.xhttp.noGRPCHeader,.xhttp.noSSEHeader,
+                .xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,
+                .xhttp.scMaxBufferedPosts,.xhttp.scStreamUpServerSecs)
+            elif $xhttp_action == "preset" then del(.xhttp.mode, .xhttp.xmux)
             elif $xhttp_action == "padding" or $xhttp_action == "padding-clear" then del(.xhttp.xPaddingBytes)
             elif $xhttp_action == "headers" or $xhttp_action == "headers-clear" then del(.xhttp.noGRPCHeader,.xhttp.noSSEHeader)
             elif $xhttp_action == "limits" or $xhttp_action == "limits-clear" then

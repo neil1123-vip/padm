@@ -251,10 +251,9 @@ listeners, other parameters, quotas, and totals remain fixed. Preview,
 confirmation, publication, and recovery reuse the existing transaction.
 Full protocol management, TUIC hopping, and host integration combinations remain deferred.
 
-Docker `Protocols & entry → XHTTP management` manages presets, XMUX, Padding,
-and two header switches for existing v3 Xray protocol `2` listeners. The four
-native packet/stream limits in 3D.7 were accepted in the local Linux `amd64`
-container regression:
+Docker `Protocols & entry → XHTTP management` manages mode, path/Host, presets,
+XMUX, Padding, two header switches, and four native packet/stream limits for
+existing v3 Xray protocol `2` listeners:
 
 ```bash
 padm-docker protocol xhttp-status entry-xhttp
@@ -263,7 +262,19 @@ padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-ED
 padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
 padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-mode entry-xhttp stream-up --preview
+padm-docker edit --xhttp-path-host entry-xhttp /padm/new-path www.example.com --preview
+padm-docker edit --xhttp-advanced entry-xhttp 128-256 2000000 20 50 30-40 true false --preview
+padm-docker edit --xhttp-defaults entry-xhttp --confirm PADM-DOCKER-EDIT
 ```
+
+Menu item `14` sets `auto/packet-up/stream-up`; `15` sets a safe path and nonempty
+hostname together. Item `16` sets seven advanced values in this order: Padding,
+POST bytes, interval in milliseconds, buffered POST count, stream seconds,
+noGRPCHeader, noSSEHeader. It preserves mode and XMUX. Item `17` restores `auto`,
+XMUX `16-32/600-900/1800-3000`, Padding `100-1000`, both headers `false`, and limits
+`1000000/30/30/20-80`, preserving path/Host. Each focused edit changes only its
+selected fields and reuses preview, confirmation, publication, and recovery.
 
 The values are `noGRPCHeader` followed by `noSSEHeader`. `true` removes the
 client stream POST gRPC Content-Type or server download SSE Content-Type,

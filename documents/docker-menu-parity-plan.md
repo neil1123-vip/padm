@@ -1428,6 +1428,29 @@ Hy2 首次新增静默读取断言受 `IFS=` 拼接影响，改逐参数检查 `
 成功输入由入口清理，失败输入已清，无新增依赖或本机临时脚本。
 完整协议管理及剩余宿主/arm64/公网验收仍 deferred，整体计划 active。
 
+#### 3D.10 XHTTP 常规与高级管理合批
+
+菜单 `14`–`17` 和 CLI 一批接入已有 v3 Xray 协议 `2`：
+`--xhttp-mode` 仅改模式，`--xhttp-path-host` 成对改安全路径和非空域名 Host，
+`--xhttp-advanced` 一次设置 Padding、POST 字节数、间隔毫秒、缓冲 POST 数、
+流式秒数、noGRPCHeader、noSSEHeader，保留 mode/XMUX。
+`--xhttp-defaults` 恢复 `auto`、XMUX `16-32/600-900/1800-3000`、
+Padding `100-1000`、首部 `false/false`、limits `1000000/30/30/20-80`，
+保留 path/host；区别于只改 mode/XMUX 的日常预设。
+状态增加 path/host，七项高级参数复用既有数值/范围/布尔校验；
+每个专项精确豁免相应字段，其余入口、认证、端口、TLS、额度及累计冻结。
+复用既有能力标记、生成器、URI、发布与失败恢复，不扩规格或引入依赖。
+2026-10-15 Linux amd64、工具镜像复用，XHTTP 定向 `80355 ms`、菜单 `57575 ms`
+通过，Jobs 2；集中 `docker-contracts -Jobs 6` 一次通过，57/57 顶层检查，
+入口 `380824 ms`、内部 `378845 ms`、排队 `324 ms`、cache=false。
+证据分别在 `.tmp-regression-docker-1d65c8defa05486faa7a1af614663a9f/`、
+`.tmp-regression-docker-25bd30ff63b74b7e9300166050ff5be9/`、
+`.tmp-regression-docker-bc9bb6dbe82246868c300bca5b5fe841/`。
+三份结果的源码 SHA-256 相同，之后仅补验收文字；成功输入归档已清，
+日志/result 保留，无新增宿主依赖或临时脚本，不重复未改变的真实客户端矩阵。
+downloadSettings、H3/CDN、上下行分离、完整管理及宿主/arm64/公网继续 deferred；
+整体计划保持 active。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

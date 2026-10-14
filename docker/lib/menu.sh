@@ -195,7 +195,7 @@ dockerMenuPortHopping() {
 }
 
 dockerMenuXhttp() {
-    local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered
+    local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered mode path host
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker XHTTP 管理（已有 Xray Reality 入口）\n'
@@ -203,7 +203,8 @@ dockerMenuXhttp() {
             '5. 单并发预设' '6. 自定义 XMUX' '7. 恢复缺省 XMUX' \
             '8. 设置 Padding' '9. 恢复缺省 Padding' \
             '10. 设置首部开关' '11. 恢复缺省首部' \
-            '12. 设置 packet/stream 参数' '13. 恢复缺省 packet/stream' '0. 返回'
+            '12. 设置 packet/stream 参数' '13. 恢复缺省 packet/stream' \
+            '14. 设置模式' '15. 设置路径和 Host' '16. 统一高级参数' '17. 恢复推荐默认' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -212,7 +213,7 @@ dockerMenuXhttp() {
         case "${choice}" in
         0) return 0 ;;
         1) dockerMenuRun protocol xhttp-status || true ;;
-        2|3|4|5|6|7|8|9|10|11|12|13)
+        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17)
             dockerMenuRun protocol xhttp-status || continue
             dockerSetupRead listener 'XHTTP 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" && "${listener}" != --* ]] || continue
@@ -247,6 +248,30 @@ dockerMenuXhttp() {
                 dockerMenuRun edit --xhttp-limits "${listener}" "${post}" "${interval}" "${buffered}" "${seconds}" || true
             elif [[ "${choice}" == 13 ]]; then
                 dockerMenuRun edit --xhttp-limits-clear "${listener}" || true
+            elif [[ "${choice}" == 14 ]]; then
+                dockerSetupRead mode 'XHTTP 模式（auto/packet-up/stream-up，0 返回）[auto]: ' auto || continue
+                dockerMenuRun edit --xhttp-mode "${listener}" "${mode}" || true
+            elif [[ "${choice}" == 15 ]]; then
+                dockerSetupRead path 'XHTTP 路径（以 / 开头，0 返回）: ' &&
+                    [[ -n "${path}" ]] &&
+                    dockerSetupRead host 'XHTTP Host（非空域名，0 返回）: ' &&
+                    [[ -n "${host}" ]] || continue
+                dockerMenuRun edit --xhttp-path-host "${listener}" "${path}" "${host}" || true
+            elif [[ "${choice}" == 16 ]]; then
+                dockerSetupRead padding 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]: ' 100-1000 &&
+                    dockerSetupRead post 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]: ' 1000000 &&
+                    dockerSetupRead interval 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[30]: ' 30 &&
+                    dockerSetupRead buffered 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]: ' 30 &&
+                    dockerSetupRead seconds 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]: ' 20-80 &&
+                    dockerSetupRead noGrpc 'noGRPCHeader（true/false，0 返回）[false]: ' false &&
+                    dockerSetupRead noSse 'noSSEHeader（true/false，0 返回）[false]: ' false || continue
+                [[ "${post}" != default ]] || post=0
+                [[ "${interval}" != default ]] || interval=0
+                [[ "${buffered}" != default ]] || buffered=0
+                dockerMenuRun edit --xhttp-advanced "${listener}" "${padding}" "${post}" "${interval}" \
+                    "${buffered}" "${seconds}" "${noGrpc}" "${noSse}" || true
+            elif [[ "${choice}" == 17 ]]; then
+                dockerMenuRun edit --xhttp-defaults "${listener}" || true
             else
                 case "${choice}" in
                 2) preset=daily ;;

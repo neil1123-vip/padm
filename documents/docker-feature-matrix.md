@@ -175,6 +175,15 @@ XMUX 三键自定义/清除、CLI/菜单状态和统一链接发布。显式 XMU
 菜单 `12`/`13` 与 `--xhttp-limits`/`--xhttp-limits-clear` 已接入；
 空输入采用默认值，`default` 对前三项保存零。清除删除字段，缺省不补 spec/URI；
 其它编辑保留，复制/派生继承，状态的 `limits_explicit` 区分显式字段。
+3D.10 合批接入菜单 `14`–`17` 与 CLI `--xhttp-mode`、`--xhttp-path-host`、
+`--xhttp-advanced`、`--xhttp-defaults`，状态同时显示 path/host。
+模式限 `auto/packet-up/stream-up`；路径和非空域名 Host 成对修改，沿用规格校验。
+高级参数一次设置 Padding、四项 limits、两项首部，保留 mode/XMUX；
+推荐恢复显式写入 `auto`、XMUX `16-32/600-900/1800-3000`、
+Padding `100-1000`、首部 `false/false`、limits `1000000/30/30/20-80`，保留 path/host。
+仅相应字段豁免冻结，复用既有能力门禁及发布/失败恢复，不扩 schema 或支持状态。
+3D.10 Linux amd64 XHTTP/菜单定向通过，集中完整合同 57/57 一次通过，`380824 ms`；
+定向和完整源码摘要相同，临时输入已清，真实客户端矩阵复用既有证据。
 其它 sc*、自定义 headers、
 downloadSettings、H3/CDN 与上下行分离未开放，
 完整管理继续 `deferred`，
@@ -298,7 +307,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | ID | 能力 | 原生入口 | 配置运行状态 | 管理状态 | 核心 | Compose profile | 网络/监听 | 原因 |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | 支持单核心或主副核心配置、字段编辑及跨核心同协议多入口；完整管理未迁移。 |
-| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 四预设、XMUX 三键自定义/清除，3D.5 Padding `1..4096`，3D.6 两项首部开关已交付。3D.7 已验收四项原生 packet/stream limits 的状态、发布事务、保留/清除和复制/派生继承；前三项为 `0..2147483647` 整数，末项为整数或正序范围；`0`/`0-0` 保留显式值但状态折算核心默认，要求 `x-padm-xhttp-limits`。其它 sc*、自定义 headers、downloadSettings、H3/CDN、上下行分离与完整管理仍未开放。 |
+| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 四预设、XMUX 三键自定义/清除，3D.5 Padding `1..4096`，3D.6 两项首部开关已交付。3D.7 已验收四项原生 packet/stream limits 的状态、发布事务、保留/清除和复制/派生继承；前三项为 `0..2147483647` 整数，末项为整数或正序范围；`0`/`0-0` 保留显式值但状态折算核心默认，要求 `x-padm-xhttp-limits`。3D.10 提供模式、成对路径/Host、七项高级参数和推荐值恢复专项，推荐恢复保留路径/Host，复用既有门禁和事务。其它 sc*、自定义 headers、downloadSettings、H3/CDN、上下行分离与完整管理仍未开放。 |
 | 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、导入、BBR/Brutal、Salamander/Gecko、HTTPS 伪装编辑、复制及分享链接；3D.8–3D.9 菜单 12 提供状态、带宽、混淆与伪装单入口专项，BBR 保留速率，密码仅私密文件或静默输入。Gecko 要求新能力标记，不开放包长参数。已有入口可两步发布受管静态网页并启用 local，固定只读目录且无混淆，操作先验证已发布网页。复用受管 TLS 和 UUID 流量账号；端口跳跃限单 sing-box、双族 Hy2 的内部监督手动管理，完整跳跃与协议管理仍 deferred。 |
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用字段编辑、同核复制/删除及分享链接；复用受管 TLS 与 UUID 流量账号，域名与凭据冻结，宿主集成组合及完整管理未开放。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用编辑、同核复制/删除及原生 URI；入口与 TLS 同域，UUID 用户名/密码共享统计额度；QUIC、独立 IP/SNI 覆盖及完整管理未开放。 |

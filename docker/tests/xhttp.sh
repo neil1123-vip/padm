@@ -239,6 +239,7 @@ dockerTrafficPrepareCandidate "${root}"
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit* ]]; then
 cp "${root}/config/spec.json" "${TEST_ROOT}/installed-before.json"
 cp "${root}/config/xray/users.base" "${TEST_ROOT}/xray-before.json"
+cp "${root}/config/xray/config.json" "${TEST_ROOT}/xray-live-before.json"
 cp "${root}/config/sing-box/users.base" "${TEST_ROOT}/sing-before.json"
 cp "${root}/data/traffic/state.json" "${TEST_ROOT}/traffic-before.json"
 cp "${root}/compose.json" "${TEST_ROOT}/compose-before.json"
@@ -266,19 +267,22 @@ xhttpEdit() {
 
 xhttpAssert() {
     local mode=$1 xmux=$2 padding=${3:-null} grpcHeader=${4:-null} sseHeader=${5:-null} limits=${6-}
+    local path=${7:-/padm/path-1} host=${8:-www.example.com}
     limits=${limits:-'{}'}
-    jq -en --arg mode "${mode}" --argjson xmux "${xmux}" --argjson padding "${padding}" \
+    jq -en --arg mode "${mode}" --arg path "${path}" --arg host "${host}" \
+        --argjson xmux "${xmux}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
         --slurpfile before "${TEST_ROOT}/installed-before.json" \
         --slurpfile after "${root}/config/spec.json" '
       def limits: with_entries(select(.key | IN("scMaxEachPostBytes","scMinPostsIntervalMs",
         "scMaxBufferedPosts","scStreamUpServerSecs")));
       def stable: .core.protocols |= map(if .listener_id == "entry-xhttp"
-        then del(.xhttp.mode,.xhttp.xmux,.xhttp.xPaddingBytes,.xhttp.noGRPCHeader,.xhttp.noSSEHeader,
+        then del(.xhttp.mode,.xhttp.path,.xhttp.host,.xhttp.xmux,.xhttp.xPaddingBytes,.xhttp.noGRPCHeader,.xhttp.noSSEHeader,
           .xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,.xhttp.scMaxBufferedPosts,
           .xhttp.scStreamUpServerSecs) else . end);
       ($before[0] | stable) == ($after[0] | stable) and
       any($after[0].core.protocols[]; .listener_id == "entry-xhttp" and
+        .xhttp.path == $path and .xhttp.host == $host and
         .xhttp.mode == $mode and .xhttp.xmux == $xmux and .xhttp.xPaddingBytes == $padding and
         .xhttp.noGRPCHeader == $grpc and .xhttp.noSSEHeader == $sse and
         (if $xmux == null then (.xhttp | has("xmux") | not) else true end) and
@@ -286,20 +290,25 @@ xhttpAssert() {
         (.xhttp | has("noGRPCHeader")) == ($grpc != null) and
         (.xhttp | has("noSSEHeader")) == ($sse != null) and (.xhttp | limits) == $limits)
     ' >/dev/null || fail 'XHTTP 改写其它规格、账户或端口'
-    jq -en --arg mode "${mode}" --argjson padding "${padding}" \
+    jq -en --arg mode "${mode}" --arg path "${path}" --arg host "${host}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
         --slurpfile before "${TEST_ROOT}/xray-before.json" \
+        --slurpfile live_before "${TEST_ROOT}/xray-live-before.json" \
         --slurpfile after "${root}/config/xray/users.base" \
         --slurpfile live "${root}/config/xray/config.json" '
       def limits: with_entries(select(.key | IN("scMaxEachPostBytes","scMinPostsIntervalMs",
         "scMaxBufferedPosts","scStreamUpServerSecs")));
       def stable: .inbounds |= map(if .tag == "entry-xhttp"
-        then del(.streamSettings.xhttpSettings.mode,.streamSettings.xhttpSettings.xPaddingBytes,
+        then del(.streamSettings.xhttpSettings.mode,.streamSettings.xhttpSettings.path,
+          .streamSettings.xhttpSettings.host,.streamSettings.xhttpSettings.xPaddingBytes,
           .streamSettings.xhttpSettings.noGRPCHeader,.streamSettings.xhttpSettings.noSSEHeader,
           .streamSettings.xhttpSettings.scMaxEachPostBytes,.streamSettings.xhttpSettings.scMinPostsIntervalMs,
           .streamSettings.xhttpSettings.scMaxBufferedPosts,.streamSettings.xhttpSettings.scStreamUpServerSecs) else . end);
       ($before[0] | stable) == ($after[0] | stable) and
+      [$live_before[0].inbounds[] | {tag,clients:.settings.clients}] ==
+        [$live[0].inbounds[] | {tag,clients:.settings.clients}] and
       any($after[0].inbounds[]; .tag == "entry-xhttp" and
+        .streamSettings.xhttpSettings.path == $path and .streamSettings.xhttpSettings.host == $host and
         .streamSettings.xhttpSettings.mode == $mode and
         .streamSettings.xhttpSettings.xPaddingBytes == $padding and
         .streamSettings.xhttpSettings.noGRPCHeader == $grpc and
@@ -316,13 +325,13 @@ xhttpAssert() {
         read -r original installed <<<"${pair}"
         cmp -s "${TEST_ROOT}/${original}" "${root}/${installed}" || fail "XHTTP 改变 ${installed}"
     done
-    python3 - "${mode}" "${xmux}" "${padding}" "${grpcHeader}" "${sseHeader}" "${limits}" "${TEST_ROOT}" "${root}" "${TOKEN}" <<'PY'
+    python3 - "${mode}" "${xmux}" "${padding}" "${grpcHeader}" "${sseHeader}" "${limits}" "${TEST_ROOT}" "${root}" "${TOKEN}" "${path}" "${host}" <<'PY'
 import json
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-mode, encoded, encoded_padding, encoded_grpc, encoded_sse, encoded_limits, temp, installed, token = sys.argv[1:]
+mode, encoded, encoded_padding, encoded_grpc, encoded_sse, encoded_limits, temp, installed, token, path, host = sys.argv[1:]
 xmux = json.loads(encoded)
 padding = json.loads(encoded_padding)
 grpc, sse = json.loads(encoded_grpc), json.loads(encoded_sse)
@@ -341,6 +350,7 @@ for before, after in ((temp / "links-before.txt", root / "data/subscription" / t
         query, actual = parse_qs(a.query), parse_qs(b.query)
         query.pop("extra", None)
         query["mode"] = [mode]
+        query["path"], query["host"] = [path], [host]
         extra = dict(limits)
         if xmux is not None:
             extra["xmux"] = xmux
@@ -357,12 +367,13 @@ PY
     dockerProtocolCommand links >"${STDOUT}"
     cmp -s "${STDOUT}" "${root}/data/subscription/${TOKEN}" || fail 'CLI 链接与主订阅不一致'
     runRead 0 xhttp-status dockerProtocolCommand xhttp-status entry-xhttp
-    jq -e --arg mode "${mode}" --argjson xmux "${xmux}" --argjson padding "${padding}" \
+    jq -e --arg mode "${mode}" --arg path "${path}" --arg host "${host}" \
+        --argjson xmux "${xmux}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" '
       {scMaxEachPostBytes:1000000,scMinPostsIntervalMs:30,scMaxBufferedPosts:30,
         scStreamUpServerSecs:"20-80"} as $defaults |
       ($defaults + ($limits | with_entries(select(.value != 0 and .value != "0-0")))) as $effective |
-      .entries == [{listener_id:"entry-xhttp",protocol:2,mode:$mode,explicit:($xmux != null),
+      .entries == [{listener_id:"entry-xhttp",protocol:2,path:$path,host:$host,mode:$mode,explicit:($xmux != null),
         xmux:($xmux // {maxConcurrency:"16-32",hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"}),
         xPaddingBytes:($padding // "100-1000"),padding_explicit:($padding != null),
         noGRPCHeader:($grpc // false),noSSEHeader:($sse // false),
@@ -392,6 +403,17 @@ xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpAssert auto null
 cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" || fail '清除 XMUX 没有恢复旧 URI'
 cmp -s "${TEST_ROOT}/group-before.txt" "${root}/data/subscription/xhttp-group-token" || fail '清除 XMUX 没有恢复分享组'
+# 常规编辑只改指定传输字段，发布仍复用同一别名入口与共享账号。
+xhttpEdit 0 unchanged --xhttp-mode entry-xhttp packet-up --preview
+for mode in packet-up stream-up auto; do
+    xhttpEdit 0 changed --xhttp-mode entry-xhttp "${mode}" --confirm PADM-DOCKER-EDIT
+    xhttpAssert "${mode}" null
+done
+xhttpEdit 0 unchanged --xhttp-path-host entry-xhttp /custom/path_2 edge.example.net --preview
+xhttpEdit 0 changed --xhttp-path-host entry-xhttp /custom/path_2 edge.example.net --confirm PADM-DOCKER-EDIT
+xhttpAssert auto null null null null '{}' /custom/path_2 edge.example.net
+xhttpEdit 0 changed --xhttp-path-host entry-xhttp /padm/path-1 www.example.com --confirm PADM-DOCKER-EDIT
+xhttpAssert auto null
 fi
 
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit || "${XHTTP_SCOPE}" == edit-padding ]]; then
@@ -466,6 +488,22 @@ xhttpAssert auto "${defaults}" '"128-256"' true false \
     '{"scMaxEachPostBytes":0,"scMinPostsIntervalMs":0,"scMaxBufferedPosts":0,"scStreamUpServerSecs":"0-0"}'
 xhttpEdit 0 changed --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpAssert auto "${defaults}" '"128-256"' true false
+# 高级参数一次提交七项；推荐默认复位保留当前路径和 Host，不重建其它入口。
+xhttpEdit 0 changed --xhttp-path-host entry-xhttp /advanced/path edge.example.net --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 changed --xhttp-mode entry-xhttp stream-up --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 changed --xhttp-xmux entry-xhttp 2 7-9 30-40 --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 unchanged --xhttp-advanced entry-xhttp 64-128 16384 5 16 1-2 false true --preview
+xhttpEdit 0 changed --xhttp-advanced entry-xhttp 64-128 16384 5 16 1-2 false true --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up '{"maxConcurrency":2,"hMaxRequestTimes":"7-9","hMaxReusableSecs":"30-40"}' '"64-128"' false true \
+    '{"scMaxEachPostBytes":16384,"scMinPostsIntervalMs":5,"scMaxBufferedPosts":16,"scStreamUpServerSecs":"1-2"}' \
+    /advanced/path edge.example.net
+xhttpEdit 0 unchanged --xhttp-defaults entry-xhttp --preview
+xhttpEdit 0 changed --xhttp-defaults entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" '"100-1000"' false false \
+    '{"scMaxEachPostBytes":1000000,"scMinPostsIntervalMs":30,"scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80"}' \
+    /advanced/path edge.example.net
+xhttpEdit 0 changed --xhttp-path-host entry-xhttp /padm/path-1 www.example.com --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 changed --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpEdit 0 changed --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpEdit 0 changed --xhttp-padding-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
@@ -554,6 +592,41 @@ xhttpEdit 2 unchanged --xhttp-preset entry-xhttp daily --xhttp-xmux-clear entry-
 xhttpEdit 2 unchanged --xhttp-preset entry-xhttp daily --spec "${XHTTP_SPEC}" --preview
 xhttpEdit 2 unchanged --xhttp-preset entry-xhttp daily --cdn-entry vless-ws edge.example.com --preview
 xhttpEdit 2 unchanged --xhttp-preset entry-xhttp daily
+# 新命令复用既有数值校验，仅检查组合边界及冻结，不重跑逐字段范围矩阵。
+xhttpEdit 2 unchanged --xhttp-mode entry-xhttp stream-one --preview
+xhttpEdit 2 unchanged --xhttp-path-host entry-xhttp /custom '' --preview
+xhttpEdit 15 unchanged --xhttp-path-host entry-xhttp no-leading-slash edge.example.net --preview
+xhttpEdit 2 unchanged --xhttp-advanced entry-xhttp 0 16384 5 16 1-2 false true --preview
+xhttpEdit 2 unchanged --xhttp-advanced entry-xhttp 64 16384 5 16 1-2 false --preview
+xhttpEdit 2 unchanged --xhttp-defaults entry-xhttp --xhttp-mode entry-xhttp auto --preview
+xhttpEdit 2 unchanged --xhttp-path-host entry-xhttp /custom edge.example.net --spec "${XHTTP_SPEC}" --preview
+xhttpEdit 2 unchanged --xhttp-advanced entry-xhttp 64 16384 5 16 1-2 false true --cdn-entry vless-ws edge.example.net --preview
+xhttpEdit 15 unchanged --xhttp-defaults vless-reality --preview
+(
+    xhttpListener=entry-xhttp xhttpAction=mode
+    jq '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.mode) = "packet-up"' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/mode-expected.json"
+    dockerEditCompatibilityValidate "${root}/config/spec.json" "${TEST_ROOT}/mode-expected.json" ||
+        fail 'XHTTP mode 冻结误拒合法修改'
+    jq '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.host) = "tampered.example.net"' \
+        "${TEST_ROOT}/mode-expected.json" >"${TEST_ROOT}/mode-tampered.json"
+    if dockerEditCompatibilityValidate "${root}/config/spec.json" "${TEST_ROOT}/mode-tampered.json" 2>/dev/null; then
+        fail 'XHTTP mode 专项允许顺带改变 Host'
+    fi
+    xhttpAction=advanced
+    jq '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp) +=
+      {xPaddingBytes:"64-128",scMaxEachPostBytes:16384,scMinPostsIntervalMs:5,
+        scMaxBufferedPosts:16,scStreamUpServerSecs:"1-2",noGRPCHeader:false,noSSEHeader:true}' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/advanced-expected.json"
+    dockerEditCompatibilityValidate "${root}/config/spec.json" "${TEST_ROOT}/advanced-expected.json" ||
+        fail 'XHTTP 高级专项冻结误拒合法修改'
+    jq '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.xmux) =
+      {maxConcurrency:1,hMaxRequestTimes:0,hMaxReusableSecs:0}' \
+        "${TEST_ROOT}/advanced-expected.json" >"${TEST_ROOT}/advanced-tampered.json"
+    if dockerEditCompatibilityValidate "${root}/config/spec.json" "${TEST_ROOT}/advanced-tampered.json" 2>/dev/null; then
+        fail 'XHTTP 高级专项允许顺带改变 XMUX'
+    fi
+)
 for mutation in \
     '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.xmux) = $xmux' \
     '.core.protocols += [(.core.protocols[] | select(.id == 2) |
@@ -565,7 +638,7 @@ done
 # 健康失败必须恢复完整旧部署，包括分享组、账号、累计流量和 TLS。
 before=$(liveSnapshot)
 rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
-xhttpEdit 14 changed --xhttp-limits entry-xhttp 2000000 20 50 30-40 --confirm PADM-DOCKER-EDIT
+xhttpEdit 14 changed --xhttp-advanced entry-xhttp 64-128 2000000 20 50 30-40 true false --confirm PADM-DOCKER-EDIT
 [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] || fail 'XHTTP 健康失败未完整恢复'
 
 for answer in n eof int term derive copy; do
@@ -584,7 +657,7 @@ for answer in n eof int term derive copy; do
         root=${PADM_DOCKER_INSTALL_DIR}
         commandArgs=(edit)
     else
-        commandArgs=(edit --xhttp-limits entry-xhttp 2000000 20 50 30-40)
+        commandArgs=(edit --xhttp-defaults entry-xhttp)
     fi
     before=$(snapshot)
     python3 - "${STDOUT}" "${answer}" bash -u "${CLI}" "${commandArgs[@]}" \

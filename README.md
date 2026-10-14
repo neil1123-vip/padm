@@ -225,9 +225,8 @@ TUIC 时长接受 1–6 位正整数加 `ms/s/m/h`，恢复推荐值为 `cubic/3
 仅改选中字段，保留认证、TLS、其它入口、其它参数和累计额度；
 沿用预览、确认、发布和失败恢复。完整协议管理、TUIC 跳跃及宿主集成组合仍未开放。
 
-Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的预设、
-XMUX、Padding、两个首部开关；3D.7 已在本地 Linux `amd64` 容器完成验收，
-新增四项原生 packet/stream limits：
+Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的模式、
+路径/Host、预设、XMUX、Padding、两个首部开关及四项原生 packet/stream limits：
 
 ```bash
 padm-docker protocol xhttp-status entry-xhttp
@@ -236,7 +235,18 @@ padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-ED
 padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
 padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-mode entry-xhttp stream-up --preview
+padm-docker edit --xhttp-path-host entry-xhttp /padm/new-path www.example.com --preview
+padm-docker edit --xhttp-advanced entry-xhttp 128-256 2000000 20 50 30-40 true false --preview
+padm-docker edit --xhttp-defaults entry-xhttp --confirm PADM-DOCKER-EDIT
 ```
+
+菜单 `14` 单独设置 `auto/packet-up/stream-up`；`15` 同时设置安全路径和非空域名 Host。
+`16` 一次设置七项高级参数，顺序为 Padding、POST 字节数、间隔毫秒、
+缓冲 POST 数、流式秒数、noGRPCHeader、noSSEHeader，保留模式和 XMUX。
+`17` 一次恢复 `auto`、XMUX `16-32/600-900/1800-3000`、Padding `100-1000`、
+两项首部 `false` 和 limits `1000000/30/30/20-80`，保留路径/Host。
+各专项仅改所选入口的相应字段，复用预览、确认、发布和失败恢复。
 
 两个值依次为 `noGRPCHeader`、`noSSEHeader`。`true` 分别去掉客户端 stream
 POST 的 gRPC Content-Type 和服务端下载响应的 SSE Content-Type；`packet-up`
