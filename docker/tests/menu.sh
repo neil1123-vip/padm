@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+MENU_SCOPE=${PADM_DOCKER_MENU_SCOPE:-full}
+case "${MENU_SCOPE}" in
+full|routing) ;;
+*) printf 'docker-menu-regression-fail: invalid scope: %s\n' "${MENU_SCOPE}" >&2; exit 1 ;;
+esac
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-menu.XXXXXX")
 MOCK_BIN="${TEST_ROOT}/bin"
@@ -21,7 +26,9 @@ fail() {
 
 command -v script >/dev/null 2>&1 || fail 'util-linux script is required for real PTY checks'
 command -v timeout >/dev/null 2>&1 || fail 'timeout is required for bounded PTY checks'
-bash "${PROJECT_ROOT}/docker/tests/menu-signals.sh"
+if [[ "${MENU_SCOPE}" == full ]]; then
+    bash "${PROJECT_ROOT}/docker/tests/menu-signals.sh"
+fi
 
 cat >"${MOCK_BIN}/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -2053,6 +2060,9 @@ assertHelpOnly() {
     [[ ! -e "${PADM_DOCKER_INSTALL_DIR}" ]] || fail 'help invocation initialized deployment state'
 }
 
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/usr-local-bin"
+if [[ "${MENU_SCOPE}" == full ]]; then
 # 单文件入口没有模块；帮助必须在下载和安装之前返回。
 ISOLATED="${TEST_ROOT}/isolated"
 mkdir -p "${ISOLATED}"
@@ -2134,6 +2144,7 @@ grep -Fq '请先使用首次配置' "${CONTROL_LOG}" || fail 'unconfigured TLS a
 runPty protocols-unconfigured protocols cancel "${CLI}" menu
 grep -Fq 'Docker 协议与入口' "${CONTROL_LOG}" || fail 'protocol submenu was not reachable'
 [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/deployment.json" ]] || fail 'unconfigured protocol menu wrote a deployment'
+fi
 
 # 隔离业务命令，只用真实 PTY 检查生产菜单的确认门禁与参数分发。
 TLS_WIZARD_ROOT="${TEST_ROOT}/tls-wizard"
@@ -2566,6 +2577,7 @@ menu)
     ;;
 esac
 EOF
+if [[ "${MENU_SCOPE}" == full ]]; then
 # 启动与恢复共用来源输入；直接验证生产动作分组，不重复业务菜单的导航矩阵。
 export SOURCE_INPUT_CHECK=1
 for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable fail2ban-settings fail2ban-port \
@@ -2863,6 +2875,7 @@ for siteCase in flow cancel static-eof redirect-eof template-eof alpn-diagnose-e
     esac
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
+fi
 
 for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
@@ -3228,7 +3241,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
             '7. 单条替换 IPv6 域名规则' \
             '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
-            '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \
+            '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 隧道地址族' '7. 切换 WARP IPv6 隧道地址族' \
             '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' '删空关闭，需要重新导入 WARP' \
             '10. 单条替换 WARP 域名规则' \
             '22. 追加 Direct 直连例外' '23. 追加 Block 域名阻断' \
@@ -3249,6 +3262,11 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     fi
 done
 unset SITE_EDIT_STATUS ROUTING_STATUS SELECTIVE_EDIT_PRECHECK_STATUS DOMAIN_REPLACE_PRECHECK_STATUS
+
+if [[ "${MENU_SCOPE}" == routing ]]; then
+    printf 'docker-menu-routing-regression-ok\n'
+    exit 0
+fi
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu

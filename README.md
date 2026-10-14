@@ -451,6 +451,11 @@ SOCKS5 策略对 TCP 代理、UDP 拒绝。诊断只读，完整冲突检测仍�
 列出参与这对规则的 `policies/winner`，包含区域直连例外，同策略覆盖不报告。
 域名按标签边界比较，不把 `notexample.net` 归入 `example.net`；不推断 keyword、
 GeoSite 成员或 IP/BT。`winner` 仅针对所列规则，不表示最终流量路径。
+`domain_rule_keyword_coverages` 另列出 `full:`、`domain:` 或 `keyword:` 规则正文
+包含其它策略的 `keyword:` 正文时的覆盖，沿用相同字段、排序和优先级。
+例如 `full:ads.example.net` 被 `keyword:ads` 覆盖，`keyword:advert` 被
+`keyword:ad` 覆盖；同策略关系不报告。只比较规范字符串，不查询 GeoSite、
+DNS 或最终目的地址，不把诊断升级成配置拒绝或完整冲突检测。
 域名解析后 IP 阻断继续待交付：本地解析结果不能代替代理实际连接地址，
 切换 Xray `IPOnDemand` 也不保证解析失败拒绝，不能据此宣称阻断有效。
 
@@ -568,7 +573,7 @@ Direct 例外、域名/IP/BT 阻断优先于选择性 IPv6，选择性 IPv6 优�
 不修改原默认网络、Docker daemon 或宿主接口，宿主仍须具备 IPv6 路由与出口。
 TUN/TProxy 的宿主网络模式不属于本阶段支持范围，完整 WARP 和宿主验收继续待补。
 
-菜单 `17` 的 `20` 导入、关闭或查看 WARP 出站，并管理已有配置的分流域名、全局模式和地址族。独立 v3 `.routing.warp`
+菜单 `17` 的 `20` 导入、关闭或查看 WARP 出站，并管理已有配置的分流域名、全局模式和隧道地址族；菜单 `6/7` 不保证公网出口地址族。独立 v3 `.routing.warp`
 通过 `x-padm-routing-warp` 门禁；输入为 root 所有、`0600`、最多 64 KiB 的私有 JSON，
 沿用路由输入的单链接及安全祖先目录限制，密钥不放在命令参数、预览或状态中。
 输入包含 `mode`（`selective` 或 `global`）、`family`（`ipv4` 或 `ipv6`）、

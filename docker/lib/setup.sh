@@ -977,6 +977,18 @@ dockerProtocolCommand() (
             {narrow_rule:$narrow[0].rule,broad_rule:$broad[0].rule,
              policies:($entries | map(.policy)),winner:$entries[0].policy}
           ] | sort_by(.narrow_rule,.broad_rule) as $coverages |
+          # 只比较规范字符串的包含关系，不查询分类成员或预测解析结果。
+          [$groups[] | select(.[0].rule | startswith("keyword:"))] as $keywords |
+          [$groups[] | . as $narrow |
+            (.[0].rule | capture("^(?<kind>full|domain|keyword):(?<name>.+)$")?) as $selector |
+            $keywords[] | . as $broad |
+            select($narrow[0].rule != $broad[0].rule and
+              ($selector.name | contains($broad[0].rule | ltrimstr("keyword:")))) |
+            ($narrow + $broad | unique_by(.policy) | sort_by(.rank)) as $entries |
+            select($entries | length > 1) |
+            {narrow_rule:$narrow[0].rule,broad_rule:$broad[0].rule,
+             policies:($entries | map(.policy)),winner:$entries[0].policy}
+          ] | sort_by(.narrow_rule,.broad_rule) as $keyword_coverages |
           $request |
           (.routing.block.domains // []) as $block |
           {enabled:(.routing != null), server:(.routing.socks5.server // null),
@@ -988,6 +1000,7 @@ dockerProtocolCommand() (
             . as $rule | select($block | index($rule) != null)],
           domain_rule_overlaps:$overlaps,
           domain_rule_coverages:$coverages,
+          domain_rule_keyword_coverages:$keyword_coverages,
           tcp:(if .routing.socks5 == null then "direct"
             elif .routing.socks5 | has("domains") then "matched-socks5" else "socks5" end),
           udp:(if .routing.socks5 == null then "direct"

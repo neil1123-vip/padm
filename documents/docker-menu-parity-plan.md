@@ -3059,6 +3059,34 @@ cache=false：`.tmp-regression-docker-c2bee5386ade42dba1108c67e27efd04/`；
 未开放解析后 IP 阻断，不将字面 IP 阻断、域名覆盖诊断或局部探针当作完整 5B；
 原生宿主/arm64/公网仍未验，总目标 active。
 
+#### 5B.4q keyword 覆盖诊断与路由菜单回归提速
+
+现有只读 `routing-status` 同批追加 `domain_rule_keyword_coverages`：
+规范 `full/domain/keyword` 正文包含另一个策略的 `keyword` 正文时，
+报告 `narrow_rule/broad_rule/policies/winner`，沿用现有五策略优先级及区域有效规则。
+同规则由原精确重叠处理，同策略包含不报告；不查询 GeoSite/DNS，不预测最终路径，
+不改变配置拒绝条件、schema、生成器、权限或支持状态。
+共用原核心合同夹具检查字符串包含、多策略优先级、同策略排除、关闭/global
+空列表，以及凭据、完整部署和累计保持。
+
+新增 `docker-menu-routing` 定向 selector，复用原菜单脚本与全部路由 PTY 断言；
+原 `docker-menu` 和完整合同继续执行原集合，信号检查保留在完整入口。
+默认/定向参数派发和环境变量不泄漏纳入现有 dispatcher 合同。
+WARP 菜单 `6/7` 改为“隧道地址族”，与实际 family 语义一致，不承诺公网出口族。
+Linux amd64、复用工具镜像：核心合同 15311 ms，路由菜单定向 14979 ms，
+dispatcher 合同 1565 ms，均 Jobs 2、exit 0。集中合同 54/54 通过，
+Jobs 6、入口 298695 ms、排队 308 ms、cache=false：
+`.tmp-regression-docker-9b02eb0f1bdb4a1a849c5599bec1d816/`。
+其中完整菜单内部 58560 ms；与定向范围、并发负载不同，不据此宣称全套缩短比例。
+10 份交付文件与 full 快照匹配，随后只补验收文字；同快照 Bash、ShellCheck error
+及非法 scope 拒绝通过。定向结果分别在
+`.tmp-regression-docker-1089dec106e641ec9445f07c98c4382f/`、
+`.tmp-regression-docker-78a32bf10e2044f4997692e0acc99fc7/`、
+`.tmp-regression-docker-2afbfd578c27452fa03cfa871b9af9ba/`。
+清理本轮成功输入归档、清单和核验临时文件，保留日志/result；
+未改渲染或真实出站，不重复既有客户端矩阵。GeoSite、解析后 IP 门槛、SOCKS UDP、
+TUIC/自动恢复及原生宿主/arm64/公网仍 deferred，整体目标 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

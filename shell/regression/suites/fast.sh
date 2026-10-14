@@ -222,6 +222,10 @@ runDockerRoutingSocks5Regression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
+runDockerMenuRoutingRegression() {
+    PADM_DOCKER_MENU_SCOPE=routing runDockerMenuRegression
+}
+
 runDockerHttpRelayRegression() {
     bash "${PROJECT_ROOT}/docker/tests/http-relay.sh"
 }
@@ -777,6 +781,7 @@ registerRegressionFunctionLeaf update-padm-signal-rollback runUpdatePadmSignalRo
 registerRegressionFunctionLeaf install-sync-signal-rollback runInstallSyncSignalRollbackRegression
 registerRegressionFunctionLeaf docker-phase1 runDockerPhase1Regression
 registerRegressionFunctionLeaf docker-menu runDockerMenuRegression
+registerRegressionFunctionLeaf docker-menu-routing runDockerMenuRoutingRegression
 registerRegressionFunctionLeaf docker-release runDockerReleaseRegression
 registerRegressionFunctionLeaf docker-setup runDockerSetupRegression
 registerRegressionFunctionLeaf docker-setup-core runDockerSetupRegression core

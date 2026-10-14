@@ -1552,6 +1552,16 @@ Containment, category membership, literal IP/BT rules and HTTP relay routing are
 this diagnostic. SOCKS5 proxies TCP and rejects UDP. The status is read-only; complete
 conflict detection remains deferred.
 
+`domain_rule_coverages` reports label-boundary containment across `full:` and
+`domain:` rules from different policies. `domain_rule_keyword_coverages` separately
+reports `full:`, `domain:` or `keyword:` text containing another policy's `keyword:`
+text, such as `full:ads.example.net` covered by `keyword:ads`, or `keyword:advert`
+covered by `keyword:ad`. Both use `narrow_rule`, `broad_rule`, `policies` and `winner`,
+sorted by the two rules; same-policy containment is omitted. They compare normalized
+strings, exclude GeoSite membership and DNS results, and do not predict the final route
+or reject configurations. Resolved IP blocking still requires actual connection-address
+binding and rejection on DNS failure; Xray `IPOnDemand` alone does not satisfy that gate.
+
 ```bash
 padm-docker edit --direct-domains 'example.org,full:exact.example.net' --preview
 padm-docker edit --block-domains 'keyword:example,geosite:cn' --confirm PADM-DOCKER-EDIT
@@ -1658,7 +1668,8 @@ egress. TUN/TProxy host-network mode, complete WARP and native-host acceptance
 remain outside this stage.
 
 Menu `17`, option `20`, imports, disables or displays WARP egress and manages an existing
-configuration's domains, global mode and address family. Optional v3
+configuration's domains, global mode and tunnel address family. Options `6/7`
+do not guarantee the public egress address family. Optional v3
 `.routing.warp` has its own `x-padm-routing-warp` gate. Input is a root-owned
 `0600` private JSON file, at most 64 KiB, with the same single-link and safe
 ancestor-directory requirements as other routing inputs. Keys never appear in

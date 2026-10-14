@@ -14,7 +14,8 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 其它配置，拒绝缺旧项、重复新项、同值、CSV、未启用或空名单。固定默认例外不可替换。
 `routing-tools`、`internal-206-routing-rules` 与完整菜单状态继续为 `deferred`。
 只读 `routing-status` 已提供跨策略 `full/domain` 域名层级覆盖诊断，
-按标签边界比较并保留原精确重叠；不推断 keyword、GeoSite 成员或最终流量。
+按标签边界比较并保留原精确重叠；另报告跨策略 `full/domain/keyword`
+正文包含 `keyword` 的确定关系，不查询 GeoSite 成员、DNS 或最终流量。
 域名解析后 IP 阻断仍未交付：固定 Xray 的 `IPOnDemand` 探针证实
 代理再次解析不同地址、指定 DNS 失败后的远端回退均可绕过本地 IP 判定，
 不能只切换该参数开放安全开关；实施门槛为实际连接地址绑定和解析失败拒绝。

@@ -1213,7 +1213,7 @@ dockerMenuWarp() {
         printf '\nDocker WARP 出站\n'
         printf '%s\n' '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '3. 查看路由状态' \
             '4. 替换 WARP 域名规则' '5. 切换 WARP 全局出站' \
-            '6. 切换 WARP IPv4 出口' '7. 切换 WARP IPv6 出口' \
+            '6. 切换 WARP IPv4 隧道地址族' '7. 切换 WARP IPv6 隧道地址族' \
             '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' \
             '10. 单条替换 WARP 域名规则' '0. 返回'
         printf '请选择: '
