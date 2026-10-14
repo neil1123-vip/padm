@@ -308,6 +308,7 @@ set -euo pipefail
 source "${PROJECT_ROOT}/docker/lib/setup.sh"
 source "${PROJECT_ROOT}/docker/lib/menu.sh"
 dockerMenuCli() { printf '%s\n' "${TEST_ROOT}/menu-cli.sh"; }
+trap 'dockerMenuInterrupted 130; printf "fixture-int-ready\n"' INT
 dockerMenuProtocols
 SH
 : >"${TEST_ROOT}/menu.calls"
@@ -324,6 +325,59 @@ cmp -s "${TEST_ROOT}/menu.calls" "${TEST_ROOT}/menu.expected" || fail '菜单分
 [[ "$(cat "${TEST_ROOT}/menu.writes")" == \
     'edit --port-hopping entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1' ]] ||
     fail '取消清除仍写入保存配置'
+
+# 复用已有 PTY 驱动方式，真实 SIGINT 后必须仍在子菜单并能继续查看状态。
+: >"${TEST_ROOT}/menu.calls"
+python3 - "${TEST_ROOT}/menu-driver.sh" "${LOG}" <<'PY'
+import fcntl
+import os
+from pathlib import Path
+import pty
+import select
+import signal
+import subprocess
+import sys
+import termios
+import time
+
+def terminal_session():
+    os.setsid()
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+master, slave = pty.openpty()
+process = subprocess.Popen(["bash", sys.argv[1]], stdin=slave, stdout=slave,
+                           stderr=slave, preexec_fn=terminal_session)
+os.close(slave)
+output = bytearray()
+
+def expect(text, count=1):
+    deadline = time.monotonic() + 3
+    while output.count(text.encode()) < count:
+        assert process.poll() is None and time.monotonic() < deadline, output.decode()
+        if select.select([master], [], [], 0.05)[0]:
+            output.extend(os.read(master, 65536))
+
+try:
+    expect("请选择: ")
+    os.write(master, b"11\n")
+    expect("请选择: ", 2)
+    os.killpg(os.getpgid(process.pid), signal.SIGINT)
+    expect("fixture-int-ready")
+    os.write(master, b"1\n")
+    expect("Docker 端口跳跃（单个双族 Hy2）", 2)
+    expect("请选择: ", 3)
+    os.write(master, b"0\n0\n")
+    assert process.wait(timeout=3) == 0, output.decode()
+finally:
+    if process.poll() is None:
+        process.kill()
+        process.wait()
+    os.close(master)
+    Path(sys.argv[2]).write_bytes(output)
+PY
+[[ "$(cat "${TEST_ROOT}/menu.calls")" == $'protocol list\nport-hopping status' ]] ||
+    fail '菜单中断后未在当前子菜单继续操作'
 for input in $'11\n' $'11\n2\n' $'11\n3\n' $'11\n2\nentry-hy2\n'; do
     : >"${TEST_ROOT}/menu.calls"
     printf '%s' "${input}" | timeout 5 bash "${TEST_ROOT}/menu-driver.sh" >"${LOG}" 2>&1 ||
