@@ -1687,10 +1687,12 @@ tproxy_state_text() {
     tp_schema=2
     [ "${tp_family:-ipv4}" = ipv4 ] || tp_schema=3
     [ -z "${tp_output_uid:-}" ] || tp_schema=4
+    [ "${tp_output_uid:-}" != all ] || tp_schema=5
     printf 'schema_version=%s\ntoken=%s\nchain=%s\nport=%s\nmark=%s\ntable=%s\npref=30000\nroute_proto=186\nrule_proto=186\nrealm=%s\nphase=%s\n' \
         "$tp_schema" "$tp_token" "$tp_chain" "$tp_port" "$tp_mark" "$tp_mark" "$tp_realm" "$tp_phase"
     [ "$tp_schema" = 2 ] || printf 'family=%s\n' "$tp_family"
     [ "$tp_schema" != 4 ] || printf 'output_uid=%s\n' "$tp_output_uid"
+    [ "$tp_schema" != 5 ] || printf 'output_all=true\n'
 }
 
 tproxy_output_uid_valid() {
@@ -1712,8 +1714,14 @@ tproxy_state_read() {
     tp_phase=$(sed -n 's/^phase=//p' "$tp_root/tproxy.state")
     tp_family=$(sed -n 's/^family=//p' "$tp_root/tproxy.state")
     tp_output_uid=$(sed -n 's/^output_uid=//p' "$tp_root/tproxy.state")
+    tp_output_all=$(sed -n 's/^output_all=//p' "$tp_root/tproxy.state")
     case "$tp_family" in '') tp_family=ipv4 ;; ipv4|ipv6|dual) ;; *) return 1 ;; esac
-    [ -z "$tp_output_uid" ] || tproxy_output_uid_valid "$tp_output_uid" || return 1
+    if [ -n "$tp_output_all" ]; then
+        [ "$tp_output_all" = true ] && [ -z "$tp_output_uid" ] || return 1
+        tp_output_uid=all
+    else
+        [ -z "$tp_output_uid" ] || tproxy_output_uid_valid "$tp_output_uid" || return 1
+    fi
     printf '%s\n' "$tp_token" | grep -Eq '^[a-f0-9]{32}$' || return 1
     tp_expected_realm=$((0x$(printf '%s' "$tp_token" | cut -c29-32)))
     [ "$tp_expected_realm" -ne 0 ] || tp_expected_realm=1
@@ -1753,6 +1761,7 @@ token, chain, port, mark, realm, mode, created, target_mark, family, target_fami
 port, mark, realm, target_mark = int(port), int(mark), int(realm), int(target_mark)
 comment = "padm-tproxy:" + token
 output_chain = chain + "-out"
+output_all = output_uid == "all"
 
 def command(args, empty_table=False):
     result = subprocess.run(args, text=True, capture_output=True)
@@ -1810,7 +1819,7 @@ def audit(version, owned):
         route_present = True
 
     dump = command(["iptables" if version == 4 else "ip6tables", "-w", "-t", "mangle", "-S"])
-    present = [False] * 8
+    present = [False] * 9
     chains_present = {chain: False, output_chain: False}
     chain_order = {chain: [], output_chain: []}
     for line in dump.splitlines():
@@ -1863,10 +1872,17 @@ def audit(version, owned):
                 which = 4
             elif args[1] == output_chain and values == dict(base, **{"--dst-type": "LOCAL", "-j": "RETURN"}) and sorted(modules) == ["addrtype", "comment"]:
                 which = 5
-            elif args[1] == output_chain and values.get("-p") in {"tcp", "udp"} and sorted(modules) == ["comment", "conntrack", "owner"]:
+            elif (output_all and args[1] == output_chain
+                  and values == dict(base, **{"--gid-owner": "10001", "-j": "RETURN"})
+                  and sorted(modules) == ["comment", "owner"]):
+                which = 8
+            elif (args[1] == output_chain and values.get("-p") in {"tcp", "udp"}
+                  and sorted(modules) == (["comment", "conntrack"] if output_all else ["comment", "conntrack", "owner"])):
                 protocol = values["-p"]
-                expected = dict(base, **{"-p": protocol, "--uid-owner": output_uid, "--ctdir": "ORIGINAL",
+                expected = dict(base, **{"-p": protocol, "--ctdir": "ORIGINAL",
                                         "-j": "MARK", "--set-xmark": f"0x{mark:x}/0xffffffff"})
+                if not output_all:
+                    expected["--uid-owner"] = output_uid
                 if values == expected:
                     which = 6 if protocol == "tcp" else 7
         if which is None or present[which]:
@@ -1875,22 +1891,29 @@ def audit(version, owned):
             chain_order[args[1]].append(which)
         present[which] = True
     for current, offset, identity in ((chain, 0, f"ipv{version}"), (output_chain, 4, f"ipv{version}-out")):
-        if chain_order[current] != sorted(chain_order[current]):
+        indices = [offset + 1, offset + 2, offset + 3]
+        if current == output_chain and output_all:
+            indices = [5, 8, 6, 7]
+        if chain_order[current] != [index for index in indices if present[index]]:
             raise ValueError("changed chain rule order")
         if active_mode == "empty":
             if chains_present[current]:
                 raise ValueError("chain already exists")
-        elif chains_present[current] and not any(present[offset + 1:offset + 4]) and identity not in created.split():
+        elif chains_present[current] and not any(present[index] for index in indices) and identity not in created.split():
             raise ValueError("empty chain has no verifiable owner")
-        elif not chains_present[current] and any(present[offset:offset + 4]):
+        elif not chains_present[current] and (present[offset] or any(present[index] for index in indices)):
             raise ValueError("missing referenced chain")
+    if output_all and any(present[6:8]) and not (present[5] and present[8]):
+        raise ValueError("missing global OUTPUT bypass")
     complete = chains_present[chain] and all(present[:4]) and route_present and rule_present
     if output_uid:
-        complete &= chains_present[output_chain] and all(present[4:])
+        complete &= chains_present[output_chain] and all(present[4:8])
+        if output_all:
+            complete &= present[8]
     if active_mode == "full" and not complete:
         raise ValueError("incomplete TProxy resources")
     return [version, *map(int, [*present[:4], chains_present[chain], rule_present, route_present,
-                               *present[4:], chains_present[output_chain]])]
+                               *present[4:8], chains_present[output_chain], present[8]])]
 
 families = {"ipv4": [4], "ipv6": [6], "dual": [4, 6]}
 # 两族全部核验成功才输出清理清单，任一漂移不能先撤销另一族。
@@ -1913,6 +1936,8 @@ tproxy_preflight() {
     if [ "${1:-}" = --output-uid ]; then
         [ "$#" -ge 2 ] && tproxy_output_uid_valid "$2" || die "invalid TProxy output UID"
         requested_output_uid=$2; shift 2
+    elif [ "${1:-}" = --output-all ]; then
+        requested_output_uid=all; shift
     fi
     ownership=${1:-unowned}
     ownership_root=${2:-$STATE_ROOT}
@@ -1971,13 +1996,20 @@ tproxy_cleanup() (
         return 1
     }
     tp_comment=padm-tproxy:$tp_token
-    while read -r tp_version tp_hook tp_local tp_tcp tp_udp tp_chain_present tp_rule tp_route tp_output_hook tp_output_local tp_output_tcp tp_output_udp tp_output_present; do
+    while read -r tp_version tp_hook tp_local tp_tcp tp_udp tp_chain_present tp_rule tp_route tp_output_hook tp_output_local tp_output_tcp tp_output_udp tp_output_present tp_output_group; do
         tp_tool=iptables
         [ "$tp_version" = 4 ] || tp_tool=ip6tables
         [ "$tp_output_hook" = 0 ] || "$tp_tool" -w -t mangle -D OUTPUT -m comment --comment "$tp_comment" -j "$tp_output_chain" || return 1
-        [ "$tp_output_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || return 1
-        [ "$tp_output_tcp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p tcp -m owner --uid-owner "$tp_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
-        [ "$tp_output_udp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p udp -m owner --uid-owner "$tp_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
+        if [ "$tp_output_uid" = all ]; then
+            [ "$tp_output_tcp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p tcp -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
+            [ "$tp_output_udp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p udp -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
+            [ "$tp_output_group" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m owner --gid-owner 10001 -m comment --comment "$tp_comment" -j RETURN || return 1
+            [ "$tp_output_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || return 1
+        else
+            [ "$tp_output_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || return 1
+            [ "$tp_output_tcp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p tcp -m owner --uid-owner "$tp_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
+            [ "$tp_output_udp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p udp -m owner --uid-owner "$tp_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
+        fi
         [ "$tp_output_present" = 0 ] || "$tp_tool" -w -t mangle -X "$tp_output_chain" || return 1
         [ "$tp_hook" = 0 ] || "$tp_tool" -w -t mangle -D PREROUTING -m comment --comment "$tp_comment" -j "$tp_chain" || return 1
         [ "$tp_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || return 1
@@ -2008,11 +2040,15 @@ tproxy_run() {
     if [ "${1:-}" = --output-uid ]; then
         [ "$#" -eq 2 ] && tproxy_output_uid_valid "$2" || die "invalid TProxy output UID"
         requested_output_uid=$2; shift 2
+    elif [ "${1:-}" = --output-all ]; then
+        requested_output_uid=all; shift
     fi
     [ "$#" -eq 0 ] || die "invalid TProxy arguments"
     ownership=unowned
     [ ! -e "$STATE_ROOT/tproxy.state" ] && [ ! -L "$STATE_ROOT/tproxy.state" ] || ownership=owned
-    if [ -n "$requested_output_uid" ]; then
+    if [ "$requested_output_uid" = all ]; then
+        tproxy_preflight "$requested_port" "$requested_mark" "$requested_family" --output-all "$ownership"
+    elif [ -n "$requested_output_uid" ]; then
         tproxy_preflight "$requested_port" "$requested_mark" "$requested_family" --output-uid "$requested_output_uid" "$ownership"
     else
         tproxy_preflight "$requested_port" "$requested_mark" "$requested_family" "$ownership"
@@ -2065,9 +2101,18 @@ tproxy_run() {
             [ "$start_signal" -eq 0 ] || exit "$start_signal"
             "$tp_tool" -w -t mangle -A "$tp_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || die "TProxy OUTPUT local rule failed to start"
             [ "$start_signal" -eq 0 ] || exit "$start_signal"
-            # 仅捕获选中 UID 主动拨号；核心 root 拨号及监听服务的回复保持原路由。
+            if [ "$tp_output_uid" = all ]; then
+                # 全主机包含 root，只给核心专用组放行，避免核心拨号再次进入透明入口。
+                "$tp_tool" -w -t mangle -A "$tp_output_chain" -m owner --gid-owner 10001 -m comment --comment "$tp_comment" -j RETURN || die "TProxy OUTPUT core bypass failed to start"
+                [ "$start_signal" -eq 0 ] || exit "$start_signal"
+            fi
+            # 仅捕获主动连接；服务回复保持原路由，指定 UID 的旧参数不变。
             for tp_protocol in tcp udp; do
-                "$tp_tool" -w -t mangle -A "$tp_output_chain" -p "$tp_protocol" -m owner --uid-owner "$tp_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || die "TProxy OUTPUT $tp_protocol rule failed to start"
+                if [ "$tp_output_uid" = all ]; then
+                    "$tp_tool" -w -t mangle -A "$tp_output_chain" -p "$tp_protocol" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || die "TProxy OUTPUT $tp_protocol rule failed to start"
+                else
+                    "$tp_tool" -w -t mangle -A "$tp_output_chain" -p "$tp_protocol" -m owner --uid-owner "$tp_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || die "TProxy OUTPUT $tp_protocol rule failed to start"
+                fi
                 [ "$start_signal" -eq 0 ] || exit "$start_signal"
             done
             "$tp_tool" -w -t mangle -I OUTPUT 1 -m comment --comment "$tp_comment" -j "$tp_output_chain" || die "TProxy OUTPUT hook failed to start"
@@ -2090,6 +2135,8 @@ tproxy_health() (
     if [ "${1:-}" = --output-uid ]; then
         [ "$#" -eq 2 ] && tproxy_output_uid_valid "$2" || return 1
         requested_output_uid=$2; shift 2
+    elif [ "${1:-}" = --output-all ]; then
+        requested_output_uid=all; shift
     fi
     [ "$#" -eq 0 ] || return 1
     [ ! -e "$STATE_ROOT/redirect.state" ] && [ ! -L "$STATE_ROOT/redirect.state" ] &&
@@ -2101,6 +2148,11 @@ tproxy_health() (
 )
 
 redirect_state_text() {
+    if [ "$rd_output_uid" = all ]; then
+        printf 'schema_version=2\ntoken=%s\nchain=%s\nport=%s\nfamily=%s\noutput_all=true\nphase=%s\n' \
+            "$rd_token" "$rd_chain" "$rd_port" "$rd_family" "$rd_phase"
+        return
+    fi
     printf 'schema_version=1\ntoken=%s\nchain=%s\nport=%s\nfamily=%s\noutput_uid=%s\nphase=%s\n' \
         "$rd_token" "$rd_chain" "$rd_port" "$rd_family" "$rd_output_uid" "$rd_phase"
 }
@@ -2116,13 +2168,19 @@ redirect_state_read() {
     rd_port=$(sed -n 's/^port=//p' "$rd_root/redirect.state")
     rd_family=$(sed -n 's/^family=//p' "$rd_root/redirect.state")
     rd_output_uid=$(sed -n 's/^output_uid=//p' "$rd_root/redirect.state")
+    rd_output_all=$(sed -n 's/^output_all=//p' "$rd_root/redirect.state")
     rd_phase=$(sed -n 's/^phase=//p' "$rd_root/redirect.state")
+    if [ -n "$rd_output_all" ]; then
+        [ "$rd_output_all" = true ] && [ -z "$rd_output_uid" ] || return 1
+        rd_output_uid=all
+    else
+        [ -z "$rd_output_uid" ] || tproxy_output_uid_valid "$rd_output_uid" || return 1
+    fi
     printf '%s\n' "$rd_token" | grep -Eq '^[a-f0-9]{32}$' || return 1
     case "$rd_port" in 0*) return 1 ;; esac
     [ "$rd_chain" = "padm-redirect-$(printf '%s' "$rd_token" | cut -c1-10)" ] &&
         integer "$rd_port" && [ "$rd_port" -ge 1 ] && [ "$rd_port" -le 65535 ] &&
         tproxy_versions "$rd_family" >/dev/null &&
-        { [ -z "$rd_output_uid" ] || tproxy_output_uid_valid "$rd_output_uid"; } &&
         { [ "$rd_phase" = intent ] || [ "$rd_phase" = active ]; } || return 1
     rd_output_chain=$rd_chain-out
     # 固定字节格式拒绝重复字段、额外内容和 NUL，绝不执行 state。
@@ -2147,6 +2205,7 @@ import sys
 token, chain, port, output_uid, family, mode, created, target_family = sys.argv[1:]
 comment = "padm-redirect:" + token
 output_chain = chain + "-out"
+output_all = output_uid == "all"
 families = {"ipv4": [4], "ipv6": [6], "dual": [4, 6]}
 
 def audit(version):
@@ -2155,7 +2214,7 @@ def audit(version):
                              "-w", "-t", "nat", "-S"], text=True, capture_output=True)
     if result.returncode:
         raise ValueError("cannot inspect Redirect resources")
-    present = [False] * 6
+    present = [False] * 7
     chains = {chain: False, output_chain: False}
     order = {chain: [], output_chain: []}
     for line in result.stdout.splitlines():
@@ -2202,12 +2261,19 @@ def audit(version):
             elif args[1] == current:
                 if values == dict(base, **{"--dst-type": "LOCAL", "-j": "RETURN"}) and sorted(modules) == ["addrtype", "comment"]:
                     which = offset + 1
+                elif (offset and output_all
+                      and values == dict(base, **{"--gid-owner": "10001", "-j": "RETURN"})
+                      and sorted(modules) == ["comment", "owner"]):
+                    which = 6
                 else:
                     expected = dict(base, **{"-p": "tcp", "-j": "REDIRECT", "--to-ports": port})
                     expected_modules = ["comment"]
                     if offset:
-                        expected.update({"--uid-owner": output_uid, "--ctdir": "ORIGINAL"})
-                        expected_modules += ["conntrack", "owner"]
+                        expected["--ctdir"] = "ORIGINAL"
+                        expected_modules += ["conntrack"]
+                        if not output_all:
+                            expected["--uid-owner"] = output_uid
+                            expected_modules += ["owner"]
                     # iptables -S 会回显隐式的 tcp 模块，允许其规范形式。
                     if values == expected and sorted(modules) in (expected_modules, sorted(expected_modules + ["tcp"])):
                         which = offset + 2
@@ -2218,21 +2284,28 @@ def audit(version):
             order[args[1]].append(which)
     for current, offset, identity in ((chain, 0, f"ipv{version}"),
                                       (output_chain, 3, f"ipv{version}-out")):
-        if order[current] != sorted(order[current]):
+        indices = [offset + 1, offset + 2]
+        if current == output_chain and output_all:
+            indices = [4, 6, 5]
+        if order[current] != [index for index in indices if present[index]]:
             raise ValueError("changed chain rule order")
         if active_mode == "empty":
             if chains[current]:
                 raise ValueError("chain already exists")
-        elif chains[current] and not any(present[offset + 1:offset + 3]) and identity not in created.split():
+        elif chains[current] and not any(present[index] for index in indices) and identity not in created.split():
             raise ValueError("empty chain has no verifiable owner")
-        elif not chains[current] and any(present[offset:offset + 3]):
+        elif not chains[current] and (present[offset] or any(present[index] for index in indices)):
             raise ValueError("missing referenced chain")
+    if output_all and present[5] and not (present[4] and present[6]):
+        raise ValueError("missing global OUTPUT bypass")
     complete = chains[chain] and all(present[:3])
     if output_uid:
-        complete &= chains[output_chain] and all(present[3:])
+        complete &= chains[output_chain] and all(present[3:6])
+        if output_all:
+            complete &= present[6]
     if active_mode == "full" and not complete:
         raise ValueError("incomplete Redirect resources")
-    return [version, *map(int, [*present[:3], chains[chain], *present[3:], chains[output_chain]])]
+    return [version, *map(int, [*present[:3], chains[chain], *present[3:6], chains[output_chain], present[6]])]
 
 # 两族两链先整体核验，任一漂移都不能先撤销其它资源。
 rows = [audit(version) for version in sorted(set(families[family] + families[target_family]))]
@@ -2249,6 +2322,8 @@ redirect_arguments() {
     if [ "${1:-}" = --output-uid ]; then
         [ "$#" -ge 2 ] && tproxy_output_uid_valid "$2" || return 1
         requested_output_uid=$2; shift 2
+    elif [ "${1:-}" = --output-all ]; then
+        requested_output_uid=all; shift
     fi
     case "$requested_port" in 0*) return 1 ;; esac
     integer "$requested_port" && [ "$requested_port" -ge 1 ] &&
@@ -2300,11 +2375,16 @@ redirect_cleanup() (
         return 1
     }
     rd_comment=padm-redirect:$rd_token
-    while read -r rd_version rd_hook rd_local rd_tcp rd_chain_present rd_output_hook rd_output_local rd_output_tcp rd_output_present; do
+    while read -r rd_version rd_hook rd_local rd_tcp rd_chain_present rd_output_hook rd_output_local rd_output_tcp rd_output_present rd_output_group; do
         rd_tool=iptables
         [ "$rd_version" = 4 ] || rd_tool=ip6tables
         [ "$rd_output_hook" = 0 ] || "$rd_tool" -w -t nat -D OUTPUT -m comment --comment "$rd_comment" -j "$rd_output_chain" || return 1
-        [ "$rd_output_tcp" = 0 ] || "$rd_tool" -w -t nat -D "$rd_output_chain" -p tcp -m owner --uid-owner "$rd_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || return 1
+        if [ "$rd_output_uid" = all ]; then
+            [ "$rd_output_tcp" = 0 ] || "$rd_tool" -w -t nat -D "$rd_output_chain" -p tcp -m conntrack --ctdir ORIGINAL -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || return 1
+            [ "$rd_output_group" = 0 ] || "$rd_tool" -w -t nat -D "$rd_output_chain" -m owner --gid-owner 10001 -m comment --comment "$rd_comment" -j RETURN || return 1
+        else
+            [ "$rd_output_tcp" = 0 ] || "$rd_tool" -w -t nat -D "$rd_output_chain" -p tcp -m owner --uid-owner "$rd_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || return 1
+        fi
         [ "$rd_output_local" = 0 ] || "$rd_tool" -w -t nat -D "$rd_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$rd_comment" -j RETURN || return 1
         [ "$rd_output_present" = 0 ] || "$rd_tool" -w -t nat -X "$rd_output_chain" || return 1
         [ "$rd_hook" = 0 ] || "$rd_tool" -w -t nat -D PREROUTING -m comment --comment "$rd_comment" -j "$rd_chain" || return 1
@@ -2356,8 +2436,15 @@ redirect_run() {
             [ "$start_signal" -eq 0 ] || exit "$start_signal"
             "$rd_tool" -w -t nat -A "$rd_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$rd_comment" -j RETURN || die "Redirect OUTPUT local rule failed to start"
             [ "$start_signal" -eq 0 ] || exit "$start_signal"
-            # 仅捕获选中 UID 主动 TCP；核心 root 拨号、UDP 和服务回复保留原路径。
-            "$rd_tool" -w -t nat -A "$rd_output_chain" -p tcp -m owner --uid-owner "$rd_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || die "Redirect OUTPUT TCP rule failed to start"
+            if [ "$rd_output_uid" = all ]; then
+                # 全主机包含 root，只给核心专用组放行，避免核心拨号再次进入透明入口。
+                "$rd_tool" -w -t nat -A "$rd_output_chain" -m owner --gid-owner 10001 -m comment --comment "$rd_comment" -j RETURN || die "Redirect OUTPUT core bypass failed to start"
+                [ "$start_signal" -eq 0 ] || exit "$start_signal"
+                "$rd_tool" -w -t nat -A "$rd_output_chain" -p tcp -m conntrack --ctdir ORIGINAL -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || die "Redirect OUTPUT TCP rule failed to start"
+            else
+                # 仅捕获选中 UID 主动 TCP；UDP 和服务回复保留原路径。
+                "$rd_tool" -w -t nat -A "$rd_output_chain" -p tcp -m owner --uid-owner "$rd_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || die "Redirect OUTPUT TCP rule failed to start"
+            fi
             [ "$start_signal" -eq 0 ] || exit "$start_signal"
             "$rd_tool" -w -t nat -I OUTPUT 1 -m comment --comment "$rd_comment" -j "$rd_output_chain" || die "Redirect OUTPUT hook failed to start"
             [ "$start_signal" -eq 0 ] || exit "$start_signal"
@@ -2420,10 +2507,10 @@ fail2ban-ssh)
     fail2ban_ssh_scope; fail2ban_run "$@"
     ;;
 tproxy)
-    shift; [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die "tproxy requires port, mark, optional family and output UID"; tproxy_run "$@"
+    shift; [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die "tproxy requires port, mark, optional family and output mode"; tproxy_run "$@"
     ;;
 redirect)
-    shift; [ "$#" -ge 1 ] && [ "$#" -le 4 ] || die "redirect requires port, optional family and output UID"; redirect_run "$@"
+    shift; [ "$#" -ge 1 ] && [ "$#" -le 4 ] || die "redirect requires port, optional family and output mode"; redirect_run "$@"
     ;;
 tun-resources)
     shift

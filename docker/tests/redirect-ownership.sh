@@ -165,8 +165,9 @@ reset() {
 }
 state_value() { sed -n "s/^$1=//p" "${FAKE_RD_STATE}/redirect.state"; }
 seed_owned() {
-    local status=0 family=${1:-dual} uid=${2-${OUTPUT_UID}} args=("${PORT}" "${1:-dual}")
-    [[ -z "${uid}" ]] || args+=(--output-uid "${uid}")
+    local status=0 family=${1:-dual} uid=${2-${OUTPUT_UID}} schema=1 args=("${PORT}" "${1:-dual}")
+    if [[ "${uid}" == all ]]; then args+=(--output-all); schema=2
+    elif [[ -n "${uid}" ]]; then args+=(--output-uid "${uid}"); fi
     call seed "${args[@]}" >"${TEST_ROOT}/output.log" 2>&1 || status=$?
     [[ "${status}" == 137 ]] || fail "seed did not reach active wait: ${status}"
     accept health "${args[@]}"
@@ -174,7 +175,9 @@ seed_owned() {
     [[ "${CHAIN}" == "padm-redirect-${TOKEN:0:10}" &&
         "${TOKEN}" =~ ^[a-f0-9]{32}$ &&
         "$(state_value family)" == "${family}" &&
-        "$(state_value output_uid)" == "${uid}" &&
+        "$(state_value schema_version)" == "${schema}" &&
+        "$(state_value output_uid)" == "$([[ "${uid}" == all ]] || printf '%s' "${uid}")" &&
+        "$(state_value output_all)" == "$([[ "${uid}" != all ]] || printf true)" &&
         "$(state_value phase)" == active &&
         "$(wc -l <"${FAKE_RD_STATE}/redirect.state")" == 7 &&
         "$(stat -c '%u:%a' "${FAKE_RD_STATE}/redirect.state")" == 0:600 ]] || fail 'wrong state identity'
@@ -211,7 +214,15 @@ if kind == "token":
 elif kind == "uid":
     rule = chains[out][1]; rule[rule.index("--uid-owner") + 1] = "65533"
 elif kind == "direction":
-    rule = chains[out][1]; rule[rule.index("--ctdir") + 1] = "REPLY"
+    rule = next(rule for rule in chains[out] if "--ctdir" in rule); rule[rule.index("--ctdir") + 1] = "REPLY"
+elif kind == "group":
+    rule = chains[out][1]; rule[rule.index("--gid-owner") + 1] = "10002"
+elif kind == "local":
+    rule = chains[out][0]; rule[rule.index("--dst-type") + 1] = "UNICAST"
+elif kind == "missing-group":
+    del chains[out][1]
+elif kind == "missing-local":
+    del chains[out][0]
 elif kind == "port":
     rule = chains[chain][1]; rule[rule.index("--to-ports") + 1] = "1"
 elif kind == "order":
@@ -232,7 +243,7 @@ PY
 
 # 三族和 UID 开关共用一组归属规则，UDP 不进入透明链。
 for family in ipv4 ipv6 dual; do
-    for uid in '' "${OUTPUT_UID}"; do
+    for uid in '' "${OUTPUT_UID}" all; do
         reset
         seed_owned "${family}" "${uid}"
         reject_unchanged cleanup 00000000000000000000000000000000
@@ -241,7 +252,7 @@ for family in ipv4 ipv6 dual; do
         assert_empty
     done
 done
-for uid in 0 10001 065534 -1 2147483648 invalid ''; do
+for uid in 0 10001 065534 -1 2147483648 invalid all ''; do
     reset
     reject_unchanged preflight "${PORT}" dual --output-uid "${uid}" unowned
     reject_unchanged run-once "${PORT}" dual --output-uid "${uid}"
@@ -249,6 +260,12 @@ done
 reset
 accept run-once "${PORT}" --output-uid 2147483647
 assert_empty
+for args in '--output-all --output-uid 65534' '--output-all --output-all'; do
+    reset
+    read -r -a parameters <<<"${args}"
+    reject_unchanged preflight "${PORT}" dual "${parameters[@]}" unowned
+    reject_unchanged run-once "${PORT}" dual "${parameters[@]}"
+done
 
 # 不安全 state 拒绝读写；后族漂移必须保留前族与全部恢复证据。
 for bad in duplicate phase family uid wide-state hardlink symlink nul; do
@@ -344,6 +361,58 @@ for signal in TERM INT; do
     done
 done
 
+# 全局绕过和 ORIGINAL 捕获的顺序属于归属，缺少关键返回规则必须保留所有现场。
+for bad in false duplicate mixed missing schema; do
+    reset
+    seed_owned dual all
+    state="${FAKE_RD_STATE}/redirect.state"
+    case "${bad}" in
+    false) sed -i 's/^output_all=.*/output_all=false/' "${state}" ;;
+    duplicate) printf 'output_all=true\n' >>"${state}" ;;
+    mixed) printf 'output_uid=65534\n' >>"${state}" ;;
+    missing) sed -i '/^output_all=/d' "${state}" ;;
+    schema) sed -i 's/^schema_version=.*/schema_version=1/' "${state}" ;;
+    esac
+    reject_unchanged health "${PORT}" dual --output-all
+    reject_unchanged cleanup
+done
+for drift in group local direction order reference missing-group missing-local; do
+    reset
+    seed_owned dual all
+    mutate "${drift}"
+    reject_unchanged health "${PORT}" dual --output-all
+    reject_unchanged cleanup
+    reject_unchanged preflight "${PORT}" dual --output-all owned
+done
+reset
+seed_owned dual "${OUTPUT_UID}"
+OLD_TOKEN=${TOKEN}
+accept preflight "${PORT}" dual --output-all owned
+[[ ! -s "${FAKE_RD_WRITES}" ]] || fail 'global candidate modified its old UID owner'
+seed_owned dual all
+[[ "${TOKEN}" != "${OLD_TOKEN}" ]] || fail 'global migration reused old token'
+accept run-once "${PORT}" dual --output-uid "${OUTPUT_UID}"
+assert_empty
+for signal in TERM INT; do
+    for point in start-output-2 start-output-3 start-output-hook; do
+        reset
+        export FAKE_RD_MODE="signal-ipv6-${point}" FAKE_RD_SIGNAL="${signal}"
+        status=0
+        call run-once "${PORT}" dual --output-all >"${TEST_ROOT}/output.log" 2>&1 || status=$?
+        [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" &&
+            -e "${FAKE_RD_ROOT}/signaled-once" ]] || fail "global OUTPUT ${point}/${signal} missed startup signal"
+        assert_empty
+    done
+done
+reset
+seed_owned dual all
+export FAKE_RD_MODE=fail-ipv6-cleanup-output
+reject cleanup
+[[ -f "${FAKE_RD_STATE}/redirect.state" ]] || fail 'partial global revoke discarded state'
+export FAKE_RD_MODE=ok
+accept cleanup
+assert_empty
+
 # 部分撤销保留可重试 state；空链失去 token 时只能保留并人工核验。
 reset
 seed_owned
@@ -369,10 +438,13 @@ reject_unchanged cleanup
 reject_unchanged run-once "${PORT}"
 
 # 正常等待阶段收到信号也回收全部资源和等待子进程。
+for output in uid all; do
+output_args=(--output-uid "${OUTPUT_UID}")
+[[ "${output}" != all ]] || output_args=(--output-all)
 for signal in TERM INT; do
     reset
     env --default-signal=INT --default-signal=TERM sh "${TEST_ROOT}/runner.sh" \
-        "${TEST_ROOT}/functions.sh" run-wait "${PORT}" dual --output-uid "${OUTPUT_UID}" >"${TEST_ROOT}/output.log" 2>&1 &
+        "${TEST_ROOT}/functions.sh" run-wait "${PORT}" dual "${output_args[@]}" >"${TEST_ROOT}/output.log" 2>&1 &
     RUN_PID=$!
     ready=false
     for ((attempt=0; attempt<200; attempt++)); do
@@ -387,5 +459,6 @@ for signal in TERM INT; do
     wait "${RUN_PID}" || true
     RUN_PID=
     assert_empty
+done
 done
 printf 'docker-redirect-ownership-regression-ok\n'

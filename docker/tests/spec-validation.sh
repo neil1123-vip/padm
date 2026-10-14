@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含 Redirect、指定 UID 透明转发和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
+# 摘要锁定含全主机透明转发和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "d137bc9852e7d3faa2e22a9eab567f21254390229923c8c887ff366fb8b9ec00"
+    "30518488ca5d2489df7cc4a851a660dda3b0847da1bd73d5cefbdcfbf3c75e99"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -289,6 +289,26 @@ for uid in (0, -1, 10001, 2147483648, "65534", None, 1.5, True):
     invalid = copy.deepcopy(redirect)
     invalid["host_integrations"][0]["settings"]["output_uid"] = uid
     cases[f"invalid-redirect-output-{len(cases)}"] = invalid
+for kind, base in (("tproxy", spec), ("redirect", redirect)):
+    for core in ("xray", "sing-box"):
+        for family in ("ipv4", "ipv6", "dual"):
+            valid = copy.deepcopy(base)
+            valid["core"]["type"] = valid["core"]["protocols"][0]["core"] = core
+            valid["host_integrations"][0]["settings"].update(family=family, output_all=True)
+            cases[f"valid-host-{kind}-output-all-{core}-{family}"] = valid
+    for value in (False, 1, "true", None, []):
+        invalid = copy.deepcopy(base)
+        invalid["host_integrations"][0]["settings"]["output_all"] = value
+        cases[f"invalid-{kind}-output-all-{len(cases)}"] = invalid
+    invalid = copy.deepcopy(base)
+    invalid["host_integrations"][0]["settings"].update(output_all=True, output_uid=65534)
+    cases[f"invalid-{kind}-output-conflict"] = invalid
+    invalid = copy.deepcopy(cases[f"valid-host-{kind}-output-all-xray-ipv4"])
+    invalid["core"]["protocols"] = copy.deepcopy(websocket["core"]["protocols"])
+    cases[f"invalid-{kind}-output-all-websocket"] = invalid
+    invalid = copy.deepcopy(cases[f"valid-host-{kind}-output-all-xray-ipv4"])
+    invalid["host_integrations"].append(copy.deepcopy(wireguard))
+    cases[f"invalid-{kind}-output-all-integration"] = invalid
 for family in ("", "IPv4", "all", None, 4, []):
     invalid = copy.deepcopy(redirect)
     invalid["host_integrations"][0]["settings"]["family"] = family

@@ -904,6 +904,8 @@ dockerProtocolCommand() (
           (if $kind == "tproxy" then {mark:($tproxy.settings.mark // null)} else {} end) +
           (if $tproxy.settings | has("output_uid") then
             {output_uid:$tproxy.settings.output_uid,hooks:["PREROUTING","OUTPUT"]}
+           elif $tproxy.settings.output_all == true then
+            {output_all:true,hooks:["PREROUTING","OUTPUT"],bypass_gid:10001}
            else {} end)' "${normalized}"
         return $?
     fi
@@ -1742,12 +1744,12 @@ dockerEditCommand() {
             tproxyKind=${transparentKind} tproxyOutput=$2
             shift 2
             ;;
-        --tproxy-output-off|--redirect-output-off)
+        --tproxy-output-off|--redirect-output-off|--tproxy-output-all|--redirect-output-all)
             transparentKind=${1#--}
             transparentKind=${transparentKind%%-*}
             [[ -z "${tproxyOutput}" && ( -z "${tproxyKind}" || "${tproxyKind}" == "${transparentKind}" ) ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            tproxyKind=${transparentKind} tproxyOutput=off
+            tproxyKind=${transparentKind} tproxyOutput=${1##*-}
             shift
             ;;
         --tun-enable|--tun-off)
@@ -2284,7 +2286,10 @@ dockerEditCommand() {
               {family:$current[0].settings.family}
             else {} end) +
             (if $output == "off" then {}
+             elif $output == "all" then {output_all:true}
              elif $output != "" then {output_uid:($output | tonumber)}
+             elif $action == "settings" and $current[0].settings.output_all == true then
+               {output_all:true}
              elif $action == "settings" and ($current[0].settings // {} | has("output_uid")) then
                {output_uid:$current[0].settings.output_uid}
              else {} end)) as $settings |
@@ -3087,7 +3092,7 @@ dockerEditCompatibilityValidate() {
        elif $tproxy_action != "" then
         def without_tproxy: .host_integrations |= map(select(.type != $tproxy_kind));
         def without_tproxy_settings:
-          .host_integrations |= map(if .type == $tproxy_kind then del(.settings.port,.settings.mark,.settings.family,.settings.output_uid) else . end);
+          .host_integrations |= map(if .type == $tproxy_kind then del(.settings.port,.settings.mark,.settings.family,.settings.output_uid,.settings.output_all) else . end);
         if $tproxy_action == "settings" then
           ([$old.host_integrations[] | select(.type == $tproxy_kind)] | length) == 1 and
           ([$new.host_integrations[] | select(.type == $tproxy_kind)] | length) == 1 and

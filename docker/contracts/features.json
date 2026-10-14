@@ -414,7 +414,7 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "5C.2b.1–5C.2b.2 菜单 17→43 和 CLI 提供单 Xray/sing-box Reality 的 IPv4/IPv6/双栈 PREROUTING TCP/UDP 管理，无其它宿主集成。可选指定 UID 的 OUTPUT 主动 TCP/UDP，范围 1–2147483647 排除 10001，root 核心、服务回包和本地目的绕过；默认关闭，修改省略保留旧 UID，关闭本机转发保留 PREROUTING。旧 schema 2/3 兼容，新模式 schema 4 和独立 bundle marker；任一族或链漂移保留全部资源及 state，完整核验后精确撤销。所选族须具备宿主转发和 TPROXY target，OUTPUT 另需 owner/conntrack/MARK。全主机 OUTPUT、原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
+      "reason": "5C.2b/2e 菜单 17→43 和 CLI 管理单 Xray/sing-box Reality 的 IPv4/IPv6/双栈 PREROUTING TCP/UDP，无其它宿主集成。OUTPUT 默认关闭，可选 UID 1–2147483647 排除 10001，或全主机包含 root 的主动 TCP/UDP；两者互斥，省略保留模式，关闭保留 PREROUTING。全主机核心 0:10001，专用 GID 10001、LOCAL/REPLY 绕过，管理核验实际核心身份。旧 schema 2/3/4 兼容，全主机 schema 5 和共享 x-padm-transparent-output-all marker；任一族或链漂移保留全部资源及 state，缺关键绕过拒绝撤销，完整核验后精确清理。需宿主转发、TPROXY target，OUTPUT 另需 owner/conntrack/MARK。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "redirect": {
       "status": "host-integrated",
@@ -423,7 +423,7 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "有限 Redirect TCP 管理：单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING，可选指定 UID 的 OUTPUT 主动 TCP，无其它宿主集成，与 TUN/TProxy 互斥。root、10001、服务回包和本地目的绕过，完整审计两族两链后精确撤销，任一漂移保留资源与 state。UDP 保持原路由；捕获 TCP/UDP 须另选 TProxy。需 nat REDIRECT target，OUTPUT 另需 owner/conntrack。全主机 OUTPUT、原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
+      "reason": "5C.2d/2e 有限 Redirect TCP 管理：单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING，OUTPUT 可选 UID 或全主机主动 TCP，两者互斥；无其它宿主集成，与 TUN/TProxy 互斥。全主机包含 root，核心 0:10001，GID 10001、LOCAL/REPLY 绕过，管理核验实际核心身份；UID 模式保留 root 绕过。schema 1 兼容，全主机 schema 2 和共享 x-padm-transparent-output-all marker。两族两链完整审计后精确撤销，任一漂移或缺关键绕过保留资源与 state。UDP 保持原路由；TCP/UDP 须选 TProxy。需 nat REDIRECT target，OUTPUT 另需 owner/conntrack。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "interactive-menu": {
       "status": "deferred",
@@ -486,7 +486,7 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "5C.2b.1–5C.2b.2 提供有限 TProxy 管理，范围与 tproxy 相同；另提供有限 Redirect TCP 管理。均限单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING、可选指定 UID 的 OUTPUT 主动连接、无其它宿主集成。TProxy 为 TCP/UDP，Redirect 只支持 TCP；root、10001、服务回包和本地目的不捕获。两族两链完整核验后精确撤销，任一漂移保留资源和 state，旧 TProxy schema 2/3 兼容。全主机 OUTPUT、原生宿主/arm64/公网/重启/完整卸载及完整 205 管理仍待验。"
+      "reason": "有限 TProxy TCP/UDP 与 Redirect TCP 管理，均限单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING，无其它宿主集成。OUTPUT 可选指定 UID 或全主机主动连接；全主机包含 root，核心以 0:10001 运行，GID 10001、LOCAL/REPLY 绕过且实际身份须核验。两族两链完整审计后精确撤销，任一漂移保留现场；旧 UID/无 OUTPUT 状态兼容，全主机需共享 marker。原生宿主/arm64/公网/重启/完整卸载及完整 205 管理仍待验。"
     },
     "internal-206-routing-rules": {
       "status": "deferred",

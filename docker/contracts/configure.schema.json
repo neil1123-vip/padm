@@ -15,6 +15,7 @@
   "x-padm-ssh-fail2ban": true,
   "x-padm-tproxy-ipv6": true,
   "x-padm-tproxy-output-uid": true,
+  "x-padm-transparent-output-all": true,
   "x-padm-redirect": true,
   "x-padm-site-content": true,
   "x-padm-site-templates": true,
@@ -693,7 +694,15 @@
     {
       "if": {
         "properties": {
-          "host_integrations": {"contains": {"properties": {"type": {"const": "redirect"}}}}
+          "host_integrations": {"contains": {
+            "anyOf": [
+              {"properties": {"type": {"const": "redirect"}}},
+              {"properties": {
+                "type": {"const": "tproxy"},
+                "settings": {"required": ["output_all"], "properties": {"output_all": {"const": true}}}
+              }}
+            ]
+          }}
         }
       },
       "then": {
@@ -1472,8 +1481,10 @@
                 "port": {"$ref": "#/$defs/port"},
                 "mark": {"type": "integer", "minimum": 1, "maximum": 2147483647, "not": {"enum": [253, 254, 255]}},
                 "family": {"enum": ["ipv4", "ipv6", "dual"]},
-                "output_uid": {"type": "integer", "minimum": 1, "maximum": 2147483647, "not": {"const": 10001}}
-              }
+                "output_uid": {"type": "integer", "minimum": 1, "maximum": 2147483647, "not": {"const": 10001}},
+                "output_all": {"const": true}
+              },
+              "not": {"required": ["output_uid", "output_all"]}
             }
           }
         }
@@ -1499,8 +1510,10 @@
               "properties": {
                 "port": {"$ref": "#/$defs/port"},
                 "family": {"enum": ["ipv4", "ipv6", "dual"]},
-                "output_uid": {"type": "integer", "minimum": 1, "maximum": 2147483647, "not": {"const": 10001}}
-              }
+                "output_uid": {"type": "integer", "minimum": 1, "maximum": 2147483647, "not": {"const": 10001}},
+                "output_all": {"const": true}
+              },
+              "not": {"required": ["output_uid", "output_all"]}
             }
           }
         }

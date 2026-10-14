@@ -1059,6 +1059,7 @@ padm-docker protocol tproxy-status
 padm-docker edit --tproxy-enable 31298 129 --tproxy-family dual
 padm-docker edit --tproxy-settings 31299 131
 padm-docker edit --tproxy-settings 31299 131 --tproxy-output-uid 65534
+padm-docker edit --tproxy-settings 31299 131 --tproxy-output-all
 padm-docker edit --tproxy-settings 31299 131 --tproxy-output-off
 padm-docker edit --tproxy-off
 ```
@@ -1071,7 +1072,12 @@ UID 范围为 `1–2147483647`，排除受管业务 UID `10001`；root 核心拨
 本地目的不捕获。未指定时保持关闭，修改省略时保留旧 UID；`--tproxy-output-off`
 只关闭本机转发，保留 PREROUTING。该模式需 owner/conntrack/MARK，并使用 schema 4
 绑定两条链及地址族，旧包须有 `x-padm-tproxy-output-uid` 才能使用或恢复。
-不提供全主机 OUTPUT。所选族须已开启宿主转发并支持对应 TPROXY target，
+菜单第 7 项或 `--tproxy-output-all` 捕获全主机主动 TCP/UDP，包含 root，
+与指定 UID 互斥；核心以 `0:10001` 运行，用专用 GID `10001` 绕过拨号，
+同组进程也会绕过。LOCAL 与服务 REPLY 保持原路由；修改省略保留当前 OUTPUT 模式。
+新状态使用 schema 5 的 `output_all=true`，旧包须有共享
+`x-padm-transparent-output-all`；管理时同时检查实际核心身份和规则归属。
+所选族须已开启宿主转发并支持对应 TPROXY target，
 预检不修改 sysctl。
 旧 schema 2 的 IPv4 state 保持兼容；IPv6/双栈使用 schema 3，同一 token
 分别绑定两族资源，任一族漂移时保留全部资源与 state，不先清另一族。
@@ -1087,6 +1093,7 @@ Redirect TCP 管理入口为菜单 `17 → 47`：
 padm-docker protocol redirect-status
 padm-docker edit --redirect-enable 31298 --redirect-family dual
 padm-docker edit --redirect-settings 31299 --redirect-output-uid 65534
+padm-docker edit --redirect-settings 31299 --redirect-output-all
 padm-docker edit --redirect-settings 31299 --redirect-output-off
 padm-docker edit --redirect-off
 ```
@@ -1096,13 +1103,17 @@ padm-docker edit --redirect-off
 需要透明 TCP/UDP 时选择 TProxy。地址族可选 `ipv4/ipv6/dual`，默认 IPv4；
 修改省略时保留旧族。可选一个 UID 的 OUTPUT 主动 TCP，范围与 TProxy 相同，
 默认关闭，修改省略保留旧 UID；本地目的、服务回包和 root 核心拨号绕过。
+菜单第 7 项或 `--redirect-output-all` 捕获全主机主动 TCP，包含 root；
+核心专用 GID `10001`、LOCAL 和 REPLY 绕过，UDP 保持原路由。
+与指定 UID 互斥，修改省略保留模式；核心身份、共享 marker 与 TProxy 全主机模式相同。
 核心使用 host 网络、root 与 `NET_ADMIN`，所选族需 NAT REDIRECT target，
 OUTPUT 另需 owner/conntrack；预检不修改 sysctl。
 私密 `redirect.state` 以随机 token 绑定两族及 PREROUTING/OUTPUT 链；
 先完整审计再精确撤销，任一漂移保留所有资源与 state，不 flush 或删除 conntrack。
 启用、修改、关闭沿现有候选和失败恢复事务，旧 bundle 必须有 `x-padm-redirect`。
 两核心、三地址族真实 TCP、UDP 原路径和生产 Compose 撤销已在隔离 Linux amd64 验证。
-全主机 OUTPUT、原生宿主、arm64、公网、重启和完整卸载仍待验。
+全主机状态使用 schema 2 的 `output_all=true`，旧 schema 1 兼容。
+原生宿主、arm64、公网、重启和完整卸载仍待验。
 
 TUN 管理入口为菜单 `17 → 44`：
 

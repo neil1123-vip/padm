@@ -753,6 +753,7 @@ padm-docker protocol tproxy-status
 padm-docker edit --tproxy-enable 31298 129 --tproxy-family dual
 padm-docker edit --tproxy-settings 31299 131
 padm-docker edit --tproxy-settings 31299 131 --tproxy-output-uid 65534
+padm-docker edit --tproxy-settings 31299 131 --tproxy-output-all
 padm-docker edit --tproxy-settings 31299 131 --tproxy-output-off
 padm-docker edit --tproxy-off
 ```
@@ -766,7 +767,13 @@ Root core traffic, service replies and local destinations keep their original pa
 OUTPUT defaults to off; settings changes retain the UID when omitted.
 `--tproxy-output-off` keeps PREROUTING active. This mode needs owner/conntrack/MARK,
 schema 4 ownership of both chains, and the `x-padm-tproxy-output-uid` bundle marker.
-Whole-host OUTPUT remains deferred. Each selected family requires
+Menu option 7 or `--tproxy-output-all` captures whole-host initiated TCP/UDP,
+including root, and excludes UID selection. The core runs as `0:10001`;
+GID `10001`, local destinations and service replies bypass capture. Other processes
+in that group also bypass capture. Omitted settings retain the current OUTPUT mode.
+This uses schema 5 with `output_all=true` and the shared
+`x-padm-transparent-output-all` bundle marker. Management checks the actual core
+identity as well as rule ownership. Each selected family requires
 host forwarding and its TPROXY target; preflight does not change sysctl.
 IPv4 schema 2 state remains compatible. IPv6/dual use schema 3 and one token
 binds each family's resources. Drift in either family preserves all resources
@@ -784,6 +791,7 @@ Manage Redirect TCP through menu `17 → 47`:
 padm-docker protocol redirect-status
 padm-docker edit --redirect-enable 31298 --redirect-family dual
 padm-docker edit --redirect-settings 31299 --redirect-output-uid 65534
+padm-docker edit --redirect-settings 31299 --redirect-output-all
 padm-docker edit --redirect-settings 31299 --redirect-output-off
 padm-docker edit --redirect-off
 ```
@@ -796,6 +804,11 @@ to IPv4; settings changes retain the family when omitted. Optional OUTPUT
 captures TCP initiated by one UID with the same limits as TProxy. It defaults
 to off and retains the old UID when omitted. Local destinations, service replies
 and root core traffic bypass capture.
+Menu option 7 or `--redirect-output-all` captures whole-host initiated TCP,
+including root; core GID `10001`, local destinations and replies bypass capture.
+UDP keeps its original route. UID selection and whole-host mode are exclusive;
+omitted settings retain the mode. Core identity and the shared bundle marker
+follow the TProxy whole-host rules.
 The core uses host networking, root and `NET_ADMIN`. Each selected family needs
 NAT REDIRECT; OUTPUT also needs owner/conntrack. Preflight does not change sysctl.
 Private `redirect.state` binds both families and PREROUTING/OUTPUT chains to one
@@ -804,8 +817,9 @@ all resources and state. No chain flush or conntrack deletion is performed.
 Enable, settings and disable use the existing candidate and failure recovery
 transaction. Old bundles require `x-padm-redirect`.
 Real TCP capture, unchanged UDP paths and production Compose removal passed for
-both cores and all three families in isolated Linux amd64. Whole-host OUTPUT,
-native host, arm64, public network, reboot and complete uninstall remain pending.
+both cores and all three families in isolated Linux amd64. Whole-host state uses
+schema 2 with `output_all=true`; schema 1 remains compatible. Native host, arm64,
+public network, reboot and complete uninstall remain pending.
 
 Manage TUN through menu `17 → 44`:
 

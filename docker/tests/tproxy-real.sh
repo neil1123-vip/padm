@@ -126,7 +126,8 @@ rejectEntry() {
 startServer() {
     port=$1 mark=$2 family=${3:-ipv4} outputUid=${4:-}
     local -a runtimeArgs=("${port}" "${mark}" "${family}")
-    [[ -z "${outputUid}" ]] || runtimeArgs+=(--output-uid "${outputUid}")
+    if [[ "${outputUid}" == all ]]; then runtimeArgs+=(--output-all)
+    elif [[ -n "${outputUid}" ]]; then runtimeArgs+=(--output-uid "${outputUid}"); fi
     net rm -f /tmp/tproxy.pid /tmp/tproxy.status
     docker exec -d "${container}" sh -c '
       sh /tmp/padm-entrypoint tproxy "$@" </dev/null >/tmp/tproxy.log 2>&1 &
@@ -163,7 +164,8 @@ readState() {
       [inputs | split("=")] as $pairs |
       if ($pairs | map(.[0])) ==
         (["schema_version","token","chain","port","mark","table","pref","route_proto","rule_proto","realm","phase"] +
-          if ($pairs[0][1] == "4") then ["family","output_uid"]
+          if ($pairs[0][1] == "5") then ["family","output_all"]
+          elif ($pairs[0][1] == "4") then ["family","output_uid"]
           elif ($pairs[0][1] == "3") then ["family"] else [] end)
         and all($pairs[]; length == 2)
       then $pairs | map({key:.[0],value:.[1]}) | from_entries
@@ -178,8 +180,10 @@ readState() {
         "$(net stat -c '%u:%a:%h' /var/lib/padm/net/tproxy.state)" == 0:600:1 ]] ||
         fail 'resource identity or state permissions are wrong'
     jq -e --arg port "${port}" --arg mark "${mark}" --arg family "${family}" --arg uid "${outputUid}" '
-      .schema_version == (if $uid != "" then "4" elif $family == "ipv4" then "2" else "3" end) and
-      (.output_uid // "") == $uid and
+      .schema_version == (if $uid == "all" then "5" elif $uid != "" then "4"
+        elif $family == "ipv4" then "2" else "3" end) and
+      (if $uid == "all" then .output_all == "true" and (has("output_uid") | not)
+       else (.output_uid // "") == $uid and (has("output_all") | not) end) and
       (.family // "ipv4") == $family and .port == $port and .mark == $mark and .table == $mark and
       .pref == "30000" and .route_proto == "186" and .rule_proto == "186" and .phase == "active"
     ' <<<"${state}" >/dev/null || fail 'state did not preserve the active resource identity'
@@ -379,7 +383,8 @@ makeCoreConfig() {
        host_integrations:[{type:"tproxy",profile:"net-transparent",firewall_rules:["padm-tproxy"],
          devices:[],schedules:[],settings:({port:$port,mark:$mark} +
            (if $family == "ipv4" then {} else {family:$family} end) +
-           (if $uid == "" then {} else {output_uid:($uid | tonumber)} end))}]}
+           (if $uid == "all" then {output_all:true}
+            elif $uid == "" then {} else {output_uid:($uid | tonumber)} end))}]}
     ' >"${configDir}/spec.json"
     dockerConfigureSpecValidate "${configDir}/spec.json"
     if [[ "${core}" == xray ]]; then
@@ -404,10 +409,14 @@ startCore() {
     else
         args=(run -D /var/lib/padm/sing-box -c /etc/padm/tproxy/config.json)
     fi
-    coreContainer=$(docker run -d --network "container:${container}" --user 0:0 \
+    coreContainer=$(docker run -d --network "container:${container}" --user 0:10001 \
         --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges:true --read-only \
         --tmpfs /tmp:rw,nosuid,nodev,size=16m --tmpfs /var/lib/padm/sing-box:rw,nosuid,nodev,size=16m \
         --mount "type=bind,source=${configDir},target=/etc/padm/tproxy,readonly" "${image}" "${args[@]}")
+    corePid=$(docker inspect --format '{{.State.Pid}}' "${coreContainer}")
+    [[ "$(awk '/^Uid:/ {print $2 ":" $3 ":" $4 ":" $5}' "/proc/${corePid}/status")" == 0:0:0:0 &&
+        "$(awk '/^Gid:/ {print $2 ":" $3 ":" $4 ":" $5}' "/proc/${corePid}/status")" == 10001:10001:10001:10001 ]] ||
+        fail 'real core did not retain the OUTPUT bypass group'
     for ((attempt = 0; attempt < 100; attempt++)); do
         if net ss -lnt | grep -qE "[[:space:]](0\\.0\\.0\\.0|\\*|\\[::\\]):${port}[[:space:]]"; then
             net ss -lnu | grep -qE "[[:space:]](0\\.0\\.0\\.0|\\*|\\[::\\]):${port}[[:space:]]" && return 0
@@ -457,14 +466,14 @@ forwardCheck() {
     assertProof "${kind}" "${TEST_ROOT}/proof" "${rows}" "${peer}"
 }
 outputCheck() {
-    local kind=$1 targetPort=$2 version=$3 uid=$4 captured=$5 transport=${1}
+    local kind=$1 targetPort=$2 version=$3 uid=$4 captured=$5 transport=${1} gid=${6:-$4}
     local before after markedBefore markedAfter rows destination=198.18.65.20 peer=198.18.65.10
     [[ "${kind}" != dns ]] || transport=udp
     if [[ "${version}" == 6 ]]; then destination=fd40:65::20 peer=fd40:65::10; fi
     rows=$(proofRows "${TEST_ROOT}/proof" "${kind}")
     before=$(trafficCounter "${transport}" "${version}" TPROXY)
     markedBefore=$(trafficCounter "${transport}" "${version}" MARK)
-    nsenter --target "${netPid}" --net -- setpriv --reuid "${uid}" --regid "${uid}" --clear-groups \
+    nsenter --target "${netPid}" --net -- setpriv --reuid "${uid}" --regid "${gid}" --clear-groups \
         --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
         python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}"
     after=$(trafficCounter "${transport}" "${version}" TPROXY)
@@ -504,7 +513,7 @@ for core in xray sing-box; do
     for tuple in '31298 129 ipv4' '31299 131 dual' '31300 132 ipv6'; do
         read -r port mark family <<<"${tuple}"
         configDir="${TEST_ROOT}/${core}-${port}"
-        makeCoreConfig "${core}" "${port}" "${mark}" "${configDir}" "${family}" 65534
+        makeCoreConfig "${core}" "${port}" "${mark}" "${configDir}" "${family}" all
         startCore "${core}" "${configDir}"
         startServer "${port}" "${mark}" "${family}" 65534
         readState
@@ -535,6 +544,40 @@ for core in xray sing-box; do
             outputCheck tcp 18080 "${version}" 65534 no
             outputCheck udp 18081 "${version}" 65534 no
         done
+        # 复用同一核心检验全主机模式；root 也捕获，专用组和回复仍绕过。
+        startServer "${port}" "${mark}" "${family}" all
+        readState
+        for version in $(case "${family}" in ipv4) echo 4 ;; ipv6) echo 6 ;; dual) echo '4 6' ;; esac); do
+            outputCheck tcp 18080 "${version}" 0 yes
+            outputCheck udp 18081 "${version}" 0 yes
+            outputCheck tcp 18080 "${version}" 65533 yes
+            outputCheck udp 18081 "${version}" 65533 yes
+            outputCheck dns 53 "${version}" 65533 yes
+            outputCheck tcp 18080 "${version}" 0 no 10001
+            outputCheck udp 18081 "${version}" 0 no 10001
+            replyCheck tcp 18090 "${version}" local
+            replyCheck udp 18091 "${version}" local
+            replyCheck tcp 18090 "${version}" reply
+            replyCheck udp 18091 "${version}" reply
+            forwardCheck tcp 18080 "${version}"
+            forwardCheck udp 18081 "${version}"
+            tool=iptables-save
+            [[ "${version}" != 6 ]] || tool=ip6tables-save
+            net "${tool}" -c -t mangle | awk -v chain="${chain}-out" '
+              index($0, "-A " chain " ") && index($0, "--gid-owner 10001") && index($0, "-j RETURN") {
+                split($1, fields, ":"); sub(/^\[/, "", fields[1]); total += fields[1]
+              }
+              END { exit !(total > 0) }
+            ' || fail 'real core and group probe did not exercise the OUTPUT bypass'
+        done
+        previousChain=${chain} previousToken=${token}
+        stopServer
+        ! net test -e /var/lib/padm/net/tproxy.state || fail 'global off left ownership state'
+        assertKernel "${baseline}" 'global off changed outside resources or left owned rules/routes'
+        for version in $(case "${family}" in ipv4) echo 4 ;; ipv6) echo 6 ;; dual) echo '4 6' ;; esac); do
+            outputCheck tcp 18080 "${version}" 0 no
+            outputCheck udp 18081 "${version}" 65533 no
+        done
         stopCore
         grep -q 'tproxy-in' "${TEST_ROOT}/${core}-${port}.log" || fail 'missing TProxy core log'
         for destination in $(case "${family}" in ipv4) echo 198.18.65.20 ;; ipv6) echo fd40:65::20 ;; dual) echo '198.18.65.20 fd40:65::20' ;; esac); do
@@ -543,7 +586,7 @@ for core in xray sing-box; do
                 grep -q "${destination}.*:53" "${TEST_ROOT}/${core}-${port}.log" ||
                 fail "${core} did not record TCP, UDP and DNS destinations"
         done
-        printf 'docker-tproxy-forwarding-ok: core=%s port=%s mark=%s family=%s prerouting=ok output_uid=65534 tcp=ok udp=ok dns=ok unselected=direct local=bypass reply=direct off=clean\n' \
+        printf 'docker-tproxy-forwarding-ok: core=%s port=%s mark=%s family=%s prerouting=ok output_uid=65534 output_all=root,ordinary bypass_gid=10001 tcp=ok udp=ok dns=ok unselected=direct local=bypass reply=direct off=clean\n' \
             "${core}" "${port}" "${mark}" "${family}"
     done
 done
@@ -564,13 +607,17 @@ if [[ "${imageHash}" != "$(sha256sum "${PROJECT_ROOT}/docker/images/net/entrypoi
     docker image inspect "${metadataImage}" >/dev/null
 fi
 root=${PADM_DOCKER_INSTALL_DIR}
-mkdir -p "${root}/config" "${root}/data/net/transparent" "${TEST_ROOT}/metadata-bundle"
+mkdir -p "${root}/config/xray" "${root}/data/xray" "${root}/data/net/transparent" "${TEST_ROOT}/metadata-bundle"
 chmod 0750 "${root}/data/net/transparent"
 printf '%040d\n' 1 >"${TEST_ROOT}/metadata-bundle/${PADM_DOCKER_BUNDLE_REF}"
 dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/metadata-bundle"; }
-jq --arg image "${metadataImage}" '.images.net=$image' "${TEST_ROOT}/xray-31298/spec.json" \
+jq --arg image "${metadataImage}" --arg xray "$(jq -er '.xray.reference' /node-images.json)" \
+    '.images.net=$image | .images.xray=$xray' "${TEST_ROOT}/xray-31298/spec.json" \
     >"${root}/config/spec.json"
 dockerConfigureSpecValidate "${root}/config/spec.json"
+dockerGenerateXrayConfig "${root}/config/spec.json" "${TEST_ROOT}/metadata-base.json"
+dockerTrafficRender xray "${TEST_ROOT}/metadata-base.json" '{"schema_version":1,"accounts":{}}' \
+    >"${root}/config/xray/config.json"
 dockerGenerateCompose "${root}/config/spec.json" "${root}/compose.json" "${root}"
 : >"${root}/images.env"
 dockerGenerateImagesEnv "${root}/config/spec.json" "${root}/images.env" "${root}"
@@ -589,11 +636,16 @@ iptables -w -t mangle -A OUTPUT -m comment --comment tproxy-meta-outside -j tpro
 ip -4 rule add pref 30110 fwmark 245 table 242 protocol 187
 ip -4 route add 198.51.101.0/24 dev lo table 242 proto 187 realm 4321
 metadataBaseline=$(hostSnapshot)
+composeStatus=0
 docker compose --project-name "${PADM_DOCKER_PROJECT}" --project-directory "${root}" \
     --env-file "${root}/images.env" --file "${root}/compose.json" --profile net-transparent \
-    up -d --no-deps --pull never net-transparent >"${TEST_ROOT}/metadata-compose.log" 2>&1
+    up -d --pull never xray net-transparent >"${TEST_ROOT}/metadata-compose.log" 2>&1 || composeStatus=$?
+coreContainer=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+    --filter label=com.docker.compose.service=xray --filter label=com.docker.compose.oneoff=False)
 composeContainer=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
     --filter label=com.docker.compose.service=net-transparent --filter label=com.docker.compose.oneoff=False)
+[[ "${composeStatus}" == 0 && "${coreContainer}" =~ ^[a-f0-9]{12,64}$ &&
+    "${composeContainer}" =~ ^[a-f0-9]{12,64}$ ]] || fail 'Compose global TProxy did not start a unique core and owner'
 for ((attempt = 0; attempt < 100; attempt++)); do
     metadataCid=$(dockerTProxyContainer running 2>"${TEST_ROOT}/metadata-inspect.log") && break
     [[ "$(docker inspect --format '{{.State.Running}}' "${composeContainer}")" == true ]] ||
@@ -616,5 +668,5 @@ iptables -w -t mangle -F tproxy-meta-outside
 iptables -w -t mangle -X tproxy-meta-outside
 ip -4 rule del pref 30110 fwmark 245 table 242 protocol 187
 ip -4 route del 198.51.101.0/24 dev lo table 242 proto 187 realm 4321
-printf 'docker-tproxy-compose-owner-ok: inspect=running disable=clean outside=preserved\n'
+printf 'docker-tproxy-compose-owner-ok: inspect=running core_identity=0:10001 disable=clean outside=preserved\n'
 printf 'docker-tproxy-real-ok\n'

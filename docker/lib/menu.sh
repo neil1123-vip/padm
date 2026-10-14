@@ -1010,7 +1010,8 @@ dockerMenuTProxy() {
         printf '\nDocker %s 管理\n' "${title}"
         [[ "${kind}" != redirect ]] || printf '仅捕获 TCP；UDP 保持原路由。\n'
         printf '%s\n' '1. 查看状态' "2. 启用 ${title}" "3. 修改 ${title} 参数" "4. 关闭 ${title}" \
-            '5. 设置本机转发 UID' '6. 关闭本机转发（保留 PREROUTING）' '0. 返回'
+            '5. 设置本机转发 UID' '6. 关闭本机转发（保留 PREROUTING）' \
+            '7. 全主机本机转发（绕过核心专用 GID 10001）' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1043,7 +1044,7 @@ dockerMenuTProxy() {
             dockerMenuRun edit "${editArgs[@]}" "--${kind}-family" "${family}" || true
             ;;
         4) dockerMenuRun edit "--${kind}-off" || true ;;
-        5|6)
+        5|6|7)
             if ! state=$(dockerMenuRun protocol "${kind}-status"); then
                 printf '%s\n' "${state}"
                 continue
@@ -1061,6 +1062,8 @@ dockerMenuTProxy() {
                 dockerSetupRead outputUid '本机转发 UID（1–2147483647，排除 10001；0 返回）: ' &&
                     [[ -n "${outputUid}" ]] || continue
                 dockerMenuRun edit "${editArgs[@]}" "--${kind}-output-uid" "${outputUid}" || true
+            elif [[ "${choice}" == 7 ]]; then
+                dockerMenuRun edit "${editArgs[@]}" "--${kind}-output-all" || true
             else
                 dockerMenuRun edit "${editArgs[@]}" "--${kind}-output-off" || true
             fi

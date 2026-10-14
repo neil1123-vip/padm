@@ -54,17 +54,9 @@ seed)
     tproxy_run "$@"
     ;;
 run-once)
-    test_port=$2 test_mark=$3 test_family=ipv4 test_uid=
-    case "${4:-}" in
-    ipv4|ipv6|dual) test_family=$4; test_uid=${6:-} ;;
-    --output-uid) test_uid=${5:-} ;;
-    esac
     shift
-    wait_forever() {
-        if [ -n "$test_uid" ]; then
-            tproxy_health "$test_port" "$test_mark" "$test_family" --output-uid "$test_uid"
-        else tproxy_health "$test_port" "$test_mark" "$test_family"; fi
-    }
+    health_args="$*"
+    wait_forever() { tproxy_health $health_args; }
     tproxy_run "$@"
     ;;
 run-wait) shift; tproxy_run "$@" ;;
@@ -353,7 +345,8 @@ state_value() { sed -n "s/^$1=//p" "${FAKE_TP_STATE}/tproxy.state"; }
 seed_owned() {
     local status=0 family=${1:-ipv4} output_uid=${2:-} schema=2 lines=11
     local parameters=("${PORT}" "${MARK}" "${family}")
-    [[ -z "${output_uid}" ]] || parameters+=(--output-uid "${output_uid}")
+    if [[ "${output_uid}" == all ]]; then parameters+=(--output-all)
+    elif [[ -n "${output_uid}" ]]; then parameters+=(--output-uid "${output_uid}"); fi
     call seed "${parameters[@]}" >"${TEST_ROOT}/output.log" 2>&1 || status=$?
     [[ "${status}" == 137 ]] || fail "seed did not reach active wait: ${status}"
     accept health "${parameters[@]}"
@@ -368,7 +361,11 @@ seed_owned() {
         schema=3 lines=12
         [[ "$(state_value family)" == "${family}" ]] || fail 'wrong state family'
     fi
-    if [[ -n "${output_uid}" ]]; then
+    if [[ "${output_uid}" == all ]]; then
+        schema=5 lines=13
+        [[ "$(state_value output_all)" == true && -z "$(state_value output_uid)" &&
+            "$(state_value family)" == "${family}" ]] || fail 'wrong global OUTPUT state identity'
+    elif [[ -n "${output_uid}" ]]; then
         schema=4 lines=13
         [[ "$(state_value output_uid)" == "${output_uid}" &&
             "$(state_value family)" == "${family}" ]] || fail 'wrong OUTPUT state identity'
@@ -924,6 +921,102 @@ export FAKE_TP_MODE=fail-ipv6-cleanup-output
 reject cleanup
 [[ -e "${FAKE_TP_ROOT}/failed-once" && -f "${FAKE_TP_STATE}/tproxy.state" ]] ||
     fail 'partial OUTPUT revoke discarded recovery state'
+export FAKE_TP_MODE=ok
+accept cleanup
+assert_empty
+# 全主机规则把专用组返回放在捕获前，漂移或缺少返回规则不得授权部分撤销。
+for family in ipv4 ipv6 dual; do
+    reset
+    seed_owned "${family}" all
+    versions='4 6'
+    [[ "${family}" != ipv4 ]] || versions=4
+    [[ "${family}" != ipv6 ]] || versions=6
+    for version in ${versions}; do
+        kernel_root=${FAKE_TP_ROOT}
+        [[ "${version}" != 6 ]] || kernel_root=${FAKE_TP_ROOT}/ipv6
+        output_rules="${kernel_root}/${CHAIN}-out.rules"
+        [[ "$(wc -l <"${output_rules}")" == 4 ]] || fail 'wrong global OUTPUT rule count'
+        sed -n '1p' "${output_rules}" | grep -q -- '--dst-type LOCAL .* -j RETURN' ||
+            fail 'global OUTPUT lacks first LOCAL bypass'
+        sed -n '2p' "${output_rules}" | grep -q -- '--gid-owner 10001 .* -j RETURN' ||
+            fail 'global OUTPUT lacks second core group bypass'
+        [[ "$(grep -c -- '--ctdir ORIGINAL .* -j MARK' "${output_rules}")" == 2 &&
+            "$(grep -c -- '--uid-owner' "${output_rules}")" == 0 ]] ||
+            fail 'global OUTPUT retained UID selection or lost ORIGINAL capture'
+    done
+    reject_unchanged health "${PORT}" "${MARK}" "${family}" --output-uid "${OUTPUT_UID}"
+    accept cleanup
+    assert_empty
+done
+for args in '--output-uid all' '--output-all --output-uid 65534' '--output-all --output-all'; do
+    reset
+    read -r -a parameters <<<"${args}"
+    reject_unchanged preflight "${PORT}" "${MARK}" dual "${parameters[@]}" unowned
+    reject_unchanged run-once "${PORT}" "${MARK}" dual "${parameters[@]}"
+done
+for bad in false duplicate mixed missing schema; do
+    reset
+    seed_owned dual all
+    state="${FAKE_TP_STATE}/tproxy.state"
+    case "${bad}" in
+    false) sed -i 's/^output_all=.*/output_all=false/' "${state}" ;;
+    duplicate) printf 'output_all=true\n' >>"${state}" ;;
+    mixed) printf 'output_uid=65534\n' >>"${state}" ;;
+    missing) sed -i '/^output_all=/d' "${state}" ;;
+    schema) sed -i 's/^schema_version=.*/schema_version=4/' "${state}" ;;
+    esac
+    reject_unchanged health "${PORT}" "${MARK}" dual --output-all
+    reject_unchanged cleanup
+done
+for drift in group local direction order reference missing-group missing-local; do
+    reset
+    seed_owned dual all
+    output_rules="${FAKE_TP_ROOT}/ipv6/${CHAIN}-out.rules"
+    case "${drift}" in
+    group) sed -i 's/--gid-owner 10001/--gid-owner 10002/' "${output_rules}" ;;
+    local) sed -i 's/--dst-type LOCAL/--dst-type UNICAST/' "${output_rules}" ;;
+    direction) sed -i 's/--ctdir ORIGINAL/--ctdir REPLY/g' "${output_rules}" ;;
+    order)
+        awk 'NR==1 {first=$0; next} NR==2 {print; print first; next} {print}' \
+            "${output_rules}" >"${TEST_ROOT}/changed-rules"
+        mv -- "${TEST_ROOT}/changed-rules" "${output_rules}"
+        ;;
+    reference)
+        printf 'outside-chain\n' >>"${FAKE_TP_ROOT}/ipv6/chains"
+        printf -- '-g %s-out\n' "${CHAIN}" >"${FAKE_TP_ROOT}/ipv6/outside-chain.rules"
+        ;;
+    missing-group) sed -i '/--gid-owner/d' "${output_rules}" ;;
+    missing-local) sed -i '/--dst-type LOCAL/d' "${output_rules}" ;;
+    esac
+    reject_unchanged health "${PORT}" "${MARK}" dual --output-all
+    reject_unchanged cleanup
+    reject_unchanged preflight "${PORT}" "${MARK}" dual --output-all owned
+done
+reset
+seed_owned dual "${OUTPUT_UID}"
+OLD_TOKEN=${TOKEN}
+accept preflight "${PORT}" "${MARK}" dual --output-all owned
+[[ ! -s "${FAKE_TP_WRITES}" ]] || fail 'global candidate modified its old UID owner'
+seed_owned dual all
+[[ "${TOKEN}" != "${OLD_TOKEN}" ]] || fail 'global migration reused its old token'
+accept run-once "${PORT}" "${MARK}" dual --output-uid "${OUTPUT_UID}"
+assert_empty
+for signal in TERM INT; do
+    for point in start-output-2 start-output-4 start-output-hook; do
+        reset
+        export FAKE_TP_MODE="signal-ipv6-${point}" FAKE_TP_SIGNAL="${signal}"
+        status=0
+        call run-once "${PORT}" "${MARK}" dual --output-all >"${TEST_ROOT}/output.log" 2>&1 || status=$?
+        [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" &&
+            -e "${FAKE_TP_ROOT}/signaled-once" ]] || fail "global OUTPUT ${point}/${signal} missed startup signal"
+        assert_empty
+    done
+done
+reset
+seed_owned dual all
+export FAKE_TP_MODE=fail-ipv6-cleanup-output
+reject cleanup
+[[ -f "${FAKE_TP_STATE}/tproxy.state" ]] || fail 'partial global revoke discarded recovery state'
 export FAKE_TP_MODE=ok
 accept cleanup
 assert_empty

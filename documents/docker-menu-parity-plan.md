@@ -3732,11 +3732,12 @@ Bash/ShellCheck error、PowerShell AST 和 diff 检查通过。
 
 菜单 `17 → 47` 与 `protocol redirect-status`、
 `edit --redirect-enable/--redirect-settings/--redirect-off` 提供完整日常入口，
-参数复用 family 与可选 OUTPUT UID。限单 Xray/sing-box、已有 Reality `1/2/26`，
+参数复用 family 与可选 OUTPUT UID/全主机 OUTPUT。限单 Xray/sing-box、已有 Reality `1/2/26`，
 允许同核心多入口，无副核心或其它宿主集成；与 TUN/TProxy 互斥。
 Redirect 仅捕获 TCP，UDP 保持原路由；透明 TCP/UDP 另选 TProxy。
-默认 IPv4、OUTPUT 关闭；修改省略保留旧族/UID，UID `1–2147483647` 排除 `10001`。
-LOCAL、服务 REPLY、root 核心拨号绕过，不提供全主机 OUTPUT。
+默认 IPv4、OUTPUT 关闭；修改省略保留旧族/模式，UID `1–2147483647` 排除 `10001`。
+指定 UID 模式下 LOCAL、服务 REPLY、root 核心拨号绕过；全主机模式捕获 root
+与其它 GID 主动 TCP，核心专用 GID `10001`、LOCAL 与 REPLY 绕过。
 
 schema 1 私密 `redirect.state` 固定字节、单硬链接、完整随机 token，
 绑定两族 PREROUTING/OUTPUT 链。候选只读审计，整体核验后精确撤销；
@@ -3760,8 +3761,41 @@ LOCAL/REPLY 绕过及停止外来基线恢复，生产 Compose 归属和精确�
 集中回归的唯一失败是 phase3 仍要求旧功能键集合，已增加 Redirect 元数据和
 缺项/错误网络的拒绝断言后补验；不声称最终同快照 57/57，也不重复已通过的 56 项。
 本轮原始夹具错误已修正，日志/result 和快照核对证据保留，输入归档及清单清理。
-全主机 OUTPUT、原生宿主/arm64/公网/重启/完整卸载和完整 205 管理继续 deferred；
+原生宿主/arm64/公网/重启/完整卸载和完整 205 管理继续 deferred；
 剩余 SOCKS UDP、Xray 解析后阻断、TUIC/自动恢复等继续推进，总目标保持 active。
+
+#### 5C.2e TProxy/Redirect 全主机 OUTPUT
+
+菜单复用 `17 → 43/47` 的第 7 项，CLI 提供
+`--tproxy-output-all` / `--redirect-output-all`。全主机模式与指定 UID 互斥，
+状态分别使用 TProxy schema 5、Redirect schema 2 的 `output_all=true`，
+共享 bundle marker `x-padm-transparent-output-all`；旧无 OUTPUT/指定 UID 状态继续兼容。
+
+全主机模式要求单核心 Reality `1/2/26`、无其它宿主集成，核心 Compose 实际运行身份
+固定为 `0:10001`。TProxy 捕获主动 TCP/UDP，Redirect 捕获主动 TCP；两者均保留
+LOCAL 与 conntrack `REPLY` 绕过，GID `10001` 在捕获前返回。管理路径同时核验
+核心容器的镜像、命令、host 网络、Compose 归属与实际进程四列 UID/GID；身份或规则
+漂移、缺少关键绕过、顺序变化和外来引用均保留 state 与现场，不先撤销另一族。
+
+本批次按一个冻结源码快照复用工具镜像集中验证：
+
+| 验证 | 入口耗时 | 证据目录 |
+| --- | ---: | --- |
+| schema/jq 302 差分 | 19.503 秒 | `.tmp-regression-docker-cfc8e398349743f2be57b69222087f96` |
+| TProxy 所有权、事务、菜单及核心身份 | 91.219 秒 | `.tmp-regression-docker-3a6f958b067147e6945ba822599b3cd0` |
+| Redirect 所有权、事务、菜单及核心身份 | 90.093 秒 | `.tmp-regression-docker-e08c50b2f37c4e0190a1ad578a8156f5` |
+| TProxy 两核心三族真实流量/Compose 撤销 | 97.779 秒 | `.tmp-regression-docker-c50d710f05564be4bf89618a71ee4754` |
+| Redirect 两核心三族真实流量/Compose 撤销 | 76.885 秒 | `.tmp-regression-docker-1146b55f538242b5b7562ae9a12d567b` |
+| 集中 `docker-contracts`，Jobs 6，57/57 | 371.871 秒 | `.tmp-regression-docker-e1832c2518864ba0982064e1dc7679df` |
+
+真实矩阵已确认 root/普通 GID 主动流量、专用 GID 绕过、LOCAL/REPLY 绕过、
+Redirect UDP 原路由、停止后的规则/路由基线恢复，以及生产 Compose 核心实际身份。
+六次回归源码摘要均为
+`D154877D1C1ACB7208DA5555682921AC9A087602E9B3152A802168F4C9DB3F73`；
+16 个代码文件逐字节匹配，随后只补计划和状态。定向 Jobs 2、集中 Jobs 6，
+复用工具/离线镜像和同一核心节点，不为新模式重建流量矩阵；完整回归仅一次。
+成功输入归档/清单及核验脚本清理，日志/result/verification 保留。
+原生宿主、arm64、公网、整机重启和完整卸载仍未验收；总目标保持 active。
 
 #### 5C.3 Fail2ban 已加载动作维护门禁
 

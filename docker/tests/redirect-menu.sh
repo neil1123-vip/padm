@@ -10,7 +10,11 @@ dockerMenuRun() {
     printf '%s\n' "$*" >>"${TEST_ROOT}/calls"
     if [[ "$1" == protocol ]]; then
         [[ "${STATUS_FAIL:-0}" == 0 ]] || return 17
-        printf '%s\n' '{"enabled":true,"port":31298,"family":"dual","output_uid":65534}'
+        if [[ "${GLOBAL_STATUS:-0}" == 1 ]]; then
+            printf '%s\n' '{"enabled":true,"port":31298,"family":"dual","output_all":true,"bypass_gid":10001}'
+        else
+            printf '%s\n' '{"enabled":true,"port":31298,"family":"dual","output_uid":65534}'
+        fi
     else
         return 17
     fi
@@ -21,13 +25,16 @@ runMenu() {
     [[ "$(cat "${TEST_ROOT}/calls")" == "$2" ]]
     grep -q '仅捕获 TCP' "${TEST_ROOT}/output"
 }
-runMenu $'1\n2\n31301\nipv6\n3\n31302\nipv4\n5\n65533\n6\n4\n1\n0' \
-    $'protocol redirect-status\nprotocol redirect-status\nedit --redirect-enable 31301 --redirect-family ipv6\nprotocol redirect-status\nedit --redirect-settings 31302 --redirect-family ipv4\nprotocol redirect-status\nedit --redirect-settings 31298 --redirect-family dual --redirect-output-uid 65533\nprotocol redirect-status\nedit --redirect-settings 31298 --redirect-family dual --redirect-output-off\nedit --redirect-off\nprotocol redirect-status'
+runMenu $'1\n2\n31301\nipv6\n3\n31302\nipv4\n5\n65533\n7\n6\n4\n1\n0' \
+    $'protocol redirect-status\nprotocol redirect-status\nedit --redirect-enable 31301 --redirect-family ipv6\nprotocol redirect-status\nedit --redirect-settings 31302 --redirect-family ipv4\nprotocol redirect-status\nedit --redirect-settings 31298 --redirect-family dual --redirect-output-uid 65533\nprotocol redirect-status\nedit --redirect-settings 31298 --redirect-family dual --redirect-output-all\nprotocol redirect-status\nedit --redirect-settings 31298 --redirect-family dual --redirect-output-off\nedit --redirect-off\nprotocol redirect-status'
+GLOBAL_STATUS=1 runMenu $'3\n31302\nipv6\n1\n0' \
+    $'protocol redirect-status\nedit --redirect-settings 31302 --redirect-family ipv6\nprotocol redirect-status'
+grep -q '全主机' "${TEST_ROOT}/output"
 runMenu $'2\n0\n3\n0\n5\n0\n0' \
     $'protocol redirect-status\nprotocol redirect-status\nprotocol redirect-status'
 runMenu $'2\n' 'protocol redirect-status'
-STATUS_FAIL=1 runMenu $'2\n3\n5\n6\n1\n0' \
-    $'protocol redirect-status\nprotocol redirect-status\nprotocol redirect-status\nprotocol redirect-status\nprotocol redirect-status'
+STATUS_FAIL=1 runMenu $'2\n3\n5\n6\n7\n1\n0' \
+    $'protocol redirect-status\nprotocol redirect-status\nprotocol redirect-status\nprotocol redirect-status\nprotocol redirect-status\nprotocol redirect-status'
 # 路由菜单的公开编号必须通向同一受测子菜单。
 : >"${TEST_ROOT}/calls"
 dockerMenuRouting <<< $'47\n1\n0\n0' >"${TEST_ROOT}/output"

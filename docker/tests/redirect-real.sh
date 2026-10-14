@@ -176,7 +176,7 @@ makeCoreConfig() {
        images:(["xray","sing-box","nginx","ops","net"] | map({key:.,value:
          ("ghcr.io/example/padm-"+.+":test@sha256:"+("a"*64))}) | from_entries),
        host_integrations:[{type:"redirect",profile:"net-transparent",firewall_rules:["padm-redirect"],
-         devices:[],schedules:[],settings:({port:$port,output_uid:65534} +
+         devices:[],schedules:[],settings:({port:$port,output_all:true} +
            (if $family == "ipv4" then {} else {family:$family} end))}]}
     ' >"${configDir}/spec.json"
     dockerConfigureSpecValidate "${configDir}/spec.json"
@@ -198,10 +198,14 @@ startCore() {
     image=$(jq -er --arg core "${core}" '.[$core].reference' /node-images.json)
     if [[ "${core}" == xray ]]; then args=(run -c /etc/padm/redirect/config.json)
     else args=(run -D /var/lib/padm/sing-box -c /etc/padm/redirect/config.json); fi
-    coreContainer=$(docker run -d --network "container:${container}" --user 0:0 \
+    coreContainer=$(docker run -d --network "container:${container}" --user 0:10001 \
         --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges:true --read-only \
         --tmpfs /tmp:rw,nosuid,nodev,size=16m --tmpfs /var/lib/padm/sing-box:rw,nosuid,nodev,size=16m \
         --mount "type=bind,source=${configDir},target=/etc/padm/redirect,readonly" "${image}" "${args[@]}")
+    corePid=$(docker inspect --format '{{.State.Pid}}' "${coreContainer}")
+    [[ "$(awk '/^Uid:/ {print $2 ":" $3 ":" $4 ":" $5}' "/proc/${corePid}/status")" == 0:0:0:0 &&
+        "$(awk '/^Gid:/ {print $2 ":" $3 ":" $4 ":" $5}' "/proc/${corePid}/status")" == 10001:10001:10001:10001 ]] ||
+        fail 'real core did not retain the OUTPUT bypass group'
     for ((attempt = 0; attempt < 100; attempt++)); do
         if net ss -lnt | grep -qE "[[:space:]](0\\.0\\.0\\.0|\\*|\\[::\\]):${port}[[:space:]]"; then
             ! net ss -lnu | grep -qE "[[:space:]](0\\.0\\.0\\.0|\\*|\\[::\\]):${port}[[:space:]]" ||
@@ -215,6 +219,9 @@ startCore() {
     fail "${core} Redirect socket did not become ready"
 }
 startServer() {
+    outputMode=${1:-uid}
+    local -a outputArgs=(--output-uid 65534)
+    [[ "${outputMode}" != all ]] || outputArgs=(--output-all)
     net rm -f /tmp/redirect.pid /tmp/redirect.status
     docker exec -d "${container}" sh -c '
       sh /tmp/padm-entrypoint redirect "$@" </dev/null >/tmp/redirect.log 2>&1 &
@@ -223,9 +230,9 @@ startServer() {
       status=0
       wait "$server" || status=$?
       printf "%s\n" "$status" >/tmp/redirect.status
-    ' test "${port}" "${family}" --output-uid 65534
+    ' test "${port}" "${family}" "${outputArgs[@]}"
     for ((attempt = 0; attempt < 100; attempt++)); do
-        entry redirect-health "${port}" "${family}" --output-uid 65534 >/dev/null 2>&1 && return 0
+        entry redirect-health "${port}" "${family}" "${outputArgs[@]}" >/dev/null 2>&1 && return 0
         ! net test -f /tmp/redirect.status || fail 'service exited before readiness'
         sleep 0.05
     done
@@ -254,8 +261,10 @@ readState() {
     ') || fail 'invalid ownership state'
     token=$(jq -er '.token | select(test("^[a-f0-9]{32}$"))' <<<"${state}")
     chain=$(jq -er '.chain' <<<"${state}")
-    jq -e --arg port "${port}" --arg family "${family}" '
-      .port == $port and .family == $family and .output_uid == "65534" and .phase == "active"
+    jq -e --arg port "${port}" --arg family "${family}" --arg mode "${outputMode}" '
+      .port == $port and .family == $family and .phase == "active" and
+      (if $mode == "all" then .schema_version == "2" and .output_all == "true" and (has("output_uid") | not)
+       else .schema_version == "1" and .output_uid == "65534" and (has("output_all") | not) end)
     ' <<<"${state}" >/dev/null || fail 'ownership state lost the requested scope'
     [[ "${chain}" == "padm-redirect-${token:0:10}" &&
         "$(net stat -c '%u:%a:%h' /var/lib/padm/net/redirect.state)" == 0:600:1 ]] ||
@@ -273,14 +282,14 @@ trafficCounter() {
     '
 }
 probe() {
-    local kind=$1 version=$2 scope=$3 captured=$4 uid=${5:-65534}
+    local kind=$1 version=$2 scope=$3 captured=$4 uid=${5:-65534} gid=${6:-${5:-65534}}
     local destination=198.18.67.20 peer=198.18.67.10 directory=proof targetPort=18080
     local beforePrerouting beforeOutput afterPrerouting afterOutput rows
     local -a caller=(nsenter --target "${clientPid}" --net --)
     [[ "${kind}" != udp ]] || targetPort=18081
     if [[ "${version}" == 6 ]]; then destination=fd40:67::20 peer=fd40:67::10; fi
     if [[ "${scope}" == output || "${scope}" == local ]]; then
-        caller=(nsenter --target "${netPid}" --net -- setpriv --reuid "${uid}" --regid "${uid}"
+        caller=(nsenter --target "${netPid}" --net -- setpriv --reuid "${uid}" --regid "${gid}"
             --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --)
     fi
     if [[ "${scope}" == local || "${scope}" == reply ]]; then
@@ -341,12 +350,41 @@ for core in xray sing-box; do
         for version in $(case "${family}" in ipv4) echo 4 ;; ipv6) echo 6 ;; dual) echo '4 6' ;; esac); do
             probe tcp "${version}" output no
         done
+        # 同一真实核心承接全主机规则，UDP 仍直连；root 和普通组 TCP 均捕获。
+        startServer all
+        readState
+        for version in $(case "${family}" in ipv4) echo 4 ;; ipv6) echo 6 ;; dual) echo '4 6' ;; esac); do
+            probe tcp "${version}" output yes 0
+            probe tcp "${version}" output yes 65533
+            probe tcp "${version}" output no 0 10001
+            probe tcp "${version}" local no
+            probe tcp "${version}" reply no
+            probe tcp "${version}" forward yes
+            probe udp "${version}" output no 0
+            probe udp "${version}" output no 65533
+            probe udp "${version}" forward no
+            probe udp "${version}" local no
+            probe udp "${version}" reply no
+            tool=iptables-save
+            [[ "${version}" != 6 ]] || tool=ip6tables-save
+            net "${tool}" -c -t nat | awk -v chain="${chain}-out" '
+              index($0, "-A " chain " ") && index($0, "--gid-owner 10001") && index($0, "-j RETURN") {
+                split($1, fields, ":"); sub(/^\[/, "", fields[1]); total += fields[1]
+              }
+              END { exit !(total > 0) }
+            ' || fail 'real core and group probe did not exercise the OUTPUT bypass'
+        done
+        stopServer
+        for version in $(case "${family}" in ipv4) echo 4 ;; ipv6) echo 6 ;; dual) echo '4 6' ;; esac); do
+            probe tcp "${version}" output no 0
+            probe tcp "${version}" output no 65533
+        done
         docker stop --time 5 "${coreContainer}" >/dev/null
         docker logs "${coreContainer}" >"${TEST_ROOT}/${core}-${port}.log" 2>&1
         docker rm --volumes "${coreContainer}" >/dev/null
         coreContainer=
         grep -q 'redirect-in' "${TEST_ROOT}/${core}-${port}.log" || fail 'missing Redirect core log'
-        printf 'docker-redirect-forwarding-ok: core=%s family=%s tcp=prerouting,uid-output udp=direct unselected=direct local=bypass reply=direct off=clean\n' \
+        printf 'docker-redirect-forwarding-ok: core=%s family=%s tcp=prerouting,uid-output,all-output root=captured ordinary=captured bypass_gid=10001 udp=direct unselected=direct local=bypass reply=direct off=clean\n' \
             "${core}" "${family}"
     done
 done
@@ -367,13 +405,17 @@ if [[ "${imageHash}" != "$(sha256sum "${PROJECT_ROOT}/docker/images/net/entrypoi
     docker image inspect "${metadataImage}" >/dev/null
 fi
 root=${PADM_DOCKER_INSTALL_DIR}
-mkdir -p "${root}/config" "${root}/data/net/transparent" "${TEST_ROOT}/metadata-bundle"
+mkdir -p "${root}/config/xray" "${root}/data/xray" "${root}/data/net/transparent" "${TEST_ROOT}/metadata-bundle"
 chmod 0750 "${root}/data/net/transparent"
 printf '%040d\n' 1 >"${TEST_ROOT}/metadata-bundle/${PADM_DOCKER_BUNDLE_REF}"
 dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/metadata-bundle"; }
-jq --arg image "${metadataImage}" '.images.net=$image' "${TEST_ROOT}/xray-31298/spec.json" \
+jq --arg image "${metadataImage}" --arg xray "$(jq -er '.xray.reference' /node-images.json)" \
+    '.images.net=$image | .images.xray=$xray' "${TEST_ROOT}/xray-31298/spec.json" \
     >"${root}/config/spec.json"
 dockerConfigureSpecValidate "${root}/config/spec.json"
+dockerGenerateXrayConfig "${root}/config/spec.json" "${TEST_ROOT}/metadata-base.json"
+dockerTrafficRender xray "${TEST_ROOT}/metadata-base.json" '{"schema_version":1,"accounts":{}}' \
+    >"${root}/config/xray/config.json"
 dockerGenerateCompose "${root}/config/spec.json" "${root}/compose.json" "${root}"
 : >"${root}/images.env"
 dockerGenerateImagesEnv "${root}/config/spec.json" "${root}/images.env" "${root}"
@@ -386,11 +428,16 @@ iptables -w -t nat -A redirect-meta-outside -m comment --comment redirect-meta-o
 iptables -w -t nat -A PREROUTING -m comment --comment redirect-meta-outside -j redirect-meta-outside
 iptables -w -t nat -A OUTPUT -m comment --comment redirect-meta-outside -j redirect-meta-outside
 metadataBaseline=$(hostSnapshot)
+composeStatus=0
 docker compose --project-name "${PADM_DOCKER_PROJECT}" --project-directory "${root}" \
     --env-file "${root}/images.env" --file "${root}/compose.json" --profile net-transparent \
-    up -d --no-deps --pull never net-transparent >"${TEST_ROOT}/metadata-compose.log" 2>&1
+    up -d --pull never xray net-transparent >"${TEST_ROOT}/metadata-compose.log" 2>&1 || composeStatus=$?
+coreContainer=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+    --filter label=com.docker.compose.service=xray --filter label=com.docker.compose.oneoff=False)
 composeContainer=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
     --filter label=com.docker.compose.service=net-transparent --filter label=com.docker.compose.oneoff=False)
+[[ "${composeStatus}" == 0 && "${coreContainer}" =~ ^[a-f0-9]{12,64}$ &&
+    "${composeContainer}" =~ ^[a-f0-9]{12,64}$ ]] || fail 'Compose global Redirect did not start a unique core and owner'
 for ((attempt = 0; attempt < 100; attempt++)); do
     metadataCid=$(dockerTProxyContainer running 2>"${TEST_ROOT}/metadata-inspect.log") && break
     [[ "$(docker inspect --format '{{.State.Running}}' "${composeContainer}")" == true ]] ||
@@ -410,5 +457,5 @@ iptables -w -t nat -D PREROUTING -m comment --comment redirect-meta-outside -j r
 iptables -w -t nat -D OUTPUT -m comment --comment redirect-meta-outside -j redirect-meta-outside
 iptables -w -t nat -F redirect-meta-outside
 iptables -w -t nat -X redirect-meta-outside
-printf 'docker-redirect-compose-owner-ok: inspect=running disable=clean outside=preserved\n'
+printf 'docker-redirect-compose-owner-ok: inspect=running core_identity=0:10001 disable=clean outside=preserved\n'
 printf 'docker-redirect-real-ok\n'

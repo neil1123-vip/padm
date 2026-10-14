@@ -96,12 +96,13 @@ runEdit() {
     assertClean
 }
 runStatus() {
-    local enabled=$1 port=$2 mark=$3 family=${4:-ipv4} outputUid=${5:-null}
+    local enabled=$1 port=$2 mark=$3 family=${4:-ipv4} outputUid=${5:-null} outputAll=${6:-false}
     (dockerMain protocol tproxy-status) >"${LOG}" 2>&1 || fail 'status failed'
     jq -e --argjson enabled "${enabled}" --argjson port "${port}" --argjson mark "${mark}" \
-        --arg family "${family}" --argjson outputUid "${outputUid}" '
+        --arg family "${family}" --argjson outputUid "${outputUid}" --argjson outputAll "${outputAll}" '
       . == ({enabled:$enabled,port:$port,mark:$mark,family:$family,hook:"PREROUTING"} +
-        if $outputUid == null then {} else {output_uid:$outputUid,hooks:["PREROUTING","OUTPUT"]} end)
+        if $outputAll then {output_all:true,hooks:["PREROUTING","OUTPUT"],bypass_gid:10001}
+        elif $outputUid == null then {} else {output_uid:$outputUid,hooks:["PREROUTING","OUTPUT"]} end)
     ' "${LOG}" >/dev/null
     assertClean
 }
@@ -139,6 +140,12 @@ runEdit 2 --tproxy-off --tproxy-output-uid 65534 --preview
 runEdit 2 --tproxy-enable 31298 129 --tproxy-output-off --preview
 runEdit 2 --tproxy-enable 31298 129 --tproxy-output-uid 65534 --tproxy-output-uid 65535 --preview
 runEdit 2 --tproxy-settings 31298 129 --tproxy-output-off --tproxy-output-uid 65534 --preview
+runEdit 2 --tproxy-output-all --preview
+runEdit 2 --tproxy-off --tproxy-output-all --preview
+runEdit 2 --tproxy-enable 31298 129 --tproxy-output-all --tproxy-output-all --preview
+runEdit 2 --tproxy-enable 31298 129 --tproxy-output-all --tproxy-output-uid 65534 --preview
+runEdit 2 --tproxy-settings 31298 129 --tproxy-output-off --tproxy-output-all --preview
+runEdit 2 --tproxy-enable 31298 129 --redirect-output-all --preview
 runEdit 15 --tproxy-enable 35441 129 --preview
 runEdit 15 --tproxy-enable 10085 129 --preview
 runEdit 0 --tproxy-enable 31298 129 --preview
@@ -284,6 +291,45 @@ runEdit 0 --tproxy-settings 31299 131 --tproxy-output-off --confirm PADM-DOCKER-
 runStatus true 31299 131 dual
 jq -e '.host_integrations[0].settings | has("output_uid") | not' "${root}/config/spec.json" >/dev/null
 runEdit 15 --tproxy-settings 31299 131 --tproxy-output-off --preview
+runEdit 0 --tproxy-settings 31299 131 --tproxy-output-all --preview
+runEdit 0 --tproxy-settings 31299 131 --tproxy-output-all --confirm PADM-DOCKER-EDIT
+runStatus true 31299 131 dual null true
+jq -e '.host_integrations[0].settings.output_all == true and
+  (.host_integrations[0].settings | has("output_uid") | not)' "${root}/config/spec.json" >/dev/null
+jq -e '.services.xray.user == "0:10001" and
+  .services["net-transparent"].command == ["tproxy","31299","131","dual","--output-all"] and
+  .services["net-transparent"].healthcheck.test ==
+    ["CMD","/usr/local/bin/padm-entrypoint","tproxy-health","31299","131","dual","--output-all"]' \
+    "${root}/compose.json" >/dev/null
+grep -Fq 'net-transparent preflight tproxy 31299 131 dual --output-all owned' \
+    "${TEST_ROOT}/candidate-calls.log" || fail 'global OUTPUT preflight missing'
+jq 'del(."x-padm-transparent-output-all")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
+! dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${root}/config/spec.json" ||
+    fail 'old bundle accepted global OUTPUT'
+runEdit 15 --tproxy-settings 31299 131 --tproxy-output-all --preview
+before=$(snapshot)
+for MODE in health-fail interrupt-int interrupt-term; do
+    rm -f -- "${TEST_ROOT}/failed-once"
+    expected=14
+    [[ "${MODE}" != interrupt-int ]] || expected=130
+    [[ "${MODE}" != interrupt-term ]] || expected=143
+    runEdit "${expected}" --tproxy-settings 31299 131 --tproxy-output-uid 65534 --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: global OUTPUT recovery changed state"
+done
+MODE=ok
+runEdit 0 --tproxy-settings 31300 132 --confirm PADM-DOCKER-EDIT
+runStatus true 31300 132 dual null true
+runEdit 0 --tproxy-settings 31300 132 --tproxy-output-uid 65534 --confirm PADM-DOCKER-EDIT
+runStatus true 31300 132 dual 65534
+dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${root}/config/spec.json" ||
+    fail 'bundle without global OUTPUT marker rejected UID'
+jq -e '.services.xray.user == "0:0"' "${root}/compose.json" >/dev/null
+runEdit 0 --tproxy-settings 31300 132 --tproxy-output-all --confirm PADM-DOCKER-EDIT
+runEdit 0 --tproxy-settings 31300 132 --tproxy-output-off --confirm PADM-DOCKER-EDIT
+runStatus true 31300 132 dual
+jq -e '.host_integrations[0].settings | has("output_all") or has("output_uid") | not' \
+    "${root}/config/spec.json" >/dev/null
 runEdit 0 --tproxy-off --confirm PADM-DOCKER-EDIT
 # 实际管理事务之外，核对停止证明会拒绝归属漂移及不完整撤销。
 runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
@@ -293,7 +339,10 @@ runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
     OWNER_MODE=ok
     OWNER_LOG=${TEST_ROOT}/owner.log
     OWNER_JSON=${TEST_ROOT}/owner.json
-    jq -n --arg root "${root}" --arg cid "${CID}" \
+    OWNER_KIND=tproxy
+    CLEANUP_COMMAND='run --rm --no-deps net-transparent preflight tproxy 31298 129 unowned'
+    writeOwnerBase() {
+      jq -n --arg root "${root}" --arg cid "${CID}" \
         --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
       $compose[0].services["net-transparent"] as $s |
       [{Id:$cid,State:{Running:true,Restarting:false,Paused:false,Dead:false,OOMKilled:false,
@@ -311,21 +360,39 @@ runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
           Tmpfs:($s.tmpfs | map(split(":") | {key:.[0],value:.[1]}) | from_entries)},
         Mounts:[$s.volumes[] | {Type:"bind",Source:(.source | sub("^\\$\\{PADM_NET_ROOT\\}";$root)),
           Destination:.target,RW:(.read_only | not)}]}]
-    ' >"${TEST_ROOT}/owner-base.json"
+      ' >"${TEST_ROOT}/owner-base.json"
+    }
+    writeOwnerBase
     resetOwner() {
         cp -- "${TEST_ROOT}/owner-base.json" "${OWNER_JSON}"
-        printf '%s\n' fixture >"${root}/data/net/transparent/tproxy.state"
+        printf '%s\n' fixture >"${root}/data/net/transparent/${OWNER_KIND}.state"
         : >"${OWNER_LOG}"
     }
     docker() {
         case "$1" in
         ps)
+            if [[ "$2" == -q ]]; then
+                printf '%s\n' "${CORE_CID}"
+                return
+            fi
             [[ "${OWNER_MODE}" != absent ]] || return 0
             [[ "${OWNER_MODE}" != duplicate ]] || printf '%s\n' "${OTHER_CID}"
             jq -r '.[0].Id' "${OWNER_JSON}"
             ;;
-        container) cat "${OWNER_JSON}" ;;
-        exec) [[ "${OWNER_MODE}" != health-fail ]] ;;
+        container)
+            if [[ "$3" == "${CORE_CID:-}" ]]; then cat "${CORE_JSON}"
+            else cat "${OWNER_JSON}"; fi
+            ;;
+        exec)
+            if [[ "$2" == "${CORE_CID:-}" ]]; then
+                [[ "$3" == sh && "$4" == -ec && "$#" == 7 ]]
+                # 只替换 proc 根目录，身份列和唯一进程判定执行生产传入的脚本。
+                local script=${5//\/proc\//"${CORE_PROC}/"}
+                sh -ec "${script}" sh "$7"
+            else
+                [[ "${OWNER_MODE}" != health-fail ]]
+            fi
+            ;;
         stop)
             printf 'stop %s\n' "$2" >>"${OWNER_LOG}"
             [[ "${OWNER_MODE}" != stop-fail ]] || return 1
@@ -335,7 +402,7 @@ runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
               elif $mode=="cid-drift" then .[0].Id=$other else . end
             ' "${OWNER_JSON}" >"${OWNER_JSON}.next"
             mv -- "${OWNER_JSON}.next" "${OWNER_JSON}"
-            [[ "${OWNER_MODE}" == keep-state ]] || rm -f -- "${root}/data/net/transparent/tproxy.state"
+            [[ "${OWNER_MODE}" == keep-state ]] || rm -f -- "${root}/data/net/transparent/${OWNER_KIND}.state"
             ;;
         rm)
             printf 'rm %s\n' "$2" >>"${OWNER_LOG}"
@@ -345,7 +412,7 @@ runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
         esac
     }
     dockerComposeExecute() {
-        [[ "$*" == 'run --rm --no-deps net-transparent preflight tproxy 31298 129 unowned' ]] ||
+        [[ "$*" == "${CLEANUP_COMMAND}" ]] ||
             fail "unexpected cleanup command: $*"
         printf 'clean\n' >>"${OWNER_LOG}"
         [[ "${OWNER_MODE}" != clean-fail ]]
@@ -372,6 +439,75 @@ runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
     cp -- "${TEST_ROOT}/base.json" "${root}/config/spec.json"
     ! dockerTProxyDisablePrepare "${TEST_ROOT}/base.json" || fail 'accepted contradictory disabled spec'
     cp -- "${TEST_ROOT}/owner-spec.json" "${root}/config/spec.json"
+    (
+        for path in config/spec.json deployment.json compose.json; do
+            cp -p -- "${root}/${path}" "${TEST_ROOT}/global-${path##*/}"
+        done
+        trap 'for path in config/spec.json deployment.json compose.json; do cp -p -- "${TEST_ROOT}/global-${path##*/}" "${root}/${path}"; done' EXIT
+        CORE_CID=$(printf 'd%.0s' {1..64})
+        CORE_JSON=${TEST_ROOT}/core-owner.json
+        CORE_PROC=${TEST_ROOT}/core-proc
+        for OWNER_KIND in tproxy redirect; do
+            core=xray
+            [[ "${OWNER_KIND}" != redirect ]] || core=sing-box
+            jq --arg core "${core}" --arg kind "${OWNER_KIND}" '
+              .core.type=$core | .core.protocols[0].core=$core |
+              .host_integrations[0].type=$kind |
+              .host_integrations[0].firewall_rules=["padm-"+$kind] |
+              .host_integrations[0].settings.output_all=true |
+              if $kind == "redirect" then del(.host_integrations[0].settings.mark) else . end
+            ' "${TEST_ROOT}/owner-spec.json" >"${root}/config/spec.json"
+            dockerGenerateCompose "${root}/config/spec.json" "${root}/compose.json" "${root}"
+            dockerGenerateDeployment "${root}/config/spec.json" "${root}/deployment.json"
+            writeOwnerBase
+            jq -n --arg root "${root}" --arg cid "${CORE_CID}" --arg core "${core}" \
+                --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
+              $compose[0].services[$core] as $s |
+              [{Id:$cid,State:{Running:true,Restarting:false,Paused:false},
+                Config:{User:"0:10001",Image:$spec[0].images[$core],
+                  Entrypoint:["/usr/local/bin/"+$core],
+                  Cmd:(if $core == "xray" then ["run","-confdir","/etc/padm/xray"]
+                    else ["run","-D","/var/lib/padm/sing-box","-c","/etc/padm/sing-box/config.json"] end),
+                  Labels:($s.labels + {
+                    "com.docker.compose.project.working_dir":$root,
+                    "com.docker.compose.project.config_files":($root+"/compose.json")})},
+                HostConfig:{NetworkMode:"host"}}]
+            ' >"${TEST_ROOT}/core-owner-base.json"
+            command=$(jq -r '.services["net-transparent"].command | join(" ")' "${root}/compose.json")
+            CLEANUP_COMMAND="run --rm --no-deps net-transparent preflight ${command} unowned"
+            for drift in none config-user runtime-uid runtime-gid duplicate missing; do
+                resetOwner
+                cp -- "${TEST_ROOT}/core-owner-base.json" "${CORE_JSON}"
+                rm -rf -- "${CORE_PROC}"
+                mkdir -p "${CORE_PROC}/123"
+                printf 'Name:\t%s\nUid:\t0\t0\t0\t0\nGid:\t10001\t10001\t10001\t10001\n' \
+                    "${core}" >"${CORE_PROC}/123/status"
+                case "${drift}" in
+                config-user)
+                    jq '.[0].Config.User="0:0"' "${CORE_JSON}" >"${CORE_JSON}.next"
+                    mv -- "${CORE_JSON}.next" "${CORE_JSON}"
+                    ;;
+                runtime-uid) sed -i 's/^Uid:.*/Uid: 0 1 0 0/' "${CORE_PROC}/123/status" ;;
+                runtime-gid) sed -i 's/^Gid:.*/Gid: 10001 0 10001 10001/' "${CORE_PROC}/123/status" ;;
+                duplicate) mkdir "${CORE_PROC}/124"; cp "${CORE_PROC}/123/status" "${CORE_PROC}/124/status" ;;
+                missing) sed -i 's/^Name:.*/Name: other/' "${CORE_PROC}/123/status" ;;
+                esac
+                if [[ "${drift}" == none ]]; then
+                    [[ "$(dockerTProxyContainer)" == "${CID}" ]] || fail "${OWNER_KIND}: rejected global owner"
+                    dockerTProxyDisablePrepare <(printf '{"host_integrations":[]}')
+                    [[ "$(cat "${OWNER_LOG}")" == "$(printf 'stop %s\nclean\nrm %s' "${CID}" "${CID}")" ]] ||
+                        fail "${OWNER_KIND}: global owner stop order changed"
+                else
+                    ! dockerTProxyDisablePrepare <(printf '{"host_integrations":[]}') ||
+                        fail "${OWNER_KIND}: accepted global core ${drift}"
+                    [[ ! -s "${OWNER_LOG}" &&
+                        -e "${root}/data/net/transparent/${OWNER_KIND}.state" ]] ||
+                        fail "${OWNER_KIND}: core drift modified owner"
+                fi
+            done
+            rm -f -- "${root}/data/net/transparent/${OWNER_KIND}.state"
+        done
+    )
 )
 (
     PADM_DOCKER_LIFECYCLE_LOADED=0

@@ -101,13 +101,14 @@ runEdit() {
     assertClean
 }
 runStatus() {
-    local enabled=$1 port=$2 family=${3:-ipv4} outputUid=${4:-null}
+    local enabled=$1 port=$2 family=${3:-ipv4} outputUid=${4:-null} outputAll=${5:-false}
     (dockerMain protocol redirect-status) >"${LOG}" 2>&1 || fail 'status failed'
     jq -e --argjson enabled "${enabled}" --argjson port "${port}" \
-      --arg family "${family}" --argjson uid "${outputUid}" '
+      --arg family "${family}" --argjson uid "${outputUid}" --argjson all "${outputAll}" '
       .enabled == $enabled and .port == $port and .family == $family and
-      .hook == "PREROUTING" and (.output_uid // null) == $uid and
-      (if $uid == null then (.hooks // ["PREROUTING"]) == ["PREROUTING"]
+      .hook == "PREROUTING" and (.output_uid // null) == $uid and (.output_all // false) == $all and
+      (if $all then .bypass_gid == 10001 else has("bypass_gid") | not end) and
+      (if $uid == null and ($all | not) then (.hooks // ["PREROUTING"]) == ["PREROUTING"]
        else .hooks == ["PREROUTING","OUTPUT"] end)
     ' "${LOG}" >/dev/null || fail 'status does not match the selected Redirect scope'
     assertClean
@@ -145,6 +146,12 @@ done
 runEdit 2 --redirect-output-uid 65534 --preview
 runEdit 2 --redirect-enable 31298 --redirect-output-off --preview
 runEdit 2 --redirect-settings 31298 --redirect-output-off --redirect-output-uid 65534 --preview
+runEdit 2 --redirect-output-all --preview
+runEdit 2 --redirect-off --redirect-output-all --preview
+runEdit 2 --redirect-enable 31298 --redirect-output-all --redirect-output-all --preview
+runEdit 2 --redirect-enable 31298 --redirect-output-all --redirect-output-uid 65534 --preview
+runEdit 2 --redirect-settings 31298 --redirect-output-off --redirect-output-all --preview
+runEdit 2 --redirect-enable 31298 --tproxy-output-all --preview
 runEdit 15 --redirect-enable 35441 --preview
 runEdit 15 --redirect-enable 10085 --preview
 runEdit 0 --redirect-enable 31298 --preview
@@ -212,6 +219,45 @@ runStatus true 31300 dual 65534
 runEdit 0 --redirect-settings 31300 --redirect-output-off --confirm PADM-DOCKER-EDIT
 runStatus true 31300 dual
 runEdit 15 --redirect-settings 31300 --redirect-output-off --preview
+runEdit 0 --redirect-settings 31300 --redirect-output-all --preview
+runEdit 0 --redirect-settings 31300 --redirect-output-all --confirm PADM-DOCKER-EDIT
+runStatus true 31300 dual null true
+jq -e '.host_integrations[0].settings.output_all == true and
+  (.host_integrations[0].settings | has("output_uid") | not)' "${root}/config/spec.json" >/dev/null
+jq -e '.services.xray.user == "0:10001" and
+  .services["net-transparent"].command == ["redirect","31300","dual","--output-all"] and
+  .services["net-transparent"].healthcheck.test ==
+    ["CMD","/usr/local/bin/padm-entrypoint","redirect-health","31300","dual","--output-all"]' \
+    "${root}/compose.json" >/dev/null
+grep -Fq "net-transparent preflight redirect 31300 dual --output-all owned /run/padm-redirect-owner" \
+    "${TEST_ROOT}/candidate-calls.log" || fail 'global OUTPUT preflight missing'
+jq 'del(."x-padm-transparent-output-all")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
+! dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${root}/config/spec.json" ||
+    fail 'old bundle accepted global OUTPUT'
+runEdit 15 --redirect-settings 31300 --redirect-output-all --preview
+before=$(snapshot)
+for MODE in health-fail interrupt-int interrupt-term; do
+    rm -f -- "${TEST_ROOT}/failed-once"
+    expected=14
+    [[ "${MODE}" != interrupt-int ]] || expected=130
+    [[ "${MODE}" != interrupt-term ]] || expected=143
+    runEdit "${expected}" --redirect-settings 31300 --redirect-output-uid 65534 --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: global OUTPUT recovery changed state"
+done
+MODE=ok
+runEdit 0 --redirect-settings 31301 --confirm PADM-DOCKER-EDIT
+runStatus true 31301 dual null true
+runEdit 0 --redirect-settings 31301 --redirect-output-uid 65534 --confirm PADM-DOCKER-EDIT
+runStatus true 31301 dual 65534
+dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${root}/config/spec.json" ||
+    fail 'bundle without global OUTPUT marker rejected UID'
+jq -e '.services.xray.user == "0:0"' "${root}/compose.json" >/dev/null
+runEdit 0 --redirect-settings 31301 --redirect-output-all --confirm PADM-DOCKER-EDIT
+runEdit 0 --redirect-settings 31301 --redirect-output-off --confirm PADM-DOCKER-EDIT
+runStatus true 31301 dual
+jq -e '.host_integrations[0].settings | has("output_all") or has("output_uid") | not' \
+    "${root}/config/spec.json" >/dev/null
 before=$(snapshot)
 runEdit 0 --redirect-off --preview
 [[ "$(snapshot)" == "${before}" ]] || fail 'off preview changed live state'

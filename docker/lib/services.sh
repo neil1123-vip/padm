@@ -758,11 +758,14 @@ dockerConfigureSpecValidate() {
           . as $integration |
           .profile == "net-transparent" and .firewall_rules == ["padm-" + .type] and
           .devices == [] and .schedules == [] and
-          (.settings | (del(.family, .output_uid) |
+          (.settings | (del(.family, .output_uid, .output_all) |
               exact(["port"] + if $integration.type == "tproxy" then ["mark"] else [] end)) and
             (if has("family") then .family | IN("ipv4", "ipv6", "dual") else true end) and (.port | port) and
             (if has("output_uid") then .output_uid |
               type == "number" and floor == . and . >= 1 and . <= 2147483647 and . != 10001
+             else true end) and
+            (if has("output_all") then
+              .output_all == true and (has("output_uid") | not)
              else true end) and
             (if $integration.type == "tproxy" then
               .mark | type == "number" and floor == . and . >= 1 and . <= 2147483647 and
@@ -802,6 +805,10 @@ dockerConfigureSpecValidate() {
       else true end and
       if any(.host_integrations[]; .type == "redirect") then
         .core.secondary_type == null and
+        (.host_integrations | length) == 1 and
+        all(.core.protocols[]; .id == 1 or .id == 2 or .id == 26)
+      else true end and
+      if any(.host_integrations[]; .type == "tproxy" and .settings.output_all == true) then
         (.host_integrations | length) == 1 and
         all(.core.protocols[]; .id == 1 or .id == 2 or .id == 26)
       else true end and
@@ -3322,7 +3329,8 @@ dockerGenerateCompose() {
       | if $transparent then
           .services[$r.core.type].profiles += ["net-transparent"]
           | .services[$r.core.type].network_mode = "host"
-          | .services[$r.core.type].user = "0:0"
+          | .services[$r.core.type].user =
+              (if $tproxy[0].settings.output_all == true then "0:10001" else "0:0" end)
           | .services[$r.core.type].cap_add = ["NET_ADMIN"]
           | del(.services[$r.core.type].ports)
           | if ($tun | length) == 1 then
@@ -3538,7 +3546,8 @@ dockerGenerateCompose() {
             command: ([$tproxy[0].type, ($tproxy[0].settings.port | tostring)] +
               (if $tproxy[0].type == "tproxy" then [($tproxy[0].settings.mark | tostring)] else [] end) +
               (if ($tproxy[0].settings.family // "ipv4") == "ipv4" then [] else [$tproxy[0].settings.family] end) +
-              (if $tproxy[0].settings | has("output_uid") then ["--output-uid", ($tproxy[0].settings.output_uid | tostring)] else [] end)),
+              (if $tproxy[0].settings.output_all == true then ["--output-all"]
+               elif $tproxy[0].settings | has("output_uid") then ["--output-uid", ($tproxy[0].settings.output_uid | tostring)] else [] end)),
             network_mode: "host",
             cap_add: ["NET_ADMIN"],
             labels: labels("net-transparent"),
@@ -3550,7 +3559,8 @@ dockerGenerateCompose() {
                 ($tproxy[0].settings.port | tostring)] +
                 (if $tproxy[0].type == "tproxy" then [($tproxy[0].settings.mark | tostring)] else [] end) +
                 (if ($tproxy[0].settings.family // "ipv4") == "ipv4" then [] else [$tproxy[0].settings.family] end) +
-                (if $tproxy[0].settings | has("output_uid") then ["--output-uid", ($tproxy[0].settings.output_uid | tostring)] else [] end)),
+                (if $tproxy[0].settings.output_all == true then ["--output-all"]
+                 elif $tproxy[0].settings | has("output_uid") then ["--output-uid", ($tproxy[0].settings.output_uid | tostring)] else [] end)),
               interval: "30s", timeout: "5s", start_period: "5s", retries: 3
             }
           })
@@ -5398,7 +5408,7 @@ dockerTProxyConfigurationCheck() {
 }
 
 dockerTProxyContainer() (
-    local root ids container mode=${1:-running} health
+    local root ids container mode=${1:-running} health core coreIds coreContainer
     local -a healthArgs=()
     [[ "$#" -le 1 && ( "${mode}" == running || "${mode}" == exited ) ]] || return 1
     root=$(dockerInstallRoot) || return 1
@@ -5447,6 +5457,45 @@ dockerTProxyContainer() (
         return 1
     }
     if [[ "${mode}" == running ]]; then
+        if jq -e 'any(.host_integrations[]; .settings.output_all == true)' \
+            "${root}/config/spec.json" >/dev/null; then
+            core=$(jq -er '.core.type' "${root}/config/spec.json") || return 1
+            coreIds=$(docker ps -q --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+                --filter "label=com.docker.compose.service=${core}" \
+                --filter label=com.docker.compose.oneoff=False) || return 1
+            [[ "${coreIds}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+            coreContainer=$(docker container inspect "${coreIds}") || return 1
+            jq -e --arg core "${core}" --arg root "${root}" --arg id "${coreIds}" \
+                --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
+              length == 1 and (.[0] as $c |
+                ($c.Id | startswith($id)) and $c.State.Running == true and
+                $c.State.Restarting == false and $c.State.Paused == false and
+                $c.Config.User == "0:10001" and $c.Config.Image == $spec[0].images[$core] and
+                $c.Config.Entrypoint == ["/usr/local/bin/" + $core] and
+                $c.Config.Cmd == (if $core == "xray" then ["run","-confdir","/etc/padm/xray"]
+                  else ["run","-D","/var/lib/padm/sing-box","-c","/etc/padm/sing-box/config.json"] end) and
+                $c.HostConfig.NetworkMode == "host" and
+                all($compose[0].services[$core].labels | to_entries[];
+                  $c.Config.Labels[.key] == .value) and
+                $c.Config.Labels["com.docker.compose.project.working_dir"] == $root and
+                $c.Config.Labels["com.docker.compose.project.config_files"] == ($root + "/compose.json"))
+            ' <<<"${coreContainer}" >/dev/null || return 1
+            # 绕过依赖实际核心身份，不能只凭编排中的 user 字段放行。
+            docker exec "${coreIds}" sh -ec '
+              count=0
+              for status in /proc/[0-9]*/status; do
+                [ "$(awk "/^Name:/ {print \$2}" "$status" 2>/dev/null)" = "$1" ] || continue
+                awk "/^Uid:/ {u=(\$2==0 && \$3==0 && \$4==0 && \$5==0)}
+                     /^Gid:/ {g=(\$2==10001 && \$3==10001 && \$4==10001 && \$5==10001)}
+                     END {exit !(u && g)}" "$status" || exit 1
+                count=$((count + 1))
+              done
+              [ "$count" = 1 ]
+            ' sh "${core}" </dev/null || {
+                dockerError '全主机 OUTPUT 核心运行身份漂移，未执行操作'
+                return 1
+            }
+        fi
         # 编排已与生成器精确一致，复用其健康参数避免两种透明模式再次拼装。
         health=$(jq -er '.services["net-transparent"].healthcheck.test[2:][]' \
             "${root}/compose.json") || return 1
@@ -6063,7 +6112,8 @@ dockerValidateHostIntegrations() {
       ([.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.port | tostring] | join(",")),
       ([.host_integrations[] | select(.type == "tproxy") | .settings.mark | tostring] | join(",")),
       ([.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.family // "ipv4"] | join(",")),
-      ([.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.output_uid // empty | tostring] | join(","))
+      ([.host_integrations[] | select(.type == "tproxy" or .type == "redirect") |
+        if .settings.output_all == true then "all" else .settings.output_uid // empty | tostring end] | join(","))
     ] |
       if any(.[]; contains("|") or contains("\n") or contains("\r")) then
         error("宿主集成元数据包含非法分隔符")
@@ -6160,7 +6210,8 @@ dockerValidateHostIntegrations() {
         local -a ownershipMount=() ownershipArgs=("${ownership}") familyArgs=() commandArgs=("${port}")
         [[ "${kind}" != tproxy ]] || commandArgs+=("${mark}")
         [[ "${family}" == ipv4 ]] || familyArgs=("${family}")
-        [[ -z "${outputUid}" ]] || familyArgs+=(--output-uid "${outputUid}")
+        if [[ "${outputUid}" == all ]]; then familyArgs+=(--output-all)
+        elif [[ -n "${outputUid}" ]]; then familyArgs+=(--output-uid "${outputUid}"); fi
         if dockerCurrentOwnsHostIntegration "${kind}"; then
             root=$(dockerInstallRoot) || return 1
             dockerTrafficSafePath "${root}" "${root}/data/net/transparent" || return 1
@@ -8706,9 +8757,11 @@ dockerValidateInstalledCommand() {
             family=$(jq -er --arg kind "${integration}" '.host_integrations[] | select(.type == $kind) | .settings.family // "ipv4"' \
                 "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
             [[ "${family}" == ipv4 ]] || familyArgs=("${family}")
-            outputUid=$(jq -r --arg kind "${integration}" '.host_integrations[] | select(.type == $kind) | .settings.output_uid // empty' \
+            outputUid=$(jq -r --arg kind "${integration}" '.host_integrations[] | select(.type == $kind) |
+              if .settings.output_all == true then "all" else .settings.output_uid // empty end' \
                 "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
-            [[ -z "${outputUid}" ]] || familyArgs+=(--output-uid "${outputUid}")
+            if [[ "${outputUid}" == all ]]; then familyArgs+=(--output-all)
+            elif [[ -n "${outputUid}" ]]; then familyArgs+=(--output-uid "${outputUid}"); fi
             local -a commandArgs=("${port}")
             [[ "${integration}" != tproxy ]] || commandArgs+=("${mark}")
             dockerComposeRun run --rm --no-deps net-transparent \
