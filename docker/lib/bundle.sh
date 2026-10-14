@@ -416,6 +416,9 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].host_integrations[]; .type == "tun") then
             $schema[0]["x-padm-tun-owned-management"] == true
           else true end) and
+          (if any($spec[0].host_integrations[]; .type == "tproxy" and (.settings.family // "ipv4") != "ipv4") then
+            $schema[0]["x-padm-tproxy-ipv6"] == true
+          else true end) and
           (if $spec[0] | has("site") then
             $schema[0]["x-padm-site-content"] == true
           else true end) and

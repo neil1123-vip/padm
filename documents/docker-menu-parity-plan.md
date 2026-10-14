@@ -3628,6 +3628,42 @@ host 指外层隔离回归容器，未借用宿主 Docker Socket。
 日志/result 保留。普通重启会精确撤销并重建规则容器，主核心定向启动同样补建。
 完整 5C、发布与总体计划继续 active。
 
+#### 5C.2b.1 TProxy IPv6 与双栈
+
+菜单 `17 → 43` 增加族选择，CLI `--tproxy-family ipv4|ipv6|dual` 仅与
+启用/参数修改组合。启用默认 IPv4；修改省略族时保留原值，不给旧输入补字段。
+两核心非 IPv4 监听 `::`，Compose、健康、预检及部署监听同步族信息。
+非 IPv4 要求 bundle marker `x-padm-tproxy-ipv6`；旧 IPv4 参数格式保持。
+
+IPv4 state 保留 schema 2 原格式，IPv6/双栈使用 schema 3 并追加 family。
+同一随机 token 绑定各族 chain/rule/route；IPv6 内核不回显 realm，
+改用 token 派生 metric 精确核验/删除。候选只读核验旧族与新族资源并集，
+启动失败或 INT/TERM 撤销两族；任一族漂移在清理前拒绝，全部保留。
+旧 schema 2 可正常撤销后切换族；更旧两字段 state 继续拒绝自动接管。
+各族须已开启宿主转发并支持对应 TPROXY target，不改宿主 sysctl。
+
+本地验收（2026-10-14，Docker Desktop Linux amd64，Jobs 2）：
+
+| 检查 | 入口秒 | 证据目录 |
+| --- | --- | --- |
+| 管理事务 | 24.804 | `.tmp-regression-docker-be955e32fb0a426a8de6e3ef8ab68ad2` |
+| 菜单路由 | 16.303 | `.tmp-regression-docker-add59d30c83b4c20ac90d7747364a929` |
+| 规格校验，215 个差分场景 | 13.679 | `.tmp-regression-docker-2a63fa59c2054fc3be25ba23008d12b9` |
+| 两族所有权/失败恢复及管理 | 53.114 | `.tmp-regression-docker-5b50cb746cd54f869f64099651ad2beb` |
+| 两核心三族真实 TCP/UDP 转发/停止 | 35.570 | `.tmp-regression-docker-995cee1578494dcfb2c10e6154cd0389` |
+| 集中 `docker-contracts`，Jobs 6，56/56 | 341.136 | `.tmp-regression-docker-37d74d5812734e8da12a9a170d7397bc` |
+| 派发合同 | 1.648 | `.tmp-regression-docker-8be1df07eefd4fab91fa2c5bf0be34d8` |
+
+真实 client/router/origin 分离，回包、TPROXY 计数、核心目的日志及目标所见
+源地址共同证明转发，停止恢复两族外来规则/路由基线。夹具等待 IPv6 DAD
+稳定后取基线，并修复 Bash 关联数组的族索引计数，不放松断言。
+完整合同后将耗时 53 秒的所有权回归提前调度，只调整同一 56 项集合顺序，
+不扩并发，派发合同补验通过；未重跑全套，不宣称已测得提速比例。
+14 份生产、合同和功能测试文件逐文件匹配完整快照，后续仅改派发顺序与文档；
+输入归档/清单清理，日志/result 保留。
+OUTPUT/Redirect、原生宿主/arm64/公网/重启和完整卸载继续 deferred；
+本项只完成 TProxy PREROUTING 双栈，5C 与整体目标继续 active。
+
 #### 5C.2c TUN 管理与资源生命周期
 
 菜单 `17 → 44`、`protocol tun-status`、`edit --tun-enable/--tun-off` 复用

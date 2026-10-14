@@ -413,7 +413,7 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "透明代理依赖宿主路由和防火墙规则，需显式 profile。"
+      "reason": "5C.2b.1 菜单 17→43 和 CLI 提供单 Xray/sing-box Reality 的 IPv4/IPv6/双栈 PREROUTING TCP/UDP 管理，无其它宿主集成。启用默认 IPv4，参数修改保留当前族，所选族须具备宿主转发和 TPROXY target。旧 IPv4 schema 2 兼容，非 IPv4 schema 3 绑定各族资源；任一族漂移保留全部资源及 state，完整核验后精确撤销。隔离 amd64 两核心三族真实转发和停止已验；OUTPUT/Redirect、原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "interactive-menu": {
       "status": "deferred",
@@ -476,7 +476,7 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "原生内部能力 205 依赖宿主转发与防火墙规则。"
+      "reason": "5C.2b.1 提供有限 TProxy 管理，范围与 tproxy 相同：单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING TCP/UDP、无其它宿主集成。两族完整核验后精确撤销，任一漂移保留资源和 state；所选族须具备宿主转发和 TPROXY target。OUTPUT/Redirect、原生宿主/arm64/公网/重启/完整卸载及完整 205 管理仍待验。"
     },
     "internal-206-routing-rules": {
       "status": "deferred",
@@ -610,7 +610,7 @@
       "status": "host-integrated",
       "profile": "net-transparent",
       "services": ["core", "net-transparent"],
-      "address_families": ["ipv4"],
+      "address_families": ["ipv4", "ipv6"],
       "network_mode": "host",
       "capabilities": ["NET_ADMIN"],
       "devices": []

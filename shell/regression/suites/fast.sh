@@ -59,7 +59,7 @@ listRegressionDockerTlsFocusedChildSelectors() {
 }
 
 listRegressionDockerContractsChildSelectors() {
-    # XHTTP 分片优先调度，避免长事务排在完整回归尾部。
+    # 长事务与两族所有权优先调度，减少完整回归尾部等待。
     printf '%s\n' \
         docker-xhttp-edit \
         docker-xhttp-rollback \
@@ -71,6 +71,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-setup-transports \
         docker-setup-encrypted-udp \
         docker-port-hopping-preflight \
+        docker-tproxy-ownership \
         docker-phase4-maintenance \
         docker-routing-core-network-lifecycle \
         docker-reality \
@@ -95,7 +96,6 @@ listRegressionDockerContractsChildSelectors() {
         docker-reality-targets-selection \
         docker-reality-target-library \
         docker-control-client \
-        docker-tproxy-ownership \
         docker-tun-management \
         docker-routing-block-ips-resolved \
         docker-routing-core-contracts \

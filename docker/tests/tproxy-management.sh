@@ -38,6 +38,7 @@ dockerManifestImageReference() { jq -er --arg image "$1" '.images[$image]' "${TE
 dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
 dockerCandidateCompose() {
     [[ -d "$1" && -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]]
+    printf '%s\n' "$*" >>"${TEST_ROOT}/candidate-calls.log"
 }
 docker() {
     [[ "${1:-}" == ps ]] && return 0
@@ -95,10 +96,10 @@ runEdit() {
     assertClean
 }
 runStatus() {
-    local enabled=$1 port=$2 mark=$3
+    local enabled=$1 port=$2 mark=$3 family=${4:-ipv4}
     (dockerMain protocol tproxy-status) >"${LOG}" 2>&1 || fail 'status failed'
-    jq -e --argjson enabled "${enabled}" --argjson port "${port}" --argjson mark "${mark}" '
-      . == {enabled:$enabled,port:$port,mark:$mark,family:"ipv4",hook:"PREROUTING"}
+    jq -e --argjson enabled "${enabled}" --argjson port "${port}" --argjson mark "${mark}" --arg family "${family}" '
+      . == {enabled:$enabled,port:$port,mark:$mark,family:$family,hook:"PREROUTING"}
     ' "${LOG}" >/dev/null
     assertClean
 }
@@ -122,6 +123,12 @@ done
 runEdit 2 --tproxy-enable 31298 129 --tproxy-off --preview
 runEdit 2 --tproxy-enable 31298 129 --dns-off --preview
 runEdit 2 --tproxy-enable 31298 129 --spec "${TEST_ROOT}/base.json" --preview
+for family in invalid IPv4 ''; do
+    runEdit 2 --tproxy-enable 31298 129 --tproxy-family "${family}" --preview
+done
+runEdit 2 --tproxy-family dual --preview
+runEdit 2 --tproxy-off --tproxy-family dual --preview
+runEdit 2 --tproxy-enable 31298 129 --tproxy-family dual --tproxy-family ipv6 --preview
 runEdit 15 --tproxy-enable 35441 129 --preview
 runEdit 15 --tproxy-enable 10085 129 --preview
 runEdit 0 --tproxy-enable 31298 129 --preview
@@ -132,6 +139,7 @@ runStatus true 31298 129
 jq -e '.services.xray.network_mode == "host" and .services.xray.user == "0:0" and
   .services.xray.cap_add == ["NET_ADMIN"] and .services.xray.ports == null and
   .services["net-transparent"].command == ["tproxy","31298","129"]' "${root}/compose.json" >/dev/null
+jq -e '.host_integrations[0].settings | has("family") | not' "${root}/config/spec.json" >/dev/null
 jq -e 'any(.inbounds[]; .tag == "tproxy-in" and .port == 31298 and
   .settings.followRedirect == true and .settings.network == "tcp,udp")' \
     "${root}/config/xray/config.json" >/dev/null
@@ -181,6 +189,55 @@ jq -e '.accounts["11111111-1111-4111-8111-111111111111"].upload == 17 and
 jq -e '.services["net-transparent"] == null and .services.xray.network_mode == null and
   .services.xray.ports == ["0.0.0.0:35441:35441/tcp"]' "${root}/compose.json" >/dev/null
 jq -e 'all(.inbounds[]; .tag != "tproxy-in")' "${root}/config/xray/config.json" >/dev/null
+# 三种地址族共用生成路径，旧 IPv4 输入及无 marker 的发布包继续兼容。
+mkdir -- "${TEST_ROOT}/old-bundle" "${TEST_ROOT}/old-bundle/docker" "${TEST_ROOT}/old-bundle/docker/contracts"
+jq 'del(."x-padm-tproxy-ipv6")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
+cp -- "${PROJECT_ROOT}/docker/contracts/features.json" "${TEST_ROOT}/old-bundle/docker/contracts/features.json"
+for core in xray sing-box; do
+    for family in ipv4 ipv6 dual; do
+        jq --arg core "${core}" --arg family "${family}" '
+          .core.type = $core | .core.protocols[0].core = $core |
+          .host_integrations = [{type:"tproxy",profile:"net-transparent",firewall_rules:["padm-tproxy"],
+            devices:[],schedules:[],settings:{port:31298,mark:129,family:$family}}]
+        ' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/family.json"
+        dockerConfigureSpecValidate "${TEST_ROOT}/family.json" || fail "invalid ${core}/${family} spec"
+        if [[ "${core}" == xray ]]; then
+            dockerGenerateXrayConfig "${TEST_ROOT}/family.json" "${TEST_ROOT}/family.config.json"
+            jq -e --arg family "${family}" 'any(.inbounds[]; .tag == "tproxy-in" and
+              .listen == (if $family == "ipv4" then "0.0.0.0" else "::" end))' \
+                "${TEST_ROOT}/family.config.json" >/dev/null
+        else
+            dockerGenerateSingBoxConfig "${TEST_ROOT}/family.json" "${TEST_ROOT}/family.config.json"
+            jq -e --arg family "${family}" 'any(.inbounds[]; .tag == "tproxy-in" and
+              .listen == (if $family == "ipv4" then "0.0.0.0" else "::" end))' \
+                "${TEST_ROOT}/family.config.json" >/dev/null
+        fi
+        dockerGenerateDeployment "${TEST_ROOT}/family.json" "${TEST_ROOT}/family.deployment.json"
+        jq -e --arg family "${family}" 'all(.listeners[] | select(.listener_id | startswith("host-tproxy-"));
+          .address_families == (if $family == "dual" then ["ipv4","ipv6"] else [$family] end))' \
+            "${TEST_ROOT}/family.deployment.json" >/dev/null
+        if [[ "${family}" == ipv4 ]]; then
+            dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${TEST_ROOT}/family.json" ||
+                fail 'old IPv4 bundle rejected'
+        else
+            ! dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${TEST_ROOT}/family.json" ||
+                fail 'old bundle accepted IPv6 TProxy'
+        fi
+    done
+done
+runEdit 0 --tproxy-family dual --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
+runStatus true 31298 129 dual
+jq -e '.services["net-transparent"].command == ["tproxy","31298","129","dual"] and
+  .services["net-transparent"].healthcheck.test ==
+    ["CMD","/usr/local/bin/padm-entrypoint","tproxy-health","31298","129","dual"]' "${root}/compose.json" >/dev/null
+grep -Fq 'net-transparent preflight tproxy 31298 129 dual unowned' "${TEST_ROOT}/candidate-calls.log" ||
+    fail 'dual preflight family missing'
+runEdit 0 --tproxy-settings 31299 131 --confirm PADM-DOCKER-EDIT
+runStatus true 31299 131 dual
+runEdit 0 --tproxy-settings 31299 131 --tproxy-family ipv6 --confirm PADM-DOCKER-EDIT
+runStatus true 31299 131 ipv6
+runEdit 0 --tproxy-off --confirm PADM-DOCKER-EDIT
 # 实际管理事务之外，核对停止证明会拒绝归属漂移及不完整撤销。
 runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
 (

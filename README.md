@@ -1054,16 +1054,21 @@ TProxy 管理入口为菜单 `17 → 43`，或以下命令：
 
 ```bash
 padm-docker protocol tproxy-status
-padm-docker edit --tproxy-enable 31298 129
+padm-docker edit --tproxy-enable 31298 129 --tproxy-family dual
 padm-docker edit --tproxy-settings 31299 131
 padm-docker edit --tproxy-off
 ```
 
 仅管理单 Xray 或 sing-box 核心的已有 Reality 部署，不能与其它宿主集成共存。
-透明入口只处理 IPv4 `PREROUTING` 的 TCP/UDP，不接管宿主 `OUTPUT` 或 IPv6。
+透明入口处理 `PREROUTING` 的 TCP/UDP，族可选 `ipv4`、`ipv6` 或 `dual`。
+启用未指定族时默认 IPv4，修改参数未指定族时保留当前值；不接管宿主 `OUTPUT`，
+不提供 Redirect。所选族须已开启宿主转发并支持对应 TPROXY target，预检不修改 sysctl。
+旧 schema 2 的 IPv4 state 保持兼容；IPv6/双栈使用 schema 3，同一 token
+分别绑定两族资源，任一族漂移时保留全部资源与 state，不先清另一族。
 启用后核心使用 host 网络、root 和 `NET_ADMIN`；修改或关闭先审计旧容器，
 正常停止并确认规则清空，再沿原配置事务提交；预览和取消不停止旧服务。
-状态命令显示规格，实际健康仍用 `validate`。原生宿主重启、arm64、公网及完整
+状态命令显示规格，实际健康仍用 `validate`。隔离 Linux amd64 已验两核心、
+三种族的真实 TCP/UDP 转发和停止清理。原生宿主重启、arm64、公网及完整
 5C 仍待验收。
 
 TUN 管理入口为菜单 `17 → 44`：

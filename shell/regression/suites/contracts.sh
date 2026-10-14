@@ -265,6 +265,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
         docker-phase3-edit docker-phase3-entries docker-traditional-tls-transports docker-traditional-tls-base
         docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
+        docker-tproxy-ownership
         docker-phase4-maintenance docker-routing-core-network-lifecycle docker-reality docker-setup-tls docker-phase4-lifecycle
         docker-reality-targets-direct docker-reality-parameters docker-sites
         docker-routing-direct-block-ip-workflow docker-routing-direct-block-csv-workflow docker-routing-core-policy-lifecycle
@@ -272,7 +273,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
         docker-cdn-entries docker-fail2ban-ownership docker-control-state
         docker-reality-targets-selection docker-reality-target-library docker-control-client
-        docker-tproxy-ownership docker-tun-management docker-routing-block-ips-resolved docker-routing-core-contracts docker-http-relay docker-control-cli
+        docker-tun-management docker-routing-block-ips-resolved docker-routing-core-contracts docker-http-relay docker-control-cli
         docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts
         docker-traffic docker-permissions docker-fail2ban-source docker-control-api
         docker-wireguard-runtime docker-subscriptions docker-accounts-cli

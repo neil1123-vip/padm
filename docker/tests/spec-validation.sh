@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含跳跃、TUN 和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
+# 摘要锁定含跳跃、透明转发和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "9224a4d57cb2bf0f06b20e1927cdb614b08edfce51d684f3047e462289b4c2dd"
+    "9bf8891098ccbe19aa48d5c2079a79356d1483c8d25c18ff58d4b92d4171e34c"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -236,6 +236,14 @@ spec["host_integrations"] = [{
     "devices": [], "schedules": [], "settings": {"port": 31298, "mark": 129},
 }]
 cases["valid-host-tproxy"] = spec
+for family in ("ipv4", "ipv6", "dual"):
+    valid = copy.deepcopy(spec)
+    valid["host_integrations"][0]["settings"]["family"] = family
+    cases[f"valid-host-tproxy-{family}"] = valid
+for family in ("", "IPv4", "all", None, 4, []):
+    invalid = copy.deepcopy(spec)
+    invalid["host_integrations"][0]["settings"]["family"] = family
+    cases[f"invalid-tproxy-family-{len(cases)}"] = invalid
 for mark in (253, 254, 255):
     invalid = copy.deepcopy(spec)
     invalid["host_integrations"][0]["settings"]["mark"] = mark

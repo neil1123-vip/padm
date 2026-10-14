@@ -1958,8 +1958,10 @@ runRoutingDriver() {
             for choice in 2 3; do
                 inputPrompt='TProxy 端口 [31298，0 返回]'
                 newPrompt='TProxy mark [129，0 返回]'
+                familyPrompt='TProxy 地址族 ipv4/ipv6/dual [ipv4，0 返回]'
                 [[ "${choice}" != 3 ]] ||
-                    { inputPrompt='TProxy 端口 [31399，0 返回]'; newPrompt='TProxy mark [257，0 返回]'; }
+                    { inputPrompt='TProxy 端口 [31399，0 返回]'; newPrompt='TProxy mark [257，0 返回]';
+                      familyPrompt='TProxy 地址族 ipv4/ipv6/dual [dual，0 返回]'; }
                 for input in $'0\n' $'\004'; do
                     targetReply 'Docker TProxy 管理' "${choice}"$'\n'
                     targetReply "${inputPrompt}" "${input}"
@@ -1969,15 +1971,24 @@ runRoutingDriver() {
                     targetReply "${inputPrompt}" $'\n'
                     targetReply "${newPrompt}" "${input}"
                 done
+                for input in $'0\n' $'\004'; do
+                    targetReply 'Docker TProxy 管理' "${choice}"$'\n'
+                    targetReply "${inputPrompt}" $'\n'
+                    targetReply "${newPrompt}" $'\n'
+                    targetReply "${familyPrompt}" "${input}"
+                done
             done
             for choice in 2 3; do
                 targetReply 'Docker TProxy 管理' "${choice}"$'\n'
                 inputPrompt='TProxy 端口 [31298，0 返回]'
                 newPrompt='TProxy mark [129，0 返回]'
+                familyPrompt='TProxy 地址族 ipv4/ipv6/dual [ipv4，0 返回]'
                 [[ "${choice}" != 3 ]] ||
-                    { inputPrompt='TProxy 端口 [31399，0 返回]'; newPrompt='TProxy mark [257，0 返回]'; }
+                    { inputPrompt='TProxy 端口 [31399，0 返回]'; newPrompt='TProxy mark [257，0 返回]';
+                      familyPrompt='TProxy 地址族 ipv4/ipv6/dual [dual，0 返回]'; }
                 targetReply "${inputPrompt}" $'\n'
                 targetReply "${newPrompt}" $'\n'
+                targetReply "${familyPrompt}" $'\n'
                 input=$'n\n'
                 [[ "${choice}" != 3 ]] || input=$'\004'
                 targetReply 'fixture-tproxy-confirm [y/N]' "${input}"
@@ -1992,6 +2003,7 @@ runRoutingDriver() {
             targetReply 'Docker TProxy 管理' $'2\n'
             targetReply 'TProxy 端口 [31298，0 返回]' $'\n'
             targetReply 'TProxy mark [129，0 返回]' $'\n'
+            targetReply 'TProxy 地址族 ipv4/ipv6/dual [ipv4，0 返回]' $'ipv6\n'
             targetReply 'fixture-tproxy-confirm [y/N]' $'y\n'
             for input in '' 32000; do
                 targetReply 'Docker TProxy 管理' $'3\n'
@@ -1999,6 +2011,9 @@ runRoutingDriver() {
                 [[ -z "${input}" ]] || newRule=130
                 targetReply 'TProxy 端口 [31399，0 返回]' "${input}"$'\n'
                 targetReply 'TProxy mark [257，0 返回]' "${newRule}"$'\n'
+                newFamily=
+                [[ -z "${input}" ]] || newFamily=ipv4
+                targetReply 'TProxy 地址族 ipv4/ipv6/dual [dual，0 返回]' "${newFamily}"$'\n'
                 targetReply 'fixture-tproxy-confirm [y/N]' $'y\n'
             done
             targetReply 'Docker TProxy 管理' $'4\n'
@@ -2381,7 +2396,7 @@ protocol)
     routing-status) exit "${ROUTING_STATUS:-0}" ;;
     tproxy-status)
         [[ "${TPROXY_STATUS:-0}" -eq 0 ]] || exit "${TPROXY_STATUS}"
-        printf '{"enabled":true,"port":31399,"mark":257,"family":"ipv4","hook":"PREROUTING"}\n'
+        printf '{"enabled":true,"port":31399,"mark":257,"family":"dual","hook":"PREROUTING"}\n'
         exit 0
         ;;
     tun-status)
@@ -2451,10 +2466,14 @@ edit)
     elif [[ "${2:-}" == --tproxy-enable || "${2:-}" == --tproxy-settings || "${2:-}" == --tproxy-off ]]; then
         # 参数只断言菜单默认值与原样分发；内核规则和恢复由 TProxy 合同覆盖。
         case "$2" in
-        --tproxy-enable) [[ "$#" -eq 4 && "$3" == 31298 && "$4" == 129 ]] || exit 2 ;;
+        --tproxy-enable)
+            [[ "$#" -eq 6 && "$3" == 31298 && "$4" == 129 && "$5" == --tproxy-family &&
+                ( "$6" == ipv4 || "$6" == ipv6 ) ]] || exit 2
+            ;;
         --tproxy-settings)
-            [[ "$#" -eq 4 && ( ( "$3" == 31399 && "$4" == 257 ) ||
-                ( "$3" == 32000 && "$4" == 130 ) ) ]] || exit 2
+            [[ "$#" -eq 6 && "$5" == --tproxy-family &&
+                ( ( "$3" == 31399 && "$4" == 257 && "$6" == dual ) ||
+                  ( "$3" == 32000 && "$4" == 130 && "$6" == ipv4 ) ) ]] || exit 2
             ;;
         --tproxy-off) [[ "$#" -eq 2 ]] || exit 2 ;;
         esac
@@ -3554,19 +3573,20 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         if [[ "${routingCase}" == tproxy-status-failed ]]; then
             expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..4})
             tproxyConfirmCount=0 tproxyFailureCount=4 tproxyExit=17
-            ! grep -Eq 'TProxy (端口|mark) \[' "${CONTROL_LOG}" ||
+            ! grep -Eq 'TProxy (端口|mark|地址族 ipv4/ipv6/dual) \[' "${CONTROL_LOG}" ||
                 fail 'TProxy 状态失败后仍读取参数'
         elif [[ "${routingCase}" == tproxy-cancel ]]; then
-            expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..8})
-            expectedRouting+=$'\nprotocol tproxy-status\nedit --tproxy-enable 31298 129\ntproxy-confirm --tproxy-enable n'
-            expectedRouting+=$'\nprotocol tproxy-status\nedit --tproxy-settings 31399 257\ntproxy-confirm --tproxy-settings eof'
+            expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..12})
+            expectedRouting+=$'\nprotocol tproxy-status\nedit --tproxy-enable 31298 129 --tproxy-family ipv4\ntproxy-confirm --tproxy-enable n'
+            expectedRouting+=$'\nprotocol tproxy-status\nedit --tproxy-settings 31399 257 --tproxy-family dual\ntproxy-confirm --tproxy-settings eof'
             expectedRouting+=$'\nedit --tproxy-off\ntproxy-confirm --tproxy-off n'
             expectedRouting+=$'\nedit --tproxy-off\ntproxy-confirm --tproxy-off eof\nprotocol tproxy-status'
             tproxyFailureCount=4 tproxyExit=2
         else
             expectedRouting='protocol tproxy-status'
-            for tproxyAction in '--tproxy-enable 31298 129' '--tproxy-settings 31399 257' \
-                '--tproxy-settings 32000 130' '--tproxy-off'; do
+            for tproxyAction in '--tproxy-enable 31298 129 --tproxy-family ipv6' \
+                '--tproxy-settings 31399 257 --tproxy-family dual' \
+                '--tproxy-settings 32000 130 --tproxy-family ipv4' '--tproxy-off'; do
                 [[ "${tproxyAction}" == --tproxy-off ]] || expectedRouting+=$'\nprotocol tproxy-status'
                 expectedRouting+=$'\nedit '"${tproxyAction}"
                 expectedRouting+=$'\ntproxy-confirm '"${tproxyAction%% *}"' y'

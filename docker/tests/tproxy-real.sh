@@ -77,7 +77,8 @@ mkdir -p "${TEST_ROOT}/owner"
 chmod 0750 "${TEST_ROOT}/owner"
 createRouter() {
     docker create --network "$1" "${@:2}" --cap-add NET_ADMIN \
-    --sysctl net.ipv4.ip_forward=1 --security-opt no-new-privileges:true --init --read-only \
+    --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv6.conf.all.forwarding=1 \
+    --security-opt no-new-privileges:true --init --read-only \
     --tmpfs /run:rw,nosuid,nodev,size=16m --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
     --mount "type=bind,source=${TEST_ROOT}/owner,target=/var/lib/padm/net" \
     --mount "type=bind,source=${TEST_ROOT}/owner,target=/run/padm-tproxy-owner,readonly" \
@@ -98,9 +99,17 @@ kernelSnapshot() {
     net iptables -w -t mangle -S || return 1
     net ip -j -N -4 rule show | jq -cS . || return 1
     net ip -j -N -4 route show table all | jq -cS . || return 1
+    net ip6tables -w -t mangle -S || return 1
+    net ip -j -N -6 rule show | jq -cS . || return 1
+    net ip -j -N -6 route show table all | jq -cS . || return 1
 }
 assertKernel() {
-    [[ "$(kernelSnapshot)" == "$1" ]] || fail "$2"
+    local actual
+    actual=$(kernelSnapshot) || fail 'cannot inspect kernel baseline'
+    if [[ "${actual}" != "$1" ]]; then
+        diff -u <(printf '%s\n' "$1") <(printf '%s\n' "${actual}") >&2 || true
+        fail "$2"
+    fi
 }
 rejectEntry() {
     local status=0
@@ -110,18 +119,18 @@ rejectEntry() {
         fail "entrypoint did not promptly reject: $*"
 }
 startServer() {
-    port=$1 mark=$2
+    port=$1 mark=$2 family=${3:-ipv4}
     net rm -f /tmp/tproxy.pid /tmp/tproxy.status
     docker exec -d "${container}" sh -c '
-      sh /tmp/padm-entrypoint tproxy "$1" "$2" </dev/null >/tmp/tproxy.log 2>&1 &
+      sh /tmp/padm-entrypoint tproxy "$1" "$2" "$3" </dev/null >/tmp/tproxy.log 2>&1 &
       server=$!
       printf "%s\n" "$server" >/tmp/tproxy.pid
       status=0
       wait "$server" || status=$?
       printf "%s\n" "$status" >/tmp/tproxy.status
-    ' test "${port}" "${mark}"
+    ' test "${port}" "${mark}" "${family}"
     for ((attempt = 0; attempt < 100; attempt++)); do
-        entry tproxy-health "${port}" "${mark}" >/dev/null 2>&1 && return 0
+        entry tproxy-health "${port}" "${mark}" "${family}" >/dev/null 2>&1 && return 0
         ! net test -f /tmp/tproxy.status || fail 'service exited before readiness'
         sleep 0.05
     done
@@ -146,7 +155,8 @@ readState() {
     state=$(net cat /var/lib/padm/net/tproxy.state | jq -Rne '
       [inputs | split("=")] as $pairs |
       if ($pairs | map(.[0])) ==
-        ["schema_version","token","chain","port","mark","table","pref","route_proto","rule_proto","realm","phase"]
+        (["schema_version","token","chain","port","mark","table","pref","route_proto","rule_proto","realm","phase"] +
+          if ($pairs[0][1] == "3") then ["family"] else [] end)
         and all($pairs[]; length == 2)
       then $pairs | map({key:.[0],value:.[1]}) | from_entries
       else error("invalid ownership state") end
@@ -159,10 +169,12 @@ readState() {
     [[ "${chain}" == "padm-tproxy-${token:0:12}" && "${realm}" == "${expected_realm}" &&
         "$(net stat -c '%u:%a:%h' /var/lib/padm/net/tproxy.state)" == 0:600:1 ]] ||
         fail 'resource identity or state permissions are wrong'
-    jq -e --arg port "${port}" --arg mark "${mark}" '
-      .schema_version == "2" and .port == $port and .mark == $mark and .table == $mark and
+    jq -e --arg port "${port}" --arg mark "${mark}" --arg family "${family}" '
+      .schema_version == (if $family == "ipv4" then "2" else "3" end) and
+      (.family // "ipv4") == $family and .port == $port and .mark == $mark and .table == $mark and
       .pref == "30000" and .route_proto == "186" and .rule_proto == "186" and .phase == "active"
     ' <<<"${state}" >/dev/null || fail 'state did not preserve the active resource identity'
+    if [[ "${family}" != ipv6 ]]; then
     net ip -j -N -4 route show table "${mark}" | jq -e --arg realm "${realm}" '
       length == 1 and (.[0] | (.type | tostring) == "2" and (.scope | tostring) == "254" and
         .dev == "lo" and (.protocol | tostring) == "186" and (.flow.to | tostring) == $realm)
@@ -171,6 +183,17 @@ readState() {
       [ .[] | select(.priority == 30000) ] | length == 1 and
       (.[0] | .src == "all" and (.table | tostring) == $mark and (.protocol | tostring) == "186")
     ' >/dev/null || fail 'owned rule does not carry the recorded preference and protocol'
+    fi
+    if [[ "${family}" != ipv4 ]]; then
+        net ip -j -N -6 route show table "${mark}" | jq -e --argjson metric "${realm}" '
+          length == 1 and (.[0] | (.type | tostring) == "2" and .dev == "lo" and
+            (.protocol | tostring) == "186" and .metric == $metric and .pref == "medium")
+        ' >/dev/null || fail 'IPv6 route did not preserve ownership metric'
+        net ip -j -N -6 rule show | jq -e --arg mark "${mark}" '
+          [.[] | select(.priority == 30000)] | length == 1 and
+          (.[0] | .src == "all" and (.table | tostring) == $mark and (.protocol | tostring) == "186")
+        ' >/dev/null || fail 'IPv6 policy rule has wrong identity'
+    fi
 }
 
 # 独立链、策略规则和路由作为外部资源，正常启停必须逐字保留。
@@ -180,6 +203,11 @@ seedOutsideResources() {
     net iptables -w -t mangle -A PREROUTING -m comment --comment outside-owner -j outside-owner
     net ip -4 rule add pref 30100 fwmark 254 table 240 protocol 187
     net ip -4 route add 198.51.100.0/24 dev lo table 240 proto 187 realm 4321
+    net ip6tables -w -t mangle -N outside-owner
+    net ip6tables -w -t mangle -A outside-owner -m comment --comment outside-owner -j RETURN
+    net ip6tables -w -t mangle -A PREROUTING -m comment --comment outside-owner -j outside-owner
+    net ip -6 rule add pref 30100 fwmark 254 table 240 protocol 187
+    net ip -6 route add fd40::/64 dev lo table 240 proto 187 metric 4321
 }
 seedOutsideResources
 baseline=$(kernelSnapshot)
@@ -250,26 +278,37 @@ for name in xray sing-box; do
 done
 for number in 64 65; do
     identity=$(docker network create --internal --subnet "198.18.${number}.0/24" \
+        --ipv6 --subnet "fd40:${number}::/64" \
         --opt com.docker.network.bridge.enable_ip_masquerade=false "tproxy-${number}-${TEST_ROOT##*/}")
     networks+=("${identity}")
 done
 # Docker 不允许将 none 容器接入桥；新空间复用同一 state 挂载并重建外部资源基线。
 docker rm --force --volumes "${container}" >/dev/null
 container=
-container=$(createRouter "${networks[0]}" --ip 198.18.64.10)
+container=$(createRouter "${networks[0]}" --ip 198.18.64.10 --ip6 fd40:64::10)
 docker start "${container}" >/dev/null
-docker network connect --ip 198.18.65.10 "${networks[1]}" "${container}"
+docker network connect --ip 198.18.65.10 --ip6 fd40:65::10 "${networks[1]}" "${container}"
 seedOutsideResources
-clientContainer=$(docker run -d --network "${networks[0]}" --ip 198.18.64.20 \
+clientContainer=$(docker run -d --network "${networks[0]}" --ip 198.18.64.20 --ip6 fd40:64::20 \
     --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges:true \
     --read-only --entrypoint tail "${NET_IMAGE}" -f /dev/null)
-targetContainer=$(docker run -d --network "${networks[1]}" --ip 198.18.65.20 \
+targetContainer=$(docker run -d --network "${networks[1]}" --ip 198.18.65.20 --ip6 fd40:65::20 \
     --cap-drop ALL --security-opt no-new-privileges:true \
     --read-only --entrypoint tail "${NET_IMAGE}" -f /dev/null)
 clientPid=$(docker inspect --format '{{.State.Pid}}' "${clientContainer}")
 targetPid=$(docker inspect --format '{{.State.Pid}}' "${targetContainer}")
 netPid=$(docker inspect --format '{{.State.Pid}}' "${container}")
+for resource in "${container}" "${clientContainer}" "${targetContainer}"; do
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        docker exec "${resource}" ip -j -6 address show | jq -e '
+          all(.[].addr_info[]; .tentative != true and .dadfailed != true)
+        ' >/dev/null && break
+        sleep 0.05
+    done
+    (( attempt < 100 )) || fail 'IPv6 duplicate-address detection did not finish'
+done
 docker exec "${clientContainer}" ip route replace default via 198.18.64.10
+docker exec "${clientContainer}" ip -6 route replace default via fd40:64::10
 net ip route replace default via 198.18.65.1
 for scope in all default eth0 eth1; do
     nsenter --target "${netPid}" --net -- sysctl -q -w "net.ipv4.conf.${scope}.rp_filter=0"
@@ -292,9 +331,9 @@ source "${PROJECT_ROOT}/install-docker.sh"
 fixture="${PROJECT_ROOT}/docker/tests/tproxy-real-fixture.py"
 
 makeCoreConfig() {
-    local core=$1 listenPort=$2 mark=$3 configDir=$4
+    local core=$1 listenPort=$2 mark=$3 configDir=$4 family=${5:-ipv4}
     mkdir -p "${configDir}"
-    jq -n --arg core "${core}" --argjson port "${listenPort}" --argjson mark "${mark}" '
+    jq -n --arg core "${core}" --argjson port "${listenPort}" --argjson mark "${mark}" --arg family "${family}" '
       {schema_version:3,release:{version:"3.1.8",manifest_sha256:("a"*64),signature_identity:"fixture"},
        core:{type:$core,secondary_type:null,protocols:[{
          id:1,core:$core,listener_id:"entry-reality",server:"proxy.example.com",public_port:35441,
@@ -306,7 +345,8 @@ makeCoreConfig() {
        images:(["xray","sing-box","nginx","ops","net"] | map({key:.,value:
          ("ghcr.io/example/padm-"+.+":test@sha256:"+("a"*64))}) | from_entries),
        host_integrations:[{type:"tproxy",profile:"net-transparent",firewall_rules:["padm-tproxy"],
-         devices:[],schedules:[],settings:{port:$port,mark:$mark}}]}
+         devices:[],schedules:[],settings:({port:$port,mark:$mark} +
+           if $family == "ipv4" then {} else {family:$family} end)}]}
     ' >"${configDir}/spec.json"
     dockerConfigureSpecValidate "${configDir}/spec.json"
     if [[ "${core}" == xray ]]; then
@@ -336,8 +376,8 @@ startCore() {
         --tmpfs /tmp:rw,nosuid,nodev,size=16m --tmpfs /var/lib/padm/sing-box:rw,nosuid,nodev,size=16m \
         --mount "type=bind,source=${configDir},target=/etc/padm/tproxy,readonly" "${image}" "${args[@]}")
     for ((attempt = 0; attempt < 100; attempt++)); do
-        if net ss -lnt | grep -qE "[[:space:]](0\\.0\\.0\\.0|\\*):${port}[[:space:]]"; then
-            net ss -lnu | grep -qE "[[:space:]](0\\.0\\.0\\.0|\\*):${port}[[:space:]]" && return 0
+        if net ss -lnt | grep -qE "[[:space:]](0\\.0\\.0\\.0|\\*|\\[::\\]):${port}[[:space:]]"; then
+            net ss -lnu | grep -qE "[[:space:]](0\\.0\\.0\\.0|\\*|\\[::\\]):${port}[[:space:]]" && return 0
         fi
         [[ "$(docker inspect --format '{{.State.Running}}' "${coreContainer}")" == true ]] ||
             fail "${core} exited before readiness"
@@ -352,31 +392,34 @@ stopCore() {
     coreContainer=
 }
 forwardCheck() {
-    local kind=$1 targetPort=$2 before after rows expected
-    before=$(net iptables -w -t mangle -nvxL "${chain}" |
+    local kind=$1 targetPort=$2 version=${3:-4} before after rows expected tool=iptables
+    local destination=198.18.65.20 peer=198.18.65.10
+    if [[ "${version}" == 6 ]]; then tool=ip6tables destination=fd40:65::20 peer=fd40:65::10; fi
+    before=$(net "${tool}" -w -t mangle -nvxL "${chain}" |
         awk -v kind="${kind}" '$3 == "TPROXY" && $4 == kind {print $1}')
     [[ "${before}" =~ ^[0-9]+$ ]] || fail "missing ${kind} counter"
-    nsenter --target "${clientPid}" --net -- python3 "${fixture}" client "${kind}" 198.18.65.20 "${targetPort}"
-    after=$(net iptables -w -t mangle -nvxL "${chain}" |
+    nsenter --target "${clientPid}" --net -- python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}"
+    after=$(net "${tool}" -w -t mangle -nvxL "${chain}" |
         awk -v kind="${kind}" '$3 == "TPROXY" && $4 == kind {print $1}')
     [[ "${after}" =~ ^[0-9]+$ ]] && ((after > before)) || fail "${kind} bypassed TProxy"
-    expected=$((proofCount + 1))
-    rows=$(jq -s --arg peer 198.18.65.10 --arg payload "tproxy-${kind}-request" '
-      if all(.[]; .peer == $peer and .payload == $payload) then length else -1 end
+    expected=$((${proofCounts[$version]} + 1))
+    rows=$(jq -s --arg peer "${peer}" --arg payload "tproxy-${kind}-request" '
+      if all(.[]; (.peer == "198.18.65.10" or .peer == "fd40:65::10") and .payload == $payload)
+      then [.[] | select(.peer == $peer)] | length else -1 end
     ' "${TEST_ROOT}/proof/${kind}.jsonl")
     [[ "${rows}" == "${expected}" ]] || fail "${kind} origin did not observe proxy source"
 }
 
-proofCount=0
+declare -A proofCounts=([4]=0 [6]=0)
 for core in xray sing-box; do
     previousChain=
     previousToken=
-    for tuple in '31298 129' '31299 131'; do
-        read -r port mark <<<"${tuple}"
+    for tuple in '31298 129 ipv4' '31299 131 dual' '31300 132 ipv6'; do
+        read -r port mark family <<<"${tuple}"
         configDir="${TEST_ROOT}/${core}-${port}"
-        makeCoreConfig "${core}" "${port}" "${mark}" "${configDir}"
+        makeCoreConfig "${core}" "${port}" "${mark}" "${configDir}" "${family}"
         startCore "${core}" "${configDir}"
-        startServer "${port}" "${mark}"
+        startServer "${port}" "${mark}" "${family}"
         readState
         [[ -z "${previousToken}" || "${token}" != "${previousToken}" ]] ||
             fail 'parameter change reused previous ownership token'
@@ -384,20 +427,24 @@ for core in xray sing-box; do
             ! net iptables -w -t mangle -S "${previousChain}" >/dev/null 2>&1 ||
                 fail 'parameter change left previous owned chain'
         fi
-        forwardCheck tcp 18080
-        forwardCheck udp 18081
-        proofCount=$((proofCount + 1))
+        for version in $(case "${family}" in ipv4) echo 4 ;; ipv6) echo 6 ;; dual) echo '4 6' ;; esac); do
+            forwardCheck tcp 18080 "${version}"
+            forwardCheck udp 18081 "${version}"
+            proofCounts[${version}]=$((${proofCounts[$version]} + 1))
+        done
         previousChain=${chain} previousToken=${token}
         stopServer
         ! net test -e /var/lib/padm/net/tproxy.state || fail 'off left ownership state'
         assertKernel "${baseline}" 'off changed outside resources or left old rules/routes'
         stopCore
-        grep -q 'tproxy-in' "${TEST_ROOT}/${core}-${port}.log" &&
-            grep -q '198.18.65.20:18080' "${TEST_ROOT}/${core}-${port}.log" &&
-            grep -q '198.18.65.20:18081' "${TEST_ROOT}/${core}-${port}.log" ||
-            fail "${core} did not record both forwarded destinations"
-        printf 'docker-tproxy-forwarding-ok: core=%s port=%s mark=%s tcp=ok udp=ok off=clean\n' \
-            "${core}" "${port}" "${mark}"
+        grep -q 'tproxy-in' "${TEST_ROOT}/${core}-${port}.log" || fail 'missing TProxy core log'
+        for destination in $(case "${family}" in ipv4) echo 198.18.65.20 ;; ipv6) echo fd40:65::20 ;; dual) echo '198.18.65.20 fd40:65::20' ;; esac); do
+            grep -q "${destination}.*:18080" "${TEST_ROOT}/${core}-${port}.log" &&
+                grep -q "${destination}.*:18081" "${TEST_ROOT}/${core}-${port}.log" ||
+                fail "${core} did not record both forwarded destinations"
+        done
+        printf 'docker-tproxy-forwarding-ok: core=%s port=%s mark=%s family=%s tcp=ok udp=ok off=clean\n' \
+            "${core}" "${port}" "${mark}" "${family}"
     done
 done
 

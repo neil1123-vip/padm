@@ -747,18 +747,25 @@ Manage TProxy through menu `17 → 43`, or:
 
 ```bash
 padm-docker protocol tproxy-status
-padm-docker edit --tproxy-enable 31298 129
+padm-docker edit --tproxy-enable 31298 129 --tproxy-family dual
 padm-docker edit --tproxy-settings 31299 131
 padm-docker edit --tproxy-off
 ```
 
 This manages existing Reality deployments with one Xray or sing-box core and no
-other host integration. It captures IPv4 TCP/UDP in `PREROUTING`; host `OUTPUT`
-and IPv6 are outside this scope. The core uses host networking, root and `NET_ADMIN`.
+other host integration. It captures TCP/UDP in `PREROUTING` with `ipv4`, `ipv6`
+or `dual`. Enable defaults to IPv4; settings changes retain the current family
+when omitted. Host `OUTPUT` and Redirect remain outside this scope. Each selected
+family requires host forwarding and its TPROXY target; preflight does not change sysctl.
+IPv4 schema 2 state remains compatible. IPv6/dual use schema 3 and one token
+binds each family's resources. Drift in either family preserves all resources
+and recovery state. The core uses host networking, root and `NET_ADMIN`.
 Changes audit and normally stop the previous container, prove its rules are gone,
 then use the existing configuration transaction. Preview and cancellation keep the
 running service. Status reports the specification; use `validate` for health.
-Native host reboot, arm64, public-network and complete 5C acceptance remain pending.
+Real TCP/UDP forwarding and clean shutdown passed for both cores and all three
+families in isolated Linux amd64. Native host reboot, arm64, public-network and
+complete 5C acceptance remain pending.
 
 Manage TUN through menu `17 → 44`:
 

@@ -1002,7 +1002,7 @@ dockerMenuIPv6() {
 }
 
 dockerMenuTProxy() {
-    local choice action port mark state defaultPort defaultMark
+    local choice action port mark family state defaultPort defaultMark defaultFamily
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker TProxy 管理\n'
@@ -1021,15 +1021,17 @@ dockerMenuTProxy() {
                 continue
             fi
             printf '%s\n' "${state}"
-            defaultPort=31298 defaultMark=129 action=--tproxy-enable
+            defaultPort=31298 defaultMark=129 defaultFamily=ipv4 action=--tproxy-enable
             if [[ "${choice}" == 3 ]]; then
                 defaultPort=$(jq -er 'select(.enabled == true) | .port' <<<"${state}") &&
-                    defaultMark=$(jq -er 'select(.enabled == true) | .mark' <<<"${state}") || continue
+                    defaultMark=$(jq -er 'select(.enabled == true) | .mark' <<<"${state}") &&
+                    defaultFamily=$(jq -er 'select(.enabled == true) | .family // "ipv4"' <<<"${state}") || continue
                 action=--tproxy-settings
             fi
             dockerSetupRead port "TProxy 端口 [${defaultPort}，0 返回]: " "${defaultPort}" &&
-                dockerSetupRead mark "TProxy mark [${defaultMark}，0 返回]: " "${defaultMark}" || continue
-            dockerMenuRun edit "${action}" "${port}" "${mark}" || true
+                dockerSetupRead mark "TProxy mark [${defaultMark}，0 返回]: " "${defaultMark}" &&
+                dockerSetupRead family "TProxy 地址族 ipv4/ipv6/dual [${defaultFamily}，0 返回]: " "${defaultFamily}" || continue
+            dockerMenuRun edit "${action}" "${port}" "${mark}" --tproxy-family "${family}" || true
             ;;
         4) dockerMenuRun edit --tproxy-off || true ;;
         *) printf '无效选项，请重新选择。\n' ;;

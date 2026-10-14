@@ -49,17 +49,19 @@ export FAKE_TP_SERVER_PID=$$
 shift
 case "$1" in
 seed)
+    shift
     wait_forever() { kill -KILL "$$"; }
-    tproxy_run "$2" "$3"
+    tproxy_run "$@"
     ;;
 run-once)
-    test_port=$2 test_mark=$3
-    wait_forever() { tproxy_health "$test_port" "$test_mark"; }
-    tproxy_run "$2" "$3"
+    test_port=$2 test_mark=$3 test_family=${4:-ipv4}
+    shift
+    wait_forever() { tproxy_health "$test_port" "$test_mark" "$test_family"; }
+    tproxy_run "$@"
     ;;
-run-wait) tproxy_run "$2" "$3" ;;
-preflight) tproxy_preflight "$2" "$3" "${4:-unowned}" "${5:-$STATE_ROOT}" ;;
-health) tproxy_health "$2" "$3" ;;
+run-wait) shift; tproxy_run "$@" ;;
+preflight) shift; tproxy_preflight "$@" ;;
+health) shift; tproxy_health "$@" ;;
 cleanup) tproxy_cleanup "${2:-}" ;;
 *) exit 99 ;;
 esac
@@ -70,7 +72,7 @@ record_write() {
 }
 inject_failure() {
     local point=$1
-    if [[ "${FAKE_TP_MODE}" == "fail-${point}" &&
+    if [[ "${FAKE_TP_MODE}" == "fail-${point_prefix:-}${point}" &&
         ! -e "${FAKE_TP_ROOT}/failed-once" ]]; then
         : >"${FAKE_TP_ROOT}/failed-once"
         exit 1
@@ -78,7 +80,7 @@ inject_failure() {
 }
 inject_signal() {
     local point=$1
-    if [[ "${FAKE_TP_MODE}" == "signal-${point}" &&
+    if [[ "${FAKE_TP_MODE}" == "signal-${point_prefix:-}${point}" &&
         ! -e "${FAKE_TP_ROOT}/signaled-once" ]]; then
         : >"${FAKE_TP_ROOT}/signaled-once"
         kill "-${FAKE_TP_SIGNAL}" "${FAKE_TP_SERVER_PID:-${PPID}}"
@@ -105,7 +107,11 @@ cat >"${TEST_ROOT}/bin/iptables" <<'SH'
 #!/usr/bin/env bash
 set -eu
 source "${0%/*}/common"
-printf 'iptables %s\n' "$*" >>"${FAKE_TP_LOG}"
+printf '%s %s\n' "${0##*/}" "$*" >>"${FAKE_TP_LOG}"
+kernel_root=${FAKE_TP_ROOT} point_prefix= on_ip=0.0.0.0
+if [[ "${0##*/}" == ip6tables ]]; then
+    kernel_root=${FAKE_TP_ROOT}/ipv6 point_prefix=ipv6- on_ip=::
+fi
 args=("$@")
 while [[ "${1:-}" == -w || "${1:-}" == -t || "${1:-}" == -n ]]; do
     if [[ "$1" == -t ]]; then [[ "$2" == mangle ]]; shift 2; else shift; fi
@@ -115,11 +121,11 @@ chain=${2:-}
 case "${action}" in
 -j) [[ "$*" == '-j TPROXY -h' ]] ;;
 -L)
-    [[ -z "${chain}" ]] || grep -qxF -- "${chain}" "${FAKE_TP_ROOT}/chains"
+    [[ -z "${chain}" ]] || grep -qxF -- "${chain}" "${kernel_root}/chains"
     ;;
 -S)
     if [[ -n "${chain}" ]]; then
-        grep -qxF -- "${chain}" "${FAKE_TP_ROOT}/chains" || exit 1
+        grep -qxF -- "${chain}" "${kernel_root}/chains" || exit 1
     fi
     while IFS= read -r current; do
         [[ -z "${chain}" || "${chain}" == "${current}" ]] || continue
@@ -130,7 +136,7 @@ case "${action}" in
             shown=${rule}
             if [[ "${shown}" == *' -j TPROXY '* ]]; then
                 [[ "${shown}" == *' --on-ip '* ]] ||
-                    shown=${shown/' --on-port '/' --on-ip 0.0.0.0 --on-port '}
+                    shown=${shown/' --on-port '/" --on-ip ${on_ip} --on-port "}
                 if [[ "${shown}" =~ --tproxy-mark[[:space:]]+([^[:space:]]+) ]]; then
                     original_mark=${BASH_REMATCH[1]}
                     canonical_mark=$(printf '0x%x/0xffffffff' "$(( ${original_mark%/*} ))")
@@ -138,20 +144,20 @@ case "${action}" in
                 fi
             fi
             printf -- '-A %s %s\n' "${current}" "${shown}"
-        done <"${FAKE_TP_ROOT}/${current}.rules"
-    done <"${FAKE_TP_ROOT}/chains"
+        done <"${kernel_root}/${current}.rules"
+    done <"${kernel_root}/chains"
     ;;
 -C)
     shift 2
-    [[ -f "${FAKE_TP_ROOT}/${chain}.rules" ]] &&
-        grep -qxF -- "$*" "${FAKE_TP_ROOT}/${chain}.rules"
+    [[ -f "${kernel_root}/${chain}.rules" ]] &&
+        grep -qxF -- "$*" "${kernel_root}/${chain}.rules"
     ;;
 -N)
     record_write "$@"
     inject_failure start-chain
-    ! grep -qxF -- "${chain}" "${FAKE_TP_ROOT}/chains" || exit 1
-    printf '%s\n' "${chain}" >>"${FAKE_TP_ROOT}/chains"
-    : >"${FAKE_TP_ROOT}/${chain}.rules"
+    ! grep -qxF -- "${chain}" "${kernel_root}/chains" || exit 1
+    printf '%s\n' "${chain}" >>"${kernel_root}/chains"
+    : >"${kernel_root}/${chain}.rules"
     inject_signal start-chain
     ;;
 -A|-I)
@@ -160,46 +166,55 @@ case "${action}" in
     [[ "${action}" != -I || "${1:-}" != 1 ]] || shift
     point=start-hook
     if [[ "${chain}" != PREROUTING ]]; then
-        count=$(wc -l <"${FAKE_TP_ROOT}/${chain}.rules")
+        count=$(wc -l <"${kernel_root}/${chain}.rules")
         point="start-chain-$((count+1))"
     fi
     inject_failure "${point}"
-    printf '%s\n' "$*" >>"${FAKE_TP_ROOT}/${chain}.rules"
+    printf '%s\n' "$*" >>"${kernel_root}/${chain}.rules"
     inject_signal "${point}"
     ;;
 -D)
     record_write "$@"
     inject_failure cleanup-chain
     shift 2
-    remove_line "${FAKE_TP_ROOT}/${chain}.rules" "$*"
+    remove_line "${kernel_root}/${chain}.rules" "$*"
     ;;
 -X)
     record_write "$@"
     inject_failure cleanup-delete-chain
-    [[ ! -s "${FAKE_TP_ROOT}/${chain}.rules" ]] || exit 1
-    ! grep -Eq -- "(^| )-j ${chain}( |$)" "${FAKE_TP_ROOT}/"*.rules || exit 1
-    remove_line "${FAKE_TP_ROOT}/chains" "${chain}"
-    rm -f -- "${FAKE_TP_ROOT}/${chain}.rules"
+    [[ ! -s "${kernel_root}/${chain}.rules" ]] || exit 1
+    ! grep -Eq -- "(^| )-j ${chain}( |$)" "${kernel_root}/"*.rules || exit 1
+    remove_line "${kernel_root}/chains" "${chain}"
+    rm -f -- "${kernel_root}/${chain}.rules"
     ;;
 -F) record_write "$@"; exit 99 ;;
 *) exit 98 ;;
 esac
 SH
+ln -s iptables "${TEST_ROOT}/bin/ip6tables"
 cat >"${TEST_ROOT}/bin/ip" <<'SH'
 #!/usr/bin/env bash
 set -eu
 source "${0%/*}/common"
 printf 'ip %s\n' "$*" >>"${FAKE_TP_LOG}"
-while [[ "${1:-}" == -j || "${1:-}" == -N || "${1:-}" == -4 || "${1:-}" == -o ]]; do shift; done
+version=4
+while [[ "${1:-}" == -j || "${1:-}" == -N || "${1:-}" == -4 || "${1:-}" == -6 || "${1:-}" == -o ]]; do
+    [[ "$1" != -6 ]] || version=6
+    shift
+done
+kernel_root=${FAKE_TP_ROOT} point_prefix=
+if [[ "${version}" == 6 ]]; then
+    kernel_root=${FAKE_TP_ROOT}/ipv6 point_prefix=ipv6-
+fi
 kind=${1:-} action=${2:-}
 shift 2
 args=("$@")
 case "${kind}:${action}" in
-rule:show) cat "${FAKE_TP_ROOT}/rules.json" ;;
+rule:show) cat "${kernel_root}/rules.json" ;;
 route:show)
     table=$(field table)
-    if [[ -f "${FAKE_TP_ROOT}/routes.${table}.json" ]]; then
-        cat "${FAKE_TP_ROOT}/routes.${table}.json"
+    if [[ -f "${kernel_root}/routes.${table}.json" ]]; then
+        cat "${kernel_root}/routes.${table}.json"
     else printf '[]\n'; fi
     ;;
 rule:add|rule:del)
@@ -211,7 +226,7 @@ rule:add|rule:del)
     value=$(jq -nc --argjson priority "${pref}" --arg fwmark "$(printf '0x%x' "$(( ${mark%/*} ))")" \
         --arg table "${table}" --arg protocol "${protocol}" \
         '{priority:$priority,src:"all",fwmark:$fwmark,table:$table,protocol:$protocol}')
-    file="${FAKE_TP_ROOT}/rules.json"
+    file="${kernel_root}/rules.json"
     point=start-rule
     [[ "${action}" != del ]] || point=cleanup-rule
     record_write "${kind}" "${action}" "$@"
@@ -227,13 +242,21 @@ rule:add|rule:del)
     inject_signal "${point}"
     ;;
 route:add|route:del)
-    [[ "${1:-}" == local && "${2:-}" == 0.0.0.0/0 ]] || exit 2
+    [[ "${1:-}" == local ]] || exit 2
     table=$(field table)
     protocol=$(field proto || field protocol)
-    realm=$(field realm || field realms)
-    value=$(jq -nc --arg protocol "${protocol}" --arg realm "${realm}" \
-        '{type:"2",dst:"default",dev:"lo",protocol:$protocol,scope:"254",flow:{to:$realm},flags:[]}')
-    file="${FAKE_TP_ROOT}/routes.${table}.json"
+    if [[ "${version}" == 4 ]]; then
+        [[ "${2:-}" == 0.0.0.0/0 ]] || exit 2
+        realm=$(field realm || field realms)
+        value=$(jq -nc --arg protocol "${protocol}" --arg realm "${realm}" \
+            '{type:"2",dst:"default",dev:"lo",protocol:$protocol,scope:"254",flow:{to:$realm},flags:[]}')
+    else
+        [[ "${2:-}" == ::/0 ]] || exit 2
+        metric=$(field metric)
+        value=$(jq -nc --arg protocol "${protocol}" --argjson metric "${metric}" \
+            '{type:"2",dst:"default",dev:"lo",protocol:$protocol,metric:$metric,flags:[],pref:"medium"}')
+    fi
+    file="${kernel_root}/routes.${table}.json"
     [[ -f "${file}" ]] || printf '[]\n' >"${file}"
     point=start-route
     [[ "${action}" != del ]] || point=cleanup-route
@@ -267,8 +290,11 @@ SH
 cat >"${TEST_ROOT}/bin/cat" <<'SH'
 #!/usr/bin/env bash
 set -eu
-if [[ "$*" == /proc/sys/net/ipv4/ip_forward ]]; then printf '%s\n' "${FAKE_TP_FORWARD:-1}"
-else command -p cat "$@"; fi
+case "$*" in
+/proc/sys/net/ipv4/ip_forward) printf '%s\n' "${FAKE_TP_FORWARD:-1}" ;;
+/proc/sys/net/ipv6/conf/all/forwarding) printf '%s\n' "${FAKE_TP_FORWARD6:-1}" ;;
+*) command -p cat "$@" ;;
+esac
 SH
 cat >"${TEST_ROOT}/bin/sleep" <<'SH'
 #!/usr/bin/env bash
@@ -288,22 +314,25 @@ reject() {
 }
 reset() {
     rm -rf -- "${FAKE_TP_ROOT}" "${FAKE_TP_STATE}"
-    mkdir -p "${FAKE_TP_ROOT}" "${FAKE_TP_STATE}"
+    mkdir -p "${FAKE_TP_ROOT}/ipv6" "${FAKE_TP_STATE}"
     chmod 0700 "${FAKE_TP_STATE}"
-    printf 'PREROUTING\n' >"${FAKE_TP_ROOT}/chains"
-    : >"${FAKE_TP_ROOT}/PREROUTING.rules"
-    printf '[]\n' >"${FAKE_TP_ROOT}/rules.json"
+    local kernel_root
+    for kernel_root in "${FAKE_TP_ROOT}" "${FAKE_TP_ROOT}/ipv6"; do
+        printf 'PREROUTING\n' >"${kernel_root}/chains"
+        : >"${kernel_root}/PREROUTING.rules"
+        printf '[]\n' >"${kernel_root}/rules.json"
+    done
     : >"${FAKE_TP_LOG}"
     : >"${FAKE_TP_WRITES}"
     : >"${FAKE_TP_SLEEP_PIDS}"
-    export FAKE_TP_MODE=ok
+    export FAKE_TP_MODE=ok FAKE_TP_FORWARD=1 FAKE_TP_FORWARD6=1
 }
 state_value() { sed -n "s/^$1=//p" "${FAKE_TP_STATE}/tproxy.state"; }
 seed_owned() {
-    local status=0
-    call seed "${PORT}" "${MARK}" >"${TEST_ROOT}/output.log" 2>&1 || status=$?
+    local status=0 family=${1:-ipv4} schema=2 lines=11
+    call seed "${PORT}" "${MARK}" "${family}" >"${TEST_ROOT}/output.log" 2>&1 || status=$?
     [[ "${status}" == 137 ]] || fail "seed did not reach active wait: ${status}"
-    accept health "${PORT}" "${MARK}"
+    accept health "${PORT}" "${MARK}" "${family}"
     CHAIN=$(state_value chain)
     TOKEN=$(state_value token)
     PREF=$(state_value pref)
@@ -311,10 +340,14 @@ seed_owned() {
     REALM=$(state_value realm)
     [[ "$(stat -c '%u:%a' "${FAKE_TP_STATE}/tproxy.state")" == 0:600 ]] ||
         fail 'state is not root-private'
-    grep -qx 'schema_version=2' "${FAKE_TP_STATE}/tproxy.state" || fail 'wrong state schema'
+    if [[ "${family}" != ipv4 ]]; then
+        schema=3 lines=12
+        [[ "$(state_value family)" == "${family}" ]] || fail 'wrong state family'
+    fi
+    grep -qx "schema_version=${schema}" "${FAKE_TP_STATE}/tproxy.state" || fail 'wrong state schema'
     [[ "${TOKEN}" =~ ^[a-f0-9]{32}$ && "${CHAIN}" =~ ^padm-tproxy-[a-f0-9]{12}$ ]] ||
         fail 'missing random ownership identity'
-    [[ "$(wc -l <"${FAKE_TP_STATE}/tproxy.state")" == 11 &&
+    [[ "$(wc -l <"${FAKE_TP_STATE}/tproxy.state")" == "${lines}" &&
         "$(state_value phase)" == active ]] || fail 'state is not canonical active state'
     grep -qx 'route_proto=186' "${FAKE_TP_STATE}/tproxy.state" &&
         grep -qx 'rule_proto=186' "${FAKE_TP_STATE}/tproxy.state" ||
@@ -336,16 +369,18 @@ assert_empty() {
     [[ ! -e "${FAKE_TP_STATE}/tproxy.state" ]] || fail 'successful revoke kept state'
     [[ -z "$(find "${FAKE_TP_STATE}" -mindepth 1 -print -quit)" ]] ||
         fail 'successful revoke leaked a private state candidate'
-    [[ "$(<"${FAKE_TP_ROOT}/chains")" == PREROUTING &&
-        ! -s "${FAKE_TP_ROOT}/PREROUTING.rules" ]] || fail 'owned firewall resources survived revoke'
-    jq -e 'length == 0' "${FAKE_TP_ROOT}/rules.json" >/dev/null ||
-        fail 'owned policy rule survived revoke'
-    local file
-    for file in "${FAKE_TP_ROOT}/routes."*.json; do
-        [[ ! -f "${file}" ]] || jq -e 'length == 0' "${file}" >/dev/null ||
-            fail 'owned route survived revoke'
+    local file kernel_root
+    for kernel_root in "${FAKE_TP_ROOT}" "${FAKE_TP_ROOT}/ipv6"; do
+        [[ "$(<"${kernel_root}/chains")" == PREROUTING &&
+            ! -s "${kernel_root}/PREROUTING.rules" ]] || fail 'owned firewall resources survived revoke'
+        jq -e 'length == 0' "${kernel_root}/rules.json" >/dev/null ||
+            fail 'owned policy rule survived revoke'
+        for file in "${kernel_root}/routes."*.json; do
+            [[ ! -f "${file}" ]] || jq -e 'length == 0' "${file}" >/dev/null ||
+                fail 'owned route survived revoke'
+        done
     done
-    ! grep -Eq '^iptables .* -F( |$)|^ip .* (rule|route) flush( |$)' "${FAKE_TP_LOG}" ||
+    ! grep -Eq '^ip(6)?tables .* -F( |$)|^ip .* (rule|route) flush( |$)' "${FAKE_TP_LOG}" ||
         fail 'cleanup used a broad flush'
 }
 
@@ -622,5 +657,129 @@ for signal in TERM INT; do
         ! kill -0 "${pid}" 2>/dev/null || fail "wait child ${pid} survived ${signal}"
     done <"${FAKE_TP_SLEEP_PIDS}"
     assert_empty
+done
+
+# IPv6 与双栈均使用同一 owner，schema 2 的 IPv4 格式仍由旧用例约束。
+for family in ipv6 dual; do
+    reset
+    seed_owned "${family}"
+    [[ -s "${FAKE_TP_ROOT}/ipv6/${CHAIN}.rules" &&
+        -s "${FAKE_TP_ROOT}/ipv6/PREROUTING.rules" ]] || fail 'IPv6 firewall resources were not created'
+    jq -e --argjson metric "${REALM}" \
+        'length == 1 and .[0] == {type:"2",dst:"default",dev:"lo",protocol:"186",metric:$metric,flags:[],pref:"medium"}' \
+        "${FAKE_TP_ROOT}/ipv6/routes.${MARK}.json" >/dev/null || fail 'IPv6 route lacks its exact metric'
+    reject_unchanged health "${PORT}" "${MARK}" ipv4
+    if [[ "${family}" == ipv6 ]]; then
+        [[ "$(<"${FAKE_TP_ROOT}/chains")" == PREROUTING &&
+            ! -s "${FAKE_TP_ROOT}/PREROUTING.rules" ]] || fail 'IPv6-only startup touched IPv4 firewall resources'
+        jq -e 'length == 0' "${FAKE_TP_ROOT}/rules.json" >/dev/null ||
+            fail 'IPv6-only startup touched IPv4 policy rules'
+    else
+        [[ -s "${FAKE_TP_ROOT}/${CHAIN}.rules" ]] || fail 'dual startup omitted IPv4 firewall resources'
+    fi
+    accept cleanup "${TOKEN}"
+    assert_empty
+done
+
+# 第二族任一步骤失败或收到信号，第一族已创建的对象也必须精确撤销。
+for point in start-route start-chain start-hook; do
+    reset
+    export FAKE_TP_MODE="fail-ipv6-${point}"
+    reject run-once "${PORT}" "${MARK}" dual
+    [[ -e "${FAKE_TP_ROOT}/failed-once" ]] || fail "IPv6 failure fixture did not reach ${point}"
+    assert_empty
+done
+for signal in TERM INT; do
+    for point in start-route start-chain start-hook; do
+        reset
+        export FAKE_TP_MODE="signal-ipv6-${point}" FAKE_TP_SIGNAL="${signal}"
+        status=0
+        call run-once "${PORT}" "${MARK}" dual >"${TEST_ROOT}/output.log" 2>&1 || status=$?
+        [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" &&
+            -e "${FAKE_TP_ROOT}/signaled-once" ]] || fail "IPv6 ${point} ${signal} did not propagate its signal"
+        assert_empty
+    done
+done
+
+# 先整体审计两族；后一族漂移也不能留下前一族已经被清理的半成品。
+for family in ipv4 ipv6; do
+    for drift in chain-token route-identity; do
+        reset
+        seed_owned dual
+        kernel_root=${FAKE_TP_ROOT}
+        [[ "${family}" != ipv6 ]] || kernel_root=${FAKE_TP_ROOT}/ipv6
+        if [[ "${drift}" == chain-token ]]; then
+            sed -i "s/${TOKEN}/00000000000000000000000000000000/g" "${kernel_root}/${CHAIN}.rules"
+        else
+            field=flow.to
+            [[ "${family}" != ipv6 ]] || field=metric
+            jq ".[] |= (.${field} = 0)" "${kernel_root}/routes.${TABLE}.json" >"${TEST_ROOT}/changed.json"
+            mv -- "${TEST_ROOT}/changed.json" "${kernel_root}/routes.${TABLE}.json"
+        fi
+        reject_unchanged health "${PORT}" "${MARK}" dual
+        reject_unchanged cleanup
+        reject_unchanged run-once "${PORT}" "${MARK}" dual
+    done
+done
+reset
+seed_owned dual
+printf '[]\n' >"${FAKE_TP_ROOT}/ipv6/rules.json"
+reject_unchanged health "${PORT}" "${MARK}" dual
+accept cleanup
+assert_empty
+
+# schema 2 旧 owner 升双栈：候选只读两族，运行入口先撤销再生成新 owner。
+reset
+seed_owned
+OLD_TOKEN=${TOKEN} OLD_CHAIN=${CHAIN}
+LIVE_STATE=${FAKE_TP_STATE}
+LIVE_HASH=$(snapshot)
+export FAKE_TP_STATE="${TEST_ROOT}/candidate-dual"
+mkdir -m 0700 "${FAKE_TP_STATE}"
+accept preflight "$((PORT+1))" "${MARK}" dual owned "${LIVE_STATE}"
+[[ ! -e "${FAKE_TP_STATE}/tproxy.state" && ! -s "${FAKE_TP_WRITES}" &&
+    "$(snapshot)" == "${LIVE_HASH}" ]] || fail 'dual candidate preflight modified or copied its IPv4 owner'
+export FAKE_TP_STATE=${LIVE_STATE}
+seed_owned dual
+[[ "${TOKEN}" != "${OLD_TOKEN}" && "${CHAIN}" != "${OLD_CHAIN}" &&
+    ! -e "${FAKE_TP_ROOT}/${OLD_CHAIN}.rules" ]] || fail 'dual migration reused or retained its old owner'
+accept cleanup
+assert_empty
+
+# 新增族的候选 mark 已被外部使用时，旧 IPv4 owner 也不能先撤销。
+reset
+seed_owned
+NEXT_MARK=$((MARK+1))
+printf '[{"priority":1234,"src":"all","fwmark":"0x%x","table":"999","protocol":"3"}]\n' \
+    "${NEXT_MARK}" >"${FAKE_TP_ROOT}/ipv6/rules.json"
+reject_unchanged preflight "${PORT}" "${NEXT_MARK}" dual owned
+reject_unchanged run-once "${PORT}" "${NEXT_MARK}" dual
+
+reset
+export FAKE_TP_FORWARD6=0
+reject_unchanged preflight "${PORT}" "${MARK}" ipv6 unowned
+reject_unchanged preflight "${PORT}" "${MARK}" dual unowned
+reject_unchanged run-once "${PORT}" "${MARK}" dual
+for family in invalid IPv6 all; do
+    reset
+    reject_unchanged preflight "${PORT}" "${MARK}" "${family}" unowned
+    reject_unchanged run-once "${PORT}" "${MARK}" "${family}"
+done
+
+# family 与 schema 必须共同匹配固定字节格式，未知或缺失字段不能授权清理。
+for bad in unknown duplicate missing schema ipv4; do
+    reset
+    seed_owned dual
+    state="${FAKE_TP_STATE}/tproxy.state"
+    case "${bad}" in
+    unknown) sed -i 's/^family=.*/family=unknown/' "${state}" ;;
+    duplicate) printf 'family=dual\n' >>"${state}" ;;
+    missing) sed -i '/^family=/d' "${state}" ;;
+    schema) sed -i 's/^schema_version=.*/schema_version=2/' "${state}" ;;
+    ipv4) sed -i 's/^family=.*/family=ipv4/' "${state}" ;;
+    esac
+    reject_unchanged health "${PORT}" "${MARK}" dual
+    reject_unchanged cleanup
+    reject_unchanged run-once "${PORT}" "${MARK}" dual
 done
 printf 'docker-tproxy-ownership-regression-ok\n'
