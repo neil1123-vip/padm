@@ -43,6 +43,8 @@ dockerUsage() {
   padm-docker edit --tproxy-enable <端口> <标记> [--tproxy-family ipv4|ipv6|dual] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --tproxy-settings <端口> <标记> [--tproxy-family ipv4|ipv6|dual] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --tproxy-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tproxy-enable <端口> <标记> --tproxy-output-uid <UID> [--tproxy-family ipv4|ipv6|dual] [确认参数]
+  padm-docker edit --tproxy-settings <端口> <标记> [--tproxy-output-uid <UID>|--tproxy-output-off] [确认参数]
   padm-docker edit --tun-enable|--tun-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

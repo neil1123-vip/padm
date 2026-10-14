@@ -96,10 +96,12 @@ runEdit() {
     assertClean
 }
 runStatus() {
-    local enabled=$1 port=$2 mark=$3 family=${4:-ipv4}
+    local enabled=$1 port=$2 mark=$3 family=${4:-ipv4} outputUid=${5:-null}
     (dockerMain protocol tproxy-status) >"${LOG}" 2>&1 || fail 'status failed'
-    jq -e --argjson enabled "${enabled}" --argjson port "${port}" --argjson mark "${mark}" --arg family "${family}" '
-      . == {enabled:$enabled,port:$port,mark:$mark,family:$family,hook:"PREROUTING"}
+    jq -e --argjson enabled "${enabled}" --argjson port "${port}" --argjson mark "${mark}" \
+        --arg family "${family}" --argjson outputUid "${outputUid}" '
+      . == ({enabled:$enabled,port:$port,mark:$mark,family:$family,hook:"PREROUTING"} +
+        if $outputUid == null then {} else {output_uid:$outputUid,hooks:["PREROUTING","OUTPUT"]} end)
     ' "${LOG}" >/dev/null
     assertClean
 }
@@ -129,6 +131,14 @@ done
 runEdit 2 --tproxy-family dual --preview
 runEdit 2 --tproxy-off --tproxy-family dual --preview
 runEdit 2 --tproxy-enable 31298 129 --tproxy-family dual --tproxy-family ipv6 --preview
+for uid in 0 10001 -1 2147483648 065534 invalid ''; do
+    runEdit 2 --tproxy-enable 31298 129 --tproxy-output-uid "${uid}" --preview
+done
+runEdit 2 --tproxy-output-uid 65534 --preview
+runEdit 2 --tproxy-off --tproxy-output-uid 65534 --preview
+runEdit 2 --tproxy-enable 31298 129 --tproxy-output-off --preview
+runEdit 2 --tproxy-enable 31298 129 --tproxy-output-uid 65534 --tproxy-output-uid 65535 --preview
+runEdit 2 --tproxy-settings 31298 129 --tproxy-output-off --tproxy-output-uid 65534 --preview
 runEdit 15 --tproxy-enable 35441 129 --preview
 runEdit 15 --tproxy-enable 10085 129 --preview
 runEdit 0 --tproxy-enable 31298 129 --preview
@@ -237,6 +247,43 @@ runEdit 0 --tproxy-settings 31299 131 --confirm PADM-DOCKER-EDIT
 runStatus true 31299 131 dual
 runEdit 0 --tproxy-settings 31299 131 --tproxy-family ipv6 --confirm PADM-DOCKER-EDIT
 runStatus true 31299 131 ipv6
+runEdit 0 --tproxy-off --confirm PADM-DOCKER-EDIT
+# 指定 UID 的 OUTPUT 沿同一事务，缺省旧规格/状态/编排不追加新字段。
+runEdit 0 --tproxy-enable 31298 129 --tproxy-family dual --tproxy-output-uid 65534 --preview
+before=$(snapshot)
+runEdit 0 --tproxy-enable 31298 129 --tproxy-family dual --tproxy-output-uid 65534 --confirm PADM-DOCKER-EDIT
+runStatus true 31298 129 dual 65534
+grep -Fq 'net-transparent preflight tproxy 31298 129 dual --output-uid 65534 unowned' \
+    "${TEST_ROOT}/candidate-calls.log" || fail 'OUTPUT preflight UID missing'
+jq -e '.services["net-transparent"].command == ["tproxy","31298","129","dual","--output-uid","65534"] and
+  .services["net-transparent"].healthcheck.test ==
+    ["CMD","/usr/local/bin/padm-entrypoint","tproxy-health","31298","129","dual","--output-uid","65534"]' \
+    "${root}/compose.json" >/dev/null
+! dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${root}/config/spec.json" ||
+    fail 'old bundle accepted OUTPUT'
+jq 'del(."x-padm-tproxy-output-uid")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
+! dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${root}/config/spec.json" ||
+    fail 'IPv6 bundle without OUTPUT marker accepted OUTPUT'
+before=$(snapshot)
+runEdit 15 --tproxy-settings 31298 129 --tproxy-output-uid 65534 --preview
+runEdit 0 --tproxy-settings 31298 129 --tproxy-output-uid 65535 --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'OUTPUT preview changed live state'
+for MODE in health-fail interrupt-int interrupt-term; do
+    rm -f -- "${TEST_ROOT}/failed-once"
+    expected=14
+    [[ "${MODE}" != interrupt-int ]] || expected=130
+    [[ "${MODE}" != interrupt-term ]] || expected=143
+    runEdit "${expected}" --tproxy-settings 31298 129 --tproxy-output-uid 65535 --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: OUTPUT recovery changed state"
+done
+MODE=ok
+runEdit 0 --tproxy-settings 31299 131 --confirm PADM-DOCKER-EDIT
+runStatus true 31299 131 dual 65534
+runEdit 0 --tproxy-settings 31299 131 --tproxy-output-off --confirm PADM-DOCKER-EDIT
+runStatus true 31299 131 dual
+jq -e '.host_integrations[0].settings | has("output_uid") | not' "${root}/config/spec.json" >/dev/null
+runEdit 15 --tproxy-settings 31299 131 --tproxy-output-off --preview
 runEdit 0 --tproxy-off --confirm PADM-DOCKER-EDIT
 # 实际管理事务之外，核对停止证明会拒绝归属漂移及不完整撤销。
 runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT

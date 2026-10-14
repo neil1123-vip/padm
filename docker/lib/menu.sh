@@ -1002,11 +1002,12 @@ dockerMenuIPv6() {
 }
 
 dockerMenuTProxy() {
-    local choice action port mark family state defaultPort defaultMark defaultFamily
+    local choice action port mark family state defaultPort defaultMark defaultFamily outputUid
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker TProxy 管理\n'
-        printf '%s\n' '1. 查看状态' '2. 启用 TProxy' '3. 修改 TProxy 参数' '4. 关闭 TProxy' '0. 返回'
+        printf '%s\n' '1. 查看状态' '2. 启用 TProxy' '3. 修改 TProxy 参数' '4. 关闭 TProxy' \
+            '5. 设置本机转发 UID' '6. 关闭本机转发（保留 PREROUTING）' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1034,6 +1035,25 @@ dockerMenuTProxy() {
             dockerMenuRun edit "${action}" "${port}" "${mark}" --tproxy-family "${family}" || true
             ;;
         4) dockerMenuRun edit --tproxy-off || true ;;
+        5|6)
+            if ! state=$(dockerMenuRun protocol tproxy-status); then
+                printf '%s\n' "${state}"
+                continue
+            fi
+            printf '%s\n' "${state}"
+            port=$(jq -er 'select(.enabled == true) | .port' <<<"${state}") &&
+                mark=$(jq -er 'select(.enabled == true) | .mark' <<<"${state}") &&
+                family=$(jq -er 'select(.enabled == true) | .family // "ipv4"' <<<"${state}") || continue
+            if [[ "${choice}" == 5 ]]; then
+                dockerSetupRead outputUid '本机转发 UID（1–2147483647，排除 10001；0 返回）: ' &&
+                    [[ -n "${outputUid}" ]] || continue
+                dockerMenuRun edit --tproxy-settings "${port}" "${mark}" --tproxy-family "${family}" \
+                    --tproxy-output-uid "${outputUid}" || true
+            else
+                dockerMenuRun edit --tproxy-settings "${port}" "${mark}" --tproxy-family "${family}" \
+                    --tproxy-output-off || true
+            fi
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -1123,8 +1143,12 @@ dockerMenuRouting() {
         6)
             dockerSetupRead server 'DNS 服务器 IPv4/IPv6（0 返回）: ' &&
                 [[ -n "${server}" ]] &&
-                dockerSetupRead port 'DNS 端口 [53，0 返回]: ' 53 &&
-                dockerSetupRead input 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead port 'DNS 端口 [53，0 返回]: ' 53 || continue
+            if [[ ! "${port}" =~ ^[0-9]{1,5}$ ]] || ((10#${port} < 1 || 10#${port} > 65535)); then
+                printf 'DNS 端口必须为 1–65535，请重新选择。\n'
+                continue
+            fi
+            dockerSetupRead input 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --dns-rules "${server}" "${port}" "${input}" || true
             ;;

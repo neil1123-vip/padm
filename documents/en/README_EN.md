@@ -749,14 +749,22 @@ Manage TProxy through menu `17 → 43`, or:
 padm-docker protocol tproxy-status
 padm-docker edit --tproxy-enable 31298 129 --tproxy-family dual
 padm-docker edit --tproxy-settings 31299 131
+padm-docker edit --tproxy-settings 31299 131 --tproxy-output-uid 65534
+padm-docker edit --tproxy-settings 31299 131 --tproxy-output-off
 padm-docker edit --tproxy-off
 ```
 
 This manages existing Reality deployments with one Xray or sing-box core and no
 other host integration. It captures TCP/UDP in `PREROUTING` with `ipv4`, `ipv6`
 or `dual`. Enable defaults to IPv4; settings changes retain the current family
-when omitted. Host `OUTPUT` and Redirect remain outside this scope. Each selected
-family requires host forwarding and its TPROXY target; preflight does not change sysctl.
+when omitted. Menu options 5/6 and `--tproxy-output-uid` optionally capture TCP/UDP
+connections initiated by one local UID in `1–2147483647`, excluding managed UID `10001`.
+Root core traffic, service replies and local destinations keep their original path.
+OUTPUT defaults to off; settings changes retain the UID when omitted.
+`--tproxy-output-off` keeps PREROUTING active. This mode needs owner/conntrack/MARK,
+schema 4 ownership of both chains, and the `x-padm-tproxy-output-uid` bundle marker.
+Whole-host OUTPUT and Redirect remain deferred. Each selected family requires
+host forwarding and its TPROXY target; preflight does not change sysctl.
 IPv4 schema 2 state remains compatible. IPv6/dual use schema 3 and one token
 binds each family's resources. Drift in either family preserves all resources
 and recovery state. The core uses host networking, root and `NET_ADMIN`.

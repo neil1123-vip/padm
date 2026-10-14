@@ -1510,7 +1510,7 @@ runRoutingDriver() {
             esac
             if [[ "${scenario}" == dns-domains-eof ]]; then
                 targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
-            else
+            elif [[ "${scenario}" != dns-invalid ]]; then
                 targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET\n'
             fi
             if [[ "${scenario}" == dns-invalid ]]; then
@@ -1948,10 +1948,23 @@ runRoutingDriver() {
         fi
         targetReply 'Docker TUN 管理' $'0\n'
         ;;
-    tproxy-flow|tproxy-cancel|tproxy-status-failed|tproxy-commit-failed)
+    tproxy-flow|tproxy-cancel|tproxy-status-failed|tproxy-commit-failed|tproxy-output-flow|tproxy-output-cancel|tproxy-output-failed)
         targetReply 'Docker 路由与出站' $'43\n'
-        if [[ "${scenario}" == tproxy-status-failed ]]; then
-            for choice in 1 2 3 1; do
+        if [[ "${scenario}" == tproxy-output-* ]]; then
+            if [[ "${scenario}" == tproxy-output-cancel ]]; then
+                for input in $'\n' $'0\n' $'\004'; do
+                    targetReply 'Docker TProxy 管理' $'5\n'
+                    targetReply '本机转发 UID（1–2147483647，排除 10001；0 返回）' "${input}"
+                done
+            else
+                targetReply 'Docker TProxy 管理' $'5\n'
+                targetReply '本机转发 UID（1–2147483647，排除 10001；0 返回）' $'65534\n'
+                targetReply 'fixture-tproxy-confirm [y/N]' $'y\n'
+                targetReply 'Docker TProxy 管理' $'6\n'
+                targetReply 'fixture-tproxy-confirm [y/N]' $'y\n'
+            fi
+        elif [[ "${scenario}" == tproxy-status-failed ]]; then
+            for choice in 1 2 3 5 6 1; do
                 targetReply 'Docker TProxy 管理' "${choice}"$'\n'
             done
         elif [[ "${scenario}" == tproxy-cancel ]]; then
@@ -2471,9 +2484,12 @@ edit)
                 ( "$6" == ipv4 || "$6" == ipv6 ) ]] || exit 2
             ;;
         --tproxy-settings)
-            [[ "$#" -eq 6 && "$5" == --tproxy-family &&
+            [[ "$5" == --tproxy-family &&
                 ( ( "$3" == 31399 && "$4" == 257 && "$6" == dual ) ||
                   ( "$3" == 32000 && "$4" == 130 && "$6" == ipv4 ) ) ]] || exit 2
+            [[ "$#" -eq 6 ||
+                ( "$#" -eq 8 && "$7" == --tproxy-output-uid && "$8" == 65534 ) ||
+                ( "$#" -eq 7 && "$7" == --tproxy-output-off ) ]] || exit 2
             ;;
         --tproxy-off) [[ "$#" -eq 2 ]] || exit 2 ;;
         esac
@@ -3143,6 +3159,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     upstream-flow upstream-cancel upstream-status-failed upstream-commit-failed \
     http-relay-flow http-relay-cancel http-relay-status-failed http-relay-commit-failed \
     tproxy-flow tproxy-cancel tproxy-status-failed tproxy-commit-failed \
+    tproxy-output-flow tproxy-output-cancel tproxy-output-failed \
     tun-flow tun-cancel tun-status-failed tun-commit-failed \
     block-ips-mode-flow block-ips-mode-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
@@ -3172,6 +3189,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != upstream-commit-failed &&
         "${routingCase}" != http-relay-commit-failed &&
         "${routingCase}" != tproxy-commit-failed &&
+        "${routingCase}" != tproxy-output-failed &&
         "${routingCase}" != tun-commit-failed &&
         "${routingCase}" != block-ips-mode-failed &&
         "${routingCase}" != hosts-manage-commit-failed ]] || SITE_EDIT_STATUS=15
@@ -3365,9 +3383,12 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         expectedRouting='edit --dns-rules 203.0.113.53 5353 Example.NET'
         ;;
     dns-invalid)
-        expectedRouting=$'edit --dns-rules 203.0.113.53 65536 Example.NET\nedit --dns-rules 203.0.113.53 53 regexp:bad'
-        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 2 ]] ||
-            fail 'DNS 非法端口或 CSV 未显示用法错误并保留菜单'
+        expectedRouting='edit --dns-rules 203.0.113.53 53 regexp:bad'
+        [[ "$(grep -Fc 'DNS 端口必须为 1–65535，请重新选择。' "${CONTROL_LOG}")" -eq 1 &&
+            "$(grep -Fc 'DNS 域名规则 CSV（' "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail 'DNS 非法端口未立即返回菜单，或仍追问域名规则'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail 'DNS 非法 CSV 未显示用法错误并保留菜单'
         ;;
     dns-failed)
         expectedRouting='edit --dns-rules 203.0.113.53 53 Example.NET'
@@ -3568,12 +3589,34 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "TUN 菜单缺少: ${label}"
         done
         ;;
+    tproxy-output-flow|tproxy-output-cancel|tproxy-output-failed)
+        expectedRouting=
+        if [[ "${routingCase}" == tproxy-output-cancel ]]; then
+            expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..3})
+        else
+            for tproxyAction in '--tproxy-settings 31399 257 --tproxy-family dual --tproxy-output-uid 65534' \
+                '--tproxy-settings 31399 257 --tproxy-family dual --tproxy-output-off'; do
+                [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
+                expectedRouting+='protocol tproxy-status'
+                expectedRouting+=$'\nedit '"${tproxyAction}"$'\ntproxy-confirm --tproxy-settings y'
+                [[ "${routingCase}" != tproxy-output-flow ]] ||
+                    expectedRouting+=$'\ntproxy-commit --tproxy-settings'
+            done
+        fi
+        if [[ "${routingCase}" == tproxy-output-failed ]]; then
+            [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}" || true)" -eq 2 ]] ||
+                fail 'TProxy OUTPUT 失败后没有继续菜单'
+        fi
+        for label in '5. 设置本机转发 UID' '6. 关闭本机转发（保留 PREROUTING）'; do
+            grep -Fq "${label}" "${CONTROL_LOG}" || fail "TProxy 菜单缺少: ${label}"
+        done
+        ;;
     tproxy-flow|tproxy-cancel|tproxy-status-failed|tproxy-commit-failed)
         tproxyConfirmCount=4 tproxyFailureCount=0 tproxyExit=15
         if [[ "${routingCase}" == tproxy-status-failed ]]; then
-            expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..4})
-            tproxyConfirmCount=0 tproxyFailureCount=4 tproxyExit=17
-            ! grep -Eq 'TProxy (端口|mark|地址族 ipv4/ipv6/dual) \[' "${CONTROL_LOG}" ||
+            expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..6})
+            tproxyConfirmCount=0 tproxyFailureCount=6 tproxyExit=17
+            ! grep -Eq 'TProxy (端口|mark|地址族 ipv4/ipv6/dual) \[|本机转发 UID（' "${CONTROL_LOG}" ||
                 fail 'TProxy 状态失败后仍读取参数'
         elif [[ "${routingCase}" == tproxy-cancel ]]; then
             expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..12})

@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含跳跃、透明转发和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
+# 摘要锁定含指定 UID 透明转发和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "9bf8891098ccbe19aa48d5c2079a79356d1483c8d25c18ff58d4b92d4171e34c"
+    "b5cf3ffda219ae601278f8ae353dc23e317bcc69a00f64841331768e3449641e"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -240,6 +240,17 @@ for family in ("ipv4", "ipv6", "dual"):
     valid = copy.deepcopy(spec)
     valid["host_integrations"][0]["settings"]["family"] = family
     cases[f"valid-host-tproxy-{family}"] = valid
+    valid = copy.deepcopy(valid)
+    valid["host_integrations"][0]["settings"]["output_uid"] = 65534
+    cases[f"valid-host-tproxy-output-{family}"] = valid
+for uid in (1, 2147483647):
+    valid = copy.deepcopy(spec)
+    valid["host_integrations"][0]["settings"]["output_uid"] = uid
+    cases[f"valid-host-tproxy-output-{uid}"] = valid
+for uid in (0, -1, 10001, 2147483648, "65534", None, 1.5, True):
+    invalid = copy.deepcopy(spec)
+    invalid["host_integrations"][0]["settings"]["output_uid"] = uid
+    cases[f"invalid-tproxy-output-{len(cases)}"] = invalid
 for family in ("", "IPv4", "all", None, 4, []):
     invalid = copy.deepcopy(spec)
     invalid["host_integrations"][0]["settings"]["family"] = family

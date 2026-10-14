@@ -973,7 +973,7 @@ registerRegressionParallelSelectorList docker-tun-focused runFrameworkParallelRe
     "${TMP_DIR}/docker-tun-focused-${BASHPID:-$$}" listRegressionDockerTunChildSelectors 2
 
 listRegressionDockerTProxyChildSelectors() {
-    printf '%s\n' docker-tproxy-management docker-menu-routing
+    printf '%s\n' docker-tproxy-ownership docker-menu-routing
 }
 registerRegressionParallelSelectorList docker-tproxy-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-tproxy-focused-${BASHPID:-$$}" listRegressionDockerTProxyChildSelectors 2

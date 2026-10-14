@@ -419,6 +419,9 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].host_integrations[]; .type == "tproxy" and (.settings.family // "ipv4") != "ipv4") then
             $schema[0]["x-padm-tproxy-ipv6"] == true
           else true end) and
+          (if any($spec[0].host_integrations[]; .type == "tproxy" and (.settings | has("output_uid"))) then
+            $schema[0]["x-padm-tproxy-output-uid"] == true
+          else true end) and
           (if $spec[0] | has("site") then
             $schema[0]["x-padm-site-content"] == true
           else true end) and

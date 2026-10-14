@@ -6,6 +6,7 @@ import ipaddress
 import signal
 import socket
 import socketserver
+import struct
 import sys
 import threading
 from pathlib import Path
@@ -34,6 +35,25 @@ class UdpHandler(socketserver.BaseRequestHandler):
         stream.sendto(b"tproxy-udp-ok", self.client_address)
 
 
+def dns_question(version: int) -> bytes:
+    return b"\x06tproxy\x04test\x00" + struct.pack("!HH", 1 if version == 4 else 28, 1)
+
+
+class DnsHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        payload, stream = self.request
+        version = 6 if self.server.address_family == socket.AF_INET6 else 4
+        question = dns_question(version)
+        assert payload == struct.pack("!HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + question
+        record(self.server.root, "dns", self.client_address, payload.hex().encode())
+        answer = socket.inet_pton(self.server.address_family,
+                                 "198.51.100.53" if version == 4 else "fd53::53")
+        stream.sendto(struct.pack("!HHHHHH", 0x1234, 0x8180, 1, 1, 0, 0) + question +
+                      b"\xc0\x0c" + struct.pack("!HHIH", 1 if version == 4 else 28,
+                                               1, 60, len(answer)) + answer,
+                      self.client_address)
+
+
 class ThreadingTcpServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
@@ -44,13 +64,16 @@ class ThreadingUdpServer(socketserver.ThreadingUDPServer):
     daemon_threads = True
 
 
-def target(root: Path, tcp_port: int, udp_port: int) -> None:
+def target(root: Path, tcp_port: int, udp_port: int, dns_port: int | None = None) -> None:
     servers = []
     for family, host in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
-        for server_type, handler, port in (
+        listeners = [
             (ThreadingTcpServer, TcpHandler, tcp_port),
             (ThreadingUdpServer, UdpHandler, udp_port),
-        ):
+        ]
+        if dns_port is not None:
+            listeners.append((ThreadingUdpServer, DnsHandler, dns_port))
+        for server_type, handler, port in listeners:
             family_server = type("FamilyServer", (server_type,), {"address_family": family})
             server = family_server((host, port), handler, bind_and_activate=False)
             if family == socket.AF_INET6:
@@ -77,15 +100,29 @@ def client(kind: str, host: str, port: int) -> None:
         return
     with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_DGRAM) as stream:
         stream.settimeout(3)
+        if kind == "dns":
+            version = 6 if ":" in host else 4
+            question = dns_question(version)
+            stream.sendto(struct.pack("!HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + question,
+                          (host, port))
+            payload, peer = stream.recvfrom(512)
+            answer = socket.inet_pton(stream.family,
+                                     "198.51.100.53" if version == 4 else "fd53::53")
+            assert peer[0] == host and peer[1] == port
+            assert payload == (struct.pack("!HHHHHH", 0x1234, 0x8180, 1, 1, 0, 0) + question +
+                               b"\xc0\x0c" + struct.pack("!HHIH", 1 if version == 4 else 28,
+                                                        1, 60, len(answer)) + answer)
+            return
         stream.sendto(b"tproxy-udp-request", (host, port))
-        payload, _ = stream.recvfrom(64)
-        assert payload == b"tproxy-udp-ok"
+        payload, peer = stream.recvfrom(64)
+        assert payload == b"tproxy-udp-ok" and peer[0] == host and peer[1] == port
 
 
 def main() -> None:
     mode = sys.argv[1]
     if mode == "target":
-        target(Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]))
+        target(Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]),
+               int(sys.argv[5]) if len(sys.argv) > 5 else None)
     elif mode == "client":
         client(sys.argv[2], sys.argv[3], int(sys.argv[4]))
     else:

@@ -1056,13 +1056,21 @@ TProxy 管理入口为菜单 `17 → 43`，或以下命令：
 padm-docker protocol tproxy-status
 padm-docker edit --tproxy-enable 31298 129 --tproxy-family dual
 padm-docker edit --tproxy-settings 31299 131
+padm-docker edit --tproxy-settings 31299 131 --tproxy-output-uid 65534
+padm-docker edit --tproxy-settings 31299 131 --tproxy-output-off
 padm-docker edit --tproxy-off
 ```
 
 仅管理单 Xray 或 sing-box 核心的已有 Reality 部署，不能与其它宿主集成共存。
 透明入口处理 `PREROUTING` 的 TCP/UDP，族可选 `ipv4`、`ipv6` 或 `dual`。
-启用未指定族时默认 IPv4，修改参数未指定族时保留当前值；不接管宿主 `OUTPUT`，
-不提供 Redirect。所选族须已开启宿主转发并支持对应 TPROXY target，预检不修改 sysctl。
+启用未指定族时默认 IPv4，修改参数未指定族时保留当前值。
+菜单第 5/6 项或 `--tproxy-output-uid` 可显式捕获一个本机 UID 主动发起的 TCP/UDP，
+UID 范围为 `1–2147483647`，排除受管业务 UID `10001`；root 核心拨号、服务回包与
+本地目的不捕获。未指定时保持关闭，修改省略时保留旧 UID；`--tproxy-output-off`
+只关闭本机转发，保留 PREROUTING。该模式需 owner/conntrack/MARK，并使用 schema 4
+绑定两条链及地址族，旧包须有 `x-padm-tproxy-output-uid` 才能使用或恢复。
+不提供全主机 OUTPUT 或 Redirect。所选族须已开启宿主转发并支持对应 TPROXY target，
+预检不修改 sysctl。
 旧 schema 2 的 IPv4 state 保持兼容；IPv6/双栈使用 schema 3，同一 token
 分别绑定两族资源，任一族漂移时保留全部资源与 state，不先清另一族。
 启用后核心使用 host 网络、root 和 `NET_ADMIN`；修改或关闭先审计旧容器，

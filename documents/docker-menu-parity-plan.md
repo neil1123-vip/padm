@@ -3664,6 +3664,35 @@ IPv4 state 保留 schema 2 原格式，IPv6/双栈使用 schema 3 并追加 fami
 OUTPUT/Redirect、原生宿主/arm64/公网/重启和完整卸载继续 deferred；
 本项只完成 TProxy PREROUTING 双栈，5C 与整体目标继续 active。
 
+#### 5C.2b.2 指定 UID 的本机 TProxy 转发
+
+菜单 `17 → 43 → 5/6` 和 CLI `--tproxy-output-uid UID` / `--tproxy-output-off`
+管理单 UID 的本机主动 TCP/UDP，启用或参数编辑复用原候选、确认和恢复事务。
+UID 为 `1–2147483647`、排除 `10001`，默认关闭；修改省略时保留旧值，
+关闭 OUTPUT 保留 PREROUTING。owner + conntrack ORIGINAL 避免捕获服务回包，
+LOCAL 绕过；root 核心自身拨号及 DNS 不进入捕获。两核心、三族范围保持。
+
+新模式使用 schema 4 绑定 UID、family、两条随机 token 链及 route/rule，
+旧 schema 2/3 不补字段。候选只读核验旧资源，两族两链审计成功才清理；
+漂移保留全部资源，第二族失败及 INT/TERM 精确撤销，清理失败保留可恢复 state。
+bundle 必须有 `x-padm-tproxy-output-uid`；不改宿主 sysctl 或增加依赖。
+顺手修复 DNS 菜单非法端口仍追问域名的问题，立即提示并返回。
+
+定向 Linux amd64：管理/菜单 32.803 秒、228 个规格差分 15.741 秒、
+所有权与恢复 72.088 秒、两核心三族真实转发及 Compose 停止 55.441 秒通过。
+同轮验证 PREROUTING、OUTPUT TCP/UDP/DNS、未选 UID、LOCAL、服务 REPLY、
+关闭恢复外来基线；严格 all/lo rp_filter=1 及其余常见过滤 sysctl=0 通过，
+未据推断增加不必要的预检门禁。集中 `docker-contracts` 同快照 56/56 通过，
+入口 340.748 秒、排队 314 ms、Jobs 6、cache_hit=false，证据
+`.tmp-regression-docker-52a6329bd9d14a28ad6996f96643c0b8/`。
+源码摘要 `020854D213EF96D23FB9BFE6C695C21363FDF6E42B450E24650955CEC2848AE4`；
+14 份生产/合同/功能测试与完整归档逐文件一致，随后只改派发和文档。
+派发合同补验入口 1.938 秒；本轮 12 个归档/清单清理，日志/result 保留。
+
+focused 入口改为所有权（已包含管理）+ 菜单，避免另跑管理；完整集合和并发不变。
+全主机 OUTPUT、Redirect、原生宿主/arm64/公网/重启与完整卸载继续 deferred，
+5C 与总体计划保持 active。
+
 #### 5C.2c TUN 管理与资源生命周期
 
 菜单 `17 → 44`、`protocol tun-status`、`edit --tun-enable/--tun-off` 复用

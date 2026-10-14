@@ -900,7 +900,10 @@ dockerProtocolCommand() (
         # 规格状态不冒充内核健康；运行验收仍由 validate 与服务健康检查提供。
         jq '[.host_integrations[] | select(.type == "tproxy")][0] as $tproxy |
           {enabled:($tproxy != null),port:($tproxy.settings.port // null),
-           mark:($tproxy.settings.mark // null),family:($tproxy.settings.family // "ipv4"),hook:"PREROUTING"}' "${normalized}"
+           mark:($tproxy.settings.mark // null),family:($tproxy.settings.family // "ipv4"),hook:"PREROUTING"} +
+          (if $tproxy.settings | has("output_uid") then
+            {output_uid:$tproxy.settings.output_uid,hooks:["PREROUTING","OUTPUT"]}
+           else {} end)' "${normalized}"
         return $?
     fi
     if [[ "${action}" == tun-status ]]; then
@@ -1489,7 +1492,7 @@ dockerEditCommand() {
     local routingDomains='[]' routingOldDomains='[]' routingDomainsField=domains
     local routingOldIp= routingNewIp= routingHost=
     local httpRelay= httpRelayFile= httpRelayPort=0 httpRelaySources='[]'
-    local tproxyAction= tproxyPort=0 tproxyMark=0 tproxyFamily= tunAction=
+    local tproxyAction= tproxyPort=0 tproxyMark=0 tproxyFamily= tproxyOutput= tunAction=
     local portAlias= portAliasListener= portAliasPort= portAliasOldPort=
     local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
     local portHoppingIpv4= portHoppingIpv6=
@@ -1709,6 +1712,17 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             tproxyFamily=$2
             shift 2
+            ;;
+        --tproxy-output-uid)
+            [[ "$#" -ge 2 && -z "${tproxyOutput}" && "$2" =~ ^[1-9][0-9]{0,9}$ &&
+                "$2" -le 2147483647 && "$2" != 10001 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            tproxyOutput=$2
+            shift 2
+            ;;
+        --tproxy-output-off)
+            [[ -z "${tproxyOutput}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            tproxyOutput=off
+            shift
             ;;
         --tun-enable|--tun-off)
             [[ -z "${tunAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -2123,6 +2137,9 @@ dockerEditCommand() {
     }
     [[ -z "${tproxyFamily}" || "${tproxyAction}" == enable || "${tproxyAction}" == settings ]] ||
         return "${PADM_DOCKER_RC_USAGE}"
+    [[ -z "${tproxyOutput}" || "${tproxyAction}" == settings ||
+        ( "${tproxyAction}" == enable && "${tproxyOutput}" != off ) ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
     [[ -z "${tproxyAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
         -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
         -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
@@ -2233,13 +2250,18 @@ dockerEditCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${tproxyAction}" ]]; then
         jq --arg action "${tproxyAction}" --argjson port "${tproxyPort}" --argjson mark "${tproxyMark}" \
-            --arg family "${tproxyFamily}" '
+            --arg family "${tproxyFamily}" --arg output "${tproxyOutput}" '
           [.host_integrations[] | select(.type == "tproxy")] as $current |
           ({port:$port,mark:$mark} +
-            if $family != "" then {family:$family}
+            (if $family != "" then {family:$family}
             elif $action == "settings" and ($current[0].settings // {} | has("family")) then
               {family:$current[0].settings.family}
-            else {} end) as $settings |
+            else {} end) +
+            (if $output == "off" then {}
+             elif $output != "" then {output_uid:($output | tonumber)}
+             elif $action == "settings" and ($current[0].settings // {} | has("output_uid")) then
+               {output_uid:$current[0].settings.output_uid}
+             else {} end)) as $settings |
           if $action == "off" then
             if ($current | length) != 1 then error("TProxy 未启用")
             else .host_integrations |= map(select(.type != "tproxy")) end
@@ -3038,7 +3060,7 @@ dockerEditCompatibilityValidate() {
        elif $tproxy_action != "" then
         def without_tproxy: .host_integrations |= map(select(.type != "tproxy"));
         def without_tproxy_settings:
-          .host_integrations |= map(if .type == "tproxy" then del(.settings.port,.settings.mark,.settings.family) else . end);
+          .host_integrations |= map(if .type == "tproxy" then del(.settings.port,.settings.mark,.settings.family,.settings.output_uid) else . end);
         if $tproxy_action == "settings" then
           ([$old.host_integrations[] | select(.type == "tproxy")] | length) == 1 and
           ([$new.host_integrations[] | select(.type == "tproxy")] | length) == 1 and

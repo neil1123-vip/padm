@@ -13,13 +13,16 @@ composeContainer=
 clientContainer=
 targetContainer=
 originPid=
+replyPid=
 networks=()
 cleanup() {
     local status=$? defaultNamespace
-    if [[ -n "${originPid}" ]]; then
-        kill -TERM "${originPid}" 2>/dev/null || true
-        wait "${originPid}" 2>/dev/null || true
-    fi
+    for resource in "${originPid}" "${replyPid}"; do
+        [[ -z "${resource}" ]] || {
+            kill -TERM "${resource}" 2>/dev/null || true
+            wait "${resource}" 2>/dev/null || true
+        }
+    done
     if [[ -n "${coreContainer}" ]]; then
         [[ "${status}" -eq 0 ]] || docker logs "${coreContainer}" >&2 || true
         docker rm --force --volumes "${coreContainer}" >/dev/null || status=1
@@ -31,6 +34,8 @@ cleanup() {
     if [[ -n "${container}" ]]; then
         if [[ "${status}" -ne 0 ]]; then
             docker exec "${container}" cat /tmp/tproxy.log 2>/dev/null || true
+            docker exec "${container}" iptables-save -c -t mangle 2>/dev/null || true
+            docker exec "${container}" ip6tables-save -c -t mangle 2>/dev/null || true
             docker exec "${container}" iptables -w -t mangle -S 2>/dev/null || true
             docker exec "${container}" ip -j -N -4 rule show 2>/dev/null || true
             docker exec "${container}" ip -j -N -4 route show table all 2>/dev/null || true
@@ -119,18 +124,20 @@ rejectEntry() {
         fail "entrypoint did not promptly reject: $*"
 }
 startServer() {
-    port=$1 mark=$2 family=${3:-ipv4}
+    port=$1 mark=$2 family=${3:-ipv4} outputUid=${4:-}
+    local -a runtimeArgs=("${port}" "${mark}" "${family}")
+    [[ -z "${outputUid}" ]] || runtimeArgs+=(--output-uid "${outputUid}")
     net rm -f /tmp/tproxy.pid /tmp/tproxy.status
     docker exec -d "${container}" sh -c '
-      sh /tmp/padm-entrypoint tproxy "$1" "$2" "$3" </dev/null >/tmp/tproxy.log 2>&1 &
+      sh /tmp/padm-entrypoint tproxy "$@" </dev/null >/tmp/tproxy.log 2>&1 &
       server=$!
       printf "%s\n" "$server" >/tmp/tproxy.pid
       status=0
       wait "$server" || status=$?
       printf "%s\n" "$status" >/tmp/tproxy.status
-    ' test "${port}" "${mark}" "${family}"
+    ' test "${runtimeArgs[@]}"
     for ((attempt = 0; attempt < 100; attempt++)); do
-        entry tproxy-health "${port}" "${mark}" "${family}" >/dev/null 2>&1 && return 0
+        entry tproxy-health "${runtimeArgs[@]}" >/dev/null 2>&1 && return 0
         ! net test -f /tmp/tproxy.status || fail 'service exited before readiness'
         sleep 0.05
     done
@@ -156,7 +163,8 @@ readState() {
       [inputs | split("=")] as $pairs |
       if ($pairs | map(.[0])) ==
         (["schema_version","token","chain","port","mark","table","pref","route_proto","rule_proto","realm","phase"] +
-          if ($pairs[0][1] == "3") then ["family"] else [] end)
+          if ($pairs[0][1] == "4") then ["family","output_uid"]
+          elif ($pairs[0][1] == "3") then ["family"] else [] end)
         and all($pairs[]; length == 2)
       then $pairs | map({key:.[0],value:.[1]}) | from_entries
       else error("invalid ownership state") end
@@ -169,8 +177,9 @@ readState() {
     [[ "${chain}" == "padm-tproxy-${token:0:12}" && "${realm}" == "${expected_realm}" &&
         "$(net stat -c '%u:%a:%h' /var/lib/padm/net/tproxy.state)" == 0:600:1 ]] ||
         fail 'resource identity or state permissions are wrong'
-    jq -e --arg port "${port}" --arg mark "${mark}" --arg family "${family}" '
-      .schema_version == (if $family == "ipv4" then "2" else "3" end) and
+    jq -e --arg port "${port}" --arg mark "${mark}" --arg family "${family}" --arg uid "${outputUid}" '
+      .schema_version == (if $uid != "" then "4" elif $family == "ipv4" then "2" else "3" end) and
+      (.output_uid // "") == $uid and
       (.family // "ipv4") == $family and .port == $port and .mark == $mark and .table == $mark and
       .pref == "30000" and .route_proto == "186" and .rule_proto == "186" and .phase == "active"
     ' <<<"${state}" >/dev/null || fail 'state did not preserve the active resource identity'
@@ -201,11 +210,13 @@ seedOutsideResources() {
     net iptables -w -t mangle -N outside-owner
     net iptables -w -t mangle -A outside-owner -m comment --comment outside-owner -j RETURN
     net iptables -w -t mangle -A PREROUTING -m comment --comment outside-owner -j outside-owner
+    net iptables -w -t mangle -A OUTPUT -m comment --comment outside-owner -j outside-owner
     net ip -4 rule add pref 30100 fwmark 254 table 240 protocol 187
     net ip -4 route add 198.51.100.0/24 dev lo table 240 proto 187 realm 4321
     net ip6tables -w -t mangle -N outside-owner
     net ip6tables -w -t mangle -A outside-owner -m comment --comment outside-owner -j RETURN
     net ip6tables -w -t mangle -A PREROUTING -m comment --comment outside-owner -j outside-owner
+    net ip6tables -w -t mangle -A OUTPUT -m comment --comment outside-owner -j outside-owner
     net ip -6 rule add pref 30100 fwmark 254 table 240 protocol 187
     net ip -6 route add fd40::/64 dev lo table 240 proto 187 metric 4321
 }
@@ -310,12 +321,17 @@ done
 docker exec "${clientContainer}" ip route replace default via 198.18.64.10
 docker exec "${clientContainer}" ip -6 route replace default via fd40:64::10
 net ip route replace default via 198.18.65.1
-for scope in all default eth0 eth1; do
+for scope in default eth0 eth1; do
     nsenter --target "${netPid}" --net -- sysctl -q -w "net.ipv4.conf.${scope}.rp_filter=0"
+done
+for scope in all lo; do
+    nsenter --target "${netPid}" --net -- sysctl -q -w \
+        "net.ipv4.conf.${scope}.rp_filter=1" "net.ipv4.conf.${scope}.src_valid_mark=0" \
+        "net.ipv4.conf.${scope}.route_localnet=0" "net.ipv4.conf.${scope}.accept_local=0"
 done
 mkdir "${TEST_ROOT}/proof"
 nsenter --target "${targetPid}" --net -- python3 \
-    "${PROJECT_ROOT}/docker/tests/tproxy-real-fixture.py" target "${TEST_ROOT}/proof" 18080 18081 \
+    "${PROJECT_ROOT}/docker/tests/tproxy-real-fixture.py" target "${TEST_ROOT}/proof" 18080 18081 53 \
     >"${TEST_ROOT}/origin.log" 2>&1 &
 originPid=$!
 for ((attempt = 0; attempt < 100; attempt++)); do
@@ -324,6 +340,21 @@ for ((attempt = 0; attempt < 100; attempt++)); do
     sleep 0.05
 done
 [[ -f "${TEST_ROOT}/proof/ready" ]] || fail 'origin did not become ready'
+command -v setpriv >/dev/null || fail 'setpriv is required for real UID OUTPUT acceptance'
+chmod 0755 "${TEST_ROOT}"
+mkdir "${TEST_ROOT}/replies"
+chown 65534:65534 "${TEST_ROOT}/replies"
+nsenter --target "${netPid}" --net -- setpriv --reuid 65534 --regid 65534 --clear-groups \
+    --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- python3 \
+    "${PROJECT_ROOT}/docker/tests/tproxy-real-fixture.py" target "${TEST_ROOT}/replies" 18090 18091 \
+    >"${TEST_ROOT}/replies.log" 2>&1 &
+replyPid=$!
+for ((attempt = 0; attempt < 100; attempt++)); do
+    [[ ! -f "${TEST_ROOT}/replies/ready" ]] || break
+    kill -0 "${replyPid}" || fail 'selected UID service exited before readiness'
+    sleep 0.05
+done
+[[ -f "${TEST_ROOT}/replies/ready" ]] || fail 'selected UID service did not become ready'
 baseline=$(kernelSnapshot)
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state" PYTHONDONTWRITEBYTECODE=1
 # shellcheck source=/dev/null
@@ -331,9 +362,10 @@ source "${PROJECT_ROOT}/install-docker.sh"
 fixture="${PROJECT_ROOT}/docker/tests/tproxy-real-fixture.py"
 
 makeCoreConfig() {
-    local core=$1 listenPort=$2 mark=$3 configDir=$4 family=${5:-ipv4}
+    local core=$1 listenPort=$2 mark=$3 configDir=$4 family=${5:-ipv4} outputUid=${6:-}
     mkdir -p "${configDir}"
-    jq -n --arg core "${core}" --argjson port "${listenPort}" --argjson mark "${mark}" --arg family "${family}" '
+    jq -n --arg core "${core}" --argjson port "${listenPort}" --argjson mark "${mark}" \
+      --arg family "${family}" --arg uid "${outputUid}" '
       {schema_version:3,release:{version:"3.1.8",manifest_sha256:("a"*64),signature_identity:"fixture"},
        core:{type:$core,secondary_type:null,protocols:[{
          id:1,core:$core,listener_id:"entry-reality",server:"proxy.example.com",public_port:35441,
@@ -346,7 +378,8 @@ makeCoreConfig() {
          ("ghcr.io/example/padm-"+.+":test@sha256:"+("a"*64))}) | from_entries),
        host_integrations:[{type:"tproxy",profile:"net-transparent",firewall_rules:["padm-tproxy"],
          devices:[],schedules:[],settings:({port:$port,mark:$mark} +
-           if $family == "ipv4" then {} else {family:$family} end)}]}
+           (if $family == "ipv4" then {} else {family:$family} end) +
+           (if $uid == "" then {} else {output_uid:($uid | tonumber)} end))}]}
     ' >"${configDir}/spec.json"
     dockerConfigureSpecValidate "${configDir}/spec.json"
     if [[ "${core}" == xray ]]; then
@@ -391,35 +424,89 @@ stopCore() {
     docker rm --volumes "${coreContainer}" >/dev/null
     coreContainer=
 }
+trafficCounter() {
+    local kind=$1 version=$2 target=$3 tool=iptables-save
+    [[ "${version}" != 6 ]] || tool=ip6tables-save
+    net "${tool}" -c -t mangle | awk -v comment="padm-tproxy:${token}" -v kind="${kind}" -v target="${target}" '
+      index($0, comment) && index($0, "-p " kind " ") && index($0, "-j " target " ") {
+        split($1, fields, ":"); sub(/^\[/, "", fields[1]); total += fields[1]
+      }
+      END { printf "%.0f\n", total }
+    '
+}
+proofRows() {
+    [[ ! -f "$1/$2.jsonl" ]] && printf '0\n' || jq -s 'length' "$1/$2.jsonl"
+}
+assertProof() {
+    local kind=$1 directory=$2 before=$3 peer=$4
+    jq -se --arg peer "${peer}" --argjson expected "$((before + 1))" --arg kind "${kind}" '
+      length == $expected and .[-1].peer == $peer and
+      (.[-1].payload | if $kind == "dns" then test("^[0-9a-f]+$")
+        else . == ("tproxy-" + $kind + "-request") end)
+    ' "${directory}/${kind}.jsonl" >/dev/null || fail "${kind} did not preserve the expected origin proof"
+}
 forwardCheck() {
-    local kind=$1 targetPort=$2 version=${3:-4} before after rows expected tool=iptables
+    local kind=$1 targetPort=$2 version=${3:-4} before after rows
     local destination=198.18.65.20 peer=198.18.65.10
-    if [[ "${version}" == 6 ]]; then tool=ip6tables destination=fd40:65::20 peer=fd40:65::10; fi
-    before=$(net "${tool}" -w -t mangle -nvxL "${chain}" |
-        awk -v kind="${kind}" '$3 == "TPROXY" && $4 == kind {print $1}')
-    [[ "${before}" =~ ^[0-9]+$ ]] || fail "missing ${kind} counter"
+    if [[ "${version}" == 6 ]]; then destination=fd40:65::20 peer=fd40:65::10; fi
+    rows=$(proofRows "${TEST_ROOT}/proof" "${kind}")
+    before=$(trafficCounter "${kind}" "${version}" TPROXY)
     nsenter --target "${clientPid}" --net -- python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}"
-    after=$(net "${tool}" -w -t mangle -nvxL "${chain}" |
-        awk -v kind="${kind}" '$3 == "TPROXY" && $4 == kind {print $1}')
-    [[ "${after}" =~ ^[0-9]+$ ]] && ((after > before)) || fail "${kind} bypassed TProxy"
-    expected=$((${proofCounts[$version]} + 1))
-    rows=$(jq -s --arg peer "${peer}" --arg payload "tproxy-${kind}-request" '
-      if all(.[]; (.peer == "198.18.65.10" or .peer == "fd40:65::10") and .payload == $payload)
-      then [.[] | select(.peer == $peer)] | length else -1 end
-    ' "${TEST_ROOT}/proof/${kind}.jsonl")
-    [[ "${rows}" == "${expected}" ]] || fail "${kind} origin did not observe proxy source"
+    after=$(trafficCounter "${kind}" "${version}" TPROXY)
+    ((after > before)) || fail "${kind} bypassed TProxy"
+    assertProof "${kind}" "${TEST_ROOT}/proof" "${rows}" "${peer}"
+}
+outputCheck() {
+    local kind=$1 targetPort=$2 version=$3 uid=$4 captured=$5 transport=${1}
+    local before after markedBefore markedAfter rows destination=198.18.65.20 peer=198.18.65.10
+    [[ "${kind}" != dns ]] || transport=udp
+    if [[ "${version}" == 6 ]]; then destination=fd40:65::20 peer=fd40:65::10; fi
+    rows=$(proofRows "${TEST_ROOT}/proof" "${kind}")
+    before=$(trafficCounter "${transport}" "${version}" TPROXY)
+    markedBefore=$(trafficCounter "${transport}" "${version}" MARK)
+    nsenter --target "${netPid}" --net -- setpriv --reuid "${uid}" --regid "${uid}" --clear-groups \
+        --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
+        python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}"
+    after=$(trafficCounter "${transport}" "${version}" TPROXY)
+    markedAfter=$(trafficCounter "${transport}" "${version}" MARK)
+    if [[ "${captured}" == yes ]]; then
+        ((after > before && markedAfter > markedBefore)) || fail "${kind} selected UID bypassed OUTPUT/TProxy"
+    else
+        [[ "${after}" == "${before}" && "${markedAfter}" == "${markedBefore}" ]] ||
+            fail "${kind} unselected/off UID was redirected"
+    fi
+    assertProof "${kind}" "${TEST_ROOT}/proof" "${rows}" "${peer}"
+}
+replyCheck() {
+    local kind=$1 targetPort=$2 version=$3 scope=$4 before after markedBefore markedAfter rows
+    local destination=198.18.64.10 peer=198.18.64.20
+    local -a caller=(nsenter --target "${clientPid}" --net --)
+    if [[ "${version}" == 6 ]]; then destination=fd40:64::10 peer=fd40:64::20; fi
+    if [[ "${scope}" == local ]]; then
+        peer=${destination}
+        caller=(nsenter --target "${netPid}" --net -- setpriv --reuid 65534 --regid 65534 --clear-groups
+            --bounding-set=-all --inh-caps=-all --ambient-caps=-all --)
+    fi
+    rows=$(proofRows "${TEST_ROOT}/replies" "${kind}")
+    before=$(trafficCounter "${kind}" "${version}" TPROXY)
+    markedBefore=$(trafficCounter "${kind}" "${version}" MARK)
+    "${caller[@]}" python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}"
+    after=$(trafficCounter "${kind}" "${version}" TPROXY)
+    markedAfter=$(trafficCounter "${kind}" "${version}" MARK)
+    [[ "${after}" == "${before}" && "${markedAfter}" == "${markedBefore}" ]] ||
+        fail "${kind} ${scope} request or selected UID service reply was redirected"
+    assertProof "${kind}" "${TEST_ROOT}/replies" "${rows}" "${peer}"
 }
 
-declare -A proofCounts=([4]=0 [6]=0)
 for core in xray sing-box; do
     previousChain=
     previousToken=
     for tuple in '31298 129 ipv4' '31299 131 dual' '31300 132 ipv6'; do
         read -r port mark family <<<"${tuple}"
         configDir="${TEST_ROOT}/${core}-${port}"
-        makeCoreConfig "${core}" "${port}" "${mark}" "${configDir}" "${family}"
+        makeCoreConfig "${core}" "${port}" "${mark}" "${configDir}" "${family}" 65534
         startCore "${core}" "${configDir}"
-        startServer "${port}" "${mark}" "${family}"
+        startServer "${port}" "${mark}" "${family}" 65534
         readState
         [[ -z "${previousToken}" || "${token}" != "${previousToken}" ]] ||
             fail 'parameter change reused previous ownership token'
@@ -428,22 +515,35 @@ for core in xray sing-box; do
                 fail 'parameter change left previous owned chain'
         fi
         for version in $(case "${family}" in ipv4) echo 4 ;; ipv6) echo 6 ;; dual) echo '4 6' ;; esac); do
+            outputCheck tcp 18080 "${version}" 65533 no
+            outputCheck udp 18081 "${version}" 65533 no
+            replyCheck tcp 18090 "${version}" local
+            replyCheck udp 18091 "${version}" local
+            replyCheck tcp 18090 "${version}" reply
+            replyCheck udp 18091 "${version}" reply
             forwardCheck tcp 18080 "${version}"
             forwardCheck udp 18081 "${version}"
-            proofCounts[${version}]=$((${proofCounts[$version]} + 1))
+            outputCheck tcp 18080 "${version}" 65534 yes
+            outputCheck udp 18081 "${version}" 65534 yes
+            outputCheck dns 53 "${version}" 65534 yes
         done
         previousChain=${chain} previousToken=${token}
         stopServer
         ! net test -e /var/lib/padm/net/tproxy.state || fail 'off left ownership state'
         assertKernel "${baseline}" 'off changed outside resources or left old rules/routes'
+        for version in $(case "${family}" in ipv4) echo 4 ;; ipv6) echo 6 ;; dual) echo '4 6' ;; esac); do
+            outputCheck tcp 18080 "${version}" 65534 no
+            outputCheck udp 18081 "${version}" 65534 no
+        done
         stopCore
         grep -q 'tproxy-in' "${TEST_ROOT}/${core}-${port}.log" || fail 'missing TProxy core log'
         for destination in $(case "${family}" in ipv4) echo 198.18.65.20 ;; ipv6) echo fd40:65::20 ;; dual) echo '198.18.65.20 fd40:65::20' ;; esac); do
             grep -q "${destination}.*:18080" "${TEST_ROOT}/${core}-${port}.log" &&
-                grep -q "${destination}.*:18081" "${TEST_ROOT}/${core}-${port}.log" ||
-                fail "${core} did not record both forwarded destinations"
+                grep -q "${destination}.*:18081" "${TEST_ROOT}/${core}-${port}.log" &&
+                grep -q "${destination}.*:53" "${TEST_ROOT}/${core}-${port}.log" ||
+                fail "${core} did not record TCP, UDP and DNS destinations"
         done
-        printf 'docker-tproxy-forwarding-ok: core=%s port=%s mark=%s family=%s tcp=ok udp=ok off=clean\n' \
+        printf 'docker-tproxy-forwarding-ok: core=%s port=%s mark=%s family=%s prerouting=ok output_uid=65534 tcp=ok udp=ok dns=ok unselected=direct local=bypass reply=direct off=clean\n' \
             "${core}" "${port}" "${mark}" "${family}"
     done
 done
@@ -485,6 +585,7 @@ sysctl -q -w net.ipv4.ip_forward=1
 iptables -w -t mangle -N tproxy-meta-outside
 iptables -w -t mangle -A tproxy-meta-outside -m comment --comment tproxy-meta-outside -j RETURN
 iptables -w -t mangle -A PREROUTING -m comment --comment tproxy-meta-outside -j tproxy-meta-outside
+iptables -w -t mangle -A OUTPUT -m comment --comment tproxy-meta-outside -j tproxy-meta-outside
 ip -4 rule add pref 30110 fwmark 245 table 242 protocol 187
 ip -4 route add 198.51.101.0/24 dev lo table 242 proto 187 realm 4321
 metadataBaseline=$(hostSnapshot)
@@ -510,6 +611,7 @@ composeContainer=
     "$(hostSnapshot)" == "${metadataBaseline}" ]] ||
     fail 'production disable left state/rules or changed outside resources'
 iptables -w -t mangle -D PREROUTING -m comment --comment tproxy-meta-outside -j tproxy-meta-outside
+iptables -w -t mangle -D OUTPUT -m comment --comment tproxy-meta-outside -j tproxy-meta-outside
 iptables -w -t mangle -F tproxy-meta-outside
 iptables -w -t mangle -X tproxy-meta-outside
 ip -4 rule del pref 30110 fwmark 245 table 242 protocol 187

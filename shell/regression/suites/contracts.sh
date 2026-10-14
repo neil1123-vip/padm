@@ -420,6 +420,7 @@ runRegressionDockerContractsAggregateContract() (
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-tun-resources]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-tun-real]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_CHILDREN[docker-tun-focused]}" == $'docker-tun-management\ndocker-menu-tun' ]]
+    [[ "${PADM_REGRESSION_SELECTOR_CHILDREN[docker-tproxy-focused]}" == $'docker-tproxy-ownership\ndocker-menu-routing' ]]
 
     # 注册集合相同还不够，新旧路由入口都必须把正确 scope 传给原脚本。
     bash() {
