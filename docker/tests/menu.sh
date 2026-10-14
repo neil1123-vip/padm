@@ -1884,6 +1884,65 @@ runRoutingDriver() {
         targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'\004'
         targetReply 'Docker HTTP 中继入站' $'0\n'
         ;;
+    tproxy-flow|tproxy-cancel|tproxy-status-failed|tproxy-commit-failed)
+        targetReply 'Docker 路由与出站' $'43\n'
+        if [[ "${scenario}" == tproxy-status-failed ]]; then
+            for choice in 1 2 3 1; do
+                targetReply 'Docker TProxy 管理' "${choice}"$'\n'
+            done
+        elif [[ "${scenario}" == tproxy-cancel ]]; then
+            for choice in 2 3; do
+                inputPrompt='TProxy 端口 [31298，0 返回]'
+                newPrompt='TProxy mark [129，0 返回]'
+                [[ "${choice}" != 3 ]] ||
+                    { inputPrompt='TProxy 端口 [31399，0 返回]'; newPrompt='TProxy mark [257，0 返回]'; }
+                for input in $'0\n' $'\004'; do
+                    targetReply 'Docker TProxy 管理' "${choice}"$'\n'
+                    targetReply "${inputPrompt}" "${input}"
+                done
+                for input in $'0\n' $'\004'; do
+                    targetReply 'Docker TProxy 管理' "${choice}"$'\n'
+                    targetReply "${inputPrompt}" $'\n'
+                    targetReply "${newPrompt}" "${input}"
+                done
+            done
+            for choice in 2 3; do
+                targetReply 'Docker TProxy 管理' "${choice}"$'\n'
+                inputPrompt='TProxy 端口 [31298，0 返回]'
+                newPrompt='TProxy mark [129，0 返回]'
+                [[ "${choice}" != 3 ]] ||
+                    { inputPrompt='TProxy 端口 [31399，0 返回]'; newPrompt='TProxy mark [257，0 返回]'; }
+                targetReply "${inputPrompt}" $'\n'
+                targetReply "${newPrompt}" $'\n'
+                input=$'n\n'
+                [[ "${choice}" != 3 ]] || input=$'\004'
+                targetReply 'fixture-tproxy-confirm [y/N]' "${input}"
+            done
+            for input in $'n\n' $'\004'; do
+                targetReply 'Docker TProxy 管理' $'4\n'
+                targetReply 'fixture-tproxy-confirm [y/N]' "${input}"
+            done
+            targetReply 'Docker TProxy 管理' $'1\n'
+        else
+            targetReply 'Docker TProxy 管理' $'1\n'
+            targetReply 'Docker TProxy 管理' $'2\n'
+            targetReply 'TProxy 端口 [31298，0 返回]' $'\n'
+            targetReply 'TProxy mark [129，0 返回]' $'\n'
+            targetReply 'fixture-tproxy-confirm [y/N]' $'y\n'
+            for input in '' 32000; do
+                targetReply 'Docker TProxy 管理' $'3\n'
+                newRule=
+                [[ -z "${input}" ]] || newRule=130
+                targetReply 'TProxy 端口 [31399，0 返回]' "${input}"$'\n'
+                targetReply 'TProxy mark [257，0 返回]' "${newRule}"$'\n'
+                targetReply 'fixture-tproxy-confirm [y/N]' $'y\n'
+            done
+            targetReply 'Docker TProxy 管理' $'4\n'
+            targetReply 'fixture-tproxy-confirm [y/N]' $'y\n'
+            targetReply 'Docker TProxy 管理' $'1\n'
+        fi
+        targetReply 'Docker TProxy 管理' $'0\n'
+        ;;
     esac
     targetReply 'Docker 路由与出站' $'0\n'
     targetReply 'Docker 管理菜单' $'0\n'
@@ -2256,6 +2315,11 @@ protocol)
         ;;
     alpn-status) exit "${SITE_ALPN_STATUS:-0}" ;;
     routing-status) exit "${ROUTING_STATUS:-0}" ;;
+    tproxy-status)
+        [[ "${TPROXY_STATUS:-0}" -eq 0 ]] || exit "${TPROXY_STATUS}"
+        printf '{"enabled":true,"port":31399,"mark":257,"family":"ipv4","hook":"PREROUTING"}\n'
+        exit 0
+        ;;
     xhttp-status) exit "${XHTTP_STATUS:-0}" ;;
     esac
     printf 'fixture-protocol-output\n'
@@ -2295,6 +2359,25 @@ edit)
         [[ "${confirmation}" == y ]] || exit 2
         [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
         recordAction http-relay-commit "$2"
+    elif [[ "${2:-}" == --tproxy-enable || "${2:-}" == --tproxy-settings || "${2:-}" == --tproxy-off ]]; then
+        # 参数只断言菜单默认值与原样分发；内核规则和恢复由 TProxy 合同覆盖。
+        case "$2" in
+        --tproxy-enable) [[ "$#" -eq 4 && "$3" == 31298 && "$4" == 129 ]] || exit 2 ;;
+        --tproxy-settings)
+            [[ "$#" -eq 4 && ( ( "$3" == 31399 && "$4" == 257 ) ||
+                ( "$3" == 32000 && "$4" == 130 ) ) ]] || exit 2
+            ;;
+        --tproxy-off) [[ "$#" -eq 2 ]] || exit 2 ;;
+        esac
+        printf 'fixture-tproxy-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction tproxy-confirm "$2" eof
+            exit 2
+        fi
+        recordAction tproxy-confirm "$2" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction tproxy-commit "$2"
     elif [[ "${2:-}" == --dns-upstream || "${2:-}" == --socks5-upstream ]]; then
         [[ "$#" -eq 4 ]] || exit 2
         if [[ "$2" == --dns-upstream ]]; then
@@ -2939,9 +3022,10 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     access-control-flow access-control-cancel access-control-failed \
     upstream-flow upstream-cancel upstream-status-failed upstream-commit-failed \
     http-relay-flow http-relay-cancel http-relay-status-failed http-relay-commit-failed \
+    tproxy-flow tproxy-cancel tproxy-status-failed tproxy-commit-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
-    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
+    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 TPROXY_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
     [[ "${routingCase}" != selective-domains-state-failed ]] || SELECTIVE_EDIT_PRECHECK_STATUS=15
     [[ "${routingCase}" != *-replace-state-failed && "${routingCase}" != hosts-manage-state-failed ]] ||
         DOMAIN_REPLACE_PRECHECK_STATUS=15
@@ -2950,6 +3034,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     [[ "${routingCase}" != socks5-domains-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != upstream-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != http-relay-status-failed ]] || ROUTING_STATUS=17
+    [[ "${routingCase}" != tproxy-status-failed ]] || TPROXY_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
@@ -2961,6 +3046,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != access-control-failed &&
         "${routingCase}" != upstream-commit-failed &&
         "${routingCase}" != http-relay-commit-failed &&
+        "${routingCase}" != tproxy-commit-failed &&
         "${routingCase}" != hosts-manage-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
@@ -3307,6 +3393,41 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "HTTP 中继菜单缺少: ${label}"
         done
         ;;
+    tproxy-flow|tproxy-cancel|tproxy-status-failed|tproxy-commit-failed)
+        tproxyConfirmCount=4 tproxyFailureCount=0 tproxyExit=15
+        if [[ "${routingCase}" == tproxy-status-failed ]]; then
+            expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..4})
+            tproxyConfirmCount=0 tproxyFailureCount=4 tproxyExit=17
+            ! grep -Eq 'TProxy (端口|mark) \[' "${CONTROL_LOG}" ||
+                fail 'TProxy 状态失败后仍读取参数'
+        elif [[ "${routingCase}" == tproxy-cancel ]]; then
+            expectedRouting=$(printf 'protocol tproxy-status\n%.0s' {1..8})
+            expectedRouting+=$'\nprotocol tproxy-status\nedit --tproxy-enable 31298 129\ntproxy-confirm --tproxy-enable n'
+            expectedRouting+=$'\nprotocol tproxy-status\nedit --tproxy-settings 31399 257\ntproxy-confirm --tproxy-settings eof'
+            expectedRouting+=$'\nedit --tproxy-off\ntproxy-confirm --tproxy-off n'
+            expectedRouting+=$'\nedit --tproxy-off\ntproxy-confirm --tproxy-off eof\nprotocol tproxy-status'
+            tproxyFailureCount=4 tproxyExit=2
+        else
+            expectedRouting='protocol tproxy-status'
+            for tproxyAction in '--tproxy-enable 31298 129' '--tproxy-settings 31399 257' \
+                '--tproxy-settings 32000 130' '--tproxy-off'; do
+                [[ "${tproxyAction}" == --tproxy-off ]] || expectedRouting+=$'\nprotocol tproxy-status'
+                expectedRouting+=$'\nedit '"${tproxyAction}"
+                expectedRouting+=$'\ntproxy-confirm '"${tproxyAction%% *}"' y'
+                [[ "${routingCase}" != tproxy-flow ]] ||
+                    expectedRouting+=$'\ntproxy-commit '"${tproxyAction%% *}"
+            done
+            expectedRouting+=$'\nprotocol tproxy-status'
+            [[ "${routingCase}" != tproxy-commit-failed ]] || tproxyFailureCount=4
+        fi
+        [[ "$(grep -Fc 'fixture-tproxy-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${tproxyConfirmCount}" ]] ||
+            fail 'TProxy 操作没有每次只确认一次'
+        [[ "$(grep -Fc "操作失败，退出码: ${tproxyExit}" "${CONTROL_LOG}" || true)" -eq "${tproxyFailureCount}" ]] ||
+            fail 'TProxy 取消或失败未显示退出码并继续菜单'
+        for label in '43. TProxy 管理' '1. 查看状态' '2. 启用 TProxy' '3. 修改 TProxy 参数' '4. 关闭 TProxy'; do
+            grep -Fq "${label}" "${CONTROL_LOG}" || fail "TProxy 菜单缺少: ${label}"
+        done
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
         fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
@@ -3347,7 +3468,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail '路由诊断失败后没有继续菜单'
     fi
 done
-unset SITE_EDIT_STATUS ROUTING_STATUS SELECTIVE_EDIT_PRECHECK_STATUS DOMAIN_REPLACE_PRECHECK_STATUS
+unset SITE_EDIT_STATUS ROUTING_STATUS TPROXY_STATUS SELECTIVE_EDIT_PRECHECK_STATUS DOMAIN_REPLACE_PRECHECK_STATUS
 
 if [[ "${MENU_SCOPE}" == routing ]]; then
     printf 'docker-menu-routing-regression-ok\n'

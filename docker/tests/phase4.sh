@@ -20,8 +20,10 @@ DOCKER_LOG="${TEST_ROOT}/docker.log"
 CONTROL_LOG="${TEST_ROOT}/control.log"
 DOCKER_ROOT="${TEST_ROOT}/state"
 FAIL2BAN_INSPECT="${TEST_ROOT}/fail2ban-inspect.json"
+TPROXY_INSPECT="${TEST_ROOT}/tproxy-inspect.json"
 SOURCE_BOUNDARY="${TEST_ROOT}/source-boundary.sh"
 FAIL2BAN_CONTAINER=abcdef123456
+TPROXY_CONTAINER=c0ffee123456
 NATIVE_ROOT="${TEST_ROOT}/native"
 CLI_DIR="${TEST_ROOT}/bin-installed"
 IMAGE_DIGEST=$(printf '1%.0s' {1..64})
@@ -99,12 +101,22 @@ compose)
         : >"${FAKE_DOCKER_FAIL_ONCE}"
         exit 1
     fi
+    service= containerId= inspectFile= stoppedFile=
     if [[ " ${*} " == *' up -d '* && " ${*} " == *' --no-deps '* &&
         " ${*} " == *' net-fail2ban --remove-orphans ' ]]; then
-        jq -n --arg root "${FAKE_DOCKER_ROOT:?}" --arg id "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" \
+        service=net-fail2ban containerId=${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}
+        inspectFile=${FAKE_DOCKER_FAIL2BAN_INSPECT:?} stoppedFile=${FAKE_DOCKER_FAIL2BAN_STOPPED:?}
+    elif [[ " ${*} " == *' up -d '* ]] &&
+        jq -e '.services["net-transparent"] != null' "${FAKE_DOCKER_ROOT:?}/compose.json" >/dev/null; then
+        service=net-transparent containerId=${FAKE_DOCKER_TPROXY_CONTAINER:?}
+        inspectFile=${FAKE_DOCKER_TPROXY_INSPECT:?} stoppedFile=${FAKE_DOCKER_TPROXY_STOPPED:?}
+    fi
+    if [[ -n "${service}" ]]; then
+        # 两类辅助容器均从真实编排生成现场字段，避免绕过生产归属检查。
+        jq -n --arg root "${FAKE_DOCKER_ROOT:?}" --arg id "${containerId}" --arg service "${service}" \
             --slurpfile spec "${FAKE_DOCKER_ROOT}/config/spec.json" \
             --slurpfile compose "${FAKE_DOCKER_ROOT}/compose.json" '
-          $compose[0].services["net-fail2ban"] as $service |
+          $service as $name | $compose[0].services[$name] as $service |
           [{
             Id: ($id + ("a" * (64 - ($id | length)))),
             State: {Status: "running", Running: true, Restarting: false,
@@ -112,19 +124,23 @@ compose)
             Config: {
               Image: $spec[0].images.net, Cmd: $service.command,
               Entrypoint: ["/usr/local/bin/padm-entrypoint"], User: ($service.user // "0:0"),
+              Healthcheck: {Test:$service.healthcheck.test},
               Labels: ($service.labels + {
                 "com.docker.compose.project": "padm-docker",
                 "com.docker.compose.project.working_dir": $root,
                 "com.docker.compose.project.config_files": ($root + "/compose.json"),
-                "com.docker.compose.service": "net-fail2ban",
+                "com.docker.compose.service": $name,
                 "com.docker.compose.oneoff": "False"
               })
             },
             HostConfig: {
               NetworkMode: $service.network_mode,
+              Init: $service.init, PidsLimit: $service.pids_limit, PortBindings: {},
               ReadonlyRootfs: $service.read_only, Privileged: false,
               RestartPolicy: {Name: $service.restart},
               CapAdd: $service.cap_add, CapDrop: $service.cap_drop,
+              SecurityOpt: $service.security_opt,
+              LogConfig: {Type:$service.logging.driver,Config:$service.logging.options},
               Tmpfs: ($service.tmpfs | map({key: split(":")[0], value: "rw"}) | from_entries)
             },
             Mounts: ($service.volumes | map({
@@ -132,11 +148,19 @@ compose)
               Destination: .target, RW: (.read_only | not)
             }))
           }]
-        ' >"${FAKE_DOCKER_FAIL2BAN_INSPECT:?}" || exit 1
-        rm -f -- "${FAKE_DOCKER_FAIL2BAN_STOPPED:?}"
+        ' >"${inspectFile}" || exit 1
+        rm -f -- "${stoppedFile}"
+        if [[ "${service}" == net-transparent ]]; then
+            printf 'fixture\n' >"${FAKE_DOCKER_ROOT}/data/net/transparent/tproxy.state"
+            chmod 0600 "${FAKE_DOCKER_ROOT}/data/net/transparent/tproxy.state"
+        fi
     fi
     ;;
 ps)
+    if [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-transparent --filter label=com.docker.compose.oneoff=False' ]]; then
+        [[ ! -f "${FAKE_DOCKER_TPROXY_INSPECT:?}" ]] || printf '%s\n' "${FAKE_DOCKER_TPROXY_CONTAINER:?}"
+        exit 0
+    fi
     [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]] || exit 0
     case "${FAKE_DOCKER_MODE:-ok}" in
     fail2ban-absent) ;;
@@ -152,6 +176,13 @@ ps)
     esac
     ;;
 container)
+    if [[ "$*" == "container inspect ${FAKE_DOCKER_TPROXY_CONTAINER:?}" ]]; then
+        filter=.
+        [[ ! -e "${FAKE_DOCKER_TPROXY_STOPPED:?}" ]] ||
+            filter='.[0].State = {Status:"exited",Running:false,Restarting:false,Paused:false,Dead:false,OOMKilled:false,ExitCode:0,Error:""}'
+        jq "${filter}" "${FAKE_DOCKER_TPROXY_INSPECT:?}"
+        exit $?
+    fi
     [[ "$*" == "container inspect ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ]] || exit 1
     filter=${FAKE_DOCKER_INSPECT_FILTER:-.}
     if [[ -e "${FAKE_DOCKER_FAIL2BAN_STOPPED:?}" ]]; then
@@ -164,6 +195,12 @@ container)
     jq "${filter}" "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}"
     ;;
 stop)
+    if [[ "$*" == "stop ${FAKE_DOCKER_TPROXY_CONTAINER:?}" ]]; then
+        [[ -f "${FAKE_DOCKER_TPROXY_INSPECT:?}" ]] || exit 1
+        : >"${FAKE_DOCKER_TPROXY_STOPPED:?}"
+        rm -f -- "${FAKE_DOCKER_ROOT:?}/data/net/transparent/tproxy.state"
+        exit 0
+    fi
     [[ "$*" == "stop ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ]] || exit 1
     [[ "${FAKE_DOCKER_MODE:-ok}" != fail2ban-stop-fail ]] || exit 42
     : >"${FAKE_DOCKER_FAIL2BAN_STOPPED:?}"
@@ -173,6 +210,13 @@ stop)
     esac
     ;;
 rm)
+    if [[ "$*" == "rm ${FAKE_DOCKER_TPROXY_CONTAINER:?}" ]]; then
+        [[ -e "${FAKE_DOCKER_TPROXY_STOPPED:?}" &&
+            ! -e "${FAKE_DOCKER_ROOT:?}/data/net/transparent/tproxy.state" &&
+            ! -L "${FAKE_DOCKER_ROOT}/data/net/transparent/tproxy.state" ]] || exit 1
+        rm -f -- "${FAKE_DOCKER_TPROXY_INSPECT:?}" "${FAKE_DOCKER_TPROXY_STOPPED}"
+        exit 0
+    fi
     [[ "$*" == "rm ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
         ! -e "${FAKE_DOCKER_ROOT:?}/data/net/fail2ban/fail2ban.state" &&
         ! -L "${FAKE_DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" ]] || exit 1
@@ -184,6 +228,17 @@ rm)
     rm -f -- "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}" "${FAKE_DOCKER_FAIL2BAN_STOPPED:?}"
     ;;
 exec)
+    if [[ "$#" -eq 6 && "$2" == "${FAKE_DOCKER_TPROXY_CONTAINER:?}" &&
+        "$3" == /usr/local/bin/padm-entrypoint && "$4" == tproxy-health ]]; then
+        [[ ! -e "${FAKE_DOCKER_TPROXY_STOPPED:?}" &&
+            -f "${FAKE_DOCKER_TPROXY_INSPECT:?}" &&
+            -f "${FAKE_DOCKER_ROOT:?}/data/net/transparent/tproxy.state" ]] &&
+            jq -e --arg port "$5" --arg mark "$6" '
+              any(.host_integrations[]; .type == "tproxy" and
+                (.settings.port | tostring) == $port and (.settings.mark | tostring) == $mark)
+            ' "${FAKE_DOCKER_ROOT}/config/spec.json" >/dev/null
+        exit $?
+    fi
     if [[ "$#" -eq 6 && "${2:-}" == "-i" && "${3:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
         "${4:-}" == python3 && "${5:-}" == - && "${6:-}" == ws ]]; then
         cat >/dev/null
@@ -427,6 +482,9 @@ runControl() {
         FAKE_DOCKER_LOG="${DOCKER_LOG}" FAKE_DOCKER_MODE="${FAKE_DOCKER_MODE:-ok}" \
         FAKE_DOCKER_FAIL2BAN_CONTAINER="${FAIL2BAN_CONTAINER}" \
         FAKE_DOCKER_FAIL2BAN_INSPECT="${FAIL2BAN_INSPECT}" \
+        FAKE_DOCKER_TPROXY_CONTAINER="${TPROXY_CONTAINER}" \
+        FAKE_DOCKER_TPROXY_INSPECT="${TPROXY_INSPECT}" \
+        FAKE_DOCKER_TPROXY_STOPPED="${TEST_ROOT}/tproxy-stopped" \
         FAKE_DOCKER_ROOT="${DOCKER_ROOT}" \
         FAKE_DOCKER_FAIL2BAN_STOPPED="${TEST_ROOT}/fail2ban-stopped" \
         FAKE_DOCKER_INSPECT_FILTER="${FAKE_DOCKER_INSPECT_FILTER:-.}" \
@@ -1191,6 +1249,7 @@ if [[ -z "${PHASE4_BRANCH}" || "${PHASE4_BRANCH}" == settings ]]; then
         'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-ssh --filter label=com.docker.compose.oneoff=False')
             [[ "${dualFault:-}" != ssh-orphan ]] || printf '%s\n' "${controlId}"
             ;;
+        'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-transparent --filter label=com.docker.compose.oneoff=False') ;;
         "container inspect ${controlId}")
             jq -n --arg id "${controlId}" '[{Id:$id,State:{Running:true}}]'
             ;;
@@ -1249,6 +1308,9 @@ import sys
 lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
 restart = next(i for i, line in enumerate(lines) if line.startswith("compose restart --no-deps "))
 queries = [line for line in lines[:restart] if line.startswith("ps -aq ")]
+assert len(queries) == 4
+assert queries[0] == "ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-transparent --filter label=com.docker.compose.oneoff=False"
+queries = queries[1:]
 assert len(queries) == 3
 assert "service=net-fail2ban " in queries[0] and "service=net-fail2ban-control " in queries[1]
 assert "service=net-fail2ban-ssh " in queries[2]

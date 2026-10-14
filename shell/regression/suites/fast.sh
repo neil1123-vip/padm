@@ -663,7 +663,8 @@ runDockerWireGuardRuntimeRegression() {
 }
 
 runDockerTProxyOwnershipRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/tproxy-ownership.sh"
+    bash "${PROJECT_ROOT}/docker/tests/tproxy-ownership.sh" &&
+        runDockerTProxyManagementRegression
 }
 
 runDockerPortHoppingPreflightRegression() {
@@ -768,6 +769,15 @@ runDockerPortHoppingTargetRealRegression() {
 
 runDockerTProxyRealRegression() {
     PADM_NET_REAL_CASE=tproxy bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
+}
+
+runDockerTProxyManagementRegression() {
+    bash -n "${PROJECT_ROOT}/docker/lib/setup.sh" "${PROJECT_ROOT}/docker/lib/menu.sh" \
+        "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/setup.sh" "${PROJECT_ROOT}/docker/lib/menu.sh" \
+            "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" \
+            "${PROJECT_ROOT}/docker/tests/tproxy-management.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/tproxy-management.sh"
 }
 
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
@@ -902,9 +912,10 @@ runDockerPortHoppingAutoRealRegression() {
 }
 registerRegressionFunctionLeaf docker-port-hopping-auto-real runDockerPortHoppingAutoRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
+registerRegressionFunctionLeaf docker-tproxy-management runDockerTProxyManagementRegression
 
 listRegressionDockerTProxyChildSelectors() {
-    printf '%s\n' docker-tproxy-ownership docker-phase4
+    printf '%s\n' docker-tproxy-management docker-menu-routing
 }
 registerRegressionParallelSelectorList docker-tproxy-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-tproxy-focused-${BASHPID:-$$}" listRegressionDockerTProxyChildSelectors 2

@@ -991,6 +991,42 @@ dockerMenuIPv6() {
     done
 }
 
+dockerMenuTProxy() {
+    local choice action port mark state defaultPort defaultMark
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker TProxy 管理\n'
+        printf '%s\n' '1. 查看状态' '2. 启用 TProxy' '3. 修改 TProxy 参数' '4. 关闭 TProxy' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun protocol tproxy-status || true ;;
+        2|3)
+            if ! state=$(dockerMenuRun protocol tproxy-status); then
+                printf '%s\n' "${state}"
+                continue
+            fi
+            printf '%s\n' "${state}"
+            defaultPort=31298 defaultMark=129 action=--tproxy-enable
+            if [[ "${choice}" == 3 ]]; then
+                defaultPort=$(jq -er 'select(.enabled == true) | .port' <<<"${state}") &&
+                    defaultMark=$(jq -er 'select(.enabled == true) | .mark' <<<"${state}") || continue
+                action=--tproxy-settings
+            fi
+            dockerSetupRead port "TProxy 端口 [${defaultPort}，0 返回]: " "${defaultPort}" &&
+                dockerSetupRead mark "TProxy mark [${defaultMark}，0 返回]: " "${defaultMark}" || continue
+            dockerMenuRun edit "${action}" "${port}" "${mark}" || true
+            ;;
+        4) dockerMenuRun edit --tproxy-off || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenuRouting() {
     local choice input server port oldRule newRule action
     while :; do
@@ -1014,7 +1050,7 @@ dockerMenuRouting() {
             '35. 精确删除 SOCKS5 域名规则' '36. 单条替换 SOCKS5 域名规则' \
             '37. 单项替换 hosts 地址' '38. 新增 hosts 精确映射' \
             '39. 精确删除 hosts 映射' '40. 移除全部访问控制' \
-            '41. 修改已有 DNS 上游' '42. 修改已有 SOCKS5 上游' '0. 返回'
+            '41. 修改已有 DNS 上游' '42. 修改已有 SOCKS5 上游' '43. TProxy 管理' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1087,6 +1123,7 @@ dockerMenuRouting() {
         19) dockerMenuIPv6 ;;
         20) dockerMenuWarp ;;
         21) dockerMenuHttpRelay ;;
+        43) dockerMenuTProxy ;;
         22|23)
             dockerSetupRead input '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue

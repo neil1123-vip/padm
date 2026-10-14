@@ -40,6 +40,9 @@ dockerUsage() {
   padm-docker edit --http-relay-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http-relay-port <端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http-relay-sources|--http-relay-sources-add|--http-relay-sources-remove <来源 IP/CIDR CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tproxy-enable <端口> <标记> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tproxy-settings <端口> <标记> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tproxy-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-default <入口 ID> <已有额外端口|base> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -115,6 +118,7 @@ dockerUsage() {
   padm-docker protocol stream-status
   padm-docker protocol alpn-status [入口 ID]
   padm-docker protocol routing-status
+  padm-docker protocol tproxy-status
   padm-docker protocol port-alias-status
   padm-docker protocol cdn-status [入口 ID]
   padm-docker account list [--json]
@@ -525,6 +529,7 @@ dockerIPv6NetworkManage() {
 dockerComposeRun() {
     local root composeFile enabled controlEnabled sshEnabled argument composeFlags integrationFlags noDeps=0 recreate='' skipTimeout=0
     local specEnabled deployedEnabled specControlEnabled deployedControlEnabled specSshEnabled deployedSshEnabled
+    local tproxyEnabled specTProxyEnabled deployedTProxyEnabled tproxyTouched=0 tproxyCore
     local -a services=()
     case "${1:-}" in up|restart|down|exec) ;; *) dockerComposeExecute "$@"; return $? ;; esac
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
@@ -538,10 +543,11 @@ dockerComposeRun() {
     composeFlags=$(jq -er -s '
       if length == 1 and (.[0] | type == "object" and (.services | type == "object")) then
         .[0].services |
-        [has("net-fail2ban"), has("net-fail2ban-control"), has("net-fail2ban-ssh")] | @tsv
+        [has("net-fail2ban"), has("net-fail2ban-control"), has("net-fail2ban-ssh"),
+         has("net-transparent")] | @tsv
       else error("编排文件结构无效") end
     ' "${composeFile}") || return "${PADM_DOCKER_RC_STATE}"
-    IFS=$'\t' read -r enabled controlEnabled sshEnabled <<<"${composeFlags}"
+    IFS=$'\t' read -r enabled controlEnabled sshEnabled tproxyEnabled <<<"${composeFlags}"
     if [[ -f "${root}/config/spec.json" ]]; then
         integrationFlags=$(jq -er -s --slurpfile deployed "${root}/deployment.json" '
           if length == 1 and (.[0] | type == "object") and
@@ -550,14 +556,15 @@ dockerComposeRun() {
             def deployed_enabled($kind): try any($deployed[0].host_integrations[]; .type == $kind) catch "error";
             [spec_enabled("fail2ban"), deployed_enabled("fail2ban"),
              spec_enabled("fail2ban-control"), deployed_enabled("fail2ban-control"),
-             spec_enabled("fail2ban-ssh"), deployed_enabled("fail2ban-ssh")] | @tsv
+             spec_enabled("fail2ban-ssh"), deployed_enabled("fail2ban-ssh"),
+             spec_enabled("tproxy"), deployed_enabled("tproxy")] | @tsv
           else error("Fail2ban 规格或部署结构无效") end
         ' "${root}/config/spec.json") || {
             dockerError 'Fail2ban 规格、部署与编排不一致，拒绝服务变更'
             return "${PADM_DOCKER_RC_STATE}"
         }
         IFS=$'\t' read -r specEnabled deployedEnabled specControlEnabled deployedControlEnabled \
-            specSshEnabled deployedSshEnabled <<<"${integrationFlags}"
+            specSshEnabled deployedSshEnabled specTProxyEnabled deployedTProxyEnabled <<<"${integrationFlags}"
         [[ "${enabled}" == "${specEnabled}" && "${enabled}" == "${deployedEnabled}" ]] || {
             dockerError 'Fail2ban 规格、部署与编排不一致，拒绝服务变更'
             return "${PADM_DOCKER_RC_STATE}"
@@ -572,13 +579,58 @@ dockerComposeRun() {
             dockerError 'SSH Fail2ban 规格、部署与编排不一致，拒绝服务变更'
             return "${PADM_DOCKER_RC_STATE}"
         }
-    elif [[ "${enabled}" == true || "${controlEnabled}" == true || "${sshEnabled}" == true ]]; then
-        dockerError 'Fail2ban 缺少受管规格，拒绝服务变更'
+        [[ "${tproxyEnabled}" == "${specTProxyEnabled}" &&
+            "${tproxyEnabled}" == "${deployedTProxyEnabled}" ]] || {
+            dockerError 'TProxy 规格、部署与编排不一致，拒绝服务变更'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    elif [[ "${enabled}" == true || "${controlEnabled}" == true || "${sshEnabled}" == true ||
+        "${tproxyEnabled}" == true ]]; then
+        dockerError 'Fail2ban/TProxy 缺少受管规格，拒绝服务变更'
         return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ "${sshEnabled}" == true && "${controlEnabled}" == true ]]; then
         dockerError 'SSH 与控制面 INPUT 防护暂不支持共存，拒绝服务变更'
         return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ "$1" == up || "$1" == restart || "$1" == down ]]; then
+        if [[ "${tproxyEnabled}" == true && "$1" != down ]]; then
+            local -a tproxyServices=()
+            local tproxyNoDeps=0 tproxySkipTimeout=0
+            tproxyCore=$(jq -er '.core.type' "${root}/config/spec.json") || return "${PADM_DOCKER_RC_STATE}"
+            for argument in "${@:2}"; do
+                if [[ "${tproxySkipTimeout}" == 1 ]]; then
+                    [[ "${argument}" =~ ^[1-9][0-9]*$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+                    tproxySkipTimeout=0
+                    continue
+                fi
+                case "${argument}" in
+                --no-deps) tproxyNoDeps=1 ;;
+                --wait-timeout) tproxySkipTimeout=1 ;;
+                -d|--wait|--force-recreate) ;;
+                *)
+                    jq -e --arg service "${argument}" '.services | has($service)' \
+                        "${composeFile}" >/dev/null || return "${PADM_DOCKER_RC_USAGE}"
+                    tproxyServices+=("${argument}")
+                    ;;
+                esac
+            done
+            [[ "${tproxySkipTimeout}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            if [[ "${#tproxyServices[@]}" == 0 || " ${tproxyServices[*]} " == *' net-transparent '* ||
+                " ${tproxyServices[*]} " == *" ${tproxyCore} "* ||
+                "${tproxyNoDeps}" == 0 ]]; then
+                tproxyTouched=1
+            fi
+        else
+            tproxyTouched=1
+        fi
+        if [[ "${tproxyTouched}" == 1 ]]; then
+            if [[ -f "${root}/config/spec.json" ]]; then
+                dockerTProxyDisablePrepare "${root}/config/spec.json"
+            else
+                dockerTProxyDisablePrepare "${root}/deployment.json"
+            fi || return "${PADM_DOCKER_RC_STATE}"
+        fi
     fi
     if [[ "${enabled}" == true || "${controlEnabled}" == true || "${sshEnabled}" == true ]]; then
         case "${1:-}" in
@@ -604,6 +656,7 @@ dockerComposeRun() {
             [[ "${skipTimeout}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
             [[ "$1" != restart ]] || recreate=restart
             if [[ "${noDeps}" == 1 && "${#services[@]}" -gt 0 &&
+                ( "${tproxyEnabled}" != true || "${tproxyTouched}" == 0 ) &&
                 " ${services[*]} " != *' net-fail2ban '* && " ${services[*]} " != *' net-fail2ban-control '* &&
                 " ${services[*]} " != *' net-fail2ban-ssh '* &&
                 " ${services[*]} " != *' nginx '* && " ${services[*]} " != *' control '* &&
@@ -622,6 +675,13 @@ dockerComposeRun() {
                 dockerControlFail2banDisablePrepare "${root}/config/spec.json" &&
                 dockerSshFail2banDisablePrepare "${root}/config/spec.json" &&
                 dockerFail2banStartManagedVerified "${recreate}" || return "${PADM_DOCKER_RC_STATE}"
+            if [[ "${tproxyEnabled}" == true ]]; then
+                dockerComposeExecute up -d --wait \
+                    --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" net-transparent ||
+                    return "${PADM_DOCKER_RC_STATE}"
+            fi
+            [[ "${tproxyEnabled}" != true ]] || dockerTProxyContainer >/dev/null ||
+                return "${PADM_DOCKER_RC_STATE}"
             return 0
             ;;
         down)
@@ -651,7 +711,26 @@ dockerComposeRun() {
                 return "${PADM_DOCKER_RC_STATE}"
         fi
     fi
-    dockerComposeExecute "$@"
+    if [[ "${tproxyEnabled}" == true && "${tproxyTouched}" == 1 && "$1" == restart ]]; then
+        local -a tproxyRestart=()
+        for argument in "${@:2}"; do
+            [[ "${argument}" == net-transparent ]] || tproxyRestart+=("${argument}")
+        done
+        # 已精确撤销并删除规则容器，restart 后须重新创建它而不是遗漏旧服务。
+        if [[ "${#tproxyServices[@]}" != 1 || "${tproxyServices[0]}" != net-transparent ]]; then
+            dockerComposeExecute restart "${tproxyRestart[@]}" || return $?
+        fi
+        dockerComposeExecute up -d --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" \
+            net-transparent || return $?
+        dockerTProxyContainer >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    else
+        dockerComposeExecute "$@" || return $?
+        if [[ "${tproxyEnabled}" == true && "${tproxyTouched}" == 1 && "$1" == up ]]; then
+            dockerComposeExecute up -d --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" \
+                net-transparent || return $?
+            dockerTProxyContainer >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+        fi
+    fi
 }
 
 dockerFail2banStartManagedVerified() {
@@ -2745,9 +2824,13 @@ dockerUninstallCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
         dockerComposeRun down || return $?
-    elif [[ -e "${root}/data/net/ssh-collector" || -L "${root}/data/net/ssh-collector" ]]; then
-        dockerSshFail2banDisablePrepare <(printf '{"host_integrations":[]}') ||
+    else
+        dockerTProxyDisablePrepare <(printf '{"host_integrations":[]}') ||
             return "${PADM_DOCKER_RC_STATE}"
+        if [[ -e "${root}/data/net/ssh-collector" || -L "${root}/data/net/ssh-collector" ]]; then
+            dockerSshFail2banDisablePrepare <(printf '{"host_integrations":[]}') ||
+                return "${PADM_DOCKER_RC_STATE}"
+        fi
     fi
     dockerTrafficScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     dockerRemoveCli || return "${PADM_DOCKER_RC_STATE}"

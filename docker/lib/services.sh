@@ -755,7 +755,8 @@ dockerConfigureSpecValidate() {
           .profile == "net-transparent" and .firewall_rules == ["padm-tproxy"] and
           .devices == [] and .schedules == [] and
           (.settings | exact(["port", "mark"]) and (.port | port) and
-            (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
+            (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647 and
+              . != 253 and . != 254 and . != 255))
         else false end) and
     '
     fi
@@ -785,6 +786,7 @@ dockerConfigureSpecValidate() {
       else true end and
       if any(.host_integrations[]; .type == "tun") then .core.type == "sing-box" else true end and
       if any(.host_integrations[]; .type == "tun" or .type == "tproxy") then
+        .core.secondary_type == null and
         all(.core.protocols[]; .id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25)
       else true end and
       all(.host_integrations[] | select(.type == "tproxy");
@@ -5300,6 +5302,164 @@ dockerSshFail2banDisablePrepare() {
     dockerFail2banDisablePrepare "$1" "${2:-normal}" ssh
 }
 
+dockerTProxyConfigurationCheck() {
+    local root path
+    root=$(dockerInstallRoot) || return 1
+    for path in config/spec.json deployment.json images.env compose.json data/net/transparent; do
+        dockerTrafficSafePath "${root}" "${root}/${path}" || return 1
+    done
+    dockerComposeFile >/dev/null &&
+        dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+            "${root}/deployment.json" "${root}/images.env" &&
+        cmp -s -- "${root}/compose.json" \
+            <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") &&
+        jq -e 'any(.host_integrations[]; .type == "tproxy")' \
+            "${root}/config/spec.json" >/dev/null || {
+        dockerError 'TProxy 规格、部署或编排漂移，未执行操作'
+        return 1
+    }
+}
+
+dockerTProxyContainer() (
+    local root ids container mode=${1:-running} port mark
+    [[ "$#" -le 1 && ( "${mode}" == running || "${mode}" == exited ) ]] || return 1
+    root=$(dockerInstallRoot) || return 1
+    dockerTProxyConfigurationCheck || return 1
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=net-transparent \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    container=$(docker container inspect "${ids}") || return 1
+    jq -e --arg root "${root}" --arg mode "${mode}" --arg id "${ids}" \
+        --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
+      length == 1 and (.[0] as $c | $c.Config.Labels as $labels |
+        $compose[0].services["net-transparent"] as $service |
+        ($c.Id | type == "string" and test("^[a-f0-9]{64}$") and startswith($id)) and
+        $c.State.Restarting == false and $c.State.Paused == false and $c.State.Dead == false and
+        $c.State.OOMKilled == false and $c.State.Error == "" and
+        (if $mode == "running" then $c.State.Running == true and $c.State.Status == "running"
+         else $c.State.Running == false and $c.State.Status == "exited" and $c.State.ExitCode == 0 end) and
+        $labels["com.docker.compose.project"] == "padm-docker" and
+        $labels["com.docker.compose.project.working_dir"] == $root and
+        $labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+        $labels["com.docker.compose.service"] == "net-transparent" and
+        $labels["com.docker.compose.oneoff"] == "False" and
+        all($service.labels | to_entries[]; $labels[.key] == .value) and
+        $c.Config.Image == $spec[0].images.net and $c.Config.Cmd == $service.command and
+        $c.Config.Entrypoint == ["/usr/local/bin/padm-entrypoint"] and $c.Config.User == "0:0" and
+        $c.Config.Healthcheck.Test == $service.healthcheck.test and
+        $c.HostConfig.NetworkMode == "host" and $c.HostConfig.Init == $service.init and
+        $c.HostConfig.RestartPolicy.Name == $service.restart and
+        $c.HostConfig.ReadonlyRootfs == $service.read_only and $c.HostConfig.Privileged == false and
+        $c.HostConfig.PidsLimit == $service.pids_limit and
+        ($c.HostConfig.PortBindings // {} | length) == 0 and
+        ($c.HostConfig.CapAdd | map(sub("^CAP_"; "")) | sort) == ($service.cap_add | sort) and
+        ($c.HostConfig.CapDrop | map(sub("^CAP_"; "")) | sort) == ($service.cap_drop | sort) and
+        $c.HostConfig.SecurityOpt == $service.security_opt and
+        $c.HostConfig.LogConfig.Type == $service.logging.driver and
+        $c.HostConfig.LogConfig.Config == $service.logging.options and
+        all($c.Mounts[]; .Type == "bind") and
+        (($c.HostConfig.Tmpfs // {}) | keys | sort) ==
+          ([$service.tmpfs[] | split(":")[0]] | sort) and
+        ($c.Mounts | map({source:.Source,target:.Destination,read_only:(.RW | not)}) | sort_by(.target)) ==
+          ($service.volumes | map({source:(.source | sub("^\\$\\{PADM_NET_ROOT\\}"; $root)),
+            target,read_only}) | sort_by(.target)))
+    ' <<<"${container}" >/dev/null || {
+        dockerError 'TProxy 容器状态或归属漂移，未执行操作'
+        return 1
+    }
+    if [[ "${mode}" == running ]]; then
+        port=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.port' \
+            "${root}/config/spec.json") &&
+            mark=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.mark' \
+                "${root}/config/spec.json") &&
+            docker exec "${ids}" /usr/local/bin/padm-entrypoint tproxy-health "${port}" "${mark}" </dev/null || {
+            dockerError 'TProxy 状态或内核规则归属漂移，未执行操作'
+            return 1
+        }
+    fi
+    printf '%s\n' "${ids}"
+)
+
+dockerTProxyDisablePrepare() {
+    local nextSpec=$1 restoreMode=${2:-normal} root ids enabled=false corrupt=0 before mode audited port mark
+    case "${restoreMode}" in normal|restore) ;; *) return 1 ;; esac
+    jq -e 'type == "object" and (.host_integrations | type == "array")' "${nextSpec}" >/dev/null || return 1
+    root=$(dockerInstallRoot) || return 1
+    dockerTrafficSafePath "${root}" "${root}/data/net/transparent/tproxy.state" || return 1
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=net-transparent \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
+        dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+            [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] || return 1
+        enabled=$(jq -er '
+          if type == "object" and (.host_integrations | type == "array")
+          then any(.host_integrations[]; .type == "tproxy") | tostring
+          else error("invalid TProxy specification") end
+        ' "${root}/config/spec.json") || {
+            [[ "${restoreMode}" == restore ]] || return 1
+            enabled=false corrupt=1
+        }
+    fi
+    if [[ -e "${root}/deployment.json" || -L "${root}/deployment.json" ||
+        -e "${root}/compose.json" || -L "${root}/compose.json" ]]; then
+        dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
+            [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] &&
+            dockerTrafficSafePath "${root}" "${root}/compose.json" &&
+            [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
+            jq -en --slurpfile deployment "${root}/deployment.json" \
+                --slurpfile compose "${root}/compose.json" --argjson enabled "${enabled}" '
+              ($deployment | length) == 1 and ($compose | length) == 1 and
+              ($deployment[0].host_integrations | type == "array") and
+              any($deployment[0].host_integrations[]; .type == "tproxy") == $enabled and
+              ($compose[0].services | type == "object") and
+              ($compose[0].services | has("net-transparent")) == $enabled
+            ' >/dev/null || {
+            dockerError '旧规格、部署或编排的 TProxy 状态不一致，未修改配置'
+            return 1
+        }
+    else
+        [[ "${enabled}" == false && "${corrupt}" == 0 ]] || return 1
+    fi
+    if [[ "${enabled}" == false ]]; then
+        [[ -z "${ids}" && ! -e "${root}/data/net/transparent/tproxy.state" &&
+            ! -L "${root}/data/net/transparent/tproxy.state" ]] || {
+            dockerError '存在未审计的 TProxy 容器或状态，保留现场并拒绝修改配置'
+            return 1
+        }
+        return 0
+    fi
+    dockerTProxyConfigurationCheck || return 1
+    port=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.port' \
+        "${root}/config/spec.json") &&
+        mark=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.mark' \
+            "${root}/config/spec.json") || return 1
+    if [[ -n "${ids}" ]]; then
+        [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+        before=$(docker container inspect "${ids}") || return 1
+        mode=$(jq -er --arg id "${ids}" '
+          if length == 1 and (.[0].Id | type == "string" and startswith($id)) then
+            if .[0].State.Running == true then "running"
+            elif .[0].State.Running == false then "exited"
+            else error("unknown container state") end
+          else error("container identity changed") end
+        ' <<<"${before}") || return 1
+        audited=$(dockerTProxyContainer "${mode}") && [[ "${audited}" == "${ids}" ]] || return 1
+        # 旧配置仍完整时只停止刚审计的 CID，异常退出不能借恢复覆盖规则证据。
+        [[ "${mode}" != running ]] || docker stop "${ids}" >/dev/null || return 1
+        audited=$(dockerTProxyContainer exited) && [[ "${audited}" == "${ids}" ]] || return 1
+    fi
+    [[ ! -e "${root}/data/net/transparent/tproxy.state" &&
+        ! -L "${root}/data/net/transparent/tproxy.state" ]] &&
+        dockerComposeExecute run --rm --no-deps net-transparent \
+            preflight tproxy "${port}" "${mark}" unowned >/dev/null || {
+        dockerError 'TProxy 停止后仍有状态或规则，保留旧配置与恢复证据'
+        return 1
+    }
+    [[ -z "${ids}" ]] || docker rm "${ids}" >/dev/null
+}
+
 dockerSshLogFileReadable() {
     local path=${1:-} parent metadata owner mode
     [[ "$#" -eq 1 && "${path}" == /* && -f "${path}" && ! -L "${path}" && -r "${path}" ]] || return 1
@@ -6141,7 +6301,7 @@ dockerInstallCandidate() {
     if [[ -e "${integrationInput}" || -L "${integrationInput}" ]]; then
         [[ -f "${integrationInput}" && ! -L "${integrationInput}" ]] || return 1
     else
-        # 旧版更新可缺原始规格，但只能复用与编排一致且明确未启用 Fail2ban 的部署记录。
+        # 旧版更新可缺原始规格，但不能借部署记录接管需要归属证明的规则。
         integrationInput="${candidate}/deployment.json"
         dockerTrafficSafePath "${root}" "${integrationInput}" &&
             [[ -f "${integrationInput}" && ! -L "${integrationInput}" ]] &&
@@ -6150,11 +6310,11 @@ dockerInstallCandidate() {
             jq -en --slurpfile deployment "${integrationInput}" \
                 --slurpfile compose "${candidate}/compose.json" '
               ($deployment | length) == 1 and ($compose | length) == 1 and
-              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh")) == false and
+              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy")) == false and
               ($compose[0].services | type == "object") and
-              ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh")) == false
+              ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh") or has("net-transparent")) == false
             ' >/dev/null || {
-            dockerError '缺少原始规格的候选不能启用 Fail2ban 或存在部署编排漂移'
+            dockerError '缺少原始规格的候选不能启用 Fail2ban/TProxy 或存在部署编排漂移'
             return 1
         }
     fi
@@ -6168,10 +6328,17 @@ dockerInstallCandidate() {
     termTrap=$(trap -p TERM)
     trap 'pending=130' INT
     trap 'pending=143' TERM
-    if dockerFail2banDisablePrepare "${integrationInput}"; then
-        DOCKER_CONFIG_SWITCHED=1
-        dockerControlFail2banDisablePrepare "${integrationInput}" &&
-            dockerSshFail2banDisablePrepare "${integrationInput}" && prepareStatus=0
+    if dockerTProxyDisablePrepare "${integrationInput}"; then
+        # 仅确证停止了旧 TProxy 才提前登记，未启用时保留原 Fail2ban 失败门禁。
+        if jq -e 'any(.host_integrations[]; .type == "tproxy")' \
+            "${root}/config/spec.json" >/dev/null 2>&1; then
+            DOCKER_CONFIG_SWITCHED=1
+        fi
+        if dockerFail2banDisablePrepare "${integrationInput}"; then
+            DOCKER_CONFIG_SWITCHED=1
+            dockerControlFail2banDisablePrepare "${integrationInput}" &&
+                dockerSshFail2banDisablePrepare "${integrationInput}" && prepareStatus=0
+        fi
     fi
     if [[ -n "${intTrap}" ]]; then eval "${intTrap}"; else trap - INT; fi
     if [[ -n "${termTrap}" ]]; then eval "${termTrap}"; else trap - TERM; fi
@@ -6407,11 +6574,11 @@ dockerRestoreConfiguration() {
             --slurpfile compose "${backup}/compose.json" '
           ($deployment | length) == 1 and ($compose | length) == 1 and
           ($deployment[0].host_integrations | type == "array") and
-          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh")) == false and
+          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy")) == false and
           ($compose[0].services | type == "object") and
-          ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh")) == false
+          ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh") or has("net-transparent")) == false
         ' >/dev/null || {
-            dockerError '恢复点缺少可验证的 Fail2ban 原始规格，尚未停止或修改服务'
+            dockerError '恢复点缺少可验证的 Fail2ban/TProxy 原始规格，尚未停止或修改服务'
             return 1
         }
     fi
@@ -6420,14 +6587,17 @@ dockerRestoreConfiguration() {
     # 当前配置可能只安装了一部分，恢复授权只取自已验证的备份。
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" || return 1
     if [[ -f "${backup}/config/spec.json" ]]; then
+        dockerTProxyDisablePrepare "${backup}/config/spec.json" restore || return 1
         dockerFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
         dockerControlFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
         dockerSshFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
     elif [[ -f "${backup}/deployment.json" ]]; then
+        dockerTProxyDisablePrepare "${backup}/deployment.json" restore || return 1
         dockerFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
         dockerControlFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
         dockerSshFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
     else
+        dockerTProxyDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
         dockerFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
         dockerControlFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
         dockerSshFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1

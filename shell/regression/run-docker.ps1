@@ -422,8 +422,14 @@ try {
             ops = 'padm-local/padm-ops:control-4c4b'
             net = 'padm-local/padm-net:control-4c4b'
         }
-        if ($Selector -in @('docker-fail2ban-real', 'docker-tproxy-real')) {
+        if ($Selector -eq 'docker-fail2ban-real') {
             $references = [ordered]@{ net = 'padm-local/padm-net:control-4c4b' }
+        } elseif ($Selector -eq 'docker-tproxy-real') {
+            $references = [ordered]@{
+                xray = 'padm-local/padm-xray:control-4c4b'
+                'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
+                net = 'padm-local/padm-net:control-4c4b'
+            }
         } elseif ($Selector -in @('docker-port-hopping-target-real', 'docker-port-hopping-change-real', 'docker-port-hopping-auto-real')) {
             $references = [ordered]@{
                 'sing-box' = 'padm-local/padm-sing-box:tls-3b4'

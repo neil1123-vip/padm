@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含手动跳跃合同的完整谓词，仅忽略拼接空白。
+# 摘要锁定含跳跃与 TProxy 单核心/保留标记合同的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "08e45c01ed130f38e889cd87e397dcfed03cf4209d608534c9498e5bad9497b5"
+    "fcbc52fda390a57cc4994437fc1073aa3180efaca3b793f4557fa2fce11f77c8"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -196,6 +196,19 @@ wireguard = {
 spec = copy.deepcopy(cases["reality-v3"])
 spec["host_integrations"] = [wireguard]
 cases["valid-host-wireguard"] = spec
+spec = copy.deepcopy(cases["reality-v3"])
+spec["host_integrations"] = [{
+    "type": "tproxy", "profile": "net-transparent", "firewall_rules": ["padm-tproxy"],
+    "devices": [], "schedules": [], "settings": {"port": 31298, "mark": 129},
+}]
+cases["valid-host-tproxy"] = spec
+for mark in (253, 254, 255):
+    invalid = copy.deepcopy(spec)
+    invalid["host_integrations"][0]["settings"]["mark"] = mark
+    cases[f"invalid-tproxy-mark-{mark}"] = invalid
+invalid = copy.deepcopy(spec)
+invalid["core"]["secondary_type"] = "sing-box"
+cases["invalid-tproxy-secondary"] = invalid
 spec = copy.deepcopy(cases["websocket-v3"])
 spec["host_integrations"] = [{
     "type": "fail2ban", "profile": "net-fail2ban", "firewall_rules": ["DOCKER-USER"],
@@ -293,6 +306,8 @@ for file in "${TEST_ROOT}"/*.json; do
         cat "${TEST_ROOT}/validation.log" >&2
         fail "有效协议规格被拒绝: ${file##*/}"
     fi
+    [[ "${file##*/}" != invalid-tproxy-* || "${actual}" != 0 ]] ||
+        fail "无效 TProxy 规格被接受: ${file##*/}"
     count=$((count + 1))
 done
 for file in mixed all-six-optionals ssh; do

@@ -735,8 +735,25 @@ foreign resource drift are rejected with recovery evidence retained. The routing
 and policy preference are exclusive, not shared. Do not delete the state to force a retry:
 stop the previous owner and inspect its actual resources on native Linux first.
 A SIGKILL that leaves an empty chain without token rules requires manual ownership
-verification. This ownership foundation does not establish transparent-proxy client
-traffic, host reboot recovery or complete 5C acceptance.
+verification.
+
+Manage TProxy through menu `17 → 43`, or:
+
+```bash
+padm-docker protocol tproxy-status
+padm-docker edit --tproxy-enable 31298 129
+padm-docker edit --tproxy-settings 31299 131
+padm-docker edit --tproxy-off
+```
+
+This manages existing Reality deployments with one Xray or sing-box core and no
+other host integration. It captures IPv4 TCP/UDP in `PREROUTING`; host `OUTPUT`
+and IPv6 are outside this scope. The core uses host networking, root and `NET_ADMIN`.
+Changes audit and normally stop the previous container, prove its rules are gone,
+then use the existing configuration transaction. Preview and cancellation keep the
+running service. Status reports the specification; use `validate` for health.
+TUN management, native host reboot, arm64, public-network and complete 5C acceptance
+remain pending.
 
 Multi-server control now has a separate private read-only API and a controlled-node sync
 transaction foundation.

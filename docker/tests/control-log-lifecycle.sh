@@ -58,6 +58,7 @@ dockerRemoveCli() { record remove-cli; }
 dockerControlRecoveryCheck() { :; }
 dockerControlAccessLogEnsure() { :; }
 dockerControlRestorePrepare() { :; }
+dockerTProxyDisablePrepare() { jq -e '.host_integrations == []' "$1" >/dev/null; }
 dockerFail2banDisablePrepare() { :; }
 dockerControlFail2banDisablePrepare() { :; }
 dockerSshFail2banDisablePrepare() { :; }
@@ -211,7 +212,7 @@ assert_registration
 
 # configure 提交和 restore 完成后都重新安装登记；登记不参与恢复快照复制。
 spec="${TEST_ROOT}/request.json"
-printf '%s\n' '{"core":{"type":"xray","secondary_type":null}}' >"${spec}"
+printf '%s\n' '{"core":{"type":"xray","secondary_type":null},"host_integrations":[]}' >"${spec}"
 dockerCreateConfigurationCandidate() {
     DOCKER_CONFIG_CANDIDATE="${lifecycleRoot}/.candidate.lifecycle"
     mkdir -p "${DOCKER_CONFIG_CANDIDATE}"

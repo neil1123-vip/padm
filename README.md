@@ -1024,7 +1024,21 @@ OpenSSH service；从控制台或其它管理通道启用。service 须只有 Ma
 保留资源及恢复证据。此版本独占对应路由表和策略优先级，不支持共享表。
 不要直接删除 state 后重试：先停止原拥有者，并在原生 Linux 主机上核对实际资源。
 SIGKILL 若留下无 token 规则的空链，需人工确认归属后恢复，不会按同名链猜测清理。
-这只是 TProxy 所有权前置，不代表透明代理客户端、宿主重启或完整 5C 已验收。
+TProxy 管理入口为菜单 `17 → 43`，或以下命令：
+
+```bash
+padm-docker protocol tproxy-status
+padm-docker edit --tproxy-enable 31298 129
+padm-docker edit --tproxy-settings 31299 131
+padm-docker edit --tproxy-off
+```
+
+仅管理单 Xray 或 sing-box 核心的已有 Reality 部署，不能与其它宿主集成共存。
+透明入口只处理 IPv4 `PREROUTING` 的 TCP/UDP，不接管宿主 `OUTPUT` 或 IPv6。
+启用后核心使用 host 网络、root 和 `NET_ADMIN`；修改或关闭先审计旧容器，
+正常停止并确认规则清空，再沿原配置事务提交；预览和取消不停止旧服务。
+状态命令显示规格，实际健康仍用 `validate`。TUN 管理、原生宿主重启、
+arm64、公网及完整 5C 仍待验收。
 
 主菜单第 13 项“核心升级评估”或 `assess` 会验签并预拉取候选镜像，使用私有配置副本
 执行菜单版升级风险扫描、实际核心配置试跑和 Xray 严格校验，以及已启用的 TLS、

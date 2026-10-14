@@ -3496,6 +3496,57 @@ dispatcher 初次暴露既有长任务调度顺序与预期夹具不一致，已
 候选 `d4087c20`、运行时 `1fea324c`、goto 防护 `5d73f28e` 均为本地 SSH 签名
 阶段提交，签名 `G`；未推送、发布或构建新业务镜像。
 
+#### 5C.2b TProxy 日常管理与事务切换
+
+菜单 `17 → 43` 接入 `protocol tproxy-status`、`edit --tproxy-enable PORT MARK`、
+`--tproxy-settings PORT MARK` 和 `--tproxy-off`。复用完整规格、候选预检、
+一次确认、配置备份及失败/INT/TERM 恢复；专项只豁免 TProxy 对应字段，
+认证、入口、发布版本、核心和其余规格冻结。预览及取消不停止在线服务。
+启用或修改限定单 Xray/sing-box Reality，无其它宿主集成；端口冲突、
+保留 mark `253/254/255`、重复启用、未启用修改/关闭和无变化均拒绝。
+
+切换前核对旧规格、部署、编排与唯一容器归属，停止刚审计的 CID，
+只接受正常退出并证明旧 state/规则/路由清空后移除该容器。
+失败或漂移保留原现场；配置恢复、更新和普通启停共用该协调路径。
+仅支持 IPv4 `PREROUTING` TCP/UDP，核心使用 host 网络/root/`NET_ADMIN`；
+状态是规格状态，不能代替内核健康。TUN、OUTPUT、IPv6、原生宿主、
+arm64、公网、整机重启与完整卸载仍待验，5C 与总目标继续 active。
+
+本地验收（2026-10-14，Docker Desktop Linux amd64，复用工具及业务镜像）：
+
+| 检查 | 结果 / 入口秒 | 证据目录 |
+| --- | --- | --- |
+| 菜单 PTY，Jobs 2 | routing 分支通过 / 16.661；同次管理夹具失败另行修复 | `.tmp-regression-docker-bf9b7f4e1d6b429b9aa8161bfe8608bd` |
+| 最终管理、归属、生命周期及停止 INT，Jobs 2 | 通过 / 22.049 | `.tmp-regression-docker-c2e5765741cd41c2900f5edb3c5191df` |
+| 隔离真实转发及生产 Compose 停止门禁，Jobs 2 | 通过 / 25.566 | `.tmp-regression-docker-e3a8a5d5ed2d4b088acb7e77e93ac6f8` |
+| 集中 `docker-contracts`，Jobs 6 | 51/54 / 299.710；3 个旧夹具失败 | `.tmp-regression-docker-b4e1837947904e19860a7d3d2cd45c2d` |
+| 修复后 `docker-reality`，Jobs 2 | 通过 / 65.997；190 个校验差分场景 | `.tmp-regression-docker-181affdb8836401eb3cf497134e99a88` |
+| 修复后 `docker-control-cli`，Jobs 2 | 通过 / 14.716 | `.tmp-regression-docker-fa0373d654b34570bf22b47a1057d667` |
+| 修复后完整 `docker-phase4`，Jobs 2 | 通过 / 149.352 | `.tmp-regression-docker-604420535bc44df8b34718abc0520537` |
+
+真实流量使用 client/router/origin 独立网络空间，两核心各测试
+`31298/129 → 31299/131`。TCP/UDP 回包、TPROXY 计数、核心目的日志及
+目标所见核心出口地址共同证明转发；重配换 token、旧链消失，关闭恢复外来
+规则/路由基线。真实 Compose 场景沿生产配置生成器与归属检查执行
+`running → stop → exited(0) → unowned preflight → rm`；
+host 指外层隔离回归容器，未借用宿主 Docker Socket。
+业务 net 镜像入口旧时只在本次私有 daemon 构建替换当前入口的薄测试层，
+不能计作可信发布镜像净构建验收。
+
+完整合同快照内容摘要
+`138413701240736C77B46AB7F5F4479C5ECE1D037E69A5C9BB0360869100B092`。
+随后只修无 TProxy 时的 Fail2ban 定向路径、混合规格重启后的规则容器重建
+及对应夹具；规格固定摘要新增保留 mark/单核心约束，控制生命周期夹具显式
+声明无集成，phase4 提供真实编排对应的 CID/inspect/停止数据。
+新增混合启动失败断言不审计未启动服务；临时复制保留原权限，避免污染 INT 夹具。
+最终定向和完整快照不是相同输入，不宣称最终源码一次性 54/54；
+只补失败项及新分支，不重复已过 51 项或扩充双核心矩阵。
+最终 24 个代码、测试及回归入口文件与 phase4 快照逐文件 SHA256 一致，
+最后只更新文档与状态。Bash/ShellCheck error、PowerShell AST 及 diff 检查通过。
+所有本次回归未命中缓存，未扩大共享三槽预算；成功/失败输入归档在核验后清理，
+日志/result 保留。普通重启会精确撤销并重建规则容器，主核心定向启动同样补建。
+完整 5C、发布与总体计划继续 active。
+
 #### 5C.3 Fail2ban 已加载动作维护门禁
 
 在既有磁盘配置/容器身份核验之后、输出唯一容器 ID 之前，复用 net 镜像内

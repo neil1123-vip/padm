@@ -825,7 +825,7 @@ dockerProtocolCommand() (
     local -a targetArgs=()
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
-    list|stream-status|routing-status|port-alias-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    list|stream-status|routing-status|port-alias-status|tproxy-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
     links|cdn-status|xhttp-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
@@ -896,6 +896,13 @@ dockerProtocolCommand() (
     dockerEditBaselineValidate "${original}" "${workspace}" &&
         dockerConfigureSpecMigrate "${original}" "${normalized}" &&
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == tproxy-status ]]; then
+        # 规格状态不冒充内核健康；运行验收仍由 validate 与服务健康检查提供。
+        jq '[.host_integrations[] | select(.type == "tproxy")][0] as $tproxy |
+          {enabled:($tproxy != null),port:($tproxy.settings.port // null),
+           mark:($tproxy.settings.mark // null),family:"ipv4",hook:"PREROUTING"}' "${normalized}"
+        return $?
+    fi
     if [[ "${action}" == xhttp-status ]]; then
         jq --arg listener "${listener}" '
           [.core.protocols[] | select(.id == 2 and .core == "xray") |
@@ -1473,6 +1480,7 @@ dockerEditCommand() {
     local routingDomains='[]' routingOldDomains='[]' routingDomainsField=domains
     local routingOldIp= routingNewIp= routingHost=
     local httpRelay= httpRelayFile= httpRelayPort=0 httpRelaySources='[]'
+    local tproxyAction= tproxyPort=0 tproxyMark=0
     local portAlias= portAliasListener= portAliasPort=
     local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
     local portHoppingIpv4= portHoppingIpv6=
@@ -1665,6 +1673,20 @@ dockerEditCommand() {
               select(length >= 1 and length <= 256 and all(.[]; . != ""))
             ' 2>/dev/null) || return "${PADM_DOCKER_RC_USAGE}"
             shift 2
+            ;;
+        --tproxy-enable|--tproxy-settings)
+            [[ "$#" -ge 3 && -z "${tproxyAction}" &&
+                "$2" =~ ^[1-9][0-9]{0,4}$ && "$2" -le 65535 &&
+                "$3" =~ ^[1-9][0-9]{0,9}$ && "$3" -le 2147483647 &&
+                "$3" != 253 && "$3" != 254 && "$3" != 255 ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            tproxyAction=${1#--tproxy-} tproxyPort=$2 tproxyMark=$3
+            shift 3
+            ;;
+        --tproxy-off)
+            [[ -z "${tproxyAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            tproxyAction=off
+            shift
             ;;
         --fail2ban-port)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${fail2banAction}" &&
@@ -2065,6 +2087,15 @@ dockerEditCommand() {
         dockerError '端口跳跃专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${tproxyAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${fail2banAction}" && -z "${cdnAction}" && -z "${xhttpAction}" &&
+        -z "${portHoppingAction}" ) ]] || {
+        dockerError 'TProxy 专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -2078,7 +2109,7 @@ dockerEditCommand() {
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
-        -z "${portHoppingAction}" ) ||
+        -z "${portHoppingAction}" && -z "${tproxyAction}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -2143,7 +2174,7 @@ dockerEditCommand() {
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
-        -z "${portHoppingAction}" ]]; then
+        -z "${portHoppingAction}" && -z "${tproxyAction}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -2155,6 +2186,32 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${tproxyAction}" ]]; then
+        jq --arg action "${tproxyAction}" --argjson port "${tproxyPort}" --argjson mark "${tproxyMark}" '
+          [.host_integrations[] | select(.type == "tproxy")] as $current |
+          if $action == "off" then
+            if ($current | length) != 1 then error("TProxy 未启用")
+            else .host_integrations |= map(select(.type != "tproxy")) end
+          else
+            if .core.secondary_type != null or (.host_integrations | length) != ($current | length) or
+              any(.core.protocols[]; .id != 1 and .id != 2 and .id != 26)
+            then error("TProxy 仅支持单核心 Reality，不能与其它宿主集成共存")
+            elif $action == "enable" then
+              if ($current | length) != 0 then error("TProxy 已启用") else
+                .host_integrations += [{type:"tproxy",profile:"net-transparent",
+                  firewall_rules:["padm-tproxy"],devices:[],schedules:[],settings:{port:$port,mark:$mark}}]
+              end
+            elif ($current | length) != 1 or $current[0].settings == {port:$port,mark:$mark}
+            then error("TProxy 未启用或参数没有变化")
+            else .host_integrations |= map(if .type == "tproxy" then .settings = {port:$port,mark:$mark} else . end)
+            end
+          end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError 'TProxy 动作需要匹配当前状态和不同参数；仅支持单核心 Reality，不能与其它宿主集成共存'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     if [[ "${fail2banAction}" == port ]]; then
         dockerFail2banSourcePlan "${draft}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
         jq --arg listener "${fail2banPortListener}" --argjson port "${fail2banNewPort}" '
@@ -2826,6 +2883,7 @@ dockerEditCompatibilityValidate() {
         --arg routing_action "${routingAction:-}" --arg routing_domains_field "${routingDomainsField:-domains}" \
         --arg routing_host "${routingHost:-}" --arg routing_ip "${routingNewIp:-}" \
         --arg http_relay "${httpRelay:-}" \
+        --arg tproxy_action "${tproxyAction:-}" \
         --arg port_alias "${portAlias:-}" \
         --arg port_hopping "${portHoppingAction:-}" \
         --arg cdn_listener "${cdnListener:-}" \
@@ -2877,7 +2935,22 @@ dockerEditCompatibilityValidate() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-       (if $port_hopping != "" then
+       (if $tproxy_action != "" then
+        def without_tproxy: .host_integrations |= map(select(.type != "tproxy"));
+        def without_tproxy_settings:
+          .host_integrations |= map(if .type == "tproxy" then del(.settings.port,.settings.mark) else . end);
+        if $tproxy_action == "settings" then
+          ([$old.host_integrations[] | select(.type == "tproxy")] | length) == 1 and
+          ([$new.host_integrations[] | select(.type == "tproxy")] | length) == 1 and
+          ($old | without_tproxy_settings) == ($new | without_tproxy_settings)
+        elif $tproxy_action == "enable" then
+          ([$old.host_integrations[] | select(.type == "tproxy")] | length) == 0 and
+          ([$new.host_integrations[] | select(.type == "tproxy")] | length) == 1 and
+          ($old | without_tproxy) == ($new | without_tproxy)
+        else
+          $new == ($old | without_tproxy)
+        end
+       elif $port_hopping != "" then
         ($old | del(.port_hopping)) == ($new | del(.port_hopping))
        elif $fail2ban_action == "port" then
          # 端口专项只豁免选中入口公开端口与唯一 jail 的保护端口，其余规格逐字冻结。
@@ -3024,7 +3097,7 @@ dockerEditCompatibilityValidate() {
             dockerError '配置中的版本、签名摘要或镜像与已安装发布输入不一致'
             return "${PADM_DOCKER_RC_MANIFEST}"
         fi
-        dockerError '仅支持端口跳跃/XHTTP/CDN 地址/Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持已开放的专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
 }
