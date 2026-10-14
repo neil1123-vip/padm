@@ -193,7 +193,7 @@ runControl() {
     local expected=$1 name=$2 actual=0
     shift 2
     if [[ "${CONTROL_USE_DEFAULT_ASSETS:-0}" != 1 &&
-        ( "${1:-}" == configure || "${1:-}" == edit ) ]]; then
+        ( "${1:-}" == configure || "${1:-}" == edit || "${1:-}" == reinstall ) ]]; then
         set -- "$@" --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
             --control-bundle "${CONFIGURE_CONTROL}"
     fi
@@ -507,7 +507,7 @@ editLiveHash() {
 }
 assertEditCleanup() {
     [[ -z "$(find "${DOCKER_ROOT}" -maxdepth 1 -type d \
-        \( -name '.candidate.*' -o -name '.edit.*' \) -print -quit)" ]] ||
+        \( -name '.candidate.*' -o -name '.edit.*' -o -name '.reinstall.*' \) -print -quit)" ]] ||
         fail 'edit left a configuration candidate or draft directory'
 }
 runEditPty() {
@@ -516,7 +516,7 @@ runEditPty() {
     local feeder actual=0 feederStatus=0
     rm -f -- "${fifo}" "${completed}"
     mkfifo "${fifo}"
-    printf -v command '%q ' bash -u "${PROJECT_ROOT}/install-docker.sh" edit "${@:3}" \
+    printf -v command '%q ' bash -u "${PROJECT_ROOT}/install-docker.sh" "${PHASE3_PTY_COMMAND:-edit}" "${@:3}" \
         --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
         --control-bundle "${CONFIGURE_CONTROL}"
     printf -v command '%s; status=$?; printf "%%s\\n" "$status" >%q; exit "$status"' "${command}" "${completed}"
@@ -1687,6 +1687,136 @@ firstTlsEdit 15 protocol-first-tls-import-not-authorized \
     --spec "${TEST_ROOT}/protocol-first-tls-foreign.json" --preview
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '首个 TLS 增量改变累计流量或额度'
+
+# 重装复用完整候选事务，只用一次跨核心、协议和账号替换验证编辑边界与恢复。
+REINSTALL_SPEC="${TEST_ROOT}/reinstall-private.json"
+jq '.core.protocols[0] |= (.public_port=33443 | .name="reinstalled-hy2" |
+    .uuid="55555555-5555-4555-8555-555555555555") |
+  .accounts[0] |= (.name="reinstalled-business" |
+    .uuid="66666666-6666-4666-8666-666666666666")' \
+    "${PROTOCOL_TLS}" >"${REINSTALL_SPEC}"
+chmod 0600 "${REINSTALL_SPEC}"
+printf '%s\n' '{"schema_version":1,"groups":[{"id":"share-aaaaaaaaaaaaaaaa","name":"old-share","enabled":false,"token":"old-share-token-aaaaaaaa","account_ids":["11111111-1111-4111-8111-111111111111"],"listener_ids":["vless-reality"]}]}' \
+    >"${DOCKER_ROOT}/config/share-groups.json"
+chmod 0600 "${DOCKER_ROOT}/config/share-groups.json"
+printf 'unrelated-business-data\n' >"${DOCKER_ROOT}/data/reinstall-preserved"
+reinstallPreservedHash() {
+    find "${DOCKER_ROOT}/data/traffic" "${DOCKER_ROOT}/data/acme" "${DOCKER_ROOT}/secrets/tls" \
+        "${DOCKER_ROOT}/config/xray/geo" \
+        "${DOCKER_ROOT}/data/reinstall-preserved" -type f -print0 |
+        sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1
+}
+reinstallControl() {
+    local expected=$1 name=$2 before preserved
+    shift 2
+    before=$(editLiveHash)
+    preserved=$(reinstallPreservedHash)
+    : >"${DOCKER_LOG}"
+    runControl "${expected}" "${name}" reinstall "$@"
+    assertEditCleanup
+    [[ "$(reinstallPreservedHash)" == "${preserved}" ]] ||
+        fail "${name}: 重装改变累计、证书、ACME 或其它业务数据"
+    if [[ "${expected}" != 0 || " $* " == *' --preview '* ]]; then
+        [[ "$(editLiveHash)" == "${before}" ]] || fail "${name}: 重装预览、拒绝或失败恢复改变线上"
+    fi
+    if [[ "${expected}" != 0 && "${expected}" != 14 || " $* " == *' --preview '* ]]; then
+        ! grep -Eq ' (up|down|restart|exec) | --issue | --install-cert ' "${DOCKER_LOG}" ||
+            fail "${name}: 重装预览或拒绝提前改动服务、账本或证书"
+    fi
+}
+reinstallControl 2 reinstall-needs-mode --spec "${REINSTALL_SPEC}"
+reinstallControl 2 reinstall-reject-confirmation --spec "${REINSTALL_SPEC}" --confirm no
+reinstallControl 2 reinstall-no-spec-preview --preview
+reinstallControl 2 reinstall-no-spec-confirm --confirm PADM-DOCKER-REINSTALL
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    guardRoot="${TEST_ROOT}/reinstall-wizard-guard"
+    mkdir -p "${guardRoot}/config"
+    dockerInstallRoot() { printf '%s\n' "${guardRoot}"; }
+    dockerComposeFile() { printf '%s\n' "${DOCKER_ROOT}/compose.json"; }
+    cp -- "${FIRST_TLS_REALITY}" "${guardRoot}/config/spec.json"
+    chmod 0600 "${guardRoot}/config/spec.json"
+    dockerSetupReinstallAllowed || fail '重装向导拒绝普通受管规格'
+    for mutation in '.host_integrations=[{type:"wireguard"}]' '.reality_stream={}' \
+        '.port_hopping={}' '.control={}' '.control_sync={}'; do
+        jq "${mutation}" "${FIRST_TLS_REALITY}" >"${guardRoot}/config/spec.json"
+        ! dockerSetupReinstallAllowed >"${TEST_ROOT}/reinstall-guard.log" 2>&1 ||
+            fail '重装向导未保留特殊宿主角色的支持边界'
+    done
+) || fail '重装向导支持边界检查失败'
+protocolEdit 15 edit-still-rejects-complete-replacement --spec "${REINSTALL_SPEC}" --preview
+reinstallControl 0 reinstall-complete-preview --spec "${REINSTALL_SPEC}" --preview
+grep -qF '候选配置校验通过，预览未提交。' "${CONTROL_LOG}" ||
+    fail '重装预览没有完成完整候选校验'
+for version in 1 2; do
+    jq --argjson version "${version}" '.schema_version=$version | del(.accounts,.core.secondary_type) |
+      .core.protocols |= map(del(.core) |
+        if $version==1 then del(.listener_id,.websocket.backend_port,.websocket.tls_port) else . end)' \
+        "${PROTOCOL_BASE}" >"${TEST_ROOT}/reinstall-legacy.json"
+    chmod 0600 "${TEST_ROOT}/reinstall-legacy.json"
+    reinstallControl 0 "reinstall-v${version}-preview" --spec "${TEST_ROOT}/reinstall-legacy.json" --preview
+done
+jq 'del(.core.protocols[0].uuid)' "${REINSTALL_SPEC}" >"${TEST_ROOT}/reinstall-invalid.json"
+chmod 0600 "${TEST_ROOT}/reinstall-invalid.json"
+reinstallControl 15 reinstall-reject-invalid-spec --spec "${TEST_ROOT}/reinstall-invalid.json" --preview
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    chmod 0644 "${REINSTALL_SPEC}"
+    reinstallControl 15 reinstall-reject-public-spec --spec "${REINSTALL_SPEC}" --preview
+    chmod 0600 "${REINSTALL_SPEC}"
+    if [[ "${TEST_SKIP_CHOWN}" == 0 ]]; then
+        chown 65534:65534 "${REINSTALL_SPEC}"
+        reinstallControl 15 reinstall-reject-foreign-spec --spec "${REINSTALL_SPEC}" --preview
+        chown 0:0 "${REINSTALL_SPEC}"
+    fi
+fi
+cp -- "${CONFIGURE_BUNDLE}" "${TEST_ROOT}/reinstall-valid.sigstore.json"
+jq '.signature="invalid"' "${TEST_ROOT}/reinstall-valid.sigstore.json" >"${CONFIGURE_BUNDLE}"
+reinstallControl 16 reinstall-reject-untrusted-release --spec "${REINSTALL_SPEC}" --preview
+cp -- "${TEST_ROOT}/reinstall-valid.sigstore.json" "${CONFIGURE_BUNDLE}"
+cp -- "${DOCKER_ROOT}/config/xray/users.base" "${TEST_ROOT}/reinstall-users.base"
+jq '.routing.rules += [{type:"field",domain:["unmanaged.example.com"],outboundTag:"direct"}]' \
+    "${TEST_ROOT}/reinstall-users.base" >"${DOCKER_ROOT}/config/xray/users.base"
+reinstallControl 15 reinstall-reject-baseline-drift --spec "${REINSTALL_SPEC}" --preview
+cp -- "${TEST_ROOT}/reinstall-users.base" "${DOCKER_ROOT}/config/xray/users.base"
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    reinstallCancelHash=$(editLiveHash)
+    reinstallDataHash=$(reinstallPreservedHash)
+    for input in $'n\n' $'\004'; do
+        : >"${DOCKER_LOG}"
+        PHASE3_PTY_COMMAND=reinstall runEditPty "${input}" 0 --spec "${REINSTALL_SPEC}"
+        [[ "$(editLiveHash)" == "${reinstallCancelHash}" &&
+            "$(reinstallPreservedHash)" == "${reinstallDataHash}" ]] ||
+            fail '重装最终确认取消或 EOF 改变线上或业务数据'
+        ! grep -Eq ' (up|down|restart|exec) | --issue | --install-cert ' "${DOCKER_LOG}" ||
+            fail '重装最终确认前改动服务、账本或证书'
+        assertEditCleanup
+    done
+    : >"${DOCKER_LOG}"
+    PHASE3_PTY_COMMAND=reinstall runEditPty $'0\n' 0
+    [[ "$(editLiveHash)" == "${reinstallCancelHash}" &&
+        "$(reinstallPreservedHash)" == "${reinstallDataHash}" ]] ||
+        fail '重新选择核心的向导取消改变线上'
+    ! grep -Eq ' (up|down|restart|exec) | --issue | --install-cert ' "${DOCKER_LOG}" ||
+        fail '重新选择核心的向导取消仍改动服务、账本或证书'
+    assertEditCleanup
+fi
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up reinstallControl 14 reinstall-up-failure-restores-complete-state \
+    --spec "${REINSTALL_SPEC}" --confirm PADM-DOCKER-REINSTALL
+reinstallControl 0 reinstall-complete-commit --spec "${REINSTALL_SPEC}" --confirm PADM-DOCKER-REINSTALL
+jq -e --slurpfile expected "${REINSTALL_SPEC}" '.==$expected[0]' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
+    fail '重装没有完整提交所选核心、协议和账号'
+jq -e '.groups == []' "${DOCKER_ROOT}/config/share-groups.json" >/dev/null ||
+    fail '完整规格重装保留了旧分享授权'
+jq -e '.core.type=="sing-box" and .core.secondary_type==null and .core.protocol_ids==[3] and
+  .compose.profiles==["core-sing-box"] and
+  all(.listeners[]; .service=="sing-box" and .public_port==33443)' \
+    "${DOCKER_ROOT}/deployment.json" >/dev/null || fail '重装部署仍包含旧核心或入口'
+[[ ! -s "${DOCKER_ROOT}/config/xray/config.json" ]] || fail '重装保留了旧 Xray 生效配置'
+runControl 0 reinstall-sharing protocol links entry-hy2
+grep -qF 'hysteria2://55555555-5555-4555-8555-555555555555@node.example.com:33443?' "${CONTROL_LOG}" &&
+    ! grep -qF 'vless://' "${CONTROL_LOG}" || fail '重装分享与新协议、凭据或端口不一致'
 
 runControl 0 restart-persistence status
 grep -qxF 'configured=yes' "${CONTROL_LOG}" || fail 'configured status was not restored'

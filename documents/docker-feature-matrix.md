@@ -24,6 +24,14 @@ ACME 预览只校验计划，确认后才申请并验证完整候选，不自动
 复制/派生/删除共用实现，fallback 复制保留共享后端，不同协议新增分配内部监听。
 完整管理及原生宿主/arm64/公网验收继续 `deferred`。
 
+3D.14 提供“安装与重装”的重新选择向导与 `reinstall --spec` 完整规格路径。
+重装允许替换核心、入口、账号与路由，成功时撤销旧分享组授权；
+保留累计账本、证书、ACME、独立资产和恢复快照，失败恢复旧配置及分享组。
+向导拒绝宿主集成、Reality 共存、跳跃和控制角色；完整规格仍沿用各转换门禁。
+Linux amd64 三项定向及一次完整合同 57/57、347 项规格差分通过，
+完整入口 `374895 ms`、Jobs 6，详细证据见实施计划。
+已有 TLS 域名迁移、真实发布及完整管理继续 `deferred`。
+
 5B.4g 已接入区域子菜单 `7` 与 CLI 的自定义直连例外单条原位替换，`8` 查看路由状态。
 仅修改已有非空 `.routing.region.allow_domains`；保留次序、区域模式、固定八条例外及
 其它配置，拒绝缺旧项、重复新项、同值、CSV、未启用或空名单。固定默认例外不可替换。
@@ -309,7 +317,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；3D.11–3D.13 提供旧规格迁移后的增量新增、核心选择、新 SS 密钥、首个 TLS 证书联动以及 v3 删除/保身份重建。完整重装、已有 TLS 域名迁移及真实发布连通未完成。 |
+| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`reinstall`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；3D.11–3D.13 提供旧规格迁移后的增量新增、核心选择、新 SS 密钥、首个 TLS 证书联动以及 v3 删除/保身份重建。3D.14 提供重新选择和完整规格重装，并撤销旧分享授权、保留累计及失败恢复。已有 TLS 域名迁移及真实发布连通未完成。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号与双核心认证/统计、账号/分享组及业务备份恢复、主控管理与被控接入/手动同步、已有单 Peer 被控自动同步 CLI/菜单、WireGuard 宿主集成 | HTTPS 链接仍要求受管 TLS；H3 和完整多服务器工作流未迁移。隔离 amd64 双部署事务及真实 cron 自主同步已验，WireGuard 需 `net-wireguard`；原生双机、arm64 和重启另验。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`23` VMess HTTPUpgrade TLS、`24` VLESS gRPC TLS、`25` Trojan gRPC TLS、`26` Reality gRPC、`27` TLS Vision fallback、`28` direct Trojan、`29` Trojan TLS fallback、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口、Reality 传输派生、参数重生成和目标站管理；有限 Reality 443 共存及 21/22/23/24/25 CDN 连接地址覆盖 | XHTTP、VMess WS、gRPC TLS 和传统 TLS fallback 仅限 Xray，Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；HTTPUpgrade 支持两核心；完整协议管理、UDP 端口跳跃、其余 CDN 和完整内部路由工作流尚未开放；Fail2ban WS 增删及通用端口编辑拒绝，单入口保护端口专项见 5C.6d。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 与 HTTP-01 standalone/受管 webroot 本地事务、Nginx WebSocket/HTTPUpgrade/gRPC HTTP/2 入口及传统 TLS fallback；默认页、静态目录、302、受管三主题、Hysteria2 local 与逐入口 ALPN 事务管理 | 隔离 amd64 TLS ALPN 和 H3 已有实测；公网 CA、宿主生命周期及原生双架构验收待补。 |

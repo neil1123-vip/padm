@@ -30,6 +30,25 @@ dockerSetupUnconfigured() {
     done
 }
 
+dockerSetupReinstallAllowed() {
+    local root
+    root=$(dockerInstallRoot) || return 1
+    dockerComposeFile >/dev/null &&
+        dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        dockerResolveRegularFile "${root}/config/spec.json" >/dev/null &&
+        [[ -O "${root}/config/spec.json" ]] &&
+        dockerPrivateFileIsRestricted "${root}/config/spec.json" || {
+        dockerError '重装需要完整受管部署，请先使用 edit 导入完整原始规格'
+        return 1
+    }
+    jq -e '.host_integrations == [] and .reality_stream == null and
+      .port_hopping == null and .control == null and .control_sync == null' \
+        "${root}/config/spec.json" >/dev/null || {
+        dockerError '重新选择向导需要先停用宿主集成、共存、跳跃与控制角色；保留这些设置请使用 reinstall --spec'
+        return 1
+    }
+}
+
 dockerSetupRead() {
     local variable=$1 prompt=$2 default=${3:-} inputValue
     printf '%s' "${prompt}"
@@ -469,7 +488,11 @@ dockerSetupCommand() {
     local hy2Mode=bbr hy2Up=100 hy2Down=50 hy2Obfs=false hy2Masquerade=
     local tuicCongestion=cubic tuicAuthTimeout=3s tuicHeartbeat=10s tuicZeroRtt=false
     local email= provider= credentials= subscription=false answer= root candidate= status=0
-    local targetMode probeInputs releasePrepared=0
+    local targetMode probeInputs releasePrepared=0 reinstall=0 operation=首次配置 applyMode=configure sharesSource=''
+    if [[ "${1:-}" == --reinstall ]]; then
+        reinstall=1 operation=重装 applyMode=confirmed
+        shift
+    fi
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --manifest|--bundle|--control-bundle)
@@ -484,11 +507,16 @@ dockerSetupCommand() {
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
-    [[ -t 0 && -t 1 ]] || { dockerError '首次配置需要交互终端'; return "${PADM_DOCKER_RC_USAGE}"; }
+    [[ -t 0 && -t 1 ]] || { dockerError "${operation}需要交互终端"; return "${PADM_DOCKER_RC_USAGE}"; }
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
-    dockerSetupUnconfigured || return "${PADM_DOCKER_RC_CONFLICT}"
-    printf '\nDocker 首次配置\n'
+    if [[ "${reinstall}" == 1 ]]; then
+        dockerSetupReinstallAllowed || return "${PADM_DOCKER_RC_CONFLICT}"
+        printf '重装会重新生成账号、密钥和分享身份，替换全部入口、分享组与路由；原数据、证书及恢复快照保留。\n'
+    else
+        dockerSetupUnconfigured || return "${PADM_DOCKER_RC_CONFLICT}"
+    fi
+    printf '\nDocker %s\n' "${operation}"
     dockerSetupRead coreChoice '核心 [1=Xray, 2=sing-box, 3=Xray+sing-box, 4=sing-box+Xray, 0=取消]: ' 1 || return 0
     case "${coreChoice}" in
     1|3)
@@ -728,17 +756,35 @@ dockerSetupCommand() {
     fi
     [[ -z "${secondaryCore}" ]] || printf '副核心: %s，Reality 入口端口 %s\n' "${secondaryCore}" "${secondaryPort}"
     printf '确认后将验证发布、生成账号参数并配置服务。\n'
-    dockerSetupRead answer '确认首次配置？[y/N]: ' n || return 0
-    case "${answer}" in y|Y|yes|YES) ;; *) printf '已取消首次配置。\n'; return 0 ;; esac
+    if [[ "${reinstall}" == 1 ]]; then
+        dockerSetupRead answer '确认重新选择核心和协议并替换全部入口、账号、分享组与路由？[y/N]: ' n || return 0
+    else
+        dockerSetupRead answer '确认首次配置？[y/N]: ' n || return 0
+    fi
+    case "${answer}" in y|Y|yes|YES) ;; *) printf '已取消%s。\n' "${operation}"; return 0 ;; esac
     dockerLockInstalledDeployment || return $?
-    dockerSetupUnconfigured || return "${PADM_DOCKER_RC_CONFLICT}"
-    if [[ "${releasePrepared}" -eq 0 ]]; then
-        dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    if [[ "${reinstall}" == 1 ]]; then
+        dockerSetupReinstallAllowed || return "${PADM_DOCKER_RC_CONFLICT}"
+    else
+        dockerSetupUnconfigured || return "${PADM_DOCKER_RC_CONFLICT}"
     fi
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     [[ -n "${candidate}" ]] || candidate=$(mktemp -d "${root}/.setup.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
     DOCKER_SETUP_CANDIDATE=${candidate}
     chmod 0700 "${candidate}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${reinstall}" == 1 ]]; then
+        cp -- "${root}/config/spec.json" "${candidate}/original.json" &&
+            chmod 0600 "${candidate}/original.json" &&
+            dockerEditBaselineValidate "${candidate}/original.json" "${candidate}" &&
+            dockerControlRecoveryCheck || return "${PADM_DOCKER_RC_STATE}"
+        # 重装撤销旧分享授权，避免相同账号或入口 ID 重新发布到旧 token。
+        sharesSource="${candidate}/shares.json"
+        dockerSubscriptionStateWrite "${sharesSource}" '{"schema_version":1,"groups":[]}' ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ "${releasePrepared}" -eq 0 ]]; then
+        dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    fi
     dockerSetupGenerateSpec "${core}" "${protocols}" "${server}" "${families}" "${realityPort}" \
         "${target}" "${targetPort}" "${sni}" "${domain}" "${wsPort}" "${subscription}" \
         "${candidate}/spec.json" "${secondaryCore}" "${secondaryPort}" \
@@ -748,14 +794,110 @@ dockerSetupCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureReleaseValidate "${candidate}/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
+    if [[ "${reinstall}" == 1 ]]; then
+        dockerAcmeWebrootTransitionValidate "${candidate}/spec.json" &&
+            dockerControlSyncTransitionValidate "${candidate}/spec.json" &&
+            dockerControlSyncScheduleSpecCheck "${candidate}/spec.json" &&
+            dockerControlTransitionValidate "${candidate}/spec.json" &&
+            dockerRealityStreamDeploymentCheck "${candidate}/spec.json" "${candidate}/original.json" &&
+            dockerRealityTargetsValidate "${candidate}/spec.json" &&
+            dockerHostIntegrationInputsValidate "${candidate}/spec.json" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        dockerTrafficRuntimeCheck "$(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${candidate}/spec.json")" ||
+            return "${PADM_DOCKER_RC_HOST}"
+        dockerConfigurePortsAvailable "${candidate}/spec.json" || return "${PADM_DOCKER_RC_CONFLICT}"
+    fi
     if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 10 || "${protocols}" == 11 || "${protocols}" == 12 || "${protocols}" == 13 || "${protocols}" == 14 || "${protocols}" == 15 || "${protocols}" == 16 || "${protocols}" == 17 ]]; then
         dockerSetupStageCertificate "${candidate}" "${tlsMode}" "${domain}" "${cert}" "${key}" \
             "${email}" "${provider}" "${credentials}" || return "${PADM_DOCKER_RC_STATE}"
-        dockerConfigureApply "${candidate}/spec.json" "${candidate}/tls" "${candidate}/acme" || status=$?
+        dockerConfigureApply "${candidate}/spec.json" "${candidate}/tls" "${candidate}/acme" "${applyMode}" '' '' '' "${sharesSource}" || status=$?
     else
-        dockerConfigureApply "${candidate}/spec.json" || status=$?
+        dockerConfigureApply "${candidate}/spec.json" '' '' "${applyMode}" '' '' '' "${sharesSource}" || status=$?
     fi
     return "${status}"
+}
+
+dockerReinstallCommand() {
+    local specFile= manifest= bundle= controlBundle= mode=interactive modeSet=0
+    local root workspace original normalized draft version
+    local -a releaseArgs=()
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+        --spec|--manifest|--bundle|--control-bundle)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$1" in
+            --spec) [[ -z "${specFile}" ]] || return "${PADM_DOCKER_RC_USAGE}"; specFile=$2 ;;
+            --manifest) manifest=$2 ;;
+            --bundle) bundle=$2 ;;
+            --control-bundle) controlBundle=$2 ;;
+            esac
+            shift 2
+            ;;
+        --preview)
+            [[ "${modeSet}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            mode=preview modeSet=1
+            shift
+            ;;
+        --confirm)
+            [[ "${modeSet}" == 0 && "$#" -ge 2 && "$2" == PADM-DOCKER-REINSTALL ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            mode=confirmed modeSet=1
+            shift 2
+            ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+    done
+    if [[ -z "${specFile}" ]]; then
+        [[ "${mode}" == interactive ]] || return "${PADM_DOCKER_RC_USAGE}"
+        [[ -z "${manifest}" ]] || releaseArgs+=(--manifest "${manifest}")
+        [[ -z "${bundle}" ]] || releaseArgs+=(--bundle "${bundle}")
+        [[ -z "${controlBundle}" ]] || releaseArgs+=(--control-bundle "${controlBundle}")
+        dockerSetupCommand --reinstall "${releaseArgs[@]}"
+        return $?
+    fi
+    [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return $?
+    dockerComposeFile >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        dockerResolveRegularFile "${root}/config/spec.json" >/dev/null &&
+        [[ -O "${root}/config/spec.json" ]] &&
+        dockerPrivateFileIsRestricted "${root}/config/spec.json" || {
+        dockerError '重装需要完整私密受管规格，不能从运行配置推测身份'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    specFile=$(dockerResolveRegularFile "${specFile}") &&
+        [[ -O "${specFile}" ]] && dockerPrivateFileIsRestricted "${specFile}" || {
+        dockerError '重装规格必须是 root 所有且仅允许持有者读取的普通文件'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    workspace=$(mktemp -d "${root}/.reinstall.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+    DOCKER_SETUP_CANDIDATE=${workspace}
+    chmod 0700 "${workspace}" || return "${PADM_DOCKER_RC_STATE}"
+    original="${workspace}/original.json"
+    normalized="${workspace}/normalized.json"
+    draft="${workspace}/draft.json"
+    cp -- "${root}/config/spec.json" "${original}" && chmod 0600 "${original}" &&
+        cp -- "${specFile}" "${draft}" && chmod 0600 "${draft}" &&
+        dockerConfigureSpecMigrate "${original}" "${normalized}" &&
+        dockerConfigureSpecMigrate "${draft}" "${draft}.v3" &&
+        mv -f -- "${draft}.v3" "${draft}" &&
+        dockerEditBaselineValidate "${original}" "${workspace}" ||
+        return "${PADM_DOCKER_RC_STATE}"
+    if [[ -z "${manifest}" ]]; then
+        version=$(jq -er '.release.version' "${draft}") || return "${PADM_DOCKER_RC_STATE}"
+        [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return "${PADM_DOCKER_RC_STATE}"
+        manifest="${PADM_DOCKER_RELEASE_MANIFEST_URL_DEFAULT%/latest/download/release-manifest.json}/download/v${version}/release-manifest.json"
+    fi
+    dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    dockerConfigureReleaseValidate "${draft}" || return "${PADM_DOCKER_RC_MANIFEST}"
+    dockerSubscriptionStateWrite "${workspace}/shares.json" '{"schema_version":1,"groups":[]}' ||
+        return "${PADM_DOCKER_RC_STATE}"
+    printf '完整规格重装将替换所列核心、入口、账号和发布设置，并撤销全部旧分享组；原数据、证书及恢复快照保留。\n'
+    dockerEditPreview "${normalized}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerConfigureApply "${draft}" '' '' "${mode}" '' '' '' "${workspace}/shares.json"
 }
 
 dockerEditPreview() {

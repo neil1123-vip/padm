@@ -136,6 +136,11 @@ compose)
     if [[ "${2:-}" == version ]]; then printf 'v2.29.1\n'; exit 0; fi
     printf 'compose %s\n' "$*" >>"${FAKE_SETUP_EVENTS:?}"
     if [[ "${mode}" == health-fail && " $* " == *' up -d '* ]]; then exit 1; fi
+    if [[ "${mode}" == health-fail-once && " $* " == *' up -d '* &&
+        ! -e "${FAKE_SETUP_EVENTS}.up-failed" ]]; then
+        : >"${FAKE_SETUP_EVENTS}.up-failed"
+        exit 1
+    fi
     if [[ "${mode}" == tls-fail && " $* " == *' tls-check '* ]]; then exit 1; fi
     if [[ " $* " == *' sing-box version '* ]]; then printf 'sing-box version 1.14.0\nTags: with_v2ray_api\n'; fi
     ;;
@@ -151,7 +156,7 @@ run)
             trap 'exit 130' INT
             while true; do sleep 1; done
         fi
-        printf '11111111-1111-4111-8111-111111111111\n'
+        printf '%s\n' "${FAKE_SETUP_UUID:-11111111-1111-4111-8111-111111111111}"
     elif [[ " $* " == *' x25519 '* ]]; then
         [[ "${mode}" != keygen-fail ]] || exit 1
         printf 'PrivateKey: %s\nPassword (PublicKey): %s\n' \
@@ -160,7 +165,7 @@ run)
         [[ "${mode}" != token-fail ]] || exit 1
         bytes=${!#}
         [[ "${bytes}" =~ ^[0-9]+$ ]] || exit 1
-        printf '%*s\n' "$((bytes * 2))" '' | tr ' ' a
+        printf '%*s\n' "$((bytes * 2))" '' | tr ' ' "${FAKE_SETUP_HEX:-a}"
     elif [[ " $* " == *' generate rand --base64 16 '* ]]; then
         [[ " $* " == *'padm-sing-box:'* ]] || exit 1
         # 两次工具调用分别返回独立的 16 字节密钥；失败不能留下半份首配。
@@ -418,6 +423,8 @@ assertNoSecrets() {
     local -a secrets=(
         -e AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
         -e aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        -e bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        -e cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
         -e hy2-obfs-private-1234 -e MDEyMzQ1Njc4OWFiY2RlZg== -e ZmVkY2JhOTg3NjU0MzIxMA==
         -e MDEyMzQ1Njc4OWFiY2RlZh==
     )
@@ -715,6 +722,122 @@ for field in release images; do
         >"${CONTROL_LOG}" 2>&1 || actual=$?
     [[ "${actual}" -eq 16 && "$(snapshot)" == "${before}" ]] || fail "tampered ${field} bypassed CLI trust boundary"
 done
+
+# 重装沿用首配输入，只在最终确认后替换身份；旧账本和独立资产必须保留。
+newState reinstall-guided
+runPty 0 reinstall-baseline "${REALITY_INPUT}" setup "${ASSET_ARGS[@]}"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+mkdir -p "${PADM_DOCKER_INSTALL_DIR}/data/traffic" "${PADM_DOCKER_INSTALL_DIR}/data/acme" \
+    "${PADM_DOCKER_INSTALL_DIR}/data/static" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
+printf '%s\n' '{"schema_version":1,"accounts":{"11111111-1111-4111-8111-111111111111":{"name":"main-reality","upload":7,"download":11,"limit_bytes":0,"baseline":{}}}}' \
+    >"${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json"
+printf 'preserved-acme-account\n' >"${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf"
+printf 'preserved-static-content\n' >"${PADM_DOCKER_INSTALL_DIR}/data/static/preserved.html"
+printf 'preserved-managed-certificate\n' >"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt"
+printf 'preserved-managed-key\n' >"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key"
+chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" \
+    "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" \
+    "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key"
+printf '%s\n' '{"schema_version":1,"groups":[{"id":"share-aaaaaaaaaaaaaaaa","name":"old-share","enabled":false,"token":"old-share-token-aaaaaaaa","account_ids":["11111111-1111-4111-8111-111111111111"],"listener_ids":["vless-reality"]}]}' \
+    >"${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json"
+chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json"
+REINSTALL_DATA=(
+    "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json"
+    "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf"
+    "${PADM_DOCKER_INSTALL_DIR}/data/static/preserved.html"
+    "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt"
+    "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key"
+)
+reinstallDataHash=$(sha256sum "${REINSTALL_DATA[@]}")
+for reinstallCancel in first partial final; do
+    case "${reinstallCancel}" in
+    first) input=$'0\n' ;;
+    partial) input=$'1\n1\n\004' ;;
+    final) input=${SINGBOX_INPUT%$'y\n'}$'n\n' ;;
+    esac
+    : >"${EVENTS}"; : >"${VERIFY_LOG}"
+    before=$(snapshot)
+    runPty 0 "reinstall-${reinstallCancel}" "${input}" reinstall "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${reinstallCancel}: 重装取消改变部署或进入发布和凭据生成"
+done
+grep -Fq '确认重新选择核心和协议并替换全部入口、账号、分享组与路由？[y/N]:' "${CONTROL_LOG}" ||
+    fail '重装向导未明确最终确认的替换范围'
+for reinstallRejected in non-tty preview confirm; do
+    arguments=()
+    case "${reinstallRejected}" in
+    preview) arguments+=(--preview) ;;
+    confirm) arguments+=(--confirm PADM-DOCKER-REINSTALL) ;;
+    esac
+    CONTROL_LOG="${TEST_ROOT}/reinstall-${reinstallRejected}.log"
+    actual=0
+    bash -u "${CLI}" reinstall "${arguments[@]}" "${ASSET_ARGS[@]}" </dev/null \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" == 2 && "$(snapshot)" == "${before}" && ! -s "${EVENTS}" ]] ||
+        fail "${reinstallRejected}: 无完整 spec 的重装绕过交互门禁"
+done
+cp -- "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base" "${TEST_ROOT}/reinstall-users.base"
+jq '.routing.rules += [{type:"field", domain:["unmanaged.example.com"], outboundTag:"direct"}]' \
+    "${TEST_ROOT}/reinstall-users.base" >"${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base"
+before=$(snapshot)
+runPty 15 reinstall-baseline-drift "${SINGBOX_INPUT}" reinstall "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+    fail '在线配置漂移的重装仍改动部署或准备发布'
+cp -- "${TEST_ROOT}/reinstall-users.base" "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base"
+
+REINSTALL_RUNTIME=(
+    "${SPEC}" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+    "${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json"
+    "${PADM_DOCKER_INSTALL_DIR}/compose.json" "${PADM_DOCKER_INSTALL_DIR}/images.env"
+    "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base"
+    "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json"
+)
+REINSTALL_SS_INPUT=$'2\n9\nnext.example.com\n3\n24459\ny\n'
+before=$(sha256sum "${REINSTALL_RUNTIME[@]}" "${REINSTALL_DATA[@]}")
+export FAKE_SETUP_UUID=22222222-2222-4222-8222-222222222222 FAKE_SETUP_HEX=b
+export FAKE_SETUP_MODE=health-fail-once
+runPty 14 reinstall-health-fail "${REINSTALL_SS_INPUT}" reinstall "${ASSET_ARGS[@]}"
+unset FAKE_SETUP_MODE
+[[ "$(sha256sum "${REINSTALL_RUNTIME[@]}" "${REINSTALL_DATA[@]}")" == "${before}" ]] ||
+    fail '向导重装启动失败没有恢复完整旧配置和独立数据'
+grep -Fq '正在恢复旧配置' "${CONTROL_LOG}" &&
+    ! grep -Fq '旧配置恢复失败' "${CONTROL_LOG}" ||
+    fail '向导重装未成功执行旧服务恢复'
+: >"${EVENTS}"; : >"${VERIFY_LOG}"
+runPty 0 reinstall-singbox-ss "${REINSTALL_SS_INPUT}" reinstall "${ASSET_ARGS[@]}"
+jq -e '.core.type == "sing-box" and .core.secondary_type == null and
+    (.core.protocols | length) == 1 and .core.protocols[0].id == 30 and
+    .core.protocols[0].listener_id == "entry-shadowsocks" and
+    .core.protocols[0].uuid == "22222222-2222-4222-8222-222222222222" and
+    .core.protocols[0].server == "next.example.com" and
+    .subscription.token == ("b" * 64) and .tls == null' "${SPEC}" >/dev/null ||
+    fail '重装没有使用新账号与所选的跨核心 Shadowsocks 入口'
+jq -e '[.inbounds[] | select(.type == "shadowsocks")] |
+    length == 1 and .[0].users[0].name == "22222222-2222-4222-8222-222222222222"' \
+    "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json" >/dev/null ||
+    fail '重装后的运行核心没有使用新账号'
+jq -e '.groups == []' "${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json" >/dev/null ||
+    fail '向导重装保留了旧分享授权'
+[[ "$(sha256sum "${REINSTALL_DATA[@]}")" == "${reinstallDataHash}" ]] ||
+    fail '跨核心重装丢失旧账本、TLS、ACME 或静态数据'
+! grep -Eq ' x25519( |$)|--issue|--install-cert' "${EVENTS}" ||
+    fail 'Shadowsocks 重装生成了无关 Reality 或 ACME 参数'
+
+export FAKE_SETUP_UUID=33333333-3333-4333-8333-333333333333 FAKE_SETUP_HEX=c
+: >"${EVENTS}"; : >"${VERIFY_LOG}"
+runPty 0 reinstall-managed-tls $'1\n2\nnext.example.com\n1\nws.example.com\n24444\n1\ny\ny\n' \
+    reinstall "${ASSET_ARGS[@]}"
+jq -e '.core.type == "xray" and .core.secondary_type == null and
+    (.core.protocols | length) == 1 and .core.protocols[0].id == 21 and
+    .core.protocols[0].uuid == "33333333-3333-4333-8333-333333333333" and
+    .tls.domain == "ws.example.com" and .subscription.enabled and
+    .subscription.token == ("c" * 64)' "${SPEC}" >/dev/null ||
+    fail '重装 TLS 向导没有复用受管证书或替换账号和订阅 token'
+[[ "$(sha256sum "${REINSTALL_DATA[@]}")" == "${reinstallDataHash}" ]] ||
+    fail 'TLS 重装改动了既有证书、ACME、累计或静态数据'
+! grep -Eq -- '--issue|--install-cert' "${EVENTS}" ||
+    fail '受管证书重装意外触发 ACME 申请'
+unset FAKE_SETUP_UUID FAKE_SETUP_HEX
 
 newState singbox-success
 runPty 0 singbox-success "${SINGBOX_INPUT}" setup "${ASSET_ARGS[@]}"

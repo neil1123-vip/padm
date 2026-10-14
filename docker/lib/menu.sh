@@ -57,7 +57,7 @@ dockerMenuRun() {
     # 子进程从已安装 bundle 读取合同，不继承菜单中的锁和候选配置。
     # 独立进程组便于中断整个动作，包括 CLI 正在等待的 Docker 命令。
     [[ $- != *m* ]] || monitorEnabled=1
-    if [[ "${1:-}" == setup || "${1:-}" == edit ||
+    if [[ "${1:-}" == setup || "${1:-}" == reinstall || "${1:-}" == edit ||
         "${1:-}" == up || "${1:-}" == restart || "${1:-}" == update || "${1:-}" == rollback ||
         ( "${1:-}" == fail2ban && ( "${2:-}" == disable ||
           "${2:-}" == enable || "${2:-}" == settings ||
@@ -103,6 +103,31 @@ dockerMenuRun() {
         dockerError "操作失败，退出码: ${status}"
     fi
     return "${status}"
+}
+
+dockerMenuInstall() {
+    local choice specFile
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 安装与重装\n'
+        printf '%s\n' '1. 首次配置' '2. 重新选择核心与协议' '3. 从完整规格重装' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun setup || true ;;
+        2) dockerMenuRun reinstall || true ;;
+        3)
+            dockerSetupRead specFile '完整规格文件绝对路径（0 返回）: ' &&
+                [[ -n "${specFile}" ]] || continue
+            dockerMenuRun reinstall --spec "${specFile}" || true
+            ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
 }
 
 dockerMenuProtocols() {
@@ -1768,7 +1793,7 @@ dockerMenu() {
         printf '\nDocker 管理菜单\n'
         printf '%s\n' \
             '1. 查看状态' \
-            '2. 首次配置' \
+            '2. 安装与重装' \
             '3. 启动服务' \
             '4. 停止服务' \
             '5. 重启服务' \
@@ -1796,7 +1821,7 @@ dockerMenu() {
         case "${choice}" in
         0) break ;;
         1) dockerMenuRun status || true ;;
-        2) dockerMenuRun setup || true ;;
+        2) dockerMenuInstall ;;
         3) dockerMenuRun up || true ;;
         4) dockerMenuRun down || true ;;
         5) dockerMenuRun restart || true ;;

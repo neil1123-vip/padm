@@ -149,10 +149,10 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 ```
 
 交互终端安装成功后自动进入菜单；已安装后直接运行 `padm-docker` 或
-`padm-docker menu` 可查看状态、启停重启和日志，选择“首次配置”收集核心、协议、地址和证书。
+`padm-docker menu` 可查看状态、启停重启和日志，选择“安装与重装 → 首次配置”收集核心、协议、地址和证书。
 当前向导支持 Xray Reality Vision/XHTTP/gRPC、sing-box Reality Vision/gRPC/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC，以及两核心 direct Trojan、VMess HTTPUpgrade TLS，
 以及 Xray VLESS WS TLS、VMess WS TLS、VLESS/Trojan gRPC TLS、VLESS TCP TLS Vision、Trojan TLS fallback 或 Reality Vision + WS TLS；
-已有部署不会被向导覆盖，可改用下述编辑入口；完整协议管理仍待后续阶段交付。
+已有部署可从同一菜单选择重装，或改用下述保身份编辑入口；完整协议管理仍待后续阶段交付。
 `install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
 不会安装 Docker、下载 bundle 或初始化状态，现有显式 CLI 命令保持可用。
 
@@ -887,8 +887,27 @@ Shadowsocks2022 不需要 TLS，首次新增在基线和发布验签通过后生
 v1/v2 沿用现有迁移器生成 v3 草稿，确认成功后才更新部署；证书申请须显式选择。
 删除会清理该入口的账号关联、额外端口和 CDN 覆盖；账号最后关联、
 主核心最后入口、Reality 共存及 Fail2ban 保护仍须先处理。
-重建保留完整规格与身份，并沿用候选验证、确认和失败恢复；
+重建保留完整规格与身份，并沿用候选验证、确认和失败恢复。
 现有事务可能统一重建所有核心，要求当前部署与受管规格匹配。
+需要重新选择核心和协议时，使用“安装与重装 → 重新选择核心与协议”或
+`padm-docker reinstall`，复用首次向导的核心、协议、地址和四种证书来源选择。
+最终确认后生成新账号、密钥和分享身份，替换全部入口、分享组与路由；
+累计账本、其它证书、ACME、静态文件与恢复快照保留。
+含宿主集成、Reality 共存、端口跳跃或控制角色的部署需先处理对应功能，
+向导不会隐式移除这些设置。
+完整规格重装可从菜单选择文件，或使用：
+
+```bash
+padm-docker reinstall --spec /root/reinstall.json --preview
+padm-docker reinstall --spec /root/reinstall.json --confirm PADM-DOCKER-REINSTALL
+```
+
+规格须为 root 所有的私密普通文件，支持 v1/v2/v3 候选迁移。
+本操作允许替换核心、协议和账号，并撤销全部旧分享组授权；
+先核对原受管部署、验签发布和验证完整候选，
+再确认并使用现有备份、健康检查与恢复。`edit` 的身份冻结保持。
+证书须已受管或通过重装向导显式准备；控制角色、HTTP-01 webroot、共存和
+宿主规则转换仍受对应门禁约束，不能用重装绕开。
 完整协议管理继续为 `deferred`。
 
 `--preview` 不提交、不采集流量、不启停业务服务；验证仍会验签发布、拉取镜像并运行候选检查。

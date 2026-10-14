@@ -2262,6 +2262,32 @@ runProtocolManagementDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runInstallDriver() {
+    local scenario=$1
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'2\n'
+    case "${scenario}" in
+    eof) targetReply 'Docker 安装与重装' $'\004' ;;
+    path-eof)
+        targetReply 'Docker 安装与重装' $'3\n'
+        targetReply '完整规格文件绝对路径（0 返回）' $'\004'
+        targetReply 'Docker 安装与重装' $'0\n'
+        ;;
+    cancel) targetReply 'Docker 安装与重装' $'0\n' ;;
+    *)
+        targetReply 'Docker 安装与重装' $'3\n'
+        targetReply '完整规格文件绝对路径（0 返回）' $'0\n'
+        targetReply 'Docker 安装与重装' $'3\n'
+        targetReply '完整规格文件绝对路径（0 返回）' "${REINSTALL_MENU_SPEC}"$'\n'
+        targetReply 'Docker 安装与重装' $'2\n'
+        targetReply 'Docker 安装与重装' $'1\n'
+        targetReply 'Docker 安装与重装' $'0\n'
+        ;;
+    esac
+    targetReply 'Docker 管理菜单' $'1\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runPty() {
     local name=$1 driver=$2 input=$3 entry=$4 actual=0 feederStatus=0 command pipe feeder
     local expected=0
@@ -2289,10 +2315,16 @@ runPty() {
             printf '%s\n' "${input}" >&3
         elif [[ "${driver}" == setup ]]; then
             printf '2\n' >&3
+            waitForText 'Docker 安装与重装' "${CONTROL_LOG}" || exit 11
+            printf '1\n' >&3
             waitForText '核心 [1=Xray, 2=sing-box, 3=Xray+sing-box, 4=sing-box+Xray, 0=取消]' "${CONTROL_LOG}" || exit 11
+            printf '0\n' >&3
+            waitForText 'Docker 安装与重装' "${CONTROL_LOG}" 2 || exit 12
             printf '0\n' >&3
             waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 12
             printf '0\n' >&3
+        elif [[ "${driver}" == install ]]; then
+            runInstallDriver "${input}"
         elif [[ "${driver}" == tls ]]; then
             printf '8\n' >&3
             waitForText 'Docker 证书管理' "${CONTROL_LOG}" || exit 13
@@ -2611,6 +2643,15 @@ source-input-menu)
 status)
     [[ "${SITE_MENU_RECORD_STATUS:-0}" != 1 ]] || recordAction status
     exit 0
+    ;;
+setup|reinstall)
+    recordAction "$@"
+    if [[ "$1" == setup ]]; then
+        [[ "$#" -eq 1 ]] || exit 2
+    else
+        [[ "$#" -eq 1 || ( "$#" -eq 3 && "$2" == --spec && "$3" == "${REINSTALL_MENU_SPEC}" ) ]] || exit 2
+    fi
+    exit "${INSTALL_MENU_STATUS:-0}"
     ;;
 protocol)
     recordAction "$@"
@@ -3126,7 +3167,7 @@ EOF
 if [[ "${MENU_SCOPE}" == full ]]; then
 # 启动与恢复共用来源输入；直接验证生产动作分组，不重复业务菜单的导航矩阵。
 export SOURCE_INPUT_CHECK=1
-for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable fail2ban-settings fail2ban-port \
+for sourceAction in up restart update rollback reinstall reinstall-spec fail2ban-disable fail2ban-enable fail2ban-settings fail2ban-port \
     fail2ban-control-disable fail2ban-control-enable fail2ban-control-settings business-restore \
     control-source-check control-log-rotate; do
     case "${sourceAction}" in
@@ -3140,6 +3181,7 @@ for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable 
     business-restore) sourceCommand=(business restore fixture.json --strategy replace --yes) ;;
     control-source-check) sourceCommand=(control source-check) ;;
     control-log-rotate) sourceCommand=(control log-rotate) ;;
+    reinstall-spec) sourceCommand=(reinstall --spec '/root/private spec.json') ;;
     *) sourceCommand=("${sourceAction}") ;;
     esac
     : >"${TLS_WIZARD_ACTIONS}"
@@ -3149,6 +3191,24 @@ for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable 
         fail "${sourceAction}: 来源输入未到达前台 CLI 或参数分发错误"
 done
 unset SOURCE_INPUT_CHECK
+export REINSTALL_MENU_SPEC='/root/private complete spec.json'
+for installCase in flow cancel eof path-eof failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export INSTALL_MENU_STATUS=0
+    [[ "${installCase}" != failed ]] || INSTALL_MENU_STATUS=17
+    runPty "install-${installCase}" install "${installCase}" "${TLS_WIZARD_CLI}" menu
+    if [[ "${installCase}" == flow || "${installCase}" == failed ]]; then
+        [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "reinstall --spec ${REINSTALL_MENU_SPEC}"$'\nreinstall\nsetup' ]] ||
+            fail '安装与重装菜单路径参数或动作分发错误'
+        if [[ "${installCase}" == failed ]]; then
+            [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 3 ]] ||
+                fail '重装菜单失败后未继续其它动作或丢失退出码'
+        fi
+    else
+        [[ ! -s "${TLS_WIZARD_ACTIONS}" ]] || fail '重装菜单取消或 EOF 仍调用业务命令'
+    fi
+done
+unset INSTALL_MENU_STATUS REINSTALL_MENU_SPEC
 printf '{"tls":null}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
 : >"${TLS_WIZARD_ACTIONS}"
 runPty tls-no-domain menu $'8\n0\n' "${TLS_WIZARD_CLI}" menu

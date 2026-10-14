@@ -3926,7 +3926,7 @@ dockerPrepareCandidatePermissions() {
 }
 
 dockerGenerateCandidate() {
-    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} root core token sharesSource=''
+    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} root core token
     local metadata http01 subscriptionEnabled coreTypes integrationTypes realityStream hostStream
     local -a cores=()
     root=$(dockerInstallRoot) || return 1
@@ -7266,7 +7266,7 @@ dockerRealityStreamTransitionPrepare() {
 }
 
 dockerConfigureApply() {
-    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-}
+    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-}
     local specFile candidate backup answer root managedFile backupPrefix=configure
     # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
     # shellcheck disable=SC2034
@@ -7342,7 +7342,7 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" "${siteSource}" "${siteTemplate}"; then
+    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" "${siteSource}" "${siteTemplate}" "${sharesSource}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     fi

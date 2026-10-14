@@ -23,6 +23,8 @@ dockerUsage() {
   install-docker.sh install [--source <目录>] [--ref <commit|latest>] [--no-menu]
   padm-docker release [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker setup [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
+  padm-docker reinstall [发布资产参数]  # 交互重新选择核心和协议，生成新账号与分享身份
+  padm-docker reinstall --spec <完整私密 JSON 文件> [--preview|--confirm PADM-DOCKER-REINSTALL] [发布资产参数]
   padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --protocol-add <源入口 ID> <目标协议 ID> <新公开端口> [--protocol-core <xray|sing-box>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
     首个 TLS 协议: --tls-domain <域名>，并选择 --tls-existing、--tls-import <证书链> <私钥>、
@@ -2998,6 +3000,7 @@ dockerMain() {
     install) dockerInstallCommand "$@" ;;
     release) dockerReleaseCommand "$@" ;;
     setup) dockerSetupCommand "$@" ;;
+    reinstall) dockerReinstallCommand "$@" ;;
     edit) dockerEditCommand "$@" ;;
     protocol) dockerProtocolCommand "$@" ;;
     account) dockerAccountCommand "$@" ;;

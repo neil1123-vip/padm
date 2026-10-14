@@ -140,7 +140,11 @@ for mode in input worker edit-input edit-worker tls-input tls-worker \
             ;;
         edit-*) printf '7\n' >&3 ;;
         tls-*) printf '8\n' >&3 ;;
-        *) printf '2\n' >&3 ;;
+        *)
+            printf '2\n' >&3
+            waitText 'Docker 安装与重装' || exit 26
+            printf '1\n' >&3
+            ;;
         esac
         waitText 'setup-ready' || exit 12
         if [[ "${mode}" == tls-* ]]; then
