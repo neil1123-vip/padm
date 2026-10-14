@@ -289,7 +289,7 @@ dockerConfigureSpecValidate() {
             (.source_ips | type == "array" and length >= 1 and length <= 256 and
               length == (unique | length) and
               all(.[]; . != "geoip:cn" and routing_ip_selector)))) and
-        all(.host_integrations[]; .type != "tun" and .type != "tproxy") and
+        all(.host_integrations[]; .type != "tun" and .type != "tproxy" and .type != "redirect") and
         (.relay.http.port as $port |
           all(.core.protocols[]; .public_port != $port and
             (.websocket // .httpupgrade // .grpc_tls).backend_port != $port and
@@ -389,7 +389,7 @@ dockerConfigureSpecValidate() {
               (if .socks5 != null then (.socks5 | has("domains")) else true end)
              else true end)
            else true end)) and
-        all(.host_integrations[]; .type != "tun" and .type != "tproxy")
+        all(.host_integrations[]; .type != "tun" and .type != "tproxy" and .type != "redirect")
        else true end) and
     '
     fi
@@ -699,7 +699,7 @@ dockerConfigureSpecValidate() {
         .schema_version == 3 and
         any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) and
         all(.core.protocols[]; .public_port != 80 or .id == 3 or .id == 31) and
-        all(.host_integrations[] | select(.type == "tproxy"); .settings.port != 80)
+        all(.host_integrations[] | select(.type == "tproxy" or .type == "redirect"); .settings.port != 80)
        else true end) and
     '
     fi
@@ -710,7 +710,7 @@ dockerConfigureSpecValidate() {
         all(.[]; image)) and
       (.host_integrations | type == "array" and length <= 3 and
         ([.[].type] | unique | length) == length and
-        ([.[] | select(.type == "tun" or .type == "tproxy")] | length) <= 1) and
+        ([.[] | select(.type == "tun" or .type == "tproxy" or .type == "redirect")] | length) <= 1) and
     '
     # 只有精确空数组省略逐项条件；缺失、畸形与非空输入仍保留完整宿主校验。
     if [[ "${hasHostIntegrations}" == true ]]; then
@@ -754,16 +754,20 @@ dockerConfigureSpecValidate() {
           .devices == ["/dev/net/tun"] and .schedules == [] and
           (.settings | exact(["interface", "address"]) and
             .interface == "padm-tun" and .address == "198.18.0.1/30")
-        elif .type == "tproxy" then
-          .profile == "net-transparent" and .firewall_rules == ["padm-tproxy"] and
+        elif .type == "tproxy" or .type == "redirect" then
+          . as $integration |
+          .profile == "net-transparent" and .firewall_rules == ["padm-" + .type] and
           .devices == [] and .schedules == [] and
-          (.settings | (del(.family, .output_uid) | exact(["port", "mark"])) and
+          (.settings | (del(.family, .output_uid) |
+              exact(["port"] + if $integration.type == "tproxy" then ["mark"] else [] end)) and
             (if has("family") then .family | IN("ipv4", "ipv6", "dual") else true end) and (.port | port) and
             (if has("output_uid") then .output_uid |
               type == "number" and floor == . and . >= 1 and . <= 2147483647 and . != 10001
              else true end) and
-            (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647 and
-              . != 253 and . != 254 and . != 255))
+            (if $integration.type == "tproxy" then
+              .mark | type == "number" and floor == . and . >= 1 and . <= 2147483647 and
+                . != 253 and . != 254 and . != 255
+             else true end))
         else false end) and
     '
     fi
@@ -796,11 +800,16 @@ dockerConfigureSpecValidate() {
         (.host_integrations | length) == 1 and (.core.protocols | length) == 1 and
         all(.core.protocols[]; .id == 1 and .address_families == ["ipv4"])
       else true end and
-      if any(.host_integrations[]; .type == "tun" or .type == "tproxy") then
+      if any(.host_integrations[]; .type == "redirect") then
+        .core.secondary_type == null and
+        (.host_integrations | length) == 1 and
+        all(.core.protocols[]; .id == 1 or .id == 2 or .id == 26)
+      else true end and
+      if any(.host_integrations[]; .type == "tun" or .type == "tproxy" or .type == "redirect") then
         .core.secondary_type == null and
         all(.core.protocols[]; .id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25)
       else true end and
-      all(.host_integrations[] | select(.type == "tproxy");
+      all(.host_integrations[] | select(.type == "tproxy" or .type == "redirect");
         .settings.port as $port | all($request.core.protocols[]; .public_port != $port)) and
     '
     fi
@@ -812,7 +821,7 @@ dockerConfigureSpecValidate() {
             if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then
               ((.websocket // .httpupgrade // .grpc_tls).backend_port // 31297) else .public_port end] +
           [if $request.relay.http.core == $core then $request.relay.http.port else empty end] +
-          [$request.host_integrations[] | select(.type == "tproxy") | .settings.port] +
+          [$request.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.port] +
           [if $core == "xray" then 10085 else 10087 end]) as $corePorts |
         ($corePorts | unique | length) == ($corePorts | length)) and
       (([.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) |
@@ -961,7 +970,7 @@ dockerControlSpecValidate() {
           (if .last_digest == null then .revision == 0
            else (.last_digest | type == "string" and test("^[a-f0-9]{64}$")) end)) and
         all(.core.protocols[]; .public_port != $spec.control.listen.port) and
-        all(.host_integrations[] | select(.type == "tproxy"); .settings.port != $spec.control.listen.port)
+        all(.host_integrations[] | select(.type == "tproxy" or .type == "redirect"); .settings.port != $spec.control.listen.port)
       else true end
     ' "$1" >/dev/null 2>&1
 }
@@ -1720,8 +1729,8 @@ dockerConfigurePortsAvailable() {
                 (.listener_id == $request.reality_stream.listener_id or .listener_id == $request.reality_stream.website_listener_id)
               then .public_port = 443 else . end |
               "\(.public_port)|\($transport)"] +
-          [.host_integrations[] | select(.type == "tproxy") |
-            "\(.settings.port)|tcp", "\(.settings.port)|udp"] +
+          [.host_integrations[] | select(.type == "tproxy" or .type == "redirect") |
+            "\(.settings.port)|tcp", (if .type == "tproxy" then "\(.settings.port)|udp" else empty end)] +
           [if .tls.http01 == true then "80|tcp" else empty end] +
           [if .relay.http != null then "\(.relay.http.port)|tcp" else empty end] +
           [.port_aliases[]? as $alias | $request.core.protocols[] |
@@ -2185,14 +2194,14 @@ dockerGenerateXrayConfig() {
           } else empty end
         ] + [
           $r.host_integrations[] |
-          select(.type == "tproxy") |
+          select(.type == "tproxy" or .type == "redirect") |
           {
             listen: (if (.settings.family // "ipv4") == "ipv4" then "0.0.0.0" else "::" end),
             port: .settings.port,
             protocol: "dokodemo-door",
-            tag: "tproxy-in",
-            settings: {network: "tcp,udp", followRedirect: true},
-            streamSettings: {sockopt: {tproxy: "tproxy"}},
+            tag: (.type + "-in"),
+            settings: {network: (if .type == "tproxy" then "tcp,udp" else "tcp" end), followRedirect: true},
+            streamSettings: {sockopt: {tproxy: .type}},
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
           }
         ] + [if $http_relay then {
@@ -2506,9 +2515,9 @@ dockerGenerateSingBoxConfig() {
             auto_redirect: true,
             strict_route: true,
             stack: "system"
-          } elif .type == "tproxy" then {
-            type: "tproxy",
-            tag: "tproxy-in",
+          } elif .type == "tproxy" or .type == "redirect" then {
+            type: .type,
+            tag: (.type + "-in"),
             listen: (if (.settings.family // "ipv4") == "ipv4" then "0.0.0.0" else "::" end),
             listen_port: .settings.port
           } else empty end
@@ -3237,7 +3246,7 @@ dockerGenerateCompose() {
       (any($websocket[]; .id == 21 and (.address_families | index("ipv6")) != null and
         (.public_port as $port | any($fail2ban[].settings.ports[]; . == $port)))) as $fail2banIPv6 |
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
-      ($r.host_integrations | map(select(.type == "tproxy"))) as $tproxy |
+      ($r.host_integrations | map(select(.type == "tproxy" or .type == "redirect"))) as $tproxy |
       ($r.routing.ipv6 != null) as $ipv6 |
       (($r.relay.http.address_families // []) | index("ipv6") != null) as $relayIPv6 |
         ($r.reality_stream.host_website.network_mode == "host") as $hostStream |
@@ -3526,7 +3535,8 @@ dockerGenerateCompose() {
           .services["net-transparent"] = (defaults + {
             image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
             profiles: ["net-transparent"],
-            command: (["tproxy", ($tproxy[0].settings.port | tostring), ($tproxy[0].settings.mark | tostring)] +
+            command: ([$tproxy[0].type, ($tproxy[0].settings.port | tostring)] +
+              (if $tproxy[0].type == "tproxy" then [($tproxy[0].settings.mark | tostring)] else [] end) +
               (if ($tproxy[0].settings.family // "ipv4") == "ipv4" then [] else [$tproxy[0].settings.family] end) +
               (if $tproxy[0].settings | has("output_uid") then ["--output-uid", ($tproxy[0].settings.output_uid | tostring)] else [] end)),
             network_mode: "host",
@@ -3536,8 +3546,9 @@ dockerGenerateCompose() {
             volumes: net_mounts("data/net/transparent"; "/var/lib/padm/net"; false),
             tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"],
             healthcheck: {
-              test: (["CMD", "/usr/local/bin/padm-entrypoint", "tproxy-health",
-                ($tproxy[0].settings.port | tostring), ($tproxy[0].settings.mark | tostring)] +
+              test: (["CMD", "/usr/local/bin/padm-entrypoint", ($tproxy[0].type + "-health"),
+                ($tproxy[0].settings.port | tostring)] +
+                (if $tproxy[0].type == "tproxy" then [($tproxy[0].settings.mark | tostring)] else [] end) +
                 (if ($tproxy[0].settings.family // "ipv4") == "ipv4" then [] else [$tproxy[0].settings.family] end) +
                 (if $tproxy[0].settings | has("output_uid") then ["--output-uid", ($tproxy[0].settings.output_uid | tostring)] else [] end)),
               interval: "30s", timeout: "5s", start_period: "5s", retries: 3
@@ -3685,15 +3696,17 @@ dockerGenerateDeployment() {
             container_port: $wireguardPort, transport: "udp",
             address_families: ["ipv4", "ipv6"]
           } + if $r.schema_version >= 2 then {listener_id: "host-wireguard"} else {} end
-          elif .type == "tproxy" then
+          elif .type == "tproxy" or .type == "redirect" then
+            .type as $kind |
             (if (.settings.family // "ipv4") == "dual" then ["ipv4", "ipv6"]
              else [(.settings.family // "ipv4")] end) as $families |
             ({service: $r.core.type, public_port: .settings.port,
               container_port: .settings.port, transport: "tcp", address_families: $families} +
-              if $r.schema_version >= 2 then {listener_id: "host-tproxy-tcp"} else {} end),
-            ({service: $r.core.type, public_port: .settings.port,
+              if $r.schema_version >= 2 then {listener_id: ("host-" + $kind + "-tcp")} else {} end),
+            (if $kind == "tproxy" then {service: $r.core.type, public_port: .settings.port,
               container_port: .settings.port, transport: "udp", address_families: $families} +
-              if $r.schema_version >= 2 then {listener_id: "host-tproxy-udp"} else {} end)
+              (if $r.schema_version >= 2 then {listener_id: "host-tproxy-udp"} else {} end)
+             else empty end)
           else empty end
           ] + [if $r.control != null then {
             listener_id: "host-control", service: "control",
@@ -3757,7 +3770,7 @@ dockerDeploymentFileValidate() {
         (if any(.[]; has("listener_id")) then
           ([.[] | [.listener_id, .transport]] | unique | length) == length and
           all(.[]; .listener_id | type == "string" and
-            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|alias-[1-9][0-9]{0,4}-(tcp|udp)|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-control|host-acme-http|relay-http)$"))
+            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|alias-[1-9][0-9]{0,4}-(tcp|udp)|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-redirect-tcp|host-control|host-acme-http|relay-http)$"))
          else true end)) and
       (. as $deployment | all(.listeners[] | select(.listener_id // "" | startswith("alias-"));
         exact(["listener_id", "target_listener_id", "service", "public_port", "container_port", "transport", "address_families"]) and
@@ -3810,8 +3823,8 @@ dockerDeploymentFileValidate() {
           all($deployment.host_integrations[]; .type != "fail2ban-control")
         elif .type == "tun" then
           .profile == "net-transparent" and .devices == ["/dev/net/tun"]
-        elif .type == "tproxy" then
-          .profile == "net-transparent" and .firewall_rules == ["padm-tproxy"] and .devices == []
+        elif .type == "tproxy" or .type == "redirect" then
+          .profile == "net-transparent" and .firewall_rules == ["padm-" + .type] and .devices == []
         else false end))
     ' "$1" >/dev/null 2>&1 &&
         dockerSshFail2banSpecValidate "$1"
@@ -4402,7 +4415,7 @@ dockerPortHoppingTargetInspect() (
       if $s.schema_version == 3 and length == 1 and .[0].id == 3 and
         (.[0].core // $s.core.type) == "sing-box" and
         (.[0].address_families | sort) == ["ipv4","ipv6"] and
-        all($s.host_integrations[]; .type != "tun" and .type != "tproxy")
+        all($s.host_integrations[]; .type != "tun" and .type != "tproxy" and .type != "redirect")
       then {port:.[0].public_port,domain:.[0].hy2.domain}
       else error("目标见证仅支持受管双族 Hy2 bridge 入口") end
     ' "${spec}") || return 1
@@ -4416,7 +4429,7 @@ dockerPortHoppingTargetInspect() (
       if $s.schema_version == 3 and length == 1 and .[0].id == 3 and
         (.[0].core // $s.core.type) == "sing-box" and
         (.[0].address_families | sort) == ["ipv4","ipv6"] and
-        all($s.host_integrations[]; .type != "tun" and .type != "tproxy")
+        all($s.host_integrations[]; .type != "tun" and .type != "tproxy" and .type != "redirect")
       then {port:.[0].public_port,domain:.[0].hy2.domain}
       else error("目标配置快照已超出双族 Hy2 支持范围") end
     ' "${spec}")" == "${entry}" ]] || return 1
@@ -5359,9 +5372,10 @@ dockerSshFail2banDisablePrepare() {
 }
 
 dockerTProxyConfigurationCheck() {
-    local root path
+    local root path kind other
     root=$(dockerInstallRoot) || return 1
-    for path in config/spec.json deployment.json images.env compose.json data/net/transparent; do
+    for path in config/spec.json deployment.json images.env compose.json data/net/transparent \
+        data/net/transparent/tproxy.state data/net/transparent/redirect.state; do
         dockerTrafficSafePath "${root}" "${root}/${path}" || return 1
     done
     dockerComposeFile >/dev/null &&
@@ -5369,16 +5383,23 @@ dockerTProxyConfigurationCheck() {
             "${root}/deployment.json" "${root}/images.env" &&
         cmp -s -- "${root}/compose.json" \
             <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") &&
-        jq -e 'any(.host_integrations[]; .type == "tproxy")' \
-            "${root}/config/spec.json" >/dev/null || {
-        dockerError 'TProxy 规格、部署或编排漂移，未执行操作'
+        kind=$(jq -er '[.host_integrations[] | select(.type == "tproxy" or .type == "redirect")] |
+          if length == 1 then .[0].type else error("透明集成不唯一") end' \
+            "${root}/config/spec.json") || {
+        dockerError 'TProxy/Redirect 规格、部署或编排漂移，未执行操作'
+        return 1
+    }
+    if [[ "${kind}" == tproxy ]]; then other=redirect; else other=tproxy; fi
+    [[ ! -e "${root}/data/net/transparent/${other}.state" &&
+        ! -L "${root}/data/net/transparent/${other}.state" ]] || {
+        dockerError '存在另一种透明代理的未审计状态，保留现场并拒绝操作'
         return 1
     }
 }
 
 dockerTProxyContainer() (
-    local root ids container mode=${1:-running} port mark family outputUid
-    local -a familyArgs=()
+    local root ids container mode=${1:-running} health
+    local -a healthArgs=()
     [[ "$#" -le 1 && ( "${mode}" == running || "${mode}" == exited ) ]] || return 1
     root=$(dockerInstallRoot) || return 1
     dockerTProxyConfigurationCheck || return 1
@@ -5422,22 +5443,17 @@ dockerTProxyContainer() (
           ($service.volumes | map({source:(.source | sub("^\\$\\{PADM_NET_ROOT\\}"; $root)),
             target,read_only}) | sort_by(.target)))
     ' <<<"${container}" >/dev/null || {
-        dockerError 'TProxy 容器状态或归属漂移，未执行操作'
+        dockerError 'TProxy/Redirect 容器状态或归属漂移，未执行操作'
         return 1
     }
     if [[ "${mode}" == running ]]; then
-        port=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.port' \
-            "${root}/config/spec.json") &&
-            mark=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.mark' \
-                "${root}/config/spec.json") &&
-            family=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.family // "ipv4"' \
-                "${root}/config/spec.json") || return 1
-        [[ "${family}" == ipv4 ]] || familyArgs=("${family}")
-        outputUid=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.output_uid // empty' \
-            "${root}/config/spec.json") || return 1
-        [[ -z "${outputUid}" ]] || familyArgs+=(--output-uid "${outputUid}")
-        docker exec "${ids}" /usr/local/bin/padm-entrypoint tproxy-health "${port}" "${mark}" "${familyArgs[@]}" </dev/null || {
-            dockerError 'TProxy 状态或内核规则归属漂移，未执行操作'
+        # 编排已与生成器精确一致，复用其健康参数避免两种透明模式再次拼装。
+        health=$(jq -er '.services["net-transparent"].healthcheck.test[2:][]' \
+            "${root}/compose.json") || return 1
+        mapfile -t healthArgs <<<"${health}"
+        [[ "${#healthArgs[@]}" -ge 2 ]] &&
+            docker exec "${ids}" /usr/local/bin/padm-entrypoint "${healthArgs[@]}" </dev/null || {
+            dockerError 'TProxy/Redirect 状态或内核规则归属漂移，未执行操作'
             return 1
         }
     fi
@@ -5445,12 +5461,14 @@ dockerTProxyContainer() (
 )
 
 dockerTProxyDisablePrepare() {
-    local nextSpec=$1 restoreMode=${2:-normal} root ids enabled=false corrupt=0 before mode audited port mark family outputUid
-    local -a familyArgs=()
+    local nextSpec=$1 restoreMode=${2:-normal} root ids enabled=false corrupt=0 before mode audited path command
+    local -a commandArgs=()
     case "${restoreMode}" in normal|restore) ;; *) return 1 ;; esac
     jq -e 'type == "object" and (.host_integrations | type == "array")' "${nextSpec}" >/dev/null || return 1
     root=$(dockerInstallRoot) || return 1
-    dockerTrafficSafePath "${root}" "${root}/data/net/transparent/tproxy.state" || return 1
+    for path in tproxy redirect; do
+        dockerTrafficSafePath "${root}" "${root}/data/net/transparent/${path}.state" || return 1
+    done
     ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
         --filter label=com.docker.compose.service=net-transparent \
         --filter label=com.docker.compose.oneoff=False) || return 1
@@ -5459,8 +5477,8 @@ dockerTProxyDisablePrepare() {
             [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] || return 1
         enabled=$(jq -er '
           if type == "object" and (.host_integrations | type == "array")
-          then any(.host_integrations[]; .type == "tproxy") | tostring
-          else error("invalid TProxy specification") end
+          then any(.host_integrations[]; .type == "tproxy" or .type == "redirect") | tostring
+          else error("invalid transparent specification") end
         ' "${root}/config/spec.json") || {
             [[ "${restoreMode}" == restore ]] || return 1
             enabled=false corrupt=1
@@ -5476,11 +5494,11 @@ dockerTProxyDisablePrepare() {
                 --slurpfile compose "${root}/compose.json" --argjson enabled "${enabled}" '
               ($deployment | length) == 1 and ($compose | length) == 1 and
               ($deployment[0].host_integrations | type == "array") and
-              any($deployment[0].host_integrations[]; .type == "tproxy") == $enabled and
+              any($deployment[0].host_integrations[]; .type == "tproxy" or .type == "redirect") == $enabled and
               ($compose[0].services | type == "object") and
               ($compose[0].services | has("net-transparent")) == $enabled
             ' >/dev/null || {
-            dockerError '旧规格、部署或编排的 TProxy 状态不一致，未修改配置'
+            dockerError '旧规格、部署或编排的 TProxy/Redirect 状态不一致，未修改配置'
             return 1
         }
     else
@@ -5488,23 +5506,18 @@ dockerTProxyDisablePrepare() {
     fi
     if [[ "${enabled}" == false ]]; then
         [[ -z "${ids}" && ! -e "${root}/data/net/transparent/tproxy.state" &&
-            ! -L "${root}/data/net/transparent/tproxy.state" ]] || {
-            dockerError '存在未审计的 TProxy 容器或状态，保留现场并拒绝修改配置'
+            ! -L "${root}/data/net/transparent/tproxy.state" &&
+            ! -e "${root}/data/net/transparent/redirect.state" &&
+            ! -L "${root}/data/net/transparent/redirect.state" ]] || {
+            dockerError '存在未审计的 TProxy/Redirect 容器或状态，保留现场并拒绝修改配置'
             return 1
         }
         return 0
     fi
     dockerTProxyConfigurationCheck || return 1
-    port=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.port' \
-        "${root}/config/spec.json") &&
-        mark=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.mark' \
-            "${root}/config/spec.json") &&
-        family=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.family // "ipv4"' \
-            "${root}/config/spec.json") || return 1
-    [[ "${family}" == ipv4 ]] || familyArgs=("${family}")
-    outputUid=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.output_uid // empty' \
-        "${root}/config/spec.json") || return 1
-    [[ -z "${outputUid}" ]] || familyArgs+=(--output-uid "${outputUid}")
+    command=$(jq -er '.services["net-transparent"].command[]' "${root}/compose.json") || return 1
+    mapfile -t commandArgs <<<"${command}"
+    [[ "${#commandArgs[@]}" -ge 2 ]] || return 1
     if [[ -n "${ids}" ]]; then
         [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
         before=$(docker container inspect "${ids}") || return 1
@@ -5521,10 +5534,12 @@ dockerTProxyDisablePrepare() {
         audited=$(dockerTProxyContainer exited) && [[ "${audited}" == "${ids}" ]] || return 1
     fi
     [[ ! -e "${root}/data/net/transparent/tproxy.state" &&
-        ! -L "${root}/data/net/transparent/tproxy.state" ]] &&
+        ! -L "${root}/data/net/transparent/tproxy.state" &&
+        ! -e "${root}/data/net/transparent/redirect.state" &&
+        ! -L "${root}/data/net/transparent/redirect.state" ]] &&
         dockerComposeExecute run --rm --no-deps net-transparent \
-            preflight tproxy "${port}" "${mark}" "${familyArgs[@]}" unowned >/dev/null || {
-        dockerError 'TProxy 停止后仍有状态或规则，保留旧配置与恢复证据'
+            preflight "${commandArgs[@]}" unowned >/dev/null || {
+        dockerError 'TProxy/Redirect 停止后仍有状态或规则，保留旧配置与恢复证据'
         return 1
     }
     [[ -z "${ids}" ]] || docker rm "${ids}" >/dev/null
@@ -6041,14 +6056,14 @@ dockerFail2banCommand() {
 }
 
 dockerValidateHostIntegrations() {
-    local specFile=$1 candidate=$2 ownership port mark ports family outputUid root metadata integrationTypes
+    local specFile=$1 candidate=$2 ownership port mark ports family outputUid root metadata integrationTypes kind
     metadata=$(jq -r '[
       ([.host_integrations[].type] | join(",")),
       ([.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")] | join(",")),
-      ([.host_integrations[] | select(.type == "tproxy") | .settings.port | tostring] | join(",")),
+      ([.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.port | tostring] | join(",")),
       ([.host_integrations[] | select(.type == "tproxy") | .settings.mark | tostring] | join(",")),
-      ([.host_integrations[] | select(.type == "tproxy") | .settings.family // "ipv4"] | join(",")),
-      ([.host_integrations[] | select(.type == "tproxy") | .settings.output_uid // empty | tostring] | join(","))
+      ([.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.family // "ipv4"] | join(",")),
+      ([.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.output_uid // empty | tostring] | join(","))
     ] |
       if any(.[]; contains("|") or contains("\n") or contains("\r")) then
         error("宿主集成元数据包含非法分隔符")
@@ -6139,22 +6154,24 @@ dockerValidateHostIntegrations() {
             return 1
         }
     fi
-    if [[ ",${integrationTypes}," == *,tproxy,* ]]; then
+    if [[ ",${integrationTypes}," == *,tproxy,* || ",${integrationTypes}," == *,redirect,* ]]; then
+        if [[ ",${integrationTypes}," == *,tproxy,* ]]; then kind=tproxy; else kind=redirect; fi
         ownership=unowned
-        local -a ownershipMount=() ownershipArgs=("${ownership}") familyArgs=()
+        local -a ownershipMount=() ownershipArgs=("${ownership}") familyArgs=() commandArgs=("${port}")
+        [[ "${kind}" != tproxy ]] || commandArgs+=("${mark}")
         [[ "${family}" == ipv4 ]] || familyArgs=("${family}")
         [[ -z "${outputUid}" ]] || familyArgs+=(--output-uid "${outputUid}")
-        if dockerCurrentOwnsHostIntegration tproxy; then
+        if dockerCurrentOwnsHostIntegration "${kind}"; then
             root=$(dockerInstallRoot) || return 1
             dockerTrafficSafePath "${root}" "${root}/data/net/transparent" || return 1
             [[ -d "${root}/data/net/transparent" ]] || return 1
             ownership=owned
-            ownershipMount=(--volume "${root}/data/net/transparent:/run/padm-tproxy-owner:ro")
-            ownershipArgs=("${ownership}" /run/padm-tproxy-owner)
+            ownershipMount=(--volume "${root}/data/net/transparent:/run/padm-${kind}-owner:ro")
+            ownershipArgs=("${ownership}" "/run/padm-${kind}-owner")
         fi
         dockerCandidateCompose "${candidate}" run --rm --no-deps "${ownershipMount[@]}" net-transparent \
-            preflight tproxy "${port}" "${mark}" "${familyArgs[@]}" "${ownershipArgs[@]}" >/dev/null || {
-            dockerError 'TProxy 转发、路由或防火墙前置检查失败'
+            preflight "${kind}" "${commandArgs[@]}" "${familyArgs[@]}" "${ownershipArgs[@]}" >/dev/null || {
+            dockerError 'TProxy/Redirect 转发、路由或防火墙前置检查失败'
             return 1
         }
     fi
@@ -6670,11 +6687,11 @@ dockerInstallCandidate() {
             jq -en --slurpfile deployment "${integrationInput}" \
                 --slurpfile compose "${candidate}/compose.json" '
               ($deployment | length) == 1 and ($compose | length) == 1 and
-              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy" or .type == "tun")) == false and
+              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy" or .type == "redirect" or .type == "tun")) == false and
               ($compose[0].services | type == "object") and
               ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh") or has("net-transparent") or has("net-tun-check")) == false
             ' >/dev/null || {
-            dockerError '缺少原始规格的候选不能启用 Fail2ban/TProxy/TUN 或存在部署编排漂移'
+            dockerError '缺少原始规格的候选不能启用 Fail2ban/TProxy/Redirect/TUN 或存在部署编排漂移'
             return 1
         }
     fi
@@ -6689,8 +6706,8 @@ dockerInstallCandidate() {
     trap 'pending=130' INT
     trap 'pending=143' TERM
     if dockerTProxyDisablePrepare "${integrationInput}"; then
-        # 仅确证停止了旧 TProxy 才提前登记，未启用时保留原 Fail2ban 失败门禁。
-        if jq -e 'any(.host_integrations[]; .type == "tproxy")' \
+        # 仅确证停止了旧透明代理才提前登记，未启用时保留原 Fail2ban 失败门禁。
+        if jq -e 'any(.host_integrations[]; .type == "tproxy" or .type == "redirect")' \
             "${root}/config/spec.json" >/dev/null 2>&1; then
             DOCKER_CONFIG_SWITCHED=1
         fi
@@ -6941,11 +6958,11 @@ dockerRestoreConfiguration() {
             --slurpfile compose "${backup}/compose.json" '
           ($deployment | length) == 1 and ($compose | length) == 1 and
           ($deployment[0].host_integrations | type == "array") and
-          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy" or .type == "tun")) == false and
+          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy" or .type == "redirect" or .type == "tun")) == false and
           ($compose[0].services | type == "object") and
           ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh") or has("net-transparent") or has("net-tun-check")) == false
         ' >/dev/null || {
-            dockerError '恢复点缺少可验证的 Fail2ban/TProxy/TUN 原始规格，尚未停止或修改服务'
+            dockerError '恢复点缺少可验证的 Fail2ban/TProxy/Redirect/TUN 原始规格，尚未停止或修改服务'
             return 1
         }
     fi
@@ -8679,21 +8696,23 @@ dockerValidateInstalledCommand() {
             dockerTunContainer running >/dev/null ||
                 return "${PADM_DOCKER_RC_STATE}"
             ;;
-        tproxy)
+        tproxy|redirect)
             local outputUid
             local -a familyArgs=()
-            port=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.port' \
+            port=$(jq -r --arg kind "${integration}" '.host_integrations[] | select(.type == $kind) | .settings.port' \
                 "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
-            mark=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.mark' \
+            mark=$(jq -r --arg kind "${integration}" '.host_integrations[] | select(.type == $kind) | .settings.mark // empty' \
                 "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
-            family=$(jq -er '.host_integrations[] | select(.type == "tproxy") | .settings.family // "ipv4"' \
+            family=$(jq -er --arg kind "${integration}" '.host_integrations[] | select(.type == $kind) | .settings.family // "ipv4"' \
                 "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
             [[ "${family}" == ipv4 ]] || familyArgs=("${family}")
-            outputUid=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.output_uid // empty' \
+            outputUid=$(jq -r --arg kind "${integration}" '.host_integrations[] | select(.type == $kind) | .settings.output_uid // empty' \
                 "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
             [[ -z "${outputUid}" ]] || familyArgs+=(--output-uid "${outputUid}")
+            local -a commandArgs=("${port}")
+            [[ "${integration}" != tproxy ]] || commandArgs+=("${mark}")
             dockerComposeRun run --rm --no-deps net-transparent \
-                preflight tproxy "${port}" "${mark}" "${familyArgs[@]}" owned >/dev/null ||
+                preflight "${integration}" "${commandArgs[@]}" "${familyArgs[@]}" owned >/dev/null ||
                 return "${PADM_DOCKER_RC_STATE}"
             ;;
         *) return "${PADM_DOCKER_RC_STATE}" ;;

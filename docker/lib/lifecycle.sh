@@ -45,6 +45,9 @@ dockerUsage() {
   padm-docker edit --tproxy-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --tproxy-enable <端口> <标记> --tproxy-output-uid <UID> [--tproxy-family ipv4|ipv6|dual] [确认参数]
   padm-docker edit --tproxy-settings <端口> <标记> [--tproxy-output-uid <UID>|--tproxy-output-off] [确认参数]
+  padm-docker edit --redirect-enable <端口> [--redirect-family ipv4|ipv6|dual] [--redirect-output-uid <UID>] [确认参数]
+  padm-docker edit --redirect-settings <端口> [--redirect-family ipv4|ipv6|dual] [--redirect-output-uid <UID>|--redirect-output-off] [确认参数]
+  padm-docker edit --redirect-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --tun-enable|--tun-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -124,6 +127,7 @@ dockerUsage() {
   padm-docker protocol alpn-status [入口 ID]
   padm-docker protocol routing-status
   padm-docker protocol tproxy-status
+  padm-docker protocol redirect-status
   padm-docker protocol tun-status
   padm-docker protocol port-alias-status
   padm-docker protocol cdn-status [入口 ID]
@@ -570,7 +574,8 @@ dockerComposeRun() {
             [spec_enabled("fail2ban"), deployed_enabled("fail2ban"),
              spec_enabled("fail2ban-control"), deployed_enabled("fail2ban-control"),
              spec_enabled("fail2ban-ssh"), deployed_enabled("fail2ban-ssh"),
-             spec_enabled("tproxy"), deployed_enabled("tproxy")] | @tsv
+             (spec_enabled("tproxy") or spec_enabled("redirect")),
+             (deployed_enabled("tproxy") or deployed_enabled("redirect"))] | @tsv
           else error("Fail2ban 规格或部署结构无效") end
         ' "${root}/config/spec.json") || {
             dockerError 'Fail2ban 规格、部署与编排不一致，拒绝服务变更'

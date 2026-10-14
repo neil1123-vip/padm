@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含指定 UID 透明转发和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
+# 摘要锁定含 Redirect、指定 UID 透明转发和解析后 IP 出站组合的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "b5cf3ffda219ae601278f8ae353dc23e317bcc69a00f64841331768e3449641e"
+    "d137bc9852e7d3faa2e22a9eab567f21254390229923c8c887ff366fb8b9ec00"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -262,6 +262,73 @@ for mark in (253, 254, 255):
 invalid = copy.deepcopy(spec)
 invalid["core"]["secondary_type"] = "sing-box"
 cases["invalid-tproxy-secondary"] = invalid
+redirect = copy.deepcopy(cases["valid-host-tproxy"])
+redirect["host_integrations"][0].update(type="redirect", firewall_rules=["padm-redirect"])
+del redirect["host_integrations"][0]["settings"]["mark"]
+cases["valid-host-redirect"] = redirect
+# 两核心三族覆盖缺省和指定 UID，Reality 传输仍保持既有支持集合。
+for core in ("xray", "sing-box"):
+    for family in ("ipv4", "ipv6", "dual"):
+        for output_enabled in (False, True):
+            valid = copy.deepcopy(redirect)
+            valid["core"]["type"] = valid["core"]["protocols"][0]["core"] = core
+            valid["host_integrations"][0]["settings"]["family"] = family
+            if output_enabled:
+                valid["host_integrations"][0]["settings"]["output_uid"] = 65534
+            cases[f"valid-host-redirect-{core}-{family}-output-{output_enabled}"] = valid
+for core, protocol in (("xray", 2), ("xray", 26), ("sing-box", 26)):
+    valid = copy.deepcopy(cases[f"valid-protocol-{protocol}"])
+    valid["core"]["type"] = valid["core"]["protocols"][0]["core"] = core
+    valid["host_integrations"] = copy.deepcopy(redirect["host_integrations"])
+    cases[f"valid-host-redirect-{core}-protocol-{protocol}"] = valid
+for uid in (1, 2147483647):
+    valid = copy.deepcopy(redirect)
+    valid["host_integrations"][0]["settings"]["output_uid"] = uid
+    cases[f"valid-host-redirect-output-{uid}"] = valid
+for uid in (0, -1, 10001, 2147483648, "65534", None, 1.5, True):
+    invalid = copy.deepcopy(redirect)
+    invalid["host_integrations"][0]["settings"]["output_uid"] = uid
+    cases[f"invalid-redirect-output-{len(cases)}"] = invalid
+for family in ("", "IPv4", "all", None, 4, []):
+    invalid = copy.deepcopy(redirect)
+    invalid["host_integrations"][0]["settings"]["family"] = family
+    cases[f"invalid-redirect-family-{len(cases)}"] = invalid
+for field, value in (("port", 0), ("port", 65536), ("port", "31298"),
+                     ("mark", 129), ("network", "tcp,udp")):
+    invalid = copy.deepcopy(redirect)
+    invalid["host_integrations"][0]["settings"][field] = value
+    cases[f"invalid-redirect-setting-{field}-{len(cases)}"] = invalid
+invalid = copy.deepcopy(redirect)
+invalid["core"]["secondary_type"] = "sing-box"
+cases["invalid-redirect-secondary"] = invalid
+for kind, integration in (
+    ("wireguard", wireguard),
+    ("tproxy", cases["valid-host-tproxy"]["host_integrations"][0]),
+):
+    invalid = copy.deepcopy(redirect)
+    invalid["host_integrations"].append(copy.deepcopy(integration))
+    cases[f"invalid-redirect-shared-{kind}"] = invalid
+invalid = copy.deepcopy(redirect)
+invalid["host_integrations"].append({
+    "type": "tun", "profile": "net-transparent", "firewall_rules": ["sing-box-auto-redirect"],
+    "devices": ["/dev/net/tun"], "schedules": [],
+    "settings": {"interface": "padm-tun", "address": "198.18.0.1/30"},
+})
+cases["invalid-redirect-shared-tun"] = invalid
+invalid = copy.deepcopy(cases["valid-protocol-21"])
+invalid["host_integrations"] = copy.deepcopy(redirect["host_integrations"])
+cases["invalid-redirect-protocol"] = invalid
+invalid = copy.deepcopy(redirect)
+extra = copy.deepcopy(invalid["core"]["protocols"][0])
+extra.update(listener_id="entry-second", public_port=4444)
+invalid["core"]["protocols"].append(extra)
+cases["valid-redirect-multi-entry"] = invalid
+for field in ("routing", "relay", "port_aliases"):
+    invalid = copy.deepcopy(redirect)
+    invalid[field] = copy.deepcopy(optional[field])
+    if field == "port_aliases":
+        invalid[field][0]["listener_id"] = invalid["core"]["protocols"][0]["listener_id"]
+    cases[f"invalid-redirect-{field}"] = invalid
 spec = copy.deepcopy(cases["reality-v3"])
 spec["core"]["type"] = spec["core"]["protocols"][0]["core"] = "sing-box"
 spec["core"]["protocols"][0]["address_families"] = ["ipv4"]
@@ -377,7 +444,8 @@ for file in "${TEST_ROOT}"/*.json; do
         cat "${TEST_ROOT}/validation.log" >&2
         fail "有效协议规格被拒绝: ${file##*/}"
     fi
-    [[ ( "${file##*/}" != invalid-tproxy-* && "${file##*/}" != invalid-block-ips-resolved-* ) ||
+    [[ ( "${file##*/}" != invalid-tproxy-* && "${file##*/}" != invalid-redirect-* &&
+        "${file##*/}" != invalid-block-ips-resolved-* ) ||
         "${actual}" != 0 ]] || fail "无效透明/解析后 IP 规格被接受: ${file##*/}"
     count=$((count + 1))
 done

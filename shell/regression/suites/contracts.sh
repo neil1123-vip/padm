@@ -265,7 +265,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
         docker-phase3-edit docker-phase3-entries docker-traditional-tls-transports docker-traditional-tls-base
         docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
-        docker-tproxy-ownership
+        docker-tproxy-ownership docker-redirect-focused
         docker-phase4-maintenance docker-routing-core-network-lifecycle docker-reality docker-setup-tls docker-phase4-lifecycle
         docker-reality-targets-direct docker-reality-parameters docker-sites
         docker-routing-direct-block-ip-workflow docker-routing-direct-block-csv-workflow docker-routing-core-policy-lifecycle

@@ -1183,11 +1183,11 @@ validateFeatureMatrix() {
         (if .status == "supported" then .network_mode == "host-cli" or (.profiles | length) > 0
         else true end);
       ["nginx", "tls-files", "acme-dns", "subscription", "acme-webroot", "acme-standalone",
-        "fail2ban", "wireguard", "tun", "tproxy"] as $legacy |
+        "fail2ban", "wireguard", "tun", "tproxy", "redirect"] as $legacy |
       ["subscription-traffic", "interactive-menu", "routing-tools", "core-lifecycle",
         "core-upgrade-assessment", "geo-data", "script-update", "uninstall", "reality-target-management",
         "reality-parameter-management", "reality-coexistence"] as $host_cli |
-      ["subscription-multiserver", "fail2ban", "wireguard", "tun", "tproxy",
+      ["subscription-multiserver", "fail2ban", "wireguard", "tun", "tproxy", "redirect",
         "internal-203-wireguard", "internal-204-tun", "internal-205-redirect-tproxy",
         "network-optimization"] as $host |
       ($legacy + $host_cli + $host + ["subscription-users", "site-static-redirect-alpn",
@@ -1216,7 +1216,7 @@ validateFeatureMatrix() {
         .value.network_mode == (if ($host_cli | index($entry.key)) != null then "host-cli"
           elif ($host | index($entry.key)) != null then "host" else "bridge" end)) and
       (.host_integrations | type == "object" and
-        keys == (["fail2ban", "fail2ban-control", "fail2ban-ssh", "tun", "tproxy", "wireguard"] | sort)) and
+        keys == (["fail2ban", "fail2ban-control", "fail2ban-ssh", "tun", "tproxy", "redirect", "wireguard"] | sort)) and
       all(.host_integrations | to_entries[];
         . as $entry |
         (.value | .status == "host-integrated" and .network_mode == "host" and
@@ -1287,6 +1287,8 @@ del(.host_integrations["fail2ban-ssh"])
 .host_integrations["fail2ban-ssh"].services = ["control","net-fail2ban-ssh"]
 .host_integrations["fail2ban-ssh"].address_families = ["ipv4","ipv6","dual"]
 .host_integrations["fail2ban-ssh"].capabilities = ["NET_ADMIN","SYS_PTRACE"]
+del(.host_integrations.redirect)
+.feature_matrix.redirect.network_mode = "bridge"
 .feature_matrix.fail2ban.profiles += ["net-fail2ban-ssh-unmanaged"]
 .feature_matrix["internal-203-wireguard"].profiles = ["net-fail2ban"]
 .feature_matrix["internal-204-tun"].host_capabilities = ["NET_ADMIN"]

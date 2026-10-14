@@ -42,6 +42,7 @@ export PADM_TEST_NET_IMAGE
 case "${PADM_NET_REAL_CASE:-fail2ban}" in
 fail2ban) bash "${PROJECT_ROOT}/docker/tests/fail2ban-real.sh" ;;
 tproxy) bash "${PROJECT_ROOT}/docker/tests/tproxy-real.sh" ;;
+redirect) bash "${PROJECT_ROOT}/docker/tests/redirect-real.sh" ;;
 tun) bash "${PROJECT_ROOT}/docker/tests/tun-real.sh" ;;
 *) printf 'unsupported isolated net test\n' >&2; exit 1 ;;
 esac

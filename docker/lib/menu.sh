@@ -1002,11 +1002,14 @@ dockerMenuIPv6() {
 }
 
 dockerMenuTProxy() {
-    local choice action port mark family state defaultPort defaultMark defaultFamily outputUid
+    local kind=${1:-tproxy} title=TProxy choice action port mark family state defaultPort defaultMark defaultFamily outputUid
+    local -a editArgs=()
+    [[ "${kind}" != redirect ]] || title=Redirect
     while :; do
         DOCKER_MENU_SIGNAL=0
-        printf '\nDocker TProxy 管理\n'
-        printf '%s\n' '1. 查看状态' '2. 启用 TProxy' '3. 修改 TProxy 参数' '4. 关闭 TProxy' \
+        printf '\nDocker %s 管理\n' "${title}"
+        [[ "${kind}" != redirect ]] || printf '仅捕获 TCP；UDP 保持原路由。\n'
+        printf '%s\n' '1. 查看状态' "2. 启用 ${title}" "3. 修改 ${title} 参数" "4. 关闭 ${title}" \
             '5. 设置本机转发 UID' '6. 关闭本机转发（保留 PREROUTING）' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -1015,43 +1018,51 @@ dockerMenuTProxy() {
         fi
         case "${choice}" in
         0) return 0 ;;
-        1) dockerMenuRun protocol tproxy-status || true ;;
+        1) dockerMenuRun protocol "${kind}-status" || true ;;
         2|3)
-            if ! state=$(dockerMenuRun protocol tproxy-status); then
+            if ! state=$(dockerMenuRun protocol "${kind}-status"); then
                 printf '%s\n' "${state}"
                 continue
             fi
             printf '%s\n' "${state}"
-            defaultPort=31298 defaultMark=129 defaultFamily=ipv4 action=--tproxy-enable
+            defaultPort=31298 defaultMark=129 defaultFamily=ipv4 action=--${kind}-enable
             if [[ "${choice}" == 3 ]]; then
                 defaultPort=$(jq -er 'select(.enabled == true) | .port' <<<"${state}") &&
-                    defaultMark=$(jq -er 'select(.enabled == true) | .mark' <<<"${state}") &&
                     defaultFamily=$(jq -er 'select(.enabled == true) | .family // "ipv4"' <<<"${state}") || continue
-                action=--tproxy-settings
+                [[ "${kind}" != tproxy ]] ||
+                    defaultMark=$(jq -er 'select(.enabled == true) | .mark' <<<"${state}") || continue
+                action=--${kind}-settings
             fi
-            dockerSetupRead port "TProxy 端口 [${defaultPort}，0 返回]: " "${defaultPort}" &&
-                dockerSetupRead mark "TProxy mark [${defaultMark}，0 返回]: " "${defaultMark}" &&
-                dockerSetupRead family "TProxy 地址族 ipv4/ipv6/dual [${defaultFamily}，0 返回]: " "${defaultFamily}" || continue
-            dockerMenuRun edit "${action}" "${port}" "${mark}" --tproxy-family "${family}" || true
+            dockerSetupRead port "${title} 端口 [${defaultPort}，0 返回]: " "${defaultPort}" || continue
+            editArgs=("${action}" "${port}")
+            if [[ "${kind}" == tproxy ]]; then
+                dockerSetupRead mark "TProxy mark [${defaultMark}，0 返回]: " "${defaultMark}" || continue
+                editArgs+=("${mark}")
+            fi
+            dockerSetupRead family "${title} 地址族 ipv4/ipv6/dual [${defaultFamily}，0 返回]: " "${defaultFamily}" || continue
+            dockerMenuRun edit "${editArgs[@]}" "--${kind}-family" "${family}" || true
             ;;
-        4) dockerMenuRun edit --tproxy-off || true ;;
+        4) dockerMenuRun edit "--${kind}-off" || true ;;
         5|6)
-            if ! state=$(dockerMenuRun protocol tproxy-status); then
+            if ! state=$(dockerMenuRun protocol "${kind}-status"); then
                 printf '%s\n' "${state}"
                 continue
             fi
             printf '%s\n' "${state}"
             port=$(jq -er 'select(.enabled == true) | .port' <<<"${state}") &&
-                mark=$(jq -er 'select(.enabled == true) | .mark' <<<"${state}") &&
                 family=$(jq -er 'select(.enabled == true) | .family // "ipv4"' <<<"${state}") || continue
+            editArgs=("--${kind}-settings" "${port}")
+            if [[ "${kind}" == tproxy ]]; then
+                mark=$(jq -er 'select(.enabled == true) | .mark' <<<"${state}") || continue
+                editArgs+=("${mark}")
+            fi
+            editArgs+=("--${kind}-family" "${family}")
             if [[ "${choice}" == 5 ]]; then
                 dockerSetupRead outputUid '本机转发 UID（1–2147483647，排除 10001；0 返回）: ' &&
                     [[ -n "${outputUid}" ]] || continue
-                dockerMenuRun edit --tproxy-settings "${port}" "${mark}" --tproxy-family "${family}" \
-                    --tproxy-output-uid "${outputUid}" || true
+                dockerMenuRun edit "${editArgs[@]}" "--${kind}-output-uid" "${outputUid}" || true
             else
-                dockerMenuRun edit --tproxy-settings "${port}" "${mark}" --tproxy-family "${family}" \
-                    --tproxy-output-off || true
+                dockerMenuRun edit "${editArgs[@]}" "--${kind}-output-off" || true
             fi
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
@@ -1107,7 +1118,7 @@ dockerMenuRouting() {
             '37. 单项替换 hosts 地址' '38. 新增 hosts 精确映射' \
             '39. 精确删除 hosts 映射' '40. 移除全部访问控制' \
             '41. 修改已有 DNS 上游' '42. 修改已有 SOCKS5 上游' '43. TProxy 管理' '44. TUN 管理' \
-            '45. IP 阻断加入域名解析结果（sing-box）' '46. IP 阻断仅匹配字面地址' '0. 返回'
+            '45. IP 阻断加入域名解析结果（sing-box）' '46. IP 阻断仅匹配字面地址' '47. Redirect TCP 管理' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1187,6 +1198,7 @@ dockerMenuRouting() {
         20) dockerMenuWarp ;;
         21) dockerMenuHttpRelay ;;
         43) dockerMenuTProxy ;;
+        47) dockerMenuTProxy redirect ;;
         44) dockerMenuTun ;;
         22|23)
             dockerSetupRead input '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&

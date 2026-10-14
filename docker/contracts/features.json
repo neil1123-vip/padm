@@ -236,7 +236,8 @@
     "fail2ban": "host-integrated",
     "wireguard": "host-integrated",
     "tun": "host-integrated",
-    "tproxy": "host-integrated"
+    "tproxy": "host-integrated",
+    "redirect": "host-integrated"
   },
   "feature_matrix": {
     "nginx": {
@@ -413,7 +414,16 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "5C.2b.1–5C.2b.2 菜单 17→43 和 CLI 提供单 Xray/sing-box Reality 的 IPv4/IPv6/双栈 PREROUTING TCP/UDP 管理，无其它宿主集成。可选指定 UID 的 OUTPUT 主动 TCP/UDP，范围 1–2147483647 排除 10001，root 核心、服务回包和本地目的绕过；默认关闭，修改省略保留旧 UID，关闭本机转发保留 PREROUTING。旧 schema 2/3 兼容，新模式 schema 4 和独立 bundle marker；任一族或链漂移保留全部资源及 state，完整核验后精确撤销。所选族须具备宿主转发和 TPROXY target，OUTPUT 另需 owner/conntrack/MARK。全主机 OUTPUT/Redirect、原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
+      "reason": "5C.2b.1–5C.2b.2 菜单 17→43 和 CLI 提供单 Xray/sing-box Reality 的 IPv4/IPv6/双栈 PREROUTING TCP/UDP 管理，无其它宿主集成。可选指定 UID 的 OUTPUT 主动 TCP/UDP，范围 1–2147483647 排除 10001，root 核心、服务回包和本地目的绕过；默认关闭，修改省略保留旧 UID，关闭本机转发保留 PREROUTING。旧 schema 2/3 兼容，新模式 schema 4 和独立 bundle marker；任一族或链漂移保留全部资源及 state，完整核验后精确撤销。所选族须具备宿主转发和 TPROXY target，OUTPUT 另需 owner/conntrack/MARK。全主机 OUTPUT、原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
+    },
+    "redirect": {
+      "status": "host-integrated",
+      "native_menu": "路由与访问控制",
+      "native_action": "Redirect/TProxy",
+      "profiles": ["net-transparent"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN"],
+      "reason": "有限 Redirect TCP 管理：单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING，可选指定 UID 的 OUTPUT 主动 TCP，无其它宿主集成，与 TUN/TProxy 互斥。root、10001、服务回包和本地目的绕过，完整审计两族两链后精确撤销，任一漂移保留资源与 state。UDP 保持原路由；捕获 TCP/UDP 须另选 TProxy。需 nat REDIRECT target，OUTPUT 另需 owner/conntrack。全主机 OUTPUT、原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "interactive-menu": {
       "status": "deferred",
@@ -476,7 +486,7 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "5C.2b.1–5C.2b.2 提供有限 TProxy 管理，范围与 tproxy 相同：单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING TCP/UDP、可选指定 UID 的 OUTPUT 主动 TCP/UDP、无其它宿主集成。root、10001、服务回包和本地目的不捕获；两族两链完整核验后精确撤销，任一漂移保留资源和 state，旧 schema 2/3 兼容。全主机 OUTPUT/Redirect、原生宿主/arm64/公网/重启/完整卸载及完整 205 管理仍待验。"
+      "reason": "5C.2b.1–5C.2b.2 提供有限 TProxy 管理，范围与 tproxy 相同；另提供有限 Redirect TCP 管理。均限单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING、可选指定 UID 的 OUTPUT 主动连接、无其它宿主集成。TProxy 为 TCP/UDP，Redirect 只支持 TCP；root、10001、服务回包和本地目的不捕获。两族两链完整核验后精确撤销，任一漂移保留资源和 state，旧 TProxy schema 2/3 兼容。全主机 OUTPUT、原生宿主/arm64/公网/重启/完整卸载及完整 205 管理仍待验。"
     },
     "internal-206-routing-rules": {
       "status": "deferred",
@@ -607,6 +617,15 @@
       "devices": ["/dev/net/tun"]
     },
     "tproxy": {
+      "status": "host-integrated",
+      "profile": "net-transparent",
+      "services": ["core", "net-transparent"],
+      "address_families": ["ipv4", "ipv6"],
+      "network_mode": "host",
+      "capabilities": ["NET_ADMIN"],
+      "devices": []
+    },
+    "redirect": {
       "status": "host-integrated",
       "profile": "net-transparent",
       "services": ["core", "net-transparent"],

@@ -1916,6 +1916,9 @@ tproxy_preflight() {
     fi
     ownership=${1:-unowned}
     ownership_root=${2:-$STATE_ROOT}
+    [ ! -e "$ownership_root/redirect.state" ] && [ ! -L "$ownership_root/redirect.state" ] &&
+        [ ! -e "$STATE_ROOT/redirect.state" ] && [ ! -L "$STATE_ROOT/redirect.state" ] ||
+        die "Redirect state conflicts with TProxy"
     [ "$#" -le 2 ] && { [ "$ownership" = owned ] || [ "$ownership" = unowned ]; } ||
         die "invalid TProxy family or ownership"
     integer "$requested_port" && [ "$requested_port" -ge 1 ] && [ "$requested_port" -le 65535 ] || die "invalid TProxy port"
@@ -1957,6 +1960,7 @@ tproxy_preflight() {
 
 tproxy_cleanup() (
     tp_expected_token=${1:-}
+    [ ! -e "$STATE_ROOT/redirect.state" ] && [ ! -L "$STATE_ROOT/redirect.state" ] || return 1
     tproxy_state_read "$STATE_ROOT" || return 1
     [ -z "$tp_expected_token" ] || [ "$tp_expected_token" = "$tp_token" ] || {
         echo "padm-net: TProxy owner was replaced; keeping resources and recovery state" >&2
@@ -2088,11 +2092,291 @@ tproxy_health() (
         requested_output_uid=$2; shift 2
     fi
     [ "$#" -eq 0 ] || return 1
-    tproxy_state_read "$STATE_ROOT" &&
+    [ ! -e "$STATE_ROOT/redirect.state" ] && [ ! -L "$STATE_ROOT/redirect.state" ] &&
+        tproxy_state_read "$STATE_ROOT" &&
         [ "$requested_port" = "$tp_port" ] && [ "$requested_mark" = "$tp_mark" ] &&
         [ "$requested_family" = "$tp_family" ] &&
         [ "$requested_output_uid" = "$tp_output_uid" ] &&
         [ "$tp_phase" = active ] && tproxy_audit full >/dev/null
+)
+
+redirect_state_text() {
+    printf 'schema_version=1\ntoken=%s\nchain=%s\nport=%s\nfamily=%s\noutput_uid=%s\nphase=%s\n' \
+        "$rd_token" "$rd_chain" "$rd_port" "$rd_family" "$rd_output_uid" "$rd_phase"
+}
+
+redirect_state_read() {
+    rd_root=${1:-$STATE_ROOT}
+    wireguard_state_directory "$rd_root" &&
+        wireguard_private_file "$rd_root/redirect.state" &&
+        [ "$(stat -c '%h' "$rd_root/redirect.state")" -eq 1 ] &&
+        [ "$(stat -c '%s' "$rd_root/redirect.state")" -le 512 ] || return 1
+    rd_token=$(sed -n 's/^token=//p' "$rd_root/redirect.state")
+    rd_chain=$(sed -n 's/^chain=//p' "$rd_root/redirect.state")
+    rd_port=$(sed -n 's/^port=//p' "$rd_root/redirect.state")
+    rd_family=$(sed -n 's/^family=//p' "$rd_root/redirect.state")
+    rd_output_uid=$(sed -n 's/^output_uid=//p' "$rd_root/redirect.state")
+    rd_phase=$(sed -n 's/^phase=//p' "$rd_root/redirect.state")
+    printf '%s\n' "$rd_token" | grep -Eq '^[a-f0-9]{32}$' || return 1
+    case "$rd_port" in 0*) return 1 ;; esac
+    [ "$rd_chain" = "padm-redirect-$(printf '%s' "$rd_token" | cut -c1-10)" ] &&
+        integer "$rd_port" && [ "$rd_port" -ge 1 ] && [ "$rd_port" -le 65535 ] &&
+        tproxy_versions "$rd_family" >/dev/null &&
+        { [ -z "$rd_output_uid" ] || tproxy_output_uid_valid "$rd_output_uid"; } &&
+        { [ "$rd_phase" = intent ] || [ "$rd_phase" = active ]; } || return 1
+    rd_output_chain=$rd_chain-out
+    # 固定字节格式拒绝重复字段、额外内容和 NUL，绝不执行 state。
+    redirect_state_text | cmp -s - "$rd_root/redirect.state"
+}
+
+redirect_state_write() (
+    umask 077
+    rd_stage=$(mktemp "$STATE_ROOT/.redirect-state.XXXXXX") || return 1
+    trap 'rm -f "$rd_stage"' EXIT
+    redirect_state_text >"$rd_stage" && chmod 0600 "$rd_stage" &&
+        mv -f "$rd_stage" "$STATE_ROOT/redirect.state"
+)
+
+redirect_audit() {
+    python3 - "$rd_token" "$rd_chain" "$rd_port" "$rd_output_uid" "$rd_family" \
+        "${1:-partial}" "${rd_created:-}" "${2:-$rd_family}" <<'PY'
+import shlex
+import subprocess
+import sys
+
+token, chain, port, output_uid, family, mode, created, target_family = sys.argv[1:]
+comment = "padm-redirect:" + token
+output_chain = chain + "-out"
+families = {"ipv4": [4], "ipv6": [6], "dual": [4, 6]}
+
+def audit(version):
+    active_mode = mode if version in families[family] else "empty"
+    result = subprocess.run(["iptables" if version == 4 else "ip6tables",
+                             "-w", "-t", "nat", "-S"], text=True, capture_output=True)
+    if result.returncode:
+        raise ValueError("cannot inspect Redirect resources")
+    present = [False] * 6
+    chains = {chain: False, output_chain: False}
+    order = {chain: [], output_chain: []}
+    for line in result.stdout.splitlines():
+        args = shlex.split(line)
+        if len(args) == 2 and args[0] == "-N":
+            current = args[1]
+            if current == "padm-redirect" or (
+                    current.startswith("padm-redirect-") and current not in chains):
+                raise ValueError("unverified Redirect chain")
+            if current in chains:
+                if current == output_chain and not output_uid:
+                    raise ValueError("unexpected OUTPUT chain")
+                if chains[current]:
+                    raise ValueError("duplicate chain")
+                chains[current] = True
+            continue
+        if len(args) < 2 or args[0] != "-A":
+            continue
+        own_chain = args[1] in chains
+        own_target = any(key in args and args.index(key) + 1 < len(args)
+                         and args[args.index(key) + 1] in chains for key in ("-j", "-g"))
+        own_comment = ("--comment" in args and args.index("--comment") + 1 < len(args)
+                       and args[args.index("--comment") + 1] == comment)
+        if not (own_chain or own_target or own_comment):
+            continue
+        if active_mode == "empty" or not own_comment or len(args) % 2:
+            raise ValueError("foreign chain reference")
+        values, modules = {}, []
+        for index in range(2, len(args), 2):
+            key, value = args[index:index + 2]
+            if key == "-m":
+                modules.append(value)
+            elif key in values:
+                raise ValueError("duplicate rule option")
+            else:
+                values[key] = value
+        base = {"--comment": comment}
+        which = None
+        for current, hook, offset in ((chain, "PREROUTING", 0), (output_chain, "OUTPUT", 3)):
+            if offset and not output_uid:
+                continue
+            if args[1] == hook and values == dict(base, **{"-j": current}) and modules == ["comment"]:
+                which = offset
+            elif args[1] == current:
+                if values == dict(base, **{"--dst-type": "LOCAL", "-j": "RETURN"}) and sorted(modules) == ["addrtype", "comment"]:
+                    which = offset + 1
+                else:
+                    expected = dict(base, **{"-p": "tcp", "-j": "REDIRECT", "--to-ports": port})
+                    expected_modules = ["comment"]
+                    if offset:
+                        expected.update({"--uid-owner": output_uid, "--ctdir": "ORIGINAL"})
+                        expected_modules += ["conntrack", "owner"]
+                    # iptables -S 会回显隐式的 tcp 模块，允许其规范形式。
+                    if values == expected and sorted(modules) in (expected_modules, sorted(expected_modules + ["tcp"])):
+                        which = offset + 2
+        if which is None or present[which]:
+            raise ValueError("changed or duplicate chain rule")
+        present[which] = True
+        if own_chain:
+            order[args[1]].append(which)
+    for current, offset, identity in ((chain, 0, f"ipv{version}"),
+                                      (output_chain, 3, f"ipv{version}-out")):
+        if order[current] != sorted(order[current]):
+            raise ValueError("changed chain rule order")
+        if active_mode == "empty":
+            if chains[current]:
+                raise ValueError("chain already exists")
+        elif chains[current] and not any(present[offset + 1:offset + 3]) and identity not in created.split():
+            raise ValueError("empty chain has no verifiable owner")
+        elif not chains[current] and any(present[offset:offset + 3]):
+            raise ValueError("missing referenced chain")
+    complete = chains[chain] and all(present[:3])
+    if output_uid:
+        complete &= chains[output_chain] and all(present[3:])
+    if active_mode == "full" and not complete:
+        raise ValueError("incomplete Redirect resources")
+    return [version, *map(int, [*present[:3], chains[chain], *present[3:], chains[output_chain]])]
+
+# 两族两链先整体核验，任一漂移都不能先撤销其它资源。
+rows = [audit(version) for version in sorted(set(families[family] + families[target_family]))]
+for row in rows:
+    print(" ".join(map(str, row)))
+PY
+}
+
+redirect_arguments() {
+    requested_port=$1
+    shift
+    requested_family=ipv4 requested_output_uid=''
+    case "${1:-}" in ipv4|ipv6|dual) requested_family=$1; shift ;; esac
+    if [ "${1:-}" = --output-uid ]; then
+        [ "$#" -ge 2 ] && tproxy_output_uid_valid "$2" || return 1
+        requested_output_uid=$2; shift 2
+    fi
+    case "$requested_port" in 0*) return 1 ;; esac
+    integer "$requested_port" && [ "$requested_port" -ge 1 ] &&
+        [ "$requested_port" -le 65535 ] || return 1
+    # 预检在尾部接受归属参数，其它入口必须没有剩余参数。
+    rd_remaining=$#
+}
+
+redirect_preflight() (
+    redirect_arguments "$@" || die "invalid Redirect arguments"
+    shift "$(($# - rd_remaining))"
+    ownership=${1:-unowned} ownership_root=${2:-$STATE_ROOT}
+    [ "$#" -le 2 ] && { [ "$ownership" = owned ] || [ "$ownership" = unowned ]; } ||
+        die "invalid Redirect family or ownership"
+    [ ! -e "$ownership_root/tproxy.state" ] && [ ! -L "$ownership_root/tproxy.state" ] &&
+        [ ! -e "$STATE_ROOT/tproxy.state" ] && [ ! -L "$STATE_ROOT/tproxy.state" ] ||
+        die "TProxy state conflicts with Redirect"
+    need python3
+    for rd_version in $(tproxy_versions "$requested_family"); do
+        rd_tool=iptables
+        [ "$rd_version" = 4 ] || rd_tool=ip6tables
+        need "$rd_tool"
+        "$rd_tool" -w -t nat -n -L >/dev/null 2>&1 || die "IPv${rd_version} nat table is unavailable"
+        "$rd_tool" -w -j REDIRECT -h >/dev/null 2>&1 || die "IPv${rd_version} REDIRECT target is unavailable"
+        if [ -n "$requested_output_uid" ]; then
+            "$rd_tool" -w -m owner -h >/dev/null 2>&1 &&
+                "$rd_tool" -w -m conntrack -h >/dev/null 2>&1 ||
+                die "IPv${rd_version} OUTPUT matches are unavailable"
+        fi
+    done
+    if [ -e "$ownership_root/redirect.state" ] || [ -L "$ownership_root/redirect.state" ]; then
+        [ "$ownership" = owned ] && redirect_state_read "$ownership_root" &&
+            redirect_audit partial "$requested_family" >/dev/null ||
+            die "Redirect ownership is unverified; refusing migration"
+    else
+        rd_token=00000000000000000000000000000000 rd_chain=padm-redirect-0000000000
+        rd_port=$requested_port rd_family=$requested_family rd_output_uid=$requested_output_uid
+        redirect_audit empty >/dev/null || die "Redirect resources are already in use"
+    fi
+)
+
+redirect_cleanup() (
+    rd_expected_token=${1:-}
+    [ ! -e "$STATE_ROOT/tproxy.state" ] && [ ! -L "$STATE_ROOT/tproxy.state" ] || return 1
+    redirect_state_read "$STATE_ROOT" || return 1
+    [ -z "$rd_expected_token" ] || [ "$rd_expected_token" = "$rd_token" ] || return 1
+    rd_presence=$(redirect_audit partial) || {
+        echo "padm-net: Redirect ownership changed; keeping resources and recovery state" >&2
+        return 1
+    }
+    rd_comment=padm-redirect:$rd_token
+    while read -r rd_version rd_hook rd_local rd_tcp rd_chain_present rd_output_hook rd_output_local rd_output_tcp rd_output_present; do
+        rd_tool=iptables
+        [ "$rd_version" = 4 ] || rd_tool=ip6tables
+        [ "$rd_output_hook" = 0 ] || "$rd_tool" -w -t nat -D OUTPUT -m comment --comment "$rd_comment" -j "$rd_output_chain" || return 1
+        [ "$rd_output_tcp" = 0 ] || "$rd_tool" -w -t nat -D "$rd_output_chain" -p tcp -m owner --uid-owner "$rd_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || return 1
+        [ "$rd_output_local" = 0 ] || "$rd_tool" -w -t nat -D "$rd_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$rd_comment" -j RETURN || return 1
+        [ "$rd_output_present" = 0 ] || "$rd_tool" -w -t nat -X "$rd_output_chain" || return 1
+        [ "$rd_hook" = 0 ] || "$rd_tool" -w -t nat -D PREROUTING -m comment --comment "$rd_comment" -j "$rd_chain" || return 1
+        [ "$rd_tcp" = 0 ] || "$rd_tool" -w -t nat -D "$rd_chain" -p tcp -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || return 1
+        [ "$rd_local" = 0 ] || "$rd_tool" -w -t nat -D "$rd_chain" -m addrtype --dst-type LOCAL -m comment --comment "$rd_comment" -j RETURN || return 1
+        [ "$rd_chain_present" = 0 ] || "$rd_tool" -w -t nat -X "$rd_chain" || return 1
+    done <<EOF
+$rd_presence
+EOF
+    redirect_audit empty >/dev/null && rm -f "$STATE_ROOT/redirect.state"
+)
+
+redirect_run() {
+    redirect_arguments "$@" && [ "$rd_remaining" -eq 0 ] || die "invalid Redirect arguments"
+    ownership=unowned
+    [ ! -e "$STATE_ROOT/redirect.state" ] && [ ! -L "$STATE_ROOT/redirect.state" ] || ownership=owned
+    redirect_preflight "$@" "$ownership"
+    wireguard_state_directory "$STATE_ROOT" || die "Redirect state directory is unsafe"
+    if [ "$ownership" = owned ]; then
+        redirect_cleanup || die "Redirect previous state could not be revoked"
+    fi
+    rd_port=$requested_port rd_family=$requested_family rd_output_uid=$requested_output_uid
+    rd_token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+    [ "${#rd_token}" -eq 32 ] || die "Redirect random source failed"
+    rd_chain=padm-redirect-$(printf '%s' "$rd_token" | cut -c1-10)
+    rd_output_chain=$rd_chain-out rd_phase=intent rd_created='' start_signal=0
+    rd_comment=padm-redirect:$rd_token
+    redirect_audit empty >/dev/null || die "Redirect resources changed before start"
+    trap 'rd_status=$?; trap - EXIT; if [ -e "$STATE_ROOT/redirect.state" ] || [ -L "$STATE_ROOT/redirect.state" ]; then redirect_cleanup "${rd_token:-}" || rd_status=1; fi; exit "$rd_status"' EXIT
+    trap 'start_signal=130' INT
+    trap 'start_signal=143' TERM
+    redirect_state_write || die "cannot persist Redirect ownership"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    for rd_version in $(tproxy_versions "$rd_family"); do
+        rd_tool=iptables
+        [ "$rd_version" = 4 ] || rd_tool=ip6tables
+        "$rd_tool" -w -t nat -N "$rd_chain" || die "Redirect chain failed to start"
+        rd_created="$rd_created ipv$rd_version"
+        [ "$start_signal" -eq 0 ] || exit "$start_signal"
+        "$rd_tool" -w -t nat -A "$rd_chain" -m addrtype --dst-type LOCAL -m comment --comment "$rd_comment" -j RETURN || die "Redirect local rule failed to start"
+        [ "$start_signal" -eq 0 ] || exit "$start_signal"
+        "$rd_tool" -w -t nat -A "$rd_chain" -p tcp -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || die "Redirect TCP rule failed to start"
+        [ "$start_signal" -eq 0 ] || exit "$start_signal"
+        "$rd_tool" -w -t nat -I PREROUTING 1 -m comment --comment "$rd_comment" -j "$rd_chain" || die "Redirect hook failed to start"
+        [ "$start_signal" -eq 0 ] || exit "$start_signal"
+        if [ -n "$rd_output_uid" ]; then
+            "$rd_tool" -w -t nat -N "$rd_output_chain" || die "Redirect OUTPUT chain failed to start"
+            rd_created="$rd_created ipv$rd_version-out"
+            [ "$start_signal" -eq 0 ] || exit "$start_signal"
+            "$rd_tool" -w -t nat -A "$rd_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$rd_comment" -j RETURN || die "Redirect OUTPUT local rule failed to start"
+            [ "$start_signal" -eq 0 ] || exit "$start_signal"
+            # 仅捕获选中 UID 主动 TCP；核心 root 拨号、UDP 和服务回复保留原路径。
+            "$rd_tool" -w -t nat -A "$rd_output_chain" -p tcp -m owner --uid-owner "$rd_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$rd_comment" -j REDIRECT --to-ports "$rd_port" || die "Redirect OUTPUT TCP rule failed to start"
+            [ "$start_signal" -eq 0 ] || exit "$start_signal"
+            "$rd_tool" -w -t nat -I OUTPUT 1 -m comment --comment "$rd_comment" -j "$rd_output_chain" || die "Redirect OUTPUT hook failed to start"
+            [ "$start_signal" -eq 0 ] || exit "$start_signal"
+        fi
+    done
+    redirect_audit full >/dev/null || die "Redirect ownership failed after start"
+    rd_created='' rd_phase=active
+    redirect_state_write || die "cannot commit Redirect ownership"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    wait_forever
+}
+
+redirect_health() (
+    redirect_arguments "$@" && [ "$rd_remaining" -eq 0 ] || return 1
+    [ ! -e "$STATE_ROOT/tproxy.state" ] && [ ! -L "$STATE_ROOT/tproxy.state" ] &&
+        redirect_state_read "$STATE_ROOT" &&
+        [ "$requested_port" = "$rd_port" ] && [ "$requested_family" = "$rd_family" ] &&
+        [ "$requested_output_uid" = "$rd_output_uid" ] &&
+        [ "$rd_phase" = active ] && redirect_audit full >/dev/null
 )
 
 case "${1:-idle}" in
@@ -2116,6 +2400,7 @@ preflight)
     fail2ban-ssh) shift; fail2ban_ssh_preflight "$@" ;;
     tun) shift; tun_preflight "$@" ;;
     tproxy) shift; tproxy_preflight "$@" ;;
+    redirect) shift; redirect_preflight "$@" ;;
     port-hopping) shift; port_hopping_preflight "$@" ;;
     *) die "unsupported preflight" ;;
     esac
@@ -2136,6 +2421,9 @@ fail2ban-ssh)
     ;;
 tproxy)
     shift; [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die "tproxy requires port, mark, optional family and output UID"; tproxy_run "$@"
+    ;;
+redirect)
+    shift; [ "$#" -ge 1 ] && [ "$#" -le 4 ] || die "redirect requires port, optional family and output UID"; redirect_run "$@"
     ;;
 tun-resources)
     shift
@@ -2192,6 +2480,9 @@ fail2ban-ssh-action)
     ;;
 tproxy-health)
     shift; [ "$#" -ge 2 ] && [ "$#" -le 5 ] || exit 1; tproxy_health "$@"
+    ;;
+redirect-health)
+    shift; [ "$#" -ge 1 ] && [ "$#" -le 4 ] || exit 1; redirect_health "$@"
     ;;
 exec)
     shift

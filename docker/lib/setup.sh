@@ -825,7 +825,7 @@ dockerProtocolCommand() (
     local -a targetArgs=()
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
-    list|stream-status|routing-status|port-alias-status|tproxy-status|tun-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    list|stream-status|routing-status|port-alias-status|tproxy-status|redirect-status|tun-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
     links|cdn-status|xhttp-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
@@ -896,11 +896,12 @@ dockerProtocolCommand() (
     dockerEditBaselineValidate "${original}" "${workspace}" &&
         dockerConfigureSpecMigrate "${original}" "${normalized}" &&
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
-    if [[ "${action}" == tproxy-status ]]; then
+    if [[ "${action}" == tproxy-status || "${action}" == redirect-status ]]; then
         # 规格状态不冒充内核健康；运行验收仍由 validate 与服务健康检查提供。
-        jq '[.host_integrations[] | select(.type == "tproxy")][0] as $tproxy |
+        jq --arg kind "${action%-status}" '[.host_integrations[] | select(.type == $kind)][0] as $tproxy |
           {enabled:($tproxy != null),port:($tproxy.settings.port // null),
-           mark:($tproxy.settings.mark // null),family:($tproxy.settings.family // "ipv4"),hook:"PREROUTING"} +
+           family:($tproxy.settings.family // "ipv4"),hook:"PREROUTING"} +
+          (if $kind == "tproxy" then {mark:($tproxy.settings.mark // null)} else {} end) +
           (if $tproxy.settings | has("output_uid") then
             {output_uid:$tproxy.settings.output_uid,hooks:["PREROUTING","OUTPUT"]}
            else {} end)' "${normalized}"
@@ -1305,7 +1306,7 @@ dockerEditFields() {
                         if .id == 21 or .id == 22 then .websocket.backend_port
                         elif .id == 23 then .httpupgrade.backend_port
                         elif .id == 24 or .id == 25 then .grpc_tls.backend_port else .public_port end] +
-                       [$r.host_integrations[] | select(.type == "tproxy") | .settings.port] +
+                       [$r.host_integrations[] | select(.type == "tproxy" or .type == "redirect") | .settings.port] +
                        [if $targetCore == "xray" then 10085 else 10087 end]) as $used |
                       .[$transport].backend_port = first(range(
                         (if .id == 23 then 31306 elif .id == 24 then 31301
@@ -1492,7 +1493,7 @@ dockerEditCommand() {
     local routingDomains='[]' routingOldDomains='[]' routingDomainsField=domains
     local routingOldIp= routingNewIp= routingHost=
     local httpRelay= httpRelayFile= httpRelayPort=0 httpRelaySources='[]'
-    local tproxyAction= tproxyPort=0 tproxyMark=0 tproxyFamily= tproxyOutput= tunAction=
+    local tproxyAction= tproxyKind= transparentKind= tproxyPort=0 tproxyMark=0 tproxyFamily= tproxyOutput= tunAction=
     local portAlias= portAliasListener= portAliasPort= portAliasOldPort=
     local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
     local portHoppingIpv4= portHoppingIpv6=
@@ -1692,36 +1693,61 @@ dockerEditCommand() {
             ' 2>/dev/null) || return "${PADM_DOCKER_RC_USAGE}"
             shift 2
             ;;
-        --tproxy-enable|--tproxy-settings)
+        --tproxy-enable|--tproxy-settings|--redirect-enable|--redirect-settings)
+            transparentKind=${1#--}
+            transparentKind=${transparentKind%%-*}
+            [[ -z "${tproxyKind}" || "${tproxyKind}" == "${transparentKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            if [[ "${transparentKind}" == redirect ]]; then
+                [[ "$#" -ge 2 && -z "${tproxyAction}" &&
+                    "$2" =~ ^[1-9][0-9]{0,4}$ && "$2" -le 65535 ]] ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                tproxyKind=redirect tproxyAction=${1#--redirect-} tproxyPort=$2
+                shift 2
+                continue
+            fi
             [[ "$#" -ge 3 && -z "${tproxyAction}" &&
                 "$2" =~ ^[1-9][0-9]{0,4}$ && "$2" -le 65535 &&
                 "$3" =~ ^[1-9][0-9]{0,9}$ && "$3" -le 2147483647 &&
                 "$3" != 253 && "$3" != 254 && "$3" != 255 ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            tproxyAction=${1#--tproxy-} tproxyPort=$2 tproxyMark=$3
+            tproxyKind=tproxy tproxyAction=${1#--tproxy-} tproxyPort=$2 tproxyMark=$3
             shift 3
             ;;
-        --tproxy-off)
-            [[ -z "${tproxyAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+        --tproxy-off|--redirect-off)
+            transparentKind=${1#--}
+            transparentKind=${transparentKind%%-*}
+            [[ -z "${tproxyAction}" && ( -z "${tproxyKind}" || "${tproxyKind}" == "${transparentKind}" ) ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            tproxyKind=${transparentKind}
             tproxyAction=off
             shift
             ;;
-        --tproxy-family)
+        --tproxy-family|--redirect-family)
+            transparentKind=${1#--}
+            transparentKind=${transparentKind%%-*}
             [[ "$#" -ge 2 && -z "${tproxyFamily}" &&
+                ( -z "${tproxyKind}" || "${tproxyKind}" == "${transparentKind}" ) &&
                 ( "$2" == ipv4 || "$2" == ipv6 || "$2" == dual ) ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            tproxyFamily=$2
+            tproxyKind=${transparentKind} tproxyFamily=$2
             shift 2
             ;;
-        --tproxy-output-uid)
+        --tproxy-output-uid|--redirect-output-uid)
+            transparentKind=${1#--}
+            transparentKind=${transparentKind%%-*}
             [[ "$#" -ge 2 && -z "${tproxyOutput}" && "$2" =~ ^[1-9][0-9]{0,9}$ &&
+                ( -z "${tproxyKind}" || "${tproxyKind}" == "${transparentKind}" ) &&
                 "$2" -le 2147483647 && "$2" != 10001 ]] || return "${PADM_DOCKER_RC_USAGE}"
-            tproxyOutput=$2
+            tproxyKind=${transparentKind} tproxyOutput=$2
             shift 2
             ;;
-        --tproxy-output-off)
-            [[ -z "${tproxyOutput}" ]] || return "${PADM_DOCKER_RC_USAGE}"
-            tproxyOutput=off
+        --tproxy-output-off|--redirect-output-off)
+            transparentKind=${1#--}
+            transparentKind=${transparentKind%%-*}
+            [[ -z "${tproxyOutput}" && ( -z "${tproxyKind}" || "${tproxyKind}" == "${transparentKind}" ) ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            tproxyKind=${transparentKind} tproxyOutput=off
             shift
             ;;
         --tun-enable|--tun-off)
@@ -2146,7 +2172,7 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${fail2banAction}" && -z "${cdnAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tunAction}" ) ]] || {
-        dockerError 'TProxy 专项编辑不能与规格导入或其它专项动作组合'
+        dockerError '透明代理专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
     [[ -z "${tunAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
@@ -2250,9 +2276,9 @@ dockerEditCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${tproxyAction}" ]]; then
         jq --arg action "${tproxyAction}" --argjson port "${tproxyPort}" --argjson mark "${tproxyMark}" \
-            --arg family "${tproxyFamily}" --arg output "${tproxyOutput}" '
-          [.host_integrations[] | select(.type == "tproxy")] as $current |
-          ({port:$port,mark:$mark} +
+            --arg kind "${tproxyKind:-tproxy}" --arg family "${tproxyFamily}" --arg output "${tproxyOutput}" '
+          [.host_integrations[] | select(.type == $kind)] as $current |
+          ({port:$port} + (if $kind == "tproxy" then {mark:$mark} else {} end) +
             (if $family != "" then {family:$family}
             elif $action == "settings" and ($current[0].settings // {} | has("family")) then
               {family:$current[0].settings.family}
@@ -2263,25 +2289,25 @@ dockerEditCommand() {
                {output_uid:$current[0].settings.output_uid}
              else {} end)) as $settings |
           if $action == "off" then
-            if ($current | length) != 1 then error("TProxy 未启用")
-            else .host_integrations |= map(select(.type != "tproxy")) end
+            if ($current | length) != 1 then error("透明代理未启用")
+            else .host_integrations |= map(select(.type != $kind)) end
           else
             if .core.secondary_type != null or (.host_integrations | length) != ($current | length) or
               any(.core.protocols[]; .id != 1 and .id != 2 and .id != 26)
-            then error("TProxy 仅支持单核心 Reality，不能与其它宿主集成共存")
+            then error("透明代理仅支持单核心 Reality，不能与其它宿主集成共存")
             elif $action == "enable" then
-              if ($current | length) != 0 then error("TProxy 已启用") else
-                .host_integrations += [{type:"tproxy",profile:"net-transparent",
-                  firewall_rules:["padm-tproxy"],devices:[],schedules:[],settings:$settings}]
+              if ($current | length) != 0 then error("透明代理已启用") else
+                .host_integrations += [{type:$kind,profile:"net-transparent",
+                  firewall_rules:["padm-" + $kind],devices:[],schedules:[],settings:$settings}]
               end
             elif ($current | length) != 1 or $current[0].settings == $settings
-            then error("TProxy 未启用或参数没有变化")
-            else .host_integrations |= map(if .type == "tproxy" then .settings = $settings else . end)
+            then error("透明代理未启用或参数没有变化")
+            else .host_integrations |= map(if .type == $kind then .settings = $settings else . end)
             end
           end
         ' "${draft}" >"${draft}.next" 2>/dev/null &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
-            dockerError 'TProxy 动作需要匹配当前状态和不同参数；仅支持单核心 Reality，不能与其它宿主集成共存'
+            dockerError '透明代理动作需要匹配当前状态和不同参数；仅支持单核心 Reality，不能与其它宿主集成共存'
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
@@ -2996,6 +3022,7 @@ dockerEditCompatibilityValidate() {
         --arg routing_host "${routingHost:-}" --arg routing_ip "${routingNewIp:-}" \
         --arg http_relay "${httpRelay:-}" \
         --arg tproxy_action "${tproxyAction:-}" \
+        --arg tproxy_kind "${tproxyKind:-tproxy}" \
         --arg tun_action "${tunAction:-}" \
         --arg port_alias "${portAlias:-}" \
         --arg alias_listener "${portAliasListener:-}" --arg alias_port "${portAliasPort:-}" \
@@ -3058,16 +3085,16 @@ dockerEditCompatibilityValidate() {
           ($old | without_tun) == ($new | without_tun)
         else $new == ($old | without_tun) end
        elif $tproxy_action != "" then
-        def without_tproxy: .host_integrations |= map(select(.type != "tproxy"));
+        def without_tproxy: .host_integrations |= map(select(.type != $tproxy_kind));
         def without_tproxy_settings:
-          .host_integrations |= map(if .type == "tproxy" then del(.settings.port,.settings.mark,.settings.family,.settings.output_uid) else . end);
+          .host_integrations |= map(if .type == $tproxy_kind then del(.settings.port,.settings.mark,.settings.family,.settings.output_uid) else . end);
         if $tproxy_action == "settings" then
-          ([$old.host_integrations[] | select(.type == "tproxy")] | length) == 1 and
-          ([$new.host_integrations[] | select(.type == "tproxy")] | length) == 1 and
+          ([$old.host_integrations[] | select(.type == $tproxy_kind)] | length) == 1 and
+          ([$new.host_integrations[] | select(.type == $tproxy_kind)] | length) == 1 and
           ($old | without_tproxy_settings) == ($new | without_tproxy_settings)
         elif $tproxy_action == "enable" then
-          ([$old.host_integrations[] | select(.type == "tproxy")] | length) == 0 and
-          ([$new.host_integrations[] | select(.type == "tproxy")] | length) == 1 and
+          ([$old.host_integrations[] | select(.type == $tproxy_kind)] | length) == 0 and
+          ([$new.host_integrations[] | select(.type == $tproxy_kind)] | length) == 1 and
           ($old | without_tproxy) == ($new | without_tproxy)
         else
           $new == ($old | without_tproxy)

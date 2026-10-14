@@ -337,7 +337,7 @@ try {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
     } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-control-log-cron-real', 'docker-routing-ipv6-real',
         'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real', 'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-cdn-entries-real', 'docker-alpn-real', 'docker-xhttp-real', 'docker-hy2-sites-real', 'docker-fail2ban-real',
-        'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real', 'docker-tun-real')) {
+        'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real')) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
         @('--privileged', '--mount', 'type=volume,dst=/n')
     } elseif ($Selector -in @('docker-ssh-driver', 'docker-contracts', 'docker-contracts-fast',
@@ -417,7 +417,7 @@ try {
     }
     if ($Selector -in @('docker-control-two-deployment-real', 'docker-control-log-cron-real', 'docker-routing-ipv6-real',
         'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real', 'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-cdn-entries-real', 'docker-alpn-real', 'docker-xhttp-real', 'docker-hy2-sites-real', 'docker-fail2ban-real',
-        'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real', 'docker-tun-real')) {
+        'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real')) {
         # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。
         $references = [ordered]@{
             xray = 'padm-local/padm-xray:control-4c4b'
@@ -433,7 +433,7 @@ try {
                 'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
                 net = 'padm-local/padm-net:control-4c4b'
             }
-        } elseif ($Selector -eq 'docker-tproxy-real') {
+        } elseif ($Selector -in @('docker-tproxy-real', 'docker-redirect-real')) {
             $references = [ordered]@{
                 xray = 'padm-local/padm-xray:control-4c4b'
                 'sing-box' = 'padm-local/padm-sing-box:tls-3b4'

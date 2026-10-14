@@ -763,7 +763,7 @@ Root core traffic, service replies and local destinations keep their original pa
 OUTPUT defaults to off; settings changes retain the UID when omitted.
 `--tproxy-output-off` keeps PREROUTING active. This mode needs owner/conntrack/MARK,
 schema 4 ownership of both chains, and the `x-padm-tproxy-output-uid` bundle marker.
-Whole-host OUTPUT and Redirect remain deferred. Each selected family requires
+Whole-host OUTPUT remains deferred. Each selected family requires
 host forwarding and its TPROXY target; preflight does not change sysctl.
 IPv4 schema 2 state remains compatible. IPv6/dual use schema 3 and one token
 binds each family's resources. Drift in either family preserves all resources
@@ -774,6 +774,35 @@ running service. Status reports the specification; use `validate` for health.
 Real TCP/UDP forwarding and clean shutdown passed for both cores and all three
 families in isolated Linux amd64. Native host reboot, arm64, public-network and
 complete 5C acceptance remain pending.
+
+Manage Redirect TCP through menu `17 → 47`:
+
+```bash
+padm-docker protocol redirect-status
+padm-docker edit --redirect-enable 31298 --redirect-family dual
+padm-docker edit --redirect-settings 31299 --redirect-output-uid 65534
+padm-docker edit --redirect-settings 31299 --redirect-output-off
+padm-docker edit --redirect-off
+```
+
+This supports existing Reality `1/2/26` listeners on one Xray or sing-box core,
+including multiple listeners on that core, without another host integration or
+secondary core. Redirect captures TCP only; UDP keeps its original route.
+Choose TProxy for transparent TCP/UDP. Families are `ipv4/ipv6/dual`, defaulting
+to IPv4; settings changes retain the family when omitted. Optional OUTPUT
+captures TCP initiated by one UID with the same limits as TProxy. It defaults
+to off and retains the old UID when omitted. Local destinations, service replies
+and root core traffic bypass capture.
+The core uses host networking, root and `NET_ADMIN`. Each selected family needs
+NAT REDIRECT; OUTPUT also needs owner/conntrack. Preflight does not change sysctl.
+Private `redirect.state` binds both families and PREROUTING/OUTPUT chains to one
+random token. All resources are audited before exact removal; any drift retains
+all resources and state. No chain flush or conntrack deletion is performed.
+Enable, settings and disable use the existing candidate and failure recovery
+transaction. Old bundles require `x-padm-redirect`.
+Real TCP capture, unchanged UDP paths and production Compose removal passed for
+both cores and all three families in isolated Linux amd64. Whole-host OUTPUT,
+native host, arm64, public network, reboot and complete uninstall remain pending.
 
 Manage TUN through menu `17 → 44`:
 

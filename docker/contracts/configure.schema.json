@@ -15,6 +15,7 @@
   "x-padm-ssh-fail2ban": true,
   "x-padm-tproxy-ipv6": true,
   "x-padm-tproxy-output-uid": true,
+  "x-padm-redirect": true,
   "x-padm-site-content": true,
   "x-padm-site-templates": true,
   "x-padm-hy2-local-site": true,
@@ -682,12 +683,33 @@
           {"$ref": "#/$defs/fail2ban_control_integration"},
           {"$ref": "#/$defs/fail2ban_ssh_integration"},
           {"$ref": "#/$defs/tun_integration"},
-          {"$ref": "#/$defs/tproxy_integration"}
+          {"$ref": "#/$defs/tproxy_integration"},
+          {"$ref": "#/$defs/redirect_integration"}
         ]
       }
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "host_integrations": {"contains": {"properties": {"type": {"const": "redirect"}}}}
+        }
+      },
+      "then": {
+        "properties": {
+          "host_integrations": {"maxItems": 1},
+          "core": {
+            "properties": {
+              "secondary_type": {"type": "null"},
+              "protocols": {
+                "items": {"properties": {"id": {"enum": [1, 2, 26]}}}
+              }
+            }
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {
@@ -758,7 +780,7 @@
         "properties": {
           "schema_version": {"const": 3},
           "host_integrations": {
-            "items": {"properties": {"type": {"not": {"enum": ["tun", "tproxy"]}}}}
+            "items": {"properties": {"type": {"not": {"enum": ["tun", "tproxy", "redirect"]}}}}
           }
         }
       }
@@ -769,7 +791,7 @@
         "properties": {
           "schema_version": {"const": 3},
           "host_integrations": {
-            "items": {"properties": {"type": {"not": {"enum": ["tun", "tproxy"]}}}}
+            "items": {"properties": {"type": {"not": {"enum": ["tun", "tproxy", "redirect"]}}}}
           }
         }
       }
@@ -853,7 +875,7 @@
           },
           "host_integrations": {
             "items": {
-              "if": {"properties": {"type": {"const": "tproxy"}}},
+              "if": {"properties": {"type": {"enum": ["tproxy", "redirect"]}}},
               "then": {"properties": {"settings": {"properties": {"port": {"not": {"const": 80}}}}}}
             }
           }
@@ -1449,6 +1471,33 @@
               "properties": {
                 "port": {"$ref": "#/$defs/port"},
                 "mark": {"type": "integer", "minimum": 1, "maximum": 2147483647, "not": {"enum": [253, 254, 255]}},
+                "family": {"enum": ["ipv4", "ipv6", "dual"]},
+                "output_uid": {"type": "integer", "minimum": 1, "maximum": 2147483647, "not": {"const": 10001}}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "redirect_integration": {
+      "allOf": [
+        {"$ref": "#/$defs/integration_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
+          "properties": {
+            "type": {"const": "redirect"},
+            "profile": {"const": "net-transparent"},
+            "firewall_rules": {"const": ["padm-redirect"]},
+            "devices": {"const": []},
+            "schedules": {"const": []},
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["port"],
+              "properties": {
+                "port": {"$ref": "#/$defs/port"},
                 "family": {"enum": ["ipv4", "ipv6", "dual"]},
                 "output_uid": {"type": "integer", "minimum": 1, "maximum": 2147483647, "not": {"const": 10001}}
               }

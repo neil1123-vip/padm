@@ -72,6 +72,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-setup-encrypted-udp \
         docker-port-hopping-preflight \
         docker-tproxy-ownership \
+        docker-redirect-focused \
         docker-phase4-maintenance \
         docker-routing-core-network-lifecycle \
         docker-reality \
@@ -142,6 +143,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-phase1 \
         docker-control-client \
         docker-tproxy-ownership \
+        docker-redirect-focused \
         docker-tun-management \
         docker-routing-block-ips-resolved \
         docker-http-relay \
@@ -692,6 +694,25 @@ runDockerTProxyOwnershipRegression() {
         runDockerTProxyManagementRegression
 }
 
+runDockerRedirectOwnershipRegression() {
+    bash -n "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" \
+        "${PROJECT_ROOT}/docker/tests/redirect-ownership.sh" \
+        "${PROJECT_ROOT}/docker/tests/redirect-real.sh" \
+        "${PROJECT_ROOT}/docker/tests/redirect-management.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" \
+            "${PROJECT_ROOT}/docker/lib/setup.sh" "${PROJECT_ROOT}/docker/lib/menu.sh" \
+            "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" \
+            "${PROJECT_ROOT}/docker/tests/redirect-ownership.sh" \
+            "${PROJECT_ROOT}/docker/tests/redirect-management.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/redirect-ownership.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/redirect-management.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/redirect-menu.sh"
+}
+
+runDockerRedirectRealRegression() {
+    PADM_NET_REAL_CASE=redirect bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
+}
+
 runDockerPortHoppingPreflightRegression() {
     runRegressionStep hopping-config runDockerPortHoppingConfigRegression &&
         runRegressionStep hopping-read-only python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
@@ -946,6 +967,8 @@ registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerContr
 registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogCronRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
+registerRegressionFunctionLeaf docker-redirect-focused runDockerRedirectOwnershipRegression
+registerRegressionFunctionLeaf docker-redirect-real runDockerRedirectRealRegression
 registerRegressionFunctionLeaf docker-port-hopping-preflight runDockerPortHoppingPreflightRegression
 registerRegressionFunctionLeaf docker-port-hopping-probe runDockerPortHoppingProbeRegression
 registerRegressionFunctionLeaf docker-port-hopping-guarded runDockerPortHoppingGuardedRegression

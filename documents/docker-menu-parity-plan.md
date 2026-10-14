@@ -3728,6 +3728,41 @@ Bash/ShellCheck error、PowerShell AST 和 diff 检查通过。
 复用工具/离线镜像，未扩大三槽预算；本轮输入清理，日志/result 保留。
 原生宿主、arm64、公网、整机重启和完整卸载仍待验，5C 及总目标保持 active。
 
+#### 5C.2d Redirect TCP 菜单、事务与真实转发
+
+菜单 `17 → 47` 与 `protocol redirect-status`、
+`edit --redirect-enable/--redirect-settings/--redirect-off` 提供完整日常入口，
+参数复用 family 与可选 OUTPUT UID。限单 Xray/sing-box、已有 Reality `1/2/26`，
+允许同核心多入口，无副核心或其它宿主集成；与 TUN/TProxy 互斥。
+Redirect 仅捕获 TCP，UDP 保持原路由；透明 TCP/UDP 另选 TProxy。
+默认 IPv4、OUTPUT 关闭；修改省略保留旧族/UID，UID `1–2147483647` 排除 `10001`。
+LOCAL、服务 REPLY、root 核心拨号绕过，不提供全主机 OUTPUT。
+
+schema 1 私密 `redirect.state` 固定字节、单硬链接、完整随机 token，
+绑定两族 PREROUTING/OUTPUT 链。候选只读审计，整体核验后精确撤销；
+任一漂移保留全部资源与 state，第二族失败及 INT/TERM 恢复，
+不 flush、不删 conntrack、不改 sysctl。旧包须有独立 `x-padm-redirect`。
+复用原配置事务、参数化菜单及已核验 Compose 的健康/启动参数，减少重复实现。
+
+Docker Linux amd64、复用工具/离线镜像，定向 Jobs 2、合同 Jobs 6：
+
+| 验证 | 入口耗时 | 证据目录 |
+| --- | --- | --- |
+| 所有权、管理/信号恢复和菜单 | 55.240 秒 | `.tmp-regression-docker-b31c423f1eca4ee99b1949f678cc87d3` |
+| 两核心、三族真实流量及生产 Compose 撤销 | 39.237 秒 | `.tmp-regression-docker-65194074a71947c9b290578d5e3e7dbc` |
+| 274 个 schema/jq 差分 | 16.931 秒 | `.tmp-regression-docker-4c418b4bd5114f1b8fc9ce382e0a5110` |
+| 集中合同 56/57 | 323.993 秒 | `.tmp-regression-docker-5bc0855411d0429fb02a31abef2efac4` |
+| 唯一失败的旧矩阵断言修复后定向补验 | 46.463 秒 | `.tmp-regression-docker-bc303e91dabe4c519df91bab983ece15` |
+| 派发与 CI 18 分片集合一致性 | 1.628 秒 | `.tmp-regression-docker-c71eaa5785964797927c2efa2fd67204` |
+
+真实流量证明 TCP PREROUTING/选中 UID OUTPUT、UDP 原路由、未选 UID、
+LOCAL/REPLY 绕过及停止外来基线恢复，生产 Compose 归属和精确关闭通过。
+集中回归的唯一失败是 phase3 仍要求旧功能键集合，已增加 Redirect 元数据和
+缺项/错误网络的拒绝断言后补验；不声称最终同快照 57/57，也不重复已通过的 56 项。
+本轮原始夹具错误已修正，日志/result 和快照核对证据保留，输入归档及清单清理。
+全主机 OUTPUT、原生宿主/arm64/公网/重启/完整卸载和完整 205 管理继续 deferred；
+剩余 SOCKS UDP、Xray 解析后阻断、TUIC/自动恢复等继续推进，总目标保持 active。
+
 #### 5C.3 Fail2ban 已加载动作维护门禁
 
 在既有磁盘配置/容器身份核验之后、输出唯一容器 ID 之前，复用 net 镜像内
