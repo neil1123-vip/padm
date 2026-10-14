@@ -404,7 +404,7 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN", "/dev/net/tun"],
-      "reason": "TUN 设备和转发规则属于宿主内核，需显式 profile。"
+      "reason": "5C.2c 菜单 17→44 和 CLI 启用/关闭/规格状态，限单 sing-box、单 Reality、IPv4、无其它宿主集成。固定 padm-tun/198.18.0.1/30，全局 IPv4 TCP/UDP，IPv6 拒绝；显式 host/root/NET_ADMIN/设备且禁自动重启。私密 state 绑定 CID/StartedAt/netns/boot、接口及完整规则路由；候选只读检查，正常停止并证明基线清净后才删证据，漂移、残留或异常退出保留现场。隔离 amd64 生产生命周期已验；原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "tproxy": {
       "status": "host-integrated",
@@ -467,7 +467,7 @@
       "profiles": ["net-transparent"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN", "/dev/net/tun"],
-      "reason": "原生内部能力 204 依赖宿主 TUN 设备和路由规则。"
+      "reason": "5C.2c 提供有限 TUN 管理，范围与 tun 相同：单 sing-box/单 Reality/IPv4，无其它宿主集成；全局 IPv4 TCP/UDP，IPv6 拒绝。CID/StartedAt/netns 和完整内核资源归属审计、正常停止及基线恢复后才清证据；漂移或异常退出保留现场。宿主设备和路由规则仍属于宿主内核；原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "internal-205-redirect-tproxy": {
       "status": "host-integrated",

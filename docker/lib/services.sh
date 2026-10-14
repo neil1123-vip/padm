@@ -784,7 +784,11 @@ dockerConfigureSpecValidate() {
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
           . as $port | any($request.core.protocols[]; .id == 21 and .public_port == $port))
       else true end and
-      if any(.host_integrations[]; .type == "tun") then .core.type == "sing-box" else true end and
+      if any(.host_integrations[]; .type == "tun") then
+        .core.type == "sing-box" and .core.secondary_type == null and
+        (.host_integrations | length) == 1 and (.core.protocols | length) == 1 and
+        all(.core.protocols[]; .id == 1 and .address_families == ["ipv4"])
+      else true end and
       if any(.host_integrations[]; .type == "tun" or .type == "tproxy") then
         .core.secondary_type == null and
         all(.core.protocols[]; .id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25)
@@ -3269,7 +3273,8 @@ dockerGenerateCompose() {
           | .services[$r.core.type].cap_add = ["NET_ADMIN"]
           | del(.services[$r.core.type].ports)
           | if ($tun | length) == 1 then
-              .services[$r.core.type].devices = [{
+              .services[$r.core.type].restart = "no"
+              | .services[$r.core.type].devices = [{
                 source: "/dev/net/tun", target: "/dev/net/tun", permissions: "rwm"
               }]
             else . end
@@ -3501,6 +3506,7 @@ dockerGenerateCompose() {
             cap_add: ["NET_ADMIN"],
             devices: [{source: "/dev/net/tun", target: "/dev/net/tun", permissions: "rwm"}],
             labels: labels("net-tun-check"),
+            volumes: net_mounts("data/net/transparent"; "/var/lib/padm/net"; false),
             tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"]
           })
         else . end
@@ -5460,6 +5466,268 @@ dockerTProxyDisablePrepare() {
     [[ -z "${ids}" ]] || docker rm "${ids}" >/dev/null
 }
 
+dockerTunConfigurationCheck() {
+    local root path
+    root=$(dockerInstallRoot) || return 1
+    for path in config/spec.json deployment.json images.env compose.json data/net/transparent; do
+        dockerTrafficSafePath "${root}" "${root}/${path}" || return 1
+    done
+    dockerComposeFile >/dev/null &&
+        dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+            "${root}/deployment.json" "${root}/images.env" &&
+        cmp -s -- "${root}/compose.json" \
+            <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") &&
+        jq -e 'any(.host_integrations[]; .type == "tun")' \
+            "${root}/config/spec.json" >/dev/null || {
+        dockerError 'TUN 规格、部署或编排漂移，未执行操作'
+        return 1
+    }
+}
+
+dockerTunContainer() (
+    local root ids container mode=${1:-running} verification=${2:-audit} cid started
+    [[ "$#" -le 2 && ( "${mode}" == running || "${mode}" == exited ) &&
+        ( "${verification}" == audit || "${verification}" == metadata || "${verification}" == transition ) ]] || return 1
+    root=$(dockerInstallRoot) || return 1
+    if [[ "${verification}" == transition ]]; then
+        jq -e '.core.type == "sing-box" and .core.secondary_type == null and
+          all(.host_integrations[]; .type != "tun")' "${root}/config/spec.json" >/dev/null &&
+            dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+                "${root}/deployment.json" "${root}/images.env" &&
+            cmp -s -- "${root}/compose.json" \
+                <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") || return 1
+    else
+        dockerTunConfigurationCheck || return 1
+    fi
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=sing-box \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    container=$(docker container inspect "${ids}") || return 1
+    jq -e --arg root "${root}" --arg mode "${mode}" --arg id "${ids}" --arg verification "${verification}" \
+        --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
+      def bindings:
+        map(capture("^(?<host>0\\.0\\.0\\.0|\\[::\\]):(?<public>[0-9]+):(?<private>[0-9]+)/(?<proto>tcp|udp)$") |
+          {key:(.private + "/" + .proto),
+           value:{HostIp:(.host | if . == "[::]" then "::" else . end),HostPort:.public}}) |
+        group_by(.key) | map({key:.[0].key,value:map(.value) | sort_by(.HostIp,.HostPort)}) | from_entries;
+      length == 1 and (.[0] as $c | $c.Config.Labels as $labels |
+        $compose[0].services["sing-box"] as $service |
+        ($c.Id | type == "string" and test("^[a-f0-9]{64}$") and startswith($id)) and
+        ($c.State.StartedAt | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and
+        $c.State.Restarting == false and $c.State.Paused == false and $c.State.Dead == false and
+        $c.State.OOMKilled == false and $c.State.Error == "" and
+        (if $mode == "running" then $c.State.Running == true and $c.State.Status == "running"
+         else $c.State.Running == false and $c.State.Status == "exited" and $c.State.ExitCode == 0 end) and
+        $labels["com.docker.compose.project"] == "padm-docker" and
+        $labels["com.docker.compose.project.working_dir"] == $root and
+        $labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+        $labels["com.docker.compose.service"] == "sing-box" and
+        $labels["com.docker.compose.oneoff"] == "False" and
+        all($service.labels | to_entries[]; $labels[.key] == .value) and
+        $c.Config.Image == $spec[0].images["sing-box"] and
+        $c.Config.Cmd == ["run", "-D", "/var/lib/padm/sing-box", "-c", "/etc/padm/sing-box/config.json"] and
+        $c.Config.Entrypoint == ["/usr/local/bin/sing-box"] and
+        $c.Config.User == ($service.user // "10001:10001") and
+        $c.Config.Healthcheck.Test == $service.healthcheck.test and
+        $c.HostConfig.NetworkMode == ($service.network_mode //
+          $compose[0].networks[($service.networks[0] // "default")].name) and
+        $c.HostConfig.Init == $service.init and
+        ($verification == "transition" or $service.restart == "no") and
+        $c.HostConfig.RestartPolicy.Name == $service.restart and
+        $c.HostConfig.ReadonlyRootfs == $service.read_only and $c.HostConfig.Privileged == false and
+        $c.HostConfig.PidsLimit == $service.pids_limit and
+        (($c.HostConfig.PortBindings // {}) | with_entries(.value |= sort_by(.HostIp,.HostPort))) ==
+          (($service.ports // []) | bindings) and
+        ($c.HostConfig.CapAdd // [] | map(sub("^CAP_"; "")) | sort) == ($service.cap_add // [] | sort) and
+        ($c.HostConfig.CapDrop | map(sub("^CAP_"; "")) | sort) == ($service.cap_drop | sort) and
+        $c.HostConfig.SecurityOpt == $service.security_opt and
+        ($c.HostConfig.Devices // []) ==
+          [($service.devices // [])[] | {PathOnHost:.source,PathInContainer:.target,CgroupPermissions:.permissions}] and
+        $c.HostConfig.LogConfig.Type == $service.logging.driver and
+        $c.HostConfig.LogConfig.Config == $service.logging.options and
+        all($c.Mounts[]; .Type == "bind") and
+        (($c.HostConfig.Tmpfs // {}) | keys | sort) ==
+          ([$service.tmpfs[] | split(":")[0]] | sort) and
+        ($c.Mounts | map({source:.Source,target:.Destination,read_only:(.RW | not)}) | sort_by(.target)) ==
+          ($service.volumes | map({source:(.source | sub("^\\$\\{PADM_DOCKER_ROOT\\}"; $root)),
+            target,read_only}) | sort_by(.target)))
+    ' <<<"${container}" >/dev/null || {
+        dockerError 'TUN 容器状态或归属漂移，未执行操作'
+        return 1
+    }
+    cid=$(jq -er '.[0].Id' <<<"${container}") &&
+        started=$(jq -er '.[0].State.StartedAt' <<<"${container}") || return 1
+    if [[ "${verification}" == audit ]]; then
+        dockerComposeExecute run --rm --no-deps net-tun-check \
+            tun-resources audit "${cid}" "${started}" >/dev/null || {
+            dockerError 'TUN 状态或内核资源归属漂移，未执行操作'
+            return 1
+        }
+    fi
+    printf '%s\n' "${cid}"
+)
+
+dockerTunTransitionPrepare() {
+    local nextSpec=$1 root ids container mode cid
+    jq -e 'any(.host_integrations[]; .type == "tun")' "${nextSpec}" >/dev/null || return 0
+    root=$(dockerInstallRoot) || return 1
+    [[ -e "${root}/config/spec.json" ]] || return 0
+    jq -e 'any(.host_integrations[]; .type == "tun")' "${root}/config/spec.json" >/dev/null && return 0
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=sing-box \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ -n "${ids}" ]] || return 0
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    container=$(docker container inspect "${ids}") || return 1
+    mode=$(jq -er 'if length == 1 then
+      if .[0].State.Running then "running" else "exited" end
+      else error("nonunique container") end' <<<"${container}") || return 1
+    cid=$(dockerTunContainer "${mode}" transition) && [[ "${cid}" == "${ids}"* ]] || return 1
+    [[ "${mode}" != running ]] || docker stop "${cid}" >/dev/null || return 1
+    DOCKER_CONFIG_SWITCHED=1
+    docker rm "${cid}" >/dev/null
+}
+
+dockerTunStartPrepare() {
+    local token ids
+    DOCKER_TUN_START_TOKEN=
+    dockerTunConfigurationCheck || return 1
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=sing-box \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ -z "${ids}" ]] || {
+        dockerError 'TUN 启动前仍有核心容器，未覆盖归属证据'
+        return 1
+    }
+    token=$(dockerComposeExecute run --rm --no-deps net-tun-check tun-resources capture) &&
+        [[ "${token}" =~ ^[a-f0-9]{32}$ ]] || return 1
+    DOCKER_TUN_START_TOKEN=${token}
+}
+
+dockerTunStartVerify() {
+    local cid started attempt failure=
+    [[ "${DOCKER_TUN_START_TOKEN:-}" =~ ^[a-f0-9]{32}$ ]] || return 1
+    cid=$(dockerTunContainer running metadata) &&
+        started=$(docker container inspect --format '{{.State.StartedAt}}' "${cid}") || return 1
+    # 核心健康仅校验配置；短暂等待接口和规则全部就绪，失败不停止或认领现场。
+    for attempt in 1 2 3 4 5; do
+        if failure=$(dockerComposeExecute run --rm --no-deps net-tun-check \
+            tun-resources bind "${cid}" "${started}" "${DOCKER_TUN_START_TOKEN}" 2>&1); then
+            DOCKER_TUN_START_TOKEN=
+            dockerTunContainer running >/dev/null
+            return
+        fi
+        [[ "${attempt}" == 5 ]] || sleep 1
+    done
+    [[ -z "${failure}" ]] || printf '%s\n' "${failure}" >&2
+    dockerError 'TUN 启动资源未通过完整归属证明，保留现场'
+    return 1
+}
+
+dockerTunStartAbort() {
+    local ids
+    [[ -n "${DOCKER_TUN_START_TOKEN:-}" ]] || return 0
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=sing-box \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ -z "${ids}" ]] || {
+        dockerError '本次 TUN 启动仍有核心容器，保留 intent 与现场'
+        return 1
+    }
+    [[ "${DOCKER_TUN_START_TOKEN}" =~ ^[a-f0-9]{32}$ ]] &&
+        dockerComposeExecute run --rm --no-deps net-tun-check \
+            tun-resources abort "${DOCKER_TUN_START_TOKEN}" >/dev/null || return 1
+    DOCKER_TUN_START_TOKEN=
+}
+
+dockerTunDisablePrepare() {
+    local nextSpec=$1 restoreMode=${2:-normal} root path enabled=false deployed=false composed=false
+    local ids before mode cid started after
+    case "${restoreMode}" in normal|restore) ;; *) return 1 ;; esac
+    jq -e 'type == "object" and (.host_integrations | type == "array")' "${nextSpec}" >/dev/null || return 1
+    root=$(dockerInstallRoot) || return 1
+    for path in config/spec.json deployment.json compose.json data/net/transparent/tun.state; do
+        dockerTrafficSafePath "${root}" "${root}/${path}" || return 1
+    done
+    if [[ ! -e "${root}/data/net/transparent/tun.state" ]] &&
+        ! jq -e 'any(.host_integrations[]?; .type == "tun")' \
+            "${root}/config/spec.json" >/dev/null 2>&1 &&
+        ! jq -e 'any(.host_integrations[]?; .type == "tun")' \
+            "${root}/deployment.json" >/dev/null 2>&1 &&
+        ! jq -e '.services | has("net-tun-check")' "${root}/compose.json" >/dev/null 2>&1; then
+        return 0
+    fi
+    if [[ -e "${root}/config/spec.json" ]]; then
+        enabled=$(jq -er 'if type == "object" and (.host_integrations | type == "array")
+          then any(.host_integrations[]; .type == "tun") | tostring else error("invalid specification") end' \
+            "${root}/config/spec.json") || return 1
+    fi
+    if [[ -e "${root}/deployment.json" ]]; then
+        deployed=$(jq -er 'if type == "object" and (.host_integrations | type == "array")
+          then any(.host_integrations[]; .type == "tun") | tostring else error("invalid deployment") end' \
+            "${root}/deployment.json") || return 1
+    fi
+    if [[ -e "${root}/compose.json" ]]; then
+        composed=$(jq -er 'if .services | type == "object"
+          then .services | has("net-tun-check") | tostring else error("invalid compose") end' \
+            "${root}/compose.json") || return 1
+    fi
+    [[ "${enabled}" == "${deployed}" && "${enabled}" == "${composed}" ]] || {
+        dockerError '旧规格、部署或编排的 TUN 状态不一致，未修改配置'
+        return 1
+    }
+    if [[ "${enabled}" == false ]]; then
+        [[ ! -e "${root}/data/net/transparent/tun.state" ]] || {
+            dockerError '存在未审计的 TUN 状态，保留现场并拒绝修改配置'
+            return 1
+        }
+        return 0
+    fi
+    dockerTunConfigurationCheck || return 1
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=sing-box \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    if [[ -z "${ids}" ]]; then
+        if [[ -e "${root}/data/net/transparent/tun.state" ]]; then
+            [[ -n "${DOCKER_TUN_START_TOKEN:-}" ]] && dockerTunStartAbort || return 1
+        fi
+        dockerComposeExecute run --rm --no-deps net-tun-check tun-resources preflight >/dev/null
+        return
+    fi
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    before=$(docker container inspect "${ids}") || return 1
+    mode=$(jq -er 'if length == 1 then
+      if .[0].State.Running == true then "running"
+      elif .[0].State.Running == false then "exited" else error("unknown container state") end
+      else error("nonunique container") end' <<<"${before}") || return 1
+    started=$(jq -er '.[0].State.StartedAt' <<<"${before}") || return 1
+    if [[ "${mode}" == running ]]; then
+        cid=$(dockerTunContainer running) && [[ "${cid}" == "${ids}"* ]] &&
+            [[ "$(docker container inspect --format '{{.State.StartedAt}}' "${cid}")" == "${started}" ]] || return 1
+        # 资源证明仍有效时仅停止该 CID；漂移或异常退出不借恢复清除现场。
+        docker stop "${cid}" >/dev/null || return 1
+    else
+        cid=$(dockerTunContainer exited metadata) && [[ "${cid}" == "${ids}"* ]] || return 1
+        if [[ "${restoreMode}" == restore && -n "${DOCKER_TUN_START_TOKEN:-}" ]]; then
+            [[ "$(docker container inspect --format '{{.State.StartedAt}}' "${cid}")" == "${started}" ]] &&
+                dockerComposeExecute run --rm --no-deps net-tun-check \
+                    tun-resources abort "${DOCKER_TUN_START_TOKEN}" >/dev/null &&
+                docker rm "${cid}" >/dev/null || return 1
+            DOCKER_TUN_START_TOKEN=
+            return 0
+        fi
+    fi
+    after=$(dockerTunContainer exited metadata) && [[ "${after}" == "${cid}" ]] &&
+        [[ "$(docker container inspect --format '{{.State.StartedAt}}' "${cid}")" == "${started}" ]] &&
+        dockerComposeExecute run --rm --no-deps net-tun-check \
+            tun-resources clean "${cid}" "${started}" >/dev/null || {
+        dockerError 'TUN 停止后资源未恢复基线，保留配置、容器与归属证据'
+        return 1
+    }
+    docker rm "${cid}" >/dev/null
+}
+
 dockerSshLogFileReadable() {
     local path=${1:-} parent metadata owner mode
     [[ "$#" -eq 1 && "${path}" == /* && -f "${path}" && ! -L "${path}" && -r "${path}" ]] || return 1
@@ -5782,9 +6050,26 @@ dockerValidateHostIntegrations() {
         }
     fi
     if [[ ",${integrationTypes}," == *,tun,* ]]; then
-        dockerCandidateCompose "${candidate}" run --rm --no-deps net-tun-check \
-            preflight tun >/dev/null || {
-            dockerError 'TUN 设备或内核前置检查失败'
+        local -a ownershipMount=()
+        root=$(dockerInstallRoot) || return 1
+        if dockerCurrentOwnsHostIntegration tun; then
+            dockerTunConfigurationCheck || return 1
+            if [[ -e "${root}/data/net/transparent/tun.state" ||
+                -L "${root}/data/net/transparent/tun.state" ]]; then
+                dockerTunContainer running >/dev/null || return 1
+            fi
+        fi
+        if [[ -e "${root}/data/net/transparent/tun.state" ||
+            -L "${root}/data/net/transparent/tun.state" ]] ||
+            dockerCurrentOwnsHostIntegration tun; then
+            dockerTrafficSafePath "${root}" "${root}/data/net/transparent" &&
+                [[ -d "${root}/data/net/transparent" ]] || return 1
+            # 归属证明留在在线目录；候选只读审计，不能复制 state 接管旧实例。
+            ownershipMount=(--volume "${root}/data/net/transparent:/var/lib/padm/net:ro")
+        fi
+        dockerCandidateCompose "${candidate}" run --rm --no-deps "${ownershipMount[@]}" net-tun-check \
+            tun-resources preflight >/dev/null || {
+            dockerError 'TUN 设备、内核资源或当前归属前置检查失败'
             return 1
         }
     fi
@@ -6125,7 +6410,14 @@ dockerCreateUpdateCandidate() {
         target="${candidate}/${relative}"
         if [[ -e "${source}" || -L "${source}" ]]; then
             [[ -d "${source}" && ! -L "${source}" ]] || return 1
-            mkdir -p -- "$(dirname -- "${target}")" && cp -a -- "${source}" "${target}" || return 1
+            if [[ "${relative}" == data/net/transparent ]]; then
+                # 动态实例归属不能随配置更新复制，预检只读挂载当前 owner 目录。
+                mkdir -p -- "${target}" &&
+                    find "${source}" -mindepth 1 -maxdepth 1 ! -name tun.state \
+                        -exec cp -a --target-directory="${target}" -- '{}' + || return 1
+            else
+                mkdir -p -- "$(dirname -- "${target}")" && cp -a -- "${source}" "${target}" || return 1
+            fi
         else
             mkdir -p -- "${target}" || return 1
         fi
@@ -6310,11 +6602,11 @@ dockerInstallCandidate() {
             jq -en --slurpfile deployment "${integrationInput}" \
                 --slurpfile compose "${candidate}/compose.json" '
               ($deployment | length) == 1 and ($compose | length) == 1 and
-              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy")) == false and
+              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy" or .type == "tun")) == false and
               ($compose[0].services | type == "object") and
-              ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh") or has("net-transparent")) == false
+              ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh") or has("net-transparent") or has("net-tun-check")) == false
             ' >/dev/null || {
-            dockerError '缺少原始规格的候选不能启用 Fail2ban/TProxy 或存在部署编排漂移'
+            dockerError '缺少原始规格的候选不能启用 Fail2ban/TProxy/TUN 或存在部署编排漂移'
             return 1
         }
     fi
@@ -6334,10 +6626,17 @@ dockerInstallCandidate() {
             "${root}/config/spec.json" >/dev/null 2>&1; then
             DOCKER_CONFIG_SWITCHED=1
         fi
-        if dockerFail2banDisablePrepare "${integrationInput}"; then
-            DOCKER_CONFIG_SWITCHED=1
-            dockerControlFail2banDisablePrepare "${integrationInput}" &&
-                dockerSshFail2banDisablePrepare "${integrationInput}" && prepareStatus=0
+        if dockerTunDisablePrepare "${integrationInput}"; then
+            if jq -e 'any(.host_integrations[]; .type == "tun")' \
+                "${root}/config/spec.json" >/dev/null 2>&1; then
+                DOCKER_CONFIG_SWITCHED=1
+            fi
+            if dockerFail2banDisablePrepare "${integrationInput}"; then
+                DOCKER_CONFIG_SWITCHED=1
+                dockerControlFail2banDisablePrepare "${integrationInput}" &&
+                    dockerSshFail2banDisablePrepare "${integrationInput}" &&
+                    dockerTunTransitionPrepare "${integrationInput}" && prepareStatus=0
+            fi
         fi
     fi
     if [[ -n "${intTrap}" ]]; then eval "${intTrap}"; else trap - INT; fi
@@ -6574,11 +6873,11 @@ dockerRestoreConfiguration() {
             --slurpfile compose "${backup}/compose.json" '
           ($deployment | length) == 1 and ($compose | length) == 1 and
           ($deployment[0].host_integrations | type == "array") and
-          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy")) == false and
+          ($deployment[0].host_integrations | any(.[]; .type == "fail2ban" or .type == "fail2ban-control" or .type == "fail2ban-ssh" or .type == "tproxy" or .type == "tun")) == false and
           ($compose[0].services | type == "object") and
-          ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh") or has("net-transparent")) == false
+          ($compose[0].services | has("net-fail2ban") or has("net-fail2ban-control") or has("net-fail2ban-ssh") or has("net-transparent") or has("net-tun-check")) == false
         ' >/dev/null || {
-            dockerError '恢复点缺少可验证的 Fail2ban/TProxy 原始规格，尚未停止或修改服务'
+            dockerError '恢复点缺少可验证的 Fail2ban/TProxy/TUN 原始规格，尚未停止或修改服务'
             return 1
         }
     fi
@@ -6588,16 +6887,19 @@ dockerRestoreConfiguration() {
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" || return 1
     if [[ -f "${backup}/config/spec.json" ]]; then
         dockerTProxyDisablePrepare "${backup}/config/spec.json" restore || return 1
+        dockerTunDisablePrepare "${backup}/config/spec.json" restore || return 1
         dockerFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
         dockerControlFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
         dockerSshFail2banDisablePrepare "${backup}/config/spec.json" restore || return 1
     elif [[ -f "${backup}/deployment.json" ]]; then
         dockerTProxyDisablePrepare "${backup}/deployment.json" restore || return 1
+        dockerTunDisablePrepare "${backup}/deployment.json" restore || return 1
         dockerFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
         dockerControlFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
         dockerSshFail2banDisablePrepare "${backup}/deployment.json" restore || return 1
     else
         dockerTProxyDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
+        dockerTunDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
         dockerFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
         dockerControlFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
         dockerSshFail2banDisablePrepare <(printf '{"host_integrations":[]}') restore || return 1
@@ -8306,7 +8608,7 @@ dockerValidateInstalledCommand() {
             dockerControlFail2banContainer >/dev/null || return "${PADM_DOCKER_RC_STATE}"
             ;;
         tun)
-            dockerComposeRun run --rm --no-deps net-tun-check preflight tun >/dev/null ||
+            dockerTunContainer running >/dev/null ||
                 return "${PADM_DOCKER_RC_STATE}"
             ;;
         tproxy)

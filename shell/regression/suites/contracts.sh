@@ -272,7 +272,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
         docker-cdn-entries docker-fail2ban-ownership docker-control-state
         docker-reality-targets-selection docker-reality-target-library docker-control-client
-        docker-tproxy-ownership docker-routing-core-contracts docker-http-relay docker-control-cli
+        docker-tproxy-ownership docker-tun-management docker-routing-core-contracts docker-http-relay docker-control-cli
         docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts
         docker-traffic docker-permissions docker-fail2ban-source docker-control-api
         docker-wireguard-runtime docker-subscriptions docker-accounts-cli
@@ -408,11 +408,17 @@ runRegressionDockerContractsAggregateContract() (
     runDockerMenuRegression
     runDockerMenuRoutingRegression
     runDockerMenuPortAliasRegression
-    printf '%s\n' full:menu.sh routing:menu.sh port-alias:menu.sh >"${expectedLog}"
+    runDockerMenuTunRegression
+    printf '%s\n' full:menu.sh routing:menu.sh port-alias:menu.sh tun:menu.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_MENU_SCOPE:-}" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-routing]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-port-alias]}" == function ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-tun]}" == function ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-tun-management]}" == function ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-tun-resources]}" == function ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-tun-real]}" == function ]]
+    [[ "${PADM_REGRESSION_SELECTOR_CHILDREN[docker-tun-focused]}" == $'docker-tun-management\ndocker-menu-tun' ]]
 
     # 注册集合相同还不够，新旧路由入口都必须把正确 scope 传给原脚本。
     bash() {

@@ -96,6 +96,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-reality-target-library \
         docker-control-client \
         docker-tproxy-ownership \
+        docker-tun-management \
         docker-routing-core-contracts \
         docker-http-relay \
         docker-control-cli \
@@ -140,6 +141,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-phase1 \
         docker-control-client \
         docker-tproxy-ownership \
+        docker-tun-management \
         docker-http-relay \
         docker-control-cli \
         docker-phase5 \
@@ -228,6 +230,10 @@ runDockerMenuRoutingRegression() {
 
 runDockerMenuPortAliasRegression() {
     PADM_DOCKER_MENU_SCOPE=port-alias runDockerMenuRegression
+}
+
+runDockerMenuTunRegression() {
+    PADM_DOCKER_MENU_SCOPE=tun runDockerMenuRegression
 }
 
 runDockerHttpRelayRegression() {
@@ -775,6 +781,10 @@ runDockerTProxyRealRegression() {
     PADM_NET_REAL_CASE=tproxy bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
 }
 
+runDockerTunRealRegression() {
+    PADM_NET_REAL_CASE=tun bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
+}
+
 runDockerTProxyManagementRegression() {
     bash -n "${PROJECT_ROOT}/docker/lib/setup.sh" "${PROJECT_ROOT}/docker/lib/menu.sh" \
         "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" &&
@@ -782,6 +792,21 @@ runDockerTProxyManagementRegression() {
             "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" \
             "${PROJECT_ROOT}/docker/tests/tproxy-management.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/tproxy-management.sh"
+}
+
+runDockerTunManagementRegression() {
+    bash -n "${PROJECT_ROOT}/docker/lib/setup.sh" "${PROJECT_ROOT}/docker/lib/menu.sh" \
+        "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" \
+        "${PROJECT_ROOT}/docker/tests/tun-management.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/setup.sh" "${PROJECT_ROOT}/docker/lib/menu.sh" \
+            "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" \
+            "${PROJECT_ROOT}/docker/tests/tun-management.sh" &&
+        runDockerTunResourcesRegression &&
+        bash "${PROJECT_ROOT}/docker/tests/tun-management.sh"
+}
+
+runDockerTunResourcesRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/tun-resources.sh"
 }
 
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
@@ -797,6 +822,7 @@ registerRegressionFunctionLeaf docker-phase1 runDockerPhase1Regression
 registerRegressionFunctionLeaf docker-menu runDockerMenuRegression
 registerRegressionFunctionLeaf docker-menu-routing runDockerMenuRoutingRegression
 registerRegressionFunctionLeaf docker-menu-port-alias runDockerMenuPortAliasRegression
+registerRegressionFunctionLeaf docker-menu-tun runDockerMenuTunRegression
 registerRegressionFunctionLeaf docker-release runDockerReleaseRegression
 registerRegressionFunctionLeaf docker-setup runDockerSetupRegression
 registerRegressionFunctionLeaf docker-setup-core runDockerSetupRegression core
@@ -917,7 +943,16 @@ runDockerPortHoppingAutoRealRegression() {
 }
 registerRegressionFunctionLeaf docker-port-hopping-auto-real runDockerPortHoppingAutoRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
+registerRegressionFunctionLeaf docker-tun-real runDockerTunRealRegression
 registerRegressionFunctionLeaf docker-tproxy-management runDockerTProxyManagementRegression
+registerRegressionFunctionLeaf docker-tun-management runDockerTunManagementRegression
+registerRegressionFunctionLeaf docker-tun-resources runDockerTunResourcesRegression
+
+listRegressionDockerTunChildSelectors() {
+    printf '%s\n' docker-tun-management docker-menu-tun
+}
+registerRegressionParallelSelectorList docker-tun-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-tun-focused-${BASHPID:-$$}" listRegressionDockerTunChildSelectors 2
 
 listRegressionDockerTProxyChildSelectors() {
     printf '%s\n' docker-tproxy-management docker-menu-routing

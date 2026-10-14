@@ -3,7 +3,7 @@ set -euo pipefail
 
 MENU_SCOPE=${PADM_DOCKER_MENU_SCOPE:-full}
 case "${MENU_SCOPE}" in
-full|routing|port-alias) ;;
+full|routing|port-alias|tun) ;;
 *) printf 'docker-menu-regression-fail: invalid scope: %s\n' "${MENU_SCOPE}" >&2; exit 1 ;;
 esac
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -1920,6 +1920,27 @@ runRoutingDriver() {
         targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'\004'
         targetReply 'Docker HTTP 中继入站' $'0\n'
         ;;
+    tun-flow|tun-cancel|tun-status-failed|tun-commit-failed)
+        targetReply 'Docker 路由与出站' $'44\n'
+        if [[ "${scenario}" == tun-status-failed ]]; then
+            targetReply 'Docker TUN 管理' $'1\n'
+        else
+            targetReply 'Docker TUN 管理' $'1\n'
+            for choice in 2 3; do
+                if [[ "${scenario}" == tun-cancel ]]; then
+                    for input in $'n\n' $'\004'; do
+                        targetReply 'Docker TUN 管理' "${choice}"$'\n'
+                        targetReply 'fixture-tun-confirm [y/N]' "${input}"
+                    done
+                else
+                    targetReply 'Docker TUN 管理' "${choice}"$'\n'
+                    targetReply 'fixture-tun-confirm [y/N]' $'y\n'
+                fi
+            done
+            targetReply 'Docker TUN 管理' $'1\n'
+        fi
+        targetReply 'Docker TUN 管理' $'0\n'
+        ;;
     tproxy-flow|tproxy-cancel|tproxy-status-failed|tproxy-commit-failed)
         targetReply 'Docker 路由与出站' $'43\n'
         if [[ "${scenario}" == tproxy-status-failed ]]; then
@@ -2356,6 +2377,11 @@ protocol)
         printf '{"enabled":true,"port":31399,"mark":257,"family":"ipv4","hook":"PREROUTING"}\n'
         exit 0
         ;;
+    tun-status)
+        [[ "${TUN_STATUS:-0}" -eq 0 ]] || exit "${TUN_STATUS}"
+        printf '{"enabled":true,"interface":"padm-tun","address":"198.18.0.1/30","family":"ipv4","scope":"global","ipv6":"reject"}\n'
+        exit 0
+        ;;
     xhttp-status) exit "${XHTTP_STATUS:-0}" ;;
     esac
     printf 'fixture-protocol-output\n'
@@ -2395,6 +2421,18 @@ edit)
         [[ "${confirmation}" == y ]] || exit 2
         [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
         recordAction http-relay-commit "$2"
+    elif [[ "${2:-}" == --tun-enable || "${2:-}" == --tun-off ]]; then
+        # 固定配置只核对原样分发与一次确认；归属和事务恢复由 TUN 合同覆盖。
+        [[ "$#" -eq 2 ]] || exit 2
+        printf 'fixture-tun-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction tun-confirm "$2" eof
+            exit 2
+        fi
+        recordAction tun-confirm "$2" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction tun-commit "$2"
     elif [[ "${2:-}" == --tproxy-enable || "${2:-}" == --tproxy-settings || "${2:-}" == --tproxy-off ]]; then
         # 参数只断言菜单默认值与原样分发；内核规则和恢复由 TProxy 合同覆盖。
         case "$2" in
@@ -3071,9 +3109,11 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     upstream-flow upstream-cancel upstream-status-failed upstream-commit-failed \
     http-relay-flow http-relay-cancel http-relay-status-failed http-relay-commit-failed \
     tproxy-flow tproxy-cancel tproxy-status-failed tproxy-commit-failed \
+    tun-flow tun-cancel tun-status-failed tun-commit-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
+    [[ "${MENU_SCOPE}" != tun || "${routingCase}" == tun-* ]] || continue
     : >"${TLS_WIZARD_ACTIONS}"
-    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 TPROXY_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
+    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 TPROXY_STATUS=0 TUN_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
     [[ "${routingCase}" != selective-domains-state-failed ]] || SELECTIVE_EDIT_PRECHECK_STATUS=15
     [[ "${routingCase}" != *-replace-state-failed && "${routingCase}" != hosts-manage-state-failed ]] ||
         DOMAIN_REPLACE_PRECHECK_STATUS=15
@@ -3083,6 +3123,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     [[ "${routingCase}" != upstream-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != http-relay-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != tproxy-status-failed ]] || TPROXY_STATUS=17
+    [[ "${routingCase}" != tun-status-failed ]] || TUN_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
@@ -3095,6 +3136,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != upstream-commit-failed &&
         "${routingCase}" != http-relay-commit-failed &&
         "${routingCase}" != tproxy-commit-failed &&
+        "${routingCase}" != tun-commit-failed &&
         "${routingCase}" != hosts-manage-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
@@ -3441,6 +3483,38 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "HTTP 中继菜单缺少: ${label}"
         done
         ;;
+    tun-flow|tun-cancel|tun-status-failed|tun-commit-failed)
+        tunConfirmCount=2 tunFailureCount=0 tunExit=15
+        expectedRouting='protocol tun-status'
+        if [[ "${routingCase}" == tun-status-failed ]]; then
+            tunConfirmCount=0 tunFailureCount=1 tunExit=17
+        else
+            for tunAction in --tun-enable --tun-off; do
+                if [[ "${routingCase}" == tun-cancel ]]; then
+                    expectedRouting+=$'\nedit '"${tunAction}"$'\ntun-confirm '"${tunAction}"' n'
+                    expectedRouting+=$'\nedit '"${tunAction}"$'\ntun-confirm '"${tunAction}"' eof'
+                else
+                    expectedRouting+=$'\nedit '"${tunAction}"$'\ntun-confirm '"${tunAction}"' y'
+                    [[ "${routingCase}" != tun-flow ]] ||
+                        expectedRouting+=$'\ntun-commit '"${tunAction}"
+                fi
+            done
+            expectedRouting+=$'\nprotocol tun-status'
+            [[ "${routingCase}" != tun-cancel ]] ||
+                { tunConfirmCount=4; tunFailureCount=4; tunExit=2; }
+            [[ "${routingCase}" != tun-commit-failed ]] || tunFailureCount=2
+            for warning in '宿主全局' IPv6 '拒绝'; do
+                grep -Fq "${warning}" "${CONTROL_LOG}" || fail "TUN 启用未提示: ${warning}"
+            done
+        fi
+        [[ "$(grep -Fc 'fixture-tun-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${tunConfirmCount}" ]] ||
+            fail 'TUN 操作没有每次只确认一次'
+        [[ "$(grep -Fc "操作失败，退出码: ${tunExit}" "${CONTROL_LOG}" || true)" -eq "${tunFailureCount}" ]] ||
+            fail 'TUN 取消或失败未显示退出码并继续菜单'
+        for label in '44. TUN 管理' '1. 查看状态' '2. 启用 TUN' '3. 关闭 TUN'; do
+            grep -Fq "${label}" "${CONTROL_LOG}" || fail "TUN 菜单缺少: ${label}"
+        done
+        ;;
     tproxy-flow|tproxy-cancel|tproxy-status-failed|tproxy-commit-failed)
         tproxyConfirmCount=4 tproxyFailureCount=0 tproxyExit=15
         if [[ "${routingCase}" == tproxy-status-failed ]]; then
@@ -3516,11 +3590,11 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail '路由诊断失败后没有继续菜单'
     fi
 done
-unset SITE_EDIT_STATUS ROUTING_STATUS TPROXY_STATUS SELECTIVE_EDIT_PRECHECK_STATUS DOMAIN_REPLACE_PRECHECK_STATUS
+unset SITE_EDIT_STATUS ROUTING_STATUS TPROXY_STATUS TUN_STATUS SELECTIVE_EDIT_PRECHECK_STATUS DOMAIN_REPLACE_PRECHECK_STATUS
 fi
 
-if [[ "${MENU_SCOPE}" == routing ]]; then
-    printf 'docker-menu-routing-regression-ok\n'
+if [[ "${MENU_SCOPE}" == routing || "${MENU_SCOPE}" == tun ]]; then
+    printf 'docker-menu-%s-regression-ok\n' "${MENU_SCOPE}"
     exit 0
 fi
 

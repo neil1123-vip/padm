@@ -27,6 +27,7 @@
   "x-padm-routing-region": true,
   "x-padm-routing-ipv6": true,
   "x-padm-routing-warp": true,
+  "x-padm-tun-owned-management": true,
   "x-padm-relay-http": true,
   "x-padm-relay-http-ipv6": true,
   "x-padm-port-aliases": true,
@@ -682,6 +683,28 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "host_integrations": {"contains": {"properties": {"type": {"const": "tun"}}}}
+        }
+      },
+      "then": {
+        "properties": {
+          "host_integrations": {"maxItems": 1},
+          "core": {
+            "properties": {
+              "type": {"const": "sing-box"},
+              "secondary_type": {"type": "null"},
+              "protocols": {
+                "minItems": 1, "maxItems": 1,
+                "items": {"properties": {"id": {"const": 1}, "address_families": {"const": ["ipv4"]}}}
+              }
+            }
+          }
+        }
+      }
+    },
     {
       "if": {"required": ["port_hopping"]},
       "then": {

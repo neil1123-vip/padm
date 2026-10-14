@@ -21,9 +21,11 @@ RUN set -eux; \
         "iptables=${IPTABLES_VERSION}" \
         "nftables=${NFTABLES_VERSION}" \
         "wireguard-tools=${WIREGUARD_TOOLS_VERSION}"; \
-    mkdir -p /etc/padm/net /etc/wireguard /var/lib/padm/net
+    mkdir -p /etc/padm/net /etc/wireguard /var/lib/padm/net /usr/local/lib/padm; \
+    chmod 0755 /usr/local/lib/padm
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-entrypoint
+COPY --chmod=0644 tun-resources.py /usr/local/lib/padm/tun-resources.py
 
 ARG PADM_VERSION
 ARG SOURCE_URL

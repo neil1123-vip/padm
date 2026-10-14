@@ -413,6 +413,9 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].host_integrations[]; .type == "fail2ban-ssh") then
             $schema[0]["x-padm-ssh-fail2ban"] == true
           else true end) and
+          (if any($spec[0].host_integrations[]; .type == "tun") then
+            $schema[0]["x-padm-tun-owned-management"] == true
+          else true end) and
           (if $spec[0] | has("site") then
             $schema[0]["x-padm-site-content"] == true
           else true end) and

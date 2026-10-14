@@ -825,7 +825,7 @@ dockerProtocolCommand() (
     local -a targetArgs=()
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
-    list|stream-status|routing-status|port-alias-status|tproxy-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    list|stream-status|routing-status|port-alias-status|tproxy-status|tun-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
     links|cdn-status|xhttp-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
@@ -901,6 +901,12 @@ dockerProtocolCommand() (
         jq '[.host_integrations[] | select(.type == "tproxy")][0] as $tproxy |
           {enabled:($tproxy != null),port:($tproxy.settings.port // null),
            mark:($tproxy.settings.mark // null),family:"ipv4",hook:"PREROUTING"}' "${normalized}"
+        return $?
+    fi
+    if [[ "${action}" == tun-status ]]; then
+        jq '[.host_integrations[] | select(.type == "tun")][0] as $tun |
+          {enabled:($tun != null),interface:($tun.settings.interface // null),
+           address:($tun.settings.address // null),family:"ipv4",scope:"global",ipv6:"reject"}' "${normalized}"
         return $?
     fi
     if [[ "${action}" == xhttp-status ]]; then
@@ -1480,7 +1486,7 @@ dockerEditCommand() {
     local routingDomains='[]' routingOldDomains='[]' routingDomainsField=domains
     local routingOldIp= routingNewIp= routingHost=
     local httpRelay= httpRelayFile= httpRelayPort=0 httpRelaySources='[]'
-    local tproxyAction= tproxyPort=0 tproxyMark=0
+    local tproxyAction= tproxyPort=0 tproxyMark=0 tunAction=
     local portAlias= portAliasListener= portAliasPort= portAliasOldPort=
     local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
     local portHoppingIpv4= portHoppingIpv6=
@@ -1686,6 +1692,11 @@ dockerEditCommand() {
         --tproxy-off)
             [[ -z "${tproxyAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             tproxyAction=off
+            shift
+            ;;
+        --tun-enable|--tun-off)
+            [[ -z "${tunAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            tunAction=${1#--tun-}
             shift
             ;;
         --fail2ban-port)
@@ -2099,8 +2110,17 @@ dockerEditCommand() {
         -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${fail2banAction}" && -z "${cdnAction}" && -z "${xhttpAction}" &&
-        -z "${portHoppingAction}" ) ]] || {
+        -z "${portHoppingAction}" && -z "${tunAction}" ) ]] || {
         dockerError 'TProxy 专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
+    [[ -z "${tunAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
+        -z "${fail2banAction}" && -z "${cdnAction}" && -z "${xhttpAction}" &&
+        -z "${portHoppingAction}" && -z "${tproxyAction}" ) ]] || {
+        dockerError 'TUN 专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
@@ -2116,7 +2136,7 @@ dockerEditCommand() {
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
-        -z "${portHoppingAction}" && -z "${tproxyAction}" ) ||
+        -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -2181,7 +2201,7 @@ dockerEditCommand() {
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
-        -z "${portHoppingAction}" && -z "${tproxyAction}" ]]; then
+        -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -2216,6 +2236,22 @@ dockerEditCommand() {
         ' "${draft}" >"${draft}.next" 2>/dev/null &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
             dockerError 'TProxy 动作需要匹配当前状态和不同参数；仅支持单核心 Reality，不能与其它宿主集成共存'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
+    if [[ -n "${tunAction}" ]]; then
+        jq --arg action "${tunAction}" '
+          [.host_integrations[] | select(.type == "tun")] as $current |
+          if $action == "off" then
+            if ($current | length) != 1 then error("TUN 未启用")
+            else .host_integrations |= map(select(.type != "tun")) end
+          elif ($current | length) != 0 then error("TUN 已启用")
+          else .host_integrations += [{type:"tun",profile:"net-transparent",
+            firewall_rules:["sing-box-auto-redirect"],devices:["/dev/net/tun"],schedules:[],
+            settings:{interface:"padm-tun",address:"198.18.0.1/30"}}] end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError 'TUN 动作需要匹配当前启用状态'
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
@@ -2899,6 +2935,7 @@ dockerEditCompatibilityValidate() {
         --arg routing_host "${routingHost:-}" --arg routing_ip "${routingNewIp:-}" \
         --arg http_relay "${httpRelay:-}" \
         --arg tproxy_action "${tproxyAction:-}" \
+        --arg tun_action "${tunAction:-}" \
         --arg port_alias "${portAlias:-}" \
         --arg alias_listener "${portAliasListener:-}" --arg alias_port "${portAliasPort:-}" \
         --arg alias_old_port "${portAliasOldPort:-}" \
@@ -2952,7 +2989,14 @@ dockerEditCompatibilityValidate() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-       (if $tproxy_action != "" then
+       (if $tun_action != "" then
+        def without_tun: .host_integrations |= map(select(.type != "tun"));
+        if $tun_action == "enable" then
+          ([$old.host_integrations[] | select(.type == "tun")] | length) == 0 and
+          ([$new.host_integrations[] | select(.type == "tun")] | length) == 1 and
+          ($old | without_tun) == ($new | without_tun)
+        else $new == ($old | without_tun) end
+       elif $tproxy_action != "" then
         def without_tproxy: .host_integrations |= map(select(.type != "tproxy"));
         def without_tproxy_settings:
           .host_integrations |= map(if .type == "tproxy" then del(.settings.port,.settings.mark) else . end);

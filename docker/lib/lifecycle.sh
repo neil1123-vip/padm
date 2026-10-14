@@ -43,6 +43,7 @@ dockerUsage() {
   padm-docker edit --tproxy-enable <端口> <标记> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --tproxy-settings <端口> <标记> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --tproxy-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --tun-enable|--tun-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-replace <入口 ID> <旧公开端口> <新公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -120,6 +121,7 @@ dockerUsage() {
   padm-docker protocol alpn-status [入口 ID]
   padm-docker protocol routing-status
   padm-docker protocol tproxy-status
+  padm-docker protocol tun-status
   padm-docker protocol port-alias-status
   padm-docker protocol cdn-status [入口 ID]
   padm-docker account list [--json]
@@ -541,6 +543,13 @@ dockerComposeRun() {
         ;;
     esac
     composeFile=$(dockerComposeFile) || return "${PADM_DOCKER_RC_COMPOSE}"
+    if jq -e 'any(.host_integrations[]?; .type == "tun")' "${root}/deployment.json" >/dev/null ||
+        { [[ -f "${root}/config/spec.json" ]] &&
+            jq -e 'any(.host_integrations[]?; .type == "tun")' "${root}/config/spec.json" >/dev/null; } ||
+        [[ -e "${root}/data/net/transparent/tun.state" || -L "${root}/data/net/transparent/tun.state" ]]; then
+        dockerTunComposeRun "$@"
+        return $?
+    fi
     composeFlags=$(jq -er -s '
       if length == 1 and (.[0] | type == "object" and (.services | type == "object")) then
         .[0].services |
@@ -731,6 +740,55 @@ dockerComposeRun() {
                 net-transparent || return $?
             dockerTProxyContainer >/dev/null || return "${PADM_DOCKER_RC_STATE}"
         fi
+    fi
+}
+
+dockerTunComposeRun() {
+    local root argument status=0 skipTimeout=0 noDeps=0 touched=0
+    local DOCKER_TUN_START_TOKEN=
+    local -a services=() args=()
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerTunConfigurationCheck || return "${PADM_DOCKER_RC_STATE}"
+    [[ "$1" != exec ]] || { dockerComposeExecute "$@"; return $?; }
+    for argument in "${@:2}"; do
+        if [[ "${skipTimeout}" == 1 ]]; then
+            [[ "${argument}" =~ ^[1-9][0-9]*$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+            skipTimeout=0
+            continue
+        fi
+        case "${argument}" in
+        --no-deps) noDeps=1; args+=("${argument}") ;;
+        --wait-timeout) skipTimeout=1 ;;
+        -d|--wait|--force-recreate) args+=("${argument}") ;;
+        *)
+            jq -e --arg name "${argument}" '.services | has($name)' "${root}/compose.json" >/dev/null ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            [[ "${argument}" != net-tun-check ]] || return "${PADM_DOCKER_RC_USAGE}"
+            services+=("${argument}") args+=("${argument}")
+            ;;
+        esac
+    done
+    [[ "${skipTimeout}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "$1" == down || "${#services[@]}" == 0 || "${noDeps}" == 0 ||
+        " ${services[*]} " == *' sing-box '* ]]; then
+        touched=1
+    fi
+    [[ "${touched}" == 1 ]] || { dockerComposeExecute "$@"; return $?; }
+    # 停止前审计完整归属；异常退出不借重启或恢复覆盖现场。
+    dockerTunDisablePrepare "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+    [[ "$1" != down ]] || { dockerComposeExecute "$@"; return $?; }
+    dockerTunStartPrepare || return "${PADM_DOCKER_RC_STATE}"
+    # 旧核心已被精确移除；restart 在这里创建新实例，再绑定本次启动意图。
+    dockerComposeExecute up -d --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" \
+        "${args[@]}" || status=$?
+    if [[ "${status}" == 0 ]]; then
+        dockerTunStartVerify || return "${PADM_DOCKER_RC_STATE}"
+    else
+        dockerTunStartAbort || {
+            dockerError 'TUN 启动未完成且内核现场不能证明清净，保留状态待核对'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        return "${status}"
     fi
 }
 

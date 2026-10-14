@@ -1677,20 +1677,10 @@ PY
 tun_preflight() {
     need ip
     need nft
+    need python3
     [ -c /dev/net/tun ] || die "/dev/net/tun is unavailable"
-    nft list ruleset >/dev/null 2>&1 || die "nftables is unavailable"
-    check="pdt$$"
-    cleanup_check() { ip link delete dev "$check" >/dev/null 2>&1 || true; }
-    trap 'cleanup_check; exit 130' INT TERM
-    ip tuntap add dev "$check" mode tun >/dev/null 2>&1 || {
-        trap - INT TERM
-        die "TUN device cannot be created"
-    }
-    ip link delete dev "$check" >/dev/null 2>&1 || {
-        trap - INT TERM
-        die "cannot remove TUN preflight interface"
-    }
-    trap - INT TERM
+    [ "$#" -eq 0 ] || die "tun preflight does not accept an old owner"
+    python3 /usr/local/lib/padm/tun-resources.py preflight
 }
 
 tproxy_state_text() {
@@ -2003,6 +1993,11 @@ fail2ban-ssh)
     ;;
 tproxy)
     shift; [ "$#" -eq 2 ] || die "tproxy requires port and mark"; tproxy_run "$@"
+    ;;
+tun-resources)
+    shift
+    need python3
+    exec python3 /usr/local/lib/padm/tun-resources.py "$@"
     ;;
 port-hopping)
     shift; [ "$#" -eq 5 ] || die "port hopping requires start, end, target and both addresses"

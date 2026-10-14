@@ -1890,16 +1890,11 @@ grep -qxF new-acme-account "${DOCKER_ROOT}/data/acme/account" ||
 )
 
 : >"${DOCKER_LOG}"
-runControl 0 tun configure --spec "${TUN_SPEC}"
-jq -e '
-  .services["sing-box"].network_mode == "host" and .services["sing-box"].user == "0:0" and
-  .services["sing-box"].cap_add == ["NET_ADMIN"] and
-  .services["sing-box"].devices[0].source == "/dev/net/tun" and
-  (.services | has("net-transparent") | not) and .services["net-tun-check"].restart == "no"
-' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'TUN service boundary is wrong'
-jq -e 'any(.inbounds[]; .type == "tun" and .interface_name == "padm-tun" and .dns_mode == "disabled" and .auto_redirect == true)' \
-    "${DOCKER_ROOT}/config/sing-box/config.json" >/dev/null || fail 'sing-box TUN inbound is wrong'
-grep -q 'net-tun-check preflight tun' "${DOCKER_LOG}" || fail 'TUN preflight was not called'
+# 有效 TUN 的事务和真实启停由专用合同覆盖；旧双栈规格必须在切换前拒绝。
+LIVE_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json")
+runControl 15 reject-dualstack-tun configure --spec "${TUN_SPEC}"
+[[ "$(sha256sum "${DOCKER_ROOT}/deployment.json")" == "${LIVE_HASH}" ]] ||
+    fail 'unsupported dual-stack TUN changed the deployment'
 
 : >"${DOCKER_LOG}"
 runControl 0 tproxy configure --spec "${TPROXY_SPEC}"

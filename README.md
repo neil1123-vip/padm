@@ -1041,8 +1041,25 @@ padm-docker edit --tproxy-off
 透明入口只处理 IPv4 `PREROUTING` 的 TCP/UDP，不接管宿主 `OUTPUT` 或 IPv6。
 启用后核心使用 host 网络、root 和 `NET_ADMIN`；修改或关闭先审计旧容器，
 正常停止并确认规则清空，再沿原配置事务提交；预览和取消不停止旧服务。
-状态命令显示规格，实际健康仍用 `validate`。TUN 管理、原生宿主重启、
-arm64、公网及完整 5C 仍待验收。
+状态命令显示规格，实际健康仍用 `validate`。原生宿主重启、arm64、公网及完整
+5C 仍待验收。
+
+TUN 管理入口为菜单 `17 → 44`：
+
+```bash
+padm-docker protocol tun-status
+padm-docker edit --tun-enable
+padm-docker edit --tun-off
+```
+
+仅支持单 sing-box、单 Reality、IPv4、无其它宿主集成的受管部署。固定接口
+`padm-tun`、地址 `198.18.0.1/30`，接管宿主全局 IPv4 TCP/UDP；IPv6 会被拒绝。
+核心使用 host 网络、root、`NET_ADMIN` 和 `/dev/net/tun`，禁用容器自动重启。
+私密 `tun.state` 绑定 CID、启动时间、网络空间、接口及完整规则/路由归属；
+关闭、重启、配置更新和恢复先审计，再正常停止核心，确认恢复基线后才移除证据。
+候选只读检查在线归属；异常退出、残留或漂移保留现场，不自动接管或清理。
+旧 bundle 缺少 TUN 管理能力时拒绝启用或恢复，不能删除 state 绕过门禁。
+Docker Linux amd64 隔离验收已通过；原生宿主、arm64、公网、整机重启和完整卸载仍待验。
 
 主菜单第 13 项“核心升级评估”或 `assess` 会验签并预拉取候选镜像，使用私有配置副本
 执行菜单版升级风险扫描、实际核心配置试跑和 Xray 严格校验，以及已启用的 TLS、

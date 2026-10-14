@@ -36,7 +36,8 @@ PTY 信号已有定向证据；真实签名发布、镜像运行和客户端连�
 - 不引入第二套编排、Web 面板、数据库或通用运行时适配框架；新增组件必须有实际功能需要。
 - 生产机只使用已验证的发布清单和预构建镜像，不现场构建，不允许跳过验签。
 - 普通服务使用 bridge；宿主功能显式启用，不默认 `privileged`、`SYS_ADMIN` 或挂载 Docker Socket。
-- 每个子步骤独立实现、验证和审阅；用户授权后提交。文档、测试和支持矩阵随实现更新。
+- 相关子步骤合批实现和审阅，先做必要定向验证，再集中完整回归与阶段签名提交；
+  不重复无变化矩阵，文档、测试和支持矩阵随实现更新。
 - 新能力的合同、实现和证据齐备后，才能升级支持状态及开放菜单；不能先改状态消除测试失败。
 
 ## 第一步：功能矩阵
@@ -3580,6 +3581,41 @@ host 指外层隔离回归容器，未借用宿主 Docker Socket。
 所有本次回归未命中缓存，未扩大共享三槽预算；成功/失败输入归档在核验后清理，
 日志/result 保留。普通重启会精确撤销并重建规则容器，主核心定向启动同样补建。
 完整 5C、发布与总体计划继续 active。
+
+#### 5C.2c TUN 管理与资源生命周期
+
+菜单 `17 → 44`、`protocol tun-status`、`edit --tun-enable/--tun-off` 复用
+完整规格和候选事务；只开放单 sing-box、单 Reality、IPv4、无其它宿主集成。
+固定 `padm-tun`、`198.18.0.1/30`，全局 IPv4 TCP/UDP，IPv6 拒绝；
+host/root/NET_ADMIN/设备显式启用，核心不自动重启。旧 bundle 缺少
+`x-padm-tun-owned-management` 拒绝启用和恢复，不扩大其它组合支持。
+
+`tun.state` 绑定随机 intent、CID/StartedAt、netns/boot、ifindex、动态表/端口
+及 sing-box 完整 nft/rule/route 闭包。候选只读核对在线归属；
+启停、更新和恢复先审计再正常停止核心，基线清净才删 state/容器。
+helper 不删除内核资源；漂移、SIGKILL、残留及失败启动不能证明清净时保留现场。
+首次启用只交接刚核验的旧 sing-box，预览/取消不停止旧服务。
+
+Docker Linux amd64 定向菜单、资源、管理/信号恢复通过，入口 19.077 秒：
+`.tmp-regression-docker-88c1882e6eef4144a0894872fe6af1f5/`。
+隔离 daemon 使用生产生成器/Compose/身份检查，验证归属绑定、漂移拒绝、
+重启新 owner、正常关闭基线恢复与外来资源保全、异常退出保留证据，
+入口 33.713 秒：`.tmp-regression-docker-e4c937f859d14fe0a8b037401dd07949/`。
+真实 TCP/UDP 和 TERM 清理沿用 `.tmp-tun-probe-20261014/`，不重复流量矩阵。
+最终 NFQUEUE 门禁拒绝外来 queue 100、覆盖区间和未知动态选择器，
+避免消费外来排队流量。真实只读候选、冲突拒绝及完整启停最终补验
+35.443 秒：`.tmp-regression-docker-050ef39d8dd5497cb451df659aa098c4/`。
+管理/资源最终合同 18.154 秒：
+`.tmp-regression-docker-daadf25918494c3ca9edc4fbf8a6a56f/`。
+集中合同 53/55、311.900 秒：
+`.tmp-regression-docker-60060ddc7b8947b3a3ab31bcbc7aef34/`；
+两个旧夹具为谓词摘要和旧双栈 TUN 成功预期，修后定向均通过：
+`docker-reality` 194 个差分场景、70.542 秒（`57dc509251d24896a37cb8998b87c316`），
+`docker-phase4-lifecycle` 45.955 秒（`e54b9fa5e602421aa786be6c494848c3`）。
+20 个实现/测试与对应输入逐文件一致；不声称同一快照 55/55，不重复通过项。
+Bash/ShellCheck error、PowerShell AST 和 diff 检查通过。
+复用工具/离线镜像，未扩大三槽预算；本轮输入清理，日志/result 保留。
+原生宿主、arm64、公网、整机重启和完整卸载仍待验，5C 及总目标保持 active。
 
 #### 5C.3 Fail2ban 已加载动作维护门禁
 

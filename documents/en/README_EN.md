@@ -758,8 +758,30 @@ and IPv6 are outside this scope. The core uses host networking, root and `NET_AD
 Changes audit and normally stop the previous container, prove its rules are gone,
 then use the existing configuration transaction. Preview and cancellation keep the
 running service. Status reports the specification; use `validate` for health.
-TUN management, native host reboot, arm64, public-network and complete 5C acceptance
-remain pending.
+Native host reboot, arm64, public-network and complete 5C acceptance remain pending.
+
+Manage TUN through menu `17 → 44`:
+
+```bash
+padm-docker protocol tun-status
+padm-docker edit --tun-enable
+padm-docker edit --tun-off
+```
+
+This is limited to a managed IPv4 deployment with one sing-box core, one Reality
+listener and no other host integration. The fixed `padm-tun` interface uses
+`198.18.0.1/30` and captures global host IPv4 TCP/UDP; IPv6 is rejected.
+The core uses host networking, root, `NET_ADMIN` and `/dev/net/tun`, with automatic
+container restart disabled. Private `tun.state` binds the container ID, start time,
+network namespace, interface and complete rule/route ownership. Stop, restart,
+configuration changes and recovery audit the owner, normally stop the core and
+prove restoration of the baseline before removing ownership evidence.
+Candidate checks read the live owner through a read-only mount. Abnormal exits,
+residual resources and drift preserve the scene; they are never adopted or cleaned
+automatically. Bundles without the TUN management capability reject activation
+and recovery. Deleting state does not bypass these checks.
+Isolated Docker Linux amd64 acceptance passed; native hosts, arm64, public networks,
+whole-host reboot and complete uninstall remain unverified.
 
 Multi-server control now has a separate private read-only API and a controlled-node sync
 transaction foundation.

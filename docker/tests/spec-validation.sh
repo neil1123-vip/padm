@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含跳跃与 TProxy 单核心/保留标记合同的完整谓词，仅忽略拼接空白。
+# 摘要锁定含跳跃、TProxy 和有限 TUN 合同的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "fcbc52fda390a57cc4994437fc1073aa3180efaca3b793f4557fa2fce11f77c8"
+    "c9533b3dabada45e011504948c1d56343aa8784d6c50375928beb99f97c3d565"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -209,6 +209,24 @@ for mark in (253, 254, 255):
 invalid = copy.deepcopy(spec)
 invalid["core"]["secondary_type"] = "sing-box"
 cases["invalid-tproxy-secondary"] = invalid
+spec = copy.deepcopy(cases["reality-v3"])
+spec["core"]["type"] = spec["core"]["protocols"][0]["core"] = "sing-box"
+spec["core"]["protocols"][0]["address_families"] = ["ipv4"]
+spec["host_integrations"] = [{
+    "type": "tun", "profile": "net-transparent", "firewall_rules": ["sing-box-auto-redirect"],
+    "devices": ["/dev/net/tun"], "schedules": [],
+    "settings": {"interface": "padm-tun", "address": "198.18.0.1/30"},
+}]
+cases["valid-host-tun"] = spec
+invalid = copy.deepcopy(spec)
+invalid["core"]["protocols"][0]["address_families"].append("ipv6")
+cases["invalid-tun-ipv6"] = invalid
+invalid = copy.deepcopy(spec)
+invalid["core"]["type"] = invalid["core"]["protocols"][0]["core"] = "xray"
+cases["invalid-tun-xray"] = invalid
+invalid = copy.deepcopy(spec)
+invalid["host_integrations"].append(wireguard)
+cases["invalid-tun-shared"] = invalid
 spec = copy.deepcopy(cases["websocket-v3"])
 spec["host_integrations"] = [{
     "type": "fail2ban", "profile": "net-fail2ban", "firewall_rules": ["DOCKER-USER"],
