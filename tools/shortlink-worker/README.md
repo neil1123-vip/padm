@@ -160,12 +160,19 @@ Worker 接口使用 `/s/<id>`，`id` 为随机生成的 32 位小写十六进制
 上传正文必须为非空 UTF-8 文本，大小上限为 128 KiB；格式或空正文错误返回 `400`，
 超限返回 `413`，鉴权失败返回 `401`，记录或路径不存在返回 `404`，KV 不可用返回 `503`。
 
-部署脚本固定使用 `wrangler@4.149.0`。Linux 优先复用 Node.js 22+ 和 npm；缺少可用运行时
-则下载 Node.js `22.23.3`，校验固定 SHA-256 后安装到 `.state/`，不替换系统 Node.js。
+Linux 每次部署都查询 Node.js 官方版本列表，选择最新 LTS；系统工具已是该版本时直接使用，
+否则下载对应版本并按官方 `SHASUMS256.txt` 校验 SHA-256，安装到
+`.state/node-v<版本>-linux-<架构>/`。已有私有运行时也会检查更新，同版本不重复下载。
+Wrangler 使用 `wrangler@latest`，每次优先向 npm 查询最新正式版。
+自动更新只作用于本次部署使用的工具，不替换系统 Node.js 或 age；部署成功保存配置后，
+已检查更新的工具会清理旧私有版本，当前版本保留；失败时不清理，符号链接及其他目录不删除。
+版本查询、下载或校验失败时停止部署，保留已有凭据和 VPS 运行配置。
 缺少配套文件时，从 `main` 分支的同一提交下载源码、模板、依赖清单和锁文件。
 部署前执行 `npm ci --omit=dev --ignore-scripts`，由 Wrangler 将 PNG 依赖打包到 Worker。
-加密或解锁时优先复用已安装的 `age`；Linux 缺少时下载官方 `age 1.3.2`，
-校验固定 SHA-256 后安装到 `.state/age-v1.3.2/`，不替换系统工具。
+加密或解锁时查询 age 官方最新正式版；系统工具已是该版本时直接使用，否则按发布文件的
+SHA-256 校验值下载到 `.state/age-v<版本>/`。已有私有版本同样自动检查更新。
+仅通过完整 Cloudflare 环境变量部署、无需加解密时，不检查或安装 age。
+PNG 依赖继续按锁文件安装，保证 Worker 打包结果可复现。
 
 仓库根目录通过 PowerShell 7.3+ 和 Docker Desktop 的 Linux 引擎执行定向回归：
 
@@ -173,7 +180,8 @@ Worker 接口使用 `/s/<id>`，`id` 为随机生成的 32 位小写十六进制
 .\shell\regression\run-docker.ps1 -Selector fast-only-output-rest -Jobs 2
 ```
 
-回归覆盖 Worker 鉴权、文本读写、大小限制、错误响应和删除；VPS 上传、失败回退、
+回归覆盖最新 LTS 选择、已有部署工具升级、同版本复用及版本信息异常保护；
+Worker 鉴权、文本读写、大小限制、错误响应和删除；VPS 上传、失败回退、
 订阅地址保留及配置权限；部署首次运行、状态复用、依赖安装、下载与校验失败、
 隐藏输入、80 列输出和颜色开关。文档中的一行下载入口也纳入验证。
 自定义域名回归覆盖首次绑定、回车复用、凭据已设置及输出重定向时的交互、非法输入、
@@ -187,5 +195,5 @@ PNG 回归使用独立识别库解码含中文及长协议链接的图片，检�
 [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/)、
 [Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、
 [Wrangler 系统要求](https://developers.cloudflare.com/workers/wrangler/install-and-update/)、
-[Node.js 校验值](https://nodejs.org/dist/v22.23.3/SHASUMS256.txt)、
+[Node.js 版本列表](https://nodejs.org/dist/index.tab)、
 [KV 一致性](https://developers.cloudflare.com/kv/concepts/how-kv-works/)。

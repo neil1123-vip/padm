@@ -24,8 +24,8 @@ export DEPLOY_TEST_LOG="${tmp}/calls"
 cat >"${fakeBin}/npx" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$1" == --yes && "$2" == wrangler@4.149.0 && "$3" == deploy ]]
-shift 3
+[[ "$1" == --yes && "$2" == --prefer-online && "$3" == wrangler@latest && "$4" == deploy ]]
+shift 4
 configFile= secretsFile= customDomain=
 while (($#)); do
     case "$1" in
@@ -74,6 +74,38 @@ SH
 chmod 755 "${fakeBin}/npm"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${fakeBin}/qrencode"
 chmod 755 "${fakeBin}/qrencode"
+# 默认模拟系统工具已是最新版，版本查询仍须每次执行，避免测试访问公网。
+export DEPLOY_TEST_AGE_VERSION
+DEPLOY_TEST_AGE_VERSION=$(age --version)
+DEPLOY_TEST_AGE_VERSION="v${DEPLOY_TEST_AGE_VERSION#v}"
+cat >"${fakeBin}/node" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == --version ]]; then printf 'v24.21.0\n'; else exec "${DEPLOY_TEST_REAL_NODE}" "$@"; fi
+SH
+cat >"${fakeBin}/curl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+url= output=
+while (($#)); do
+    case "$1" in
+    -o) output=$2; shift 2 ;;
+    https://*) url=$1; shift ;;
+    *) shift ;;
+    esac
+done
+case "${url}" in
+https://nodejs.org/dist/index.tab)
+    printf 'version\tdate\tfiles\tnpm\tv8\tuv\tzlib\topenssl\tmodules\tlts\tsecurity\n' >"${output}"
+    printf 'v26.11.1\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\nv24.21.0\t-\t-\t-\t-\t-\t-\t-\t-\tKrypton\t-\n' >>"${output}"
+    ;;
+https://api.github.com/repos/FiloSottile/age/releases/latest)
+    printf '{"tag_name":"%s","assets":[{"name":"age-%s-linux-amd64.tar.gz","digest":"sha256:%064d"},{"name":"age-%s-linux-arm64.tar.gz","digest":"sha256:%064d"}]}\n' \
+        "${DEPLOY_TEST_AGE_VERSION}" "${DEPLOY_TEST_AGE_VERSION}" 0 "${DEPLOY_TEST_AGE_VERSION}" 0 >"${output}"
+    ;;
+*) printf 'unexpected URL: %s\n' "${url}" >&2; exit 91 ;;
+esac
+SH
+chmod 755 "${fakeBin}/"{node,curl}
 export PATH="${fakeBin}:${PATH}"
 stateDir="${project}/.state"
 bash -n "${root}/deploy.sh" "${root}/deploy.test.sh"
@@ -467,8 +499,11 @@ with tarfile.open(archive, "w:gz") as package:
 archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
 launcher = r'''
 command() {
-    if [[ "$1" == -v && "${2:-}" == age ]]; then return 1; fi
+    if [[ "$1" == -v && "${2:-}" == age && "${DEPLOY_TEST_AGE_MODE}" != upgrade ]]; then return 1; fi
     builtin command "$@"
+}
+age() {
+    if [[ "${1:-}" == --version ]]; then printf 'v0.0.1\n'; else builtin command age "$@"; fi
 }
 curl() {
     local output= url=
@@ -479,50 +514,79 @@ curl() {
         *) shift ;;
         esac
     done
-    [[ "${url}" == https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz ||
-       "${url}" == https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-arm64.tar.gz ]]
+    if [[ "${url}" == https://nodejs.org/dist/index.tab ]]; then
+        builtin command curl https://nodejs.org/dist/index.tab -o "${output}"
+        return
+    fi
+    printf '%s\n' "${url}" >>"${DEPLOY_TEST_AGE_DOWNLOADS}"
+    if [[ "${url}" == https://api.github.com/repos/FiloSottile/age/releases/latest ]]; then
+        case "${DEPLOY_TEST_AGE_MODE}" in
+        metadata-failure) return 22 ;;
+        invalid-metadata-failure) printf '{"tag_name":"../bad","assets":[]}\n' >"${output}" ;;
+        missing-digest-failure) printf '{"tag_name":"v9.8.7","assets":[{"name":"age-v9.8.7-linux-amd64.tar.gz"}]}\n' >"${output}" ;;
+        *) printf '{"tag_name":"v9.8.7","assets":[{"name":"age-v9.8.7-linux-amd64.tar.gz","digest":"sha256:%s"},{"name":"age-v9.8.7-linux-arm64.tar.gz","digest":"sha256:%s"}]}\n' \
+            "${DEPLOY_TEST_AGE_HASH}" "${DEPLOY_TEST_AGE_HASH}" >"${output}" ;;
+        esac
+        return
+    fi
+    [[ "${url}" == https://github.com/FiloSottile/age/releases/download/v9.8.7/age-v9.8.7-linux-amd64.tar.gz ||
+       "${url}" == https://github.com/FiloSottile/age/releases/download/v9.8.7/age-v9.8.7-linux-arm64.tar.gz ]]
     case "${DEPLOY_TEST_AGE_MODE}" in
     download-failure) return 22 ;;
     checksum-failure) printf 'corrupt archive\n' >"${output}" ;;
     *) cp -- "${DEPLOY_TEST_AGE_ARCHIVE}" "${output}" ;;
     esac
 }
-export -f command curl
+export -f command curl age
 exec bash "${DEPLOY_TEST_AGE_PROJECT}/deploy.sh"
 '''
-for mode in ("fresh", "reuse", "download-failure", "checksum-failure"):
+for mode in ("fresh", "reuse", "upgrade", "metadata-failure", "invalid-metadata-failure",
+             "missing-digest-failure", "download-failure", "checksum-failure"):
     install_project = project.parent / ("age-install" if mode in ("fresh", "reuse") else f"age-{mode}")
     if mode != "reuse":
         install_project.mkdir()
         for name in ("deploy.sh", "worker.js", "wrangler.toml", "package.json", "package-lock.json"):
             shutil.copy(project / name, install_project / name)
-        script = install_project / "deploy.sh"
-        script.write_text(re.sub(r"ageHash=[0-9a-f]{64}", f"ageHash={archive_hash}", script.read_text()))
+        old = install_project / ".state/age-v1.0.0"
+        old.mkdir(parents=True)
+        (old / "sentinel").write_text("old private version\n")
+        preserved = install_project / ".state/age-v-backup"
+        preserved.mkdir()
+        (preserved / "sentinel").write_text("keep unrelated directory\n")
+        (install_project / ".state/age-v1.1.0").symlink_to(preserved, target_is_directory=True)
     case_env = dict(env, CLOUDFLARE_API_TOKEN="", CLOUDFLARE_ACCOUNT_ID="",
                     DEPLOY_TEST_AGE_PROJECT=str(install_project), DEPLOY_TEST_AGE_ARCHIVE=str(archive),
-                    DEPLOY_TEST_AGE_MODE=mode)
+                    DEPLOY_TEST_AGE_HASH=archive_hash, DEPLOY_TEST_AGE_MODE=mode,
+                    DEPLOY_TEST_AGE_DOWNLOADS=str(install_project / "downloads"))
     if mode == "reuse":
         prompts = [(decrypt_prompt, passphrase), ("  自定义域名（".encode(), b"")]
     else:
         prompts = [(b"Cloudflare API Token", token), (b"Cloudflare Account ID: ", account)]
-        if mode == "fresh":
+        if mode in ("fresh", "upgrade"):
             prompts += [(encrypt_prompt, passphrase), (confirm_prompt, passphrase),
                         ("  自定义域名（".encode(), b"")]
     calls = calls_file.read_bytes()
     previous_config = config.read_bytes()
     status, output = run_terminal(["bash", "-c", launcher], case_env, prompts)
-    assert (status == 0) == (mode in ("fresh", "reuse")), output
+    assert (status == 0) == (mode in ("fresh", "reuse", "upgrade")), output
     assert token not in output and passphrase not in output
     state = install_project / ".state"
-    if mode in ("fresh", "reuse"):
-        assert (state / "age-v1.3.2/age").is_file()
-        assert (state / "age-v1.3.2").stat().st_mode & 0o777 == 0o700
+    if mode in ("fresh", "reuse", "upgrade"):
+        assert (state / "age-v9.8.7/age").is_file()
+        assert (state / "age-v9.8.7").stat().st_mode & 0o777 == 0o700
+        assert not (state / "age-v1.0.0").exists()
         assert (state / "cloudflare.age").stat().st_mode & 0o777 == 0o600
+        downloads = (install_project / "downloads").read_text().splitlines()
+        assert downloads.count("https://api.github.com/repos/FiloSottile/age/releases/latest") == (2 if mode == "reuse" else 1)
+        assert len([url for url in downloads if "/releases/download/" in url]) == 1
     else:
+        assert (state / "age-v1.0.0/sentinel").read_text() == "old private version\n"
         assert not (state / "cloudflare.age").exists()
         assert config.read_bytes() == previous_config
         assert calls_file.read_bytes() == calls
     assert not any(state.glob(".tmp-deploy.*"))
+    assert (state / "age-v1.1.0").is_symlink()
+    assert (state / "age-v-backup/sentinel").read_text() == "keep unrelated directory\n"
     for path in state.rglob("*"):
         if path.is_file():
             assert token not in path.read_bytes(), f"deployment Token saved to {path}"
@@ -537,9 +601,9 @@ cmp "${tmp}/domain-previous.json" "${PADM_INSTALL_DIR}/qr-shortener.json"
 
 # 模拟全新 VPS，用真实 tar 和 SHA-256 验证下载、安装及失败路径。
 for arch in x64 arm64; do
-    nodeName="node-v22.23.3-linux-${arch}"
+    nodeName="node-v24.21.0-linux-${arch}"
     mkdir -p "${tmp}/archive/${nodeName}/bin"
-    printf '#!/usr/bin/env bash\nexec "${DEPLOY_TEST_REAL_NODE}" "$@"\n' \
+    printf '#!/usr/bin/env bash\nif [[ "${1:-}" == --version ]]; then printf "v24.21.0\\n"; else exec "${DEPLOY_TEST_REAL_NODE}" "$@"; fi\n' \
         >"${tmp}/archive/${nodeName}/bin/node"
     cp -- "${fakeBin}/"{npx,npm} "${tmp}/archive/${nodeName}/bin/"
     chmod 755 "${tmp}/archive/${nodeName}/bin/node"
@@ -560,7 +624,23 @@ done
 printf '%s\n' "${url}" >>"${DEPLOY_TEST_TMP}/downloads"
 [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" != download-failure ]] || exit 22
 case "${url}" in
-https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-*.tar.xz)
+https://nodejs.org/dist/index.tab)
+    if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" == invalid-index-failure ]]; then
+        printf 'invalid index\n' >"${output}"
+    else
+        printf 'version\tdate\tfiles\tnpm\tv8\tuv\tzlib\topenssl\tmodules\tlts\tsecurity\n' >"${output}"
+        printf 'v26.11.1\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\nv24.21.0\t-\t-\t-\t-\t-\t-\t-\t-\tKrypton\t-\n' >>"${output}"
+    fi
+    ;;
+https://nodejs.org/dist/v24.21.0/SHASUMS256.txt)
+    if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" == missing-hash-failure ]]; then
+        printf '%064d  other.tar.xz\n' 0 >"${output}"
+    else
+        fixtureHash=$(sha256sum "${DEPLOY_TEST_TMP}/node-${DEPLOY_TEST_ARCH}.tar.xz")
+        printf '%s  node-v24.21.0-linux-%s.tar.xz\n' "${fixtureHash%% *}" "${DEPLOY_TEST_ARCH}" >"${output}"
+    fi
+    ;;
+https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-*.tar.xz)
     if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" == checksum-failure ]]; then
         printf 'corrupt download\n' >"${output}"
     else
@@ -589,7 +669,8 @@ command() {
         case "$2" in
         node | npx | npm)
             if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" != old-node &&
-                "${PATH}" != "${DEPLOY_TEST_PROJECT}/.state/node-v22.23.3-linux-"* ]]; then
+                "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" != upgrade &&
+                "${PATH}" != "${DEPLOY_TEST_PROJECT}/.state/node-v24.21.0-linux-"* ]]; then
                 return 1
             fi
             ;;
@@ -600,9 +681,12 @@ command() {
     builtin command "$@"
 }
 node() {
-    if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" == old-node &&
-        "${PATH}" != "${DEPLOY_TEST_PROJECT}/.state/node-v22.23.3-linux-"* ]]; then
-        return 1
+    if [[ "${PATH}" != "${DEPLOY_TEST_PROJECT}/.state/node-v24.21.0-linux-"* ]]; then
+        if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" == old-node ]]; then return 1; fi
+        if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE:-}" == upgrade && "${1:-}" == --version ]]; then
+            printf 'v22.23.3\n'
+            return
+        fi
     fi
     builtin command node "$@"
 }
@@ -615,16 +699,23 @@ uname() {
 }
 export -f command node uname
 export DEPLOY_TEST_BOOTSTRAP=true
-for spec in apt-get:fresh:x64 dnf:old-node:arm64 yum:standalone:x64 \
-    apt-get:install-failure:x64 apt-get:download-failure:x64 apt-get:checksum-failure:x64; do
+for spec in apt-get:fresh:x64 apt-get:reuse:x64 dnf:old-node:arm64 yum:standalone:x64 apt-get:upgrade:x64 \
+    apt-get:install-failure:x64 apt-get:download-failure:x64 apt-get:checksum-failure:x64 \
+    apt-get:invalid-index-failure:x64 apt-get:missing-hash-failure:x64; do
     IFS=: read -r DEPLOY_TEST_MANAGER DEPLOY_TEST_BOOTSTRAP_MODE DEPLOY_TEST_ARCH <<<"${spec}"
     export DEPLOY_TEST_MANAGER DEPLOY_TEST_BOOTSTRAP_MODE DEPLOY_TEST_ARCH
-    export DEPLOY_TEST_PROJECT="${tmp}/${DEPLOY_TEST_MANAGER}-${DEPLOY_TEST_BOOTSTRAP_MODE}"
+    fixtureMode=${DEPLOY_TEST_BOOTSTRAP_MODE}
+    [[ "${fixtureMode}" != reuse ]] || fixtureMode=fresh
+    export DEPLOY_TEST_PROJECT="${tmp}/${DEPLOY_TEST_MANAGER}-${fixtureMode}"
     export PADM_INSTALL_DIR="${DEPLOY_TEST_PROJECT}/padm"
     mkdir -p "${DEPLOY_TEST_PROJECT}"
     cp -- "${root}/deploy.sh" "${DEPLOY_TEST_PROJECT}/"
     if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE}" != standalone ]]; then
         cp -- "${root}/"{worker.js,wrangler.toml,package.json,package-lock.json} "${DEPLOY_TEST_PROJECT}/"
+    fi
+    if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE}" == fresh || "${DEPLOY_TEST_BOOTSTRAP_MODE}" == upgrade ]]; then
+        mkdir -p "${DEPLOY_TEST_PROJECT}/.state/node-v22.23.3-linux-${DEPLOY_TEST_ARCH}"
+        printf 'old\n' >"${DEPLOY_TEST_PROJECT}/.state/node-v22.23.3-linux-${DEPLOY_TEST_ARCH}/old"
     fi
     if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE}" == *failure ]]; then
         mkdir -p "${DEPLOY_TEST_PROJECT}/.state"
@@ -633,9 +724,6 @@ for spec in apt-get:fresh:x64 dnf:old-node:arm64 yum:standalone:x64 \
         mkdir -p "${PADM_INSTALL_DIR}"
         cp -- "${tmp}/previous.json" "${PADM_INSTALL_DIR}/qr-shortener.json"
     fi
-    fixtureHash=$(sha256sum "${tmp}/node-${DEPLOY_TEST_ARCH}.tar.xz")
-    fixtureHash=${fixtureHash%% *}
-    sed -i -E "s/nodeHash=[0-9a-f]{64}/nodeHash=${fixtureHash}/" "${DEPLOY_TEST_PROJECT}/deploy.sh"
     rm -f -- "${tmp}/packages-ready" "${tmp}/packages" "${tmp}/downloads"
     status=0
     bash "${DEPLOY_TEST_PROJECT}/deploy.sh" >"${tmp}/output" 2>"${tmp}/error" || status=$?
@@ -653,7 +741,14 @@ for spec in apt-get:fresh:x64 dnf:old-node:arm64 yum:standalone:x64 \
         [[ "${status}" == 0 && ! -e "${DEPLOY_TEST_PROJECT}/.state/vps.env" &&
             ! -e "${DEPLOY_TEST_PROJECT}/.state/cloudflare.age" ]]
         [[ "$(stat -c '%a' "${PADM_INSTALL_DIR}/qr-shortener.json")" == 600 ]]
-        [[ -x "${DEPLOY_TEST_PROJECT}/.state/node-v22.23.3-linux-${DEPLOY_TEST_ARCH}/bin/node" ]]
+        [[ -x "${DEPLOY_TEST_PROJECT}/.state/node-v24.21.0-linux-${DEPLOY_TEST_ARCH}/bin/node" ]]
+        [[ ! -e "${DEPLOY_TEST_PROJECT}/.state/node-v22.23.3-linux-${DEPLOY_TEST_ARCH}" ]]
+        grep -q '/dist/index.tab' "${tmp}/downloads"
+        if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE}" == reuse ]]; then
+            ! grep -qE 'tar.xz|SHASUMS256.txt' "${tmp}/downloads"
+        else
+            grep -q '/dist/v24.21.0/SHASUMS256.txt' "${tmp}/downloads"
+        fi
         ! grep -qF "${CLOUDFLARE_API_TOKEN}" "${tmp}/output"
         ! grep -r -qF "${CLOUDFLARE_API_TOKEN}" "${DEPLOY_TEST_PROJECT}/.state"
         if [[ "${DEPLOY_TEST_BOOTSTRAP_MODE}" == standalone ]]; then

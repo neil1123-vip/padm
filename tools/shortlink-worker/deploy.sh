@@ -8,7 +8,7 @@ configFile="${stateDir}/wrangler.toml"
 domainFile="${stateDir}/custom-domain"
 credentialsFile="${stateDir}/cloudflare.age"
 legacyEnvFile="${stateDir}/vps.env"
-wrangler=(npx --yes wrangler@4.149.0)
+wrangler=(npx --yes --prefer-online wrangler@latest)
 
 deployLine() {
     local color=$1
@@ -27,6 +27,8 @@ deployStage() {
 }
 
 runDir=
+ageDir=
+ageCommand=
 currentStage=初始化
 deployCleanup() {
     local status=$?
@@ -82,15 +84,11 @@ if [[ "${system}" == Linux ]]; then
     case "$(uname -m)" in
     x86_64 | amd64)
         nodeArch=x64
-        nodeHash=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
         ageArch=amd64
-        ageHash=cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
         ;;
     aarch64 | arm64)
         nodeArch=arm64
-        nodeHash=a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f
         ageArch=arm64
-        ageHash=6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4
         ;;
     *) deployLine '1;31' '  自动部署支持 Linux x86_64 和 ARM64' >&2; exit 1 ;;
     esac
@@ -101,13 +99,8 @@ if [[ "${system}" == Linux ]]; then
         }
         privilege=(sudo)
     fi
-    nodeName="node-v22.23.3-linux-${nodeArch}"
-    # 私有运行时只影响本次部署，不替换 VPS 上已有的 Node.js。
-    if [[ -d "${stateDir}/${nodeName}" ]]; then
-        export PATH="${stateDir}/${nodeName}/bin:${PATH}"
-    fi
     missing=false
-    for tool in curl tar gzip xz openssl sha256sum qrencode script; do
+    for tool in curl tar gzip xz openssl sha256sum qrencode script awk; do
         command -v "${tool}" >/dev/null 2>&1 || missing=true
     done
     if [[ "${missing}" == true ]] || ! nodeReady ||
@@ -117,31 +110,55 @@ if [[ "${system}" == Linux ]]; then
             "${privilege[@]}" apt-get update
             "${privilege[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 -o DPkg::Lock::Timeout=120 \
-                ca-certificates curl tar gzip xz-utils openssl coreutils libstdc++6 libatomic1 qrencode util-linux
+                ca-certificates curl tar gzip xz-utils openssl coreutils gawk libstdc++6 libatomic1 qrencode util-linux
         elif command -v dnf >/dev/null 2>&1; then
             "${privilege[@]}" dnf install -y \
-                ca-certificates curl tar gzip xz openssl coreutils libstdc++ libatomic qrencode util-linux
+                ca-certificates curl tar gzip xz openssl coreutils gawk libstdc++ libatomic qrencode util-linux
         elif command -v yum >/dev/null 2>&1; then
             "${privilege[@]}" yum install -y \
-                ca-certificates curl tar gzip xz openssl coreutils libstdc++ libatomic qrencode util-linux
+                ca-certificates curl tar gzip xz openssl coreutils gawk libstdc++ libatomic qrencode util-linux
         else
             deployLine '1;31' '  自动安装支持 apt-get、dnf 或 yum' >&2
             exit 1
         fi
     fi
-    if ! nodeReady; then
-        deployLine '90' '  下载并校验官方 Node.js 22.23.3…'
-        nodeArchive="${nodeName}.tar.xz"
-        curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 180 \
-            "https://nodejs.org/dist/v22.23.3/${nodeArchive}" -o "${runDir}/${nodeArchive}"
-        (cd -- "${runDir}"; printf '%s  %s\n' "${nodeHash}" "${nodeArchive}" | sha256sum -c -)
-        tar -xJf "${runDir}/${nodeArchive}" -C "${runDir}"
-        [[ ! -e "${stateDir}/${nodeName}" && ! -L "${stateDir}/${nodeName}" ]] || {
-            deployLine '1;31' '  已有私有 Node.js 目录但无法运行，请检查文件和系统兼容性' >&2
+    deployLine '90' '  检查 Node.js 最新 LTS…'
+    curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 60 \
+        https://nodejs.org/dist/index.tab -o "${runDir}/node-index.tab"
+    nodeVersion=$(awk -F '\t' 'NR > 1 && $10 != "" && $10 != "-" { print $1; exit }' "${runDir}/node-index.tab")
+    [[ "${nodeVersion}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+        deployLine '1;31' '  无法从官方版本列表获取 Node.js 最新 LTS' >&2
+        exit 1
+    }
+    nodeName="node-${nodeVersion}-linux-${nodeArch}"
+    nodeDir="${stateDir}/${nodeName}"
+    [[ ! -L "${nodeDir}" && ! -L "${nodeDir}/bin" && ! -L "${nodeDir}/bin/node" ]] || {
+        deployLine '1;31' '  私有 Node.js 路径不能是符号链接' >&2
+        exit 1
+    }
+    if ! nodeReady || [[ "$(node --version)" != "${nodeVersion}" ]]; then
+        if [[ ! -e "${nodeDir}" ]]; then
+            deployLine '90' "  下载并校验 Node.js ${nodeVersion}…"
+            nodeArchive="${nodeName}.tar.xz"
+            curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 180 \
+                "https://nodejs.org/dist/${nodeVersion}/${nodeArchive}" -o "${runDir}/${nodeArchive}"
+            curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 60 \
+                "https://nodejs.org/dist/${nodeVersion}/SHASUMS256.txt" -o "${runDir}/node-shasums.txt"
+            nodeHash=$(awk -v archive="${nodeArchive}" '$2 == archive { print $1; exit }' "${runDir}/node-shasums.txt")
+            [[ "${nodeHash}" =~ ^[0-9a-f]{64}$ ]] || {
+                deployLine '1;31' '  官方 Node.js 压缩包校验值无效' >&2
+                exit 1
+            }
+            (cd -- "${runDir}"; printf '%s  %s\n' "${nodeHash}" "${nodeArchive}" | sha256sum -c -)
+            tar -xJf "${runDir}/${nodeArchive}" -C "${runDir}"
+            mv -- "${runDir}/${nodeName}" "${nodeDir}"
+        fi
+        # 私有运行时每次跟随最新 LTS，不替换系统工具。
+        export PATH="${nodeDir}/bin:${PATH}"
+        if ! nodeReady || [[ "$(node --version)" != "${nodeVersion}" ]]; then
+            deployLine '1;31' '  最新 LTS Node.js 无法运行，请检查私有目录和系统兼容性' >&2
             exit 1
-        }
-        mv -- "${runDir}/${nodeName}" "${stateDir}/${nodeName}"
-        export PATH="${stateDir}/${nodeName}/bin:${PATH}"
+        fi
     fi
 fi
 nodeReady || {
@@ -154,20 +171,41 @@ command -v openssl >/dev/null 2>&1 || {
     exit 1
 }
 prepareAge() {
+    [[ -z "${ageCommand:-}" ]] || return 0
+    local releaseInfo ageVersion ageHash archive systemAge=
+    deployLine '90' '  检查 age 最新正式版…'
+    curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 60 \
+        https://api.github.com/repos/FiloSottile/age/releases/latest -o "${runDir}/age-release.json" || return
+    releaseInfo=$(node - "${runDir}/age-release.json" "${ageArch}" <<'NODE'
+const release = require(process.argv[2]);
+const version = release.tag_name;
+const asset = release.assets?.find((entry) => entry.name === `age-${version}-linux-${process.argv[3]}.tar.gz`);
+if (release.draft || release.prerelease || !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(version) ||
+    !/^sha256:[0-9a-f]{64}$/.test(asset?.digest ?? "")) {
+  console.error("官方 age 版本信息或校验值无效");
+  process.exit(1);
+}
+process.stdout.write(`${version} ${asset.digest.slice(7)}`);
+NODE
+    ) || return
+    read -r ageVersion ageHash <<<"${releaseInfo}"
+    ageDir="${stateDir}/age-${ageVersion}"
     if command -v age >/dev/null 2>&1; then
-        ageCommand=$(command -v age)
-        return
+        systemAge=$(age --version 2>/dev/null) || systemAge=
+        if [[ "v${systemAge#v}" == "${ageVersion}" ]]; then
+            ageCommand=$(command -v age)
+            return
+        fi
     fi
-    local ageDir="${stateDir}/age-v1.3.2"
     [[ ! -L "${ageDir}" && ! -L "${ageDir}/age" ]] || {
         deployLine '1;31' '  私有 age 路径不能是符号链接' >&2
         return 1
     }
     if [[ ! -x "${ageDir}/age" ]]; then
-        deployLine '90' '  下载并校验官方 age 1.3.2…'
-        local archive="age-v1.3.2-linux-${ageArch}.tar.gz"
+        deployLine '90' "  下载并校验 age ${ageVersion}…"
+        archive="age-${ageVersion}-linux-${ageArch}.tar.gz"
         curl -q --proto '=https' --proto-redir '=https' -fLsS --retry 2 --connect-timeout 10 --max-time 180 \
-            "https://github.com/FiloSottile/age/releases/download/v1.3.2/${archive}" -o "${runDir}/${archive}" || return
+            "https://github.com/FiloSottile/age/releases/download/${ageVersion}/${archive}" -o "${runDir}/${archive}" || return
         (cd -- "${runDir}"; printf '%s  %s\n' "${ageHash}" "${archive}" | sha256sum -c -) || return
         tar -xzf "${runDir}/${archive}" -C "${runDir}" age/age || return
         mkdir -p "${ageDir}"
@@ -466,6 +504,21 @@ NODE
 if [[ -n "${customDomain}" ]]; then
     printf '%s\n' "${customDomain}" >"${runDir}/custom-domain"
     mv -- "${runDir}/custom-domain" "${domainFile}"
+fi
+# 最新版已确认且配置保存成功后，只清理普通目录中的旧私有工具。
+if [[ "${system}" == Linux ]]; then
+    for privateTool in "${stateDir}"/node-v*-linux-* "${stateDir}"/age-v*; do
+        [[ -d "${privateTool}" && ! -L "${privateTool}" ]] || continue
+        privateName=${privateTool##*/}
+        if [[ "${privateName}" =~ ^node-v[0-9]+\.[0-9]+\.[0-9]+-linux-(x64|arm64)$ ]]; then
+            [[ "${privateTool}" != "${nodeDir}" ]] || continue
+        elif [[ "${privateName}" =~ ^age-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            [[ -n "${ageDir}" && "${privateTool}" != "${ageDir}" ]] || continue
+        else
+            continue
+        fi
+        rm -rf -- "${privateTool}" || deployLine '33' "  旧私有工具清理失败：${privateName}" >&2
+    done
 fi
 printf '\n'
 deployLine '1;32' '┌─ 部署完成 ──────────────────────────────────'
