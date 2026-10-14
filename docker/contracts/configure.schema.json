@@ -44,6 +44,7 @@
   "x-padm-xhttp-xmux": true,
   "x-padm-xhttp-padding": true,
   "x-padm-xhttp-headers": true,
+  "x-padm-xhttp-limits": true,
   "x-padm-port-hopping-manual": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
@@ -1678,6 +1679,21 @@
                 },
                 "noSSEHeader": {
                   "type": "boolean"
+                },
+                "scMaxEachPostBytes": {
+                  "type": "integer", "minimum": 0, "maximum": 2147483647
+                },
+                "scMinPostsIntervalMs": {
+                  "type": "integer", "minimum": 0, "maximum": 2147483647
+                },
+                "scMaxBufferedPosts": {
+                  "type": "integer", "minimum": 0, "maximum": 2147483647
+                },
+                "scStreamUpServerSecs": {
+                  "oneOf": [
+                    {"type": "integer", "minimum": 0, "maximum": 2147483647},
+                    {"type": "string", "maxLength": 21, "pattern": "^(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})(?![\\s\\S])"}
+                  ]
                 },
                 "xmux": {
                   "type": "object",

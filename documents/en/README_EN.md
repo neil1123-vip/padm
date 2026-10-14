@@ -218,13 +218,17 @@ Old default/HTTPS specs and Nginx static combinations without local keep their
 existing bundle compatibility. Website appearance provides no anti-detection proof.
 
 Docker `Protocols & entry → XHTTP management` manages presets, XMUX, Padding,
-and two header switches for existing v3 Xray protocol `2` listeners:
+and two header switches for existing v3 Xray protocol `2` listeners. The four
+native packet/stream limits in 3D.7 were accepted in the local Linux `amd64`
+container regression:
 
 ```bash
 padm-docker protocol xhttp-status entry-xhttp
 padm-docker edit --xhttp-headers entry-xhttp true false --preview
 padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
+padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 ```
 
 The values are `noGRPCHeader` followed by `noSSEHeader`. `true` removes the
@@ -232,8 +236,18 @@ client stream POST gRPC Content-Type or server download SSE Content-Type,
 respectively. Packet-up requests already lack that gRPC header. Explicit `false`
 is retained; clear deletes both fields and restores defaults. Either explicit
 field requires `x-padm-xhttp-headers`. Menu items `10` and `11` set and clear them.
+The four limits are `scMaxEachPostBytes`, `scMinPostsIntervalMs`,
+`scMaxBufferedPosts`, and `scStreamUpServerSecs`. The first three accept integer
+values from `0` through `2147483647`; the last accepts an integer or an ordered
+range whose endpoints are in the same bounds. `0` and `0-0` remain in the spec,
+server config, and URI, while status reports the core defaults
+`1000000/30/30/20-80`. Empty input uses those defaults. Menu items `12` and `13`
+set and clear the limits, and explicit fields require `x-padm-xhttp-limits`.
+Clear deletes the fields and restores defaults. Other edits retain the limits,
+and copies/derivations inherit them. Defaults add no spec or URI fields, and
+`limits_explicit` distinguishes explicit values in status.
 Other listeners, XMUX, Padding, credentials, subscription/share groups, quotas,
-and totals are preserved. Arbitrary headers, sc*, downloadSettings, H3/CDN,
+and totals are preserved. Other `sc*`, custom headers, downloadSettings, H3/CDN,
 and split upload/download remain unavailable. Header changes do not establish
 camouflage or performance benefits.
 
@@ -1415,7 +1429,7 @@ After installing `2. VLESS Reality XHTTP`, tune protocol behavior under `Protoco
 | Level | Contents |
 | --- | --- |
 | ✅ Normal settings | View current config, apply scenario presets, switch `auto` / `packet-up` / `stream-up`. |
-| 🧪 Advanced settings | Tune XMUX, path/host, header, packet, and stream parameters. |
+| 🧪 Advanced settings | Tune XMUX, path/host, header switches, and four native packet/stream limits. |
 | ⚠️ Experimental features | Enable or disable split upload/download `downloadSettings`. |
 
 Daily/CDN defaults are `mode=auto`, `xmux.maxConcurrency=16-32`, `hMaxRequestTimes=600-900`, and `hMaxReusableSecs=1800-3000`. Each change is written to a temporary config and validated with Xray first; failed validation rolls back and prints the log path.

@@ -158,10 +158,14 @@ jq '
     .xhttp.xmux = {maxConcurrency:"16-32",hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"} |
     if .listener_id == "entry-compatible" then
       .xhttp.mode = "packet-up" | .xhttp.xPaddingBytes = "100-1000" |
-      .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = false
+      .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = false |
+      .xhttp += {scMaxEachPostBytes:16384,scMinPostsIntervalMs:5,
+        scMaxBufferedPosts:16,scStreamUpServerSecs:"1-2"}
     elif .listener_id == "entry-stream" then
       .xhttp.mode = "stream-up" | .xhttp.xPaddingBytes = 4096 |
-      .xhttp.noGRPCHeader = false | .xhttp.noSSEHeader = true
+      .xhttp.noGRPCHeader = false | .xhttp.noSSEHeader = true |
+      .xhttp += {scMaxEachPostBytes:16384,scMinPostsIntervalMs:5,
+        scMaxBufferedPosts:16,scStreamUpServerSecs:"1-2"}
     elif .listener_id == "entry-single" then .xhttp.xmux.maxConcurrency = 1 |
       .xhttp.noGRPCHeader = false | .xhttp.noSSEHeader = false
     elif .listener_id == "entry-custom" then
@@ -194,6 +198,14 @@ jq -e --slurpfile spec "${SPEC}" '
   ([$spec[0].core.protocols[] | {id:.listener_id,headers:(.xhttp | headers)}] | sort_by(.id))
 ' "${candidate}/config/xray/users.base" >/dev/null
 printf 'docker-xhttp-real-headers-config-ok: dual-ended=true/true,true/false,false/true,false/false default=absent\n'
+jq -e --slurpfile spec "${SPEC}" '
+  def limits: with_entries(select(.key == "scMaxEachPostBytes" or .key == "scMinPostsIntervalMs" or
+    .key == "scMaxBufferedPosts" or .key == "scStreamUpServerSecs"));
+  ([.inbounds[] | select(.streamSettings.network == "xhttp") |
+    {id:.tag,limits:(.streamSettings.xhttpSettings | limits)}] | sort_by(.id)) ==
+  ([$spec[0].core.protocols[] | {id:.listener_id,limits:(.xhttp | limits)}] | sort_by(.id))
+' "${candidate}/config/xray/users.base" >/dev/null
+printf 'docker-xhttp-real-limits-config-ok: packet-up/stream-up=16384/5/16/1-2 default=3 server=spec\n'
 cp -a "${candidate}/config/." "${PADM_DOCKER_INSTALL_DIR}/config/"
 cp -a "${candidate}/data/." "${PADM_DOCKER_INSTALL_DIR}/data/"
 cp -a "${candidate}/logs/." "${PADM_DOCKER_INSTALL_DIR}/logs/"
@@ -205,7 +217,7 @@ dockerEnsureRuntimeDataPermissions
 dockerProtocolCommand links >"${TEST_ROOT}/links.txt"
 mkdir -p "${TEST_ROOT}/runtime/client" "${TEST_ROOT}/runtime/tls" "${TEST_ROOT}/runtime/origin"
 cp -a "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" "${TEST_ROOT}/runtime/"
-python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" <<'PY'
+python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${SPEC}" <<'PY'
 import json
 from pathlib import Path
 import re
@@ -220,6 +232,13 @@ expected = {
     35505: ("custom", "auto", 2, "7-9", "30-40", None, None, None),
 }
 required = {"encryption", "security", "sni", "fp", "pbk", "sid", "type", "path", "host", "mode", "extra"}
+limit_keys = {"scMaxEachPostBytes", "scMinPostsIntervalMs", "scMaxBufferedPosts", "scStreamUpServerSecs"}
+spec = json.loads(Path(sys.argv[3]).read_text())
+spec_limits = {entry["public_port"]: {key: value for key, value in entry["xhttp"].items() if key in limit_keys}
+               for entry in spec["core"]["protocols"]}
+assert spec_limits == {port: {"scMaxEachPostBytes": 16384, "scMinPostsIntervalMs": 5,
+                             "scMaxBufferedPosts": 16, "scStreamUpServerSecs": "1-2"}
+                       if port in (35502, 35503) else {} for port in expected}
 def parse(line):
     uri = urllib.parse.urlsplit(line)
     q = urllib.parse.parse_qs(uri.query, keep_blank_values=True)
@@ -230,7 +249,7 @@ def parse(line):
     assert q["encryption"] == "none" and q["security"] == "reality" and q["type"] == "xhttp"
     extra = json.loads(q["extra"])
     assert isinstance(extra, dict) and {"xmux"} <= set(extra) <= {
-        "xmux", "xPaddingBytes", "noGRPCHeader", "noSSEHeader"}
+        "xmux", "xPaddingBytes", "noGRPCHeader", "noSSEHeader"} | limit_keys
     assert isinstance(extra["xmux"], dict) and set(extra["xmux"]) == {
         "maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"}
     if "xPaddingBytes" in extra:
@@ -244,6 +263,17 @@ def parse(line):
     for key in ("noGRPCHeader", "noSSEHeader"):
         if key in extra:
             assert type(extra[key]) is bool, (key, extra[key])
+    for key in ("scMaxEachPostBytes", "scMinPostsIntervalMs", "scMaxBufferedPosts"):
+        if key in extra:
+            assert type(extra[key]) is int and 0 <= extra[key] <= 2147483647, (key, extra[key])
+    if "scStreamUpServerSecs" in extra:
+        value = extra["scStreamUpServerSecs"]
+        if isinstance(value, str):
+            assert re.fullmatch(r"(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})", value), value
+            lower, upper = map(int, value.split("-"))
+            assert 0 <= lower <= upper <= 2147483647, value
+        else:
+            assert type(value) is int and 0 <= value <= 2147483647, value
     return uri, q, extra
 lines = Path(sys.argv[1]).read_text().splitlines()
 assert len(lines) == 5
@@ -264,6 +294,8 @@ for line in lines:
         expected_extra["noGRPCHeader"] = no_grpc
     if no_sse is not None:
         expected_extra["noSSEHeader"] = no_sse
+    expected_extra.update(spec_limits[uri.port])
+    assert {key: value for key, value in extra.items() if key in limit_keys} == spec_limits[uri.port]
     assert q["mode"] == mode and extra == expected_extra
     inbound = "socks-"+name
     outbound = "xhttp-"+name
@@ -285,6 +317,8 @@ invalid += [dict(sample_extra, xPaddingBytes=value) for value in
              "01-2", "1-4097", "1-2\n")]
 invalid += [dict(sample_extra, **{key: value}) for key in ("noGRPCHeader", "noSSEHeader")
             for value in (None, 0, 1, 1.0, "true", "false", [], {})]
+invalid += [dict(sample_extra, **{key: value}) for key in limit_keys
+            for value in (None, -1, True, 1.0, 2147483648, "1", "2-1", "01-2", "1-2147483648", "1-2\n")]
 for extra in invalid:
     query = urllib.parse.parse_qs(sample.query)
     query["extra"] = [json.dumps(extra)]
@@ -296,7 +330,8 @@ for extra in invalid:
         raise AssertionError("invalid extra accepted")
 Path(sys.argv[2]).write_text(json.dumps(config))
 print("docker-xhttp-real-links-ok: presets=daily,compatible,stream,single custom=2/7-9/30-40 "
-      "padding=1/100-1000/4096 default=2 headers=TT/TF/FT/FF/absent source=protocol-links")
+      "padding=1/100-1000/4096 default=2 headers=TT/TF/FT/FF/absent "
+      "limits=dual-ended/spec/default-compatible source=protocol-links")
 PY
 # 本地 TLS 目标提供 Reality 需要的 TLS 1.3/h2 握手，测试不依赖公网。
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=reality.target.test \
@@ -331,6 +366,10 @@ counts = collections.Counter()
 lock = threading.Lock()
 barriers = {name:threading.Barrier(3) for name in ("daily","compatible","stream","single","custom")}
 class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        assert self.path.split("/")[2] == "compatible"
+        assert self.rfile.read(int(self.headers["Content-Length"])) == b"x" * 32768
+        self.do_GET()
     def do_GET(self):
         if self.path == "/counts":
             with lock:
@@ -465,7 +504,13 @@ def probe(item):
         else:
             raise AssertionError(head)
         receive(2)
-        sock.sendall(f"GET {path} HTTP/1.1\r\nHost: origin\r\nConnection: close\r\n\r\n".encode())
+        if name == "compatible":
+            # 沿用原有四次业务请求，上传超过单个 packet-up POST 上限的数据。
+            payload = b"x" * 32768
+            sock.sendall(f"POST {path} HTTP/1.1\r\nHost: origin\r\nContent-Length: {len(payload)}\r\n"
+                         "Connection: close\r\n\r\n".encode() + payload)
+        else:
+            sock.sendall(f"GET {path} HTTP/1.1\r\nHost: origin\r\nConnection: close\r\n\r\n".encode())
         result = b""
         while True:
             part = sock.recv(4096)
@@ -494,7 +539,8 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
     paths += list(pool.map(probe, [(name,"recovery",0) for name in names]))
 counts = json.load(urllib.request.urlopen("http://origin:8088/counts", timeout=5))
 assert counts == {path:1 for path in paths}, counts
-print("docker-xhttp-real-probe-ok: origin-proof-count=20 initial=15 recovery=5 presets=4 custom=1")
+print("docker-xhttp-real-probe-ok: origin-proof-count=20 initial=15 recovery=5 presets=4 custom=1 "
+      "packet-upload=32768>16384")
 PY
 compose logs --no-color client >"${TEST_ROOT}/client.log"
 python3 - "${TEST_ROOT}/client.log" <<'PY'
@@ -525,5 +571,5 @@ for port in (35504,35505):
 print("docker-xhttp-real-runtime-ok: h2=5 modes=stream-one/packet-up/stream-up xmux=5 single/custom=maxConcurrency-hit")
 PY
 [[ "$(docker inspect --format '{{.State.Health.Status}}' "$(compose ps -q xray)")" == healthy ]]
-printf 'docker-xhttp-real-ok: target=local-tls13-h2 source=protocol-links padding=dual-ended/default-compatible headers=dual-ended/explicit-false/absent server-xmux=unchanged xray=%s ops=%s\n' \
+printf 'docker-xhttp-real-ok: target=local-tls13-h2 source=protocol-links padding=dual-ended/default-compatible headers=dual-ended/explicit-false/absent limits=dual-ended/default-compatible server-xmux=unchanged xray=%s ops=%s\n' \
     "${XRAY_ID}" "${OPS_ID}"

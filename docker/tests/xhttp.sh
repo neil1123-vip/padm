@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 XHTTP_SCOPE=${PADM_DOCKER_XHTTP_SCOPE:-full}
 case "${XHTTP_SCOPE}" in
-full|validation|edit|edit-preset|edit-padding|edit-headers|rollback) ;;
+full|validation|edit|edit-preset|edit-padding|edit-headers|edit-limits|rollback) ;;
 *) printf 'docker-xhttp-regression: unknown scope: %s\n' "${XHTTP_SCOPE}" >&2; exit 1 ;;
 esac
 
@@ -143,6 +143,24 @@ next(p for p in value["core"]["protocols"] if p["id"] == 2)["xhttp"]["headers"] 
 assert not validator.is_valid(value), "未支持的高级字段不能进入规格"
 (root / "case-advanced-unknown.json").write_text(json.dumps(value), encoding="utf-8")
 cases.append(("advanced-unknown", 0))
+for key in ("scMaxEachPostBytes", "scMinPostsIntervalMs", "scMaxBufferedPosts", "scStreamUpServerSecs"):
+    values = (0, 2147483647, -1, 2147483648, True, 1.5, "1", None)
+    if key == "scStreamUpServerSecs":
+        values += ("0-0", "20-80", "0-2147483647", "2-1", "0-2147483648",
+                   "01-2", "1-02", "1-2\n", "")
+    else:
+        values += ("0-1",)
+    for index, limit in enumerate(values):
+        value = copy.deepcopy(base)
+        next(p for p in value["core"]["protocols"] if p["id"] == 2)["xhttp"][key] = limit
+        valid = type(limit) is int and 0 <= limit <= 2147483647
+        if key == "scStreamUpServerSecs" and limit in ("0-0", "20-80", "0-2147483647"):
+            valid = True
+        schema_valid = valid or (key == "scStreamUpServerSecs" and limit in ("2-1", "0-2147483648"))
+        assert validator.is_valid(value) == schema_valid, (key, limit)
+        name = f"limits-{key}-{index}"
+        (root / f"case-{name}.json").write_text(json.dumps(value), encoding="utf-8")
+        cases.append((name, int(valid)))
 (root / "cases.tsv").write_text("".join(f"{name}\t{valid}\n" for name, valid in cases))
 PY
 while IFS=$'\t' read -r name valid; do
@@ -189,6 +207,21 @@ for spec in "${XHTTP_SPEC}" "${TEST_ROOT}/case-defaults.json" "${TEST_ROOT}/case
     dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${spec}" ||
         fail '缺 Header 能力的旧包误拒原 XHTTP/XMUX/Padding 子集'
 done
+cp "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+for key in scMaxEachPostBytes scMinPostsIntervalMs scMaxBufferedPosts scStreamUpServerSecs; do
+    dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-limits-${key}-0.json" ||
+        fail "当前包拒绝显式 ${key}=0"
+done
+jq 'del(."x-padm-xhttp-limits")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+for key in scMaxEachPostBytes scMinPostsIntervalMs scMaxBufferedPosts scStreamUpServerSecs; do
+    if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-limits-${key}-0.json" 2>/dev/null; then
+        fail "旧包接受不支持的显式 ${key}=0"
+    fi
+done
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${XHTTP_SPEC}" || fail '旧包误拒缺省 Packet/Stream 参数'
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-defaults.json" ||
+    fail '缺 Packet/Stream 能力的旧包误拒已有 XMUX'
 fi
 
 if [[ "${XHTTP_SCOPE}" != validation ]]; then
@@ -232,13 +265,18 @@ xhttpEdit() {
 }
 
 xhttpAssert() {
-    local mode=$1 xmux=$2 padding=${3:-null} grpcHeader=${4:-null} sseHeader=${5:-null}
+    local mode=$1 xmux=$2 padding=${3:-null} grpcHeader=${4:-null} sseHeader=${5:-null} limits=${6-}
+    limits=${limits:-'{}'}
     jq -en --arg mode "${mode}" --argjson xmux "${xmux}" --argjson padding "${padding}" \
-        --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" \
+        --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
         --slurpfile before "${TEST_ROOT}/installed-before.json" \
         --slurpfile after "${root}/config/spec.json" '
+      def limits: with_entries(select(.key | IN("scMaxEachPostBytes","scMinPostsIntervalMs",
+        "scMaxBufferedPosts","scStreamUpServerSecs")));
       def stable: .core.protocols |= map(if .listener_id == "entry-xhttp"
-        then del(.xhttp.mode,.xhttp.xmux,.xhttp.xPaddingBytes,.xhttp.noGRPCHeader,.xhttp.noSSEHeader) else . end);
+        then del(.xhttp.mode,.xhttp.xmux,.xhttp.xPaddingBytes,.xhttp.noGRPCHeader,.xhttp.noSSEHeader,
+          .xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,.xhttp.scMaxBufferedPosts,
+          .xhttp.scStreamUpServerSecs) else . end);
       ($before[0] | stable) == ($after[0] | stable) and
       any($after[0].core.protocols[]; .listener_id == "entry-xhttp" and
         .xhttp.mode == $mode and .xhttp.xmux == $xmux and .xhttp.xPaddingBytes == $padding and
@@ -246,16 +284,20 @@ xhttpAssert() {
         (if $xmux == null then (.xhttp | has("xmux") | not) else true end) and
         (if $padding == null then (.xhttp | has("xPaddingBytes") | not) else true end) and
         (.xhttp | has("noGRPCHeader")) == ($grpc != null) and
-        (.xhttp | has("noSSEHeader")) == ($sse != null))
+        (.xhttp | has("noSSEHeader")) == ($sse != null) and (.xhttp | limits) == $limits)
     ' >/dev/null || fail 'XHTTP 改写其它规格、账户或端口'
     jq -en --arg mode "${mode}" --argjson padding "${padding}" \
-        --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" \
+        --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
         --slurpfile before "${TEST_ROOT}/xray-before.json" \
         --slurpfile after "${root}/config/xray/users.base" \
         --slurpfile live "${root}/config/xray/config.json" '
+      def limits: with_entries(select(.key | IN("scMaxEachPostBytes","scMinPostsIntervalMs",
+        "scMaxBufferedPosts","scStreamUpServerSecs")));
       def stable: .inbounds |= map(if .tag == "entry-xhttp"
         then del(.streamSettings.xhttpSettings.mode,.streamSettings.xhttpSettings.xPaddingBytes,
-          .streamSettings.xhttpSettings.noGRPCHeader,.streamSettings.xhttpSettings.noSSEHeader) else . end);
+          .streamSettings.xhttpSettings.noGRPCHeader,.streamSettings.xhttpSettings.noSSEHeader,
+          .streamSettings.xhttpSettings.scMaxEachPostBytes,.streamSettings.xhttpSettings.scMinPostsIntervalMs,
+          .streamSettings.xhttpSettings.scMaxBufferedPosts,.streamSettings.xhttpSettings.scStreamUpServerSecs) else . end);
       ($before[0] | stable) == ($after[0] | stable) and
       any($after[0].inbounds[]; .tag == "entry-xhttp" and
         .streamSettings.xhttpSettings.mode == $mode and
@@ -264,25 +306,27 @@ xhttpAssert() {
         .streamSettings.xhttpSettings.noSSEHeader == $sse and
         (if $padding == null then (.streamSettings.xhttpSettings | has("xPaddingBytes") | not) else true end) and
         (.streamSettings.xhttpSettings | has("noGRPCHeader")) == ($grpc != null) and
-        (.streamSettings.xhttpSettings | has("noSSEHeader")) == ($sse != null)) and
+        (.streamSettings.xhttpSettings | has("noSSEHeader")) == ($sse != null) and
+        (.streamSettings.xhttpSettings | limits) == $limits) and
       [$after[0].inbounds[] | select(.tag == "entry-xhttp") | .streamSettings.xhttpSettings] ==
         [$live[0].inbounds[] | select(.tag == "entry-xhttp") | .streamSettings.xhttpSettings]
-    ' >/dev/null || fail 'XHTTP 改写服务端固定 XMUX、其它核心入口或未同步 Padding/Header'
+    ' >/dev/null || fail 'XHTTP 改写服务端固定 XMUX、其它核心入口或未同步高级字段'
     for pair in 'sing-before.json config/sing-box/users.base' 'traffic-before.json data/traffic/state.json' \
         'compose-before.json compose.json'; do
         read -r original installed <<<"${pair}"
         cmp -s "${TEST_ROOT}/${original}" "${root}/${installed}" || fail "XHTTP 改变 ${installed}"
     done
-    python3 - "${mode}" "${xmux}" "${padding}" "${grpcHeader}" "${sseHeader}" "${TEST_ROOT}" "${root}" "${TOKEN}" <<'PY'
+    python3 - "${mode}" "${xmux}" "${padding}" "${grpcHeader}" "${sseHeader}" "${limits}" "${TEST_ROOT}" "${root}" "${TOKEN}" <<'PY'
 import json
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-mode, encoded, encoded_padding, encoded_grpc, encoded_sse, temp, installed, token = sys.argv[1:]
+mode, encoded, encoded_padding, encoded_grpc, encoded_sse, encoded_limits, temp, installed, token = sys.argv[1:]
 xmux = json.loads(encoded)
 padding = json.loads(encoded_padding)
 grpc, sse = json.loads(encoded_grpc), json.loads(encoded_sse)
+limits = json.loads(encoded_limits)
 root, temp = Path(installed), Path(temp)
 for before, after in ((temp / "links-before.txt", root / "data/subscription" / token),
                       (temp / "group-before.txt", root / "data/subscription/xhttp-group-token")):
@@ -295,8 +339,9 @@ for before, after in ((temp / "links-before.txt", root / "data/subscription" / t
             continue
         assert a._replace(query="") == b._replace(query="")
         query, actual = parse_qs(a.query), parse_qs(b.query)
+        query.pop("extra", None)
         query["mode"] = [mode]
-        extra = {}
+        extra = dict(limits)
         if xmux is not None:
             extra["xmux"] = xmux
         if padding is not None:
@@ -306,20 +351,23 @@ for before, after in ((temp / "links-before.txt", root / "data/subscription" / t
         if sse is not None:
             extra["noSSEHeader"] = sse
         if extra:
-            query["extra"] = [json.dumps(extra, separators=(",", ":"))]
-            assert "extra=%7B" in second and json.loads(actual["extra"][0]) == extra
+            assert "extra=%7B" in second and json.loads(actual.pop("extra")[0]) == extra
         assert actual == query, (actual, query)
 PY
     dockerProtocolCommand links >"${STDOUT}"
     cmp -s "${STDOUT}" "${root}/data/subscription/${TOKEN}" || fail 'CLI 链接与主订阅不一致'
     runRead 0 xhttp-status dockerProtocolCommand xhttp-status entry-xhttp
     jq -e --arg mode "${mode}" --argjson xmux "${xmux}" --argjson padding "${padding}" \
-        --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" '
+        --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" '
+      {scMaxEachPostBytes:1000000,scMinPostsIntervalMs:30,scMaxBufferedPosts:30,
+        scStreamUpServerSecs:"20-80"} as $defaults |
+      ($defaults + ($limits | with_entries(select(.value != 0 and .value != "0-0")))) as $effective |
       .entries == [{listener_id:"entry-xhttp",protocol:2,mode:$mode,explicit:($xmux != null),
         xmux:($xmux // {maxConcurrency:"16-32",hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"}),
         xPaddingBytes:($padding // "100-1000"),padding_explicit:($padding != null),
         noGRPCHeader:($grpc // false),noSSEHeader:($sse // false),
-        grpc_header_explicit:($grpc != null),sse_header_explicit:($sse != null)}]
+        grpc_header_explicit:($grpc != null),sse_header_explicit:($sse != null),
+        limits:$effective,limits_explicit:($limits | length > 0)}]
     ' "${STDOUT}" >/dev/null || fail 'XHTTP 状态没有区分缺省与显式参数'
     [[ "$(stat -c %a "${root}/config/spec.json")" == 600 &&
         "$(stat -c %a "${root}/data/subscription/${TOKEN}")" == 640 ]] || fail 'XHTTP 更新改变私有权限'
@@ -400,6 +448,33 @@ cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" &&
     fail '清除 Header 没有恢复缺省 URI 和分享组'
 fi
 
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit || "${XHTTP_SCOPE}" == edit-limits ]]; then
+# 四字段双端投影独立保存，已有专项编辑与清除都应保留它们。
+limits='{"scMaxEachPostBytes":2000000,"scMinPostsIntervalMs":20,"scMaxBufferedPosts":50,"scStreamUpServerSecs":"30-40"}'
+xhttpEdit 0 unchanged --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
+! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail 'Packet/Stream 预览启动候选'
+xhttpEdit 0 changed --xhttp-limits entry-xhttp 2000000 20 50 30-40 --confirm PADM-DOCKER-EDIT
+xhttpAssert auto null null null null "${limits}"
+xhttpEdit 0 changed --xhttp-preset entry-xhttp daily --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" null null null "${limits}"
+xhttpEdit 0 changed --xhttp-padding entry-xhttp 128-256 --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" '"128-256"' null null "${limits}"
+xhttpEdit 0 changed --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" '"128-256"' true false "${limits}"
+xhttpEdit 0 changed --xhttp-limits entry-xhttp 0 0 0 0-0 --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" '"128-256"' true false \
+    '{"scMaxEachPostBytes":0,"scMinPostsIntervalMs":0,"scMaxBufferedPosts":0,"scStreamUpServerSecs":"0-0"}'
+xhttpEdit 0 changed --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" '"128-256"' true false
+xhttpEdit 0 changed --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 changed --xhttp-padding-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpAssert auto null
+cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" &&
+    cmp -s "${TEST_ROOT}/group-before.txt" "${root}/data/subscription/xhttp-group-token" ||
+    fail '清除 Packet/Stream 没有恢复缺省 URI 和分享组'
+fi
+
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == rollback ]]; then
 for listener in entry-missing vless-reality entry-grpc-sing; do
     runRead 15 "unsupported-${listener}" dockerProtocolCommand xhttp-status "${listener}"
@@ -407,6 +482,8 @@ for listener in entry-missing vless-reality entry-grpc-sing; do
     xhttpEdit 15 unchanged --xhttp-padding "${listener}" 100-1000 --preview
     xhttpEdit 15 unchanged --xhttp-headers "${listener}" true false --preview
     xhttpEdit 15 unchanged --xhttp-headers-clear "${listener}" --preview
+    xhttpEdit 15 unchanged --xhttp-limits "${listener}" 1000000 30 30 20-80 --preview
+    xhttpEdit 15 unchanged --xhttp-limits-clear "${listener}" --preview
 done
 for bad in 0 0-0 -1 1.5 01 1e2 2-1 0-1 1-02 4097 1-4097 $'1\n' $'1-2\n'; do
     xhttpEdit 2 unchanged --xhttp-padding entry-xhttp "${bad}" --preview
@@ -424,8 +501,32 @@ xhttpEdit 2 unchanged --xhttp-headers entry-xhttp true false --xhttp-headers-cle
 xhttpEdit 2 unchanged --xhttp-headers entry-xhttp true false --xhttp-padding entry-xhttp 64 --preview
 xhttpEdit 2 unchanged --xhttp-headers entry-xhttp true false --spec "${XHTTP_SPEC}" --preview
 xhttpEdit 2 unchanged --xhttp-headers entry-xhttp true false
+for bad in -1 1.5 01 1e2 0-1 2147483648 $'1\n'; do
+    xhttpEdit 2 unchanged --xhttp-limits entry-xhttp "${bad}" 30 30 20-80 --preview
+done
+xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 -1 30 20-80 --preview
+xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 -1 20-80 --preview
+for bad in -1 1.5 01 1e2 2-1 1-02 2147483648 0-2147483648 $'1\n' $'1-2\n'; do
+    xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 30 "${bad}" --preview
+done
+xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 30 --preview
+xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 30 20-80 --xhttp-limits-clear entry-xhttp --preview
+xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 30 20-80 --xhttp-headers entry-xhttp true false --preview
+xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 30 20-80 --xhttp-preset entry-xhttp daily --preview
+xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 30 20-80 --spec "${XHTTP_SPEC}" --preview
+xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 30 20-80
 for bad in 0 -1 1.5 01 1e2 2-1 0-1 1-02 2147483648 1-2147483648 $'1\n'; do
     xhttpEdit 2 unchanged --xhttp-xmux entry-xhttp "${bad}" 0 0 --preview
+done
+for key in scMaxEachPostBytes scMinPostsIntervalMs scMaxBufferedPosts scStreamUpServerSecs; do
+    for mutation in \
+        '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp[$key]) = 0' \
+        '.core.protocols += [(.core.protocols[] | select(.id == 2) |
+          .listener_id = "entry-new" | .public_port = 45443 | .xhttp[$key] = 0)]'; do
+        jq --arg key "${key}" "${mutation}" "${root}/config/spec.json" >"${TEST_ROOT}/manual.json"
+        chmod 0600 "${TEST_ROOT}/manual.json"
+        xhttpEdit 15 unchanged --spec "${TEST_ROOT}/manual.json" --preview
+    done
 done
 for mutation in \
     '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.xPaddingBytes) = 128' \
@@ -464,7 +565,7 @@ done
 # 健康失败必须恢复完整旧部署，包括分享组、账号、累计流量和 TLS。
 before=$(liveSnapshot)
 rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
-xhttpEdit 14 changed --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-EDIT
+xhttpEdit 14 changed --xhttp-limits entry-xhttp 2000000 20 50 30-40 --confirm PADM-DOCKER-EDIT
 [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] || fail 'XHTTP 健康失败未完整恢复'
 
 for answer in n eof int term derive copy; do
@@ -473,7 +574,9 @@ for answer in n eof int term derive copy; do
         jq --argjson xmux "${defaults}" '
           .core.protocols |= map(select(.listener_id == "entry-xhttp") |
             .xhttp.xmux = $xmux | .xhttp.xPaddingBytes = "100-1000" |
-            .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = false) |
+            .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = false |
+            .xhttp.scMaxEachPostBytes = 2000000 | .xhttp.scMinPostsIntervalMs = 20 |
+            .xhttp.scMaxBufferedPosts = 50 | .xhttp.scStreamUpServerSecs = "30-40") |
           .core.secondary_type = null | .tls = null | .subscription.enabled = false |
           del(.accounts,.port_aliases)
         ' "${XHTTP_SPEC}" >"${TEST_ROOT}/single-xhttp.json"
@@ -481,7 +584,7 @@ for answer in n eof int term derive copy; do
         root=${PADM_DOCKER_INSTALL_DIR}
         commandArgs=(edit)
     else
-        commandArgs=(edit --xhttp-headers entry-xhttp false true)
+        commandArgs=(edit --xhttp-limits entry-xhttp 2000000 20 50 30-40)
     fi
     before=$(snapshot)
     python3 - "${STDOUT}" "${answer}" bash -u "${CLI}" "${commandArgs[@]}" \
@@ -546,10 +649,12 @@ PY
           .core.protocols | length == 2 and all(.[]; .id == 2 and .xhttp.xmux == $xmux and
             .xhttp.xPaddingBytes == "100-1000" and
             .xhttp.noGRPCHeader == true and .xhttp.noSSEHeader == false and
+            .xhttp.scMaxEachPostBytes == 2000000 and .xhttp.scMinPostsIntervalMs == 20 and
+            .xhttp.scMaxBufferedPosts == 50 and .xhttp.scStreamUpServerSecs == "30-40" and
             (.xhttp | has("noGRPCHeader") and has("noSSEHeader"))) and
           any(.[]; .listener_id == "entry-1" and .public_port == 45443 and
             .xhttp.mode == "auto" and .xhttp.path == $path)
-        ' "${root}/config/spec.json" >/dev/null || fail '菜单复制或派生 XHTTP 丢失 XMUX/Padding/Header'
+        ' "${root}/config/spec.json" >/dev/null || fail '菜单复制或派生 XHTTP 丢失高级字段'
     else
         [[ "$(snapshot)" == "${before}" ]] || fail "XHTTP ${answer} 改变未提交部署"
     fi
@@ -564,6 +669,7 @@ jq -e '.entries == []' "${STDOUT}" >/dev/null || fail '没有 XHTTP 入口时状
 xhttpEdit 15 unchanged --xhttp-xmux-clear vless-reality --preview
 xhttpEdit 15 unchanged --xhttp-padding-clear vless-reality --preview
 xhttpEdit 15 unchanged --xhttp-headers-clear vless-reality --preview
+xhttpEdit 15 unchanged --xhttp-limits-clear vless-reality --preview
 fi
 fi
 printf 'docker-xhttp-regression-ok\n'

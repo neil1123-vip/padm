@@ -66,6 +66,8 @@ dockerUsage() {
   padm-docker edit --xhttp-padding-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-headers <入口 ID> <noGRPCHeader:true|false> <noSSEHeader:true|false> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-headers-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --xhttp-limits <入口 ID> <POST字节数> <间隔毫秒> <缓冲POST数> <流式秒数或范围> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --xhttp-limits-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-rules <IPv4/IPv6> <DNS 端口> <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-upstream <IPv4/IPv6> <端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

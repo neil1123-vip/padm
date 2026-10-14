@@ -520,7 +520,7 @@ runCdnDriver() {
 }
 
 runXhttpDriver() {
-    local scenario=$1 choice answer field grpc sse
+    local scenario=$1 choice answer field grpc sse post interval buffered seconds
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'9\n'
     targetReply 'Docker 协议与入口' $'10\n'
@@ -566,6 +566,21 @@ runXhttpDriver() {
         done
         targetReply 'Docker XHTTP 管理' $'11\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        for answer in custom defaults native-defaults; do
+            targetReply 'Docker XHTTP 管理' $'12\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+            case "${answer}" in
+            custom) post=16384 interval=5 buffered=16 seconds=1-2 ;;
+            defaults) post='' interval='' buffered='' seconds='' ;;
+            native-defaults) post=default interval=default buffered=default seconds=0-0 ;;
+            esac
+            targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]' "${post}"$'\n'
+            targetReply 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[30]' "${interval}"$'\n'
+            targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]' "${buffered}"$'\n'
+            targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]' "${seconds}"$'\n'
+        done
+        targetReply 'Docker XHTTP 管理' $'13\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         ;;
     cancel)
         targetReply 'Docker XHTTP 管理' $'99\n'
@@ -605,6 +620,16 @@ runXhttpDriver() {
                 targetReply 'noSSEHeader（true/false，0 返回）[false]' "${answer}"
             done
         done
+        for choice in 12 13; do
+            targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'0\n'
+        done
+        targetReply 'Docker XHTTP 管理' $'12\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]' $'16384\n'
+        targetReply 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[30]' $'5\n'
+        targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]' $'16\n'
+        targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]' $'0\n'
         ;;
     failed|invalid)
         if [[ "${scenario}" == failed ]]; then
@@ -654,9 +679,20 @@ runXhttpDriver() {
             targetReply 'Docker XHTTP 管理' $'11\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         fi
+        targetReply 'Docker XHTTP 管理' $'12\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        if [[ "${scenario}" == invalid ]]; then post=not-number; else post=16384; fi
+        targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]' "${post}"$'\n'
+        targetReply 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[30]' $'5\n'
+        targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]' $'16\n'
+        targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]' $'1-2\n'
+        if [[ "${scenario}" == failed ]]; then
+            targetReply 'Docker XHTTP 管理' $'13\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        fi
         ;;
     status-failed)
-        for choice in 2 8 9 10 11; do
+        for choice in 2 8 9 10 11 12 13; do
             targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
         done
         ;;
@@ -2629,6 +2665,12 @@ edit)
     elif [[ "${2:-}" == --xhttp-headers-clear ]]; then
         [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
         exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --xhttp-limits ]]; then
+        [[ "$#" -eq 7 && "$3" == entry-xhttp && -n "$4" && -n "$5" && -n "$6" && -n "$7" ]] || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --xhttp-limits-clear ]]; then
+        [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --region-mode ]]; then
         [[ "$#" -eq 3 && ( "$3" == both || "$3" == domain || "$3" == ip ) ]] || exit 2
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
@@ -4171,9 +4213,13 @@ for xhttpCase in flow cancel failed invalid status-failed; do
             expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-headers entry-xhttp '"${xhttpHeaders}"
         done
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-headers-clear entry-xhttp'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits entry-xhttp 16384 5 16 1-2'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits entry-xhttp 1000000 30 30 20-80'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits entry-xhttp 0 0 0 0-0'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits-clear entry-xhttp'
         ;;
     cancel)
-        for ((xhttpStatus = 0; xhttpStatus < 4 * 7 + 2 * (3 + 1 + 2); xhttpStatus++)); do
+        for ((xhttpStatus = 0; xhttpStatus < 4 * 7 + 2 * (3 + 1 + 2) + 3; xhttpStatus++)); do
             expectedXhttp+=$'\nprotocol xhttp-status'
         done
         grep -Fq '无效选项，请重新选择。' "${CONTROL_LOG}" || fail 'XHTTP 无效选项未留在菜单'
@@ -4186,7 +4232,9 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-padding-clear entry-xhttp'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-headers entry-xhttp true false'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-headers-clear entry-xhttp'
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 7 ]] ||
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits entry-xhttp 16384 5 16 1-2'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits-clear entry-xhttp'
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 9 ]] ||
             fail 'XHTTP 编辑失败未显示错误并继续读取'
         ;;
     invalid)
@@ -4194,14 +4242,15 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-padding entry-xhttp not-range'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-headers entry-xhttp not-bool false'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-headers entry-xhttp false not-bool'
-        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 4 ]] ||
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits entry-xhttp not-number 5 16 1-2'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 5 ]] ||
             fail 'XHTTP 非法参数未保留菜单'
         ;;
     status-failed)
-        for ((xhttpStatus = 0; xhttpStatus < 5; xhttpStatus++)); do
+        for ((xhttpStatus = 0; xhttpStatus < 7; xhttpStatus++)); do
             expectedXhttp+=$'\nprotocol xhttp-status'
         done
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 7 ]] ||
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 9 ]] ||
             fail 'XHTTP 状态失败仍提示变更或未恢复菜单'
         ! grep -Fq 'XHTTP 入口 ID（0 返回）' "${CONTROL_LOG}" ||
             fail 'XHTTP 状态失败仍读取变更入口'
@@ -4216,6 +4265,8 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         grep -Fq '9. 恢复缺省 Padding' "${CONTROL_LOG}" || fail 'XHTTP Padding 菜单入口缺失'
     grep -Fq '10. 设置首部开关' "${CONTROL_LOG}" &&
         grep -Fq '11. 恢复缺省首部' "${CONTROL_LOG}" || fail 'XHTTP Header 菜单入口缺失'
+    grep -Fq '12. 设置 packet/stream 参数' "${CONTROL_LOG}" &&
+        grep -Fq '13. 恢复缺省 packet/stream' "${CONTROL_LOG}" || fail 'XHTTP packet/stream 菜单入口缺失'
 done
 unset XHTTP_EDIT_STATUS XHTTP_STATUS
 

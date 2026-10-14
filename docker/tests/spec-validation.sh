@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含全主机透明转发、解析后 IP 出站组合及 Gecko 的完整谓词，仅忽略拼接空白。
+# 摘要锁定含透明转发、解析后 IP 出站组合、Gecko 和 XHTTP 四参数的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "45adc7c217523bfc2406262e94ef79dad548e0b82b024219c4c75cce3fd4d323"
+    "70183b24c5aa43e5f0e12543c08a85808a7b73b9837364955aefb5a0a824cf9b"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -123,6 +123,22 @@ for protocol_id in protocol_ids:
     spec["core"]["protocols"] = [entry]
     spec["tls"] = None if protocol_id in (1, 2, 26, 30) else {"domain": domain}
     cases[f"valid-protocol-{protocol_id}"] = spec
+for key in ("scMaxEachPostBytes", "scMinPostsIntervalMs", "scMaxBufferedPosts", "scStreamUpServerSecs"):
+    for limit in (0, 2147483647):
+        spec = copy.deepcopy(cases["valid-protocol-2"])
+        spec["core"]["protocols"][0]["xhttp"][key] = limit
+        cases[f"valid-xhttp-limits-{key}-{limit}"] = spec
+    invalid_values = (-1, 2147483648, True, 1.5, None, "1", "0-1")
+    if key == "scStreamUpServerSecs":
+        invalid_values = (-1, 2147483648, True, 1.5, None, "1", "2-1", "0-2147483648", "01-2")
+        for limit in ("0-0", "20-80", "0-2147483647"):
+            spec = copy.deepcopy(cases["valid-protocol-2"])
+            spec["core"]["protocols"][0]["xhttp"][key] = limit
+            cases[f"valid-xhttp-limits-{key}-{limit}"] = spec
+    for index, limit in enumerate(invalid_values):
+        spec = copy.deepcopy(cases["valid-protocol-2"])
+        spec["core"]["protocols"][0]["xhttp"][key] = limit
+        cases[f"invalid-xhttp-limits-{key}-{index}"] = spec
 spec = copy.deepcopy(cases["valid-protocol-3"])
 spec["core"]["protocols"][0]["hy2"]["obfs"] = {
     "type": "gecko", "password": "gecko-fixture-1234",
@@ -475,7 +491,8 @@ for file in "${TEST_ROOT}"/*.json; do
     fi
     [[ ( "${file##*/}" != invalid-tproxy-* && "${file##*/}" != invalid-redirect-* &&
         "${file##*/}" != invalid-block-ips-resolved-* &&
-        "${file##*/}" != invalid-hy2-gecko-* ) ||
+        "${file##*/}" != invalid-hy2-gecko-* &&
+        "${file##*/}" != invalid-xhttp-limits-* ) ||
         "${actual}" != 0 ]] || fail "无效透明/解析后 IP 规格被接受: ${file##*/}"
     count=$((count + 1))
 done

@@ -1228,7 +1228,8 @@ HTTP/2、五组 XMUX 创建及单并发/自定义的并发上限分支。服务�
 以及认证、其它入口、端口别名、额度、主订阅和分享组保持由生产 CLI 合同验证。
 真实脚本的 jq 作用域/必需字段错误和独审发现的派生丢 XMUX 回归均已修复；
 失败日志保留，重复源码归档在验收后清理，证据 `.tmp-xhttp-close/acceptance.md`。
-不据此宣称长时复用或吞吐收益；有限 Padding 见 3D.5，首部开关见 3D.6，任意 headers/sc*、downloadSettings、H3/CDN、
+不据此宣称长时复用或吞吐收益；有限 Padding 见 3D.5，首部开关见 3D.6，四项 packet/stream limits 见 3D.7。
+其它 sc*、自定义 headers、downloadSettings、H3/CDN、
 上下行分离和完整协议管理仍 `deferred`，公网、原生宿主、arm64 和可信发布仍待验。
 
 #### 3D.5 有限 XHTTP Padding
@@ -1259,7 +1260,8 @@ Jobs `6`、`416875 ms`、exit `0`，未命中缓存。
 服务端逐入口等于 spec，原五组 `15` 次初始和 `5` 次恢复请求、精确 `20` 次原点请求，
 TLS 1.3/h2、模式及 XMUX 运行分支断言保持。
 证据 `.tmp-xhttp-padding-close/acceptance.md`，失败日志保留，重复归档清理。
-不证明填充字节分布、抗识别、长时复用或吞吐收益；有限首部开关见 3D.6，任意 headers/sc*、downloadSettings、
+不证明填充字节分布、抗识别、长时复用或吞吐收益；有限首部开关见 3D.6，四项 packet/stream limits 见 3D.7。
+其它 sc*、自定义 headers、downloadSettings、
 H3/CDN、上下行分离和完整管理仍未开放，公网、原生宿主、arm64 与可信发布仍待验。
 
 #### 3D.6 有限 XHTTP 首部开关
@@ -1302,8 +1304,54 @@ POST 的 `Content-Type: application/grpc`；`packet-up` POST 和分流 GET
 证据 `.tmp-regression-docker-f5f002d9b7dc41d798f7d2c7eb94b197/`；
 17 个变更文件与该完整快照逐字节匹配，之后仅补验收文字。
 Bash/ShellCheck error、JSON、Python AST 与 workflow YAML 检查通过。
-任意 headers/sc*、downloadSettings、H3/CDN、上下行分离与完整管理仍 `deferred`；
+四项 packet/stream limits 见 3D.7；其它 sc*、自定义 headers、downloadSettings、H3/CDN、
+上下行分离与完整管理仍 `deferred`；
 首部变化不证明抗识别、长时复用或吞吐收益，公网/原生宿主/arm64/可信发布待验。
+
+#### 3D.7 原生 XHTTP packet/stream limits
+
+本轮实施已有 v3 Xray 协议 `2`、显式选中单入口的四项原生 limits，
+不开放自定义 headers 或其它 `sc*` 字段。
+CLI `edit --xhttp-limits <入口 ID> <post> <interval> <buffered> <secs>` 设置
+`scMaxEachPostBytes`、`scMinPostsIntervalMs`、`scMaxBufferedPosts`、
+`scStreamUpServerSecs`，`edit --xhttp-limits-clear <入口 ID>` 清除四字段；
+菜单第 `12` 项设置、第 `13` 项恢复缺省。
+前三项仅接受规范整数 `0..2147483647`；最后一项接受同范围整数或正序范围，
+拒绝负数、浮点、倒序、非规范数字、溢出，前三项不接受范围。
+空输入采用 `1000000/30/30/20-80`，前三项输入 `default` 保存 `0`。
+
+`0`/`0-0` 使用核心缺省，但作为显式值保留在 spec、服务端及客户端 URI `extra`；
+状态的 `limits` 显示核心生效值，默认分别为 `1000000`、`30`、`30`、`20-80`，
+`limits_explicit` 区分任一显式字段与缺省。
+清除删除字段，缺省不补 spec、server 或 URI；任一字段存在要求
+`x-padm-xhttp-limits`，旧包只兼容没有显式四字段的规格。
+专项操作与其它编辑专项互斥，只豁免所选入口的四字段；普通导入不能绕过冻结。
+预设、XMUX、Padding、首部编辑保留 limits，复制和同协议派生继承，
+服务端与 URI 的高级字段采用统一投影，主订阅、分享组及本地链接同事务刷新。
+认证、其它入口、端口别名、累计流量和额度沿用原冻结与失败恢复。
+
+2026-10-15 本地 Linux `amd64` 容器的定向、真实、菜单与 dispatcher 均 exit `0`：
+
+| 验收 | 入口耗时 | 证据目录 |
+| --- | ---: | --- |
+| `docker-xhttp-limits` | `30079 ms` | `.tmp-regression-docker-98a95f28b7a147d7902acfd40724d06a/` |
+| `docker-xhttp-real` | `25743 ms` | `.tmp-regression-docker-bd8dca2ab5c84146a4a6c20b39e7c3eb/` |
+| `docker-menu` | `55976 ms` | `.tmp-regression-docker-8d876cda131a45f6a0143a80f324ddc7/` |
+| `regression-dispatcher-contract` | `2217 ms` | `.tmp-regression-docker-2a9d8c618eff42cdbd9b8b5471cdb0ce/` |
+
+真实链路保持 5 个入口、20 条业务请求，覆盖 `32768 > 16384` 字节的 packet POST；
+服务端与 URI limits 等于 spec，缺省兼容，原 h2/模式/XMUX 分支断言保持。
+菜单首轮因新入口标签不匹配失败，校正后通过；原失败目录
+`.tmp-regression-docker-e0e9c631948840cf8297cc5afb036758/` 保留。
+集中 `docker-contracts -Jobs 6` 仅运行一次，exit `0`、入口 `383362 ms`、
+内部 `381215 ms`、排队 `320 ms`、`cache_hit=false`，345 项规格差分通过；
+证据 `.tmp-regression-docker-94698fa5854848aa852850ad4ba398f2/`。
+复用工具镜像，完整工作区为容器内 tmpfs；完整与成功菜单 source 摘要一致，
+之后仅补文档，不以容器验收推断公网、原生宿主、arm64 或性能收益。
+
+`management_status` 保持 `deferred`；其它 `sc*`、自定义 headers、
+downloadSettings、H3/CDN、上下行分离、完整管理及公网/原生宿主/arm64/可信发布
+仍待实施或验收，不宣称吞吐、填充分布、长时复用或抗识别收益。
 
 ## 第四步：用户、订阅与服务维护
 

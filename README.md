@@ -197,13 +197,16 @@ VLESS/Trojan gRPC TLS 在 Xray 首配中分别选 `14`/`15`，复用 Nginx HTTP/
 单独部署只提供本地链接，和协议 21 混合时可纳入其 HTTPS 订阅。
 
 Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的预设、
-XMUX、Padding 和两个首部开关：
+XMUX、Padding、两个首部开关；3D.7 已在本地 Linux `amd64` 容器完成验收，
+新增四项原生 packet/stream limits：
 
 ```bash
 padm-docker protocol xhttp-status entry-xhttp
 padm-docker edit --xhttp-headers entry-xhttp true false --preview
 padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
+padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 ```
 
 两个值依次为 `noGRPCHeader`、`noSSEHeader`。`true` 分别去掉客户端 stream
@@ -211,7 +214,15 @@ POST 的 gRPC Content-Type 和服务端下载响应的 SSE Content-Type；`packe
 原本没有 gRPC 请求首部。显式 `false` 保留，clear 删除字段恢复缺省；
 任一字段存在要求 `x-padm-xhttp-headers`。菜单 `10` 设置、`11` 恢复缺省，
 修改保持其它入口、XMUX、Padding、认证、主订阅/分享组和额度累计。
-任意 headers、sc*、downloadSettings、H3/CDN 与上下行分离仍未开放，
+四项 limits 为 `scMaxEachPostBytes`、`scMinPostsIntervalMs`、
+`scMaxBufferedPosts` 和 `scStreamUpServerSecs`，前三项接受 `0..2147483647`
+整数，最后一项接受整数或端点 `0..2147483647` 的正序范围；`0`/`0-0`
+保留在 spec、服务端和 URI，状态显示核心默认 `1000000/30/30/20-80`。
+空输入使用同一组默认值，菜单 `12` 设置、`13` 清除，显式字段要求
+`x-padm-xhttp-limits`。`clear` 删除字段恢复缺省，其它编辑保留、复制/派生继承；
+缺省不补 spec 或 URI，状态通过 `limits_explicit` 区分显式值。其它 `sc*`、
+自定义 headers、downloadSettings、H3/CDN
+与上下行分离仍未开放，
 首部变化不代表抗识别或性能收益。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
@@ -1674,7 +1685,7 @@ Reality 目标站主结果库使用 16 列 TSV 写入 `/etc/padm/reality_targets
 | 层级 | 内容 |
 | --- | --- |
 | ✅ 普通设置 | 查看当前配置、选择场景预设、切换 `auto` / `packet-up` / `stream-up`。 |
-| 🧪 高级设置 | 调整 XMUX、path/host、header、packet、stream 参数。 |
+| 🧪 高级设置 | 调整 XMUX、path/host、首部开关和四项原生 packet/stream limits。 |
 | ⚠️ 实验功能 | 配置或关闭上下行分离 `downloadSettings`。 |
 
 默认推荐值面向日常和 CDN：`mode=auto`，`xmux.maxConcurrency=16-32`，`hMaxRequestTimes=600-900`，`hMaxReusableSecs=1800-3000`。每次修改都会先写临时配置并执行 Xray 校验，失败会自动回滚并提示日志路径。
