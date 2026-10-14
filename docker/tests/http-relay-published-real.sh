@@ -54,18 +54,19 @@ if dockerConfigureSpecValidate "${TEST_ROOT}/sing-box.rejected.spec.json" >/dev/
 fi
 printf 'http-relay-published-sing-box-source-contract-rejected\n'
 
-for core in xray; do
-    jq --arg core "${core}" '.relay.http.core=$core' "${TEST_ROOT}/base.json" \
-        >"${TEST_ROOT}/${core}.spec.json"
-    dockerConfigureSpecValidate "${TEST_ROOT}/${core}.spec.json"
-    dockerGenerateCompose "${TEST_ROOT}/${core}.spec.json" "${TEST_ROOT}/${core}.compose.json"
-    if [[ "${core}" == xray ]]; then
-        dockerGenerateXrayConfig "${TEST_ROOT}/${core}.spec.json" "${TEST_ROOT}/${core}.base"
+for variant in xray xray-edited; do
+    if [[ "${variant}" == xray-edited ]]; then
+        jq '.relay.http.port=38181 |
+          .relay.http.source_ips=["198.18.1.3/32","2001:db8:1::3/128"]' \
+            "${TEST_ROOT}/base.json" >"${TEST_ROOT}/${variant}.spec.json"
     else
-        dockerGenerateSingBoxConfig "${TEST_ROOT}/${core}.spec.json" "${TEST_ROOT}/${core}.base"
+        cp -- "${TEST_ROOT}/base.json" "${TEST_ROOT}/${variant}.spec.json"
     fi
-    dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.base" \
-        '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.json"
+    dockerConfigureSpecValidate "${TEST_ROOT}/${variant}.spec.json"
+    dockerGenerateCompose "${TEST_ROOT}/${variant}.spec.json" "${TEST_ROOT}/${variant}.compose.json"
+    dockerGenerateXrayConfig "${TEST_ROOT}/${variant}.spec.json" "${TEST_ROOT}/${variant}.base"
+    dockerTrafficRender xray "${TEST_ROOT}/${variant}.base" \
+        '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${variant}.json"
 done
 
 python3 "${PROJECT_ROOT}/docker/tests/http-relay-published-real.py" "${TEST_ROOT}"

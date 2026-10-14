@@ -1185,7 +1185,9 @@ dockerMenuHttpRelay() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker HTTP 中继入站\n'
-        printf '%s\n' '1. 导入认证与来源规则' '2. 关闭 HTTP 中继' '3. 查看路由状态' '0. 返回'
+        printf '%s\n' '1. 导入认证与来源规则' '2. 关闭 HTTP 中继' '3. 查看路由状态' \
+            '4. 修改中继端口' '5. 替换来源允许名单' '6. 追加来源允许名单' \
+            '7. 精确删除来源允许名单（删空拒绝）' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1201,6 +1203,22 @@ dockerMenuHttpRelay() {
             ;;
         2) dockerMenuRun edit --http-relay-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
+        4|5|6|7)
+            dockerMenuRun protocol routing-status || continue
+            if [[ "${choice}" == 4 ]]; then
+                dockerSetupRead input '新 HTTP 中继端口（1–65535，0 返回）: ' &&
+                    [[ -n "${input}" ]] || continue
+                dockerMenuRun edit --http-relay-port "${input}" || true
+            else
+                dockerSetupRead input 'HTTP 中继来源 IP/CIDR CSV（精确字面规则，0 返回）: ' &&
+                    [[ -n "${input}" ]] || continue
+                case "${choice}" in
+                5) dockerMenuRun edit --http-relay-sources "${input}" || true ;;
+                6) dockerMenuRun edit --http-relay-sources-add "${input}" || true ;;
+                7) dockerMenuRun edit --http-relay-sources-remove "${input}" || true ;;
+                esac
+            fi
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

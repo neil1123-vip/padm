@@ -63,8 +63,10 @@ docker() {
 dockerComposeRun() {
     printf '%s\n' "$*" >>"${TEST_ROOT}/compose-calls.log"
     [[ -e "${root}/locks/deployment.lock" ]] || fail '发布未持有部署锁'
-    if [[ "${1:-}" == up && "${MODE}" == health-fail && ! -e "${TEST_ROOT}/failed-once" ]]; then
+    if [[ "${1:-}" == up && "${MODE}" != ok && ! -e "${TEST_ROOT}/failed-once" ]]; then
         : >"${TEST_ROOT}/failed-once"
+        [[ "${MODE}" != interrupt-int ]] || kill -INT "${BASHPID}"
+        [[ "${MODE}" != interrupt-term ]] || kill -TERM "${BASHPID}"
         return 1
     fi
 }
@@ -308,6 +310,14 @@ runStatus
 jq -e '.http_relay=={enabled:false}' "${LOG}" >/dev/null
 runEdit 0 --http-relay "${INPUT}" --preview
 runEdit 0 --http-relay-off --preview
+for action in port sources sources-add sources-remove; do
+    value=192.0.2.1
+    [[ "${action}" != port ]] || value=36081
+    runEdit 15 "--http-relay-${action}" "${value}" --preview
+    runEdit 2 "--http-relay-${action}"
+    runEdit 2 "--http-relay-${action}" "${value}" --http-relay-off --preview
+    runEdit 2 "--http-relay-${action}" "${value}" --socks5-off --preview
+done
 for args in missing duplicate mixed; do
     case "${args}" in
     missing) runEdit 2 --http-relay ;;
@@ -339,6 +349,67 @@ runStatus
 jq -e '.http_relay=={enabled:true,core:"xray",port:36080,
   address_families:["ipv4","ipv6"],source_ips:["127.0.0.1/32","::1/128"]}' "${LOG}" >/dev/null
 before=$(snapshot)
+# 日常动作只放开一个字段，不得借此轮换认证、地址族、核心或其它路由。
+for httpRelay in port sources sources-add sources-remove; do
+    for mutation in '.relay.http.username="changed"' '.relay.http.password="changed"' \
+        '.relay.http.address_families=["ipv4"]' '.relay.http.core="sing-box"' \
+        '.routing.block_ips.ips=["192.0.2.2"]' '.core.protocols[0].public_port=35443'; do
+        jq "${mutation}" "${TEST_ROOT}/relay.json" >"${TEST_ROOT}/tampered.json"
+        reject dockerEditCompatibilityValidate "${TEST_ROOT}/relay.json" "${TEST_ROOT}/tampered.json"
+    done
+done
+unset httpRelay
+for port in 0 65536 -1 1.5 abc; do runEdit 2 --http-relay-port "${port}" --preview; done
+for port in 36080 35441 35442 10085 10087; do runEdit 15 --http-relay-port "${port}" --preview; done
+for source in '' ',192.0.2.1' '192.0.2.1,' '192.0.2.1,,::1'; do
+    runEdit 2 --http-relay-sources "${source}" --preview
+done
+for source in example.com geoip:cn 192.0.2.1/33 ::1/129 ::1%lo ::ffff:192.0.2.1; do
+    runEdit 2 --http-relay-sources-add "${source}" --preview
+done
+runEdit 15 --http-relay-sources '127.0.0.1/32, ::1/128' --preview
+runEdit 15 --http-relay-sources-add '127.0.0.1/32,127.0.0.1/32' --preview
+runEdit 15 --http-relay-sources-remove '127.0.0.1' --preview
+runEdit 15 --http-relay-sources-remove '127.0.0.1/32,192.0.2.1' --preview
+runEdit 15 --http-relay-sources-remove '127.0.0.1/32,::1/128' --preview
+sources=$(jq -nr '[range(256) | "192.0.2.\(.)"] | join(",")')
+runEdit 0 --http-relay-sources "${sources}" --preview
+runEdit 15 --http-relay-sources-add "${sources}" --preview
+runEdit 2 --http-relay-sources "${sources},198.51.100.1" --preview
+runEdit 0 --http-relay-port 36081 --preview
+runEdit 0 --http-relay-sources-add '192.0.2.1, 2001:0DB8::/64' --preview
+[[ "$(snapshot)" == "${before}" ]] || fail '日常编辑预览或拒绝输入改变在线部署'
+
+runEdit 0 --http-relay-port 36081 --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/relay.json" --slurpfile new "${root}/config/spec.json" \
+    '($old[0] | .relay.http.port=36081) == $new[0]' >/dev/null || fail '端口编辑改变其它规格'
+jq -e '.services.xray.ports | index("0.0.0.0:36081:36081/tcp") != null and
+  index("[::]:36081:36081/tcp") != null and index("0.0.0.0:36080:36080/tcp") == null' \
+    "${root}/compose.json" >/dev/null || fail '端口编辑未同步双族发布'
+runEdit 0 --http-relay-sources-add '192.0.2.1, 2001:0DB8::/64,192.0.2.1' --confirm PADM-DOCKER-EDIT
+jq -e '.relay.http.source_ips==["127.0.0.1/32","::1/128","192.0.2.1","2001:0DB8::/64"]' \
+    "${root}/config/spec.json" >/dev/null || fail '追加来源未保留字面值、次序或重复'
+runEdit 15 --http-relay-sources-remove '2001:db8::/64' --preview
+runEdit 0 --http-relay-sources-remove '127.0.0.1/32,192.0.2.1' --confirm PADM-DOCKER-EDIT
+jq -e '.relay.http.source_ips==["::1/128","2001:0DB8::/64"]' \
+    "${root}/config/spec.json" >/dev/null || fail '精确删除来源未保留剩余次序'
+runEdit 0 --http-relay-sources '127.0.0.1/32, ::1/128,127.0.0.1/32' --confirm PADM-DOCKER-EDIT
+runEdit 0 --http-relay-port 36080 --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/relay.json" --slurpfile new "${root}/config/spec.json" \
+    '$old == $new' >/dev/null || fail '日常管理改变认证、其它规格或原名单'
+jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload==17 and .accounts[$uuid].download==19' \
+    "${root}/data/traffic/state.json" >/dev/null || fail '日常管理清空业务累计'
+before=$(snapshot)
+for MODE in health-fail interrupt-int interrupt-term; do
+    rm -f -- "${TEST_ROOT}/failed-once"
+    case "${MODE}" in
+    health-fail) runEdit 14 --http-relay-port 36081 --confirm PADM-DOCKER-EDIT ;;
+    interrupt-int) runEdit 130 --http-relay-sources-add 192.0.2.1 --confirm PADM-DOCKER-EDIT ;;
+    interrupt-term) runEdit 143 --http-relay-sources-remove '::1/128' --confirm PADM-DOCKER-EDIT ;;
+    esac
+    [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: 日常管理未恢复全部在线文件、权限和累计"
+done
+MODE=ok
 composeCalls=$(wc -l <"${TEST_ROOT}/compose-calls.log")
 # 旧发布路径会折叠 IPv6 来源；恢复必须在停止在线服务前拒绝该快照。
 (
@@ -355,6 +426,7 @@ composeCalls=$(wc -l <"${TEST_ROOT}/compose-calls.log")
 [[ "$(snapshot)" == "${before}" ]] || fail '拒绝旧中继恢复点改变在线部署'
 runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
 MODE=health-fail
+rm -f -- "${TEST_ROOT}/failed-once"
 runEdit 14 --http-relay-off --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail '失败事务未恢复 relay、业务规格和流量'
 MODE=ok

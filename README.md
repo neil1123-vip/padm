@@ -402,6 +402,16 @@ SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际
 普通 `--spec` 编辑不能绕过路由冻结。启用、替换与关闭复用原候选确认、备份和失败/信号恢复。
 `routing-status` 额外返回 DNS 服务器、域名规则和 hosts 映射，不显示 SOCKS5 凭据。
 
+菜单 `17 → 21` 的 `4–7` 管理已有 Xray HTTP 中继的端口和来源允许名单：
+`edit --http-relay-port <端口>`、`--http-relay-sources <CSV>`、
+`--http-relay-sources-add <CSV>`、`--http-relay-sources-remove <CSV>`。
+CSV 去项首尾空白、稳定去重并保留字面写法；追加保留旧顺序，删除须全部精确存在。
+删空、缺项、无变化、非法 IP/CIDR、超过 256 条或端口冲突均拒绝。
+认证、核心、地址族、其余规格及业务累计保持；状态失败和空输入/`0`/EOF 返回，
+一次确认复用候选、备份及失败/信号恢复。只支持已有受管 Xray，
+完整 `202` 的原生宿主/公网/arm64/可信发布验收继续 deferred，
+详见 [Docker HTTP 中继](documents/docker-http-relay.md)。
+
 菜单 `17` 的 `10/12` 分别替换 Direct 直连例外和 Block 域名阻断，可直接输入
 逗号分隔规则；CLI `--direct-domains/--block-domains` 使用相同输入。
 CSV 去首尾空白、转小写、按首次出现去重，裸域名补 `domain:`，

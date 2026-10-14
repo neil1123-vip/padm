@@ -1522,6 +1522,19 @@ all other configuration. Missing lists and global WARP/IPv6 modes are rejected.
 Preview, cancellation and failure/signal recovery use the existing transaction.
 Complete region and other rule management remain deferred.
 
+Menu `17 → 21`, options `4–7`, manages an existing Xray HTTP relay through
+`edit --http-relay-port <port>` and `--http-relay-sources`,
+`--http-relay-sources-add`, or `--http-relay-sources-remove <CSV>`.
+CSV trims item whitespace, deduplicates in first-occurrence order and retains literal
+IP/CIDR spelling. Additions preserve existing order; removal requires every exact item
+to exist. Empty results, missing items, unchanged values, invalid addresses, more than
+256 sources and conflicting ports are rejected. Credentials, core, address families,
+other configuration and cumulative business traffic are preserved. Status failure,
+blank input, `0` and EOF return to the menu; the CLI confirms once and reuses candidate,
+backup and health-failure/signal recovery. Only an already managed Xray is supported.
+Native host, public network, arm64 and trusted-release acceptance for complete `202`
+remain deferred. See [Docker HTTP relay](../docker-http-relay.md).
+
 Menu `17`, options `10/12`, replaces Direct or Block domain rules using comma-separated
 input. `--direct-domains <CSV>` and `--block-domains <CSV>` use the same normalization:
 trim whitespace, lowercase, preserve first-occurrence order while deduplicating, and

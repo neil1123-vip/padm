@@ -1848,6 +1848,36 @@ runRoutingDriver() {
         targetReply 'Docker WARP 出站' $'3\n'
         targetReply 'Docker WARP 出站' $'0\n'
         ;;
+    http-relay-flow|http-relay-cancel|http-relay-status-failed|http-relay-commit-failed)
+        targetReply 'Docker 路由与出站' $'21\n'
+        for choice in 4 5 6 7; do
+            inputPrompt='HTTP 中继来源 IP/CIDR CSV（精确字面规则，0 返回）'
+            [[ "${choice}" != 4 ]] || inputPrompt='新 HTTP 中继端口（1–65535，0 返回）'
+            if [[ "${scenario}" == http-relay-cancel ]]; then
+                for input in $'0\n' $'\n' $'\004'; do
+                    targetReply 'Docker HTTP 中继入站' "${choice}"$'\n'
+                    targetReply "${inputPrompt}" "${input}"
+                done
+                continue
+            fi
+            targetReply 'Docker HTTP 中继入站' "${choice}"$'\n'
+            [[ "${scenario}" != http-relay-status-failed ]] || continue
+            input='192.0.2.11, 2001:0DB8::/64'
+            [[ "${choice}" != 4 ]] || input=18888
+            targetReply "${inputPrompt}" "${input}"$'\n'
+            targetReply 'fixture-http-relay-confirm [y/N]' $'y\n'
+        done
+        if [[ "${scenario}" == http-relay-cancel ]]; then
+            targetReply 'Docker HTTP 中继入站' $'4\n'
+            targetReply '新 HTTP 中继端口（1–65535，0 返回）' $'18888\n'
+            targetReply 'fixture-http-relay-confirm [y/N]' $'n\n'
+            targetReply 'Docker HTTP 中继入站' $'5\n'
+            targetReply 'HTTP 中继来源 IP/CIDR CSV（精确字面规则，0 返回）' $'192.0.2.11, 2001:0DB8::/64\n'
+            targetReply 'fixture-http-relay-confirm [y/N]' $'\004'
+        fi
+        targetReply 'Docker HTTP 中继入站' $'3\n'
+        targetReply 'Docker HTTP 中继入站' $'0\n'
+        ;;
     http-relay-eof)
         targetReply 'Docker 路由与出站' $'21\n'
         targetReply 'Docker HTTP 中继入站' $'1\n'
@@ -2247,6 +2277,24 @@ edit)
         [[ "${confirmation}" == y ]] || exit 2
         [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
         recordAction access-control-commit
+    elif [[ "${2:-}" == --http-relay-port || "${2:-}" == --http-relay-sources ||
+        "${2:-}" == --http-relay-sources-add || "${2:-}" == --http-relay-sources-remove ]]; then
+        # 只验证单个字段原样分发；地址校验、名单变换和事务由中继合同覆盖。
+        [[ "$#" -eq 3 ]] || exit 2
+        if [[ "$2" == --http-relay-port ]]; then
+            [[ "$3" == 18888 ]] || exit 2
+        else
+            [[ "$3" == '192.0.2.11, 2001:0DB8::/64' ]] || exit 2
+        fi
+        printf 'fixture-http-relay-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction http-relay-confirm "$2" eof
+            exit 2
+        fi
+        recordAction http-relay-confirm "$2" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction http-relay-commit "$2"
     elif [[ "${2:-}" == --dns-upstream || "${2:-}" == --socks5-upstream ]]; then
         [[ "$#" -eq 4 ]] || exit 2
         if [[ "$2" == --dns-upstream ]]; then
@@ -2890,6 +2938,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     socks5-domains-eof socks5-domains-status-failed \
     access-control-flow access-control-cancel access-control-failed \
     upstream-flow upstream-cancel upstream-status-failed upstream-commit-failed \
+    http-relay-flow http-relay-cancel http-relay-status-failed http-relay-commit-failed \
     warp-confirm-cancel warp-confirm-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0 SELECTIVE_EDIT_PRECHECK_STATUS=0 DOMAIN_REPLACE_PRECHECK_STATUS=0
@@ -2900,6 +2949,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         ROUTING_STATUS=17
     [[ "${routingCase}" != socks5-domains-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != upstream-status-failed ]] || ROUTING_STATUS=17
+    [[ "${routingCase}" != http-relay-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
     [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != direct-block-remove-failed &&
         "${routingCase}" != dns-failed && "${routingCase}" != region-allow-failed &&
@@ -2910,6 +2960,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != *-replace-commit-failed &&
         "${routingCase}" != access-control-failed &&
         "${routingCase}" != upstream-commit-failed &&
+        "${routingCase}" != http-relay-commit-failed &&
         "${routingCase}" != hosts-manage-commit-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
@@ -3220,6 +3271,41 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
                     fail '上游提交失败未显示退出码并继续诊断'
             fi
         fi
+        ;;
+    http-relay-flow|http-relay-cancel|http-relay-status-failed|http-relay-commit-failed)
+        httpRelayConfirmCount=4 httpRelayFailureCount=0 httpRelayExit=15
+        if [[ "${routingCase}" == http-relay-cancel ]]; then
+            expectedRouting=$(printf 'protocol routing-status\n%.0s' {1..12})
+            expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-port 18888\nhttp-relay-confirm --http-relay-port n'
+            expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-sources 192.0.2.11, 2001:0DB8::/64\nhttp-relay-confirm --http-relay-sources eof'
+            expectedRouting+=$'\nprotocol routing-status'
+            httpRelayConfirmCount=2 httpRelayFailureCount=2 httpRelayExit=2
+        elif [[ "${routingCase}" == http-relay-status-failed ]]; then
+            expectedRouting=$(printf 'protocol routing-status\n%.0s' {1..5})
+            httpRelayConfirmCount=0 httpRelayFailureCount=5 httpRelayExit=17
+            ! grep -Eq '新 HTTP 中继端口|HTTP 中继来源 IP/CIDR CSV' "${CONTROL_LOG}" ||
+                fail 'HTTP 中继状态失败后仍读取编辑输入'
+        else
+            for httpRelayFlag in --http-relay-port --http-relay-sources --http-relay-sources-add --http-relay-sources-remove; do
+                httpRelayInput='192.0.2.11, 2001:0DB8::/64'
+                [[ "${httpRelayFlag}" != --http-relay-port ]] || httpRelayInput=18888
+                [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
+                expectedRouting+=$'protocol routing-status\n'"edit ${httpRelayFlag} ${httpRelayInput}"
+                expectedRouting+=$'\n'"http-relay-confirm ${httpRelayFlag} y"
+                [[ "${routingCase}" != http-relay-flow ]] ||
+                    expectedRouting+=$'\n'"http-relay-commit ${httpRelayFlag}"
+            done
+            expectedRouting+=$'\nprotocol routing-status'
+            [[ "${routingCase}" != http-relay-commit-failed ]] || httpRelayFailureCount=4
+        fi
+        [[ "$(grep -Fc 'fixture-http-relay-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${httpRelayConfirmCount}" ]] ||
+            fail 'HTTP 中继日常编辑没有每次只确认一次'
+        [[ "$(grep -Fc "操作失败，退出码: ${httpRelayExit}" "${CONTROL_LOG}" || true)" -eq "${httpRelayFailureCount}" ]] ||
+            fail 'HTTP 中继取消或编辑失败未显示退出码并继续诊断'
+        for label in '4. 修改中继端口' '5. 替换来源允许名单' '6. 追加来源允许名单' \
+            '7. 精确删除来源允许名单（删空拒绝）'; do
+            grep -Fq "${label}" "${CONTROL_LOG}" || fail "HTTP 中继菜单缺少: ${label}"
+        done
         ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||

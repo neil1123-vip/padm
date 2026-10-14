@@ -3172,6 +3172,34 @@ SOCKS UDP 探针确认私网动态 `BND.ADDR/BND.PORT` 不能靠固定同端口�
 同 bridge 原始 BND 正对照成功；下一步先解决发布可达与真实来源，
 不能降为 TCP-only 或将 `internal-201` 标为完成。
 
+#### 5B.5a.1 HTTP 中继日常管理
+
+菜单 `17 → 21` 追加端口修改和来源允许名单替换、追加、精确删除，
+CLI 对应 `--http-relay-port`、`--http-relay-sources`、
+`--http-relay-sources-add`、`--http-relay-sources-remove`。
+只操作已有中继，复用原规格校验、候选、一次确认及失败/信号恢复；
+端口只豁免 `.relay.http.port`，名单只豁免 `.relay.http.source_ips`，
+冻结认证、核心、地址族及其余完整规格，不扩 schema、核心或宿主权限。
+
+CSV 去项首尾空白、按首次出现去重，保留字面值和顺序；追加在原列表后添加新项，
+删除须每项精确存在。拒绝空项、非法 IP/CIDR、无变化、删空、缺项、
+合并后超过 256 项和冲突端口；清空应显式关闭中继。
+菜单先查看状态，失败、空输入、`0`、EOF 返回。支持范围保持 5B.5a，
+完整 `internal-202` 和整体计划仍 deferred/active。
+
+Linux amd64 定向合同 16447 ms、路由菜单 PTY 14547 ms（Jobs 2）通过；
+合同覆盖字段冻结、非法/无变化/缺项/删空/256 项、双族端口同步、累计及健康/INT/TERM 恢复。
+发布专项 10715 ms，复用同一隔离 daemon、veth 和真实 Xray，验证端口/来源切换、
+新来源成功、旧端口/来源拒绝以及 HTTP/CONNECT、认证和原安全限制保持。
+集中完整合同 54/54、302674 ms（入口 304754 ms，Jobs 6、排队 314 ms、cache=false）；
+默认完整菜单 56744 ms。发布专项与 full 源码摘要一致，12 份交付文件核对匹配，
+Bash/ShellCheck error 和 Python AST 通过；未重复无变化的真实路由矩阵或 ci。
+证据 `.tmp-regression-docker-2385d043d40b4595802aeea0edf5afaa/`、
+`.tmp-regression-docker-86b06b58041441f4b403739130348be4/`、
+`.tmp-regression-docker-25db59c96ac44295ae4a847b4153ac79/` 与
+`.tmp-regression-docker-6d0cbc496f794a1689909b51e2437d71/`。
+后续仅补验收文字；成功源码归档/清单和临时检查脚本/容器清理，保留日志/result。
+
 #### 5B.5b SOCKS UDP 发布与会话鉴权前置验证
 
 未修改生产合同或开放 `201` 菜单。sing-box `v1.14.2` 的动态私网 BND 发布阻塞之外，

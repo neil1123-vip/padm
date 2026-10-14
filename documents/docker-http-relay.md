@@ -1,6 +1,7 @@
 # Docker HTTP 中继
 
-菜单 `17. 路由与出站` 的 `21. HTTP 中继入站` 提供认证参数导入、关闭和脱敏状态。
+菜单 `17. 路由与出站` 的 `21. HTTP 中继入站` 提供认证参数导入、关闭、脱敏状态，
+以及已有中继的端口修改和来源允许名单替换、追加、精确删除。
 这是内部能力 `202`，不是公开节点协议，不生成订阅链接。
 
 ## 配置
@@ -50,6 +51,20 @@ v3 规格保存为 `.relay.http`，控制包必须声明 `x-padm-relay-http`。
 普通 `edit --spec` 不能改写已有中继的认证或来源，专项操作不能与其它编辑动作组合。
 配置、更新和回滚使用当前候选校验、备份及失败恢复流程；关闭只删除 HTTP 中继。
 
+子菜单 `4–7` 和以下 CLI 只操作已启用的中继。端口操作仅改变端口；来源操作仅改变
+`source_ips`，认证、核心、地址族及其余完整规格保持。CSV 去除项首尾空白并按首次
+出现去重，保留字面 IP/CIDR 的大小写与写法；追加保留原名单顺序。精确删除的每项
+必须已存在，等价但写法不同的 IPv6/CIDR 不视为同一项。删空、缺项、无变化或合并
+后超过 256 条均拒绝，清空需显式关闭中继。空项、非法地址和端口冲突也会拒绝。
+菜单先读取状态，失败、空输入、`0` 或 EOF 返回；CLI 沿用一次确认与事务恢复。
+
+```sh
+padm-docker edit --http-relay-port 36081 --preview
+padm-docker edit --http-relay-sources '198.51.100.10/32,2001:db8::/64' --preview
+padm-docker edit --http-relay-sources-add '198.51.100.11/32' --confirm PADM-DOCKER-EDIT
+padm-docker edit --http-relay-sources-remove '198.51.100.10/32' --confirm PADM-DOCKER-EDIT
+```
+
 ## 行为
 
 只发布独立 TCP 端口，支持普通 HTTP 代理请求和 CONNECT。来源判断使用核心实际
@@ -72,7 +87,8 @@ CONNECT 的目标 TLS 不会加密客户端到代理的 Basic 认证头。
 定向回归为 `docker-http-relay`、`docker-http-relay-real`、
 `docker-http-relay-published-real`，统一由 `shell/regression/run-docker.ps1` 运行。
 发布专项用隔离 Linux daemon、生产 Compose 端口和外部 veth 客户端验证 DNAT 来源，
-不借真实宿主 Socket 或公网；当前已覆盖 IPv4/IPv6 发布、真实 veth 来源和白名单。
+不借真实宿主 Socket 或公网；覆盖 IPv4/IPv6 发布、真实 veth 来源和白名单，
+以及端口/来源切换后新来源生效、旧端口与旧来源拒绝。
 业务容器维持 UID `10001`、只读根和零 capabilities。
 
 原生 Linux 宿主生命周期、公网、arm64 和可信发布仍需独立验收；

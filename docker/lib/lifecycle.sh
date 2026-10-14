@@ -38,6 +38,8 @@ dockerUsage() {
   padm-docker edit --socks5-global [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http-relay <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http-relay-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --http-relay-port <端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --http-relay-sources|--http-relay-sources-add|--http-relay-sources-remove <来源 IP/CIDR CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-default <入口 ID> <已有额外端口|base> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

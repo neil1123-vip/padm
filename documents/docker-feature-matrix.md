@@ -277,7 +277,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | ID | 能力 | 原生入口 | Docker 状态 | Docker 边界 |
 | ---: | --- | --- | --- | --- |
 | 201 | Socks 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 5B.1–5B.2 已交付认证 TCP 全局/域名出站；入站仍未交付：sing-box 动态 UDP BND 发布不通，5B.5b Xray 固定发布可达但控制关闭后无认证 UDP 仍可转发。 |
-| 202 | HTTP 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 5B.5a 提供已有受管 Xray 的私有认证 HTTP/CONNECT 入站、来源规则和事务管理；双栈发布与来源已在隔离 amd64 Linux daemon 验证，IPv6 只接受管 bridge 并拒绝旧 plain bridge 恢复；sing-box 来源头绕过导致明确拒绝，公网/宿主/arm64 待验。 |
+| 202 | HTTP 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 5B.5a 提供已有受管 Xray 的私有认证 HTTP/CONNECT 入站、来源规则和事务管理；5B.5a.1 增加端口与来源名单日常管理，删空拒绝、认证冻结。双栈发布与来源已在隔离 amd64 Linux daemon 验证，IPv6 只接受管 bridge 并拒绝旧 plain bridge 恢复；sing-box 来源头绕过导致明确拒绝，公网/宿主/arm64 待验。 |
 | 203 | WireGuard | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard`、host network、`NET_ADMIN`。 |
 | 204 | TUN | 路由与访问控制 | `host-integrated` | `net-transparent`、host network、`NET_ADMIN`、`/dev/net/tun`。 |
 | 205 | Redirect/TProxy | 路由与访问控制 | `host-integrated` | `net-transparent`、host network、`NET_ADMIN`。 |
@@ -309,7 +309,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | `tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙规则。 |
 | `routing-tools` | 路由与访问控制 -> WARP/IPv6/Socks5/DNS/BT/访问控制 | `deferred` | 核心 | bridge | 5B.1–5B.4g 已交付 SOCKS5 TCP 出站、DNS/hosts、域名 Direct/Block、目的 IP、明文 BT、CN 预设、IPv6 和用户态 WARP 子能力及失败恢复；已有 WARP 可保留密钥修改域名、全局模式及地址族，已有 selective WARP/IPv6 可增删域名，缺失/global 拒绝、删空关闭；区域自定义例外及手工字面 IP/CIDR 可单条原位替换，冻结其余配置。5B.4h 接入已有非空 selective SOCKS5 域名增删/单条替换，保留上游/凭据；缺失/global 拒绝，删空关闭整个 SOCKS5，重新导入才可启用，不转全局，定向、菜单及完整 49 项回归已通过。5B.4i 菜单 17→37 与 --hosts-replace 只替换已有精确 FQDN 的单字面 IP；key ASCII 转小写不去空白，IP 原文保持，空白/尾换行/CSV/前缀/坏地址返回 2，缺键/未启用/同值返回 15；其余 hosts、完整配置、URI/订阅/累计冻结，原 JSON 整组入口保持，不新增/删除/批量，不扩 schema/marker/权限/状态。定向与菜单通过，集中完整 49 项回归通过，属于有限管理增强。不改宿主；完整区域/访问控制和公网/宿主/双架构验收待补。 |
 | `internal-201-socks-relay` | 路由与访问控制 -> Socks 中继 | `deferred` | 核心 | bridge | 5B.1–5B.2 TCP 出站子能力已交付；5B.5b 确认 sing-box 动态 BND 发布阻塞、Xray 26.3.27 固定 UDP 发布的来源许可在当前进程内不随控制关闭撤销，完整入站不交付、不降为 TCP-only；不作为公网节点。 |
-| `internal-202-http-relay` | 路由与访问控制 -> HTTP 中继 | `deferred` | `core-xray` | bridge | 5B.5a 独立 `relay.http` 合同、私有认证与来源前置规则、菜单/CLI/关闭/回滚；专属直连且不计业务额度。双栈发布与真实来源已在隔离 amd64 Linux daemon 验证，IPv6 relay 只接受管 bridge，拒绝旧包/旧 plain bridge 恢复；拒绝 sing-box 的代理头来源覆盖，公网、宿主、arm64 和可信发布待验。详见 `docker-http-relay.md`。 |
+| `internal-202-http-relay` | 路由与访问控制 -> HTTP 中继 | `deferred` | `core-xray` | bridge | 5B.5a 独立 `relay.http` 合同、私有认证与来源前置规则、菜单/CLI/关闭/回滚；5B.5a.1 提供已有中继端口及来源名单替换/追加/精确删除，冻结认证与其余规格、删空拒绝；专属直连且不计业务额度。双栈发布与真实来源已在隔离 amd64 Linux daemon 验证，IPv6 relay 只接受管 bridge，拒绝旧包/旧 plain bridge 恢复；拒绝 sing-box 的代理头来源覆盖，公网、宿主、arm64 和可信发布待验。详见 `docker-http-relay.md`。 |
 | `internal-203-wireguard` | 订阅与用户 / 路由 -> WireGuard | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有；4C.3a 核验真实归属后预检/健康/撤销，活动旧式标记需先正常停止旧容器。 |
 | `internal-204-tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 依赖宿主设备和转发规则。 |
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙。 |

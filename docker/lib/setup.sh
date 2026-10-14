@@ -1472,7 +1472,7 @@ dockerEditCommand() {
     local routingServer= routingPort=
     local routingDomains='[]' routingOldDomains='[]' routingDomainsField=domains
     local routingOldIp= routingNewIp= routingHost=
-    local httpRelay= httpRelayFile=
+    local httpRelay= httpRelayFile= httpRelayPort=0 httpRelaySources='[]'
     local portAlias= portAliasListener= portAliasPort=
     local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
     local portHoppingIpv4= portHoppingIpv6=
@@ -1645,6 +1645,26 @@ dockerEditCommand() {
             [[ -z "${httpRelay}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             httpRelay=disable
             shift
+            ;;
+        --http-relay-port)
+            [[ "$#" -ge 2 && -z "${httpRelay}" && "$2" =~ ^[0-9]{1,5}$ ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            httpRelayPort=$((10#$2))
+            (( httpRelayPort >= 1 && httpRelayPort <= 65535 )) ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            httpRelay=port
+            shift 2
+            ;;
+        --http-relay-sources|--http-relay-sources-add|--http-relay-sources-remove)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${httpRelay}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            httpRelay=${1#--http-relay-}
+            httpRelaySources=$(jq -ecn --arg input "$2" '
+              $input | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
+              reduce .[] as $rule ([]; if index($rule) == null then . + [$rule] else . end) |
+              select(length >= 1 and length <= 256 and all(.[]; . != ""))
+            ' 2>/dev/null) || return "${PADM_DOCKER_RC_USAGE}"
+            shift 2
             ;;
         --fail2ban-port)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${fail2banAction}" &&
@@ -2310,6 +2330,44 @@ dockerEditCommand() {
             "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
+    elif [[ -n "${httpRelay}" ]]; then
+        jq -e '.relay.http != null' "${draft}" >/dev/null || {
+            dockerError '请先导入有效的 HTTP 中继配置，再修改端口或来源允许名单'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        if [[ "${httpRelay}" != port ]]; then
+            # 输入先独立校验，合并或删除不能掩盖坏地址；保留字面值与次序。
+            jq --argjson sources "${httpRelaySources}" '.relay.http.source_ips = $sources' \
+                "${draft}" >"${workspace}/http-relay-input.json" &&
+                chmod 0600 "${workspace}/http-relay-input.json" ||
+                return "${PADM_DOCKER_RC_STATE}"
+            dockerConfigureSpecValidate "${workspace}/http-relay-input.json" || {
+                dockerError 'HTTP 中继来源只接受 1–256 条合法字面 IPv4/IPv6 或 CIDR'
+                return "${PADM_DOCKER_RC_USAGE}"
+            }
+        fi
+        jq --arg action "${httpRelay}" --argjson port "${httpRelayPort}" \
+            --argjson sources "${httpRelaySources}" '
+          .relay.http as $old |
+          if $action == "port" then .relay.http.port = $port
+          elif $action == "sources" then .relay.http.source_ips = $sources
+          elif $action == "sources-add" then
+            .relay.http.source_ips = (reduce $sources[] as $rule ($old.source_ips;
+              if index($rule) == null then . + [$rule] else . end))
+          elif ($sources - $old.source_ips | length) != 0 then
+            error("待删除来源必须全部存在于当前 HTTP 中继允许名单")
+          else .relay.http.source_ips = ($old.source_ips - $sources) end |
+          if (.relay.http.source_ips | length) < 1 then
+            error("来源允许名单不能删空，请显式关闭 HTTP 中继")
+          elif (.relay.http.source_ips | length) > 256 then
+            error("合并后来源允许名单超过 256 项")
+          elif .relay.http == $old then error("HTTP 中继配置没有变化")
+          else . end
+        ' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError 'HTTP 中继端口或来源允许名单更新失败，未提交配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
     fi
     if [[ "${socks5}" == enable ]]; then
         dockerEditPrivateInputCopy "${socks5File}" "${workspace}/socks5.json" socks5 || {
@@ -2852,6 +2910,10 @@ dockerEditCompatibilityValidate() {
         ($old | without_cdn) == ($new | without_cdn)
        elif $port_alias != "" then
         ($old | del(.port_aliases)) == ($new | del(.port_aliases))
+       elif $http_relay == "port" then
+        ($old | del(.relay.http.port)) == ($new | del(.relay.http.port))
+       elif ($http_relay | startswith("sources")) then
+        ($old | del(.relay.http.source_ips)) == ($new | del(.relay.http.source_ips))
        elif $http_relay != "" then
         ($old | del(.relay.http) | if .relay == {} then del(.relay) else . end) ==
           ($new | del(.relay.http) | if .relay == {} then del(.relay) else . end)

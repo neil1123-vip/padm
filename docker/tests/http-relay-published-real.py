@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = Path(__file__).resolve()
 helpers = runpy.run_path(str(SCRIPT.with_name("control-two-deployment-real.py")))
 command, stop = (helpers[name] for name in ("command", "stop"))
-PORT, ORIGIN_PORT = 38180, 18080
+PORT, EDITED_PORT, ORIGIN_PORT = 38180, 38181, 18080
 HOST, ALLOWED, DENIED = "198.18.1.1", "198.18.1.2", "198.18.1.3"
 HOST6, ALLOWED6, DENIED6 = "2001:db8:1::1", "2001:db8:1::2", "2001:db8:1::3"
 HOSTS = {"ipv4": HOST, "ipv6": HOST6}
@@ -73,7 +73,7 @@ def fixture(root):
         thread.join(1)
 
 
-def request(origin, method, auth, family):
+def request(origin, method, auth, family, port=PORT):
     credentials = b""
     if auth != "none":
         password = PASSWORD if auth == "valid" else "wrong-password"
@@ -83,7 +83,7 @@ def request(origin, method, auth, family):
     target = destination if method == "CONNECT" else b"http://" + destination + b"/published-check"
     forged = ALLOWED if family == "ipv4" else ALLOWED6
     forwarded = forged if family == "ipv4" else f'"[{forged}]"'
-    with socket.create_connection((HOSTS[family], PORT), timeout=1.5) as stream:
+    with socket.create_connection((HOSTS[family], int(port)), timeout=1.5) as stream:
         assert stream.family == (socket.AF_INET if family == "ipv4" else socket.AF_INET6)
         # 代理头故意伪造为允许来源，来源判定必须使用真实 Linux TCP 来源。
         stream.sendall(method.encode() + b" " + target + b" HTTP/1.1\r\nHost: " + destination +
@@ -131,16 +131,16 @@ def rows(root):
     return [json.loads(line) for line in (root / "events.jsonl").read_text().splitlines()]
 
 
-def permissions(value, ports):
+def permissions(value, ports, port=PORT):
     host = value["HostConfig"]
     assert host["ReadonlyRootfs"] and not host["Privileged"]
     assert host["CapDrop"] == ["ALL"] and not host["CapAdd"] and not host["Devices"]
     assert value["Config"]["User"] == "10001:10001"
     assert "no-new-privileges:true" in host["SecurityOpt"]
     if ports:
-        expected = [dict(HostIp="0.0.0.0", HostPort=str(PORT)),
-                    dict(HostIp="::", HostPort=str(PORT))]
-        assert sorted(host["PortBindings"][f"{PORT}/tcp"],
+        expected = [dict(HostIp="0.0.0.0", HostPort=str(port)),
+                    dict(HostIp="::", HostPort=str(port))]
+        assert sorted(host["PortBindings"][f"{port}/tcp"],
                       key=lambda row: row["HostIp"]) == sorted(
                           expected, key=lambda row: row["HostIp"])
     else:
@@ -317,7 +317,44 @@ def run(root):
                           line.replace(PASSWORD, "[hidden]").replace("wrong-password", "[hidden]"),
                           flush=True)
                 assert inspect(docker, identity)["State"]["Running"]
-                command(core_compose + ["rm", "-s", "-f"], timeout=10)
+                # 在同一隔离部署切换端口与允许来源，复用客户端验证撤销和新来源生效。
+                edited = json.loads((root / f"{core}-edited.json").read_text())
+                edited["log"] = config["log"]
+                edited_inbound = next(item for item in edited["inbounds"]
+                                      if item["tag"] == "padm-relay-http")
+                assert edited_inbound["port"] == EDITED_PORT
+                assert edited_inbound["settings"] == inbound["settings"]
+                config_path.write_text(json.dumps(edited))
+                current = json.loads((root / f"{core}-edited.compose.json").read_text())
+                edited_service = current["services"][core]
+                for key in ("image", "volumes", "entrypoint", "command", "healthcheck", "restart"):
+                    edited_service[key] = service[key]
+                current["services"] = {core: edited_service}
+                edited_compose_path = node / f"{core}-edited.compose.json"
+                edited_compose_path.write_text(json.dumps(current))
+                edited_core_compose = docker + ["compose", "--project-name", "padm-docker",
+                                                "--file", str(edited_compose_path),
+                                                "--profile", f"core-{core}"]
+                command(edited_core_compose + ["up", "-d", "--pull", "never"], timeout=30)
+                identity = command(edited_core_compose + ["ps", "-q", core]).decode().strip()
+                permissions(inspect(docker, identity), True, EDITED_PORT)
+                wait_ready(lambda: all(published_listener(clients[0], family, EDITED_PORT)
+                                       for family in HOSTS))
+                for family in HOSTS:
+                    for client in clients:
+                        assert not published_listener(client, family), "旧中继发布端口仍可连接"
+                    for method in ("GET", "CONNECT"):
+                        for index, client in enumerate(clients):
+                            before = len(rows(proof))
+                            output = command(["nsenter", "--target", str(client.pid), "--net", "--",
+                                              "python3", str(SCRIPT), "client", origin_ip,
+                                              method, "valid", family, str(EDITED_PORT)], timeout=5)
+                            accepted = index == 1
+                            assert json.loads(output)["accepted"] == accepted, (family, method, index)
+                            assert len(rows(proof)[before:]) == int(accepted)
+                print("http-relay-published-edit: new dual-stack port/source applied, "
+                      "old port/source rejected, HTTP/CONNECT and auth preserved", flush=True)
+                command(edited_core_compose + ["rm", "-s", "-f"], timeout=10)
                 print(f"http-relay-published-{core}: production ports/HTTP/CONNECT/auth/"
                       f"IPv4+IPv6/source-CIDR/forged-proxy-header/UID10001/cap0 passed", flush=True)
             command(compose + ["rm", "-s", "-f"], timeout=10)
@@ -360,9 +397,9 @@ def run(root):
                     raise cleanup_error
 
 
-def published_listener(client, family):
+def published_listener(client, family, port=PORT):
     result = subprocess.run(["nsenter", "--target", str(client.pid), "--net", "--", "python3", "-c",
-                             f"import socket; socket.create_connection(('{HOSTS[family]}', {PORT}), .15).close()"],
+                             f"import socket; socket.create_connection(('{HOSTS[family]}', {port}), .15).close()"],
                             capture_output=True, timeout=2)
     return result.returncode == 0
 
@@ -371,6 +408,6 @@ if __name__ == "__main__":
     if sys.argv[1] == "fixture":
         fixture(Path(sys.argv[2]))
     elif sys.argv[1] == "client":
-        print(json.dumps(dict(accepted=request(*sys.argv[2:6]) == 200)))
+        print(json.dumps(dict(accepted=request(*sys.argv[2:]) == 200)))
     else:
         run(Path(sys.argv[1]))
