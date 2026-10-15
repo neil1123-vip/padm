@@ -590,7 +590,10 @@ Hy2 uses the client's native default 30-second random port selection, observing
 for at most 300 seconds and stopping once both families have used both ports.
 The Hy2 generator contract and configuration checks passed in 127.283 and
 29.466 seconds; combined share URI validation passed in 146.808 seconds,
-and all 57 complete contract groups passed in 555.266 seconds.
+and all 57 complete contract groups passed in 555.266 seconds. A follow-up
+stop probe created fresh client processes for both range endpoints of Hy2 and
+TUIC and confirmed new connections were refused; the selector completed in
+about 132.8 seconds.
 Gecko range URI and other client imports, native hosts, arm64, public networks,
 automatic TUIC client hopping, old-session drainage and complete Hy2/TUIC hopping remain `deferred`.
 

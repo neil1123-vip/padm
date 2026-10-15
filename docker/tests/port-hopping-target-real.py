@@ -357,6 +357,12 @@ def share_uri(node, work, root, docker, enter):
         assert not list(root.glob(".hopping-guarded.*"))
         assert not command(docker + ["ps", "-aq", "--filter",
                                     "label=io.padm.hopping-supervised"]).strip()
+        # 停止后用新进程新建连接，不能把既有会话排空当作拒绝证据。
+        for port in (30000, 30001):
+            authentication(node, root, enter, f"stopped-{port}", protocol["uuid"],
+                           "44444444-4444-4444-8444-444444444444", (),
+                           server_port=port)
+        evidence["stopped_new_connections_refused"] = True
         evidence["final_stop_clean"] = True
         return evidence
     finally:

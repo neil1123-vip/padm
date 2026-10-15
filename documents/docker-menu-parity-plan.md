@@ -7847,7 +7847,10 @@ Jobs 6/tmpfs、排队 385 ms、`cache_hit=false`，
 `9FA4382A234735877A6CADBADE87ADD95779860EC818FF959B2B1BE1A21FE432`。
 本批只补固定客户端/参数组合的导入证据；Gecko 范围 URI、其它客户端、
 TUIC 自动跳跃、旧 conntrack 排空、原生宿主/arm64/公网、自动恢复与完整跳跃/
-协议管理继续 deferred，整体计划保持 active。
+协议管理继续 deferred，整体计划保持 active。随后补充停止后的新连接探针：
+Hy2/TUIC 在范围首尾端口分别由新客户端进程建立连接均被拒绝，未把旧会话排空
+当作证据；本次 `docker-port-hopping-share-real` 入口约 132.8 秒，结果保留在
+`.tmp-regression-docker-164967b90109407d8f2db4fd64f54f19`。
 
 #### 近期菜单一致性修补（跨 4A/5B/5C）
 
