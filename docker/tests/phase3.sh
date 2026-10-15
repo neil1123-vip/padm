@@ -2,9 +2,14 @@
 set -euo pipefail
 
 PHASE3_SCOPE=${PADM_DOCKER_PHASE3_SCOPE:-full}
+PHASE3_ENTRIES_BRANCH=${PADM_DOCKER_PHASE3_ENTRIES_BRANCH:-all}
 case "${PHASE3_SCOPE}" in
 full|edit|entries) ;;
 *) printf 'docker-phase3-regression-fail: unknown scope %s\n' "${PHASE3_SCOPE}" >&2; exit 1 ;;
+esac
+case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}" in
+*:all|entries:topology|entries:management) ;;
+*) printf 'docker-phase3-regression-fail: unknown entries branch %s\n' "${PHASE3_ENTRIES_BRANCH}" >&2; exit 1 ;;
 esac
 
 export FAKE_PHASE3_HOST_SYSTEM FAKE_PHASE3_HOST_STAT
@@ -911,6 +916,11 @@ if [[ "${PHASE3_SCOPE}" == entries ]]; then
 fi
 
 if [[ "${PHASE3_SCOPE}" != edit ]]; then
+CREDENTIALS="${TEST_ROOT}/dns.env"
+printf 'CF_Token=test-token\n' >"${CREDENTIALS}"
+chmod 0600 "${CREDENTIALS}"
+# 独立分片各自重建带流量和 Geo 的基线，避免拓扑与长管理事务互相等待。
+if [[ "${PHASE3_ENTRIES_BRANCH}" != management ]]; then
 # 多入口复用既有凭据；身份、核心端口与 TLS 端口必须由完整规格明确记录。
 MULTI_SPEC="${TEST_ROOT}/multi-v2.json"
 jq '
@@ -1207,9 +1217,6 @@ runControl 15 reject-subscription-without-tls configure --spec "${TEST_ROOT}/inv
 [[ "$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)" == "${DEPLOYMENT_HASH}" ]] ||
     fail 'rejected subscription topology changed live deployment'
 
-CREDENTIALS="${TEST_ROOT}/dns.env"
-printf 'CF_Token=test-token\n' >"${CREDENTIALS}"
-chmod 0600 "${CREDENTIALS}"
 : >"${DOCKER_LOG}"
 runControl 0 acme-issue acme issue --domain proxy.example.com --email admin@example.com \
     --dns dns_cf --credentials "${CREDENTIALS}"
@@ -1217,7 +1224,9 @@ grep -q -- '--issue --dns dns_cf --keylength ec-256 -d proxy.example.com' "${DOC
 grep -q -- '--install-cert -d proxy.example.com --ecc' "${DOCKER_LOG}" || fail 'ECC ACME install-cert was not run'
 grep -qxF 'fake-acme-certificate' "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ||
     fail 'ACME certificate was not committed'
+fi
 
+if [[ "${PHASE3_ENTRIES_BRANCH}" != topology ]]; then
 # 新增、删除和保身份重建复用 entries 的真实候选事务，不重复核心与协议矩阵。
 protocolEdit() {
     local expected=$1 name=$2 before
@@ -2315,6 +2324,7 @@ jq -e --slurpfile before "${PROTOCOL_BASE}" '
         "${DOCKER_ROOT}/secrets/renewal/migrated-alpn.example.com/request.json" >/dev/null &&
     [[ ! -e "${DOCKER_ROOT}/secrets/renewal/migrated-alpn.example.com/credentials.env" ]] ||
     fail 'ALPN TLS 迁移改变其它规格，或未登记实际续期参数'
+fi
 
 runControl 0 restart-persistence status
 grep -qxF 'configured=yes' "${CONTROL_LOG}" || fail 'configured status was not restored'

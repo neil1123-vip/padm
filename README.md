@@ -303,7 +303,7 @@ URI 使用对象自己的地址、安全身份和三项 XHTTP 字段，不继承
 预设及其它编辑保留对象，复制/派生只清除新入口对象，服务端配置不写入客户端字段。
 本功能只管理客户端元数据，外部前置必须已部署并转回同一 XHTTP handler 及认证。
 不会自动建设 TLS/H3/CDN 拓扑，也不能将上下行指向无会话关联的独立后端；
-公网前置验收、其它 sc*、性能收益和完整管理继续 `deferred`。
+当前原生菜单的四项 `sc*` 参数已覆盖；公网前置验收、宿主/arm64、性能收益和完整管理仍待补。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；
@@ -2156,6 +2156,9 @@ Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workf
 工作流定向复用原事务断言，不替代 Schema、生成器、其它路由矩阵和真实流量验收。
 额外入口端口改动使用 `docker-entry-port-alias` 与 `docker-menu-port-alias`；
 菜单定向复用完整入口的全部别名 PTY 断言，完整 `docker-menu` 保留原集合。
+多入口/双核心拓扑改动使用 `docker-phase3-entries-topology`，
+协议增删、TLS 或重装管理改动使用 `docker-phase3-entries-management`。
+`docker-phase3-entries` 保留两组并行入口；完整合同直接调度两组，CI 分片覆盖相同叶子。
 各任务先运行匹配改动的定向回归，集成完成后集中执行完整回归。
 入口归档当前工作区的已跟踪文件和未忽略的新文件，包含未提交修改，不包含 `.git`
 和 `.tmp-*`；源码、`TMPDIR`、`HOME` 在容器内部，不挂载 Windows 工作目录。

@@ -263,7 +263,8 @@ runRegressionDockerContractsAggregateContract() (
     local status=0 selector
     local -a expectedSelectors=(
         docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
-        docker-phase3-edit docker-phase3-entries docker-traditional-tls-transports docker-traditional-tls-base
+        docker-phase3-edit docker-phase3-entries-management docker-phase3-entries-topology
+        docker-traditional-tls-transports docker-traditional-tls-base
         docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
         docker-tproxy-ownership docker-redirect-focused
         docker-phase4-maintenance docker-routing-core-network-lifecycle docker-reality docker-setup-tls docker-phase4-lifecycle
@@ -338,7 +339,7 @@ runRegressionDockerContractsAggregateContract() (
         shift
         printf '%s\n' "$@" >"${callLog}"
     }
-    for selector in docker-contracts-reality-metadata docker-contracts-setup-basic \
+    for selector in docker-phase3-entries docker-contracts-reality-metadata docker-contracts-setup-basic \
         docker-contracts-system-light docker-routing-core-network docker-routing-dns-csv; do
         : >"${callLog}"
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
@@ -477,15 +478,31 @@ runRegressionDockerContractsAggregateContract() (
     [[ -z "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-}" ]]
     [[ -z "${PADM_DOCKER_TRADITIONAL_TLS_BASE_GROUP:-}" ]]
 
-    bash() { printf '%s:%s\n' "${PADM_DOCKER_PHASE3_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
+    for selector in full:management edit:topology entries:unknown; do
+        if PADM_DOCKER_PHASE3_SCOPE="${selector%%:*}" \
+            PADM_DOCKER_PHASE3_ENTRIES_BRANCH="${selector#*:}" \
+            command bash "${PROJECT_ROOT}/docker/tests/phase3.sh" >"${callLog}" 2>&1; then
+            return 1
+        fi
+        grep -q 'unknown entries branch' "${callLog}"
+    done
+    bash() {
+        printf '%s:%s:%s\n' "${PADM_DOCKER_PHASE3_SCOPE:-full}" \
+            "${PADM_DOCKER_PHASE3_ENTRIES_BRANCH:-all}" "${1##*/}" >>"${callLog}"
+    }
     : >"${callLog}"
     unset PADM_DOCKER_PHASE3_SCOPE
+    unset PADM_DOCKER_PHASE3_ENTRIES_BRANCH
     runDockerPhase3Regression
     runDockerPhase3EditRegression
     runDockerPhase3EntriesRegression
-    printf '%s\n' full:phase3.sh edit:phase3.sh entries:phase3.sh >"${expectedLog}"
+    runDockerPhase3EntriesTopologyRegression
+    runDockerPhase3EntriesManagementRegression
+    printf '%s\n' full:all:phase3.sh edit:all:phase3.sh entries:all:phase3.sh \
+        entries:topology:phase3.sh entries:management:phase3.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_PHASE3_SCOPE:-}" ]]
+    [[ -z "${PADM_DOCKER_PHASE3_ENTRIES_BRANCH:-}" ]]
 
     bash() {
         printf '%s:%s:%s\n' "${PADM_DOCKER_PHASE4_SCOPE:-full}" \

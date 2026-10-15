@@ -346,8 +346,8 @@ listener, and server configuration omits these client fields.
 This manages client metadata only. An external frontend must already exist and
 relay to the same XHTTP handler and authentication. It does not construct a
 TLS/H3/CDN topology or connect unrelated backends without shared sessions.
-Public frontend acceptance, other sc* fields, performance benefits, and full
-management remain `deferred`.
+The four `sc*` parameters exposed by the current native menu are covered.
+Public frontend and host/arm64 acceptance, performance benefits, and full management remain `deferred`.
 
 The same site menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:
@@ -2209,6 +2209,9 @@ For Direct/Block CSV or Docker menu dispatch changes on Windows, run
 and `docker-menu` first. The focused selector reuses the transaction assertions;
 it does not replace Schema, generator, other routing matrices, or real traffic checks.
 For extra listener ports, use `docker-entry-port-alias` and `docker-menu-port-alias`.
+For multiple-listener or dual-core topology changes, use `docker-phase3-entries-topology`;
+for protocol, TLS, or reinstallation management changes, use `docker-phase3-entries-management`.
+`docker-phase3-entries` runs both groups in parallel. Complete contracts and CI cover the same leaves.
 The menu selector reuses every alias PTY assertion; `docker-menu` retains the full set.
 
 | Level | Command | Purpose |
