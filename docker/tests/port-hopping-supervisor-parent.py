@@ -453,10 +453,11 @@ def fake_owned(fd, root, action="", arguments=None):
             break
         value["running"].update(seq=value["running"]["seq"] + 1, nonce=os.urandom(32).hex())
         gate("running")
-    if os.environ.get("TEST_INIT_PHASE") == "deadline-stop":
-        time.sleep(0.1)
     marker.unlink()
     stage.rmdir()
+    if os.environ.get("TEST_INIT_PHASE") == "deadline-stop":
+        # 已完成现场清理，故意卡住最终回执以验证监督者会回收残留子进程。
+        time.sleep(10)
     try:
         MODULE["send"](peer, {"v": 1, "phase": "cleaned", "nonce": os.urandom(32).hex(), "payload": {
             "target": value["target"], "child_id": value["child"]["Id"], "stage": str(stage)}})

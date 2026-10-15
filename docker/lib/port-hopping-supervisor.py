@@ -842,7 +842,17 @@ def service(initial_fd, root, entrypoint, values):
                 process.wait(timeout=max(0, stop_deadline - time.monotonic())
                              if stop_deadline is not None else STOP_TIMEOUT)
             except subprocess.TimeoutExpired:
-                pass
+                try:
+                    if process_fd is not None:
+                        signal.pidfd_send_signal(process_fd, signal.SIGKILL)
+                    else:
+                        process.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
         if process_fd is not None:
             os.close(process_fd)
         for peer in (initial, stop_peer, listener):
