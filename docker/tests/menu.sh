@@ -1683,7 +1683,7 @@ runRoutingDriver() {
         done
         for choice in 24 25; do
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
-            targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
+            targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         done
         targetReply 'Docker 路由与出站' $'26\n'
         targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-add.json\n'
@@ -1693,7 +1693,7 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'28\n'
         targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com\n'
         targetReply 'Docker 路由与出站' $'29\n'
-        targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com\n'
         targetReply 'Docker 路由与出站' $'3\n'
         for choice in 34 35; do
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
@@ -1802,18 +1802,18 @@ runRoutingDriver() {
         done
         for choice in 24 25; do
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
-            targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
+            targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
-            targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
+            targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         done
         targetReply 'Docker 路由与出站' $'28\n'
         targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'28\n'
         targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         targetReply 'Docker 路由与出站' $'29\n'
-        targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
+        targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'29\n'
-        targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
+        targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         ;;
     file-eof)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -1893,15 +1893,15 @@ runRoutingDriver() {
         else
             targetReply 'Docker 路由与出站' $'25\n'
         fi
-        targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+        targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'\004'
         ;;
     direct-block-remove-invalid|direct-block-remove-failed)
         for choice in 24 25; do
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
             if [[ "${scenario}" == direct-block-remove-invalid ]]; then
-                targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'regexp:bad\n'
+                targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'regexp:bad\n'
             else
-                targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET\n'
+                targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET\n'
             fi
         done
         ;;
@@ -1911,7 +1911,7 @@ runRoutingDriver() {
             targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
         else
             targetReply 'Docker 路由与出站' $'29\n'
-            targetReply '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+            targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'\004'
         fi
         ;;
     dns-domains-change-invalid|dns-domains-change-failed)
@@ -1920,7 +1920,7 @@ runRoutingDriver() {
             if [[ "${choice}" == 28 ]]; then
                 inputPrompt='追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）'
             else
-                inputPrompt='删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）'
+                inputPrompt='精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）'
             fi
             if [[ "${scenario}" == dns-domains-change-invalid ]]; then
                 targetReply "${inputPrompt}" $'regexp:bad\n'

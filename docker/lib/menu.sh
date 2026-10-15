@@ -1533,7 +1533,7 @@ dockerMenuRouting() {
             fi
             ;;
         24|25)
-            dockerSetupRead input '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
             if [[ "${choice}" == 24 ]]; then
                 dockerMenuRun edit --direct-domains-remove "${input}" || true
@@ -1547,7 +1547,7 @@ dockerMenuRouting() {
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --dns-domains-add "${input}" || true
             else
-                dockerSetupRead input '删除域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead input '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' &&
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --dns-domains-remove "${input}" || true
             fi
