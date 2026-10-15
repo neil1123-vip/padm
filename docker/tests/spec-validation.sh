@@ -43,7 +43,7 @@ for prefix, body in blocks:
     baseline += body
 # 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行和 Hy2/TUIC 跳跃的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "94bdb9d539ecdb06f6a0d5873758ba178b3934b2e6aafb4db90f2a827dcd9cd4"
+    "ededd43cae1cb6471134c982b34274a978df91898d300c094f52ca51daa50d1e"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)

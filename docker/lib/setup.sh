@@ -1212,7 +1212,7 @@ dockerProtocolCommand() (
     if [[ "${action}" == cdn-status ]]; then
         jq --arg listener "${listener}" '
           . as $request |
-          [.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) |
+          [.core.protocols[] | select(.id == 2 or .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) |
             select($listener == "" or .listener_id == $listener) |
             . as $entry |
             ([$request.cdn_entries[]? | select(.listener_id == $entry.listener_id)][0]) as $cdn |
@@ -1221,7 +1221,7 @@ dockerProtocolCommand() (
           if $listener != "" and ($entries | length) == 0 then error("入口不支持 CDN 地址覆盖")
           else {enabled:has("cdn_entries"),entries:$entries} end
         ' "${normalized}" || {
-            dockerError 'CDN 地址覆盖只支持已有协议 21/22/23/24/25 入口'
+            dockerError 'CDN 地址覆盖只支持已有协议 2/21/22/23/24/25 入口'
             return "${PADM_DOCKER_RC_STATE}"
         }
         return 0
@@ -3365,7 +3365,7 @@ dockerEditCommand() {
     if [[ -n "${cdnAction}" ]]; then
         jq --arg listener "${cdnListener}" --arg action "${cdnAction}" --arg addresses "${cdnAddresses}" '
           if ([.core.protocols[] | select(.listener_id == $listener and
-            (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))] | length) != 1 then
+            (.id == 2 or .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))] | length) != 1 then
             error("入口不支持 CDN 地址覆盖")
           elif $action == "clear" then
             if has("cdn_entries") then
@@ -3378,7 +3378,7 @@ dockerEditCommand() {
           end
         ' "${draft}" >"${draft}.next" 2>/dev/null &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
-            dockerError 'CDN 地址覆盖只支持已有协议 21/22/23/24/25 入口，未提交配置'
+            dockerError 'CDN 地址覆盖只支持已有协议 2/21/22/23/24/25 入口，未提交配置'
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi

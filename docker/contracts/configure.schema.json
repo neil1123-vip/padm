@@ -41,6 +41,7 @@
   "x-padm-port-alias-default": true,
   "x-padm-cdn-entry-addresses": true,
   "x-padm-cdn-grpc-tls": true,
+  "x-padm-cdn-xhttp": true,
   "x-padm-xhttp-xmux": true,
   "x-padm-xhttp-padding": true,
   "x-padm-xhttp-headers": true,

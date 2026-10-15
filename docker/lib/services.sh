@@ -236,7 +236,7 @@ dockerConfigureSpecValidate() {
             (.listener_id as $id |
               [$request.core.protocols[] | select(.listener_id == $id)] as $entries |
               ($entries | length) == 1 and
-              ($entries[0].id == 21 or $entries[0].id == 22 or $entries[0].id == 23 or
+              ($entries[0].id == 2 or $entries[0].id == 21 or $entries[0].id == 22 or $entries[0].id == 23 or
                $entries[0].id == 24 or $entries[0].id == 25)) and
             (.addresses | type == "array" and length >= 1 and length <= 16 and
               length == (unique | length) and
@@ -3147,6 +3147,7 @@ dockerGenerateSubscription() {
       .listener_id as $listener |
       .public_port = ([$request.port_aliases[]? |
         select(.listener_id == $listener and .share_default == true) | .public_port][0] // .public_port) |
+      .server as $downloadServer |
       # CDN 只替换分享连接地址，保留原入口的端口、认证与 TLS/HTTP 域名。
       ([$request.cdn_entries[]? | select(.listener_id == $listener) | .addresses][0] // []) as $addresses |
       if ($addresses | length) > 0 then
@@ -3161,7 +3162,7 @@ dockerGenerateSubscription() {
           ((. as $entry | .xhttp | del(.path,.host,.mode,.download_port,.download) |
             if $entry.xhttp.download_port != null then
               .downloadSettings = {
-                address:$entry.server,port:$entry.xhttp.download_port,network:"xhttp",security:"reality",
+                address:$downloadServer,port:$entry.xhttp.download_port,network:"xhttp",security:"reality",
                 realitySettings:{serverName:$entry.reality.server_name,fingerprint:"chrome",
                   publicKey:$entry.reality.public_key,shortId:$entry.reality.short_id},
                 xhttpSettings:($entry.xhttp | del(.download_port,.download) | .mode = "auto")}

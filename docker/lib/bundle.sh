@@ -499,6 +499,10 @@ dockerBundleSupportsSpec() {
             any($spec[0].core.protocols[]; .listener_id == $listener and (.id == 24 or .id == 25))) then
             $schema[0]["x-padm-cdn-grpc-tls"] == true
           else true end) and
+          (if any($spec[0].cdn_entries[]?; .listener_id as $listener |
+            any($spec[0].core.protocols[]; .listener_id == $listener and .id == 2)) then
+            $schema[0]["x-padm-cdn-xhttp"] == true
+          else true end) and
           (if ($spec[0].routing.socks5 // {}) | has("domains") then
             $schema[0]["x-padm-routing-domains"] == true
           else true end) and

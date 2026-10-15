@@ -572,7 +572,7 @@ dockerMenuCdnEntries() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker CDN 连接地址\n'
-        printf '%s\n' '1. 查看状态' '2. 设置地址（WS/HTTPUpgrade/gRPC TLS）' '3. 清除覆盖' '0. 返回'
+        printf '%s\n' '1. 查看状态' '2. 设置地址（Reality XHTTP/WS/HTTPUpgrade/gRPC TLS）' '3. 清除覆盖' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue

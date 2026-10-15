@@ -4849,7 +4849,7 @@ for cdnCase in flow cancel failed; do
     expectedCdn+=$'\nprotocol cdn-status'
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedCdn}" ]] ||
         fail "CDN ${cdnCase} 参数分发错误或取消后执行编辑"
-    grep -Fq '2. 设置地址（WS/HTTPUpgrade/gRPC TLS）' "${CONTROL_LOG}" ||
+    grep -Fq '2. 设置地址（Reality XHTTP/WS/HTTPUpgrade/gRPC TLS）' "${CONTROL_LOG}" ||
         fail 'CDN 菜单未显示 gRPC TLS 支持范围'
     if [[ "${cdnCase}" == failed ]]; then
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||

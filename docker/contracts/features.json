@@ -378,7 +378,7 @@
       "profiles": ["subscription"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "4A.5–4A.5b 提供协议 21/22/23/24/25 WS/HTTPUpgrade/gRPC TLS 的逐入口多连接地址覆盖、菜单/CLI 状态、设置和清除，统一刷新本地链接、主订阅及分享组，保留 SNI、Host/路径或 gRPC serviceName/h2、端口与认证并复用候选和失败恢复。24/25 仅接受已有 Xray 受管 Nginx TLS，带其 CDN 映射时另要求 x-padm-cdn-grpc-tls，原三协议及无映射的 gRPC 旧包子集仍兼容。Reality XHTTP/gRPC、H3 参数、其它协议及公网 CDN 验收尚未交付，完整管理保持 deferred。"
+      "reason": "4A.5–4A.5b 提供协议 2 Reality XHTTP、21/22/23 WS/HTTPUpgrade、24/25 gRPC TLS 的逐入口多连接地址覆盖、菜单/CLI 状态、设置和清除，统一刷新本地链接、主订阅及分享组，保留 Reality、SNI、Host/路径、XHTTP 模式或 gRPC serviceName/h2、端口与认证并复用候选和失败恢复。协议 2 带 CDN 映射时要求 x-padm-cdn-xhttp；24/25 带 CDN 映射时要求 x-padm-cdn-grpc-tls；原三协议及无映射的 gRPC 旧包子集仍兼容。H3 参数、其它协议及公网 CDN 实际验收尚未交付，完整管理保持 deferred。"
     },
     "fail2ban": {
       "status": "host-integrated",

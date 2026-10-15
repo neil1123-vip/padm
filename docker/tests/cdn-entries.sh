@@ -79,6 +79,12 @@ jq -n --arg uuid "${UUID}" --arg account "${ACCOUNT}" '
       reality:{server_name:"www.debian.org",target_host:"www.debian.org",target_port:443,
         private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
         public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",short_id:"1234"}},
+     {id:2,core:"xray",listener_id:"entry-reality-xhttp",server:"origin.example.com",
+      public_port:35002,address_families:["ipv4","ipv6"],name:"Reality-XHTTP",uuid:$uuid,
+      reality:{server_name:"www.debian.org",target_host:"www.debian.org",target_port:443,
+        private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
+        public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",short_id:"1234"},
+       xhttp:{path:"/reality-xhttp",host:"www.debian.org",mode:"auto",download_port:35102}},
      (21,22,23,24,25 | . as $protocol |
        {id:$protocol,core:"xray",listener_id:("entry-"+($protocol|tostring)),
         server:"origin.example.com",public_port:(35000+$protocol),
@@ -94,11 +100,13 @@ jq -n --arg uuid "${UUID}" --arg account "${ACCOUNT}" '
    host_integrations:[],accounts:[
      {id:$account,name:"Alice",enabled:true,uuid:"44444444-4444-4444-8444-444444444444",
       password:"Alice.-~@+=:Secret",shadowsocks_password:null,
-      listeners:["entry-reality","entry-21","entry-22","entry-23","entry-24","entry-25"]},
+       listeners:["entry-reality","entry-reality-xhttp","entry-21","entry-22","entry-23","entry-24","entry-25"]},
      {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",name:"Disabled",enabled:false,
       uuid:"55555555-5555-4555-8555-555555555555",password:"Disabled-secret01",
       shadowsocks_password:null,listeners:["entry-21","entry-22","entry-23","entry-24","entry-25"]}],
-   port_aliases:[21,22,23,24,25 | {listener_id:("entry-"+(tostring)),public_port:(51000+.),share_default:true}]}
+   port_aliases:[
+     {listener_id:"entry-reality-xhttp",public_port:35102},
+     (21,22,23,24,25 | {listener_id:("entry-"+(tostring)),public_port:(51000+.),share_default:true})]}
 ' >"${TEST_ROOT}/base.json"
 
 # Schema 检查字段形状，生产校验还检查唯一入口、协议允许范围和严格地址。
@@ -126,6 +134,7 @@ def case(name, value, valid, schema_valid=None):
 case("base", base, True)
 cdn = copy.deepcopy(base)
 cdn["cdn_entries"] = [
+    {"listener_id": "entry-reality-xhttp", "addresses": ["edge-xhttp.example.com", "2001:db8::2"]},
     {"listener_id": "entry-21", "addresses": ["edge.example.com", "2001:db8::21"]},
     {"listener_id": "entry-22", "addresses": ["192.0.2.22", "2001:db8:0:0:0:0:0:22"]},
     {"listener_id": "entry-23", "addresses": ["edge23.example.com"]},
@@ -141,7 +150,8 @@ value["cdn_entries"] = []
 value["accounts"] = []
 value["port_aliases"] = []
 for n in range(16):
-    entry = copy.deepcopy(base["core"]["protocols"][1])
+    entry = copy.deepcopy(next(protocol for protocol in base["core"]["protocols"]
+                               if protocol["id"] == 21))
     entry.update(listener_id=f"entry-count-{n}", public_port=36000+n, name=f"Count-{n}")
     entry["websocket"].update(path=f"count-path{n}", backend_port=42000+n, tls_port=43000+n)
     value["core"]["protocols"].append(entry)
@@ -201,6 +211,14 @@ jq 'del(."x-padm-cdn-entry-addresses")' "${PROJECT_ROOT}/docker/contracts/config
 reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/cdn.json"
 dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" || fail '旧包拒绝无 CDN 规格'
 cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${TEST_ROOT}/bundle/docker/contracts/"
+jq 'del(."x-padm-cdn-xhttp")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/cdn.json"
+jq '.cdn_entries |= map(select(.listener_id!="entry-reality-xhttp"))' \
+    "${TEST_ROOT}/cdn.json" >"${TEST_ROOT}/legacy-no-xhttp-cdn.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/legacy-no-xhttp-cdn.json" ||
+    fail '缺少 XHTTP CDN 能力的旧包拒绝既有 CDN 入口'
+cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${TEST_ROOT}/bundle/docker/contracts/"
 jq 'del(."x-padm-cdn-grpc-tls")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
     >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/cdn.json"
@@ -256,6 +274,28 @@ for entry in spec["core"]["protocols"]:
         original = next(baseline)
         assert original["ps"] == name
         assert original["id" if entry["id"] in (22, 23) else "uuid"] == credential
+        if entry["id"] == 2:
+            assert original["scheme"] == "vless"
+            assert original["query"]["type"] == ["xhttp"]
+            assert original["query"]["security"] == ["reality"]
+            assert original["query"]["pbk"] == [entry["reality"]["public_key"]]
+            assert original["query"]["sid"] == [entry["reality"]["short_id"]]
+            assert original["query"]["sni"] == [entry["reality"]["server_name"]]
+            assert original["query"]["path"] == [entry["xhttp"]["path"]]
+            assert original["query"]["host"] == [entry["xhttp"]["host"]]
+            download = json.loads(original["query"]["extra"][0])["downloadSettings"]
+            assert download["address"] == entry["server"]
+            assert download["port"] == entry["xhttp"]["download_port"]
+            assert download["security"] == "reality"
+            assert download["realitySettings"] == {
+                "serverName": entry["reality"]["server_name"],
+                "fingerprint": "chrome",
+                "publicKey": entry["reality"]["public_key"],
+                "shortId": entry["reality"]["short_id"]}
+            assert download["xhttpSettings"] == {
+                "path": entry["xhttp"]["path"],
+                "host": entry["xhttp"]["host"],
+                "mode": "auto"}
         if entry["id"] in (24, 25):
             assert original["scheme"] == ("vless" if entry["id"] == 24 else "trojan")
             assert original["query"]["sni"] == [entry["grpc_tls"]["domain"]]
@@ -286,7 +326,7 @@ for fixture in base cdn sixteen-addresses; do
 done
 group='{"id":"share-cccccccccccccccc","name":"CDN-Team","enabled":true,
   "token":"cdn-transaction-token","account_ids":["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
-  "listener_ids":["entry-21","entry-22","entry-24","entry-25"]}'
+  "listener_ids":["entry-21","entry-22","entry-24","entry-25","entry-reality-xhttp"]}'
 dockerSubscriptionRender "${TEST_ROOT}/cdn.json" "${group}" "${TEST_ROOT}/group.links"
 jq --argjson group "${group}" '.subscription.include_base=false |
   .core.protocols |= map(select(.listener_id as $id | ($group.listener_ids|index($id)) != null)) |
@@ -374,6 +414,7 @@ cp -- "${TEST_ROOT}/nginx-http01-drift.conf" "${nginxActual}/default.conf"
 reject dockerNginxConfigMatches "${TEST_ROOT}/nginx-http01.json" "${nginxActual}/default.conf"
 assertNginxDirectory 1 "${TEST_ROOT}/nginx-http01.json" "${nginxActual}"
 jq 'del(.port_aliases) |
+  .core.protocols |= map(if .id == 2 then del(.xhttp.download_port) else . end) |
   .reality_stream={listener_id:"entry-reality",website_listener_id:"entry-21"}' \
     "${TEST_ROOT}/base.json" >"${TEST_ROOT}/nginx-stream.json"
 dockerConfigureSpecValidate "${TEST_ROOT}/nginx-stream.json"
@@ -449,13 +490,13 @@ grep -qx 'https://tls.example.com/subscriptions/cdn-transaction-token' "${TEST_R
     fail '初始分享 URL 不正确'
 legacyBefore=$(snapshot)
 (dockerMain protocol list) >"${LOG}" 2>&1 || fail '旧 Nginx 不能读取入口列表'
-for listener in entry-reality entry-21 entry-22 entry-23 entry-24 entry-25; do
+for listener in entry-reality entry-reality-xhttp entry-21 entry-22 entry-23 entry-24 entry-25; do
     grep -q "^${listener}  " "${LOG}" || fail "旧 Nginx 入口列表遗漏 ${listener}"
 done
 (dockerMain protocol links) >"${TEST_ROOT}/legacy.links" || fail '旧 Nginx 不能读取分享链接'
 assertShare "${root}/config/spec.json" "${TEST_ROOT}/legacy.links"
 (dockerMain protocol cdn-status) >"${LOG}"
-jq -e '.enabled==false and (.entries|length)==5 and
+jq -e '.enabled==false and (.entries|length)==6 and
   all(.entries[]; .overridden==false and .addresses==["origin.example.com"])' "${LOG}" >/dev/null
 assertClean
 [[ "$(snapshot)" == "${legacyBefore}" ]] || fail '旧 Nginx 只读菜单修改在线部署'
@@ -491,6 +532,21 @@ assertClean
 runEdit 0 --cdn-entry entry-21 'edge.example.com,2001:db8::21' --confirm PADM-DOCKER-EDIT
 cmp -- "${TEST_ROOT}/nginx-installed-strict.conf" "${root}/config/nginx/default.conf" ||
     fail '首次 CDN 提交未完整升级三个入口的 Host 校验'
+protectedBefore=$(cdnProtectedSnapshot)
+before=$(snapshot)
+runEdit 0 --cdn-entry entry-reality-xhttp 'edge-xhttp.example.com,2001:db8::2' --preview
+grep -Fq 'edge-xhttp.example.com' "${LOG}" || fail 'Reality XHTTP CDN 预览遗漏覆盖地址'
+! grep -Fq "${UUID}" "${LOG}" || fail 'Reality XHTTP CDN 预览泄露认证'
+[[ "$(snapshot)" == "${before}" ]] || fail 'Reality XHTTP CDN 预览改变在线部署'
+runEdit 0 --cdn-entry entry-reality-xhttp 'edge-xhttp.example.com,2001:db8::2' --confirm PADM-DOCKER-EDIT
+[[ "$(cdnProtectedSnapshot)" == "${protectedBefore}" ]] || fail 'Reality XHTTP CDN 设置改变其它配置或业务状态'
+(dockerMain protocol cdn-status entry-reality-xhttp) >"${LOG}"
+jq -e '.=={enabled:true,entries:[{listener_id:"entry-reality-xhttp",protocol:2,server:"origin.example.com",
+  overridden:true,addresses:["edge-xhttp.example.com","2001:db8::2"]}]}' "${LOG}" >/dev/null
+(dockerMain protocol links entry-reality-xhttp) >"${TEST_ROOT}/xhttp-selected.links"
+jq '.core.protocols |= map(select(.listener_id=="entry-reality-xhttp"))' \
+    "${root}/config/spec.json" >"${TEST_ROOT}/xhttp-selected.json"
+assertShare "${TEST_ROOT}/xhttp-selected.json" "${TEST_ROOT}/xhttp-selected.links"
 runEdit 0 --cdn-entry entry-22 '192.0.2.22,2001:db8:0:0:0:0:0:22' --confirm PADM-DOCKER-EDIT
 runEdit 0 --cdn-entry entry-23 edge23.example.com --confirm PADM-DOCKER-EDIT
 for protocol in 24 25; do
@@ -582,6 +638,17 @@ jq -e 'all(.cdn_entries[]; .listener_id!="entry-23") and
 assertInstalledShare
 runEdit 0 --cdn-entry-clear entry-21 --confirm PADM-DOCKER-EDIT
 runEdit 0 --cdn-entry-clear entry-22 --confirm PADM-DOCKER-EDIT
+protectedBefore=$(cdnProtectedSnapshot)
+before=$(snapshot)
+runEdit 0 --cdn-entry-clear entry-reality-xhttp --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'Reality XHTTP CDN 清空预览改变在线部署'
+runEdit 0 --cdn-entry-clear entry-reality-xhttp --confirm PADM-DOCKER-EDIT
+[[ "$(cdnProtectedSnapshot)" == "${protectedBefore}" ]] ||
+    fail 'Reality XHTTP CDN 清空改变其它配置或业务状态'
+(dockerMain protocol cdn-status entry-reality-xhttp) >"${LOG}"
+jq -e '.entries[0].overridden==false and .entries[0].addresses==["origin.example.com"]' \
+    "${LOG}" >/dev/null
+assertInstalledShare
 for protocol in 24 25; do
     listener="entry-${protocol}"
     protectedBefore=$(cdnProtectedSnapshot)
@@ -608,8 +675,12 @@ jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload==17 and .accounts[$uuid].dow
     ! grep -q '^edit ' "${TEST_ROOT}/menu.commands" || fail 'CDN 菜单取消仍派发编辑'
     grep -qx 'protocol cdn-status' "${TEST_ROOT}/menu.commands" || fail 'CDN 状态菜单未派发'
     : >"${TEST_ROOT}/menu.commands"
-    printf '2\nentry-24\nedge.example.com,2001:db8::24\n3\nentry-25\n0\n' |
+    printf '2\nentry-reality-xhttp\nedge-xhttp.example.com,2001:db8::2\n3\nentry-reality-xhttp\n2\nentry-24\nedge.example.com,2001:db8::24\n3\nentry-25\n0\n' |
         dockerMenuCdnEntries >"${LOG}"
+    grep -qx 'edit --cdn-entry entry-reality-xhttp edge-xhttp.example.com,2001:db8::2' \
+        "${TEST_ROOT}/menu.commands" || fail 'Reality XHTTP CDN 设置菜单参数错误'
+    grep -qx 'edit --cdn-entry-clear entry-reality-xhttp' "${TEST_ROOT}/menu.commands" ||
+        fail 'Reality XHTTP CDN 清空菜单参数错误'
     grep -qx 'edit --cdn-entry entry-24 edge.example.com,2001:db8::24' "${TEST_ROOT}/menu.commands" ||
         fail 'CDN 设置菜单参数错误'
     grep -qx 'edit --cdn-entry-clear entry-25' "${TEST_ROOT}/menu.commands" || fail 'CDN 清空菜单参数错误'

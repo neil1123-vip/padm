@@ -1883,7 +1883,7 @@ packet/stream 采用状态中的有效值，不宣称原样保留底层显式零
 | 4A.2 账号 CLI/菜单事务 | 已交付：新建、名称/关联编辑、复制、启停、删除及凭据轮换；复用候选提交/恢复，未选账号保持，复制生成新身份与凭据，恢复不回退最新累计。 |
 | 4A.3 分享组与内容输出 | 已交付分享组 CRUD、账号/入口筛选、独立 token、启停与 token 轮换、纯订阅内容及 HTTPS 链接输出；CDN 连接地址见 4A.5，H3 仍待后续阶段。 |
 | 4A.4 业务备份恢复 | 已提交 `99ce706c`：账号、组、发布授权、额度、累计和格式版本的备份、冲突预览及 merge/replace 恢复；不以版本 rollback 冒充业务恢复。 |
-| 4A.5–4A.5b CDN 连接地址 | 已实现协议 21/22/23/24/25 的多连接地址覆盖、CLI/菜单、统一链接输出与事务恢复；本地六组合实链路、严格拒绝探针、旧包兼容及完整合同通过；拒绝其余协议，完整 CDN 管理保持 deferred。 |
+| 4A.5–4A.5c CDN 连接地址 | 已实现协议 2、21/22/23/24/25 的多连接地址覆盖、CLI/菜单、统一链接输出与事务恢复；本地六组合实链路、严格拒绝探针、旧包兼容及合同分片通过；拒绝其余协议，完整 CDN 管理保持 deferred。 |
 | 4A.6 流量与额度菜单 | 已交付账号菜单 `10 → 9`，复用已有 show/collect/limit/reset；查看不采集，额度 `0` 不限额，设置/重置各确认一次，重置保留额度。 |
 
 4A.1 当前实现：v3 可选 `accounts` 接受 1–256 项，每项精确保存
@@ -2025,6 +2025,29 @@ Linux amd64 定向 CDN 合同 49699 ms、菜单 PTY 67510 ms，通过；
 `.tmp-grpc-cdn-close/`，重复归档在核对输入后清理。
 回归调度将 network-lifecycle 提前到第 7，并补已有 CDN 的顺序合同漏项；
 本次与实链路混跑，完整耗时不作为孤立调度收益证据，不扩大三槽或 Jobs 6。
+
+#### 4A.5c Reality XHTTP 的 CDN 连接地址
+
+沿用 `cdn_entries` 的逐入口地址覆盖、菜单/CLI 状态、设置、清除、候选预览、
+确认和失败恢复，只追加协议 `2` Reality XHTTP。覆盖只替换分享连接的外部地址，
+保留原入口端口、Reality 身份、SNI、XHTTP path/Host/mode、认证和独立下行绑定；
+`downloadSettings.address` 继续使用原入口地址，不随上行 CDN 地址漂移。
+新增 `x-padm-cdn-xhttp` 能力门禁，缺少该标记的旧控制 bundle 拒绝带 XHTTP
+映射的规格；没有 XHTTP 映射的旧 CDN 子集保持兼容。菜单文案同步列出
+Reality XHTTP，分享组、主订阅和本地链接共用生成器。
+
+本阶段明确支持协议 `2` 的地址覆盖，不自动部署公网 CDN、TLS/H3、前置路由或
+独立下行服务；公网供应商透传、真实宿主/arm64、性能、完整管理和可信发布继续
+deferred，整体计划保持 active。
+
+Docker Linux amd64 当前源码快照下，定向 `docker-cdn-entries -Jobs 2` 通过，
+入口约 `63.7` 秒；合同回归中 `docker-reality`、`docker-cdn-entries`、
+`docker-menu` 及其余受影响分片通过。首次 `docker-contracts -Jobs 6` 仅因
+未改动的 `docker-reality-targets-selection` 在 10 秒选择等待中时序超时而退出；
+该分片随后单独复跑通过（入口约 `109.6` 秒）。完整合同未因该次抖动重复整套，
+避免扩大本机回归耗时；本阶段证据保留在
+`.tmp-regression-docker-03bcf11144bb49d38620a8eef1b9b243/` 和
+`.tmp-regression-docker-1b2fb8465a4b4cc98ce58732a6a64d58/`。
 
 #### 4A.6 Docker 菜单流量与额度入口
 
