@@ -4319,7 +4319,7 @@ manageTuic() {
             tuicSettingsSummary || return 1
             menuItem 1 "重新安装" "重建 Tuic 入站配置"
             menuItem 2 "卸载" "移除 Tuic 入站配置"
-            menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
+            menuItem 3 "端口范围转发管理" "配置 UDP 端口范围转发；客户端自动换端口仍未开放"
             menuItem 4 "拥塞控制" "cubic / bbr / new_reno"
             menuItem 5 "高级设置" "auth_timeout、heartbeat、0-RTT"
             menuRecommendedItem 6 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
