@@ -3188,9 +3188,9 @@ dockerGenerateSubscription() {
       elif .id == 29 then
         "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.fallback_tls.domain | @uri)&security=tls&fp=chrome&sni=\(.fallback_tls.domain | @uri)&alpn=\((.fallback_tls.alpn // ["h2", "http/1.1"]) | join(",") | @uri)&type=tcp#\(.name | @uri)"
       elif .id == 3 then
-        # 服务端上行对应客户端下行，分享链接需要交换带宽方向。
+        # 交换服务端带宽方向，并兼容分别读取 upmbps/downmbps 和 up/down 的客户端。
         "hysteria2://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.hy2.domain | @uri)&insecure=0&sni=\(.hy2.domain | @uri)&alpn=h3" +
-          (if .hy2.bandwidth_mode == "brutal" then "&upmbps=\(.hy2.down_mbps)&downmbps=\(.hy2.up_mbps)" else "" end) +
+          (if .hy2.bandwidth_mode == "brutal" then "&upmbps=\(.hy2.down_mbps)&downmbps=\(.hy2.up_mbps)&up=\(.hy2.down_mbps)&down=\(.hy2.up_mbps)" else "" end) +
           (if .hy2.obfs != null then "&obfs=\(.hy2.obfs.type | @uri)&obfs-password=\(.hy2.obfs.password | @uri)" else "" end) +
           "#\(.name | @uri)"
       elif .id == 4 then

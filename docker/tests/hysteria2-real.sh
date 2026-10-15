@@ -236,6 +236,7 @@ endpoints = json.loads(sys.argv[3])
 assert len(endpoints) == 2
 assert [ipaddress.ip_address(endpoint).version for endpoint in endpoints] == [4, 6], endpoints
 config = {"log":{"level":"warn"}, "inbounds":[], "outbounds":[], "route":{"rules":[]}}
+bandwidth_keys = {"upmbps", "downmbps", "up", "down"}
 
 def parse(line):
     uri = urllib.parse.urlsplit(line)
@@ -243,14 +244,15 @@ def parse(line):
     assert uri.scheme == "hysteria2" and uri.username and uri.password is None and uri.hostname == "hy2.padm.test"
     assert str(uuid.UUID(urllib.parse.unquote(uri.username))) == urllib.parse.unquote(uri.username)
     required = {"peer", "insecure", "sni", "alpn"}
-    if "upmbps" in q or "downmbps" in q:
-        required |= {"upmbps", "downmbps"}
+    if bandwidth_keys.intersection(q):
+        required |= bandwidth_keys
     if "obfs" in q or "obfs-password" in q:
         required |= {"obfs", "obfs-password"}
     assert set(q) == required and all(len(v) == 1 and v[0] for v in q.values()), q
     q = {key:values[0] for key, values in q.items()}
     assert q["peer"] == q["sni"] == uri.hostname and q["insecure"] == "0" and q["alpn"] == "h3"
     if "upmbps" in q:
+        assert q["up"] == q["upmbps"] and q["down"] == q["downmbps"]
         assert q["upmbps"].isdecimal() and 0 < int(q["upmbps"]) <= 1000000
         assert q["downmbps"].isdecimal() and 0 < int(q["downmbps"]) <= 1000000
     if "obfs" in q:
@@ -278,7 +280,7 @@ for line in lines:
     if mode == "brutal":
         assert q["upmbps"] == "60" and q["downmbps"] == "120" and "obfs" not in q
     else:
-        assert "upmbps" not in q and "downmbps" not in q
+        assert not bandwidth_keys.intersection(q)
         assert ("obfs" in q) == (mode in {"salamander", "gecko"})
         if "obfs" in q:
             assert q["obfs"] == mode and q["obfs-password"] == mode+"-real-123456"

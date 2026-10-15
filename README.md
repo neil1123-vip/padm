@@ -900,8 +900,16 @@ Hy2 无参数输出范围 URI，TUIC 无参数输出范围起始端口的普通 
 TUIC 的范围 DNAT 让客户端可选择其中任一端口，当前固定 sing-box TUIC 客户端
 没有 `server_ports`/`hop_interval`，不输出非标准范围 URI，也不宣称客户端自动换端口。
 sing-box 客户端 `server_ports` 与 `hop_interval=5s` 已在隔离 Linux amd64
-验证同一进程的双族跨端口请求；范围 URI 的外部客户端导入尚未验收。
-原生宿主、arm64、公网、TUIC 客户端自动跳跃、旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`。
+验证同一进程的双族跨端口请求。Hy2 分享生成器同时输出等值的
+`upmbps/downmbps` 和 `up/down`，保持客户端方向，修复 Mihomo 原始 URI 导入丢失 Brutal 带宽。
+新增 `docker-port-hopping-share-real`（Jobs 2），固定官方 Mihomo `v1.19.28`
+直接导入原始分享 URI，核验 Hy2 Brutal + Salamander 范围跳跃及 TUIC 首尾普通 URI，
+覆盖双族 HTTP、错误账号拒绝与停止净撤销；该客户端仅用于回归，不增加生产核心。
+Hy2 使用客户端原生默认 30 秒随机换端口，最多观察 300 秒，两族跨端口满足即结束。
+本批 Hy2 生成器合同与配置定向分别 127.283 秒、29.466 秒通过；
+分享 URI 组合真实 146.808 秒通过，集中完整合同 57/57 组通过（555.266 秒）。
+Gecko 范围 URI 及其它客户端导入、原生宿主、arm64、公网、TUIC 客户端自动跳跃、
+旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`。
 
 菜单“协议与入口 → CDN 连接地址”可为已有 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
 入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。

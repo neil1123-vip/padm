@@ -221,6 +221,152 @@ def hopping_cli(root, docker, *arguments, accepted=True):
     return result.stdout
 
 
+def share_uri(node, work, root, docker, enter):
+    invoke = partial(hopping_cli, root, docker)
+    spec = json.loads((root / "config/spec.json").read_text())
+    protocol = spec["core"]["protocols"][0]
+    hy2 = protocol["id"] == 3
+    binary = Path("/uri-client/mihomo")
+    version = command([str(binary), "-v"]).decode().strip()
+    assert "v1.19.28" in version, version
+    image = json.loads(Path("/uri-client/image.json").read_text())
+    binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
+    assert image["binary_sha256"] == binary_sha256
+    tables = {"ipv4": "iptables", "ipv6": "ip6tables"}
+    nat_before = {table: command([table, "-w", "-t", "nat", "-S"])
+                  for table in tables.values()}
+    home = node / "uri-client"
+    home.mkdir(mode=0o700)
+    config = {"mode": "rule", "log-level": "warning", "ipv6": True,
+              "hosts": {"target.padm.test": list(helpers["HOSTS"].values())},
+              "proxy-providers": {}, "proxy-groups": [], "listeners": [],
+              "rules": ["MATCH,REJECT"]}
+    positive, negative = [], []
+    process = None
+    active = False
+    evidence = dict(scope="mihomo-raw-share-uri-import", protocol_id=protocol["id"],
+                    client=dict(version=version, binary_sha256=binary_sha256, image=image),
+                    same_client_process=True, tls_verification_disabled=False,
+                    automatic_client_hopping_verified=False, samples=[],
+                    native_host_verified=False, arm64_verified=False)
+    try:
+        assert invoke("port-hopping", "start").decode().strip() == "端口跳跃已启用。"
+        active = True
+        shares = [invoke("port-hopping", "share")]
+        if not hy2:
+            shares.append(invoke("port-hopping", "share", "30001"))
+        evidence["share_uris"] = [value.decode().strip() for value in shares]
+        if hy2:
+            bandwidth = protocol["hy2"]
+            for key, value in (("upmbps", bandwidth["down_mbps"]), ("up", bandwidth["down_mbps"]),
+                               ("downmbps", bandwidth["up_mbps"]), ("down", bandwidth["up_mbps"])):
+                assert f"{key}={value}" in evidence["share_uris"][0]
+            assert "obfs=salamander" in evidence["share_uris"][0]
+            evidence["brutal_bandwidth_aliases_equal"] = True
+        wrong = shares[0].replace(protocol["uuid"].encode(),
+                                 b"44444444-4444-4444-8444-444444444444", 1)
+        assert wrong != shares[0]
+        # 文件 provider 收到 CLI 原文；仅负例替换凭据，不将 URI 重建为协议配置。
+        for index, raw in enumerate([*shares, wrong]):
+            source = home / f"share-{index}.txt"
+            source.write_bytes(raw)
+            source.chmod(0o600)
+            families = tables if index < len(shares) else {"ipv4": "iptables"}
+            for family in families:
+                tag = f"share-{index}-{family}"
+                port = 24001 + len(positive) + len(negative)
+                config["proxy-providers"][tag] = {
+                    "type": "file", "path": str(source),
+                    "health-check": {"enable": False},
+                    "override": {"ip-version": family, "additional-prefix": tag + "-"}}
+                config["proxy-groups"].append({"name": tag, "type": "select", "use": [tag]})
+                config["listeners"].append({"name": tag, "type": "socks",
+                                            "listen": "127.0.0.1", "port": port, "proxy": tag})
+                (positive if index < len(shares) else negative).append((port, index < len(shares)))
+        for family, table in tables.items():
+            address = helpers["HOSTS"][family]
+            command(enter + [table, "-w", "-t", "mangle", "-N", "PADM_URI_CLIENT"])
+            for port in (30000, 30001):
+                command(enter + [table, "-w", "-t", "mangle", "-A", "PADM_URI_CLIENT",
+                                 "-p", "udp", "-d", address, "--dport", str(port), "-j", "RETURN"])
+            command(enter + [table, "-w", "-t", "mangle", "-A", "OUTPUT",
+                             "-p", "udp", "-d", address, "--dport", "30000:30001",
+                             "-j", "PADM_URI_CLIENT"])
+        path = home / "config.json"
+        path.write_text(json.dumps(config))
+        path.chmod(0o600)
+        certificate = str(root / "secrets/tls/target.padm.test.crt")
+        arguments = [str(binary), "-d", str(home), "-f", str(path)]
+        command(["env", "SSL_CERT_FILE=" + certificate, *arguments, "-t"])
+        with (node / "client-share-uri.log").open("wb") as log:
+            process = subprocess.Popen(enter + arguments, stdout=log, stderr=log,
+                                       env=dict(os.environ, SSL_CERT_FILE=certificate))
+        wait_ready(lambda: process.poll() is None and subprocess.run(
+            enter + ["python3", "-c", "import socket; " + "; ".join(
+                f"socket.create_connection(('127.0.0.1',{port}),.2).close()"
+                for port, _ in [*positive, *negative])],
+            capture_output=True, timeout=2).returncode == 0)
+        evidence["client_pid"] = process.pid
+        (node / "auth-probes.json").write_text(json.dumps(positive))
+        events = node / "events.jsonl"
+        events.touch(exist_ok=True)
+        events_before = len(events.read_text().splitlines())
+        started = time.monotonic()
+        while True:
+            assert process.poll() is None
+            command(enter + ["python3", str(SCRIPT), "auth-probes", str(node)], timeout=8)
+            counters = {}
+            for family, table in tables.items():
+                raw = command(enter + [table + "-save", "-c", "-t", "mangle"]).decode()
+                counters[family] = {int(port): int(packets) for packets, port in re.findall(
+                    r"^\[(\d+):\d+\] -A PADM_URI_CLIENT .*--dport (\d+) -j RETURN$", raw, re.M)}
+                assert set(counters[family]) == {30000, 30001}, raw
+            evidence["samples"].append(dict(
+                elapsed=round(time.monotonic() - started, 3), counters=counters))
+            assert len(events.read_text().splitlines()) - events_before == \
+                len(positive) * len(evidence["samples"])
+            if all(all(row.values()) for row in counters.values()):
+                break
+            assert hy2, "TUIC 原始首尾 URI 未分别到达双族发布端口"
+            assert time.monotonic() - started < 300, (
+                "Mihomo 默认随机端口观察未满足；未重启客户端或把此结果当作业务失败",
+                evidence["samples"])
+            time.sleep(5.1)
+        assert process.poll() is None and json.loads(path.read_text()) == config
+        assert all((home / f"share-{index}.txt").read_bytes() == raw
+                   for index, raw in enumerate(shares))
+        evidence.update(dual_family_both_ports=True,
+                        automatic_client_hopping_verified=hy2,
+                        raw_provider_files_unchanged=True, client_environment=config)
+        # 正向计数证据已封存，错误凭据不会补齐自动跳跃的端口覆盖。
+        (node / "auth-probes.json").write_text(json.dumps(negative))
+        command(enter + ["python3", str(SCRIPT), "auth-probes", str(node)], timeout=8)
+        assert process.poll() is None
+        assert len(events.read_text().splitlines()) - events_before == \
+            len(positive) * len(evidence["samples"])
+        evidence["wrong_uri_credentials_refused"] = True
+        stop(process)
+        process = None
+        assert invoke("port-hopping", "stop").decode().strip() == "端口跳跃已停止；保存配置保留。"
+        active = False
+        assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
+                   for table, previous in nat_before.items())
+        assert not (root / "data/net/.hopping-supervisor").exists()
+        assert not (root / "locks/deployment.lock").exists()
+        assert not (root / "data/net/port-hopping.state").exists()
+        assert not list(root.glob(".hopping-guarded.*"))
+        assert not command(docker + ["ps", "-aq", "--filter",
+                                    "label=io.padm.hopping-supervised"]).strip()
+        evidence["final_stop_clean"] = True
+        return evidence
+    finally:
+        (work / "share-uri.json").write_text(json.dumps(evidence, sort_keys=True))
+        if process is not None:
+            stop(process)
+        if active:
+            invoke("port-hopping", "stop")
+
+
 def explicit_recovery(node, work, root, docker, enter, password, nat_before):
     invoke = partial(hopping_cli, root, docker)
     saved = json.loads((root / "config/spec.json").read_text())["port_hopping"]
@@ -1675,6 +1821,10 @@ def run(work):
             configured["port_hopping"] = dict(
                 listener_id=protocol["listener_id"], range_start=30000, range_end=30001,
                 ipv4="198.18.1.1", ipv6="2001:db8:1::1")
+            if os.environ.get("PADM_DOCKER_HOPPING_SHARE_ONLY") == "1" and protocol["id"] == 3:
+                protocol["hy2"].update(
+                    bandwidth_mode="brutal", up_mbps=80, down_mbps=40,
+                    obfs=dict(type="salamander", password="hy2-uri-obfs-private_1234"))
             spec.write_text(json.dumps(configured))
             # 生成材料与 bind 源均属于本次私有节点，保持完整生产 Compose。
             command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),
@@ -1684,6 +1834,11 @@ def run(work):
 dockerInitializeStateRoot
 dockerInstallBundle "$(dirname "$1")" ffffffffffffffffffffffffffffffffffffffff
 dockerInstallCli
+if [[ "${PADM_DOCKER_HOPPING_SHARE_ONLY:-0}" == 1 ]]; then
+    dockerGenerateSingBoxConfig "$2/config/spec.json" "$2/config/sing-box/users.base"
+    dockerTrafficRender sing-box "$2/config/sing-box/users.base" "$(dockerTrafficReadState)" \
+        >"$2/config/sing-box/config.json"
+fi
 dockerGenerateCompose "$2/config/spec.json" "$2/compose.json" "$2"
 : >"$2/images.env"
 dockerGenerateImagesEnv "$2/config/spec.json" "$2/images.env" "$2"
@@ -1749,6 +1904,12 @@ dockerReleaseDeploymentLock
             current = json.loads(spec.read_text())
             old_password = current["core"]["protocols"][0]["uuid"]
             new_password = "44444444-4444-4444-8444-444444444444"
+            if os.environ.get("PADM_DOCKER_HOPPING_SHARE_ONLY") == "1":
+                shared = share_uri(node, work, root, docker, enter)
+                print("docker-port-hopping-share-real-snapshot=" + json.dumps(dict(
+                    initial=proof, share_uri=shared,
+                    elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
+                return
             if os.environ.get("PADM_DOCKER_HOPPING_TUIC_ONLY") == "1":
                 assert protocol["id"] == 31
                 authentication(node, root, enter, "tuic-initial", old_password, new_password, "old")

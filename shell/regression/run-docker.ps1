@@ -333,13 +333,20 @@ try {
         if (Test-Path -LiteralPath $cachePath) { Remove-Item -LiteralPath $cachePath }
     }
 
+    $nestedNodeSelectors = @(
+        'docker-control-two-deployment-real', 'docker-control-log-cron-real', 'docker-routing-ipv6-real',
+        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real',
+        'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-port-hopping-tuic-real',
+        'docker-port-hopping-recovery-real', 'docker-port-hopping-share-real', 'docker-cdn-entries-real',
+        'docker-alpn-real', 'docker-xhttp-real', 'docker-hy2-sites-real', 'docker-fail2ban-real',
+        'docker-fail2ban-source-real', 'docker-control-fail2ban-real',
+        'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real'
+    )
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real',
         'docker-routing-block-ips-resolved-egress-real')) {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
-    } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-control-log-cron-real', 'docker-routing-ipv6-real',
-        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real', 'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-port-hopping-tuic-real', 'docker-port-hopping-recovery-real', 'docker-cdn-entries-real', 'docker-alpn-real', 'docker-xhttp-real', 'docker-hy2-sites-real', 'docker-fail2ban-real',
-        'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real')) {
+    } elseif ($Selector -in $nestedNodeSelectors) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
         @('--privileged', '--mount', 'type=volume,dst=/n')
     } elseif ($Selector -in @('docker-ssh-driver', 'docker-contracts', 'docker-contracts-fast',
@@ -379,6 +386,35 @@ try {
     if ($LASTEXITCODE -ne 0) { $container = $null; throw 'Regression container creation failed.' }
     & $docker cp $snapshot "${container}:/snapshot.tar"
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
+    if ($Selector -eq 'docker-port-hopping-share-real') {
+        # 固定实际导入器版本，仅复制到本次容器，不更新共用工具镜像。
+        $uriClientReference = 'metacubex/mihomo:v1.19.28@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312'
+        $uriClientInfo = & $docker image inspect $uriClientReference
+        if ($LASTEXITCODE -ne 0) { throw 'Required URI client image is missing.' }
+        $uriClientInfo = $uriClientInfo | ConvertFrom-Json | Select-Object -First 1
+        if ("$($uriClientInfo.Os)/$($uriClientInfo.Architecture)" -ne $platform) {
+            throw 'URI client image architecture does not match host.'
+        }
+        $uriClientDirectory = Join-Path $runDir 'uri-client'
+        New-Item -ItemType Directory -Path $uriClientDirectory | Out-Null
+        $uriExtractor = & $docker create --network none $uriClientInfo.Id
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot create URI client extraction container.' }
+        try {
+            & $docker cp "${uriExtractor}:/mihomo" (Join-Path $uriClientDirectory 'mihomo')
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot extract URI client.' }
+        }
+        finally {
+            & $docker rm --volumes $uriExtractor
+            if ($LASTEXITCODE -ne 0) { throw 'URI client extraction cleanup failed.' }
+        }
+        $result.uri_client = [ordered]@{
+            reference = $uriClientReference; image_id = $uriClientInfo.Id; platform = $platform
+            binary_sha256 = (Get-FileHash -LiteralPath (Join-Path $uriClientDirectory 'mihomo')).Hash.ToLowerInvariant()
+        }
+        $result.uri_client | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $uriClientDirectory 'image.json') -Encoding utf8
+        & $docker cp $uriClientDirectory "${container}:/uri-client"
+        if ($LASTEXITCODE -ne 0) { throw 'URI client copy failed.' }
+    }
     if ($Selector -in @('routing-socks5-source-real', 'docker-routing-socks5-real', 'docker-routing-dns-hosts-real',
         'docker-routing-direct-block-real', 'docker-routing-block-ips-real', 'docker-routing-block-ips-resolved-real',
         'docker-routing-block-ips-resolved-egress-real', 'docker-routing-block-bt-real',
@@ -417,9 +453,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Routing binary copy failed.' }
         $result.routing_images = $coreInputs
     }
-    if ($Selector -in @('docker-control-two-deployment-real', 'docker-control-log-cron-real', 'docker-routing-ipv6-real',
-        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real', 'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-port-hopping-tuic-real', 'docker-port-hopping-recovery-real', 'docker-cdn-entries-real', 'docker-alpn-real', 'docker-xhttp-real', 'docker-hy2-sites-real', 'docker-fail2ban-real',
-        'docker-fail2ban-source-real', 'docker-control-fail2ban-real', 'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real')) {
+    if ($Selector -in $nestedNodeSelectors) {
         # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。
         $references = [ordered]@{
             xray = 'padm-local/padm-xray:control-4c4b'
@@ -441,7 +475,7 @@ try {
                 'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
                 net = 'padm-local/padm-net:control-4c4b'
             }
-        } elseif ($Selector -in @('docker-port-hopping-target-real', 'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-port-hopping-tuic-real', 'docker-port-hopping-recovery-real')) {
+        } elseif ($Selector -in @('docker-port-hopping-target-real', 'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-port-hopping-tuic-real', 'docker-port-hopping-recovery-real', 'docker-port-hopping-share-real')) {
             $references = [ordered]@{
                 'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
                 net = 'padm-local/padm-net:control-4c4b'
@@ -554,7 +588,7 @@ finally {
         if ($successful) {
             # 成功仅保留结果与日志；失败输入继续保留，方便直接复现。
             $inputRoot = [IO.Path]::GetFullPath($runDir).TrimEnd('\') + '\'
-            foreach ($name in @('source.tar', 'files.list', 'routing-cores')) {
+            foreach ($name in @('source.tar', 'files.list', 'routing-cores', 'uri-client')) {
                 $inputPath = Join-Path $runDir $name
                 if (-not (Test-Path -LiteralPath $inputPath)) { continue }
                 $resolvedInput = (Resolve-Path -LiteralPath $inputPath).ProviderPath

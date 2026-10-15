@@ -1005,6 +1005,13 @@ runDockerPortHoppingRecoveryRealRegression() {
         runDockerPortHoppingTargetRealRegression
 }
 registerRegressionFunctionLeaf docker-port-hopping-recovery-real runDockerPortHoppingRecoveryRealRegression
+runDockerPortHoppingShareRealRegression() {
+    PADM_DOCKER_HOPPING_SHARE_ONLY=1 \
+        unshare --net bash "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh" &&
+        PADM_DOCKER_HOPPING_SHARE_ONLY=1 PADM_DOCKER_HOPPING_TUIC_ONLY=1 \
+            unshare --net bash "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh"
+}
+registerRegressionFunctionLeaf docker-port-hopping-share-real runDockerPortHoppingShareRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
 registerRegressionFunctionLeaf docker-tun-real runDockerTunRealRegression
 registerRegressionFunctionLeaf docker-tproxy-management runDockerTProxyManagementRegression

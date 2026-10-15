@@ -7735,6 +7735,44 @@ Hy2 证据 `.tmp-regression-docker-61d6d498762d443caa42a4d367303e26/`，
 daemon/boot/systemd/整机重启自动恢复、跨 boot 接管、旧连接排空、
 原生宿主/arm64/公网及完整跳跃管理继续 deferred，整体目标 active。
 
+#### 5C.9f 固定客户端原始分享 URI 导入与连接
+
+将 Hy2/TUIC 原始分享 URI 的外部客户端导入、实际连接及兼容修复合为一个功能批。
+复用官方 Mihomo `v1.19.28` provider 的原始 URI 转换，不自写解析器或新增生产核心；
+固定镜像为
+`docker.io/metacubex/mihomo:v1.19.28@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312`，
+已实跑核对 Linux amd64 版本。原分享 URI 直接交给客户端，仅配置双族选路与夹具证书信任，
+不覆写认证、TLS、带宽或混淆，不使用跳过 TLS 校验来代替受信证书。
+
+固定客户端的 Hy2 转换只读取 `up/down`，此前生成器仅输出 `upmbps/downmbps`，
+导致导入丢失 Brutal 带宽；在共用生成器保留原字段并增加等值 `up/down`，
+继续按客户端方向交换服务端上下行，普通分享与活动范围分享同步修复。
+复用生成器和已有合同，避免另一套 URI 拼接；Gecko 范围 URI 与其它客户端不据此升级。
+
+新增 `docker-port-hopping-share-real`（Jobs 2），两协议使用独立 netns，
+复用隔离 daemon、现有真实节点和监督启停，避免重复长生命周期/恢复矩阵。
+Hy2 使用 Brutal + Salamander 原范围 URI，严格 TLS、错误 UUID 拒绝，
+同一客户端进程内分别观察 IPv4/IPv6 实际跨首尾端口并持续完成 HTTP；
+使用原生默认 30 秒随机换端口，最多观察 300 秒，两族满足即停，不填无效跳跃间隔覆写。
+TUIC 直接导入范围首尾的普通 URI，核双族 HTTP、错误账号拒绝；
+两协议均核停止净撤销，原始 URI 文件保持；本轮未做停止后新连接探针，也未调用客户端 API。
+
+Docker Linux amd64 当前源码快照、复用工具镜像，Hy2 生成器合同定向
+127.283 秒通过，证据 `.tmp-regression-docker-f785efcc9ff943a9bc3621a4c5f632d8/`；
+配置定向 29.466 秒通过，证据 `.tmp-regression-docker-3b7138c2149044ad8d26b4c0b9f48449/`，
+均 Jobs 2。分享 URI 组合真实 146.808 秒、排队 182 ms、Jobs 2、`cache_hit=false`，
+证据 `.tmp-regression-docker-5554b827f73548caabc76fe832f1e6bb/`；
+Hy2 内部 98.343 秒，13 次采样，同一 PID 双族两端覆盖 62.834 秒；
+TUIC 内部 43.079 秒，双族首尾普通 URI 连接通过，`automatic_hopping=false`。
+唯一一次集中完整合同 57/57 组、0 失败，入口 555.266 秒、内部 553.017 秒，
+Jobs 6/tmpfs、排队 385 ms、`cache_hit=false`，
+证据 `.tmp-regression-docker-9496576acae74b42aa07549440cc230f/`。
+分享真实与完整合同的源码归档 SHA-256 均为
+`9FA4382A234735877A6CADBADE87ADD95779860EC818FF959B2B1BE1A21FE432`。
+本批只补固定客户端/参数组合的导入证据；Gecko 范围 URI、其它客户端、
+TUIC 自动跳跃、旧 conntrack 排空、原生宿主/arm64/公网、自动恢复与完整跳跃/
+协议管理继续 deferred，整体计划保持 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

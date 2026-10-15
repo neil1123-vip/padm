@@ -150,7 +150,7 @@ jq -e '.inbounds[0] | .up_mbps == 100 and .down_mbps == 50 and
     fail 'Hysteria2 Brutal/混淆/伪装生成错误'
 jq '.subscription.enabled = true' "${TEST_ROOT}/brutal-hy2.json" >"${TEST_ROOT}/local-hy2.json"
 dockerGenerateSubscription "${TEST_ROOT}/local-hy2.json" "${STDOUT}"
-[[ "$(<"${STDOUT}")" == "${HY2_URI//#Hysteria2/}&upmbps=50&downmbps=100&obfs=salamander&obfs-password=0123456789abcdef#Hysteria2" ]] ||
+[[ "$(<"${STDOUT}")" == "${HY2_URI//#Hysteria2/}&upmbps=50&downmbps=100&up=50&down=100&obfs=salamander&obfs-password=0123456789abcdef#Hysteria2" ]] ||
     fail 'Hysteria2 带宽方向或混淆链接不精确'
 
 # Gecko 只改变混淆字段，账号、TLS、带宽与伪装沿用现有配置。
@@ -176,7 +176,7 @@ for mode in bbr brutal; do
         >"${TEST_ROOT}/gecko-share.json"
     dockerGenerateSubscription "${TEST_ROOT}/gecko-share.json" "${STDOUT}"
     bandwidthQuery=
-    [[ "${mode}" != brutal ]] || bandwidthQuery='&upmbps=50&downmbps=100'
+    [[ "${mode}" != brutal ]] || bandwidthQuery='&upmbps=50&downmbps=100&up=50&down=100'
     [[ "$(<"${STDOUT}")" == "${HY2_URI//#Hysteria2/}${bandwidthQuery}&obfs=gecko&obfs-password=gecko-0123456789abcdef#Hysteria2" ]] ||
         fail "Gecko ${mode} 分享链接不精确"
     dockerBundleSupportsSpec "${HY2_COMPAT_BUNDLE}" "${TEST_ROOT}/gecko-${mode}.json" ||
@@ -281,9 +281,10 @@ liveSnapshot() {
             "${STDOUT}" >/dev/null || fail 'Hy2 状态没有保留 BBR 隐藏速率'
         runRead 0 hy2-links-after dockerProtocolCommand links entry-hy2
         if [[ "${mode}" == bbr ]]; then
-            ! grep -Fq upmbps "${STDOUT}" || fail 'Hy2 BBR 链接仍发布 Brutal 速率'
+            ! grep -Eq '(^|[?&])(upmbps|downmbps|up|down)=' "${STDOUT}" ||
+                fail 'Hy2 BBR 链接仍发布 Brutal 速率'
         else
-            grep -Fq '&upmbps=125&downmbps=250&obfs=gecko' "${STDOUT}" ||
+            grep -Fq '&upmbps=125&downmbps=250&up=125&down=250&obfs=gecko' "${STDOUT}" ||
                 fail 'Hy2 Brutal 客户端带宽方向错误'
         fi
     done
