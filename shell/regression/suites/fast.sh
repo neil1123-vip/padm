@@ -291,7 +291,8 @@ runDockerXhttpEditRegression() {
             xhttp-preset runDockerXhttpPresetRegression \
             xhttp-padding runDockerXhttpPaddingRegression \
             xhttp-headers runDockerXhttpHeadersRegression \
-            xhttp-limits runDockerXhttpLimitsRegression
+            xhttp-limits runDockerXhttpLimitsRegression \
+            xhttp-download runDockerXhttpDownloadRegression
 }
 
 runDockerXhttpPresetRegression() {
@@ -308,6 +309,10 @@ runDockerXhttpHeadersRegression() {
 
 runDockerXhttpLimitsRegression() {
     PADM_DOCKER_XHTTP_SCOPE=edit-limits bash "${PROJECT_ROOT}/docker/tests/xhttp.sh"
+}
+
+runDockerXhttpDownloadRegression() {
+    PADM_DOCKER_XHTTP_SCOPE=edit-download bash "${PROJECT_ROOT}/docker/tests/xhttp.sh"
 }
 
 runDockerXhttpRollbackRegression() {
@@ -923,6 +928,7 @@ registerRegressionFunctionLeaf docker-xhttp-validation runDockerXhttpValidationR
 registerRegressionFunctionLeaf docker-xhttp-edit runDockerXhttpEditRegression
 registerRegressionFunctionLeaf docker-xhttp-headers runDockerXhttpHeadersRegression
 registerRegressionFunctionLeaf docker-xhttp-limits runDockerXhttpLimitsRegression
+registerRegressionFunctionLeaf docker-xhttp-download runDockerXhttpDownloadRegression
 registerRegressionFunctionLeaf docker-xhttp-rollback runDockerXhttpRollbackRegression
 registerRegressionFunctionLeaf docker-xhttp-real runDockerXhttpRealRegression
 registerRegressionFunctionLeaf docker-hy2-sites-real runDockerHy2SitesRealRegression

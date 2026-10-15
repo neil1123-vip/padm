@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 XHTTP_SCOPE=${PADM_DOCKER_XHTTP_SCOPE:-full}
 case "${XHTTP_SCOPE}" in
-full|validation|edit|edit-preset|edit-padding|edit-headers|edit-limits|rollback) ;;
+full|validation|edit|edit-preset|edit-padding|edit-headers|edit-limits|edit-download|rollback) ;;
 *) printf 'docker-xhttp-regression: unknown scope: %s\n' "${XHTTP_SCOPE}" >&2; exit 1 ;;
 esac
 
@@ -28,7 +28,9 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg account "${ACCOUNT}" \
     (.core.protocols[] | select(.id == 2) |
       .listener_id = "entry-xhttp-other" | .public_port = 25447 | .name = "Other-XHTTP"),
     ($ws[0].core.protocols[] | select(.id == 21))] |
-  .port_aliases = [{listener_id:"entry-xhttp",public_port:35443,share_default:true}] |
+  .port_aliases = [{listener_id:"entry-xhttp",public_port:35443,share_default:true},
+    {listener_id:"entry-xhttp",public_port:35444},
+    {listener_id:"entry-xhttp-other",public_port:35447}] |
   .accounts = [{id:$account,name:"Alice",enabled:true,
     uuid:"44444444-4444-4444-8444-444444444444",password:"Alice.-~@+=:Secret",
     shadowsocks_password:null,listeners:["entry-xhttp","entry-xhttp-other","vless-ws"]}]
@@ -250,6 +252,46 @@ dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-defaults.json" ||
     fail '缺 Packet/Stream 能力的旧包误拒已有 XMUX'
 fi
 
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == validation || "${XHTTP_SCOPE}" == edit-download ]]; then
+# 下行只选择同入口已登记的非默认别名，不接受任意地址或独立身份。
+python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
+import copy
+import json
+import sys
+from pathlib import Path
+from jsonschema import Draft202012Validator, FormatChecker
+
+project, root = map(Path, sys.argv[1:])
+base = json.loads((root / "xhttp.json").read_text())
+validator = Draft202012Validator(
+    json.loads((project / "docker/contracts/configure.schema.json").read_text()), format_checker=FormatChecker())
+cases = []
+for index, port in enumerate((35444, 25443, 35443, 25447, 35447, 45444,
+                              None, True, "35444", 0, 65536, 1.5)):
+    value = copy.deepcopy(base)
+    next(p for p in value["core"]["protocols"] if p["listener_id"] == "entry-xhttp")["xhttp"]["download_port"] = port
+    assert validator.is_valid(value) == (index < 6), (index, port)
+    (root / f"download-{index}.json").write_text(json.dumps(value), encoding="utf-8")
+    cases.append((index, int(index == 0)))
+(root / "download-cases.tsv").write_text("".join(f"{index}\t{valid}\n" for index, valid in cases))
+PY
+while IFS=$'\t' read -r name valid; do
+    actual=0
+    dockerConfigureSpecValidate "${TEST_ROOT}/download-${name}.json" >"${STDOUT}" 2>"${STDERR}" || actual=$?
+    [[ ( "${valid}" == 1 && "${actual}" == 0 ) || ( "${valid}" == 0 && "${actual}" != 0 ) ]] ||
+        fail "生产 XHTTP 下行校验不匹配: ${name}"
+done <"${TEST_ROOT}/download-cases.tsv"
+cp "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/download-0.json" || fail '当前包拒绝同入口下行别名'
+jq 'del(."x-padm-xhttp-download")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/download-0.json" 2>/dev/null; then
+    fail '旧包接受未支持的下行绑定'
+fi
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${XHTTP_SPEC}" || fail '旧包误拒无下行绑定规格'
+cp "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+fi
+
 if [[ "${XHTTP_SCOPE}" != validation ]]; then
 # 发布与回滚分片各自创建含 TLS、共享组和累计流量的完整部署基线。
 newState xhttp "${XHTTP_SPEC}"
@@ -293,12 +335,12 @@ xhttpEdit() {
 
 xhttpAssert() {
     local mode=$1 xmux=$2 padding=${3:-null} grpcHeader=${4:-null} sseHeader=${5:-null} limits=${6-}
-    local path=${7:-/padm/path-1} host=${8:-www.example.com} requestHeaders=${9:-null}
+    local path=${7:-/padm/path-1} host=${8:-www.example.com} requestHeaders=${9:-null} downloadPort=${10:-null}
     limits=${limits:-'{}'}
     jq -en --arg mode "${mode}" --arg path "${path}" --arg host "${host}" \
         --argjson xmux "${xmux}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
-        --argjson headers "${requestHeaders}" \
+        --argjson headers "${requestHeaders}" --argjson download "${downloadPort}" \
         --slurpfile before "${TEST_ROOT}/installed-before.json" \
         --slurpfile after "${root}/config/spec.json" '
       def limits: with_entries(select(.key | IN("scMaxEachPostBytes","scMinPostsIntervalMs",
@@ -306,7 +348,7 @@ xhttpAssert() {
       def stable: .core.protocols |= map(if .listener_id == "entry-xhttp"
         then del(.xhttp.mode,.xhttp.path,.xhttp.host,.xhttp.xmux,.xhttp.xPaddingBytes,.xhttp.noGRPCHeader,.xhttp.noSSEHeader,
           .xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,.xhttp.scMaxBufferedPosts,
-          .xhttp.scStreamUpServerSecs,.xhttp.headers) else . end);
+          .xhttp.scStreamUpServerSecs,.xhttp.headers,.xhttp.download_port) else . end);
       ($before[0] | stable) == ($after[0] | stable) and
       any($after[0].core.protocols[]; .listener_id == "entry-xhttp" and
         .xhttp.path == $path and .xhttp.host == $host and
@@ -316,7 +358,8 @@ xhttpAssert() {
         (if $padding == null then (.xhttp | has("xPaddingBytes") | not) else true end) and
         (.xhttp | has("noGRPCHeader")) == ($grpc != null) and
         (.xhttp | has("noSSEHeader")) == ($sse != null) and (.xhttp | limits) == $limits and
-        .xhttp.headers == $headers and (.xhttp | has("headers")) == ($headers != null))
+        .xhttp.headers == $headers and (.xhttp | has("headers")) == ($headers != null) and
+        .xhttp.download_port == $download and (.xhttp | has("download_port")) == ($download != null))
     ' >/dev/null || fail 'XHTTP 改写其它规格、账户或端口'
     jq -en --arg mode "${mode}" --arg path "${path}" --arg host "${host}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
@@ -344,6 +387,7 @@ xhttpAssert() {
         .streamSettings.xhttpSettings.noGRPCHeader == $grpc and
         .streamSettings.xhttpSettings.noSSEHeader == $sse and
         .streamSettings.xhttpSettings.headers == $headers and
+        (.streamSettings.xhttpSettings | has("download_port") or has("downloadSettings") | not) and
         (.streamSettings.xhttpSettings | has("headers")) == ($headers != null) and
         (if $padding == null then (.streamSettings.xhttpSettings | has("xPaddingBytes") | not) else true end) and
         (.streamSettings.xhttpSettings | has("noGRPCHeader")) == ($grpc != null) and
@@ -357,19 +401,22 @@ xhttpAssert() {
         read -r original installed <<<"${pair}"
         cmp -s "${TEST_ROOT}/${original}" "${root}/${installed}" || fail "XHTTP 改变 ${installed}"
     done
-    python3 - "${mode}" "${xmux}" "${padding}" "${grpcHeader}" "${sseHeader}" "${limits}" "${TEST_ROOT}" "${root}" "${TOKEN}" "${path}" "${host}" "${requestHeaders}" <<'PY'
+    python3 - "${mode}" "${xmux}" "${padding}" "${grpcHeader}" "${sseHeader}" "${limits}" "${TEST_ROOT}" "${root}" "${TOKEN}" "${path}" "${host}" "${requestHeaders}" "${downloadPort}" <<'PY'
 import json
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-mode, encoded, encoded_padding, encoded_grpc, encoded_sse, encoded_limits, temp, installed, token, path, host, encoded_headers = sys.argv[1:]
+mode, encoded, encoded_padding, encoded_grpc, encoded_sse, encoded_limits, temp, installed, token, path, host, encoded_headers, encoded_download = sys.argv[1:]
 xmux = json.loads(encoded)
 padding = json.loads(encoded_padding)
 grpc, sse = json.loads(encoded_grpc), json.loads(encoded_sse)
 limits = json.loads(encoded_limits)
 headers = json.loads(encoded_headers)
+download = json.loads(encoded_download)
 root, temp = Path(installed), Path(temp)
+entry = next(p for p in json.loads((root / "config/spec.json").read_text())["core"]["protocols"]
+             if p["listener_id"] == "entry-xhttp")
 for before, after in ((temp / "links-before.txt", root / "data/subscription" / token),
                       (temp / "group-before.txt", root / "data/subscription/xhttp-group-token")):
     old, new = before.read_text().splitlines(), after.read_text().splitlines()
@@ -395,6 +442,15 @@ for before, after in ((temp / "links-before.txt", root / "data/subscription" / t
             extra["noSSEHeader"] = sse
         if headers is not None:
             extra["headers"] = headers
+        if download is not None:
+            transport = dict(entry["xhttp"])
+            transport.pop("download_port")
+            transport["mode"] = "auto"
+            extra["downloadSettings"] = dict(
+                address=entry["server"], port=download, network="xhttp", security="reality",
+                realitySettings=dict(serverName=entry["reality"]["server_name"], fingerprint="chrome",
+                                    publicKey=entry["reality"]["public_key"], shortId=entry["reality"]["short_id"]),
+                xhttpSettings=transport)
         if extra:
             assert "extra=%7B" in second and json.loads(actual.pop("extra")[0]) == extra
         assert actual == query, (actual, query)
@@ -405,7 +461,7 @@ PY
     jq -e --arg mode "${mode}" --arg path "${path}" --arg host "${host}" \
         --argjson xmux "${xmux}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
-        --argjson headers "${requestHeaders}" '
+        --argjson headers "${requestHeaders}" --argjson download "${downloadPort}" '
       {scMaxEachPostBytes:1000000,scMinPostsIntervalMs:30,scMaxBufferedPosts:30,
         scStreamUpServerSecs:"20-80"} as $defaults |
       ($defaults + ($limits | with_entries(select(.value != 0 and .value != "0-0")))) as $effective |
@@ -415,6 +471,7 @@ PY
         noGRPCHeader:($grpc // false),noSSEHeader:($sse // false),
         grpc_header_explicit:($grpc != null),sse_header_explicit:($sse != null),
         requestHeaders:($headers // {}),request_headers_explicit:($headers != null),
+        download_port:$download,download_enabled:($download != null),
         limits:$effective,limits_explicit:($limits | length > 0)}]
     ' "${STDOUT}" >/dev/null || fail 'XHTTP 状态没有区分缺省与显式参数'
     [[ "$(stat -c %a "${root}/config/spec.json")" == 600 &&
@@ -563,6 +620,51 @@ cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" &&
     fail '清除 Packet/Stream 没有恢复缺省 URI 和分享组'
 fi
 
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit || "${XHTTP_SCOPE}" == edit-download ]]; then
+for bad in 0 65536 -1 1.5 01 not-a-port $'35444\n'; do
+    xhttpEdit 2 unchanged --xhttp-download entry-xhttp "${bad}" --preview
+done
+for port in 25443 35443 25447 35447 45444; do
+    xhttpEdit 15 unchanged --xhttp-download entry-xhttp "${port}" --preview
+done
+xhttpEdit 15 unchanged --xhttp-download vless-reality 35444 --preview
+xhttpEdit 2 unchanged --xhttp-download entry-xhttp 35444 --xhttp-download-clear entry-xhttp --preview
+xhttpEdit 2 unchanged --xhttp-download entry-xhttp 35444 --spec "${XHTTP_SPEC}" --preview
+xhttpEdit 0 unchanged --xhttp-download entry-xhttp 35444 --preview
+! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail '下行绑定预览启动候选'
+xhttpEdit 0 changed --xhttp-download entry-xhttp 35444 --confirm PADM-DOCKER-EDIT
+xhttpAssert auto null null null null '{}' /padm/path-1 www.example.com null 35444
+(
+    xhttpListener=entry-xhttp xhttpAction=download
+    cp "${root}/config/spec.json" "${TEST_ROOT}/download-expected.json"
+    dockerEditCompatibilityValidate "${TEST_ROOT}/installed-before.json" "${TEST_ROOT}/download-expected.json" ||
+        fail 'XHTTP 下行冻结误拒合法修改'
+    jq '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.host) = "tampered.example.net"' \
+        "${TEST_ROOT}/download-expected.json" >"${TEST_ROOT}/download-tampered.json"
+    if dockerEditCompatibilityValidate "${TEST_ROOT}/installed-before.json" "${TEST_ROOT}/download-tampered.json" 2>/dev/null; then
+        fail 'XHTTP 下行专项允许顺带改变 Host'
+    fi
+)
+# 下行路径及传输参数随来源修改，模式固定 auto，预设和恢复不能清掉绑定。
+xhttpEdit 0 changed --xhttp-path-host entry-xhttp /download/path edge.example.net --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 changed --xhttp-preset entry-xhttp stream --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up "${defaults}" null null null '{}' /download/path edge.example.net null 35444
+xhttpEdit 0 changed --xhttp-advanced entry-xhttp 64-128 16384 5 16 1-2 false true --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up "${defaults}" '"64-128"' false true \
+    '{"scMaxEachPostBytes":16384,"scMinPostsIntervalMs":5,"scMaxBufferedPosts":16,"scStreamUpServerSecs":"1-2"}' \
+    /download/path edge.example.net null 35444
+xhttpEdit 0 changed --xhttp-defaults entry-xhttp --confirm PADM-DOCKER-EDIT
+defaultLimits='{"scMaxEachPostBytes":1000000,"scMinPostsIntervalMs":30,"scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80"}'
+xhttpAssert auto "${defaults}" '"100-1000"' false false "${defaultLimits}" /download/path edge.example.net null 35444
+before=$(liveSnapshot)
+rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
+xhttpEdit 14 changed --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+[[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] || fail 'XHTTP 下行清除失败未完整恢复'
+xhttpEdit 0 unchanged --xhttp-download-clear entry-xhttp --preview
+xhttpEdit 0 changed --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" '"100-1000"' false false "${defaultLimits}" /download/path edge.example.net
+fi
+
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == rollback ]]; then
 for listener in entry-missing vless-reality entry-grpc-sing; do
     runRead 15 "unsupported-${listener}" dockerProtocolCommand xhttp-status "${listener}"
@@ -708,8 +810,12 @@ before=$(liveSnapshot)
 rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
 xhttpEdit 14 changed --xhttp-request-headers entry-xhttp '{"X-Trace":"rollback"}' --confirm PADM-DOCKER-EDIT
 [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] || fail 'XHTTP 健康失败未完整恢复'
+fi
 
-for answer in n eof int term derive copy; do
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == rollback || "${XHTTP_SCOPE}" == edit-download ]]; then
+answers=(n eof int term derive copy)
+[[ "${XHTTP_SCOPE}" != edit-download ]] || answers=(derive copy)
+for answer in "${answers[@]}"; do
     if [[ "${answer}" == derive || "${answer}" == copy ]]; then
         # 仅一个 Reality 来源才能证明派生不会借其它缺省入口绕过 XMUX 冻结。
         jq --argjson xmux "${defaults}" '
@@ -717,10 +823,11 @@ for answer in n eof int term derive copy; do
             .xhttp.xmux = $xmux | .xhttp.xPaddingBytes = "100-1000" |
             .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = false |
             .xhttp.headers = {"X-Trace":"copy value"} |
+            .xhttp.download_port = 35444 |
             .xhttp.scMaxEachPostBytes = 2000000 | .xhttp.scMinPostsIntervalMs = 20 |
             .xhttp.scMaxBufferedPosts = 50 | .xhttp.scStreamUpServerSecs = "30-40") |
           .core.secondary_type = null | .tls = null | .subscription.enabled = false |
-          del(.accounts,.port_aliases)
+          del(.accounts) | .port_aliases = [{listener_id:"entry-xhttp",public_port:35444}]
         ' "${XHTTP_SPEC}" >"${TEST_ROOT}/single-xhttp.json"
         newState "xhttp-${answer}" "${TEST_ROOT}/single-xhttp.json"
         root=${PADM_DOCKER_INSTALL_DIR}
@@ -796,8 +903,9 @@ PY
             .xhttp.scMaxBufferedPosts == 50 and .xhttp.scStreamUpServerSecs == "30-40" and
             (.xhttp | has("noGRPCHeader") and has("noSSEHeader"))) and
           any(.[]; .listener_id == "entry-1" and .public_port == 45443 and
-            .xhttp.mode == "auto" and .xhttp.path == $path)
-        ' "${root}/config/spec.json" >/dev/null || fail '菜单复制或派生 XHTTP 丢失高级字段'
+            .xhttp.mode == "auto" and .xhttp.path == $path and (.xhttp | has("download_port") | not)) and
+          any(.[]; .listener_id == "entry-xhttp" and .xhttp.download_port == 35444)
+        ' "${root}/config/spec.json" >/dev/null || fail '菜单复制或派生 XHTTP 丢失高级字段或借用源下行'
     else
         [[ "$(snapshot)" == "${before}" ]] || fail "XHTTP ${answer} 改变未提交部署"
     fi

@@ -1729,6 +1729,36 @@ Referer 由独立 Host 字段或传输核心管理，不开放覆盖。
 Bash/ShellCheck error 通过；成功归档和文件清单由入口清理，仅留日志/result。
 总目标保持 active。
 
+#### 3D.21 XHTTP 同后端上下行分离
+
+菜单 `20/21` 与 `edit --xhttp-download <入口 ID> <端口>`、
+`--xhttp-download-clear <入口 ID>` 设置或清除 `xhttp.download_port`。
+只接受已有 v3 Xray 协议 `2` 同入口登记、非默认分享的额外端口；
+拒绝基础端口、默认分享别名、其它入口和未登记端口，不增加后端或修改端口发布。
+字段要求 `x-padm-xhttp-download`，旧无字段规格兼容；
+状态通过 `download_port/download_enabled` 区分缺省。
+沿统一 URI 生成 `extra.downloadSettings`，复用入口服务器、Reality 公钥、
+short ID、SNI、Host、路径和 XHTTP 参数，下行模式固定 `auto`；
+服务端不写客户端字段。其它编辑保留绑定，身份及路径变更后链接自动跟随；
+复制/派生的新入口清除绑定，源入口保持，避免借用源后端。
+沿已有冻结、候选发布、失败恢复与分享组更新，不新增一套事务。
+独立外部下行地址/身份、TLS/H3/CDN、其它 sc* 和完整管理仍 deferred。
+
+定向新增 `docker-xhttp-download`，复用 `edit-download` 分片；
+真实链路复用原 5 入口/20 业务，4 个入口使用生产 alias 发布，
+保留单流对照，并仅破坏下行端口检验分离实际生效。
+2026-10-15 Docker Linux amd64、复用工具镜像：
+下行定向、菜单、真实链路均 Jobs 2，通过耗时 `33797/60831/26798 ms`；
+4 个仅破坏下行端口的探针全部拒绝，确认实际使用分离下行。
+定向修复差分夹具漏启 `FormatChecker`，以及复制冻结比较未排除源绑定，
+由最终下行定向和集中合同覆盖，不重复已通过的菜单与实链路。
+集中 `docker-contracts -Jobs 6` 一次通过，57/57、365 项规格差分，
+入口 `407727 ms`、内部 `405584 ms`、排队 `318 ms`、`cache_hit=false`。
+完整证据 `.tmp-regression-docker-a0d3c2a996844ab792c1cbbe43e4bed2/`，
+真实证据 `.tmp-regression-docker-162c4ebe0c814585a867925741c6fbfe/`。
+本轮成功及失败输入归档、文件清单清理，仅保留日志/result 和镜像信息；
+独立外部下行身份及其它未交付项继续 deferred，整体目标保持 active。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

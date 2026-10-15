@@ -252,7 +252,7 @@ confirmation, publication, and recovery reuse the existing transaction.
 Full protocol management and host integration combinations remain deferred; TUIC range forwarding is described below.
 
 Docker `Protocols & entry → XHTTP management` manages mode, path/Host, presets,
-XMUX, Padding, two header switches, and four native packet/stream limits for
+XMUX, Padding, headers, four native packet/stream limits, and a same-listener download port for
 existing v3 Xray protocol `2` listeners:
 
 ```bash
@@ -262,6 +262,8 @@ padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-ED
 padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-request-headers entry-xhttp '{"X-Trace":"edge value"}' --preview
 padm-docker edit --xhttp-request-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-download entry-xhttp 35444 --preview
+padm-docker edit --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
 padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-mode entry-xhttp stream-up --preview
@@ -294,8 +296,7 @@ Clear deletes the fields and restores defaults. Other edits retain the limits,
 and copies/derivations inherit them. Defaults add no spec or URI fields, and
 `limits_explicit` distinguishes explicit values in status.
 Other listeners, XMUX, Padding, credentials, subscription/share groups, quotas,
-and totals are preserved. Other `sc*`, downloadSettings, H3/CDN,
-and split upload/download remain unavailable. Header changes do not establish
+and totals are preserved. Header changes do not establish
 camouflage or performance benefits.
 
 Menu item `18` sets the `xhttp.headers` JSON object and `19` deletes it. This
@@ -311,6 +312,21 @@ Explicit headers require `x-padm-xhttp-request-headers`; status reports
 derivations retain them, as do presets, advanced edits, and recommended defaults.
 Headers appear in share links and subscriptions. They do not configure server
 response headers or provide access authentication.
+
+Menu item `20` binds a download port and `21` clears it. First register an extra
+port on the same listener through entry port management; it must not be the
+default share port. Base ports, default share ports, other listeners' ports,
+and unregistered ports are rejected. The edit creates no backend or port
+publication. An explicit `xhttp.download_port` requires `x-padm-xhttp-download`.
+Status reports `download_port` (`null` by default) and `download_enabled`.
+URI `extra.downloadSettings` uses this listener's server and bound port,
+automatically following its Reality public key, short ID, SNI, path, Host,
+and other XHTTP parameters; download mode is always `auto`. Server configuration
+omits this client-only field. Local links, the main subscription, and share groups
+use the same output. Presets, advanced edits, and recommended defaults retain
+the binding. Copies and derivations keep the source binding but clear it on the
+new listener, which needs its own registered extra port. Independent download
+addresses/identities, external TLS/H3/CDN, and full management remain `deferred`.
 
 The same site menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:

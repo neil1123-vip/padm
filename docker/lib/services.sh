@@ -538,18 +538,26 @@ dockerConfigureSpecValidate() {
             (.short_id | test("^(?:[a-f0-9]{2}){1,8}$"))) and
           (if .id == 2 then
              .core == "xray" and
+             (. as $entry |
              (.xhttp | exact(["path", "host", "mode"] +
                  (if has("xmux") then ["xmux"] else [] end) +
                  (if has("xPaddingBytes") then ["xPaddingBytes"] else [] end) +
                  (if has("noGRPCHeader") then ["noGRPCHeader"] else [] end) +
                  (if has("noSSEHeader") then ["noSSEHeader"] else [] end) +
                  (if has("headers") then ["headers"] else [] end) +
+                 (if has("download_port") then ["download_port"] else [] end) +
                  ([keys[] | select(. == "scMaxEachPostBytes" or . == "scMinPostsIntervalMs" or
                    . == "scMaxBufferedPosts" or . == "scStreamUpServerSecs")])) and
                (.path | type == "string" and test("^/[A-Za-z0-9._~/-]{1,128}$") and
                  (explode | all(. > 32 and . != 127))) and
                (.host | hostname and (explode | all(. > 32 and . != 127))) and
                (.mode == "auto" or .mode == "packet-up" or .mode == "stream-up") and
+               (if has("download_port") then
+                 (.download_port | port) and
+                 (.download_port as $port |
+                   any($request.port_aliases[]?; .listener_id == $entry.listener_id and
+                     .public_port == $port and .share_default != true))
+                else true end) and
                (if has("xmux") then
                  (.xmux | exact(["maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"]) and
                    (.maxConcurrency | xhttp_value(1; 2147483647)) and
@@ -576,7 +584,7 @@ dockerConfigureSpecValidate() {
                all(to_entries[] | select(.key == "scMaxEachPostBytes" or
                  .key == "scMinPostsIntervalMs" or .key == "scMaxBufferedPosts");
                  .value | type == "number" and floor == . and . >= 0 and . <= 2147483647) and
-               (if has("scStreamUpServerSecs") then (.scStreamUpServerSecs | xhttp_value(0; 2147483647)) else true end))
+               (if has("scStreamUpServerSecs") then (.scStreamUpServerSecs | xhttp_value(0; 2147483647)) else true end)))
            elif .id == 26 then
              (.grpc | exact(["service_name"]) and
                (.service_name | type == "string" and test("^[A-Za-z0-9._-]{1,64}$") and
@@ -2161,7 +2169,7 @@ dockerGenerateXrayConfig() {
                 shortIds: ["", .reality.short_id]
               }
             } + (if .id == 2 then {
-              xhttpSettings: (.xhttp | del(.xmux)) +
+              xhttpSettings: (.xhttp | del(.xmux,.download_port)) +
                 {xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}}
             } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end)),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
@@ -3133,7 +3141,14 @@ dockerGenerateSubscription() {
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
       elif .id == 2 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
-          ((.xhttp | del(.path,.host,.mode)) |
+          ((. as $entry | .xhttp | del(.path,.host,.mode,.download_port) |
+            if $entry.xhttp.download_port != null then
+              .downloadSettings = {
+                address:$entry.server,port:$entry.xhttp.download_port,network:"xhttp",security:"reality",
+                realitySettings:{serverName:$entry.reality.server_name,fingerprint:"chrome",
+                  publicKey:$entry.reality.public_key,shortId:$entry.reality.short_id},
+                xhttpSettings:($entry.xhttp | del(.download_port) | .mode = "auto")}
+            else . end) |
             if length > 0 then "&extra=\(. | tojson | @uri)" else "" end) +
           "#\(.name | @uri)"
       elif .id == 26 then

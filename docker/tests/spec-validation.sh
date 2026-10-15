@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 和 Hy2/TUIC 跳跃的完整谓词，仅忽略拼接空白。
+# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 下行和 Hy2/TUIC 跳跃的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "4723c06b72116af2f33b311c444835853dd35213f47cae6b61314a2f73670b93"
+    "81762ca0e4bb9279dc198b029e56ec538dd78ddd5c5c3ec838f2fcf75851579e"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -145,6 +145,27 @@ for index, headers in enumerate((
     spec = copy.deepcopy(cases["valid-protocol-2"])
     spec["core"]["protocols"][0]["xhttp"]["headers"] = headers
     cases[f"{'valid' if index == 0 else 'invalid'}-xhttp-request-headers-{index}"] = spec
+download = copy.deepcopy(cases["valid-protocol-2"])
+download["port_aliases"] = [{"listener_id": "entry-p2", "public_port": 35444}]
+download["core"]["protocols"][0]["xhttp"]["download_port"] = 35444
+cases["valid-xhttp-download"] = download
+for index, port in enumerate((None, True, "35444", 0, 65536, 1.5, 443, 45444)):
+    spec = copy.deepcopy(download)
+    spec["core"]["protocols"][0]["xhttp"]["download_port"] = port
+    cases[f"invalid-xhttp-download-port-{index}"] = spec
+for name in ("unregistered", "default", "other"):
+    spec = copy.deepcopy(download)
+    if name == "unregistered":
+        del spec["port_aliases"]
+    elif name == "default":
+        spec["port_aliases"][0]["share_default"] = True
+    else:
+        other = copy.deepcopy(spec["core"]["protocols"][0])
+        other.update(listener_id="entry-other", public_port=25447)
+        del other["xhttp"]["download_port"]
+        spec["core"]["protocols"].append(other)
+        spec["port_aliases"][0]["listener_id"] = "entry-other"
+    cases[f"invalid-xhttp-download-{name}"] = spec
 spec = copy.deepcopy(cases["valid-protocol-3"])
 spec["core"]["protocols"][0]["hy2"]["obfs"] = {
     "type": "gecko", "password": "gecko-fixture-1234",
@@ -510,6 +531,7 @@ for file in "${TEST_ROOT}"/*.json; do
         "${file##*/}" != invalid-hy2-gecko-* &&
         "${file##*/}" != invalid-port-hopping-* &&
         "${file##*/}" != invalid-xhttp-limits-* &&
+        "${file##*/}" != invalid-xhttp-download-* &&
         "${file##*/}" != invalid-xhttp-request-headers-* ) ||
         "${actual}" != 0 ]] || fail "无效透明/解析后 IP 规格被接受: ${file##*/}"
     count=$((count + 1))

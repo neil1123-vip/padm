@@ -171,7 +171,10 @@ jq '
     elif .listener_id == "entry-custom" then
       .xhttp.headers = {"X-Padm-Trace":"Reality value & extra"} |
       .xhttp.xmux = {maxConcurrency:2,hMaxRequestTimes:"7-9",hMaxReusableSecs:"30-40"}
-    else .xhttp.xPaddingBytes = 1 | .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = true end)
+    else .xhttp.xPaddingBytes = 1 | .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = true end |
+    if .listener_id != "entry-single" then .xhttp.download_port = (.public_port + 1000) else . end) |
+  .port_aliases = [.core.protocols[] | select(.xhttp.download_port != null) |
+    {listener_id,public_port:.xhttp.download_port}]
 ' "${SPEC}" >"${TEST_ROOT}/configured.json"
 mv "${TEST_ROOT}/configured.json" "${SPEC}"
 chmod 0600 "${SPEC}"
@@ -208,6 +211,16 @@ jq -e --slurpfile spec "${SPEC}" '
   ([$spec[0].core.protocols[] | {id:.listener_id,limits:(.xhttp | limits)}] | sort_by(.id))
 ' "${candidate}/config/xray/users.base" >/dev/null
 printf 'docker-xhttp-real-limits-config-ok: packet-up/stream-up=16384/5/16/1-2 default=3 server=spec\n'
+jq -e '
+  [.inbounds[] | select(.streamSettings.network == "xhttp") | .streamSettings.xhttpSettings] |
+  length == 5 and all(has("download_port") or has("downloadSettings") | not)
+' "${candidate}/config/xray/users.base" >/dev/null
+jq -e '
+  .services.xray.ports as $ports |
+  all([35501,35502,35503,35505][]; . as $port |
+    $ports | index("0.0.0.0:\($port+1000):\($port)/tcp") != null)
+' "${candidate}/compose.json" >/dev/null
+printf 'docker-xhttp-real-download-config-ok: server=unchanged split=4 alias=same-backend\n'
 cp -a "${candidate}/config/." "${PADM_DOCKER_INSTALL_DIR}/config/"
 cp -a "${candidate}/data/." "${PADM_DOCKER_INSTALL_DIR}/data/"
 cp -a "${candidate}/logs/." "${PADM_DOCKER_INSTALL_DIR}/logs/"
@@ -236,6 +249,7 @@ expected = {
 required = {"encryption", "security", "sni", "fp", "pbk", "sid", "type", "path", "host", "mode", "extra"}
 limit_keys = {"scMaxEachPostBytes", "scMinPostsIntervalMs", "scMaxBufferedPosts", "scStreamUpServerSecs"}
 spec = json.loads(Path(sys.argv[3]).read_text())
+spec_entries = {entry["public_port"]: entry for entry in spec["core"]["protocols"]}
 spec_limits = {entry["public_port"]: {key: value for key, value in entry["xhttp"].items() if key in limit_keys}
                for entry in spec["core"]["protocols"]}
 assert spec_limits == {port: {"scMaxEachPostBytes": 16384, "scMinPostsIntervalMs": 5,
@@ -251,7 +265,7 @@ def parse(line):
     assert q["encryption"] == "none" and q["security"] == "reality" and q["type"] == "xhttp"
     extra = json.loads(q["extra"])
     assert isinstance(extra, dict) and {"xmux"} <= set(extra) <= {
-        "xmux", "xPaddingBytes", "noGRPCHeader", "noSSEHeader", "headers"} | limit_keys
+        "xmux", "xPaddingBytes", "noGRPCHeader", "noSSEHeader", "headers", "downloadSettings"} | limit_keys
     assert isinstance(extra["xmux"], dict) and set(extra["xmux"]) == {
         "maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"}
     if "xPaddingBytes" in extra:
@@ -276,6 +290,18 @@ def parse(line):
             assert 0 <= lower <= upper <= 2147483647, value
         else:
             assert type(value) is int and 0 <= value <= 2147483647, value
+    if "downloadSettings" in extra:
+        download = extra["downloadSettings"]
+        assert isinstance(download, dict) and set(download) == {
+            "address", "port", "network", "security", "realitySettings", "xhttpSettings"}, download
+        assert download["address"] == uri.hostname and download["port"] == uri.port + 1000
+        assert download["network"] == "xhttp" and download["security"] == "reality"
+        assert download["realitySettings"] == {"serverName": q["sni"], "fingerprint": q["fp"],
+            "publicKey": q["pbk"], "shortId": q["sid"]}
+        expected_down = dict(spec_entries[uri.port]["xhttp"])
+        expected_down.pop("download_port")
+        expected_down["mode"] = "auto"
+        assert download["xhttpSettings"] == expected_down, download
     return uri, q, extra
 lines = Path(sys.argv[1]).read_text().splitlines()
 assert len(lines) == 5
@@ -299,6 +325,14 @@ for line in lines:
     expected_extra.update(spec_limits[uri.port])
     if name == "custom":
         expected_extra["headers"] = {"X-Padm-Trace": "Reality value & extra"}
+    entry = spec_entries[uri.port]
+    if "download_port" in entry["xhttp"]:
+        down_settings = {key: value for key, value in entry["xhttp"].items() if key != "download_port"}
+        down_settings["mode"] = "auto"
+        expected_extra["downloadSettings"] = {"address": entry["server"],
+            "port": entry["xhttp"]["download_port"], "network": "xhttp", "security": "reality",
+            "realitySettings": {"serverName": q["sni"], "fingerprint": q["fp"],
+                "publicKey": q["pbk"], "shortId": q["sid"]}, "xhttpSettings": down_settings}
     assert {key: value for key, value in extra.items() if key in limit_keys} == spec_limits[uri.port]
     assert q["mode"] == mode and extra == expected_extra
     inbound = "socks-"+name
@@ -333,9 +367,17 @@ for extra in invalid:
     else:
         raise AssertionError("invalid extra accepted")
 Path(sys.argv[2]).write_text(json.dumps(config))
+# 只破坏下行端口；若核心忽略 downloadSettings，后续业务请求会意外成功。
+broken = json.loads(json.dumps(config))
+broken["inbounds"] = [item for item in broken["inbounds"] if item["tag"] != "socks-single"]
+broken["outbounds"] = [item for item in broken["outbounds"] if item["tag"] != "xhttp-single"]
+broken["routing"]["rules"] = [item for item in broken["routing"]["rules"] if item["outboundTag"] != "xhttp-single"]
+for outbound in broken["outbounds"]:
+    outbound["streamSettings"]["xhttpSettings"]["extra"]["downloadSettings"]["port"] = 9
+Path(sys.argv[2]).with_name("broken.json").write_text(json.dumps(broken))
 print("docker-xhttp-real-links-ok: presets=daily,compatible,stream,single custom=2/7-9/30-40 "
       "padding=1/100-1000/4096 default=2 headers=TT/TF/FT/FF/absent "
-      "limits=dual-ended/spec/default-compatible source=protocol-links")
+      "limits=dual-ended/spec/default-compatible download=4/same-identity source=protocol-links")
 PY
 # 本地 TLS 目标提供 Reality 需要的 TLS 1.3/h2 握手，测试不依赖公网。
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=reality.target.test \
@@ -407,7 +449,7 @@ jq --arg project "${project}" --arg volume "${volume}" --arg xray "${XRAY_ID}" -
   .networks.default.labels["io.padm.test"] = $project |
   del(.services.acme) | .volumes = {files:{external:true,name:$volume}} |
   .services |= with_entries(
-    .value.image = $xray | .value.ports = [] | .value.labels["io.padm.test"] = $project |
+    .value.image = $xray | .value.labels["io.padm.test"] = $project |
     .value.volumes |= map(.source as $source |
       .type = "volume" | .source = "files" |
       .volume = {nocopy:true,subpath:("runtime/"+($source|ltrimstr("${PADM_DOCKER_ROOT}/")))} |
@@ -423,9 +465,11 @@ jq --arg project "${project}" --arg volume "${volume}" --arg xray "${XRAY_ID}" -
       volume:{nocopy:true,subpath:"runtime/origin"}}]} |
   .services.client = {image:$xray,read_only:true,init:true,cap_drop:["ALL"],tmpfs:["/tmp"],
     labels:{"io.padm.test":$project},healthcheck:{disable:true},
+    extra_hosts:{"proxy.padm.test":"host-gateway"},
     command:["run","-c","/client/config.json"],
     volumes:[{type:"volume",source:"files",target:"/client",read_only:true,
-      volume:{nocopy:true,subpath:"runtime/client"}}]}
+      volume:{nocopy:true,subpath:"runtime/client"}}]} |
+  .services.broken = (.services.client | .command = ["run","-c","/client/broken.json"])
 ' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >"${COMPOSE}"
 compose() { docker compose --project-name "${project}" --file "${COMPOSE}" --profile '*' "$@"; }
 compose config --format json >/dev/null
@@ -460,7 +504,7 @@ while True:
 print("docker-xhttp-real-local-target-ok: tls=1.3 alpn=h2 origin=ready")
 PY
 compose up -d --pull never --wait --wait-timeout 30 xray
-compose up -d --pull never client
+compose up -d --pull never client broken
 docker run --rm -i --pull=never --network "${project}" --label "io.padm.test=${project}" \
     --entrypoint python3 "${OPS_ID}" - <<'PY'
 import concurrent.futures
@@ -471,20 +515,20 @@ import time
 import urllib.request
 
 names = ("daily","compatible","stream","single","custom")
-def connect(port):
+def connect(port, client):
     deadline = time.monotonic()+10
     while True:
         try:
-            return socket.create_connection(("client",port), timeout=0.2)
+            return socket.create_connection((client,port), timeout=0.2)
         except OSError:
             if time.monotonic() >= deadline:
                 raise
             time.sleep(0.05)
-def probe(item):
+def probe(item, client="client"):
     name, phase, number = item
     path = f"/proof/{name}/{phase}/{number}"
-    with connect(2081+names.index(name)) as sock:
-        sock.settimeout(20)
+    with connect(2081+names.index(name), client) as sock:
+        sock.settimeout(3 if client == "broken" else 20)
         def receive(size):
             result = b""
             while len(result) < size:
@@ -498,7 +542,8 @@ def probe(item):
         host = b"origin"
         sock.sendall(b"\x05\x01\x00\x03"+bytes([len(host)])+host+struct.pack("!H",8088))
         head = receive(4)
-        assert head[:2] == b"\x05\x00", (item,head)
+        if head[:2] != b"\x05\x00":
+            raise OSError(f"SOCKS CONNECT rejected: {item} {head!r}")
         if head[3] == 1:
             receive(4)
         elif head[3] == 4:
@@ -521,6 +566,8 @@ def probe(item):
             if not part:
                 break
             result += part
+        if not result:
+            raise EOFError("业务连接未收到响应")
         head, body = result.split(b"\r\n\r\n",1)
         assert head.startswith(b"HTTP/1.0 200") and body == ("padm-xhttp-real:"+path+"\n").encode(), (item,result)
     return path
@@ -541,10 +588,21 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=15) as pool:
     paths = [future.result() for future in futures]
 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
     paths += list(pool.map(probe, [(name,"recovery",0) for name in names]))
+def reject_broken(name):
+    try:
+        probe((name, "recovery", 1), client="broken")
+    except (OSError, EOFError):
+        return
+    raise AssertionError(f"坏下行端口未阻断真实业务: {name}")
+with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+    list(pool.map(reject_broken, (name for name in names if name != "single")))
 counts = json.load(urllib.request.urlopen("http://origin:8088/counts", timeout=5))
-assert counts == {path:1 for path in paths}, counts
+assert all(counts.get(path) == 1 for path in paths), counts
+# 下行失败时，上行可能已经抵达原点；只有客户端拿到响应才算业务成功。
+broken_paths = {f"/proof/{name}/recovery/1" for name in names if name != "single"}
+assert set(counts) - set(paths) <= broken_paths and all(value == 1 for value in counts.values()), counts
 print("docker-xhttp-real-probe-ok: origin-proof-count=20 initial=15 recovery=5 presets=4 custom=1 "
-      "packet-upload=32768>16384")
+      "packet-upload=32768>16384 download=auto/packet-up/stream-up/custom broken-download=4-rejected")
 PY
 compose logs --no-color client >"${TEST_ROOT}/client.log"
 python3 - "${TEST_ROOT}/client.log" <<'PY'
@@ -553,7 +611,8 @@ import re
 import sys
 
 lines = Path(sys.argv[1]).read_text().splitlines()
-modes = {35501:"stream-one",35502:"packet-up",35503:"stream-up",35504:"stream-one",35505:"stream-one"}
+modes = {35501:{"packet-up","stream-up"},35502:{"packet-up"},35503:{"stream-up"},
+         35504:{"stream-one"},35505:{"packet-up","stream-up"}}
 connections = {}
 xmux = {}
 for line in lines:
@@ -561,7 +620,7 @@ for line in lines:
     if match:
         connection, port, mode, version = match.groups()
         port = int(port)
-        assert mode == modes[port] and version == "2", line
+        assert mode in modes[port] and version == "2", line
         connections[connection] = port
     match = re.search(r"\[(\d+)\].*XMUX: creating xmuxClient because (.+)", line)
     if match:
@@ -575,5 +634,5 @@ for port in (35504,35505):
 print("docker-xhttp-real-runtime-ok: h2=5 modes=stream-one/packet-up/stream-up xmux=5 single/custom=maxConcurrency-hit")
 PY
 [[ "$(docker inspect --format '{{.State.Health.Status}}' "$(compose ps -q xray)")" == healthy ]]
-printf 'docker-xhttp-real-ok: target=local-tls13-h2 source=protocol-links padding=dual-ended/default-compatible headers=dual-ended/explicit-false/absent limits=dual-ended/default-compatible server-xmux=unchanged xray=%s ops=%s\n' \
+printf 'docker-xhttp-real-ok: target=local-tls13-h2 source=protocol-links padding=dual-ended/default-compatible headers=dual-ended/explicit-false/absent limits=dual-ended/default-compatible download=4/production-alias/broken-port-rejected server-xmux=unchanged xray=%s ops=%s\n' \
     "${XRAY_ID}" "${OPS_ID}"

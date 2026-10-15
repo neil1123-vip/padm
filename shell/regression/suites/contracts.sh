@@ -518,10 +518,11 @@ runRegressionDockerContractsAggregateContract() (
     runDockerXhttpPaddingRegression
     runDockerXhttpHeadersRegression
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-limits
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-download
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-rollback
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-xhttp-real
     printf '%s\n' full:xhttp.sh validation:xhttp.sh edit-preset:xhttp.sh \
-        edit-padding:xhttp.sh edit-headers:xhttp.sh edit-limits:xhttp.sh \
+        edit-padding:xhttp.sh edit-headers:xhttp.sh edit-limits:xhttp.sh edit-download:xhttp.sh \
         rollback:xhttp.sh full:xhttp-real.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_XHTTP_SCOPE:-}" ]]
@@ -678,7 +679,7 @@ runDockerXhttpParallelContract() (
     }
     runDockerXhttpEditRegression || status=$?
     [[ "${status}" == 7 ]]
-    [[ "$(<"${callLog}")" == $'xhttp-preset\nrunDockerXhttpPresetRegression\nxhttp-padding\nrunDockerXhttpPaddingRegression\nxhttp-headers\nrunDockerXhttpHeadersRegression\nxhttp-limits\nrunDockerXhttpLimitsRegression' ]]
+    [[ "$(<"${callLog}")" == $'xhttp-preset\nrunDockerXhttpPresetRegression\nxhttp-padding\nrunDockerXhttpPaddingRegression\nxhttp-headers\nrunDockerXhttpHeadersRegression\nxhttp-limits\nrunDockerXhttpLimitsRegression\nxhttp-download\nrunDockerXhttpDownloadRegression' ]]
 )
 
 runDockerRoutingParallelContract() (

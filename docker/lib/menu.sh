@@ -269,7 +269,7 @@ dockerMenuPortHopping() {
 }
 
 dockerMenuXhttp() {
-    local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered mode path host headers
+    local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered mode path host headers downloadPort
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker XHTTP 管理（已有 Xray Reality 入口）\n'
@@ -279,7 +279,8 @@ dockerMenuXhttp() {
             '10. 设置首部开关' '11. 恢复缺省首部' \
             '12. 设置 packet/stream 参数' '13. 恢复缺省 packet/stream' \
             '14. 设置模式' '15. 设置路径和 Host' '16. 统一高级参数' '17. 恢复推荐默认' \
-            '18. 设置请求首部（JSON）' '19. 清除请求首部' '0. 返回'
+            '18. 设置请求首部（JSON）' '19. 清除请求首部' \
+            '20. 设置下行端口' '21. 关闭上下行分离' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -288,7 +289,7 @@ dockerMenuXhttp() {
         case "${choice}" in
         0) return 0 ;;
         1) dockerMenuRun protocol xhttp-status || true ;;
-        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19)
+        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21)
             dockerMenuRun protocol xhttp-status || continue
             dockerSetupRead listener 'XHTTP 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" && "${listener}" != --* ]] || continue
@@ -354,6 +355,13 @@ dockerMenuXhttp() {
                 dockerMenuRun edit --xhttp-request-headers "${listener}" "${headers}" || true
             elif [[ "${choice}" == 19 ]]; then
                 dockerMenuRun edit --xhttp-request-headers-clear "${listener}" || true
+            elif [[ "${choice}" == 20 ]]; then
+                printf '下行沿用本入口同服务器的 Reality 后端、身份、路径和 Host。\n'
+                dockerSetupRead downloadPort '下行端口（已登记的额外非默认分享端口，0 返回，空值取消）: ' &&
+                    [[ -n "${downloadPort}" ]] || continue
+                dockerMenuRun edit --xhttp-download "${listener}" "${downloadPort}" || true
+            elif [[ "${choice}" == 21 ]]; then
+                dockerMenuRun edit --xhttp-download-clear "${listener}" || true
             else
                 case "${choice}" in
                 2) preset=daily ;;

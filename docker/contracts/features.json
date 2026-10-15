@@ -27,7 +27,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray XHTTP Reality 首配、规格导入、入口编辑/复制、分享链接、逐入口 Reality 参数重生成、目标站管理及有限 443 共存。已有单入口支持四预设、XMUX 三键、Padding 1-4096、noGRPCHeader/noSSEHeader、四项 packet/stream limits、模式、成对路径/Host、七项高级参数和推荐恢复；复用冻结、候选发布及失败恢复，保持其它入口、认证和额度。显式 XMUX/Padding/首部开关/limits 分别要求对应 x-padm-xhttp-* 能力。3D.20 增加客户端请求首部设置/清除、状态和 URI extra 投影：1-8 项，名称 1-64 位字母/数字/连字符且以字母或数字开头、忽略大小写唯一，值 0-256 位可打印 ASCII；拒绝 Host、连接控制、Content-Type、Referer 等保留字段，要求 x-padm-xhttp-request-headers。预设/高级参数/推荐恢复保留请求首部，复制/派生继承；首部内容进入分享链接和订阅，不提供服务端响应首部或访问认证。其它 sc*、downloadSettings、H3/CDN、上下行分离及完整管理仍 deferred，性能和抗识别收益未证明。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、规格导入、入口编辑/复制、分享链接、逐入口 Reality 参数重生成、目标站管理及有限 443 共存。已有单入口支持四预设、XMUX 三键、Padding 1-4096、noGRPCHeader/noSSEHeader、四项 packet/stream limits、模式、成对路径/Host、七项高级参数和推荐恢复；复用冻结、候选发布及失败恢复，保持其它入口、认证和额度。显式 XMUX/Padding/首部开关/limits 分别要求对应 x-padm-xhttp-* 能力。3D.20 增加客户端请求首部设置/清除、状态和 URI extra 投影：1-8 项，名称 1-64 位字母/数字/连字符且以字母或数字开头、忽略大小写唯一，值 0-256 位可打印 ASCII；拒绝 Host、连接控制、Content-Type、Referer 等保留字段，要求 x-padm-xhttp-request-headers。预设/高级参数/推荐恢复保留请求首部，复制/派生继承；首部内容进入分享链接和订阅，不提供服务端响应首部或访问认证。3D.21 增加同入口已登记非默认分享额外端口的下行绑定及清除，要求 x-padm-xhttp-download；URI extra.downloadSettings 沿用来源服务器、Reality 身份、路径/Host 和其它传输参数，下行模式固定 auto，服务端不投影客户端绑定。预设/高级/推荐恢复保留，复制/派生保留源绑定并清除新入口绑定。独立下行地址/身份、外部 TLS/H3/CDN 及完整管理仍 deferred，性能和抗识别收益未证明。"
     },
     {
       "id": 3,

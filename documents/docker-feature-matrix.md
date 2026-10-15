@@ -260,9 +260,20 @@ Padding `100-1000`、首部 `false/false`、limits `1000000/30/30/20-80`，保�
 本地 amd64 合同、菜单、真实 TLS/h2 与 Reality 链路通过；集中完整合同
 57/57、353 项差分，入口 404.019 秒，合法长转义 JSON 补验 50.896 秒。
 新增 `docker-xhttp-headers` 直接复用已有分片，后续仅跑匹配定向。
-其它 sc*、
-downloadSettings、H3/CDN 与上下行分离未开放，
-完整管理继续 `deferred`，
+3D.21 增加同入口额外端口的上下行分离：菜单 `20/21`、
+`--xhttp-download`/`--xhttp-download-clear` 管理可选 `xhttp.download_port`，
+要求 `x-padm-xhttp-download`。端口必须是同一 v3 Xray 协议 `2` 入口已登记的
+非默认分享别名，拒绝基础、默认分享、其它入口和未登记端口；沿用已有后端及端口发布。
+状态增加 `download_port`（缺省 `null`）和 `download_enabled`，
+统一 URI `extra.downloadSettings` 指向本入口服务器与所选端口，
+Reality 公钥/short ID/SNI、路径/Host 和其它 XHTTP 参数随来源更新，下行模式固定 `auto`；
+服务端配置不投影 `download_port` 或 `downloadSettings`。
+预设、高级参数、推荐恢复保留绑定，复制/派生只保留源入口绑定，新入口清除，
+不能借用源入口的别名。独立下行地址/身份、外部 TLS/H3/CDN 和完整管理继续 `deferred`。
+新增 `docker-xhttp-download` 复用验证、发布、失败恢复及复制/派生分片；
+本地 amd64 下行定向/菜单/真实链路分别 33.797/60.831/26.798 秒通过，
+真实 5 入口/20 业务及 4 个坏下行端口拒绝通过；集中合同 57/57、
+365 项差分，407.727 秒、Jobs 6、排队 318 ms、`cache_hit=false`。
 填充字节分布、抗识别、长时复用和吞吐收益未证明；本地 amd64 合同、菜单、
 定向 limits 30.079 秒、真实 XHTTP 25.743 秒、菜单校正后 55.976 秒、
 dispatcher 2.217 秒，完整 `docker-contracts` 一次通过（383.362 秒，
@@ -383,7 +394,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | ID | 能力 | 原生入口 | 配置运行状态 | 管理状态 | 核心 | Compose profile | 网络/监听 | 原因 |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | 支持单核心或主副核心配置、字段编辑及跨核心同协议多入口；完整管理未迁移。 |
-| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 四预设、XMUX 三键自定义/清除，3D.5 Padding `1..4096`，3D.6 两项首部开关已交付。3D.7 四项原生 packet/stream limits 的状态、事务、清除与复制/派生继承；前三项 `0..2147483647` 整数，末项为整数或正序范围；`0`/`0-0` 保留显式值、状态折算核心默认，要求 `x-padm-xhttp-limits`。3D.10 提供模式、成对路径/Host、七项高级参数及推荐恢复。3D.20 支持客户端请求首部设置/清除、状态和统一链接，1–8 项、名称 1–64 位、值 0–256 位可打印 ASCII，拒绝大小写重复及核心保留字段，要求 `x-padm-xhttp-request-headers`；不提供服务端响应或访问认证。其它 sc*、downloadSettings、H3/CDN、上下行分离与完整管理仍未开放。 |
+| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 四预设、XMUX 三键自定义/清除，3D.5 Padding `1..4096`，3D.6 两项首部开关已交付。3D.7 四项原生 packet/stream limits 的状态、事务、清除与复制/派生继承；前三项 `0..2147483647` 整数，末项为整数或正序范围；`0`/`0-0` 保留显式值、状态折算核心默认，要求 `x-padm-xhttp-limits`。3D.10 提供模式、成对路径/Host、七项高级参数及推荐恢复。3D.20 支持客户端请求首部设置/清除、状态和统一链接，1–8 项、名称 1–64 位、值 0–256 位可打印 ASCII，拒绝大小写重复及核心保留字段，要求 `x-padm-xhttp-request-headers`；不提供服务端响应或访问认证。3D.21 支持同入口已登记非默认分享额外端口的下行绑定及清除，要求 `x-padm-xhttp-download`；链接沿用来源 Reality 身份/路径/Host，固定下行模式 `auto`，复制/派生的新入口清除绑定。独立下行地址/身份、外部 TLS/H3/CDN 与完整管理仍未开放。 |
 | 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、导入、BBR/Brutal、Salamander/Gecko、HTTPS 伪装编辑、复制及分享链接；3D.8–3D.9 菜单 12 提供状态、带宽、混淆与伪装单入口专项，BBR 保留速率，密码仅私密文件或静默输入。Gecko 要求新能力标记，不开放包长参数。已有入口可两步发布受管静态网页并启用 local，固定只读目录且无混淆，操作先验证已发布网页。复用受管 TLS 和 UUID 流量账号；端口跳跃限单 sing-box、双族 Hy2 的内部监督手动管理，完整跳跃与协议管理仍 deferred。 |
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用字段编辑、同核复制/删除及分享链接；复用受管 TLS 与 UUID 流量账号，域名与凭据冻结，宿主集成组合及完整管理未开放。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用编辑、同核复制/删除及原生 URI；入口与 TLS 同域，UUID 用户名/密码共享统计额度；QUIC、独立 IP/SNI 覆盖及完整管理未开放。 |

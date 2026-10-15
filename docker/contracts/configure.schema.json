@@ -45,6 +45,7 @@
   "x-padm-xhttp-padding": true,
   "x-padm-xhttp-headers": true,
   "x-padm-xhttp-request-headers": true,
+  "x-padm-xhttp-download": true,
   "x-padm-xhttp-limits": true,
   "x-padm-port-hopping-manual": true,
   "x-padm-port-hopping-tuic": true,
@@ -1668,6 +1669,12 @@
                 },
                 "mode": {
                   "enum": ["auto", "packet-up", "stream-up"]
+                },
+                "download_port": {
+                  "description": "同入口的非默认分享额外端口；客户端下行沿用本入口 Reality 身份和路径。",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
                 },
                 "xPaddingBytes": {
                   "description": "本阶段仅支持 1 至 4096 的整数或正序范围；删除字段恢复 Xray 缺省 100-1000，不能关闭 Padding。",

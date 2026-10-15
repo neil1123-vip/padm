@@ -226,7 +226,7 @@ TUIC 时长接受 1–6 位正整数加 `ms/s/m/h`，恢复推荐值为 `cubic/3
 沿用预览、确认、发布和失败恢复。完整协议管理及宿主集成组合仍未开放；TUIC 范围转发见下文。
 
 Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的模式、
-路径/Host、预设、XMUX、Padding、两个首部开关及四项原生 packet/stream limits：
+路径/Host、预设、XMUX、Padding、首部、四项原生 packet/stream limits 及同入口下行端口：
 
 ```bash
 padm-docker protocol xhttp-status entry-xhttp
@@ -235,6 +235,8 @@ padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-ED
 padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-request-headers entry-xhttp '{"X-Trace":"edge value"}' --preview
 padm-docker edit --xhttp-request-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-download entry-xhttp 35444 --preview
+padm-docker edit --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
 padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-mode entry-xhttp stream-up --preview
@@ -261,9 +263,7 @@ POST 的 gRPC Content-Type 和服务端下载响应的 SSE Content-Type；`packe
 保留在 spec、服务端和 URI，状态显示核心默认 `1000000/30/30/20-80`。
 空输入使用同一组默认值，菜单 `12` 设置、`13` 清除，显式字段要求
 `x-padm-xhttp-limits`。`clear` 删除字段恢复缺省，其它编辑保留、复制/派生继承；
-缺省不补 spec 或 URI，状态通过 `limits_explicit` 区分显式值。其它 `sc*`、
-downloadSettings、H3/CDN
-与上下行分离仍未开放，
+缺省不补 spec 或 URI，状态通过 `limits_explicit` 区分显式值。
 首部变化不代表抗识别或性能收益。
 
 菜单 `18` 设置 `xhttp.headers` JSON 对象，`19` 删除字段恢复无自定义首部。
@@ -277,6 +277,16 @@ downloadSettings、H3/CDN
 `request_headers_explicit` 区分缺省，统一 URI `extra`、复制/派生继承。
 预设、高级参数和推荐值恢复均保留自定义首部；这不提供服务端响应首部或访问认证，
 首部内容会进入分享链接和订阅。
+
+菜单 `20` 绑定下行端口，`21` 清除；只接受本入口已登记、未设为默认分享的额外端口，
+先在入口端口菜单登记，再设置 `xhttp.download_port`。不接受基础端口、默认分享端口、
+其它入口或未登记端口；不会创建新后端或更改端口发布。显式绑定要求
+`x-padm-xhttp-download`，状态返回 `download_port`（缺省为 `null`）及 `download_enabled`。
+统一链接的 `extra.downloadSettings` 使用本入口服务器和下行端口，自动跟随同一
+Reality 公钥、short ID、SNI、路径、Host 和其它 XHTTP 参数，下行模式固定 `auto`。
+服务端配置不写入该客户端字段；主订阅、分享组和本地链接同步更新。
+预设、高级参数和推荐恢复保留绑定；复制/派生保留源入口绑定，新入口清除绑定，
+需自行登记新入口的额外端口。独立下行地址/身份、外部 TLS/H3/CDN 和完整管理仍为 `deferred`。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；
