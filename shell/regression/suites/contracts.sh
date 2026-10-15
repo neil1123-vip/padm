@@ -411,12 +411,14 @@ runRegressionDockerContractsAggregateContract() (
     runDockerMenuRoutingRegression
     runDockerMenuPortAliasRegression
     runDockerMenuTunRegression
-    printf '%s\n' full:menu.sh routing:menu.sh port-alias:menu.sh tun:menu.sh >"${expectedLog}"
+    runDockerMenuXhttpRegression
+    printf '%s\n' full:menu.sh routing:menu.sh port-alias:menu.sh tun:menu.sh xhttp:menu.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_MENU_SCOPE:-}" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-routing]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-port-alias]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-tun]}" == function ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-xhttp]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-tun-management]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-tun-resources]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-tun-real]}" == function ]]

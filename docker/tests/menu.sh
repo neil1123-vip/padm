@@ -3,7 +3,7 @@ set -euo pipefail
 
 MENU_SCOPE=${PADM_DOCKER_MENU_SCOPE:-full}
 case "${MENU_SCOPE}" in
-full|routing|port-alias|tun|block-ips-resolved) ;;
+full|routing|port-alias|tun|block-ips-resolved|xhttp) ;;
 *) printf 'docker-menu-regression-fail: invalid scope: %s\n' "${MENU_SCOPE}" >&2; exit 1 ;;
 esac
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -593,7 +593,7 @@ runXhttpDriver() {
     cancel)
         targetReply 'Docker XHTTP 管理' $'99\n'
         for answer in $'0\n' $'\n' $'\004' $'--invalid\n'; do
-            for choice in 2 6 7 8 9 10 11; do
+            for choice in 2 6 7 8 9 10 11 23 24; do
                 targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
                 targetReply 'XHTTP 入口 ID（0 返回）' "${answer}"
             done
@@ -717,8 +717,50 @@ runXhttpDriver() {
             targetReply 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）' $'not-json\n'
         fi
         ;;
+    current)
+        targetReply 'Docker XHTTP 管理' $'23\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-missing\n'
+        targetReply 'Docker XHTTP 管理' $'6\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'XMUX 最大并发（整数或 from-to）[4-8，0 返回]' $'\n'
+        targetReply 'XMUX 每连接请求数（0-0 表示零）[0-0，0 返回]' $'\n'
+        targetReply 'XMUX 连接复用秒数（0-0 表示零）[0-0，0 返回]' $'\n'
+        targetReply 'Docker XHTTP 管理' $'8\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'Padding 字节数（1..4096 整数或 from-to）[17-19，0 返回]' $'\n'
+        targetReply 'Docker XHTTP 管理' $'10\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'noGRPCHeader（true/false，0 返回）[false]' $'\n'
+        targetReply 'noSSEHeader（true/false，0 返回）[true]' $'\n'
+        targetReply 'Docker XHTTP 管理' $'12\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[8192]' $'\n'
+        targetReply 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[5]' $'\n'
+        targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[7]' $'\n'
+        targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[10-15]' $'\n'
+        targetReply 'Docker XHTTP 管理' $'14\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'XHTTP 模式（auto/packet-up/stream-up，0 返回）[stream-up]' $'\n'
+        targetReply 'Docker XHTTP 管理' $'15\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'XHTTP 路径（以 / 开头，0 返回）[/current/path]' $'\n'
+        targetReply 'XHTTP Host（非空域名，0 返回）[current.example.net]' $'\n'
+        targetReply 'Docker XHTTP 管理' $'16\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'Padding 字节数（1..4096 整数或 from-to）[17-19，0 返回]' $'\n'
+        targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[8192]' $'\n'
+        targetReply 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[5]' $'\n'
+        targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[7]' $'\n'
+        targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[10-15]' $'\n'
+        targetReply 'noGRPCHeader（true/false，0 返回）[false]' $'\n'
+        targetReply 'noSSEHeader（true/false，0 返回）[true]' $'\n'
+        ;;
+    status-invalid|status-incomplete)
+        targetReply 'Docker XHTTP 管理' $'23\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        ;;
     status-failed)
-        for choice in 2 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22; do
+        for choice in 2 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
             targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
         done
         ;;
@@ -778,7 +820,7 @@ runXhttpDriver() {
         targetReply 'Docker XHTTP 管理' $'15\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XHTTP 路径（以 / 开头，0 返回）' $'/custom/path\n'
-        targetReply 'XHTTP Host（非空域名，0 返回）' $'\n'
+        targetReply 'XHTTP Host（非空域名，0 返回）' $'0\n'
         targetReply 'Docker XHTTP 管理' $'16\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' $'0\n'
@@ -878,6 +920,12 @@ runXhttpDriver() {
         done
         ;;
     esac
+    if [[ "${scenario}" == flow || "${scenario}" == failed || "${scenario}" == current ]]; then
+        for choice in 23 24; do
+            targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        done
+    fi
     targetReply 'Docker XHTTP 管理' $'1\n'
     targetReply 'Docker XHTTP 管理' $'0\n'
     targetReply 'Docker 协议与入口' $'0\n'
@@ -2838,7 +2886,30 @@ protocol)
         printf '{"enabled":true,"interface":"padm-tun","address":"198.18.0.1/30","family":"ipv4","scope":"global","ipv6":"reject"}\n'
         exit 0
         ;;
-    xhttp-status) exit "${XHTTP_STATUS:-0}" ;;
+    xhttp-status)
+        [[ "${XHTTP_STATUS:-0}" -eq 0 ]] || exit "${XHTTP_STATUS}"
+        if [[ "${XHTTP_STATUS_FIXTURE:-default}" == invalid ]]; then
+            printf 'fixture-invalid-xhttp-status\n'
+        else
+            jq -cn --arg fixture "${XHTTP_STATUS_FIXTURE:-default}" '
+                {entries:[{listener_id:"entry-xhttp",
+                  xmux:{maxConcurrency:"16-32",hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"},
+                  xPaddingBytes:"100-1000",noGRPCHeader:false,noSSEHeader:false,
+                  limits:{scMaxEachPostBytes:1000000,scMinPostsIntervalMs:30,
+                    scMaxBufferedPosts:30,scStreamUpServerSecs:"20-80"},
+                  mode:"auto",path:"/padm/path-1",host:"www.example.com"}]} |
+                if $fixture == "current" then
+                  .entries[0] |= (. + {
+                    xmux:{maxConcurrency:"4-8",hMaxRequestTimes:0,hMaxReusableSecs:0},
+                    xPaddingBytes:"17-19",noSSEHeader:true,
+                    limits:{scMaxEachPostBytes:8192,scMinPostsIntervalMs:5,
+                      scMaxBufferedPosts:7,scStreamUpServerSecs:"10-15"},
+                    mode:"stream-up",path:"/current/path",host:"current.example.net"})
+                elif $fixture == "incomplete" then del(.entries[0].xmux)
+                else . end'
+        fi
+        exit 0
+        ;;
     hy2-status|tuic-status) exit "${UDP_PROTOCOL_STATUS:-0}" ;;
     esac
     printf 'fixture-protocol-output\n'
@@ -3047,6 +3118,9 @@ edit)
         exit "${XHTTP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --xhttp-xmux ]]; then
         [[ "$#" -eq 6 && "$3" == entry-xhttp && -n "$4" && -n "$5" && -n "$6" ]] || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --xhttp-concurrency ]]; then
+        [[ "$#" -eq 4 && "$3" == entry-xhttp && ( "$4" == 16-32 || "$4" == 1 ) ]] || exit 2
         exit "${XHTTP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --xhttp-xmux-clear ]]; then
         [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
@@ -3668,7 +3742,7 @@ done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 fi
 
-if [[ "${MENU_SCOPE}" != port-alias ]]; then
+if [[ "${MENU_SCOPE}" != port-alias && "${MENU_SCOPE}" != xhttp ]]; then
 for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
     domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \
@@ -4677,6 +4751,7 @@ done
 unset SITE_EDIT_STATUS FAIL2BAN_PROTOCOL_LIST_STATUS
 fi
 
+if [[ "${MENU_SCOPE}" != xhttp ]]; then
 # 额外入口菜单使用真实 PTY，取消与 EOF 不向 CLI 提交端口变更。
 for aliasCase in flow cancel eof invalid failed default-cancel default-eof base-eof default-invalid default-failed \
     replace-flow replace-cancel replace-eof replace-failed; do
@@ -4782,15 +4857,19 @@ for cdnCase in flow cancel failed; do
     fi
 done
 unset SITE_EDIT_STATUS
+fi
 
 # 菜单只校验取消与参数分发；非法参数由 CLI 拒绝后必须能继续查看状态。
-for xhttpCase in flow cancel failed invalid status-failed; do
+for xhttpCase in flow cancel failed invalid current status-failed status-invalid status-incomplete; do
     : >"${TLS_WIZARD_ACTIONS}"
-    export XHTTP_EDIT_STATUS=0 XHTTP_STATUS=0
+    export XHTTP_EDIT_STATUS=0 XHTTP_STATUS=0 XHTTP_STATUS_FIXTURE=default
     case "${xhttpCase}" in
     failed) XHTTP_EDIT_STATUS=15 ;;
     invalid) XHTTP_EDIT_STATUS=2 ;;
+    current) XHTTP_STATUS_FIXTURE=current ;;
     status-failed) XHTTP_STATUS=15 ;;
+    status-invalid) XHTTP_STATUS_FIXTURE=invalid ;;
+    status-incomplete) XHTTP_STATUS_FIXTURE=incomplete ;;
     esac
     runPty "xhttp-${xhttpCase}" xhttp "${xhttpCase}" "${TLS_WIZARD_CLI}" menu
     expectedXhttp=$'protocol list\nprotocol xhttp-status'
@@ -4818,7 +4897,7 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers-clear entry-xhttp'
         ;;
     cancel)
-        for ((xhttpStatus = 0; xhttpStatus < 4 * 7 + 2 * (3 + 1 + 2) + 3 + 8 + 5 + 5 + 5; xhttpStatus++)); do
+        for ((xhttpStatus = 0; xhttpStatus < 4 * 9 + 2 * (3 + 1 + 2) + 3 + 8 + 5 + 5 + 5; xhttpStatus++)); do
             expectedXhttp+=$'\nprotocol xhttp-status'
         done
         grep -Fq '无效选项，请重新选择。' "${CONTROL_LOG}" || fail 'XHTTP 无效选项未留在菜单'
@@ -4835,7 +4914,7 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits-clear entry-xhttp'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers entry-xhttp {"x-trace":"edge value"}'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers-clear entry-xhttp'
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 18 ]] ||
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 20 ]] ||
             fail 'XHTTP 编辑失败未显示错误并继续读取'
         ;;
     invalid)
@@ -4849,13 +4928,30 @@ for xhttpCase in flow cancel failed invalid status-failed; do
             fail 'XHTTP 非法参数未保留菜单'
         ;;
     status-failed)
-        for ((xhttpStatus = 0; xhttpStatus < 16; xhttpStatus++)); do
+        for ((xhttpStatus = 0; xhttpStatus < 18; xhttpStatus++)); do
             expectedXhttp+=$'\nprotocol xhttp-status'
         done
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 18 ]] ||
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 20 ]] ||
             fail 'XHTTP 状态失败仍提示变更或未恢复菜单'
         ! grep -Fq 'XHTTP 入口 ID（0 返回）' "${CONTROL_LOG}" ||
             fail 'XHTTP 状态失败仍读取变更入口'
+        ;;
+    current)
+        expectedXhttp+=$'\nprotocol xhttp-status'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-xmux entry-xhttp 4-8 0-0 0-0'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-padding entry-xhttp 17-19'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-headers entry-xhttp false true'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits entry-xhttp 8192 5 7 10-15'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-mode entry-xhttp stream-up'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-path-host entry-xhttp /current/path current.example.net'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-advanced entry-xhttp 17-19 8192 5 7 10-15 false true'
+        grep -Fq '无法读取该入口的 XHTTP 当前值' "${CONTROL_LOG}" ||
+            fail 'XHTTP 未登记入口没有拒绝编辑'
+        ;;
+    status-invalid|status-incomplete)
+        expectedXhttp+=$'\nprotocol xhttp-status'
+        grep -Fq '无法读取该入口的 XHTTP 当前值' "${CONTROL_LOG}" ||
+            fail 'XHTTP 非法或不完整状态没有拒绝编辑'
         ;;
     esac
     case "${xhttpCase}" in
@@ -4888,11 +4984,18 @@ for xhttpCase in flow cancel failed invalid status-failed; do
             expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-download-settings entry-xhttp {"address":"192.0.2.10","port":8443,"security":"reality","server_name":"reality.example.net","host":"reality-relay.example.net","path":"/reality/down","mode":"stream-one","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","short_id":"0123456789abcdef"}'
         ;;
     esac
+    if [[ "${xhttpCase}" == flow || "${xhttpCase}" == failed || "${xhttpCase}" == current ]]; then
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-concurrency entry-xhttp 16-32'
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-concurrency entry-xhttp 1'
+    fi
     expectedXhttp+=$'\nprotocol xhttp-status'
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedXhttp}" ]] ||
         fail "XHTTP ${xhttpCase} 参数分发错误或取消后执行编辑"
     grep -Fq '10. XHTTP 管理' "${CONTROL_LOG}" || fail 'XHTTP 管理未接入协议菜单'
     grep -Fq '已有 Xray Reality 入口' "${CONTROL_LOG}" || fail 'XHTTP 菜单未显示支持范围'
+    for label in 普通设置 高级设置 实验功能 '23. XMUX 日常并发' '24. XMUX 单并发'; do
+        grep -Fq "${label}" "${CONTROL_LOG}" || fail "XHTTP 菜单缺少 ${label}"
+    done
     grep -Fq '8. 设置 Padding' "${CONTROL_LOG}" &&
         grep -Fq '9. 恢复缺省 Padding' "${CONTROL_LOG}" || fail 'XHTTP Padding 菜单入口缺失'
     grep -Fq '10. 设置首部开关' "${CONTROL_LOG}" &&
@@ -4904,14 +5007,30 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         '20. 设置下行端口' '21. 关闭上下行分离' '22. 设置独立下行'; do
         grep -Fq "${label}" "${CONTROL_LOG}" || fail "XHTTP 菜单缺少 ${label}"
     done
-    if [[ "${xhttpCase}" != status-failed ]]; then
+    if [[ "${xhttpCase}" == flow || "${xhttpCase}" == cancel || "${xhttpCase}" == failed || "${xhttpCase}" == invalid ]]; then
         grep -Fq '已登记的额外非默认分享端口' "${CONTROL_LOG}" &&
             grep -Fq '同服务器的 Reality 后端' "${CONTROL_LOG}" || fail 'XHTTP 下行菜单未说明支持范围'
         grep -Fq '外部前置必须回到同一 XHTTP 会话后端' "${CONTROL_LOG}" &&
             grep -Fq '本菜单不自动部署 CDN' "${CONTROL_LOG}" || fail 'XHTTP 独立下行菜单未说明支持范围'
     fi
 done
-unset XHTTP_EDIT_STATUS XHTTP_STATUS
+unset XHTTP_EDIT_STATUS XHTTP_STATUS XHTTP_STATUS_FIXTURE
+
+# TERM 退出不能留下状态副本；不另起整套 PTY 场景。
+menuStatus=0
+printf '%s\n' fixture-xhttp-status >"${TEST_ROOT}/xhttp-status.tmp"
+(
+    source "${PROJECT_ROOT}/docker/lib/menu.sh"
+    DOCKER_MENU_STATUS_FILE="${TEST_ROOT}/xhttp-status.tmp"
+    dockerMenuInterrupted 143
+) || menuStatus=$?
+[[ "${menuStatus}" -eq 143 && ! -e "${TEST_ROOT}/xhttp-status.tmp" ]] ||
+    fail 'XHTTP TERM 退出遗留状态副本或退出码错误'
+
+if [[ "${MENU_SCOPE}" == xhttp ]]; then
+    printf 'docker-menu-xhttp-regression-ok\n'
+    exit 0
+fi
 
 # 仅覆盖参数分发和确认返回，真实事务由 Hy2/TUIC 合同验证。
 for kind in hy2 tuic; do

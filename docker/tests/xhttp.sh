@@ -571,6 +571,23 @@ for preset in daily compatible stream single; do
 done
 xhttpEdit 0 changed --xhttp-xmux entry-xhttp 2-4 0 17 --confirm PADM-DOCKER-EDIT
 xhttpAssert auto '{"maxConcurrency":"2-4","hMaxRequestTimes":0,"hMaxReusableSecs":17}'
+xhttpEdit 0 changed --xhttp-concurrency entry-xhttp 7 --confirm PADM-DOCKER-EDIT
+xhttpAssert auto '{"maxConcurrency":7,"hMaxRequestTimes":0,"hMaxReusableSecs":17}'
+(
+    xhttpListener=entry-xhttp xhttpAction=concurrency
+    jq '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.xmux.maxConcurrency) = "8-9"' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/concurrency-expected.json"
+    dockerEditCompatibilityValidate "${root}/config/spec.json" "${TEST_ROOT}/concurrency-expected.json" ||
+        fail 'XHTTP 并发专项冻结误拒合法修改'
+    for mutation in '.xhttp.xmux.hMaxRequestTimes = 9' '.xhttp.xmux.hMaxReusableSecs = 0' \
+        'del(.xhttp.xmux.hMaxRequestTimes)' '.xhttp.mode = "packet-up"'; do
+        jq "(.core.protocols[] | select(.listener_id == \"entry-xhttp\")) |= (${mutation})" \
+            "${TEST_ROOT}/concurrency-expected.json" >"${TEST_ROOT}/concurrency-tampered.json"
+        if dockerEditCompatibilityValidate "${root}/config/spec.json" "${TEST_ROOT}/concurrency-tampered.json" 2>/dev/null; then
+            fail 'XHTTP 并发专项允许顺带改变其它 XMUX 键或 mode'
+        fi
+    done
+)
 xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpAssert auto null
 cmp -s "${TEST_ROOT}/links-before.txt" "${root}/data/subscription/${TOKEN}" || fail '清除 XMUX 没有恢复旧 URI'
@@ -580,6 +597,19 @@ xhttpEdit 0 unchanged --xhttp-mode entry-xhttp packet-up --preview
 for mode in packet-up stream-up auto; do
     xhttpEdit 0 changed --xhttp-mode entry-xhttp "${mode}" --confirm PADM-DOCKER-EDIT
     xhttpAssert "${mode}" null
+    if [[ "${mode}" == packet-up ]]; then
+        xhttpEdit 0 unchanged --xhttp-concurrency entry-xhttp 3-5 --preview
+        ! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail '并发预览启动候选'
+        xhttpEdit 0 changed --xhttp-concurrency entry-xhttp 3-5 --confirm PADM-DOCKER-EDIT
+        xhttpAssert packet-up '{"maxConcurrency":"3-5","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}'
+        before=$(liveSnapshot)
+        rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
+        xhttpEdit 14 changed --xhttp-concurrency entry-xhttp 6 --confirm PADM-DOCKER-EDIT
+        [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] ||
+            fail 'XHTTP 并发更新健康失败未完整恢复'
+        xhttpEdit 0 changed --xhttp-xmux-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+        xhttpAssert packet-up null
+    fi
 done
 xhttpEdit 0 unchanged --xhttp-path-host entry-xhttp /custom/path_2 edge.example.net --preview
 xhttpEdit 0 changed --xhttp-path-host entry-xhttp /custom/path_2 edge.example.net --confirm PADM-DOCKER-EDIT
@@ -804,6 +834,7 @@ if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == rollback ]]; then
 for listener in entry-missing vless-reality entry-grpc-sing; do
     runRead 15 "unsupported-${listener}" dockerProtocolCommand xhttp-status "${listener}"
     xhttpEdit 15 unchanged --xhttp-preset "${listener}" daily --preview
+    xhttpEdit 15 unchanged --xhttp-concurrency "${listener}" 1 --preview
     xhttpEdit 15 unchanged --xhttp-padding "${listener}" 100-1000 --preview
     xhttpEdit 15 unchanged --xhttp-headers "${listener}" true false --preview
     xhttpEdit 15 unchanged --xhttp-headers-clear "${listener}" --preview
@@ -851,6 +882,9 @@ xhttpEdit 2 unchanged --xhttp-limits entry-xhttp 1000000 30 30 20-80
 for bad in 0 -1 1.5 01 1e2 2-1 0-1 1-02 2147483648 1-2147483648 $'1\n'; do
     xhttpEdit 2 unchanged --xhttp-xmux entry-xhttp "${bad}" 0 0 --preview
 done
+xhttpEdit 2 unchanged --xhttp-concurrency entry-xhttp 0 --preview
+xhttpEdit 2 unchanged --xhttp-concurrency entry-xhttp --preview
+xhttpEdit 2 unchanged --xhttp-concurrency entry-xhttp 1 --xhttp-xmux-clear entry-xhttp --preview
 for key in scMaxEachPostBytes scMinPostsIntervalMs scMaxBufferedPosts scStreamUpServerSecs; do
     for mutation in \
         '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp[$key]) = 0' \

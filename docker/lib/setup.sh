@@ -1933,7 +1933,7 @@ dockerEditCommand() {
     local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
     local portHoppingIpv4= portHoppingIpv6=
     local cdnAction= cdnListener= cdnAddresses=
-    local xhttpAction= xhttpListener= xhttpPreset= xhttpValues='{}' xhttpPadding=null
+    local xhttpAction= xhttpListener= xhttpPreset= xhttpValues='{}' xhttpPadding=null xhttpArgCount=0
     local xhttpNoGrpc=false xhttpNoSse=false xhttpLimits='{}'
     local protocolKind= protocolListener= protocolPatch='{}' protocolId=0
     local protocolPatchFile= hy2ObfsType= hy2ObfsFile= hy2ObfsPassword=
@@ -2460,10 +2460,13 @@ dockerEditCommand() {
             xhttpAction=preset xhttpListener=$2 xhttpPreset=$3
             shift 3
             ;;
-        --xhttp-xmux)
-            [[ "$#" -ge 5 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+        --xhttp-xmux|--xhttp-concurrency)
+            xhttpArgCount=5
+            [[ "$1" != --xhttp-concurrency ]] || xhttpArgCount=3
+            [[ "$#" -ge "${xhttpArgCount}" && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            xhttpValues=$(jq -cen --arg concurrency "$3" --arg requests "$4" --arg seconds "$5" '
+            xhttpValues=$(jq -cen --arg action "${1#--xhttp-}" \
+                --arg concurrency "$3" --arg requests "${4:-}" --arg seconds "${5:-}" '
               def value($min):
                 if test("^(0|[1-9][0-9]{0,9})\\z") then
                   tonumber | if . >= $min and . <= 2147483647 then . else error("范围越界") end
@@ -2472,11 +2475,13 @@ dockerEditCommand() {
                   if .[0] >= $min and .[0] <= .[1] and .[1] <= 2147483647
                   then $raw else error("范围越界或反转") end
                 else error("不是规范整数或范围") end;
-              {maxConcurrency:($concurrency | value(1)),hMaxRequestTimes:($requests | value(0)),
-               hMaxReusableSecs:($seconds | value(0))}
+              {maxConcurrency:($concurrency | value(1))} +
+                (if $action == "xmux" then
+                  {hMaxRequestTimes:($requests | value(0)),hMaxReusableSecs:($seconds | value(0))}
+                 else {} end)
             ' 2>/dev/null) || return "${PADM_DOCKER_RC_USAGE}"
-            xhttpAction=xmux xhttpListener=$2
-            shift 5
+            xhttpAction=${1#--xhttp-} xhttpListener=$2
+            shift "${xhttpArgCount}"
             ;;
         --xhttp-xmux-clear)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
@@ -3327,6 +3332,8 @@ dockerEditCommand() {
           else .core.protocols |= map(if .listener_id == $listener then
             if $action == "clear" then del(.xhttp.xmux)
             elif $action == "xmux" then .xhttp.xmux = $values
+            elif $action == "concurrency" then
+              .xhttp.xmux = ((.xhttp.xmux // {hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"}) + $values)
             elif $action == "mode" or $action == "path-host" or $action == "advanced" or $action == "defaults"
               then .xhttp += $values
             elif $action == "padding" then .xhttp.xPaddingBytes = $padding
@@ -4230,6 +4237,7 @@ dockerEditCompatibilityValidate() {
                 .xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,
                 .xhttp.scMaxBufferedPosts,.xhttp.scStreamUpServerSecs)
             elif $xhttp_action == "preset" then del(.xhttp.mode, .xhttp.xmux)
+            elif $xhttp_action == "concurrency" then del(.xhttp.xmux.maxConcurrency)
             elif $xhttp_action == "padding" or $xhttp_action == "padding-clear" then del(.xhttp.xPaddingBytes)
             elif $xhttp_action == "headers" or $xhttp_action == "headers-clear" then del(.xhttp.noGRPCHeader,.xhttp.noSSEHeader)
             elif $xhttp_action == "request-headers" or $xhttp_action == "request-headers-clear" then del(.xhttp.headers)
@@ -4240,7 +4248,10 @@ dockerEditCompatibilityValidate() {
                 .xhttp.scMaxBufferedPosts,.xhttp.scStreamUpServerSecs)
             else del(.xhttp.xmux) end
           else . end);
-        ($old | without_xhttp) == ($new | without_xhttp)
+        ($old | if $xhttp_action == "concurrency" then
+          .core.protocols |= map(if .listener_id == $xhttp_listener and .xhttp.xmux == null
+            then .xhttp.xmux = {hMaxRequestTimes:"600-900",hMaxReusableSecs:"1800-3000"} else . end)
+          else . end | without_xhttp) == ($new | without_xhttp)
        elif $cdn_listener != "" then
         ($old | without_cdn) == ($new | without_cdn)
        elif $port_alias == "port-alias-replace" then

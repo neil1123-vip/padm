@@ -33,7 +33,10 @@ dockerMenuInterrupted() {
         fi
         wait "${DOCKER_MENU_CHILD_PID}" 2>/dev/null || true
     fi
-    [[ "$1" -ne 143 ]] || exit 143
+    if [[ "$1" -eq 143 ]]; then
+        [[ -z "${DOCKER_MENU_STATUS_FILE:-}" ]] || rm -f -- "${DOCKER_MENU_STATUS_FILE}"
+        exit 143
+    fi
     printf '\n'
 }
 
@@ -281,16 +284,21 @@ dockerMenuPortHopping() {
 dockerMenuXhttp() {
     local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered mode path host headers downloadPort
     local downloadAddress downloadSecurity downloadServerName downloadAlpn downloadPublicKey downloadShortId downloadSettings
+    local DOCKER_MENU_STATUS_FILE= status snapshot currentValues currentConcurrency currentRequests currentSeconds currentPadding
+    local currentNoGrpc currentNoSse currentPost currentInterval currentBuffered currentKeepalive currentMode currentPath currentHost
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker XHTTP 管理（已有 Xray Reality 入口）\n'
-        printf '%s\n' '1. 查看状态' '2. 日常预设' '3. 兼容预设' '4. 流式预设' \
-            '5. 单并发预设' '6. 自定义 XMUX' '7. 恢复缺省 XMUX' \
+        printf '%s\n' '普通设置' '1. 查看状态' '2. 日常预设' '3. 兼容预设' '4. 流式预设' \
+            '5. 单并发预设' '14. 设置模式' \
+            '高级设置' '23. XMUX 日常并发' '24. XMUX 单并发' '6. 自定义 XMUX' '7. 恢复缺省 XMUX' \
+            '15. 设置路径和 Host' \
             '8. 设置 Padding' '9. 恢复缺省 Padding' \
             '10. 设置首部开关' '11. 恢复缺省首部' \
             '12. 设置 packet/stream 参数' '13. 恢复缺省 packet/stream' \
-            '14. 设置模式' '15. 设置路径和 Host' '16. 统一高级参数' '17. 恢复推荐默认' \
+            '16. 统一高级参数' '17. 恢复推荐默认' \
             '18. 设置请求首部（JSON）' '19. 清除请求首部' \
+            '实验功能' \
             '20. 设置下行端口' '21. 关闭上下行分离' '22. 设置独立下行' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -300,35 +308,66 @@ dockerMenuXhttp() {
         case "${choice}" in
         0) return 0 ;;
         1) dockerMenuRun protocol xhttp-status || true ;;
-        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22)
-            dockerMenuRun protocol xhttp-status || continue
+        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24)
+            # 在当前进程运行 CLI，保留中断处理；状态副本读完立即删除。
+            DOCKER_MENU_STATUS_FILE=$(mktemp "${TMPDIR:-/tmp}/padm-xhttp-menu.XXXXXX") || continue
+            status=0
+            dockerMenuRun protocol xhttp-status >"${DOCKER_MENU_STATUS_FILE}" || status=$?
+            snapshot=$(<"${DOCKER_MENU_STATUS_FILE}")
+            rm -f -- "${DOCKER_MENU_STATUS_FILE}"
+            DOCKER_MENU_STATUS_FILE=
+            printf '%s\n' "${snapshot}"
+            [[ "${status}" -eq 0 ]] || continue
             dockerSetupRead listener 'XHTTP 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" && "${listener}" != --* ]] || continue
+            currentValues=$(jq -er --arg listener "${listener}" '
+                [.entries[] | select(.listener_id == $listener)] |
+                if length != 1 then error("入口不支持 XHTTP 管理") else .[0] end |
+                [.xmux.maxConcurrency, .xmux.hMaxRequestTimes, .xmux.hMaxReusableSecs,
+                 .xPaddingBytes, .noGRPCHeader, .noSSEHeader, .limits.scMaxEachPostBytes,
+                 .limits.scMinPostsIntervalMs, .limits.scMaxBufferedPosts, .limits.scStreamUpServerSecs,
+                 .mode, .path, .host] |
+                if any(.[]; . == null) then error("XHTTP 状态不完整") else . end |
+                map(tostring) | @tsv
+            ' <<<"${snapshot}" 2>/dev/null) || {
+                dockerError '无法读取该入口的 XHTTP 当前值，请重新查看状态'
+                continue
+            }
+            IFS=$'\t' read -r currentConcurrency currentRequests currentSeconds currentPadding \
+                currentNoGrpc currentNoSse currentPost currentInterval currentBuffered currentKeepalive \
+                currentMode currentPath currentHost <<<"${currentValues}"
+            [[ "${currentRequests}" != 0 ]] || currentRequests=0-0
+            [[ "${currentSeconds}" != 0 ]] || currentSeconds=0-0
+            [[ "${currentKeepalive}" != 0 ]] || currentKeepalive=0-0
             if [[ "${choice}" == 6 ]]; then
                 # 0 保留为返回键；需要零值时使用范围 0-0，数值边界交给 CLI。
-                dockerSetupRead concurrency 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]: ' 16-32 &&
-                    dockerSetupRead requests 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]: ' 600-900 &&
-                    dockerSetupRead seconds 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]: ' 1800-3000 || continue
+                dockerSetupRead concurrency "XMUX 最大并发（整数或 from-to）[${currentConcurrency}，0 返回]: " "${currentConcurrency}" &&
+                    dockerSetupRead requests "XMUX 每连接请求数（0-0 表示零）[${currentRequests}，0 返回]: " "${currentRequests}" &&
+                    dockerSetupRead seconds "XMUX 连接复用秒数（0-0 表示零）[${currentSeconds}，0 返回]: " "${currentSeconds}" || continue
                 dockerMenuRun edit --xhttp-xmux "${listener}" "${concurrency}" "${requests}" "${seconds}" || true
+            elif [[ "${choice}" == 23 || "${choice}" == 24 ]]; then
+                concurrency=16-32
+                [[ "${choice}" != 24 ]] || concurrency=1
+                dockerMenuRun edit --xhttp-concurrency "${listener}" "${concurrency}" || true
             elif [[ "${choice}" == 7 ]]; then
                 dockerMenuRun edit --xhttp-xmux-clear "${listener}" || true
             elif [[ "${choice}" == 8 ]]; then
-                dockerSetupRead padding 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]: ' 100-1000 || continue
+                dockerSetupRead padding "Padding 字节数（1..4096 整数或 from-to）[${currentPadding}，0 返回]: " "${currentPadding}" || continue
                 dockerMenuRun edit --xhttp-padding "${listener}" "${padding}" || true
             elif [[ "${choice}" == 9 ]]; then
                 dockerMenuRun edit --xhttp-padding-clear "${listener}" || true
             elif [[ "${choice}" == 10 ]]; then
-                dockerSetupRead noGrpc 'noGRPCHeader（true/false，0 返回）[false]: ' false &&
-                    dockerSetupRead noSse 'noSSEHeader（true/false，0 返回）[false]: ' false || continue
+                dockerSetupRead noGrpc "noGRPCHeader（true/false，0 返回）[${currentNoGrpc}]: " "${currentNoGrpc}" &&
+                    dockerSetupRead noSse "noSSEHeader（true/false，0 返回）[${currentNoSse}]: " "${currentNoSse}" || continue
                 dockerMenuRun edit --xhttp-headers "${listener}" "${noGrpc}" "${noSse}" || true
             elif [[ "${choice}" == 11 ]]; then
                 dockerMenuRun edit --xhttp-headers-clear "${listener}" || true
             elif [[ "${choice}" == 12 ]]; then
                 # 0 保留为返回键，前三项用 default 表示核心零值。
-                dockerSetupRead post 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]: ' 1000000 &&
-                    dockerSetupRead interval 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[30]: ' 30 &&
-                    dockerSetupRead buffered 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]: ' 30 &&
-                    dockerSetupRead seconds 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]: ' 20-80 || continue
+                dockerSetupRead post "packet-up 单个 POST 最大字节数（default=缺省，0 返回）[${currentPost}]: " "${currentPost}" &&
+                    dockerSetupRead interval "packet-up POST 最小间隔毫秒（default=缺省，0 返回）[${currentInterval}]: " "${currentInterval}" &&
+                    dockerSetupRead buffered "packet-up 最多缓存 POST 数（default=缺省，0 返回）[${currentBuffered}]: " "${currentBuffered}" &&
+                    dockerSetupRead seconds "stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[${currentKeepalive}]: " "${currentKeepalive}" || continue
                 [[ "${post}" != default ]] || post=0
                 [[ "${interval}" != default ]] || interval=0
                 [[ "${buffered}" != default ]] || buffered=0
@@ -336,22 +375,22 @@ dockerMenuXhttp() {
             elif [[ "${choice}" == 13 ]]; then
                 dockerMenuRun edit --xhttp-limits-clear "${listener}" || true
             elif [[ "${choice}" == 14 ]]; then
-                dockerSetupRead mode 'XHTTP 模式（auto/packet-up/stream-up，0 返回）[auto]: ' auto || continue
+                dockerSetupRead mode "XHTTP 模式（auto/packet-up/stream-up，0 返回）[${currentMode}]: " "${currentMode}" || continue
                 dockerMenuRun edit --xhttp-mode "${listener}" "${mode}" || true
             elif [[ "${choice}" == 15 ]]; then
-                dockerSetupRead path 'XHTTP 路径（以 / 开头，0 返回）: ' &&
+                dockerSetupRead path "XHTTP 路径（以 / 开头，0 返回）[${currentPath}]: " "${currentPath}" &&
                     [[ -n "${path}" ]] &&
-                    dockerSetupRead host 'XHTTP Host（非空域名，0 返回）: ' &&
+                    dockerSetupRead host "XHTTP Host（非空域名，0 返回）[${currentHost}]: " "${currentHost}" &&
                     [[ -n "${host}" ]] || continue
                 dockerMenuRun edit --xhttp-path-host "${listener}" "${path}" "${host}" || true
             elif [[ "${choice}" == 16 ]]; then
-                dockerSetupRead padding 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]: ' 100-1000 &&
-                    dockerSetupRead post 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]: ' 1000000 &&
-                    dockerSetupRead interval 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[30]: ' 30 &&
-                    dockerSetupRead buffered 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]: ' 30 &&
-                    dockerSetupRead seconds 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]: ' 20-80 &&
-                    dockerSetupRead noGrpc 'noGRPCHeader（true/false，0 返回）[false]: ' false &&
-                    dockerSetupRead noSse 'noSSEHeader（true/false，0 返回）[false]: ' false || continue
+                dockerSetupRead padding "Padding 字节数（1..4096 整数或 from-to）[${currentPadding}，0 返回]: " "${currentPadding}" &&
+                    dockerSetupRead post "packet-up 单个 POST 最大字节数（default=缺省，0 返回）[${currentPost}]: " "${currentPost}" &&
+                    dockerSetupRead interval "packet-up POST 最小间隔毫秒（default=缺省，0 返回）[${currentInterval}]: " "${currentInterval}" &&
+                    dockerSetupRead buffered "packet-up 最多缓存 POST 数（default=缺省，0 返回）[${currentBuffered}]: " "${currentBuffered}" &&
+                    dockerSetupRead seconds "stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[${currentKeepalive}]: " "${currentKeepalive}" &&
+                    dockerSetupRead noGrpc "noGRPCHeader（true/false，0 返回）[${currentNoGrpc}]: " "${currentNoGrpc}" &&
+                    dockerSetupRead noSse "noSSEHeader（true/false，0 返回）[${currentNoSse}]: " "${currentNoSse}" || continue
                 [[ "${post}" != default ]] || post=0
                 [[ "${interval}" != default ]] || interval=0
                 [[ "${buffered}" != default ]] || buffered=0

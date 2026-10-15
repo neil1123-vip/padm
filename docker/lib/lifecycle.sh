@@ -77,6 +77,7 @@ dockerUsage() {
   padm-docker edit --cdn-entry-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-preset <入口 ID> <daily|compatible|stream|single> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-xmux <入口 ID> <并发数或范围> <请求数或范围> <复用秒数或范围> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --xhttp-concurrency <入口 ID> <并发数或范围> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-xmux-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-padding <入口 ID> <1-4096 的整数或正序范围> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-padding-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

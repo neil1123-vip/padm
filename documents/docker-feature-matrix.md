@@ -274,6 +274,13 @@ XMUX 三键自定义/清除、CLI/菜单状态和统一链接发布。显式 XMU
 推荐恢复显式写入 `auto`、XMUX `16-32/600-900/1800-3000`、
 Padding `100-1000`、首部 `false/false`、limits `1000000/30/30/20-80`，保留 path/host。
 仅相应字段豁免冻结，复用既有能力门禁及发布/失败恢复，不扩 schema 或支持状态。
+3D.23 菜单按普通/高级/实验分组并保留原编号；参数回车采用本次状态的当前值。
+新增 `23/24` 与 `--xhttp-concurrency` 只改 XMUX 并发，保留另外两键及 mode，
+原无 XMUX 时初始化默认请求数和复用秒数；沿用原能力门禁、锁与发布事务。
+`docker-menu-xhttp` 可独立验证交互，完整菜单保留相同场景。
+3D.23 Linux amd64 菜单/编辑/回滚/分发定向通过，源码摘要与唯一集中完整合同相同；
+完整 `58/58`、`469466 ms`、Jobs `6`、cache=false，TERM 退出清理断言通过。
+证据 `.tmp-regression-docker-923b1a3b57b043a2820ee249f5f3568b/`，成功输入已清。
 3D.10 Linux amd64 XHTTP/菜单定向通过，集中完整合同 57/57 一次通过，`380824 ms`；
 定向和完整源码摘要相同，临时输入已清，真实客户端矩阵复用既有证据。
 3D.20 接入菜单 `18/19` 和 `--xhttp-request-headers`/`--xhttp-request-headers-clear`，
