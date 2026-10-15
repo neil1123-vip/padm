@@ -177,6 +177,23 @@ commit 前断流不启动持锁 Bash，失败会话保留；commit 后 ACK 丢�
 新 TUIC 配置要求 `x-padm-port-hopping-tuic`，Hy2 旧包子集保持。
 活动 `share` 默认 TUIC 范围首端口，`share <端口>` 为两协议输出普通单端口 URI，
 只允许活动范围内端口，不改静态订阅；固定 TUIC 客户端无原生范围字段，不宣称自动跳跃。
+5C.9e 增加 `port-hopping recover --preview` 与
+`--confirm PADM-DOCKER-HOPPING-RECOVER`，跳跃菜单 `8` 先预览再确认。
+仅同 boot/namespace 内原 manager/Bash 代次均结束、绑定的 stage 路径/child/target/
+root-data-net 投影及部署锁仍匹配、
+精确子容器退出 `0`、state 消失且双族 NAT 无残留时清理，活跃/未知/漂移均拒绝留证。
+持目录描述符拒绝本次核验/清理期间替换；既有证据不记录 stage/session 历史 inode，
+不能识别此前同内容重建，合作锁不抵御任意特权替换。
+返回 `recoverable/stopped` 与完整 `saved`，保留规格、账号和累计，不删 conntrack；
+清理后须显式 `start` 建立新代次和挑战，不用旧 JSON/tuple 授权。
+旧无 spec 部署先用 `edit --spec <完整原始输入>` 匹配实际部署接入，
+保留账号配置与累计，再保存范围并显式启用；不从运行配置推造完整规格。
+本地 amd64 旧接入定向 25.819 秒、TUIC 恢复真实 53.793 秒、
+Hy2 自动跳跃及恢复链 105.324 秒通过；集中合同一次 57/57 组、含 141 项监督合同，
+入口 428.109 秒、Jobs 6/tmpfs、排队 335 ms、`cache_hit=false`。
+后续恢复改动优先 `docker-port-hopping-recovery-real`（Jobs 2），
+Hy2 自动跳跃使用 `docker-port-hopping-auto-real`，不另行重复旧长生命周期集合；
+完整证据 `.tmp-regression-docker-7c7189dcb0f348d88174f898f342d922/`。
 自动恢复、外部 URI 导入、TUIC 客户端自动跳跃、旧 conntrack 排空及
 原生宿主/arm64/公网与完整协议管理继续 `deferred`；阶段验收见实施计划。
 

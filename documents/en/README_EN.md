@@ -528,8 +528,49 @@ evidence without automatic takeover. Conflict checks cannot exclude simultaneous
 rule changes.
 SIGKILL of the lock-owning Bash was verified on isolated amd64: the child exits and
 removes dual-family NAT/state, while its exited container, owner, stage and deployment
-lock remain. Status, stop, start and lifecycle operations refuse takeover. Inspect the
-original owner and remnants on native Linux rather than deleting owner/lock evidence.
+lock remain. Status, stop, start and lifecycle operations refuse takeover.
+Menu `8`, "Verify and clean up a residual session", previews before asking for confirmation.
+The equivalent commands are:
+
+```bash
+padm-docker port-hopping recover --preview
+padm-docker port-hopping recover --confirm PADM-DOCKER-HOPPING-RECOVER
+padm-docker port-hopping start
+```
+
+`recover` accepts only a managed terminal state in the same boot and namespace realm
+after both original manager and Bash process generations have ended. The bound stage path,
+child, target and root/data/net projection must match, as must the deployment lock;
+the exact child container must have exited with code `0`, the hopping state must be absent,
+and neither NAT family may retain session resources. A live owner, unknown record,
+nonzero exit or any drift refuses cleanup and preserves the evidence.
+Verification and cleanup hold directory descriptors and reject replacement during this operation.
+Existing evidence does not record historical stage/session inodes or detect an earlier rebuild
+with identical contents; the cooperative lock does not defend against arbitrary privileged replacement.
+Preview returns `state:"recoverable"`; confirmed cleanup returns `state:"stopped"`.
+Both preserve the complete range in `saved`. Cleanup retains the saved specification,
+accounts and traffic totals, and does not delete conntrack. Explicit `start` creates
+a fresh process generation and challenge. Old JSON, environment variables or tuples
+do not authorize cleanup; deleting owner/lock evidence cannot force recovery.
+
+If an old deployment lacks `config/spec.json`, first match the retained complete original
+input against the actual deployment:
+
+```bash
+padm-docker edit --spec /root/padm-original.json --confirm PADM-DOCKER-EDIT
+```
+
+Then save the hopping range and run `start` explicitly. Missing input or mismatched account
+identity refuses adoption. Adoption preserves `users.base`, the running account
+configuration and cumulative traffic; saving the range does not enable rules.
+It does not reconstruct a complete specification from runtime configuration or environment
+variables. Unattended recovery remains `deferred`.
+On Linux amd64, TUIC recovery and the Hy2 automatic hopping/recovery chain passed
+in 53.793 and 105.324 seconds; all 57 contract groups passed in 428.109 seconds,
+including 141 supervisor checks. For recovery changes, prefer
+`docker-port-hopping-recovery-real` with Jobs 2, focused on TUIC cleanup and reactivation.
+Use `docker-port-hopping-auto-real` for Hy2 automatic hopping.
+
 `share` emits a link only when the active target matches the saved specification;
 it does not write static subscriptions. Without an argument, Hy2 uses a range URI,
 while TUIC uses a normal `tuic://` link for the first port. `share <port>` or menu

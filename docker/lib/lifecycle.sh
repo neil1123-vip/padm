@@ -71,6 +71,8 @@ dockerUsage() {
   padm-docker edit --port-hopping-clear [--preview|--confirm PADM-DOCKER-EDIT]
   padm-docker port-hopping <status|start|stop|share>
   padm-docker port-hopping share <活动范围内端口>
+  padm-docker port-hopping recover --preview
+  padm-docker port-hopping recover --confirm PADM-DOCKER-HOPPING-RECOVER
   padm-docker edit --cdn-entry <入口 ID> <IP或域名,...> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --cdn-entry-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-preset <入口 ID> <daily|compatible|stream|single> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -1136,7 +1138,7 @@ dockerPortHoppingTargetStartPrepare() {
 
 dockerPortHoppingTargetBindingCheck() {
     local witness=$1 binding=$2 domain=$3 current container
-    local ph_owner=${BASHPID:-$$} ph_lock ph_stage=${ph_stage:-}
+    local ph_owner=${4:-${BASHPID:-$$}} ph_lock ph_stage=${ph_stage:-}
     local -a timed=()
     [[ "${ph_guarded:-false}" != true ]] || timed=(timeout -k 2 5)
     ph_lock=$(jq -ec '.lock' <<<"${binding}") &&
@@ -1739,6 +1741,86 @@ dockerPortHoppingSupervisorStop() {
         python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" stop "${root}"
 }
 
+dockerPortHoppingSupervisorRecover() {
+    local root
+    [[ "$#" == 0 || ( "$#" == 1 && "$1" == --confirm ) ]] || return 1
+    root=$(dockerInstallRoot) &&
+        python3 -B "${DOCKER_LIB_DIR}/port-hopping-supervisor.py" recover "${root}" \
+            "${DOCKER_BUNDLE_SOURCE_ROOT}/install-docker.sh" "$@"
+}
+
+dockerPortHoppingRecoveryInspect() (
+    local owner=${1:-} ph_root ph_stage stageName ph_owner ph_lock ph_witness ph_binding ph_domain
+    local ph_helper="${DOCKER_LIB_DIR}/port-hopping-probe.py" ph_directory ph_projection ph_child
+    local ph_image ph_label ph_host ph_start ph_end ph_target ph_ipv4 ph_ipv6 saved current projection
+    local ph_operation=supervised ph_guarded=true
+    local DOCKER_DEPLOYMENT_LOCK_DIR=
+    [[ "$#" == 1 ]] || return 1
+    ph_root=$(dockerInstallRoot) &&
+        jq -e --arg root "${ph_root}" '.root == $root and .state == "active"' <<<"${owner}" >/dev/null &&
+        ph_stage=$(jq -er '.stage' <<<"${owner}") &&
+        ph_owner=$(jq -er '.bash.pid' <<<"${owner}") || return 1
+    stageName=${ph_stage##*/}
+    [[ "${ph_stage}" == "${ph_root}/${stageName}" &&
+        "${stageName}" =~ ^\.hopping-guarded\.[[:alnum:]]{6}$ ]] || return 1
+    dockerTrafficSafePath "${ph_root}" "${ph_stage}" &&
+        ph_witness=$(jq -ec '.' "${ph_stage}/prepared.json") &&
+        jq -e --argjson witness "${ph_witness}" '.target == $witness' \
+            "${ph_stage}/supervised.json" >/dev/null &&
+        ph_binding=$(jq -ec '.startup_binding' <<<"${ph_witness}") &&
+        ph_lock=$(jq -ec '.lock' <<<"${ph_binding}") &&
+        saved=$(dockerPortHoppingSavedArguments) &&
+        jq -e --argjson saved "${saved}" '
+          [.listener_id, (.range_start|tostring), (.range_end|tostring), .ipv4, .ipv6] == $saved
+        ' <<<"${ph_witness}" >/dev/null &&
+        ph_domain=$(jq -er --arg listener "$(jq -er '.listener_id' <<<"${ph_witness}")" '
+          .core.protocols[] | select(.listener_id == $listener) |
+            if .id == 3 then .hy2.domain elif .id == 31 then .tuic.domain else empty end
+        ' "${ph_root}/config/spec.json") || return 1
+    # 仅核验原锁及在线绑定；恢复入口不接管旧锁，也不重新准备或启动目标。
+    DOCKER_DEPLOYMENT_LOCK_DIR="${ph_root}/locks/deployment.lock"
+    dockerPortHoppingTargetBindingCheck "${ph_witness}" "${ph_binding}" "${ph_domain}" "${ph_owner}" &&
+        ph_directory=$(python3 "${ph_helper}" directory "${ph_root}") &&
+        ph_child=$(<"${ph_stage}/cid") &&
+        [[ "${ph_child}" =~ ^[a-f0-9]{64}$ ]] &&
+        current=$(timeout -k 2 5 docker container inspect "${ph_child}") &&
+        jq -e 'length == 1 and (.[0].State |
+          .Status == "exited" and .Running == false and .ExitCode == 0)' <<<"${current}" >/dev/null &&
+        ph_image=$(jq -er '.[0].Image' <<<"${current}") &&
+        ph_label=$(jq -er '.[0].Config.Labels["io.padm.hopping-supervised"]' <<<"${current}") &&
+        ph_host=$(jq -er '.[0].Config.Hostname' <<<"${current}") &&
+        ph_start=$(jq -er '.range_start|tostring' <<<"${ph_witness}") &&
+        ph_end=$(jq -er '.range_end|tostring' <<<"${ph_witness}") &&
+        ph_target=$(jq -er '.target_port|tostring' <<<"${ph_witness}") &&
+        ph_ipv4=$(jq -er '.ipv4' <<<"${ph_witness}") &&
+        ph_ipv6=$(jq -er '.ipv6' <<<"${ph_witness}") &&
+        ph_projection=$(dockerPortHoppingGuardedContainer any) || return 1
+    projection=$(jq -cn --argjson target "${ph_witness}" --argjson child "${ph_projection}" \
+        --argjson directory "${ph_directory}" --arg stage "${ph_stage}" \
+        '{target:$target,child:$child,directory:$directory,stage:$stage}') &&
+        python3 -c 'import hashlib,json,sys
+raw=json.dumps(json.load(sys.stdin),sort_keys=True,separators=(",",":"),ensure_ascii=True).encode("ascii")
+if hashlib.sha256(raw).hexdigest()!=sys.argv[1]:
+    raise SystemExit("恢复投影与原监督摘要不一致")' \
+            "$(jq -er '.stage_sha256' <<<"${owner}")" <<<"${projection}" || return 1
+    # 复用既有只读预检，拒绝双族残留链、范围冲突及未知 NAT 布局。
+    docker run --rm --pull never --network host --user 0:0 --read-only \
+        --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges \
+        --no-healthcheck --restart no --log-driver none \
+        --tmpfs /tmp:rw,nosuid,nodev,size=16m,mode=1777 \
+        --tmpfs /run:rw,nosuid,nodev,size=16m,mode=0755 \
+        --mount "type=bind,source=${ph_root}/data/net,target=/var/lib/padm/net,readonly" \
+        "${ph_image}" preflight port-hopping "${ph_start}" "${ph_end}" "${ph_target}" >&2 &&
+        dockerPortHoppingTargetBindingCheck "${ph_witness}" "${ph_binding}" "${ph_domain}" "${ph_owner}" &&
+        [[ "$(python3 "${ph_helper}" directory "${ph_root}")" == "${ph_directory}" ]] &&
+        [[ "$(dockerPortHoppingGuardedContainer any)" == "${ph_projection}" ]] &&
+        [[ "$(dockerPortHoppingSavedArguments)" == "${saved}" ]] || return 1
+    jq -cn --argjson target "${ph_witness}" --argjson child "${ph_projection}" \
+        --argjson directory "${ph_directory}" --arg stage "${ph_stage}" \
+        --slurpfile spec "${ph_root}/config/spec.json" \
+        '{target:$target,child:$child,directory:$directory,stage:$stage,saved:$spec[0].port_hopping}'
+)
+
 dockerPortHoppingSavedArguments() {
     local root spec expected
     root=$(dockerInstallRoot) || return 1
@@ -1756,10 +1838,17 @@ dockerPortHoppingSavedArguments() {
 
 dockerPortHoppingCommand() {
     local action=${1:-status} root result saved spec uri port=${2:-}
-    [[ "$#" -le 1 || ( "${action}" == share && "$#" -eq 2 ) ]] ||
-        return "${PADM_DOCKER_RC_USAGE}"
-    case "${action}" in status|start|stop|share) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
-    if [[ "$#" -eq 2 ]]; then
+    case "${action}" in
+    status|start|stop) [[ "$#" -le 1 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    share) [[ "$#" -le 2 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    recover)
+        [[ ( "$#" == 2 && "$2" == --preview ) ||
+            ( "$#" == 3 && "$2" == --confirm && "$3" == PADM-DOCKER-HOPPING-RECOVER ) ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        ;;
+    *) return "${PADM_DOCKER_RC_USAGE}" ;;
+    esac
+    if [[ "${action}" == share && "$#" -eq 2 ]]; then
         [[ "${port}" =~ ^[1-9][0-9]{0,4}$ && "${port}" -le 65535 ]] ||
             return "${PADM_DOCKER_RC_USAGE}"
     fi
@@ -1767,6 +1856,13 @@ dockerPortHoppingCommand() {
     dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     case "${action}" in
+    recover)
+        if [[ "$2" == --confirm ]]; then
+            dockerPortHoppingSupervisorRecover --confirm
+        else
+            dockerPortHoppingSupervisorRecover
+        fi
+        ;;
     start)
         dockerPortHoppingSavedArguments >/dev/null || {
             dockerError '缺少有效的受管端口跳跃配置，请先保存单个双族 Hy2/TUIC 配置'

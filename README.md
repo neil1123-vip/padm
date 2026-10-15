@@ -861,7 +861,39 @@ padm-docker edit --port-hopping-clear --confirm PADM-DOCKER-EDIT
 SIGKILL、非合作替换或未知残留保留证据，不自动接管；冲突检查无法排除外部同时修改规则。
 隔离 amd64 已验直接 SIGKILL 持锁 Bash：子端退出并撤销双族 NAT/state，
 退出容器、owner、stage 和原部署锁保留；查询、停止、启用及生命周期操作拒绝接管。
-应在原生 Linux 上核对原拥有者和残留，不能删除 owner/锁强行继续。
+菜单 `8`“核验并清理残留会话”先预览，再确认清理；也可使用：
+
+```bash
+padm-docker port-hopping recover --preview
+padm-docker port-hopping recover --confirm PADM-DOCKER-HOPPING-RECOVER
+padm-docker port-hopping start
+```
+
+`recover` 只处理同一 boot/namespace 归属内原 manager 和 Bash 代次均已结束的受管终态：
+已绑定的 stage 路径、子容器、目标与 root/data/net 投影一致，部署锁仍匹配，
+精确子容器已退出且退出码为 `0`，
+跳跃 state 已消失，双族 NAT 无本会话残留。活跃 owner、未知记录、非零退出或任何漂移均拒绝，
+保留现场。核验和清理持目录描述符，拒绝本次期间的路径替换；
+现有证据不记录 stage/session 历史 inode，不能识别此前同内容重建，合作锁不抵御任意特权替换。
+预览返回 `state:"recoverable"`，确认清理后返回 `state:"stopped"`，
+两者的 `saved` 均保留完整范围。清理只回收已核验残留，不修改保存规格、账号或累计，
+不删除 conntrack；再次启用须显式 `start`，以新代次和新挑战建立会话。
+旧 JSON、环境变量或 tuple 不授权清理，不能删除 owner/锁强行继续。
+
+旧部署缺少 `config/spec.json` 时，先用保留的完整原始输入匹配实际部署：
+
+```bash
+padm-docker edit --spec /root/padm-original.json --confirm PADM-DOCKER-EDIT
+```
+
+接入后再保存跳跃范围并显式 `start`；缺少输入或账号身份不匹配时拒绝接入。
+接入保留 `users.base`、运行账号配置与流量累计，保存范围不会自动启用；
+不从运行配置或环境变量推造完整规格。无人值守恢复仍为 `deferred`。
+本批 Linux amd64 的 TUIC 恢复、Hy2 自动跳跃及恢复链分别 53.793 秒、105.324 秒通过，
+集中合同 57/57 组通过（428.109 秒，含 141 项监督合同）。
+后续恢复改动优先运行 `docker-port-hopping-recovery-real`（Jobs 2），
+它聚焦 TUIC 残留清理和重新启用；Hy2 自动跳跃使用 `docker-port-hopping-auto-real`。
+
 `share` 只在活动目标与保存规格一致时输出链接，不写静态订阅。
 Hy2 无参数输出范围 URI，TUIC 无参数输出范围起始端口的普通 `tuic://`；
 `share <端口>` 或菜单 `7` 为两协议输出范围内指定单端口的普通链接，保留认证和 TLS。

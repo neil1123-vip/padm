@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import fcntl
 import hashlib
 import json
 import os
@@ -53,6 +54,12 @@ PADM_DOCKER_INSTALL_DIR=$2
 DOCKER_DEPLOYMENT_LOCK_DIR=$2/locks/deployment.lock
 export PADM_DOCKER_INSTALL_DIR
 dockerPortHoppingTargetLockSnapshot "$3"
+'''
+RECOVER_BODY = r'''
+source "$1"
+PADM_DOCKER_INSTALL_DIR=$2
+export PADM_DOCKER_INSTALL_DIR
+dockerPortHoppingRecoveryInspect "$3"
 '''
 
 
@@ -996,6 +1003,232 @@ def control(action, root, token=None, arguments=None):
         directory.close()
 
 
+def file_stamp(metadata):
+    return (*path_identity(metadata), metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
+
+
+def recovery_dead(owner):
+    current = identity(os.getpid())
+    for role in ("manager", "bash"):
+        expected = owner[role]
+        if any(expected[key] != current[key] for key in ("boot_id", "pid_ns", "net_ns")):
+            raise Failure("恢复只支持同一 boot、PID 与网络 namespace")
+        if expected["pid"] > 2147483647:
+            raise Failure("恢复原 PID 超出范围")
+        try:
+            descriptor = os.pidfd_open(expected["pid"])
+        except ProcessLookupError:
+            continue
+        try:
+            if not select.select([descriptor], [], [], 0)[0]:
+                raise Failure("恢复原 manager 或 Bash PID 仍在运行")
+        finally:
+            os.close(descriptor)
+
+
+def recover(root, entrypoint, confirm=False):
+    pending = stop_signals()
+    directory = Directory(root)
+    held = []
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    stage_names = {"prepared.json", "cid", "child.log", "supervised.json"}
+    session_names = {"owner.json", "control.sock", "service.log"}
+    lock_names = {"pid"}
+    stage_removed, lock_removed = False, False
+    deadline = time.monotonic() + START_TIMEOUT
+
+    def opened(name, parent, is_dir=False, mode=None):
+        descriptor = os.open(name, flags | (os.O_DIRECTORY if is_dir else 0), dir_fd=parent)
+        held.append(descriptor)
+        metadata = os.fstat(descriptor)
+        if (metadata.st_uid != 0 or metadata.st_mode & 0o022 or
+                not (stat.S_ISDIR(metadata.st_mode) if is_dir else stat.S_ISREG(metadata.st_mode)) or
+                not is_dir and metadata.st_nlink != 1 or
+                mode is not None and stat.S_IMODE(metadata.st_mode) != mode):
+            raise Failure("恢复文件或目录 owner、类型、权限无效")
+        return descriptor
+
+    def regular(parent, name):
+        descriptor = os.open(name, flags, dir_fd=parent)
+        try:
+            metadata = os.fstat(descriptor)
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or
+                    metadata.st_nlink != 1 or metadata.st_mode & 0o022):
+                raise Failure("恢复受管文件身份无效")
+            if file_stamp(metadata) != file_stamp(os.stat(name, dir_fd=parent, follow_symlinks=False)):
+                raise Failure("恢复受管文件在打开时变化")
+            return file_stamp(metadata)
+        finally:
+            os.close(descriptor)
+
+    def absent(parent, name):
+        try:
+            os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        raise Failure("恢复要求规则 state 或已删除路径保持不存在")
+
+    try:
+        path = Path(entrypoint)
+        if not path.is_absolute() or path.is_symlink():
+            raise Failure("恢复入口必须是安全绝对路径")
+        entry_fd = opened(entrypoint, None)
+        entry_stamp = file_stamp(os.fstat(entry_fd))
+        directory.session()
+        owner_fd = opened("owner.json", directory.fd, mode=0o600)
+        # 同一原 owner inode 上排斥两个恢复者；普通部署仍由会话目录门禁阻断。
+        fcntl.flock(owner_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        owner = owner_check(directory.read_owner())
+        recovery_dead(owner)
+        stage_path = PurePosixPath(owner["stage"])
+        if (str(stage_path) != owner["stage"] or stage_path.parent != PurePosixPath(root) or
+                not stage_path.name.startswith(".hopping-guarded.") or
+                stage_path.name == ".hopping-guarded."):
+            raise Failure("恢复 stage 超出受管根")
+        stage_fd = opened(stage_path.name, directory.root_fd, True, 0o700)
+        locks_fd = opened("locks", directory.root_fd, True, 0o750)
+        lock_fd = opened("deployment.lock", locks_fd, True, 0o750)
+        stage_id, locks_id, lock_id = (
+            path_identity(os.fstat(item)) for item in (stage_fd, locks_fd, lock_fd))
+        if (set(os.listdir(stage_fd)) != stage_names or
+                set(os.listdir(directory.fd)) != session_names or set(os.listdir(lock_fd)) != lock_names):
+            raise Failure("恢复 stage、会话或锁含未知文件")
+        stage_files = {name: regular(stage_fd, name) for name in stage_names}
+        session_files = {name: regular(directory.fd, name) for name in ("owner.json", "service.log")}
+        socket_id = path_identity(os.stat("control.sock", dir_fd=directory.fd, follow_symlinks=False))
+        if (not stat.S_ISSOCK(socket_id[2]) or socket_id[3] != 0 or
+                stat.S_IMODE(socket_id[2]) != 0o600 or socket_id[-1] != 1):
+            raise Failure("恢复控制 socket 身份无效")
+        pid_stamp = regular(lock_fd, "pid")
+        pid_fd = opened("pid", lock_fd, mode=0o640)
+        expected_pid = (str(owner["bash"]["pid"]) + "\n").encode("ascii")
+        if (os.read(pid_fd, len(expected_pid) + 1) != expected_pid or
+                file_stamp(os.fstat(pid_fd)) != pid_stamp):
+            raise Failure("恢复原锁 pid 不匹配")
+        cid_fd = opened("cid", stage_fd)
+        cid = os.read(cid_fd, 66).decode("ascii").strip()
+        if not nonce(cid) or file_stamp(os.fstat(cid_fd)) != stage_files["cid"]:
+            raise Failure("恢复原 child ID 无效")
+        path_rows, current_path = ["/"], ""
+        for part in PurePosixPath(root).parts[1:]:
+            current_path += "/" + part
+            path_rows.append(current_path)
+        path_rows.extend((root + "/data", root + "/data/net"))
+        projection = [[name, *value] for name, value in zip(path_rows, directory.projection[:-1])]
+
+        def check():
+            check_signal(pending)
+            remaining_time(deadline)
+            directory.check()
+            recovery_dead(owner)
+            if (file_stamp(os.stat(entrypoint, follow_symlinks=False)) != entry_stamp or
+                    file_stamp(os.fstat(entry_fd)) != entry_stamp):
+                raise Failure("恢复入口身份变化")
+            current_locks = (*locks_id[:-1], locks_id[-1] - int(lock_removed))
+            if (path_identity(os.stat("locks", dir_fd=directory.root_fd,
+                                      follow_symlinks=False)) != current_locks or
+                    path_identity(os.fstat(locks_fd)) != current_locks):
+                raise Failure("恢复原 locks 目录变化")
+            for removed, parent, name, descriptor, original, names, files in (
+                    (stage_removed, directory.root_fd, stage_path.name, stage_fd,
+                     stage_id, stage_names, stage_files),
+                    (lock_removed, locks_fd, "deployment.lock", lock_fd,
+                     lock_id, lock_names, {"pid": pid_stamp})):
+                if removed:
+                    absent(parent, name)
+                    continue
+                if (path_identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != original or
+                        path_identity(os.fstat(descriptor)) != original or
+                        set(os.listdir(descriptor)) != names):
+                    raise Failure("恢复原 stage 或锁目录身份、文件集合变化")
+                for item in names:
+                    if regular(descriptor, item) != files[item]:
+                        raise Failure("恢复原 stage 或锁文件变化")
+            if set(os.listdir(directory.fd)) != session_names:
+                raise Failure("恢复原会话文件集合变化")
+            for name in session_names - {"control.sock"}:
+                if regular(directory.fd, name) != session_files[name]:
+                    raise Failure("恢复原 owner 或日志变化")
+            if "owner.json" in session_names and (
+                    file_stamp(os.fstat(owner_fd)) != session_files["owner.json"] or
+                    directory.read_owner() != owner):
+                raise Failure("恢复原 owner 已替换")
+            if "control.sock" in session_names and path_identity(os.stat(
+                    "control.sock", dir_fd=directory.fd, follow_symlinks=False)) != socket_id:
+                raise Failure("恢复原控制 socket 已替换")
+            absent(directory.net_fd, "port-hopping.state")
+
+        def inspect():
+            check()
+            result = run_interruptible(
+                ["bash", "-Eeuo", "pipefail", "-c", RECOVER_BODY, "padm-hopping-recovery",
+                 entrypoint, root, canonical(owner).decode("ascii")], pending, deadline)
+            if result.returncode:
+                raise Failure("恢复现场审计失败: " + result.stderr.decode("utf-8", errors="replace"))
+            audit = shape(json.loads(result.stdout.decode("ascii"), object_pairs_hook=unique),
+                          ("target", "child", "directory", "stage", "saved"))
+            if (audit["stage"] != owner["stage"] or not isinstance(audit["target"], dict) or
+                    not isinstance(audit["child"], dict) or audit["child"].get("Id") != cid or
+                    audit["directory"] != projection or not isinstance(audit["saved"], dict) or
+                    digest({key: audit[key] for key in (
+                        "target", "child", "directory", "stage")}) != owner["stage_sha256"]):
+                raise Failure("恢复审计原 stage、child 或摘要不匹配")
+            original = audit["target"]["startup_binding"]["lock"]
+            if (not isinstance(original, list) or len(original) < 3 or
+                    original[-3] != [root + "/locks", *locks_id[:5]] or
+                    original[-2] != [root + "/locks/deployment.lock", *lock_id[:5]] or
+                    original[-1] != [root + "/locks/deployment.lock/pid", *pid_stamp,
+                                     str(owner["bash"]["pid"])]):
+                raise Failure("恢复审计原锁与持有目录不匹配")
+            check()
+            return audit
+
+        audit = inspect()
+        result = {"state": "recoverable", "saved": audit["saved"], "owner_sha256": digest(owner),
+                  "child_id": cid, "stage": owner["stage"]}
+        if not confirm:
+            return result
+        if inspect() != audit:
+            raise Failure("恢复确认复验时现场投影变化")
+        check()
+        removed = run_interruptible(
+            ["timeout", "-k", "2", "10", "docker", "container", "rm", cid], pending, deadline)
+        if removed.returncode:
+            raise Failure("恢复不能移除已核验的退出 helper: " +
+                          removed.stderr.decode("utf-8", errors="replace"))
+        remaining = run_interruptible(
+            ["timeout", "-k", "2", "5", "docker", "container", "ls", "-a", "--no-trunc",
+             "--filter", "id=" + cid, "--format", "{{.ID}}"], pending, deadline)
+        if remaining.returncode or remaining.stdout.strip():
+            raise Failure("恢复未证明原 helper 已删除")
+        check()
+        for name in sorted(stage_names):
+            check()
+            os.unlink(name, dir_fd=stage_fd)
+            stage_names.remove(name)
+        check()
+        os.rmdir(stage_path.name, dir_fd=directory.root_fd)
+        stage_removed = True
+        check()
+        os.unlink("pid", dir_fd=lock_fd)
+        lock_names.clear()
+        check()
+        os.rmdir("deployment.lock", dir_fd=locks_fd)
+        lock_removed = True
+        # 会话目录最后删除；部分清理或信号失败时继续阻挡普通部署操作。
+        for name in ("control.sock", "service.log", "owner.json"):
+            check()
+            os.unlink(name, dir_fd=directory.fd)
+            session_names.remove(name)
+        check()
+        os.rmdir(SESSION, dir_fd=directory.net_fd)
+        return dict(result, state="stopped")
+    finally:
+        for descriptor in reversed(held):
+            os.close(descriptor)
+        directory.close()
+
+
 def helper(command, phase, raw):
     peer = socket.socket(fileno=os.dup(0))
     try:
@@ -1031,6 +1264,8 @@ def main(arguments):
         result = reserve(*args)
     elif operation == "start" and len(args) in {2, 7}:
         result = start(args[0], args[1], args[2:])
+    elif operation == "recover" and (len(args) == 2 or len(args) == 3 and args[2] == "--confirm"):
+        result = recover(args[0], args[1], len(args) == 3)
     elif operation == "status" and len(args) == 1:
         result = control("status", args[0])
     elif operation in {"stop", "restart"} and len(args) in {1, 2}:

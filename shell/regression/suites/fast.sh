@@ -1000,6 +1000,11 @@ runDockerPortHoppingTuicRealRegression() {
     PADM_DOCKER_HOPPING_TUIC_ONLY=1 runDockerPortHoppingTargetRealRegression
 }
 registerRegressionFunctionLeaf docker-port-hopping-tuic-real runDockerPortHoppingTuicRealRegression
+runDockerPortHoppingRecoveryRealRegression() {
+    PADM_DOCKER_HOPPING_TUIC_ONLY=1 PADM_DOCKER_HOPPING_RECOVERY_ONLY=1 \
+        runDockerPortHoppingTargetRealRegression
+}
+registerRegressionFunctionLeaf docker-port-hopping-recovery-real runDockerPortHoppingRecoveryRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
 registerRegressionFunctionLeaf docker-tun-real runDockerTunRealRegression
 registerRegressionFunctionLeaf docker-tproxy-management runDockerTProxyManagementRegression

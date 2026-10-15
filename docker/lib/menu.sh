@@ -231,7 +231,8 @@ dockerMenuPortHopping() {
         printf '\nDocker 端口跳跃（单个双族 Hy2/TUIC）\n'
         printf '%s\n' '1. 查看状态' '2. 保存配置' '3. 启用已保存配置' \
             '4. 停止跳跃' '5. 清除保存配置' \
-            '6. 输出活动分享链接（Hy2 范围/TUIC 首端口）' '7. 输出指定活动端口链接' '0. 返回'
+            '6. 输出活动分享链接（Hy2 范围/TUIC 首端口）' '7. 输出指定活动端口链接' \
+            '8. 核验并清理残留会话' '0. 返回'
         dockerSetupRead choice '请选择: ' || return 0
         case "${choice}" in
         0) return 0 ;;
@@ -262,6 +263,15 @@ dockerMenuPortHopping() {
             dockerSetupRead port '活动范围内的端口（0 返回）: ' &&
                 [[ -n "${port}" && "${port}" != 0 ]] || continue
             dockerMenuRun port-hopping share "${port}" || true
+            ;;
+        8)
+            dockerMenuRun port-hopping recover --preview || continue
+            dockerSetupRead answer '确认清理已核验的退出会话并保留保存配置？[y/N]: ' n || continue
+            case "${answer}" in
+            y|Y|yes|YES)
+                dockerMenuRun port-hopping recover --confirm PADM-DOCKER-HOPPING-RECOVER || true
+                ;;
+            esac
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

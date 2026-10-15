@@ -964,12 +964,151 @@ def invoke(command, phase, payload, accepted=True, response=None):
             process.wait()
 
 
+def recovery_cases(base):
+    namespace = MODULE["recover"].__globals__
+    native_run = namespace["run_interruptible"]
+    count = 0
+    live = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True)
+    try:
+        for case in ("preview", "clean", "live", "realm", "starting", "stage-hash",
+                     "child", "malformed-lock", "stage-file", "owner-replaced", "stage-replaced",
+                     "unknown", "busy"):
+            root = base / case
+            (root / "data/net").mkdir(parents=True, mode=0o700)
+            root.chmod(0o750)
+            (root / "locks").mkdir(mode=0o750)
+            lock = root / "locks/deployment.lock"
+            lock.mkdir(mode=0o750)
+            original = MODULE["identity"](os.getpid())
+            manager = dict(original, pid=2147483647, session_id=2147483647)
+            bash = dict(original, pid=2147483646, session_id=2147483647)
+            if case == "live":
+                manager = MODULE["identity"](live.pid)
+                bash = dict(manager)
+            if case == "realm":
+                manager["boot_id"] = "unknown-boot"
+            (lock / "pid").write_text(str(bash["pid"]) + "\n")
+            (lock / "pid").chmod(0o640)
+            stage = root / ".hopping-guarded.Abc123"
+            stage.mkdir(mode=0o700)
+            entrypoint = base / "entrypoint.sh"
+            entrypoint.write_text("dockerPortHoppingRecoveryInspect() { :; }\n")
+            entrypoint.chmod(0o600)
+            directory = MODULE["Directory"](str(root))
+            try:
+                paths = ["/", *[str(parent) for parent in reversed(root.parents) if str(parent) != "/"],
+                         str(root), str(root / "data"), str(root / "data/net")]
+                projection = [[path, *value] for path, value in zip(paths, directory.projection)]
+                directory.session(create=True)
+                lock_projection = [
+                    [str(root / "locks"), *MODULE["path_identity"]((root / "locks").stat())[:5]],
+                    [str(lock), *MODULE["path_identity"](lock.stat())[:5]],
+                    [str(lock / "pid"), *file_identity(lock / "pid"), str(bash["pid"])],
+                ]
+                target = {"listener_id": "hy2-main", "startup_binding": {"lock": lock_projection}}
+                if case == "malformed-lock":
+                    target["startup_binding"]["lock"] = []
+                audit = {"target": target, "child": {"Id": "b" * 64}, "directory": projection,
+                         "stage": str(stage), "saved": {"listener_id": "hy2-main",
+                         "range_start": 36561, "range_end": 36562,
+                         "ipv4": "198.18.1.1", "ipv6": "2001:db8:1::1"}}
+                owner = {"v": 1, "token": "a" * 64, "root": str(root), "manager": manager,
+                         "bash": bash, "stage": str(stage), "stage_sha256": digest({
+                             key: audit[key] for key in ("target", "child", "directory", "stage")}),
+                         "state": "starting" if case == "starting" else "active"}
+                if case == "stage-hash":
+                    owner["stage_sha256"] = "f" * 64
+                directory.write_owner(owner)
+                control = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                control.bind(f"/proc/self/fd/{directory.fd}/control.sock")
+                control.close()
+                (root / "data/net/.hopping-supervisor/control.sock").chmod(0o600)
+                (root / "data/net/.hopping-supervisor/service.log").touch(mode=0o600)
+            finally:
+                directory.close()
+            for name, value in (("prepared.json", canonical(target)), ("cid", b"b" * 64 + b"\n"),
+                                ("child.log", b""), ("supervised.json", b"{}\n")):
+                (stage / name).write_bytes(value)
+                (stage / name).chmod(0o600)
+            if case == "stage-file":
+                (stage / "prepared.json").unlink()
+                (stage / "prepared.json").symlink_to(entrypoint)
+            elif case == "unknown":
+                (stage / "supervised.next").touch()
+            elif case == "child":
+                audit["child"]["Id"] = "c" * 64
+            before = {str(path.relative_to(root)): file_identity(path)
+                      for path in root.rglob("*")}
+            calls, writes, child_exists = [], [], [True]
+
+            def run(arguments, pending, deadline=None):
+                MODULE["check_signal"](pending)
+                calls.append(arguments)
+                if arguments[0] == "bash":
+                    if case in {"owner-replaced", "stage-replaced"} and len(calls) == 2:
+                        path = (root / "data/net/.hopping-supervisor/owner.json"
+                                if case == "owner-replaced" else stage / "prepared.json")
+                        replacement = path.with_suffix(".replacement")
+                        replacement.write_bytes(path.read_bytes())
+                        replacement.chmod(0o600)
+                        replacement.replace(path)
+                    return subprocess.CompletedProcess(arguments, 0, canonical(audit), b"")
+                if arguments[4:7] == ["docker", "container", "rm"]:
+                    assert arguments[7:] == ["b" * 64] and child_exists[0], arguments
+                    child_exists[0] = False
+                    writes.append("rm")
+                    return subprocess.CompletedProcess(arguments, 0, b"b" * 64 + b"\n", b"")
+                assert arguments[4:7] == ["docker", "container", "ls"], arguments
+                return subprocess.CompletedProcess(arguments, 0, b"b" * 64 if child_exists[0] else b"", b"")
+
+            namespace["run_interruptible"] = run
+            busy_fd = None
+            try:
+                if case == "busy":
+                    busy_fd = os.open(root / "data/net/.hopping-supervisor/owner.json", os.O_RDONLY)
+                    MODULE["fcntl"].flock(busy_fd, MODULE["fcntl"].LOCK_EX | MODULE["fcntl"].LOCK_NB)
+                try:
+                    result = MODULE["recover"](str(root), str(entrypoint), case != "preview")
+                except (MODULE["Failure"], OSError):
+                    assert case not in {"preview", "clean"}, case
+                    assert not writes and child_exists[0], (case, writes)
+                    assert (root / "data/net/.hopping-supervisor").is_dir() and lock.is_dir(), case
+                    if case not in {"owner-replaced", "stage-replaced"}:
+                        assert {str(path.relative_to(root)): file_identity(path)
+                                for path in root.rglob("*")} == before, case
+                else:
+                    assert case in {"preview", "clean"}, case
+                    assert result == {"state": "recoverable" if case == "preview" else "stopped",
+                                      "saved": audit["saved"], "owner_sha256": digest(owner),
+                                      "child_id": "b" * 64, "stage": str(stage)}
+                    if case == "preview":
+                        assert not writes and child_exists[0]
+                        assert {str(path.relative_to(root)): file_identity(path)
+                                for path in root.rglob("*")} == before
+                    else:
+                        assert writes == ["rm"] and not child_exists[0]
+                        assert not stage.exists() and not lock.exists()
+                        assert not (root / "data/net/.hopping-supervisor").exists()
+                count += 1
+            finally:
+                if busy_fd is not None:
+                    os.close(busy_fd)
+                namespace["run_interruptible"] = native_run
+    finally:
+        namespace["run_interruptible"] = native_run
+        live.terminate()
+        live.wait(timeout=5)
+    return count
+
+
 def main():
     count = 0
     count += deadline_cases()
     with tempfile.TemporaryDirectory(prefix="padm-hopping-deployment-gate.") as directory:
         count += deployment_gate_cases(Path(directory))
         count += rollback_scope_cases(Path(directory))
+        count += recovery_cases(Path(directory))
     payload = {"target": {"listener_id": "hy2-main"}, "running": {
         "v": 1, "phase": "running", "nonce": "a" * 64,
         "child_id": "b" * 64, "request_sha256": "c" * 64, "seq": 2,

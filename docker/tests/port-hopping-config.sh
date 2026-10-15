@@ -216,6 +216,34 @@ chmod 0640 "${root}/secrets/tls/"*
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"business",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+# 原根路径保留编排挂载，完整备份在子进程退出时恢复，不干扰后续已有规格案例。
+(
+    cp -a -- "${root}" "${TEST_ROOT}/legacy-backup"
+    trap 'rm -rf -- "${root}"; mv -- "${TEST_ROOT}/legacy-backup" "${root}"' EXIT
+    rm -- "${root}/config/spec.json"
+    before=$(snapshot)
+    runEdit 15 --confirm PADM-DOCKER-EDIT
+    jq '.core.protocols[0].uuid="22222222-2222-4222-8222-222222222222"' \
+        "${TEST_ROOT}/base.json" >"${TEST_ROOT}/legacy-wrong.json"
+    runEdit 15 --spec "${TEST_ROOT}/legacy-wrong.json" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '缺少或错误原始规格接入改变在线状态'
+    runEdit 0 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
+    [[ -f "${root}/config/spec.json" ]] || fail '完整原始规格接入未保存受管规格'
+    runEdit 0 --port-hopping entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1 --confirm PADM-DOCKER-EDIT
+    assertSaved
+    [[ ! -e "${root}/data/net/.hopping-supervisor" ]] || fail '旧部署接入保存时自动启动监督'
+    for path in config/sing-box/config.json config/sing-box/users.base data/traffic/state.json; do
+        cmp -s -- "${root}/${path}" "${TEST_ROOT}/legacy-backup/${path}" ||
+            fail "旧部署接入或跳跃保存改写账号或累计: ${path}"
+    done
+    dockerPortHoppingSupervisorStart() {
+        [[ "$#" == 0 ]] || fail '旧部署接入后启动仍从 CLI 接收 tuple'
+        [[ "$(dockerPortHoppingSavedArguments)" == \
+            '["entry-hy2","36000","36002","198.18.1.1","2001:db8:1::1"]' ]] ||
+            fail '旧部署接入后启动未使用已保存参数'
+    }
+    dockerMain port-hopping start >"${LOG}" 2>&1 || fail '旧部署接入后无法启动已保存跳跃配置'
+)
 before=$(snapshot)
 runEdit 0 --port-hopping entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1 --preview
 for arguments in \
@@ -236,6 +264,39 @@ runEdit 15 --spec "${TEST_ROOT}/saved.json" --confirm PADM-DOCKER-EDIT
 runEdit 0 --port-hopping entry-hy2 36000 36002 198.18.1.1 2001:db8:1::1 --confirm PADM-DOCKER-EDIT
 assertSaved
 [[ ! -e "${root}/data/net/.hopping-supervisor" ]] || fail '保存配置自动启动监督'
+# 原投影摘要未核验前，不得用现场镜像启动带 NET_ADMIN 的预检。
+(
+    stage=$(mktemp -d "${root}/.hopping-guarded.XXXXXX")
+    trap 'rm -rf -- "${stage}"' EXIT
+    target=$(jq -cn --argjson saved "${SAVED}" \
+        '$saved + {target_port:35442,startup_binding:{lock:{}}}')
+    printf '%s\n' "${target}" >"${stage}/prepared.json"
+    jq -cn --argjson target "${target}" '{target:$target}' >"${stage}/supervised.json"
+    child=$(jq -cn '{Id:("b"*64),Image:("sha256:"+("c"*64)),
+      State:{Status:"exited",Running:false,ExitCode:0},
+      Config:{Labels:{"io.padm.hopping-supervised":("d"*64)},Hostname:"fixture"}}')
+    cid=$(jq -r '.Id' <<<"${child}")
+    printf '%s\n' "${cid}" >"${stage}/cid"
+    owner=$(jq -cn --arg root "${root}" --arg stage "${stage}" '{root:$root,
+      state:"active",stage:$stage,bash:{pid:99999},stage_sha256:("0"*64)}')
+    dockerPortHoppingTargetBindingCheck() { :; }
+    dockerPortHoppingGuardedContainer() { printf '%s\n' "${child}"; }
+    timeout() {
+        [[ "$1 $2 $3" == '-k 2 5' ]] || fail '恢复使用意外检查时限'
+        shift 3
+        "$@"
+    }
+    docker() {
+        case "$*" in
+        "container inspect ${cid}") printf '[%s]\n' "${child}" ;;
+        run\ *) : >"${TEST_ROOT}/recovery-untrusted-run" ;;
+        *) fail "恢复调用意外 Docker 命令: $*" ;;
+        esac
+    }
+    reject dockerPortHoppingRecoveryInspect "${owner}"
+    grep -Fq '恢复投影与原监督摘要不一致' "${LOG}" || fail '恢复未抵达原投影摘要核验'
+    [[ ! -e "${TEST_ROOT}/recovery-untrusted-run" ]] || fail '错误原投影仍启动 NET_ADMIN 预检'
+)
 before=$(snapshot)
 (
     trap dockerReleaseDeploymentLock EXIT
@@ -289,6 +350,33 @@ jq -e --argjson saved "${SAVED}" '.=={state:"stopped",saved:$saved}' "${LOG}" >/
         jq -n --argjson saved "${SAVED}" --argjson end "${STATUS_END:-36002}" \
             '{payload:{target:($saved + {range_end:$end,target_port:35442,protocol_id:3})}}'
     }
+    recoverPreview=$(jq -cn --argjson saved "${SAVED}" '{state:"recoverable",saved:$saved,
+      owner_sha256:("a"*64),child_id:("b"*64),stage:"/fixture-stage"}')
+    recoverConfirmed=$(jq -c '.state="stopped"' <<<"${recoverPreview}")
+    : >"${TEST_ROOT}/recover.calls"
+    dockerPortHoppingSupervisorRecover() {
+        if [[ "$#" == 0 ]]; then
+            printf 'preview\n' >>"${TEST_ROOT}/recover.calls"
+            printf '%s\n' "${recoverPreview}"
+        else
+            [[ "$#" == 1 && "$1" == --confirm ]] || fail '恢复收到未授权参数'
+            printf '%s\n' "$1" >>"${TEST_ROOT}/recover.calls"
+            printf '%s\n' "${recoverConfirmed}"
+        fi
+    }
+    [[ "$(dockerMain port-hopping recover --preview)" == "${recoverPreview}" ]] ||
+        fail '恢复预览未透传五键 JSON'
+    [[ "$(dockerMain port-hopping recover --confirm PADM-DOCKER-HOPPING-RECOVER)" == "${recoverConfirmed}" ]] ||
+        fail '恢复确认未透传五键 JSON'
+    for arguments in '' '--preview unexpected' '--confirm' '--confirm invalid' \
+        '--confirm PADM-DOCKER-HOPPING-RECOVER unexpected'; do
+        read -r -a words <<<"${arguments}"
+        actual=0
+        dockerMain port-hopping recover "${words[@]}" >"${LOG}" 2>&1 || actual=$?
+        [[ "${actual}" == 2 ]] || fail "recover 未拒绝非法参数: ${arguments}"
+    done
+    [[ "$(cat "${TEST_ROOT}/recover.calls")" == $'preview\n--confirm' ]] ||
+        fail '恢复参数分发错误或非法调用进入监督'
     [[ "$(dockerMain port-hopping start)" == '端口跳跃已启用。' ]] || fail '启动缺少成功提示'
     [[ "$(dockerMain port-hopping stop)" == '端口跳跃已停止；保存配置保留。' ]] || fail '停止缺少成功提示'
     [[ "$(dockerMain port-hopping share)" == \
@@ -405,6 +493,9 @@ cat >"${TEST_ROOT}/menu-cli.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${TEST_ROOT}/menu.calls"
+if [[ "$*" == 'port-hopping recover --preview' && "${MENU_RECOVER_PREVIEW_FAIL:-0}" == 1 ]]; then
+    exit 15
+fi
 if [[ "${1:-}" == edit ]]; then
     [[ -t 0 ]] || exit 19
     printf 'fixture-edit-confirm [y/N]: '
@@ -424,13 +515,15 @@ SH
 : >"${TEST_ROOT}/menu.calls"
 : >"${TEST_ROOT}/menu.writes"
 printf '%s\n' 11 1 6 7 0 7 36001 2 entry-tuic 36000 36002 198.18.1.1 2001:db8:1::1 y \
-    3 n 3 y 4 5 n 2 0 2 entry-hy2 0 0 0 |
+    3 n 3 y 4 5 n 8 n 8 y 2 0 2 entry-hy2 0 0 0 |
     timeout 10 script -qefc "bash '${TEST_ROOT}/menu-driver.sh'" /dev/null >"${LOG}" 2>&1 ||
     fail '端口跳跃菜单 PTY 分发失败'
 printf '%s\n' 'protocol list' 'port-hopping status' 'port-hopping share' \
     'port-hopping share 36001' \
     'edit --port-hopping entry-tuic 36000 36002 198.18.1.1 2001:db8:1::1' \
     'port-hopping start' 'port-hopping stop' 'edit --port-hopping-clear' \
+    'port-hopping recover --preview' 'port-hopping recover --preview' \
+    'port-hopping recover --confirm PADM-DOCKER-HOPPING-RECOVER' \
     >"${TEST_ROOT}/menu.expected"
 cmp -s "${TEST_ROOT}/menu.calls" "${TEST_ROOT}/menu.expected" || fail '菜单分发或取消行为错误'
 [[ "$(cat "${TEST_ROOT}/menu.writes")" == \
@@ -495,5 +588,20 @@ for input in $'11\n' $'11\n2\n' $'11\n3\n' $'11\n2\nentry-hy2\n' $'11\n7\n'; do
         fail '菜单 EOF 未返回'
     [[ "$(cat "${TEST_ROOT}/menu.calls")" == 'protocol list' ]] || fail '菜单 EOF 触发动作'
 done
+: >"${TEST_ROOT}/menu.calls"
+printf '11\n8\n' | timeout 5 bash "${TEST_ROOT}/menu-driver.sh" >"${LOG}" 2>&1 ||
+    fail '恢复确认 EOF 未返回'
+[[ "$(cat "${TEST_ROOT}/menu.calls")" == $'protocol list\nport-hopping recover --preview' ]] ||
+    fail '恢复确认 EOF 仍提交清理'
+: >"${TEST_ROOT}/menu.calls"
+printf '11\n8\n1\n0\n0\n' | MENU_RECOVER_PREVIEW_FAIL=1 \
+    timeout 5 bash "${TEST_ROOT}/menu-driver.sh" >"${LOG}" 2>&1 ||
+    fail '恢复预览失败后菜单未返回'
+[[ "$(cat "${TEST_ROOT}/menu.calls")" == \
+    $'protocol list\nport-hopping recover --preview\nport-hopping status' ]] ||
+    fail '恢复预览失败后仍读取确认或提交清理'
+if grep -Fq '确认清理已核验的退出会话并保留保存配置？' "${LOG}"; then
+    fail '恢复预览失败仍提示确认'
+fi
 
 printf 'docker-port-hopping-config-ok\n'

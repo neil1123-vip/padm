@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import concurrent.futures
+from functools import partial
 import hashlib
 import json
 import os
@@ -205,21 +206,137 @@ def initialization_cancel(work, root, docker, *, deadline=False):
             os.close(descriptor)
 
 
-def automatic_hopping(node, work, root, docker, enter, password):
-    def invoke(*arguments, accepted=True):
-        result = subprocess.run([
-            "env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
-            "bash", "-Eeuo", "pipefail", "-c",
-            '. "$1"; shift; trap dockerReleaseDeploymentLock EXIT; dockerMain "$@"',
-            "test", str(ROOT / "install-docker.sh"), *arguments],
-            capture_output=True, timeout=100)
-        if accepted:
-            assert result.returncode == 0, result.stderr.decode()
-        else:
-            assert result.returncode != 0 and not result.stdout, (
-                arguments, result.returncode, result.stdout, result.stderr)
-        return result.stdout
+def hopping_cli(root, docker, *arguments, accepted=True):
+    result = subprocess.run([
+        "env", "PADM_DOCKER_INSTALL_DIR=" + str(root), "DOCKER_HOST=" + docker[-1],
+        "bash", "-Eeuo", "pipefail", "-c",
+        '. "$1"; shift; trap dockerReleaseDeploymentLock EXIT; dockerMain "$@"',
+        "test", str(ROOT / "install-docker.sh"), *arguments],
+        capture_output=True, timeout=100)
+    if accepted:
+        assert result.returncode == 0, result.stderr.decode()
+    else:
+        assert result.returncode != 0 and not result.stdout, (
+            arguments, result.returncode, result.stdout, result.stderr)
+    return result.stdout
 
+
+def explicit_recovery(node, work, root, docker, enter, password, nat_before):
+    invoke = partial(hopping_cli, root, docker)
+    saved = json.loads((root / "config/spec.json").read_text())["port_hopping"]
+    active = False
+    try:
+        assert invoke("port-hopping", "start").decode().strip() == "端口跳跃已启用。"
+        active = True
+        session = root / "data/net/.hopping-supervisor"
+        owner = json.loads((session / "owner.json").read_text())
+        stage = Path(owner["stage"])
+        child_id = (stage / "cid").read_text().strip()
+        retained_owner = tree(session / "owner.json")
+        retained_lock = tree(root / "locks/deployment.lock")
+        module = runpy.run_path(str(ROOT / "docker/lib/port-hopping-supervisor.py"))
+        descriptors = []
+        try:
+            for key in ("manager", "bash"):
+                descriptors.append(module["pin"](owner[key]))
+            # Bash 无法处理 KILL；只观察原 pidfd 和真实子端，不伪造净停止回执。
+            signal.pidfd_send_signal(descriptors[1], signal.SIGKILL)
+            active = False
+            wait_ready(lambda: all(select.select([fd], [], [], 0)[0] for fd in descriptors), 15)
+            wait_ready(lambda: not inspect(docker, child_id)["State"]["Running"], 15)
+        finally:
+            for descriptor in descriptors:
+                os.close(descriptor)
+        child_state = inspect(docker, child_id)["State"]
+        assert child_state["Status"] == "exited" and child_state["ExitCode"] == 0
+        assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
+                   for table, previous in nat_before.items())
+        assert not (root / "data/net/port-hopping.state").exists()
+        assert tree(session / "owner.json") == retained_owner
+        assert tree(root / "locks/deployment.lock") == retained_lock
+        retained_stage = tree(stage)
+        for arguments in (("port-hopping", "status"), ("port-hopping", "stop"),
+                          ("port-hopping", "start"), ("restart",), ("down",), ("uninstall",)):
+            invoke(*arguments, accepted=False)
+            assert tree(session / "owner.json") == retained_owner and tree(stage) == retained_stage
+            assert tree(root / "locks/deployment.lock") == retained_lock
+            assert inspect(docker, child_id)["State"] == child_state
+        shutil.copyfile(session / "service.log", work / "bash-kill-supervisor.log")
+        (work / "bash-kill-stage.json").write_text(json.dumps(retained_stage, sort_keys=True))
+        # 显式恢复先审计原终态；预览不写现场，确认只回到 saved/stopped。
+        retained_tree = tree(root)
+        saved_files = {name: (root / name).read_bytes() for name in (
+            "config/spec.json", "deployment.json", "compose.json", "images.env",
+            "config/sing-box/users.base", "config/sing-box/config.json", "data/traffic/state.json")}
+        preview = json.loads(invoke("port-hopping", "recover", "--preview"))
+        assert preview == dict(state="recoverable", saved=saved,
+                               owner_sha256=module["digest"](owner),
+                               child_id=child_id, stage=str(stage))
+        assert tree(root) == retained_tree, "恢复预览改变原始现场"
+        assert inspect(docker, child_id)["State"] == child_state
+        assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
+                   for table, previous in nat_before.items())
+        recovered = json.loads(invoke("port-hopping", "recover", "--confirm",
+                                     "PADM-DOCKER-HOPPING-RECOVER"))
+        assert recovered == {**preview, "state": "stopped"}
+        assert not session.exists() and not stage.exists()
+        assert not (root / "locks/deployment.lock").exists()
+        assert not (root / "data/net/port-hopping.state").exists()
+        assert not command(docker + ["ps", "-aq", "--filter", "id=" + child_id]).strip()
+        assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
+                   for table, previous in nat_before.items())
+        assert all((root / name).read_bytes() == value for name, value in saved_files.items())
+        stopped_status = json.loads(invoke("port-hopping", "status"))
+        assert stopped_status == dict(state="stopped", saved=saved)
+        assert not list(root.glob(".hopping-guarded.*"))
+        # 新 start 必须另建挑战与全部运行代次，再用新 QUIC 连接证明双族业务。
+        assert invoke("port-hopping", "start").decode().strip() == "端口跳跃已启用。"
+        active = True
+        new_owner = json.loads((session / "owner.json").read_text())
+        assert new_owner["state"] == "active"
+        assert all(new_owner[key] != owner[key] for key in ("token", "manager", "bash", "stage"))
+        assert all(module["identity"](new_owner[key]["pid"]) == new_owner[key]
+                   for key in ("manager", "bash"))
+        new_stage = Path(new_owner["stage"])
+        new_child_id = (new_stage / "cid").read_text().strip()
+        assert new_child_id != child_id and inspect(docker, new_child_id)["State"]["Running"]
+        new_owner_tree = tree(session / "owner.json")
+        invoke("port-hopping", "recover", "--preview", accepted=False)
+        assert tree(session / "owner.json") == new_owner_tree
+        assert inspect(docker, new_child_id)["State"]["Running"]
+        authentication(node, root, enter, "explicit-recovered", password,
+                       "44444444-4444-4444-8444-444444444444", "old", server_port=30000)
+        assert invoke("port-hopping", "stop").decode().strip() == "端口跳跃已停止；保存配置保留。"
+        active = False
+        assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
+                   for table, previous in nat_before.items())
+        assert not session.exists() and not new_stage.exists()
+        assert not (root / "locks/deployment.lock").exists()
+        assert not (root / "data/net/port-hopping.state").exists()
+        assert not list(root.glob(".hopping-guarded.*"))
+        assert not command(docker + ["ps", "-aq", "--filter",
+                                    "label=io.padm.hopping-supervised"]).strip()
+        assert json.loads(invoke("port-hopping", "status")) == stopped_status
+        return dict(
+            bash_kill=dict(owner=owner, child_id=child_id, child_state=child_state,
+                           child_retained=True, state_removed=True, nat_restored=True,
+                           session_retained=True, stage_retained=True,
+                           deployment_lock_retained=True, stale_commands_refused=True,
+                           automatic_recovery_verified=False),
+            explicit_recovery=dict(
+                preview=preview, confirmed=recovered, preview_unchanged=True,
+                old_child_removed=True, saved_config_preserved=True,
+                stopped_status=stopped_status, new_owner=new_owner,
+                new_child_id=new_child_id, new_session_generation=True,
+                active_owner_recovery_refused=True, dual_family_new_connections=True,
+                final_stop_clean=True))
+    finally:
+        if active:
+            invoke("port-hopping", "stop")
+
+
+def automatic_hopping(node, work, root, docker, enter, password):
+    invoke = partial(hopping_cli, root, docker)
     tables = {"ipv4": "iptables", "ipv6": "ip6tables"}
     nat_before = {table: command([table, "-w", "-t", "nat", "-S"])
                   for table in tables.values()}
@@ -306,54 +423,14 @@ def automatic_hopping(node, work, root, docker, enter, password):
         # 新进程形成新 QUIC 连接；不把既有 conntrack 会话的排空算作已验。
         authentication(node, root, enter, "auto-stopped", password, "wrong-password", (),
                        server_port=30000)
-        assert invoke("port-hopping", "start").decode().strip() == "端口跳跃已启用。"
-        active = True
-        session = root / "data/net/.hopping-supervisor"
-        owner = json.loads((session / "owner.json").read_text())
-        stage = Path(owner["stage"])
-        child_id = (stage / "cid").read_text().strip()
-        retained_owner = tree(session / "owner.json")
-        retained_lock = tree(root / "locks/deployment.lock")
-        module = runpy.run_path(str(ROOT / "docker/lib/port-hopping-supervisor.py"))
-        descriptors = []
-        try:
-            for key in ("manager", "bash"):
-                descriptors.append(module["pin"](owner[key]))
-            # Bash 无法处理 KILL；只观察原 pidfd 和真实子端，不伪造净停止回执。
-            signal.pidfd_send_signal(descriptors[1], signal.SIGKILL)
-            active = False
-            wait_ready(lambda: all(select.select([fd], [], [], 0)[0] for fd in descriptors), 15)
-            wait_ready(lambda: not inspect(docker, child_id)["State"]["Running"], 15)
-        finally:
-            for descriptor in descriptors:
-                os.close(descriptor)
-        child_state = inspect(docker, child_id)["State"]
-        assert child_state["Status"] == "exited"
-        assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
-                   for table, previous in nat_before.items())
-        assert not (root / "data/net/port-hopping.state").exists()
-        assert tree(session / "owner.json") == retained_owner
-        assert tree(root / "locks/deployment.lock") == retained_lock
-        retained_stage = tree(stage)
-        for arguments in (("port-hopping", "status"), ("port-hopping", "stop"),
-                          ("port-hopping", "start"), ("restart",), ("down",), ("uninstall",)):
-            invoke(*arguments, accepted=False)
-            assert tree(session / "owner.json") == retained_owner and tree(stage) == retained_stage
-            assert tree(root / "locks/deployment.lock") == retained_lock
-            assert inspect(docker, child_id)["State"] == child_state
-        shutil.copyfile(session / "service.log", work / "bash-kill-supervisor.log")
-        (work / "bash-kill-stage.json").write_text(json.dumps(retained_stage, sort_keys=True))
+        recovery = explicit_recovery(node, work, root, docker, enter, password, nat_before)
         evidence = dict(scope="supervised-hy2-client-auto-hopping", initialization_cancel=canceled,
                         initialization_deadline=expired,
                         client_config=config,
                         client_pid=client_pid, same_client_alive=True,
                         samples=samples, dual_family_both_ports=True,
                         stopped_new_connections_refused=True, nat_restored=True,
-                        bash_kill=dict(owner=owner, child_id=child_id, child_state=child_state,
-                                       child_retained=True, state_removed=True, nat_restored=True,
-                                       session_retained=True, stage_retained=True,
-                                       deployment_lock_retained=True, stale_commands_refused=True,
-                                       automatic_recovery_verified=False),
+                        **recovery,
                         native_host_verified=False, arm64_verified=False,
                         old_conntrack_revocation_verified=False)
         (work / "automatic-hopping.json").write_text(json.dumps(evidence, sort_keys=True))
@@ -1677,6 +1754,17 @@ dockerReleaseDeploymentLock
                 authentication(node, root, enter, "tuic-initial", old_password, new_password, "old")
                 nat_before = {tool: command([tool, "-w", "-t", "nat", "-S"], timeout=5)
                               for tool in ("iptables", "ip6tables")}
+                if os.environ.get("PADM_DOCKER_HOPPING_RECOVERY_ONLY") == "1":
+                    recovery = dict(
+                        scope="supervised-tuic-explicit-recovery", protocol_id=31,
+                        **explicit_recovery(node, work, root, docker, enter, old_password, nat_before),
+                        automatic_client_hopping_verified=False, native_host_verified=False,
+                        arm64_verified=False, old_conntrack_revocation_verified=False)
+                    (work / "explicit-recovery.json").write_text(json.dumps(recovery, sort_keys=True))
+                    print("docker-port-hopping-recovery-real-snapshot=" + json.dumps(dict(
+                        initial=proof, recovery=recovery,
+                        elapsed=round(time.monotonic() - started, 3)), sort_keys=True))
+                    return
                 independent = independent_supervisor(
                     node, work, root, docker, net_image["Id"], nat_before, enter,
                     old_password, new_password)

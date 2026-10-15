@@ -7687,6 +7687,54 @@ TUIC 已验双族基础口和范围首尾、分享、restart、update、rollback
 菜单 `7` 的 `0 返回` 已修复并由现有 PTY 覆盖；输入归档已清理，日志/result 保留。
 未重复 TUIC 上游阻塞探针或长生命周期矩阵，不升级完整协议管理状态。
 
+#### 5C.9e 受管跳跃残留显式恢复与旧完整规格接入
+
+把受管终态残留的核验、预览、确认清理和旧完整输入接入合为一个功能批，
+沿用单 sing-box、单个双族 Hy2/TUIC、无宿主集成的既有范围。
+`port-hopping recover --preview` 只读核验，确认使用
+`port-hopping recover --confirm PADM-DOCKER-HOPPING-RECOVER`；
+跳跃菜单 `8`“核验并清理残留会话”先预览再确认。
+
+只接受原 manager/Bash 代次均已结束、同 boot/namespace 归属的受管终态。
+已绑定的 stage 路径、child、target 与 root/data/net 投影一致，部署锁仍匹配，
+精确子容器已退出且退出码为 `0`，
+跳跃 state 已消失，双族 NAT 无本会话残留，才允许回收。
+活跃 owner、未知记录、非零退出、符号链接/文件集变化或资源漂移均拒绝并保留现场。
+核验/清理持目录描述符，拒绝本次期间替换；既有 `stage_sha256` 不记录
+stage/session 历史 inode，不能证明此前未发生同内容重建，合作锁不抵御任意特权替换。
+不借旧 JSON、环境变量或 tuple 授权，不杀未知进程，不宽删 NAT，不删除 conntrack。
+预览返回 `state:"recoverable"`，清理后返回 `state:"stopped"`，
+`saved` 始终保留完整范围；规格、账号与累计保持。
+恢复只回到保存且停用状态，再显式 `start` 以新代次、新 token 和新挑战启用。
+
+旧无 `config/spec.json` 部署复用现有
+`edit --spec <完整原始输入> --confirm PADM-DOCKER-EDIT`，
+先匹配真实部署接入受管输入，再保存跳跃配置。
+缺少输入或账号身份不匹配时拒绝且文件不变；匹配接入保留
+`users.base`、运行账号配置和流量累计，保存范围不自动启动，
+启动在预约锁内读取保存参数。不新增环境变量/tuple 或原生配置导入器。
+
+验收复用监督父端合同、已有配置事务和真实 KILL 终态夹具，
+覆盖预览无写、活跃/漂移拒绝、精确清理、旧完整输入接入及恢复后新会话双族业务。
+不另行启动已确认的内核/上游阻塞矩阵，不重复旧长生命周期集合；
+后续恢复改动优先 `docker-port-hopping-recovery-real`（Jobs 2），
+复用 TUIC 单端口连接和残留恢复，不重复 restart/update/rollback/down/uninstall；
+Hy2 自动跳跃继续 `docker-port-hopping-auto-real`。
+
+Docker Linux amd64 当前源码快照、复用工具镜像下，
+旧完整规格接入定向 25.819 秒通过；
+TUIC 恢复真实 53.793 秒（排队 174 ms）、
+Hy2 自动跳跃及恢复链 105.324 秒通过，均 Jobs 2。
+唯一一次集中完整合同 57/57 叶子组通过，含 141 项监督合同，
+入口 428.109 秒、内部 426.059 秒、Jobs 6/tmpfs、排队 335 ms、`cache_hit=false`。
+旧接入证据 `.tmp-regression-docker-e6625e2024734ed59ed12687f752d41a/`，
+TUIC 恢复证据 `.tmp-regression-docker-a174d0cc91994424b8ab30e9bc18bd79/`，
+Hy2 证据 `.tmp-regression-docker-61d6d498762d443caa42a4d367303e26/`，
+完整证据 `.tmp-regression-docker-7c7189dcb0f348d88174f898f342d922/`。
+本轮输入归档/清单与临时 selfcheck 已清理，结果和日志保留。
+daemon/boot/systemd/整机重启自动恢复、跨 boot 接管、旧连接排空、
+原生宿主/arm64/公网及完整跳跃管理继续 deferred，整体目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
