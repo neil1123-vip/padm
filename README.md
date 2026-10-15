@@ -226,7 +226,7 @@ TUIC 时长接受 1–6 位正整数加 `ms/s/m/h`，恢复推荐值为 `cubic/3
 沿用预览、确认、发布和失败恢复。完整协议管理及宿主集成组合仍未开放；TUIC 范围转发见下文。
 
 Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的模式、
-路径/Host、预设、XMUX、Padding、首部、四项原生 packet/stream limits 及同入口下行端口：
+路径/Host、预设、XMUX、Padding、首部、四项原生 packet/stream limits 及下行分离：
 
 ```bash
 padm-docker protocol xhttp-status entry-xhttp
@@ -236,6 +236,7 @@ padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-request-headers entry-xhttp '{"X-Trace":"edge value"}' --preview
 padm-docker edit --xhttp-request-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-download entry-xhttp 35444 --preview
+padm-docker edit --xhttp-download-settings entry-xhttp '{"address":"download.example.net","port":443,"security":"tls","server_name":"tls.example.net","host":"relay.example.net","path":"/down/path","mode":"auto","alpn":["h2"]}' --preview
 padm-docker edit --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
 padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
@@ -286,7 +287,23 @@ POST 的 gRPC Content-Type 和服务端下载响应的 SSE Content-Type；`packe
 Reality 公钥、short ID、SNI、路径、Host 和其它 XHTTP 参数，下行模式固定 `auto`。
 服务端配置不写入该客户端字段；主订阅、分享组和本地链接同步更新。
 预设、高级参数和推荐恢复保留绑定；复制/派生保留源入口绑定，新入口清除绑定，
-需自行登记新入口的额外端口。独立下行地址/身份、外部 TLS/H3/CDN 和完整管理仍为 `deferred`。
+需自行登记新入口的额外端口。
+
+菜单 `22` 或 `--xhttp-download-settings <入口 ID> <JSON>` 设置独立下行地址和身份，
+保存为 `xhttp.download`；与 `download_port` 互斥，设置任一形式会清除另一形式，
+菜单 `21` 和 `--xhttp-download-clear` 可清除两类绑定。对象必须完整显式指定
+`address`、`port`、`security`、`server_name`、`host`、`path`、`mode`。
+地址接受域名或严格 IPv4/IPv6，SNI 和 Host 使用域名，路径与上行约束相同；
+下行模式可选 `auto/stream-one/packet-up/stream-up`。
+`security=tls` 必须指定 `alpn:["h2"]` 或 `["h3"]`；
+`security=reality` 必须指定 43 位 base64url `public_key` 和 1–8 字节小写十六进制 `short_id`，
+不能混入另一安全类型的字段或其它高级参数。显式对象要求
+`x-padm-xhttp-download-settings`，状态新增 `download_settings`（缺省 `null`）。
+URI 使用对象自己的地址、安全身份和三项 XHTTP 字段，不继承上行高级参数；
+预设及其它编辑保留对象，复制/派生只清除新入口对象，服务端配置不写入客户端字段。
+本功能只管理客户端元数据，外部前置必须已部署并转回同一 XHTTP handler 及认证。
+不会自动建设 TLS/H3/CDN 拓扑，也不能将上下行指向无会话关联的独立后端；
+公网前置验收、其它 sc*、性能收益和完整管理继续 `deferred`。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；

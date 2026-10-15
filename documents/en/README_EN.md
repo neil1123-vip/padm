@@ -252,7 +252,7 @@ confirmation, publication, and recovery reuse the existing transaction.
 Full protocol management and host integration combinations remain deferred; TUIC range forwarding is described below.
 
 Docker `Protocols & entry → XHTTP management` manages mode, path/Host, presets,
-XMUX, Padding, headers, four native packet/stream limits, and a same-listener download port for
+XMUX, Padding, headers, four native packet/stream limits, and split upload/download for
 existing v3 Xray protocol `2` listeners:
 
 ```bash
@@ -263,6 +263,7 @@ padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-request-headers entry-xhttp '{"X-Trace":"edge value"}' --preview
 padm-docker edit --xhttp-request-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-download entry-xhttp 35444 --preview
+padm-docker edit --xhttp-download-settings entry-xhttp '{"address":"download.example.net","port":443,"security":"tls","server_name":"tls.example.net","host":"relay.example.net","path":"/down/path","mode":"auto","alpn":["h2"]}' --preview
 padm-docker edit --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
 padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
@@ -325,8 +326,28 @@ and other XHTTP parameters; download mode is always `auto`. Server configuration
 omits this client-only field. Local links, the main subscription, and share groups
 use the same output. Presets, advanced edits, and recommended defaults retain
 the binding. Copies and derivations keep the source binding but clear it on the
-new listener, which needs its own registered extra port. Independent download
-addresses/identities, external TLS/H3/CDN, and full management remain `deferred`.
+new listener, which needs its own registered extra port.
+
+Menu item `22` or `--xhttp-download-settings <listener ID> <JSON>` sets an explicit
+download address and identity in `xhttp.download`. It is mutually exclusive with
+`download_port`: setting either form clears the other, and item `21` or
+`--xhttp-download-clear` clears both. The complete object requires `address`,
+`port`, `security`, `server_name`, `host`, `path`, and `mode`. Address accepts a
+hostname or strict IPv4/IPv6; SNI and Host require hostnames, and path follows the
+upload rules. Download mode accepts `auto/stream-one/packet-up/stream-up`.
+TLS requires `alpn:["h2"]` or `["h3"]`; Reality requires a 43-character base64url
+`public_key` and a `short_id` of 1-8 bytes in lowercase hexadecimal. Fields for
+the other security type and additional advanced fields are rejected. The object
+requires `x-padm-xhttp-download-settings`; status adds `download_settings`
+(`null` by default). URI output uses this object's address, security identity,
+and three XHTTP fields without inheriting upload advanced parameters. Other
+edits retain the object; copies and derivations clear it only on the new
+listener, and server configuration omits these client fields.
+This manages client metadata only. An external frontend must already exist and
+relay to the same XHTTP handler and authentication. It does not construct a
+TLS/H3/CDN topology or connect unrelated backends without shared sessions.
+Public frontend acceptance, other sc* fields, performance benefits, and full
+management remain `deferred`.
 
 The same site menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:

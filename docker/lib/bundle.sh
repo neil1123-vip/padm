@@ -459,6 +459,9 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].core.protocols[]; (.xhttp // {}) | has("download_port")) then
             $schema[0]["x-padm-xhttp-download"] == true
           else true end) and
+          (if any($spec[0].core.protocols[]; (.xhttp // {}) | has("download")) then
+            $schema[0]["x-padm-xhttp-download-settings"] == true
+          else true end) and
           (if any($spec[0].core.protocols[]; (.xhttp // {}) |
             has("scMaxEachPostBytes") or has("scMinPostsIntervalMs") or
               has("scMaxBufferedPosts") or has("scStreamUpServerSecs")) then

@@ -111,8 +111,8 @@ runNonTty() {
 }
 
 waitForText() {
-    local pattern=$1 file=$2 count=${3:-1} attempt
-    for ((attempt = 0; attempt < 9000; attempt++)); do
+    local pattern=$1 file=$2 count=${3:-1} deadline=$((SECONDS + 15))
+    while ((SECONDS < deadline)); do
         if [[ -f "${file}" ]] && [[ "$(grep -Fc "${pattern}" "${file}" || true)" -ge "${count}" ]]; then
             return 0
         fi
@@ -130,7 +130,10 @@ targetReply() {
     local prompt=$1 input=$2 count
     count=$((${targetPrompts["${prompt}"]:-0} + 1))
     targetPrompts["${prompt}"]=${count}
-    waitForText "${prompt}" "${CONTROL_LOG}" "${count}" || exit 31
+    waitForText "${prompt}" "${CONTROL_LOG}" "${count}" || {
+        printf 'PTY 等待提示超时: %s（第 %s 次）\n' "${prompt}" "${count}" >&2
+        exit 31
+    }
     assertNoLock
     [[ ! -e "${TLS_WIZARD_ROOT}/locks/deployment.lock" ]] || exit 32
     printf '%s' "${input}" >&3
@@ -520,7 +523,7 @@ runCdnDriver() {
 }
 
 runXhttpDriver() {
-    local scenario=$1 choice answer field grpc sse post interval buffered seconds
+    local scenario=$1 choice answer field grpc sse post interval buffered seconds security
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'9\n'
     targetReply 'Docker 协议与入口' $'10\n'
@@ -715,7 +718,7 @@ runXhttpDriver() {
         fi
         ;;
     status-failed)
-        for choice in 2 8 9 10 11 12 13 14 15 16 17 18 19 20 21; do
+        for choice in 2 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22; do
             targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
         done
         ;;
@@ -813,6 +816,65 @@ runXhttpDriver() {
             targetReply 'Docker XHTTP 管理' $'20\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply '下行端口（已登记的额外非默认分享端口，0 返回，空值取消）' "${answer}"
+        done
+        ;;
+    esac
+    case "${scenario}" in
+    flow|failed|invalid)
+        for security in tls reality; do
+            [[ "${scenario}" == flow || "${security}" == tls ]] || continue
+            targetReply 'Docker XHTTP 管理' $'22\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+            if [[ "${security}" == tls ]]; then
+                targetReply '下行地址（0 返回，空值取消）' $'download.example.net\n'
+                answer=
+                [[ "${scenario}" != invalid ]] || answer=not-port
+                targetReply '下行端口 [443，0 返回]' "${answer}"$'\n'
+                targetReply '下行安全（tls/reality，0 返回）[tls]' $'\n'
+                targetReply '下行 Server Name（0 返回，空值取消）' $'tls.example.net\n'
+                targetReply '下行 Host（0 返回，空值取消）' $'relay.example.net\n'
+                targetReply '下行路径（以 / 开头，0 返回，空值取消）' $'/down/path\n'
+                targetReply '下行模式（auto/stream-one/packet-up/stream-up，0 返回）[auto]' $'\n'
+                answer=
+                [[ "${scenario}" != flow ]] || answer=h3
+                targetReply '下行 ALPN（h2/h3，0 返回）[h2]' "${answer}"$'\n'
+            else
+                targetReply '下行地址（0 返回，空值取消）' $'192.0.2.10\n'
+                targetReply '下行端口 [443，0 返回]' $'8443\n'
+                targetReply '下行安全（tls/reality，0 返回）[tls]' $'reality\n'
+                targetReply '下行 Server Name（0 返回，空值取消）' $'reality.example.net\n'
+                targetReply '下行 Host（0 返回，空值取消）' $'reality-relay.example.net\n'
+                targetReply '下行路径（以 / 开头，0 返回，空值取消）' $'/reality/down\n'
+                targetReply '下行模式（auto/stream-one/packet-up/stream-up，0 返回）[auto]' $'stream-one\n'
+                targetReply '下行 Reality public_key（0 返回，空值取消）' $'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+                targetReply '下行 Reality short_id（0 返回，空值取消）' $'0123456789abcdef\n'
+            fi
+        done
+        ;;
+    cancel)
+        targetReply 'Docker XHTTP 管理' $'22\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'0\n'
+        for answer in $'\n' $'\003'; do
+            targetReply 'Docker XHTTP 管理' $'22\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+            targetReply '下行地址（0 返回，空值取消）' "${answer}"
+        done
+        for security in tls reality; do
+            targetReply 'Docker XHTTP 管理' $'22\n'
+            targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+            targetReply '下行地址（0 返回，空值取消）' $'download.example.net\n'
+            targetReply '下行端口 [443，0 返回]' $'\n'
+            targetReply '下行安全（tls/reality，0 返回）[tls]' "${security}"$'\n'
+            targetReply '下行 Server Name（0 返回，空值取消）' $'tls.example.net\n'
+            targetReply '下行 Host（0 返回，空值取消）' $'relay.example.net\n'
+            targetReply '下行路径（以 / 开头，0 返回，空值取消）' $'/down/path\n'
+            targetReply '下行模式（auto/stream-one/packet-up/stream-up，0 返回）[auto]' $'\n'
+            if [[ "${security}" == tls ]]; then
+                targetReply '下行 ALPN（h2/h3，0 返回）[h2]' $'\004'
+            else
+                targetReply '下行 Reality public_key（0 返回，空值取消）' $'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+                targetReply '下行 Reality short_id（0 返回，空值取消）' $'0\n'
+            fi
         done
         ;;
     esac
@@ -3015,6 +3077,21 @@ edit)
     elif [[ "${2:-}" == --xhttp-download-clear ]]; then
         [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
         exit "${XHTTP_EDIT_STATUS:-0}"
+    elif [[ "${2:-}" == --xhttp-download-settings ]]; then
+        [[ "$#" -eq 4 && "$3" == entry-xhttp ]] || exit 2
+        jq -e '
+          if .security == "tls" then
+            (.port == 443 or .port == "not-port") and
+            (.alpn == ["h2"] or .alpn == ["h3"]) and
+            (del(.port,.alpn) == {
+              address:"download.example.net",security:"tls",server_name:"tls.example.net",
+              host:"relay.example.net",path:"/down/path",mode:"auto"})
+          else . == {
+            address:"192.0.2.10",port:8443,security:"reality",server_name:"reality.example.net",
+            host:"reality-relay.example.net",path:"/reality/down",mode:"stream-one",
+            public_key:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",short_id:"0123456789abcdef"}
+          end' <<<"$4" >/dev/null || exit 2
+        exit "${XHTTP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --xhttp-limits ]]; then
         [[ "$#" -eq 7 && "$3" == entry-xhttp && -n "$4" && -n "$5" && -n "$6" && -n "$7" ]] || exit 2
         exit "${XHTTP_EDIT_STATUS:-0}"
@@ -4741,7 +4818,7 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers-clear entry-xhttp'
         ;;
     cancel)
-        for ((xhttpStatus = 0; xhttpStatus < 4 * 7 + 2 * (3 + 1 + 2) + 3 + 8 + 5 + 5; xhttpStatus++)); do
+        for ((xhttpStatus = 0; xhttpStatus < 4 * 7 + 2 * (3 + 1 + 2) + 3 + 8 + 5 + 5 + 5; xhttpStatus++)); do
             expectedXhttp+=$'\nprotocol xhttp-status'
         done
         grep -Fq '无效选项，请重新选择。' "${CONTROL_LOG}" || fail 'XHTTP 无效选项未留在菜单'
@@ -4758,7 +4835,7 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits-clear entry-xhttp'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers entry-xhttp {"x-trace":"edge value"}'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers-clear entry-xhttp'
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 17 ]] ||
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 18 ]] ||
             fail 'XHTTP 编辑失败未显示错误并继续读取'
         ;;
     invalid)
@@ -4768,14 +4845,14 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-headers entry-xhttp false not-bool'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits entry-xhttp not-number 5 16 1-2'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers entry-xhttp not-json'
-        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 10 ]] ||
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 11 ]] ||
             fail 'XHTTP 非法参数未保留菜单'
         ;;
     status-failed)
-        for ((xhttpStatus = 0; xhttpStatus < 15; xhttpStatus++)); do
+        for ((xhttpStatus = 0; xhttpStatus < 16; xhttpStatus++)); do
             expectedXhttp+=$'\nprotocol xhttp-status'
         done
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 17 ]] ||
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 18 ]] ||
             fail 'XHTTP 状态失败仍提示变更或未恢复菜单'
         ! grep -Fq 'XHTTP 入口 ID（0 返回）' "${CONTROL_LOG}" ||
             fail 'XHTTP 状态失败仍读取变更入口'
@@ -4803,6 +4880,12 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-download entry-xhttp '"${downloadPort}"
         [[ "${xhttpCase}" == invalid ]] ||
             expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-download-clear entry-xhttp'
+        downloadPort=443 xhttpAlpn=h2
+        [[ "${xhttpCase}" != invalid ]] || downloadPort='"not-port"'
+        [[ "${xhttpCase}" != flow ]] || xhttpAlpn=h3
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-download-settings entry-xhttp {"address":"download.example.net","port":'"${downloadPort}"',"security":"tls","server_name":"tls.example.net","host":"relay.example.net","path":"/down/path","mode":"auto","alpn":["'"${xhttpAlpn}"'"]}'
+        [[ "${xhttpCase}" != flow ]] ||
+            expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-download-settings entry-xhttp {"address":"192.0.2.10","port":8443,"security":"reality","server_name":"reality.example.net","host":"reality-relay.example.net","path":"/reality/down","mode":"stream-one","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","short_id":"0123456789abcdef"}'
         ;;
     esac
     expectedXhttp+=$'\nprotocol xhttp-status'
@@ -4818,12 +4901,14 @@ for xhttpCase in flow cancel failed invalid status-failed; do
         grep -Fq '13. 恢复缺省 packet/stream' "${CONTROL_LOG}" || fail 'XHTTP packet/stream 菜单入口缺失'
     for label in '14. 设置模式' '15. 设置路径和 Host' '16. 统一高级参数' '17. 恢复推荐默认' \
         '18. 设置请求首部（JSON）' '19. 清除请求首部' \
-        '20. 设置下行端口' '21. 关闭上下行分离'; do
+        '20. 设置下行端口' '21. 关闭上下行分离' '22. 设置独立下行'; do
         grep -Fq "${label}" "${CONTROL_LOG}" || fail "XHTTP 菜单缺少 ${label}"
     done
     if [[ "${xhttpCase}" != status-failed ]]; then
         grep -Fq '已登记的额外非默认分享端口' "${CONTROL_LOG}" &&
             grep -Fq '同服务器的 Reality 后端' "${CONTROL_LOG}" || fail 'XHTTP 下行菜单未说明支持范围'
+        grep -Fq '外部前置必须回到同一 XHTTP 会话后端' "${CONTROL_LOG}" &&
+            grep -Fq '本菜单不自动部署 CDN' "${CONTROL_LOG}" || fail 'XHTTP 独立下行菜单未说明支持范围'
     fi
 done
 unset XHTTP_EDIT_STATUS XHTTP_STATUS

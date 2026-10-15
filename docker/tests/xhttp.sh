@@ -253,7 +253,7 @@ dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-defaults.json" ||
 fi
 
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == validation || "${XHTTP_SCOPE}" == edit-download ]]; then
-# 下行只选择同入口已登记的非默认别名，不接受任意地址或独立身份。
+# 同入口别名与独立下行身份互斥；外部对象完整显式指定，不继承上行参数。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy
 import json
@@ -273,6 +273,58 @@ for index, port in enumerate((35444, 25443, 35443, 25447, 35447, 45444,
     assert validator.is_valid(value) == (index < 6), (index, port)
     (root / f"download-{index}.json").write_text(json.dumps(value), encoding="utf-8")
     cases.append((index, int(index == 0)))
+tls = dict(address="download.example.net", port=443, security="tls",
+           server_name="tls.example.net", host="relay.example.net", path="/down/path",
+           mode="auto", alpn=["h2"])
+reality = dict(tls, security="reality", public_key="A" * 43, short_id="0123456789abcdef")
+del reality["alpn"]
+
+def external(name, settings, valid, port=None):
+    value = copy.deepcopy(base)
+    transport = next(p for p in value["core"]["protocols"] if p["listener_id"] == "entry-xhttp")["xhttp"]
+    transport["download"] = settings
+    if port is not None:
+        transport["download_port"] = port
+    assert validator.is_valid(value) == valid, name
+    name = f"settings-{name}"
+    (root / f"download-{name}.json").write_text(json.dumps(value), encoding="utf-8")
+    cases.append((name, int(valid)))
+
+external("tls-h2", tls, True)
+external("tls-h3", dict(tls, alpn=["h3"]), True)
+external("reality", reality, True)
+external("reality-key-last", dict(reality, public_key="A" * 42 + "B"), True)
+external("ipv4", dict(tls, address="192.0.2.10", port=65535), True)
+external("ipv6", dict(tls, address="2001:db8::10", port=1), True)
+for mode in ("stream-one", "packet-up", "stream-up"):
+    external(mode, dict(tls, mode=mode), True)
+for index, settings in enumerate((None, [], {}, True)):
+    external(f"shape-{index}", settings, False)
+for field in tls:
+    value = dict(tls)
+    del value[field]
+    external(f"missing-{field}", value, False)
+for field, bad in (("address", "https://download.example.net"), ("address", "192.168.001.1"),
+                   ("address", "256.0.0.1"), ("address", "[2001:db8::1]"), ("address", "host"),
+                   ("port", True), ("port", "443"), ("port", 0), ("port", 65536),
+                   ("security", "none"), ("mode", "invalid"), ("mode", "auto\n"),
+                   ("server_name", "192.0.2.1"), ("server_name", "tls.example.net\n"),
+                   ("host", "https://relay.example.net"), ("path", "no-slash"),
+                   ("path", "/down/path\n"), ("alpn", "h2"), ("alpn", []),
+                   ("alpn", ["h2", "h3"]), ("alpn", ["http/1.1"])):
+    external(f"{field}-{len(cases)}", dict(tls, **{field: bad}), False)
+for field, bad in (("public_key", "A" * 43), ("short_id", "00"),
+                   ("headers", {"X-Test": "unexpected"}), ("extra", True)):
+    external(f"tls-extra-{field}", dict(tls, **{field: bad}), False)
+for field in ("public_key", "short_id"):
+    value = dict(reality)
+    del value[field]
+    external(f"reality-missing-{field}", value, False)
+for field, bad in (("public_key", "A" * 42), ("public_key", "A" * 42 + "="),
+                   ("short_id", ""), ("short_id", "0"),
+                   ("short_id", "AB"), ("short_id", "00" * 9), ("alpn", ["h2"])):
+    external(f"reality-{field}-{len(cases)}", dict(reality, **{field: bad}), False)
+external("both", tls, False, 35444)
 (root / "download-cases.tsv").write_text("".join(f"{index}\t{valid}\n" for index, valid in cases))
 PY
 while IFS=$'\t' read -r name valid; do
@@ -289,6 +341,17 @@ if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/download-0.json" 2>
     fail '旧包接受未支持的下行绑定'
 fi
 dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${XHTTP_SPEC}" || fail '旧包误拒无下行绑定规格'
+cp "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/download-settings-tls-h2.json" ||
+    fail '当前包拒绝独立下行身份'
+jq 'del(."x-padm-xhttp-download-settings")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    >"${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
+if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/download-settings-tls-h2.json" 2>/dev/null; then
+    fail '旧包接受未支持的独立下行身份'
+fi
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/download-0.json" ||
+    fail '缺独立下行能力的旧包误拒同入口下行别名'
+dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${XHTTP_SPEC}" || fail '旧包误拒无独立下行规格'
 cp "${PROJECT_ROOT}/docker/contracts/configure.schema.json" "${COMPAT_BUNDLE}/docker/contracts/configure.schema.json"
 fi
 
@@ -336,11 +399,12 @@ xhttpEdit() {
 xhttpAssert() {
     local mode=$1 xmux=$2 padding=${3:-null} grpcHeader=${4:-null} sseHeader=${5:-null} limits=${6-}
     local path=${7:-/padm/path-1} host=${8:-www.example.com} requestHeaders=${9:-null} downloadPort=${10:-null}
+    local downloadSettings=${11:-null}
     limits=${limits:-'{}'}
     jq -en --arg mode "${mode}" --arg path "${path}" --arg host "${host}" \
         --argjson xmux "${xmux}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
-        --argjson headers "${requestHeaders}" --argjson download "${downloadPort}" \
+        --argjson headers "${requestHeaders}" --argjson download "${downloadPort}" --argjson settings "${downloadSettings}" \
         --slurpfile before "${TEST_ROOT}/installed-before.json" \
         --slurpfile after "${root}/config/spec.json" '
       def limits: with_entries(select(.key | IN("scMaxEachPostBytes","scMinPostsIntervalMs",
@@ -348,7 +412,7 @@ xhttpAssert() {
       def stable: .core.protocols |= map(if .listener_id == "entry-xhttp"
         then del(.xhttp.mode,.xhttp.path,.xhttp.host,.xhttp.xmux,.xhttp.xPaddingBytes,.xhttp.noGRPCHeader,.xhttp.noSSEHeader,
           .xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,.xhttp.scMaxBufferedPosts,
-          .xhttp.scStreamUpServerSecs,.xhttp.headers,.xhttp.download_port) else . end);
+          .xhttp.scStreamUpServerSecs,.xhttp.headers,.xhttp.download_port,.xhttp.download) else . end);
       ($before[0] | stable) == ($after[0] | stable) and
       any($after[0].core.protocols[]; .listener_id == "entry-xhttp" and
         .xhttp.path == $path and .xhttp.host == $host and
@@ -359,7 +423,8 @@ xhttpAssert() {
         (.xhttp | has("noGRPCHeader")) == ($grpc != null) and
         (.xhttp | has("noSSEHeader")) == ($sse != null) and (.xhttp | limits) == $limits and
         .xhttp.headers == $headers and (.xhttp | has("headers")) == ($headers != null) and
-        .xhttp.download_port == $download and (.xhttp | has("download_port")) == ($download != null))
+        .xhttp.download_port == $download and (.xhttp | has("download_port")) == ($download != null) and
+        .xhttp.download == $settings and (.xhttp | has("download")) == ($settings != null))
     ' >/dev/null || fail 'XHTTP 改写其它规格、账户或端口'
     jq -en --arg mode "${mode}" --arg path "${path}" --arg host "${host}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
@@ -387,7 +452,7 @@ xhttpAssert() {
         .streamSettings.xhttpSettings.noGRPCHeader == $grpc and
         .streamSettings.xhttpSettings.noSSEHeader == $sse and
         .streamSettings.xhttpSettings.headers == $headers and
-        (.streamSettings.xhttpSettings | has("download_port") or has("downloadSettings") | not) and
+        (.streamSettings.xhttpSettings | has("download_port") or has("download") or has("downloadSettings") | not) and
         (.streamSettings.xhttpSettings | has("headers")) == ($headers != null) and
         (if $padding == null then (.streamSettings.xhttpSettings | has("xPaddingBytes") | not) else true end) and
         (.streamSettings.xhttpSettings | has("noGRPCHeader")) == ($grpc != null) and
@@ -401,19 +466,20 @@ xhttpAssert() {
         read -r original installed <<<"${pair}"
         cmp -s "${TEST_ROOT}/${original}" "${root}/${installed}" || fail "XHTTP 改变 ${installed}"
     done
-    python3 - "${mode}" "${xmux}" "${padding}" "${grpcHeader}" "${sseHeader}" "${limits}" "${TEST_ROOT}" "${root}" "${TOKEN}" "${path}" "${host}" "${requestHeaders}" "${downloadPort}" <<'PY'
+    python3 - "${mode}" "${xmux}" "${padding}" "${grpcHeader}" "${sseHeader}" "${limits}" "${TEST_ROOT}" "${root}" "${TOKEN}" "${path}" "${host}" "${requestHeaders}" "${downloadPort}" "${downloadSettings}" <<'PY'
 import json
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-mode, encoded, encoded_padding, encoded_grpc, encoded_sse, encoded_limits, temp, installed, token, path, host, encoded_headers, encoded_download = sys.argv[1:]
+mode, encoded, encoded_padding, encoded_grpc, encoded_sse, encoded_limits, temp, installed, token, path, host, encoded_headers, encoded_download, encoded_settings = sys.argv[1:]
 xmux = json.loads(encoded)
 padding = json.loads(encoded_padding)
 grpc, sse = json.loads(encoded_grpc), json.loads(encoded_sse)
 limits = json.loads(encoded_limits)
 headers = json.loads(encoded_headers)
 download = json.loads(encoded_download)
+settings = json.loads(encoded_settings)
 root, temp = Path(installed), Path(temp)
 entry = next(p for p in json.loads((root / "config/spec.json").read_text())["core"]["protocols"]
              if p["listener_id"] == "entry-xhttp")
@@ -451,6 +517,16 @@ for before, after in ((temp / "links-before.txt", root / "data/subscription" / t
                 realitySettings=dict(serverName=entry["reality"]["server_name"], fingerprint="chrome",
                                     publicKey=entry["reality"]["public_key"], shortId=entry["reality"]["short_id"]),
                 xhttpSettings=transport)
+        if settings is not None:
+            security = dict(serverName=settings["server_name"], fingerprint="chrome")
+            if settings["security"] == "tls":
+                security["alpn"] = settings["alpn"]
+            else:
+                security.update(publicKey=settings["public_key"], shortId=settings["short_id"])
+            extra["downloadSettings"] = dict(
+                address=settings["address"], port=settings["port"], network="xhttp", security=settings["security"],
+                xhttpSettings={key: settings[key] for key in ("path", "host", "mode")},
+                **{settings["security"] + "Settings": security})
         if extra:
             assert "extra=%7B" in second and json.loads(actual.pop("extra")[0]) == extra
         assert actual == query, (actual, query)
@@ -461,7 +537,7 @@ PY
     jq -e --arg mode "${mode}" --arg path "${path}" --arg host "${host}" \
         --argjson xmux "${xmux}" --argjson padding "${padding}" \
         --argjson grpc "${grpcHeader}" --argjson sse "${sseHeader}" --argjson limits "${limits}" \
-        --argjson headers "${requestHeaders}" --argjson download "${downloadPort}" '
+        --argjson headers "${requestHeaders}" --argjson download "${downloadPort}" --argjson settings "${downloadSettings}" '
       {scMaxEachPostBytes:1000000,scMinPostsIntervalMs:30,scMaxBufferedPosts:30,
         scStreamUpServerSecs:"20-80"} as $defaults |
       ($defaults + ($limits | with_entries(select(.value != 0 and .value != "0-0")))) as $effective |
@@ -471,7 +547,7 @@ PY
         noGRPCHeader:($grpc // false),noSSEHeader:($sse // false),
         grpc_header_explicit:($grpc != null),sse_header_explicit:($sse != null),
         requestHeaders:($headers // {}),request_headers_explicit:($headers != null),
-        download_port:$download,download_enabled:($download != null),
+        download_port:$download,download_settings:$settings,download_enabled:($download != null or $settings != null),
         limits:$effective,limits_explicit:($limits | length > 0)}]
     ' "${STDOUT}" >/dev/null || fail 'XHTTP 状态没有区分缺省与显式参数'
     [[ "$(stat -c %a "${root}/config/spec.json")" == 600 &&
@@ -479,6 +555,8 @@ PY
 }
 
 defaults='{"maxConcurrency":"16-32","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}'
+downloadTLS='{"address":"download.example.net","port":443,"security":"tls","server_name":"tls.example.net","host":"relay.example.net","path":"/down/path","mode":"auto","alpn":["h2"]}'
+downloadReality='{"address":"192.0.2.10","port":8443,"security":"reality","server_name":"reality.example.net","host":"reality-relay.example.net","path":"/reality/down","mode":"stream-one","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","short_id":"0123456789abcdef"}'
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == edit || "${XHTTP_SCOPE}" == edit-preset ]]; then
 runRead 0 xhttp-all-status dockerProtocolCommand xhttp-status
 jq -e '.entries | length == 2 and all(.[]; .explicit == false)' "${STDOUT}" >/dev/null
@@ -663,6 +741,63 @@ xhttpEdit 14 changed --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-ED
 xhttpEdit 0 unchanged --xhttp-download-clear entry-xhttp --preview
 xhttpEdit 0 changed --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 xhttpAssert auto "${defaults}" '"100-1000"' false false "${defaultLimits}" /download/path edge.example.net
+for bad in null '[]' not-json '{"address":"download.example.net"} {}'; do
+    xhttpEdit 2 unchanged --xhttp-download-settings entry-xhttp "${bad}" --preview
+done
+for bad in '{}' '{"address":"https://download.example.net"}'; do
+    xhttpEdit 15 unchanged --xhttp-download-settings entry-xhttp "${bad}" --preview
+done
+xhttpEdit 15 unchanged --xhttp-download-settings vless-reality "${downloadTLS}" --preview
+xhttpEdit 2 unchanged --xhttp-download-settings entry-xhttp "${downloadTLS}" --xhttp-download-clear entry-xhttp --preview
+xhttpEdit 2 unchanged --xhttp-download-settings entry-xhttp "${downloadTLS}" --xhttp-download entry-xhttp 35444 --preview
+xhttpEdit 2 unchanged --xhttp-download-settings entry-xhttp "${downloadTLS}" --spec "${XHTTP_SPEC}" --preview
+xhttpEdit 0 unchanged --xhttp-download-settings entry-xhttp "${downloadTLS}" --preview
+! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail '独立下行预览启动候选'
+cp "${root}/config/spec.json" "${TEST_ROOT}/download-external-before.json"
+xhttpEdit 0 changed --xhttp-download-settings entry-xhttp "${downloadTLS}" --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" '"100-1000"' false false "${defaultLimits}" \
+    /download/path edge.example.net null null "${downloadTLS}"
+(
+    xhttpListener=entry-xhttp xhttpAction=download-settings
+    dockerEditCompatibilityValidate "${TEST_ROOT}/download-external-before.json" "${root}/config/spec.json" ||
+        fail '独立下行冻结误拒合法修改'
+    jq '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.host) = "tampered.example.net"' \
+        "${root}/config/spec.json" >"${TEST_ROOT}/download-external-tampered.json"
+    if dockerEditCompatibilityValidate "${TEST_ROOT}/download-external-before.json" \
+        "${TEST_ROOT}/download-external-tampered.json" 2>/dev/null; then
+        fail '独立下行专项允许顺带改变上行 Host'
+    fi
+)
+downloadH3=$(jq -cn --argjson settings "${downloadTLS}" '$settings | .alpn = ["h3"]')
+xhttpEdit 0 changed --xhttp-download-settings entry-xhttp "${downloadH3}" --confirm PADM-DOCKER-EDIT
+xhttpAssert auto "${defaults}" '"100-1000"' false false "${defaultLimits}" \
+    /download/path edge.example.net null null "${downloadH3}"
+before=$(liveSnapshot)
+rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
+xhttpEdit 14 changed --xhttp-download-settings entry-xhttp "${downloadReality}" --confirm PADM-DOCKER-EDIT
+[[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] ||
+    fail '独立下行更新失败未恢复原身份、订阅和部署'
+xhttpEdit 0 changed --xhttp-download-settings entry-xhttp "${downloadReality}" --confirm PADM-DOCKER-EDIT
+xhttpEdit 0 changed --xhttp-preset entry-xhttp stream --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up "${defaults}" '"100-1000"' false false "${defaultLimits}" \
+    /download/path edge.example.net null null "${downloadReality}"
+# 两类绑定切换必须互相清除，普通预设不得重写外部身份或继承上行高级参数。
+xhttpEdit 0 changed --xhttp-download entry-xhttp 35444 --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up "${defaults}" '"100-1000"' false false "${defaultLimits}" \
+    /download/path edge.example.net null 35444
+xhttpEdit 0 changed --xhttp-download-settings entry-xhttp "${downloadTLS}" --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up "${defaults}" '"100-1000"' false false "${defaultLimits}" \
+    /download/path edge.example.net null null "${downloadTLS}"
+xhttpEdit 0 changed --xhttp-download-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+xhttpAssert stream-up "${defaults}" '"100-1000"' false false "${defaultLimits}" /download/path edge.example.net
+for mutation in \
+    '(.core.protocols[] | select(.listener_id == "entry-xhttp") | .xhttp.download) = $settings' \
+    '.core.protocols += [(.core.protocols[] | select(.id == 2) |
+      .listener_id = "entry-new" | .public_port = 45443 | .xhttp.download = $settings)]'; do
+    jq --argjson settings "${downloadTLS}" "${mutation}" "${root}/config/spec.json" >"${TEST_ROOT}/manual-download.json"
+    chmod 0600 "${TEST_ROOT}/manual-download.json"
+    xhttpEdit 15 unchanged --spec "${TEST_ROOT}/manual-download.json" --preview
+done
 fi
 
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == rollback ]]; then
@@ -818,12 +953,12 @@ answers=(n eof int term derive copy)
 for answer in "${answers[@]}"; do
     if [[ "${answer}" == derive || "${answer}" == copy ]]; then
         # 仅一个 Reality 来源才能证明派生不会借其它缺省入口绕过 XMUX 冻结。
-        jq --argjson xmux "${defaults}" '
+        jq --argjson xmux "${defaults}" --arg answer "${answer}" --argjson settings "${downloadTLS}" '
           .core.protocols |= map(select(.listener_id == "entry-xhttp") |
             .xhttp.xmux = $xmux | .xhttp.xPaddingBytes = "100-1000" |
             .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = false |
             .xhttp.headers = {"X-Trace":"copy value"} |
-            .xhttp.download_port = 35444 |
+            if $answer == "copy" then .xhttp.download = $settings else .xhttp.download_port = 35444 end |
             .xhttp.scMaxEachPostBytes = 2000000 | .xhttp.scMinPostsIntervalMs = 20 |
             .xhttp.scMaxBufferedPosts = 50 | .xhttp.scStreamUpServerSecs = "30-40") |
           .core.secondary_type = null | .tls = null | .subscription.enabled = false |
@@ -894,7 +1029,8 @@ PY
     if [[ "${answer}" == derive || "${answer}" == copy ]]; then
         expected_path=/padm/path-1
         [[ "${answer}" != derive ]] || expected_path=/entry-1xhttp
-        jq -e --argjson xmux "${defaults}" --arg path "${expected_path}" '
+        jq -e --argjson xmux "${defaults}" --arg path "${expected_path}" \
+            --arg answer "${answer}" --argjson settings "${downloadTLS}" '
           .core.protocols | length == 2 and all(.[]; .id == 2 and .xhttp.xmux == $xmux and
             .xhttp.xPaddingBytes == "100-1000" and
             .xhttp.noGRPCHeader == true and .xhttp.noSSEHeader == false and
@@ -903,8 +1039,11 @@ PY
             .xhttp.scMaxBufferedPosts == 50 and .xhttp.scStreamUpServerSecs == "30-40" and
             (.xhttp | has("noGRPCHeader") and has("noSSEHeader"))) and
           any(.[]; .listener_id == "entry-1" and .public_port == 45443 and
-            .xhttp.mode == "auto" and .xhttp.path == $path and (.xhttp | has("download_port") | not)) and
-          any(.[]; .listener_id == "entry-xhttp" and .xhttp.download_port == 35444)
+            .xhttp.mode == "auto" and .xhttp.path == $path and
+            (.xhttp | has("download_port") or has("download") | not)) and
+          any(.[]; .listener_id == "entry-xhttp" and
+            (if $answer == "copy" then .xhttp.download == $settings and (.xhttp | has("download_port") | not)
+             else .xhttp.download_port == 35444 and (.xhttp | has("download") | not) end))
         ' "${root}/config/spec.json" >/dev/null || fail '菜单复制或派生 XHTTP 丢失高级字段或借用源下行'
     else
         [[ "$(snapshot)" == "${before}" ]] || fail "XHTTP ${answer} 改变未提交部署"

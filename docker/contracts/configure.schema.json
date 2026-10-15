@@ -46,6 +46,7 @@
   "x-padm-xhttp-headers": true,
   "x-padm-xhttp-request-headers": true,
   "x-padm-xhttp-download": true,
+  "x-padm-xhttp-download-settings": true,
   "x-padm-xhttp-limits": true,
   "x-padm-port-hopping-manual": true,
   "x-padm-port-hopping-tuic": true,
@@ -1657,6 +1658,7 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["path", "host", "mode"],
+              "not": {"required": ["download_port", "download"]},
               "properties": {
                 "path": {
                   "type": "string",
@@ -1675,6 +1677,45 @@
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 65535
+                },
+                "download": {
+                  "description": "客户端独立下行设置；外部前置必须回到同一 XHTTP 会话后端，不自动部署前置或 CDN。",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["address", "port", "security", "server_name", "host", "path", "mode"],
+                  "properties": {
+                    "address": {"$ref": "#/$defs/server_address"},
+                    "port": {"$ref": "#/$defs/port"},
+                    "security": {"enum": ["tls", "reality"]},
+                    "server_name": {"$ref": "#/$defs/hostname"},
+                    "host": {"$ref": "#/$defs/hostname"},
+                    "path": {
+                      "type": "string",
+                      "pattern": "^/[A-Za-z0-9._~/-]{1,128}(?![\\s\\S])"
+                    },
+                    "mode": {"enum": ["auto", "stream-one", "packet-up", "stream-up"]},
+                    "alpn": {"enum": [["h2"], ["h3"]]},
+                    "public_key": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{43}(?![\\s\\S])"
+                    },
+                    "short_id": {
+                      "type": "string",
+                      "pattern": "^(?:[a-f0-9]{2}){1,8}(?![\\s\\S])"
+                    }
+                  },
+                  "oneOf": [
+                    {
+                      "properties": {"security": {"const": "tls"}},
+                      "required": ["alpn"],
+                      "not": {"anyOf": [{"required": ["public_key"]}, {"required": ["short_id"]}]}
+                    },
+                    {
+                      "properties": {"security": {"const": "reality"}},
+                      "required": ["public_key", "short_id"],
+                      "not": {"required": ["alpn"]}
+                    }
+                  ]
                 },
                 "xPaddingBytes": {
                   "description": "本阶段仅支持 1 至 4096 的整数或正序范围；删除字段恢复 Xray 缺省 100-1000，不能关闭 Padding。",

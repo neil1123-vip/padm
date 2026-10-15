@@ -1191,7 +1191,8 @@ dockerProtocolCommand() (
              requestHeaders:(.xhttp.headers // {}),
              request_headers_explicit:(.xhttp | has("headers")),
              download_port:.xhttp.download_port,
-             download_enabled:(.xhttp | has("download_port")),
+             download_settings:.xhttp.download,
+             download_enabled:(.xhttp | has("download_port") or has("download")),
              limits:(.xhttp |
                def effective($default): if . == null or . == 0 or . == "0-0" then $default else . end;
                {scMaxEachPostBytes:(.scMaxEachPostBytes | effective(1000000)),
@@ -1592,7 +1593,7 @@ dockerEditEntryAdd() {
          else error("目标协议不支持") end
        end |
        # 新入口没有源入口的额外端口，不能让下行借用源后端。
-       del(.xhttp.download_port) |
+       del(.xhttp.download_port,.xhttp.download) |
        .listener_id = $newId | .core = $targetCore | .public_port = $port |
        # 核心内部监听与 Nginx 监听分别分配，复制和新增使用同一套冲突检查。
        if (.id | nginx) then
@@ -2545,6 +2546,16 @@ dockerEditCommand() {
             xhttpAction=download-clear xhttpListener=$2
             shift 2
             ;;
+        --xhttp-download-settings)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
+                -z "${xhttpAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            xhttpValues=$(jq -cse '
+              if length == 1 and (.[0] | type) == "object" then {download:.[0]}
+              else error("下行设置必须是单个 JSON 对象") end' <<<"$3") ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=download-settings xhttpListener=$2
+            shift 3
+            ;;
         --cdn-entry)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
                 "${#3}" -le 4096 && -z "${cdnAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -3324,8 +3335,9 @@ dockerEditCommand() {
             elif $action == "headers-clear" then del(.xhttp.noGRPCHeader,.xhttp.noSSEHeader)
             elif $action == "request-headers" then .xhttp.headers = $values.headers
             elif $action == "request-headers-clear" then del(.xhttp.headers)
-            elif $action == "download" then .xhttp.download_port = $values.download_port
-            elif $action == "download-clear" then del(.xhttp.download_port)
+            elif $action == "download" then del(.xhttp.download) | .xhttp.download_port = $values.download_port
+            elif $action == "download-settings" then del(.xhttp.download_port) | .xhttp.download = $values.download
+            elif $action == "download-clear" then del(.xhttp.download_port,.xhttp.download)
             elif $action == "limits" then .xhttp += $limits
             elif $action == "limits-clear" then
               del(.xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,
@@ -4221,7 +4233,8 @@ dockerEditCompatibilityValidate() {
             elif $xhttp_action == "padding" or $xhttp_action == "padding-clear" then del(.xhttp.xPaddingBytes)
             elif $xhttp_action == "headers" or $xhttp_action == "headers-clear" then del(.xhttp.noGRPCHeader,.xhttp.noSSEHeader)
             elif $xhttp_action == "request-headers" or $xhttp_action == "request-headers-clear" then del(.xhttp.headers)
-            elif $xhttp_action == "download" or $xhttp_action == "download-clear" then del(.xhttp.download_port)
+            elif $xhttp_action == "download" or $xhttp_action == "download-settings" or $xhttp_action == "download-clear" then
+              del(.xhttp.download_port,.xhttp.download)
             elif $xhttp_action == "limits" or $xhttp_action == "limits-clear" then
               del(.xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,
                 .xhttp.scMaxBufferedPosts,.xhttp.scStreamUpServerSecs)
@@ -4337,7 +4350,7 @@ dockerEditCompatibilityValidate() {
             (if reality and ($entry | reality) then
               shared == ($entry | shared) and
               ($entry.id != 2 or
-                ((.xhttp // {}) | del(.path,.host,.mode,.download_port)) ==
+                ((.xhttp // {}) | del(.path,.host,.mode,.download_port,.download)) ==
                   (($entry.xhttp // {}) | del(.path,.host,.mode)))
             else
               (fixed | del(.listener_id, .core, .websocket.backend_port, .websocket.tls_port,

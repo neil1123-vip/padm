@@ -270,6 +270,7 @@ dockerMenuPortHopping() {
 
 dockerMenuXhttp() {
     local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered mode path host headers downloadPort
+    local downloadAddress downloadSecurity downloadServerName downloadAlpn downloadPublicKey downloadShortId downloadSettings
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker XHTTP 管理（已有 Xray Reality 入口）\n'
@@ -280,7 +281,7 @@ dockerMenuXhttp() {
             '12. 设置 packet/stream 参数' '13. 恢复缺省 packet/stream' \
             '14. 设置模式' '15. 设置路径和 Host' '16. 统一高级参数' '17. 恢复推荐默认' \
             '18. 设置请求首部（JSON）' '19. 清除请求首部' \
-            '20. 设置下行端口' '21. 关闭上下行分离' '0. 返回'
+            '20. 设置下行端口' '21. 关闭上下行分离' '22. 设置独立下行' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -289,7 +290,7 @@ dockerMenuXhttp() {
         case "${choice}" in
         0) return 0 ;;
         1) dockerMenuRun protocol xhttp-status || true ;;
-        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21)
+        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22)
             dockerMenuRun protocol xhttp-status || continue
             dockerSetupRead listener 'XHTTP 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" && "${listener}" != --* ]] || continue
@@ -362,6 +363,39 @@ dockerMenuXhttp() {
                 dockerMenuRun edit --xhttp-download "${listener}" "${downloadPort}" || true
             elif [[ "${choice}" == 21 ]]; then
                 dockerMenuRun edit --xhttp-download-clear "${listener}" || true
+            elif [[ "${choice}" == 22 ]]; then
+                printf '外部前置必须回到同一 XHTTP 会话后端；不能连接任意独立后端，本菜单不自动部署 CDN。\n'
+                dockerSetupRead downloadAddress '下行地址（0 返回，空值取消）: ' &&
+                    [[ -n "${downloadAddress}" ]] &&
+                    dockerSetupRead downloadPort '下行端口 [443，0 返回]: ' 443 &&
+                    dockerSetupRead downloadSecurity '下行安全（tls/reality，0 返回）[tls]: ' tls &&
+                    dockerSetupRead downloadServerName '下行 Server Name（0 返回，空值取消）: ' &&
+                    [[ -n "${downloadServerName}" ]] &&
+                    dockerSetupRead host '下行 Host（0 返回，空值取消）: ' &&
+                    [[ -n "${host}" ]] &&
+                    dockerSetupRead path '下行路径（以 / 开头，0 返回，空值取消）: ' &&
+                    [[ -n "${path}" ]] &&
+                    dockerSetupRead mode '下行模式（auto/stream-one/packet-up/stream-up，0 返回）[auto]: ' auto || continue
+                downloadAlpn= downloadPublicKey= downloadShortId=
+                if [[ "${downloadSecurity}" == tls ]]; then
+                    dockerSetupRead downloadAlpn '下行 ALPN（h2/h3，0 返回）[h2]: ' h2 || continue
+                elif [[ "${downloadSecurity}" == reality ]]; then
+                    dockerSetupRead downloadPublicKey '下行 Reality public_key（0 返回，空值取消）: ' &&
+                        [[ -n "${downloadPublicKey}" ]] &&
+                        dockerSetupRead downloadShortId '下行 Reality short_id（0 返回，空值取消）: ' &&
+                        [[ -n "${downloadShortId}" ]] || continue
+                fi
+                # 非法端口保留原值，交给 CLI 统一校验并显示错误。
+                downloadSettings=$(jq -cn --arg address "${downloadAddress}" --arg port "${downloadPort}" \
+                    --arg security "${downloadSecurity}" --arg server_name "${downloadServerName}" \
+                    --arg host "${host}" --arg path "${path}" --arg mode "${mode}" \
+                    --arg alpn "${downloadAlpn}" --arg public_key "${downloadPublicKey}" --arg short_id "${downloadShortId}" '
+                    {address:$address,port:($port | try tonumber catch $port),security:$security,
+                     server_name:$server_name,host:$host,path:$path,mode:$mode} +
+                    if $security == "tls" then {alpn:[$alpn]}
+                    elif $security == "reality" then {public_key:$public_key,short_id:$short_id}
+                    else {} end') || continue
+                dockerMenuRun edit --xhttp-download-settings "${listener}" "${downloadSettings}" || true
             else
                 case "${choice}" in
                 2) preset=daily ;;
@@ -1811,7 +1845,8 @@ dockerMenu() {
         return "${PADM_DOCKER_RC_USAGE}"
     fi
     dockerMenuCli >/dev/null || return $?
-    trap 'dockerMenuInterrupted 130' INT
+    # Bash 会在信号处理后继续表单 read，显式返回才能立即取消当前字段。
+    trap 'dockerMenuInterrupted 130; [[ "${FUNCNAME[0]:-}" != dockerSetupRead ]] || return 130' INT
     trap 'dockerMenuInterrupted 143' TERM
     dockerMenuRun status || true
     while :; do

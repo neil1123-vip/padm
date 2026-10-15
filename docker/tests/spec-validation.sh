@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 下行和 Hy2/TUIC 跳跃的完整谓词，仅忽略拼接空白。
+# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行和 Hy2/TUIC 跳跃的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "81762ca0e4bb9279dc198b029e56ec538dd78ddd5c5c3ec838f2fcf75851579e"
+    "94bdb9d539ecdb06f6a0d5873758ba178b3934b2e6aafb4db90f2a827dcd9cd4"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -166,6 +166,31 @@ for name in ("unregistered", "default", "other"):
         spec["core"]["protocols"].append(other)
         spec["port_aliases"][0]["listener_id"] = "entry-other"
     cases[f"invalid-xhttp-download-{name}"] = spec
+external = dict(address="download.example.net", port=443, security="tls",
+                server_name="tls.example.net", host="relay.example.net", path="/down/path",
+                mode="auto", alpn=["h2"])
+external_reality = dict(external, security="reality", public_key="A" * 43, short_id="01")
+del external_reality["alpn"]
+for name, settings in (("tls-h2", external), ("tls-h3", dict(external, alpn=["h3"], mode="stream-one")),
+                       ("ipv6", dict(external, address="2001:db8::10", mode="packet-up")),
+                       ("reality", external_reality)):
+    spec = copy.deepcopy(cases["valid-protocol-2"])
+    spec["core"]["protocols"][0]["xhttp"]["download"] = settings
+    cases[f"valid-xhttp-download-settings-{name}"] = spec
+for index, settings in enumerate((
+        None, {}, dict(external, address="192.168.001.1"), dict(external, address="[2001:db8::1]"),
+        dict(external, port=True), dict(external, path="/down\n"), dict(external, host="127.0.0.1"),
+        dict(external, mode="unknown"), dict(external, alpn="h2"),
+        dict(external, alpn=["h2", "h3"]), dict(external, public_key="A" * 43),
+        {key: value for key, value in external.items() if key != "alpn"},
+        dict(external_reality, alpn=["h2"]), dict(external_reality, public_key="A" * 42),
+        dict(external_reality, short_id="abc"), dict(external, extra=True))):
+    spec = copy.deepcopy(cases["valid-protocol-2"])
+    spec["core"]["protocols"][0]["xhttp"]["download"] = settings
+    cases[f"invalid-xhttp-download-settings-{index}"] = spec
+spec = copy.deepcopy(download)
+spec["core"]["protocols"][0]["xhttp"]["download"] = external
+cases["invalid-xhttp-download-settings-conflict"] = spec
 spec = copy.deepcopy(cases["valid-protocol-3"])
 spec["core"]["protocols"][0]["hy2"]["obfs"] = {
     "type": "gecko", "password": "gecko-fixture-1234",

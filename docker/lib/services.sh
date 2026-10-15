@@ -546,17 +546,34 @@ dockerConfigureSpecValidate() {
                  (if has("noSSEHeader") then ["noSSEHeader"] else [] end) +
                  (if has("headers") then ["headers"] else [] end) +
                  (if has("download_port") then ["download_port"] else [] end) +
+                 (if has("download") then ["download"] else [] end) +
                  ([keys[] | select(. == "scMaxEachPostBytes" or . == "scMinPostsIntervalMs" or
                    . == "scMaxBufferedPosts" or . == "scStreamUpServerSecs")])) and
                (.path | type == "string" and test("^/[A-Za-z0-9._~/-]{1,128}$") and
                  (explode | all(. > 32 and . != 127))) and
                (.host | hostname and (explode | all(. > 32 and . != 127))) and
                (.mode == "auto" or .mode == "packet-up" or .mode == "stream-up") and
+               (has("download_port") and has("download") | not) and
                (if has("download_port") then
                  (.download_port | port) and
                  (.download_port as $port |
                    any($request.port_aliases[]?; .listener_id == $entry.listener_id and
                      .public_port == $port and .share_default != true))
+                else true end) and
+               (if has("download") then
+                 (.download | exact(["address","port","security","server_name","host","path","mode"] +
+                     if .security == "tls" then ["alpn"] else ["public_key","short_id"] end) and
+                   (.address | (hostname or routing_ipv4 or routing_ipv6) and
+                     (explode | all(. > 32 and . != 127))) and (.port | port) and
+                   (.server_name | hostname and (explode | all(. > 32 and . != 127))) and
+                   (.host | hostname and (explode | all(. > 32 and . != 127))) and
+                   (.path | type == "string" and test("^/[A-Za-z0-9._~/-]{1,128}\\z")) and
+                   (.mode == "auto" or .mode == "stream-one" or .mode == "packet-up" or .mode == "stream-up") and
+                   (if .security == "tls" then .alpn == ["h2"] or .alpn == ["h3"]
+                    elif .security == "reality" then
+                      (.public_key | type == "string" and test("^[A-Za-z0-9_-]{43}\\z")) and
+                      (.short_id | type == "string" and test("^(?:[a-f0-9]{2}){1,8}\\z"))
+                    else false end))
                 else true end) and
                (if has("xmux") then
                  (.xmux | exact(["maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"]) and
@@ -2169,7 +2186,7 @@ dockerGenerateXrayConfig() {
                 shortIds: ["", .reality.short_id]
               }
             } + (if .id == 2 then {
-              xhttpSettings: (.xhttp | del(.xmux,.download_port)) +
+              xhttpSettings: (.xhttp | del(.xmux,.download_port,.download)) +
                 {xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}}
             } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end)),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
@@ -3141,13 +3158,24 @@ dockerGenerateSubscription() {
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
       elif .id == 2 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
-          ((. as $entry | .xhttp | del(.path,.host,.mode,.download_port) |
+          ((. as $entry | .xhttp | del(.path,.host,.mode,.download_port,.download) |
             if $entry.xhttp.download_port != null then
               .downloadSettings = {
                 address:$entry.server,port:$entry.xhttp.download_port,network:"xhttp",security:"reality",
                 realitySettings:{serverName:$entry.reality.server_name,fingerprint:"chrome",
                   publicKey:$entry.reality.public_key,shortId:$entry.reality.short_id},
-                xhttpSettings:($entry.xhttp | del(.download_port) | .mode = "auto")}
+                xhttpSettings:($entry.xhttp | del(.download_port,.download) | .mode = "auto")}
+            elif $entry.xhttp.download != null then
+              $entry.xhttp.download as $down |
+              .downloadSettings = ({
+                address:$down.address,port:$down.port,network:"xhttp",security:$down.security,
+                xhttpSettings:($down | {path,host,mode})} +
+                if $down.security == "tls" then
+                  {tlsSettings:{serverName:$down.server_name,alpn:$down.alpn,fingerprint:"chrome"}}
+                else
+                  {realitySettings:{serverName:$down.server_name,publicKey:$down.public_key,
+                    shortId:$down.short_id,fingerprint:"chrome"}}
+                end)
             else . end) |
             if length > 0 then "&extra=\(. | tojson | @uri)" else "" end) +
           "#\(.name | @uri)"

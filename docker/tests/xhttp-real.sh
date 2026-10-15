@@ -61,6 +61,10 @@ with (node / "daemon.log").open("wb") as log:
             "--out", str(node / "headers")])
         assert child.wait(timeout=60) == 0, "XHTTP 外层首部观察失败"
         child = subprocess.Popen([
+            "python3", str(scripts / "xhttp-download-real.py"), "--xray", str(binary),
+            "--out", str(node / "download")])
+        assert child.wait(timeout=90) == 0, "XHTTP 独立下行实链路失败"
+        child = subprocess.Popen([
             "bash", str(scripts / "xhttp-real.sh"),
             *(inputs[name]["image_id"] for name in ("xray", "ops"))],
             env=dict(os.environ, DOCKER_HOST=docker[-1]))

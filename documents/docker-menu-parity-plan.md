@@ -1759,6 +1759,50 @@ short ID、SNI、Host、路径和 XHTTP 参数，下行模式固定 `auto`；
 本轮成功及失败输入归档、文件清单清理，仅保留日志/result 和镜像信息；
 独立外部下行身份及其它未交付项继续 deferred，整体目标保持 active。
 
+#### 3D.22 XHTTP 外部下行身份与 TLS/H3 元数据
+
+已有 v3 Xray 协议 `2` 入口通过菜单 `22` 表单或
+`edit --xhttp-download-settings <入口 ID> <JSON>` 保存 `xhttp.download`，
+要求新能力 `x-padm-xhttp-download-settings`；旧无字段规格和原
+`download_port` 子集保持兼容。两类绑定互斥，设置任一形式会清除另一形式，
+菜单 `21` 与 `--xhttp-download-clear` 共用清除入口，不新增重复命令。
+
+对象严格要求 `address`、`port`、`security`、`server_name`、`host`、`path`、`mode`；
+地址复用域名或严格 IPv4/IPv6，端口 `1..65535`，SNI/Host 复用域名约束，
+路径与上行相同，下行模式为 `auto/stream-one/packet-up/stream-up`。
+TLS 还要求单值 ALPN 数组 `["h2"]` 或 `["h3"]`；
+Reality 还要求 43 位 base64url 公钥与 1–8 字节小写十六进制 short ID。
+拒绝其它键、缺省字段、不同安全类型混用以及两种绑定共存。
+
+状态保留 `download_port`，新增 `download_settings`，任一形式存在时
+`download_enabled=true`。统一 URI 的 `extra.downloadSettings`
+使用独立地址/端口及对应的 `tlsSettings` 或 `realitySettings`，
+固定 `fingerprint=chrome`，`xhttpSettings` 仅含本对象 path/Host/mode，
+不继承上行高级参数。服务端剥离两类客户端字段，沿既有冻结、
+预览/发布、订阅/分享组更新和失败恢复；普通编辑保留对象，
+复制/派生保留源绑定，只清新入口绑定。
+
+支持范围仅是客户端元数据管理：外部前置须预先部署并汇入同一
+XHTTP handler 及认证，不能另起无会话关联的独立上下行后端。
+不自动配置外部证书、TLS/H3/CDN 或路由拓扑，不据此开放完整 CDN 管理。
+其它 sc*、公网前置、宿主/arm64 和完整管理继续 deferred，总目标 active。
+
+本批复用 `docker-xhttp-download` 的 `edit-download` 分片，
+覆盖严格对象、能力门禁、端口/对象切换、状态/URI、冻结、预览、
+失败恢复及复制/派生；规格差分新增 21 个代表案例。
+真实验收复用既有 `docker-xhttp-real` 入口，不另行启动旧 3D.21 矩阵；
+同一入口仍执行原首部 18 项和原业务 20 项，并新增外部 Reality、
+TLS h2/h3 同 handler 前置的 12 项回显及 8 项坏身份拒绝。
+Docker Linux amd64 当前源码快照下，定向 62.650 秒、真实 28.090 秒通过，
+均为 Jobs 2。唯一一次集中完整合同为 56/57 分片通过、386 项差分通过，
+入口 483.718 秒、Jobs 6、排队 317 ms；唯一失败是新增取消场景的菜单检查点失步。
+修正 `dockerSetupRead` 的 INT 返回和测试等待截止后，只补跑菜单，
+入口 61.201 秒通过；其余未变分片复用本轮证据，不记为同一次 57/57。
+定向证据 `.tmp-regression-docker-3194456a744245cdbe61d4953c609468/`，
+真实证据 `.tmp-regression-docker-38e5640216cd4261bb42a2515345a704/`，
+集中证据 `.tmp-regression-docker-6423ec078ca84c4e88274c4ef55c7378/`，
+菜单补验证据 `.tmp-regression-docker-87308a5670734e82947e2c497a808970/`。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

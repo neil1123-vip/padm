@@ -269,11 +269,30 @@ Padding `100-1000`、首部 `false/false`、limits `1000000/30/30/20-80`，保�
 Reality 公钥/short ID/SNI、路径/Host 和其它 XHTTP 参数随来源更新，下行模式固定 `auto`；
 服务端配置不投影 `download_port` 或 `downloadSettings`。
 预设、高级参数、推荐恢复保留绑定，复制/派生只保留源入口绑定，新入口清除，
-不能借用源入口的别名。独立下行地址/身份、外部 TLS/H3/CDN 和完整管理继续 `deferred`。
+不能借用源入口的别名。
 新增 `docker-xhttp-download` 复用验证、发布、失败恢复及复制/派生分片；
 本地 amd64 下行定向/菜单/真实链路分别 33.797/60.831/26.798 秒通过，
 真实 5 入口/20 业务及 4 个坏下行端口拒绝通过；集中合同 57/57、
 365 项差分，407.727 秒、Jobs 6、排队 318 ms、`cache_hit=false`。
+3D.22 增加菜单 `22` 和 `--xhttp-download-settings` 的独立下行客户端元数据，
+完整显式 `xhttp.download` 对象与 `download_port` 互斥，设置任一形式清除另一形式，
+菜单 `21`/`--xhttp-download-clear` 清除两类绑定。地址为域名或严格 IPv4/IPv6，
+端口 `1..65535`，SNI/Host 为域名，安全路径与上行相同；
+模式 `auto/stream-one/packet-up/stream-up`，TLS 仅接受单一 ALPN `["h2"]`/`["h3"]`，
+Reality 要求公钥和 short ID，安全类型字段不得混用，其它字段拒绝。
+要求 `x-padm-xhttp-download-settings`，旧无字段规格与原下行端口子集兼容；
+状态新增 `download_settings`，URI 仅投影该对象地址、安全身份及三项 XHTTP 参数，
+不继承上行高级参数，服务端不投影客户端字段。其它编辑保留，复制/派生只清新入口绑定。
+外部前置必须已部署并汇入同一 XHTTP handler/认证，不自动建设 TLS/H3/CDN
+拓扑，不支持无会话关联的独立后端。本地 amd64 定向 62.650 秒、真实 28.090 秒通过；
+真实复用既有入口，不另行启动旧 3D.21 矩阵，同一入口仍执行原首部 18 项和原业务 20 项，
+新增 TLS h2/h3/Reality 同 handler 前置的 12 项回显及 8 项坏身份拒绝。
+唯一一次集中合同 56/57 分片、386 项差分通过，483.718 秒、Jobs 6、排队 317 ms；
+新增菜单取消场景检查点失步，修正 INT 返回和等待截止后，菜单单独补验 61.201 秒通过，
+其余未变分片复用本轮证据，不记为同一次 57/57。完整证据
+`.tmp-regression-docker-6423ec078ca84c4e88274c4ef55c7378/`，菜单补验证据
+`.tmp-regression-docker-87308a5670734e82947e2c497a808970/`。
+公网、其它 sc*、完整管理及性能收益继续 `deferred`。
 填充字节分布、抗识别、长时复用和吞吐收益未证明；本地 amd64 合同、菜单、
 定向 limits 30.079 秒、真实 XHTTP 25.743 秒、菜单校正后 55.976 秒、
 dispatcher 2.217 秒，完整 `docker-contracts` 一次通过（383.362 秒，
@@ -394,7 +413,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | ID | 能力 | 原生入口 | 配置运行状态 | 管理状态 | 核心 | Compose profile | 网络/监听 | 原因 |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | 支持单核心或主副核心配置、字段编辑及跨核心同协议多入口；完整管理未迁移。 |
-| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 四预设、XMUX 三键自定义/清除，3D.5 Padding `1..4096`，3D.6 两项首部开关已交付。3D.7 四项原生 packet/stream limits 的状态、事务、清除与复制/派生继承；前三项 `0..2147483647` 整数，末项为整数或正序范围；`0`/`0-0` 保留显式值、状态折算核心默认，要求 `x-padm-xhttp-limits`。3D.10 提供模式、成对路径/Host、七项高级参数及推荐恢复。3D.20 支持客户端请求首部设置/清除、状态和统一链接，1–8 项、名称 1–64 位、值 0–256 位可打印 ASCII，拒绝大小写重复及核心保留字段，要求 `x-padm-xhttp-request-headers`；不提供服务端响应或访问认证。3D.21 支持同入口已登记非默认分享额外端口的下行绑定及清除，要求 `x-padm-xhttp-download`；链接沿用来源 Reality 身份/路径/Host，固定下行模式 `auto`，复制/派生的新入口清除绑定。独立下行地址/身份、外部 TLS/H3/CDN 与完整管理仍未开放。 |
+| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 四预设、XMUX 三键自定义/清除，3D.5 Padding `1..4096`，3D.6 两项首部开关已交付。3D.7 四项原生 packet/stream limits 的状态、事务、清除与复制/派生继承；前三项 `0..2147483647` 整数，末项为整数或正序范围；`0`/`0-0` 保留显式值、状态折算核心默认，要求 `x-padm-xhttp-limits`。3D.10 提供模式、成对路径/Host、七项高级参数及推荐恢复。3D.20 支持客户端请求首部设置/清除、状态和统一链接，1–8 项、名称 1–64 位、值 0–256 位可打印 ASCII，拒绝大小写重复及核心保留字段，要求 `x-padm-xhttp-request-headers`；不提供服务端响应或访问认证。3D.21 支持同入口已登记非默认分享额外端口的下行绑定及清除，要求 `x-padm-xhttp-download`；链接沿用来源 Reality 身份/路径/Host，固定下行模式 `auto`，复制/派生的新入口清除绑定。3D.22 支持独立外部下行地址与 TLS h2/h3 或 Reality 身份元数据，要求 `x-padm-xhttp-download-settings`；与原端口绑定互斥、共用清除，URI 不继承上行高级参数，其它编辑保留，复制/派生仅清除新入口绑定。外部前置须已部署并回到同一 XHTTP handler/认证，不自动建设 TLS/H3/CDN 拓扑，不支持无会话关联的独立后端；公网前置、其它 sc*、完整管理及性能收益继续 deferred。 |
 | 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、导入、BBR/Brutal、Salamander/Gecko、HTTPS 伪装编辑、复制及分享链接；3D.8–3D.9 菜单 12 提供状态、带宽、混淆与伪装单入口专项，BBR 保留速率，密码仅私密文件或静默输入。Gecko 要求新能力标记，不开放包长参数。已有入口可两步发布受管静态网页并启用 local，固定只读目录且无混淆，操作先验证已发布网页。复用受管 TLS 和 UUID 流量账号；端口跳跃限单 sing-box、双族 Hy2 的内部监督手动管理，完整跳跃与协议管理仍 deferred。 |
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用字段编辑、同核复制/删除及分享链接；复用受管 TLS 与 UUID 流量账号，域名与凭据冻结，宿主集成组合及完整管理未开放。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用编辑、同核复制/删除及原生 URI；入口与 TLS 同域，UUID 用户名/密码共享统计额度；QUIC、独立 IP/SNI 覆盖及完整管理未开放。 |
