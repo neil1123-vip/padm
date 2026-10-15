@@ -4749,6 +4749,9 @@ for managementCase in flow failed status-failed; do
         fail "协议管理 ${managementCase} 分发错误或取消后仍写入"
     [[ "${managementCase}" != flow ]] || grep -Fq '30 Shadowsocks2022' "${CONTROL_LOG}" ||
         fail '协议新增菜单没有 Shadowsocks2022 目标'
+    [[ "${managementCase}" != flow ]] ||
+        grep -Fq '11. 端口跳跃（双族 Hy2/TUIC；TUIC 仅范围转发）' "${CONTROL_LOG}" ||
+        fail '协议菜单未明确 TUIC 仅范围转发边界'
     grep -Fq '17. 核心/Nginx 内部端口' "${CONTROL_LOG}" || fail '内部端口入口没有接入协议菜单'
     [[ "${managementCase}" == flow ]] ||
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -ge 3 ]] ||
