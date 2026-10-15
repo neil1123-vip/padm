@@ -233,6 +233,8 @@ padm-docker protocol xhttp-status entry-xhttp
 padm-docker edit --xhttp-headers entry-xhttp true false --preview
 padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-request-headers entry-xhttp '{"X-Trace":"edge value"}' --preview
+padm-docker edit --xhttp-request-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
 padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-mode entry-xhttp stream-up --preview
@@ -260,9 +262,21 @@ POST 的 gRPC Content-Type 和服务端下载响应的 SSE Content-Type；`packe
 空输入使用同一组默认值，菜单 `12` 设置、`13` 清除，显式字段要求
 `x-padm-xhttp-limits`。`clear` 删除字段恢复缺省，其它编辑保留、复制/派生继承；
 缺省不补 spec 或 URI，状态通过 `limits_explicit` 区分显式值。其它 `sc*`、
-自定义 headers、downloadSettings、H3/CDN
+downloadSettings、H3/CDN
 与上下行分离仍未开放，
 首部变化不代表抗识别或性能收益。
+
+菜单 `18` 设置 `xhttp.headers` JSON 对象，`19` 删除字段恢复无自定义首部。
+范围为已有 v3 Xray XHTTP 单入口的客户端请求首部，接受 1–8 项；
+名称为 1–64 位字母、数字和连字符且以字母或数字开头，忽略大小写后必须唯一；
+值为 0–256 位可打印 ASCII，拒绝 CR/LF、控制字符及非 ASCII。
+`Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Keep-Alive`、
+`Proxy-Connection`、`Upgrade`、`TE`、`Trailer`、`Content-Type`、`Referer`
+保留给独立 Host 字段或传输核心，不能覆盖。显式字段要求
+`x-padm-xhttp-request-headers`；状态的 `requestHeaders` 和
+`request_headers_explicit` 区分缺省，统一 URI `extra`、复制/派生继承。
+预设、高级参数和推荐值恢复均保留自定义首部；这不提供服务端响应首部或访问认证，
+首部内容会进入分享链接和订阅。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；

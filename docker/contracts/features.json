@@ -27,7 +27,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理和有限 443 共存。3D.4 支持已有单入口的日常/兼容/流式/单并发预设、客户端 XMUX 三键自定义及清除，菜单/CLI 状态、事务与统一链接发布保持其它入口、认证和额度；显式 XMUX 要求 x-padm-xhttp-xmux 能力。Padding 支持已有 v3 Xray 单入口的 xPaddingBytes 设置与恢复缺省，本阶段范围 1-4096，客户端与服务端一致，显式字段要求 x-padm-xhttp-padding 能力；0/0-0 拒绝，删除恢复缺省 100-1000，不能关闭。3D.6 提供 noGRPCHeader/noSSEHeader 布尔开关及恢复缺省，显式 false 保留，任一字段存在要求 x-padm-xhttp-headers；缺省不补字段，统一 URI extra 与服务端配置保持，packet-up 的 noGRPCHeader 不改变请求首部。3D.7 已在本地 Linux amd64 容器验收 scMaxEachPostBytes/scMinPostsIntervalMs/scMaxBufferedPosts/scStreamUpServerSecs 四项原生 packet/stream limits 的状态、专项编辑/清除、服务端和 URI 投影、复制/派生继承；前三项为 0..2147483647 整数，末项为同范围整数或正序范围，0/0-0 保留显式值，状态折算默认 1000000/30/30/20-80，任一字段存在要求 x-padm-xhttp-limits。3D.10 合批提供模式、成对路径/Host、七项高级参数及推荐值恢复专项，状态显示 path/host；高级参数保留 mode/XMUX，推荐恢复保留 path/host，仅相关字段豁免冻结，复用既有门禁与发布恢复。其它 sc*、自定义 headers、downloadSettings、H3/CDN、上下行分离及完整管理尚未开放，性能和抗识别收益未证明。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、规格导入、入口编辑/复制、分享链接、逐入口 Reality 参数重生成、目标站管理及有限 443 共存。已有单入口支持四预设、XMUX 三键、Padding 1-4096、noGRPCHeader/noSSEHeader、四项 packet/stream limits、模式、成对路径/Host、七项高级参数和推荐恢复；复用冻结、候选发布及失败恢复，保持其它入口、认证和额度。显式 XMUX/Padding/首部开关/limits 分别要求对应 x-padm-xhttp-* 能力。3D.20 增加客户端请求首部设置/清除、状态和 URI extra 投影：1-8 项，名称 1-64 位字母/数字/连字符且以字母或数字开头、忽略大小写唯一，值 0-256 位可打印 ASCII；拒绝 Host、连接控制、Content-Type、Referer 等保留字段，要求 x-padm-xhttp-request-headers。预设/高级参数/推荐恢复保留请求首部，复制/派生继承；首部内容进入分享链接和订阅，不提供服务端响应首部或访问认证。其它 sc*、downloadSettings、H3/CDN、上下行分离及完整管理仍 deferred，性能和抗识别收益未证明。"
     },
     {
       "id": 3,

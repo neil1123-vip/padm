@@ -1188,6 +1188,8 @@ dockerProtocolCommand() (
              noSSEHeader:(.xhttp.noSSEHeader // false),
              grpc_header_explicit:(.xhttp | has("noGRPCHeader")),
              sse_header_explicit:(.xhttp | has("noSSEHeader")),
+             requestHeaders:(.xhttp.headers // {}),
+             request_headers_explicit:(.xhttp | has("headers")),
              limits:(.xhttp |
                def effective($default): if . == null or . == 0 or . == "0-0" then $default else . end;
                {scMaxEachPostBytes:(.scMaxEachPostBytes | effective(1000000)),
@@ -2507,6 +2509,23 @@ dockerEditCommand() {
             xhttpAction=headers-clear xhttpListener=$2
             shift 2
             ;;
+        --xhttp-request-headers)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -n "$3" &&
+                -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpValues=$(jq -cse '
+              if length == 1 and (.[0] | type == "object") then {headers:.[0]}
+              else error("请求首部必须是一个 JSON 对象") end
+            ' <<<"$3" 2>/dev/null) || return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=request-headers xhttpListener=$2
+            shift 3
+            ;;
+        --xhttp-request-headers-clear)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${xhttpAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            xhttpAction=request-headers-clear xhttpListener=$2
+            shift 2
+            ;;
         --cdn-entry)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
                 "${#3}" -le 4096 && -z "${cdnAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -3284,6 +3303,8 @@ dockerEditCommand() {
             elif $action == "padding-clear" then del(.xhttp.xPaddingBytes)
             elif $action == "headers" then .xhttp.noGRPCHeader = $noGrpc | .xhttp.noSSEHeader = $noSse
             elif $action == "headers-clear" then del(.xhttp.noGRPCHeader,.xhttp.noSSEHeader)
+            elif $action == "request-headers" then .xhttp.headers = $values.headers
+            elif $action == "request-headers-clear" then del(.xhttp.headers)
             elif $action == "limits" then .xhttp += $limits
             elif $action == "limits-clear" then
               del(.xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,
@@ -4178,6 +4199,7 @@ dockerEditCompatibilityValidate() {
             elif $xhttp_action == "preset" then del(.xhttp.mode, .xhttp.xmux)
             elif $xhttp_action == "padding" or $xhttp_action == "padding-clear" then del(.xhttp.xPaddingBytes)
             elif $xhttp_action == "headers" or $xhttp_action == "headers-clear" then del(.xhttp.noGRPCHeader,.xhttp.noSSEHeader)
+            elif $xhttp_action == "request-headers" or $xhttp_action == "request-headers-clear" then del(.xhttp.headers)
             elif $xhttp_action == "limits" or $xhttp_action == "limits-clear" then
               del(.xhttp.scMaxEachPostBytes,.xhttp.scMinPostsIntervalMs,
                 .xhttp.scMaxBufferedPosts,.xhttp.scStreamUpServerSecs)

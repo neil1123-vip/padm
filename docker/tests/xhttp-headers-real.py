@@ -164,6 +164,7 @@ def client_case(binary, output, certificate, key, mode, label, flag):
     extra = {"xPaddingBytes": 16}
     if flag is not None:
         extra["noGRPCHeader"] = flag
+        extra["headers"] = {"X-Padm-Trace": "edge value", "X-Padm-Empty": ""}
     certificate_hash = hashlib.sha256(
         ssl.PEM_cert_to_DER_cert(certificate.read_text())).hexdigest()
     config = {"log": {"loglevel": "debug"},
@@ -193,7 +194,11 @@ def client_case(binary, output, certificate, key, mode, label, flag):
             content_type = headers.get("content-type")
             expected = "application/grpc" if method == "POST" and mode != "packet-up" and flag is not True else None
             assert content_type == expected, (mode, label, method, content_type, expected)
-            rows.append({"method": method, "content_type": content_type})
+            for name, value in extra.get("headers", {}).items():
+                assert headers.get(name.lower()) == value, (mode, label, method, headers)
+            assert (":authority" in headers and headers[":authority"] == HOST), headers
+            rows.append({"method": method, "content_type": content_type,
+                         "custom": {name: value for name, value in headers.items() if name.startswith("x-padm-")}})
         return {"side": "client", "mode": mode, "flag": label, "requests": rows}
     finally:
         stop(process)
@@ -228,6 +233,7 @@ def server_case(binary, output, certificate, key, mode, label, flag):
     extra = {"xPaddingBytes": 16}
     if flag is not None:
         extra["noSSEHeader"] = flag
+        extra["headers"] = {"X-Padm-Trace": "request only"}
     config = {"log": {"loglevel": "debug"},
               "inbounds": [{"listen": "127.0.0.1", "port": port, "protocol": "vless",
                   "settings": {"clients": [{"id": USER}], "decryption": "none"},
@@ -245,6 +251,7 @@ def server_case(binary, output, certificate, key, mode, label, flag):
         observed = response_headers(port, method, path, certificate)
         expected = None if flag is True else "text/event-stream"
         assert observed[":status"] == "200" and observed.get("content-type") == expected, observed
+        assert "x-padm-trace" not in observed, observed
         rows = [{"method": method, "status": observed[":status"],
                  "content_type": observed.get("content-type")}]
         if mode != "stream-one":
@@ -288,6 +295,7 @@ def main():
         evidence["passed"] = True
         print(f"docker-xhttp-headers-real-ok: cases=18 modes=stream-one/stream-up/packet-up "
               f"flags=default/true/false tls=verified-h2 h2={h2.__version__} "
+              f"request-headers=all-modes/default-absent response-headers=unchanged "
               f"xray-sha256={evidence['xray_sha256']}", flush=True)
     except BaseException:
         for log in sorted(arguments.out.glob("*.log")):

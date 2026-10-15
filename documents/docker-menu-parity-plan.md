@@ -1697,6 +1697,38 @@ webroot 续期；上下文限本次编辑调用栈，普通 configure、关闭 H
 `.tmp-regression-docker-a6ce49dac52f49e3bcd6a72b73b8f626/`；
 源码归档和文件清单已清理，仅保留日志/result。
 
+#### 3D.20 XHTTP 自定义请求首部
+
+菜单 `18/19` 与 `edit --xhttp-request-headers <入口 ID> <JSON 对象>`、
+`--xhttp-request-headers-clear <入口 ID>` 管理已有 v3 Xray 协议 `2` 单入口的
+`xhttp.headers`。对象限 1–8 项；名称为 1–64 位字母、数字、连字符，
+以字母或数字开头且忽略大小写唯一；值为 0–256 位可打印 ASCII，允许空字符串，
+拒绝 CR/LF、控制字符和非 ASCII。Host、Content-Length、Transfer-Encoding、
+Connection、Keep-Alive、Proxy-Connection、Upgrade、TE、Trailer、Content-Type、
+Referer 由独立 Host 字段或传输核心管理，不开放覆盖。
+显式字段要求 `x-padm-xhttp-request-headers`；旧无字段子集兼容，
+清除删除字段，状态通过 `requestHeaders/request_headers_explicit` 区分。
+复用既有校验、冻结、候选事务与恢复；只豁免选中入口 headers，
+沿现有生成器与 URI extra 投影，不复制生成流程。
+预设、高级参数及推荐值恢复保留 headers，复制/派生继承。
+这是客户端请求首部，不是服务端响应设置或访问认证；内容进入分享链接及订阅。
+其它 sc*、downloadSettings、H3/CDN、上下行分离与完整管理仍 deferred。
+
+2026-10-15 Docker Linux amd64：`docker-xhttp -Jobs 2`、`docker-menu -Jobs 2`、
+`docker-xhttp-real -Jobs 2` 均通过，入口分别 `219466/60636/24946 ms`。
+复用原 18 组 TLS/h2 首部记录器观察三模式请求并保持 default 无自定义字段对照，
+确认不写入服务端响应；URI 驱动的 5 个 Reality 入口、20 条业务请求通过。
+合同覆盖旧包门禁、非法输入、其它字段冻结、分享组、额度、回滚及复制/派生。
+集中 `docker-contracts -Jobs 6` 一次通过，57/57、353 项规格差分，
+入口 `404019 ms`、排队 `6257 ms`、`cache_hit=false`；
+证据 `.tmp-regression-docker-093a5b8b08534b2d91477d4b78916bba/`。
+复核后删除 CLI 原文 4096 字符限制，避免合法转义值被误拒；
+解析后边界不变，只补 `docker-xhttp-headers -Jobs 2`，入口 `50896 ms` 通过，
+覆盖 8 项 × 256 反斜杠的合法对象预览。
+该 selector 直接注册现成首部分片，后续无需跑整组；未重复完整回归。
+Bash/ShellCheck error 通过；成功归档和文件清单由入口清理，仅留日志/result。
+总目标保持 active。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

@@ -43,7 +43,7 @@ for prefix, body in blocks:
     baseline += body
 # 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 和 Hy2/TUIC 跳跃的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "1f13fddf34f2c7fcd46ee9ce90f8babbf4ff13455a65ad9de8d8186b1fcd7a1b"
+    "4723c06b72116af2f33b311c444835853dd35213f47cae6b61314a2f73670b93"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -139,6 +139,12 @@ for key in ("scMaxEachPostBytes", "scMinPostsIntervalMs", "scMaxBufferedPosts", 
         spec = copy.deepcopy(cases["valid-protocol-2"])
         spec["core"]["protocols"][0]["xhttp"][key] = limit
         cases[f"invalid-xhttp-limits-{key}-{index}"] = spec
+for index, headers in enumerate((
+        {"X-Trace": "edge value", "X-Empty": ""}, {}, {"hOsT": "bad"},
+        {"X-A": "a", "x-a": "b"}, {"X-A": "a\r\nb"}, {"X-A": "a" * 257})):
+    spec = copy.deepcopy(cases["valid-protocol-2"])
+    spec["core"]["protocols"][0]["xhttp"]["headers"] = headers
+    cases[f"{'valid' if index == 0 else 'invalid'}-xhttp-request-headers-{index}"] = spec
 spec = copy.deepcopy(cases["valid-protocol-3"])
 spec["core"]["protocols"][0]["hy2"]["obfs"] = {
     "type": "gecko", "password": "gecko-fixture-1234",
@@ -503,7 +509,8 @@ for file in "${TEST_ROOT}"/*.json; do
         "${file##*/}" != invalid-block-ips-resolved-* &&
         "${file##*/}" != invalid-hy2-gecko-* &&
         "${file##*/}" != invalid-port-hopping-* &&
-        "${file##*/}" != invalid-xhttp-limits-* ) ||
+        "${file##*/}" != invalid-xhttp-limits-* &&
+        "${file##*/}" != invalid-xhttp-request-headers-* ) ||
         "${actual}" != 0 ]] || fail "无效透明/解析后 IP 规格被接受: ${file##*/}"
     count=$((count + 1))
 done

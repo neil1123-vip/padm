@@ -169,6 +169,7 @@ jq '
     elif .listener_id == "entry-single" then .xhttp.xmux.maxConcurrency = 1 |
       .xhttp.noGRPCHeader = false | .xhttp.noSSEHeader = false
     elif .listener_id == "entry-custom" then
+      .xhttp.headers = {"X-Padm-Trace":"Reality value & extra"} |
       .xhttp.xmux = {maxConcurrency:2,hMaxRequestTimes:"7-9",hMaxReusableSecs:"30-40"}
     else .xhttp.xPaddingBytes = 1 | .xhttp.noGRPCHeader = true | .xhttp.noSSEHeader = true end)
 ' "${SPEC}" >"${TEST_ROOT}/configured.json"
@@ -192,7 +193,8 @@ printf 'docker-xhttp-real-padding-config-ok: explicit=1/100-1000/4096 default=2 
 jq -e --slurpfile spec "${SPEC}" '
   def headers:
     (if has("noGRPCHeader") then {noGRPCHeader} else {} end) +
-    (if has("noSSEHeader") then {noSSEHeader} else {} end);
+    (if has("noSSEHeader") then {noSSEHeader} else {} end) +
+    (if has("headers") then {headers} else {} end);
   ([.inbounds[] | select(.streamSettings.network == "xhttp") |
     {id:.tag,headers:(.streamSettings.xhttpSettings | headers)}] | sort_by(.id)) ==
   ([$spec[0].core.protocols[] | {id:.listener_id,headers:(.xhttp | headers)}] | sort_by(.id))
@@ -249,7 +251,7 @@ def parse(line):
     assert q["encryption"] == "none" and q["security"] == "reality" and q["type"] == "xhttp"
     extra = json.loads(q["extra"])
     assert isinstance(extra, dict) and {"xmux"} <= set(extra) <= {
-        "xmux", "xPaddingBytes", "noGRPCHeader", "noSSEHeader"} | limit_keys
+        "xmux", "xPaddingBytes", "noGRPCHeader", "noSSEHeader", "headers"} | limit_keys
     assert isinstance(extra["xmux"], dict) and set(extra["xmux"]) == {
         "maxConcurrency", "hMaxRequestTimes", "hMaxReusableSecs"}
     if "xPaddingBytes" in extra:
@@ -295,6 +297,8 @@ for line in lines:
     if no_sse is not None:
         expected_extra["noSSEHeader"] = no_sse
     expected_extra.update(spec_limits[uri.port])
+    if name == "custom":
+        expected_extra["headers"] = {"X-Padm-Trace": "Reality value & extra"}
     assert {key: value for key, value in extra.items() if key in limit_keys} == spec_limits[uri.port]
     assert q["mode"] == mode and extra == expected_extra
     inbound = "socks-"+name

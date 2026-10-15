@@ -80,6 +80,8 @@ dockerUsage() {
   padm-docker edit --xhttp-padding-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-headers <入口 ID> <noGRPCHeader:true|false> <noSSEHeader:true|false> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-headers-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --xhttp-request-headers <入口 ID> <JSON 对象> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --xhttp-request-headers-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-limits <入口 ID> <POST字节数> <间隔毫秒> <缓冲POST数> <流式秒数或范围> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-limits-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-mode <入口 ID> <auto|packet-up|stream-up> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

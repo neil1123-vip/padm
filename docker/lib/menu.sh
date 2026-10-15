@@ -269,7 +269,7 @@ dockerMenuPortHopping() {
 }
 
 dockerMenuXhttp() {
-    local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered mode path host
+    local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered mode path host headers
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker XHTTP 管理（已有 Xray Reality 入口）\n'
@@ -278,7 +278,8 @@ dockerMenuXhttp() {
             '8. 设置 Padding' '9. 恢复缺省 Padding' \
             '10. 设置首部开关' '11. 恢复缺省首部' \
             '12. 设置 packet/stream 参数' '13. 恢复缺省 packet/stream' \
-            '14. 设置模式' '15. 设置路径和 Host' '16. 统一高级参数' '17. 恢复推荐默认' '0. 返回'
+            '14. 设置模式' '15. 设置路径和 Host' '16. 统一高级参数' '17. 恢复推荐默认' \
+            '18. 设置请求首部（JSON）' '19. 清除请求首部' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -287,7 +288,7 @@ dockerMenuXhttp() {
         case "${choice}" in
         0) return 0 ;;
         1) dockerMenuRun protocol xhttp-status || true ;;
-        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17)
+        2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19)
             dockerMenuRun protocol xhttp-status || continue
             dockerSetupRead listener 'XHTTP 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" && "${listener}" != --* ]] || continue
@@ -346,6 +347,13 @@ dockerMenuXhttp() {
                     "${buffered}" "${seconds}" "${noGrpc}" "${noSse}" || true
             elif [[ "${choice}" == 17 ]]; then
                 dockerMenuRun edit --xhttp-defaults "${listener}" || true
+            elif [[ "${choice}" == 18 ]]; then
+                # JSON 作为单个参数原样交给 CLI，键值边界由后端合同校验。
+                dockerSetupRead headers 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）: ' &&
+                    [[ -n "${headers}" ]] || continue
+                dockerMenuRun edit --xhttp-request-headers "${listener}" "${headers}" || true
+            elif [[ "${choice}" == 19 ]]; then
+                dockerMenuRun edit --xhttp-request-headers-clear "${listener}" || true
             else
                 case "${choice}" in
                 2) preset=daily ;;

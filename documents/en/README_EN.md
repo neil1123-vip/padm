@@ -260,6 +260,8 @@ padm-docker protocol xhttp-status entry-xhttp
 padm-docker edit --xhttp-headers entry-xhttp true false --preview
 padm-docker edit --xhttp-headers entry-xhttp true false --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
+padm-docker edit --xhttp-request-headers entry-xhttp '{"X-Trace":"edge value"}' --preview
+padm-docker edit --xhttp-request-headers-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-limits entry-xhttp 2000000 20 50 30-40 --preview
 padm-docker edit --xhttp-limits-clear entry-xhttp --confirm PADM-DOCKER-EDIT
 padm-docker edit --xhttp-mode entry-xhttp stream-up --preview
@@ -292,9 +294,23 @@ Clear deletes the fields and restores defaults. Other edits retain the limits,
 and copies/derivations inherit them. Defaults add no spec or URI fields, and
 `limits_explicit` distinguishes explicit values in status.
 Other listeners, XMUX, Padding, credentials, subscription/share groups, quotas,
-and totals are preserved. Other `sc*`, custom headers, downloadSettings, H3/CDN,
+and totals are preserved. Other `sc*`, downloadSettings, H3/CDN,
 and split upload/download remain unavailable. Header changes do not establish
 camouflage or performance benefits.
+
+Menu item `18` sets the `xhttp.headers` JSON object and `19` deletes it. This
+supports client request headers for one existing v3 Xray XHTTP listener, with
+1-8 entries. Names use 1-64 letters, digits, or hyphens, start with a letter or
+digit, and must be unique without regard to case. Values allow 0-256 printable
+ASCII characters. Controls, CR/LF, and non-ASCII are rejected. Reserved names
+are Host, Content-Length, Transfer-Encoding, Connection, Keep-Alive,
+Proxy-Connection, Upgrade, TE, Trailer, Content-Type, and Referer. Use the
+separate Host field; transport-controlled fields cannot be overridden.
+Explicit headers require `x-padm-xhttp-request-headers`; status reports
+`requestHeaders` and `request_headers_explicit`. URI `extra`, copies, and
+derivations retain them, as do presets, advanced edits, and recommended defaults.
+Headers appear in share links and subscriptions. They do not configure server
+response headers or provide access authentication.
 
 The same site menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:

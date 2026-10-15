@@ -453,6 +453,9 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].core.protocols[]; (.xhttp // {}) | has("noGRPCHeader") or has("noSSEHeader")) then
             $schema[0]["x-padm-xhttp-headers"] == true
           else true end) and
+          (if any($spec[0].core.protocols[]; (.xhttp // {}) | has("headers")) then
+            $schema[0]["x-padm-xhttp-request-headers"] == true
+          else true end) and
           (if any($spec[0].core.protocols[]; (.xhttp // {}) |
             has("scMaxEachPostBytes") or has("scMinPostsIntervalMs") or
               has("scMaxBufferedPosts") or has("scStreamUpServerSecs")) then

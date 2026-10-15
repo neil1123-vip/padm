@@ -543,6 +543,7 @@ dockerConfigureSpecValidate() {
                  (if has("xPaddingBytes") then ["xPaddingBytes"] else [] end) +
                  (if has("noGRPCHeader") then ["noGRPCHeader"] else [] end) +
                  (if has("noSSEHeader") then ["noSSEHeader"] else [] end) +
+                 (if has("headers") then ["headers"] else [] end) +
                  ([keys[] | select(. == "scMaxEachPostBytes" or . == "scMinPostsIntervalMs" or
                    . == "scMaxBufferedPosts" or . == "scStreamUpServerSecs")])) and
                (.path | type == "string" and test("^/[A-Za-z0-9._~/-]{1,128}$") and
@@ -558,6 +559,20 @@ dockerConfigureSpecValidate() {
                (if has("xPaddingBytes") then (.xPaddingBytes | xhttp_value(1; 4096)) else true end) and
                (if has("noGRPCHeader") then (.noGRPCHeader | type == "boolean") else true end) and
                (if has("noSSEHeader") then (.noSSEHeader | type == "boolean") else true end) and
+               (if has("headers") then
+                 (.headers | type == "object" and length >= 1 and length <= 8 and
+                   (keys | map(ascii_downcase) as $names |
+                     ($names | unique | length) == ($names | length)) and
+                   all(to_entries[];
+                     (.key | test("^[A-Za-z0-9][A-Za-z0-9-]{0,63}\\z")) and
+                     ((.key | ascii_downcase) as $name |
+                       ["host","content-length","transfer-encoding","connection","keep-alive",
+                         "proxy-connection","upgrade","te","trailer","content-type","referer"] |
+                       index($name) | not)) and
+                   all(to_entries[];
+                     .value | type == "string" and length <= 256 and
+                     (explode | all(. >= 32 and . <= 126))))
+               else true end) and
                all(to_entries[] | select(.key == "scMaxEachPostBytes" or
                  .key == "scMinPostsIntervalMs" or .key == "scMaxBufferedPosts");
                  .value | type == "number" and floor == . and . >= 0 and . <= 2147483647) and
