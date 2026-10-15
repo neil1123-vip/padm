@@ -470,6 +470,10 @@ dockerTlsManageCommand() {
         dockerEditCommand --http01 "${action}"
         return $?
     fi
+    if [[ "${choice}" == 5 ]]; then
+        dockerRenewalCommand status
+        return $?
+    fi
     dockerSetupRead domain "证书域名 [${currentDomain}]（0 取消）: " "${currentDomain}" || return 0
     dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
     case "${choice}" in

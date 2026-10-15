@@ -4581,7 +4581,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
             ;;
         esac
         ;;
-    renewal-status) input=$'5\n\ny\n'; expectedAction='schedule status' ;;
+    renewal-status) input=$'5\n'; expectedAction='schedule status' ;;
     renewal-enable)
         input=$'6\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\n'
         expectedAction='schedule enable --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env'
@@ -4677,6 +4677,12 @@ for tlsCase in cancel final-no eof validate install issue renew \
     runPty "tls-${tlsCase}" tls "${input}" "${TLS_WIZARD_CLI}" menu
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAction}" ]] ||
         fail "TLS ${tlsCase} bypassed confirmation or dispatched incorrect arguments"
+    if [[ "${tlsCase}" == renewal-status ]]; then
+        ! grep -Fq '证书域名 [' "${CONTROL_LOG}" ||
+            fail '自动续期状态不应询问证书域名'
+        ! grep -Fq '确认执行证书操作？[y/N]' "${CONTROL_LOG}" ||
+            fail '自动续期状态不应要求确认'
+    fi
     if [[ "${tlsCase}" == offer-failed ]]; then
         grep -Fq '操作已完成，但自动续期登记失败；现有证书和配置已保留' "${CONTROL_LOG}" &&
             grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" ||
