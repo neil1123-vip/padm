@@ -7886,6 +7886,13 @@ Jobs 2 下通过，入口 `26.969` 秒、排队 `4.727` 秒，结果
 `fix(menu): restore selective removal warnings`。
 本轮未发现可复现的其它低风险菜单根因，未做猜测性修改。
 
+随后补跑 `docker-port-hopping-supervisor` 定向回归：Docker Linux amd64、Jobs 2，
+141 个严格 control/owner 场景通过，入口 `31.404` 秒、内部 `30.349` 秒，结果
+`.tmp-regression-docker-8094fba54beb40e5a8d75659adf512a8/`。首次失败仅因测试允许
+列表未包含生命周期当前稳定拒绝前缀“跳跃监督会话仍在运行或残留”，未修改生命周期
+行为；测试修复已由 `79425ed5 test(docker): accept current hopping supervisor rejection`
+签名提交。该回归不改变菜单、协议或客户端支持范围。
+
 公网 CA、原生宿主/arm64、完整外部客户端、SOCKS UDP 会话撤销、
 自动恢复和完整协议管理继续 deferred，整体计划保持 active。
 
