@@ -231,7 +231,7 @@ dockerMenuProtocols() {
 dockerMenuPortHopping() {
     local choice listener start end ipv4 ipv6 answer port
     while :; do
-        printf '\nDocker 端口跳跃（单个双族 Hy2/TUIC）\n'
+        printf '\nDocker 端口跳跃（单个双族 Hy2/TUIC；TUIC 仅范围转发）\n'
         printf '%s\n' '1. 查看状态' '2. 保存配置' '3. 启用已保存配置' \
             '4. 停止跳跃' '5. 清除保存配置' \
             '6. 输出活动分享链接（Hy2 范围/TUIC 首端口）' '7. 输出指定活动端口链接' \

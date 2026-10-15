@@ -579,7 +579,7 @@ try:
     os.killpg(os.getpgid(process.pid), signal.SIGINT)
     expect("fixture-int-ready")
     os.write(master, b"1\n")
-    expect("Docker 端口跳跃（单个双族 Hy2/TUIC）", 2)
+    expect("Docker 端口跳跃（单个双族 Hy2/TUIC；TUIC 仅范围转发）", 2)
     expect("请选择: ", 3)
     os.write(master, b"0\n0\n")
     assert process.wait(timeout=3) == 0, output.decode()

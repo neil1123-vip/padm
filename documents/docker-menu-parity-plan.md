@@ -7854,7 +7854,8 @@ TUIC 自动跳跃、旧 conntrack 排空、原生宿主/arm64/公网、自动恢
 2026-10-16 对已交付菜单做了一轮窄范围收口：证书菜单的“自动续期状态”
 直接执行状态查询，不再错误询问域名或重复确认；路由菜单 8/9 改为准确显示
 “设置/关闭 hosts 覆盖”；XHTTP 菜单状态快照在 INT/TERM 路径统一清理；
-不支持 CDN 能力时拒绝清空动作；Gecko 跳跃分享补齐活动范围与指定端口断言。
+不支持 CDN 能力时拒绝清空动作；Gecko 跳跃分享补齐活动范围与指定端口断言；
+端口跳跃菜单明确 TUIC 仅提供范围转发，不暗示客户端自动换端口。
 这些修补分别保持现有事务、能力门禁、取消和恢复边界，不扩大协议或客户端支持范围。
 
 `docker-menu-port-alias` 在 Docker Linux amd64、Jobs 2 下实际执行通过，
@@ -7862,6 +7863,11 @@ TUIC 自动跳跃、旧 conntrack 排空、原生宿主/arm64/公网、自动恢
 `.tmp-regression-docker-f1b56f0b65804384b5a1f8ebbbe2468f/`；
 `cache_hit=false`，源码摘要为
 `A64E9BFE372E363425B35A3383D0E8E16D140AC1C55CC476831F4CC5EA9E4081`。
+端口跳跃菜单文案定向回归 `docker-port-hopping-config` 在 Docker Linux amd64、
+Jobs 2 下通过，入口 `26.969` 秒、排队 `4.727` 秒，结果
+`.tmp-regression-docker-a6fbd493cdfe4e23bed8a5d4d045910f/`；
+`cache_hit=false`，源码摘要为
+`45472475EDF790236F49A070E9BB8DC422DFCA25B90CF7C5FB0B8556E693D1C5`。
 最近提交名称统一使用英文 Conventional Commit：
 `fix(docker): streamline renewal status menu`、
 `fix(docker): clarify hosts routing menu labels`、
