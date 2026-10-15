@@ -702,6 +702,32 @@ jq '.tls.domain = "b.example.com"' "${TEST_ROOT}/webroot-spec.json" >"${TEST_ROO
 reject dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/webroot-domain.json"
 dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/webroot-spec.json"
 before=$(registryAndJobs)
+beforeSchedule=$(<"${TEST_ROOT}/schedule.log")
+(
+    export DOCKER_ACME_WEBROOT_MIGRATION_OLD=a.example.com DOCKER_ACME_WEBROOT_MIGRATION_NEW=b.example.com
+    reject dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/webroot-domain.json"
+    dockerEditCommand() {
+        local DOCKER_ACME_WEBROOT_MIGRATION_OLD=$1 DOCKER_ACME_WEBROOT_MIGRATION_NEW=$2
+        local DOCKER_ACME_WEBROOT_MIGRATION_PENDING=
+        shift 2
+        dockerAcmeWebrootTransitionValidate "$@" || return $?
+        [[ "${DOCKER_ACME_WEBROOT_MIGRATION_PENDING}" == a.example.com ]] ||
+            fail '合法 webroot 迁移未标记待停用的旧域名'
+    }
+    dockerEditCommand a.example.com b.example.com "${TEST_ROOT}/webroot-domain.json"
+    jq 'del(.tls.http01)' "${TEST_ROOT}/webroot-domain.json" >"${TEST_ROOT}/webroot-domain-disabled.json"
+    dockerEditCommand a.example.com b.example.com "${TEST_ROOT}/webroot-domain-disabled.json"
+    reject dockerEditCommand c.example.com b.example.com "${TEST_ROOT}/webroot-domain.json"
+    reject dockerEditCommand a.example.com c.example.com "${TEST_ROOT}/webroot-domain.json"
+    reject dockerEditCommand a.example.com a.example.com "${TEST_ROOT}/webroot-disabled.json"
+    reject dockerEditCommand a.example.com b.example.com "${TEST_ROOT}/legacy-no-spec.json"
+    jq '.schema_version = 2' "${TEST_ROOT}/webroot-request.json" >"$(registry)/a.example.com/request.json"
+    reject dockerEditCommand a.example.com b.example.com "${TEST_ROOT}/webroot-domain.json"
+    cp -- "${TEST_ROOT}/webroot-request.json" "$(registry)/a.example.com/request.json"
+)
+[[ "$(registryAndJobs)" == "${before}" && "$(<"${TEST_ROOT}/schedule.log")" == "${beforeSchedule}" ]] ||
+    fail 'webroot 迁移校验改写了续期登记或调度'
+before=$(registryAndJobs)
 MODE=schedule-fail
 runControl failure acme schedule disable --domain a.example.com
 [[ "$(registryAndJobs)" == "${before}" ]] || fail 'webroot 停用调度失败没有恢复登记和任务'

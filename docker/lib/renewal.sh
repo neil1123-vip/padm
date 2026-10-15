@@ -174,6 +174,14 @@ dockerAcmeWebrootTransitionValidate() {
     request="${registry}/${oldDomain}/request.json"
     if [[ -f "${request}" ]] &&
         jq -e '.enabled == true and .provider == "webroot"' "${request}" >/dev/null; then
+        # 仅放行编辑调用栈内的精确域名迁移，旧登记等配置成功后再停用。
+        if [[ " ${FUNCNAME[*]} " == *" dockerEditCommand "* &&
+            "${DOCKER_ACME_WEBROOT_MIGRATION_OLD:-}" == "${oldDomain}" &&
+            "${DOCKER_ACME_WEBROOT_MIGRATION_NEW:-}" == "${newDomain}" &&
+            "${newDomain}" != "${oldDomain}" ]] && dockerDomainIsValid "${newDomain}"; then
+            DOCKER_ACME_WEBROOT_MIGRATION_PENDING=${oldDomain}
+            return 0
+        fi
         dockerError '当前域名仍启用 webroot 自动续期，请先停用自动续期再关闭或迁移 HTTP-01 入口'
         return 1
     fi

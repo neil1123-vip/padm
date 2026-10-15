@@ -1675,6 +1675,28 @@ Bash/ShellCheck error 通过；真实非 root Nginx 检查双栈 token 原始字
 成功及失败的源码归档、文件清单均已清理，仅保留日志/result 和静态检查摘要。
 公网、原生宿主/arm64、端口跳跃完整管理仍 deferred，总目标保持 active。
 
+#### 3D.19 活跃旧域名 Webroot 续期迁移衔接
+
+`edit --tls-migrate` 及证书菜单迁移在精确的旧域名到新域名上下文中放行活跃
+webroot 续期；上下文限本次编辑调用栈，普通 configure、关闭 HTTP-01、
+删最后 Nginx 和回滚仍须先停用。登记不安全或上下文错配继续拒绝。
+配置成功且新域名已落盘后，复用独立续期事务停用旧 webroot 登记；
+不跨配置提交持有调度快照，不改写 ACME 账户或旧证书，不改变其它域名登记。
+新域名仍沿显式 `--tls-auto-renew` 或交互选择登记，未选择则不启用。
+预览、取消、申请失败、候选失败及启动失败保留旧登记。
+停用旧登记或登记新域名失败返回 `15`，明确配置已成功并保留证书和配置；
+提交后中断可能留下待停用旧登记，须从证书菜单核对并重试。
+本批验证覆盖实际配置事务、续期恢复及上下文保护；公网 CA、原生宿主/arm64
+与整体计划仍按原边界 deferred，不能以本批完成关闭目标。
+2026-10-15 Docker Linux amd64：`docker-renewal -Jobs 2` 通过，入口 `14841 ms`；
+集中 `docker-contracts -Jobs 6` 入口 `439252 ms`、排队 `338 ms`，
+56/57 合同和 347 项规格差分通过，唯一失败为新增 entries 故障用例漏保留 HTTP-01
+的测试预期。修正该断言后，仅补跑 `docker-phase3-entries -Jobs 2`，入口
+`315318 ms` 通过；生产代码未变，不重复完整回归。Bash/ShellCheck error 通过。
+完整及补验证据分别为 `.tmp-regression-docker-a4cd0dd7f8cd4b708e38a6d1b37ea7bb/`、
+`.tmp-regression-docker-a6ce49dac52f49e3bcd6a72b73b8f626/`；
+源码归档和文件清单已清理，仅保留日志/result。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

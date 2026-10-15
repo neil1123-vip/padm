@@ -232,6 +232,17 @@ chmod 0755 "${MOCK_BIN}/uname" "${MOCK_BIN}/id" "${MOCK_BIN}/docker"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
 chmod 0755 "${MOCK_BIN}/systemctl"
 cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
+cat >"${MOCK_BIN}/systemctl" <<'EOF'
+#!/usr/bin/env bash
+# 仅在配置提交后移除旧登记时失败一次，核对独立续期事务的恢复。
+if [[ "${FAKE_DOCKER_MODE:-ok}" == webroot-disable-fail && "${1:-}" == daemon-reload &&
+    ! -e "${PADM_DOCKER_INSTALL_DIR}/secrets/renewal/first-webroot.example.com" &&
+    ! -e "${FAKE_DOCKER_LOG}.renewal-disable-failed" ]]; then
+    : >"${FAKE_DOCKER_LOG}.renewal-disable-failed"
+    exit 1
+fi
+exit 0
+EOF
 
 runControl() {
     local expected=$1 name=$2 actual=0
@@ -1878,11 +1889,94 @@ jq -e '.schema_version==3 and .enabled==true and .domain=="first-webroot.example
     jq -e '.services.nginx.ports | index("0.0.0.0:80:8088/tcp") != null and
       index("[::]:80:8088/tcp") != null' "${DOCKER_ROOT}/compose.json" >/dev/null ||
     fail 'webroot 迁移未持久启用双栈 80 入口和 schema 3 续期'
-firstTlsEdit 15 protocol-tls-migrate-active-webroot --tls-migrate blocked-webroot.example.com \
-    --tls-webroot admin@example.com --preview
-grep -Fq '请先停用自动续期' "${CONTROL_LOG}" ||
-    fail '活跃旧域名 webroot 续期没有阻止迁移'
-runControl 0 protocol-tls-webroot-disable-renewal acme schedule disable --domain first-webroot.example.com
+webrootRenewalHash=$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-webroot.example.com/request.json")
+webrootAccountHash=$(find "${DOCKER_ROOT}/data/acme/first-webroot.example.com_ecc" -type f -print0 |
+    sort -z | xargs -0 sha256sum | sha256sum)
+for source in import webroot; do
+    tlsArgs=(--tls-import "${CERT_FILE}" "${KEY_FILE}")
+    [[ "${source}" != webroot ]] || tlsArgs=(--tls-webroot admin@example.com --tls-auto-renew)
+    firstTlsEdit 0 "protocol-tls-migrate-active-webroot-${source}-preview" \
+        --tls-migrate migrated-webroot.example.com "${tlsArgs[@]}" --preview
+    [[ "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-webroot.example.com/request.json")" == \
+        "${webrootRenewalHash}" ]] || fail '活跃 webroot 迁移预览改写旧续期'
+done
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    webrootCancelHash=$(editLiveHash)
+    for source in import webroot; do
+        tlsArgs=(--tls-import "${CERT_FILE}" "${KEY_FILE}")
+        [[ "${source}" != webroot ]] || tlsArgs=(--tls-webroot admin@example.com)
+        runEditPty $'n\n' 0 --tls-migrate migrated-webroot.example.com "${tlsArgs[@]}"
+        [[ "$(editLiveHash)" == "${webrootCancelHash}" &&
+            "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-webroot.example.com/request.json")" == \
+                "${webrootRenewalHash}" ]] || fail '活跃 webroot 迁移取消改变线上或续期登记'
+        assertEditCleanup
+    done
+fi
+for mode in acme-issue-fail core-validate-fail fail-next-up; do
+    tlsArgs=(--tls-import "${CERT_FILE}" "${KEY_FILE}")
+    expected=15
+    [[ "${mode}" != acme-issue-fail ]] || tlsArgs=(--tls-webroot admin@example.com)
+    [[ "${mode}" != fail-next-up ]] || expected=14
+    rm -f -- "${TEST_ROOT}/fail-once"
+    FAKE_DOCKER_MODE="${mode}" firstTlsEdit "${expected}" "protocol-tls-migrate-active-${mode}" \
+        --tls-migrate migrated-webroot.example.com "${tlsArgs[@]}" --confirm PADM-DOCKER-EDIT
+    [[ "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-webroot.example.com/request.json")" == \
+        "${webrootRenewalHash}" ]] || fail '活跃 webroot 迁移失败改写旧续期'
+done
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=webroot-disable-fail runControl 15 protocol-tls-migrate-disable-failure \
+    edit --tls-migrate migrated-webroot.example.com --tls-import "${CERT_FILE}" "${KEY_FILE}" \
+    --confirm PADM-DOCKER-EDIT
+assertEditCleanup
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 migrated-webroot.example.com 21 xray 32446 sing-box true
+grep -Fq '配置已成功迁移，但旧域名 first-webroot.example.com 的 webroot 自动续期停用失败' "${CONTROL_LOG}" &&
+    [[ "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-webroot.example.com/request.json")" == \
+        "${webrootRenewalHash}" ]] || fail '停用失败没有保留成功配置及恢复旧登记'
+runControl 0 protocol-tls-webroot-retry-disable acme schedule disable --domain first-webroot.example.com
+runControl 0 protocol-tls-webroot-reactivate edit --tls-migrate active-webroot.example.com \
+    --tls-webroot admin@example.com --tls-auto-renew --confirm PADM-DOCKER-EDIT
+firstTlsEdit 0 protocol-tls-webroot-active-success --tls-migrate next-webroot.example.com \
+    --tls-webroot admin@example.com --tls-auto-renew --confirm PADM-DOCKER-EDIT
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 next-webroot.example.com 21 xray 32446 sing-box true
+[[ ! -e "${DOCKER_ROOT}/secrets/renewal/active-webroot.example.com" ]] &&
+    jq -e '.schema_version==3 and .enabled==true and .provider=="webroot"' \
+        "${DOCKER_ROOT}/secrets/renewal/next-webroot.example.com/request.json" >/dev/null ||
+    fail '活跃 webroot 迁移没有停用旧登记或启用新登记'
+export FAKE_PHASE3_JQ
+FAKE_PHASE3_JQ=$(command -v jq)
+cat >"${MOCK_BIN}/jq" <<'EOF'
+#!/usr/bin/env bash
+# 只让配置提交后的域名核对读取失败，不损坏已经成功的配置。
+if [[ "${FAKE_DOCKER_MODE:-ok}" == webroot-spec-read-fail && "$#" == 3 &&
+    "$1" == -er && "$2" == .tls.domain &&
+    "$3" == "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ]]; then exit 5; fi
+exec "${FAKE_PHASE3_JQ}" "$@"
+EOF
+chmod 0755 "${MOCK_BIN}/jq"
+FAKE_DOCKER_MODE=webroot-spec-read-fail runControl 15 protocol-tls-webroot-read-failure \
+    edit --tls-migrate readcheck-webroot.example.com --tls-import "${CERT_FILE}" "${KEY_FILE}" \
+    --confirm PADM-DOCKER-EDIT
+rm -f -- "${MOCK_BIN}/jq"
+assertEditCleanup
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 readcheck-webroot.example.com 21 xray 32446 sing-box true
+grep -Fq '配置应用后无法核对 TLS 域名，续期调整未完成' "${CONTROL_LOG}" &&
+    [[ -f "${DOCKER_ROOT}/secrets/renewal/next-webroot.example.com/request.json" ]] ||
+    fail '配置读取失败被误报成功或改变旧登记'
+runControl 0 protocol-tls-webroot-read-retry-disable acme schedule disable --domain next-webroot.example.com
+FAKE_DOCKER_MODE=acme-account-missing runControl 15 protocol-tls-webroot-new-renewal-failure \
+    edit --tls-migrate final-dns.example.com --tls-dns admin@example.com dns_cf "${CREDENTIALS}" \
+    --tls-auto-renew --confirm PADM-DOCKER-EDIT
+assertEditCleanup
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 final-dns.example.com 21 xray 32446 sing-box true
+grep -Fq '操作已完成，但自动续期登记失败' "${CONTROL_LOG}" &&
+    [[ ! -e "${DOCKER_ROOT}/secrets/renewal/next-webroot.example.com" &&
+        ! -e "${DOCKER_ROOT}/secrets/renewal/final-dns.example.com" &&
+        -f "${DOCKER_ROOT}/secrets/tls/first-webroot.example.com.crt" &&
+        -f "${DOCKER_ROOT}/secrets/tls/final-dns.example.com.crt" &&
+        "$(find "${DOCKER_ROOT}/data/acme/first-webroot.example.com_ecc" -type f -print0 |
+            sort -z | xargs -0 sha256sum | sha256sum)" == "${webrootAccountHash}" &&
+        "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-http.example.com/request.json" | cut -d ' ' -f 1)" == \
+            "${renewalRequestHash}" ]] || fail '新登记失败回退成功配置、复活旧登记或丢失旧证书及账户'
 
 (
     export PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}"

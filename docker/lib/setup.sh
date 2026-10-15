@@ -1919,6 +1919,9 @@ dockerEditCommand() {
     local entryTlsProvider= entryTlsCredentials= entryTlsSource= answer
     local entryTlsRenewal=0 entryTlsRenewalOffer=0
     local tlsMigrateDomain=
+    # shellcheck disable=SC2034
+    local DOCKER_ACME_WEBROOT_MIGRATION_OLD= DOCKER_ACME_WEBROOT_MIGRATION_NEW=
+    local DOCKER_ACME_WEBROOT_MIGRATION_PENDING=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local warpFamily=
@@ -2965,6 +2968,9 @@ dockerEditCommand() {
             dockerError 'TLS 域名迁移需要不同的已有 TLS 域名，且暂不支持宿主集成、共存、跳跃或控制角色'
             return "${PADM_DOCKER_RC_STATE}"
         }
+        DOCKER_ACME_WEBROOT_MIGRATION_OLD=$(jq -er '.tls.domain' "${normalized}") ||
+            return "${PADM_DOCKER_RC_STATE}"
+        DOCKER_ACME_WEBROOT_MIGRATION_NEW=${tlsMigrateDomain}
     fi
     if [[ -n "${entryAction}" ]]; then
         jq -e --arg listener "${entryListener}" --arg action "${entryAction}" '
@@ -3889,8 +3895,11 @@ dockerEditCommand() {
       [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
     if [[ -n "${entryTlsMode}" ]]; then
         if [[ -n "${tlsMigrateDomain}" ]]; then
-            printf 'TLS 域名迁移至 %s，证书方式: %s；保留账号、分享 token 和累计，客户端需重新导入链接；旧域名续期登记保持。\n' \
+            printf 'TLS 域名迁移至 %s，证书方式: %s；保留账号、分享 token 和累计，客户端需重新导入链接。\n' \
                 "${entryTlsDomain}" "${entryTlsMode}"
+            [[ -z "${DOCKER_ACME_WEBROOT_MIGRATION_PENDING}" ]] ||
+                printf '配置成功后停用旧域名 %s 的 webroot 自动续期，保留旧证书和 ACME 账户；若提交后中断，请从证书菜单重试停用。\n' \
+                    "${DOCKER_ACME_WEBROOT_MIGRATION_PENDING}"
         else
             printf '新增 TLS 域名: %s，证书方式: %s；保留已有入口、账号授权和订阅状态。\n' \
                 "${entryTlsDomain}" "${entryTlsMode}"
@@ -3940,6 +3949,21 @@ dockerEditCommand() {
     DOCKER_CONFIG_RESTORE_ALPN_LISTENER=${alpnListener}
     dockerConfigureApply "${draft}" "${entryTlsSource:+${entryTlsSource}/tls}" \
         "${entryTlsSource:+${entryTlsSource}/acme}" "${mode}" '' "${siteSource}" "${siteTemplate}" || return $?
+    if [[ -n "${DOCKER_ACME_WEBROOT_MIGRATION_PENDING}" ]]; then
+        # 预览和交互取消也返回成功，必须确认新域名已提交后才能停用旧登记。
+        [[ "${mode}" != preview ]] || return 0
+        local committedTlsDomain
+        committedTlsDomain=$(jq -er '.tls.domain' "${root}/config/spec.json") || {
+            dockerError '配置应用后无法核对 TLS 域名，续期调整未完成；现有配置已保留，请从证书菜单核对并重试'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        [[ "${committedTlsDomain}" == "${tlsMigrateDomain}" ]] || return 0
+        dockerRenewalChange disable "${DOCKER_ACME_WEBROOT_MIGRATION_PENDING}" || {
+            dockerError "配置已成功迁移，但旧域名 ${DOCKER_ACME_WEBROOT_MIGRATION_PENDING} 的 webroot 自动续期停用失败；现有证书和配置已保留，请从证书菜单重试停用"
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        printf '旧域名 webroot 自动续期已停用: %s\n' "${DOCKER_ACME_WEBROOT_MIGRATION_PENDING}"
+    fi
     if [[ "${entryTlsRenewal}" == 1 ]]; then
         dockerSetupRenewalOffer "${entryTlsDomain}" "${entryTlsEmail}" "${entryTlsProvider}" \
             "${entryTlsCredentials}" confirmed
