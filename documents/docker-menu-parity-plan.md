@@ -7865,6 +7865,9 @@ Hy2/TUIC 在范围首尾端口分别由新客户端进程建立连接均被拒�
 仅完成补丁静态差分检查，定向回归待引擎恢复后补跑。
 随后恢复 IPv6/WARP 精确删除菜单在删空时提示策略关闭，并明确 WARP 需要重新导入；
 该提示与 `setup.sh` 删除最后一条规则的实际语义一致，菜单静态断言已同步。
+本轮继续统一 Direct、Block 与 DNS 域名精确删除提示，明确删空会关闭对应策略；
+仅调整交互文案与已有静态断言，不扩大 `domain:/full:/keyword:/geosite:` 支持范围。
+Docker Linux engine 仍不可用，定向回归保持待补。
 
 `docker-menu-port-alias` 在 Docker Linux amd64、Jobs 2 下实际执行通过，
 入口 `2.714` 秒、排队 `195` 毫秒，结果
