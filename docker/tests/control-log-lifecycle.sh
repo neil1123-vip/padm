@@ -204,6 +204,17 @@ has_call 'error:跳跃监督会话仍在运行或残留，已拒绝普通启动�
     fail 'up 残留门禁拒绝前已修改服务'
 rm -f -- "${lifecycleRoot}/data/net/.hopping-supervisor"
 
+# 断链符号链接也属于残留，不能被普通存在性检查绕过。
+ln -s -- "${lifecycleRoot}/data/net/.missing-supervisor" \
+    "${lifecycleRoot}/data/net/.hopping-supervisor"
+reset_calls
+status=0
+dockerLifecycleCommand up || status=$?
+[[ "${status}" == "${PADM_DOCKER_RC_LOCK}" ]] || fail 'up 绕过跳跃断链残留门禁'
+! grep -Eq '^(compose:|traffic-|.*-install$)' "${calls}" ||
+    fail 'up 断链残留门禁拒绝前已修改服务'
+rm -f -- "${lifecycleRoot}/data/net/.hopping-supervisor"
+
 reset_calls
 dockerLifecycleCommand restart
 has_call control-log-install || fail 'restart 未安装控制日志调度'
