@@ -1480,6 +1480,11 @@ runProtocolEntryConfigUpdateRegression() (
             currentInstallProtocolType=,1,
             manageCDN 1 <<< $'1\n4'
             [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
+            beforeStatus=$(wc -l <"${statusLog}")
+            manageCDN 1 <<< $'2\n4'
+            [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
+            [[ "$(wc -l <"${statusLog}")" == "$((beforeStatus + 1))" ]]
+            tail -n 1 "${statusLog}" | grep -q '^不可用 '
         )
         (
             local currentInstallProtocolType=,1, coreInstallType=1 configPath= singBoxConfigPath=

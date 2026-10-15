@@ -2249,7 +2249,11 @@ manageCDN() {
             fi
             ;;
         2)
-            clearCDNEntryAddress || true
+            if currentProtocolHasAny 2 21 22 23 24 25; then
+                clearCDNEntryAddress || true
+            else
+                statusCard "不可用" "请先安装 Reality XHTTP 或传统 TLS/CDN 协议"
+            fi
             ;;
         3)
             showCDNUsageNotes
