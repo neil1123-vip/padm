@@ -879,6 +879,9 @@ padm-docker edit --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
 无 TLS 部署新增首个 TLS 协议时，菜单会询问域名和证书来源；
 CLI 使用 `--tls-domain` 以及互斥的 `--tls-existing`、`--tls-import <证书链> <私钥>`、
 `--tls-dns <邮箱> <dns_provider> <私密凭据文件>` 或 `--tls-standalone <邮箱>`。
+Nginx TLS 协议还可选 `--tls-webroot <邮箱>`：先以临时 Nginx 提供 HTTP-01，
+取得证书后由正式 Nginx 持久监听双栈公网 `80`。仅支持 `21–25/27/29`，
+不接管无关端口服务；引导期间可能暂停本部署的 80 所在容器及其 HTTPS。
 已有受管/导入证书可做完整候选预览；ACME 预览只校验计划，不申请证书或暂停服务，
 交互确认或显式 `--confirm` 后才申请，再验证完整候选并提交。
 证书和 ACME 数据沿用现有备份/恢复事务，保留其它域名和账户。
@@ -927,6 +930,8 @@ padm-docker edit --tls-migrate new.example.com --tls-existing --confirm PADM-DOC
 旧域名的续期登记不迁移；旧域名已启用 webroot 自动续期时须先停用。
 新域名使用 ACME 时，可在交互成功后选择续期，或在命令加 `--tls-auto-renew`；
 受管/导入来源不接受该参数。宿主集成、Reality 共存、端口跳跃和控制角色暂不支持。
+Nginx TLS 部署的迁移也可选 `--tls-webroot <邮箱>`，显式启用新域名 HTTP-01 入口；
+旧域名的活跃 webroot 续期须先停用，旧登记不会自动迁移。
 
 `--preview` 不提交、不采集流量、不启停业务服务；验证仍会验签发布、拉取镜像并运行候选检查。
 `edit` 默认验证当前部署版本而非 latest，也可传入下述同版本发布资产参数。
@@ -1468,8 +1473,10 @@ padm-docker acme auto-renew
 首次配置、重新选择、首个 TLS 协议安装、TLS 域名迁移，以及证书菜单申请/续期成功后，
 可复用刚输入的 ACME 邮箱、验证方式和凭据启用自动续期；默认否，`0` 或 EOF 跳过。
 登记复用独立的调度恢复事务；失败返回 `15` 并说明证书或配置已成功，旧登记和调度按原事务恢复。
-非交互 `edit --tls-dns/--tls-standalone` 需显式加 `--tls-auto-renew`；
+非交互 `edit --tls-dns/--tls-standalone/--tls-webroot` 需显式加 `--tls-auto-renew`；
 直接 `acme` CLI 继续使用独立的 `acme schedule enable`。
+首配/重新选择证书选项 `5` 和编辑 `--tls-webroot` 提供同一 webroot 引导，
+可接续 schema 3 自动续期；取消和预览不启动挑战，申请或部署失败沿用现有恢复。
 已配置部署必须使用部署记录的 ops 镜像，不能用 `--ops-image` 换成其他镜像。
 候选证书检查有效期、域名和私钥匹配后，先执行 `nginx -t` 再重载并检查健康；
 失败或中断恢复旧证书和 ACME 账户，保留其他域名及累计流量。

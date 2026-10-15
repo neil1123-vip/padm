@@ -41,6 +41,7 @@ DOCKER_TLS_BACKUP=
 DOCKER_TLS_SWITCHED=0
 DOCKER_ACME_STOPPED=()
 DOCKER_ACME_CONTAINER=
+DOCKER_ACME_BOOTSTRAP_CONTAINER=
 DOCKER_ACME_PORT_PUBLISH=0
 DOCKER_ACME_RECOVERY=
 DOCKER_ACME_RUNNING=null
@@ -2837,6 +2838,29 @@ dockerGenerateSiteLocations() {
     fi
 }
 
+dockerGenerateAcmeWebrootServer() {
+    local domain=$1 target=$2
+    printf '%s\n' "
+server {
+    listen 8088;
+    listen [::]:8088;
+    server_name ${domain};
+    root /srv/padm-acme/active;
+    disable_symlinks on;
+    autoindex off;
+    default_type text/plain;
+
+    if (\$host != ${domain,,}) { return 404; }
+    if (\$request_uri !~ \"^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$\") { return 404; }
+
+    location ~ \"^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$\" {
+        try_files \$uri =404;
+    }
+
+    location / { return 404; }
+}" >>"${target}"
+}
+
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
     local httpPort http2Port hostMode=${3:-strict} metadata enabled sourceLogEnabled http01 fallbackEnabled
@@ -2871,25 +2895,7 @@ dockerGenerateNginxConfig() {
     }
 }' >>"${target}" || return 1
     if [[ "${http01}" == true ]]; then
-        printf '%s\n' "
-server {
-    listen 8088;
-    listen [::]:8088;
-    server_name ${domain};
-    root /srv/padm-acme/active;
-    disable_symlinks on;
-    autoindex off;
-    default_type text/plain;
-
-    if (\$host != ${domain,,}) { return 404; }
-    if (\$request_uri !~ \"^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$\") { return 404; }
-
-    location ~ \"^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$\" {
-        try_files \$uri =404;
-    }
-
-    location / { return 404; }
-}" >>"${target}" || return 1
+        dockerGenerateAcmeWebrootServer "${domain}" "${target}" || return 1
     fi
     if [[ "${fallbackEnabled}" == true ]]; then
         printf '%s\n' "
@@ -7533,7 +7539,7 @@ dockerCreateTlsCandidate() {
 dockerCleanupTlsCandidate() {
     local root candidate=${DOCKER_TLS_CANDIDATE:-}
     [[ "${#DOCKER_ACME_STOPPED[@]}" == 0 && -z "${DOCKER_ACME_CONTAINER:-}" &&
-        -z "${DOCKER_ACME_WEBROOT:-}" ]] || {
+        -z "${DOCKER_ACME_BOOTSTRAP_CONTAINER:-}" && -z "${DOCKER_ACME_WEBROOT:-}" ]] || {
         dockerError 'ACME 服务尚未恢复，保留候选账户以便重试'
         return 1
     }
@@ -8158,21 +8164,29 @@ dockerAcmeWebrootCleanup() {
 }
 
 dockerAcmeChallengeRestore() {
-    local id ids failed=0
+    local id ids variable handle failed=0 containerFailed
     local -a pending=()
-    if [[ -n "${DOCKER_ACME_CONTAINER:-}" ]]; then
-        ids=$(docker ps -aq --filter "label=io.padm.challenge=${DOCKER_ACME_CONTAINER}" \
-            --filter "label=io.padm.project=${PADM_DOCKER_PROJECT}") || return 1
+    for variable in DOCKER_ACME_CONTAINER DOCKER_ACME_BOOTSTRAP_CONTAINER; do
+        handle=${!variable}
+        [[ -n "${handle}" ]] || continue
+        containerFailed=0
+        if ! ids=$(docker ps -aq --filter "label=io.padm.challenge=${handle}" \
+            --filter "label=io.padm.project=${PADM_DOCKER_PROJECT}"); then
+            failed=1
+            continue
+        fi
         while IFS= read -r id; do
             [[ -n "${id}" ]] || continue
             [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] &&
-                docker rm -f "${id}" >/dev/null || failed=1
+                docker rm -f "${id}" >/dev/null || containerFailed=1
         done <<<"${ids}"
-        if [[ "${failed}" != 0 ]]; then
+        if [[ "${containerFailed}" != 0 ]]; then
+            failed=1
             dockerError "ACME 挑战容器清理失败，恢复记录: ${DOCKER_ACME_RECOVERY:-}"
+        else
+            printf -v "${variable}" '%s' ''
         fi
-        [[ "${failed}" != 0 ]] || DOCKER_ACME_CONTAINER=
-    fi
+    done
     # 挑战容器仍占端口时不能启动原服务，也不能丢弃恢复记录。
     [[ "${failed}" == 0 ]] || return 1
     dockerAcmeWebrootCleanup || return 1
@@ -8341,17 +8355,10 @@ dockerAcmeWebrootDeploymentCheck() {
     }
 }
 
-dockerAcmeWebrootPrepare() {
-    local domain=$1 candidate=$2 root directory intTrap termTrap pending=0 status=1
-    root=$(dockerInstallRoot) || return 1
-    directory="${root}/data/acme-webroot"
-    [[ -z "${DOCKER_ACME_WEBROOT}" && -z "${DOCKER_ACME_CONTAINER}" ]] &&
-        dockerTrafficSafePath "${root}" "${candidate}" && [[ -d "${candidate}" ]] &&
-        dockerAcmeWebrootDeploymentCheck "${domain}" &&
-        dockerAcmeWebrootTreeValidate "${root}" "${directory}" true || {
-        dockerError 'ACME webroot 未就绪或已有未完成挑战，本次未修改服务'
-        return 1
-    }
+dockerAcmeWebrootActivePrepare() {
+    local root=$1 directory="${1}/data/acme-webroot" intTrap termTrap pending=0 status=1
+    [[ -z "${DOCKER_ACME_WEBROOT}" ]] &&
+        dockerAcmeWebrootTreeValidate "${root}" "${directory}" true || return 1
     # 初始化完成后才处理信号，清理必须看到本次 inode 和可验证的归属。
     intTrap=$(trap -p INT)
     termTrap=$(trap -p TERM)
@@ -8376,6 +8383,84 @@ dockerAcmeWebrootPrepare() {
         return 1
     fi
     return "${status}"
+}
+
+dockerAcmeWebrootPrepare() {
+    local domain=$1 candidate=$2 root
+    root=$(dockerInstallRoot) || return 1
+    [[ -z "${DOCKER_ACME_WEBROOT}" && -z "${DOCKER_ACME_CONTAINER}" &&
+        -z "${DOCKER_ACME_BOOTSTRAP_CONTAINER}" ]] &&
+        dockerTrafficSafePath "${root}" "${candidate}" && [[ -d "${candidate}" ]] &&
+        dockerAcmeWebrootDeploymentCheck "${domain}" || {
+        dockerError 'ACME webroot 未就绪或已有未完成挑战，本次未修改服务'
+        return 1
+    }
+    dockerAcmeWebrootActivePrepare "${root}"
+}
+
+dockerAcmeBootstrapPrepare() {
+    local domain=$1 candidate=$2 image=$3 root config state deadline
+    root=$(dockerInstallRoot) || return 1
+    [[ -z "${DOCKER_ACME_WEBROOT}" && -z "${DOCKER_ACME_CONTAINER}" &&
+        -z "${DOCKER_ACME_BOOTSTRAP_CONTAINER}" && "${#DOCKER_ACME_STOPPED[@]}" == 0 &&
+        "${DOCKER_ACME_PORT_PUBLISH}" == 0 ]] &&
+        dockerDomainIsValid "${domain}" && dockerImageReferenceIsValid "${image}" &&
+        dockerTrafficSafePath "${root}" "${candidate}" && [[ -d "${candidate}" ]] &&
+        dockerTrafficSafePath "${root}" "${root}/data" || return 1
+    config="${candidate}/acme-bootstrap.conf"
+    dockerTrafficSafePath "${root}" "${config}" && [[ ! -e "${config}" ]] || return 1
+    if [[ ! -e "${root}/data" ]]; then
+        mkdir -m 0700 -- "${root}/data" || return 1
+    fi
+    dockerAcmeWebrootEnsure "${root}" &&
+        dockerAcmeWebrootActivePrepare "${root}" || return 1
+    printf '%s\n' 'server {
+    listen 8080;
+    listen [::]:8080;
+    server_name _;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+}' >"${config}" &&
+        dockerGenerateAcmeWebrootServer "${domain}" "${config}" &&
+        chmod 0644 "${config}" &&
+        dockerAcmeChallengePrepare standalone "${candidate}" || {
+        dockerAcmeChallengeRestore || true
+        return 1
+    }
+    # 80 端口只由临时 Nginx 发布，ops 仅挂载本轮挑战目录。
+    DOCKER_ACME_PORT_PUBLISH=0
+    DOCKER_ACME_BOOTSTRAP_CONTAINER="padm-acme-webroot-${BASHPID:-$$}-${RANDOM}"
+    if docker run -d --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+        --user "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
+        --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+        --publish 0.0.0.0:80:8088/tcp --publish '[::]:80:8088/tcp' \
+        --name "${DOCKER_ACME_BOOTSTRAP_CONTAINER}" \
+        --label "io.padm.challenge=${DOCKER_ACME_BOOTSTRAP_CONTAINER}" \
+        --label io.padm.mode=docker --label "io.padm.project=${PADM_DOCKER_PROJECT}" \
+        --volume "${config}:/etc/nginx/http.d/default.conf:ro" \
+        --volume "${root}/data/acme-webroot:/srv/padm-acme:ro" \
+        --health-interval 1s --health-start-period 0s --health-timeout 2s --health-retries 3 \
+        "${image}" >/dev/null; then
+        deadline=$((SECONDS + ${PADM_DOCKER_HEALTH_TIMEOUT:-60}))
+        while (( SECONDS <= deadline )); do
+            state=$(docker container inspect "${DOCKER_ACME_BOOTSTRAP_CONTAINER}") || break
+            jq -e --arg image "${image}" --arg name "${DOCKER_ACME_BOOTSTRAP_CONTAINER}" '
+              length == 1 and .[0].State.Running == true and .[0].State.Restarting != true and
+              .[0].Config.Image == $image and .[0].Config.Labels["io.padm.challenge"] == $name and
+              .[0].Config.Labels["io.padm.project"] == "padm-docker"
+            ' <<<"${state}" >/dev/null || break
+            jq -e '.[0].State.Health.Status == "healthy"' <<<"${state}" >/dev/null && return 0
+            jq -e '.[0].State.Health.Status == "starting"' <<<"${state}" >/dev/null || break
+            sleep 1
+        done
+    fi
+    dockerError 'ACME webroot 临时 Nginx 未能健康启动，正在恢复原服务'
+    dockerAcmeChallengeRestore || true
+    return 1
 }
 
 dockerAcmeChallengePrepare() {

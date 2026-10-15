@@ -129,7 +129,19 @@ info)
     ;;
 context) printf 'unix:///var/run/docker.sock\n' ;;
 ps)
+    if [[ -f "${FAKE_SETUP_EVENTS}.bootstrap" && " $* " == *' label=io.padm.challenge=padm-acme-webroot-'* ]]; then
+        printf '%064d\n' 1
+    fi
     if [[ "${mode}" == port-conflict && " $* " == *' publish='* ]]; then printf 'other-project\n'; fi
+    ;;
+container)
+    [[ "${2:-}" == inspect && -f "${FAKE_SETUP_EVENTS}.bootstrap" ]] || exit 1
+    cat "${FAKE_SETUP_EVENTS}.bootstrap"
+    ;;
+rm)
+    [[ "${2:-}" == -f && "${3:-}" == "$(printf '%064d' 1)" ]] || exit 1
+    rm -f -- "${FAKE_SETUP_EVENTS}.bootstrap"
+    printf 'bootstrap-removed\n' >>"${FAKE_SETUP_EVENTS}"
     ;;
 pull) printf 'pull %s\n' "$2" >>"${FAKE_SETUP_EVENTS:?}" ;;
 compose)
@@ -146,7 +158,17 @@ compose)
     ;;
 run)
     printf 'run %s\n' "$*" >>"${FAKE_SETUP_EVENTS:?}"
-    if [[ " $* " == *' uuid '* ]]; then
+    if [[ " $* " == *' --name padm-acme-webroot-'* ]]; then
+        name= previous=
+        for argument in "$@"; do
+            [[ "${previous}" != --name ]] || name=${argument}
+            previous=${argument}
+        done
+        jq -n --arg name "${name}" --arg image "${!#}" '
+          [{State:{Running:true,Restarting:false,Health:{Status:"healthy"}},
+            Config:{Image:$image,Labels:{"io.padm.challenge":$name,"io.padm.project":"padm-docker"}}}]
+        ' >"${FAKE_SETUP_EVENTS}.bootstrap"
+    elif [[ " $* " == *' uuid '* ]]; then
         [[ "${mode}" != keygen-fail ]] || exit 1
         if [[ "${mode}" == interrupt-int || "${mode}" == interrupt-term ]]; then
             printf 'generation-ready\n'
@@ -223,7 +245,7 @@ run)
                 account=${argument%:/var/lib/padm/acme}
             elif [[ "${previous}" == -d ]]; then
                 domain=${argument}
-            elif [[ "${previous}" == --dns ]]; then
+            elif [[ "${previous}" == --dns || "${previous}" == --webroot ]]; then
                 provider=${argument}
             fi
             previous=${argument}
@@ -418,6 +440,7 @@ snapshot() {
 
 assertClean() {
     [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail 'setup retained deployment lock'
+    [[ ! -e "${EVENTS}.bootstrap" ]] || fail 'setup retained a bootstrap Nginx container'
     [[ -z "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 2 -type d \
         \( -name '.setup.*' -o -name '.edit.*' -o -name '.protocol.*' -o \
             -name '.candidate.*' -o -name '.manifest.*' -o -name '.stage.*' \) -print -quit)" ]] ||
@@ -2260,6 +2283,43 @@ fi
 fi
 
 if [[ "${SECTION}" == all || "${SECTION}" == tls ]]; then
+# 首配 webroot 通过真实引导事务取得证书；成功后保留双栈 80 入口供续期使用。
+WEBROOT_INPUT=$'1\n2\nproxy.example.com\n1\nws.example.com\n24444\n5\nadmin@example.com\ny\ny\n'
+for webrootCase in acme-fail success; do
+    newState "webroot-${webrootCase}"
+    if [[ "${webrootCase}" == acme-fail ]]; then
+        export FAKE_SETUP_MODE=acme-fail
+        runPty 15 webroot-acme-fail "${WEBROOT_INPUT}" setup "${ASSET_ARGS[@]}"
+        assertUnconfigured
+        [[ ! -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" ]] ||
+            fail 'webroot 申请失败保留候选 ACME 账号'
+        unset FAKE_SETUP_MODE
+    else
+        runPty 0 webroot-success "${WEBROOT_INPUT}"$'y\n' setup "${ASSET_ARGS[@]}"
+        jq -e '.tls == {domain:"ws.example.com",http01:true} and
+          .core.protocols[0].id == 21 and .subscription.enabled' \
+            "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null &&
+            jq -e '.services.nginx.ports | index("0.0.0.0:80:8088/tcp") != null and
+              index("[::]:80:8088/tcp") != null' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null &&
+            [[ -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" &&
+                -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" &&
+                -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key" ]] ||
+            fail 'webroot 首配未同时提交 TLS、ACME 账号和持久双栈 80 入口'
+        request="${PADM_DOCKER_INSTALL_DIR}/secrets/renewal/ws.example.com"
+        jq -e '.schema_version == 3 and .enabled and .domain == "ws.example.com" and
+          .email == "admin@example.com" and .provider == "webroot"' "${request}/request.json" >/dev/null &&
+            [[ ! -e "${request}/credentials.env" &&
+                -f "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.timer" ]] ||
+            fail 'webroot 首配未登记 schema 3 续期，或错误生成 DNS 凭据'
+        grep -qF -- '--issue --webroot /var/lib/padm/acme-webroot' "${EVENTS}" ||
+            fail 'webroot 首配没有使用实际 ACME webroot 申请路径'
+    fi
+    grep -qF -- '--name padm-acme-webroot-' "${EVENTS}" &&
+        grep -qF bootstrap-removed "${EVENTS}" &&
+        [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]] ||
+        fail "${webrootCase}: webroot 引导未启动 Nginx 或未清理本轮挑战"
+done
+
 # 两类 Xray gRPC TLS 复用首配事务，不生成无用 Reality 凭据。
 for grpcProtocol in 24 25; do
     grpcChoice=14; backend=31301; scheme=vless; listener=entry-vless-grpc-tls

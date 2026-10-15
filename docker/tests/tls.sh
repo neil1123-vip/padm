@@ -35,6 +35,7 @@ STOPPED_ID=$(printf 'b%.0s' {1..64})
 HTTPS_ID=$(printf 'c%.0s' {1..64})
 CHALLENGE_ID=$(printf 'd%.0s' {1..64})
 UNRELATED_ID=$(printf 'e%.0s' {1..64})
+BOOTSTRAP_ID=$(printf 'f%.0s' {1..64})
 OPS_IMAGE="ghcr.io/example/padm-ops:3.2.0@sha256:$(printf 'a%.0s' {1..64})"
 CERT_FILE=${TEST_ROOT}/new.crt
 KEY_FILE=${TEST_ROOT}/new.key
@@ -81,7 +82,7 @@ find() {
 
 # 保留实际候选校验，Docker 只映射 bind 路径到本测试目录。
 docker() {
-    local candidate='' script='' previous='' argument last='' state
+    local candidate='' script='' previous='' argument last='' state name='' image=''
     case "$1" in
     ps)
         case "$*" in
@@ -91,12 +92,19 @@ docker() {
         'ps -aq --filter label=io.padm.challenge=fixture-challenge --filter label=io.padm.project=padm-docker')
             [[ ! -f "${TEST_ROOT}/challenge-container" ]] || printf '%s\n' "${CHALLENGE_ID}"
             ;;
+        'ps -aq --filter label=io.padm.challenge=padm-acme-webroot-'*' --filter label=io.padm.project=padm-docker')
+            [[ ! -f "${TEST_ROOT}/bootstrap-container.json" ]] || printf '%s\n' "${BOOTSTRAP_ID}"
+            ;;
         *) fail '运行容器发现依赖 Docker 端口过滤或挑战清理缺少 label' ;;
         esac
         return 0
         ;;
     container)
         [[ "${2:-}" == inspect ]] || fail '意外的容器命令'
+        if [[ "$#" == 3 && "$3" == padm-acme-webroot-* ]]; then
+            cat -- "${TEST_ROOT}/bootstrap-container.json"
+            return 0
+        fi
         state=$(jq -c --argjson ids "$(printf '%s\n' "${@:3}" | jq -Rsc 'split("\n")|map(select(length>0))')" \
             '[.[] | select(.Id as $id | $ids | index($id) != null)]' "${TEST_ROOT}/containers.json")
         [[ "$(jq 'length' <<<"${state}")" == $(("$#" - 2)) ]] || return 1
@@ -123,12 +131,48 @@ docker() {
         ;;
     rm)
         printf '%s\n' "$*" >>"${TEST_ROOT}/challenge.log"
-        [[ "$*" == "rm -f ${CHALLENGE_ID}" ]] || fail '恢复删除了非本轮挑战容器'
-        rm -f -- "${TEST_ROOT}/challenge-container"
+        if [[ "$*" == "rm -f ${BOOTSTRAP_ID}" ]]; then
+            [[ "${MODE}" != bootstrap-cleanup-fail ]] || return 1
+            rm -f -- "${TEST_ROOT}/bootstrap-container.json"
+        else
+            [[ "$*" == "rm -f ${CHALLENGE_ID}" ]] || fail '恢复删除了非本轮挑战容器'
+            rm -f -- "${TEST_ROOT}/challenge-container"
+        fi
         return 0
         ;;
     esac
     [[ "$1" == run ]] || fail '意外的 Docker 命令'
+    if [[ "${2:-}" == -d ]]; then
+        printf '%s\n' "$*" >>"${TEST_ROOT}/bootstrap.args"
+        for argument in "$@"; do
+            [[ "${previous}" != --name ]] || name=${argument}
+            [[ "${previous}" != --volume || "${argument}" != *:/etc/nginx/http.d/default.conf:ro ]] ||
+                candidate=${argument%:/etc/nginx/http.d/default.conf:ro}
+            previous=${argument}
+            image=${argument}
+        done
+        [[ "${name}" == padm-acme-webroot-* &&
+            "${image}" == "${OPS_IMAGE/padm-ops/padm-nginx}" && -f "${candidate}" ]] ||
+            fail 'webroot 引导缺少独立名称、固定 Nginx 镜像或配置'
+        [[ "$*" == *'--read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001'* &&
+            "$*" == *'--publish 0.0.0.0:80:8088/tcp --publish [::]:80:8088/tcp'* &&
+            "$*" == *"--volume ${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot:/srv/padm-acme:ro"* ]] ||
+            fail 'webroot 引导缺少权限隔离、双族端口或稳定只读挂载'
+        ! grep -Eq 'ssl_certificate|subscription|proxy_pass' "${candidate}" ||
+            fail 'webroot 引导加载了业务证书或代理'
+        grep -Fq 'location = /healthz' "${candidate}" &&
+            grep -Fq "server_name ${DOMAIN};" "${candidate}" ||
+            fail 'webroot 引导缺少健康检查或域名约束'
+        jq -n --arg image "${image}" --arg name "${name}" --arg mode "${MODE}" '
+          [{State:{Running:($mode != "bootstrap-stopped"),Restarting:false,
+            Health:{Status:(if $mode == "bootstrap-unhealthy" then "unhealthy" else "healthy" end)}},
+            Config:{Image:$image,Labels:{"io.padm.challenge":$name,"io.padm.project":"padm-docker"}}}]
+        ' >"${TEST_ROOT}/bootstrap-container.json"
+        [[ "${MODE}" != bootstrap-term ]] || kill -TERM "${BASHPID}"
+        [[ "${MODE}" != bootstrap-run-fail ]] || return 1
+        printf '%s\n' "${BOOTSTRAP_ID}"
+        return 0
+    fi
     if [[ "${RAW_ACME_RUN}" == 1 ]]; then
         printf '%s\n' "$*" >>"${TEST_ROOT}/acme-docker.args"
         [[ -z "$(cat)" ]] || fail 'HTTP 验证向工具注入了 DNS 凭据'
@@ -355,10 +399,11 @@ newState() {
         "${PADM_DOCKER_INSTALL_DIR}/compose.json"
     MODE=ok
     rm -f -- "${TEST_ROOT}/failed-once" "${TEST_ROOT}/stopped-once" "${TEST_ROOT}/restore-failed" \
-        "${TEST_ROOT}/challenge-container"
+        "${TEST_ROOT}/challenge-container" "${TEST_ROOT}/bootstrap-container.json"
     printf '[]\n' >"${TEST_ROOT}/containers.json"
     DOCKER_ACME_STOPPED=()
     DOCKER_ACME_CONTAINER=
+    DOCKER_ACME_BOOTSTRAP_CONTAINER=
     DOCKER_ACME_PORT_PUBLISH=0
     DOCKER_ACME_RECOVERY=
     DOCKER_ACME_RUNNING=null
@@ -369,6 +414,7 @@ newState() {
     : >"${TEST_ROOT}/acme.args"
     : >"${TEST_ROOT}/challenge.log"
     : >"${TEST_ROOT}/ops.log"
+    : >"${TEST_ROOT}/bootstrap.args"
 }
 
 standaloneState() {
@@ -485,7 +531,8 @@ assertWebrootRestored() {
 assertChallengeRestored() {
     cmp -s "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before" ||
         fail '挑战没有恢复原运行状态或启动了原停/无关服务'
-    [[ ! -e "${TEST_ROOT}/challenge-container" ]] || fail '本轮挑战容器未清理'
+    [[ ! -e "${TEST_ROOT}/challenge-container" && ! -e "${TEST_ROOT}/bootstrap-container.json" ]] ||
+        fail '本轮挑战容器未清理'
     [[ "$(<"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/other.example.com.crt")" == other-certificate &&
         "$(<"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/other.example.com.key")" == other-key &&
         "$(<"${PADM_DOCKER_INSTALL_DIR}/data/acme/other.example.com/domain.conf")" == other-domain ]] ||
@@ -590,6 +637,41 @@ runControl() {
     if (dockerMain "$@") >"${TEST_ROOT}/control.log" 2>&1; then status=0; else status=$?; fi
     if [[ "${status}" != "${expected}" ]]; then cat "${TEST_ROOT}/control.log" >&2; fail "$*: 预期 ${expected}，实际 ${status}"; fi
     assertClean
+}
+
+runBootstrap() {
+    local expected=$1 status
+    if (
+        trap 'dockerCommandInterrupted 130' INT
+        trap 'dockerCommandInterrupted 143' TERM
+        dockerAcquireDeploymentLock
+        dockerCreateTlsCandidate
+        if dockerAcmeBootstrapPrepare "${DOMAIN}" "${DOCKER_TLS_CANDIDATE}" \
+            "${OPS_IMAGE/padm-ops/padm-nginx}"; then
+            status=0
+            [[ "${DOCKER_ACME_PORT_PUBLISH}" == 0 && -n "${DOCKER_ACME_BOOTSTRAP_CONTAINER}" &&
+                "${DOCKER_ACME_WEBROOT}" == "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]] ||
+                fail 'webroot 引导没有保留独立挑战句柄'
+            (
+                cd "${DOCKER_ACME_WEBROOT}/.well-known/acme-challenge"
+                setpriv --reuid 10001 --regid 10001 --clear-groups -- sh -c \
+                    'printf "Padm_token-123.thumbprint_456\n" >Padm_token-123'
+            ) || fail 'webroot 引导挑战目录不允许 ops UID 写入'
+            DOCKER_ACME_CONTAINER=fixture-challenge
+            : >"${TEST_ROOT}/challenge-container"
+        else
+            status=$?
+        fi
+        dockerAcmeChallengeRestore
+        dockerCleanupTlsCandidate
+        dockerReleaseDeploymentLock
+        exit "${status}"
+    ) >"${TEST_ROOT}/control.log" 2>&1; then status=0; else status=$?; fi
+    [[ "${status}" == "${expected}" ]] || fail "webroot 引导预期 ${expected}，实际 ${status}"
+    assertClean
+    assertChallengeRestored
+    [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]] ||
+        fail 'webroot 引导遗留本轮 token 目录'
 }
 
 assertPermissions() {
@@ -738,6 +820,86 @@ for ARGS in '--standalone --dns dns_test' '--dns dns_test --standalone' \
 done
 [[ ! -s "${TEST_ROOT}/acme.log" && ! -s "${TEST_ROOT}/challenge.log" ]] ||
     fail '互斥验证方式仍执行了 ACME'
+
+# 首配引导复用受管端口归属检查；启动失败或信号须先清两个挑战容器再恢复服务。
+for MODE_CASE in ok bootstrap-run-fail bootstrap-stopped bootstrap-unhealthy bootstrap-term external-80; do
+    standaloneState "webroot-bootstrap-${MODE_CASE}"
+    before=$(materials)
+    MODE=${MODE_CASE}
+    EXPECTED=1
+    [[ "${MODE}" != ok ]] || EXPECTED=0
+    [[ "${MODE}" != bootstrap-term ]] || EXPECTED=143
+    runBootstrap "${EXPECTED}"
+    [[ "$(materials)" == "${before}" ]] || fail 'webroot 引导修改了现有证书或 ACME 账户'
+    if [[ "${MODE}" == external-80 ]]; then
+        [[ ! -s "${TEST_ROOT}/bootstrap.args" && ! -s "${TEST_ROOT}/challenge.log" ]] ||
+            fail 'webroot 引导遇到外部 80 占用仍启动挑战或停启服务'
+    else
+        [[ "$(grep -c "^stop ${RUNNING_ID}$" "${TEST_ROOT}/challenge.log")" == 1 &&
+            "$(grep -c "^start ${RUNNING_ID}$" "${TEST_ROOT}/challenge.log")" == 1 ]] ||
+            fail 'webroot 引导没有恢复原运行服务'
+    fi
+done
+
+newState webroot-bootstrap-first-deployment
+cp -- "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before"
+rm -- "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+    "${PADM_DOCKER_INSTALL_DIR}/compose.json" "${PADM_DOCKER_INSTALL_DIR}/images.env"
+runBootstrap 0
+! grep -Eq '^stop |^start ' "${TEST_ROOT}/challenge.log" ||
+    fail '空部署 webroot 引导停启了已有服务'
+
+(
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/webroot-bootstrap-without-data"
+    dockerInitializeStateRoot
+    rmdir -- "${PADM_DOCKER_INSTALL_DIR}/data"
+    dockerAcquireDeploymentLock
+    dockerCreateTlsCandidate
+    dockerAcmeBootstrapPrepare "${DOMAIN}" "${DOCKER_TLS_CANDIDATE}" "${OPS_IMAGE/padm-ops/padm-nginx}"
+    [[ "$(stat -c '%a %u %g' "${PADM_DOCKER_INSTALL_DIR}/data")" == '700 0 0' ]] ||
+        fail '首配 webroot 未安全初始化 data 父目录'
+    dockerAcmeChallengeRestore
+    dockerCleanupTlsCandidate
+    dockerReleaseDeploymentLock
+    [[ -d "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot" &&
+        ! -e "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]] ||
+        fail '首配 webroot 未完成稳定根初始化和本轮目录清理'
+) >"${TEST_ROOT}/control.log" 2>&1 || fail '首配缺失 data 时 webroot 引导失败'
+
+newState webroot-bootstrap-validation
+dockerCreateTlsCandidate
+reject dockerAcmeBootstrapPrepare '../example.com' "${DOCKER_TLS_CANDIDATE}" "${OPS_IMAGE/padm-ops/padm-nginx}"
+reject dockerAcmeBootstrapPrepare "${DOMAIN}" /outside/candidate "${OPS_IMAGE/padm-ops/padm-nginx}"
+reject dockerAcmeBootstrapPrepare "${DOMAIN}" "${DOCKER_TLS_CANDIDATE}" nginx:latest
+[[ ! -s "${TEST_ROOT}/bootstrap.args" && ! -s "${TEST_ROOT}/challenge.log" &&
+    ! -e "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot" ]] ||
+    fail 'webroot 引导参数无效仍修改挑战目录或服务'
+dockerCleanupTlsCandidate
+assertClean
+
+standaloneState webroot-bootstrap-cleanup-retry
+(
+    dockerAcquireDeploymentLock
+    dockerCreateTlsCandidate
+    dockerAcmeBootstrapPrepare "${DOMAIN}" "${DOCKER_TLS_CANDIDATE}" "${OPS_IMAGE/padm-ops/padm-nginx}"
+    DOCKER_ACME_CONTAINER=fixture-challenge
+    : >"${TEST_ROOT}/challenge-container"
+    MODE=bootstrap-cleanup-fail
+    reject dockerAcmeChallengeRestore
+    [[ -z "${DOCKER_ACME_CONTAINER}" && -n "${DOCKER_ACME_BOOTSTRAP_CONTAINER}" &&
+        -d "${DOCKER_ACME_WEBROOT}" && "${#DOCKER_ACME_STOPPED[@]}" == 1 &&
+        ! -e "${TEST_ROOT}/challenge-container" ]] ||
+        fail 'webroot 清理失败丢弃了恢复记录或未清理独立 ops 容器'
+    reject dockerCleanupTlsCandidate
+    ! grep -q '^start ' "${TEST_ROOT}/challenge.log" ||
+        fail 'webroot 清理失败仍恢复了 80 端口服务'
+    MODE=ok
+    dockerAcmeChallengeRestore
+    dockerCleanupTlsCandidate
+    dockerReleaseDeploymentLock
+) >"${TEST_ROOT}/control.log" 2>&1 || fail 'webroot 清理失败不能安全重试'
+assertClean
+assertChallengeRestored
 
 # webroot 使用真实归属和目录校验，ACME 工具只模拟候选账户及标准 key authorization。
 for ACTION in issue renew; do

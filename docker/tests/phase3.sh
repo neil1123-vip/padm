@@ -104,8 +104,31 @@ compose)
     fi
     ;;
 ps)
+    if [[ -f "${FAKE_DOCKER_LOG}.bootstrap" && " $* " == *' label=io.padm.challenge=padm-acme-webroot-'* ]]; then
+        printf '%064d\n' 1
+    fi
+    ;;
+container)
+    [[ "${2:-}" == inspect && -f "${FAKE_DOCKER_LOG}.bootstrap" ]] || exit 1
+    cat "${FAKE_DOCKER_LOG}.bootstrap"
+    ;;
+rm)
+    [[ "${2:-}" == -f && "${3:-}" == "$(printf '%064d' 1)" ]] || exit 1
+    rm -f -- "${FAKE_DOCKER_LOG}.bootstrap"
     ;;
 run)
+    if [[ " $* " == *' --name padm-acme-webroot-'* ]]; then
+        name= previous=
+        for argument in "$@"; do
+            [[ "${previous}" != --name ]] || name=${argument}
+            previous=${argument}
+        done
+        jq -n --arg name "${name}" --arg image "${!#}" '
+          [{State:{Running:true,Restarting:false,Health:{Status:"healthy"}},
+            Config:{Image:$image,Labels:{"io.padm.challenge":$name,"io.padm.project":"padm-docker"}}}]
+        ' >"${FAKE_DOCKER_LOG}.bootstrap"
+        exit 0
+    fi
     if [[ " ${*} " == *' generate rand --base64 16 '* ]]; then
         [[ "${mode}" != ss-generate-fail ]] || exit 1
         value=$(python3 -c 'import base64,secrets; print(base64.b64encode(secrets.token_bytes(16)).decode())') || exit 1
@@ -527,6 +550,7 @@ editLiveHash() {
     } | sha256sum | cut -d ' ' -f 1
 }
 assertEditCleanup() {
+    [[ ! -e "${DOCKER_LOG}.bootstrap" ]] || fail 'edit retained a bootstrap Nginx container'
     [[ -z "$(find "${DOCKER_ROOT}" -maxdepth 1 -type d \
         \( -name '.candidate.*' -o -name '.edit.*' -o -name '.reinstall.*' \) -print -quit)" ]] ||
         fail 'edit left a configuration candidate or draft directory'
@@ -1482,7 +1506,7 @@ jq -e --slurpfile before "${TEST_ROOT}/protocol-ss-installed.json" '
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '旧版迁移、跨核心或 Shadowsocks 增量改变累计与额度'
 
-# 首个 TLS 协议只追加本次入口和域名；四种来源复用已有证书事务。
+# 首个 TLS 协议只追加本次入口和域名；证书来源复用已有事务。
 FIRST_TLS_REALITY="${TEST_ROOT}/protocol-ss-base.json"
 FIRST_TLS_SS="${TEST_ROOT}/protocol-ss-installed.json"
 mkdir -p "${DOCKER_ROOT}/data/acme/unrelated"
@@ -1508,13 +1532,13 @@ firstTlsEdit() {
         "${FIRST_TLS_UNRELATED_HASH}" ]] || fail "${name}: 改写其它证书或 ACME 账号"
 }
 assertFirstTlsSpec() {
-    local before=$1 source=$2 domain=$3 protocol=$4 core=$5 port=$6 secondary=$7
+    local before=$1 source=$2 domain=$3 protocol=$4 core=$5 port=$6 secondary=$7 http01=${8:-false}
     jq -e --slurpfile before "${before}" --arg source "${source}" --arg domain "${domain}" \
         --arg core "${core}" --arg secondary "${secondary}" --argjson protocol "${protocol}" \
-        --argjson port "${port}" '
+        --argjson port "${port}" --argjson http01 "${http01}" '
       (.core.protocols[-1]) as $new |
       ($before[0].core.protocols[] | select(.listener_id==$source)) as $source |
-      .tls=={domain:$domain} and
+      .tls==({domain:$domain} + if $http01 then {http01:true} else {} end) and
       .core.secondary_type==(if $secondary=="" then null else $secondary end) and
       (.core.protocols[0:-1])==$before[0].core.protocols and
       (. | del(.tls,.core.protocols,.core.secondary_type))==
@@ -1627,6 +1651,14 @@ for source in dns standalone; do
         fail 'ACME 预览调用 CA 或占用挑战端口'
     [[ ! -e "${DOCKER_ROOT}/secrets/renewal" ]] || fail 'ACME 预览提前登记自动续期'
 done
+firstTlsEdit 15 protocol-first-tls-webroot-needs-nginx --protocol-add entry-1 31 32445 \
+    --tls-domain first-webroot.example.com --tls-webroot admin@example.com --preview
+firstTlsEdit 0 protocol-first-tls-webroot-preview --protocol-add entry-1 21 32446 \
+    --protocol-core xray --tls-domain first-webroot.example.com --tls-webroot admin@example.com \
+    --tls-auto-renew --preview
+! grep -Eq ' --issue | --install-cert |--publish 0.0.0.0:80:' "${DOCKER_LOG}" &&
+    [[ ! -e "${DOCKER_ROOT}/secrets/renewal" && ! -e "${DOCKER_LOG}.bootstrap" ]] ||
+    fail 'webroot 首个 TLS 预览申请证书、启动 Nginx 或登记续期'
 if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     firstTlsCancelHash=$(editLiveHash)
     for input in $'n\n' $'\004'; do
@@ -1706,6 +1738,29 @@ grep -qF '操作已完成，但自动续期登记失败；现有证书和配置�
     [[ ! -e "${DOCKER_ROOT}/secrets/renewal/first-renewal-fail.example.com" &&
         "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-http.example.com/request.json" | cut -d ' ' -f 1)" == "${renewalRequestHash}" ]] ||
     fail '续期登记失败回滚了成功配置、丢失明确错误或改写旧登记'
+
+: >"${DOCKER_LOG}"
+firstTlsEdit 0 protocol-tls-migrate-webroot-commit --tls-migrate first-webroot.example.com \
+    --tls-webroot admin@example.com --tls-auto-renew --confirm PADM-DOCKER-EDIT
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 first-webroot.example.com 21 xray 32446 sing-box true
+grep -q -- '--issue --webroot /var/lib/padm/acme-webroot' "${DOCKER_LOG}" &&
+    grep -q -- '--name padm-acme-webroot-' "${DOCKER_LOG}" &&
+    grep -q '^rm -f ' "${DOCKER_LOG}" &&
+    [[ ! -e "${DOCKER_LOG}.bootstrap" &&
+        ! -e "${DOCKER_ROOT}/data/acme-webroot/active" &&
+        "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-http.example.com/request.json" | cut -d ' ' -f 1)" == "${renewalRequestHash}" ]] ||
+    fail 'webroot 迁移未使用临时 Nginx、未清理挑战或改动旧续期登记'
+jq -e '.schema_version==3 and .enabled==true and .domain=="first-webroot.example.com" and
+  .email=="admin@example.com" and .provider=="webroot"' \
+    "${DOCKER_ROOT}/secrets/renewal/first-webroot.example.com/request.json" >/dev/null &&
+    jq -e '.services.nginx.ports | index("0.0.0.0:80:8088/tcp") != null and
+      index("[::]:80:8088/tcp") != null' "${DOCKER_ROOT}/compose.json" >/dev/null ||
+    fail 'webroot 迁移未持久启用双栈 80 入口和 schema 3 续期'
+firstTlsEdit 15 protocol-tls-migrate-active-webroot --tls-migrate blocked-webroot.example.com \
+    --tls-webroot admin@example.com --preview
+grep -Fq '请先停用自动续期' "${CONTROL_LOG}" ||
+    fail '活跃旧域名 webroot 续期没有阻止迁移'
+runControl 0 protocol-tls-webroot-disable-renewal acme schedule disable --domain first-webroot.example.com
 
 (
     export PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}"

@@ -2636,7 +2636,7 @@ dockerEditCommand() {
         --tls-existing) [[ "$#" -eq 3 ]] || return 2 ;;
         --tls-import) [[ "$#" -eq 5 && "$4" == 'certificate file.pem' && "$5" == 'private key.pem' ]] || return 2 ;;
         --tls-dns) [[ "$#" -eq 6 && "$4" == admin@example.com && "$5" == dns_cf && "$6" == credentials.env ]] || return 2 ;;
-        --tls-standalone) [[ "$#" -eq 4 && "$4" == admin@example.com ]] || return 2 ;;
+        --tls-standalone|--tls-webroot) [[ "$#" -eq 4 && "$4" == admin@example.com ]] || return 2 ;;
         *) return 2 ;;
         esac
         printf 'fixture-tls-migrate-confirm [y/N]: '
@@ -4297,7 +4297,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
     standalone-renew-final-no standalone-enable-final-no standalone-eof method-cancel method-eof \
     webroot-issue webroot-renew webroot-enable webroot-final-no webroot-disabled webroot-other-domain \
     http01-enable http01-disable http01-enable-cancel http01-disable-cancel \
-    migrate-existing migrate-import migrate-dns migrate-standalone migrate-domain-cancel \
+    migrate-existing migrate-import migrate-dns migrate-standalone migrate-webroot migrate-domain-cancel \
     migrate-source-cancel migrate-source-eof migrate-final-no migrate-final-eof migrate-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     printf '{"tls":{"domain":"ws.example.com","http01":true}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
@@ -4402,7 +4402,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
         printf -v input '%s\n%s\n' "${choice}" "${answer}"
         [[ "${answer}" != y ]] || expectedAction="edit --http01 ${action}"
         ;;
-    migrate-existing|migrate-import|migrate-dns|migrate-standalone|migrate-failed)
+    migrate-existing|migrate-import|migrate-dns|migrate-standalone|migrate-webroot|migrate-failed)
         input=$'10\nother.example.com\n1\ny\n'
         expectedAction='edit --tls-migrate other.example.com --tls-existing'
         case "${tlsCase}" in
@@ -4417,6 +4417,10 @@ for tlsCase in cancel final-no eof validate install issue renew \
         migrate-standalone)
             input=$'10\nother.example.com\n4\nadmin@example.com\ny\n'
             expectedAction='edit --tls-migrate other.example.com --tls-standalone admin@example.com'
+            ;;
+        migrate-webroot)
+            input=$'10\nother.example.com\n5\nadmin@example.com\ny\n'
+            expectedAction='edit --tls-migrate other.example.com --tls-webroot admin@example.com'
             ;;
         migrate-failed) TLS_MIGRATE_STATUS=17 ;;
         esac

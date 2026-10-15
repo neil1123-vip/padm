@@ -28,7 +28,8 @@ dockerUsage() {
   padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --protocol-add <源入口 ID> <目标协议 ID> <新公开端口> [--protocol-core <xray|sing-box>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
     首个 TLS 协议: --tls-domain <域名>，并选择 --tls-existing、--tls-import <证书链> <私钥>、
-      --tls-dns <邮箱> <dns_provider> <私密凭据文件> 或 --tls-standalone <邮箱>；已有 TLS 沿用原域名
+      --tls-dns <邮箱> <dns_provider> <私密凭据文件>、--tls-standalone <邮箱> 或 --tls-webroot <邮箱>；已有 TLS 沿用原域名
+    webroot 仅 Nginx TLS 协议，申请时临时提供 HTTP-01，成功后持久监听 80；不接管无关服务
     ACME 可加 --tls-auto-renew，配置成功后启用续期；预览不登记，失败返回错误并保留成功配置
   padm-docker edit --tls-migrate <新域名> <上述证书来源参数> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
     迁移已有 TLS 域名，保留账号、分享身份和累计；自动续期登记另行管理

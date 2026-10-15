@@ -51,6 +51,17 @@ Linux amd64 `docker-setup-tls`、`docker-menu`、`docker-phase3-entries` 定向�
 同快照静态检查及一次 `docker-contracts -Jobs 6` 通过；合同 57/57、规格差分 347 项，
 完整入口 `409194 ms`，本批无失败重跑。公网 CA、真实宿主调度和新部署 webroot 引导继续 `deferred`。
 
+3D.17 新增 Nginx TLS `21–25/27/29` 的首配、首个 TLS 和域名迁移 webroot 引导：
+证书选项 `5` 与 `--tls-webroot <邮箱>` 先临时运行仅 HTTP-01 的固定 Nginx，
+再由正式配置持久监听双栈 80，可显式接续 schema 3 自动续期。
+预览/取消不启动挑战，失败和信号复用现有恢复；旧登记不迁移，
+活跃旧域名 webroot 续期须先停用。公网 CA、原生宿主与 arm64 等边界保持。
+四项定向与 Bash/ShellCheck error 通过，真实非 root Nginx 双栈 token 及四类 404 通过；
+集中 `docker-contracts -Jobs 6` 一次通过，57/57 合同、347 项规格差分，
+入口 `382523 ms`，排队 `3989 ms`。证据
+`.tmp-regression-docker-673f7ecc870f4537aff98efed3ee5509/`；
+工具镜像 Nginx 自检不代替固定发行镜像、公网 CA 或真实宿主调度验收。
+
 5B.4g 已接入区域子菜单 `7` 与 CLI 的自定义直连例外单条原位替换，`8` 查看路由状态。
 仅修改已有非空 `.routing.region.allow_domains`；保留次序、区域模式、固定八条例外及
 其它配置，拒绝缺旧项、重复新项、同值、CSV、未启用或空名单。固定默认例外不可替换。

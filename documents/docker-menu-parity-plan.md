@@ -1627,6 +1627,34 @@ Jobs 6/cache=false，工具镜像复用。本批无失败重跑。
 公网 CA、真实宿主调度和新部署 webroot 引导仍按原边界 deferred。
 成功输入已由入口清理，仅保留日志/result；整体计划继续 active。
 
+#### 3D.17 首配与域名迁移的 Webroot 引导
+
+首配/重新选择、首个 TLS 安装与域名迁移新增显式 webroot 来源，
+交互证书选项 `5`、CLI `--tls-webroot <邮箱>`，仅 Nginx TLS `21–25/27/29`。
+先以本次验签固定 Nginx 镜像临时提供双栈 80 挑战入口，无业务证书或代理；
+挑战成功后停临时服务并清本次 token，正式配置持久开启 `.tls.http01=true`。
+临时与正式 Nginx 共用 token vhost，保留域名、原始 URI、文件及符号链接校验。
+冲突复用 standalone 归属检查，不停止无关服务；引导时可能暂停本部署的
+80 所在容器及 HTTPS，失败、INT/TERM 先清两种挑战容器再恢复原服务。
+申请、导出、完整候选校验与切换继续用已有事务，不新增 schema 或依赖。
+预览和取消不启动挑战；成功后可接续 schema 3 续期，旧登记不迁移；
+活跃旧域名 webroot 续期仍须先停用，宿主集成等原迁移边界保持。
+2026-10-15 Docker Linux amd64：`docker-tls`、`docker-setup-tls`、
+`docker-phase3-entries`、`docker-menu` 定向均通过，Jobs 2，
+入口分别 `31933/47952/216560/59984 ms`，共享三槽并行。
+集中 `docker-contracts -Jobs 6` 一次通过，57/57 合同和 347 项规格差分通过，
+入口 `382523 ms`、排队 `3989 ms`、`cache_hit=false`；
+完整证据 `.tmp-regression-docker-673f7ecc870f4537aff98efed3ee5509/`，
+源码归档 SHA-256 `303FAF6A1CD747D64129F637C8A6093800855F4E2E6BAC2252AA68C7290C90E7`，
+`source_content_sha256=F8C0CC9CE12696FB026CD170935980BAA96B1D2552D7D186C71E870B17E37ED4`。
+Bash/ShellCheck error 通过；真实非 root Nginx 检查双栈 token 原始字节与
+根路径、缺失 token、带查询串、错误 Host 四类 404，正常退出通过。
+此检查复用工具镜像内 Nginx，不代替固定发行镜像或公网 CA 验收。
+先前误用不存在的 `docker-tls-renewal` 返回 2，未执行测试；
+真实 Nginx 自检补齐缓存路径和入口依赖、消除管道回车后通过，生产代码未因此调整。
+成功源码输入和本轮临时脚本已清理，仅保留脱敏日志/result；
+公网 CA、原生宿主/arm64 及整机生命周期仍 deferred，整体计划保持 active。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份
