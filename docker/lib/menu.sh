@@ -33,8 +33,8 @@ dockerMenuInterrupted() {
         fi
         wait "${DOCKER_MENU_CHILD_PID}" 2>/dev/null || true
     fi
+    [[ -z "${DOCKER_MENU_STATUS_FILE:-}" ]] || rm -f -- "${DOCKER_MENU_STATUS_FILE}"
     if [[ "$1" -eq 143 ]]; then
-        [[ -z "${DOCKER_MENU_STATUS_FILE:-}" ]] || rm -f -- "${DOCKER_MENU_STATUS_FILE}"
         exit 143
     fi
     printf '\n'

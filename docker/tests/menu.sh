@@ -5027,6 +5027,16 @@ printf '%s\n' fixture-xhttp-status >"${TEST_ROOT}/xhttp-status.tmp"
 [[ "${menuStatus}" -eq 143 && ! -e "${TEST_ROOT}/xhttp-status.tmp" ]] ||
     fail 'XHTTP TERM 退出遗留状态副本或退出码错误'
 
+menuStatus=0
+printf '%s\n' fixture-xhttp-status >"${TEST_ROOT}/xhttp-status.tmp"
+(
+    source "${PROJECT_ROOT}/docker/lib/menu.sh"
+    DOCKER_MENU_STATUS_FILE="${TEST_ROOT}/xhttp-status.tmp"
+    dockerMenuInterrupted 130
+) || menuStatus=$?
+[[ "${menuStatus}" -eq 0 && ! -e "${TEST_ROOT}/xhttp-status.tmp" ]] ||
+    fail 'XHTTP INT 退出遗留状态副本或退出码错误'
+
 if [[ "${MENU_SCOPE}" == xhttp ]]; then
     printf 'docker-menu-xhttp-regression-ok\n'
     exit 0
