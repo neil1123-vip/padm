@@ -164,7 +164,7 @@ padm-docker status
 
 向导最终确认后才验签发布、生成 UUID/Reality 参数/订阅 token，并准备候选配置与证书。
 没有 `cosign` 时停止，不自动从未验证来源安装验证器，也不能跳过验签。
-WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01/HTTP-01 standalone；
+WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01/HTTP-01 standalone/TLS-ALPN-01；
 私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布仍要求 Xray、协议 21 VLESS WS TLS 和受管证书。
 Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander/Gecko 混淆和 HTTPS 伪装；
 带宽按服务端方向输入，分享链接自动转换为客户端方向。
@@ -889,7 +889,7 @@ padm-docker edit --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
 已有 TLS 部署沿用原域名，Naive 使用该证书域名作为服务器。
 无 TLS 部署新增首个 TLS 协议时，菜单会询问域名和证书来源；
 CLI 使用 `--tls-domain` 以及互斥的 `--tls-existing`、`--tls-import <证书链> <私钥>`、
-`--tls-dns <邮箱> <dns_provider> <私密凭据文件>` 或 `--tls-standalone <邮箱>`。
+`--tls-dns <邮箱> <dns_provider> <私密凭据文件>`、`--tls-standalone <邮箱>` 或 `--tls-alpn <邮箱>`。
 Nginx TLS 协议还可选 `--tls-webroot <邮箱>`：先以临时 Nginx 提供 HTTP-01，
 取得证书后由正式 Nginx 持久监听双栈公网 `80`。仅支持 `21–25/27/29`，
 不接管无关端口服务；引导期间可能暂停本部署的 80 所在容器及其 HTTPS。
@@ -939,7 +939,7 @@ padm-docker edit --tls-migrate new.example.com --tls-existing --confirm PADM-DOC
 保留独立 IP/地址、Reality、SS、端口、账号、分享 token、累计及其它完整规格。
 客户端须重新导入链接。ACME 预览只校验计划，确认后才申请证书并验证完整候选。
 旧域名的续期登记不迁移；本次迁移成功后自动停用旧域名的活跃 webroot 续期，
-保留旧证书与 ACME 账户，DNS-01/standalone 的旧登记保持。
+保留旧证书与 ACME 账户，DNS-01/standalone/ALPN 的旧登记保持。
 新域名使用 ACME 时，可在交互成功后选择续期，或在命令加 `--tls-auto-renew`；
 受管/导入来源不接受该参数。宿主集成、Reality 共存、端口跳跃和控制角色暂不支持。
 Nginx TLS 部署的迁移也可选 `--tls-webroot <邮箱>`，显式启用新域名 HTTP-01 入口；
@@ -1100,7 +1100,7 @@ WS jail 以 `0:10001` 读取受管 Nginx 日志，目录和文件保持 `0750/06
 停用前也收集旧配置可能恢复所需的来源；预览、取消不要求响应挑战。
 `net-fail2ban` 禁用 Docker 自动重启，daemon 重启后须通过管理入口重新见证；
 旧 `unless-stopped` 编排须先标准更新，已验证旧备份恢复时仅规范化该策略，备份原文不变。
-启用防护的 Nginx 不接受 standalone HTTP-01 停启，请使用 webroot；
+启用防护的 Nginx 不接受 HTTP-01 standalone/TLS-ALPN-01 停启，请使用 DNS-01 或 webroot；
 TLS 重载同样需要本次来源输入与现场挑战，未配置输入的无人值守轮换会拒绝提交。
 30 秒是日志采集窗口；Docker 日志或地址查询阻塞时命令可能更久，超时仍以失败收场。
 该检查证明磁盘配置、容器元数据和现场请求一致，不证明特权修改后的 Nginx worker
@@ -1473,6 +1473,8 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 padm-docker acme schedule enable --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --standalone
 padm-docker acme schedule enable --domain example.com --email admin@example.com --standalone
+padm-docker acme <issue|renew> --domain example.com --email admin@example.com --alpn
+padm-docker acme schedule enable --domain example.com --email admin@example.com --alpn
 padm-docker edit --http01 enable --preview
 padm-docker edit --http01 enable --confirm PADM-DOCKER-EDIT
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --webroot
@@ -1482,11 +1484,11 @@ padm-docker acme schedule disable --domain example.com
 padm-docker acme auto-renew
 ```
 
-主菜单第 8 项可查看/校验证书、导入轮换、DNS-01/HTTP-01 standalone/webroot 申请或续期，并显式开关 HTTP-01 入口、管理自动续期；最终确认前不持有部署锁。
+主菜单第 8 项可查看/校验证书、导入轮换、DNS-01/HTTP-01 standalone/webroot/TLS-ALPN-01 申请或续期，并显式开关 HTTP-01 入口、管理自动续期；最终确认前不持有部署锁。
 首次配置、重新选择、首个 TLS 协议安装、TLS 域名迁移，以及证书菜单申请/续期成功后，
 可复用刚输入的 ACME 邮箱、验证方式和凭据启用自动续期；默认否，`0` 或 EOF 跳过。
 登记复用独立的调度恢复事务；失败返回 `15` 并说明证书或配置已成功，旧登记和调度按原事务恢复。
-非交互 `edit --tls-dns/--tls-standalone/--tls-webroot` 需显式加 `--tls-auto-renew`；
+非交互 `edit --tls-dns/--tls-standalone/--tls-webroot/--tls-alpn` 需显式加 `--tls-auto-renew`；
 直接 `acme` CLI 继续使用独立的 `acme schedule enable`。
 首配/重新选择证书选项 `5` 和编辑 `--tls-webroot` 提供同一 webroot 引导，
 可接续 schema 3 自动续期；取消和预览不启动挑战，申请或部署失败沿用现有恢复。
@@ -1498,12 +1500,19 @@ padm-docker acme auto-renew
 `/etc/padm/secrets/tls` 挂载；全部消费者先校验，再定向重建核心或 reload Nginx，
 逐服务检查健康，失败时尝试恢复全部消费者且累计流量不回退。
 HTTP-01 standalone 使用非 root ops 容器的 `8080`，临时发布宿主双栈 TCP `80`；
-域名必须解析到本机且公网 `80` 可达，不修改防火墙，也不提供 TLS-ALPN-01。
+域名必须解析到本机且公网 `80` 可达，不修改防火墙。
 挑战前核对实际容器标签、镜像、挂载、部署与端口归属；外部或无法确认的监听拒绝。
 只暂停本部署原本运行的 `80` 拥有者，同容器的 HTTPS 会短暂停机，不停止无关 `443` 服务。
 成功、失败或信号后恢复原容器；原本停止的 TLS 消费者不启动。
 续期先让 acme.sh 完成到期/ARI 判断，未到期不发布端口、不暂停服务；
 恢复失败保留私有候选内的 `challenge.json` 容器 ID 记录，不继续下一域名。
+TLS-ALPN-01 复用同一申请、恢复及续期事务，使用非 root ops 的 `8443`，
+临时发布宿主双栈 TCP `443`；域名必须解析到本机，公网 `443` 直达该主机，
+不能由 CDN 或其它 TLS 终止器代答。首配/重新选择证书选项 `6`，
+首个 TLS 和迁移使用 `--tls-alpn <邮箱>`，证书菜单验证方式为 `4`。
+仅暂停本部署原运行的 `443` 拥有者，同容器其它端口也会短暂停机，
+无关 `80` 服务保持运行；Fail2ban 保护的 Nginx 拒绝自监听停启。
+尚未验收公网 CA、原生宿主生命周期和原生双架构，完整 ACME 能力仍为 `deferred`。
 webroot 必须已有受管 Nginx 入口 `21–25`/`27`/`29`，先显式设置 v3 `.tls.http01=true`；
 旧规格不自动开放 `80`。专用 HTTP vhost 固定双栈 `80:8088`，只服务当前 TLS 域名的标准
 `/.well-known/acme-challenge/<token>`，不沿用站点重定向、代理或订阅规则。
@@ -1517,7 +1526,7 @@ Nginx 只读挂载稳定的 `data/acme-webroot`；ops 仅写本次独占 `active
 直接开启。DNS 将 `NAME=value` 凭据和续期输入保存在宿主
 `secrets/renewal/<域名>/`，目录为 `0700 root:root`、文件为 `0600 root:root`；
 凭据经标准输入进入工具，不放在调度、参数或 Docker 环境变量元数据中。
-standalone 登记只保存 schema `2`、webroot 保存 schema `3` 请求，均无凭据文件；DNS 保持 schema `1`。
+standalone 登记只保存 schema `2`、webroot 保存 schema `3`、ALPN 保存 schema `4` 请求，均无凭据文件；DNS 保持 schema `1`。
 bundle 必须支持所有已启用登记的最高 schema；停用时事务删除该域名登记，允许重新使用兼容旧 bundle。
 多个域名共用一个每日 03:17 的任务，优先 systemd timer（最多随机延迟 5 分钟），
 否则使用正在运行的 cron；两个后端互斥，重复启用不增加任务，未到期正常跳过。

@@ -319,7 +319,7 @@ dockerSetupStageCertificate() {
         cp -- "${cert}" "${candidate}/tls/${domain}.crt" &&
             cp -- "${key}" "${candidate}/tls/${domain}.key" || return 1
         ;;
-    3|4|5)
+    3|4|5|6)
         if [[ "${mode}" == 3 ]]; then
             credentials=$(dockerResolveRegularFile "${credentials}") &&
                 dockerPrivateFileIsRestricted "${credentials}" || {
@@ -330,6 +330,9 @@ dockerSetupStageCertificate() {
         elif [[ "${mode}" == 4 ]]; then
             [[ "${provider}" == standalone && -z "${credentials}" ]] || return 1
             challengeArgs=(--standalone --httpport 8080)
+        elif [[ "${mode}" == 6 ]]; then
+            [[ "${provider}" == alpn && -z "${credentials}" ]] || return 1
+            challengeArgs=(--alpn --tlsport 8443)
         else
             [[ "${provider}" == webroot && -z "${credentials}" ]] || return 1
             nginxImage=$(dockerManifestImageReference nginx) || return 1
@@ -433,7 +436,7 @@ dockerTlsManageCommand() {
     if [[ "${choice}" == 10 ]]; then
         dockerSetupRead domain '新的 TLS 域名（0 取消）: ' || return 0
         dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
-        dockerSetupRead method '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 0=取消]: ' 1 || return 0
+        dockerSetupRead method '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 6=TLS-ALPN-01, 0=取消]: ' 1 || return 0
         case "${method}" in
         1) challengeArgs=(--tls-existing) ;;
         2)
@@ -448,10 +451,13 @@ dockerTlsManageCommand() {
             dockerSetupRead credentials 'DNS 凭据文件（0 取消）: ' || return 0
             challengeArgs=(--tls-dns "${email}" "${provider}" "${credentials}")
             ;;
-        4|5)
+        4|5|6)
             dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
-            if [[ "${method}" == 4 ]]; then challengeArgs=(--tls-standalone "${email}")
-            else challengeArgs=(--tls-webroot "${email}"); fi
+            case "${method}" in
+            4) challengeArgs=(--tls-standalone "${email}") ;;
+            5) challengeArgs=(--tls-webroot "${email}") ;;
+            6) challengeArgs=(--tls-alpn "${email}") ;;
+            esac
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
@@ -482,7 +488,7 @@ dockerTlsManageCommand() {
         esac
         dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
         dockerEmailIsValid "${email}" || return "${PADM_DOCKER_RC_USAGE}"
-        dockerSetupRead method '验证方式 [1=DNS-01, 2=HTTP-01 standalone, 3=HTTP-01 webroot，默认 1，0 取消]: ' 1 || return 0
+        dockerSetupRead method '验证方式 [1=DNS-01, 2=HTTP-01 standalone, 3=HTTP-01 webroot, 4=TLS-ALPN-01，默认 1，0 取消]: ' 1 || return 0
         case "${method}" in
         1)
             dockerSetupRead provider 'DNS provider（dns_*，0 取消）: ' || return 0
@@ -505,6 +511,11 @@ dockerTlsManageCommand() {
             provider=webroot
             challengeArgs=(--webroot)
             printf 'HTTP-01 webroot 使用已启用的公网 80 入口，不暂停 Nginx 或其它 TLS 消费者。\n'
+            ;;
+        4)
+            provider=alpn
+            challengeArgs=(--alpn)
+            printf 'TLS-ALPN-01 需要公网 TCP 443 直达本机；验证期间可能暂停本部署的 443 端口服务，同容器其它端口也会短暂停机。\n'
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
@@ -734,7 +745,7 @@ dockerSetupCommand() {
         else
             dockerSetupRead wsPort "WS TLS 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         fi
-        dockerSetupRead tlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 0=取消]: ' 1 || return 0
+        dockerSetupRead tlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 6=TLS-ALPN-01, 0=取消]: ' 1 || return 0
         case "${tlsMode}" in
         1) ;;
         2)
@@ -763,6 +774,12 @@ dockerSetupCommand() {
             dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
             dockerEmailIsValid "${email}" || return "${PADM_DOCKER_RC_USAGE}"
             printf 'HTTP-01 webroot 需要公网 80 可达；引导时可能暂停本部署 80 所在容器及其 HTTPS，配置成功后持久监听 80，不接管无关服务。\n'
+            ;;
+        6)
+            provider=alpn
+            dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
+            dockerEmailIsValid "${email}" || return "${PADM_DOCKER_RC_USAGE}"
+            printf 'TLS-ALPN-01 需要公网 TCP 443 直达本机；确认后可能暂停本部署的 443 端口服务，同容器其它端口也会短暂停机。\n'
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
@@ -879,7 +896,7 @@ dockerSetupCommand() {
     else
         dockerConfigureApply "${candidate}/spec.json" '' '' "${applyMode}" '' '' '' "${sharesSource}" || status=$?
     fi
-    if [[ "${status}" == 0 && ( "${tlsMode}" == 3 || "${tlsMode}" == 4 || "${tlsMode}" == 5 ) ]]; then
+    if [[ "${status}" == 0 && ( "${tlsMode}" == 3 || "${tlsMode}" == 4 || "${tlsMode}" == 5 || "${tlsMode}" == 6 ) ]]; then
         dockerSetupRenewalOffer "${domain}" "${email}" "${provider}" "${credentials}" || status=$?
     fi
     return "${status}"
@@ -1972,7 +1989,7 @@ dockerEditCommand() {
             entryTlsRenewal=1
             shift
             ;;
-        --tls-existing|--tls-import|--tls-dns|--tls-standalone|--tls-webroot)
+        --tls-existing|--tls-import|--tls-dns|--tls-standalone|--tls-webroot|--tls-alpn)
             [[ -z "${entryTlsMode}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             case "$1" in
             --tls-existing) entryTlsMode=1; shift ;;
@@ -1986,12 +2003,15 @@ dockerEditCommand() {
                     return "${PADM_DOCKER_RC_USAGE}"
                 entryTlsMode=3 entryTlsEmail=$2 entryTlsProvider=$3 entryTlsCredentials=$4
                 shift 4 ;;
-            --tls-standalone|--tls-webroot)
+            --tls-standalone|--tls-webroot|--tls-alpn)
                 [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] ||
                     return "${PADM_DOCKER_RC_USAGE}"
                 entryTlsEmail=$2
-                if [[ "$1" == --tls-standalone ]]; then entryTlsMode=4 entryTlsProvider=standalone
-                else entryTlsMode=5 entryTlsProvider=webroot; fi
+                case "$1" in
+                --tls-standalone) entryTlsMode=4 entryTlsProvider=standalone ;;
+                --tls-webroot) entryTlsMode=5 entryTlsProvider=webroot ;;
+                --tls-alpn) entryTlsMode=6 entryTlsProvider=alpn ;;
+                esac
                 shift 2 ;;
             esac
             ;;
@@ -2830,7 +2850,7 @@ dockerEditCommand() {
         [[ "${entryAction}" == add ]] || return "${PADM_DOCKER_RC_USAGE}"
         case "${entryProtocol}" in 1|2|26|30) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     fi
-    [[ "${entryTlsRenewal}" == 0 || "${entryTlsMode}" == 3 || "${entryTlsMode}" == 4 || "${entryTlsMode}" == 5 ]] ||
+    [[ "${entryTlsRenewal}" == 0 || "${entryTlsMode}" == 3 || "${entryTlsMode}" == 4 || "${entryTlsMode}" == 5 || "${entryTlsMode}" == 6 ]] ||
         return "${PADM_DOCKER_RC_USAGE}"
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
@@ -2961,7 +2981,7 @@ dockerEditCommand() {
             entryTlsCredentials=$(dockerResolveRegularFile "${entryTlsCredentials}") &&
                 dockerRenewalCredentialsValidate "${entryTlsCredentials}" ||
                 return "${PADM_DOCKER_RC_STATE}" ;;
-        4|5) dockerEmailIsValid "${entryTlsEmail}" || return "${PADM_DOCKER_RC_USAGE}" ;;
+        4|5|6) dockerEmailIsValid "${entryTlsEmail}" || return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
         dockerEditTlsDomainChange "${draft}" "${tlsMigrateDomain}" "${draft}.next" "${entryTlsMode}" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
@@ -2999,7 +3019,7 @@ dockerEditCommand() {
                         [[ -n "${entryTlsDomain}" ]] ||
                             dockerSetupRead entryTlsDomain '新增协议的 TLS 域名（0 取消）: ' || return 0
                         [[ -n "${entryTlsMode}" ]] ||
-                            dockerSetupRead entryTlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 0=取消]: ' 1 || return 0
+                            dockerSetupRead entryTlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 6=TLS-ALPN-01, 0=取消]: ' 1 || return 0
                         case "${entryTlsMode}" in
                         1) ;;
                         2)
@@ -3014,9 +3034,12 @@ dockerEditCommand() {
                                 dockerSetupRead entryTlsProvider 'DNS provider（dns_*，0 取消）: ' || return 0
                             [[ -n "${entryTlsCredentials}" ]] ||
                                 dockerSetupRead entryTlsCredentials 'DNS 凭据文件（0 取消）: ' || return 0 ;;
-                        4|5)
-                            if [[ "${entryTlsMode}" == 4 ]]; then entryTlsProvider=standalone
-                            else entryTlsProvider=webroot; fi
+                        4|5|6)
+                            case "${entryTlsMode}" in
+                            4) entryTlsProvider=standalone ;;
+                            5) entryTlsProvider=webroot ;;
+                            6) entryTlsProvider=alpn ;;
+                            esac
                             [[ -n "${entryTlsEmail}" ]] ||
                                 dockerSetupRead entryTlsEmail 'ACME 邮箱（0 取消）: ' || return 0 ;;
                         *) return "${PADM_DOCKER_RC_USAGE}" ;;
@@ -3038,7 +3061,7 @@ dockerEditCommand() {
                             dockerError 'DNS 凭据必须为私密普通文件，内容须符合现有 ACME 环境变量约束'
                             return "${PADM_DOCKER_RC_STATE}"
                         } ;;
-                    4|5)
+                    4|5|6)
                         dockerEmailIsValid "${entryTlsEmail}" || return "${PADM_DOCKER_RC_USAGE}"
                         ;;
                     *) return "${PADM_DOCKER_RC_USAGE}" ;;
@@ -3906,7 +3929,7 @@ dockerEditCommand() {
         fi
         [[ "${entryTlsRenewal}" == 0 ]] ||
             printf '配置成功后将使用本次 ACME 参数启用自动续期；登记失败保留成功配置并返回错误。\n'
-        if [[ "${entryTlsMode}" == 3 || "${entryTlsMode}" == 4 || "${entryTlsMode}" == 5 ]]; then
+        if [[ "${entryTlsMode}" == 3 || "${entryTlsMode}" == 4 || "${entryTlsMode}" == 5 || "${entryTlsMode}" == 6 ]]; then
             # 申请前先完成无证书即可验证的门禁；预览和取消不触发 CA 或暂停服务。
             dockerControlRecoveryCheck &&
                 dockerControlSyncTransitionValidate "${draft}" &&
@@ -3922,6 +3945,8 @@ dockerEditCommand() {
                 printf 'HTTP-01 需要域名解析到本机且公网 80 可达；确认后临时使用宿主 80，冲突时不停止无关服务。\n'
             [[ "${entryTlsMode}" != 5 ]] ||
                 printf 'HTTP-01 webroot 将临时运行 Nginx 挑战入口，可能暂停本部署 80 所在容器及其 HTTPS；配置成功后持久监听公网 80，不接管无关服务。\n'
+            [[ "${entryTlsMode}" != 6 ]] ||
+                printf 'TLS-ALPN-01 需要公网 TCP 443 直达本机；确认后可能暂停本部署的 443 端口服务，同容器其它端口也会短暂停机。\n'
             if [[ "${mode}" == preview ]]; then
                 if [[ -n "${tlsMigrateDomain}" ]]; then
                     printf 'TLS 域名迁移计划已校验；预览未申请证书或提交，证书及完整候选将在确认后验证。\n'

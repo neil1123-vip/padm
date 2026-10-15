@@ -8238,8 +8238,9 @@ dockerAcmeRuntimeSnapshot() {
 }
 
 dockerAcmePortOwners() {
-    local ids id containers
+    local port=${1:-80} ids id containers
     local -a runningIds=()
+    [[ "${port}" == 80 || "${port}" == 443 ]] || return 1
     ids=$(docker ps -q) || return 1
     while IFS= read -r id; do
         [[ -n "${id}" ]] || continue
@@ -8249,19 +8250,20 @@ dockerAcmePortOwners() {
     [[ "${#runningIds[@]}" -gt 0 ]] || { printf '[]\n'; return 0; }
     containers=$(docker container inspect "${runningIds[@]}") || return 1
     # Docker 的 publish 过滤不是宿主端口证明，必须读取实际 HostPort。
-    jq -ce 'map(select(.State.Running == true and
+    jq -ce --arg port "${port}" 'map(select(.State.Running == true and
       any(.HostConfig.PortBindings // {} | to_entries[];
-        (.key | endswith("/tcp")) and any(.value[]?; .HostPort == "80"))))' <<<"${containers}"
+        (.key | endswith("/tcp")) and any(.value[]?; .HostPort == $port))))' <<<"${containers}"
 }
 
 dockerAcmeHostPortOwned() {
-    local owners=$1 listeners line pid arguments ip port
-    dockerTcpPortIsListening 80 || return 0
+    local owners=$1 hostPort=${2:-80} listeners line pid arguments ip port
+    [[ "${hostPort}" == 80 || "${hostPort}" == 443 ]] || return 1
+    dockerTcpPortIsListening "${hostPort}" || return 0
     command -v ss >/dev/null || {
-        dockerError '缺少 ss，不能确认宿主 80 端口进程归属'
+        dockerError "缺少 ss，不能确认宿主 ${hostPort} 端口进程归属"
         return 1
     }
-    listeners=$(ss -H -ltnp 'sport = :80') || return 1
+    listeners=$(ss -H -ltnp "sport = :${hostPort}") || return 1
     [[ -n "${listeners}" ]] || return 1
     while IFS= read -r line; do
         [[ "${line}" =~ users:\(\(\"docker-proxy\",pid=([0-9]+),fd=[0-9]+\)\)$ ]] || return 1
@@ -8269,18 +8271,19 @@ dockerAcmeHostPortOwned() {
         [[ -f "/proc/${pid}/cmdline" ]] || return 1
         arguments=$(tr '\0' '\n' <"/proc/${pid}/cmdline") || return 1
         [[ "$(sed -n '/^-proto$/{n;p;}' <<<"${arguments}")" == tcp &&
-            "$(sed -n '/^-host-port$/{n;p;}' <<<"${arguments}")" == 80 ]] || return 1
+            "$(sed -n '/^-host-port$/{n;p;}' <<<"${arguments}")" == "${hostPort}" ]] || return 1
         ip=$(sed -n '/^-container-ip$/{n;p;}' <<<"${arguments}") || return 1
         port=$(sed -n '/^-container-port$/{n;p;}' <<<"${arguments}") || return 1
-        jq -e --arg ip "${ip}" --arg port "${port}/tcp" '
+        jq -e --arg ip "${ip}" --arg port "${port}/tcp" --arg hostPort "${hostPort}" '
           any(.[]; any(.NetworkSettings.Networks[]; .IPAddress == $ip or .GlobalIPv6Address == $ip) and
-            any(.HostConfig.PortBindings[$port][]?; .HostPort == "80"))
+            any(.HostConfig.PortBindings[$port][]?; .HostPort == $hostPort))
         ' <<<"${owners}" >/dev/null || return 1
     done <<<"${listeners}"
 }
 
 dockerAcmeOwnersValidate() {
-    local owners=$1 root container service image
+    local owners=$1 port=${2:-80} root container service image
+    [[ "${port}" == 80 || "${port}" == 443 ]] || return 1
     root=$(dockerInstallRoot) || return 1
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
         dockerTrafficSafePath "${root}" "${root}/compose.json" &&
@@ -8298,7 +8301,7 @@ dockerAcmeOwnersValidate() {
         service=$(jq -er '.[0].Config.Labels["com.docker.compose.service"]' <<<"${container}") || return 1
         case "${service}" in xray|sing-box|nginx) ;; *) return 1 ;; esac
         image=$(jq -er --arg service "${service}" '.images[$service]' "${root}/config/spec.json") || return 1
-        jq -e --arg root "${root}" --arg service "${service}" --arg image "${image}" \
+        jq -e --arg root "${root}" --arg service "${service}" --arg image "${image}" --argjson port "${port}" \
             --slurpfile deployment "${root}/deployment.json" --slurpfile compose "${root}/compose.json" '
           .[0] as $c | $c.Config.Labels as $labels |
           $labels["com.docker.compose.project"] == "padm-docker" and
@@ -8310,7 +8313,7 @@ dockerAcmeOwnersValidate() {
           all($c.Mounts[]; .Type == "bind") and
           (($c.HostConfig.Tmpfs // {}) | keys | sort) ==
             ([$compose[0].services[$service].tmpfs[]? | split(":")[0]] | sort) and
-          any($deployment[0].listeners[]; .service == $service and .public_port == 80 and .transport == "tcp") and
+            any($deployment[0].listeners[]; .service == $service and .public_port == $port and .transport == "tcp") and
           ([$c.HostConfig.PortBindings | to_entries[] | . as $binding | .value[] |
             ((if (.HostIp | contains(":")) then "[" + .HostIp + "]"
               else (if .HostIp == "" then "0.0.0.0" else .HostIp // "0.0.0.0" end) end) +
@@ -8321,12 +8324,12 @@ dockerAcmeOwnersValidate() {
           ($compose[0].services[$service].volumes |
             map({source:(.source | sub("^\\$\\{PADM_DOCKER_ROOT\\}"; $root)),target,read_only}) | sort_by(.target))
         ' <<<"${container}" >/dev/null || {
-            dockerError '80 端口容器不属于当前受管部署，未停止任何服务'
+            dockerError "${port} 端口容器不属于当前受管部署，未停止任何服务"
             return 1
         }
     done < <(jq -c '.[]' <<<"${owners}")
-    dockerAcmeHostPortOwned "${owners}" || {
-        dockerError '宿主 80 端口存在外部或无法归属的监听，未停止任何服务'
+    dockerAcmeHostPortOwned "${owners}" "${port}" || {
+        dockerError "宿主 ${port} 端口存在外部或无法归属的监听，未停止任何服务"
         return 1
     }
 }
@@ -8464,32 +8467,36 @@ dockerAcmeBootstrapPrepare() {
 }
 
 dockerAcmeChallengePrepare() {
-    local provider=$1 candidate=$2 root owners
+    local provider=$1 candidate=$2 root owners port=80 challenge=HTTP-01
     if [[ "${provider}" == webroot ]]; then
         dockerAcmeWebrootPrepare "${3}" "${candidate}"
         return $?
     fi
-    [[ "${provider}" == standalone ]] || return 0
+    case "${provider}" in
+    standalone) ;;
+    alpn) port=443 challenge=TLS-ALPN-01 ;;
+    *) return 0 ;;
+    esac
     [[ "${#DOCKER_ACME_STOPPED[@]}" == 0 && "${DOCKER_ACME_PORT_PUBLISH}" == 0 ]] || return 1
     root=$(dockerInstallRoot) || return 1
     dockerTrafficSafePath "${root}" "${candidate}" &&
         [[ -d "${candidate}" && ! -L "${candidate}" ]] || return 1
-    owners=$(dockerAcmePortOwners) || return 1
-    # 首次 standalone 没有部署，只有发现拥有者时才要求受管配置证明。
+    owners=$(dockerAcmePortOwners "${port}") || return 1
+    # 首次自监听申请没有部署，只有发现拥有者时才要求受管配置证明。
     if [[ "${owners}" != '[]' ]]; then
-        dockerAcmeOwnersValidate "${owners}" || return 1
+        dockerAcmeOwnersValidate "${owners}" "${port}" || return 1
     else
-        dockerAcmeHostPortOwned "${owners}" || return 1
+        dockerAcmeHostPortOwned "${owners}" "${port}" || return 1
     fi
     if [[ "$(jq 'length' <<<"${owners}")" != 0 ]]; then
         if jq -e 'any(.[]; .Config.Labels["com.docker.compose.service"] == "nginx")' \
             <<<"${owners}" >/dev/null &&
             jq -e 'any(.host_integrations[]; .type == "fail2ban")' \
                 "${root}/config/spec.json" >/dev/null; then
-            dockerError 'Fail2ban 保护的 Nginx 不能用 standalone 停启，HTTP-01 请使用 webroot'
+            dockerError 'Fail2ban 保护的 Nginx 不能用自监听挑战停启，请使用 DNS-01 或 HTTP-01 webroot'
             return 1
         fi
-        printf 'HTTP-01 临时暂停 80 端口服务: %s；同容器其它端口也会短暂停机。\n' \
+        printf '%s 临时暂停 %s 端口服务: %s；同容器其它端口也会短暂停机。\n' "${challenge}" "${port}" \
             "$(jq -r 'map(.Config.Labels["com.docker.compose.service"]) | unique | join(",")' <<<"${owners}")"
         # 停止前登记，部分停止失败或信号到达时仍恢复全部原运行容器。
         DOCKER_ACME_RECOVERY="${candidate}/challenge.json"
@@ -8502,16 +8509,17 @@ dockerAcmeChallengePrepare() {
             return 1
         }
     fi
-    owners=$(dockerAcmePortOwners) || {
+    owners=$(dockerAcmePortOwners "${port}") || {
         dockerAcmeChallengeRestore || true
         return 1
     }
-    if dockerTcpPortIsListening 80 || [[ "${owners}" != '[]' ]]; then
-        dockerError '挑战前 80 端口未完全释放，正在恢复原运行容器'
+    if dockerTcpPortIsListening "${port}" || [[ "${owners}" != '[]' ]]; then
+        dockerError "挑战前 ${port} 端口未完全释放，正在恢复原运行容器"
         dockerAcmeChallengeRestore || true
         return 1
     fi
-    DOCKER_ACME_PORT_PUBLISH=1
+    if [[ "${provider}" == alpn ]]; then DOCKER_ACME_PORT_PUBLISH=443
+    else DOCKER_ACME_PORT_PUBLISH=1; fi
 }
 
 dockerAcmeRenewProbe() {
@@ -8551,13 +8559,16 @@ dockerAcmeRun() {
         dockerRenewalCredentialsValidate "${credentials}" || return 1
         input=${credentials}
     fi
-    if [[ "${DOCKER_ACME_PORT_PUBLISH}" == 1 ]]; then
-        ports=(--publish 0.0.0.0:80:8080/tcp --publish '[::]:80:8080/tcp')
-    fi
+    case "${DOCKER_ACME_PORT_PUBLISH}" in
+    0) ;;
+    1) ports=(--publish 0.0.0.0:80:8080/tcp --publish '[::]:80:8080/tcp') ;;
+    443) ports=(--publish 0.0.0.0:443:8443/tcp --publish '[::]:443:8443/tcp') ;;
+    *) return 1 ;;
+    esac
     if [[ -n "${DOCKER_ACME_WEBROOT}" ]]; then
         webrootMount=(--volume "${DOCKER_ACME_WEBROOT}:/var/lib/padm/acme-webroot")
     fi
-    if [[ "${DOCKER_ACME_PORT_PUBLISH}" == 1 || -n "${DOCKER_ACME_WEBROOT}" ]]; then
+    if [[ "${DOCKER_ACME_PORT_PUBLISH}" != 0 || -n "${DOCKER_ACME_WEBROOT}" ]]; then
         DOCKER_ACME_CONTAINER="padm-acme-${BASHPID:-$$}-${RANDOM}"
         containerArgs=(--name "${DOCKER_ACME_CONTAINER}" --label "io.padm.challenge=${DOCKER_ACME_CONTAINER}")
     fi
@@ -8603,6 +8614,7 @@ dockerAcmeCommand() {
         --email) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; email=$2; shift 2 ;;
         --dns) [[ "$#" -ge 2 && -z "${provider}" && "$2" =~ ^dns_[a-z0-9_]+$ ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=$2; shift 2 ;;
         --standalone) [[ -z "${provider}" ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=standalone; shift ;;
+        --alpn) [[ -z "${provider}" ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=alpn; shift ;;
         --webroot) [[ -z "${provider}" ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=webroot; shift ;;
         --credentials) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; credentials=$2; shift 2 ;;
         --ops-image) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; requestedImage=$2; shift 2 ;;
@@ -8611,8 +8623,8 @@ dockerAcmeCommand() {
     done
     dockerDomainIsValid "${domain}" && dockerEmailIsValid "${email}" &&
         { [[ "${provider}" =~ ^dns_[a-z0-9_]+$ && -n "${credentials}" ]] ||
-            [[ ( "${provider}" == standalone || "${provider}" == webroot ) && -z "${credentials}" ]]; } || {
-        dockerError 'acme 需要合法 domain/email 与互斥的 --dns/--credentials、--standalone 或 --webroot'
+            [[ ( "${provider}" == standalone || "${provider}" == webroot || "${provider}" == alpn ) && -z "${credentials}" ]]; } || {
+        dockerError 'acme 需要合法 domain/email 与互斥的 --dns/--credentials、--standalone、--webroot 或 --alpn'
         return "${PADM_DOCKER_RC_USAGE}"
     }
     if [[ "${provider}" =~ ^dns_ ]]; then
@@ -8669,13 +8681,13 @@ dockerAcmeApply() {
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/acme" ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
-    if [[ "${provider}" == standalone || "${provider}" == webroot ]]; then
+    if [[ "${provider}" == standalone || "${provider}" == webroot || "${provider}" == alpn ]]; then
         dockerAcmeRuntimeSnapshot "${domain}" || return "${PADM_DOCKER_RC_STATE}"
-        if [[ "${provider}" == standalone ]]; then
-            challengeArgs=(--standalone --httpport 8080)
-        else
-            challengeArgs=(--webroot /var/lib/padm/acme-webroot)
-        fi
+        case "${provider}" in
+        standalone) challengeArgs=(--standalone --httpport 8080) ;;
+        alpn) challengeArgs=(--alpn --tlsport 8443) ;;
+        webroot) challengeArgs=(--webroot /var/lib/padm/acme-webroot) ;;
+        esac
         if [[ "${action}" == renew ]]; then
             dockerRenewalAccountCheck "${root}" "${domain}" "${provider}" || return "${PADM_DOCKER_RC_STATE}"
             if dockerAcmeRenewProbe "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
@@ -8699,7 +8711,10 @@ dockerAcmeApply() {
         }
     else
         challengeArgs=()
-        [[ "${provider}" != standalone ]] || challengeArgs=(--httpport 8080)
+        case "${provider}" in
+        standalone) challengeArgs=(--httpport 8080) ;;
+        alpn) challengeArgs=(--tlsport 8443) ;;
+        esac
         if dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
             --renew -d "${domain}" "${keyArgs[@]}" "${challengeArgs[@]}" >/dev/null 2>&1; then
             status=0

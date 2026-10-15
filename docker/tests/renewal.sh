@@ -124,9 +124,9 @@ dockerAcmeWebrootDeploymentCheck() {
         "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null
 }
 dockerAcmeChallengePrepare() {
-    [[ "$1" == standalone || "$1" == webroot ]] || return 0
+    [[ "$1" == standalone || "$1" == webroot || "$1" == alpn ]] || return 0
     [[ "$2" == "${PADM_DOCKER_INSTALL_DIR}/.tls."* && -d "$2/acme" &&
-        -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail 'HTTP 续期没有候选账户或部署锁'
+        -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail 'ACME 续期没有候选账户或部署锁'
     if [[ "$1" == webroot ]]; then
         DOCKER_ACME_WEBROOT="${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active"
         mkdir -p -- "${DOCKER_ACME_WEBROOT}"
@@ -157,6 +157,10 @@ dockerAcmeRun() {
         if [[ -n "${DOCKER_ACME_WEBROOT:-}" ]]; then
             [[ "${CHALLENGE_PENDING}" == 0 && " ${*:5} " != *' --httpport '* &&
                 " ${*:5} " != *' --standalone '* ]] || fail 'webroot 续期暂停了服务或混入 standalone 参数'
+        elif [[ " ${*:5} " == *' --tlsport '* ]]; then
+            [[ "${CHALLENGE_PENDING}" == 1 && " ${*:5} " == *' --tlsport 8443 '* &&
+                " ${*:5} " != *' --httpport '* && " ${*:5} " != *' --standalone '* ]] ||
+                fail 'ALPN 续期没有准备端口或混入 HTTP 参数'
         else
             [[ "${CHALLENGE_PENDING}" == 1 && " ${*:5} " == *' --httpport 8080 '* ]] ||
                 fail 'HTTP 续期没有准备端口或使用非 root 验证端口'
@@ -401,11 +405,14 @@ runControl 2 acme schedule enable --domain a.example.com --email admin@example.c
 runControl 2 acme schedule enable --domain a.example.com --email admin@example.com --dns dns_test --standalone
 runControl 2 acme schedule enable --domain a.example.com --email admin@example.com --standalone --credentials "${CREDENTIALS}"
 for ARGS in '--webroot --standalone' '--standalone --webroot' '--webroot --dns dns_test' \
-    '--dns dns_test --webroot' "--webroot --credentials ${CREDENTIALS}" '--webroot /outside'; do
+    '--dns dns_test --webroot' "--webroot --credentials ${CREDENTIALS}" '--webroot /outside' \
+    '--alpn --standalone' '--standalone --alpn' '--alpn --webroot' '--webroot --alpn' \
+    '--alpn --dns dns_test' '--dns dns_test --alpn' "--alpn --credentials ${CREDENTIALS}" '--alpn /outside'; do
     read -r -a ARGS <<<"${ARGS}"
     runControl 2 acme schedule enable --domain a.example.com --email admin@example.com "${ARGS[@]}"
 done
 runControl 2 acme schedule disable --domain a.example.com --webroot
+runControl 2 acme schedule disable --domain a.example.com --alpn
 runControl failure acme schedule enable --domain a.example.com --email admin@example.com --dns dns_other --credentials "${CREDENTIALS}"
 mv "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com" "${PADM_DOCKER_INSTALL_DIR}/data/acme/saved-domain"
 runControl failure acme schedule enable --domain a.example.com --email admin@example.com --dns dns_test --credentials "${CREDENTIALS}"
@@ -536,6 +543,8 @@ mkdir -p "${TEST_ROOT}/schema1-bundle/docker/lib"
 printf 'readonly PADM_DOCKER_RENEWAL_SCHEMA=1\n' >"${TEST_ROOT}/schema1-bundle/docker/lib/renewal.sh"
 mkdir -p "${TEST_ROOT}/schema2-bundle/docker/lib"
 printf 'readonly PADM_DOCKER_RENEWAL_SCHEMA=2\n' >"${TEST_ROOT}/schema2-bundle/docker/lib/renewal.sh"
+mkdir -p "${TEST_ROOT}/schema3-bundle/docker/lib"
+printf 'readonly PADM_DOCKER_RENEWAL_SCHEMA=3\n' >"${TEST_ROOT}/schema3-bundle/docker/lib/renewal.sh"
 mkdir -p "${TEST_ROOT}/schema4-bundle/docker/lib"
 printf 'readonly PADM_DOCKER_RENEWAL_SCHEMA=4\n' >"${TEST_ROOT}/schema4-bundle/docker/lib/renewal.sh"
 dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
@@ -580,6 +589,47 @@ runControl failure acme auto-renew
 runControl 0 acme schedule disable --domain a.example.com
 dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
 [[ ! -e "$(registry)/a.example.com" ]] || fail '停用 HTTP 续期仍留下旧 bundle 无法读取的登记'
+
+newState alpn-renewal
+runControl failure acme schedule enable --domain a.example.com --email admin@example.com --alpn
+sed -i "s/Le_Webroot='dns_test'/Le_Webroot='alpn'/" "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com/a.example.com.conf"
+runControl 0 acme schedule enable --domain a.example.com --email admin@example.com --alpn
+[[ "$(find "$(registry)/a.example.com" -mindepth 1 -maxdepth 1 | wc -l)" == 1 &&
+    "$(stat -c '%a %u %g' "$(registry)/a.example.com/request.json")" == '600 0 0' ]] ||
+    fail 'ALPN 登记多存了 DNS 凭据或放宽了权限'
+jq -e '.schema_version == 4 and .provider == "alpn" and .enabled == true' \
+    "$(registry)/a.example.com/request.json" >/dev/null || fail 'ALPN 续期登记格式不正确'
+dockerRenewalRegistryValidate "$(registry)"
+reject dockerRenewalBundleCheck "${TEST_ROOT}/schema3-bundle"
+dockerRenewalBundleCheck "${TEST_ROOT}/schema4-bundle"
+dockerRenewalBundleCheck "${TEST_ROOT}/new-bundle"
+cp -- "$(registry)/a.example.com/request.json" "${TEST_ROOT}/alpn-request.json"
+jq '.schema_version = 3' "${TEST_ROOT}/alpn-request.json" >"$(registry)/a.example.com/request.json"
+reject dockerRenewalRegistryValidate "$(registry)"
+cp -- "${TEST_ROOT}/alpn-request.json" "$(registry)/a.example.com/request.json"
+cp -- "${CREDENTIALS}" "$(registry)/a.example.com/credentials.env"
+reject dockerRenewalRegistryValidate "$(registry)"
+rm -- "$(registry)/a.example.com/credentials.env"
+before=$(registryAndJobs)
+MODE=schedule-fail
+runControl failure acme schedule disable --domain a.example.com
+[[ "$(registryAndJobs)" == "${before}" ]] || fail 'ALPN 停用调度失败没有恢复登记和任务'
+MODE=ok
+rm -f -- "${TEST_ROOT}/schedule-failed"
+runControl 0 acme auto-renew
+[[ "$(<"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/a.example.com.crt")" == new-cert-a.example.com &&
+    "$(<"${TEST_ROOT}/challenge.log")" == $'prepare\nrestore' ]] &&
+    grep -q -- '--tlsport 8443' "${TEST_ROOT}/acme.args" ||
+    fail 'ALPN 自动续期没有使用受管端口、提交证书或完成挑战恢复'
+: >"${TEST_ROOT}/acme.log"
+sed -i "s/Le_Webroot='alpn'/Le_Webroot='no'/" "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com/a.example.com.conf"
+before=$(materials)
+runControl failure acme auto-renew
+[[ ! -s "${TEST_ROOT}/acme.log" && "$(materials)" == "${before}" ]] ||
+    fail 'ALPN 账户验证方式漂移仍执行续期或改写材料'
+runControl 0 acme schedule disable --domain a.example.com
+[[ ! -e "$(registry)/a.example.com" ]] || fail '停用 ALPN 仍留下旧 bundle 无法读取的登记'
+dockerRenewalBundleCheck "${TEST_ROOT}/schema3-bundle"
 
 newState webroot-renewal
 mkdir -p -- "${PADM_DOCKER_INSTALL_DIR}/config"

@@ -235,6 +235,13 @@ run)
                 " $* " != *' --dns '* && " $* " != *' --env-file '* ]] || exit 1
             [[ -z "$(cat)" ]] || exit 1
             printf 'standalone-private-input-empty\n' >>"${FAKE_SETUP_EVENTS}"
+        elif [[ " $* " == *' --alpn '* ]]; then
+            [[ " $* " == *' --tlsport 8443 '* &&
+                " $* " == *' 0.0.0.0:443:8443/tcp '* &&
+                " $* " == *' [::]:443:8443/tcp '* &&
+                " $* " != *' --dns '* && " $* " != *' --env-file '* ]] || exit 1
+            [[ -z "$(cat)" ]] || exit 1
+            printf 'alpn-private-input-empty\n' >>"${FAKE_SETUP_EVENTS}"
         fi
         [[ "${mode}" != acme-fail ]] || exit 1
         output= account= domain= provider=no previous=
@@ -247,6 +254,8 @@ run)
                 domain=${argument}
             elif [[ "${previous}" == --dns || "${previous}" == --webroot ]]; then
                 provider=${argument}
+            elif [[ "${argument}" == --alpn ]]; then
+                provider=alpn
             fi
             previous=${argument}
         done
@@ -2283,6 +2292,44 @@ fi
 fi
 
 if [[ "${SECTION}" == all || "${SECTION}" == tls ]]; then
+# ALPN 首配只临时发布双栈 443，成功后按实际账户登记无 DNS 凭据的续期。
+ALPN_INPUT=$'1\n2\nproxy.example.com\n1\nws.example.com\n24444\n6\nadmin@example.com\ny\ny\n'
+for alpnCase in cancel acme-fail success; do
+    newState "alpn-${alpnCase}"
+    case "${alpnCase}" in
+    cancel)
+        before=$(snapshot)
+        runPty 0 alpn-cancel "${ALPN_INPUT%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+        [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+            fail 'ALPN 首配取消后改写状态或启动特权操作'
+        ;;
+    acme-fail)
+        export FAKE_SETUP_MODE=acme-fail
+        runPty 15 alpn-acme-fail "${ALPN_INPUT}" setup "${ASSET_ARGS[@]}"
+        assertUnconfigured
+        [[ ! -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" ]] ||
+            fail 'ALPN 首配失败保留候选 ACME 账户'
+        unset FAKE_SETUP_MODE
+        ;;
+    success)
+        runPty 0 alpn-success "${ALPN_INPUT}"$'y\n' setup "${ASSET_ARGS[@]}"
+        jq -e '.tls == {domain:"ws.example.com"} and .core.protocols[0].id == 21' \
+            "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null &&
+            [[ -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" &&
+                -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" &&
+                -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key" ]] &&
+            grep -qF alpn-private-input-empty "${EVENTS}" ||
+            fail 'ALPN 首配未同时提交证书与账户，或未使用无凭据的双栈 443 挑战'
+        request="${PADM_DOCKER_INSTALL_DIR}/secrets/renewal/ws.example.com"
+        jq -e '.schema_version == 4 and .enabled and .domain == "ws.example.com" and
+          .email == "admin@example.com" and .provider == "alpn"' "${request}/request.json" >/dev/null &&
+            [[ ! -e "${request}/credentials.env" &&
+                -f "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.timer" ]] ||
+            fail 'ALPN 首配未登记 schema 4 续期，或错误生成 DNS 凭据'
+        ;;
+    esac
+done
+
 # 首配 webroot 通过真实引导事务取得证书；成功后保留双栈 80 入口供续期使用。
 WEBROOT_INPUT=$'1\n2\nproxy.example.com\n1\nws.example.com\n24444\n5\nadmin@example.com\ny\ny\n'
 for webrootCase in acme-fail success; do

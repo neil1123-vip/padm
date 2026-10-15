@@ -4,7 +4,7 @@ if [[ "${PADM_DOCKER_RENEWAL_LOADED:-}" == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
 PADM_DOCKER_RENEWAL_LOADED=1
-readonly PADM_DOCKER_RENEWAL_SCHEMA=3
+readonly PADM_DOCKER_RENEWAL_SCHEMA=4
 DOCKER_RENEWAL_STAGE=
 DOCKER_RENEWAL_DOMAIN=
 DOCKER_RENEWAL_SWITCHED=0
@@ -52,14 +52,15 @@ dockerRenewalRegistryValidate() {
             (.provider | type == "string") and
             ((.schema_version == 1 and (.provider | test("^dns_[a-z0-9_]+$"))) or
               (.schema_version == 2 and .provider == "standalone") or
-              (.schema_version == 3 and .provider == "webroot")))
+              (.schema_version == 3 and .provider == "webroot") or
+              (.schema_version == 4 and .provider == "alpn")))
         ' "${request}" >/dev/null 2>&1 &&
             dockerEmailIsValid "$(jq -r '.email' "${request}")" || return 1
         provider=$(jq -r '.provider' "${request}") || return 1
         fileCount=$(set -o pipefail
             find "${entry}" -mindepth 1 -maxdepth 1 | wc -l
         ) || return 1
-        if [[ "${provider}" == standalone || "${provider}" == webroot ]]; then
+        if [[ "${provider}" == standalone || "${provider}" == webroot || "${provider}" == alpn ]]; then
             [[ "${fileCount}" -eq 1 ]] || return 1
         else
             [[ "${fileCount}" -eq 2 &&
@@ -220,9 +221,13 @@ dockerRenewalChange() {
     if [[ "${action}" == enable ]]; then
         dockerTrafficScheduleCheck &&
             dockerResolveOpsImage >/dev/null || return 1
-        if [[ "${provider}" == standalone || "${provider}" == webroot ]]; then
+        if [[ "${provider}" == standalone || "${provider}" == webroot || "${provider}" == alpn ]]; then
             [[ -z "${credentials}" ]] || return 1
-            if [[ "${provider}" == webroot ]]; then schema=3; else schema=2; fi
+            case "${provider}" in
+            standalone) schema=2 ;;
+            webroot) schema=3 ;;
+            alpn) schema=4 ;;
+            esac
         else
             dockerRenewalCredentialsValidate "${credentials}" || return 1
         fi
@@ -246,7 +251,7 @@ dockerRenewalChange() {
     fi
     mkdir -- "${stage}/next" || return 1
     if [[ "${action}" == enable ]]; then
-        if [[ "${provider}" != standalone && "${provider}" != webroot ]]; then
+        if [[ "${provider}" != standalone && "${provider}" != webroot && "${provider}" != alpn ]]; then
             cp -- "${credentials}" "${stage}/next/credentials.env" || status=1
         fi
         jq -n --arg domain "${domain}" --arg email "${email}" --arg provider "${provider}" --argjson schema "${schema}" '
@@ -257,7 +262,7 @@ dockerRenewalChange() {
             dockerRenewalInterrupted || return 1
             return 0
         fi
-        if jq -e '.provider == "standalone" or .provider == "webroot"' "${target}/request.json" >/dev/null; then
+        if jq -e '.provider == "standalone" or .provider == "webroot" or .provider == "alpn"' "${target}/request.json" >/dev/null; then
             remove=1
         else
             cp -- "${target}/credentials.env" "${stage}/next/credentials.env" || status=1
@@ -311,7 +316,8 @@ dockerRenewalRun() {
         email=$(jq -er '.email' "${request}") || return "${PADM_DOCKER_RC_STATE}"
         provider=$(jq -er '.provider' "${request}") || return "${PADM_DOCKER_RC_STATE}"
         credentials=
-        [[ "${provider}" == standalone || "${provider}" == webroot ]] || credentials="${request%/*}/credentials.env"
+        [[ "${provider}" == standalone || "${provider}" == webroot || "${provider}" == alpn ]] ||
+            credentials="${request%/*}/credentials.env"
         dockerRenewalAccountCheck "${root}" "${domain}" "${provider}" || {
             status=${PADM_DOCKER_RC_STATE}
             continue
@@ -341,7 +347,7 @@ dockerRenewalCommand() {
     case "${action}" in
     enable|disable)
         while [[ "$#" -gt 0 ]]; do
-            if [[ "$1" == --standalone || "$1" == --webroot ]]; then
+            if [[ "$1" == --standalone || "$1" == --webroot || "$1" == --alpn ]]; then
                 [[ "${action}" == enable && -z "${provider}" ]] || return "${PADM_DOCKER_RC_USAGE}"
                 provider=${1#--}
                 shift
@@ -360,7 +366,7 @@ dockerRenewalCommand() {
         dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
         if [[ "${action}" == enable ]]; then
             dockerEmailIsValid "${email}" || return "${PADM_DOCKER_RC_USAGE}"
-            if [[ "${provider}" == standalone || "${provider}" == webroot ]]; then
+            if [[ "${provider}" == standalone || "${provider}" == webroot || "${provider}" == alpn ]]; then
                 [[ -z "${credentials}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             else
                 [[ "${provider}" =~ ^dns_[a-z0-9_]+$ ]] || return "${PADM_DOCKER_RC_USAGE}"

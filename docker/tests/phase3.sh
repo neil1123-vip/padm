@@ -202,6 +202,8 @@ run)
             webroot=${argument}
         elif [[ "${argument}" == --standalone ]]; then
             webroot=no
+        elif [[ "${argument}" == --alpn ]]; then
+            webroot=alpn
         elif [[ "${previous}" == --keylength ]]; then
             keylength=${argument}
         elif [[ "${previous}" == "--fullchain-file" ]]; then
@@ -1773,14 +1775,15 @@ done
 firstTlsEdit 2 protocol-first-tls-renewal-duplicate --protocol-add entry-1 31 32445 \
     --tls-domain first-dns.example.com --tls-dns admin@example.com dns_cf "${CREDENTIALS}" \
     --tls-auto-renew --tls-auto-renew --preview
-for source in dns standalone; do
+for source in dns standalone alpn; do
     tlsArgs=(--tls-dns admin@example.com dns_cf "${CREDENTIALS}")
     [[ "${source}" != standalone ]] || tlsArgs=(--tls-standalone admin@example.com)
+    [[ "${source}" != alpn ]] || tlsArgs=(--tls-alpn admin@example.com)
     firstTlsEdit 0 "protocol-first-tls-${source}-preview" --protocol-add entry-1 31 32445 \
         --tls-domain first-dns.example.com "${tlsArgs[@]}" --tls-auto-renew --preview
     grep -qF '预览未申请证书或提交' "${CONTROL_LOG}" ||
         fail 'ACME 预览未明确保留计划验收范围'
-    ! grep -Eq ' --issue | --install-cert |--publish 0.0.0.0:80:' "${DOCKER_LOG}" ||
+    ! grep -Eq ' --issue | --install-cert |--publish 0.0.0.0:(80|443):' "${DOCKER_LOG}" ||
         fail 'ACME 预览调用 CA 或占用挑战端口'
     [[ ! -e "${DOCKER_ROOT}/secrets/renewal" ]] || fail 'ACME 预览提前登记自动续期'
 done
@@ -1834,6 +1837,19 @@ jq -e '.tls.domain=="first-manual.example.com"' "${DOCKER_ROOT}/config/spec.json
     [[ ! -e "${DOCKER_ROOT}/secrets/renewal" ]] &&
     ! grep -Fq '为该 ACME 证书启用自动续期' "${CONTROL_LOG}" ||
     fail '普通非交互确认隐式启用或询问自动续期'
+runControl 0 protocol-first-tls-alpn-baseline configure --spec "${FIRST_TLS_SS}"
+firstTlsEdit 0 protocol-first-tls-alpn-commit --protocol-add entry-1 21 32446 \
+    --protocol-core xray --tls-domain first-alpn.example.com --tls-alpn admin@example.com \
+    --tls-auto-renew --confirm PADM-DOCKER-EDIT
+assertFirstTlsSpec "${FIRST_TLS_SS}" entry-1 first-alpn.example.com 21 xray 32446 sing-box
+grep -q -- '--issue --alpn --tlsport 8443 --keylength ec-256 -d first-alpn.example.com' "${DOCKER_LOG}" &&
+    grep -q -- '--publish 0.0.0.0:443:8443/tcp --publish \[::\]:443:8443/tcp' "${DOCKER_LOG}" ||
+    fail '首个 TLS 没有复用双栈 443 ALPN 挑战'
+jq -e '.schema_version==4 and .enabled and .domain=="first-alpn.example.com" and
+  .email=="admin@example.com" and .provider=="alpn"' \
+    "${DOCKER_ROOT}/secrets/renewal/first-alpn.example.com/request.json" >/dev/null &&
+    [[ ! -e "${DOCKER_ROOT}/secrets/renewal/first-alpn.example.com/credentials.env" ]] ||
+    fail '首个 ALPN TLS 未登记无 DNS 凭据的 schema 4 续期'
 runControl 0 protocol-first-tls-standalone-baseline configure --spec "${FIRST_TLS_SS}"
 if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     : >"${DOCKER_LOG}"
@@ -2236,12 +2252,13 @@ jq '.routing.rules += [{type:"field",domain:["unmanaged.example.com"],outboundTa
     "${TEST_ROOT}/tls-migrate-users.base" >"${DOCKER_ROOT}/config/xray/users.base"
 tlsMigrateEdit 15 tls-migrate-reject-baseline-drift --tls-existing --preview
 cp -- "${TEST_ROOT}/tls-migrate-users.base" "${DOCKER_ROOT}/config/xray/users.base"
-for source in dns standalone; do
+for source in dns standalone alpn; do
     tlsArgs=(--tls-dns admin@example.com dns_cf "${CREDENTIALS}")
     [[ "${source}" != standalone ]] || tlsArgs=(--tls-standalone admin@example.com)
+    [[ "${source}" != alpn ]] || tlsArgs=(--tls-alpn admin@example.com)
     tlsMigrateEdit 0 "tls-migrate-${source}-preview" "${tlsArgs[@]}" --preview
     grep -qF '预览未申请证书或提交' "${CONTROL_LOG}" &&
-        ! grep -Eq ' --issue | --install-cert |--publish 0.0.0.0:80:' "${DOCKER_LOG}" ||
+        ! grep -Eq ' --issue | --install-cert |--publish 0.0.0.0:(80|443):' "${DOCKER_LOG}" ||
         fail 'TLS 域名迁移 ACME 预览申请证书或占用挑战端口'
 done
 if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
@@ -2284,6 +2301,20 @@ grep -q "vless://22222222-2222-4222-8222-222222222222@${TLS_MIGRATE_DOMAIN}:2444
     grep -qF 'vless://11111111-1111-4111-8111-111111111111@proxy.example.com:25443' \
         "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
     fail 'TLS 迁移分享没有更新 TLS 域名/SNI 或改变 Reality 连接地址'
+
+: >"${DOCKER_LOG}"
+firstTlsEdit 0 tls-migrate-alpn-commit --tls-migrate migrated-alpn.example.com \
+    --tls-alpn admin@example.com --tls-auto-renew --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_BASE}" '
+  . == ($before[0] | .tls.domain="migrated-alpn.example.com" |
+    .core.protocols[0].server="migrated-alpn.example.com" |
+    .core.protocols[0].websocket.domain="migrated-alpn.example.com")' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null &&
+    jq -e '.schema_version==4 and .enabled and .provider=="alpn" and
+      .domain=="migrated-alpn.example.com" and .email=="admin@example.com"' \
+        "${DOCKER_ROOT}/secrets/renewal/migrated-alpn.example.com/request.json" >/dev/null &&
+    [[ ! -e "${DOCKER_ROOT}/secrets/renewal/migrated-alpn.example.com/credentials.env" ]] ||
+    fail 'ALPN TLS 迁移改变其它规格，或未登记实际续期参数'
 
 runControl 0 restart-persistence status
 grep -qxF 'configured=yes' "${CONTROL_LOG}" || fail 'configured status was not restored'

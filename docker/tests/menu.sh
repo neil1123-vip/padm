@@ -2354,8 +2354,10 @@ runPty() {
                 printf '6\n\nadmin@example.com\n1\ndns_cf\n' >&3
                 waitForText 'DNS 凭据文件' "${CONTROL_LOG}" || exit 17
                 printf '\004' >&3
-            elif [[ "${input}" == standalone-eof ]]; then
-                printf '3\n\nadmin@example.com\n2\n' >&3
+            elif [[ "${input}" == standalone-eof || "${input}" == alpn-eof ]]; then
+                method=2
+                [[ "${input}" != alpn-eof ]] || method=4
+                printf '3\n\nadmin@example.com\n%s\n' "${method}" >&3
                 waitForText '确认执行证书操作？[y/N]' "${CONTROL_LOG}" || exit 17
                 printf '\004' >&3
             elif [[ "${input}" == method-eof ]]; then
@@ -2653,7 +2655,7 @@ dockerEditCommand() {
         --tls-existing) [[ "$#" -eq 3 ]] || return 2 ;;
         --tls-import) [[ "$#" -eq 5 && "$4" == 'certificate file.pem' && "$5" == 'private key.pem' ]] || return 2 ;;
         --tls-dns) [[ "$#" -eq 6 && "$4" == admin@example.com && "$5" == dns_cf && "$6" == credentials.env ]] || return 2 ;;
-        --tls-standalone|--tls-webroot) [[ "$#" -eq 4 && "$4" == admin@example.com ]] || return 2 ;;
+        --tls-standalone|--tls-webroot|--tls-alpn) [[ "$#" -eq 4 && "$4" == admin@example.com ]] || return 2 ;;
         *) return 2 ;;
         esac
         printf 'fixture-tls-migrate-confirm [y/N]: '
@@ -4310,13 +4312,14 @@ done
 unset GEO_STATUS GEO_UPDATE_STATUS GEO_UPDATE_WAIT GEO_UPDATE_PID
 
 for tlsCase in cancel final-no eof validate install issue renew \
-    offer-dns offer-standalone offer-webroot offer-cancel offer-eof offer-failed acme-failed \
+    offer-dns offer-standalone offer-webroot offer-alpn offer-cancel offer-eof offer-failed acme-failed \
     renewal-status renewal-enable renewal-disable renewal-final-no renewal-eof \
     standalone-issue standalone-renew standalone-enable standalone-final-no \
     standalone-renew-final-no standalone-enable-final-no standalone-eof method-cancel method-eof \
+    alpn-issue alpn-renew alpn-enable alpn-final-no alpn-eof \
     webroot-issue webroot-renew webroot-enable webroot-final-no webroot-disabled webroot-other-domain \
     http01-enable http01-disable http01-enable-cancel http01-disable-cancel \
-    migrate-existing migrate-import migrate-dns migrate-standalone migrate-webroot migrate-domain-cancel \
+    migrate-existing migrate-import migrate-dns migrate-standalone migrate-webroot migrate-alpn migrate-domain-cancel \
     migrate-source-cancel migrate-source-eof migrate-final-no migrate-final-eof migrate-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     printf '{"tls":{"domain":"ws.example.com","http01":true}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
@@ -4336,7 +4339,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
         printf -v input '%s\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\nn\n' "${choice}"
         expectedAction="acme ${tlsCase} --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env"
         ;;
-    offer-dns|offer-standalone|offer-webroot|offer-cancel|offer-eof|offer-failed|acme-failed)
+    offer-dns|offer-standalone|offer-webroot|offer-alpn|offer-cancel|offer-eof|offer-failed|acme-failed)
         input=$'3\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\n'
         expectedAction='acme issue --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env'
         provider=dns_cf credentials=credentials.env
@@ -4349,6 +4352,10 @@ for tlsCase in cancel final-no eof validate install issue renew \
             input=$'4\n\nadmin@example.com\n3\ny\n'
             expectedAction='acme renew --domain ws.example.com --email admin@example.com --webroot'
             provider=webroot credentials= ;;
+        offer-alpn)
+            input=$'3\n\nadmin@example.com\n4\ny\n'
+            expectedAction='acme issue --domain ws.example.com --email admin@example.com --alpn'
+            provider=alpn credentials= ;;
         offer-failed) TLS_RENEWAL_STATUS=17 ;;
         acme-failed) TLS_ACME_STATUS=17 ;;
         esac
@@ -4370,26 +4377,27 @@ for tlsCase in cancel final-no eof validate install issue renew \
     renewal-disable) input=$'7\n\ny\n'; expectedAction='schedule disable --domain ws.example.com' ;;
     renewal-final-no) input=$'6\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\nn\n' ;;
     renewal-eof) input=renewal-eof ;;
-    standalone-issue|standalone-renew|standalone-enable|standalone-final-no|standalone-renew-final-no|standalone-enable-final-no)
+    standalone-issue|standalone-renew|standalone-enable|standalone-final-no|standalone-renew-final-no|standalone-enable-final-no|alpn-issue|alpn-renew|alpn-enable|alpn-final-no)
         choice=3
-        action=issue
+        action=issue method=2 provider=standalone
+        [[ "${tlsCase}" != alpn-* ]] || { method=4; provider=alpn; }
         case "${tlsCase}" in
-        standalone-renew*) choice=4; action=renew ;;
-        standalone-enable*) choice=6; action=enable ;;
+        *-renew*) choice=4; action=renew ;;
+        *-enable*) choice=6; action=enable ;;
         esac
         answer=y
         [[ "${tlsCase}" != *final-no ]] || answer=n
-        printf -v input '%s\n\nadmin@example.com\n2\n%s\n' "${choice}" "${answer}"
+        printf -v input '%s\n\nadmin@example.com\n%s\n%s\n' "${choice}" "${method}" "${answer}"
         if [[ "${answer}" == y ]]; then
             if [[ "${choice}" == 6 ]]; then
-                expectedAction='schedule enable --domain ws.example.com --email admin@example.com --standalone'
+                expectedAction="schedule enable --domain ws.example.com --email admin@example.com --${provider}"
             else
-                expectedAction="acme ${action} --domain ws.example.com --email admin@example.com --standalone"
+                expectedAction="acme ${action} --domain ws.example.com --email admin@example.com --${provider}"
                 input+=$'n\n'
             fi
         fi
         ;;
-    standalone-eof) input=standalone-eof ;;
+    standalone-eof|alpn-eof) input=${tlsCase} ;;
     method-cancel) input=$'3\n\nadmin@example.com\n0\n' ;;
     method-eof) input=method-eof ;;
     webroot-issue|webroot-renew|webroot-enable|webroot-final-no)
@@ -4421,7 +4429,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
         printf -v input '%s\n%s\n' "${choice}" "${answer}"
         [[ "${answer}" != y ]] || expectedAction="edit --http01 ${action}"
         ;;
-    migrate-existing|migrate-import|migrate-dns|migrate-standalone|migrate-webroot|migrate-failed)
+    migrate-existing|migrate-import|migrate-dns|migrate-standalone|migrate-webroot|migrate-alpn|migrate-failed)
         input=$'10\nother.example.com\n1\ny\n'
         expectedAction='edit --tls-migrate other.example.com --tls-existing'
         case "${tlsCase}" in
@@ -4440,6 +4448,10 @@ for tlsCase in cancel final-no eof validate install issue renew \
         migrate-webroot)
             input=$'10\nother.example.com\n5\nadmin@example.com\ny\n'
             expectedAction='edit --tls-migrate other.example.com --tls-webroot admin@example.com'
+            ;;
+        migrate-alpn)
+            input=$'10\nother.example.com\n6\nadmin@example.com\ny\n'
+            expectedAction='edit --tls-migrate other.example.com --tls-alpn admin@example.com'
             ;;
         migrate-failed) TLS_MIGRATE_STATUS=17 ;;
         esac
@@ -4461,7 +4473,7 @@ for tlsCase in cancel final-no eof validate install issue renew \
         ! grep -Fq '为该 ACME 证书启用自动续期' "${CONTROL_LOG}" &&
             grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" ||
             fail 'ACME 失败仍询问自动续期或丢失退出码'
-    elif [[ "${tlsCase}" == offer-dns || "${tlsCase}" == offer-standalone || "${tlsCase}" == offer-webroot ]]; then
+    elif [[ "${tlsCase}" == offer-dns || "${tlsCase}" == offer-standalone || "${tlsCase}" == offer-webroot || "${tlsCase}" == offer-alpn ]]; then
         grep -Fq '自动续期已启用: ws.example.com' "${CONTROL_LOG}" || fail '续期登记成功未说明结果'
     fi
     if [[ "${tlsCase}" == migrate-* ]]; then
@@ -4474,13 +4486,15 @@ for tlsCase in cancel final-no eof validate install issue renew \
         [[ "${tlsCase}" != migrate-failed ]] ||
             grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'TLS 迁移失败后未返回主菜单或丢失退出码'
     fi
-    if [[ "${tlsCase}" == standalone-* ]]; then
-        grep -Fq 'HTTP-01 需要公网 80 可达' "${CONTROL_LOG}" ||
-            fail 'standalone 确认前没有说明公网 80 与短暂停机影响'
+    if [[ "${tlsCase}" == standalone-* || "${tlsCase}" == alpn-* ]]; then
+        challengeText='HTTP-01 需要公网 80 可达'
+        [[ "${tlsCase}" != alpn-* ]] || challengeText='TLS-ALPN-01 需要公网 TCP 443 直达本机'
+        grep -Fq "${challengeText}" "${CONTROL_LOG}" ||
+            fail "${tlsCase}: 确认前没有说明公网挑战端口与短暂停机影响"
         [[ "$(grep -Fc '确认执行证书操作？[y/N]' "${CONTROL_LOG}")" == 1 ]] ||
-            fail 'standalone 操作没有恰好确认一次'
+            fail "${tlsCase}: 操作没有恰好确认一次"
         ! grep -Eq 'DNS provider|DNS 凭据文件' "${CONTROL_LOG}" ||
-            fail 'standalone 仍要求 DNS 凭据'
+            fail "${tlsCase}: 仍要求 DNS 凭据"
     fi
     if [[ "${tlsCase}" == webroot-* ]]; then
         ! grep -Eq 'DNS provider|DNS 凭据文件' "${CONTROL_LOG}" || fail 'webroot 仍要求 DNS 凭据'
