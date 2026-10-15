@@ -4264,10 +4264,12 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '替换自定义直连例外规则（逗号分隔，留空清空，0 返回）' '19. IPv6 域名出站' \
             '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' \
             '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
+            '精确删除 IPv6 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' \
             '7. 单条替换 IPv6 域名规则' \
             '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
             '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 隧道地址族' '7. 切换 WARP IPv6 隧道地址族' \
-            '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' '删空关闭，需要重新导入 WARP' \
+            '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' \
+            '精确删除 WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' \
             '10. 单条替换 WARP 域名规则' \
             '22. 追加 Direct 直连例外' '23. 追加 Block 域名阻断' \
             '24. 删除 Direct 直连例外' '25. 删除 Block 域名阻断' \

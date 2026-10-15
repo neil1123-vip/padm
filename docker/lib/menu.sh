@@ -1304,7 +1304,7 @@ dockerMenuIPv6() {
             dockerMenuRun edit --ipv6-domains-add "${domains}" || true
             ;;
         6)
-            dockerSetupRead domains '精确删除 IPv6 域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead domains '精确删除 IPv6 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${domains}" ]] || continue
             dockerMenuRun edit --ipv6-domains-remove "${domains}" || true
             ;;
@@ -1698,7 +1698,7 @@ dockerMenuWarp() {
             dockerMenuRun edit --warp-domains-add "${input}" || true
             ;;
         9)
-            dockerSetupRead input '精确删除 WARP 域名规则 CSV（删空关闭，需要重新导入 WARP；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input '精确删除 WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --warp-domains-remove "${input}" || true
             ;;
