@@ -1,6 +1,6 @@
 # Docker 菜单与功能对齐实施计划
 
-修订日期：2026-10-15
+修订日期：2026-10-16
 
 本计划替代聊天中的六步菜单对齐方案，落实该方案的审计修正。它是
 [功能对照表](docker-feature-matrix.md)之后的实施路线，不是重做
@@ -7848,6 +7848,28 @@ Jobs 6/tmpfs、排队 385 ms、`cache_hit=false`，
 本批只补固定客户端/参数组合的导入证据；Gecko 范围 URI、其它客户端、
 TUIC 自动跳跃、旧 conntrack 排空、原生宿主/arm64/公网、自动恢复与完整跳跃/
 协议管理继续 deferred，整体计划保持 active。
+
+#### 近期菜单一致性修补（跨 4A/5B/5C）
+
+2026-10-16 对已交付菜单做了一轮窄范围收口：证书菜单的“自动续期状态”
+直接执行状态查询，不再错误询问域名或重复确认；路由菜单 8/9 改为准确显示
+“设置/关闭 hosts 覆盖”；XHTTP 菜单状态快照在 INT/TERM 路径统一清理；
+不支持 CDN 能力时拒绝清空动作；Gecko 跳跃分享补齐活动范围与指定端口断言。
+这些修补分别保持现有事务、能力门禁、取消和恢复边界，不扩大协议或客户端支持范围。
+
+`docker-menu-port-alias` 在 Docker Linux amd64、Jobs 2 下实际执行通过，
+入口 `2.714` 秒、排队 `195` 毫秒，结果
+`.tmp-regression-docker-f1b56f0b65804384b5a1f8ebbbe2468f/`；
+`cache_hit=false`，源码摘要为
+`A64E9BFE372E363425B35A3383D0E8E16D140AC1C55CC476831F4CC5EA9E4081`。
+最近提交名称统一使用英文 Conventional Commit：
+`fix(docker): streamline renewal status menu`、
+`fix(docker): clarify hosts routing menu labels`、
+`test(docker): cover Gecko hopping shares`。
+本轮未发现可复现的其它低风险菜单根因，未做猜测性修改。
+
+公网 CA、原生宿主/arm64、完整外部客户端、SOCKS UDP 会话撤销、
+自动恢复和完整协议管理继续 deferred，整体计划保持 active。
 
 ## 第六步：发布与完整验收
 
