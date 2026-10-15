@@ -1655,6 +1655,26 @@ Bash/ShellCheck error 通过；真实非 root Nginx 检查双栈 token 原始字
 成功源码输入和本轮临时脚本已清理，仅保留脱敏日志/result；
 公网 CA、原生宿主/arm64 及整机生命周期仍 deferred，整体计划保持 active。
 
+#### 3D.18 已有 Nginx TLS 入口内部端口管理
+
+协议菜单第 17 项及 `edit --internal-ports <入口 ID> <核心后端端口> <Nginx TLS 内部端口>`
+同时修改唯一已有 `21–25` 入口的两个内部端口；HTTPUpgrade `23` 支持 Xray/sing-box，
+其余仅 Xray。复用规格校验、核心/Nginx/Compose 生成和配置事务，
+保留公开端口、凭据、账号、订阅及累计；别名与受管 Reality 443 共存自动使用新端口。
+按各核心和 Nginx 网络空间校验其它监听、统计 API、HTTP-01 与共存端口冲突，
+拒绝站点 Fail2ban 和其它专项组合；普通 `edit --spec` 仍冻结内部端口。
+专项从原规格重算唯一允许结果，全量比较，不能夹带其它入口、账号或根字段漂移。
+菜单取消、EOF 与失败沿用原返回和事务恢复；移除通用编辑中重复的 Fail2ban 判断。
+2026-10-15 Docker Linux amd64：`docker-phase3-entries -Jobs 2` 与
+`docker-menu -Jobs 2` 通过，入口分别 `237592/60550 ms`。
+集中 `docker-contracts -Jobs 6` 一次通过，57/57，入口 `420352 ms`，
+排队 `4115 ms`、`cache_hit=false`；Bash/ShellCheck error 通过。
+完整证据 `.tmp-regression-docker-7067b36d191f41e48c5179a51042545e/`，
+`source_content_sha256=959CFC217DB5A83C80476A08AFD6A88753523FD64608D32B14FA02E91BE7CF20`。
+首轮 entries 暴露共存夹具的地址族不匹配与别名分流预期错误，修正夹具后通过；
+成功及失败的源码归档、文件清单均已清理，仅保留日志/result 和静态检查摘要。
+公网、原生宿主/arm64、端口跳跃完整管理仍 deferred，总目标保持 active。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

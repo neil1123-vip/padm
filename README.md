@@ -723,7 +723,7 @@ gRPC service name、WS/HTTPUpgrade 路径、Hysteria2 拥塞/带宽/混淆/伪�
 未选中的入口、UUID、密钥、token、证书、宿主集成和累计流量保持不变。
 菜单可按入口 ID 复制或删除现有协议入口，主核心至少保留一个入口。
 Reality Vision/gRPC、direct Trojan 和 VMess HTTPUpgrade 可复制到另一核心，XHTTP 仅支持 Xray；
-VLESS/VMess WS TLS、VLESS/Trojan gRPC TLS 和传统 TLS fallback 仅支持 Xray 内复制，已有入口的 TLS 身份及内部端口冻结。
+VLESS/VMess WS TLS、VLESS/Trojan gRPC TLS 和传统 TLS fallback 仅支持 Xray 内复制，通用编辑冻结已有入口的 TLS 身份及内部端口。
 Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅支持 sing-box 内复制；已有部署新增这些类型须导入完整 v3 `configure` 规格。
 Shadowsocks 的方法、服务器/用户密钥、UUID 和已有入口身份冻结，不通过通用编辑轮换凭据。
 AnyTLS/NaiveProxy/direct Trojan 复用通用入口字段编辑，TLS 域名与 UUID 冻结，证书轮换使用证书管理入口。
@@ -739,6 +739,17 @@ NaiveProxy 的入口域名随 TLS 身份固定，不能单独修改为其它域�
 padm-docker edit
 padm-docker edit --spec /root/original-spec.json --preview
 padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
+```
+
+菜单“协议与入口”的“核心/Nginx 内部端口”可同时修改已有 WS/HTTPUpgrade/gRPC TLS
+（21–25）入口的核心后端端口与 Nginx TLS 内部端口，保留公开端口、账号及分享身份。
+HTTPUpgrade 支持 Xray/sing-box，其余仅 Xray；额外公开端口及受管 Reality 443 共存同步投影。
+端口须为 1–65535，并通过各容器监听、统计 API、HTTP-01 及共存端口冲突检查。
+带站点 Fail2ban 时需先停用防护；普通规格导入仍不能修改内部端口。
+
+```bash
+padm-docker edit --internal-ports entry-ws 31300 8446 --preview
+padm-docker edit --internal-ports entry-ws 31300 8446 --confirm PADM-DOCKER-EDIT
 ```
 
 菜单“协议与入口”的“额外入口端口”可给已有受管入口添加、删除或修改额外公开端口。

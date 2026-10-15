@@ -2214,7 +2214,7 @@ runRoutingDriver() {
 }
 
 runProtocolManagementDriver() {
-    local scenario=$1 action
+    local scenario=$1 action reply
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'9\n'
     if [[ "${scenario}" == flow ]]; then
@@ -2232,12 +2232,25 @@ runProtocolManagementDriver() {
         targetReply '目标核心 [1=Xray，2=sing-box，空输入沿用源核心，0 返回]' $'\n'
         targetReply '目标协议 ID（0 返回）' $'31\n'
         targetReply '新公开端口（0 返回）' $'0\n'
-        for action in 15 16; do
+        for action in 15 16 17; do
             targetReply 'Docker 协议与入口' "${action}"$'\n'
             targetReply '入口 ID（0 返回）' $'0\n'
         done
+        for action in 0 eof; do
+            reply=$'0\n'
+            [[ "${action}" != eof ]] || reply=$'\004'
+            targetReply 'Docker 协议与入口' $'17\n'
+            targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+            targetReply '核心后端端口（0 返回）' "${reply}"
+            targetReply 'Docker 协议与入口' $'17\n'
+            targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+            targetReply '核心后端端口（0 返回）' $'31350\n'
+            targetReply 'Nginx TLS 内部端口（0 返回）' "${reply}"
+        done
+        targetReply 'Docker 协议与入口' $'17\n'
+        targetReply '入口 ID（0 返回）' $'\004'
     fi
-    for action in 14 15 16; do
+    for action in 14 15 16 17; do
         targetReply 'Docker 协议与入口' "${action}"$'\n'
         [[ "${scenario}" != status-failed ]] || continue
         if [[ "${action}" == 14 ]]; then
@@ -2247,6 +2260,10 @@ runProtocolManagementDriver() {
             targetReply '新公开端口（0 返回）' $'30443\n'
         else
             targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+            if [[ "${action}" == 17 ]]; then
+                targetReply '核心后端端口（0 返回）' $'31350\n'
+                targetReply 'Nginx TLS 内部端口（0 返回）' $'8650\n'
+            fi
         fi
     done
     if [[ "${scenario}" != status-failed ]]; then
@@ -2727,6 +2744,8 @@ edit)
         fi
     elif [[ "${2:-}" == --protocol-remove || "${2:-}" == --protocol-rebuild ]]; then
         [[ "$#" -eq 3 && "$3" == entry-fixture ]] || exit 2
+    elif [[ "${2:-}" == --internal-ports ]]; then
+        [[ "$#" -eq 5 && "$3" == entry-fixture && "$4" == 31350 && "$5" == 8650 ]] || exit 2
     elif [[ "${2:-}" == --fail2ban-port ]]; then
         [[ "$#" -eq 6 && "$3" == entry-fixture && "$4" != not-a-port &&
             "$5" == --confirm && "$6" == PADM-DOCKER-EDIT ]] || exit 2
@@ -4485,19 +4504,20 @@ runPty protocols-links-cancel protocols cancel "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == 'protocol list' ]] ||
     fail 'cancelled protocol link selection dispatched a business command'
 
-# 三个入口共用真实 PTY，取消不下发写操作，失败后仍可继续选择。
+# 协议与内部端口入口共用真实 PTY，取消不下发写操作，失败后仍可继续选择。
 for managementCase in flow failed status-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 FAIL2BAN_PROTOCOL_LIST_STATUS=0
     [[ "${managementCase}" != failed ]] || SITE_EDIT_STATUS=15
     [[ "${managementCase}" != status-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=15
     runPty "protocol-management-${managementCase}" protocol-management "${managementCase}" "${TLS_WIZARD_CLI}" menu
-    expectedManagement=$'edit --protocol-add entry-fixture 31 30443\nedit --protocol-remove entry-fixture\nedit --protocol-rebuild entry-fixture\nedit --protocol-add entry-fixture 28 30443 --protocol-core xray\nedit --protocol-add entry-fixture 30 30443 --protocol-core sing-box'
+    expectedManagement=$'edit --protocol-add entry-fixture 31 30443\nedit --protocol-remove entry-fixture\nedit --protocol-rebuild entry-fixture\nedit --internal-ports entry-fixture 31350 8650\nedit --protocol-add entry-fixture 28 30443 --protocol-core xray\nedit --protocol-add entry-fixture 30 30443 --protocol-core sing-box'
     [[ "${managementCase}" != status-failed ]] || expectedManagement=
     [[ "$(grep -v '^protocol list$' "${TLS_WIZARD_ACTIONS}" || true)" == "${expectedManagement}" ]] ||
         fail "协议管理 ${managementCase} 分发错误或取消后仍写入"
     [[ "${managementCase}" != flow ]] || grep -Fq '30 Shadowsocks2022' "${CONTROL_LOG}" ||
         fail '协议新增菜单没有 Shadowsocks2022 目标'
+    grep -Fq '17. 核心/Nginx 内部端口' "${CONTROL_LOG}" || fail '内部端口入口没有接入协议菜单'
     [[ "${managementCase}" == flow ]] ||
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -ge 3 ]] ||
         fail "协议管理 ${managementCase} 未保留退出码或返回菜单"

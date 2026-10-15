@@ -983,6 +983,10 @@ dockerEditPreview() {
     jq -r '.core.protocols[] |
       "  入口 \(.listener_id // (.id | tostring))，核心 \(.core // "未迁移")，协议 \(.id): \(.server):\(.public_port) [\(.address_families | join(","))]"' \
         "${draft}" || return 1
+    jq -r '.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) |
+      (.websocket // .httpupgrade // .grpc_tls) as $transport |
+      "    内部端口 \(.listener_id): Nginx TLS \($transport.tls_port) -> \(.core):\($transport.backend_port)"' \
+        "${draft}" || return 1
     jq -r '.cdn_entries[]? | "  CDN 入口 \(.listener_id): \(.addresses | join(","))"' "${draft}"
 }
 
@@ -1689,14 +1693,7 @@ dockerEditFields() {
                     "$([[ "${choice}" == 11 ]] && printf derive || printf copy)" "${temporary}" || return 1
             else
             case "${choice}" in
-            1)
-                if [[ "${protocol}" == 21 || "${protocol}" == 22 || "${protocol}" == 23 || "${protocol}" == 24 || "${protocol}" == 25 ]] &&
-                    jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${draft}" >/dev/null; then
-                    dockerError '带 Fail2ban 的 WS 入口端口需联动封禁规则，本阶段未开放端口修改'
-                    return 1
-                fi
-                field=public_port
-                ;;
+            1) field=public_port ;;
             2) field=server ;;
             3) field=address_families ;;
             4) field=name ;;
@@ -1908,6 +1905,7 @@ dockerEditCommand() {
     local httpRelay= httpRelayFile= httpRelayPort=0 httpRelaySources='[]'
     local tproxyAction= tproxyKind= transparentKind= tproxyPort=0 tproxyMark=0 tproxyFamily= tproxyOutput= tunAction=
     local portAlias= portAliasListener= portAliasPort= portAliasOldPort=
+    local internalListener= internalBackend= internalTls=
     local portHoppingAction= portHoppingListener= portHoppingStart=0 portHoppingEnd=0
     local portHoppingIpv4= portHoppingIpv6=
     local cdnAction= cdnListener= cdnAddresses=
@@ -2498,6 +2496,13 @@ dockerEditCommand() {
             cdnAction=clear cdnListener=$2
             shift 2
             ;;
+        --internal-ports)
+            [[ "$#" -ge 4 && -n "$2" && "$2" != --* && -z "${internalListener}" &&
+                "$3" =~ ^[1-9][0-9]{0,4}$ && "$4" =~ ^[1-9][0-9]{0,4}$ &&
+                "$3" -le 65535 && "$4" -le 65535 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            internalListener=$2 internalBackend=$3 internalTls=$4
+            shift 4
+            ;;
         --port-alias|--port-alias-remove|--port-alias-default|--port-alias-replace)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* &&
                 -z "${portAlias}" ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -2799,6 +2804,13 @@ dockerEditCommand() {
         dockerError '协议入口专项不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${internalListener}" || ( -z "${specFile}${entryAction}${entryCore}${entryTlsDomain}${entryTlsMode}${tlsMigrateDomain}" &&
+        -z "${regenerateReality}${realityTarget}${realityStream}${siteMode}${alpnListener}" &&
+        -z "${http01}${socks5}${routingKind}${httpRelay}${portAlias}${fail2banAction}" &&
+        -z "${cdnAction}${xhttpAction}${portHoppingAction}${tproxyAction}${tunAction}${protocolKind}" ) ]] || {
+        dockerError '内部端口专项不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     if [[ -n "${tlsMigrateDomain}" ]]; then
         [[ -n "${entryTlsMode}" &&
             -z "${specFile}" && -z "${entryAction}" && -z "${entryTlsDomain}" &&
@@ -2840,7 +2852,7 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
-        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" ) ||
+        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" && -z "${internalListener}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -2906,7 +2918,7 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
-        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" ]]; then
+        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" && -z "${internalListener}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -2918,6 +2930,25 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${internalListener}" ]]; then
+        jq --arg listener "${internalListener}" --argjson backend "${internalBackend}" --argjson tls "${internalTls}" '
+          [.core.protocols[] | select(.listener_id == $listener and
+            (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))] as $selected |
+          if ($selected | length) != 1 or any(.host_integrations[]; .type == "fail2ban") then
+            error("需要唯一受管 Nginx TLS 入口且无站点 Fail2ban")
+          else
+            .core.protocols |= map(if .listener_id == $listener then
+              (if .id == 21 or .id == 22 then "websocket"
+               elif .id == 23 then "httpupgrade" else "grpc_tls" end) as $transport |
+              .[$transport].backend_port = $backend | .[$transport].tls_port = $tls
+            else . end)
+          end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError '内部端口管理仅支持已有 WS/HTTPUpgrade/gRPC TLS 入口；带站点 Fail2ban 时需先停用防护'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     if [[ -n "${tlsMigrateDomain}" ]]; then
         case "${entryTlsMode}" in
         3)
@@ -3966,6 +3997,8 @@ dockerEditCompatibilityValidate() {
         --arg tproxy_kind "${tproxyKind:-tproxy}" \
         --arg tun_action "${tunAction:-}" \
         --arg port_alias "${portAlias:-}" \
+        --arg internal_listener "${internalListener:-}" \
+        --arg internal_backend "${internalBackend:-}" --arg internal_tls "${internalTls:-}" \
         --arg alias_listener "${portAliasListener:-}" --arg alias_port "${portAliasPort:-}" \
         --arg alias_old_port "${portAliasOldPort:-}" \
         --arg port_hopping "${portHoppingAction:-}" \
@@ -4020,7 +4053,18 @@ dockerEditCompatibilityValidate() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-       (if $tun_action != "" then
+       (if $internal_listener != "" then
+        # 从原规格重算唯一结果，不放宽普通导入或其它入口的内部端口。
+        ([$old.core.protocols[] | select(.listener_id == $internal_listener and
+          (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))] | length) == 1 and
+        all($old.host_integrations[]; .type != "fail2ban") and
+        $new == ($old | .core.protocols |= map(if .listener_id == $internal_listener then
+          (if .id == 21 or .id == 22 then "websocket"
+           elif .id == 23 then "httpupgrade" else "grpc_tls" end) as $transport |
+          .[$transport].backend_port = ($internal_backend | tonumber) |
+          .[$transport].tls_port = ($internal_tls | tonumber)
+        else . end))
+       elif $tun_action != "" then
         def without_tun: .host_integrations |= map(select(.type != "tun"));
         if $tun_action == "enable" then
           ([$old.host_integrations[] | select(.type == "tun")] | length) == 0 and

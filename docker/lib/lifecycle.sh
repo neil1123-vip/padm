@@ -61,6 +61,8 @@ dockerUsage() {
   padm-docker edit --redirect-settings <端口> [--redirect-family ipv4|ipv6|dual] [--redirect-output-uid <UID>|--redirect-output-all|--redirect-output-off] [确认参数]
   padm-docker edit --redirect-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --tun-enable|--tun-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --internal-ports <入口 ID> <核心后端端口> <Nginx TLS 内部端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+    仅已有 WS/HTTPUpgrade/gRPC TLS 入口；带站点 Fail2ban 时先停用防护
   padm-docker edit --port-alias <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-replace <入口 ID> <旧公开端口> <新公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

@@ -1229,6 +1229,128 @@ jq '.schema_version=3 | .core.secondary_type=null | .core.protocols |= map(.core
     "${EDIT_SPEC}" >"${PROTOCOL_BASE}"
 runControl 0 protocol-management-baseline configure --spec "${PROTOCOL_BASE}"
 PROTOCOL_TRAFFIC_HASH=$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)
+# 内部端口复用同一在线事务；协议差异只跑生成器，不重复整套部署。
+for invalidPort in 0 65536 031300 -1 +1 1e3 not-a-port; do
+    protocolEdit 2 internal-ports-invalid-backend --internal-ports vless-ws "${invalidPort}" 8643 --preview
+    protocolEdit 2 internal-ports-invalid-tls --internal-ports vless-ws 31300 "${invalidPort}" --preview
+done
+protocolEdit 2 internal-ports-missing-argument --internal-ports vless-ws 31300 --preview
+protocolEdit 2 internal-ports-duplicate --internal-ports vless-ws 31300 8643 \
+    --internal-ports vless-ws 31301 8644 --preview
+protocolEdit 2 internal-ports-reject-spec --internal-ports vless-ws 31300 8643 \
+    --spec "${PROTOCOL_BASE}" --preview
+protocolEdit 2 internal-ports-reject-other-action --internal-ports vless-ws 31300 8643 \
+    --protocol-rebuild vless-ws --preview
+protocolEdit 15 internal-ports-unknown-entry --internal-ports missing-entry 31300 8643 --preview
+protocolEdit 15 internal-ports-unsupported-entry --internal-ports vless-reality 31300 8643 --preview
+protocolEdit 15 internal-ports-api-conflict --internal-ports vless-ws 10085 8643 --preview
+protocolEdit 15 internal-ports-nginx-health-conflict --internal-ports vless-ws 31300 8080 --preview
+protocolEdit 0 internal-ports-preview --internal-ports vless-ws 1 65535 --preview
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    INTERNAL_CANCEL_HASH=$(editLiveHash)
+    runEditPty $'n\n' 0 --internal-ports vless-ws 31300 8643
+    [[ "$(editLiveHash)" == "${INTERNAL_CANCEL_HASH}" ]] || fail '取消内部端口修改改变在线状态'
+    assertEditCleanup
+fi
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up protocolEdit 14 internal-ports-failed-start \
+    --internal-ports vless-ws 31300 8643 --confirm PADM-DOCKER-EDIT
+protocolEdit 0 internal-ports-commit --internal-ports vless-ws 31300 8643 --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile before "${PROTOCOL_BASE}" '
+  . == ($before[0] | .core.protocols[0].websocket.backend_port=31300 |
+    .core.protocols[0].websocket.tls_port=8643)' "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
+    fail '内部端口修改漂移了账号、入口身份或其它规格'
+jq -e 'any(.inbounds[]; .tag=="vless-ws" and .port==31300)' \
+    "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail '核心没有使用新后端端口'
+grep -Fq 'listen 8643 ssl;' "${DOCKER_ROOT}/config/nginx/default.conf" &&
+    grep -Fq 'proxy_pass http://xray:31300;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
+    fail 'Nginx 没有同步新 TLS 与后端端口'
+jq -e '.services.nginx.ports | index("0.0.0.0:24444:8643/tcp") != null' \
+    "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Compose 没有同步新 TLS 端口映射'
+jq -e 'any(.listeners[]; .listener_id=="vless-ws" and .public_port==24444 and .container_port==8643)' \
+    "${DOCKER_ROOT}/deployment.json" >/dev/null || fail '部署入口没有同步新 TLS 端口'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == "${PROTOCOL_TRAFFIC_HASH}" ]] ||
+    fail '内部端口修改改变累计流量'
+protocolEdit 15 internal-ports-still-frozen-in-spec --spec "${PROTOCOL_BASE}" --preview
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    internalListener=entry-1 internalBackend=31350 internalTls=8650
+    for template in '21 websocket xray' '22 websocket xray' '23 httpupgrade xray' \
+        '23 httpupgrade sing-box' '24 grpc_tls xray' '25 grpc_tls xray'; do
+        read -r protocol field core <<<"${template}"
+        generated="${TEST_ROOT}/internal-generated.json"
+        changed="${TEST_ROOT}/internal-changed.json"
+        dockerEditEntryAdd "${PROTOCOL_BASE}" vless-ws "${protocol}" "${core}" 34443 protocol "${generated}" ||
+            fail "内部端口模板生成失败: ${protocol}/${core}"
+        jq --arg field "${field}" '.core.protocols[-1][$field] += {backend_port:31350,tls_port:8650}' \
+            "${generated}" >"${changed}"
+        dockerEditCompatibilityValidate "${generated}" "${changed}" &&
+            dockerConfigureSpecValidate "${changed}" || fail "内部端口合法变更被拒绝: ${protocol}/${core}"
+        for mutation in '.accounts[0].name="foreign"' '.core.protocols[0].websocket.tls_port=8651'; do
+            jq "${mutation}" "${changed}" >"${TEST_ROOT}/internal-drift.json"
+            ! dockerEditCompatibilityValidate "${generated}" "${TEST_ROOT}/internal-drift.json" \
+                >"${TEST_ROOT}/internal-helper.log" 2>&1 || fail '内部端口专项放行账号或其它入口漂移'
+        done
+        if [[ "${core}" == xray ]]; then
+            dockerGenerateXrayConfig "${changed}" "${TEST_ROOT}/internal-core.json" &&
+                jq -e 'any(.inbounds[]; .tag=="entry-1" and .port==31350)' \
+                    "${TEST_ROOT}/internal-core.json" >/dev/null || fail 'Xray 枚举后端端口错误'
+        else
+            dockerGenerateSingBoxConfig "${changed}" "${TEST_ROOT}/internal-core.json" &&
+                jq -e 'any(.inbounds[]; .tag=="entry-1" and .listen_port==31350)' \
+                    "${TEST_ROOT}/internal-core.json" >/dev/null || fail 'sing-box HTTPUpgrade 后端端口错误'
+        fi
+        dockerGenerateNginxConfig "${changed}" "${TEST_ROOT}/internal-nginx.conf" &&
+            grep -Fq 'listen 8650 ssl;' "${TEST_ROOT}/internal-nginx.conf" &&
+            grep -Fq "://${core}:31350;" "${TEST_ROOT}/internal-nginx.conf" ||
+            fail "Nginx 枚举内部端口错误: ${protocol}/${core}"
+        dockerGenerateCompose "${changed}" "${TEST_ROOT}/internal-compose.json" &&
+            jq -e '.services.nginx.ports | index("0.0.0.0:34443:8650/tcp") != null' \
+                "${TEST_ROOT}/internal-compose.json" >/dev/null ||
+            fail "Compose 枚举内部端口错误: ${protocol}/${core}"
+    done
+    internalListener=vless-ws
+    jq '.port_aliases=[{listener_id:"vless-ws",public_port:36665}]' \
+        "${PROTOCOL_BASE}" >"${generated}"
+    jq '.core.protocols[0].websocket += {backend_port:31350,tls_port:8650}' "${generated}" >"${changed}"
+    dockerEditCompatibilityValidate "${generated}" "${changed}" &&
+        dockerConfigureSpecValidate "${changed}" &&
+        dockerGenerateCompose "${changed}" "${TEST_ROOT}/internal-compose.json" &&
+        jq -e '.services.nginx.ports | index("0.0.0.0:36665:8650/tcp") != null' \
+            "${TEST_ROOT}/internal-compose.json" >/dev/null ||
+        fail '内部端口修改未同步额外入口投影'
+    jq '.core.protocols[1].address_families=.core.protocols[0].address_families |
+      .reality_stream={listener_id:"vless-reality",website_listener_id:"vless-ws"} |
+      .port_aliases=[{listener_id:"vless-ws",public_port:36665}]' \
+        "${PROTOCOL_BASE}" >"${generated}"
+    jq '.core.protocols[0].websocket += {backend_port:31350,tls_port:8650}' "${generated}" >"${changed}"
+    dockerEditCompatibilityValidate "${generated}" "${changed}" &&
+        dockerConfigureSpecValidate "${changed}" &&
+        dockerGenerateRealityStreamConfig "${changed}" "${TEST_ROOT}/internal-stream.conf" &&
+        grep -Fq 'server 127.0.0.1:8650;' "${TEST_ROOT}/internal-stream.conf" &&
+        dockerGenerateCompose "${changed}" "${TEST_ROOT}/internal-compose.json" &&
+        jq -e '.services.nginx.ports | index("0.0.0.0:36665:15443/tcp") != null' \
+            "${TEST_ROOT}/internal-compose.json" >/dev/null ||
+        fail '内部端口修改未同步 Reality 共存网站或额外入口投影'
+    jq '.core.protocols[0].websocket.tls_port=15443' "${changed}" >"${TEST_ROOT}/internal-conflict.json"
+    ! dockerConfigureSpecValidate "${TEST_ROOT}/internal-conflict.json" \
+        >"${TEST_ROOT}/internal-helper.log" 2>&1 || fail '内部端口占用了 Reality 共存分流端口'
+    jq '.host_integrations=[{type:"fail2ban"}]' "${generated}" >"${TEST_ROOT}/internal-protected.json"
+    jq '.host_integrations=[{type:"fail2ban"}]' "${changed}" >"${TEST_ROOT}/internal-protected-changed.json"
+    ! dockerEditCompatibilityValidate "${TEST_ROOT}/internal-protected.json" \
+        "${TEST_ROOT}/internal-protected-changed.json" >"${TEST_ROOT}/internal-helper.log" 2>&1 ||
+        fail '内部端口修改突破站点 Fail2ban 边界'
+    for protection in fail2ban-control fail2ban-ssh; do
+        jq --arg protection "${protection}" '.host_integrations=[{type:$protection}]' \
+            "${generated}" >"${TEST_ROOT}/internal-protected.json"
+        jq --arg protection "${protection}" '.host_integrations=[{type:$protection}]' \
+            "${changed}" >"${TEST_ROOT}/internal-protected-changed.json"
+        dockerEditCompatibilityValidate "${TEST_ROOT}/internal-protected.json" \
+            "${TEST_ROOT}/internal-protected-changed.json" ||
+            fail "内部端口修改错误拒绝独立防护: ${protection}"
+    done
+) || fail '内部端口枚举、冻结或共存生成合同失败'
+runControl 0 internal-ports-restore-baseline configure --spec "${PROTOCOL_BASE}"
 # 旧格式先迁移私密草稿；预览和取消保留线上格式，确认才写入 v3。
 for version in 1 2; do
     jq --argjson version "${version}" '.schema_version=$version | del(.accounts,.core.secondary_type) |

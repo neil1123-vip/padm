@@ -342,7 +342,7 @@
       "profiles": ["core-xray"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v2/v3 已支持最多 16 个入口、复制/删除及端口事务，v3 明确核心归属；5B.5c–5B.5d 额外公开端口的菜单/CLI 增删、状态与默认分享选择已交付，沿用原认证、统计和 TLS/SNI 前端，候选失败恢复，本地真实发布已验。受管/桥接可达宿主网站的 Reality 443 共存可使用别名；拒绝 WS/SSH Fail2ban、TUN/TProxy 与 host-network 组合，允许已有 WireGuard/控制面 Fail2ban。既有身份和内部端口冻结，端口跳跃、适用公网/IPv6/原生宿主/arm64 及完整管理仍待交付或验收。"
+      "reason": "v2/v3 已支持最多 16 个入口、复制/删除及端口事务，v3 明确核心归属；5B.5c–5B.5d 额外公开端口的菜单/CLI 增删、状态与默认分享选择已交付，沿用原认证、统计和 TLS/SNI 前端，候选失败恢复，本地真实发布已验。受管/桥接可达宿主网站的 Reality 443 共存可使用别名；拒绝 WS/SSH Fail2ban、TUN/TProxy 与 host-network 组合，允许已有 WireGuard/控制面 Fail2ban。3D.18 专项菜单/CLI 可修改已有 21–25 入口的核心后端及 Nginx TLS 内部端口，HTTPUpgrade 支持双核心、其余仅 Xray，同步别名和受管共存投影并校验监听冲突，拒绝站点 Fail2ban；既有身份和普通导入的内部端口仍冻结。端口跳跃完整管理、适用公网/原生宿主/arm64 及完整管理仍待交付或验收。"
     },
     "reality-target-management": {
       "status": "supported",
