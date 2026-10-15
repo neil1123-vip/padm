@@ -394,6 +394,16 @@ jq -e --argjson saved "${SAVED}" '.=={state:"stopped",saved:$saved}' "${LOG}" >/
         "hysteria2://${UUID}@proxy.example.com:36001?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3&upmbps=60&downmbps=120&up=60&down=120&obfs=salamander&obfs-password=hy2-obfs-private_1234#hy2" ]] ||
         fail 'Hy2 指定活动端口分享未保留认证、带宽或混淆参数'
     [[ "$(snapshot)" == "${before}" ]] || fail '活动范围分享改变受管文件'
+    jq '.core.protocols[0].hy2.obfs.type = "gecko"' "${TEST_ROOT}/brutal-share.json" >"${TEST_ROOT}/gecko-share.json"
+    runEdit 0 --spec "${TEST_ROOT}/gecko-share.json" --confirm PADM-DOCKER-EDIT
+    beforeGecko=$(snapshot)
+    [[ "$(dockerMain port-hopping share)" == \
+        "hysteria2://${UUID}@proxy.example.com:36000-36002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3&upmbps=60&downmbps=120&up=60&down=120&obfs=gecko&obfs-password=hy2-obfs-private_1234#hy2" ]] ||
+        fail 'Gecko 活动范围分享未保留认证、带宽或混淆参数'
+    [[ "$(dockerMain port-hopping share 36001)" == \
+        "hysteria2://${UUID}@proxy.example.com:36001?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3&upmbps=60&downmbps=120&up=60&down=120&obfs=gecko&obfs-password=hy2-obfs-private_1234#hy2" ]] ||
+        fail 'Gecko 指定活动端口分享未保留认证、带宽或混淆参数'
+    [[ "$(snapshot)" == "${beforeGecko}" ]] || fail 'Gecko 活动范围分享改变受管文件'
     STATUS_END=36003
     if dockerMain port-hopping share >"${LOG}" 2>&1; then fail '活动范围漂移仍生成分享链接'; fi
     unset STATUS_END
