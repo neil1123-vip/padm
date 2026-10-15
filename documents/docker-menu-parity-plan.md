@@ -7863,6 +7863,8 @@ Hy2/TUIC 在范围首尾端口分别由新客户端进程建立连接均被拒�
 本轮另补生命周期门禁：跳跃监督会话目录存在时，`up` 立即拒绝并保留现场，
 要求先 `stop` 或显式 `recover`，不尝试无人值守接管。Docker Linux engine 当前不可用，
 仅完成补丁静态差分检查，定向回归待引擎恢复后补跑。
+随后恢复 IPv6/WARP 精确删除菜单在删空时提示策略关闭，并明确 WARP 需要重新导入；
+该提示与 `setup.sh` 删除最后一条规则的实际语义一致，菜单静态断言已同步。
 
 `docker-menu-port-alias` 在 Docker Linux amd64、Jobs 2 下实际执行通过，
 入口 `2.714` 秒、排队 `195` 毫秒，结果
@@ -7877,7 +7879,8 @@ Jobs 2 下通过，入口 `26.969` 秒、排队 `4.727` 秒，结果
 最近提交名称统一使用英文 Conventional Commit：
 `fix(docker): streamline renewal status menu`、
 `fix(docker): clarify hosts routing menu labels`、
-`test(docker): cover Gecko hopping shares`。
+`test(docker): cover Gecko hopping shares`、
+`fix(menu): restore selective removal warnings`。
 本轮未发现可复现的其它低风险菜单根因，未做猜测性修改。
 
 公网 CA、原生宿主/arm64、完整外部客户端、SOCKS UDP 会话撤销、
