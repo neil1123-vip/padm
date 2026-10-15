@@ -257,7 +257,8 @@ def deployment_command(root, function, *arguments, accepted=False, boundary="",
     elif not usage:
         assert any(message.encode() in result.stderr for message in (
             "跳跃监督会话存在或停止未核验", "跳跃监督重启未确认",
-            "跳跃监督会话未能通过原控制通道停止", "跳跃独立监督拒绝")), result.stderr
+            "跳跃监督会话未能通过原控制通道停止", "跳跃独立监督拒绝",
+            "跳跃监督会话仍在运行或残留")), result.stderr
 
 
 def deployment_gate_cases(base):
