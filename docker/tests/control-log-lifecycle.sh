@@ -191,6 +191,19 @@ has_call control-log-install || fail 'up 未安装控制日志调度'
 has_call control-sync-install || fail 'up 未安装自动同步调度'
 has_call 'compose:up -d' || fail 'up 未启动 Compose'
 
+# 跳跃监督会话存在时，普通 up 必须保留现场并拒绝启动，不能绕过恢复门禁。
+mkdir -p "${lifecycleRoot}/data/net"
+: >"${lifecycleRoot}/data/net/.hopping-supervisor"
+reset_calls
+status=0
+dockerLifecycleCommand up || status=$?
+[[ "${status}" == "${PADM_DOCKER_RC_LOCK}" ]] || fail 'up 绕过跳跃残留门禁'
+has_call 'error:跳跃监督会话仍在运行或残留，已拒绝普通启动；请先停止或核验清理' ||
+    fail 'up 残留门禁未给出恢复提示'
+! grep -Eq '^(compose:|traffic-|.*-install$)' "${calls}" ||
+    fail 'up 残留门禁拒绝前已修改服务'
+rm -f -- "${lifecycleRoot}/data/net/.hopping-supervisor"
+
 reset_calls
 dockerLifecycleCommand restart
 has_call control-log-install || fail 'restart 未安装控制日志调度'

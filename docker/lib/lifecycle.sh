@@ -2294,6 +2294,11 @@ dockerLifecycleCommand() {
     shift
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${operation}" == up &&
+        ( -e "${root}/data/net/.hopping-supervisor" || -L "${root}/data/net/.hopping-supervisor" ) ]]; then
+        dockerError '跳跃监督会话仍在运行或残留，已拒绝普通启动；请先停止或核验清理'
+        return "${PADM_DOCKER_RC_LOCK}"
+    fi
     if [[ "${operation}" == restart &&
         ( -e "${root}/data/net/.hopping-supervisor" || -L "${root}/data/net/.hopping-supervisor" ) ]]; then
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
