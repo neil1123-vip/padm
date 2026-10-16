@@ -616,7 +616,7 @@ dockerMenuCdnEntries() {
             dockerSetupRead listener '入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" ]] || continue
             if [[ "${choice}" == 2 ]]; then
-                dockerSetupRead addresses '连接地址（IP 或域名，多个用逗号分隔，0 返回）: ' &&
+                dockerSetupRead addresses '连接地址（IP 或域名，多个用逗号分隔，0 返回）: ' '' csv &&
                     [[ -n "${addresses}" ]] || continue
                 dockerMenuRun edit --cdn-entry "${listener}" "${addresses}" || true
             else
@@ -713,7 +713,7 @@ dockerMenuRealityStream() {
             dockerMenuRun protocol list || continue
             dockerSetupRead listener '默认 Xray Reality Vision/XHTTP 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" ]] &&
-                dockerSetupRead domains '宿主网站域名（多个用逗号分隔，0 返回）: ' &&
+                dockerSetupRead domains '宿主网站域名（多个用逗号分隔，0 返回）: ' '' csv &&
                 [[ -n "${domains}" ]] &&
                 dockerSetupRead address '容器可达宿主地址（不支持 loopback）[host.docker.internal，0 返回]: ' host.docker.internal &&
                 dockerSetupRead port '宿主网站 TLS 端口 [8443，0 返回]: ' 8443 || continue
@@ -723,7 +723,7 @@ dockerMenuRealityStream() {
             dockerMenuRun protocol list || continue
             dockerSetupRead listener '默认 Xray Reality Vision/XHTTP 入口 ID（0 返回）: ' &&
                 [[ -n "${listener}" ]] &&
-                dockerSetupRead domains '宿主网站域名（多个用逗号分隔，0 返回）: ' &&
+                dockerSetupRead domains '宿主网站域名（多个用逗号分隔，0 返回）: ' '' csv &&
                 [[ -n "${domains}" ]] &&
                 dockerSetupRead address '宿主回环地址 [127.0.0.1，::1 为 IPv6，0 返回]: ' 127.0.0.1 &&
                 dockerSetupRead port '宿主网站 TLS 端口 [8443，0 返回]: ' 8443 || continue
@@ -849,7 +849,7 @@ dockerMenuAccounts() {
             action=(account create)
             dockerSetupRead name '账号名称（空输入自动生成，0 返回）: ' || continue
             [[ -z "${name}" ]] || action+=(--name "${name}")
-            dockerSetupRead listeners '入口 ID（逗号分隔，空输入使用全部入口，0 返回）: ' || continue
+            dockerSetupRead listeners '入口 ID（逗号分隔，空输入使用全部入口，0 返回）: ' '' csv || continue
             [[ -z "${listeners}" ]] || action+=(--listeners "${listeners}")
             dockerSetupRead enabled '是否启用账号 [Y/n]: ' y || continue
             case "${enabled}" in
@@ -864,7 +864,7 @@ dockerMenuAccounts() {
             action=(account edit "${accountId}")
             dockerSetupRead name '新名称（空输入保持不变，0 返回）: ' || continue
             [[ -z "${name}" ]] || action+=(--name "${name}")
-            dockerSetupRead listeners '新入口 ID（空输入保持不变，0 返回）: ' || continue
+            dockerSetupRead listeners '新入口 ID（空输入保持不变，0 返回）: ' '' csv || continue
             [[ -z "${listeners}" ]] || action+=(--listeners "${listeners}")
             [[ "${#action[@]}" -gt 3 ]] ||
                 { printf '至少修改名称或入口。\n'; continue; }
@@ -979,9 +979,9 @@ dockerMenuSubscriptions() {
             action=(subscription create)
             dockerSetupRead name '分享组名称（空输入自动生成，0 返回）: ' || continue
             [[ -z "${name}" ]] || action+=(--name "${name}")
-            dockerSetupRead accounts '账号 ID（逗号分隔，空输入使用全部账号，0 返回）: ' || continue
+            dockerSetupRead accounts '账号 ID（逗号分隔，空输入使用全部账号，0 返回）: ' '' csv || continue
             [[ -z "${accounts}" ]] || action+=(--accounts "${accounts}")
-            dockerSetupRead listeners '入口 ID（逗号分隔，空输入使用全部入口，0 返回）: ' || continue
+            dockerSetupRead listeners '入口 ID（逗号分隔，空输入使用全部入口，0 返回）: ' '' csv || continue
             [[ -z "${listeners}" ]] || action+=(--listeners "${listeners}")
             dockerSetupRead enabled '是否启用分享组 [Y/n]: ' y || continue
             case "${enabled}" in
@@ -996,9 +996,9 @@ dockerMenuSubscriptions() {
             action=(subscription edit "${groupId}")
             dockerSetupRead name '新名称（空输入保持不变，0 返回）: ' || continue
             [[ -z "${name}" ]] || action+=(--name "${name}")
-            dockerSetupRead accounts '新账号 ID（空输入保持不变，0 返回）: ' || continue
+            dockerSetupRead accounts '新账号 ID（空输入保持不变，0 返回）: ' '' csv || continue
             [[ -z "${accounts}" ]] || action+=(--accounts "${accounts}")
-            dockerSetupRead listeners '新入口 ID（空输入保持不变，0 返回）: ' || continue
+            dockerSetupRead listeners '新入口 ID（空输入保持不变，0 返回）: ' '' csv || continue
             [[ -z "${listeners}" ]] || action+=(--listeners "${listeners}")
             [[ "${#action[@]}" -gt 3 ]] ||
                 { printf '至少修改名称、账号或入口。\n'; continue; }
@@ -1291,7 +1291,7 @@ dockerMenuRegion() {
             printf '默认直连例外: %s\n' "$(jq -r 'map(ltrimstr("domain:")) | join(",")' \
                 <<<"${PADM_DOCKER_REGION_DEFAULT_DOMAINS}")"
             printf '区域阻断可能影响客户端连接；直连例外优先于其它阻断和 SOCKS5。\n'
-            dockerSetupRead extra '替换自定义直连例外规则（逗号分隔，留空清空，0 返回）: ' || continue
+            dockerSetupRead extra '替换自定义直连例外规则（逗号分隔，留空清空，0 返回）: ' '' csv || continue
             if [[ -n "${extra}" ]]; then
                 dockerMenuRun edit --region "${mode}" --region-allow "${extra}" || true
             else
@@ -1302,11 +1302,11 @@ dockerMenuRegion() {
         5|6)
             if [[ "${choice}" == 5 ]]; then
                 action=--region-allow-add
-                dockerSetupRead extra '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead extra '追加自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                     [[ -n "${extra}" ]] || continue
             else
                 action=--region-allow-remove
-                dockerSetupRead extra '删除自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead extra '删除自定义直连例外 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                     [[ -n "${extra}" ]] || continue
             fi
             dockerMenuRun edit "${action}" "${extra}" || true
@@ -1350,7 +1350,7 @@ dockerMenuIPv6() {
         case "${choice}" in
         0) return 0 ;;
         1)
-            dockerSetupRead domains 'IPv6 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead domains 'IPv6 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${domains}" ]] || continue
             dockerMenuRun edit --ipv6 selective --ipv6-domains "${domains}" || true
             ;;
@@ -1358,12 +1358,12 @@ dockerMenuIPv6() {
         3) dockerMenuRun edit --ipv6-off || true ;;
         4) dockerMenuRun protocol routing-status || true ;;
         5)
-            dockerSetupRead domains '追加 IPv6 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead domains '追加 IPv6 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${domains}" ]] || continue
             dockerMenuRun edit --ipv6-domains-add "${domains}" || true
             ;;
         6)
-            dockerSetupRead domains '精确删除 IPv6 域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead domains '精确删除 IPv6 域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${domains}" ]] || continue
             dockerMenuRun edit --ipv6-domains-remove "${domains}" || true
             ;;
@@ -1527,7 +1527,7 @@ dockerMenuRouting() {
             dockerMenuRun edit "${action}" "${server}" "${port}" || true
             ;;
         4)
-            dockerSetupRead input 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --socks5-domains "${input}" || true
             ;;
@@ -1540,7 +1540,7 @@ dockerMenuRouting() {
                 printf 'DNS 端口必须为 1–65535，请重新选择。\n'
                 continue
             fi
-            dockerSetupRead input 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --dns-rules "${server}" "${port}" "${input}" || true
             ;;
@@ -1551,7 +1551,7 @@ dockerMenuRouting() {
             ;;
         9) dockerMenuRun edit --hosts-off || true ;;
         10|12)
-            dockerSetupRead input '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             if [[ "${choice}" == 10 ]]; then
                 dockerMenuRun edit --direct-domains "${input}" || true
@@ -1564,7 +1564,7 @@ dockerMenuRouting() {
         14|26|27)
             [[ "${choice}" != 27 ]] ||
                 printf '精确删除按完整字符串匹配，删空关闭手工 IP 阻断。\n'
-            dockerSetupRead input 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）: ' &&
+            dockerSetupRead input 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             case "${choice}" in
             14) dockerMenuRun edit --block-ips-csv "${input}" || true ;;
@@ -1583,7 +1583,7 @@ dockerMenuRouting() {
         47) dockerMenuTProxy redirect ;;
         44) dockerMenuTun ;;
         22|23)
-            dockerSetupRead input '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             if [[ "${choice}" == 22 ]]; then
                 dockerMenuRun edit --direct-domains-add "${input}" || true
@@ -1592,7 +1592,7 @@ dockerMenuRouting() {
             fi
             ;;
         24|25)
-            dockerSetupRead input '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             if [[ "${choice}" == 24 ]]; then
                 dockerMenuRun edit --direct-domains-remove "${input}" || true
@@ -1602,11 +1602,11 @@ dockerMenuRouting() {
             ;;
         28|29)
             if [[ "${choice}" == 28 ]]; then
-                dockerSetupRead input '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead input '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --dns-domains-add "${input}" || true
             else
-                dockerSetupRead input '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead input '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --dns-domains-remove "${input}" || true
             fi
@@ -1635,11 +1635,11 @@ dockerMenuRouting() {
         34|35)
             dockerMenuRun protocol routing-status || continue
             if [[ "${choice}" == 34 ]]; then
-                dockerSetupRead input '追加 SOCKS5 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead input '追加 SOCKS5 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --socks5-domains-add "${input}" || true
             else
-                dockerSetupRead input '精确删除 SOCKS5 域名规则 CSV（删空关闭，需重新启用；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead input '精确删除 SOCKS5 域名规则 CSV（删空关闭，需重新启用；domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --socks5-domains-remove "${input}" || true
             fi
@@ -1704,7 +1704,7 @@ dockerMenuHttpRelay() {
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --http-relay-port "${input}" || true
             else
-                dockerSetupRead input 'HTTP 中继来源 IP/CIDR CSV（精确字面规则，0 返回）: ' &&
+                dockerSetupRead input 'HTTP 中继来源 IP/CIDR CSV（精确字面规则，0 返回）: ' '' csv &&
                     [[ -n "${input}" ]] || continue
                 case "${choice}" in
                 5) dockerMenuRun edit --http-relay-sources "${input}" || true ;;
@@ -1742,7 +1742,7 @@ dockerMenuWarp() {
         2) dockerMenuRun edit --warp-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
         4)
-            dockerSetupRead input 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --warp-domains "${input}" || true
             ;;
@@ -1750,12 +1750,12 @@ dockerMenuWarp() {
         6) dockerMenuRun edit --warp-family ipv4 || true ;;
         7) dockerMenuRun edit --warp-family ipv6 || true ;;
         8)
-            dockerSetupRead input '追加 WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input '追加 WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --warp-domains-add "${input}" || true
             ;;
         9)
-            dockerSetupRead input '精确删除 WARP 域名规则 CSV（删空关闭，需重新录入或导入 WARP；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input '精确删除 WARP 域名规则 CSV（删空关闭，需重新录入或导入 WARP；domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --warp-domains-remove "${input}" || true
             ;;
@@ -1879,7 +1879,7 @@ dockerMenuFail2ban() {
                 [[ "${choice}" != 19 ]] || confirmation='确认更新受管 SSH 防护参数？[y/N]: '
             fi
             if [[ "${#scopeArgs[@]}" == 0 ]]; then
-                dockerSetupRead ports '保护 WS 端口（逗号分隔，0 返回）: ' &&
+                dockerSetupRead ports '保护 WS 端口（逗号分隔，0 返回）: ' '' csv &&
                     [[ -n "${ports}" ]] || continue
                 portArgs=("${ports}")
             elif [[ "${scopeArgs[0]}" == ssh ]]; then

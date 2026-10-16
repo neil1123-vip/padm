@@ -1705,7 +1705,7 @@ runSitesDriver() {
 }
 
 runRoutingDriver() {
-    local scenario=$1 choice input family variant oldRule newRule
+    local scenario=$1 choice input family variant oldRule newRule index
     local inputPrompt menuLabel familyLabel addChoice removeChoice statusChoice
     local replaceCase replaceKind oldPrompt newPrompt
     local -A targetPrompts=()
@@ -1714,6 +1714,16 @@ runRoutingDriver() {
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
     case "${scenario}" in
+    csv-long)
+        input=
+        for ((index = 1; index <= 257; index++)); do
+            printf -v newRule 'd%03d.example.com' "${index}"
+            input+="${input:+,}${newRule}"
+            [[ "${index}" -ge 256 ]] || continue
+            targetReply 'Docker 路由与出站' $'10\n'
+            targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
+        done
+        ;;
     flow|failed)
         targetReply 'Docker 路由与出站' $'invalid\n'
         targetReply 'Docker 路由与出站' $'1\n'
@@ -3994,7 +4004,7 @@ unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 fi
 
 if [[ "${MENU_SCOPE}" != port-alias && "${MENU_SCOPE}" != xhttp ]]; then
-for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-input-eof hosts-input-status-failed hosts-input-commit-failed direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
+for routingCase in flow csv-long cancel socks5-input-eof socks5-input-commit-failed domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-input-eof hosts-input-status-failed hosts-input-commit-failed direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
     domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \
     ip-replace-flow ip-replace-cancel ip-replace-status-failed ip-replace-state-failed \
@@ -4051,6 +4061,17 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
     case "${routingCase}" in
+    csv-long)
+        longDomains=
+        for ((domainIndex = 1; domainIndex <= 257; domainIndex++)); do
+            printf -v domain 'd%03d.example.com' "${domainIndex}"
+            longDomains+="${longDomains:+,}${domain}"
+            [[ "${domainIndex}" -ge 256 ]] || continue
+            expectedRouting+="${expectedRouting:+$'\n'}edit --direct-domains ${longDomains}"
+        done
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail '长 CSV 未完整接受 256 项或未拒绝 257 项'
+        ;;
     flow|failed)
         expectedRouting='protocol routing-status'
         if [[ "${routingCase}" == flow ]]; then
