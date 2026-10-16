@@ -561,13 +561,13 @@
       "reason": "Docker 已提供受管 uninstall、remove-images 和显式 purge。"
     },
     "vless-encryption": {
-      "status": "unsupported",
+      "status": "deferred",
       "native_menu": "高级/危险操作",
       "native_action": "VLESS Encryption 实验",
       "profiles": ["core-xray"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "该实验开关尚未纳入 Docker 配置合同和回滚边界。"
+      "reason": "5C.10 已交付 schema 3 Xray Reality Vision/XHTTP 逐入口实验开关、状态、配置/URI 投影、ML-KEM-768 配对校验及能力 marker 更新/回滚门禁；仅固定 Xray 26.3.27/Mihomo v1.19.28 的 Linux amd64 实验已验，其它客户端、算法、公网、原生宿主/arm64 与完整能力验收仍 deferred。"
     }
   },
   "host_integrations": {

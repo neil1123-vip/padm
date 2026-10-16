@@ -81,6 +81,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-phase4-lifecycle \
         docker-reality-targets-direct \
         docker-reality-parameters \
+        docker-vless-encryption \
         docker-sites \
         docker-routing-direct-block-ip-workflow \
         docker-routing-direct-block-csv-workflow \
@@ -201,8 +202,12 @@ listRegressionDockerContractsRealityChildSelectors() {
         docker-reality-targets-selection docker-reality-target-library
 }
 
+listRegressionDockerVlessEncryptionChildSelectors() {
+    printf '%s\n' docker-vless-encryption docker-vless-encryption-real
+}
+
 listRegressionDockerContractsRealityMetadataChildSelectors() {
-    printf '%s\n' docker-xhttp-edit docker-reality-parameters docker-reality-targets-selection docker-reality-target-library
+    printf '%s\n' docker-xhttp-edit docker-reality-parameters docker-vless-encryption docker-reality-targets-selection docker-reality-target-library
 }
 
 listRegressionDockerContractsSetupBasicChildSelectors() {
@@ -908,6 +913,8 @@ registerRegressionFunctionLeaf docker-setup-tls runDockerSetupRegression tls
 registerRegressionFunctionLeaf docker-protocol runDockerProtocolRegression
 registerRegressionFunctionLeaf docker-reality runDockerRealityRegression
 registerRegressionFunctionLeaf docker-reality-parameters runDockerRealityParametersRegression
+registerRegressionFunctionLeaf docker-vless-encryption runDockerVlessEncryptionRegression
+registerRegressionFunctionLeaf docker-vless-encryption-real runDockerVlessEncryptionRealRegression
 registerRegressionFunctionLeaf docker-reality-targets runDockerRealityTargetsRegression
 registerRegressionFunctionLeaf docker-reality-targets-direct runDockerRealityTargetsDirectRegression
 registerRegressionFunctionLeaf docker-reality-targets-selection runDockerRealityTargetsSelectionRegression
@@ -1100,6 +1107,8 @@ registerRegressionParallelSelectorList docker-phase3-entries runFrameworkParalle
     "${TMP_DIR}/docker-phase3-entries-${BASHPID:-$$}" listRegressionDockerPhase3EntriesChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts runRegressionDockerContracts \
     "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
+registerRegressionParallelSelectorList docker-vless-encryption-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-vless-encryption-parallel-${BASHPID:-$$}" listRegressionDockerVlessEncryptionChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 4
 registerRegressionParallelSelectorList docker-contracts-fast-heavy runFrameworkParallelRegressionSelectorListWithJobs \

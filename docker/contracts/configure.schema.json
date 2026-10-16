@@ -21,6 +21,7 @@
   "x-padm-site-templates": true,
   "x-padm-hy2-local-site": true,
   "x-padm-hy2-gecko": true,
+  "x-padm-vless-encryption": true,
   "x-padm-fallback-alpn": true,
   "x-padm-acme-webroot": true,
   "x-padm-routing-socks5": true,
@@ -1104,7 +1105,10 @@
             "properties": {
               "protocols": {
                 "items": {
-                  "not": {"required": ["core"]},
+                  "not": {"anyOf": [
+                    {"required": ["core"]},
+                    {"required": ["vless_encryption"]}
+                  ]},
                   "properties": {"id": {"enum": [1, 21]}}
                 }
               }
@@ -1550,6 +1554,25 @@
         }
       }
     },
+    "vless_encryption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decryption", "encryption"],
+      "properties": {
+        "decryption": {
+          "type": "string",
+          "minLength": 117,
+          "maxLength": 117,
+          "pattern": "^mlkem768x25519plus\\.native\\.600s\\.[A-Za-z0-9_-]{85}[AQgw](?![\\s\\S])"
+        },
+        "encryption": {
+          "type": "string",
+          "minLength": 1610,
+          "maxLength": 1610,
+          "pattern": "^mlkem768x25519plus\\.native\\.0rtt\\.[A-Za-z0-9_-]{1578}[AEIMQUYcgkosw048](?![\\s\\S])"
+        }
+      }
+    },
     "reality_protocol": {
       "allOf": [
         {
@@ -1585,6 +1608,9 @@
             "uuid": {
               "$ref": "#/$defs/uuid"
             },
+            "vless_encryption": {
+              "$ref": "#/$defs/vless_encryption"
+            },
             "reality": {
               "type": "object",
               "additionalProperties": false,
@@ -1613,6 +1639,11 @@
                 }
               }
             }
+          },
+          "if": {"required": ["vless_encryption"]},
+          "then": {
+            "required": ["core"],
+            "properties": {"core": {"const": "xray"}}
           }
         }
       ]
@@ -1651,6 +1682,9 @@
             },
             "uuid": {
               "$ref": "#/$defs/uuid"
+            },
+            "vless_encryption": {
+              "$ref": "#/$defs/vless_encryption"
             },
             "reality": {
               "$ref": "#/$defs/reality_protocol/allOf/1/properties/reality"

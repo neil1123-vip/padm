@@ -239,7 +239,7 @@ Hy2/TUIC 停止后再由新客户端进程验证拒绝。三种独立场景按�
 | --- | --- |
 | `supported` | Docker 配置合同、控制命令和 Compose profile 已能完成该能力。 |
 | `host-integrated` | 能力依赖宿主内核、接口或防火墙；只能通过显式 `net-*` profile 使用。 |
-| `deferred` | 原生已有能力，Docker 已记录边界或后续方向，但当前合同/控制命令尚未开放。 |
+| `deferred` | 原生已有能力，Docker 完整管理或所需验收尚未完成；已交付子能力以逐项边界为准。 |
 | `unsupported` | 当前 Docker 版本不提供，也没有可安全复用的现成入口。 |
 
 协议的 `status` 只表示通过首次向导或 JSON spec 配置并运行的能力；`management_status`
@@ -459,7 +459,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同；5B.1–5B.4i 两核心 SOCKS5 TCP 出站、DNS/hosts、域名 Direct/Block、目的 IP、明文 BT、CN 预设、IPv6 与用户态 WARP 子能力；已有 DNS/选择性 SOCKS5/IPv6/WARP 名单增删、七类域名及手工字面 IP/CIDR 单条原位替换、已有 hosts 单键地址替换；5B.5a 已有 Xray 的 HTTP 中继事务 | SOCKS5 名单定向、菜单及完整 49 项回归已通过；hosts 单键替换定向与菜单已通过，集中完整 49 项回归通过；SOCKS UDP 发布、完整区域/访问控制仍未交付；WARP 公网出口、IPv6/HTTP 公网发布、真实宿主及双架构验收待补，完整状态不升级。 |
 | 核心与服务 | `supported` + `deferred` | 基础状态、启动、停止、重启、日志、更新、回滚、配置校验、可信候选核心试跑与升级风险扫描、Xray Geo 状态/更新/每日任务 | 评估要求受管 spec；预发布须有匹配的可信发布资产，不现场构建；Geo 的本地合同及真实 amd64 解析/权限已验收，真实上游、生产重建、宿主调度和双架构生命周期另验；当前不是原生全部生命周期管理。 |
 | 系统与脚本 | `supported` + `host-integrated` + `unsupported` | `padm-docker update`、Fail2ban 宿主集成 | BBR/网络优化不由 Docker 修改宿主内核；Fail2ban 需 `net-fail2ban`。 |
-| 高级/危险操作 | `supported` + `unsupported` | 受管卸载、移除镜像、显式 purge | VLESS Encryption 实验尚未纳入 Docker 合同。 |
+| 高级/危险操作 | `supported` + `deferred` | 受管卸载、移除镜像、显式 purge；有限 VLESS Encryption 实验开关 | 实验限 schema 3 Xray Reality Vision/XHTTP；固定客户端组合之外与完整验收仍待补。 |
 
 ## 公网协议
 
@@ -540,7 +540,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | `script-update` | 系统与脚本 -> 更新 padm | `supported` | 无 | 宿主 CLI | `padm-docker update` 处理签名 bundle、镜像和配置事务。 |
 | `network-optimization` | 系统与脚本 -> 网络优化 | `unsupported` | 无 | host | Docker 不修改宿主 BBR/fq。 |
 | `uninstall` | 高级/危险操作 -> 卸载脚本 | `supported` | 无 | 宿主 CLI | 受管卸载、移除镜像和显式 purge。 |
-| `vless-encryption` | 高级/危险操作 -> VLESS Encryption 实验 | `unsupported` | `core-xray` | bridge | 尚未纳入 Docker 配置合同和回滚边界。 |
+| `vless-encryption` | 高级/危险操作 -> VLESS Encryption 实验 | `deferred` | `core-xray` | bridge | 5C.10 提供菜单 9→18、`edit --vless-encryption ID enable/disable` 及 `protocol encryption-status [ID]`，限 schema 3 Xray 协议 1/2；配置与 URI、私密配对校验、失败恢复及旧 bundle marker 门禁已接入。固定 Xray 26.3.27/Mihomo v1.19.28 的 Linux amd64 真实实验通过，其它客户端、算法、公网、原生宿主/arm64 与完整能力仍待验。 |
 
 ## 第一阶段验收
 

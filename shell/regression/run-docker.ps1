@@ -386,7 +386,8 @@ try {
     if ($LASTEXITCODE -ne 0) { $container = $null; throw 'Regression container creation failed.' }
     & $docker cp $snapshot "${container}:/snapshot.tar"
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
-    if ($Selector -eq 'docker-port-hopping-share-real') {
+    if ($Selector -in @('docker-port-hopping-share-real', 'docker-vless-encryption-real',
+        'docker-vless-encryption-focused')) {
         # 固定实际导入器版本，仅复制到本次容器，不更新共用工具镜像。
         $uriClientReference = 'metacubex/mihomo:v1.19.28@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312'
         $uriClientInfo = & $docker image inspect $uriClientReference
@@ -418,7 +419,8 @@ try {
     if ($Selector -in @('routing-socks5-source-real', 'docker-routing-socks5-real', 'docker-routing-dns-hosts-real',
         'docker-routing-direct-block-real', 'docker-routing-block-ips-real', 'docker-routing-block-ips-resolved-real',
         'docker-routing-block-ips-resolved-egress-real', 'docker-routing-block-bt-real',
-        'docker-routing-region-real', 'docker-routing-warp-real', 'docker-http-relay-real')) {
+        'docker-routing-region-real', 'docker-routing-warp-real', 'docker-http-relay-real',
+        'docker-vless-encryption-real', 'docker-vless-encryption-focused')) {
         # 仅复制已有本机镜像的程序到隔离回归容器，不安装宿主工具或挂载 Docker Socket。
         $cores = Join-Path $runDir 'routing-cores'
         New-Item -ItemType Directory -Path $cores | Out-Null
@@ -430,7 +432,9 @@ try {
             if ($Selector -in @('routing-socks5-source-real', 'docker-routing-block-ips-resolved-real',
                 'docker-routing-block-ips-resolved-egress-real') -and
                 $entry.name -eq 'xray') { continue }
-            if ($Selector -eq 'docker-http-relay-real' -and $entry.name -eq 'sing-box') { continue }
+            if ($Selector -in @('docker-http-relay-real', 'docker-vless-encryption-real',
+                'docker-vless-encryption-focused') -and
+                $entry.name -eq 'sing-box') { continue }
             $info = & $docker image inspect $entry.reference
             if ($LASTEXITCODE -ne 0) { throw "Required routing image is missing: $($entry.reference)" }
             $info = $info | ConvertFrom-Json | Select-Object -First 1

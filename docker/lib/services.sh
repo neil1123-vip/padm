@@ -529,8 +529,17 @@ dockerConfigureSpecValidate() {
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "reality"] +
             if $request.schema_version >= 2 then ["listener_id"] else [] end +
             if $request.schema_version == 3 then ["core"] else [] end +
+            (if has("vless_encryption") then ["vless_encryption"] else [] end) +
             if .id == 2 then ["xhttp"] elif .id == 26 then ["grpc"] else [] end) and
           (if .id == 1 then true else $request.schema_version == 3 end) and
+          (if has("vless_encryption") then
+            $request.schema_version == 3 and .core == "xray" and (.id == 1 or .id == 2) and
+            (.vless_encryption | exact(["decryption", "encryption"]) and
+              (.decryption | type == "string" and
+                test("^mlkem768x25519plus\\.native\\.600s\\.[A-Za-z0-9_-]{85}[AQgw](?![\\s\\S])")) and
+              (.encryption | type == "string" and
+                test("^mlkem768x25519plus\\.native\\.0rtt\\.[A-Za-z0-9_-]{1578}[AEIMQUYcgkosw048](?![\\s\\S])")))
+           else true end) and
           (.reality | exact(["server_name", "target_host", "target_port", "private_key", "public_key", "short_id"]) and
             (.server_name | hostname) and (.target_host | hostname) and (.target_port | port) and
             (.private_key | test("^[A-Za-z0-9_-]{43}$")) and
@@ -2172,7 +2181,7 @@ dockerGenerateXrayConfig() {
             settings: {
               clients: [{id: .uuid, email: .name} +
                 if .id == 1 then {flow: "xtls-rprx-vision"} else {} end],
-              decryption: "none"
+              decryption: (.vless_encryption.decryption // "none")
             },
             streamSettings: ({
               network: (if .id == 1 then "tcp" elif .id == 2 then "xhttp" else "grpc" end),
@@ -3156,9 +3165,9 @@ dockerGenerateSubscription() {
         if ($addresses | length) > 1 then .name += "-" + (($index + 1) | tostring) else . end
       else . end |
       if .id == 1 then
-        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=\((.vless_encryption.encryption // "none") | @uri)&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
       elif .id == 2 then
-        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=\((.vless_encryption.encryption // "none") | @uri)&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
           ((. as $entry | .xhttp | del(.path,.host,.mode,.download_port,.download) |
             if $entry.xhttp.download_port != null then
               .downloadSettings = {
@@ -6286,6 +6295,44 @@ dockerValidateHostIntegrations() {
     fi
 }
 
+dockerVlessEncryptionValidate() {
+    local specFile=$1 image=$2 pairs
+    pairs=$(jq -c '[.core.protocols[] | .vless_encryption | select(. != null)]' "${specFile}") || return 1
+    [[ "${pairs}" != '[]' ]] || return 0
+    # OpenSSL 从标准 PKCS8 seed 派生公钥，秘密只经标准输入，不用 Xray 的 -i 参数。
+    printf '%s\n' "${pairs}" |
+        docker run --rm -i --read-only --network none --cap-drop ALL \
+            --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+            --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+            --entrypoint python3 "${image}" -c '
+import base64
+import json
+import subprocess
+import sys
+
+def raw(value, length):
+    value = value.rsplit(".", 1)[-1]
+    decoded = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+    if len(decoded) != length or base64.urlsafe_b64encode(decoded).decode().rstrip("=") != value:
+        raise ValueError("密钥编码无效")
+    return decoded
+
+try:
+    for pair in json.load(sys.stdin):
+        seed = raw(pair["decryption"], 64)
+        public = raw(pair["encryption"], 1184)
+        result = subprocess.run(
+            ["openssl", "pkey", "-inform", "DER", "-pubout", "-outform", "DER"],
+            input=bytes.fromhex("3054020100300b060960864801650304040204428040") + seed,
+            capture_output=True, check=True, timeout=10,
+        ).stdout
+        if result != bytes.fromhex("308204b2300b0609608648016503040402038204a100") + public:
+            raise ValueError("加密公私材料不匹配")
+except Exception:
+    sys.exit(1)
+' >/dev/null 2>&1
+}
+
 dockerValidateCandidate() {
     local specFile=$1 candidate=$2 core domain jsonFile image tlsDomains='' domains jsonPaths
     local metadata http01 hasSite hasTls subscriptionEnabled hasControl coreTypes nginxEnabled streamEnabled tlsDomain
@@ -6307,6 +6354,10 @@ dockerValidateCandidate() {
       else join("|") end' "${specFile}") || return 1
     IFS='|' read -r http01 hasSite hasTls tlsDomain image subscriptionEnabled hasControl coreTypes <<<"${metadata}"
     IFS=',' read -r -a cores <<<"${coreTypes}"
+    dockerVlessEncryptionValidate "${specFile}" "${image}" || {
+        dockerError 'VLESS Encryption 配对校验失败；需要支持 ML-KEM-768 的受信 ops OpenSSL'
+        return 1
+    }
     if [[ "${http01}" == true ]]; then
         dockerAcmeWebrootTreeValidate "${candidate}" "${candidate}/data/acme-webroot" true || {
             dockerError '候选 ACME webroot 目录不安全或非空'

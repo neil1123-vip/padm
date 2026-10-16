@@ -1098,6 +1098,28 @@ padm-docker edit --regenerate-reality <入口ID> --confirm PADM-DOCKER-EDIT
 预览不提交，确认前的候选参数不会保留到下一次命令；普通 `edit --spec` 仍禁止手工改密钥。
 失败或中断使用配置快照恢复；公开 `rollback` 仍只回滚更新快照，不是编辑撤销命令。
 
+Docker 菜单 `9 → 18. VLESS Encryption 实验` 仅管理 schema 3 的 Xray
+Reality Vision（协议 `1`）与 Reality XHTTP（协议 `2`）已有入口：
+
+```bash
+padm-docker protocol encryption-status
+padm-docker protocol encryption-status <入口ID>
+padm-docker edit --vless-encryption <入口ID> enable --preview
+padm-docker edit --vless-encryption <入口ID> enable --confirm PADM-DOCKER-EDIT
+padm-docker edit --vless-encryption <入口ID> disable --confirm PADM-DOCKER-EDIT
+```
+
+`vless_encryption` 对象保存 `decryption/encryption`，缺省为 `none`。
+固定使用服务端 `mlkem768x25519plus.native.600s.<seed>` 与客户端
+`mlkem768x25519plus.native.0rtt.<public>`；可信 Xray 生成后，由 ops 内 Python/OpenSSL
+校验 ML-KEM-768 密钥配对。私密文件为 `0600`，秘密不进入命令参数、预览、状态或日志。
+普通编辑与同核复制保留该对象，复制到不支持的核心/协议时拒绝。
+重复启用或关闭返回 `15`；轮换须先关闭再启用，每次变更后重新导入分享 URI。
+更新/回滚的目标 bundle 缺少 `x-padm-vless-encryption` 时拒绝带实验配置的操作。
+固定 Xray `26.3.27` / Mihomo `v1.19.28` 的 Linux amd64 实验已通过；
+其它客户端、算法、公网、原生宿主与 arm64 未验，完整能力继续 `deferred`，
+验收证据见[实施计划 5C.10](documents/docker-menu-parity-plan.md#5c10-vless-encryption-有限实验管理)。
+
 离线使用同一 Release 的三个资产：
 
 ```bash

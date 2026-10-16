@@ -7998,6 +7998,57 @@ Gecko 72.148 秒、TUIC 35.809 秒、Salamander 284.505 秒，内部总耗时 28
 其它客户端、TUIC 自动跳跃、旧连接排空、自动恢复、原生宿主/arm64/公网、
 整机重启与完整卸载继续 deferred，整体计划 active。
 
+#### 5C.10 VLESS Encryption 有限实验管理
+
+仅开放 schema 3、Xray Reality Vision（协议 `1`）和 Reality XHTTP（协议 `2`）
+已有入口的独立实验开关；菜单 `9 → 18. VLESS Encryption 实验` 与
+`edit --vless-encryption ID enable|disable` 共用预览、一次确认、候选发布和失败恢复，
+支持 `--preview` 或 `--confirm PADM-DOCKER-EDIT`。
+`protocol encryption-status [ID]` 只显示开关状态，不输出密钥。
+`vless_encryption:{decryption,encryption}` 缺省为 `none`；普通编辑和同核复制保留，
+复制到不支持核心或协议时拒绝，重复 enable/disable 返回 `15`。
+轮换要求先关闭再启用，启用、关闭或轮换后均须重新导入分享 URI。
+
+固定算法为服务端 `mlkem768x25519plus.native.600s.<seed>` 与客户端
+`mlkem768x25519plus.native.0rtt.<public>`。可信固定 Xray `26.3.27`
+的 `vlessenc` 输出包含两类算法，生产只接受唯一
+`Authentication: ML-KEM-768, Post-Quantum` 段，拒绝重复或缺失字段。
+ops 内 Python/OpenSSL ML-KEM-768 校验从 stdin 接收 seed 与 public 并验证配对；
+私密文件 `0600`，秘密不进入 argv、预览、状态或日志。
+目标 bundle 缺少 `x-padm-vless-encryption` 时拒绝实验配置的更新/回滚，
+不以旧 bundle 静默清除字段替代兼容性验证。
+
+2026-10-16 Docker Linux amd64，固定 Xray `26.3.27`（commit `d2758a0`）
+和 Mihomo `v1.19.28`，复用生产 helper/config/URI/validator 的真实实验通过：
+16 个正例、8 个负例，38.540 秒，证据
+`.tmp-regression-docker-b2bb2e43a9f04e6a8403a62b675690d9/`。
+该次 focused 组合入口返回 `1`：合同子项因 schema 夹具不匹配失败，
+真实子项返回 `0`，不把真实实验通过当作整个组合或完整合同通过。
+本次源码归档 SHA-256 为
+`A9107EE884AF36991330F6750132182E41848C79A201D2C5795F33005C5A723E`，
+工具镜像 ID 为
+`sha256:ba4102e10f3d88a5392f6858f85fb8120e65369ae564b5d5660081abfd92a77f`，
+实际 Xray 镜像 ID 为
+`sha256:cee8dedd49c0de4d4ee5c6de21a56db394ea577c2294c79d44ef9452f2ec76f5`。
+专项合同 `docker-vless-encryption` 通过，内部 53.185 秒、入口 54.279 秒；
+派发合同通过，入口 1.751 秒。两者源码摘要均为
+`11B8DC0145B5275FF57D2457BB406582606E6B76E17F54D36CC0B93A35C78EC7`，
+证据分别为 `.tmp-regression-docker-18a5438fd9104b25a8286e986659f3e0/`
+和 `.tmp-regression-docker-22e4a158ba8d4f838dd58cc963cf876d/`。
+集中完整合同实际运行 60 项，59 项通过，入口 439.544 秒；
+唯一失败为规格差分测试仍锁定旧完整谓词摘要，证据
+`.tmp-regression-docker-73dd299fac7e427983c4ac8fefc97410/`。
+同步摘要并新增形状边界后，395 个差分用例和完整 `docker-reality` 叶子通过，
+后者内部 76.198 秒、入口 77.221 秒，证据
+`.tmp-regression-docker-1beacb4fb7a0492eb045a07cdfbfc90e/`。
+这不是单次完整合同全通过的记录；后续 SS 轮换集成后集中实际重跑。
+Bash/ShellCheck error、PowerShell AST 和 diff 检查通过；已解决失败的源码包、
+清单及核心/客户端副本与旧可行性脚本已清理，保留脱敏日志和结果。
+
+`vless-encryption` 从 `unsupported` 调整为 `deferred`，仅表示有限子能力已交付；
+其它客户端、算法、公网、原生宿主、arm64 和完整协议管理不据此升级，
+整体实施计划保持 active。
+
 #### 近期菜单一致性修补（跨 4A/5B/5C）
 
 2026-10-16 对已交付菜单做了一轮窄范围收口：证书菜单的“自动续期状态”
@@ -8080,7 +8131,8 @@ Jobs 2 下通过，入口 `26.969` 秒、排队 `4.727` 秒，结果
 | `acme-webroot`、`acme-standalone`、`site-static-redirect-alpn` | 5A |
 | `routing-tools`、`internal-201-socks-relay`、`internal-202-http-relay`、`internal-206-routing-rules`、`internal-207-access-control` | 5B |
 | `fail2ban`、`tun`、`tproxy`、`internal-204-tun`、`internal-205-redirect-tproxy` | 5C |
-| `network-optimization`、`vless-encryption` | 5C 独立宿主/实验子项；未验收仍不支持 |
+| `network-optimization` | 5C 独立宿主子项；未验收仍不支持 |
+| `vless-encryption` | 5C.10 有限实验子能力已交付，完整能力与剩余环境验收仍 deferred |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
 [`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]`，

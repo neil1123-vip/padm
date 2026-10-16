@@ -65,7 +65,7 @@ dockerSetupRead() {
 dockerSetupTool() {
     local image=$1
     shift
-    docker run --rm --read-only --network none --cap-drop ALL \
+    docker run --rm --read-only --network none --log-driver none --cap-drop ALL \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         "${image}" "$@"
@@ -73,7 +73,7 @@ dockerSetupTool() {
 
 dockerSetupRandomHex() {
     local image=$1 bytes=$2 value
-    value=$(docker run --rm --read-only --network none --cap-drop ALL \
+    value=$(docker run --rm --read-only --network none --log-driver none --cap-drop ALL \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --entrypoint openssl "${image}" rand -hex "${bytes}" 2>/dev/null) || return 1
@@ -140,6 +140,33 @@ dockerEditRegenerateReality() {
     ' "${draft}" >"${temporary}" 2>/dev/null &&
         chmod 0600 "${temporary}" && mv -f -- "${temporary}" "${draft}" &&
         rm -f -- "${credentials}"
+}
+
+dockerEditVlessEncryptionGenerate() {
+    local draft=$1 listener=$2 image raw="${1}.vlessenc" pair="${1}.encryption.json"
+    image=$(dockerManifestImageReference xray) || return 1
+    # 工具输出含服务端秘密，只经候选内的私密文件解析，不进入参数、预览或日志。
+    (
+        umask 077
+        dockerSetupTool "${image}" vlessenc >"${raw}" 2>/dev/null &&
+            jq -Rse '
+              split("\n") |
+              "Authentication: ML-KEM-768, Post-Quantum" as $heading |
+              if ([.[] | select(. == $heading)] | length) != 1
+              then error("缺少唯一 ML-KEM 输出段")
+              else .[(index($heading) + 1):] end |
+              [.[] |
+                capture("^\\s*\"(?<key>decryption|encryption)\"\\s*:\\s*\"(?<value>[^\"\\s]+)\"\\s*,?\\s*$")] |
+              if length == 2 and (map(.key) | sort) == ["decryption","encryption"]
+              then from_entries else error("加密输出无效") end
+            ' "${raw}" >"${pair}" 2>/dev/null &&
+            jq --arg listener "${listener}" --slurpfile pair "${pair}" '
+              .core.protocols |= map(if .listener_id == $listener
+                then .vless_encryption = $pair[0] else . end)
+            ' "${draft}" >"${draft}.next" 2>/dev/null
+    ) &&
+        chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" &&
+        rm -f -- "${raw}" "${pair}"
 }
 
 dockerSetupGenerateSpec() {
@@ -1218,7 +1245,7 @@ dockerProtocolCommand() (
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     list|stream-status|routing-status|port-alias-status|tproxy-status|redirect-status|tun-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
-    links|cdn-status|xhttp-status|hy2-status|tuic-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
+    links|cdn-status|xhttp-status|encryption-status|hy2-status|tuic-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
         if [[ "${action}" == select-target ]]; then
@@ -1321,6 +1348,19 @@ dockerProtocolCommand() (
           else {entries:$entries} end
         ' "${normalized}" || {
             dockerError 'Hy2/TUIC 管理只支持已有 v3 sing-box 协议 3/31 入口'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        return 0
+    fi
+    if [[ "${action}" == encryption-status ]]; then
+        jq --arg listener "${listener}" '
+          [.core.protocols[] | select(.core == "xray" and (.id == 1 or .id == 2)) |
+            select($listener == "" or .listener_id == $listener) |
+            {listener_id,protocol:.id,enabled:has("vless_encryption")}] as $entries |
+          if $listener != "" and ($entries | length) == 0 then error("入口不支持 VLESS Encryption")
+          else {experimental:true,entries:$entries} end
+        ' "${normalized}" || {
+            dockerError 'VLESS Encryption 只支持已有 v3 Xray Reality Vision/XHTTP 入口'
             return "${PADM_DOCKER_RC_STATE}"
         }
         return 0
@@ -2068,6 +2108,7 @@ dockerEditTlsDomainChange() {
 dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
     local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
+    local encryptionAction= encryptionListener=
     local realityTarget= targetHost= targetPort= targetSni=
     local realityStream= streamListener= streamWebsite=
     local streamDomains= streamAddress= streamPort=8443
@@ -2883,6 +2924,13 @@ dockerEditCommand() {
             regenerateReality=$2
             shift 2
             ;;
+        --vless-encryption)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${encryptionAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            case "$3" in enable|disable) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            encryptionListener=$2 encryptionAction=$3
+            shift 3
+            ;;
         --reality-target)
             [[ "$#" -ge 5 && -n "$2" && "$2" != --* && -z "${realityTarget}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -2933,6 +2981,14 @@ dockerEditCommand() {
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
+    [[ -z "${encryptionAction}" || (
+        -z "${specFile}${regenerateReality}${realityTarget}${realityStream}${siteMode}${alpnListener}" &&
+        -z "${http01}${socks5}${routingKind}${httpRelay}${portAlias}${fail2banAction}${cdnAction}${xhttpAction}" &&
+        -z "${portHoppingAction}${tproxyAction}${tunAction}${protocolKind}${entryAction}${entryCore}" &&
+        -z "${entryTlsDomain}${entryTlsMode}${tlsMigrateDomain}${internalListener}" ) ]] || {
+        dockerError 'VLESS Encryption 不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${regionAllowSet}" -eq 0 || ( "${routingKind}" == region && "${routingAction}" == enable ) ]] ||
         return "${PADM_DOCKER_RC_USAGE}"
     [[ "${ipv6DomainsSet}" -eq 0 || ( "${routingKind}" == ipv6 && "${routingAction}" == enable ) ]] ||
@@ -3112,7 +3168,8 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
-        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" && -z "${internalListener}" ) ||
+        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" && -z "${internalListener}" &&
+        -z "${encryptionAction}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -3178,7 +3235,8 @@ dockerEditCommand() {
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" &&
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
-        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" && -z "${internalListener}" ]]; then
+        -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" && -z "${internalListener}" &&
+        -z "${encryptionAction}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -4101,6 +4159,23 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
+    if [[ -n "${encryptionAction}" ]]; then
+        jq -e --arg listener "${encryptionListener}" --arg action "${encryptionAction}" '
+          [.core.protocols[] | select(.listener_id == $listener and .core == "xray" and
+            (.id == 1 or .id == 2))] |
+          length == 1 and (.[0] | has("vless_encryption") == ($action == "disable"))
+        ' "${draft}" >/dev/null 2>&1 || {
+            dockerError '需要唯一 Xray Reality Vision/XHTTP 入口，且加密状态必须发生变化；轮换请先关闭再启用'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        if [[ "${encryptionAction}" == disable ]]; then
+            jq --arg listener "${encryptionListener}" '
+              .core.protocols |= map(if .listener_id == $listener then del(.vless_encryption) else . end)
+            ' "${draft}" >"${draft}.next" &&
+                chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+                return "${PADM_DOCKER_RC_STATE}"
+        fi
+    fi
     # 删除最后一个 Nginx 入口时只清理 HTTP-01 开关，不丢掉其它 TLS 入口的域名。
     jq --slurpfile before "${normalized}" 'if $before[0].tls.http01 == true and
       all(.core.protocols[];
@@ -4181,6 +4256,16 @@ dockerEditCommand() {
         }
         printf '仅重生成入口 %s 的 Reality 密钥及 short ID；提交后需重新导入该入口链接。\n' "${regenerateReality}"
     fi
+    if [[ "${encryptionAction}" == enable ]]; then
+        dockerEditVlessEncryptionGenerate "${draft}" "${encryptionListener}" &&
+            dockerConfigureSpecValidate "${draft}" || {
+            dockerError 'VLESS Encryption 生成或校验失败，未改写已安装配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
+    [[ -z "${encryptionAction}" ]] ||
+        printf '入口 %s 的 VLESS Encryption 将%s；提交后需重新导入链接，旧客户端参数将失效。\n' \
+            "${encryptionListener}" "$([[ "${encryptionAction}" == enable ]] && printf '启用' || printf '关闭')"
     dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     # 发布准备、重生成与预览之后再冻结草稿，保留提交前的最后一道兼容门禁。
     dockerEditCompatibilityValidate "${normalized}" "${draft}" || return $?
@@ -4283,6 +4368,18 @@ dockerEditCommand() {
 
 dockerEditCompatibilityValidate() {
     local editBefore=$1 editAfter=$2
+    if [[ -n "${encryptionAction:-}" ]]; then
+        jq -en --arg listener "${encryptionListener}" \
+            --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '
+          def fixed:
+            .core.protocols |= map(if .listener_id == $listener then del(.vless_encryption) else . end);
+          ($before[0] | fixed) == ($after[0] | fixed)
+        ' >/dev/null 2>&1 || {
+            dockerError 'VLESS Encryption 仅允许选中入口的加密对象变更，其它完整规格必须保持'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        return 0
+    fi
     if [[ -n "${tlsMigrateDomain:-}" ]]; then
         # 固定新域名从原规格重算全量结果，不允许把额外漂移混入迁移。
         dockerEditTlsDomainChange "${editBefore}" "${tlsMigrateDomain}" "${editAfter}.expected" "${entryTlsMode:-}" &&

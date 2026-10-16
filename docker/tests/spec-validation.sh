@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行和 Hy2/TUIC 跳跃的完整谓词，仅忽略拼接空白。
+# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行、Hy2/TUIC 跳跃和 VLESS Encryption 的完整谓词，仅忽略拼接空白。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "ededd43cae1cb6471134c982b34274a978df91898d300c094f52ca51daa50d1e"
+    "86825b8ff432d42fdc2b966177c672d088f942ff4de29829dbe804642eed764d"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -123,6 +123,20 @@ for protocol_id in protocol_ids:
     spec["core"]["protocols"] = [entry]
     spec["tls"] = None if protocol_id in (1, 2, 26, 30) else {"domain": domain}
     cases[f"valid-protocol-{protocol_id}"] = spec
+encryption = {
+    "decryption": "mlkem768x25519plus.native.600s." + "A" * 86,
+    "encryption": "mlkem768x25519plus.native.0rtt." + "A" * 1579,
+}
+for protocol_id in (1, 2, 26, 30):
+    spec = copy.deepcopy(cases[f"valid-protocol-{protocol_id}"])
+    spec["core"]["protocols"][0]["vless_encryption"] = encryption
+    cases[f"{'valid' if protocol_id in (1, 2) else 'invalid'}-vless-encryption-{protocol_id}"] = spec
+for index, value in enumerate((None, {}, dict(encryption, extra=True),
+                               dict(encryption, encryption=encryption["encryption"] + "\n"),
+                               dict(encryption, decryption=encryption["decryption"][:-1] + "B"))):
+    spec = copy.deepcopy(cases["valid-protocol-1"])
+    spec["core"]["protocols"][0]["vless_encryption"] = value
+    cases[f"invalid-vless-encryption-value-{index}"] = spec
 for key in ("scMaxEachPostBytes", "scMinPostsIntervalMs", "scMaxBufferedPosts", "scStreamUpServerSecs"):
     for limit in (0, 2147483647):
         spec = copy.deepcopy(cases["valid-protocol-2"])

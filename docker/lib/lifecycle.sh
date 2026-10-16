@@ -26,6 +26,8 @@ dockerUsage() {
   padm-docker reinstall [发布资产参数]  # 交互重新选择核心和协议，生成新账号与分享身份
   padm-docker reinstall --spec <完整私密 JSON 文件> [--preview|--confirm PADM-DOCKER-REINSTALL] [发布资产参数]
   padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --vless-encryption <入口 ID> <enable|disable> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+    实验范围仅 v3 Xray Reality Vision/XHTTP；生成配对或恢复 none，提交后重新导入链接
   padm-docker edit --protocol-add <源入口 ID> <目标协议 ID> <新公开端口> [--protocol-core <xray|sing-box>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
     首个 TLS 协议: --tls-domain <域名>，并选择 --tls-existing、--tls-import <证书链> <私钥>、
       --tls-dns <邮箱> <dns_provider> <私密凭据文件>、--tls-standalone <邮箱>、--tls-webroot <邮箱> 或 --tls-alpn <邮箱>；已有 TLS 沿用原域名
@@ -168,6 +170,7 @@ dockerUsage() {
   padm-docker protocol list
   padm-docker protocol links [入口 ID]
   padm-docker protocol xhttp-status [入口 ID]
+  padm-docker protocol encryption-status [入口 ID]
   padm-docker protocol hy2-status [入口 ID]
   padm-docker protocol tuic-status [入口 ID]
   padm-docker protocol stream-status

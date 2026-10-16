@@ -668,6 +668,31 @@ or assigned a different public port; those changes require coordinated firewall 
 3A.3 has passed local dual-core transaction, PTY, traffic, update/rollback, and Linux permission regressions. Real signed releases,
 application images, and dual-architecture client connectivity remain unverified.
 
+Docker menu `9 → 18. VLESS Encryption experiment` manages one existing schema 3
+Xray Reality Vision (protocol `1`) or Reality XHTTP (protocol `2`) listener:
+
+```bash
+padm-docker protocol encryption-status
+padm-docker protocol encryption-status <listener-id>
+padm-docker edit --vless-encryption <listener-id> enable --preview
+padm-docker edit --vless-encryption <listener-id> enable --confirm PADM-DOCKER-EDIT
+padm-docker edit --vless-encryption <listener-id> disable --confirm PADM-DOCKER-EDIT
+```
+
+The optional `vless_encryption` object stores `decryption/encryption`; omission means
+`none`. The fixed server/client forms are `mlkem768x25519plus.native.600s.<seed>` and
+`mlkem768x25519plus.native.0rtt.<public>`. Trusted Xray generation is followed by
+ML-KEM-768 pair validation through Python/OpenSSL inside ops. Private files use `0600`;
+secrets stay out of command arguments, previews, status, and logs. Ordinary edits and
+same-core copies preserve the object; copies to unsupported cores or protocols are rejected.
+Enabling an enabled listener or disabling a disabled listener returns `15`.
+Rotate by disabling and enabling again, then reimport the sharing URI after every change.
+Updates/rollbacks with experimental configuration reject bundles lacking
+`x-padm-vless-encryption`. Linux amd64 experiments passed with fixed Xray `26.3.27`
+and Mihomo `v1.19.28`; other clients, algorithms, public networks, native hosts, and
+arm64 remain unverified. The complete feature remains `deferred`; see
+[acceptance evidence in plan 5C.10](../docker-menu-parity-plan.md#5c10-vless-encryption-有限实验管理).
+
 For offline use, provide all three assets from the same Release:
 
 ```bash

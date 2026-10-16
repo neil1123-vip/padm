@@ -7844,6 +7844,17 @@ runDockerRealityParametersRegression() {
         bash "${PROJECT_ROOT}/docker/tests/reality-parameters.sh"
 }
 
+runDockerVlessEncryptionRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/vless-encryption.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/"{bundle,lifecycle,menu,services,setup}.sh \
+            "${PROJECT_ROOT}/docker/tests/vless-encryption.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/vless-encryption.sh"
+}
+
+runDockerVlessEncryptionRealRegression() {
+    python3 "${PROJECT_ROOT}/docker/tests/vless-encryption-real.py"
+}
+
 runDockerRealityTargetsRegression() {
     PADM_DOCKER_TEST_FIXTURE_ONLY="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" \
         bash "${PROJECT_ROOT}/docker/tests/reality-targets.sh"

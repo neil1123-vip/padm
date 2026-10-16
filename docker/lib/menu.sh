@@ -140,7 +140,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '11. 端口跳跃（双族 Hy2/TUIC；TUIC 仅范围转发）' '12. Hysteria2 管理' '13. TUIC 管理' '14. 增量安装协议入口' '15. 删除协议入口' '16. 保留参数重建' '17. 核心/Nginx 内部端口' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '11. 端口跳跃（双族 Hy2/TUIC；TUIC 仅范围转发）' '12. Hysteria2 管理' '13. TUIC 管理' '14. 增量安装协议入口' '15. 删除协议入口' '16. 保留参数重建' '17. 核心/Nginx 内部端口' '18. VLESS Encryption 实验' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -222,6 +222,30 @@ dockerMenuProtocols() {
             dockerSetupRead tls 'Nginx TLS 内部端口（0 返回）: ' &&
                 [[ -n "${tls}" ]] || continue
             dockerMenuRun edit --internal-ports "${listener}" "${backend}" "${tls}" || true
+            ;;
+        18) dockerMenuVlessEncryption ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuVlessEncryption() {
+    local choice listener action
+    while :; do
+        printf '\nDocker VLESS Encryption 实验\n'
+        printf '%s\n' '仅支持 schema 3 的 Xray Reality Vision/XHTTP，已验范围仅固定 Xray/Mihomo 组合。' \
+            '启用或关闭后须重新导入分享 URI。' \
+            '1. 查看状态' '2. 启用并生成新参数' '3. 关闭' '0. 返回'
+        dockerSetupRead choice '请选择: ' || return 0
+        case "${choice}" in
+        1) dockerMenuRun protocol encryption-status || true ;;
+        2|3)
+            dockerMenuRun protocol encryption-status || continue
+            dockerSetupRead listener 'Xray Vision/XHTTP 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" && "${listener}" != --* ]] || continue
+            action=enable
+            [[ "${choice}" != 3 ]] || action=disable
+            dockerMenuRun edit --vless-encryption "${listener}" "${action}" || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

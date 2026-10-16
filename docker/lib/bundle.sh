@@ -441,6 +441,9 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].core.protocols[]; .id == 3 and .hy2.obfs.type == "gecko") then
             $schema[0]["x-padm-hy2-gecko"] == true
           else true end) and
+          (if any($spec[0].core.protocols[]; has("vless_encryption")) then
+            $schema[0]["x-padm-vless-encryption"] == true
+          else true end) and
           (if any($spec[0].core.protocols[]; (.fallback_tls // {}) | has("alpn")) then
             $schema[0]["x-padm-fallback-alpn"] == true
           else true end) and
