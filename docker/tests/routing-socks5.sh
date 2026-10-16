@@ -223,7 +223,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-network-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle &&
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" != socks5-input ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != socks5-input &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != warp-input ]]; then
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy
@@ -1469,6 +1470,204 @@ PY
     done
     printf 'docker-routing-socks5-input-regression-ok\n'
 }
+warpInputCheck() {
+    local name actual expected before composeBefore variable worker="${TEST_ROOT}/warp-input.sh"
+    local original="${TEST_ROOT}/warp-input-original.json"
+    local -a inputArgs=()
+    cp -- "${root}/config/spec.json" "${original}"
+    jq 'del(.routing.socks5)' "${TEST_ROOT}/routing-bt-policy.json" >"${TEST_ROOT}/warp-input-base.json"
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/warp-input-base.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化 WARP 录入组合夹具失败'
+    assertClean
+    # PTY 复用生产事务和组合规格，只监视私钥是否进入参数或终端回显。
+    (
+        umask 077
+        printf '#!/usr/bin/env bash\nset -Euo pipefail\n'
+        while IFS= read -r variable; do
+            declare -p "${variable}"
+        done < <(compgen -A variable | grep -E '^(PADM_|DOCKER_|TEST_ROOT$|MODE$|LOG$|COMPOSE_LOG$|root$|WARP_PRIVATE$)')
+        declare -f
+        cat <<'SH'
+jq() {
+    local arg
+    for arg in "$@"; do
+        [[ "${arg}" != *"${WARP_PRIVATE:0:43}"* ]] || {
+            printf 'WARP 私钥进入 jq 参数\n' >&2
+            return 99
+        }
+    done
+    command jq "$@"
+}
+dockerMain edit --warp-input
+SH
+    ) >"${worker}"
+    for name in ipv4-global ipv4-selective ipv6-global ipv6-selective \
+        cancel-family cancel-private cancel-peer cancel-ipv6 cancel-reserved cancel-mode cancel-domains \
+        blank-private blank-reserved eof-family eof-private eof-mode eof-domains \
+        invalid-family invalid-private invalid-peer invalid-ipv6 invalid-reserved-range \
+        invalid-reserved-count invalid-reserved-number invalid-reserved-fraction invalid-mode invalid-domains \
+        final-cancel term-private term-mode; do
+        before=$(snapshot)
+        composeBefore=$(cat "${COMPOSE_LOG}")
+        expected=0
+        case "${name}" in invalid-*) expected=15 ;; term-*) expected=143 ;; esac
+        actual=0
+        python3 - "${worker}" "${LOG}" "${WARP_INPUT}" "${DOMAINS_CSV}" "${name}" <<'PY' || actual=$?
+import errno
+import json
+import os
+import pty
+import select
+import signal
+import sys
+import time
+
+worker, log, fixture, domains, scenario = sys.argv[1:]
+with open(fixture) as stream:
+    warp = json.load(stream)
+pid, terminal = pty.fork()
+if pid == 0:
+    os.execv("/bin/bash", ["bash", worker])
+output = bytearray()
+private = warp["private_key"][:43].encode()
+
+def wait_for(prompt):
+    expected = prompt.encode()
+    deadline = time.monotonic() + 15
+    while expected not in output:
+        if time.monotonic() >= deadline:
+            raise AssertionError("WARP 输入提示超时: " + prompt)
+        if select.select([terminal], [], [], 0.1)[0]:
+            data = os.read(terminal, 65536)
+            if not data:
+                raise AssertionError("WARP 输入提前结束")
+            output.extend(data)
+
+selective = scenario.endswith("-selective") or scenario.endswith("-domains")
+steps = [
+    ("WARP 地址族", "2" if scenario.startswith("ipv6-") else "1", "family"),
+    ("WARP 私钥", warp["private_key"], "private"),
+    ("WARP Peer 公钥", warp["peer_public_key"], "peer"),
+    ("WARP IPv6 地址", warp["ipv6_address"], "ipv6"),
+    ("WARP reserved", " 1 , 2 , 255 ", "reserved"),
+    ("WARP 模式", "2" if selective else "1", "mode"),
+]
+if selective:
+    steps.append(("WARP 域名规则", domains, "domains"))
+invalid = {"family": "3", "private": warp["private_key"][:43], "peer": "invalid-peer",
+           "ipv6": "::1", "mode": "3", "domains": "regexp:.*"}
+reserved_invalid = {"range": "1,2,256", "count": "1,2", "number": "1e2,2,255",
+                    "fraction": "1,2,3.0"}
+try:
+    stopped = False
+    for prompt, value, field in steps:
+        wait_for(prompt)
+        if field == "mode":
+            for entry in os.scandir("/proc"):
+                if entry.name.isdecimal():
+                    try:
+                        with open(entry.path + "/cmdline", "rb") as stream:
+                            assert private not in stream.read()
+                    except (FileNotFoundError, ProcessLookupError, PermissionError):
+                        pass
+            assert private not in output
+        if scenario == "term-" + field:
+            os.kill(pid, signal.SIGTERM)
+            stopped = True
+            break
+        if scenario == "eof-" + field:
+            os.write(terminal, b"\x04")
+            stopped = True
+            break
+        if scenario in ("cancel-" + field, "blank-" + field):
+            os.write(terminal, b"\n" if scenario.startswith("blank-") else b"0\n")
+            stopped = True
+            break
+        if scenario == "invalid-" + field:
+            value = invalid[field]
+        if field == "reserved" and scenario.startswith("invalid-reserved-"):
+            value = reserved_invalid[scenario.rsplit("-", 1)[1]]
+        os.write(terminal, (value + "\n").encode())
+        if (scenario == "invalid-" + field and field in ("family", "mode", "domains")
+                or field == "reserved" and scenario.startswith("invalid-reserved-")):
+            stopped = True
+            break
+    if not stopped and not scenario.startswith("invalid-"):
+        wait_for("候选配置已验证，确认提交？[y/N]")
+        os.write(terminal, b"n\n" if scenario == "final-cancel" else b"y\n")
+    deadline = time.monotonic() + 20
+    while True:
+        if time.monotonic() >= deadline:
+            raise AssertionError("WARP 输入子进程未退出")
+        if select.select([terminal], [], [], 0.1)[0]:
+            try:
+                data = os.read(terminal, 65536)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                break
+            if not data:
+                break
+            output.extend(data)
+    _, status = os.waitpid(pid, 0)
+    assert private not in output
+    sys.exit(os.waitstatus_to_exitcode(status))
+finally:
+    with open(log, "wb") as stream:
+        stream.write(output)
+    os.close(terminal)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+PY
+        [[ "${actual}" == "${expected}" ]] || fail "${name}: WARP 录入预期 ${expected}，实际 ${actual}"
+        assertClean
+        case "${name}" in
+        ipv4-*|ipv6-*)
+            jq -en --arg name "${name}" --argjson domains "${DOMAINS}" \
+                --slurpfile old "${TEST_ROOT}/warp-input-base.json" --slurpfile input "${WARP_INPUT}" \
+                --slurpfile new "${root}/config/spec.json" '
+              $new[0] == ($old[0] | .routing.warp = ($input[0] |
+                .family = ($name | split("-")[0]) | .mode = ($name | split("-")[1]) |
+                .domains = (if .mode == "selective" then $domains else [] end)))
+            ' >/dev/null || fail "${name}: WARP 直接录入改变其它配置或丢失输入"
+            [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+                fail 'WARP 直接录入改变私有规格权限'
+            runEdit 0 --warp-off --confirm PADM-DOCKER-EDIT
+            ;;
+        final-cancel)
+            [[ "$(snapshot)" == "${before}" &&
+                "$(grep '^live:' "${COMPOSE_LOG}")" == "$(grep '^live:' <<<"${composeBefore}")" ]] ||
+                fail 'WARP 最终确认取消改变部署或执行在线 Compose'
+            ;;
+        *)
+            [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+                fail "${name}: 取消或非法录入改变部署或调用 Compose"
+            ;;
+        esac
+    done
+    before=$(snapshot)
+    composeBefore=$(cat "${COMPOSE_LOG}")
+    for name in '--preview' '--confirm PADM-DOCKER-EDIT' '--warp-off --preview' \
+        "--warp ${WARP_INPUT} --preview" '--warp-input --preview' '--socks5-input' \
+        '--warp-family ipv6 --preview' "--spec ${TEST_ROOT}/base.json --preview"; do
+        read -r -a inputArgs <<<"${name}"
+        runEdit 2 --warp-input "${inputArgs[@]}"
+    done
+    [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail 'WARP 录入互斥参数改变部署或调用 Compose'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${original}" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '恢复 WARP 录入原始夹具失败'
+    assertClean
+    printf 'docker-routing-warp-input-regression-ok\n'
+}
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == block-ips-resolved ]]; then
     # 只验证新开关；原双核心路由矩阵由既有 selector 保留。
     jq '.core = {type:"sing-box",secondary_type:null,protocols:
@@ -2137,6 +2336,10 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == socks5-input ]]; then
     socks5InputCheck
     exit 0
 fi
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp-input ]]; then
+    warpInputCheck
+    exit 0
+fi
 if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
     ( "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-policy-lifecycle && "${ROUTING_BRANCH}" == socks5 ) ]]; then
     socks5InputCheck
@@ -2190,6 +2393,7 @@ if [[ ( -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" 
     "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ||
     "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-network-lifecycle ) &&
     ( -z "${ROUTING_BRANCH}" || "${ROUTING_BRANCH}" == warp ) ]]; then
+    warpInputCheck
     before=$(snapshot)
     runEdit 0 --warp "${WARP_INPUT}" --preview
     runEdit 0 --warp-off --preview

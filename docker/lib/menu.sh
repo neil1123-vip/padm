@@ -1665,7 +1665,7 @@ dockerMenuWarp() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker WARP 出站\n'
-        printf '%s\n' '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '3. 查看路由状态' \
+        printf '%s\n' '1. 直接录入 WARP Peer' '2. 关闭 WARP 出站' '3. 查看路由状态' \
             '4. 替换 WARP 域名规则' '5. 切换 WARP 全局出站' \
             '6. 切换 WARP IPv4 隧道地址族' '7. 切换 WARP IPv6 隧道地址族' \
             '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' \
@@ -1678,9 +1678,8 @@ dockerMenuWarp() {
         case "${choice}" in
         0) return 0 ;;
         1)
-            dockerSetupRead input 'root 私有 WARP JSON 文件绝对路径（0 返回）: ' &&
-                [[ -n "${input}" ]] || continue
-            dockerMenuRun edit --warp "${input}" || true
+            dockerMenuRun protocol routing-status || continue
+            dockerMenuRun edit --warp-input || true
             ;;
         2) dockerMenuRun edit --warp-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
@@ -1698,7 +1697,7 @@ dockerMenuWarp() {
             dockerMenuRun edit --warp-domains-add "${input}" || true
             ;;
         9)
-            dockerSetupRead input '精确删除 WARP 域名规则 CSV（删空关闭，需要重新导入 WARP；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            dockerSetupRead input '精确删除 WARP 域名规则 CSV（删空关闭，需重新录入或导入 WARP；domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --warp-domains-remove "${input}" || true
             ;;

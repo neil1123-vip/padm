@@ -154,6 +154,7 @@ dockerUsage() {
   padm-docker edit --ipv6-domains-replace <旧规则> <新规则> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --ipv6-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --warp <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --warp-input [发布资产参数]（仅交互终端，直接录入已有 WARP Peer 参数）
   padm-docker edit --warp-domains <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --warp-domains-add <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --warp-domains-remove <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

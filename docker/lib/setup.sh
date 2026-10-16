@@ -1102,6 +1102,54 @@ dockerEditSocks5Input() {
     ) && chmod 0600 "${target}"
 }
 
+dockerEditWarpInput() {
+    local target=$1 family privateKey peerPublicKey ipv6Address reserved scope domains='[]'
+    dockerSetupRead family 'WARP 地址族 [1=IPv4, 2=IPv6, 0=返回]: ' &&
+        [[ -n "${family}" ]] || return 3
+    case "${family}" in
+    1) family=ipv4 ;;
+    2) family=ipv6 ;;
+    *) return 1 ;;
+    esac
+    printf 'WARP 私钥（隐藏输入，0 返回，空输入取消）: '
+    IFS= read -r -s privateKey || return 3
+    printf '\n'
+    [[ -n "${privateKey}" && "${privateKey}" != 0 ]] || return 3
+    dockerSetupRead peerPublicKey 'WARP Peer 公钥（0 返回，空输入取消）: ' &&
+        [[ -n "${peerPublicKey}" ]] || return 3
+    dockerSetupRead ipv6Address 'WARP IPv6 地址（不含前缀，0 返回，空输入取消）: ' &&
+        [[ -n "${ipv6Address}" ]] || return 3
+    dockerSetupRead reserved 'WARP reserved（3 个 0..255 整数 CSV，0 返回）: ' &&
+        [[ -n "${reserved}" ]] || return 3
+    reserved=$(jq -ecn --arg input "${reserved}" '
+      $input | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
+      select(length == 3 and all(.[]; test("^[0-9]{1,3}$"))) |
+      map(tonumber) | select(all(.[]; . <= 255))
+    ' 2>/dev/null) || return 1
+    dockerSetupRead scope 'WARP 模式 [1=全局, 2=域名分流, 0=返回]: ' &&
+        [[ -n "${scope}" ]] || return 3
+    case "${scope}" in
+    1) scope=global ;;
+    2)
+        scope=selective
+        dockerSetupRead domains 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            [[ -n "${domains}" ]] || return 3
+        domains=$(dockerSocks5DomainsNormalize "${domains}") || return 1
+        ;;
+    *) return 1 ;;
+    esac
+    # 私钥只经标准输入进入私有候选，其余字段沿用完整规格校验。
+    (
+        umask 077
+        printf '%s\n%s\n%s\n' "${privateKey}" "${peerPublicKey}" "${ipv6Address}" |
+            jq -Rsc --arg family "${family}" --arg mode "${scope}" \
+                --argjson reserved "${reserved}" --argjson domains "${domains}" '
+              split("\n") | {mode:$mode,family:$family,private_key:.[0],
+                peer_public_key:.[1],ipv6_address:.[2],reserved:$reserved,domains:$domains}
+            ' >"${target}"
+    ) && chmod 0600 "${target}"
+}
+
 dockerEditHttpRelayInput() {
     local target=$1 port family username password sources
     dockerSetupRead port 'HTTP 中继端口（1..65535，0 返回，空输入取消）: ' &&
@@ -2723,6 +2771,11 @@ dockerEditCommand() {
             portHoppingAction=clear
             shift
             ;;
+        --warp-input)
+            [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=warp routingAction=input
+            shift
+            ;;
         --warp-domains)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -3016,7 +3069,8 @@ dockerEditCommand() {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
     }
-    [[ ( "${socks5}" != input && "${httpRelay}" != input ) || "${mode}" == interactive ]] ||
+    [[ ( "${socks5}" != input && "${httpRelay}" != input && "${routingAction}" != input ) ||
+        "${mode}" == interactive ]] ||
         return "${PADM_DOCKER_RC_USAGE}"
     [[ -z "${hy2ObfsType}" || "${hy2ObfsType}" == off || "${mode}" == interactive ||
         -n "${hy2ObfsFile}" ]] || {
@@ -3909,12 +3963,21 @@ dockerEditCommand() {
                 --argjson domains "${routingDomains}" \
                 '.routing.dns = {server:$server,port:$port,domains:$domains}' \
                 "${draft}" >"${draft}.next"
-        elif [[ "${routingAction}" == enable ]]; then
-            [[ -n "${routingIps}" ]] ||
-                dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
-                dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
-                return "${PADM_DOCKER_RC_STATE}"
-            }
+        elif [[ "${routingAction}" == enable || "${routingAction}" == input ]]; then
+            if [[ "${routingAction}" == input ]]; then
+                dockerEditWarpInput "${workspace}/warp.json" || {
+                    status=$?
+                    [[ "${status}" -ne 3 ]] || return 0
+                    dockerError 'WARP 输入无效，未提交配置'
+                    return "${PADM_DOCKER_RC_STATE}"
+                }
+            else
+                [[ -n "${routingIps}" ]] ||
+                    dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
+                    dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
+                    return "${PADM_DOCKER_RC_STATE}"
+                }
+            fi
             jq --arg kind "${routingKind}" --slurpfile input "${workspace}/${routingKind}.json" \
                 '.routing[$kind] = ($input[0] +
                   if $kind == "block_ips" and .routing.block_ips.resolve_domains == true then

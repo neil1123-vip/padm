@@ -714,15 +714,21 @@ Direct 例外、域名/IP/BT 阻断优先于选择性 IPv6，选择性 IPv6 优�
 不修改原默认网络、Docker daemon 或宿主接口，宿主仍须具备 IPv6 路由与出口。
 TUN/TProxy 的宿主网络模式不属于本阶段支持范围，完整 WARP 和宿主验收继续待补。
 
-菜单 `17` 的 `20` 导入、关闭或查看 WARP 出站，并管理已有配置的分流域名、全局模式和隧道地址族；菜单 `6/7` 不保证公网出口地址族。独立 v3 `.routing.warp`
-通过 `x-padm-routing-warp` 门禁；输入为 root 所有、`0600`、最多 64 KiB 的私有 JSON，
-沿用路由输入的单链接及安全祖先目录限制，密钥不放在命令参数、预览或状态中。
+菜单 `17 → 20 → 1` 和交互 CLI `edit --warp-input` 直接录入已有 WARP Peer 参数，
+私钥隐藏输入，只经标准输入进入私有候选。空输入/EOF 或 `0` 取消；
+该入口仅交互终端，不与 `--preview`/`--confirm` 组合，最后只确认一次。
+子菜单还可关闭、查看状态或管理已有配置的分流域名、全局模式和隧道地址族；
+菜单 `6/7` 不保证公网出口地址族。独立 v3 `.routing.warp`
+通过 `x-padm-routing-warp` 门禁。原 `--warp <JSON>` CLI 保留，
+文件须为 root 所有、`0600`、最多 64 KiB，沿用单链接及安全祖先目录限制；
+私钥不放在命令参数、预览或状态中。
 输入包含 `mode`（`selective` 或 `global`）、`family`（`ipv4` 或 `ipv6`）、
 `private_key`、`peer_public_key`、`ipv6_address`、`reserved` 和 `domains`。
 密钥为规范的 32 字节 Base64，`reserved` 为 3 个 `0–255` 整数；
 选择性模式要求 1–256 条唯一四类域名规则，全局模式必须使用空 `domains`。
 
 ```bash
+padm-docker edit --warp-input
 padm-docker edit --warp /root/warp.json --preview
 padm-docker edit --warp /root/warp.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-domains 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
@@ -739,7 +745,7 @@ padm-docker edit --warp-off --confirm PADM-DOCKER-EDIT
 WARP 子菜单 `8/9` 与 `--warp-domains-add/--warp-domains-remove <CSV>` 增删已有
 selective 名单，未启用或 global 模式明确拒绝。稳定追加、256 条上限与精确删除
 沿用域名增量规则，非空时保留 mode、family、密钥、Peer、隧道地址及 reserved。
-删空关闭 WARP 并移除当前私有配置，之后须重新导入；不会隐式切到全局模式。
+删空关闭 WARP 并移除当前私有配置，之后须重新录入或导入；不会隐式切到全局模式。
 账号参数由用户已有的 WARP 配置提供，不自动注册账号或安装第三方注册器。
 固定 Peer 为 `162.159.192.1:2408`、MTU 为 `1280`；`family` 选择单一本地隧道地址及
 匹配域名的解析地址族。IPv4 为 `172.16.0.2/32`，IPv6 为导入的 `ipv6_address/128`；

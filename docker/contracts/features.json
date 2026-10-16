@@ -441,7 +441,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已交付两核心认证 SOCKS5 TCP 全局/选择性出站、DNS/精确 hosts、域名 Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT、CN 区域预设、IPv6 AAAA-only 出站和用户态 WARP。菜单/CLI 支持既有名单增删及单条替换、hosts 单键增删/替换、DNS/SOCKS5 上游修改和区域模式/自定义例外；5B.4u 支持 SOCKS5 上游、静默认证及全局/域名模式直接录入，旧私有 JSON CLI 保留。有限重叠与 full/domain/keyword 覆盖诊断只读，不预测最终流量。Direct 优先，关闭保留其它策略，代理或匹配 DNS 失败不回退；私有参数、其它配置与累计冻结，复用候选及失败/信号恢复。5B.4r/4s 提供单 sing-box、无副核心的显式解析后 IP 阻断及 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析，重新阻断后立即选路，代理绑定已检查的字面地址，解析失败拒绝；缺省字面模式保持，基础 flag 与组合分别由独立 bundle marker 保护。Xray 解析后阻断、SOCKS UDP 入站认证撤销、完整区域/语义冲突检测仍未交付。WARP 本地加密 Peer 已验，Cloudflare 账号、公网出口及原生宿主/arm64/可信发布仍待验，整体 deferred 不升级。"
+      "reason": "已交付两核心认证 SOCKS5 TCP 全局/选择性出站、DNS/精确 hosts、域名 Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT、CN 区域预设、IPv6 AAAA-only 出站和用户态 WARP。菜单/CLI 支持既有名单增删及单条替换、hosts 单键增删/替换、DNS/SOCKS5 上游修改和区域模式/自定义例外；5B.4u 支持 SOCKS5 上游、静默认证及全局/域名模式直接录入，5B.4v 支持已有 WARP Peer 七字段直接录入、静默私钥，旧私有 JSON CLI 保留。有限重叠与 full/domain/keyword 覆盖诊断只读，不预测最终流量。Direct 优先，关闭保留其它策略，代理或匹配 DNS 失败不回退；私有参数、其它配置与累计冻结，复用候选及失败/信号恢复。5B.4r/4s 提供单 sing-box、无副核心的显式解析后 IP 阻断及 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析，重新阻断后立即选路，代理绑定已检查的字面地址，解析失败拒绝；缺省字面模式保持，基础 flag 与组合分别由独立 bundle marker 保护。Xray 解析后阻断、SOCKS UDP 入站认证撤销、完整区域/语义冲突检测仍未交付。WARP 本地加密 Peer 已验，Cloudflare 账号、公网出口及原生宿主/arm64/可信发布仍待验，整体 deferred 不升级。"
     },
     "internal-201-socks-relay": {
       "status": "deferred",

@@ -2027,13 +2027,17 @@ Docker daemon or host interfaces. The host still needs working IPv6 routing and
 egress. TUN/TProxy host-network mode, complete WARP and native-host acceptance
 remain outside this stage.
 
-Menu `17`, option `20`, imports, disables or displays WARP egress and manages an existing
+Menu `17 → 20 → 1` and interactive `edit --warp-input` collect existing WARP Peer
+parameters directly. The private key is hidden and reaches the private candidate
+only through stdin. Empty input, EOF or `0` cancels. This entry requires a TTY,
+rejects `--preview`/`--confirm` and asks for one final confirmation.
+The submenu also disables or displays WARP egress and manages an existing
 configuration's domains, global mode and tunnel address family. Options `6/7`
 do not guarantee the public egress address family. Optional v3
-`.routing.warp` has its own `x-padm-routing-warp` gate. Input is a root-owned
-`0600` private JSON file, at most 64 KiB, with the same single-link and safe
-ancestor-directory requirements as other routing inputs. Keys never appear in
-command arguments, previews or routing status.
+`.routing.warp` has its own `x-padm-routing-warp` gate. The existing `--warp <JSON>`
+CLI remains available: the file must be root-owned, `0600`, at most 64 KiB, with
+the same single-link and safe ancestor-directory requirements as other routing
+inputs. Private keys never appear in command arguments, previews or routing status.
 The seven fields are `mode` (`selective` or `global`), `family` (`ipv4` or `ipv6`),
 `private_key`, `peer_public_key`, `ipv6_address`, `reserved` and `domains`.
 Keys are canonical 32-byte Base64; `reserved` contains three integers from
@@ -2041,6 +2045,7 @@ Keys are canonical 32-byte Base64; `reserved` contains three integers from
 domain-rule types; global mode requires an empty `domains` array.
 
 ```bash
+padm-docker edit --warp-input
 padm-docker edit --warp /root/warp.json --preview
 padm-docker edit --warp /root/warp.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --warp-domains 'example.com,full:api.example.net' --confirm PADM-DOCKER-EDIT
@@ -2060,7 +2065,7 @@ an existing selective list and reject missing or global WARP configurations. The
 use stable normalized additions, a 256-rule merged limit and exact batch removal.
 While rules remain, mode, family, keys, Peer, tunnel address and reserved bytes are
 preserved. Removing the last rule disables WARP and removes its current private
-configuration, so enabling it later requires reimporting the JSON. It never switches
+configuration, so enabling it later requires entering or importing it again. It never switches
 implicitly to global mode.
 Supply parameters from an existing WARP account; no account registration or
 third-party registration-tool installation is performed. The Peer is fixed at

@@ -474,6 +474,10 @@ runDockerRoutingSocks5InputRegression() {
     PADM_DOCKER_ROUTING_SCOPE=socks5-input bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
+runDockerRoutingWarpInputRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=warp-input bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
 runDockerPhase4MaintenanceRegression() {
     PADM_DOCKER_PHASE4_SCOPE=maintenance bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
 }
@@ -982,6 +986,7 @@ registerRegressionFunctionLeaf docker-routing-direct-block-csv-workflow runDocke
 registerRegressionFunctionLeaf docker-routing-ipv6 runDockerRoutingIPv6Regression
 registerRegressionFunctionLeaf docker-routing-ipv6-real runDockerRoutingIPv6RealRegression
 registerRegressionFunctionLeaf docker-routing-warp runDockerRoutingWarpRegression
+registerRegressionFunctionLeaf docker-routing-warp-input runDockerRoutingWarpInputRegression
 registerRegressionFunctionLeaf docker-routing-warp-real runDockerRoutingWarpRealRegression
 registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression

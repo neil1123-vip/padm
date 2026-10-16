@@ -3824,6 +3824,22 @@ Linux amd64 两项定向分别通过，内部/入口耗时 `41756/42962 ms`、
 `.tmp-regression-docker-2a35c50193ab4c73b3bb2a161e2e104c/`。
 与 HTTP 中继直接录入合批集成验收，支持状态继续 deferred，整体计划 active。
 
+#### 5B.4v 已有 WARP Peer 参数直接录入
+
+菜单 `17 → 20 → 1` 与交互 CLI `edit --warp-input` 收集地址族、隐藏私钥、
+Peer 公钥、IPv6 隧道地址、3 个 reserved 字节和全局/域名模式。
+域名复用现有规范化，密钥与地址复用完整规格校验；私钥仅经标准输入写入
+0700 候选的 0600 文件，不进入 argv、预览、状态或普通日志。
+空输入/EOF 或 `0` 取消；只允许交互 TTY，拒绝 preview/confirm 组合。
+原 `--warp <私有 JSON>` CLI 保留，共用原合并、冻结、一次确认和失败/信号恢复。
+菜单先核对状态，删空提示重新录入或导入，不改变规则语义。
+
+新增 `docker-routing-warp-input` 窄 selector；原 WARP 生命周期只执行一次输入检查，
+完整聚合不重复增加叶子。PTY 覆盖双地址族/双模式、每字段取消、EOF、
+非法输入、最终取消、输入中 TERM、私钥回显/argv、其它配置及权限保持。
+未改 schema、核心生成、Cloudflare 注册、宿主权限或支持状态；
+原生宿主/arm64/公网出口和完整路由管理继续 deferred，整体计划 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

@@ -128,6 +128,10 @@ Direct/Block/IPv6/WARP/SOCKS5 候选顺序及优先者，包括区域合成的�
 完整校验和一次确认沿用原事务，不扩 schema、核心、权限或公开支持状态。
 HTTP 来源必须明确填写，SOCKS UDP 与 sing-box HTTP 来源限制保持。
 
+5B.4v 将已有 WARP Peer 七字段接入菜单 `17 → 20 → 1` 与交互 `--warp-input`，
+隐藏私钥、stdin 写入私有候选，旧 JSON CLI 和原完整校验/恢复事务保持。
+仍不注册 Cloudflare 账号或保证公网出口，完整路由管理继续 `deferred`。
+
 5C.9a 仅补固定 amd64 sing-box 1.14.2 客户端前置：Hy2 接受范围字段，
 TUIC 拒绝 `server_ports`，两者单端口基线均通过。Hy2 两个现有 UDP alias
 分别通过双栈严格 TLS、认证与 TCP/UDP；范围客户端跨 5.1 秒保持业务，

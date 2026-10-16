@@ -1653,7 +1653,8 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'20\n'
         targetReply 'Docker WARP 出站' $'invalid\n'
         targetReply 'Docker WARP 出站' $'1\n'
-        targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'/root/padm-warp.json\n'
+        [[ "${scenario}" == failed ]] ||
+            targetReply 'fixture-warp-input-confirm [y/N]' $'y\n'
         targetReply 'Docker WARP 出站' $'2\n'
         targetReply 'Docker WARP 出站' $'3\n'
         targetReply 'Docker WARP 出站' $'4\n'
@@ -1775,10 +1776,10 @@ runRoutingDriver() {
         done
         targetReply 'Docker IPv6 域名出站' $'0\n'
         targetReply 'Docker 路由与出站' $'20\n'
-        targetReply 'Docker WARP 出站' $'1\n'
-        targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'0\n'
-        targetReply 'Docker WARP 出站' $'1\n'
-        targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'\n'
+        for input in 0 '' n; do
+            targetReply 'Docker WARP 出站' $'1\n'
+            targetReply 'fixture-warp-input-confirm [y/N]' "${input}"$'\n'
+        done
         targetReply 'Docker WARP 出站' $'4\n'
         targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
         targetReply 'Docker WARP 出站' $'4\n'
@@ -2048,13 +2049,22 @@ runRoutingDriver() {
     warp-eof)
         targetReply 'Docker 路由与出站' $'20\n'
         targetReply 'Docker WARP 出站' $'1\n'
-        targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'\004'
+        targetReply 'fixture-warp-input-confirm [y/N]' $'\004'
+        targetReply 'Docker WARP 出站' $'3\n'
         targetReply 'Docker WARP 出站' $'4\n'
         targetReply 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
         targetReply 'Docker WARP 出站' $'8\n'
         targetReply '追加 WARP 域名规则 CSV' $'\004'
         targetReply 'Docker WARP 出站' $'9\n'
         targetReply '精确删除 WARP 域名规则 CSV' $'\004'
+        targetReply 'Docker WARP 出站' $'0\n'
+        ;;
+    warp-input-status-failed|warp-input-commit-failed)
+        targetReply 'Docker 路由与出站' $'20\n'
+        targetReply 'Docker WARP 出站' $'1\n'
+        [[ "${scenario}" == warp-input-status-failed ]] ||
+            targetReply 'fixture-warp-input-confirm [y/N]' $'y\n'
+        targetReply 'Docker WARP 出站' $'3\n'
         targetReply 'Docker WARP 出站' $'0\n'
         ;;
     domain-replace-*|ip-replace-*|hosts-replace-*|hosts-manage-*)
@@ -2934,7 +2944,8 @@ protocol)
     ;;
 edit)
     recordAction "$@"
-    if [[ "${2:-}" == --socks5-input || "${2:-}" == --http-relay-input ]]; then
+    if [[ "${2:-}" == --socks5-input || "${2:-}" == --http-relay-input ||
+        "${2:-}" == --warp-input ]]; then
         # 菜单只核对无凭据参数分发及取消；实际录入由对应路由合同覆盖。
         [[ "$#" -eq 2 ]] || exit 2
         family=${2#--}
@@ -3785,7 +3796,7 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
     hosts-manage-flow hosts-manage-cancel hosts-manage-invalid hosts-manage-status-failed hosts-manage-state-failed \
     hosts-manage-confirm-cancel hosts-manage-confirm-eof hosts-manage-commit-failed \
     selective-domains-invalid selective-domains-state-failed selective-domains-confirm-cancel selective-domains-confirm-eof selective-domains-commit-failed \
-    socks5-domains-eof socks5-domains-status-failed \
+    socks5-domains-eof socks5-domains-status-failed warp-input-status-failed warp-input-commit-failed \
     access-control-flow access-control-cancel access-control-failed \
     upstream-flow upstream-cancel upstream-status-failed upstream-commit-failed \
     http-relay-flow http-relay-cancel http-relay-status-failed http-relay-commit-failed \
@@ -3806,6 +3817,7 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
     [[ "${routingCase}" != socks5-domains-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != upstream-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != http-relay-status-failed ]] || ROUTING_STATUS=17
+    [[ "${routingCase}" != warp-input-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != tproxy-status-failed ]] || TPROXY_STATUS=17
     [[ "${routingCase}" != tun-status-failed ]] || TUN_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
@@ -3817,6 +3829,7 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
         "${routingCase}" != selective-domains-commit-failed &&
         "${routingCase}" != *-replace-commit-failed &&
         "${routingCase}" != socks5-input-commit-failed &&
+        "${routingCase}" != warp-input-commit-failed &&
         "${routingCase}" != access-control-failed &&
         "${routingCase}" != upstream-commit-failed &&
         "${routingCase}" != http-relay-commit-failed &&
@@ -3833,7 +3846,7 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
         if [[ "${routingCase}" == flow ]]; then
             expectedRouting+=$'\nedit --socks5-input\nsocks5-input-confirm y\nsocks5-input-commit'
         else
-            ! grep -Eq 'fixture-(socks5|http-relay)-input-confirm' "${CONTROL_LOG}" ||
+            ! grep -Eq 'fixture-(socks5|http-relay|warp)-input-confirm' "${CONTROL_LOG}" ||
                 fail '路由状态失败后仍进入凭据录入'
         fi
         expectedRouting+=$'\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips-csv 192.0.2.10, 2001:DB8::10, geoip:cn\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
@@ -3846,7 +3859,10 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
             [[ "${routingCase}" != flow ]] || expectedRouting+=$'\nipv6-daily-commit '"${ipv6Action}"
         done
         expectedRouting+=$'\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
-        expectedRouting+=$'\nedit --warp /root/padm-warp.json\nedit --warp-off\nprotocol routing-status'
+        expectedRouting+=$'\nprotocol routing-status'
+        [[ "${routingCase}" != flow ]] ||
+            expectedRouting+=$'\nedit --warp-input\nwarp-input-confirm y\nwarp-input-commit'
+        expectedRouting+=$'\nedit --warp-off\nprotocol routing-status'
         for warpAction in '--warp-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN' \
             '--warp-domains-add Example.NET, full:Exact.Example.Com' \
             '--warp-domains-remove Example.NET, full:Exact.Example.Com' \
@@ -3887,6 +3903,9 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
             expectedRouting+=$'protocol routing-status\nedit --socks5-input\nsocks5-input-confirm '"${socksInput}"
         done
         expectedRouting+=$'\nprotocol routing-status\nprotocol routing-status\nprotocol routing-status\nprotocol routing-status'
+        for warpInput in 0 '' n; do
+            expectedRouting+=$'\nprotocol routing-status\nedit --warp-input\nwarp-input-confirm '"${warpInput}"
+        done
         for httpRelayInput in 0 '' n; do
             expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-input\nhttp-relay-input-confirm '"${httpRelayInput}"
         done
@@ -3898,6 +3917,23 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
         expectedRouting=$'protocol routing-status\nedit --socks5-input\nsocks5-input-confirm '"${socksConfirmation}"$'\nprotocol routing-status'
         [[ "$(grep -Fc "操作失败，退出码: ${socksExit}" "${CONTROL_LOG}")" -eq 1 ]] ||
             fail 'SOCKS5 输入取消或提交失败后未显示退出码并继续诊断'
+        ;;
+    warp-eof|warp-input-status-failed|warp-input-commit-failed)
+        expectedRouting='protocol routing-status'
+        warpInputExit=2 warpInputFailureCount=1
+        if [[ "${routingCase}" == warp-input-status-failed ]]; then
+            warpInputExit=17 warpInputFailureCount=2
+            ! grep -Fq 'fixture-warp-input-confirm' "${CONTROL_LOG}" ||
+                fail 'WARP 状态失败后仍进入 Peer 录入'
+        else
+            warpInputConfirmation=eof
+            [[ "${routingCase}" != warp-input-commit-failed ]] ||
+                { warpInputConfirmation=y; warpInputExit=15; }
+            expectedRouting+=$'\nedit --warp-input\nwarp-input-confirm '"${warpInputConfirmation}"
+        fi
+        expectedRouting+=$'\nprotocol routing-status'
+        [[ "$(grep -Fc "操作失败，退出码: ${warpInputExit}" "${CONTROL_LOG}")" -eq "${warpInputFailureCount}" ]] ||
+            fail 'WARP 录入取消或失败后未显示退出码并继续诊断'
         ;;
     socks5-domains-eof|socks5-domains-status-failed)
         expectedRouting=$'protocol routing-status\nprotocol routing-status'
@@ -4339,10 +4375,10 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
             '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
             '精确删除 IPv6 域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' \
             '7. 单条替换 IPv6 域名规则' \
-            '1. 导入 WARP 配置' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
+            '1. 直接录入 WARP Peer' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
             '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 隧道地址族' '7. 切换 WARP IPv6 隧道地址族' \
             '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' \
-            '精确删除 WARP 域名规则 CSV（删空关闭，需要重新导入 WARP；domain:/full:/keyword:/geosite:，0 返回）' \
+            '精确删除 WARP 域名规则 CSV（删空关闭，需重新录入或导入 WARP；domain:/full:/keyword:/geosite:，0 返回）' \
             '10. 单条替换 WARP 域名规则' \
             '22. 追加 Direct 直连例外' '23. 追加 Block 域名阻断' \
             '24. 删除 Direct 直连例外' '25. 删除 Block 域名阻断' \
