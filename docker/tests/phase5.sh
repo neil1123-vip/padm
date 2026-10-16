@@ -885,6 +885,11 @@ grep -Fq "if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWit
     grep -Fq '"${SELECTOR}" == docker-routing-* || "${SELECTOR}" == docker-port-hopping-preflight' "${CONTRACT_WORKFLOW}" &&
     grep -Fq '"${SELECTOR}" == docker-contracts-fast-rest || "${SELECTOR}" == docker-port-hopping-preflight' "${CONTRACT_WORKFLOW}" ||
     fail '端口跳跃独立分片未沿用隔离工具镜像、当前源码或所需能力'
+# ML-KEM 分片的缓存、准备和执行必须同时使用新版 OpenSSL 工具镜像。
+[[ "$(grep -Fc "|| matrix.selector == 'docker-contracts-reality-metadata'" "${CONTRACT_WORKFLOW}")" -eq 2 ]] &&
+    grep -Fq '&& matrix.selector != '\''docker-contracts-reality-metadata'\''' "${CONTRACT_WORKFLOW}" &&
+    grep -Fq '|| "${SELECTOR}" == docker-contracts-reality-metadata ]]; then' "${CONTRACT_WORKFLOW}" ||
+    fail 'ML-KEM 回归未沿用支持 OpenSSL 3.5 的隔离工具镜像'
 grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
 grep -Fq 'max-parallel: 18' "${CONTRACT_WORKFLOW}" ||

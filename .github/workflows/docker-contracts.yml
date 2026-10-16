@@ -49,16 +49,16 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 1
       - name: Install pinned jq
-        if: ${{ !startsWith(matrix.selector, 'docker-contracts-fast-') && !startsWith(matrix.selector, 'docker-routing-') && matrix.selector != 'docker-port-hopping-preflight' }}
+        if: ${{ !startsWith(matrix.selector, 'docker-contracts-fast-') && !startsWith(matrix.selector, 'docker-routing-') && matrix.selector != 'docker-port-hopping-preflight' && matrix.selector != 'docker-contracts-reality-metadata' }}
         run: sudo bash shell/regression/install-ci-jq.sh
       - name: Cache contract tools
-        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight'
+        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight' || matrix.selector == 'docker-contracts-reality-metadata'
         uses: actions/cache@v6.1.0
         with:
           path: ${{ runner.temp }}/padm-contract-tools.tar
           key: padm-contract-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('shell/regression/container/**') }}
       - name: Prepare control and site contract tools
-        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight'
+        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight' || matrix.selector == 'docker-contracts-reality-metadata'
         shell: bash
         run: |
           set -euo pipefail
@@ -75,7 +75,8 @@ jobs:
           SELECTOR: ${{ matrix.selector }}
         run: |
           set -euo pipefail
-          if [[ "${SELECTOR}" == docker-contracts-fast-* || "${SELECTOR}" == docker-routing-* || "${SELECTOR}" == docker-port-hopping-preflight ]]; then
+          # ML-KEM 配对校验需要工具镜像中的 OpenSSL 3.5，不能使用旧版 runner 工具。
+          if [[ "${SELECTOR}" == docker-contracts-fast-* || "${SELECTOR}" == docker-routing-* || "${SELECTOR}" == docker-port-hopping-preflight || "${SELECTOR}" == docker-contracts-reality-metadata ]]; then
             jobs=2
             if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi
             capabilities=()
