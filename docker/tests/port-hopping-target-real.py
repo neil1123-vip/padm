@@ -113,6 +113,12 @@ def authentication(node, root, enter, phase, old_password, new_password, accepte
                 outbound.update(type="tuic", uuid=password,
                                 congestion_control=protocol["tuic"]["congestion_control"],
                                 udp_relay_mode="native", zero_rtt_handshake=False)
+            else:
+                hy2 = protocol["hy2"]
+                if hy2["obfs"] is not None:
+                    outbound["obfs"] = hy2["obfs"]
+                if hy2["bandwidth_mode"] == "brutal":
+                    outbound.update(up_mbps=hy2["down_mbps"], down_mbps=hy2["up_mbps"])
             config["outbounds"].append(outbound)
             config["route"]["rules"].append(dict(inbound=[tag], action="route", outbound=tag))
             checks.append((port, role in accepted_role if isinstance(accepted_role, tuple)
@@ -261,7 +267,8 @@ def share_uri(node, work, root, docker, enter):
             for key, value in (("upmbps", bandwidth["down_mbps"]), ("up", bandwidth["down_mbps"]),
                                ("downmbps", bandwidth["up_mbps"]), ("down", bandwidth["up_mbps"])):
                 assert f"{key}={value}" in evidence["share_uris"][0]
-            assert "obfs=salamander" in evidence["share_uris"][0]
+            assert f'obfs={bandwidth["obfs"]["type"]}' in evidence["share_uris"][0]
+            evidence["obfs"] = bandwidth["obfs"]["type"]
             evidence["brutal_bandwidth_aliases_equal"] = True
         wrong = shares[0].replace(protocol["uuid"].encode(),
                                  b"44444444-4444-4444-8444-444444444444", 1)
@@ -347,6 +354,12 @@ def share_uri(node, work, root, docker, enter):
         evidence["wrong_uri_credentials_refused"] = True
         stop(process)
         process = None
+        # 停止前证明同一探针带齐混淆与带宽参数，避免把客户端不兼容误判为撤销成功。
+        for port in (30000, 30001):
+            authentication(node, root, enter, f"active-{port}", protocol["uuid"],
+                           "44444444-4444-4444-8444-444444444444", "old",
+                           server_port=port)
+        evidence["stop_probe_positive_control"] = True
         assert invoke("port-hopping", "stop").decode().strip() == "端口跳跃已停止；保存配置保留。"
         active = False
         assert all(command([table, "-w", "-t", "nat", "-S"]) == previous
@@ -1828,9 +1841,11 @@ def run(work):
                 listener_id=protocol["listener_id"], range_start=30000, range_end=30001,
                 ipv4="198.18.1.1", ipv6="2001:db8:1::1")
             if os.environ.get("PADM_DOCKER_HOPPING_SHARE_ONLY") == "1" and protocol["id"] == 3:
+                obfs = os.environ.get("PADM_DOCKER_HOPPING_SHARE_OBFS", "salamander")
+                assert obfs in ("salamander", "gecko"), obfs
                 protocol["hy2"].update(
                     bandwidth_mode="brutal", up_mbps=80, down_mbps=40,
-                    obfs=dict(type="salamander", password="hy2-uri-obfs-private_1234"))
+                    obfs=dict(type=obfs, password="hy2-uri-obfs-private_1234"))
             spec.write_text(json.dumps(configured))
             # 生成材料与 bind 源均属于本次私有节点，保持完整生产 Compose。
             command(["env", "PADM_DOCKER_INSTALL_DIR=" + str(root),

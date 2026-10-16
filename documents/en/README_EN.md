@@ -582,19 +582,18 @@ range URI or automatic client hopping is offered. A Hy2 sing-box client using
 in the same process on isolated Linux amd64. The shared Hy2 URI generator emits equal
 `upmbps/downmbps` and `up/down` values in the client direction, fixing lost Brutal
 bandwidth during Mihomo raw URI import.
-The new `docker-port-hopping-share-real` selector (Jobs 2) uses official Mihomo
-`v1.19.28` to import the original share URIs: Hy2 Brutal + Salamander range hopping
+The `docker-port-hopping-share-real` selector (Jobs 2) uses official Mihomo
+`v1.19.28` to import the original share URIs: Hy2 Brutal + Salamander/Gecko range hopping
 and normal TUIC links for both range endpoints, with dual-family HTTP,
-wrong-account rejection and clean shutdown. The client is a test dependency only.
+wrong-account rejection and clean shutdown. Stop probes include the actual bandwidth
+and obfuscation settings, prove successful connections before stopping, then use fresh
+processes to verify rejection. The client is a test dependency only. Each of the three
+scenarios uses a separate netns, daemon and data directory, running within the entrypoint Jobs limit.
 Hy2 uses the client's native default 30-second random port selection, observing
 for at most 300 seconds and stopping once both families have used both ports.
-The Hy2 generator contract and configuration checks passed in 127.283 and
-29.466 seconds; combined share URI validation passed in 146.808 seconds,
-and all 57 complete contract groups passed in 555.266 seconds. A follow-up
-stop probe created fresh client processes for both range endpoints of Hy2 and
-TUIC and confirmed new connections were refused; the selector completed in
-about 132.8 seconds.
-Gecko range URI and other client imports, native hosts, arm64, public networks,
+These fixed-client imports and actual connections passed on local Linux amd64;
+the implementation plan records the evidence.
+Other client imports, native hosts, arm64, public networks,
 automatic TUIC client hopping, old-session drainage and complete Hy2/TUIC hopping remain `deferred`.
 
 The protocol menu's CDN address manager overrides client connection addresses for

@@ -1022,10 +1022,23 @@ runDockerPortHoppingRecoveryRealRegression() {
 }
 registerRegressionFunctionLeaf docker-port-hopping-recovery-real runDockerPortHoppingRecoveryRealRegression
 runDockerPortHoppingShareRealRegression() {
-    PADM_DOCKER_HOPPING_SHARE_ONLY=1 \
-        unshare --net bash "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh" &&
-        PADM_DOCKER_HOPPING_SHARE_ONLY=1 PADM_DOCKER_HOPPING_TUIC_ONLY=1 \
-            unshare --net bash "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh"
+    # 各场景独享 netns、daemon 与数据目录；沿用入口 Jobs，避免串行等待随机跳跃。
+    runParallelRegressionRunners "${TMP_DIR}/hopping-share-${BASHPID:-$$}" \
+        hy2-salamander runDockerPortHoppingShareSalamanderRealRegression \
+        hy2-gecko runDockerPortHoppingShareGeckoRealRegression \
+        tuic runDockerPortHoppingShareTuicRealRegression
+}
+runDockerPortHoppingShareSalamanderRealRegression() {
+    PADM_DOCKER_HOPPING_SHARE_ONLY=1 PADM_DOCKER_HOPPING_SHARE_OBFS=salamander \
+        unshare --net bash "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh"
+}
+runDockerPortHoppingShareGeckoRealRegression() {
+    PADM_DOCKER_HOPPING_SHARE_ONLY=1 PADM_DOCKER_HOPPING_SHARE_OBFS=gecko \
+        unshare --net bash "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh"
+}
+runDockerPortHoppingShareTuicRealRegression() {
+    PADM_DOCKER_HOPPING_SHARE_ONLY=1 PADM_DOCKER_HOPPING_TUIC_ONLY=1 \
+        unshare --net bash "${PROJECT_ROOT}/docker/tests/port-hopping-target-real.sh"
 }
 registerRegressionFunctionLeaf docker-port-hopping-share-real runDockerPortHoppingShareRealRegression
 registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
