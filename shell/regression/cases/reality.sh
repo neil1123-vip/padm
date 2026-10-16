@@ -845,6 +845,27 @@ runRealityTargetLocationRegression() (
         [[ "${pageOutput}" == *"location=London, United Kingdom"* ]]
         [[ ! -s "${pageLog}" ]]
         [[ "$(realityTargetResultField "$(<"${resultsFile}")" 16)" == "London, United Kingdom" ]]
+        (
+            local coloredOutput plainOutput noColorFlag
+            # 用真实渲染验证字段配色、重置和无色开关，避免菜单桩掩盖串色。
+            source "${PROJECT_ROOT}/shell/core/locale.sh"
+            unset PADM_NO_COLOR NO_COLOR
+            coloredOutput=$(showRealityTargetScanResults all once)
+            [[ "${coloredOutput}" == *$'\033[38;2;147;197;227mlocation-page.example.com:443\033[0m'* ]]
+            [[ "${coloredOutput}" == *$'\033[38;2;175;209;184mA | X25519MLKEM768=yes\033[0m'* ]]
+            [[ "${coloredOutput}" == *$'\033[38;2;221;201;157mcert=4096\033[0m'* ]]
+            [[ "${coloredOutput}" == *$'\033[38;2;175;209;184mTLS1.3=yes\033[0m'* ]]
+            [[ "${coloredOutput}" == *$'\033[38;2;195;180;226mAS64501 RemoteNet\033[0m'* ]]
+            [[ "${coloredOutput}" == *$'\033[38;2;226;179;157mLondon, United Kingdom\033[0m'* ]]
+            plainOutput=$(printf '%s' "${coloredOutput}" | sed $'s/\033\\[[0-9;]*m//g')
+            for noColorFlag in PADM_NO_COLOR NO_COLOR; do
+                printf -v "${noColorFlag}" '%s' 1
+                pageOutput=$(showRealityTargetScanResults all once)
+                [[ "${pageOutput}" != *$'\033'* && "${pageOutput}" == "${plainOutput}" ]]
+                unset "${noColorFlag}"
+            done
+            [[ ! -s "${pageLog}" ]]
+        )
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "legacy-page.example.com:443" "legacy-page.example.com" "Legacy" "test" "no" "192.0.2.231" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}" >"${resultsFile}"
         pageOutput=$(showRealityTargetScanResults all once)

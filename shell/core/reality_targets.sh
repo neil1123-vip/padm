@@ -2884,21 +2884,21 @@ showRealityTargetScanResults() {
         end=$(( page * pageSize ))
         (( end > total )) && end=${total}
         titleFilter=$(realityTargetFilterTitle "${filter}")
-        echoContent title "\n┌─ REALITY A 级目标：${titleFilter} ───────────────────────────────"
+        echoContent realityTitle "\n┌─ REALITY A 级目标：${titleFilter} ───────────────────────────────"
         menuLine "筛选条件：${filter}；第 ${page}/${maxPage} 页；总数：${total}；n 下一页；p 上一页；f 重新筛选；r 返回"
         pageIndex=1
         for ((itemIndex = start; itemIndex < end; itemIndex++)); do
             line=${filteredResults[itemIndex]}
             IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${line//$'\t'/$'\x1f'}"
             checkedTime=$(date -d "@${checkedAt}" "+%F %T" 2>/dev/null || printf '%s' "${checkedAt}")
-            menuItem "${pageIndex}" "${target}" "${score} | X25519MLKEM768=${pqc} | cert=${certLength} | TLS1.3=${tls13} | network=${networkMatch}"
-            menuLine "    cdn_risk=${cdnRisk} checked=${checkedTime} SNI=${sni} IP=${ip} ASN=${asn} ${asOrg}"
-            menuLine "    name=${name} category=${category} location=${location:-Unknown}"
-            [[ -n "${note}" ]] && menuLine "    ${note}"
+            menuItem "${pageIndex}" "$(uiStyle realityDomain "${target}")" "$(uiStyle realitySuccess "${score} | X25519MLKEM768=${pqc}") | $(uiStyle realityCertificate "cert=${certLength}") | $(uiStyle realitySuccess "TLS1.3=${tls13}") | network=${networkMatch}"
+            menuLine "    $(uiStyle realityMetadata "cdn_risk=${cdnRisk} checked=${checkedTime} SNI=${sni} IP=${ip} ASN=")$(uiStyle realityAsn "${asn} ${asOrg}")"
+            menuLine "    $(uiStyle realityMetadata "name=${name} category=${category} location=")$(uiStyle realityRegion "${location:-Unknown}")"
+            [[ -n "${note}" ]] && menuLine "    $(uiStyle realityVerification "${note}")"
             pageIndex=$((pageIndex + 1))
         done
         [[ "${total}" == "0" ]] && menuLine "当前筛选没有 A 级目标"
-        menuClose
+        PADM_STATUS_CARD_COLOR=realityTitle menuClose
         if [[ "${mode}" == "once" ]]; then
             return 0
         fi

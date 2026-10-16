@@ -38,6 +38,14 @@ uiColorCode() {
     "magenta" | "purple" | "section") printf '35' ;;
     "yellow" | "warn") printf '33' ;;
     "gray" | "muted") printf '90' ;;
+    "realityTitle") printf '38;2;139;203;200' ;;
+    "realityDomain") printf '38;2;147;197;227' ;;
+    "realitySuccess") printf '38;2;175;209;184' ;;
+    "realityCertificate") printf '38;2;221;201;157' ;;
+    "realityMetadata") printf '38;2;171;181;193' ;;
+    "realityVerification") printf '38;2;177;190;183' ;;
+    "realityRegion") printf '38;2;226;179;157' ;;
+    "realityAsn") printf '38;2;195;180;226' ;;
     *) return 1 ;;
     esac
 }
