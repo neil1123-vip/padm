@@ -31,7 +31,21 @@ def canonical(accounts):
                       sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
 
-def build_draft(spec, desired):
+def _managed_accounts(accounts, listeners, entries):
+    need_ss = any(entries[listener]["id"] == 30 for listener in listeners)
+    managed = []
+    for source in sorted(accounts, key=lambda account: account["id"]):
+        account = copy.deepcopy(source)
+        account["listeners"] = listeners.copy()
+        if not need_ss:
+            account["shadowsocks_password"] = None
+        elif account["shadowsocks_password"] is None:
+            raise ValueError("Shadowsocks 映射缺少账号凭据")
+        managed.append(account)
+    return managed
+
+
+def build_draft(spec, desired, listeners=None):
     exact_keys(desired, "ok api_version controller_id node_id revision accounts")
     if desired["ok"] is not True or type(desired["api_version"]) is not int or desired["api_version"] != API_VERSION:
         raise ValueError("同步响应版本不支持")
@@ -50,30 +64,31 @@ def build_draft(spec, desired):
     current_by_id = {account["id"]: account for account in current}
     if any(current_by_id.get(account["id"]) != account for account in previous):
         raise ValueError("受管账号已被本机修改，拒绝覆盖")
-    listeners = sync["listener_ids"]
+    previous_listeners = sync["listener_ids"]
     entries = {entry["listener_id"]: entry for entry in spec["core"]["protocols"]}
-    if not listeners or any(listener not in entries for listener in listeners):
+    if not previous_listeners or any(listener not in entries for listener in previous_listeners):
         raise ValueError("同步入口映射不存在")
-    if any(account["listeners"] != listeners for account in previous):
+    if any(account["listeners"] != previous_listeners for account in previous):
         raise ValueError("同步入口映射已改变")
+    if listeners is None:
+        listeners = previous_listeners
+    if (not isinstance(listeners, list) or not 1 <= len(listeners) <= 16
+            or any(not isinstance(listener, str) or listener not in entries for listener in listeners)
+            or len(set(listeners)) != len(listeners)):
+        raise ValueError("同步入口映射不合法")
     digest = hashlib.sha256(canonical(desired["accounts"])).hexdigest()
     if sync["last_revision"] is not None:
         if revision < sync["last_revision"]:
             raise ValueError("同步版本落后于已提交版本")
         if revision == sync["last_revision"] and digest != sync["last_digest"]:
             raise ValueError("同一同步版本的内容不一致")
-    need_ss = any(entries[listener]["id"] == 30 for listener in listeners)
-    managed = []
-    for source in sorted(desired["accounts"], key=lambda account: account["id"]):
-        account = copy.deepcopy(source)
-        account["listeners"] = listeners.copy()
-        if not need_ss:
-            account["shadowsocks_password"] = None
-        elif account["shadowsocks_password"] is None:
-            raise ValueError("Shadowsocks 映射缺少账号凭据")
-        managed.append(account)
-    if revision == sync["last_revision"] and managed != previous:
-        raise ValueError("同步归属与已提交内容不一致")
+    managed = _managed_accounts(desired["accounts"], listeners, entries)
+    mapping_changed = listeners != previous_listeners
+    if revision == sync["last_revision"]:
+        # 重映射也先验证旧快照，不能借更换入口覆盖已漂移的受管账号。
+        expected = _managed_accounts(desired["accounts"], previous_listeners, entries) if mapping_changed else managed
+        if expected != previous:
+            raise ValueError("同步归属与已提交内容不一致")
     owned_ids = {account["id"] for account in previous}
     local = [account for account in current if account["id"] not in owned_ids]
     # 不用覆盖解决碰撞；认证、身份与流量账目必须保持唯一。
@@ -92,7 +107,7 @@ def build_draft(spec, desired):
                 raise ValueError("同步账号与本机入口凭据冲突")
     if len(local) + len(managed) > 256:
         raise ValueError("同步后账号数量超过上限")
-    if revision == sync["last_revision"]:
+    if revision == sync["last_revision"] and not mapping_changed:
         # 本机新增账号可改变数组顺序；同版本重试不能因此重建服务。
         return copy.deepcopy(spec)
     draft = copy.deepcopy(spec)
@@ -100,7 +115,7 @@ def build_draft(spec, desired):
         draft["accounts"] = local + managed
     else:
         draft.pop("accounts", None)
-    draft["control_sync"].update(last_revision=revision, last_digest=digest,
+    draft["control_sync"].update(listener_ids=listeners.copy(), last_revision=revision, last_digest=digest,
                                  managed_accounts=copy.deepcopy(managed))
     return draft
 

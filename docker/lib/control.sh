@@ -1045,6 +1045,7 @@ dockerControlClientBuildDraft() {
 
 dockerControlClientApply() (
     local action=$1 invitation= yes=0 answer root spec draft= parent metadata mode status=0
+    local confirmation='确认接入主控并同步到选定入口？[y/N]: '
     local -a listeners=()
     shift
     while [[ "$#" -gt 0 ]]; do
@@ -1055,13 +1056,13 @@ dockerControlClientApply() (
             invitation=$2; shift 2
             ;;
         --listener)
-            [[ "${action}" == join && "$#" -ge 2 &&
+            [[ "${action}" != sync && "$#" -ge 2 &&
                 "$2" =~ ^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$ ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             listeners+=(--listener "$2"); shift 2
             ;;
         --yes)
-            [[ "${action}" == join && "${yes}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            [[ "${action}" != sync && "${yes}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
             yes=1; shift
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
@@ -1074,12 +1075,16 @@ dockerControlClientApply() (
         dockerError '邀请须为受管目录外的 root 私有普通文件，祖先目录不得可写或含链接'
         return "${PADM_DOCKER_RC_STATE}"
     }
-    if [[ "${action}" == join && "${yes}" != 1 ]]; then
+    if [[ "${action}" == remap ]]; then
+        listeners=(--remap "${listeners[@]}")
+        confirmation='确认在同一控制连接上替换受管账号的入口映射？[y/N]: '
+    fi
+    if [[ "${action}" != sync && "${yes}" != 1 ]]; then
         [[ -t 0 && -t 1 ]] || {
-            dockerError '接入被控角色需要 --yes 确认'
+            dockerError '接入或重映射被控角色需要 --yes 确认'
             return "${PADM_DOCKER_RC_USAGE}"
         }
-        dockerSetupRead answer '确认接入主控并同步到选定入口？[y/N]: ' n ||
+        dockerSetupRead answer "${confirmation}" n ||
             return "${PADM_DOCKER_RC_USAGE}"
         case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     fi
@@ -1112,6 +1117,13 @@ dockerControlClientApply() (
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
+    if [[ "${action}" == remap ]]; then
+        dockerControlSyncScheduleValidate "${root}" || return "${PADM_DOCKER_RC_STATE}"
+        [[ ! -d "${root}/secrets/control-sync" ]] || {
+            dockerError '重映射前请先停用被控账号自动同步，提交后用同连接邀请重新启用'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
+    fi
     draft=$(mktemp -d "${root}/.control-client.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
     chmod 0700 "${draft}" &&
         dockerControlInviteInputCheck "${invitation}" "${root}" &&
@@ -1134,7 +1146,13 @@ dockerControlClientApply() (
     fi
     DOCKER_CONTROL_SYNC_TRANSACTION=1
     dockerAccountApplyDraft "${draft}/next.json" || status=$?
-    [[ "${status}" -ne 0 ]] || printf '被控角色和账号同步已提交。\n'
+    if [[ "${status}" -eq 0 ]]; then
+        if [[ "${action}" == remap ]]; then
+            printf '被控账号入口映射已提交，主控身份和连接保持不变。\n'
+        else
+            printf '被控角色和账号同步已提交。\n'
+        fi
+    fi
     return "${status}"
 )
 
@@ -1386,6 +1404,7 @@ dockerControlCommand() {
     revoke) dockerControlRevoke "$@" ;;
     join) dockerControlJoin "$@" ;;
     sync) dockerControlSync "$@" ;;
+    remap) dockerControlClientApply remap "$@" ;;
     source-check) dockerControlSourceCheck "$@" ;;
     source-probe) dockerControlSourceProbe "$@" ;;
     log-rotate) dockerControlLogRotate "$@" ;;
@@ -1394,7 +1413,7 @@ dockerControlCommand() {
     sync-schedule) dockerControlSyncScheduleCommand "$@" ;;
     auto-sync) dockerControlAutoSync "$@" ;;
     *)
-        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex> | log-rotate [--yes] | log-schedule enable|disable [--yes] | log-schedule status | auto-log-rotate | sync-schedule enable --invite <私有文件> [--yes] | sync-schedule disable [--yes] | sync-schedule status | auto-sync'
+        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | remap --invite <同连接私有文件> --listener <入口 ID>... [--yes] | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex> | log-rotate [--yes] | log-schedule enable|disable [--yes] | log-schedule status | auto-log-rotate | sync-schedule enable --invite <私有文件> [--yes] | sync-schedule disable [--yes] | sync-schedule status | auto-sync'
         return "${PADM_DOCKER_RC_USAGE}"
         ;;
     esac

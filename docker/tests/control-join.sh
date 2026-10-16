@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
-TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-control-join.XXXXXX")
+TEST_ROOT=$(mktemp -d "${PROJECT_ROOT}/.tmp-control-join.XXXXXX")
 INVITE_ROOT=$(mktemp -d /root/.padm-control-join-test.XXXXXX)
 trap 'rm -rf -- "${TEST_ROOT}" "${INVITE_ROOT}"' EXIT
 trap 'printf "docker-control-join-fail: line %s, rc=%s, callers=%s\n" "${LINENO}" "$?" "${BASH_LINENO[*]}" >&2' ERR
@@ -147,7 +147,7 @@ dockerComposeExecute() {
 }
 docker() { :; }
 dockerRealityProbeRun() {
-    local previous= directory= argument
+    local previous= directory= argument remap=0
     local -a listeners=()
     [[ " $* " == *' --network host '* && " $* " == *' --user 0:0 '* &&
         " $* " == *' --log-driver none '* && " $* " == *' /opt/padm/control_client.py '* ]] || return 1
@@ -158,6 +158,7 @@ dockerRealityProbeRun() {
         elif [[ "${previous}" == --listener ]]; then
             listeners+=("${argument}")
         fi
+        [[ "${argument}" != --remap ]] || remap=1
         previous=${argument}
     done
     [[ -n "${directory}" && "$(stat -c '%a:%u' "${directory}")" == 700:0 &&
@@ -167,7 +168,7 @@ dockerRealityProbeRun() {
     if [[ -f "${TEST_ROOT}/interrupt-client" ]]; then
         kill -s "$(<"${TEST_ROOT}/interrupt-client")" "${BASHPID}"
     fi
-    python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" "${directory}" "${listeners[@]}" <<'PY'
+    python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" "${directory}" "${remap}" "${listeners[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -189,11 +190,13 @@ def desired(invitation):
 
 client.require_wireguard_address = address
 client.fetch_desired = desired
-listeners = sys.argv[4:]
+remap, listeners = sys.argv[4] == "1", sys.argv[5:]
 sys.argv = ["control_client.py", "--spec", str(directory / "spec.json"),
             "--invite", str(directory / "invite.json")]
 for listener in listeners:
     sys.argv.extend(("--listener", listener))
+if remap:
+    sys.argv.append("--remap")
 client.main()
 PY
 }
@@ -221,6 +224,10 @@ reject dockerControlCommand sync
 reject dockerControlCommand sync --invite "${invite}" --yes
 reject dockerControlCommand sync --invite "${invite}" --listener entry-reality
 reject dockerControlCommand sync --invite "${invite}" --invite "${invite}"
+reject dockerControlCommand remap
+reject dockerControlCommand remap --invite "${invite}" --yes
+reject dockerControlCommand remap --invite "${invite}" --listener entry-reality
+reject dockerControlCommand remap "${args[@]}" --yes
 [[ ! -f "${TEST_ROOT}/host.log" ]] || fail '参数错误触及宿主'
 
 for bad in relative.json "${root}/inside.json" "${INVITE_ROOT}/missing.json" "${INVITE_ROOT}//invite.json"; do
@@ -347,6 +354,78 @@ jq -e '.control_sync.last_revision == 8 and .accounts[0].name == "本机账号" 
   .accounts[1].name == "主控更新"' "${spec}" >/dev/null
 [[ "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
 check_clean
+
+# 同连接重映射复用候选事务；失败、自动同步和历史回滚不能改变已提交归属。
+(
+    cp -- "${spec}" "${TEST_ROOT}/before-remap.json"
+    jq '.core.protocols += [(.core.protocols[0] |
+      .listener_id = "entry-secondary" | .name = "secondary" | .public_port = 24443 |
+      .uuid = "77777777-7777-4777-8777-777777777777" |
+      .reality.private_key = ("C"*43) | .reality.public_key = ("D"*43))]' \
+        "${spec}" >"${TEST_ROOT}/remap-two-entries.json"
+    dockerConfigureApply "${TEST_ROOT}/remap-two-entries.json" >/dev/null
+    remapBefore=$(sha256sum "${spec}")
+    oldConnection=$(jq -c '.control_sync | {node_id,controller_id,connection,last_revision,last_digest}' "${spec}")
+    remapArgs=(--invite "${invite}" --listener entry-secondary --yes)
+    for mutation in '.controller_id = "77777777-7777-4777-8777-777777777777"' \
+        '.listen.port = 19443'; do
+        jq "${mutation}" "${invite}" >"${INVITE_ROOT}/remap-changed.json"
+        chmod 0600 "${INVITE_ROOT}/remap-changed.json"
+        reject dockerControlCommand remap --invite "${INVITE_ROOT}/remap-changed.json" \
+            --listener entry-secondary --yes
+    done
+    reject dockerControlCommand remap --invite "${invite}" --listener entry-missing --yes
+    # 登记本身先走生产校验；有自动同步时，重映射不得触发私网客户端。
+    mkdir -p "${root}/secrets/control-sync"
+    chmod 0700 "${root}/secrets/control-sync"
+    cp -- "${invite}" "${root}/secrets/control-sync/invite.json"
+    jq '.control_sync | {schema_version:1,enabled:true,node_id,controller_id,listener_ids,connection}' \
+        "${spec}" >"${root}/secrets/control-sync/request.json"
+    chmod 0600 "${root}/secrets/control-sync/"*.json
+    clientsBefore=$(wc -l <"${TEST_ROOT}/client.log")
+    reject dockerControlCommand remap "${remapArgs[@]}"
+    grep -Fq '重映射前请先停用被控账号自动同步' "${TEST_ROOT}/rejected.log"
+    [[ "$(wc -l <"${TEST_ROOT}/client.log")" == "${clientsBefore}" ]]
+    dockerRemoveManagedTree "${root}" "${root}/secrets/control-sync"
+    for marker in fail-client fail-up; do
+        touch "${TEST_ROOT}/${marker}"
+        reject dockerControlCommand remap "${remapArgs[@]}"
+        rm -f -- "${TEST_ROOT}/${marker}"
+        [[ "$(sha256sum "${spec}")" == "${remapBefore}" &&
+            "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
+        check_clean
+    done
+    for stage in client up; do
+        for signal in INT TERM; do
+            printf '%s\n' "${signal}" >"${TEST_ROOT}/interrupt-${stage}"
+            status=0
+            dockerControlCommand remap "${remapArgs[@]}" >"${TEST_ROOT}/remap-signal.log" 2>&1 || status=$?
+            [[ "${signal}:${status}" == INT:130 || "${signal}:${status}" == TERM:143 ]] ||
+                fail "重映射信号退出码错误: ${stage}:${signal}:${status}"
+            rm -f -- "${TEST_ROOT}/interrupt-${stage}"
+            [[ "$(sha256sum "${spec}")" == "${remapBefore}" &&
+                "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
+            [[ "$(tail -n 1 "${TEST_ROOT}/host.log")" == unlock ]]
+            check_clean
+        done
+    done
+    dockerControlCommand remap "${remapArgs[@]}" --listener entry-secondary >"${TEST_ROOT}/remap.log"
+    jq -e '.control_sync.listener_ids == ["entry-secondary"] and
+      .control_sync.managed_accounts[0].listeners == ["entry-secondary"] and
+      .accounts[1].listeners == ["entry-secondary"] and
+      .accounts[0].listeners == ["entry-reality"] and (.core.protocols | length) == 2' \
+        "${spec}" >/dev/null
+    [[ "$(jq -c '.control_sync | {node_id,controller_id,connection,last_revision,last_digest}' "${spec}")" == "${oldConnection}" &&
+        "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
+    upBefore=$(up_count)
+    dockerControlCommand remap "${remapArgs[@]}" >/dev/null
+    [[ "$(up_count)" == "${upBefore}" ]]
+    # 映射变化前的完整备份不能通过显式回滚恢复旧映射。
+    reject dockerControlSyncRollbackCheck "${DOCKER_CONFIG_BACKUP}"
+    dockerControlCommand remap --invite "${invite}" --listener entry-reality --yes >/dev/null
+    dockerConfigureApply "${TEST_ROOT}/before-remap.json" >/dev/null
+    check_clean
+)
 
 # 显式回滚不能降低已提交同步版本；普通失败/信号恢复已在前面验证。
 before=$(sha256sum "${spec}")

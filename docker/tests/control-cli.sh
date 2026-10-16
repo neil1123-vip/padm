@@ -25,6 +25,13 @@ reject() {
     [[ "${status}" -ne 0 ]] || fail "应拒绝: $*"
 }
 
+(
+    dockerControlClientApply() {
+        [[ "$*" == 'remap --invite /root/private.json --listener entry-main --yes' ]]
+    }
+    dockerControlCommand remap --invite /root/private.json --listener entry-main --yes
+)
+
 spec="${root}/config/spec.json"
 jq -n '{
   schema_version: 3,

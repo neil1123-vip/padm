@@ -115,9 +115,11 @@ def publish(value=DESIRED, *, status=200, headers=None, raw=None, delay=0):
     ]
 
 
-def cli(spec_path, invite_path, listeners=()):
+def cli(spec_path, invite_path, listeners=(), remap=False):
     stdout, stderr = io.StringIO(), io.StringIO()
     arguments = ["control_client.py", "--spec", str(spec_path), "--invite", str(invite_path)]
+    if remap:
+        arguments.append("--remap")
     for listener in listeners:
         arguments.extend(["--listener", listener])
     status = 0
@@ -160,6 +162,63 @@ try:
         assert multi_joined["accounts"] == SPEC["accounts"] + [mapped_account]
         assert multi_joined["core"] == multi_spec["core"]
         assert client.build_client_draft(multi_joined, INVITATION) == multi_joined
+        remapped = client.build_client_draft(
+            multi_joined, INVITATION, ["entry-main", "entry-main"], True)
+        assert remapped["control_sync"]["listener_ids"] == ["entry-main"]
+        assert remapped["control_sync"]["last_revision"] == multi_joined["control_sync"]["last_revision"]
+        assert remapped["control_sync"]["last_digest"] == multi_joined["control_sync"]["last_digest"]
+        assert remapped["accounts"] == joined["accounts"]
+        assert remapped["core"] == multi_joined["core"]
+        assert client.build_client_draft(remapped, INVITATION, ["entry-main"], True) == remapped
+        assert multi_spec == multi_original
+
+        ss_spec = copy.deepcopy(multi_spec)
+        ss_spec["core"]["protocols"].append({
+            "listener_id": "entry-ss", "id": 30, "uuid": identity(11),
+            "shadowsocks": {"server_password": "AgICAgICAgICAgICAgICAg=="},
+        })
+        ss_desired = copy.deepcopy(DESIRED)
+        ss_desired["accounts"][0]["shadowsocks_password"] = "AQEBAQEBAQEBAQEBAQEBAQ=="
+        ss_original, invite_original = copy.deepcopy(ss_desired), copy.deepcopy(INVITATION)
+        publish(ss_desired)
+        ss_joined = client.build_client_draft(ss_spec, INVITATION, ["entry-main"])
+        ss_joined["traffic"] = {"unrelated": "unchanged"}
+        assert ss_joined["accounts"][1]["shadowsocks_password"] is None
+        ss_remapped = client.build_client_draft(ss_joined, INVITATION, ["entry-ss", "entry-secondary"], True)
+        assert ss_remapped["control_sync"]["listener_ids"] == ["entry-ss", "entry-secondary"]
+        assert ss_remapped["accounts"][1]["shadowsocks_password"] == ss_desired["accounts"][0]["shadowsocks_password"]
+        assert ss_remapped["accounts"][0] == ss_joined["accounts"][0]
+        assert ss_remapped["core"] == ss_joined["core"] and ss_remapped["traffic"] == ss_joined["traffic"]
+        assert client.build_client_draft(ss_remapped, INVITATION, ["entry-ss", "entry-secondary"], True) == ss_remapped
+        ss_removed = client.build_client_draft(ss_remapped, INVITATION, ["entry-main"], True)
+        assert ss_removed == ss_joined
+        assert ss_desired == ss_original and INVITATION == invite_original
+
+        for section in ("accounts", "snapshot", "mapping"):
+            drift = copy.deepcopy(ss_joined)
+            if section == "mapping":
+                drift["control_sync"]["listener_ids"] = ["entry-secondary"]
+            else:
+                drift["accounts"][1]["password"] += "changed"
+                if section == "snapshot":
+                    drift["control_sync"]["managed_accounts"][0]["password"] += "changed"
+            rejected(client.build_client_draft, drift, INVITATION, ["entry-ss"], True)
+        for request in (dict(ss_desired, revision=6), DESIRED):
+            publish(request)
+            rejected(client.build_client_draft, ss_joined, INVITATION, ["entry-ss"], True)
+        publish()
+        rejected(client.build_client_draft, multi_joined, INVITATION, ["entry-ss"], True)
+        ss_missing = client.build_client_draft(ss_spec, INVITATION, ["entry-main"])
+        rejected(client.build_client_draft, ss_missing, INVITATION, ["entry-ss"], True)
+        publish(ss_desired)
+        for section in ("accounts", "core"):
+            collision = copy.deepcopy(ss_joined)
+            if section == "accounts":
+                collision["accounts"][0]["shadowsocks_password"] = ss_desired["accounts"][0]["shadowsocks_password"]
+            else:
+                collision["core"]["protocols"][-1]["shadowsocks"]["server_password"] = ss_desired["accounts"][0]["shadowsocks_password"]
+            rejected(client.build_client_draft, collision, INVITATION, ["entry-ss"], True)
+        publish()
         path, address, headers = server.requests[-1]
         assert path == "/v1/desired" and address == "127.0.0.2"
         assert headers.get_all("Authorization") == ["Bearer " + INVITATION["token"]]
@@ -199,6 +258,10 @@ try:
             rejected(client.build_client_draft, SPEC, invitation, ["entry-main"])
         for listeners in ([], ["entry-missing"], [None]):
             rejected(client.build_client_draft, SPEC, INVITATION, listeners)
+            rejected(client.build_client_draft, multi_joined, INVITATION, listeners, True)
+        rejected(client.build_client_draft, multi_joined, INVITATION, None, True)
+        rejected(client.build_client_draft, multi_joined, INVITATION, ["entry-main"])
+        rejected(client.build_client_draft, SPEC, INVITATION, ["entry-main"], True)
         for role in ("control", "control_sync"):
             occupied = copy.deepcopy(SPEC)
             occupied[role] = {}
@@ -209,6 +272,7 @@ try:
             drift = copy.deepcopy(joined)
             drift["control_sync"][field] = value
             rejected(client.build_client_draft, drift, INVITATION)
+            rejected(client.build_client_draft, drift, INVITATION, ["entry-main"], True)
         for section, field, value in (("listen", "port", 18081), ("listen", "port", 18080.0),
                                       ("listen", "address", "10.77.0.3"),
                                       (None, "peer_address", "10.77.0.3")):
@@ -216,6 +280,7 @@ try:
             connection = drift["control_sync"]["connection"]
             (connection[section] if section else connection)[field] = value
             rejected(client.build_client_draft, drift, INVITATION)
+            rejected(client.build_client_draft, drift, INVITATION, ["entry-main"], True)
         legacy = copy.deepcopy(joined)
         del legacy["control_sync"]["connection"]
         rejected(client.build_client_draft, legacy, INVITATION)
@@ -307,6 +372,15 @@ try:
             status, output, errors = cli(spec_path, invite_path, ["entry-secondary", "entry-main"])
             assert status == 0 and json.loads(output) == multi_joined and not errors
             assert spec_path.read_bytes() == source
+            save(spec_path, multi_joined)
+            source = spec_path.read_bytes()
+            status, output, errors = cli(spec_path, invite_path, ["entry-main", "entry-main"], True)
+            assert status == 0 and json.loads(output) == remapped and not errors
+            assert spec_path.read_bytes() == source and INVITATION["token"] not in output
+            for listeners in ([], ["entry-missing"], [INVITATION["token"]]):
+                status, output, errors = cli(spec_path, invite_path, listeners, True)
+                assert status == 78 and not output and errors
+                assert spec_path.read_bytes() == source and INVITATION["token"] not in errors
             save(spec_path, joined)
             source = spec_path.read_bytes()
             assert cli(spec_path, invite_path)[0] == 0

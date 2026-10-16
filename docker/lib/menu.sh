@@ -1123,7 +1123,8 @@ dockerMenuControl() {
         printf '%s\n' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' '4. 撤销授权' \
             '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' \
             '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
-            '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' '0. 返回'
+            '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
+            '15. 重映射受管账号入口（同连接）' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1147,7 +1148,11 @@ dockerMenuControl() {
             dockerMenuRun control invite --output "${output}" --expires-in "${expiry}" || true
             ;;
         4) dockerMenuRun control revoke || true ;;
-        5)
+        5|15)
+            if [[ "${choice}" == 15 ]]; then
+                printf '仅替换当前主控连接的入口映射；请先停用自动同步。\n'
+                dockerMenuRun protocol list || continue
+            fi
             dockerSetupRead invitation '私有邀请文件绝对路径（0 返回）: ' &&
                 [[ -n "${invitation}" ]] &&
                 dockerSetupRead listeners '映射入口 ID（逗号分隔，最多 16 项，0 返回）: ' &&
@@ -1158,6 +1163,7 @@ dockerMenuControl() {
                 continue
             fi
             action=(control join --invite "${invitation}")
+            [[ "${choice}" != 15 ]] || action=(control remap --invite "${invitation}")
             for listener in "${listenerIds[@]}"; do
                 [[ "${listener}" =~ ^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$ ]] || {
                     printf '映射入口 ID 无效或含空项。\n'

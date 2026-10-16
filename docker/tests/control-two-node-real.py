@@ -186,7 +186,10 @@ def main():
             local = dict(account(3), listeners=["entry-main"])
             spec = {
                 "schema_version": 3,
-                "core": {"protocols": [{"listener_id": "entry-main", "id": 1, "uuid": identity(9)}]},
+                "core": {"protocols": [
+                    {"listener_id": "entry-main", "id": 1, "uuid": identity(9)},
+                    {"listener_id": "entry-secondary", "id": 1, "uuid": identity(10)},
+                ]},
                 "accounts": [local],
             }
             state_path, spec_path, invite_path = [work / name for name in ("state.json", "spec.json", "invite.json")]
@@ -291,7 +294,7 @@ def main():
                 "receipt_inode_unchanged": True, "api_not_restarted": True,
             }
 
-            def client(*, join=False, accepted=True):
+            def client(*, join=False, remap=None, accepted=True):
                 before = spec_path.read_bytes(), invite_path.read_bytes()
                 arguments = ["setpriv", "--bounding-set=-all", "--inh-caps=-all",
                              "--ambient-caps=-all", "--", sys.executable,
@@ -299,13 +302,15 @@ def main():
                              "--spec", str(spec_path), "--invite", str(invite_path)]
                 if join:
                     arguments += ["--listener", "entry-main"]
+                if remap is not None:
+                    arguments += ["--remap", "--listener", remap]
                 result = subprocess.run(namespace(controlled) + arguments, capture_output=True, timeout=7)
                 with client_log.open("ab") as output:
                     output.write(result.stderr)
                 assert before == (spec_path.read_bytes(), invite_path.read_bytes()), "客户端改写了规划输入"
                 if not accepted:
                     assert result.returncode == 78 and not result.stdout, "异常同步未安全拒绝"
-                    assert result.stderr == "被控接入或同步输入无效、授权失配或网络响应不支持\n".encode()
+                    assert result.stderr == "被控接入、同步或重映射输入无效、授权失配或网络响应不支持\n".encode()
                     return None
                 assert result.returncode == 0 and not result.stderr, "真实客户端规划失败"
                 draft = json.loads(result.stdout)
@@ -323,6 +328,17 @@ def main():
             # 仅把规划草稿作为下次输入；不冒充 Compose 应用、备份或双机服务健康验收。
             save(spec_path, joined)
             assert client() == joined, "同版本重试不是幂等规划"
+            remapped = client(remap="entry-secondary")
+            expected = copy.deepcopy(joined)
+            expected["accounts"][1]["listeners"] = ["entry-secondary"]
+            expected["control_sync"]["listener_ids"] = ["entry-secondary"]
+            expected["control_sync"]["managed_accounts"][0]["listeners"] = ["entry-secondary"]
+            assert remapped == expected, "同连接重映射改变了身份、版本或本机配置"
+            save(spec_path, remapped)
+            assert client(remap="entry-secondary") == remapped, "同版本重映射不是幂等规划"
+            assert client() == remapped, "重映射后普通同步未沿用新入口"
+            assert client(remap="entry-main") == joined, "同版本不能安全恢复原入口映射"
+            save(spec_path, joined)
             state.update(revision=8, accounts=[dict(account(4), enabled=False), account(5)])
             save(state_path, state, api=True)
             advanced = client()
@@ -335,6 +351,7 @@ def main():
             state["peer"]["token_sha256"] = hashlib.sha256(rotated.encode()).hexdigest()
             save(state_path, state, api=True)
             client(accepted=False)
+            client(remap="entry-secondary", accepted=False)
             invitation["token"] = rotated
             save(invite_path, invitation)
             assert client() == advanced, "轮换邀请不能保留已有同步版本"
@@ -356,6 +373,7 @@ def main():
             state["revision"] = 7
             save(state_path, state, api=True)
             client(accepted=False)
+            client(remap="entry-secondary", accepted=False)
             state["revision"] = 8
             state["accounts"][0]["name"] = "同版本冲突"
             save(state_path, state, api=True)
@@ -380,6 +398,10 @@ def main():
                     "恢复后控制流量未经过真实 WireGuard"
                 final_counters.append(after)
             evidence["wireguard"] = dict(zip(("controller", "controlled"), final_counters))
+            evidence["remap"] = {
+                "same_connection_revision": True, "idempotent": True, "sync_uses_new_mapping": True,
+                "local_inputs_unchanged": True, "old_token_and_revision_rejected": True,
+            }
 
             save(spec_path, recovered)
             desired_path = work / "desired.json"
@@ -433,7 +455,7 @@ def main():
             auth_log.chmod(0o640)
             logs = b"".join(path.read_bytes() for path in (api_log, client_log, sync_log))
             logs += auth_log.read_bytes() + failure_log.read_bytes()
-            secrets = [token, rotated, identity(9)] + [
+            secrets = [token, rotated, identity(9), identity(10)] + [
                 value for number in (3, 4, 5) for value in (account(number)["password"], account(number)["uuid"])
             ]
             secrets += [path.read_text().strip() for path in keys]

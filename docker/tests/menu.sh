@@ -1439,18 +1439,20 @@ runControlDriver() {
         targetReply 'Docker 管理菜单' $'0\n'
         return 0
         ;;
-    join-mapping-invalid|join-mapping-eof)
-        if [[ "${scenario}" == join-mapping-invalid ]]; then
+    join-mapping-invalid|join-mapping-eof|remap-mapping-invalid|remap-mapping-eof)
+        controlChoice=5
+        [[ "${scenario}" != remap-* ]] || controlChoice=15
+        if [[ "${scenario}" == *-mapping-invalid ]]; then
             printf -v overLimit 'entry-%s,' {1..17}
             overLimit=${overLimit%,}
             for listenerInput in ',entry-reality' 'entry-reality,' 'entry-reality,,entry-secondary' \
                 'entry-reality,invalid' 'entry-reality, entry-secondary' "${overLimit}"; do
-                targetReply 'Docker 控制连接' $'5\n'
+                targetReply 'Docker 控制连接' "${controlChoice}"$'\n'
                 targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
                 targetReply '映射入口 ID（逗号分隔，最多 16 项，0 返回）' "${listenerInput}"$'\n'
             done
         else
-            targetReply 'Docker 控制连接' $'5\n'
+            targetReply 'Docker 控制连接' "${controlChoice}"$'\n'
             targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
             targetReply '映射入口 ID（逗号分隔，最多 16 项，0 返回）' $'\004'
         fi
@@ -1458,25 +1460,27 @@ runControlDriver() {
         targetReply 'Docker 管理菜单' $'0\n'
         return 0
         ;;
-    join|join-multiple|join-cancel|join-eof|sync|sync-cancel|sync-eof|sync-failed)
-        if [[ "${scenario}" == join* ]]; then
-            if [[ "${scenario}" == join-cancel ]]; then
-                targetReply 'Docker 控制连接' $'5\n'
+    join|join-multiple|join-cancel|join-eof|remap|remap-multiple|remap-cancel|remap-eof|remap-failed|sync|sync-cancel|sync-eof|sync-failed)
+        if [[ "${scenario}" == join* || "${scenario}" == remap* ]]; then
+            controlChoice=5
+            [[ "${scenario}" != remap* ]] || controlChoice=15
+            if [[ "${scenario}" == *-cancel ]]; then
+                targetReply 'Docker 控制连接' "${controlChoice}"$'\n'
                 targetReply '私有邀请文件绝对路径（0 返回）' $'0\n'
                 for listenerInput in 0 ''; do
-                    targetReply 'Docker 控制连接' $'5\n'
+                    targetReply 'Docker 控制连接' "${controlChoice}"$'\n'
                     targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
                     targetReply '映射入口 ID（逗号分隔，最多 16 项，0 返回）' "${listenerInput}"$'\n'
                 done
             fi
-            targetReply 'Docker 控制连接' $'5\n'
+            targetReply 'Docker 控制连接' "${controlChoice}"$'\n'
             targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
             listenerInput=entry-reality
-            [[ "${scenario}" != join-multiple ]] || listenerInput=entry-secondary,entry-reality
+            [[ "${scenario}" != *-multiple ]] || listenerInput=entry-secondary,entry-reality
             targetReply '映射入口 ID（逗号分隔，最多 16 项，0 返回）' "${listenerInput}"$'\n'
             case "${scenario}" in
-            join-cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
-            join-eof) targetReply 'fixture-control-confirm [y/N]' $'\004' ;;
+            *-cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
+            *-eof) targetReply 'fixture-control-confirm [y/N]' $'\004' ;;
             *) targetReply 'fixture-control-confirm [y/N]' $'y\n' ;;
             esac
         else
@@ -1487,7 +1491,7 @@ runControlDriver() {
             *) targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n' ;;
             esac
         fi
-        if [[ "${scenario}" == sync-failed ]]; then
+        if [[ "${scenario}" == *-failed ]]; then
             targetReply 'Docker 控制连接' $'1\n'
         fi
         targetReply 'Docker 控制连接' $'0\n'
@@ -3548,8 +3552,8 @@ control)
         [[ "${CONTROL_SYNC_SCHEDULE_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_SYNC_SCHEDULE_STATUS}"
         recordAction control-sync-schedule-commit "$3"
         ;;
-    init|invite|revoke|join)
-        if [[ "$2" == join ]]; then
+    init|invite|revoke|join|remap)
+        if [[ "$2" == join || "$2" == remap ]]; then
             [[ "$3" == --invite && "$4" == /root/padm-invite.json && "$5" == --listener &&
                 ( ( "$#" -eq 6 && "$6" == entry-reality ) ||
                   ( "$#" -eq 8 && "$6" == entry-secondary && "$7" == --listener && "$8" == entry-reality ) ) ]] ||
@@ -4605,7 +4609,8 @@ runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
 for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
     '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' \
     '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
-    '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' '0. 返回'; do
+    '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
+    '15. 重映射受管账号入口（同连接）' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -4657,27 +4662,31 @@ for controlCase in invite invite-cancel invite-eof revoke revoke-cancel; do
 done
 
 for controlCase in join join-multiple join-cancel join-eof join-mapping-invalid join-mapping-eof \
+    remap remap-multiple remap-cancel remap-eof remap-mapping-invalid remap-mapping-eof remap-failed \
     sync sync-cancel sync-eof sync-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export CONTROL_INIT_STATUS=0
-    [[ "${controlCase}" != sync-failed ]] || CONTROL_INIT_STATUS=17
+    [[ "${controlCase}" != *-failed ]] || CONTROL_INIT_STATUS=17
     runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
     expectedControl=
     case "${controlCase}" in
-    join-mapping-*)
+    join-mapping-*|remap-mapping-*)
         ! grep -Fq 'fixture-control-confirm [y/N]' "${CONTROL_LOG}" ||
             fail "control ${controlCase} dispatched a rejected mapping"
-        [[ "${controlCase}" != join-mapping-invalid ]] ||
+        [[ "${controlCase}" != *-mapping-invalid ]] ||
             [[ "$(grep -Ec '映射入口.*(无效|有效 ID)' "${CONTROL_LOG}")" -eq 6 ]] ||
             fail '无效映射未全部返回菜单'
         ;;
-    join*)
-        expectedControl='control join --invite /root/padm-invite.json --listener entry-reality'
-        [[ "${controlCase}" != join-multiple ]] ||
-            expectedControl='control join --invite /root/padm-invite.json --listener entry-secondary --listener entry-reality'
+    join*|remap*)
+        controlAction=join
+        [[ "${controlCase}" != remap* ]] || controlAction=remap
+        expectedControl="control ${controlAction} --invite /root/padm-invite.json --listener entry-reality"
+        [[ "${controlCase}" != *-multiple ]] ||
+            expectedControl="control ${controlAction} --invite /root/padm-invite.json --listener entry-secondary --listener entry-reality"
         case "${controlCase}" in
-        join-cancel) expectedControl+=$'\ncontrol-confirm n' ;;
-        join-eof) expectedControl+=$'\ncontrol-confirm eof' ;;
+        *-cancel) expectedControl+=$'\ncontrol-confirm n' ;;
+        *-eof) expectedControl+=$'\ncontrol-confirm eof' ;;
+        *-failed) expectedControl+=$'\ncontrol-confirm y\ncontrol status' ;;
         *) expectedControl+=$'\ncontrol-confirm y\ncontrol-commit' ;;
         esac
         [[ "$(grep -Fc 'fixture-control-confirm [y/N]' "${CONTROL_LOG}")" -eq 1 ]] ||
@@ -4689,6 +4698,21 @@ for controlCase in join join-multiple join-cancel join-eof join-mapping-invalid 
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed control sync was not reported'
         ;;
     esac
+    if [[ "${controlCase}" == remap* ]]; then
+        remapLists=1
+        case "${controlCase}" in
+        remap-cancel) remapLists=4 ;;
+        remap-mapping-invalid) remapLists=6 ;;
+        esac
+        [[ "$(grep -cxF 'protocol list' "${TLS_WIZARD_ACTIONS}")" -eq "${remapLists}" ]] ||
+            fail "control ${controlCase} 未在录入前列出可用入口"
+        grep -Fq '仅替换当前主控连接的入口映射；请先停用自动同步。' "${CONTROL_LOG}" ||
+            fail '重映射菜单未说明连接和自动同步边界'
+        expectedLists=
+        for ((index=0; index<remapLists; index++)); do expectedLists+=$'protocol list\n'; done
+        expectedControl="${expectedLists}${expectedControl}"
+        expectedControl=${expectedControl%$'\n'}
+    fi
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
         fail "control ${controlCase} dispatched incorrect arguments or committed after cancellation"
     if [[ "${controlCase}" == sync* ]]; then

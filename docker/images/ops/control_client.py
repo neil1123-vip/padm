@@ -184,15 +184,18 @@ def _existing_sync(spec, invitation):
     return spec
 
 
-def build_client_draft(spec, invitation, listeners=None):
+def build_client_draft(spec, invitation, listeners=None, remap=False):
     invitation = validate_invitation(invitation)
     spec = copy.deepcopy(spec)
-    if listeners is not None:
+    if remap:
+        spec = _existing_sync(spec, invitation)
+        listeners = _mapping(spec, listeners)
+    elif listeners is not None:
         spec = _new_sync(spec, invitation, listeners)
     else:
         spec = _existing_sync(spec, invitation)
     desired = fetch_desired(invitation)
-    return build_draft(spec, desired)
+    return build_draft(spec, desired, listeners if remap else None)
 
 
 def main():
@@ -200,16 +203,17 @@ def main():
     parser.add_argument("--spec", required=True)
     parser.add_argument("--invite", required=True)
     parser.add_argument("--listener", action="append")
+    parser.add_argument("--remap", action="store_true")
     args = parser.parse_args()
     try:
         spec = read_input(args.spec, 16 * MAX_STATE_BYTES)
         invitation = read_input(args.invite, MAX_STATE_BYTES)
-        draft = build_client_draft(spec, invitation, args.listener)
+        draft = build_client_draft(spec, invitation, args.listener, args.remap)
         json.dump(draft, sys.stdout, ensure_ascii=True, separators=(",", ":"))
         sys.stdout.write("\n")
     except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError, http.client.HTTPException):
         # 输入和授权材料含凭据，失败时只返回状态码，不把原文写入普通输出。
-        parser.exit(78, "被控接入或同步输入无效、授权失配或网络响应不支持\n")
+        parser.exit(78, "被控接入、同步或重映射输入无效、授权失配或网络响应不支持\n")
 
 
 if __name__ == "__main__":
