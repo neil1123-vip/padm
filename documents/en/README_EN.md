@@ -1459,8 +1459,9 @@ failures and INT/TERM roll back this restore. After registration, SIGKILL recove
 with menu `18 → 10` or `restore recover`. Ordinary deployment operations refuse pending cleanup.
 Failed recovery preserves evidence; external schedule changes are rejected rather than overwritten.
 Committed transactions only clean staging on retry and do not stop the deployment.
-A hard kill before registration, commit metadata publication or schedule snapshot publication can leave
-unregistered staging that requires inspection and manual cleanup; automatic cleanup of these windows remains pending.
+Commit metadata and schedule source/build staging use fixed private paths inside the registration.
+Partial writes or a hard kill can be cleaned by rollback or committed-cleanup retries; partial metadata never proves a commit.
+A hard kill before registration publication can still leave unregistered staging that requires inspection and manual cleanup; it is not adopted automatically.
 Existing-deployment replacement, other persistent inputs, role migration, native fresh-host checks
 and complete disaster recovery remain deferred.
 

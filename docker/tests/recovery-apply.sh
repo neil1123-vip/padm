@@ -116,6 +116,44 @@ crontab() {
     *) return 1 ;;
     esac
 }
+kill_restore_owner() {
+    : >"${MOCK_BACKEND}/fault"
+    kill -KILL "${DOCKER_TEST_OWNER}"
+    exit 137
+}
+mkdir() {
+    command mkdir "$@" || return $?
+    if [[ "${MODE}" == source-mkdir &&
+        "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/traffic-source" ]]; then
+        kill_restore_owner
+    fi
+}
+cat() {
+    local line
+    if [[ "${MODE}" == source-unit && ! -e "${MOCK_BACKEND}/fault" &&
+        "$#" == 2 && "$1" == -- &&
+        "$2" == "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.service" &&
+        -d "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/traffic-source" ]]; then
+        IFS= read -r line <"$2" || return 1
+        builtin printf '%s\n' "${line}"
+        kill_restore_owner
+    fi
+    if [[ "${MODE}" == source-template && ! -e "${MOCK_BACKEND}/fault" && "$#" == 0 &&
+        -d "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/traffic-schedule" ]]; then
+        IFS= read -r line || return 1
+        builtin printf '%s\n' "${line}"
+        kill_restore_owner
+    fi
+    command cat "$@"
+}
+printf() {
+    if [[ "${MODE}" == source-cron && ! -e "${MOCK_BACKEND}/fault" &&
+        -f "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/traffic-source/crontab" ]]; then
+        builtin printf '%s' '# partial cron snapshot'
+        kill_restore_owner
+    fi
+    builtin printf "$@"
+}
 mv() {
     local last=${!#} argument
     if [[ "${MODE}" == first-write && "${last}" == "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" ]]; then
@@ -290,6 +328,7 @@ PY
 schedule_snapshot() {
     find "${PADM_DOCKER_SYSTEMD_DIR}" -type f -print0 | sort -z | xargs -0 -r sha256sum
     cat -- "${MOCK_BACKEND}/crontab"
+    [[ "${1:-}" != content ]] || return 0
     for state in enabled active; do
         [[ ! -e "${MOCK_BACKEND}/${state}" ]] || printf '%s\n' "${state}"
     done
@@ -431,6 +470,37 @@ for backend in systemd cron; do
         rm -f -- "${dropin}/override.conf"
         rmdir -- "${dropin}"
     fi
+    run_child recover ok 0
+    assert_empty
+done
+
+# 创建或复制原始快照时硬杀，恢复不得遗留锁下随机目录或触碰旧调度。
+for mode in source-mkdir source-unit source-cron source-template; do
+    backend=systemd
+    [[ "${mode}" != source-cron ]] || backend=cron
+    prepare_target "${mode}" "${backend}"
+    dockerTrafficScheduleInstall || fail "${mode}: 旧调度准备失败"
+    snapshot >"${MOCK_BACKEND}/before"
+    schedule_snapshot >"${MOCK_BACKEND}/schedule-before"
+    schedule_snapshot content >"${MOCK_BACKEND}/schedule-content-before"
+    run_child apply "${mode}" 137
+    source_snapshot="${root}/.restore-pending/traffic-source"
+    [[ -e "${MOCK_BACKEND}/fault" && -d "${source_snapshot}" &&
+        "$(stat -c '%u:%g:%a' "${source_snapshot}")" == 0:0:700 &&
+        -z "$(find "${source_snapshot}" -type f ! -perm 0600 -print -quit)" ]] ||
+        fail "${mode}: 硬杀未命中私密原始快照"
+    if [[ "${mode}" == source-template ]]; then
+        [[ -s "${source_snapshot}/new.service" ]] &&
+            jq -e '.snapshot == "traffic-source"' \
+                "${root}/.restore-pending/traffic-schedule/metadata.json" >/dev/null ||
+            fail '模板首写前没有持久保存旧调度'
+    else
+        [[ ! -e "${root}/.restore-pending/traffic-schedule" ]] ||
+            fail "${mode}: 没有在快照保存前硬杀"
+    fi
+    schedule_snapshot content >"${MOCK_BACKEND}/schedule-after-kill"
+    cmp -- "${MOCK_BACKEND}/schedule-content-before" "${MOCK_BACKEND}/schedule-after-kill" ||
+        fail "${mode}: 快照复制或模板暂存改变了外部调度"
     run_child recover ok 0
     assert_empty
 done

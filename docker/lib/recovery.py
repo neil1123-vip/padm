@@ -41,9 +41,14 @@ TREES = {
 TRANSACTION = ".restore-pending"
 TRANSACTION_CLEANING = ".restore-cleaning"
 TRANSACTION_METADATA = "metadata.json"
+TRANSACTION_NEXT = "metadata.next"
 TRANSACTION_DIRECTORIES = ("config", "data", "secrets", "logs", "backups")
 TRANSACTION_FILES = ("compose.json", "images.env", "deployment.json")
 SCHEDULE_FILES = ("padm-docker-traffic.service", "padm-docker-traffic.timer", "crontab")
+TRANSACTION_STAGING = {
+    "traffic-source": set(SCHEDULE_FILES) | {"new.service", "new.timer"},
+    "traffic-building": set(SCHEDULE_FILES) | {TRANSACTION_METADATA},
+}
 MAX_TRANSACTION_FILE = 16 * 1024 * 1024
 MAX_TRANSACTION_METADATA = 64 * 1024
 
@@ -560,12 +565,29 @@ def transaction_schedule(directory_fd, root, project):
                 and metadata["root"] == root and metadata["project"] == project)
         transaction_path(metadata["unit_dir"])
         require(isinstance(metadata["snapshot"], str)
-                and re.fullmatch(r"traffic-schedule\.[A-Za-z0-9]{6}", metadata["snapshot"]))
+                and (metadata["snapshot"] == "traffic-source"
+                     or re.fullmatch(r"traffic-schedule\.[A-Za-z0-9]{6}", metadata["snapshot"])))
         require(all(type(metadata[key]) is int and metadata[key] in (0, 1)
                     for key in ("systemd_ready", "timer_enabled", "timer_active")))
         transaction_validate_files(schedule_fd, metadata["files"], SCHEDULE_FILES, required=False)
         require(set(os.listdir(schedule_fd)) == {TRANSACTION_METADATA} | set(metadata["files"]))
         return metadata
+
+
+def transaction_staging(directory_fd):
+    names = set(os.listdir(directory_fd))
+    if TRANSACTION_NEXT in names:
+        transaction_read(directory_fd, TRANSACTION_NEXT, limit=MAX_TRANSACTION_METADATA)
+    for name, files in TRANSACTION_STAGING.items():
+        if name not in names:
+            continue
+        with transaction_directory(directory_fd, name) as fd:
+            entries = set(os.listdir(fd))
+            require(entries <= files)
+            for entry in entries:
+                transaction_read(fd, entry, limit=MAX_TRANSACTION_METADATA
+                                 if entry == TRANSACTION_METADATA else MAX_TRANSACTION_FILE)
+    return names & ({TRANSACTION_NEXT} | set(TRANSACTION_STAGING))
 
 
 def transaction_validate(directory_fd, root, project):
@@ -584,8 +606,9 @@ def transaction_validate(directory_fd, root, project):
     transaction_validate_directories(metadata["directories"])
     transaction_validate_files(directory_fd, metadata["files"], TRANSACTION_FILES)
     schedule = transaction_schedule(directory_fd, root, project)
+    staging = transaction_staging(directory_fd)
     require(set(os.listdir(directory_fd)) == {TRANSACTION_METADATA} | set(TRANSACTION_FILES)
-            | ({"traffic-schedule"} if schedule is not None else set()))
+            | ({"traffic-schedule"} if schedule is not None else set()) | staging)
     return metadata, schedule
 
 
@@ -604,19 +627,23 @@ def transaction_reap(root_fd):
         return False
     with transaction_directory(root_fd, TRANSACTION_CLEANING) as fd:
         names = set(os.listdir(fd))
-        require(names <= {TRANSACTION_METADATA, "traffic-schedule"} | set(TRANSACTION_FILES))
-        for name in names - {"traffic-schedule"}:
+        directories = {"traffic-schedule"} | set(TRANSACTION_STAGING)
+        require(names <= {TRANSACTION_METADATA, TRANSACTION_NEXT} | directories | set(TRANSACTION_FILES))
+        for name in names - directories:
             transaction_read(fd, name, limit=MAX_TRANSACTION_METADATA
-                             if name == TRANSACTION_METADATA else MAX_TRANSACTION_FILE)
-        if "traffic-schedule" in names:
-            with transaction_directory(fd, "traffic-schedule") as schedule_fd:
+                             if name in (TRANSACTION_METADATA, TRANSACTION_NEXT) else MAX_TRANSACTION_FILE)
+        for directory in names & directories:
+            with transaction_directory(fd, directory) as schedule_fd:
                 entries = set(os.listdir(schedule_fd))
-                require(entries <= {TRANSACTION_METADATA} | set(SCHEDULE_FILES))
+                allowed_files = (TRANSACTION_STAGING[directory] if directory in TRANSACTION_STAGING
+                                 else {TRANSACTION_METADATA} | set(SCHEDULE_FILES))
+                require(entries <= allowed_files)
                 for name in entries:
                     transaction_read(schedule_fd, name, limit=MAX_TRANSACTION_METADATA
                                      if name == TRANSACTION_METADATA else MAX_TRANSACTION_FILE)
-            transaction_remove_files(fd, "traffic-schedule")
-        for name in names - {"traffic-schedule"}:
+        for directory in names & directories:
+            transaction_remove_files(fd, directory)
+        for name in names - directories:
             os.unlink(name, dir_fd=fd)
         os.fsync(fd)
     os.rmdir(TRANSACTION_CLEANING, dir_fd=root_fd)
@@ -690,15 +717,17 @@ def transaction_commit(root, project):
             if metadata["state"] == "committed":
                 return
             metadata["state"] = "committed"
-            temporary = ".restore-metadata-" + secrets.token_hex(12)
+            # 半写只存在于已登记私密目录，不能成为提交依据或遗留到部署根。
+            if TRANSACTION_NEXT in os.listdir(fd):
+                os.unlink(TRANSACTION_NEXT, dir_fd=fd)
             try:
-                transaction_write(root_fd, temporary, transaction_encoded(metadata))
-                os.replace(temporary, TRANSACTION_METADATA, src_dir_fd=root_fd, dst_dir_fd=fd)
+                transaction_write(fd, TRANSACTION_NEXT, transaction_encoded(metadata))
+                os.replace(TRANSACTION_NEXT, TRANSACTION_METADATA, src_dir_fd=fd, dst_dir_fd=fd)
                 os.fsync(fd)
                 os.fsync(root_fd)
             finally:
-                if temporary in os.listdir(root_fd):
-                    os.unlink(temporary, dir_fd=root_fd)
+                if TRANSACTION_NEXT in os.listdir(fd):
+                    os.unlink(TRANSACTION_NEXT, dir_fd=fd)
 
 
 def transaction_clean(root, project):
@@ -720,45 +749,40 @@ def transaction_schedule_save(root, project, snapshot, unit_dir, systemd_ready,
                               timer_enabled, timer_active):
     transaction_path(snapshot)
     transaction_path(unit_dir)
-    require(os.path.dirname(snapshot) == root + "/locks"
-            and re.fullmatch(r"traffic-schedule\.[A-Za-z0-9]{6}", os.path.basename(snapshot)))
+    require(snapshot == root + "/" + TRANSACTION + "/traffic-source")
     require(all(type(value) is int and value in (0, 1)
                 for value in (systemd_ready, timer_enabled, timer_active)))
     with transaction_root(root, project) as root_fd:
         with transaction_directory(root_fd, TRANSACTION) as fd:
             metadata, schedule = transaction_validate(fd, root, project)
             require(metadata["state"] == "active" and schedule is None)
-            with transaction_directory(root_fd, "locks", private=False) as locks_fd:
-                with transaction_directory(locks_fd, os.path.basename(snapshot)) as snapshot_fd:
-                    require(set(os.listdir(snapshot_fd)) <= set(SCHEDULE_FILES))
-                    temporary = ".restore-schedule-" + secrets.token_hex(12)
-                    os.mkdir(temporary, 0o700, dir_fd=locks_fd)
-                    published = False
-                    try:
-                        with transaction_directory(locks_fd, temporary) as temporary_fd:
-                            files = {}
-                            for name in sorted(os.listdir(snapshot_fd)):
-                                data, _ = transaction_read(snapshot_fd, name, private=False,
-                                                           source_mode=0o644)
-                                transaction_write(temporary_fd, name, data)
-                                files[name] = {"size": len(data),
-                                               "sha256": hashlib.sha256(data).hexdigest(),
-                                               "mode": 0o600}
-                            saved = {"schema_version": 1, "root": root, "project": project,
-                                     "unit_dir": unit_dir, "systemd_ready": systemd_ready,
-                                     "timer_enabled": timer_enabled, "timer_active": timer_active,
-                                     "snapshot": os.path.basename(snapshot), "files": files}
-                            transaction_write(temporary_fd, TRANSACTION_METADATA,
-                                              transaction_encoded(saved))
-                            os.fsync(temporary_fd)
-                        os.rename(temporary, "traffic-schedule",
-                                  src_dir_fd=locks_fd, dst_dir_fd=fd)
-                        published = True
-                        os.fsync(fd)
-                        os.fsync(locks_fd)
-                    finally:
-                        if not published:
-                            transaction_remove_files(locks_fd, temporary)
+            with transaction_directory(fd, "traffic-source") as snapshot_fd:
+                require(set(os.listdir(snapshot_fd)) <= set(SCHEDULE_FILES))
+                temporary = "traffic-building"
+                os.mkdir(temporary, 0o700, dir_fd=fd)
+                published = False
+                try:
+                    with transaction_directory(fd, temporary) as temporary_fd:
+                        files = {}
+                        for name in sorted(os.listdir(snapshot_fd)):
+                            data, _ = transaction_read(snapshot_fd, name)
+                            transaction_write(temporary_fd, name, data)
+                            files[name] = {"size": len(data),
+                                           "sha256": hashlib.sha256(data).hexdigest(),
+                                           "mode": 0o600}
+                        saved = {"schema_version": 1, "root": root, "project": project,
+                                 "unit_dir": unit_dir, "systemd_ready": systemd_ready,
+                                 "timer_enabled": timer_enabled, "timer_active": timer_active,
+                                 "snapshot": os.path.basename(snapshot), "files": files}
+                        transaction_write(temporary_fd, TRANSACTION_METADATA,
+                                          transaction_encoded(saved))
+                        os.fsync(temporary_fd)
+                    os.rename(temporary, "traffic-schedule", src_dir_fd=fd, dst_dir_fd=fd)
+                    published = True
+                    os.fsync(fd)
+                finally:
+                    if not published:
+                        transaction_remove_files(fd, temporary)
     return saved
 
 

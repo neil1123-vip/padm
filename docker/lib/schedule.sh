@@ -177,7 +177,7 @@ dockerMaintenanceScheduleApply() {
     local marker cronMarker command calendar cronSchedule description timerDescription expected legacyExpected
     local controlLogService= controlLogTimer= dropIns= loaded= prefix= backend=none active=false
     local timeout=1800 timerOptions='RandomizedDelaySec=300' legacy=0 syncLegacy=0 keepService=0
-    local systemdReady=0 cronReady=0 timerEnabled=0 timerActive=0 haveUnits=0 haveCron=0
+    local systemdReady=0 cronReady=0 timerEnabled=0 timerActive=0 haveUnits=0 haveCron=0 recoverySnapshot=0
     case "${action}" in install|remove) ;; check) [[ "${job}" == control-log || "${job}" == control-sync ]] || return 1 ;; *) return 1 ;; esac
     case "${job}" in
     renewal)
@@ -448,18 +448,37 @@ EOF
         "${haveCron}" == 0 && -f "${unitDir}/padm-docker-control-sync.service" ]]; then
         keepService=1
     fi
-    snapshot=$(mktemp -d "${root}/locks/${job}-schedule.XXXXXX") || return 1
+    if [[ "${job}" == traffic && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ]]; then
+        # 原始快照从创建起归持久登记所有，硬杀不会遗留未登记的随机目录。
+        snapshot="${root}/.restore-pending/traffic-source"
+        dockerTrafficSafePath "${root}" "${root}/.restore-pending" &&
+            [[ -d "${root}/.restore-pending" &&
+                "$(stat -c '%u:%g:%a' "${root}/.restore-pending")" == 0:0:700 &&
+                ! -e "${snapshot}" && ! -L "${snapshot}" ]] &&
+            mkdir -m 0700 -- "${snapshot}" || return 1
+        recoverySnapshot=1
+    else
+        snapshot=$(mktemp -d "${root}/locks/${job}-schedule.XXXXXX") || return 1
+    fi
     DOCKER_MAINTENANCE_JOB=${job} DOCKER_MAINTENANCE_SNAPSHOT=${snapshot} \
         DOCKER_MAINTENANCE_UNIT_DIR=${unitDir} DOCKER_MAINTENANCE_SYSTEMD_READY=${systemdReady} \
         DOCKER_MAINTENANCE_TIMER_ENABLED=${timerEnabled} DOCKER_MAINTENANCE_TIMER_ACTIVE=${timerActive} \
         DOCKER_MAINTENANCE_CHANGED=0 DOCKER_MAINTENANCE_KEEP_SERVICE=${keepService}
     chmod 0700 "${snapshot}" || return 1
-    for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
-        [[ ! -f "${unitDir}/${file}" ]] || cp -- "${unitDir}/${file}" "${snapshot}/${file}" || return 1
-    done
-    [[ "${haveCron}" == 0 && ( "${action}" == remove || "${systemdReady}" == 1 ) ]] ||
-        printf '%s\n' "${cronText}" >"${snapshot}/crontab" || return 1
-    if [[ "${job}" == traffic && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ]]; then
+    (
+        [[ "${recoverySnapshot}" != 1 ]] || umask 077
+        for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
+            [[ -f "${unitDir}/${file}" ]] || continue
+            if [[ "${recoverySnapshot}" == 1 ]]; then
+                cat -- "${unitDir}/${file}" >"${snapshot}/${file}" || exit 1
+            else
+                cp -- "${unitDir}/${file}" "${snapshot}/${file}" || exit 1
+            fi
+        done
+        [[ "${haveCron}" == 0 && ( "${action}" == remove || "${systemdReady}" == 1 ) ]] ||
+            printf '%s\n' "${cronText}" >"${snapshot}/crontab" || exit 1
+    ) || return 1
+    if [[ "${recoverySnapshot}" == 1 ]]; then
         # 外层恢复提交前保留原调度，SIGKILL 后新进程仍能撤销首写。
         python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-save \
             --root "${root}" --project "${PADM_DOCKER_PROJECT}" --snapshot "${snapshot}" \
@@ -470,6 +489,7 @@ EOF
     if (
     trap 'exit 130' INT
     trap 'exit 143' TERM
+    [[ "${recoverySnapshot}" != 1 ]] || umask 077
     if [[ "${haveUnits}" == 1 ]]; then
         if [[ "${systemdReady}" == 1 ]]; then
             [[ ! -f "${unitDir}/padm-docker-${job}.timer" ]] ||

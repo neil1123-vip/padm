@@ -3315,9 +3315,13 @@ dockerRecoveryRecover() {
             dockerRemoveManagedTree "${root}" "${root}/${directory}" || return 1
     done
     if [[ "${schedule}" != null ]]; then
-        directory=$(jq -er '.snapshot' <<<"${schedule}") &&
-            dockerTrafficSafePath "${root}" "${root}/locks/${directory}" &&
-            dockerRemoveManagedTree "${root}" "${root}/locks/${directory}" || return 1
+        directory=$(jq -er '.snapshot' <<<"${schedule}") || return 1
+        # 新暂存由登记统一回收；旧版本只清理精确匹配的锁目录。
+        if [[ "${directory}" != traffic-source ]]; then
+            [[ "${directory}" =~ ^traffic-schedule\.[A-Za-z0-9]{6}$ ]] &&
+                dockerTrafficSafePath "${root}" "${root}/locks/${directory}" &&
+                dockerRemoveManagedTree "${root}" "${root}/locks/${directory}" || return 1
+        fi
     fi
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-clean \
         --root "${root}" --project "${PADM_DOCKER_PROJECT}" || return 1

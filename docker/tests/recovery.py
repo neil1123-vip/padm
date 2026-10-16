@@ -524,9 +524,7 @@ class RecoveryTransactionTests(unittest.TestCase):
         path.write_bytes(recovery.transaction_encoded(metadata))
 
     def snapshot(self):
-        locks = self.root / "locks"
-        locks.mkdir(mode=0o750, exist_ok=True)
-        snapshot = locks / "traffic-schedule.Abc123"
+        snapshot = self.pending / "traffic-source"
         snapshot.mkdir(mode=0o700)
         return snapshot
 
@@ -574,6 +572,7 @@ class RecoveryTransactionTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 recovery.transaction_commit(str(self.root), self.project)
         self.assertEqual(self.check()[0]["state"], "active")
+        self.assertFalse((self.pending / recovery.TRANSACTION_NEXT).exists())
         self.assertEqual(list(self.root.glob(".restore-metadata-*")), [])
         recovery.transaction_commit(str(self.root), self.project)
         before = (self.pending / recovery.TRANSACTION_METADATA).stat().st_mtime_ns
@@ -584,6 +583,165 @@ class RecoveryTransactionTests(unittest.TestCase):
         self.assertFalse(self.pending.exists())
         self.assertTrue(self.candidate.is_dir())
 
+    def test_sigkill_keeps_partial_writes_registered_and_cross_process_cleanable(self):
+        script = """
+import importlib.util
+import os
+import signal
+import sys
+
+spec = importlib.util.spec_from_file_location("recovery", sys.argv[1])
+recovery = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(recovery)
+root, project, phase = sys.argv[2:]
+write = recovery.transaction_write
+replace = recovery.os.replace
+rename = recovery.os.rename
+
+def kill():
+    os.kill(os.getpid(), signal.SIGKILL)
+
+def interrupted_write(parent, name, data):
+    if phase == "commit-partial" and name == recovery.TRANSACTION_NEXT:
+        write(parent, name, data[:len(data) // 2])
+        kill()
+    if phase == "schedule-partial" and name == "crontab":
+        write(parent, name, data[:len(data) // 2])
+        kill()
+    write(parent, name, data)
+    if (phase == "commit-written" and name == recovery.TRANSACTION_NEXT
+            or phase == "schedule-written" and name == recovery.TRANSACTION_METADATA):
+        kill()
+
+def interrupted_replace(*arguments, **keywords):
+    replace(*arguments, **keywords)
+    kill()
+
+def interrupted_rename(*arguments, **keywords):
+    rename(*arguments, **keywords)
+    kill()
+
+recovery.transaction_write = interrupted_write
+if phase == "commit-published":
+    recovery.os.replace = interrupted_replace
+if phase == "schedule-published":
+    recovery.os.rename = interrupted_rename
+if phase.startswith("commit-"):
+    recovery.transaction_commit(root, project)
+else:
+    recovery.transaction_schedule_save(root, project, root + "/.restore-pending/traffic-source",
+                                       "/etc/systemd/system", 1, 0, 1)
+raise AssertionError("kill point was not reached")
+"""
+        for phase in ("commit-partial", "commit-written", "commit-published",
+                      "schedule-partial", "schedule-written", "schedule-published"):
+            with self.subTest(phase=phase):
+                self.prepare()
+                if phase.startswith("schedule-"):
+                    snapshot = self.snapshot()
+                    for name in recovery.SCHEDULE_FILES:
+                        path = snapshot / name
+                        path.write_bytes(SECRET + name.encode())
+                        path.chmod(0o600)
+                result = subprocess.run(
+                    [sys.executable, "-B", "-c", script, str(HELPER), str(self.root),
+                     self.project, phase], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, -signal.SIGKILL, result.stderr.decode())
+                checked = self.cli("check")
+                self.assertEqual(checked.returncode, 0, checked.stderr.decode())
+                self.assertEqual(json.loads(checked.stdout),
+                                 {"state": "committed" if phase == "commit-published" else "active"})
+                schedule = self.cli("schedule-metadata")
+                self.assertEqual(schedule.returncode, 0, schedule.stderr.decode())
+                self.assertEqual(json.loads(schedule.stdout) is not None,
+                                 phase == "schedule-published")
+                if phase in ("commit-partial", "commit-written"):
+                    self.assertTrue((self.pending / recovery.TRANSACTION_NEXT).is_file())
+                if phase in ("schedule-partial", "schedule-written"):
+                    self.assertTrue((self.pending / "traffic-building").is_dir())
+                cleaned = self.cli("clean")
+                self.assertEqual(cleaned.returncode, 0, cleaned.stderr.decode())
+                self.assertFalse(self.pending.exists())
+                self.assertFalse((self.root / recovery.TRANSACTION_CLEANING).exists())
+                self.assertEqual(list(self.root.glob(".restore-*")), [])
+                self.assertEqual(list((self.root / "locks").glob("*")), [])
+                self.assertEqual((self.candidate / "images.runtime.env").read_bytes(),
+                                 self.source["images.runtime.env"])
+                self.assertNotIn(SECRET, result.stdout + result.stderr + checked.stdout
+                                 + checked.stderr + schedule.stdout + schedule.stderr
+                                 + cleaned.stdout + cleaned.stderr)
+
+    def test_staging_rejects_unsafe_files_before_any_cleanup(self):
+        self.prepare()
+        metadata = (self.pending / recovery.TRANSACTION_METADATA).read_bytes()
+        for staging in (recovery.TRANSACTION_NEXT, "traffic-source", "traffic-building"):
+            directory = self.pending if staging == recovery.TRANSACTION_NEXT else self.pending / staging
+            if directory != self.pending:
+                directory.mkdir(mode=0o700)
+            name = recovery.TRANSACTION_NEXT if directory == self.pending else "crontab"
+            path = directory / name
+            for kind in ("public", "owner", "hardlink", "symlink", "directory", "oversize"):
+                with self.subTest(staging=staging, kind=kind):
+                    path.write_bytes(SECRET)
+                    path.chmod(0o600)
+                    alias = self.base / "staging-alias"
+                    if kind == "public":
+                        path.chmod(0o640)
+                    elif kind == "owner":
+                        os.chown(path, 65534, 65534)
+                    elif kind == "hardlink":
+                        os.link(path, alias)
+                    elif kind == "symlink":
+                        path.unlink()
+                        path.symlink_to(self.candidate / "images.runtime.env")
+                    elif kind == "directory":
+                        path.unlink()
+                        path.mkdir(mode=0o700)
+                    else:
+                        limit = (recovery.MAX_TRANSACTION_METADATA if directory == self.pending
+                                 else recovery.MAX_TRANSACTION_FILE)
+                        with path.open("r+b") as target:
+                            target.truncate(limit + 1)
+                    before = path.lstat()
+                    for action in (self.check, lambda: recovery.transaction_clean(str(self.root),
+                                                                                self.project)):
+                        with self.assertRaises((ValueError, OSError)):
+                            action()
+                        self.assertEqual((self.pending / recovery.TRANSACTION_METADATA).read_bytes(),
+                                         metadata)
+                        self.assertEqual(recovery.signature(path.lstat()),
+                                         recovery.signature(before))
+                    if alias.exists():
+                        alias.unlink()
+                    path.rmdir() if kind == "directory" else path.unlink()
+            if directory != self.pending:
+                extra = directory / "unregistered"
+                extra.write_bytes(SECRET)
+                extra.chmod(0o600)
+                with self.assertRaises(ValueError):
+                    self.check()
+                extra.unlink()
+                for kind in ("public", "owner", "symlink"):
+                    with self.subTest(staging=staging, kind=kind):
+                        if kind == "public":
+                            directory.chmod(0o750)
+                        elif kind == "owner":
+                            os.chown(directory, 65534, 65534)
+                        else:
+                            directory.rmdir()
+                            directory.symlink_to(self.candidate, target_is_directory=True)
+                        with self.assertRaises((ValueError, OSError)):
+                            self.check()
+                        if kind == "symlink":
+                            directory.unlink()
+                            directory.mkdir(mode=0o700)
+                        directory.chmod(0o700)
+                        os.chown(directory, 0, 0)
+                directory.rmdir()
+        recovery.transaction_clean(str(self.root), self.project)
+
     def test_prepare_rejects_existing_registration_without_changing_it(self):
         self.prepare()
         before = {path.name: path.read_bytes() for path in self.pending.iterdir()}
@@ -592,16 +750,16 @@ class RecoveryTransactionTests(unittest.TestCase):
         self.assertEqual({path.name: path.read_bytes() for path in self.pending.iterdir()}, before)
 
     def test_clean_retries_every_partial_unlink_without_touching_candidate(self):
-        snapshot = self.snapshot()
-        for name in recovery.SCHEDULE_FILES:
-            path = snapshot / name
-            path.write_bytes(SECRET)
-            path.chmod(0o644)
         original = recovery.os.unlink
         cleaning = self.root / recovery.TRANSACTION_CLEANING
-        for interrupted_after in range(1, 9):
+        for interrupted_after in range(1, 12):
             with self.subTest(interrupted_after=interrupted_after):
                 self.prepare()
+                snapshot = self.snapshot()
+                for name in recovery.SCHEDULE_FILES:
+                    path = snapshot / name
+                    path.write_bytes(SECRET)
+                    path.chmod(0o600)
                 self.save_schedule(snapshot)
                 count = 0
 
@@ -838,7 +996,7 @@ class RecoveryTransactionTests(unittest.TestCase):
         for name in recovery.SCHEDULE_FILES:
             path = snapshot / name
             path.write_bytes(SECRET + name.encode())
-            path.chmod(0o644)
+            path.chmod(0o600)
         saved = self.save_schedule(snapshot)
         self.assertEqual(self.check()[1], saved)
         self.assertEqual(saved["snapshot"], snapshot.name)
@@ -864,6 +1022,14 @@ class RecoveryTransactionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.save_schedule(snapshot)
 
+    def test_schedule_keeps_legacy_random_snapshot_metadata_readable(self):
+        self.prepare()
+        saved = self.save_schedule(self.snapshot())
+        saved["snapshot"] = "traffic-schedule.Abc123"
+        self.write_metadata(saved, self.pending / "traffic-schedule")
+        self.assertEqual(self.check()[1], saved)
+        recovery.transaction_clean(str(self.root), self.project)
+
     def test_schedule_rejects_unsafe_snapshot_or_tampered_registration(self):
         self.prepare()
         snapshot = self.snapshot()
@@ -872,8 +1038,8 @@ class RecoveryTransactionTests(unittest.TestCase):
         path.chmod(0o666)
         with self.assertRaises(ValueError):
             self.save_schedule(snapshot)
+        path.chmod(0o600)
         self.assertIsNone(self.check()[1])
-        path.chmod(0o644)
         with self.assertRaises(ValueError):
             self.save_schedule(self.base / snapshot.name)
         self.save_schedule(snapshot)

@@ -8423,10 +8423,9 @@ active 恢复先拒绝外部 unit/drop-in/crontab 漂移，再恢复流量调度
 提交状态原子持久化后只回收暂存，不停止已提交服务或恢复旧调度。
 登记先原子移为 `.restore-cleaning`，固定白名单逐文件回收可中断重试；
 普通部署锁在获取前、等待中及获取后同时阻断两类登记。
-准备阶段登记前、提交元数据或调度 source/build 快照发布前遭硬杀，
-可能留下未登记私密暂存，后续空目标拒绝接管；需核对后人工清理。
-后两类窗口在 pending 已发布后也可达，列入下一检查点 6A.3b，
-当前不宣称全部硬杀窗口自动清理。
+此基线尚未处理提交元数据及调度 source/build 发布前的硬杀暂存；
+后续 6A.3b 将它们收敛到持久登记内。准备阶段登记发布前遭硬杀仍可能留下
+未登记私密暂存，后续空目标拒绝接管；需核对后人工清理。
 
 2026-10-17 Docker Linux amd64：helper 45 项、apply 31 个 CLI/锁动作通过，
 专项入口 24.623 秒，菜单入口 69.989 秒；证据分别为
@@ -8444,6 +8443,30 @@ active 恢复先拒绝外部 unit/drop-in/crontab 漂移，再恢复流量调度
 本批仅交付空目标普通部署事务；更多持久输入、已有部署替换、多 Peer、
 角色迁移/重绑定和完整灾备仍 deferred。原生宿主、arm64、公网、真实 systemd/
 整机重启、可信发布与新宿主业务连通须独立验收，整体计划保持 active。
+
+### 6A.3b 登记内硬杀暂存收口
+
+提交元数据改用 `.restore-pending/metadata.next`，调度原始快照及待发布快照
+分别使用登记内 `traffic-source`、`traffic-building`，不再生成根目录或 locks 下
+未登记的随机暂存。目录从创建即为 `0700 root:root`，文件从创建即为 `0600`；
+半写内容只作待清暂存，不参与提交状态或调度恢复判断。
+校验和 cleaning 重试仅接受固定文件白名单，拒绝链接、宽权限、未知文件或目录；
+旧版本已登记的精确 `traffic-schedule.XXXXXX` 仍按原路径回收。
+active 撤销与 committed 只清暂存的边界不变，准备阶段登记发布前的硬杀仍需
+人工核对，不扩大为完整崩溃接管或真实宿主 systemd 验收。
+
+Docker Linux amd64 定向 `docker-backup` 的 48 项 helper 检查通过，含 6 个真实
+子进程 SIGKILL 窗口及 11 次 partial-unlink 重试；入口 9.841 秒，证据
+`.tmp-regression-docker-53af7a0913e549b6b258cc4a4eed293f/`。
+`docker-recovery-apply` 的 39 个 CLI/锁动作通过，新增 source 创建、旧 service/
+cron 半写和 new.service 半写 4 个真实硬杀窗口；入口 27.911 秒，证据
+`.tmp-regression-docker-e00683fe93224f36bf2fe27704515337/`。
+两次失败只涉及测试注入器重复触发及误把 timer 暂停视作文件漂移，修正测试后通过，
+未放宽生产门禁。集中 `docker-contracts -Jobs 6` 已通过，入口 486.858 秒，
+较基线 507.588 秒缩短 20.730 秒（4.08%）；本次没有缓存命中，证据
+`.tmp-regression-docker-77f5f6e4a6994670a1d95c1641234674/`。
+本轮源码归档及文件清单已清理，日志与结果保留。
+整体计划保持 active。
 
 - 每阶段同步中英文使用说明、支持矩阵、权限边界及失败恢复操作。
   旧部署迁移明确要求完整 spec 或安全导入，不允许一条重配命令替代迁移。
