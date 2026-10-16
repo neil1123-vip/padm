@@ -1617,7 +1617,7 @@ runRoutingDriver() {
         targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'Docker 路由与出站' $'13\n'
         targetReply 'Docker 路由与出站' $'14\n'
-        targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block-ips.json\n'
+        targetReply 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' $'192.0.2.10, 2001:DB8::10, geoip:cn\n'
         targetReply 'Docker 路由与出站' $'15\n'
         targetReply 'Docker 路由与出站' $'16\n'
         targetReply 'Docker 路由与出站' $'17\n'
@@ -1686,9 +1686,9 @@ runRoutingDriver() {
             targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         done
         targetReply 'Docker 路由与出站' $'26\n'
-        targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-add.json\n'
+        targetReply 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' $'198.51.100.17/24, 2001:DB8::/64\n'
         targetReply 'Docker 路由与出站' $'27\n'
-        targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-remove.json\n'
+        targetReply 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' $'192.0.2.10, 2001:DB8::10\n'
         targetReply 'Docker 路由与出站' $'3\n'
         targetReply 'Docker 路由与出站' $'28\n'
         targetReply '追加域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com\n'
@@ -1747,7 +1747,7 @@ runRoutingDriver() {
         for choice in 14 26 27; do
             for input in 0 ''; do
                 targetReply 'Docker 路由与出站' "${choice}"$'\n'
-                targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' "${input}"$'\n'
+                targetReply 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' "${input}"$'\n'
             done
         done
         targetReply 'Docker 路由与出站' $'18\n'
@@ -1938,13 +1938,15 @@ runRoutingDriver() {
         block-ips-remove-eof) choice=27 ;;
         esac
         targetReply 'Docker 路由与出站' "${choice}"$'\n'
-        targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'\004'
+        targetReply 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' $'\004'
         ;;
     block-ips-change-failed)
+        targetReply 'Docker 路由与出站' $'14\n'
+        targetReply 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' $'192.0.2.10, geoip:cn\n'
         targetReply 'Docker 路由与出站' $'26\n'
-        targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-add.json\n'
+        targetReply 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' $'198.51.100.17/24, 2001:DB8::/64\n'
         targetReply 'Docker 路由与出站' $'27\n'
-        targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block ips-remove.json\n'
+        targetReply 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' $'192.0.2.10, 2001:DB8::10\n'
         targetReply 'Docker 路由与出站' $'3\n'
         ;;
     region-eof)
@@ -3217,9 +3219,10 @@ edit)
         "${2:-}" == --dns-domains-add || "${2:-}" == --dns-domains-remove ||
         "${2:-}" == --region-allow-add || "${2:-}" == --region-allow-remove ]]; then
         dockerSocks5DomainsNormalize "${3:-}" >/dev/null || exit 2
-    elif [[ "${2:-}" == --block-ips-add || "${2:-}" == --block-ips-remove ]]; then
-        # 文件路径保持一个参数；JSON 权限和精确匹配由后端合同检查。
-        [[ "$#" -eq 3 && "${3:-}" == /* ]] || exit 2
+    elif [[ "${2:-}" == --block-ips-csv || "${2:-}" == --block-ips-add-csv ||
+        "${2:-}" == --block-ips-remove-csv ]]; then
+        # 带空白的 CSV 保持一个参数，完整校验与精确匹配由后端合同检查。
+        [[ "$#" -eq 3 && -n "${3:-}" && "${3:-}" != --* ]] || exit 2
     elif [[ "${2:-}" == --dns-rules ]]; then
         [[ "$#" -eq 5 && -n "${3:-}" && "${3:-}" != --* &&
             "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
@@ -3796,7 +3799,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
-        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
+        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips-csv 192.0.2.10, 2001:DB8::10, geoip:cn\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip'
         expectedRouting+=$'\nedit --region-allow-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-allow-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com'
@@ -3819,7 +3822,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         expectedRouting+=$'\nedit --http-relay /root/padm-http-relay.json\nedit --http-relay-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --direct-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --direct-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
-        expectedRouting+=$'\nedit --block-ips-add /root/padm-block ips-add.json\nedit --block-ips-remove /root/padm-block ips-remove.json\nprotocol routing-status'
+        expectedRouting+=$'\nedit --block-ips-add-csv 198.51.100.17/24, 2001:DB8::/64\nedit --block-ips-remove-csv 192.0.2.10, 2001:DB8::10\nprotocol routing-status'
         expectedRouting+=$'\nedit --dns-domains-add Example.NET, full:Exact.Example.Com\nedit --dns-domains-remove Example.NET, full:Exact.Example.Com\nprotocol routing-status'
         for socksAction in add remove; do
             expectedRouting+=$'\nprotocol routing-status'
@@ -4020,9 +4023,9 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             fail 'Direct/Block 删除缺项未显示状态错误并保留菜单'
         ;;
     block-ips-change-failed)
-        expectedRouting=$'edit --block-ips-add /root/padm-block ips-add.json\nedit --block-ips-remove /root/padm-block ips-remove.json\nprotocol routing-status'
-        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
-            fail 'IP/CIDR 增删失败未显示状态错误并继续诊断'
+        expectedRouting=$'edit --block-ips-csv 192.0.2.10, geoip:cn\nedit --block-ips-add-csv 198.51.100.17/24, 2001:DB8::/64\nedit --block-ips-remove-csv 192.0.2.10, 2001:DB8::10\nprotocol routing-status'
+        [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail 'IP/CIDR 录入失败未显示状态错误并继续诊断'
         ;;
     dns-domains-change-invalid)
         expectedRouting=$'edit --dns-domains-add regexp:bad\nedit --dns-domains-remove regexp:bad'
@@ -4274,6 +4277,8 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             '22. 追加 Direct 直连例外' '23. 追加 Block 域名阻断' \
             '24. 删除 Direct 直连例外' '25. 删除 Block 域名阻断' \
             '26. 追加 IP/CIDR 阻断' '27. 精确删除 IP/CIDR 阻断' \
+            'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）' \
+            '精确删除按完整字符串匹配，删空关闭手工 IP 阻断。' \
             '28. 追加 DNS 分流域名' '29. 精确删除 DNS 分流域名' \
             '30. 单条替换 DNS 分流域名' '31. 单条替换 Direct 直连例外' \
             '32. 单条替换 Block 域名阻断' '33. 单条替换 IP/CIDR 阻断' \

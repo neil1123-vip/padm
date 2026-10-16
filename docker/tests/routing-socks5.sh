@@ -1469,7 +1469,13 @@ PY
     runStatus 0
     jq -e --argjson ips "${BLOCK_IPS}" '.block_ips=={ip_rules:$ips.ips,resolve_domains:true}' \
         "${LOG}" >/dev/null || fail '解析模式状态缺少 flag 或改变名单'
-    runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+    runEdit 0 --block-ips-add-csv ' 203.0.113.250 ' --confirm PADM-DOCKER-EDIT
+    jq -e --argjson ips "${BLOCK_IPS}" '
+      .routing.block_ips=={ips:($ips.ips+["203.0.113.250"]),resolve_domains:true}
+    ' "${root}/config/spec.json" >/dev/null || fail 'IP CSV 追加丢失解析开关或改写名单'
+    runEdit 0 --block-ips-remove-csv '203.0.113.250' --confirm PADM-DOCKER-EDIT
+    runEdit 0 --block-ips-csv ' 192.0.2.10 , 2001:db8::10, 198.51.100.0/24, 2001:db8::/64, geoip:cn ' \
+        --confirm PADM-DOCKER-EDIT
     jq -en --slurpfile old "${TEST_ROOT}/resolved-warp4.json" \
         --slurpfile actual "${root}/config/spec.json" '$actual==$old' >/dev/null ||
         fail '整组 IP 名单替换丢失解析开关或改变其它配置'
@@ -3824,6 +3830,76 @@ jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" \
     --slurpfile actual "${root}/config/spec.json" '$actual==$expected' >/dev/null ||
     fail 'IP 增量合同结束没有恢复原路由夹具'
 printf 'docker-routing-block-ips-incremental-regression-ok\n'
+
+# CSV 只裁剪首尾空白，沿用私有 JSON 输入的校验、字符串身份和事务。
+ipCsv=$' 2001:DB8::10 ,\t198.51.100.17/24 , geoip:cn '
+ipCsvIps='["2001:DB8::10","198.51.100.17/24","geoip:cn"]'
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/ip-csv.before"
+jq --argjson ips "${ipCsvIps}" '.routing.block_ips.ips=$ips' \
+    "${TEST_ROOT}/ip-csv.before" >"${TEST_ROOT}/ip-csv.expected"
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+for option in --block-ips-csv --block-ips-add-csv --block-ips-remove-csv; do
+    runEdit 2 "${option}"
+    runEdit 2 "${option}" "${ipCsv}" --block-ips-off --preview
+    for invalid in '192.0.2.10,,203.0.113.10' '192.0.2.10,192.0.2.10'; do
+        runEdit 15 "${option}" "${invalid}" --confirm PADM-DOCKER-EDIT
+    done
+done
+for invalid in ' ' ',192.0.2.10' '192.0.2.10,' 'geoip:CN' 'geoip:us' \
+    '198.51.100.0/33' '2001:db8:::1' \
+    "$(jq -nr '[range(0;257) | "198.51.\(. / 256 | floor).\(. % 256)"] | join(",")')"; do
+    runEdit 15 --block-ips-csv "${invalid}" --confirm PADM-DOCKER-EDIT
+done
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'IP CSV 无效、重复、超限或互斥参数改变部署或调用 Compose'
+liveBefore=$(grep '^live:' "${COMPOSE_LOG}" || true)
+runEdit 0 --block-ips-csv "${ipCsv}" --preview
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerSetupRead() { printf -v "$1" '%s' n; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/ip-csv.expected" '' '' interactive
+) >"${LOG}" 2>&1 || fail 'IP CSV 候选确认取消失败'
+assertClean
+[[ "$(snapshot)" == "${before}" && "$(grep '^live:' "${COMPOSE_LOG}" || true)" == "${liveBefore}" ]] ||
+    fail 'IP CSV 预览或取消改变在线部署'
+runEdit 0 --block-ips-csv "${ipCsv}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/ip-csv.expected" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$expected' >/dev/null || fail 'IP CSV 与 JSON 不等价或改写 IPv6 大小写、CIDR 主机位和其它字段'
+runEdit 0 --block-ips-add-csv 'geoip:cn, 2001:db8::10, 198.51.100.0/24' --confirm PADM-DOCKER-EDIT
+jq -en --argjson ips "${ipCsvIps}" --slurpfile old "${TEST_ROOT}/ip-csv.before" \
+    --slurpfile actual "${root}/config/spec.json" '
+  $actual[0]==($old[0]|.routing.block_ips.ips=($ips+["2001:db8::10","198.51.100.0/24"]))
+' >/dev/null || fail 'IP CSV 追加改变完整字符串身份、顺序或其它字段'
+before=$(snapshot)
+composeBefore=$(cat "${COMPOSE_LOG}")
+runEdit 15 --block-ips-remove-csv '2001:db8::10, 203.0.113.250' --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail 'IP CSV 部分缺项没有整批拒绝或调用 Compose'
+for failure in health-fail term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    expected=14
+    [[ "${failure}" != term ]] || expected=143
+    runEdit "${expected}" --block-ips-remove-csv '2001:DB8::10' --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: IP CSV 未恢复完整部署与非空流量"
+done
+MODE=ok
+runEdit 0 --block-ips-remove-csv ' 2001:db8::10, 198.51.100.0/24 ' --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/ip-csv.expected" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$expected' >/dev/null || fail 'IP CSV 删除没有精确匹配完整字符串或改变其它字段'
+runStatus 0
+jq -e --argjson ips "${ipCsvIps}" '.block_ips.ip_rules==$ips' "${LOG}" >/dev/null ||
+    fail 'IP CSV 状态丢失原文和有序名单'
+runEdit 0 --block-ips-remove-csv "${ipCsv}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/ip-csv.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual[0]==($old[0]|del(.routing.block_ips))' >/dev/null ||
+    fail 'IP CSV 删空未关闭手工阻断或删除其它子项'
+runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/ip-csv.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$old' >/dev/null || fail 'IP CSV 后原 JSON 接口未恢复夹具'
+printf 'docker-routing-block-ips-csv-regression-ok\n'
 fi
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block-ip ]]; then
 # CSV 是整组替换；其它子项、核心身份、分享内容与累计流量保持原样。

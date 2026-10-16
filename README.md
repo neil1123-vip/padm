@@ -563,7 +563,8 @@ DNS 或最终目的地址，不把诊断升级成配置拒绝或完整冲突检�
 单 sing-box 已提供显式解析后 IP 阻断，见下文；Xray 继续待交付。
 本地解析结果不能代替代理实际连接地址，Xray `IPOnDemand` 不满足此门槛。
 
-菜单 `17` 的 IP/CIDR 阻断使用独立 v3 `.routing.block_ips`，私有 JSON 为
+菜单 `17` 的 `14/26/27` 分别直接录入、追加和精确删除 IP/CIDR 阻断 CSV，
+使用独立 v3 `.routing.block_ips`；原 CLI 私有 JSON 接口保留，格式为
 `{"ips":["192.0.2.8","198.51.100.0/24","2001:db8::/32","geoip:cn"]}`。
 接受 1–256 条唯一 IPv4/纯 IPv6 字面地址或 CIDR，以及固定 `geoip:cn`；
 不接受主机名、地址范围、IPv6 scope、点分嵌入 IPv4 或其它 GeoIP 分类。
@@ -575,11 +576,17 @@ padm-docker edit --block-ips /root/padm-block-ips.json --preview
 padm-docker edit --block-ips /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-add /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-remove /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-csv '192.0.2.8,2001:DB8::/32,geoip:cn' --preview
+padm-docker edit --block-ips-add-csv '198.51.100.17/24' --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-remove-csv '198.51.100.17/24' --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-replace '198.51.100.0/24' '203.0.113.17/24' --preview
 padm-docker edit --block-ips-off --confirm PADM-DOCKER-EDIT
 ```
 
-菜单 `17` 的 `26/27` 分别追加和精确删除 IP 阻断规则，沿用同一私有 JSON 格式。
+直接录入只去除每项首尾空白，保留 IPv6 大小写、压缩写法和 CIDR 主机位；
+空项、重复项、非法值或超过 256 项整批拒绝，空输入、`0` 或 EOF 取消。
+CSV 与私有 JSON 复用相同校验、预览、确认及恢复事务，保留已有解析后阻断模式。
+`--block-ips-add/--block-ips-remove` 继续接受原私有 JSON 格式。
 追加保留原顺序，再按输入顺序添加新规则；不存在的手工名单会创建，合并后最多 256 项。
 删除要求请求中的每条完整字符串都在手工名单中，缺一条即整组拒绝；
 不按 CIDR 包含关系匹配，也不合并 IPv6 的大小写、压缩写法或 CIDR 主机位。

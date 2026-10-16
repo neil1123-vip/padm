@@ -1724,8 +1724,14 @@ not resolve domain targets just to match an IP or recheck addresses after DNS/ho
 These changes retain the same private-input and deployment transaction boundaries.
 SOCKS ingress, public WARP acceptance and complete routing management remain deferred.
 
-Menu `17`, options `26/27`, appends or removes manual IP-block rules through
-`--block-ips-add/--block-ips-remove <private JSON file>`. The input keeps the existing
+Menu `17`, options `14/26/27`, accepts CSV directly to set, append or remove manual
+IP-block rules. The matching CLI options are `--block-ips-csv`,
+`--block-ips-add-csv` and `--block-ips-remove-csv`. Each item is trimmed, with IPv6
+spelling and CIDR host bits preserved; empty items, duplicates, invalid rules and more
+than 256 items reject the entire input. Blank input, `0` or EOF cancels the menu action.
+CSV uses the same validation, preview, confirmation and recovery transaction and preserves
+the existing resolved-domain blocking mode.
+`--block-ips` and `--block-ips-add/--block-ips-remove <private JSON file>` retain the
 `{"ips":[...]}` format and root-owned `0600` file requirements. Append retains existing
 order, then adds unseen strings in input order, with at most 256 rules after merging.
 Remove requires every complete requested string to exist in the manual list; a missing
@@ -1737,6 +1743,9 @@ Preview and cancellation leave the deployment unchanged.
 ```bash
 padm-docker edit --block-ips-add /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-remove /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-csv '192.0.2.8,2001:DB8::/32,geoip:cn' --preview
+padm-docker edit --block-ips-add-csv '198.51.100.17/24' --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-remove-csv '198.51.100.17/24' --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-replace '198.51.100.0/24' '203.0.113.17/24' --preview
 ```
 

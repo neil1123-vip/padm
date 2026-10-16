@@ -1927,7 +1927,7 @@ dockerEditCommand() {
     local siteMode= siteSource= siteUrl= siteTemplate=
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
-    local routingServer= routingPort=
+    local routingServer= routingPort= routingIps=
     local routingDomains='[]' routingOldDomains='[]' routingDomainsField=domains
     local routingOldIp= routingNewIp= routingHost=
     local httpRelay= httpRelayFile= httpRelayPort=0 httpRelaySources='[]'
@@ -2133,6 +2133,20 @@ dockerEditCommand() {
                     '($old | length) == 1 and ($domains | length) == 1' >/dev/null ||
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 3
+            ;;
+        --block-ips-csv|--block-ips-add-csv|--block-ips-remove-csv)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=block_ips
+            case "$1" in
+            --block-ips-csv) routingAction=enable ;;
+            --block-ips-add-csv) routingAction=ips_add ;;
+            --block-ips-remove-csv) routingAction=ips_remove ;;
+            esac
+            routingIps=$(jq -cn --arg input "$2" \
+                '{ips:($input | split(",") | map(gsub("^\\s+|\\s+$"; "")))}') ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            shift 2
             ;;
         --block-ips-add|--block-ips-remove)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
@@ -3515,6 +3529,12 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${routingKind}" ]]; then
+        if [[ -n "${routingIps}" ]]; then
+            # 录入值进入已有私有候选，后续复用文件输入的完整校验与事务。
+            printf '%s\n' "${routingIps}" >"${workspace}/block_ips.json" &&
+                chmod 0600 "${workspace}/block_ips.json" ||
+                return "${PADM_DOCKER_RC_STATE}"
+        fi
         if [[ "${routingAction}" == host_replace || "${routingAction}" == host_add ]]; then
             # 用临时完整规格复用精确域名与可路由字面地址校验，不扩展 hosts 合同。
             jq --arg host "${routingHost}" --arg ip "${routingNewIp}" \
@@ -3731,7 +3751,8 @@ dockerEditCommand() {
                 ($existing | map(if . == $old then $new else . end)) end
             ' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == ips_add || "${routingAction}" == ips_remove ]]; then
-            dockerEditPrivateInputCopy "${routingFile}" "${workspace}/block_ips.json" block_ips || {
+            [[ -n "${routingIps}" ]] ||
+                dockerEditPrivateInputCopy "${routingFile}" "${workspace}/block_ips.json" block_ips || {
                 dockerError 'IP/CIDR 增量输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，且必须是合法 block_ips 规格'
                 return "${PADM_DOCKER_RC_STATE}"
             }
@@ -3781,7 +3802,8 @@ dockerEditCommand() {
                 '.routing.dns = {server:$server,port:$port,domains:$domains}' \
                 "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == enable ]]; then
-            dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
+            [[ -n "${routingIps}" ]] ||
+                dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
                 dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
                 return "${PADM_DOCKER_RC_STATE}"
             }

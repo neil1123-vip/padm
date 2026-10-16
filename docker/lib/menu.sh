@@ -1505,12 +1505,14 @@ dockerMenuRouting() {
         11) dockerMenuRun edit --direct-off || true ;;
         13) dockerMenuRun edit --block-off || true ;;
         14|26|27)
-            dockerSetupRead input 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）: ' &&
+            [[ "${choice}" != 27 ]] ||
+                printf '精确删除按完整字符串匹配，删空关闭手工 IP 阻断。\n'
+            dockerSetupRead input 'IP/CIDR 规则 CSV（字面 IP/CIDR 或 geoip:cn，逗号分隔，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
             case "${choice}" in
-            14) dockerMenuRun edit --block-ips "${input}" || true ;;
-            26) dockerMenuRun edit --block-ips-add "${input}" || true ;;
-            27) dockerMenuRun edit --block-ips-remove "${input}" || true ;;
+            14) dockerMenuRun edit --block-ips-csv "${input}" || true ;;
+            26) dockerMenuRun edit --block-ips-add-csv "${input}" || true ;;
+            27) dockerMenuRun edit --block-ips-remove-csv "${input}" || true ;;
             esac
             ;;
         15) dockerMenuRun edit --block-ips-off || true ;;

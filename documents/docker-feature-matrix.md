@@ -86,6 +86,12 @@ DNS 失败拒绝，Direct 例外优先，缺省字面模式及其它配置保持
 Xray `IPOnDemand` 的代理重解析与 DNS 失败回退可绕过判定，继续 deferred；
 完整区域及宿主过滤也不升级支持状态；WARP 本地加密 Peer 不替代公网实际出口验收。
 
+5B.4t 菜单 `17 → 14/26/27` 直接录入 IP/CIDR CSV，CLI 增加
+`--block-ips-csv`、`--block-ips-add-csv` 和 `--block-ips-remove-csv`。
+仅去每项首尾空白，保留 IPv6 写法和 CIDR 主机位；复用已有私有候选、校验和事务，
+保持 1–256 项、固定 `geoip:cn`、整批缺项拒绝、删空关闭及解析模式保留。
+原 JSON 接口继续提供，不扩展 schema、渲染、权限或完整路由支持状态。
+
 5B.4h 已接入菜单 `17 → 34/35/36` 与 CLI 的已有非空 selective SOCKS5 域名增删/单条替换。
 未启用/global 拒绝；追加稳定去重、合并最多 256 条，删除缺项整批拒绝，
 替换拒绝 CSV/缺旧/重复新/同值并保留位置。非空只改 `domains`，冻结上游、凭据及其它配置；

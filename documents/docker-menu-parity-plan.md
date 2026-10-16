@@ -3780,6 +3780,30 @@ Bash/ShellCheck/Python/JSON/PowerShell AST 检查通过。清理源码归档、�
 保留日志/result。Cloudflare 账号/公网及原生宿主/arm64 仍未验，
 完整区域、SOCKS UDP 会话撤销等剩余项继续 deferred，整体目标 active。
 
+#### 5B.4t IP/CIDR 阻断直接录入与增删
+
+补齐原生 IP/CIDR 录入工作流：路由菜单 `17` 的 `14/26/27` 分别直接输入 CSV
+设置、追加和精确删除，无需用户先创建 JSON 文件。CLI 提供 `--block-ips-csv`、
+`--block-ips-add-csv`、`--block-ips-remove-csv`，原私有 JSON 接口保留。
+只去每项首尾空白，不转换 IPv6 写法或 CIDR 主机位，不合并重复项；
+仍按现有合同接受 1–256 项和固定 `geoip:cn`，空项、重复项与非法值整组拒绝。
+内部使用已有受限候选目录，复用原文件输入的完整校验、冻结比较和恢复事务；
+追加保留顺序、删除按完整字符串匹配且缺项整组拒绝，删空关闭手工 IP 阻断，
+区域生成项及其它路由不变，已有解析后阻断模式保持。
+删除菜单明确告知精确匹配及删空关闭，空输入、`0` 或 EOF 取消。
+
+定向使用已有 `docker-routing-direct-block-ip-workflow` 和 `docker-menu-routing`，
+集成后集中完整合同；不新增 selector、schema、渲染、权限或重复真实流量矩阵。
+Linux amd64 两项定向分别通过，内部/入口耗时 `41756/42962 ms`、
+`16829/17851 ms`。完整 `docker-contracts -Jobs 6` 通过，
+内部/入口 `496882/499012 ms`、排队 `406 ms`，未命中缓存，使用 tmpfs。
+同一源码快照的 Bash 语法与 ShellCheck error 检查通过。
+证据 `.tmp-regression-docker-5844939f8c8b462389f83a3255966b18/`、
+`.tmp-regression-docker-a83811be71874c708ff6efe4ea0bc587/` 和
+`.tmp-regression-docker-24e000c4cd3841daac531e44c3590345/`；
+本轮源码归档与输入清理完毕，只保留日志/result。
+完整区域策略、固定核心阻塞项及原生宿主/arm64/公网仍 deferred，整体计划 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP
