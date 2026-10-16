@@ -384,9 +384,7 @@ def fake_owned(fd, root, action="", arguments=None):
     peer = socket.socket(fileno=fd)
     installation = Path(root)
     lock = installation / "locks/deployment.lock"
-    lock.mkdir(parents=True, mode=0o750)
-    (lock / "pid").write_text(str(os.getpid()) + "\n")
-    (lock / "pid").chmod(0o640)
+    assert (lock / "pid").read_text() == str(os.getpid()) + "\n"
     with (installation / "fixture-launches").open("a") as stream:
         stream.write(str(os.getpid()) + "\n")
     stage = installation / f".hopping-guarded.fixture.{os.getpid()}"
@@ -528,17 +526,22 @@ def reservation_cases(base, entrypoint):
             count += 1
         output, error = holder.communicate(b"release\n", timeout=5)
         assert holder.returncode == 0 and not output and not error
-        results = []
-        for caller in peers:
+        results, failures = [], []
+        for caller, manager in zip(peers, services):
             try:
                 result = MODULE["receive"](caller, timeout=8)
-            except MODULE["Failure"]:
+            except MODULE["Failure"] as error:
+                # 必须收齐失败进程的退出状态，不能把仍在启动的超时误算为竞争失败。
+                output, stderr = manager.communicate(timeout=8)
+                assert manager.returncode == 1 and not output and stderr, (
+                    str(error), manager.returncode, output, stderr)
                 results.append(None)
+                failures.append(stderr.decode("utf-8", errors="replace"))
             else:
                 assert result["phase"] == "started"
                 MODULE["owner_check"](result["owner"])
                 results.append(result)
-        assert sum(result is not None for result in results) == 1
+        assert sum(result is not None for result in results) == 1, failures
         winner = next(result for result in results if result is not None)
         assert (installation / "selected-arguments").read_text().splitlines() == saved_values, (
             "保存启动采用了取锁前的旧参数")
@@ -1222,6 +1225,8 @@ def main():
             '  esac\n'
             'fi\n'
             'dockerPortHoppingTargetSupervisedOwned() {\n'
+            # 预约失败者可能短暂占锁，模拟 owner 也须沿生产路径等待，不能直接 mkdir。
+            '  dockerAcquireDeploymentLock --hopping-owner || return 1\n'
             '  printf "%s\\n" "${@:2:5}" >"$PADM_DOCKER_INSTALL_DIR/selected-arguments"\n'
             f'  exec "{sys.executable}" "{SCRIPT}" fake-owned "$1" "$PADM_DOCKER_INSTALL_DIR" '
             '"${7:-}" "${@:8}"\n'
