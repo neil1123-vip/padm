@@ -697,6 +697,119 @@ def geo_inputs(directory, destination=None):
     return {"geo_files": 3}
 
 
+def renewal_request(domain, data):
+    request = read_json(data)
+    require(isinstance(request, dict) and set(request) == {
+        "schema_version", "domain", "email", "provider", "enabled"})
+    require(request["domain"] == domain and request["enabled"] is False
+            and type(request["schema_version"]) is int
+            and isinstance(request["provider"], str) and isinstance(request["email"], str))
+    require(re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}",
+                         request["email"]))
+    provider = request["provider"]
+    require((request["schema_version"] == 1 and re.fullmatch(r"dns_[a-z0-9_]+", provider))
+            or (request["schema_version"], provider) in {(2, "standalone"), (4, "alpn")})
+    return provider.startswith("dns_")
+
+
+def renewal_credentials(data):
+    names = set()
+    for line in data.decode("utf-8").split("\n"):
+        line = line.removesuffix("\r")
+        if not line or line.startswith("#"):
+            continue
+        name, separator, _ = line.partition("=")
+        require(separator and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+                and name not in names and name not in {
+                    "PATH", "HOME", "ENV", "BASH_ENV", "IFS", "SHELLOPTS", "BASHOPTS",
+                    "CDPATH", "GLOBIGNORE", "PS4", "DEBUG", "TMPDIR"}
+                and not name.startswith(("PYTHON", "LD_", "PADM_", "LE_", "ACME_", "Le_")))
+        require("\x00" not in line)
+        names.add(name)
+    require(names)
+
+
+def renewal_inputs(directory, destination=None):
+    prefix = "secrets/renewal"
+    payload = {}
+    total = 0
+    with contextlib.ExitStack() as stack:
+        parent, name = stack.enter_context(absolute_parent(directory, private=True))
+        root_fd = stack.enter_context(transaction_directory(parent, name, private=False))
+        observed = [(parent, name, signature(os.fstat(root_fd)))]
+        manifest_info = os.stat(MANIFEST, dir_fd=root_fd, follow_symlinks=False)
+        manifest, _ = transaction_read(root_fd, MANIFEST, limit=MAX_MANIFEST)
+        observed.append((root_fd, MANIFEST, signature(manifest_info)))
+        entries = validate_manifest(read_json(manifest))
+        expected = {path: entry for path, entry in entries.items()
+                    if path == prefix or path.startswith(prefix + "/")}
+        if "secrets" not in os.listdir(root_fd):
+            require(not expected)
+            return {"renewal_registrations": 0}
+        secrets_fd = stack.enter_context(transaction_directory(root_fd, "secrets", private=False))
+        if "renewal" not in os.listdir(secrets_fd):
+            require(not expected)
+            return {"renewal_registrations": 0}
+        registry_fd = stack.enter_context(transaction_directory(secrets_fd, "renewal"))
+        observed.extend((owner, child, signature(os.fstat(fd))) for owner, child, fd in (
+            (root_fd, "secrets", secrets_fd), (secrets_fd, "renewal", registry_fd)))
+        require(prefix in expected and expected[prefix]["type"] == "directory")
+        found = {prefix}
+        domains = sorted(os.listdir(registry_fd))
+        for domain in domains:
+            require(len(domain) <= 253 and re.fullmatch(
+                r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}", domain))
+            domain_path = prefix + "/" + domain
+            require(domain_path in expected and expected[domain_path]["type"] == "directory")
+            domain_fd = stack.enter_context(transaction_directory(registry_fd, domain))
+            observed.append((registry_fd, domain, signature(os.fstat(domain_fd))))
+            found.add(domain_path)
+            files = set(os.listdir(domain_fd))
+            require(files in ({"request.json"}, {"request.json", "credentials.env"}))
+            data = {}
+            for filename in sorted(files):
+                path = domain_path + "/" + filename
+                require(path in expected and expected[path]["type"] == "file")
+                info = os.stat(filename, dir_fd=domain_fd, follow_symlinks=False)
+                encoded, metadata = transaction_read(domain_fd, filename, limit=(
+                    64 * 1024 if filename == "request.json" else 1024 * 1024))
+                require(all(metadata[key] == expected[path][key] for key in ("size", "sha256")))
+                total += len(encoded)
+                require(total <= MAX_TRANSACTION_FILE)
+                observed.append((domain_fd, filename, signature(info)))
+                data[filename] = encoded
+                found.add(path)
+            dns = renewal_request(domain, data["request.json"])
+            require(dns == ("credentials.env" in data))
+            if dns:
+                renewal_credentials(data["credentials.env"])
+            payload[domain] = data
+        require(found == set(expected))
+
+        def stable():
+            require(set(os.listdir(registry_fd)) == set(domains))
+            for owner, child, before in observed:
+                require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == before)
+            with absolute_parent(directory, private=True) as (owner, child):
+                require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == observed[0][2])
+
+        stable()
+        if destination is not None:
+            owner, child = stack.enter_context(absolute_parent(destination, private=True))
+            target_fd = stack.enter_context(transaction_directory(owner, child, private=False))
+            secrets_fd = stack.enter_context(transaction_directory(target_fd, "secrets", private=False))
+            os.mkdir("renewal", 0o700, dir_fd=secrets_fd)
+            target_registry = stack.enter_context(transaction_directory(secrets_fd, "renewal"))
+            # 登记保持停用和原字节；账户执行配置与宿主调度不属于本阶段恢复范围。
+            for domain, data in payload.items():
+                os.mkdir(domain, 0o700, dir_fd=target_registry)
+                with transaction_directory(target_registry, domain) as target_domain:
+                    for filename, encoded in data.items():
+                        transaction_write(target_domain, filename, encoded)
+        stable()
+    return {"renewal_registrations": len(payload)}
+
+
 def transaction_encoded(metadata):
     data = json.dumps(metadata, ensure_ascii=True, separators=(",", ":")).encode()
     require(len(data) <= MAX_TRANSACTION_METADATA)
@@ -996,6 +1109,9 @@ def main():
     geo = commands.add_parser("geo-inputs")
     geo.add_argument("--directory", required=True)
     geo.add_argument("--destination")
+    renewal = commands.add_parser("renewal-inputs")
+    renewal.add_argument("--directory", required=True)
+    renewal.add_argument("--destination")
     for action in ("prepare", "check", "commit", "clean", "metadata",
                    "schedule-save", "schedule-metadata"):
         command = commands.add_parser("transaction-" + action)
@@ -1024,6 +1140,8 @@ def main():
             print(json.dumps(reality_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "geo-inputs":
             print(json.dumps(geo_inputs(args.directory, args.destination), separators=(",", ":")))
+        elif args.action == "renewal-inputs":
+            print(json.dumps(renewal_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "transaction-prepare":
             transaction_prepare(args.root, args.project, args.candidate, args.input_stage)
         elif args.action == "transaction-commit":

@@ -47,6 +47,7 @@ dockerTlsValidateCandidate() { :; }
 dockerRealityTargetsValidate() { :; }
 dockerIPv6NetworkManage() { :; }
 dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
+dockerConfigureSchemaFile() { printf '%s\n' "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"; }
 dockerConfigureReleasePrepare() {
     printf '%s\n' "$@" >"${TEST_ROOT}/release-arguments"
     DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/bundle"
@@ -100,7 +101,7 @@ docker() {
     esac
 }
 dockerCandidateCompose() {
-    local candidate=$1 marker
+    local candidate=$1 marker file relative
     shift
     [[ -d "${candidate}" && -e "${root}/locks/deployment.lock" ]] ||
         candidate_fail '候选校验没有持有部署锁'
@@ -164,12 +165,45 @@ dockerCandidateCompose() {
         done
         [[ "$(stat -c '%u:%g:%a' "${candidate}/data/reality-targets")" == 0:0:700 ]] ||
             candidate_fail '目标库目录权限不私密'
+        if [[ -n "${EXPECTED_RENEWAL_DIR}" ]]; then
+            [[ "$(find "${candidate}/secrets/renewal" -type f | wc -l)" == 4 &&
+                -z "$(find "${candidate}/secrets/renewal" -type d ! -perm 0700 -print -quit)" &&
+                -z "$(find "${candidate}/secrets/renewal" -type f ! -perm 0600 -print -quit)" &&
+                -z "$(find "${candidate}/secrets/renewal" \( ! -user root -o ! -group root \) -print -quit)" ]] ||
+                candidate_fail '停用续期登记的数量、所有者或权限错误'
+            while IFS= read -r file; do
+                relative=${file#"${EXPECTED_RENEWAL_DIR}/"}
+                cmp -- "${file}" "${candidate}/secrets/renewal/${relative}" ||
+                    candidate_fail '停用续期登记没有保持原字节'
+            done < <(find "${EXPECTED_RENEWAL_DIR}" -type f)
+        else
+            [[ ! -e "${candidate}/secrets/renewal" ]] || candidate_fail '无续期输入生成了登记'
+        fi
+        if jq -e '.reality_stream != null' "${EXPECTED_SPEC}" >/dev/null; then
+            cmp -- "${candidate}/config/nginx/stream/reality.conf" \
+                <(dockerGenerateRealityStreamConfig "${EXPECTED_SPEC}" /dev/stdout) ||
+                candidate_fail '共存 stream 未由规格重新生成'
+            jq -e '.services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp"] and
+              .services.nginx.ports == ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] and
+              any(.services.nginx.volumes[]; .target == "/etc/nginx/stream.d" and .read_only == true)
+            ' "${candidate}/compose.json" >/dev/null || candidate_fail '共存 Compose 映射错误'
+            jq -e '[.listeners[] | select(.listener_id == "entry-site" or .listener_id == "entry-reality")] |
+              length == 2 and all(.[]; .service == "nginx" and .public_port == 443 and .container_port == 15443)
+            ' "${candidate}/deployment.json" >/dev/null || candidate_fail '共存部署有效公网端口错误'
+            grep -q '@proxy.example.com:443?' "${candidate}/data/subscription/${TOKEN}" &&
+                grep -q '@proxy.example.com:24445?' "${candidate}/data/subscription/${TOKEN}" ||
+                candidate_fail '共存订阅没有保留有效公网端口及未绑定入口'
+        fi
         : >"${marker}"
         printf '%s\n' "${MODE}" >>"${TEST_ROOT}/candidate-checked"
         case "${MODE}" in
         int) kill -INT "${BASHPID}" ;;
         term) kill -TERM "${BASHPID}" ;;
         esac
+    fi
+    if [[ "$*" == --file*' nginx -t' ]]; then
+        printf '%s\n' "${MODE}" >>"${TEST_ROOT}/nginx-checked"
+        [[ "${MODE}" != nginx-fail ]] || return 1
     fi
     [[ "${MODE}" != validation-fail ]]
 }
@@ -277,6 +311,7 @@ prepare_target() {
     dockerInitializeStateRoot
     MODE=ok
     EXPECTED_GEO_DIR=
+    EXPECTED_RENEWAL_DIR=
     EXPECTED_SPEC="${TEST_ROOT}/base.json"
     EXPECTED_TRAFFIC_FILE="${SOURCE}/data/traffic/state.json"
 }
@@ -306,6 +341,109 @@ grep -q '"reality_results": 1' "${LOG}" && grep -q '"reality_blocked": 1' "${LOG
     fail '预览缺少目标库条数'
 ! grep -q 'Example.COM\|custom-reason' "${LOG}" || fail '预览泄露目标库记录'
 grep -q '"geo_files": 0' "${LOG}" || fail '无 Geo 预览缺少兼容计数'
+grep -q '"renewal_registrations": 0' "${LOG}" || fail '无续期预览缺少兼容计数'
+
+archive_variant renewal-disabled
+mkdir -m 0700 -- "${VARIANT}/secrets/renewal"
+for provider in dns_cf standalone alpn; do
+    domain="${provider//_/-}.example.com"
+    version=1
+    [[ "${provider}" != standalone ]] || version=2
+    [[ "${provider}" != alpn ]] || version=4
+    mkdir -m 0700 -- "${VARIANT}/secrets/renewal/${domain}"
+    jq -n --arg domain "${domain}" --arg provider "${provider}" --argjson version "${version}" \
+        '{schema_version:$version,domain:$domain,email:"admin@example.com",provider:$provider,enabled:false}' \
+        >"${VARIANT}/secrets/renewal/${domain}/request.json"
+    chmod 0600 "${VARIANT}/secrets/renewal/${domain}/request.json"
+done
+printf '# DNS provider\r\nDNS_Token=private-value\r\n' \
+    >"${VARIANT}/secrets/renewal/dns-cf.example.com/credentials.env"
+chmod 0600 "${VARIANT}/secrets/renewal/dns-cf.example.com/credentials.env"
+RENEWAL_SOURCE=${VARIANT}
+export_variant renewal-disabled
+prepare_target renewal-disabled
+EXPECTED_RENEWAL_DIR="${RENEWAL_SOURCE}/secrets/renewal"
+run_case renewal-disabled "${TEST_ROOT}/renewal-disabled.tar" 0
+grep -q '"renewal_registrations": 3' "${LOG}" || fail '续期预览缺少登记计数'
+! grep -q 'private-value\|admin@example.com\|dns-cf.example.com' "${LOG}" || fail '续期预览泄露登记或凭据'
+
+for variant in enabled webroot; do
+    VARIANT="${TEST_ROOT}/variant-renewal-${variant}"
+    cp -a -- "${RENEWAL_SOURCE}" "${VARIANT}"
+    filter='.enabled = true'
+    [[ "${variant}" != webroot ]] || filter='.schema_version = 3 | .provider = "webroot"'
+    jq "${filter}" "${VARIANT}/secrets/renewal/standalone.example.com/request.json" >"${TEST_ROOT}/request.json"
+    cat -- "${TEST_ROOT}/request.json" >"${VARIANT}/secrets/renewal/standalone.example.com/request.json"
+    export_variant "renewal-${variant}"
+    prepare_target "renewal-${variant}"
+    run_case "renewal-${variant}" "${TEST_ROOT}/renewal-${variant}.tar" "${PADM_DOCKER_RC_STATE}"
+    grep -q 'enabled=false' "${LOG}" || fail "续期 ${variant} 未明确拒绝"
+done
+
+archive_variant acme-empty
+mkdir -p -- "${VARIANT}/data/acme"
+chmod 0700 -- "${VARIANT}/data/acme"
+export_variant acme-empty
+prepare_target acme-empty
+run_case acme-empty "${TEST_ROOT}/acme-empty.tar" 0
+printf 'ACCOUNT_CONF=must-not-execute\n' >"${VARIANT}/data/acme/account.conf"
+chmod 0600 "${VARIANT}/data/acme/account.conf"
+export_variant acme-input
+prepare_target acme-input
+run_case acme-input "${TEST_ROOT}/acme-input.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q 'ACME 执行配置' "${LOG}" || fail '实际 ACME 输入未明确拒绝'
+
+archive_variant stream config/spec.json '
+  .core.protocols += [{id:1,core:"xray",listener_id:"entry-reality",server:"proxy.example.com",
+    public_port:24444,address_families:["ipv4","ipv6"],name:"Reality",
+    uuid:"11111111-1111-4111-8111-111111111111",reality:{server_name:"reality.example.com",
+      target_host:"reality.example.com",target_port:443,
+      public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
+      private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",short_id:"6ba85179e30d4fc2"}}] |
+  .core.protocols += [(.core.protocols[1] | .id = 26 | .listener_id = "entry-other" |
+    .public_port = 24445 | .name = "Other-gRPC" | .grpc = {service_name:"other"})] |
+  .accounts[0].listeners += ["entry-reality","entry-other"] |
+  .reality_stream = {listener_id:"entry-reality",website_listener_id:"entry-site"}'
+dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail '受管共存夹具无效'
+dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+mkdir -p -- "${VARIANT}/config/nginx/stream"
+printf 'untrusted archived stream;\n' >"${VARIANT}/config/nginx/stream/reality.conf"
+chmod 0640 "${VARIANT}/config/nginx/stream/reality.conf"
+STREAM_SOURCE=${VARIANT}
+export_variant stream
+prepare_target stream
+EXPECTED_SPEC="${STREAM_SOURCE}/config/spec.json"
+run_case stream "${TEST_ROOT}/stream.tar" 0
+jq -e '.listeners == [{listener_id:"entry-site",public_port:443},
+  {listener_id:"entry-reality",public_port:443},{listener_id:"entry-other",public_port:24445}]' \
+    <(sed -n '/^{/,$p' "${LOG}") >/dev/null || fail '共存预览未显示有效公网端口'
+
+prepare_target stream-nginx-fail
+EXPECTED_SPEC="${STREAM_SOURCE}/config/spec.json"
+MODE=nginx-fail
+run_case stream-nginx-fail "${TEST_ROOT}/stream.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q 'Nginx 候选配置校验失败' "${LOG}" || fail '共存 Nginx 失败未明确拒绝'
+
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" "${TEST_ROOT}/schema.json"
+jq 'del(.["x-padm-reality-stream-deployment"])' "${TEST_ROOT}/schema.json" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+prepare_target stream-missing-capability
+run_case stream-missing-capability "${TEST_ROOT}/stream.tar" "${PADM_DOCKER_RC_MANIFEST}"
+grep -q '目标控制 bundle 不支持' "${LOG}" || fail '共存能力缺失未明确拒绝'
+cp -- "${TEST_ROOT}/schema.json" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
+VARIANT="${TEST_ROOT}/variant-stream-host"
+cp -a -- "${STREAM_SOURCE}" "${VARIANT}"
+jq '.reality_stream = {listener_id:"entry-reality",host_website:{
+  domains:["host.example.com"],address:"host.docker.internal",port:8443}}' \
+    "${VARIANT}/config/spec.json" >"${TEST_ROOT}/host.json"
+cat -- "${TEST_ROOT}/host.json" >"${VARIANT}/config/spec.json"
+dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail '宿主网站拒绝夹具无效'
+dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+export_variant stream-host
+prepare_target stream-host
+run_case stream-host "${TEST_ROOT}/stream-host.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q '宿主网站共存' "${LOG}" || fail '宿主网站未明确拒绝'
 
 archive_variant geo
 mkdir -m 0750 -- "${VARIANT}/config/xray/geo"
@@ -507,6 +645,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 9 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 13 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
+grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 printf 'docker-recovery-preview-ok: %s cases\n' "${CASES}"

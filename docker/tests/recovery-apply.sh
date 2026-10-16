@@ -60,11 +60,26 @@ dockerRealityProbeRun() {
 }
 dockerCandidateCompose() {
     local candidate=$1
+    shift
     [[ -d "${candidate}" && -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] ||
         fail '候选校验未持有部署锁'
     jq -e '.services.xray != null and .services.evil == null' \
         "${candidate}/compose.json" >/dev/null || fail '候选没有重新生成 Compose'
     [[ ! -e "${candidate}/geo-probe.json" ]] || fail 'Geo 探针配置未清理'
+    case "$*" in
+    'config --format json') printf 'candidate-compose\n' >>"${MOCK_BACKEND}/events" ;;
+    'run --rm --no-deps xray -test -confdir /etc/padm/xray')
+        printf 'candidate-xray\n' >>"${MOCK_BACKEND}/events" ;;
+    "--file ${candidate}/compose.nginx-check.json run --rm --no-deps nginx -t")
+        jq -e '.services.nginx.extra_hosts | index("xray:127.0.0.1") != null and
+          index("subscription:127.0.0.1") != null' "${candidate}/compose.nginx-check.json" >/dev/null ||
+            fail 'Nginx 离线校验缺少核心或订阅临时解析'
+        printf 'candidate-nginx\n' >>"${MOCK_BACKEND}/events"
+        [[ "${MODE}" != nginx-fail ]] || return 1 ;;
+    'run --rm --no-deps subscription subscription --check')
+        printf 'candidate-subscription\n' >>"${MOCK_BACKEND}/events" ;;
+    *) fail "非预期候选校验: $*" ;;
+    esac
 }
 dockerComposeRun() {
     [[ "$1" == up ]] || fail "非预期在线动作: $*"
@@ -79,7 +94,7 @@ dockerComposeRun() {
     killed) kill -KILL "${BASHPID}" ;;
     esac
 }
-dockerRenewalScheduleInstall() { :; }
+dockerRenewalScheduleInstall() { fail '恢复不应安装或启用续期调度'; }
 dockerGeoScheduleInstall() { :; }
 dockerControlLogScheduleInstall() { :; }
 dockerControlSyncScheduleInstall() { :; }
@@ -283,19 +298,31 @@ jq -n --arg domain "${DOMAIN}" --arg alice "${ALICE}" '
    core:{type:"xray",secondary_type:null,protocols:[{
      id:21,core:"xray",listener_id:"entry-site",server:"proxy.example.com",public_port:24443,
      address_families:["ipv4","ipv6"],name:"Recovery",uuid:"11111111-1111-4111-8111-111111111111",
-     websocket:{domain:$domain,path:"abcdefgh",backend_port:31297,tls_port:8443}}]},
+     websocket:{domain:$domain,path:"abcdefgh",backend_port:31297,tls_port:8443}},
+    {id:1,core:"xray",listener_id:"entry-reality",server:"proxy.example.com",public_port:24444,
+     address_families:["ipv4","ipv6"],name:"Reality",uuid:"11111111-1111-4111-8111-111111111111",
+     reality:{server_name:"reality.example.com",target_host:"reality.example.com",target_port:443,
+       public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
+       private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",short_id:"6ba85179e30d4fc2"}},
+    {id:26,core:"xray",listener_id:"entry-other",server:"proxy.example.com",public_port:24445,
+     address_families:["ipv4","ipv6"],name:"Other-gRPC",uuid:"11111111-1111-4111-8111-111111111111",
+     grpc:{service_name:"other"},reality:{server_name:"reality.example.com",target_host:"reality.example.com",
+       target_port:443,public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
+       private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",short_id:"6ba85179e30d4fc2"}}]},
+   reality_stream:{listener_id:"entry-reality",website_listener_id:"entry-site"},
    tls:{domain:$domain},site:{mode:"static"},
    subscription:{enabled:true,token:"0123456789abcdef0123456789abcdef"},
    images:(["xray","sing-box","nginx","ops","net"] |
      map({key:.,value:("ghcr.io/example/padm-"+.+":test@sha256:"+("a"*64))}) | from_entries),
    host_integrations:[],accounts:[{
      id:$alice,name:"Alice",enabled:true,uuid:"44444444-4444-4444-8444-444444444444",
-     password:"Alice.-~@+=:Secret",shadowsocks_password:null,listeners:["entry-site"]}]}
+     password:"Alice.-~@+=:Secret",shadowsocks_password:null,
+     listeners:["entry-site","entry-reality","entry-other"]}]}
 ' >"${TEST_ROOT}/base.json"
 chmod 0600 "${TEST_ROOT}/base.json"
 jq -n --arg alice "${ALICE}" '
   {schema_version:1,groups:[{id:"share-cccccccccccccccc",name:"Recovery-Team",enabled:true,
-    token:"recovery-group-token",account_ids:[$alice],listener_ids:["entry-site"]}]}
+    token:"recovery-group-token",account_ids:[$alice],listener_ids:["entry-other","entry-reality","entry-site"]}]}
 ' >"${root}/config/share-groups.json"
 jq -n --arg alice "${ALICE}" --arg history "${HISTORY}" '
   def old: {xray:{upload:{generation:"old-core",value:17},download:{generation:"old-core",value:19}}};
@@ -325,6 +352,22 @@ jq -n --arg ip "$(sha256sum "${SOURCE}/config/xray/geo/geoip.dat" | cut -d ' ' -
     '{schema_version:1,version:"202610170001",enabled:false,
       sha256:{"geoip.dat":$ip,"geosite.dat":$site}}' >"${SOURCE}/config/xray/geo/state.json"
 chmod 0640 "${SOURCE}/config/xray/geo/"*
+mkdir -m 0700 -- "${SOURCE}/secrets/renewal"
+for provider in dns_cf standalone alpn; do
+    domain="${provider//_/-}.example.com"
+    version=1
+    [[ "${provider}" != standalone ]] || version=2
+    [[ "${provider}" != alpn ]] || version=4
+    mkdir -m 0700 -- "${SOURCE}/secrets/renewal/${domain}"
+    jq -n --arg domain "${domain}" --arg provider "${provider}" --argjson version "${version}" \
+        '{schema_version:$version,domain:$domain,email:"admin@example.com",provider:$provider,enabled:false}' \
+        >"${SOURCE}/secrets/renewal/${domain}/request.json"
+    chmod 0600 "${SOURCE}/secrets/renewal/${domain}/request.json"
+done
+printf '# DNS provider\r\nDNS_Token=private-value\r\n' \
+    >"${SOURCE}/secrets/renewal/dns-cf.example.com/credentials.env"
+chmod 0600 "${SOURCE}/secrets/renewal/dns-cf.example.com/credentials.env"
+printf 'untrusted archived stream;\n' >"${SOURCE}/config/nginx/stream/reality.conf"
 printf '{"services":{"evil":{"image":"untrusted.invalid/evil"}}}\n' >"${SOURCE}/compose.json"
 chmod 0640 "${SOURCE}/compose.json"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${SOURCE}" \
@@ -399,6 +442,33 @@ assert_empty() {
         fail '回滚残留容器或锁'
 }
 assert_deployed() {
+    local file relative
+    [[ "$(find "${root}/secrets/renewal" -type f | wc -l)" == 4 &&
+        -z "$(find "${root}/secrets/renewal" -type d ! -perm 0700 -print -quit)" &&
+        -z "$(find "${root}/secrets/renewal" -type f ! -perm 0600 -print -quit)" &&
+        -z "$(find "${root}/secrets/renewal" \( ! -user root -o ! -group root \) -print -quit)" ]] ||
+        fail '停用续期登记的数量、所有者或权限错误'
+    while IFS= read -r file; do
+        relative=${file#"${SOURCE}/secrets/renewal/"}
+        cmp -- "${file}" "${root}/secrets/renewal/${relative}" || fail '续期登记没有保持原字节'
+    done < <(find "${SOURCE}/secrets/renewal" -type f)
+    cmp -- "${root}/config/nginx/stream/reality.conf" \
+        <(dockerGenerateRealityStreamConfig "${TEST_ROOT}/base.json" /dev/stdout) ||
+        fail '恢复照搬了归档 stream，没有按规格重新生成'
+    jq -e '.services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp"] and
+      .services.nginx.ports == ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] and
+      any(.services.nginx.volumes[]; .target == "/etc/nginx/stream.d" and .read_only == true)
+    ' "${root}/compose.json" >/dev/null || fail '恢复共存 Compose 映射错误'
+    jq -e '[.listeners[] | select(.listener_id == "entry-site" or .listener_id == "entry-reality")] |
+      length == 2 and all(.[]; .service == "nginx" and .public_port == 443 and .container_port == 15443)
+    ' "${root}/deployment.json" >/dev/null || fail '恢复共存部署有效公网端口错误'
+    grep -q '@proxy.example.com:443?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" &&
+        grep -q '@proxy.example.com:24445?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" ||
+        fail '恢复共存订阅有效公网端口或未绑定入口错误'
+    [[ "$(grep -E '^candidate-|^geo-probe$|^up$' "${MOCK_BACKEND}/events")" == \
+        $'candidate-compose\ngeo-probe\ncandidate-xray\ncandidate-nginx\ncandidate-subscription\nup' ]] ||
+        fail '恢复未按 Compose、Geo、Xray、Nginx、订阅校验后再启动'
+    [[ ! -e "${root}/compose.nginx-check.json" ]] || fail '恢复残留 Nginx 临时校验配置'
     for file in state.json geoip.dat geosite.dat; do
         cmp -- "${SOURCE}/config/xray/geo/${file}" "${root}/config/xray/geo/${file}" ||
             fail '恢复 Geo 未保持原字节'
@@ -467,15 +537,15 @@ for backend in systemd cron; do
         fail '成功事务没有清理登记或锁'
 done
 
-for mode in geo-probe-fail first-write partial-move health int term; do
+for mode in geo-probe-fail nginx-fail first-write partial-move health int term; do
     prepare_target "${mode}"
     expected=failure
     [[ "${mode}" != int ]] || expected=130
     [[ "${mode}" != term ]] || expected=143
     run_child apply "${mode}" "${expected}"
     assert_empty
-    if [[ "${mode}" == geo-probe-fail ]]; then
-        ! grep -q '^up$' "${MOCK_BACKEND}/events" || fail 'Geo 探针失败后启动了服务'
+    if [[ "${mode}" == geo-probe-fail || "${mode}" == nginx-fail ]]; then
+        ! grep -q '^up$' "${MOCK_BACKEND}/events" || fail "${mode}: 候选校验失败后启动了服务"
     fi
     if [[ "${mode}" == first-write || "${mode}" == partial-move ]]; then
         [[ -e "${MOCK_BACKEND}/fault" ]] || fail "${mode}: 故障未注入"

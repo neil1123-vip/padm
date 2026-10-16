@@ -1451,11 +1451,12 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 ```
 
 The target must contain only an installed control skeleton: configuration, data, secrets,
-logs and backups must be empty, with no containers from the same project. The first scope
-accepts same-architecture v3 ordinary deployments with cores, manual TLS, static sites,
-account/share identities, saved traffic, Reality target libraries and the limited Geo data described below.
-Host integrations, control roles/sync, Reality coexistence, hopping, HTTP-01, and unhandled ACME or renewal files
-are rejected explicitly. Dangling references in disabled share groups are also rejected.
+logs and backups must be empty, with no containers from the same project. The supported scope
+accepts same-architecture v3 ordinary deployments and managed Reality coexistence with cores,
+manual TLS, static sites, account/share identities, saved traffic, Reality target libraries,
+limited Geo data and disabled renewal registrations described below. Host integrations,
+control roles/sync, host-website coexistence, hopping, HTTP-01 and ACME execution configuration
+remain rejected. Dangling references in disabled share groups are also rejected.
 Reality recovery only accepts `data/reality-targets/results.tsv` (15/16-column TSV) and
 `blocked.tsv` (four `|`-separated columns), limited to 16 MiB per file. All records are validated
 before copying the original bytes, preserving empty columns, duplicates and custom block reasons.
@@ -1467,6 +1468,12 @@ Geo recovery requires an Xray-containing deployment and a fixed-version managed 
 Archive manifest and state data digests are checked before network-disabled Xray parsing validation.
 No Geo data is downloaded and no automatic-update schedule is restored. `enabled=false` does not
 disable use of the Geo data; archives with `enabled=true` are rejected, not restored by disabling updates.
+Renewal recovery accepts only `enabled=false` DNS, standalone or ALPN registrations and DNS
+credentials, preserving original bytes and `0700/0600 root:root` permissions without installing
+a renewal schedule. Enabled registrations, webroot/HTTP-01 and actual ACME files are rejected;
+an empty `data/acme` directory is compatible. Managed Reality coexistence regenerates stream
+configuration from the spec and reports public port `443`; archived Nginx stream files are
+not executed. Host-website coexistence remains outside this scope.
 Release version, signature identity, manifest hash and every image must exactly match an
 independently verified release; supply matching assets explicitly for an older archive.
 Preview creates private `0700` staging, may pull digest-pinned images and runs candidate

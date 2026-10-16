@@ -645,6 +645,204 @@ class RealityInputTests(unittest.TestCase):
         self.assertFalse((self.destination / "data/reality-targets").exists())
 
 
+class RenewalInputTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="padm-renewal-recovery-",
+                                                     dir=os.environ["TMPDIR"])
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.source = self.root / "source"
+        self.registry = self.source / "secrets/renewal"
+        self.domain = "dns.example.com"
+        self.entry = self.registry / self.domain
+        self.entry.mkdir(parents=True, mode=0o700)
+        self.registry.chmod(0o700)
+        for name in recovery.REQUIRED:
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"docker\n" if name == "mode" else b"{}\n")
+            path.chmod(0o600)
+        self.destination = self.root / "candidate"
+        (self.destination / "secrets").mkdir(parents=True)
+        self.credentials = self.entry / "credentials.env"
+        self.credentials.write_bytes(b"# DNS provider\r\nDNS_Token=" + SECRET + b"\r\n")
+        self.credentials.chmod(0o600)
+        self.request = {"schema_version": 1, "domain": self.domain,
+                        "email": "admin@example.com", "provider": "dns_cf", "enabled": False}
+        self.put_request(self.request)
+
+    def seal(self):
+        archive = self.root / "source.tar"
+        if archive.exists():
+            archive.unlink()
+        recovery.export_archive(str(self.source), str(archive))
+        with tarfile.open(archive, "r:") as source:
+            path = self.source / recovery.MANIFEST
+            path.write_bytes(source.extractfile(recovery.MANIFEST).read())
+            path.chmod(0o600)
+
+    def put_request(self, request):
+        path = self.entry / "request.json"
+        path.write_bytes(request if isinstance(request, bytes) else
+                         (json.dumps(request, indent=3) + "\n\n").encode())
+        path.chmod(0o600)
+        self.seal()
+
+    def rejected(self):
+        with self.assertRaises((ValueError, OSError)):
+            recovery.renewal_inputs(str(self.source), str(self.destination))
+        self.assertFalse((self.destination / "secrets/renewal").exists())
+
+    def test_exact_private_copy_all_disabled_providers_and_cli_summary(self):
+        for schema, provider in ((2, "standalone"), (4, "alpn")):
+            domain = provider + ".example.com"
+            entry = self.registry / domain
+            entry.mkdir(mode=0o700)
+            path = entry / "request.json"
+            path.write_bytes((json.dumps(dict(self.request, schema_version=schema,
+                                              domain=domain, provider=provider)) + "\n").encode())
+            path.chmod(0o600)
+        self.seal()
+        result = recovery.renewal_inputs(str(self.source), str(self.destination))
+        self.assertEqual(result, {"renewal_registrations": 3})
+        target = self.destination / "secrets/renewal"
+        for path in [self.registry] + list(self.registry.rglob("*")):
+            copied = target / path.relative_to(self.registry)
+            self.assertEqual(stat.S_IMODE(copied.stat().st_mode), 0o700 if path.is_dir() else 0o600)
+            self.assertEqual((copied.stat().st_uid, copied.stat().st_gid), (0, 0))
+            if path.is_file():
+                self.assertEqual(copied.read_bytes(), path.read_bytes())
+        with self.assertRaises(FileExistsError):
+            recovery.renewal_inputs(str(self.source), str(self.destination))
+        result = subprocess.run([sys.executable, "-B", str(HELPER), "renewal-inputs",
+                                 "--directory", str(self.source)], capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), {"renewal_registrations": 3})
+        self.assertEqual(result.stderr, b"")
+        self.assertNotIn(SECRET, result.stdout)
+
+    def test_absent_and_empty_registry_compatibility(self):
+        self.credentials.unlink()
+        (self.entry / "request.json").unlink()
+        self.entry.rmdir()
+        self.seal()
+        self.assertEqual(recovery.renewal_inputs(str(self.source)), {"renewal_registrations": 0})
+        self.registry.rmdir()
+        self.seal()
+        self.assertEqual(recovery.renewal_inputs(str(self.source), str(self.destination)),
+                         {"renewal_registrations": 0})
+        self.assertFalse((self.destination / "secrets/renewal").exists())
+
+    def test_request_schema_enabled_and_http01_boundaries(self):
+        invalid = [dict(self.request, **{key: value}) for key, value in (
+            ("enabled", True), ("enabled", 0), ("schema_version", True),
+            ("schema_version", 2), ("provider", "dns_CF"), ("provider", "webroot"),
+            ("domain", "other.example.com"), ("email", "bad"), ("email", "a@example.com\n"))]
+        invalid.extend([dict(self.request, schema_version=3, provider="webroot"),
+                        dict(self.request, extra="unexpected"), b"[]", b"",
+                        b'{"enabled":false,"enabled":false}'])
+        for request in invalid:
+            with self.subTest(request=request):
+                self.put_request(request)
+                self.rejected()
+
+    def test_credentials_reject_duplicate_dangerous_names_and_invalid_lines(self):
+        invalid = [b"", b"# only comments\n", b"invalid\n", b"DNS_Token=a\nDNS_Token=b\n",
+                   b"DNS_Token=a\x00b", b"1TOKEN=a", b"export DNS_Token=a", b"\xff"]
+        invalid.extend(name.encode() + b"=private\n" for name in (
+            "PATH", "HOME", "ENV", "BASH_ENV", "IFS", "SHELLOPTS", "BASHOPTS", "CDPATH",
+            "GLOBIGNORE", "PS4", "DEBUG", "TMPDIR", "PYTHONPATH", "LD_PRELOAD",
+            "PADM_FLAG", "LE_FLAG", "ACME_FLAG", "Le_Flag"))
+        for data in invalid:
+            with self.subTest(data=data):
+                self.credentials.write_bytes(data)
+                self.seal()
+                self.rejected()
+
+    def test_missing_extra_or_changed_manifest_inputs_are_rejected(self):
+        self.credentials.write_bytes(b"DNS_Token=changed\n")
+        self.rejected()
+        self.credentials.unlink()
+        self.rejected()
+        self.seal()
+        self.rejected()
+        self.credentials.write_bytes(b"DNS_Token=valid\n")
+        self.credentials.chmod(0o600)
+        self.seal()
+        extra = self.entry / "extra"
+        extra.write_bytes(b"not allowed")
+        extra.chmod(0o600)
+        self.rejected()
+        self.seal()
+        self.rejected()
+        extra.unlink()
+        self.credentials.unlink()
+        self.put_request(dict(self.request, schema_version=2, provider="standalone"))
+        self.credentials.write_bytes(b"DNS_Token=unexpected\n")
+        self.credentials.chmod(0o600)
+        self.seal()
+        self.rejected()
+
+    def test_unsafe_permissions_ownership_links_and_size_limits(self):
+        for path, mode in ((self.registry, 0o750), (self.entry, 0o750),
+                           (self.credentials, 0o640)):
+            original = stat.S_IMODE(path.stat().st_mode)
+            path.chmod(mode)
+            self.rejected()
+            path.chmod(original)
+        os.chown(self.credentials, 10001, 10001)
+        self.rejected()
+        os.chown(self.credentials, 0, 0)
+        outside = self.root / "outside"
+        self.credentials.rename(outside)
+        self.credentials.symlink_to(outside)
+        self.rejected()
+        self.credentials.unlink()
+        os.link(outside, self.credentials)
+        self.rejected()
+        self.credentials.unlink()
+        self.credentials.write_bytes(b"DNS_Token=valid\n")
+        self.credentials.chmod(0o600)
+        for path, limit in ((self.credentials, 1024 * 1024), (self.entry / "request.json", 64 * 1024)):
+            data = path.read_bytes()
+            os.truncate(path, limit + 1)
+            self.rejected()
+            path.write_bytes(data)
+
+    def test_read_mutation_and_registry_replacement_fail_before_copy(self):
+        inode = self.credentials.stat().st_ino
+        original = os.read
+
+        def changed_read(fd, size):
+            data = original(fd, size)
+            if data and os.fstat(fd).st_ino == inode:
+                self.credentials.write_bytes(b"DNS_Token=changed\n")
+            return data
+
+        with mock.patch.object(recovery.os, "read", side_effect=changed_read):
+            self.rejected()
+        self.seal()
+        original_read = recovery.transaction_read
+
+        def replaced_read(parent, name, *args, **kwargs):
+            result = original_read(parent, name, *args, **kwargs)
+            if name == "request.json":
+                self.registry.rename(self.source / "secrets/old-renewal")
+                self.registry.mkdir(mode=0o700)
+            return result
+
+        with mock.patch.object(recovery, "transaction_read", side_effect=replaced_read):
+            self.rejected()
+
+    def test_cli_rejection_does_not_expose_private_input(self):
+        self.credentials.write_bytes(b"PATH=" + SECRET)
+        self.seal()
+        result = subprocess.run([sys.executable, "-B", str(HELPER), "renewal-inputs",
+                                 "--directory", str(self.source)], capture_output=True)
+        self.assertEqual(result.returncode, 15)
+        self.assertEqual(result.stdout, b"")
+        self.assertNotIn(SECRET, result.stderr)
+
+
 class GeoInputTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="padm-geo-recovery-",

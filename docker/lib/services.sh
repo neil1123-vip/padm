@@ -7527,6 +7527,13 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     fi
+    if [[ -n "${DOCKER_RECOVERY_INPUT:-}" ]] &&
+        ! { python3 -B "${DOCKER_LIB_DIR}/recovery.py" renewal-inputs \
+            --directory "${DOCKER_RECOVERY_INPUT}" --destination "${candidate}" >/dev/null &&
+            dockerRenewalRegistryValidate "${candidate}/secrets/renewal"; }; then
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
     if ! dockerValidateCandidate "${specFile}" "${candidate}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
@@ -7548,6 +7555,8 @@ dockerConfigureApply() {
         if ! dockerInstallCandidate "${candidate}" "${backup}" ||
             { [[ -d "${candidate}/data/reality-targets" ]] &&
                 ! mv -- "${candidate}/data/reality-targets" "${root}/data/"; } ||
+            { [[ -d "${candidate}/secrets/renewal" ]] &&
+                ! mv -- "${candidate}/secrets/renewal" "${root}/secrets/"; } ||
             ! dockerEnsureRuntimeDataPermissions ||
             ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
             ! dockerTrafficScheduleInstall; then
