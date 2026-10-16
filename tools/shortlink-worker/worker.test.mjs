@@ -51,7 +51,19 @@ for (const [target, accept] of [
     assert.equal(image.width, image.height);
     const decoded = jsQR(new Uint8ClampedArray(image.data), image.width, image.height);
     assert.equal(decoded?.data, content);
-    assert.equal(image.width, (17 + 4 * decoded.version + 8) * 4);
+    assert.equal(image.width, (17 + 4 * decoded.version + 8) * 6);
+    assert.ok(image.width <= 740);
+    for (let y = 0; y < image.height; y++) {
+        for (let x = 0; x < image.width; x++) {
+            const offset = (y * image.width + x) * 4;
+            const [red, green, blue, alpha] = image.data.subarray(offset, offset + 4);
+            assert.ok(red === 0 || red === 255);
+            assert.deepEqual([green, blue, alpha], [red, red, 255]);
+            if (x < 24 || y < 24 || x >= image.width - 24 || y >= image.height - 24) {
+                assert.equal(red, 255);
+            }
+        }
+    }
 }
 assert.equal(await (await send("GET", undefined, "", env, `${url}?format=text`, "text/html")).text(), content);
 for (const accept of ["text/plain,text/html;q=0", "text/html; q=0.000", "text/html-other"]) {
@@ -61,7 +73,8 @@ for (const accept of ["text/plain,text/html;q=0", "text/html; q=0.000", "text/ht
 }
 const longProtocol = `vless://uuid@example.test:443?type=xhttp&extra=${"x".repeat(1800)}#中文`;
 const boundaryProtocol = longProtocol + "x".repeat(2953 - new TextEncoder().encode(longProtocol).length);
-for (const protocol of [longProtocol, boundaryProtocol]) {
+const mediumBoundary = longProtocol + "x".repeat(2331 - new TextEncoder().encode(longProtocol).length);
+for (const protocol of [longProtocol, mediumBoundary, `${mediumBoundary}x`, boundaryProtocol]) {
     await send("PUT", protocol);
     result = await send("GET", undefined, "", env, url, "text/html");
     assert.equal(result.status, 200);
@@ -69,7 +82,13 @@ for (const protocol of [longProtocol, boundaryProtocol]) {
     const decoded = jsQR(new Uint8ClampedArray(image.data), image.width, image.height);
     assert.equal(decoded?.data, protocol);
     assert.equal(image.width, image.height);
-    assert.equal(image.width, (17 + 4 * decoded.version + 8) * 4);
+    const modules = 17 + 4 * decoded.version + 8;
+    assert.equal(image.width % modules, 0);
+    assert.ok(image.width / modules >= 4 && image.width / modules <= 6);
+    assert.ok(image.width <= 740);
+    if (protocol === mediumBoundary || protocol === boundaryProtocol) {
+        assert.equal(decoded.version, 40);
+    }
 }
 await send("PUT", `${boundaryProtocol}x`);
 result = await send("GET", undefined, "", env, `${url}?format=png`);

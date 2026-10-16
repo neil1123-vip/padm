@@ -2,6 +2,7 @@ import qrImage from "qr-image";
 
 const MAX_BODY_BYTES = 128 * 1024;
 const MAX_QR_BYTES = 2953;
+const MAX_QR_M_BYTES = 2331;
 const SHORT_PATH = /^\/s\/([0-9a-f]{32})$/;
 
 function response(body, status = 200, contentType = "text/plain; charset=utf-8") {
@@ -49,11 +50,16 @@ export default {
                      (request.headers.get("Accept") || "").split(",").some((type) =>
                          /^\s*text\/html\s*(?:;|$)/i.test(type) &&
                          !/;\s*q\s*=\s*0(?:\.0*)?\s*(?:;|$)/i.test(type)))) {
-                    if (new TextEncoder().encode(value).length > MAX_QR_BYTES) {
+                    const bytes = new TextEncoder().encode(value).length;
+                    if (bytes > MAX_QR_BYTES) {
                         return response("完整协议超过单张二维码容量；在短链后加 ?format=text 获取文本并复制导入。\n", 422);
                     }
+                    // 常用协议提高纠错和码点尺寸；长码保留容量，并避免浏览器缩小过大的图片。
+                    const level = bytes <= MAX_QR_M_BYTES ? "M" : "L";
+                    const modules = qrImage.matrix(value, level).length + 8;
+                    const size = Math.min(6, Math.floor(740 / modules));
                     const image = response(qrImage.imageSync(value, {
-                        type: "png", ec_level: "L", size: 4, margin: 4,
+                        type: "png", ec_level: level, size, margin: 4,
                     }), 200, "image/png");
                     image.headers.set("Content-Disposition", 'inline; filename="padm-node.png"');
                     return image;
