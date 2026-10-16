@@ -169,6 +169,38 @@ dockerEditVlessEncryptionGenerate() {
         rm -f -- "${raw}" "${pair}"
 }
 
+dockerEditRotateSsUser() {
+    local draft=$1 listener=$2 image=$3 password attempt
+    jq -e --arg listener "${listener}" '
+      .schema_version == 3 and
+      ([.core.protocols[] | select(.listener_id == $listener and .id == 30 and .core == "sing-box")] |
+        length) == 1
+    ' "${draft}" >/dev/null 2>&1 || {
+        dockerError '自用用户密钥轮换需要唯一 v3 sing-box Shadowsocks2022 入口'
+        return 1
+    }
+    for attempt in {1..32}; do
+        password=$(dockerAccountRandomSsPassword "${image}") || {
+            dockerError 'Shadowsocks 用户密钥生成失败，未改写已安装配置'
+            return 1
+        }
+        # 密钥只经标准输入或私密文件描述符，不进入 jq 参数或预览。
+        printf '%s' "${password}" | jq -e --rawfile password /dev/stdin '
+          (any(.core.protocols[] | select(.id == 30);
+            .shadowsocks.server_password == $password or .shadowsocks.user_password == $password) | not) and
+          (any((.accounts // [])[]; .shadowsocks_password == $password) | not)
+        ' "${draft}" >/dev/null 2>&1 || continue
+        jq --arg listener "${listener}" --rawfile password <(printf '%s' "${password}") '
+          .core.protocols |= map(if .listener_id == $listener
+            then .shadowsocks.user_password = $password else . end)
+        ' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || return 1
+        return 0
+    done
+    dockerError '无法生成不冲突的 Shadowsocks 用户密钥，未改写已安装配置'
+    return 1
+}
+
 dockerSetupGenerateSpec() {
     local core=$1 protocols=$2 server=$3 families=$4 realityPort=$5 target=$6 targetPort=$7 sni=$8
     local domain=$9 wsPort=${10} subscription=${11} output=${12} secondaryCore=${13:-} secondaryPort=${14:-8444}
@@ -2108,7 +2140,7 @@ dockerEditTlsDomainChange() {
 dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
     local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
-    local encryptionAction= encryptionListener=
+    local encryptionAction= encryptionListener= ssRotateListener=
     local realityTarget= targetHost= targetPort= targetSni=
     local realityStream= streamListener= streamWebsite=
     local streamDomains= streamAddress= streamPort=8443
@@ -2931,6 +2963,12 @@ dockerEditCommand() {
             encryptionListener=$2 encryptionAction=$3
             shift 3
             ;;
+        --rotate-ss-user)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${ssRotateListener}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            ssRotateListener=$2
+            shift 2
+            ;;
         --reality-target)
             [[ "$#" -ge 5 && -n "$2" && "$2" != --* && -z "${realityTarget}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -2981,12 +3019,13 @@ dockerEditCommand() {
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
-    [[ -z "${encryptionAction}" || (
+    [[ -z "${encryptionAction}${ssRotateListener}" || (
         -z "${specFile}${regenerateReality}${realityTarget}${realityStream}${siteMode}${alpnListener}" &&
         -z "${http01}${socks5}${routingKind}${httpRelay}${portAlias}${fail2banAction}${cdnAction}${xhttpAction}" &&
         -z "${portHoppingAction}${tproxyAction}${tunAction}${protocolKind}${entryAction}${entryCore}" &&
-        -z "${entryTlsDomain}${entryTlsMode}${tlsMigrateDomain}${internalListener}" ) ]] || {
-        dockerError 'VLESS Encryption 不能与规格导入或其它专项动作组合'
+        -z "${entryTlsDomain}${entryTlsMode}${tlsMigrateDomain}${internalListener}" &&
+        ( -z "${encryptionAction}" || -z "${ssRotateListener}" ) ) ]] || {
+        dockerError '密钥专项不能组合使用，也不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
     [[ "${regionAllowSet}" -eq 0 || ( "${routingKind}" == region && "${routingAction}" == enable ) ]] ||
@@ -3169,7 +3208,7 @@ dockerEditCommand() {
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
         -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" && -z "${internalListener}" &&
-        -z "${encryptionAction}" ) ||
+        -z "${encryptionAction}${ssRotateListener}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -3236,7 +3275,7 @@ dockerEditCommand() {
         -z "${cdnAction}" && -z "${fail2banAction}" && -z "${xhttpAction}" &&
         -z "${portHoppingAction}" && -z "${tproxyAction}" && -z "${tunAction}" &&
         -z "${protocolKind}" && -z "${entryAction}" && -z "${tlsMigrateDomain}" && -z "${internalListener}" &&
-        -z "${encryptionAction}" ]]; then
+        -z "${encryptionAction}${ssRotateListener}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -4263,6 +4302,13 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
+    if [[ -n "${ssRotateListener}" ]]; then
+        opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
+        dockerEditRotateSsUser "${draft}" "${ssRotateListener}" "${opsImage}" &&
+            dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+        printf '仅轮换入口 %s 的 Shadowsocks 自用用户密钥；服务器密钥和独立账号保持，提交后重新导入链接。\n' \
+            "${ssRotateListener}"
+    fi
     [[ -z "${encryptionAction}" ]] ||
         printf '入口 %s 的 VLESS Encryption 将%s；提交后需重新导入链接，旧客户端参数将失效。\n' \
             "${encryptionListener}" "$([[ "${encryptionAction}" == enable ]] && printf '启用' || printf '关闭')"
@@ -4368,6 +4414,19 @@ dockerEditCommand() {
 
 dockerEditCompatibilityValidate() {
     local editBefore=$1 editAfter=$2
+    if [[ -n "${ssRotateListener:-}" ]]; then
+        jq -en --arg listener "${ssRotateListener}" \
+            --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '
+          def fixed:
+            .core.protocols |= map(if .listener_id == $listener
+              then del(.shadowsocks.user_password) else . end);
+          ($before[0] | fixed) == ($after[0] | fixed)
+        ' >/dev/null 2>&1 || {
+            dockerError 'Shadowsocks 轮换仅允许选中入口的自用用户密钥变更，其它完整规格必须保持'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        return 0
+    fi
     if [[ -n "${encryptionAction:-}" ]]; then
         jq -en --arg listener "${encryptionListener}" \
             --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '

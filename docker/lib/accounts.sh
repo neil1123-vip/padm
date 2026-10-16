@@ -93,7 +93,7 @@ dockerAccountRandomPassword() {
 dockerAccountRandomSsPassword() {
     local image=${1:-} value
     image=${image:-$(dockerAccountImage ops)} || return 1
-    value=$(docker run --rm --read-only --network none --cap-drop ALL \
+    value=$(docker run --rm --read-only --network none --log-driver none --cap-drop ALL \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --entrypoint openssl "${image}" rand -base64 16 2>/dev/null | tr -d '\r\n') || value=

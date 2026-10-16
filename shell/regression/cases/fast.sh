@@ -7880,6 +7880,19 @@ runDockerShadowsocksRegression() {
     bash "${PROJECT_ROOT}/docker/tests/shadowsocks.sh"
 }
 
+runDockerShadowsocksRotationRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/shadowsocks-rotation.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/"{accounts,lifecycle,menu,setup}.sh \
+            "${PROJECT_ROOT}/docker/tests/shadowsocks-rotation.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/shadowsocks-rotation.sh"
+}
+
+runDockerShadowsocksRealRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/shadowsocks-real.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/shadowsocks-real.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/shadowsocks-real.sh"
+}
+
 runDockerTuicRegression() {
     bash "${PROJECT_ROOT}/docker/tests/tuic.sh"
 }

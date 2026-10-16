@@ -418,7 +418,9 @@ Hysteria2, AnyTLS, NaiveProxy, Shadowsocks, and TUIC can only be copied within s
 An existing v3 deployment can add supported protocols through the protocol menu or
 `edit --protocol-add`, reusing the source identity and explicitly authorized accounts.
 Adding the first TLS listener also requires its domain and managed certificate.
-Shadowsocks method, keys, UUID, and existing listener identity remain frozen during editing.
+Shadowsocks method, server key, UUID, and existing listener identity remain frozen.
+Ordinary editing and `--spec` still reject manual key changes; use the focused
+self-use user-key rotation below.
 Deleting the last secondary-core listener disables that core; existing listener ownership cannot change.
 Copies reuse the original credentials. Listeners with the same
 UUID share accumulated traffic and quota rather than creating separate users.
@@ -427,6 +429,26 @@ cannot bypass existing identity or internal-port protections.
 An older deployment without `config/spec.json` requires its complete original spec;
 missing fields, additional accounts, custom routes/sites, or mismatched mount roots
 reject editing rather than reconstructing an invented spec from runtime summaries.
+
+Docker menu `9 → 19. Shadowsocks self-use user-key rotation` or these commands
+rotate only `shadowsocks.user_password` on one existing v3 sing-box protocol `30` listener:
+
+```bash
+padm-docker edit --rotate-ss-user <listener-id> --preview
+padm-docker edit --rotate-ss-user <listener-id> --confirm PADM-DOCKER-EDIT
+```
+
+The server key, UUID, other listeners (including those sharing the UUID), independent
+account keys, quotas, and accumulated traffic remain preserved. After release verification,
+trusted ops OpenSSL generates a canonical Base64 16-byte key, trying at most 32 times and
+rejecting collisions with existing SS server, self-use, and independent account keys.
+Secrets stay out of process arguments and logs. The main subscription and selected self-use
+URI update; independent account share-group content stays unchanged. Clients must reimport
+the URI; draining existing connections is not promised. This edit cannot combine with
+other focused edits or `--spec`, and adds no schema or capability marker.
+The focused contract, Docker amd64 dual-stack TCP/UDP probes, and all 61 integrated
+contracts passed; complete management stays `deferred`.
+See [plan 3D.24](../docker-menu-parity-plan.md#3d24-shadowsocks-逐入口自用用户密钥轮换).
 
 ```bash
 padm-docker edit

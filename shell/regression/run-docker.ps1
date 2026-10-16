@@ -340,7 +340,7 @@ try {
         'docker-port-hopping-recovery-real', 'docker-port-hopping-share-real', 'docker-cdn-entries-real',
         'docker-alpn-real', 'docker-xhttp-real', 'docker-hy2-sites-real', 'docker-fail2ban-real',
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real',
-        'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real'
+        'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real', 'docker-shadowsocks-real'
     )
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real',
@@ -466,7 +466,14 @@ try {
             ops = 'padm-local/padm-ops:control-4c4b'
             net = 'padm-local/padm-net:control-4c4b'
         }
-        if ($Selector -eq 'docker-fail2ban-real') {
+        if ($Selector -eq 'docker-shadowsocks-real') {
+            $references = [ordered]@{
+                xray = 'padm-local/padm-xray:control-4c4b'
+                'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
+                ops = 'padm-local/padm-ops:control-4c4b'
+                curl = 'padm-local/padm-static-site-h3-client:20261012'
+            }
+        } elseif ($Selector -eq 'docker-fail2ban-real') {
             $references = [ordered]@{ net = 'padm-local/padm-net:control-4c4b' }
         } elseif ($Selector -eq 'docker-tun-real') {
             $references = [ordered]@{

@@ -1,9 +1,91 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
+trap 'printf "docker-shadowsocks-real-fail: line=%s rc=%s\n" "${LINENO}" "$?" >&2' ERR
 
 # 只验收本次唯一项目与命名卷，不发布宿主端口或接管现有部署。
-[[ "$#" == 4 ]] || { printf 'usage: shadowsocks-real.sh <local-xray> <local-sing-box> <local-ops> <local-curl>\n' >&2; exit 2; }
+[[ "$#" == 0 || "$#" == 4 ]] || {
+    printf 'usage: shadowsocks-real.sh [<local-xray> <local-sing-box> <local-ops> <local-curl>]\n' >&2
+    exit 2
+}
+if [[ "$#" == 0 ]]; then
+    python3 - "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import runpy
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+
+scripts = Path(sys.argv[1])
+helpers = runpy.run_path(str(scripts / "http-relay-published-real.py"))
+command, stop, wait_ready = (helpers[name] for name in ("command", "stop", "wait_ready"))
+assert os.getuid() == 0 and sys.platform == "linux" and Path("/.dockerenv").is_file()
+assert {item["ifname"] for item in json.loads(command(["ip", "-j", "link", "show"]))} == {"lo"}
+assert not Path("/var/run/docker.sock").exists(), "不得使用宿主 Docker Socket"
+inputs = json.loads(Path("/node-images.json").read_text())
+assert set(inputs) == {"xray", "sing-box", "ops", "curl"}
+node = Path(tempfile.mkdtemp(prefix=".tmp-shadowsocks-", dir="/n"))
+docker = ["docker", "--host", f"unix://{node}/docker.sock"]
+daemon = child = None
+
+def terminate(*_):
+    raise SystemExit(143)
+
+signal.signal(signal.SIGTERM, terminate)
+with (node / "daemon.log").open("wb") as log, (node / "child.log").open("wb") as child_log:
+    try:
+        # 离线镜像只进入本次独立 daemon，源码仍取当前工作区快照。
+        daemon = subprocess.Popen([
+            "dockerd", "--host", docker[-1], "--data-root", str(node / "docker"),
+            "--exec-root", str(node / "run"), "--pidfile", str(node / "daemon.pid"),
+            "--feature", "containerd-snapshotter=true", "--storage-driver", "overlayfs",
+            "--bip", "172.30.0.1/24"], stdout=log, stderr=log)
+        wait_ready(lambda: subprocess.run(docker + ["info"], capture_output=True).returncode == 0, 30)
+        command(docker + ["load", "--input", "/node-images.tar"], timeout=120)
+        for item in inputs.values():
+            assert re.fullmatch(r"sha256:[0-9a-f]{64}", item["image_id"])
+            image = json.loads(command(docker + ["image", "inspect", item["reference"]]))[0]
+            assert image["Id"] == item["image_id"]
+        child = subprocess.Popen([
+            "bash", str(scripts / "shadowsocks-real.sh"),
+            *(inputs[name]["image_id"] for name in ("xray", "sing-box", "ops", "curl"))],
+            env=dict(os.environ, DOCKER_HOST=docker[-1]), stdout=child_log, stderr=child_log)
+        child_status = child.wait(timeout=600)
+        assert child_status == 0, f"Shadowsocks 实链路子脚本退出码 {child_status}"
+        assert not command(docker + ["ps", "-aq"]).strip(), "测试容器未清理"
+        assert not command(docker + ["volume", "ls", "-q"]).strip(), "测试卷未清理"
+        print("docker-shadowsocks-real-images=" + json.dumps(inputs), flush=True)
+    finally:
+        active_error = sys.exc_info()[0] is not None
+        try:
+            if child is not None:
+                stop(child)
+            if daemon is not None:
+                try:
+                    result = subprocess.run(docker + ["ps", "-aq"], capture_output=True, timeout=5)
+                    if not result.returncode and result.stdout.strip():
+                        command(docker + ["rm", "-f"] + result.stdout.decode().split(), timeout=15)
+                finally:
+                    stop(daemon)
+        finally:
+            try:
+                for name in (("child.log", "daemon.log") if active_error else ("child.log",)):
+                    output = (node / name).read_text(errors="replace")
+                    output = re.sub(r"ss://[^\s\"']+", "ss://[已隐藏]", output)
+                    output = re.sub(r"[A-Za-z0-9+/]{22}==", "[已隐藏密钥]", output)
+                    print(output[-4000:] if active_error else output,
+                          file=sys.stderr if active_error else sys.stdout, flush=True)
+            finally:
+                assert node.parent == Path("/n") and node.name.startswith(".tmp-shadowsocks-")
+                shutil.rmtree(node)
+PY
+    exit 0
+fi
 [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || {
     printf 'shadowsocks-real.sh requires Linux root\n' >&2
     exit 1
@@ -125,7 +207,7 @@ jq -e '
 ' "${candidate}/deployment.json" >/dev/null
 [[ "$(stat -c '%u:%g:%a' "${candidate}/config/sing-box/config.json")" == 0:10001:640 ]]
 [[ "$(stat -c '%u:%g:%a' "${candidate}/config/sing-box")" == 0:10001:750 ]]
-[[ "$(stat -c '%u:%g:%a' "${candidate}/config/sing-box/users.base")" == 0:10001:640 ]]
+[[ "$(stat -c '%u:%g:%a' "${candidate}/config/sing-box/users.base")" == 0:0:600 ]]
 [[ "$(stat -c '%u:%g:%a' "${candidate}/config/spec.json")" == 0:0:600 ]]
 cp -a "${candidate}/config/." "${PADM_DOCKER_INSTALL_DIR}/config/"
 cp -a "${candidate}/data/." "${PADM_DOCKER_INSTALL_DIR}/data/"
@@ -191,7 +273,13 @@ import urllib.request
 
 proof = b"padm-shadowsocks-real-proof\n"
 phase = sys.argv[1]
-assert phase in ("allow", "deny")
+allowed_ports = {
+    "allow": {2081, 2082},
+    "deny": set(),
+    "accounts": {2081, 2082, 2085, 2086},
+    "rotated": {2081, 2082, 2085, 2086},
+}
+assert phase in allowed_ports
 def read(sock, size):
     data = b""
     while len(data) < size:
@@ -275,20 +363,25 @@ def counts():
     return json.loads(urllib.request.urlopen("http://origin:8088/counts", timeout=5).read())
 def probe(item):
     port, transport = item
-    expected = phase == "allow" and port < 2083
+    expected = port in allowed_ports[phase]
     try:
         accepted = (tcp if transport == "tcp" else udp)(port)
     except (OSError, EOFError, ValueError):
         accepted = False
     assert accepted == expected, (phase, port, transport, accepted)
     return str(port)+"/"+transport
-before = counts()
-items = [(port, transport) for port in range(2081, 2085) for transport in ("tcp", "udp")]
-with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-    results = list(pool.map(probe, items))
-after = counts()
-expected_delta = 2 if phase == "allow" else 0
-assert {key:after[key]-before[key] for key in before} == {"tcp":expected_delta, "udp":expected_delta}
+end_port = {"allow": 2085, "deny": 2085, "accounts": 2087, "rotated": 2089}[phase]
+results = []
+# 拒绝探针单独计数，防止成功账号的请求掩盖旧密钥到达 origin。
+for expected in (True, False):
+    items = [(port, transport) for port in range(2081, end_port)
+             if (port in allowed_ports[phase]) == expected for transport in ("tcp", "udp")]
+    before = counts()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results.extend(pool.map(probe, items))
+    after = counts()
+    expected_delta = len(items)//2 if expected else 0
+    assert {key:after[key]-before[key] for key in before} == {"tcp":expected_delta, "udp":expected_delta}
 print("docker-shadowsocks-real-probe-ok: phase="+phase+" source=protocol-links family=ipv4,ipv6 socks="+",".join(results))
 PY
 chmod 0750 "${TEST_ROOT}/runtime" "${TEST_ROOT}/runtime/"{client,origin,probe}
@@ -346,7 +439,8 @@ docker inspect "${server}" |
 addresses=$(docker inspect "${server}" |
     jq -cer --arg project "${project}" '.[0].NetworkSettings.Networks[$project] | [.IPAddress,.GlobalIPv6Address]')
 # 只从实际 URI 解析认证和 authority；地址映射与原始 spec 无关。
-python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" <<'PY'
+startClient() {
+    python3 - "$1" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" "${2:-}" <<'PY'
 import base64
 import ipaddress
 import json
@@ -356,11 +450,12 @@ import urllib.parse
 
 lines = pathlib.Path(sys.argv[1]).read_text().splitlines()
 endpoints = json.loads(sys.argv[3])
-assert len(lines) == 1 and [ipaddress.ip_address(value).version for value in endpoints] == [4, 6]
+assert len(lines) in (1, 2) and [ipaddress.ip_address(value).version for value in endpoints] == [4, 6]
 def parse(line):
     uri = urllib.parse.urlsplit(line)
     assert uri.scheme == "ss" and uri.hostname == "ss.padm.test" and uri.port == 35470
-    assert not uri.query and not uri.path and urllib.parse.unquote(uri.fragment) == "entry-shadowsocks"
+    assert not uri.query and not uri.path
+    assert urllib.parse.unquote(uri.fragment) in ("entry-shadowsocks", "entry-shadowsocks-independent")
     method = urllib.parse.unquote(uri.username or "")
     password = urllib.parse.unquote(uri.password or "")
     assert method == "2022-blake3-aes-128-gcm"
@@ -383,8 +478,21 @@ for invalid in (sample._replace(scheme="vless").geturl(),
     else:
         raise AssertionError("invalid SIP002 URI accepted")
 uri, method, password, server_key = parse(lines[0])
+assert urllib.parse.unquote(uri.fragment) == "entry-shadowsocks"
+modes = [("multi", password), ("server-only", server_key)]
+if len(lines) == 2:
+    account_uri, account_method, account_password, account_server_key = parse(lines[1])
+    assert urllib.parse.unquote(account_uri.fragment) == "entry-shadowsocks-independent"
+    assert account_method == method and account_server_key == server_key and account_password != password
+    modes.append(("independent", account_password))
+if sys.argv[4]:
+    previous = pathlib.Path(sys.argv[4]).read_text().splitlines()
+    assert len(lines) == len(previous) == 2 and previous[1] == lines[1] and previous[0] != lines[0]
+    _, old_method, old_password, old_server_key = parse(previous[0])
+    assert old_method == method and old_server_key == server_key and old_password != password
+    modes.append(("old-self", old_password))
 config = {"log":{"level":"warn"}, "inbounds":[], "outbounds":[], "route":{"rules":[]}}
-for mode, credential in (("multi", password), ("server-only", server_key)):
+for mode, credential in modes:
     for family, endpoint in zip((4, 6), endpoints):
         tag = mode+"-v"+str(family)
         config["inbounds"].append({"type":"socks", "tag":"socks-"+tag, "listen":"0.0.0.0",
@@ -394,11 +502,13 @@ for mode, credential in (("multi", password), ("server-only", server_key)):
         config["route"]["rules"].append({"inbound":["socks-"+tag], "action":"route", "outbound":tag})
 pathlib.Path(sys.argv[2]).write_text(json.dumps(config))
 PY
-chmod 0640 "${TEST_ROOT}/runtime/client/config.json"
-chown 0:10001 "${TEST_ROOT}/runtime/client/config.json"
-upload runtime/client
-compose run --rm --no-deps --pull never client check -c /etc/padm/client/config.json >/dev/null
-compose up -d --pull never client
+    chmod 0640 "${TEST_ROOT}/runtime/client/config.json"
+    chown 0:10001 "${TEST_ROOT}/runtime/client/config.json"
+    upload runtime/client
+    compose run --rm --no-deps --pull never client check -c /etc/padm/client/config.json >/dev/null
+    compose up -d --pull never --force-recreate client
+}
+startClient "${TEST_ROOT}/links.txt"
 client=$(compose ps -q client)
 docker inspect "${client}" |
     jq -e --arg image "${SING_ID}" '
@@ -485,5 +595,48 @@ dockerTrafficSnapshot
 jq -e --arg uuid "${UUID}" '
   .accounts[$uuid] | .upload > 0 and .download > 0 and .limit_bytes == 0
 ' "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" >/dev/null
-printf 'docker-shadowsocks-real-ok: endpoint=isolated-compose quota=deny-restore xray=%s sing-box=%s ops=%s curl=%s\n' \
+
+# 额度恢复后增加独立账号，轮换仍走生产 helper 与候选生成器。
+publishTestSpec() {
+    dockerConfigureSpecValidate "$1"
+    dockerCreateConfigurationCandidate
+    candidate=${DOCKER_CONFIG_CANDIDATE}
+    dockerGenerateCandidate "$1" "${candidate}"
+    cp -a "${candidate}/config/." "${PADM_DOCKER_INSTALL_DIR}/config/"
+    cp -a "${candidate}/data/." "${PADM_DOCKER_INSTALL_DIR}/data/"
+    cp "${candidate}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+    cp "${candidate}/images.runtime.env" "${PADM_DOCKER_INSTALL_DIR}/images.env"
+    dockerCleanupConfigurationCandidate
+    dockerComposeRun run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null
+    dockerComposeRun restart sing-box
+    compose up -d --pull never --wait --wait-timeout 60 sing-box
+}
+accountSsPassword=$(dockerAccountRandomSsPassword "${OPS_ID}")
+jq --rawfile ss <(printf '%s' "${accountSsPassword}") '
+  .accounts = [{id:"22222222-2222-4222-8222-222222222222",name:"independent",enabled:true,
+    uuid:"33333333-3333-4333-8333-333333333333",password:"independent-test-password",
+    shadowsocks_password:$ss,listeners:["entry-shadowsocks"]}]
+' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${TEST_ROOT}/with-account.json"
+accountSsPassword=
+publishTestSpec "${TEST_ROOT}/with-account.json"
+dockerProtocolCommand links >"${TEST_ROOT}/before-rotation-links.txt"
+startClient "${TEST_ROOT}/before-rotation-links.txt"
+probe accounts
+cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/rotated-spec.json"
+dockerEditRotateSsUser "${TEST_ROOT}/rotated-spec.json" entry-shadowsocks "${OPS_ID}"
+jq -e -s '
+  .[0] as $before | .[1] as $after |
+  ($before | del(.core.protocols[0].shadowsocks.user_password)) ==
+    ($after | del(.core.protocols[0].shadowsocks.user_password)) and
+  $before.core.protocols[0].shadowsocks.user_password != $after.core.protocols[0].shadowsocks.user_password
+' "${TEST_ROOT}/with-account.json" "${TEST_ROOT}/rotated-spec.json" >/dev/null
+publishTestSpec "${TEST_ROOT}/rotated-spec.json"
+dockerProtocolCommand links >"${TEST_ROOT}/rotated-links.txt"
+startClient "${TEST_ROOT}/rotated-links.txt" "${TEST_ROOT}/before-rotation-links.txt"
+probe rotated
+dockerTrafficSnapshot
+jq -e --arg uuid "${UUID}" '
+  .accounts[$uuid] | .upload > 0 and .download > 0 and .limit_bytes == 0
+' "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" >/dev/null
+printf 'docker-shadowsocks-real-ok: endpoint=isolated-compose quota=deny-restore rotation=self-user old-uri=deny independent=preserved xray=%s sing-box=%s ops=%s curl=%s\n' \
     "${XRAY_ID}" "${SING_ID}" "${OPS_ID}" "${CURL_ID}"

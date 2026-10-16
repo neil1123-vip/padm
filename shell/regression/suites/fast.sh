@@ -82,6 +82,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-reality-targets-direct \
         docker-reality-parameters \
         docker-vless-encryption \
+        docker-shadowsocks-rotation \
         docker-sites \
         docker-routing-direct-block-ip-workflow \
         docker-routing-direct-block-csv-workflow \
@@ -207,7 +208,7 @@ listRegressionDockerVlessEncryptionChildSelectors() {
 }
 
 listRegressionDockerContractsRealityMetadataChildSelectors() {
-    printf '%s\n' docker-xhttp-edit docker-reality-parameters docker-vless-encryption docker-reality-targets-selection docker-reality-target-library
+    printf '%s\n' docker-xhttp-edit docker-reality-parameters docker-vless-encryption docker-shadowsocks-rotation docker-reality-targets-selection docker-reality-target-library
 }
 
 listRegressionDockerContractsSetupBasicChildSelectors() {
@@ -923,6 +924,8 @@ registerRegressionFunctionLeaf docker-hysteria2 runDockerHysteria2Regression
 registerRegressionFunctionLeaf docker-anytls runDockerAnyTlsRegression
 registerRegressionFunctionLeaf docker-naive runDockerNaiveRegression
 registerRegressionFunctionLeaf docker-shadowsocks runDockerShadowsocksRegression
+registerRegressionFunctionLeaf docker-shadowsocks-rotation runDockerShadowsocksRotationRegression
+registerRegressionFunctionLeaf docker-shadowsocks-real runDockerShadowsocksRealRegression
 registerRegressionFunctionLeaf docker-tuic runDockerTuicRegression
 registerRegressionFunctionLeaf docker-trojan runDockerTrojanRegression
 registerRegressionFunctionLeaf docker-vmess runDockerVmessRegression

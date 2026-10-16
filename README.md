@@ -797,7 +797,8 @@ VLESS/VMess WS TLS、VLESS/Trojan gRPC TLS 和传统 TLS fallback 仅支持 Xray
 Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅支持 sing-box 内复制；
 已有 v3 部署可通过“协议与入口”的新增操作或 `edit --protocol-add` 添加受支持协议，
 沿用来源入口身份和已授权账号范围；首次 TLS 仍须提供域名及受管证书。
-Shadowsocks 的方法、服务器/用户密钥、UUID 和已有入口身份冻结，不通过通用编辑轮换凭据。
+Shadowsocks 的方法、服务器密钥、UUID 和已有入口身份冻结；普通编辑/`--spec`
+仍拒绝手改密钥，自用用户密钥须使用下面的专项轮换。
 AnyTLS/NaiveProxy/direct Trojan 复用通用入口字段编辑，TLS 域名与 UUID 冻结，证书轮换使用证书管理入口。
 NaiveProxy 的入口域名随 TLS 身份固定，不能单独修改为其它域名或 IP。
 编辑器可从现有 Reality 入口派生其它 Reality 传输入口，不生成新账号或密钥。
@@ -806,6 +807,22 @@ NaiveProxy 的入口域名随 TLS 身份固定，不能单独修改为其它域�
 复制复用原入口凭据；同一 UUID 的多个入口共享累计流量与额度，不会创建独立用户。
 旧部署没有 `config/spec.json` 时，必须导入保留的完整原始 spec，匹配运行配置后才能接入；
 缺字段、额外账号、手写路由/站点或不匹配的挂载路径会拒绝编辑，不从运行摘要伪造输入。
+
+Docker 菜单 `9 → 19. Shadowsocks 自用用户密钥轮换` 或以下命令，
+每次只轮换一个已有 v3 sing-box 协议 `30` 入口的 `shadowsocks.user_password`：
+
+```bash
+padm-docker edit --rotate-ss-user <入口ID> --preview
+padm-docker edit --rotate-ss-user <入口ID> --confirm PADM-DOCKER-EDIT
+```
+
+服务器密钥、UUID、其它入口（包括同 UUID）、独立账号密钥、额度与累计保持。
+发布验签后由可信 ops 的 OpenSSL 生成规范 Base64 的 16 字节密钥，
+最多尝试 32 次并拒绝与现存 SS 服务器/自用/独立账号密钥碰撞；秘密不进 argv 或日志。
+主订阅和该入口自用 URI 更新，独立账号分享组内容保持；客户端须重新导入，
+不承诺既有连接排空。不能与其它专项或 `--spec` 组合，不新增 schema 或能力 marker。
+专项、Docker amd64 双族 TCP/UDP 真实回归及集中完整合同 61/61 项通过；
+完整管理仍 `deferred`，见[实施计划 3D.24](documents/docker-menu-parity-plan.md#3d24-shadowsocks-逐入口自用用户密钥轮换)。
 
 ```bash
 padm-docker edit

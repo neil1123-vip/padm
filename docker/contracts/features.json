@@ -209,7 +209,7 @@
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box Shadowsocks 2022 AES-128 多用户首配、完整规格导入、入口编辑、同核复制与删除及 SIP002 分享链接；TCP/UDP 双栈，复用 UUID 流量与额度。Docker 账号子命令支持 SS 账号创建、复制、授权关联/移除、独立密钥轮换及失败恢复；入口自用密钥、宿主集成组合和完整协议/用户管理仍未开放。"
+      "reason": "v3 支持 sing-box Shadowsocks 2022 AES-128 多用户首配、完整规格导入、入口编辑、同核复制与删除及 SIP002 分享链接；TCP/UDP 双栈，复用 UUID 流量与额度。账号子命令支持创建、复制、授权关联/移除、独立密钥轮换及失败恢复。3D.24 提供菜单 9→19 与 edit --rotate-ss-user 的逐入口自用用户密钥轮换，仅修改已有 v3 sing-box 协议 30 的 user_password；服务器密钥、UUID、其它入口（包括同 UUID）、独立账号密钥、额度与累计保持。专项、amd64 双族 TCP/UDP 实链路及完整合同通过；服务器密钥轮换、宿主集成组合和完整协议/用户管理仍未开放。"
     },
     {
       "id": 31,

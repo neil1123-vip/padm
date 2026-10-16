@@ -268,7 +268,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
         docker-tproxy-ownership docker-redirect-focused
         docker-phase4-maintenance docker-routing-core-network-lifecycle docker-reality docker-setup-tls docker-phase4-lifecycle
-        docker-reality-targets-direct docker-reality-parameters docker-vless-encryption docker-sites
+        docker-reality-targets-direct docker-reality-parameters docker-vless-encryption docker-shadowsocks-rotation docker-sites
         docker-routing-direct-block-ip-workflow docker-routing-direct-block-csv-workflow docker-routing-core-policy-lifecycle
         docker-setup-core docker-phase1 docker-menu docker-setup-encrypted-tcp
         docker-routing-dns-hosts-workflow docker-routing-hosts-input docker-phase6 docker-entry-port-alias

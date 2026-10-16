@@ -672,7 +672,8 @@ canonical Base64 严格校验，秘密经私密文件传入，不出现在 stdou
 无需 TLS/Nginx，同端口发布 TCP/UDP 双栈；部署以相同入口 ID 的两条传输记录表示，
 唯一性按 `(listener_id, transport)` 检查，端口占用与归属分别检查 TCP/UDP。
 首配、完整规格导入、通用字段编辑、同核复制与删除、精确 SIP002 链接均已接入。
-已有部署新增类型须完整 `configure` 规格；方法、两密钥、UUID、核心和入口身份冻结。
+增量新增见 3D.12；普通编辑冻结方法、两密钥、UUID、核心和入口身份，
+自用用户密钥仅可通过 3D.24 专项轮换，服务器密钥仍冻结。
 本地 URI 不依赖发布开关；HTTPS 发布仍要求 Xray WS TLS，包含 SS 时暂拒绝宿主集成。
 UUID 复用现有流量/额度；超额撤销运行入站，避免空 `users` 回落为服务器密钥单用户认证，
 解除额度后从保留的 `users.base` 恢复原密钥和监听，不增加假用户或另一套路由状态。
@@ -710,7 +711,8 @@ bash docker/tests/shadowsocks-real.sh \
 ```
 
 未验公网 TCP/UDP 宿主入口、第三方导入 UI、保持打开的既有会话、原生 arm64、
-真实 DNS/整机重启或可信发布；凭据轮换与用户 CRUD 未开放。
+真实 DNS/整机重启或可信发布；独立账号 CRUD/密钥轮换见 4A.2，
+自用用户密钥轮换见 3D.24，服务器密钥轮换仍未开放。
 3B.4、其余 3C、3D、4A、5C 仍待完成；后续 TUIC 交付见 3C.7。
 
 #### 3C.7 TUIC 基础入口与参数管理
@@ -1855,6 +1857,47 @@ packet/stream 采用状态中的有效值，不宣称原样保留底层显式零
 `cc9a46c6b54b4db6ad4acc7b4f1c89eb`、`d10d47f0bc064f88970476f44463b5f5`、
 `f02237d73a5f4198947ae1b338ed5eb1`，目录均以前缀 `.tmp-regression-docker-` 保存。
 入口已自动清理成功运行的源码归档、清单和测试输入，仅保留日志/result。
+
+#### 3D.24 Shadowsocks 逐入口自用用户密钥轮换
+
+菜单 `9 → 19. Shadowsocks 自用用户密钥轮换` 与
+`edit --rotate-ss-user ID [--preview|--confirm PADM-DOCKER-EDIT]`
+仅管理一个已有 v3 sing-box 协议 `30` 入口。
+私密草稿只放行该入口 `shadowsocks.user_password` 的变化；
+服务器密钥、方法、UUID、其它入口（包括同 UUID）、独立账号密钥、
+额度与累计保持。入口增量新增时复用同 UUID 密钥是新增策略，不是规格共享约束，
+因此本操作不联动其它入口。普通 `--spec` 继续拒绝手改密钥，
+专项不能与其它编辑组合，不增加 schema 或能力 marker。
+
+发布验签通过后，使用可信 ops 中的 `openssl rand -base64 16`，
+严格核验规范 Base64 与 16 字节长度，最多尝试 32 次；
+拒绝与所有现存 SS 服务器、自用用户及独立账号密钥碰撞。
+秘密通过 stdin/rawfile 进入私密草稿，不写入 argv、预览、状态或日志。
+复用现有候选配置、确认、发布及失败/INT/TERM 恢复流程，
+主订阅和选中入口自用 URI 更新，独立账号分享组内容保持。
+客户端须重新导入，旧 URI 的新连接拒绝；不承诺既有连接排空。
+
+2026-10-16 Docker Linux amd64 专项合同通过，内部 42.008 秒、入口 43.095 秒，
+证据 `.tmp-regression-docker-38d156a5cb504b7884fd1a9b780d5ab0/`。
+覆盖碰撞拒绝/重试、先验签、预览/取消/EOF/PTY 一次确认、完整规格冻结、
+同 UUID 其它入口、分享组与累计、健康失败/INT/TERM 恢复及秘密/权限。
+真实探针复用生产 helper、生成器和原始 URI 解析，验证额度恢复后
+新自用/独立账号的双族 TCP/UDP，以及旧 URI 拒绝期间 origin 计数不增。
+真实回归内部 79.082 秒、入口 80.098 秒，证据
+`.tmp-regression-docker-eea6b84dafc74003801f712fdbaf7085/`；派发合同入口
+1.711 秒通过，证据 `.tmp-regression-docker-163af5ea49f443028efa5c9d74329fa9/`。
+集中完整合同 Jobs 6/tmpfs 单次 61/61 项通过，内部 457.528 秒、
+入口 459.592 秒、排队 346 ms、`cache_hit=false`，证据
+`.tmp-regression-docker-9bc79de9331641c6a135271913969dce/`。
+真实、派发及完整合同的源码归档 SHA-256 为
+`2CDA9EEDFCDE129F94053BE1C40CDFB32FEAE4CEA40DDEC2F7E9EA4E27DE3F93`；
+工具镜像 ID 为
+`sha256:ba4102e10f3d88a5392f6858f85fb8120e65369ae564b5d5660081abfd92a77f`，
+真实四镜像摘要保存在该次 `node-images.json` 与脱敏日志。
+Bash/ShellCheck error、PowerShell AST、JSON 和 diff 检查通过。
+已清理本轮已解决失败的源码包/清单，成功输入由入口自动清理，保留日志/result。
+服务器密钥轮换、完整协议/用户管理、公网、原生宿主/arm64 与其它客户端
+不因本子项升级支持，整体实施计划保持 active。
 
 ## 第四步：用户、订阅与服务维护
 
@@ -8041,7 +8084,8 @@ ops 内 Python/OpenSSL ML-KEM-768 校验从 stdin 接收 seed 与 public 并验�
 同步摘要并新增形状边界后，395 个差分用例和完整 `docker-reality` 叶子通过，
 后者内部 76.198 秒、入口 77.221 秒，证据
 `.tmp-regression-docker-1beacb4fb7a0492eb045a07cdfbfc90e/`。
-这不是单次完整合同全通过的记录；后续 SS 轮换集成后集中实际重跑。
+随后 SS 轮换集成的集中重跑单次 61/61 项通过，入口 459.592 秒，
+证据与源码摘要见 3D.24；此前失败记录保留，不再视为未验证的整合状态。
 Bash/ShellCheck error、PowerShell AST 和 diff 检查通过；已解决失败的源码包、
 清单及核心/客户端副本与旧可行性脚本已清理，保留脱敏日志和结果。
 
