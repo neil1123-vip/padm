@@ -1435,9 +1435,14 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 The target must contain only an installed control skeleton: configuration, data, secrets,
 logs and backups must be empty, with no containers from the same project. The first scope
 accepts same-architecture v3 ordinary deployments with cores, manual TLS, static sites,
-account/share identities and saved traffic. Host integrations, control roles/sync, Reality
-coexistence, hopping, HTTP-01, and unhandled Geo, ACME, renewal or Reality-library files
+account/share identities, saved traffic and Reality target libraries. Host integrations, control roles/sync, Reality
+coexistence, hopping, HTTP-01, and unhandled Geo, ACME or renewal files
 are rejected explicitly. Dangling references in disabled share groups are also rejected.
+Reality recovery only accepts `data/reality-targets/results.tsv` (15/16-column TSV) and
+`blocked.tsv` (four `|`-separated columns), limited to 16 MiB per file. All records are validated
+before copying the original bytes, preserving empty columns, duplicates and custom block reasons.
+Directories use `0700 root:root` and files use `0600 root:root`. Recovery does not refresh records
+over the network or establish that historical scores or handshakes remain valid.
 Release version, signature identity, manifest hash and every image must exactly match an
 independently verified release; supply matching assets explicitly for an older archive.
 Preview creates private `0700` staging, may pull digest-pinned images and runs candidate

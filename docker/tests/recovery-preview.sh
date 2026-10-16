@@ -121,6 +121,14 @@ dockerCandidateCompose() {
         fi
         [[ ! -e "${TEST_ROOT}/source-compose-executed" ]] ||
             candidate_fail '源 Compose 被执行'
+        for file in results.tsv blocked.tsv; do
+            cmp -- "${SOURCE}/data/reality-targets/${file}" "${candidate}/data/reality-targets/${file}" ||
+                candidate_fail '目标库未按原字节恢复'
+            [[ "$(stat -c '%u:%g:%a' "${candidate}/data/reality-targets/${file}")" == 0:0:600 ]] ||
+                candidate_fail '目标库文件权限不私密'
+        done
+        [[ "$(stat -c '%u:%g:%a' "${candidate}/data/reality-targets")" == 0:0:700 ]] ||
+            candidate_fail '目标库目录权限不私密'
         : >"${marker}"
         printf '%s\n' "${MODE}" >>"${TEST_ROOT}/candidate-checked"
         case "${MODE}" in
@@ -176,6 +184,11 @@ printf 'docker\n' >"${SOURCE}/mode"
 mkdir -p -- "${SOURCE}/data/traffic"
 cp -- "${root}/data/traffic/state.json" "${SOURCE}/data/traffic/state.json"
 chmod 0600 "${SOURCE}/mode" "${SOURCE}/data/traffic/state.json"
+mkdir -m 0700 -- "${SOURCE}/data/reality-targets"
+printf 'Example.COM:00443\tExample.COM\t\tcustom\tyes\tunknown\tunknown\t\tauto_probe\tunknown\tunknown\tunknown\tunknown\t0\t\n' \
+    >"${SOURCE}/data/reality-targets/results.tsv"
+printf 'blocked.example||custom-reason|custom description\n' >"${SOURCE}/data/reality-targets/blocked.tsv"
+chmod 0600 "${SOURCE}/data/reality-targets/"*.tsv
 jq -n --arg command "touch ${TEST_ROOT}/source-compose-executed" '
   {services:{evil:{image:"untrusted.invalid/evil",entrypoint:["/bin/sh","-c",$command]}}}
 ' >"${SOURCE}/compose.json"
@@ -253,6 +266,15 @@ run_case tls-static "${ARCHIVE}" 0 --manifest "${TEST_ROOT}/trusted.json" \
     "$(printf '%s\n' "${TEST_ROOT}/trusted.json" "${TEST_ROOT}/trusted.tar" "${TEST_ROOT}/control.tar")" ]] ||
     fail '可信发布参数没有完整传递'
 grep -q '灾备恢复预览通过' "${LOG}" || fail '正常预览没有输出明确结果'
+grep -q '"reality_results": 1' "${LOG}" && grep -q '"reality_blocked": 1' "${LOG}" ||
+    fail '预览缺少目标库条数'
+! grep -q 'Example.COM\|custom-reason' "${LOG}" || fail '预览泄露目标库记录'
+
+archive_variant bad-library
+printf 'malformed\n' >"${VARIANT}/data/reality-targets/results.tsv"
+export_variant bad-library
+prepare_target bad-library
+run_case bad-library "${TEST_ROOT}/bad-library.tar" "${PADM_DOCKER_RC_STATE}"
 
 # 1,024 条历史账使紧凑 JSON 超过 Linux 单参数上限，恢复链不得把完整账作为参数传递。
 archive_variant large-traffic

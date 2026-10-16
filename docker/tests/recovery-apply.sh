@@ -295,6 +295,11 @@ printf 'docker\n' >"${SOURCE}/mode"
 mkdir -p -- "${SOURCE}/data/traffic"
 cp -- "${root}/data/traffic/state.json" "${SOURCE}/data/traffic/state.json"
 chmod 0600 "${SOURCE}/mode" "${SOURCE}/data/traffic/state.json"
+mkdir -m 0700 -- "${SOURCE}/data/reality-targets"
+printf 'Example.COM:00443\tExample.COM\t\tcustom\tno\tunknown\tunknown\t\tunknown\tA\tunknown\tunknown\tunknown\t0\t\t\n' \
+    >"${SOURCE}/data/reality-targets/results.tsv"
+printf 'blocked.example||custom-reason|custom description\n' >"${SOURCE}/data/reality-targets/blocked.tsv"
+chmod 0600 "${SOURCE}/data/reality-targets/"*.tsv
 printf '{"services":{"evil":{"image":"untrusted.invalid/evil"}}}\n' >"${SOURCE}/compose.json"
 chmod 0640 "${SOURCE}/compose.json"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${SOURCE}" \
@@ -369,6 +374,14 @@ assert_empty() {
         fail '回滚残留容器或锁'
 }
 assert_deployed() {
+    for file in results.tsv blocked.tsv; do
+        cmp -- "${SOURCE}/data/reality-targets/${file}" "${root}/data/reality-targets/${file}" ||
+            fail '目标库未按原字节恢复'
+        [[ "$(stat -c '%u:%g:%a' "${root}/data/reality-targets/${file}")" == 0:0:600 ]] ||
+            fail '目标库文件权限不私密'
+    done
+    [[ "$(stat -c '%u:%g:%a' "${root}/data/reality-targets")" == 0:0:700 ]] ||
+        fail '目标库目录权限不私密'
     jq -en --slurpfile expected "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" '
       $actual[0].core == $expected[0].core and $actual[0].accounts == $expected[0].accounts and
       $actual[0].subscription == $expected[0].subscription' >/dev/null ||

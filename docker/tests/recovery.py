@@ -483,6 +483,168 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 143)
 
 
+class RealityInputTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="padm-reality-recovery-",
+                                                     dir=os.environ["TMPDIR"])
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.source = self.root / "source"
+        self.library = self.source / "data/reality-targets"
+        self.library.mkdir(parents=True, mode=0o700)
+        for name in recovery.REQUIRED:
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"docker\n" if name == "mode" else b"{}\n")
+            path.chmod(0o600)
+        self.destination = self.root / "candidate"
+        (self.destination / "data").mkdir(parents=True)
+        self.row = ["Example.COM:00443", "Example.COM", "", "custom", "no", "unknown",
+                    "AS12345678901234567890", "", "auto_probe", "A", "unknown",
+                    "unknown", "unknown", "0", ""]
+        self.seal()
+
+    def seal(self):
+        archive = self.root / "source.tar"
+        if archive.exists():
+            archive.unlink()
+        recovery.export_archive(str(self.source), str(archive))
+        with tarfile.open(archive, "r:") as source:
+            path = self.source / recovery.MANIFEST
+            path.write_bytes(source.extractfile(recovery.MANIFEST).read())
+            path.chmod(0o600)
+
+    def put(self, name, data):
+        path = self.library / name
+        path.write_bytes(data)
+        path.chmod(0o600)
+        self.seal()
+        return path
+
+    def test_legacy_empty_columns_duplicates_custom_reason_and_exact_private_copy(self):
+        old = "\t".join(self.row)
+        new = "\t".join(self.row + ["Somewhere, Country"])
+        payload = {"results.tsv": (old + "\n" + new + "\n" + old).encode(),
+                   "blocked.tsv": "blocked.example||自定义原因|说明\n".encode()}
+        for name, data in payload.items():
+            self.put(name, data)
+        counts = recovery.reality_inputs(str(self.source), str(self.destination))
+        self.assertEqual(counts, {"reality_results": 3, "reality_blocked": 1})
+        target = self.destination / "data/reality-targets"
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o700)
+        for name, data in payload.items():
+            path = target / name
+            self.assertEqual(path.read_bytes(), data)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual((path.stat().st_uid, path.stat().st_gid), (0, 0))
+        with self.assertRaises(FileExistsError):
+            recovery.reality_inputs(str(self.source), str(self.destination))
+
+    def test_empty_missing_and_historical_enum_values(self):
+        self.library.rmdir()
+        self.library.parent.rmdir()
+        self.assertEqual(recovery.reality_inputs(str(self.source)),
+                         {"reality_results": 0, "reality_blocked": 0})
+        for risk in ("no", "yes", "unknown", "cdn_edge", "cloudflare_relay"):
+            row = self.row.copy()
+            row[4], row[5], row[9], row[10], row[11], row[12] = risk, "::1", "FAIL", "no", "0", "no"
+            self.assertEqual(recovery.reality_records("results.tsv", "\t".join(row).encode()), 1)
+        self.library.mkdir(parents=True, mode=0o700)
+        self.put("results.tsv", b"")
+        recovery.reality_inputs(str(self.source), str(self.destination))
+        self.assertEqual((self.destination / "data/reality-targets/results.tsv").read_bytes(), b"")
+
+    def test_invalid_rows_fail_before_any_destination_write(self):
+        invalid = [b"\xff", b"\n", b"bad\trow\n", b"bad\rrow\n", b"bad\x00row"]
+        for index, value in ((0, "host:0"), (0, "host:65536"), (0, "[::1]:443"),
+                             (0, "999.1.1.1:443"), (1, "bad host"), (4, "invalid"),
+                             (5, "not-an-ip"), (6, "AS-1"), (8, "invalid"),
+                             (9, "D"), (10, "true"), (11, "-1"), (12, "true"), (13, "-1")):
+            row = self.row.copy()
+            row[index] = value
+            invalid.append("\t".join(row).encode())
+        for data in invalid:
+            self.put("results.tsv", data)
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                recovery.reality_inputs(str(self.source), str(self.destination))
+            self.assertFalse((self.destination / "data/reality-targets").exists())
+        self.put("results.tsv", "\t".join(self.row).encode())
+        for data in (b"a|b|c", b"a|b||d", b"bad host|b|c|d", b"a|b|c|d|e"):
+            self.put("blocked.tsv", data)
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                recovery.reality_inputs(str(self.source), str(self.destination))
+            self.assertFalse((self.destination / "data/reality-targets").exists())
+
+    def test_unsafe_files_directories_and_changed_read_are_rejected(self):
+        path = self.put("results.tsv", "\t".join(self.row).encode())
+        path.chmod(0o640)
+        with self.assertRaises(ValueError):
+            recovery.reality_inputs(str(self.source))
+        path.chmod(0o600)
+        self.library.chmod(0o750)
+        with self.assertRaises(ValueError):
+            recovery.reality_inputs(str(self.source))
+        self.library.chmod(0o700)
+        outside = self.root / "outside"
+        path.rename(outside)
+        path.symlink_to(outside)
+        with self.assertRaises(OSError):
+            recovery.reality_inputs(str(self.source))
+        path.unlink()
+        os.link(outside, path)
+        with self.assertRaises(ValueError):
+            recovery.reality_inputs(str(self.source))
+        path.unlink()
+        self.put("results.tsv", outside.read_bytes())
+        target_inode = path.stat().st_ino
+        original = os.read
+        def changing_read(fd, size):
+            data = original(fd, size)
+            if data and os.fstat(fd).st_ino == target_inode:
+                path.write_bytes(b"changed")
+            return data
+        with mock.patch.object(recovery.os, "read", side_effect=changing_read):
+            with self.assertRaises(ValueError):
+                recovery.reality_inputs(str(self.source), str(self.destination))
+        self.assertFalse((self.destination / "data/reality-targets").exists())
+
+    def test_observed_library_disappearance_is_not_treated_as_missing(self):
+        path = self.put("results.tsv", "\t".join(self.row).encode())
+        original = recovery.transaction_read
+
+        def disappearing_read(parent, name, *args, **kwargs):
+            if name == "results.tsv":
+                path.unlink()
+                self.library.rmdir()
+            return original(parent, name, *args, **kwargs)
+
+        with mock.patch.object(recovery, "transaction_read", side_effect=disappearing_read):
+            with self.assertRaises(FileNotFoundError):
+                recovery.reality_inputs(str(self.source), str(self.destination))
+        self.assertFalse((self.destination / "data/reality-targets").exists())
+
+    def test_manifest_rejects_missing_extra_or_changed_inputs_between_calls(self):
+        data = "\t".join(self.row).encode()
+        path = self.put("results.tsv", data)
+        recovery.reality_inputs(str(self.source))
+        path.unlink()
+        self.library.rmdir()
+        with self.assertRaises(ValueError):
+            recovery.reality_inputs(str(self.source), str(self.destination))
+        self.library.mkdir(mode=0o700)
+        path.write_bytes(data.replace(b"custom", b"change"))
+        path.chmod(0o600)
+        with self.assertRaises(ValueError):
+            recovery.reality_inputs(str(self.source), str(self.destination))
+        path.write_bytes(data)
+        extra = self.library / "blocked.tsv"
+        extra.write_bytes(b"")
+        extra.chmod(0o600)
+        with self.assertRaises(ValueError):
+            recovery.reality_inputs(str(self.source), str(self.destination))
+        self.assertFalse((self.destination / "data/reality-targets").exists())
+
+
 class RecoveryTransactionTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="padm-transaction-", dir=os.environ["TMPDIR"])

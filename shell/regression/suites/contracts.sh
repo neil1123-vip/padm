@@ -229,7 +229,8 @@ runFrameworkParallelSelectorListWithJobsContract() (
             "$*" >>"${callLog}"
     }
 
-    unset PADM_REGRESSION_PARALLEL_JOBS
+    # 隔离外层聚合的临时绑定，避免 unset 后重新暴露继承的并发数。
+    local PADM_REGRESSION_PARALLEL_JOBS=''
     : >"${callLog}"
     PADM_REGRESSION_PARALLEL_JOBS=9 \
         runFrameworkParallelRegressionSelectorListWithJobs \
@@ -295,7 +296,7 @@ runRegressionDockerContractsAggregateContract() (
     for selector in "${expectedSelectors[@]}"; do
         printf '%s\n%s\n' "${selector}" "${selector}" >>"${expectedLog}"
     done
-    unset PADM_REGRESSION_PARALLEL_JOBS
+    local PADM_REGRESSION_PARALLEL_JOBS=''
     set +e
     (PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-contracts) >/dev/null 2>&1
     status=$?

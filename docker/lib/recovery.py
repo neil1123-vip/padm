@@ -6,6 +6,7 @@ import contextlib
 import datetime
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import platform
@@ -504,6 +505,84 @@ def transaction_write(parent, name, data):
             os.fsync(fd)
 
 
+def reality_host(value):
+    if not 0 < len(value) <= 253:
+        return False
+    if re.fullmatch(r"[0-9]+(?:\.[0-9]+){3}", value):
+        return all(len(part) <= 3 and int(part) <= 255 for part in value.split("."))
+    return all(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", part)
+               for part in value.split("."))
+
+
+def reality_records(name, data):
+    text = data.decode("utf-8")
+    require(all(char.isprintable() or char in "\t\n" for char in text))
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    for line in lines:
+        fields = line.split("|" if name == "blocked.tsv" else "\t")
+        if name == "blocked.tsv":
+            require(len(fields) == 4 and reality_host(fields[0]) and fields[2] != "")
+            continue
+        # 按列拆分保留中间和末尾空列；兼容历史 15 列，不去重或刷新探测结果。
+        require(len(fields) in (15, 16))
+        host, separator, port = fields[0].rpartition(":")
+        require(separator == ":" and reality_host(host)
+                and re.fullmatch(r"[0-9]{1,5}", port) and 1 <= int(port) <= 65535)
+        require(reality_host(fields[1]))
+        require(fields[4] in {"no", "unknown", "cdn_edge", "cloudflare_relay", "yes"})
+        if fields[5] != "unknown":
+            ipaddress.ip_address(fields[5])
+        require(fields[6] == "unknown" or re.fullmatch(r"AS[0-9]+", fields[6]))
+        require(fields[8] in {"same_asn", "same_provider", "different_network",
+                              "scanner_local", "unknown", "auto_probe"})
+        require(fields[9] in {"A", "B", "C", "FAIL", "unknown"})
+        require(fields[10] in {"yes", "no", "unknown"})
+        require(fields[11] == "unknown" or re.fullmatch(r"[0-9]+", fields[11]))
+        require(fields[12] in {"yes", "no", "unknown"})
+        require(re.fullmatch(r"[0-9]+", fields[13]))
+    return len(lines)
+
+
+def reality_inputs(directory, destination=None):
+    payload = {}
+    with absolute_parent(directory, private=True) as (parent, name):
+        with transaction_directory(parent, name, private=False) as root_fd:
+            manifest, _ = transaction_read(root_fd, MANIFEST, limit=MAX_MANIFEST)
+            entries = validate_manifest(read_json(manifest))
+            expected = {path.rsplit("/", 1)[1]: entry for path, entry in entries.items()
+                        if path in {"data/reality-targets/results.tsv",
+                                    "data/reality-targets/blocked.tsv"}}
+            require(all(entry["type"] == "file" for entry in expected.values()))
+            if "data" not in os.listdir(root_fd):
+                require(not expected)
+                return {"reality_results": 0, "reality_blocked": 0}
+            with transaction_directory(root_fd, "data", private=False) as data_fd:
+                if "reality-targets" not in os.listdir(data_fd):
+                    require(not expected)
+                    return {"reality_results": 0, "reality_blocked": 0}
+                # 已观察到的库或文件消失必须报错，不能退化为合法缺库。
+                with transaction_directory(data_fd, "reality-targets") as library_fd:
+                    filenames = sorted(os.listdir(library_fd))
+                    require(set(filenames) == set(expected))
+                    for filename in filenames:
+                        data, metadata = transaction_read(library_fd, filename)
+                        require(all(metadata[key] == expected[filename][key]
+                                    for key in ("size", "sha256")))
+                        payload[filename] = (data, reality_records(filename, data))
+    if destination is not None and payload:
+        with absolute_parent(destination, private=True) as (parent, name):
+            with transaction_directory(parent, name, private=False) as root_fd:
+                with transaction_directory(root_fd, "data", private=False) as data_fd:
+                    os.mkdir("reality-targets", 0o700, dir_fd=data_fd)
+                    with transaction_directory(data_fd, "reality-targets") as library_fd:
+                        for filename, (data, _) in payload.items():
+                            transaction_write(library_fd, filename, data)
+    return {"reality_results": payload.get("results.tsv", (None, 0))[1],
+            "reality_blocked": payload.get("blocked.tsv", (None, 0))[1]}
+
+
 def transaction_encoded(metadata):
     data = json.dumps(metadata, ensure_ascii=True, separators=(",", ":")).encode()
     require(len(data) <= MAX_TRANSACTION_METADATA)
@@ -797,6 +876,9 @@ def main():
     extract = commands.add_parser("extract")
     extract.add_argument("--archive", required=True)
     extract.add_argument("--directory", required=True)
+    reality = commands.add_parser("reality-inputs")
+    reality.add_argument("--directory", required=True)
+    reality.add_argument("--destination")
     for action in ("prepare", "check", "commit", "clean", "metadata",
                    "schedule-save", "schedule-metadata"):
         command = commands.add_parser("transaction-" + action)
@@ -821,6 +903,8 @@ def main():
         elif args.action == "extract":
             counts = extract_archive(args.archive, args.directory)
             print("灾备归档已校验并解包至私密暂存目录（{} 个文件，{} 字节）。".format(*counts))
+        elif args.action == "reality-inputs":
+            print(json.dumps(reality_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "transaction-prepare":
             transaction_prepare(args.root, args.project, args.candidate, args.input_stage)
         elif args.action == "transaction-commit":

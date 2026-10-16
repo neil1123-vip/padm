@@ -7513,6 +7513,13 @@ dockerConfigureApply() {
         return "${PADM_DOCKER_RC_STATE}"
     fi
     specFile="${candidate}/config/spec.json"
+    # 生成器权限准备完成后复制私密库，普通配置更新不能接管在线库。
+    if [[ -n "${DOCKER_RECOVERY_INPUT:-}" ]] &&
+        ! python3 -B "${DOCKER_LIB_DIR}/recovery.py" reality-inputs \
+            --directory "${DOCKER_RECOVERY_INPUT}" --destination "${candidate}" >/dev/null; then
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
     if ! dockerValidateCandidate "${specFile}" "${candidate}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
@@ -7532,6 +7539,8 @@ dockerConfigureApply() {
             --root "${root}" --project "${PADM_DOCKER_PROJECT}" --candidate "${candidate}" \
             --input-stage "${DOCKER_RECOVERY_INPUT%/input}" || return "${PADM_DOCKER_RC_STATE}"
         if ! dockerInstallCandidate "${candidate}" "${backup}" ||
+            { [[ -d "${candidate}/data/reality-targets" ]] &&
+                ! mv -- "${candidate}/data/reality-targets" "${root}/data/"; } ||
             ! dockerEnsureRuntimeDataPermissions ||
             ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
             ! dockerTrafficScheduleInstall; then
