@@ -3,6 +3,7 @@ set -euo pipefail
 
 PHASE3_SCOPE=${PADM_DOCKER_PHASE3_SCOPE:-full}
 PHASE3_ENTRIES_BRANCH=${PADM_DOCKER_PHASE3_ENTRIES_BRANCH:-all}
+PHASE3_MANAGEMENT_GROUP=${PADM_DOCKER_PHASE3_MANAGEMENT_GROUP:-all}
 case "${PHASE3_SCOPE}" in
 full|edit|entries) ;;
 *) printf 'docker-phase3-regression-fail: unknown scope %s\n' "${PHASE3_SCOPE}" >&2; exit 1 ;;
@@ -10,6 +11,10 @@ esac
 case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}" in
 *:all|entries:topology|entries:management) ;;
 *) printf 'docker-phase3-regression-fail: unknown entries branch %s\n' "${PHASE3_ENTRIES_BRANCH}" >&2; exit 1 ;;
+esac
+case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}:${PHASE3_MANAGEMENT_GROUP}" in
+*:all|entries:management:protocol|entries:management:tls) ;;
+*) printf 'docker-phase3-regression-fail: unknown management group %s\n' "${PHASE3_MANAGEMENT_GROUP}" >&2; exit 1 ;;
 esac
 
 export FAKE_PHASE3_HOST_SYSTEM FAKE_PHASE3_HOST_STAT
@@ -1251,6 +1256,26 @@ jq '.schema_version=3 | .core.secondary_type=null | .core.protocols |= map(.core
     "${EDIT_SPEC}" >"${PROTOCOL_BASE}"
 runControl 0 protocol-management-baseline configure --spec "${PROTOCOL_BASE}"
 PROTOCOL_TRAFFIC_HASH=$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)
+PROTOCOL_TLS="${TEST_ROOT}/protocol-tls.json"
+jq '.core.type="sing-box" | .core.secondary_type=null |
+  .core.protocols=[(.core.protocols[] | select(.listener_id=="vless-reality") |
+    del(.reality) | .id=3 | .core="sing-box" | .listener_id="entry-hy2" |
+    .server="node.example.com" |
+    .hy2={domain:"proxy.example.com",bandwidth_mode:"bbr",up_mbps:100,down_mbps:50,
+      obfs:null,masquerade:""})] |
+  .accounts |= map(.listeners=["entry-hy2"]) | .subscription.enabled=false' \
+    "${PROTOCOL_BASE}" >"${PROTOCOL_TLS}"
+jq '.core.protocols |= map(select(.id==1)) | .tls=null | .subscription.enabled=false |
+  .accounts |= map(.listeners=["vless-reality"])' "${PROTOCOL_BASE}" \
+    >"${TEST_ROOT}/protocol-ss-base.json"
+assertSsPrivate() {
+    local secret
+    while IFS= read -r secret; do
+        ! grep -Fq -- "${secret}" "${CONTROL_LOG}" "${DOCKER_LOG}" ||
+            fail 'Shadowsocks 密钥出现在预览、业务输出或外部 argv'
+    done <"${DOCKER_LOG}.ss-generated"
+}
+if [[ "${PHASE3_MANAGEMENT_GROUP}" != tls ]]; then
 # 内部端口复用同一在线事务；协议差异只跑生成器，不重复整套部署。
 for invalidPort in 0 65536 031300 -1 +1 1e3 not-a-port; do
     protocolEdit 2 internal-ports-invalid-backend --internal-ports vless-ws "${invalidPort}" 8643 --preview
@@ -1459,15 +1484,6 @@ protocolEdit 15 protocol-remove-last-account-link --protocol-remove vless-realit
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '协议增删或重建改变累计流量与额度'
 
-PROTOCOL_TLS="${TEST_ROOT}/protocol-tls.json"
-jq '.core.type="sing-box" | .core.secondary_type=null |
-  .core.protocols=[(.core.protocols[] | select(.listener_id=="vless-reality") |
-    del(.reality) | .id=3 | .core="sing-box" | .listener_id="entry-hy2" |
-    .server="node.example.com" |
-    .hy2={domain:"proxy.example.com",bandwidth_mode:"bbr",up_mbps:100,down_mbps:50,
-      obfs:null,masquerade:""})] |
-  .accounts |= map(.listeners=["entry-hy2"]) | .subscription.enabled=false' \
-    "${PROTOCOL_BASE}" >"${PROTOCOL_TLS}"
 runControl 0 protocol-tls-management-baseline configure --spec "${PROTOCOL_TLS}"
 (
     source "${PROJECT_ROOT}/install-docker.sh"
@@ -1574,19 +1590,9 @@ jq -e --slurpfile before "${PROTOCOL_BASE}" '.==$before[0]' \
     "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '移除新增副核心未恢复原规格'
 
 # 无 TLS 的 Shadowsocks 增量只生成两把独立 16 字节密钥，复制和重用保持原密钥。
-jq '.core.protocols |= map(select(.id==1)) | .tls=null | .subscription.enabled=false |
-  .accounts |= map(.listeners=["vless-reality"])' "${PROTOCOL_BASE}" \
-    >"${TEST_ROOT}/protocol-ss-base.json"
 runControl 0 protocol-ss-baseline configure --spec "${TEST_ROOT}/protocol-ss-base.json"
 protocolEdit 15 protocol-without-tls-rejected --protocol-add vless-reality 31 31443 \
     --protocol-core sing-box --preview
-assertSsPrivate() {
-    local secret
-    while IFS= read -r secret; do
-        ! grep -Fq -- "${secret}" "${CONTROL_LOG}" "${DOCKER_LOG}" ||
-            fail 'Shadowsocks 密钥出现在预览、业务输出或外部 argv'
-    done <"${DOCKER_LOG}.ss-generated"
-}
 FAKE_DOCKER_MODE=ss-generate-fail protocolEdit 15 protocol-ss-generation-failure \
     --protocol-add vless-reality 30 31443 --protocol-core sing-box --confirm PADM-DOCKER-EDIT
 protocolEdit 0 protocol-ss-preview --protocol-add vless-reality 30 31443 --protocol-core sing-box --preview
@@ -1649,7 +1655,15 @@ jq -e --slurpfile before "${TEST_ROOT}/protocol-ss-installed.json" '
 ) || fail 'Shadowsocks 复制身份失败'
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '旧版迁移、跨核心或 Shadowsocks 增量改变累计与额度'
+else
+    # TLS 独立分片只重建真实随机凭据夹具，不把草稿占位密钥当成已安装身份。
+    runControl 0 protocol-ss-fixture-baseline configure --spec "${TEST_ROOT}/protocol-ss-base.json"
+    protocolEdit 0 protocol-ss-fixture --protocol-add vless-reality 30 31443 \
+        --protocol-core sing-box --confirm PADM-DOCKER-EDIT
+    cp -- "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/protocol-ss-installed.json"
+fi
 
+if [[ "${PHASE3_MANAGEMENT_GROUP}" != protocol ]]; then
 # 首个 TLS 协议只追加本次入口和域名；证书来源复用已有事务。
 FIRST_TLS_REALITY="${TEST_ROOT}/protocol-ss-base.json"
 FIRST_TLS_SS="${TEST_ROOT}/protocol-ss-installed.json"
@@ -2324,6 +2338,7 @@ jq -e --slurpfile before "${PROTOCOL_BASE}" '
         "${DOCKER_ROOT}/secrets/renewal/migrated-alpn.example.com/request.json" >/dev/null &&
     [[ ! -e "${DOCKER_ROOT}/secrets/renewal/migrated-alpn.example.com/credentials.env" ]] ||
     fail 'ALPN TLS 迁移改变其它规格，或未登记实际续期参数'
+fi
 fi
 
 runControl 0 restart-persistence status

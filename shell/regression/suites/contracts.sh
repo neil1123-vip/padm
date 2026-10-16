@@ -262,10 +262,11 @@ runRegressionDockerContractsAggregateContract() (
     set -euo pipefail
     local callLog="${TMP_DIR}/docker-contracts-aggregate.log"
     local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
-    local status=0 selector
+    local status=0 selector scope branch group
     local -a expectedSelectors=(
         docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
-        docker-phase3-edit docker-phase3-entries-management docker-phase3-entries-topology
+        docker-phase3-edit docker-phase3-entries-management-tls docker-phase3-entries-management-protocol
+        docker-phase3-entries-topology
         docker-traditional-tls-transports docker-traditional-tls-base
         docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
         docker-tproxy-ownership docker-redirect-focused
@@ -497,23 +498,39 @@ runRegressionDockerContractsAggregateContract() (
         fi
         grep -q 'unknown entries branch' "${callLog}"
     done
+    for selector in full:all:protocol edit:all:tls entries:all:protocol entries:topology:tls \
+        entries:management:unknown; do
+        IFS=: read -r scope branch group <<<"${selector}"
+        if PADM_DOCKER_PHASE3_SCOPE="${scope}" PADM_DOCKER_PHASE3_ENTRIES_BRANCH="${branch}" \
+            PADM_DOCKER_PHASE3_MANAGEMENT_GROUP="${group}" \
+            command bash "${PROJECT_ROOT}/docker/tests/phase3.sh" >"${callLog}" 2>&1; then
+            return 1
+        fi
+        grep -q 'unknown management group' "${callLog}"
+    done
     bash() {
-        printf '%s:%s:%s\n' "${PADM_DOCKER_PHASE3_SCOPE:-full}" \
-            "${PADM_DOCKER_PHASE3_ENTRIES_BRANCH:-all}" "${1##*/}" >>"${callLog}"
+        printf '%s:%s:%s:%s\n' "${PADM_DOCKER_PHASE3_SCOPE:-full}" \
+            "${PADM_DOCKER_PHASE3_ENTRIES_BRANCH:-all}" "${PADM_DOCKER_PHASE3_MANAGEMENT_GROUP:-all}" \
+            "${1##*/}" >>"${callLog}"
     }
     : >"${callLog}"
     unset PADM_DOCKER_PHASE3_SCOPE
     unset PADM_DOCKER_PHASE3_ENTRIES_BRANCH
+    unset PADM_DOCKER_PHASE3_MANAGEMENT_GROUP
     runDockerPhase3Regression
     runDockerPhase3EditRegression
     runDockerPhase3EntriesRegression
     runDockerPhase3EntriesTopologyRegression
     runDockerPhase3EntriesManagementRegression
-    printf '%s\n' full:all:phase3.sh edit:all:phase3.sh entries:all:phase3.sh \
-        entries:topology:phase3.sh entries:management:phase3.sh >"${expectedLog}"
+    runDockerPhase3EntriesManagementProtocolRegression
+    runDockerPhase3EntriesManagementTlsRegression
+    printf '%s\n' full:all:all:phase3.sh edit:all:all:phase3.sh entries:all:all:phase3.sh \
+        entries:topology:all:phase3.sh entries:management:all:phase3.sh \
+        entries:management:protocol:phase3.sh entries:management:tls:phase3.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_PHASE3_SCOPE:-}" ]]
     [[ -z "${PADM_DOCKER_PHASE3_ENTRIES_BRANCH:-}" ]]
+    [[ -z "${PADM_DOCKER_PHASE3_MANAGEMENT_GROUP:-}" ]]
 
     bash() {
         printf '%s:%s:%s\n' "${PADM_DOCKER_PHASE4_SCOPE:-full}" \

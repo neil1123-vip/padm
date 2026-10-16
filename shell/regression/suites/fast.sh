@@ -65,7 +65,8 @@ listRegressionDockerContractsChildSelectors() {
         docker-xhttp-rollback \
         docker-xhttp-validation \
         docker-phase3-edit \
-        docker-phase3-entries-management \
+        docker-phase3-entries-management-tls \
+        docker-phase3-entries-management-protocol \
         docker-phase3-entries-topology \
         docker-traditional-tls-transports \
         docker-traditional-tls-base \
@@ -509,6 +510,7 @@ runDockerPhase3EditRegression() {
 
 runDockerPhase3EntriesRegression() {
     PADM_DOCKER_PHASE3_SCOPE=entries PADM_DOCKER_PHASE3_ENTRIES_BRANCH="${1:-all}" \
+        PADM_DOCKER_PHASE3_MANAGEMENT_GROUP="${2:-all}" \
         bash "${PROJECT_ROOT}/docker/tests/phase3.sh"
 }
 
@@ -518,6 +520,14 @@ runDockerPhase3EntriesTopologyRegression() {
 
 runDockerPhase3EntriesManagementRegression() {
     runDockerPhase3EntriesRegression management
+}
+
+runDockerPhase3EntriesManagementProtocolRegression() {
+    runDockerPhase3EntriesRegression management protocol
+}
+
+runDockerPhase3EntriesManagementTlsRegression() {
+    runDockerPhase3EntriesRegression management tls
 }
 
 runDockerPhase4LifecycleRegression() {
@@ -991,6 +1001,8 @@ registerRegressionFunctionLeaf docker-phase3 runDockerPhase3Regression
 registerRegressionFunctionLeaf docker-phase3-edit runDockerPhase3EditRegression
 registerRegressionFunctionLeaf docker-phase3-entries-topology runDockerPhase3EntriesTopologyRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management runDockerPhase3EntriesManagementRegression
+registerRegressionFunctionLeaf docker-phase3-entries-management-protocol runDockerPhase3EntriesManagementProtocolRegression
+registerRegressionFunctionLeaf docker-phase3-entries-management-tls runDockerPhase3EntriesManagementTlsRegression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-source-real runDockerFail2banSourceRealRegression
@@ -1163,7 +1175,8 @@ registerRegressionParallelSelectorList docker-core-assessment runFrameworkParall
 registerRegressionParallelSelectorList docker-geo runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-geo-parallel-${BASHPID:-$$}" listRegressionDockerGeoChildSelectors 2
 listRegressionDockerPhase3EntriesChildSelectors() {
-    printf '%s\n' docker-phase3-entries-management docker-phase3-entries-topology
+    printf '%s\n' docker-phase3-entries-management-tls docker-phase3-entries-management-protocol \
+        docker-phase3-entries-topology
 }
 registerRegressionParallelSelectorList docker-phase3-entries runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-phase3-entries-${BASHPID:-$$}" listRegressionDockerPhase3EntriesChildSelectors 2
