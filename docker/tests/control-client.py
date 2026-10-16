@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -53,9 +54,9 @@ DESIRED = {
 }
 
 
-def rejected(function, *args):
+def rejected(function, *args, **kwargs):
     try:
-        function(*args)
+        function(*args, **kwargs)
     except (ValueError, OSError, KeyError, TypeError, AttributeError, RecursionError,
             http.client.HTTPException):
         return
@@ -97,8 +98,9 @@ real_connect = socket.create_connection
 connections = []
 
 
-def local_connect(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, **kwargs):
-    assert address == ("10.77.0.1", 18080)
+def local_connect(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None,
+                  *, expected_port=18080, **kwargs):
+    assert address == ("10.77.0.1", expected_port)
     assert source_address == ("10.77.0.2", 0)
     connections.append((address, timeout, source_address))
     # 只把私网字面地址映射到 Linux loopback，保留真实 HTTPConnection 和源地址绑定。
@@ -115,11 +117,12 @@ def publish(value=DESIRED, *, status=200, headers=None, raw=None, delay=0):
     ]
 
 
-def cli(spec_path, invite_path, listeners=(), remap=False):
+def cli(spec_path, invite_path, listeners=(), remap=False, reconnect=0):
     stdout, stderr = io.StringIO(), io.StringIO()
     arguments = ["control_client.py", "--spec", str(spec_path), "--invite", str(invite_path)]
     if remap:
         arguments.append("--remap")
+    arguments.extend(["--reconnect"] * reconnect)
     for listener in listeners:
         arguments.extend(["--listener", listener])
     status = 0
@@ -172,6 +175,31 @@ try:
         assert client.build_client_draft(remapped, INVITATION, ["entry-main"], True) == remapped
         assert multi_spec == multi_original
 
+        reconnect_invite = copy.deepcopy(INVITATION)
+        reconnect_invite["listen"]["port"] = 18081
+        reconnect_invite["token"] = "b" * 48
+        reconnect_source = copy.deepcopy(multi_joined)
+        reconnect_source["traffic"] = {"unrelated": "unchanged"}
+        reconnect_source["accounts"].append(dict(account(5), listeners=["entry-main"]))
+        reconnect_original, reconnect_invite_original = copy.deepcopy(reconnect_source), copy.deepcopy(reconnect_invite)
+        with patch.object(socket, "create_connection", side_effect=partial(local_connect, expected_port=18081)):
+            reconnected = client.build_client_draft(reconnect_source, reconnect_invite, reconnect=True)
+            expected = copy.deepcopy(reconnect_source)
+            expected["control_sync"]["connection"]["listen"]["port"] = 18081
+            assert reconnected == expected, "同版本重连只能改变 API port"
+            assert client.build_client_draft(reconnected, reconnect_invite, reconnect=True) == reconnected
+            assert connections[-1] == (("10.77.0.1", 18081), 5, ("10.77.0.2", 0))
+            assert server.requests[-1][2].get_all("Authorization") == ["Bearer " + reconnect_invite["token"]]
+            assert reconnect_invite["token"] not in json.dumps(reconnected)
+            publish(dict(DESIRED, revision=8, accounts=[]))
+            refreshed = client.build_client_draft(reconnect_source, reconnect_invite, reconnect=True)
+            assert refreshed["accounts"] == [reconnect_source["accounts"][0], reconnect_source["accounts"][-1]]
+            assert refreshed["control_sync"]["last_revision"] == 8
+            assert refreshed["control_sync"]["connection"] == expected["control_sync"]["connection"]
+            assert refreshed["core"] == reconnect_source["core"] and refreshed["traffic"] == reconnect_source["traffic"]
+            publish()
+        assert reconnect_source == reconnect_original and reconnect_invite == reconnect_invite_original
+
         ss_spec = copy.deepcopy(multi_spec)
         ss_spec["core"]["protocols"].append({
             "listener_id": "entry-ss", "id": 30, "uuid": identity(11),
@@ -203,9 +231,11 @@ try:
                 if section == "snapshot":
                     drift["control_sync"]["managed_accounts"][0]["password"] += "changed"
             rejected(client.build_client_draft, drift, INVITATION, ["entry-ss"], True)
+            rejected(client.build_client_draft, drift, INVITATION, reconnect=True)
         for request in (dict(ss_desired, revision=6), DESIRED):
             publish(request)
             rejected(client.build_client_draft, ss_joined, INVITATION, ["entry-ss"], True)
+            rejected(client.build_client_draft, ss_joined, INVITATION, reconnect=True)
         publish()
         rejected(client.build_client_draft, multi_joined, INVITATION, ["entry-ss"], True)
         ss_missing = client.build_client_draft(ss_spec, INVITATION, ["entry-main"])
@@ -262,6 +292,9 @@ try:
         rejected(client.build_client_draft, multi_joined, INVITATION, None, True)
         rejected(client.build_client_draft, multi_joined, INVITATION, ["entry-main"])
         rejected(client.build_client_draft, SPEC, INVITATION, ["entry-main"], True)
+        rejected(client.build_client_draft, SPEC, INVITATION, reconnect=True)
+        rejected(client.build_client_draft, multi_joined, INVITATION, ["entry-main"], reconnect=True)
+        rejected(client.build_client_draft, multi_joined, INVITATION, remap=True, reconnect=True)
         for role in ("control", "control_sync"):
             occupied = copy.deepcopy(SPEC)
             occupied[role] = {}
@@ -273,6 +306,7 @@ try:
             drift["control_sync"][field] = value
             rejected(client.build_client_draft, drift, INVITATION)
             rejected(client.build_client_draft, drift, INVITATION, ["entry-main"], True)
+            rejected(client.build_client_draft, drift, INVITATION, reconnect=True)
         for section, field, value in (("listen", "port", 18081), ("listen", "port", 18080.0),
                                       ("listen", "address", "10.77.0.3"),
                                       (None, "peer_address", "10.77.0.3")):
@@ -284,12 +318,20 @@ try:
         legacy = copy.deepcopy(joined)
         del legacy["control_sync"]["connection"]
         rejected(client.build_client_draft, legacy, INVITATION)
+        rejected(client.build_client_draft, legacy, INVITATION, reconnect=True)
+        for section, field, value in (("listen", "interface", "wg-other"), ("listen", "port", 18080.0),
+                                      ("listen", "address", "10.77.0.3"), (None, "peer_address", "10.77.0.3")):
+            drift = copy.deepcopy(joined)
+            connection = drift["control_sync"]["connection"]
+            (connection[section] if section else connection)[field] = value
+            rejected(client.build_client_draft, drift, INVITATION, reconnect=True)
         assert len(connections) == before, "无效邀请、映射或状态不能发起网络请求"
 
         for field, value in (("controller_id", identity(6)), ("node_id", identity(6)),
                              ("api_version", 2), ("api_version", True), ("revision", 6)):
             publish(dict(DESIRED, **{field: value}))
             rejected(client.build_client_draft, joined, INVITATION)
+            rejected(client.build_client_draft, joined, INVITATION, reconnect=True)
         collision = copy.deepcopy(DESIRED)
         collision["accounts"][0]["uuid"] = SPEC["accounts"][0]["uuid"]
         publish(collision)
@@ -381,6 +423,27 @@ try:
                 status, output, errors = cli(spec_path, invite_path, listeners, True)
                 assert status == 78 and not output and errors
                 assert spec_path.read_bytes() == source and INVITATION["token"] not in errors
+            save(spec_path, reconnect_source)
+            save(invite_path, reconnect_invite)
+            source, invite_source = spec_path.read_bytes(), invite_path.read_bytes()
+            with patch.object(socket, "create_connection", side_effect=partial(local_connect, expected_port=18081)):
+                status, output, errors = cli(spec_path, invite_path, reconnect=True)
+            assert status == 0 and json.loads(output) == reconnected and not errors
+            assert spec_path.read_bytes() == source and invite_path.read_bytes() == invite_source
+            assert reconnect_invite["token"] not in output
+            before = len(connections)
+            for arguments in ({"reconnect": 2}, {"remap": True, "reconnect": True},
+                              {"listeners": ["entry-main"], "reconnect": True}):
+                status, output, errors = cli(spec_path, invite_path, **arguments)
+                assert status == 78 and not output and errors
+                assert spec_path.read_bytes() == source and invite_path.read_bytes() == invite_source
+                assert reconnect_invite["token"] not in errors
+            assert len(connections) == before, "重连参数冲突不能发起网络请求"
+            with patch.object(socket, "create_connection", side_effect=OSError("failed")):
+                status, output, errors = cli(spec_path, invite_path, reconnect=True)
+            assert status == 78 and not output and errors and reconnect_invite["token"] not in errors
+            assert spec_path.read_bytes() == source and invite_path.read_bytes() == invite_source
+            save(invite_path, INVITATION)
             save(spec_path, joined)
             source = spec_path.read_bytes()
             assert cli(spec_path, invite_path)[0] == 0

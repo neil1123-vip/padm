@@ -30,6 +30,10 @@ reject() {
         [[ "$*" == 'remap --invite /root/private.json --listener entry-main --yes' ]]
     }
     dockerControlCommand remap --invite /root/private.json --listener entry-main --yes
+    dockerControlClientApply() {
+        [[ "$*" == 'reconnect --invite /root/private.json --yes' ]]
+    }
+    dockerControlCommand reconnect --invite /root/private.json --yes
 )
 
 spec="${root}/config/spec.json"
@@ -133,6 +137,7 @@ dockerConfigureApply() {
     [[ "${DOCKER_CONTROL_TRANSACTION:-0}" == 1 &&
         "$(stat -c '%a:%u' "$(dirname -- "$1")")" == 700:0 &&
         "$(stat -c '%a:%u' "$1")" == 600:0 ]] || return 1
+    printf 'apply\n' >>"${TEST_ROOT}/apply.log"
     if [[ -f "${TEST_ROOT}/retain-recovery" ]]; then
         DOCKER_CONFIG_CANDIDATE="${root}/.candidate.failed"
         mkdir -- "${DOCKER_CONFIG_CANDIDATE}"
@@ -174,6 +179,16 @@ reject dockerControlCommand init "${args[@]}" --address 10.77.0.3
 reject dockerControlCommand init "${args[@]}" --unknown
 reject dockerControlCommand init --address 10.77.0.1 --port 18080 --peer-address
 reject dockerControlCommand init --address 10.77.0.1 --port 18080 --peer-address 10.77.0.2
+reject dockerControlCommand set-port
+reject dockerControlCommand set-port --yes
+reject dockerControlCommand set-port --port
+reject dockerControlCommand set-port --port 18080
+reject dockerControlCommand set-port --port 18080 --yes --yes
+reject dockerControlCommand set-port --port 18080 --port 19080 --yes
+reject dockerControlCommand set-port --port 18080 --yes --unknown
+for port in 0 80 1023 65536 018080 -18080 abc; do
+    reject dockerControlCommand set-port --port "${port}" --yes
+done
 [[ ! -f "${TEST_ROOT}/host.log" ]] || fail '参数错误触及宿主'
 
 json=$(dockerControlCommand status --json)
@@ -239,6 +254,98 @@ jq -e 'keys == ["authorization","controller_id","healthy","listen","node_id","pe
   .role == "main" and .healthy == true and .revision == 0 and
   .authorization == {enabled:false, expires_at:1}' <<<"${json}" >/dev/null
 cp -- "${spec}" "${TEST_ROOT}/main.json"
+(
+    # 端口变更沿用主控事务；旁路调度和网络异常不能触发部署。
+    cp -p -- "${root}/config/control/state.json" "${TEST_ROOT}/main-state.json"
+    check_port_clean() {
+        [[ ! -d "${root}/.fixture-deployment.lock" &&
+            -z "$(find "${root}" -maxdepth 1 -name '.control-port.*' -print -quit)" ]]
+    }
+    portBefore=$(sha256sum "${spec}")
+    stateBefore=$(sha256sum "${root}/config/control/state.json")
+    applyBefore=$(wc -l <"${TEST_ROOT}/apply.log")
+    dockerControlCommand set-port --port 18080 --yes >"${TEST_ROOT}/port-unchanged.log"
+    [[ "$(sha256sum "${spec}")" == "${portBefore}" &&
+        "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+    check_port_clean
+    for marker in bad-deployment bad-state unowned bad-health bad-address; do
+        touch "${TEST_ROOT}/${marker}"
+        reject dockerControlCommand set-port --port 19080 --yes
+        rm -- "${TEST_ROOT}/${marker}"
+        [[ "$(sha256sum "${spec}")" == "${portBefore}" &&
+            "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+        check_port_clean
+    done
+    printf '%s\t10.77.0.3/32\n' "${peerKey}" >"${CONTROL_WG_ACTUAL}"
+    reject dockerControlCommand set-port --port 19080 --yes
+    cp -- "${TEST_ROOT}/safe-wg.actual" "${CONTROL_WG_ACTUAL}"
+    [[ "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+    check_port_clean
+    for role in standalone controlled; do
+        if [[ "${role}" == standalone ]]; then
+            cp -- "${TEST_ROOT}/standalone.json" "${spec}"
+        else
+            jq '.control_sync = {
+              schema_version:1,role:"controlled",node_id:"33333333-3333-4333-8333-333333333333",
+              controller_id:"44444444-4444-4444-8444-444444444444",listener_ids:["entry-reality"],
+              last_revision:null,last_digest:null,managed_accounts:[]
+            }' "${TEST_ROOT}/standalone.json" >"${spec}"
+        fi
+        reject dockerControlCommand set-port --port 19080 --yes
+        [[ "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+        check_port_clean
+    done
+    cp -- "${TEST_ROOT}/main.json" "${spec}"
+    mkdir -p "${root}/data/control-log"
+    chmod 0700 "${root}/data/control-log"
+    printf '{"schema_version":1,"enabled":true}\n' >"${root}/data/control-log/schedule.json"
+    chmod 0600 "${root}/data/control-log/schedule.json"
+    reject dockerControlCommand set-port --port 19080 --yes
+    grep -Fq '修改端口前请先停用控制日志自动轮转' "${TEST_ROOT}/rejected.log"
+    printf '{\n' >"${root}/data/control-log/schedule.json"
+    reject dockerControlCommand set-port --port 18080 --yes
+    [[ "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+    dockerRemoveManagedTree "${root}" "${root}/data/control-log"
+    jq '.host_integrations += [{type:"fail2ban-control",profile:"net-fail2ban-control",
+      firewall_rules:["INPUT"],devices:[],schedules:[],
+      settings:{max_retry:6,find_time:600,ban_time:3600}}]' "${spec}" >"${TEST_ROOT}/port-fail2ban.json"
+    cp -- "${TEST_ROOT}/port-fail2ban.json" "${spec}"
+    reject dockerControlCommand set-port --port 19080 --yes
+    grep -Fq '修改端口前请先停用控制面 Fail2ban' "${TEST_ROOT}/rejected.log"
+    [[ "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+    cp -- "${TEST_ROOT}/main.json" "${spec}"
+    touch "${TEST_ROOT}/fail-apply"
+    reject dockerControlCommand set-port --port 19080 --yes
+    rm -- "${TEST_ROOT}/fail-apply"
+    [[ "$(sha256sum "${spec}")" == "${portBefore}" &&
+        "$(sha256sum "${root}/config/control/state.json")" == "${stateBefore}" ]]
+    check_port_clean
+    for signal in INT TERM; do
+        printf '%s\n' "${signal}" >"${TEST_ROOT}/signal"
+        status=0
+        dockerControlCommand set-port --port 19080 --yes >"${TEST_ROOT}/port-signal.log" 2>&1 || status=$?
+        [[ "${signal}:${status}" == INT:130 || "${signal}:${status}" == TERM:143 ]] ||
+            fail "端口变更信号退出码错误: ${signal}:${status}"
+        [[ "$(sha256sum "${spec}")" == "${portBefore}" &&
+            "$(sha256sum "${root}/config/control/state.json")" == "${stateBefore}" ]]
+        check_port_clean
+    done
+    rm -- "${TEST_ROOT}/signal"
+    dockerControlCommand set-port --port 19080 --yes >"${TEST_ROOT}/set-port.log"
+    jq -e '.control.listen.port == 19080' "${spec}" >/dev/null
+    jq -en --slurpfile before "${TEST_ROOT}/main.json" --slurpfile after "${spec}" \
+        '$before[0] == ($after[0] | .control.listen.port = 18080)' >/dev/null
+    jq -en --slurpfile before "${TEST_ROOT}/main-state.json" \
+        --slurpfile after "${root}/config/control/state.json" \
+        '$before[0] == ($after[0] | .listen.port = 18080)' >/dev/null
+    grep -Fq '重新 source-check' "${TEST_ROOT}/set-port.log"
+    applyBefore=$(wc -l <"${TEST_ROOT}/apply.log")
+    dockerControlCommand set-port --port 19080 --yes >/dev/null
+    [[ "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+    check_port_clean
+    cp -- "${TEST_ROOT}/main.json" "${spec}"
+    cp -p -- "${TEST_ROOT}/main-state.json" "${root}/config/control/state.json"
+)
 rm -- "${spec}"
 reject dockerControlCommand status --json
 cp -- "${TEST_ROOT}/main.json" "${spec}"

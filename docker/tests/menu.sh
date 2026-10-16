@@ -1366,10 +1366,41 @@ runMaintenanceDriver() {
 }
 
 runControlDriver() {
-    local scenario=$1 listenerInput overLimit
+    local scenario=$1 listenerInput overLimit controlChoice controlPrompt controlInput
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
+    endpoint|endpoint-input-cancel|endpoint-input-eof|endpoint-confirm-cancel|endpoint-confirm-eof|endpoint-failed)
+        for controlChoice in 16 17; do
+            controlPrompt='新主控 API 端口（1024–65535，0 返回）'
+            controlInput=19443
+            if [[ "${controlChoice}" == 17 ]]; then
+                controlPrompt='私有邀请文件绝对路径（0 返回）'
+                controlInput=/root/padm-invite.json
+            fi
+            targetReply 'Docker 控制连接' "${controlChoice}"$'\n'
+            case "${scenario}" in
+            endpoint-input-cancel)
+                targetReply "${controlPrompt}" $'0\n'
+                targetReply 'Docker 控制连接' "${controlChoice}"$'\n'
+                targetReply "${controlPrompt}" $'\n'
+                ;;
+            endpoint-input-eof) targetReply "${controlPrompt}" $'\004' ;;
+            *)
+                targetReply "${controlPrompt}" "${controlInput}"$'\n'
+                case "${scenario}" in
+                endpoint-confirm-cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
+                endpoint-confirm-eof) targetReply 'fixture-control-confirm [y/N]' $'\004' ;;
+                *) targetReply 'fixture-control-confirm [y/N]' $'y\n' ;;
+                esac
+                ;;
+            esac
+        done
+        [[ "${scenario}" != endpoint-failed ]] || targetReply 'Docker 控制连接' $'1\n'
+        targetReply 'Docker 控制连接' $'0\n'
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+        ;;
     sync-schedule|sync-schedule-input-cancel|sync-schedule-input-eof|sync-schedule-confirm-cancel|sync-schedule-confirm-eof|sync-schedule-failed)
         if [[ "${scenario}" == sync-schedule-input-cancel ]]; then
             targetReply 'Docker 控制连接' $'13\n'
@@ -3587,7 +3618,12 @@ control)
         [[ "${CONTROL_SYNC_SCHEDULE_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_SYNC_SCHEDULE_STATUS}"
         recordAction control-sync-schedule-commit "$3"
         ;;
-    init|invite|revoke|join|remap)
+    init|invite|revoke|join|remap|set-port|reconnect)
+        if [[ "$2" == set-port ]]; then
+            [[ "$#" -eq 4 && "$3" == --port && "$4" == 19443 ]] || exit 2
+        elif [[ "$2" == reconnect ]]; then
+            [[ "$#" -eq 4 && "$3" == --invite && "$4" == /root/padm-invite.json ]] || exit 2
+        fi
         if [[ "$2" == join || "$2" == remap ]]; then
             [[ "$3" == --invite && "$4" == /root/padm-invite.json && "$5" == --listener &&
                 ( ( "$#" -eq 6 && "$6" == entry-reality ) ||
@@ -4671,7 +4707,8 @@ for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主�
     '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' \
     '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
     '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
-    '15. 重映射受管账号入口（同连接）' '0. 返回'; do
+    '15. 重映射受管账号入口（同连接）' '16. 更新主控 API 端口' \
+    '17. 被控同身份重连' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -4698,6 +4735,41 @@ for controlCase in cancel input-eof confirm-eof failed; do
         fail "control ${controlCase} committed after cancellation or dispatched incorrect arguments"
     [[ "${controlCase}" != failed ]] ||
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed control initialization was not reported'
+done
+unset CONTROL_INIT_STATUS
+for controlCase in endpoint endpoint-input-cancel endpoint-input-eof endpoint-confirm-cancel endpoint-confirm-eof endpoint-failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export CONTROL_INIT_STATUS=0
+    [[ "${controlCase}" != endpoint-failed ]] || CONTROL_INIT_STATUS=17
+    runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
+    expectedControl= expectedConfirmations=0
+    if [[ "${controlCase}" != endpoint-input-* ]]; then
+        for controlAction in 'set-port --port 19443' 'reconnect --invite /root/padm-invite.json'; do
+            [[ -z "${expectedControl}" ]] || expectedControl+=$'\n'
+            expectedControl+="control ${controlAction}"
+            case "${controlCase}" in
+            endpoint-confirm-cancel) expectedControl+=$'\ncontrol-confirm n' ;;
+            endpoint-confirm-eof) expectedControl+=$'\ncontrol-confirm eof' ;;
+            endpoint-failed) expectedControl+=$'\ncontrol-confirm y' ;;
+            *) expectedControl+=$'\ncontrol-confirm y\ncontrol-commit' ;;
+            esac
+        done
+        expectedConfirmations=2
+    fi
+    if [[ "${controlCase}" == endpoint-failed ]]; then
+        expectedControl+=$'\ncontrol status'
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}" || true)" -eq 2 ]] ||
+            fail '控制端口更新或重连失败未报告退出码并返回菜单'
+        grep -Fq 'fixture-control-status' "${CONTROL_LOG}" || fail '控制端点操作失败后菜单不可用'
+    fi
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
+        fail "控制端点 ${controlCase} 参数错误、重复执行或取消后提交"
+    [[ "$(grep -Fc 'fixture-control-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${expectedConfirmations}" ]] ||
+        fail "控制端点 ${controlCase} 未复用 CLI 单次确认"
+    for controlBoundary in '请先停用自动同步及控制日志调度，并禁用控制面 Fail2ban。' \
+        '仅支持同身份、同 WireGuard 地址的 API 端口更新；不支持主控重绑定。'; do
+        grep -Fq "${controlBoundary}" "${CONTROL_LOG}" || fail "控制端点菜单缺少边界: ${controlBoundary}"
+    done
 done
 unset CONTROL_INIT_STATUS
 for controlCase in invite invite-cancel invite-eof revoke revoke-cancel; do

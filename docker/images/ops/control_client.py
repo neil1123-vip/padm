@@ -165,7 +165,7 @@ def _new_sync(spec, invitation, listeners):
     return spec
 
 
-def _existing_sync(spec, invitation):
+def _existing_sync(spec, invitation, reconnect=False):
     if type(spec.get("schema_version")) is not int or spec["schema_version"] != 3 \
             or "control" in spec or not isinstance(spec.get("control_sync"), dict):
         raise ValueError("同步要求已有被控连接")
@@ -178,16 +178,23 @@ def _existing_sync(spec, invitation):
     connection = sync["connection"]
     exact_keys(connection, "listen peer_address")
     _listen(connection["listen"])
-    if connection["listen"] != invitation["listen"] or connection["peer_address"] != invitation["peer_address"]:
+    listen = dict(connection["listen"], port=invitation["listen"]["port"]) if reconnect else connection["listen"]
+    if listen != invitation["listen"] or connection["peer_address"] != invitation["peer_address"]:
         raise ValueError("同步邀请连接与本机状态不匹配")
     _mapping(spec, sync["listener_ids"])
+    if reconnect:
+        connection["listen"] = listen
     return spec
 
 
-def build_client_draft(spec, invitation, listeners=None, remap=False):
+def build_client_draft(spec, invitation, listeners=None, remap=False, reconnect=False):
     invitation = validate_invitation(invitation)
     spec = copy.deepcopy(spec)
-    if remap:
+    if reconnect:
+        if remap or listeners is not None:
+            raise ValueError("重连不能同时接入或重映射入口")
+        spec = _existing_sync(spec, invitation, reconnect=True)
+    elif remap:
         spec = _existing_sync(spec, invitation)
         listeners = _mapping(spec, listeners)
     elif listeners is not None:
@@ -204,16 +211,19 @@ def main():
     parser.add_argument("--invite", required=True)
     parser.add_argument("--listener", action="append")
     parser.add_argument("--remap", action="store_true")
+    parser.add_argument("--reconnect", action="count", default=0)
     args = parser.parse_args()
     try:
+        if args.reconnect > 1:
+            raise ValueError("重连参数不能重复")
         spec = read_input(args.spec, 16 * MAX_STATE_BYTES)
         invitation = read_input(args.invite, MAX_STATE_BYTES)
-        draft = build_client_draft(spec, invitation, args.listener, args.remap)
+        draft = build_client_draft(spec, invitation, args.listener, args.remap, bool(args.reconnect))
         json.dump(draft, sys.stdout, ensure_ascii=True, separators=(",", ":"))
         sys.stdout.write("\n")
     except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError, http.client.HTTPException):
         # 输入和授权材料含凭据，失败时只返回状态码，不把原文写入普通输出。
-        parser.exit(78, "被控接入、同步或重映射输入无效、授权失配或网络响应不支持\n")
+        parser.exit(78, "被控接入、同步、重映射或重连输入无效、授权失配或网络响应不支持\n")
 
 
 if __name__ == "__main__":

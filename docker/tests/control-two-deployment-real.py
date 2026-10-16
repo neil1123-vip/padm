@@ -216,7 +216,8 @@ def source_check(controller, controlled):
                 time.sleep(0.05)
             registration_path = controller["path"] / "deployment/data/control-source/challenge.json"
             registration = json.loads(registration_path.read_text())
-            cli(controlled, "control", "source-probe", "--address", ADDRESS[0], "--port", "39778",
+            cli(controlled, "control", "source-probe", "--address", ADDRESS[0], "--port",
+                str(state(controller)["control"]["listen"]["port"]),
                 "--peer-address", ADDRESS[1], "--nonce", registration["nonce"])
             assert proof.wait(timeout=20) == 0, diagnostic(controller, proof_output.read_text())
             assert b"source-verified=" in proof_output.read_bytes()
@@ -1059,6 +1060,97 @@ def remap(node, invitation, image):
     print("docker-control-two-deployment-remap-traffic-idempotency-return-ok", flush=True)
 
 
+def reconnect(controller, controlled, invitation, image):
+    before_controller, before_controlled = state(controller), state(controlled)
+    before_services = services(controller)
+    ledger = controlled["path"] / "deployment/data/traffic/state.json"
+    totals = json.loads(ledger.read_text())["accounts"]
+    port = before_controller["control"]["listen"]["port"] + 1
+    cli(controller, "control", "set-port", "--port", str(port), "--yes")
+    expected_controller = copy.deepcopy(before_controller)
+    expected_controller["control"]["listen"]["port"] = port
+    assert state(controller) == expected_controller, "真实端口切换改变主控身份、授权或账号版本"
+    current_services = services(controller)
+    assert set(current_services) == set(before_services), "真实端口切换改变服务集合"
+    assert current_services["control"]["id"] != before_services["control"]["id"], \
+        "真实端口切换未重建 API 服务"
+    command(controlled["enter"] + ["python3", "-c", """
+import json, socket, sys
+invite = json.load(open(sys.argv[1]))
+try:
+    connection = socket.create_connection(
+        (invite["listen"]["address"], invite["listen"]["port"]), 3,
+        source_address=(invite["peer_address"], 0))
+except OSError:
+    pass
+else:
+    connection.close()
+    raise AssertionError("端口切换后旧 API 仍接受连接")
+""", str(invitation)], timeout=5)
+    source_check(controller, controlled)
+    rotated = controller["path"] / "private/reconnected.json"
+    cli(controller, "control", "invite", "--output", str(rotated), "--yes")
+    old_invite, new_invite = json.loads(invitation.read_text()), json.loads(rotated.read_text())
+    assert all(new_invite[name] == old_invite[name]
+               for name in ("controller_id", "node_id", "peer_address"))
+    assert new_invite["listen"] == dict(old_invite["listen"], port=port)
+    assert new_invite["token"] != old_invite["token"]
+    current_invite = controlled["path"] / "private/reconnected.json"
+    save(current_invite, new_invite)
+    reachable(controlled, current_invite)
+    cli(controlled, "control", "sync", "--invite", str(current_invite), accepted=False)
+    assert state(controlled) == before_controlled, "普通同步绕过重连连接门禁"
+    cli(controlled, "control", "reconnect", "--invite", str(current_invite), "--yes")
+    expected_controlled = copy.deepcopy(before_controlled)
+    expected_controlled["control_sync"]["connection"]["listen"]["port"] = port
+    assert state(controlled) == expected_controlled, "真实重连改变控制身份、入口映射、账号或版本"
+    current_totals = json.loads(ledger.read_text())["accounts"]
+    assert all(current_totals[account_id][key] >= value[key] for account_id, value in totals.items()
+               for key in ("upload", "download")), "真实重连回退累计流量"
+    managed_id = expected_controlled["control_sync"]["managed_accounts"][0]["id"]
+    traffic(controlled, image, account_id=managed_id)
+    traffic(controlled, image)
+    before_services, before_ledger = services(controlled), ledger.read_bytes()
+    cli(controlled, "control", "reconnect", "--invite", str(current_invite), "--yes")
+    assert state(controlled) == expected_controlled and services(controlled) == before_services, \
+        "真实幂等重连重建服务或改写规格"
+    assert ledger.read_bytes() == before_ledger, "真实幂等重连改写流量账"
+    before_services = services(controller)
+    cli(controller, "control", "set-port", "--port", str(port), "--yes")
+    assert services(controller) == before_services, "真实同端口更新重建服务"
+    cli(controller, "control", "revoke", "--yes")
+    revoked = state(controller)
+    reachable(controlled, current_invite)
+    unauthorized(controlled, current_invite)
+    cli(controller, "control", "set-port", "--port", str(old_invite["listen"]["port"]), "--yes")
+    revoked["control"]["listen"]["port"] = old_invite["listen"]["port"]
+    assert state(controller) == revoked, "撤销后端口切换复活 Peer 或改变主控身份"
+    # 不重新签发邀请；改用已撤销令牌探测新端口，避免签发本身重新授权。
+    revoked_invite = copy.deepcopy(new_invite)
+    revoked_invite["listen"]["port"] = old_invite["listen"]["port"]
+    save(current_invite, revoked_invite)
+    reachable(controlled, current_invite)
+    unauthorized(controlled, current_invite)
+    before_services, before_ledger = services(controlled), ledger.read_bytes()
+    for action in ("reconnect", "sync"):
+        arguments = ["control", action, "--invite", str(current_invite)]
+        if action == "reconnect":
+            arguments.append("--yes")
+        cli(controlled, *arguments, accepted=False)
+        assert state(controlled) == expected_controlled and services(controlled) == before_services, \
+            "撤销后的真实重连或同步改变被控部署"
+        assert ledger.read_bytes() == before_ledger, "撤销后的真实重连或同步改写流量账"
+        assert state(controller) == revoked, "撤销后的真实重连或同步复活 Peer"
+    assert revoked["control"]["peer"]["enabled"] is False
+    assert revoked["control"]["peer"]["expires_at"] == 1
+    for node in (controller, controlled):
+        root = node["path"] / "deployment"
+        assert not list(root.glob(".candidate.*")) and not list(root.glob(".control-client.*"))
+        assert not list(root.glob(".control-port.*")) and not (root / "locks/deployment.lock").exists()
+    print("docker-control-two-deployment-port-reconnect-identity-traffic-revoke-ok", flush=True)
+    return rotated
+
+
 def private_logs(nodes, invitations, keys):
     secrets = [json.loads(path.read_text())["token"] for path in invitations] + keys
     for member in nodes:
@@ -1320,8 +1412,9 @@ def main():
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
             if options.remap_only:
                 remap(controlled, controlled_invite, images["sing-box"])
-                private_logs(nodes, (invite,), keys)
-                proofs[0]["scope"] = "real-compose-control-remap-from-installed-fixture"
+                rotated = reconnect(controller, controlled, controlled_invite, images["sing-box"])
+                private_logs(nodes, (invite, rotated), keys)
+                proofs[0]["scope"] = "real-compose-control-remap-reconnect-from-installed-fixture"
                 return proofs
             if options.log_schedule_cron_only:
                 log_rotate(controller, controlled, controlled_invite, scheduled=True)

@@ -1538,7 +1538,7 @@ padm-docker control sync --invite /root/padm-control-invite.json
 `--listener` 可重复指定现有入口；菜单 `15 → 5` 输入逗号分隔的入口 ID（最多 16 个），
 空段、尾逗号或非法 ID 拒绝。接入一次确认，在同一事务中初始化被控身份、固定映射并完成首轮同步。
 失败保留原角色、账号和流量；重复同步同版本同内容不重建。
-双方身份和连接地址随后冻结，不能用另一邀请重新认领。普通同步保留已提交映射。
+双方身份和 WireGuard 地址随后冻结，不能用另一邀请重新认领。普通同步保留已提交映射和 API 端口。
 菜单 `15 → 15` 或以下命令可在同连接上重新认证并替换映射：
 
 ```bash
@@ -1547,6 +1547,21 @@ padm-docker control remap --invite /root/padm-control-invite.json --listener ent
 
 先停用自动同步，提交后用同连接邀请重新启用；版本、摘要和旧受管快照仍须一致，
 本机账号及流量保持。轮换后安全传递新的邀请文件，再同步。
+菜单 `15 → 16/17` 提供同身份的 API 端口更新与重连，命令顺序如下：
+
+```bash
+# 被控端先停用自动同步；主控端先停用控制日志调度和控制面 Fail2ban。
+padm-docker control set-port --port 19443 --yes
+padm-docker control invite --output /root/padm-control-new-port.json --yes
+# 将新邀请安全传至被控端，再执行：
+padm-docker control reconnect --invite /root/padm-control-new-port.json --yes
+```
+
+仅接受 `1024–65535` 端口，保留主控/被控身份、WireGuard 密钥和地址、入口映射与累计流量；
+重连仍认证邀请并核对版本、摘要和旧受管快照，可能同时取得主控的新账号版本。
+同端口、同版本重复执行不重建；失败或 INT/TERM 走原事务恢复，不允许跨端口显式回滚。
+切换后旧端口不再提供 API；主控须重新 `source-check` 才能启用来源相关防护和日志调度，
+被控须用新邀请重新启用自动同步。该入口不支持地址/身份/密钥迁移、多 Peer 或跨主控重绑定。
 每次手动同步显式读取受管目录外的 root 私有邀请，祖先目录权限与输出要求一致；过期或撤销时拒绝。
 原始 token 不写入 spec、备份、参数、环境或普通日志。客户端无能力、固定本机私网源地址直连，
 不使用代理、重定向或公网回退；状态只展示连接元数据，不据此宣称远端健康。

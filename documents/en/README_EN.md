@@ -1174,8 +1174,8 @@ Repeat `--listener` to map multiple existing entries, or enter comma-separated l
 in control menu `15 → 5` (up to 16). Empty segments and invalid IDs are rejected.
 Join confirms once and initializes identity,
 mapping and the initial account sync in one transaction. Failure preserves the original role, accounts
-and traffic; retrying the same revision/content does not rebuild services. Identity, connection addresses
-are then fixed; a different invitation cannot reclaim them. Ordinary sync retains the committed mapping.
+and traffic; retrying the same revision/content does not rebuild services. Identity and WireGuard addresses
+are then fixed; a different invitation cannot reclaim them. Ordinary sync retains the committed mapping and API port.
 Control menu `15 → 15` or this command reauthenticates the same connection and replaces its mapping:
 
 ```bash
@@ -1184,6 +1184,24 @@ padm-docker control remap --invite /root/padm-control-invite.json --listener ent
 
 Disable automatic sync first, then enable it again with the same connection's invitation after committing.
 Revision, digest and the previous managed snapshot remain checked; local accounts and traffic are preserved.
+Control menu `15 → 16/17` updates and reconnects the API port for the same identity:
+
+```bash
+# 被控端先停用自动同步；主控端先停用控制日志调度和控制面 Fail2ban。
+padm-docker control set-port --port 19443 --yes
+padm-docker control invite --output /root/padm-control-new-port.json --yes
+# 将新邀请安全传至被控端，再执行：
+padm-docker control reconnect --invite /root/padm-control-new-port.json --yes
+```
+
+Only ports `1024–65535` are accepted. Identities, WireGuard keys and addresses, listener mapping and
+traffic totals remain unchanged. Reconnect authenticates the invitation and checks revision, digest and
+the previous managed snapshot; it can also apply a newer controller account revision. Retrying the same
+port and revision does not rebuild services. Failures and INT/TERM use the existing recovery transaction;
+explicit rollback cannot cross API ports. The old API port closes after switching. Run a fresh controller
+`source-check` before enabling source-dependent protection or log scheduling, and import the new invitation
+when enabling controlled auto-sync again. Address, identity and key migration, multiple peers and
+cross-controller rebinding remain unsupported.
 After rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.

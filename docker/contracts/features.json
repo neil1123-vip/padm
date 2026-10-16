@@ -305,7 +305,7 @@
       "profiles": ["subscription", "net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "4C.1–4C.3d6 已提供私网 API、主控初始化与邀请/轮换/撤销、被控多入口接入和手动同步 CLI/菜单、同连接受管账号入口重映射及事务/回滚保护；重映射保留版本/旧快照门禁，须先停用自动同步，真实 WireGuard 规划及隔离 amd64 双 Docker Engine 的 Compose 重映射、WS/TLS 请求、幂等不重建与切回已验，本机账号及累计保持。核验已有受管单 Peer WireGuard 的归属、地址和唯一 /32 Peer，不创建接口/密钥/路由。token 仅写外部 root 私有邀请，不进入规格/备份/普通日志；独立只读服务与客户端零能力，无公网端口映射。4C.4a 真实加密链路及规划、4C.4b 隔离 amd64 双 Docker Engine 的生产 CLI/Compose 接入同步、WS/TLS 流量、账号/累计保持和健康失败/INT/TERM 恢复已验；4C.5 已验已有单 Peer 被控每 5 分钟自动同步、锁竞争、轮换/撤销及健康失败/INT/TERM 恢复。多 Peer、网络向导、角色重绑定、迁移与完整灾备未交付，可信发布、原生双机/arm64 和宿主重启待验，完整状态保持 deferred。"
+      "reason": "4C.1–4C.3d6 已提供私网 API、主控初始化与邀请/轮换/撤销、被控多入口接入和手动同步 CLI/菜单、同连接受管账号入口重映射及事务/回滚保护；重映射保留版本/旧快照门禁，须先停用自动同步，真实 WireGuard 规划及隔离 amd64 双 Docker Engine 的 Compose 重映射、WS/TLS 请求、幂等不重建与切回已验，本机账号及累计保持。4C.6 增加同身份/同 WireGuard 地址的主控 API 端口更新和被控重连，须先停用相关调度及控制面防护，保留身份、映射、累计和版本/旧快照/回滚门禁；CLI/client、菜单及隔离 amd64 双 Docker Engine 的 Compose 切换、重连、业务流量、同版幂等和撤销已验，本批完整合同 65/65 叶子通过。核验已有受管单 Peer WireGuard 的归属、地址和唯一 /32 Peer，不创建接口/密钥/路由。token 仅写外部 root 私有邀请，不进入规格/备份/普通日志；独立只读服务与客户端零能力，无公网端口映射。4C.4a 真实加密链路及规划、4C.4b 隔离 amd64 双 Docker Engine 的生产 CLI/Compose 接入同步、WS/TLS 流量、账号/累计保持和健康失败/INT/TERM 恢复已验；4C.5 已验已有单 Peer 被控每 5 分钟自动同步、锁竞争、轮换/撤销及健康失败/INT/TERM 恢复。多 Peer、网络向导、角色重绑定、迁移与完整灾备未交付，可信发布、原生双机/arm64 和宿主重启待验，完整状态保持 deferred。"
     },
     "acme-webroot": {
       "status": "deferred",
