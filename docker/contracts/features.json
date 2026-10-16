@@ -271,15 +271,14 @@
       "status": "supported",
       "native_menu": "订阅与用户",
       "native_action": "订阅发布",
-      "profiles": ["core-xray", "nginx", "subscription"],
+      "profiles": ["nginx", "subscription"],
       "requires": {
-        "core": "xray",
-        "protocol_ids": [21],
+        "protocol_ids": [21, 22, 23, 24, 25],
         "tls": true
       },
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "部署必须包含 Xray 协议 21 和受管 TLS，无论 Xray 为主核心还是副核心；Nginx 发布 token 保护的订阅可包含两核心 Reality 和 sing-box Hysteria2 节点。没有 Xray WS TLS 入口时不可发布。"
+      "reason": "4A.7 复用至少一个 Nginx TLS 协议 21–25 入口及同域受管 TLS，含纯 sing-box HTTPUpgrade 23；不要求同时包含全部协议。无 21 时启用发布需 x-padm-subscription-nginx-tls，含 21 或关闭发布的旧规格兼容。部署及分享组 token 沿用，分享 URL 按 core.protocols 中首个适用入口的实际公开端口，Reality 共存选中的 website 使用公开 443。22–25 的主/组 HTTPS 下载、严格 TLS、双族 TCP/UDP 已通过隔离 amd64 实测；独立 27/29 及其它非 Nginx TLS 协议仍不可单独发布，不新增独立发布域名、证书或服务。"
     },
     "subscription-traffic": {
       "status": "supported",

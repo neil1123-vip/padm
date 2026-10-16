@@ -335,7 +335,7 @@ jq --argjson group "${group}" '.subscription.include_base=false |
 assertShare "${TEST_ROOT}/group.json" "${TEST_ROOT}/group.links"
 [[ "$(stat -c %a "${TEST_ROOT}/group.links")" == 640 ]] || fail '分享组文件权限错误'
 
-# 旧正文由严格输出精确删除三处新增校验得到，不能由待测 legacy 模式自证。
+# 旧正文从严格输出精确还原已知差异，不能由待测 legacy 模式自证。
 makeLegacyNginx() {
     python3 - "$@" <<'PY'
 import json
@@ -344,23 +344,35 @@ from pathlib import Path
 
 spec_path, strict_path, output_path = map(Path, sys.argv[1:4])
 mode = sys.argv[4] if len(sys.argv) == 5 else "full"
-assert mode in ("full", "partial")
+assert mode in ("full", "partial", "publish", "host-publish")
 spec = json.loads(spec_path.read_text())
 entries = [entry for entry in spec["core"]["protocols"] if entry["id"] in (21, 22, 23)]
-assert sorted(entry["id"] for entry in entries) == [21, 22, 23]
 parts = strict_path.read_text().split("\nserver {\n")
 gate = f'\n    if ($host != {spec["tls"]["domain"].lower()}) {{ return 404; }}\n'
-for entry in entries:
-    transport = entry.get("websocket", entry.get("httpupgrade"))
-    port = transport["tls_port"]
-    matches = [index for index, part in enumerate(parts)
-               if part.startswith(f"    listen {port} ssl;\n    listen [::]:{port} ssl;\n")]
-    assert len(matches) == 1, (entry["listener_id"], matches)
-    index = matches[0]
-    assert parts[index].count(gate) == 1, entry["listener_id"]
-    if mode == "full" or entry["id"] == 21:
-        parts[index] = parts[index].replace(gate, "", 1)
-output_path.write_text("\nserver {\n".join(parts))
+if mode != "publish":
+    assert sorted(entry["id"] for entry in entries) == [21, 22, 23]
+    for entry in entries:
+        transport = entry.get("websocket", entry.get("httpupgrade"))
+        port = transport["tls_port"]
+        matches = [index for index, part in enumerate(parts)
+                   if part.startswith(f"    listen {port} ssl;\n    listen [::]:{port} ssl;\n")]
+        assert len(matches) == 1, (entry["listener_id"], matches)
+        index = matches[0]
+        assert parts[index].count(gate) == 1, entry["listener_id"]
+        if mode != "partial" or entry["id"] == 21:
+            parts[index] = parts[index].replace(gate, "", 1)
+text = "\nserver {\n".join(parts)
+if mode in ("publish", "host-publish"):
+    publish_entries = [entry for entry in spec["core"]["protocols"] if entry["id"] in (21, 22, 23, 24, 25)]
+    resolver = "        resolver 127.0.0.11 ipv6=off valid=30s;\n        resolver_timeout 5s;\n"
+    assert spec["subscription"]["enabled"] and text.count(resolver) == len(publish_entries)
+    text = text.replace(resolver, "")
+    grpc = "    location /subscriptions/ {\n        grpc_pass "
+    assert text.count(grpc) == sum(entry["id"] in (24, 25) and
+                                  entry["grpc_tls"]["service_name"] == "subscriptions"
+                                  for entry in publish_entries)
+    text = text.replace(grpc, "    location ^~ /subscriptions/ {\n        grpc_pass ")
+output_path.write_text(text)
 PY
 }
 assertNginxDirectory() {
@@ -378,12 +390,14 @@ mkdir -p "${nginxActual}"
 dockerGenerateNginxConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/nginx-strict.conf"
 makeLegacyNginx "${TEST_ROOT}/base.json" "${TEST_ROOT}/nginx-strict.conf" "${TEST_ROOT}/nginx-legacy.conf"
 makeLegacyNginx "${TEST_ROOT}/base.json" "${TEST_ROOT}/nginx-strict.conf" "${TEST_ROOT}/nginx-partial.conf" partial
+makeLegacyNginx "${TEST_ROOT}/base.json" "${TEST_ROOT}/nginx-strict.conf" "${TEST_ROOT}/nginx-publish.conf" publish
+makeLegacyNginx "${TEST_ROOT}/base.json" "${TEST_ROOT}/nginx-strict.conf" "${TEST_ROOT}/nginx-host-publish.conf" host-publish
 sed 's|proxy_pass http://xray:40021;|proxy_pass http://xray:49999;|' \
     "${TEST_ROOT}/nginx-legacy.conf" >"${TEST_ROOT}/nginx-proxy-drift.conf"
 grep -qF 'proxy_pass http://xray:49999;' "${TEST_ROOT}/nginx-proxy-drift.conf"
-for variant in strict legacy partial proxy-drift; do
+for variant in strict legacy publish host-publish partial proxy-drift; do
     cp -- "${TEST_ROOT}/nginx-${variant}.conf" "${nginxActual}/default.conf"
-    if [[ "${variant}" == strict || "${variant}" == legacy ]]; then
+    if [[ "${variant}" != partial && "${variant}" != proxy-drift ]]; then
         dockerNginxConfigMatches "${TEST_ROOT}/base.json" "${nginxActual}/default.conf" ||
             fail "拒绝完整 Nginx ${variant} 正文"
         assertNginxDirectory 0 "${TEST_ROOT}/base.json" "${nginxActual}"
@@ -392,12 +406,43 @@ for variant in strict legacy partial proxy-drift; do
         assertNginxDirectory 1 "${TEST_ROOT}/base.json" "${nginxActual}"
     fi
 done
-cp -- "${TEST_ROOT}/nginx-legacy.conf" "${nginxActual}/default.conf"
+cp -- "${TEST_ROOT}/nginx-publish.conf" "${nginxActual}/default.conf"
+printf 'server { listen 49998; }\n' >>"${nginxActual}/default.conf"
+reject dockerNginxConfigMatches "${TEST_ROOT}/base.json" "${nginxActual}/default.conf"
+assertNginxDirectory 1 "${TEST_ROOT}/base.json" "${nginxActual}"
+cp -- "${TEST_ROOT}/nginx-host-publish.conf" "${nginxActual}/default.conf"
 printf 'server { listen 49998; }\n' >"${nginxActual}/unmanaged.conf"
 assertNginxDirectory 1 "${TEST_ROOT}/base.json" "${nginxActual}"
 rm -- "${nginxActual}/unmanaged.conf"
 reject dockerNginxConfigMatches "${TEST_ROOT}/cdn.json" "${nginxActual}/default.conf"
 assertNginxDirectory 1 "${TEST_ROOT}/cdn.json" "${nginxActual}"
+cp -- "${TEST_ROOT}/nginx-publish.conf" "${nginxActual}/default.conf"
+dockerNginxConfigMatches "${TEST_ROOT}/cdn.json" "${nginxActual}/default.conf" ||
+    fail '已有 CDN 字段拒绝保留 Host 校验的完整旧发布正文'
+assertNginxDirectory 0 "${TEST_ROOT}/cdn.json" "${nginxActual}"
+
+# 旧发布兼容仅接入既有 21 发布拓扑，不能套用到新放开的无 21 入口。
+jq 'del(.accounts,.port_aliases) | .core.protocols |= map(select(.id==22 or .id==23))' \
+    "${TEST_ROOT}/base.json" >"${TEST_ROOT}/nginx-no21.json"
+dockerConfigureSpecValidate "${TEST_ROOT}/nginx-no21.json"
+dockerGenerateNginxConfig "${TEST_ROOT}/nginx-no21.json" "${TEST_ROOT}/nginx-no21-strict.conf"
+makeLegacyNginx "${TEST_ROOT}/nginx-no21.json" "${TEST_ROOT}/nginx-no21-strict.conf" \
+    "${nginxActual}/default.conf" publish
+reject dockerNginxConfigMatches "${TEST_ROOT}/nginx-no21.json" "${nginxActual}/default.conf"
+assertNginxDirectory 1 "${TEST_ROOT}/nginx-no21.json" "${nginxActual}"
+
+# 混合发布的旧 gRPC 前缀仍须整份匹配，新正文继续让 token 正则优先。
+jq '.core.protocols |= map(if .id==24 or .id==25 then
+  .grpc_tls.service_name="subscriptions" else . end)' "${TEST_ROOT}/base.json" \
+    >"${TEST_ROOT}/nginx-grpc-publish.json"
+dockerConfigureSpecValidate "${TEST_ROOT}/nginx-grpc-publish.json"
+dockerGenerateNginxConfig "${TEST_ROOT}/nginx-grpc-publish.json" "${TEST_ROOT}/nginx-grpc-publish-strict.conf"
+makeLegacyNginx "${TEST_ROOT}/nginx-grpc-publish.json" "${TEST_ROOT}/nginx-grpc-publish-strict.conf" \
+    "${nginxActual}/default.conf" publish
+[[ "$(grep -cF 'location ^~ /subscriptions/ {' "${nginxActual}/default.conf")" == 2 ]] ||
+    fail '旧发布夹具未还原两个 gRPC 前缀'
+dockerNginxConfigMatches "${TEST_ROOT}/nginx-grpc-publish.json" "${nginxActual}/default.conf"
+assertNginxDirectory 0 "${TEST_ROOT}/nginx-grpc-publish.json" "${nginxActual}"
 
 # 旧模式只缺本次 TLS 校验，既有 HTTP-01 校验和 stream 正文仍须完整一致。
 jq '.tls.http01=true' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/nginx-http01.json"
@@ -447,7 +492,8 @@ cdnProtectedSnapshot() (
     cd "${root}"
     jq -S 'del(.cdn_entries)' config/spec.json
     sha256sum compose.json images.env config/xray/config.json config/xray/users.base \
-        config/nginx/default.conf config/share-groups.json data/traffic/state.json secrets/tls/*
+        config/share-groups.json data/traffic/state.json secrets/tls/*
+    [[ "${1:-}" == without-nginx ]] || sha256sum config/nginx/default.conf
 )
 runEdit() {
     local expected=$1 actual=0
@@ -475,18 +521,18 @@ dockerSubscriptionStateWrite "${root}/config/share-groups.json" \
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerAcquireDeploymentLock
-    dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+    dockerConfigureApply "${TEST_ROOT}/nginx-grpc-publish.json" '' '' configure
 ) >"${LOG}" 2>&1 || fail '初始化 CDN 夹具失败'
 assertClean
 assertInstalledShare
-# 模拟旧 bundle 更新后的在线正文，首次 CDN 提交必须一次补齐所有入口校验。
+# 模拟旧 bundle 更新后的在线正文，首次 CDN 提交须补齐解析器与入口校验。
 cp -- "${root}/config/nginx/default.conf" "${TEST_ROOT}/nginx-installed-strict.conf"
 makeLegacyNginx "${root}/config/spec.json" "${TEST_ROOT}/nginx-installed-strict.conf" \
-    "${root}/config/nginx/default.conf"
+    "${root}/config/nginx/default.conf" host-publish
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"business",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
 (dockerMain subscription links share-cccccccccccccccc) >"${TEST_ROOT}/url.before"
-grep -qx 'https://tls.example.com/subscriptions/cdn-transaction-token' "${TEST_ROOT}/url.before" ||
+grep -qx 'https://tls.example.com:35021/subscriptions/cdn-transaction-token' "${TEST_ROOT}/url.before" ||
     fail '初始分享 URL 不正确'
 legacyBefore=$(snapshot)
 (dockerMain protocol list) >"${LOG}" 2>&1 || fail '旧 Nginx 不能读取入口列表'
@@ -500,8 +546,13 @@ jq -e '.enabled==false and (.entries|length)==6 and
   all(.entries[]; .overridden==false and .addresses==["origin.example.com"])' "${LOG}" >/dev/null
 assertClean
 [[ "$(snapshot)" == "${legacyBefore}" ]] || fail '旧 Nginx 只读菜单修改在线部署'
-before=$(snapshot)
-runEdit 0 --cdn-entry entry-21 'edge.example.com,2001:db8::21' --preview
+for legacyMode in publish host-publish; do
+    makeLegacyNginx "${root}/config/spec.json" "${TEST_ROOT}/nginx-installed-strict.conf" \
+        "${root}/config/nginx/default.conf" "${legacyMode}"
+    before=$(snapshot)
+    runEdit 0 --cdn-entry entry-21 'edge.example.com,2001:db8::21' --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail "${legacyMode}: 旧发布正文预览改变在线部署"
+done
 grep -Fq 'edge.example.com' "${LOG}" || fail 'CDN 预览未显示有效覆盖地址'
 ! grep -Fq "${UUID}" "${LOG}" || fail 'CDN 预览泄露 UUID'
 runEdit 2 --cdn-entry entry-21
@@ -529,9 +580,13 @@ reject dockerMain protocol cdn-status entry-21 extra
 ) >"${LOG}" 2>&1 || fail 'CDN 候选取消失败'
 assertClean
 [[ "$(snapshot)" == "${before}" ]] || fail 'CDN 确认取消改变在线部署'
+protectedBefore=$(cdnProtectedSnapshot without-nginx)
 runEdit 0 --cdn-entry entry-21 'edge.example.com,2001:db8::21' --confirm PADM-DOCKER-EDIT
 cmp -- "${TEST_ROOT}/nginx-installed-strict.conf" "${root}/config/nginx/default.conf" ||
-    fail '首次 CDN 提交未完整升级三个入口的 Host 校验'
+    fail '首次 CDN 提交未完整升级旧发布正文和 Host 校验'
+[[ "$(cdnProtectedSnapshot without-nginx)" == "${protectedBefore}" ]] ||
+    fail '旧发布兼容提交改变未选配置、认证、累计或证书'
+assertInstalledShare
 protectedBefore=$(cdnProtectedSnapshot)
 before=$(snapshot)
 runEdit 0 --cdn-entry entry-reality-xhttp 'edge-xhttp.example.com,2001:db8::2' --preview

@@ -7893,6 +7893,12 @@ runDockerShadowsocksRealRegression() {
         bash "${PROJECT_ROOT}/docker/tests/shadowsocks-real.sh"
 }
 
+runDockerSubscriptionPublicationRealRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/subscription-publication-real.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/"{subscription-publication-real,vmess-real}.sh &&
+        bash "${PROJECT_ROOT}/docker/tests/subscription-publication-real.sh"
+}
+
 runDockerTuicRegression() {
     bash "${PROJECT_ROOT}/docker/tests/tuic.sh"
 }

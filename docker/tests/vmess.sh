@@ -39,8 +39,7 @@ for mutation in \
     '.core.protocols[0].extra = true' \
     '.core.protocols[0].uuid += "\n"' \
     '.core.protocols[0].websocket.backend_port = 10085' \
-    '.core.protocols[0].websocket.tls_port = 8080' \
-    '.subscription.enabled = true'; do
+    '.core.protocols[0].websocket.tls_port = 8080'; do
     jq "${mutation}" "${VMESS_SPEC}" >"${TEST_ROOT}/invalid-vmess.json"
     if dockerConfigureSpecValidate "${TEST_ROOT}/invalid-vmess.json" 2>/dev/null; then
         fail "VMess 接受非法合同: ${mutation}"
@@ -79,7 +78,7 @@ VMESS_JSON=$(jq -cn --arg uuid "${UUID}" '
    net:"ws",type:"none",host:"ws.example.com",path:"/abcdefghws",tls:"tls",sni:"ws.example.com"}')
 VMESS_URI="vmess://$(printf '%s' "${VMESS_JSON}" | base64 | tr -d '\n')"
 
-# 新入口与已有 VLESS 共用 Nginx，但单 VMess 不开放 HTTPS 发布。
+# 未启用发布时，新入口仍只启动核心与受管 Nginx。
 newState vmess-single "${VMESS_SPEC}"
 dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
     "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env" ||
@@ -179,7 +178,7 @@ dockerTrafficRender xray "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base" "${
     >"${TEST_ROOT}/quota-mixed-vmess.json"
 jq -e 'all(.inbounds[] | select(.protocol == "vmess" or .protocol == "vless"); .settings.clients == [])' \
     "${TEST_ROOT}/quota-mixed-vmess.json" >/dev/null || fail 'VMess/VLESS 未共享 UUID 额度'
-# 两类 WS 共用端口池；删最后 VLESS 只关发布，不撤销 VMess 的 TLS。
+# 两类 WS 共用端口池；删最后 VLESS 后，VMess 继续承担 TLS 与订阅发布。
 cp "${TEST_ROOT}/published-vmess.json" "${TEST_ROOT}/vmess-edit-draft.json"
 printf '9\nentry-vmess\n1\n24447\n8\n' |
     dockerEditFields "${TEST_ROOT}/vmess-edit-draft.json" >"${STDOUT}" || fail '混合 WS 复制失败'
@@ -187,9 +186,9 @@ jq -e '.core.protocols[2] | .id == 22 and .websocket.backend_port == 31299 and .
     "${TEST_ROOT}/vmess-edit-draft.json" >/dev/null || fail '混合 WS 复制复用了已有内部端口'
 printf '10\nvless-ws\n8\n' |
     dockerEditFields "${TEST_ROOT}/vmess-edit-draft.json" >"${STDOUT}" || fail '删除最后 VLESS 失败'
-jq -e '.tls.domain == "ws.example.com" and .subscription.enabled == false and
+jq -e '.tls.domain == "ws.example.com" and .subscription.enabled == true and
   all(.core.protocols[]; .id == 22)' "${TEST_ROOT}/vmess-edit-draft.json" >/dev/null ||
-    fail '删除最后 VLESS 撤销了 VMess TLS 或保留发布'
+    fail '删除最后 VLESS 撤销了 VMess TLS 或订阅发布'
 jq --slurpfile before "${TEST_ROOT}/v3.json" '
   .core.protocols += [$before[0].core.protocols[] | select(.id == 1)]' \
     "${TEST_ROOT}/vmess-edit-draft.json" >"${TEST_ROOT}/vmess-final-tls.json"
@@ -198,6 +197,9 @@ printf '10\nentry-1\n10\nentry-vmess\n8\n' |
 jq -e '.tls == null and .subscription.enabled == false and
   (.core.protocols | length) == 1 and .core.protocols[0].id == 1' \
     "${TEST_ROOT}/vmess-final-tls.json" >/dev/null || fail '删除最后 VMess 未撤销 TLS 规格引用'
+# 无协议 21 的发布也必须走完整候选事务，失败和提交信号恢复原内容与身份。
+jq '.subscription.enabled = true' "${VMESS_SPEC}" >"${TEST_ROOT}/vmess-single-published.json"
+newState vmess-single-published "${TEST_ROOT}/vmess-single-published.json"
 before=$(liveSnapshot)
 rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
 jq '(.core.protocols[] | select(.id == 22) | .public_port) = 24446' \
@@ -211,5 +213,30 @@ actual=0
 ) >"${STDOUT}" 2>"${STDERR}" || actual=$?
 [[ "${actual}" == 14 && "$(liveSnapshot)" == "${before}" ]] ||
     fail "VMess 失败事务返回 ${actual} 或改变了配置"
+actual=0
+(
+    signalBin="${TEST_ROOT}/vmess-signal-bin"
+    mkdir -p -- "${signalBin}"
+    export FAKE_VMESS_DOCKER="${MOCK_BIN}/docker"
+    cat >"${signalBin}/docker" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == compose && " $* " == *' up -d '* &&
+    ! -e "${FAKE_REALITY_FAIL_MARKER:?}" ]]; then
+    : >"${FAKE_REALITY_FAIL_MARKER}"
+    kill -TERM "${PPID}" || exit 1
+fi
+exec "${FAKE_VMESS_DOCKER:?}" "$@"
+SH
+    chmod 0755 "${signalBin}/docker"
+    export PATH="${signalBin}:${PATH}"
+    rm -f -- "${FAKE_REALITY_FAIL_MARKER}"
+    trap 'dockerConfigurationInterrupted; dockerReleaseDeploymentLock' EXIT
+    trap 'exit 143' TERM
+    dockerAcquireDeploymentLock
+    dockerConfigureReleasePrepare "${CONFIGURE_MANIFEST}" "${CONFIGURE_BUNDLE}" "${CONFIGURE_CONTROL}"
+    dockerConfigureApply "${TEST_ROOT}/changed-vmess.json" "" "" confirmed
+) >"${STDOUT}" 2>"${STDERR}" || actual=$?
+[[ "${actual}" == 143 && "$(liveSnapshot)" == "${before}" ]] ||
+    fail "VMess 发布提交 TERM 返回 ${actual} 或改变了配置/订阅"
 [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail 'VMess 回归遗留部署锁'
 printf 'docker-vmess-regression-ok\n'

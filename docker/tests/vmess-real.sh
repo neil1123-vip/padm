@@ -16,8 +16,10 @@ XRAY_REF=$1 SING_REF=$2 OPS_REF=$3 NGINX_REF=$4
 PROTOCOL=${5:-22} CORE=${6:-xray}
 CDN_ENTRIES=${PADM_TEST_CDN_ENTRIES:-0}
 ALPN_ORDERS=${PADM_TEST_ALPN_ORDERS:-0}
+SUBSCRIPTION_PUBLICATION=${PADM_TEST_SUBSCRIPTION_PUBLICATION:-0}
 [[ "${CDN_ENTRIES}" == 0 || "${CDN_ENTRIES}" == 1 ]] || exit 2
 [[ "${ALPN_ORDERS}" == 0 || "${ALPN_ORDERS}" == 1 ]] || exit 2
+[[ "${SUBSCRIPTION_PUBLICATION}" == 0 || "${SUBSCRIPTION_PUBLICATION}" == 1 ]] || exit 2
 [[ "${PROTOCOL}:${CORE}" == 21:xray || "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:xray ||
     "${PROTOCOL}:${CORE}" == 23:sing-box || "${PROTOCOL}:${CORE}" == 24:xray ||
     "${PROTOCOL}:${CORE}" == 25:xray || "${PROTOCOL}:${CORE}" == 27:xray ||
@@ -43,6 +45,12 @@ if [[ "${ALPN_ORDERS}" == 1 ]]; then
         ( "${PROTOCOL}:${CORE}" == 27:xray || "${PROTOCOL}:${CORE}" == 29:xray ) ]] || exit 2
     TEST_NAME="${TEST_NAME}-alpn"
 fi
+if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
+    [[ "${CDN_ENTRIES}" == 0 && "${ALPN_ORDERS}" == 0 &&
+        ( "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:sing-box ||
+          "${PROTOCOL}:${CORE}" == 24:xray || "${PROTOCOL}:${CORE}" == 25:xray ) ]] || exit 2
+    TLS_PORT=35468 TEST_NAME="${TEST_NAME}-publication"
+fi
 for tool in docker jq python3 sha256sum tar openssl awk diff; do command -v "${tool}" >/dev/null; done
 stage=images
 XRAY_ID=$(docker image inspect --format '{{.Id}}' "${XRAY_REF}")
@@ -50,7 +58,8 @@ SING_ID=$(docker image inspect --format '{{.Id}}' "${SING_REF}")
 OPS_ID=$(docker image inspect --format '{{.Id}}' "${OPS_REF}")
 NGINX_ID=$(docker image inspect --format '{{.Id}}' "${NGINX_REF}")
 CURL_ID=
-if [[ ( "${CORE}" == sing-box && "${CDN_ENTRIES}" == 0 ) || "${TRANSPORT}" == tcp ]]; then
+if [[ ( "${CORE}" == sing-box && "${CDN_ENTRIES}" == 0 && "${SUBSCRIPTION_PUBLICATION}" == 0 ) ||
+    "${TRANSPORT}" == tcp ]]; then
     [[ -n "${PADM_TEST_HTTP2_CURL_REF:-}" ]] || {
         printf 'sing-box stats or fallback h2 requires PADM_TEST_HTTP2_CURL_REF (local HTTP2 curl image)\n' >&2
         exit 2
@@ -134,7 +143,7 @@ openssl verify -CAfile "${TEST_ROOT}/certs/ca.crt" "${TLS_DIR}/${DOMAIN}.crt" >/
 SPEC="${TEST_ROOT}/spec.json"
 jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" --arg core "${CORE}" --arg name "${TEST_NAME}" \
     --arg key "${TRANSPORT_KEY}" --argjson protocol "${PROTOCOL}" --argjson backend "${BACKEND_PORT}" \
-    --argjson tls_port "${TLS_PORT}" --argjson cdn "${CDN_ENTRIES}" '
+    --argjson tls_port "${TLS_PORT}" --argjson cdn "${CDN_ENTRIES}" --argjson publication "${SUBSCRIPTION_PUBLICATION}" '
   def image($name): "ghcr.io/example/padm-"+$name+":test@sha256:"+("a"*64);
   {schema_version:3,
    release:{version:"3.9.9",manifest_sha256:("a"*64),signature_identity:"local-test-only"},
@@ -143,25 +152,40 @@ jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" --arg core "${CORE}" --arg n
       address_families:["ipv4","ipv6"],name:$name,uuid:$uuid,
       ($key):(if $protocol == 27 or $protocol == 29 then {domain:$domain,http_port:31300,http2_port:31302}
         else {domain:$domain,backend_port:$backend,tls_port:$tls_port} +
-          if $protocol == 24 or $protocol == 25 then {service_name:"padm_grpc-1"} else {path:"padmvmess"} end
+          if $protocol == 24 or $protocol == 25 then
+            {service_name:(if $publication == 1 then "subscriptions" else "padm_grpc-1" end)}
+          else {path:"padmvmess"} end
         end)}]},
-   tls:{domain:$domain},subscription:{enabled:false,token:"0123456789abcdef"},
+   tls:{domain:$domain},subscription:{enabled:($publication == 1),token:"0123456789abcdef"},
    images:{xray:image("xray"),"sing-box":image("sing-box"),nginx:image("nginx"),ops:image("ops"),net:image("net")},
     host_integrations:[]} +
-      if $cdn == 1 then {port_aliases:[{listener_id:"entry-vmess",public_port:35469,share_default:true}]}
-      else {} end
+      (if $cdn == 1 then {port_aliases:[{listener_id:"entry-vmess",public_port:35469,share_default:true}]}
+       else {} end) +
+      if $publication == 1 then {accounts:[{
+        id:"22222222-2222-4222-8222-222222222222",name:"independent",enabled:true,
+        uuid:"33333333-3333-4333-8333-333333333333",password:"44444444-4444-4444-8444-444444444444",
+        shadowsocks_password:null,listeners:["entry-vmess"]}]} else {} end
 ' >"${SPEC}"
 chmod 0600 "${SPEC}"
+subscriptionShares=
+if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
+    subscriptionShares="${TEST_ROOT}/shares.json"
+    jq -n '{schema_version:1,groups:[{
+      id:"share-0123456789abcdef",name:"publication",enabled:true,token:"publication_group_0123456789abcdef",
+      account_ids:["22222222-2222-4222-8222-222222222222"],listener_ids:["entry-vmess"]}]}' >"${subscriptionShares}"
+fi
 stage=spec
 dockerConfigureSpecValidate "${SPEC}"
 stage=candidate
 dockerCreateConfigurationCandidate
 candidate=${DOCKER_CONFIG_CANDIDATE}
-dockerGenerateCandidate "${SPEC}" "${candidate}"
+dockerGenerateCandidate "${SPEC}" "${candidate}" '' '' '' '' '' "${subscriptionShares}"
 jq -e --arg uuid "${UUID}" --arg core "${CORE}" --arg transport "${TRANSPORT}" \
-    --arg domain "${DOMAIN}" --argjson backend "${BACKEND_PORT}" --arg app "${APP_PROTOCOL}" '
+    --arg domain "${DOMAIN}" --argjson backend "${BACKEND_PORT}" --arg app "${APP_PROTOCOL}" \
+    --argjson publication "${SUBSCRIPTION_PUBLICATION}" '
   if $core == "xray" then any(.inbounds[]; .protocol == $app and .tag == "entry-vmess" and .port == $backend and
-    .settings == ((if $app == "trojan" then {clients:[{password:$uuid,email:$uuid}]}
+    (.settings.clients | length) == (1 + $publication) and
+    (.settings | .clients |= .[:1]) == ((if $app == "trojan" then {clients:[{password:$uuid,email:$uuid}]}
       elif $app == "vless" then {clients:[{id:$uuid,email:$uuid} +
         if $transport == "tcp" then {flow:"xtls-rprx-vision"} else {} end],decryption:"none"}
       else {clients:[{id:$uuid,email:$uuid,alterId:0}]} end) +
@@ -173,15 +197,21 @@ jq -e --arg uuid "${UUID}" --arg core "${CORE}" --arg transport "${TRANSPORT}" \
         keyFile:("/etc/padm/secrets/tls/"+$domain+".key")}]}}
       else {network:$transport,security:"none"} +
         if $transport == "ws" then {wsSettings:{path:"/padmvmessws"}}
-        elif $transport == "grpc" then {grpcSettings:{serviceName:"padm_grpc-1"}}
+        elif $transport == "grpc" then {grpcSettings:{
+          serviceName:(if $publication == 1 then "subscriptions" else "padm_grpc-1" end)}}
         else {httpupgradeSettings:{path:"/padmvmess",host:$domain}} end end))
   else any(.inbounds[]; .type == "vmess" and .tag == "entry-vmess" and .listen_port == $backend and
-    .users == [{uuid:$uuid,name:$uuid,alterId:0}] and
+    (.users | length) == (1 + $publication) and .users[:1] == [{uuid:$uuid,name:$uuid,alterId:0}] and
     .transport == {type:"httpupgrade",path:"/padmvmess",host:$domain}) end' \
     "${candidate}/config/${CORE}/config.json" >/dev/null
 if [[ "${TRANSPORT}" == grpc ]]; then
     grep -qF 'http2 on;' "${candidate}/config/nginx/default.conf"
-    grep -qF 'location ^~ /padm_grpc-1/ {' "${candidate}/config/nginx/default.conf"
+    if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
+        # token 正则须优先于同名 gRPC 前缀，同时保留真实 gRPC 通道。
+        grep -qF 'location /subscriptions/ {' "${candidate}/config/nginx/default.conf"
+    else
+        grep -qF 'location ^~ /padm_grpc-1/ {' "${candidate}/config/nginx/default.conf"
+    fi
     grep -qF "grpc_pass grpc://xray:${BACKEND_PORT};" "${candidate}/config/nginx/default.conf"
 fi
 jq -e --arg transport "${TRANSPORT}" --argjson tls_port "${TLS_PORT}" --argjson cdn "${CDN_ENTRIES}" '
@@ -202,14 +232,28 @@ dockerEnsureRuntimeDataPermissions
 [[ "$(stat -c '%u:%g:%a' "${PADM_DOCKER_INSTALL_DIR}/data/static")" == 0:10001:750 ]]
 dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
     "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env"
-dockerTrafficAccounts "${CORE}" | jq -e --arg uuid "${UUID}" 'length == 1 and .[0].account == $uuid' >/dev/null
+dockerTrafficAccounts "${CORE}" | jq -e --arg uuid "${UUID}" --argjson publication "${SUBSCRIPTION_PUBLICATION}" '
+  length == (1 + $publication) and any(.[]; .account == $uuid)' >/dev/null
 [[ "$(stat -c '%u:%g:%a' "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json")" == 0:10001:640 ]]
 [[ "$(stat -c '%u:%g:%a' "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")" == 0:0:600 ]]
 base_hash=$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")
 stage=original-links
 dockerProtocolCommand links >"${TEST_ROOT}/links.txt"
-[[ "$(wc -l <"${TEST_ROOT}/links.txt")" == 1 ]]
+[[ "$(wc -l <"${TEST_ROOT}/links.txt")" == "$((1 + SUBSCRIPTION_PUBLICATION))" ]]
 [[ "${CDN_ENTRIES}" == 0 ]] || cp -- "${TEST_ROOT}/links.txt" "${TEST_ROOT}/original.links.txt"
+if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
+    dockerSubscriptionLinks "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        "${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json" share-0123456789abcdef >"${TEST_ROOT}/group-url.txt"
+    jq -n --slurpfile spec "${SPEC}" --rawfile group "${TEST_ROOT}/group-url.txt" \
+        --rawfile mainContent "${PADM_DOCKER_INSTALL_DIR}/data/subscription/0123456789abcdef" \
+        --rawfile groupContent "${PADM_DOCKER_INSTALL_DIR}/data/subscription/publication_group_0123456789abcdef" '
+      {main:("https://" + $spec[0].tls.domain + ":35468/subscriptions/" + $spec[0].subscription.token),
+       group:($group | rtrimstr("\n")),domain:$spec[0].tls.domain,port:35468,
+       expected:{main:$mainContent,group:$groupContent}}
+    ' >"${TEST_ROOT}/runtime/client/publication.json"
+    chmod 0640 "${TEST_ROOT}/runtime/client/publication.json"
+    chown 0:10001 "${TEST_ROOT}/runtime/client/publication.json"
+fi
 cp -a "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" \
     "${PADM_DOCKER_INSTALL_DIR}/logs" "${PADM_DOCKER_INSTALL_DIR}/secrets" "${TEST_ROOT}/runtime/"
 cp "${TEST_ROOT}/certs/ca.crt" "${TEST_ROOT}/runtime/client/ca.crt"
@@ -260,13 +304,14 @@ tar -cpf - -C "${TEST_ROOT}" runtime |
 COMPOSE="${TEST_ROOT}/compose.json"
 jq --arg project "${project}" --arg volume "${volume}" --arg core "${CORE}" --arg xray "${XRAY_ID}" \
     --arg sing "${SING_ID}" --arg ops "${OPS_ID}" --arg nginx "${NGINX_ID}" --arg subnet "${subnet}" \
-    --arg domain "${DOMAIN}" --argjson cdn "${CDN_ENTRIES}" '
+    --arg domain "${DOMAIN}" --argjson cdn "${CDN_ENTRIES}" --argjson publication "${SUBSCRIPTION_PUBLICATION}" '
   .name = $project | .networks.default.name = $project |
   .networks.default.labels["io.padm.test"] = $project |
   .networks.default.enable_ipv6 = true | .networks.default.ipam = {config:[{subnet:$subnet}]} |
   del(.services.acme) | .volumes = {files:{external:true,name:$volume}} |
   .services[$core].image = (if $core == "xray" then $xray else $sing end) | .services.nginx.image = $nginx |
-  (if $cdn == 1 then .services.nginx.networks = {default:{aliases:[$domain,"edge.padm.test"]}} else . end) |
+  (if $publication == 1 then .services.subscription.image = $ops else . end) |
+  (if $cdn == 1 or $publication == 1 then .services.nginx.networks = {default:{aliases:[$domain,"edge.padm.test"]}} else . end) |
   .services |= with_entries(.value.ports = [] | .value.init = true | .value.pull_policy = "never" |
     .value.labels["io.padm.test"] = $project |
     .value.volumes |= map(.source as $source |
@@ -346,13 +391,81 @@ if [[ "${CDN_ENTRIES}" == 1 ]]; then
     cdnPhase=override
     cdnRenderConfiguration "${cdnPhase}"
 fi
+if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
+    stage=subscription-download
+    docker run --rm --init -i --pull=never --read-only --cap-drop ALL --user 10001:10001 \
+        --network "${project}" --label "io.padm.test=${project}" \
+        --mount "type=volume,source=${volume},target=/test,readonly,volume-subpath=runtime/client" --entrypoint python3 "${OPS_ID}" \
+        - "${addresses}" >"${TEST_ROOT}/publication-content.json" <<'PY'
+import http.client
+import ipaddress
+import json
+from pathlib import Path
+import socket
+import ssl
+import sys
+import urllib.parse
+
+root = Path("/test")
+settings = json.loads((root / "publication.json").read_text())
+endpoints = json.loads(sys.argv[1])
+assert [ipaddress.ip_address(value).version for value in endpoints] == [4, 6]
+context = ssl.create_default_context(cafile=root / "ca.crt")
+assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+contents = {}
+for kind in ("main", "group"):
+    uri = urllib.parse.urlsplit(settings[kind])
+    assert uri.scheme == "https" and uri.hostname == settings["domain"].lower()
+    assert uri.port == settings["port"] == 35468 and not uri.query and not uri.fragment
+    assert uri.username is None and uri.password is None and uri.path.startswith("/subscriptions/")
+    expected = settings["expected"][kind].encode()
+    for endpoint in endpoints:
+        for path, status in ((uri.path, 200), ("/subscriptions/unknown_token_0123456789abcdef", 404)):
+            connection = http.client.HTTPSConnection(uri.hostname, uri.port, context=context, timeout=5)
+            with socket.create_connection((endpoint, uri.port), timeout=5) as raw:
+                connection.sock = context.wrap_socket(raw, server_hostname=uri.hostname)
+                try:
+                    connection.request("GET", path)
+                    response = connection.getresponse()
+                    body = response.read()
+                    assert response.status == status, (kind, response.status, status)
+                    if status == 200:
+                        assert body == expected and body
+                        contents[kind] = body.decode()
+                finally:
+                    connection.close()
+# 证书反例直接核验失败类型，不把网络超时当作身份拒绝。
+for hostname, trust in (("wrong.padm.test", context), (uri.hostname, ssl.create_default_context())):
+    try:
+        with socket.create_connection((endpoints[0], uri.port), timeout=5) as raw:
+            with trust.wrap_socket(raw, server_hostname=hostname):
+                raise AssertionError("错误证书身份被接受")
+    except ssl.SSLCertVerificationError:
+        pass
+print(json.dumps(contents))
+PY
+    python3 - "${TEST_ROOT}/publication-content.json" "${TEST_ROOT}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+contents = json.loads(Path(sys.argv[1]).read_text())
+root = Path(sys.argv[2])
+main, group = (contents[key].splitlines() for key in ("main", "group"))
+assert len(main) == 2 and len(group) == 1 and main[1] == group[0] and main[0] != group[0]
+(root / "links.txt").write_text(main[0] + "\n")
+(root / "publication-group.links.txt").write_text(contents["group"])
+PY
+    cdnPhase=subscription-main
+fi
 generateClient() {
 stage="client-${cdnPhase}"
 local alpn
 alpn=$(jq -c '.core.protocols[0].fallback_tls.alpn // ["h2","http/1.1"]' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json")
 python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" \
-    "${TRANSPORT}" "${TEST_NAME}" "${DOMAIN}" "${APP_PROTOCOL}" "${CDN_ENTRIES}" "${cdnPhase}" "${alpn}" <<'PY'
+    "${TRANSPORT}" "${PUBLICATION_NAME:-${TEST_NAME}}" "${DOMAIN}" "${APP_PROTOCOL}" "${CDN_ENTRIES}" \
+    "${cdnPhase}" "${alpn}" "${PUBLICATION_UUID:-${UUID}}" "${SUBSCRIPTION_PUBLICATION}" <<'PY'
 import base64
 import ipaddress
 import json
@@ -366,6 +479,7 @@ endpoints = json.loads(sys.argv[3])
 transport, name, domain, app = sys.argv[4:8]
 cdn, cdn_phase = sys.argv[8] == "1", sys.argv[9]
 alpn = json.loads(sys.argv[10])
+identity, publication = sys.argv[11], sys.argv[12] == "1"
 share_port = 35469 if cdn else 35468
 assert [ipaddress.ip_address(x).version for x in endpoints] == [4, 6]
 servers = endpoints + ["edge.padm.test"] if cdn and cdn_phase == "override" else [domain]
@@ -384,11 +498,12 @@ def parse(line, server=servers[0], label=names[0]):
         elif transport == "grpc":
             expected = ({"encryption":"none","security":"tls","sni":domain} if app == "vless" else
                         {"peer":domain,"fp":"chrome","sni":domain})
-            expected.update(type="grpc", alpn="h2", serviceName="padm_grpc-1")
+            expected.update(type="grpc", alpn="h2",
+                            serviceName="subscriptions" if publication else "padm_grpc-1")
         else:
             expected = {"encryption":"none","security":"tls","sni":domain,"type":"ws",
                         "host":domain,"path":"/padmvmessws"}
-        assert uri.scheme == app and uri.username == "11111111-1111-4111-8111-111111111111"
+        assert uri.scheme == app and uri.username == identity
         assert uri.password is None and uri.hostname == server and uri.port == share_port and not uri.path
         assert urllib.parse.unquote(uri.fragment) == label
         assert pairs == list(expected.items())
@@ -403,7 +518,7 @@ def parse(line, server=servers[0], label=names[0]):
     assert list(value) == ["v","ps","add","port","id","aid","scy","net","type","host","path","tls","sni"]
     assert raw.decode() == json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     assert value == {"v":"2","ps":label,"add":server,"port":str(share_port),
-                     "id":"11111111-1111-4111-8111-111111111111","aid":"0","scy":"auto","net":transport,
+                     "id":identity,"aid":"0","scy":"auto","net":transport,
                      "type":"none","host":domain,"path":"/padmvmess"+("ws" if transport == "ws" else ""),
                      "tls":"tls","sni":domain}
     assert str(uuid.UUID(value["id"])) == value["id"]
@@ -451,7 +566,7 @@ for variant in variants:
         port = 2081+len(config["inbounds"])
         config["inbounds"].append({"type":"socks","tag":"socks-"+tag,"listen":"0.0.0.0","listen_port":port})
         outbound = {"type":app,"tag":tag,"server":value["add"] if cdn else endpoint,
-            "server_port":int(value["port"]) if cdn else (35468 if transport == "tcp" else 8443),
+            "server_port":int(value["port"]) if cdn or publication else (35468 if transport == "tcp" else 8443),
             ("password" if app == "trojan" else "uuid"):
                 ("22222222-2222-4222-8222-222222222222" if variant == "wrong-auth" else value["id"]),
             "tls":{"enabled":True,"server_name":value["sni"],"certificate_path":"/etc/padm/client/ca.crt"}}
@@ -791,6 +906,21 @@ print("docker-"+test_name+"-probe-ok: core="+core+" phase="+phase+" source=proto
         jq -e --arg core "${CORE}" 'all(.[]; .State.Running) and
           all(.[] | select(.Config.Labels["com.docker.compose.service"] == $core); .State.Health.Status == "healthy")' >/dev/null
 }
+if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
+    probe allow
+    compose stop client
+    cp "${TEST_ROOT}/publication-group.links.txt" "${TEST_ROOT}/links.txt"
+    PUBLICATION_UUID=33333333-3333-4333-8333-333333333333
+    [[ "${APP_PROTOCOL}" != trojan ]] || PUBLICATION_UUID=44444444-4444-4444-8444-444444444444
+    PUBLICATION_NAME="${TEST_NAME}-independent"
+    cdnPhase=subscription-group
+    generateClient
+    compose up -d --pull never client
+    probe allow
+    printf 'docker-subscription-publication-real-ok: protocol=%s core=%s tls=strict-ca-hostname main-group=downloaded token404=ipv4,ipv6 client=tcp-udp effective-port=35468\n' \
+        "${PROTOCOL}" "${CORE}"
+    exit 0
+fi
 if [[ "${ALPN_ORDERS}" == 1 ]]; then
     fallbackProbe '<!doctype html><title>Welcome</title><h1>Welcome</h1>'
     printf 'padm-fallback-static-proof\n' >"${PADM_DOCKER_INSTALL_DIR}/data/static/index.html"

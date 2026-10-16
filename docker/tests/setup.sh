@@ -2056,10 +2056,10 @@ export FAKE_SETUP_MODE=ok
 fi
 
 if [[ -z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == ws-vmess ]]; then
-# VMess WS TLS 复用现有 WS 事务，aid 固定为零，单入口不开放 HTTPS 发布。
-printf -v VMESS_INPUT '1\n12\nproxy.example.com\n3\nvmess.example.com\n24481\n2\n%s\n%s\ny\n' \
+# VMess WS TLS 复用现有 WS 事务，单核不发布、双核发布均由首配明确选择。
+printf -v VMESS_INPUT '1\n12\nproxy.example.com\n3\nvmess.example.com\n24481\n2\n%s\n%s\nn\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_VMESS_INPUT '3\n12\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nvmess.example.com\n24481\n2\n%s\n%s\ny\n' \
+printf -v DUAL_VMESS_INPUT '3\n12\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nvmess.example.com\n24481\n2\n%s\n%s\ny\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for vmessCase in vmess-single vmess-dual; do
     newState "${vmessCase}"
@@ -2073,7 +2073,7 @@ for vmessCase in vmess-single vmess-dual; do
     SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
     jq -e --argjson single "${single}" '
       .schema_version == 3 and .core.type == "xray" and .tls.domain == "vmess.example.com" and
-      .subscription.enabled == false and
+      .subscription.enabled == ($single | not) and
       (.core.protocols[0] | .id == 22 and .core == "xray" and .public_port == 24481 and
         .address_families == ["ipv4","ipv6"] and .server == "proxy.example.com" and
         .uuid == "11111111-1111-4111-8111-111111111111" and
@@ -2089,9 +2089,9 @@ for vmessCase in vmess-single vmess-dual; do
           network:"ws",security:"none",wsSettings:{path:("/"+$p.websocket.path+"ws")}})' \
         "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" >/dev/null ||
         fail "${vmessCase}: VMess 认证、aid 或 WS 配置错误"
-    jq -e '.services.xray.ports == [] and .services.nginx.ports ==
+    jq -e --argjson single "${single}" '.services.xray.ports == [] and .services.nginx.ports ==
       ["0.0.0.0:24481:8443/tcp","[::]:24481:8443/tcp"] and
-      (.services | has("subscription") | not)' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+      (.services | has("subscription")) == ($single | not)' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
         fail "${vmessCase}: VMess Nginx 双栈或发布拓扑错误"
     if [[ "${single}" == true ]]; then
         ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail 'VMess 单核生成无用 Reality 密钥'
@@ -2150,7 +2150,9 @@ done
 runPty 0 vmess-delete-copy $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
 jq -e '.tls.domain == "vmess.example.com" and (.core.protocols | length) == 1' \
     "${SPEC}" >/dev/null || fail 'VMess 删除副本撤销 TLS'
-runPty 15 vmess-enable-publish $'7\ny\n8\n' edit "${ASSET_ARGS[@]}"
+runPty 0 vmess-enable-publish $'7\ny\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.subscription.enabled and all(.core.protocols[]; .id == 22)' "${SPEC}" >/dev/null ||
+    fail 'VMess 单入口未能通过编辑启用发布'
 for vmessFailure in tls-fail health-fail; do
     newState "vmess-${vmessFailure}"
     export FAKE_SETUP_MODE="${vmessFailure}"
@@ -2163,7 +2165,7 @@ fi
 
 if [[ -z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == httpupgrade ]]; then
 # HTTPUpgrade 与 WS 共用受管 TLS，但入口路径及两核后端保持独立。
-printf -v HTTPUPGRADE_INPUT '1\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
+printf -v HTTPUPGRADE_INPUT '1\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\nn\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for httpupgradeCase in httpupgrade-xray httpupgrade-sing dual-httpupgrade-xray dual-httpupgrade-sing; do
     core=xray; coreChoice=1; single=true
@@ -2172,12 +2174,14 @@ for httpupgradeCase in httpupgrade-xray httpupgrade-sing dual-httpupgrade-xray d
     dual-httpupgrade-xray) coreChoice=3; single=false ;;
     dual-httpupgrade-sing) core=sing-box; coreChoice=4; single=false ;;
     esac
+    subscription=false; subscriptionAnswer=n
+    [[ "${core}" != sing-box ]] || { subscription=true; subscriptionAnswer=y; }
     if [[ "${single}" == true ]]; then
-        printf -v input '%s\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
-            "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+        printf -v input '%s\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\n%s\ny\n' \
+            "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem" "${subscriptionAnswer}"
     else
-        printf -v input '%s\n13\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
-            "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+        printf -v input '%s\n13\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhttpupgrade.example.com\n24485\n2\n%s\n%s\n%s\ny\n' \
+            "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem" "${subscriptionAnswer}"
     fi
     newState "${httpupgradeCase}"
     before=$(snapshot)
@@ -2186,9 +2190,9 @@ for httpupgradeCase in httpupgrade-xray httpupgrade-sing dual-httpupgrade-xray d
         fail "${httpupgradeCase}: 取消首配提前生成凭据或写入部署"
     runPty 0 "${httpupgradeCase}" "${input}" setup "${ASSET_ARGS[@]}"
     SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
-    jq -e --arg core "${core}" --argjson single "${single}" '
+    jq -e --arg core "${core}" --argjson single "${single}" --argjson subscription "${subscription}" '
       .schema_version == 3 and .core.type == $core and .tls.domain == "httpupgrade.example.com" and
-      .subscription.enabled == false and
+      .subscription.enabled == $subscription and
       (.core.protocols[0] | .id == 23 and .core == $core and .listener_id == "entry-vmess-httpupgrade" and
         .name == "main-vmess-httpupgrade" and .public_port == 24485 and
         .address_families == ["ipv4","ipv6"] and .server == "proxy.example.com" and
@@ -2210,13 +2214,19 @@ for httpupgradeCase in httpupgrade-xray httpupgrade-sing dual-httpupgrade-xray d
         .transport == {type:"httpupgrade",path:("/"+$p.httpupgrade.path),host:$p.httpupgrade.domain}) end
     ' "${PADM_DOCKER_INSTALL_DIR}/config/${core}/config.json" >/dev/null ||
         fail "${httpupgradeCase}: HTTPUpgrade 认证、host 或路径错误"
-    jq -e --arg core "${core}" '.services[$core].ports == [] and
+    jq -e --arg core "${core}" --argjson subscription "${subscription}" '.services[$core].ports == [] and
       .services.nginx.ports == ["0.0.0.0:24485:8443/tcp","[::]:24485:8443/tcp"] and
-      (.services.nginx.depends_on | keys) == [$core] and (.services | has("subscription") | not)' \
+      (.services.nginx.depends_on | keys) == ([$core] + [if $subscription then "subscription" else empty end] | sort) and
+      (.services | has("subscription")) == $subscription' \
         "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
         fail "${httpupgradeCase}: HTTPUpgrade Nginx 双栈或 upstream 依赖错误"
     if [[ "${single}" == true ]]; then
         ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail 'HTTPUpgrade 单核生成无用 Reality 密钥'
+        if [[ "${subscription}" == true ]]; then
+            jq -e '(.services | has("xray") | not) and .services.subscription.profiles == ["subscription"]' \
+                "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+                fail 'sing-box 单入口发布隐式安装 Xray'
+        fi
     fi
     assertClean
     assertNoSecrets
@@ -2279,7 +2289,9 @@ jq -e '.core.secondary_type == null and .tls.domain == "httpupgrade.example.com"
 runPty 0 httpupgrade-delete-copy $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
 jq -e '.tls.domain == "httpupgrade.example.com" and (.core.protocols | length) == 1' \
     "${SPEC}" >/dev/null || fail 'HTTPUpgrade 删除副本撤销 TLS'
-runPty 15 httpupgrade-enable-publish $'7\ny\n8\n' edit "${ASSET_ARGS[@]}"
+runPty 0 httpupgrade-enable-publish $'7\ny\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.subscription.enabled and all(.core.protocols[]; .id == 23)' "${SPEC}" >/dev/null ||
+    fail 'HTTPUpgrade 单入口未能通过编辑启用发布'
 for httpupgradeFailure in tls-fail health-fail; do
     newState "httpupgrade-${httpupgradeFailure}"
     export FAKE_SETUP_MODE="${httpupgradeFailure}"
@@ -2371,14 +2383,14 @@ done
 for grpcProtocol in 24 25; do
     grpcChoice=14; backend=31301; scheme=vless; listener=entry-vless-grpc-tls
     [[ "${grpcProtocol}" != 25 ]] || { grpcChoice=15; backend=31304; scheme=trojan; listener=entry-trojan-grpc-tls; }
-    printf -v grpcInput '1\n%s\nproxy.example.com\n3\ngrpc.example.com\n24491\n2\n%s\n%s\ny\n' \
+    printf -v grpcInput '1\n%s\nproxy.example.com\n3\ngrpc.example.com\n24491\n2\n%s\n%s\nn\ny\n' \
         "${grpcChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
     for grpcTopology in single dual; do
         newState "grpc-tls-${grpcProtocol}-${grpcTopology}"
         input=${grpcInput}; single=true
         if [[ "${grpcTopology}" == dual ]]; then
             single=false
-            printf -v input '3\n%s\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ngrpc.example.com\n24491\n2\n%s\n%s\ny\n' \
+            printf -v input '3\n%s\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ngrpc.example.com\n24491\n2\n%s\n%s\ny\ny\n' \
                 "${grpcChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
         fi
         before=$(snapshot)
@@ -2390,7 +2402,7 @@ for grpcProtocol in 24 25; do
         jq -e --argjson protocol "${grpcProtocol}" --argjson backend "${backend}" \
             --arg listener "${listener}" --arg scheme "${scheme}" --argjson single "${single}" '
           .schema_version == 3 and .core.type == "xray" and .tls.domain == "grpc.example.com" and
-          .subscription.enabled == false and
+          .subscription.enabled == ($single | not) and
           (.core.protocols[0] | .id == $protocol and .core == "xray" and .listener_id == $listener and
             .name == "main-"+$scheme+"-grpc-tls" and .server == "proxy.example.com" and .public_port == 24491 and
             .address_families == ["ipv4","ipv6"] and .uuid == "11111111-1111-4111-8111-111111111111" and
@@ -2409,10 +2421,11 @@ for grpcProtocol in 24 25; do
               network:"grpc",security:"none",grpcSettings:{serviceName:$p.grpc_tls.service_name}})' \
             "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" >/dev/null ||
             fail "${grpcProtocol}/${grpcTopology}: gRPC TLS 认证或 serviceName 错误"
-        jq -e '.services.xray.ports == [] and .services.nginx.ports ==
+        jq -e --argjson single "${single}" '.services.xray.ports == [] and .services.nginx.ports ==
           ["0.0.0.0:24491:8443/tcp","[::]:24491:8443/tcp"] and
-          .services.nginx.depends_on == {xray:{condition:"service_healthy"}} and
-          (.services | has("subscription") | not)' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+          .services.nginx.depends_on == ({xray:{condition:"service_healthy"}} +
+            if $single then {} else {subscription:{condition:"service_healthy"}} end) and
+          (.services | has("subscription")) == ($single | not)' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
             fail "${grpcProtocol}/${grpcTopology}: gRPC TLS 双栈或 Nginx 依赖错误"
         if [[ "${single}" == true ]]; then
             ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail '单核 gRPC TLS 生成无用 Reality 密钥'
@@ -2478,7 +2491,10 @@ for grpcProtocol in 24 25; do
     runPty 0 "grpc-tls-${grpcProtocol}-delete-copy" $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
     jq -e '.tls.domain == "grpc.example.com" and (.core.protocols | length) == 1' "${SPEC}" >/dev/null ||
         fail "${grpcProtocol}: 删除 gRPC TLS 副本撤销证书引用"
-    runPty 15 "grpc-tls-${grpcProtocol}-enable-publish" $'7\ny\n8\n' edit "${ASSET_ARGS[@]}"
+    runPty 0 "grpc-tls-${grpcProtocol}-enable-publish" $'7\ny\n8\ny\n' edit "${ASSET_ARGS[@]}"
+    jq -e --argjson protocol "${grpcProtocol}" '.subscription.enabled and
+      all(.core.protocols[]; .id == $protocol)' "${SPEC}" >/dev/null ||
+        fail "${grpcProtocol}: gRPC TLS 单入口未能通过编辑启用发布"
     for grpcFailure in tls-fail health-fail; do
         newState "grpc-tls-${grpcProtocol}-${grpcFailure}"
         export FAKE_SETUP_MODE="${grpcFailure}"

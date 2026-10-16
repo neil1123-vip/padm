@@ -851,7 +851,8 @@ dockerSetupCommand() {
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
-        if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
+        if [[ "${protocols}" == 2 || "${protocols}" == 3 ||
+            "${protocols}" == 12 || "${protocols}" == 13 || "${protocols}" == 14 || "${protocols}" == 15 ]]; then
             dockerSetupRead answer '启用 HTTPS 订阅发布？[y/N]: ' n || return 0
             case "${answer}" in
             y|Y|yes|YES) subscription=true ;;
@@ -904,6 +905,8 @@ dockerSetupCommand() {
     elif [[ "${protocols}" == 11 ]]; then
         printf 'Trojan direct: %s:%s/tcp，TLS 域名 %s，证书方式 %s\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
     fi
+    [[ "${protocols}" != 12 && "${protocols}" != 13 && "${protocols}" != 14 && "${protocols}" != 15 ]] ||
+        printf 'HTTPS 订阅发布: %s\n' "${subscription}"
     [[ -z "${secondaryCore}" ]] || printf '副核心: %s，Reality 入口端口 %s\n' "${secondaryCore}" "${secondaryPort}"
     printf '确认后将验证发布、生成账号参数并配置服务。\n'
     if [[ "${reinstall}" == 1 ]]; then
@@ -1707,8 +1710,8 @@ dockerEditEntryRemove() {
         if .cdn_entries == [] then del(.cdn_entries) else . end
       else . end |
       if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
-      elif any(.core.protocols[]; .id == 21) then .
-      elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 31)
+      elif any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) then .
+      elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 27 or .id == 28 or .id == 29 or .id == 31)
       then .subscription.enabled = false
       else .tls = null | .subscription.enabled = false end |
       .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null) |

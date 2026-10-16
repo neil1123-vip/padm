@@ -37,7 +37,6 @@ for protocol in 24 25; do
         '.core.protocols[0].uuid += "\n"' \
         '.core.protocols[0].flow = "xtls-rprx-vision"' \
         '.core.protocols[0].grpc = {service_name:"other"}' \
-        '.subscription.enabled = true' \
         '.host_integrations = [{type:"wireguard",profile:"net-wireguard",firewall_rules:[],
           devices:["wg-padm"],schedules:[],settings:{config_file:"wg-padm.conf",interface:"wg-padm"}}]'; do
         jq "${mutation}" "${spec}" >"${TEST_ROOT}/invalid-grpc-tls.json"
@@ -188,9 +187,9 @@ jq -e '(.core.protocols[6] | .id == 24 and .grpc_tls.backend_port == 31303 and .
     "${TEST_ROOT}/grpc-tls-edit.json" >/dev/null || fail 'gRPC TLS 复制未避让直接入口或共享 TLS 池'
 printf '10\nvless-ws\n10\nentry-vmess\n10\nentry-httpupgrade\n8\n' |
     dockerEditFields "${TEST_ROOT}/grpc-tls-edit.json" >"${STDOUT}" || fail '混合删除传统 HTTP 入口失败'
-jq -e '.tls.domain == "ws.example.com" and .subscription.enabled == false and
+jq -e '.tls.domain == "ws.example.com" and .subscription.enabled == true and
   .core.secondary_type == null and any(.core.protocols[]; .id == 24) and any(.core.protocols[]; .id == 25)' \
-    "${TEST_ROOT}/grpc-tls-edit.json" >/dev/null || fail '删除 HTTP 入口撤销仍需 gRPC TLS 的证书引用'
+    "${TEST_ROOT}/grpc-tls-edit.json" >/dev/null || fail '删除 HTTP 入口撤销 gRPC TLS 的证书引用或订阅发布'
 printf '10\nentry-1\n10\nentry-grpc-24\n10\nentry-2\n10\nentry-grpc-25\n8\n' |
     dockerEditFields "${TEST_ROOT}/grpc-tls-edit.json" >"${STDOUT}" || fail '删除最后 gRPC TLS 入口失败'
 jq -e '.tls == null and .subscription.enabled == false and (.core.protocols | length) == 1 and

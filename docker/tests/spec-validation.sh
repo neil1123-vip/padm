@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行、Hy2/TUIC 跳跃和 VLESS Encryption 的完整谓词，仅忽略拼接空白。
+# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行、跳跃、VLESS Encryption 和独立 Nginx 订阅的完整谓词。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "86825b8ff432d42fdc2b966177c672d088f942ff4de29829dbe804642eed764d"
+    "993c4d3fee28fe905effe1102f03bf7f5e26db7d5cdf10aa039e7dcedc601c01"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -123,6 +123,18 @@ for protocol_id in protocol_ids:
     spec["core"]["protocols"] = [entry]
     spec["tls"] = None if protocol_id in (1, 2, 26, 30) else {"domain": domain}
     cases[f"valid-protocol-{protocol_id}"] = spec
+# 发布前置按实际 TLS 终止入口判断，核心端 TLS 和 fallback 页面仍不能独立发布。
+for protocol_id in protocol_ids:
+    spec = copy.deepcopy(cases[f"valid-protocol-{protocol_id}"])
+    spec["subscription"]["enabled"] = True
+    status = "valid" if protocol_id in (21, 22, 23, 24, 25) else "invalid"
+    cases[f"{status}-subscription-protocol-{protocol_id}"] = spec
+spec = copy.deepcopy(cases["valid-subscription-protocol-23"])
+spec["core"]["type"] = spec["core"]["protocols"][0]["core"] = "sing-box"
+cases["valid-subscription-sing-box"] = spec
+spec = copy.deepcopy(cases["valid-subscription-protocol-22"])
+spec["tls"] = None
+cases["invalid-subscription-missing-tls"] = spec
 encryption = {
     "decryption": "mlkem768x25519plus.native.600s." + "A" * 86,
     "encryption": "mlkem768x25519plus.native.0rtt." + "A" * 1579,
@@ -569,6 +581,7 @@ for file in "${TEST_ROOT}"/*.json; do
         "${file##*/}" != invalid-block-ips-resolved-* &&
         "${file##*/}" != invalid-hy2-gecko-* &&
         "${file##*/}" != invalid-port-hopping-* &&
+        "${file##*/}" != invalid-subscription-* &&
         "${file##*/}" != invalid-xhttp-limits-* &&
         "${file##*/}" != invalid-xhttp-download-* &&
         "${file##*/}" != invalid-xhttp-request-headers-* ) ||

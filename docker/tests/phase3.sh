@@ -2416,7 +2416,7 @@ validateFeatureMatrix() {
         .services == ["net-fail2ban-ssh"]) and
       all({
         nginx: ["nginx"], "tls-files": ["nginx", "acme"], "acme-dns": ["acme"],
-        subscription: ["core-xray", "nginx", "subscription"],
+        subscription: ["nginx", "subscription"],
         "subscription-traffic": ["core-xray", "core-sing-box"],
         "core-lifecycle": ["core-xray", "core-sing-box"],
         "core-upgrade-assessment": ["core-xray", "core-sing-box"], "geo-data": ["core-xray"],
@@ -2436,8 +2436,8 @@ validateFeatureMatrix() {
       $matrix.feature_matrix["reality-target-management"].status == "supported" and
       $matrix.feature_matrix["reality-parameter-management"].status == "supported" and
       ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] and
-      .feature_matrix.subscription.requires == {core: "xray", protocol_ids: [21], tls: true} and
-      (.feature_matrix.subscription.profiles | sort) == ["core-xray", "nginx", "subscription"]
+      .feature_matrix.subscription.requires == {protocol_ids: [21, 22, 23, 24, 25], tls: true} and
+      (.feature_matrix.subscription.profiles | sort) == ["nginx", "subscription"]
     ' "$1" >/dev/null 2>&1
 }
 
@@ -2478,6 +2478,8 @@ del(.host_integrations.redirect)
 (.protocols[] | select(.id == 29)) |= (.status = "supported" | .profiles = ["core-sing-box"])
 .feature_matrix.subscription.requires.core = "sing-box"
 .feature_matrix.subscription.requires.protocol_ids = [1]
+.feature_matrix.subscription.requires.protocol_ids = [21]
+.feature_matrix.subscription.profiles += ["core-xray"]
 .feature_matrix.subscription.requires.tls = false
 .feature_matrix["core-upgrade-assessment"].status = "deferred"
 .feature_matrix["core-upgrade-assessment"].profiles = []

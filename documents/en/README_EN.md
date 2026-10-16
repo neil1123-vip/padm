@@ -152,7 +152,16 @@ and candidate configuration or certificate preparation. Missing `cosign` stops t
 the wizard neither installs an untrusted verifier nor allows verification to be skipped.
 WS TLS, Hysteria2, AnyTLS, NaiveProxy, and TUIC can use managed certificates, an imported full certificate chain and private key,
 or DNS-01/HTTP-01 standalone. Private keys and DNS credentials must be regular files readable only by their owner.
-Subscription publishing still requires Xray, WS TLS, and managed TLS.
+Subscription publishing requires at least one Nginx TLS listener using protocol `21–25`
+and managed TLS for the same domain; a sing-box-only HTTPUpgrade `23` deployment can qualify.
+It reuses the existing Nginx and subscription services, without a separate publishing domain,
+certificate, or service. Enabling publication without `21` requires the bundle capability
+`x-padm-subscription-nginx-tls`; existing specs with `21` or publication disabled remain compatible.
+Share-group HTTPS URLs use the actual public port of the first `21–25` listener in
+`core.protocols`, omitting `443`; a website listener selected for Reality coexistence uses
+public port `443`. Plan 4A.7 passed isolated amd64 tests for protocols `22–25`:
+main/group HTTPS downloads, strict TLS, and IPv4/IPv6 TCP/UDP clients.
+Public-network and native dual-architecture acceptance remain separate.
 The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` with mode `0600`.
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
 The spec contains secrets and must not be printed or published.
@@ -679,8 +688,8 @@ values without renumbering existing internal ports. Listener identities, public 
 and internal listeners in the same container network namespace must not conflict.
 For an existing managed deployment, `edit --spec` supports these listener changes
 through the same preview, validation, and confirmation flow.
-Deleting the last WS listener disables subscription publishing. The spec retains TLS
-while Hysteria2, AnyTLS, NaiveProxy, or TUIC remains; otherwise it sets `tls` to `null`,
+Deleting the last Nginx TLS `21–25` listener disables subscription publishing. The spec retains TLS
+while traditional TLS fallback, Hysteria2, AnyTLS, NaiveProxy, TUIC, or direct Trojan remains; otherwise it sets `tls` to `null`,
 while retaining TLS/ACME files and the token. Shadowsocks does not require TLS.
 Nginx-side rotation and managed core-side TLS foundations are implemented.
 Reality XHTTP/gRPC, Hysteria2, AnyTLS, NaiveProxy, Shadowsocks, and TUIC basic listeners

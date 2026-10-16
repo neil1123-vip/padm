@@ -845,7 +845,9 @@ dockerConfigureSpecValidate() {
       else
         .tls == null and .subscription.enabled == false
       end and
-      if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
+      if .subscription.enabled then
+        any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)
+      else true end and
       if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
     '
     if [[ "${hasHostIntegrations}" == true ]]; then
@@ -2912,9 +2914,18 @@ server {
 
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
-    local httpPort http2Port hostMode=${3:-strict} metadata enabled sourceLogEnabled http01 fallbackEnabled
-    local fallbackSite= tlsSite=
-    case "${hostMode}" in strict|legacy-host) ;; *) return 1 ;; esac
+    local httpPort http2Port hostMode=${3:-strict} legacyPublication=0 metadata enabled sourceLogEnabled http01 fallbackEnabled
+    local fallbackSite= tlsSite= grpcLocation
+    case "${hostMode}" in
+    strict|legacy-host) ;;
+    legacy-publish) hostMode=strict; legacyPublication=1 ;;
+    legacy-host-publish) hostMode=legacy-host; legacyPublication=1 ;;
+    *) return 1 ;;
+    esac
+    if [[ "${legacyPublication}" == 1 ]]; then
+        jq -e '.subscription.enabled == true and any(.core.protocols[]; .id == 21)' \
+            "${specFile}" >/dev/null || return 1
+    fi
     metadata=$(jq -r '[
       (.reality_stream != null or any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)),
       .tls.domain, .subscription.token, .subscription.enabled,
@@ -3007,7 +3018,11 @@ server {
         printf '    access_log /var/log/nginx/access.log combined;\n\n' >>"${target}" || return 1
     fi
     if [[ "${protocolId}" == 24 || "${protocolId}" == 25 ]]; then
-        printf '%s\n' "    location ^~ ${path} {
+        grpcLocation='^~ '
+        # 同名 gRPC 入口须让订阅 token 正则先匹配，Tun/TunMulti 仍走前缀。
+        [[ "${subscriptionEnabled}" != true || "${path}" != /subscriptions/ ||
+            "${legacyPublication}" == 1 ]] || grpcLocation=
+        printf '%s\n' "    location ${grpcLocation}${path} {
         grpc_pass grpc://${backendCore}:${backendPort};
         grpc_set_header Host ${domain};
         client_max_body_size 0;
@@ -3028,8 +3043,12 @@ server {
     if [[ "${subscriptionEnabled}" == "true" ]]; then
         printf '%s\n' "
     location ~ \"^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})\$\" {
-        access_log off;
-        proxy_pass http://subscription:${PADM_DOCKER_SUBSCRIPTION_PORT}/\$padm_subscription_token;
+        access_log off;" >>"${target}" || return 1
+        if [[ "${legacyPublication}" == 0 ]]; then
+            printf '%s\n' '        resolver 127.0.0.11 ipv6=off valid=30s;
+        resolver_timeout 5s;' >>"${target}" || return 1
+        fi
+        printf '%s\n' "        proxy_pass http://subscription:${PADM_DOCKER_SUBSCRIPTION_PORT}/\$padm_subscription_token;
         proxy_pass_request_headers off;
     }" >>"${target}" || return 1
     fi
@@ -3044,19 +3063,25 @@ server {
 }
 
 dockerNginxConfigMatches() {
-    local specFile=$1 actual=$2
-    cmp -s -- "${actual}" <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) && return 0
-    # 旧生成器没有 CDN 字段或新 Host 校验；仅接受完整旧正文，不能逐入口放宽。
-    jq -e 'has("cdn_entries") | not' "${specFile}" >/dev/null &&
-        cmp -s -- "${actual}" <(dockerGenerateNginxConfig "${specFile}" /dev/stdout legacy-host)
+    local specFile=$1 actual=$2 mode
+    for mode in strict legacy-publish legacy-host legacy-host-publish; do
+        [[ "${mode}" != legacy-host* ]] ||
+            jq -e 'has("cdn_entries") | not' "${specFile}" >/dev/null || continue
+        [[ "${mode}" != *publish ]] ||
+            jq -e '.subscription.enabled == true and any(.core.protocols[]; .id == 21)' \
+                "${specFile}" >/dev/null || continue
+        # 仅接受整份已知旧正文，旧发布范围不扩大到无 21 的新规格。
+        cmp -s -- "${actual}" <(dockerGenerateNginxConfig "${specFile}" /dev/stdout "${mode}") && return 0
+    done
+    return 1
 }
 
 dockerNginxDirectoryMatches() {
     local specFile=$1 expected=$2 actual=$3
     diff -qr -- "${expected}" "${actual}" >/dev/null 2>&1 && return 0
-    # expected 是私有校验草稿，在线目录与下一次提交的默认生成模式均不变。
-    jq -e 'has("cdn_entries") | not' "${specFile}" >/dev/null &&
-        dockerGenerateNginxConfig "${specFile}" "${expected}/default.conf" legacy-host &&
+    # 只在私有校验草稿复用已精确核验的旧正文，其余文件仍逐一比较。
+    dockerNginxConfigMatches "${specFile}" "${actual}/default.conf" &&
+        cp -- "${actual}/default.conf" "${expected}/default.conf" &&
         diff -qr -- "${expected}" "${actual}" >/dev/null 2>&1
 }
 

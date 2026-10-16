@@ -142,8 +142,127 @@ while IFS= read -r line; do
 done <<<"${CONTENT}"
 
 LINK=$(dockerSubscriptionCommand links "${GROUP}")
-[[ "${LINK}" == "https://ws.example.com/subscriptions/${GROUP_TOKEN}" ]] ||
+[[ "${LINK}" == "https://ws.example.com:8443/subscriptions/${GROUP_TOKEN}" ]] ||
     fail '分享 HTTPS 链接错误'
+
+# 分享服务使用实际发布入口，不能把内部 TLS 端口或空入口 ID 当成公网 443。
+(
+    portSpec="${TEST_ROOT}/port-spec.json"
+    for portCase in standard legacy shared first; do
+        case "${portCase}" in
+        standard)
+            filter='(.core.protocols[] | select(.id == 21) | .public_port) = 443 |
+              (.core.protocols[] | select(.id == 1) | .public_port) = 4443'
+            authority=ws.example.com
+            ;;
+        legacy)
+            filter='.schema_version = 1 | del(.accounts, .core.secondary_type) |
+              .core.protocols = [.core.protocols[] | select(.id == 21) |
+                del(.core, .listener_id, .websocket.backend_port, .websocket.tls_port)]'
+            authority=ws.example.com:8443
+            ;;
+        shared)
+            filter='.core.protocols |= map(.server = "proxy.example.com") |
+              .reality_stream = {listener_id:"entry-reality",website_listener_id:"entry-ws"}'
+            authority=ws.example.com
+            ;;
+        first)
+            filter='.core.protocols += [.core.protocols[] | select(.id == 21) |
+              .listener_id = "entry-second" | .public_port = 9443 |
+              .websocket.backend_port = 31298 | .websocket.tls_port = 8444]'
+            authority=ws.example.com:8443
+            ;;
+        esac
+        jq "${filter}" "${SPEC}" >"${portSpec}"
+        dockerConfigureSpecValidate "${portSpec}" || fail "${portCase}: 发布端口夹具无效"
+        [[ "$(dockerSubscriptionLinks "${portSpec}" "${STATE_FILE}" "${GROUP}")" == "https://${authority}/subscriptions/${GROUP_TOKEN}" ]] ||
+            fail "${portCase}: 分享链接未使用实际公开端口"
+    done
+)
+
+# 仅复用已有 Nginx TLS 入口；发布和本地内容分别验收，旧包能力仅限制新增拓扑。
+(
+    mkdir -p -- "${TEST_ROOT}/bundle"
+    printf '%040d\n' 1 >"${TEST_ROOT}/bundle/${PADM_DOCKER_BUNDLE_REF}"
+    dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
+    compat="${TEST_ROOT}/subscription-old-bundle"
+    mkdir -p -- "${compat}/docker/contracts"
+    cp -- "$(dockerFeatureMatrixFile)" "${compat}/docker/contracts/features.json"
+    jq 'del(.["x-padm-subscription-nginx-tls"])' "$(dockerConfigureSchemaFile)" \
+        >"${compat}/docker/contracts/configure.schema.json"
+    dockerBundleSupportsSpec "${compat}" "${SPEC}" || fail '旧包拒绝原协议 21 发布子集'
+    share=$(jq -cn --arg token "${GROUP_TOKEN}" --arg account "${BOB}" '
+      {token:$token,account_ids:[$account],listener_ids:["entry-ws"]}')
+    for topology in 22:xray 23:xray 23:sing-box 24:xray 25:xray; do
+        protocol=${topology%%:*}; core=${topology#*:}
+        spec="${TEST_ROOT}/publish-${protocol}-${core}.json"
+        jq --argjson protocol "${protocol}" --arg core "${core}" --arg account "${BOB}" '
+          .core.type = $core | .core.secondary_type = null |
+          .core.protocols = [.core.protocols[] | select(.id == 21) |
+            .id = $protocol | .core = $core |
+            if $protocol == 23 then .httpupgrade = .websocket | del(.websocket)
+            elif $protocol == 24 or $protocol == 25 then
+              .grpc_tls = (.websocket | del(.path) + {service_name:"subscriptions"}) | del(.websocket)
+            else . end] |
+          .accounts |= map(select(.id == $account))
+        ' "${SPEC}" >"${spec}"
+        dockerConfigureSpecValidate "${spec}" || fail "${topology}: 独立发布规格被拒绝"
+        dockerBundleSupportsSpec "${PROJECT_ROOT}" "${spec}" || fail "${topology}: 当前包拒绝发布"
+        reject dockerBundleSupportsSpec "${compat}" "${spec}"
+        dockerGenerateCompose "${spec}" "${TEST_ROOT}/publish-compose.json"
+        jq -e --arg core "${core}" '
+          (.services | keys | map(select(. == "xray" or . == "sing-box"))) == [$core] and
+          .services.subscription.profiles == ["subscription"] and
+          .services.nginx.depends_on[$core].condition == "service_healthy" and
+          .services.nginx.depends_on.subscription.condition == "service_healthy" and
+          .services.nginx.ports == ["0.0.0.0:8443:8443/tcp"] and
+          .services.subscription.ports == null
+        ' "${TEST_ROOT}/publish-compose.json" >/dev/null || fail "${topology}: 发布拓扑或核心依赖错误"
+        dockerGenerateDeployment "${spec}" "${TEST_ROOT}/publish-deployment.json" ||
+            fail "${topology}: 发布元数据生成失败"
+        jq -e --arg core "${core}" '.compose.profiles == ["core-"+$core,"nginx","subscription"]' \
+            "${TEST_ROOT}/publish-deployment.json" >/dev/null || fail "${topology}: 发布 profile 错误"
+        dockerGenerateNginxConfig "${spec}" "${TEST_ROOT}/publish-nginx.conf"
+        grep -qF 'proxy_pass http://subscription:8081/$padm_subscription_token;' \
+            "${TEST_ROOT}/publish-nginx.conf" || fail "${topology}: Nginx 缺少订阅路由"
+        if [[ "${protocol}" == 24 || "${protocol}" == 25 ]]; then
+            grep -qF 'location /subscriptions/ {' "${TEST_ROOT}/publish-nginx.conf" &&
+                ! grep -qF 'location ^~ /subscriptions/ {' "${TEST_ROOT}/publish-nginx.conf" ||
+                fail "${topology}: gRPC 服务名抢占订阅 token 路由"
+        fi
+        dockerGenerateSubscription "${spec}" "${TEST_ROOT}/publish-main.txt"
+        [[ "$(wc -l <"${TEST_ROOT}/publish-main.txt")" == 2 ]] ||
+            fail "${topology}: 主订阅遗漏自用或独立账号"
+        dockerSubscriptionRender "${spec}" "${share}" "${TEST_ROOT}/publish-share.txt"
+        [[ "$(wc -l <"${TEST_ROOT}/publish-share.txt")" == 1 ]] ||
+            fail "${topology}: 分享组没有只输出选中账号"
+        content=$(<"${TEST_ROOT}/publish-share.txt")
+        if [[ "${protocol}" == 22 || "${protocol}" == 23 ]]; then
+            printf '%s' "${content#vmess://}" | base64 -d |
+                jq -e --arg uuid "${BOB_UUID}" --argjson protocol "${protocol}" '
+                  .id == $uuid and .port == "8443" and .tls == "tls" and
+                  .net == (if $protocol == 22 then "ws" else "httpupgrade" end)
+                ' >/dev/null || fail "${topology}: 分享账号或传输错误"
+        elif [[ "${protocol}" == 24 ]]; then
+            [[ "${content}" == "vless://${BOB_UUID}@"* ]] || fail 'VLESS gRPC 分享账号错误'
+        else
+            [[ "${content}" == 'trojan://Bob.-~%40%2B%3D%3ASecret@'* ]] ||
+                fail 'Trojan gRPC 分享账号错误'
+        fi
+        jq '.subscription.enabled = false' "${spec}" >"${TEST_ROOT}/publish-disabled.json"
+        dockerBundleSupportsSpec "${compat}" "${TEST_ROOT}/publish-disabled.json" ||
+            fail "${topology}: 旧包拒绝关闭发布的协议子集"
+        dockerSubscriptionRender "${TEST_ROOT}/publish-disabled.json" "${share}" "${TEST_ROOT}/publish-local.txt"
+        cmp -s "${TEST_ROOT}/publish-share.txt" "${TEST_ROOT}/publish-local.txt" ||
+            fail "${topology}: 关闭 HTTPS 发布改变本地分享内容"
+        if [[ "${protocol}" == 24 || "${protocol}" == 25 ]]; then
+            dockerGenerateNginxConfig "${TEST_ROOT}/publish-disabled.json" "${TEST_ROOT}/publish-disabled.conf"
+            grep -qF 'location ^~ /subscriptions/ {' "${TEST_ROOT}/publish-disabled.conf" ||
+                fail "${topology}: 关闭发布仍改变 gRPC 原路由优先级"
+        fi
+        reject dockerSubscriptionLinks "${TEST_ROOT}/publish-disabled.json" "${STATE_FILE}" "${GROUP}"
+    done
+)
 
 dockerSubscriptionCommand edit "${GROUP}" --name Team-Renamed --listeners entry-reality >/dev/null
 jq -e --arg id "${GROUP}" '.groups[] | select(.id == $id and .name == "Team-Renamed")' \
@@ -191,6 +310,8 @@ grep -qF 'location ~ "^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{1
     fail 'Nginx 未生成受限 token 路由'
 grep -qF 'proxy_pass http://subscription:8081/$padm_subscription_token;' "${NGINX}" ||
     fail 'Nginx token 代理路径错误'
+grep -qF 'resolver 127.0.0.11 ipv6=off valid=30s;' "${NGINX}" || fail 'Nginx token 代理缺少 Docker DNS 解析'
+grep -qF 'resolver_timeout 5s;' "${NGINX}" || fail 'Nginx token 代理缺少 DNS 超时'
 
 # 达到组数上限后拒绝新增，不能写入后续管理入口无法读取的状态。
 (

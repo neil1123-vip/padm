@@ -370,7 +370,7 @@ local 启用期间默认页/302/混淆拒绝，关闭保留内容；纯 Hy2 静�
 3C.4 新增 sing-box AnyTLS：v3 首配、完整规格导入、通用字段编辑、同核复制/删除及分享链接，
 支持 TCP 双栈，复用受管 TLS 和 UUID 流量账号；TLS 域名与凭据按身份合同冻结。
 真实 amd64 的 IPv4/IPv6 两条 SOCKS HTTP proof 已通过；包含 AnyTLS 时暂拒绝宿主集成。
-AnyTLS 单独部署不能发布 HTTPS 订阅，组合 Xray WS TLS 后可包含 AnyTLS 链接。
+AnyTLS 单独部署不能发布 HTTPS 订阅，组合至少一个同域 Nginx TLS `21–25` 入口后可包含 AnyTLS 链接。
 3C.5 新增 sing-box NaiveProxy：v3 首配、导入、通用字段编辑、同核复制/删除及原生分享 URI，
 仅监听 TCP，入口域名与 TLS 域名一致；UUID 作为用户名、密码和统计标识，不添加 `name` 字段。
 真实 amd64 双栈 SOCKS HTTP proof 及 UUID 正上/下行计数已通过；宿主集成、QUIC 和独立 IP/SNI 覆盖未开放。
@@ -409,17 +409,17 @@ TLS 域名与凭据冻结，fallback、宿主集成及完整用户管理尚未�
 3C.9 新增 Xray VMess WS TLS：v3 首配、导入、入口与 WS 路径编辑、同核复制/删除及 `vmess://`
 分享链接；固定 `alterId=0`，复用 Nginx、受管 TLS 和 UUID 流量账号。
 真实 amd64 Nginx TLS/WS 双栈、错误 UUID 拒绝、UUID 正统计及同客户端额度拒绝/恢复已通过。
-协议 22 单独部署不开放 HTTPS 订阅发布，暂不接受宿主集成，完整管理仍为 `deferred`；
+4A.7 扩展协议 22 复用自身同域 Nginx TLS 入口发布 HTTPS 订阅，隔离 amd64 主/组实链路已验；暂不接受宿主集成，完整管理仍为 `deferred`；
 公网宿主入口、第三方导入 UI、业务镜像签名发布和原生 arm64 客户端仍待验。
 3C.10 新增两核心 VMess HTTPUpgrade TLS：v3 首配、导入、入口与路径编辑、跨核心复制/删除及分享链接，
 固定 `alterId=0`，独立 `httpupgrade` 字段复用 Nginx/TLS、UUID 统计和额度。
 Nginx 按入口核心反代，后端端口按核心隔离，TLS 端口全局唯一；路径不附加 `ws`。
 真实 amd64 两核心各双栈 TCP/UDP 隧道、大小写域名 Host/SNI、错误 UUID、统计与同客户端额度恢复通过。
-协议 23 单独部署不发布 HTTPS 订阅；宿主集成及完整管理继续未开放。
+4A.7 扩展协议 23 复用自身同域 Nginx TLS 入口发布 HTTPS 订阅，含纯 sing-box 部署，隔离 amd64 主/组实链路已验；宿主集成及完整管理继续未开放。
 3C.11 新增 Xray VLESS/Trojan gRPC TLS：v3 首配、导入、通用字段与服务名编辑、同核复制/删除及分享链接。
 独立 `grpc_tls` 字段复用 Nginx HTTP/2、受管 TLS 和 UUID 统计额度；后端端口按核心避让，
 TLS 端口与 WS/HTTPUpgrade 共享全局池；不支持 sing-box、宿主集成或 fallback。
-单独部署不发布 HTTPS 订阅，和协议 21 混合时可输出并发布两类 gRPC TLS 链接；完整管理继续未开放。
+4A.7 扩展两类 gRPC TLS 入口复用自身同域 Nginx TLS 发布 HTTPS 订阅，无须包含协议 `21`，隔离 amd64 主/组与同名 `subscriptions` 服务实链路已验；完整管理继续未开放。
 真实 amd64 两协议均通过严格 CA/SNI、HTTP/2 双栈 TCP/UDP 隧道、错误凭据拒绝、
 UUID 正统计及同客户端额度拒绝/恢复；未暴露宿主端口或核心 gRPC 后端。
 3C.12 新增 Xray VLESS TCP TLS Vision 与 Trojan TCP TLS fallback：v3 首配、导入、
@@ -436,7 +436,7 @@ UUID 正统计及同客户端额度拒绝/恢复；未暴露宿主端口或核�
 真实 Nginx PROXY HTTP/2 已验，真实 Xray ALPN 协商、公网及原生双架构仍待验；
 5A.3a/5A.3b 已提供 standalone/webroot HTTP-01 的本地事务底座；公网 CA、
 真实宿主生命周期及原生双架构仍待验，组合管理状态保持 `deferred`。
-独立 27/29 不发布 HTTPS 订阅，组合协议 21 可发布其链接；宿主集成、sing-box 与完整管理仍拒绝。
+独立 27/29 不发布 HTTPS 订阅，组合至少一个同域 Nginx TLS `21–25` 入口可发布其链接；宿主集成、sing-box 与完整管理仍拒绝。
 本阶段真实客户端、HTTP/1.1/HTTP/2 回落和恢复验收已通过；Docker Linux 定向回归约 `109.543` 秒，
 真实 amd64 27/29 及旧 22/24/25 顺序验收约 `277` 秒，静态 ShellCheck、Schema `4` 正例/`50` 反例
 和 phase3 矩阵检查通过。公网宿主入口、原生 arm64、真实 DNS/整机重启及可信发布仍未验。
@@ -445,6 +445,16 @@ Nginx 与核心端 TLS 轮换底座已交付；其它新协议类型和完整管
 Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单直接 WS 21、
 单集成和单保护端口的专项联动，实际迁移验收见实施计划。真实签名发布、业务镜像及
 双架构客户端连通仍待验，不能由工具容器回归推断完成。
+
+4A.7 将 HTTPS 订阅发布限定扩展到至少一个现有 Nginx TLS `21–25` 入口，
+复用同域受管 TLS、Nginx 和 subscription 服务；未包含 `21` 的启用规格要求
+`x-padm-subscription-nginx-tls`，含 `21` 或关闭发布的旧规格保持兼容。
+分享组 URL 使用 `core.protocols` 中首个适用入口的实际公开端口，省略 `443`；
+Reality 共存选中的 website 入口使用公开 `443`。首配 `12–15` 接入发布提问，
+仅删除最后一个适用入口时关闭发布。22–25 的主/组 HTTPS、严格 TLS 及双族 TCP/UDP
+已通过隔离 amd64 验收；变量代理补齐 Docker DNS 解析，同名 gRPC 服务不遮蔽 token。
+不增加独立发布域名、证书或服务，
+独立 27/29 及其它非 Nginx TLS 协议的发布和完整管理继续按原边界。
 
 机器可读状态位于 [`docker/contracts/features.json`](../docker/contracts/features.json)：
 
@@ -457,7 +467,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
 | 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`reinstall`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；3D.11–3D.13 提供旧规格迁移后的增量新增、核心选择、新 SS 密钥、首个 TLS 证书联动以及 v3 删除/保身份重建。3D.14 提供重新选择和完整规格重装，并撤销旧分享授权、保留累计及失败恢复；3D.15 提供保身份 TLS 域名迁移，3D.16 可在 ACME 成功后显式登记新域名续期，旧登记不迁移。真实发布连通未完成。 |
-| 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号与双核心认证/统计、账号/分享组及业务备份恢复、主控管理与被控接入/手动同步、已有单 Peer 被控自动同步 CLI/菜单、WireGuard 宿主集成 | HTTPS 链接仍要求受管 TLS；H3 和完整多服务器工作流未迁移。隔离 amd64 双部署事务及真实 cron 自主同步已验，WireGuard 需 `net-wireguard`；原生双机、arm64 和重启另验。 |
+| 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号与双核心认证/统计、账号/分享组及业务备份恢复、主控管理与被控接入/手动同步、已有单 Peer 被控自动同步 CLI/菜单、WireGuard 宿主集成 | 4A.7 的 HTTPS 发布复用至少一个 `21–25` 入口与同域受管 TLS，隔离 amd64 主/组实链路已验；独立域名/证书发布、H3 和完整多服务器工作流未迁移。隔离 amd64 双部署事务及真实 cron 自主同步已验，WireGuard 需 `net-wireguard`；原生双机、arm64 和重启另验。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`23` VMess HTTPUpgrade TLS、`24` VLESS gRPC TLS、`25` Trojan gRPC TLS、`26` Reality gRPC、`27` TLS Vision fallback、`28` direct Trojan、`29` Trojan TLS fallback、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口、Reality 传输派生、参数重生成和目标站管理；有限 Reality 443 共存及 2/21/22/23/24/25 CDN 连接地址覆盖 | XHTTP、VMess WS、gRPC TLS 和传统 TLS fallback 仅限 Xray，Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；HTTPUpgrade 支持两核心；完整协议管理、完整 UDP 端口跳跃、其余 CDN 和完整内部路由工作流尚未开放；Fail2ban WS 增删及通用端口编辑拒绝，单入口保护端口专项见 5C.6d。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、保身份域名迁移、DNS-01 与 HTTP-01 standalone/受管 webroot 本地事务、Nginx WebSocket/HTTPUpgrade/gRPC HTTP/2 入口及传统 TLS fallback；默认页、静态目录、302、受管三主题、Hysteria2 local 与逐入口 ALPN 事务管理 | 域名迁移不迁移续期登记；隔离 amd64 TLS ALPN 和 H3 已有实测；公网 CA、宿主生命周期及原生双架构验收待补。 |
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同；5B.1–5B.4i 两核心 SOCKS5 TCP 出站、DNS/hosts、域名 Direct/Block、目的 IP、明文 BT、CN 预设、IPv6 与用户态 WARP 子能力；已有 DNS/选择性 SOCKS5/IPv6/WARP 名单增删、七类域名及手工字面 IP/CIDR 单条原位替换、已有 hosts 单键地址替换；5B.5a 已有 Xray 的 HTTP 中继事务 | SOCKS5 名单定向、菜单及完整 49 项回归已通过；hosts 单键替换定向与菜单已通过，集中完整 49 项回归通过；SOCKS UDP 发布、完整区域/访问控制仍未交付；WARP 公网出口、IPv6/HTTP 公网发布、真实宿主及双架构验收待补，完整状态不升级。 |
@@ -479,10 +489,10 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用字段编辑、同核复制/删除及分享链接；复用受管 TLS 与 UUID 流量账号，域名与凭据冻结，宿主集成组合及完整管理未开放。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用编辑、同核复制/删除及原生 URI；入口与 TLS 同域，UUID 用户名/密码共享统计额度；QUIC、独立 IP/SNI 覆盖及完整管理未开放。 |
 | 21 | VLESS WS TLS | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | 已有多入口 Xray 后端、Nginx 反代和同域 TLS；5C.6d 单直接 WS 21/单集成/单保护端口的专项迁移接入菜单和事务，新旧端口均要求 fresh 来源；关联入口增删、通用端口编辑及完整管理仍拒绝。 |
-| 22 | VMess WS TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 支持首配、导入、入口与 WS 路径编辑、同核复制/删除及 `vmess://` 分享；固定 `alterId=0`，单独部署不发布 HTTPS 订阅，宿主集成及完整管理未开放。 |
-| 23 | VMess HTTPUpgrade TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` / `nginx` | bridge / TCP + Nginx | v3 两核心首配、导入、入口/路径编辑、跨核心复制/删除及分享；固定 `alterId=0`，UUID 共享额度，单独部署不发布 HTTPS 订阅，宿主集成及完整管理未开放。 |
-| 24 | VLESS gRPC TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 首配、导入、入口/服务名编辑、同核复制/删除及 `vless://` 分享；Nginx HTTP/2 反代，UUID 共享额度，单独部署不发布 HTTPS 订阅，宿主集成、fallback 及完整管理未开放。 |
-| 25 | Trojan gRPC TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 首配、导入、入口/服务名编辑、同核复制/删除及 `trojan://` 分享；Nginx HTTP/2 反代，UUID 共享额度，单独部署不发布 HTTPS 订阅，宿主集成、fallback 及完整管理未开放。 |
+| 22 | VMess WS TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 支持首配、导入、入口与 WS 路径编辑、同核复制/删除及 `vmess://` 分享；固定 `alterId=0`，4A.7 自身同域 Nginx TLS 发布已通过隔离 amd64 实测，宿主集成及完整管理未开放。 |
+| 23 | VMess HTTPUpgrade TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` / `nginx` | bridge / TCP + Nginx | v3 两核心首配、导入、入口/路径编辑、跨核心复制/删除及分享；固定 `alterId=0`，UUID 共享额度，4A.7 含纯 sing-box 的自身同域 Nginx TLS 发布已通过隔离 amd64 实测，宿主集成及完整管理未开放。 |
+| 24 | VLESS gRPC TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 首配、导入、入口/服务名编辑、同核复制/删除及 `vless://` 分享；Nginx HTTP/2 反代，UUID 共享额度，4A.7 自身同域 Nginx TLS 发布已通过隔离 amd64 实测，宿主集成、fallback 及完整管理未开放。 |
+| 25 | Trojan gRPC TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 首配、导入、入口/服务名编辑、同核复制/删除及 `trojan://` 分享；Nginx HTTP/2 反代，UUID 共享额度，4A.7 自身同域 Nginx TLS 发布已通过隔离 amd64 实测，宿主集成、fallback 及完整管理未开放。 |
 | 26 | VLESS Reality gRPC | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 支持首配、导入、service name 编辑、跨核心复制及分享链接；完整管理未迁移。 |
 | 27 | VLESS TCP TLS Vision | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + fallback | v3 首配、导入、通用编辑、同核复制/删除及 URI；Xray TLS/Vision 与 PROXY v1 HTTP/1.1、HTTP/2 回落，UUID 共享额度；默认页/静态/302 与逐入口 ALPN 可事务管理，宿主集成与完整管理未开放。 |
 | 28 | Trojan TCP TLS direct | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 两核首配、导入、通用编辑、跨核心复制/删除及 URI；受管 TLS、UUID 密码共享流量额度，fallback、宿主集成及完整管理未开放。 |
@@ -512,7 +522,7 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 | `nginx` | 站点与证书 -> 传统 TLS fallback | `supported` | `nginx` | bridge | 独立 Nginx 容器，承载 WS/HTTPUpgrade/gRPC 反代与传统 TLS fallback 的 PROXY v1 HTTP/1.1、HTTP/2 后端；默认页、静态目录、302 与传统 TLS ALPN 经菜单/CLI 事务管理。 |
 | `tls-files` | 站点与证书 -> 本机 TLS 证书 | `supported` | `nginx` / `acme` | bridge | 菜单/CLI 校验、导入轮换和只读挂载；Nginx 与 Xray/sing-box 逐消费者校验、重载/重建及健康失败恢复旧证书。核心端仅交付受管 TLS 文件底座，不代表新增协议或完整管理。 |
 | `acme-dns` | 站点与证书 -> 本机 TLS 证书 | `supported` | `acme` | bridge + 宿主 CLI 调度 | 菜单/CLI DNS-01 issue/renew 及自动续期启停/状态；root 私有输入、唯一 systemd/cron 任务、部署锁和候选账户/证书事务；未到期跳过，更新/回滚保留最新输入，卸载只撤销受管任务。 |
-| `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | 既有部署级 token 发布继续要求 Xray 协议 `21` 和受管 TLS；分享组另有独立 token，可按账号/入口生成纯订阅内容并查看 HTTPS 链接；CDN/H3 仍未迁移。 |
+| `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `nginx` / `subscription` | bridge | 4A.7 复用至少一个 `21–25` 入口及同域受管 TLS，含纯 sing-box `23`；无 `21` 的启用规格需新能力标记，隔离 amd64 主/组实链路已验。部署/分享组 token 沿用，分享 URL 按首个适用入口的实际公开端口；独立域名/证书发布与 H3 未迁移。 |
 | `subscription-traffic` | 账号管理 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/collect/limit/reset；菜单 `10 -> 9` 查看不隐式采集，额度 `0` 表示不限额，设置/重置各确认一次，重置保留额度。沿用 CLI 采样与失败副作用；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1–4A.4 账号底座、账号 CLI/菜单事务、独立 token 分享组及业务备份恢复已交付；账号/入口筛选、启停/轮换、纯内容与 HTTPS 链接，账号/组/额度/累计 merge/replace 恢复均复用候选事务，轮换与恢复不回退最新累计。4A.2a 凭据不进外部 argv，修复首次 SS 关联生成与迁移入口选择；已有账号须显式设置新增入口授权。CDN/H3 与完整多服务器工作流按独立功能边界验收。 |
 | `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.5 提供私网 API、主控管理、被控接入/手动同步及已有单 Peer 被控每 5 分钟自动同步 CLI/菜单。校验 Peer 归属、地址与唯一 `/32`，不建接口/密钥/路由；默认关闭，持久邀请限本机 root 私有目录，不进规格/备份/普通日志，停用清除凭据。独立服务和客户端零能力，无公网映射。隔离 amd64 双 Docker Engine 的生产 CLI/Compose、WS/TLS 流量、真实 cron 自主推进、同版幂等、锁竞争、轮换/撤销及健康失败/INT/TERM 恢复已验。正常 down 跳过，异常归属和 WS/SSH 来源防护组合拒绝。多 Peer、网络向导、角色重绑定、迁移、灾备、原生 systemd/双机/arm64、重启和可信发布待补。 |

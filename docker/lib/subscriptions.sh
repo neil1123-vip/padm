@@ -359,7 +359,7 @@ dockerSubscriptionContent() {
 }
 
 dockerSubscriptionLinks() {
-    local specFile=$1 state=$2 groupId=$3 group domain
+    local specFile=$1 state=$2 groupId=$3 group authority
     group=$(dockerSubscriptionGroupJson "${state}" "${groupId}") || return "${PADM_DOCKER_RC_USAGE}"
     [[ "$(jq -r '.enabled' <<<"${group}")" == true ]] || {
         dockerError '分享组已停用，未输出链接'
@@ -369,8 +369,17 @@ dockerSubscriptionLinks() {
         dockerError '当前部署没有启用受管 TLS 订阅，暂不能生成公网分享链接'
         return "${PADM_DOCKER_RC_STATE}"
     }
-    domain=$(jq -er '.tls.domain' "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
-    printf 'https://%s/subscriptions/%s\n' "${domain}" "$(jq -er '.token' <<<"${group}")"
+    authority=$(jq -er '
+      . as $request |
+      [.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)] |
+      .[0] | if . == null then error("没有订阅发布入口") else
+        (if $request.reality_stream != null and
+          $request.reality_stream.website_listener_id == .listener_id
+          then 443 else .public_port end) as $port |
+        $request.tls.domain + (if $port == 443 then "" else ":" + ($port | tostring) end)
+      end
+    ' "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
+    printf 'https://%s/subscriptions/%s\n' "${authority}" "$(jq -er '.token' <<<"${group}")"
 }
 
 dockerSubscriptionList() {

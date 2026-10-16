@@ -7,6 +7,7 @@
   "x-padm-reality-stream-host-website": true,
   "x-padm-reality-stream-host-network": true,
   "x-padm-accounts": true,
+  "x-padm-subscription-nginx-tls": true,
   "x-padm-control-sync": true,
   "x-padm-control-sync-rollback": true,
   "x-padm-control-client": true,
@@ -1235,7 +1236,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"const": 21}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [21, 22, 23, 24, 25]}}}}
             }
           }
         }

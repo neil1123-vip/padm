@@ -207,6 +207,10 @@ listRegressionDockerVlessEncryptionChildSelectors() {
     printf '%s\n' docker-vless-encryption docker-vless-encryption-real
 }
 
+listRegressionDockerSubscriptionPublicationChildSelectors() {
+    printf '%s\n' docker-subscriptions docker-spec-validation docker-setup-transports docker-setup-tls
+}
+
 listRegressionDockerContractsRealityMetadataChildSelectors() {
     printf '%s\n' docker-xhttp-edit docker-reality-parameters docker-vless-encryption docker-shadowsocks-rotation docker-reality-targets-selection docker-reality-target-library
 }
@@ -650,7 +654,10 @@ runDockerAccountsCliRegression() {
 }
 
 runDockerSubscriptionsRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/subscriptions.sh"
+    bash -n "${PROJECT_ROOT}/docker/tests/subscriptions.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/"{bundle,services,setup,subscriptions}.sh \
+            "${PROJECT_ROOT}/docker/tests/subscriptions.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/subscriptions.sh"
 }
 
 runDockerBusinessRegression() {
@@ -1007,6 +1014,7 @@ registerRegressionFunctionLeaf docker-routing-warp-real runDockerRoutingWarpReal
 registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression
+registerRegressionFunctionLeaf docker-subscription-publication-real runDockerSubscriptionPublicationRealRegression
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-sites runDockerSitesRegression
 registerRegressionFunctionLeaf docker-geo-data runDockerGeoRegression
@@ -1112,6 +1120,8 @@ registerRegressionParallelSelectorList docker-contracts runRegressionDockerContr
     "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
 registerRegressionParallelSelectorList docker-vless-encryption-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-vless-encryption-parallel-${BASHPID:-$$}" listRegressionDockerVlessEncryptionChildSelectors 2
+registerRegressionParallelSelectorList docker-subscription-publication-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-subscription-publication-parallel-${BASHPID:-$$}" listRegressionDockerSubscriptionPublicationChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 4
 registerRegressionParallelSelectorList docker-contracts-fast-heavy runFrameworkParallelRegressionSelectorListWithJobs \

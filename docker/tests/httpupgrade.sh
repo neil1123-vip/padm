@@ -37,7 +37,6 @@ for core in xray sing-box; do
         '.core.protocols[0].uuid += "\n"' \
         ".core.protocols[0].httpupgrade.backend_port = ${api_port}" \
         '.core.protocols[0].httpupgrade.tls_port = 8080' \
-        '.subscription.enabled = true' \
         '.host_integrations = [{type:"wireguard",profile:"net-wireguard",firewall_rules:[],
           devices:["wg-padm"],schedules:[],settings:{config_file:"wg-padm.conf",interface:"wg-padm"}}]'; do
         jq "${mutation}" "${TEST_ROOT}/valid-httpupgrade-${core}.json" >"${TEST_ROOT}/invalid-httpupgrade.json"
@@ -221,9 +220,9 @@ jq -e '.core.protocols[0] as $source |
     "${TEST_ROOT}/httpupgrade-edit.json" >/dev/null || fail 'HTTPUpgrade 复制未隔离后端核心和共享 TLS 端口池'
 printf '10\nvless-ws\n10\nentry-vmess\n8\n' |
     dockerEditFields "${TEST_ROOT}/httpupgrade-edit.json" >"${STDOUT}" || fail '混合删除 WS 失败'
-jq -e '.tls.domain == "ws.example.com" and .subscription.enabled == false and
+jq -e '.tls.domain == "ws.example.com" and .subscription.enabled == true and
   all(.core.protocols[]; .id == 23)' "${TEST_ROOT}/httpupgrade-edit.json" >/dev/null ||
-    fail '删除最后 VLESS/VMess 撤销了 HTTPUpgrade TLS 或保留发布'
+    fail '删除最后 VLESS/VMess 撤销了 HTTPUpgrade TLS 或订阅发布'
 jq --slurpfile before "${TEST_ROOT}/v3.json" '
   .core.protocols += [$before[0].core.protocols[] | select(.id == 1)]
 ' "${TEST_ROOT}/httpupgrade-edit.json" >"${TEST_ROOT}/httpupgrade-final-tls.json"

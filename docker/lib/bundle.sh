@@ -397,6 +397,10 @@ dockerBundleSupportsSpec() {
           (if $spec[0] | has("accounts") then
             $schema[0]["x-padm-accounts"] == true
           else true end) and
+          (if $spec[0].subscription.enabled == true and
+            (any($spec[0].core.protocols[]; .id == 21) | not) then
+            $schema[0]["x-padm-subscription-nginx-tls"] == true
+          else true end) and
           (if $spec[0] | has("control_sync") then
             $schema[0]["x-padm-control-sync"] == true and
               $schema[0]["x-padm-control-sync-rollback"] == true

@@ -165,7 +165,12 @@ padm-docker status
 向导最终确认后才验签发布、生成 UUID/Reality 参数/订阅 token，并准备候选配置与证书。
 没有 `cosign` 时停止，不自动从未验证来源安装验证器，也不能跳过验签。
 WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01/HTTP-01 standalone/TLS-ALPN-01；
-私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布仍要求 Xray、协议 21 VLESS WS TLS 和受管证书。
+私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布要求至少一个 Nginx TLS 协议 `21–25` 入口和同域受管证书，可仅使用 sing-box HTTPUpgrade `23`。
+发布复用已有 Nginx 和 subscription 服务，不新增独立发布域名、证书或服务；
+没有协议 `21` 时启用发布需要 bundle 能力 `x-padm-subscription-nginx-tls`，含 `21` 或关闭发布的旧规格保持兼容。
+分享组 HTTPS 链接使用 `core.protocols` 中首个 `21–25` 入口的实际公开端口，`443` 省略；
+Reality 共存选中的 website 入口实际公开端口为 `443`。4A.7 已通过隔离 amd64 的
+22/23/24/25 HTTPS 主/组订阅下载、严格 TLS 及双族 TCP/UDP 验收；公网及原生双架构另验。
 Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander/Gecko 混淆和 HTTPS 伪装；
 带宽按服务端方向输入，分享链接自动转换为客户端方向。
 首配混淆输入 `y` 选择 Salamander、`gecko` 选择 Gecko、`n` 关闭；已有入口在 Hysteria2 参数菜单切换类型，空密码保留已有值。
@@ -187,14 +192,14 @@ UUID 作为密码及流量账号，可输出 `trojan://` 链接。服务器地�
 TLS 域名与凭据冻结；支持通用字段编辑、跨核心复制和删除，不包含 fallback 或独立 HTTPS 发布。
 VMess WS TLS 在 Xray 首配中选 `12`，复用 Nginx、受管 TLS 和 UUID 流量账号；
 固定 `alterId=0`，可输出标准 Base64 `vmess://` 链接。协议 22 可与 VLESS WS TLS 共用 Nginx，
-但单独部署不发布 HTTPS 订阅，也不接受 sing-box、宿主集成或跨核心复制。
+也可复用自身同域 Nginx TLS 入口发布 HTTPS 订阅；不接受 sing-box、宿主集成或跨核心复制。
 VMess HTTPUpgrade TLS 在 Xray 或 sing-box 首配中选 `13`，复用 Nginx 和受管 TLS；
 使用独立 `httpupgrade` 字段、固定 `alterId=0`，链接的 `net=httpupgrade`，路径为 `/` 加受管路径段，不附加 `ws`。
-支持路径编辑和跨核心复制，同一 UUID 共享流量及额度；单独部署不发布 HTTPS 订阅，也不接受宿主集成。
+支持路径编辑和跨核心复制，同一 UUID 共享流量及额度；两核心均可复用自身同域 Nginx TLS 入口发布 HTTPS 订阅，不接受宿主集成。
 VLESS/Trojan gRPC TLS 在 Xray 首配中分别选 `14`/`15`，复用 Nginx HTTP/2、受管 TLS 和 UUID 流量账号；
 使用独立 `grpc_tls` 字段，服务名为 1–64 位字母、数字、下划线或连字符，编辑菜单 `12` 可修改。
 支持通用字段编辑、Xray 内复制/删除及 `vless://`/`trojan://` 链接；不接受 sing-box、宿主集成或 fallback。
-单独部署只提供本地链接，和协议 21 混合时可纳入其 HTTPS 订阅。
+两类协议均可复用自身同域 Nginx TLS 入口发布 HTTPS 订阅，无须包含协议 `21`。
 
 Docker `协议与入口 → 12. Hysteria2 管理` 与 `13. TUIC 管理` 为已有 v3
 sing-box 单入口提供专项编辑：
@@ -1094,7 +1099,7 @@ gRPC TLS 对应 `grpc_tls.backend_port` 与 `grpc_tls.tls_port`，
 传统 TLS fallback 对应 `fallback_tls.http_port` 与 `fallback_tls.http2_port`。
 不重排已有内部端口；后端监听按实际核心避让，Nginx TLS 与 fallback 端口全局避让，公开端口不得冲突。
 已有部署的 `edit --spec` 也支持这些入口变更，仍经过相同的预览、校验与确认。
-删除最后一个 VLESS WS 入口会关闭订阅；仍有 VMess WS/HTTPUpgrade、gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 或 direct Trojan 时保留规格中的 TLS，
+删除最后一个 Nginx TLS `21–25` 入口会关闭订阅；仍有传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 或 direct Trojan 时保留规格中的 TLS，
 否则将 `tls` 设为 `null`，受管 TLS/ACME 文件与 token 均保留。
 Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan/VMess WS/HTTPUpgrade/gRPC TLS/传统 TLS fallback 基础入口已交付；
 逐入口 Reality 参数重生成、目标库/扫描、有限 443 共存与 XHTTP 管理已交付，具体边界见各专项说明；完整协议管理仍为 `deferred`。
