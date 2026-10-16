@@ -146,6 +146,20 @@ try:
         assert joined["accounts"][0] == SPEC["accounts"][0]
         assert joined["accounts"][1]["id"] == identity(4)
         assert client.build_client_draft(joined, INVITATION) == joined
+        multi_spec = copy.deepcopy(SPEC)
+        multi_spec["core"]["protocols"].append({
+            "listener_id": "entry-secondary", "id": 4, "uuid": identity(10),
+        })
+        multi_original = copy.deepcopy(multi_spec)
+        multi_joined = client.build_client_draft(
+            multi_spec, INVITATION, ["entry-secondary", "entry-main", "entry-secondary"])
+        mapped_account = dict(account(4), listeners=["entry-secondary", "entry-main"])
+        assert multi_spec == multi_original
+        assert multi_joined["control_sync"]["listener_ids"] == ["entry-secondary", "entry-main"]
+        assert multi_joined["control_sync"]["managed_accounts"] == [mapped_account]
+        assert multi_joined["accounts"] == SPEC["accounts"] + [mapped_account]
+        assert multi_joined["core"] == multi_spec["core"]
+        assert client.build_client_draft(multi_joined, INVITATION) == multi_joined
         path, address, headers = server.requests[-1]
         assert path == "/v1/desired" and address == "127.0.0.2"
         assert headers.get_all("Authorization") == ["Bearer " + INVITATION["token"]]
@@ -287,6 +301,11 @@ try:
             status, output, errors = cli(spec_path, invite_path, ["entry-main"])
             assert status == 0 and json.loads(output) == joined and not errors
             assert INVITATION["token"] not in output
+            assert spec_path.read_bytes() == source
+            save(spec_path, multi_spec)
+            source = spec_path.read_bytes()
+            status, output, errors = cli(spec_path, invite_path, ["entry-secondary", "entry-main"])
+            assert status == 0 and json.loads(output) == multi_joined and not errors
             assert spec_path.read_bytes() == source
             save(spec_path, joined)
             source = spec_path.read_bytes()

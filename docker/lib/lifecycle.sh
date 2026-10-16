@@ -40,7 +40,7 @@ dockerUsage() {
   padm-docker edit --protocol-remove <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --protocol-rebuild <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-static <独立站点目录> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
-  padm-docker edit --site-template <notes|photos|docs> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --site-template <notes|photos|docs> [--site-title <2–60 字符站名>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-redirect <HTTP/HTTPS URL> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-default [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http01 <enable|disable> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -198,8 +198,8 @@ dockerUsage() {
    padm-docker subscription disable <分享组 ID>
    padm-docker subscription delete <分享组 ID> [--yes]
    padm-docker subscription rotate <分享组 ID> [--yes]
-   padm-docker subscription content <分享组 ID>
-   padm-docker subscription links <分享组 ID>
+   padm-docker subscription content <分享组 ID|--base>
+   padm-docker subscription links <分享组 ID|--base>
    padm-docker share <同上 subscription 命令>
   padm-docker control status [--json]
   padm-docker control init --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> [--yes]

@@ -7899,6 +7899,10 @@ runDockerSubscriptionPublicationRealRegression() {
         bash "${PROJECT_ROOT}/docker/tests/subscription-publication-real.sh"
 }
 
+runDockerSubscriptionSiteRealRegression() {
+    PADM_TEST_SUBSCRIPTION_SITE_TEMPLATE=photos runDockerSubscriptionPublicationRealRegression
+}
+
 runDockerTuicRegression() {
     bash "${PROJECT_ROOT}/docker/tests/tuic.sh"
 }

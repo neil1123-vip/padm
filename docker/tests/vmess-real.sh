@@ -17,9 +17,12 @@ PROTOCOL=${5:-22} CORE=${6:-xray}
 CDN_ENTRIES=${PADM_TEST_CDN_ENTRIES:-0}
 ALPN_ORDERS=${PADM_TEST_ALPN_ORDERS:-0}
 SUBSCRIPTION_PUBLICATION=${PADM_TEST_SUBSCRIPTION_PUBLICATION:-0}
+SUBSCRIPTION_SITE_TEMPLATE=${PADM_TEST_SUBSCRIPTION_SITE_TEMPLATE:-}
 [[ "${CDN_ENTRIES}" == 0 || "${CDN_ENTRIES}" == 1 ]] || exit 2
 [[ "${ALPN_ORDERS}" == 0 || "${ALPN_ORDERS}" == 1 ]] || exit 2
 [[ "${SUBSCRIPTION_PUBLICATION}" == 0 || "${SUBSCRIPTION_PUBLICATION}" == 1 ]] || exit 2
+[[ -z "${SUBSCRIPTION_SITE_TEMPLATE}" || ( "${SUBSCRIPTION_SITE_TEMPLATE}" == photos &&
+    "${SUBSCRIPTION_PUBLICATION}" == 1 && "${PROTOCOL}:${CORE}" == 23:sing-box ) ]] || exit 2
 [[ "${PROTOCOL}:${CORE}" == 21:xray || "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:xray ||
     "${PROTOCOL}:${CORE}" == 23:sing-box || "${PROTOCOL}:${CORE}" == 24:xray ||
     "${PROTOCOL}:${CORE}" == 25:xray || "${PROTOCOL}:${CORE}" == 27:xray ||
@@ -51,6 +54,7 @@ if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
           "${PROTOCOL}:${CORE}" == 24:xray || "${PROTOCOL}:${CORE}" == 25:xray ) ]] || exit 2
     TLS_PORT=35468 TEST_NAME="${TEST_NAME}-publication"
 fi
+[[ -z "${SUBSCRIPTION_SITE_TEMPLATE}" ]] || TEST_NAME="${TEST_NAME}-photos"
 for tool in docker jq python3 sha256sum tar openssl awk diff; do command -v "${tool}" >/dev/null; done
 stage=images
 XRAY_ID=$(docker image inspect --format '{{.Id}}' "${XRAY_REF}")
@@ -143,7 +147,8 @@ openssl verify -CAfile "${TEST_ROOT}/certs/ca.crt" "${TLS_DIR}/${DOMAIN}.crt" >/
 SPEC="${TEST_ROOT}/spec.json"
 jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" --arg core "${CORE}" --arg name "${TEST_NAME}" \
     --arg key "${TRANSPORT_KEY}" --argjson protocol "${PROTOCOL}" --argjson backend "${BACKEND_PORT}" \
-    --argjson tls_port "${TLS_PORT}" --argjson cdn "${CDN_ENTRIES}" --argjson publication "${SUBSCRIPTION_PUBLICATION}" '
+    --argjson tls_port "${TLS_PORT}" --argjson cdn "${CDN_ENTRIES}" --argjson publication "${SUBSCRIPTION_PUBLICATION}" \
+    --arg siteTemplate "${SUBSCRIPTION_SITE_TEMPLATE}" '
   def image($name): "ghcr.io/example/padm-"+$name+":test@sha256:"+("a"*64);
   {schema_version:3,
    release:{version:"3.9.9",manifest_sha256:("a"*64),signature_identity:"local-test-only"},
@@ -164,7 +169,8 @@ jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" --arg core "${CORE}" --arg n
       if $publication == 1 then {accounts:[{
         id:"22222222-2222-4222-8222-222222222222",name:"independent",enabled:true,
         uuid:"33333333-3333-4333-8333-333333333333",password:"44444444-4444-4444-8444-444444444444",
-        shadowsocks_password:null,listeners:["entry-vmess"]}]} else {} end
+        shadowsocks_password:null,listeners:["entry-vmess"]}]} else {} end |
+      if $siteTemplate != "" then .site = {mode:"static"} else . end
 ' >"${SPEC}"
 chmod 0600 "${SPEC}"
 subscriptionShares=
@@ -179,7 +185,13 @@ dockerConfigureSpecValidate "${SPEC}"
 stage=candidate
 dockerCreateConfigurationCandidate
 candidate=${DOCKER_CONFIG_CANDIDATE}
-dockerGenerateCandidate "${SPEC}" "${candidate}" '' '' '' '' '' "${subscriptionShares}"
+if [[ -n "${SUBSCRIPTION_SITE_TEMPLATE}" ]]; then
+    # 模板实链路复用已激活可信包，生产生成器继续核验模板清单和默认渲染。
+    DOCKER_STAGED_BUNDLE_PATH="$(dockerCurrentBundlePath)" \
+        dockerGenerateCandidate "${SPEC}" "${candidate}" '' '' '' '' "${SUBSCRIPTION_SITE_TEMPLATE}" "${subscriptionShares}"
+else
+    dockerGenerateCandidate "${SPEC}" "${candidate}" '' '' '' '' '' "${subscriptionShares}"
+fi
 jq -e --arg uuid "${UUID}" --arg core "${CORE}" --arg transport "${TRANSPORT}" \
     --arg domain "${DOMAIN}" --argjson backend "${BACKEND_PORT}" --arg app "${APP_PROTOCOL}" \
     --argjson publication "${SUBSCRIPTION_PUBLICATION}" '
@@ -242,14 +254,39 @@ dockerProtocolCommand links >"${TEST_ROOT}/links.txt"
 [[ "$(wc -l <"${TEST_ROOT}/links.txt")" == "$((1 + SUBSCRIPTION_PUBLICATION))" ]]
 [[ "${CDN_ENTRIES}" == 0 ]] || cp -- "${TEST_ROOT}/links.txt" "${TEST_ROOT}/original.links.txt"
 if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
+    bundleEntry="$(dockerCurrentBundlePath)/install-docker.sh"
+    bash "${bundleEntry}" subscription content --base >"${TEST_ROOT}/main-content.txt"
+    bash "${bundleEntry}" subscription links --base >"${TEST_ROOT}/main-url.txt"
+    cmp -s "${TEST_ROOT}/main-content.txt" \
+        "${PADM_DOCKER_INSTALL_DIR}/data/subscription/0123456789abcdef"
     dockerSubscriptionLinks "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
         "${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json" share-0123456789abcdef >"${TEST_ROOT}/group-url.txt"
-    jq -n --slurpfile spec "${SPEC}" --rawfile group "${TEST_ROOT}/group-url.txt" \
-        --rawfile mainContent "${PADM_DOCKER_INSTALL_DIR}/data/subscription/0123456789abcdef" \
+    siteResources='{}'
+    if [[ -n "${SUBSCRIPTION_SITE_TEMPLATE}" ]]; then
+        siteResources=$(python3 - "${PADM_DOCKER_INSTALL_DIR}/data/static" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+assert "Light and Distance" in (root / "index.html").read_text()
+resources = {"/" + path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+             for path in sorted(root.rglob("*")) if path.is_file()}
+assert {"/index.html", "/assets/style.css", "/assets/forest.jpg", "/assets/favicon.png",
+        "/light-in-the-trees.html"} <= resources.keys()
+resources["/"] = resources["/index.html"]
+print(json.dumps(resources))
+PY
+        )
+    fi
+    jq -n --slurpfile spec "${SPEC}" --rawfile main "${TEST_ROOT}/main-url.txt" \
+        --rawfile group "${TEST_ROOT}/group-url.txt" --argjson siteResources "${siteResources}" \
+        --rawfile mainContent "${TEST_ROOT}/main-content.txt" \
         --rawfile groupContent "${PADM_DOCKER_INSTALL_DIR}/data/subscription/publication_group_0123456789abcdef" '
-      {main:("https://" + $spec[0].tls.domain + ":35468/subscriptions/" + $spec[0].subscription.token),
+      {main:($main | rtrimstr("\n")),
        group:($group | rtrimstr("\n")),domain:$spec[0].tls.domain,port:35468,
-       expected:{main:$mainContent,group:$groupContent}}
+       expected:{main:$mainContent,group:$groupContent},site_resources:$siteResources}
     ' >"${TEST_ROOT}/runtime/client/publication.json"
     chmod 0640 "${TEST_ROOT}/runtime/client/publication.json"
     chown 0:10001 "${TEST_ROOT}/runtime/client/publication.json"
@@ -397,6 +434,7 @@ if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
         --network "${project}" --label "io.padm.test=${project}" \
         --mount "type=volume,source=${volume},target=/test,readonly,volume-subpath=runtime/client" --entrypoint python3 "${OPS_ID}" \
         - "${addresses}" >"${TEST_ROOT}/publication-content.json" <<'PY'
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -434,6 +472,18 @@ for kind in ("main", "group"):
                         contents[kind] = body.decode()
                 finally:
                     connection.close()
+for endpoint in endpoints:
+    for path, digest in settings["site_resources"].items():
+        connection = http.client.HTTPSConnection(uri.hostname, uri.port, context=context, timeout=5)
+        with socket.create_connection((endpoint, uri.port), timeout=5) as raw:
+            connection.sock = context.wrap_socket(raw, server_hostname=uri.hostname)
+            try:
+                connection.request("GET", path)
+                response = connection.getresponse()
+                assert response.status == 200, (path, response.status)
+                assert hashlib.sha256(response.read()).hexdigest() == digest, path
+            finally:
+                connection.close()
 # 证书反例直接核验失败类型，不把网络超时当作身份拒绝。
 for hostname, trust in (("wrong.padm.test", context), (uri.hostname, ssl.create_default_context())):
     try:
@@ -919,6 +969,9 @@ if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
     probe allow
     printf 'docker-subscription-publication-real-ok: protocol=%s core=%s tls=strict-ca-hostname main-group=downloaded token404=ipv4,ipv6 client=tcp-udp effective-port=35468\n' \
         "${PROTOCOL}" "${CORE}"
+    [[ -z "${SUBSCRIPTION_SITE_TEMPLATE}" ]] ||
+        printf 'docker-subscription-site-real-ok: template=%s core=%s website=all-local-resources family=ipv4,ipv6 base-cli=content,links\n' \
+            "${SUBSCRIPTION_SITE_TEMPLATE}" "${CORE}"
     exit 0
 fi
 if [[ "${ALPN_ORDERS}" == 1 ]]; then

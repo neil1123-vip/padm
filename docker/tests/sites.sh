@@ -931,12 +931,48 @@ runEdit 2 --site-template notes --site-redirect https://example.com --preview
 runEdit 2 --site-template notes --spec "${TEST_ROOT}/base.json" --preview
 runEdit 2 --site-template notes --http01 enable --preview
 runEdit 2 --site-template notes --alpn entry-site h2,http/1.1 --preview
+customTitle="中文 & <站点> \"双引\" '单引' | \\"
+titleLimit=$(printf '界%.0s' {1..60})
+runEdit 2 --site-title "${customTitle}" --preview
+runEdit 2 --site-static "${SOURCE}" --site-title "${customTitle}" --preview
+runEdit 2 --site-default --site-title "${customTitle}" --preview
+runEdit 2 --site-template notes --site-title
+runEdit 2 --site-template notes --site-title --preview
+runEdit 2 --site-template notes --site-title "${customTitle}" --site-title "${customTitle}" --preview
+for invalidTitle in '' '界' "${titleLimit}界" '   ' $'标题\t' $'标题\n' $'标题\r' $'标题\177'; do
+    runEdit 2 --site-template notes --site-title "${invalidTitle}" --preview
+done
 runEdit 0 --site-template notes --preview
+runEdit 0 --site-template notes --site-title "${customTitle}" --preview
+runEdit 0 --site-title 二字 --site-template notes --preview
+runEdit 0 --site-template notes --site-title "${titleLimit}" --preview
 [[ "$(snapshot)" == "${before}" ]] || fail '主题非法参数或预览改变在线内容和配置'
+
+runEdit 0 --site-title "${customTitle}" --site-template notes --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot without-static)" == "${protectedBefore}" ]] ||
+    fail '自定义站名修改了规格、认证、累计或订阅文件'
+jq -e '.site == {mode:"static"}' "${root}/config/spec.json" >/dev/null ||
+    fail '自定义站名进入受管规格'
+python3 - "${root}/data/static" "${customTitle}" <<'PY' || fail '自定义中文站名未安全渲染'
+import html
+import pathlib
+import re
+import sys
+
+root, title = pathlib.Path(sys.argv[1]), sys.argv[2]
+escaped = html.escape(title, quote=True).replace("&#x27;", "&#39;")
+pages = list(root.rglob("*.html"))
+assert pages
+for page in pages:
+    text = page.read_text(encoding="utf-8")
+    assert escaped in text and title not in text, page
+    assert not re.search(r"__[A-Z_]+__", text), page
+PY
 
 mkdir -p "${TEST_ROOT}/site-templates"
 while IFS=$'\t' read -r theme title accent; do
-    runEdit 0 --site-template "${theme}" --confirm PADM-DOCKER-EDIT
+    staticSiteTitle=宿主站名不得继承 staticSiteAccent='#112233' \
+        runEdit 0 --site-template "${theme}" --confirm PADM-DOCKER-EDIT
     [[ "$(snapshot without-static)" == "${protectedBefore}" ]] ||
         fail "${theme}: 主题修改了规格、认证、累计或订阅文件"
     jq -e '.site == {mode:"static"}' "${root}/config/spec.json" >/dev/null ||
@@ -973,7 +1009,8 @@ before=$(snapshot)
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerSetupRead() { printf -v "$1" '%s' n; }
     dockerAcquireDeploymentLock
-    dockerConfigureApply "${root}/config/spec.json" '' '' interactive '' "${TEST_ROOT}/site-templates/notes"
+    DOCKER_STAGED_BUNDLE_PATH=$(dockerCurrentBundlePath)
+    dockerConfigureApply "${root}/config/spec.json" '' '' interactive '' '' notes '' "${customTitle}"
 ) >"${LOG}" 2>&1 || fail '主题候选确认取消失败'
 assertClean
 [[ "$(snapshot)" == "${before}" ]] || fail '主题取消改变静态内容、规格、认证或累计'
@@ -983,7 +1020,7 @@ for failure in health-fail int term; do
     expected=14
     [[ "${failure}" != int ]] || expected=130
     [[ "${failure}" != term ]] || expected=143
-    runEdit "${expected}" --site-template notes --confirm PADM-DOCKER-EDIT
+    runEdit "${expected}" --site-template notes --site-title "${customTitle}" --confirm PADM-DOCKER-EDIT
     [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 主题未恢复旧静态内容和完整部署"
 done
 MODE=ok
@@ -1312,7 +1349,7 @@ for failure in health-fail int term; do
 done
 MODE=ok
 
-# Xray Nginx 类型继续使用同一主题入口，直连和 sing-box 23 仍明确拒绝。
+# Xray Nginx 类型继续使用同一主题入口，直连仍明确拒绝。
 for protocol in 21 22 23 24 25 27 29; do
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
@@ -1333,18 +1370,40 @@ assertClean
 before=$(snapshot)
 runEdit 0 --site-template notes --preview
 [[ "$(snapshot)" == "${before}" ]] || fail '主题预览改动共存的 Reality 入口'
-for spec in valid-direct valid-sing-upgrade valid-mixed-sing-upgrade; do
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/valid-direct.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '初始化主题拒绝范围夹具失败'
+assertClean
+before=$(snapshot)
+composeBefore=$(wc -l <"${COMPOSE_LOG}")
+runEdit 15 --site-template notes --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" && "$(wc -l <"${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail '无适用入口的主题拒绝改变已有部署或服务'
+
+# 纯和混合 sing-box HTTPUpgrade 共用 Nginx 静态目录，主题只替换网页资源。
+for spec in valid-sing-upgrade valid-mixed-sing-upgrade; do
+    jq '.site = {mode:"static"}' "${TEST_ROOT}/${spec}.json" >"${TEST_ROOT}/sing-upgrade-site.json"
     (
         trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
         dockerAcquireDeploymentLock
-        dockerConfigureApply "${TEST_ROOT}/${spec}.json" '' '' configure
-    ) >"${LOG}" 2>&1 || fail "${spec}: 初始化主题拒绝范围夹具失败"
+        dockerConfigureApply "${TEST_ROOT}/sing-upgrade-site.json" '' '' configure
+        # 先完成拓扑切换后的正常历史轮转，模板编辑仍完整比较静态目录外的所有文件。
+        dockerConfigureApply "${TEST_ROOT}/sing-upgrade-site.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail "${spec}: 初始化主题支持范围夹具失败"
     assertClean
     before=$(snapshot)
-    composeBefore=$(wc -l <"${COMPOSE_LOG}")
-    runEdit 15 --site-template notes --confirm PADM-DOCKER-EDIT
-    [[ "$(snapshot)" == "${before}" && "$(wc -l <"${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
-        fail "${spec}: 无适用入口的主题拒绝改变已有部署或服务"
+    protectedBefore=$(snapshot without-static)
+    runEdit 0 --site-template notes --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail "${spec}: 主题预览改变已有部署"
+    runEdit 0 --site-template notes --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot without-static)" == "${protectedBefore}" ]] || {
+        diff -u <(printf '%s\n' "${protectedBefore}") <(snapshot without-static) >&2 || true
+        fail "${spec}: 主题修改了规格、认证、累计或订阅文件"
+    }
+    diff -r "${TEST_ROOT}/site-templates/notes" "${root}/data/static" >"${LOG}" 2>&1 ||
+        fail "${spec}: 主题资源与已校验模板不一致"
 done
 
 # Hy2 先准备普通静态站点，再编辑已有入口启用 local；混合 Nginx 共用同一目录。

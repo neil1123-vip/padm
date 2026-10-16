@@ -59,12 +59,16 @@ nginxStaticTemplateAssetsValidate() {
     printf '%s\n' "${paths[@]}"
 }
 
+nginxStaticTemplateTitleValidate() {
+    jq -ne --arg title "$1" '$title | length >= 2 and length <= 60 and
+        test("[^[:space:]]") and (test("[[:cntrl:]]") | not)' >/dev/null
+}
+
 # 站名写入 HTML 前转义，生成后的内容保持稳定，正文由主题自身提供。
 renderNginxStaticTemplate() {
     local title=${staticSiteTitle:-} accent=${staticSiteAccent:-}
     [[ "${accent}" =~ ^#[0-9a-fA-F]{6}$ ]] &&
-        jq -ne --arg title "${title}" '$title | length >= 2 and length <= 60 and
-            test("[^[:space:]]") and (test("[[:cntrl:]]") | not)' >/dev/null || return 1
+        nginxStaticTemplateTitleValidate "${title}" || return 1
     title=$(printf '%s' "${title}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' \
         -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&#39;/g" -e 's/[&|\\]/\\&/g') || return 1
     local targetFile targetFiles placeholderStatus

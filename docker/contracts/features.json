@@ -332,7 +332,7 @@
       "profiles": ["nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5A.1 默认页、静态目录和 302、5A.1b 受管 notes/photos/docs 内置模板与 5A.2 逐入口 ALPN 诊断、推荐修复及三种持久化顺序提供菜单/CLI；模板用于已有 v3 Xray 21–25/27/29 或 Hysteria2，拒绝 sing-box 23。5A.1c Hysteria2 local 使用共享受管静态目录、固定只读挂载且无混淆，local 启用时 default/302 拒绝，纯 Hy2 只开放静态网页。随包资源清单纳入 bundle 验证，主题不写入规格。内容、规格与生成结果纳入候选、备份及失败/信号恢复。专项仅放行所选 ALPN 字段漂移，拒绝覆盖其它配置；隔离 amd64 27/29 的真实 Xray 双栈 TLS ALPN、h1/h2 fallback/404、PROXY 来源及链接认证已验，不把配置诊断当作 TLS 协商。公网及原生双架构验收待补，组合能力仍 deferred；webroot/standalone ACME 另列。"
+      "reason": "5A.1 默认页、静态目录和 302、5A.1b–5A.1e 受管 notes/photos/docs 模板及可选站名与 5A.2 逐入口 ALPN 诊断、推荐修复及三种顺序提供菜单/CLI；模板用于已有 v3 Nginx TLS 21–25（含纯或混合 sing-box 23）、Xray 27/29 或 Hysteria2。站名复用原生校验与 HTML 转义，只写入公开网页，不入规格。5A.1c Hysteria2 local 使用共享受管静态目录、固定只读挂载且无混淆，local 启用时 default/302 拒绝，纯 Hy2 只开放静态网页。随包资源清单纳入 bundle 验证，主题不写入规格。内容、规格与生成结果纳入候选、备份及失败/信号恢复。专项仅放行所选 ALPN 字段漂移，拒绝覆盖其它配置；隔离 amd64 27/29 的真实双栈 TLS ALPN、h1/h2 fallback/404、PROXY 来源及认证，以及 sing-box 23 模板资源与主/组订阅双栈共存已验。公网及原生双架构验收待补，组合能力仍 deferred；webroot/standalone ACME 另列。"
     },
     "entry-port-management": {
       "status": "deferred",

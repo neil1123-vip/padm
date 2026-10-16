@@ -953,7 +953,7 @@ dockerMenuSubscriptions() {
     local -a action=()
     while :; do
         DOCKER_MENU_SIGNAL=0
-        printf '\nDocker 分享订阅管理\n'
+        printf '\nDocker 订阅管理\n'
         printf '%s\n' \
             '1. 查看分享组' \
             '2. 新建分享组' \
@@ -964,6 +964,8 @@ dockerMenuSubscriptions() {
             '7. 轮换分享 token' \
             '8. 输出纯订阅内容' \
             '9. 输出 HTTPS 链接' \
+            '10. 输出部署主订阅内容' \
+            '11. 输出部署主订阅 HTTPS 链接' \
             '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -1033,6 +1035,8 @@ dockerMenuSubscriptions() {
                 dockerMenuRun subscription links "${groupId}" || true
             fi
             ;;
+        10) dockerMenuRun subscription content --base || true ;;
+        11) dockerMenuRun subscription links --base || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -1111,7 +1115,8 @@ dockerMenuGeo() {
 }
 
 dockerMenuControl() {
-    local choice address port peer output expiry invitation listener
+    local choice address port peer output expiry invitation listeners listener
+    local -a listenerIds=() action=()
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 控制连接\n'
@@ -1145,9 +1150,22 @@ dockerMenuControl() {
         5)
             dockerSetupRead invitation '私有邀请文件绝对路径（0 返回）: ' &&
                 [[ -n "${invitation}" ]] &&
-                dockerSetupRead listener '映射入口 ID（0 返回）: ' &&
-                [[ -n "${listener}" ]] || continue
-            dockerMenuRun control join --invite "${invitation}" --listener "${listener}" || true
+                dockerSetupRead listeners '映射入口 ID（逗号分隔，最多 16 项，0 返回）: ' &&
+                [[ -n "${listeners}" ]] || continue
+            IFS=',' read -r -a listenerIds <<<"${listeners}"
+            if [[ "${listeners}" == *, || "${#listenerIds[@]}" -gt 16 ]]; then
+                printf '映射入口须为 1–16 个有效 ID，不能含空项。\n'
+                continue
+            fi
+            action=(control join --invite "${invitation}")
+            for listener in "${listenerIds[@]}"; do
+                [[ "${listener}" =~ ^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$ ]] || {
+                    printf '映射入口 ID 无效或含空项。\n'
+                    continue 2
+                }
+                action+=(--listener "${listener}")
+            done
+            dockerMenuRun "${action[@]}" || true
             ;;
         6)
             dockerSetupRead invitation '私有邀请文件绝对路径（0 返回）: ' &&
@@ -1172,7 +1190,7 @@ dockerMenuControl() {
 }
 
 dockerMenuSites() {
-    local choice directory url listener alpnChoice templateChoice siteTemplate
+    local choice directory url listener alpnChoice templateChoice siteTemplate siteTitle
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 站点管理\n'
@@ -1233,7 +1251,12 @@ dockerMenuSites() {
             3) siteTemplate=docs ;;
             *) printf '无效选项，请重新选择。\n'; continue ;;
             esac
-            dockerMenuRun edit --site-template "${siteTemplate}" || true
+            dockerSetupRead siteTitle '站名（2–60 个字符，空输入使用主题默认值，0 返回）: ' || continue
+            if [[ -n "${siteTitle}" ]]; then
+                dockerMenuRun edit --site-template "${siteTemplate}" --site-title "${siteTitle}" || true
+            else
+                dockerMenuRun edit --site-template "${siteTemplate}" || true
+            fi
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
@@ -1940,7 +1963,7 @@ dockerMenu() {
             '8. 证书管理' \
             '9. 协议与入口' \
             '10. 账号管理' \
-            '11. 分享订阅管理' \
+            '11. 订阅管理' \
             '12. 业务备份恢复' \
             '13. 核心升级评估' \
             '14. Xray Geo 数据' \

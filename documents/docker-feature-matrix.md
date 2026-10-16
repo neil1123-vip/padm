@@ -455,6 +455,10 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–15` 接�
 已通过隔离 amd64 验收；变量代理补齐 Docker DNS 解析，同名 gRPC 服务不遮蔽 token。
 不增加独立发布域名、证书或服务，
 独立 27/29 及其它非 Nginx TLS 协议的发布和完整管理继续按原边界。
+4A.8 增加 `subscription content/links --base` 和菜单 `11 → 10/11`：
+本地主订阅复用节点生成器，不依赖分享组或启用发布；HTTPS 链接沿用实际公开端口及发布门禁。
+5A.1d–5A.1e 将受管模板扩展到已有 sing-box `23`，并复用原生 renderer 接入可选站名；
+仅渲染公开内容，不新增规格字段或放宽模板资源校验。
 
 机器可读状态位于 [`docker/contracts/features.json`](../docker/contracts/features.json)：
 
@@ -528,7 +532,7 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–15` 接�
 | `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.5 提供私网 API、主控管理、被控接入/手动同步及已有单 Peer 被控每 5 分钟自动同步 CLI/菜单。校验 Peer 归属、地址与唯一 `/32`，不建接口/密钥/路由；默认关闭，持久邀请限本机 root 私有目录，不进规格/备份/普通日志，停用清除凭据。独立服务和客户端零能力，无公网映射。隔离 amd64 双 Docker Engine 的生产 CLI/Compose、WS/TLS 流量、真实 cron 自主推进、同版幂等、锁竞争、轮换/撤销及健康失败/INT/TERM 恢复已验。正常 down 跳过，异常归属和 WS/SSH 来源防护组合拒绝。多 Peer、网络向导、角色重绑定、迁移、灾备、原生 systemd/双机/arm64、重启和可信发布待补。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 5A.3b 已提供显式 opt-in 双栈 `80:8088`、独立 HTTP vhost、只读稳定根与 ops 独占 `active/`，菜单/CLI 和 schema 3 自动续期；归属及目录校验、不停 Nginx、失败/信号恢复和关闭/回滚保护。公网 CA、真实宿主生命周期及原生双架构未验，完整状态不升级。 |
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | 宿主预检 + bridge | 5A.3a/5A.3c 已提供 HTTP-01 standalone 与 TLS-ALPN-01 首配、重新选择、首个 TLS、迁移、菜单/CLI 和自动续期；非 root ops 临时双栈 `80:8080` 或 `443:8443`，实际归属校验，只暂停本部署原运行拥有者并恢复；未到期不暂停。ALPN 使用无凭据 schema `4`，Fail2ban Nginx 拒绝自监听停启。公网 CA、原生 Linux/双架构及宿主生命周期待验，完整状态不升级。 |
-| `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` / `core-sing-box` | bridge | 5A.1 站点、5A.1b 受管 notes/photos/docs 模板、5A.1c Hysteria2 local 与 5A.2 逐入口 ALPN 诊断/三种顺序事务已提供；模板限已有 v3 Xray 21–25/27/29 或 Hy2，拒绝 sing-box 23，资源清单随 bundle 校验，生成后仍普通 static。local 固定只读目录且无混淆，纯 Hy2 只开放静态模式。隔离 amd64 27/29 的真实 Xray 双栈 TLS ALPN、h1/h2 fallback/404、PROXY 来源与认证已验，公网及原生双架构仍待验。 |
+| `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` / `core-sing-box` | bridge | 5A.1 站点、5A.1b–5A.1e 受管 notes/photos/docs 模板及可选站名、5A.1c Hysteria2 local 与 5A.2 逐入口 ALPN 事务已提供；模板限已有 v3 Nginx TLS 21–25（含 sing-box 23）、Xray 27/29 或 Hy2，资源清单随 bundle 校验，生成后仍普通 static，站名只写入转义后的网页。local 固定只读目录且无混淆，纯 Hy2 只开放静态模式。隔离 amd64 27/29 的真实 TLS ALPN、fallback 与认证、sing-box 23 的模板资源及主/组订阅双栈共存已验；公网及原生双架构仍待验。 |
 | `reality-target-management` | 协议与入口 -> REALITY 管理 -> 目标站管理 | `supported` | 核心 profile | 宿主 CLI | 对齐原生 8 项管理及首配候选检测/手动输入；检测 TLS/PQC/ASN/证书链、刷新库、网段/同 ASN 抽样扫描、A 级筛选分页与逐入口切换、host[:port]/独立 SNI、黑名单；扫描进度和部分结果处理共用原生，B/C 手动告警，全部地址按最差评分及 CDN 风险判定，缓存切换重新复测，Docker 私密状态与事务恢复独立于原生。 |
 | `reality-parameter-management` | 协议与入口 -> REALITY 管理 -> 重新生成参数 | `supported` | 核心 profile | 宿主 CLI | 菜单/CLI 按入口重生成密钥对和 short ID，派生校验、候选确认和失败恢复；账号、目标、其它入口及额度保持，链接和已启用发布同步更新。 |
 | `reality-coexistence` | 协议与入口 -> REALITY 管理 -> 443 共存分流 | `deferred` | `core-xray` / `nginx` / `nginx-stream` | 宿主 CLI | 已提供受管 TLS 入口、桥接可达宿主网站或独立 host 网络分流入口与一个 Xray Vision/XHTTP 后端的 443 共存；菜单/CLI 状态、开启、更换、关闭及端口恢复复用候选事务。宿主网站的多个 SNI、host-gateway、可路由 IP 或回环支持有明确边界；原生宿主、适用公网及完整管理仍待验收。 |

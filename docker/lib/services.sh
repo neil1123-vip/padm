@@ -2798,10 +2798,9 @@ dockerSiteTemplateInputsValidate() {
       .schema_version == 3 and
       any(.core.protocols[]; (.core == "xray" and
         (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)) or
-        (.core == "sing-box" and .id == 3)) and
-      all(.core.protocols[]; .id != 23 or .core != "sing-box")
+        (.core == "sing-box" and (.id == 3 or .id == 23)))
     ' "${specFile}" >/dev/null 2>&1 || {
-        dockerError '内置模板需要已有 v3 Xray Nginx TLS、fallback 或 Hysteria2 入口，不支持 sing-box 23 共存'
+        dockerError '内置模板需要已有 v3 Nginx TLS、Xray fallback 或 Hysteria2 入口'
         return 1
     }
     [[ -n "${bundlePath}" ]] &&
@@ -2812,7 +2811,8 @@ dockerSiteTemplateInputsValidate() {
 }
 
 dockerStageSiteFiles() {
-    local specFile=$1 candidate=$2 source=${3:-} siteTemplate=${4:-} root bundlePath
+    local specFile=$1 candidate=$2 source=${3:-} siteTemplate=${4:-} siteTitle=${5:-} root bundlePath
+    [[ -z "${siteTitle}" || -n "${siteTemplate}" ]] || return 1
     root=$(dockerInstallRoot) || return 1
     if [[ -n "${siteTemplate}" ]]; then
         bundlePath=${DOCKER_STAGED_BUNDLE_PATH:-}
@@ -2822,8 +2822,8 @@ dockerStageSiteFiles() {
         cp -a -- "${bundlePath}/assets/static-sites/sites/${siteTemplate}/." \
             "${candidate}/data/static/" || return 1
         (
-            # 内置模板采用固定默认值，不继承宿主或原生菜单的自定义内容。
-            local staticSiteTitle= staticSiteAccent= nginxStaticPath="${candidate}/data/static"
+            # 未传站名采用主题默认值，不继承宿主或原生菜单的自定义内容。
+            local staticSiteTitle=${siteTitle} staticSiteAccent= nginxStaticPath="${candidate}/data/static"
             local PADM_STATIC_SITE_RENDERER_LOADED=0
             source "${bundlePath}/shell/core/static_site_renderer.sh" &&
                 nginxStaticTemplateDefaults "${siteTemplate}" &&
@@ -3159,8 +3159,12 @@ EOF
 }
 
 dockerGenerateSubscription() {
-    local specFile=$1 target=$2
-    jq -e '.subscription.enabled == true' "${specFile}" >/dev/null || return 0
+    local specFile=$1 target=$2 mode=${3:-published}
+    case "${mode}" in
+    published) jq -e '.subscription.enabled == true' "${specFile}" >/dev/null || return 0 ;;
+    local) ;;
+    *) return 1 ;;
+    esac
     jq -r '
       def authority: if contains(":") then "[\(.)]" else . end;
       . as $request |
@@ -4025,7 +4029,7 @@ dockerPrepareCandidatePermissions() {
 }
 
 dockerGenerateCandidate() {
-    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} root core token
+    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} siteTitle=${9:-} root core token
     local metadata http01 subscriptionEnabled coreTypes integrationTypes realityStream hostStream
     local -a cores=()
     root=$(dockerInstallRoot) || return 1
@@ -4080,7 +4084,7 @@ dockerGenerateCandidate() {
             [[ -z "$(find "${acmeSource}" -type l -print -quit)" ]] || return 1
         cp -a -- "${acmeSource}/." "${candidate}/data/acme/" || return 1
     fi
-    dockerStageSiteFiles "${specFile}" "${candidate}" "${siteSource}" "${siteTemplate}" || return 1
+    dockerStageSiteFiles "${specFile}" "${candidate}" "${siteSource}" "${siteTemplate}" "${siteTitle}" || return 1
     dockerGenerateNginxConfig "${specFile}" "${candidate}/config/nginx/default.conf" || return 1
     [[ "${realityStream}" != true ]] ||
         dockerGenerateRealityStreamConfig "${specFile}" "${candidate}/config/nginx/stream/reality.conf" || return 1
@@ -7407,13 +7411,14 @@ dockerRealityStreamTransitionPrepare() {
 }
 
 dockerConfigureApply() {
-    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-}
+    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} siteTitle=${9:-}
     local specFile candidate backup answer root managedFile backupPrefix=configure
     # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     [[ -z "${businessSource}" ]] || backupPrefix=business
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    [[ -z "${siteTitle}" || -n "${siteTemplate}" ]] || return "${PADM_DOCKER_RC_USAGE}"
     if [[ -n "${siteTemplate}" ]]; then
         [[ -z "${siteSource}" ]] &&
             dockerSiteTemplateInputsValidate "${sourceSpec}" "${siteTemplate}" "$(dockerCurrentBundlePath)" &&
@@ -7483,7 +7488,7 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" "${siteSource}" "${siteTemplate}" "${sharesSource}"; then
+    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" "${siteSource}" "${siteTemplate}" "${sharesSource}" "${siteTitle}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     fi

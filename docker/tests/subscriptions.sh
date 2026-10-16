@@ -91,6 +91,111 @@ BASE_FILE="${TEST_ROOT}/base-subscription.txt"
 dockerGenerateSubscription "${SPEC}" "${BASE_FILE}" || fail '主订阅生成失败'
 grep -q "${MAIN_UUID}" "${BASE_FILE}" || fail '主订阅默认未包含入口 URI'
 
+# 部署主订阅只读输出，不依赖分享组状态，也不能改写已有发布文件。
+(
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/base-query"
+    queryRoot="${PADM_DOCKER_INSTALL_DIR}"
+    querySpec="${queryRoot}/config/spec.json"
+    mkdir -p -- "${queryRoot}/config" "${queryRoot}/data/subscription"
+    printf 'published sentinel\n' >"${queryRoot}/data/subscription/${MAIN_TOKEN}"
+    dockerTrafficCollect() { fail '主订阅查询触发流量采集'; }
+    baseQuerySnapshot() {
+        (
+            cd -- "${queryRoot}"
+            find . -printf '%P|%y|%m|%u|%g\n' | LC_ALL=C sort
+            find . -type f -print0 | sort -z | xargs -0 -r sha256sum
+        )
+    }
+    for baseCase in published standard shared disabled-account disabled reality legacy; do
+        authority=ws.example.com:8443
+        case "${baseCase}" in
+        published) filter='.' ;;
+        standard)
+            filter='(.core.protocols[] | select(.id == 21) | .public_port) = 443 |
+              (.core.protocols[] | select(.id == 1) | .public_port) = 4443'
+            authority=ws.example.com
+            ;;
+        shared)
+            filter='.core.protocols |= map(.server = "proxy.example.com") |
+              .reality_stream = {listener_id:"entry-reality",website_listener_id:"entry-ws"}'
+            authority=ws.example.com
+            ;;
+        disabled-account) filter='.accounts[0].enabled = false' ;;
+        disabled) filter='.subscription.enabled = false' ;;
+        reality)
+            filter='.subscription.enabled = false | .tls = null |
+              .core.protocols |= map(select(.id == 1)) |
+              .accounts |= map(select(.listeners == ["entry-reality"]))'
+            ;;
+        legacy)
+            filter='.schema_version = 1 | del(.accounts, .core.secondary_type) |
+              .core.protocols = [.core.protocols[] | select(.id == 21) |
+                del(.core, .listener_id, .websocket.backend_port, .websocket.tls_port)]'
+            ;;
+        esac
+        jq "${filter}" "${SPEC}" >"${querySpec}"
+        chmod 0600 "${querySpec}"
+        dockerConfigureSpecValidate "${querySpec}" || fail "${baseCase}: 主订阅查询夹具无效"
+        jq '.subscription.enabled = true' "${querySpec}" >"${TEST_ROOT}/base-expected-spec.json"
+        dockerGenerateSubscription "${TEST_ROOT}/base-expected-spec.json" "${TEST_ROOT}/base-expected.txt"
+        before=$(baseQuerySnapshot)
+        dockerMain subscription content --base >"${TEST_ROOT}/base-content.txt" ||
+            fail "${baseCase}: 主订阅内容查询失败"
+        cmp -s "${TEST_ROOT}/base-expected.txt" "${TEST_ROOT}/base-content.txt" ||
+            fail "${baseCase}: 主订阅查询与现有生成器内容不同"
+        case "${baseCase}" in
+        published)
+            cmp -s "${BASE_FILE}" "${TEST_ROOT}/base-content.txt" || fail '主订阅内容遗漏自用或启用账号'
+            [[ "$(wc -l <"${TEST_ROOT}/base-content.txt")" == 4 ]] || fail '主订阅默认条目数错误'
+            ;;
+        disabled-account)
+            [[ "$(wc -l <"${TEST_ROOT}/base-content.txt")" == 3 ]] || fail '主订阅启用账号过滤错误'
+            ! grep -q "${ALICE_UUID}" "${TEST_ROOT}/base-content.txt" || fail '主订阅包含停用账号'
+            ;;
+        esac
+        if [[ "${baseCase}" == disabled || "${baseCase}" == reality ]]; then
+            reject dockerSubscriptionCommand links --base
+        else
+            [[ "$(dockerSubscriptionCommand links --base)" == "https://${authority}/subscriptions/${MAIN_TOKEN}" ]] ||
+                fail "${baseCase}: 主订阅链接未使用实际公开端口"
+        fi
+        [[ "$(baseQuerySnapshot)" == "${before}" ]] || fail "${baseCase}: 主订阅查询修改状态或留下临时文件"
+        [[ ! -e "${queryRoot}/config/share-groups.json" ]] || fail '主订阅查询创建分享组状态'
+    done
+    # include_base 仅为分享渲染的内部投影，受管规格继续拒绝保存该字段。
+    jq '.subscription.enabled = false | .subscription.include_base = false' "${SPEC}" >"${querySpec}"
+    before=$(baseQuerySnapshot)
+    for action in content links; do reject dockerSubscriptionCommand "${action}" --base; done
+    dockerGenerateSubscription "${querySpec}" "${TEST_ROOT}/base-content.txt" local ||
+        fail '本地主订阅生成失败'
+    [[ "$(wc -l <"${TEST_ROOT}/base-content.txt")" == 2 ]] || fail '本地生成器未保留 include_base=false'
+    ! grep -q "${MAIN_UUID}" "${TEST_ROOT}/base-content.txt" || fail '本地生成器重新加入被关闭的自用条目'
+    [[ "$(baseQuerySnapshot)" == "${before}" ]] || fail '内部主订阅投影修改状态'
+    cp -p -- "${SPEC}" "${querySpec}"
+    before=$(baseQuerySnapshot)
+    for action in content links; do
+        reject dockerSubscriptionCommand "${action}"
+        reject dockerSubscriptionCommand "${action}" --base extra
+        reject dockerSubscriptionCommand "${action}" --base --base
+        reject dockerSubscriptionCommand "${action}" --base --json
+    done
+    [[ "$(baseQuerySnapshot)" == "${before}" ]] || fail '非法主订阅参数修改状态'
+    chmod 0666 "${querySpec}"
+    for action in content links; do reject dockerSubscriptionCommand "${action}" --base; done
+    chmod 0600 "${querySpec}"
+    mv -- "${querySpec}" "${querySpec}.real"
+    ln -s "${querySpec}.real" "${querySpec}"
+    for action in content links; do reject dockerSubscriptionCommand "${action}" --base; done
+    rm -- "${querySpec}"
+    mv -- "${querySpec}.real" "${querySpec}"
+    mv -- "${queryRoot}/config" "${queryRoot}/config-real"
+    ln -s "${queryRoot}/config-real" "${queryRoot}/config"
+    for action in content links; do reject dockerSubscriptionCommand "${action}" --base; done
+    rm -- "${queryRoot}/config"
+    mv -- "${queryRoot}/config-real" "${queryRoot}/config"
+    [[ "$(baseQuerySnapshot)" == "${before}" ]] || fail '拒绝恶意规格后未保持原状态'
+)
+
 STATE_FILE="${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json"
 for STATE_INPUT in '' null '{}' '{"schema_version":1,"groups":[]} {"schema_version":1,"groups":[]}'; do
     printf '%s\n' "${STATE_INPUT}" >"${STATE_FILE}"

@@ -162,6 +162,12 @@ Share-group HTTPS URLs use the actual public port of the first `21–25` listene
 public port `443`. Plan 4A.7 passed isolated amd64 tests for protocols `22–25`:
 main/group HTTPS downloads, strict TLS, and IPv4/IPv6 TCP/UDP clients.
 Public-network and native dual-architecture acceptance remain separate.
+Menu `11 → 10/11`, or `subscription content --base` / `subscription links --base`,
+prints the deployment's main subscription content or HTTPS URL. Content uses the existing
+node renderer, including self-use entries and enabled accounts, and remains available
+with publication disabled or Reality-only listeners. HTTPS URLs require enabled publication.
+These queries create no share-group state and do not change published files.
+Content and URLs contain credentials and should only reach authorized clients.
 The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` with mode `0600`.
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
 The spec contains secrets and must not be printed or published.
@@ -180,6 +186,7 @@ directory, and HTTP/HTTPS 302; Hysteria2 supports managed static content:
 
 ```bash
 padm-docker edit --site-template notes --preview
+padm-docker edit --site-template notes --site-title "My Notes" --preview
 padm-docker edit --site-template photos --confirm PADM-DOCKER-EDIT
 padm-docker edit --site-template docs --confirm PADM-DOCKER-EDIT
 padm-docker edit --site-static /root/public-site --preview
@@ -205,12 +212,16 @@ v3 `.site` requires the bundle capability `x-padm-site-content`.
 Managed webroot and standalone HTTP-01 are available through certificate management.
 
 Menu `16 → 8. Built-in static sites` selects `notes`, `photos`, or `docs`. Built-in
-themes require an existing v3 Xray Nginx TLS listener (`21`-`25`), fallback
-(`27`/`29`), or sing-box Hysteria2; deployments containing sing-box `23` are rejected, while
-other Reality listeners without a website may coexist. Themes are copied from the
+themes require an existing v3 Nginx TLS listener (`21`-`25`, including standalone or mixed
+sing-box `23`), Xray fallback (`27`/`29`), or sing-box Hysteria2.
+Other Reality listeners without a website may coexist. After selecting a theme, enter a
+site title or leave it empty for the theme default; `0` returns. CLI `--site-title` requires
+`--site-template` and accepts 2–60 characters, rejecting blank titles and control characters.
+HTML special characters are escaped. Themes are copied from the
 verified control bundle and rejected when the bundled manifest or resources fail
 integrity checks. The resulting spec stores only ordinary `site.mode=static`, never
-the theme identity; old bundles keep their existing default, static-directory, and
+the theme identity or title; select the template again to rename it.
+Old bundles keep their existing default, static-directory, and
 302 workflows.
 
 For Hysteria2, publish a template or static directory first, then use protocol menu
@@ -1159,7 +1170,9 @@ padm-docker control join --invite /root/padm-control-invite.json --listener entr
 padm-docker control sync --invite /root/padm-control-invite.json
 ```
 
-Repeat `--listener` to map multiple existing entries. Join confirms once and initializes identity,
+Repeat `--listener` to map multiple existing entries, or enter comma-separated listener IDs
+in control menu `15 → 5` (up to 16). Empty segments and invalid IDs are rejected.
+Join confirms once and initializes identity,
 mapping and the initial account sync in one transaction. Failure preserves the original role, accounts
 and traffic; retrying the same revision/content does not rebuild services. Identity, connection addresses
 and mapping are then fixed; a different invitation cannot reclaim them. After rotation, securely transfer

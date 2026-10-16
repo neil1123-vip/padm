@@ -139,6 +139,32 @@ targetReply() {
     printf '%s' "${input}" >&3
 }
 
+runSubscriptionsDriver() {
+    local scenario=$1
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'11\n'
+    case "${scenario}" in
+    flow)
+        targetReply 'Docker 订阅管理' $'10\n'
+        targetReply 'Docker 订阅管理' $'11\n'
+        ;;
+    cancel|eof)
+        targetReply 'Docker 订阅管理' $'8\n'
+        if [[ "${scenario}" == eof ]]; then
+            targetReply '分享组 ID（0 返回）' $'\004'
+        else
+            targetReply '分享组 ID（0 返回）' $'0\n'
+        fi
+        ;;
+    esac
+    if [[ "${scenario}" == eof ]]; then
+        targetReply 'Docker 订阅管理' $'\004'
+    else
+        targetReply 'Docker 订阅管理' $'0\n'
+    fi
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runTrafficDriver() {
     local scenario=$1 action value accountId=alpha
     local -A targetPrompts=()
@@ -1287,7 +1313,7 @@ runMaintenanceDriver() {
 }
 
 runControlDriver() {
-    local scenario=$1
+    local scenario=$1 listenerInput overLimit
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
@@ -1378,18 +1404,41 @@ runControlDriver() {
         targetReply 'Docker 管理菜单' $'0\n'
         return 0
         ;;
-    join|join-cancel|join-eof|sync|sync-cancel|sync-eof|sync-failed)
+    join-mapping-invalid|join-mapping-eof)
+        if [[ "${scenario}" == join-mapping-invalid ]]; then
+            printf -v overLimit 'entry-%s,' {1..17}
+            overLimit=${overLimit%,}
+            for listenerInput in ',entry-reality' 'entry-reality,' 'entry-reality,,entry-secondary' \
+                'entry-reality,invalid' 'entry-reality, entry-secondary' "${overLimit}"; do
+                targetReply 'Docker 控制连接' $'5\n'
+                targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
+                targetReply '映射入口 ID（逗号分隔，最多 16 项，0 返回）' "${listenerInput}"$'\n'
+            done
+        else
+            targetReply 'Docker 控制连接' $'5\n'
+            targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
+            targetReply '映射入口 ID（逗号分隔，最多 16 项，0 返回）' $'\004'
+        fi
+        targetReply 'Docker 控制连接' $'0\n'
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+        ;;
+    join|join-multiple|join-cancel|join-eof|sync|sync-cancel|sync-eof|sync-failed)
         if [[ "${scenario}" == join* ]]; then
             if [[ "${scenario}" == join-cancel ]]; then
                 targetReply 'Docker 控制连接' $'5\n'
                 targetReply '私有邀请文件绝对路径（0 返回）' $'0\n'
-                targetReply 'Docker 控制连接' $'5\n'
-                targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
-                targetReply '映射入口 ID（0 返回）' $'0\n'
+                for listenerInput in 0 ''; do
+                    targetReply 'Docker 控制连接' $'5\n'
+                    targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
+                    targetReply '映射入口 ID（逗号分隔，最多 16 项，0 返回）' "${listenerInput}"$'\n'
+                done
             fi
             targetReply 'Docker 控制连接' $'5\n'
             targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
-            targetReply '映射入口 ID（0 返回）' $'entry-reality\n'
+            listenerInput=entry-reality
+            [[ "${scenario}" != join-multiple ]] || listenerInput=entry-secondary,entry-reality
+            targetReply '映射入口 ID（逗号分隔，最多 16 项，0 返回）' "${listenerInput}"$'\n'
             case "${scenario}" in
             join-cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
             join-eof) targetReply 'fixture-control-confirm [y/N]' $'\004' ;;
@@ -1504,7 +1553,14 @@ runSitesDriver() {
         for themeChoice in 1 2 3; do
             targetReply 'Docker 站点管理' $'8\n'
             targetReply '请选择站点主题（0 返回）' "${themeChoice}"$'\n'
+            targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' $'\n'
         done
+        ;;
+    title)
+        targetReply 'Docker 站点管理' $'8\n'
+        targetReply '请选择站点主题（0 返回）' $'1\n'
+        targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' \
+            $'中文 & <站点> "双引" \'单引\' | \\\n'
         ;;
     cancel)
         targetReply 'Docker 站点管理' $'2\n'
@@ -1529,10 +1585,18 @@ runSitesDriver() {
             targetReply 'Docker 站点管理' $'8\n'
             targetReply '请选择站点主题（0 返回）' "${themeChoice}"$'\n'
         done
+        targetReply 'Docker 站点管理' $'8\n'
+        targetReply '请选择站点主题（0 返回）' $'1\n'
+        targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' $'0\n'
         ;;
     template-eof)
         targetReply 'Docker 站点管理' $'8\n'
         targetReply '请选择站点主题（0 返回）' $'\004'
+        ;;
+    title-eof)
+        targetReply 'Docker 站点管理' $'8\n'
+        targetReply '请选择站点主题（0 返回）' $'1\n'
+        targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' $'\004'
         ;;
     static-eof|redirect-eof)
         if [[ "${scenario}" == static-eof ]]; then
@@ -1575,6 +1639,7 @@ runSitesDriver() {
         targetReply '请选择 ALPN 顺序（0 返回）' $'2\n'
         targetReply 'Docker 站点管理' $'8\n'
         targetReply '请选择站点主题（0 返回）' $'1\n'
+        targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' $'\n'
         targetReply 'Docker 站点管理' $'4\n'
         ;;
     esac
@@ -2626,6 +2691,8 @@ runPty() {
             runRoutingDriver "${input}"
         elif [[ "${driver}" == traffic ]]; then
             runTrafficDriver "${input}"
+        elif [[ "${driver}" == subscriptions ]]; then
+            runSubscriptionsDriver "${input}"
         elif [[ "${driver}" == accounts ]]; then
             local accountMenuCount=1
             printf '10\n' >&3
@@ -2950,7 +3017,10 @@ protocol)
     ;;
 edit)
     recordAction "$@"
-    if [[ "${2:-}" == --socks5-input || "${2:-}" == --http-relay-input ||
+    if [[ "${2:-}" == --site-template ]]; then
+        [[ "$#" -eq 3 || ( "$#" -eq 5 && "$4" == --site-title &&
+            "$5" == $'中文 & <站点> "双引" \'单引\' | \\' ) ]] || exit 2
+    elif [[ "${2:-}" == --socks5-input || "${2:-}" == --http-relay-input ||
         "${2:-}" == --warp-input || "${2:-}" == --hosts-input ]]; then
         # 菜单只核对无凭据参数分发及取消；实际录入由对应路由合同覆盖。
         [[ "$#" -eq 2 ]] || exit 2
@@ -3278,6 +3348,10 @@ edit)
     exit "${SITE_EDIT_STATUS:-0}"
     ;;
 account) recordAction "$@" ;;
+subscription)
+    recordAction "$@"
+    [[ "$#" -eq 3 && "$3" == --base && ( "$2" == content || "$2" == links ) ]] || exit 2
+    ;;
 traffic)
     recordAction "$@"
     case "${2:-}" in
@@ -3429,6 +3503,12 @@ control)
         recordAction control-sync-schedule-commit "$3"
         ;;
     init|invite|revoke|join)
+        if [[ "$2" == join ]]; then
+            [[ "$3" == --invite && "$4" == /root/padm-invite.json && "$5" == --listener &&
+                ( ( "$#" -eq 6 && "$6" == entry-reality ) ||
+                  ( "$#" -eq 8 && "$6" == entry-secondary && "$7" == --listener && "$8" == entry-reality ) ) ]] ||
+                exit 2
+        fi
         printf 'fixture-control-confirm [y/N]: '
         if ! IFS= read -r confirmation; then
             recordAction control-confirm eof
@@ -3753,7 +3833,7 @@ unset FAIL2BAN_STATUS FAIL2BAN_UNBAN_STATUS FAIL2BAN_DISABLE_STATUS \
     FAIL2BAN_VERIFY_STATUS FAIL2BAN_EDIT_STATUS FAIL2BAN_PROTOCOL_LIST_STATUS FAIL2BAN_WAIT FAIL2BAN_PID
 
 export SITE_MENU_RECORD_STATUS=1
-for siteCase in flow cancel static-eof redirect-eof template-eof alpn-diagnose-eof alpn-recommended-eof \
+for siteCase in flow title cancel static-eof redirect-eof template-eof title-eof alpn-diagnose-eof alpn-recommended-eof \
     alpn-manual-id-eof alpn-manual-order-eof failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 SITE_ALPN_STATUS=0
@@ -3773,6 +3853,11 @@ for siteCase in flow cancel static-eof redirect-eof template-eof alpn-diagnose-e
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "站点菜单缺少: ${label}"
         done
         ;;
+    title)
+        expectedSite=$'edit --site-template notes --site-title 中文 & <站点> "双引" \'单引\' | \\'
+        ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" ||
+            fail '自定义站名未保持为单个完整参数'
+        ;;
     failed)
         expectedSite=$'edit --site-default\nprotocol alpn-status entry-tls\nedit --alpn entry-tls h2,http/1.1\nedit --alpn entry-tls http/1.1,h2\nedit --site-template notes\nstatus'
         grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '站点提交失败未显示退出码'
@@ -3782,7 +3867,7 @@ for siteCase in flow cancel static-eof redirect-eof template-eof alpn-diagnose-e
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedSite}" ]] ||
         fail "站点 ${siteCase} 参数分发错误或取消后仍执行编辑"
     case "${siteCase}" in
-    flow|cancel|template-eof|failed)
+    flow|title|cancel|template-eof|title-eof|failed)
         grep -Fq 'Hysteria2 发布后，在已有入口参数中关闭混淆并将伪装设置为 local。' \
             "${CONTROL_LOG}" || fail "站点 ${siteCase} 未说明 Hy2 local 的两步流程"
         ;;
@@ -4498,15 +4583,25 @@ for controlCase in invite invite-cancel invite-eof revoke revoke-cancel; do
         fail "control ${controlCase} did not confirm exactly once"
 done
 
-for controlCase in join join-cancel join-eof sync sync-cancel sync-eof sync-failed; do
+for controlCase in join join-multiple join-cancel join-eof join-mapping-invalid join-mapping-eof \
+    sync sync-cancel sync-eof sync-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export CONTROL_INIT_STATUS=0
     [[ "${controlCase}" != sync-failed ]] || CONTROL_INIT_STATUS=17
     runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
     expectedControl=
     case "${controlCase}" in
+    join-mapping-*)
+        ! grep -Fq 'fixture-control-confirm [y/N]' "${CONTROL_LOG}" ||
+            fail "control ${controlCase} dispatched a rejected mapping"
+        [[ "${controlCase}" != join-mapping-invalid ]] ||
+            [[ "$(grep -Ec '映射入口.*(无效|有效 ID)' "${CONTROL_LOG}")" -eq 6 ]] ||
+            fail '无效映射未全部返回菜单'
+        ;;
     join*)
         expectedControl='control join --invite /root/padm-invite.json --listener entry-reality'
+        [[ "${controlCase}" != join-multiple ]] ||
+            expectedControl='control join --invite /root/padm-invite.json --listener entry-secondary --listener entry-reality'
         case "${controlCase}" in
         join-cancel) expectedControl+=$'\ncontrol-confirm n' ;;
         join-eof) expectedControl+=$'\ncontrol-confirm eof' ;;
@@ -5312,6 +5407,21 @@ printf '{"name":"padm-docker","services":{}}\n' >"${PADM_DOCKER_INSTALL_DIR}/com
 runPty accounts accounts '' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'account list\naccount create --name Bob --listeners entry-reality --disabled\naccount edit alpha --name Alpha-Edited --listeners entry-reality\naccount copy alpha --name Alpha-Copy\naccount enable alpha\naccount disable alpha\naccount delete alpha --yes\naccount rotate alpha --yes' ]] ||
     fail 'account menu dispatched incorrect actions'
+
+# 主订阅两项直接派发；分享组取消和 EOF 继续使用原菜单循环。
+for subscriptionCase in flow cancel eof; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    runPty "subscriptions-${subscriptionCase}" subscriptions "${subscriptionCase}" "${TLS_WIZARD_CLI}" menu
+    expectedSubscriptions=''
+    if [[ "${subscriptionCase}" == flow ]]; then
+        expectedSubscriptions=$'subscription content --base\nsubscription links --base'
+        ! grep -Fq '分享组 ID（0 返回）' "${CONTROL_LOG}" || fail '主订阅菜单仍要求分享组 ID'
+    fi
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedSubscriptions}" ]] ||
+        fail "subscriptions ${subscriptionCase} 参数分发错误或取消后仍执行操作"
+    grep -Fq '10. 输出部署主订阅内容' "${CONTROL_LOG}" &&
+        grep -Fq '11. 输出部署主订阅 HTTPS 链接' "${CONTROL_LOG}" || fail '主订阅菜单入口缺失'
+done
 
 # 七个 PTY 会话复用同一夹具，不重复流量后端或展开协议矩阵。
 for trafficCase in flow cancel eof status-failed invalid unknown failed; do

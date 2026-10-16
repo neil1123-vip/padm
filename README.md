@@ -171,6 +171,10 @@ WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy�
 分享组 HTTPS 链接使用 `core.protocols` 中首个 `21–25` 入口的实际公开端口，`443` 省略；
 Reality 共存选中的 website 入口实际公开端口为 `443`。4A.7 已通过隔离 amd64 的
 22/23/24/25 HTTPS 主/组订阅下载、严格 TLS 及双族 TCP/UDP 验收；公网及原生双架构另验。
+菜单 `11 → 10/11` 或 `subscription content --base` / `subscription links --base`
+直接输出部署主订阅内容或 HTTPS 链接。内容复用现有节点生成器，包含自用及启用账号，
+即使关闭发布或只有 Reality 入口仍可本地读取；HTTPS 链接要求已启用发布。
+查询不创建分享组或修改发布文件，内容和链接含凭据，仅交给获授权的客户端。
 Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander/Gecko 混淆和 HTTPS 伪装；
 带宽按服务端方向输入，分享链接自动转换为客户端方向。
 首配混淆输入 `y` 选择 Salamander、`gecko` 选择 Gecko、`n` 关闭；已有入口在 Hysteria2 参数菜单切换类型，空密码保留已有值。
@@ -321,6 +325,7 @@ Docker 菜单 `16. 站点管理` 管理已有 Nginx TLS 入口 `21–25`、fallb
 
 ```bash
 padm-docker edit --site-template notes --preview
+padm-docker edit --site-template notes --site-title "My Notes" --preview
 padm-docker edit --site-template photos --confirm PADM-DOCKER-EDIT
 padm-docker edit --site-template docs --confirm PADM-DOCKER-EDIT
 padm-docker edit --site-static /root/public-site --preview
@@ -341,10 +346,12 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 规格要求控制 bundle 声明 `x-padm-site-content`；受管 webroot 与 standalone HTTP-01 见证书管理。
 
 菜单 `16 → 8. 内置静态站点` 可选择 `notes`、`photos` 或 `docs`。内置主题仅适用于
-已有 v3 Xray Nginx TLS `21–25`、fallback `27/29` 或 sing-box Hysteria2，
-包含 sing-box `23` 的部署明确拒绝；其它不提供网站的 Reality 入口可共存。主题从验签后的
+已有 v3 Nginx TLS `21–25`（含纯/混合 sing-box `23`）、Xray fallback `27/29`
+或 sing-box Hysteria2；其它不提供网站的 Reality 入口可共存。选主题后可输入站名，
+回车使用主题默认值，`0` 返回；CLI `--site-title` 仅配合 `--site-template`，
+接受 2–60 个字符，拒绝纯空白和控制字符，HTML 特殊字符转义后写入网页。主题从验签后的
 控制包复制，随包清单和资源完整性校验失败即拒绝；生成后只保存普通 `site.mode=static`，
-不保存主题身份，旧控制包的默认页、静态目录和 302 行为保持。
+不保存主题身份或站名，之后需改名时重新选择模板；旧控制包的默认页、静态目录和 302 行为保持。
 
 Hysteria2 先通过上面的模板或目录命令发布网页，再在 `协议与入口 → 12. Hysteria2 管理`
 关闭混淆、选择本地网页；CLI 使用 `edit --hy2-masquerade <入口 ID> local`，
@@ -1528,7 +1535,8 @@ padm-docker control join --invite /root/padm-control-invite.json --listener entr
 padm-docker control sync --invite /root/padm-control-invite.json
 ```
 
-`--listener` 可重复指定现有入口；接入一次确认，在同一事务中初始化被控身份、固定映射并完成首轮同步。
+`--listener` 可重复指定现有入口；菜单 `15 → 5` 输入逗号分隔的入口 ID（最多 16 个），
+空段、尾逗号或非法 ID 拒绝。接入一次确认，在同一事务中初始化被控身份、固定映射并完成首轮同步。
 失败保留原角色、账号和流量；重复同步同版本同内容不重建。
 双方身份、连接地址和映射随后冻结，不能用另一邀请重新认领。轮换后安全传递新的邀请文件，再同步。
 每次手动同步显式读取受管目录外的 root 私有邀请，祖先目录权限与输出要求一致；过期或撤销时拒绝。

@@ -24,6 +24,8 @@ assert {item["ifname"] for item in json.loads(command(["ip", "-j", "link", "show
 assert not Path("/var/run/docker.sock").exists(), "不得使用宿主 Docker Socket"
 inputs = json.loads(Path("/node-images.json").read_text())
 assert set(inputs) == {"xray", "sing-box", "ops", "nginx"}
+template = os.environ.get("PADM_TEST_SUBSCRIPTION_SITE_TEMPLATE", "")
+assert template in ("", "photos")
 node = Path(tempfile.mkdtemp(prefix=".tmp-subscription-publication-", dir="/n"))
 docker = ["docker", "--host", f"unix://{node}/docker.sock"]
 daemon = child = None
@@ -47,7 +49,9 @@ with (node / "daemon.log").open("wb") as log, (node / "child.log").open("wb") as
             image = json.loads(command(docker + ["image", "inspect", item["reference"]]))[0]
             assert image["Id"] == item["image_id"]
         environment = dict(os.environ, DOCKER_HOST=docker[-1], PADM_TEST_SUBSCRIPTION_PUBLICATION="1")
-        for protocol, core in ((22, "xray"), (23, "sing-box"), (24, "xray"), (25, "xray")):
+        combinations = ((23, "sing-box"),) if template else (
+            (22, "xray"), (23, "sing-box"), (24, "xray"), (25, "xray"))
+        for protocol, core in combinations:
             print(f"docker-subscription-publication-real-start: protocol={protocol} core={core}", flush=True)
             child = subprocess.Popen([
                 "bash", str(scripts / "vmess-real.sh"),

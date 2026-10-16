@@ -2147,7 +2147,7 @@ dockerEditCommand() {
     local realityTarget= targetHost= targetPort= targetSni=
     local realityStream= streamListener= streamWebsite=
     local streamDomains= streamAddress= streamPort=8443
-    local siteMode= siteSource= siteUrl= siteTemplate=
+    local siteMode= siteSource= siteUrl= siteTemplate= siteTitle=
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local routingServer= routingPort= routingIps=
@@ -2269,6 +2269,12 @@ dockerEditCommand() {
             [[ "$#" -ge 2 && -z "${siteMode}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             case "$2" in notes|photos|docs) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
             siteMode=static siteTemplate=$2
+            shift 2
+            ;;
+        --site-title)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${siteTitle}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            siteTitle=$2
             shift 2
             ;;
         --site-default)
@@ -3022,6 +3028,16 @@ dockerEditCommand() {
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
+    if [[ -n "${siteTitle}" ]]; then
+        [[ -n "${siteTemplate}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+        (
+            local PADM_STATIC_SITE_RENDERER_LOADED=0
+            # 只加载当前执行包的渲染器；候选包仍在生成时独立复验。
+            # shellcheck source=/dev/null
+            source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/static_site_renderer.sh" &&
+                nginxStaticTemplateTitleValidate "${siteTitle}"
+        ) || return "${PADM_DOCKER_RC_USAGE}"
+    fi
     [[ -z "${encryptionAction}${ssRotateListener}" || (
         -z "${specFile}${regenerateReality}${realityTarget}${realityStream}${siteMode}${alpnListener}" &&
         -z "${http01}${socks5}${routingKind}${httpRelay}${portAlias}${fail2banAction}${cdnAction}${xhttpAction}" &&
@@ -4321,7 +4337,8 @@ dockerEditCommand() {
     [[ -z "${alpnListener}" ]] ||
         printf '入口 %s 的 TLS ALPN 将设为 %s；仅允许该 ALPN 字段漂移，其它配置须与规格一致。\n' "${alpnListener}" "${alpnOrder}"
     [[ -z "${siteSource}" ]] || printf '静态站点内容将使用已校验目录更新；源路径不会写入规格。\n'
-    [[ -z "${siteTemplate}" ]] || printf '静态站点内容将使用受管 %s 内置模板更新；主题不写入规格。\n' "${siteTemplate}"
+    [[ -z "${siteTemplate}" ]] || printf '静态站点内容将使用受管 %s 内置模板更新；主题和站名不写入规格。\n' "${siteTemplate}"
+    [[ -z "${siteTitle}" ]] || printf '模板站名: %s\n' "${siteTitle}"
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
     while IFS=$'\t' read -r privateKey publicKey; do
@@ -4390,7 +4407,7 @@ dockerEditCommand() {
     fi
     DOCKER_CONFIG_RESTORE_ALPN_LISTENER=${alpnListener}
     dockerConfigureApply "${draft}" "${entryTlsSource:+${entryTlsSource}/tls}" \
-        "${entryTlsSource:+${entryTlsSource}/acme}" "${mode}" '' "${siteSource}" "${siteTemplate}" || return $?
+        "${entryTlsSource:+${entryTlsSource}/acme}" "${mode}" '' "${siteSource}" "${siteTemplate}" '' "${siteTitle}" || return $?
     if [[ -n "${DOCKER_ACME_WEBROOT_MIGRATION_PENDING}" ]]; then
         # 预览和交互取消也返回成功，必须确认新域名已提交后才能停用旧登记。
         [[ "${mode}" != preview ]] || return 0

@@ -358,18 +358,13 @@ dockerSubscriptionContent() {
     dockerSubscriptionRender "${specFile}" "${group}" /dev/stdout
 }
 
-dockerSubscriptionLinks() {
-    local specFile=$1 state=$2 groupId=$3 group authority
-    group=$(dockerSubscriptionGroupJson "${state}" "${groupId}") || return "${PADM_DOCKER_RC_USAGE}"
-    [[ "$(jq -r '.enabled' <<<"${group}")" == true ]] || {
-        dockerError '分享组已停用，未输出链接'
-        return "${PADM_DOCKER_RC_STATE}"
-    }
+dockerSubscriptionPublishAuthority() {
+    local specFile=$1
     jq -e '.subscription.enabled == true and .tls != null' "${specFile}" >/dev/null 2>&1 || {
         dockerError '当前部署没有启用受管 TLS 订阅，暂不能生成公网分享链接'
         return "${PADM_DOCKER_RC_STATE}"
     }
-    authority=$(jq -er '
+    jq -er '
       . as $request |
       [.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)] |
       .[0] | if . == null then error("没有订阅发布入口") else
@@ -378,7 +373,17 @@ dockerSubscriptionLinks() {
           then 443 else .public_port end) as $port |
         $request.tls.domain + (if $port == 443 then "" else ":" + ($port | tostring) end)
       end
-    ' "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
+    ' "${specFile}"
+}
+
+dockerSubscriptionLinks() {
+    local specFile=$1 state=$2 groupId=$3 group authority
+    group=$(dockerSubscriptionGroupJson "${state}" "${groupId}") || return "${PADM_DOCKER_RC_USAGE}"
+    [[ "$(jq -r '.enabled' <<<"${group}")" == true ]] || {
+        dockerError '分享组已停用，未输出链接'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    authority=$(dockerSubscriptionPublishAuthority "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
     printf 'https://%s/subscriptions/%s\n' "${authority}" "$(jq -er '.token' <<<"${group}")"
 }
 
@@ -410,7 +415,7 @@ dockerSubscriptionCommand() {
     local action=${1:-} state='' specFile='' root='' groupId='' name='' \
         accountsRaw='' listenersRaw='' accounts='' listeners=''
     local enabled=1 json=0 yes=0 seenName=0 seenAccounts=0 seenListeners=0
-    local group='' id='' token='' oldToken='' oldState='' nextState='' \
+    local group='' id='' token='' oldToken='' oldState='' nextState='' authority='' \
         groupJson='' tokenBackup='' newTokenBackup=''
     shift || true
     case "${action}" in
@@ -609,11 +614,22 @@ dockerSubscriptionCommand() {
     content|links)
         [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
         groupId=$1
-        dockerSubscriptionGroupIdIsValid "${groupId}" || return "${PADM_DOCKER_RC_USAGE}"
+        [[ "${groupId}" == --base ]] ||
+            dockerSubscriptionGroupIdIsValid "${groupId}" || return "${PADM_DOCKER_RC_USAGE}"
         dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
         dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
         root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
         specFile=$(dockerSubscriptionSpecFile) || return $?
+        if [[ "${groupId}" == --base ]]; then
+            if [[ "${action}" == content ]]; then
+                dockerGenerateSubscription "${specFile}" /dev/stdout local
+            else
+                token=$(jq -er '.subscription.token' "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
+                authority=$(dockerSubscriptionPublishAuthority "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
+                printf 'https://%s/subscriptions/%s\n' "${authority}" "${token}"
+            fi
+            return $?
+        fi
         state=$(dockerSubscriptionStatePath "${root}") || return "${PADM_DOCKER_RC_STATE}"
         if [[ "${action}" == content ]]; then dockerSubscriptionContent "${specFile}" "${state}" "${groupId}"; else dockerSubscriptionLinks "${specFile}" "${state}" "${groupId}"; fi
         ;;
