@@ -60,6 +60,34 @@ dockerComposeRun() { candidate_fail "预览执行了在线 Compose: $*"; }
 dockerComposeExecute() { candidate_fail "预览执行了在线恢复: $*"; }
 dockerInstallCandidate() { candidate_fail '预览安装了候选'; }
 dockerTrafficBeforeChange() { candidate_fail '预览采集或写入了在线流量'; }
+dockerRealityProbeRun() {
+    local directory probe
+    [[ "$#" == 13 && "$1 $2 $3 $4 $5 $6" == \
+        '60 --network none --env XRAY_LOCATION_ASSET=/etc/padm/xray/geo --volume' &&
+        "$7" == */config/xray/geo:/etc/padm/xray/geo:ro && "$8" == --volume &&
+        "$9" == */geo-probe.json:/probe.json:ro &&
+        "${10}" == "$(jq -r '.images.xray' "${EXPECTED_SPEC}")" &&
+        "${11} ${12} ${13}" == '-test -config /probe.json' ]] ||
+        candidate_fail "Geo 探针未使用固定镜像、只读挂载或无网络: $*"
+    directory=${7%:/etc/padm/xray/geo:ro}
+    probe=${9%:/probe.json:ro}
+    [[ -n "${EXPECTED_GEO_DIR}" && "$(stat -c '%u:%g:%a' "${probe}")" == \
+        "0:${PADM_DOCKER_CONTAINER_GID}:640" ]] || candidate_fail 'Geo 探针输入或权限错误'
+    jq -e '.routing.rules == [
+      {type:"field",domain:["geosite:cn"],outboundTag:"direct"},
+      {type:"field",ip:["geoip:cn"],outboundTag:"direct"}]' "${probe}" >/dev/null ||
+        candidate_fail 'Geo 探针没有强制加载双库'
+    for file in state.json geoip.dat geosite.dat; do
+        cmp -- "${EXPECTED_GEO_DIR}/${file}" "${directory}/${file}" ||
+            candidate_fail 'Geo 候选未保持原字节'
+        [[ "$(stat -c '%u:%g:%a' "${directory}/${file}")" == \
+            "0:${PADM_DOCKER_CONTAINER_GID}:640" ]] || candidate_fail 'Geo 候选文件权限错误'
+    done
+    [[ "$(stat -c '%u:%g:%a' "${directory}")" == "0:${PADM_DOCKER_CONTAINER_GID}:750" ]] ||
+        candidate_fail 'Geo 候选目录权限错误'
+    printf '%s\n' "${MODE}" >>"${TEST_ROOT}/geo-probed"
+    [[ "${MODE}" != geo-probe-fail ]]
+}
 docker() {
     [[ "${1:-}" == ps && "$#" -eq 4 && "$2" == -aq && "$3" == --filter ]] ||
         candidate_fail "非预期 Docker 调用: $*"
@@ -80,6 +108,13 @@ dockerCandidateCompose() {
         "$(stat -c %a "${DOCKER_RECOVERY_INPUT}")" == 700 &&
         "$(stat -c %a "${DOCKER_RECOVERY_INPUT%/input}")" == 700 ]] ||
         candidate_fail '恢复输入没有处于私密暂存目录'
+    [[ ! -e "${candidate}/geo-probe.json" ]] || candidate_fail 'Geo 探针临时配置未清理'
+    if [[ -n "${EXPECTED_GEO_DIR}" ]]; then
+        jq -e '.services.xray.environment.XRAY_LOCATION_ASSET == "/etc/padm/xray/geo"' \
+            "${candidate}/compose.json" >/dev/null || candidate_fail 'Geo 读取路径没有写入 Compose'
+    else
+        [[ ! -e "${candidate}/config/xray/geo" ]] || candidate_fail '无 Geo 归档生成了 Geo 数据'
+    fi
     marker="${TEST_ROOT}/checked-${candidate##*/}"
     if [[ ! -e "${marker}" ]]; then
         jq -en --slurpfile expected "${EXPECTED_SPEC}" \
@@ -241,6 +276,7 @@ prepare_target() {
     export PADM_DOCKER_INSTALL_DIR="${root}"
     dockerInitializeStateRoot
     MODE=ok
+    EXPECTED_GEO_DIR=
     EXPECTED_SPEC="${TEST_ROOT}/base.json"
     EXPECTED_TRAFFIC_FILE="${SOURCE}/data/traffic/state.json"
 }
@@ -269,6 +305,78 @@ grep -q '灾备恢复预览通过' "${LOG}" || fail '正常预览没有输出明
 grep -q '"reality_results": 1' "${LOG}" && grep -q '"reality_blocked": 1' "${LOG}" ||
     fail '预览缺少目标库条数'
 ! grep -q 'Example.COM\|custom-reason' "${LOG}" || fail '预览泄露目标库记录'
+grep -q '"geo_files": 0' "${LOG}" || fail '无 Geo 预览缺少兼容计数'
+
+archive_variant geo
+mkdir -m 0750 -- "${VARIANT}/config/xray/geo"
+printf 'fixture-ip\000\377\n' >"${VARIANT}/config/xray/geo/geoip.dat"
+printf 'fixture-site\000\376\n' >"${VARIANT}/config/xray/geo/geosite.dat"
+jq -n --arg ip "$(sha256sum "${VARIANT}/config/xray/geo/geoip.dat" | cut -d ' ' -f 1)" \
+    --arg site "$(sha256sum "${VARIANT}/config/xray/geo/geosite.dat" | cut -d ' ' -f 1)" \
+    '{schema_version:1,version:"202610170001",enabled:false,
+      sha256:{"geoip.dat":$ip,"geosite.dat":$site}}' >"${VARIANT}/config/xray/geo/state.json"
+chmod 0640 "${VARIANT}/config/xray/geo/"*
+GEO_SOURCE=${VARIANT}
+export_variant geo
+prepare_target geo
+EXPECTED_GEO_DIR="${GEO_SOURCE}/config/xray/geo"
+run_case geo "${TEST_ROOT}/geo.tar" 0
+grep -q '"geo_files": 3' "${LOG}" || fail 'Geo 预览缺少三文件计数'
+
+prepare_target geo-probe-fail
+EXPECTED_GEO_DIR="${GEO_SOURCE}/config/xray/geo"
+MODE=geo-probe-fail
+run_case geo-probe-fail "${TEST_ROOT}/geo.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q 'Geo 数据的无网络 Xray 解析校验失败' "${LOG}" || fail 'Geo 探针失败未明确拒绝'
+
+VARIANT="${TEST_ROOT}/variant-geo-enabled"
+cp -a -- "${GEO_SOURCE}" "${VARIANT}"
+jq '.enabled = true' "${VARIANT}/config/xray/geo/state.json" >"${TEST_ROOT}/state.json"
+cat -- "${TEST_ROOT}/state.json" >"${VARIANT}/config/xray/geo/state.json"
+export_variant geo-enabled
+prepare_target geo-enabled
+run_case geo-enabled "${TEST_ROOT}/geo-enabled.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q 'enabled=false' "${LOG}" || fail 'Geo 自动更新启用未明确拒绝'
+
+VARIANT="${TEST_ROOT}/variant-geo-digest"
+cp -a -- "${GEO_SOURCE}" "${VARIANT}"
+printf 'changed-data\n' >"${VARIANT}/config/xray/geo/geoip.dat"
+export_variant geo-digest
+prepare_target geo-digest
+run_case geo-digest "${TEST_ROOT}/geo-digest.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q '摘要一致' "${LOG}" || fail 'Geo 数据与 state 摘要失配未明确拒绝'
+
+VARIANT="${TEST_ROOT}/variant-geo-secondary"
+cp -a -- "${GEO_SOURCE}" "${VARIANT}"
+jq '.core.type = "sing-box" | .core.secondary_type = "xray" |
+  .core.protocols += [{id:1,core:"sing-box",listener_id:"entry-secondary",server:"proxy.example.com",
+    public_port:24444,address_families:["ipv4"],name:"Secondary",uuid:"11111111-1111-4111-8111-111111111111",
+    reality:{server_name:"reality.example.com",target_host:"reality.example.com",target_port:443,
+      private_key:("A"*43),public_key:("B"*43),short_id:"1234abcd"}}]' \
+    "${VARIANT}/config/spec.json" >"${TEST_ROOT}/secondary.json"
+cat -- "${TEST_ROOT}/secondary.json" >"${VARIANT}/config/spec.json"
+dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+export_variant geo-secondary
+prepare_target geo-secondary
+EXPECTED_SPEC="${VARIANT}/config/spec.json"
+EXPECTED_GEO_DIR="${GEO_SOURCE}/config/xray/geo"
+run_case geo-secondary "${TEST_ROOT}/geo-secondary.tar" 0
+
+VARIANT="${TEST_ROOT}/variant-geo-no-xray"
+cp -a -- "${GEO_SOURCE}" "${VARIANT}"
+jq '.tls = null | .subscription.enabled = false | del(.site) |
+  .core.type = "sing-box" | .core.secondary_type = null | .core.protocols[0] |=
+  (del(.websocket) | .id = 1 | .core = "sing-box" |
+    .reality = {server_name:"reality.example.com",target_host:"reality.example.com",target_port:443,
+      private_key:("A"*43),public_key:("B"*43),short_id:"1234abcd"})' \
+    "${VARIANT}/config/spec.json" >"${TEST_ROOT}/no-xray.json"
+cat -- "${TEST_ROOT}/no-xray.json" >"${VARIANT}/config/spec.json"
+dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+export_variant geo-no-xray
+prepare_target geo-no-xray
+run_case geo-no-xray "${TEST_ROOT}/geo-no-xray.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q '主核心或副核心包含 Xray' "${LOG}" || fail '无 Xray 的 Geo 归档未明确拒绝'
+[[ "$(wc -l <"${TEST_ROOT}/geo-probed")" -eq 3 ]] || fail 'Geo 探针次数错误'
 
 archive_variant bad-library
 printf 'malformed\n' >"${VARIANT}/data/reality-targets/results.tsv"
@@ -398,6 +506,7 @@ for mode in int term; do
     [[ "${mode}" != term ]] || expected=143
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 6 ]] ||
+# Geo 解析失败前也已完成 Compose 候选校验。
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 9 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 printf 'docker-recovery-preview-ok: %s cases\n' "${CASES}"

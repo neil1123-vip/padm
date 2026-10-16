@@ -645,6 +645,202 @@ class RealityInputTests(unittest.TestCase):
         self.assertFalse((self.destination / "data/reality-targets").exists())
 
 
+class GeoInputTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="padm-geo-recovery-",
+                                                     dir=os.environ["TMPDIR"])
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.source = self.root / "source"
+        self.geo = self.source / "config/xray/geo"
+        self.geo.mkdir(parents=True, mode=0o700)
+        for name in recovery.REQUIRED:
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"docker\n" if name == "mode" else b"{}\n")
+            path.chmod(0o600)
+        self.destination = self.root / "candidate"
+        (self.destination / "config/xray").mkdir(parents=True)
+        self.payload = {"geoip.dat": b"\x00\xffip\n", "geosite.dat": b"\x00\xfesite\n"}
+        for name, data in self.payload.items():
+            path = self.geo / name
+            path.write_bytes(data)
+            path.chmod(0o600)
+        self.state = {"schema_version": 1, "version": "202610170001", "enabled": False,
+                      "sha256": {name: recovery.hashlib.sha256(data).hexdigest()
+                                 for name, data in self.payload.items()}}
+        self.put_state(self.state)
+
+    def seal(self):
+        archive = self.root / "source.tar"
+        if archive.exists():
+            archive.unlink()
+        recovery.export_archive(str(self.source), str(archive))
+        with tarfile.open(archive, "r:") as source:
+            path = self.source / recovery.MANIFEST
+            path.write_bytes(source.extractfile(recovery.MANIFEST).read())
+            path.chmod(0o600)
+
+    def put_state(self, state):
+        path = self.geo / "state.json"
+        path.write_bytes(state if isinstance(state, bytes) else
+                         (json.dumps(state, indent=3) + "\n\n").encode())
+        path.chmod(0o600)
+        self.seal()
+
+    def rejected(self):
+        with self.assertRaises((ValueError, OSError)):
+            recovery.geo_inputs(str(self.source), str(self.destination))
+        self.assertFalse((self.destination / "config/xray/geo").exists())
+
+    def test_exact_private_copy_streaming_and_cli_summary(self):
+        payload = b"\x00\xff" * (recovery.CHUNK + 17)
+        (self.geo / "geoip.dat").write_bytes(payload)
+        self.state["sha256"]["geoip.dat"] = recovery.hashlib.sha256(payload).hexdigest()
+        self.put_state(self.state)
+        original = os.read
+
+        def bounded_read(fd, size):
+            self.assertLessEqual(size, recovery.CHUNK)
+            return original(fd, size)
+
+        with mock.patch.object(recovery.os, "read", side_effect=bounded_read):
+            self.assertEqual(recovery.geo_inputs(str(self.source), str(self.destination)),
+                             {"geo_files": 3})
+        target = self.destination / "config/xray/geo"
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o700)
+        for path in self.geo.iterdir():
+            copied = target / path.name
+            self.assertEqual(copied.read_bytes(), path.read_bytes())
+            self.assertEqual(stat.S_IMODE(copied.stat().st_mode), 0o600)
+            self.assertEqual((copied.stat().st_uid, copied.stat().st_gid), (0, 0))
+        with self.assertRaises(FileExistsError):
+            recovery.geo_inputs(str(self.source), str(self.destination))
+        result = subprocess.run([sys.executable, "-B", str(HELPER), "geo-inputs",
+                                 "--directory", str(self.source)], capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), {"geo_files": 3})
+        self.assertEqual(result.stderr, b"")
+
+    def test_absent_geo_compatibility_and_exact_manifest_files(self):
+        for path in self.geo.iterdir():
+            path.unlink()
+        self.geo.rmdir()
+        self.geo.parent.rmdir()
+        self.seal()
+        self.assertEqual(recovery.geo_inputs(str(self.source), str(self.destination)), {"geo_files": 0})
+        self.geo.mkdir(parents=True, mode=0o700)
+        self.rejected()
+        self.seal()
+        self.rejected()
+
+    def test_state_schema_fixed_version_disabled_schedule_and_digest_contract(self):
+        invalid = []
+        for key, value in (("schema_version", True), ("enabled", True), ("enabled", 0),
+                           ("version", "latest"), ("version", ""), ("version", "bad/tag"),
+                           ("version", "x" * 129), ("sha256", {}),
+                           ("sha256", {"geoip.dat": "A" * 64, "geosite.dat": "0" * 64})):
+            state = copy.deepcopy(self.state)
+            state[key] = value
+            invalid.append(state)
+        invalid.extend([dict(self.state, extra="unexpected"),
+                        b'{"schema_version":1,"schema_version":1}', b"[]", b""])
+        for state in invalid:
+            with self.subTest(state=state):
+                self.put_state(state)
+                self.rejected()
+        self.put_state(self.state)
+        (self.geo / "geoip.dat").write_bytes(b"changed")
+        self.seal()
+        self.rejected()
+
+    def test_missing_extra_empty_and_changed_manifest_data_rejected(self):
+        path = self.geo / "geoip.dat"
+        path.write_bytes(b"changed")
+        self.rejected()
+        path.write_bytes(self.payload[path.name])
+        path.unlink()
+        self.rejected()
+        path.write_bytes(b"")
+        path.chmod(0o600)
+        self.state["sha256"][path.name] = recovery.hashlib.sha256(b"").hexdigest()
+        self.put_state(self.state)
+        self.rejected()
+        path.write_bytes(self.payload[path.name])
+        self.state["sha256"][path.name] = recovery.hashlib.sha256(path.read_bytes()).hexdigest()
+        self.put_state(self.state)
+        extra = self.geo / "extra"
+        extra.write_bytes(b"extra")
+        extra.chmod(0o600)
+        self.rejected()
+        self.seal()
+        self.rejected()
+
+    def test_size_boundaries_are_checked_before_streaming(self):
+        path = self.geo / "geoip.dat"
+        os.truncate(path, recovery.MAX_GEO_FILE + 1)
+        with mock.patch.object(recovery, "geo_stream", side_effect=AssertionError("超限文件被读取")):
+            self.rejected()
+        path.write_bytes(self.payload[path.name])
+        path = self.geo / "state.json"
+        os.truncate(path, recovery.MAX_TRANSACTION_FILE + 1)
+        inode = path.stat().st_ino
+        original = os.read
+
+        def bounded_read(fd, size):
+            self.assertNotEqual(os.fstat(fd).st_ino, inode, "超限 state 被读取")
+            return original(fd, size)
+
+        with mock.patch.object(recovery.os, "read", side_effect=bounded_read):
+            self.rejected()
+
+    def test_unsafe_files_directories_and_links_rejected(self):
+        path = self.geo / "geoip.dat"
+        path.chmod(0o640)
+        self.rejected()
+        path.chmod(0o600)
+        self.geo.chmod(0o750)
+        self.rejected()
+        self.geo.chmod(0o700)
+        outside = self.root / "outside"
+        path.rename(outside)
+        path.symlink_to(outside)
+        self.rejected()
+        path.unlink()
+        os.link(outside, path)
+        self.rejected()
+        path.unlink()
+        path.mkdir()
+        self.rejected()
+
+    def test_stream_mutation_and_path_replacement_rejected_before_destination(self):
+        path = self.geo / "geoip.dat"
+        inode = path.stat().st_ino
+        original = os.read
+
+        def changed_read(fd, size):
+            data = original(fd, size)
+            if data and os.fstat(fd).st_ino == inode:
+                path.write_bytes(b"changed")
+            return data
+
+        with mock.patch.object(recovery.os, "read", side_effect=changed_read):
+            self.rejected()
+        path.write_bytes(self.payload[path.name])
+        self.seal()
+        original_stream = recovery.geo_stream
+
+        def replaced_stream(fd, size, target=None):
+            digest = original_stream(fd, size, target)
+            if os.fstat(fd).st_ino == inode and target is None:
+                path.rename(self.root / "moved.dat")
+                path.write_bytes(self.payload[path.name])
+                path.chmod(0o600)
+            return digest
+
+        with mock.patch.object(recovery, "geo_stream", side_effect=replaced_stream):
+            self.rejected()
+
+
 class RecoveryTransactionTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="padm-transaction-", dir=os.environ["TMPDIR"])

@@ -35,10 +35,29 @@ dockerGeoStateValidate() {
 
 dockerGeoPrepareCandidate() {
     local root=$1 candidate=$2 directory="${1}/config/xray/geo"
+    if [[ -n "${DOCKER_RECOVERY_INPUT:-}" ]]; then
+        python3 -B "${DOCKER_LIB_DIR}/recovery.py" geo-inputs \
+            --directory "${DOCKER_RECOVERY_INPUT}" --destination "${candidate}" >/dev/null
+        return $?
+    fi
     dockerTrafficSafePath "${root}" "${directory}" || return 1
     [[ -e "${directory}" || -L "${directory}" ]] || return 0
     dockerGeoStateValidate "${directory}" || return 1
     cp -a -- "${directory}" "${candidate}/config/xray/geo"
+}
+
+dockerGeoDataProbe() {
+    local directory=$1 image=$2 probe=$3 status=0
+    # 强制加载两份库，不能因业务规则未引用而漏过损坏数据。
+    jq -n '{outbounds:[{protocol:"freedom",tag:"direct"}],routing:{rules:[
+      {type:"field",domain:["geosite:cn"],outboundTag:"direct"},
+      {type:"field",ip:["geoip:cn"],outboundTag:"direct"}]}}' >"${probe}" &&
+        chmod 0640 "${probe}" && chown "0:${PADM_DOCKER_CONTAINER_GID}" "${probe}" &&
+        dockerRealityProbeRun 60 --network none --env XRAY_LOCATION_ASSET=/etc/padm/xray/geo \
+            --volume "${directory}:/etc/padm/xray/geo:ro" --volume "${probe}:/probe.json:ro" \
+            "${image}" -test -config /probe.json >/dev/null || status=$?
+    rm -f -- "${probe}" || return 1
+    return "${status}"
 }
 
 dockerGeoBundleCheck() {
@@ -166,21 +185,17 @@ dockerGeoUpdate() {
     cp -- "${root}/config/xray/config.json" "${stage}/config/xray/config.json" &&
         jq '.services.xray.environment.XRAY_LOCATION_ASSET = "/etc/padm/xray/geo"' \
             "${root}/compose.json" >"${stage}/compose.json" || return 1
-    # 独立无网络探针强制加载两份数据，再验证当前配置，不触碰生产容器。
-    jq -n '{outbounds:[{protocol:"freedom",tag:"direct"}],routing:{rules:[
-      {type:"field",domain:["geosite:cn"],outboundTag:"direct"},
-      {type:"field",ip:["geoip:cn"],outboundTag:"direct"}]}}' >"${stage}/probe.json" || return 1
     image=$(jq -er '.images.xray | select(test("@sha256:[0-9a-f]{64}$"))' "${root}/config/spec.json") || return 1
     chmod 0750 "${stage}/config/xray" "${directory}" &&
-        chmod 0640 "${stage}/config/xray/config.json" "${directory}/"* "${stage}/probe.json" &&
-        chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${stage}/config" "${stage}/probe.json" || return 1
+        chmod 0640 "${stage}/config/xray/config.json" "${directory}/"* &&
+        chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${stage}/config" || return 1
     runner=(dockerRealityProbeRun 60 --network none --env XRAY_LOCATION_ASSET=/etc/padm/xray/geo
-        --volume "${stage}/config/xray:/etc/padm/xray:ro" --volume "${stage}/probe.json:/probe.json:ro")
+        --volume "${stage}/config/xray:/etc/padm/xray:ro")
     if jq -e '.services.xray.volumes[]? | select(.target == "/etc/padm/secrets/tls")' \
         "${root}/compose.json" >/dev/null; then
         runner+=(--volume "${root}/secrets/tls:/etc/padm/secrets/tls:ro")
     fi
-    "${runner[@]}" "${image}" -test -config /probe.json &&
+    dockerGeoDataProbe "${directory}" "${image}" "${stage}/probe.json" &&
         "${runner[@]}" "${image}" -test -config /etc/padm/xray/config.json || return 1
     ids=$(dockerComposeRun ps --status running -q xray) || return 1
     if [[ -n "${ids}" ]]; then

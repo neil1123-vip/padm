@@ -3194,17 +3194,30 @@ dockerRecoveryInputsPrepare() {
         . == "mode" or . == "deployment.json" or . == "images.env" or . == "compose.json" or
         . == "config/spec.json" or . == "config/share-groups.json" or
         . == "config/xray/config.json" or . == "config/xray/users.base" or
+        . == "config/xray/geo/state.json" or . == "config/xray/geo/geoip.dat" or
+        . == "config/xray/geo/geosite.dat" or
         . == "config/sing-box/config.json" or . == "config/sing-box/users.base" or
         . == "config/nginx/default.conf" or . == "data/traffic/state.json" or
         . == "data/reality-targets/results.tsv" or . == "data/reality-targets/blocked.tsv" or
         startswith("data/subscription/") or startswith("data/static/") or
         startswith("secrets/tls/"))
     ' "${input}/manifest.json" >/dev/null || {
-        dockerError '归档含尚未接入恢复的持久输入（如 Geo、续期或 ACME），未准备候选'
+        dockerError '归档含尚未接入恢复的持久输入（如续期或 ACME），未准备候选'
         return 1
     }
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" reality-inputs --directory "${input}" \
         >"${draft}/reality-counts.json" || return 1
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" geo-inputs --directory "${input}" \
+        >"${draft}/geo-counts.json" || {
+        dockerError 'Geo 恢复仅接受完整、摘要一致且自动更新停用 enabled=false 的固定版本数据'
+        return 1
+    }
+    if jq -e '.geo_files > 0' "${draft}/geo-counts.json" >/dev/null; then
+        jq -e '[.core.type, .core.secondary_type] | index("xray") != null' "${spec}" >/dev/null || {
+            dockerError 'Geo 归档需要主核心或副核心包含 Xray，不能静默忽略数据'
+            return 1
+        }
+    fi
     shares='{"schema_version":1,"groups":[]}'
     traffic='{"schema_version":1,"accounts":{}}'
     if [[ -f "${input}/config/share-groups.json" ]]; then
@@ -3420,9 +3433,10 @@ dockerRecoveryCommand() (
         "${stage}/draft/business.json" "${siteSource}" || return $?
     [[ "${action}" != apply ]] || return 0
     printf '灾备恢复预览通过（未安装部署；已创建私密暂存并运行候选校验）。\n'
-    jq --slurpfile reality "${stage}/draft/reality-counts.json" '{listeners:[.spec.core.protocols[] | {listener_id,public_port}],
+    jq --slurpfile reality "${stage}/draft/reality-counts.json" \
+        --slurpfile geo "${stage}/draft/geo-counts.json" '{listeners:[.spec.core.protocols[] | {listener_id,public_port}],
       accounts:(.spec.accounts // [] | length),shares:(.shares.groups | length),
-      saved_traffic_accounts:(.traffic.accounts | length)} + $reality[0]' "${stage}/draft/business.json"
+      saved_traffic_accounts:(.traffic.accounts | length)} + $reality[0] + $geo[0]' "${stage}/draft/business.json"
 )
 
 dockerMain() {

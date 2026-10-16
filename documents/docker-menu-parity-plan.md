@@ -8495,6 +8495,28 @@ Geo、ACME、续期、已有部署替换、控制角色/同步及原有环境边
 `.tmp-regression-docker-c2009d34cbe942da9bcc67b870dd01fa/`。
 相比 6A.3b 的 486.858 秒基本持平，不重复已通过的完整合同；整体计划保持 active。
 
+### 6A.5 固定版本 Geo 数据原字节恢复
+
+空目标、同架构 v3 普通部署接入 `config/xray/geo/` 下的 `state.json`、
+`geoip.dat`、`geosite.dat`。要求主核心或副核心含 Xray，版本固定且
+`state.enabled=false`；停用的是自动更新，不是 Geo 数据。拒绝残缺、额外文件、
+自动更新启用、无 Xray 或摘要不符的输入，不通过自动关闭调度代替恢复。
+state 上限 16 MiB，两份数据各上限 128 MiB，有界流式校验与复制；
+核对清单、state、SHA-256、权限、单链接及读取前后的路径稳定性。
+候选保持原字节，复用无网络只读 Xray 探针强制加载 `geosite:cn` 和 `geoip:cn`；
+探针失败不启动部署。普通 Geo 更新复用同一探针并保留独立业务配置校验。
+不下载 Geo 数据、不恢复自动更新调度，安装失败和中断沿用持久空目标事务。
+
+2026-10-17 Docker Linux amd64 完整 `docker-contracts -Jobs 6` 通过，
+64/64 叶子、helper 61 项、preview 26 场景、apply 40 场景无失败标记；
+入口 492.064 秒、内部 489.990 秒、排队 370 ms，`cache_hit=false`，使用 tmpfs。
+工具镜像仍为 `sha256:ba4102e10f3d88a5392f6858f85fb8120e65369ae564b5d5660081abfd92a77f`，
+证据 `.tmp-regression-docker-e1f95500aeb1485fb8902d84ba30188d/`。
+源码归档和文件清单已清理，日志/result 保留；更早 focused 失败不记为通过。
+此证据不替代快照后 4C.6 控制端口与重连改动的独立验收。
+ACME/续期、已有部署替换、控制角色/同步、宿主调度及完整灾备仍 deferred；
+原生宿主、arm64、公网、重启和可信发布未由本地合同证明，整体目标保持 active。
+
 - 每阶段同步中英文使用说明、支持矩阵、权限边界及失败恢复操作。
   旧部署迁移明确要求完整 spec 或安全导入，不允许一条重配命令替代迁移。
 - PR 按实际改动运行合同、Compose、菜单 PTY 和定向回归；

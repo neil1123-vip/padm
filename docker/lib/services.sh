@@ -6450,6 +6450,13 @@ dockerValidateCandidate() {
         tlsDomains+="${domains}"$'\n'
         case "${core}" in
         xray)
+            if [[ -n "${DOCKER_RECOVERY_INPUT:-}" && -d "${candidate}/config/xray/geo" ]]; then
+                dockerGeoDataProbe "${candidate}/config/xray/geo" \
+                    "$(jq -er '.images.xray' "${specFile}")" "${candidate}/geo-probe.json" || {
+                    dockerError '恢复 Geo 数据的无网络 Xray 解析校验失败'
+                    return 1
+                }
+            fi
             dockerCandidateCompose "${candidate}" run --rm --no-deps xray \
                 -test -confdir /etc/padm/xray >/dev/null || {
                 dockerError 'Xray 候选配置校验失败'

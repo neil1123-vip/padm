@@ -1435,14 +1435,20 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 The target must contain only an installed control skeleton: configuration, data, secrets,
 logs and backups must be empty, with no containers from the same project. The first scope
 accepts same-architecture v3 ordinary deployments with cores, manual TLS, static sites,
-account/share identities, saved traffic and Reality target libraries. Host integrations, control roles/sync, Reality
-coexistence, hopping, HTTP-01, and unhandled Geo, ACME or renewal files
+account/share identities, saved traffic, Reality target libraries and the limited Geo data described below.
+Host integrations, control roles/sync, Reality coexistence, hopping, HTTP-01, and unhandled ACME or renewal files
 are rejected explicitly. Dangling references in disabled share groups are also rejected.
 Reality recovery only accepts `data/reality-targets/results.tsv` (15/16-column TSV) and
 `blocked.tsv` (four `|`-separated columns), limited to 16 MiB per file. All records are validated
 before copying the original bytes, preserving empty columns, duplicates and custom block reasons.
 Directories use `0700 root:root` and files use `0600 root:root`. Recovery does not refresh records
 over the network or establish that historical scores or handshakes remain valid.
+Geo recovery requires an Xray-containing deployment and a fixed-version managed library with
+`state.enabled=false` (automatic updates disabled). It preserves the original bytes of
+`config/xray/geo/state.json`, `geoip.dat` and `geosite.dat`, with each data file limited to 128 MiB.
+Archive manifest and state data digests are checked before network-disabled Xray parsing validation.
+No Geo data is downloaded and no automatic-update schedule is restored. `enabled=false` does not
+disable use of the Geo data; archives with `enabled=true` are rejected, not restored by disabling updates.
 Release version, signature identity, manifest hash and every image must exactly match an
 independently verified release; supply matching assets explicitly for an older archive.
 Preview creates private `0700` staging, may pull digest-pinned images and runs candidate

@@ -42,12 +42,29 @@ dockerConfigureReleasePrepare() {
     DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/bundle"
     DOCKER_CONFIG_RELEASE_INPUTS=$(jq -c '{release,images}' "${TEST_ROOT}/base.json")
 }
+dockerRealityProbeRun() {
+    local directory probe
+    [[ "$#" == 13 && "$1 $2 $3 $4 $5 $6" == \
+        '60 --network none --env XRAY_LOCATION_ASSET=/etc/padm/xray/geo --volume' &&
+        "$7" == */config/xray/geo:/etc/padm/xray/geo:ro && "$8" == --volume &&
+        "$9" == */geo-probe.json:/probe.json:ro &&
+        "${10}" == "$(jq -r '.images.xray' "${TEST_ROOT}/base.json")" &&
+        "${11} ${12} ${13}" == '-test -config /probe.json' ]] || fail '恢复 Geo 探针参数错误'
+    directory=${7%:/etc/padm/xray/geo:ro}
+    probe=${9%:/probe.json:ro}
+    [[ -s "${directory}/geoip.dat" && -s "${directory}/geosite.dat" ]] || fail 'Geo 双库缺失'
+    jq -e '[.routing.rules[].domain[]?,.routing.rules[].ip[]?] == ["geosite:cn","geoip:cn"]' \
+        "${probe}" >/dev/null || fail 'Geo 探针未强制加载双库'
+    printf 'geo-probe\n' >>"${MOCK_BACKEND}/events"
+    [[ "${MODE}" != geo-probe-fail ]]
+}
 dockerCandidateCompose() {
     local candidate=$1
     [[ -d "${candidate}" && -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] ||
         fail '候选校验未持有部署锁'
     jq -e '.services.xray != null and .services.evil == null' \
         "${candidate}/compose.json" >/dev/null || fail '候选没有重新生成 Compose'
+    [[ ! -e "${candidate}/geo-probe.json" ]] || fail 'Geo 探针配置未清理'
 }
 dockerComposeRun() {
     [[ "$1" == up ]] || fail "非预期在线动作: $*"
@@ -300,6 +317,14 @@ printf 'Example.COM:00443\tExample.COM\t\tcustom\tno\tunknown\tunknown\t\tunknow
     >"${SOURCE}/data/reality-targets/results.tsv"
 printf 'blocked.example||custom-reason|custom description\n' >"${SOURCE}/data/reality-targets/blocked.tsv"
 chmod 0600 "${SOURCE}/data/reality-targets/"*.tsv
+mkdir -m 0750 -- "${SOURCE}/config/xray/geo"
+printf 'fixture-ip\000\377\n' >"${SOURCE}/config/xray/geo/geoip.dat"
+printf 'fixture-site\000\376\n' >"${SOURCE}/config/xray/geo/geosite.dat"
+jq -n --arg ip "$(sha256sum "${SOURCE}/config/xray/geo/geoip.dat" | cut -d ' ' -f 1)" \
+    --arg site "$(sha256sum "${SOURCE}/config/xray/geo/geosite.dat" | cut -d ' ' -f 1)" \
+    '{schema_version:1,version:"202610170001",enabled:false,
+      sha256:{"geoip.dat":$ip,"geosite.dat":$site}}' >"${SOURCE}/config/xray/geo/state.json"
+chmod 0640 "${SOURCE}/config/xray/geo/"*
 printf '{"services":{"evil":{"image":"untrusted.invalid/evil"}}}\n' >"${SOURCE}/compose.json"
 chmod 0640 "${SOURCE}/compose.json"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${SOURCE}" \
@@ -374,6 +399,17 @@ assert_empty() {
         fail '回滚残留容器或锁'
 }
 assert_deployed() {
+    for file in state.json geoip.dat geosite.dat; do
+        cmp -- "${SOURCE}/config/xray/geo/${file}" "${root}/config/xray/geo/${file}" ||
+            fail '恢复 Geo 未保持原字节'
+        [[ "$(stat -c '%u:%g:%a' "${root}/config/xray/geo/${file}")" == \
+            "0:${PADM_DOCKER_CONTAINER_GID}:640" ]] || fail 'Geo 文件运行权限错误'
+    done
+    [[ "$(stat -c '%u:%g:%a' "${root}/config/xray/geo")" == "0:${PADM_DOCKER_CONTAINER_GID}:750" ]] ||
+        fail 'Geo 目录运行权限错误'
+    jq -e '.services.xray.environment.XRAY_LOCATION_ASSET == "/etc/padm/xray/geo"' \
+        "${root}/compose.json" >/dev/null || fail 'Geo Compose 读取路径错误'
+    [[ "$(grep -c '^geo-probe$' "${MOCK_BACKEND}/events")" == 1 ]] || fail '恢复未执行唯一 Geo 探针'
     for file in results.tsv blocked.tsv; do
         cmp -- "${SOURCE}/data/reality-targets/${file}" "${root}/data/reality-targets/${file}" ||
             fail '目标库未按原字节恢复'
@@ -431,13 +467,16 @@ for backend in systemd cron; do
         fail '成功事务没有清理登记或锁'
 done
 
-for mode in first-write partial-move health int term; do
+for mode in geo-probe-fail first-write partial-move health int term; do
     prepare_target "${mode}"
     expected=failure
     [[ "${mode}" != int ]] || expected=130
     [[ "${mode}" != term ]] || expected=143
     run_child apply "${mode}" "${expected}"
     assert_empty
+    if [[ "${mode}" == geo-probe-fail ]]; then
+        ! grep -q '^up$' "${MOCK_BACKEND}/events" || fail 'Geo 探针失败后启动了服务'
+    fi
     if [[ "${mode}" == first-write || "${mode}" == partial-move ]]; then
         [[ -e "${MOCK_BACKEND}/fault" ]] || fail "${mode}: 故障未注入"
     fi

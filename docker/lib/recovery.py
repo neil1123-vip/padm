@@ -52,6 +52,7 @@ TRANSACTION_STAGING = {
 }
 MAX_TRANSACTION_FILE = 16 * 1024 * 1024
 MAX_TRANSACTION_METADATA = 64 * 1024
+MAX_GEO_FILE = 128 * 1024 * 1024
 
 
 def require(condition):
@@ -583,6 +584,119 @@ def reality_inputs(directory, destination=None):
             "reality_blocked": payload.get("blocked.tsv", (None, 0))[1]}
 
 
+def geo_stream(fd, size, target=None):
+    os.lseek(fd, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    consumed = 0
+    while consumed <= size:
+        data = os.read(fd, min(CHUNK, size + 1 - consumed))
+        if not data:
+            break
+        digest.update(data)
+        consumed += len(data)
+        if target is not None:
+            target.write(data)
+    require(consumed == size)
+    return digest.hexdigest()
+
+
+def geo_inputs(directory, destination=None):
+    filenames = {"state.json", "geoip.dat", "geosite.dat"}
+    prefix = "config/xray/geo"
+    with absolute_parent(directory, private=True) as (parent, name):
+        with transaction_directory(parent, name, private=False) as root_fd:
+            observed = [(parent, name, signature(os.fstat(root_fd)))]
+            manifest_info = os.stat(MANIFEST, dir_fd=root_fd, follow_symlinks=False)
+            manifest, _ = transaction_read(root_fd, MANIFEST, limit=MAX_MANIFEST)
+            observed.append((root_fd, MANIFEST, signature(manifest_info)))
+            entries = validate_manifest(read_json(manifest))
+            expected = {path: entry for path, entry in entries.items()
+                        if path == prefix or path.startswith(prefix + "/")}
+            require(not expected or set(expected) == {prefix} | {
+                prefix + "/" + filename for filename in filenames})
+            require(not expected or expected[prefix]["type"] == "directory" and
+                    all(expected[prefix + "/" + filename]["type"] == "file"
+                        for filename in filenames))
+            with transaction_directory(root_fd, "config", private=False) as config_fd:
+                if "xray" not in os.listdir(config_fd):
+                    require(not expected)
+                    return {"geo_files": 0}
+                with transaction_directory(config_fd, "xray", private=False) as xray_fd:
+                    if "geo" not in os.listdir(xray_fd):
+                        require(not expected)
+                        return {"geo_files": 0}
+                    with transaction_directory(xray_fd, "geo") as geo_fd:
+                        require(expected and set(os.listdir(geo_fd)) == filenames)
+                        observed.extend((owner, child, signature(os.fstat(fd))) for owner, child, fd in (
+                            (root_fd, "config", config_fd), (config_fd, "xray", xray_fd),
+                            (xray_fd, "geo", geo_fd)))
+                        state_info = os.stat("state.json", dir_fd=geo_fd, follow_symlinks=False)
+                        encoded, metadata = transaction_read(geo_fd, "state.json")
+                        observed.append((geo_fd, "state.json", signature(state_info)))
+                        require(all(metadata[key] == expected[prefix + "/state.json"][key]
+                                    for key in ("size", "sha256")))
+                        state = read_json(encoded)
+                        require(isinstance(state, dict) and set(state) == {
+                            "schema_version", "version", "enabled", "sha256"})
+                        require(type(state["schema_version"]) is int and state["schema_version"] == 1
+                                and state["enabled"] is False)
+                        require(isinstance(state["version"], str) and len(state["version"]) <= 128
+                                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", state["version"])
+                                and state["version"] != "latest")
+                        require(isinstance(state["sha256"], dict)
+                                and set(state["sha256"]) == filenames - {"state.json"}
+                                and all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+                                        for value in state["sha256"].values()))
+                        with contextlib.ExitStack() as stack:
+                            sources = {}
+                            for filename in sorted(filenames - {"state.json"}):
+                                fd = stack.enter_context(opened(geo_fd, filename, os.O_RDONLY))
+                                info = os.fstat(fd)
+                                require(stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == 0
+                                        and stat.S_IMODE(info.st_mode) == 0o600 and info.st_nlink == 1
+                                        and 0 < info.st_size <= MAX_GEO_FILE)
+                                observed.append((geo_fd, filename, signature(info)))
+                                entry = expected[prefix + "/" + filename]
+                                require(info.st_size == entry["size"] and
+                                        geo_stream(fd, info.st_size) == entry["sha256"] ==
+                                        state["sha256"][filename])
+                                sources[filename] = (fd, info)
+
+                            def stable():
+                                require(set(os.listdir(geo_fd)) == filenames)
+                                for owner, child, before in observed:
+                                    require(signature(os.stat(child, dir_fd=owner,
+                                                              follow_symlinks=False)) == before)
+                                for fd, before in sources.values():
+                                    require(signature(os.fstat(fd)) == signature(before))
+                                with absolute_parent(directory, private=True) as (owner, child):
+                                    require(signature(os.stat(child, dir_fd=owner,
+                                                              follow_symlinks=False)) == observed[0][2])
+
+                            stable()
+                            if destination is not None:
+                                with absolute_parent(destination, private=True) as (owner, child):
+                                    with transaction_directory(owner, child, private=False) as target_fd:
+                                        with transaction_directory(target_fd, "config/xray",
+                                                                   private=False) as target_xray:
+                                            os.mkdir("geo", 0o700, dir_fd=target_xray)
+                                            with transaction_directory(target_xray, "geo") as target_geo:
+                                                transaction_write(target_geo, "state.json", encoded)
+                                                # 数据文件保持有界流式读写；候选失败由现有恢复清理统一回收。
+                                                for filename, (fd, info) in sources.items():
+                                                    with opened(target_geo, filename,
+                                                                os.O_WRONLY | os.O_CREAT | os.O_EXCL) as output:
+                                                        os.fchmod(output, 0o600)
+                                                        os.fchown(output, 0, 0)
+                                                        with os.fdopen(os.dup(output), "wb") as target:
+                                                            require(geo_stream(fd, info.st_size, target) ==
+                                                                    state["sha256"][filename])
+                                                            target.flush()
+                                                            os.fsync(output)
+                            stable()
+    return {"geo_files": 3}
+
+
 def transaction_encoded(metadata):
     data = json.dumps(metadata, ensure_ascii=True, separators=(",", ":")).encode()
     require(len(data) <= MAX_TRANSACTION_METADATA)
@@ -879,6 +993,9 @@ def main():
     reality = commands.add_parser("reality-inputs")
     reality.add_argument("--directory", required=True)
     reality.add_argument("--destination")
+    geo = commands.add_parser("geo-inputs")
+    geo.add_argument("--directory", required=True)
+    geo.add_argument("--destination")
     for action in ("prepare", "check", "commit", "clean", "metadata",
                    "schedule-save", "schedule-metadata"):
         command = commands.add_parser("transaction-" + action)
@@ -905,6 +1022,8 @@ def main():
             print("灾备归档已校验并解包至私密暂存目录（{} 个文件，{} 字节）。".format(*counts))
         elif args.action == "reality-inputs":
             print(json.dumps(reality_inputs(args.directory, args.destination), separators=(",", ":")))
+        elif args.action == "geo-inputs":
+            print(json.dumps(geo_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "transaction-prepare":
             transaction_prepare(args.root, args.project, args.candidate, args.input_stage)
         elif args.action == "transaction-commit":

@@ -77,7 +77,7 @@ curl() {
 }
 
 docker() {
-    local operation=${1:-} argument previous= compose= image= format= status=0
+    local operation=${1:-} argument previous= compose= image= format= status=0 geo= probe= config= tls=
     printf '%s\n' "$*" >>"${TEST_ROOT}/docker.log"
     case "${operation}" in
     compose)
@@ -136,11 +136,42 @@ docker() {
         fi
         ;;
     run)
-        [[ "${MODE}" != probe-fail ]] || status=1
         for argument in "$@"; do
             [[ "${argument}" != *@sha256:* ]] || image=${argument}
+            if [[ "${previous}" == --volume ]]; then
+                case "${argument}" in
+                *:/etc/padm/xray/geo:ro) geo=${argument%:/etc/padm/xray/geo:ro} ;;
+                *:/probe.json:ro) probe=${argument%:/probe.json:ro} ;;
+                *:/etc/padm/xray:ro) config=${argument%:/etc/padm/xray:ro} ;;
+                "${PADM_DOCKER_INSTALL_DIR}/secrets/tls:/etc/padm/secrets/tls:ro") tls=1 ;;
+                *) fail "Geo 探针出现意外挂载: ${argument}" ;;
+                esac
+            fi
+            previous=${argument}
         done
-        [[ -n "${image}" ]] || fail 'Geo 探针没有固定摘要镜像'
+        [[ "${image}" == "$(jq -er '.images.xray' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json")" ]] ||
+            fail 'Geo 探针没有使用当前固定摘要镜像'
+        [[ " $* " == *' --network none '* &&
+            " $* " == *' --env XRAY_LOCATION_ASSET=/etc/padm/xray/geo '* ]] ||
+            fail 'Geo 探针未隔离网络或未指定受管数据路径'
+        if [[ "${*: -3}" == '-test -config /probe.json' ]]; then
+            [[ -n "${geo}" && -s "${geo}/geoip.dat" && -s "${geo}/geosite.dat" &&
+                -n "${probe}" && -f "${probe}" && -z "${config}" && -z "${tls}" ]] ||
+                fail '双库探针未只读挂载完整数据和独立规则'
+            jq -e '.outbounds == [{protocol:"freedom",tag:"direct"}] and .routing.rules == [
+              {type:"field",domain:["geosite:cn"],outboundTag:"direct"},
+              {type:"field",ip:["geoip:cn"],outboundTag:"direct"}]' "${probe}" >/dev/null ||
+                fail '双库探针未强制加载 GeoSite 和 GeoIP'
+            printf 'data\n' >>"${TEST_ROOT}/probe.log"
+            [[ "${MODE}" != probe-fail ]] || status=1
+        else
+            [[ "${*: -3}" == '-test -config /etc/padm/xray/config.json' &&
+                -n "${config}" && -s "${config}/config.json" &&
+                -z "${geo}" && -z "${probe}" && ! -e "${config%/config/xray}/probe.json" ]] ||
+                fail '业务配置探针挂载错误或双库探针规则未清理'
+            printf 'config\n' >>"${TEST_ROOT}/probe.log"
+            [[ "${MODE}" != config-probe-fail ]] || status=1
+        fi
         return "${status}"
         ;;
     pull|rm|stop) ;;
@@ -232,7 +263,7 @@ newState() {
     dockerGenerateImagesEnv "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}/images.env" "${PADM_DOCKER_INSTALL_DIR}"
     printf '# unrelated job\n' >"${TEST_ROOT}/crontab"
     printf '1\n' >"${TEST_ROOT}/running"
-    for log in docker download schedule; do : >"${TEST_ROOT}/${log}.log"; done
+    for log in docker download schedule probe; do : >"${TEST_ROOT}/${log}.log"; done
     rm -f -- "${TEST_ROOT}/failed-once" "${TEST_ROOT}/timer-enabled" "${TEST_ROOT}/timer-active"
     MODE=ok
     FRAGMENT_OVERRIDE=
@@ -276,6 +307,7 @@ runControl 0 geo status
 runControl failure geo schedule enable
 [[ ! -s "${TEST_ROOT}/download.log" ]] || fail '启用调度擅自下载 Geo'
 runControl 0 geo update
+[[ "$(<"${TEST_ROOT}/probe.log")" == $'data\nconfig' ]] || fail '更新未按双库、业务配置顺序完成校验'
 [[ "$(<"$(geoDir)/geoip.dat")" == "valid-${VERSION}-geoip.dat" &&
     "$(<"$(geoDir)/geosite.dat")" == "valid-${VERSION}-geosite.dat" ]] || fail '更新没有提交完整 Geo 文件对'
 dockerGeoStateValidate "$(geoDir)" || fail '提交的 Geo 状态不合法'
@@ -286,6 +318,16 @@ jq -e '.services.xray.environment.XRAY_LOCATION_ASSET == "/etc/padm/xray/geo"' \
 [[ "$(identity)" == "${beforeIdentity}" && "$(<"${TEST_ROOT}/running")" == 1 ]] ||
     fail 'Geo 更新修改身份、累计或其它核心'
 
+for MODE in ok probe-fail; do
+    probe="${TEST_ROOT}/standalone-probe.json"
+    status=0
+    dockerGeoDataProbe "$(geoDir)" "$(jq -er '.images.xray' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json")" \
+        "${probe}" || status=$?
+    [[ "${status}" == "$([[ "${MODE}" == ok ]] && printf 0 || printf 1)" && ! -e "${probe}" ]] ||
+        fail "${MODE}: 共用双库探针没有返回原始状态或清理规则"
+done
+MODE=ok
+
 for running in 0 1; do
     printf '%s\n' "${running}" >"${TEST_ROOT}/running"
     : >"${TEST_ROOT}/docker.log"
@@ -295,13 +337,14 @@ for running in 0 1; do
         fail '停机更新启动了 Xray'
 done
 
-for mode in download-fail digest-fail probe-fail traffic-fail download-term restart-fail restart-term latest-missing latest-multi; do
+for mode in download-fail digest-fail probe-fail config-probe-fail traffic-fail download-term restart-fail restart-term latest-missing latest-multi; do
     newState "failure-${mode}"
     runControl 0 geo update --version "${VERSION}"
     before=$(materials)
     beforeIdentity=$(identity)
     MODE=${mode}
     : >"${TEST_ROOT}/docker.log"
+    : >"${TEST_ROOT}/probe.log"
     expected=failure
     [[ "${mode}" != *-term ]] || expected=143
     if [[ "${mode}" == latest-* ]]; then runControl "${expected}" geo update;
@@ -310,6 +353,11 @@ for mode in download-fail digest-fail probe-fail traffic-fail download-term rest
         "$(<"${TEST_ROOT}/running")" == 1 ]] || fail "${mode}: 更新失败没有恢复完整数据、Compose 和运行状态"
     [[ "${mode}" != traffic-fail ]] || ! grep -q ' up ' "${TEST_ROOT}/docker.log" ||
         fail '采集失败后仍重建 Xray'
+    if [[ "${mode}" == probe-fail ]]; then
+        [[ "$(<"${TEST_ROOT}/probe.log")" == data ]] || fail '双库解析失败后仍校验业务配置'
+    elif [[ "${mode}" == config-probe-fail ]]; then
+        [[ "$(<"${TEST_ROOT}/probe.log")" == $'data\nconfig' ]] || fail '业务配置失败场景未经过双库解析'
+    fi
 done
 
 newState invalid-state

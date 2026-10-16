@@ -1763,12 +1763,16 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 ```
 
 目标须仅安装控制骨架，配置、数据、密钥、日志和备份目录为空，且没有同项目容器。
-当前只接受同架构 v3 普通部署：核心、手动 TLS、静态站、账号/分享身份、已保存流量和 Reality 目标库；
-宿主集成、控制角色/同步、Reality 共存、跳跃、HTTP-01 及尚未导入的 Geo、ACME、
+当前只接受同架构 v3 普通部署：核心、手动 TLS、静态站、账号/分享身份、已保存流量、Reality 目标库和下述受限 Geo 数据；
+宿主集成、控制角色/同步、Reality 共存、跳跃、HTTP-01 及尚未导入的 ACME、
 续期登记文件都会明确拒绝。停用分享组的悬空引用也须先修正。
 Reality 仅恢复 `data/reality-targets/results.tsv`（15/16 列 TSV）及 `blocked.tsv`（4 列 `|` 分隔），
 每文件最多 16 MiB，先完整验证再按原字节复制，保留空列、重复项和自定义屏蔽原因。
 目录为 `0700 root:root`、文件为 `0600 root:root`；不联网刷新，不保证旧评分或握手仍有效。
+Geo 仅接受包含 Xray 且 `state.enabled=false`（自动更新停用）的固定版本受管库，
+按原字节恢复 `config/xray/geo/` 下的 `state.json`、`geoip.dat` 和 `geosite.dat`，两份数据各不超过 128 MiB。
+先核对归档清单和 state 中的数据摘要，再进行无网络 Xray 解析校验；不联网下载 Geo 数据，不恢复自动更新调度。
+`enabled=false` 不停用 Geo 数据；`enabled=true` 的归档明确拒绝，不会关闭自动更新来代替恢复。
 归档的发布、签名身份、清单摘要和镜像必须与独立验签的发布完全一致。
 预览会创建 `0700` 私密暂存、按需拉取固定摘要镜像并运行候选验证容器；
 从原始规格重新生成候选，不执行归档 Compose、镜像环境文件或脚本。
