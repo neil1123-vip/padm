@@ -114,6 +114,7 @@ dockerUsage() {
   padm-docker edit --dns-domains-replace <旧规则> <新规则> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --hosts-input [发布资产参数]（仅交互终端，一个 IP 与精确域名 CSV 整组替换）
   padm-docker edit --hosts-replace <已有精确域名> <新字面 IPv4/IPv6> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts-add <新精确域名> <单个字面 IPv4/IPv6> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts-remove <已有精确域名> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

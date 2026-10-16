@@ -3,13 +3,8 @@ set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-redirect-ownership.XXXXXX")
-RUN_PID=
 cleanup() {
     local status=$?
-    if [[ -n "${RUN_PID}" ]]; then
-        kill -TERM "${RUN_PID}" 2>/dev/null || true
-        wait "${RUN_PID}" 2>/dev/null || true
-    fi
     if [[ "${PADM_TEST_KEEP:-0}" == 1 ]]; then
         printf 'redirect-ownership-test-root: %s\n' "${TEST_ROOT}" >&2
     else rm -rf -- "${TEST_ROOT}"; fi
@@ -443,21 +438,63 @@ output_args=(--output-uid "${OUTPUT_UID}")
 [[ "${output}" != all ]] || output_args=(--output-all)
 for signal in TERM INT; do
     reset
-    env --default-signal=INT --default-signal=TERM sh "${TEST_ROOT}/runner.sh" \
-        "${TEST_ROOT}/functions.sh" run-wait "${PORT}" dual "${output_args[@]}" >"${TEST_ROOT}/output.log" 2>&1 &
-    RUN_PID=$!
-    ready=false
-    for ((attempt=0; attempt<200; attempt++)); do
-        if [[ -f "${FAKE_RD_STATE}/redirect.state" ]] && grep -qx phase=active "${FAKE_RD_STATE}/redirect.state"; then
-            ready=true; break
-        fi
-        kill -0 "${RUN_PID}" 2>/dev/null || break
-        sleep 0.025
-    done
-    [[ "${ready}" == true ]] || fail 'runtime did not become active'
-    kill "-${signal}" "${RUN_PID}"
-    wait "${RUN_PID}" || true
-    RUN_PID=
+    # 只向生产父进程发信号；超时回收本用例会话，不能把整套合同拖成无限等待。
+    python3 - "${TEST_ROOT}" "${FAKE_RD_STATE}" "${signal}" "${PORT}" "${output_args[@]}" <<'PY' ||
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+root, state, signal_name, *arguments = sys.argv[1:]
+
+def session_tasks():
+    tasks = []
+    for entry in Path("/proc").glob("[0-9]*/stat"):
+        try:
+            value = entry.read_text()
+            fields = value[value.rfind(")") + 2:].split()
+            if int(fields[3]) == process.pid and fields[0] not in ("Z", "X"):
+                tasks.append(value.strip())
+        except (FileNotFoundError, ProcessLookupError):
+            pass
+    return tasks
+
+with (Path(root) / "output.log").open("w") as output:
+    process = subprocess.Popen(
+        ["env", "--default-signal=INT", "--default-signal=TERM", "sh",
+         str(Path(root) / "runner.sh"), str(Path(root) / "functions.sh"),
+         "run-wait", *arguments],
+        stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        deadline = time.monotonic() + 5
+        while True:
+            owner = Path(state) / "redirect.state"
+            if owner.is_file() and "phase=active\n" in owner.read_text():
+                break
+            assert process.poll() is None, "Redirect 等待入口提前退出"
+            assert time.monotonic() < deadline, "Redirect 等待入口未进入 active"
+            time.sleep(0.025)
+        process.send_signal(getattr(signal, "SIG" + signal_name))
+        try:
+            status = process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            print("\n".join(session_tasks()), file=sys.stderr)
+            raise AssertionError(f"Redirect {signal_name} 后 10 秒仍未退出") from None
+        assert status in (0, 128 + getattr(signal, "SIG" + signal_name)), status
+        deadline = time.monotonic() + 1
+        while session_tasks() and time.monotonic() < deadline:
+            time.sleep(0.025)
+        assert not session_tasks(), "Redirect 退出后残留等待子进程"
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=2)
+PY
+        fail "runtime ${output}/${signal} signal did not finish"
     assert_empty
 done
 done

@@ -459,6 +459,13 @@ IP 保留原文，包括 IPv6 大小写和写法。空白、末尾换行、CSV�
 定向与菜单 PTY 回归，集中完整 53 项回归通过；
 完整区域策略、冲突检测及原生 hosts 完整迁移仍为 `deferred`。
 
+菜单 `17 → 8` 与交互 CLI `edit --hosts-input` 可输入一个字面 IPv4/IPv6，
+再输入精确 FQDN CSV，整组替换 hosts；旧键不会保留，确认前可取消。
+域名去除首尾空白、ASCII 转小写并去重，接受 1–256 个精确域名；
+不接受规则前缀、通配符或空项。IP 保留原文并复用完整规格校验。
+空输入、`0` 或 EOF 取消；仅限交互 TTY，不能与 `--preview`/`--confirm` 组合。
+原私有 JSON CLI、单键增删/替换、权限与失败恢复保持，支持范围仍为 `deferred`。
+
 ```bash
 padm-docker edit --dns /root/padm-dns.json --preview
 padm-docker edit --dns /root/padm-dns.json --confirm PADM-DOCKER-EDIT
@@ -466,6 +473,7 @@ padm-docker edit --dns-rules 192.0.2.53 53 'example.net,full:exact.example.org' 
 padm-docker edit --dns-domains-add 'full:updates.example.net' --preview
 padm-docker edit --dns-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts /root/padm-hosts.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --hosts-input
 padm-docker edit --hosts-replace Exact.Example.NET 2001:0DB8::10 --preview
 padm-docker edit --hosts-replace exact.example.net 192.0.2.11 --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-add new.example.net 2001:DB8::11 --preview
@@ -786,7 +794,9 @@ gRPC service name、WS/HTTPUpgrade 路径、Hysteria2 拥塞/带宽/混淆/伪�
 菜单可按入口 ID 复制或删除现有协议入口，主核心至少保留一个入口。
 Reality Vision/gRPC、direct Trojan 和 VMess HTTPUpgrade 可复制到另一核心，XHTTP 仅支持 Xray；
 VLESS/VMess WS TLS、VLESS/Trojan gRPC TLS 和传统 TLS fallback 仅支持 Xray 内复制，通用编辑冻结已有入口的 TLS 身份及内部端口。
-Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅支持 sing-box 内复制；已有部署新增这些类型须导入完整 v3 `configure` 规格。
+Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅支持 sing-box 内复制；
+已有 v3 部署可通过“协议与入口”的新增操作或 `edit --protocol-add` 添加受支持协议，
+沿用来源入口身份和已授权账号范围；首次 TLS 仍须提供域名及受管证书。
 Shadowsocks 的方法、服务器/用户密钥、UUID 和已有入口身份冻结，不通过通用编辑轮换凭据。
 AnyTLS/NaiveProxy/direct Trojan 复用通用入口字段编辑，TLS 域名与 UUID 冻结，证书轮换使用证书管理入口。
 NaiveProxy 的入口域名随 TLS 身份固定，不能单独修改为其它域名或 IP。

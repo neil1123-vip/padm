@@ -3840,6 +3840,45 @@ Peer 公钥、IPv6 隧道地址、3 个 reserved 字节和全局/域名模式。
 未改 schema、核心生成、Cloudflare 注册、宿主权限或支持状态；
 原生宿主/arm64/公网出口和完整路由管理继续 deferred，整体计划 active。
 
+#### 5B.4w hosts 批量直接录入
+
+菜单 `17 → 8` 先查状态，再调用交互 `edit --hosts-input`：
+输入一个字面 IPv4/IPv6 和精确 FQDN CSV，明确整组替换且不保留旧键。
+域名去首尾空白、ASCII 转小写并去重，限 1–256 个；
+空项、规则前缀及通配符拒绝，IP 原文由完整规格校验约束。
+空输入/0/EOF 取消，仅交互 TTY，preview/confirm 和其它专项组合拒绝。
+候选为 0600，复用原合并、冻结、一次确认和健康失败/信号恢复；
+旧私有 JSON CLI、单键管理保持，不新增 schema、marker 或权限。
+新增 `docker-routing-hosts-input` 窄 selector，完整合同集中调度。
+本阶段不改变双核心解析语义，完整区域策略、原生 hosts 完整迁移、
+原生宿主/arm64/公网和可信发布继续 deferred，整体计划 active。
+
+只读复核补出长名单边界：普通 `read` 在 Linux 终端规范模式中将
+4351 字节的 256 个域名截成 241 项，末项仍是合法但错误的 FQDN，
+旧逻辑会继续提交。公共读取仅为直接录入的 hosts、SOCKS5/WARP 域名
+和 HTTP relay 来源启用 Bash readline，TTY 提示由 readline 显示，
+避免先显示提示再切换终端模式时快速 Ctrl-D 被提前消费。
+普通字段及管道仍按行读取，兼容已有菜单的预先输入；
+隐藏字段由静默 read 自己显示提示，关闭回显后才接收凭据。
+PTY 用例验证完整 256 项和 257 项拒绝，取消、EOF、TERM
+及提交失败恢复断言保持。初始长名单失败证据
+`.tmp-regression-docker-dc0fdf6731b140e3893347aeae9dc477/`；
+最终修复后 Linux amd64、Jobs 2 的 hosts/WARP 输入分别为 13.403/13.756 秒，
+证据 `.tmp-regression-docker-684a035543e9441298bd68420d7fcb8a/`、
+`.tmp-regression-docker-903c149881ec492a8bf32d7beb245cb8/`；
+SOCKS5 输入 11.129 秒，菜单 20.024 秒，HTTP relay 29.567 秒。
+HTTP relay 新增 256 条 IPv6 来源、超过 4095 字节的 PTY 场景。
+上游往返断言改为 JSON 语义等价，累计仍按字节校验，避免单行夹具与
+jq 格式化差异误报；生产完整规格及累计未发生语义变化。
+集中 `docker-contracts` 59/59 通过，Linux amd64、Jobs 6、456.762 秒，
+证据 `.tmp-regression-docker-b7e310bf88874071afe2a5aae86af11c/`；
+包含完整菜单信号、端口跳跃、传统协议编辑及全部新增输入合同。
+Docker 内 Bash 语法及 ShellCheck error 检查通过，成功源码归档已自动清理。
+Redirect 信号合同改为有界等待并核对会话子进程退出，防止无限挂起；
+失败仍保留日志和诊断，不以超时忽略错误。
+同步修正 SS 独立账号密钥轮换、协议新增、分享组/业务备份和
+TLS-ALPN-01 已交付子能力的过时说明，不升级任何支持或管理状态。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP

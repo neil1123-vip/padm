@@ -90,6 +90,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-menu \
         docker-setup-encrypted-tcp \
         docker-routing-dns-hosts-workflow \
+        docker-routing-hosts-input \
         docker-phase6 \
         docker-entry-port-alias \
         docker-cdn-entries \
@@ -218,7 +219,7 @@ listRegressionDockerRoutingCoreNetworkChildSelectors() {
 }
 
 listRegressionDockerRoutingDnsCsvChildSelectors() {
-    printf '%s\n' docker-routing-dns-hosts-workflow docker-routing-direct-block-csv-workflow
+    printf '%s\n' docker-routing-dns-hosts-workflow docker-routing-hosts-input docker-routing-direct-block-csv-workflow
 }
 
 runDockerTrafficRegression() {
@@ -476,6 +477,10 @@ runDockerRoutingSocks5InputRegression() {
 
 runDockerRoutingWarpInputRegression() {
     PADM_DOCKER_ROUTING_SCOPE=warp-input bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingHostsInputRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=hosts-input bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
 runDockerPhase4MaintenanceRegression() {
@@ -987,6 +992,7 @@ registerRegressionFunctionLeaf docker-routing-ipv6 runDockerRoutingIPv6Regressio
 registerRegressionFunctionLeaf docker-routing-ipv6-real runDockerRoutingIPv6RealRegression
 registerRegressionFunctionLeaf docker-routing-warp runDockerRoutingWarpRegression
 registerRegressionFunctionLeaf docker-routing-warp-input runDockerRoutingWarpInputRegression
+registerRegressionFunctionLeaf docker-routing-hosts-input runDockerRoutingHostsInputRegression
 registerRegressionFunctionLeaf docker-routing-warp-real runDockerRoutingWarpRealRegression
 registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression

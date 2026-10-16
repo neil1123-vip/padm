@@ -271,7 +271,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-reality-targets-direct docker-reality-parameters docker-sites
         docker-routing-direct-block-ip-workflow docker-routing-direct-block-csv-workflow docker-routing-core-policy-lifecycle
         docker-setup-core docker-phase1 docker-menu docker-setup-encrypted-tcp
-        docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
+        docker-routing-dns-hosts-workflow docker-routing-hosts-input docker-phase6 docker-entry-port-alias
         docker-cdn-entries docker-fail2ban-ownership docker-control-state
         docker-reality-targets-selection docker-reality-target-library docker-control-client
         docker-tun-management docker-routing-block-ips-resolved docker-routing-core-contracts docker-http-relay docker-control-cli
@@ -445,6 +445,7 @@ runRegressionDockerContractsAggregateContract() (
     runDockerRoutingSocks5LifecycleRegression
     runDockerRoutingSocks5InputRegression
     runDockerRoutingWarpInputRegression
+    runDockerRoutingHostsInputRegression
     runDockerRoutingDnsWorkflowRegression
     runDockerRoutingHostsWorkflowRegression
     runDockerRoutingDirectBlockWorkflowRegression
@@ -455,7 +456,7 @@ runRegressionDockerContractsAggregateContract() (
         core-lifecycle:all:routing-socks5.sh core-network-lifecycle:warp:routing-socks5.sh \
         core-network-lifecycle:ipv6:routing-socks5.sh core-policy-lifecycle:region:routing-socks5.sh \
         core-policy-lifecycle:bt:routing-socks5.sh core-policy-lifecycle:socks5:routing-socks5.sh \
-        socks5-input:all:routing-socks5.sh warp-input:all:routing-socks5.sh \
+        socks5-input:all:routing-socks5.sh warp-input:all:routing-socks5.sh hosts-input:all:routing-socks5.sh \
         domains-dns-hosts:dns:routing-socks5.sh domains-dns-hosts:hosts:routing-socks5.sh \
         domains-direct-block:all:routing-socks5.sh \
         domains-direct-block-ip:all:routing-socks5.sh domains-direct-block-csv:all:routing-socks5.sh >"${expectedLog}"
@@ -464,6 +465,7 @@ runRegressionDockerContractsAggregateContract() (
     [[ -z "${PADM_DOCKER_ROUTING_BRANCH:-}" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-routing-socks5-input]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-routing-warp-input]}" == function ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-routing-hosts-input]}" == function ]]
 
     bash() {
         printf '%s:%s:%s\n' "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" \

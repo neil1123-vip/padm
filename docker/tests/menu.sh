@@ -1609,7 +1609,8 @@ runRoutingDriver() {
         targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'Docker 路由与出站' $'7\n'
         targetReply 'Docker 路由与出站' $'8\n'
-        targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'/root/padm-hosts.json\n'
+        [[ "${scenario}" == failed ]] ||
+            targetReply 'fixture-hosts-input-confirm [y/N]' $'y\n'
         targetReply 'Docker 路由与出站' $'9\n'
         targetReply 'Docker 路由与出站' $'10\n'
         targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
@@ -1737,10 +1738,10 @@ runRoutingDriver() {
             targetReply 'DNS 端口 [53，0 返回]' $'\n'
             targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
         done
-        targetReply 'Docker 路由与出站' $'8\n'
-        targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'0\n'
-        targetReply 'Docker 路由与出站' $'8\n'
-        targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'\n'
+        for input in 0 '' n; do
+            targetReply 'Docker 路由与出站' $'8\n'
+            targetReply 'fixture-hosts-input-confirm [y/N]' "${input}"$'\n'
+        done
         for choice in 10 12; do
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
             targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
@@ -1857,9 +1858,14 @@ runRoutingDriver() {
             fi
         fi
         ;;
-    hosts-file-eof)
+    hosts-input-eof|hosts-input-status-failed|hosts-input-commit-failed)
         targetReply 'Docker 路由与出站' $'8\n'
-        targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'\004'
+        if [[ "${scenario}" != hosts-input-status-failed ]]; then
+            input=$'\004'
+            [[ "${scenario}" != hosts-input-commit-failed ]] || input=$'y\n'
+            targetReply 'fixture-hosts-input-confirm [y/N]' "${input}"
+        fi
+        targetReply 'Docker 路由与出站' $'3\n'
         ;;
     direct-domains-eof|block-domains-eof)
         if [[ "${scenario}" == direct-domains-eof ]]; then
@@ -2945,17 +2951,17 @@ protocol)
 edit)
     recordAction "$@"
     if [[ "${2:-}" == --socks5-input || "${2:-}" == --http-relay-input ||
-        "${2:-}" == --warp-input ]]; then
+        "${2:-}" == --warp-input || "${2:-}" == --hosts-input ]]; then
         # 菜单只核对无凭据参数分发及取消；实际录入由对应路由合同覆盖。
         [[ "$#" -eq 2 ]] || exit 2
         family=${2#--}
         printf 'fixture-%s-confirm [y/N]: ' "${family}"
         if ! IFS= read -r confirmation; then
             recordAction "${family}-confirm" eof
-            exit 2
+            exit 0
         fi
         recordAction "${family}-confirm" "${confirmation}"
-        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${confirmation}" == y ]] || exit 0
         [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
         recordAction "${family}-commit"
     elif [[ "${2:-}" == --protocol-add ]]; then
@@ -3786,7 +3792,7 @@ unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 fi
 
 if [[ "${MENU_SCOPE}" != port-alias && "${MENU_SCOPE}" != xhttp ]]; then
-for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
+for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-input-eof hosts-input-status-failed hosts-input-commit-failed direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
     domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \
     ip-replace-flow ip-replace-cancel ip-replace-status-failed ip-replace-state-failed \
@@ -3818,6 +3824,7 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
     [[ "${routingCase}" != upstream-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != http-relay-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != warp-input-status-failed ]] || ROUTING_STATUS=17
+    [[ "${routingCase}" != hosts-input-status-failed ]] || ROUTING_STATUS=17
     [[ "${routingCase}" != tproxy-status-failed ]] || TPROXY_STATUS=17
     [[ "${routingCase}" != tun-status-failed ]] || TUN_STATUS=17
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
@@ -3830,6 +3837,7 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
         "${routingCase}" != *-replace-commit-failed &&
         "${routingCase}" != socks5-input-commit-failed &&
         "${routingCase}" != warp-input-commit-failed &&
+        "${routingCase}" != hosts-input-commit-failed &&
         "${routingCase}" != access-control-failed &&
         "${routingCase}" != upstream-commit-failed &&
         "${routingCase}" != http-relay-commit-failed &&
@@ -3846,10 +3854,13 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
         if [[ "${routingCase}" == flow ]]; then
             expectedRouting+=$'\nedit --socks5-input\nsocks5-input-confirm y\nsocks5-input-commit'
         else
-            ! grep -Eq 'fixture-(socks5|http-relay|warp)-input-confirm' "${CONTROL_LOG}" ||
-                fail '路由状态失败后仍进入凭据录入'
+            ! grep -Eq 'fixture-(socks5|http-relay|warp|hosts)-input-confirm' "${CONTROL_LOG}" ||
+                fail '路由状态失败后仍进入直接录入'
         fi
-        expectedRouting+=$'\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips-csv 192.0.2.10, 2001:DB8::10, geoip:cn\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
+        expectedRouting+=$'\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nprotocol routing-status'
+        [[ "${routingCase}" != flow ]] ||
+            expectedRouting+=$'\nedit --hosts-input\nhosts-input-confirm y\nhosts-input-commit'
+        expectedRouting+=$'\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips-csv 192.0.2.10, 2001:DB8::10, geoip:cn\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip'
         expectedRouting+=$'\nedit --region-allow-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-allow-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com'
@@ -3903,24 +3914,47 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
             expectedRouting+=$'protocol routing-status\nedit --socks5-input\nsocks5-input-confirm '"${socksInput}"
         done
         expectedRouting+=$'\nprotocol routing-status\nprotocol routing-status\nprotocol routing-status\nprotocol routing-status'
+        for hostsInput in 0 '' n; do
+            expectedRouting+=$'\nprotocol routing-status\nedit --hosts-input\nhosts-input-confirm '"${hostsInput}"
+        done
         for warpInput in 0 '' n; do
             expectedRouting+=$'\nprotocol routing-status\nedit --warp-input\nwarp-input-confirm '"${warpInput}"
         done
         for httpRelayInput in 0 '' n; do
             expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-input\nhttp-relay-input-confirm '"${httpRelayInput}"
         done
+        ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" ||
+            fail '直接录入取消被误报为操作失败'
         ;;
     socks5-input-eof|socks5-input-commit-failed)
-        socksConfirmation=eof socksExit=2
+        # 空退出码匹配全部失败提示，取消时必须一条也没有。
+        socksConfirmation=eof socksExit= socksFailureCount=0
         [[ "${routingCase}" != socks5-input-commit-failed ]] ||
-            { socksConfirmation=y; socksExit=15; }
+            { socksConfirmation=y; socksExit=15; socksFailureCount=1; }
         expectedRouting=$'protocol routing-status\nedit --socks5-input\nsocks5-input-confirm '"${socksConfirmation}"$'\nprotocol routing-status'
-        [[ "$(grep -Fc "操作失败，退出码: ${socksExit}" "${CONTROL_LOG}")" -eq 1 ]] ||
-            fail 'SOCKS5 输入取消或提交失败后未显示退出码并继续诊断'
+        [[ "$(grep -Fc "操作失败，退出码: ${socksExit}" "${CONTROL_LOG}" || true)" -eq "${socksFailureCount}" ]] ||
+            fail 'SOCKS5 输入取消被误报失败，或提交失败未显示退出码并继续诊断'
+        ;;
+    hosts-input-eof|hosts-input-status-failed|hosts-input-commit-failed)
+        expectedRouting='protocol routing-status'
+        hostsInputExit= hostsInputFailureCount=0
+        if [[ "${routingCase}" == hosts-input-status-failed ]]; then
+            hostsInputExit=17 hostsInputFailureCount=2
+            ! grep -Fq 'fixture-hosts-input-confirm' "${CONTROL_LOG}" ||
+                fail 'hosts 状态失败后仍进入整组录入'
+        else
+            hostsInputConfirmation=eof
+            [[ "${routingCase}" != hosts-input-commit-failed ]] ||
+                { hostsInputConfirmation=y; hostsInputExit=15; hostsInputFailureCount=1; }
+            expectedRouting+=$'\nedit --hosts-input\nhosts-input-confirm '"${hostsInputConfirmation}"
+        fi
+        expectedRouting+=$'\nprotocol routing-status'
+        [[ "$(grep -Fc "操作失败，退出码: ${hostsInputExit}" "${CONTROL_LOG}" || true)" -eq "${hostsInputFailureCount}" ]] ||
+            fail 'hosts 整组录入取消被误报失败，或失败后未显示退出码并继续诊断'
         ;;
     warp-eof|warp-input-status-failed|warp-input-commit-failed)
         expectedRouting='protocol routing-status'
-        warpInputExit=2 warpInputFailureCount=1
+        warpInputExit= warpInputFailureCount=0
         if [[ "${routingCase}" == warp-input-status-failed ]]; then
             warpInputExit=17 warpInputFailureCount=2
             ! grep -Fq 'fixture-warp-input-confirm' "${CONTROL_LOG}" ||
@@ -3928,12 +3962,12 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
         else
             warpInputConfirmation=eof
             [[ "${routingCase}" != warp-input-commit-failed ]] ||
-                { warpInputConfirmation=y; warpInputExit=15; }
+                { warpInputConfirmation=y; warpInputExit=15; warpInputFailureCount=1; }
             expectedRouting+=$'\nedit --warp-input\nwarp-input-confirm '"${warpInputConfirmation}"
         fi
         expectedRouting+=$'\nprotocol routing-status'
-        [[ "$(grep -Fc "操作失败，退出码: ${warpInputExit}" "${CONTROL_LOG}")" -eq "${warpInputFailureCount}" ]] ||
-            fail 'WARP 录入取消或失败后未显示退出码并继续诊断'
+        [[ "$(grep -Fc "操作失败，退出码: ${warpInputExit}" "${CONTROL_LOG}" || true)" -eq "${warpInputFailureCount}" ]] ||
+            fail 'WARP 录入取消被误报失败，或失败后未显示退出码并继续诊断'
         ;;
     socks5-domains-eof|socks5-domains-status-failed)
         expectedRouting=$'protocol routing-status\nprotocol routing-status'
@@ -4213,7 +4247,7 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
             expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-port 18888\nhttp-relay-confirm --http-relay-port n'
             expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-sources 192.0.2.11, 2001:0DB8::/64\nhttp-relay-confirm --http-relay-sources eof'
             expectedRouting+=$'\nprotocol routing-status'
-            httpRelayConfirmCount=2 httpRelayFailureCount=5 httpRelayExit=2
+            httpRelayConfirmCount=2 httpRelayFailureCount=2 httpRelayExit=2
         elif [[ "${routingCase}" == http-relay-status-failed ]]; then
             expectedRouting=$(printf 'protocol routing-status\n%.0s' {1..6})
             httpRelayConfirmCount=0 httpRelayFailureCount=6 httpRelayExit=17
@@ -4246,8 +4280,8 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
         ;;
     http-relay-eof)
         expectedRouting=$'protocol routing-status\nedit --http-relay-input\nhttp-relay-input-confirm eof\nprotocol routing-status'
-        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 1 ]] ||
-            fail 'HTTP 中继输入 EOF 后未显示退出码并继续诊断'
+        ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" ||
+            fail 'HTTP 中继输入 EOF 被误报为操作失败'
         ;;
     block-ips-mode-flow|block-ips-mode-failed)
         for flag in --block-ips-resolve --block-ips-literal; do
@@ -4361,7 +4395,7 @@ for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domai
     if [[ "${routingCase}" == flow ]]; then
         for label in '17. 路由与出站' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
             '3. 查看路由状态' '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
-            '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 设置 hosts 覆盖' \
+            '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 直接录入 hosts（整组替换）' \
             '9. 关闭 hosts 覆盖' '10. 替换 Direct 直连例外' '11. 关闭 Direct 直连例外' \
             '12. 替换 Block 域名阻断' '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' '17. 关闭 BT 协议阻断' \

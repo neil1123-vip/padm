@@ -403,8 +403,9 @@ rotation. Each change uses a private draft, candidate validation, backup, and he
 transaction; untouched accounts, totals, and quotas remain unchanged, while copies receive
 new stable identities and credentials. Ordinary output includes self-use and enabled
 accounts under the deployment-wide token, not independent share subscriptions. Share groups,
-per-account publishing authorization, pure-content copy, and business backup/restore remain
-unavailable.
+per-account publishing authorization, pure-content copy, and business backup/restore are
+available through the account and subscription workflows; host integration and the
+complete multi-server lifecycle remain deferred.
 
 Use the menu's configuration editor or `padm-docker edit` to change public ports,
 server addresses, address families, node names, Reality targets/SNI, WS paths, or
@@ -414,7 +415,9 @@ certificates, host integrations, and accumulated traffic remain unchanged.
 The menu can copy or delete an existing protocol listener by listener ID; the primary
 core must retain at least one listener. Reality can be copied to the other core.
 Hysteria2, AnyTLS, NaiveProxy, Shadowsocks, and TUIC can only be copied within sing-box.
-Adding these protocol types to an existing deployment requires a complete v3 `configure` spec.
+An existing v3 deployment can add supported protocols through the protocol menu or
+`edit --protocol-add`, reusing the source identity and explicitly authorized accounts.
+Adding the first TLS listener also requires its domain and managed certificate.
 Shadowsocks method, keys, UUID, and existing listener identity remain frozen during editing.
 Deleting the last secondary-core listener disables that core; existing listener ownership cannot change.
 Copies reuse the original credentials. Listeners with the same
@@ -1806,7 +1809,17 @@ the full configuration, share URIs, subscriptions and cumulative traffic are pre
 Focused Linux amd64 and menu PTY verification passes; integrated Docker contracts pass (53/53).
 Complete native hosts migration, region policy and conflict detection remain deferred.
 
+Menu `17 → 8` and interactive `edit --hosts-input` accept one literal IPv4/IPv6
+and a CSV list of exact FQDNs, replacing the whole hosts map after confirmation.
+Existing keys are removed. Domain whitespace is trimmed, ASCII letters lowercased
+and duplicates removed; 1–256 distinct exact domains are accepted. Rule prefixes,
+wildcards and empty items are rejected. The IP is kept verbatim and checked by the
+full specification validator. Blank input, `0` or EOF cancels. This requires a TTY
+and rejects `--preview`/`--confirm`. Private JSON import, single-key editing,
+permissions and recovery remain available; support status stays deferred.
+
 ```bash
+padm-docker edit --hosts-input
 padm-docker edit --hosts-replace Exact.Example.NET 2001:0DB8::10 --preview
 padm-docker edit --hosts-replace exact.example.net 192.0.2.11 --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-add new.example.net 2001:DB8::11 --preview

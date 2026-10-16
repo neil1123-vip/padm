@@ -1424,7 +1424,7 @@ dockerMenuRouting() {
         printf '\nDocker 路由与出站\n'
         printf '%s\n' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' '3. 查看路由状态' \
             '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
-            '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 设置 hosts 覆盖' \
+            '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 直接录入 hosts（整组替换）' \
             '9. 关闭 hosts 覆盖' '10. 替换 Direct 直连例外' \
             '11. 关闭 Direct 直连例外' '12. 替换 Block 域名阻断' \
             '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
@@ -1487,9 +1487,8 @@ dockerMenuRouting() {
             ;;
         7) dockerMenuRun edit --dns-off || true ;;
         8)
-            dockerSetupRead input 'root 私有 hosts JSON 文件绝对路径（0 返回）: ' &&
-                [[ -n "${input}" ]] || continue
-            dockerMenuRun edit --hosts "${input}" || true
+            dockerMenuRun protocol routing-status || continue
+            dockerMenuRun edit --hosts-input || true
             ;;
         9) dockerMenuRun edit --hosts-off || true ;;
         10|12)

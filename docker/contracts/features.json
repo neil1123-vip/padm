@@ -209,7 +209,7 @@
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box Shadowsocks 2022 AES-128 多用户首配、完整规格导入、入口编辑、同核复制与删除及 SIP002 分享链接；TCP/UDP 双栈，复用 UUID 流量与额度，宿主集成组合、凭据轮换及完整用户管理尚未开放。"
+      "reason": "v3 支持 sing-box Shadowsocks 2022 AES-128 多用户首配、完整规格导入、入口编辑、同核复制与删除及 SIP002 分享链接；TCP/UDP 双栈，复用 UUID 流量与额度。Docker 账号子命令支持 SS 账号创建、复制、授权关联/移除、独立密钥轮换及失败恢复；入口自用密钥、宿主集成组合和完整协议/用户管理仍未开放。"
     },
     {
       "id": 31,
@@ -441,7 +441,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已交付两核心认证 SOCKS5 TCP 全局/选择性出站、DNS/精确 hosts、域名 Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT、CN 区域预设、IPv6 AAAA-only 出站和用户态 WARP。菜单/CLI 支持既有名单增删及单条替换、hosts 单键增删/替换、DNS/SOCKS5 上游修改和区域模式/自定义例外；5B.4u 支持 SOCKS5 上游、静默认证及全局/域名模式直接录入，5B.4v 支持已有 WARP Peer 七字段直接录入、静默私钥，旧私有 JSON CLI 保留。有限重叠与 full/domain/keyword 覆盖诊断只读，不预测最终流量。Direct 优先，关闭保留其它策略，代理或匹配 DNS 失败不回退；私有参数、其它配置与累计冻结，复用候选及失败/信号恢复。5B.4r/4s 提供单 sing-box、无副核心的显式解析后 IP 阻断及 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析，重新阻断后立即选路，代理绑定已检查的字面地址，解析失败拒绝；缺省字面模式保持，基础 flag 与组合分别由独立 bundle marker 保护。Xray 解析后阻断、SOCKS UDP 入站认证撤销、完整区域/语义冲突检测仍未交付。WARP 本地加密 Peer 已验，Cloudflare 账号、公网出口及原生宿主/arm64/可信发布仍待验，整体 deferred 不升级。"
+      "reason": "已交付两核心认证 SOCKS5 TCP 全局/选择性出站、DNS/精确 hosts、域名 Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT、CN 区域预设、IPv6 AAAA-only 出站和用户态 WARP。菜单/CLI 支持既有名单增删及单条替换、hosts 单键增删/替换、DNS/SOCKS5 上游修改和区域模式/自定义例外；5B.4u 支持 SOCKS5 上游、静默认证及全局/域名模式直接录入，5B.4v 支持已有 WARP Peer 七字段直接录入、静默私钥，5B.4w 支持一个字面 IP 与 1–256 个精确 FQDN 的 hosts 整组直接录入，旧私有 JSON CLI 保留。有限重叠与 full/domain/keyword 覆盖诊断只读，不预测最终流量。Direct 优先，关闭保留其它策略，代理或匹配 DNS 失败不回退；私有参数、其它配置与累计冻结，复用候选及失败/信号恢复。5B.4r/4s 提供单 sing-box、无副核心的显式解析后 IP 阻断及 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析，重新阻断后立即选路，代理绑定已检查的字面地址，解析失败拒绝；缺省字面模式保持，基础 flag 与组合分别由独立 bundle marker 保护。Xray 解析后阻断、SOCKS UDP 入站认证撤销、完整区域/语义冲突检测仍未交付。WARP 本地加密 Peer 已验，Cloudflare 账号、公网出口及原生宿主/arm64/可信发布仍待验，整体 deferred 不升级。"
     },
     "internal-201-socks-relay": {
       "status": "deferred",
@@ -495,7 +495,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "两核心 DNS、精确 hosts、Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT 和 CN 区域预设已交付；菜单/CLI 支持名单增删/单条替换、hosts 单键管理、DNS/SOCKS5 上游修改和区域模式/自定义例外，配置及累计保护复用部署事务。IPv6 与用户态 WARP 保持独立所有权，Direct 优先，解析或代理失败不回退。只读精确重叠和 full/domain/keyword 覆盖不推断 GeoSite、DNS 或最终流量。5B.4r/4s 菜单 17→45/46 与 --block-ips-resolve/--block-ips-literal 提供已有手工 IP 名单的解析模式：仅单 sing-box、无副核心，支持 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析后重新匹配 IP 并立即选路，代理绑定经检查的字面地址，DNS 失败拒绝；缺省及旧状态保持，基础 flag 由 x-padm-routing-block-ips-resolve 保护，组合另需 x-padm-routing-block-ips-resolve-egress。名单编辑保留模式，删空/关闭移除；模式专项只允许 flag 漂移，支持预览、健康失败/INT/TERM 恢复。Xray、完整区域及语义冲突检测、原生宿主/arm64/公网仍待交付或验收，206 不作为公开节点协议，整体 deferred 不升级。"
+      "reason": "两核心 DNS、精确 hosts、Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT 和 CN 区域预设已交付；菜单/CLI 支持名单增删/单条替换、hosts 单键管理及单 IP/精确 FQDN CSV 整组直接录入、DNS/SOCKS5 上游修改和区域模式/自定义例外，配置及累计保护复用部署事务。IPv6 与用户态 WARP 保持独立所有权，Direct 优先，解析或代理失败不回退。只读精确重叠和 full/domain/keyword 覆盖不推断 GeoSite、DNS 或最终流量。5B.4r/4s 菜单 17→45/46 与 --block-ips-resolve/--block-ips-literal 提供已有手工 IP 名单的解析模式：仅单 sing-box、无副核心，支持 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析后重新匹配 IP 并立即选路，代理绑定经检查的字面地址，DNS 失败拒绝；缺省及旧状态保持，基础 flag 由 x-padm-routing-block-ips-resolve 保护，组合另需 x-padm-routing-block-ips-resolve-egress。名单编辑保留模式，删空/关闭移除；模式专项只允许 flag 漂移，支持预览、健康失败/INT/TERM 恢复。Xray、完整区域及语义冲突检测、原生宿主/arm64/公网仍待交付或验收，206 不作为公开节点协议，整体 deferred 不升级。"
     },
     "internal-207-access-control": {
       "status": "deferred",

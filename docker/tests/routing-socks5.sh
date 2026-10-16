@@ -224,7 +224,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-network-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != socks5-input &&
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" != warp-input ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != warp-input &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != hosts-input ]]; then
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy
@@ -1470,6 +1471,213 @@ PY
     done
     printf 'docker-routing-socks5-input-regression-ok\n'
 }
+hostsInputCheck() {
+    local name actual expected before composeBefore variable worker="${TEST_ROOT}/hosts-input.sh"
+    local original="${TEST_ROOT}/hosts-input-original.json" hostsInputDataBefore
+    local -a inputArgs=()
+    cp -- "${root}/config/spec.json" "${original}"
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/warp-owner.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化 hosts 录入组合夹具失败'
+    assertClean
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/hosts-input.before"
+    for core in xray sing-box; do
+        cp -- "${root}/config/${core}/config.json" "${TEST_ROOT}/hosts-input-${core}.before"
+    done
+    (dockerMain protocol links) >"${TEST_ROOT}/hosts-input-links.before"
+    hostsInputDataBefore=$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)
+    # PTY 只替换输入驱动，完整组合规格、候选和失败恢复继续走生产事务。
+    (
+        umask 077
+        printf '#!/usr/bin/env bash\nset -Euo pipefail\n'
+        while IFS= read -r variable; do
+            declare -p "${variable}"
+        done < <(compgen -A variable | grep -E '^(PADM_|DOCKER_|TEST_ROOT$|MODE$|LOG$|COMPOSE_LOG$|root$)')
+        declare -f
+        printf 'MODE=${1:-ok}\ndockerMain edit --hosts-input\n'
+    ) >"${worker}"
+    for name in ipv4 ipv6 boundary-256 cancel-ip blank-ip eof-ip cancel-domains blank-domains \
+        eof-domains invalid-ip invalid-ip-list invalid-ip-domain invalid-loopback invalid-prefix \
+        invalid-wildcard invalid-empty invalid-leading-empty invalid-trailing-empty invalid-space \
+        invalid-unicode invalid-overlimit final-cancel final-eof term-ip term-domains \
+        health-fail commit-int commit-term; do
+        before=$(snapshot)
+        composeBefore=$(cat "${COMPOSE_LOG}")
+        rm -f -- "${TEST_ROOT}/failed-once"
+        expected=0
+        case "${name}" in
+        invalid-*) expected=15 ;;
+        health-fail) expected=14 ;;
+        term-*|commit-term) expected=143 ;;
+        commit-int) expected=130 ;;
+        esac
+        actual=0
+        python3 - "${worker}" "${LOG}" "${TEST_ROOT}/hosts-input.expected.json" "${name}" <<'PY' || actual=$?
+import errno
+import json
+import os
+import pty
+import select
+import signal
+import sys
+import time
+
+worker, log, expected_file, scenario = sys.argv[1:]
+address = "2001:0DB8::11" if scenario == "ipv6" else "203.0.113.11"
+domains = " Exact.Example.Com , ADDED.Example.NET , exact.example.com "
+if scenario.startswith("boundary-") or scenario == "invalid-overlimit":
+    domains = ",".join(f"h{n:03}.example.com" for n in range(257 if scenario == "invalid-overlimit" else 256))
+invalid = {
+    "invalid-ip": ("999.0.0.1", domains),
+    "invalid-ip-list": ("203.0.113.11,203.0.113.12", domains),
+    "invalid-ip-domain": ("backend.example.com", domains),
+    "invalid-loopback": ("127.0.0.1", domains),
+    "invalid-prefix": (address, "full:exact.example.com"),
+    "invalid-wildcard": (address, "*.example.com"),
+    "invalid-empty": (address, "exact.example.com,,added.example.net"),
+    "invalid-leading-empty": (address, ",exact.example.com"),
+    "invalid-trailing-empty": (address, "exact.example.com,"),
+    "invalid-space": (address, "exa ct.example.com"),
+    "invalid-unicode": (address, "\u212a.example.com"),
+}
+address, domains = invalid.get(scenario, (address, domains))
+with open(expected_file, "w") as stream:
+    json.dump({domain.strip().lower(): address for domain in domains.split(",")}, stream)
+mode = {"health-fail": "health-fail", "commit-int": "int", "commit-term": "term"}.get(scenario, "ok")
+pid, terminal = pty.fork()
+if pid == 0:
+    os.execv("/bin/bash", ["bash", worker, mode])
+output = bytearray()
+
+def wait_for(prompt):
+    deadline = time.monotonic() + 15
+    while prompt.encode() not in output:
+        if time.monotonic() >= deadline:
+            raise AssertionError("hosts 输入提示超时: " + prompt)
+        if select.select([terminal], [], [], 0.1)[0]:
+            data = os.read(terminal, 65536)
+            if not data:
+                raise AssertionError("hosts 输入提前结束")
+            output.extend(data)
+
+try:
+    stopped = False
+    for prompt, value, field in [
+        ("hosts IPv4/IPv6", address, "ip"),
+        ("hosts 精确域名 CSV", domains, "domains"),
+    ]:
+        wait_for(prompt)
+        if scenario == "term-" + field:
+            os.kill(pid, signal.SIGTERM)
+        elif scenario == "eof-" + field:
+            os.write(terminal, b"\x04")
+        elif scenario == "cancel-" + field:
+            os.write(terminal, b"0\n")
+        elif scenario == "blank-" + field:
+            os.write(terminal, b"\n")
+        else:
+            os.write(terminal, (value + "\n").encode())
+            continue
+        stopped = True
+        break
+    if not stopped and not scenario.startswith("invalid-"):
+        wait_for("候选配置已验证，确认提交？[y/N]")
+        assert "整组替换 hosts 映射".encode() in output
+        os.write(terminal, b"n\n" if scenario == "final-cancel" else
+                 b"\x04" if scenario == "final-eof" else b"y\n")
+    deadline = time.monotonic() + 20
+    while True:
+        if time.monotonic() >= deadline:
+            raise AssertionError("hosts 输入子进程未退出")
+        if select.select([terminal], [], [], 0.1)[0]:
+            try:
+                data = os.read(terminal, 65536)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                break
+            if not data:
+                break
+            output.extend(data)
+    _, status = os.waitpid(pid, 0)
+    sys.exit(os.waitstatus_to_exitcode(status))
+finally:
+    with open(log, "wb") as stream:
+        stream.write(output)
+    os.close(terminal)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+PY
+        [[ "${actual}" == "${expected}" ]] || fail "${name}: hosts 录入预期 ${expected}，实际 ${actual}"
+        assertClean
+        ! grep -Fq -e "${USERNAME}" -e "${PASSWORD}" -e "${WARP_PRIVATE}" -e 'routing-regression-token' "${LOG}" ||
+            fail 'hosts 录入泄露既有私有字段'
+        case "${name}" in
+        ipv4|ipv6|boundary-256)
+            jq -en --slurpfile hosts "${TEST_ROOT}/hosts-input.expected.json" \
+                --slurpfile old "${TEST_ROOT}/hosts-input.before" --slurpfile new "${root}/config/spec.json" '
+              $new[0] == ($old[0] | .routing.hosts = $hosts[0])
+            ' >/dev/null || fail "${name}: hosts 录入未整组替换、规范化域名或保持其它完整规格"
+            [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+                fail 'hosts 录入改变私有规格权限'
+            for core in xray sing-box; do
+                jq -en --arg core "${core}" --argjson old_hosts "${HOSTS}" \
+                    --slurpfile hosts "${TEST_ROOT}/hosts-input.expected.json" \
+                    --slurpfile old "${TEST_ROOT}/hosts-input-${core}.before" \
+                    --slurpfile actual "${root}/config/${core}/config.json" '
+                  $actual[0] == ($old[0] | if $core=="xray" then
+                    .dns.hosts = ($hosts[0] | with_entries(.key = "full:" + .key))
+                  else
+                    .dns.servers |= map(if .tag=="padm-hosts" then .predefined=$hosts[0] else . end) |
+                    walk(if type=="object" then
+                      if .domain==($old_hosts|keys) then .domain=($hosts[0]|keys) else . end
+                    else . end)
+                  end)
+                ' >/dev/null || fail "${name}/${core}: hosts 录入改变映射及派生名单以外的生成"
+            done
+            (dockerMain protocol links) >"${TEST_ROOT}/hosts-input-links.after"
+            cmp -s "${TEST_ROOT}/hosts-input-links.before" "${TEST_ROOT}/hosts-input-links.after" &&
+                [[ "$(find "${root}/data" -type f -print0 | sort -z | xargs -0 -r sha256sum)" == "${hostsInputDataBefore}" ]] ||
+                fail 'hosts 录入改变分享 URI、订阅或非空累计流量'
+            ;;
+        final-cancel|final-eof)
+            [[ "$(snapshot)" == "${before}" &&
+                "$(grep '^live:' "${COMPOSE_LOG}")" == "$(grep '^live:' <<<"${composeBefore}")" ]] ||
+                fail 'hosts 最终确认取消改变部署或执行在线 Compose'
+            ;;
+        health-fail|commit-int|commit-term)
+            [[ -e "${TEST_ROOT}/failed-once" && "$(snapshot)" == "${before}" ]] ||
+                fail "${name}: hosts 录入未恢复完整部署和非空流量"
+            ;;
+        *)
+            [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+                fail "${name}: hosts 取消或非法录入改变部署或调用 Compose"
+            ;;
+        esac
+    done
+    before=$(snapshot)
+    composeBefore=$(cat "${COMPOSE_LOG}")
+    runEdit 2 --hosts-input
+    for name in '--preview' '--confirm PADM-DOCKER-EDIT' '--hosts-off --preview' \
+        "--hosts ${HOSTS_INPUT} --preview" '--hosts-input --preview' '--warp-input' \
+        '--socks5-input' "--spec ${TEST_ROOT}/base.json --preview" '--http-relay-off --preview'; do
+        read -r -a inputArgs <<<"${name}"
+        runEdit 2 --hosts-input "${inputArgs[@]}"
+    done
+    [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+        fail 'hosts 录入互斥或非 TTY 参数改变部署或调用 Compose'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${original}" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '恢复 hosts 录入原始夹具失败'
+    assertClean
+    printf 'docker-routing-hosts-input-regression-ok\n'
+}
 warpInputCheck() {
     local name actual expected before composeBefore variable worker="${TEST_ROOT}/warp-input.sh"
     local original="${TEST_ROOT}/warp-input-original.json"
@@ -1930,7 +2138,9 @@ upstreamEditCheck() {
           .server == "2001:0DB8::54" and .port == 5354
         ' "${LOG}" >/dev/null || fail "${kind}: 上游状态未显示实际地址和端口"
         runEdit 0 "${option}" "${oldServer}" "${oldPort}" --confirm PADM-DOCKER-EDIT
-        cmp -s "${root}/config/spec.json" "${TEST_ROOT}/upstream.before" &&
+        jq -en --slurpfile old "${TEST_ROOT}/upstream.before" \
+            --slurpfile actual "${root}/config/spec.json" \
+            '$old[0] == $actual[0]' >/dev/null &&
             [[ "$(sha256sum "${root}/data/traffic/state.json")" == "${trafficBefore}" ]] ||
             fail "${kind}: 上游往返未保留完整规格和累计"
     done
@@ -2338,6 +2548,10 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == socks5-input ]]; then
 fi
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp-input ]]; then
     warpInputCheck
+    exit 0
+fi
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == hosts-input ]]; then
+    hostsInputCheck
     exit 0
 fi
 if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
@@ -4500,15 +4714,15 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
 menuLog="${TEST_ROOT}/routing-menu.log"
 (
     dockerMenuRun() { printf '%s\n' "$*" >>"${menuLog}"; }
-    dockerMenuRouting < <(printf '6\n0\n8\n0\n0\n')
+    dockerMenuRouting < <(printf '6\n0\n0\n')
 ) >"${LOG}" 2>&1
-[[ ! -e "${menuLog}" ]] || fail 'DNS/hosts 菜单路径取消仍调用编辑'
+[[ ! -e "${menuLog}" ]] || fail 'DNS 菜单路径取消仍调用编辑'
 (
     dockerMenuRun() { printf '%s\n' "$*" >>"${menuLog}"; }
-    dockerMenuRouting < <(printf '6\n203.0.113.53\n\n%s\n7\n8\n%s\n9\n0\n' "${DNS_CSV}" "${HOSTS_INPUT}")
+    dockerMenuRouting < <(printf '6\n203.0.113.53\n\n%s\n7\n8\n9\n0\n' "${DNS_CSV}")
 ) >"${LOG}" 2>&1
-printf 'edit --dns-rules 203.0.113.53 53 %s\nedit --dns-off\nedit --hosts %s\nedit --hosts-off\n' \
-    "${DNS_CSV}" "${HOSTS_INPUT}" >"${TEST_ROOT}/routing-menu.expected"
+printf 'edit --dns-rules 203.0.113.53 53 %s\nedit --dns-off\nprotocol routing-status\nedit --hosts-input\nedit --hosts-off\n' \
+    "${DNS_CSV}" >"${TEST_ROOT}/routing-menu.expected"
 cmp -s "${menuLog}" "${TEST_ROOT}/routing-menu.expected" ||
     fail 'DNS/hosts 菜单没有映射到 CLI 事务'
 fi

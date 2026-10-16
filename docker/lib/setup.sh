@@ -51,8 +51,13 @@ dockerSetupReinstallAllowed() {
 
 dockerSetupRead() {
     local variable=$1 prompt=$2 default=${3:-} inputValue
-    printf '%s' "${prompt}"
-    IFS= read -r inputValue || return 1
+    if [[ -t 0 && "${4:-}" == csv ]]; then
+        # 仅长名单启用 readline；接管终端后再提示，避免截断及快速 Ctrl-D 竞态。
+        IFS= read -r -e -p "${prompt}" inputValue || return 1
+    else
+        printf '%s' "${prompt}"
+        IFS= read -r inputValue || return 1
+    fi
     [[ "${inputValue}" != 0 ]] || return 1
     printf -v "${variable}" '%s' "${inputValue:-${default}}"
 }
@@ -1072,12 +1077,10 @@ dockerEditSocks5Input() {
         [[ -n "${port}" ]] || return 3
     [[ "${port}" =~ ^[0-9]{1,5}$ ]] &&
         ((10#${port} >= 1 && 10#${port} <= 65535)) || return 1
-    printf 'SOCKS5 用户名（隐藏输入，0 返回，空输入取消）: '
-    IFS= read -r -s username || return 3
+    IFS= read -r -s -p 'SOCKS5 用户名（隐藏输入，0 返回，空输入取消）: ' username || return 3
     printf '\n'
     [[ -n "${username}" && "${username}" != 0 ]] || return 3
-    printf 'SOCKS5 密码（隐藏输入，空输入取消）: '
-    IFS= read -r -s password || return 3
+    IFS= read -r -s -p 'SOCKS5 密码（隐藏输入，空输入取消）: ' password || return 3
     printf '\n'
     [[ -n "${password}" ]] || return 3
     dockerSetupRead scope 'SOCKS5 模式 [1=全局, 2=域名分流, 0=返回]: ' &&
@@ -1085,7 +1088,7 @@ dockerEditSocks5Input() {
     case "${scope}" in
     1) ;;
     2)
-        dockerSetupRead domains 'SOCKS5 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+        dockerSetupRead domains 'SOCKS5 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
             [[ -n "${domains}" ]] || return 3
         domains=$(dockerSocks5DomainsNormalize "${domains}") || return 1
         ;;
@@ -1111,8 +1114,7 @@ dockerEditWarpInput() {
     2) family=ipv6 ;;
     *) return 1 ;;
     esac
-    printf 'WARP 私钥（隐藏输入，0 返回，空输入取消）: '
-    IFS= read -r -s privateKey || return 3
+    IFS= read -r -s -p 'WARP 私钥（隐藏输入，0 返回，空输入取消）: ' privateKey || return 3
     printf '\n'
     [[ -n "${privateKey}" && "${privateKey}" != 0 ]] || return 3
     dockerSetupRead peerPublicKey 'WARP Peer 公钥（0 返回，空输入取消）: ' &&
@@ -1132,7 +1134,7 @@ dockerEditWarpInput() {
     1) scope=global ;;
     2)
         scope=selective
-        dockerSetupRead domains 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+        dockerSetupRead domains 'WARP 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
             [[ -n "${domains}" ]] || return 3
         domains=$(dockerSocks5DomainsNormalize "${domains}") || return 1
         ;;
@@ -1150,6 +1152,27 @@ dockerEditWarpInput() {
     ) && chmod 0600 "${target}"
 }
 
+dockerEditHostsInput() {
+    local target=$1 address domains
+    printf '本次将整组替换 hosts 映射，不保留旧键。\n'
+    dockerSetupRead address 'hosts IPv4/IPv6（单个字面地址，0 返回，空输入取消）: ' &&
+        [[ -n "${address}" ]] || return 3
+    dockerSetupRead domains 'hosts 精确域名 CSV（仅 FQDN，0 返回，空输入取消）: ' '' csv &&
+        [[ -n "${domains}" ]] || return 3
+    (
+        umask 077
+        jq -ecn --arg address "${address}" --arg input "${domains}" \
+            --slurpfile schema "$(dockerConfigureSchemaFile)" '
+          $schema[0].properties.routing.properties.hosts as $contract |
+          ($input | split(",") | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase) |
+            unique) |
+          select(length >= $contract.minProperties and length <= $contract.maxProperties and
+            all(.[]; test($contract.propertyNames.pattern))) |
+          map({key:.,value:$address}) | from_entries
+        ' >"${target}"
+    ) && chmod 0600 "${target}"
+}
+
 dockerEditHttpRelayInput() {
     local target=$1 port family username password sources
     dockerSetupRead port 'HTTP 中继端口（1..65535，0 返回，空输入取消）: ' &&
@@ -1164,15 +1187,13 @@ dockerEditHttpRelayInput() {
     3) family='["ipv4","ipv6"]' ;;
     *) return 1 ;;
     esac
-    printf 'HTTP 中继用户名（隐藏输入，0 返回，空输入取消）: '
-    IFS= read -r -s username || return 3
+    IFS= read -r -s -p 'HTTP 中继用户名（隐藏输入，0 返回，空输入取消）: ' username || return 3
     printf '\n'
     [[ -n "${username}" && "${username}" != 0 ]] || return 3
-    printf 'HTTP 中继密码（隐藏输入，空输入取消）: '
-    IFS= read -r -s password || return 3
+    IFS= read -r -s -p 'HTTP 中继密码（隐藏输入，空输入取消）: ' password || return 3
     printf '\n'
     [[ -n "${password}" ]] || return 3
-    dockerSetupRead sources 'HTTP 中继来源 IP/CIDR CSV（必填，0 返回）: ' &&
+    dockerSetupRead sources 'HTTP 中继来源 IP/CIDR CSV（必填，0 返回）: ' '' csv &&
         [[ -n "${sources}" ]] || return 3
     sources=$(jq -ecn --arg input "${sources}" '
       $input | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
@@ -2771,9 +2792,9 @@ dockerEditCommand() {
             portHoppingAction=clear
             shift
             ;;
-        --warp-input)
+        --warp-input|--hosts-input)
             [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
-            routingKind=warp routingAction=input
+            routingKind=${1#--} routingKind=${routingKind%-input} routingAction=input
             shift
             ;;
         --warp-domains)
@@ -3965,10 +3986,14 @@ dockerEditCommand() {
                 "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == enable || "${routingAction}" == input ]]; then
             if [[ "${routingAction}" == input ]]; then
-                dockerEditWarpInput "${workspace}/warp.json" || {
+                if [[ "${routingKind}" == warp ]]; then
+                    dockerEditWarpInput "${workspace}/warp.json"
+                else
+                    dockerEditHostsInput "${workspace}/hosts.json"
+                fi || {
                     status=$?
                     [[ "${status}" -ne 3 ]] || return 0
-                    dockerError 'WARP 输入无效，未提交配置'
+                    dockerError "${routingKind} 输入无效，未提交配置"
                     return "${PADM_DOCKER_RC_STATE}"
                 }
             else

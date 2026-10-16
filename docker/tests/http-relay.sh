@@ -322,13 +322,13 @@ jq() {
 dockerMain edit --http-relay-input
 SH
     ) >"${worker}"
-    for name in dual ipv6-zero cancel-sources eof-password invalid-user invalid-sources final-cancel term-password; do
+    for name in dual ipv6-zero long-ipv6-sources cancel-sources eof-password invalid-user invalid-sources final-cancel term-password; do
         before=$(snapshot)
         composeBefore=$(cat "${TEST_ROOT}/compose-calls.log")
         expected=0
         case "${name}" in invalid-*) expected=15 ;; term-*) expected=143 ;; esac
         actual=0
-        python3 - "${worker}" "${LOG}" "${INPUT}" "${name}" <<'PY' || actual=$?
+        python3 - "${worker}" "${LOG}" "${INPUT}" "${name}" "${TEST_ROOT}/long-sources.json" <<'PY' || actual=$?
 import errno
 import json
 import os
@@ -338,7 +338,7 @@ import signal
 import sys
 import time
 
-worker, log, fixture, scenario = sys.argv[1:]
+worker, log, fixture, scenario, expected_sources_path = sys.argv[1:]
 with open(fixture) as stream:
     relay = json.load(stream)
 pid, terminal = pty.fork()
@@ -357,13 +357,22 @@ def wait_for(prompt):
                 raise AssertionError("HTTP 中继输入提前结束")
             output.extend(data)
 
+if scenario == "long-ipv6-sources":
+    sources = [f"2001:db8:{index:04x}::/64" for index in range(256)]
+    sources_csv = ",".join(sources)
+    assert len(sources_csv.encode()) > 4095
+    with open(expected_sources_path, "w", encoding="utf-8") as stream:
+        json.dump(sources, stream)
+else:
+    sources_csv = "127.0.0.1/32, ::1/128,127.0.0.1/32"
+
 steps = [
     ("HTTP 中继端口", "36080", "port"),
     ("HTTP 中继地址族", "2" if scenario == "ipv6-zero" else "3", "family"),
     ("HTTP 中继用户名", "invalid:user" if scenario == "invalid-user" else relay["username"], "user"),
     ("HTTP 中继密码", "0" if scenario == "ipv6-zero" else relay["password"], "password"),
     ("HTTP 中继来源 IP/CIDR CSV",
-     "example.com" if scenario == "invalid-sources" else "127.0.0.1/32, ::1/128,127.0.0.1/32", "sources"),
+     "example.com" if scenario == "invalid-sources" else sources_csv, "sources"),
 ]
 try:
     stopped = False
@@ -431,6 +440,17 @@ PY
             ' >/dev/null || fail "${name}: HTTP 中继输入丢失或改变其它配置"
             [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
                 fail 'HTTP 中继直接录入改变私有规格权限'
+            runEdit 0 --http-relay-off --confirm PADM-DOCKER-EDIT
+            ;;
+        long-ipv6-sources)
+            jq -en --slurpfile base "${TEST_ROOT}/base.json" --slurpfile relay "${INPUT}" \
+                --slurpfile sources "${TEST_ROOT}/long-sources.json" --slurpfile new "${root}/config/spec.json" '
+              $new[0] == ($base[0] | .relay.http = ($relay[0] | .source_ips = $sources[0]))
+            ' >/dev/null || fail '超长 HTTP 中继来源 CSV 被截断或改变其它配置'
+            [[ "$(jq -r '.relay.http.source_ips | length' "${root}/config/spec.json")" == 256 ]] ||
+                fail '超长 HTTP 中继来源 CSV 未保存 256 条来源'
+            [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+                fail '超长 HTTP 中继直接录入改变私有规格权限'
             runEdit 0 --http-relay-off --confirm PADM-DOCKER-EDIT
             ;;
         final-cancel)
