@@ -7429,7 +7429,15 @@ dockerConfigureApply() {
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     [[ -z "${businessSource}" ]] || backupPrefix=business
-    case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    case "${mode}" in
+    configure|preview|interactive|confirmed) ;;
+    recovery)
+        [[ "${FUNCNAME[1]:-}" == dockerRecoveryCommand &&
+            "${action:-}" == apply && -n "${DOCKER_RECOVERY_INPUT:-}" ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        ;;
+    *) return "${PADM_DOCKER_RC_USAGE}" ;;
+    esac
     [[ -z "${siteTitle}" || -n "${siteTemplate}" ]] || return "${PADM_DOCKER_RC_USAGE}"
     if [[ -n "${siteTemplate}" ]]; then
         [[ -z "${siteSource}" ]] &&
@@ -7512,6 +7520,29 @@ dockerConfigureApply() {
     if [[ "${mode}" == preview ]]; then
         printf '候选配置校验通过，预览未提交。\n'
         dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
+        return 0
+    fi
+    if [[ "${mode}" == recovery ]]; then
+        # 空目标没有旧配置快照；先持久保存停机输入，再允许首次业务写入。
+        backup="${candidate}/empty-backup"
+        mkdir -m 0700 -- "${backup}" && : >"${backup}/present" &&
+            chmod 0600 "${backup}/present" || return "${PADM_DOCKER_RC_STATE}"
+        DOCKER_RECOVERY_STARTED=1
+        python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-prepare \
+            --root "${root}" --project "${PADM_DOCKER_PROJECT}" --candidate "${candidate}" \
+            --input-stage "${DOCKER_RECOVERY_INPUT%/input}" || return "${PADM_DOCKER_RC_STATE}"
+        if ! dockerInstallCandidate "${candidate}" "${backup}" ||
+            ! dockerEnsureRuntimeDataPermissions ||
+            ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
+            ! dockerTrafficScheduleInstall; then
+            dockerError '灾备恢复安装或健康检查失败，正在撤销本次恢复'
+            return "${PADM_DOCKER_RC_COMPOSE}"
+        fi
+        python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-commit \
+            --root "${root}" --project "${PADM_DOCKER_PROJECT}" || return "${PADM_DOCKER_RC_STATE}"
+        DOCKER_CONFIG_SWITCHED=0
+        dockerRecoveryRecover || return "${PADM_DOCKER_RC_STATE}"
+        printf '灾备恢复已提交。\n'
         return 0
     fi
     if [[ "${mode}" == interactive ]]; then

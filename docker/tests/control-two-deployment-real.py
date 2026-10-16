@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import concurrent.futures
+import copy
 import fcntl
 import hashlib
 import json
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -186,14 +188,14 @@ def services(node):
     assert {"xray", "nginx", "net-wireguard"} <= result.keys()
     current = state(node)
     config = json.loads((node["path"] / "deployment/config/xray/config.json").read_text())
-    clients = next(inbound["settings"]["clients"] for inbound in config["inbounds"]
-                   if inbound["tag"] == "entry-ws")
-    expected = [{"id": current["core"]["protocols"][0]["uuid"],
-                 "email": current["core"]["protocols"][0]["uuid"]}]
-    expected += [{"id": account["uuid"], "email": account["id"]} for account in current["accounts"]
-                 if account["enabled"]]
-    assert sorted(clients, key=lambda value: value["email"]) == sorted(expected, key=lambda value: value["email"]), \
-        "真实核心账号与已提交规格不一致"
+    for entry in current["core"]["protocols"]:
+        clients = next(inbound["settings"]["clients"] for inbound in config["inbounds"]
+                       if inbound["tag"] == entry["listener_id"])
+        expected = [{"id": entry["uuid"], "email": entry["uuid"]}]
+        expected += [{"id": account["uuid"], "email": account["id"]} for account in current["accounts"]
+                     if account["enabled"] and entry["listener_id"] in account["listeners"]]
+        assert sorted(clients, key=lambda value: value["email"]) == sorted(expected, key=lambda value: value["email"]), \
+            "真实核心账号与已提交规格不一致"
     return result
 
 
@@ -954,19 +956,22 @@ def interrupted_sync(node, invitation, number=None, *, automatic=False):
     print(f"docker-control-two-deployment-restore:{label}:elapsed={time.monotonic()-started:.3f}s", flush=True)
 
 
-def traffic(node, image):
+def traffic(node, image, *, listener="entry-ws", account_id=None):
     path = node["path"] / "client"
-    path.mkdir(mode=0o755)
+    path.mkdir(mode=0o755, exist_ok=True)
     current = state(node)
+    entry = next(entry for entry in current["core"]["protocols"] if entry["listener_id"] == listener)
+    selected = next(account for account in current["accounts"] if account["id"] == account_id) \
+        if account_id is not None else current["accounts"][0]
     domain = current["tls"]["domain"]
     (path / "ca.crt").write_bytes((node["path"] / "secrets/tls" / f"{domain}.crt").read_bytes())
     config = {
         "inbounds": [{"type": "socks", "listen": "127.0.0.1", "listen_port": 1080}],
         "outbounds": [{
-            "type": "vless", "server": "127.0.0.1", "server_port": 35466,
-            "uuid": current["accounts"][0]["uuid"],
+            "type": "vless", "server": "127.0.0.1", "server_port": entry["public_port"],
+            "uuid": selected["uuid"],
             "tls": {"enabled": True, "server_name": domain, "certificate_path": "/input/ca.crt"},
-            "transport": {"type": "ws", "path": "/control-testws", "headers": {"Host": domain}},
+            "transport": {"type": "ws", "path": f"/{entry['websocket']['path']}ws", "headers": {"Host": domain}},
         }],
     }
     save(path / "config.json", config)
@@ -1008,7 +1013,7 @@ HTTPServer(("0.0.0.0", 38999), Handler).serve_forever()
             time.sleep(0.1)
         cli(node, "traffic", "collect")
         ledger = json.loads((node["path"] / "deployment/data/traffic/state.json").read_text())
-        totals = ledger["accounts"][current["accounts"][0]["id"]]
+        totals = ledger["accounts"][selected["id"]]
         assert totals["upload"] > 0 and totals["download"] >= len(result.stdout)
         assert totals["baseline"]["xray"], "真实流量采集缺少核心基线"
         print("docker-control-two-deployment-real-traffic-ok", flush=True)
@@ -1019,9 +1024,67 @@ HTTPServer(("0.0.0.0", 38999), Handler).serve_forever()
         stop(server)
 
 
+def remap(node, invitation, image):
+    before = state(node)
+    managed_id = before["control_sync"]["managed_accounts"][0]["id"]
+    traffic(node, image)
+    traffic(node, image, account_id=managed_id)
+    ledger = node["path"] / "deployment/data/traffic/state.json"
+    totals = json.loads(ledger.read_text())["accounts"]
+    cli(node, "control", "remap", "--invite", str(invitation),
+        "--listener", "entry-ws-secondary", "--yes")
+    expected = copy.deepcopy(before)
+    expected["control_sync"]["listener_ids"] = ["entry-ws-secondary"]
+    for account in expected["accounts"] + expected["control_sync"]["managed_accounts"]:
+        if account["id"] == managed_id:
+            account["listeners"] = ["entry-ws-secondary"]
+    assert state(node) == expected, "真实重映射改变了身份、版本、本机账号或其它配置"
+    after_totals = json.loads(ledger.read_text())["accounts"]
+    assert all(after_totals[account_id][key] >= value[key] for account_id, value in totals.items()
+               for key in ("upload", "download")), "真实重映射回退累计流量"
+    traffic(node, image, listener="entry-ws-secondary", account_id=managed_id)
+    traffic(node, image)
+    before_services, before_ledger = services(node), ledger.read_bytes()
+    cli(node, "control", "remap", "--invite", str(invitation),
+        "--listener", "entry-ws-secondary", "--yes")
+    assert services(node) == before_services and state(node) == expected, "真实幂等重映射重建服务或改写规格"
+    assert ledger.read_bytes() == before_ledger, "真实幂等重映射改写流量账"
+    cli(node, "control", "remap", "--invite", str(invitation), "--listener", "entry-ws", "--yes")
+    assert state(node) == before, "真实重映射未能切回原入口"
+    services(node)
+    traffic(node, image, account_id=managed_id)
+    root = node["path"] / "deployment"
+    assert not list(root.glob(".candidate.*")) and not list(root.glob(".control-client.*"))
+    assert not (root / "locks/deployment.lock").exists()
+    print("docker-control-two-deployment-remap-traffic-idempotency-return-ok", flush=True)
+
+
+def private_logs(nodes, invitations, keys):
+    secrets = [json.loads(path.read_text())["token"] for path in invitations] + keys
+    for member in nodes:
+        for spec in (json.loads((member["path"] / "spec.json").read_text()), state(member)):
+            for account in spec["accounts"]:
+                secrets += [value for name in ("uuid", "password", "shadowsocks_password")
+                            if isinstance(value := account[name], str)]
+            secrets += [entry["uuid"] for entry in spec["core"]["protocols"]]
+        secrets += [(member["path"] / "secrets/tls" /
+                     f"{state(member)['tls']['domain']}.key").read_text().strip()]
+    for node in nodes:
+        logs = b"".join((node["path"] / name).read_bytes()
+                        for name in ("cli.log", "seed.log", "seed-private.log", "cron.log"))
+        for item in services(node).values():
+            logs += command(node["docker"] + ["logs", item["id"]])
+        assert all(secret.encode() not in logs for secret in secrets), "真实 CLI 日志泄露秘密"
+        assert all(json.loads(path.read_text())["token"].encode() not in
+                   (node["path"] / "deployment/config/spec.json").read_bytes()
+                   for path in invitations), "自动同步 token 进入部署规格"
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--log-schedule-cron-only", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--log-schedule-cron-only", action="store_true")
+    modes.add_argument("--remap-only", action="store_true")
     options = parser.parse_args()
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
@@ -1120,6 +1183,36 @@ def main():
                                "netns": os.readlink(f"/proc/{pid}/ns/net")})
             assert proofs[0]["engine_id"] != proofs[1]["engine_id"]
             assert proofs[0]["netns"] != proofs[1]["netns"]
+            if options.remap_only:
+                # 仅在隔离 daemon 派生当前客户端，固定基础镜像且离线构建，不复用旧源码冒充本轮验收。
+                context = root / "remap-ops"
+                context.mkdir()
+                modules = ("control_client.py", "control_sync.py")
+                for module in modules:
+                    shutil.copyfile(ROOT / "docker/images/ops" / module, context / module)
+                (context / "Dockerfile").write_text(
+                    f"FROM {images['ops']}\n"
+                    "COPY --chown=10001:10001 control_client.py control_sync.py /opt/padm/\n"
+                )
+                tag = "padm-local/padm-ops:remap-current"
+                command(nodes[0]["docker"] + ["build", "--network", "none", "--pull=false",
+                                             "--tag", tag, str(context)], timeout=120)
+                actual = json.loads(command(nodes[0]["docker"] + ["image", "inspect", tag]))[0]
+                digest = actual["Descriptor"]["digest"]
+                assert re.fullmatch(r"sha256:[a-f0-9]{64}", digest)
+                images["ops"] = f"{tag}@{digest}"
+                archive = root / "remap-ops.tar"
+                command(nodes[0]["docker"] + ["save", "--output", str(archive), tag], timeout=120)
+                command(nodes[1]["docker"] + ["load", "--input", str(archive)], timeout=120)
+                assert json.loads(command(nodes[1]["docker"] + ["image", "inspect", images["ops"]]))[0]["Id"] == actual["Id"]
+                proofs[0]["remap_ops"] = {
+                    "base_image_id": inputs["ops"]["image_id"], "image_id": actual["Id"], "digest": digest,
+                    "source_sha256": {module: hashlib.sha256((context / module).read_bytes()).hexdigest()
+                                      for module in modules},
+                }
+                for node in nodes:
+                    command(node["enter"] + ["pkill", "-STOP", "-x", "cron"])
+                    node["cron_paused"] = True
             command(["ip", "link", "add", names[0], "type", "veth", "peer", "name", names[1]])
             keys, public = [], []
             for index, node in enumerate(nodes):
@@ -1174,6 +1267,12 @@ def main():
                         "shadowsocks_password": None, "listeners": ["entry-ws"],
                     }],
                 }
+                if options.remap_only and index == 1:
+                    secondary = copy.deepcopy(spec["core"]["protocols"][0])
+                    secondary.update(listener_id="entry-ws-secondary", public_port=35467,
+                                     name="vless-ws-secondary", uuid=identity(110))
+                    secondary["websocket"].update(path="control-secondary", backend_port=31298, tls_port=8444)
+                    spec["core"]["protocols"].append(secondary)
                 save(path / "spec.json", spec)
                 process = subprocess.Popen(
                     node["enter"] + ["bash", str(ROOT / "docker/tests/control-deployment-node.sh"),
@@ -1219,6 +1318,11 @@ def main():
             assert services(controlled) == before_services, "真实幂等同步重建了服务"
             assert state(controlled) == joined
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
+            if options.remap_only:
+                remap(controlled, controlled_invite, images["sing-box"])
+                private_logs(nodes, (invite,), keys)
+                proofs[0]["scope"] = "real-compose-control-remap-from-installed-fixture"
+                return proofs
             if options.log_schedule_cron_only:
                 log_rotate(controller, controlled, controlled_invite, scheduled=True)
                 proofs[0]["scope"] = "real-compose-control-log-original-cron-wall-clock"
@@ -1327,27 +1431,7 @@ def main():
             for node in nodes:
                 assert not list((node["path"] / "deployment").glob(".candidate.*"))
                 assert not list((node["path"] / "deployment").glob(".control-client.*"))
-            for node in nodes:
-                logs = (node["path"] / "cli.log").read_bytes()
-                logs += (node["path"] / "seed.log").read_bytes()
-                logs += (node["path"] / "seed-private.log").read_bytes()
-                logs += (node["path"] / "cron.log").read_bytes()
-                for service, item in services(node).items():
-                    logs += command(node["docker"] + ["logs", item["id"]])
-                secrets = [json.loads(path.read_text())["token"] for path in (invite, rotated)]
-                secrets += keys
-                for member in nodes:
-                    for spec in (json.loads((member["path"] / "spec.json").read_text()), state(member)):
-                        for account in spec["accounts"]:
-                            secrets += [value for name in ("uuid", "password", "shadowsocks_password")
-                                        if isinstance(value := account[name], str)]
-                        secrets += [entry["uuid"] for entry in spec["core"]["protocols"]]
-                    secrets += [(member["path"] / "secrets/tls" /
-                                 f"{state(member)['tls']['domain']}.key").read_text().strip()]
-                assert all(secret.encode() not in logs for secret in secrets), "真实 CLI 日志泄露秘密"
-                assert all(json.loads(path.read_text())["token"].encode() not in
-                           (node["path"] / "deployment/config/spec.json").read_bytes()
-                           for path in (invite, rotated)), "自动同步 token 进入部署规格"
+            private_logs(nodes, (invite, rotated), keys)
             proofs[0]["scope"] = "real-compose-control-transactions-from-installed-fixture"
             print("docker-control-two-deployment-sync-rotation-revoke-ok", flush=True)
         finally:

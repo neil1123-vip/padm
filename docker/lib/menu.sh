@@ -1913,7 +1913,8 @@ dockerMenuMaintenance() {
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 服务维护\n'
         printf '%s\n' '1. 校验部署配置' '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' \
-            '5. Fail2ban 维护' '6. 导出灾备归档' '7. 只读校验灾备归档' '8. 预览灾备恢复（空目标）' '0. 返回'
+            '5. Fail2ban 维护' '6. 导出灾备归档' '7. 只读校验灾备归档' '8. 预览灾备恢复（空目标）' \
+            '9. 应用灾备恢复（空目标）' '10. 恢复中断的灾备事务' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1950,6 +1951,18 @@ dockerMenuMaintenance() {
             dockerSetupRead path '待预览恢复的灾备归档绝对路径（0 返回）: ' || continue
             [[ -n "${path}" ]] || continue
             dockerMenuRun restore preview "${path}" || true
+            continue
+            ;;
+        9)
+            dockerSetupRead path '待应用恢复的灾备归档绝对路径（0 返回）: ' || continue
+            [[ -n "${path}" ]] || continue
+            dockerSetupRead answer '确认向空目标应用灾备归档？[y/N]: ' n || continue
+            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+            dockerMenuRun restore apply "${path}" --confirm PADM-DOCKER-RESTORE || true
+            continue
+            ;;
+        10)
+            dockerMenuRun restore recover || true
             continue
             ;;
         *) printf '无效选项，请重新选择。\n'; continue ;;

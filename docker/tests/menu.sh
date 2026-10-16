@@ -1076,6 +1076,24 @@ runMaintenanceDriver() {
         *) targetReply "${prompt}" $'/root/private recovery.tar\n' ;;
         esac
         ;;
+    restore-apply|restore-apply-failed|restore-apply-cancel|restore-apply-eof|restore-apply-path-eof)
+        targetReply 'Docker 服务维护' $'9\n'
+        prompt='待应用恢复的灾备归档绝对路径（0 返回）'
+        if [[ "${scenario}" == restore-apply-path-eof ]]; then
+            targetReply "${prompt}" $'\004'
+        else
+            targetReply "${prompt}" $'/root/private recovery.tar\n'
+            case "${scenario}" in
+            restore-apply-cancel) answer=n ;;
+            restore-apply-eof) answer=$'\004' ;;
+            *) answer=y ;;
+            esac
+            targetReply '确认向空目标应用灾备归档？[y/N]' "${answer}"$'\n'
+        fi
+        ;;
+    restore-recover|restore-recover-failed)
+        targetReply 'Docker 服务维护' $'10\n'
+        ;;
     backup-flow|backup-failed|backup-cancel|backup-eof)
         for choice in 6 7; do
             if [[ "${choice}" == 6 ]]; then
@@ -3428,7 +3446,14 @@ backup)
     ;;
 restore)
     recordAction "$@"
-    [[ "$#" -eq 3 && "$2" == preview && "$3" == '/root/private recovery.tar' ]] || exit 2
+    case "${2:-}" in
+    preview) [[ "$#" -eq 3 && "$3" == '/root/private recovery.tar' ]] || exit 2 ;;
+    apply)
+        [[ "$#" -eq 5 && "$3" == '/root/private recovery.tar' &&
+            "$4" == --confirm && "$5" == PADM-DOCKER-RESTORE ]] || exit 2 ;;
+    recover) [[ "$#" -eq 2 ]] || exit 2 ;;
+    *) exit 2 ;;
+    esac
     exit "${BACKUP_STATUS:-0}"
     ;;
 fail2ban)
@@ -3658,12 +3683,14 @@ runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
 
 for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollback uninstall \
-    backup-flow backup-cancel backup-eof backup-failed restore-flow restore-cancel restore-eof restore-failed; do
+    backup-flow backup-cancel backup-eof backup-failed restore-flow restore-cancel restore-eof restore-failed \
+    restore-apply restore-apply-failed restore-apply-cancel restore-apply-eof restore-apply-path-eof \
+    restore-recover restore-recover-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export MAINTENANCE_STATUS=0 MAINTENANCE_VALIDATE_STATUS=0 BACKUP_STATUS=0
     [[ "${maintenanceCase}" != flow && "${maintenanceCase}" != failed ]] || MAINTENANCE_STATUS=17
     [[ "${maintenanceCase}" != failed ]] || MAINTENANCE_VALIDATE_STATUS=17
-    case "${maintenanceCase}" in backup-failed|restore-failed) BACKUP_STATUS=15 ;; esac
+    case "${maintenanceCase}" in *-failed) BACKUP_STATUS=15 ;; esac
     runPty "maintenance-${maintenanceCase}" maintenance "${maintenanceCase}" "${TLS_WIZARD_CLI}" menu
     expectedMaintenance=
     case "${maintenanceCase}" in
@@ -3707,12 +3734,25 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
             ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" || fail '恢复预览归档路径被拆分'
         fi
         ;;
+    restore-apply|restore-apply-failed|restore-recover|restore-recover-failed)
+        expectedMaintenance='restore recover'
+        [[ "${maintenanceCase}" != restore-apply* ]] ||
+            expectedMaintenance='restore apply /root/private recovery.tar --confirm PADM-DOCKER-RESTORE'
+        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail '灾备恢复动作结束了维护菜单会话'
+        if [[ "${maintenanceCase}" == *-failed ]]; then
+            grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '灾备恢复未保留失败退出码'
+        else
+            ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" || fail '灾备恢复参数错误'
+        fi
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedMaintenance}" ]] ||
         fail "维护 ${maintenanceCase} 参数分发错误或取消后仍执行操作"
     for maintenanceLabel in '18. 服务维护' 'Docker 服务维护' '1. 校验部署配置' \
         '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护' \
-        '6. 导出灾备归档' '7. 只读校验灾备归档' '8. 预览灾备恢复（空目标）'; do
+        '6. 导出灾备归档' '7. 只读校验灾备归档' '8. 预览灾备恢复（空目标）' \
+        '9. 应用灾备恢复（空目标）' '10. 恢复中断的灾备事务'; do
         grep -Fq "${maintenanceLabel}" "${CONTROL_LOG}" || fail "维护菜单缺少: ${maintenanceLabel}"
     done
 done

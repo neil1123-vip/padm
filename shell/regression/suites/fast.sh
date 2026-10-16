@@ -123,6 +123,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-business \
         docker-backup \
         docker-recovery-preview \
+        docker-recovery-apply \
         docker-phase2
 }
 
@@ -172,6 +173,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-business \
         docker-backup \
         docker-recovery-preview \
+        docker-recovery-apply \
         docker-phase2 \
         docker-xhttp-validation
 }
@@ -689,8 +691,15 @@ runDockerRecoveryPreviewRegression() {
         bash "${PROJECT_ROOT}/docker/tests/recovery-preview.sh"
 }
 
+runDockerRecoveryApplyRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/recovery-apply.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/"{bootstrap,lifecycle,schedule,services}.sh \
+            "${PROJECT_ROOT}/docker/tests/recovery-apply.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/recovery-apply.sh"
+}
+
 listRegressionDockerRecoveryChildSelectors() {
-    printf '%s\n' docker-backup docker-business docker-recovery-preview regression-dispatcher-contract
+    printf '%s\n' docker-backup docker-business docker-recovery-preview docker-recovery-apply regression-dispatcher-contract
 }
 
 runDockerSitesRegression() {
@@ -725,6 +734,10 @@ runDockerControlTwoNodeRealRegression() {
 
 runDockerControlTwoDeploymentRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py"
+}
+
+runDockerControlRemapRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --remap-only
 }
 
 runDockerControlLogCronRealRegression() {
@@ -1048,6 +1061,7 @@ registerRegressionFunctionLeaf docker-subscription-site-real runDockerSubscripti
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-backup runDockerBackupRegression
 registerRegressionFunctionLeaf docker-recovery-preview runDockerRecoveryPreviewRegression
+registerRegressionFunctionLeaf docker-recovery-apply runDockerRecoveryApplyRegression
 registerRegressionParallelSelectorList docker-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-recovery-focused-${BASHPID:-$$}" listRegressionDockerRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-backup-focused runFrameworkParallelRegressionSelectorListWithJobs \
@@ -1063,6 +1077,7 @@ registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegre
 registerRegressionFunctionLeaf docker-control-sync-schedule runDockerControlSyncScheduleRegression
 registerRegressionFunctionLeaf docker-control-two-node-real runDockerControlTwoNodeRealRegression
 registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerControlTwoDeploymentRealRegression
+registerRegressionFunctionLeaf docker-control-remap-real runDockerControlRemapRealRegression
 registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogCronRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression

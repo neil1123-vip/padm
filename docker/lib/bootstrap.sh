@@ -246,17 +246,36 @@ dockerPortHoppingSessionAbsent() {
     }
 }
 
+dockerRecoveryTransactionAbsent() {
+    local root=$1
+    [[ ! -e "${root}/.restore-pending" && ! -L "${root}/.restore-pending" &&
+        ! -e "${root}/.restore-cleaning" && ! -L "${root}/.restore-cleaning" ]] || {
+        dockerError '灾备恢复事务尚未清理，请先执行 restore recover'
+        return 1
+    }
+}
+
 dockerAcquireDeploymentLock() {
-    local root lockDir timeout deadline ownerPid lockMtime now hoppingOwner=0
+    local root lockDir timeout deadline ownerPid lockMtime now hoppingOwner=0 recoveryOwner=0
     case "$#" in
     0) ;;
-    1) [[ "$1" == --hopping-owner ]] || return 1; hoppingOwner=1 ;;
+    1)
+        case "$1" in
+        --hopping-owner) hoppingOwner=1 ;;
+        --recovery)
+            [[ "${FUNCNAME[1]:-}" == dockerRecoveryCommand && "${action:-}" == recover ]] || return 1
+            recoveryOwner=1
+            ;;
+        *) return 1 ;;
+        esac
+        ;;
     *) return 1 ;;
     esac
     root=$(dockerInstallRoot) || return 1
     dockerPathIsSafeAbsolute "${root}" || return 1
     [[ ! -L "${root}" ]] || return 1
     ((hoppingOwner)) || dockerPortHoppingSessionAbsent "${root}" || return 1
+    ((recoveryOwner)) || dockerRecoveryTransactionAbsent "${root}" || return 1
     mkdir -p -- "${root}/locks" || return 1
     [[ -d "${root}/locks" && ! -L "${root}/locks" ]] || return 1
     chmod 0750 "${root}" "${root}/locks" || return 1
@@ -266,6 +285,7 @@ dockerAcquireDeploymentLock() {
     deadline=$((SECONDS + timeout))
     while ! mkdir -- "${lockDir}" 2>/dev/null; do
         ((hoppingOwner)) || dockerPortHoppingSessionAbsent "${root}" || return 1
+        ((recoveryOwner)) || dockerRecoveryTransactionAbsent "${root}" || return 1
         [[ ! -L "${lockDir}" && ( ! -e "${lockDir}" || -d "${lockDir}" ) ]] || {
             dockerError 'Docker 部署锁路径异常'
             return 1
@@ -301,6 +321,10 @@ dockerAcquireDeploymentLock() {
     }
     # 会话可在等待期间出现；未知残留只阻断，不按旧 owner 自动恢复或清除。
     if ((!hoppingOwner)) && ! dockerPortHoppingSessionAbsent "${root}"; then
+        dockerReleaseDeploymentLock || return 1
+        return 1
+    fi
+    if ((!recoveryOwner)) && ! dockerRecoveryTransactionAbsent "${root}"; then
         dockerReleaseDeploymentLock || return 1
         return 1
     fi

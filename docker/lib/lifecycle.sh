@@ -205,6 +205,7 @@ dockerUsage() {
   padm-docker control init --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> [--yes]
   padm-docker control join --invite <私有邀请文件> --listener <入口 ID>... [--yes]
   padm-docker control sync --invite <私有邀请文件>
+  padm-docker control remap --invite <同连接私有文件> --listener <入口 ID>... [--yes]
   padm-docker control source-check
   padm-docker control source-probe --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> --nonce <64 位 hex>
   padm-docker control log-rotate [--yes]
@@ -217,6 +218,8 @@ dockerUsage() {
   padm-docker backup export <绝对归档文件路径>
   padm-docker backup verify <绝对归档文件路径>
   padm-docker restore preview <绝对归档文件路径> [发布资产参数]
+  padm-docker restore apply <绝对归档文件路径> --confirm PADM-DOCKER-RESTORE [发布资产参数]
+  padm-docker restore recover
   padm-docker business preview <备份 JSON 路径> --strategy <merge|replace>
   padm-docker business restore <备份 JSON 路径> --strategy <merge|replace> --yes
   padm-docker edit --reality-stream <Reality 入口 ID> <网站 TLS 入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -3238,30 +3241,133 @@ dockerRecoveryInputsPrepare() {
     }
 }
 
+dockerRecoveryRecover() {
+    local root metadata schedule state directory entry containers mode uid gid path profile
+    local -a compose=()
+    root=$(dockerInstallRoot) || return 1
+    [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
+        "$(<"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")" == "${BASHPID:-$$}" ]] || return 1
+    if [[ ! -e "${root}/.restore-pending" && ! -L "${root}/.restore-pending" ]]; then
+        if [[ -e "${root}/.restore-cleaning" || -L "${root}/.restore-cleaning" ]]; then
+            python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-clean \
+                --root "${root}" --project "${PADM_DOCKER_PROJECT}" || return 1
+        fi
+        DOCKER_RECOVERY_STARTED=0
+        return 0
+    fi
+    metadata=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-metadata \
+        --root "${root}" --project "${PADM_DOCKER_PROJECT}") &&
+        schedule=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-metadata \
+            --root "${root}" --project "${PADM_DOCKER_PROJECT}") || return 1
+    state=$(jq -er '.state' <<<"${metadata}") || return 1
+    if [[ "${state}" == active ]]; then
+        # 停服只使用首写前持久保存的可信编排；在线文件可能只安装了一半。
+        dockerRecoveryScheduleRestore "${root}" "${schedule}" || return 1
+        compose=(env -u PADM_DOCKER_ROOT -u PADM_NET_ROOT \
+            -u PADM_XRAY_IMAGE -u PADM_SINGBOX_IMAGE -u PADM_NGINX_IMAGE \
+            -u PADM_OPS_IMAGE -u PADM_NET_IMAGE docker compose --project-name "${PADM_DOCKER_PROJECT}"
+            --project-directory "${root}" --env-file "${root}/.restore-pending/images.env"
+            --file "${root}/.restore-pending/compose.json")
+        while IFS= read -r profile; do
+            [[ -z "${profile}" ]] || compose+=(--profile "${profile}")
+        done < <(jq -r '.compose.profiles[]' "${root}/.restore-pending/deployment.json")
+        "${compose[@]}" down --remove-orphans </dev/null || return 1
+        for directory in com.docker.compose.project io.padm.project; do
+            containers=$(docker ps -aq --filter "label=${directory}=${PADM_DOCKER_PROJECT}") || return 1
+            [[ -z "${containers}" ]] || return 1
+        done
+        if jq -e '.networks.ipv6 != null' "${root}/.restore-pending/compose.json" >/dev/null; then
+            dockerIPv6NetworkManage cleanup || return 1
+        fi
+        # 首次恢复只写这五个空骨架目录；全部确认路径后才清理。
+        for directory in config data secrets logs backups; do
+            dockerTrafficSafePath "${root}" "${root}/${directory}" &&
+                [[ ! -e "${root}/${directory}" || -d "${root}/${directory}" ]] || return 1
+        done
+        for entry in compose.json images.env deployment.json deployment.previous.json; do
+            dockerTrafficSafePath "${root}" "${root}/${entry}" &&
+                [[ ! -e "${root}/${entry}" || -f "${root}/${entry}" ]] || return 1
+        done
+        for directory in config data secrets logs backups; do
+            path="${root}/${directory}"
+            if [[ -d "${path}" ]]; then
+                find "${path}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || return 1
+            fi
+            if jq -e --arg name "${directory}" '.directories[$name].exists' <<<"${metadata}" >/dev/null; then
+                mode=$(jq -er --arg name "${directory}" '.directories[$name].mode' <<<"${metadata}") &&
+                    uid=$(jq -er --arg name "${directory}" '.directories[$name].uid' <<<"${metadata}") &&
+                    gid=$(jq -er --arg name "${directory}" '.directories[$name].gid' <<<"${metadata}") &&
+                    mkdir -p -- "${path}" && chown "${uid}:${gid}" "${path}" &&
+                    chmod "$(printf '%o' "${mode}")" "${path}" || return 1
+            else
+                [[ ! -d "${path}" ]] || rmdir -- "${path}" || return 1
+            fi
+        done
+        rm -f -- "${root}/compose.json" "${root}/images.env" \
+            "${root}/deployment.json" "${root}/deployment.previous.json" || return 1
+    fi
+    for entry in candidate input_stage; do
+        directory=$(jq -er --arg name "${entry}" '.[$name] // empty' <<<"${metadata}") || {
+            [[ "${entry}" == input_stage ]] && continue
+            return 1
+        }
+        dockerTrafficSafePath "${root}" "${root}/${directory}" &&
+            dockerRemoveManagedTree "${root}" "${root}/${directory}" || return 1
+    done
+    if [[ "${schedule}" != null ]]; then
+        directory=$(jq -er '.snapshot' <<<"${schedule}") &&
+            dockerTrafficSafePath "${root}" "${root}/locks/${directory}" &&
+            dockerRemoveManagedTree "${root}" "${root}/locks/${directory}" || return 1
+    fi
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-clean \
+        --root "${root}" --project "${PADM_DOCKER_PROJECT}" || return 1
+    DOCKER_CONFIG_SWITCHED=0 DOCKER_CONFIG_CANDIDATE= DOCKER_CONFIG_IPV6_TOUCHED=0
+    DOCKER_MAINTENANCE_SNAPSHOT= DOCKER_MAINTENANCE_JOB= DOCKER_MAINTENANCE_CHANGED=0
+    DOCKER_RECOVERY_STARTED=0
+}
+
 dockerRecoveryCommand() (
-    local action=${1:-} archive=${2:-} manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected
-    local DOCKER_RECOVERY_INPUT=
-    [[ "$#" -ge 2 && "${action}" == preview ]] && dockerPathIsSafeAbsolute "${archive}" ||
-        return "${PADM_DOCKER_RC_USAGE}"
-    shift 2
+    local action=${1:-} archive= confirm= manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected
+    local DOCKER_RECOVERY_INPUT= DOCKER_RECOVERY_STARTED=0
+    case "${action}" in
+    recover) [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"; shift ;;
+    preview|apply)
+        [[ "$#" -ge 2 ]] && dockerPathIsSafeAbsolute "$2" || return "${PADM_DOCKER_RC_USAGE}"
+        archive=$2; shift 2 ;;
+    *) return "${PADM_DOCKER_RC_USAGE}" ;;
+    esac
     while [[ "$#" -gt 0 ]]; do
         [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         case "$1" in
         --manifest) [[ -z "${manifest}" ]] || return "${PADM_DOCKER_RC_USAGE}"; manifest=$2 ;;
         --bundle) [[ -z "${bundle}" ]] || return "${PADM_DOCKER_RC_USAGE}"; bundle=$2 ;;
         --control-bundle) [[ -z "${controlBundle}" ]] || return "${PADM_DOCKER_RC_USAGE}"; controlBundle=$2 ;;
+        --confirm)
+            [[ "${action}" == apply && -z "${confirm}" && "$2" == PADM-DOCKER-RESTORE ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            confirm=$2 ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
         shift 2
     done
+    [[ "${action}" != apply || "${confirm}" == PADM-DOCKER-RESTORE ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
     dockerRequireCommand python3 && dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     trap '
         status=$?
         trap "" INT TERM
-        dockerCleanupConfigurationCandidate || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_STATE}; }
-        [[ -z "${stage}" ]] || dockerRemoveManagedTree "${root}" "${stage}" ||
-            { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_STATE}; }
+        if [[ "${action}" != recover && "${DOCKER_RECOVERY_STARTED}" == 1 ]]; then
+            dockerRecoveryRecover || {
+                dockerError "灾备恢复撤销未完成，现场已保留；请执行 restore recover: ${root}"
+                [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_STATE}
+            }
+        fi
+        if [[ "${action}" != recover && "${DOCKER_RECOVERY_STARTED}" == 0 ]]; then
+            dockerCleanupConfigurationCandidate || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_STATE}; }
+            [[ -z "${stage}" ]] || dockerRemoveManagedTree "${root}" "${stage}" ||
+                { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_STATE}; }
+        fi
         dockerCleanupStagedBundle || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}; }
         dockerManifestCleanup || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_MANIFEST}; }
         dockerReleaseDeploymentLock || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_LOCK}; }
@@ -3269,9 +3375,16 @@ dockerRecoveryCommand() (
     ' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
+    if [[ "${action}" == recover ]]; then
+        dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+        dockerAcquireDeploymentLock --recovery || return "${PADM_DOCKER_RC_LOCK}"
+        dockerRequireInstalledBundle && dockerRecoveryRecover || return "${PADM_DOCKER_RC_STATE}"
+        printf '灾备恢复事务已清理。\n'
+        return 0
+    fi
     dockerLockInstalledDeployment || return $?
     dockerRecoveryTargetEmpty "${root}" || {
-        dockerError '恢复预览需要仅安装控制骨架的空目标；已有配置、数据、日志、备份、残留或同项目容器均拒绝'
+        dockerError '灾备恢复需要仅安装控制骨架的空目标；已有配置、数据、日志、备份、残留或同项目容器均拒绝'
         return "${PADM_DOCKER_RC_STATE}"
     }
     stage=$(mktemp -d "${root}/.recovery.XXXXXX") &&
@@ -3294,8 +3407,11 @@ dockerRecoveryCommand() (
         fi
     fi
     [[ ! -d "${stage}/input/secrets/tls" ]] || tlsSource="${stage}/input/secrets/tls"
-    dockerConfigureApply "${stage}/draft/spec.json" "${tlsSource}" '' preview \
+    unexpected=preview
+    [[ "${action}" != apply ]] || unexpected=recovery
+    dockerConfigureApply "${stage}/draft/spec.json" "${tlsSource}" '' "${unexpected}" \
         "${stage}/draft/business.json" "${siteSource}" || return $?
+    [[ "${action}" != apply ]] || return 0
     printf '灾备恢复预览通过（未安装部署；已创建私密暂存并运行候选校验）。\n'
     jq '{listeners:[.spec.core.protocols[] | {listener_id,public_port}],
       accounts:(.spec.accounts // [] | length),shares:(.shares.groups | length),

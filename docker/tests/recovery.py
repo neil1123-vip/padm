@@ -483,5 +483,415 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 143)
 
 
+class RecoveryTransactionTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="padm-transaction-", dir=os.environ["TMPDIR"])
+        self.addCleanup(self.directory.cleanup)
+        self.base = Path(self.directory.name)
+        self.root = self.base / "state"
+        self.root.mkdir(mode=0o750)
+        self.project = "padm-test"
+        self.candidate = self.root / ".candidate.Abc123"
+        self.candidate.mkdir(mode=0o750)
+        self.source = {
+            "compose.json": json.dumps({"name": self.project}).encode(),
+            "images.runtime.env": b"XRAY_IMAGE=" + SECRET + b"\n",
+            "deployment.json": json.dumps({"compose": {"project": self.project}}).encode(),
+        }
+        for name, data in self.source.items():
+            path = self.candidate / name
+            path.write_bytes(data)
+            path.chmod(0o640)
+        self.pending = self.root / recovery.TRANSACTION
+
+    def prepare(self, stage=None):
+        return recovery.transaction_prepare(str(self.root), self.project, str(self.candidate),
+                                            str(stage) if stage is not None else None)
+
+    def check(self):
+        return recovery.transaction_check(str(self.root), self.project)
+
+    def cli(self, action, *arguments):
+        return subprocess.run(
+            [sys.executable, "-B", str(HELPER), "transaction-" + action,
+             "--root", str(self.root), "--project", self.project, *arguments],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            env={**os.environ, "TMPDIR": str(self.base / "missing")},
+        )
+
+    def write_metadata(self, metadata, directory=None):
+        path = (directory or self.pending) / recovery.TRANSACTION_METADATA
+        path.write_bytes(recovery.transaction_encoded(metadata))
+
+    def snapshot(self):
+        locks = self.root / "locks"
+        locks.mkdir(mode=0o750, exist_ok=True)
+        snapshot = locks / "traffic-schedule.Abc123"
+        snapshot.mkdir(mode=0o700)
+        return snapshot
+
+    def save_schedule(self, snapshot):
+        return recovery.transaction_schedule_save(
+            str(self.root), self.project, str(snapshot), "/etc/systemd/system", 1, 0, 1,
+        )
+
+    def test_prepare_persists_private_copies_and_original_directory_metadata(self):
+        (self.root / "config").mkdir(mode=0o750)
+        (self.root / "secrets").mkdir(mode=0o700)
+        stage = self.root / ".recovery.Def456"
+        stage.mkdir(mode=0o700)
+        metadata = self.prepare(stage)
+        self.assertEqual(metadata["directories"]["config"],
+                         {"exists": True, "mode": 0o750, "uid": 0, "gid": 0})
+        self.assertEqual(metadata["directories"]["data"], {"exists": False})
+        self.assertEqual(metadata["input_stage"], stage.name)
+        self.assertEqual(self.check(), (metadata, None))
+        self.assertEqual(stat.S_IMODE(self.pending.stat().st_mode), 0o700)
+        for path in self.pending.iterdir():
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual((path.stat().st_uid, path.stat().st_gid, path.stat().st_nlink),
+                             (0, 0, 1))
+        self.assertEqual((self.pending / "images.env").read_bytes(), self.source["images.runtime.env"])
+        for path in self.candidate.iterdir():
+            path.unlink()
+        self.candidate.rmdir()
+        result = self.cli("check")
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(json.loads(result.stdout), {"state": "active"})
+        result = self.cli("metadata")
+        self.assertEqual(json.loads(result.stdout), metadata)
+        self.assertNotIn(SECRET, result.stdout + result.stderr)
+
+    def test_commit_is_atomic_idempotent_and_clean_removes_registration(self):
+        self.prepare()
+        original = recovery.transaction_write
+
+        def interrupted_write(parent, name, data):
+            original(parent, name, data)
+            raise SystemExit(143)
+
+        with mock.patch.object(recovery, "transaction_write", side_effect=interrupted_write):
+            with self.assertRaises(SystemExit):
+                recovery.transaction_commit(str(self.root), self.project)
+        self.assertEqual(self.check()[0]["state"], "active")
+        self.assertEqual(list(self.root.glob(".restore-metadata-*")), [])
+        recovery.transaction_commit(str(self.root), self.project)
+        before = (self.pending / recovery.TRANSACTION_METADATA).stat().st_mtime_ns
+        recovery.transaction_commit(str(self.root), self.project)
+        self.assertEqual((self.pending / recovery.TRANSACTION_METADATA).stat().st_mtime_ns, before)
+        self.assertEqual(self.check()[0]["state"], "committed")
+        recovery.transaction_clean(str(self.root), self.project)
+        self.assertFalse(self.pending.exists())
+        self.assertTrue(self.candidate.is_dir())
+
+    def test_prepare_rejects_existing_registration_without_changing_it(self):
+        self.prepare()
+        before = {path.name: path.read_bytes() for path in self.pending.iterdir()}
+        with self.assertRaises(ValueError):
+            self.prepare()
+        self.assertEqual({path.name: path.read_bytes() for path in self.pending.iterdir()}, before)
+
+    def test_clean_retries_every_partial_unlink_without_touching_candidate(self):
+        snapshot = self.snapshot()
+        for name in recovery.SCHEDULE_FILES:
+            path = snapshot / name
+            path.write_bytes(SECRET)
+            path.chmod(0o644)
+        original = recovery.os.unlink
+        cleaning = self.root / recovery.TRANSACTION_CLEANING
+        for interrupted_after in range(1, 9):
+            with self.subTest(interrupted_after=interrupted_after):
+                self.prepare()
+                self.save_schedule(snapshot)
+                count = 0
+
+                def interrupted_unlink(*arguments, **keywords):
+                    nonlocal count
+                    original(*arguments, **keywords)
+                    count += 1
+                    if count == interrupted_after:
+                        raise SystemExit(137)
+
+                with mock.patch.object(recovery.os, "unlink", side_effect=interrupted_unlink):
+                    with self.assertRaises(SystemExit):
+                        recovery.transaction_clean(str(self.root), self.project)
+                self.assertFalse(self.pending.exists())
+                self.assertTrue(cleaning.is_dir())
+                result = self.cli("clean")
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertFalse(cleaning.exists())
+                self.assertEqual((self.candidate / "images.runtime.env").read_bytes(),
+                                 self.source["images.runtime.env"])
+
+    def test_prepare_reaps_interrupted_cleaning_before_new_registration(self):
+        self.prepare()
+        original = recovery.os.unlink
+
+        def interrupted_unlink(*arguments, **keywords):
+            original(*arguments, **keywords)
+            raise SystemExit(137)
+
+        with mock.patch.object(recovery.os, "unlink", side_effect=interrupted_unlink):
+            with self.assertRaises(SystemExit):
+                recovery.transaction_clean(str(self.root), self.project)
+        self.prepare()
+        self.assertEqual(self.check()[0]["state"], "active")
+        self.assertFalse((self.root / recovery.TRANSACTION_CLEANING).exists())
+
+    def test_clean_rejects_unsafe_tombstone_before_removing_anything(self):
+        self.prepare()
+        cleaning = self.root / recovery.TRANSACTION_CLEANING
+        self.pending.rename(cleaning)
+        path = cleaning / "images.env"
+        original = path.read_bytes()
+        for kind in ("public", "foreign", "hardlink", "symlink", "extra", "directory"):
+            with self.subTest(kind=kind):
+                if kind == "public":
+                    path.chmod(0o640)
+                elif kind == "foreign":
+                    os.chown(path, 65534, 65534)
+                elif kind == "hardlink":
+                    os.link(path, self.base / "clean-alias")
+                elif kind == "symlink":
+                    path.unlink()
+                    path.symlink_to(self.candidate / "images.runtime.env")
+                elif kind == "extra":
+                    (cleaning / "unregistered").write_bytes(SECRET)
+                else:
+                    path.unlink()
+                    path.mkdir(mode=0o700)
+                with self.assertRaises((ValueError, OSError)):
+                    recovery.transaction_clean(str(self.root), self.project)
+                self.assertEqual((cleaning / "compose.json").read_bytes(),
+                                 self.source["compose.json"])
+                if kind == "hardlink":
+                    (self.base / "clean-alias").unlink()
+                if kind == "extra":
+                    (cleaning / "unregistered").unlink()
+                if kind == "directory":
+                    path.rmdir()
+                if path.is_symlink():
+                    path.unlink()
+                path.write_bytes(original)
+                path.chmod(0o600)
+                os.chown(path, 0, 0)
+        recovery.transaction_clean(str(self.root), self.project)
+        with self.assertRaises(ValueError):
+            recovery.transaction_clean(str(self.root), self.project)
+
+    def test_prepare_rejects_nonempty_or_unsafe_skeleton(self):
+        for kind in ("nonempty", "symlink", "public", "foreign"):
+            with self.subTest(kind=kind):
+                path = self.root / "data"
+                if kind == "symlink":
+                    path.symlink_to(self.candidate, target_is_directory=True)
+                else:
+                    path.mkdir(mode=0o750)
+                    if kind == "nonempty":
+                        (path / "sentinel").write_bytes(SECRET)
+                    elif kind == "public":
+                        path.chmod(0o777)
+                    else:
+                        os.chown(path, 65534, 65534)
+                with self.assertRaises((ValueError, OSError)):
+                    self.prepare()
+                self.assertFalse(self.pending.exists())
+                if kind == "nonempty":
+                    self.assertEqual((path / "sentinel").read_bytes(), SECRET)
+                    (path / "sentinel").unlink()
+                path.unlink() if path.is_symlink() else path.rmdir()
+
+    def test_prepare_rejects_unsafe_source_files_without_publishing(self):
+        path = self.candidate / "images.runtime.env"
+        for kind in ("symlink", "hardlink", "fifo", "public", "foreign", "oversize"):
+            with self.subTest(kind=kind):
+                path.unlink()
+                alias = self.base / "source-alias"
+                if kind == "symlink":
+                    path.symlink_to(self.candidate / "compose.json")
+                elif kind == "fifo":
+                    os.mkfifo(path, 0o600)
+                else:
+                    path.write_bytes(SECRET)
+                    path.chmod(0o640)
+                    if kind == "hardlink":
+                        os.link(path, alias)
+                    elif kind == "public":
+                        path.chmod(0o644)
+                    elif kind == "foreign":
+                        os.chown(path, 65534, 65534)
+                    else:
+                        with path.open("r+b") as target:
+                            target.truncate(recovery.MAX_TRANSACTION_FILE + 1)
+                with self.assertRaises((ValueError, OSError)):
+                    self.prepare()
+                self.assertFalse(self.pending.exists())
+                self.assertEqual(list(self.root.glob(".restore-building-*")), [])
+                if alias.exists():
+                    alias.unlink()
+
+    def test_prepare_rejects_wrong_candidate_project_and_escaping_paths(self):
+        path = self.candidate / "compose.json"
+        path.write_bytes(b'{"name":"another-project"}')
+        with self.assertRaises(ValueError):
+            self.prepare()
+        path.write_bytes(self.source[path.name])
+        for candidate in (self.base / self.candidate.name, self.root / ".." / self.candidate.name,
+                          self.root / ".candidate.too-long"):
+            with self.subTest(candidate=candidate):
+                with self.assertRaises((ValueError, OSError)):
+                    recovery.transaction_prepare(str(self.root), self.project, str(candidate))
+        for stage in (self.candidate, self.base / ".recovery.Abc123"):
+            with self.assertRaises(ValueError):
+                self.prepare(stage)
+        self.assertFalse(self.pending.exists())
+
+    def test_prepare_failure_or_signal_never_publishes_partial_registration(self):
+        original = recovery.transaction_write
+        for failure in (ValueError("injected"), SystemExit(143)):
+            count = 0
+
+            def interrupted_write(parent, name, data):
+                nonlocal count
+                original(parent, name, data)
+                count += 1
+                if count == 2:
+                    raise failure
+
+            with self.subTest(failure=type(failure).__name__):
+                with mock.patch.object(recovery, "transaction_write", side_effect=interrupted_write):
+                    with self.assertRaises(type(failure)):
+                        self.prepare()
+                self.assertFalse(self.pending.exists())
+                self.assertEqual(list(self.root.glob(".restore-building-*")), [])
+
+    def test_prepare_rechecks_empty_skeleton_before_publish(self):
+        original = recovery.transaction_validate
+
+        def populate_skeleton(directory, root, project):
+            result = original(directory, root, project)
+            (self.root / "data").mkdir(mode=0o750)
+            (self.root / "data/sentinel").write_bytes(SECRET)
+            return result
+
+        with mock.patch.object(recovery, "transaction_validate", side_effect=populate_skeleton):
+            with self.assertRaises(ValueError):
+                self.prepare()
+        self.assertFalse(self.pending.exists())
+        self.assertEqual((self.root / "data/sentinel").read_bytes(), SECRET)
+
+    def test_check_rejects_malformed_or_mismatched_metadata(self):
+        original = self.prepare()
+        for key, value in (("schema_version", True), ("schema_version", 2),
+                           ("root", "/other"), ("project", "other"), ("state", "unknown"),
+                           ("candidate", "../escape"), ("input_stage", "bad"),
+                           ("directories", {}), ("files", {}), ("unexpected", "value")):
+            metadata = copy.deepcopy(original)
+            metadata[key] = value
+            self.write_metadata(metadata)
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ValueError):
+                    self.check()
+        self.write_metadata(original)
+        path = self.pending / recovery.TRANSACTION_METADATA
+        path.write_bytes(b'{"schema_version":1,' + path.read_bytes()[1:])
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_check_rejects_copy_tampering_and_unregistered_contents(self):
+        metadata = self.prepare()
+        path = self.pending / "images.env"
+        original = path.read_bytes()
+        for kind in ("content", "mode", "owner", "hardlink", "symlink", "extra"):
+            with self.subTest(kind=kind):
+                if kind == "content":
+                    path.write_bytes(b"tampered")
+                elif kind == "mode":
+                    path.chmod(0o640)
+                elif kind == "owner":
+                    os.chown(path, 65534, 65534)
+                elif kind == "hardlink":
+                    os.link(path, self.base / "copy-alias")
+                elif kind == "symlink":
+                    path.unlink()
+                    path.symlink_to(self.candidate / "images.runtime.env")
+                else:
+                    (self.pending / "extra").write_bytes(SECRET)
+                with self.assertRaises((ValueError, OSError)):
+                    self.check()
+                if kind == "hardlink":
+                    (self.base / "copy-alias").unlink()
+                if kind == "extra":
+                    (self.pending / "extra").unlink()
+                if path.is_symlink():
+                    path.unlink()
+                path.write_bytes(original)
+                path.chmod(0o600)
+                os.chown(path, 0, 0)
+        self.assertEqual(self.check()[0], metadata)
+
+    def test_schedule_snapshot_is_private_persistent_and_single_use(self):
+        self.prepare()
+        result = self.cli("schedule-metadata")
+        self.assertEqual(json.loads(result.stdout), None)
+        snapshot = self.snapshot()
+        for name in recovery.SCHEDULE_FILES:
+            path = snapshot / name
+            path.write_bytes(SECRET + name.encode())
+            path.chmod(0o644)
+        saved = self.save_schedule(snapshot)
+        self.assertEqual(self.check()[1], saved)
+        self.assertEqual(saved["snapshot"], snapshot.name)
+        for name in recovery.SCHEDULE_FILES:
+            path = self.pending / "traffic-schedule" / name
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(path.read_bytes(), SECRET + name.encode())
+            (snapshot / name).unlink()
+        snapshot.rmdir()
+        self.assertEqual(json.loads(self.cli("schedule-metadata").stdout), saved)
+        with self.assertRaises(ValueError):
+            self.save_schedule(snapshot)
+        recovery.transaction_clean(str(self.root), self.project)
+        self.assertFalse(self.pending.exists())
+
+    def test_schedule_empty_snapshot_and_committed_save_gate(self):
+        self.prepare()
+        snapshot = self.snapshot()
+        saved = self.save_schedule(snapshot)
+        self.assertEqual(saved["files"], {})
+        recovery.transaction_commit(str(self.root), self.project)
+        self.assertEqual(self.check()[1], saved)
+        with self.assertRaises(ValueError):
+            self.save_schedule(snapshot)
+
+    def test_schedule_rejects_unsafe_snapshot_or_tampered_registration(self):
+        self.prepare()
+        snapshot = self.snapshot()
+        path = snapshot / "crontab"
+        path.write_bytes(SECRET)
+        path.chmod(0o666)
+        with self.assertRaises(ValueError):
+            self.save_schedule(snapshot)
+        self.assertIsNone(self.check()[1])
+        path.chmod(0o644)
+        with self.assertRaises(ValueError):
+            self.save_schedule(self.base / snapshot.name)
+        self.save_schedule(snapshot)
+        schedule = self.pending / "traffic-schedule"
+        metadata = self.check()[1]
+        metadata["timer_active"] = True
+        self.write_metadata(metadata, schedule)
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_cli_rejection_does_not_disclose_private_contents(self):
+        self.prepare()
+        (self.pending / "images.env").write_bytes(SECRET + b"tampered")
+        result = self.cli("check")
+        self.assertEqual(result.returncode, 15)
+        self.assertNotIn(SECRET, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, b"")
+
+
 if __name__ == "__main__":
     unittest.main()

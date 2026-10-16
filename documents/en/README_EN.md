@@ -1175,7 +1175,16 @@ in control menu `15 → 5` (up to 16). Empty segments and invalid IDs are reject
 Join confirms once and initializes identity,
 mapping and the initial account sync in one transaction. Failure preserves the original role, accounts
 and traffic; retrying the same revision/content does not rebuild services. Identity, connection addresses
-and mapping are then fixed; a different invitation cannot reclaim them. After rotation, securely transfer
+are then fixed; a different invitation cannot reclaim them. Ordinary sync retains the committed mapping.
+Control menu `15 → 15` or this command reauthenticates the same connection and replaces its mapping:
+
+```bash
+padm-docker control remap --invite /root/padm-control-invite.json --listener entry-secondary --yes
+```
+
+Disable automatic sync first, then enable it again with the same connection's invitation after committing.
+Revision, digest and the previous managed snapshot remain checked; local accounts and traffic are preserved.
+After rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.
 The raw token is not stored in specs, backups, arguments, environment or ordinary logs. The capability-free
@@ -1437,8 +1446,23 @@ archived Compose, image environment files or scripts. Saved totals, quotas and h
 traffic keys remain; old baselines are cleared and over-quota accounts are disabled in the
 candidate. Staging is cleaned on success, failure or interruption. No deployment or schedule
 is installed. Unlike `backup verify`, preview is not completely read-only.
-Full restore commit/rollback, role migration and fresh host integration checks remain
-deferred. There is no `restore apply` command.
+The same supported scope can be applied from menu `18 → 9`; older archives still require matching release assets:
+
+```bash
+padm-docker restore apply /root/padm-recovery.tar --confirm PADM-DOCKER-RESTORE
+padm-docker restore recover
+```
+
+Before the first business write, the transaction persists trusted candidate shutdown inputs,
+empty-directory metadata and schedule snapshots. Installation, health or traffic scheduling
+failures and INT/TERM roll back this restore. After registration, SIGKILL recovery can continue
+with menu `18 → 10` or `restore recover`. Ordinary deployment operations refuse pending cleanup.
+Failed recovery preserves evidence; external schedule changes are rejected rather than overwritten.
+Committed transactions only clean staging on retry and do not stop the deployment.
+A hard kill before registration, commit metadata publication or schedule snapshot publication can leave
+unregistered staging that requires inspection and manual cleanup; automatic cleanup of these windows remains pending.
+Existing-deployment replacement, other persistent inputs, role migration, native fresh-host checks
+and complete disaster recovery remain deferred.
 
 ### User Traffic and Quotas
 

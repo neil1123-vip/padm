@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""受管部署输入的版本化归档与私密暂存；不执行部署恢复或信任判定。"""
+"""受管部署输入归档、私密暂存及空目标恢复事务登记。"""
 
 import argparse
 import contextlib
@@ -38,6 +38,14 @@ TREES = {
     "data/subscription", "data/static", "data/acme",
     "secrets/tls", "secrets/renewal", "secrets/control-sync",
 }
+TRANSACTION = ".restore-pending"
+TRANSACTION_CLEANING = ".restore-cleaning"
+TRANSACTION_METADATA = "metadata.json"
+TRANSACTION_DIRECTORIES = ("config", "data", "secrets", "logs", "backups")
+TRANSACTION_FILES = ("compose.json", "images.env", "deployment.json")
+SCHEDULE_FILES = ("padm-docker-traffic.service", "padm-docker-traffic.timer", "crontab")
+MAX_TRANSACTION_FILE = 16 * 1024 * 1024
+MAX_TRANSACTION_METADATA = 64 * 1024
 
 
 def require(condition):
@@ -429,6 +437,331 @@ def extract_archive(path, directory):
         os.close(directory_fd)
 
 
+def transaction_path(path):
+    require(isinstance(path, str) and re.fullmatch(r"/[A-Za-z0-9._/-]+", path)
+            and all(part and part not in (".", "..") for part in path.split("/")[1:]))
+    return path
+
+
+@contextlib.contextmanager
+def transaction_root(root, project):
+    transaction_path(root)
+    require(os.geteuid() == 0 and isinstance(project, str)
+            and re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", project))
+    with absolute_parent(root, private=True) as (parent, name):
+        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    try:
+        info = os.fstat(fd)
+        require(info.st_uid == 0 and stat.S_IMODE(info.st_mode) & 0o7022 == 0)
+        yield fd
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def transaction_directory(parent, name, private=True):
+    with opened(parent, name, os.O_RDONLY | os.O_DIRECTORY) as fd:
+        info = os.fstat(fd)
+        require(info.st_uid == 0 and (not private or (
+            info.st_gid == 0 and stat.S_IMODE(info.st_mode) == 0o700)))
+        require(stat.S_IMODE(info.st_mode) & 0o7022 == 0)
+        yield fd
+
+
+def transaction_read(parent, name, private=True, limit=MAX_TRANSACTION_FILE, source_mode=0o640):
+    with opened(parent, name, os.O_RDONLY) as fd:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_uid == 0
+                and before.st_nlink == 1 and 0 <= before.st_size <= limit)
+        mode = stat.S_IMODE(before.st_mode)
+        if private:
+            require(mode == 0o600 and before.st_gid == 0)
+        else:
+            require(mode & ~source_mode == 0)
+        data = bytearray()
+        while len(data) <= before.st_size:
+            chunk = os.read(fd, min(CHUNK, before.st_size + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        require(len(data) == before.st_size and signature(os.fstat(fd)) == signature(before))
+        return bytes(data), {"size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                             "mode": mode}
+
+
+def transaction_write(parent, name, data):
+    with opened(parent, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as fd:
+        os.fchmod(fd, 0o600)
+        os.fchown(fd, 0, 0)
+        with os.fdopen(os.dup(fd), "wb") as target:
+            target.write(data)
+            target.flush()
+            os.fsync(fd)
+
+
+def transaction_encoded(metadata):
+    data = json.dumps(metadata, ensure_ascii=True, separators=(",", ":")).encode()
+    require(len(data) <= MAX_TRANSACTION_METADATA)
+    return data
+
+
+def transaction_directories(root_fd):
+    result = {}
+    for name in TRANSACTION_DIRECTORIES:
+        try:
+            with transaction_directory(root_fd, name, private=False) as fd:
+                info = os.fstat(fd)
+                require(not os.listdir(fd))
+                result[name] = {"exists": True, "mode": stat.S_IMODE(info.st_mode),
+                                "uid": info.st_uid, "gid": info.st_gid}
+        except FileNotFoundError:
+            result[name] = {"exists": False}
+    return result
+
+
+def transaction_validate_directories(directories):
+    require(isinstance(directories, dict) and set(directories) == set(TRANSACTION_DIRECTORIES))
+    for entry in directories.values():
+        require(isinstance(entry, dict) and type(entry.get("exists")) is bool)
+        if entry["exists"]:
+            require(set(entry) == {"exists", "mode", "uid", "gid"}
+                    and type(entry["mode"]) is int and 0 <= entry["mode"] <= 0o777
+                    and entry["mode"] & 0o22 == 0 and type(entry["uid"]) is int
+                    and entry["uid"] == 0 and type(entry["gid"]) is int
+                    and 0 <= entry["gid"] < 2 ** 32 - 1)
+        else:
+            require(set(entry) == {"exists"})
+
+
+def transaction_validate_files(directory_fd, files, names, required=True):
+    require(isinstance(files, dict) and (set(files) == set(names) if required
+                                        else set(files) <= set(names)))
+    for name, entry in files.items():
+        require(isinstance(entry, dict) and set(entry) == {"size", "sha256", "mode"}
+                and type(entry["size"]) is int and 0 <= entry["size"] <= MAX_TRANSACTION_FILE
+                and entry["mode"] == 0o600 and type(entry["mode"]) is int
+                and isinstance(entry["sha256"], str)
+                and re.fullmatch(r"[a-f0-9]{64}", entry["sha256"]))
+        _, observed = transaction_read(directory_fd, name)
+        require(observed == entry)
+
+
+def transaction_schedule(directory_fd, root, project):
+    if "traffic-schedule" not in os.listdir(directory_fd):
+        return None
+    with transaction_directory(directory_fd, "traffic-schedule") as schedule_fd:
+        data, _ = transaction_read(schedule_fd, TRANSACTION_METADATA,
+                                   limit=MAX_TRANSACTION_METADATA)
+        metadata = read_json(data)
+        require(isinstance(metadata, dict) and set(metadata) == {
+            "schema_version", "root", "project", "unit_dir", "systemd_ready",
+            "timer_enabled", "timer_active", "snapshot", "files"
+        } and type(metadata["schema_version"]) is int and metadata["schema_version"] == 1
+                and metadata["root"] == root and metadata["project"] == project)
+        transaction_path(metadata["unit_dir"])
+        require(isinstance(metadata["snapshot"], str)
+                and re.fullmatch(r"traffic-schedule\.[A-Za-z0-9]{6}", metadata["snapshot"]))
+        require(all(type(metadata[key]) is int and metadata[key] in (0, 1)
+                    for key in ("systemd_ready", "timer_enabled", "timer_active")))
+        transaction_validate_files(schedule_fd, metadata["files"], SCHEDULE_FILES, required=False)
+        require(set(os.listdir(schedule_fd)) == {TRANSACTION_METADATA} | set(metadata["files"]))
+        return metadata
+
+
+def transaction_validate(directory_fd, root, project):
+    data, _ = transaction_read(directory_fd, TRANSACTION_METADATA, limit=MAX_TRANSACTION_METADATA)
+    metadata = read_json(data)
+    require(isinstance(metadata, dict) and set(metadata) == {
+        "schema_version", "root", "project", "state", "directories", "files",
+        "candidate", "input_stage"
+    } and type(metadata["schema_version"]) is int and metadata["schema_version"] == 1
+            and metadata["root"] == root and metadata["project"] == project
+            and metadata["state"] in ("active", "committed"))
+    require(isinstance(metadata["candidate"], str)
+            and re.fullmatch(r"\.candidate\.[A-Za-z0-9]{6}", metadata["candidate"]))
+    require(metadata["input_stage"] is None or isinstance(metadata["input_stage"], str)
+            and re.fullmatch(r"\.recovery\.[A-Za-z0-9]{6}", metadata["input_stage"]))
+    transaction_validate_directories(metadata["directories"])
+    transaction_validate_files(directory_fd, metadata["files"], TRANSACTION_FILES)
+    schedule = transaction_schedule(directory_fd, root, project)
+    require(set(os.listdir(directory_fd)) == {TRANSACTION_METADATA} | set(TRANSACTION_FILES)
+            | ({"traffic-schedule"} if schedule is not None else set()))
+    return metadata, schedule
+
+
+def transaction_remove_files(parent, name):
+    # 仅清理本进程新建或完整校验后的固定文件集合，不递归跟随路径。
+    with transaction_directory(parent, name) as fd:
+        for item in os.listdir(fd):
+            os.unlink(item, dir_fd=fd)
+        os.fsync(fd)
+    os.rmdir(name, dir_fd=parent)
+    os.fsync(parent)
+
+
+def transaction_reap(root_fd):
+    if TRANSACTION_CLEANING not in os.listdir(root_fd):
+        return False
+    with transaction_directory(root_fd, TRANSACTION_CLEANING) as fd:
+        names = set(os.listdir(fd))
+        require(names <= {TRANSACTION_METADATA, "traffic-schedule"} | set(TRANSACTION_FILES))
+        for name in names - {"traffic-schedule"}:
+            transaction_read(fd, name, limit=MAX_TRANSACTION_METADATA
+                             if name == TRANSACTION_METADATA else MAX_TRANSACTION_FILE)
+        if "traffic-schedule" in names:
+            with transaction_directory(fd, "traffic-schedule") as schedule_fd:
+                entries = set(os.listdir(schedule_fd))
+                require(entries <= {TRANSACTION_METADATA} | set(SCHEDULE_FILES))
+                for name in entries:
+                    transaction_read(schedule_fd, name, limit=MAX_TRANSACTION_METADATA
+                                     if name == TRANSACTION_METADATA else MAX_TRANSACTION_FILE)
+            transaction_remove_files(fd, "traffic-schedule")
+        for name in names - {"traffic-schedule"}:
+            os.unlink(name, dir_fd=fd)
+        os.fsync(fd)
+    os.rmdir(TRANSACTION_CLEANING, dir_fd=root_fd)
+    os.fsync(root_fd)
+    return True
+
+
+def transaction_prepare(root, project, candidate, input_stage=None):
+    transaction_path(candidate)
+    require(os.path.dirname(candidate) == root
+            and re.fullmatch(r"\.candidate\.[A-Za-z0-9]{6}", os.path.basename(candidate)))
+    if input_stage is not None:
+        transaction_path(input_stage)
+        require(os.path.dirname(input_stage) == root
+                and re.fullmatch(r"\.recovery\.[A-Za-z0-9]{6}", os.path.basename(input_stage)))
+    with transaction_root(root, project) as root_fd:
+        require(TRANSACTION not in os.listdir(root_fd))
+        transaction_reap(root_fd)
+        if input_stage is not None:
+            with transaction_directory(root_fd, os.path.basename(input_stage)):
+                pass
+        directories = transaction_directories(root_fd)
+        with transaction_directory(root_fd, os.path.basename(candidate), private=False) as candidate_fd:
+            temporary = ".restore-building-" + secrets.token_hex(12)
+            os.mkdir(temporary, 0o700, dir_fd=root_fd)
+            published = False
+            try:
+                with transaction_directory(root_fd, temporary) as temporary_fd:
+                    files = {}
+                    for name in TRANSACTION_FILES:
+                        source = "images.runtime.env" if name == "images.env" else name
+                        data, _ = transaction_read(candidate_fd, source, private=False)
+                        if name in ("compose.json", "deployment.json"):
+                            value = read_json(data)
+                            require(isinstance(value, dict))
+                            require(value.get("name") == project if name == "compose.json" else
+                                    isinstance(value.get("compose"), dict)
+                                    and value["compose"].get("project") == project)
+                        transaction_write(temporary_fd, name, data)
+                        files[name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                                       "mode": 0o600}
+                    metadata = {"schema_version": 1, "root": root, "project": project,
+                                "state": "active", "directories": directories, "files": files,
+                                "candidate": os.path.basename(candidate),
+                                "input_stage": os.path.basename(input_stage) if input_stage else None}
+                    transaction_write(temporary_fd, TRANSACTION_METADATA, transaction_encoded(metadata))
+                    transaction_validate(temporary_fd, root, project)
+                    require(transaction_directories(root_fd) == directories)
+                    os.fsync(temporary_fd)
+                # root 由部署锁串行化；非空既有登记不能被 rename 覆盖。
+                require(TRANSACTION not in os.listdir(root_fd))
+                os.rename(temporary, TRANSACTION, src_dir_fd=root_fd, dst_dir_fd=root_fd)
+                published = True
+                os.fsync(root_fd)
+            finally:
+                if not published:
+                    transaction_remove_files(root_fd, temporary)
+    return metadata
+
+
+def transaction_check(root, project):
+    with transaction_root(root, project) as root_fd:
+        with transaction_directory(root_fd, TRANSACTION) as fd:
+            return transaction_validate(fd, root, project)
+
+
+def transaction_commit(root, project):
+    with transaction_root(root, project) as root_fd:
+        with transaction_directory(root_fd, TRANSACTION) as fd:
+            metadata, _ = transaction_validate(fd, root, project)
+            if metadata["state"] == "committed":
+                return
+            metadata["state"] = "committed"
+            temporary = ".restore-metadata-" + secrets.token_hex(12)
+            try:
+                transaction_write(root_fd, temporary, transaction_encoded(metadata))
+                os.replace(temporary, TRANSACTION_METADATA, src_dir_fd=root_fd, dst_dir_fd=fd)
+                os.fsync(fd)
+                os.fsync(root_fd)
+            finally:
+                if temporary in os.listdir(root_fd):
+                    os.unlink(temporary, dir_fd=root_fd)
+
+
+def transaction_clean(root, project):
+    with transaction_root(root, project) as root_fd:
+        if TRANSACTION not in os.listdir(root_fd):
+            require(transaction_reap(root_fd))
+            return
+        require(TRANSACTION_CLEANING not in os.listdir(root_fd))
+        with transaction_directory(root_fd, TRANSACTION) as fd:
+            metadata, _ = transaction_validate(fd, root, project)
+        # 先原子移出有效登记，逐文件删除中断后只回收私密固定文件集合。
+        os.rename(TRANSACTION, TRANSACTION_CLEANING, src_dir_fd=root_fd, dst_dir_fd=root_fd)
+        os.fsync(root_fd)
+        transaction_reap(root_fd)
+    return metadata
+
+
+def transaction_schedule_save(root, project, snapshot, unit_dir, systemd_ready,
+                              timer_enabled, timer_active):
+    transaction_path(snapshot)
+    transaction_path(unit_dir)
+    require(os.path.dirname(snapshot) == root + "/locks"
+            and re.fullmatch(r"traffic-schedule\.[A-Za-z0-9]{6}", os.path.basename(snapshot)))
+    require(all(type(value) is int and value in (0, 1)
+                for value in (systemd_ready, timer_enabled, timer_active)))
+    with transaction_root(root, project) as root_fd:
+        with transaction_directory(root_fd, TRANSACTION) as fd:
+            metadata, schedule = transaction_validate(fd, root, project)
+            require(metadata["state"] == "active" and schedule is None)
+            with transaction_directory(root_fd, "locks", private=False) as locks_fd:
+                with transaction_directory(locks_fd, os.path.basename(snapshot)) as snapshot_fd:
+                    require(set(os.listdir(snapshot_fd)) <= set(SCHEDULE_FILES))
+                    temporary = ".restore-schedule-" + secrets.token_hex(12)
+                    os.mkdir(temporary, 0o700, dir_fd=locks_fd)
+                    published = False
+                    try:
+                        with transaction_directory(locks_fd, temporary) as temporary_fd:
+                            files = {}
+                            for name in sorted(os.listdir(snapshot_fd)):
+                                data, _ = transaction_read(snapshot_fd, name, private=False,
+                                                           source_mode=0o644)
+                                transaction_write(temporary_fd, name, data)
+                                files[name] = {"size": len(data),
+                                               "sha256": hashlib.sha256(data).hexdigest(),
+                                               "mode": 0o600}
+                            saved = {"schema_version": 1, "root": root, "project": project,
+                                     "unit_dir": unit_dir, "systemd_ready": systemd_ready,
+                                     "timer_enabled": timer_enabled, "timer_active": timer_active,
+                                     "snapshot": os.path.basename(snapshot), "files": files}
+                            transaction_write(temporary_fd, TRANSACTION_METADATA,
+                                              transaction_encoded(saved))
+                            os.fsync(temporary_fd)
+                        os.rename(temporary, "traffic-schedule",
+                                  src_dir_fd=locks_fd, dst_dir_fd=fd)
+                        published = True
+                        os.fsync(fd)
+                        os.fsync(locks_fd)
+                    finally:
+                        if not published:
+                            transaction_remove_files(locks_fd, temporary)
+    return saved
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
@@ -440,6 +773,19 @@ def main():
     extract = commands.add_parser("extract")
     extract.add_argument("--archive", required=True)
     extract.add_argument("--directory", required=True)
+    for action in ("prepare", "check", "commit", "clean", "metadata",
+                   "schedule-save", "schedule-metadata"):
+        command = commands.add_parser("transaction-" + action)
+        command.add_argument("--root", required=True)
+        command.add_argument("--project", required=True)
+        if action == "prepare":
+            command.add_argument("--candidate", required=True)
+            command.add_argument("--input-stage")
+        elif action == "schedule-save":
+            command.add_argument("--snapshot", required=True)
+            command.add_argument("--unit-dir", required=True)
+            for option in ("systemd-ready", "timer-enabled", "timer-active"):
+                command.add_argument("--" + option, type=int, choices=(0, 1), required=True)
     args = parser.parse_args()
     try:
         if args.action == "export":
@@ -448,9 +794,24 @@ def main():
         elif args.action == "verify":
             counts = verify_archive(args.archive)
             print("灾备归档完整性校验通过（{} 个文件，{} 字节；未验证来源或恢复能力）。".format(*counts))
-        else:
+        elif args.action == "extract":
             counts = extract_archive(args.archive, args.directory)
             print("灾备归档已校验并解包至私密暂存目录（{} 个文件，{} 字节）。".format(*counts))
+        elif args.action == "transaction-prepare":
+            transaction_prepare(args.root, args.project, args.candidate, args.input_stage)
+        elif args.action == "transaction-commit":
+            transaction_commit(args.root, args.project)
+        elif args.action == "transaction-clean":
+            transaction_clean(args.root, args.project)
+        elif args.action == "transaction-schedule-save":
+            transaction_schedule_save(args.root, args.project, args.snapshot, args.unit_dir,
+                                      args.systemd_ready, args.timer_enabled, args.timer_active)
+        else:
+            metadata, schedule = transaction_check(args.root, args.project)
+            result = (metadata if args.action == "transaction-metadata" else
+                      schedule if args.action == "transaction-schedule-metadata" else
+                      {"state": metadata["state"]})
+            print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
         return 0
     except (OSError, ValueError, TypeError, KeyError, RecursionError, tarfile.TarError):
         print("灾备归档拒绝：输入不安全、文件变化、归档损坏或范围不支持。", file=sys.stderr)

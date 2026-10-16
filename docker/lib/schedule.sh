@@ -44,6 +44,101 @@ dockerMaintenanceScheduleRestore() {
     [[ "${failed}" == 0 ]]
 }
 
+dockerRecoveryScheduleRestore() {
+    local root=$1 schedule=$2 snapshot="${1}/.restore-pending/traffic-schedule"
+    local metadata unitDir systemdReady timerEnabled timerActive file target mode fragment dropIns
+    local cli bashPath service timer cronLine currentCron savedCron currentOther savedOther
+    [[ "${schedule}" != null ]] || return 0
+    metadata=$(jq -er '[.unit_dir,.systemd_ready,.timer_enabled,.timer_active] | @tsv' <<<"${schedule}") ||
+        return 1
+    IFS=$'\t' read -r unitDir systemdReady timerEnabled timerActive <<<"${metadata}" || return 1
+    dockerTrafficSafePath "${root}" "${snapshot}" &&
+        [[ -d "${snapshot}" && ! -L "${snapshot}" ]] || return 1
+    if [[ -e "${unitDir}" || -L "${unitDir}" ]]; then
+        [[ -d "${unitDir}" && ! -L "${unitDir}" && -O "${unitDir}" &&
+            "$(cd -- "${unitDir}" && pwd -P)" == "${unitDir}" ]] || return 1
+        mode=$(stat -c %a -- "${unitDir}") &&
+            (( (8#${mode} & 022) == 0 )) || return 1
+    else
+        [[ "${systemdReady}" == 0 &&
+            ! -e "${snapshot}/padm-docker-traffic.service" &&
+            ! -e "${snapshot}/padm-docker-traffic.timer" ]] || return 1
+    fi
+    if [[ "${systemdReady}" == 1 ]]; then
+        command -v systemctl >/dev/null 2>&1 &&
+            systemctl show-environment >/dev/null 2>&1 || return 1
+    elif command -v systemctl >/dev/null 2>&1 &&
+        systemctl show-environment >/dev/null 2>&1; then
+        return 1
+    fi
+    cli="${PADM_DOCKER_BIN_DIR:-/usr/local/bin}/padm-docker"
+    bashPath=$(command -v bash) || return 1
+    service=$(cat <<EOF
+# padm-docker 流量采集
+# padm-docker root=${root}
+[Unit]
+Description=padm Docker traffic accounting
+After=docker.service
+[Service]
+Type=oneshot
+Environment=PADM_DOCKER_INSTALL_DIR=${root}
+ExecStart=${bashPath} ${cli} traffic collect
+TimeoutStartSec=90
+EOF
+)
+    timer=$(cat <<EOF
+# padm-docker 流量采集
+# padm-docker root=${root}
+[Unit]
+Description=Collect padm Docker traffic every minute
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=true
+Unit=padm-docker-traffic.service
+[Install]
+WantedBy=timers.target
+EOF
+)
+    # 新进程恢复前先核对全部调度，不能用旧快照覆盖中断后新增的外部内容。
+    for file in padm-docker-traffic.service padm-docker-traffic.timer; do
+        target="${unitDir}/${file}"
+        [[ ! -L "${target}" && ! -e "${target}.d" && ! -L "${target}.d" ]] || return 1
+        if [[ "${systemdReady}" == 1 ]]; then
+            fragment=$(systemctl show --property=FragmentPath --value "${file}" 2>/dev/null) || return 1
+            [[ -z "${fragment}" || ( "${fragment}" == "${target}" && -f "${target}" ) ]] || return 1
+            dropIns=$(systemctl show --property=DropInPaths --value "${file}" 2>/dev/null) || return 1
+            [[ -z "${dropIns}" ]] || return 1
+        fi
+        [[ -e "${target}" ]] || continue
+        [[ -f "${target}" && -O "${target}" && "$(stat -c %h -- "${target}")" == 1 ]] ||
+            return 1
+        mode=$(stat -c %a -- "${target}") &&
+            (( (8#${mode} & ~8#644) == 0 )) || return 1
+        if [[ -f "${snapshot}/${file}" ]] && cmp -s -- "${snapshot}/${file}" "${target}"; then
+            continue
+        fi
+        if [[ "${file}" == *.service ]]; then
+            printf '%s\n' "${service}" | cmp -s - "${target}" || return 1
+        else
+            printf '%s\n' "${timer}" | cmp -s - "${target}" || return 1
+        fi
+    done
+    if [[ -f "${snapshot}/crontab" ]]; then
+        command -v crontab >/dev/null 2>&1 || return 1
+        currentCron=$(dockerTrafficReadCrontab) || return 1
+        savedCron=$(<"${snapshot}/crontab")
+        cronLine="* * * * * PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} traffic collect # padm-docker-traffic"
+        currentOther=$(printf '%s\n' "${currentCron}" | awk -v owned="${cronLine}" '$0 != owned') ||
+            return 1
+        savedOther=$(printf '%s\n' "${savedCron}" | awk -v owned="${cronLine}" '$0 != owned') ||
+            return 1
+        [[ "${currentOther}" == "${savedOther}" ]] || return 1
+    fi
+    dockerMaintenanceScheduleRestore "${snapshot}" "${unitDir}" "${systemdReady}" \
+        "${timerEnabled}" "${timerActive}" traffic
+}
+
 dockerMaintenanceScheduleInterrupted() {
     local job=$1 snapshot=${DOCKER_MAINTENANCE_SNAPSHOT:-} root
     [[ -n "${snapshot}" && "${DOCKER_MAINTENANCE_JOB:-}" == "${job}" ]] || return 0
@@ -210,7 +305,8 @@ EOF
     for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
         legacy=0
         [[ ! -L "${unitDir}/${file}" ]] || return 1
-        if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
+        if [[ "${job}" == control-log || "${job}" == control-sync ||
+            ( "${job}" == traffic && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
             [[ ! -e "${unitDir}/${file}.d" && ! -L "${unitDir}/${file}.d" ]] || return 1
         fi
         if [[ -e "${unitDir}/${file}" ]]; then
@@ -286,7 +382,8 @@ EOF
             fragment=$(systemctl show --property=FragmentPath --value "${file}" 2>/dev/null) || return 1
             [[ -z "${fragment}" ||
                 ( "${fragment}" == "${unitDir}/${file}" && -f "${unitDir}/${file}" ) ]] || return 1
-            if [[ "${job}" == control-log || "${job}" == control-sync ]]; then
+            if [[ "${job}" == control-log || "${job}" == control-sync ||
+                ( "${job}" == traffic && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
                 dropIns=$(systemctl show --property=DropInPaths --value "${file}" 2>/dev/null) || return 1
                 [[ -z "${dropIns}" ]] || return 1
             fi
@@ -362,6 +459,13 @@ EOF
     done
     [[ "${haveCron}" == 0 && ( "${action}" == remove || "${systemdReady}" == 1 ) ]] ||
         printf '%s\n' "${cronText}" >"${snapshot}/crontab" || return 1
+    if [[ "${job}" == traffic && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ]]; then
+        # 外层恢复提交前保留原调度，SIGKILL 后新进程仍能撤销首写。
+        python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-save \
+            --root "${root}" --project "${PADM_DOCKER_PROJECT}" --snapshot "${snapshot}" \
+            --unit-dir "${unitDir}" --systemd-ready "${systemdReady}" \
+            --timer-enabled "${timerEnabled}" --timer-active "${timerActive}" || return 1
+    fi
     DOCKER_MAINTENANCE_CHANGED=1
     if (
     trap 'exit 130' INT
@@ -445,7 +549,10 @@ EOF
                 "${DOCKER_CONTROL_SYNC_SCHEDULE_SWITCHED:-0}" != 1 ]] || return 0
             dockerMaintenanceScheduleCommit control-sync
             ;;
-        traffic) dockerMaintenanceScheduleCommit traffic ;;
+        traffic)
+            [[ "${DOCKER_RECOVERY_STARTED:-0}" != 1 ]] || return 0
+            dockerMaintenanceScheduleCommit traffic
+            ;;
         esac
     else
         dockerMaintenanceScheduleInterrupted "${job}" || true
