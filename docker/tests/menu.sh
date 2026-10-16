@@ -1595,7 +1595,8 @@ runRoutingDriver() {
     flow|failed)
         targetReply 'Docker 路由与出站' $'invalid\n'
         targetReply 'Docker 路由与出站' $'1\n'
-        targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'/root/padm-socks5.json\n'
+        [[ "${scenario}" == failed ]] ||
+            targetReply 'fixture-socks5-input-confirm [y/N]' $'y\n'
         targetReply 'Docker 路由与出站' $'2\n'
         targetReply 'Docker 路由与出站' $'3\n'
         targetReply 'Docker 路由与出站' $'4\n'
@@ -1673,7 +1674,8 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'21\n'
         targetReply 'Docker HTTP 中继入站' $'invalid\n'
         targetReply 'Docker HTTP 中继入站' $'1\n'
-        targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'/root/padm-http-relay.json\n'
+        [[ "${scenario}" == failed ]] ||
+            targetReply 'fixture-http-relay-input-confirm [y/N]' $'y\n'
         targetReply 'Docker HTTP 中继入站' $'2\n'
         targetReply 'Docker HTTP 中继入站' $'3\n'
         targetReply 'Docker HTTP 中继入站' $'0\n'
@@ -1705,10 +1707,10 @@ runRoutingDriver() {
         done
         ;;
     cancel)
-        targetReply 'Docker 路由与出站' $'1\n'
-        targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'0\n'
-        targetReply 'Docker 路由与出站' $'1\n'
-        targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'\n'
+        for input in 0 '' n; do
+            targetReply 'Docker 路由与出站' $'1\n'
+            targetReply 'fixture-socks5-input-confirm [y/N]' "${input}"$'\n'
+        done
         targetReply 'Docker 路由与出站' $'4\n'
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'4\n'
@@ -1789,10 +1791,10 @@ runRoutingDriver() {
         done
         targetReply 'Docker WARP 出站' $'0\n'
         targetReply 'Docker 路由与出站' $'21\n'
-        targetReply 'Docker HTTP 中继入站' $'1\n'
-        targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'0\n'
-        targetReply 'Docker HTTP 中继入站' $'1\n'
-        targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'\n'
+        for input in 0 '' n; do
+            targetReply 'Docker HTTP 中继入站' $'1\n'
+            targetReply 'fixture-http-relay-input-confirm [y/N]' "${input}"$'\n'
+        done
         targetReply 'Docker HTTP 中继入站' $'0\n'
         for choice in 22 23; do
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
@@ -1815,9 +1817,12 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'29\n'
         targetReply '精确删除域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         ;;
-    file-eof)
+    socks5-input-eof|socks5-input-commit-failed)
         targetReply 'Docker 路由与出站' $'1\n'
-        targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'\004'
+        input=$'\004'
+        [[ "${scenario}" != socks5-input-commit-failed ]] || input=$'y\n'
+        targetReply 'fixture-socks5-input-confirm [y/N]' "${input}"
+        targetReply 'Docker 路由与出站' $'3\n'
         ;;
     domains-eof)
         targetReply 'Docker 路由与出站' $'4\n'
@@ -2218,6 +2223,16 @@ runRoutingDriver() {
         ;;
     http-relay-flow|http-relay-cancel|http-relay-status-failed|http-relay-commit-failed)
         targetReply 'Docker 路由与出站' $'21\n'
+        if [[ "${scenario}" == http-relay-cancel ]]; then
+            for input in 0 '' n; do
+                targetReply 'Docker HTTP 中继入站' $'1\n'
+                targetReply 'fixture-http-relay-input-confirm [y/N]' "${input}"$'\n'
+            done
+        else
+            targetReply 'Docker HTTP 中继入站' $'1\n'
+            [[ "${scenario}" == http-relay-status-failed ]] ||
+                targetReply 'fixture-http-relay-input-confirm [y/N]' $'y\n'
+        fi
         for choice in 4 5 6 7; do
             inputPrompt='HTTP 中继来源 IP/CIDR CSV（精确字面规则，0 返回）'
             [[ "${choice}" != 4 ]] || inputPrompt='新 HTTP 中继端口（1–65535，0 返回）'
@@ -2249,7 +2264,8 @@ runRoutingDriver() {
     http-relay-eof)
         targetReply 'Docker 路由与出站' $'21\n'
         targetReply 'Docker HTTP 中继入站' $'1\n'
-        targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'\004'
+        targetReply 'fixture-http-relay-input-confirm [y/N]' $'\004'
+        targetReply 'Docker HTTP 中继入站' $'3\n'
         targetReply 'Docker HTTP 中继入站' $'0\n'
         ;;
     block-ips-mode-flow|block-ips-mode-failed)
@@ -2918,7 +2934,20 @@ protocol)
     ;;
 edit)
     recordAction "$@"
-    if [[ "${2:-}" == --protocol-add ]]; then
+    if [[ "${2:-}" == --socks5-input || "${2:-}" == --http-relay-input ]]; then
+        # 菜单只核对无凭据参数分发及取消；实际录入由对应路由合同覆盖。
+        [[ "$#" -eq 2 ]] || exit 2
+        family=${2#--}
+        printf 'fixture-%s-confirm [y/N]: ' "${family}"
+        if ! IFS= read -r confirmation; then
+            recordAction "${family}-confirm" eof
+            exit 2
+        fi
+        recordAction "${family}-confirm" "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${SITE_EDIT_STATUS:-0}" -eq 0 ]] || exit "${SITE_EDIT_STATUS}"
+        recordAction "${family}-commit"
+    elif [[ "${2:-}" == --protocol-add ]]; then
         [[ "$3" == entry-fixture && "$5" == 30443 ]] || exit 2
         if [[ "$#" -eq 5 ]]; then
             [[ "$4" == 31 ]] || exit 2
@@ -3746,7 +3775,7 @@ unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 fi
 
 if [[ "${MENU_SCOPE}" != port-alias && "${MENU_SCOPE}" != xhttp ]]; then
-for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
+for routingCase in flow cancel socks5-input-eof socks5-input-commit-failed domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
     domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \
     ip-replace-flow ip-replace-cancel ip-replace-status-failed ip-replace-state-failed \
@@ -3787,6 +3816,7 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
         "${routingCase}" != dns-domains-change-failed &&
         "${routingCase}" != selective-domains-commit-failed &&
         "${routingCase}" != *-replace-commit-failed &&
+        "${routingCase}" != socks5-input-commit-failed &&
         "${routingCase}" != access-control-failed &&
         "${routingCase}" != upstream-commit-failed &&
         "${routingCase}" != http-relay-commit-failed &&
@@ -3799,7 +3829,14 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
-        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips-csv 192.0.2.10, 2001:DB8::10, geoip:cn\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
+        expectedRouting='protocol routing-status'
+        if [[ "${routingCase}" == flow ]]; then
+            expectedRouting+=$'\nedit --socks5-input\nsocks5-input-confirm y\nsocks5-input-commit'
+        else
+            ! grep -Eq 'fixture-(socks5|http-relay)-input-confirm' "${CONTROL_LOG}" ||
+                fail '路由状态失败后仍进入凭据录入'
+        fi
+        expectedRouting+=$'\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips-csv 192.0.2.10, 2001:DB8::10, geoip:cn\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip'
         expectedRouting+=$'\nedit --region-allow-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-allow-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com'
@@ -3819,7 +3856,10 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             [[ "${routingCase}" != flow ]] || expectedRouting+=$'\nwarp-daily-commit '"${warpAction%% *}"
         done
         expectedRouting+=$'\nprotocol routing-status'
-        expectedRouting+=$'\nedit --http-relay /root/padm-http-relay.json\nedit --http-relay-off\nprotocol routing-status'
+        expectedRouting+=$'\nprotocol routing-status'
+        [[ "${routingCase}" != flow ]] ||
+            expectedRouting+=$'\nedit --http-relay-input\nhttp-relay-input-confirm y\nhttp-relay-input-commit'
+        expectedRouting+=$'\nedit --http-relay-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --direct-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --direct-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-remove Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         expectedRouting+=$'\nedit --block-ips-add-csv 198.51.100.17/24, 2001:DB8::/64\nedit --block-ips-remove-csv 192.0.2.10, 2001:DB8::10\nprotocol routing-status'
@@ -3837,9 +3877,27 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
             fail 'WARP 日常编辑没有每次只确认一次'
         [[ "$(grep -Fc 'fixture-ipv6-daily-confirm [y/N]' "${CONTROL_LOG}")" -eq 2 ]] ||
             fail 'IPv6 域名增删没有每次只确认一次'
+        [[ "${routingCase}" != flow ]] ||
+            grep -Fq '精确删除 SOCKS5 域名规则 CSV（删空关闭，需重新启用；' "${CONTROL_LOG}" ||
+            fail 'SOCKS5 域名删空后未提示重新启用'
         ;;
     cancel)
-        expectedRouting=$'protocol routing-status\nprotocol routing-status\nprotocol routing-status\nprotocol routing-status'
+        for socksInput in 0 '' n; do
+            [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
+            expectedRouting+=$'protocol routing-status\nedit --socks5-input\nsocks5-input-confirm '"${socksInput}"
+        done
+        expectedRouting+=$'\nprotocol routing-status\nprotocol routing-status\nprotocol routing-status\nprotocol routing-status'
+        for httpRelayInput in 0 '' n; do
+            expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-input\nhttp-relay-input-confirm '"${httpRelayInput}"
+        done
+        ;;
+    socks5-input-eof|socks5-input-commit-failed)
+        socksConfirmation=eof socksExit=2
+        [[ "${routingCase}" != socks5-input-commit-failed ]] ||
+            { socksConfirmation=y; socksExit=15; }
+        expectedRouting=$'protocol routing-status\nedit --socks5-input\nsocks5-input-confirm '"${socksConfirmation}"$'\nprotocol routing-status'
+        [[ "$(grep -Fc "操作失败，退出码: ${socksExit}" "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail 'SOCKS5 输入取消或提交失败后未显示退出码并继续诊断'
         ;;
     socks5-domains-eof|socks5-domains-status-failed)
         expectedRouting=$'protocol routing-status\nprotocol routing-status'
@@ -4111,17 +4169,24 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
     http-relay-flow|http-relay-cancel|http-relay-status-failed|http-relay-commit-failed)
         httpRelayConfirmCount=4 httpRelayFailureCount=0 httpRelayExit=15
         if [[ "${routingCase}" == http-relay-cancel ]]; then
-            expectedRouting=$(printf 'protocol routing-status\n%.0s' {1..12})
+            for httpRelayInput in 0 '' n; do
+                [[ -z "${expectedRouting}" ]] || expectedRouting+=$'\n'
+                expectedRouting+=$'protocol routing-status\nedit --http-relay-input\nhttp-relay-input-confirm '"${httpRelayInput}"
+            done
+            expectedRouting+=$'\n'"$(printf 'protocol routing-status\n%.0s' {1..12})"
             expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-port 18888\nhttp-relay-confirm --http-relay-port n'
             expectedRouting+=$'\nprotocol routing-status\nedit --http-relay-sources 192.0.2.11, 2001:0DB8::/64\nhttp-relay-confirm --http-relay-sources eof'
             expectedRouting+=$'\nprotocol routing-status'
-            httpRelayConfirmCount=2 httpRelayFailureCount=2 httpRelayExit=2
+            httpRelayConfirmCount=2 httpRelayFailureCount=5 httpRelayExit=2
         elif [[ "${routingCase}" == http-relay-status-failed ]]; then
-            expectedRouting=$(printf 'protocol routing-status\n%.0s' {1..5})
-            httpRelayConfirmCount=0 httpRelayFailureCount=5 httpRelayExit=17
-            ! grep -Eq '新 HTTP 中继端口|HTTP 中继来源 IP/CIDR CSV' "${CONTROL_LOG}" ||
+            expectedRouting=$(printf 'protocol routing-status\n%.0s' {1..6})
+            httpRelayConfirmCount=0 httpRelayFailureCount=6 httpRelayExit=17
+            ! grep -Eq 'fixture-http-relay-input-confirm|新 HTTP 中继端口|HTTP 中继来源 IP/CIDR CSV' "${CONTROL_LOG}" ||
                 fail 'HTTP 中继状态失败后仍读取编辑输入'
         else
+            expectedRouting=$'protocol routing-status\nedit --http-relay-input\nhttp-relay-input-confirm y'
+            [[ "${routingCase}" != http-relay-flow ]] ||
+                expectedRouting+=$'\nhttp-relay-input-commit'
             for httpRelayFlag in --http-relay-port --http-relay-sources --http-relay-sources-add --http-relay-sources-remove; do
                 httpRelayInput='192.0.2.11, 2001:0DB8::/64'
                 [[ "${httpRelayFlag}" != --http-relay-port ]] || httpRelayInput=18888
@@ -4132,16 +4197,21 @@ for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof 
                     expectedRouting+=$'\n'"http-relay-commit ${httpRelayFlag}"
             done
             expectedRouting+=$'\nprotocol routing-status'
-            [[ "${routingCase}" != http-relay-commit-failed ]] || httpRelayFailureCount=4
+            [[ "${routingCase}" != http-relay-commit-failed ]] || httpRelayFailureCount=5
         fi
         [[ "$(grep -Fc 'fixture-http-relay-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${httpRelayConfirmCount}" ]] ||
             fail 'HTTP 中继日常编辑没有每次只确认一次'
         [[ "$(grep -Fc "操作失败，退出码: ${httpRelayExit}" "${CONTROL_LOG}" || true)" -eq "${httpRelayFailureCount}" ]] ||
             fail 'HTTP 中继取消或编辑失败未显示退出码并继续诊断'
-        for label in '4. 修改中继端口' '5. 替换来源允许名单' '6. 追加来源允许名单' \
+        for label in '1. 直接录入认证与来源规则' '4. 修改中继端口' '5. 替换来源允许名单' '6. 追加来源允许名单' \
             '7. 精确删除来源允许名单（删空拒绝）'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "HTTP 中继菜单缺少: ${label}"
         done
+        ;;
+    http-relay-eof)
+        expectedRouting=$'protocol routing-status\nedit --http-relay-input\nhttp-relay-input-confirm eof\nprotocol routing-status'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail 'HTTP 中继输入 EOF 后未显示退出码并继续诊断'
         ;;
     block-ips-mode-flow|block-ips-mode-failed)
         for flag in --block-ips-resolve --block-ips-literal; do

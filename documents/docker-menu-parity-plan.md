@@ -3804,6 +3804,26 @@ Linux amd64 两项定向分别通过，内部/入口耗时 `41756/42962 ms`、
 本轮源码归档与输入清理完毕，只保留日志/result。
 完整区域策略、固定核心阻塞项及原生宿主/arm64/公网仍 deferred，整体计划 active。
 
+#### 5B.4u SOCKS5 上游与认证直接录入
+
+菜单 `17 → 1` 与交互 CLI `edit --socks5-input` 直接收集字面上游 IP、端口、
+静默用户名/密码和全局/域名分流模式。域名 CSV 复用现有规范化；
+凭据仅经标准输入进入 0700 候选中的 0600 文件，不进入 argv、普通日志或预览。
+空输入/EOF 取消，密码 `0` 合法，其它字段 `0` 返回；
+该入口仅交互 TTY，不与 `--preview`/`--confirm` 组合，原 JSON CLI 保留。
+复用完整规格校验、冻结比较、一次确认和失败/信号恢复，不扩 SOCKS UDP 支持。
+菜单先核对状态，失败不进入录入；删空提示统一为重新启用。
+
+新增 `docker-routing-socks5-input` 窄 selector 复用同一输入检查，
+完整/核心/策略生命周期入口仍覆盖该检查，不在完整回归重复增加叶子。
+普通终端回显下检查静默、jq argv 与存活进程参数；覆盖全局/域名、
+密码 `0`、取消/EOF、非法输入、最终取消和输入中 TERM 后清理。
+首轮夹具 `errexit` 及非法地址回显断言已修复，没有修改生产清理行为。
+定向 Docker Linux amd64 Jobs 2 通过，内部/入口 `7543/8663 ms`，
+排队 `4247 ms`、`cache_hit=false`；证据
+`.tmp-regression-docker-2a35c50193ab4c73b3bb2a161e2e104c/`。
+与 HTTP 中继直接录入合批集成验收，支持状态继续 deferred，整体计划 active。
+
 #### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
 
 原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP
@@ -3916,6 +3936,29 @@ Bash/ShellCheck error 和 Python AST 通过；未重复无变化的真实路由�
 `.tmp-regression-docker-25db59c96ac44295ae4a847b4153ac79/` 与
 `.tmp-regression-docker-6d0cbc496f794a1689909b51e2437d71/`。
 后续仅补验收文字；成功源码归档/清单和临时检查脚本/容器清理，保留日志/result。
+
+#### 5B.5a.2 HTTP 中继认证与来源直接录入
+
+菜单 `17 → 21 → 1` 与交互 CLI `edit --http-relay-input` 直接收集端口、
+IPv4/IPv6/双栈、静默用户名/密码和必填来源 CSV，固定已有受管 Xray。
+来源不提供默认放行值，去项首尾空白并稳定去重；原合同继续拒绝非法来源、
+用户名冒号、冲突端口和超过 256 项。取消/密码 `0`/交互门禁同 5B.4u，
+旧私有 JSON CLI 保留，复用候选、完整校验和一次确认及恢复事务。
+不改 schema、渲染、网络权限或支持状态；sing-box 来源头绕过仍明确拒绝。
+真实 PTY 复用原夹具，覆盖双栈、IPv6 密码 `0`、取消/EOF、非法用户名/来源、
+最终取消及 TERM 清理；argv 和正常回显均无凭据。
+与 5B.4u 合批定向及集中完整合同，原生宿主/arm64/公网与完整 202 仍 deferred。
+
+2026-10-16 合批验收：Docker Linux amd64、工具镜像复用，
+HTTP 中继定向内部/入口 `22721/23825 ms`，路由菜单 `20169/21220 ms`，
+均 Jobs 2、exit 0；证据 `.tmp-regression-docker-9d37e85c0f4845e5bbc66b5e4e1e7123/`
+和 `.tmp-regression-docker-68e9d9d3815f48878b6120ae6dc80661/`。
+集中完整合同 Jobs 6/tmpfs、内部/入口 `440369/442392 ms`、排队 `334 ms`、
+`cache_hit=false`，证据 `.tmp-regression-docker-2c3dbc65b7a34cfa8e885c01b21eea6b/`。
+三份源码归档摘要均为 `DC7E3AFBB880E5B9AB731B3AA012BB2635A6135752339602A26349151F4085C2`；
+按入口同算法复算全部 393 项，内容摘要 `7EE7B34E...26CDB00` 与完整结果一致，
+因此未重复完整回归。随后仅补验收文字；成功输入归档/清单已清理，日志/result 保留。
+支持状态不升级，整体计划继续 active。
 
 #### 5B.5b SOCKS UDP 发布与会话鉴权前置验证
 

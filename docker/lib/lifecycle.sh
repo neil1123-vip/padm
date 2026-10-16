@@ -41,6 +41,7 @@ dockerUsage() {
   padm-docker edit --site-default [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http01 <enable|disable> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --socks5 <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --socks5-input [发布资产参数]（仅交互终端，直接录入 SOCKS5 上游和认证）
   padm-docker edit --socks5-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --socks5-domains <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --socks5-domains-add <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -48,6 +49,7 @@ dockerUsage() {
   padm-docker edit --socks5-domains-replace <旧规则> <新规则> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --socks5-global [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http-relay <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --http-relay-input [发布资产参数]（仅交互终端，直接录入 HTTP 中继认证与来源规则）
   padm-docker edit --http-relay-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http-relay-port <端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --http-relay-sources|--http-relay-sources-add|--http-relay-sources-remove <来源 IP/CIDR CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

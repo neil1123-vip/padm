@@ -222,7 +222,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != block-ips-resolved &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-lifecycle &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-network-lifecycle &&
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != socks5-input ]]; then
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy
@@ -1293,6 +1294,181 @@ runStatus() {
     ! grep -Fq -e "${USERNAME}" -e "${PASSWORD}" -e "${UUID}" -e "${WARP_PRIVATE}" \
         "${LOG}" "${TEST_ROOT}/status.stderr" || fail '路由诊断泄露认证信息'
 }
+socks5InputCheck() {
+    local name actual expected before composeBefore variable worker="${TEST_ROOT}/socks5-input.sh"
+    local -a inputArgs=()
+    # 保存现有生产函数和最小夹具，PTY 子进程继续使用同一部署及事务断言。
+    (
+        umask 077
+        printf '#!/usr/bin/env bash\nset -Euo pipefail\n'
+        while IFS= read -r variable; do
+            declare -p "${variable}"
+        done < <(compgen -A variable | grep -E '^(PADM_|DOCKER_|TEST_ROOT$|MODE$|LOG$|COMPOSE_LOG$|root$|USERNAME$|PASSWORD$)')
+        declare -f
+        cat <<'SH'
+jq() {
+    local arg
+    for arg in "$@"; do
+        [[ "${arg}" != *"${USERNAME}"* && "${arg}" != *"${PASSWORD}"* ]] || {
+            printf 'SOCKS5 凭据进入 jq 参数\n' >&2
+            return 99
+        }
+    done
+    command jq "$@"
+}
+dockerMain edit --socks5-input
+SH
+    ) >"${worker}"
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/input-before.json"
+    for name in global domains password-zero cancel-server cancel-port cancel-user cancel-password \
+        cancel-mode cancel-domains eof-password eof-mode invalid-port invalid-user invalid-server \
+        invalid-mode invalid-domains final-cancel term-password term-mode; do
+        before=$(snapshot)
+        composeBefore=$(cat "${COMPOSE_LOG}")
+        expected=0
+        case "${name}" in invalid-*) expected=15 ;; term-*) expected=143 ;; esac
+        actual=0
+        python3 - "${worker}" "${LOG}" "${INPUT}" "${DOMAINS_CSV}" "${name}" <<'PY' || actual=$?
+import errno
+import json
+import os
+import pty
+import select
+import signal
+import sys
+import time
+
+worker, log, fixture, domains, scenario = sys.argv[1:]
+with open(fixture) as stream:
+    socks = json.load(stream)
+pid, terminal = pty.fork()
+if pid == 0:
+    os.execv("/bin/bash", ["bash", worker])
+output = bytearray()
+
+def wait_for(prompt):
+    expected = prompt.encode()
+    deadline = time.monotonic() + 15
+    while expected not in output:
+        if time.monotonic() >= deadline:
+            raise AssertionError("SOCKS5 输入提示超时: " + prompt)
+        if select.select([terminal], [], [], 0.1)[0]:
+            data = os.read(terminal, 65536)
+            if not data:
+                raise AssertionError("SOCKS5 输入提前结束")
+            output.extend(data)
+
+steps = [
+    ("SOCKS5 上游 IP", "203.0.113.9", "server"),
+    ("SOCKS5 端口", "01080", "port"),
+    ("SOCKS5 用户名", socks["username"], "user"),
+    ("SOCKS5 密码", "0" if scenario == "password-zero" else socks["password"], "password"),
+    ("SOCKS5 模式", "2" if scenario in ("domains", "cancel-domains", "invalid-domains") else "1", "mode"),
+]
+if scenario in ("domains", "cancel-domains", "invalid-domains"):
+    steps.append(("SOCKS5 域名规则 CSV", domains, "domains"))
+invalid = {"port": "65536", "user": "bad user", "server": "127.0.0.1",
+           "mode": "3", "domains": "regexp:.*"}
+try:
+    stopped = False
+    for prompt, value, field in steps:
+        wait_for(prompt)
+        if field == "mode":
+            # 此时两份凭据已读入，核对存活进程参数和正常终端回显。
+            for entry in os.scandir("/proc"):
+                if entry.name.isdecimal():
+                    try:
+                        with open(entry.path + "/cmdline", "rb") as stream:
+                            arguments = stream.read()
+                        assert socks["username"].encode() not in arguments
+                        assert socks["password"].encode() not in arguments
+                    except (FileNotFoundError, ProcessLookupError, PermissionError):
+                        pass
+            echoed_server = "127.0.0.1" if scenario == "invalid-server" else "203.0.113.9"
+            assert (echoed_server + "\r\n").encode() in output
+            assert socks["username"].encode() not in output
+            assert socks["password"].encode() not in output
+        if scenario == "term-" + field:
+            os.kill(pid, signal.SIGTERM)
+            stopped = True
+            break
+        if scenario == "eof-" + field:
+            os.write(terminal, b"\x04")
+            stopped = True
+            break
+        if scenario == "cancel-" + field:
+            os.write(terminal, b"\n" if field == "password" else b"0\n")
+            stopped = True
+            break
+        if scenario == "invalid-" + field:
+            value = invalid[field]
+        os.write(terminal, (value + "\n").encode())
+        if scenario == "invalid-port" and field == "port":
+            stopped = True
+            break
+    if not stopped and not scenario.startswith("invalid-"):
+        wait_for("候选配置已验证，确认提交？[y/N]")
+        os.write(terminal, b"n\n" if scenario == "final-cancel" else b"y\n")
+    deadline = time.monotonic() + 20
+    while True:
+        if time.monotonic() >= deadline:
+            raise AssertionError("SOCKS5 输入子进程未退出")
+        if select.select([terminal], [], [], 0.1)[0]:
+            try:
+                data = os.read(terminal, 65536)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                break
+            if not data:
+                break
+            output.extend(data)
+    _, status = os.waitpid(pid, 0)
+    assert socks["username"].encode() not in output
+    assert socks["password"].encode() not in output
+    sys.exit(os.waitstatus_to_exitcode(status))
+finally:
+    with open(log, "wb") as stream:
+        stream.write(output)
+    os.close(terminal)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+PY
+        [[ "${actual}" == "${expected}" ]] || fail "${name}: SOCKS5 录入预期 ${expected}，实际 ${actual}"
+        assertClean
+        case "${name}" in
+        global|domains|password-zero)
+            jq -en --arg name "${name}" --argjson domains "${DOMAINS}" \
+                --slurpfile old "${TEST_ROOT}/input-before.json" --slurpfile input "${INPUT}" \
+                --slurpfile new "${root}/config/spec.json" '
+              $new[0] == ($old[0] | .routing.socks5 = ($input[0] |
+                if $name == "domains" then .domains = $domains
+                elif $name == "password-zero" then .password = "0" else . end))
+            ' >/dev/null || fail "${name}: SOCKS5 直接录入改变其它配置或丢失输入"
+            [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+                fail 'SOCKS5 直接录入改变私有规格权限'
+            runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
+            ;;
+        final-cancel)
+            [[ "$(snapshot)" == "${before}" &&
+                "$(grep '^live:' "${COMPOSE_LOG}")" == "$(grep '^live:' <<<"${composeBefore}")" ]] ||
+                fail 'SOCKS5 最终确认取消改变部署或执行在线 Compose'
+            ;;
+        *)
+            [[ "$(snapshot)" == "${before}" && "$(cat "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+                fail "${name}: 取消或非法录入改变部署或调用 Compose"
+            ;;
+        esac
+    done
+    for args in '--preview' '--confirm PADM-DOCKER-EDIT' '--socks5-off --preview' \
+        "--socks5 ${INPUT} --preview" '--socks5-input --preview'; do
+        read -r -a inputArgs <<<"${args}"
+        runEdit 2 --socks5-input "${inputArgs[@]}"
+    done
+    printf 'docker-routing-socks5-input-regression-ok\n'
+}
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == block-ips-resolved ]]; then
     # 只验证新开关；原双核心路由矩阵由既有 selector 保留。
     jq '.core = {type:"sing-box",secondary_type:null,protocols:
@@ -1957,8 +2133,13 @@ selectiveDomainsIncrementalCheck() {
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"routing",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == socks5-input ]]; then
+    socks5InputCheck
+    exit 0
+fi
 if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
     ( "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-policy-lifecycle && "${ROUTING_BRANCH}" == socks5 ) ]]; then
+    socks5InputCheck
     upstreamEditCheck
 fi
 # 域名工作流保留非空流量和原事务断言，只跳过其它能力的生命周期。

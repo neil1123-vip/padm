@@ -95,7 +95,7 @@ Xray `IPOnDemand` 的代理重解析与 DNS 失败回退可绕过判定，继续
 5B.4h 已接入菜单 `17 → 34/35/36` 与 CLI 的已有非空 selective SOCKS5 域名增删/单条替换。
 未启用/global 拒绝；追加稳定去重、合并最多 256 条，删除缺项整批拒绝，
 替换拒绝 CSV/缺旧/重复新/同值并保留位置。非空只改 `domains`，冻结上游、凭据及其它配置；
-删空关闭整个 SOCKS5，重新启用须导入凭据，不切 global。定向合同、菜单 PTY 与完整 49 项回归已通过，
+删空关闭整个 SOCKS5，重新启用须录入或导入凭据，不切 global。定向合同、菜单 PTY 与完整 49 项回归已通过，
 不新增 schema/marker 或宿主权限，不升级上述整体 `deferred` 状态。
 
 5B.4i 已接入菜单 `17 → 37` 与 `edit --hosts-replace <已有精确 FQDN> <新单字面 IP>`，
@@ -122,6 +122,11 @@ Direct/Block/IPv6/WARP/SOCKS5 候选顺序及优先者，包括区域合成的�
 仅切换已有 `.routing.region.mode`，保留自定义例外顺序、固定八条例外及其它配置。
 同模式或未启用返回 `15`，非法值返回 `2`；原 `--region` 整组替换语义保持，
 菜单 `1`–`3` 明示替换自定义例外、留空清空。完整区域管理和整体状态仍 `deferred`。
+
+5B.4u 与 5B.5a.2 将 SOCKS5 上游/认证、HTTP 中继认证/来源接入直接录入，
+旧私有 JSON CLI 保留。凭据隐藏输入并通过标准输入进入私有候选，
+完整校验和一次确认沿用原事务，不扩 schema、核心、权限或公开支持状态。
+HTTP 来源必须明确填写，SOCKS UDP 与 sing-box HTTP 来源限制保持。
 
 5C.9a 仅补固定 amd64 sing-box 1.14.2 客户端前置：Hy2 接受范围字段，
 TUIC 拒绝 `server_ports`，两者单端口基线均通过。Hy2 两个现有 UDP alias

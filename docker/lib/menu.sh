@@ -1450,9 +1450,8 @@ dockerMenuRouting() {
         case "${choice}" in
         0) return 0 ;;
         1)
-            dockerSetupRead input 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）: ' &&
-                [[ -n "${input}" ]] || continue
-            dockerMenuRun edit --socks5 "${input}" || true
+            dockerMenuRun protocol routing-status || continue
+            dockerMenuRun edit --socks5-input || true
             ;;
         2) dockerMenuRun edit --socks5-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
@@ -1582,7 +1581,7 @@ dockerMenuRouting() {
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --socks5-domains-add "${input}" || true
             else
-                dockerSetupRead input '精确删除 SOCKS5 域名规则 CSV（删空关闭，需重新导入；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                dockerSetupRead input '精确删除 SOCKS5 域名规则 CSV（删空关闭，需重新启用；domain:/full:/keyword:/geosite:，0 返回）: ' &&
                     [[ -n "${input}" ]] || continue
                 dockerMenuRun edit --socks5-domains-remove "${input}" || true
             fi
@@ -1623,7 +1622,7 @@ dockerMenuHttpRelay() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker HTTP 中继入站\n'
-        printf '%s\n' '1. 导入认证与来源规则' '2. 关闭 HTTP 中继' '3. 查看路由状态' \
+        printf '%s\n' '1. 直接录入认证与来源规则' '2. 关闭 HTTP 中继' '3. 查看路由状态' \
             '4. 修改中继端口' '5. 替换来源允许名单' '6. 追加来源允许名单' \
             '7. 精确删除来源允许名单（删空拒绝）' '0. 返回'
         printf '请选择: '
@@ -1634,10 +1633,9 @@ dockerMenuHttpRelay() {
         case "${choice}" in
         0) return 0 ;;
         1)
+            dockerMenuRun protocol routing-status || continue
             printf 'HTTP 中继只接受已有受管 Xray；sing-box 的代理头来源覆盖不满足来源限制。\n'
-            dockerSetupRead input 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）: ' &&
-                [[ -n "${input}" ]] || continue
-            dockerMenuRun edit --http-relay "${input}" || true
+            dockerMenuRun edit --http-relay-input || true
             ;;
         2) dockerMenuRun edit --http-relay-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;

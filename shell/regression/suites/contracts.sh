@@ -443,6 +443,7 @@ runRegressionDockerContractsAggregateContract() (
     runDockerRoutingRegionLifecycleRegression
     runDockerRoutingBtLifecycleRegression
     runDockerRoutingSocks5LifecycleRegression
+    runDockerRoutingSocks5InputRegression
     runDockerRoutingDnsWorkflowRegression
     runDockerRoutingHostsWorkflowRegression
     runDockerRoutingDirectBlockWorkflowRegression
@@ -453,12 +454,14 @@ runRegressionDockerContractsAggregateContract() (
         core-lifecycle:all:routing-socks5.sh core-network-lifecycle:warp:routing-socks5.sh \
         core-network-lifecycle:ipv6:routing-socks5.sh core-policy-lifecycle:region:routing-socks5.sh \
         core-policy-lifecycle:bt:routing-socks5.sh core-policy-lifecycle:socks5:routing-socks5.sh \
+        socks5-input:all:routing-socks5.sh \
         domains-dns-hosts:dns:routing-socks5.sh domains-dns-hosts:hosts:routing-socks5.sh \
         domains-direct-block:all:routing-socks5.sh \
         domains-direct-block-ip:all:routing-socks5.sh domains-direct-block-csv:all:routing-socks5.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" ]]
     [[ -z "${PADM_DOCKER_ROUTING_BRANCH:-}" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-routing-socks5-input]}" == function ]]
 
     bash() {
         printf '%s:%s:%s\n' "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" \

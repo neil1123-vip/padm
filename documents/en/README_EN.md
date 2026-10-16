@@ -1660,7 +1660,12 @@ Recommended multi-server flow:
 
 ## Routing and Access Control
 
-Docker menu `17. Routing and outbound` provides global or domain-selective authenticated SOCKS5 TCP outbound.
+Docker menu `17. Routing and outbound → 1` accepts global or domain-selective authenticated SOCKS5 TCP input.
+The same terminal workflow is available through `padm-docker edit --socks5-input`.
+Username and password input is hidden and credentials stay out of process arguments and previews.
+Empty input or EOF cancels; password `0` is valid, while `0` in other fields returns.
+The validated candidate still requires confirmation; this entry cannot be combined with `--preview` or `--confirm`.
+For automation, continue to use the file-based CLI.
 Use a root-owned, mode `0600`, single-link JSON file in a root-owned directory with no
 group/other writable ancestors, for example
 `{"server":"192.0.2.10","port":1080,"username":"user","password":"secret"}`.
@@ -1829,6 +1834,11 @@ all other configuration. Missing lists and global WARP/IPv6 modes are rejected.
 Preview, cancellation and failure/signal recovery use the existing transaction.
 Complete region and other rule management remain deferred.
 
+Menu `17 → 21 → 1` or terminal command `padm-docker edit --http-relay-input`
+accepts the relay port, address families, hidden username/password and required source CSV.
+It requires an existing Xray and confirmation after candidate validation.
+Empty input or EOF cancels; password `0` is valid, while `0` in other fields returns.
+There is no permissive source default; the private JSON CLI and support boundaries remain.
 Menu `17 → 21`, options `4–7`, manages an existing Xray HTTP relay through
 `edit --http-relay-port <port>` and `--http-relay-sources`,
 `--http-relay-sources-add`, or `--http-relay-sources-remove <CSV>`.

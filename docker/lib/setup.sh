@@ -1064,6 +1064,84 @@ dockerSocks5DomainsNormalize() {
     ' 2>/dev/null
 }
 
+dockerEditSocks5Input() {
+    local target=$1 server port username password scope domains='[]'
+    dockerSetupRead server 'SOCKS5 上游 IP（0 返回，空输入取消）: ' &&
+        [[ -n "${server}" ]] || return 3
+    dockerSetupRead port 'SOCKS5 端口（1..65535，0 返回，空输入取消）: ' &&
+        [[ -n "${port}" ]] || return 3
+    [[ "${port}" =~ ^[0-9]{1,5}$ ]] &&
+        ((10#${port} >= 1 && 10#${port} <= 65535)) || return 1
+    printf 'SOCKS5 用户名（隐藏输入，0 返回，空输入取消）: '
+    IFS= read -r -s username || return 3
+    printf '\n'
+    [[ -n "${username}" && "${username}" != 0 ]] || return 3
+    printf 'SOCKS5 密码（隐藏输入，空输入取消）: '
+    IFS= read -r -s password || return 3
+    printf '\n'
+    [[ -n "${password}" ]] || return 3
+    dockerSetupRead scope 'SOCKS5 模式 [1=全局, 2=域名分流, 0=返回]: ' &&
+        [[ -n "${scope}" ]] || return 3
+    case "${scope}" in
+    1) ;;
+    2)
+        dockerSetupRead domains 'SOCKS5 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
+            [[ -n "${domains}" ]] || return 3
+        domains=$(dockerSocks5DomainsNormalize "${domains}") || return 1
+        ;;
+    *) return 1 ;;
+    esac
+    # 凭据仅经标准输入进入私有候选，完整规格校验继续约束字符、长度和地址。
+    (
+        umask 077
+        printf '%s\n%s\n%s\n%s\n' "${server}" "${port}" "${username}" "${password}" |
+            jq -Rsc --argjson domains "${domains}" '
+              split("\n") | {server:.[0],port:(.[1] | tonumber),username:.[2],password:.[3]} |
+              if $domains == [] then . else .domains = $domains end
+            ' >"${target}"
+    ) && chmod 0600 "${target}"
+}
+
+dockerEditHttpRelayInput() {
+    local target=$1 port family username password sources
+    dockerSetupRead port 'HTTP 中继端口（1..65535，0 返回，空输入取消）: ' &&
+        [[ -n "${port}" ]] || return 3
+    [[ "${port}" =~ ^[0-9]{1,5}$ ]] &&
+        ((10#${port} >= 1 && 10#${port} <= 65535)) || return 1
+    dockerSetupRead family 'HTTP 中继地址族 [1=IPv4, 2=IPv6, 3=双栈, 0=返回]: ' &&
+        [[ -n "${family}" ]] || return 3
+    case "${family}" in
+    1) family='["ipv4"]' ;;
+    2) family='["ipv6"]' ;;
+    3) family='["ipv4","ipv6"]' ;;
+    *) return 1 ;;
+    esac
+    printf 'HTTP 中继用户名（隐藏输入，0 返回，空输入取消）: '
+    IFS= read -r -s username || return 3
+    printf '\n'
+    [[ -n "${username}" && "${username}" != 0 ]] || return 3
+    printf 'HTTP 中继密码（隐藏输入，空输入取消）: '
+    IFS= read -r -s password || return 3
+    printf '\n'
+    [[ -n "${password}" ]] || return 3
+    dockerSetupRead sources 'HTTP 中继来源 IP/CIDR CSV（必填，0 返回）: ' &&
+        [[ -n "${sources}" ]] || return 3
+    sources=$(jq -ecn --arg input "${sources}" '
+      $input | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
+      reduce .[] as $rule ([]; if index($rule) == null then . + [$rule] else . end) |
+      select(length >= 1 and length <= 256 and all(.[]; . != ""))
+    ' 2>/dev/null) || return 1
+    # 凭据只经标准输入写入私有候选，来源不提供默认放行值。
+    (
+        umask 077
+        printf '%s\n%s\n%s\n' "${port}" "${username}" "${password}" |
+            jq -Rsc --argjson families "${family}" --argjson sources "${sources}" '
+              split("\n") | {core:"xray",port:(.[0] | tonumber),address_families:$families,
+                username:.[1],password:.[2],source_ips:$sources}
+            ' >"${target}"
+    ) && chmod 0600 "${target}"
+}
+
 dockerProtocolCommand() (
     local action=${1:-} listener= root workspace original normalized selected status targetAction=
     local selectedHost selectedPort selectedSni
@@ -2064,6 +2142,11 @@ dockerEditCommand() {
             socks5=enable socks5File=$2
             shift 2
             ;;
+        --socks5-input)
+            [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            socks5=input
+            shift
+            ;;
         --socks5-off)
             [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             socks5=disable
@@ -2194,6 +2277,11 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             httpRelay=enable httpRelayFile=$2
             shift 2
+            ;;
+        --http-relay-input)
+            [[ -z "${httpRelay}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            httpRelay=input
+            shift
             ;;
         --http-relay-off)
             [[ -z "${httpRelay}" ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -2928,6 +3016,8 @@ dockerEditCommand() {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ ( "${socks5}" != input && "${httpRelay}" != input ) || "${mode}" == interactive ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
     [[ -z "${hy2ObfsType}" || "${hy2ObfsType}" == off || "${mode}" == interactive ||
         -n "${hy2ObfsFile}" ]] || {
         dockerError '非交互开启 Hy2 混淆需要 root 私密 JSON 密码文件'
@@ -3449,11 +3539,20 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
-    if [[ "${httpRelay}" == enable ]]; then
-        dockerEditPrivateInputCopy "${httpRelayFile}" "${workspace}/http-relay.json" http_relay || {
+    if [[ "${httpRelay}" == input || "${httpRelay}" == enable ]]; then
+        if [[ "${httpRelay}" == input ]]; then
+            dockerEditHttpRelayInput "${workspace}/http-relay.json" || status=$?
+            if [[ "${status}" -eq 3 ]]; then
+                printf '已取消配置编辑。\n'
+                return 0
+            elif [[ "${status}" -ne 0 ]]; then
+                dockerError 'HTTP 中继输入无效或草稿写入失败，未提交配置'
+                return "${PADM_DOCKER_RC_STATE}"
+            fi
+        elif ! dockerEditPrivateInputCopy "${httpRelayFile}" "${workspace}/http-relay.json" http_relay; then
             dockerError 'HTTP 中继输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
             return "${PADM_DOCKER_RC_STATE}"
-        }
+        fi
         jq --slurpfile relay "${workspace}/http-relay.json" '.relay.http = $relay[0]' \
             "${draft}" >"${draft}.next" 2>/dev/null &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
@@ -3502,11 +3601,20 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
-    if [[ "${socks5}" == enable ]]; then
-        dockerEditPrivateInputCopy "${socks5File}" "${workspace}/socks5.json" socks5 || {
+    if [[ "${socks5}" == input || "${socks5}" == enable ]]; then
+        if [[ "${socks5}" == input ]]; then
+            dockerEditSocks5Input "${workspace}/socks5.json" || status=$?
+            if [[ "${status}" -eq 3 ]]; then
+                printf '已取消配置编辑。\n'
+                return 0
+            elif [[ "${status}" -ne 0 ]]; then
+                dockerError 'SOCKS5 输入无效或草稿写入失败，未提交配置'
+                return "${PADM_DOCKER_RC_STATE}"
+            fi
+        elif ! dockerEditPrivateInputCopy "${socks5File}" "${workspace}/socks5.json" socks5; then
             dockerError 'SOCKS5 输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
             return "${PADM_DOCKER_RC_STATE}"
-        }
+        fi
         # 凭据仅从私有快照导入，不进入参数或配置预览。
         jq --slurpfile socks5 "${workspace}/socks5.json" '.routing.socks5 = $socks5[0]' \
             "${draft}" >"${draft}.next" 2>/dev/null &&

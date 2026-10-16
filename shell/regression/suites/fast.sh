@@ -470,6 +470,10 @@ runDockerRoutingSocks5LifecycleRegression() {
         bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
+runDockerRoutingSocks5InputRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=socks5-input bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
 runDockerPhase4MaintenanceRegression() {
     PADM_DOCKER_PHASE4_SCOPE=maintenance bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
 }
@@ -931,6 +935,7 @@ registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression
 registerRegressionFunctionLeaf docker-routing-socks5 runDockerRoutingSocks5Regression
+registerRegressionFunctionLeaf docker-routing-socks5-input runDockerRoutingSocks5InputRegression
 registerRegressionFunctionLeaf docker-routing-socks5-real runDockerRoutingSocks5RealRegression
 registerRegressionFunctionLeaf docker-http-relay runDockerHttpRelayRegression
 registerRegressionFunctionLeaf docker-http-relay-real runDockerHttpRelayRealRegression

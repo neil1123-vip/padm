@@ -371,7 +371,11 @@ padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
-Docker 菜单 `17. 路由与出站` 提供认证 SOCKS5 TCP 全局或域名分流出站。先在 root 私有目录准备
+Docker 菜单 `17. 路由与出站 → 1` 提供认证 SOCKS5 TCP 全局或域名分流直接录入，
+也可在终端运行 `padm-docker edit --socks5-input`。用户名和密码隐藏输入，
+凭据不进入进程参数或预览；空输入或 EOF 取消，密码 `0` 是合法值，其它字段 `0` 返回。
+完整候选验证后仍需确认提交，该入口不能与 `--preview` 或 `--confirm` 组合。
+自动化继续在 root 私有目录准备
 `0600` JSON 文件，内容为 `{"server":"192.0.2.10","port":1080,"username":"user","password":"secret"}`；
 这是格式示例，不是可用服务器。文件须单链接，所有祖先 root 所有且不可被组/其他用户写入，
 不接受 `/tmp`、符号链接或特殊文件，最大 64 KiB。地址先限可路由 IPv4/IPv6 字面量，
@@ -496,7 +500,11 @@ SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际
 普通 `--spec` 编辑不能绕过路由冻结。启用、替换与关闭复用原候选确认、备份和失败/信号恢复。
 `routing-status` 额外返回 DNS 服务器、域名规则和 hosts 映射，不显示 SOCKS5 凭据。
 
-菜单 `17 → 21` 的 `4–7` 管理已有 Xray HTTP 中继的端口和来源允许名单：
+菜单 `17 → 21 → 1` 或终端 `padm-docker edit --http-relay-input` 可直接录入
+已有 Xray 的中继端口、地址族、隐藏用户名/密码和必填来源 CSV；
+候选验证后确认提交，空输入/EOF 取消，密码 `0` 合法，其它字段 `0` 返回。
+来源不设开放默认值，旧私有 JSON CLI 保留，支持范围不变。
+子菜单 `4–7` 管理已有 Xray HTTP 中继的端口和来源允许名单：
 `edit --http-relay-port <端口>`、`--http-relay-sources <CSV>`、
 `--http-relay-sources-add <CSV>`、`--http-relay-sources-remove <CSV>`。
 CSV 去项首尾空白、稳定去重并保留字面写法；追加保留旧顺序，删除须全部精确存在。

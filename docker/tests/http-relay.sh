@@ -298,6 +298,159 @@ runStatus() {
     done
     assertClean
 }
+httpRelayInputCheck() {
+    local name expected actual before composeBefore variable worker="${TEST_ROOT}/http-input.sh"
+    # PTY 保持正常回显，直接验证静默凭据及生产候选事务。
+    (
+        umask 077
+        printf '#!/usr/bin/env bash\nset -Euo pipefail\n'
+        while IFS= read -r variable; do
+            declare -p "${variable}"
+        done < <(compgen -A variable | grep -E '^(PADM_|DOCKER_|TEST_ROOT$|MODE$|LOG$|root$|USERNAME$|PASSWORD$)')
+        declare -f
+        cat <<'SH'
+jq() {
+    local arg
+    for arg in "$@"; do
+        [[ "${arg}" != *"${USERNAME}"* && "${arg}" != *"${PASSWORD}"* ]] || {
+            printf 'HTTP 中继凭据进入 jq 参数\n' >&2
+            return 99
+        }
+    done
+    command jq "$@"
+}
+dockerMain edit --http-relay-input
+SH
+    ) >"${worker}"
+    for name in dual ipv6-zero cancel-sources eof-password invalid-user invalid-sources final-cancel term-password; do
+        before=$(snapshot)
+        composeBefore=$(cat "${TEST_ROOT}/compose-calls.log")
+        expected=0
+        case "${name}" in invalid-*) expected=15 ;; term-*) expected=143 ;; esac
+        actual=0
+        python3 - "${worker}" "${LOG}" "${INPUT}" "${name}" <<'PY' || actual=$?
+import errno
+import json
+import os
+import pty
+import select
+import signal
+import sys
+import time
+
+worker, log, fixture, scenario = sys.argv[1:]
+with open(fixture) as stream:
+    relay = json.load(stream)
+pid, terminal = pty.fork()
+if pid == 0:
+    os.execv("/bin/bash", ["bash", worker])
+output = bytearray()
+
+def wait_for(prompt):
+    deadline = time.monotonic() + 15
+    while prompt.encode() not in output:
+        if time.monotonic() >= deadline:
+            raise AssertionError("HTTP 中继输入提示超时: " + prompt)
+        if select.select([terminal], [], [], 0.1)[0]:
+            data = os.read(terminal, 65536)
+            if not data:
+                raise AssertionError("HTTP 中继输入提前结束")
+            output.extend(data)
+
+steps = [
+    ("HTTP 中继端口", "36080", "port"),
+    ("HTTP 中继地址族", "2" if scenario == "ipv6-zero" else "3", "family"),
+    ("HTTP 中继用户名", "invalid:user" if scenario == "invalid-user" else relay["username"], "user"),
+    ("HTTP 中继密码", "0" if scenario == "ipv6-zero" else relay["password"], "password"),
+    ("HTTP 中继来源 IP/CIDR CSV",
+     "example.com" if scenario == "invalid-sources" else "127.0.0.1/32, ::1/128,127.0.0.1/32", "sources"),
+]
+try:
+    stopped = False
+    for prompt, value, field in steps:
+        wait_for(prompt)
+        if field == "sources":
+            assert b"36080\r\n" in output
+            for entry in os.scandir("/proc"):
+                if entry.name.isdecimal():
+                    try:
+                        with open(entry.path + "/cmdline", "rb") as stream:
+                            arguments = stream.read()
+                        assert relay["username"].encode() not in arguments
+                        assert relay["password"].encode() not in arguments
+                    except (FileNotFoundError, ProcessLookupError, PermissionError):
+                        pass
+        if scenario == "term-" + field:
+            os.kill(pid, signal.SIGTERM)
+            stopped = True
+            break
+        if scenario == "eof-" + field or scenario == "cancel-" + field:
+            os.write(terminal, b"\x04" if scenario.startswith("eof-") else b"\n")
+            stopped = True
+            break
+        os.write(terminal, (value + "\n").encode())
+    if not stopped and not scenario.startswith("invalid-"):
+        wait_for("候选配置已验证，确认提交？[y/N]")
+        os.write(terminal, b"n\n" if scenario == "final-cancel" else b"y\n")
+    deadline = time.monotonic() + 20
+    while True:
+        if time.monotonic() >= deadline:
+            raise AssertionError("HTTP 中继子进程未退出")
+        if select.select([terminal], [], [], 0.1)[0]:
+            try:
+                data = os.read(terminal, 65536)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                break
+            if not data:
+                break
+            output.extend(data)
+    _, status = os.waitpid(pid, 0)
+    assert relay["username"].encode() not in output
+    assert relay["password"].encode() not in output
+    assert b"invalid:user" not in output
+    sys.exit(os.waitstatus_to_exitcode(status))
+finally:
+    with open(log, "wb") as stream:
+        stream.write(output)
+    os.close(terminal)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+PY
+        [[ "${actual}" == "${expected}" ]] || fail "${name}: HTTP 中继录入预期 ${expected}，实际 ${actual}"
+        assertClean
+        case "${name}" in
+        dual|ipv6-zero)
+            jq -en --arg name "${name}" --slurpfile base "${TEST_ROOT}/base.json" \
+                --slurpfile relay "${INPUT}" --slurpfile new "${root}/config/spec.json" '
+              $new[0] == ($base[0] | .relay.http = ($relay[0] |
+                if $name == "ipv6-zero" then .password = "0" | .address_families = ["ipv6"] else . end))
+            ' >/dev/null || fail "${name}: HTTP 中继输入丢失或改变其它配置"
+            [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+                fail 'HTTP 中继直接录入改变私有规格权限'
+            runEdit 0 --http-relay-off --confirm PADM-DOCKER-EDIT
+            ;;
+        final-cancel)
+            [[ "$(snapshot)" == "${before}" &&
+                "$(grep -E '^(up|down|restart)( |$)' "${TEST_ROOT}/compose-calls.log")" == "$(grep -E '^(up|down|restart)( |$)' <<<"${composeBefore}")" ]] ||
+                fail 'HTTP 中继确认取消改变部署或执行在线 Compose'
+            ;;
+        *)
+            [[ "$(snapshot)" == "${before}" &&
+                "$(cat "${TEST_ROOT}/compose-calls.log")" == "${composeBefore}" ]] ||
+                fail "${name}: 取消或非法录入改变部署或执行 Compose"
+            ;;
+        esac
+    done
+    runEdit 2 --http-relay-input
+    runEdit 2 --http-relay-input --preview
+    runEdit 2 --http-relay-input --confirm PADM-DOCKER-EDIT
+    runEdit 2 --http-relay-input --http-relay "${INPUT}" --preview
+    runEdit 2 --http-relay "${INPUT}" --http-relay-input --preview
+}
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerAcquireDeploymentLock
@@ -306,6 +459,7 @@ runStatus() {
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"business",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+httpRelayInputCheck
 before=$(snapshot)
 runStatus
 jq -e '.http_relay=={enabled:false}' "${LOG}" >/dev/null
