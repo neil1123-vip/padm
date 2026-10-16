@@ -122,6 +122,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-ssh-driver \
         docker-business \
         docker-backup \
+        docker-recovery-preview \
         docker-phase2
 }
 
@@ -170,6 +171,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-control-api \
         docker-business \
         docker-backup \
+        docker-recovery-preview \
         docker-phase2 \
         docker-xhttp-validation
 }
@@ -680,6 +682,17 @@ listRegressionDockerBackupChildSelectors() {
     printf '%s\n' docker-backup docker-menu docker-phase1
 }
 
+runDockerRecoveryPreviewRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/recovery-preview.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/"{lifecycle,services}.sh \
+            "${PROJECT_ROOT}/docker/tests/recovery-preview.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/recovery-preview.sh"
+}
+
+listRegressionDockerRecoveryChildSelectors() {
+    printf '%s\n' docker-backup docker-business docker-recovery-preview regression-dispatcher-contract
+}
+
 runDockerSitesRegression() {
     bash "${PROJECT_ROOT}/docker/tests/sites.sh"
 }
@@ -1034,6 +1047,9 @@ registerRegressionFunctionLeaf docker-subscription-publication-real runDockerSub
 registerRegressionFunctionLeaf docker-subscription-site-real runDockerSubscriptionSiteRealRegression
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-backup runDockerBackupRegression
+registerRegressionFunctionLeaf docker-recovery-preview runDockerRecoveryPreviewRegression
+registerRegressionParallelSelectorList docker-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-recovery-focused-${BASHPID:-$$}" listRegressionDockerRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-backup-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-backup-focused-${BASHPID:-$$}" listRegressionDockerBackupChildSelectors 2
 registerRegressionFunctionLeaf docker-sites runDockerSitesRegression

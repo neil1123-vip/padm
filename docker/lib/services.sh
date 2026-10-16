@@ -36,6 +36,8 @@ DOCKER_CONFIG_IPV6_TOUCHED=0
 DOCKER_CONFIG_STREAM_TRANSITION=0
 DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
 DOCKER_CONFIG_RELEASE_INPUTS=
+DOCKER_RECOVERY_INPUT=
+export -n DOCKER_RECOVERY_INPUT
 DOCKER_TLS_CANDIDATE=
 DOCKER_TLS_BACKUP=
 DOCKER_TLS_SWITCHED=0
@@ -2736,7 +2738,7 @@ dockerSiteTreeValidate() {
 }
 
 dockerSiteSourceValidate() {
-    local source=$1 root path mode relative file
+    local source=$1 root path mode relative file recoveryStage
     while [[ "${source}" == */ ]]; do source=${source%/}; done
     [[ -n "${source}" ]] || return 1
     [[ "${source}" == /* ]] || source="${PWD}/${source}"
@@ -2754,8 +2756,18 @@ dockerSiteSourceValidate() {
     mode=$(stat -c %a -- "${source}") || return 1
     (( (8#${mode} & 022) == 0 )) || return 1
     root=$(dockerInstallRoot) || return 1
-    [[ "${source}" != "${root}" && "${source}" != "${root%/}/"* &&
-        "${root}" != "${source%/}/"* ]] || return 1
+    if [[ -n "${DOCKER_RECOVERY_INPUT:-}" && "${source}" == "${DOCKER_RECOVERY_INPUT}/data/static" ]]; then
+        # 只有本次已验证的私密恢复暂存可以从受管根导入，公开资源仍走相同内容检查。
+        recoveryStage=${DOCKER_RECOVERY_INPUT%/input}
+        [[ "${DOCKER_RECOVERY_INPUT}" == "${recoveryStage}/input" &&
+            "${recoveryStage%/*}" == "${root}" &&
+            "${recoveryStage##*/}" == .recovery.?* ]] || return 1
+        dockerTrafficSafePath "${root}" "${source}" &&
+            [[ -f "${DOCKER_RECOVERY_INPUT}/manifest.json" ]] || return 1
+    else
+        [[ "${source}" != "${root}" && "${source}" != "${root%/}/"* &&
+            "${root}" != "${source%/}/"* ]] || return 1
+    fi
     dockerSiteTreeValidate "${source}" &&
         [[ -f "${source}/index.html" && -s "${source}/index.html" ]] || return 1
     while IFS= read -r -d '' file; do

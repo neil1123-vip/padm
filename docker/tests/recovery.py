@@ -95,6 +95,121 @@ class RecoveryTests(unittest.TestCase):
         for path, info in before.items():
             self.assertEqual(recovery.signature(path.stat()), recovery.signature(info))
 
+    def test_extract_exact_content_private_modes_and_validated_manifest(self):
+        stage = self.base / "private stage"
+        stage.mkdir(mode=0o700)
+        previous_umask = os.umask(0o777)
+        try:
+            counts = recovery.extract_archive(str(self.archive), str(stage))
+        finally:
+            os.umask(previous_umask)
+        self.assertEqual(counts, recovery.verify_archive(str(self.archive)))
+        members = self.members()
+        self.assertEqual({str(path.relative_to(stage)) for path in stage.rglob("*")},
+                         {info.name for info, _ in members})
+        for info, data in members:
+            path = stage / info.name
+            self.assertEqual(path.stat().st_uid, os.geteuid())
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700 if info.isdir() else 0o600)
+            if info.isfile():
+                self.assertEqual(path.read_bytes(), data)
+        manifest = recovery.read_json((stage / recovery.MANIFEST).read_bytes())
+        recovery.validate_manifest(manifest)
+        self.assertEqual(manifest["architecture"], {"x86_64": "amd64", "aarch64": "arm64"}[
+            recovery.platform.machine()])
+
+    def test_extract_rejects_nonprivate_nonempty_foreign_or_linked_stage(self):
+        for kind in ("public", "nonempty", "foreign", "symlink", "parent-link", "missing"):
+            with self.subTest(kind=kind):
+                stage = self.base / ("stage-" + kind)
+                if kind == "missing":
+                    destination = stage
+                else:
+                    stage.mkdir(mode=0o700)
+                    destination = stage
+                    if kind == "public":
+                        stage.chmod(0o750)
+                    elif kind == "nonempty":
+                        (stage / "sentinel").write_bytes(b"keep-existing")
+                    elif kind == "foreign":
+                        os.chown(stage, 65534, 65534)
+                    elif kind == "symlink":
+                        destination = self.base / "stage-alias"
+                        destination.symlink_to(stage, target_is_directory=True)
+                    else:
+                        alias = self.base / "parent-alias"
+                        alias.symlink_to(self.base, target_is_directory=True)
+                        destination = alias / stage.name
+                with self.assertRaises((ValueError, OSError)):
+                    recovery.extract_archive(str(self.archive), str(destination))
+                if kind != "missing":
+                    self.assertEqual([path.name for path in stage.iterdir()],
+                                     ["sentinel"] if kind == "nonempty" else [])
+                else:
+                    self.assertFalse(stage.exists())
+
+    def test_extract_corruption_and_unsafe_members_cannot_publish_manifest_or_escape(self):
+        sentinel = self.base / "escape"
+        sentinel.write_bytes(b"keep-outside")
+        for kind in ("corrupt", "trailer", "traversal", "symlink"):
+            with self.subTest(kind=kind):
+                stage = self.base / ("unverified-" + kind)
+                stage.mkdir(mode=0o700)
+                members = self.members()
+                if kind == "corrupt":
+                    index = next(i for i, (info, _) in enumerate(members) if info.isfile())
+                    info, data = members[index]
+                    members[index] = info, bytes([data[0] ^ 1]) + data[1:]
+                elif kind == "traversal":
+                    members.insert(-1, (recovery.tar_info("../escape", False, 1), b"x"))
+                elif kind == "symlink":
+                    info = recovery.tar_info("data/static/link", False)
+                    info.type, info.linkname = tarfile.SYMTYPE, "../../escape"
+                    members.insert(-1, (info, b""))
+                damaged = self.packed(members)
+                if kind == "trailer":
+                    damaged += b"unexpected-trailer"
+                archive = self.base / ("damaged-" + kind + ".tar")
+                archive.write_bytes(damaged)
+                archive.chmod(0o600)
+                with self.assertRaises((ValueError, OSError, tarfile.TarError)):
+                    recovery.extract_archive(str(archive), str(stage))
+                self.assertFalse((stage / recovery.MANIFEST).exists())
+                self.assertFalse(any(path.is_symlink() for path in stage.rglob("*")))
+                self.assertEqual(sentinel.read_bytes(), b"keep-outside")
+
+    def test_extract_changed_archive_cannot_publish_validated_manifest(self):
+        stage = self.base / "changed-stage"
+        stage.mkdir(mode=0o700)
+        original = recovery.verify_stream
+
+        def verify_and_change(source, directory_fd=None):
+            result = original(source, directory_fd)
+            info = self.archive.stat()
+            os.utime(self.archive, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000))
+            return result
+
+        with mock.patch.object(recovery, "verify_stream", side_effect=verify_and_change):
+            with self.assertRaises(ValueError):
+                recovery.extract_archive(str(self.archive), str(stage))
+        self.assertTrue((stage / "config/spec.json").is_file())
+        self.assertFalse((stage / recovery.MANIFEST).exists())
+
+    def test_extract_cli_does_not_disclose_contents(self):
+        stage = self.base / "cli-stage"
+        stage.mkdir(mode=0o700)
+        result = subprocess.run(
+            [sys.executable, "-B", str(HELPER), "extract", "--archive", str(self.archive),
+             "--directory", str(stage)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            env={**os.environ, "TMPDIR": str(self.base / "does-not-exist")},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertNotIn(SECRET, result.stdout + result.stderr)
+        self.assertEqual((stage / "config/xray/config.json").read_bytes(), SECRET)
+        self.assertTrue((stage / recovery.MANIFEST).is_file())
+        self.assert_no_staging()
+
     def test_runtime_owned_private_keys_are_preserved(self):
         key = self.root / "secrets/tls/test.example.key"
         os.chown(key, 10001, 10001)
@@ -320,6 +435,11 @@ class RecoveryTests(unittest.TestCase):
                     path.chmod(0o644)
                 with self.assertRaises((ValueError, OSError)):
                     recovery.verify_archive(str(path))
+                stage = self.base / ("unsafe-archive-" + kind)
+                stage.mkdir(mode=0o700)
+                with self.assertRaises((ValueError, OSError)):
+                    recovery.extract_archive(str(path), str(stage))
+                self.assertEqual(list(stage.iterdir()), [])
                 path.unlink()
 
     def test_verify_cli_is_read_only_and_does_not_disclose_contents(self):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""受管部署输入的版本化归档；不执行恢复或信任判定。"""
+"""受管部署输入的版本化归档与私密暂存；不执行部署恢复或信任判定。"""
 
 import argparse
 import contextlib
@@ -110,7 +110,7 @@ def opened(root_fd, relative, flags):
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
             os.close(parent)
             parent = child
-        fd = os.open(parts[-1], flags | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        fd = os.open(parts[-1], flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=parent)
         try:
             yield fd
         finally:
@@ -335,17 +335,19 @@ def next_header(source):
     return member
 
 
-def read_payload(source, size, digest=None):
+def read_payload(source, size, digest=None, target=None):
     remaining = size
     while remaining:
         data = read_exact(source, min(remaining, CHUNK))
         if digest is not None:
             digest.update(data)
+        if target is not None:
+            target.write(data)
         remaining -= len(data)
     require(not any(read_exact(source, -size % 512)))
 
 
-def verify_stream(source):
+def verify_stream(source, directory_fd=None):
     observed = {}
     total = 0
     while True:
@@ -353,7 +355,8 @@ def verify_stream(source):
         require(member is not None)
         if member.name == MANIFEST:
             require(member.isfile() and member.mode == 0o600 and 0 < member.size <= MAX_MANIFEST)
-            expected = validate_manifest(read_json(read_exact(source, member.size)))
+            encoded = read_exact(source, member.size)
+            expected = validate_manifest(read_json(encoded))
             require(not any(read_exact(source, -member.size % 512)))
             require(list(observed) == list(expected) and observed == expected)
             break
@@ -366,16 +369,29 @@ def verify_stream(source):
         total += member.size
         require(len(observed) < MAX_ENTRIES and total <= MAX_TOTAL)
         digest = hashlib.sha256()
-        read_payload(source, member.size, digest)
+        if directory_fd is None:
+            read_payload(source, member.size, digest)
+        else:
+            parent, _, name = path.rpartition("/")
+            require(not parent or parent in observed and observed[parent]["type"] == "directory")
+            with (opened(directory_fd, parent, os.O_RDONLY | os.O_DIRECTORY) if parent
+                  else contextlib.nullcontext(directory_fd)) as parent_fd:
+                if directory:
+                    os.mkdir(name, 0o700, dir_fd=parent_fd)
+                else:
+                    with opened(parent_fd, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as fd:
+                        with os.fdopen(os.dup(fd), "wb") as target:
+                            read_payload(source, member.size, digest, target)
         observed[path] = {"path": path, "type": "directory" if directory else "file",
                           "mode": member.mode, "size": member.size,
                           "sha256": None if directory else digest.hexdigest()}
     require(next_header(source) is None)
-    return sum(entry["type"] == "file" for entry in expected.values()), sum(
-        entry["size"] for entry in expected.values())
+    counts = (sum(entry["type"] == "file" for entry in expected.values()),
+              sum(entry["size"] for entry in expected.values()))
+    return counts if directory_fd is None else (counts, encoded)
 
 
-def verify_archive(path):
+def verify_archive(path, directory_fd=None):
     with absolute_parent(path) as (parent, name):
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
     with os.fdopen(fd, "rb") as source:
@@ -383,9 +399,34 @@ def verify_archive(path):
         require(stat.S_ISREG(before.st_mode) and before.st_uid == os.geteuid()
                 and stat.S_IMODE(before.st_mode) & ~0o600 == 0 and before.st_nlink == 1
                 and before.st_size <= MAX_TOTAL + MAX_MANIFEST + MAX_ENTRIES * 1024 + 10240)
-        counts = verify_stream(source)
+        result = verify_stream(source, directory_fd)
         require(signature(os.fstat(source.fileno())) == signature(before))
+        if directory_fd is None:
+            return result
+        counts, encoded = result
+        # 清单只在完整归档及源文件稳定性校验通过后发布，失败暂存不能冒充已验证输入。
+        with opened(directory_fd, MANIFEST, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as fd:
+            try:
+                with os.fdopen(os.dup(fd), "wb") as target:
+                    target.write(encoded)
+            except BaseException:
+                os.unlink(MANIFEST, dir_fd=directory_fd)
+                raise
         return counts
+
+
+def extract_archive(path, directory):
+    with absolute_parent(directory) as (parent, name):
+        directory_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    previous_umask = os.umask(0o077)
+    try:
+        info = os.fstat(directory_fd)
+        require(info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o700
+                and not os.listdir(directory_fd))
+        return verify_archive(path, directory_fd)
+    finally:
+        os.umask(previous_umask)
+        os.close(directory_fd)
 
 
 def main():
@@ -396,14 +437,20 @@ def main():
     export.add_argument("--output", required=True)
     verify = commands.add_parser("verify")
     verify.add_argument("--archive", required=True)
+    extract = commands.add_parser("extract")
+    extract.add_argument("--archive", required=True)
+    extract.add_argument("--directory", required=True)
     args = parser.parse_args()
     try:
         if args.action == "export":
             counts = export_archive(args.root, args.output)
             print("灾备归档已导出（{} 个文件，{} 字节）。".format(*counts))
-        else:
+        elif args.action == "verify":
             counts = verify_archive(args.archive)
             print("灾备归档完整性校验通过（{} 个文件，{} 字节；未验证来源或恢复能力）。".format(*counts))
+        else:
+            counts = extract_archive(args.archive, args.directory)
+            print("灾备归档已校验并解包至私密暂存目录（{} 个文件，{} 字节）。".format(*counts))
         return 0
     except (OSError, ValueError, TypeError, KeyError, RecursionError, tarfile.TarError):
         print("灾备归档拒绝：输入不安全、文件变化、归档损坏或范围不支持。", file=sys.stderr)

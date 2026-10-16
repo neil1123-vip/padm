@@ -252,7 +252,8 @@ runFrameworkParallelSelectorListWithJobsContract() (
     # Geo 需要 root，仅由 Docker 合同覆盖，不能进入普通用户运行的原生 CI。
     ! listRegressionCiChildSelectors | grep -qx docker-geo-data || return 1
     ! listRegressionCiPrChildSelectors | grep -qx docker-geo-data || return 1
-    listRegressionDockerContractsFastChildSelectors | grep -qx docker-geo-data || return 1
+    # 消费完整列表，避免 pipefail 将后续列表输出的 SIGPIPE 误判为失败。
+    listRegressionDockerContractsFastChildSelectors | grep -x docker-geo-data >/dev/null || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-geo-data]}" == function ]]
 )
 
@@ -278,7 +279,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts
         docker-traffic docker-permissions docker-fail2ban-source docker-control-api
         docker-wireguard-runtime docker-subscriptions docker-accounts-cli
-        docker-ssh-preflight docker-ssh-driver docker-business docker-backup docker-phase2
+        docker-ssh-preflight docker-ssh-driver docker-business docker-backup docker-recovery-preview docker-phase2
     )
 
     runFrameworkParallelRegressionSelectors() {

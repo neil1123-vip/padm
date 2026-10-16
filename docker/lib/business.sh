@@ -57,13 +57,14 @@ dockerBusinessExport() (
     trap 'rm -f -- "${temp}"' EXIT
     chmod 0600 "${temp}" || return 1
     jq --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --argjson shares "${shares}" --argjson traffic "${traffic}" '
+        --slurpfile shares <(printf '%s\n' "${shares}") \
+        --slurpfile traffic <(printf '%s\n' "${traffic}") '
       . as $spec |
       {format:"padm-docker-business",schema_version:1,created_at:$created,
        listeners:[.core.protocols[] |
          {listener_id,id,core:(.core // $spec.core.type)}],
-       accounts:(.accounts // []),subscription,shares:$shares,
-       traffic:$traffic}
+       accounts:(.accounts // []),subscription,shares:$shares[0],
+       traffic:$traffic[0]}
     ' "${spec}" >"${temp}" || return 1
     dockerBusinessValidate "${temp}" || return 1
     # 硬链接原子发布且拒绝覆盖，避免目标在检查后被其它进程抢占。
@@ -75,10 +76,10 @@ dockerBusinessBuildDraft() {
     local source=$1 spec=$2 strategy=$3 draft=$4 currentShares
     currentShares=$(dockerSubscriptionReadState) || return 1
     jq -n --slurpfile backup "${source}" --slurpfile spec "${spec}" \
-        --argjson currentShares "${currentShares}" --arg strategy "${strategy}" '
+        --slurpfile currentShares <(printf '%s\n' "${currentShares}") --arg strategy "${strategy}" '
       def merge_ids($current; $saved):
         [$current[] | select(.id as $id | any($saved[]; .id == $id) | not)] + $saved;
-      $backup[0] as $backup | $spec[0] as $spec |
+      $backup[0] as $backup | $spec[0] as $spec | $currentShares[0] as $currentShares |
       [$spec.core.protocols[] |
         {listener_id,id,core:(.core // $spec.core.type)}] as $listeners |
       if all($backup.listeners[]; . as $entry | any($listeners[]; . == $entry))
@@ -128,7 +129,12 @@ dockerBusinessBuildDraft() {
 
 dockerBusinessMergeTraffic() {
     local saved=$1 current=$2
-    jq -n --argjson saved "${saved}" --argjson current "${current}" '
+    # 历史账可超过 Linux 单参数上限，JSON 通过文件描述符传递。
+    jq -n --slurpfile saved <(printf '%s\n' "${saved}") \
+        --slurpfile current <(printf '%s\n' "${current}") '
+      if ($saved | length) == 1 and ($current | length) == 1 then .
+      else error("流量状态必须是单个对象") end |
+      $saved[0] as $saved | $current[0] as $current |
       $current |
       reduce ($saved.accounts | to_entries[]) as $entry (.;
         (.accounts[$entry.key] // {upload:0,download:0,baseline:{}}) as $live |

@@ -1063,6 +1063,19 @@ runMaintenanceDriver() {
         targetReply 'Docker 服务维护' $'4\n'
         targetReply '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]' $'n\n'
         ;;
+    restore-flow|restore-failed|restore-cancel|restore-eof)
+        targetReply 'Docker 服务维护' $'8\n'
+        prompt='待预览恢复的灾备归档绝对路径（0 返回）'
+        case "${scenario}" in
+        restore-cancel)
+            targetReply "${prompt}" $'0\n'
+            targetReply 'Docker 服务维护' $'8\n'
+            targetReply "${prompt}" $'\n'
+            ;;
+        restore-eof) targetReply "${prompt}" $'\004' ;;
+        *) targetReply "${prompt}" $'/root/private recovery.tar\n' ;;
+        esac
+        ;;
     backup-flow|backup-failed|backup-cancel|backup-eof)
         for choice in 6 7; do
             if [[ "${choice}" == 6 ]]; then
@@ -3409,6 +3422,11 @@ backup)
         "$3" == '/root/private recovery.tar' ]] || exit 2
     exit "${BACKUP_STATUS:-0}"
     ;;
+restore)
+    recordAction "$@"
+    [[ "$#" -eq 3 && "$2" == preview && "$3" == '/root/private recovery.tar' ]] || exit 2
+    exit "${BACKUP_STATUS:-0}"
+    ;;
 fail2ban)
     recordAction "$@"
     if [[ "${2:-}" == ssh ]]; then
@@ -3636,12 +3654,12 @@ runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
 
 for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollback uninstall \
-    backup-flow backup-cancel backup-eof backup-failed; do
+    backup-flow backup-cancel backup-eof backup-failed restore-flow restore-cancel restore-eof restore-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export MAINTENANCE_STATUS=0 MAINTENANCE_VALIDATE_STATUS=0 BACKUP_STATUS=0
     [[ "${maintenanceCase}" != flow && "${maintenanceCase}" != failed ]] || MAINTENANCE_STATUS=17
     [[ "${maintenanceCase}" != failed ]] || MAINTENANCE_VALIDATE_STATUS=17
-    [[ "${maintenanceCase}" != backup-failed ]] || BACKUP_STATUS=15
+    case "${maintenanceCase}" in backup-failed|restore-failed) BACKUP_STATUS=15 ;; esac
     runPty "maintenance-${maintenanceCase}" maintenance "${maintenanceCase}" "${TLS_WIZARD_CLI}" menu
     expectedMaintenance=
     case "${maintenanceCase}" in
@@ -3674,12 +3692,23 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
                 fail '灾备路径未保持为单个完整参数'
         fi
         ;;
+    restore-flow|restore-failed)
+        expectedMaintenance='restore preview /root/private recovery.tar'
+        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail '恢复预览结束了维护菜单会话'
+        ! grep -Fq '[y/N]' "${CONTROL_LOG}" || fail '恢复预览增加了重复确认'
+        if [[ "${maintenanceCase}" == restore-failed ]]; then
+            grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '恢复预览未保留失败退出码'
+        else
+            ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" || fail '恢复预览归档路径被拆分'
+        fi
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedMaintenance}" ]] ||
         fail "维护 ${maintenanceCase} 参数分发错误或取消后仍执行操作"
     for maintenanceLabel in '18. 服务维护' 'Docker 服务维护' '1. 校验部署配置' \
         '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护' \
-        '6. 导出灾备归档' '7. 只读校验灾备归档'; do
+        '6. 导出灾备归档' '7. 只读校验灾备归档' '8. 预览灾备恢复（空目标）'; do
         grep -Fq "${maintenanceLabel}" "${CONTROL_LOG}" || fail "维护菜单缺少: ${maintenanceLabel}"
     done
 done

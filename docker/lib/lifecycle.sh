@@ -216,6 +216,7 @@ dockerUsage() {
   padm-docker business backup <绝对 JSON 路径>
   padm-docker backup export <绝对归档文件路径>
   padm-docker backup verify <绝对归档文件路径>
+  padm-docker restore preview <绝对归档文件路径> [发布资产参数]
   padm-docker business preview <备份 JSON 路径> --strategy <merge|replace>
   padm-docker business restore <备份 JSON 路径> --strategy <merge|replace> --yes
   padm-docker edit --reality-stream <Reality 入口 ID> <网站 TLS 入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -3143,6 +3144,164 @@ dockerBackupCommand() (
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${root}" --output "${path}"
 )
 
+dockerRecoveryTargetEmpty() {
+    local root=$1 directory unexpected containers mode
+    dockerSetupUnconfigured || return 1
+    unexpected=$(find "${root}" -mindepth 1 -maxdepth 1 \
+        ! -name mode ! -name bundle ! -name .bundles ! -name locks \
+        ! -name config ! -name data ! -name secrets ! -name logs ! -name backups \
+        -printf x -quit) || return 1
+    [[ -z "${unexpected}" ]] || return 1
+    for directory in config data secrets logs backups; do
+        dockerTrafficSafePath "${root}" "${root}/${directory}" &&
+            [[ -d "${root}/${directory}" && -O "${root}/${directory}" ]] || return 1
+        mode=$(stat -c %a -- "${root}/${directory}") &&
+            (( (8#${mode} & 022) == 0 )) || return 1
+        unexpected=$(find "${root}/${directory}" -mindepth 1 -printf x -quit) || return 1
+        [[ -z "${unexpected}" ]] || return 1
+    done
+    unexpected=$(find "${root}/locks" -mindepth 1 -maxdepth 1 \
+        ! -name deployment.lock -printf x -quit) || return 1
+    [[ -z "${unexpected}" ]] || return 1
+    for directory in com.docker.compose.project io.padm.project; do
+        containers=$(docker ps -aq --filter "label=${directory}=${PADM_DOCKER_PROJECT}") || return 1
+        [[ -z "${containers}" ]] || return 1
+    done
+}
+
+dockerRecoveryInputsPrepare() {
+    local input=$1 draft=$2 spec="${1}/config/spec.json" architecture shares traffic file
+    architecture=$(dockerNormalizeArchitecture "$(uname -m)") || return 1
+    jq -e --arg architecture "${architecture}" '.architecture == $architecture' \
+        "${input}/manifest.json" >/dev/null &&
+        [[ "$(<"${input}/mode")" == docker ]] || return 1
+    for file in config/spec.json deployment.json images.env; do
+        [[ "$(stat -c %s -- "${input}/${file}")" -le 16777216 ]] || return 1
+    done
+    dockerManagedSpecMatchesDeployment "${spec}" "${input}/deployment.json" "${input}/images.env" &&
+        jq -e '.schema_version == 3 and .host_integrations == [] and
+          .control == null and .control_sync == null and .reality_stream == null and
+          .port_hopping == null and .tls.http01 != true' "${spec}" >/dev/null || {
+        dockerError '恢复预览仅支持 v3 普通部署；控制角色、宿主集成、共存、跳跃和 HTTP-01 尚未接入'
+        return 1
+    }
+    # 未处理的持久输入必须拒绝，生成文件只作证据，不能作为候选执行。
+    jq -e '
+      all(.entries[] | select(.type == "file"); .path |
+        . == "mode" or . == "deployment.json" or . == "images.env" or . == "compose.json" or
+        . == "config/spec.json" or . == "config/share-groups.json" or
+        . == "config/xray/config.json" or . == "config/xray/users.base" or
+        . == "config/sing-box/config.json" or . == "config/sing-box/users.base" or
+        . == "config/nginx/default.conf" or . == "data/traffic/state.json" or
+        startswith("data/subscription/") or startswith("data/static/") or
+        startswith("secrets/tls/"))
+    ' "${input}/manifest.json" >/dev/null || {
+        dockerError '归档含尚未接入恢复的持久输入（如 Geo、续期、ACME 或 Reality 库），未准备候选'
+        return 1
+    }
+    shares='{"schema_version":1,"groups":[]}'
+    traffic='{"schema_version":1,"accounts":{}}'
+    if [[ -f "${input}/config/share-groups.json" ]]; then
+        dockerBusinessFileSafe "${input}/config/share-groups.json" &&
+            dockerSubscriptionStateValidate "${input}/config/share-groups.json" &&
+            shares=$(jq -c . "${input}/config/share-groups.json") || return 1
+    fi
+    if [[ -f "${input}/data/traffic/state.json" ]]; then
+        dockerBusinessFileSafe "${input}/data/traffic/state.json" &&
+            traffic=$(jq -ces 'if length == 1 then .[0] else error("流量状态必须为单个对象") end |
+              '"${DOCKER_TRAFFIC_STATE_JQ}" "${input}/data/traffic/state.json") || return 1
+    fi
+    jq --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --slurpfile shares <(printf '%s\n' "${shares}") \
+        --slurpfile traffic <(printf '%s\n' "${traffic}") '
+      . as $spec |
+      {format:"padm-docker-business",schema_version:1,created_at:$created,
+       listeners:[.core.protocols[] | {listener_id,id,core:(.core // $spec.core.type)}],
+       accounts:(.accounts // []),subscription,shares:$shares[0],traffic:$traffic[0]}
+    ' "${spec}" >"${draft}/input.json" &&
+        chmod 0600 "${draft}/input.json" &&
+        dockerBusinessFileSafe "${draft}/input.json" &&
+        dockerBusinessValidate "${draft}/input.json" &&
+        dockerBusinessBuildDraft "${draft}/input.json" "${spec}" replace "${draft}" || {
+        dockerError '归档业务关系或已保存流量不合法，未准备候选'
+        return 1
+    }
+    jq -e --slurpfile business "${draft}/business.json" '
+      (["data/subscription/users.base",
+        ("data/subscription/" + $business[0].spec.subscription.token)] +
+        [$business[0].shares.groups[].token | "data/subscription/" + .]) as $generated |
+      all(.entries[] | select(.type == "file" and (.path | startswith("data/subscription/")));
+        .path as $path | ($generated | index($path)) != null)
+    ' "${input}/manifest.json" >/dev/null || {
+        dockerError '归档订阅目录存在规格或分享组未声明的文件，不能静默忽略'
+        return 1
+    }
+}
+
+dockerRecoveryCommand() (
+    local action=${1:-} archive=${2:-} manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected
+    local DOCKER_RECOVERY_INPUT=
+    [[ "$#" -ge 2 && "${action}" == preview ]] && dockerPathIsSafeAbsolute "${archive}" ||
+        return "${PADM_DOCKER_RC_USAGE}"
+    shift 2
+    while [[ "$#" -gt 0 ]]; do
+        [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
+        case "$1" in
+        --manifest) [[ -z "${manifest}" ]] || return "${PADM_DOCKER_RC_USAGE}"; manifest=$2 ;;
+        --bundle) [[ -z "${bundle}" ]] || return "${PADM_DOCKER_RC_USAGE}"; bundle=$2 ;;
+        --control-bundle) [[ -z "${controlBundle}" ]] || return "${PADM_DOCKER_RC_USAGE}"; controlBundle=$2 ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+        shift 2
+    done
+    dockerRequireCommand python3 && dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    trap '
+        status=$?
+        trap "" INT TERM
+        dockerCleanupConfigurationCandidate || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_STATE}; }
+        [[ -z "${stage}" ]] || dockerRemoveManagedTree "${root}" "${stage}" ||
+            { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_STATE}; }
+        dockerCleanupStagedBundle || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}; }
+        dockerManifestCleanup || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_MANIFEST}; }
+        dockerReleaseDeploymentLock || { [[ "${status}" != 0 ]] || status=${PADM_DOCKER_RC_LOCK}; }
+        exit "${status}"
+    ' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    dockerLockInstalledDeployment || return $?
+    dockerRecoveryTargetEmpty "${root}" || {
+        dockerError '恢复预览需要仅安装控制骨架的空目标；已有配置、数据、日志、备份、残留或同项目容器均拒绝'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    stage=$(mktemp -d "${root}/.recovery.XXXXXX") &&
+        chmod 0700 "${stage}" &&
+        mkdir -m 0700 -- "${stage}/input" "${stage}/draft" || return "${PADM_DOCKER_RC_STATE}"
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" extract --archive "${archive}" \
+        --directory "${stage}/input" || return "${PADM_DOCKER_RC_STATE}"
+    dockerRecoveryInputsPrepare "${stage}/input" "${stage}/draft" || return "${PADM_DOCKER_RC_STATE}"
+    dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    dockerConfigureReleaseValidate "${stage}/draft/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
+    DOCKER_RECOVERY_INPUT="${stage}/input"
+    if jq -e '.site.mode == "static"' "${stage}/draft/spec.json" >/dev/null; then
+        siteSource="${stage}/input/data/static"
+    elif [[ -d "${stage}/input/data/static" ]]; then
+        unexpected=$(find "${stage}/input/data/static" -mindepth 1 -printf x -quit) ||
+            return "${PADM_DOCKER_RC_STATE}"
+        if [[ -n "${unexpected}" ]]; then
+            dockerError '归档有静态资源但规格未启用静态站点，不能静默忽略'
+            return "${PADM_DOCKER_RC_STATE}"
+        fi
+    fi
+    [[ ! -d "${stage}/input/secrets/tls" ]] || tlsSource="${stage}/input/secrets/tls"
+    dockerConfigureApply "${stage}/draft/spec.json" "${tlsSource}" '' preview \
+        "${stage}/draft/business.json" "${siteSource}" || return $?
+    printf '灾备恢复预览通过（未安装部署；已创建私密暂存并运行候选校验）。\n'
+    jq '{listeners:[.spec.core.protocols[] | {listener_id,public_port}],
+      accounts:(.spec.accounts // [] | length),shares:(.shares.groups | length),
+      saved_traffic_accounts:(.traffic.accounts | length)}' "${stage}/draft/business.json"
+)
+
 dockerMain() {
     local command=${1:-menu} status
     [[ "$#" -gt 0 ]] && shift
@@ -3154,6 +3313,10 @@ dockerMain() {
     # 归档校验完全只读，不能进入其它命令的状态恢复与清理路径。
     if [[ "${command}" == backup ]]; then
         dockerBackupCommand "$@"
+        return $?
+    fi
+    if [[ "${command}" == restore ]]; then
+        dockerRecoveryCommand "$@"
         return $?
     fi
     trap 'dockerCommandInterrupted 130' INT

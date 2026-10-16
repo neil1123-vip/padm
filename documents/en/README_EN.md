@@ -1415,8 +1415,30 @@ missing/extra members, unsupported versions, unsafe modes and corruption.
 This stage accepts ASCII USTAR paths only: at most 255 bytes per path, 100 per basename,
 16,384 entries, 512 MiB per file and 2 GiB total payload; limits fail without truncation.
 Integrity does not establish provenance, business consistency or restore readiness.
-Full restoration, role migration, cross-host traffic baseline rebuilding and fresh host
-integration checks remain deferred. No restore command is exposed.
+
+Maintenance menu `18 → 8` and this command provide a limited restore preview:
+
+```bash
+padm-docker restore preview /root/padm-recovery.tar
+padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-manifest.json --bundle /root/release-manifest.sigstore.json --control-bundle /root/control.tar.gz
+```
+
+The target must contain only an installed control skeleton: configuration, data, secrets,
+logs and backups must be empty, with no containers from the same project. The first scope
+accepts same-architecture v3 ordinary deployments with cores, manual TLS, static sites,
+account/share identities and saved traffic. Host integrations, control roles/sync, Reality
+coexistence, hopping, HTTP-01, and unhandled Geo, ACME, renewal or Reality-library files
+are rejected explicitly. Dangling references in disabled share groups are also rejected.
+Release version, signature identity, manifest hash and every image must exactly match an
+independently verified release; supply matching assets explicitly for an older archive.
+Preview creates private `0700` staging, may pull digest-pinned images and runs candidate
+validation containers. It regenerates configuration from the spec rather than executing
+archived Compose, image environment files or scripts. Saved totals, quotas and historical
+traffic keys remain; old baselines are cleared and over-quota accounts are disabled in the
+candidate. Staging is cleaned on success, failure or interruption. No deployment or schedule
+is installed. Unlike `backup verify`, preview is not completely read-only.
+Full restore commit/rollback, role migration and fresh host integration checks remain
+deferred. There is no `restore apply` command.
 
 ### User Traffic and Quotas
 
