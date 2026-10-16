@@ -1063,6 +1063,28 @@ runMaintenanceDriver() {
         targetReply 'Docker 服务维护' $'4\n'
         targetReply '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]' $'n\n'
         ;;
+    backup-flow|backup-failed|backup-cancel|backup-eof)
+        for choice in 6 7; do
+            if [[ "${choice}" == 6 ]]; then
+                prompt='新灾备归档绝对路径（不覆盖已有文件，0 返回）'
+            else
+                prompt='待校验灾备归档绝对路径（0 返回）'
+            fi
+            if [[ "${scenario}" == backup-cancel ]]; then
+                for value in 0 ''; do
+                    targetReply 'Docker 服务维护' "${choice}"$'\n'
+                    targetReply "${prompt}" "${value}"$'\n'
+                done
+            else
+                targetReply 'Docker 服务维护' "${choice}"$'\n'
+                if [[ "${scenario}" == backup-eof ]]; then
+                    targetReply "${prompt}" $'\004'
+                else
+                    targetReply "${prompt}" $'/root/private recovery.tar\n'
+                fi
+            fi
+        done
+        ;;
     update|update-eof)
         targetReply 'Docker 服务维护' $'2\n'
         if [[ "${scenario}" == update ]]; then
@@ -3381,6 +3403,12 @@ validate|update|rollback|uninstall)
     [[ "$1" != validate ]] || exit "${MAINTENANCE_VALIDATE_STATUS:-0}"
     exit "${MAINTENANCE_STATUS:-0}"
     ;;
+backup)
+    recordAction "$@"
+    [[ "$#" -eq 3 && ( "$2" == export || "$2" == verify ) &&
+        "$3" == '/root/private recovery.tar' ]] || exit 2
+    exit "${BACKUP_STATUS:-0}"
+    ;;
 fail2ban)
     recordAction "$@"
     if [[ "${2:-}" == ssh ]]; then
@@ -3607,11 +3635,13 @@ printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.
 runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
 
-for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollback uninstall; do
+for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollback uninstall \
+    backup-flow backup-cancel backup-eof backup-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
-    export MAINTENANCE_STATUS=0 MAINTENANCE_VALIDATE_STATUS=0
+    export MAINTENANCE_STATUS=0 MAINTENANCE_VALIDATE_STATUS=0 BACKUP_STATUS=0
     [[ "${maintenanceCase}" != flow && "${maintenanceCase}" != failed ]] || MAINTENANCE_STATUS=17
     [[ "${maintenanceCase}" != failed ]] || MAINTENANCE_VALIDATE_STATUS=17
+    [[ "${maintenanceCase}" != backup-failed ]] || BACKUP_STATUS=15
     runPty "maintenance-${maintenanceCase}" maintenance "${maintenanceCase}" "${TLS_WIZARD_CLI}" menu
     expectedMaintenance=
     case "${maintenanceCase}" in
@@ -3631,15 +3661,29 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
         [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 1 ]] ||
             fail "维护 ${maintenanceCase} 成功后仍留在子菜单"
         ;;
+    backup-flow|backup-failed)
+        expectedMaintenance=$'backup export /root/private recovery.tar\nbackup verify /root/private recovery.tar'
+        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail '灾备操作结束了维护菜单会话'
+        ! grep -Fq '[y/N]' "${CONTROL_LOG}" || fail '灾备菜单增加了重复确认'
+        if [[ "${maintenanceCase}" == backup-failed ]]; then
+            [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
+                fail '灾备失败未保留退出码或继续菜单'
+        else
+            ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" ||
+                fail '灾备路径未保持为单个完整参数'
+        fi
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedMaintenance}" ]] ||
         fail "维护 ${maintenanceCase} 参数分发错误或取消后仍执行操作"
     for maintenanceLabel in '18. 服务维护' 'Docker 服务维护' '1. 校验部署配置' \
-        '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护'; do
+        '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护' \
+        '6. 导出灾备归档' '7. 只读校验灾备归档'; do
         grep -Fq "${maintenanceLabel}" "${CONTROL_LOG}" || fail "维护菜单缺少: ${maintenanceLabel}"
     done
 done
-unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS
+unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS BACKUP_STATUS
 
 for fail2banCase in flow cancel menu-eof invalid failed int term disable disable-failed disable-int disable-term \
     verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term \

@@ -121,6 +121,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-ssh-preflight \
         docker-ssh-driver \
         docker-business \
+        docker-backup \
         docker-phase2
 }
 
@@ -168,6 +169,7 @@ listRegressionDockerContractsFastRestChildSelectors() {
         docker-subscriptions \
         docker-control-api \
         docker-business \
+        docker-backup \
         docker-phase2 \
         docker-xhttp-validation
 }
@@ -664,6 +666,20 @@ runDockerBusinessRegression() {
     bash "${PROJECT_ROOT}/docker/tests/business.sh"
 }
 
+runDockerBackupRegression() {
+    local file
+    for file in install-docker.sh docker/lib/{bundle,lifecycle,menu}.sh docker/tests/recovery.sh; do
+        bash -n "${PROJECT_ROOT}/${file}" || return 1
+    done
+    shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/"{bundle,lifecycle,menu}.sh \
+        "${PROJECT_ROOT}/docker/tests/recovery.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/recovery.sh"
+}
+
+listRegressionDockerBackupChildSelectors() {
+    printf '%s\n' docker-backup docker-menu docker-phase1
+}
+
 runDockerSitesRegression() {
     bash "${PROJECT_ROOT}/docker/tests/sites.sh"
 }
@@ -1017,6 +1033,9 @@ registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegres
 registerRegressionFunctionLeaf docker-subscription-publication-real runDockerSubscriptionPublicationRealRegression
 registerRegressionFunctionLeaf docker-subscription-site-real runDockerSubscriptionSiteRealRegression
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
+registerRegressionFunctionLeaf docker-backup runDockerBackupRegression
+registerRegressionParallelSelectorList docker-backup-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-backup-focused-${BASHPID:-$$}" listRegressionDockerBackupChildSelectors 2
 registerRegressionFunctionLeaf docker-sites runDockerSitesRegression
 registerRegressionFunctionLeaf docker-geo-data runDockerGeoRegression
 registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression

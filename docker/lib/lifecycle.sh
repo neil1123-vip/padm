@@ -214,6 +214,8 @@ dockerUsage() {
   padm-docker control sync-schedule <disable|status> [--yes]
   padm-docker control auto-sync
   padm-docker business backup <绝对 JSON 路径>
+  padm-docker backup export <绝对归档文件路径>
+  padm-docker backup verify <绝对归档文件路径>
   padm-docker business preview <备份 JSON 路径> --strategy <merge|replace>
   padm-docker business restore <备份 JSON 路径> --strategy <merge|replace> --yes
   padm-docker edit --reality-stream <Reality 入口 ID> <网站 TLS 入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -3111,12 +3113,47 @@ dockerCommandInterrupted() {
     exit "${status}"
 }
 
+dockerBackupCommand() (
+    local action=${1:-} path=${2:-} root parent metadata mode spec
+    [[ "$#" -eq 2 ]] && dockerPathIsSafeAbsolute "${path}" ||
+        return "${PADM_DOCKER_RC_USAGE}"
+    case "${action}" in export|verify) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    dockerRequireCommand python3 || return "${PADM_DOCKER_RC_HOST}"
+    if [[ "${action}" == verify ]]; then
+        python3 -B "${DOCKER_LIB_DIR}/recovery.py" verify --archive "${path}"
+        return $?
+    fi
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    trap 'dockerReleaseDeploymentLock || true' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    dockerLockInstalledDeployment || return $?
+    for parent in "${root}" "${root}/config"; do
+        dockerTrafficSafePath "${root}" "${parent}" && [[ -d "${parent}" ]] ||
+            return "${PADM_DOCKER_RC_STATE}"
+        metadata=$(stat -c '%u:%a' "${parent}") || return "${PADM_DOCKER_RC_STATE}"
+        [[ "${metadata}" == 0:* ]] || return "${PADM_DOCKER_RC_STATE}"
+        mode=${metadata#*:}
+        (( (8#${mode} & 8#022) == 0 )) || return "${PADM_DOCKER_RC_STATE}"
+    done
+    spec=$(dockerAccountSpecFile) &&
+        dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" ||
+        return "${PADM_DOCKER_RC_STATE}"
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${root}" --output "${path}"
+)
+
 dockerMain() {
     local command=${1:-menu} status
     [[ "$#" -gt 0 ]] && shift
     # 菜单不持有部署锁，各操作由独立 CLI 进程完成清理。
     if [[ "${command}" == menu ]]; then
         dockerMenu "$@"
+        return $?
+    fi
+    # 归档校验完全只读，不能进入其它命令的状态恢复与清理路径。
+    if [[ "${command}" == backup ]]; then
+        dockerBackupCommand "$@"
         return $?
     fi
     trap 'dockerCommandInterrupted 130' INT

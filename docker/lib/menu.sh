@@ -1902,11 +1902,12 @@ dockerMenuFail2ban() {
 }
 
 dockerMenuMaintenance() {
-    local choice answer action
+    local choice answer action path
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 服务维护\n'
-        printf '%s\n' '1. 校验部署配置' '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护' '0. 返回'
+        printf '%s\n' '1. 校验部署配置' '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' \
+            '5. Fail2ban 维护' '6. 导出灾备归档' '7. 只读校验灾备归档' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1927,6 +1928,18 @@ dockerMenuMaintenance() {
             action=uninstall
             ;;
         5) dockerMenuFail2ban; continue ;;
+        6|7)
+            if [[ "${choice}" == 6 ]]; then
+                action=export
+                dockerSetupRead path '新灾备归档绝对路径（不覆盖已有文件，0 返回）: ' || continue
+            else
+                action=verify
+                dockerSetupRead path '待校验灾备归档绝对路径（0 返回）: ' || continue
+            fi
+            [[ -n "${path}" ]] || continue
+            dockerMenuRun backup "${action}" "${path}" || true
+            continue
+            ;;
         *) printf '无效选项，请重新选择。\n'; continue ;;
         esac
         if dockerMenuRun "${action}"; then

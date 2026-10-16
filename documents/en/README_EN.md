@@ -1386,6 +1386,38 @@ On success, stdout contains only JSON with `release` and `images`. It is emitted
 
 `cosign` must support Sigstore bundle v0.3. A missing tool stops the command without bypassing verification or automatically installing host tools. Install it from an independently trusted package source or verify its provenance using Sigstore's official release instructions, then retry. An unverified manifest cannot choose the trusted publisher identity or verifier source.
 
+### Recovery Archives
+
+Menu `18. Service Maintenance -> 6/7` exports managed inputs and verifies archives.
+The host requires Python 3:
+
+```bash
+padm-docker backup export /root/padm-recovery.tar
+padm-docker backup verify /root/padm-recovery.tar
+```
+
+Export holds the deployment lock, checks the current spec against deployment metadata,
+and writes a version 1 USTAR archive with a path, size, mode and SHA-256 manifest.
+Publication is atomic, mode `0600`, and never overwrites an existing target. The destination
+directory must belong to root and have no group or other write access. Inputs include
+specs, generated configurations, deployment and image references, actual Geo files,
+accounts and saved traffic, website/subscription content, TLS/ACME and renewal inputs,
+WireGuard keys, control state/private sync registration and the Reality target library.
+The archive contains credentials. Export preserves saved counters and raw baselines without
+collecting traffic. It rejects changes to selected files during export. Runtime owners,
+sessions, challenges, locks, logs, host rules/schedules, image layers, old backups and the
+control bundle are excluded; obtain fixed versions and images from trusted releases separately.
+
+`verify` needs no Docker, installed deployment or root. It neither extracts nor writes
+temporary files. The archive must be a private regular file owned by the current user,
+with one hard link. Streaming checks reject unsafe paths, links/special members, duplicates,
+missing/extra members, unsupported versions, unsafe modes and corruption.
+This stage accepts ASCII USTAR paths only: at most 255 bytes per path, 100 per basename,
+16,384 entries, 512 MiB per file and 2 GiB total payload; limits fail without truncation.
+Integrity does not establish provenance, business consistency or restore readiness.
+Full restoration, role migration, cross-host traffic baseline rebuilding and fresh host
+integration checks remain deferred. No restore command is exposed.
+
 ### User Traffic and Quotas
 
 The Docker menu exposes `10. Account Management -> 9. Traffic and Quotas`.

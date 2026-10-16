@@ -466,7 +466,7 @@ dockerEntryBundleModulesPresent() {
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
         done
     fi
-    for required in port-hopping-probe.py port-hopping-supervisor.py; do
+    for required in port-hopping-probe.py port-hopping-supervisor.py recovery.py; do
         if grep -qF "/${required}\"" "${sourceRoot}/docker/lib/lifecycle.sh"; then
             [[ -f "${sourceRoot}/docker/lib/${required}" &&
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1

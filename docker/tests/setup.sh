@@ -388,7 +388,7 @@ for relative in \
     docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/schedule.sh docker/lib/geo.sh docker/lib/control-sync.sh docker/lib/control.sh docker/lib/lifecycle.sh docker/lib/menu.sh docker/lib/setup.sh docker/lib/accounts.sh docker/lib/subscriptions.sh docker/lib/business.sh docker/lib/reality-targets.sh \
     docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py \
     docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py \
-    docker/lib/port-hopping-probe.py docker/lib/port-hopping-supervisor.py \
+    docker/lib/port-hopping-probe.py docker/lib/port-hopping-supervisor.py docker/lib/recovery.py \
     docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
     docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh shell/core/static_site_renderer.sh; do
     mkdir -p "${SOURCE_ROOT}/$(dirname -- "${relative}")"
@@ -687,6 +687,19 @@ if [[ "${FAKE_SETUP_HOST_SYSTEM}" == Linux ]]; then
 fi
 [[ "$(grep -c '^pull ' "${EVENTS}")" -eq 5 ]] || fail 'setup did not use the five verified image references'
 ! grep -Fq AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "${CONTROL_LOG}" || fail 'setup printed the private key'
+
+# 已安装首配的真实 CLI 应可归档并独立核验，且不改写在线配置或业务输入。
+before=$(snapshot)
+bash -u "${CLI}" backup export "${TEST_ROOT}/xray recovery.tar" \
+    >"${TEST_ROOT}/xray-recovery.log" 2>&1 &&
+    bash -u "${CLI}" backup verify "${TEST_ROOT}/xray recovery.tar" \
+        >>"${TEST_ROOT}/xray-recovery.log" 2>&1 || fail '首配后的生产 CLI 灾备归档失败'
+[[ "$(snapshot)" == "${before}" ]] || fail '灾备归档改写了受管部署'
+[[ "$("${FAKE_SETUP_HOST_STAT}" -c %a "${TEST_ROOT}/xray recovery.tar")" == 600 ]] ||
+    fail '首配灾备归档权限不是 0600'
+! grep -Fq AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "${TEST_ROOT}/xray-recovery.log" ||
+    fail '灾备归档输出包含私钥'
+assertClean
 
 # 用真实已配置夹具检查门禁顺序，不允许取消或身份拒绝触发昂贵且有副作用的后段。
 cat >"${TEST_ROOT}/edit-order-driver.sh" <<'EOF'
