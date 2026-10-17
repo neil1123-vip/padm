@@ -35,7 +35,7 @@
 | 4C.7 单 Peer WireGuard 建链与维护，已通过本地验收 | 两步私密身份准备/交换公钥后固定唯一 RFC1918 `/32` Peer；首次确认启动复用配置事务，后续只启停精确审计容器。定向及隔离 amd64 真实 CLI 建链、加密流量和启停通过；临时停止保留规格和容器，角色依赖时拒绝。 |
 | 多被控服务器管理 | 当前单 `.control.peer` 和唯一 WireGuard Peer；需稳定节点身份、独立邀请/授权/同步与逐节点撤销，故障不影响其它节点。 |
 | 4C.8 同隧道主控替换，已通过本地验收 | 显式 `control rebind` 和菜单 `19` 更换主控身份及受管账号，保留 WireGuard 密钥/地址、入口映射、本机账号及累计；客户端、事务、菜单和隔离 amd64 双部署实链路通过。 |
-| 完整连接更新 | 4C.6/4C.8 已覆盖同地址 API 端口更新和显式主控替换；Peer、密钥及隧道地址迁移仍待交付，失败须保持原连接及累计。 |
+| 4C.9 单 Peer 连接更新，已通过本地验收 | 无控制角色的 canonical 三件套可显式更新地址、监听端口、Peer、公钥、endpoint 或轮换本机密钥；定向及隔离 amd64 真实双端迁移、业务和失败恢复通过；控制角色关联迁移仍待交付。 |
 | 控制角色灾备 | 当前拒绝角色、WireGuard 和同步输入；依赖网络归属与调度恢复，重新预检后接入，不照搬旧主机运行规则。 |
 
 原生 `manageCDN` 只有地址设置/清空和 H3 使用说明；原生区域菜单提供 CN 域名、
@@ -2854,6 +2854,37 @@ API 端口可随新邀请变化，未开放 Peer、WireGuard 密钥或隧道地�
 证据 `.tmp-regression-docker-2b6fa70021ab4cb5bd62bb3e69c8210c/`。
 未重复无变化的日常或 full；多 Peer、密钥/地址迁移、角色灾备及原生双架构、
 整机重启、公网验收继续待补，完整多服务器仍 `deferred`，整体目标 active。
+
+### 4C.9 单 Peer WireGuard 连接更新
+
+`wireguard migrate` 和 WireGuard 子菜单第 `6` 项可合并更新本机地址、监听端口、
+Peer 地址/公钥、endpoint 和本机密钥。省略字段保持，`--endpoint none` 清空 endpoint，
+`--rotate-key` 在可信 net 镜像生成新密钥；相同配置不重建服务。
+仅接受 4C.7 准备的 canonical `identity.json/private.key/wg-padm.conf` 三件套，
+已登记、运行健康且无 `control/control_sync` 的单 Peer 部署。
+不接收任意路由、hook 或原始配置导入，不覆盖未知文件。
+
+```bash
+padm-docker wireguard migrate --listen-port 51821 --yes
+padm-docker wireguard migrate --endpoint 192.0.2.2:51821 --yes
+padm-docker wireguard migrate --address 10.78.0.1 --peer-address 10.78.0.2 --rotate-key --yes
+padm-docker wireguard status
+```
+
+双方须逐端显式应用并交换新公钥；会短暂断联，单端健康不证明远端连通。
+迁移会通过原配置事务重建部署服务。生成前核旧密钥配对及精确容器归属，
+候选保持 root `0700/0600`；原在线私密目录在旧接口确证停止后才整体交接。
+备份仅在本次显式迁移记录该三件套，失败及 INT/TERM 恢复原目录 inode；
+目录或运行归属漂移保留现场。普通配置忽略环境输入，普通恢复不能跨迁移覆盖密钥。
+配置 helper 22 项、CLI 40 项及归属/启停 67 项通过；迁移事务 21 项、
+菜单 56 项通过，focused 9.272 秒，证据
+`.tmp-regression-docker-38ebbcbf28be4b968a3dbe07ba195a42/`。
+隔离 amd64 双 daemon 生产 CLI/Compose 完成端口/endpoint 更新、
+双方密钥与地址轮换、失败恢复后的加密流量及幂等检查，247.919 秒，
+证据 `.tmp-regression-docker-6d30b67fba6147539ff491d6a6d8f172/`。
+未重复无变化的日常或 full；本批临时源码归档和清单已清理，保留日志/result。
+有控制角色的网络迁移、多 Peer、角色灾备及原生双架构、重启、公网验收仍待补，
+完整多服务器状态仍 `deferred`，整体目标 active。
 
 ## 第五步：站点、路由与宿主集成
 

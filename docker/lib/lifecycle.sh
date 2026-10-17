@@ -84,6 +84,7 @@ dockerUsage() {
   padm-docker wireguard status
   padm-docker wireguard prepare --address <RFC1918 IPv4> --listen-port <1024-65535> [--yes]
   padm-docker wireguard peer --peer-address <RFC1918 IPv4> --peer-public-key <公钥> [--endpoint <IPv4:端口>] [--yes]
+  padm-docker wireguard migrate [--address <RFC1918 IPv4>] [--listen-port <端口>] [--peer-address <RFC1918 IPv4>] [--peer-public-key <公钥>] [--endpoint <IPv4:端口|none>] [--rotate-key] [--yes]
   padm-docker wireguard start|stop [--yes]
     仅单 Peer wg-padm；先交换公钥再显式启动。stop 临时停连接，up/restart 可重新启动；控制角色依赖时拒绝停止
   padm-docker edit --cdn-entry <入口 ID> <IP或域名,...> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -2759,13 +2760,14 @@ dockerUpdateCommand() {
 
 dockerConfigurationBackupAllowed() {
     case "$1" in
-    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/control|config/spec.json|config/share-groups.json|data/traffic/state.json|data/subscription|data/static|secrets/tls|data/acme) return 0 ;;
+    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/control|config/spec.json|config/share-groups.json|data/traffic/state.json|data/subscription|data/static|secrets/tls|secrets/net/wireguard|data/acme) return 0 ;;
     *) return 1 ;;
     esac
 }
 
 dockerValidateConfigurationBackup() {
-    local backup=$1 root relative entry bundlePath expectedCompose
+    local backup=$1 root relative entry bundlePath expectedCompose wireguardStatus
+    local DOCKER_WIREGUARD_INPUT=''
     root=$(dockerInstallRoot) || return 1
     dockerManagedPathIsSafe "${root}" "${backup}" || return 1
     [[ "${backup}" == "${root%/}/backups/"* && -d "${backup}" && ! -L "${backup}" && -O "${backup}" ]] || return 1
@@ -2783,6 +2785,17 @@ dockerValidateConfigurationBackup() {
             -O "${backup}/${relative}" ]] || return 1
     done <"${backup}/present"
     [[ -z "$(sort "${backup}/present" | uniq -d)" ]] || return 1
+    if grep -qxF secrets/net/wireguard "${backup}/present"; then
+        DOCKER_WIREGUARD_INPUT="${backup}/secrets/net/wireguard"
+        jq -e '.control == null and .control_sync == null and
+            any(.host_integrations[]; .type == "wireguard")' "${backup}/config/spec.json" >/dev/null ||
+            return 1
+        wireguardStatus=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status \
+            --directory "${DOCKER_WIREGUARD_INPUT}") &&
+            jq -e '.configured == true' <<<"${wireguardStatus}" >/dev/null || return 1
+    elif [[ -e "${backup}/secrets/net" || -L "${backup}/secrets/net" ]]; then
+        return 1
+    fi
     while IFS= read -r entry; do
         [[ "${entry}" == "${backup}/present" || "${entry}" == "${backup}/bundle.target" ||
             "${entry}" == "${backup}/deployment.json" ||
@@ -2790,6 +2803,11 @@ dockerValidateConfigurationBackup() {
             "${entry}" == "${backup}/compose.json" || "${entry}" == "${backup}/config" ||
             "${entry}" == "${backup}/data" || "${entry}" == "${backup}/secrets" ||
             "${entry}" == "${backup}/secrets/tls" || "${entry}" == "${backup}/secrets/tls/"* ||
+            ( -n "${DOCKER_WIREGUARD_INPUT}" &&
+                ( "${entry}" == "${backup}/secrets/net" || "${entry}" == "${DOCKER_WIREGUARD_INPUT}" ||
+                  "${entry}" == "${DOCKER_WIREGUARD_INPUT}/identity.json" ||
+                  "${entry}" == "${DOCKER_WIREGUARD_INPUT}/private.key" ||
+                  "${entry}" == "${DOCKER_WIREGUARD_INPUT}/wg-padm.conf" ) ) ||
             "${entry}" == "${backup}/config/"* ||
             "${entry}" == "${backup}/data/"* ]] || return 1
         [[ -O "${entry}" ]] || return 1

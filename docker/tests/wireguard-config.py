@@ -20,6 +20,9 @@ SPEC.loader.exec_module(wg)
 PRIVATE = base64.b64encode(bytes(range(32))).decode()
 PUBLIC = base64.b64encode(bytes(range(32, 64))).decode()
 PEER = base64.b64encode(bytes(range(64, 96))).decode()
+ROTATED_PRIVATE = base64.b64encode(bytes(range(96, 128))).decode()
+ROTATED_PUBLIC = base64.b64encode(bytes(range(128, 160))).decode()
+ROTATED_PEER = base64.b64encode(bytes(range(160, 192))).decode()
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -46,9 +49,12 @@ class ConfigurationTests(unittest.TestCase):
                 (path.lstat().st_mode, path.read_bytes() if path.is_file() else None)
                 for path in self.root.rglob("*")}
 
-    def rejected(self, function, *arguments):
+    def rejected(self, function, *arguments, **keywords):
         with self.assertRaises((OSError, ValueError, TypeError, UnicodeError)):
-            function(*arguments)
+            function(*arguments, **keywords)
+
+    def migrate(self, destination=None, **changes):
+        return wg.migrate(str(self.directory), str(destination or self.root / "candidate"), **changes)
 
     def test_prepare_and_peer_keep_private_modes_and_fixed_configuration(self):
         identity = self.prepare()
@@ -265,6 +271,171 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual((self.directory / "wg-padm.conf").read_bytes(), marker)
         self.assertEqual(set(path.name for path in self.directory.iterdir()),
                          {"identity.json", "private.key", "wg-padm.conf"})
+
+    def test_migrate_merges_changes_into_private_candidate_without_touching_source(self):
+        self.prepare()
+        self.peer(endpoint="198.18.0.2:51821")
+        original = {path.name: path.read_bytes() for path in self.directory.iterdir()}
+        result = self.migrate(own_address="10.91.0.1", listen_port=51900,
+                              peer_address="10.91.0.2", peer_public_key=ROTATED_PEER,
+                              peer_endpoint="198.18.0.3:51901")
+        candidate = self.root / "candidate"
+        self.assertEqual(result, {"schema_version": 1, "address": "10.91.0.1",
+                                  "listen_port": 51900, "public_key": PUBLIC, "configured": True})
+        expected = wg.configuration({key: value for key, value in result.items() if key != "configured"},
+                                    PRIVATE, "10.91.0.2", ROTATED_PEER, "198.18.0.3:51901")
+        self.assertEqual((candidate / "wg-padm.conf").read_bytes(), expected)
+        self.assertEqual(candidate.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(candidate.stat().st_uid, 0)
+        for path in candidate.iterdir():
+            self.assertEqual((path.stat().st_uid, path.stat().st_nlink, path.stat().st_mode & 0o777),
+                             (0, 1, 0o600))
+        self.assertEqual({path.name: path.read_bytes() for path in self.directory.iterdir()}, original)
+        self.assertNotIn(PRIVATE, json.dumps(result))
+        self.assertEqual(wg.status(str(candidate)), result)
+
+    def test_migrate_omissions_keep_values_and_none_clears_only_endpoint(self):
+        self.prepare()
+        self.peer(endpoint="198.18.0.2:51821")
+        self.migrate()
+        self.assertEqual({path.name: path.read_bytes() for path in (self.root / "candidate").iterdir()},
+                         {path.name: path.read_bytes() for path in self.directory.iterdir()})
+        self.migrate(self.root / "without-endpoint", peer_endpoint="none")
+        changed = (self.root / "without-endpoint" / "wg-padm.conf").read_bytes()
+        self.assertEqual(changed, (self.directory / "wg-padm.conf").read_bytes().split(b"Endpoint = ")[0])
+        self.assertNotIn(b"PersistentKeepalive", changed)
+
+    def test_migrate_rotation_requires_both_private_input_files(self):
+        self.prepare()
+        self.peer()
+        rotated_private, rotated_public = self.root / "rotated-private", self.root / "rotated-public"
+        for path, value in ((rotated_private, ROTATED_PRIVATE), (rotated_public, ROTATED_PUBLIC)):
+            path.write_text(value + "\n")
+            path.chmod(0o600)
+        before = self.snapshot()
+        for arguments in ({"private_key": str(rotated_private)}, {"public_key": str(rotated_public)}):
+            self.rejected(self.migrate, **arguments)
+            self.assertEqual(self.snapshot(), before)
+        result = self.migrate(private_key=str(rotated_private), public_key=str(rotated_public))
+        self.assertEqual(result["public_key"], ROTATED_PUBLIC)
+        self.assertEqual((self.root / "candidate" / "private.key").read_text(), ROTATED_PRIVATE + "\n")
+        self.assertIn("PrivateKey = " + ROTATED_PRIVATE, (self.root / "candidate" / "wg-padm.conf").read_text())
+        self.assertEqual((self.directory / "private.key").read_text(), PRIVATE + "\n")
+        self.assertNotIn(ROTATED_PRIVATE, json.dumps(result))
+        before = self.snapshot()
+        rotated_public.write_text(PEER + "\n")
+        self.rejected(self.migrate, self.root / "self-peer",
+                      private_key=str(rotated_private), public_key=str(rotated_public))
+        self.assertFalse((self.root / "self-peer").exists())
+        rotated_public.write_text(ROTATED_PUBLIC + "\n")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_migrate_invalid_changes_leave_source_and_existing_target_unchanged(self):
+        self.prepare()
+        self.peer()
+        before = self.snapshot()
+        for arguments in ({"own_address": "10.90.0.2"}, {"peer_address": "10.90.0.1"},
+                          {"peer_public_key": PUBLIC}, {"own_address": "192.0.2.1"},
+                          {"listen_port": True}, {"listen_port": 80}, {"peer_public_key": "invalid"},
+                          {"peer_endpoint": ""}, {"peer_endpoint": "None"},
+                          {"peer_endpoint": "127.0.0.1:51820"}):
+            self.rejected(self.migrate, **arguments)
+            self.assertEqual(self.snapshot(), before)
+        candidate = self.root / "candidate"
+        for existing in ("directory", "file", "symlink"):
+            if existing == "directory":
+                candidate.mkdir(mode=0o700)
+            elif existing == "file":
+                candidate.write_text("keep")
+            else:
+                candidate.symlink_to(self.directory, target_is_directory=True)
+            before = self.snapshot()
+            self.rejected(self.migrate)
+            self.assertEqual(self.snapshot(), before)
+            candidate.rmdir() if existing == "directory" else candidate.unlink()
+        self.rejected(self.migrate, self.directory)
+        self.rejected(self.migrate, self.directory / "nested")
+
+    def test_migrate_rejects_noncanonical_source_and_unsafe_rotation_paths(self):
+        self.prepare()
+        self.rejected(self.migrate)
+        self.peer()
+        unknown = self.directory / "unexpected"
+        unknown.write_text("keep")
+        before = self.snapshot()
+        self.rejected(self.migrate)
+        self.assertEqual(self.snapshot(), before)
+        unknown.unlink()
+        config = self.directory / "wg-padm.conf"
+        config.write_bytes(config.read_bytes() + b"PostUp = evil\n")
+        before = self.snapshot()
+        self.rejected(self.migrate)
+        self.assertEqual(self.snapshot(), before)
+        config.write_bytes(config.read_bytes().removesuffix(b"PostUp = evil\n"))
+        alias = self.root / "rotation-alias"
+        alias.symlink_to(self.private)
+        before = self.snapshot()
+        self.rejected(self.migrate, private_key=str(alias), public_key=str(self.public))
+        self.assertEqual(self.snapshot(), before)
+        self.private.chmod(0o640)
+        before = self.snapshot()
+        self.rejected(self.migrate, private_key=str(self.private), public_key=str(self.public))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_migrate_failure_and_interrupt_clean_only_owned_candidate(self):
+        self.prepare()
+        self.peer()
+        before = self.snapshot()
+        original_write, original_publish = wg.write_file, wg.publish_directory
+
+        def failed_write(directory, name, data, publish=None):
+            original_write(directory, name, data, publish)
+            if name == "wg-padm.conf":
+                raise OSError("injected")
+
+        def interrupted_publish(*arguments):
+            original_publish(*arguments)
+            raise InterruptedError("injected")
+
+        for target, failure in (("write_file", failed_write),
+                                ("publish_directory", OSError("injected")),
+                                ("publish_directory", interrupted_publish)):
+            with self.subTest(target=target, failure=type(failure).__name__):
+                with mock.patch.object(wg, target, side_effect=failure):
+                    self.rejected(self.migrate)
+                self.assertEqual(self.snapshot(), before)
+
+        def racing_publish(parent, temporary, name):
+            os.mkdir(name, 0o700, dir_fd=parent)
+            original_publish(parent, temporary, name)
+
+        with mock.patch.object(wg, "publish_directory", side_effect=racing_publish):
+            self.rejected(self.migrate)
+        candidate = self.root / "candidate"
+        self.assertEqual(list(candidate.iterdir()), [])
+        self.assertEqual({path.name for path in self.root.iterdir()},
+                         {"private-input", "public-input", "prepared", "candidate"})
+
+    def test_migrate_cli_rejects_duplicates_and_emits_only_public_identity(self):
+        self.prepare()
+        self.peer(endpoint="198.18.0.2:51821")
+        candidate = self.root / "candidate"
+        command = [sys.executable, "-B", str(HELPER), "migrate", "--directory", str(self.directory),
+                   "--destination", str(candidate)]
+        before = self.snapshot()
+        for options in (["--address", "10.91.0.1", "--address=10.91.0.2"],
+                        ["--endpoint", "none", "--endpoint", "198.18.0.3:51820"],
+                        ["--private-key", str(self.private)],
+                        ["--private-key", str(self.private), "--public-key", str(self.public),
+                         "--public-key", str(self.public)]):
+            result = subprocess.run(command + options, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
+            self.assertEqual(self.snapshot(), before)
+        result = subprocess.run(command + ["--endpoint", "none"], capture_output=True, check=True)
+        self.assertTrue(json.loads(result.stdout)["configured"])
+        self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
+        self.assertNotIn(b"PrivateKey", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

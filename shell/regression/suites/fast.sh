@@ -847,14 +847,20 @@ runDockerSshDriverRegression() {
 
 runDockerWireGuardRuntimeRegression() {
     bash -n "${PROJECT_ROOT}/docker/lib/wireguard.sh" \
-        "${PROJECT_ROOT}/docker/tests/"wireguard-{cli,management,menu}.sh &&
+        "${PROJECT_ROOT}/docker/tests/"wireguard-{cli,management,menu,migration}.sh &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/wireguard.sh" \
-            "${PROJECT_ROOT}/docker/tests/"wireguard-{cli,management,menu}.sh &&
+            "${PROJECT_ROOT}/docker/tests/"wireguard-{cli,management,menu,migration}.sh &&
         python3 -B "${PROJECT_ROOT}/docker/tests/wireguard-config.py" &&
         bash "${PROJECT_ROOT}/docker/tests/wireguard-cli.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/wireguard-management.sh" &&
-        bash "${PROJECT_ROOT}/docker/tests/wireguard-menu.sh" &&
+        runDockerWireGuardMigrationRegression &&
         bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
+}
+
+runDockerWireGuardMigrationRegression() {
+    bash -n "${PROJECT_ROOT}/docker/lib/"{control,lifecycle,services}.sh &&
+        bash "${PROJECT_ROOT}/docker/tests/wireguard-migration.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/wireguard-menu.sh"
 }
 
 runDockerTProxyOwnershipRegression() {
@@ -1162,6 +1168,7 @@ registerRegressionFunctionLeaf docker-control-remap-real runDockerControlRemapRe
 registerRegressionFunctionLeaf docker-control-rebind-real runDockerControlRebindRealRegression
 registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogCronRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
+registerRegressionFunctionLeaf docker-wireguard-migration-focused runDockerWireGuardMigrationRegression
 registerRegressionFunctionLeaf docker-wireguard-cli-real runDockerWireGuardCliRealRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-focused runDockerRedirectOwnershipRegression

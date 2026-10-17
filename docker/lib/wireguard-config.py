@@ -131,7 +131,7 @@ def configuration(identity, private, peer_address, peer_public_key, peer_endpoin
     return text.encode("ascii")
 
 
-def load(directory):
+def load(directory, include_peer=False):
     checked_directory(directory, private=True)
     names = set(os.listdir(directory))
     require({"identity.json", "private.key"} <= names
@@ -144,6 +144,7 @@ def load(directory):
     port(identity["listen_port"])
     key(identity["public_key"])
     private = key(read_file(directory, "private.key", 45).decode("ascii").removesuffix("\n"))
+    remote_values = None
     if "wg-padm.conf" in names:
         data = read_file(directory, "wg-padm.conf", 4096)
         match = re.search(rb"\nPublicKey = ([A-Za-z0-9+/]{43}=)\nAllowedIPs = ([0-9.]+)/32\n"
@@ -152,7 +153,9 @@ def load(directory):
         public, remote, target = (part.decode("ascii") if part is not None else None
                                   for part in match.groups())
         require(data == configuration(identity, private, remote, public, target))
-    return identity, private, "wg-padm.conf" in names
+        remote_values = remote, public, target
+    result = identity, private, "wg-padm.conf" in names
+    return result + (remote_values,) if include_peer else result
 
 
 def write_file(directory, name, data, publish=None):
@@ -240,6 +243,92 @@ def peer(directory, peer_address, peer_public_key, peer_endpoint=None):
     return {**identity, "configured": True}
 
 
+def migrate(directory, destination, own_address=None, listen_port=None, peer_address=None,
+            peer_public_key=None, peer_endpoint=None, private_key=None, public_key=None):
+    require((private_key is None) == (public_key is None))
+    with parent_directory(directory) as (parent, name):
+        require(Path(directory) != Path(destination) and Path(directory) not in Path(destination).parents)
+        source = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        try:
+            identity, private, configured, remote = load(source, include_peer=True)
+            require(configured)
+        finally:
+            os.close(source)
+    identity = dict(identity)
+    if own_address is not None:
+        identity["address"] = address(own_address)
+    if listen_port is not None:
+        identity["listen_port"] = port(listen_port)
+    if private_key is not None:
+        private, identity["public_key"] = read_key(private_key), read_key(public_key)
+    remote_address, remote_public, remote_endpoint = remote
+    if peer_address is not None:
+        remote_address = peer_address
+    if peer_public_key is not None:
+        remote_public = peer_public_key
+    if peer_endpoint is not None:
+        remote_endpoint = None if peer_endpoint == "none" else peer_endpoint
+    data = configuration(identity, private, remote_address, remote_public, remote_endpoint)
+    with parent_directory(destination) as (parent, name):
+        try:
+            os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError("WireGuard 迁移候选目录已经存在")
+        temporary = ".wireguard-" + secrets.token_hex(12)
+        stage, created, completed = None, None, False
+        try:
+            # 建立目录与持有其描述符之间不响应信号，异常清理才有精确归属凭据。
+            blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+            try:
+                os.mkdir(temporary, 0o700, dir_fd=parent)
+                created = os.stat(temporary, dir_fd=parent, follow_symlinks=False)
+                stage = os.open(temporary, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+            os.fchmod(stage, 0o700)
+            write_file(stage, "private.key", (private + "\n").encode("ascii"))
+            write_file(stage, "identity.json", (json.dumps(identity, sort_keys=True) + "\n").encode())
+            write_file(stage, "wg-padm.conf", data)
+            os.fsync(stage)
+            publish_directory(parent, temporary, name)
+            os.fsync(parent)
+            completed = True
+        finally:
+            blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+            try:
+                if stage is None and created is not None:
+                    remaining = os.stat(temporary, dir_fd=parent, follow_symlinks=False)
+                    require((remaining.st_dev, remaining.st_ino) == (created.st_dev, created.st_ino))
+                    os.rmdir(temporary, dir_fd=parent)
+                elif stage is not None:
+                    if not completed:
+                        # 发布后抛错也只回收同 inode 的候选，不删除并发产生的目标。
+                        for candidate in (temporary, name):
+                            try:
+                                remaining = os.stat(candidate, dir_fd=parent, follow_symlinks=False)
+                            except FileNotFoundError:
+                                continue
+                            owned = os.fstat(stage)
+                            if (remaining.st_dev, remaining.st_ino) != (owned.st_dev, owned.st_ino):
+                                continue
+                            require(set(os.listdir(stage)) <= {"private.key", "identity.json", "wg-padm.conf"})
+                            for file in ("private.key", "identity.json", "wg-padm.conf"):
+                                try:
+                                    os.unlink(file, dir_fd=stage)
+                                except FileNotFoundError:
+                                    pass
+                            os.rmdir(candidate, dir_fd=parent)
+            finally:
+                try:
+                    if stage is not None:
+                        os.close(stage)
+                finally:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+    return {**identity, "configured": True}
+
+
 def status(directory):
     with parent_directory(directory) as (parent, name):
         try:
@@ -261,25 +350,38 @@ def interrupted(_number, _frame):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     commands = parser.add_subparsers(dest="action", required=True)
-    setup = commands.add_parser("prepare")
+    setup = commands.add_parser("prepare", allow_abbrev=False)
     setup.add_argument("--directory", required=True)
     setup.add_argument("--address", required=True)
     setup.add_argument("--listen-port", type=int, required=True)
     setup.add_argument("--private-key", required=True)
     setup.add_argument("--public-key", required=True)
-    remote = commands.add_parser("peer")
+    remote = commands.add_parser("peer", allow_abbrev=False)
     remote.add_argument("--directory", required=True)
     remote.add_argument("--peer-address", required=True)
     remote.add_argument("--peer-public-key", required=True)
     remote.add_argument("--endpoint")
-    commands.add_parser("status").add_argument("--directory", required=True)
+    migration = commands.add_parser("migrate", allow_abbrev=False)
+    migration.add_argument("--directory", required=True)
+    migration.add_argument("--destination", required=True)
+    migration.add_argument("--address")
+    migration.add_argument("--listen-port", type=int)
+    migration.add_argument("--peer-address")
+    migration.add_argument("--peer-public-key")
+    migration.add_argument("--endpoint")
+    migration.add_argument("--private-key")
+    migration.add_argument("--public-key")
+    commands.add_parser("status", allow_abbrev=False).add_argument("--directory", required=True)
+    options = [value.partition("=")[0] for value in sys.argv[1:] if value.startswith("--")]
+    if len(options) != len(set(options)):
+        parser.error("WireGuard 参数不能重复")
     arguments = vars(parser.parse_args())
     action = arguments.pop("action")
-    if action == "prepare":
+    if action in ("prepare", "migrate"):
         arguments["own_address"] = arguments.pop("address")
-    elif action == "peer":
+    if action in ("peer", "migrate"):
         arguments["peer_endpoint"] = arguments.pop("endpoint")
     try:
         result = globals()[action](**arguments)

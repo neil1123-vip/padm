@@ -37,6 +37,14 @@ DOCKER_CONFIG_SWITCHED=0
 DOCKER_CONFIG_IPV6_TOUCHED=0
 DOCKER_CONFIG_STREAM_TRANSITION=0
 DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
+DOCKER_WIREGUARD_INPUT=
+DOCKER_CONFIG_WIREGUARD_MIGRATION=0
+DOCKER_CONFIG_WIREGUARD_PARENT=
+DOCKER_CONFIG_WIREGUARD_OLD=
+DOCKER_CONFIG_WIREGUARD_NEW=
+DOCKER_CONFIG_WIREGUARD_SOURCE=
+export -n DOCKER_WIREGUARD_INPUT DOCKER_CONFIG_WIREGUARD_MIGRATION DOCKER_CONFIG_WIREGUARD_PARENT \
+    DOCKER_CONFIG_WIREGUARD_OLD DOCKER_CONFIG_WIREGUARD_NEW DOCKER_CONFIG_WIREGUARD_SOURCE
 DOCKER_CONFIG_RELEASE_INPUTS=
 DOCKER_RECOVERY_INPUT=
 export -n DOCKER_RECOVERY_INPUT
@@ -1863,7 +1871,121 @@ dockerCreateConfigurationCandidate() {
 dockerWireGuardConfigFile() {
     local root
     root=$(dockerInstallRoot) || return 1
+    if [[ -n "${DOCKER_WIREGUARD_INPUT:-}" ]]; then
+        printf '%s\n' "${DOCKER_WIREGUARD_INPUT}/wg-padm.conf"
+        return 0
+    fi
     printf '%s\n' "${root}/secrets/net/wireguard/wg-padm.conf"
+}
+
+dockerWireGuardMigrationDirectoryCheck() {
+    local directory=$1 expected=${2:-} reference=${3:-} public name
+    [[ -z "${expected}" || "$(stat -c '%d:%i' "${directory}")" == "${expected}" ]] || return 1
+    public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status --directory "${directory}") &&
+        jq -e '.configured == true' <<<"${public}" >/dev/null || return 1
+    if [[ -n "${reference}" ]]; then
+        for name in identity.json private.key wg-padm.conf; do
+            cmp -s -- "${directory}/${name}" "${reference}/${name}" || return 1
+        done
+    fi
+}
+
+dockerWireGuardMigrationInstall() {
+    local candidate=$1 root directory previous ids audited pending=0 intTrap termTrap result=0
+    local DOCKER_WIREGUARD_INPUT=
+    root=$(dockerInstallRoot) || return 1
+    directory="${root}/secrets/net/wireguard"
+    previous="${candidate}/wireguard.previous"
+    dockerWireGuardMigrationDirectoryCheck "${directory}" '' "${DOCKER_CONFIG_BACKUP}/secrets/net/wireguard" &&
+        dockerWireGuardMigrationDirectoryCheck "${candidate}/secrets/net/wireguard" '' \
+            "${DOCKER_CONFIG_WIREGUARD_SOURCE}" &&
+        [[ ! -e "${previous}" && ! -L "${previous}" ]] || return 1
+    ids=$(dockerWireGuardContainer running) || return 1
+    DOCKER_CONFIG_WIREGUARD_PARENT=$(stat -c '%d:%i' "${root}/secrets/net") &&
+        DOCKER_CONFIG_WIREGUARD_OLD=$(stat -c '%d:%i' "${directory}") &&
+        DOCKER_CONFIG_WIREGUARD_NEW=$(stat -c '%d:%i' "${candidate}/secrets/net/wireguard") || return 1
+    # 停止与登记之间暂存信号，恢复只能操作本次审计的目录和容器。
+    intTrap=$(trap -p INT)
+    termTrap=$(trap -p TERM)
+    trap 'pending=130' INT
+    trap 'pending=143' TERM
+    if docker stop -t 30 "${ids}" >/dev/null; then
+        DOCKER_CONFIG_SWITCHED=1
+        DOCKER_CONFIG_WIREGUARD_MIGRATION=1
+        if audited=$(dockerWireGuardContainer exited) && [[ "${audited}" == "${ids}" ]] &&
+            dockerWireGuardMigrationDirectoryCheck "${directory}" "${DOCKER_CONFIG_WIREGUARD_OLD}" \
+                "${DOCKER_CONFIG_BACKUP}/secrets/net/wireguard" &&
+            mv -- "${directory}" "${previous}" &&
+            mv -- "${candidate}/secrets/net/wireguard" "${directory}"; then
+            :
+        else
+            result=1
+        fi
+    else
+        result=1
+    fi
+    if [[ -n "${intTrap}" ]]; then eval "${intTrap}"; else trap - INT; fi
+    if [[ -n "${termTrap}" ]]; then eval "${termTrap}"; else trap - TERM; fi
+    if [[ "${pending}" != 0 ]]; then
+        if [[ "${pending}" == 130 ]]; then kill -INT "${BASHPID}"; else kill -TERM "${BASHPID}"; fi
+        return 1
+    fi
+    return "${result}"
+}
+
+dockerWireGuardMigrationRuntimeCheck() {
+    local mode=${1:-current} root ids source image
+    local DOCKER_WIREGUARD_INPUT=
+    root=$(dockerInstallRoot) || return 1
+    ids=$(docker ps -aq --no-trunc --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=net-wireguard \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    if [[ -z "${ids}" ]]; then
+        image=$(jq -er '.images.net' "${DOCKER_CONFIG_BACKUP}/config/spec.json") || return 1
+        docker run --rm --network host --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --pids-limit 16 --user 0:0 \
+            --entrypoint /bin/sh "${image}" -ec \
+            'ip -o link show >/dev/null && ! ip link show dev wg-padm >/dev/null 2>&1' </dev/null
+        return $?
+    fi
+    [[ "${ids}" =~ ^[a-f0-9]{64}$ ]] || return 1
+    for source in "${root}/secrets/net/wireguard" "${DOCKER_CONFIG_BACKUP}/secrets/net/wireguard"; do
+        DOCKER_WIREGUARD_INPUT=${source}
+        if [[ "${mode}" == current ]] && dockerWireGuardContainer running >/dev/null 2>&1; then
+            return 0
+        fi
+        dockerWireGuardContainer exited 0 >/dev/null 2>&1 && return 0
+    done
+    dockerError 'WireGuard 恢复前容器或接口归属变化，保留私密目录和现场'
+    return 1
+}
+
+dockerWireGuardMigrationRestore() {
+    local action=$1 root directory previous
+    [[ "${DOCKER_CONFIG_WIREGUARD_MIGRATION:-0}" == 1 ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    directory="${root}/secrets/net/wireguard"
+    previous="${DOCKER_CONFIG_CANDIDATE}/wireguard.previous"
+    dockerTrafficSafePath "${root}" "${directory}" &&
+        dockerTrafficSafePath "${root}" "${previous}" &&
+        [[ "$(stat -c '%d:%i' "${root}/secrets/net")" == "${DOCKER_CONFIG_WIREGUARD_PARENT}" ]] || return 1
+    if [[ -e "${previous}" || -L "${previous}" ]]; then
+        dockerWireGuardMigrationDirectoryCheck "${previous}" "${DOCKER_CONFIG_WIREGUARD_OLD}" \
+            "${DOCKER_CONFIG_BACKUP}/secrets/net/wireguard" || return 1
+        if [[ -e "${directory}" || -L "${directory}" ]]; then
+            dockerWireGuardMigrationDirectoryCheck "${directory}" "${DOCKER_CONFIG_WIREGUARD_NEW}" \
+                "${DOCKER_CONFIG_WIREGUARD_SOURCE}" || return 1
+        fi
+        [[ "${action}" != apply ]] || {
+            if [[ -e "${directory}" ]]; then
+                dockerRemoveManagedTree "${root}" "${directory}" || return 1
+            fi
+            mv -- "${previous}" "${directory}" || return 1
+        }
+    else
+        dockerWireGuardMigrationDirectoryCheck "${directory}" "${DOCKER_CONFIG_WIREGUARD_OLD}" \
+            "${DOCKER_CONFIG_BACKUP}/secrets/net/wireguard" || return 1
+    fi
 }
 
 dockerWireGuardListenPort() {
@@ -1902,7 +2024,15 @@ dockerStageHostIntegrationFiles() {
     jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null || return 0
     configFile=$(dockerWireGuardConfigFile) || return 1
     cp -- "${configFile}" "${candidate}/secrets/net/wireguard/wg-padm.conf" &&
-        chmod 0600 "${candidate}/secrets/net/wireguard/wg-padm.conf"
+        chmod 0600 "${candidate}/secrets/net/wireguard/wg-padm.conf" || return 1
+    if [[ -n "${DOCKER_WIREGUARD_INPUT:-}" ]]; then
+        cp -- "${DOCKER_WIREGUARD_INPUT}/"{identity.json,private.key} \
+            "${candidate}/secrets/net/wireguard/" &&
+            chmod 0700 "${candidate}/secrets/net/wireguard" &&
+            chmod 0600 "${candidate}/secrets/net/wireguard/"{identity.json,private.key} &&
+            dockerWireGuardMigrationDirectoryCheck "${candidate}/secrets/net/wireguard" ||
+            return 1
+    fi
 }
 
 dockerGenerateControlFail2banConfig() {
@@ -4069,6 +4199,13 @@ dockerPrepareCandidatePermissions() {
         chmod 0600 "${privateFiles[@]}" || return 1
         [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
             chown 0:0 "${privateFiles[@]}" || return 1
+    fi
+    if [[ -n "${DOCKER_WIREGUARD_INPUT:-}" ]]; then
+        chmod 0700 "${candidate}/secrets/net/wireguard" &&
+            chmod 0600 "${candidate}/secrets/net/wireguard/"{identity.json,private.key,wg-padm.conf} || return 1
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
+            chown -R 0:0 "${candidate}/secrets/net/wireguard" || return 1
+        dockerWireGuardMigrationDirectoryCheck "${candidate}/secrets/net/wireguard" || return 1
     fi
     dockerTlsRuntimePermissions "${candidate}/secrets/tls"
 }
@@ -6629,6 +6766,8 @@ dockerRealityStreamHostRuntimeCheck() {
 
 dockerBackupConfiguration() {
     local root backup relative source bundlePath unsafe prefix=${1:-configure}
+    local wireguardInput=${DOCKER_WIREGUARD_INPUT:-}
+    local DOCKER_WIREGUARD_INPUT=
     local -a sources=() payloads=()
     root=$(dockerInstallRoot) || return 1
     [[ "${prefix}" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
@@ -6674,6 +6813,13 @@ data/static
 secrets/tls
 data/acme
 EOF
+    if [[ -n "${wireguardInput}" ]]; then
+        source="${root}/secrets/net/wireguard"
+        dockerTrafficSafePath "${root}" "${source}" &&
+            dockerWireGuardMigrationDirectoryCheck "${source}" || return 1
+        sources+=("${source}")
+        payloads+=(secrets/net/wireguard)
+    fi
     if ((${#sources[@]} > 0)); then
         unsafe=$(find "${sources[@]}" -type l -print -quit 2>/dev/null) &&
             [[ -z "${unsafe}" ]] || return 1
@@ -6982,6 +7128,10 @@ dockerInstallCandidate() {
         dockerTrafficWriteState <"${candidate}/business-traffic.json" || return 1
     fi
     dockerRealityStreamTransitionPrepare "${candidate}/config/spec.json" || return 1
+    if [[ -n "${DOCKER_WIREGUARD_INPUT:-}" ]]; then
+        DOCKER_CONFIG_WIREGUARD_SOURCE=${DOCKER_WIREGUARD_INPUT}
+        dockerWireGuardMigrationInstall "${candidate}" || return 1
+    fi
     dockerRemoveConfigurationTargets || return 1
     if grep -qxF deployment.json "${backup}/present"; then
         cp -- "${backup}/deployment.json" "${root}/deployment.previous.json" || return 1
@@ -7151,9 +7301,22 @@ dockerRestoreConfiguration() {
     local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic includeStatic=0
     local alpnListener=${DOCKER_CONFIG_RESTORE_ALPN_LISTENER:-} alpnTemporary= ipv6Cleanup=0
     local legacyFail2ban=0 expectedCompose= parent
+    local DOCKER_WIREGUARD_INPUT=
     local -a restorePaths=() restoreParents=()
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
+    if grep -qxF secrets/net/wireguard "${backup}/present"; then
+        if [[ "${DOCKER_CONFIG_WIREGUARD_MIGRATION:-0}" == 1 ]]; then
+            dockerWireGuardMigrationRestore check &&
+                dockerWireGuardMigrationRuntimeCheck || return 1
+        else
+            dockerWireGuardMigrationDirectoryCheck "${root}/secrets/net/wireguard" '' \
+                "${backup}/secrets/net/wireguard" || {
+                dockerError 'WireGuard 迁移快照与当前身份不同，请显式迁移，未停止或修改服务'
+                return 1
+            }
+        fi
+    fi
     # 首配空恢复点也不能绕过本机自动同步的身份门禁。
     dockerControlSyncScheduleSpecCheck "${backup}/config/spec.json" || return 1
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
@@ -7267,12 +7430,17 @@ dockerRestoreConfiguration() {
         # 同次恢复已完成 owner 门禁，停止不能再依赖可能损坏的当前规格。
         dockerComposeExecute down >/dev/null || return 1
     fi
+    if [[ "${DOCKER_CONFIG_WIREGUARD_MIGRATION:-0}" == 1 ]]; then
+        dockerWireGuardMigrationRuntimeCheck stopped &&
+            dockerWireGuardMigrationRestore apply || return 1
+    fi
     # 旧快照未记录站点内容时保留现有目录，不能把它当作空站点删除。
     grep -qxF data/static "${backup}/present" && includeStatic=1
     dockerRemoveConfigurationTargets "${includeStatic}" || return 1
     while IFS= read -r relative; do
         # 业务恢复点已恢复额度并合并最新累计，不能再用旧文件覆盖账目。
         [[ "${relative}" != data/traffic/state.json ]] || continue
+        [[ "${relative}" != secrets/net/wireguard ]] || continue
         # 旧授权不能先复制再覆盖，存活的控制进程可能在窗口内接受已撤销凭据。
         if [[ -n "${DOCKER_CONTROL_RESTORE_PLAN:-}" &&
             ( "${relative}" == config/spec.json || "${relative}" == config/control ) ]]; then
@@ -7345,6 +7513,7 @@ dockerRestoreConfiguration() {
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
+    DOCKER_CONFIG_WIREGUARD_MIGRATION=0
     [[ -z "${DOCKER_CONTROL_RESTORE_PLAN:-}" ]] ||
         printf '主控恢复完成，Peer 授权已禁用，请重新生成邀请。\n' >&2
     DOCKER_CONTROL_RESTORE_PLAN=
@@ -7353,6 +7522,10 @@ dockerRestoreConfiguration() {
 dockerCleanupConfigurationCandidate() {
     local root candidate=${DOCKER_CONFIG_CANDIDATE:-}
     [[ -n "${candidate}" ]] || return 0
+    if [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 1 && "${DOCKER_CONFIG_WIREGUARD_MIGRATION:-0}" == 1 ]]; then
+        dockerError "WireGuard 恢复未完成，保留原私密目录和候选: ${candidate}"
+        return 1
+    fi
     if [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 1 &&
         ( -e "${candidate}/control-plan.json" ||
           -L "${candidate}/control-plan.json" ||
@@ -7471,10 +7644,25 @@ dockerRealityStreamTransitionPrepare() {
 dockerConfigureApply() {
     local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} siteTitle=${9:-}
     local specFile candidate backup answer root managedFile backupPrefix=configure geoEnabled=false renewalEnabled=false
+    local DOCKER_WIREGUARD_INPUT=${10:-}
     # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
     [[ -z "${businessSource}" ]] || backupPrefix=business
+    if [[ -n "${DOCKER_WIREGUARD_INPUT}" ]]; then
+        root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+        [[ "${FUNCNAME[1]:-}" == dockerWireGuardMigrate &&
+            "${DOCKER_WIREGUARD_INPUT}" == "${root}/.wireguard."*/wireguard &&
+            "${DOCKER_WIREGUARD_INPUT%/wireguard}" != "${root}/.wireguard." &&
+            "$(stat -c '%u:%a' "${DOCKER_WIREGUARD_INPUT%/wireguard}")" == 0:700 ]] &&
+            dockerTrafficSafePath "${root}" "${DOCKER_WIREGUARD_INPUT}" &&
+            dockerWireGuardMigrationDirectoryCheck "${DOCKER_WIREGUARD_INPUT}" &&
+            jq -e '.control == null and .control_sync == null and
+                any(.host_integrations[]; .type == "wireguard")' "${sourceSpec}" >/dev/null ||
+            return "${PADM_DOCKER_RC_STATE}"
+        [[ "${sourceSpec}" == "${root}/config/spec.json" ]] ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     case "${mode}" in
     configure|preview|interactive|confirmed) ;;
     recovery)
@@ -7690,6 +7878,7 @@ dockerConfigureApply() {
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
+    DOCKER_CONFIG_WIREGUARD_MIGRATION=0
     dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
     printf 'Docker 配置已提交，回滚快照: %s\n' "${backup}"
 }

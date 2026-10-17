@@ -571,7 +571,7 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 已登记 `start/stop` 仅操作精确审计的 WireGuard 容器。`stop` 保留规格和容器，
 `up/restart` 可重新启用；有 `control/control_sync` 依赖时拒绝单独停止。
 沿用现有 owner/preflight/run/cleanup/health，拒绝归属漂移。CLI 示例及定向、隔离 amd64 真实验收证据见实施计划；
-4C.8 的同隧道主控重绑定见下文；多 Peer、WireGuard 密钥/地址迁移、
+4C.8 的同隧道主控重绑定及 4C.9 的无角色连接迁移见下文；多 Peer、有控制角色的网络迁移、
 角色灾备及原生双架构、重启、公网边界不变。
 
 4C.8 新增 `control rebind --invite <私有文件> [--yes]` 及控制菜单 `19`。
@@ -582,7 +582,16 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 复用原锁、私密邀请、健康和失败/INT/TERM 恢复；同版幂等。
 普通 sync/reconnect 拒绝旧主控邀请，再次显式 rebind 可主动切回。
 客户端/事务/控制菜单及隔离 amd64 双部署生产 CLI、真实业务检查通过，
-不开放多 Peer、WireGuard 密钥/地址迁移或角色灾备，完整状态保持 `deferred`。
+不开放多 Peer、有控制角色的 WireGuard 密钥/地址迁移或角色灾备，完整状态保持 `deferred`。
+
+4C.9 增加 `wireguard migrate` 和 WireGuard 子菜单 `6`，限已登记且运行健康、
+无控制角色的 4C.7 canonical 三件套。可合并更换本机地址/监听端口、Peer 地址/公钥、
+endpoint 及轮换本机密钥；省略保持，endpoint `none` 清空，同配置不重建。
+可信 net 镜像核旧密钥配对并生成新密钥，候选 root `0700/0600`，
+原配置事务在精确停服/接口消失后整体交接私密目录，失败和 INT/TERM 恢复旧 inode。
+目录/运行归属漂移保留现场，普通恢复不能跨迁移覆盖密钥。
+定向及隔离 amd64 双部署生产 CLI、双方轮换、失败恢复后加密流量和幂等检查通过。
+双方逐端迁移会暂时断联，单端健康不等于远端连通；未扩展多 Peer、关联控制角色和灾备范围。
 
 6A.8 将空目标恢复扩展到单 sing-box 双族 Hy2/TUIC 的已保存 `port_hopping` 规格。
 候选重新校验，身份、累计及 tuple 保留；恢复后状态为 `stopped`，不恢复旧监督进程、

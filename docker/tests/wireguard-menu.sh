@@ -17,6 +17,7 @@ if [[ "${1:-}" == wireguard || "${1:-}" == control ]]; then
             [[ ( "$#" == 6 || "$#" == 8 ) && "$3" == --peer-address &&
                 "$5" == --peer-public-key ]] || exit 2
             [[ "$#" == 6 || "$7" == --endpoint ]] || exit 2 ;;
+        migrate) [[ "$#" -ge 3 ]] || exit 2 ;;
         *) exit 2 ;;
         esac
     fi
@@ -44,6 +45,7 @@ if [[ "${1:-}" == --foreground-driver ]]; then
     case "${2:-}" in
     prepare) args=(wireguard prepare --address 10.90.0.1 --listen-port 51820) ;;
     peer) args=(wireguard peer --peer-address 10.90.0.2 --peer-public-key "${PUBLIC}") ;;
+    migrate) args=(wireguard migrate --rotate-key) ;;
     start|stop) args=(wireguard "$2") ;;
     *) exit 2 ;;
     esac
@@ -79,7 +81,7 @@ runCase() {
 runCase status $'1\n0\n' 'wireguard status'
 grep -Fq fixture-public-status "${CONTROL_LOG}" || fail '状态没有显示 CLI 公开输出'
 for label in '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
-    '4. 确认启用或启动' '5. 临时停止'; do
+    '4. 确认启用或启动' '5. 临时停止' '6. 更新连接或轮换密钥'; do
     grep -Fq "${label}" "${CONTROL_LOG}" || fail "缺少菜单 ${label}"
 done
 runCase prepare $'2\n10.90.0.1\n51821\ny\n1\n0\n' \
@@ -92,14 +94,23 @@ runCase peer-no-endpoint "3"$'\n10.90.0.2\n'"${PUBLIC}"$'\n\ny\n0\n' \
     "wireguard peer --peer-address 10.90.0.2 --peer-public-key ${PUBLIC}"$'\nconfirm peer y'
 runCase start $'4\ny\n1\n0\n' $'wireguard start\nconfirm start y\nwireguard status'
 runCase stop $'5\ny\n1\n0\n' $'wireguard stop\nconfirm stop y\nwireguard status'
+runCase migrate "6"$'\n10.91.0.1\n51821\n10.91.0.2\n'"${PUBLIC}"$'\n198.18.0.2:51821\ny\ny\n1\n0\n' \
+    "wireguard migrate --address 10.91.0.1 --listen-port 51821 --peer-address 10.91.0.2 --peer-public-key ${PUBLIC} --endpoint 198.18.0.2:51821 --rotate-key"$'\nconfirm migrate y\nwireguard status'
+runCase migrate-endpoint $'6\n\n\n\n\nnone\nn\ny\n0\n' \
+    $'wireguard migrate --endpoint none\nconfirm migrate y'
+runCase migrate-rotate $'6\n\n\n\n\n\ny\ny\n0\n' \
+    $'wireguard migrate --rotate-key\nconfirm migrate y'
+runCase migrate-empty $'6\n\n\n\n\n\nn\n1\n0\n' 'wireguard status'
+runCase migrate-invalid $'6\n\n\n\n\n\ninvalid\n1\n0\n' 'wireguard status'
 runCase invalid $'99\n1\n0\n' 'wireguard status'
 runCase empty-address $'2\n\n1\n0\n' 'wireguard status'
 runCase empty-peer $'3\n\n1\n0\n' 'wireguard status'
 runCase empty-public "3"$'\n10.90.0.2\n\n1\n0\n' 'wireguard status'
 
-for choice in 2 3; do
+for choice in 2 3 6; do
     fields=(10.90.0.1 51820)
     [[ "${choice}" != 3 ]] || fields=(10.90.0.2 "${PUBLIC}" 198.18.0.2:51821)
+    [[ "${choice}" != 6 ]] || fields=(10.91.0.1 51821 10.91.0.2 "${PUBLIC}" none y)
     # 每个字段的 0 和 EOF 都只能取消本次操作，不能启动子 CLI。
     for ((field = 0; field < ${#fields[@]}; field++)); do
         printf -v input '%s\n' "${choice}" "${fields[@]:0:field}" 0 1 0
@@ -109,7 +120,7 @@ for choice in 2 3; do
     done
 done
 runCase empty-eof '' ''
-for action in prepare peer start stop; do
+for action in prepare peer start stop migrate; do
     case "${action}" in
     prepare)
         input=$'2\n10.90.0.1\n51820\nn\n1\n0\n'
@@ -119,6 +130,7 @@ for action in prepare peer start stop; do
         expected="wireguard peer --peer-address 10.90.0.2 --peer-public-key ${PUBLIC}" ;;
     start) input=$'4\nn\n1\n0\n'; expected='wireguard start' ;;
     stop) input=$'5\nn\n1\n0\n'; expected='wireguard stop' ;;
+    migrate) input=$'6\n\n\n\n\n\ny\nn\n1\n0\n'; expected='wireguard migrate --rotate-key' ;;
     esac
     runCase "cli-cancel-${action}" "${input}" "${expected}"$'\n'"confirm ${action} n"$'\nwireguard status'
 done
@@ -142,7 +154,7 @@ for tool in script timeout; do
     command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
 done
 export WIREGUARD_MENU_FOREGROUND=1
-for action in prepare peer start stop; do
+for action in prepare peer start stop migrate; do
     for answer in y n; do
         : >"${WIREGUARD_MENU_ACTIONS}"
         CONTROL_LOG="${TEST_ROOT}/foreground-${action}-${answer}.log"

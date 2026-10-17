@@ -313,6 +313,13 @@ assertGateFails exited
 fixture exited
 mutate '.[0].State.ExitCode = 1'
 assertGateFails exited
+[[ "$(dockerWireGuardContainer exited 0)" == "${CID}" ]]
+checks=$((checks + 1))
+mutate '.[0].State.OOMKilled = true'
+if dockerWireGuardContainer exited 0 >"${LOG}" 2>&1; then
+    fail '恢复审计放行了 OOM 异常容器'
+fi
+checks=$((checks + 1))
 fixture exited
 : >"${TEST_ROOT}/ids"
 runService 0 start

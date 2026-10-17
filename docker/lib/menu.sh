@@ -1120,13 +1120,13 @@ dockerMenuGeo() {
 }
 
 dockerMenuWireGuard() {
-    local choice address port peer public endpoint
+    local choice address port peer public endpoint rotate
     local -a action=()
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker WireGuard 单 Peer\n'
         printf '%s\n' '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
-            '4. 确认启用或启动' '5. 临时停止' '0. 返回'
+            '4. 确认启用或启动' '5. 临时停止' '6. 更新连接或轮换密钥' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1153,6 +1153,28 @@ dockerMenuWireGuard() {
             ;;
         4) dockerMenuRun wireguard start || true ;;
         5) dockerMenuRun wireguard stop || true ;;
+        6)
+            printf '%s\n' '仅限无控制角色的已启用单 Peer；留空保持，0 返回。双方逐端更新后须验证连通。'
+            dockerSetupRead address '本机 RFC1918 IPv4: ' &&
+                dockerSetupRead port 'UDP 监听端口: ' &&
+                dockerSetupRead peer '对端 RFC1918 IPv4: ' &&
+                dockerSetupRead public '对端公钥: ' &&
+                dockerSetupRead endpoint '对端 IPv4:UDP端口（none 清空）: ' &&
+                dockerSetupRead rotate '轮换本机密钥？[y/N]: ' n || continue
+            action=(wireguard migrate)
+            [[ -z "${address}" ]] || action+=(--address "${address}")
+            [[ -z "${port}" ]] || action+=(--listen-port "${port}")
+            [[ -z "${peer}" ]] || action+=(--peer-address "${peer}")
+            [[ -z "${public}" ]] || action+=(--peer-public-key "${public}")
+            [[ -z "${endpoint}" ]] || action+=(--endpoint "${endpoint}")
+            case "${rotate}" in
+            y|Y|yes|YES) action+=(--rotate-key) ;;
+            n|N|no|NO) ;;
+            *) printf '无效选项，请重新选择。\n'; continue ;;
+            esac
+            [[ "${#action[@]}" -gt 2 ]] || continue
+            dockerMenuRun "${action[@]}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

@@ -395,7 +395,7 @@
       "profiles": ["net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "WireGuard 接口由宿主内核拥有，默认不启用；预检/健康/撤销核对真实接口索引、公钥和随机标记，旧式活动标记拒绝自动接管。4C.7 新增控制连接菜单第 18 项及 wireguard status/prepare/peer/start/stop：先生成本机私密身份并仅输出公钥等公开状态，再交换公钥设置唯一 RFC1918 IPv4 /32 Peer；可选字面 IPv4 endpoint，监听及 endpoint 端口限 1024–65535。准备限尚无 WireGuard 和控制角色的部署，目录/文件为 root 0700/0600，拒绝覆盖或更换已有密钥/Peer。首次 start 显式确认并复用配置事务增加 WireGuard 集成，可能更新并检查全部署；已登记 start/stop 只操作精确审计的 WireGuard 容器。stop 临时保留规格和容器，up/restart 可重新启用，control/control_sync 依赖时拒绝 stop。沿用现有 owner/preflight/run/cleanup/health，归属漂移拒绝；现有手工配置沿用完整规格入口。4C.7 已通过定向及隔离 amd64 真实 CLI 验收，多 Peer、迁移/重绑定、角色灾备及原生双架构/重启/公网验收仍未完成。"
+      "reason": "WireGuard 接口由宿主内核拥有，默认不启用；预检/健康/撤销核对真实接口索引、公钥和随机标记，旧式活动标记拒绝接管。4C.7 提供控制菜单 18 和 wireguard status/prepare/peer/start/stop：私密准备、交换公钥后配置唯一 RFC1918 IPv4 /32 Peer，可选字面 IPv4 endpoint，监听/endpoint 端口限 1024–65535；目录/文件为 root 0700/0600，准备不替换已有密钥/Peer。首次 start 复用配置事务更新并检查部署；已登记 start/stop 只操作精确审计容器，stop 临时保留规格，up/restart 可启用，控制角色依赖时拒绝独立停止。4C.9 增加 wireguard migrate 和子菜单 6，限已登记、健康且无控制角色的 canonical 三件套；可合并更新本机地址/监听端口、Peer 地址/公钥、endpoint 和轮换本机密钥，省略保持，endpoint none 清空，同配置不重建。可信 net 镜像核旧密钥配对及生成新密钥，私密候选随原配置事务在精确停服/接口消失后整体交接；失败和 INT/TERM 恢复原目录 inode，目录/运行归属漂移保留现场。普通配置忽略环境迁移输入，普通恢复不能跨迁移覆盖密钥。双方逐端显式应用会暂时断联，单端健康不证明远端连通。现有手工配置沿用完整规格入口；多 Peer、有控制角色的网络迁移、角色灾备及原生双架构/重启/公网验收仍待交付或验收，完整管理状态不升级。"
     },
     "tun": {
       "status": "host-integrated",

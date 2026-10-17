@@ -44,7 +44,8 @@ dockerWireGuardContainer() (
          else
            $c.State.Restarting == false and $c.State.OOMKilled == false and $c.State.Error == "" and
            (if $mode == "running" then $c.State.Running == true and $c.State.Status == "running"
-            else $c.State.Running == false and $c.State.Status == "exited" and $c.State.ExitCode == 0 end)
+            else $c.State.Running == false and $c.State.Status == "exited" and
+              ($health == "0" or $c.State.ExitCode == 0) end)
          end) and
         $labels["com.docker.compose.project"] == "padm-docker" and
         $labels["com.docker.compose.project.working_dir"] == $root and

@@ -1178,7 +1178,7 @@ and container; ordinary `up/restart` can start it again. A `control` or `control
 blocks an independent stop. The existing owner/preflight/run/cleanup/health runtime is reused,
 and ownership drift is rejected. Focused checks and isolated Linux amd64 production CLI tests passed,
 including preparation from a standalone deployment, bidirectional encrypted traffic and exact-container restart.
-Multiple Peers, WireGuard key/address migration, role disaster recovery, native dual-architecture,
+Multiple Peers, network migration with control roles, role disaster recovery, native dual-architecture,
 host-reboot and public-network acceptance remain outside this checkpoint.
 
 After the managed connection is healthy, initialize the controller:
@@ -1269,7 +1269,32 @@ Ordinary sync/reconnect reject the previous controller's invitation; a later exp
 deliberately switch back. Enable auto-sync again with the new invitation after committing.
 Focused client, transaction and control-menu checks and isolated amd64 dual-deployment production
 CLI/Compose tests passed, including real traffic, health-failure recovery and preserved totals.
-Multiple Peers, WireGuard key/address migration and role disaster recovery remain deferred.
+Multiple Peers, network migration with control roles and role disaster recovery remain deferred.
+
+4C.9 adds `wireguard migrate` and WireGuard submenu item `6` for a healthy registered single-Peer
+deployment prepared by 4C.7, without `control` or `control_sync`:
+
+```bash
+padm-docker wireguard migrate --listen-port 51821 --yes
+padm-docker wireguard migrate --endpoint 192.0.2.2:51821 --yes
+padm-docker wireguard migrate --address 10.78.0.1 --peer-address 10.78.0.2 --rotate-key --yes
+padm-docker wireguard status
+```
+
+Optional `--address`, `--listen-port`, `--peer-address`, `--peer-public-key` and `--endpoint`
+can be combined; omitted fields stay unchanged, and endpoint `none` removes the endpoint.
+`--rotate-key` generates a new local key pair in the trusted net image.
+Apply changes explicitly on both nodes and exchange new public keys. Temporary disconnection
+is expected; local health does not prove remote connectivity. An unchanged configuration avoids
+service recreation. Changes use the existing full configuration transaction and recreate deployment services.
+Only the canonical private three-file directory is accepted. The existing key pair and precise runtime
+owner are checked before staging. Private candidates remain root `0700/0600`; the original directory
+is replaced only after the audited interface stops. Failure and INT/TERM restore its original inode.
+Directory or runtime ownership drift preserves recovery evidence. Ordinary configuration ignores
+injected migration input, and ordinary recovery cannot replace keys across a migration.
+Focused checks and isolated amd64 dual-deployment production CLI tests passed, including changes
+on both nodes, encrypted traffic after failure recovery and unchanged-configuration checks.
+Multiple Peers, network migration with control roles and role disaster recovery remain deferred.
 After rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.

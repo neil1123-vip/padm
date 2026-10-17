@@ -1276,7 +1276,7 @@ def private_logs(nodes, invitations, keys):
                    for path in invitations), "自动同步 token 进入部署规格"
 
 
-def wireguard_traffic(nodes):
+def wireguard_traffic(nodes, addresses=ADDRESS, ports=(51820, 51820)):
     servers = []
     try:
         for index, node in enumerate(nodes):
@@ -1287,7 +1287,7 @@ server.bind((sys.argv[1], 39899))
 while True:
     data, peer = server.recvfrom(65535)
     server.sendto(data, peer)
-""", ADDRESS[index]], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
+""", addresses[index]], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
         for index, node in enumerate(nodes):
             # 仅在 underlay 抓包；隧道明文可回显，链路上必须存在 WireGuard 数据包且没有明文。
             command(node["enter"] + ["python3", "-c", """
@@ -1298,6 +1298,7 @@ client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 client.bind((sys.argv[1], 0))
 client.settimeout(1)
 payload = b"padm-wireguard-encrypted-proof:" + os.urandom(96)
+ports = (int(sys.argv[3]), int(sys.argv[4]))
 for _ in range(10):
     client.sendto(payload, (sys.argv[2], 39899))
     try:
@@ -1319,10 +1320,11 @@ while True:
     if len(packet) < 42 or packet[12:14] != b"\\x08\\x00" or packet[23] != 17:
         continue
     udp = 14 + (packet[14] & 15) * 4
-    if packet[udp:udp + 4] == b"\\xca\\x6c\\xca\\x6c":
+    observed = (int.from_bytes(packet[udp:udp + 2], "big"), int.from_bytes(packet[udp + 2:udp + 4], "big"))
+    if observed == ports or observed == ports[::-1]:
         encrypted += packet[udp + 8:udp + 12] == b"\\x04\\x00\\x00\\x00"
 assert encrypted >= 2, "underlay 缺少双向 WireGuard 加密数据包"
-""", ADDRESS[index], ADDRESS[1-index]], timeout=15)
+""", addresses[index], addresses[1-index], str(ports[index]), str(ports[1-index])], timeout=15)
             peer = command(node["enter"] + ["wg", "show", "wg-padm", "latest-handshakes"]).split()
             transfer = command(node["enter"] + ["wg", "show", "wg-padm", "transfer"]).split()
             assert len(peer) == 2 and int(peer[1]) > 0
@@ -1332,6 +1334,111 @@ assert encrypted >= 2, "underlay 缺少双向 WireGuard 加密数据包"
         for server in servers:
             stop(server)
             server.stderr.close()
+
+
+def wireguard_migrate_real(nodes):
+    directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
+    before = [state(node) for node in nodes]
+    old_links = [json.loads(command(node["enter"] + ["ip", "-j", "link", "show", "wg-padm"]))[0]
+                 for node in nodes]
+    old_public = [json.loads(cli(node, "wireguard", "status").stdout)["public_key"] for node in nodes]
+    cli(nodes[0], "wireguard", "migrate", "--listen-port", "51821", "--yes")
+    cli(nodes[1], "wireguard", "migrate", "--endpoint", "192.0.2.1:51821", "--yes")
+    ports = (51821, 51820)
+    assert [json.loads(cli(node, "wireguard", "status").stdout)["public_key"] for node in nodes] == old_public
+    wireguard_traffic(nodes, ports=ports)
+    node, directory = nodes[0], directories[0]
+    root = node["path"] / "deployment"
+    originals = {path: path.read_bytes() for path in (
+        root / "config/spec.json", root / "deployment.json", root / "compose.json", root / "images.env",
+        directory / "identity.json", directory / "private.key", directory / "wg-padm.conf",
+    )}
+    # 在真实候选完成健康检查后仅注入一次错误；候选启动、回滚和旧配置恢复都走生产事务。
+    result = subprocess.run(node["enter"] + ["bash", "-c", """
+source "$1"
+shift
+testCompose=$(declare -f dockerComposeRun)
+eval "${testCompose/dockerComposeRun/testRealComposeRun}"
+testHealthFailure=1
+dockerComposeRun() {
+    testRealComposeRun "$@" || return $?
+    if [[ "${testHealthFailure}" == 1 && "${1:-}" == up && " $* " == *" --force-recreate "* &&
+        " $* " == *" --wait "* ]]; then
+        testHealthFailure=0
+        printf 'wireguard-migrate-injected-health-failure\\n' >&2
+        return 14
+    fi
+}
+dockerMain "$@"
+""", "padm-wireguard-migrate-health", str(node["path"] / "bin/padm-docker"),
+        "wireguard", "migrate", "--listen-port", "51822", "--yes"],
+        env=node["env"], capture_output=True, timeout=180)
+    with (node["path"] / "cli.log").open("ab") as output:
+        output.write(result.stdout + result.stderr)
+    assert result.returncode == 14 and b"wireguard-migrate-injected-health-failure" in result.stderr, \
+        diagnostic(node, (result.stdout + result.stderr).decode(errors="replace"))
+    assert all(path.read_bytes() == content for path, content in originals.items()), "迁移健康失败未恢复旧配置和密钥"
+    assert command(node["enter"] + ["wg", "show", "wg-padm", "listen-port"]).strip() == b"51821"
+    assert command(node["enter"] + ["wg", "show", "wg-padm", "public-key"]).decode().strip() == old_public[0]
+    for node in nodes:
+        assert set(services(node)) == {"xray", "nginx", "net-wireguard"}
+    wireguard_traffic(nodes, ports=ports)
+    addresses = ("10.232.0.1", "10.232.0.2")
+    public, keys = [], []
+    for index, node in enumerate(nodes):
+        cli(node, "wireguard", "migrate", "--address", addresses[index], "--rotate-key", "--yes")
+        current = json.loads(cli(node, "wireguard", "status").stdout)
+        assert current["address"] == addresses[index] and current["public_key"] != old_public[index]
+        public.append(current["public_key"])
+        keys.append((directories[index] / "private.key").read_text().strip())
+    for index, node in enumerate(nodes):
+        cli(node, "wireguard", "migrate", "--peer-address", addresses[1-index],
+            "--peer-public-key", public[1-index], "--yes")
+        assert state(node) == before[index], "迁移改变了主配置、入口或本机账号"
+        assert set(services(node)) == {"xray", "nginx", "net-wireguard"}
+        directory = directories[index]
+        identity = json.loads((directory / "identity.json").read_text())
+        assert identity == {"schema_version": 1, "address": addresses[index],
+                            "listen_port": ports[index], "public_key": public[index]}
+        assert command(["wg", "pubkey"], content=(keys[index] + "\n").encode()).decode().strip() == public[index]
+        assert command(node["enter"] + ["wg", "show", "wg-padm", "public-key"]).decode().strip() == public[index]
+        assert command(node["enter"] + ["wg", "show", "wg-padm", "allowed-ips"]).decode().split() == \
+            [public[1-index], addresses[1-index] + "/32"]
+        assert command(node["enter"] + ["wg", "show", "wg-padm", "listen-port"]).decode().strip() == str(ports[index])
+        link = json.loads(command(node["enter"] + ["ip", "-j", "link", "show", "wg-padm"]))[0]
+        addresses_state = json.loads(command(node["enter"] + ["ip", "-j", "address", "show", "wg-padm"]))[0]
+        assert link["ifindex"] != old_links[index]["ifindex"] and link["ifalias"] != old_links[index]["ifalias"]
+        assert [item["local"] for item in addresses_state["addr_info"] if item["family"] == "inet"] == [addresses[index]]
+        routes = json.loads(command(node["enter"] + ["ip", "-j", "route"]))
+        assert all(route.get("dst") not in (ADDRESS[1-index], ADDRESS[1-index] + "/32") for route in routes)
+        owner = dict(line.split("=", 1) for line in
+                     (node["path"] / "deployment/data/net/wireguard/wireguard.state").read_text().splitlines())
+        assert owner == {"schema_version": "2", "interface": "wg-padm", "ifindex": str(link["ifindex"]),
+                         "public_key": public[index], "alias": link["ifalias"]}
+        config = (directory / "wg-padm.conf").read_bytes()
+        assert config == (node["path"] / "deployment/data/net/wireguard/wireguard/wg-padm.conf").read_bytes()
+        assert ("Address = " + addresses[index] + "/32").encode() in config
+        assert ("AllowedIPs = " + addresses[1-index] + "/32").encode() in config
+        assert ("PublicKey = " + public[1-index]).encode() in config
+        assert ("PrivateKey = " + keys[index]).encode() in config
+        assert ("Endpoint = 192.0.2." + str(2-index) + ":" + str(ports[1-index])).encode() in config
+        assert directory.lstat().st_uid == 0 and directory.lstat().st_mode & 0o777 == 0o700
+        assert {path.name for path in directory.iterdir()} == {"identity.json", "private.key", "wg-padm.conf"}
+        for path in directory.iterdir():
+            info = path.lstat()
+            assert path.is_file() and not path.is_symlink() and info.st_uid == 0
+            assert info.st_mode & 0o777 == 0o600 and info.st_nlink == 1
+    wireguard_traffic(nodes, addresses, ports)
+    for index, node in enumerate(nodes):
+        current_services = services(node)
+        files = {path: path.read_bytes() for path in directories[index].iterdir()}
+        cli(node, "wireguard", "migrate", "--yes")
+        assert services(node) == current_services and state(node) == before[index], "同配置迁移重建服务或改写规格"
+        assert all(path.read_bytes() == content for path, content in files.items()), "同配置迁移改写私密文件"
+        assert not list((node["path"] / "deployment").glob(".wireguard.*"))
+        assert not (node["path"] / "deployment/locks/deployment.lock").exists()
+    print("docker-wireguard-cli-real-migrate-identity-peer-traffic-rollback-idempotency-ok", flush=True)
+    return keys
 
 
 def wireguard_cli_real(nodes):
@@ -1417,6 +1524,7 @@ def wireguard_cli_real(nodes):
                                        restarted["net-wireguard"]["id"]]).strip() != b"healthy":
         assert time.monotonic() < deadline, "归属恢复后 WireGuard 健康未恢复"
         time.sleep(0.1)
+    keys += wireguard_migrate_real(nodes)
     private_logs(nodes, (), keys)
     print("docker-wireguard-cli-real-prepare-peer-start-stop-ownership-private-ok", flush=True)
 

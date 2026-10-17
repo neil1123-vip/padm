@@ -37,6 +37,14 @@ dockerCurrentOwnsHostIntegration() {
 }
 dockerRealityProbeRun() {
     local directory
+    if [[ "${16:-}" == 'wg pubkey < /input/private.key' ]]; then
+        [[ "$#" == 16 && "${11}" == "type=bind,src=${root}/secrets/net/wireguard,dst=/input,readonly" &&
+            "${14}" == "$(jq -r '.images.net' "${root}/config/spec.json")" ]] ||
+            fail '迁移身份核验没有只读挂载当前私密目录'
+        printf '%s\n' "${CURRENT_PUBLIC}"
+        [[ "${MODE}" != pair-fail ]]
+        return
+    fi
     [[ "$#" == 16 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}" == \
         '10 --pull never --user 0:0 --network none --log-driver none --mount' &&
         "${12} ${13}" == '--entrypoint sh' && "${15}" == -ec &&
@@ -202,6 +210,55 @@ run_case "${PADM_DOCKER_RC_CONFLICT}" prepare --address 10.90.0.1 --listen-port 
 run_case "${PADM_DOCKER_RC_CONFLICT}" peer --peer-address 10.90.0.2 --peer-public-key "${PEER}" --yes
 [[ "$(snapshot)" == "${before}" ]] || fail '启用后重复准备或 Peer 改变已有输入'
 
+# 命令保持在线输入不动，完整私密候选只能作为原配置事务的第十个参数提交。
+CURRENT_PUBLIC=${PUBLIC}
+dockerWireGuardContainer() {
+    [[ "$#" == 1 && "$1" == running && "${MODE}" != owner-fail ]] || return 1
+    printf '%064d\n' 1
+}
+dockerConfigureApply() {
+    local candidate=${10}
+    [[ "$#" == 10 && "$1" == "${root}/config/spec.json" &&
+        "$2$3$4$5$6$7$8$9" == configure &&
+        "${candidate}" == "${root}/.wireguard."*/wireguard &&
+        "$(snapshot)" == "${before}" ]] || fail '迁移未通过原事务或提前改写在线输入'
+    python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status --directory "${candidate}" >/dev/null ||
+        fail '迁移没有完整私密候选'
+    printf 'migrate-apply\n' >>"${CALLS}"
+    [[ "${MODE}" != apply-fail ]] || return "${PADM_DOCKER_RC_COMPOSE}"
+    [[ "${MODE}" != int ]] || { kill -INT "${BASHPID}"; return 1; }
+    [[ "${MODE}" != term ]] || { kill -TERM "${BASHPID}"; return 1; }
+    cp -- "${candidate}/"{identity.json,private.key,wg-padm.conf} "${root}/secrets/net/wireguard/"
+}
+run_case "${PADM_DOCKER_RC_USAGE}" migrate --rotate-key --rotate-key --yes
+run_case "${PADM_DOCKER_RC_USAGE}" migrate --address 10.91.0.1 --address 10.91.0.2 --yes
+run_case "${PADM_DOCKER_RC_USAGE}" migrate --listener entry-xray --yes
+for MODE in owner-fail pair-fail apply-fail int term; do
+    expected=${PADM_DOCKER_RC_STATE}
+    [[ "${MODE}" != apply-fail ]] || expected=${PADM_DOCKER_RC_COMPOSE}
+    [[ "${MODE}" != int ]] || expected=130
+    [[ "${MODE}" != term ]] || expected=143
+    run_case "${expected}" migrate --endpoint none --yes
+    [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: 迁移失败改变了在线输入"
+done
+MODE=ok
+: >"${CALLS}"
+run_case 0 migrate --yes
+! grep -qF migrate-apply "${CALLS}" || fail '同配置迁移仍提交事务'
+run_case 0 migrate --address 10.91.0.1 --listen-port 51821 --peer-address 10.91.0.2 \
+    --endpoint none --yes
+grep -qFx 'Address = 10.91.0.1/32' "${root}/secrets/net/wireguard/wg-padm.conf" &&
+    grep -qFx 'AllowedIPs = 10.91.0.2/32' "${root}/secrets/net/wireguard/wg-padm.conf" &&
+    ! grep -q Endpoint "${root}/secrets/net/wireguard/wg-padm.conf" ||
+    fail '迁移未更新选定字段'
+before=$(snapshot)
+PRIVATE=$(printf '%032d' 4 | base64 -w0)
+PUBLIC=$(printf '%032d' 5 | base64 -w0)
+run_case 0 migrate --rotate-key --yes
+[[ "$(<"${root}/secrets/net/wireguard/private.key")" == "${PRIVATE}" ]] ||
+    fail '迁移未采用新密钥'
+CURRENT_PUBLIC=${PUBLIC}
+
 # 角色规格在其它专项已校验，此处仅定位新命令的主控/被控拒绝门禁。
 for role in control control_sync; do
     jq --arg role "${role}" '. + {($role):{role:"fixture"}}' "${TEST_ROOT}/base.json" \
@@ -212,8 +269,9 @@ for role in control control_sync; do
         dockerAccountSpecFile() { printf '%s\n' "${root}/config/spec.json"; }
         run_case "${PADM_DOCKER_RC_CONFLICT}" prepare --address 10.90.0.1 --listen-port 51820 --yes
         run_case "${PADM_DOCKER_RC_CONFLICT}" peer --peer-address 10.90.0.2 --peer-public-key "${PEER}" --yes
+        run_case "${PADM_DOCKER_RC_CONFLICT}" migrate --rotate-key --yes
     )
-    CASES=$((CASES + 2))
+    CASES=$((CASES + 3))
     [[ "$(snapshot)" == "${before}" ]] || fail "${role}: 拒绝时改变了已有输入"
 done
 printf 'wireguard-cli-ok: %s cases\n' "${CASES}"

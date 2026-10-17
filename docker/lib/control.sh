@@ -1466,18 +1466,77 @@ dockerControlStatus() (
     fi
 )
 
+dockerWireGuardMigrate() (
+    local spec=$1 directory=$2 rotate=$3 root draft= image status=0 file unchanged=1 public derived
+    shift 3
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    trap 'status=$?; trap - EXIT INT TERM; dockerConfigurationInterrupted;
+        if [[ -n "${draft}" ]]; then
+            if [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 1 && "${DOCKER_CONFIG_WIREGUARD_MIGRATION:-0}" == 1 ]]; then
+                dockerError "迁移恢复未完成，保留私密输入: ${draft}";
+            else
+                dockerRemoveManagedTree "${root}" "${draft}" || status=15;
+            fi;
+        fi;
+        exit "${status}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    jq -e '.control == null and .control_sync == null and
+        any(.host_integrations[]; .type == "wireguard")' "${spec}" >/dev/null || {
+        dockerError '迁移仅支持已启用且无主控/被控角色的单 Peer WireGuard'
+        return "${PADM_DOCKER_RC_CONFLICT}"
+    }
+    dockerWireGuardContainer running >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status --directory "${directory}") &&
+        jq -e '.configured == true' <<<"${public}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    dockerConfigureReleaseReuseInstalled &&
+        dockerConfigureReleaseValidate "${spec}" || return "${PADM_DOCKER_RC_MANIFEST}"
+    image=$(jq -er '.images.net' "${spec}") || return "${PADM_DOCKER_RC_STATE}"
+    derived=$(dockerRealityProbeRun 10 --pull never --user 0:0 --network none --log-driver none \
+        --mount "type=bind,src=${directory},dst=/input,readonly" --entrypoint sh "${image}" -ec \
+        'wg pubkey < /input/private.key') &&
+        [[ "${derived}" == "$(jq -er '.public_key' <<<"${public}")" ]] ||
+        return "${PADM_DOCKER_RC_STATE}"
+    draft=$(mktemp -d "${root}/.wireguard.XXXXXX") &&
+        chmod 0700 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${rotate}" == 1 ]]; then
+        dockerRealityProbeRun 10 --pull never --user 0:0 --network none --log-driver none \
+            --mount "type=bind,src=${draft},dst=/input" --entrypoint sh "${image}" -ec \
+            'umask 077; wg genkey > /input/private.key; wg pubkey < /input/private.key > /input/public.key' ||
+            return "${PADM_DOCKER_RC_HOST}"
+        set -- "$@" --private-key "${draft}/private.key" --public-key "${draft}/public.key"
+    fi
+    python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate --directory "${directory}" \
+        --destination "${draft}/wireguard" "$@" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    for file in identity.json private.key wg-padm.conf; do
+        cmp -s -- "${directory}/${file}" "${draft}/wireguard/${file}" || unchanged=0
+    done
+    if [[ "${unchanged}" == 1 ]]; then
+        printf 'WireGuard 配置未变化。\n'
+        return 0
+    fi
+    # 私密候选随原配置事务一起切换；双方逐端迁移，远端握手不作为单端提交条件。
+    dockerConfigureApply "${spec}" '' '' configure '' '' '' '' '' "${draft}/wireguard" || return $?
+    printf 'WireGuard 单端迁移已提交；请在对端更新对应公钥、地址或 endpoint 并验证连通。\n'
+)
+
 dockerWireGuardCommand() (
-    local action=${1:-status} yes=0 answer root spec directory draft= image status=0 key value public parent
+    local action=${1:-status} yes=0 rotate=0 answer root spec directory draft= image status=0 key value public parent
     local -A options=()
+    local -a migrationArgs=()
     [[ "$#" == 0 ]] || shift
-    case "${action}" in prepare|peer|status|start|stop) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    case "${action}" in prepare|peer|status|start|stop|migrate) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     while [[ "$#" -gt 0 ]]; do
         if [[ "$1" == --yes ]]; then
             [[ "${yes}" == 0 && "${action}" != status ]] || return "${PADM_DOCKER_RC_USAGE}"
             yes=1; shift; continue
         fi
+        if [[ "$1" == --rotate-key && "${action}" == migrate && "${rotate}" == 0 ]]; then
+            rotate=1; shift; continue
+        fi
         case "${action}:$1" in
-        prepare:--address|prepare:--listen-port|peer:--peer-address|peer:--peer-public-key|peer:--endpoint)
+        prepare:--address|prepare:--listen-port|peer:--peer-address|peer:--peer-public-key|peer:--endpoint|\
+        migrate:--address|migrate:--listen-port|migrate:--peer-address|migrate:--peer-public-key|migrate:--endpoint)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && ! -v "options[$1]" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             options[$1]=$2; shift 2 ;;
@@ -1523,6 +1582,13 @@ dockerWireGuardCommand() (
     dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
         dockerControlRecoveryCheck current || return "${PADM_DOCKER_RC_STATE}"
     directory="${root}/secrets/net/wireguard"
+    if [[ "${action}" == migrate ]]; then
+        for key in --address --listen-port --peer-address --peer-public-key --endpoint; do
+            [[ ! -v "options[${key}]" ]] || migrationArgs+=("${key}" "${options[${key}]}")
+        done
+        dockerWireGuardMigrate "${spec}" "${directory}" "${rotate}" "${migrationArgs[@]}"
+        return $?
+    fi
     if [[ "${action}" == status ]]; then
         if [[ ! -d "${root}/secrets/net" ]]; then
             public='{"state":"absent","configured":false}'
