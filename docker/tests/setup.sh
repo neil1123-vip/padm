@@ -2521,14 +2521,14 @@ done
 for fallbackProtocol in 27 29; do
     fallbackChoice=16; listener=entry-vless-tls-vision
     [[ "${fallbackProtocol}" != 29 ]] || { fallbackChoice=17; listener=entry-trojan-tls-fallback; }
-    printf -v fallbackInput '1\n%s\nproxy.example.com\n3\nfallback.example.com\n24501\n2\n%s\n%s\ny\n' \
+    printf -v fallbackInput '1\n%s\nproxy.example.com\n3\nfallback.example.com\n24501\n2\n%s\n%s\nn\ny\n' \
         "${fallbackChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
     for fallbackTopology in single dual; do
         newState "fallback-${fallbackProtocol}-${fallbackTopology}"
-        input=${fallbackInput}; single=true
+        input=${fallbackInput}; single=true; publish=false
         if [[ "${fallbackTopology}" == dual ]]; then
-            single=false
-            printf -v input '3\n%s\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nfallback.example.com\n24501\n2\n%s\n%s\ny\n' \
+            single=false; publish=true
+            printf -v input '3\n%s\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nfallback.example.com\n24501\n2\n%s\n%s\ny\ny\n' \
                 "${fallbackChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
         fi
         before=$(snapshot)
@@ -2537,9 +2537,10 @@ for fallbackProtocol in 27 29; do
             fail "${fallbackProtocol}/${fallbackTopology}: 取消传统 TLS 首配改变状态"
         runPty 0 "fallback-${fallbackProtocol}-${fallbackTopology}" "${input}" setup "${ASSET_ARGS[@]}"
         SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
-        jq -e --argjson protocol "${fallbackProtocol}" --arg listener "${listener}" --argjson single "${single}" '
+        jq -e --argjson protocol "${fallbackProtocol}" --arg listener "${listener}" \
+            --argjson single "${single}" --argjson publish "${publish}" '
           .schema_version == 3 and .core.type == "xray" and .tls.domain == "fallback.example.com" and
-          .subscription.enabled == false and
+          .subscription.enabled == $publish and
           (.core.protocols[0] | .id == $protocol and .core == "xray" and .listener_id == $listener and
             .server == "proxy.example.com" and .public_port == 24501 and
             .address_families == ["ipv4","ipv6"] and .uuid == "11111111-1111-4111-8111-111111111111" and
@@ -2549,13 +2550,24 @@ for fallbackProtocol in 27 29; do
             .core.protocols[1].id == 1 and .core.protocols[1].public_port == 24445 and
             .core.protocols[0].uuid == .core.protocols[1].uuid end
         ' "${SPEC}" >/dev/null || fail "${fallbackProtocol}/${fallbackTopology}: 传统 TLS 首配规格错误"
-        jq -e '.services.xray.ports == ["0.0.0.0:24501:24501/tcp","[::]:24501:24501/tcp"] and
-          (.services.xray.depends_on // {}) == {} and (.services.nginx.depends_on // {}) == {} and
+        jq -e --argjson publish "${publish}" '
+          .services.xray.ports == ["0.0.0.0:24501:24501/tcp","[::]:24501:24501/tcp"] and
+          (.services.xray.depends_on // {}) == {} and
+          (.services.nginx.depends_on // {}) ==
+            (if $publish then {subscription:{condition:"service_healthy"}} else {} end) and
           .services.nginx.ports == [] and
           any(.services.xray.volumes[]; .target == "/etc/padm/secrets/tls" and .read_only) and
           all(.services.nginx.volumes[]; .target != "/etc/padm/secrets/tls")' \
             "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
             fail "${fallbackProtocol}/${fallbackTopology}: TLS 终止或 fallback 依赖错误"
+        if [[ "${publish}" == true ]]; then
+            [[ "$(grep -cF 'proxy_pass http://subscription:8081/$padm_subscription_token;' \
+                "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf")" == 2 ]] ||
+                fail "${fallbackProtocol}/${fallbackTopology}: 首配发布缺少双后端 token 路由"
+        else
+            ! grep -qF 'padm_subscription_token' "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf" ||
+                fail "${fallbackProtocol}/${fallbackTopology}: 关闭发布仍保留 token 路由"
+        fi
         if [[ "${single}" == true ]]; then
             ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail '单核传统 TLS 生成无用 Reality 密钥'
         fi
@@ -2607,7 +2619,21 @@ for fallbackProtocol in 27 29; do
     runPty 0 "fallback-${fallbackProtocol}-delete-copy" $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
     jq -e '.tls.domain == "fallback.example.com" and (.core.protocols | length) == 1' "${SPEC}" >/dev/null ||
         fail "${fallbackProtocol}: 删除副本撤销 TLS"
-    runPty 15 "fallback-${fallbackProtocol}-enable-publish" $'7\ny\n8\n' edit "${ASSET_ARGS[@]}"
+    runPty 0 "fallback-${fallbackProtocol}-enable-publish" $'7\ny\n8\ny\n' edit "${ASSET_ARGS[@]}"
+    jq -e --argjson protocol "${fallbackProtocol}" '.subscription.enabled and
+      all(.core.protocols[]; .id == $protocol)' "${SPEC}" >/dev/null ||
+        fail "${fallbackProtocol}: 传统 TLS 单入口未能通过编辑启用发布"
+    # 删除最后一个 WS 后，仍有 fallback 发布入口时不能关闭订阅。
+    jq '.core.protocols += [{id:21,core:"xray",listener_id:"entry-ws",server:"proxy.example.com",
+      public_port:24504,address_families:["ipv4"],name:"ws",uuid:.core.protocols[0].uuid,
+      websocket:{domain:.tls.domain,path:"fixture_path",backend_port:31297,tls_port:8443}}]' \
+        "${SPEC}" >"${TEST_ROOT}/fallback-with-ws.json"
+    dockerConfigureSpecValidate "${TEST_ROOT}/fallback-with-ws.json" &&
+        dockerEditEntryRemove "${TEST_ROOT}/fallback-with-ws.json" entry-ws "${TEST_ROOT}/fallback-without-ws.json" &&
+        dockerConfigureSpecValidate "${TEST_ROOT}/fallback-without-ws.json" &&
+        jq -e '.subscription.enabled and all(.core.protocols[]; .id != 21)' \
+            "${TEST_ROOT}/fallback-without-ws.json" >/dev/null ||
+        fail "${fallbackProtocol}: 删除最后 WS 误关 fallback 订阅发布"
     for fallbackFailure in tls-fail health-fail; do
         newState "fallback-${fallbackProtocol}-${fallbackFailure}"
         export FAKE_SETUP_MODE="${fallbackFailure}"

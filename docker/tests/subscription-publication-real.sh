@@ -23,7 +23,7 @@ assert os.getuid() == 0 and sys.platform == "linux" and Path("/.dockerenv").is_f
 assert {item["ifname"] for item in json.loads(command(["ip", "-j", "link", "show"]))} == {"lo"}
 assert not Path("/var/run/docker.sock").exists(), "不得使用宿主 Docker Socket"
 inputs = json.loads(Path("/node-images.json").read_text())
-assert set(inputs) == {"xray", "sing-box", "ops", "nginx"}
+assert set(inputs) == {"xray", "sing-box", "ops", "nginx", "curl"}
 template = os.environ.get("PADM_TEST_SUBSCRIPTION_SITE_TEMPLATE", "")
 assert template in ("", "photos")
 node = Path(tempfile.mkdtemp(prefix=".tmp-subscription-publication-", dir="/n"))
@@ -48,9 +48,11 @@ with (node / "daemon.log").open("wb") as log, (node / "child.log").open("wb") as
             assert re.fullmatch(r"sha256:[0-9a-f]{64}", item["image_id"])
             image = json.loads(command(docker + ["image", "inspect", item["reference"]]))[0]
             assert image["Id"] == item["image_id"]
-        environment = dict(os.environ, DOCKER_HOST=docker[-1], PADM_TEST_SUBSCRIPTION_PUBLICATION="1")
+        environment = dict(os.environ, DOCKER_HOST=docker[-1], PADM_TEST_SUBSCRIPTION_PUBLICATION="1",
+                           PADM_TEST_HTTP2_CURL_REF=inputs["curl"]["image_id"])
         combinations = ((23, "sing-box"),) if template else (
-            (22, "xray"), (23, "sing-box"), (24, "xray"), (25, "xray"))
+            (22, "xray"), (23, "sing-box"), (24, "xray"), (25, "xray"),
+            (27, "xray"), (29, "xray"))
         for protocol, core in combinations:
             print(f"docker-subscription-publication-real-start: protocol={protocol} core={core}", flush=True)
             child = subprocess.Popen([

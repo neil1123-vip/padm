@@ -165,10 +165,11 @@ padm-docker status
 向导最终确认后才验签发布、生成 UUID/Reality 参数/订阅 token，并准备候选配置与证书。
 没有 `cosign` 时停止，不自动从未验证来源安装验证器，也不能跳过验签。
 WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01/HTTP-01 standalone/TLS-ALPN-01；
-私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布要求至少一个 Nginx TLS 协议 `21–25` 入口和同域受管证书，可仅使用 sing-box HTTPUpgrade `23`。
+私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布要求至少一个 Nginx TLS `21–25` 或 Xray TLS fallback `27/29` 入口和同域受管证书，可仅使用 sing-box HTTPUpgrade `23`。
 发布复用已有 Nginx 和 subscription 服务，不新增独立发布域名、证书或服务；
-没有协议 `21` 时启用发布需要 bundle 能力 `x-padm-subscription-nginx-tls`，含 `21` 或关闭发布的旧规格保持兼容。
-分享组 HTTPS 链接使用 `core.protocols` 中首个 `21–25` 入口的实际公开端口，`443` 省略；
+没有协议 `21` 时启用发布需要 bundle 能力 `x-padm-subscription-nginx-tls`；含 `27/29` 的发布还需要 `x-padm-subscription-fallback-tls`，关闭发布的旧子集保持兼容。
+fallback 的 HTTP/1.1 和 HTTP/2 后端均提供相同订阅路由，不新增公开端口或 Nginx TLS 私钥挂载。
+分享组 HTTPS 链接使用 `core.protocols` 中首个适用入口的实际公开端口，`443` 省略；
 Reality 共存选中的 website 入口实际公开端口为 `443`。4A.7 已通过隔离 amd64 的
 22/23/24/25 HTTPS 主/组订阅下载、严格 TLS 及双族 TCP/UDP 验收；公网及原生双架构另验。
 菜单 `11 → 10/11` 或 `subscription content --base` / `subscription links --base`
@@ -318,7 +319,7 @@ VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；
 `fallback_tls` 固定域名及两个内部端口，默认 `31300`/`31302`，同核复制可共享后端。
 默认首页不写入站点目录，已有 `/etc/padm-docker/data/static/index.html` 优先；
-支持通用字段编辑、同核复制/删除与链接；默认页、静态目录、302 和 ALPN 已支持事务管理，宿主集成及独立 HTTPS 发布尚未开放。
+支持通用字段编辑、同核复制/删除与链接；默认页、静态目录、302 和 ALPN 已支持事务管理，4A.9 可复用自身 fallback 发布 HTTPS 订阅，宿主集成与独立发布域名仍未开放。
 
 Docker 菜单 `16. 站点管理` 管理已有 Nginx TLS 入口 `21–25`、fallback `27`/`29`
 或 Hysteria2 的静态网页：
@@ -1113,7 +1114,7 @@ gRPC TLS 对应 `grpc_tls.backend_port` 与 `grpc_tls.tls_port`，
 传统 TLS fallback 对应 `fallback_tls.http_port` 与 `fallback_tls.http2_port`。
 不重排已有内部端口；后端监听按实际核心避让，Nginx TLS 与 fallback 端口全局避让，公开端口不得冲突。
 已有部署的 `edit --spec` 也支持这些入口变更，仍经过相同的预览、校验与确认。
-删除最后一个 Nginx TLS `21–25` 入口会关闭订阅；仍有传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 或 direct Trojan 时保留规格中的 TLS，
+删除最后一个适用发布入口（`21–25/27/29`）会关闭订阅；仍有 Hysteria2、AnyTLS、NaiveProxy、TUIC 或 direct Trojan 时保留规格中的 TLS，
 否则将 `tls` 设为 `null`，受管 TLS/ACME 文件与 token 均保留。
 Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan/VMess WS/HTTPUpgrade/gRPC TLS/传统 TLS fallback 基础入口已交付；
 逐入口 Reality 参数重生成、目标库/扫描、有限 443 共存与 XHTTP 管理已交付，具体边界见各专项说明；完整协议管理仍为 `deferred`。

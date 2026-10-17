@@ -848,7 +848,7 @@ dockerConfigureSpecValidate() {
         .tls == null and .subscription.enabled == false
       end and
       if .subscription.enabled then
-        any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)
+        any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)
       else true end and
       if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
     '
@@ -2924,19 +2924,39 @@ server {
 }" >>"${target}"
 }
 
+dockerGenerateSubscriptionLocation() {
+    local target=$1 legacyPublication=${2:-0}
+    printf '%s\n' "
+    location ~ \"^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})\$\" {
+        access_log off;" >>"${target}" || return 1
+    if [[ "${legacyPublication}" == 0 ]]; then
+        printf '%s\n' '        resolver 127.0.0.11 ipv6=off valid=30s;
+        resolver_timeout 5s;' >>"${target}" || return 1
+    fi
+    printf '%s\n' "        proxy_pass http://subscription:${PADM_DOCKER_SUBSCRIPTION_PORT}/\$padm_subscription_token;
+        proxy_pass_request_headers off;
+    }" >>"${target}"
+}
+
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
-    local httpPort http2Port hostMode=${3:-strict} legacyPublication=0 metadata enabled sourceLogEnabled http01 fallbackEnabled
+    local httpPort http2Port hostMode=${3:-strict} legacyPublication=0 legacyFallbackPublication=0 metadata enabled sourceLogEnabled http01 fallbackEnabled
     local fallbackSite= tlsSite= grpcLocation
     case "${hostMode}" in
     strict|legacy-host) ;;
-    legacy-publish) hostMode=strict; legacyPublication=1 ;;
-    legacy-host-publish) hostMode=legacy-host; legacyPublication=1 ;;
+    legacy-fallback-publish) hostMode=strict; legacyFallbackPublication=1 ;;
+    legacy-host-fallback-publish) hostMode=legacy-host; legacyFallbackPublication=1 ;;
+    legacy-publish) hostMode=strict; legacyPublication=1; legacyFallbackPublication=1 ;;
+    legacy-host-publish) hostMode=legacy-host; legacyPublication=1; legacyFallbackPublication=1 ;;
     *) return 1 ;;
     esac
     if [[ "${legacyPublication}" == 1 ]]; then
         jq -e '.subscription.enabled == true and any(.core.protocols[]; .id == 21)' \
             "${specFile}" >/dev/null || return 1
+    elif [[ "${legacyFallbackPublication}" == 1 ]]; then
+        jq -e '.subscription.enabled == true and
+          any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) and
+          any(.core.protocols[]; .id == 27 or .id == 29)' "${specFile}" >/dev/null || return 1
     fi
     metadata=$(jq -r '[
       (.reality_stream != null or any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)),
@@ -2984,6 +3004,9 @@ server {
     listen ${httpPort} proxy_protocol;
     listen [::]:${httpPort} proxy_protocol;
     server_name ${domain};" >>"${target}" || return 1
+        if [[ "${subscriptionEnabled}" == true && "${legacyFallbackPublication}" == 0 ]]; then
+            dockerGenerateSubscriptionLocation "${target}" || return 1
+        fi
         printf '%s' "${fallbackSite%.}" >>"${target}" || return 1
         printf '%s\n' "}
 
@@ -2992,6 +3015,9 @@ server {
     listen [::]:${http2Port} proxy_protocol;
     http2 on;
     server_name ${domain};" >>"${target}" || return 1
+        if [[ "${subscriptionEnabled}" == true && "${legacyFallbackPublication}" == 0 ]]; then
+            dockerGenerateSubscriptionLocation "${target}" || return 1
+        fi
         printf '%s' "${fallbackSite%.}" >>"${target}" || return 1
         printf '}\n' >>"${target}" || return 1
     done < <(jq -r '[.core.protocols[] | select(.id == 27 or .id == 29) |
@@ -3053,16 +3079,7 @@ server {
     }" >>"${target}" || return 1
     fi
     if [[ "${subscriptionEnabled}" == "true" ]]; then
-        printf '%s\n' "
-    location ~ \"^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})\$\" {
-        access_log off;" >>"${target}" || return 1
-        if [[ "${legacyPublication}" == 0 ]]; then
-            printf '%s\n' '        resolver 127.0.0.11 ipv6=off valid=30s;
-        resolver_timeout 5s;' >>"${target}" || return 1
-        fi
-        printf '%s\n' "        proxy_pass http://subscription:${PADM_DOCKER_SUBSCRIPTION_PORT}/\$padm_subscription_token;
-        proxy_pass_request_headers off;
-    }" >>"${target}" || return 1
+        dockerGenerateSubscriptionLocation "${target}" "${legacyPublication}" || return 1
     fi
         printf '%s' "${tlsSite%.}" >>"${target}" || return 1
         printf '}\n' >>"${target}" || return 1
@@ -3076,13 +3093,18 @@ server {
 
 dockerNginxConfigMatches() {
     local specFile=$1 actual=$2 mode
-    for mode in strict legacy-publish legacy-host legacy-host-publish; do
+    for mode in strict legacy-fallback-publish legacy-publish legacy-host legacy-host-fallback-publish legacy-host-publish; do
         [[ "${mode}" != legacy-host* ]] ||
             jq -e 'has("cdn_entries") | not' "${specFile}" >/dev/null || continue
-        [[ "${mode}" != *publish ]] ||
+        if [[ "${mode}" == *-fallback-publish ]]; then
+            jq -e '.subscription.enabled == true and
+              any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) and
+              any(.core.protocols[]; .id == 27 or .id == 29)' "${specFile}" >/dev/null || continue
+        elif [[ "${mode}" == *publish ]]; then
             jq -e '.subscription.enabled == true and any(.core.protocols[]; .id == 21)' \
                 "${specFile}" >/dev/null || continue
-        # 仅接受整份已知旧正文，旧发布范围不扩大到无 21 的新规格。
+        fi
+        # 仅接受整份已知旧正文；旧 fallback 发布模式还须有当时支持的普通 TLS 入口。
         cmp -s -- "${actual}" <(dockerGenerateNginxConfig "${specFile}" /dev/stdout "${mode}") && return 0
     done
     return 1

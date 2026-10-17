@@ -285,7 +285,7 @@ LINK=$(dockerSubscriptionCommand links "${GROUP}")
     done
 )
 
-# 仅复用已有 Nginx TLS 入口；发布和本地内容分别验收，旧包能力仅限制新增拓扑。
+# 仅复用已有 TLS 网站入口；发布和本地内容分别验收，旧包能力仅限制新增拓扑。
 (
     mkdir -p -- "${TEST_ROOT}/bundle"
     printf '%040d\n' 1 >"${TEST_ROOT}/bundle/${PADM_DOCKER_BUNDLE_REF}"
@@ -296,9 +296,14 @@ LINK=$(dockerSubscriptionCommand links "${GROUP}")
     jq 'del(.["x-padm-subscription-nginx-tls"])' "$(dockerConfigureSchemaFile)" \
         >"${compat}/docker/contracts/configure.schema.json"
     dockerBundleSupportsSpec "${compat}" "${SPEC}" || fail '旧包拒绝原协议 21 发布子集'
+    fallbackCompat="${TEST_ROOT}/subscription-old-fallback-bundle"
+    mkdir -p -- "${fallbackCompat}/docker/contracts"
+    cp -- "$(dockerFeatureMatrixFile)" "${fallbackCompat}/docker/contracts/features.json"
+    jq 'del(.["x-padm-subscription-fallback-tls"])' "$(dockerConfigureSchemaFile)" \
+        >"${fallbackCompat}/docker/contracts/configure.schema.json"
     share=$(jq -cn --arg token "${GROUP_TOKEN}" --arg account "${BOB}" '
       {token:$token,account_ids:[$account],listener_ids:["entry-ws"]}')
-    for topology in 22:xray 23:xray 23:sing-box 24:xray 25:xray; do
+    for topology in 22:xray 23:xray 23:sing-box 24:xray 25:xray 27:xray 29:xray; do
         protocol=${topology%%:*}; core=${topology#*:}
         spec="${TEST_ROOT}/publish-${protocol}-${core}.json"
         jq --argjson protocol "${protocol}" --arg core "${core}" --arg account "${BOB}" '
@@ -308,19 +313,77 @@ LINK=$(dockerSubscriptionCommand links "${GROUP}")
             if $protocol == 23 then .httpupgrade = .websocket | del(.websocket)
             elif $protocol == 24 or $protocol == 25 then
               .grpc_tls = (.websocket | del(.path) + {service_name:"subscriptions"}) | del(.websocket)
+            elif $protocol == 27 or $protocol == 29 then
+              .fallback_tls = {domain:.websocket.domain,http_port:31300,http2_port:31302} | del(.websocket)
             else . end] |
           .accounts |= map(select(.id == $account))
         ' "${SPEC}" >"${spec}"
         dockerConfigureSpecValidate "${spec}" || fail "${topology}: 独立发布规格被拒绝"
         dockerBundleSupportsSpec "${PROJECT_ROOT}" "${spec}" || fail "${topology}: 当前包拒绝发布"
         reject dockerBundleSupportsSpec "${compat}" "${spec}"
+        if [[ "${protocol}" == 27 || "${protocol}" == 29 ]]; then
+            reject dockerBundleSupportsSpec "${fallbackCompat}" "${spec}"
+            jq --slurpfile original "${SPEC}" '
+              .core.protocols += [$original[0].core.protocols[] | select(.id == 21) |
+                .listener_id = "entry-second" | .public_port = 9443]
+            ' "${spec}" >"${TEST_ROOT}/publish-mixed.json"
+            dockerConfigureSpecValidate "${TEST_ROOT}/publish-mixed.json" || fail '混合发布夹具无效'
+            reject dockerBundleSupportsSpec "${fallbackCompat}" "${TEST_ROOT}/publish-mixed.json"
+            # 旧混合正文不含 fallback token 路由，兼容时仍须整份匹配。
+            dockerGenerateNginxConfig "${TEST_ROOT}/publish-mixed.json" "${TEST_ROOT}/publish-legacy.conf" legacy-publish
+            [[ "$(grep -cF 'proxy_pass http://subscription:8081/$padm_subscription_token;' \
+                "${TEST_ROOT}/publish-legacy.conf")" == 1 ]] || fail '旧混合正文扩大 fallback 发布'
+            dockerNginxConfigMatches "${TEST_ROOT}/publish-mixed.json" "${TEST_ROOT}/publish-legacy.conf" ||
+                fail '旧混合发布正文被拒绝'
+            printf '\n# drift\n' >>"${TEST_ROOT}/publish-legacy.conf"
+            reject dockerNginxConfigMatches "${TEST_ROOT}/publish-mixed.json" "${TEST_ROOT}/publish-legacy.conf"
+            # 上版普通 TLS 已有动态 resolver，只有 fallback 尚无 token 路由。
+            for regularProtocol in 21 22; do
+                jq --argjson protocol "${regularProtocol}" '.core.protocols[-1].id = $protocol' \
+                    "${TEST_ROOT}/publish-mixed.json" >"${TEST_ROOT}/publish-previous.json"
+                dockerConfigureSpecValidate "${TEST_ROOT}/publish-previous.json" || fail '上版混合发布夹具无效'
+                dockerGenerateNginxConfig "${TEST_ROOT}/publish-previous.json" \
+                    "${TEST_ROOT}/publish-previous.conf" legacy-fallback-publish
+                [[ "$(grep -cF 'proxy_pass http://subscription:8081/$padm_subscription_token;' \
+                    "${TEST_ROOT}/publish-previous.conf")" == 1 &&
+                    "$(grep -cF 'resolver 127.0.0.11 ipv6=off valid=30s;' \
+                        "${TEST_ROOT}/publish-previous.conf")" == 1 ]] || fail '上版混合正文丢失普通 TLS resolver'
+                dockerNginxConfigMatches "${TEST_ROOT}/publish-previous.json" "${TEST_ROOT}/publish-previous.conf" ||
+                    fail '上版混合发布正文被拒绝'
+                printf '\n# drift\n' >>"${TEST_ROOT}/publish-previous.conf"
+                reject dockerNginxConfigMatches "${TEST_ROOT}/publish-previous.json" "${TEST_ROOT}/publish-previous.conf"
+            done
+            reject dockerGenerateNginxConfig "${spec}" "${TEST_ROOT}/publish-previous.conf" legacy-fallback-publish
+            for portCase in nonstandard standard first; do
+                authority=ws.example.com:8443
+                case "${portCase}" in
+                nonstandard) cp -- "${spec}" "${TEST_ROOT}/publish-port.json" ;;
+                standard)
+                    jq '.core.protocols[0].public_port = 443' "${spec}" >"${TEST_ROOT}/publish-port.json"
+                    authority=ws.example.com ;;
+                first) cp -- "${TEST_ROOT}/publish-mixed.json" "${TEST_ROOT}/publish-port.json" ;;
+                esac
+                dockerConfigureSpecValidate "${TEST_ROOT}/publish-port.json" || fail 'fallback 发布端口夹具无效'
+                [[ "$(dockerSubscriptionLinks "${TEST_ROOT}/publish-port.json" "${STATE_FILE}" "${GROUP}")" == \
+                    "https://${authority}/subscriptions/${GROUP_TOKEN}" ]] || fail 'fallback 分享链接端口错误'
+                (
+                    dockerSubscriptionSpecFile() { printf '%s\n' "${TEST_ROOT}/publish-port.json"; }
+                    [[ "$(dockerSubscriptionCommand links --base)" == "https://${authority}/subscriptions/${MAIN_TOKEN}" ]]
+                ) || fail 'fallback 主订阅链接端口错误'
+            done
+        else
+            dockerBundleSupportsSpec "${fallbackCompat}" "${spec}" || fail 'fallback 能力门禁误伤 Nginx TLS 发布'
+        fi
         dockerGenerateCompose "${spec}" "${TEST_ROOT}/publish-compose.json"
-        jq -e --arg core "${core}" '
+        jq -e --arg core "${core}" --argjson protocol "${protocol}" '
           (.services | keys | map(select(. == "xray" or . == "sing-box"))) == [$core] and
           .services.subscription.profiles == ["subscription"] and
-          .services.nginx.depends_on[$core].condition == "service_healthy" and
+          (if $protocol == 27 or $protocol == 29 then
+            (.services.nginx.depends_on | has($core) | not) and .services.nginx.ports == [] and
+            .services[$core].ports == ["0.0.0.0:8443:8443/tcp"]
+          else .services.nginx.depends_on[$core].condition == "service_healthy" and
+            .services.nginx.ports == ["0.0.0.0:8443:8443/tcp"] end) and
           .services.nginx.depends_on.subscription.condition == "service_healthy" and
-          .services.nginx.ports == ["0.0.0.0:8443:8443/tcp"] and
           .services.subscription.ports == null
         ' "${TEST_ROOT}/publish-compose.json" >/dev/null || fail "${topology}: 发布拓扑或核心依赖错误"
         dockerGenerateDeployment "${spec}" "${TEST_ROOT}/publish-deployment.json" ||
@@ -330,6 +393,14 @@ LINK=$(dockerSubscriptionCommand links "${GROUP}")
         dockerGenerateNginxConfig "${spec}" "${TEST_ROOT}/publish-nginx.conf"
         grep -qF 'proxy_pass http://subscription:8081/$padm_subscription_token;' \
             "${TEST_ROOT}/publish-nginx.conf" || fail "${topology}: Nginx 缺少订阅路由"
+        if [[ "${protocol}" == 27 || "${protocol}" == 29 ]]; then
+            [[ "$(grep -cF 'proxy_pass http://subscription:8081/$padm_subscription_token;' \
+                "${TEST_ROOT}/publish-nginx.conf")" == 2 ]] &&
+                grep -qF 'listen 31300 proxy_protocol;' "${TEST_ROOT}/publish-nginx.conf" &&
+                grep -qF 'listen 31302 proxy_protocol;' "${TEST_ROOT}/publish-nginx.conf" &&
+                grep -qF 'http2 on;' "${TEST_ROOT}/publish-nginx.conf" ||
+                fail "${topology}: fallback 双后端路由或 PROXY/HTTP2 丢失"
+        fi
         if [[ "${protocol}" == 24 || "${protocol}" == 25 ]]; then
             grep -qF 'location /subscriptions/ {' "${TEST_ROOT}/publish-nginx.conf" &&
                 ! grep -qF 'location ^~ /subscriptions/ {' "${TEST_ROOT}/publish-nginx.conf" ||
@@ -348,20 +419,28 @@ LINK=$(dockerSubscriptionCommand links "${GROUP}")
                   .id == $uuid and .port == "8443" and .tls == "tls" and
                   .net == (if $protocol == 22 then "ws" else "httpupgrade" end)
                 ' >/dev/null || fail "${topology}: 分享账号或传输错误"
-        elif [[ "${protocol}" == 24 ]]; then
-            [[ "${content}" == "vless://${BOB_UUID}@"* ]] || fail 'VLESS gRPC 分享账号错误'
+        elif [[ "${protocol}" == 24 || "${protocol}" == 27 ]]; then
+            [[ "${content}" == "vless://${BOB_UUID}@"* ]] || fail 'VLESS 分享账号错误'
         else
             [[ "${content}" == 'trojan://Bob.-~%40%2B%3D%3ASecret@'* ]] ||
-                fail 'Trojan gRPC 分享账号错误'
+                fail 'Trojan 分享账号错误'
+        fi
+        if [[ "${protocol}" == 27 || "${protocol}" == 29 ]]; then
+            [[ "${content}" == *'@ws.example.com:8443?'* && "${content}" == *'&sni=ws.example.com&'* &&
+                "${content}" == *'&type=tcp#'* ]] || fail 'fallback 内容域名、端口或传输错误'
         fi
         jq '.subscription.enabled = false' "${spec}" >"${TEST_ROOT}/publish-disabled.json"
         dockerBundleSupportsSpec "${compat}" "${TEST_ROOT}/publish-disabled.json" ||
             fail "${topology}: 旧包拒绝关闭发布的协议子集"
+        dockerBundleSupportsSpec "${fallbackCompat}" "${TEST_ROOT}/publish-disabled.json" ||
+            fail "${topology}: 缺 fallback 能力的旧包拒绝关闭发布"
         dockerSubscriptionRender "${TEST_ROOT}/publish-disabled.json" "${share}" "${TEST_ROOT}/publish-local.txt"
         cmp -s "${TEST_ROOT}/publish-share.txt" "${TEST_ROOT}/publish-local.txt" ||
             fail "${topology}: 关闭 HTTPS 发布改变本地分享内容"
+        dockerGenerateNginxConfig "${TEST_ROOT}/publish-disabled.json" "${TEST_ROOT}/publish-disabled.conf"
+        ! grep -qF 'padm_subscription_token' "${TEST_ROOT}/publish-disabled.conf" ||
+            fail "${topology}: 关闭发布仍保留 token 路由"
         if [[ "${protocol}" == 24 || "${protocol}" == 25 ]]; then
-            dockerGenerateNginxConfig "${TEST_ROOT}/publish-disabled.json" "${TEST_ROOT}/publish-disabled.conf"
             grep -qF 'location ^~ /subscriptions/ {' "${TEST_ROOT}/publish-disabled.conf" ||
                 fail "${topology}: 关闭发布仍改变 gRPC 原路由优先级"
         fi

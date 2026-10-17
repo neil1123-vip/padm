@@ -477,6 +477,7 @@ try {
             }
         } elseif ($Selector -in @('docker-subscription-publication-real', 'docker-subscription-site-real')) {
             $references.Remove('net')
+            $references['curl'] = 'padm-local/padm-static-site-h3-client:20261012'
         } elseif ($Selector -eq 'docker-fail2ban-real') {
             $references = [ordered]@{ net = 'padm-local/padm-net:control-4c4b' }
         } elseif ($Selector -eq 'docker-tun-real') {

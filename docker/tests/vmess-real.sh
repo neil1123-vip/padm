@@ -51,7 +51,8 @@ fi
 if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
     [[ "${CDN_ENTRIES}" == 0 && "${ALPN_ORDERS}" == 0 &&
         ( "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:sing-box ||
-          "${PROTOCOL}:${CORE}" == 24:xray || "${PROTOCOL}:${CORE}" == 25:xray ) ]] || exit 2
+          "${PROTOCOL}:${CORE}" == 24:xray || "${PROTOCOL}:${CORE}" == 25:xray ||
+          "${PROTOCOL}:${CORE}" == 27:xray || "${PROTOCOL}:${CORE}" == 29:xray ) ]] || exit 2
     TLS_PORT=35468 TEST_NAME="${TEST_NAME}-publication"
 fi
 [[ -z "${SUBSCRIPTION_SITE_TEMPLATE}" ]] || TEST_NAME="${TEST_NAME}-photos"
@@ -492,8 +493,44 @@ for hostname, trust in (("wrong.padm.test", context), (uri.hostname, ssl.create_
                 raise AssertionError("错误证书身份被接受")
     except ssl.SSLCertVerificationError:
         pass
+    except ssl.SSLError as error:
+        # Xray 可在发送证书前拒绝错误 SNI；其它握手或网络错误仍须失败。
+        assert hostname == "wrong.padm.test" and error.reason == "TLSV1_UNRECOGNIZED_NAME", error
 print(json.dumps(contents))
 PY
+    if [[ "${TRANSPORT}" == tcp ]]; then
+        stage=subscription-download-http2
+        # fallback 两个 ALPN 后端必须都交付相同正文，不能让 curl 降级掩盖 h2 路由缺失。
+        while IFS= read -r endpoint; do
+            authority=${endpoint}; [[ "${endpoint}" != *:* ]] || authority="[${endpoint}]"
+            for kind in main group; do
+                url=$(jq -er --arg kind "${kind}" '.[$kind]' "${TEST_ROOT}/runtime/client/publication.json")
+                expected=$(jq -er --arg kind "${kind}" '.expected[$kind] + "\n200 2"' \
+                    "${TEST_ROOT}/runtime/client/publication.json")
+                response=$(docker run --rm --init --pull=never --read-only --cap-drop ALL --user 10001:10001 \
+                    --network "${project}" --label "io.padm.test=${project}" \
+                    --mount "type=volume,source=${volume},target=/etc/padm/client,readonly,volume-subpath=runtime/client" \
+                    --entrypoint curl "${CURL_ID}" --fail --silent --show-error --noproxy '*' \
+                    --connect-timeout 2 --max-time 5 --http2 --cacert /etc/padm/client/ca.crt \
+                    --resolve "${DOMAIN}:35468:${authority}" --write-out '\n%{http_code} %{http_version}' "${url}")
+                [[ "${response}" == "${expected}" ]] || {
+                    printf 'subscription HTTP2 content or ALPN mismatch: endpoint=%s token=%s\n' "${endpoint}" "${kind}" >&2
+                    exit 1
+                }
+            done
+            response=$(docker run --rm --init --pull=never --read-only --cap-drop ALL --user 10001:10001 \
+                --network "${project}" --label "io.padm.test=${project}" \
+                --mount "type=volume,source=${volume},target=/etc/padm/client,readonly,volume-subpath=runtime/client" \
+                --entrypoint curl "${CURL_ID}" --silent --show-error --noproxy '*' \
+                --connect-timeout 2 --max-time 5 --http2 --cacert /etc/padm/client/ca.crt \
+                --resolve "${DOMAIN}:35468:${authority}" --output /dev/null \
+                --write-out '%{http_code} %{http_version}' \
+                "https://${DOMAIN}:35468/subscriptions/unknown_token_0123456789abcdef")
+            [[ "${response}" == '404 2' ]]
+        done < <(jq -r '.[]' <<<"${addresses}")
+        printf 'docker-subscription-publication-http2-ok: protocol=%s core=%s main-group=exact token404=ipv4,ipv6 tls=strict-ca-sni http_version=2\n' \
+            "${PROTOCOL}" "${CORE}"
+    fi
     python3 - "${TEST_ROOT}/publication-content.json" "${TEST_ROOT}" <<'PY'
 import json
 from pathlib import Path
@@ -860,7 +897,12 @@ def tcp(port):
     if not response:
         raise ProbeRejected("upstream-eof")
     head,body = response.split(b"\r\n\r\n",1)
-    assert (head.startswith(b"HTTP/1.0 200") or head.startswith(b"HTTP/1.1 200")) and body == proof
+    # Trojan 错误认证落入网站 fallback，认证前缀可使 Nginx 返回 400，而非普通路径的 404。
+    status = head.split(b"\r\n",1)[0]
+    if transport_name == "tcp" and test_name.startswith("trojan-tls-fallback-real") and \
+            status in (b"HTTP/1.1 400 Bad Request", b"HTTP/1.1 404 Not Found"):
+        raise ProbeRejected("fallback-http-"+status.split()[1].decode())
+    assert (head.startswith(b"HTTP/1.0 200") or head.startswith(b"HTTP/1.1 200")) and body == proof, (port,head,body)
     return True
 def udp(port):
     control,host,relay_port = connect(port,3)

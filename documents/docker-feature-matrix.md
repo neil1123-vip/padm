@@ -435,10 +435,10 @@ UUID 正统计及同客户端额度拒绝/恢复；未暴露宿主端口或核�
 链接、硬链接、特殊文件及可识别私钥；不能据此证明内容无任何凭据。
 5A.2 提供逐入口 ALPN 配置诊断、推荐修复及三种持久化顺序，核心与 URI 同序；
 专项仅容许选中入站 ALPN 漂移，不覆盖其它账号、路由、fallback、Nginx 或编排。
-真实 Nginx PROXY HTTP/2 已验，真实 Xray ALPN 协商、公网及原生双架构仍待验；
+真实 Nginx PROXY HTTP/2 与隔离 amd64 Xray ALPN 协商已验，公网及原生双架构仍待验；
 5A.3a/5A.3b 已提供 standalone/webroot HTTP-01 的本地事务底座；公网 CA、
 真实宿主生命周期及原生双架构仍待验，组合管理状态保持 `deferred`。
-独立 27/29 不发布 HTTPS 订阅，组合至少一个同域 Nginx TLS `21–25` 入口可发布其链接；宿主集成、sing-box 与完整管理仍拒绝。
+4A.9 允许独立 27/29 复用自身 fallback 发布 HTTPS 订阅，HTTP/1.1 与 HTTP/2 后端共用 token 路由；宿主集成、sing-box fallback 与完整管理仍拒绝。
 本阶段真实客户端、HTTP/1.1/HTTP/2 回落和恢复验收已通过；Docker Linux 定向回归约 `109.543` 秒，
 真实 amd64 27/29 及旧 22/24/25 顺序验收约 `277` 秒，静态 ShellCheck、Schema `4` 正例/`50` 反例
 和 phase3 矩阵检查通过。公网宿主入口、原生 arm64、真实 DNS/整机重启及可信发布仍未验。
@@ -448,15 +448,15 @@ Fail2ban 关联 WS 的增删与通用端口编辑暂冻结；5C.6d 仅提供单�
 单集成和单保护端口的专项联动，实际迁移验收见实施计划。真实签名发布、业务镜像及
 双架构客户端连通仍待验，不能由工具容器回归推断完成。
 
-4A.7 将 HTTPS 订阅发布限定扩展到至少一个现有 Nginx TLS `21–25` 入口，
+4A.7/4A.9 将 HTTPS 订阅发布限定扩展到至少一个现有 Nginx TLS `21–25` 或 Xray fallback `27/29` 入口，
 复用同域受管 TLS、Nginx 和 subscription 服务；未包含 `21` 的启用规格要求
-`x-padm-subscription-nginx-tls`，含 `21` 或关闭发布的旧规格保持兼容。
+`x-padm-subscription-nginx-tls`；含 `27/29` 的发布另需 `x-padm-subscription-fallback-tls`，关闭发布的旧子集保持兼容。
 分享组 URL 使用 `core.protocols` 中首个适用入口的实际公开端口，省略 `443`；
-Reality 共存选中的 website 入口使用公开 `443`。首配 `12–15` 接入发布提问，
+Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接入发布提问，
 仅删除最后一个适用入口时关闭发布。22–25 的主/组 HTTPS、严格 TLS 及双族 TCP/UDP
 已通过隔离 amd64 验收；变量代理补齐 Docker DNS 解析，同名 gRPC 服务不遮蔽 token。
 不增加独立发布域名、证书或服务，
-独立 27/29 及其它非 Nginx TLS 协议的发布和完整管理继续按原边界。
+其它核心端 TLS 协议仍不能单独发布，完整管理继续按原边界。
 4A.8 增加 `subscription content/links --base` 和菜单 `11 → 10/11`：
 本地主订阅复用节点生成器，不依赖分享组或启用发布；HTTPS 链接沿用实际公开端口及发布门禁。
 5A.1d–5A.1e 将受管模板扩展到已有 sing-box `23`，并复用原生 renderer 接入可选站名；
@@ -528,7 +528,7 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–15` 接�
 | `nginx` | 站点与证书 -> 传统 TLS fallback | `supported` | `nginx` | bridge | 独立 Nginx 容器，承载 WS/HTTPUpgrade/gRPC 反代与传统 TLS fallback 的 PROXY v1 HTTP/1.1、HTTP/2 后端；默认页、静态目录、302 与传统 TLS ALPN 经菜单/CLI 事务管理。 |
 | `tls-files` | 站点与证书 -> 本机 TLS 证书 | `supported` | `nginx` / `acme` | bridge | 菜单/CLI 校验、导入轮换和只读挂载；Nginx 与 Xray/sing-box 逐消费者校验、重载/重建及健康失败恢复旧证书。核心端仅交付受管 TLS 文件底座，不代表新增协议或完整管理。 |
 | `acme-dns` | 站点与证书 -> 本机 TLS 证书 | `supported` | `acme` | bridge + 宿主 CLI 调度 | 菜单/CLI DNS-01 issue/renew 及自动续期启停/状态；root 私有输入、唯一 systemd/cron 任务、部署锁和候选账户/证书事务；未到期跳过，更新/回滚保留最新输入，卸载只撤销受管任务。 |
-| `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `nginx` / `subscription` | bridge | 4A.7 复用至少一个 `21–25` 入口及同域受管 TLS，含纯 sing-box `23`；无 `21` 的启用规格需新能力标记，隔离 amd64 主/组实链路已验。部署/分享组 token 沿用，分享 URL 按首个适用入口的实际公开端口；独立域名/证书发布与 H3 未迁移。 |
+| `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `nginx` / `subscription` | bridge | 4A.7/4A.9 复用至少一个 `21–25/27/29` 入口及同域受管 TLS，含纯 sing-box `23`；无 `21` 需 `x-padm-subscription-nginx-tls`，含 fallback 发布另需 `x-padm-subscription-fallback-tls`。HTTP/1.1 与 HTTP/2 后端共用 token 路由。部署/分享组 token 沿用，分享 URL 按首个适用入口的实际公开端口；独立域名/证书发布与 H3 未迁移，27/29 新范围验收见 4A.9。 |
 | `subscription-traffic` | 账号管理 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/collect/limit/reset；菜单 `10 -> 9` 查看不隐式采集，额度 `0` 表示不限额，设置/重置各确认一次，重置保留额度。沿用 CLI 采样与失败副作用；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1–4A.4 账号底座、账号 CLI/菜单事务、独立 token 分享组及业务备份恢复已交付；账号/入口筛选、启停/轮换、纯内容与 HTTPS 链接，账号/组/额度/累计 merge/replace 恢复均复用候选事务，轮换与恢复不回退最新累计。4A.2a 凭据不进外部 argv，修复首次 SS 关联生成与迁移入口选择；已有账号须显式设置新增入口授权。CDN/H3 与完整多服务器工作流按独立功能边界验收。 |
 | `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.5 提供私网 API、主控管理、被控接入/手动同步及已有单 Peer 被控每 5 分钟自动同步 CLI/菜单。4C.6 增加同身份/同 WireGuard 地址的 API 端口更新及被控重连；先停用相关调度/控制面防护，保留身份、映射、累计、版本、旧快照及回滚门禁，CLI/client、菜单及隔离 amd64 双 Docker Engine 的 Compose 切换、重连、业务流量、同版幂等和撤销已验，本批完整合同 65/65 叶子通过。校验 Peer 归属、地址与唯一 `/32`，不建接口/密钥/路由；默认关闭，持久邀请限本机 root 私有目录，不进规格/备份/普通日志，停用清除凭据。独立服务和客户端零能力，无公网映射。隔离 amd64 双 Docker Engine 的生产 CLI/Compose、WS/TLS 流量、真实 cron 自主推进、同版幂等、锁竞争、轮换/撤销及健康失败/INT/TERM 恢复已验。正常 down 跳过，异常归属和 WS/SSH 来源防护组合拒绝。多 Peer、网络向导、角色重绑定、迁移、灾备、原生 systemd/双机/arm64、重启和可信发布待补。 |

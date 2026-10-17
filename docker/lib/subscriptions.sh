@@ -366,7 +366,7 @@ dockerSubscriptionPublishAuthority() {
     }
     jq -er '
       . as $request |
-      [.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)] |
+      [.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)] |
       .[0] | if . == null then error("没有订阅发布入口") else
         (if $request.reality_stream != null and
           $request.reality_stream.website_listener_id == .listener_id

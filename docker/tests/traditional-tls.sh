@@ -50,6 +50,9 @@ for protocol in 27 29; do
         del(.httpupgrade))
     ' "${HTTPUPGRADE_SPEC}" >"${spec}"
     dockerConfigureSpecValidate "${spec}" || fail "${protocol}: 有效传统 TLS 合同被拒绝"
+    jq '.subscription.enabled = true' "${spec}" >"${TEST_ROOT}/traditional-tls-subscription.json"
+    dockerConfigureSpecValidate "${TEST_ROOT}/traditional-tls-subscription.json" ||
+        fail "${protocol}: 传统 TLS fallback 订阅合同被拒绝"
     for mutation in \
         '.tls = null' \
         '.core.type = "sing-box" | .core.protocols[0].core = "sing-box"' \
@@ -69,7 +72,6 @@ for protocol in 27 29; do
         '.core.protocols[0].flow = "xtls-rprx-vision"' \
         '.core.protocols[0].trojan = {domain:"ws.example.com"}' \
         '.core.protocols[0].public_port = 10085' \
-        '.subscription.enabled = true' \
         '.host_integrations = [{type:"wireguard",profile:"net-wireguard",firewall_rules:[],
           devices:["wg-padm"],schedules:[],settings:{config_file:"wg-padm.conf",interface:"wg-padm"}}]'; do
         jq "${mutation}" "${spec}" >"${TEST_ROOT}/invalid-traditional-tls.json"

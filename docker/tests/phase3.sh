@@ -2451,7 +2451,7 @@ validateFeatureMatrix() {
       $matrix.feature_matrix["reality-target-management"].status == "supported" and
       $matrix.feature_matrix["reality-parameter-management"].status == "supported" and
       ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] and
-      .feature_matrix.subscription.requires == {protocol_ids: [21, 22, 23, 24, 25], tls: true} and
+      .feature_matrix.subscription.requires == {protocol_ids: [21, 22, 23, 24, 25, 27, 29], tls: true} and
       (.feature_matrix.subscription.profiles | sort) == ["nginx", "subscription"]
     ' "$1" >/dev/null 2>&1
 }

@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行、跳跃、VLESS Encryption 和独立 Nginx 订阅的完整谓词。
+# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行、跳跃、VLESS Encryption 及 TLS fallback 订阅发布的完整谓词。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "993c4d3fee28fe905effe1102f03bf7f5e26db7d5cdf10aa039e7dcedc601c01"
+    "0bbf98fb487f5c16422ffd14963e29004d60e0ceb6603df467fdb723566f0cab"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -123,18 +123,19 @@ for protocol_id in protocol_ids:
     spec["core"]["protocols"] = [entry]
     spec["tls"] = None if protocol_id in (1, 2, 26, 30) else {"domain": domain}
     cases[f"valid-protocol-{protocol_id}"] = spec
-# 发布前置按实际 TLS 终止入口判断，核心端 TLS 和 fallback 页面仍不能独立发布。
+# 发布仅复用受管 TLS 网站入口，其它核心端 TLS 协议仍不独立发布。
 for protocol_id in protocol_ids:
     spec = copy.deepcopy(cases[f"valid-protocol-{protocol_id}"])
     spec["subscription"]["enabled"] = True
-    status = "valid" if protocol_id in (21, 22, 23, 24, 25) else "invalid"
+    status = "valid" if protocol_id in (21, 22, 23, 24, 25, 27, 29) else "invalid"
     cases[f"{status}-subscription-protocol-{protocol_id}"] = spec
 spec = copy.deepcopy(cases["valid-subscription-protocol-23"])
 spec["core"]["type"] = spec["core"]["protocols"][0]["core"] = "sing-box"
 cases["valid-subscription-sing-box"] = spec
-spec = copy.deepcopy(cases["valid-subscription-protocol-22"])
-spec["tls"] = None
-cases["invalid-subscription-missing-tls"] = spec
+for protocol_id in (22, 27, 29):
+    spec = copy.deepcopy(cases[f"valid-subscription-protocol-{protocol_id}"])
+    spec["tls"] = None
+    cases[f"invalid-subscription-missing-tls-{protocol_id}"] = spec
 encryption = {
     "decryption": "mlkem768x25519plus.native.600s." + "A" * 86,
     "encryption": "mlkem768x25519plus.native.0rtt." + "A" * 1579,
