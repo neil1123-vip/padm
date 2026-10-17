@@ -3262,12 +3262,12 @@ dockerRecoveryInputsPrepare() {
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" renewal-inputs --directory "${input}" \
         >"${draft}/renewal-counts.json" &&
         dockerRenewalRegistryValidate "${input}/secrets/renewal" || {
-        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记，或匹配安全 ACME 输入的单域名启用 standalone 登记'
+        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记，或匹配安全 ACME 输入的单域名启用 standalone/webroot 登记'
         return 1
     }
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" acme-inputs --directory "${input}" \
         >"${draft}/acme-counts.json" || {
-        dockerError 'ACME 执行配置仅接受单域名 EC-P256 standalone 的安全重建和对应续期登记'
+        dockerError 'ACME 执行配置仅接受单域名 EC-P256 standalone，或已有 Nginx TLS、HTTP-01 与固定挑战目录的 webroot 安全重建及对应续期登记'
         return 1
     }
     if jq -e '.geo_files > 0' "${draft}/geo-counts.json" >/dev/null; then

@@ -8174,15 +8174,15 @@ dockerRecoveryAcmeValidate() {
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${candidate}/data/acme" || return 1
     # 私密材料只读挂载且不联网；容器内使用可信 OpenSSL，不执行归档配置。
-    docker run --rm --pull=never --network none --read-only \
+    docker run -i --rm --pull=never --network none --read-only \
         --user "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
         --cap-drop ALL --security-opt no-new-privileges \
         --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --volume "${candidate}/data/acme:/acme:ro" \
-        --volume "${candidate}/secrets/tls:/tls:ro" --volume "${helper}:/acme_recovery.py:ro" \
-        --entrypoint python3 "${image}" -B /acme_recovery.py check \
-        --home /acme --domain "${domain}" --tls-directory /tls >/dev/null
+        --volume "${candidate}/secrets/tls:/tls:ro" \
+        --entrypoint python3 "${image}" -B - check \
+        --home /acme --domain "${domain}" --tls-directory /tls <"${helper}" >/dev/null
 }
 
 dockerTlsValidateCandidate() {

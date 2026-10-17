@@ -794,6 +794,18 @@ runDockerWireGuardRecoveryApplyRegression() {
     PADM_DOCKER_RECOVERY_SCOPE=wireguard runDockerRecoveryApplyRegression
 }
 
+runDockerWebrootRecoveryApplyRegression() {
+    PADM_DOCKER_RECOVERY_SCOPE=webroot runDockerRecoveryApplyRegression
+}
+
+runDockerWebrootRecoveryRealRegression() {
+    PADM_ACME_RECOVERY_REAL_SCOPE=webroot runDockerAcmeRecoveryRealRegression
+}
+
+listRegressionDockerWebrootRecoveryChildSelectors() {
+    printf '%s\n' docker-backup docker-recovery-preview docker-webroot-recovery-apply
+}
+
 listRegressionDockerRecoveryChildSelectors() {
     printf '%s\n' docker-recovery-apply docker-recovery-preview docker-backup docker-business regression-dispatcher-contract
 }
@@ -1194,11 +1206,15 @@ registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegres
 registerRegressionFunctionLeaf docker-subscription-publication-real runDockerSubscriptionPublicationRealRegression
 registerRegressionFunctionLeaf docker-subscription-site-real runDockerSubscriptionSiteRealRegression
 registerRegressionFunctionLeaf docker-acme-recovery-real runDockerAcmeRecoveryRealRegression
+registerRegressionFunctionLeaf docker-webroot-recovery-real runDockerWebrootRecoveryRealRegression
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-backup runDockerBackupRegression
 registerRegressionFunctionLeaf docker-recovery-preview runDockerRecoveryPreviewRegression
 registerRegressionFunctionLeaf docker-recovery-apply runDockerRecoveryApplyRegression
 registerRegressionFunctionLeaf docker-wireguard-recovery-apply runDockerWireGuardRecoveryApplyRegression
+registerRegressionFunctionLeaf docker-webroot-recovery-apply runDockerWebrootRecoveryApplyRegression
+registerRegressionParallelSelectorList docker-webroot-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-webroot-recovery-focused-${BASHPID:-$$}" listRegressionDockerWebrootRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-recovery-focused-${BASHPID:-$$}" listRegressionDockerRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-backup-focused runFrameworkParallelRegressionSelectorListWithJobs \

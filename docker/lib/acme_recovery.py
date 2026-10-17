@@ -16,6 +16,8 @@ from urllib.parse import urlsplit
 
 
 TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+WEBROOT = "/var/lib/padm/acme-webroot"
+VALIDATIONS = ("standalone-http01", "webroot-http01")
 MAX_CONFIG = 64 * 1024
 MAX_FILE = 1024 * 1024
 P256_SPKI = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d03010703420004")
@@ -23,8 +25,8 @@ HOOKS = ("Le_PreHook", "Le_PostHook", "Le_RenewHook", "Le_ReloadCmd", "Le_Deploy
 TIMES = ("Le_CertCreateTime", "Le_NextRenewTime", "Le_InstallCertSuccessTime")
 LINKS = ("Le_OrderFinalize", "Le_LinkOrder", "Le_LinkCert")
 OUTPUTS = ("Le_RealCertPath", "Le_RealCACertPath", "Le_RealKeyPath", "Le_RealFullChainPath")
-DOMAIN_REQUIRED = {"Le_Domain", "Le_Alt", "Le_Webroot", "Le_API", "Le_HTTPPort", "Le_Keylength"}
-DOMAIN_FIELDS = DOMAIN_REQUIRED | set(HOOKS + TIMES + LINKS + OUTPUTS) | {
+DOMAIN_REQUIRED = {"Le_Domain", "Le_Alt", "Le_Webroot", "Le_API", "Le_Keylength"}
+DOMAIN_FIELDS = DOMAIN_REQUIRED | {"Le_HTTPPort"} | set(HOOKS + TIMES + LINKS + OUTPUTS) | {
     field + "Str" for field in TIMES
 }
 
@@ -178,7 +180,7 @@ def account_metadata(data, email, account_url, origin):
     return public[0] if public else None
 
 
-def normalize_acme_home(files, domain, email=None):
+def normalize_acme_home(files, domain, email=None, validation=None):
     """返回规范文件和非秘密摘要；路径、权限和清单信任由恢复入口负责。"""
     checked_domain(domain)
     require(isinstance(files, dict) and len(files) <= 20)
@@ -191,9 +193,16 @@ def normalize_acme_home(files, domain, email=None):
     require(account["USER_PATH"] == TRUSTED_PATH and not account.get("CA_BUNDLE"))
     config = assignments(files[domain_path], DOMAIN_FIELDS, DOMAIN_REQUIRED)
     require(config["Le_Domain"] == domain and config["Le_Alt"] == "no"
-            and config["Le_Webroot"] == "no" and config["Le_HTTPPort"] == "8080"
             and config["Le_Keylength"] == "ec-256"
             and all(not config.get(field) for field in HOOKS))
+    if config["Le_Webroot"] == "no":
+        require(config.get("Le_HTTPPort") == "8080")
+        observed_validation = "standalone-http01"
+    else:
+        # 固定客户端仅在 standalone 保存端口，webroot 不接受残留或自定义端口。
+        require(config["Le_Webroot"] == WEBROOT and "Le_HTTPPort" not in config)
+        observed_validation = "webroot-http01"
+    require(validation is None or validation == observed_validation)
     ca, origin = ca_directory(config["Le_API"])
     required = {"account.conf", domain_path, ca + "/account.key", ca + "/account.json",
                 ca + "/ca.conf", directory + "/" + domain + ".key",
@@ -235,7 +244,7 @@ def normalize_acme_home(files, domain, email=None):
     config.update(outputs)
     normalized[domain_path] = encoded({key: config[key] for key in sorted(config)})
     normalized[ca + "/ca.conf"] = encoded(ca_config)
-    return normalized, {"acme_version": "3.1.6", "validation": "standalone-http01",
+    return normalized, {"acme_version": "3.1.6", "validation": observed_validation,
                         "key_type": "EC-P256", "normalized_files": len(normalized),
                         "discarded_files": len(set(files) - required)}
 
@@ -271,9 +280,10 @@ def certificates(openssl, data):
             for block in blocks]
 
 
-def verify_materials(files, domain, tls_key, tls_fullchain, openssl="openssl", email=None):
+def verify_materials(files, domain, tls_key, tls_fullchain, openssl="openssl", email=None,
+                     validation=None):
     """在可信 ops 容器内验证账户及 TLS 绑定；私钥仅通过标准输入传递。"""
-    normalized, _ = normalize_acme_home(files, domain, email)
+    normalized, _ = normalize_acme_home(files, domain, email, validation)
     directory = domain + "_ecc"
     config = assignments(normalized[directory + "/" + domain + ".conf"], DOMAIN_FIELDS)
     ca, origin = ca_directory(config["Le_API"])
@@ -335,6 +345,7 @@ def main():
     check.add_argument("--domain", required=True)
     check.add_argument("--tls-directory", required=True, type=Path)
     check.add_argument("--email")
+    check.add_argument("--validation", choices=VALIDATIONS)
     arguments = parser.parse_args()
     try:
         checked_domain(arguments.domain)
@@ -343,12 +354,13 @@ def main():
         # 上游已完成树、清单和权限校验；此入口只接收受信暂存目录。
         files = {path.relative_to(arguments.home).as_posix(): path.read_bytes()
                  for path in arguments.home.rglob("*") if path.is_file()}
-        _, summary = normalize_acme_home(files, arguments.domain, arguments.email)
+        _, summary = normalize_acme_home(files, arguments.domain, arguments.email,
+                                         arguments.validation)
         summary["materials"] = verify_materials(
             files, arguments.domain,
             (arguments.tls_directory / (arguments.domain + ".key")).read_bytes(),
             (arguments.tls_directory / (arguments.domain + ".crt")).read_bytes(),
-            email=arguments.email)
+            email=arguments.email, validation=arguments.validation)
     except (ValueError, OSError):
         print("ACME 恢复材料检查失败", file=sys.stderr)
         return 1

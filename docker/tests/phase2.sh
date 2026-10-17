@@ -39,7 +39,7 @@ requiredLockVariables=(
     PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256 PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256
     PADM_LOCK_NGINX_VERSION PADM_LOCK_NGINX_PACKAGE_VERSION PADM_LOCK_ACME_SH_VERSION
     PADM_LOCK_ACME_SH_URL PADM_LOCK_ACME_SH_SHA256 PADM_LOCK_PYTHON3_VERSION
-    PADM_LOCK_OPENSSL_VERSION PADM_LOCK_SOCAT_VERSION PADM_LOCK_BASH_VERSION
+    PADM_LOCK_CURL_VERSION PADM_LOCK_OPENSSL_VERSION PADM_LOCK_SOCAT_VERSION PADM_LOCK_BASH_VERSION
     PADM_LOCK_IPROUTE2_VERSION PADM_LOCK_IPTABLES_VERSION PADM_LOCK_NFTABLES_VERSION
     PADM_LOCK_WIREGUARD_TOOLS_VERSION PADM_LOCK_FAIL2BAN_VERSION PADM_LOCK_PATCHES
 )
@@ -88,6 +88,8 @@ grep -Fxq 'load_module /usr/lib/nginx/modules/ngx_stream_module.so;' \
     "${PROJECT_ROOT}/docker/images/nginx/nginx.conf" || fail 'Nginx 未加载 stream 模块'
 grep -Fxq 'include /etc/nginx/stream.d/*.conf;' \
     "${PROJECT_ROOT}/docker/images/nginx/nginx.conf" || fail 'Nginx 缺少独立 stream 配置入口'
+grep -Fq '"curl=${CURL_VERSION}"' "${PROJECT_ROOT}/docker/images/ops/Dockerfile" ||
+    fail 'ops 的 ACME HTTP 客户端未锁定 curl'
 
 if grep -ERni 'fail2ban|wireguard|iptables|nftables|python3|acme[.]sh' \
     "${PROJECT_ROOT}/docker/images/xray" "${PROJECT_ROOT}/docker/images/sing-box" >/dev/null; then
@@ -123,11 +125,13 @@ jq -e '
     .target["sing-box"].args.SING_BOX_AMD64_SHA256 == $singBoxAmd64 and
     .target["sing-box"].args.SING_BOX_ARM64_SHA256 == $singBoxArm64 and
     .target["sing-box"].args.LIBGCC_VERSION == $libgcc and
+    .target.ops.args.CURL_VERSION == $curl and
     all(.target[]; (.tags | length) == 1 and (all(.tags[]; (contains(":latest") | not))))
 ' --arg base "${PADM_LOCK_ALPINE_BASE}" \
     --arg singBoxAmd64 "${PADM_LOCK_SING_BOX_AMD64_SHA256}" \
     --arg singBoxArm64 "${PADM_LOCK_SING_BOX_ARM64_SHA256}" \
     --arg libgcc "${PADM_LOCK_LIBGCC_VERSION}" \
+    --arg curl "${PADM_LOCK_CURL_VERSION}" \
     "${bakeJson}" >/dev/null || fail 'Bake output drifted from the lock contract'
 
 digest=$(printf '1%.0s' {1..64})

@@ -1579,7 +1579,7 @@ Host interfaces, ifindex, aliases, runtime ownership and source challenges are r
 Rollback removes private material only after both containers and the interface are confirmed absent;
 failed probes or residual interfaces preserve evidence for `restore recover`.
 An existing `.tls.http01=true` is preserved with a newly generated empty challenge root
-and dual-stack `80:8088`. This combination rejects ACME accounts and enabled renewal registrations;
+and dual-stack `80:8088`. ACME accounts and renewal accept only the restricted combinations below;
 old challenge files are not restored, and the existing target port-ownership checks still apply.
 Single sing-box dual-stack Hy2/TUIC deployments may restore the saved `port_hopping` spec.
 The restored state is `stopped`; old supervisors, rules and runtime state are not restored.
@@ -1601,17 +1601,19 @@ Renewal recovery accepts `enabled=false` DNS, standalone, webroot or ALPN regist
 credentials, preserving original bytes and `0700/0600 root:root` permissions without installing
 a renewal schedule. Disabled or absent registrations do not take over existing external renewal
 tasks. Non-DNS registrations must not contain credentials.
-ACME recovery accepts only acme.sh `3.1.6`, one domain, EC-P256 account and domain keys,
-and standalone HTTP-01 on `8080`, with a matching schema `2` standalone renewal registration
-and `.tls.http01` disabled. It parses data without executing
+ACME recovery accepts only acme.sh `3.1.6`, one domain and EC-P256 account and domain keys.
+Standalone HTTP-01 on `8080` requires a matching schema `2` registration and `.tls.http01` disabled.
+Managed webroot requires a matching schema `3` registration, `.tls.http01` enabled and an existing
+Nginx TLS listener `21`-`25`/`27`/`29`. Its path is fixed at `/var/lib/padm/acme-webroot`;
+`Le_HTTPPort` and custom paths are rejected. Recovery parses data without executing
 archived shell, rebuilds exactly nine files and discards only known CSR/transient material.
 Unknown configuration, hooks, DNS/SAN/RSA/EAB and custom execution paths are rejected.
 A network-disabled trusted ops container verifies private/public key, ordered certificate
 chain and fixed TLS-output bindings before preserving the account and domain keys.
-Only this verified standalone registration may also use `enabled=true`, with no other domain in
+Only a matching verified standalone or webroot registration may also use `enabled=true`, with no other domain in
 the renewal registry. After candidate installation
 and health checks succeed, applicable schedules are installed in traffic, Geo, then renewal order.
-Enabled DNS, webroot, ALPN and all other ACME combinations remain rejected.
+Enabled DNS, ALPN and all other ACME combinations remain rejected.
 Preview does not install schedules. An empty `data/acme` remains compatible but cannot authorize
 enabled renewal. Focused validation, enabled recovery followed by real renewal against a local
 CA, and the 34-check daily `docker-contracts` integration gate have passed.

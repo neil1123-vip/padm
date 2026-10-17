@@ -2,9 +2,11 @@
 set -euo pipefail
 umask 077
 
+scope=${PADM_ACME_RECOVERY_REAL_SCOPE:-standalone}
+case "${scope}" in standalone|webroot) ;; *) exit 2 ;; esac
 [[ "$#" == 0 ]] || exit 2
 scriptRoot=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-python3 - "${scriptRoot}" <<'PY'
+python3 - "${scriptRoot}" "${scope}" <<'PY'
 import base64
 import hashlib
 import importlib.util
@@ -19,8 +21,10 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 
 scripts = Path(sys.argv[1])
+scope = sys.argv[2]
 root = scripts.parents[1]
 helpers = runpy.run_path(str(scripts / "http-relay-published-real.py"))
 command, stop, wait_ready = (helpers[name] for name in ("command", "stop", "wait_ready"))
@@ -28,13 +32,16 @@ assert os.getuid() == 0 and sys.platform == "linux" and Path("/.dockerenv").is_f
 assert {item["ifname"] for item in json.loads(command(["ip", "-j", "link", "show"]))} == {"lo"}
 assert not Path("/var/run/docker.sock").exists(), "不得使用宿主 Docker Socket"
 inputs = json.loads(Path("/node-images.json").read_text())
-assert set(inputs) == {"ops", "acme", "pebble"}
+assert set(inputs) == ({"ops", "acme", "pebble", "nginx", "xray", "sing-box"}
+                       if scope == "webroot" else {"ops", "acme", "pebble"})
 node = Path(tempfile.mkdtemp(prefix=".tmp-acme-recovery-", dir="/n"))
 docker = ["docker", "--host", f"unix://{node}/docker.sock"]
 daemon = None
+cron = None
 logs = []
 network = "padm-acme-recovery"
 domain, email = "restore.padm.test", "restore@padm.test"
+http_port = 8088 if scope == "webroot" else 8080
 api = "https://pebble:14000/dir"
 client = "padm-acme-recovery-source"
 restored = "padm-acme-recovery-restored"
@@ -78,6 +85,8 @@ def volume(name):
 
 
 def start_client(name, home, tls, ca):
+    webroot = [] if scope == "standalone" else [
+        "--volume", f"{webroot_volume}:/var/lib/padm/acme-webroot"]
     command(docker + [
         "run", "--pull=never", "--detach", "--name", name,
         "--label", "io.padm.test=acme-recovery", "--network", network,
@@ -87,6 +96,7 @@ def start_client(name, home, tls, ca):
         "--env", "CURL_CA_BUNDLE=/ca/pebble.crt",
         "--volume", f"{ca}:/ca:ro", "--volume", f"{home}:/var/lib/padm/acme",
         "--volume", f"{tls}:/var/lib/padm/tls-output",
+        *webroot,
         "--entrypoint", "/bin/sh", inputs["acme"]["image_id"], "-c", "exec tail -f /dev/null"])
     observed = json.loads(command(docker + ["inspect", name]))[0]
     assert not observed["HostConfig"]["PortBindings"]
@@ -115,6 +125,230 @@ def diagnostic(data):
     return text.replace(email, "[已隐藏邮箱]")
 
 
+def webroot_recovery_real():
+    global phase, cron
+    control = runpy.run_path(str(scripts / "control-two-deployment-real.py"))
+    cli, services, traffic = (control[name] for name in ("cli", "services", "traffic"))
+    path = node
+    for relative in ("bin", "home", "tmp", "private", "secrets/tls", "secrets/net/wireguard"):
+        (path / relative).mkdir(parents=True, mode=0o700, exist_ok=True)
+    deployed = path / "deployment"
+    environment = dict(os.environ, DOCKER_HOST=docker[-1], PADM_DOCKER_SKIP_CHOWN="0",
+                       PADM_DOCKER_INSTALL_DIR=str(deployed), PADM_DOCKER_BIN_DIR=str(path / "bin"),
+                       HOME=str(path / "home"), TMPDIR=str(path / "tmp"), PYTHONDONTWRITEBYTECODE="1")
+    command(["crontab", "-"], content=(
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+        f"PADM_DOCKER_BIN_DIR={path}/bin\nHOME={path}/home\nTMPDIR={path}/tmp\n"
+        "PYTHONDONTWRITEBYTECODE=1\nMAILTO=\"\"\n"
+    ).encode())
+    with (path / "cron.log").open("wb") as output:
+        cron = subprocess.Popen(["cron", "-f"], stdout=output, stderr=subprocess.STDOUT)
+    wait_ready(lambda: cron.poll() is None and subprocess.run(
+        ["pgrep", "-x", "cron"], capture_output=True).returncode == 0, 5)
+    # 调度安装仍走生产路径，暂停真实进程以避免自动采集干扰手动恢复和续期断言。
+    cron.send_signal(signal.SIGSTOP)
+    member = {"path": path, "enter": [], "docker": docker, "env": environment}
+    images = {name: inputs[name]["reference"] for name in ("ops", "nginx", "xray", "sing-box")}
+    # 本场景不启动 net；保留唯一的已载入引用，满足发布夹具对五类镜像的精确校验。
+    images["net"] = inputs["acme"]["reference"]
+    identity = control["identity"]
+    spec = {
+        "schema_version": 3,
+        "release": {"version": "3.15.0", "manifest_sha256": "1" * 64,
+                    "signature_identity": "local-test-only-not-release-verified"},
+        "core": {"type": "xray", "secondary_type": None, "protocols": [{
+            "id": 21, "core": "xray", "listener_id": "entry-ws", "server": domain,
+            "public_port": 35466, "address_families": ["ipv4"], "name": "webroot-recovery-ws",
+            "uuid": identity(810), "websocket": {
+                "domain": domain, "path": "recovery-webroot", "backend_port": 31297, "tls_port": 8443},
+        }]},
+        "tls": {"domain": domain, "http01": True},
+        "subscription": {"enabled": False, "token": "0" * 16}, "images": images,
+        "host_integrations": [], "accounts": [{
+            "id": identity(820), "name": "preserved-local", "enabled": True,
+            "uuid": identity(830), "password": "Webroot.-~@+=:Local",
+            "shadowsocks_password": None, "listeners": ["entry-ws"],
+        }],
+    }
+    for suffix in (".crt", ".key"):
+        shutil.copyfile(source_tls / (domain + suffix), path / "secrets/tls" / (domain + suffix))
+    control["save"](path / "spec.json", spec)
+    phase = "webroot-seed"
+    result = subprocess.run(["bash", str(scripts / "control-deployment-node.sh"), str(path)],
+                            env=environment, capture_output=True, timeout=180)
+    logs.append((phase, result.stdout + result.stderr))
+    seed_log = path / "seed-private.log"
+    assert result.returncode == 0, "webroot 初装夹具失败：" + (
+        seed_log.read_text() if seed_log.is_file() else (result.stdout + result.stderr).decode())[-3000:]
+    phase = "webroot-release"
+    release = control["wireguard_recovery_release"]([member], images)
+    environment = member["env"]
+    acme = module("padm_real_webroot_acme", root / "docker/lib/acme_recovery.py")
+    shutil.copytree(source_home, deployed / "data/acme", dirs_exist_ok=True)
+    (deployed / "data/acme/account.conf").write_bytes(acme.encoded({
+        "USER_PATH": acme.TRUSTED_PATH, "CA_BUNDLE": ""}))
+    private_tree(deployed / "data/acme")
+    cli(member, "acme", "schedule", "enable", "--domain", domain, "--email", email, "--webroot")
+    # 客户端信任本地 CA；部署与后续证书仍来自真实签发。
+    shutil.copyfile(source_tls / "root.crt", path / "secrets/tls" / (domain + ".crt"))
+    client_path = path / "client"
+    client_path.mkdir(mode=0o755)
+    client_path.chmod(0o755)
+    (client_path / "ca.crt").touch(mode=0o644)
+    (client_path / "ca.crt").chmod(0o644)
+    phase = "webroot-business-before"
+    traffic(member, images["sing-box"])
+    before = control["state"](member)
+    before_home = deployed / "data/acme"
+    before_key = (before_home / "ca/pebble/dir/account.key").read_bytes()
+    before_ca = acme.assignments((before_home / "ca/pebble/dir/ca.conf").read_bytes(),
+                                 {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"})
+    before_domain_key = (before_home / f"{domain}_ecc/{domain}.key").read_bytes()
+    ledger_path = deployed / "data/traffic/state.json"
+    archive = path / "private/webroot.tar"
+    phase = "webroot-export"
+    cli(member, "backup", "export", str(archive))
+    cli(member, "backup", "verify", str(archive))
+    before_totals = json.loads(ledger_path.read_text())
+    cli(member, "down")
+    deployed.rename(path / "deployment-before-recovery")
+    command(["bash", "-ec", r'''
+source "$1"
+dockerAcquireDeploymentLock
+trap dockerReleaseDeploymentLock EXIT
+dockerInitializeStateRoot
+dockerInstallBundle "$2"
+dockerInstallCli
+''', "--", str(root / "install-docker.sh"), str(root)], env=environment, timeout=60)
+    phase = "webroot-empty-target-restore"
+    helper_stat = (deployed / "bundle/docker/lib/acme_recovery.py").stat()
+    assert helper_stat.st_uid == 0 and stat.S_IMODE(helper_stat.st_mode) == 0o640, \
+        "真实恢复必须覆盖 root 私有安装脚本的非特权容器调用"
+    cli(member, "restore", "apply", str(archive), *release, "--confirm", "PADM-DOCKER-RESTORE")
+    assert control["state"](member) == before, "webroot 恢复改变入口、账号或发布身份"
+    restored_home = deployed / "data/acme"
+    assert (restored_home / "ca/pebble/dir/account.key").read_bytes() == before_key
+    assert acme.assignments((restored_home / "ca/pebble/dir/ca.conf").read_bytes(),
+                            {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"}) == before_ca
+    assert (restored_home / f"{domain}_ecc/{domain}.key").read_bytes() == before_domain_key
+    assert json.loads(ledger_path.read_text()) == dict(
+        before_totals, accounts={key: dict(value, baseline={})
+                                for key, value in before_totals["accounts"].items()})
+    challenge = deployed / "data/acme-webroot"
+    assert challenge.is_dir() and not list(challenge.iterdir()), "恢复后挑战根未清空"
+    phase = "webroot-business-restored"
+    traffic(member, images["sing-box"])
+    before_nginx = services(member, wireguard=False)["nginx"]
+    # 本地 CA 直接访问 Nginx 的容器内 HTTP-01 端口，避免 internal 网桥的宿主端口回流。
+    command(docker + ["network", "connect", "--alias", domain, network, before_nginx["id"]])
+    before_renewal_totals = json.loads(ledger_path.read_text())["accounts"]
+    before_registration = (deployed / "secrets/renewal" / domain / "request.json").read_bytes()
+    certificate = deployed / "secrets/tls" / (domain + ".crt")
+    serial = command(["openssl", "x509", "-in", str(certificate), "-noout", "-serial"])
+    # 只给本地 CA 注入网络和信任；真实续期预检、挑战、证书提交及重载保持生产调用。
+    wrapped_docker = Path(environment["PATH"].split(":")[0]) / "docker"
+    previous_wrapper = wrapped_docker.with_name("docker-release-check")
+    wrapped_docker.rename(previous_wrapper)
+    wrapped_docker.write_text(r'''#!/usr/bin/env python3
+import os, sys
+arguments = sys.argv[1:]
+if arguments and arguments[0] == "run" and any('os.execvpe("/opt/acme/acme.sh"' in item for item in arguments):
+    # 仅让夹具的 NextRenewTime=1 保持到期，不被本地 CA 的未来 ARI 窗口覆盖。
+    arguments[1:1] = ["--network", os.environ["PADM_REAL_ACME_NETWORK"],
+                     "--env", "CURL_CA_BUNDLE=/ca/pebble.crt",
+                     "--env", "SSL_CERT_FILE=/ca/pebble.crt",
+                     "--env", "NO_ARI=1",
+                     "--volume", os.environ["PADM_REAL_ACME_CA"] + ":/ca:ro",
+                     "--volume", os.environ["PADM_REAL_ACME_CA_FILE"]
+                     + ":/etc/ssl/certs/ca-certificates.crt:ro"]
+release_check = os.path.join(os.path.dirname(sys.argv[0]), "docker-release-check")
+os.execv(release_check, [release_check, *arguments])
+''')
+    wrapped_docker.chmod(0o755)
+    environment.update(PADM_REAL_ACME_NETWORK=network, PADM_REAL_ACME_CA=ca_volume,
+                       PADM_REAL_ACME_CA_FILE=str(ca_path / "pebble.crt"))
+    # 先核实际 ops 的 curl 及 nonce 响应头，避免 HTTP 客户端缺陷拖到续期超时。
+    ca_client = docker + [
+        "run", "--rm", "--pull=never", "--network", network, "--read-only",
+        "--user", "10001:10001", "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges", "--env", "CURL_CA_BUNDLE=/ca/pebble.crt",
+        "--volume", f"{ca_volume}:/ca:ro",
+        "--entrypoint", "curl", inputs["ops"]["image_id"],
+        "--fail", "--silent", "--show-error", "--max-time", "3", "--noproxy", "*"]
+    directory = json.loads(command(ca_client + [api], timeout=10))
+    assert directory["newOrder"], "实际 ops 未读取到本地 CA 目录"
+    nonce_headers = command(ca_client + [
+        "--head", "--dump-header", "-", "--output", "/dev/null", directory["newNonce"]], timeout=10)
+    assert re.search(rb"(?im)^Replay-Nonce:\s*\S+", nonce_headers), "实际 ops 未读取到 CA nonce"
+    config = restored_home / f"{domain}_ecc/{domain}.conf"
+    content = config.read_text()
+    assert re.search(r"^Le_NextRenewTime='[0-9]+'$", content, re.M)
+    config.write_text(re.sub(r"^Le_NextRenewTime='[0-9]+'$", "Le_NextRenewTime='1'", content, flags=re.M))
+    polling, failures = threading.Event(), []
+    observed_requests = []
+
+    def probe():
+        while not polling.is_set():
+            try:
+                result = subprocess.run(["curl", "--silent", "--show-error", "--max-time", "2",
+                                         "--noproxy", "*", "--cacert", str(source_tls / "root.crt"),
+                                         "--resolve", f"{domain}:35466:127.0.0.1", "--output", "/dev/null",
+                                         f"https://{domain}:35466/"], capture_output=True, timeout=4)
+                observed_requests.append(result.returncode)
+                if result.returncode:
+                    failures.append(result.stderr.decode(errors="replace"))
+            except subprocess.TimeoutExpired:
+                failures.append("HTTPS 业务观测超时")
+            polling.wait(0.1)
+
+    thread = threading.Thread(target=probe, daemon=True)
+    phase = "webroot-production-renewal-run"
+    thread.start()
+    try:
+        cli(member, "acme", "auto-renew")
+    finally:
+        polling.set()
+        thread.join(timeout=5)
+    assert observed_requests and not failures, "webroot 续期期间 HTTPS 入口中断：" + str(failures)
+    assert services(member, wireguard=False)["nginx"] == before_nginx, "webroot 续期重启了 Nginx"
+    after_serial = command(["openssl", "x509", "-in", str(certificate), "-noout", "-serial"])
+    assert after_serial != serial and after_serial.strip(), "生产续期未更换真实证书"
+    assert control["state"](member) == before
+    actual = json.loads(ledger_path.read_text())["accounts"]
+    assert all(actual[key][field] >= value[field] for key, value in before_renewal_totals.items()
+               for field in ("upload", "download")), "生产续期回退累计流量"
+    assert (deployed / "secrets/renewal" / domain / "request.json").read_bytes() == before_registration
+    assert (restored_home / "ca/pebble/dir/account.key").read_bytes() == before_key
+    assert acme.assignments((restored_home / "ca/pebble/dir/ca.conf").read_bytes(),
+                            {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"}) == before_ca
+    assert (restored_home / f"{domain}_ecc/{domain}.key").read_bytes() == before_domain_key
+    assert not list(challenge.iterdir()), "生产续期结束后遗留挑战"
+    command(["openssl", "verify", "-CAfile", str(source_tls / "root.crt"),
+             "-untrusted", str(restored_home / f"{domain}_ecc/ca.cer"),
+             str(restored_home / f"{domain}_ecc/{domain}.cer")])
+    phase = "webroot-business-renewed"
+    traffic(member, images["sing-box"])
+    actual = json.loads(ledger_path.read_text())["accounts"]
+    assert all(actual[key][field] >= value[field] for key, value in before_totals["accounts"].items()
+               for field in ("upload", "download")), "webroot 恢复或续期回退累计流量"
+    assert not (deployed / "locks/deployment.lock").exists()
+    assert not (deployed / ".restore-pending").exists()
+    assert not list(deployed.glob(".tls.*"))
+    result = subprocess.run(docker + ["logs", server], capture_output=True, timeout=10)
+    assert result.returncode == 0
+    ca_log = result.stdout + result.stderr
+    assert ca_log.count(b"set VALID by completed challenge") >= 2
+    assert ca_log.count(f"http://{domain}:{http_port}/.well-known/acme-challenge/".encode()) >= 6
+    print("docker-acme-webroot-recovery-real=" + json.dumps({
+        "acme_version": "3.1.6", "release_trust": "fixture", "webroot": acme.WEBROOT,
+        "empty_target_restore": True, "production_renewal_run": True,
+        "forced_due": {"Le_NextRenewTime": 1, "NO_ARI": "1"},
+        "serial_changed": True, "nginx_uninterrupted": True, "https_requests": len(observed_requests),
+        "account_domain_key_identity_preserved": True, "traffic_preserved": True,
+        "challenge_cleaned": True, "network": "internal",
+    }), flush=True)
+
+
 signal.signal(signal.SIGTERM, terminate)
 with (node / "daemon.log").open("wb") as daemon_log:
     try:
@@ -122,7 +356,8 @@ with (node / "daemon.log").open("wb") as daemon_log:
             "dockerd", "--host", docker[-1], "--data-root", str(node / "docker"),
             "--exec-root", str(node / "run"), "--pidfile", str(node / "daemon.pid"),
             "--feature", "containerd-snapshotter=true", "--storage-driver", "overlayfs",
-            "--bip", "172.30.0.1/24"], stdout=daemon_log, stderr=daemon_log)
+            "--bip", "172.31.0.1/24" if scope == "webroot" else "172.30.0.1/24"],
+            stdout=daemon_log, stderr=daemon_log)
         wait_ready(lambda: subprocess.run(docker + ["info"], capture_output=True).returncode == 0, 30)
         command(docker + ["load", "--input", "/node-images.tar"], timeout=120)
         for item in inputs.values():
@@ -144,17 +379,22 @@ with (node / "daemon.log").open("wb") as daemon_log:
         phase = "local-ca"
         command(docker + ["network", "create", "--internal", "--label",
                           "io.padm.test=acme-recovery", network])
-        assert json.loads(command(docker + ["network", "inspect", network]))[0]["Internal"]
+        inspected_network = json.loads(command(docker + ["network", "inspect", network]))[0]
+        assert inspected_network["Internal"]
         ca_volume, ca_path = volume("ca")
         source_volume, source_home = volume("source")
         output_volume, source_tls = volume("output")
         _, candidate = volume("candidate")
+        if scope != "standalone":
+            webroot_volume, webroot_path = volume("webroot")
+            os.chown(webroot_path, 10001, 10001)
         for path in (ca_path, source_home, source_tls):
             os.chown(path, 10001, 10001)
         pebble_config = {"pebble": {
             "listenAddress": "0.0.0.0:14000", "managementListenAddress": "0.0.0.0:15000",
             "certificate": "/ca/pebble.crt", "privateKey": "/ca/pebble.key",
-            "httpPort": 8080, "tlsPort": 8443, "externalAccountBindingRequired": False}}
+            "httpPort": http_port, "tlsPort": 8443,
+            "externalAccountBindingRequired": False}}
         (ca_path / "pebble.json").write_text(json.dumps(pebble_config))
         os.chown(ca_path / "pebble.json", 10001, 10001)
         run(docker + [
@@ -185,9 +425,18 @@ with (node / "daemon.log").open("wb") as daemon_log:
             capture_output=True, timeout=5).returncode == 0, 30)
 
         phase = "issue"
+        if scope != "standalone":
+            command(docker + ["exec", "--detach", client, "python3", "-m", "http.server",
+                             str(http_port),
+                             "--directory", "/var/lib/padm/acme-webroot"])
+            wait_ready(lambda: subprocess.run(
+                docker + ["exec", client, "curl", "--fail", "--silent", "--max-time", "2",
+                          f"http://127.0.0.1:{http_port}/"], capture_output=True, timeout=4).returncode == 0, 10)
+        validation = ["--standalone", "--httpport", "8080"] if scope == "standalone" else \
+            ["--webroot", "/var/lib/padm/acme-webroot"]
         run(docker + [
             "exec", client, "/opt/acme/acme.sh", "--home", "/var/lib/padm/acme",
-            "--issue", "--standalone", "--httpport", "8080", "--keylength", "ec-256",
+            "--issue", *validation, "--keylength", "ec-256",
             "-d", domain, "--accountemail", email, "--server", api,
             "--ca-bundle", "/ca/pebble.crt"], timeout=120)
         run(docker + [
@@ -210,6 +459,9 @@ with (node / "daemon.log").open("wb") as daemon_log:
             "exec", client, "openssl", "x509", "-in", f"/var/lib/padm/tls-output/{domain}.crt",
             "-noout", "-serial"])
         command(docker + ["rm", "-f", client])
+        if scope == "webroot":
+            webroot_recovery_real()
+            raise SystemExit(0)
 
         phase = "archive-and-normalize"
         acme = module("padm_real_acme", root / "docker/lib/acme_recovery.py")
@@ -335,7 +587,8 @@ with (node / "daemon.log").open("wb") as daemon_log:
             "account_key_hash_url_preserved": True, "renewal_enabled": True,
             "fixture_ca_bundle_cleared": True, "network": "internal"}), flush=True)
     finally:
-        active_error = sys.exc_info()[0] is not None
+        active_error = sys.exc_info()[0] is not None and not (
+            isinstance(sys.exc_info()[1], SystemExit) and sys.exc_info()[1].code == 0)
         try:
             if daemon is not None:
                 if active_error:
@@ -360,8 +613,20 @@ with (node / "daemon.log").open("wb") as daemon_log:
                 assert not command(docker + ["ps", "-aq"]).strip()
                 assert not command(docker + ["volume", "ls", "-q"]).strip()
         finally:
+            if cron is not None:
+                cron.send_signal(signal.SIGCONT)
+                stop(cron)
             if daemon is not None:
                 stop(daemon)
+            # daemon 退出后回收本节点的命名空间挂载，再删除私有运行目录。
+            mounts = json.loads(command(["findmnt", "--json", "--list", "--output", "TARGET"]))
+            owned_mounts = [Path(row["target"]) for row in mounts["filesystems"]
+                            if Path(row["target"]).is_relative_to(node)]
+            for mounted in sorted(owned_mounts, key=lambda path: len(path.parts), reverse=True):
+                command(["umount", "--lazy", str(mounted)])
+            release_fixture = node.parent / "recovery-release"
+            if scope == "webroot" and release_fixture.exists():
+                shutil.rmtree(release_fixture)
             assert node.parent == Path("/n") and node.name.startswith(".tmp-acme-recovery-")
             shutil.rmtree(node)
 PY

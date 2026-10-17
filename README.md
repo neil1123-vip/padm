@@ -1813,7 +1813,7 @@ WireGuard 要求完整 canonical `identity.json`、`private.key`、`wg-padm.conf
 宿主接口、ifindex、alias、运行归属及来源挑战不随归档恢复；目标重新预检并生成运行归属。
 撤销时仅在容器和接口均确认消失后清理私密材料；探测失败或接口残留时保留现场供 `restore recover` 重试。
 已有 `.tls.http01=true` 可保留，按规格重建空挑战根和双栈 `80:8088`，
-不恢复旧挑战文件、ACME 账户或续期调度；目标的端口归属仍须通过现有预检。
+不恢复旧挑战文件；ACME 账户及续期仅接受下述受限组合，目标端口仍须通过现有预检。
 单 sing-box 双族 Hy2/TUIC 可恢复已保存的 `port_hopping` 规格；恢复后为 `stopped`，
 不恢复旧监督进程、规则或运行态。启用前须在目标主机显式执行 `port-hopping start` 并重新预检。
 Reality 仅恢复 `data/reality-targets/results.tsv`（15/16 列 TSV）及 `blocked.tsv`（4 列 `|` 分隔），
@@ -1826,13 +1826,15 @@ Geo 接受包含 Xray 且 `state.enabled` 为布尔值的固定版本受管库�
 `enabled=false` 仍使用 Geo 数据，但不安装或接管已有 Geo 调度。预览不安装调度。
 续期仅恢复 `enabled=false` 的 DNS、standalone、webroot 或 ALPN 登记及 DNS 凭据，保持原字节和
 `0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记仅接受下述受限组合。
-ACME 数据仅接受 acme.sh `3.1.6` 的单域名、账户及域名 EC-P256、standalone HTTP-01 `8080`，
-且必须有对应 schema `2` 的 standalone 续期登记、不能启用 `.tls.http01`。
+ACME 数据仅接受 acme.sh `3.1.6` 的单域名、账户及域名 EC-P256：
+standalone HTTP-01 `8080` 须匹配 schema `2` 登记且关闭 `.tls.http01`；
+受管 webroot 须匹配 schema `3` 登记、开启 `.tls.http01` 并已有 Nginx TLS 入口 `21–25/27/29`。
+webroot 固定为 `/var/lib/padm/acme-webroot`，不得残留 `Le_HTTPPort` 或自定义路径。
 恢复器不执行归档 shell：严格解析并重建固定 9 个文件，只丢弃已知 CSR/临时材料；
 未知配置、hook、DNS/SAN/RSA/EAB 和自定义执行路径均拒绝。私钥、公钥、证书链及固定 TLS 输出
 先在无网络的可信 ops 容器内验证绑定；账户和域名密钥保留。
-仅该材料匹配且登记只有该域时，可保留 schema `2` standalone 的 `enabled=true`；
-健康成功后按 traffic、Geo、renewal 安装适用调度。启用 DNS/webroot/ALPN 继续拒绝，
+仅对应材料匹配且登记只有该域时，可保留 standalone 或 webroot 的 `enabled=true`；
+健康成功后按 traffic、Geo、renewal 安装适用调度。启用 DNS/ALPN 继续拒绝，
 空 `data/acme` 不能授权启用续期。
 空 `data/acme` 仍兼容。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
 不执行归档 Nginx stream 文件。桥接宿主网站恢复保留域名、上游地址和端口，

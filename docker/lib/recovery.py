@@ -792,7 +792,8 @@ def renewal_request(domain, data):
     require((request["schema_version"] == 1 and re.fullmatch(r"dns_[a-z0-9_]+", provider))
             or (request["schema_version"], provider) in {
                 (2, "standalone"), (3, "webroot"), (4, "alpn")})
-    require(not request["enabled"] or (request["schema_version"], provider) == (2, "standalone"))
+    require(not request["enabled"] or (request["schema_version"], provider) in {
+        (2, "standalone"), (3, "webroot")})
     return provider.startswith("dns_")
 
 
@@ -979,8 +980,7 @@ def acme_inputs(directory, destination=None):
         require(all(metadata[key] == entries["config/spec.json"][key] for key in ("size", "sha256")))
         observed.append((config_fd, "spec.json", signature(spec_info)))
         spec = read_json(encoded)
-        require(isinstance(spec, dict) and isinstance(spec.get("tls"), dict)
-                and spec["tls"].get("http01") is not True)
+        require(isinstance(spec, dict) and isinstance(spec.get("tls"), dict))
         domain = acme.checked_domain(spec["tls"].get("domain"))
         request_fd = stack.enter_context(transaction_directory(renewal_fd, domain))
         observed.append((renewal_fd, domain, signature(os.fstat(request_fd))))
@@ -993,8 +993,20 @@ def acme_inputs(directory, destination=None):
         observed.append((request_fd, "request.json", signature(request_info)))
         renewal_request(domain, encoded)
         request = read_json(encoded)
-        require(request["schema_version"] == 2 and request["provider"] == "standalone")
-        normalized, summary = acme.normalize_acme_home(payload, domain, request["email"])
+        if spec["tls"].get("http01") is True:
+            require(type(spec.get("schema_version")) is int and spec["schema_version"] == 3
+                    and isinstance(spec.get("core"), dict)
+                    and isinstance(spec["core"].get("protocols"), list)
+                    and any(isinstance(entry, dict) and type(entry.get("id")) is int
+                            and entry["id"] in {21, 22, 23, 24, 25, 27, 29}
+                            for entry in spec["core"]["protocols"]))
+            require(request["schema_version"] == 3 and request["provider"] == "webroot")
+            validation = "webroot-http01"
+        else:
+            require(request["schema_version"] == 2 and request["provider"] == "standalone")
+            validation = "standalone-http01"
+        normalized, summary = acme.normalize_acme_home(
+            payload, domain, request["email"], validation=validation)
         stable()
         if destination is not None:
             owner, child = stack.enter_context(absolute_parent(destination, private=True))

@@ -5,7 +5,7 @@ trap 'printf "docker-recovery-apply-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1 PADM_DOCKER_SKIP_CHOWN=0 PADM_DOCKER_LOCK_TIMEOUT=1
 case "${PADM_DOCKER_RECOVERY_SCOPE:-all}" in
-all|wireguard) ;;
+all|wireguard|webroot) ;;
 *) exit 2 ;;
 esac
 if [[ "${1:-}" != --child ]]; then
@@ -750,6 +750,38 @@ cp -a -- "${SOURCE}" "${NO_RENEWAL_SOURCE}"
 rm -rf -- "${NO_RENEWAL_SOURCE}/secrets/renewal"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${NO_RENEWAL_SOURCE}" \
     --output "${TEST_ROOT}/no-renewal.tar" >/dev/null || fail '无续期登记归档导出失败'
+WEBROOT_SOURCE="${TEST_ROOT}/source-webroot-enabled"
+cp -a -- "${RENEWAL_ENABLED_SOURCE}" "${WEBROOT_SOURCE}"
+python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${WEBROOT_SOURCE}" "${DOMAIN}" <<'PY'
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+spec = importlib.util.spec_from_file_location("acme_fixture", sys.argv[1])
+fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+root, domain = Path(sys.argv[2]), sys.argv[3]
+path = root / ("data/acme/" + domain + "_ecc/" + domain + ".conf")
+values = fixture.acme.assignments(path.read_bytes(), fixture.acme.DOMAIN_FIELDS)
+values["Le_Webroot"] = fixture.acme.WEBROOT
+values.pop("Le_HTTPPort")
+path.write_bytes(fixture.acme.encoded(values))
+for relative, fields in (
+    ("config/spec.json", None),
+    ("secrets/renewal/" + domain + "/request.json", {"schema_version": 3, "provider": "webroot"}),
+):
+    path = root / relative
+    value = json.loads(path.read_bytes())
+    if fields is None:
+        value["tls"]["http01"] = True
+    else:
+        value.update(fields)
+    path.write_text(json.dumps(value))
+PY
+dockerGenerateDeployment "${WEBROOT_SOURCE}/config/spec.json" "${WEBROOT_SOURCE}/deployment.json"
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${WEBROOT_SOURCE}" \
+    --output "${TEST_ROOT}/webroot-enabled.tar" >/dev/null || fail '启用 Webroot 续期归档导出失败'
 
 for protocol in hy2 tuic; do
     variant="${TEST_ROOT}/source-hopping-${protocol}"
@@ -1628,12 +1660,22 @@ run_child apply killed 137
 run_child recover ok 0
 assert_empty
 
-# 启用续期最后安装，三项共享 cron 的任务必须全部保留。
+fi
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != wireguard ]]; then
+for renewal_provider in standalone webroot; do
+    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${renewal_provider}" == webroot ]] || continue
+    RENEWAL_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+    RENEWAL_SOURCE="${RENEWAL_ENABLED_SOURCE}"
+    if [[ "${renewal_provider}" == webroot ]]; then
+        RENEWAL_ARCHIVE="${TEST_ROOT}/webroot-enabled.tar"
+        RENEWAL_SOURCE="${WEBROOT_SOURCE}"
+    fi
+# 两种验证方式复用完整调度撤销矩阵，调试入口只执行 Webroot。
 for backend in systemd cron; do
-    prepare_target "renewal-success-${backend}" "${backend}"
-    RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+    prepare_target "${renewal_provider}-renewal-success-${backend}" "${backend}"
+    RECOVERY_ARCHIVE="${RENEWAL_ARCHIVE}"
     run_child apply ok 0
-    assert_deployed "${RENEWAL_ENABLED_SOURCE}"
+    assert_deployed "${RENEWAL_SOURCE}"
     assert_acme_home "${root}/data/acme" "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" 750
     if [[ "${backend}" == systemd ]]; then
         [[ "$(grep -E '^up$|^systemctl:enable --now ' "${MOCK_BACKEND}/events")" == \
@@ -1655,6 +1697,7 @@ for backend in systemd cron; do
         fail '续期成功恢复没有清理登记或锁'
 done
 
+if [[ "${renewal_provider}" == standalone ]]; then
 for input in disabled absent; do
     backend=systemd
     [[ "${input}" != absent ]] || backend=cron
@@ -1678,11 +1721,12 @@ for input in disabled absent; do
         grep -qx '9 2 \* \* \* external # padm-docker TLS 自动续期 root=/elsewhere' \
             "${MOCK_BACKEND}/crontab" || fail "${input}: 恢复改变了外部续期状态或 cron"
 done
+fi
 
 for backend in systemd cron; do
     for mode in renewal-scheduler renewal-killed; do
-        prepare_target "${mode}-${backend}" "${backend}"
-        RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+        prepare_target "${renewal_provider}-${mode}-${backend}" "${backend}"
+        RECOVERY_ARCHIVE="${RENEWAL_ARCHIVE}"
         expected=failure
         [[ "${mode}" != renewal-killed ]] || expected=137
         run_child apply "${mode}" "${expected}"
@@ -1723,21 +1767,24 @@ for backend in systemd cron; do
     done
 done
 for mode in renewal-int renewal-term; do
-    prepare_target "${mode}" systemd
-    RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+    prepare_target "${renewal_provider}-${mode}" systemd
+    RECOVERY_ARCHIVE="${RENEWAL_ARCHIVE}"
     expected=130
     [[ "${mode}" != renewal-term ]] || expected=143
     run_child apply "${mode}" "${expected}"
     [[ -e "${MOCK_BACKEND}/fault" ]] || fail "${mode}: 续期信号故障未命中"
     assert_empty
 done
-prepare_target renewal-health
-RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+prepare_target "${renewal_provider}-renewal-health"
+RECOVERY_ARCHIVE="${RENEWAL_ARCHIVE}"
 run_child apply health failure
 assert_empty
 ! grep -q '^systemctl:enable --now ' "${MOCK_BACKEND}/events" ||
     fail '健康失败后仍安装了恢复调度'
+done
+fi
 
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ]]; then
 for protocol in hy2 tuic; do
     prepare_target "hopping-${protocol}"
     RECOVERY_ARCHIVE="${TEST_ROOT}/hopping-${protocol}.tar"
@@ -1773,6 +1820,7 @@ run_child recover ok 0
 assert_empty
 
 fi
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot ]]; then
 for role in standalone controlled; do
     prepare_target "wireguard-${role}"
     RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-${role}.tar"
@@ -1837,4 +1885,5 @@ for mode in ok wireguard-leftover wireguard-drift wireguard-probe-fail wireguard
     run_child recover ok 0
     assert_empty
 done
+fi
 printf 'docker-recovery-apply-ok: %s cases\n' "${CASES}"

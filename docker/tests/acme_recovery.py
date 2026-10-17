@@ -66,6 +66,15 @@ def config(files, path, **changes):
     files[path] = acme.encoded(values)
 
 
+def webroot(files):
+    files = dict(files)
+    values = acme.assignments(files[CONF], acme.DOMAIN_FIELDS)
+    values["Le_Webroot"] = acme.WEBROOT
+    values.pop("Le_HTTPPort")
+    files[CONF] = acme.encoded(values)
+    return files
+
+
 class NormalizationTests(unittest.TestCase):
     def setUp(self):
         self.files = fixture()
@@ -90,6 +99,54 @@ class NormalizationTests(unittest.TestCase):
             self.assertNotIn(secret, json.dumps(summary))
         self.assertEqual(summary["normalized_files"], 9)
         self.assertEqual(summary["discarded_files"], 0)
+        self.assertEqual(summary["validation"], "standalone-http01")
+
+    def test_expected_validation_must_match_materials(self):
+        normalized, summary = acme.normalize_acme_home(
+            self.files, DOMAIN, EMAIL, validation="standalone-http01")
+        self.assertEqual(summary["validation"], "standalone-http01")
+        self.assertEqual(acme.normalize_acme_home(
+            normalized, DOMAIN, EMAIL, validation="standalone-http01"), (normalized, summary))
+        for validation in ("webroot-http01", "dns", "alpn", "", False):
+            with self.subTest(validation=validation), self.assertRaises(ValueError):
+                acme.normalize_acme_home(self.files, DOMAIN, EMAIL, validation=validation)
+        files = webroot(self.files)
+        normalized, summary = acme.normalize_acme_home(
+            files, DOMAIN, EMAIL, validation="webroot-http01")
+        self.assertEqual(summary["validation"], "webroot-http01")
+        self.assertEqual(acme.normalize_acme_home(
+            normalized, DOMAIN, EMAIL, validation="webroot-http01"), (normalized, summary))
+        with self.assertRaises(ValueError):
+            acme.normalize_acme_home(files, DOMAIN, EMAIL, validation="standalone-http01")
+
+    def test_fixed_webroot_shape_normalizes_without_http_port(self):
+        files = webroot(self.files)
+        normalized, summary = acme.normalize_acme_home(files, DOMAIN, EMAIL)
+        values = acme.assignments(normalized[CONF], acme.DOMAIN_FIELDS)
+        self.assertEqual(values["Le_Webroot"], "/var/lib/padm/acme-webroot")
+        self.assertNotIn("Le_HTTPPort", values)
+        self.assertEqual(values["Le_RealKeyPath"], "/var/lib/padm/tls-output/" + DOMAIN + ".key")
+        self.assertEqual(summary["validation"], "webroot-http01")
+        self.assertEqual(summary["normalized_files"], 9)
+        self.assertEqual(set(normalized), set(self.files))
+        for path in (CA + "/account.key", CA + "/account.json", CA + "/ca.conf",
+                     KEY, LEAF, ROOT, CHAIN):
+            self.assertEqual(normalized[path], files[path])
+
+    def test_webroot_rejects_port_leftovers_other_challenges_and_execution(self):
+        for field, value in (
+            ("Le_HTTPPort", ""), ("Le_HTTPPort", "80"), ("Le_HTTPPort", "8080"),
+            ("Le_Webroot", "/var/www"), ("Le_Webroot", acme.WEBROOT + "/"),
+            ("Le_Webroot", acme.WEBROOT + "/../outside"), ("Le_Webroot", "no"),
+            ("Le_Webroot", "alpn"), ("Le_Webroot", "dns_cf"),
+            ("Le_Domain", "foreign.example.test"), ("Le_Alt", "extra.example.test"),
+            ("Le_Keylength", "ec-384"), ("Le_ReloadCmd", "encoded-command"),
+            ("Le_RealKeyPath", "/tmp/foreign"),
+        ):
+            with self.subTest(field=field, value=value):
+                files = webroot(self.files)
+                config(files, CONF, **{field: value})
+                self.rejected(files)
 
     def test_known_transient_files_are_discarded(self):
         for path in ("http.header", DIRECTORY + "/" + DOMAIN + ".csr",
@@ -298,11 +355,12 @@ class MaterialTests(unittest.TestCase):
             "x509", "-req", "-CA", str(cls.ca_path), "-CAkey", str(cls.ca_key),
             "-set_serial", "42", "-days", days, "-copy_extensions", "copy", data=request)
 
-    def verify(self, files=None, tls_key=None, tls_fullchain=None):
+    def verify(self, files=None, tls_key=None, tls_fullchain=None, validation=None):
         return acme.verify_materials(
             self.files if files is None else files, DOMAIN,
             self.domain_key if tls_key is None else tls_key,
-            self.files[CHAIN] if tls_fullchain is None else tls_fullchain, email=EMAIL)
+            self.files[CHAIN] if tls_fullchain is None else tls_fullchain,
+            email=EMAIL, validation=validation)
 
     def test_real_account_jwk_and_tls_materials(self):
         self.assertEqual(self.verify(),
@@ -312,6 +370,20 @@ class MaterialTests(unittest.TestCase):
         del account["key"]
         files[CA + "/account.json"] = json.dumps(account).encode()
         self.assertEqual(self.verify(files)["certificates"], 2)
+
+    def test_webroot_keeps_real_material_and_expected_validation_binding(self):
+        files = webroot(self.files)
+        self.assertEqual(self.verify(files, validation="webroot-http01"),
+                         {"account_key": "EC-P256", "tls_key": "EC-P256", "certificates": 2})
+        for source, validation in ((self.files, "webroot-http01"),
+                                   (files, "standalone-http01")):
+            with self.subTest(validation=validation), self.assertRaises(ValueError):
+                self.verify(source, validation=validation)
+        with self.assertRaises(ValueError):
+            self.verify(files, tls_key=self.other_key, validation="webroot-http01")
+        config(files, CA + "/ca.conf", CA_EMAIL="other@example.test")
+        with self.assertRaises(ValueError):
+            self.verify(files, validation="webroot-http01")
 
     def test_jwk_must_match_account_key_and_be_a_curve_point(self):
         for coordinates in ("foreign", "zero"):
@@ -481,6 +553,19 @@ class MaterialTests(unittest.TestCase):
                                      timeout=30, check=False)
             self.assertEqual(success.returncode, 0, success.stderr.decode())
             self.assertEqual(json.loads(success.stdout)["materials"]["certificates"], 2)
+            (home / CONF).write_bytes(webroot(self.files)[CONF])
+            success = subprocess.run(command + ["--validation", "webroot-http01"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     timeout=30, check=False)
+            self.assertEqual(success.returncode, 0, success.stderr.decode())
+            self.assertEqual(json.loads(success.stdout)["validation"], "webroot-http01")
+            mismatch = subprocess.run(command + ["--validation", "standalone-http01"],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      timeout=30, check=False)
+            self.assertEqual(mismatch.returncode, 1)
+            self.assertEqual(mismatch.stdout, b"")
+            self.assertNotIn(b"PRIVATE KEY", mismatch.stderr)
+            self.assertNotIn(EMAIL.encode(), mismatch.stderr)
             (home / CONF).write_bytes(self.files[CONF] + b"Le_DNS='private-marker'\n")
             failed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     timeout=30, check=False)

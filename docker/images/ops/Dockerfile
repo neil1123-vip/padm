@@ -8,6 +8,7 @@ ARG ACME_SH_VERSION
 ARG ACME_SH_URL
 ARG ACME_SH_SHA256
 ARG CA_CERTIFICATES_VERSION
+ARG CURL_VERSION
 ARG OPENSSL_VERSION
 ARG PYTHON3_VERSION
 ARG SOCAT_VERSION
@@ -15,6 +16,7 @@ ARG SOCAT_VERSION
 RUN set -eux; \
     apk add --no-cache \
         "ca-certificates=${CA_CERTIFICATES_VERSION}" \
+        "curl=${CURL_VERSION}" \
         "openssl=${OPENSSL_VERSION}" \
         "python3=${PYTHON3_VERSION}" \
         "socat=${SOCAT_VERSION}"; \

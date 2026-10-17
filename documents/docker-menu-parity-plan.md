@@ -8948,6 +8948,36 @@ helper/材料沿首轮已通过的独立叶子结果，证据 `.tmp-regression-d
 证据 `.tmp-regression-docker-d0b69b5fa62b4b3eba0613498a107687/`。
 随后仅明确 Sigstore 提示及夹具文件名，未重复整套菜单或 full；整体目标保持 active。
 
+6A.16、6A.17 与 4C.11 集中日常 `docker-contracts -Jobs 6` `34/34` 通过，
+入口 `304.660` 秒、排队 `348 ms`，证据 `.tmp-regression-docker-56584aa50aa44eeca501563e98a0025b/`。
+不因阶段提交追加 full，已通过且未变的独立叶子不重复执行。
+
+### 6A.18 受管 Webroot ACME 与启用续期恢复
+
+接受同架构 v3 空目标、单非通配符 TLS 域的 EC-P256 账户及域名密钥，
+要求已有 Nginx TLS `21–25/27/29`、`.tls.http01=true` 和匹配 schema `3` webroot 登记。
+pinned acme.sh `3.1.6` 的真实签发及 install-cert 探针确认：
+`Le_Webroot='/var/lib/padm/acme-webroot'`，`Le_HTTPPort` 必须缺失。
+材料存在时，无论登记启用与否都绑定规格、域名、邮箱、CA、证书和验证模式；
+启用时登记目录只能有该域，材料必须完整。
+沿用固定 9 文件安全重建、不执行归档 shell、空挑战根、候选校验及三任务调度恢复事务。
+standalone 原边界保持；DNS/ALPN、hooks、任意路径、RSA/SAN/未知材料和额外启用登记继续拒绝。
+真实安装验收修复可信 helper 的读取权限：已安装控制包保持 `root:root 0640`，
+通过标准输入交给非特权校验容器，不放宽文件权限；standalone 共用该修复。
+真实续期暴露固定 acme.sh 的 wget 分支无法读取 nonce；ops 镜像补入锁定 curl，
+接入 Bake、发布依赖归属和更新夹具，保持固定 ACME 版本及校验摘要。
+helper `96`、材料 `28`、preview `69`、专用 apply `16` 通过，定向入口 `84.124` 秒、
+排队 `219 ms`，证据 `.tmp-regression-docker-5676f8dd707446989ce83597857989db/`。
+专用 apply 复用原矩阵，仅执行本阶段 `16` 项，避免调试重复原 `227` 项；
+旧 all 叶子保留原断言并加入新场景，尚未重跑全集。
+隔离 amd64 的生产安装、真实签发、启用调度、归档、恢复及恢复后真实续期通过，
+入口 `112.282` 秒，续期 `11.245` 秒；证书 serial 改变，`103` 次 HTTPS 观测均成功，
+Nginx 容器及启动时间未变，密钥、登记、账号和累计保持，挑战及事务清理通过。
+证据 `.tmp-regression-docker-70393edfee244e768b282346cd4460f9/`，发布信任为离线夹具。
+已清理本轮 `132.887 MiB` 失败源码包和清单，保留日志及 result；
+公网 CA、原生宿主/arm64、真实 systemd/重启及整体灾备继续待验。
+整体目标保持 active，后续接续主控灾备。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
