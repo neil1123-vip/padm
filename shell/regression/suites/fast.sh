@@ -912,6 +912,10 @@ runDockerWireGuardPeersRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-peers-only
 }
 
+runDockerControlPeersRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --control-peers-only
+}
+
 runDockerWireGuardControlRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-control-only
 }
@@ -933,6 +937,10 @@ runDockerControlCliRegression() {
     bash "${PROJECT_ROOT}/docker/tests/control-cli.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/control-invite.sh" &&
         runDockerControlLogScheduleRegression
+}
+
+runDockerControlMenuRegression() {
+    PADM_DOCKER_MENU_SCOPE=control runDockerMenuRegression
 }
 
 runDockerControlLogScheduleRegression() {
@@ -1290,6 +1298,7 @@ registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression
 registerRegressionFunctionLeaf docker-control-sync runDockerControlSyncRegression
 registerRegressionFunctionLeaf docker-control-state runDockerControlStateRegression
 registerRegressionFunctionLeaf docker-control-cli runDockerControlCliRegression
+registerRegressionFunctionLeaf docker-menu-control runDockerControlMenuRegression
 registerRegressionFunctionLeaf docker-control-log-schedule runDockerControlLogScheduleRegression
 registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegression
 registerRegressionFunctionLeaf docker-control-sync-schedule runDockerControlSyncScheduleRegression
@@ -1303,6 +1312,7 @@ registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntim
 registerRegressionFunctionLeaf docker-wireguard-migration-focused runDockerWireGuardMigrationRegression
 registerRegressionFunctionLeaf docker-wireguard-cli-real runDockerWireGuardCliRealRegression
 registerRegressionFunctionLeaf docker-wireguard-peers-real runDockerWireGuardPeersRealRegression
+registerRegressionFunctionLeaf docker-control-peers-real runDockerControlPeersRealRegression
 registerRegressionFunctionLeaf docker-wireguard-control-real runDockerWireGuardControlRealRegression
 registerRegressionFunctionLeaf docker-wireguard-address-real runDockerWireGuardAddressRealRegression
 registerRegressionFunctionLeaf docker-wireguard-recovery-real runDockerWireGuardRecoveryRealRegression
@@ -1381,6 +1391,13 @@ listRegressionDockerWireGuardChildSelectors() {
 }
 registerRegressionParallelSelectorList docker-wireguard-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-wireguard-focused-${BASHPID:-$$}" listRegressionDockerWireGuardChildSelectors 2
+
+listRegressionDockerControlPeersChildSelectors() {
+    printf '%s\n' docker-control-state docker-control-cli docker-wireguard-migration-focused \
+        docker-menu-control docker-backup
+}
+registerRegressionParallelSelectorList docker-control-peers-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-control-peers-focused-${BASHPID:-$$}" listRegressionDockerControlPeersChildSelectors 2
 
 registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors

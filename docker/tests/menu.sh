@@ -1466,6 +1466,53 @@ runControlDriver() {
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
+    peers|peers-cancel|peers-input-eof|peers-confirm-eof|peers-failed)
+        if [[ "${scenario}" == peers-input-eof ]]; then
+            targetReply 'Docker 控制连接' $'22\n'
+            targetReply '已配置 WireGuard 的 Peer RFC1918 IPv4（0 返回）' $'\004'
+        else
+            if [[ "${scenario}" == peers-cancel ]]; then
+                for controlChoice in 3 4 7 22 23; do
+                    controlPrompt='Peer ID（v2 必填，v1 可留空，0 返回）'
+                    [[ "${controlChoice}" != 22 ]] ||
+                        controlPrompt='已配置 WireGuard 的 Peer RFC1918 IPv4（0 返回）'
+                    [[ "${controlChoice}" != 23 ]] ||
+                        controlPrompt='已撤销授权的 Peer ID（0 返回）'
+                    targetReply 'Docker 控制连接' "${controlChoice}"$'\n'
+                    targetReply "${controlPrompt}" $'0\n'
+                done
+            fi
+            targetReply 'Docker 控制连接' $'20\n'
+            case "${scenario}" in
+            peers-cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
+            peers-confirm-eof) targetReply 'fixture-control-confirm [y/N]' $'\004' ;;
+            *) targetReply 'fixture-control-confirm [y/N]' $'y\n' ;;
+            esac
+            if [[ "${scenario}" == peers || "${scenario}" == peers-failed ]]; then
+                targetReply 'Docker 控制连接' $'21\n'
+                targetReply 'Docker 控制连接' $'22\n'
+                targetReply '已配置 WireGuard 的 Peer RFC1918 IPv4（0 返回）' $'10.77.0.3\n'
+                targetReply 'fixture-control-confirm [y/N]' $'y\n'
+                targetReply 'Docker 控制连接' $'23\n'
+                targetReply '已撤销授权的 Peer ID（0 返回）' $'55555555-5555-4555-8555-555555555555\n'
+                targetReply 'fixture-control-confirm [y/N]' $'y\n'
+                targetReply 'Docker 控制连接' $'3\n'
+                targetReply 'Peer ID（v2 必填，v1 可留空，0 返回）' $'55555555-5555-4555-8555-555555555555\n'
+                targetReply '邀请文件绝对路径（受管目录外，0 返回）' $'/root/padm-invite.json\n'
+                targetReply '授权有效秒数 [86400，0 返回]' $'3600\n'
+                targetReply 'fixture-control-confirm [y/N]' $'y\n'
+                targetReply 'Docker 控制连接' $'4\n'
+                targetReply 'Peer ID（v2 必填，v1 可留空，0 返回）' $'55555555-5555-4555-8555-555555555555\n'
+                targetReply 'fixture-control-confirm [y/N]' $'y\n'
+                targetReply 'Docker 控制连接' $'7\n'
+                targetReply 'Peer ID（v2 必填，v1 可留空，0 返回）' $'55555555-5555-4555-8555-555555555555\n'
+                targetReply 'Docker 控制连接' $'1\n'
+            fi
+        fi
+        targetReply 'Docker 控制连接' $'0\n'
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+        ;;
     endpoint|endpoint-input-cancel|endpoint-input-eof|endpoint-confirm-cancel|endpoint-confirm-eof|endpoint-failed)
         for controlChoice in 16 17 19; do
             controlPrompt='新主控 API 端口（1024–65535，0 返回）'
@@ -1568,6 +1615,7 @@ runControlDriver() {
     diagnostics|diagnostics-failed|log-rotate-cancel|log-rotate-eof|source-menu-eof)
         if [[ "${scenario}" != log-rotate-* ]]; then
             targetReply 'Docker 控制连接' $'7\n'
+            targetReply 'Peer ID（v2 必填，v1 可留空，0 返回）' $'\n'
         fi
         if [[ "${scenario}" == source-menu-eof ]]; then
             targetReply 'Docker 控制连接' $'\004'
@@ -1649,12 +1697,15 @@ runControlDriver() {
         if [[ "${scenario}" == invite* ]]; then
             if [[ "${scenario}" == invite-cancel ]]; then
                 targetReply 'Docker 控制连接' $'3\n'
+                targetReply 'Peer ID（v2 必填，v1 可留空，0 返回）' $'\n'
                 targetReply '邀请文件绝对路径（受管目录外，0 返回）' $'0\n'
                 targetReply 'Docker 控制连接' $'3\n'
+                targetReply 'Peer ID（v2 必填，v1 可留空，0 返回）' $'\n'
                 targetReply '邀请文件绝对路径（受管目录外，0 返回）' $'/root/padm-invite.json\n'
                 targetReply '授权有效秒数 [86400，0 返回]' $'0\n'
             fi
             targetReply 'Docker 控制连接' $'3\n'
+            targetReply 'Peer ID（v2 必填，v1 可留空，0 返回）' $'\n'
             targetReply '邀请文件绝对路径（受管目录外，0 返回）' $'/root/padm-invite.json\n'
             if [[ "${scenario}" == invite ]]; then
                 targetReply '授权有效秒数 [86400，0 返回]' $'3600\n'
@@ -1663,6 +1714,7 @@ runControlDriver() {
             fi
         else
             targetReply 'Docker 控制连接' $'4\n'
+            targetReply 'Peer ID（v2 必填，v1 可留空，0 返回）' $'\n'
         fi
         case "${scenario}" in
         *-cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
@@ -3734,7 +3786,17 @@ control)
         [[ "${CONTROL_SYNC_SCHEDULE_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_SYNC_SCHEDULE_STATUS}"
         recordAction control-sync-schedule-commit "$3"
         ;;
-    init|invite|revoke|join|remap|set-port|reconnect|rebind)
+    init|invite|revoke|join|remap|set-port|reconnect|rebind|upgrade|peers)
+        if [[ "$2" == peers ]]; then
+            case "${3:-}" in
+            list) [[ "$#" -eq 3 ]] || exit 2; printf 'fixture-control-peers\n'; exit 0 ;;
+            add) [[ "$#" -eq 5 && "$4" == --peer-address && "$5" == 10.77.0.3 ]] || exit 2 ;;
+            remove)
+                [[ "$#" -eq 5 && "$4" == --peer-id &&
+                    "$5" == 55555555-5555-4555-8555-555555555555 ]] || exit 2 ;;
+            *) exit 2 ;;
+            esac
+        fi
         if [[ "$2" == set-port ]]; then
             [[ "$#" -eq 4 && "$3" == --port && "$4" == 19443 ]] || exit 2
         elif [[ "$2" == reconnect || "$2" == rebind ]]; then
@@ -4868,7 +4930,8 @@ for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主�
     '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
     '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
     '15. 重映射受管账号入口（同连接）' '16. 更新主控 API 端口' \
-    '17. 被控同身份重连' '19. 更换主控身份（同隧道）' '0. 返回'; do
+    '17. 被控同身份重连' '19. 更换主控身份（同隧道）' '20. 升级多 Peer 主控' \
+    '21. 查看控制 Peer' '22. 登记控制 Peer' '23. 移除控制 Peer' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -4897,6 +4960,45 @@ for controlCase in cancel input-eof confirm-eof failed; do
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed control initialization was not reported'
 done
 unset CONTROL_INIT_STATUS
+for controlCase in peers peers-cancel peers-input-eof peers-confirm-eof peers-failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export CONTROL_INIT_STATUS=0 CONTROL_DIAGNOSTIC_STATUS=0
+    if [[ "${controlCase}" == peers-failed ]]; then
+        CONTROL_INIT_STATUS=17 CONTROL_DIAGNOSTIC_STATUS=17
+    fi
+    runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
+    expectedControl= expectedConfirmations=0
+    case "${controlCase}" in
+    peers|peers-failed)
+        for controlAction in 'upgrade' 'peers list' 'peers add --peer-address 10.77.0.3' \
+            'peers remove --peer-id 55555555-5555-4555-8555-555555555555' \
+            'invite --output /root/padm-invite.json --expires-in 3600 --peer-id 55555555-5555-4555-8555-555555555555' \
+            'revoke --peer-id 55555555-5555-4555-8555-555555555555' \
+            'source-check --peer-id 55555555-5555-4555-8555-555555555555' 'status'; do
+            [[ -z "${expectedControl}" ]] || expectedControl+=$'\n'
+            expectedControl+="control ${controlAction}"
+            case "${controlAction}" in
+            'peers list'|source-check*|status) ;;
+            *)
+                expectedControl+=$'\ncontrol-confirm y'
+                [[ "${controlCase}" != peers ]] || expectedControl+=$'\ncontrol-commit'
+                expectedConfirmations=$((expectedConfirmations + 1))
+                ;;
+            esac
+        done
+        ;;
+    peers-cancel) expectedControl=$'control upgrade\ncontrol-confirm n'; expectedConfirmations=1 ;;
+    peers-confirm-eof) expectedControl=$'control upgrade\ncontrol-confirm eof'; expectedConfirmations=1 ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
+        fail "多 Peer 菜单 ${controlCase} 目标错误、重复执行或取消后提交"
+    [[ "$(grep -Fc 'fixture-control-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${expectedConfirmations}" ]] ||
+        fail "多 Peer 菜单 ${controlCase} 未复用 CLI 单次确认"
+    [[ "${controlCase}" != peers-failed ]] ||
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 6 ]] ||
+        fail '多 Peer 操作失败后未报告并继续菜单'
+done
+unset CONTROL_INIT_STATUS CONTROL_DIAGNOSTIC_STATUS
 for controlCase in endpoint endpoint-input-cancel endpoint-input-eof endpoint-confirm-cancel endpoint-confirm-eof endpoint-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export CONTROL_INIT_STATUS=0

@@ -223,14 +223,24 @@ dockerControlPrivateAddressIsValid() {
 }
 
 dockerControlPeerCheck() {
-    # 归属健康已核对运行快照；这里只读比对配置和在线唯一 Peer 的 /32 地址。
+    # 同时比对完整在线集合；v2 只按指定地址核验，不把第一项当成目标。
     DOCKER_COMPOSE_TIMEOUT=10 dockerComposeRun exec -T net-wireguard bash -euo pipefail -c '
-configured=$(wg-quick strip /etc/wireguard/wg-padm.conf | awk -v address="$1/32" '"'"'
+configured=$(wg-quick strip /etc/wireguard/wg-padm.conf | awk -v address="$1/32" -v multiple="$2" '"'"'
+    function finish() {
+        if (section != "[Peer]") return
+        if (keys != 1 || ranges != 1 || length(key) != 44 ||
+            key !~ /^[A-Za-z0-9+\/]+=$/ || allowed !~ /^[0-9.]+\/32$/ ||
+            seen_keys[key]++ || seen_addresses[allowed]++) invalid=1
+        if (allowed == address) selected++
+        print key "\t" allowed
+    }
     {
         line=$0; sub(/#.*/, "", line)
         gsub(/^[ \t]+|[ \t]+$/, "", line)
         if (line ~ /^\[/) {
+            finish()
             section=line
+            keys=0; ranges=0; key=""; allowed=""
             if (section == "[Peer]") peers++
             next
         }
@@ -244,14 +254,31 @@ configured=$(wg-quick strip /etc/wireguard/wg-padm.conf | awk -v address="$1/32"
         }
     }
     END {
-        if (peers != 1 || keys != 1 || ranges != 1 || allowed != address ||
-            length(key) != 44 || key !~ /^[A-Za-z0-9+\/]+=$/) exit 1
-        print key
+        finish()
+        if (invalid || selected != 1 || (multiple != 1 && peers != 1)) exit 1
     }
 '"'"')
 actual=$(wg show wg-padm allowed-ips)
-[[ "$actual" == "$(printf "%s\t%s" "$configured" "$1/32")" ]]
-' padm-control-peer "$1" >/dev/null 2>&1
+[[ "$(printf "%s\n" "$actual" | LC_ALL=C sort)" == "$(printf "%s\n" "$configured" | LC_ALL=C sort)" ]]
+' padm-control-peer "$1" "${2:-0}" >/dev/null 2>&1
+}
+
+dockerControlPeerSelect() {
+    local spec=$1 selected=${2:-}
+    if [[ -z "${selected}" ]]; then
+        jq -e '.control.schema_version == 1' "${spec}" >/dev/null || {
+            dockerError '多 Peer 主控必须使用 --peer-id 明确指定目标'
+            return "${PADM_DOCKER_RC_USAGE}"
+        }
+        selected=$(jq -er '.control.peer.id' "${spec}") || return "${PADM_DOCKER_RC_STATE}"
+    fi
+    jq -ce --arg id "${selected}" '
+      (if .control.schema_version == 1 then [.control.peer] else .control.peers end) |
+      map(select(.id == $id)) | if length == 1 then .[0] else error("unknown peer") end
+    ' "${spec}" || {
+        dockerError '指定 Peer 不存在'
+        return "${PADM_DOCKER_RC_CONFLICT}"
+    }
 }
 
 dockerControlInit() (
@@ -373,21 +400,26 @@ dockerControlRequireMain() {
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
     dockerControlRecoveryCheck "${recoveryMode}" &&
-        dockerControlStateCheck "${root}" "${3:-}" &&
+        dockerControlStateCheck "${root}" "${3:-}" "${5:-}" &&
         dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" ||
         return "${PADM_DOCKER_RC_STATE}"
 }
 
 dockerControlInviteRuntimeCheck() {
-    local spec=$1 image address peerAddress
+    local spec=$1 image address peerAddress multiple=0 peers
     address=$(jq -er '.control.listen.address' "${spec}") &&
-        peerAddress=$(jq -er '.control.peer.address' "${spec}") &&
         dockerControlPrivateAddressIsValid "${address}" &&
-        dockerControlPrivateAddressIsValid "${peerAddress}" &&
         dockerCurrentOwnsHostIntegration wireguard &&
         DOCKER_COMPOSE_TIMEOUT=10 dockerComposeRun exec -T net-wireguard \
-            /usr/local/bin/padm-entrypoint wireguard-health wg-padm >/dev/null 2>&1 &&
-        dockerControlPeerCheck "${peerAddress}" || return "${PADM_DOCKER_RC_HOST}"
+            /usr/local/bin/padm-entrypoint wireguard-health wg-padm >/dev/null 2>&1 ||
+        return "${PADM_DOCKER_RC_HOST}"
+    jq -e '.control.schema_version == 2' "${spec}" >/dev/null && multiple=1
+    peers=$(jq -er 'if .control.schema_version == 1 then .control.peer.address
+        else .control.peers[].address end' "${spec}") || return "${PADM_DOCKER_RC_STATE}"
+    while IFS= read -r peerAddress; do
+        dockerControlPrivateAddressIsValid "${peerAddress}" &&
+            dockerControlPeerCheck "${peerAddress}" "${multiple}" || return "${PADM_DOCKER_RC_HOST}"
+    done <<<"${peers}"
     image=$(dockerAccountImage ops) || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityProbeRun 10 --user 10001:10001 --network host \
         --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
@@ -465,6 +497,113 @@ dockerControlSetPort() (
     printf '主控 API 端口已更新；请重新签发邀请，在被控端执行 reconnect，并重新 source-check。\n'
 )
 
+dockerControlPeersCommand() (
+    local action=${1:-list} yes=0 peerAddress= peerId= answer root spec draft= selected image value attempt parent metadata
+    [[ "$#" == 0 ]] || shift
+    case "${action}" in list|upgrade|add|remove) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    while [[ "$#" -gt 0 ]]; do
+        case "${action}:$1" in
+        add:--peer-address)
+            [[ -z "${peerAddress}" && "$#" -ge 2 ]] && dockerControlPrivateAddressIsValid "$2" ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            peerAddress=$2; shift 2 ;;
+        remove:--peer-id)
+            [[ -z "${peerId}" && "$#" -ge 2 ]] && dockerAccountIdIsValid "$2" ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            peerId=$2; shift 2 ;;
+        upgrade:--yes|add:--yes|remove:--yes)
+            [[ "${yes}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            yes=1; shift ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+    done
+    [[ "${action}" != add || -n "${peerAddress}" ]] &&
+        [[ "${action}" != remove || -n "${peerId}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "${action}" != list && "${yes}" != 1 ]]; then
+        [[ -t 0 && -t 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead answer "确认主控 Peer ${action}${peerId:+ ${peerId}}${peerAddress:+ ${peerAddress}}？[y/N]: " n ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    fi
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    for parent in "${root}" "${root}/config"; do
+        dockerTrafficSafePath "${root}" "${parent}" && [[ -d "${parent}" ]] &&
+            metadata=$(stat -c '%u:%a' "${parent}") &&
+            [[ "${metadata%%:*}" == 0 ]] && (( (8#${metadata#*:} & 022) == 0 )) ||
+            return "${PADM_DOCKER_RC_STATE}"
+    done
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'dockerConfigurationInterrupted; [[ -z "${draft}" ]] || dockerRemoveManagedTree "${root}" "${draft}" || true; dockerReleaseDeploymentLock' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    spec=$(dockerAccountSpecFile) || return $?
+    dockerControlRequireMain "${spec}" "${root}" || return $?
+    if [[ "${action}" == list ]]; then
+        jq '{schema_version:.control.schema_version,node_id:.control.node_id,
+          peers:((if .control.schema_version == 1 then [.control.peer] else .control.peers end) |
+            map({id,address,enabled,expires_at}))}' "${spec}"
+        return $?
+    fi
+    if [[ "${action}" == upgrade ]]; then
+        if jq -e '.control.schema_version == 2' "${spec}" >/dev/null; then
+            printf '主控已使用多 Peer 规格，无需重复升级。\n'
+            return 0
+        fi
+        jq -e 'all(.host_integrations[]; .type != "fail2ban-control")' "${spec}" >/dev/null || {
+            dockerError '升级多 Peer 前请先停用控制面 Fail2ban'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
+    else
+        jq -e '.control.schema_version == 2' "${spec}" >/dev/null || {
+            dockerError 'Peer 集合管理需要先执行 control upgrade'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
+    fi
+    dockerControlInviteRuntimeCheck "${spec}" || return $?
+    if [[ "${action}" == add ]]; then
+        jq -e --arg address "${peerAddress}" '
+          .control.listen.address != $address and all(.control.peers[]; .address != $address)
+        ' "${spec}" >/dev/null && dockerControlPeerCheck "${peerAddress}" 1 || {
+            dockerError '新 Peer 必须对应现有受管 WireGuard 的唯一 /32 地址，且尚未登记'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
+        for attempt in {1..32}; do
+            value=$(dockerAccountRandomUuid "${spec}" "$(jq -r '.control.node_id' "${spec}")") ||
+                return "${PADM_DOCKER_RC_STATE}"
+            jq -e --arg id "${value}" 'all(.control.peers[]; .id != $id)' "${spec}" >/dev/null || continue
+            peerId=${value}; break
+        done
+        [[ -n "${peerId}" ]] || return "${PADM_DOCKER_RC_STATE}"
+        image=$(dockerAccountImage ops) || return "${PADM_DOCKER_RC_STATE}"
+        value=$(set -o pipefail; dockerSetupRandomHex "${image}" 32 | tr -d '\r\n' | sha256sum) ||
+            return "${PADM_DOCKER_RC_STATE}"
+        value=${value%% *}
+        jq -e --arg hash "${value}" 'all(.control.peers[]; .token_sha256 != $hash)' "${spec}" >/dev/null ||
+            return "${PADM_DOCKER_RC_STATE}"
+    elif [[ "${action}" == remove ]]; then
+        selected=$(dockerControlPeerSelect "${spec}" "${peerId}") || return $?
+        jq -e '.enabled == false and .expires_at == 1' <<<"${selected}" >/dev/null &&
+            jq -e '.control.peers | length > 1' "${spec}" >/dev/null || {
+            dockerError '移除前须先 revoke 指定 Peer，且不能移除最后一项'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
+    fi
+    draft=$(mktemp -d "${root}/.control-peers.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+    chmod 0700 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    (umask 077; jq --arg action "${action}" --arg id "${peerId}" --arg address "${peerAddress}" \
+        --arg hash "${value:-}" '
+      if $action == "upgrade" then
+        .control |= (.peers = [.peer] | del(.peer) | .schema_version = 2)
+      elif $action == "add" then
+        .control.peers += [{id:$id,address:$address,enabled:false,expires_at:1,token_sha256:$hash}]
+      else .control.peers |= map(select(.id != $id)) end
+    ' "${spec}" >"${draft}/spec.json") || return "${PADM_DOCKER_RC_STATE}"
+    DOCKER_CONTROL_TRANSACTION=1
+    dockerAccountApplyDraft "${draft}/spec.json" || return $?
+    printf '主控 Peer %s 已提交%s。\n' "${action}" "${peerId:+，Peer ID: ${peerId}}"
+)
+
 dockerControlRandomToken() {
     local image=$1
     dockerRealityProbeRun 10 --log-driver none --network none \
@@ -501,7 +640,7 @@ dockerControlInviteOutputCheck() {
 
 dockerControlInvite() (
     local output= expiresIn=86400 seenExpires=0 yes=0 answer root spec draft= temporary= published=0
-    local image tokenHash expiresAt metadata mode parent
+    local image tokenHash expiresAt metadata mode parent peerId= selected
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --output)
@@ -514,6 +653,10 @@ dockerControlInvite() (
                 return "${PADM_DOCKER_RC_USAGE}"
             expiresIn=$2; seenExpires=1; shift 2
             ;;
+        --peer-id)
+            [[ -z "${peerId}" && "$#" -ge 2 ]] && dockerAccountIdIsValid "$2" ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            peerId=$2; shift 2 ;;
         --yes) [[ "${yes}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"; yes=1; shift ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
@@ -548,6 +691,8 @@ dockerControlInvite() (
     spec=$(dockerAccountSpecFile) || return $?
     dockerControlRequireMain "${spec}" "${root}" &&
         dockerControlInviteRuntimeCheck "${spec}" || return $?
+    selected=$(dockerControlPeerSelect "${spec}" "${peerId}") || return $?
+    peerId=$(jq -er '.id' <<<"${selected}") || return "${PADM_DOCKER_RC_STATE}"
     draft=$(mktemp -d "${root}/.control-invite.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
     chmod 0700 "${draft}" && cp -- "${spec}" "${draft}/spec.json" &&
         chmod 0600 "${draft}/spec.json" || return "${PADM_DOCKER_RC_STATE}"
@@ -562,13 +707,13 @@ dockerControlInvite() (
     expiresAt=$((expiresAt + expiresIn))
     # 原文只经标准输入写入私有邀请，不展开到 jq 参数、环境或在线规格。
     (set -o pipefail; dockerControlRandomToken "${image}" | jq -Rs --slurpfile spec "${draft}/spec.json" \
-        --argjson expiresAt "${expiresAt}" '
+        --argjson expiresAt "${expiresAt}" --argjson peer "${selected}" '
       rtrimstr("\n") |
       if length == 48 and test("^[a-f0-9]{48}$") then {
         format: "padm-docker-control-invite", schema_version: 1,
-        controller_id: $spec[0].control.node_id, node_id: $spec[0].control.peer.id,
+        controller_id: $spec[0].control.node_id, node_id: $peer.id,
         listen: $spec[0].control.listen,
-        peer_address: $spec[0].control.peer.address, token: ., expires_at: $expiresAt
+        peer_address: $peer.address, token: ., expires_at: $expiresAt
       } else error("invalid invitation token") end
     ' >"${temporary}") || return "${PADM_DOCKER_RC_STATE}"
     tokenHash=$(set -o pipefail; jq -ejr '.token' "${temporary}" | sha256sum) ||
@@ -588,8 +733,11 @@ dockerControlInvite() (
         dockerError '邀请交付后主控身份、授权或网络状态已改变，拒绝启用'
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    (umask 077; jq --arg tokenHash "${tokenHash}" --argjson expiresAt "${expiresAt}" '
-      .control.peer |= . + {token_sha256: $tokenHash, enabled: true, expires_at: $expiresAt}
+    (umask 077; jq --arg id "${peerId}" --arg tokenHash "${tokenHash}" --argjson expiresAt "${expiresAt}" '
+      def authorize: if .id == $id then . + {token_sha256:$tokenHash,enabled:true,expires_at:$expiresAt}
+        else . end;
+      if .control.schema_version == 1 then .control.peer |= authorize
+      else .control.peers |= map(authorize) end
     ' "${spec}" >"${draft}/next.json") || return "${PADM_DOCKER_RC_STATE}"
     DOCKER_CONTROL_TRANSACTION=1
     dockerAccountApplyDraft "${draft}/next.json" || return $?
@@ -597,9 +745,17 @@ dockerControlInvite() (
 )
 
 dockerControlRevoke() (
-    local yes=0 answer root spec draft=
-    if [[ "$#" == 1 && "$1" == --yes ]]; then yes=1; shift; fi
-    [[ "$#" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    local yes=0 answer root spec draft= peerId= selected
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+        --yes) [[ "${yes}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"; yes=1; shift ;;
+        --peer-id)
+            [[ -z "${peerId}" && "$#" -ge 2 ]] && dockerAccountIdIsValid "$2" ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            peerId=$2; shift 2 ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+    done
     [[ "${yes}" == 1 || ( -t 0 && -t 1 ) ]] || {
         dockerError '撤销主控授权需要 --yes 确认'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -611,22 +767,29 @@ dockerControlRevoke() (
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     # 撤销仅依赖已验证状态；WireGuard 故障不能阻止禁用授权。
-    dockerControlStateCheck "${root}" revoke || return "${PADM_DOCKER_RC_STATE}"
+    dockerControlStateCheck "${root}" revoke "${peerId}" || return "${PADM_DOCKER_RC_STATE}"
     trap '[[ -z "${draft}" ]] || dockerRemoveManagedTree "${root}" "${draft}" || true; dockerReleaseDeploymentLock' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
     spec=$(dockerAccountSpecFile) || return $?
-    dockerControlRequireMain "${spec}" "${root}" revoke || return $?
-    if jq -e '.control.peer.enabled == false and .control.peer.expires_at == 1' "${spec}" >/dev/null; then
+    dockerControlRequireMain "${spec}" "${root}" revoke '' "${peerId}" || return $?
+    selected=$(dockerControlPeerSelect "${spec}" "${peerId}") || return $?
+    peerId=$(jq -er '.id' <<<"${selected}") || return "${PADM_DOCKER_RC_STATE}"
+    if jq -e '.enabled == false and .expires_at == 1' <<<"${selected}" >/dev/null; then
         printf 'Peer 授权已撤销，无需重复部署。\n'
         return 0
     fi
     draft=$(mktemp -d "${root}/.control-revoke.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
     chmod 0700 "${draft}" &&
-        (umask 077; jq '.control.peer |= . + {enabled: false, expires_at: 1}' \
+        (umask 077; jq --arg id "${peerId}" '
+            def revoke: if .id == $id then . + {enabled:false,expires_at:1} else . end;
+            if .control.schema_version == 1 then .control.peer |= revoke
+            else .control.peers |= map(revoke) end' \
             "${spec}" >"${draft}/spec.json" &&
-            jq '.peer |= . + {enabled: false, expires_at: 1}' \
+            jq --arg id "${peerId}" '
+              def revoke: if .id == $id then . + {enabled:false,expires_at:1} else . end;
+              if .schema_version == 1 then .peer |= revoke else .peers |= map(revoke) end' \
                 "${root}/config/control/state.json" >"${draft}/state.json") &&
         chmod 0600 "${draft}/spec.json" &&
         chmod 0640 "${draft}/state.json" &&
@@ -806,14 +969,17 @@ dockerControlSourceWitnessLocked() {
     local witnessOwner=${BASHPID:-$$}
     (
     local root spec challenge receipt temporary= registration= snapshot current nonce image expires cursor result started
+    local selected peerAddress peerId=${2:-}
     local registrationHash= since until directory mode completion=${1:-}
-    [[ "$#" -le 1 ]] && { [[ -z "${completion}" ]] || declare -F "${completion}" >/dev/null; } ||
+    [[ "$#" -le 2 ]] && { [[ -z "${completion}" ]] || declare -F "${completion}" >/dev/null; } ||
         return "${PADM_DOCKER_RC_USAGE}"
     [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
         "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${witnessOwner}" ]] ||
         return "${PADM_DOCKER_RC_LOCK}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     spec="${root}/config/spec.json"
+    selected=$(dockerControlPeerSelect "${spec}" "${peerId}") || return $?
+    peerAddress=$(jq -er '.address' <<<"${selected}") || return "${PADM_DOCKER_RC_STATE}"
     challenge="${root}/data/control-source/challenge.json"
     receipt="${root}/logs/control/source.receipt"
     dockerTrafficSafePath "${root}" "${challenge}" &&
@@ -861,9 +1027,9 @@ dockerControlSourceWitnessLocked() {
     since=$(date -u -d "@${expires}" '+%Y-%m-%dT%H:%M:%S.000Z') || return "${PADM_DOCKER_RC_STATE}"
     expires=$((expires + 30))
     until=$(date -u -d "@${expires}" '+%Y-%m-%dT%H:%M:%S.000Z') || return "${PADM_DOCKER_RC_STATE}"
-    (umask 027; jq --arg nonce "${nonce}" --argjson expires "${expires}" '
+    (umask 027; jq --arg nonce "${nonce}" --argjson expires "${expires}" --arg source "${peerAddress}" '
       {schema_version:1,nonce:$nonce,expires_at:$expires,
-       expected_source:.control.peer.address,target:.control.listen.address,port:.control.listen.port}
+       expected_source:$source,target:.control.listen.address,port:.control.listen.port}
     ' "${spec}" >"${temporary}/challenge.json") &&
         chmod 0640 "${temporary}/challenge.json" &&
         chown 0:10001 "${temporary}/challenge.json" &&
@@ -891,7 +1057,7 @@ dockerControlSourceWitnessLocked() {
             "$(sha256sum "${challenge}")" == "${registrationHash}" &&
             "$(date +%s)" -lt "${expires}" ]] || return "${PADM_DOCKER_RC_STATE}"
         result=$(dockerControlSourceReceipt "${receipt}" "${cursor}" "${nonce}" \
-            "$(jq -r .control.peer.address "${spec}")" "$(jq -r .control.listen.address "${spec}")" \
+            "${peerAddress}" "$(jq -r .control.listen.address "${spec}")" \
             "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}") ||
             return "${PADM_DOCKER_RC_STATE}"
         if [[ "${result}" == verified ]]; then
@@ -900,7 +1066,7 @@ dockerControlSourceWitnessLocked() {
                     "$(stat -c '%d:%i:%a:%u:%g:%h' "${challenge}")" == "${registration}" &&
                     "$(sha256sum "${challenge}")" == "${registrationHash}" &&
                     "$(dockerControlSourceReceipt "${receipt}" "${cursor}" "${nonce}" \
-                      "$(jq -r .control.peer.address "${spec}")" "$(jq -r .control.listen.address "${spec}")" \
+                      "${peerAddress}" "$(jq -r .control.listen.address "${spec}")" \
                       "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}")" == verified ]] ||
                 return "${PADM_DOCKER_RC_STATE}"
             printf 'source-verified=%s\n' "$(jq -c '{source:.expected_source,target,port}' "${challenge}")" ||
@@ -926,18 +1092,21 @@ dockerControlSourceWitnessRecheck() {
             "$(sha256sum "${challenge}")" == "${registrationHash}" ]] &&
         current=$(dockerControlSourceSnapshot) && [[ "${current}" == "${snapshot}" ]] &&
         [[ "$(dockerControlSourceReceipt "${receipt}" "${cursor}" "${nonce}" \
-          "$(jq -r .control.peer.address "${spec}")" "$(jq -r .control.listen.address "${spec}")" \
+          "${peerAddress}" "$(jq -r .control.listen.address "${spec}")" \
           "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}")" == verified &&
             "$(date +%s)" -lt "${expires}" ]] && ((SECONDS - started < 30))
 }
 
 dockerControlSourceCheck() (
-    local status
+    local status peerId=
+    if [[ "$#" == 2 && "$1" == --peer-id ]] && dockerAccountIdIsValid "$2"; then
+        peerId=$2; shift 2
+    fi
     [[ "$#" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
     trap 'status=$?; dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
-    dockerControlSourceWitnessLocked
+    dockerControlSourceWitnessLocked '' "${peerId}"
 )
 
 dockerControlSourceProbe() (
@@ -1442,7 +1611,11 @@ dockerControlStatus() (
     controlled) dockerControlSyncSpecValidate "${spec}" || return "${PADM_DOCKER_RC_STATE}" ;;
     esac
     result=$(jq -c --arg role "${role}" --argjson healthy "${healthy}" '
-      if $role == "main" then {
+      if $role == "main" and .control.schema_version == 2 then {
+        role:$role,node_id:.control.node_id,controller_id:null,listen:.control.listen,
+        revision:.control.revision,healthy:$healthy,
+        peers:(.control.peers | map({id,address,enabled,expires_at}))
+      } elif $role == "main" then {
         role: $role, node_id: .control.node_id, controller_id: null,
         listen: .control.listen, peer_address: .control.peer.address,
         revision: .control.revision, healthy: $healthy,
@@ -1488,11 +1661,23 @@ dockerWireGuardMigrate() (
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
     if [[ -n "${peerAction}" ]]; then
-        [[ "${rotate}" == 0 ]] &&
-            jq -e '.control == null and .control_sync == null' "${spec}" >/dev/null || {
-            dockerError 'Peer 集合变更仅支持无主控、被控角色的部署，并保持本机密钥不变'
+        [[ "${rotate}" == 0 ]] && jq -e '
+          .control_sync == null and (.control == null or .control.schema_version == 2)
+        ' "${spec}" >/dev/null || {
+            dockerError 'Peer 集合变更仅支持无控制角色或 v2 主控，并保持本机密钥不变'
             return "${PADM_DOCKER_RC_CONFLICT}"
         }
+        if [[ "${peerAction}" != add ]] && jq -e '.control.schema_version == 2' "${spec}" >/dev/null; then
+            local argument previousArgument= target=
+            for argument in "$@"; do
+                [[ "${previousArgument}" != --peer-address ]] || target=${argument}
+                previousArgument=${argument}
+            done
+            jq -e --arg address "${target}" 'all(.control.peers[]; .address != $address)' "${spec}" >/dev/null || {
+                dockerError 'v2 已登记控制 Peer 的 WireGuard 项不支持更新或移除；请先撤销并移除控制登记'
+                return "${PADM_DOCKER_RC_CONFLICT}"
+            }
+        fi
         public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers --directory "${directory}") ||
             return "${PADM_DOCKER_RC_STATE}"
         if [[ "${peerAction}" == remove ]] && [[ "$(jq '.peers | length' <<<"${public}")" == 1 ]]; then
@@ -1500,6 +1685,10 @@ dockerWireGuardMigrate() (
             return "${PADM_DOCKER_RC_CONFLICT}"
         fi
     else
+        jq -e '.control.schema_version == 2' "${spec}" >/dev/null && {
+            dockerError 'v2 主控暂不支持 WireGuard 本机或关联地址迁移'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
         python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses --directory "${directory}" \
             >/dev/null || {
             dockerError '普通迁移仅支持单 Peer；多 Peer 请按地址使用 peers update 或 remove'
@@ -1531,7 +1720,7 @@ dockerWireGuardMigrate() (
     fi
     python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate --directory "${directory}" \
         --destination "${draft}/wireguard" "$@" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
-    if jq -e 'has("control") or has("control_sync")' "${spec}" >/dev/null; then
+    if [[ -z "${peerAction}" ]] && jq -e 'has("control") or has("control_sync")' "${spec}" >/dev/null; then
         previousAddresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses \
             --directory "${directory}") &&
             addresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses \
@@ -1751,6 +1940,8 @@ dockerControlCommand() {
         dockerControlStatus "${json}"
         ;;
     init) dockerControlInit "$@" ;;
+    upgrade) dockerControlPeersCommand upgrade "$@" ;;
+    peers) dockerControlPeersCommand "$@" ;;
     invite) dockerControlInvite "$@" ;;
     revoke) dockerControlRevoke "$@" ;;
     join) dockerControlJoin "$@" ;;

@@ -13,6 +13,7 @@
   "x-padm-control-sync-rollback": true,
   "x-padm-control-client": true,
   "x-padm-control-state": true,
+  "x-padm-control-peers": true,
   "x-padm-control-fail2ban": true,
   "x-padm-ssh-fail2ban": true,
   "x-padm-tproxy-ipv6": true,
@@ -169,9 +170,13 @@
     "control": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "role", "node_id", "listen", "peer", "revision", "last_digest"],
+      "required": ["schema_version", "role", "node_id", "listen", "revision", "last_digest"],
+      "oneOf": [
+        {"properties": {"schema_version": {"const": 1}}, "required": ["peer"], "not": {"required": ["peers"]}},
+        {"properties": {"schema_version": {"const": 2}}, "required": ["peers"], "not": {"required": ["peer"]}}
+      ],
       "properties": {
-        "schema_version": {"const": 1},
+        "schema_version": {"enum": [1, 2]},
         "role": {"const": "main"},
         "node_id": {"$ref": "#/$defs/uuid"},
         "listen": {
@@ -195,6 +200,12 @@
             "expires_at": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
             "token_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
           }
+        },
+        "peers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/properties/control/properties/peer"}
         },
         "revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "last_digest": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
@@ -983,6 +994,7 @@
         "required": ["control"],
         "properties": {
           "schema_version": {"const": 3},
+          "control": {"properties": {"schema_version": {"const": 1}}},
           "host_integrations": {
             "contains": {
               "properties": {"type": {"const": "wireguard"}},

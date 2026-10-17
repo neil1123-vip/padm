@@ -18,7 +18,9 @@ def desired_accounts(spec):
 
 def state_from_spec(spec):
     control = spec["control"]
-    exact_keys(control, "schema_version role node_id listen peer revision last_digest")
+    version = control.get("schema_version") if isinstance(control, dict) else None
+    peer_field = "peer" if version == 1 else "peers"
+    exact_keys(control, f"schema_version role node_id listen {peer_field} revision last_digest")
     state = {key: copy.deepcopy(value) for key, value in control.items() if key != "last_digest"}
     state["accounts"] = desired_accounts(spec)
     validate_state(state)

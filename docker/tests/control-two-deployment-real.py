@@ -206,12 +206,13 @@ def services(node, *, wireguard=True):
     return result
 
 
-def source_check(controller, controlled, addresses=ADDRESS):
+def source_check(controller, controlled, addresses=ADDRESS, peer_id=None):
     proof_output = controller["path"] / "source-proof.log"
     with proof_output.open("wb") as output:
         proof = subprocess.Popen(
             controller["enter"] + ["bash", str(controller["path"] / "bin/padm-docker"),
-                                   "control", "source-check"],
+                                   "control", "source-check",
+                                   *(("--peer-id", peer_id) if peer_id else ())],
             env=controller["env"], stdout=output, stderr=subprocess.STDOUT,
         )
         try:
@@ -612,9 +613,10 @@ def log_rotate(controller, controlled, invitation, scheduled=False):
 
 
 def reachable(node, invitation):
-    connection = json.loads(invitation.read_text())["listen"]
+    invited = json.loads(invitation.read_text())
+    connection = invited["listen"]
     output = command(node["enter"] + [
-        "curl", "-sS", "--noproxy", "*", "--interface", ADDRESS[1], "--max-time", "5",
+        "curl", "-sS", "--noproxy", "*", "--interface", invited["peer_address"], "--max-time", "5",
         "--retry", "4", "--retry-all-errors", "--retry-delay", "1",
         f"http://{connection['address']}:{connection['port']}/v1/health",
     ], timeout=35)
@@ -1936,6 +1938,152 @@ def wireguard_peers_real(nodes, image):
     return keys
 
 
+def control_peers_real(nodes, image):
+    controller, first, second = nodes
+    addresses = (*ADDRESS, "10.231.0.3")
+    directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
+    public, keys = [], []
+    local = [copy.deepcopy(state(node)["accounts"][0]) for node in nodes]
+    for index, node in enumerate(nodes):
+        prepared = json.loads(cli(node, "wireguard", "prepare", "--address", addresses[index],
+                                  "--listen-port", "51820", "--yes").stdout)
+        public.append(prepared["public_key"])
+        keys.append((directories[index] / "private.key").read_text().strip())
+    for index, node in enumerate(nodes):
+        remote = 1 if index == 0 else 0
+        cli(node, "wireguard", "peer", "--peer-address", addresses[remote],
+            "--peer-public-key", public[remote], "--endpoint", f"192.0.2.{remote+1}:51820", "--yes")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(lambda node: cli(node, "wireguard", "start", "--yes"), nodes))
+    retained = {path: path.read_bytes() for directory in directories
+                for path in (directory / "identity.json", directory / "private.key")}
+    leaves = [{path.name: path.read_bytes() for path in directory.iterdir()} for directory in directories[1:]]
+    cli(controller, "control", "init", "--address", addresses[0], "--port", "39778",
+        "--peer-address", addresses[1], "--yes")
+    invitation = controller["path"] / "private/first.json"
+    cli(controller, "control", "invite", "--output", str(invitation), "--yes")
+    first_invite = first["path"] / "private/invite.json"
+    save(first_invite, json.loads(invitation.read_text()))
+    cli(first, "control", "join", "--invite", str(first_invite), "--listener", "entry-ws", "--yes")
+    old = state(controller)["control"]
+    original_first, first_services = state(first), services(first)
+    cli(controller, "control", "upgrade", "--yes")
+    upgraded = state(controller)["control"]
+    assert upgraded == {key: value for key, value in old.items() if key not in ("schema_version", "peer")} | {
+        "schema_version": 2, "peers": [old["peer"]]}
+    cli(first, "control", "sync", "--invite", str(first_invite))
+    assert state(first) == original_first and services(first) == first_services, \
+        "主控升级改变旧邀请的同版本幂等同步"
+    cli(controller, "control", "upgrade", "--yes")
+    assert state(controller)["control"] == upgraded
+    for arguments in (("invite", "--output", str(controller["path"] / "private/ambiguous.json"), "--yes"),
+                      ("revoke", "--yes"), ("source-check",)):
+        cli(controller, "control", *arguments, accepted=False)
+        assert state(controller)["control"] == upgraded, "省略 Peer ID 改变多节点授权"
+    cli(controller, "wireguard", "peers", "add", "--peer-address", addresses[2],
+        "--peer-public-key", public[2], "--endpoint", "192.0.2.3:51820", "--yes")
+    cli(controller, "control", "peers", "add", "--peer-address", addresses[2], "--yes")
+    listed = json.loads(cli(controller, "control", "peers", "list").stdout)
+    assert listed["schema_version"] == 2 and listed["node_id"] == old["node_id"]
+    assert [peer["address"] for peer in listed["peers"]] == list(addresses[1:])
+    ids = [peer["id"] for peer in listed["peers"]]
+    assert ids[0] == old["peer"]["id"] and len(set(ids)) == 2
+    assert listed["peers"][1]["enabled"] is False and listed["peers"][1]["expires_at"] == 1
+    second_output = controller["path"] / "private/second.json"
+    cli(controller, "control", "invite", "--peer-id", ids[1], "--output", str(second_output), "--yes")
+    second_invite = second["path"] / "private/invite.json"
+    save(second_invite, json.loads(second_output.read_text()))
+    cli(second, "control", "join", "--invite", str(second_invite), "--listener", "entry-ws", "--yes")
+    assert json.loads(first_invite.read_text())["token"] != json.loads(second_invite.read_text())["token"]
+    for index, node in enumerate(nodes[1:], 1):
+        current = state(node)
+        assert current["accounts"][0] == local[index]
+        assert current["control_sync"]["node_id"] == ids[index-1]
+        assert current["control_sync"]["controller_id"] == old["node_id"]
+        wireguard_traffic((controller, node), (addresses[0], addresses[index]),
+                          peer_public=(public[0], public[index]))
+        source_check(controller, node, (addresses[0], addresses[index]), ids[index-1])
+        traffic(node, image, account_id=local[0]["id"])
+    traffic(controller, image)
+    before = state(controller)
+    previous = services(controller)
+    for index in (1, 2):
+        for action in ("update", "remove"):
+            arguments = ("--endpoint", "none") if action == "update" else ()
+            cli(controller, "wireguard", "peers", action, "--peer-address", addresses[index],
+                *arguments, "--yes", accepted=False)
+        cli(controller, "control", "peers", "remove", "--peer-id", ids[index-1], "--yes", accepted=False)
+        assert state(controller) == before and services(controller) == previous
+    second_peer = copy.deepcopy(before["control"]["peers"][1])
+    second_before, second_services = state(second), services(second)
+    rotated = controller["path"] / "private/first-rotated.json"
+    cli(controller, "control", "invite", "--peer-id", ids[0], "--output", str(rotated), "--yes")
+    assert state(controller)["control"]["peers"][1] == second_peer, "轮换第一节点改变第二节点授权"
+    unauthorized(first, first_invite)
+    cli(first, "control", "sync", "--invite", str(first_invite), accepted=False)
+    assert state(first) == original_first
+    cli(second, "control", "sync", "--invite", str(second_invite))
+    assert state(second) == second_before and services(second) == second_services
+    rotated_first = first["path"] / "private/rotated.json"
+    save(rotated_first, json.loads(rotated.read_text()))
+    cli(first, "control", "sync", "--invite", str(rotated_first))
+    assert state(first) == original_first
+    totals = [traffic(node, image) for node in nodes[1:]]
+    # 第一节点断网和第二节点候选失败分别受限，另一节点仍能独立同步与提供业务。
+    command(first["enter"] + ["ip", "link", "set", "underlay", "down"])
+    cli(controller, "account", "disable", local[0]["id"])
+    first_before, first_services = state(first), services(first)
+    cli(first, "control", "sync", "--invite", str(rotated_first), accepted=False)
+    assert state(first) == first_before and services(first) == first_services
+    interrupted_sync(second, second_invite)
+    cli(second, "control", "sync", "--invite", str(second_invite))
+    assert state(first) == first_before, "第二节点同步改写第一节点规格"
+    command(first["enter"] + ["ip", "link", "set", "underlay", "up"])
+    cli(first, "control", "sync", "--invite", str(rotated_first))
+    for index, node in enumerate(nodes[1:]):
+        current = state(node)
+        assert current["accounts"][0] == local[index+1]
+        assert next(account for account in current["accounts"] if account["id"] == local[0]["id"])["enabled"] is False
+        assert current["control_sync"]["last_revision"] == state(controller)["control"]["revision"]
+        observed = traffic(node, image)
+        assert all(observed[key] >= totals[index][key] for key in ("upload", "download"))
+        assert observed["limit_bytes"] == totals[index]["limit_bytes"]
+    second_before, second_services = state(second), services(second)
+    cli(controller, "control", "revoke", "--peer-id", ids[0], "--yes")
+    unauthorized(first, rotated_first)
+    first_before, first_services = state(first), services(first)
+    cli(first, "control", "sync", "--invite", str(rotated_first), accepted=False)
+    assert state(first) == first_before and services(first) == first_services
+    cli(second, "control", "sync", "--invite", str(second_invite))
+    assert state(second) == second_before and services(second) == second_services
+    cli(controller, "control", "peers", "remove", "--peer-id", ids[0], "--yes")
+    assert json.loads(cli(controller, "control", "peers", "list").stdout)["peers"] == [{
+        key: value for key, value in state(controller)["control"]["peers"][0].items() if key != "token_sha256"}]
+    assert state(controller)["control"]["peers"][0]["id"] == ids[1]
+    cli(controller, "wireguard", "peers", "remove", "--peer-address", addresses[1], "--yes")
+    wireguard_traffic((controller, second), (addresses[0], addresses[2]),
+                      peer_public=(public[0], public[2]))
+    cli(second, "control", "sync", "--invite", str(second_invite))
+    assert state(second) == second_before and services(second) == second_services
+    traffic(second, image)
+    cli(controller, "control", "revoke", "--peer-id", ids[1], "--yes")
+    before = state(controller)
+    cli(controller, "control", "peers", "remove", "--peer-id", ids[1], "--yes", accepted=False)
+    assert state(controller) == before and len(before["control"]["peers"]) == 1
+    assert before["control"]["node_id"] == old["node_id"]
+    assert all(path.read_bytes() == value for path, value in retained.items())
+    assert [{path.name: path.read_bytes() for path in directory.iterdir()}
+            for directory in directories[1:]] == leaves
+    for node in nodes:
+        services(node)
+        root = node["path"] / "deployment"
+        assert not (root / "locks/deployment.lock").exists()
+        assert all(not list(root.glob(pattern)) for pattern in (
+            ".candidate.*", ".control-peers.*", ".control-invite.*", ".control-client.*", ".wireguard.*"))
+    private_logs(nodes, (invitation, second_output, rotated), keys)
+    print("docker-control-peers-real-three-engines-upgrade-authorize-rotate-revoke-isolation-ok", flush=True)
+
+
 def wireguard_recovery_release(nodes, images):
     fixture = nodes[0]["path"].parent / "recovery-release"
     (fixture / "bin").mkdir(parents=True, mode=0o700)
@@ -2287,10 +2435,12 @@ def main():
     modes.add_argument("--wireguard-recovery-only", action="store_true")
     modes.add_argument("--controller-recovery-only", action="store_true")
     modes.add_argument("--wireguard-peers-only", action="store_true")
+    modes.add_argument("--control-peers-only", action="store_true")
     options = parser.parse_args()
     prepare_wireguard = (options.wireguard_only or options.wireguard_control_only
                          or options.wireguard_address_only or options.wireguard_recovery_only
-                         or options.controller_recovery_only or options.wireguard_peers_only)
+                         or options.controller_recovery_only or options.wireguard_peers_only
+                         or options.control_peers_only)
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
         "测试不得使用宿主或外部网络"
@@ -2301,8 +2451,11 @@ def main():
     images = {name: value["reference"] for name, value in inputs.items()}
     holders, daemons, crons, nodes, seeds = [], [], [], [], []
     proofs = []
-    roles = ("gateway", "peer-one", "peer-two") if options.wireguard_peers_only else ("controller", "controlled")
-    names = ["pn" + uuid.uuid4().hex[:10] for _ in range(6 if options.wireguard_peers_only else 2)]
+    three_nodes = options.wireguard_peers_only or options.control_peers_only
+    roles = (("gateway", "peer-one", "peer-two") if options.wireguard_peers_only else
+             ("controller", "controlled-one", "controlled-two") if options.control_peers_only else
+             ("controller", "controlled"))
+    names = ["pn" + uuid.uuid4().hex[:10] for _ in range(6 if three_nodes else 2)]
     bridge = "pb" + uuid.uuid4().hex[:10]
     bridge_created = False
     with tempfile.TemporaryDirectory(prefix=".tmp-control-deploy-", dir="/n") as directory:
@@ -2391,23 +2544,30 @@ def main():
                                "netns": os.readlink(f"/proc/{pid}/ns/net")})
             assert len({proof["engine_id"] for proof in proofs}) == len(roles)
             assert len({proof["netns"] for proof in proofs}) == len(roles)
-            if options.wireguard_peers_only:
+            if three_nodes:
                 for node in nodes:
                     command(node["enter"] + ["pkill", "-STOP", "-x", "cron"])
                     node["cron_paused"] = True
             if (options.remap_only or options.rebind_only or options.wireguard_control_only
                     or options.wireguard_address_only or options.wireguard_recovery_only
-                    or options.controller_recovery_only):
+                    or options.controller_recovery_only or options.control_peers_only):
                 # 仅在隔离 daemon 派生当前客户端，固定基础镜像且离线构建，不复用旧源码冒充本轮验收。
                 context = root / "remap-ops"
                 context.mkdir()
                 modules = ("control_client.py", "control_sync.py")
+                if options.control_peers_only:
+                    modules += ("control_api.py", "control_state.py", "control_server.py")
                 for module in modules:
                     shutil.copyfile(ROOT / "docker/images/ops" / module, context / module)
-                (context / "Dockerfile").write_text(
+                dockerfile = (
                     f"FROM {images['ops']}\n"
                     "COPY --chown=10001:10001 control_client.py control_sync.py /opt/padm/\n"
                 )
+                if options.control_peers_only:
+                    dockerfile += (
+                        "COPY --chown=10001:10001 control_api.py control_state.py /opt/padm/\n"
+                        "COPY --chown=10001:10001 control_server.py /opt/padm/subscription/\n")
+                (context / "Dockerfile").write_text(dockerfile)
                 tag = "padm-local/padm-ops:remap-current"
                 command(nodes[0]["docker"] + ["build", "--network", "none", "--pull=false",
                                              "--tag", tag, str(context)], timeout=120)
@@ -2417,9 +2577,10 @@ def main():
                 images["ops"] = f"{tag}@{digest}"
                 archive = root / "remap-ops.tar"
                 command(nodes[0]["docker"] + ["save", "--output", str(archive), tag], timeout=120)
-                command(nodes[1]["docker"] + ["load", "--input", str(archive)], timeout=120)
-                assert json.loads(command(nodes[1]["docker"] + ["image", "inspect", images["ops"]]))[0]["Id"] == actual["Id"]
-                proofs[0]["remap_ops"] = {
+                for node in nodes[1:]:
+                    command(node["docker"] + ["load", "--input", str(archive)], timeout=120)
+                    assert json.loads(command(node["docker"] + ["image", "inspect", images["ops"]]))[0]["Id"] == actual["Id"]
+                proofs[0]["current_ops" if options.control_peers_only else "remap_ops"] = {
                     "base_image_id": inputs["ops"]["image_id"], "image_id": actual["Id"], "digest": digest,
                     "source_sha256": {module: hashlib.sha256((context / module).read_bytes()).hexdigest()
                                       for module in modules},
@@ -2427,7 +2588,7 @@ def main():
                 for node in nodes:
                     command(node["enter"] + ["pkill", "-STOP", "-x", "cron"])
                     node["cron_paused"] = True
-            if options.wireguard_peers_only:
+            if three_nodes:
                 command(["ip", "link", "add", bridge, "type", "bridge"])
                 bridge_created = True
                 command(["ip", "link", "set", bridge, "up"])
@@ -2435,7 +2596,7 @@ def main():
                 command(["ip", "link", "add", names[0], "type", "veth", "peer", "name", names[1]])
             keys, public = [], []
             for index, node in enumerate(nodes):
-                if options.wireguard_peers_only:
+                if three_nodes:
                     outer, inner = names[index*2:index*2+2]
                     command(["ip", "link", "add", outer, "type", "veth", "peer", "name", inner])
                     command(["ip", "link", "set", outer, "master", bridge])
@@ -2444,7 +2605,7 @@ def main():
                     inner = names[index]
                 command(["ip", "link", "set", inner, "netns", str(node["pid"])])
                 command(node["enter"] + ["ip", "link", "set", inner, "name", "underlay"])
-                prefix = 29 if options.wireguard_peers_only else 30
+                prefix = 29 if three_nodes else 30
                 command(node["enter"] + ["ip", "address", "add", f"192.0.2.{index + 1}/{prefix}",
                                          "dev", "underlay"])
                 command(node["enter"] + ["ip", "link", "set", "underlay", "up"])
@@ -2534,6 +2695,12 @@ def main():
                 keys = wireguard_peers_real(nodes, images["sing-box"])
                 private_logs(nodes, (), keys)
                 proofs[0].update(scope="real-compose-wireguard-three-node-peer-management",
+                                 release_trust="fixture", transaction_interruption="allowed")
+                return proofs
+            if options.control_peers_only:
+                wireguard_recovery_release(nodes, images)
+                control_peers_real(nodes, images["sing-box"])
+                proofs[0].update(scope="real-compose-control-three-node-peer-management",
                                  release_trust="fixture", transaction_interruption="allowed")
                 return proofs
             if options.wireguard_recovery_only or options.controller_recovery_only:

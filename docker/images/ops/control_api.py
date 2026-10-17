@@ -24,10 +24,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 API_VERSION = 1
+STATE_VERSION = 2
 MAX_STATE_BYTES = 1024 * 1024
 MAX_HEALTH_BYTES = 256
 HEALTH_TIMEOUT = 2
 ACCESS_LOG_ROTATE_BYTES = 10 * 1024 * 1024
+REQUEST_LOG_LOCK = threading.Lock()
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
 ))
@@ -60,9 +62,17 @@ def strict_object(pairs):
     return result
 
 
+def state_peers(state):
+    return [state["peer"]] if state["schema_version"] == 1 else state["peers"]
+
+
 def validate_state(state):
-    exact_keys(state, "schema_version role node_id listen peer revision accounts")
-    if type(state["schema_version"]) is not int or state["schema_version"] != API_VERSION or state["role"] != "main":
+    version = state.get("schema_version") if isinstance(state, dict) else None
+    if type(version) is not int or version not in (1, STATE_VERSION):
+        raise ValueError("控制状态版本或角色不支持")
+    peer_field = "peer" if version == 1 else "peers"
+    exact_keys(state, f"schema_version role node_id listen {peer_field} revision accounts")
+    if state["role"] != "main":
         raise ValueError("控制状态版本或角色不支持")
     stable_id(state["node_id"])
     exact_keys(state["listen"], "interface address port")
@@ -70,16 +80,25 @@ def validate_state(state):
     if listen["interface"] != "wg-padm" or type(listen["port"]) is not int or not 1024 <= listen["port"] <= 65535:
         raise ValueError("控制监听接口或端口不支持")
     private_address(listen["address"])
-    exact_keys(state["peer"], "id address enabled expires_at token_sha256")
-    peer = state["peer"]
-    stable_id(peer["id"])
-    private_address(peer["address"])
-    if peer["id"] == state["node_id"] or peer["address"] == listen["address"]:
-        raise ValueError("控制节点不能引用自己")
-    if type(peer["enabled"]) is not bool or type(peer["expires_at"]) is not int or not 0 < peer["expires_at"] <= 9007199254740991:
-        raise ValueError("控制授权开关或有效期不合法")
-    if not isinstance(peer["token_sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", peer["token_sha256"]):
-        raise ValueError("控制 token 摘要不合法")
+    peers = state_peers(state)
+    if not isinstance(peers, list) or not peers:
+        raise ValueError("控制 Peer 集合不能为空")
+    ids, addresses, tokens = set(), set(), set()
+    for peer in peers:
+        exact_keys(peer, "id address enabled expires_at token_sha256")
+        stable_id(peer["id"])
+        private_address(peer["address"])
+        if peer["id"] == state["node_id"] or peer["address"] == listen["address"]:
+            raise ValueError("控制节点不能引用自己")
+        if type(peer["enabled"]) is not bool or type(peer["expires_at"]) is not int or not 0 < peer["expires_at"] <= 9007199254740991:
+            raise ValueError("控制授权开关或有效期不合法")
+        if not isinstance(peer["token_sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", peer["token_sha256"]):
+            raise ValueError("控制 token 摘要不合法")
+        if peer["id"] in ids or peer["address"] in addresses or peer["token_sha256"] in tokens:
+            raise ValueError("控制 Peer 身份、地址或凭据重复")
+        ids.add(peer["id"])
+        addresses.add(peer["address"])
+        tokens.add(peer["token_sha256"])
     if type(state["revision"]) is not int or not 0 <= state["revision"] <= 9007199254740991:
         raise ValueError("控制版本序号不合法")
     validate_accounts(state["accounts"])
@@ -449,15 +468,16 @@ def request_log_event(status, endpoints, access_log=None, lock_path=None):
     source, target, port = endpoints
     timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     line = f"{timestamp} control-request status={status} source={source} target={target} port={port}"
-    try:
-        if access_log is not None:
-            # 每条重新打开已预建的安全文件，单次追加并同步后才允许 stdout 或响应。
-            append_access_line(access_log, line, lock_path)
-        print(line, flush=True)
-    except (OSError, ValueError):
-        if access_log is not None:
-            access_log_failure()
-        raise
+    with REQUEST_LOG_LOCK:
+        try:
+            if access_log is not None:
+                # 并发请求仍保持持久证据与 stdout 的相同顺序。
+                append_access_line(access_log, line, lock_path)
+            print(line, flush=True)
+        except (OSError, ValueError):
+            if access_log is not None:
+                access_log_failure()
+            raise
 
 
 class ControlHandler(BaseHTTPRequestHandler):
@@ -483,18 +503,18 @@ class ControlHandler(BaseHTTPRequestHandler):
         except (OSError, ValueError):
             self.reply(503, {"ok": False, "error": "invalid_state"})
             return
-        peer = state["peer"]
+        peer = None
         authorization = self.headers.get("Authorization", "")
         token = authorization.removeprefix("Bearer ")
-        authorized = (
-            len(self.headers.get_all("Authorization", [])) == 1
-            and authorization.startswith("Bearer ")
-            and re.fullmatch(r"[a-f0-9]{48}", token) is not None
-            and hmac.compare_digest(hashlib.sha256(token.encode("ascii")).hexdigest(), peer["token_sha256"])
-            and peer["enabled"] and peer["expires_at"] > time.time()
-            and self.client_address[0] == peer["address"]
-        )
-        if not authorized:
+        if (len(self.headers.get_all("Authorization", [])) == 1
+                and authorization.startswith("Bearer ")
+                and re.fullmatch(r"[a-f0-9]{48}", token) is not None):
+            token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
+            peer = next((item for item in state_peers(state)
+                         if self.client_address[0] == item["address"]
+                         and hmac.compare_digest(token_hash, item["token_sha256"])
+                         and item["enabled"] and item["expires_at"] > time.time()), None)
+        if peer is None:
             challenge = self.source_challenge(state)
             self.reply(401, {"ok": False, "error": "unauthorized"}, challenge)
         elif self.headers.get_all("X-Padm-Control-Version", []) != [str(API_VERSION)]:
@@ -515,11 +535,12 @@ class ControlHandler(BaseHTTPRequestHandler):
     def source_challenge(self, state):
         path = getattr(self.server, "source_challenge", None)
         headers = self.headers.get_all("X-Padm-Source-Challenge", [])
-        expected = state["peer"]["address"], state["listen"]["address"], state["listen"]["port"]
         if (path is None or self.path != "/v1/health"
                 or self.headers.get_all("Authorization", []) != []
                 or len(headers) != 1 or re.fullmatch(r"[a-f0-9]{64}", headers[0]) is None
-                or self.log_endpoints != expected):
+                or self.log_endpoints not in [
+                    (peer["address"], state["listen"]["address"], state["listen"]["port"])
+                    for peer in state_peers(state)]):
             return None
         try:
             challenge = read_source_challenge(path)
@@ -571,9 +592,77 @@ class ControlHandler(BaseHTTPRequestHandler):
         pass
 
 
-class ControlServer(HTTPServer):
-    # ponytail: 一主一被控串行读取；节点扩展后再按实测增加有界并发。
+class ControlServer(socketserver.ThreadingMixIn, HTTPServer):
     request_timeout = 5
+    max_requests = 8
+    request_queue_size = 8
+
+    def __init__(self, *args, **kwargs):
+        self.active_requests = {}
+        self.request_deadlines = {}
+        self.request_lock = threading.Condition()
+        self.failure_code = None
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, connection, address):
+        with self.request_lock:
+            peers = self.active_requests.get(address[0], [])
+            admitted = (self.failure_code is None and len(peers) < 2
+                        and len(self.request_deadlines) < self.max_requests)
+            if admitted:
+                self.active_requests.setdefault(address[0], []).append(connection)
+                self.request_deadlines[connection] = time.monotonic() + self.request_timeout
+                self.request_lock.notify_all()
+        if not admitted:
+            self.shutdown_request(connection)
+            return
+        try:
+            super().process_request(connection, address)
+        except BaseException:
+            self.release_request(connection, address)
+            raise
+
+    def release_request(self, connection, address):
+        with self.request_lock:
+            peers = self.active_requests[address[0]]
+            peers.remove(connection)
+            if not peers:
+                del self.active_requests[address[0]]
+            del self.request_deadlines[connection]
+            self.request_lock.notify_all()
+
+    def process_request_thread(self, connection, address):
+        try:
+            with self.request_lock:
+                # 同源仅一项处理，额外一项只在工作线程有界等待，监听线程不等交接。
+                ready = self.request_lock.wait_for(
+                    lambda: self.failure_code is not None or self.active_requests[address[0]][0] is connection,
+                    timeout=0.1)
+                failed = self.failure_code is not None
+            if not ready or failed:
+                self.shutdown_request(connection)
+                return
+            super().process_request_thread(connection, address)
+        except SystemExit as error:
+            # 日志失败不能只终止工作线程；所有连接关闭后由主循环保留非零退出。
+            with self.request_lock:
+                self.failure_code = error.code if type(error.code) is int and error.code else 78
+                connections = tuple(self.request_deadlines)
+                self.request_lock.notify_all()
+            for active in connections:
+                try:
+                    active.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            self.socket.close()
+            self.shutdown()
+        finally:
+            self.release_request(connection, address)
+
+    def serve_forever(self, *args, **kwargs):
+        super().serve_forever(*args, **kwargs)
+        if self.failure_code is not None:
+            raise SystemExit(self.failure_code)
 
     def server_bind(self):
         # 私网字面地址无需反向 DNS，避免离线控制服务启动等待外部解析。
@@ -596,7 +685,9 @@ class ControlServer(HTTPServer):
                 pass
 
         # 空闲超时不能阻止持续慢速发包，整个请求另设总时限。
-        deadline = threading.Timer(self.request_timeout, expire)
+        with self.request_lock:
+            remaining = max(0, self.request_deadlines[connection] - time.monotonic())
+        deadline = threading.Timer(remaining, expire)
         deadline.start()
         try:
             super().finish_request(connection, address)

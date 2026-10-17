@@ -1,11 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "padm Docker private control state v1",
+  "title": "padm Docker private control state v1/v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "role", "node_id", "listen", "peer", "revision", "accounts"],
+  "required": ["schema_version", "role", "node_id", "listen", "revision", "accounts"],
+  "oneOf": [
+    {"properties": {"schema_version": {"const": 1}}, "required": ["peer"], "not": {"required": ["peers"]}},
+    {"properties": {"schema_version": {"const": 2}}, "required": ["peers"], "not": {"required": ["peer"]}}
+  ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"enum": [1, 2]},
     "role": {"const": "main"},
     "node_id": {"$ref": "#/$defs/id"},
     "revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
@@ -30,6 +34,12 @@
         "expires_at": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "token_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
       }
+    },
+    "peers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/properties/peer"}
     },
     "accounts": {
       "type": "array",

@@ -1203,7 +1203,7 @@ dockerMenuWireGuard() {
 }
 
 dockerMenuControl() {
-    local choice address port peer output expiry invitation listeners listener
+    local choice address port peer peerId output expiry invitation listeners listener
     local -a listenerIds=() action=()
     while :; do
         DOCKER_MENU_SIGNAL=0
@@ -1213,7 +1213,8 @@ dockerMenuControl() {
             '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
             '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
             '15. 重映射受管账号入口（同连接）' '16. 更新主控 API 端口' \
-            '17. 被控同身份重连' '18. WireGuard 建链与维护' '19. 更换主控身份（同隧道）' '0. 返回'
+            '17. 被控同身份重连' '18. WireGuard 建链与维护' '19. 更换主控身份（同隧道）' \
+            '20. 升级多 Peer 主控' '21. 查看控制 Peer' '22. 登记控制 Peer' '23. 移除控制 Peer' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1231,12 +1232,21 @@ dockerMenuControl() {
             dockerMenuRun control init --address "${address}" --port "${port}" --peer-address "${peer}" || true
             ;;
         3)
-            dockerSetupRead output '邀请文件绝对路径（受管目录外，0 返回）: ' &&
+            dockerSetupRead peerId 'Peer ID（v2 必填，v1 可留空，0 返回）: ' &&
+                dockerSetupRead output '邀请文件绝对路径（受管目录外，0 返回）: ' &&
                 [[ -n "${output}" ]] &&
                 dockerSetupRead expiry '授权有效秒数 [86400，0 返回]: ' 86400 || continue
-            dockerMenuRun control invite --output "${output}" --expires-in "${expiry}" || true
+            action=(control invite --output "${output}" --expires-in "${expiry}")
+            [[ -z "${peerId}" ]] || action+=(--peer-id "${peerId}")
+            dockerMenuRun "${action[@]}" || true
             ;;
-        4) dockerMenuRun control revoke || true ;;
+        4|7)
+            dockerSetupRead peerId 'Peer ID（v2 必填，v1 可留空，0 返回）: ' || continue
+            action=(control revoke)
+            [[ "${choice}" != 7 ]] || action=(control source-check)
+            [[ -z "${peerId}" ]] || action+=(--peer-id "${peerId}")
+            dockerMenuRun "${action[@]}" || true
+            ;;
         5|15)
             if [[ "${choice}" == 15 ]]; then
                 printf '仅替换当前主控连接的入口映射；请先停用自动同步。\n'
@@ -1267,7 +1277,18 @@ dockerMenuControl() {
                 [[ -n "${invitation}" ]] || continue
             dockerMenuRun control sync --invite "${invitation}" || true
             ;;
-        7) dockerMenuRun control source-check || true ;;
+        20) dockerMenuRun control upgrade || true ;;
+        21) dockerMenuRun control peers list || true ;;
+        22)
+            dockerSetupRead peer '已配置 WireGuard 的 Peer RFC1918 IPv4（0 返回）: ' &&
+                [[ -n "${peer}" ]] || continue
+            dockerMenuRun control peers add --peer-address "${peer}" || true
+            ;;
+        23)
+            dockerSetupRead peerId '已撤销授权的 Peer ID（0 返回）: ' &&
+                [[ -n "${peerId}" ]] || continue
+            dockerMenuRun control peers remove --peer-id "${peerId}" || true
+            ;;
         8) dockerMenuRun control log-rotate || true ;;
         9) dockerMenuRun control log-schedule status || true ;;
         10) dockerMenuRun control log-schedule enable || true ;;

@@ -216,13 +216,20 @@ dockerUsage() {
    padm-docker share <同上 subscription 命令>
   padm-docker control status [--json]
   padm-docker control init --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> [--yes]
+  padm-docker control upgrade [--yes]
+  padm-docker control peers [list]
+  padm-docker control peers add --peer-address <WireGuard IPv4> [--yes]
+  padm-docker control peers remove --peer-id <UUID> [--yes]
+  padm-docker control invite --output <绝对路径> [--expires-in <秒>] [--peer-id <UUID>] [--yes]
+  padm-docker control revoke [--peer-id <UUID>] [--yes]
+    v2 主控的 invite、revoke、source-check 必须指定 Peer ID；移除须先撤销且不能移除最后一项
   padm-docker control join --invite <私有邀请文件> --listener <入口 ID>... [--yes]
   padm-docker control sync --invite <私有邀请文件>
   padm-docker control remap --invite <同连接私有文件> --listener <入口 ID>... [--yes]
   padm-docker control set-port --port <端口> [--yes]
   padm-docker control reconnect --invite <同身份新端口私有文件> [--yes]
   padm-docker control rebind --invite <同隧道新主控私有文件> [--yes]
-  padm-docker control source-check
+  padm-docker control source-check [--peer-id <UUID>]
   padm-docker control source-probe --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> --nonce <64 位 hex>
   padm-docker control log-rotate [--yes]
   padm-docker control log-schedule <enable|disable|status> [--yes]
@@ -3222,7 +3229,7 @@ dockerRecoveryInputsPrepare() {
         jq -e --arg rebuildController "${rebuildController}" '.schema_version == 3 and
           (.host_integrations | length <= 1 and all(.[]; .type == "wireguard")) and
           (if $rebuildController == "1" then
-            .control.role == "main" and .control_sync == null and
+            .control.schema_version == 1 and .control.role == "main" and .control_sync == null and
             (.host_integrations | length == 1)
            else
             .control == null and

@@ -1533,7 +1533,7 @@ padm-docker control revoke --yes
 已有文件、目录或链接均拒绝覆盖；轮换时选择新文件名。普通输出、日志和进程参数不含 token，
 受管 spec 只保存摘要。撤销不要求网络健康，重复撤销不重建；状态提供脱敏授权开关与过期时间。
 撤销先原子禁用 API，再更新 spec；两步之间中断时重复执行 `revoke` 补齐，不恢复旧授权。
-恢复、失败回滚或显式版本回滚均禁用授权，避免复活旧 token，之后需重新邀请。
+v1 恢复、失败回滚或显式版本回滚均禁用授权，避免复活旧 token，之后需重新邀请。
 邀请文件原子交付后即使配置失败也保留，但不保证授权有效，以 `control status` 为准。
 被控端先配置并启动归属一致的单 Peer WireGuard，再将邀请安全送至其 root 私有目录。
 主控地址须是唯一 Peer 的 `/32` AllowedIPs，本机接口地址须与邀请的 `peer_address` 一致，
@@ -1644,7 +1644,8 @@ SSH、原生宿主 systemd/重启卸载、公网和 arm64 尚未验收。
 同版本必须保持摘要和受管账号；同步状态未变的兼容发行版快照仍可回滚。
 被控规格要求 bundle 声明回滚保护能力，不能回到缺少该保护的旧脚本。
 普通接入/同步失败或中断仍恢复事务前状态，不在本机伪造上游版本。
-控制菜单已提供单 Peer 角色连接维护和显式同隧道主控重绑定；多被控及任意历史账号恢复仍未开放。
+控制菜单提供单 Peer 角色连接维护、显式同隧道主控重绑定及 v2 多被控管理；
+任意历史账号恢复仍未开放。
 无主控/被控角色的已启用 canonical WireGuard 可通过菜单 `15 → 18 → 7–10`
 或以下命令按地址管理 Peer 集合：
 
@@ -1659,8 +1660,37 @@ padm-docker wireguard peers remove --peer-address 10.77.0.3 --yes
 配置沿用 `4096` 字节上限。更新的地址是精确选择器，不改变该项地址；
 省略字段保持，`none` 清除 endpoint，至少保留一个 Peer。
 变更逐字节保留本机身份和私钥，复用完整配置事务及失败/INT/TERM 恢复，
-会重建部署服务并可能短暂中断连接。现有主控/被控集合变更继续拒绝；
+会重建部署服务并可能短暂中断连接。v1 主控与被控集合变更继续拒绝；
 多 Peer 的旧 `wireguard migrate` 和单 Peer 灾备恢复入口也拒绝，不能默认选择首项。
+
+已有 v1 主控可通过菜单 `15 → 20` 显式升级为 v2，再登记第二个被控：
+
+```bash
+padm-docker control upgrade --yes
+padm-docker wireguard peers add --peer-address 10.77.0.3 --peer-public-key "$PEER_PUBLIC_KEY" --endpoint 192.0.2.3:51820 --yes
+padm-docker control peers add --peer-address 10.77.0.3 --yes
+padm-docker control peers list
+padm-docker control invite --peer-id "$PEER_ID" --output /root/padm-peer-3.json --yes
+padm-docker control source-check --peer-id "$PEER_ID"
+padm-docker control revoke --peer-id "$PEER_ID" --yes
+padm-docker control peers remove --peer-id "$PEER_ID" --yes
+```
+
+从脱敏列表取得生成的 `PEER_ID`；菜单 `21–23` 提供查看、登记与移除。
+v2 即使只剩一项，邀请、撤销及来源检查仍必须指定 ID；升级保留原身份、授权、版本、
+账号和累计，旧邀请继续有效，HTTP API 与被控格式仍为 v1。
+每个被控独立持有邀请并沿原接入/同步流程操作，来源与 token 必须同时匹配该项。
+API 端口及账号发布版本由主控共享；更换端口后每个被控分别重连。
+同来源允许一个处理请求和一个最多等待 `100 ms` 的交接请求，均计入总并发上限 `8`；
+监听线程不等待交接，每连接总时限 `5` 秒。
+同一主控的配置事务仍可能短暂影响全部连接。v2 失败回滚只保留在全部可信计划中
+身份、监听和完整 Peer 元数据均未变化的旧授权；其它项禁用，不能证明时整体禁用。
+移除前必须先撤销，集合至少保留一项。v2 主控可维护未登记的 WireGuard Peer；
+已登记项须先撤销并移除控制登记，再修改或移除其隧道项。
+v2 更新/回滚要求目标 bundle 声明 `x-padm-control-peers=true`，旧单项 bundle 在切换前拒绝。
+v2 关联地址/本机密钥迁移、主控灾备及控制面 Fail2ban 暂不支持；升级前先停用后者。
+本机定向及三节点验收状态见[实施计划](documents/docker-menu-parity-plan.md)，
+原生宿主、arm64、公网、重启和可信发布仍分别待验。
 
 `wireguard migrate` 及其子菜单 `6` 支持主控/已接入被控的关联地址迁移，例如：
 

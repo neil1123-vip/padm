@@ -1670,11 +1670,15 @@ class ControllerInputTests(unittest.TestCase):
 
     def test_main_role_single_peer_and_original_tuple_are_required(self):
         original_spec, original_state = copy.deepcopy(self.spec), copy.deepcopy(self.state)
-        for changes in ("version", "controlled", "integration", "tuple"):
+        for changes in ("version", "control-version", "controlled", "integration", "tuple"):
             with self.subTest(changes=changes):
                 self.spec, self.state = copy.deepcopy(original_spec), copy.deepcopy(original_state)
                 if changes == "version":
                     self.spec["schema_version"] = 2
+                elif changes == "control-version":
+                    for value in (self.spec["control"], self.state):
+                        value["schema_version"] = 2
+                        value["peers"] = [value.pop("peer")]
                 elif changes == "controlled":
                     self.spec["control_sync"] = {}
                 elif changes == "integration":
@@ -1683,7 +1687,12 @@ class ControllerInputTests(unittest.TestCase):
                     self.spec["control"]["listen"]["address"] = "10.77.0.3"
                     self.state["listen"]["address"] = "10.77.0.3"
                 self.seal()
-                self.rejected()
+                if changes == "control-version":
+                    with self.assertRaises(ValueError):
+                        recovery.controller_inputs(str(self.source), str(self.output))
+                    self.assertFalse(self.output.exists())
+                else:
+                    self.rejected()
         self.spec, self.state = original_spec, original_state
         self.seal()
         (self.source / recovery.WIREGUARD_PREFIX / "private.key").unlink()

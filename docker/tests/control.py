@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import re
+import select
 import socket
 import stat
 import subprocess
@@ -28,6 +29,7 @@ schema = json.loads((ROOT / "docker/contracts/control.schema.json").read_text())
 Draft202012Validator.check_schema(schema)
 validator = Draft202012Validator(schema, format_checker=FormatChecker())
 TOKEN = "a" * 48
+SECOND_TOKEN = "b" * 48
 ENTRYPOINT = ROOT / "docker/images/ops/entrypoint.sh"
 subprocess.run(["sh", "-n", str(ENTRYPOINT)], check=True)
 for arguments in ([], ["--check", "/state.json"], ["--state"],
@@ -47,6 +49,13 @@ STATE = {
                   "enabled": True, "uuid": "44444444-4444-4444-8444-444444444444",
                   "password": "b" * 48, "shadowsocks_password": None}],
 }
+STATE_V2 = copy.deepcopy(STATE)
+STATE_V2["schema_version"] = api.STATE_VERSION
+STATE_V2["peers"] = [STATE_V2.pop("peer"), {
+    "id": "55555555-5555-4555-8555-555555555555", "address": "10.77.0.3",
+    "enabled": True, "expires_at": STATE["peer"]["expires_at"],
+    "token_sha256": hashlib.sha256(SECOND_TOKEN.encode()).hexdigest(),
+}]
 
 
 def rejected(function, *args):
@@ -70,6 +79,31 @@ def log_failed(function, *args):
 
 validator.validate(STATE)
 api.validate_state(STATE)
+validator.validate(STATE_V2)
+assert api.validate_state(STATE_V2) == STATE_V2
+assert api.state_peers(STATE) == [STATE["peer"]]
+assert api.state_peers(STATE_V2) == STATE_V2["peers"]
+for mutation in (
+        lambda s: s.update(peer=copy.deepcopy(STATE["peer"])),
+        lambda s: s.update(schema_version=1),
+        lambda s: s.update(schema_version=3),
+        lambda s: s.update(schema_version=True),
+        lambda s: s.update(peers=[]),
+        lambda s: s.update(peers={}),
+        lambda s: s["peers"].append(copy.deepcopy(s["peers"][0]))):
+    state = copy.deepcopy(STATE_V2)
+    mutation(state)
+    assert not validator.is_valid(state)
+    rejected(api.validate_state, state)
+for field in ("id", "address", "token_sha256"):
+    state = copy.deepcopy(STATE_V2)
+    state["peers"][1][field] = state["peers"][0][field]
+    rejected(api.validate_state, state)
+for field, value in (("id", STATE["node_id"]), ("address", STATE["listen"]["address"]),
+                     ("enabled", 1), ("expires_at", True), ("token_sha256", "a" * 63)):
+    state = copy.deepcopy(STATE_V2)
+    state["peers"][1][field] = value
+    rejected(api.validate_state, state)
 for field, value in (("role", "controlled"), ("revision", True), ("schema_version", 2), ("accounts", {})):
     state = copy.deepcopy(STATE)
     state[field] = value
@@ -294,6 +328,21 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
 
     handler = challenge_request()
     assert handler.source_challenge(STATE) == challenge
+    disabled_peers = copy.deepcopy(STATE_V2)
+    for peer in disabled_peers["peers"]:
+        peer.update(enabled=False, expires_at=1)
+        registered = dict(challenge, expected_source=peer["address"])
+        register_challenge(registered)
+        selected = challenge_request(endpoints=(
+            peer["address"], STATE["listen"]["address"], STATE["listen"]["port"]))
+        assert selected.source_challenge(disabled_peers) == registered, \
+            "来源探针须识别所选 Peer，且不能依赖尚未签发的授权"
+        assert handler.source_challenge(disabled_peers) == (registered if peer["address"] ==
+                                                          STATE["peer"]["address"] else None)
+    register_challenge(dict(challenge, expected_source="10.77.0.4"))
+    assert challenge_request(endpoints=("10.77.0.4", "10.77.0.1", STATE["listen"]["port"])).source_challenge(
+        STATE_V2) is None, "未登记 Peer 不能取得来源回执"
+    register_challenge(challenge)
     for headers in ([], [("X-Padm-Source-Challenge", "d" * 64)],
                     [("X-Padm-Source-Challenge", TOKEN)], [("X-Unregistered-Challenge", nonce)],
                     [("X-Padm-Source-Challenge", nonce), ("X-Padm-Source-Challenge", nonce)],
@@ -647,7 +696,13 @@ api.append_access_line(sys.argv[2], "locked-append", sys.argv[3])
 
         def setup(self):
             super().setup()
-            self.client_address = (self.peer_address, self.client_address[1])
+            event = getattr(self.server, "connection_events", {}).get(self.client_address[0])
+            if event is not None:
+                event.set()
+            address = {"127.0.0.2": STATE["peer"]["address"],
+                       "127.0.0.3": STATE_V2["peers"][1]["address"]}.get(
+                           self.client_address[0], self.peer_address)
+            self.client_address = (address, self.client_address[1])
 
         def do_GET(self):
             if self.health_status is None:
@@ -694,8 +749,10 @@ api.append_access_line(sys.argv[2], "locked-append", sys.argv[3])
                 patch.object(api.http.client, "HTTPConnection", side_effect=local_health_connection):
             api.health_check(api.read_state(state_path))
 
-    def request(path="/v1/health", token=TOKEN, version="1", method="GET", authorization=None, extra_headers=None):
-        connection = http.client.HTTPConnection(*server.server_address, timeout=3)
+    def request(path="/v1/health", token=TOKEN, version="1", method="GET", authorization=None,
+                extra_headers=None, source=None, timeout=3):
+        connection = http.client.HTTPConnection(*server.server_address, timeout=timeout,
+                                                source_address=(source, 0) if source else None)
         headers = {
             "Authorization": f"Bearer {token}" if authorization is None else authorization,
             "X-Padm-Control-Version": version,
@@ -870,6 +927,45 @@ api.main()
             health()
         publish(STATE)
         assert request()[0] == 200
+        publish(STATE_V2)
+        for peer, token in zip(STATE_V2["peers"], (TOKEN, SECOND_TOKEN)):
+            TestHandler.peer_address = peer["address"]
+            source = "127.0.0.2" if token == TOKEN else "127.0.0.3"
+            status, body = request("/v1/desired", token=token, source=source)
+            desired = json.loads(body)
+            assert status == 200 and desired == {
+                "ok": True, "api_version": 1, "controller_id": STATE["node_id"],
+                "node_id": peer["id"], "revision": STATE["revision"], "accounts": STATE["accounts"],
+            }, "各 Peer 必须收到自己的身份及同一份账号版本"
+            assert request(token=SECOND_TOKEN if token == TOKEN else TOKEN, source=source)[0] == 401, \
+                "其它 Peer 的 token 不能与当前来源组合授权"
+            assert request(token=token, version="2", source=source)[0] == 409, "私有状态 v2 不升级 HTTP 协议"
+        for _ in range(20):
+            assert request(token=SECOND_TOKEN, source="127.0.0.3")[0] == 200
+            assert request("/v1/desired", token=SECOND_TOKEN, source="127.0.0.3")[0] == 200, \
+                "同真实来源连续请求不能依赖测试等待来躲避工作线程交接"
+        TestHandler.peer_address = "10.77.0.4"
+        assert request()[0] == request(token=SECOND_TOKEN)[0] == 401
+        for mutation in ("disabled", "expired", "rotated", "removed"):
+            state = copy.deepcopy(STATE_V2)
+            if mutation == "removed":
+                state["peers"].pop(0)
+            elif mutation == "disabled":
+                state["peers"][0]["enabled"] = False
+            elif mutation == "expired":
+                state["peers"][0]["expires_at"] = int(time.time()) - 1
+            else:
+                state["peers"][0]["token_sha256"] = "0" * 64
+            publish(state)
+            TestHandler.peer_address = STATE["peer"]["address"]
+            assert request(source="127.0.0.2")[0] == 401, "单项授权变化必须立即生效"
+            TestHandler.peer_address = STATE_V2["peers"][1]["address"]
+            status, body = request("/v1/desired", token=SECOND_TOKEN, source="127.0.0.3")
+            assert status == 200 and json.loads(body)["node_id"] == STATE_V2["peers"][1]["id"], \
+                "撤销、过期、轮换或移除其它 Peer 不得影响当前授权"
+            health()
+        TestHandler.peer_address = STATE["peer"]["address"]
+        publish(STATE)
         state = copy.deepcopy(STATE)
         state["listen"]["port"] += 1
         publish(state)
@@ -897,11 +993,15 @@ api.main()
             rejected(health)
             assert time.monotonic() - before < 1, "持续慢速健康响应也必须按总时限终止"
         TestHandler.health_status, TestHandler.health_delay = None, 0
-        server.request_timeout = 0.2
+        publish(STATE_V2)
+        assert server.request_timeout == 5, "并发验收必须使用生产请求时限"
+        isolation_times = []
         for mode in ("zero", "partial", "slow"):
-            log_count = len(request_logs)
-            blocked = socket.create_connection(server.server_address, timeout=2)
+            server.connection_events = {"127.0.0.2": threading.Event()}
+            blocked = socket.create_connection(server.server_address, timeout=2,
+                                               source_address=("127.0.0.2", 0))
             started = threading.Event()
+            stopped = threading.Event()
 
             def occupy():
                 try:
@@ -909,8 +1009,7 @@ api.main()
                         blocked.sendall(b"G")
                     started.set()
                     if mode == "slow":
-                        for _ in range(20):
-                            time.sleep(0.04)
+                        while not stopped.wait(0.04):
                             blocked.sendall(b"E")
                 except OSError:
                     pass
@@ -918,14 +1017,59 @@ api.main()
             sender = threading.Thread(target=occupy)
             sender.start()
             assert started.wait(timeout=2)
+            assert server.connection_events["127.0.0.2"].wait(timeout=2)
+            queued = socket.create_connection(server.server_address, timeout=1,
+                                               source_address=("127.0.0.2", 0))
+            with server.request_lock:
+                assert server.request_lock.wait_for(
+                    lambda: len(server.active_requests.get("127.0.0.2", [])) == 2, timeout=1)
+            with socket.create_connection(server.server_address, timeout=1,
+                                          source_address=("127.0.0.2", 0)) as excess_source:
+                try:
+                    assert excess_source.recv(1) == b"", "同一来源最多只能占用处理与交接各一项"
+                except ConnectionResetError:
+                    pass
             before = time.monotonic()
-            assert request()[0] == 200
-            assert time.monotonic() - before < 1.5, "慢速或空请求不得无限占住服务"
+            status, body = request("/v1/desired", token=SECOND_TOKEN, source="127.0.0.3",
+                                   timeout=api.HEALTH_TIMEOUT)
+            assert status == 200 and json.loads(body)["node_id"] == STATE_V2["peers"][1]["id"]
+            health()
+            elapsed = time.monotonic() - before
+            isolation_times.append(elapsed)
+            assert elapsed < api.HEALTH_TIMEOUT, "A 占连接时 B 同步及健康仍须在 2 秒内成功"
+            try:
+                assert queued.recv(1) == b"", "同源交接等待超时后必须拒绝，不能继续排队"
+            except ConnectionResetError:
+                pass
+            queued.close()
+            blocked.settimeout(0.1)
+            try:
+                assert blocked.recv(1) != b"", "原连接仍在生产时限内，不应靠缩短超时释放 B"
+            except TimeoutError:
+                pass
+            stopped.set()
             blocked.close()
             sender.join(timeout=2)
             assert not sender.is_alive()
-            assert any("status=connection_closed source=127.0.0.1 " in line
-                       for line in request_logs[log_count:]), f"{mode} 请求关闭必须记录真实 socket 来源"
+        occupied = []
+        try:
+            server.connection_events = {f"127.0.0.{n}": threading.Event() for n in range(2, 11)}
+            for source, event in list(server.connection_events.items())[:8]:
+                occupied.append(socket.create_connection(server.server_address, timeout=2,
+                                                         source_address=(source, 0)))
+                assert event.wait(timeout=2)
+            with socket.create_connection(server.server_address, timeout=1,
+                                          source_address=("127.0.0.10", 0)) as excess:
+                try:
+                    assert excess.recv(1) == b""
+                except ConnectionResetError:
+                    pass
+            assert not server.connection_events["127.0.0.10"].is_set(), \
+                "总计 8 个在途请求之外不能生成线程或排队任务"
+        finally:
+            for connection in occupied:
+                connection.close()
+        publish(STATE)
     finally:
         server.shutdown()
         thread.join(timeout=3)
@@ -935,7 +1079,7 @@ api.main()
     pattern = re.compile(
         r"(?P<time>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z) "
         r"control-request status=(?P<status>[1-5][0-9]{2}|connection_closed) "
-        r"source=127\.0\.0\.1 target=127\.0\.0\.1 port=(?P<port>[0-9]+)"
+        r"source=127\.0\.0\.[1-9] target=127\.0\.0\.1 port=(?P<port>[0-9]+)"
     )
     statuses = set()
     for line in request_logs:
@@ -948,7 +1092,8 @@ api.main()
     assert access_path.read_bytes() == ("\n".join(request_logs) + "\n").encode("ascii"), \
         "真实响应与健康检查的持久日志必须逐字等于 stdout"
     logs = "\n".join(request_logs)
-    for secret in (TOKEN, STATE["peer"]["token_sha256"], STATE["accounts"][0]["password"],
+    for secret in (TOKEN, SECOND_TOKEN, STATE["peer"]["token_sha256"],
+                   STATE_V2["peers"][1]["token_sha256"], STATE["accounts"][0]["password"],
                    STATE["accounts"][0]["uuid"], "/v1/desired", "secret", "log-injection",
                    "198.51.100.41", "198.51.100.42", "198.51.100.43",
                    STATE["listen"]["address"], STATE["peer"]["address"]):
@@ -956,15 +1101,34 @@ api.main()
     rejected(health)
     access_path.chmod(0o600)
     original_log = access_path.read_bytes()
-    with api.ControlServer(("127.0.0.1", 0), TestHandler) as failed_server:
-        failed_server.state_path = state_path
-        failed_server.listen = STATE["listen"]
-        failed_server.access_log = access_path
-        with socket.create_connection(failed_server.server_address, timeout=2) as client, \
-                patch.object(failed_server, "handle_error", side_effect=AssertionError("不能吞掉日志失败")):
+    failed_server = subprocess.Popen([sys.executable, "-c", """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("control_failure_test", sys.argv[1])
+api = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(api)
+with api.ControlServer(("127.0.0.1", 0), api.ControlHandler) as server:
+    server.state_path = sys.argv[2]
+    server.listen = api.read_state(sys.argv[2])["listen"]
+    server.access_log = sys.argv[3]
+    print(server.server_address[1], flush=True)
+    server.serve_forever()
+""", str(ROOT / "docker/images/ops/control_api.py"), str(state_path), str(access_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        assert select.select([failed_server.stdout], [], [], 3)[0], "真实服务须有界就绪"
+        failed_port = int(failed_server.stdout.readline())
+        with socket.create_connection(("127.0.0.1", failed_port), timeout=2) as client:
             client.sendall(b"GET /v1/health HTTP/1.1\r\nHost: local\r\n\r\n")
-            log_failed(failed_server._handle_request_noblock)
             assert client.recv(1) == b"", "日志权限失效必须先于任何 HTTP 响应退出"
+        stdout, stderr = failed_server.communicate(timeout=3)
+        assert failed_server.returncode == 78 and stdout == b""
+        assert stderr.decode() == "控制访问日志写入失败，服务已停止\n", \
+            "工作线程日志失败必须让整个进程以非零码退出，不能只关闭该线程"
+    finally:
+        if failed_server.poll() is None:
+            failed_server.kill()
+            failed_server.communicate(timeout=3)
     assert access_path.read_bytes() == original_log, "坏权限日志不能继续写入"
 
+print(f"docker-control-peer-isolation-ok:max_ms={max(isolation_times) * 1000:.3f}:failure_exit=78")
 print("docker-control-api-regression-ok")

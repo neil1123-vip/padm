@@ -463,6 +463,31 @@ for role in main controlled; do
     EXPECT_ROLE_ADDRESS=0
 done
 
+# v2 主控允许补建或修正未登记隧道，已有控制映射不受集合命令修改。
+addresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses \
+    --directory "${root}/secrets/net/wireguard")
+jq --argjson addresses "${addresses}" '
+  .control = {schema_version:2,role:"main",node_id:"00000001-1111-4111-8111-000000000001",
+    listen:{interface:"wg-padm",address:$addresses.address,port:18080},
+    peers:[{id:"00000002-1111-4111-8111-000000000002",address:$addresses.peer_address,
+      enabled:false,expires_at:1,token_sha256:("a"*64)}],revision:0,last_digest:null}
+' "${TEST_ROOT}/standalone.json" >"${root}/config/spec.json"
+chmod 0600 "${root}/config/spec.json"
+dockerConfigureSpecValidate "${root}/config/spec.json" || fail 'v2 主控夹具无效'
+registered=$(jq -r '.peer_address' <<<"${addresses}")
+before=$(snapshot)
+EXPECT_PEER_CHANGE=1
+run_case "${PADM_DOCKER_RC_CONFLICT}" peers update --peer-address "${registered}" --endpoint none --yes
+run_case "${PADM_DOCKER_RC_CONFLICT}" peers remove --peer-address "${registered}" --yes
+run_case "${PADM_DOCKER_RC_CONFLICT}" migrate --listen-port 51824 --yes
+[[ "$(snapshot)" == "${before}" ]] || fail 'v2 已登记映射拒绝改变了输入'
+run_case 0 peers add --peer-address 10.96.0.3 --peer-public-key "${SECOND_PEER}" --yes
+before=$(snapshot)
+run_case 0 peers update --peer-address 10.96.0.3 --endpoint 198.18.0.3:51824 --yes
+before=$(snapshot)
+run_case 0 peers remove --peer-address 10.96.0.3 --yes
+EXPECT_PEER_CHANGE=0
+
 # 不完整角色规格仍在准备、设置 Peer 和迁移前拒绝。
 for role in control control_sync; do
     jq --arg role "${role}" '. + {($role):{role:"fixture"}}' "${TEST_ROOT}/base.json" \

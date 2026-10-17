@@ -702,6 +702,8 @@ def controller_inputs(directory, spec_output=None):
         require(isinstance(spec, dict) and type(spec.get("schema_version")) is int
                 and spec["schema_version"] == 3 and "control_sync" not in spec
                 and isinstance(spec.get("control"), dict)
+                and type(spec["control"].get("schema_version")) is int
+                and spec["control"]["schema_version"] == 1
                 and isinstance(spec.get("host_integrations"), list)
                 and len(spec["host_integrations"]) == 1
                 and isinstance(spec["host_integrations"][0], dict)

@@ -336,7 +336,7 @@ try {
 
     $nestedNodeSelectors = @(
         'docker-control-two-deployment-real', 'docker-control-remap-real', 'docker-control-log-cron-real',
-        'docker-control-rebind-real',
+        'docker-control-rebind-real', 'docker-control-peers-real',
         'docker-routing-ipv6-real', 'docker-wireguard-cli-real', 'docker-wireguard-peers-real', 'docker-wireguard-control-real',
         'docker-wireguard-recovery-real', 'docker-wireguard-address-real', 'docker-controller-recovery-real',
         'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real',

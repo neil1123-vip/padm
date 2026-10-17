@@ -100,7 +100,7 @@ dockerRealityProbeRun() {
         [[ -n "${directory}" && " $* " == *' --network none '* ]] || return 1
         if [[ -n "${code}" ]]; then
             PYTHONPATH="${PROJECT_ROOT}/docker/images/ops" python3 -c "${code}" \
-                "${directory}/spec.json" "${directory}/state.json"
+                "${directory}/spec.json" "${directory}/state.json" "${!#}"
         else
             python3 "${PROJECT_ROOT}/docker/images/ops/control_state.py" --spec "${directory}/spec.json" \
                 --check-state "${directory}/state.json"
@@ -168,11 +168,12 @@ state_path = Path(sys.argv[2])
 state = api.read_state(state_path)
 invitation = json.loads(Path(sys.argv[3]).read_text())
 old = json.loads(Path(sys.argv[4]).read_text()) if sys.argv[4] else None
+peer = next(item for item in api.state_peers(state) if item["id"] == invitation["node_id"])
 
 class Handler(api.ControlHandler):
     def setup(self):
         super().setup()
-        self.client_address = (state["peer"]["address"], self.client_address[1])
+        self.client_address = (peer["address"], self.client_address[1])
 
     def log_message(self, *_):
         pass
@@ -194,7 +195,7 @@ def request(token):
     return status, json.loads(body)
 
 try:
-    expected = 200 if state["peer"]["enabled"] else 401
+    expected = 200 if peer["enabled"] else 401
     status, body = request(invitation["token"])
     assert status == expected, "已交付邀请须满足生产 API 鉴权合同"
     if expected == 200:
@@ -438,5 +439,64 @@ reject dockerControlCommand invite --output "${OUTPUT_ROOT}/race-directory.json"
 [[ -d "${OUTPUT_ROOT}/race-directory.json" &&
     -z "$(find "${OUTPUT_ROOT}/race-directory.json" -mindepth 1 -print -quit)" ]]
 unset -f ln
+check_clean
+
+# 两个 Peer 的邀请、轮换与撤销互相独立，撤销中断只能补齐指定项。
+firstOutput="${OUTPUT_ROOT}/v2-first.json"
+reset_locks
+dockerControlCommand invite --output "${firstOutput}" --yes >/dev/null
+dockerControlCommand upgrade --yes >/dev/null
+firstId=$(jq -r '.control.peers[0].id' "${spec}")
+secondId=55555555-5555-4555-8555-555555555555
+dockerControlPeerCheck() { [[ "$1" == 10.77.0.2 || "$1" == 10.77.0.3 ]]; }
+dockerAccountRandomUuid() { printf '%s\n' "${secondId}"; }
+dockerSetupRandomHex() { [[ "$2" == 32 ]] && printf e%.0s {1..64}; }
+dockerControlCommand peers add --peer-address 10.77.0.3 --yes >/dev/null
+cp -- "${spec}" "${TEST_ROOT}/v2-before.json"
+reject dockerControlCommand invite --output "${OUTPUT_ROOT}/v2-no-id.json" --yes
+reject dockerControlCommand invite --peer-id "${firstId}" --peer-id "${secondId}" \
+    --output "${OUTPUT_ROOT}/v2-duplicate-id.json" --yes
+[[ ! -e "${OUTPUT_ROOT}/v2-no-id.json" && ! -e "${OUTPUT_ROOT}/v2-duplicate-id.json" ]]
+secondOutput="${OUTPUT_ROOT}/v2-second.json"
+reset_locks
+dockerControlCommand invite --peer-id "${secondId}" --output "${secondOutput}" --yes >/dev/null
+jq -e --arg id "${secondId}" '.schema_version == 1 and .node_id == $id and
+    .peer_address == "10.77.0.3"' "${secondOutput}" >/dev/null
+check_api "${firstOutput}"
+check_api "${secondOutput}"
+cp -- "${spec}" "${TEST_ROOT}/v2-enabled.json"
+rotatedOutput="${OUTPUT_ROOT}/v2-second-rotated.json"
+reset_locks
+dockerControlCommand invite --peer-id "${secondId}" --output "${rotatedOutput}" --yes >/dev/null
+check_api "${rotatedOutput}" "${secondOutput}"
+check_api "${firstOutput}"
+jq -en --slurpfile before "${TEST_ROOT}/v2-before.json" --slurpfile after "${spec}" '
+  $before[0].control.peers[0] == $after[0].control.peers[0] and
+  ($before[0] | del(.control.peers)) == ($after[0] | del(.control.peers))
+' >/dev/null
+mv() {
+    command mv "$@" || return $?
+    if [[ "${!#}" == "${root}/config/control/state.json" && -f "${TEST_ROOT}/v2-revoke-signal" ]]; then
+        kill -TERM "${BASHPID}"
+    fi
+}
+touch "${TEST_ROOT}/v2-revoke-signal"
+status=0
+dockerControlCommand revoke --peer-id "${secondId}" --yes >/dev/null 2>&1 || status=$?
+[[ "${status}" == 143 ]]
+check_api "${rotatedOutput}"
+check_api "${firstOutput}"
+reject dockerControlStateCheck "${root}"
+reject dockerControlStateCheck "${root}" revoke "${firstId}"
+rm -- "${TEST_ROOT}/v2-revoke-signal"
+dockerControlCommand revoke --peer-id "${secondId}" --yes >/dev/null
+dockerControlStateCheck "${root}"
+check_api "${firstOutput}"
+check_api "${rotatedOutput}"
+jq -en --slurpfile before "${TEST_ROOT}/v2-before.json" --slurpfile after "${spec}" '
+  $before[0].control.peers[0] == $after[0].control.peers[0] and
+  ($before[0] | del(.control.peers)) == ($after[0] | del(.control.peers))
+' >/dev/null
+unset -f mv
 check_clean
 printf 'docker-control-invite-regression-ok\n'

@@ -1029,25 +1029,36 @@ dockerControlSpecValidate() {
         (split(".") as $parts | ($parts | length) == 4 and
          all($parts[]; test("^(0|[1-9][0-9]{0,2})$") and tonumber <= 255)) and
         test("^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)");
+      def peer: exact(["id","address","enabled","expires_at","token_sha256"]) and
+        (.id | uuid) and (.address | private_address) and (.enabled | type == "boolean") and
+        (.expires_at | count and . > 0) and
+        (.token_sha256 | type == "string" and test("^[a-f0-9]{64}$"));
       . as $spec |
       if has("control") then
         .schema_version == 3 and (has("control_sync") | not) and
         any(.host_integrations[]; .type == "wireguard") and
         (.control |
-          exact(["schema_version","role","node_id","listen","peer","revision","last_digest"]) and
-          .schema_version == 1 and .role == "main" and (.node_id | uuid) and
+          . as $control |
+          (if .schema_version == 1 then
+            exact(["schema_version","role","node_id","listen","peer","revision","last_digest"]) and
+            (.peer | peer) and .node_id != .peer.id and .listen.address != .peer.address
+           elif .schema_version == 2 then
+            exact(["schema_version","role","node_id","listen","peers","revision","last_digest"]) and
+            (.peers | type == "array" and length > 0 and all(.[]; peer) and
+              (map(.id) | unique | length) == length and
+              (map(.address) | unique | length) == length and
+              (map(.token_sha256) | unique | length) == length) and
+            all(.peers[]; .id != $control.node_id and .address != $control.listen.address)
+           else false end) and
+          .role == "main" and (.node_id | uuid) and
           (.listen | exact(["interface","address","port"]) and .interface == "wg-padm" and
             (.address | private_address) and
             (.port | count and . >= 1024 and . <= 65535)) and
-          (.peer | exact(["id","address","enabled","expires_at","token_sha256"]) and
-            (.id | uuid) and (.address | private_address) and (.enabled | type == "boolean") and
-            (.expires_at | count and . > 0) and
-            (.token_sha256 | type == "string" and test("^[a-f0-9]{64}$"))) and
-          .node_id != .peer.id and .listen.address != .peer.address and
           (.revision | count) and
           (if .last_digest == null then .revision == 0
            else (.last_digest | type == "string" and test("^[a-f0-9]{64}$")) end)) and
         all(.core.protocols[]; .public_port != $spec.control.listen.port) and
+        ($spec.control.schema_version != 2 or all(.host_integrations[]; .type != "fail2ban-control")) and
         all(.host_integrations[] | select(.type == "tproxy" or .type == "redirect"); .settings.port != $spec.control.listen.port)
       else true end
     ' "$1" >/dev/null 2>&1
@@ -1135,19 +1146,23 @@ dockerControlStateCheck() (
 import sys
 sys.path.insert(0, "/opt/padm")
 from control_state import published_state
-from control_api import MAX_STATE_BYTES, validate_state
+from control_api import MAX_STATE_BYTES, validate_state, state_peers
 from control_sync import read_input
 try:
     expected = published_state(read_input(sys.argv[1], 16 * MAX_STATE_BYTES))
     actual = validate_state(read_input(sys.argv[2], MAX_STATE_BYTES))
     # 撤销中断只补齐开关与有效期；严格解析后的身份、摘要及账号仍须一致。
-    if not actual["peer"]["enabled"] and actual["peer"]["expires_at"] == 1:
-        expected["peer"].update(enabled=False, expires_at=1)
+    selected = sys.argv[3] or (actual["peer"]["id"] if actual["schema_version"] == 1 else None)
+    for peer in state_peers(actual):
+        if peer["id"] == selected and not peer["enabled"] and peer["expires_at"] == 1:
+            for target in state_peers(expected):
+                if target["id"] == selected:
+                    target.update(enabled=False, expires_at=1)
     if actual != expected:
         raise ValueError("state mismatch")
 except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError):
     sys.exit("主控状态、账号摘要或发布版本不一致")
-' /input/spec.json /input/state.json
+' /input/spec.json /input/state.json "${3:-}"
     else
         dockerControlPlan "${input}" "${image}" --check-state /input/state.json
     fi
@@ -1219,12 +1234,16 @@ dockerControlRestorePrepare() {
     mkdir -p -- "${directory}/config/control" &&
         chmod 0700 "${directory}" || return 1
     (
-        local input source image index=0
+        local input source image index=0 comparisons='[]'
         local -a floors=()
         input=$(mktemp -d "${candidate}/.control-restore-input.XXXXXX") || return 1
         trap 'dockerRemoveManagedTree "$candidate" "$input"' EXIT
         chmod 0700 "${input}" &&
-            jq '.control.peer.enabled = false | .control.peer.expires_at = 1' \
+            jq 'if .control.schema_version == 1 then
+                  .control.peer |= (.enabled = false | .expires_at = 1)
+                elif .control.schema_version == 2 then
+                  .control.peers |= map(.enabled = false | .expires_at = 1)
+                else error("unsupported control version") end' \
                 "${backup}/config/spec.json" >"${input}/spec.json" &&
             chmod 0600 "${input}/spec.json" || return 1
         source="${root}/config/spec.json"
@@ -1237,6 +1256,7 @@ dockerControlRestorePrepare() {
                 cp -- "${source}" "${input}/previous.json" &&
                 chmod 0600 "${input}/previous.json" || return 1
             floors+=(--previous /input/previous.json)
+            comparisons=$(jq -cn --slurpfile spec "${source}" '[$spec[0].control]') || return 1
         fi
         # 恢复可能先复制旧规格；重试仍须综合未完成候选与此前恢复计划的最高版本。
         for source in "${candidate}/control-plan.json" "${directory}/control-plan.json"; do
@@ -1251,12 +1271,26 @@ dockerControlRestorePrepare() {
                 dockerConfigureSpecValidate "${input}/floor-spec.json" &&
                 jq -e 'has("control")' "${input}/floor-spec.json" >/dev/null || return 1
             floors+=(--plan-floor "/input/plan${index}.json")
+            comparisons=$(jq -cn --argjson previous "${comparisons}" \
+                --slurpfile spec "${input}/floor-spec.json" '$previous + [$spec[0].control]') || return 1
             index=$((index + 1))
         done
         [[ "${#floors[@]}" -gt 0 ]] || {
             dockerError '在线主控版本与候选恢复版本均缺失，保留现场并拒绝降低版本'
             return 1
         }
+        if jq -e '.control.schema_version == 2' "${backup}/config/spec.json" >/dev/null; then
+            # 仅保留所有可信快照均未变化的授权；缺少候选证据时全部禁用。
+            jq --argjson controls "${comparisons}" --argjson plans "${index}" '
+              .control as $old |
+              .control.peers |= map(. as $peer |
+                if $plans > 0 and all($controls[];
+                  .schema_version == 2 and .node_id == $old.node_id and .listen == $old.listen and
+                  any(.peers[]; . == $peer))
+                then . else .enabled = false | .expires_at = 1 end)
+            ' "${backup}/config/spec.json" >"${input}/spec.json" || return 1
+            chmod 0600 "${input}/spec.json" || return 1
+        fi
         image=$(jq -er '.images.ops' "${input}/spec.json") || return 1
         (umask 077; dockerControlPlan "${input}" "${image}" "${floors[@]}" >"${directory}/control-plan.next.json") &&
             jq '.spec' "${directory}/control-plan.next.json" >"${directory}/config/spec.json" &&
@@ -1883,6 +1917,19 @@ dockerWireGuardMigrationRoleCheck() {
     role=$(jq -er 'if has("control") then "main"
         elif has("control_sync") then "controlled" else "standalone" end' "${spec}") || return 1
     [[ "${role}" != standalone ]] || return 0
+    if jq -e '.control.schema_version == 2 and .control_sync == null' "${spec}" >/dev/null; then
+        addresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers --directory "${directory}") &&
+            jq -en --argjson addresses "${addresses}" --slurpfile spec "${spec}" '
+              $spec[0].control as $control |
+              $addresses.address == $control.listen.address and
+              all($control.peers[]; .address as $address |
+                any($addresses.peers[]; .address == $address))
+            ' >/dev/null || {
+            dockerError 'v2 控制地址必须全部对应现有 canonical WireGuard Peer，暂不支持关联改址'
+            return 1
+        }
+        return 0
+    fi
     addresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses \
         --directory "${directory}") &&
         jq -en --argjson addresses "${addresses}" --slurpfile spec "${spec}" '
@@ -1915,6 +1962,7 @@ dockerWireGuardMigrationSpecRole() {
       select(($current | length) == 1 and ($next | length) == 1) |
       $current[0] as $old | $next[0] as $new |
       if $old.control.role == "main" and $new.control.role == "main" and
+        $old.control.schema_version == 1 and $new.control.schema_version == 1 and
         $old.control_sync == null and $new.control_sync == null and
         $new.control.peer.enabled == false and $new.control.peer.expires_at == 1 and
         ($old.control.listen.address != $new.control.listen.address or
@@ -7696,7 +7744,7 @@ dockerRestoreConfiguration() {
     DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
     DOCKER_CONFIG_WIREGUARD_MIGRATION=0
     [[ -z "${DOCKER_CONTROL_RESTORE_PLAN:-}" ]] ||
-        printf '主控恢复完成，Peer 授权已禁用，请重新生成邀请。\n' >&2
+        printf '主控恢复完成；请查看 control peers list，为已禁用的 Peer 重新生成邀请。\n' >&2
     DOCKER_CONTROL_RESTORE_PLAN=
 }
 

@@ -1206,7 +1206,7 @@ Revocation works even when the network is down and repeated revocation does not 
 It atomically disables API authorization before updating the spec; repeat `revoke` after an interruption
 to finish the spec update without restoring the old authorization.
 Redacted status includes the authorization switch and expiry.
-Recovery, failed-transaction rollback and explicit version rollback disable authorization to prevent old tokens
+For v1, recovery, failed-transaction rollback and explicit version rollback disable authorization to prevent old tokens
 from becoming valid again; generate a new invitation afterwards. An atomically delivered invitation remains
 even if configuration fails, but is not proof of active authorization; check `control status`.
 On the controlled node, first start a healthy managed single-peer WireGuard deployment and securely
@@ -1325,10 +1325,43 @@ duplicate addresses/keys are rejected; the existing 4096-byte configuration limi
 The update address selects an existing Peer; omitted fields stay unchanged and `none`
 clears the endpoint. Removing the last Peer is rejected. The existing full configuration
 transaction preserves identity/key bytes and handles failure/INT/TERM; service recreation
-may briefly interrupt connections. Role-bound collection changes, ordinary `migrate` with
+may briefly interrupt connections. Collection changes for v1 controllers or controlled nodes, ordinary `migrate` with
 multiple Peers and single-Peer disaster recovery with multiple Peers remain rejected.
-Multiple controlled servers and native-host/arm64/public-network acceptance remain deferred;
+Native-host/arm64/public-network acceptance remains deferred;
 limited controller recovery with a new identity is described below.
+
+An existing v1 controller can explicitly upgrade through menu `15 → 20` and register another node:
+
+```bash
+padm-docker control upgrade --yes
+padm-docker wireguard peers add --peer-address 10.77.0.3 --peer-public-key "$PEER_PUBLIC_KEY" --endpoint 192.0.2.3:51820 --yes
+padm-docker control peers add --peer-address 10.77.0.3 --yes
+padm-docker control peers list
+padm-docker control invite --peer-id "$PEER_ID" --output /root/padm-peer-3.json --yes
+padm-docker control source-check --peer-id "$PEER_ID"
+padm-docker control revoke --peer-id "$PEER_ID" --yes
+padm-docker control peers remove --peer-id "$PEER_ID" --yes
+```
+
+Use the generated `PEER_ID` from the redacted list; menu `21–23` lists, registers and removes nodes.
+V2 requires an explicit ID for invitations, revocation and source checks even with one remaining node.
+Upgrade preserves identities, authorization, revision, accounts and totals; old invitations remain valid.
+HTTP, invitation and controlled-node formats stay v1. Each node uses its own invitation and the existing
+join/sync workflow; both its actual source and token must match. The API port and account revision remain
+shared, and a port change requires each node to reconnect. Each source may have one processing request
+and one handoff waiting at most `100 ms`, both counted toward the overall limit of eight.
+The listener never waits for handoff; each connection has a total deadline of five seconds.
+Controller configuration transactions may briefly interrupt all connections. V2 rollback preserves an old
+authorization only when identity, listener and the complete Peer record are unchanged in every trusted
+plan; changed or unprovable authorizations are disabled. Revoke before removal and retain at least one node.
+V2 update/rollback requires `x-padm-control-peers=true` in the target bundle; older single-Peer bundles
+are rejected before switching.
+V2 controllers may maintain unregistered WireGuard Peers. Revoke and remove a control registration before
+updating/removing its WireGuard entry. V2 identity/address/key migration, controller disaster recovery and
+control-plane Fail2ban remain unsupported; disable the latter before upgrading.
+See the [implementation plan](../docker-menu-parity-plan.md) for focused and three-node evidence;
+native hosts, arm64, public networks, reboot and trusted releases still require separate acceptance.
+
 After control-token rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.

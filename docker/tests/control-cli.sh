@@ -150,7 +150,7 @@ dockerConfigureApply() {
         kill -s "$(<"${TEST_ROOT}/signal")" "${BASHPID}"
     fi
     [[ ! -f "${TEST_ROOT}/fail-apply" ]] || return 17
-    python3 "${PROJECT_ROOT}/docker/images/ops/control_state.py" --spec "$1" >"${TEST_ROOT}/plan.json" ||
+    python3 "${PROJECT_ROOT}/docker/images/ops/control_state.py" --spec "$1" --previous "${spec}" >"${TEST_ROOT}/plan.json" ||
         return 1
     jq '.spec' "${TEST_ROOT}/plan.json" >"${spec}" &&
         mkdir -p "${root}/config/control" &&
@@ -735,5 +735,93 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
     [[ "$(grep -c '^create$' "${TEST_ROOT}/rotation-docker.log")" == 5 &&
         "$(grep -c '^rm$' "${TEST_ROOT}/rotation-docker.log")" == 6 ]]
     rm -- "${TEST_ROOT}/rotation-drift"
+)
+(
+    # v2 升级与授权操作共享原规划器，第二项变化不得改第一项或账号版本。
+    cp -p -- "${spec}" "${TEST_ROOT}/v2-original.json"
+    jq '.control.revision = 7 | .control.peer.enabled = true | .control.peer.expires_at = 2000000000' \
+        "${spec}" >"${TEST_ROOT}/v2-baseline.json"
+    cp -- "${TEST_ROOT}/v2-baseline.json" "${spec}"
+    baseline=$(jq -cS . "${spec}")
+    for marker in fail-apply; do
+        touch "${TEST_ROOT}/${marker}"
+        reject dockerControlCommand upgrade --yes
+        rm -- "${TEST_ROOT}/${marker}"
+        [[ "$(jq -cS . "${spec}")" == "${baseline}" ]]
+    done
+    for signal in INT TERM; do
+        printf '%s\n' "${signal}" >"${TEST_ROOT}/signal"
+        status=0
+        dockerControlCommand upgrade --yes >/dev/null 2>&1 || status=$?
+        [[ "${signal}:${status}" == INT:130 || "${signal}:${status}" == TERM:143 ]]
+        [[ "$(jq -cS . "${spec}")" == "${baseline}" ]]
+    done
+    rm -- "${TEST_ROOT}/signal"
+    dockerControlCommand upgrade --yes >/dev/null
+    jq -en --slurpfile before "${TEST_ROOT}/v2-baseline.json" --slurpfile after "${spec}" '
+      $after[0] == ($before[0] | .control |= (.peers = [.peer] | del(.peer) | .schema_version = 2))
+    ' >/dev/null
+    applyBefore=$(wc -l <"${TEST_ROOT}/apply.log")
+    dockerControlCommand upgrade --yes >/dev/null
+    [[ "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+    firstId=$(jq -r '.control.peers[0].id' "${spec}")
+    reject dockerControlCommand invite --output "${TEST_ROOT}/missing-peer.json" --yes
+    reject dockerControlCommand revoke --yes
+    reject dockerControlCommand source-check
+    reject dockerControlCommand peers list --yes
+    reject dockerControlCommand peers remove --peer-id "${firstId}" --yes
+    reject dockerControlCommand peers add --peer-address 10.77.0.1 --yes
+    reject dockerControlCommand peers add --peer-address 10.77.0.2 --yes
+    reject dockerControlCommand peers add --peer-address 10.77.0.3 --yes
+    secondKey="$(printf E%.0s {1..43})="
+    printf '[Peer]\nPublicKey = %s\nAllowedIPs = 10.77.0.3/32\n' "${secondKey}" >>"${CONTROL_WG_CONFIG}"
+    printf '%s\t10.77.0.3/32\n' "${secondKey}" >>"${CONTROL_WG_ACTUAL}"
+    dockerSetupRandomHex() { [[ "$2" == 32 ]] && printf d%.0s {1..64}; }
+    dockerControlCommand peers add --peer-address 10.77.0.3 --yes >/dev/null
+    secondId=$(jq -r '.control.peers[] | select(.address == "10.77.0.3") | .id' "${spec}")
+    [[ "${firstId}" != "${secondId}" ]]
+    jq -en --slurpfile before "${TEST_ROOT}/v2-baseline.json" --slurpfile after "${spec}" '
+      $after[0].control.peers[0] == $before[0].control.peer and
+      ($after[0] | del(.control)) == ($before[0] | del(.control)) and
+      $after[0].control.revision == 7 and $after[0].control.last_digest == $before[0].control.last_digest and
+      $after[0].control.peers[1].enabled == false
+    ' >/dev/null
+    json=$(dockerControlCommand peers list)
+    statusJson=$(dockerControlCommand status --json)
+    jq -e '.schema_version == 2 and (.peers | length) == 2 and
+      all(.peers[]; keys == ["address","enabled","expires_at","id"])' <<<"${json}" >/dev/null
+    jq -e '.role == "main" and .revision == 7 and (.peers | length) == 2' <<<"${statusJson}" >/dev/null
+    (
+        dockerControlSourceSnapshot() { printf 'stable\n'; }
+        sleep() {
+            local challenge="${root}/data/control-source/challenge.json"
+            [[ "$1" == 1 && -f "${challenge}" ]] || return 1
+            printf '%s control-source nonce=%s status=401 source=%s target=%s port=%s\n' \
+                "$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" \
+                "$(jq -r .nonce "${challenge}")" "$(jq -r .expected_source "${challenge}")" \
+                "$(jq -r .target "${challenge}")" "$(jq -r .port "${challenge}")" \
+                >>"${root}/logs/control/source.receipt"
+        }
+        dockerControlCommand source-check --peer-id "${secondId}" >"${TEST_ROOT}/v2-source.log" 2>&1
+        grep -Fq '"source":"10.77.0.3"' "${TEST_ROOT}/v2-source.log"
+        [[ ! -e "${root}/data/control-source/challenge.json" ]]
+    )
+    cp -- "${spec}" "${TEST_ROOT}/v2-port-before.json"
+    dockerControlCommand set-port --port 19080 --yes >/dev/null
+    jq -en --slurpfile before "${TEST_ROOT}/v2-port-before.json" --slurpfile after "${spec}" '
+      $before[0] == ($after[0] | .control.listen.port = 18080)
+    ' >/dev/null
+    applyBefore=$(wc -l <"${TEST_ROOT}/apply.log")
+    dockerControlCommand set-port --port 19080 --yes >/dev/null
+    [[ "$(wc -l <"${TEST_ROOT}/apply.log")" == "${applyBefore}" ]]
+    dockerControlCommand revoke --peer-id "${secondId}" --yes >/dev/null
+    dockerControlCommand peers remove --peer-id "${secondId}" --yes >/dev/null
+    [[ "$(jq '.control.peers | length' "${spec}")" == 1 ]]
+    dockerControlCommand revoke --peer-id "${firstId}" --yes >/dev/null
+    jq -e '.control.peers[0].enabled == false and .control.peers[0].expires_at == 1 and
+      .control.revision == 7' "${spec}" >/dev/null
+    reject dockerControlCommand peers remove --peer-id "${firstId}" --yes
+    reject dockerControlCommand peers remove --peer-id "${secondId}" --yes
+    [[ -z "$(find "${root}" -maxdepth 1 -name '.control-peers.*' -print -quit)" ]]
 )
 printf 'docker-control-cli-regression-ok\n'

@@ -101,6 +101,41 @@ for mutation in (lambda s: s.pop("control"),
 authorization = copy.deepcopy(first["spec"])
 authorization["control"]["peer"]["enabled"] = False
 assert planner.build_plan(authorization, first["spec"])["state"]["revision"] == 0
+upgraded = copy.deepcopy(first["spec"])
+control = upgraded["control"]
+control.update(schema_version=2, peers=[control.pop("peer")])
+upgrade_plan = planner.build_plan(upgraded, first["spec"])
+validator.validate(upgrade_plan["spec"])
+assert upgrade_plan["spec"] == upgraded, "显式迁移不能改变账号、摘要或版本"
+assert planner.published_state(upgraded) == upgrade_plan["state"]
+assert first["spec"]["control"]["schema_version"] == 1 and "peer" in first["state"]
+second_peer = dict(id=identity(5), address="10.77.0.3", enabled=False,
+                   expires_at=1, token_sha256="b" * 64)
+multiple = copy.deepcopy(upgraded)
+multiple["control"]["peers"].append(second_peer)
+validator.validate(multiple)
+assert planner.build_plan(multiple, upgraded)["spec"] == multiple
+for mutation in (lambda p: p.update(enabled=True, expires_at=2000000000),
+                 lambda p: p.update(enabled=False, expires_at=1),
+                 lambda p: p.update(token_sha256="c" * 64)):
+    candidate = copy.deepcopy(multiple)
+    mutation(candidate["control"]["peers"][1])
+    planned = planner.build_plan(candidate, multiple)
+    assert planned["spec"] == candidate, "逐 Peer 授权不能改变共享账号摘要或版本"
+    assert planned["state"]["accounts"] == first["state"]["accounts"]
+    assert planned["state"]["peers"][0] == first["state"]["peer"]
+changed_v2 = copy.deepcopy(multiple)
+changed_v2["accounts"][0]["name"] = "两个被控共享新版本"
+changed_v2_plan = planner.build_plan(changed_v2, multiple)
+assert changed_v2_plan["state"]["revision"] == 1
+assert len(changed_v2_plan["state"]["peers"]) == 2
+assert planner.build_plan(multiple, first["spec"], [changed_v2_plan["spec"]])["state"]["revision"] == 2
+invalid_v2 = copy.deepcopy(multiple)
+invalid_v2["control"]["peers"] = []
+assert not validator.is_valid(invalid_v2)
+invalid_v2["control"]["peers"] = multiple["control"]["peers"]
+invalid_v2["control"]["peer"] = first["spec"]["control"]["peer"]
+assert not validator.is_valid(invalid_v2)
 
 def reject(value, previous=None):
     try:
@@ -389,6 +424,15 @@ if dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${spec}"; then exit 1; fi
 DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/old-bundle"
 if dockerValidateUpdateCandidate "${root}"; then exit 1; fi
 DOCKER_STAGED_BUNDLE_PATH=$(dockerCurrentBundlePath)
+
+# 旧单 Peer 能力标记继续兼容 v1，但不能接管同一规格版本内的多 Peer 状态。
+jq 'del(.["x-padm-control-peers"])' "$(dockerConfigureSchemaFile)" \
+    >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${spec}"
+jq '.control |= (.peers = [.peer] | del(.peer) | .schema_version = 2)' \
+    "${spec}" >"${TEST_ROOT}/control-v2.json"
+if dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${TEST_ROOT}/control-v2.json"; then exit 1; fi
+dockerBundleSupportsSpec "$(dockerCurrentBundlePath)" "${TEST_ROOT}/control-v2.json"
 
 # 默认 umask 下创建更新候选仍须先收紧私有规格，再校验主控状态。
 (
@@ -775,4 +819,44 @@ if dockerControlRecoveryCheck; then exit 1; fi
 rm -- "${residual}"
 dockerControlRecoveryCheck
 [[ "$(sha256sum "${root}/logs/control/auth.log")" == "${authDigest}" ]]
+
+# 主控原事务回滚只撤销变化的 A，未变的 B 及账号版本、累计必须保持。
+mkdir -p "${root}/data/traffic"
+chmod 0700 "${root}/data/traffic"
+jq '{schema_version:1,accounts:(.accounts | map({key:.id,value:{
+    name:.name,upload:123,download:456,limit_bytes:9000,baseline:{}}}) | from_entries)}' \
+    "${spec}" >"${root}/data/traffic/state.json"
+chmod 0600 "${root}/data/traffic/state.json"
+for failure in fail-up INT TERM; do
+    jq '.control |= (.peers = [
+        (.peer // .peers[0] | .enabled = true | .expires_at = 2000000000),
+        {id:"99999999-1111-4111-8111-999999999999",address:"10.77.0.3",
+         enabled:true,expires_at:2000000000,token_sha256:("f"*64)}] |
+         del(.peer) | .schema_version = 2)' "${spec}" >"${root}/v2-baseline.json"
+    chmod 0600 "${root}/v2-baseline.json"
+    DOCKER_CONTROL_TRANSACTION=1 apply "${root}/v2-baseline.json"
+    cp -- "${spec}" "${TEST_ROOT}/v2-before.json"
+    trafficBefore=$(sha256sum "${root}/data/traffic/state.json")
+    jq '.control.peers[0].token_sha256 = ("e"*64)' "${spec}" >"${root}/v2-invite.json"
+    chmod 0600 "${root}/v2-invite.json"
+    expected=14
+    if [[ "${failure}" == fail-up ]]; then
+        touch "${TEST_ROOT}/fail-up"
+    else
+        printf '%s\n' "${failure}" >"${TEST_ROOT}/interrupt-up"
+        expected=130
+        [[ "${failure}" != TERM ]] || expected=143
+    fi
+    status=0
+    DOCKER_CONTROL_TRANSACTION=1 apply "${root}/v2-invite.json" || status=$?
+    [[ "${status}" == "${expected}" ]]
+    jq -en --slurpfile before "${TEST_ROOT}/v2-before.json" --slurpfile after "${spec}" '
+      $after[0].control.peers[0].enabled == false and
+      $after[0].control.peers[0].expires_at == 1 and
+      $after[0].control.peers[1] == $before[0].control.peers[1] and
+      ($after[0] | del(.control.peers)) == ($before[0] | del(.control.peers))
+    ' >/dev/null
+    [[ "$(sha256sum "${root}/data/traffic/state.json")" == "${trafficBefore}" ]]
+    dockerControlStateCheck "${root}"
+done
 printf 'docker-control-state-regression-ok\n'

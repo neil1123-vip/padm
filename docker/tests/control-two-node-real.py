@@ -5,6 +5,7 @@ import http.client
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -310,7 +311,7 @@ def main():
                 assert before == (spec_path.read_bytes(), invite_path.read_bytes()), "客户端改写了规划输入"
                 if not accepted:
                     assert result.returncode == 78 and not result.stdout, "异常同步未安全拒绝"
-                    assert result.stderr == "被控接入、同步或重映射输入无效、授权失配或网络响应不支持\n".encode()
+                    assert result.stderr == "被控接入、同步、重映射、重连或重绑定输入无效、授权失配或网络响应不支持\n".encode()
                     return None
                 assert result.returncode == 0 and not result.stderr, "真实客户端规划失败"
                 draft = json.loads(result.stdout)
@@ -403,6 +404,34 @@ def main():
                 "local_inputs_unchanged": True, "old_token_and_revision_rejected": True,
             }
 
+            # 两个真实隧道来源复用同一隔离节点，验证单来源慢连接不阻塞另一项授权。
+            second_address, second_token = "10.231.0.3", "c" * 48
+            run(["ip", "address", "add", second_address + "/32", "dev", "wg-padm"], controlled)
+            run(["wg", "set", "wg-padm", "peer", public[1], "allowed-ips",
+                 f"{PEER_ADDRESS}/32,{second_address}/32"], controller)
+            run(["ip", "route", "add", second_address + "/32", "dev", "wg-padm"], controller)
+            multiple = copy.deepcopy(state)
+            multiple["schema_version"] = 2
+            multiple["peers"] = [multiple.pop("peer"), {
+                "id": identity(6), "address": second_address, "enabled": True, "expires_at": expires,
+                "token_sha256": hashlib.sha256(second_token.encode()).hexdigest(),
+            }]
+            second_invite = work / "second-invite.json"
+            save(second_invite, dict(invitation, node_id=identity(6),
+                                     peer_address=second_address, token=second_token))
+            save(state_path, multiple, api=True)
+            probe_result = run([
+                "setpriv", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--",
+                sys.executable, str(Path(__file__).resolve()), "--v2-requests",
+                str(invite_path), str(second_invite),
+            ], controlled)
+            evidence["v2_sources"] = json.loads(probe_result)
+            save(state_path, state, api=True)
+            run(["ip", "route", "delete", second_address + "/32", "dev", "wg-padm"], controller)
+            run(["wg", "set", "wg-padm", "peer", public[1],
+                 "allowed-ips", PEER_ADDRESS + "/32"], controller)
+            run(["ip", "address", "delete", second_address + "/32", "dev", "wg-padm"], controlled)
+
             save(spec_path, recovered)
             desired_path = work / "desired.json"
             save(desired_path, {
@@ -455,7 +484,7 @@ def main():
             auth_log.chmod(0o640)
             logs = b"".join(path.read_bytes() for path in (api_log, client_log, sync_log))
             logs += auth_log.read_bytes() + failure_log.read_bytes()
-            secrets = [token, rotated, identity(9), identity(10)] + [
+            secrets = [token, rotated, second_token, identity(9), identity(10)] + [
                 value for number in (3, 4, 5) for value in (account(number)["password"], account(number)["uuid"])
             ]
             secrets += [path.read_text().strip() for path in keys]
@@ -465,7 +494,7 @@ def main():
             for line in api_log.read_text().splitlines():
                 match = re.fullmatch(
                     r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z) control-request "
-                    r"status=([1-5]\d{2}|connection_closed) source=(10\.231\.0\.[12]) "
+                    r"status=([1-5]\d{2}|connection_closed) source=(10\.231\.0\.[123]) "
                     rf"target={re.escape(ADDRESS)} port={PORT}", line,
                 )
                 assert match, "真实控制日志格式或 socket 来源不匹配"
@@ -535,6 +564,48 @@ if __name__ == "__main__":
                     assert response.read() == b'{"ok":false,"error":"unauthorized"}'
             finally:
                 connection.close()
+        sys.exit(0)
+    if sys.argv[1:2] == ["--v2-requests"]:
+        invitations = [json.loads(Path(path).read_text()) for path in sys.argv[2:]]
+
+        def request(invitation, path="/v1/desired", token=None, accepted=True):
+            connection = http.client.HTTPConnection(
+                ADDRESS, PORT, timeout=3, source_address=(invitation["peer_address"], 0))
+            try:
+                connection.request("GET", path, headers={
+                    "Authorization": "Bearer " + (token or invitation["token"]),
+                    "X-Padm-Control-Version": "1", "Connection": "close"})
+                with connection.getresponse() as response:
+                    payload = json.loads(response.read())
+                    assert response.status == (200 if accepted else 401)
+                    if accepted:
+                        assert payload["node_id"] == invitation["node_id"]
+                        assert payload["controller_id"] == invitation["controller_id"]
+                    else:
+                        assert payload == {"ok": False, "error": "unauthorized"}
+            finally:
+                connection.close()
+
+        for invitation in invitations:
+            for _ in range(20):
+                request(invitation)
+                request(invitation, "/v1/health")
+        request(invitations[0], token=invitations[1]["token"], accepted=False)
+        request(invitations[1], token=invitations[0]["token"], accepted=False)
+        slow = socket.create_connection(
+            (ADDRESS, PORT), timeout=3, source_address=(invitations[0]["peer_address"], 0))
+        try:
+            slow.sendall(b"GET /v1/health HTTP/1.1\r\nHost: padm\r\n")
+            started = time.monotonic()
+            request(invitations[1])
+            request(invitations[1], "/v1/health")
+            elapsed = time.monotonic() - started
+            assert elapsed < 2, "单来源慢连接阻塞其它真实 WireGuard Peer"
+        finally:
+            slow.close()
+        print(json.dumps({"sources": [item["peer_address"] for item in invitations],
+                          "continuous_requests": 80, "cross_tokens_rejected": True,
+                          "other_peer_during_slow_ms": round(elapsed * 1000, 3)}))
         sys.exit(0)
     if sys.argv[1:2] == ["--source-probe"]:
         sys.path.insert(0, str(OPS))
