@@ -110,7 +110,14 @@ jobs:
           # ML-KEM 配对校验需要工具镜像中的 OpenSSL 3.5，不能使用旧版 runner 工具。
           elif [[ "${CONTRACT_TOOLS}" == true ]]; then
             git ls-files -z | tar --null -T - -cf "${RUNNER_TEMP}/padm-contracts-source.tar"
+            permissions=()
+            if [[ "${SELECTOR}" == docker-contracts-fast-rest ]]; then
+              # SSH driver 和 guard 夹具需要 ptrace 及容器私有挂载空间。
+              # Ubuntu 默认 AppArmor 拒绝 mount，只有该分片放开此限制。
+              permissions=(--cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined)
+            fi
             docker run --rm --network none --init \
+              "${permissions[@]}" \
               --tmpfs /work:rw,exec,mode=0755 --tmpfs /tmp:rw,exec,mode=1777 \
               --env PADM_REGRESSION_PARALLEL_JOBS="${jobs}" \
               --env PADM_DOCKER_CONTRACTS_SHARED_CHECKS \

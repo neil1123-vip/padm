@@ -940,6 +940,44 @@ SH
     done
 )
 
+# 执行工作流命令，确保只有 fast-rest 获得真实挂载与 ptrace 夹具所需能力。
+CONTRACT_RUN_SCRIPT=${TEST_ROOT}/run-contract-shard.sh
+awk '
+    /^      - name: Run contract shard$/ {step = 1; next}
+    step && /^        run: \|$/ {code = 1; next}
+    code {
+        if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) exit
+        sub(/^          /, ""); print
+    }
+' "${CONTRACT_WORKFLOW}" >"${CONTRACT_RUN_SCRIPT}"
+[[ -s "${CONTRACT_RUN_SCRIPT}" ]] || fail '合同分片执行步骤缺失'
+(
+    git() { :; }
+    tar() { cat >/dev/null; }
+    docker() {
+        [[ "$1" == run ]] || return 1
+        local -a permissions=()
+        while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+            --cap-add|--security-opt) permissions+=("$1" "$2"); shift ;;
+            --privileged) return 1 ;;
+            esac
+            shift
+        done
+        if [[ "${SELECTOR}" == docker-contracts-fast-rest ]]; then
+            [[ "${permissions[*]}" == '--cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined' ]]
+        else
+            [[ "${#permissions[@]}" -eq 0 ]]
+        fi
+    }
+    export CONTRACT_TOOLS=true RUNNER_TEMP=${TEST_ROOT}
+    for SELECTOR in docker-contracts-fast-rest docker-contracts-fast-heavy docker-contracts-fast-sites \
+        docker-contracts-reality-metadata docker-contracts-reality-rotation; do
+        export SELECTOR
+        (source "${CONTRACT_RUN_SCRIPT}") || fail "合同分片能力配置错误：${SELECTOR}"
+    done
+)
+
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
 grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS="${jobs}" PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
     fail 'contract shards do not use root-safe temp directories and bounded workers'
