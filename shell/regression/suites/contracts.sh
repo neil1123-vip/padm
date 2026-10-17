@@ -325,6 +325,9 @@ runRegressionDockerContractsAggregateContract() (
     status=$?
     set -e
     [[ "${status}" -eq 7 ]]
+    # 调度顺序可随耗时调整，集合及重复次数仍须完全一致。
+    sort -o "${expectedLog}" "${expectedLog}"
+    sort -o "${callLog}" "${callLog}"
     cmp -s "${expectedLog}" "${callLog}"
     # 精简门禁必须是全量的无重复子集，不能注册后悄悄丢失。
     [[ "${#coreSelectors[@]}" -eq 34 ]]

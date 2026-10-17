@@ -99,72 +99,72 @@ listRegressionDockerContractsChildSelectors() {
 }
 
 listRegressionDockerContractsFullChildSelectors() {
-    # 长事务与两族所有权优先调度，减少完整回归尾部等待。
+    # 按完整回归实测耗时先启动长任务，避免恢复故障矩阵独占收尾。
     printf '%s\n' \
-        docker-xhttp-edit \
-        docker-xhttp-rollback \
-        docker-xhttp-validation \
-        docker-phase3-edit \
         docker-phase3-entries-management-tls \
-        docker-phase3-entries-management-protocol \
-        docker-phase3-entries-topology \
-        docker-traditional-tls-transports \
-        docker-traditional-tls-base \
-        docker-setup-transports \
-        docker-setup-encrypted-udp \
+        docker-recovery-apply \
+        docker-xhttp-edit \
         docker-port-hopping-preflight \
         docker-tproxy-ownership \
         docker-redirect-focused \
-        docker-phase4-maintenance \
-        docker-routing-core-network-lifecycle \
+        docker-phase3-entries-management-protocol \
         docker-reality \
-        docker-setup-tls \
-        docker-phase4-lifecycle \
-        docker-reality-targets-direct \
-        docker-reality-parameters \
-        docker-vless-encryption \
-        docker-shadowsocks-rotation \
         docker-sites \
-        docker-routing-direct-block-ip-workflow \
-        docker-routing-direct-block-csv-workflow \
-        docker-routing-core-policy-lifecycle \
-        docker-setup-core \
-        docker-phase1 \
+        docker-shadowsocks-rotation \
+        docker-phase4-maintenance \
+        docker-setup-encrypted-udp \
+        docker-reality-targets-direct \
         docker-menu \
-        docker-setup-encrypted-tcp \
-        docker-routing-dns-hosts-workflow \
-        docker-routing-hosts-input \
-        docker-phase6 \
+        docker-setup-tls \
+        docker-vless-encryption \
+        docker-phase3-entries-topology \
+        docker-reality-parameters \
+        docker-routing-core-network-lifecycle \
+        docker-control-client \
+        docker-setup-core \
+        docker-phase4-lifecycle \
         docker-entry-port-alias \
+        docker-phase3-edit \
+        docker-recovery-preview \
+        docker-phase6 \
         docker-cdn-entries \
+        docker-routing-dns-hosts-workflow \
+        docker-routing-direct-block-csv-workflow \
+        docker-traditional-tls-base \
+        docker-routing-core-policy-lifecycle \
+        docker-routing-direct-block-ip-workflow \
+        docker-traditional-tls-transports \
+        docker-xhttp-rollback \
+        docker-phase1 \
+        docker-setup-transports \
+        docker-reality-targets-selection \
         docker-fail2ban-ownership \
         docker-control-state \
-        docker-reality-targets-selection \
-        docker-reality-target-library \
-        docker-control-client \
-        docker-tun-management \
-        docker-routing-block-ips-resolved \
-        docker-routing-core-contracts \
         docker-http-relay \
+        docker-tun-management \
+        docker-setup-encrypted-tcp \
+        docker-reality-target-library \
         docker-control-cli \
         docker-release \
-        docker-control-sync \
+        docker-routing-core-contracts \
+        docker-subscriptions \
+        docker-routing-hosts-input \
+        docker-backup \
+        docker-routing-block-ips-resolved \
+        docker-xhttp-validation \
         docker-phase5 \
+        docker-control-sync \
         docker-geo-data \
-        docker-accounts \
+        docker-ssh-driver \
+        docker-ssh-preflight \
         docker-traffic \
+        docker-accounts \
         docker-permissions \
         docker-fail2ban-source \
         docker-control-api \
-        docker-wireguard-runtime \
-        docker-subscriptions \
         docker-accounts-cli \
-        docker-ssh-preflight \
-        docker-ssh-driver \
+        docker-wireguard-runtime \
         docker-business \
-        docker-backup \
-        docker-recovery-preview \
-        docker-recovery-apply \
         docker-phase2
 }
 
@@ -754,7 +754,7 @@ runDockerRecoveryApplyRegression() {
 }
 
 listRegressionDockerRecoveryChildSelectors() {
-    printf '%s\n' docker-backup docker-business docker-recovery-preview docker-recovery-apply regression-dispatcher-contract
+    printf '%s\n' docker-recovery-apply docker-recovery-preview docker-backup docker-business regression-dispatcher-contract
 }
 
 runDockerSitesRegression() {
