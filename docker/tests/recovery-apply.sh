@@ -353,10 +353,11 @@ jq -n --arg ip "$(sha256sum "${SOURCE}/config/xray/geo/geoip.dat" | cut -d ' ' -
       sha256:{"geoip.dat":$ip,"geosite.dat":$site}}' >"${SOURCE}/config/xray/geo/state.json"
 chmod 0640 "${SOURCE}/config/xray/geo/"*
 mkdir -m 0700 -- "${SOURCE}/secrets/renewal"
-for provider in dns_cf standalone alpn; do
+for provider in dns_cf standalone webroot alpn; do
     domain="${provider//_/-}.example.com"
     version=1
     [[ "${provider}" != standalone ]] || version=2
+    [[ "${provider}" != webroot ]] || version=3
     [[ "${provider}" != alpn ]] || version=4
     mkdir -m 0700 -- "${SOURCE}/secrets/renewal/${domain}"
     jq -n --arg domain "${domain}" --arg provider "${provider}" --argjson version "${version}" \
@@ -443,7 +444,7 @@ assert_empty() {
 }
 assert_deployed() {
     local file relative
-    [[ "$(find "${root}/secrets/renewal" -type f | wc -l)" == 4 &&
+    [[ "$(find "${root}/secrets/renewal" -type f | wc -l)" == 5 &&
         -z "$(find "${root}/secrets/renewal" -type d ! -perm 0700 -print -quit)" &&
         -z "$(find "${root}/secrets/renewal" -type f ! -perm 0600 -print -quit)" &&
         -z "$(find "${root}/secrets/renewal" \( ! -user root -o ! -group root \) -print -quit)" ]] ||

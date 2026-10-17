@@ -708,7 +708,8 @@ def renewal_request(domain, data):
                          request["email"]))
     provider = request["provider"]
     require((request["schema_version"] == 1 and re.fullmatch(r"dns_[a-z0-9_]+", provider))
-            or (request["schema_version"], provider) in {(2, "standalone"), (4, "alpn")})
+            or (request["schema_version"], provider) in {
+                (2, "standalone"), (3, "webroot"), (4, "alpn")})
     return provider.startswith("dns_")
 
 

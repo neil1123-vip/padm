@@ -3216,7 +3216,7 @@ dockerRecoveryInputsPrepare() {
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" renewal-inputs --directory "${input}" \
         >"${draft}/renewal-counts.json" &&
         dockerRenewalRegistryValidate "${input}/secrets/renewal" || {
-        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone 或 ALPN 登记；不恢复 ACME、webroot 或调度'
+        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记；不恢复 HTTP-01、ACME 或调度'
         return 1
     }
     if jq -e '.geo_files > 0' "${draft}/geo-counts.json" >/dev/null; then

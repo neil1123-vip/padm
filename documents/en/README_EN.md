@@ -1468,9 +1468,10 @@ Geo recovery requires an Xray-containing deployment and a fixed-version managed 
 Archive manifest and state data digests are checked before network-disabled Xray parsing validation.
 No Geo data is downloaded and no automatic-update schedule is restored. `enabled=false` does not
 disable use of the Geo data; archives with `enabled=true` are rejected, not restored by disabling updates.
-Renewal recovery accepts only `enabled=false` DNS, standalone or ALPN registrations and DNS
+Renewal recovery accepts only `enabled=false` DNS, standalone, webroot or ALPN registrations and DNS
 credentials, preserving original bytes and `0700/0600 root:root` permissions without installing
-a renewal schedule. Enabled registrations, webroot/HTTP-01 and actual ACME files are rejected;
+a renewal schedule. Non-DNS registrations must not contain credentials. Enabled registrations,
+HTTP-01 and actual ACME files are rejected;
 an empty `data/acme` directory is compatible. Managed Reality coexistence regenerates stream
 configuration from the spec and reports public port `443`; archived Nginx stream files are
 not executed. Host-website coexistence remains outside this scope.

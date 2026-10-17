@@ -1788,8 +1788,8 @@ Geo 仅接受包含 Xray 且 `state.enabled=false`（自动更新停用）的固
 按原字节恢复 `config/xray/geo/` 下的 `state.json`、`geoip.dat` 和 `geosite.dat`，两份数据各不超过 128 MiB。
 先核对归档清单和 state 中的数据摘要，再进行无网络 Xray 解析校验；不联网下载 Geo 数据，不恢复自动更新调度。
 `enabled=false` 不停用 Geo 数据；`enabled=true` 的归档明确拒绝，不会关闭自动更新来代替恢复。
-续期仅恢复 `enabled=false` 的 DNS、standalone 或 ALPN 登记及 DNS 凭据，保持原字节和
-`0700/0600 root:root` 权限，不安装续期调度；启用登记、webroot/HTTP-01 和实际 ACME 文件拒绝，
+续期仅恢复 `enabled=false` 的 DNS、standalone、webroot 或 ALPN 登记及 DNS 凭据，保持原字节和
+`0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记、HTTP-01 和实际 ACME 文件拒绝，
 仅兼容空 `data/acme` 目录。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
 不执行归档 Nginx stream 文件；宿主网站共存不在此范围。
 归档的发布、签名身份、清单摘要和镜像必须与独立验签的发布完全一致。

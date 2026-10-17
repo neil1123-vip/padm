@@ -694,7 +694,7 @@ class RenewalInputTests(unittest.TestCase):
         self.assertFalse((self.destination / "secrets/renewal").exists())
 
     def test_exact_private_copy_all_disabled_providers_and_cli_summary(self):
-        for schema, provider in ((2, "standalone"), (4, "alpn")):
+        for schema, provider in ((2, "standalone"), (3, "webroot"), (4, "alpn")):
             domain = provider + ".example.com"
             entry = self.registry / domain
             entry.mkdir(mode=0o700)
@@ -704,7 +704,7 @@ class RenewalInputTests(unittest.TestCase):
             path.chmod(0o600)
         self.seal()
         result = recovery.renewal_inputs(str(self.source), str(self.destination))
-        self.assertEqual(result, {"renewal_registrations": 3})
+        self.assertEqual(result, {"renewal_registrations": 4})
         target = self.destination / "secrets/renewal"
         for path in [self.registry] + list(self.registry.rglob("*")):
             copied = target / path.relative_to(self.registry)
@@ -716,7 +716,7 @@ class RenewalInputTests(unittest.TestCase):
             recovery.renewal_inputs(str(self.source), str(self.destination))
         result = subprocess.run([sys.executable, "-B", str(HELPER), "renewal-inputs",
                                  "--directory", str(self.source)], capture_output=True, check=True)
-        self.assertEqual(json.loads(result.stdout), {"renewal_registrations": 3})
+        self.assertEqual(json.loads(result.stdout), {"renewal_registrations": 4})
         self.assertEqual(result.stderr, b"")
         self.assertNotIn(SECRET, result.stdout)
 
@@ -737,7 +737,7 @@ class RenewalInputTests(unittest.TestCase):
             ("enabled", True), ("enabled", 0), ("schema_version", True),
             ("schema_version", 2), ("provider", "dns_CF"), ("provider", "webroot"),
             ("domain", "other.example.com"), ("email", "bad"), ("email", "a@example.com\n"))]
-        invalid.extend([dict(self.request, schema_version=3, provider="webroot"),
+        invalid.extend([dict(self.request, schema_version=3, provider="webroot", enabled=True),
                         dict(self.request, extra="unexpected"), b"[]", b"",
                         b'{"enabled":false,"enabled":false}'])
         for request in invalid:
@@ -776,11 +776,12 @@ class RenewalInputTests(unittest.TestCase):
         self.rejected()
         extra.unlink()
         self.credentials.unlink()
-        self.put_request(dict(self.request, schema_version=2, provider="standalone"))
-        self.credentials.write_bytes(b"DNS_Token=unexpected\n")
-        self.credentials.chmod(0o600)
-        self.seal()
-        self.rejected()
+        for schema, provider in ((2, "standalone"), (3, "webroot"), (4, "alpn")):
+            self.put_request(dict(self.request, schema_version=schema, provider=provider))
+            self.credentials.write_bytes(b"DNS_Token=unexpected\n")
+            self.credentials.chmod(0o600)
+            self.seal()
+            self.rejected()
 
     def test_unsafe_permissions_ownership_links_and_size_limits(self):
         for path, mode in ((self.registry, 0o750), (self.entry, 0o750),

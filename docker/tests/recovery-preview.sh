@@ -166,7 +166,7 @@ dockerCandidateCompose() {
         [[ "$(stat -c '%u:%g:%a' "${candidate}/data/reality-targets")" == 0:0:700 ]] ||
             candidate_fail '目标库目录权限不私密'
         if [[ -n "${EXPECTED_RENEWAL_DIR}" ]]; then
-            [[ "$(find "${candidate}/secrets/renewal" -type f | wc -l)" == 4 &&
+            [[ "$(find "${candidate}/secrets/renewal" -type f | wc -l)" == 5 &&
                 -z "$(find "${candidate}/secrets/renewal" -type d ! -perm 0700 -print -quit)" &&
                 -z "$(find "${candidate}/secrets/renewal" -type f ! -perm 0600 -print -quit)" &&
                 -z "$(find "${candidate}/secrets/renewal" \( ! -user root -o ! -group root \) -print -quit)" ]] ||
@@ -345,10 +345,11 @@ grep -q '"renewal_registrations": 0' "${LOG}" || fail '无续期预览缺少兼�
 
 archive_variant renewal-disabled
 mkdir -m 0700 -- "${VARIANT}/secrets/renewal"
-for provider in dns_cf standalone alpn; do
+for provider in dns_cf standalone webroot alpn; do
     domain="${provider//_/-}.example.com"
     version=1
     [[ "${provider}" != standalone ]] || version=2
+    [[ "${provider}" != webroot ]] || version=3
     [[ "${provider}" != alpn ]] || version=4
     mkdir -m 0700 -- "${VARIANT}/secrets/renewal/${domain}"
     jq -n --arg domain "${domain}" --arg provider "${provider}" --argjson version "${version}" \
@@ -364,16 +365,21 @@ export_variant renewal-disabled
 prepare_target renewal-disabled
 EXPECTED_RENEWAL_DIR="${RENEWAL_SOURCE}/secrets/renewal"
 run_case renewal-disabled "${TEST_ROOT}/renewal-disabled.tar" 0
-grep -q '"renewal_registrations": 3' "${LOG}" || fail '续期预览缺少登记计数'
+grep -q '"renewal_registrations": 4' "${LOG}" || fail '续期预览缺少登记计数'
 ! grep -q 'private-value\|admin@example.com\|dns-cf.example.com' "${LOG}" || fail '续期预览泄露登记或凭据'
 
-for variant in enabled webroot; do
+for variant in enabled webroot-enabled webroot-credentials; do
     VARIANT="${TEST_ROOT}/variant-renewal-${variant}"
     cp -a -- "${RENEWAL_SOURCE}" "${VARIANT}"
-    filter='.enabled = true'
-    [[ "${variant}" != webroot ]] || filter='.schema_version = 3 | .provider = "webroot"'
-    jq "${filter}" "${VARIANT}/secrets/renewal/standalone.example.com/request.json" >"${TEST_ROOT}/request.json"
-    cat -- "${TEST_ROOT}/request.json" >"${VARIANT}/secrets/renewal/standalone.example.com/request.json"
+    entry=standalone.example.com
+    [[ "${variant}" != webroot-* ]] || entry=webroot.example.com
+    if [[ "${variant}" == webroot-credentials ]]; then
+        cp -- "${VARIANT}/secrets/renewal/dns-cf.example.com/credentials.env" \
+            "${VARIANT}/secrets/renewal/${entry}/credentials.env"
+    else
+        jq '.enabled = true' "${VARIANT}/secrets/renewal/${entry}/request.json" >"${TEST_ROOT}/request.json"
+        cat -- "${TEST_ROOT}/request.json" >"${VARIANT}/secrets/renewal/${entry}/request.json"
+    fi
     export_variant "renewal-${variant}"
     prepare_target "renewal-${variant}"
     run_case "renewal-${variant}" "${TEST_ROOT}/renewal-${variant}.tar" "${PADM_DOCKER_RC_STATE}"
