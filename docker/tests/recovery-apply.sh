@@ -102,11 +102,12 @@ dockerComposeRun() {
     esac
 }
 dockerRenewalScheduleInstall() { fail '恢复不应安装或启用续期调度'; }
-dockerGeoScheduleInstall() { :; }
 dockerControlLogScheduleInstall() { :; }
 dockerControlSyncScheduleInstall() { :; }
 dockerRestoreConfiguration() { fail '恢复应用调用了普通配置回滚'; }
 systemctl() {
+    local prefix= timer=${!#}
+    [[ "${timer}" != padm-docker-geo.timer ]] || prefix=geo-
     [[ "${MOCK_SCHEDULER}" == systemd ]] || return 1
     printf 'systemctl:%s\n' "$*" >>"${MOCK_BACKEND}/events"
     case "$1" in
@@ -117,11 +118,20 @@ systemctl() {
         [[ ! -f "${PADM_DOCKER_SYSTEMD_DIR}/${!#}" ]] ||
             printf '%s\n' "${PADM_DOCKER_SYSTEMD_DIR}/${!#}"
         return 0 ;;
-    is-enabled) [[ -e "${MOCK_BACKEND}/enabled" ]]; return $? ;;
-    is-active) [[ -e "${MOCK_BACKEND}/active" ]]; return $? ;;
+    is-enabled) [[ -e "${MOCK_BACKEND}/${prefix}enabled" ]]; return $? ;;
+    is-active) [[ -e "${MOCK_BACKEND}/${prefix}active" ]]; return $? ;;
     enable)
-        : >"${MOCK_BACKEND}/enabled"
-        [[ "$*" != *--now* ]] || : >"${MOCK_BACKEND}/active"
+        : >"${MOCK_BACKEND}/${prefix}enabled"
+        [[ "$*" != *--now* ]] || : >"${MOCK_BACKEND}/${prefix}active"
+        if [[ "${timer}" == padm-docker-geo.timer && "${MODE}" == geo-* &&
+            ! -e "${MOCK_BACKEND}/fault" ]]; then
+            case "${MODE}" in
+            geo-scheduler) : >"${MOCK_BACKEND}/fault"; return 1 ;;
+            geo-killed) kill_restore_owner ;;
+            geo-int) : >"${MOCK_BACKEND}/fault"; kill -INT "${DOCKER_TEST_OWNER}"; return 1 ;;
+            geo-term) : >"${MOCK_BACKEND}/fault"; kill -TERM "${DOCKER_TEST_OWNER}"; return 1 ;;
+            esac
+        fi
         if [[ "${MODE}" == scheduler || "${MODE}" == scheduler-killed ]]; then
             : >"${MOCK_BACKEND}/fault"
             [[ "${MODE}" != scheduler-killed ]] || {
@@ -131,9 +141,9 @@ systemctl() {
             return 1
         fi ;;
     disable)
-        rm -f -- "${MOCK_BACKEND}/enabled"
-        [[ "$*" != *--now* ]] || rm -f -- "${MOCK_BACKEND}/active" ;;
-    start) : >"${MOCK_BACKEND}/active" ;;
+        rm -f -- "${MOCK_BACKEND}/${prefix}enabled"
+        [[ "$*" != *--now* ]] || rm -f -- "${MOCK_BACKEND}/${prefix}active" ;;
+    start) : >"${MOCK_BACKEND}/${prefix}active" ;;
     *) return 1 ;;
     esac
 }
@@ -143,6 +153,22 @@ crontab() {
     -l) cat -- "${MOCK_BACKEND}/crontab" ;;
     -)
         cat >"${MOCK_BACKEND}/crontab"
+        if [[ "${MODE}" == geo-recover-killed && ! -e "${MOCK_BACKEND}/recover-fault" ]] &&
+            grep -q 'traffic collect' "${MOCK_BACKEND}/crontab" &&
+            ! grep -q 'geo auto-update' "${MOCK_BACKEND}/crontab"; then
+            : >"${MOCK_BACKEND}/recover-fault"
+            DOCKER_TEST_OWNER=$(<"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")
+            kill_restore_owner
+        fi
+        if [[ "${MODE}" == geo-* && ! -e "${MOCK_BACKEND}/fault" ]] &&
+            grep -q 'geo auto-update' "${MOCK_BACKEND}/crontab"; then
+            case "${MODE}" in
+            geo-scheduler) : >"${MOCK_BACKEND}/fault"; return 1 ;;
+            geo-killed) kill_restore_owner ;;
+            geo-int) : >"${MOCK_BACKEND}/fault"; kill -INT "${DOCKER_TEST_OWNER}"; return 1 ;;
+            geo-term) : >"${MOCK_BACKEND}/fault"; kill -TERM "${DOCKER_TEST_OWNER}"; return 1 ;;
+            esac
+        fi
         if [[ ( "${MODE}" == scheduler || "${MODE}" == scheduler-killed ) &&
             ! -e "${MOCK_BACKEND}/fault" ]]; then
             : >"${MOCK_BACKEND}/fault"
@@ -160,7 +186,21 @@ kill_restore_owner() {
     kill -KILL "${DOCKER_TEST_OWNER}"
     exit 137
 }
+schedule_snapshot() {
+    find "${PADM_DOCKER_SYSTEMD_DIR}" -type f -print0 | sort -z | xargs -0 -r sha256sum
+    cat -- "${MOCK_BACKEND}/crontab"
+    [[ "${1:-}" != content ]] || return 0
+    for state in enabled active geo-enabled geo-active; do
+        [[ ! -e "${MOCK_BACKEND}/${state}" ]] || printf '%s\n' "${state}"
+    done
+    return 0
+}
 mkdir() {
+    # Geo 原始快照之前已重装 traffic，按此刻的完整调度核对快照阶段无写入。
+    if [[ "${MODE}" == geo-source-* &&
+        "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/geo-source" ]]; then
+        schedule_snapshot content >"${MOCK_BACKEND}/schedule-content-before" || return 1
+    fi
     command mkdir "$@" || return $?
     if [[ "${MODE}" == preparing-stage &&
         "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.recovery."* ]]; then
@@ -169,6 +209,10 @@ mkdir() {
     fi
     if [[ "${MODE}" == source-mkdir &&
         "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/traffic-source" ]]; then
+        kill_restore_owner
+    fi
+    if [[ "${MODE}" == geo-source-mkdir &&
+        "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/geo-source" ]]; then
         kill_restore_owner
     fi
 }
@@ -190,8 +234,22 @@ cat() {
         builtin printf '%s\n' "${line}"
         kill_restore_owner
     fi
+    if [[ "${MODE}" == geo-source-unit && ! -e "${MOCK_BACKEND}/fault" &&
+        "$#" == 2 && "$1" == -- &&
+        "$2" == "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.service" &&
+        -d "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/geo-source" ]]; then
+        IFS= read -r line <"$2" || return 1
+        builtin printf '%s\n' "${line}"
+        kill_restore_owner
+    fi
     if [[ "${MODE}" == source-template && ! -e "${MOCK_BACKEND}/fault" && "$#" == 0 &&
         -d "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/traffic-schedule" ]]; then
+        IFS= read -r line || return 1
+        builtin printf '%s\n' "${line}"
+        kill_restore_owner
+    fi
+    if [[ "${MODE}" == geo-source-template && ! -e "${MOCK_BACKEND}/fault" && "$#" == 0 &&
+        -d "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/geo-schedule" ]]; then
         IFS= read -r line || return 1
         builtin printf '%s\n' "${line}"
         kill_restore_owner
@@ -202,6 +260,11 @@ printf() {
     if [[ "${MODE}" == source-cron && ! -e "${MOCK_BACKEND}/fault" &&
         -f "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/traffic-source/crontab" ]]; then
         builtin printf '%s' '# partial cron snapshot'
+        kill_restore_owner
+    fi
+    if [[ "${MODE}" == geo-source-cron && ! -e "${MOCK_BACKEND}/fault" &&
+        -f "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/geo-source/crontab" ]]; then
+        builtin printf '%s' '# partial Geo cron snapshot'
         kill_restore_owner
     fi
     builtin printf "$@"
@@ -225,6 +288,49 @@ mv() {
     command mv "$@"
 }
 python3() {
+    if [[ "${MODE}" == unit-* && "$*" == *'recovery.py transaction-unit-publish '* ]]; then
+        local owner
+        owner=$(<"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")
+        [[ "${owner}" =~ ^[1-9][0-9]*$ ]] || fail 'unit 硬杀缺少恢复进程 PID'
+        command python3 -B - "${MODE}" "${owner}" "$@" <<'PY'
+import importlib.util
+import os
+import signal
+import sys
+from pathlib import Path
+
+_, operation, job, kind, moment = sys.argv[1].split("-")
+owner = int(sys.argv[2])
+arguments = sys.argv[3:]
+spec = importlib.util.spec_from_file_location("recovery", arguments[1])
+recovery = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(recovery)
+replace = recovery.os.replace
+matched = (("--restore" in arguments) == (operation == "restore")
+           and arguments[arguments.index("--job") + 1] == job
+           and arguments[arguments.index("--kind") + 1] == kind)
+
+def kill():
+    Path(os.environ["MOCK_BACKEND"], "unit-fault").touch()
+    os.kill(owner, signal.SIGKILL)
+    os.kill(os.getpid(), signal.SIGKILL)
+
+def interrupted_replace(source, target, **kwargs):
+    if matched and target == "padm-docker-" + job + "." + kind and moment == "before":
+        kill()
+    replace(source, target, **kwargs)
+    if matched and target == "padm-docker-" + job + "." + kind and moment == "after":
+        kill()
+
+recovery.os.replace = interrupted_replace
+sys.argv = arguments[1:]
+status = recovery.main()
+if matched:
+    raise AssertionError("unit 原子替换硬杀未命中")
+sys.exit(status)
+PY
+        return $?
+    fi
     if [[ ( "${MODE}" == preparing-begin && "$*" == *'recovery.py transaction-begin '* ) ||
         ( "${MODE}" == preparing-extract && "$*" == *'recovery.py extract '* ) ]]; then
         # begin 位于命令替换内，部署锁记录的才是外层恢复进程。
@@ -446,6 +552,18 @@ python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${SOURCE}" \
     --output "${TEST_ROOT}/private recovery archive.tar" >/dev/null || fail '归档导出失败'
 DOCKER_CONFIG_CANDIDATE=
 
+GEO_ENABLED_SOURCE="${TEST_ROOT}/source-geo-enabled"
+cp -a -- "${SOURCE}" "${GEO_ENABLED_SOURCE}"
+jq '.enabled = true' "${SOURCE}/config/xray/geo/state.json" \
+    >"${GEO_ENABLED_SOURCE}/config/xray/geo/state.json"
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${GEO_ENABLED_SOURCE}" \
+    --output "${TEST_ROOT}/geo-enabled.tar" >/dev/null || fail '启用 Geo 归档导出失败'
+NO_GEO_SOURCE="${TEST_ROOT}/source-no-geo"
+cp -a -- "${SOURCE}" "${NO_GEO_SOURCE}"
+rm -rf -- "${NO_GEO_SOURCE}/config/xray/geo"
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${NO_GEO_SOURCE}" \
+    --output "${TEST_ROOT}/no-geo.tar" >/dev/null || fail '无 Geo 归档导出失败'
+
 HOST_SOURCE="${TEST_ROOT}/source-host"
 cp -a -- "${SOURCE}" "${HOST_SOURCE}"
 jq '.reality_stream = {listener_id:"entry-reality",host_website:{
@@ -520,15 +638,6 @@ for path in sorted([root] + list(root.rglob("*"))):
 print(json.dumps(entries, separators=(",", ":")))
 PY
 }
-schedule_snapshot() {
-    find "${PADM_DOCKER_SYSTEMD_DIR}" -type f -print0 | sort -z | xargs -0 -r sha256sum
-    cat -- "${MOCK_BACKEND}/crontab"
-    [[ "${1:-}" != content ]] || return 0
-    for state in enabled active; do
-        [[ ! -e "${MOCK_BACKEND}/${state}" ]] || printf '%s\n' "${state}"
-    done
-    return 0
-}
 prepare_target() {
     root="${TEST_ROOT}/target-$1"
     RECOVERY_ARCHIVE="${TEST_ROOT}/private recovery archive.tar"
@@ -564,6 +673,28 @@ assert_empty() {
     [[ ! -e "${MOCK_BACKEND}/compose-container" && ! -e "${MOCK_BACKEND}/padm-container" &&
         -z "$(find "${root}/locks" -mindepth 1 -print -quit)" ]] ||
         fail '回滚残留容器或锁'
+}
+assert_units_complete() {
+    local job kind file mode
+    for job in traffic geo; do
+        for kind in service timer; do
+            file="${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-${job}.${kind}"
+            [[ -f "${file}" && ! -L "${file}" &&
+                "$(stat -c '%u:%g:%h' "${file}")" == 0:0:1 ]] ||
+                fail 'unit 原子替换产生了不安全的文件'
+            mode=$(stat -c %a -- "${file}") || return 1
+            [[ "${mode}" == 600 || "${mode}" == 644 ]] ||
+                fail 'unit 原子替换产生了错误权限'
+            cmp -s -- "${file}" "${MOCK_BACKEND}/${job}.${kind}.old" ||
+                cmp -s -- "${file}" "${MOCK_BACKEND}/${job}.${kind}.new" ||
+                fail 'unit 硬杀留下空文件或半写内容'
+        done
+    done
+    [[ "$(find "${PADM_DOCKER_SYSTEMD_DIR}" -mindepth 1 | wc -l)" == 4 &&
+        -z "$(find "${root}/.restore-pending" -type f ! -perm 0600 -print -quit)" &&
+        -z "$(find "${root}/.restore-pending" -type d ! -perm 0700 -print -quit)" &&
+        -z "$(find "${root}/.restore-pending" \( ! -user root -o ! -group root -o -type l -o -type f -links +1 \) -print -quit)" ]] ||
+        fail 'unit 硬杀留下未登记文件或非私密暂存'
 }
 assert_deployed() {
     local source=${1:-${SOURCE}} file relative
@@ -770,6 +901,109 @@ for backend in systemd cron; do
         fail '成功事务没有清理登记或锁'
 done
 
+# 两项调度共享 crontab，Geo 后写入必须保留流量采集和无关任务。
+for backend in systemd cron; do
+    prepare_target "geo-success-${backend}" "${backend}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/geo-enabled.tar"
+    run_child apply ok 0
+    assert_deployed "${GEO_ENABLED_SOURCE}"
+    if [[ "${backend}" == systemd ]]; then
+        [[ -f "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.service" &&
+            -f "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.service" &&
+            -e "${MOCK_BACKEND}/geo-enabled" && -e "${MOCK_BACKEND}/geo-active" ]] ||
+            fail '启用 Geo 恢复没有安装并启用两项调度'
+        grep -qx 'ExecStart=.* geo auto-update' "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.service" &&
+            grep -qx 'OnCalendar=\*-\*-\* 01:35:00' "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.timer" ||
+            fail 'Geo 恢复没有使用受管命令或固定时间'
+    else
+        [[ "$(grep -c 'traffic collect' "${MOCK_BACKEND}/crontab")" == 1 &&
+            "$(grep -c 'geo auto-update' "${MOCK_BACKEND}/crontab")" == 1 ]] ||
+            fail 'Geo 恢复覆盖了流量采集或生成重复 cron'
+        grep -qx '17 3 \* \* \* another-renewal # padm-docker TLS renewal root=/elsewhere' \
+            "${MOCK_BACKEND}/crontab" || fail 'Geo 恢复覆盖了其它部署任务'
+    fi
+    [[ ! -e "${root}/.restore-pending" ]] || fail 'Geo 成功恢复残留登记'
+done
+
+# 停用或缺失 Geo 输入不接管宿主上既有的 Geo 任务。
+for input in disabled absent; do
+    prepare_target "geo-preserved-${input}" cron
+    [[ "${input}" != absent ]] || RECOVERY_ARCHIVE="${TEST_ROOT}/no-geo.tar"
+    printf 'external geo unit\n' >"${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.service"
+    printf '9 2 * * * external # padm-docker Geo 自动更新 root=/elsewhere\n' >>"${MOCK_BACKEND}/crontab"
+    cp -- "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.service" "${MOCK_BACKEND}/geo-before"
+    run_child apply ok 0
+    cmp -- "${MOCK_BACKEND}/geo-before" "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.service" ||
+        fail "${input}: 恢复接管了外部 Geo unit"
+    grep -qx '9 2 \* \* \* external # padm-docker Geo 自动更新 root=/elsewhere' \
+        "${MOCK_BACKEND}/crontab" || fail "${input}: 恢复接管了外部 Geo cron"
+done
+
+for backend in systemd cron; do
+    for mode in geo-scheduler geo-killed; do
+        prepare_target "${mode}-${backend}" "${backend}"
+        RECOVERY_ARCHIVE="${TEST_ROOT}/geo-enabled.tar"
+        expected=failure
+        [[ "${mode}" != geo-killed ]] || expected=137
+        run_child apply "${mode}" "${expected}"
+        [[ -e "${MOCK_BACKEND}/fault" ]] || fail "${mode}/${backend}: Geo 故障未命中"
+        if [[ "${mode}" == geo-scheduler ]]; then
+            assert_empty
+            continue
+        fi
+        [[ -d "${root}/.restore-pending/traffic-schedule" &&
+            -d "${root}/.restore-pending/geo-schedule" ]] || fail 'Geo 硬杀未保存两项撤销登记'
+        if [[ "${backend}" == systemd ]]; then
+            current_schedule="${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.service"
+        else
+            current_schedule="${MOCK_BACKEND}/crontab"
+        fi
+        cp -- "${current_schedule}" "${MOCK_BACKEND}/geo-expected"
+        printf '\n# external Geo schedule change\n' >>"${current_schedule}"
+        snapshot >"${MOCK_BACKEND}/pending-before"
+        schedule_snapshot >"${MOCK_BACKEND}/schedule-pending-before"
+        run_child recover ok failure
+        snapshot >"${MOCK_BACKEND}/pending-after"
+        schedule_snapshot >"${MOCK_BACKEND}/schedule-pending-after"
+        cmp -- "${MOCK_BACKEND}/pending-before" "${MOCK_BACKEND}/pending-after" &&
+            cmp -- "${MOCK_BACKEND}/schedule-pending-before" "${MOCK_BACKEND}/schedule-pending-after" ||
+            fail 'Geo 漂移拒绝时改变了 traffic、部署或登记'
+        cp -- "${MOCK_BACKEND}/geo-expected" "${current_schedule}"
+        if [[ "${backend}" == systemd ]]; then
+            dropin="${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-geo.service.d"
+            mkdir -- "${dropin}"
+            printf '[Service]\nEnvironment=EXTERNAL=1\n' >"${dropin}/override.conf"
+            snapshot >"${MOCK_BACKEND}/pending-before"
+            schedule_snapshot >"${MOCK_BACKEND}/schedule-pending-before"
+            run_child recover ok failure
+            snapshot >"${MOCK_BACKEND}/pending-after"
+            schedule_snapshot >"${MOCK_BACKEND}/schedule-pending-after"
+            cmp -- "${MOCK_BACKEND}/pending-before" "${MOCK_BACKEND}/pending-after" &&
+                cmp -- "${MOCK_BACKEND}/schedule-pending-before" "${MOCK_BACKEND}/schedule-pending-after" ||
+                fail 'Geo drop-in 拒绝时改变了 traffic、部署或登记'
+            rm -f -- "${dropin}/override.conf"
+            rmdir -- "${dropin}"
+        else
+            # Geo 已撤销、traffic 尚未撤销时再次硬杀，新进程仍须完整恢复。
+            run_child recover geo-recover-killed 137
+            [[ -e "${MOCK_BACKEND}/recover-fault" ]] || fail 'Geo 撤销后重试硬杀未命中'
+        fi
+        run_child recover ok 0
+        assert_empty
+        run_child recover ok 0
+        assert_empty
+    done
+done
+for mode in geo-int geo-term; do
+    prepare_target "${mode}" systemd
+    RECOVERY_ARCHIVE="${TEST_ROOT}/geo-enabled.tar"
+    expected=130
+    [[ "${mode}" != geo-term ]] || expected=143
+    run_child apply "${mode}" "${expected}"
+    [[ -e "${MOCK_BACKEND}/fault" ]] || fail "${mode}: Geo 信号故障未命中"
+    assert_empty
+done
+
 for mode in geo-probe-fail nginx-fail first-write partial-move health int term; do
     prepare_target "${mode}"
     expected=failure
@@ -830,27 +1064,34 @@ for backend in systemd cron; do
 done
 
 # 创建或复制原始快照时硬杀，恢复不得遗留锁下随机目录或触碰旧调度。
-for mode in source-mkdir source-unit source-cron source-template; do
+for mode in source-mkdir source-unit source-cron source-template \
+    geo-source-mkdir geo-source-unit geo-source-cron geo-source-template; do
     backend=systemd
-    [[ "${mode}" != source-cron ]] || backend=cron
+    [[ "${mode}" != *-cron ]] || backend=cron
     prepare_target "${mode}" "${backend}"
     dockerTrafficScheduleInstall || fail "${mode}: 旧调度准备失败"
+    job=traffic
+    if [[ "${mode}" == geo-* ]]; then
+        job=geo
+        RECOVERY_ARCHIVE="${TEST_ROOT}/geo-enabled.tar"
+        dockerGeoScheduleApply install || fail "${mode}: 旧 Geo 调度准备失败"
+    fi
     snapshot >"${MOCK_BACKEND}/before"
     schedule_snapshot >"${MOCK_BACKEND}/schedule-before"
     schedule_snapshot content >"${MOCK_BACKEND}/schedule-content-before"
     run_child apply "${mode}" 137
-    source_snapshot="${root}/.restore-pending/traffic-source"
+    source_snapshot="${root}/.restore-pending/${job}-source"
     [[ -e "${MOCK_BACKEND}/fault" && -d "${source_snapshot}" &&
         "$(stat -c '%u:%g:%a' "${source_snapshot}")" == 0:0:700 &&
         -z "$(find "${source_snapshot}" -type f ! -perm 0600 -print -quit)" ]] ||
         fail "${mode}: 硬杀未命中私密原始快照"
-    if [[ "${mode}" == source-template ]]; then
+    if [[ "${mode}" == *-template ]]; then
         [[ -s "${source_snapshot}/new.service" ]] &&
-            jq -e '.snapshot == "traffic-source"' \
-                "${root}/.restore-pending/traffic-schedule/metadata.json" >/dev/null ||
+            jq -e --arg source "${job}-source" '.snapshot == $source' \
+                "${root}/.restore-pending/${job}-schedule/metadata.json" >/dev/null ||
             fail '模板首写前没有持久保存旧调度'
     else
-        [[ ! -e "${root}/.restore-pending/traffic-schedule" ]] ||
+        [[ ! -e "${root}/.restore-pending/${job}-schedule" ]] ||
             fail "${mode}: 没有在快照保存前硬杀"
     fi
     schedule_snapshot content >"${MOCK_BACKEND}/schedule-after-kill"
@@ -858,6 +1099,55 @@ for mode in source-mkdir source-unit source-cron source-template; do
         fail "${mode}: 快照复制或模板暂存改变了外部调度"
     run_child recover ok 0
     assert_empty
+done
+
+# 安装与撤销的每个在线替换点硬杀，原始调度和新模板必须始终保持完整。
+for operation in publish restore; do
+    for job in traffic geo; do
+        for kind in service timer; do
+            for moment in before after; do
+                mode="unit-${operation}-${job}-${kind}-${moment}"
+                prepare_target "${mode}" systemd
+                RECOVERY_ARCHIVE="${TEST_ROOT}/geo-enabled.tar"
+                dockerTrafficScheduleInstall && dockerGeoScheduleApply install ||
+                    fail "${mode}: 旧调度准备失败"
+                for old_job in traffic geo; do
+                    for old_kind in service timer; do
+                        unit="${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-${old_job}.${old_kind}"
+                        cp -- "${unit}" "${MOCK_BACKEND}/${old_job}.${old_kind}.new"
+                        printf '\n# 原始调度注释\n' >>"${unit}"
+                        cp -- "${unit}" "${MOCK_BACKEND}/${old_job}.${old_kind}.old"
+                    done
+                done
+                snapshot >"${MOCK_BACKEND}/before"
+                schedule_snapshot >"${MOCK_BACKEND}/schedule-before"
+                action=apply
+                if [[ "${operation}" == restore ]]; then
+                    run_child apply geo-killed 137
+                    if [[ "${job}" == traffic && "${kind}" == service && "${moment}" == before ]]; then
+                        # 旧登记引用随机锁目录，回写仍须使用新的固定私密暂存。
+                        legacy="${root}/locks/traffic-schedule.legacy"
+                        mkdir -m 0700 -- "${legacy}"
+                        cp -- "${root}/.restore-pending/traffic-schedule/padm-docker-traffic.service" \
+                            "${root}/.restore-pending/traffic-schedule/padm-docker-traffic.timer" "${legacy}/"
+                        metadata="${root}/.restore-pending/traffic-schedule/metadata.json"
+                        jq '.snapshot = "traffic-schedule.legacy"' "${metadata}" >"${MOCK_BACKEND}/legacy-metadata"
+                        cat -- "${MOCK_BACKEND}/legacy-metadata" >"${metadata}"
+                    fi
+                    action=recover
+                fi
+                run_child "${action}" "${mode}" 137
+                [[ -e "${MOCK_BACKEND}/unit-fault" ]] || fail "${mode}: 原子替换硬杀未命中"
+                assert_units_complete
+                run_child recover ok 0
+                assert_empty
+                [[ -z "$(find "${PADM_DOCKER_SYSTEMD_DIR}" -type f ! -perm 0644 -print -quit)" ]] ||
+                    fail "${mode}: 完成撤销后没有恢复 unit 权限"
+                run_child recover ok 0
+                assert_empty
+            done
+        done
+    done
 done
 
 prepare_target killed
@@ -908,6 +1198,22 @@ cmp -- "${MOCK_BACKEND}/committed-before" "${MOCK_BACKEND}/committed-after" ||
 [[ ! -e "${root}/.restore-pending" ]] || fail 'committed 恢复没有清理登记'
 [[ "$(grep -c '^down$' "${MOCK_BACKEND}/events" || true)" == 0 ]] ||
     fail 'committed 恢复停止了成功部署'
+
+prepare_target geo-committed cron
+RECOVERY_ARCHIVE="${TEST_ROOT}/geo-enabled.tar"
+run_child apply committed 137
+assert_deployed "${GEO_ENABLED_SOURCE}"
+snapshot deployment >"${MOCK_BACKEND}/committed-before"
+schedule_snapshot >"${MOCK_BACKEND}/schedule-committed-before"
+run_child recover ok 0
+snapshot deployment >"${MOCK_BACKEND}/committed-after"
+schedule_snapshot >"${MOCK_BACKEND}/schedule-committed-after"
+cmp -- "${MOCK_BACKEND}/committed-before" "${MOCK_BACKEND}/committed-after" &&
+    cmp -- "${MOCK_BACKEND}/schedule-committed-before" "${MOCK_BACKEND}/schedule-committed-after" ||
+    fail 'Geo committed 恢复修改了成功部署或共享 crontab'
+[[ ! -e "${root}/.restore-pending" &&
+    "$(grep -c '^down$' "${MOCK_BACKEND}/events" || true)" == 0 ]] ||
+    fail 'Geo committed 恢复没有只清理登记'
 
 prepare_target cleaning
 run_child apply committed 137

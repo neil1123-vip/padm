@@ -932,9 +932,17 @@ class GeoInputTests(unittest.TestCase):
         self.seal()
         self.rejected()
 
-    def test_state_schema_fixed_version_disabled_schedule_and_digest_contract(self):
+    def test_enabled_schedule_preserves_state_bytes(self):
+        self.state["enabled"] = True
+        self.put_state(self.state)
+        self.assertEqual(recovery.geo_inputs(str(self.source), str(self.destination)), {"geo_files": 3})
+        self.assertEqual((self.destination / "config/xray/geo/state.json").read_bytes(),
+                         (self.geo / "state.json").read_bytes())
+
+    def test_state_schema_fixed_version_boolean_schedule_and_digest_contract(self):
         invalid = []
-        for key, value in (("schema_version", True), ("enabled", True), ("enabled", 0),
+        for key, value in (("schema_version", True), ("enabled", "true"), ("enabled", 0),
+                           ("enabled", None),
                            ("version", "latest"), ("version", ""), ("version", "bad/tag"),
                            ("version", "x" * 129), ("sha256", {}),
                            ("sha256", {"geoip.dat": "A" * 64, "geosite.dat": "0" * 64})):
@@ -1080,14 +1088,14 @@ class RecoveryTransactionTests(unittest.TestCase):
         path = (directory or self.pending) / recovery.TRANSACTION_METADATA
         path.write_bytes(recovery.transaction_encoded(metadata))
 
-    def snapshot(self):
-        snapshot = self.pending / "traffic-source"
+    def snapshot(self, job="traffic"):
+        snapshot = self.pending / (job + "-source")
         snapshot.mkdir(mode=0o700)
         return snapshot
 
-    def save_schedule(self, snapshot):
+    def save_schedule(self, snapshot, job="traffic"):
         return recovery.transaction_schedule_save(
-            str(self.root), self.project, str(snapshot), "/etc/systemd/system", 1, 0, 1,
+            str(self.root), self.project, str(snapshot), "/etc/systemd/system", 1, 0, 1, job,
         )
 
     def test_prepare_persists_private_copies_and_original_directory_metadata(self):
@@ -1262,6 +1270,8 @@ spec = importlib.util.spec_from_file_location("recovery", sys.argv[1])
 recovery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(recovery)
 root, project, phase = sys.argv[2:]
+job = "geo" if phase.startswith("geo-") else "traffic"
+phase = phase.removeprefix("geo-")
 write = recovery.transaction_write
 replace = recovery.os.replace
 rename = recovery.os.rename
@@ -1315,22 +1325,25 @@ elif phase.startswith("activate-"):
 elif phase.startswith("commit-"):
     recovery.transaction_commit(root, project)
 else:
-    recovery.transaction_schedule_save(root, project, root + "/.restore-pending/traffic-source",
-                                       "/etc/systemd/system", 1, 0, 1)
+    recovery.transaction_schedule_save(root, project, root + "/.restore-pending/" + job + "-source",
+                                       "/etc/systemd/system", 1, 0, 1, job)
 raise AssertionError("kill point was not reached")
 """
         for phase in ("begin-created", "begin-partial", "begin-written", "begin-published",
                       "activate-partial", "activate-written", "activate-published",
                       "commit-partial", "commit-written", "commit-published",
-                      "schedule-partial", "schedule-written", "schedule-published"):
+                      "schedule-partial", "schedule-written", "schedule-published",
+                      "geo-schedule-partial", "geo-schedule-written", "geo-schedule-published"):
             with self.subTest(phase=phase):
+                job = "geo" if phase.startswith("geo-") else "traffic"
+                schedule_phase = phase.removeprefix("geo-")
                 if phase.startswith("activate-"):
                     recovery.transaction_begin(str(self.root), self.project, str(self.candidate))
                 elif not phase.startswith("begin-"):
                     self.prepare()
-                if phase.startswith("schedule-"):
-                    snapshot = self.snapshot()
-                    for name in recovery.SCHEDULE_FILES:
+                if schedule_phase.startswith("schedule-"):
+                    snapshot = self.snapshot(job)
+                    for name in recovery.SCHEDULE_JOBS[job]:
                         path = snapshot / name
                         path.write_bytes(SECRET + name.encode())
                         path.chmod(0o600)
@@ -1350,14 +1363,14 @@ raise AssertionError("kill point was not reached")
                 elif phase == "commit-published":
                     expected = "committed"
                 self.assertEqual(json.loads(checked.stdout), {"state": expected})
-                schedule = self.cli("schedule-metadata")
+                schedule = self.cli("schedule-metadata", "--job", job)
                 self.assertEqual(schedule.returncode, 0, schedule.stderr.decode())
                 self.assertEqual(json.loads(schedule.stdout) is not None,
-                                 phase == "schedule-published")
+                                 schedule_phase == "schedule-published")
                 if phase in ("commit-partial", "commit-written"):
                     self.assertTrue((self.pending / recovery.TRANSACTION_NEXT).is_file())
-                if phase in ("schedule-partial", "schedule-written"):
-                    self.assertTrue((self.pending / "traffic-building").is_dir())
+                if schedule_phase in ("schedule-partial", "schedule-written"):
+                    self.assertTrue((self.pending / (job + "-building")).is_dir())
                 cleaned = self.cli("clean")
                 self.assertEqual(cleaned.returncode, 0, cleaned.stderr.decode())
                 self.assertFalse(self.pending.exists())
@@ -1449,7 +1462,7 @@ raise AssertionError("kill point was not reached")
     def test_clean_retries_every_partial_unlink_without_touching_candidate(self):
         original = recovery.os.unlink
         cleaning = self.root / recovery.TRANSACTION_CLEANING
-        for interrupted_after in range(1, 12):
+        for interrupted_after in range(1, 19):
             with self.subTest(interrupted_after=interrupted_after):
                 self.prepare()
                 snapshot = self.snapshot()
@@ -1458,6 +1471,12 @@ raise AssertionError("kill point was not reached")
                     path.write_bytes(SECRET)
                     path.chmod(0o600)
                 self.save_schedule(snapshot)
+                geo_snapshot = self.snapshot("geo")
+                for name in recovery.SCHEDULE_JOBS["geo"]:
+                    path = geo_snapshot / name
+                    path.write_bytes(SECRET)
+                    path.chmod(0o600)
+                self.save_schedule(geo_snapshot, "geo")
                 count = 0
 
                 def interrupted_unlink(*arguments, **keywords):
@@ -1719,6 +1738,31 @@ raise AssertionError("kill point was not reached")
         with self.assertRaises(ValueError):
             self.save_schedule(snapshot)
 
+    def test_geo_schedule_is_independent_and_default_traffic_stays_compatible(self):
+        self.prepare()
+        traffic = self.save_schedule(self.snapshot())
+        snapshot = self.snapshot("geo")
+        path = snapshot / "padm-docker-geo.service"
+        path.write_bytes(SECRET)
+        path.chmod(0o600)
+        geo = self.save_schedule(snapshot, "geo")
+        self.assertEqual(self.check()[1], traffic)
+        self.assertEqual(json.loads(self.cli("schedule-metadata").stdout), traffic)
+        self.assertEqual(json.loads(self.cli("schedule-metadata", "--job", "geo").stdout), geo)
+        self.assertEqual(geo["snapshot"], "geo-source")
+        for job in ("geo", "renewal", "control-sync"):
+            with self.assertRaises(ValueError):
+                self.save_schedule(snapshot, job)
+        copied = self.pending / "geo-schedule/padm-docker-geo.service"
+        copied.write_bytes(b"tampered")
+        with self.assertRaises(ValueError):
+            self.check()
+        copied.write_bytes(SECRET)
+        recovery.transaction_commit(str(self.root), self.project)
+        self.assertEqual(self.check()[0]["state"], "committed")
+        recovery.transaction_clean(str(self.root), self.project)
+        self.assertFalse(self.pending.exists())
+
     def test_schedule_keeps_legacy_random_snapshot_metadata_readable(self):
         self.prepare()
         saved = self.save_schedule(self.snapshot())
@@ -1726,6 +1770,56 @@ raise AssertionError("kill point was not reached")
         self.write_metadata(saved, self.pending / "traffic-schedule")
         self.assertEqual(self.check()[1], saved)
         recovery.transaction_clean(str(self.root), self.project)
+
+    def test_unit_cross_filesystem_rejects_writes_but_allows_cron_only_check(self):
+        self.prepare()
+        with tempfile.TemporaryDirectory(prefix="padm-unit-", dir="/dev/shm") as directory:
+            unit_dir = Path(directory) / "units"
+            unit_dir.mkdir(mode=0o700)
+            self.assertNotEqual(unit_dir.stat().st_dev, self.pending.stat().st_dev)
+            for job in ("traffic", "geo"):
+                snapshot = self.snapshot(job)
+                service = "padm-docker-" + job + ".service"
+                original = unit_dir / service
+                original.write_bytes(b"original-" + job.encode())
+                original.chmod(0o644)
+                (snapshot / service).write_bytes(original.read_bytes())
+                (snapshot / service).chmod(0o600)
+                recovery.transaction_schedule_save(
+                    str(self.root), self.project, str(snapshot), str(unit_dir), 1, 0, 0, job)
+                for kind in ("service", "timer"):
+                    template = snapshot / ("new." + kind)
+                    template.write_bytes(b"replacement-" + kind.encode())
+                    template.chmod(0o600)
+                before = {path.name: (path.read_bytes(), recovery.signature(path.stat()))
+                          for path in unit_dir.iterdir()}
+                operations = (
+                    {"install": True}, {"kind": "service"}, {"kind": "timer"},
+                    {"kind": "service", "restore": True}, {"kind": "timer", "restore": True},
+                )
+                for operation in operations:
+                    with self.subTest(job=job, operation=operation):
+                        with self.assertRaises(ValueError):
+                            recovery.transaction_unit(str(self.root), self.project, job, **operation)
+                        self.assertEqual(
+                            {path.name: (path.read_bytes(), recovery.signature(path.stat()))
+                             for path in unit_dir.iterdir()}, before)
+                        for kind in ("service", "timer"):
+                            self.assertEqual((snapshot / ("new." + kind)).read_bytes(),
+                                             b"replacement-" + kind.encode())
+            recovery.transaction_clean(str(self.root), self.project)
+            for path in unit_dir.iterdir():
+                path.unlink()
+            self.prepare()
+            for job in ("traffic", "geo"):
+                with self.subTest(job=job, operation="cron-only"):
+                    snapshot = self.snapshot(job)
+                    (snapshot / "crontab").write_bytes(b"# original cron\n")
+                    (snapshot / "crontab").chmod(0o600)
+                    recovery.transaction_schedule_save(
+                        str(self.root), self.project, str(snapshot), str(unit_dir), 0, 0, 0, job)
+                    recovery.transaction_unit(str(self.root), self.project, job)
+                    self.assertEqual(list(unit_dir.iterdir()), [])
 
     def test_schedule_rejects_unsafe_snapshot_or_tampered_registration(self):
         self.prepare()

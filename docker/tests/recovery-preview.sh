@@ -61,6 +61,7 @@ dockerComposeRun() { candidate_fail "预览执行了在线 Compose: $*"; }
 dockerComposeExecute() { candidate_fail "预览执行了在线恢复: $*"; }
 dockerInstallCandidate() { candidate_fail '预览安装了候选'; }
 dockerTrafficBeforeChange() { candidate_fail '预览采集或写入了在线流量'; }
+dockerMaintenanceScheduleApply() { candidate_fail "预览修改了外部调度: $*"; }
 dockerRealityProbeRun() {
     local directory probe
     [[ "$#" == 13 && "$1 $2 $3 $4 $5 $6" == \
@@ -595,8 +596,9 @@ jq '.enabled = true' "${VARIANT}/config/xray/geo/state.json" >"${TEST_ROOT}/stat
 cat -- "${TEST_ROOT}/state.json" >"${VARIANT}/config/xray/geo/state.json"
 export_variant geo-enabled
 prepare_target geo-enabled
-run_case geo-enabled "${TEST_ROOT}/geo-enabled.tar" "${PADM_DOCKER_RC_STATE}"
-grep -q 'enabled=false' "${LOG}" || fail 'Geo 自动更新启用未明确拒绝'
+EXPECTED_GEO_DIR="${VARIANT}/config/xray/geo"
+run_case geo-enabled "${TEST_ROOT}/geo-enabled.tar" 0
+grep -q '"geo_files": 3' "${LOG}" || fail '启用 Geo 预览缺少三文件计数'
 
 VARIANT="${TEST_ROOT}/variant-geo-digest"
 cp -a -- "${GEO_SOURCE}" "${VARIANT}"
@@ -636,7 +638,7 @@ export_variant geo-no-xray
 prepare_target geo-no-xray
 run_case geo-no-xray "${TEST_ROOT}/geo-no-xray.tar" "${PADM_DOCKER_RC_STATE}"
 grep -q '主核心或副核心包含 Xray' "${LOG}" || fail '无 Xray 的 Geo 归档未明确拒绝'
-[[ "$(wc -l <"${TEST_ROOT}/geo-probed")" -eq 3 ]] || fail 'Geo 探针次数错误'
+[[ "$(wc -l <"${TEST_ROOT}/geo-probed")" -eq 4 ]] || fail 'Geo 探针次数错误'
 
 archive_variant bad-library
 printf 'malformed\n' >"${VARIANT}/data/reality-targets/results.tsv"
@@ -892,7 +894,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 20 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 21 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&

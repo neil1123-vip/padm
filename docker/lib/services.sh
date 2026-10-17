@@ -7462,7 +7462,7 @@ dockerRealityStreamTransitionPrepare() {
 
 dockerConfigureApply() {
     local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} siteTitle=${9:-}
-    local specFile candidate backup answer root managedFile backupPrefix=configure
+    local specFile candidate backup answer root managedFile backupPrefix=configure geoEnabled=false
     # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
@@ -7576,6 +7576,10 @@ dockerConfigureApply() {
     fi
     if [[ "${mode}" == recovery ]]; then
         # 空目标没有旧配置快照；先持久保存停机输入，再允许首次业务写入。
+        if [[ -d "${candidate}/config/xray/geo" ]]; then
+            geoEnabled=$(jq -er '.enabled | select(type == "boolean") | tostring' \
+                "${candidate}/config/xray/geo/state.json") || return "${PADM_DOCKER_RC_STATE}"
+        fi
         backup="${candidate}/empty-backup"
         mkdir -m 0700 -- "${backup}" && : >"${backup}/present" &&
             chmod 0600 "${backup}/present" || return "${PADM_DOCKER_RC_STATE}"
@@ -7589,7 +7593,9 @@ dockerConfigureApply() {
                 ! mv -- "${candidate}/secrets/renewal" "${root}/secrets/"; } ||
             ! dockerEnsureRuntimeDataPermissions ||
             ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
-            ! dockerTrafficScheduleInstall; then
+            ! dockerTrafficScheduleInstall ||
+            { [[ "${geoEnabled}" == true ]] &&
+                ! dockerGeoScheduleInstall; }; then
             dockerError '灾备恢复安装或健康检查失败，正在撤销本次恢复'
             return "${PADM_DOCKER_RC_COMPOSE}"
         fi

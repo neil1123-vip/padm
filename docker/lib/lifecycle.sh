@@ -3212,7 +3212,7 @@ dockerRecoveryInputsPrepare() {
         >"${draft}/reality-counts.json" || return 1
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" geo-inputs --directory "${input}" \
         >"${draft}/geo-counts.json" || {
-        dockerError 'Geo 恢复仅接受完整、摘要一致且自动更新停用 enabled=false 的固定版本数据'
+        dockerError 'Geo 恢复仅接受完整、摘要一致且 enabled 为布尔值的固定版本数据'
         return 1
     }
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" renewal-inputs --directory "${input}" \
@@ -3267,7 +3267,7 @@ dockerRecoveryInputsPrepare() {
 }
 
 dockerRecoveryRecover() {
-    local root metadata schedule state directory entry containers mode uid gid path profile
+    local root metadata schedule geoSchedule state directory entry containers mode uid gid path profile job taskSchedule withGeo=0
     local -a compose=()
     root=$(dockerInstallRoot) || return 1
     [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
@@ -3283,11 +3283,22 @@ dockerRecoveryRecover() {
     metadata=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-metadata \
         --root "${root}" --project "${PADM_DOCKER_PROJECT}") &&
         schedule=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-metadata \
-            --root "${root}" --project "${PADM_DOCKER_PROJECT}") || return 1
+            --root "${root}" --project "${PADM_DOCKER_PROJECT}") &&
+        geoSchedule=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-metadata \
+            --root "${root}" --project "${PADM_DOCKER_PROJECT}" --job geo) || return 1
+    [[ "${geoSchedule}" == null ]] || withGeo=1
     state=$(jq -er '.state' <<<"${metadata}") || return 1
     if [[ "${state}" == active ]]; then
+        # 全部外部状态先核对，再按安装的逆序撤销，避免覆盖共享 crontab 的外部漂移。
+        for mode in 1 0; do
+            for job in geo traffic; do
+                taskSchedule=${schedule}
+                [[ "${job}" != geo ]] || taskSchedule=${geoSchedule}
+                dockerRecoveryScheduleRestore "${root}" "${taskSchedule}" "${job}" "${mode}" "${withGeo}" ||
+                    return 1
+            done
+        done
         # 停服只使用首写前持久保存的可信编排；在线文件可能只安装了一半。
-        dockerRecoveryScheduleRestore "${root}" "${schedule}" || return 1
         compose=(env -u PADM_DOCKER_ROOT -u PADM_NET_ROOT \
             -u PADM_XRAY_IMAGE -u PADM_SINGBOX_IMAGE -u PADM_NGINX_IMAGE \
             -u PADM_OPS_IMAGE -u PADM_NET_IMAGE docker compose --project-name "${PADM_DOCKER_PROJECT}"
@@ -3340,15 +3351,19 @@ dockerRecoveryRecover() {
         dockerTrafficSafePath "${root}" "${root}/${directory}" &&
             dockerRemoveManagedTree "${root}" "${root}/${directory}" || return 1
     done
-    if [[ "${schedule}" != null ]]; then
-        directory=$(jq -er '.snapshot' <<<"${schedule}") || return 1
+    for job in geo traffic; do
+        taskSchedule=${schedule}
+        [[ "${job}" != geo ]] || taskSchedule=${geoSchedule}
+        [[ "${taskSchedule}" != null ]] || continue
+        directory=$(jq -er '.snapshot' <<<"${taskSchedule}") || return 1
         # 新暂存由登记统一回收；旧版本只清理精确匹配的锁目录。
-        if [[ "${directory}" != traffic-source ]]; then
-            [[ "${directory}" =~ ^traffic-schedule\.[A-Za-z0-9]{6}$ ]] &&
+        if [[ "${directory}" != "${job}-source" ]]; then
+            [[ "${job}" == traffic &&
+                "${directory}" =~ ^traffic-schedule\.[A-Za-z0-9]{6}$ ]] &&
                 dockerTrafficSafePath "${root}" "${root}/locks/${directory}" &&
                 dockerRemoveManagedTree "${root}" "${root}/locks/${directory}" || return 1
         fi
-    fi
+    done
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-clean \
         --root "${root}" --project "${PADM_DOCKER_PROJECT}" || return 1
     DOCKER_CONFIG_SWITCHED=0 DOCKER_CONFIG_CANDIDATE= DOCKER_CONFIG_IPV6_TOUCHED=0

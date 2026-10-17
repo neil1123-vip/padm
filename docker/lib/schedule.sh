@@ -12,7 +12,7 @@ DOCKER_MAINTENANCE_KEEP_SERVICE=0
 
 dockerMaintenanceScheduleRestore() {
     local snapshot=$1 unitDir=$2 systemdReady=$3 timerEnabled=$4 timerActive=$5 job=$6 file failed=0
-    local keepService=${7:-0}
+    local keepService=${7:-0} recoveryRoot=${8:-}
     case "${job}" in renewal|geo|traffic|control-log|control-sync) ;; *) return 1 ;; esac
     if [[ "${systemdReady}" == 1 ]]; then
         [[ ! -f "${unitDir}/padm-docker-${job}.timer" ]] ||
@@ -23,7 +23,11 @@ dockerMaintenanceScheduleRestore() {
         fi
     fi
     for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
-        if [[ -f "${snapshot}/${file}" ]]; then
+        if [[ -n "${recoveryRoot}" ]]; then
+            python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-unit-publish \
+                --root "${recoveryRoot}" --project "${PADM_DOCKER_PROJECT}" --job "${job}" \
+                --kind "${file##*.}" --restore || failed=1
+        elif [[ -f "${snapshot}/${file}" ]]; then
             install -m 0644 "${snapshot}/${file}" "${unitDir}/${file}" || failed=1
         else
             rm -f -- "${unitDir}/${file}" || failed=1
@@ -45,9 +49,27 @@ dockerMaintenanceScheduleRestore() {
 }
 
 dockerRecoveryScheduleRestore() {
-    local root=$1 schedule=$2 snapshot="${1}/.restore-pending/traffic-schedule"
+    local root=$1 schedule=$2 job=${3:-traffic} checkOnly=${4:-0} withGeo=${5:-0} snapshot
     local metadata unitDir systemdReady timerEnabled timerActive file target mode fragment dropIns
-    local cli bashPath service timer cronLine currentCron savedCron currentOther savedOther
+    local cli bashPath service timer cronLine geoLine= currentCron savedCron currentOther savedOther
+    local marker command calendar description timerDescription timeout timerOptions
+    case "${job}" in
+    traffic)
+        marker='# padm-docker 流量采集'; command='traffic collect'
+        calendar='*-*-* *:*:00'
+        description='padm Docker traffic accounting'
+        timerDescription='Collect padm Docker traffic every minute'
+        timeout=90; timerOptions='AccuracySec=1s' ;;
+    geo)
+        marker='# padm-docker Geo 自动更新'; command='geo auto-update'
+        calendar='*-*-* 01:35:00'
+        description='padm Docker Xray Geo update'
+        timerDescription='Update padm Docker Xray Geo daily'
+        timeout=1800; timerOptions='RandomizedDelaySec=300' ;;
+    *) return 1 ;;
+    esac
+    [[ "${checkOnly}" == 0 || "${checkOnly}" == 1 ]] || return 1
+    snapshot="${root}/.restore-pending/${job}-schedule"
     [[ "${schedule}" != null ]] || return 0
     metadata=$(jq -er '[.unit_dir,.systemd_ready,.timer_enabled,.timer_active] | @tsv' <<<"${schedule}") ||
         return 1
@@ -61,8 +83,8 @@ dockerRecoveryScheduleRestore() {
             (( (8#${mode} & 022) == 0 )) || return 1
     else
         [[ "${systemdReady}" == 0 &&
-            ! -e "${snapshot}/padm-docker-traffic.service" &&
-            ! -e "${snapshot}/padm-docker-traffic.timer" ]] || return 1
+            ! -e "${snapshot}/padm-docker-${job}.service" &&
+            ! -e "${snapshot}/padm-docker-${job}.timer" ]] || return 1
     fi
     if [[ "${systemdReady}" == 1 ]]; then
         command -v systemctl >/dev/null 2>&1 &&
@@ -74,34 +96,34 @@ dockerRecoveryScheduleRestore() {
     cli="${PADM_DOCKER_BIN_DIR:-/usr/local/bin}/padm-docker"
     bashPath=$(command -v bash) || return 1
     service=$(cat <<EOF
-# padm-docker 流量采集
+${marker}
 # padm-docker root=${root}
 [Unit]
-Description=padm Docker traffic accounting
+Description=${description}
 After=docker.service
 [Service]
 Type=oneshot
 Environment=PADM_DOCKER_INSTALL_DIR=${root}
-ExecStart=${bashPath} ${cli} traffic collect
-TimeoutStartSec=90
+ExecStart=${bashPath} ${cli} ${command}
+TimeoutStartSec=${timeout}
 EOF
 )
     timer=$(cat <<EOF
-# padm-docker 流量采集
+${marker}
 # padm-docker root=${root}
 [Unit]
-Description=Collect padm Docker traffic every minute
+Description=${timerDescription}
 [Timer]
-OnCalendar=*-*-* *:*:00
-AccuracySec=1s
+OnCalendar=${calendar}
+${timerOptions}
 Persistent=true
-Unit=padm-docker-traffic.service
+Unit=padm-docker-${job}.service
 [Install]
 WantedBy=timers.target
 EOF
 )
     # 新进程恢复前先核对全部调度，不能用旧快照覆盖中断后新增的外部内容。
-    for file in padm-docker-traffic.service padm-docker-traffic.timer; do
+    for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
         target="${unitDir}/${file}"
         [[ ! -L "${target}" && ! -e "${target}.d" && ! -L "${target}.d" ]] || return 1
         if [[ "${systemdReady}" == 1 ]]; then
@@ -129,24 +151,37 @@ EOF
         currentCron=$(dockerTrafficReadCrontab) || return 1
         savedCron=$(<"${snapshot}/crontab")
         cronLine="* * * * * PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} traffic collect # padm-docker-traffic"
-        currentOther=$(printf '%s\n' "${currentCron}" | awk -v owned="${cronLine}" '$0 != owned') ||
+        if [[ "${withGeo}" == 1 ]]; then
+            geoLine="35 1 * * * PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} geo auto-update # padm-docker Geo 自动更新 root=${root}"
+        fi
+        currentOther=$(printf '%s\n' "${currentCron}" |
+            awk -v owned="${cronLine}" -v geo="${geoLine}" '$0 != owned && (geo == "" || $0 != geo)') ||
             return 1
-        savedOther=$(printf '%s\n' "${savedCron}" | awk -v owned="${cronLine}" '$0 != owned') ||
+        savedOther=$(printf '%s\n' "${savedCron}" |
+            awk -v owned="${cronLine}" -v geo="${geoLine}" '$0 != owned && (geo == "" || $0 != geo)') ||
             return 1
         [[ "${currentOther}" == "${savedOther}" ]] || return 1
     fi
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-unit-check \
+        --root "${root}" --project "${PADM_DOCKER_PROJECT}" --job "${job}" || return 1
+    [[ "${checkOnly}" != 1 ]] || return 0
     dockerMaintenanceScheduleRestore "${snapshot}" "${unitDir}" "${systemdReady}" \
-        "${timerEnabled}" "${timerActive}" traffic
+        "${timerEnabled}" "${timerActive}" "${job}" 0 "${root}"
 }
 
 dockerMaintenanceScheduleInterrupted() {
-    local job=$1 snapshot=${DOCKER_MAINTENANCE_SNAPSHOT:-} root
+    local job=$1 snapshot=${DOCKER_MAINTENANCE_SNAPSHOT:-} root recoveryRoot=
     [[ -n "${snapshot}" && "${DOCKER_MAINTENANCE_JOB:-}" == "${job}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     if [[ "${DOCKER_MAINTENANCE_CHANGED:-0}" == 1 ]]; then
+        if [[ ( "${job}" == traffic || "${job}" == geo ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 &&
+            "${snapshot}" == "${root}/.restore-pending/${job}-source" ]]; then
+            recoveryRoot=${root}
+        fi
         dockerMaintenanceScheduleRestore "${snapshot}" "${DOCKER_MAINTENANCE_UNIT_DIR}" \
             "${DOCKER_MAINTENANCE_SYSTEMD_READY}" "${DOCKER_MAINTENANCE_TIMER_ENABLED}" \
-            "${DOCKER_MAINTENANCE_TIMER_ACTIVE}" "${job}" "${DOCKER_MAINTENANCE_KEEP_SERVICE:-0}" || {
+            "${DOCKER_MAINTENANCE_TIMER_ACTIVE}" "${job}" "${DOCKER_MAINTENANCE_KEEP_SERVICE:-0}" \
+            "${recoveryRoot}" || {
             dockerError "${job} 调度恢复失败，请检查: ${snapshot}"
             return 1
         }
@@ -178,6 +213,8 @@ dockerMaintenanceScheduleApply() {
     local controlLogService= controlLogTimer= dropIns= loaded= prefix= backend=none active=false
     local timeout=1800 timerOptions='RandomizedDelaySec=300' legacy=0 syncLegacy=0 keepService=0
     local systemdReady=0 cronReady=0 timerEnabled=0 timerActive=0 haveUnits=0 haveCron=0 recoverySnapshot=0
+    local pendingDevice unitDevice
+    local -a unitCheck=()
     case "${action}" in install|remove) ;; check) [[ "${job}" == control-log || "${job}" == control-sync ]] || return 1 ;; *) return 1 ;; esac
     case "${job}" in
     renewal)
@@ -306,7 +343,7 @@ EOF
         legacy=0
         [[ ! -L "${unitDir}/${file}" ]] || return 1
         if [[ "${job}" == control-log || "${job}" == control-sync ||
-            ( "${job}" == traffic && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
+            ( ( "${job}" == traffic || "${job}" == geo ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
             [[ ! -e "${unitDir}/${file}.d" && ! -L "${unitDir}/${file}.d" ]] || return 1
         fi
         if [[ -e "${unitDir}/${file}" ]]; then
@@ -383,7 +420,7 @@ EOF
             [[ -z "${fragment}" ||
                 ( "${fragment}" == "${unitDir}/${file}" && -f "${unitDir}/${file}" ) ]] || return 1
             if [[ "${job}" == control-log || "${job}" == control-sync ||
-                ( "${job}" == traffic && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
+                ( ( "${job}" == traffic || "${job}" == geo ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
                 dropIns=$(systemctl show --property=DropInPaths --value "${file}" 2>/dev/null) || return 1
                 [[ -z "${dropIns}" ]] || return 1
             fi
@@ -448,9 +485,17 @@ EOF
         "${haveCron}" == 0 && -f "${unitDir}/padm-docker-control-sync.service" ]]; then
         keepService=1
     fi
-    if [[ "${job}" == traffic && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ]]; then
+    if [[ ( "${job}" == traffic || "${job}" == geo ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ]]; then
+        if [[ "${haveUnits}" == 1 || ( "${action}" == install && "${systemdReady}" == 1 ) ]]; then
+            pendingDevice=$(stat -c %d -- "${root}/.restore-pending") &&
+                unitDevice=$(stat -c %d -- "${unitDir}") || return 1
+            if [[ "${pendingDevice}" != "${unitDevice}" ]]; then
+                dockerError '恢复写入 systemd unit 需要调度目录与私密暂存位于同一文件系统'
+                return 1
+            fi
+        fi
         # 原始快照从创建起归持久登记所有，硬杀不会遗留未登记的随机目录。
-        snapshot="${root}/.restore-pending/traffic-source"
+        snapshot="${root}/.restore-pending/${job}-source"
         dockerTrafficSafePath "${root}" "${root}/.restore-pending" &&
             [[ -d "${root}/.restore-pending" &&
                 "$(stat -c '%u:%g:%a' "${root}/.restore-pending")" == 0:0:700 &&
@@ -482,8 +527,12 @@ EOF
         # 外层恢复提交前保留原调度，SIGKILL 后新进程仍能撤销首写。
         python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-save \
             --root "${root}" --project "${PADM_DOCKER_PROJECT}" --snapshot "${snapshot}" \
+            --job "${job}" \
             --unit-dir "${unitDir}" --systemd-ready "${systemdReady}" \
             --timer-enabled "${timerEnabled}" --timer-active "${timerActive}" || return 1
+        unitCheck=(transaction-unit-check --root "${root}" --project "${PADM_DOCKER_PROJECT}" --job "${job}")
+        [[ "${action}" != install || "${systemdReady}" != 1 ]] || unitCheck+=(--install)
+        python3 -B "${DOCKER_LIB_DIR}/recovery.py" "${unitCheck[@]}" || return 1
     fi
     DOCKER_MAINTENANCE_CHANGED=1
     if (
@@ -538,9 +587,17 @@ Unit=padm-docker-${job}.service
 WantedBy=timers.target
 EOF
         fi
-        install -m 0644 "${snapshot}/new.service" "${unitDir}/padm-docker-${job}.service" &&
-            install -m 0644 "${snapshot}/new.timer" "${unitDir}/padm-docker-${job}.timer" &&
-            systemctl daemon-reload &&
+        if [[ "${recoverySnapshot}" == 1 ]]; then
+            for file in service timer; do
+                python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-unit-publish \
+                    --root "${root}" --project "${PADM_DOCKER_PROJECT}" --job "${job}" \
+                    --kind "${file}" || exit 1
+            done
+        else
+            install -m 0644 "${snapshot}/new.service" "${unitDir}/padm-docker-${job}.service" &&
+                install -m 0644 "${snapshot}/new.timer" "${unitDir}/padm-docker-${job}.timer" || exit 1
+        fi
+        systemctl daemon-reload &&
             systemctl enable --now "padm-docker-${job}.timer" >/dev/null || exit 1
     else
         rm -f -- "${unitDir}/padm-docker-${job}.service" "${unitDir}/padm-docker-${job}.timer" || exit 1
@@ -551,6 +608,11 @@ EOF
         fi
     fi
     ); then
+        if [[ "${recoverySnapshot}" == 1 ]]; then
+            # 可信副本归外层恢复事务所有，释放内存槽位后才能安装下一项调度。
+            dockerMaintenanceScheduleCommit "${job}"
+            return $?
+        fi
         case "${job}" in
         renewal)
             [[ -z "${DOCKER_RENEWAL_STAGE:-}" || "${DOCKER_RENEWAL_SWITCHED:-0}" != 1 ]] || return 0

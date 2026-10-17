@@ -1484,11 +1484,13 @@ before copying the original bytes, preserving empty columns, duplicates and cust
 Directories use `0700 root:root` and files use `0600 root:root`. Recovery does not refresh records
 over the network or establish that historical scores or handshakes remain valid.
 Geo recovery requires an Xray-containing deployment and a fixed-version managed library with
-`state.enabled=false` (automatic updates disabled). It preserves the original bytes of
+a boolean `state.enabled`. It preserves the original bytes of
 `config/xray/geo/state.json`, `geoip.dat` and `geosite.dat`, with each data file limited to 128 MiB.
 Archive manifest and state data digests are checked before network-disabled Xray parsing validation.
-No Geo data is downloaded and no automatic-update schedule is restored. `enabled=false` does not
-disable use of the Geo data; archives with `enabled=true` are rejected, not restored by disabling updates.
+Recovery does not download Geo data. With `enabled=true`, it installs the target host's daily
+automatic-update schedule after installation and health checks succeed. With `enabled=false`,
+the data remains in use, but recovery does not install or take over an existing Geo schedule.
+Preview does not install schedules.
 Renewal recovery accepts only `enabled=false` DNS, standalone, webroot or ALPN registrations and DNS
 credentials, preserving original bytes and `0700/0600 root:root` permissions without installing
 a renewal schedule. Non-DNS registrations must not contain credentials. Enabled registrations
@@ -1515,10 +1517,15 @@ padm-docker restore recover
 ```
 
 Before the first business write, the transaction persists trusted candidate shutdown inputs,
-empty-directory metadata and schedule snapshots. Installation, health or traffic scheduling
+empty-directory metadata and schedule snapshots. Installation, health, traffic or Geo scheduling
 failures and INT/TERM roll back this restore. After registration, SIGKILL recovery can continue
 with menu `18 → 10` or `restore recover`. Ordinary deployment operations refuse pending cleanup.
 Failed recovery preserves evidence; external schedule changes are rejected rather than overwritten.
+Traffic and Geo have separate persistent snapshots. Rollback checks all external schedules for
+drift before restoring Geo and then traffic in reverse installation order.
+When recovery must write systemd units, the unit directory and private deployment staging
+must share a filesystem so complete files can be replaced atomically. Cross-filesystem
+unit writes are rejected before external schedule changes; cron-only recovery is unaffected.
 Committed transactions only clean staging on retry and do not stop the deployment.
 Commit metadata and schedule source/build staging use fixed private paths inside the registration.
 Partial writes or a hard kill can be cleaned by rollback or committed-cleanup retries; partial metadata never proves a commit.

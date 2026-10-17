@@ -45,10 +45,16 @@ TRANSACTION_METADATA = "metadata.json"
 TRANSACTION_NEXT = "metadata.next"
 TRANSACTION_DIRECTORIES = ("config", "data", "secrets", "logs", "backups")
 TRANSACTION_FILES = ("compose.json", "images.env", "deployment.json")
-SCHEDULE_FILES = ("padm-docker-traffic.service", "padm-docker-traffic.timer", "crontab")
+SCHEDULE_JOBS = {
+    "traffic": ("padm-docker-traffic.service", "padm-docker-traffic.timer", "crontab"),
+    "geo": ("padm-docker-geo.service", "padm-docker-geo.timer", "crontab"),
+}
+SCHEDULE_FILES = SCHEDULE_JOBS["traffic"]
 TRANSACTION_STAGING = {
-    "traffic-source": set(SCHEDULE_FILES) | {"new.service", "new.timer"},
-    "traffic-building": set(SCHEDULE_FILES) | {TRANSACTION_METADATA},
+    name: set(files) | extra
+    for job, files in SCHEDULE_JOBS.items()
+    for name, extra in ((job + "-source", {"new.service", "new.timer"}),
+                        (job + "-building", {TRANSACTION_METADATA}))
 }
 MAX_TRANSACTION_FILE = 16 * 1024 * 1024
 MAX_TRANSACTION_METADATA = 64 * 1024
@@ -639,7 +645,7 @@ def geo_inputs(directory, destination=None):
                         require(isinstance(state, dict) and set(state) == {
                             "schema_version", "version", "enabled", "sha256"})
                         require(type(state["schema_version"]) is int and state["schema_version"] == 1
-                                and state["enabled"] is False)
+                                and type(state["enabled"]) is bool)
                         require(isinstance(state["version"], str) and len(state["version"]) <= 128
                                 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", state["version"])
                                 and state["version"] != "latest")
@@ -858,10 +864,11 @@ def transaction_validate_files(directory_fd, files, names, required=True):
         require(observed == entry)
 
 
-def transaction_schedule(directory_fd, root, project):
-    if "traffic-schedule" not in os.listdir(directory_fd):
+def transaction_schedule(directory_fd, root, project, job="traffic"):
+    require(job in SCHEDULE_JOBS)
+    if job + "-schedule" not in os.listdir(directory_fd):
         return None
-    with transaction_directory(directory_fd, "traffic-schedule") as schedule_fd:
+    with transaction_directory(directory_fd, job + "-schedule") as schedule_fd:
         data, _ = transaction_read(schedule_fd, TRANSACTION_METADATA,
                                    limit=MAX_TRANSACTION_METADATA)
         metadata = read_json(data)
@@ -872,11 +879,11 @@ def transaction_schedule(directory_fd, root, project):
                 and metadata["root"] == root and metadata["project"] == project)
         transaction_path(metadata["unit_dir"])
         require(isinstance(metadata["snapshot"], str)
-                and (metadata["snapshot"] == "traffic-source"
-                     or re.fullmatch(r"traffic-schedule\.[A-Za-z0-9]{6}", metadata["snapshot"])))
+                and (metadata["snapshot"] == job + "-source" or job == "traffic"
+                     and re.fullmatch(r"traffic-schedule\.[A-Za-z0-9]{6}", metadata["snapshot"])))
         require(all(type(metadata[key]) is int and metadata[key] in (0, 1)
                     for key in ("systemd_ready", "timer_enabled", "timer_active")))
-        transaction_validate_files(schedule_fd, metadata["files"], SCHEDULE_FILES, required=False)
+        transaction_validate_files(schedule_fd, metadata["files"], SCHEDULE_JOBS[job], required=False)
         require(set(os.listdir(schedule_fd)) == {TRANSACTION_METADATA} | set(metadata["files"]))
         return metadata
 
@@ -926,11 +933,12 @@ def transaction_validate(directory_fd, root, project, metadata_name=TRANSACTION_
                              if name == TRANSACTION_NEXT else MAX_TRANSACTION_FILE)
         return metadata, None
     transaction_validate_files(directory_fd, metadata["files"], TRANSACTION_FILES)
-    schedule = transaction_schedule(directory_fd, root, project)
+    schedules = {job: transaction_schedule(directory_fd, root, project, job)
+                 for job in SCHEDULE_JOBS}
     staging = transaction_staging(directory_fd)
     require(set(os.listdir(directory_fd)) == {TRANSACTION_METADATA} | set(TRANSACTION_FILES)
-            | ({"traffic-schedule"} if schedule is not None else set()) | staging)
-    return metadata, schedule
+            | {job + "-schedule" for job, saved in schedules.items() if saved is not None} | staging)
+    return metadata, schedules["traffic"]
 
 
 def transaction_begin(root, project, candidate=None, input_stage=None):
@@ -1004,7 +1012,8 @@ def transaction_reap(root_fd):
         return False
     with transaction_directory(root_fd, TRANSACTION_CLEANING) as fd:
         names = set(os.listdir(fd))
-        directories = {"traffic-schedule"} | set(TRANSACTION_STAGING)
+        schedules = {job + "-schedule": set(files) for job, files in SCHEDULE_JOBS.items()}
+        directories = set(schedules) | set(TRANSACTION_STAGING)
         require(names <= {TRANSACTION_METADATA, TRANSACTION_NEXT} | directories | set(TRANSACTION_FILES))
         for name in names - directories:
             transaction_read(fd, name, limit=MAX_TRANSACTION_METADATA
@@ -1013,7 +1022,7 @@ def transaction_reap(root_fd):
             with transaction_directory(fd, directory) as schedule_fd:
                 entries = set(os.listdir(schedule_fd))
                 allowed_files = (TRANSACTION_STAGING[directory] if directory in TRANSACTION_STAGING
-                                 else {TRANSACTION_METADATA} | set(SCHEDULE_FILES))
+                                 else {TRANSACTION_METADATA} | schedules[directory])
                 require(entries <= allowed_files)
                 for name in entries:
                     transaction_read(schedule_fd, name, limit=MAX_TRANSACTION_METADATA
@@ -1084,12 +1093,15 @@ def transaction_prepare(root, project, candidate, input_stage=None):
     return metadata
 
 
-def transaction_check(root, project):
+def transaction_check(root, project, job="traffic"):
+    require(job in SCHEDULE_JOBS)
     with transaction_root(root, project) as root_fd:
         with transaction_directory(root_fd, TRANSACTION) as fd:
             metadata, schedule = transaction_validate(fd, root, project)
             if metadata["state"] == "preparing":
                 transaction_preparing_paths(root_fd, metadata)
+            if job != "traffic":
+                schedule = transaction_schedule(fd, root, project, job)
             return metadata, schedule
 
 
@@ -1130,19 +1142,21 @@ def transaction_clean(root, project):
 
 
 def transaction_schedule_save(root, project, snapshot, unit_dir, systemd_ready,
-                              timer_enabled, timer_active):
+                              timer_enabled, timer_active, job="traffic"):
+    require(job in SCHEDULE_JOBS)
     transaction_path(snapshot)
     transaction_path(unit_dir)
-    require(snapshot == root + "/" + TRANSACTION + "/traffic-source")
+    require(snapshot == root + "/" + TRANSACTION + "/" + job + "-source")
     require(all(type(value) is int and value in (0, 1)
                 for value in (systemd_ready, timer_enabled, timer_active)))
     with transaction_root(root, project) as root_fd:
         with transaction_directory(root_fd, TRANSACTION) as fd:
-            metadata, schedule = transaction_validate(fd, root, project)
-            require(metadata["state"] == "active" and schedule is None)
-            with transaction_directory(fd, "traffic-source") as snapshot_fd:
-                require(set(os.listdir(snapshot_fd)) <= set(SCHEDULE_FILES))
-                temporary = "traffic-building"
+            metadata, _ = transaction_validate(fd, root, project)
+            require(metadata["state"] == "active"
+                    and transaction_schedule(fd, root, project, job) is None)
+            with transaction_directory(fd, job + "-source") as snapshot_fd:
+                require(set(os.listdir(snapshot_fd)) <= set(SCHEDULE_JOBS[job]))
+                temporary = job + "-building"
                 os.mkdir(temporary, 0o700, dir_fd=fd)
                 published = False
                 try:
@@ -1161,13 +1175,85 @@ def transaction_schedule_save(root, project, snapshot, unit_dir, systemd_ready,
                         transaction_write(temporary_fd, TRANSACTION_METADATA,
                                           transaction_encoded(saved))
                         os.fsync(temporary_fd)
-                    os.rename(temporary, "traffic-schedule", src_dir_fd=fd, dst_dir_fd=fd)
+                    os.rename(temporary, job + "-schedule", src_dir_fd=fd, dst_dir_fd=fd)
                     published = True
                     os.fsync(fd)
                 finally:
                     if not published:
                         transaction_remove_files(fd, temporary)
     return saved
+
+
+@contextlib.contextmanager
+def transaction_unit_directory(pending_fd, schedule, job, install=False):
+    needs_write = install or any(name.endswith((".service", ".timer"))
+                                 for name in schedule["files"])
+    with contextlib.ExitStack() as stack:
+        try:
+            parent, name = stack.enter_context(absolute_parent(schedule["unit_dir"], private=True))
+            unit_fd = stack.enter_context(transaction_directory(parent, name, private=False))
+        except FileNotFoundError:
+            require(not needs_write)
+            yield None
+            return
+        # 原子替换不跨文件系统，不能退回可能被硬杀截断的复制。
+        require(not needs_write or os.fstat(unit_fd).st_dev == os.fstat(pending_fd).st_dev)
+        for name in SCHEDULE_JOBS[job][:2]:
+            try:
+                os.stat(name + ".d", dir_fd=unit_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                require(False)
+            try:
+                transaction_read(unit_fd, name, private=False, source_mode=0o644)
+            except FileNotFoundError:
+                pass
+        yield unit_fd
+
+
+def transaction_unit(root, project, job, kind=None, restore=False, install=False):
+    require(job in SCHEDULE_JOBS and kind in (None, "service", "timer"))
+    with transaction_root(root, project) as root_fd:
+        with transaction_directory(root_fd, TRANSACTION) as pending_fd:
+            metadata, _ = transaction_validate(pending_fd, root, project)
+            schedule = transaction_schedule(pending_fd, root, project, job)
+            require(metadata["state"] == "active" and schedule is not None)
+            needs_install = install or kind is not None and not restore
+            with transaction_unit_directory(pending_fd, schedule, job, needs_install) as unit_fd:
+                if kind is None or unit_fd is None:
+                    return
+                name = "padm-docker-" + job + "." + kind
+                if restore and name not in schedule["files"]:
+                    try:
+                        os.unlink(name, dir_fd=unit_fd)
+                    except FileNotFoundError:
+                        pass
+                    os.fsync(unit_fd)
+                    return
+                source = job + "-source"
+                if source not in os.listdir(pending_fd):
+                    require(restore)
+                    os.mkdir(source, 0o700, dir_fd=pending_fd)
+                    os.fsync(pending_fd)
+                with transaction_directory(pending_fd, source) as source_fd:
+                    require(os.fstat(source_fd).st_dev == os.fstat(unit_fd).st_dev)
+                    temporary = "new." + kind
+                    if restore:
+                        with transaction_directory(pending_fd, job + "-schedule") as schedule_fd:
+                            data, _ = transaction_read(schedule_fd, name)
+                        if temporary in os.listdir(source_fd):
+                            os.unlink(temporary, dir_fd=source_fd)
+                        transaction_write(source_fd, temporary, data)
+                    transaction_read(source_fd, temporary)
+                    with opened(source_fd, temporary, os.O_RDONLY) as new_fd:
+                        os.fsync(new_fd)
+                        os.replace(temporary, name, src_dir_fd=source_fd, dst_dir_fd=unit_fd)
+                        # 暂存始终为 0600；替换后再放宽，硬杀只留下完整的旧或新文件。
+                        os.fchmod(new_fd, 0o644)
+                        os.fsync(new_fd)
+                    os.fsync(unit_fd)
+                    os.fsync(source_fd)
 
 
 def main():
@@ -1191,10 +1277,12 @@ def main():
     renewal.add_argument("--directory", required=True)
     renewal.add_argument("--destination")
     for action in ("begin", "prepare", "check", "commit", "clean", "metadata",
-                   "schedule-save", "schedule-metadata"):
+                   "schedule-save", "schedule-metadata", "unit-check", "unit-publish"):
         command = commands.add_parser("transaction-" + action)
         command.add_argument("--root", required=True)
         command.add_argument("--project", required=True)
+        if action in ("schedule-save", "schedule-metadata", "unit-check", "unit-publish"):
+            command.add_argument("--job", choices=tuple(SCHEDULE_JOBS), default="traffic")
         if action == "prepare":
             command.add_argument("--candidate", required=True)
             command.add_argument("--input-stage")
@@ -1203,6 +1291,11 @@ def main():
             command.add_argument("--unit-dir", required=True)
             for option in ("systemd-ready", "timer-enabled", "timer-active"):
                 command.add_argument("--" + option, type=int, choices=(0, 1), required=True)
+        elif action == "unit-check":
+            command.add_argument("--install", action="store_true")
+        elif action == "unit-publish":
+            command.add_argument("--kind", choices=("service", "timer"), required=True)
+            command.add_argument("--restore", action="store_true")
     args = parser.parse_args()
     try:
         if args.action == "export":
@@ -1230,9 +1323,16 @@ def main():
             transaction_clean(args.root, args.project)
         elif args.action == "transaction-schedule-save":
             transaction_schedule_save(args.root, args.project, args.snapshot, args.unit_dir,
-                                      args.systemd_ready, args.timer_enabled, args.timer_active)
+                                      args.systemd_ready, args.timer_enabled, args.timer_active,
+                                      args.job)
+        elif args.action == "transaction-unit-check":
+            transaction_unit(args.root, args.project, args.job, install=args.install)
+        elif args.action == "transaction-unit-publish":
+            transaction_unit(args.root, args.project, args.job, args.kind, args.restore)
         else:
-            metadata, schedule = transaction_check(args.root, args.project)
+            metadata, schedule = transaction_check(
+                args.root, args.project,
+                args.job if args.action == "transaction-schedule-metadata" else "traffic")
             result = (metadata if args.action == "transaction-metadata" else
                       schedule if args.action == "transaction-schedule-metadata" else
                       {"state": metadata["state"]})

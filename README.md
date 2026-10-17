@@ -1797,10 +1797,11 @@ host 网络共存和 ACME 执行配置仍明确拒绝。停用分享组的悬空
 Reality 仅恢复 `data/reality-targets/results.tsv`（15/16 列 TSV）及 `blocked.tsv`（4 列 `|` 分隔），
 每文件最多 16 MiB，先完整验证再按原字节复制，保留空列、重复项和自定义屏蔽原因。
 目录为 `0700 root:root`、文件为 `0600 root:root`；不联网刷新，不保证旧评分或握手仍有效。
-Geo 仅接受包含 Xray 且 `state.enabled=false`（自动更新停用）的固定版本受管库，
+Geo 接受包含 Xray 且 `state.enabled` 为布尔值的固定版本受管库，
 按原字节恢复 `config/xray/geo/` 下的 `state.json`、`geoip.dat` 和 `geosite.dat`，两份数据各不超过 128 MiB。
-先核对归档清单和 state 中的数据摘要，再进行无网络 Xray 解析校验；不联网下载 Geo 数据，不恢复自动更新调度。
-`enabled=false` 不停用 Geo 数据；`enabled=true` 的归档明确拒绝，不会关闭自动更新来代替恢复。
+先核对归档清单和 state 中的数据摘要，再进行无网络 Xray 解析校验；恢复过程不联网下载 Geo 数据。
+`enabled=true` 在安装和健康检查成功后恢复目标主机的每日自动更新调度；
+`enabled=false` 仍使用 Geo 数据，但不安装或接管已有 Geo 调度。预览不安装调度。
 续期仅恢复 `enabled=false` 的 DNS、standalone、webroot 或 ALPN 登记及 DNS 凭据，保持原字节和
 `0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记和实际 ACME 文件拒绝，
 仅兼容空 `data/acme` 目录。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
@@ -1820,9 +1821,12 @@ padm-docker restore recover
 ```
 
 首次业务写入前持久保存可信候选的停机输入、原空目录元数据和调度快照。
-安装、健康检查、流量调度失败或 INT/TERM 时撤销本次恢复；登记发布后的 SIGKILL
+安装、健康检查、流量或 Geo 调度失败及 INT/TERM 时撤销本次恢复；登记发布后的 SIGKILL
 可用菜单 `18 → 10` 或 `restore recover` 继续。普通部署命令在登记清理前拒绝运行。
 恢复失败保留现场；外部调度被改写时拒绝覆盖。已提交事务的重试只清暂存，不停止服务。
+流量和 Geo 分别持久保存调度快照；撤销前统一核对外部漂移，再按 Geo、流量的逆序恢复。
+恢复中需要写回 systemd unit 时，unit 目录必须与部署私密暂存位于同一文件系统，
+以便原子替换完整文件；跨文件系统在修改外部调度前拒绝。纯 cron 恢复不受此限制。
 登记内的提交元数据及调度 source/build 暂存使用固定私密路径，半写或硬杀后
 可随撤销或已提交清理重试回收，不按半写元数据认定提交成功。
 准备阶段先创建私密登记，再创建精确登记的解包和候选目录；首次元数据半写、
