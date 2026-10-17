@@ -903,7 +903,7 @@ def renewal_request(domain, data):
             or (request["schema_version"], provider) in {
                 (2, "standalone"), (3, "webroot"), (4, "alpn")})
     require(not request["enabled"] or (request["schema_version"], provider) in {
-        (2, "standalone"), (3, "webroot")})
+        (2, "standalone"), (3, "webroot"), (4, "alpn")})
     return provider.startswith("dns_")
 
 
@@ -1103,7 +1103,10 @@ def acme_inputs(directory, destination=None):
         observed.append((request_fd, "request.json", signature(request_info)))
         renewal_request(domain, encoded)
         request = read_json(encoded)
-        if spec["tls"].get("http01") is True:
+        if request["provider"] == "alpn":
+            # HTTP-01 入口可与独立 ALPN 账户共存，材料验证方式仍由登记绑定。
+            validation = "tls-alpn01"
+        elif spec["tls"].get("http01") is True:
             require(type(spec.get("schema_version")) is int and spec["schema_version"] == 3
                     and isinstance(spec.get("core"), dict)
                     and isinstance(spec["core"].get("protocols"), list)

@@ -821,6 +821,18 @@ runDockerWebrootRecoveryApplyRegression() {
     PADM_DOCKER_RECOVERY_SCOPE=webroot runDockerRecoveryApplyRegression
 }
 
+runDockerAlpnRecoveryApplyRegression() {
+    PADM_DOCKER_RECOVERY_SCOPE=alpn runDockerRecoveryApplyRegression
+}
+
+runDockerAlpnRecoveryRealRegression() {
+    PADM_ACME_RECOVERY_REAL_SCOPE=alpn runDockerAcmeRecoveryRealRegression
+}
+
+listRegressionDockerAlpnRecoveryChildSelectors() {
+    printf '%s\n' docker-recovery-preview docker-alpn-recovery-apply
+}
+
 runDockerControllerRecoveryApplyRegression() {
     PADM_DOCKER_RECOVERY_SCOPE=controller runDockerRecoveryApplyRegression
 }
@@ -1248,6 +1260,10 @@ registerRegressionFunctionLeaf docker-recovery-preview runDockerRecoveryPreviewR
 registerRegressionFunctionLeaf docker-recovery-apply runDockerRecoveryApplyRegression
 registerRegressionFunctionLeaf docker-wireguard-recovery-apply runDockerWireGuardRecoveryApplyRegression
 registerRegressionFunctionLeaf docker-webroot-recovery-apply runDockerWebrootRecoveryApplyRegression
+registerRegressionFunctionLeaf docker-alpn-recovery-apply runDockerAlpnRecoveryApplyRegression
+registerRegressionFunctionLeaf docker-alpn-recovery-real runDockerAlpnRecoveryRealRegression
+registerRegressionParallelSelectorList docker-alpn-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-alpn-recovery-focused-${BASHPID:-$$}" listRegressionDockerAlpnRecoveryChildSelectors 2
 registerRegressionFunctionLeaf docker-controller-recovery-apply runDockerControllerRecoveryApplyRegression
 registerRegressionFunctionLeaf docker-controller-recovery-real runDockerControllerRecoveryRealRegression
 registerRegressionParallelSelectorList docker-controller-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \

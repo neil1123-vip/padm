@@ -609,10 +609,11 @@ run_case acme-enabled "${TEST_ROOT}/acme-enabled.tar" 0
 grep -q '"acme_files": 9' "${LOG}" && grep -q '"renewal_registrations": 1' "${LOG}" ||
     fail '启用 standalone 预览缺少绑定材料和登记计数'
 
+for challenge_provider in webroot alpn; do
 for enabled in false true; do
-    VARIANT="${TEST_ROOT}/variant-acme-webroot-${enabled}"
+    VARIANT="${TEST_ROOT}/variant-acme-${challenge_provider}-${enabled}"
     cp -a -- "${ACME_SOURCE}" "${VARIANT}"
-    python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${VARIANT}" "${DOMAIN}" "${enabled}" <<'PY'
+    python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${VARIANT}" "${DOMAIN}" "${enabled}" "${challenge_provider}" <<'PY'
 import importlib.util
 import json
 from pathlib import Path
@@ -621,11 +622,13 @@ import sys
 spec = importlib.util.spec_from_file_location("acme_fixture", sys.argv[1])
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
-root, domain = Path(sys.argv[2]), sys.argv[3]
+root, domain, provider = Path(sys.argv[2]), sys.argv[3], sys.argv[5]
 path = root / ("data/acme/" + domain + "_ecc/" + domain + ".conf")
 values = fixture.acme.assignments(path.read_bytes(), fixture.acme.DOMAIN_FIELDS)
-values["Le_Webroot"] = fixture.acme.WEBROOT
+values["Le_Webroot"] = fixture.acme.WEBROOT if provider == "webroot" else "alpn"
 values.pop("Le_HTTPPort")
+if provider == "alpn":
+    values["Le_TLSPort"] = "8443"
 path.write_bytes(fixture.acme.encoded(values))
 path = root / "config/spec.json"
 value = json.loads(path.read_bytes())
@@ -633,18 +636,22 @@ value["tls"]["http01"] = True
 path.write_text(json.dumps(value))
 path = root / ("secrets/renewal/" + domain + "/request.json")
 value = json.loads(path.read_bytes())
-value.update(schema_version=3, provider="webroot", enabled=sys.argv[4] == "true")
+value.update(schema_version=3 if provider == "webroot" else 4,
+             provider=provider, enabled=sys.argv[4] == "true")
 path.write_text(json.dumps(value))
 PY
     dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
-    export_variant "acme-webroot-${enabled}"
-    prepare_target "acme-webroot-${enabled}"
+    export_variant "acme-${challenge_provider}-${enabled}"
+    prepare_target "acme-${challenge_provider}-${enabled}"
     EXPECTED_SPEC="${VARIANT}/config/spec.json"
     EXPECTED_ACME_DIR="${VARIANT}/data/acme"
     EXPECTED_RENEWAL_DIR="${VARIANT}/secrets/renewal"
-    run_case "acme-webroot-${enabled}" "${TEST_ROOT}/acme-webroot-${enabled}.tar" 0
-    grep -q '"validation": "webroot-http01"' "${LOG}" &&
-        grep -q '"acme_files": 9' "${LOG}" || fail 'Webroot 预览未绑定验证方式和重建材料'
+    run_case "acme-${challenge_provider}-${enabled}" "${TEST_ROOT}/acme-${challenge_provider}-${enabled}.tar" 0
+    validation=webroot-http01
+    [[ "${challenge_provider}" != alpn ]] || validation=tls-alpn01
+    grep -q "\"validation\": \"${validation}\"" "${LOG}" &&
+        grep -q '"acme_files": 9' "${LOG}" || fail '预览未绑定挑战验证方式和重建材料'
+done
 done
 
 archive_variant stream config/spec.json '
@@ -1184,7 +1191,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 29 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 31 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&

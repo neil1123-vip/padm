@@ -557,7 +557,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | TProxy TCP/UDP 和 Redirect TCP 的有限管理范围同上，两者互斥；完整 Redirect/TProxy 管理及宿主验收仍 deferred。 |
 | `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 核心 | bridge | 两核心 DNS/hosts、Direct/Block、IP/CIDR、BT、CN 预设、IPv6/WARP 和专项事务已交付；名单增删/原位替换、上游和区域自定义例外管理冻结未选字段。hosts 单键增删/替换及交互单 IP/精确 FQDN CSV 整组替换共存，原 JSON CLI 保留。手工 IP 保留原文和顺序，不改区域合成项；sing-box 可显式解析后阻断并组合 WARP/IPv6，Xray 继续拒绝。只读重叠/覆盖不推断 GeoSite 或最终流量；完整区域、语义冲突检测、原生迁移及公网/宿主/双架构验收待补。 |
 | `internal-207-access-control` | 协议与入口 -> 额外入口端口 | `deferred` | 原业务核心/Nginx | bridge | 5B.5c–5B.5e 独立 `port_aliases`、菜单/CLI 增删/原位修改/状态/默认分享与候选回滚；双栈 TCP/UDP 发布已在隔离 amd64 Linux daemon 验证，同入口认证/统计，TLS/SNI 前端不旁路，URI/主订阅/分享组逐入口选择已有别名，修改保留默认标记，恢复或删除后回退 base，不增加节点。拒绝 WS/SSH Fail2ban、TUN/TProxy 和 host-network，允许已有 WireGuard/控制面 Fail2ban；适用公网/原生宿主/arm64 与完整管理验收待补。 |
-| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有状态/启停/日志、可信首配、规格编辑/多入口/双核心、Reality 目标/参数/443 共存、TLS/ACME、账号/分享组/额度/业务备份恢复、核心/Geo、多服务器手动同步、已有单 Peer 被控自动同步和同连接重映射、4C.6 同身份 API 端口更新/被控重连、站点/路由与 WS/控制面/有限 SSH Fail2ban 菜单。6A.1 提供私密灾备导出及只读校验，6A.2–6A.3 提供同架构 v3 空目标候选预览、提交及持久恢复，保留身份和累计，拒绝已有部署及未处理输入。6A.4–6A.5/6A.13 接入 Reality 目标库和固定版本 Geo 原字节恢复、离线校验及启用 Geo 调度；停用或无 Geo 不接管原调度。6A.6/6A.10 接入停用 DNS/standalone/webroot/ALPN 登记，DNS 要求合法凭据，非 DNS 拒绝凭据。6A.14–6A.15/6A.18 接入单域名 EC-P256 standalone/受管 webroot ACME 安全重建及对应唯一登记，材料匹配后可保留 enabled=true。健康成功后按 traffic、Geo、renewal 安装适用调度；三项独立私密持久快照、统一漂移检查及逆序撤销，unit 同文件系统原子替换。停用或无登记不接管外部续期任务，预览不安装调度；启用 DNS/ALPN 继续拒绝。验收见实施计划，整体状态不升级。6A.7/6A.9 接入受管或桥接可达 `host_website` Reality 共存，stream 从规格重生成；回环、host 网络及未处理 host-main 拒绝，宿主网站不随归档恢复。6A.8 恢复单 sing-box 双族 Hy2/TUIC 保存的跳跃规格，状态 `stopped`，不恢复监督、规则或运行态。6A.11 重建已有 HTTP-01 的空挑战根及双栈 `80:8088`，不恢复旧挑战文件。当前验收见实施计划，完整协议管理、多 Peer/迁移/完整灾备及原生双架构生命周期和可信发布仍待交付或验收。 |
+| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有可信首配、规格/协议/Reality/TLS、账号/分享/额度、备份、核心/Geo、单 Peer 主控/被控、站点/路由及适用 Fail2ban 菜单。6A.1–6A.20 提供私密导出、只读验证和同架构 v3 空目标恢复；逐项支持范围、权限与失败恢复见下文。ACME 限单域 EC-P256 standalone、固定受管 Webroot 或 ALPN 及匹配唯一启用登记；健康后按 traffic、Geo、renewal 安装适用调度，独立快照、统一漂移检查、逆序撤销，预览不安装调度。DNS 启用续期、未知材料、已有部署替换仍拒绝。主控限隔离旧宿主后显式新身份恢复和被控 rebind。完整协议管理、多 Peer/完整灾备、原生双架构生命周期及可信发布仍待交付或验收。 |
 | `core-lifecycle` | 核心与服务 | `supported` | 核心 profile | 宿主 CLI | 基础 `status/up/down/restart/logs/update/rollback/validate` 已可用，不代表原生全部升级管理。 |
 | `core-upgrade-assessment` | 核心与服务 -> Xray / sing-box 生命周期 | `supported` | 核心 profile | 宿主 CLI | 菜单第 13 项及 `assess` 复用只读风险扫描，使用可信候选镜像/配置副本执行版本检查、双核心配置试跑、Xray 严格模式与能力探针及已启用的 TLS/订阅/宿主前置检查；旧核心不启用严格解析时明确警告，不切换生产状态。要求受管 spec，预发布须提供匹配的可信发布资产；真实客户端连通另验。 |
 | `geo-data` | 核心与服务 -> Xray Geo 数据 | `supported` | `core-xray` | 宿主 CLI | 菜单第 14 项与 `geo status/update/schedule/auto-update` 已交付；完整受管数据经双摘要及真实 Xray 解析校验后切换读取路径，重建前采集 Xray 流量，仅重建原本运行的 Xray，失败恢复数据/Compose/运行状态；每日 01:35 systemd/cron 任务有部署归属和锁。编辑、更新和回滚保留数据及调度登记，旧 bundle 在切换前拒绝；真实上游、生产重建、宿主调度、arm64 和整机重启另验。 |
@@ -674,6 +674,14 @@ WireGuard 密钥/地址、账号及累计。原规格/发布状态须一致，�
 helper `102`、材料 `28`、maintenance `38`、专用 apply `18` 及隔离 amd64
 真实双端恢复/rebind/业务/累计通过；真实入口 `365.034` 秒，发布信任为离线夹具。
 原身份恢复、多 Peer、已有部署替换、原生宿主/arm64 与完整灾备仍未支持。
+
+6A.20 接入单域 EC-P256、schema `4`／`alpn` ACME 与启用续期恢复，
+固定 `Le_Webroot='alpn'`、`Le_TLSPort='8443'`，拒绝残留 HTTP 端口及验证方式混用。
+允许合法 HTTP-01 入口共存；唯一启用登记及完整材料门禁保持，复用原恢复/调度事务。
+helper `105`、材料 `32`、专用 apply `16` 及本地 CA 真实初签、空目标恢复、
+挑战失败恢复和成功续期通过；真实入口 `112.758` 秒，发布信任为离线夹具。
+ALPN 续期会临时停启占用 `443` 的受管服务，不承诺零中断；
+DNS 启用续期、任意 hooks/端口、RSA/SAN、原生宿主/arm64/公网及完整灾备继续待验或拒绝。
 
 ## 第一阶段验收
 

@@ -346,7 +346,7 @@ try {
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real',
         'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real', 'docker-shadowsocks-real',
         'docker-subscription-publication-real', 'docker-subscription-site-real', 'docker-acme-recovery-real',
-        'docker-webroot-recovery-real'
+        'docker-webroot-recovery-real', 'docker-alpn-recovery-real'
     )
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real',
@@ -472,13 +472,13 @@ try {
             ops = 'padm-local/padm-ops:control-4c4b'
             net = 'padm-local/padm-net:control-4c4b'
         }
-        if ($Selector -in @('docker-acme-recovery-real', 'docker-webroot-recovery-real')) {
+        if ($Selector -in @('docker-acme-recovery-real', 'docker-webroot-recovery-real', 'docker-alpn-recovery-real')) {
             $references = [ordered]@{
                 ops = 'padm-local/padm-ops:acme-curl-6a18'
                 acme = 'padm-tmp/acme-sample-tools:20261017-closure'
                 pebble = 'ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199'
             }
-            if ($Selector -eq 'docker-webroot-recovery-real') {
+            if ($Selector -in @('docker-webroot-recovery-real', 'docker-alpn-recovery-real')) {
                 $references['nginx'] = 'padm-local/padm-nginx:control-4c4b'
                 $references['xray'] = 'padm-local/padm-xray:control-4c4b'
                 $references['sing-box'] = 'padm-local/padm-sing-box:tls-3b4'

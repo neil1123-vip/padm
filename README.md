@@ -1829,12 +1829,14 @@ Geo 接受包含 Xray 且 `state.enabled` 为布尔值的固定版本受管库�
 ACME 数据仅接受 acme.sh `3.1.6` 的单域名、账户及域名 EC-P256：
 standalone HTTP-01 `8080` 须匹配 schema `2` 登记且关闭 `.tls.http01`；
 受管 webroot 须匹配 schema `3` 登记、开启 `.tls.http01` 并已有 Nginx TLS 入口 `21–25/27/29`。
-webroot 固定为 `/var/lib/padm/acme-webroot`，不得残留 `Le_HTTPPort` 或自定义路径。
+webroot 固定为 `/var/lib/padm/acme-webroot`，不得残留自监听端口或自定义路径。
+TLS-ALPN-01 须匹配 schema `4`／`alpn` 登记、`Le_Webroot='alpn'` 和固定 `Le_TLSPort='8443'`，
+不得残留 `Le_HTTPPort`；可保留合法 HTTP-01 入口，后续续期仍重新预检 `443` 归属。
 恢复器不执行归档 shell：严格解析并重建固定 9 个文件，只丢弃已知 CSR/临时材料；
 未知配置、hook、DNS/SAN/RSA/EAB 和自定义执行路径均拒绝。私钥、公钥、证书链及固定 TLS 输出
 先在无网络的可信 ops 容器内验证绑定；账户和域名密钥保留。
-仅对应材料匹配且登记只有该域时，可保留 standalone 或 webroot 的 `enabled=true`；
-健康成功后按 traffic、Geo、renewal 安装适用调度。启用 DNS/ALPN 继续拒绝，
+仅对应材料匹配且登记只有该域时，可保留 standalone、webroot 或 ALPN 的 `enabled=true`；
+健康成功后按 traffic、Geo、renewal 安装适用调度。启用 DNS 继续拒绝，
 空 `data/acme` 不能授权启用续期。
 空 `data/acme` 仍兼容。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
 不执行归档 Nginx stream 文件。桥接宿主网站恢复保留域名、上游地址和端口，

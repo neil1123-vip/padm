@@ -755,9 +755,9 @@ class RenewalInputTests(unittest.TestCase):
                 self.put_request(request)
                 self.rejected()
 
-    def test_enabled_http01_requires_acme_home(self):
+    def test_enabled_nondns_requires_acme_home(self):
         self.credentials.unlink()
-        for schema, provider in ((2, "standalone"), (3, "webroot")):
+        for schema, provider in ((2, "standalone"), (3, "webroot"), (4, "alpn")):
             with self.subTest(provider=provider):
                 self.put_request(dict(self.request, schema_version=schema,
                                       provider=provider, enabled=True))
@@ -942,6 +942,16 @@ class AcmeInputTests(unittest.TestCase):
         self.write_bindings()
         self.seal()
 
+    def alpn(self):
+        self.request.update(schema_version=4, provider="alpn", enabled=True)
+        config = self.acme.assignments(self.files[self.domain_config], self.acme.DOMAIN_FIELDS)
+        config.update(Le_Webroot="alpn", Le_TLSPort="8443")
+        config.pop("Le_HTTPPort")
+        self.files[self.domain_config] = self.acme.encoded(config)
+        (self.home / self.domain_config).write_bytes(self.files[self.domain_config])
+        self.write_bindings()
+        self.seal()
+
     def seal(self):
         archive = self.root / "source.tar"
         if archive.exists():
@@ -1027,6 +1037,64 @@ class AcmeInputTests(unittest.TestCase):
         self.assertEqual({path.relative_to(self.target).as_posix(): path.read_bytes()
                           for path in self.target.rglob("*") if path.is_file()}, normalized)
         self.assertFalse((self.destination / "data/acme-webroot").exists())
+
+    def test_enabled_alpn_preserves_registration_and_binds_validation(self):
+        self.alpn()
+        (self.destination / "secrets").mkdir(mode=0o700)
+        self.assertEqual(recovery.renewal_inputs(str(self.source), str(self.destination)),
+                         {"renewal_registrations": 1})
+        copied = self.destination / "secrets/renewal" / self.domain / "request.json"
+        self.assertEqual(copied.read_bytes(), self.request_path.read_bytes())
+        self.assertIs(json.loads(copied.read_bytes())["enabled"], True)
+        result = recovery.acme_inputs(str(self.source), str(self.destination))
+        self.assertEqual(result["acme_files"], 9)
+        self.assertEqual(result["acme_summary"]["validation"], "tls-alpn01")
+        normalized, _ = self.acme.normalize_acme_home(
+            self.files, self.domain, self.email, validation="tls-alpn01")
+        self.assertEqual({path.relative_to(self.target).as_posix(): path.read_bytes()
+                          for path in self.target.rglob("*") if path.is_file()}, normalized)
+        self.assertFalse((self.destination / "data/acme-webroot").exists())
+
+    def test_alpn_accepts_existing_http01_listener(self):
+        self.alpn()
+        self.spec = {"schema_version": 3, "tls": {"domain": self.domain, "http01": True},
+                     "core": {"protocols": [{"id": 21}]}}
+        self.write_bindings()
+        self.seal()
+        self.assertEqual(recovery.renewal_inputs(str(self.source)),
+                         {"renewal_registrations": 1})
+        result = recovery.acme_inputs(str(self.source), str(self.destination))
+        self.assertEqual(result["acme_summary"]["validation"], "tls-alpn01")
+        self.assertEqual(result["acme_files"], 9)
+
+    def test_alpn_registration_and_challenge_materials_cannot_be_mixed(self):
+        standalone = self.files[self.domain_config]
+        config = self.acme.assignments(standalone, self.acme.DOMAIN_FIELDS)
+        config["Le_Webroot"] = self.acme.WEBROOT
+        del config["Le_HTTPPort"]
+        webroot = self.acme.encoded(config)
+        self.alpn()
+        original_request = dict(self.request)
+        for changes in ({"schema_version": 3}, {"provider": "standalone"},
+                        {"schema_version": 2, "provider": "standalone"},
+                        {"schema_version": 3, "provider": "webroot"},
+                        {"domain": "other.example.test"}, {"email": "other@example.test"}):
+            with self.subTest(request=changes):
+                self.request = dict(original_request, **changes)
+                self.write_bindings()
+                self.seal()
+                self.rejected()
+                with self.assertRaises((ValueError, OSError)):
+                    recovery.renewal_inputs(str(self.source))
+        self.request = original_request
+        self.write_bindings()
+        for data in (standalone, webroot):
+            with self.subTest(material=data):
+                (self.home / self.domain_config).write_bytes(data)
+                self.seal()
+                self.rejected()
+                with self.assertRaises((ValueError, OSError)):
+                    recovery.renewal_inputs(str(self.source))
 
     def test_webroot_spec_request_and_materials_cannot_be_mixed(self):
         standalone_files = dict(self.files)

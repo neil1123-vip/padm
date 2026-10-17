@@ -75,6 +75,15 @@ def webroot(files):
     return files
 
 
+def alpn(files):
+    files = dict(files)
+    values = acme.assignments(files[CONF], acme.DOMAIN_FIELDS)
+    values.update(Le_Webroot="alpn", Le_TLSPort="8443")
+    values.pop("Le_HTTPPort")
+    files[CONF] = acme.encoded(values)
+    return files
+
+
 class NormalizationTests(unittest.TestCase):
     def setUp(self):
         self.files = fixture()
@@ -107,7 +116,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(summary["validation"], "standalone-http01")
         self.assertEqual(acme.normalize_acme_home(
             normalized, DOMAIN, EMAIL, validation="standalone-http01"), (normalized, summary))
-        for validation in ("webroot-http01", "dns", "alpn", "", False):
+        for validation in ("webroot-http01", "tls-alpn01", "dns", "alpn", "", False):
             with self.subTest(validation=validation), self.assertRaises(ValueError):
                 acme.normalize_acme_home(self.files, DOMAIN, EMAIL, validation=validation)
         files = webroot(self.files)
@@ -147,6 +156,50 @@ class NormalizationTests(unittest.TestCase):
                 files = webroot(self.files)
                 config(files, CONF, **{field: value})
                 self.rejected(files)
+
+    def test_fixed_alpn_shape_preserves_material_and_normalizes_idempotently(self):
+        files = alpn(self.files)
+        normalized, summary = acme.normalize_acme_home(
+            files, DOMAIN, EMAIL, validation="tls-alpn01")
+        values = acme.assignments(normalized[CONF], acme.DOMAIN_FIELDS)
+        self.assertEqual(values["Le_Webroot"], "alpn")
+        self.assertEqual(values["Le_TLSPort"], "8443")
+        self.assertNotIn("Le_HTTPPort", values)
+        self.assertEqual(summary["validation"], "tls-alpn01")
+        self.assertEqual(summary["normalized_files"], 9)
+        self.assertEqual(set(normalized), set(files))
+        for path in (CA + "/account.key", CA + "/account.json", CA + "/ca.conf",
+                     KEY, LEAF, ROOT, CHAIN):
+            self.assertEqual(normalized[path], files[path])
+        self.assertEqual(acme.normalize_acme_home(
+            normalized, DOMAIN, EMAIL, validation="tls-alpn01"), (normalized, summary))
+        for validation in ("standalone-http01", "webroot-http01"):
+            with self.subTest(validation=validation), self.assertRaises(ValueError):
+                acme.normalize_acme_home(files, DOMAIN, EMAIL, validation=validation)
+
+    def test_alpn_rejects_missing_or_foreign_ports_and_challenge_drift(self):
+        files = alpn(self.files)
+        values = acme.assignments(files[CONF], acme.DOMAIN_FIELDS)
+        del values["Le_TLSPort"]
+        files[CONF] = acme.encoded(values)
+        self.rejected(files)
+        for field, value in (
+            ("Le_TLSPort", ""), ("Le_TLSPort", "443"), ("Le_TLSPort", "8444"),
+            ("Le_TLSPort", "08443"), ("Le_HTTPPort", ""), ("Le_HTTPPort", "8080"),
+            ("Le_Webroot", "no"), ("Le_Webroot", acme.WEBROOT), ("Le_Webroot", "dns_cf"),
+        ):
+            with self.subTest(field=field, value=value):
+                files = alpn(self.files)
+                config(files, CONF, **{field: value})
+                self.rejected(files)
+
+    def test_http_challenges_reject_tls_port_leftovers(self):
+        for source in (self.files, webroot(self.files)):
+            for value in ("", "8443"):
+                with self.subTest(source=source[CONF], port=value):
+                    files = dict(source)
+                    config(files, CONF, Le_TLSPort=value)
+                    self.rejected(files)
 
     def test_known_transient_files_are_discarded(self):
         for path in ("http.header", DIRECTORY + "/" + DOMAIN + ".csr",
@@ -385,6 +438,16 @@ class MaterialTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.verify(files, validation="webroot-http01")
 
+    def test_alpn_keeps_real_material_and_expected_validation_binding(self):
+        files = alpn(self.files)
+        self.assertEqual(self.verify(files, validation="tls-alpn01"),
+                         {"account_key": "EC-P256", "tls_key": "EC-P256", "certificates": 2})
+        for validation in ("standalone-http01", "webroot-http01"):
+            with self.subTest(validation=validation), self.assertRaises(ValueError):
+                self.verify(files, validation=validation)
+        with self.assertRaises(ValueError):
+            self.verify(files, tls_key=self.other_key, validation="tls-alpn01")
+
     def test_jwk_must_match_account_key_and_be_a_curve_point(self):
         for coordinates in ("foreign", "zero"):
             with self.subTest(coordinates=coordinates):
@@ -553,12 +616,14 @@ class MaterialTests(unittest.TestCase):
                                      timeout=30, check=False)
             self.assertEqual(success.returncode, 0, success.stderr.decode())
             self.assertEqual(json.loads(success.stdout)["materials"]["certificates"], 2)
-            (home / CONF).write_bytes(webroot(self.files)[CONF])
-            success = subprocess.run(command + ["--validation", "webroot-http01"],
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     timeout=30, check=False)
-            self.assertEqual(success.returncode, 0, success.stderr.decode())
-            self.assertEqual(json.loads(success.stdout)["validation"], "webroot-http01")
+            for files, validation in ((webroot(self.files), "webroot-http01"),
+                                      (alpn(self.files), "tls-alpn01")):
+                (home / CONF).write_bytes(files[CONF])
+                success = subprocess.run(command + ["--validation", validation],
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                         timeout=30, check=False)
+                self.assertEqual(success.returncode, 0, success.stderr.decode())
+                self.assertEqual(json.loads(success.stdout)["validation"], validation)
             mismatch = subprocess.run(command + ["--validation", "standalone-http01"],
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                       timeout=30, check=False)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""固定 acme.sh 3.1.6 单域名 ECC HTTP-01 状态的纯数据重建与材料校验。"""
+"""固定 acme.sh 3.1.6 单域名 ECC HTTP-01/TLS-ALPN-01 状态的纯数据重建与材料校验。"""
 
 import argparse
 import base64
@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 WEBROOT = "/var/lib/padm/acme-webroot"
-VALIDATIONS = ("standalone-http01", "webroot-http01")
+VALIDATIONS = ("standalone-http01", "webroot-http01", "tls-alpn01")
 MAX_CONFIG = 64 * 1024
 MAX_FILE = 1024 * 1024
 P256_SPKI = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d03010703420004")
@@ -26,7 +26,7 @@ TIMES = ("Le_CertCreateTime", "Le_NextRenewTime", "Le_InstallCertSuccessTime")
 LINKS = ("Le_OrderFinalize", "Le_LinkOrder", "Le_LinkCert")
 OUTPUTS = ("Le_RealCertPath", "Le_RealCACertPath", "Le_RealKeyPath", "Le_RealFullChainPath")
 DOMAIN_REQUIRED = {"Le_Domain", "Le_Alt", "Le_Webroot", "Le_API", "Le_Keylength"}
-DOMAIN_FIELDS = DOMAIN_REQUIRED | {"Le_HTTPPort"} | set(HOOKS + TIMES + LINKS + OUTPUTS) | {
+DOMAIN_FIELDS = DOMAIN_REQUIRED | {"Le_HTTPPort", "Le_TLSPort"} | set(HOOKS + TIMES + LINKS + OUTPUTS) | {
     field + "Str" for field in TIMES
 }
 
@@ -196,11 +196,15 @@ def normalize_acme_home(files, domain, email=None, validation=None):
             and config["Le_Keylength"] == "ec-256"
             and all(not config.get(field) for field in HOOKS))
     if config["Le_Webroot"] == "no":
-        require(config.get("Le_HTTPPort") == "8080")
+        require(config.get("Le_HTTPPort") == "8080" and "Le_TLSPort" not in config)
         observed_validation = "standalone-http01"
+    elif config["Le_Webroot"] == "alpn":
+        require(config.get("Le_TLSPort") == "8443" and "Le_HTTPPort" not in config)
+        observed_validation = "tls-alpn01"
     else:
-        # 固定客户端仅在 standalone 保存端口，webroot 不接受残留或自定义端口。
-        require(config["Le_Webroot"] == WEBROOT and "Le_HTTPPort" not in config)
+        # 固定客户端仅在自监听方式保存端口，webroot 不接受残留或自定义端口。
+        require(config["Le_Webroot"] == WEBROOT
+                and "Le_HTTPPort" not in config and "Le_TLSPort" not in config)
         observed_validation = "webroot-http01"
     require(validation is None or validation == observed_validation)
     ca, origin = ca_directory(config["Le_API"])

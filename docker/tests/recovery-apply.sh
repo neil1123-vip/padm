@@ -5,7 +5,7 @@ trap 'printf "docker-recovery-apply-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1 PADM_DOCKER_SKIP_CHOWN=0 PADM_DOCKER_LOCK_TIMEOUT=1
 case "${PADM_DOCKER_RECOVERY_SCOPE:-all}" in
-all|core|atomic|variants|wireguard|webroot|controller) ;;
+all|core|atomic|variants|wireguard|webroot|alpn|controller) ;;
 *) exit 2 ;;
 esac
 if [[ "${1:-}" != --child ]]; then
@@ -799,10 +799,14 @@ fi
 
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ]]; then
-WEBROOT_SOURCE="${TEST_ROOT}/source-webroot-enabled"
-cp -a -- "${RENEWAL_ENABLED_SOURCE}" "${WEBROOT_SOURCE}"
-python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${WEBROOT_SOURCE}" "${DOMAIN}" <<'PY'
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == alpn ]]; then
+for challenge_provider in webroot alpn; do
+    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${challenge_provider}" == webroot ]] || continue
+    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != alpn || "${challenge_provider}" == alpn ]] || continue
+CHALLENGE_SOURCE="${TEST_ROOT}/source-${challenge_provider}-enabled"
+cp -a -- "${RENEWAL_ENABLED_SOURCE}" "${CHALLENGE_SOURCE}"
+python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${CHALLENGE_SOURCE}" "${DOMAIN}" "${challenge_provider}" <<'PY'
 import importlib.util
 import json
 from pathlib import Path
@@ -811,15 +815,18 @@ import sys
 spec = importlib.util.spec_from_file_location("acme_fixture", sys.argv[1])
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
-root, domain = Path(sys.argv[2]), sys.argv[3]
+root, domain, provider = Path(sys.argv[2]), sys.argv[3], sys.argv[4]
 path = root / ("data/acme/" + domain + "_ecc/" + domain + ".conf")
 values = fixture.acme.assignments(path.read_bytes(), fixture.acme.DOMAIN_FIELDS)
-values["Le_Webroot"] = fixture.acme.WEBROOT
+values["Le_Webroot"] = fixture.acme.WEBROOT if provider == "webroot" else "alpn"
 values.pop("Le_HTTPPort")
+if provider == "alpn":
+    values["Le_TLSPort"] = "8443"
 path.write_bytes(fixture.acme.encoded(values))
 for relative, fields in (
     ("config/spec.json", None),
-    ("secrets/renewal/" + domain + "/request.json", {"schema_version": 3, "provider": "webroot"}),
+    ("secrets/renewal/" + domain + "/request.json",
+     {"schema_version": 3 if provider == "webroot" else 4, "provider": provider}),
 ):
     path = root / relative
     value = json.loads(path.read_bytes())
@@ -829,9 +836,10 @@ for relative, fields in (
         value.update(fields)
     path.write_text(json.dumps(value))
 PY
-dockerGenerateDeployment "${WEBROOT_SOURCE}/config/spec.json" "${WEBROOT_SOURCE}/deployment.json"
-python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${WEBROOT_SOURCE}" \
-    --output "${TEST_ROOT}/webroot-enabled.tar" >/dev/null || fail '启用 Webroot 续期归档导出失败'
+dockerGenerateDeployment "${CHALLENGE_SOURCE}/config/spec.json" "${CHALLENGE_SOURCE}/deployment.json"
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${CHALLENGE_SOURCE}" \
+    --output "${TEST_ROOT}/${challenge_provider}-enabled.tar" >/dev/null || fail '启用挑战续期归档导出失败'
+done
 fi
 fi
 fi
@@ -1786,16 +1794,18 @@ assert_empty
 fi
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ]]; then
-for renewal_provider in standalone webroot; do
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == alpn ]]; then
+for renewal_provider in standalone webroot alpn; do
     [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${renewal_provider}" == webroot ]] || continue
+    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != alpn || "${renewal_provider}" == alpn ]] || continue
     RENEWAL_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
     RENEWAL_SOURCE="${RENEWAL_ENABLED_SOURCE}"
-    if [[ "${renewal_provider}" == webroot ]]; then
-        RENEWAL_ARCHIVE="${TEST_ROOT}/webroot-enabled.tar"
-        RENEWAL_SOURCE="${WEBROOT_SOURCE}"
+    if [[ "${renewal_provider}" != standalone ]]; then
+        RENEWAL_ARCHIVE="${TEST_ROOT}/${renewal_provider}-enabled.tar"
+        RENEWAL_SOURCE="${TEST_ROOT}/source-${renewal_provider}-enabled"
     fi
-# 两种验证方式复用完整调度撤销矩阵，调试入口只执行 Webroot。
+# 三种验证方式复用调度撤销矩阵，定向入口只执行所选方式。
 for backend in systemd cron; do
     prepare_target "${renewal_provider}-renewal-success-${backend}" "${backend}"
     RECOVERY_ARCHIVE="${RENEWAL_ARCHIVE}"

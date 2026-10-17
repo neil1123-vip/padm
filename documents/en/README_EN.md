@@ -1607,15 +1607,18 @@ ACME recovery accepts only acme.sh `3.1.6`, one domain and EC-P256 account and d
 Standalone HTTP-01 on `8080` requires a matching schema `2` registration and `.tls.http01` disabled.
 Managed webroot requires a matching schema `3` registration, `.tls.http01` enabled and an existing
 Nginx TLS listener `21`-`25`/`27`/`29`. Its path is fixed at `/var/lib/padm/acme-webroot`;
-`Le_HTTPPort` and custom paths are rejected. Recovery parses data without executing
+self-listening port fields and custom paths are rejected.
+TLS-ALPN-01 requires matching schema `4`/`alpn` registration, `Le_Webroot='alpn'`
+and `Le_TLSPort='8443'`, with no `Le_HTTPPort`. A valid HTTP-01 listener may coexist;
+future renewal still rechecks port `443` ownership. Recovery parses data without executing
 archived shell, rebuilds exactly nine files and discards only known CSR/transient material.
 Unknown configuration, hooks, DNS/SAN/RSA/EAB and custom execution paths are rejected.
 A network-disabled trusted ops container verifies private/public key, ordered certificate
 chain and fixed TLS-output bindings before preserving the account and domain keys.
-Only a matching verified standalone or webroot registration may also use `enabled=true`, with no other domain in
+Only a matching verified standalone, webroot or ALPN registration may also use `enabled=true`, with no other domain in
 the renewal registry. After candidate installation
 and health checks succeed, applicable schedules are installed in traffic, Geo, then renewal order.
-Enabled DNS, ALPN and all other ACME combinations remain rejected.
+Enabled DNS and all other ACME combinations remain rejected.
 Preview does not install schedules. An empty `data/acme` remains compatible but cannot authorize
 enabled renewal. Focused validation, enabled recovery followed by real renewal against a local
 CA, and the 34-check daily `docker-contracts` integration gate have passed.
