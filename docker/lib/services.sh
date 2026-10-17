@@ -2085,22 +2085,33 @@ dockerControllerRecoveryInputCheck() {
         --slurpfile rebuilt "${DOCKER_RECOVERY_CONTROLLER_SPEC}" --slurpfile draft "${sourceSpec}" '
       def business_normalized:
         if (.accounts // [] | length) == 0 then del(.accounts) else . end;
+      def controller_peers:
+        if .control.schema_version == 1 then [.control.peer]
+        elif .control.schema_version == 2 then .control.peers
+        else error("主控版本不支持") end;
+      def controller_normalized:
+        .control |= (del(.node_id,.revision,.last_digest) |
+          if .schema_version == 1 then
+            .peer |= del(.id,.token_sha256,.enabled,.expires_at)
+          elif .schema_version == 2 then
+            .peers |= map(del(.id,.token_sha256,.enabled,.expires_at))
+          else error("主控版本不支持") end);
       ($previous | length) == 1 and ($rebuilt | length) == 1 and ($draft | length) == 1 and
       ($previous[0] as $old | $rebuilt[0] as $new |
-        ([$old.control.node_id,$old.control.peer.id] +
+        ($old | controller_peers) as $oldPeers | ($new | controller_peers) as $newPeers |
+        ([$old.control.node_id] + [$oldPeers[].id] +
           [$old.accounts[]? | .id,.uuid]) as $occupied |
+        ([$new.control.node_id] + [$newPeers[].id]) as $newIds |
+        [$oldPeers[].token_sha256] as $oldTokens | [$newPeers[].token_sha256] as $newTokens |
         $old.control.role == "main" and $new.control.role == "main" and
         $old.control_sync == null and $new.control_sync == null and
-        ($occupied | index($new.control.node_id)) == null and
-        ($occupied | index($new.control.peer.id)) == null and
-        $new.control.node_id != $new.control.peer.id and
-        $new.control.peer.token_sha256 != $old.control.peer.token_sha256 and
-        $new.control.peer.enabled == false and $new.control.peer.expires_at == 1 and
+        ($newIds | length) == ($newIds | unique | length) and
+        all($newIds[]; . as $id | ($occupied | index($id)) == null) and
+        ($newTokens | length) == ($newTokens | unique | length) and
+        all($newTokens[]; . as $token | ($oldTokens | index($token)) == null) and
+        all($newPeers[]; .enabled == false and .expires_at == 1) and
         $new.control.revision == 0 and $new.control.last_digest == null and
-        ($old | del(.control.node_id,.control.peer.id,.control.peer.token_sha256,
-          .control.peer.enabled,.control.peer.expires_at,.control.revision,.control.last_digest)) ==
-        ($new | del(.control.node_id,.control.peer.id,.control.peer.token_sha256,
-          .control.peer.enabled,.control.peer.expires_at,.control.revision,.control.last_digest)) and
+        ($old | controller_normalized) == ($new | controller_normalized) and
         ($new | business_normalized) == ($draft[0] | business_normalized))
     ' >/dev/null
 }

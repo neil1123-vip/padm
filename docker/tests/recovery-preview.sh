@@ -96,6 +96,27 @@ dockerTrafficBeforeChange() { candidate_fail '预览采集或写入了在线流�
 dockerMaintenanceScheduleApply() { candidate_fail "预览修改了外部调度: $*"; }
 dockerRealityProbeRun() {
     local directory probe
+    if [[ " $* " == *' /opt/padm/control_state.py '* ]]; then
+        [[ ( "$#" == 19 || "$#" == 21 ) &&
+            "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10} ${11} ${12}" == \
+                "30 --user 0:0 --network none --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m --label io.padm.mode=docker --label io.padm.project=${PADM_DOCKER_PROJECT} --mount" &&
+            "${14} ${15}" == '--entrypoint python3' &&
+            "${16}" == "$(jq -r '.images.ops' "${EXPECTED_SPEC}")" &&
+            "${17} ${18} ${19}" == '/opt/padm/control_state.py --spec /input/spec.json' ]] ||
+            candidate_fail '主控规划器没有使用可信镜像和既有隔离参数'
+        directory=${13#type=bind,src=}
+        directory=${directory%,dst=/input,readonly}
+        [[ "${13}" == "type=bind,src=${directory},dst=/input,readonly" ]] ||
+            candidate_fail '主控规划器输入没有只读挂载'
+        local -a args=(--spec "${directory}/spec.json")
+        if [[ "$#" == 21 ]]; then
+            [[ "${20} ${21}" == '--check-state /input/state.json' ]] ||
+                candidate_fail '主控发布状态校验参数错误'
+            args+=(--check-state "${directory}/state.json")
+        fi
+        python3 -B "${PROJECT_ROOT}/docker/images/ops/control_state.py" "${args[@]}"
+        return $?
+    fi
     if [[ "$*" == *'wg pubkey'* ]]; then
         [[ "$#" == 16 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}" == \
             '10 --pull never --user 0:0 --network none --log-driver none --mount' &&
@@ -171,16 +192,41 @@ dockerCandidateCompose() {
     fi
     marker="${TEST_ROOT}/checked-${candidate##*/}"
     if [[ ! -e "${marker}" ]]; then
-        jq -en --slurpfile expected "${EXPECTED_SPEC}" \
+        jq -en --argjson rebuild "${EXPECTED_CONTROLLER_REBUILD}" --slurpfile expected "${EXPECTED_SPEC}" \
             --slurpfile actual "${candidate}/config/spec.json" '
+          def peers: if .schema_version == 2 then .peers else [.peer] end;
+          def stable_control:
+            del(.node_id,.revision,.last_digest) |
+            if .schema_version == 2 then .peers |= map(del(.id,.token_sha256,.enabled,.expires_at))
+            else .peer |= del(.id,.token_sha256,.enabled,.expires_at) end;
           $actual[0].core == $expected[0].core and
           $actual[0].accounts == $expected[0].accounts and
           $actual[0].subscription == $expected[0].subscription and
           $actual[0].tls == $expected[0].tls and
           $actual[0].reality_stream == $expected[0].reality_stream and
-          $actual[0].control == $expected[0].control and
+          (if $rebuild then
+            $actual[0].control as $new | $expected[0].control as $old |
+            ($new | peers) as $newPeers | ($old | peers) as $oldPeers |
+            ([$new.node_id] + [$newPeers[].id]) as $newIds |
+            ([$old.node_id] + [$oldPeers[].id] +
+              [$expected[0].accounts[]? | .id,.uuid]) as $oldIds |
+            ($new | stable_control) == ($old | stable_control) and
+            ($newIds | unique | length) == ($newIds | length) and
+            all($newIds[]; . as $id | ($oldIds | index($id)) == null) and
+            all($newPeers[]; .token_sha256 as $hash |
+              .enabled == false and .expires_at == 1 and
+              all($oldPeers[]; .token_sha256 != $hash)) and
+            ($newPeers | map(.token_sha256) | unique | length) == ($newPeers | length) and
+            $new.revision == 0 and $new.last_digest == $old.last_digest
+           else $actual[0].control == $expected[0].control end) and
           $actual[0].control_sync == $expected[0].control_sync
         ' >/dev/null || candidate_fail '恢复改变了入口、独立账号凭据或订阅身份'
+        if [[ "${EXPECTED_CONTROLLER_REBUILD}" == true ]]; then
+            jq -e '.control.revision == 0 and .control.last_digest == null' \
+                "${DOCKER_RECOVERY_CONTROLLER_SPEC}" >/dev/null &&
+                dockerControlStateCheck "${candidate}" ||
+                candidate_fail '主控身份草稿未归零，或候选发布状态不匹配'
+        fi
         cmp -- "${SOURCE}/config/share-groups.json" "${candidate}/config/share-groups.json" ||
             candidate_fail '分享组身份或外键改变'
         jq -e --slurpfile expected "${EXPECTED_TRAFFIC_FILE}" '
@@ -462,6 +508,7 @@ prepare_target() {
     EXPECTED_RENEWAL_DIR=
     EXPECTED_ACME_DIR=
     EXPECTED_WIREGUARD_DIR=
+    EXPECTED_CONTROLLER_REBUILD=false
     EXPECTED_SPEC="${TEST_ROOT}/base.json"
     EXPECTED_TRAFFIC_FILE="${SOURCE}/data/traffic/state.json"
 }
@@ -1034,6 +1081,58 @@ grep -q '"wireguard_files": 3' "${LOG}" || fail '多 Peer 预览缺少三文件�
 ! grep -q 'dwdtCnMY\|hSDwCYkw\|RERERERE\|192.0.2.[23]' "${LOG}" ||
     fail '多 Peer 预览泄露私密配置'
 
+VARIANT="${TEST_ROOT}/variant-controller-v2"
+cp -a -- "${WIREGUARD_MULTI_SOURCE}" "${VARIANT}"
+jq '.control = {schema_version:2,role:"main",
+  node_id:"00000001-1111-4111-8111-000000000001",
+  listen:{interface:"wg-padm",address:"10.77.0.1",port:18080},
+  peers:[{id:"00000003-1111-4111-8111-000000000003",address:"10.77.0.3",
+    enabled:true,expires_at:2000000000,token_sha256:("b"*64)},
+    {id:"00000002-1111-4111-8111-000000000002",address:"10.77.0.2",
+      enabled:true,expires_at:2000000000,token_sha256:("a"*64)}],
+  revision:0,last_digest:null}' "${VARIANT}/config/spec.json" >"${TEST_ROOT}/controller-input.json"
+chmod 0600 "${TEST_ROOT}/controller-input.json"
+python3 -B "${PROJECT_ROOT}/docker/images/ops/control_state.py" \
+    --spec "${TEST_ROOT}/controller-input.json" >"${TEST_ROOT}/controller-plan.json"
+jq '.spec | .control.revision = 17' "${TEST_ROOT}/controller-plan.json" >"${VARIANT}/config/spec.json"
+jq '.state | .revision = 17' "${TEST_ROOT}/controller-plan.json" >"${VARIANT}/config/control/state.json"
+chmod 0640 "${VARIANT}/config/control/state.json"
+DOCKER_WIREGUARD_INPUT="${VARIANT}/secrets/net/wireguard" \
+    dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+CONTROLLER_V2_SOURCE=${VARIANT}
+export_variant controller-v2
+prepare_target controller-v2-ordinary
+run_case controller-v2-ordinary "${TEST_ROOT}/controller-v2.tar" "${PADM_DOCKER_RC_STATE}"
+prepare_target controller-v2
+EXPECTED_SPEC="${CONTROLLER_V2_SOURCE}/config/spec.json"
+EXPECTED_WIREGUARD_DIR="${CONTROLLER_V2_SOURCE}/secrets/net/wireguard"
+EXPECTED_CONTROLLER_REBUILD=true
+run_case controller-v2 "${TEST_ROOT}/controller-v2.tar" 0 --rebuild-controller
+jq -e '.rebuilt_controller == true and .controller_accounts == 1 and .wireguard_files == 3' \
+    <(sed -n '/^{/,$p' "${LOG}") >/dev/null || fail 'v2 主控预览未报告身份重建'
+for mismatch in state wireguard; do
+    VARIANT="${TEST_ROOT}/variant-controller-v2-${mismatch}"
+    cp -a -- "${CONTROLLER_V2_SOURCE}" "${VARIANT}"
+    if [[ "${mismatch}" == state ]]; then
+        jq '.peers[0].enabled = false | .peers[0].expires_at = 1' \
+            "${VARIANT}/config/control/state.json" >"${TEST_ROOT}/controller-state.json"
+        cat -- "${TEST_ROOT}/controller-state.json" >"${VARIANT}/config/control/state.json"
+    else
+        jq '.control.peers[0].address = "10.77.0.9"' \
+            "${VARIANT}/config/spec.json" >"${TEST_ROOT}/controller-input.json"
+        cat -- "${TEST_ROOT}/controller-input.json" >"${VARIANT}/config/spec.json"
+        jq '.peers[0].address = "10.77.0.9"' \
+            "${VARIANT}/config/control/state.json" >"${TEST_ROOT}/controller-state.json"
+        cat -- "${TEST_ROOT}/controller-state.json" >"${VARIANT}/config/control/state.json"
+        DOCKER_WIREGUARD_INPUT="${VARIANT}/secrets/net/wireguard" \
+            dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+    fi
+    export_variant "controller-v2-${mismatch}"
+    prepare_target "controller-v2-${mismatch}"
+    run_case "controller-v2-${mismatch}" "${TEST_ROOT}/controller-v2-${mismatch}.tar" \
+        "${PADM_DOCKER_RC_STATE}" --rebuild-controller
+done
+
 VARIANT="${TEST_ROOT}/variant-wireguard-controlled"
 cp -a -- "${WIREGUARD_SOURCE}" "${VARIANT}"
 jq --arg managed 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' '
@@ -1254,7 +1353,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 34 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 35 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&

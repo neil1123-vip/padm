@@ -172,6 +172,9 @@ dockerCandidateCompose() {
             kill_restore_owner
         fi ;;
     'run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --access-lock /var/log/padm/control/auth.lock --source-challenge /run/padm/control-source/challenge.json --source-receipt /var/log/padm/control/source.receipt --check')
+        jq -e '.control.revision == 0 and .control.last_digest == null' \
+            "${DOCKER_RECOVERY_CONTROLLER_SPEC}" >/dev/null ||
+            fail '主控重建身份草稿没有清空原发布版本和摘要'
         dockerControlStateCheck "${candidate}" || return 1
         printf 'candidate-control\n' >>"${MOCK_BACKEND}/events"
         [[ "${MODE}" != controller-check ]] || return 1 ;;
@@ -988,6 +991,33 @@ if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
         dockerGenerateDeployment "${CONTROLLER_SOURCE}/config/spec.json" "${CONTROLLER_SOURCE}/deployment.json"
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${CONTROLLER_SOURCE}" \
         --output "${TEST_ROOT}/controller.tar" >/dev/null || fail '主控归档导出失败'
+    CONTROLLER_V2_SOURCE="${TEST_ROOT}/source-controller-v2"
+    cp -a -- "${CONTROLLER_SOURCE}" "${CONTROLLER_V2_SOURCE}"
+    python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate \
+        --directory "${CONTROLLER_V2_SOURCE}/secrets/net/wireguard" \
+        --destination "${CONTROLLER_V2_SOURCE}/wireguard-multi" \
+        --peer-action add --peer-address 10.77.0.3 \
+        --peer-public-key 'REREREREREREREREREREREREREREREREREREREREREQ=' \
+        --endpoint 192.0.2.3:51820 >/dev/null
+    mv -- "${CONTROLLER_V2_SOURCE}/wireguard-multi/wg-padm.conf" \
+        "${CONTROLLER_V2_SOURCE}/secrets/net/wireguard/wg-padm.conf"
+    dockerRemoveManagedTree "${CONTROLLER_V2_SOURCE}" "${CONTROLLER_V2_SOURCE}/wireguard-multi"
+    jq '.control.schema_version = 2 |
+      .control.peers = [(.control.peer | .id = "00000003-1111-4111-8111-000000000003" |
+        .address = "10.77.0.3" | .token_sha256 = ("b"*64)),.control.peer] |
+      del(.control.peer) | .control.revision = 0 | .control.last_digest = null' \
+        "${CONTROLLER_SOURCE}/config/spec.json" >"${TEST_ROOT}/controller-input.json"
+    python3 -B "${PROJECT_ROOT}/docker/images/ops/control_state.py" \
+        --spec "${TEST_ROOT}/controller-input.json" >"${TEST_ROOT}/controller-plan.json"
+    jq '.spec | .control.revision = 17' "${TEST_ROOT}/controller-plan.json" \
+        >"${CONTROLLER_V2_SOURCE}/config/spec.json"
+    jq '.state | .revision = 17' "${TEST_ROOT}/controller-plan.json" \
+        >"${CONTROLLER_V2_SOURCE}/config/control/state.json"
+    DOCKER_WIREGUARD_INPUT="${CONTROLLER_V2_SOURCE}/secrets/net/wireguard" \
+        dockerGenerateDeployment "${CONTROLLER_V2_SOURCE}/config/spec.json" \
+            "${CONTROLLER_V2_SOURCE}/deployment.json"
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${CONTROLLER_V2_SOURCE}" \
+        --output "${TEST_ROOT}/controller-v2.tar" >/dev/null || fail 'v2 主控归档导出失败'
     CONTROLLER_EMPTY_SOURCE="${TEST_ROOT}/source-controller-empty"
     cp -a -- "${CONTROLLER_SOURCE}" "${CONTROLLER_EMPTY_SOURCE}"
     jq 'del(.accounts) | .control.revision = 0 | .control.last_digest = null' \
@@ -1172,19 +1202,29 @@ assert_deployed() {
         fail '目标库目录权限不私密'
     jq -en --argjson rebuild "${2:-false}" \
         --slurpfile expected "${source}/config/spec.json" --slurpfile actual "${root}/config/spec.json" '
+      def peers: if .schema_version == 2 then .peers else [.peer] end;
+      def stable_control:
+        del(.node_id,.revision,.last_digest) |
+        if .schema_version == 2 then .peers |= map(del(.id,.token_sha256,.enabled,.expires_at))
+        else .peer |= del(.id,.token_sha256,.enabled,.expires_at) end;
       $actual[0].core == $expected[0].core and $actual[0].accounts == $expected[0].accounts and
       $actual[0].subscription == $expected[0].subscription and
       $actual[0].tls == $expected[0].tls and
       $actual[0].reality_stream == $expected[0].reality_stream and
       (if $rebuild then
-        ($actual[0].control | del(.node_id,.peer.id,.peer.token_sha256,.peer.enabled,.peer.expires_at,.revision,.last_digest)) ==
-        ($expected[0].control | del(.node_id,.peer.id,.peer.token_sha256,.peer.enabled,.peer.expires_at,.revision,.last_digest)) and
-        $actual[0].control.node_id != $expected[0].control.node_id and
-        $actual[0].control.peer.id != $expected[0].control.peer.id and
-        $actual[0].control.peer.token_sha256 != $expected[0].control.peer.token_sha256 and
-        $actual[0].control.peer.enabled == false and $actual[0].control.peer.expires_at == 1 and
-        $actual[0].control.revision == 0 and
-        $actual[0].control.last_digest == $expected[0].control.last_digest
+        $actual[0].control as $new | $expected[0].control as $old |
+        ($new | peers) as $newPeers | ($old | peers) as $oldPeers |
+        ([$new.node_id] + [$newPeers[].id]) as $newIds |
+        ([$old.node_id] + [$oldPeers[].id] +
+          [$expected[0].accounts[]? | .id,.uuid]) as $oldIds |
+        ($new | stable_control) == ($old | stable_control) and
+        ($newIds | unique | length) == ($newIds | length) and
+        all($newIds[]; . as $id | ($oldIds | index($id)) == null) and
+        all($newPeers[]; .token_sha256 as $hash |
+          .enabled == false and .expires_at == 1 and
+          all($oldPeers[]; .token_sha256 != $hash)) and
+        ($newPeers | map(.token_sha256) | unique | length) == ($newPeers | length) and
+        $new.revision == 0 and $new.last_digest == $old.last_digest
        else $actual[0].control == $expected[0].control end) and
       $actual[0].control_sync == $expected[0].control_sync' >/dev/null ||
         fail '恢复改变了入口、账号凭据或订阅身份'
@@ -2069,23 +2109,28 @@ for action in controller-old-confirm controller-wrong-mode controller-duplicate 
     assert_empty
 done
 prepare_target controller-ordinary-rejected
-RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+RECOVERY_ARCHIVE="${TEST_ROOT}/controller-v2.tar"
 run_child apply ok failure
 assert_empty
 prepare_target controller-mode-needs-controller
 run_child controller-preview ok failure
 assert_empty
 prepare_target controller-preview
-RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+RECOVERY_ARCHIVE="${TEST_ROOT}/controller-v2.tar"
 run_child controller-preview ok 0
 jq -e '.rebuilt_controller == true and .controller_accounts == 1' \
     <(sed -n '/^{/,$p' "${LOG}") >/dev/null || fail '主控预览未报告身份重建'
 assert_empty
 for backend in systemd cron; do
     prepare_target "controller-success-${backend}" "${backend}"
-    RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/controller-v2.tar"
+    [[ "${backend}" != cron ]] || RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
     run_child controller-apply ok 0
-    assert_deployed "${CONTROLLER_SOURCE}" true
+    if [[ "${backend}" == systemd ]]; then
+        assert_deployed "${CONTROLLER_V2_SOURCE}" true
+    else
+        assert_deployed "${CONTROLLER_SOURCE}" true
+    fi
     dockerControlStateCheck "${root}" ||
         fail '主控恢复未生成匹配的新发布状态'
     [[ -f "${root}/logs/control/auth.log" && ! -s "${root}/logs/control/auth.log" &&
@@ -2108,7 +2153,7 @@ jq -e '(.accounts // [] | length) == 0 and .control.revision == 0 and
     dockerControlStateCheck "${root}" || fail '空账号主控未按既有业务规范化重建'
 for mode in controller-check health int term; do
     prepare_target "controller-${mode}"
-    RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/controller-v2.tar"
     expected=failure
     [[ "${mode}" != int ]] || expected=130
     [[ "${mode}" != term ]] || expected=143
@@ -2116,10 +2161,14 @@ for mode in controller-check health int term; do
     assert_empty
 done
 prepare_target controller-killed
-RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+RECOVERY_ARCHIVE="${TEST_ROOT}/controller-v2.tar"
 run_child controller-apply killed 137
 [[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/wireguard-link" &&
     -f "${root}/config/control/state.json" ]] || fail '主控恢复硬杀没有保留持久事务'
+jq -e '.control.schema_version == 2 and .control.revision == 0 and
+  (.control.peers | length) == 2 and all(.control.peers[]; .enabled == false and .expires_at == 1)' \
+    "${root}/config/spec.json" >/dev/null || fail '硬杀现场没有保留撤权后的 v2 双 Peer 新身份'
+dockerControlStateCheck "${root}" || fail 'v2 主控恢复硬杀留下不匹配发布状态'
 run_child recover ok 0
 assert_empty
 run_child recover ok 0

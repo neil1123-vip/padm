@@ -861,6 +861,10 @@ listRegressionDockerControllerRecoveryChildSelectors() {
     printf '%s\n' docker-backup docker-menu-maintenance docker-controller-recovery-apply
 }
 
+listRegressionDockerControllerPeersRecoveryChildSelectors() {
+    printf '%s\n' docker-backup docker-recovery-preview docker-controller-recovery-apply regression-dispatcher-contract
+}
+
 runDockerWebrootRecoveryRealRegression() {
     PADM_ACME_RECOVERY_REAL_SCOPE=webroot runDockerAcmeRecoveryRealRegression
 }
@@ -950,6 +954,10 @@ runDockerWireGuardPeersRecoveryRealRegression() {
 
 runDockerWireGuardPeersMigrationRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-peers-migration-only
+}
+
+runDockerControllerPeersRecoveryRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --controller-peers-recovery-only
 }
 
 runDockerControlStateRegression() {
@@ -1314,6 +1322,8 @@ registerRegressionFunctionLeaf docker-controller-recovery-apply runDockerControl
 registerRegressionFunctionLeaf docker-controller-recovery-real runDockerControllerRecoveryRealRegression
 registerRegressionParallelSelectorList docker-controller-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-controller-recovery-focused-${BASHPID:-$$}" listRegressionDockerControllerRecoveryChildSelectors 2
+registerRegressionParallelSelectorList docker-controller-peers-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-controller-peers-recovery-focused-${BASHPID:-$$}" listRegressionDockerControllerPeersRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-webroot-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-webroot-recovery-focused-${BASHPID:-$$}" listRegressionDockerWebrootRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
@@ -1348,6 +1358,7 @@ registerRegressionFunctionLeaf docker-wireguard-address-real runDockerWireGuardA
 registerRegressionFunctionLeaf docker-wireguard-recovery-real runDockerWireGuardRecoveryRealRegression
 registerRegressionFunctionLeaf docker-wireguard-peers-recovery-real runDockerWireGuardPeersRecoveryRealRegression
 registerRegressionFunctionLeaf docker-wireguard-peers-migration-real runDockerWireGuardPeersMigrationRealRegression
+registerRegressionFunctionLeaf docker-controller-peers-recovery-real runDockerControllerPeersRecoveryRealRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-focused runDockerRedirectOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-real runDockerRedirectRealRegression

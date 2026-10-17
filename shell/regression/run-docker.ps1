@@ -339,7 +339,7 @@ try {
         'docker-control-rebind-real', 'docker-control-peers-real',
         'docker-routing-ipv6-real', 'docker-wireguard-cli-real', 'docker-wireguard-peers-real', 'docker-wireguard-control-real',
         'docker-wireguard-recovery-real', 'docker-wireguard-peers-recovery-real', 'docker-wireguard-peers-migration-real',
-        'docker-wireguard-address-real', 'docker-controller-recovery-real',
+        'docker-wireguard-address-real', 'docker-controller-recovery-real', 'docker-controller-peers-recovery-real',
         'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real',
         'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-port-hopping-tuic-real',
         'docker-port-hopping-recovery-real', 'docker-port-hopping-share-real', 'docker-cdn-entries-real',

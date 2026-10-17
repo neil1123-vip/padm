@@ -16,6 +16,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import uuid
 from unittest import mock
 
 
@@ -1505,13 +1506,20 @@ class WireGuardInputTests(unittest.TestCase):
         for field, role in (
             ("control_sync", {"role": "controlled"}),
             ("control", {"schema_version": 1, "role": "main"}),
-            ("control", {"schema_version": 2, "role": "main"}),
         ):
             with self.subTest(field=field, role=role):
                 self.spec[field] = role
                 self.put_spec()
                 self.rejected()
                 self.spec[field] = None
+        self.spec["control"] = {"schema_version": 2, "role": "main"}
+        self.put_spec()
+        self.assertEqual(recovery.wireguard_inputs(str(self.source)), {"wireguard_files": 3})
+        with self.assertRaises((ValueError, OSError, KeyError)):
+            recovery.controller_inputs(str(self.source))
+        self.spec["control_sync"] = {"role": "controlled"}
+        self.put_spec()
+        self.rejected()
 
     def test_absent_wireguard_returns_zero_but_any_secret_without_spec_is_rejected(self):
         self.spec["host_integrations"] = []
@@ -1718,6 +1726,123 @@ class ControllerInputTests(unittest.TestCase):
             recovery.controller_inputs(str(self.source), str(self.output))
         self.assertFalse(self.output.exists())
 
+    def prepare_v2(self):
+        control = self.spec["control"]
+        control["schema_version"] = 2
+        control["peers"] = [
+            {"id": "00000004-1111-4111-8111-000000000004", "address": "10.77.0.3",
+             "enabled": False, "expires_at": 1, "token_sha256": "b" * 64},
+            control.pop("peer"),
+        ]
+        self.state = {key: copy.deepcopy(value) for key, value in control.items()
+                      if key != "last_digest"}
+        self.state["accounts"] = [
+            {key: value for key, value in account.items() if key != "listeners"}
+            for account in self.spec["accounts"]]
+        self.wg.put("wg-padm.conf", self.wg.helper.configuration_peers(
+            self.wg.identity, self.wg.private, [
+                {"address": "10.77.0.2", "public_key": self.wg.peer_public,
+                 "endpoint": "198.51.100.2:51820"},
+                {"address": "10.77.0.3", "public_key": base64.b64encode(b"D" * 32).decode(),
+                 "endpoint": None},
+                {"address": "10.77.0.4", "public_key": base64.b64encode(b"E" * 32).decode(),
+                 "endpoint": "198.51.100.4:51820"},
+            ]))
+        self.seal()
+
+    def test_v2_rebuild_keeps_peer_order_unregistered_wireguard_and_source(self):
+        self.prepare_v2()
+        before = self.snapshot()
+        expected = {"rebuilt_controller": True, "controller_accounts": 1}
+        with mock.patch.object(recovery.secrets, "token_bytes", side_effect=AssertionError):
+            self.assertEqual(recovery.controller_inputs(str(self.source)), expected)
+        self.assertEqual(recovery.controller_inputs(str(self.source), str(self.output)), expected)
+        result = json.loads(self.output.read_bytes())
+        control, previous = result["control"], self.spec["control"]
+        old_ids = {previous["node_id"]} | {peer["id"] for peer in previous["peers"]}
+        old_ids.update(value for account in self.spec["accounts"]
+                       for value in (account["id"], account["uuid"]))
+        new_ids = [control["node_id"]] + [peer["id"] for peer in control["peers"]]
+        self.assertEqual(len(new_ids), len(set(new_ids)))
+        self.assertTrue(set(new_ids).isdisjoint(old_ids))
+        tokens = [peer["token_sha256"] for peer in control["peers"]]
+        self.assertEqual(len(tokens), len(set(tokens)))
+        self.assertTrue(set(tokens).isdisjoint(peer["token_sha256"] for peer in previous["peers"]))
+        self.assertEqual([peer["address"] for peer in control["peers"]], ["10.77.0.3", "10.77.0.2"])
+        self.assertTrue(all(peer["enabled"] is False and peer["expires_at"] == 1
+                            for peer in control["peers"]))
+        self.assertEqual(control["revision"], 0)
+        self.assertIsNone(control["last_digest"])
+        restored = copy.deepcopy(result)
+        restored["control"].update(
+            node_id=previous["node_id"], revision=previous["revision"],
+            last_digest=previous["last_digest"])
+        for peer, old in zip(restored["control"]["peers"], previous["peers"]):
+            for key in ("id", "token_sha256", "enabled", "expires_at"):
+                peer[key] = old[key]
+        self.assertEqual(restored, self.spec)
+        self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), 0o600)
+        self.assertEqual(before, self.snapshot())
+        cli = subprocess.run(
+            [sys.executable, "-B", str(HELPER), "controller-inputs", "--directory", str(self.source)],
+            capture_output=True, check=True)
+        self.assertEqual(json.loads(cli.stdout), expected)
+        self.assertEqual(cli.stderr, b"")
+        for private in (SECRET, self.wg.private.encode(), previous["node_id"].encode()):
+            self.assertNotIn(private, cli.stdout)
+
+    def test_v2_rebuild_retries_old_business_and_new_identity_and_token_collisions(self):
+        self.prepare_v2()
+        old_tokens = [b"E" * 32, b"F" * 32]
+        for state in (self.spec["control"], self.state):
+            for peer, token in zip(state["peers"], old_tokens):
+                peer["token_sha256"] = hashlib.sha256(token).hexdigest()
+        self.seal()
+        old_ids = [self.spec["control"]["node_id"]] + [
+            peer["id"] for peer in self.spec["control"]["peers"]] + [
+            self.spec["accounts"][0]["id"], self.spec["accounts"][0]["uuid"]]
+        new_ids = [f"0000001{index}-1111-4111-8111-00000000001{index}" for index in range(3)]
+        identity_inputs = [uuid.UUID(value).bytes for value in old_ids + [
+            new_ids[0], new_ids[0], new_ids[1], new_ids[1], new_ids[2]]]
+        token_inputs = old_tokens + [b"G" * 32, b"G" * 32, old_tokens[1], b"H" * 32]
+        with mock.patch.object(recovery.secrets, "token_bytes",
+                               side_effect=identity_inputs + token_inputs):
+            recovery.controller_inputs(str(self.source), str(self.output))
+        control = json.loads(self.output.read_bytes())["control"]
+        self.assertEqual([control["node_id"]] + [peer["id"] for peer in control["peers"]], new_ids)
+        self.assertEqual([peer["token_sha256"] for peer in control["peers"]],
+                         [hashlib.sha256(token).hexdigest() for token in (b"G" * 32, b"H" * 32)])
+
+    def test_v2_state_order_registered_addresses_and_single_peer_role_boundaries(self):
+        self.prepare_v2()
+        original_spec, original_state = copy.deepcopy(self.spec), copy.deepcopy(self.state)
+        for changes in ("missing-peer", "listen", "state-order", "state-peer",
+                        "duplicate-id", "duplicate-token", "empty", "v1"):
+            with self.subTest(changes=changes):
+                self.spec, self.state = copy.deepcopy(original_spec), copy.deepcopy(original_state)
+                if changes == "state-order":
+                    self.state["peers"].reverse()
+                elif changes == "state-peer":
+                    self.state["peers"][0]["address"] = "10.77.0.5"
+                else:
+                    for control in (self.spec["control"], self.state):
+                        if changes == "missing-peer":
+                            control["peers"][0]["address"] = "10.77.0.5"
+                        elif changes == "listen":
+                            control["listen"]["address"] = "10.77.0.5"
+                        elif changes in ("duplicate-id", "duplicate-token"):
+                            key = "id" if changes == "duplicate-id" else "token_sha256"
+                            control["peers"][0][key] = control["peers"][1][key]
+                        elif changes == "empty":
+                            control["peers"] = []
+                        else:
+                            control["schema_version"] = 1
+                            control["peer"] = control.pop("peers")[0]
+                self.seal()
+                before = self.snapshot()
+                self.rejected()
+                self.assertEqual(before, self.snapshot())
+
     def test_read_only_check_and_fresh_private_spec_change_only_seven_fields(self):
         before = self.snapshot()
         expected = {"rebuilt_controller": True, "controller_accounts": 1}
@@ -1804,7 +1929,7 @@ class ControllerInputTests(unittest.TestCase):
                     self.spec["schema_version"] = 2
                 elif changes == "control-version":
                     for value in (self.spec["control"], self.state):
-                        value["schema_version"] = 2
+                        value["schema_version"] = 3
                         value["peers"] = [value.pop("peer")]
                 elif changes == "controlled":
                     self.spec["control_sync"] = {}
@@ -1814,12 +1939,7 @@ class ControllerInputTests(unittest.TestCase):
                     self.spec["control"]["listen"]["address"] = "10.77.0.3"
                     self.state["listen"]["address"] = "10.77.0.3"
                 self.seal()
-                if changes == "control-version":
-                    with self.assertRaises(ValueError):
-                        recovery.controller_inputs(str(self.source), str(self.output))
-                    self.assertFalse(self.output.exists())
-                else:
-                    self.rejected()
+                self.rejected()
         self.spec, self.state = original_spec, original_state
         self.seal()
         (self.source / recovery.WIREGUARD_PREFIX / "private.key").unlink()

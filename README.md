@@ -1697,7 +1697,8 @@ API 端口及账号发布版本由主控共享；更换端口后每个被控分�
 移除前必须先撤销，集合至少保留一项。v2 主控可维护未登记的 WireGuard Peer；
 已登记项须先撤销并移除控制登记，再修改或移除其隧道项。
 v2 更新/回滚要求目标 bundle 声明 `x-padm-control-peers=true`，旧单项 bundle 在切换前拒绝。
-v2 关联地址/本机密钥迁移、主控灾备及控制面 Fail2ban 暂不支持；升级前先停用后者。
+v2 关联地址/本机密钥迁移及控制面 Fail2ban 暂不支持；升级前先停用后者。
+主控新身份空目标恢复见下文，不能恢复旧授权。
 本机定向及三节点验收状态见[实施计划](documents/docker-menu-parity-plan.md)，
 原生宿主、arm64、公网、重启和可信发布仍分别待验。
 
@@ -1863,7 +1864,7 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 停用分享组的悬空引用也须先修正。
 WireGuard 要求完整 canonical `identity.json`、`private.key`、`wg-padm.conf` 三件套，
 均为 `root:root`、目录 `0700`、文件 `0600`，可信 net 镜像另核私钥与公钥配对。
-无控制角色支持非空 Peer 集合；已接入被控及下述显式重建主控仍限单 Peer。
+无控制角色支持非空 Peer 集合；已接入被控仍限单 Peer，主控须使用下述显式新身份重建。
 被控自动同步须先停用，归档不得含 `secrets/control-sync`。
 保留全部 Peer 地址、公钥和 endpoint，以及本机密钥、适用的控制身份、连接、受管快照、版本、账号及累计；被控恢复后重新邀请并手动同步，
 不清空版本防倒退门禁。恢复前先停止旧节点并确认接口消失，不能同时运行相同 WireGuard 身份。
@@ -1915,17 +1916,18 @@ padm-docker restore apply /root/padm-recovery.tar --confirm PADM-DOCKER-RESTORE
 padm-docker restore recover
 ```
 
-单 Peer 主控须先停机并隔离旧宿主，再通过维护菜单 `18 → 11/12` 或以下命令重建：
+主控须先停机并隔离旧宿主，再通过维护菜单 `18 → 11/12` 或以下命令重建：
 
 ```bash
 padm-docker restore preview /root/padm-recovery.tar --rebuild-controller
 padm-docker restore apply /root/padm-recovery.tar --rebuild-controller --confirm PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED
 ```
 
-仅接受同架构 v3 空目标、完整 canonical 单 Peer 和一致的原规格及发布状态；
+仅接受同架构 v3 空目标、完整 canonical WireGuard 和一致的原规格及发布状态；
+v1 主控仍限单 Peer，v2 主控保留非空控制 Peer 集合及全部 WireGuard 项，所有已登记地址必须匹配。
 归档不得含控制日志登记、来源现场、历史日志或持久同步授权。
-保留账号、累计、API 端口及 WireGuard 密钥和地址，重新生成主控与 Peer 身份，
-禁用并过期原授权，版本从 `0` 开始；重新签发邀请后在被控端显式执行 `control rebind`。
+保留账号、累计、API 端口及 WireGuard 密钥和地址，重新生成主控与所有 Peer 身份，
+禁用并过期全部旧授权，版本从 `0` 开始；逐节点重新签发邀请后在各被控端显式执行 `control rebind`。
 普通同步的旧身份、版本及凭据碰撞门禁继续生效。新身份不能撤销仍存活的旧副本，
 故隔离旧宿主是恢复前提；不恢复原主控身份或覆盖已有部署。
 

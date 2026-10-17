@@ -3229,7 +3229,8 @@ dockerRecoveryInputsPrepare() {
         jq -e --arg rebuildController "${rebuildController}" '.schema_version == 3 and
           (.host_integrations | length <= 1 and all(.[]; .type == "wireguard")) and
           (if $rebuildController == "1" then
-            .control.schema_version == 1 and .control.role == "main" and .control_sync == null and
+            (.control.schema_version == 1 or .control.schema_version == 2) and
+            .control.role == "main" and .control_sync == null and
             (.host_integrations | length == 1)
            else
             .control == null and
@@ -3270,14 +3271,14 @@ dockerRecoveryInputsPrepare() {
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" wireguard-inputs --directory "${input}" \
         >"${draft}/wireguard-counts.json" &&
         dockerWireGuardMigrationRoleCheck "${spec}" "${input}/secrets/net/wireguard" || {
-        dockerError 'WireGuard 恢复要求完整 canonical 私密输入；控制角色仍限单 Peer，且被控连接地址必须一致'
+        dockerError 'WireGuard 恢复要求完整 canonical 私密输入；单 Peer 角色或 v2 主控集合必须与控制地址一致'
         return 1
     }
     printf '{}\n' >"${draft}/controller-counts.json" || return 1
     if [[ "${rebuildController}" == 1 ]]; then
         python3 -B "${DOCKER_LIB_DIR}/recovery.py" controller-inputs --directory "${input}" \
             --spec-output "${draft}/controller-spec.json" >"${draft}/controller-counts.json" || {
-            dockerError '主控重建要求原规格与发布状态一致、完整单 Peer 输入，且不能携带控制日志登记或旧持久授权'
+            dockerError '主控重建要求原规格、发布状态与完整 WireGuard Peer 输入一致，且不能携带控制日志登记或旧持久授权'
             return 1
         }
         spec="${draft}/controller-spec.json"

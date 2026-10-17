@@ -655,7 +655,7 @@ def wireguard_inputs(directory):
             require(all(metadata[key] == entry[key] for key in ("size", "sha256", "mode")))
             observed.append((wireguard_fd, filename, signature(info)))
         stable()
-        # 无控制角色时复用规范 Peer 集合；曲线密钥配对由可信 net 镜像另行检查。
+        # 无角色或 v2 主控复用规范 Peer 集合；主控绑定由专用校验补足。
         import importlib.util
         module_spec = importlib.util.spec_from_file_location(
             "padm_wireguard_recovery", os.path.join(os.path.dirname(__file__), "wireguard-config.py"))
@@ -664,7 +664,12 @@ def wireguard_inputs(directory):
         _, _, configured, remotes = wireguard.load(wireguard_fd, include_peers=True)
         require(configured and remotes and set(os.listdir(wireguard_fd)) == filenames)
         require((spec.get("control") is None and spec.get("control_sync") is None)
-                or len(remotes) == 1)
+                or len(remotes) == 1
+                or (isinstance(spec.get("control"), dict)
+                    and type(spec["control"].get("schema_version")) is int
+                    and spec["control"]["schema_version"] == 2
+                    and spec["control"].get("role") == "main"
+                    and spec.get("control_sync") is None))
         stable()
     return {"wireguard_files": 3}
 
@@ -705,7 +710,7 @@ def controller_inputs(directory, spec_output=None):
                 and spec["schema_version"] == 3 and "control_sync" not in spec
                 and isinstance(spec.get("control"), dict)
                 and type(spec["control"].get("schema_version")) is int
-                and spec["control"]["schema_version"] == 1
+                and spec["control"]["schema_version"] in (1, 2)
                 and isinstance(spec.get("host_integrations"), list)
                 and len(spec["host_integrations"]) == 1
                 and isinstance(spec["host_integrations"][0], dict)
@@ -729,9 +734,13 @@ def controller_inputs(directory, spec_output=None):
             "padm_controller_wireguard", os.path.join(os.path.dirname(__file__), "wireguard-config.py"))
         wireguard = importlib.util.module_from_spec(module_spec)
         module_spec.loader.exec_module(wireguard)
-        addresses = wireguard.addresses(directory + "/" + WIREGUARD_PREFIX)
-        require(addresses == {"address": spec["control"]["listen"]["address"],
-                              "peer_address": spec["control"]["peer"]["address"]})
+        control = spec["control"]
+        peers = [control["peer"]] if control["schema_version"] == 1 else control["peers"]
+        addresses = wireguard.peers(directory + "/" + WIREGUARD_PREFIX)
+        require(addresses["address"] == control["listen"]["address"]
+                and (control["schema_version"] == 2 or len(addresses["peers"]) == 1)
+                and all(peer["address"] in {remote["address"] for remote in addresses["peers"]}
+                        for peer in peers))
         # 解包白名单之外的控制授权或来源现场也不能被未登记目录掩盖。
         for prefix in ("data", "secrets", "logs"):
             if prefix not in os.listdir(root_fd):
@@ -754,20 +763,23 @@ def controller_inputs(directory, spec_output=None):
         if spec_output is not None:
             require(isinstance(spec_output, str) and spec_output != directory
                     and not spec_output.startswith(directory + "/"))
-            occupied = {spec["control"]["node_id"], spec["control"]["peer"]["id"]}
+            occupied = {control["node_id"]} | {peer["id"] for peer in peers}
             for account in spec.get("accounts", []):
                 occupied.update((account["id"], account["uuid"]))
-            for target, field in ((spec["control"], "node_id"), (spec["control"]["peer"], "id")):
+            for target, field in [(control, "node_id")] + [(peer, "id") for peer in peers]:
                 identity = str(uuid.UUID(bytes=secrets.token_bytes(16), version=4))
                 while identity in occupied:
                     identity = str(uuid.UUID(bytes=secrets.token_bytes(16), version=4))
                 occupied.add(identity)
                 target[field] = identity
-            token_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
-            while token_hash == spec["control"]["peer"]["token_sha256"]:
+            occupied_tokens = {peer["token_sha256"] for peer in peers}
+            for peer in peers:
                 token_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
-            spec["control"]["peer"].update(enabled=False, expires_at=1, token_sha256=token_hash)
-            spec["control"].update(revision=0, last_digest=None)
+                while token_hash in occupied_tokens:
+                    token_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+                occupied_tokens.add(token_hash)
+                peer.update(enabled=False, expires_at=1, token_sha256=token_hash)
+            control.update(revision=0, last_digest=None)
             encoded = json.dumps(spec, ensure_ascii=True, separators=(",", ":")).encode()
             require(len(encoded) <= MAX_TRANSACTION_FILE)
             with absolute_parent(spec_output, private=True) as (owner, child):

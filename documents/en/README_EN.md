@@ -1369,8 +1369,8 @@ plan; changed or unprovable authorizations are disabled. Revoke before removal a
 V2 update/rollback requires `x-padm-control-peers=true` in the target bundle; older single-Peer bundles
 are rejected before switching.
 V2 controllers may maintain unregistered WireGuard Peers. Revoke and remove a control registration before
-updating/removing its WireGuard entry. V2 identity/address/key migration, controller disaster recovery and
-control-plane Fail2ban remain unsupported; disable the latter before upgrading.
+updating/removing its WireGuard entry. V2 identity/address/key migration and control-plane Fail2ban
+remain unsupported; disable the latter before upgrading. New-identity controller recovery is described below.
 See the [implementation plan](../docker-menu-parity-plan.md) for focused and three-node evidence;
 native hosts, arm64, public networks, reboot and trusted releases still require separate acceptance.
 
@@ -1635,7 +1635,7 @@ Dangling references in disabled share groups are also rejected.
 WireGuard requires the complete canonical `identity.json`, `private.key` and `wg-padm.conf`,
 with `root:root` ownership, directory mode `0700` and file mode `0600`; a trusted net image also
 checks the private/public key pair. Nodes without a control role accept a nonempty Peer collection;
-joined controlled nodes and explicit controller rebuilds below still require a single Peer.
+joined controlled nodes still require a single Peer; controllers use the explicit rebuild below.
 Controlled-node automatic sync must be disabled, with no archived `secrets/control-sync`.
 All Peer addresses, public keys and endpoints, local keys, applicable control identity, connection,
 managed snapshot, revision, accounts and totals are preserved. On a controlled node, obtain a fresh
@@ -1714,7 +1714,7 @@ padm-docker restore apply /root/padm-recovery.tar --confirm PADM-DOCKER-RESTORE
 padm-docker restore recover
 ```
 
-For a single-Peer controller, shut down and isolate the old host first, then use maintenance
+For a controller, shut down and isolate the old host first, then use maintenance
 menu `18 → 11/12` or:
 
 ```bash
@@ -1722,12 +1722,14 @@ padm-docker restore preview /root/padm-recovery.tar --rebuild-controller
 padm-docker restore apply /root/padm-recovery.tar --rebuild-controller --confirm PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED
 ```
 
-This requires a same-architecture v3 empty target, complete canonical single-Peer inputs and
-matching original spec/published state. Control-log registration, source evidence, historical
+This requires a same-architecture v3 empty target, complete canonical WireGuard inputs and
+matching original spec/published state. V1 still requires a single Peer; v2 preserves its nonempty
+control Peer collection and all WireGuard entries, with every registered address matched.
+Control-log registration, source evidence, historical
 logs and persistent sync authorization are rejected. Accounts, totals, API port and WireGuard
-keys/addresses are preserved; controller and Peer identities are regenerated, old authorization
-is disabled/expired, and revision starts at zero. Issue a new invitation and explicitly run
-`control rebind` on the controlled node. Ordinary identity, revision and credential-collision
+keys/addresses are preserved; controller and all Peer identities are regenerated, every old authorization
+is disabled/expired, and revision starts at zero. Issue a new invitation for each Peer and explicitly run
+`control rebind` on each controlled node. Ordinary identity, revision and credential-collision
 checks remain enforced. A new identity cannot revoke a surviving old copy, so isolation is
 required; preserving the old controller identity or replacing an existing deployment is unsupported.
 

@@ -535,7 +535,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `nginx` / `subscription` | bridge | 4A.7/4A.9 复用至少一个 `21–25/27/29` 入口及同域受管 TLS，含纯 sing-box `23`；无 `21` 需 `x-padm-subscription-nginx-tls`，含 fallback 发布另需 `x-padm-subscription-fallback-tls`。HTTP/1.1 与 HTTP/2 后端共用 token 路由。部署/分享组 token 沿用，分享 URL 按首个适用入口的实际公开端口；独立域名/证书发布与 H3 未迁移，27/29 新范围验收见 4A.9。 |
 | `subscription-traffic` | 账号管理 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/collect/limit/reset；菜单 `10 -> 9` 查看不隐式采集，额度 `0` 表示不限额，设置/重置各确认一次，重置保留额度。沿用 CLI 采样与失败副作用；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1–4A.4 账号底座、账号 CLI/菜单事务、独立 token 分享组及业务备份恢复已交付；账号/入口筛选、启停/轮换、纯内容与 HTTPS 链接，账号/组/额度/累计 merge/replace 恢复均复用候选事务，轮换与恢复不回退最新累计。4A.2a 凭据不进外部 argv，修复首次 SS 关联生成与迁移入口选择；已有账号须显式设置新增入口授权。CDN/H3 与完整多服务器工作流按独立功能边界验收。 |
-| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.5 提供私网 API、主控管理、被控接入/手动同步及已有单 Peer 被控每 5 分钟自动同步 CLI/菜单。4C.6 增加同身份/同 WireGuard 地址的 API 端口更新及被控重连；先停用相关调度/控制面防护，保留身份、映射、累计、版本、旧快照及回滚门禁，CLI/client、菜单及隔离 amd64 双 Docker Engine 的 Compose 切换、重连、业务流量、同版幂等和撤销已验，本批完整合同 65/65 叶子通过。主控/被控命令校验已有 Peer 归属、地址与唯一 `/32`，不建接口/密钥/路由；4C.7 独立单 Peer 准备与启停入口已通过定向及隔离 amd64 真实 CLI 验收，见下文。默认关闭，持久邀请限本机 root 私有目录，不进规格/备份/普通日志，停用清除凭据。独立服务和客户端零能力，无公网映射。隔离 amd64 双 Docker Engine 的生产 CLI/Compose、WS/TLS 流量、真实 cron 自主推进、同版幂等、锁竞争、轮换/撤销及健康失败/INT/TERM 恢复已验。正常 down 跳过，异常归属和 WS/SSH 来源防护组合拒绝。多 Peer、完整网络管理、角色重绑定、迁移、灾备、原生 systemd/双机/arm64、重启和可信发布待补。 |
+| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.6 提供私网 API、主控管理、被控接入、手动/每 5 分钟自动同步及 API 端口重连；4C.7–4C.11 提供单 Peer 建链、同隧道主控 rebind 及连接/关联地址迁移。4C.12–4C.14 提供无角色多 Peer 管理/本机迁移及 v2 多被控逐节点邀请、授权、撤销和故障隔离。保留业务累计和普通版本门禁，token 仅写外部 root 私有邀请，API/客户端零能力且无公网映射。隔离 amd64 双/三节点真实业务、授权与来源隔离、自动同步及失败恢复证据见各阶段；6A.19/6A.23 接续隔离旧主控后的 v1/v2 新身份空目标恢复，全部撤权并逐端新邀请/rebind。v2 关联迁移和控制面 Fail2ban 明确拒绝；完整灾备、原生 systemd/双机/arm64、重启和可信发布待验。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 5A.3b 已提供显式 opt-in 双栈 `80:8088`、独立 HTTP vhost、只读稳定根与 ops 独占 `active/`，菜单/CLI 和 schema 3 自动续期；归属及目录校验、不停 Nginx、失败/信号恢复和关闭/回滚保护。公网 CA、真实宿主生命周期及原生双架构未验，完整状态不升级。 |
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | 宿主预检 + bridge | 5A.3a/5A.3c 已提供 HTTP-01 standalone 与 TLS-ALPN-01 首配、重新选择、首个 TLS、迁移、菜单/CLI 和自动续期；非 root ops 临时双栈 `80:8080` 或 `443:8443`，实际归属校验，只暂停本部署原运行拥有者并恢复；未到期不暂停。ALPN 使用无凭据 schema `4`，Fail2ban Nginx 拒绝自监听停启。公网 CA、原生 Linux/双架构及宿主生命周期待验，完整状态不升级。 |
 | `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` / `core-sing-box` | bridge | 5A.1 站点、5A.1b–5A.1e 受管 notes/photos/docs 模板及可选站名、5A.1c Hysteria2 local 与 5A.2 逐入口 ALPN 事务已提供；模板限已有 v3 Nginx TLS 21–25（含 sing-box 23）、Xray 27/29 或 Hy2，资源清单随 bundle 校验，生成后仍普通 static，站名只写入转义后的网页。local 固定只读目录且无混淆，纯 Hy2 只开放静态模式。隔离 amd64 27/29 的真实 TLS ALPN、fallback 与认证、sing-box 23 的模板资源及主/组订阅双栈共存已验；公网及原生双架构仍待验。 |
@@ -557,7 +557,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | TProxy TCP/UDP 和 Redirect TCP 的有限管理范围同上，两者互斥；完整 Redirect/TProxy 管理及宿主验收仍 deferred。 |
 | `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 核心 | bridge | 两核心 DNS/hosts、Direct/Block、IP/CIDR、BT、CN 预设、IPv6/WARP 和专项事务已交付；名单增删/原位替换、上游和区域自定义例外管理冻结未选字段。hosts 单键增删/替换及交互单 IP/精确 FQDN CSV 整组替换共存，原 JSON CLI 保留。手工 IP 保留原文和顺序，不改区域合成项；sing-box 可显式解析后阻断并组合 WARP/IPv6，Xray 继续拒绝。只读重叠/覆盖不推断 GeoSite 或最终流量；完整区域、语义冲突检测、原生迁移及公网/宿主/双架构验收待补。 |
 | `internal-207-access-control` | 协议与入口 -> 额外入口端口 | `deferred` | 原业务核心/Nginx | bridge | 5B.5c–5B.5e 独立 `port_aliases`、菜单/CLI 增删/原位修改/状态/默认分享与候选回滚；双栈 TCP/UDP 发布已在隔离 amd64 Linux daemon 验证，同入口认证/统计，TLS/SNI 前端不旁路，URI/主订阅/分享组逐入口选择已有别名，修改保留默认标记，恢复或删除后回退 base，不增加节点。拒绝 WS/SSH Fail2ban、TUN/TProxy 和 host-network，允许已有 WireGuard/控制面 Fail2ban；适用公网/原生宿主/arm64 与完整管理验收待补。 |
-| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有可信首配、规格/协议/Reality/TLS、账号/分享/额度、备份、核心/Geo、多被控逐节点管理、站点/路由及适用 Fail2ban 菜单。6A.1–6A.22 提供私密导出、只读验证和同架构 v3 空目标恢复；逐项支持范围、权限与失败恢复见下文。ACME 限单域 EC-P256 standalone、固定受管 Webroot、ALPN 或 dns_acmedns 及匹配唯一启用登记；健康后按 traffic、Geo、renewal 安装适用调度，独立快照、统一漂移检查、逆序撤销，预览不安装调度。其它启用 DNS、未知材料、已有部署替换仍拒绝。无控制角色允许 canonical 多 Peer，主控/被控恢复仍限单 Peer，主控须隔离旧宿主后显式重建身份并在被控 rebind。完整协议管理、控制角色多 Peer 灾备、原生双架构生命周期及可信发布仍待交付或验收。 |
+| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有可信首配、规格/协议/Reality/TLS、账号/分享/额度、备份、核心/Geo、多被控逐节点管理、站点/路由及适用 Fail2ban 菜单。6A.1–6A.23 提供私密导出、只读验证和同架构 v3 空目标恢复；逐项支持范围、权限与失败恢复见下文。ACME 限单域 EC-P256 standalone、固定受管 Webroot、ALPN 或 dns_acmedns 及匹配唯一启用登记；健康后按 traffic、Geo、renewal 安装适用调度，独立快照、统一漂移检查、逆序撤销，预览不安装调度。其它启用 DNS、未知材料、已有部署替换仍拒绝。无控制角色允许 canonical 多 Peer，被控恢复仍限单 Peer；主控接受 v1 单项或 v2 非空集合，须停机隔离旧宿主后重建全部控制身份、撤权并逐端新邀请/rebind。完整协议管理、v2 关联迁移、原生双架构生命周期及可信发布仍待交付或验收。 |
 | `core-lifecycle` | 核心与服务 | `supported` | 核心 profile | 宿主 CLI | 基础 `status/up/down/restart/logs/update/rollback/validate` 已可用，不代表原生全部升级管理。 |
 | `core-upgrade-assessment` | 核心与服务 -> Xray / sing-box 生命周期 | `supported` | 核心 profile | 宿主 CLI | 菜单第 13 项及 `assess` 复用只读风险扫描，使用可信候选镜像/配置副本执行版本检查、双核心配置试跑、Xray 严格模式与能力探针及已启用的 TLS/订阅/宿主前置检查；旧核心不启用严格解析时明确警告，不切换生产状态。要求受管 spec，预发布须提供匹配的可信发布资产；真实客户端连通另验。 |
 | `geo-data` | 核心与服务 -> Xray Geo 数据 | `supported` | `core-xray` | 宿主 CLI | 菜单第 14 项与 `geo status/update/schedule/auto-update` 已交付；完整受管数据经双摘要及真实 Xray 解析校验后切换读取路径，重建前采集 Xray 流量，仅重建原本运行的 Xray，失败恢复数据/Compose/运行状态；每日 01:35 systemd/cron 任务有部署归属和锁。编辑、更新和回滚保留数据及调度登记，旧 bundle 在切换前拒绝；真实上游、生产重建、宿主调度、arm64 和整机重启另验。 |
@@ -576,7 +576,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 `up/restart` 可重新启用；有 `control/control_sync` 依赖时拒绝单独停止。
 沿用现有 owner/preflight/run/cleanup/health，拒绝归属漂移。CLI 示例及定向、隔离 amd64 真实验收证据见实施计划；
 4C.8 的同隧道主控重绑定及 4C.9–4C.11 的单 Peer 连接迁移见下文；
-无角色多 Peer 集合管理见 4C.12，角色灾备及原生双架构、重启、公网边界不变。
+无角色多 Peer 集合管理见 4C.12，主控新身份恢复见 6A.19/6A.23，原生双架构、重启、公网边界不变。
 
 4C.8 新增 `control rebind --invite <私有文件> [--yes]` 及控制菜单 `19`。
 须先停用被控自动同步，认证新邀请后显式替换旧主控受管账号；
@@ -623,8 +623,8 @@ endpoint 及轮换本机密钥；省略保持，endpoint `none` 清空，同配�
 先配置 canonical WireGuard `/32` 再登记控制 Peer，移除须先撤销且保留至少一项。
 未登记隧道项可维护，已登记项须先移除控制登记；主控端口及账号版本共享，
 配置事务可能短暂影响其它连接。v2 失败恢复仅保留可信快照中完整未变化的旧授权；
-变化项禁用，无可信比较证据时全部禁用。v2 灾备、关联地址/密钥迁移和控制面 Fail2ban
-明确拒绝。定向 CLI、菜单、WireGuard、备份及状态组已通过；
+变化项禁用，无可信比较证据时全部禁用。v2 新身份灾备接续 6A.23，关联地址/密钥迁移和控制面
+Fail2ban 明确拒绝。定向 CLI、菜单、WireGuard、备份及状态组已通过；
 隔离 amd64 一主两被控事务及最终 API 双来源请求隔离已通过，证据见实施计划。
 旧 bundle 须显式支持 v2 集合；完整灾备及原生环境缺口保留，整体状态不提前升级。
 
@@ -700,7 +700,7 @@ WireGuard 密钥/地址、账号及累计。原规格/发布状态须一致，�
 来源/历史日志及持久同步授权；被控须新邀请后显式 rebind，普通版本及凭据碰撞门禁保留。
 helper `102`、材料 `28`、maintenance `38`、专用 apply `18` 及隔离 amd64
 真实双端恢复/rebind/业务/累计通过；真实入口 `365.034` 秒，发布信任为离线夹具。
-原身份恢复、多 Peer、已有部署替换、原生宿主/arm64 与完整灾备仍未支持。
+v2 集合新身份恢复接续 6A.23；原身份恢复、已有部署替换、原生宿主/arm64 与完整灾备仍未支持。
 
 6A.20 接入单域 EC-P256、schema `4`／`alpn` ACME 与启用续期恢复，
 固定 `Le_Webroot='alpn'`、`Le_TLSPort='8443'`，拒绝残留 HTTP 端口及验证方式混用。
@@ -722,11 +722,21 @@ helper `109`、材料 `35`、preview `75`、专用 apply `16` 和派发合同通
 
 6A.22 接入无控制角色 canonical 非空 WireGuard Peer 集合的同架构 v3 空目标恢复，
 保留原三文件、全部 Peer 地址/公钥/endpoint、本机身份密钥、账号及累计。
-沿用原候选与持久恢复事务，控制角色仍限单 Peer；旧节点须先停止并确认接口消失。
+沿用原候选与持久恢复事务；本阶段控制角色限单 Peer，v2 主控接续 6A.23；旧节点须先停止并确认接口消失。
 helper `110`、材料 `35`、preview `77`、apply `26` 及派发合同一次通过，入口 `76.102` 秒。
 隔离 amd64 三独立 Engine/netns 的网关恢复、双链加密、真实业务和累计通过，
 入口 `218.121` 秒，发布信任为离线夹具，证据见实施计划。
-v2 主控灾备、其它宿主集成、已有部署替换和原生宿主/arm64/公网/重启仍待交付或验收。
+其它宿主集成、已有部署替换和原生宿主/arm64/公网/重启仍待交付或验收。
+
+6A.23 复用主控显式新身份恢复入口，同架构 v3 空目标接受 v2 非空控制 Peer 集合。
+旧主控须停机隔离；原规格、发布状态及所有登记 WG 地址严格绑定，
+保留完整 canonical 隧道集合、Peer 次序、地址/API、业务和累计。
+主控及全部 Peer ID/token hash 换新且无交叉碰撞，全部授权停用/过期、revision 归零；
+不导入旧认证日志及来源现场，各被控须逐端新邀请/rebind，再继续正常同步。
+helper `113`、材料 `35`、apply `18`、派发合同及 preview `81` 通过，唯一预览测试桩
+修复后仅补该叶。三独立 Engine/netns 的双旧邀请拒绝、双端 rebind、revision `1`
+同步、双链加密、业务及累计通过，真实入口 `641.241` 秒；证据见实施计划。
+不扩大 v2 关联迁移、控制面 Fail2ban、已有部署替换及环境范围，完整状态仍 deferred。
 
 ## 第一阶段验收
 

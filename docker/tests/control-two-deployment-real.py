@@ -2413,6 +2413,147 @@ print(fetch_desired(invite)["revision"])
     return rotated
 
 
+def controller_empty_target_restore(controller, archive, release):
+    root = controller["path"] / "deployment"
+    # 必须先隔离旧主控；本地撤权不能替代停止仍持有旧身份的副本。
+    cli(controller, "down")
+    assert not command(controller["docker"] + ["ps", "-aq", "--filter",
+                                              "label=com.docker.compose.project=padm-docker"]).strip()
+    assert "wg-padm" not in {link["ifname"] for link in
+                             json.loads(command(controller["enter"] + ["ip", "-j", "link"]))}
+    root.rename(controller["path"] / "deployment-before-recovery-controller")
+    command(controller["enter"] + ["bash", "-ec", r'''
+set -Eeuo pipefail
+source "$1"
+dockerAcquireDeploymentLock
+trap 'dockerReleaseDeploymentLock' EXIT
+dockerInitializeStateRoot
+dockerInstallBundle "$2"
+dockerInstallCli
+''', "--", str(ROOT / "install-docker.sh"), str(ROOT)], env=controller["env"], timeout=60)
+    cli(controller, "restore", "apply", str(archive), *release, "--rebuild-controller",
+        "--confirm", "PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED")
+
+
+def controller_peers_recovery_real(nodes, image, release):
+    controller = nodes[0]
+    addresses, public, keys = wireguard_peers_prepare_real(nodes)
+    root = controller["path"] / "deployment"
+    local = [state(node)["accounts"][0] for node in nodes]
+    cli(controller, "control", "init", "--address", addresses[0], "--port", "39778",
+        "--peer-address", addresses[1], "--yes")
+    cli(controller, "control", "upgrade", "--yes")
+    cli(controller, "wireguard", "peers", "add", "--peer-address", addresses[2],
+        "--peer-public-key", public[2], "--endpoint", "192.0.2.3:51820", "--yes")
+    cli(controller, "control", "peers", "add", "--peer-address", addresses[2], "--yes")
+    invitations = []
+    for index, node in enumerate(nodes[1:], 1):
+        peer = state(controller)["control"]["peers"][index-1]
+        path = controller["path"] / f"private/recovery-old-{index}.json"
+        cli(controller, "control", "invite", "--peer-id", peer["id"], "--output", str(path), "--yes")
+        invitation = node["path"] / "private/recovery-old.json"
+        save(invitation, json.loads(path.read_text()))
+        invitations.append(invitation)
+        cli(node, "control", "join", "--invite", str(invitation), "--listener", "entry-ws", "--yes")
+        source_check(controller, node, (addresses[0], addresses[index]), peer["id"])
+    crossed = nodes[1]["path"] / "private/recovery-crossed.json"
+    save(crossed, dict(json.loads(invitations[1].read_text()), peer_address=addresses[1]))
+    unauthorized(nodes[1], crossed)
+    account = local[0]["id"]
+    for name in ("controller-peers-recovery-published", "controller-peers-recovery-high-version"):
+        cli(controller, "account", "edit", account, "--name", name)
+    for node, invitation in zip(nodes[1:], invitations):
+        cli(node, "control", "sync", "--invite", str(invitation))
+    before, *joined = [state(node) for node in nodes]
+    assert all(item["control_sync"]["last_revision"] == before["control"]["revision"] > 1 for item in joined)
+    for index, node in enumerate(nodes):
+        traffic(node, image, account_id=account)
+        if index:
+            traffic(node, image, account_id=local[index]["id"])
+    totals = [json.loads((node["path"] / "deployment/data/traffic/state.json").read_text()) for node in nodes]
+    wireguard = {node["path"] / "deployment/secrets/net/wireguard" / name:
+                 (node["path"] / "deployment/secrets/net/wireguard" / name).read_bytes()
+                 for node in nodes for name in ("identity.json", "private.key", "wg-padm.conf")}
+    auth_log = root / "logs/control/auth.log"
+    previous_auth = auth_log.read_bytes()
+    assert previous_auth, "旧主控必须具有真实认证日志"
+    archive = controller["path"] / "private/controller-peers-recovery.tar"
+    cli(controller, "backup", "export", str(archive))
+    cli(controller, "backup", "verify", str(archive))
+    controller_empty_target_restore(controller, archive, release)
+    rebuilt = state(controller)
+    fresh, old = rebuilt["control"], before["control"]
+    old_ids = {old["node_id"], *(peer["id"] for peer in old["peers"])}
+    fresh_ids = {fresh["node_id"], *(peer["id"] for peer in fresh["peers"])}
+    old_hashes = {peer["token_sha256"] for peer in old["peers"]}
+    fresh_hashes = {peer["token_sha256"] for peer in fresh["peers"]}
+    assert len(fresh_ids) == 3 and not fresh_ids & old_ids
+    assert len(fresh_hashes) == 2 and not fresh_hashes & old_hashes
+    assert all(peer["enabled"] is False and peer["expires_at"] == 1 for peer in fresh["peers"])
+    assert fresh["revision"] == 0 and fresh["listen"] == old["listen"]
+    assert [peer["address"] for peer in fresh["peers"]] == [peer["address"] for peer in old["peers"]]
+    expected = copy.deepcopy(before)
+    expected["control"].update(node_id=fresh["node_id"], revision=0, peers=fresh["peers"])
+    assert rebuilt == expected, "v2 主控恢复改变了完整 Peer 地址、账号、API 或业务配置"
+    assert json.loads((root / "data/traffic/state.json").read_text()) == dict(
+        totals[0], accounts={key: dict(value, baseline={}) for key, value in totals[0]["accounts"].items()})
+    assert all(path.read_bytes() == data for path, data in wireguard.items())
+    assert not (root / "secrets/control-sync").exists()
+    assert not list((root / "data/control-source").iterdir())
+    assert (root / "logs/control/source.receipt").read_bytes() == b""
+    assert not auth_log.exists() or previous_auth not in auth_log.read_bytes(), "恢复导入了旧控制认证日志"
+    for index, (node, invitation) in enumerate(zip(nodes[1:], invitations)):
+        previous_services = services(node)
+        ledger = node["path"] / "deployment/data/traffic/state.json"
+        previous_ledger = ledger.read_bytes()
+        unauthorized(node, invitation)
+        cli(node, "control", "sync", "--invite", str(invitation), accepted=False)
+        assert state(node) == joined[index] and services(node) == previous_services
+        assert ledger.read_bytes() == previous_ledger
+    rotated = []
+    for index, node in enumerate(nodes[1:], 1):
+        peer = fresh["peers"][index-1]
+        source_check(controller, node, (addresses[0], addresses[index]), peer["id"])
+        output = controller["path"] / f"private/recovery-new-{index}.json"
+        cli(controller, "control", "invite", "--peer-id", peer["id"], "--output", str(output), "--yes")
+        invitation = node["path"] / "private/recovery-new.json"
+        save(invitation, json.loads(output.read_text()))
+        assert json.loads(invitation.read_text())["token"] != json.loads(invitations[index-1].read_text())["token"]
+        cli(node, "control", "rebind", "--invite", str(invitation), "--yes")
+        current = state(node)
+        sync = current["control_sync"]
+        assert sync["controller_id"] == fresh["node_id"] and sync["node_id"] == peer["id"]
+        assert sync["last_revision"] == 0 and sync["managed_accounts"] == state(controller)["accounts"]
+        assert sync["connection"] == joined[index-1]["control_sync"]["connection"]
+        assert sync["listener_ids"] == joined[index-1]["control_sync"]["listener_ids"]
+        expected = copy.deepcopy(joined[index-1])
+        expected.update(accounts=[local[index]] + sync["managed_accounts"], control_sync=sync)
+        assert current == expected, "v2 主控重绑定改变本机账号、入口或隧道"
+        rotated.append(invitation)
+    cli(controller, "account", "edit", account, "--name", "controller-peers-recovery-next-version")
+    for index, (node, invitation) in enumerate(zip(nodes[1:], rotated), 1):
+        cli(node, "control", "sync", "--invite", str(invitation))
+        current = state(node)
+        assert current["control_sync"]["last_revision"] == state(controller)["control"]["revision"] == 1
+        assert current["control_sync"]["managed_accounts"] == state(controller)["accounts"]
+        wireguard_traffic((controller, node), (addresses[0], addresses[index]),
+                          peer_public=(public[0], public[index]))
+        traffic(node, image, account_id=account)
+        traffic(node, image, account_id=local[index]["id"])
+    traffic(controller, image, account_id=account)
+    for index, node in enumerate(nodes):
+        actual = json.loads((node["path"] / "deployment/data/traffic/state.json").read_text())["accounts"]
+        assert actual.keys() == totals[index]["accounts"].keys()
+        assert all(actual[key][field] >= value[field] for key, value in totals[index]["accounts"].items()
+                   for field in ("upload", "download")), "v2 主控恢复或重绑定回退账号累计"
+        assert not (node["path"] / "deployment/locks/deployment.lock").exists()
+        assert not (node["path"] / "deployment/.restore-pending").exists()
+        services(node)
+    assert all(path.read_bytes() == data for path, data in wireguard.items())
+    private_logs(nodes, invitations + rotated, keys)
+    print("docker-controller-peers-recovery-real-isolated-new-identities-rebind-double-link-traffic-ok", flush=True)
+
+
 def controller_recovery_real(nodes, invitation, image, release):
     controller, controlled = nodes
     root = controller["path"] / "deployment"
@@ -2438,24 +2579,7 @@ def controller_recovery_real(nodes, invitation, image, release):
     archive = controller["path"] / "private/controller-recovery.tar"
     cli(controller, "backup", "export", str(archive))
     cli(controller, "backup", "verify", str(archive))
-    # 必须先隔离旧主控；本地撤权不能替代停止仍持有旧身份的副本。
-    cli(controller, "down")
-    assert not command(controller["docker"] + ["ps", "-aq", "--filter",
-                                              "label=com.docker.compose.project=padm-docker"]).strip()
-    assert "wg-padm" not in {link["ifname"] for link in
-                             json.loads(command(controller["enter"] + ["ip", "-j", "link"]))}
-    root.rename(controller["path"] / "deployment-before-recovery-controller")
-    command(controller["enter"] + ["bash", "-ec", r'''
-set -Eeuo pipefail
-source "$1"
-dockerAcquireDeploymentLock
-trap 'dockerReleaseDeploymentLock' EXIT
-dockerInitializeStateRoot
-dockerInstallBundle "$2"
-dockerInstallCli
-''', "--", str(ROOT / "install-docker.sh"), str(ROOT)], env=controller["env"], timeout=60)
-    cli(controller, "restore", "apply", str(archive), *release, "--rebuild-controller",
-        "--confirm", "PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED")
+    controller_empty_target_restore(controller, archive, release)
     rebuilt = state(controller)
     fresh, old = rebuilt["control"], before["control"]
     assert fresh["node_id"] not in (old["node_id"], old["peer"]["id"])
@@ -2576,6 +2700,7 @@ def main():
     modes.add_argument("--wireguard-address-only", action="store_true")
     modes.add_argument("--wireguard-recovery-only", action="store_true")
     modes.add_argument("--controller-recovery-only", action="store_true")
+    modes.add_argument("--controller-peers-recovery-only", action="store_true")
     modes.add_argument("--wireguard-peers-only", action="store_true")
     modes.add_argument("--wireguard-peers-recovery-only", action="store_true")
     modes.add_argument("--wireguard-peers-migration-only", action="store_true")
@@ -2586,7 +2711,7 @@ def main():
                          or options.controller_recovery_only or options.wireguard_peers_only
                          or options.wireguard_peers_recovery_only
                          or options.wireguard_peers_migration_only
-                         or options.control_peers_only)
+                         or options.control_peers_only or options.controller_peers_recovery_only)
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
         "测试不得使用宿主或外部网络"
@@ -2599,9 +2724,10 @@ def main():
     proofs = []
     wireguard_three_nodes = (options.wireguard_peers_only or options.wireguard_peers_recovery_only
                             or options.wireguard_peers_migration_only)
-    three_nodes = wireguard_three_nodes or options.control_peers_only
+    controller_three_nodes = options.control_peers_only or options.controller_peers_recovery_only
+    three_nodes = wireguard_three_nodes or controller_three_nodes
     roles = (("gateway", "peer-one", "peer-two") if wireguard_three_nodes else
-             ("controller", "controlled-one", "controlled-two") if options.control_peers_only else
+             ("controller", "controlled-one", "controlled-two") if controller_three_nodes else
              ("controller", "controlled"))
     names = ["pn" + uuid.uuid4().hex[:10] for _ in range(6 if three_nodes else 2)]
     bridge = "pb" + uuid.uuid4().hex[:10]
@@ -2698,12 +2824,12 @@ def main():
                     node["cron_paused"] = True
             if (options.remap_only or options.rebind_only or options.wireguard_control_only
                     or options.wireguard_address_only or options.wireguard_recovery_only
-                    or options.controller_recovery_only or options.control_peers_only):
+                    or options.controller_recovery_only or controller_three_nodes):
                 # 仅在隔离 daemon 派生当前客户端，固定基础镜像且离线构建，不复用旧源码冒充本轮验收。
                 context = root / "remap-ops"
                 context.mkdir()
                 modules = ("control_client.py", "control_sync.py")
-                if options.control_peers_only:
+                if controller_three_nodes:
                     modules += ("control_api.py", "control_state.py", "control_server.py")
                 for module in modules:
                     shutil.copyfile(ROOT / "docker/images/ops" / module, context / module)
@@ -2711,7 +2837,7 @@ def main():
                     f"FROM {images['ops']}\n"
                     "COPY --chown=10001:10001 control_client.py control_sync.py /opt/padm/\n"
                 )
-                if options.control_peers_only:
+                if controller_three_nodes:
                     dockerfile += (
                         "COPY --chown=10001:10001 control_api.py control_state.py /opt/padm/\n"
                         "COPY --chown=10001:10001 control_server.py /opt/padm/subscription/\n")
@@ -2728,7 +2854,7 @@ def main():
                 for node in nodes[1:]:
                     command(node["docker"] + ["load", "--input", str(archive)], timeout=120)
                     assert json.loads(command(node["docker"] + ["image", "inspect", images["ops"]]))[0]["Id"] == actual["Id"]
-                proofs[0]["current_ops" if options.control_peers_only else "remap_ops"] = {
+                proofs[0]["current_ops" if controller_three_nodes else "remap_ops"] = {
                     "base_image_id": inputs["ops"]["image_id"], "image_id": actual["Id"], "digest": digest,
                     "source_sha256": {module: hashlib.sha256((context / module).read_bytes()).hexdigest()
                                       for module in modules},
@@ -2866,6 +2992,13 @@ def main():
                 control_peers_real(nodes, images["sing-box"])
                 proofs[0].update(scope="real-compose-control-three-node-peer-management",
                                  release_trust="fixture", transaction_interruption="allowed")
+                return proofs
+            if options.controller_peers_recovery_only:
+                release = wireguard_recovery_release(nodes, images)
+                controller_peers_recovery_real(nodes, images["sing-box"], release)
+                proofs[0].update(scope="real-compose-controller-peers-isolated-empty-target-recovery",
+                                 release_trust="fixture", peers=2, identities_rebuilt=True,
+                                 grants_disabled=True, both_peers_rebound=True)
                 return proofs
             if options.wireguard_recovery_only or options.controller_recovery_only:
                 release = wireguard_recovery_release(nodes, images)
