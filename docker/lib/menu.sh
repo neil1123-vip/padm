@@ -1169,7 +1169,7 @@ dockerMenuControl() {
             '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
             '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
             '15. 重映射受管账号入口（同连接）' '16. 更新主控 API 端口' \
-            '17. 被控同身份重连' '18. WireGuard 建链与维护' '0. 返回'
+            '17. 被控同身份重连' '18. WireGuard 建链与维护' '19. 更换主控身份（同隧道）' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1236,9 +1236,16 @@ dockerMenuControl() {
             ;;
         14) dockerMenuRun control sync-schedule disable || true ;;
         18) dockerMenuWireGuard ;;
+        19)
+            printf '%s\n' '请先停用被控自动同步；仅更换同一 WireGuard 隧道上的主控身份及受管账号。' \
+                '保留隧道密钥、地址、本机账号和入口映射；确认后原受管账号将被替换。'
+            dockerSetupRead invitation '私有邀请文件绝对路径（0 返回）: ' &&
+                [[ -n "${invitation}" ]] || continue
+            dockerMenuRun control rebind --invite "${invitation}" || true
+            ;;
         16|17)
             printf '%s\n' '请先停用自动同步及控制日志调度，并禁用控制面 Fail2ban。' \
-                '仅支持同身份、同 WireGuard 地址的 API 端口更新；不支持主控重绑定。'
+                '仅支持同身份、同 WireGuard 地址的 API 端口更新；更换主控身份请使用第 19 项。'
             if [[ "${choice}" == 16 ]]; then
                 dockerSetupRead port '新主控 API 端口（1024–65535，0 返回）: ' &&
                     [[ -n "${port}" ]] || continue

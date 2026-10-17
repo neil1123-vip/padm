@@ -213,6 +213,9 @@ dockerUsage() {
   padm-docker control join --invite <私有邀请文件> --listener <入口 ID>... [--yes]
   padm-docker control sync --invite <私有邀请文件>
   padm-docker control remap --invite <同连接私有文件> --listener <入口 ID>... [--yes]
+  padm-docker control set-port --port <端口> [--yes]
+  padm-docker control reconnect --invite <同身份新端口私有文件> [--yes]
+  padm-docker control rebind --invite <同隧道新主控私有文件> [--yes]
   padm-docker control source-check
   padm-docker control source-probe --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> --nonce <64 位 hex>
   padm-docker control log-rotate [--yes]

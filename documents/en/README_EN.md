@@ -1178,7 +1178,7 @@ and container; ordinary `up/restart` can start it again. A `control` or `control
 blocks an independent stop. The existing owner/preflight/run/cleanup/health runtime is reused,
 and ownership drift is rejected. Focused checks and isolated Linux amd64 production CLI tests passed,
 including preparation from a standalone deployment, bidirectional encrypted traffic and exact-container restart.
-Multiple Peers, key/address/identity migration, role rebinding/disaster recovery, native dual-architecture,
+Multiple Peers, WireGuard key/address migration, role disaster recovery, native dual-architecture,
 host-reboot and public-network acceptance remain outside this checkpoint.
 
 After the managed connection is healthy, initialize the controller:
@@ -1249,8 +1249,27 @@ the previous managed snapshot; it can also apply a newer controller account revi
 port and revision does not rebuild services. Failures and INT/TERM use the existing recovery transaction;
 explicit rollback cannot cross API ports. The old API port closes after switching. Run a fresh controller
 `source-check` before enabling source-dependent protection or log scheduling, and import the new invitation
-when enabling controlled auto-sync again. Address, identity and key migration, multiple peers and
-cross-controller rebinding remain unsupported.
+when enabling controlled auto-sync again. WireGuard address/key migration and multiple peers remain unsupported.
+
+4C.8 adds explicit controller rebinding on the same WireGuard tunnel through control menu `15 → 19`:
+
+```bash
+padm-docker control sync-schedule disable --yes
+padm-docker control rebind --invite /root/padm-new-controller.json --yes
+```
+
+The new invitation must authenticate. Rebinding replaces the previous controller's managed accounts
+and may change its API port; WireGuard keys/addresses, listener mappings, local accounts and traffic
+totals remain unchanged. The previous managed snapshot and all account mappings are checked first.
+An existing account ID must keep its authentication identity; credentials cannot collide across IDs.
+Only a changed controller/node identity resets the upstream revision/digest baseline. Same-identity
+retries retain version checks. The existing lock, private invitation snapshot, health checks and
+failure/INT/TERM recovery transaction apply. Repeating the same invitation and revision is idempotent.
+Ordinary sync/reconnect reject the previous controller's invitation; a later explicit rebind can
+deliberately switch back. Enable auto-sync again with the new invitation after committing.
+Focused client, transaction and control-menu checks and isolated amd64 dual-deployment production
+CLI/Compose tests passed, including real traffic, health-failure recovery and preserved totals.
+Multiple Peers, WireGuard key/address migration and role disaster recovery remain deferred.
 After rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.

@@ -780,7 +780,8 @@ runDockerControlSyncRegression() {
 runDockerControlClientRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-client.py" &&
         bash "${PROJECT_ROOT}/docker/tests/control-join.sh" &&
-        runDockerControlSyncScheduleRegression
+        runDockerControlSyncScheduleRegression &&
+        PADM_DOCKER_MENU_SCOPE=control runDockerMenuRegression
 }
 
 runDockerControlSyncScheduleRegression() {
@@ -797,6 +798,10 @@ runDockerControlTwoDeploymentRealRegression() {
 
 runDockerControlRemapRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --remap-only
+}
+
+runDockerControlRebindRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --rebind-only
 }
 
 runDockerControlLogCronRealRegression() {
@@ -1154,6 +1159,7 @@ registerRegressionFunctionLeaf docker-control-sync-schedule runDockerControlSync
 registerRegressionFunctionLeaf docker-control-two-node-real runDockerControlTwoNodeRealRegression
 registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerControlTwoDeploymentRealRegression
 registerRegressionFunctionLeaf docker-control-remap-real runDockerControlRemapRealRegression
+registerRegressionFunctionLeaf docker-control-rebind-real runDockerControlRebindRealRegression
 registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogCronRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-wireguard-cli-real runDockerWireGuardCliRealRegression

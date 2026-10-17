@@ -25,7 +25,8 @@ def diagnostic(node, output):
         value = json.loads(path.read_text()).get("token")
         if isinstance(value, str):
             output = output.replace(value, "[已隐藏]")
-    for spec in (node["path"] / "spec.json", node["path"] / "deployment/config/spec.json"):
+    for spec in (node["path"] / "spec.json", node["path"] / "deployment/config/spec.json",
+                 node["path"] / "deployment-before-rebind/config/spec.json"):
         if spec.is_file():
             value = json.loads(spec.read_text())
             for account in value.get("accounts", []):
@@ -879,7 +880,7 @@ def sync_schedule_disable(controller, controlled):
     print("docker-control-two-deployment-sync-schedule-down-disable-zero-network-ok", flush=True)
 
 
-def interrupted_sync(node, invitation, number=None, *, automatic=False):
+def interrupted_sync(node, invitation, number=None, *, automatic=False, action="sync"):
     before = state(node)
     previous = services(node)["xray"]["id"]
     root = node["path"] / "deployment"
@@ -892,7 +893,10 @@ def interrupted_sync(node, invitation, number=None, *, automatic=False):
     # 主控重建后先确认隧道已重新握手，再把故障注入限定到应用事务。
     reachable(node, invitation)
     with (node["path"] / "cli.log").open("ab") as output:
-        arguments = ["control", "auto-sync"] if automatic else ["control", "sync", "--invite", str(invitation)]
+        arguments = ["control", "auto-sync"] if automatic else ["control", action, "--invite", str(invitation)]
+        if action == "rebind":
+            assert not automatic
+            arguments.append("--yes")
         process = subprocess.Popen(
             node["enter"] + ["setsid", "--wait", "--", "bash", str(node["path"] / "bin/padm-docker"),
                              *arguments],
@@ -920,8 +924,12 @@ def interrupted_sync(node, invitation, number=None, *, automatic=False):
                 if new:
                     actual = json.loads(command(node["docker"] + ["inspect", new]))[0]
                     assert actual["Config"]["Labels"]["io.padm.component"] == "xray"
-                    assert actual["State"]["Running"] and \
-                        state(node)["control_sync"]["last_revision"] > before["control_sync"]["last_revision"]
+                    candidate = state(node)["control_sync"]
+                    assert actual["State"]["Running"]
+                    if action == "rebind":
+                        assert candidate["controller_id"] != before["control_sync"]["controller_id"]
+                    else:
+                        assert candidate["last_revision"] > before["control_sync"]["last_revision"]
                     children = Path(f"/proc/{process.pid}/task/{process.pid}/children").read_text().split()
                     assert len(children) == 1
                     transaction_pid = int(children[0])
@@ -961,6 +969,92 @@ def interrupted_sync(node, invitation, number=None, *, automatic=False):
     assert not (root / "locks/deployment.lock").exists()
     label = "health" if number is None else signal.Signals(number).name
     print(f"docker-control-two-deployment-restore:{label}:elapsed={time.monotonic()-started:.3f}s", flush=True)
+
+
+def rebind(controller, controlled, invitation, image):
+    before = state(controlled)
+    old_managed = before["control_sync"]["managed_accounts"]
+    owned_ids = {account["id"] for account in old_managed}
+    local = [account for account in before["accounts"] if account["id"] not in owned_ids]
+    traffic(controlled, image, account_id=old_managed[0]["id"])
+    traffic(controlled, image, account_id=local[0]["id"])
+    ledger = controlled["path"] / "deployment/data/traffic/state.json"
+    totals = json.loads(ledger.read_text())["accounts"]
+    wireguard = {node["path"] / "deployment/secrets/net/wireguard/wg-padm.conf":
+                 (node["path"] / "deployment/secrets/net/wireguard/wg-padm.conf").read_bytes()
+                 for node in (controller, controlled)}
+    old_controller = state(controller)["control"]
+    source = controller["path"] / "spec.json"
+    replacement = json.loads(source.read_text())
+    replacement["accounts"][0].update(id=identity(220), uuid=identity(230),
+                                      name="replacement-main", password="Replacement.-~@+=:Secret")
+    assert "control" not in replacement and "control_sync" not in replacement
+    # 仅重建测试主控现场；新身份仍由正常初始化生成，不绕过被控重绑定或主控迁移门禁。
+    cli(controller, "down")
+    (controller["path"] / "deployment").rename(controller["path"] / "deployment-before-rebind")
+    save(source, replacement)
+    private_log = controller["path"] / "seed-private.log"
+    previous_log = private_log.read_bytes()
+    result = subprocess.run(controller["enter"] + [
+        "bash", str(ROOT / "docker/tests/control-deployment-node.sh"), str(controller["path"]),
+    ], env=controller["env"], capture_output=True, timeout=180)
+    with (controller["path"] / "seed.log").open("ab") as output:
+        output.write(result.stdout + result.stderr)
+    private_log.write_bytes(previous_log + private_log.read_bytes())
+    assert result.returncode == 0, diagnostic(controller,
+        (result.stdout + result.stderr).decode(errors="replace") + private_log.read_text(errors="replace")[-6000:])
+    assert set(services(controller)) == {"xray", "nginx", "net-wireguard"}
+    cli(controller, "control", "init", "--address", ADDRESS[0],
+        "--port", str(old_controller["listen"]["port"]), "--peer-address", ADDRESS[1], "--yes")
+    current_controller = state(controller)["control"]
+    assert current_controller["node_id"] != old_controller["node_id"]
+    assert current_controller["peer"]["id"] != old_controller["peer"]["id"]
+    source_check(controller, controlled)
+    rotated = controller["path"] / "private/rebound.json"
+    cli(controller, "control", "invite", "--output", str(rotated), "--yes")
+    current_invite = controlled["path"] / "private/rebound.json"
+    save(current_invite, json.loads(rotated.read_text()))
+    previous_services, previous_ledger = services(controlled), ledger.read_bytes()
+    cli(controlled, "control", "sync", "--invite", str(current_invite), accepted=False)
+    assert state(controlled) == before and services(controlled) == previous_services
+    assert ledger.read_bytes() == previous_ledger, "普通同步尝试换身份时改写流量账"
+    interrupted_sync(controlled, current_invite, action="rebind")
+    assert state(controlled) == before, "重绑定健康失败未恢复旧被控身份和账号"
+    traffic(controlled, image, account_id=old_managed[0]["id"])
+    cli(controlled, "control", "rebind", "--invite", str(current_invite), "--yes")
+    rebound = state(controlled)
+    sync = rebound["control_sync"]
+    assert sync["controller_id"] == current_controller["node_id"]
+    assert sync["node_id"] == current_controller["peer"]["id"]
+    assert sync["listener_ids"] == before["control_sync"]["listener_ids"]
+    assert sync["connection"] == before["control_sync"]["connection"]
+    assert sync["last_revision"] == state(controller)["control"]["revision"]
+    assert not owned_ids & {account["id"] for account in rebound["accounts"]}
+    assert [account for account in rebound["accounts"] if account["id"] in {item["id"] for item in local}] == local
+    expected = copy.deepcopy(before)
+    expected.update(accounts=local + sync["managed_accounts"], control_sync=sync)
+    assert rebound == expected, "真实重绑定改变了本机入口、账号、隧道或其它配置"
+    assert sync["managed_accounts"] == state(controller)["accounts"], "新受管账号与新主控发布内容不一致"
+    assert {account["id"] for account in sync["managed_accounts"]} == {identity(220)}
+    actual_totals = json.loads(ledger.read_text())["accounts"]
+    assert all(actual_totals[account_id][key] >= account[key] for account_id, account in totals.items()
+               for key in ("upload", "download")), "真实重绑定回退本机或旧受管账号累计"
+    assert all(path.read_bytes() == contents for path, contents in wireguard.items()), "重绑定改变 WireGuard 配置"
+    traffic(controlled, image, account_id=identity(220))
+    traffic(controlled, image, account_id=local[0]["id"])
+    previous_services, previous_ledger = services(controlled), ledger.read_bytes()
+    cli(controlled, "control", "rebind", "--invite", str(current_invite), "--yes")
+    assert state(controlled) == rebound and services(controlled) == previous_services
+    assert ledger.read_bytes() == previous_ledger, "真实同版重绑定改写流量账"
+    cli(controlled, "control", "sync", "--invite", str(invitation), accepted=False)
+    assert state(controlled) == rebound and services(controlled) == previous_services
+    assert ledger.read_bytes() == previous_ledger, "旧邀请同步改变新身份流量账"
+    for node in (controller, controlled):
+        root = node["path"] / "deployment"
+        assert not list(root.glob(".candidate.*")) and not list(root.glob(".control-client.*"))
+        assert not (root / "locks/deployment.lock").exists()
+    print("docker-control-two-deployment-rebind-traffic-idempotency-rollback-old-invite-ok", flush=True)
+    return rotated
 
 
 def traffic(node, image, *, listener="entry-ws", account_id=None):
@@ -1160,7 +1254,11 @@ else:
 def private_logs(nodes, invitations, keys):
     secrets = [json.loads(path.read_text())["token"] for path in invitations] + keys
     for member in nodes:
-        for spec in (json.loads((member["path"] / "spec.json").read_text()), state(member)):
+        specs = [json.loads((member["path"] / "spec.json").read_text()), state(member)]
+        previous = member["path"] / "deployment-before-rebind/config/spec.json"
+        if previous.is_file():
+            specs.append(json.loads(previous.read_text()))
+        for spec in specs:
             for account in spec["accounts"]:
                 secrets += [value for name in ("uuid", "password", "shadowsocks_password")
                             if isinstance(value := account[name], str)]
@@ -1328,6 +1426,7 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--log-schedule-cron-only", action="store_true")
     modes.add_argument("--remap-only", action="store_true")
+    modes.add_argument("--rebind-only", action="store_true")
     modes.add_argument("--wireguard-only", action="store_true")
     options = parser.parse_args()
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
@@ -1427,7 +1526,7 @@ def main():
                                "netns": os.readlink(f"/proc/{pid}/ns/net")})
             assert proofs[0]["engine_id"] != proofs[1]["engine_id"]
             assert proofs[0]["netns"] != proofs[1]["netns"]
-            if options.remap_only:
+            if options.remap_only or options.rebind_only:
                 # 仅在隔离 daemon 派生当前客户端，固定基础镜像且离线构建，不复用旧源码冒充本轮验收。
                 context = root / "remap-ops"
                 context.mkdir()
@@ -1573,6 +1672,11 @@ def main():
                 rotated = reconnect(controller, controlled, controlled_invite, images["sing-box"])
                 private_logs(nodes, (invite, rotated), keys)
                 proofs[0]["scope"] = "real-compose-control-remap-reconnect-from-installed-fixture"
+                return proofs
+            if options.rebind_only:
+                rotated = rebind(controller, controlled, controlled_invite, images["sing-box"])
+                private_logs(nodes, (invite, rotated), keys)
+                proofs[0]["scope"] = "real-compose-control-rebind-from-installed-fixture"
                 return proofs
             if options.log_schedule_cron_only:
                 log_rotate(controller, controlled, controlled_invite, scheduled=True)

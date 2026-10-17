@@ -117,12 +117,13 @@ def publish(value=DESIRED, *, status=200, headers=None, raw=None, delay=0):
     ]
 
 
-def cli(spec_path, invite_path, listeners=(), remap=False, reconnect=0):
+def cli(spec_path, invite_path, listeners=(), remap=False, reconnect=0, rebind=0):
     stdout, stderr = io.StringIO(), io.StringIO()
     arguments = ["control_client.py", "--spec", str(spec_path), "--invite", str(invite_path)]
     if remap:
         arguments.append("--remap")
     arguments.extend(["--reconnect"] * reconnect)
+    arguments.extend(["--rebind"] * rebind)
     for listener in listeners:
         arguments.extend(["--listener", listener])
     status = 0
@@ -200,6 +201,89 @@ try:
             publish()
         assert reconnect_source == reconnect_original and reconnect_invite == reconnect_invite_original
 
+        rebind_invite = dict(INVITATION, controller_id=identity(6), node_id=identity(7), token="c" * 48,
+                             listen=dict(INVITATION["listen"], port=18082))
+        rebind_desired = dict(DESIRED, controller_id=identity(6), node_id=identity(7),
+                              revision=1, accounts=[account(8)])
+        rebind_source = copy.deepcopy(reconnect_source)
+        rebind_original, rebind_invite_original = copy.deepcopy(rebind_source), copy.deepcopy(rebind_invite)
+        publish(rebind_desired)
+        with patch.object(socket, "create_connection", side_effect=partial(local_connect, expected_port=18082)):
+            rebound = client.build_client_draft(rebind_source, rebind_invite, rebind=True)
+            expected = copy.deepcopy(rebind_source)
+            managed = dict(account(8), listeners=multi_joined["control_sync"]["listener_ids"])
+            expected["accounts"] = [rebind_source["accounts"][0], rebind_source["accounts"][-1], managed]
+            expected["control_sync"].update(
+                controller_id=identity(6), node_id=identity(7), last_revision=1,
+                last_digest=rebound["control_sync"]["last_digest"], managed_accounts=[managed],
+                connection={"listen": rebind_invite["listen"], "peer_address": rebind_invite["peer_address"]})
+            assert rebound == expected, "重绑定只能替换控制身份、连接和受管账号"
+            assert rebound["control_sync"]["last_digest"] != rebind_source["control_sync"]["last_digest"]
+            assert rebind_invite["token"] not in json.dumps(rebound)
+            assert client.build_client_draft(rebound, rebind_invite, rebind=True) == rebound
+            for response in (dict(rebind_desired, revision=0),
+                             dict(rebind_desired, accounts=[account(12)])):
+                publish(response)
+                rejected(client.build_client_draft, rebound, rebind_invite, rebind=True)
+            publish(rebind_desired)
+            before = len(connections)
+            for arguments in ({"listeners": ["entry-main"]}, {"remap": True}, {"reconnect": True}):
+                rejected(client.build_client_draft, rebind_source, rebind_invite, rebind=True, **arguments)
+            rejected(client.build_client_draft, rebind_source, rebind_invite)
+            rejected(client.build_client_draft, rebind_source, rebind_invite, reconnect=True)
+            rejected(client.build_client_draft, rebound, INVITATION)
+            rejected(client.build_client_draft, rebound, INVITATION, reconnect=True)
+            for failure in ("accounts", "snapshot", "duplicate-current", "duplicate-snapshot",
+                            "mapping", "local", "revision", "digest"):
+                drift = copy.deepcopy(rebind_source)
+                if failure == "accounts":
+                    drift["accounts"][1]["password"] += "changed"
+                elif failure == "snapshot":
+                    drift["control_sync"]["managed_accounts"][0]["password"] += "changed"
+                elif failure == "duplicate-current":
+                    drift["accounts"].append(copy.deepcopy(drift["accounts"][0]))
+                elif failure == "duplicate-snapshot":
+                    drift["control_sync"]["managed_accounts"] *= 2
+                elif failure == "mapping":
+                    drift["control_sync"]["listener_ids"] = ["entry-main"]
+                elif failure == "local":
+                    drift["accounts"][0]["uuid"] = drift["accounts"][-1]["uuid"]
+                else:
+                    drift["control_sync"]["last_" + failure] = True if failure == "revision" else "invalid"
+                drift_original = copy.deepcopy(drift)
+                rejected(client.build_client_draft, drift, rebind_invite, rebind=True)
+                assert drift == drift_original
+            for section, field, value in (("listen", "address", "10.77.0.3"),
+                                          (None, "peer_address", "10.77.0.3")):
+                invitation = copy.deepcopy(rebind_invite)
+                (invitation[section] if section else invitation)[field] = value
+                rejected(client.build_client_draft, rebind_source, invitation, rebind=True)
+            assert len(connections) == before, "重绑定须先核验旧快照、账号和连接，参数冲突不能请求网络"
+            for field, value in (("id", identity(3)), ("uuid", account(3)["uuid"]),
+                                 ("password", account(3)["password"]), ("id", identity(4)),
+                                 ("uuid", account(4)["uuid"]), ("password", account(4)["password"])):
+                collision = dict(rebind_desired, accounts=[dict(account(8), **{field: value})])
+                publish(collision)
+                rejected(client.build_client_draft, rebind_source, rebind_invite, rebind=True)
+            publish(dict(rebind_desired, accounts=[account(4)]))
+            continued = client.build_client_draft(rebind_source, rebind_invite, rebind=True)
+            assert continued["control_sync"]["managed_accounts"] == rebind_source["control_sync"]["managed_accounts"], \
+                "同一账号仅在认证身份不变时保留历史累计归属"
+            for response, status in ((dict(rebind_desired, controller_id=identity(1)), 200),
+                                     (rebind_desired, 401)):
+                publish(response, status=status)
+                rejected(client.build_client_draft, rebind_source, rebind_invite, rebind=True)
+            with patch.object(socket, "create_connection", side_effect=OSError("failed")):
+                rejected(client.build_client_draft, rebind_source, rebind_invite, rebind=True)
+        assert rebind_source == rebind_original and rebind_invite == rebind_invite_original
+        publish()
+        returned = client.build_client_draft(rebound, INVITATION, rebind=True)
+        assert returned["control_sync"]["controller_id"] == INVITATION["controller_id"], \
+            "仍获认证的旧邀请只有再次显式重绑定才能切回"
+        assert returned["accounts"] == [rebind_source["accounts"][0], rebind_source["accounts"][-1],
+                                       rebind_source["accounts"][1]]
+        assert returned["traffic"] == rebind_source["traffic"]
+
         ss_spec = copy.deepcopy(multi_spec)
         ss_spec["core"]["protocols"].append({
             "listener_id": "entry-ss", "id": 30, "uuid": identity(11),
@@ -222,6 +306,12 @@ try:
         assert ss_removed == ss_joined
         assert ss_desired == ss_original and INVITATION == invite_original
 
+        rebind_ss_desired = dict(rebind_desired, accounts=[
+            dict(account(8), shadowsocks_password=ss_desired["accounts"][0]["shadowsocks_password"])])
+        publish(rebind_ss_desired)
+        with patch.object(socket, "create_connection", side_effect=partial(local_connect, expected_port=18082)):
+            rejected(client.build_client_draft, ss_remapped, rebind_invite, rebind=True)
+        publish(ss_desired)
         for section in ("accounts", "snapshot", "mapping"):
             drift = copy.deepcopy(ss_joined)
             if section == "mapping":
@@ -443,6 +533,28 @@ try:
                 status, output, errors = cli(spec_path, invite_path, reconnect=True)
             assert status == 78 and not output and errors and reconnect_invite["token"] not in errors
             assert spec_path.read_bytes() == source and invite_path.read_bytes() == invite_source
+            save(spec_path, rebind_source)
+            save(invite_path, rebind_invite)
+            source, invite_source = spec_path.read_bytes(), invite_path.read_bytes()
+            publish(rebind_desired)
+            with patch.object(socket, "create_connection", side_effect=partial(local_connect, expected_port=18082)):
+                status, output, errors = cli(spec_path, invite_path, rebind=True)
+                assert status == 0 and json.loads(output) == rebound and not errors
+                assert rebind_invite["token"] not in output
+                assert spec_path.read_bytes() == source and invite_path.read_bytes() == invite_source
+                before = len(connections)
+                for arguments in ({"rebind": 2}, {"rebind": True, "listeners": ["entry-main"]},
+                                  {"rebind": True, "remap": True}, {"rebind": True, "reconnect": True}):
+                    status, output, errors = cli(spec_path, invite_path, **arguments)
+                    assert status == 78 and not output and errors
+                    assert rebind_invite["token"] not in errors
+                    assert spec_path.read_bytes() == source and invite_path.read_bytes() == invite_source
+                assert len(connections) == before, "重绑定参数重复或冲突不能发起网络请求"
+                publish(rebind_desired, status=401)
+                status, output, errors = cli(spec_path, invite_path, rebind=True)
+                assert status == 78 and not output and errors and rebind_invite["token"] not in errors
+                assert spec_path.read_bytes() == source and invite_path.read_bytes() == invite_source
+            publish()
             save(invite_path, INVITATION)
             save(spec_path, joined)
             source = spec_path.read_bytes()

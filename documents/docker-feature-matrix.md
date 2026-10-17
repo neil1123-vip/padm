@@ -571,7 +571,18 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 已登记 `start/stop` 仅操作精确审计的 WireGuard 容器。`stop` 保留规格和容器，
 `up/restart` 可重新启用；有 `control/control_sync` 依赖时拒绝单独停止。
 沿用现有 owner/preflight/run/cleanup/health，拒绝归属漂移。CLI 示例及定向、隔离 amd64 真实验收证据见实施计划；
-多 Peer、迁移/重绑定、角色灾备及原生双架构、重启、公网边界不变。
+4C.8 的同隧道主控重绑定见下文；多 Peer、WireGuard 密钥/地址迁移、
+角色灾备及原生双架构、重启、公网边界不变。
+
+4C.8 新增 `control rebind --invite <私有文件> [--yes]` 及控制菜单 `19`。
+须先停用被控自动同步，认证新邀请后显式替换旧主控受管账号；
+保留 WireGuard 密钥/地址、入口映射、本机账号及累计，API 端口可变化。
+先校验旧受管快照和全部账号映射；同 ID 认证身份及异 ID 凭据碰撞门禁保持。
+仅控制身份 tuple 变化时重置版本基线，同身份重试仍校验 revision/digest。
+复用原锁、私密邀请、健康和失败/INT/TERM 恢复；同版幂等。
+普通 sync/reconnect 拒绝旧主控邀请，再次显式 rebind 可主动切回。
+客户端/事务/控制菜单及隔离 amd64 双部署生产 CLI、真实业务检查通过，
+不开放多 Peer、WireGuard 密钥/地址迁移或角色灾备，完整状态保持 `deferred`。
 
 6A.8 将空目标恢复扩展到单 sing-box 双族 Hy2/TUIC 的已保存 `port_hopping` 规格。
 候选重新校验，身份、累计及 tuple 保留；恢复后状态为 `stopped`，不恢复旧监督进程、

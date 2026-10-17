@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 
-from control_api import API_VERSION, MAX_STATE_BYTES, exact_keys, private_address, require_wireguard_address, stable_id, strict_object
+from control_api import API_VERSION, MAX_STATE_BYTES, exact_keys, private_address, require_wireguard_address, stable_id, strict_object, validate_accounts
 from control_sync import build_draft, read_input
 
 INVITE_FORMAT = "padm-docker-control-invite"
@@ -187,10 +187,42 @@ def _existing_sync(spec, invitation, reconnect=False):
     return spec
 
 
-def build_client_draft(spec, invitation, listeners=None, remap=False, reconnect=False):
+def build_client_draft(spec, invitation, listeners=None, remap=False, reconnect=False, rebind=False):
     invitation = validate_invitation(invitation)
     spec = copy.deepcopy(spec)
-    if reconnect:
+    identity_changed = False
+    if rebind:
+        if remap or reconnect or listeners is not None:
+            raise ValueError("重绑定不能同时接入、重映射或重连")
+        sync = spec["control_sync"]
+        previous_invitation = dict(invitation, controller_id=sync["controller_id"], node_id=sync["node_id"])
+        validate_invitation(previous_invitation)
+        spec = _existing_sync(spec, previous_invitation, reconnect=True)
+        current, previous = spec.get("accounts", []), sync["managed_accounts"]
+        for accounts in (current, previous):
+            if not isinstance(accounts, list):
+                raise ValueError("重绑定账号集合不合法")
+            validate_accounts([{key: value for key, value in account.items() if key != "listeners"}
+                               for account in accounts])
+            for account in accounts:
+                if _mapping(spec, account["listeners"]) != account["listeners"]:
+                    raise ValueError("重绑定账号入口映射不合法")
+        if _mapping(spec, sync["listener_ids"]) != sync["listener_ids"]:
+            raise ValueError("重绑定入口映射不合法")
+        current_by_id = {account["id"]: account for account in current}
+        if any(current_by_id.get(account["id"]) != account
+               or account["listeners"] != sync["listener_ids"] for account in previous):
+            raise ValueError("重绑定前的受管账号快照已漂移")
+        revision, digest = sync["last_revision"], sync["last_digest"]
+        if revision is None:
+            if digest is not None or previous:
+                raise ValueError("重绑定前的同步版本不合法")
+        elif (type(revision) is not int or not 0 <= revision <= MAX_SAFE_INTEGER
+              or not isinstance(digest, str) or re.fullmatch(r"[a-f0-9]{64}", digest) is None):
+            raise ValueError("重绑定前的同步版本不合法")
+        identity_changed = (sync["controller_id"], sync["node_id"]) != (
+            invitation["controller_id"], invitation["node_id"])
+    elif reconnect:
         if remap or listeners is not None:
             raise ValueError("重连不能同时接入或重映射入口")
         spec = _existing_sync(spec, invitation, reconnect=True)
@@ -202,7 +234,24 @@ def build_client_draft(spec, invitation, listeners=None, remap=False, reconnect=
     else:
         spec = _existing_sync(spec, invitation)
     desired = fetch_desired(invitation)
-    return build_draft(spec, desired, listeners if remap else None)
+    if identity_changed:
+        # 新控制身份有独立版本空间；旧快照仍交给原候选逻辑核验和替换。
+        spec["control_sync"].update(controller_id=invitation["controller_id"], node_id=invitation["node_id"],
+                                    last_revision=None, last_digest=None)
+    draft = build_draft(spec, desired, listeners if remap else None)
+    if identity_changed:
+        for account in draft["control_sync"]["managed_accounts"]:
+            for previous in spec["control_sync"]["managed_accounts"]:
+                if account["id"] == previous["id"]:
+                    if any(account[key] != previous[key]
+                           for key in ("uuid", "password", "shadowsocks_password")):
+                        raise ValueError("新主控不能更换已有账号的认证身份")
+                elif ({account["id"], account["uuid"]} & {previous["id"], previous["uuid"]}
+                      or account["password"] == previous["password"]
+                      or account["shadowsocks_password"] is not None
+                      and account["shadowsocks_password"] == previous["shadowsocks_password"]):
+                    raise ValueError("新旧主控账号身份或凭据冲突")
+    return draft
 
 
 def main():
@@ -212,18 +261,20 @@ def main():
     parser.add_argument("--listener", action="append")
     parser.add_argument("--remap", action="store_true")
     parser.add_argument("--reconnect", action="count", default=0)
+    parser.add_argument("--rebind", action="count", default=0)
     args = parser.parse_args()
     try:
-        if args.reconnect > 1:
-            raise ValueError("重连参数不能重复")
+        if args.reconnect > 1 or args.rebind > 1:
+            raise ValueError("重连或重绑定参数不能重复")
         spec = read_input(args.spec, 16 * MAX_STATE_BYTES)
         invitation = read_input(args.invite, MAX_STATE_BYTES)
-        draft = build_client_draft(spec, invitation, args.listener, args.remap, bool(args.reconnect))
+        draft = build_client_draft(spec, invitation, args.listener, args.remap, bool(args.reconnect),
+                                   bool(args.rebind))
         json.dump(draft, sys.stdout, ensure_ascii=True, separators=(",", ":"))
         sys.stdout.write("\n")
     except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError, http.client.HTTPException):
         # 输入和授权材料含凭据，失败时只返回状态码，不把原文写入普通输出。
-        parser.exit(78, "被控接入、同步、重映射或重连输入无效、授权失配或网络响应不支持\n")
+        parser.exit(78, "被控接入、同步、重映射、重连或重绑定输入无效、授权失配或网络响应不支持\n")
 
 
 if __name__ == "__main__":

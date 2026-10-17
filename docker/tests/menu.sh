@@ -3,7 +3,7 @@ set -euo pipefail
 
 MENU_SCOPE=${PADM_DOCKER_MENU_SCOPE:-full}
 case "${MENU_SCOPE}" in
-full|routing|port-alias|tun|block-ips-resolved|xhttp) ;;
+full|routing|port-alias|tun|block-ips-resolved|xhttp|control) ;;
 *) printf 'docker-menu-regression-fail: invalid scope: %s\n' "${MENU_SCOPE}" >&2; exit 1 ;;
 esac
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -1376,10 +1376,10 @@ runControlDriver() {
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
     endpoint|endpoint-input-cancel|endpoint-input-eof|endpoint-confirm-cancel|endpoint-confirm-eof|endpoint-failed)
-        for controlChoice in 16 17; do
+        for controlChoice in 16 17 19; do
             controlPrompt='新主控 API 端口（1024–65535，0 返回）'
             controlInput=19443
-            if [[ "${controlChoice}" == 17 ]]; then
+            if [[ "${controlChoice}" != 16 ]]; then
                 controlPrompt='私有邀请文件绝对路径（0 返回）'
                 controlInput=/root/padm-invite.json
             fi
@@ -1401,7 +1401,9 @@ runControlDriver() {
                 ;;
             esac
         done
-        [[ "${scenario}" != endpoint-failed ]] || targetReply 'Docker 控制连接' $'1\n'
+        if [[ "${scenario}" == endpoint || "${scenario}" == endpoint-failed ]]; then
+            targetReply 'Docker 控制连接' $'1\n'
+        fi
         targetReply 'Docker 控制连接' $'0\n'
         targetReply 'Docker 管理菜单' $'0\n'
         return 0
@@ -3624,10 +3626,10 @@ control)
         [[ "${CONTROL_SYNC_SCHEDULE_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_SYNC_SCHEDULE_STATUS}"
         recordAction control-sync-schedule-commit "$3"
         ;;
-    init|invite|revoke|join|remap|set-port|reconnect)
+    init|invite|revoke|join|remap|set-port|reconnect|rebind)
         if [[ "$2" == set-port ]]; then
             [[ "$#" -eq 4 && "$3" == --port && "$4" == 19443 ]] || exit 2
-        elif [[ "$2" == reconnect ]]; then
+        elif [[ "$2" == reconnect || "$2" == rebind ]]; then
             [[ "$#" -eq 4 && "$3" == --invite && "$4" == /root/padm-invite.json ]] || exit 2
         fi
         if [[ "$2" == join || "$2" == remap ]]; then
@@ -4045,7 +4047,7 @@ done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 fi
 
-if [[ "${MENU_SCOPE}" != port-alias && "${MENU_SCOPE}" != xhttp ]]; then
+if [[ "${MENU_SCOPE}" != port-alias && "${MENU_SCOPE}" != xhttp && "${MENU_SCOPE}" != control ]]; then
 for routingCase in flow csv-long cancel socks5-input-eof socks5-input-commit-failed domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-input-eof hosts-input-status-failed hosts-input-commit-failed direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
     domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \
@@ -4706,7 +4708,7 @@ if [[ "${MENU_SCOPE}" == routing || "${MENU_SCOPE}" == tun || "${MENU_SCOPE}" ==
     exit 0
 fi
 
-if [[ "${MENU_SCOPE}" == full ]]; then
+if [[ "${MENU_SCOPE}" == full || "${MENU_SCOPE}" == control ]]; then
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
 for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
@@ -4714,7 +4716,7 @@ for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主�
     '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
     '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
     '15. 重映射受管账号入口（同连接）' '16. 更新主控 API 端口' \
-    '17. 被控同身份重连' '0. 返回'; do
+    '17. 被控同身份重连' '19. 更换主控身份（同隧道）' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -4750,7 +4752,8 @@ for controlCase in endpoint endpoint-input-cancel endpoint-input-eof endpoint-co
     runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
     expectedControl= expectedConfirmations=0
     if [[ "${controlCase}" != endpoint-input-* ]]; then
-        for controlAction in 'set-port --port 19443' 'reconnect --invite /root/padm-invite.json'; do
+        for controlAction in 'set-port --port 19443' 'reconnect --invite /root/padm-invite.json' \
+            'rebind --invite /root/padm-invite.json'; do
             [[ -z "${expectedControl}" ]] || expectedControl+=$'\n'
             expectedControl+="control ${controlAction}"
             case "${controlCase}" in
@@ -4760,12 +4763,13 @@ for controlCase in endpoint endpoint-input-cancel endpoint-input-eof endpoint-co
             *) expectedControl+=$'\ncontrol-confirm y\ncontrol-commit' ;;
             esac
         done
-        expectedConfirmations=2
+        expectedConfirmations=3
     fi
+    [[ "${controlCase}" != endpoint ]] || expectedControl+=$'\ncontrol status'
     if [[ "${controlCase}" == endpoint-failed ]]; then
         expectedControl+=$'\ncontrol status'
-        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}" || true)" -eq 2 ]] ||
-            fail '控制端口更新或重连失败未报告退出码并返回菜单'
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}" || true)" -eq 3 ]] ||
+            fail '控制端口更新、重连或主控身份更换失败未报告退出码并返回菜单'
         grep -Fq 'fixture-control-status' "${CONTROL_LOG}" || fail '控制端点操作失败后菜单不可用'
     fi
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
@@ -4773,7 +4777,7 @@ for controlCase in endpoint endpoint-input-cancel endpoint-input-eof endpoint-co
     [[ "$(grep -Fc 'fixture-control-confirm [y/N]' "${CONTROL_LOG}" || true)" -eq "${expectedConfirmations}" ]] ||
         fail "控制端点 ${controlCase} 未复用 CLI 单次确认"
     for controlBoundary in '请先停用自动同步及控制日志调度，并禁用控制面 Fail2ban。' \
-        '仅支持同身份、同 WireGuard 地址的 API 端口更新；不支持主控重绑定。'; do
+        '仅支持同身份、同 WireGuard 地址的 API 端口更新；'; do
         grep -Fq "${controlBoundary}" "${CONTROL_LOG}" || fail "控制端点菜单缺少边界: ${controlBoundary}"
     done
 done
@@ -4973,6 +4977,11 @@ for controlCase in sync-schedule sync-schedule-input-cancel sync-schedule-input-
     fi
 done
 unset CONTROL_SYNC_SCHEDULE_STATUS
+
+if [[ "${MENU_SCOPE}" == control ]]; then
+    printf 'docker-menu-control-regression-ok\n'
+    exit 0
+fi
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty geo-dispatch geo flow "${TLS_WIZARD_CLI}" menu

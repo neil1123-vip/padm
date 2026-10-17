@@ -147,7 +147,7 @@ dockerComposeExecute() {
 }
 docker() { :; }
 dockerRealityProbeRun() {
-    local previous= directory= argument remap=0 reconnect=0
+    local previous= directory= argument remap=0 reconnect=0 rebind=0
     local -a listeners=()
     [[ " $* " == *' --network host '* && " $* " == *' --user 0:0 '* &&
         " $* " == *' --log-driver none '* && " $* " == *' /opt/padm/control_client.py '* ]] || return 1
@@ -160,6 +160,7 @@ dockerRealityProbeRun() {
         fi
         [[ "${argument}" != --remap ]] || remap=1
         [[ "${argument}" != --reconnect ]] || reconnect=1
+        [[ "${argument}" != --rebind ]] || rebind=1
         previous=${argument}
     done
     [[ -n "${directory}" && "$(stat -c '%a:%u' "${directory}")" == 700:0 &&
@@ -169,7 +170,7 @@ dockerRealityProbeRun() {
     if [[ -f "${TEST_ROOT}/interrupt-client" ]]; then
         kill -s "$(<"${TEST_ROOT}/interrupt-client")" "${BASHPID}"
     fi
-    python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" "${directory}" "${remap}" "${reconnect}" "${listeners[@]}" <<'PY'
+    python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" "${directory}" "${remap}" "${reconnect}" "${rebind}" "${listeners[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -192,7 +193,8 @@ def desired(invitation):
 
 client.require_wireguard_address = address
 client.fetch_desired = desired
-remap, reconnect, listeners = sys.argv[4] == "1", sys.argv[5] == "1", sys.argv[6:]
+remap, reconnect, rebind = (value == "1" for value in sys.argv[4:7])
+listeners = sys.argv[7:]
 sys.argv = ["control_client.py", "--spec", str(directory / "spec.json"),
             "--invite", str(directory / "invite.json")]
 for listener in listeners:
@@ -201,6 +203,8 @@ if remap:
     sys.argv.append("--remap")
 if reconnect:
     sys.argv.append("--reconnect")
+if rebind:
+    sys.argv.append("--rebind")
 client.main()
 PY
 }
@@ -240,6 +244,9 @@ reject dockerControlCommand reconnect --invite "${invite}" --invite "${invite}" 
 reject dockerControlCommand reconnect --invite "${invite}" --yes --yes
 reject dockerControlCommand reconnect --invite "${invite}" --listener entry-reality --yes
 reject dockerControlCommand reconnect --invite "${invite}" --yes --unknown
+reject dockerControlCommand rebind
+reject dockerControlCommand rebind --invite "${invite}"
+reject dockerControlCommand rebind --invite "${invite}" --listener entry-reality --yes
 [[ ! -f "${TEST_ROOT}/host.log" ]] || fail '参数错误触及宿主'
 
 for bad in relative.json "${root}/inside.json" "${INVITE_ROOT}/missing.json" "${INVITE_ROOT}//invite.json"; do
@@ -275,6 +282,7 @@ done
 reject dockerControlCommand join --invite "${invite}" --listener entry-missing --yes
 reject dockerControlCommand sync --invite "${invite}"
 reject dockerControlCommand reconnect --invite "${invite}" --yes
+reject dockerControlCommand rebind --invite "${invite}" --yes
 for marker in bad-deployment unowned bad-health bad-peer bad-route bad-source bad-address fail-client; do
     touch "${TEST_ROOT}/${marker}"
     reject dockerControlCommand join "${args[@]}"
@@ -397,7 +405,7 @@ check_clean
     chmod 0600 "${root}/secrets/control-sync/"*.json
     clientsBefore=$(wc -l <"${TEST_ROOT}/client.log")
     reject dockerControlCommand remap "${remapArgs[@]}"
-    grep -Fq '重映射或重连前请先停用被控账号自动同步' "${TEST_ROOT}/rejected.log"
+    grep -Fq '请先停用被控账号自动同步' "${TEST_ROOT}/rejected.log"
     [[ "$(wc -l <"${TEST_ROOT}/client.log")" == "${clientsBefore}" ]]
     dockerRemoveManagedTree "${root}" "${root}/secrets/control-sync"
     for marker in fail-client fail-up; do
@@ -477,7 +485,7 @@ check_clean
     chmod 0600 "${root}/secrets/control-sync/"*.json
     clientsBefore=$(wc -l <"${TEST_ROOT}/client.log")
     reject dockerControlCommand reconnect "${reconnectArgs[@]}"
-    grep -Fq '重映射或重连前请先停用被控账号自动同步' "${TEST_ROOT}/rejected.log"
+    grep -Fq '请先停用被控账号自动同步' "${TEST_ROOT}/rejected.log"
     printf '{\n' >"${root}/secrets/control-sync/request.json"
     reject dockerControlCommand reconnect "${reconnectArgs[@]}"
     [[ "$(wc -l <"${TEST_ROOT}/client.log")" == "${clientsBefore}" ]]
@@ -545,6 +553,115 @@ check_clean
     cp -- "${TEST_ROOT}/before-reconnect-desired.json" "${TEST_ROOT}/desired.json"
     cp -- "${TEST_ROOT}/before-reconnect-invite.json" "${TEST_ROOT}/server-invite.json"
     DOCKER_CONTROL_SYNC_TRANSACTION=1 dockerConfigureApply "${TEST_ROOT}/before-reconnect.json" >/dev/null
+    check_clean
+)
+
+# 显式重绑定更换认证身份和受管账号，仍保持健康单 Peer、地址与原入口映射。
+(
+    cp -- "${spec}" "${TEST_ROOT}/before-rebind.json"
+    cp -- "${invite}" "${TEST_ROOT}/before-rebind-invite.json"
+    cp -- "${TEST_ROOT}/desired.json" "${TEST_ROOT}/before-rebind-desired.json"
+    wgBefore=$(sha256sum "${root}/secrets/net/wireguard/wg-padm.conf")
+    rebind_snapshot() (
+        cd -- "${root}"
+        sha256sum config/spec.json config/xray/config.json compose.json deployment.json \
+            data/traffic/state.json secrets/net/wireguard/wg-padm.conf
+    )
+    rebindBefore=$(rebind_snapshot)
+    rebindArgs=(--invite "${INVITE_ROOT}/rebind.json" --yes)
+    jq '.controller_id = "77777777-7777-4777-8777-777777777777" |
+      .node_id = "88888888-8888-4888-8888-888888888888" |
+      .listen.port = 20443 | .token = ("f"*48)' "${invite}" >"${INVITE_ROOT}/rebind.json"
+    chmod 0600 "${INVITE_ROOT}/rebind.json"
+    cp -- "${INVITE_ROOT}/rebind.json" "${TEST_ROOT}/server-invite.json"
+    jq '.controller_id = "77777777-7777-4777-8777-777777777777" |
+      .node_id = "88888888-8888-4888-8888-888888888888" | .revision = 1 |
+      .accounts[0] = {id:"99999999-9999-4999-8999-999999999999",name:"重绑定主控账号",
+        enabled:true,uuid:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        password:"Rebind.-~@+=:Secret",shadowsocks_password:null}
+    ' "${TEST_ROOT}/desired.json" >"${TEST_ROOT}/rebind-desired.json"
+    cp -- "${TEST_ROOT}/rebind-desired.json" "${TEST_ROOT}/desired.json"
+    reject dockerControlCommand sync --invite "${INVITE_ROOT}/rebind.json"
+    reject dockerControlCommand reconnect --invite "${INVITE_ROOT}/rebind.json" --yes
+    for mutation in '.listen.address = "10.77.0.3"' '.peer_address = "10.77.0.4"'; do
+        jq "${mutation}" "${INVITE_ROOT}/rebind.json" >"${INVITE_ROOT}/rebind-changed.json"
+        chmod 0600 "${INVITE_ROOT}/rebind-changed.json"
+        reject dockerControlCommand rebind --invite "${INVITE_ROOT}/rebind-changed.json" --yes
+    done
+    touch "${TEST_ROOT}/bad-health"
+    reject dockerControlCommand rebind "${rebindArgs[@]}"
+    rm -- "${TEST_ROOT}/bad-health"
+    [[ "$(rebind_snapshot)" == "${rebindBefore}" ]]
+    check_clean
+    mkdir -p "${root}/secrets/control-sync"
+    chmod 0700 "${root}/secrets/control-sync"
+    cp -- "${invite}" "${root}/secrets/control-sync/invite.json"
+    jq '.control_sync | {schema_version:1,enabled:true,node_id,controller_id,listener_ids,connection}' \
+        "${spec}" >"${root}/secrets/control-sync/request.json"
+    chmod 0600 "${root}/secrets/control-sync/"*.json
+    clientsBefore=$(wc -l <"${TEST_ROOT}/client.log")
+    reject dockerControlCommand rebind "${rebindArgs[@]}"
+    grep -Fq '请先停用被控账号自动同步' "${TEST_ROOT}/rejected.log"
+    [[ "$(wc -l <"${TEST_ROOT}/client.log")" == "${clientsBefore}" ]]
+    dockerRemoveManagedTree "${root}" "${root}/secrets/control-sync"
+    for marker in fail-client fail-up; do
+        touch "${TEST_ROOT}/${marker}"
+        reject dockerControlCommand rebind "${rebindArgs[@]}"
+        rm -f -- "${TEST_ROOT}/${marker}"
+        [[ "$(rebind_snapshot)" == "${rebindBefore}" ]]
+        check_clean
+    done
+    for signal in INT TERM; do
+        printf '%s\n' "${signal}" >"${TEST_ROOT}/interrupt-up"
+        status=0
+        dockerControlCommand rebind "${rebindArgs[@]}" >"${TEST_ROOT}/rebind-signal.log" 2>&1 || status=$?
+        [[ "${signal}:${status}" == INT:130 || "${signal}:${status}" == TERM:143 ]] ||
+            fail "重绑定信号退出码错误: ${signal}:${status}"
+        rm -f -- "${TEST_ROOT}/interrupt-up"
+        [[ "$(rebind_snapshot)" == "${rebindBefore}" &&
+            "$(tail -n 1 "${TEST_ROOT}/host.log")" == unlock ]]
+        check_clean
+    done
+    dockerBackupConfiguration
+    rebindBackup=${DOCKER_CONFIG_BACKUP}
+    dockerControlCommand rebind "${rebindArgs[@]}" >"${TEST_ROOT}/rebind.log"
+    jq -e '.control_sync.controller_id == "77777777-7777-4777-8777-777777777777" and
+      .control_sync.node_id == "88888888-8888-4888-8888-888888888888" and
+      .control_sync.connection.listen.port == 20443 and .control_sync.last_revision == 1 and
+      .control_sync.listener_ids == ["entry-reality"] and
+      [.control_sync.managed_accounts[].id] == ["99999999-9999-4999-8999-999999999999"] and
+      [.accounts[].id] == ["11111111-1111-4111-8111-111111111111","99999999-9999-4999-8999-999999999999"] and
+      .accounts[1].listeners == ["entry-reality"]' "${spec}" >/dev/null
+    jq -en --slurpfile before "${TEST_ROOT}/before-rebind.json" --slurpfile after "${spec}" '
+      ($before[0] | del(.control_sync,.accounts)) == ($after[0] | del(.control_sync,.accounts)) and
+      $before[0].accounts[0] == $after[0].accounts[0] and
+      ($before[0].control_sync.connection | del(.listen.port)) ==
+        ($after[0].control_sync.connection | del(.listen.port))
+    ' >/dev/null
+    [[ "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" &&
+        "$(sha256sum "${root}/secrets/net/wireguard/wg-padm.conf")" == "${wgBefore}" ]]
+    reject dockerControlSyncRollbackCheck "${rebindBackup}"
+    for file in "${spec}" "${TEST_ROOT}/rebind.log"; do
+        ! grep -Fq "$(printf f%.0s {1..48})" "${file}" || fail '重绑定 token 写入规格或日志'
+    done
+    upBefore=$(up_count)
+    rebindCommitted=$(rebind_snapshot)
+    dockerControlCommand rebind "${rebindArgs[@]}" >/dev/null
+    [[ "$(up_count)" == "${upBefore}" && "$(rebind_snapshot)" == "${rebindCommitted}" ]]
+    jq '.revision = 0' "${TEST_ROOT}/rebind-desired.json" >"${TEST_ROOT}/desired.json"
+    reject dockerControlCommand rebind "${rebindArgs[@]}"
+    [[ "$(rebind_snapshot)" == "${rebindCommitted}" ]]
+    # 旧邀请仍可认证时，只有显式重绑定允许主动切回；普通同步和重连继续拒绝。
+    cp -- "${TEST_ROOT}/before-rebind-invite.json" "${TEST_ROOT}/server-invite.json"
+    cp -- "${TEST_ROOT}/before-rebind-desired.json" "${TEST_ROOT}/desired.json"
+    reject dockerControlCommand sync --invite "${invite}"
+    reject dockerControlCommand reconnect --invite "${invite}" --yes
+    [[ "$(rebind_snapshot)" == "${rebindCommitted}" ]]
+    dockerControlCommand rebind --invite "${invite}" --yes >/dev/null
+    jq -en --slurpfile before "${TEST_ROOT}/before-rebind.json" --slurpfile after "${spec}" \
+        '$before == $after' >/dev/null
+    [[ "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" &&
+        "$(sha256sum "${root}/secrets/net/wireguard/wg-padm.conf")" == "${wgBefore}" ]]
     check_clean
 )
 
