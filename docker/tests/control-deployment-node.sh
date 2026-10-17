@@ -65,7 +65,9 @@ dockerTrafficRuntimeCheck "$(jq -r '[.core.type, .core.secondary_type] | .[] | s
 STAGE=inputs
 cp -a -- "${NODE_ROOT}/secrets/." "${ROOT}/secrets/"
 chmod 0700 "${ROOT}/secrets/net" "${ROOT}/secrets/net/wireguard"
-chmod 0600 "${ROOT}/secrets/net/wireguard/wg-padm.conf"
+if [[ -f "${ROOT}/secrets/net/wireguard/wg-padm.conf" ]]; then
+    chmod 0600 "${ROOT}/secrets/net/wireguard/wg-padm.conf"
+fi
 dockerHostIntegrationInputsValidate "${SPEC}"
 dockerConfigurePortsAvailable "${SPEC}"
 

@@ -35,10 +35,14 @@ def diagnostic(node, output):
                         output = output.replace(credential, "[已隐藏]")
             for entry in value["core"]["protocols"]:
                 output = output.replace(entry["uuid"], "[已隐藏]")
-    key = node["path"] / "secrets/net/wireguard/wg-padm.conf"
-    if key.is_file():
-        for value in re.findall(r"PrivateKey\s*=\s*(\S+)", key.read_text()):
-            output = output.replace(value, "[已隐藏]")
+    for root in (node["path"], node["path"] / "deployment"):
+        key = root / "secrets/net/wireguard/wg-padm.conf"
+        if key.is_file():
+            for value in re.findall(r"PrivateKey\s*=\s*(\S+)", key.read_text()):
+                output = output.replace(value, "[已隐藏]")
+        key = root / "secrets/net/wireguard/private.key"
+        if key.is_file():
+            output = output.replace(key.read_text().strip(), "[已隐藏]")
     return re.sub(r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
                   "[已隐藏私钥]", output, flags=re.S)
 
@@ -162,19 +166,21 @@ def scheduled_state_check():
     print("docker-control-two-deployment-scheduled-state-check-ok", flush=True)
 
 
-def services(node):
+def services(node, *, wireguard=True):
     rows = command(node["docker"] + ["ps", "--all", "--filter", "label=com.docker.compose.project=padm-docker",
                                      "--format", "{{json .}}"]).splitlines()
     result = {}
     for row in rows:
         container = json.loads(row)["ID"]
         inspected = json.loads(command(node["docker"] + ["inspect", container]))[0]
+        service = inspected["Config"]["Labels"]["com.docker.compose.service"]
+        if not wireguard and service == "net-wireguard" and not inspected["State"]["Running"]:
+            continue
         assert inspected["State"]["Running"]
         assert inspected["State"]["Health"]["Status"] == "healthy"
         assert inspected["HostConfig"]["ReadonlyRootfs"]
         assert inspected["HostConfig"]["CapDrop"] == ["ALL"]
         assert not inspected["HostConfig"]["Privileged"]
-        service = inspected["Config"]["Labels"]["com.docker.compose.service"]
         if service in ("net-wireguard", "net-fail2ban-control"):
             assert [cap.removeprefix("CAP_") for cap in inspected["HostConfig"]["CapAdd"]] == ["NET_ADMIN"]
         else:
@@ -185,7 +191,7 @@ def services(node):
             child_ns = command(node["docker"] + ["exec", container, "readlink", "/proc/self/ns/net"]).decode().strip()
             assert child_ns == os.readlink(f"/proc/{node['pid']}/ns/net")
         result[service] = {"id": inspected["Id"], "started_at": inspected["State"]["StartedAt"]}
-    assert {"xray", "nginx", "net-wireguard"} <= result.keys()
+    assert ({"xray", "nginx", "net-wireguard"} if wireguard else {"xray", "nginx"}) <= result.keys()
     current = state(node)
     config = json.loads((node["path"] / "deployment/config/xray/config.json").read_text())
     for entry in current["core"]["protocols"]:
@@ -1172,11 +1178,157 @@ def private_logs(nodes, invitations, keys):
                    for path in invitations), "自动同步 token 进入部署规格"
 
 
+def wireguard_traffic(nodes):
+    servers = []
+    try:
+        for index, node in enumerate(nodes):
+            servers.append(subprocess.Popen(node["enter"] + ["python3", "-c", """
+import socket, sys
+server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+server.bind((sys.argv[1], 39899))
+while True:
+    data, peer = server.recvfrom(65535)
+    server.sendto(data, peer)
+""", ADDRESS[index]], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
+        for index, node in enumerate(nodes):
+            # 仅在 underlay 抓包；隧道明文可回显，链路上必须存在 WireGuard 数据包且没有明文。
+            command(node["enter"] + ["python3", "-c", """
+import os, socket, sys
+capture = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3))
+capture.bind(("underlay", 0))
+client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+client.bind((sys.argv[1], 0))
+client.settimeout(1)
+payload = b"padm-wireguard-encrypted-proof:" + os.urandom(96)
+for _ in range(10):
+    client.sendto(payload, (sys.argv[2], 39899))
+    try:
+        data, peer = client.recvfrom(65535)
+    except TimeoutError:
+        continue
+    assert data == payload and peer == (sys.argv[2], 39899)
+    break
+else:
+    raise AssertionError("WireGuard 双向真实流量未通过")
+capture.setblocking(False)
+encrypted = 0
+while True:
+    try:
+        packet = capture.recv(65535)
+    except BlockingIOError:
+        break
+    assert payload not in packet, "underlay 出现隧道明文"
+    if len(packet) < 42 or packet[12:14] != b"\\x08\\x00" or packet[23] != 17:
+        continue
+    udp = 14 + (packet[14] & 15) * 4
+    if packet[udp:udp + 4] == b"\\xca\\x6c\\xca\\x6c":
+        encrypted += packet[udp + 8:udp + 12] == b"\\x04\\x00\\x00\\x00"
+assert encrypted >= 2, "underlay 缺少双向 WireGuard 加密数据包"
+""", ADDRESS[index], ADDRESS[1-index]], timeout=15)
+            peer = command(node["enter"] + ["wg", "show", "wg-padm", "latest-handshakes"]).split()
+            transfer = command(node["enter"] + ["wg", "show", "wg-padm", "transfer"]).split()
+            assert len(peer) == 2 and int(peer[1]) > 0
+            assert len(transfer) == 3 and all(int(value) > 0 for value in transfer[1:])
+        print("docker-wireguard-cli-real-bidirectional-encrypted-traffic-ok", flush=True)
+    finally:
+        for server in servers:
+            stop(server)
+            server.stderr.close()
+
+
+def wireguard_cli_real(nodes):
+    public, keys, files = [], [], []
+    for index, node in enumerate(nodes):
+        initial = state(node)
+        assert initial["host_integrations"] == [] and not initial.get("control") and not initial.get("control_sync")
+        before = services(node, wireguard=False)
+        assert set(before) == {"xray", "nginx"}
+        assert "wg-padm" not in {item["ifname"] for item in
+                                 json.loads(command(node["enter"] + ["ip", "-j", "link"]))}
+        absent = json.loads(cli(node, "wireguard", "status").stdout)
+        assert absent["state"] == "absent" and absent["enabled"] is False
+        prepared = json.loads(cli(node, "wireguard", "prepare", "--address", ADDRESS[index],
+                                  "--listen-port", "51820", "--yes").stdout)
+        assert prepared["configured"] is False and prepared["address"] == ADDRESS[index]
+        directory = node["path"] / "deployment/secrets/net/wireguard"
+        info = directory.lstat()
+        assert directory.is_dir() and not directory.is_symlink() and info.st_uid == 0 and info.st_mode & 0o777 == 0o700
+        assert {path.name for path in directory.iterdir()} == {"identity.json", "private.key"}
+        public.append(prepared["public_key"])
+        keys.append((directory / "private.key").read_text().strip())
+        assert command(["wg", "pubkey"], content=(keys[-1] + "\n").encode()).decode().strip() == public[-1]
+        assert state(node) == initial and services(node, wireguard=False) == before
+        cli(node, "wireguard", "prepare", "--address", ADDRESS[index], "--listen-port", "51820",
+            "--yes", accepted=False)
+    for index, node in enumerate(nodes):
+        cli(node, "wireguard", "peer", "--peer-address", ADDRESS[1-index],
+            "--peer-public-key", public[1-index], "--endpoint", f"192.0.2.{2-index}:51820", "--yes")
+        directory = node["path"] / "deployment/secrets/net/wireguard"
+        snapshot = {path.name: path.read_bytes() for path in directory.iterdir()}
+        assert set(snapshot) == {"identity.json", "private.key", "wg-padm.conf"}
+        for path in directory.iterdir():
+            info = path.lstat()
+            assert path.is_file() and not path.is_symlink() and info.st_uid == 0
+            assert info.st_mode & 0o777 == 0o600 and info.st_nlink == 1
+        files.append(snapshot)
+        cli(node, "wireguard", "peer", "--peer-address", ADDRESS[1-index],
+            "--peer-public-key", public[1-index], "--yes", accepted=False)
+        assert {path.name: path.read_bytes() for path in directory.iterdir()} == snapshot
+        cli(node, "wireguard", "start", "--yes")
+        assert set(services(node)) == {"xray", "nginx", "net-wireguard"}
+        current = state(node)
+        assert [item["type"] for item in current["host_integrations"]] == ["wireguard"]
+        assert not current.get("control") and not current.get("control_sync")
+    wireguard_traffic(nodes)
+    node = nodes[0]
+    before, current = services(node), state(node)
+    cli(node, "wireguard", "stop", "--yes")
+    after = services(node, wireguard=False)
+    assert after == {name: item for name, item in before.items() if name != "net-wireguard"}
+    container = json.loads(command(node["docker"] + ["inspect", before["net-wireguard"]["id"]]))[0]
+    assert container["State"]["Running"] is False and container["State"]["ExitCode"] == 0
+    assert state(node) == current
+    assert "wg-padm" not in {item["ifname"] for item in json.loads(command(node["enter"] + ["ip", "-j", "link"]))}
+    cli(node, "wireguard", "start", "--yes")
+    deadline = time.monotonic() + 8
+    while command(node["docker"] + ["inspect", "--format", "{{.State.Health.Status}}",
+                                   before["net-wireguard"]["id"]]).strip() != b"healthy":
+        assert time.monotonic() < deadline, "WireGuard 重新启动后健康未就绪"
+        time.sleep(0.1)
+    restarted = services(node)
+    assert restarted["net-wireguard"]["id"] == before["net-wireguard"]["id"]
+    assert {name: item for name, item in restarted.items() if name != "net-wireguard"} == after
+    wireguard_traffic(nodes)
+    alias = json.loads(command(node["enter"] + ["ip", "-j", "link", "show", "dev", "wg-padm"]))[0]["ifalias"]
+    command(node["enter"] + ["ip", "link", "set", "dev", "wg-padm", "alias", "outside-owner"])
+    try:
+        for action in ("stop", "start"):
+            cli(node, "wireguard", action, "--yes", accepted=False)
+            link = json.loads(command(node["enter"] + ["ip", "-j", "link", "show", "dev", "wg-padm"]))[0]
+            assert link["ifalias"] == "outside-owner"
+        assert state(node) == current
+    finally:
+        command(node["enter"] + ["ip", "link", "set", "dev", "wg-padm", "alias", alias])
+    for index, node in enumerate(nodes):
+        directory = node["path"] / "deployment/secrets/net/wireguard"
+        assert {path.name: path.read_bytes() for path in directory.iterdir()} == files[index]
+        assert not list((node["path"] / "deployment").glob(".wireguard.*"))
+        assert not (node["path"] / "deployment/locks/deployment.lock").exists()
+    deadline = time.monotonic() + 8
+    while command(nodes[0]["docker"] + ["inspect", "--format", "{{.State.Health.Status}}",
+                                       restarted["net-wireguard"]["id"]]).strip() != b"healthy":
+        assert time.monotonic() < deadline, "归属恢复后 WireGuard 健康未恢复"
+        time.sleep(0.1)
+    private_logs(nodes, (), keys)
+    print("docker-wireguard-cli-real-prepare-peer-start-stop-ownership-private-ok", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--log-schedule-cron-only", action="store_true")
     modes.add_argument("--remap-only", action="store_true")
+    modes.add_argument("--wireguard-only", action="store_true")
     options = parser.parse_args()
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
@@ -1313,9 +1465,10 @@ def main():
                 command(node["enter"] + ["ip", "address", "add", f"192.0.2.{index + 1}/30",
                                          "dev", "underlay"])
                 command(node["enter"] + ["ip", "link", "set", "underlay", "up"])
-                key = command(["wg", "genkey"])
-                keys.append(key.decode().strip())
-                public.append(command(["wg", "pubkey"], content=key).decode().strip())
+                if not options.wireguard_only:
+                    key = command(["wg", "genkey"])
+                    keys.append(key.decode().strip())
+                    public.append(command(["wg", "pubkey"], content=key).decode().strip())
             for index, node in enumerate(nodes):
                 path = node["path"]
                 domain = f"node-{index}.padm.test"
@@ -1326,14 +1479,15 @@ def main():
                          "-keyout", str(private), "-out", str(certificate)])
                 private.chmod(0o600)
                 certificate.chmod(0o600)
-                configuration = path / "secrets/net/wireguard/wg-padm.conf"
-                configuration.write_text(
-                    f"[Interface]\nPrivateKey = {keys[index]}\nAddress = {ADDRESS[index]}/32\n"
-                    f"ListenPort = 51820\n[Peer]\nPublicKey = {public[1-index]}\n"
-                    f"AllowedIPs = {ADDRESS[1-index]}/32\nEndpoint = 192.0.2.{2-index}:51820\n"
-                    "PersistentKeepalive = 1\n"
-                )
-                configuration.chmod(0o600)
+                if not options.wireguard_only:
+                    configuration = path / "secrets/net/wireguard/wg-padm.conf"
+                    configuration.write_text(
+                        f"[Interface]\nPrivateKey = {keys[index]}\nAddress = {ADDRESS[index]}/32\n"
+                        f"ListenPort = 51820\n[Peer]\nPublicKey = {public[1-index]}\n"
+                        f"AllowedIPs = {ADDRESS[1-index]}/32\nEndpoint = 192.0.2.{2-index}:51820\n"
+                        "PersistentKeepalive = 1\n"
+                    )
+                    configuration.chmod(0o600)
                 spec = {
                     "schema_version": 3,
                     "release": {"version": "3.15.0", "manifest_sha256": "1" * 64,
@@ -1348,7 +1502,7 @@ def main():
                     }]},
                     "tls": {"domain": domain}, "subscription": {"enabled": False, "token": "0" * 16},
                     "images": images,
-                    "host_integrations": [{
+                    "host_integrations": [] if options.wireguard_only else [{
                         "type": "wireguard", "profile": "net-wireguard", "firewall_rules": [],
                         "devices": ["wg-padm"], "schedules": [],
                         "settings": {"config_file": "wg-padm.conf", "interface": "wg-padm"},
@@ -1388,6 +1542,10 @@ def main():
                 output = command(node["docker"] + ["ps", "--format", "{{json .}}"])
                 assert b"healthy" in output, "真实部署服务未通过健康检查"
                 print(f"docker-control-two-deployment-seed-ok:{proofs[index]['role']}", flush=True)
+            if options.wireguard_only:
+                wireguard_cli_real(nodes)
+                proofs[0]["scope"] = "real-compose-wireguard-cli-from-standalone"
+                return proofs
             controller, controlled = nodes
             original_local = state(controlled)["accounts"][0]
             cli(controller, "control", "init", "--address", ADDRESS[0], "--port", "39778",

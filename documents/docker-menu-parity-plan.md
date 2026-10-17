@@ -17,7 +17,7 @@
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
 | 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入，3D.3c 受管共存、3D.3d1 桥接可达宿主网站和 3D.3d2 宿主回环已通过本地/真实 Desktop 验收；3D.25 增加 SS 逐入口服务器密钥轮换，XHTTP 长 JSON 菜单输入已修复 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
-| 4. 用户、订阅与服务维护 | 4A.1–4A.9、4B.1–4B.2 已交付，4A.9 增加 Xray 27/29 fallback HTTPS 发布并通过真实 CA/SNI/h2 验收；4C.1–4C.5 私网 API、主控/被控管理、手动同步与已有单 Peer 被控自动同步、归属/健康及事务/回滚保护已交付；隔离 amd64 双部署生产 CLI/Compose、业务流量、真实 cron 自主更新及失败/信号恢复整套验收通过；4C.6 同身份端口更新/重连的菜单、真实切换及集中合同已验；多 Peer、角色迁移/重绑定与完整灾备仍未交付 | 稳定分享身份与双核心认证/统计、本机用户业务、单 Peer 手动/自动同步、分范围备份恢复、核心运维 |
+| 4. 用户、订阅与服务维护 | 4A.1–4A.9、4B.1–4B.2 已交付，4A.9 增加 Xray 27/29 fallback HTTPS 发布并通过真实 CA/SNI/h2 验收；4C.1–4C.5 私网 API、主控/被控管理、手动同步与已有单 Peer 被控自动同步、归属/健康及事务/回滚保护已交付；隔离 amd64 双部署生产 CLI/Compose、业务流量、真实 cron 自主更新及失败/信号恢复整套验收通过；4C.6 同身份端口更新/重连的菜单、真实切换及集中合同已验；4C.7 单 Peer WireGuard 准备与启停入口通过定向及隔离 amd64 真实 CLI 验收；多 Peer、角色迁移/重绑定与完整灾备仍未交付 | 稳定分享身份与双核心认证/统计、本机用户业务、单 Peer 手动/自动同步、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 5A.1–5A.3c、5B.1–5B.4b 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设、IPv6 bridge 与用户态 WARP 本地 Peer 验收已通过；5B.5a HTTP 中继和 5B.5c–5B.5d 额外端口/默认分享已通过适用本地真实验收；5C 已交付受管网络归属及 WS/控制面 Fail2ban，8c.3 专用 SSH collector/jail、菜单启停/解封与隔离 amd64 实际封禁/DROP/来源失效清理已验；SOCKS UDP 按固定核心反例继续拒绝，原生宿主/arm64/公网/整机重启/完整卸载仍待验 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 6A.1–6A.5 已部分交付导出、验证与受限空目标恢复；6A.6–6A.10 接入停用续期登记、受管/桥接宿主网站 Reality 共存和停用 Hy2/TUIC 跳跃规格；6A.11 HTTP-01 规格恢复、6A.12 准备期硬杀接管及 6A.13 启用 Geo 调度恢复通过集中合同；6A.14 单域名 ACME 安全重建和本地 CA 实际续期通过，6A.15 对应 standalone 启用续期恢复的定向、本地 CA 实际续期及日常 34 项集成通过；完整灾备、原生双架构验收和可信发布仍待完成 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
@@ -32,7 +32,7 @@
 | 6A.14 ACME 私密输入恢复，已通过本地 CA 验收 | 单域名 EC-P256 standalone 的纯数据规范化、9 文件重建与材料绑定、签发及恢复后强制续期通过；对应启用续期接续 6A.15，其它组合继续拒绝。 |
 | 6A.13 启用 Geo 调度恢复，已验收 | 启用 Geo 输入在健康成功后安装调度；独立私密快照、统一漂移预检、逆序撤销与 unit 原子替换已通过完整合同。 |
 | 6A.15 启用续期调度恢复，已通过本地验收 | 仅匹配 6A.14 材料的唯一 schema 2 standalone 登记可保留 enabled=true；健康成功后安装三项适用调度，独立快照、统一漂移检查及逆序撤销；apply 202 项、真实续期及日常 34 项集成通过。 |
-| 单 Peer WireGuard 建链与维护 | 当前主控/被控要求已有受管连接；需生成私密密钥、准备并确认启动、自有资源撤销及启停维护。 |
+| 4C.7 单 Peer WireGuard 建链与维护，已通过本地验收 | 两步私密身份准备/交换公钥后固定唯一 RFC1918 `/32` Peer；首次确认启动复用配置事务，后续只启停精确审计容器。定向及隔离 amd64 真实 CLI 建链、加密流量和启停通过；临时停止保留规格和容器，角色依赖时拒绝。 |
 | 多被控服务器管理 | 当前单 `.control.peer` 和唯一 WireGuard Peer；需稳定节点身份、独立邀请/授权/同步与逐节点撤销，故障不影响其它节点。 |
 | 主控替换及完整连接更新 | 当前只允许同身份/同地址改 API 端口；需显式迁移身份/Peer/密钥，处理旧受管账号，失败保持原连接及累计。 |
 | 控制角色灾备 | 当前拒绝角色、WireGuard 和同步输入；依赖网络归属与调度恢复，重新预检后接入，不照搬旧主机运行规则。 |
@@ -2791,6 +2791,43 @@ CLI/client 定向已通过，入口分别 15.666/54.455 秒、Jobs 2：
 源码内容 SHA-256 `D70BC1D01FC35FF2894D85D18DA040D04C9B220CA8C935CF7DF0EF50177DFD8E`，
 证据 `.tmp-regression-docker-7e47a4852d844fd190f41fe4d1b2b501/`；
 不以此快照证明后续 27/29 订阅发布扩展或原生宿主验收。
+
+### 4C.7 单 Peer WireGuard 准备与启停
+
+新增独立的 `wireguard status/prepare/peer/start/stop` CLI，控制连接菜单第 `18` 项提供
+状态和公钥、本机准备、设置对端、启动及临时停止。先在双方各准备本机身份，
+仅输出公钥等非私密状态，交换公钥后设置对端；示例为本机 `10.77.0.1`，对端操作时交换 `.1/.2`：
+
+```bash
+padm-docker wireguard prepare --address 10.77.0.1 --listen-port 51820 --yes
+padm-docker wireguard status
+padm-docker wireguard peer --peer-address 10.77.0.2 --peer-public-key '<对端公钥>' --endpoint 192.0.2.2:51820 --yes
+padm-docker wireguard start --yes
+padm-docker wireguard stop --yes
+```
+
+示例 endpoint 须替换为实际可达地址；`--endpoint` 可省略，设置时仅接受字面 IPv4 和
+`1024–65535` 端口，本机监听端口范围相同。
+本机及对端均固定为 RFC1918 IPv4 `/32`，仅一个 Peer，不接受任意路由或多 Peer。
+准备和设置对端限尚无 WireGuard、`control` 或 `control_sync` 的已安装部署；
+私密目录 `0700 root:root`、文件 `0600 root:root`，拒绝覆盖/更换已有密钥、Peer 或未知内容。
+现有手工配置仍走原完整规格入口。写操作交互确认，非交互须显式 `--yes`。
+
+首次 `start` 通过原配置事务增加 WireGuard integration，可能更新并检查全部署服务，
+不是仅起一个容器；复用原失败/信号恢复。已登记后的 `start/stop` 只操作精确审计的
+WireGuard 容器。`stop` 为临时停止，保留规格与容器，`up/restart` 可重新启用；
+存在 `control/control_sync` 依赖时拒绝单独停止。未新增接口运行机制，
+沿用原 owner/preflight/run/cleanup/health，归属漂移拒绝自动接管或撤销。
+
+本项已通过定向及隔离 Linux amd64 真实 CLI 验收：配置 helper 15 项、CLI 27 场景、
+启停/归属 65 项、菜单 36 场景及原运行合同通过。真实双 daemon 从无 WireGuard
+部署完成准备、交换公钥、首次启用、双向加密流量、精确启停和漂移拒绝，115.363 秒；
+证据 `.tmp-regression-docker-f390aa247a8b4b59a150f376627cdcb4/`。
+日常合同 33/34 通过，唯一发布夹具漏新模块已修；发布、包完整性、首次配置和升级
+四项补验通过，118.944 秒，证据 `.tmp-regression-docker-b4a5290ae0f949c18f7b29886e65fc2a/`。
+不重复已通过的其它 33 项，未运行 full。缺失容器完整恢复分支另补失败/INT/TERM 清理。
+多 Peer、身份/密钥/地址迁移、重绑定、角色灾备及原生双架构、整机重启、公网验收继续待补，
+完整多服务器状态仍为 `deferred`，整体目标保持 active。
 
 ## 第五步：站点、路由与宿主集成
 
@@ -8809,7 +8846,7 @@ JSON 完整传入 CLI；其它单项输入保持。集中完整合同 `65/65` �
 | `subscription`、`subscription-users`、`subscription-traffic`、`cdn-entry-management` | 4A |
 | `core-lifecycle`、`script-update`、`uninstall`、`core-upgrade-assessment`、`geo-data` | 4B |
 | `subscription-multiserver` | 4C |
-| `wireguard`、`internal-203-wireguard` | 4C 最小控制连接与所有权前置；5C 完整管理 |
+| `wireguard`、`internal-203-wireguard` | 4C 最小控制连接与所有权前置；4C.7 受限单 Peer 准备与启停通过定向及隔离 amd64 真实 CLI 验收；5C 完整管理 |
 | `acme-webroot`、`acme-standalone`、`site-static-redirect-alpn` | 5A |
 | `routing-tools`、`internal-201-socks-relay`、`internal-202-http-relay`、`internal-206-routing-rules`、`internal-207-access-control` | 5B |
 | `fail2ban`、`tun`、`tproxy`、`internal-204-tun`、`internal-205-redirect-tproxy` | 5C |

@@ -1460,6 +1460,133 @@ dockerControlStatus() (
     fi
 )
 
+dockerWireGuardCommand() (
+    local action=${1:-status} yes=0 answer root spec directory draft= image status=0 key value public parent
+    local -A options=()
+    [[ "$#" == 0 ]] || shift
+    case "${action}" in prepare|peer|status|start|stop) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    while [[ "$#" -gt 0 ]]; do
+        if [[ "$1" == --yes ]]; then
+            [[ "${yes}" == 0 && "${action}" != status ]] || return "${PADM_DOCKER_RC_USAGE}"
+            yes=1; shift; continue
+        fi
+        case "${action}:$1" in
+        prepare:--address|prepare:--listen-port|peer:--peer-address|peer:--peer-public-key|peer:--endpoint)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && ! -v "options[$1]" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            options[$1]=$2; shift 2 ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+    done
+    if [[ "${action}" == prepare ]]; then
+        dockerControlPrivateAddressIsValid "${options[--address]:-}" &&
+            [[ "${options[--listen-port]:-}" =~ ^[1-9][0-9]{3,4}$ ]] &&
+            (( ${options[--listen-port]} >= 1024 && ${options[--listen-port]} <= 65535 )) ||
+            return "${PADM_DOCKER_RC_USAGE}"
+    elif [[ "${action}" == peer ]]; then
+        dockerControlPrivateAddressIsValid "${options[--peer-address]:-}" &&
+            [[ "${options[--peer-public-key]:-}" =~ ^[A-Za-z0-9+/]{43}=$ ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+    fi
+    if [[ "${action}" != status && "${yes}" == 0 ]]; then
+        [[ -t 0 && -t 1 ]] || {
+            dockerError 'WireGuard 修改需要 --yes 确认'
+            return "${PADM_DOCKER_RC_USAGE}"
+        }
+        dockerSetupRead answer "确认 WireGuard ${action}？stop 为临时停止，up/restart 可重新启动。[y/N]: " n ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    fi
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    # 在部署锁收紧目录权限前拒绝不安全的原路径。
+    for parent in "${root}" "${root}/config" "${root}/secrets" "${root}/secrets/net"; do
+        [[ "${parent}" != "${root}/secrets/net" || -e "${parent}" || -L "${parent}" ]] || continue
+        dockerTrafficSafePath "${root}" "${parent}" && [[ -d "${parent}" ]] &&
+            value=$(stat -c '%u:%a' "${parent}") &&
+            [[ "${value%%:*}" == 0 ]] && (( (8#${value#*:} & 022) == 0 )) ||
+            return "${PADM_DOCKER_RC_STATE}"
+    done
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'status=$?; dockerConfigurationInterrupted;
+        if [[ -n "${draft}" ]]; then dockerRemoveManagedTree "${root}" "${draft}" || status=15; fi;
+        dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    spec=$(dockerAccountSpecFile) || return $?
+    dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
+        dockerControlRecoveryCheck current || return "${PADM_DOCKER_RC_STATE}"
+    directory="${root}/secrets/net/wireguard"
+    if [[ "${action}" == status ]]; then
+        if [[ ! -d "${root}/secrets/net" ]]; then
+            public='{"state":"absent","configured":false}'
+        else
+            public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status --directory "${directory}") ||
+                return "${PADM_DOCKER_RC_STATE}"
+        fi
+        jq --argjson enabled "$(jq 'any(.host_integrations[]; .type == "wireguard")' "${spec}")" \
+            '. + {enabled:$enabled}' <<<"${public}"
+        return $?
+    fi
+    if [[ "${action}" == start || "${action}" == stop ]]; then
+        if dockerCurrentOwnsHostIntegration wireguard; then
+            dockerWireGuardService "${action}"
+            return $?
+        fi
+        [[ "${action}" == start ]] || return "${PADM_DOCKER_RC_STATE}"
+        public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status --directory "${directory}") &&
+            jq -e '.configured == true' <<<"${public}" >/dev/null ||
+            return "${PADM_DOCKER_RC_STATE}"
+        draft=$(mktemp -d "${root}/.wireguard.XXXXXX") &&
+            chmod 0700 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+        (umask 077; jq '.host_integrations += [{
+            type:"wireguard",profile:"net-wireguard",firewall_rules:[],
+            devices:["wg-padm"],schedules:[],
+            settings:{config_file:"wg-padm.conf",interface:"wg-padm"}
+          }]' "${spec}" >"${draft}/spec.json") || return "${PADM_DOCKER_RC_STATE}"
+        printf '首次启用 WireGuard 将通过现有配置事务更新并检查部署服务。\n'
+        dockerAccountApplyDraft "${draft}/spec.json"
+        return $?
+    fi
+    jq -e 'has("control") or has("control_sync") or any(.host_integrations[]; .type == "wireguard")' \
+        "${spec}" >/dev/null && {
+        dockerError '准备配置仅支持尚未启用 WireGuard、主控或被控角色的部署'
+        return "${PADM_DOCKER_RC_CONFLICT}"
+    }
+    dockerTrafficSafePath "${root}" "${directory}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == peer ]]; then
+        local -a peerArgs=(peer --directory "${directory}")
+        for key in --peer-address --peer-public-key --endpoint; do
+            [[ ! -v "options[${key}]" ]] || peerArgs+=("${key}" "${options[${key}]}")
+        done
+        python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" "${peerArgs[@]}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        return 0
+    fi
+    # 只移除安全的空骨架；已有密钥、配置或未知内容一律保留。
+    if [[ -e "${directory}" ]]; then
+        value=$(stat -c '%u:%a' "${directory}") || return "${PADM_DOCKER_RC_STATE}"
+        [[ -d "${directory}" && "${value%%:*}" == 0 ]] &&
+            (( (8#${value#*:} & 022) == 0 )) &&
+            rmdir -- "${directory}" || return "${PADM_DOCKER_RC_CONFLICT}"
+    fi
+    dockerConfigureReleaseReuseInstalled &&
+        dockerConfigureReleaseValidate "${spec}" || return "${PADM_DOCKER_RC_MANIFEST}"
+    image=$(jq -er '.images.net' "${spec}") || return "${PADM_DOCKER_RC_STATE}"
+    draft=$(mktemp -d "${root}/.wireguard.XXXXXX") &&
+        chmod 0700 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerRealityProbeRun 10 --pull never --user 0:0 --network none --log-driver none \
+        --mount "type=bind,src=${draft},dst=/input" --entrypoint sh "${image}" -ec \
+        'umask 077; wg genkey > /input/private.key; wg pubkey < /input/private.key > /input/public.key' ||
+        return "${PADM_DOCKER_RC_HOST}"
+    [[ -d "${root}/secrets/net" ]] || mkdir -m 0700 -- "${root}/secrets/net" ||
+        return "${PADM_DOCKER_RC_STATE}"
+    python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" prepare --directory "${directory}" \
+        --address "${options[--address]}" --listen-port "${options[--listen-port]}" \
+        --private-key "${draft}/private.key" --public-key "${draft}/public.key" ||
+        return "${PADM_DOCKER_RC_STATE}"
+)
+
 dockerControlCommand() {
     local action=${1:-} json=0
     shift || true

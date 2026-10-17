@@ -110,16 +110,21 @@ dockerBundleSourceIsComplete() {
     done
     serviceReferences=$(LC_ALL=C grep -aoF \
         -e '/renewal.sh"' -e '/schedule.sh"' -e '/geo.sh"' \
-        -e '/control-sync.sh"' -e '/control.sh"' -e '/ssh-runtime.sh"' \
+        -e '/control-sync.sh"' -e '/control.sh"' -e '/ssh-runtime.sh"' -e '/wireguard.sh"' \
         -e '/docker/lib/ssh-source.py"' -e '/docker/lib/ssh-journal.py"' \
         -e '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh") || status=$?
     ((status <= 1)) || return 1
-    for required in renewal schedule geo control-sync control ssh-runtime; do
+    for required in renewal schedule geo control-sync control ssh-runtime wireguard; do
         if [[ "${serviceReferences}" == *"/${required}.sh\""* ]]; then
             [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
                 ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
         fi
     done
+    if [[ -f "${sourceRoot}/docker/lib/control.sh" ]] &&
+        grep -qF '/wireguard-config.py"' "${sourceRoot}/docker/lib/control.sh"; then
+        [[ -f "${sourceRoot}/docker/lib/wireguard-config.py" &&
+            ! -L "${sourceRoot}/docker/lib/wireguard-config.py" ]] || return 1
+    fi
     if [[ "${serviceReferences}" == *'/docker/lib/ssh-source.py"'* ]]; then
         for required in ssh-source.py ssh-source-client.py; do
             [[ -f "${sourceRoot}/docker/lib/${required}" &&

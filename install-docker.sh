@@ -444,12 +444,17 @@ dockerEntryBundleModulesPresent() {
         shell/core/deployment_mode.sh shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
-    for required in renewal schedule geo control-sync control ssh-runtime; do
+    for required in renewal schedule geo control-sync control ssh-runtime wireguard; do
         if grep -qF "/${required}.sh\"" "${sourceRoot}/docker/lib/services.sh"; then
             [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
                 ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
         fi
     done
+    if [[ -f "${sourceRoot}/docker/lib/control.sh" ]] &&
+        grep -qF '/wireguard-config.py"' "${sourceRoot}/docker/lib/control.sh"; then
+        [[ -f "${sourceRoot}/docker/lib/wireguard-config.py" &&
+            ! -L "${sourceRoot}/docker/lib/wireguard-config.py" ]] || return 1
+    fi
     if grep -qF '/docker/lib/ssh-source.py"' "${sourceRoot}/docker/lib/services.sh"; then
         for required in ssh-source.py ssh-source-client.py; do
             [[ -f "${sourceRoot}/docker/lib/${required}" &&

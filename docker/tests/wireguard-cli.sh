@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+[[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || exit 1
+if [[ "${1:-}" == --cancel ]]; then
+    TEST_ROOT=$2
+else
+    TEST_ROOT=$(mktemp -d /root/padm-wireguard-cli.XXXXXX)
+    trap 'rm -rf -- "${TEST_ROOT}"' EXIT
+fi
+trap 'printf "wireguard-cli-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2' ERR
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state" PADM_DOCKER_SKIP_CHOWN=0
+export PADM_DOCKER_LOCK_TIMEOUT=1 PYTHONDONTWRITEBYTECODE=1
+root=${PADM_DOCKER_INSTALL_DIR}
+LOG="${TEST_ROOT}/command.log"
+CALLS="${TEST_ROOT}/calls.log"
+MODE=ok
+CASES=0
+PRIVATE=$(printf '%032d' 1 | base64 -w0)
+PUBLIC=$(printf '%032d' 2 | base64 -w0)
+PEER=$(printf '%032d' 3 | base64 -w0)
+fail() { cat "${LOG}" >&2; printf 'wireguard-cli-fail: %s\n' "$*" >&2; exit 1; }
+
+# 规格、私密文件和命令使用生产路径，只隔离宿主、工具容器与配置事务的提交边界。
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/install-docker.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/docker/lib/control.sh"
+dockerHostPreflight() { printf 'preflight\n' >>"${CALLS}"; }
+dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
+dockerManagedSpecMatchesDeployment() { [[ "${MODE}" != drift ]]; }
+dockerConfigureReleaseReuseInstalled() { printf 'release\n' >>"${CALLS}"; }
+dockerConfigureReleaseValidate() { [[ "${MODE}" != release-fail ]]; }
+dockerCurrentOwnsHostIntegration() {
+    jq -e --arg type "$1" 'any(.host_integrations[]; .type == $type)' "${root}/config/spec.json" >/dev/null
+}
+dockerRealityProbeRun() {
+    local directory
+    [[ "$#" == 16 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}" == \
+        '10 --pull never --user 0:0 --network none --log-driver none --mount' &&
+        "${12} ${13}" == '--entrypoint sh' && "${15}" == -ec &&
+        "${14}" == "$(jq -r '.images.net' "${root}/config/spec.json")" &&
+        "${16}" == 'umask 077; wg genkey > /input/private.key; wg pubkey < /input/private.key > /input/public.key' ]] ||
+        fail 'WireGuard 密钥工具容器参数不受限'
+    directory=${11#type=bind,src=}
+    directory=${directory%,dst=/input}
+    [[ "${11}" == "type=bind,src=${directory},dst=/input" && "${directory}" == "${root}/.wireguard."* &&
+        "$(stat -c '%u:%g:%a' "${directory}")" == 0:0:700 ]] ||
+        fail '密钥工具容器没有使用本次私密暂存'
+    printf 'keygen\n' >>"${CALLS}"
+    (umask 077; printf '%s\n' "${PRIVATE}" >"${directory}/private.key")
+    [[ "${MODE}" != key-fail ]] || return 1
+    (umask 077; printf '%s\n' "${PUBLIC}" >"${directory}/public.key")
+}
+dockerAccountApplyDraft() {
+    local draft=$1
+    [[ -e "${root}/locks/deployment.lock" ]] || fail '首次启用没有持有部署锁'
+    jq -en --slurpfile before "${root}/config/spec.json" --slurpfile next "${draft}" '
+      ($next[0] | del(.host_integrations)) == ($before[0] | del(.host_integrations)) and
+      $next[0].host_integrations == ($before[0].host_integrations + [{
+        type:"wireguard",profile:"net-wireguard",firewall_rules:[],devices:["wg-padm"],
+        schedules:[],settings:{config_file:"wg-padm.conf",interface:"wg-padm"}
+      }])' >/dev/null || fail '首次启用改变其它规格或没有使用固定宿主集成'
+    dockerConfigureSpecValidate "${draft}" || fail '首次启用生成了无效规格'
+    printf 'apply\n' >>"${CALLS}"
+    [[ "${MODE}" != apply-fail ]] || return "${PADM_DOCKER_RC_COMPOSE}"
+    cp -- "${draft}" "${root}/config/spec.json"
+    chmod 0600 "${root}/config/spec.json"
+}
+
+if [[ "${1:-}" == --cancel ]]; then
+    dockerWireGuardCommand prepare --address 10.90.0.1 --listen-port 51820
+    exit $?
+fi
+
+dockerInitializeStateRoot
+jq -n '
+  {schema_version:3,release:{version:"3.1.8",manifest_sha256:("a"*64),signature_identity:"fixture"},
+   core:{type:"sing-box",secondary_type:null,protocols:[{
+     id:1,core:"sing-box",listener_id:"entry-main",server:"proxy.example.com",public_port:35441,
+     address_families:["ipv4"],name:"WireGuard-CLI",uuid:"11111111-1111-4111-8111-111111111111",
+     reality:{server_name:"www.debian.org",target_host:"www.debian.org",target_port:443,
+       private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
+       public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",short_id:"1234"}}]},
+   tls:null,subscription:{enabled:false,token:"0123456789abcdef"},
+   images:(["xray","sing-box","nginx","ops","net"] | map({key:.,value:
+     ("ghcr.io/example/padm-"+.+":test@sha256:"+("a"*64))}) | from_entries),
+   host_integrations:[]}
+' >"${root}/config/spec.json"
+chmod 0600 "${root}/config/spec.json"
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/base.json"
+dockerConfigureSpecValidate "${root}/config/spec.json" || fail '基础规格夹具无效'
+: >"${CALLS}"
+
+snapshot() (
+    cd -- "${root}"
+    find config secrets -type f -printf '%p %m %U %G %n\n' | LC_ALL=C sort
+    find config secrets -type f -print0 | sort -z | xargs -0 -r sha256sum
+)
+assert_clean() {
+    [[ ! -e "${root}/locks/deployment.lock" &&
+        -z "$(find "${root}" -maxdepth 1 -name '.wireguard.*' -print -quit)" ]] ||
+        fail '命令残留部署锁或密钥暂存'
+    ! grep -qF -- "${PRIVATE}" "${LOG}" || fail '命令输出泄露 WireGuard 私钥'
+}
+run_case() {
+    local expected=$1 actual=0
+    shift
+    (dockerWireGuardCommand "$@") >"${LOG}" 2>&1 || actual=$?
+    [[ "${actual}" == "${expected}" ]] || fail "$*: 退出码 ${actual}，预期 ${expected}"
+    assert_clean
+    CASES=$((CASES + 1))
+}
+before=$(snapshot)
+for arguments in \
+    'prepare --address 10.90.0.1 --listen-port 51820' \
+    'prepare --address 10.90.0.1 --address 10.90.0.2 --listen-port 51820 --yes' \
+    'prepare --address 10.90.0.1 --listen-port 51820 --yes --yes' \
+    'prepare --address 127.0.0.1 --listen-port 51820 --yes' \
+    'prepare --address 10.90.0.1 --listen-port 80 --yes' \
+    'peer --peer-address 10.90.0.2 --peer-public-key missing --yes' \
+    'status --yes'; do
+    read -r -a options <<<"${arguments}"
+    run_case "${PADM_DOCKER_RC_USAGE}" "${options[@]}"
+done
+[[ ! -s "${CALLS}" && "$(snapshot)" == "${before}" ]] ||
+    fail '未确认或非法参数访问后端或改变已有输入'
+
+# 真实 TTY 回答 n，确认取消发生在预检、锁和密钥生成之前。
+python3 -B - "${BASH_SOURCE[0]}" "${TEST_ROOT}" "${LOG}" <<'PY'
+import os
+from pathlib import Path
+import select
+import signal
+import sys
+import time
+
+pid, master = os.forkpty()
+if pid == 0:
+    os.execvp("bash", ["bash", sys.argv[1], "--cancel", sys.argv[2]])
+output, sent, code = b"", False, None
+try:
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if select.select([master], [], [], 0.1)[0]:
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                chunk = b""
+            output += chunk
+            if not sent and "确认 WireGuard".encode() in output:
+                os.write(master, b"n\n")
+                sent = True
+        finished, status = os.waitpid(pid, os.WNOHANG)
+        if finished:
+            code = os.waitstatus_to_exitcode(status)
+            break
+    assert sent and code == 2, (sent, code, output)
+finally:
+    if code is None:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    os.close(master)
+    Path(sys.argv[3]).write_bytes(output)
+PY
+CASES=$((CASES + 1))
+assert_clean
+[[ ! -s "${CALLS}" && "$(snapshot)" == "${before}" ]] || fail '取消仍执行了后端或修改'
+
+for MODE in drift release-fail key-fail; do
+    expected=${PADM_DOCKER_RC_STATE}
+    [[ "${MODE}" != release-fail ]] || expected=${PADM_DOCKER_RC_MANIFEST}
+    [[ "${MODE}" != key-fail ]] || expected=${PADM_DOCKER_RC_HOST}
+    run_case "${expected}" prepare --address 10.90.0.1 --listen-port 51820 --yes
+    [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: 失败改变已有输入"
+done
+MODE=ok
+run_case 0 status
+jq -e '.state == "absent" and .configured == false and .enabled == false' "${LOG}" >/dev/null
+run_case 0 prepare --address 10.90.0.1 --listen-port 51820 --yes
+jq -e --arg key "${PUBLIC}" '.public_key == $key and .configured == false' "${LOG}" >/dev/null
+run_case 0 status
+jq -e '.configured == false and .enabled == false and .address == "10.90.0.1"' "${LOG}" >/dev/null
+before=$(snapshot)
+run_case "${PADM_DOCKER_RC_CONFLICT}" prepare --address 10.90.0.3 --listen-port 51821 --yes
+run_case "${PADM_DOCKER_RC_STATE}" peer --peer-address 10.90.0.1 --peer-public-key "${PEER}" --yes
+[[ "$(snapshot)" == "${before}" ]] || fail '重复准备或自身 Peer 改变已有输入'
+run_case 0 peer --peer-address 10.90.0.2 --peer-public-key "${PEER}" --endpoint 198.18.0.2:51821 --yes
+before=$(snapshot)
+run_case "${PADM_DOCKER_RC_STATE}" peer --peer-address 10.90.0.3 --peer-public-key "${PEER}" --yes
+[[ "$(snapshot)" == "${before}" ]] || fail '重复 Peer 改变已有输入'
+MODE=apply-fail
+run_case "${PADM_DOCKER_RC_COMPOSE}" start --yes
+[[ "$(snapshot)" == "${before}" ]] || fail '首次启用失败覆盖了已有规格或密钥'
+MODE=ok
+run_case 0 start --yes
+run_case 0 status
+jq -e '.configured == true and .enabled == true' "${LOG}" >/dev/null
+before=$(snapshot)
+run_case "${PADM_DOCKER_RC_CONFLICT}" prepare --address 10.90.0.1 --listen-port 51820 --yes
+run_case "${PADM_DOCKER_RC_CONFLICT}" peer --peer-address 10.90.0.2 --peer-public-key "${PEER}" --yes
+[[ "$(snapshot)" == "${before}" ]] || fail '启用后重复准备或 Peer 改变已有输入'
+
+# 角色规格在其它专项已校验，此处仅定位新命令的主控/被控拒绝门禁。
+for role in control control_sync; do
+    jq --arg role "${role}" '. + {($role):{role:"fixture"}}' "${TEST_ROOT}/base.json" \
+        >"${root}/config/spec.json"
+    chmod 0600 "${root}/config/spec.json"
+    before=$(snapshot)
+    (
+        dockerAccountSpecFile() { printf '%s\n' "${root}/config/spec.json"; }
+        run_case "${PADM_DOCKER_RC_CONFLICT}" prepare --address 10.90.0.1 --listen-port 51820 --yes
+        run_case "${PADM_DOCKER_RC_CONFLICT}" peer --peer-address 10.90.0.2 --peer-public-key "${PEER}" --yes
+    )
+    CASES=$((CASES + 2))
+    [[ "$(snapshot)" == "${before}" ]] || fail "${role}: 拒绝时改变了已有输入"
+done
+printf 'wireguard-cli-ok: %s cases\n' "${CASES}"

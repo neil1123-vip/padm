@@ -13,6 +13,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/control-sync.sh" || return 1
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/control.sh" || return 1
 # shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/wireguard.sh" || return 1
+# shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/ssh-runtime.sh" || return 1
 
 if [[ "${PADM_DOCKER_SERVICES_LOADED:-}" == "1" ]]; then

@@ -81,6 +81,11 @@ dockerUsage() {
   padm-docker port-hopping share <活动范围内端口>
   padm-docker port-hopping recover --preview
   padm-docker port-hopping recover --confirm PADM-DOCKER-HOPPING-RECOVER
+  padm-docker wireguard status
+  padm-docker wireguard prepare --address <RFC1918 IPv4> --listen-port <1024-65535> [--yes]
+  padm-docker wireguard peer --peer-address <RFC1918 IPv4> --peer-public-key <公钥> [--endpoint <IPv4:端口>] [--yes]
+  padm-docker wireguard start|stop [--yes]
+    仅单 Peer wg-padm；先交换公钥再显式启动。stop 临时停连接，up/restart 可重新启动；控制角色依赖时拒绝停止
   padm-docker edit --cdn-entry <入口 ID> <IP或域名,...> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --cdn-entry-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-preset <入口 ID> <daily|compatible|stream|single> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -3515,6 +3520,7 @@ dockerMain() {
     subscription | share) dockerSubscriptionCommand "$@" ;;
     business) dockerBusinessCommand "$@" ;;
     control) dockerControlCommand "$@" ;;
+    wireguard) dockerWireGuardCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
         case "${1:-}" in

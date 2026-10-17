@@ -1147,7 +1147,41 @@ Ordinary configuration cannot change controller identity, listener or authorizat
 Focused fixtures cover candidate generation, installation, recovery and
 permissions; core/host actions are stubbed, not real two-node acceptance.
 `padm-docker control status [--json]` and the Control connection menu expose redacted role state.
-Initialize a controller only on an already healthy managed single-peer WireGuard deployment:
+Controller initialization requires an already healthy managed single-peer WireGuard deployment.
+
+4C.7 adds a separate single-Peer preparation and start/stop workflow. In the Control connection
+menu, item `18` opens status/public key, local preparation, Peer configuration, start and temporary stop.
+Prepare an identity on each node, exchange only public keys, then configure the sole Peer.
+For the node using `10.77.0.1`:
+
+```bash
+padm-docker wireguard prepare --address 10.77.0.1 --listen-port 51820 --yes
+padm-docker wireguard status
+padm-docker wireguard peer --peer-address 10.77.0.2 --peer-public-key '<PEER_PUBLIC_KEY>' --endpoint 192.0.2.2:51820 --yes
+padm-docker wireguard start --yes
+padm-docker wireguard stop --yes
+```
+
+Reverse `.1/.2` on the other node and use that node's actual Peer public key and reachable endpoint.
+Both tunnel addresses must be RFC1918 IPv4 `/32`, with exactly one Peer. `--endpoint` is optional
+and accepts a literal IPv4 address; both its port and the local listen port must be `1024–65535`.
+Preparation and Peer configuration require an installed deployment without WireGuard or control roles.
+The private directory is `0700 root:root`, files are `0600 root:root`, and commands expose only public
+identity/status data. Existing keys, Peer configuration and unknown contents are never replaced.
+Existing manual configurations continue to use the complete-spec workflow.
+Writes require interactive confirmation or explicit `--yes`.
+
+The first `wireguard start` adds the integration through the existing configuration transaction
+and may update and check all deployment services. Subsequent registered `start/stop` operations
+touch only the precisely audited WireGuard container. `stop` is temporary and preserves its spec
+and container; ordinary `up/restart` can start it again. A `control` or `control_sync` dependency
+blocks an independent stop. The existing owner/preflight/run/cleanup/health runtime is reused,
+and ownership drift is rejected. Focused checks and isolated Linux amd64 production CLI tests passed,
+including preparation from a standalone deployment, bidirectional encrypted traffic and exact-container restart.
+Multiple Peers, key/address/identity migration, role rebinding/disaster recovery, native dual-architecture,
+host-reboot and public-network acceptance remain outside this checkpoint.
+
+After the managed connection is healthy, initialize the controller:
 
 ```bash
 padm-docker control init --address 10.77.0.1 --port 18443 --peer-address 10.77.0.2 --yes
@@ -1314,7 +1348,7 @@ at the same revision. Compatible release snapshots with unchanged sync state can
 Controlled specs require a bundle declaring sync rollback protection, so older unprotected scripts are rejected.
 Failed or interrupted join/sync transactions still restore their pre-transaction state without inventing
 upstream revisions locally. Multiple Peers, role rebinding, arbitrary historical-account restoration and
-a WireGuard connection wizard are not provided.
+complete network management are not provided; the limited 4C.7 workflow above passed focused and isolated amd64 CLI tests.
 4C.4a verifies real WireGuard handshakes and encrypted traffic between two independent network
 namespaces in an isolated Linux container. The production API and capability-free client cover join
 planning, idempotency, credential rotation, expiration/revocation, revision conflicts and network recovery.

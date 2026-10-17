@@ -739,6 +739,10 @@ listRegressionDockerBackupChildSelectors() {
     printf '%s\n' docker-backup docker-menu docker-phase1
 }
 
+listRegressionDockerBundleChildSelectors() {
+    printf '%s\n' docker-phase6 docker-phase1 docker-setup-core docker-release
+}
+
 runDockerRecoveryPreviewRegression() {
     bash -n "${PROJECT_ROOT}/docker/tests/recovery-preview.sh" &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/"{lifecycle,services}.sh \
@@ -799,6 +803,10 @@ runDockerControlLogCronRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --log-schedule-cron-only
 }
 
+runDockerWireGuardCliRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-only
+}
+
 runDockerControlStateRegression() {
     bash "${PROJECT_ROOT}/docker/tests/fail2ban-metadata.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
@@ -833,7 +841,15 @@ runDockerSshDriverRegression() {
 }
 
 runDockerWireGuardRuntimeRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
+    bash -n "${PROJECT_ROOT}/docker/lib/wireguard.sh" \
+        "${PROJECT_ROOT}/docker/tests/"wireguard-{cli,management,menu}.sh &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/wireguard.sh" \
+            "${PROJECT_ROOT}/docker/tests/"wireguard-{cli,management,menu}.sh &&
+        python3 -B "${PROJECT_ROOT}/docker/tests/wireguard-config.py" &&
+        bash "${PROJECT_ROOT}/docker/tests/wireguard-cli.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/wireguard-management.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/wireguard-menu.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
 }
 
 runDockerTProxyOwnershipRegression() {
@@ -1124,6 +1140,8 @@ registerRegressionParallelSelectorList docker-recovery-focused runFrameworkParal
     "${TMP_DIR}/docker-recovery-focused-${BASHPID:-$$}" listRegressionDockerRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-backup-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-backup-focused-${BASHPID:-$$}" listRegressionDockerBackupChildSelectors 2
+registerRegressionParallelSelectorList docker-bundle-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-bundle-focused-${BASHPID:-$$}" listRegressionDockerBundleChildSelectors 2
 registerRegressionFunctionLeaf docker-sites runDockerSitesRegression
 registerRegressionFunctionLeaf docker-geo-data runDockerGeoRegression
 registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression
@@ -1138,6 +1156,7 @@ registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerContr
 registerRegressionFunctionLeaf docker-control-remap-real runDockerControlRemapRealRegression
 registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogCronRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
+registerRegressionFunctionLeaf docker-wireguard-cli-real runDockerWireGuardCliRealRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-focused runDockerRedirectOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-real runDockerRedirectRealRegression

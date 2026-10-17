@@ -72,6 +72,7 @@ dockerMenuRun() {
           "${2:-}" != list && "${2:-}" != content && "${2:-}" != links ) ||
         ( "${1:-}" == tls && "${2:-}" == manage ) ||
         ( "${1:-}" == control && "${2:-}" != status ) ||
+        ( "${1:-}" == wireguard && "${2:-}" != status ) ||
         ( "${1:-}" == protocol && ( "${2:-}" == select-target ||
           "${2:-}" == scan-targets || "${2:-}" == scan-targets-asn ) ) ]]; then
         # 配置与启动来源输入必须共用前台进程组，否则后台 read 会收到 SIGTTIN。
@@ -1118,6 +1119,45 @@ dockerMenuGeo() {
     done
 }
 
+dockerMenuWireGuard() {
+    local choice address port peer public endpoint
+    local -a action=()
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker WireGuard 单 Peer\n'
+        printf '%s\n' '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
+            '4. 确认启用或启动' '5. 临时停止' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun wireguard status || true ;;
+        2)
+            dockerSetupRead address '本机 RFC1918 IPv4（0 返回）: ' &&
+                [[ -n "${address}" ]] &&
+                dockerSetupRead port 'UDP 监听端口 [51820，0 返回]: ' 51820 || continue
+            dockerMenuRun wireguard prepare --address "${address}" --listen-port "${port}" || true
+            ;;
+        3)
+            dockerSetupRead peer '对端 RFC1918 IPv4（0 返回）: ' &&
+                [[ -n "${peer}" ]] &&
+                dockerSetupRead public '对端 WireGuard 公钥（0 返回）: ' &&
+                [[ -n "${public}" ]] &&
+                dockerSetupRead endpoint '对端 IPv4:UDP端口（可留空，0 返回）: ' || continue
+            action=(wireguard peer --peer-address "${peer}" --peer-public-key "${public}")
+            [[ -z "${endpoint}" ]] || action+=(--endpoint "${endpoint}")
+            dockerMenuRun "${action[@]}" || true
+            ;;
+        4) dockerMenuRun wireguard start || true ;;
+        5) dockerMenuRun wireguard stop || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenuControl() {
     local choice address port peer output expiry invitation listeners listener
     local -a listenerIds=() action=()
@@ -1129,7 +1169,7 @@ dockerMenuControl() {
             '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
             '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
             '15. 重映射受管账号入口（同连接）' '16. 更新主控 API 端口' \
-            '17. 被控同身份重连' '0. 返回'
+            '17. 被控同身份重连' '18. WireGuard 建链与维护' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1195,6 +1235,7 @@ dockerMenuControl() {
             dockerMenuRun control sync-schedule enable --invite "${invitation}" || true
             ;;
         14) dockerMenuRun control sync-schedule disable || true ;;
+        18) dockerMenuWireGuard ;;
         16|17)
             printf '%s\n' '请先停用自动同步及控制日志调度，并禁用控制面 Fail2ban。' \
                 '仅支持同身份、同 WireGuard 地址的 API 端口更新；不支持主控重绑定。'
