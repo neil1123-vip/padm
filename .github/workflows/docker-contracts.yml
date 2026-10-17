@@ -18,7 +18,8 @@ jobs:
     timeout-minutes: 10
     env:
       PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
-      CONTRACT_TOOLS: ${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') }}
+      # 协议分片包含控制日志测试，日志路径的全部祖先必须归 root 所有。
+      CONTRACT_TOOLS: ${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') || matrix.selector == 'docker-contracts-phase3-protocol' }}
     strategy:
       fail-fast: true
       # 留出原生与 TLS 门禁的两个槽位，避免长分片排队。

@@ -62,7 +62,7 @@ if [[ "${1:-}" == --foreground-driver ]]; then
     case "${2:-}" in
     prepare) args=(wireguard prepare --address 10.90.0.1 --listen-port 51820) ;;
     peer) args=(wireguard peer --peer-address 10.90.0.2 --peer-public-key "${PUBLIC}") ;;
-    migrate) args=(wireguard migrate --rotate-key) ;;
+    migrate) args=(wireguard migrate --address 10.91.0.1 --listen-port 51821 --rotate-key) ;;
     peers-add) args=(wireguard peers add --peer-address 10.90.0.3 --peer-public-key "${PUBLIC}") ;;
     peers-update) args=(wireguard peers update --peer-address 10.90.0.3 --endpoint none) ;;
     peers-remove) args=(wireguard peers remove --peer-address 10.90.0.3) ;;
@@ -101,7 +101,7 @@ runCase() {
 runCase status $'1\n0\n' 'wireguard status'
 grep -Fq fixture-public-status "${CONTROL_LOG}" || fail '状态没有显示 CLI 公开输出'
 for label in '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
-    '4. 确认启用或启动' '5. 临时停止' '6. 更新单 Peer 连接或轮换密钥' \
+    '4. 确认启用或启动' '5. 临时停止' '6. 迁移本机参数或单 Peer 连接' \
     '7. 查看 Peer 列表' '8. 添加 Peer' '9. 更新指定 Peer' '10. 移除指定 Peer'; do
     grep -Fq "${label}" "${CONTROL_LOG}" || fail "缺少菜单 ${label}"
 done
@@ -119,6 +119,12 @@ runCase migrate "6"$'\n10.91.0.1\n51821\n10.91.0.2\n'"${PUBLIC}"$'\n198.18.0.2:5
     "wireguard migrate --address 10.91.0.1 --listen-port 51821 --peer-address 10.91.0.2 --peer-public-key ${PUBLIC} --endpoint 198.18.0.2:51821 --rotate-key"$'\nconfirm migrate y\nwireguard status'
 runCase migrate-endpoint $'6\n\n\n\n\nnone\nn\ny\n0\n' \
     $'wireguard migrate --endpoint none\nconfirm migrate y'
+runCase migrate-local $'6\n10.91.0.1\n51821\n\n\n\ny\ny\n1\n0\n' \
+    $'wireguard migrate --address 10.91.0.1 --listen-port 51821 --rotate-key\nconfirm migrate y\nwireguard status'
+grep -Fq '无控制角色的多 Peer 仅可更新本机地址、监听端口或轮换密钥；对端字段须留空。' "${CONTROL_LOG}" ||
+    fail '迁移菜单未说明多 Peer 本机字段范围'
+grep -Fq 'v2 主控暂不支持。' "${CONTROL_LOG}" ||
+    fail '迁移菜单未说明 v2 主控边界'
 runCase migrate-rotate $'6\n\n\n\n\n\ny\ny\n0\n' \
     $'wireguard migrate --rotate-key\nconfirm migrate y'
 grep -Fq '控制角色改址会关联更新角色地址' "${CONTROL_LOG}" ||
@@ -224,6 +230,10 @@ for action in prepare peer start stop migrate peers-add peers-update peers-remov
             fail "${action}/${answer}: 前台确认输入失败，退出码 ${status}"
         grep -qxF "confirm ${action} ${answer}" "${WIREGUARD_MENU_ACTIONS}" ||
             fail "${action}/${answer}: 输入没有到达前台 CLI"
+        if [[ "${action}" == migrate ]]; then
+            grep -qxF 'wireguard migrate --address 10.91.0.1 --listen-port 51821 --rotate-key' \
+                "${WIREGUARD_MENU_ACTIONS}" || fail '前台复合本机迁移参数丢失'
+        fi
         CASES=$((CASES + 1))
     done
 done

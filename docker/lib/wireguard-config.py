@@ -285,21 +285,24 @@ def migrate(directory, destination, own_address=None, listen_port=None, peer_add
             os.close(source)
     identity = dict(identity)
     if peer_action is None:
-        # 旧迁移仍限定单项，不能把未选定的 Peer 当作修改目标。
-        require(len(remotes) == 1)
+        # 集合迁移只改显式本机字段，不能隐式选择某个 Peer。
+        require(len(remotes) == 1 or (
+            any(value is not None for value in (own_address, listen_port, private_key))
+            and all(value is None for value in (peer_address, peer_public_key, peer_endpoint))))
         if own_address is not None:
             identity["address"] = address(own_address)
         if listen_port is not None:
             identity["listen_port"] = port(listen_port)
         if private_key is not None:
             private, identity["public_key"] = read_key(private_key), read_key(public_key)
-        remote = remotes[0]
-        if peer_address is not None:
-            remote["address"] = peer_address
-        if peer_public_key is not None:
-            remote["public_key"] = peer_public_key
-        if peer_endpoint is not None:
-            remote["endpoint"] = None if peer_endpoint == "none" else peer_endpoint
+        if len(remotes) == 1:
+            remote = remotes[0]
+            if peer_address is not None:
+                remote["address"] = peer_address
+            if peer_public_key is not None:
+                remote["public_key"] = peer_public_key
+            if peer_endpoint is not None:
+                remote["endpoint"] = None if peer_endpoint == "none" else peer_endpoint
     else:
         # Peer 集合变更不承载本机身份迁移，必须按地址精确选中已有项。
         require(own_address is None and listen_port is None and private_key is None)

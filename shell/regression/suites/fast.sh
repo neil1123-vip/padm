@@ -948,6 +948,10 @@ runDockerWireGuardPeersRecoveryRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-peers-recovery-only
 }
 
+runDockerWireGuardPeersMigrationRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-peers-migration-only
+}
+
 runDockerControlStateRegression() {
     bash "${PROJECT_ROOT}/docker/tests/fail2ban-metadata.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
@@ -1343,6 +1347,7 @@ registerRegressionFunctionLeaf docker-wireguard-control-real runDockerWireGuardC
 registerRegressionFunctionLeaf docker-wireguard-address-real runDockerWireGuardAddressRealRegression
 registerRegressionFunctionLeaf docker-wireguard-recovery-real runDockerWireGuardRecoveryRealRegression
 registerRegressionFunctionLeaf docker-wireguard-peers-recovery-real runDockerWireGuardPeersRecoveryRealRegression
+registerRegressionFunctionLeaf docker-wireguard-peers-migration-real runDockerWireGuardPeersMigrationRealRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-focused runDockerRedirectOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-real runDockerRedirectRealRegression

@@ -1325,8 +1325,19 @@ duplicate addresses/keys are rejected; the existing 4096-byte configuration limi
 The update address selects an existing Peer; omitted fields stay unchanged and `none`
 clears the endpoint. Removing the last Peer is rejected. The existing full configuration
 transaction preserves identity/key bytes and handles failure/INT/TERM; service recreation
-may briefly interrupt connections. Collection changes for v1 controllers or controlled nodes, ordinary `migrate` with
-multiple Peers remain rejected. Empty-target recovery accepts canonical Peer collections
+may briefly interrupt connections. Collection changes for v1 controllers or controlled nodes remain rejected.
+Without a control role, menu `15 → 18 → 6` or the following command can migrate local fields
+while preserving every Peer address, public key and endpoint:
+
+```bash
+padm-docker wireguard migrate --address 10.78.0.1 --listen-port 51821 --rotate-key --yes
+```
+
+At least one local field must be explicit. With multiple Peers, `--peer-address`,
+`--peer-public-key` and `--endpoint` are rejected; no Peer is implicitly selected.
+Update each remote node after changing the local address or key; temporary disconnection is expected.
+Health failure and INT/TERM reuse the existing private-directory rollback. Control-role scope stays unchanged.
+Empty-target recovery accepts canonical Peer collections
 only when no control role is configured, as described below.
 Native-host/arm64/public-network acceptance remains deferred;
 limited controller recovery with a new identity is described below.

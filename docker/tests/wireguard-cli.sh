@@ -224,6 +224,7 @@ run_case "${PADM_DOCKER_RC_CONFLICT}" peer --peer-address 10.90.0.2 --peer-publi
 CURRENT_PUBLIC=${PUBLIC}
 EXPECT_ROLE_ADDRESS=0
 EXPECT_PEER_CHANGE=0
+EXPECT_LOCAL_MULTI=0
 dockerWireGuardContainer() {
     [[ "$#" == 1 && "$1" == running && "${MODE}" != owner-fail ]] || return 1
     printf '%064d\n' 1
@@ -268,6 +269,16 @@ dockerConfigureApply() {
             cmp -s -- "${root}/secrets/net/wireguard/${file}" "${candidate}/${file}" ||
                 fail 'Peer 变更改变了本机身份或密钥'
         done
+    fi
+    if [[ "${EXPECT_LOCAL_MULTI}" == 1 ]]; then
+        local previousPeers candidatePeers
+        previousPeers=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers \
+            --directory "${root}/secrets/net/wireguard")
+        candidatePeers=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers \
+            --directory "${candidate}")
+        jq -en --argjson previous "${previousPeers}" --argjson next "${candidatePeers}" \
+            '$previous.peers == $next.peers and ($next.peers | length) == 2' >/dev/null ||
+            fail '多 Peer 本机迁移改变了对端集合或参数'
     fi
     printf 'migrate-apply\n' >>"${CALLS}"
     [[ "${MODE}" != apply-fail ]] || return "${PADM_DOCKER_RC_COMPOSE}"
@@ -341,7 +352,53 @@ run_case 0 peers add --peer-address 10.91.0.3 --peer-public-key "${SECOND_PEER}"
 before=$(snapshot)
 run_case 0 peers list
 jq -e '.peers | map(.address) == ["10.91.0.2","10.91.0.3"]' "${LOG}" >/dev/null
-run_case "${PADM_DOCKER_RC_CONFLICT}" migrate --rotate-key --yes
+EXPECT_PEER_CHANGE=0
+for arguments in \
+    'migrate --yes' \
+    'migrate --address 10.91.0.10 --peer-address 10.91.0.2 --yes' \
+    "migrate --listen-port 51825 --peer-public-key ${UPDATED_PEER} --yes" \
+    'migrate --rotate-key --endpoint none --yes'; do
+    read -r -a options <<<"${arguments}"
+    run_case "${PADM_DOCKER_RC_CONFLICT}" "${options[@]}"
+done
+for address in 10.91.0.2 10.91.0.3; do
+    run_case "${PADM_DOCKER_RC_STATE}" migrate --address "${address}" --yes
+done
+[[ "$(snapshot)" == "${before}" ]] || fail '多 Peer 非法本机迁移改变在线输入'
+EXPECT_LOCAL_MULTI=1
+previousPrivate=${PRIVATE} previousPublic=${PUBLIC}
+PRIVATE=$(printf '%032d' 8 | base64 -w0)
+PUBLIC=$(printf '%032d' 9 | base64 -w0)
+for MODE in owner-fail pair-fail apply-fail int term; do
+    expected=${PADM_DOCKER_RC_STATE}
+    [[ "${MODE}" != apply-fail ]] || expected=${PADM_DOCKER_RC_COMPOSE}
+    [[ "${MODE}" != int ]] || expected=130
+    [[ "${MODE}" != term ]] || expected=143
+    run_case "${expected}" migrate --address 10.91.0.10 --listen-port 51825 --rotate-key --yes
+    [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: 多 Peer 本机迁移失败改变在线输入"
+done
+MODE=ok
+PUBLIC=${SECOND_PEER}
+run_case "${PADM_DOCKER_RC_STATE}" migrate --rotate-key --yes
+[[ "$(snapshot)" == "${before}" ]] || fail '多 Peer 密钥碰撞改变在线输入'
+PUBLIC=$(printf '%032d' 9 | base64 -w0)
+run_case 0 migrate --address 10.91.0.10 --listen-port 51825 --rotate-key --yes
+[[ "$(<"${root}/secrets/net/wireguard/private.key")" == "${PRIVATE}" ]] &&
+    jq -e --arg key "${PUBLIC}" '.address == "10.91.0.10" and .listen_port == 51825 and
+        .public_key == $key' "${root}/secrets/net/wireguard/identity.json" >/dev/null ||
+    fail '多 Peer 复合本机迁移未采用全部指定字段'
+CURRENT_PUBLIC=${PUBLIC}
+before=$(snapshot)
+: >"${CALLS}"
+run_case 0 migrate --address 10.91.0.10 --listen-port 51825 --yes
+! grep -qF migrate-apply "${CALLS}" || fail '多 Peer 同值本机迁移仍提交事务'
+[[ "$(snapshot)" == "${before}" ]] || fail '多 Peer 幂等本机迁移改变在线输入'
+PRIVATE=${previousPrivate} PUBLIC=${previousPublic}
+run_case 0 migrate --address 10.91.0.1 --listen-port 51821 --rotate-key --yes
+CURRENT_PUBLIC=${PUBLIC}
+before=$(snapshot)
+EXPECT_LOCAL_MULTI=0
+EXPECT_PEER_CHANGE=1
 run_case "${PADM_DOCKER_RC_STATE}" peers remove --peer-address 10.91.0.4 --yes
 run_case "${PADM_DOCKER_RC_STATE}" peers update --peer-address 10.91.0.3 \
     --peer-public-key "${PEER}" --yes

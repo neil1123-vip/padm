@@ -1661,7 +1661,16 @@ padm-docker wireguard peers remove --peer-address 10.77.0.3 --yes
 省略字段保持，`none` 清除 endpoint，至少保留一个 Peer。
 变更逐字节保留本机身份和私钥，复用完整配置事务及失败/INT/TERM 恢复，
 会重建部署服务并可能短暂中断连接。v1 主控与被控集合变更继续拒绝；
-多 Peer 的旧 `wireguard migrate` 仍拒绝，不能默认选择首项；无控制角色的多 Peer 空目标恢复见下文。
+无控制角色的多 Peer 可通过菜单 `15 → 18 → 6` 或以下命令更新本机地址、监听端口和密钥：
+
+```bash
+padm-docker wireguard migrate --address 10.78.0.1 --listen-port 51821 --rotate-key --yes
+```
+
+至少显式提供一个本机字段；全部 Peer 地址、公钥和 endpoint 保持。
+多 Peer 禁止在该命令中传 `--peer-address`、`--peer-public-key` 或 `--endpoint`，不会默认选择首项。
+地址或密钥更新后须逐端更新远端配置，期间可能断联；健康失败和 INT/TERM 沿用原三件套恢复。
+控制角色范围不扩大；无控制角色的多 Peer 空目标恢复见下文。
 
 已有 v1 主控可通过菜单 `15 → 20` 显式升级为 v2，再登记第二个被控：
 

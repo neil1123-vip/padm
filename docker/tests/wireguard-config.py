@@ -471,6 +471,61 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(changed, (self.directory / "wg-padm.conf").read_bytes().split(b"Endpoint = ")[0])
         self.assertNotIn(b"PersistentKeepalive", changed)
 
+    def test_multi_peer_local_migration_preserves_all_peers_and_source(self):
+        self.prepare()
+        identity = json.loads((self.directory / "identity.json").read_bytes())
+        remotes = [
+            {"address": "10.90.0.2", "public_key": PEER, "endpoint": "198.18.0.2:51821"},
+            {"address": "10.90.0.3", "public_key": ROTATED_PEER, "endpoint": None},
+        ]
+        configuration = wg.configuration_peers(identity, PRIVATE, remotes)
+        config = self.directory / "wg-padm.conf"
+        config.write_bytes(configuration)
+        config.chmod(0o600)
+        original = {path.name: path.read_bytes() for path in self.directory.iterdir()}
+        self.private.write_text(ROTATED_PRIVATE + "\n")
+        self.public.write_text(ROTATED_PUBLIC + "\n")
+        result = self.migrate(
+            own_address="10.91.0.1", listen_port=51900,
+            private_key=str(self.private), public_key=str(self.public))
+        candidate = self.root / "candidate"
+        self.assertEqual(result, {"schema_version": 1, "address": "10.91.0.1",
+                                  "listen_port": 51900, "public_key": ROTATED_PUBLIC,
+                                  "configured": True})
+        self.assertEqual(wg.peers(str(candidate))["peers"], remotes)
+        self.assertEqual((candidate / "wg-padm.conf").read_bytes().split(b"\n[Peer]\n", 1)[1],
+                         configuration.split(b"\n[Peer]\n", 1)[1])
+        self.assertEqual((candidate / "private.key").read_text(), ROTATED_PRIVATE + "\n")
+        self.assertEqual({path.name: path.read_bytes() for path in self.directory.iterdir()}, original)
+        for secret in (PRIVATE, ROTATED_PRIVATE):
+            self.assertNotIn(secret, json.dumps(result))
+
+    def test_multi_peer_local_migration_rejects_peer_fields_and_identity_collisions(self):
+        self.prepare()
+        identity = json.loads((self.directory / "identity.json").read_bytes())
+        config = self.directory / "wg-padm.conf"
+        config.write_bytes(wg.configuration_peers(identity, PRIVATE, [
+            {"address": "10.90.0.2", "public_key": PEER, "endpoint": None},
+            {"address": "10.90.0.3", "public_key": ROTATED_PEER, "endpoint": None},
+        ]))
+        config.chmod(0o600)
+        before = self.snapshot()
+        for changes in (
+            {}, {"own_address": "10.90.0.2"}, {"own_address": "10.90.0.3"},
+            {"listen_port": 51900, "peer_address": "10.91.0.2"},
+            {"listen_port": 51900, "peer_public_key": ROTATED_PUBLIC},
+            {"listen_port": 51900, "peer_endpoint": "none"},
+        ):
+            with self.subTest(changes=changes):
+                self.rejected(self.migrate, **changes)
+                self.assertEqual(self.snapshot(), before)
+        for public in (PEER, ROTATED_PEER):
+            self.public.write_text(public + "\n")
+            before = self.snapshot()
+            with self.subTest(public=public):
+                self.rejected(self.migrate, private_key=str(self.private), public_key=str(self.public))
+                self.assertEqual(self.snapshot(), before)
+
     def test_peer_changes_select_address_and_preserve_identity_bytes(self):
         self.prepare()
         self.peer(endpoint="198.18.0.2:51821")

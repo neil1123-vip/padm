@@ -218,14 +218,15 @@ assertOld
 checks=$((checks + 1))
 
 [[ "${checks}" == 21 ]]
-for action in add update remove; do
+for action in add update remove local; do
     for MODE_CASE in ok fail-up INT TERM; do
         fixture
         directory=$(mktemp -d "${root}/.wireguard.XXXXXX")
         python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate \
             --directory "${root}/secrets/net/wireguard" --destination "${directory}/wireguard" \
             --peer-action add --peer-address 10.77.0.3 \
-            --peer-public-key "$(printf '%032d' 5 | base64 -w0)" >/dev/null
+            --peer-public-key "$(printf '%032d' 5 | base64 -w0)" \
+            --endpoint 198.18.0.3:51821 >/dev/null
         cp -- "${directory}/wireguard/"* "${root}/secrets/net/wireguard/"
         cp -- "${directory}/wireguard/"* "${root}/expected/"
         input=$(mktemp -d "${root}/.wireguard.XXXXXX")/wireguard
@@ -234,13 +235,33 @@ for action in add update remove; do
         add) arguments+=(--peer-address 10.77.0.4 --peer-public-key "$(printf '%032d' 6 | base64 -w0)") ;;
         update) arguments+=(--peer-address 10.77.0.3 --endpoint 198.18.0.3:51822) ;;
         remove) arguments+=(--peer-address 10.77.0.2) ;;
+        local)
+            printf '%032d' 6 | base64 >"${root}/new-public"
+            arguments=(--address 10.88.0.1 --listen-port 51821 \
+                --private-key "${root}/new-private" --public-key "${root}/new-public")
+            ;;
         esac
         python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate \
             --directory "${root}/secrets/net/wireguard" --destination "${input}" \
             "${arguments[@]}" >/dev/null
-        for file in identity.json private.key; do
-            cmp -s -- "${root}/expected/${file}" "${input}/${file}"
-        done
+        if [[ "${action}" == local ]]; then
+            jq -e --arg public "$(cat "${root}/new-public")" \
+                '.address == "10.88.0.1" and .listen_port == 51821 and .public_key == $public' \
+                "${input}/identity.json" >/dev/null
+            cmp -s -- "${root}/new-private" "${input}/private.key"
+            cmp -s <(sed -n '/^\[Peer\]$/,$p' "${root}/expected/wg-padm.conf") \
+                <(sed -n '/^\[Peer\]$/,$p' "${input}/wg-padm.conf")
+            peers=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers \
+                --directory "${root}/expected" | jq '.peers')
+            python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers --directory "${input}" |
+                jq -e --argjson peers "${peers}" '.peers == $peers and (.peers | length) == 2' >/dev/null
+        else
+            for file in identity.json private.key; do
+                cmp -s -- "${root}/expected/${file}" "${input}/${file}"
+            done
+        fi
+        cp -- "${root}/config/spec.json" "${root}/spec-before.json"
+        cp -- "${root}/data/traffic/state.json" "${root}/traffic-before.json"
         MODE=${MODE_CASE}
         expected=0
         [[ "${MODE}" != fail-up ]] || expected=14
@@ -256,6 +277,12 @@ for action in add update remove; do
             grep -qxF down "${CALLS}"
         fi
         grep -qxF secrets/net/wireguard "${root}"/backups/configure.*/present
+        cmp -s -- "${root}/spec-before.json" "${root}/config/spec.json"
+        cmp -s -- "${root}/traffic-before.json" "${root}/data/traffic/state.json"
+        for file in identity.json private.key wg-padm.conf; do
+            [[ -f "${root}/secrets/net/wireguard/${file}" && ! -L "${root}/secrets/net/wireguard/${file}" &&
+                "$(stat -c '%u:%g:%a:%h' "${root}/secrets/net/wireguard/${file}")" == 0:0:600:1 ]]
+        done
     done
 done
 for helper in "${!controlFunctions[@]}"; do

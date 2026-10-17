@@ -46,6 +46,7 @@ nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-l
                        "docker-wireguard-peers-real", "docker-control-peers-real",
                        "docker-control-rebind-real", "docker-wireguard-control-real", "docker-wireguard-recovery-real",
                        "docker-controller-recovery-real", "docker-wireguard-peers-recovery-real",
+                       "docker-wireguard-peers-migration-real",
                        "docker-wireguard-address-real", "docker-webroot-recovery-real", "docker-alpn-recovery-real",
                        "docker-acme-dns-recovery-real")
 memory_workspace = sys.argv[1] in ("docker-contracts", "docker-contracts-full")
@@ -143,6 +144,8 @@ $ordinaryCases = if ($Scope -eq 'artifacts') {
     @{ selector = 'docker-wireguard-recovery-real-other'; expected = 0 },
     @{ selector = 'docker-wireguard-peers-recovery-real'; expected = 0 },
     @{ selector = 'docker-wireguard-peers-recovery-real-other'; expected = 0 },
+    @{ selector = 'docker-wireguard-peers-migration-real'; expected = 0 },
+    @{ selector = 'docker-wireguard-peers-migration-real-other'; expected = 0 },
     @{ selector = 'docker-controller-recovery-real'; expected = 0 },
     @{ selector = 'docker-controller-recovery-real-other'; expected = 0 },
     @{ selector = 'docker-wireguard-address-real'; expected = 0 },

@@ -1126,7 +1126,7 @@ dockerMenuWireGuard() {
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker WireGuard\n'
         printf '%s\n' '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
-            '4. 确认启用或启动' '5. 临时停止' '6. 更新单 Peer 连接或轮换密钥' \
+            '4. 确认启用或启动' '5. 临时停止' '6. 迁移本机参数或单 Peer 连接' \
             '7. 查看 Peer 列表' '8. 添加 Peer' '9. 更新指定 Peer' '10. 移除指定 Peer' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -1174,7 +1174,8 @@ dockerMenuWireGuard() {
             dockerMenuRun wireguard peers remove --peer-address "${peer}" || true
             ;;
         6)
-            printf '%s\n' '已启用单 Peer；先停自动同步、控制日志调度及控制面封禁。' \
+            printf '%s\n' '无控制角色的多 Peer 仅可更新本机地址、监听端口或轮换密钥；对端字段须留空。' \
+                '单 Peer 控制角色迁移前，先停自动同步、控制日志调度及控制面封禁；v2 主控暂不支持。' \
                 '控制角色改址会关联更新角色地址；主控撤权，双方迁移后须重新邀请并核验来源。' \
                 '留空保持，0 返回。双方逐端更新后须验证连通。'
             dockerSetupRead address '本机 RFC1918 IPv4: ' &&

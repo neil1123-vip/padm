@@ -1689,11 +1689,24 @@ dockerWireGuardMigrate() (
             dockerError 'v2 主控暂不支持 WireGuard 本机或关联地址迁移'
             return "${PADM_DOCKER_RC_CONFLICT}"
         }
-        python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses --directory "${directory}" \
-            >/dev/null || {
-            dockerError '普通迁移仅支持单 Peer；多 Peer 请按地址使用 peers update 或 remove'
+        public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers --directory "${directory}") || {
+            dockerError '本机迁移需要完整 canonical WireGuard Peer 配置'
             return "${PADM_DOCKER_RC_CONFLICT}"
         }
+        if [[ "$(jq '.peers | length' <<<"${public}")" -gt 1 ]]; then
+            local argument ownChange=${rotate}
+            for argument in "$@"; do
+                case "${argument}" in
+                --address|--listen-port) ownChange=1 ;;
+                --peer-address|--peer-public-key|--endpoint) ownChange=0; break ;;
+                esac
+            done
+            [[ "${ownChange}" == 1 ]] &&
+                jq -e '.control == null and .control_sync == null' "${spec}" >/dev/null || {
+                dockerError '多 Peer 迁移仅支持无控制角色的显式本机地址、监听端口或密钥轮换；对端字段请使用 peers update'
+                return "${PADM_DOCKER_RC_CONFLICT}"
+            }
+        fi
     fi
     dockerWireGuardMigrationRoleCheck "${spec}" "${directory}" &&
         dockerWireGuardMigrationDependenciesCheck "${spec}" ||
