@@ -338,7 +338,7 @@ try {
         'docker-control-two-deployment-real', 'docker-control-remap-real', 'docker-control-log-cron-real',
         'docker-control-rebind-real',
         'docker-routing-ipv6-real', 'docker-wireguard-cli-real', 'docker-wireguard-control-real',
-        'docker-wireguard-recovery-real', 'docker-wireguard-address-real',
+        'docker-wireguard-recovery-real', 'docker-wireguard-address-real', 'docker-controller-recovery-real',
         'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-port-hopping-target-real',
         'docker-port-hopping-change-real', 'docker-port-hopping-auto-real', 'docker-port-hopping-tuic-real',
         'docker-port-hopping-recovery-real', 'docker-port-hopping-share-real', 'docker-cdn-entries-real',

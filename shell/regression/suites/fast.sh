@@ -798,6 +798,18 @@ runDockerWebrootRecoveryApplyRegression() {
     PADM_DOCKER_RECOVERY_SCOPE=webroot runDockerRecoveryApplyRegression
 }
 
+runDockerControllerRecoveryApplyRegression() {
+    PADM_DOCKER_RECOVERY_SCOPE=controller runDockerRecoveryApplyRegression
+}
+
+runDockerControllerRecoveryRealRegression() {
+    python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --controller-recovery-only
+}
+
+listRegressionDockerControllerRecoveryChildSelectors() {
+    printf '%s\n' docker-backup docker-menu-maintenance docker-controller-recovery-apply
+}
+
 runDockerWebrootRecoveryRealRegression() {
     PADM_ACME_RECOVERY_REAL_SCOPE=webroot runDockerAcmeRecoveryRealRegression
 }
@@ -1213,6 +1225,10 @@ registerRegressionFunctionLeaf docker-recovery-preview runDockerRecoveryPreviewR
 registerRegressionFunctionLeaf docker-recovery-apply runDockerRecoveryApplyRegression
 registerRegressionFunctionLeaf docker-wireguard-recovery-apply runDockerWireGuardRecoveryApplyRegression
 registerRegressionFunctionLeaf docker-webroot-recovery-apply runDockerWebrootRecoveryApplyRegression
+registerRegressionFunctionLeaf docker-controller-recovery-apply runDockerControllerRecoveryApplyRegression
+registerRegressionFunctionLeaf docker-controller-recovery-real runDockerControllerRecoveryRealRegression
+registerRegressionParallelSelectorList docker-controller-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-controller-recovery-focused-${BASHPID:-$$}" listRegressionDockerControllerRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-webroot-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-webroot-recovery-focused-${BASHPID:-$$}" listRegressionDockerWebrootRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \

@@ -2004,6 +2004,59 @@ dockerWireGuardRecoveryInputCheck() {
         dockerWireGuardMigrationDirectoryCheck "${DOCKER_WIREGUARD_INPUT}"
 }
 
+dockerControllerRecoveryInputCheck() {
+    local sourceSpec=$1 mode=$2 root draft file
+    [[ "${FUNCNAME[1]:-}" == dockerConfigureApply &&
+        "${FUNCNAME[2]:-}" == dockerRecoveryCommand && "${rebuildController:-0}" == 1 &&
+        -n "${DOCKER_RECOVERY_CONTROLLER_SPEC:-}" ]] || return 1
+    case "${mode}:${action:-}" in
+    preview:preview) ;;
+    recovery:apply)
+        [[ "${confirm:-}" == PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED ]] || return 1
+        ;;
+    *) return 1 ;;
+    esac
+    dockerWireGuardRecoveryInputCheck "${DOCKER_RECOVERY_CANDIDATE:-}" preparing || return 1
+    root=$(dockerInstallRoot) || return 1
+    draft="${DOCKER_RECOVERY_INPUT%/input}/draft"
+    [[ "${sourceSpec}" == "${draft}/spec.json" &&
+        "${DOCKER_RECOVERY_CONTROLLER_SPEC}" == "${draft}/controller-spec.json" &&
+        -d "${draft}" && ! -L "${draft}" &&
+        "$(stat -c '%u:%g:%a' -- "${draft}")" == 0:0:700 ]] &&
+        dockerTrafficSafePath "${root}" "${draft}" || return 1
+    for file in "${DOCKER_RECOVERY_INPUT}/config/spec.json" \
+        "${DOCKER_RECOVERY_CONTROLLER_SPEC}" "${sourceSpec}"; do
+        [[ -f "${file}" && ! -L "${file}" &&
+            "$(stat -c '%u:%g:%a:%h' -- "${file}")" == 0:0:600:1 ]] &&
+            dockerTrafficSafePath "${root}" "${file}" || return 1
+    done
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" controller-inputs \
+        --directory "${DOCKER_RECOVERY_INPUT}" >/dev/null || return 1
+    # 重建只换身份并撤销旧授权；业务草稿仅接受既有的空账号规范化。
+    jq -en --slurpfile previous "${DOCKER_RECOVERY_INPUT}/config/spec.json" \
+        --slurpfile rebuilt "${DOCKER_RECOVERY_CONTROLLER_SPEC}" --slurpfile draft "${sourceSpec}" '
+      def business_normalized:
+        if (.accounts // [] | length) == 0 then del(.accounts) else . end;
+      ($previous | length) == 1 and ($rebuilt | length) == 1 and ($draft | length) == 1 and
+      ($previous[0] as $old | $rebuilt[0] as $new |
+        ([$old.control.node_id,$old.control.peer.id] +
+          [$old.accounts[]? | .id,.uuid]) as $occupied |
+        $old.control.role == "main" and $new.control.role == "main" and
+        $old.control_sync == null and $new.control_sync == null and
+        ($occupied | index($new.control.node_id)) == null and
+        ($occupied | index($new.control.peer.id)) == null and
+        $new.control.node_id != $new.control.peer.id and
+        $new.control.peer.token_sha256 != $old.control.peer.token_sha256 and
+        $new.control.peer.enabled == false and $new.control.peer.expires_at == 1 and
+        $new.control.revision == 0 and $new.control.last_digest == null and
+        ($old | del(.control.node_id,.control.peer.id,.control.peer.token_sha256,
+          .control.peer.enabled,.control.peer.expires_at,.control.revision,.control.last_digest)) ==
+        ($new | del(.control.node_id,.control.peer.id,.control.peer.token_sha256,
+          .control.peer.enabled,.control.peer.expires_at,.control.revision,.control.last_digest)) and
+        ($new | business_normalized) == ($draft[0] | business_normalized))
+    ' >/dev/null
+}
+
 dockerWireGuardMigrationInstall() {
     local candidate=$1 root directory previous ids audited pending=0 intTrap termTrap result=0
     local DOCKER_WIREGUARD_INPUT=
@@ -7829,6 +7882,11 @@ dockerConfigureApply() {
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
+    if [[ -n "${DOCKER_RECOVERY_CONTROLLER_SPEC:-}" ]]; then
+        dockerControllerRecoveryInputCheck "${sourceSpec}" "${mode}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        DOCKER_CONTROL_TRANSACTION=1
+    fi
     [[ -z "${siteTitle}" || -n "${siteTemplate}" ]] || return "${PADM_DOCKER_RC_USAGE}"
     if [[ -n "${siteTemplate}" ]]; then
         [[ -z "${siteSource}" ]] &&
@@ -7953,6 +8011,10 @@ dockerConfigureApply() {
         python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-prepare \
             --root "${root}" --project "${PADM_DOCKER_PROJECT}" --candidate "${candidate}" \
             --input-stage "${DOCKER_RECOVERY_INPUT%/input}" || return "${PADM_DOCKER_RC_STATE}"
+        if [[ -n "${DOCKER_RECOVERY_CONTROLLER_SPEC:-}" ]] &&
+            ! dockerControlAccessLogEnsure "${root}" "${specFile}"; then
+            return "${PADM_DOCKER_RC_STATE}"
+        fi
         if ! dockerInstallCandidate "${candidate}" "${backup}" ||
             { [[ -d "${candidate}/data/reality-targets" ]] &&
                 ! mv -- "${candidate}/data/reality-targets" "${root}/data/"; } ||

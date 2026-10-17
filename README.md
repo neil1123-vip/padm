@@ -1656,7 +1656,7 @@ padm-docker wireguard migrate --address 10.78.0.1 --peer-address 10.78.0.2 --yes
 账号、同步版本和累计保持。主控改址撤销原邀请，双方逐端改址会暂时断联，
 完成后须重新邀请、同步和核验来源；同地址的密钥/端口/endpoint 更新仍沿用原行为。
 失败及 INT/TERM 恢复旧地址和密钥，主控授权保持撤销；普通回滚拒绝跨控制地址覆盖。
-隔离 Linux amd64 双 daemon 真实改址、业务及恢复已验，主控灾备和原生宿主验收仍待补。
+隔离 Linux amd64 双 daemon 真实改址、业务及恢复已验；主控新身份灾备见下文，原生宿主验收仍待补。
 定向夹具覆盖候选、安装、恢复和权限，核心/宿主动作是桩，不代替真实双节点验收。
 4C.4a 已在隔离 Linux 容器的两个独立网络空间实测 WireGuard 握手和加密传输，
 通过生产 API/零能力客户端验证接入规划、幂等、凭据轮换、过期/撤销、版本冲突及断网恢复。
@@ -1803,7 +1803,7 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 目标须仅安装控制骨架，配置、数据、密钥、日志和备份目录为空，且没有同项目容器。
 当前接受同架构 v3 普通部署、受管或桥接可达宿主网站 Reality 共存：核心、手动 TLS、静态站、账号/分享身份、
 已保存流量、Reality 目标库、下述受限 Geo、ACME、续期及单 Peer WireGuard 输入。
-主控、其它宿主集成、自动同步授权、host 网络共存及未处理的 ACME 组合仍明确拒绝。
+主控仅接受下述显式新身份恢复；其它宿主集成、自动同步授权、host 网络共存及未处理 ACME 仍拒绝。
 停用分享组的悬空引用也须先修正。
 WireGuard 要求完整 canonical `identity.json`、`private.key`、`wg-padm.conf` 三件套，
 均为 `root:root`、目录 `0700`、文件 `0600`，可信 net 镜像另核私钥与公钥配对。
@@ -1851,6 +1851,20 @@ webroot 固定为 `/var/lib/padm/acme-webroot`，不得残留 `Le_HTTPPort` 或�
 padm-docker restore apply /root/padm-recovery.tar --confirm PADM-DOCKER-RESTORE
 padm-docker restore recover
 ```
+
+单 Peer 主控须先停机并隔离旧宿主，再通过维护菜单 `18 → 11/12` 或以下命令重建：
+
+```bash
+padm-docker restore preview /root/padm-recovery.tar --rebuild-controller
+padm-docker restore apply /root/padm-recovery.tar --rebuild-controller --confirm PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED
+```
+
+仅接受同架构 v3 空目标、完整 canonical 单 Peer 和一致的原规格及发布状态；
+归档不得含控制日志登记、来源现场、历史日志或持久同步授权。
+保留账号、累计、API 端口及 WireGuard 密钥和地址，重新生成主控与 Peer 身份，
+禁用并过期原授权，版本从 `0` 开始；重新签发邀请后在被控端显式执行 `control rebind`。
+普通同步的旧身份、版本及凭据碰撞门禁继续生效。新身份不能撤销仍存活的旧副本，
+故隔离旧宿主是恢复前提；不恢复原主控身份或覆盖已有部署。
 
 首次业务写入前持久保存可信候选的停机输入、原空目录元数据和调度快照。
 安装、健康检查、流量、Geo 或续期调度失败及 INT/TERM 时撤销本次恢复；登记发布后的 SIGKILL

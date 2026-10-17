@@ -1160,6 +1160,36 @@ runMaintenanceDriver() {
     restore-recover|restore-recover-failed)
         targetReply 'Docker 服务维护' $'10\n'
         ;;
+    restore-controller|restore-controller-apply|restore-controller-assets|restore-controller-cancel|restore-controller-eof|restore-controller-reset|restore-controller-failed)
+        choice=11
+        prompt='待预览恢复的灾备归档绝对路径（0 返回）'
+        if [[ "${scenario}" == restore-controller-apply || "${scenario}" == restore-controller-cancel ||
+            "${scenario}" == restore-controller-eof ]]; then
+            choice=12
+            prompt='待应用恢复的灾备归档绝对路径（0 返回）'
+        fi
+        targetReply 'Docker 服务维护' "${choice}"$'\n'
+        targetReply "${prompt}" $'/root/private recovery.tar\n'
+        answer=1
+        [[ "${scenario}" != restore-controller-assets ]] || answer=2
+        targetReply '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）' "${answer}"$'\n'
+        if [[ "${answer}" == 2 ]]; then
+            targetReply '匹配归档的 manifest 绝对路径（0 返回）' $'/root/historical release/release-manifest.json\n'
+            targetReply '匹配归档的 Sigstore bundle 绝对路径（0 返回）' $'/root/historical release/release-manifest.sigstore.json\n'
+            targetReply '匹配归档的 control-bundle 绝对路径（0 返回）' $'/root/historical release/control-bundle.tar.gz\n'
+        fi
+        if [[ "${choice}" == 12 ]]; then
+            answer=y
+            [[ "${scenario}" != restore-controller-cancel ]] || answer=n
+            [[ "${scenario}" != restore-controller-eof ]] || answer=$'\004'
+            targetReply '确认旧主控已停机隔离，并以新身份恢复到空目标？[y/N]' "${answer}"$'\n'
+        fi
+        if [[ "${scenario}" == restore-controller-reset ]]; then
+            targetReply 'Docker 服务维护' $'8\n'
+            targetReply "${prompt}" $'/root/private recovery.tar\n'
+            targetReply '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）' $'1\n'
+        fi
+        ;;
     backup-flow|backup-failed|backup-cancel|backup-eof)
         for choice in 6 7; do
             if [[ "${choice}" == 6 ]]; then
@@ -3567,8 +3597,13 @@ restore)
                 "$5" == --control-bundle && "$6" == '/root/historical release/control-bundle.tar.gz' ]] || exit 2
             shift 6
         fi
+        restoreConfirm=PADM-DOCKER-RESTORE
+        if [[ "${1:-}" == --rebuild-controller ]]; then
+            restoreConfirm=PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED
+            shift
+        fi
         if [[ "${restoreAction}" == apply ]]; then
-            [[ "$#" -eq 2 && "$1" == --confirm && "$2" == PADM-DOCKER-RESTORE ]] || exit 2
+            [[ "$#" -eq 2 && "$1" == --confirm && "$2" == "${restoreConfirm}" ]] || exit 2
         else
             [[ "$#" -eq 0 ]] || exit 2
         fi
@@ -3817,6 +3852,8 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
     restore-apply restore-apply-failed restore-apply-cancel restore-apply-eof restore-apply-path-eof \
     restore-source-cancel restore-assets restore-assets-failed restore-assets-apply restore-assets-apply-failed \
     restore-assets-cancel restore-assets-apply-cancel restore-assets-reset \
+    restore-controller restore-controller-apply restore-controller-assets restore-controller-cancel \
+    restore-controller-eof restore-controller-reset restore-controller-failed \
     restore-recover restore-recover-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export MAINTENANCE_STATUS=0 MAINTENANCE_VALIDATE_STATUS=0 BACKUP_STATUS=0
@@ -3889,13 +3926,33 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
             ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" || fail '灾备恢复参数错误'
         fi
         ;;
+    restore-controller|restore-controller-assets|restore-controller-reset|restore-controller-failed|restore-controller-apply)
+        expectedMaintenance='restore preview /root/private recovery.tar'
+        [[ "${maintenanceCase}" != restore-controller-apply ]] ||
+            expectedMaintenance='restore apply /root/private recovery.tar'
+        [[ "${maintenanceCase}" != restore-controller-assets ]] ||
+            expectedMaintenance+="${expectedReleaseAssets}"
+        expectedMaintenance+=' --rebuild-controller'
+        [[ "${maintenanceCase}" != restore-controller-apply ]] ||
+            expectedMaintenance+=' --confirm PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED'
+        if [[ "${maintenanceCase}" == restore-controller-reset ]]; then
+            expectedMaintenance+=$'\nrestore preview /root/private recovery.tar'
+        fi
+        grep -Fq '旧主控须先停机隔离' "${CONTROL_LOG}" || fail '主控恢复未说明旧节点隔离'
+        if [[ "${maintenanceCase}" == *-failed ]]; then
+            grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '主控恢复未保留失败退出码'
+        else
+            ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" || fail '主控恢复参数错误'
+        fi
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedMaintenance}" ]] ||
         fail "维护 ${maintenanceCase} 参数分发错误或取消后仍执行操作"
     for maintenanceLabel in '18. 服务维护' 'Docker 服务维护' '1. 校验部署配置' \
         '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护' \
         '6. 导出灾备归档' '7. 只读校验灾备归档' '8. 预览灾备恢复（空目标）' \
-        '9. 应用灾备恢复（空目标）' '10. 恢复中断的灾备事务'; do
+        '9. 应用灾备恢复（空目标）' '10. 恢复中断的灾备事务' \
+        '11. 预览主控灾备（新身份）' '12. 应用主控灾备（新身份）'; do
         grep -Fq "${maintenanceLabel}" "${CONTROL_LOG}" || fail "维护菜单缺少: ${maintenanceLabel}"
     done
 done

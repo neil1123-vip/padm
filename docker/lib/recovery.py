@@ -16,6 +16,7 @@ import signal
 import stat
 import sys
 import tarfile
+import uuid
 
 
 FORMAT = "padm-docker-recovery"
@@ -664,6 +665,115 @@ def wireguard_inputs(directory):
         require(configured and remote is not None and set(os.listdir(wireguard_fd)) == filenames)
         stable()
     return {"wireguard_files": 3}
+
+
+def controller_inputs(directory, spec_output=None):
+    with contextlib.ExitStack() as stack:
+        parent, name = stack.enter_context(absolute_parent(directory, private=True))
+        root_fd = stack.enter_context(transaction_directory(parent, name, private=False))
+        observed = [(parent, name, signature(os.fstat(root_fd)))]
+        manifest_info = os.stat(MANIFEST, dir_fd=root_fd, follow_symlinks=False)
+        manifest, _ = transaction_read(root_fd, MANIFEST, limit=MAX_MANIFEST)
+        observed.append((root_fd, MANIFEST, signature(manifest_info)))
+        entries = validate_manifest(read_json(manifest))
+        require({path for path in entries if path == "config/control"
+                 or path.startswith("config/control/")} ==
+                {"config/control", "config/control/state.json"})
+        require(entries["config/control"]["type"] == "directory")
+        require(not any(path == prefix or path.startswith(prefix + "/")
+                        for path in entries for prefix in (
+                            "data/control-log", "data/control-source", "secrets/control-sync")))
+        config_fd = stack.enter_context(transaction_directory(root_fd, "config", private=False))
+        control_fd = stack.enter_context(transaction_directory(config_fd, "control"))
+        observed.extend((owner, child, signature(os.fstat(fd))) for owner, child, fd in (
+            (root_fd, "config", config_fd), (config_fd, "control", control_fd)))
+        require(set(os.listdir(control_fd)) == {"state.json"})
+        values = {}
+        for owner, filename, path, limit in (
+                (config_fd, "spec.json", "config/spec.json", MAX_TRANSACTION_FILE),
+                (control_fd, "state.json", "config/control/state.json", 1024 * 1024)):
+            info = os.stat(filename, dir_fd=owner, follow_symlinks=False)
+            data, metadata = transaction_read(owner, filename, limit=limit)
+            require(entries[path]["type"] == "file" and
+                    all(metadata[key] == entries[path][key] for key in ("size", "sha256")))
+            observed.append((owner, filename, signature(info)))
+            values[path] = read_json(data)
+        spec = values["config/spec.json"]
+        require(isinstance(spec, dict) and type(spec.get("schema_version")) is int
+                and spec["schema_version"] == 3 and "control_sync" not in spec
+                and isinstance(spec.get("control"), dict)
+                and isinstance(spec.get("host_integrations"), list)
+                and len(spec["host_integrations"]) == 1
+                and isinstance(spec["host_integrations"][0], dict)
+                and spec["host_integrations"][0].get("type") == "wireguard")
+        # 只借用可信包内的原状态校验器，不把旧状态复制为新主控的执行输入。
+        import importlib.util
+        ops = os.path.abspath(os.path.join(os.path.dirname(__file__), "../images/ops"))
+        sys.path.insert(0, ops)
+        try:
+            module_spec = importlib.util.spec_from_file_location(
+                "padm_controller_recovery", os.path.join(ops, "control_state.py"))
+            checker = importlib.util.module_from_spec(module_spec)
+            module_spec.loader.exec_module(checker)
+            require(checker.validate_state(values["config/control/state.json"]) ==
+                    checker.published_state(spec))
+        except ImportError as error:
+            raise ValueError("可信主控状态校验器不可用") from error
+        finally:
+            sys.path.pop(0)
+        module_spec = importlib.util.spec_from_file_location(
+            "padm_controller_wireguard", os.path.join(os.path.dirname(__file__), "wireguard-config.py"))
+        wireguard = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(wireguard)
+        addresses = wireguard.addresses(directory + "/" + WIREGUARD_PREFIX)
+        require(addresses == {"address": spec["control"]["listen"]["address"],
+                              "peer_address": spec["control"]["peer"]["address"]})
+        # 解包白名单之外的控制授权或来源现场也不能被未登记目录掩盖。
+        for prefix in ("data", "secrets", "logs"):
+            if prefix not in os.listdir(root_fd):
+                continue
+            owner = stack.enter_context(transaction_directory(root_fd, prefix, private=False))
+            observed.append((root_fd, prefix, signature(os.fstat(owner))))
+            blocked = {"data": {"control-log", "control-source"},
+                       "secrets": {"control-sync"}, "logs": {"control"}}[prefix]
+            require(not (set(os.listdir(owner)) & blocked))
+
+        def stable():
+            require(wireguard_inputs(directory) == {"wireguard_files": 3})
+            require(set(os.listdir(control_fd)) == {"state.json"})
+            for owner, child, before in observed:
+                require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == before)
+            with absolute_parent(directory, private=True) as (owner, child):
+                require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == observed[0][2])
+
+        stable()
+        if spec_output is not None:
+            require(isinstance(spec_output, str) and spec_output != directory
+                    and not spec_output.startswith(directory + "/"))
+            occupied = {spec["control"]["node_id"], spec["control"]["peer"]["id"]}
+            for account in spec.get("accounts", []):
+                occupied.update((account["id"], account["uuid"]))
+            for target, field in ((spec["control"], "node_id"), (spec["control"]["peer"], "id")):
+                identity = str(uuid.UUID(bytes=secrets.token_bytes(16), version=4))
+                while identity in occupied:
+                    identity = str(uuid.UUID(bytes=secrets.token_bytes(16), version=4))
+                occupied.add(identity)
+                target[field] = identity
+            token_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+            while token_hash == spec["control"]["peer"]["token_sha256"]:
+                token_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+            spec["control"]["peer"].update(enabled=False, expires_at=1, token_sha256=token_hash)
+            spec["control"].update(revision=0, last_digest=None)
+            encoded = json.dumps(spec, ensure_ascii=True, separators=(",", ":")).encode()
+            require(len(encoded) <= MAX_TRANSACTION_FILE)
+            with absolute_parent(spec_output, private=True) as (owner, child):
+                transaction_write(owner, child, encoded)
+                try:
+                    stable()
+                except (OSError, ValueError):
+                    os.unlink(child, dir_fd=owner)
+                    raise
+    return {"rebuilt_controller": True, "controller_accounts": len(spec.get("accounts", []))}
 
 
 def geo_stream(fd, size, target=None):
@@ -1482,6 +1592,9 @@ def main():
     reality.add_argument("--destination")
     wireguard = commands.add_parser("wireguard-inputs")
     wireguard.add_argument("--directory", required=True)
+    controller = commands.add_parser("controller-inputs")
+    controller.add_argument("--directory", required=True)
+    controller.add_argument("--spec-output")
     geo = commands.add_parser("geo-inputs")
     geo.add_argument("--directory", required=True)
     geo.add_argument("--destination")
@@ -1526,6 +1639,8 @@ def main():
             print(json.dumps(reality_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "wireguard-inputs":
             print(json.dumps(wireguard_inputs(args.directory), separators=(",", ":")))
+        elif args.action == "controller-inputs":
+            print(json.dumps(controller_inputs(args.directory, args.spec_output), separators=(",", ":")))
         elif args.action == "geo-inputs":
             print(json.dumps(geo_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "renewal-inputs":

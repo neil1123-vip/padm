@@ -1990,6 +1990,158 @@ print(fetch_desired(invite)["revision"])
     return rotated
 
 
+def controller_recovery_real(nodes, invitation, image, release):
+    controller, controlled = nodes
+    root = controller["path"] / "deployment"
+    controlled_root = controlled["path"] / "deployment"
+    account = state(controller)["accounts"][0]["id"]
+    local = state(controlled)["accounts"][0]
+    for name in ("controller-recovery-published", "controller-recovery-high-version"):
+        cli(controller, "account", "edit", account, "--name", name)
+    cli(controlled, "control", "sync", "--invite", str(invitation))
+    before, joined = state(controller), state(controlled)
+    assert before["control"]["revision"] == joined["control_sync"]["last_revision"] > 1
+    traffic(controller, image, account_id=account)
+    traffic(controlled, image, account_id=account)
+    traffic(controlled, image, account_id=local["id"])
+    ledger = root / "data/traffic/state.json"
+    controlled_ledger = controlled_root / "data/traffic/state.json"
+    totals = json.loads(ledger.read_text())
+    controlled_totals = json.loads(controlled_ledger.read_text())["accounts"]
+    wireguard = {node["path"] / "deployment/secrets/net/wireguard" / name:
+                 (node["path"] / "deployment/secrets/net/wireguard" / name).read_bytes()
+                 for node in nodes for name in ("identity.json", "private.key", "wg-padm.conf")}
+    previous_receipt = (root / "logs/control/source.receipt").read_bytes()
+    archive = controller["path"] / "private/controller-recovery.tar"
+    cli(controller, "backup", "export", str(archive))
+    cli(controller, "backup", "verify", str(archive))
+    # 必须先隔离旧主控；本地撤权不能替代停止仍持有旧身份的副本。
+    cli(controller, "down")
+    assert not command(controller["docker"] + ["ps", "-aq", "--filter",
+                                              "label=com.docker.compose.project=padm-docker"]).strip()
+    assert "wg-padm" not in {link["ifname"] for link in
+                             json.loads(command(controller["enter"] + ["ip", "-j", "link"]))}
+    root.rename(controller["path"] / "deployment-before-recovery-controller")
+    command(controller["enter"] + ["bash", "-ec", r'''
+set -Eeuo pipefail
+source "$1"
+dockerAcquireDeploymentLock
+trap 'dockerReleaseDeploymentLock' EXIT
+dockerInitializeStateRoot
+dockerInstallBundle "$2"
+dockerInstallCli
+''', "--", str(ROOT / "install-docker.sh"), str(ROOT)], env=controller["env"], timeout=60)
+    cli(controller, "restore", "apply", str(archive), *release, "--rebuild-controller",
+        "--confirm", "PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED")
+    rebuilt = state(controller)
+    fresh, old = rebuilt["control"], before["control"]
+    assert fresh["node_id"] not in (old["node_id"], old["peer"]["id"])
+    assert fresh["peer"]["id"] not in (old["node_id"], old["peer"]["id"], fresh["node_id"])
+    assert fresh["peer"]["enabled"] is False and fresh["peer"]["expires_at"] == 1
+    assert fresh["peer"]["token_sha256"] != old["peer"]["token_sha256"]
+    assert fresh["revision"] == 0 < joined["control_sync"]["last_revision"]
+    expected = copy.deepcopy(before)
+    expected["control"].update(node_id=fresh["node_id"], revision=0, peer=fresh["peer"])
+    assert rebuilt == expected, "隔离恢复改变了主控账号、API、tuple 或其它配置"
+    assert fresh["listen"] == old["listen"] and fresh["peer"]["address"] == old["peer"]["address"]
+    assert json.loads(ledger.read_text()) == dict(
+        totals, accounts={key: dict(value, baseline={}) for key, value in totals["accounts"].items()})
+    assert all(path.read_bytes() == data for path, data in wireguard.items())
+    assert not (root / ".restore-pending").exists() and not (root / "locks/deployment.lock").exists()
+    assert (root / "data/control-source").is_dir() and not list((root / "data/control-source").iterdir())
+    assert (root / "logs/control/source.receipt").read_bytes() == b""
+    services(controller)
+    wireguard_traffic(nodes)
+    previous_services, previous_ledger = services(controlled), controlled_ledger.read_bytes()
+    unauthorized(controlled, invitation)
+    cli(controlled, "control", "sync", "--invite", str(invitation), accepted=False)
+    assert state(controlled) == joined and services(controlled) == previous_services
+    assert controlled_ledger.read_bytes() == previous_ledger
+    source_check(controller, controlled)
+    assert (root / "logs/control/source.receipt").read_bytes() != previous_receipt
+    assert (root / "logs/control/auth.log").is_file()
+    rotated = controller["path"] / "private/controller-recovery-invite.json"
+    cli(controller, "control", "invite", "--output", str(rotated), "--yes")
+    current_invite = controlled["path"] / "private/controller-recovery-invite.json"
+    save(current_invite, json.loads(rotated.read_text()))
+    assert json.loads(current_invite.read_text())["token"] != json.loads(invitation.read_text())["token"]
+    cli(controlled, "control", "sync", "--invite", str(current_invite), accepted=False)
+    assert state(controlled) == joined and services(controlled) == previous_services
+    assert controlled_ledger.read_bytes() == previous_ledger
+    publication = root / "config/control/state.json"
+
+    def desired():
+        return json.loads(command(controlled["enter"] + ["python3", "-c", """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from control_client import fetch_desired, validate_invitation
+invite = validate_invitation(json.load(open(sys.argv[2])))
+json.dump(fetch_desired(invite), sys.stdout)
+""", str(ROOT / "docker/images/ops"), str(current_invite)], timeout=15))
+
+    published = publication.read_bytes()
+    try:
+        collision = json.loads(published)
+        collision["accounts"][0]["uuid"] = local["uuid"]
+        publication.write_bytes(json.dumps(collision).encode("ascii"))
+        assert desired()["accounts"][0]["uuid"] == local["uuid"]
+        cli(controlled, "control", "rebind", "--invite", str(current_invite), "--yes", accepted=False)
+        assert state(controlled) == joined and services(controlled) == previous_services
+        assert controlled_ledger.read_bytes() == previous_ledger, "凭据碰撞拒绝后改写累计"
+    finally:
+        publication.write_bytes(published)
+    cli(controlled, "control", "rebind", "--invite", str(current_invite), "--yes")
+    rebound = state(controlled)
+    sync = rebound["control_sync"]
+    assert sync["controller_id"] == fresh["node_id"] and sync["node_id"] == fresh["peer"]["id"]
+    assert sync["last_revision"] == state(controller)["control"]["revision"] == 0
+    assert sync["connection"] == joined["control_sync"]["connection"]
+    assert sync["listener_ids"] == joined["control_sync"]["listener_ids"]
+    assert sync["managed_accounts"] == state(controller)["accounts"]
+    expected = copy.deepcopy(joined)
+    expected.update(accounts=[local] + sync["managed_accounts"], control_sync=sync)
+    assert rebound == expected, "重绑定改变本机账号、入口或隧道配置"
+    cli(controller, "account", "edit", account, "--name", "controller-recovery-next-version")
+    cli(controlled, "control", "sync", "--invite", str(current_invite))
+    updated = state(controlled)
+    assert updated["control_sync"]["last_revision"] == 1
+    assert updated["control_sync"]["managed_accounts"] == state(controller)["accounts"]
+    previous_services, previous_ledger = services(controlled), controlled_ledger.read_bytes()
+    published = publication.read_bytes()
+    try:
+        for lower in (True, False):
+            conflict = json.loads(published)
+            if lower:
+                conflict["revision"] -= 1
+            else:
+                conflict["accounts"][0]["name"] = "controller-recovery-same-version-conflict"
+            publication.write_bytes(json.dumps(conflict).encode("ascii"))
+            fetched = desired()
+            assert fetched["revision"] == conflict["revision"]
+            assert fetched["accounts"] == conflict["accounts"]
+            cli(controlled, "control", "sync", "--invite", str(current_invite), accepted=False)
+            assert state(controlled) == updated and services(controlled) == previous_services
+            assert controlled_ledger.read_bytes() == previous_ledger, "版本门禁拒绝后改写累计"
+    finally:
+        publication.write_bytes(published)
+    cli(controlled, "control", "sync", "--invite", str(current_invite))
+    cli(controlled, "control", "sync", "--invite", str(invitation), accepted=False)
+    assert state(controlled) == updated and services(controlled) == previous_services
+    assert controlled_ledger.read_bytes() == previous_ledger
+    traffic(controller, image, account_id=account)
+    traffic(controlled, image, account_id=account)
+    traffic(controlled, image, account_id=local["id"])
+    for node, previous in ((controller, totals["accounts"]), (controlled, controlled_totals)):
+        actual = json.loads((node["path"] / "deployment/data/traffic/state.json").read_text())["accounts"]
+        assert all(actual[key][field] >= value[field] for key, value in previous.items()
+                   for field in ("upload", "download")), "主控灾备或重绑定回退账号累计"
+        assert not (node["path"] / "deployment/locks/deployment.lock").exists()
+        services(node)
+    assert all(path.read_bytes() == data for path, data in wireguard.items())
+    print("docker-controller-recovery-real-isolation-identity-rebind-version-traffic-ok", flush=True)
+    return rotated
+
+
 def main():
     parser = argparse.ArgumentParser()
     modes = parser.add_mutually_exclusive_group()
@@ -2000,9 +2152,11 @@ def main():
     modes.add_argument("--wireguard-control-only", action="store_true")
     modes.add_argument("--wireguard-address-only", action="store_true")
     modes.add_argument("--wireguard-recovery-only", action="store_true")
+    modes.add_argument("--controller-recovery-only", action="store_true")
     options = parser.parse_args()
     prepare_wireguard = (options.wireguard_only or options.wireguard_control_only
-                         or options.wireguard_address_only or options.wireguard_recovery_only)
+                         or options.wireguard_address_only or options.wireguard_recovery_only
+                         or options.controller_recovery_only)
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
         "测试不得使用宿主或外部网络"
@@ -2101,7 +2255,8 @@ def main():
             assert proofs[0]["engine_id"] != proofs[1]["engine_id"]
             assert proofs[0]["netns"] != proofs[1]["netns"]
             if (options.remap_only or options.rebind_only or options.wireguard_control_only
-                    or options.wireguard_address_only or options.wireguard_recovery_only):
+                    or options.wireguard_address_only or options.wireguard_recovery_only
+                    or options.controller_recovery_only):
                 # 仅在隔离 daemon 派生当前客户端，固定基础镜像且离线构建，不复用旧源码冒充本轮验收。
                 context = root / "remap-ops"
                 context.mkdir()
@@ -2220,10 +2375,11 @@ def main():
                 wireguard_cli_real(nodes)
                 proofs[0]["scope"] = "real-compose-wireguard-cli-from-standalone"
                 return proofs
-            if options.wireguard_recovery_only:
+            if options.wireguard_recovery_only or options.controller_recovery_only:
                 release = wireguard_recovery_release(nodes, images)
                 proofs[0]["release_trust"] = "fixture"
-            if options.wireguard_control_only or options.wireguard_address_only or options.wireguard_recovery_only:
+            if (options.wireguard_control_only or options.wireguard_address_only
+                    or options.wireguard_recovery_only or options.controller_recovery_only):
                 keys, _ = wireguard_prepare_real(nodes)
             if options.wireguard_recovery_only:
                 wireguard_recovery_real(nodes, 0, images["sing-box"], release)
@@ -2249,6 +2405,11 @@ def main():
             assert services(controlled) == before_services, "真实幂等同步重建了服务"
             assert state(controlled) == joined
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
+            if options.controller_recovery_only:
+                rotated = controller_recovery_real(nodes, controlled_invite, images["sing-box"], release)
+                private_logs(nodes, (invite, rotated), keys)
+                proofs[0]["scope"] = "real-compose-controller-isolated-empty-target-recovery"
+                return proofs
             if options.wireguard_recovery_only:
                 rotated = wireguard_recovery_real(nodes, 1, images["sing-box"], release)
                 private_logs(nodes, (invite, rotated), keys)

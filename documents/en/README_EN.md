@@ -1310,7 +1310,8 @@ sync and verify a fresh source. Failure or INT/TERM restores the old addresses a
 controller authorization revoked. Ordinary rollback rejects snapshots from a different control tuple.
 Focused and isolated Linux amd64 dual-daemon tests cover migration, encrypted traffic, invitation
 revocation, same-version sync, lower-version rejection and health-failure recovery.
-Multiple Peers, controller disaster recovery and native-host/arm64/public-network acceptance remain deferred.
+Multiple Peers and native-host/arm64/public-network acceptance remain deferred;
+limited controller recovery with a new identity is described below.
 After control-token rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.
@@ -1566,8 +1567,9 @@ logs and backups must be empty, with no containers from the same project. The su
 accepts same-architecture v3 ordinary deployments and managed or bridge-reachable host-website Reality coexistence with cores,
 manual TLS, static sites, account/share identities, saved traffic, Reality target libraries,
 limited Geo, ACME, renewal and single-Peer WireGuard inputs described below.
-Controllers, other host integrations, automatic-sync authorization, host-network coexistence
-and unhandled ACME combinations remain rejected. Dangling references in disabled share groups are also rejected.
+Controllers require the explicit new-identity workflow below. Other host integrations,
+automatic-sync authorization, host-network coexistence and unhandled ACME combinations remain rejected.
+Dangling references in disabled share groups are also rejected.
 WireGuard requires the complete canonical `identity.json`, `private.key` and `wg-padm.conf`,
 with `root:root` ownership, directory mode `0700` and file mode `0600`; a trusted net image also
 checks the private/public key pair. Standalone and joined controlled nodes are accepted only
@@ -1638,6 +1640,23 @@ The same supported scope can be applied from menu `18 → 9`; older archives sti
 padm-docker restore apply /root/padm-recovery.tar --confirm PADM-DOCKER-RESTORE
 padm-docker restore recover
 ```
+
+For a single-Peer controller, shut down and isolate the old host first, then use maintenance
+menu `18 → 11/12` or:
+
+```bash
+padm-docker restore preview /root/padm-recovery.tar --rebuild-controller
+padm-docker restore apply /root/padm-recovery.tar --rebuild-controller --confirm PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED
+```
+
+This requires a same-architecture v3 empty target, complete canonical single-Peer inputs and
+matching original spec/published state. Control-log registration, source evidence, historical
+logs and persistent sync authorization are rejected. Accounts, totals, API port and WireGuard
+keys/addresses are preserved; controller and Peer identities are regenerated, old authorization
+is disabled/expired, and revision starts at zero. Issue a new invitation and explicitly run
+`control rebind` on the controlled node. Ordinary identity, revision and credential-collision
+checks remain enforced. A new identity cannot revoke a surviving old copy, so isolation is
+required; preserving the old controller identity or replacing an existing deployment is unsupported.
 
 Before the first business write, the transaction persists trusted candidate shutdown inputs,
 empty-directory metadata and schedule snapshots. Installation, health, traffic, Geo or renewal scheduling

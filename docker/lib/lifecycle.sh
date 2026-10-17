@@ -228,8 +228,10 @@ dockerUsage() {
   padm-docker business backup <绝对 JSON 路径>
   padm-docker backup export <绝对归档文件路径>
   padm-docker backup verify <绝对归档文件路径>
-  padm-docker restore preview <绝对归档文件路径> [发布资产参数]
+  padm-docker restore preview <绝对归档文件路径> [--rebuild-controller] [发布资产参数]
   padm-docker restore apply <绝对归档文件路径> --confirm PADM-DOCKER-RESTORE [发布资产参数]
+  padm-docker restore apply <绝对归档文件路径> --rebuild-controller --confirm PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED [发布资产参数]
+    主控重建仅限空目标和 canonical 单 Peer；隔离确认表示旧宿主已隔离，重建后需重新邀请并绑定被控端
   padm-docker restore recover
   padm-docker business preview <备份 JSON 路径> --strategy <merge|replace>
   padm-docker business restore <备份 JSON 路径> --strategy <merge|replace> --yes
@@ -3202,7 +3204,8 @@ dockerRecoveryTargetEmpty() {
 }
 
 dockerRecoveryInputsPrepare() {
-    local input=$1 draft=$2 spec="${1}/config/spec.json" architecture shares traffic file
+    local input=$1 draft=$2 rebuildController=${3:-0} spec="${1}/config/spec.json" architecture shares traffic file
+    [[ "${rebuildController}" == 0 || "${rebuildController}" == 1 ]] || return 1
     architecture=$(dockerNormalizeArchitecture "$(uname -m)") || return 1
     jq -e --arg architecture "${architecture}" '.architecture == $architecture' \
         "${input}/manifest.json" >/dev/null &&
@@ -3211,14 +3214,19 @@ dockerRecoveryInputsPrepare() {
         [[ "$(stat -c %s -- "${input}/${file}")" -le 16777216 ]] || return 1
     done
     dockerManagedSpecMatchesDeployment "${spec}" "${input}/deployment.json" "${input}/images.env" &&
-        jq -e '.schema_version == 3 and
+        jq -e --arg rebuildController "${rebuildController}" '.schema_version == 3 and
           (.host_integrations | length <= 1 and all(.[]; .type == "wireguard")) and
-          .control == null and
-          (if .control_sync != null then
-            .control_sync.connection != null and
-            any(.host_integrations[]; .type == "wireguard") else true end) and
+          (if $rebuildController == "1" then
+            .control.role == "main" and .control_sync == null and
+            (.host_integrations | length == 1)
+           else
+            .control == null and
+            (if .control_sync != null then
+              .control_sync.connection != null and
+              any(.host_integrations[]; .type == "wireguard") else true end)
+           end) and
           .reality_stream.host_website.network_mode != "host"' "${spec}" >/dev/null || {
-        dockerError '恢复仅支持 v3 普通部署、单 Peer WireGuard 及停用自动同步的被控角色；主控、其它宿主集成和 host 网络共存尚未接入'
+        dockerError '恢复仅支持 v3 普通部署、单 Peer WireGuard、停用自动同步的被控角色或显式重建的主控；其它宿主集成和 host 网络共存尚未接入'
         return 1
     }
     [[ ! -e "${input}/secrets/control-sync" && ! -L "${input}/secrets/control-sync" ]] || {
@@ -3226,10 +3234,11 @@ dockerRecoveryInputsPrepare() {
         return 1
     }
     # 未处理的持久输入必须拒绝，生成文件只作证据，不能作为候选执行。
-    jq -e '
+    jq -e --arg rebuildController "${rebuildController}" '
       all(.entries[] | select(.type == "file"); .path |
         . == "mode" or . == "deployment.json" or . == "images.env" or . == "compose.json" or
         . == "config/spec.json" or . == "config/share-groups.json" or
+        (. == "config/control/state.json" and $rebuildController == "1") or
         . == "config/xray/config.json" or . == "config/xray/users.base" or
         . == "config/xray/geo/state.json" or . == "config/xray/geo/geoip.dat" or
         . == "config/xray/geo/geosite.dat" or
@@ -3252,6 +3261,15 @@ dockerRecoveryInputsPrepare() {
         dockerError 'WireGuard 恢复要求完整 canonical 单 Peer 私密输入及一致的被控连接地址'
         return 1
     }
+    printf '{}\n' >"${draft}/controller-counts.json" || return 1
+    if [[ "${rebuildController}" == 1 ]]; then
+        python3 -B "${DOCKER_LIB_DIR}/recovery.py" controller-inputs --directory "${input}" \
+            --spec-output "${draft}/controller-spec.json" >"${draft}/controller-counts.json" || {
+            dockerError '主控重建要求原规格与发布状态一致、完整单 Peer 输入，且不能携带控制日志登记或旧持久授权'
+            return 1
+        }
+        spec="${draft}/controller-spec.json"
+    fi
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" reality-inputs --directory "${input}" \
         >"${draft}/reality-counts.json" || return 1
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" geo-inputs --directory "${input}" \
@@ -3445,7 +3463,8 @@ dockerRecoveryRecover() {
 
 dockerRecoveryCommand() (
     local action=${1:-} archive= confirm= manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected registration wireguardSource= image public derived
-    local DOCKER_RECOVERY_INPUT= DOCKER_RECOVERY_STARTED=0 DOCKER_RECOVERY_CANDIDATE=
+    local rebuildController=0
+    local DOCKER_RECOVERY_INPUT= DOCKER_RECOVERY_STARTED=0 DOCKER_RECOVERY_CANDIDATE= DOCKER_RECOVERY_CONTROLLER_SPEC=
     case "${action}" in
     recover) [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"; shift ;;
     preview|apply)
@@ -3454,21 +3473,35 @@ dockerRecoveryCommand() (
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
     while [[ "$#" -gt 0 ]]; do
+        if [[ "$1" == --rebuild-controller ]]; then
+            [[ "${rebuildController}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            rebuildController=1
+            shift
+            continue
+        fi
         [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         case "$1" in
         --manifest) [[ -z "${manifest}" ]] || return "${PADM_DOCKER_RC_USAGE}"; manifest=$2 ;;
         --bundle) [[ -z "${bundle}" ]] || return "${PADM_DOCKER_RC_USAGE}"; bundle=$2 ;;
         --control-bundle) [[ -z "${controlBundle}" ]] || return "${PADM_DOCKER_RC_USAGE}"; controlBundle=$2 ;;
         --confirm)
-            [[ "${action}" == apply && -z "${confirm}" && "$2" == PADM-DOCKER-RESTORE ]] ||
+            [[ "${action}" == apply && -z "${confirm}" &&
+                ( "$2" == PADM-DOCKER-RESTORE ||
+                  "$2" == PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED ) ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             confirm=$2 ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
         shift 2
     done
-    [[ "${action}" != apply || "${confirm}" == PADM-DOCKER-RESTORE ]] ||
-        return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "${action}" == apply ]]; then
+        if [[ "${rebuildController}" == 1 ]]; then
+            [[ "${confirm}" == PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+        else
+            [[ "${confirm}" == PADM-DOCKER-RESTORE ]] || return "${PADM_DOCKER_RC_USAGE}"
+        fi
+    fi
     dockerRequireCommand python3 && dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     trap '
@@ -3515,7 +3548,10 @@ dockerRecoveryCommand() (
         mkdir -m 0700 -- "${stage}/input" "${stage}/draft" || return "${PADM_DOCKER_RC_STATE}"
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" extract --archive "${archive}" \
         --directory "${stage}/input" || return "${PADM_DOCKER_RC_STATE}"
-    dockerRecoveryInputsPrepare "${stage}/input" "${stage}/draft" || return "${PADM_DOCKER_RC_STATE}"
+    dockerRecoveryInputsPrepare "${stage}/input" "${stage}/draft" "${rebuildController}" ||
+        return "${PADM_DOCKER_RC_STATE}"
+    [[ "${rebuildController}" != 1 ]] ||
+        DOCKER_RECOVERY_CONTROLLER_SPEC="${stage}/draft/controller-spec.json"
     dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
     dockerConfigureReleaseValidate "${stage}/draft/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
     DOCKER_RECOVERY_INPUT="${stage}/input"
@@ -3550,6 +3586,7 @@ dockerRecoveryCommand() (
     [[ "${action}" != apply ]] || return 0
     printf '灾备恢复预览通过（未安装部署；已创建私密暂存并运行候选校验）。\n'
     jq --slurpfile reality "${stage}/draft/reality-counts.json" \
+        --slurpfile controller "${stage}/draft/controller-counts.json" \
         --slurpfile geo "${stage}/draft/geo-counts.json" \
         --slurpfile renewal "${stage}/draft/renewal-counts.json" \
         --slurpfile acme "${stage}/draft/acme-counts.json" \
@@ -3558,7 +3595,7 @@ dockerRecoveryCommand() (
         if $stream != null and (.listener_id == $stream.listener_id or
           .listener_id == $stream.website_listener_id) then 443 else .public_port end)}],
       accounts:(.spec.accounts // [] | length),shares:(.shares.groups | length),
-      saved_traffic_accounts:(.traffic.accounts | length)} + $reality[0] + $geo[0] + $renewal[0] + $acme[0] + $wireguard[0]' "${stage}/draft/business.json"
+      saved_traffic_accounts:(.traffic.accounts | length)} + $controller[0] + $reality[0] + $geo[0] + $renewal[0] + $acme[0] + $wireguard[0]' "${stage}/draft/business.json"
 )
 
 dockerMain() {

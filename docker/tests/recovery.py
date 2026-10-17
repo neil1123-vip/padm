@@ -1470,6 +1470,221 @@ class WireGuardInputTests(unittest.TestCase):
             self.rejected()
 
 
+class ControllerInputTests(unittest.TestCase):
+    def setUp(self):
+        self.wg = WireGuardInputTests()
+        with mock.patch.dict(os.environ, {"TMPDIR": "/root"}):
+            self.wg.setUp()
+        self.addCleanup(self.wg.doCleanups)
+        self.root, self.source = self.wg.root, self.wg.source
+        self.spec = copy.deepcopy(self.wg.spec)
+        account = {
+            "id": "00000003-1111-4111-8111-000000000003",
+            "name": SECRET.decode(), "enabled": True,
+            "uuid": "00000103-1111-4111-8111-000000000103",
+            "password": "ControllerFixturePassword.0123456789",
+            "shadowsocks_password": None, "listeners": ["entry-main"],
+        }
+        self.spec["accounts"] = [account]
+        accounts = [{key: value for key, value in account.items() if key != "listeners"}]
+        digest = hashlib.sha256(json.dumps(
+            accounts, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
+        self.spec["control"] = {
+            "schema_version": 1, "role": "main",
+            "node_id": "00000001-1111-4111-8111-000000000001",
+            "listen": {"interface": "wg-padm", "address": "10.77.0.1", "port": 18080},
+            "peer": {"id": "00000002-1111-4111-8111-000000000002", "address": "10.77.0.2",
+                     "enabled": True, "expires_at": 2000000000, "token_sha256": "a" * 64},
+            "revision": 37, "last_digest": digest,
+        }
+        self.state = {key: copy.deepcopy(value) for key, value in self.spec["control"].items()
+                      if key != "last_digest"}
+        self.state["accounts"] = accounts
+        self.spec_path = self.source / "config/spec.json"
+        self.state_path = self.source / "config/control/state.json"
+        self.state_path.parent.mkdir(mode=0o700)
+        self.draft = self.root / "draft"
+        self.draft.mkdir(mode=0o700)
+        self.output = self.draft / "controller-spec.json"
+        self.seal()
+
+    def seal(self):
+        for path, value in ((self.spec_path, self.spec), (self.state_path, self.state)):
+            path.write_text(json.dumps(value))
+            path.chmod(0o600)
+        self.wg.seal()
+
+    def snapshot(self):
+        return {path: (path.read_bytes() if path.is_file() else None,
+                       recovery.signature(path.stat())) for path in self.source.rglob("*")}
+
+    def rejected(self):
+        with self.assertRaises((ValueError, OSError, KeyError)):
+            recovery.controller_inputs(str(self.source), str(self.output))
+        self.assertFalse(self.output.exists())
+
+    def test_read_only_check_and_fresh_private_spec_change_only_seven_fields(self):
+        before = self.snapshot()
+        expected = {"rebuilt_controller": True, "controller_accounts": 1}
+        with mock.patch.object(recovery.secrets, "token_bytes", side_effect=AssertionError):
+            self.assertEqual(recovery.controller_inputs(str(self.source)), expected)
+        self.assertEqual(recovery.controller_inputs(str(self.source), str(self.output)), expected)
+        self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), 0o600)
+        self.assertEqual((self.output.stat().st_uid, self.output.stat().st_gid), (0, 0))
+        result = json.loads(self.output.read_bytes())
+        control, previous = result["control"], self.spec["control"]
+        self.assertNotIn(control["node_id"], (previous["node_id"], previous["peer"]["id"]))
+        self.assertNotIn(control["peer"]["id"],
+                         (previous["node_id"], previous["peer"]["id"], control["node_id"]))
+        self.assertNotEqual(control["peer"]["token_sha256"], previous["peer"]["token_sha256"])
+        self.assertIs(control["peer"]["enabled"], False)
+        self.assertEqual(control["peer"]["expires_at"], 1)
+        self.assertEqual(control["revision"], 0)
+        self.assertIsNone(control["last_digest"])
+        restored = copy.deepcopy(result)
+        restored["control"].update(
+            node_id=previous["node_id"], revision=previous["revision"],
+            last_digest=previous["last_digest"])
+        for key in ("id", "token_sha256", "enabled", "expires_at"):
+            restored["control"]["peer"][key] = previous["peer"][key]
+        self.assertEqual(restored, self.spec)
+        second = self.draft / "second.json"
+        recovery.controller_inputs(str(self.source), str(second))
+        self.assertNotEqual(json.loads(second.read_bytes())["control"]["node_id"], control["node_id"])
+        self.assertEqual(before, self.snapshot())
+        bundle = self.root / "bundle"
+        for relative in ("lib/recovery.py", "lib/wireguard-config.py",
+                         "images/ops/control_state.py", "images/ops/control_api.py",
+                         "images/ops/control_sync.py"):
+            target = bundle / relative
+            target.parent.mkdir(parents=True, mode=0o711, exist_ok=True)
+            target.write_bytes((HELPER.parent.parent / relative).read_bytes())
+            target.chmod(0o640)
+            os.chown(target, 10001, 10001)
+        for parent in (bundle, bundle / "lib", bundle / "images", bundle / "images/ops"):
+            parent.chmod(0o711)
+            os.chown(parent, 10001, 10001)
+        cli = subprocess.run(
+            [sys.executable, "-B", str(bundle / "lib/recovery.py"),
+             "controller-inputs", "--directory", str(self.source)],
+            capture_output=True, check=True)
+        self.assertEqual(json.loads(cli.stdout), expected)
+        self.assertEqual(cli.stderr, b"")
+        for private in (SECRET, previous["node_id"].encode(), self.wg.private.encode()):
+            self.assertNotIn(private, cli.stdout)
+
+    def test_state_is_required_exact_and_matches_published_accounts(self):
+        original_spec, original_state = copy.deepcopy(self.spec), copy.deepcopy(self.state)
+        for changes in ("extra-state", "revision", "digest", "accounts"):
+            with self.subTest(changes=changes):
+                self.spec, self.state = copy.deepcopy(original_spec), copy.deepcopy(original_state)
+                if changes == "extra-state":
+                    self.state["extra"] = "unknown"
+                elif changes == "revision":
+                    self.state["revision"] += 1
+                elif changes == "digest":
+                    self.spec["control"]["last_digest"] = "f" * 64
+                else:
+                    self.spec["accounts"][0]["password"] = "ChangedControllerPassword.0123"
+                self.seal()
+                self.rejected()
+        self.spec, self.state = original_spec, original_state
+        self.seal()
+        self.state_path.unlink()
+        self.wg.seal()
+        self.rejected()
+        self.seal()
+        extra = self.state_path.with_name("unknown.json")
+        extra.write_bytes(b"{}\n")
+        extra.chmod(0o600)
+        self.wg.seal()
+        self.rejected()
+
+    def test_main_role_single_peer_and_original_tuple_are_required(self):
+        original_spec, original_state = copy.deepcopy(self.spec), copy.deepcopy(self.state)
+        for changes in ("version", "controlled", "integration", "tuple"):
+            with self.subTest(changes=changes):
+                self.spec, self.state = copy.deepcopy(original_spec), copy.deepcopy(original_state)
+                if changes == "version":
+                    self.spec["schema_version"] = 2
+                elif changes == "controlled":
+                    self.spec["control_sync"] = {}
+                elif changes == "integration":
+                    self.spec["host_integrations"].append({"type": "fail2ban-control"})
+                else:
+                    self.spec["control"]["listen"]["address"] = "10.77.0.3"
+                    self.state["listen"]["address"] = "10.77.0.3"
+                self.seal()
+                self.rejected()
+        self.spec, self.state = original_spec, original_state
+        self.seal()
+        (self.source / recovery.WIREGUARD_PREFIX / "private.key").unlink()
+        self.wg.seal()
+        self.rejected()
+
+    def test_control_schedules_authorizations_and_source_evidence_are_rejected(self):
+        for relative in ("data/control-log/schedule.json", "secrets/control-sync/request.json",
+                         "data/control-source/challenge.json", "logs/control/source.receipt"):
+            with self.subTest(relative=relative):
+                path = self.source / relative
+                path.parent.mkdir(parents=True, mode=0o700)
+                path.write_bytes(b'{"schema_version":1,"enabled":false}\n')
+                path.chmod(0o600)
+                self.wg.seal()
+                self.rejected()
+                path.unlink()
+                path.parent.rmdir()
+        self.wg.seal()
+        recovery.controller_inputs(str(self.source))
+
+    def test_manifest_drift_private_state_and_read_mutation_fail_before_output(self):
+        original = self.state_path.read_bytes()
+        self.state_path.write_bytes(original + b"\n")
+        self.rejected()
+        self.state_path.write_bytes(original)
+        self.state_path.chmod(0o640)
+        self.rejected()
+        self.state_path.chmod(0o600)
+        original_read = recovery.transaction_read
+
+        def changed_read(owner, name, *args, **kwargs):
+            result = original_read(owner, name, *args, **kwargs)
+            if name == "state.json":
+                self.state_path.write_bytes(original + b"\n")
+            return result
+
+        with mock.patch.object(recovery, "transaction_read", side_effect=changed_read):
+            self.rejected()
+        self.state_path.write_bytes(original)
+        original_write = recovery.transaction_write
+
+        def changed_write(owner, name, data):
+            original_write(owner, name, data)
+            self.state_path.write_bytes(original + b"\n")
+
+        with mock.patch.object(recovery, "transaction_write", side_effect=changed_write):
+            self.rejected()
+
+    def test_existing_or_linked_output_and_source_output_are_rejected(self):
+        marker = SECRET + b"-keep"
+        self.output.write_bytes(marker)
+        self.output.chmod(0o600)
+        with self.assertRaises(FileExistsError):
+            recovery.controller_inputs(str(self.source), str(self.output))
+        self.assertEqual(self.output.read_bytes(), marker)
+        self.output.unlink()
+        outside = self.root / "outside"
+        outside.write_bytes(marker)
+        self.output.symlink_to(outside)
+        with self.assertRaises(OSError):
+            recovery.controller_inputs(str(self.source), str(self.output))
+        self.assertEqual(outside.read_bytes(), marker)
+        self.output.unlink()
+        with self.assertRaises(ValueError):
+            recovery.controller_inputs(str(self.source), str(self.source / "new-spec.json"))
+        self.assertFalse((self.source / "new-spec.json").exists())
+
+
 class GeoInputTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="padm-geo-recovery-",

@@ -5,7 +5,7 @@ trap 'printf "docker-recovery-apply-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1 PADM_DOCKER_SKIP_CHOWN=0 PADM_DOCKER_LOCK_TIMEOUT=1
 case "${PADM_DOCKER_RECOVERY_SCOPE:-all}" in
-all|wireguard|webroot) ;;
+all|wireguard|webroot|controller) ;;
 *) exit 2 ;;
 esac
 if [[ "${1:-}" != --child ]]; then
@@ -82,7 +82,22 @@ dockerConfigureReleasePrepare() {
     DOCKER_CONFIG_RELEASE_INPUTS=$(jq -c '{release,images}' "${TEST_ROOT}/base.json")
 }
 dockerRealityProbeRun() {
-    local directory probe
+    local directory probe previous argument check=
+    if [[ " $* " == *' /opt/padm/control_state.py '* ]]; then
+        for argument in "$@"; do
+            case "${previous:-}" in
+            --mount) directory=${argument#type=bind,src=}; directory=${directory%,dst=/input,readonly} ;;
+            --check-state) check=${argument#/input/} ;;
+            esac
+            previous=${argument}
+        done
+        [[ -n "${directory:-}" && " $* " == *' --network none '* &&
+            " $* " == *' --user 0:0 '* ]] || fail '主控规划器没有隔离运行'
+        local -a args=(--spec "${directory}/spec.json")
+        [[ -z "${check}" ]] || args+=(--check-state "${directory}/${check}")
+        python3 -B "${PROJECT_ROOT}/docker/images/ops/control_state.py" "${args[@]}"
+        return $?
+    fi
     if [[ "$*" == *'wg pubkey'* ]]; then
         [[ "$#" == 16 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}" == \
             '10 --pull never --user 0:0 --network none --log-driver none --mount' &&
@@ -156,6 +171,10 @@ dockerCandidateCompose() {
             DOCKER_TEST_OWNER=${BASHPID}
             kill_restore_owner
         fi ;;
+    'run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --access-lock /var/log/padm/control/auth.lock --source-challenge /run/padm/control-source/challenge.json --source-receipt /var/log/padm/control/source.receipt --check')
+        dockerControlStateCheck "${candidate}" || return 1
+        printf 'candidate-control\n' >>"${MOCK_BACKEND}/events"
+        [[ "${MODE}" != controller-check ]] || return 1 ;;
     'run --rm --no-deps net-wireguard preflight wireguard /etc/wireguard/wg-padm.conf wg-padm unowned /run/padm-wireguard-owner')
         [[ ! -e "${MOCK_BACKEND}/wireguard-link" ]] || return 1
         printf 'wireguard-preflight\n' >>"${MOCK_BACKEND}/events" ;;
@@ -514,6 +533,17 @@ if [[ "${1:-}" == --child ]]; then
         dockerMain restore apply "${archive}" \
             --confirm PADM-DOCKER-RESTORE ;;
     preview) dockerMain restore preview "${archive}" ;;
+    controller-apply)
+        dockerMain restore apply "${archive}" --rebuild-controller \
+            --confirm PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED ;;
+    controller-preview) dockerMain restore preview "${archive}" --rebuild-controller ;;
+    controller-old-confirm)
+        dockerMain restore apply "${archive}" --rebuild-controller --confirm PADM-DOCKER-RESTORE ;;
+    controller-wrong-mode)
+        dockerMain restore apply "${archive}" --confirm PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED ;;
+    controller-duplicate)
+        dockerMain restore preview "${archive}" --rebuild-controller --rebuild-controller ;;
+    controller-recover-flag) dockerMain restore recover --rebuild-controller ;;
     unconfirmed) dockerMain restore apply "${TEST_ROOT}/private recovery archive.tar" ;;
     bad-confirm)
         dockerMain restore apply "${TEST_ROOT}/private recovery archive.tar" --confirm wrong ;;
@@ -704,6 +734,8 @@ printf 'untrusted archived HTTP-01 config;\n' >"${HTTP01_SOURCE}/config/nginx/de
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${HTTP01_SOURCE}" \
     --output "${TEST_ROOT}/http01.tar" >/dev/null || fail 'HTTP-01 归档导出失败'
 
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != wireguard &&
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != controller ]]; then
 ACME_SOURCE="${TEST_ROOT}/source-acme"
 cp -a -- "${SOURCE}" "${ACME_SOURCE}"
 python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${ACME_SOURCE}" "${DOMAIN}" <<'PY'
@@ -782,6 +814,7 @@ PY
 dockerGenerateDeployment "${WEBROOT_SOURCE}/config/spec.json" "${WEBROOT_SOURCE}/deployment.json"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${WEBROOT_SOURCE}" \
     --output "${TEST_ROOT}/webroot-enabled.tar" >/dev/null || fail '启用 Webroot 续期归档导出失败'
+fi
 
 for protocol in hy2 tuic; do
     variant="${TEST_ROOT}/source-hopping-${protocol}"
@@ -818,6 +851,7 @@ printf 'dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo=\n' >"${TEST_ROOT}/wg-privat
 printf 'hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=\n' >"${TEST_ROOT}/wg-public"
 chmod 0600 "${TEST_ROOT}/wg-private" "${TEST_ROOT}/wg-public"
 for role in standalone controlled; do
+    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != controller || "${role}" == standalone ]] || continue
     variant="${TEST_ROOT}/source-wireguard-${role}"
     cp -a -- "${SOURCE}" "${variant}"
     jq --arg role "${role}" --arg managed 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' '
@@ -866,6 +900,47 @@ for role in standalone controlled; do
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${variant}" \
         --output "${TEST_ROOT}/wireguard-${role}.tar" >/dev/null || fail "${role}: WireGuard 归档失败"
 done
+
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == controller ]]; then
+    CONTROLLER_SOURCE="${TEST_ROOT}/source-controller"
+    cp -a -- "${TEST_ROOT}/source-wireguard-standalone" "${CONTROLLER_SOURCE}"
+    jq '.control = {schema_version:1,role:"main",
+      node_id:"00000001-1111-4111-8111-000000000001",
+      listen:{interface:"wg-padm",address:"10.77.0.1",port:18080},
+      peer:{id:"00000002-1111-4111-8111-000000000002",address:"10.77.0.2",
+        enabled:true,expires_at:2000000000,token_sha256:("a"*64)},
+      revision:0,last_digest:null}' "${CONTROLLER_SOURCE}/config/spec.json" \
+        >"${TEST_ROOT}/controller-input.json"
+    chmod 0600 "${TEST_ROOT}/controller-input.json"
+    python3 -B "${PROJECT_ROOT}/docker/images/ops/control_state.py" \
+        --spec "${TEST_ROOT}/controller-input.json" >"${TEST_ROOT}/controller-plan.json"
+    jq '.spec | .control.revision = 17' "${TEST_ROOT}/controller-plan.json" \
+        >"${CONTROLLER_SOURCE}/config/spec.json"
+    jq '.state | .revision = 17' "${TEST_ROOT}/controller-plan.json" \
+        >"${CONTROLLER_SOURCE}/config/control/state.json"
+    chmod 0640 "${CONTROLLER_SOURCE}/config/control/state.json"
+    DOCKER_WIREGUARD_INPUT="${CONTROLLER_SOURCE}/secrets/net/wireguard" \
+        dockerGenerateDeployment "${CONTROLLER_SOURCE}/config/spec.json" "${CONTROLLER_SOURCE}/deployment.json"
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${CONTROLLER_SOURCE}" \
+        --output "${TEST_ROOT}/controller.tar" >/dev/null || fail '主控归档导出失败'
+    CONTROLLER_EMPTY_SOURCE="${TEST_ROOT}/source-controller-empty"
+    cp -a -- "${CONTROLLER_SOURCE}" "${CONTROLLER_EMPTY_SOURCE}"
+    jq 'del(.accounts) | .control.revision = 0 | .control.last_digest = null' \
+        "${CONTROLLER_SOURCE}/config/spec.json" >"${TEST_ROOT}/controller-input.json"
+    python3 -B "${PROJECT_ROOT}/docker/images/ops/control_state.py" \
+        --spec "${TEST_ROOT}/controller-input.json" >"${TEST_ROOT}/controller-plan.json"
+    jq '.spec' "${TEST_ROOT}/controller-plan.json" >"${CONTROLLER_EMPTY_SOURCE}/config/spec.json"
+    jq '.state' "${TEST_ROOT}/controller-plan.json" >"${CONTROLLER_EMPTY_SOURCE}/config/control/state.json"
+    jq '.groups = []' "${CONTROLLER_SOURCE}/config/share-groups.json" \
+        >"${CONTROLLER_EMPTY_SOURCE}/config/share-groups.json"
+    rm -f -- "${CONTROLLER_EMPTY_SOURCE}/data/subscription/recovery-group-token"
+    DOCKER_WIREGUARD_INPUT="${CONTROLLER_EMPTY_SOURCE}/secrets/net/wireguard" \
+        dockerGenerateDeployment "${CONTROLLER_EMPTY_SOURCE}/config/spec.json" \
+            "${CONTROLLER_EMPTY_SOURCE}/deployment.json"
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${CONTROLLER_EMPTY_SOURCE}" \
+        --output "${TEST_ROOT}/controller-empty.tar" >/dev/null || fail '空账号主控归档导出失败'
+fi
 
 snapshot() {
     python3 -B - "${root}" "${1:-all}" <<'PY'
@@ -1006,8 +1081,10 @@ assert_deployed() {
         grep -q '@proxy.example.com:24443?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" ||
             fail 'WireGuard 普通 TLS 入口的订阅端口错误'
     fi
-    [[ "$(grep -E '^candidate-|^geo-probe$|^up$' "${MOCK_BACKEND}/events")" == \
-        $'candidate-compose\ngeo-probe\ncandidate-xray\ncandidate-nginx\ncandidate-subscription\nup' ]] ||
+    local expected_events=$'candidate-compose\ngeo-probe\ncandidate-xray\ncandidate-nginx\ncandidate-subscription'
+    [[ "${2:-false}" != true ]] || expected_events+=$'\ncandidate-control'
+    expected_events+=$'\nup'
+    [[ "$(grep -E '^candidate-|^geo-probe$|^up$' "${MOCK_BACKEND}/events")" == "${expected_events}" ]] ||
         fail '恢复未按 Compose、Geo、Xray、Nginx、订阅校验后再启动'
     [[ ! -e "${root}/compose.nginx-check.json" ]] || fail '恢复残留 Nginx 临时校验配置'
     for file in state.json geoip.dat geosite.dat; do
@@ -1029,12 +1106,22 @@ assert_deployed() {
     done
     [[ "$(stat -c '%u:%g:%a' "${root}/data/reality-targets")" == 0:0:700 ]] ||
         fail '目标库目录权限不私密'
-    jq -en --slurpfile expected "${source}/config/spec.json" --slurpfile actual "${root}/config/spec.json" '
+    jq -en --argjson rebuild "${2:-false}" \
+        --slurpfile expected "${source}/config/spec.json" --slurpfile actual "${root}/config/spec.json" '
       $actual[0].core == $expected[0].core and $actual[0].accounts == $expected[0].accounts and
       $actual[0].subscription == $expected[0].subscription and
       $actual[0].tls == $expected[0].tls and
       $actual[0].reality_stream == $expected[0].reality_stream and
-      $actual[0].control == $expected[0].control and
+      (if $rebuild then
+        ($actual[0].control | del(.node_id,.peer.id,.peer.token_sha256,.peer.enabled,.peer.expires_at,.revision,.last_digest)) ==
+        ($expected[0].control | del(.node_id,.peer.id,.peer.token_sha256,.peer.enabled,.peer.expires_at,.revision,.last_digest)) and
+        $actual[0].control.node_id != $expected[0].control.node_id and
+        $actual[0].control.peer.id != $expected[0].control.peer.id and
+        $actual[0].control.peer.token_sha256 != $expected[0].control.peer.token_sha256 and
+        $actual[0].control.peer.enabled == false and $actual[0].control.peer.expires_at == 1 and
+        $actual[0].control.revision == 0 and
+        $actual[0].control.last_digest == $expected[0].control.last_digest
+       else $actual[0].control == $expected[0].control end) and
       $actual[0].control_sync == $expected[0].control_sync' >/dev/null ||
         fail '恢复改变了入口、账号凭据或订阅身份'
     cmp -- "${source}/config/share-groups.json" "${root}/config/share-groups.json" ||
@@ -1661,7 +1748,8 @@ run_child recover ok 0
 assert_empty
 
 fi
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != wireguard ]]; then
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != wireguard &&
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != controller ]]; then
 for renewal_provider in standalone webroot; do
     [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${renewal_provider}" == webroot ]] || continue
     RENEWAL_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
@@ -1820,7 +1908,8 @@ run_child recover ok 0
 assert_empty
 
 fi
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot ]]; then
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot &&
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != controller ]]; then
 for role in standalone controlled; do
     prepare_target "wireguard-${role}"
     RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-${role}.tar"
@@ -1885,5 +1974,71 @@ for mode in ok wireguard-leftover wireguard-drift wireguard-probe-fail wireguard
     run_child recover ok 0
     assert_empty
 done
+fi
+
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == controller ]]; then
+for action in controller-old-confirm controller-wrong-mode controller-duplicate controller-recover-flag; do
+    prepare_target "${action}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+    run_child "${action}" ok "${PADM_DOCKER_RC_USAGE}"
+    assert_empty
+done
+prepare_target controller-ordinary-rejected
+RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+run_child apply ok failure
+assert_empty
+prepare_target controller-mode-needs-controller
+run_child controller-preview ok failure
+assert_empty
+prepare_target controller-preview
+RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+run_child controller-preview ok 0
+jq -e '.rebuilt_controller == true and .controller_accounts == 1' \
+    <(sed -n '/^{/,$p' "${LOG}") >/dev/null || fail '主控预览未报告身份重建'
+assert_empty
+for backend in systemd cron; do
+    prepare_target "controller-success-${backend}" "${backend}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+    run_child controller-apply ok 0
+    assert_deployed "${CONTROLLER_SOURCE}" true
+    dockerControlStateCheck "${root}" ||
+        fail '主控恢复未生成匹配的新发布状态'
+    [[ -f "${root}/logs/control/auth.log" && ! -s "${root}/logs/control/auth.log" &&
+        -f "${root}/logs/control/source.receipt" && ! -s "${root}/logs/control/source.receipt" &&
+        -d "${root}/data/control-source" &&
+        -z "$(find "${root}/data/control-source" -mindepth 1 -print -quit)" &&
+        ! -e "${root}/data/control-log/schedule.json" ]] ||
+        fail '主控恢复沿用了来源、日志或轮转现场'
+done
+prepare_target controller-empty-accounts
+RECOVERY_ARCHIVE="${TEST_ROOT}/controller-empty.tar"
+run_child controller-preview ok 0
+jq -e '.rebuilt_controller == true and .controller_accounts == 0 and .accounts == 0' \
+    <(sed -n '/^{/,$p' "${LOG}") >/dev/null || fail '空账号主控预览计数错误'
+assert_empty
+run_child controller-apply ok 0
+jq -e '(.accounts // [] | length) == 0 and .control.revision == 0 and
+  .control.peer.enabled == false and .control.peer.expires_at == 1' \
+    "${root}/config/spec.json" >/dev/null &&
+    dockerControlStateCheck "${root}" || fail '空账号主控未按既有业务规范化重建'
+for mode in controller-check health int term; do
+    prepare_target "controller-${mode}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+    expected=failure
+    [[ "${mode}" != int ]] || expected=130
+    [[ "${mode}" != term ]] || expected=143
+    run_child controller-apply "${mode}" "${expected}"
+    assert_empty
+done
+prepare_target controller-killed
+RECOVERY_ARCHIVE="${TEST_ROOT}/controller.tar"
+run_child controller-apply killed 137
+[[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/wireguard-link" &&
+    -f "${root}/config/control/state.json" ]] || fail '主控恢复硬杀没有保留持久事务'
+run_child recover ok 0
+assert_empty
+run_child recover ok 0
+assert_empty
 fi
 printf 'docker-recovery-apply-ok: %s cases\n' "${CASES}"
