@@ -247,7 +247,7 @@ with (node / "daemon.log").open("wb") as daemon_log:
         request_path.parent.mkdir(mode=0o700, parents=True)
         request_path.write_text(json.dumps({
             "schema_version": 2, "domain": domain, "email": email,
-            "provider": "standalone", "enabled": False}))
+            "provider": "standalone", "enabled": True}))
         private_tree(source)
         archive, stage = node / "backup.tar", node / "stage"
         recovery.export_archive(str(source), str(archive))
@@ -316,7 +316,7 @@ with (node / "daemon.log").open("wb") as daemon_log:
                                     {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"})
         assert after_ca == before_ca
         assert json.loads((candidate / "secrets/renewal" / domain / "request.json").read_bytes())[
-            "enabled"] is False
+            "enabled"] is True
         account = acme.assignments((restored_home / "account.conf").read_bytes(),
                                    {"USER_PATH", "CA_BUNDLE"})
         assert account.get("CA_BUNDLE", "") in ("", "/ca/pebble.crt")
@@ -332,7 +332,7 @@ with (node / "daemon.log").open("wb") as daemon_log:
         print("docker-acme-recovery-real=" + json.dumps({
             "acme_version": "3.1.6", "acme_files": 9,
             "production_material_check": True, "forced_renew": True, "serial_changed": True,
-            "account_key_hash_url_preserved": True, "renewal_enabled": False,
+            "account_key_hash_url_preserved": True, "renewal_enabled": True,
             "fixture_ca_bundle_cleared": True, "network": "internal"}), flush=True)
     finally:
         active_error = sys.exc_info()[0] is not None

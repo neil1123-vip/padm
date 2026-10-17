@@ -136,13 +136,13 @@ dockerComposeRun() {
     killed) kill -KILL "${BASHPID}" ;;
     esac
 }
-dockerRenewalScheduleInstall() { fail '恢复不应安装或启用续期调度'; }
 dockerControlLogScheduleInstall() { :; }
 dockerControlSyncScheduleInstall() { :; }
 dockerRestoreConfiguration() { fail '恢复应用调用了普通配置回滚'; }
 systemctl() {
     local prefix= timer=${!#}
     [[ "${timer}" != padm-docker-geo.timer ]] || prefix=geo-
+    [[ "${timer}" != padm-docker-renewal.timer ]] || prefix=renewal-
     [[ "${MOCK_SCHEDULER}" == systemd ]] || return 1
     printf 'systemctl:%s\n' "$*" >>"${MOCK_BACKEND}/events"
     case "$1" in
@@ -165,6 +165,14 @@ systemctl() {
             geo-killed) kill_restore_owner ;;
             geo-int) : >"${MOCK_BACKEND}/fault"; kill -INT "${DOCKER_TEST_OWNER}"; return 1 ;;
             geo-term) : >"${MOCK_BACKEND}/fault"; kill -TERM "${DOCKER_TEST_OWNER}"; return 1 ;;
+            esac
+        fi
+        if [[ "${timer}" == padm-docker-renewal.timer && ! -e "${MOCK_BACKEND}/fault" ]]; then
+            case "${MODE}" in
+            renewal-scheduler) : >"${MOCK_BACKEND}/fault"; return 1 ;;
+            renewal-killed) kill_restore_owner ;;
+            renewal-int) : >"${MOCK_BACKEND}/fault"; kill -INT "${DOCKER_TEST_OWNER}"; return 1 ;;
+            renewal-term) : >"${MOCK_BACKEND}/fault"; kill -TERM "${DOCKER_TEST_OWNER}"; return 1 ;;
             esac
         fi
         if [[ "${MODE}" == scheduler || "${MODE}" == scheduler-killed ]]; then
@@ -195,6 +203,14 @@ crontab() {
             DOCKER_TEST_OWNER=$(<"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")
             kill_restore_owner
         fi
+        if [[ "${MODE}" == renewal-recover-killed && ! -e "${MOCK_BACKEND}/recover-fault" ]] &&
+            grep -q 'traffic collect' "${MOCK_BACKEND}/crontab" &&
+            grep -q 'geo auto-update' "${MOCK_BACKEND}/crontab" &&
+            ! grep -q 'acme auto-renew' "${MOCK_BACKEND}/crontab"; then
+            : >"${MOCK_BACKEND}/recover-fault"
+            DOCKER_TEST_OWNER=$(<"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")
+            kill_restore_owner
+        fi
         if [[ "${MODE}" == geo-* && ! -e "${MOCK_BACKEND}/fault" ]] &&
             grep -q 'geo auto-update' "${MOCK_BACKEND}/crontab"; then
             case "${MODE}" in
@@ -202,6 +218,15 @@ crontab() {
             geo-killed) kill_restore_owner ;;
             geo-int) : >"${MOCK_BACKEND}/fault"; kill -INT "${DOCKER_TEST_OWNER}"; return 1 ;;
             geo-term) : >"${MOCK_BACKEND}/fault"; kill -TERM "${DOCKER_TEST_OWNER}"; return 1 ;;
+            esac
+        fi
+        if [[ ! -e "${MOCK_BACKEND}/fault" ]] &&
+            grep -q 'acme auto-renew' "${MOCK_BACKEND}/crontab"; then
+            case "${MODE}" in
+            renewal-scheduler) : >"${MOCK_BACKEND}/fault"; return 1 ;;
+            renewal-killed) kill_restore_owner ;;
+            renewal-int) : >"${MOCK_BACKEND}/fault"; kill -INT "${DOCKER_TEST_OWNER}"; return 1 ;;
+            renewal-term) : >"${MOCK_BACKEND}/fault"; kill -TERM "${DOCKER_TEST_OWNER}"; return 1 ;;
             esac
         fi
         if [[ ( "${MODE}" == scheduler || "${MODE}" == scheduler-killed ) &&
@@ -225,7 +250,7 @@ schedule_snapshot() {
     find "${PADM_DOCKER_SYSTEMD_DIR}" -type f -print0 | sort -z | xargs -0 -r sha256sum
     cat -- "${MOCK_BACKEND}/crontab"
     [[ "${1:-}" != content ]] || return 0
-    for state in enabled active geo-enabled geo-active; do
+    for state in enabled active geo-enabled geo-active renewal-enabled renewal-active; do
         [[ ! -e "${MOCK_BACKEND}/${state}" ]] || printf '%s\n' "${state}"
     done
     return 0
@@ -234,6 +259,10 @@ mkdir() {
     # Geo 原始快照之前已重装 traffic，按此刻的完整调度核对快照阶段无写入。
     if [[ "${MODE}" == geo-source-* &&
         "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/geo-source" ]]; then
+        schedule_snapshot content >"${MOCK_BACKEND}/schedule-content-before" || return 1
+    fi
+    if [[ "${MODE}" == renewal-source-template &&
+        "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/renewal-source" ]]; then
         schedule_snapshot content >"${MOCK_BACKEND}/schedule-content-before" || return 1
     fi
     command mkdir "$@" || return $?
@@ -285,6 +314,12 @@ cat() {
     fi
     if [[ "${MODE}" == geo-source-template && ! -e "${MOCK_BACKEND}/fault" && "$#" == 0 &&
         -d "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/geo-schedule" ]]; then
+        IFS= read -r line || return 1
+        builtin printf '%s\n' "${line}"
+        kill_restore_owner
+    fi
+    if [[ "${MODE}" == renewal-source-template && ! -e "${MOCK_BACKEND}/fault" && "$#" == 0 &&
+        -d "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/renewal-schedule" ]]; then
         IFS= read -r line || return 1
         builtin printf '%s\n' "${line}"
         kill_restore_owner
@@ -649,6 +684,21 @@ for directory in (root / "data/acme", root / "secrets/renewal"):
 PY
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${ACME_SOURCE}" \
     --output "${TEST_ROOT}/acme.tar" >/dev/null || fail 'ACME 归档导出失败'
+RENEWAL_ENABLED_SOURCE="${TEST_ROOT}/source-renewal-enabled"
+cp -a -- "${ACME_SOURCE}" "${RENEWAL_ENABLED_SOURCE}"
+find "${RENEWAL_ENABLED_SOURCE}/secrets/renewal" -mindepth 1 -maxdepth 1 \
+    ! -name "${DOMAIN}" -exec rm -rf -- {} +
+jq '.enabled = true' "${ACME_SOURCE}/secrets/renewal/${DOMAIN}/request.json" \
+    >"${RENEWAL_ENABLED_SOURCE}/secrets/renewal/${DOMAIN}/request.json"
+jq '.enabled = true' "${ACME_SOURCE}/config/xray/geo/state.json" \
+    >"${RENEWAL_ENABLED_SOURCE}/config/xray/geo/state.json"
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${RENEWAL_ENABLED_SOURCE}" \
+    --output "${TEST_ROOT}/renewal-enabled.tar" >/dev/null || fail '启用续期归档导出失败'
+NO_RENEWAL_SOURCE="${TEST_ROOT}/source-no-renewal"
+cp -a -- "${SOURCE}" "${NO_RENEWAL_SOURCE}"
+rm -rf -- "${NO_RENEWAL_SOURCE}/secrets/renewal"
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${NO_RENEWAL_SOURCE}" \
+    --output "${TEST_ROOT}/no-renewal.tar" >/dev/null || fail '无续期登记归档导出失败'
 
 for protocol in hy2 tuic; do
     variant="${TEST_ROOT}/source-hopping-${protocol}"
@@ -743,7 +793,8 @@ assert_empty() {
 }
 assert_units_complete() {
     local job kind file mode
-    for job in traffic geo; do
+    [[ "$#" != 0 ]] || set -- traffic geo
+    for job in "$@"; do
         for kind in service timer; do
             file="${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-${job}.${kind}"
             [[ -f "${file}" && ! -L "${file}" &&
@@ -757,7 +808,7 @@ assert_units_complete() {
                 fail 'unit 硬杀留下空文件或半写内容'
         done
     done
-    [[ "$(find "${PADM_DOCKER_SYSTEMD_DIR}" -mindepth 1 | wc -l)" == 4 &&
+    [[ "$(find "${PADM_DOCKER_SYSTEMD_DIR}" -mindepth 1 | wc -l)" == "$(( $# * 2 ))" &&
         -z "$(find "${root}/.restore-pending" -type f ! -perm 0600 -print -quit)" &&
         -z "$(find "${root}/.restore-pending" -type d ! -perm 0700 -print -quit)" &&
         -z "$(find "${root}/.restore-pending" \( ! -user root -o ! -group root -o -type l -o -type f -links +1 \) -print -quit)" ]] ||
@@ -765,11 +816,12 @@ assert_units_complete() {
 }
 assert_deployed() {
     local source=${1:-${SOURCE}} file relative
-    [[ "$(find "${root}/secrets/renewal" -type f | wc -l)" == 5 &&
+    [[ "$(find "${root}/secrets/renewal" -type f | wc -l)" == \
+        "$(find "${source}/secrets/renewal" -type f | wc -l)" &&
         -z "$(find "${root}/secrets/renewal" -type d ! -perm 0700 -print -quit)" &&
         -z "$(find "${root}/secrets/renewal" -type f ! -perm 0600 -print -quit)" &&
         -z "$(find "${root}/secrets/renewal" \( ! -user root -o ! -group root \) -print -quit)" ]] ||
-        fail '停用续期登记的数量、所有者或权限错误'
+        fail '续期登记的数量、所有者或权限错误'
     while IFS= read -r file; do
         relative=${file#"${source}/secrets/renewal/"}
         cmp -- "${file}" "${root}/secrets/renewal/${relative}" || fail '续期登记没有保持原字节'
@@ -1132,7 +1184,7 @@ done
 
 # 创建或复制原始快照时硬杀，恢复不得遗留锁下随机目录或触碰旧调度。
 for mode in source-mkdir source-unit source-cron source-template \
-    geo-source-mkdir geo-source-unit geo-source-cron geo-source-template; do
+    geo-source-mkdir geo-source-unit geo-source-cron geo-source-template renewal-source-template; do
     backend=systemd
     [[ "${mode}" != *-cron ]] || backend=cron
     prepare_target "${mode}" "${backend}"
@@ -1142,6 +1194,11 @@ for mode in source-mkdir source-unit source-cron source-template \
         job=geo
         RECOVERY_ARCHIVE="${TEST_ROOT}/geo-enabled.tar"
         dockerGeoScheduleApply install || fail "${mode}: 旧 Geo 调度准备失败"
+    elif [[ "${mode}" == renewal-* ]]; then
+        job=renewal
+        RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+        dockerGeoScheduleApply install && dockerRenewalScheduleApply install ||
+            fail "${mode}: 旧 Geo/续期调度准备失败"
     fi
     snapshot >"${MOCK_BACKEND}/before"
     schedule_snapshot >"${MOCK_BACKEND}/schedule-before"
@@ -1215,6 +1272,36 @@ for operation in publish restore; do
             done
         done
     done
+done
+
+# 续期复用相同原子替换器，只补第三任务的发布与撤销代表点。
+for mode in unit-publish-renewal-service-before unit-restore-renewal-timer-after; do
+    prepare_target "${mode}" systemd
+    RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+    dockerTrafficScheduleInstall && dockerGeoScheduleApply install && dockerRenewalScheduleApply install ||
+        fail "${mode}: 旧三项调度准备失败"
+    for old_job in traffic geo renewal; do
+        for old_kind in service timer; do
+            unit="${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-${old_job}.${old_kind}"
+            cp -- "${unit}" "${MOCK_BACKEND}/${old_job}.${old_kind}.new"
+            printf '\n# 原始调度注释\n' >>"${unit}"
+            cp -- "${unit}" "${MOCK_BACKEND}/${old_job}.${old_kind}.old"
+        done
+    done
+    snapshot >"${MOCK_BACKEND}/before"
+    schedule_snapshot >"${MOCK_BACKEND}/schedule-before"
+    action=apply
+    if [[ "${mode}" == unit-restore-* ]]; then
+        run_child apply renewal-killed 137
+        action=recover
+    fi
+    run_child "${action}" "${mode}" 137
+    [[ -e "${MOCK_BACKEND}/unit-fault" ]] || fail "${mode}: 原子替换硬杀未命中"
+    assert_units_complete traffic geo renewal
+    run_child recover ok 0
+    assert_empty
+    [[ -z "$(find "${PADM_DOCKER_SYSTEMD_DIR}" -type f ! -perm 0644 -print -quit)" ]] ||
+        fail "${mode}: 续期撤销没有恢复 unit 权限"
 done
 
 prepare_target killed
@@ -1397,6 +1484,116 @@ run_child apply killed 137
     -e "${MOCK_BACKEND}/compose-container" ]] || fail 'ACME 硬杀未保留材料与恢复现场'
 run_child recover ok 0
 assert_empty
+
+# 启用续期最后安装，三项共享 cron 的任务必须全部保留。
+for backend in systemd cron; do
+    prepare_target "renewal-success-${backend}" "${backend}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+    run_child apply ok 0
+    assert_deployed "${RENEWAL_ENABLED_SOURCE}"
+    assert_acme_home "${root}/data/acme" "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" 750
+    if [[ "${backend}" == systemd ]]; then
+        [[ "$(grep -E '^up$|^systemctl:enable --now ' "${MOCK_BACKEND}/events")" == \
+            $'up\nsystemctl:enable --now padm-docker-traffic.timer\nsystemctl:enable --now padm-docker-geo.timer\nsystemctl:enable --now padm-docker-renewal.timer' &&
+            -e "${MOCK_BACKEND}/renewal-enabled" && -e "${MOCK_BACKEND}/renewal-active" ]] ||
+            fail '续期没有在健康成功、traffic 和 Geo 之后启用'
+        grep -qx 'ExecStart=.* acme auto-renew' "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.service" &&
+            grep -qx 'OnCalendar=\*-\*-\* 03:17:00' "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.timer" ||
+            fail '续期恢复没有使用受管命令或固定时间'
+    else
+        [[ "$(grep -c 'traffic collect' "${MOCK_BACKEND}/crontab")" == 1 &&
+            "$(grep -c 'geo auto-update' "${MOCK_BACKEND}/crontab")" == 1 &&
+            "$(grep -c 'acme auto-renew' "${MOCK_BACKEND}/crontab")" == 1 ]] ||
+            fail '续期恢复丢失其它任务或生成重复 cron'
+        grep -qx '17 3 \* \* \* another-renewal # padm-docker TLS renewal root=/elsewhere' \
+            "${MOCK_BACKEND}/crontab" || fail '续期恢复覆盖了其它部署任务'
+    fi
+    [[ ! -e "${root}/.restore-pending" && ! -e "${root}/locks/deployment.lock" ]] ||
+        fail '续期成功恢复没有清理登记或锁'
+done
+
+for input in disabled absent; do
+    backend=systemd
+    [[ "${input}" != absent ]] || backend=cron
+    prepare_target "renewal-preserved-${input}" "${backend}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/acme.tar"
+    [[ "${input}" != absent ]] || RECOVERY_ARCHIVE="${TEST_ROOT}/no-renewal.tar"
+    for kind in service timer; do
+        printf 'external renewal %s\n' "${kind}" >"${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.${kind}"
+        cp -- "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.${kind}" "${MOCK_BACKEND}/renewal.${kind}.before"
+    done
+    : >"${MOCK_BACKEND}/renewal-enabled"
+    : >"${MOCK_BACKEND}/renewal-active"
+    printf '9 2 * * * external # padm-docker TLS 自动续期 root=/elsewhere\n' >>"${MOCK_BACKEND}/crontab"
+    run_child apply ok 0
+    for kind in service timer; do
+        cmp -- "${MOCK_BACKEND}/renewal.${kind}.before" \
+            "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.${kind}" ||
+            fail "${input}: 恢复接管了外部续期 unit"
+    done
+    [[ -e "${MOCK_BACKEND}/renewal-enabled" && -e "${MOCK_BACKEND}/renewal-active" ]] &&
+        grep -qx '9 2 \* \* \* external # padm-docker TLS 自动续期 root=/elsewhere' \
+            "${MOCK_BACKEND}/crontab" || fail "${input}: 恢复改变了外部续期状态或 cron"
+done
+
+for backend in systemd cron; do
+    for mode in renewal-scheduler renewal-killed; do
+        prepare_target "${mode}-${backend}" "${backend}"
+        RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+        expected=failure
+        [[ "${mode}" != renewal-killed ]] || expected=137
+        run_child apply "${mode}" "${expected}"
+        [[ -e "${MOCK_BACKEND}/fault" ]] || fail "${mode}/${backend}: 续期故障未命中"
+        if [[ "${mode}" == renewal-scheduler ]]; then
+            assert_empty
+            continue
+        fi
+        for job in traffic geo renewal; do
+            [[ -d "${root}/.restore-pending/${job}-schedule" ]] ||
+                fail '续期硬杀没有持久保存三项撤销登记'
+        done
+        if [[ "${backend}" == systemd ]]; then
+            current_schedule="${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.service"
+        else
+            current_schedule="${MOCK_BACKEND}/crontab"
+        fi
+        cp -- "${current_schedule}" "${MOCK_BACKEND}/renewal-expected"
+        printf '\n# external renewal schedule change\n' >>"${current_schedule}"
+        snapshot >"${MOCK_BACKEND}/pending-before"
+        schedule_snapshot >"${MOCK_BACKEND}/schedule-pending-before"
+        run_child recover ok failure
+        snapshot >"${MOCK_BACKEND}/pending-after"
+        schedule_snapshot >"${MOCK_BACKEND}/schedule-pending-after"
+        cmp -- "${MOCK_BACKEND}/pending-before" "${MOCK_BACKEND}/pending-after" &&
+            cmp -- "${MOCK_BACKEND}/schedule-pending-before" "${MOCK_BACKEND}/schedule-pending-after" ||
+            fail '续期漂移拒绝时改变了 traffic、Geo、部署或登记'
+        cp -- "${MOCK_BACKEND}/renewal-expected" "${current_schedule}"
+        if [[ "${backend}" == cron ]]; then
+            # 续期已撤销、Geo 和 traffic 尚在时硬杀，重试不能漏撤其它任务。
+            run_child recover renewal-recover-killed 137
+            [[ -e "${MOCK_BACKEND}/recover-fault" ]] || fail '续期撤销后的硬杀未命中'
+        fi
+        run_child recover ok 0
+        assert_empty
+        run_child recover ok 0
+        assert_empty
+    done
+done
+for mode in renewal-int renewal-term; do
+    prepare_target "${mode}" systemd
+    RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+    expected=130
+    [[ "${mode}" != renewal-term ]] || expected=143
+    run_child apply "${mode}" "${expected}"
+    [[ -e "${MOCK_BACKEND}/fault" ]] || fail "${mode}: 续期信号故障未命中"
+    assert_empty
+done
+prepare_target renewal-health
+RECOVERY_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
+run_child apply health failure
+assert_empty
+! grep -q '^systemctl:enable --now ' "${MOCK_BACKEND}/events" ||
+    fail '健康失败后仍安装了恢复调度'
 
 for protocol in hy2 tuic; do
     prepare_target "hopping-${protocol}"

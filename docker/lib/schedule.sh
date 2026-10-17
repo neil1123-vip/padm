@@ -49,9 +49,9 @@ dockerMaintenanceScheduleRestore() {
 }
 
 dockerRecoveryScheduleRestore() {
-    local root=$1 schedule=$2 job=${3:-traffic} checkOnly=${4:-0} withGeo=${5:-0} snapshot
+    local root=$1 schedule=$2 job=${3:-traffic} checkOnly=${4:-0} withGeo=${5:-0} withRenewal=${6:-0} snapshot
     local metadata unitDir systemdReady timerEnabled timerActive file target mode fragment dropIns
-    local cli bashPath service timer cronLine geoLine= currentCron savedCron currentOther savedOther
+    local cli bashPath service timer cronLine geoLine= renewalLine= currentCron savedCron currentOther savedOther
     local marker command calendar description timerDescription timeout timerOptions
     case "${job}" in
     traffic)
@@ -65,6 +65,12 @@ dockerRecoveryScheduleRestore() {
         calendar='*-*-* 01:35:00'
         description='padm Docker Xray Geo update'
         timerDescription='Update padm Docker Xray Geo daily'
+        timeout=1800; timerOptions='RandomizedDelaySec=300' ;;
+    renewal)
+        marker='# padm-docker TLS 自动续期'; command='acme auto-renew'
+        calendar='*-*-* 03:17:00'
+        description='padm Docker TLS renewal'
+        timerDescription='Renew padm Docker TLS daily'
         timeout=1800; timerOptions='RandomizedDelaySec=300' ;;
     *) return 1 ;;
     esac
@@ -154,11 +160,16 @@ EOF
         if [[ "${withGeo}" == 1 ]]; then
             geoLine="35 1 * * * PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} geo auto-update # padm-docker Geo 自动更新 root=${root}"
         fi
+        if [[ "${withRenewal}" == 1 ]]; then
+            renewalLine="17 3 * * * PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} acme auto-renew # padm-docker TLS 自动续期 root=${root}"
+        fi
         currentOther=$(printf '%s\n' "${currentCron}" |
-            awk -v owned="${cronLine}" -v geo="${geoLine}" '$0 != owned && (geo == "" || $0 != geo)') ||
+            awk -v owned="${cronLine}" -v geo="${geoLine}" -v renewal="${renewalLine}" \
+                '$0 != owned && (geo == "" || $0 != geo) && (renewal == "" || $0 != renewal)') ||
             return 1
         savedOther=$(printf '%s\n' "${savedCron}" |
-            awk -v owned="${cronLine}" -v geo="${geoLine}" '$0 != owned && (geo == "" || $0 != geo)') ||
+            awk -v owned="${cronLine}" -v geo="${geoLine}" -v renewal="${renewalLine}" \
+                '$0 != owned && (geo == "" || $0 != geo) && (renewal == "" || $0 != renewal)') ||
             return 1
         [[ "${currentOther}" == "${savedOther}" ]] || return 1
     fi
@@ -174,7 +185,7 @@ dockerMaintenanceScheduleInterrupted() {
     [[ -n "${snapshot}" && "${DOCKER_MAINTENANCE_JOB:-}" == "${job}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     if [[ "${DOCKER_MAINTENANCE_CHANGED:-0}" == 1 ]]; then
-        if [[ ( "${job}" == traffic || "${job}" == geo ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 &&
+        if [[ ( "${job}" == traffic || "${job}" == geo || "${job}" == renewal ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 &&
             "${snapshot}" == "${root}/.restore-pending/${job}-source" ]]; then
             recoveryRoot=${root}
         fi
@@ -343,7 +354,7 @@ EOF
         legacy=0
         [[ ! -L "${unitDir}/${file}" ]] || return 1
         if [[ "${job}" == control-log || "${job}" == control-sync ||
-            ( ( "${job}" == traffic || "${job}" == geo ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
+            ( ( "${job}" == traffic || "${job}" == geo || "${job}" == renewal ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
             [[ ! -e "${unitDir}/${file}.d" && ! -L "${unitDir}/${file}.d" ]] || return 1
         fi
         if [[ -e "${unitDir}/${file}" ]]; then
@@ -420,7 +431,7 @@ EOF
             [[ -z "${fragment}" ||
                 ( "${fragment}" == "${unitDir}/${file}" && -f "${unitDir}/${file}" ) ]] || return 1
             if [[ "${job}" == control-log || "${job}" == control-sync ||
-                ( ( "${job}" == traffic || "${job}" == geo ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
+                ( ( "${job}" == traffic || "${job}" == geo || "${job}" == renewal ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ) ]]; then
                 dropIns=$(systemctl show --property=DropInPaths --value "${file}" 2>/dev/null) || return 1
                 [[ -z "${dropIns}" ]] || return 1
             fi
@@ -485,7 +496,7 @@ EOF
         "${haveCron}" == 0 && -f "${unitDir}/padm-docker-control-sync.service" ]]; then
         keepService=1
     fi
-    if [[ ( "${job}" == traffic || "${job}" == geo ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ]]; then
+    if [[ ( "${job}" == traffic || "${job}" == geo || "${job}" == renewal ) && "${DOCKER_RECOVERY_STARTED:-0}" == 1 ]]; then
         if [[ "${haveUnits}" == 1 || ( "${action}" == install && "${systemdReady}" == 1 ) ]]; then
             pendingDevice=$(stat -c %d -- "${root}/.restore-pending") &&
                 unitDevice=$(stat -c %d -- "${unitDir}") || return 1

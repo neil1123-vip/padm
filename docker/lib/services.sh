@@ -7468,7 +7468,7 @@ dockerRealityStreamTransitionPrepare() {
 
 dockerConfigureApply() {
     local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} siteTitle=${9:-}
-    local specFile candidate backup answer root managedFile backupPrefix=configure geoEnabled=false
+    local specFile candidate backup answer root managedFile backupPrefix=configure geoEnabled=false renewalEnabled=false
     # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
@@ -7595,6 +7595,11 @@ dockerConfigureApply() {
             geoEnabled=$(jq -er '.enabled | select(type == "boolean") | tostring' \
                 "${candidate}/config/xray/geo/state.json") || return "${PADM_DOCKER_RC_STATE}"
         fi
+        if dockerRenewalEnabled "${candidate}/secrets/renewal"; then
+            renewalEnabled=true
+        else
+            [[ "$?" == 1 ]] || return "${PADM_DOCKER_RC_STATE}"
+        fi
         backup="${candidate}/empty-backup"
         mkdir -m 0700 -- "${backup}" && : >"${backup}/present" &&
             chmod 0600 "${backup}/present" || return "${PADM_DOCKER_RC_STATE}"
@@ -7610,7 +7615,9 @@ dockerConfigureApply() {
             ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
             ! dockerTrafficScheduleInstall ||
             { [[ "${geoEnabled}" == true ]] &&
-                ! dockerGeoScheduleInstall; }; then
+                ! dockerGeoScheduleInstall; } ||
+            { [[ "${renewalEnabled}" == true ]] &&
+                ! dockerRenewalScheduleInstall; }; then
             dockerError '灾备恢复安装或健康检查失败，正在撤销本次恢复'
             return "${PADM_DOCKER_RC_COMPOSE}"
         fi

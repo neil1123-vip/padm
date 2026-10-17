@@ -3218,12 +3218,12 @@ dockerRecoveryInputsPrepare() {
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" renewal-inputs --directory "${input}" \
         >"${draft}/renewal-counts.json" &&
         dockerRenewalRegistryValidate "${input}/secrets/renewal" || {
-        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记；不安装续期调度'
+        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记，或匹配安全 ACME 输入的单域名启用 standalone 登记'
         return 1
     }
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" acme-inputs --directory "${input}" \
         >"${draft}/acme-counts.json" || {
-        dockerError 'ACME 执行配置仅接受单域名 EC-P256 standalone 的安全重建和停用续期登记'
+        dockerError 'ACME 执行配置仅接受单域名 EC-P256 standalone 的安全重建和对应续期登记'
         return 1
     }
     if jq -e '.geo_files > 0' "${draft}/geo-counts.json" >/dev/null; then
@@ -3272,7 +3272,7 @@ dockerRecoveryInputsPrepare() {
 }
 
 dockerRecoveryRecover() {
-    local root metadata schedule geoSchedule state directory entry containers mode uid gid path profile job taskSchedule withGeo=0
+    local root metadata schedule geoSchedule renewalSchedule state directory entry containers mode uid gid path profile job taskSchedule withGeo=0 withRenewal=0
     local -a compose=()
     root=$(dockerInstallRoot) || return 1
     [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
@@ -3290,16 +3290,20 @@ dockerRecoveryRecover() {
         schedule=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-metadata \
             --root "${root}" --project "${PADM_DOCKER_PROJECT}") &&
         geoSchedule=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-metadata \
-            --root "${root}" --project "${PADM_DOCKER_PROJECT}" --job geo) || return 1
+            --root "${root}" --project "${PADM_DOCKER_PROJECT}" --job geo) &&
+        renewalSchedule=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-schedule-metadata \
+            --root "${root}" --project "${PADM_DOCKER_PROJECT}" --job renewal) || return 1
     [[ "${geoSchedule}" == null ]] || withGeo=1
+    [[ "${renewalSchedule}" == null ]] || withRenewal=1
     state=$(jq -er '.state' <<<"${metadata}") || return 1
     if [[ "${state}" == active ]]; then
         # 全部外部状态先核对，再按安装的逆序撤销，避免覆盖共享 crontab 的外部漂移。
         for mode in 1 0; do
-            for job in geo traffic; do
+            for job in renewal geo traffic; do
                 taskSchedule=${schedule}
                 [[ "${job}" != geo ]] || taskSchedule=${geoSchedule}
-                dockerRecoveryScheduleRestore "${root}" "${taskSchedule}" "${job}" "${mode}" "${withGeo}" ||
+                [[ "${job}" != renewal ]] || taskSchedule=${renewalSchedule}
+                dockerRecoveryScheduleRestore "${root}" "${taskSchedule}" "${job}" "${mode}" "${withGeo}" "${withRenewal}" ||
                     return 1
             done
         done
@@ -3356,9 +3360,10 @@ dockerRecoveryRecover() {
         dockerTrafficSafePath "${root}" "${root}/${directory}" &&
             dockerRemoveManagedTree "${root}" "${root}/${directory}" || return 1
     done
-    for job in geo traffic; do
+    for job in renewal geo traffic; do
         taskSchedule=${schedule}
         [[ "${job}" != geo ]] || taskSchedule=${geoSchedule}
+        [[ "${job}" != renewal ]] || taskSchedule=${renewalSchedule}
         [[ "${taskSchedule}" != null ]] || continue
         directory=$(jq -er '.snapshot' <<<"${taskSchedule}") || return 1
         # 新暂存由登记统一回收；旧版本只清理精确匹配的锁目录。

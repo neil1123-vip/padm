@@ -1469,12 +1469,12 @@ The target must contain only an installed control skeleton: configuration, data,
 logs and backups must be empty, with no containers from the same project. The supported scope
 accepts same-architecture v3 ordinary deployments and managed or bridge-reachable host-website Reality coexistence with cores,
 manual TLS, static sites, account/share identities, saved traffic, Reality target libraries,
-limited Geo and ACME data and disabled renewal registrations described below. Host integrations,
+limited Geo and ACME data and renewal registrations described below. Host integrations,
 control roles/sync, host-network coexistence and unhandled ACME combinations
 remain rejected. Dangling references in disabled share groups are also rejected.
 An existing `.tls.http01=true` is preserved with a newly generated empty challenge root
-and dual-stack `80:8088`. Old challenge files, ACME accounts and renewal schedules are not restored;
-the existing target port-ownership checks still apply.
+and dual-stack `80:8088`. This combination rejects ACME accounts and enabled renewal registrations;
+old challenge files are not restored, and the existing target port-ownership checks still apply.
 Single sing-box dual-stack Hy2/TUIC deployments may restore the saved `port_hopping` spec.
 The restored state is `stopped`; old supervisors, rules and runtime state are not restored.
 An explicit `port-hopping start` must pass fresh checks on the target host before enabling it.
@@ -1491,17 +1491,25 @@ Recovery does not download Geo data. With `enabled=true`, it installs the target
 automatic-update schedule after installation and health checks succeed. With `enabled=false`,
 the data remains in use, but recovery does not install or take over an existing Geo schedule.
 Preview does not install schedules.
-Renewal recovery accepts only `enabled=false` DNS, standalone, webroot or ALPN registrations and DNS
+Renewal recovery accepts `enabled=false` DNS, standalone, webroot or ALPN registrations and DNS
 credentials, preserving original bytes and `0700/0600 root:root` permissions without installing
-a renewal schedule. Non-DNS registrations must not contain credentials. Enabled registrations
-remain rejected. ACME recovery accepts only acme.sh `3.1.6`, one domain, EC-P256 account
-and domain keys, and standalone HTTP-01 on `8080`, with a matching schema `2` disabled
-standalone renewal registration and `.tls.http01` disabled. It parses data without executing
+a renewal schedule. Disabled or absent registrations do not take over existing external renewal
+tasks. Non-DNS registrations must not contain credentials.
+ACME recovery accepts only acme.sh `3.1.6`, one domain, EC-P256 account and domain keys,
+and standalone HTTP-01 on `8080`, with a matching schema `2` standalone renewal registration
+and `.tls.http01` disabled. It parses data without executing
 archived shell, rebuilds exactly nine files and discards only known CSR/transient material.
 Unknown configuration, hooks, DNS/SAN/RSA/EAB and custom execution paths are rejected.
 A network-disabled trusted ops container verifies private/public key, ordered certificate
 chain and fixed TLS-output bindings before preserving the account and domain keys.
-It does not install renewal schedules. An empty `data/acme` remains compatible.
+Only this verified standalone registration may also use `enabled=true`, with no other domain in
+the renewal registry. After candidate installation
+and health checks succeed, applicable schedules are installed in traffic, Geo, then renewal order.
+Enabled DNS, webroot, ALPN and all other ACME combinations remain rejected.
+Preview does not install schedules. An empty `data/acme` remains compatible but cannot authorize
+enabled renewal. Focused validation, enabled recovery followed by real renewal against a local
+CA, and the 34-check daily `docker-contracts` integration gate have passed.
+Public-CA and native-host validation remain separate.
 Managed Reality coexistence regenerates stream
 configuration from the spec and reports public port `443`; archived Nginx stream files are
 not executed. Bridge-reachable host-website recovery preserves domains, upstream address and port,
@@ -1524,12 +1532,12 @@ padm-docker restore recover
 ```
 
 Before the first business write, the transaction persists trusted candidate shutdown inputs,
-empty-directory metadata and schedule snapshots. Installation, health, traffic or Geo scheduling
+empty-directory metadata and schedule snapshots. Installation, health, traffic, Geo or renewal scheduling
 failures and INT/TERM roll back this restore. After registration, SIGKILL recovery can continue
 with menu `18 → 10` or `restore recover`. Ordinary deployment operations refuse pending cleanup.
 Failed recovery preserves evidence; external schedule changes are rejected rather than overwritten.
-Traffic and Geo have separate persistent snapshots. Rollback checks all external schedules for
-drift before restoring Geo and then traffic in reverse installation order.
+Traffic, Geo and renewal have separate private persistent snapshots. Rollback checks all registered
+external schedules for drift before restoring renewal, Geo and traffic in reverse installation order.
 When recovery must write systemd units, the unit directory and private deployment staging
 must share a filesystem so complete files can be replaced atomically. Cross-filesystem
 unit writes are rejected before external schedule changes; cron-only recovery is unaffected.

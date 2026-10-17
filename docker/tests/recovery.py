@@ -736,16 +736,23 @@ class RenewalInputTests(unittest.TestCase):
 
     def test_request_schema_enabled_and_http01_boundaries(self):
         invalid = [dict(self.request, **{key: value}) for key, value in (
-            ("enabled", True), ("enabled", 0), ("schema_version", True),
+            ("enabled", True), ("enabled", 0), ("enabled", 1), ("enabled", "true"),
+            ("enabled", None), ("schema_version", True),
             ("schema_version", 2), ("provider", "dns_CF"), ("provider", "webroot"),
             ("domain", "other.example.com"), ("email", "bad"), ("email", "a@example.com\n"))]
         invalid.extend([dict(self.request, schema_version=3, provider="webroot", enabled=True),
+                        dict(self.request, schema_version=4, provider="alpn", enabled=True),
                         dict(self.request, extra="unexpected"), b"[]", b"",
                         b'{"enabled":false,"enabled":false}'])
         for request in invalid:
             with self.subTest(request=request):
                 self.put_request(request)
                 self.rejected()
+
+    def test_enabled_standalone_requires_acme_home(self):
+        self.credentials.unlink()
+        self.put_request(dict(self.request, schema_version=2, provider="standalone", enabled=True))
+        self.rejected()
 
     def test_credentials_reject_duplicate_dangerous_names_and_invalid_lines(self):
         invalid = [b"", b"# only comments\n", b"invalid\n", b"DNS_Token=a\nDNS_Token=b\n",
@@ -972,7 +979,41 @@ class AcmeInputTests(unittest.TestCase):
         self.assertEqual(recovery.acme_inputs(str(self.source)), empty)
         self.assertEqual(list(self.target.iterdir()), [])
 
-    def test_spec_and_disabled_standalone_request_must_match(self):
+    def test_enabled_standalone_preserves_registration_and_matching_acme_home(self):
+        self.request["enabled"] = True
+        self.write_bindings()
+        self.seal()
+        (self.destination / "secrets").mkdir(mode=0o700)
+        self.assertEqual(recovery.renewal_inputs(str(self.source), str(self.destination)),
+                         {"renewal_registrations": 1})
+        copied = self.destination / "secrets/renewal" / self.domain / "request.json"
+        self.assertEqual(copied.read_bytes(), self.request_path.read_bytes())
+        self.assertIs(json.loads(copied.read_bytes())["enabled"], True)
+        self.assertEqual(recovery.acme_inputs(str(self.source), str(self.destination))["acme_files"], 9)
+
+    def test_enabled_standalone_requires_only_matching_domain_registration(self):
+        self.request["enabled"] = True
+        self.write_bindings()
+        other_domain = "other.example.test"
+        other_entry = self.request_path.parent.with_name(other_domain)
+        other_entry.mkdir(mode=0o700)
+        other_request = other_entry / "request.json"
+        other_request.write_text(json.dumps(dict(self.request, domain=other_domain, enabled=False)))
+        other_request.chmod(0o600)
+        (self.destination / "secrets").mkdir(mode=0o700)
+        for registrations in ("multiple", "foreign-domain"):
+            with self.subTest(registrations=registrations):
+                if registrations == "foreign-domain":
+                    self.request_path.unlink()
+                    self.request_path.parent.rmdir()
+                    other_request.write_text(json.dumps(dict(self.request, domain=other_domain)))
+                self.seal()
+                with self.assertRaises((ValueError, OSError)):
+                    recovery.renewal_inputs(str(self.source), str(self.destination))
+                self.assertFalse((self.destination / "secrets/renewal").exists())
+                self.assertEqual(list(self.target.iterdir()), [])
+
+    def test_spec_and_standalone_request_must_match(self):
         original_spec, original_request = copy.deepcopy(self.spec), dict(self.request)
         for value in (None, {}, {"tls": {}}, {"tls": {"domain": "other.example.test"}},
                       {"tls": {"domain": self.domain, "http01": True}}):
@@ -982,7 +1023,8 @@ class AcmeInputTests(unittest.TestCase):
                 self.seal()
                 self.rejected()
         self.spec = original_spec
-        for changes in ({"enabled": True}, {"enabled": 0}, {"domain": "other.example.test"},
+        for changes in ({"enabled": 0}, {"enabled": 1}, {"enabled": "true"},
+                        {"domain": "other.example.test"},
                         {"schema_version": 3, "provider": "webroot"},
                         {"schema_version": 1, "provider": "dns_cf"},
                         {"email": "other@example.test"}, {"extra": "not-allowed"}):
@@ -1999,26 +2041,29 @@ raise AssertionError("kill point was not reached")
         with self.assertRaises(ValueError):
             self.save_schedule(snapshot)
 
-    def test_geo_schedule_is_independent_and_default_traffic_stays_compatible(self):
+    def test_geo_and_renewal_schedules_are_independent_and_default_traffic_stays_compatible(self):
         self.prepare()
         traffic = self.save_schedule(self.snapshot())
-        snapshot = self.snapshot("geo")
-        path = snapshot / "padm-docker-geo.service"
-        path.write_bytes(SECRET)
-        path.chmod(0o600)
-        geo = self.save_schedule(snapshot, "geo")
-        self.assertEqual(self.check()[1], traffic)
-        self.assertEqual(json.loads(self.cli("schedule-metadata").stdout), traffic)
-        self.assertEqual(json.loads(self.cli("schedule-metadata", "--job", "geo").stdout), geo)
-        self.assertEqual(geo["snapshot"], "geo-source")
-        for job in ("geo", "renewal", "control-sync"):
+        for job in ("geo", "renewal"):
+            snapshot = self.snapshot(job)
+            path = snapshot / ("padm-docker-" + job + ".service")
+            path.write_bytes(SECRET)
+            path.chmod(0o600)
+            saved = self.save_schedule(snapshot, job)
+            self.assertEqual(self.check()[1], traffic)
+            self.assertEqual(json.loads(self.cli("schedule-metadata").stdout), traffic)
+            self.assertEqual(json.loads(self.cli("schedule-metadata", "--job", job).stdout), saved)
+            self.assertEqual(saved["snapshot"], job + "-source")
             with self.assertRaises(ValueError):
                 self.save_schedule(snapshot, job)
-        copied = self.pending / "geo-schedule/padm-docker-geo.service"
-        copied.write_bytes(b"tampered")
         with self.assertRaises(ValueError):
-            self.check()
-        copied.write_bytes(SECRET)
+            self.save_schedule(snapshot, "control-sync")
+        for job in ("geo", "renewal"):
+            copied = self.pending / (job + "-schedule") / ("padm-docker-" + job + ".service")
+            copied.write_bytes(b"tampered")
+            with self.assertRaises(ValueError):
+                self.check()
+            copied.write_bytes(SECRET)
         recovery.transaction_commit(str(self.root), self.project)
         self.assertEqual(self.check()[0]["state"], "committed")
         recovery.transaction_clean(str(self.root), self.project)
@@ -2038,7 +2083,7 @@ raise AssertionError("kill point was not reached")
             unit_dir = Path(directory) / "units"
             unit_dir.mkdir(mode=0o700)
             self.assertNotEqual(unit_dir.stat().st_dev, self.pending.stat().st_dev)
-            for job in ("traffic", "geo"):
+            for job in ("traffic", "geo", "renewal"):
                 snapshot = self.snapshot(job)
                 service = "padm-docker-" + job + ".service"
                 original = unit_dir / service
@@ -2072,7 +2117,7 @@ raise AssertionError("kill point was not reached")
             for path in unit_dir.iterdir():
                 path.unlink()
             self.prepare()
-            for job in ("traffic", "geo"):
+            for job in ("traffic", "geo", "renewal"):
                 with self.subTest(job=job, operation="cron-only"):
                     snapshot = self.snapshot(job)
                     (snapshot / "crontab").write_bytes(b"# original cron\n")

@@ -48,6 +48,7 @@ TRANSACTION_FILES = ("compose.json", "images.env", "deployment.json")
 SCHEDULE_JOBS = {
     "traffic": ("padm-docker-traffic.service", "padm-docker-traffic.timer", "crontab"),
     "geo": ("padm-docker-geo.service", "padm-docker-geo.timer", "crontab"),
+    "renewal": ("padm-docker-renewal.service", "padm-docker-renewal.timer", "crontab"),
 }
 SCHEDULE_FILES = SCHEDULE_JOBS["traffic"]
 TRANSACTION_STAGING = {
@@ -707,7 +708,7 @@ def renewal_request(domain, data):
     request = read_json(data)
     require(isinstance(request, dict) and set(request) == {
         "schema_version", "domain", "email", "provider", "enabled"})
-    require(request["domain"] == domain and request["enabled"] is False
+    require(request["domain"] == domain and type(request["enabled"]) is bool
             and type(request["schema_version"]) is int
             and isinstance(request["provider"], str) and isinstance(request["email"], str))
     require(re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}",
@@ -716,6 +717,7 @@ def renewal_request(domain, data):
     require((request["schema_version"] == 1 and re.fullmatch(r"dns_[a-z0-9_]+", provider))
             or (request["schema_version"], provider) in {
                 (2, "standalone"), (3, "webroot"), (4, "alpn")})
+    require(not request["enabled"] or (request["schema_version"], provider) == (2, "standalone"))
     return provider.startswith("dns_")
 
 
@@ -801,13 +803,17 @@ def renewal_inputs(directory, destination=None):
                 require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == observed[0][2])
 
         stable()
+        if any(read_json(data["request.json"])["enabled"] for data in payload.values()):
+            # 启用登记必须绑定唯一、完整且可安全重建的 ACME 账户，不能只恢复定时任务。
+            require(len(payload) == 1 and acme_inputs(directory)["acme_files"] > 0)
+            stable()
         if destination is not None:
             owner, child = stack.enter_context(absolute_parent(destination, private=True))
             target_fd = stack.enter_context(transaction_directory(owner, child, private=False))
             secrets_fd = stack.enter_context(transaction_directory(target_fd, "secrets", private=False))
             os.mkdir("renewal", 0o700, dir_fd=secrets_fd)
             target_registry = stack.enter_context(transaction_directory(secrets_fd, "renewal"))
-            # 登记保持停用和原字节；账户执行配置与宿主调度不属于本阶段恢复范围。
+            # 保留登记原字节；启用任务等候选部署健康后由外层事务安装。
             for domain, data in payload.items():
                 os.mkdir(domain, 0o700, dir_fd=target_registry)
                 with transaction_directory(target_registry, domain) as target_domain:
