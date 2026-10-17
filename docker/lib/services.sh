@@ -7492,6 +7492,12 @@ dockerEnsureRuntimeDataPermissions() {
     ((${#missingDirectories[@]} == 0)) ||
         mkdir -p -- "${missingDirectories[@]}" || return 1
     chmod 0750 "${directories[@]}" || return 1
+    if jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${root}/config/spec.json" >/dev/null 2>&1; then
+        # collector 只允许宿主 root 访问，未启用 SSH 时不创建其运行状态。
+        dockerTrafficSafePath "${root}" "${root}/data/net/ssh-collector" &&
+            mkdir -p -- "${root}/data/net/ssh-collector" &&
+            chmod 0700 "${root}/data/net/ssh-collector" || return 1
+    fi
     dockerSiteTreeValidate "${root}/data/static" &&
         find "${root}/data/static" \( -type d -exec chmod 0750 {} + \) -o \
             \( -type f -exec chmod 0640 {} + \) || return 1

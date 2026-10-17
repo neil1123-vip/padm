@@ -6,11 +6,11 @@ if [[ "$(uname -s)" != Linux ]]; then
     exit 0
 fi
 [[ "$(id -u)" == 0 ]] || { printf 'docker-permissions-regression-fail: run as root\n' >&2; exit 1; }
-for tool in jq setpriv stat chown chmod; do
+for tool in jq python3 setpriv stat chown chmod; do
     command -v "${tool}" >/dev/null || { printf 'missing tool: %s\n' "${tool}" >&2; exit 1; }
 done
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
-TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-permissions.XXXXXX")
+TEST_ROOT=$(mktemp -d "/root/padm-docker-permissions.XXXXXX")
 trap 'rm -rf -- "${TEST_ROOT}"' EXIT
 export PADM_DOCKER_SKIP_CHOWN=0
 # shellcheck source=/dev/null
@@ -142,6 +142,31 @@ jq -r '.images | "PADM_XRAY_IMAGE=" + .xray, "PADM_SINGBOX_IMAGE=" + ."sing-box"
     "PADM_NGINX_IMAGE=" + .nginx, "PADM_OPS_IMAGE=" + .ops, "PADM_NET_IMAGE=" + .net' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${PADM_DOCKER_INSTALL_DIR}/images.env"
 dockerEnsureRuntimeDataPermissions
+# 复现实机留下的空 collector 目录，SSH 状态不能影响普通部署的恢复。
+(
+    sshRoot="${TEST_ROOT}/ssh-collector-runtime"
+    cp -a -- "${PADM_DOCKER_INSTALL_DIR}" "${sshRoot}"
+    export PADM_DOCKER_INSTALL_DIR="${sshRoot}"
+    jq '.host_integrations = [{type:"fail2ban-ssh"}]' "${sshRoot}/config/spec.json" \
+        >"${TEST_ROOT}/ssh-spec.json"
+    mv -- "${TEST_ROOT}/ssh-spec.json" "${sshRoot}/config/spec.json"
+    mkdir -p "${sshRoot}/data/net/ssh-collector"
+    chmod 0755 "${sshRoot}/data/net/ssh-collector"
+    dockerEnsureRuntimeDataPermissions || fail 'SSH collector 运行权限准备失败'
+    python3 -B - "${PROJECT_ROOT}" "${sshRoot}/data/net/ssh-collector" <<'PY' || exit 1
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("runtime", sys.argv[1] + "/docker/lib/ssh-runtime.py")
+runtime = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runtime)
+directory = runtime.Directory(sys.argv[2])
+directory.close()
+PY
+    assertMetadata "${sshRoot}/data/net/ssh-collector" '700 0 0'
+    dockerEnsureRuntimeDataPermissions || fail '重复准备 SSH collector 运行权限失败'
+    assertMetadata "${sshRoot}/data/net/ssh-collector" '700 0 0'
+) || fail 'SSH collector 运行权限准备失败'
 # 后段路径和批量工具失败均须拒绝，私密文件不得因此放宽权限。
 for permissionFailure in late-link mkdir chmod find; do
     (
