@@ -51,8 +51,8 @@ dockerSetupReinstallAllowed() {
 
 dockerSetupRead() {
     local variable=$1 prompt=$2 default=${3:-} inputValue
-    if [[ -t 0 && "${4:-}" == csv ]]; then
-        # 仅长名单启用 readline；接管终端后再提示，避免截断及快速 Ctrl-D 竞态。
+    if [[ -t 0 && ( "${4:-}" == csv || "${4:-}" == json ) ]]; then
+        # 仅长输入启用 readline；接管终端后再提示，避免截断及快速 Ctrl-D 竞态。
         IFS= read -r -e -p "${prompt}" inputValue || return 1
     else
         printf '%s' "${prompt}"

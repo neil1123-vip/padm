@@ -616,6 +616,11 @@ runXhttpDriver() {
         targetReply 'Docker XHTTP 管理' $'19\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         ;;
+    headers-long)
+        targetReply 'Docker XHTTP 管理' $'18\n'
+        targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
+        targetReply 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）' "${XHTTP_LONG_HEADERS}"$'\n'
+        ;;
     cancel)
         targetReply 'Docker XHTTP 管理' $'99\n'
         for answer in $'0\n' $'\n' $'\004' $'--invalid\n'; do
@@ -3356,7 +3361,8 @@ edit)
     elif [[ "${2:-}" == --xhttp-request-headers ]]; then
         [[ "$#" -eq 4 && "$3" == entry-xhttp &&
             ( "$4" == '{"x-trace":"edge value","x-route":"v3"}' ||
-              "$4" == '{"x-trace":"edge value"}' || "$4" == not-json ) ]] || exit 2
+              "$4" == '{"x-trace":"edge value"}' || "$4" == not-json ||
+              "$4" == "${XHTTP_LONG_HEADERS:?}" ) ]] || exit 2
         exit "${XHTTP_EDIT_STATUS:-0}"
     elif [[ "${2:-}" == --xhttp-request-headers-clear ]]; then
         [[ "$#" -eq 3 && "$3" == entry-xhttp ]] || exit 2
@@ -5340,8 +5346,24 @@ done
 unset SITE_EDIT_STATUS
 fi
 
+# 转义后的合法首部超过终端 canonical 输入上限，先用真实合同证明夹具有效。
+XHTTP_LONG_HEADERS=$(jq -cn '[range(1;9) | {
+  key:("x-" + ("a" * 61) + tostring),value:("\"" * 256)}] | from_entries')
+[[ "${#XHTTP_LONG_HEADERS}" -gt 4095 ]] || fail 'XHTTP 长首部夹具未覆盖终端输入上限'
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    DOCKER_BUNDLE_SOURCE_ROOT=${PROJECT_ROOT}
+    jq --argjson headers "${XHTTP_LONG_HEADERS}" '
+      .schema_version=3 | .core.secondary_type=null |
+      .core.protocols[0] += {id:2,core:"xray",listener_id:"entry-xhttp",
+        xhttp:{path:"/xhttp",host:"proxy.example.com",mode:"auto",headers:$headers}}' \
+        "${PROJECT_ROOT}/docker/configure.example.json" >"${TEST_ROOT}/xhttp-long-headers.json"
+    dockerConfigureSpecValidate "${TEST_ROOT}/xhttp-long-headers.json"
+) || fail 'XHTTP 长首部夹具未通过真实规格合同'
+export XHTTP_LONG_HEADERS
+
 # 菜单只校验取消与参数分发；非法参数由 CLI 拒绝后必须能继续查看状态。
-for xhttpCase in flow cancel failed invalid current status-failed status-invalid status-incomplete; do
+for xhttpCase in flow headers-long cancel failed invalid current status-failed status-invalid status-incomplete; do
     : >"${TLS_WIZARD_ACTIONS}"
     export XHTTP_EDIT_STATUS=0 XHTTP_STATUS=0 XHTTP_STATUS_FIXTURE=default
     case "${xhttpCase}" in
@@ -5376,6 +5398,10 @@ for xhttpCase in flow cancel failed invalid current status-failed status-invalid
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-limits-clear entry-xhttp'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers entry-xhttp {"x-trace":"edge value","x-route":"v3"}'
         expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers-clear entry-xhttp'
+        ;;
+    headers-long)
+        expectedXhttp+=$'\nprotocol xhttp-status\nedit --xhttp-request-headers entry-xhttp '"${XHTTP_LONG_HEADERS}"
+        ! grep -Fq '操作失败' "${CONTROL_LOG}" || fail 'XHTTP 长首部未完整传递给 CLI'
         ;;
     cancel)
         for ((xhttpStatus = 0; xhttpStatus < 4 * 9 + 2 * (3 + 1 + 2) + 3 + 8 + 5 + 5 + 5; xhttpStatus++)); do
@@ -5495,7 +5521,7 @@ for xhttpCase in flow cancel failed invalid current status-failed status-invalid
             grep -Fq '本菜单不自动部署 CDN' "${CONTROL_LOG}" || fail 'XHTTP 独立下行菜单未说明支持范围'
     fi
 done
-unset XHTTP_EDIT_STATUS XHTTP_STATUS XHTTP_STATUS_FIXTURE
+unset XHTTP_EDIT_STATUS XHTTP_STATUS XHTTP_STATUS_FIXTURE XHTTP_LONG_HEADERS
 
 # TERM 退出不能留下状态副本；不另起整套 PTY 场景。
 menuStatus=0

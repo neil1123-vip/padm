@@ -1469,6 +1469,9 @@ manual TLS, static sites, account/share identities, saved traffic, Reality targe
 limited Geo data and disabled renewal registrations described below. Host integrations,
 control roles/sync, host-network coexistence, HTTP-01 and ACME execution configuration
 remain rejected. Dangling references in disabled share groups are also rejected.
+Single sing-box dual-stack Hy2/TUIC deployments may restore the saved `port_hopping` spec.
+The restored state is `stopped`; old supervisors, rules and runtime state are not restored.
+An explicit `port-hopping start` must pass fresh checks on the target host before enabling it.
 Reality recovery only accepts `data/reality-targets/results.tsv` (15/16-column TSV) and
 `blocked.tsv` (four `|`-separated columns), limited to 16 MiB per file. All records are validated
 before copying the original bytes, preserving empty columns, duplicates and custom block reasons.
@@ -1481,9 +1484,6 @@ Archive manifest and state data digests are checked before network-disabled Xray
 No Geo data is downloaded and no automatic-update schedule is restored. `enabled=false` does not
 disable use of the Geo data; archives with `enabled=true` are rejected, not restored by disabling updates.
 Renewal recovery accepts only `enabled=false` DNS, standalone, webroot or ALPN registrations and DNS
-Single sing-box dual-stack Hy2/TUIC deployments may restore the saved `port_hopping` spec.
-The restored state is `stopped`; old supervisors, rules and runtime state are not restored.
-An explicit `port-hopping start` must pass fresh checks on the target host before enabling it.
 credentials, preserving original bytes and `0700/0600 root:root` permissions without installing
 a renewal schedule. Non-DNS registrations must not contain credentials. Enabled registrations,
 HTTP-01 and actual ACME files are rejected;

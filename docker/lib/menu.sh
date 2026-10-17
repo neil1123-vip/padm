@@ -434,7 +434,7 @@ dockerMenuXhttp() {
                 dockerMenuRun edit --xhttp-defaults "${listener}" || true
             elif [[ "${choice}" == 18 ]]; then
                 # JSON 作为单个参数原样交给 CLI，键值边界由后端合同校验。
-                dockerSetupRead headers 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）: ' &&
+                dockerSetupRead headers 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）: ' '' json &&
                     [[ -n "${headers}" ]] || continue
                 dockerMenuRun edit --xhttp-request-headers "${listener}" "${headers}" || true
             elif [[ "${choice}" == 19 ]]; then
