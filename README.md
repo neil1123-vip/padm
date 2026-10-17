@@ -2350,7 +2350,6 @@ Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回
 .\shell\regression\run-docker.ps1 -Selector docker-routing-domains-workflow
 .\shell\regression\run-docker.ps1 -Selector ci -Jobs 3
 .\shell\regression\run-docker.ps1 -Selector docker-contracts -Jobs 6
-.\shell\regression\run-docker.ps1 -Selector docker-contracts-full -Jobs 6
 ```
 
 普通定向 selector 默认 `-Jobs 2`，完整 `ci`、`ci-pr`、`all` 默认 `-Jobs 3`，
@@ -2369,7 +2368,9 @@ Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workf
 多入口/双核心拓扑改动使用 `docker-phase3-entries-topology`，
 协议增删、TLS 或重装管理改动使用 `docker-phase3-entries-management`。
 `docker-phase3-entries` 保留管理与拓扑的并行分组；`docker-contracts-full` 直接调度这些分组，CI 分片覆盖相同叶子。
-各任务先运行匹配改动的定向回归，集成完成后集中执行完整回归。
+各任务先运行匹配改动的定向回归；需要综合回归时默认使用 `docker-contracts -Jobs 6`，
+日常集合外的功能补充对应定向 selector。跨文件、集成完成或准备提交不自动触发 `docker-contracts-full`；
+全量仅用于明确要求的验收，或发布前由一个集成任务集中执行一次。
 入口归档当前工作区的已跟踪文件和未忽略的新文件，包含未提交修改，不包含 `.git`
 和 `.tmp-*`；源码、`TMPDIR`、`HOME` 在容器内部，不挂载 Windows 工作目录。
 每次运行的源码快照、日志和结果保存在 `.tmp-regression-docker-*/`，测试失败保留日志并返回原退出码。
