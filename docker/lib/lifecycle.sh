@@ -3332,6 +3332,7 @@ dockerRecoveryRecover() {
             "${root}/deployment.json" "${root}/deployment.previous.json" || return 1
     fi
     for entry in candidate input_stage; do
+        [[ "${state}" != unpublished ]] || break
         directory=$(jq -er --arg name "${entry}" '.[$name] // empty' <<<"${metadata}") || {
             [[ "${entry}" == input_stage ]] && continue
             return 1
@@ -3356,8 +3357,8 @@ dockerRecoveryRecover() {
 }
 
 dockerRecoveryCommand() (
-    local action=${1:-} archive= confirm= manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected
-    local DOCKER_RECOVERY_INPUT= DOCKER_RECOVERY_STARTED=0
+    local action=${1:-} archive= confirm= manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected registration
+    local DOCKER_RECOVERY_INPUT= DOCKER_RECOVERY_STARTED=0 DOCKER_RECOVERY_CANDIDATE=
     case "${action}" in
     recover) [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"; shift ;;
     preview|apply)
@@ -3416,8 +3417,14 @@ dockerRecoveryCommand() (
         dockerError '灾备恢复需要仅安装控制骨架的空目标；已有配置、数据、日志、备份、残留或同项目容器均拒绝'
         return "${PADM_DOCKER_RC_STATE}"
     }
-    stage=$(mktemp -d "${root}/.recovery.XXXXXX") &&
-        chmod 0700 "${stage}" &&
+    # 先登记精确暂存路径，再创建或写入；首份元数据半写也由固定 marker 回收。
+    DOCKER_RECOVERY_STARTED=1
+    registration=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-begin \
+        --root "${root}" --project "${PADM_DOCKER_PROJECT}") ||
+        return "${PADM_DOCKER_RC_STATE}"
+    stage="${root}/$(jq -er '.input_stage' <<<"${registration}")" &&
+        DOCKER_RECOVERY_CANDIDATE="${root}/$(jq -er '.candidate' <<<"${registration}")" &&
+        mkdir -m 0700 -- "${stage}" &&
         mkdir -m 0700 -- "${stage}/input" "${stage}/draft" || return "${PADM_DOCKER_RC_STATE}"
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" extract --archive "${archive}" \
         --directory "${stage}/input" || return "${PADM_DOCKER_RC_STATE}"

@@ -654,7 +654,7 @@ Other client imports, native hosts, arm64, public networks,
 automatic TUIC client hopping, old-session drainage and complete Hy2/TUIC hopping remain `deferred`.
 
 The protocol menu's CDN address manager overrides client connection addresses for
-existing `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
+existing `2` Reality XHTTP and `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
 and share groups. Optional v3 `cdn_entries` contains up to 16 `{listener_id, addresses}`
 records, each with 1–16 unique IP addresses or domain names. URLs, ports, whitespace
 and empty items are rejected. Without an override, links use the original server.
@@ -675,10 +675,13 @@ copying does not inherit it. Changes use the existing candidate, confirmation an
 failure recovery transaction, which recreates services on commit. Ordinary spec
 editing cannot replace CDN overrides. Bundles without `x-padm-cdn-entry-addresses`
 reject configuration, updates and restoration containing the field.
-Overrides for `24/25` also require `x-padm-cdn-grpc-tls`; older bundles can still
-handle the original three override types and gRPC TLS listeners without overrides.
-Reality XHTTP/gRPC, other TCP/UDP protocols and H3 parameter management
-are outside this stage; complete CDN management remains `deferred`.
+Overrides for `24/25` also require `x-padm-cdn-grpc-tls`; protocol `2` requires
+`x-padm-cdn-xhttp` and changes only the upstream connection address, preserving Reality
+identity and any independent download address. Older bundles can still handle the original
+three override types and gRPC TLS listeners without overrides. Reality gRPC and other TCP/UDP
+protocols remain outside this scope; external CDN, TLS/H3 and download services must already exist.
+The native CDN menu provides H3 guidance rather than a separate parameter switch.
+Public passthrough and complete environment acceptance remain `deferred`.
 
 Newly generated `21/22/23` TLS frontends reject an incorrect Host. Without CDN
 fields, the complete legacy Nginx output remains valid for reads and edit baselines;
@@ -1519,7 +1522,10 @@ Failed recovery preserves evidence; external schedule changes are rejected rathe
 Committed transactions only clean staging on retry and do not stop the deployment.
 Commit metadata and schedule source/build staging use fixed private paths inside the registration.
 Partial writes or a hard kill can be cleaned by rollback or committed-cleanup retries; partial metadata never proves a commit.
-A hard kill before registration publication can still leave unregistered staging that requires inspection and manual cleanup; it is not adopted automatically.
+Preparation creates private registration before creating the exact registered extraction and
+candidate directories. After a hard kill during initial metadata publication, extraction or candidate
+generation, `restore recover` verifies the original empty skeleton, paths and permissions before cleanup.
+Preparation recovery does not execute unvalidated Compose or change external schedules; unknown staging or tampering is rejected.
 Existing-deployment replacement, other persistent inputs, role migration, native fresh-host checks
 and complete disaster recovery remain deferred.
 

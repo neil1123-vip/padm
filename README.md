@@ -980,7 +980,7 @@ Hy2 使用客户端原生默认 30 秒随机换端口，最多观察 300 秒，�
 其它客户端导入、原生宿主、arm64、公网、TUIC 客户端自动跳跃、
 旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`。
 
-菜单“协议与入口 → CDN 连接地址”可为已有 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
+菜单“协议与入口 → CDN 连接地址”可为已有 `2` Reality XHTTP 及 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
 入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。
 v3 可选 `cdn_entries` 保存最多 16 项 `{listener_id, addresses}`，每项 1–16 个唯一地址；
 不含该字段时使用原服务器地址。地址不接受 URL、端口、空白或空项。
@@ -999,9 +999,10 @@ padm-docker edit --cdn-entry-clear entry-ws --confirm PADM-DOCKER-EDIT
 专项编辑沿用候选、确认和失败恢复事务，提交会按现有流程重建服务。
 普通规格编辑不能改写 CDN 覆盖；旧 bundle 缺少 `x-padm-cdn-entry-addresses`
 时拒绝带该字段的配置、更新和恢复。仅覆盖 `24/25` 时另要求
-`x-padm-cdn-grpc-tls`；旧包可继续处理原三种覆盖及没有覆盖的 gRPC TLS。
-本阶段拒绝 Reality XHTTP/gRPC、
-其它 TCP/UDP 协议及 H3 参数管理；完整 CDN 管理仍为 `deferred`。
+`x-padm-cdn-grpc-tls`；协议 `2` 另需 `x-padm-cdn-xhttp`，只替换上行连接地址，
+保留 Reality 身份及独立下行地址。旧包可继续处理原三种覆盖及没有覆盖的 gRPC TLS。
+Reality gRPC 与其它 TCP/UDP 协议仍不在范围内；外部 CDN、TLS/H3 和下行服务须已部署。
+原生 CDN 菜单只有 H3 使用说明，不另设 H3 参数开关。公网透传与完整环境验收仍为 `deferred`。
 
 新生成的 `21/22/23` TLS 前端拒绝错误 Host；无 CDN 字段的完整旧 Nginx
 正文可继续通过只读和编辑基线，下一次确认配置编辑会生成新正文。
@@ -1824,7 +1825,9 @@ padm-docker restore recover
 恢复失败保留现场；外部调度被改写时拒绝覆盖。已提交事务的重试只清暂存，不停止服务。
 登记内的提交元数据及调度 source/build 暂存使用固定私密路径，半写或硬杀后
 可随撤销或已提交清理重试回收，不按半写元数据认定提交成功。
-准备阶段登记发布前遭硬杀仍可能留下未登记暂存，需核对后人工清理，不自动接管。
+准备阶段先创建私密登记，再创建精确登记的解包和候选目录；首次元数据半写、
+解包或候选生成时遭硬杀，可由 `restore recover` 核对原空骨架、路径和权限后回收。
+准备期接管不执行未验证的 Compose、不修改外部调度；未知暂存或篡改仍拒绝。
 覆盖已有部署、其它持久输入、角色迁移、原生新宿主与完整灾备验收仍待交付。
 
 ### 用户流量与额度

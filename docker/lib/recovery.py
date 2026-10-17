@@ -897,26 +897,96 @@ def transaction_staging(directory_fd):
     return names & ({TRANSACTION_NEXT} | set(TRANSACTION_STAGING))
 
 
-def transaction_validate(directory_fd, root, project):
-    data, _ = transaction_read(directory_fd, TRANSACTION_METADATA, limit=MAX_TRANSACTION_METADATA)
+def transaction_validate(directory_fd, root, project, metadata_name=TRANSACTION_METADATA):
+    names = set(os.listdir(directory_fd))
+    if metadata_name == TRANSACTION_METADATA and TRANSACTION_METADATA not in names:
+        # 首次登记发布前尚未创建任何暂存，只回收空 marker 或有界半写元数据。
+        require(names <= {TRANSACTION_NEXT})
+        if TRANSACTION_NEXT in names:
+            transaction_read(directory_fd, TRANSACTION_NEXT, limit=MAX_TRANSACTION_METADATA)
+        return {"state": "unpublished"}, None
+    data, _ = transaction_read(directory_fd, metadata_name, limit=MAX_TRANSACTION_METADATA)
     metadata = read_json(data)
     require(isinstance(metadata, dict) and set(metadata) == {
         "schema_version", "root", "project", "state", "directories", "files",
         "candidate", "input_stage"
     } and type(metadata["schema_version"]) is int and metadata["schema_version"] == 1
             and metadata["root"] == root and metadata["project"] == project
-            and metadata["state"] in ("active", "committed"))
+            and metadata["state"] in ("preparing", "active", "committed"))
     require(isinstance(metadata["candidate"], str)
             and re.fullmatch(r"\.candidate\.[A-Za-z0-9]{6}", metadata["candidate"]))
     require(metadata["input_stage"] is None or isinstance(metadata["input_stage"], str)
             and re.fullmatch(r"\.recovery\.[A-Za-z0-9]{6}", metadata["input_stage"]))
     transaction_validate_directories(metadata["directories"])
+    if metadata["state"] == "preparing":
+        require(metadata["files"] == {} and
+                names <= {TRANSACTION_METADATA, TRANSACTION_NEXT} | set(TRANSACTION_FILES))
+        for name in names - {TRANSACTION_METADATA}:
+            transaction_read(directory_fd, name, limit=MAX_TRANSACTION_METADATA
+                             if name == TRANSACTION_NEXT else MAX_TRANSACTION_FILE)
+        return metadata, None
     transaction_validate_files(directory_fd, metadata["files"], TRANSACTION_FILES)
     schedule = transaction_schedule(directory_fd, root, project)
     staging = transaction_staging(directory_fd)
     require(set(os.listdir(directory_fd)) == {TRANSACTION_METADATA} | set(TRANSACTION_FILES)
             | ({"traffic-schedule"} if schedule is not None else set()) | staging)
     return metadata, schedule
+
+
+def transaction_begin(root, project, candidate=None, input_stage=None):
+    with transaction_root(root, project) as root_fd:
+        require(TRANSACTION not in os.listdir(root_fd))
+        transaction_reap(root_fd)
+        directories = transaction_directories(root_fd)
+        if candidate is None:
+            candidate = root + "/.candidate." + secrets.token_hex(3)
+            input_stage = root + "/.recovery." + secrets.token_hex(3)
+            require(all(os.path.basename(path) not in os.listdir(root_fd)
+                        for path in (candidate, input_stage)))
+        for path, pattern in ((candidate, r"\.candidate\.[A-Za-z0-9]{6}"),
+                              (input_stage, r"\.recovery\.[A-Za-z0-9]{6}")):
+            if path is not None:
+                transaction_path(path)
+                require(os.path.dirname(path) == root
+                        and re.fullmatch(pattern, os.path.basename(path)))
+        metadata = {"schema_version": 1, "root": root, "project": project,
+                    "state": "preparing", "directories": directories, "files": {},
+                    "candidate": os.path.basename(candidate),
+                    "input_stage": os.path.basename(input_stage) if input_stage else None}
+        # 固定 marker 先落盘；元数据发布后，调用者才能创建登记中的精确目录。
+        os.mkdir(TRANSACTION, 0o700, dir_fd=root_fd)
+        os.fsync(root_fd)
+        with transaction_directory(root_fd, TRANSACTION) as fd:
+            transaction_write(fd, TRANSACTION_NEXT, transaction_encoded(metadata))
+            os.replace(TRANSACTION_NEXT, TRANSACTION_METADATA, src_dir_fd=fd, dst_dir_fd=fd)
+            os.fsync(fd)
+        os.fsync(root_fd)
+    return metadata
+
+
+def transaction_preparing_paths(root_fd, metadata):
+    require(transaction_directories(root_fd) == metadata["directories"])
+
+    def check_tree(parent, name, top=False, private=False):
+        with opened(parent, name, os.O_RDONLY | os.O_DIRECTORY) as fd:
+            info = os.fstat(fd)
+            require(info.st_uid in ((0,) if top else (0, 10001))
+                    and info.st_gid in (0, 10001) and stat.S_IMODE(info.st_mode) & 0o7022 == 0)
+            if private:
+                require(info.st_gid == 0 and stat.S_IMODE(info.st_mode) == 0o700)
+            for child in os.listdir(fd):
+                info = os.stat(child, dir_fd=fd, follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    check_tree(fd, child)
+                else:
+                    require(stat.S_ISREG(info.st_mode) and info.st_uid in (0, 10001)
+                            and info.st_gid in (0, 10001) and info.st_nlink == 1
+                            and stat.S_IMODE(info.st_mode) & 0o7022 == 0)
+
+    for key in ("candidate", "input_stage"):
+        name = metadata[key]
+        if name is not None and name in os.listdir(root_fd):
+            check_tree(root_fd, name, top=True, private=key == "input_stage")
 
 
 def transaction_remove_files(parent, name):
@@ -966,19 +1036,26 @@ def transaction_prepare(root, project, candidate, input_stage=None):
         transaction_path(input_stage)
         require(os.path.dirname(input_stage) == root
                 and re.fullmatch(r"\.recovery\.[A-Za-z0-9]{6}", os.path.basename(input_stage)))
+    started = False
     with transaction_root(root, project) as root_fd:
-        require(TRANSACTION not in os.listdir(root_fd))
-        transaction_reap(root_fd)
-        if input_stage is not None:
-            with transaction_directory(root_fd, os.path.basename(input_stage)):
-                pass
-        directories = transaction_directories(root_fd)
-        with transaction_directory(root_fd, os.path.basename(candidate), private=False) as candidate_fd:
-            temporary = ".restore-building-" + secrets.token_hex(12)
-            os.mkdir(temporary, 0o700, dir_fd=root_fd)
-            published = False
-            try:
-                with transaction_directory(root_fd, temporary) as temporary_fd:
+        if TRANSACTION not in os.listdir(root_fd):
+            # 保留内部 helper 的单次 prepare 调用，失败只清本次登记，不接管来源目录。
+            transaction_begin(root, project, candidate, input_stage)
+            started = True
+        try:
+            if input_stage is not None:
+                with transaction_directory(root_fd, os.path.basename(input_stage)):
+                    pass
+            with transaction_directory(root_fd, TRANSACTION) as pending_fd:
+                saved, _ = transaction_validate(pending_fd, root, project)
+                require(saved["state"] == "preparing"
+                        and saved["candidate"] == os.path.basename(candidate)
+                        and saved["input_stage"] ==
+                        (os.path.basename(input_stage) if input_stage else None)
+                        and transaction_directories(root_fd) == saved["directories"]
+                        and set(os.listdir(pending_fd)) == {TRANSACTION_METADATA})
+                with transaction_directory(root_fd, os.path.basename(candidate),
+                                           private=False) as candidate_fd:
                     files = {}
                     for name in TRANSACTION_FILES:
                         source = "images.runtime.env" if name == "images.env" else name
@@ -989,38 +1066,38 @@ def transaction_prepare(root, project, candidate, input_stage=None):
                             require(value.get("name") == project if name == "compose.json" else
                                     isinstance(value.get("compose"), dict)
                                     and value["compose"].get("project") == project)
-                        transaction_write(temporary_fd, name, data)
+                        transaction_write(pending_fd, name, data)
                         files[name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                                        "mode": 0o600}
-                    metadata = {"schema_version": 1, "root": root, "project": project,
-                                "state": "active", "directories": directories, "files": files,
-                                "candidate": os.path.basename(candidate),
-                                "input_stage": os.path.basename(input_stage) if input_stage else None}
-                    transaction_write(temporary_fd, TRANSACTION_METADATA, transaction_encoded(metadata))
-                    transaction_validate(temporary_fd, root, project)
-                    require(transaction_directories(root_fd) == directories)
-                    os.fsync(temporary_fd)
-                # root 由部署锁串行化；非空既有登记不能被 rename 覆盖。
-                require(TRANSACTION not in os.listdir(root_fd))
-                os.rename(temporary, TRANSACTION, src_dir_fd=root_fd, dst_dir_fd=root_fd)
-                published = True
+                    metadata = {**saved, "state": "active", "files": files}
+                    transaction_write(pending_fd, TRANSACTION_NEXT, transaction_encoded(metadata))
+                    transaction_validate(pending_fd, root, project, TRANSACTION_NEXT)
+                    require(transaction_directories(root_fd) == saved["directories"])
+                    os.replace(TRANSACTION_NEXT, TRANSACTION_METADATA,
+                               src_dir_fd=pending_fd, dst_dir_fd=pending_fd)
+                    os.fsync(pending_fd)
                 os.fsync(root_fd)
-            finally:
-                if not published:
-                    transaction_remove_files(root_fd, temporary)
+        except BaseException:
+            if started:
+                transaction_remove_files(root_fd, TRANSACTION)
+            raise
     return metadata
 
 
 def transaction_check(root, project):
     with transaction_root(root, project) as root_fd:
         with transaction_directory(root_fd, TRANSACTION) as fd:
-            return transaction_validate(fd, root, project)
+            metadata, schedule = transaction_validate(fd, root, project)
+            if metadata["state"] == "preparing":
+                transaction_preparing_paths(root_fd, metadata)
+            return metadata, schedule
 
 
 def transaction_commit(root, project):
     with transaction_root(root, project) as root_fd:
         with transaction_directory(root_fd, TRANSACTION) as fd:
             metadata, _ = transaction_validate(fd, root, project)
+            require(metadata["state"] in ("active", "committed"))
             if metadata["state"] == "committed":
                 return
             metadata["state"] = "committed"
@@ -1113,7 +1190,7 @@ def main():
     renewal = commands.add_parser("renewal-inputs")
     renewal.add_argument("--directory", required=True)
     renewal.add_argument("--destination")
-    for action in ("prepare", "check", "commit", "clean", "metadata",
+    for action in ("begin", "prepare", "check", "commit", "clean", "metadata",
                    "schedule-save", "schedule-metadata"):
         command = commands.add_parser("transaction-" + action)
         command.add_argument("--root", required=True)
@@ -1143,6 +1220,8 @@ def main():
             print(json.dumps(geo_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "renewal-inputs":
             print(json.dumps(renewal_inputs(args.directory, args.destination), separators=(",", ":")))
+        elif args.action == "transaction-begin":
+            print(json.dumps(transaction_begin(args.root, args.project), separators=(",", ":")))
         elif args.action == "transaction-prepare":
             transaction_prepare(args.root, args.project, args.candidate, args.input_stage)
         elif args.action == "transaction-commit":

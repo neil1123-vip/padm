@@ -80,7 +80,11 @@ dockerCandidateCompose() {
         printf 'candidate-nginx\n' >>"${MOCK_BACKEND}/events"
         [[ "${MODE}" != nginx-fail ]] || return 1 ;;
     'run --rm --no-deps subscription subscription --check')
-        printf 'candidate-subscription\n' >>"${MOCK_BACKEND}/events" ;;
+        printf 'candidate-subscription\n' >>"${MOCK_BACKEND}/events"
+        if [[ "${MODE}" == preparing-validated ]]; then
+            DOCKER_TEST_OWNER=${BASHPID}
+            kill_restore_owner
+        fi ;;
     *) fail "非预期候选校验: $*" ;;
     esac
 }
@@ -158,8 +162,21 @@ kill_restore_owner() {
 }
 mkdir() {
     command mkdir "$@" || return $?
+    if [[ "${MODE}" == preparing-stage &&
+        "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.recovery."* ]]; then
+        DOCKER_TEST_OWNER=${BASHPID}
+        kill_restore_owner
+    fi
     if [[ "${MODE}" == source-mkdir &&
         "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/traffic-source" ]]; then
+        kill_restore_owner
+    fi
+}
+cp() {
+    command cp "$@" || return $?
+    if [[ "${MODE}" == preparing-candidate &&
+        "${!#}" == "${PADM_DOCKER_INSTALL_DIR}/.candidate."*/request.json ]]; then
+        DOCKER_TEST_OWNER=${BASHPID}
         kill_restore_owner
     fi
 }
@@ -208,6 +225,53 @@ mv() {
     command mv "$@"
 }
 python3() {
+    if [[ ( "${MODE}" == preparing-begin && "$*" == *'recovery.py transaction-begin '* ) ||
+        ( "${MODE}" == preparing-extract && "$*" == *'recovery.py extract '* ) ]]; then
+        # begin 位于命令替换内，部署锁记录的才是外层恢复进程。
+        local owner
+        owner=$(<"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")
+        [[ "${owner}" =~ ^[1-9][0-9]*$ ]] || fail '准备期硬杀缺少恢复进程 PID'
+        command python3 -B - "${MODE}" "${owner}" "$@" <<'PY'
+import importlib.util
+import os
+import signal
+import sys
+from pathlib import Path
+
+mode, owner = sys.argv[1:3]
+arguments = sys.argv[3:]
+spec = importlib.util.spec_from_file_location("recovery", arguments[1])
+recovery = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(recovery)
+write = recovery.transaction_write
+payload = recovery.read_payload
+
+def kill():
+    Path(os.environ["MOCK_BACKEND"], "fault").touch()
+    os.kill(int(owner), signal.SIGKILL)
+    os.kill(os.getpid(), signal.SIGKILL)
+
+def interrupted_write(parent, name, data):
+    write(parent, name, data[:len(data) // 2])
+    kill()
+
+def interrupted_payload(source, size, digest=None, target=None):
+    if target is not None and size:
+        target.write(source.read(max(1, size // 2)))
+        target.flush()
+        kill()
+    return payload(source, size, digest, target)
+
+if mode == "preparing-begin":
+    recovery.transaction_write = interrupted_write
+else:
+    recovery.read_payload = interrupted_payload
+sys.argv = arguments[1:]
+recovery.main()
+raise AssertionError("准备期硬杀未命中")
+PY
+        return $?
+    fi
     if [[ "${MODE}" == committed && "$*" == *'recovery.py transaction-clean '* ]] &&
         command python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-check \
             --root "${PADM_DOCKER_INSTALL_DIR}" --project "${PADM_DOCKER_PROJECT}" |
@@ -228,6 +292,7 @@ if [[ "${1:-}" == --child ]]; then
     apply)
         dockerMain restore apply "${archive}" \
             --confirm PADM-DOCKER-RESTORE ;;
+    preview) dockerMain restore preview "${archive}" ;;
     unconfirmed) dockerMain restore apply "${TEST_ROOT}/private recovery archive.tar" ;;
     bad-confirm)
         dockerMain restore apply "${TEST_ROOT}/private recovery archive.tar" --confirm wrong ;;
@@ -673,6 +738,29 @@ for action in unconfirmed bad-confirm; do
     run_child "${action}" ok "${PADM_DOCKER_RC_USAGE}"
     assert_empty
 done
+
+# 准备期没有可信停服编排；真实硬杀后只能回收登记中的暂存。
+for mode in preparing-begin preparing-stage preparing-extract preparing-candidate preparing-validated; do
+    prepare_target "${mode}"
+    run_child apply "${mode}" 137
+    [[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/fault" ]] ||
+        fail "${mode}: 没有在持久登记内命中硬杀"
+    run_child lock ok failure
+    run_child recover ok 0
+    assert_empty
+    ! grep -Eq '^up$|^down$|^systemctl:' "${MOCK_BACKEND}/events" ||
+        fail "${mode}: 准备期恢复触碰了容器或外部调度"
+    run_child recover ok 0
+    assert_empty
+done
+prepare_target preparing-preview
+run_child preview preparing-extract 137
+[[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/fault" ]] ||
+    fail '预览准备期未在持久登记内命中硬杀'
+run_child recover ok 0
+assert_empty
+! grep -Eq '^up$|^down$|^systemctl:' "${MOCK_BACKEND}/events" ||
+    fail '预览准备期恢复触碰了容器或外部调度'
 
 for backend in systemd cron; do
     prepare_target "success-${backend}" "${backend}"

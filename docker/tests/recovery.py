@@ -1117,6 +1117,117 @@ class RecoveryTransactionTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout), metadata)
         self.assertNotIn(SECRET, result.stdout + result.stderr)
 
+    def test_begin_registers_paths_before_creation_and_only_exact_candidate_can_activate(self):
+        result = self.cli("begin")
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        metadata = json.loads(result.stdout)
+        candidate = self.root / metadata["candidate"]
+        stage = self.root / metadata["input_stage"]
+        self.assertEqual(metadata["state"], "preparing")
+        self.assertFalse(candidate.exists())
+        self.assertFalse(stage.exists())
+        self.assertEqual(self.check(), (metadata, None))
+        for action in (self.prepare, lambda: recovery.transaction_commit(str(self.root), self.project)):
+            with self.assertRaises(ValueError):
+                action()
+        candidate.mkdir(mode=0o750)
+        stage.mkdir(mode=0o700)
+        for name, data in self.source.items():
+            path = candidate / name
+            path.write_bytes(data)
+            path.chmod(0o640)
+        actual = recovery.transaction_prepare(str(self.root), self.project, str(candidate), str(stage))
+        self.assertEqual(actual["state"], "active")
+        self.assertEqual(actual["directories"], metadata["directories"])
+        self.assertEqual(self.check(), (actual, None))
+
+    def test_unpublished_marker_accepts_only_private_bounded_metadata_and_no_paths(self):
+        self.pending.mkdir(mode=0o700)
+        path = self.pending / recovery.TRANSACTION_NEXT
+        path.write_bytes(b'{"schema_version":')
+        path.chmod(0o600)
+        self.assertEqual(self.check(), ({"state": "unpublished"}, None))
+        for kind in ("public", "owner", "hardlink", "symlink", "extra", "oversize"):
+            with self.subTest(kind=kind):
+                if kind == "public":
+                    path.chmod(0o640)
+                elif kind == "owner":
+                    os.chown(path, 65534, 65534)
+                elif kind == "hardlink":
+                    os.link(path, self.base / "unpublished-alias")
+                elif kind == "symlink":
+                    path.unlink()
+                    path.symlink_to(self.candidate / "images.runtime.env")
+                elif kind == "extra":
+                    (self.pending / "unregistered").write_bytes(SECRET)
+                else:
+                    with path.open("r+b") as target:
+                        target.truncate(recovery.MAX_TRANSACTION_METADATA + 1)
+                with self.assertRaises((ValueError, OSError)):
+                    self.check()
+                with self.assertRaises((ValueError, OSError)):
+                    recovery.transaction_clean(str(self.root), self.project)
+                if kind == "hardlink":
+                    (self.base / "unpublished-alias").unlink()
+                if kind == "extra":
+                    (self.pending / "unregistered").unlink()
+                if path.is_symlink():
+                    path.unlink()
+                path.write_bytes(b'{"schema_version":')
+                path.chmod(0o600)
+                os.chown(path, 0, 0)
+        result = self.cli("clean")
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertFalse(self.pending.exists())
+        self.assertEqual((self.candidate / "images.runtime.env").read_bytes(),
+                         self.source["images.runtime.env"])
+
+    def test_preparing_rejects_changed_skeleton_and_unsafe_registered_tree(self):
+        metadata = recovery.transaction_begin(str(self.root), self.project)
+        stage = self.root / metadata["input_stage"]
+        stage.mkdir(mode=0o700)
+        path = stage / "partial"
+        path.write_bytes(SECRET)
+        path.chmod(0o600)
+        for kind in ("symlink", "hardlink", "public", "owner", "stage-mode", "stage-link"):
+            with self.subTest(kind=kind):
+                if kind == "symlink":
+                    path.unlink()
+                    path.symlink_to(self.candidate / "images.runtime.env")
+                elif kind == "hardlink":
+                    os.link(path, self.base / "preparing-alias")
+                elif kind == "public":
+                    path.chmod(0o666)
+                elif kind == "owner":
+                    os.chown(path, 65534, 65534)
+                elif kind == "stage-mode":
+                    stage.chmod(0o750)
+                else:
+                    path.unlink()
+                    stage.rmdir()
+                    stage.symlink_to(self.candidate, target_is_directory=True)
+                with self.assertRaises((ValueError, OSError)):
+                    self.check()
+                self.assertEqual((self.candidate / "images.runtime.env").read_bytes(),
+                                 self.source["images.runtime.env"])
+                if kind == "hardlink":
+                    (self.base / "preparing-alias").unlink()
+                if kind == "stage-link":
+                    stage.unlink()
+                    stage.mkdir(mode=0o700)
+                if path.is_symlink():
+                    path.unlink()
+                path.write_bytes(SECRET)
+                path.chmod(0o600)
+                os.chown(path, 0, 0)
+                stage.chmod(0o700)
+        skeleton = self.root / "data"
+        skeleton.mkdir(mode=0o750)
+        with self.assertRaises(ValueError):
+            self.check()
+        skeleton.rmdir()
+        self.assertEqual(self.check(), (metadata, None))
+
     def test_commit_is_atomic_idempotent_and_clean_removes_registration(self):
         self.prepare()
         original = recovery.transaction_write
@@ -1154,11 +1265,16 @@ root, project, phase = sys.argv[2:]
 write = recovery.transaction_write
 replace = recovery.os.replace
 rename = recovery.os.rename
+mkdir = recovery.os.mkdir
 
 def kill():
     os.kill(os.getpid(), signal.SIGKILL)
 
 def interrupted_write(parent, name, data):
+    if (phase == "begin-partial" and name == recovery.TRANSACTION_NEXT
+            or phase == "activate-partial" and name == "compose.json"):
+        write(parent, name, data[:len(data) // 2])
+        kill()
     if phase == "commit-partial" and name == recovery.TRANSACTION_NEXT:
         write(parent, name, data[:len(data) // 2])
         kill()
@@ -1167,7 +1283,14 @@ def interrupted_write(parent, name, data):
         kill()
     write(parent, name, data)
     if (phase == "commit-written" and name == recovery.TRANSACTION_NEXT
-            or phase == "schedule-written" and name == recovery.TRANSACTION_METADATA):
+            or phase == "schedule-written" and name == recovery.TRANSACTION_METADATA
+            or phase in ("begin-written", "activate-written")
+            and name == recovery.TRANSACTION_NEXT):
+        kill()
+
+def interrupted_mkdir(*arguments, **keywords):
+    mkdir(*arguments, **keywords)
+    if arguments[0] == recovery.TRANSACTION:
         kill()
 
 def interrupted_replace(*arguments, **keywords):
@@ -1179,21 +1302,32 @@ def interrupted_rename(*arguments, **keywords):
     kill()
 
 recovery.transaction_write = interrupted_write
-if phase == "commit-published":
+if phase in ("begin-published", "activate-published", "commit-published"):
     recovery.os.replace = interrupted_replace
+if phase == "begin-created":
+    recovery.os.mkdir = interrupted_mkdir
 if phase == "schedule-published":
     recovery.os.rename = interrupted_rename
-if phase.startswith("commit-"):
+if phase.startswith("begin-"):
+    recovery.transaction_begin(root, project)
+elif phase.startswith("activate-"):
+    recovery.transaction_prepare(root, project, root + "/.candidate.Abc123")
+elif phase.startswith("commit-"):
     recovery.transaction_commit(root, project)
 else:
     recovery.transaction_schedule_save(root, project, root + "/.restore-pending/traffic-source",
                                        "/etc/systemd/system", 1, 0, 1)
 raise AssertionError("kill point was not reached")
 """
-        for phase in ("commit-partial", "commit-written", "commit-published",
+        for phase in ("begin-created", "begin-partial", "begin-written", "begin-published",
+                      "activate-partial", "activate-written", "activate-published",
+                      "commit-partial", "commit-written", "commit-published",
                       "schedule-partial", "schedule-written", "schedule-published"):
             with self.subTest(phase=phase):
-                self.prepare()
+                if phase.startswith("activate-"):
+                    recovery.transaction_begin(str(self.root), self.project, str(self.candidate))
+                elif not phase.startswith("begin-"):
+                    self.prepare()
                 if phase.startswith("schedule-"):
                     snapshot = self.snapshot()
                     for name in recovery.SCHEDULE_FILES:
@@ -1208,8 +1342,14 @@ raise AssertionError("kill point was not reached")
                 self.assertEqual(result.returncode, -signal.SIGKILL, result.stderr.decode())
                 checked = self.cli("check")
                 self.assertEqual(checked.returncode, 0, checked.stderr.decode())
-                self.assertEqual(json.loads(checked.stdout),
-                                 {"state": "committed" if phase == "commit-published" else "active"})
+                expected = "active"
+                if phase in ("begin-created", "begin-partial", "begin-written"):
+                    expected = "unpublished"
+                elif phase in ("begin-published", "activate-partial", "activate-written"):
+                    expected = "preparing"
+                elif phase == "commit-published":
+                    expected = "committed"
+                self.assertEqual(json.loads(checked.stdout), {"state": expected})
                 schedule = self.cli("schedule-metadata")
                 self.assertEqual(schedule.returncode, 0, schedule.stderr.decode())
                 self.assertEqual(json.loads(schedule.stdout) is not None,
@@ -1483,8 +1623,8 @@ raise AssertionError("kill point was not reached")
     def test_prepare_rechecks_empty_skeleton_before_publish(self):
         original = recovery.transaction_validate
 
-        def populate_skeleton(directory, root, project):
-            result = original(directory, root, project)
+        def populate_skeleton(directory, root, project, *arguments):
+            result = original(directory, root, project, *arguments)
             (self.root / "data").mkdir(mode=0o750)
             (self.root / "data/sentinel").write_bytes(SECRET)
             return result

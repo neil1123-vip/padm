@@ -1828,7 +1828,16 @@ dockerCreateConfigurationCandidate() {
     local root candidate directory
     local -a directories=()
     root=$(dockerInstallRoot) || return 1
-    candidate=$(mktemp -d "${root}/.candidate.XXXXXX") || return 1
+    if [[ -n "${DOCKER_RECOVERY_CANDIDATE:-}" &&
+        "${FUNCNAME[1]:-}" == dockerConfigureApply &&
+        "${FUNCNAME[2]:-}" == dockerRecoveryCommand ]]; then
+        candidate=${DOCKER_RECOVERY_CANDIDATE}
+        [[ "${candidate}" == "${root}/.candidate."* &&
+            ! -e "${candidate}" && ! -L "${candidate}" ]] &&
+            mkdir -m 0700 -- "${candidate}" || return 1
+    else
+        candidate=$(mktemp -d "${root}/.candidate.XXXXXX") || return 1
+    fi
     dockerManagedPathIsSafe "${root}" "${candidate}" || return 1
     for directory in \
         config/xray config/sing-box config/nginx config/control config/net/fail2ban config/net/transparent \
@@ -7570,7 +7579,6 @@ dockerConfigureApply() {
         backup="${candidate}/empty-backup"
         mkdir -m 0700 -- "${backup}" && : >"${backup}/present" &&
             chmod 0600 "${backup}/present" || return "${PADM_DOCKER_RC_STATE}"
-        DOCKER_RECOVERY_STARTED=1
         python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-prepare \
             --root "${root}" --project "${PADM_DOCKER_PROJECT}" --candidate "${candidate}" \
             --input-stage "${DOCKER_RECOVERY_INPUT%/input}" || return "${PADM_DOCKER_RC_STATE}"
