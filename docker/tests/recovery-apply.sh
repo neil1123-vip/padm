@@ -63,13 +63,16 @@ dockerCandidateCompose() {
     shift
     [[ -d "${candidate}" && -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] ||
         fail '候选校验未持有部署锁'
-    jq -e '.services.xray != null and .services.evil == null' \
+    jq -e '(.services.xray != null or .services["sing-box"] != null) and .services.evil == null' \
         "${candidate}/compose.json" >/dev/null || fail '候选没有重新生成 Compose'
     [[ ! -e "${candidate}/geo-probe.json" ]] || fail 'Geo 探针配置未清理'
     case "$*" in
     'config --format json') printf 'candidate-compose\n' >>"${MOCK_BACKEND}/events" ;;
     'run --rm --no-deps xray -test -confdir /etc/padm/xray')
         printf 'candidate-xray\n' >>"${MOCK_BACKEND}/events" ;;
+    'run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json')
+        printf 'candidate-sing-box\n' >>"${MOCK_BACKEND}/events"
+        [[ "${MODE}" != sing-box-fail ]] || return 1 ;;
     "--file ${candidate}/compose.nginx-check.json run --rm --no-deps nginx -t")
         jq -e '.services.nginx.extra_hosts | index("xray:127.0.0.1") != null and
           index("subscription:127.0.0.1") != null' "${candidate}/compose.nginx-check.json" >/dev/null ||
@@ -194,7 +197,8 @@ mv() {
     fi
     if [[ "${MODE}" == partial-move && "${last}" == "${PADM_DOCKER_INSTALL_DIR}/config/" ]]; then
         for argument in "$@"; do
-            if [[ "${argument}" == "${PADM_DOCKER_INSTALL_DIR}/.candidate."*/config/xray ]]; then
+            if [[ "${argument}" == "${PADM_DOCKER_INSTALL_DIR}/.candidate."*/config/xray ||
+                "${argument}" == "${PADM_DOCKER_INSTALL_DIR}/.candidate."*/config/sing-box ]]; then
                 command mv -- "${argument}" "${last}" || return 1
                 : >"${MOCK_BACKEND}/fault"
                 return 1
@@ -215,13 +219,14 @@ python3() {
 
 if [[ "${1:-}" == --child ]]; then
     action=$2 MODE=$3
+    archive=${5:-${TEST_ROOT}/private recovery archive.tar}
     export PADM_DOCKER_INSTALL_DIR=$4
     export MOCK_BACKEND="${TEST_ROOT}/backend-${4##*/}" MOCK_MODE="${MODE}"
     export PADM_DOCKER_SYSTEMD_DIR="${MOCK_BACKEND}/units" PADM_DOCKER_BIN_DIR="${MOCK_BACKEND}/bin"
     export PATH="${TEST_ROOT}/bin:${PATH}"
     case "${action}" in
     apply)
-        dockerMain restore apply "${TEST_ROOT}/private recovery archive.tar" \
+        dockerMain restore apply "${archive}" \
             --confirm PADM-DOCKER-RESTORE ;;
     unconfirmed) dockerMain restore apply "${TEST_ROOT}/private recovery archive.tar" ;;
     bad-confirm)
@@ -274,7 +279,8 @@ if [[ "${1:-}" == compose ]]; then
     done
     [[ "${compose}" == "${PADM_DOCKER_INSTALL_DIR}/.restore-pending/compose.json" &&
         -f "${compose}" && "${action}" == down ]] || exit 1
-    jq -e '.services.xray != null and .services.evil == null' "${compose}" >/dev/null
+    jq -e '(.services.xray != null or .services["sing-box"] != null) and .services.evil == null' \
+        "${compose}" >/dev/null
     [[ "${MOCK_MODE}" != down-failure ]] || exit 1
     printf 'down\n' >>"${MOCK_BACKEND}/events"
     rm -f -- "${MOCK_BACKEND}/compose-container" "${MOCK_BACKEND}/padm-container"
@@ -375,6 +381,47 @@ python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${SOURCE}" \
     --output "${TEST_ROOT}/private recovery archive.tar" >/dev/null || fail '归档导出失败'
 DOCKER_CONFIG_CANDIDATE=
 
+HOST_SOURCE="${TEST_ROOT}/source-host"
+cp -a -- "${SOURCE}" "${HOST_SOURCE}"
+jq '.reality_stream = {listener_id:"entry-reality",host_website:{
+  domains:["host.example.com"],address:"host.docker.internal",port:8443}}' \
+    "${SOURCE}/config/spec.json" >"${HOST_SOURCE}/config/spec.json"
+dockerConfigureSpecValidate "${HOST_SOURCE}/config/spec.json" || fail '桥接宿主网站夹具无效'
+dockerGenerateDeployment "${HOST_SOURCE}/config/spec.json" "${HOST_SOURCE}/deployment.json"
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${HOST_SOURCE}" \
+    --output "${TEST_ROOT}/host.tar" >/dev/null || fail '宿主共存归档导出失败'
+
+for protocol in hy2 tuic; do
+    variant="${TEST_ROOT}/source-hopping-${protocol}"
+    cp -a -- "${SOURCE}" "${variant}"
+    jq '
+      .core.type = "sing-box" | .core.secondary_type = null |
+      .core.protocols = [(.core.protocols[0] | del(.websocket) |
+        .id = 3 | .core = "sing-box" | .public_port = 35442 |
+        .hy2 = {domain:"ws.example.com",bandwidth_mode:"bbr",up_mbps:100,down_mbps:100,
+          obfs:null,masquerade:""})] |
+      .accounts[].listeners = ["entry-site"] |
+      .subscription.enabled = false | del(.site,.reality_stream) |
+      .port_hopping = {listener_id:"entry-site",range_start:36000,range_end:36002,
+        ipv4:"198.18.1.1",ipv6:"2001:db8:1::1"}
+    ' "${SOURCE}/config/spec.json" >"${variant}/config/spec.json"
+    if [[ "${protocol}" == tuic ]]; then
+        jq '.core.protocols[0] |= (del(.hy2) | .id = 31 |
+          .tuic = {domain:"ws.example.com",congestion_control:"cubic",
+            auth_timeout:"3s",heartbeat:"10s",zero_rtt_handshake:false})' \
+            "${variant}/config/spec.json" >"${TEST_ROOT}/hopping.json"
+        cat -- "${TEST_ROOT}/hopping.json" >"${variant}/config/spec.json"
+    fi
+    jq -c '.groups[].listener_ids = ["entry-site"]' "${SOURCE}/config/share-groups.json" \
+        >"${variant}/config/share-groups.json"
+    rm -rf -- "${variant}/config/xray" "${variant}/config/nginx" \
+        "${variant}/data/static" "${variant}/data/subscription"
+    dockerConfigureSpecValidate "${variant}/config/spec.json" || fail "${protocol} 跳跃夹具无效"
+    dockerGenerateDeployment "${variant}/config/spec.json" "${variant}/deployment.json"
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${variant}" \
+        --output "${TEST_ROOT}/hopping-${protocol}.tar" >/dev/null || fail "${protocol} 跳跃归档失败"
+done
+
 snapshot() {
     python3 -B - "${root}" "${1:-all}" <<'PY'
 import hashlib
@@ -410,6 +457,7 @@ schedule_snapshot() {
 }
 prepare_target() {
     root="${TEST_ROOT}/target-$1"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/private recovery archive.tar"
     export PADM_DOCKER_INSTALL_DIR="${root}"
     export MOCK_BACKEND="${TEST_ROOT}/backend-${root##*/}" MOCK_MODE=ok MOCK_SCHEDULER=${2:-systemd}
     export PADM_DOCKER_SYSTEMD_DIR="${MOCK_BACKEND}/units" PADM_DOCKER_BIN_DIR="${MOCK_BACKEND}/bin"
@@ -423,7 +471,8 @@ prepare_target() {
 }
 run_child() {
     local action=$1 mode=$2 expected=$3 status=0
-    bash "${BASH_SOURCE[0]}" --child "${action}" "${mode}" "${root}" >"${LOG}" 2>&1 || status=$?
+    bash "${BASH_SOURCE[0]}" --child "${action}" "${mode}" "${root}" "${RECOVERY_ARCHIVE}" \
+        >"${LOG}" 2>&1 || status=$?
     if [[ "${expected}" == failure ]]; then
         [[ "${status}" != 0 ]] || fail "${action}/${mode}: 意外成功"
     else
@@ -443,35 +492,50 @@ assert_empty() {
         fail '回滚残留容器或锁'
 }
 assert_deployed() {
-    local file relative
+    local source=${1:-${SOURCE}} file relative
     [[ "$(find "${root}/secrets/renewal" -type f | wc -l)" == 5 &&
         -z "$(find "${root}/secrets/renewal" -type d ! -perm 0700 -print -quit)" &&
         -z "$(find "${root}/secrets/renewal" -type f ! -perm 0600 -print -quit)" &&
         -z "$(find "${root}/secrets/renewal" \( ! -user root -o ! -group root \) -print -quit)" ]] ||
         fail '停用续期登记的数量、所有者或权限错误'
     while IFS= read -r file; do
-        relative=${file#"${SOURCE}/secrets/renewal/"}
+        relative=${file#"${source}/secrets/renewal/"}
         cmp -- "${file}" "${root}/secrets/renewal/${relative}" || fail '续期登记没有保持原字节'
-    done < <(find "${SOURCE}/secrets/renewal" -type f)
+    done < <(find "${source}/secrets/renewal" -type f)
     cmp -- "${root}/config/nginx/stream/reality.conf" \
-        <(dockerGenerateRealityStreamConfig "${TEST_ROOT}/base.json" /dev/stdout) ||
+        <(dockerGenerateRealityStreamConfig "${source}/config/spec.json" /dev/stdout) ||
         fail '恢复照搬了归档 stream，没有按规格重新生成'
-    jq -e '.services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp"] and
-      .services.nginx.ports == ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] and
+    jq -e --slurpfile spec "${source}/config/spec.json" '
+      .services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp"] and
+      .services.nginx.ports ==
+        (if $spec[0].reality_stream.host_website != null then
+          ["0.0.0.0:24443:8443/tcp","[::]:24443:8443/tcp"] else [] end +
+          ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"]) and
+      (if $spec[0].reality_stream.host_website != null then
+        .services.nginx.extra_hosts == ["host.docker.internal:host-gateway"]
+       else true end) and
       any(.services.nginx.volumes[]; .target == "/etc/nginx/stream.d" and .read_only == true)
     ' "${root}/compose.json" >/dev/null || fail '恢复共存 Compose 映射错误'
-    jq -e '[.listeners[] | select(.listener_id == "entry-site" or .listener_id == "entry-reality")] |
-      length == 2 and all(.[]; .service == "nginx" and .public_port == 443 and .container_port == 15443)
+    jq -e --slurpfile spec "${source}/config/spec.json" '
+      [.listeners[] | select(.listener_id == "entry-site" or .listener_id == "entry-reality")] |
+      length == 2 and all(.[]; .service == "nginx" and
+        if $spec[0].reality_stream.host_website != null and .listener_id == "entry-site" then
+          .public_port == 24443 and .container_port == 8443
+        else .public_port == 443 and .container_port == 15443 end)
     ' "${root}/deployment.json" >/dev/null || fail '恢复共存部署有效公网端口错误'
     grep -q '@proxy.example.com:443?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" &&
         grep -q '@proxy.example.com:24445?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" ||
         fail '恢复共存订阅有效公网端口或未绑定入口错误'
+    if jq -e '.reality_stream.host_website != null' "${source}/config/spec.json" >/dev/null; then
+        grep -q '@proxy.example.com:24443?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" ||
+            fail '宿主共存改变了独立受管网站入口的订阅端口'
+    fi
     [[ "$(grep -E '^candidate-|^geo-probe$|^up$' "${MOCK_BACKEND}/events")" == \
         $'candidate-compose\ngeo-probe\ncandidate-xray\ncandidate-nginx\ncandidate-subscription\nup' ]] ||
         fail '恢复未按 Compose、Geo、Xray、Nginx、订阅校验后再启动'
     [[ ! -e "${root}/compose.nginx-check.json" ]] || fail '恢复残留 Nginx 临时校验配置'
     for file in state.json geoip.dat geosite.dat; do
-        cmp -- "${SOURCE}/config/xray/geo/${file}" "${root}/config/xray/geo/${file}" ||
+        cmp -- "${source}/config/xray/geo/${file}" "${root}/config/xray/geo/${file}" ||
             fail '恢复 Geo 未保持原字节'
         [[ "$(stat -c '%u:%g:%a' "${root}/config/xray/geo/${file}")" == \
             "0:${PADM_DOCKER_CONTAINER_GID}:640" ]] || fail 'Geo 文件运行权限错误'
@@ -482,20 +546,21 @@ assert_deployed() {
         "${root}/compose.json" >/dev/null || fail 'Geo Compose 读取路径错误'
     [[ "$(grep -c '^geo-probe$' "${MOCK_BACKEND}/events")" == 1 ]] || fail '恢复未执行唯一 Geo 探针'
     for file in results.tsv blocked.tsv; do
-        cmp -- "${SOURCE}/data/reality-targets/${file}" "${root}/data/reality-targets/${file}" ||
+        cmp -- "${source}/data/reality-targets/${file}" "${root}/data/reality-targets/${file}" ||
             fail '目标库未按原字节恢复'
         [[ "$(stat -c '%u:%g:%a' "${root}/data/reality-targets/${file}")" == 0:0:600 ]] ||
             fail '目标库文件权限不私密'
     done
     [[ "$(stat -c '%u:%g:%a' "${root}/data/reality-targets")" == 0:0:700 ]] ||
         fail '目标库目录权限不私密'
-    jq -en --slurpfile expected "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" '
+    jq -en --slurpfile expected "${source}/config/spec.json" --slurpfile actual "${root}/config/spec.json" '
       $actual[0].core == $expected[0].core and $actual[0].accounts == $expected[0].accounts and
-      $actual[0].subscription == $expected[0].subscription' >/dev/null ||
+      $actual[0].subscription == $expected[0].subscription and
+      $actual[0].reality_stream == $expected[0].reality_stream' >/dev/null ||
         fail '恢复改变了入口、账号凭据或订阅身份'
-    cmp -- "${SOURCE}/config/share-groups.json" "${root}/config/share-groups.json" ||
+    cmp -- "${source}/config/share-groups.json" "${root}/config/share-groups.json" ||
         fail '恢复改变了分享组'
-    jq -e --slurpfile expected "${SOURCE}/data/traffic/state.json" '
+    jq -e --slurpfile expected "${source}/data/traffic/state.json" '
       .schema_version == $expected[0].schema_version and
       .accounts == ($expected[0].accounts | map_values(.baseline = {}))
     ' "${root}/data/traffic/state.json" >/dev/null || fail '累计、限额、历史账号或 baseline 错误'
@@ -506,8 +571,9 @@ assert_deployed() {
     jq -e 'all(.inbounds[]?.settings.clients[]?;
       .id != "44444444-4444-4444-8444-444444444444")' \
         "${root}/config/xray/config.json" >/dev/null || fail '超额账号仍在运行配置'
-    cmp -- "${SOURCE}/secrets/tls/${DOMAIN}.key" "${root}/secrets/tls/${DOMAIN}.key" &&
-        cmp -- "${SOURCE}/data/static/index.html" "${root}/data/static/index.html" ||
+    cmp -- "${source}/secrets/tls/${DOMAIN}.crt" "${root}/secrets/tls/${DOMAIN}.crt" &&
+        cmp -- "${source}/secrets/tls/${DOMAIN}.key" "${root}/secrets/tls/${DOMAIN}.key" &&
+        cmp -- "${source}/data/static/index.html" "${root}/data/static/index.html" ||
         fail 'TLS 或静态站恢复错误'
     [[ "$(stat -c %a "${root}/config/spec.json")" == 600 &&
         "$(stat -c %a "${root}/config/xray/users.base")" == 600 &&
@@ -522,6 +588,56 @@ assert_deployed() {
         grep -q '# padm-docker-traffic' "${MOCK_BACKEND}/crontab" ||
             fail '恢复没有安装流量 cron'
     fi
+}
+assert_hopping_deployed() {
+    local protocol=$1 source="${TEST_ROOT}/source-hopping-${1}" file status
+    jq -en --slurpfile expected "${source}/config/spec.json" \
+        --slurpfile actual "${root}/config/spec.json" \
+        --slurpfile deployment "${root}/deployment.json" \
+        --slurpfile compose "${root}/compose.json" '
+      $expected[0].port_hopping as $saved |
+      $actual[0].core == $expected[0].core and $actual[0].accounts == $expected[0].accounts and
+      $actual[0].subscription == $expected[0].subscription and
+      $actual[0].port_hopping == $saved and $deployment[0].port_hopping == $saved and
+      $compose[0]["x-padm-port-hopping"] == $saved and
+      ($compose[0].services | keys) == ["acme","sing-box"]
+    ' >/dev/null || fail "${protocol}: 跳跃 tuple、身份或服务集合错误"
+    cmp -- "${source}/config/share-groups.json" "${root}/config/share-groups.json" ||
+        fail "${protocol}: 恢复改变了分享组"
+    jq -e --slurpfile expected "${source}/data/traffic/state.json" '
+      .schema_version == $expected[0].schema_version and
+      .accounts == ($expected[0].accounts | map_values(.baseline = {}))
+    ' "${root}/data/traffic/state.json" >/dev/null || fail "${protocol}: 累计或 baseline 错误"
+    jq -e --arg alice "${ALICE}" '
+      any(.inbounds[]?.users[]?; .padm_account == $alice and .password == "Alice.-~@+=:Secret")
+    ' "${root}/config/sing-box/users.base" >/dev/null || fail "${protocol}: 基础凭据丢失"
+    jq -e 'all(.inbounds[]?.users[]?; .password != "Alice.-~@+=:Secret")' \
+        "${root}/config/sing-box/config.json" >/dev/null || fail "${protocol}: 超额账号仍在运行配置"
+    for file in results.tsv blocked.tsv; do
+        cmp -- "${source}/data/reality-targets/${file}" "${root}/data/reality-targets/${file}" ||
+            fail "${protocol}: 目标库未按原字节恢复"
+    done
+    cmp -- "${source}/secrets/tls/${DOMAIN}.crt" "${root}/secrets/tls/${DOMAIN}.crt" &&
+        cmp -- "${source}/secrets/tls/${DOMAIN}.key" "${root}/secrets/tls/${DOMAIN}.key" ||
+        fail "${protocol}: TLS 恢复错误"
+    [[ "$(stat -c %a "${root}/config/spec.json")" == 600 &&
+        "$(stat -c %a "${root}/config/share-groups.json")" == 600 &&
+        "$(stat -c %a "${root}/config/sing-box/users.base")" == 600 &&
+        "$(stat -c %a "${root}/data/traffic/state.json")" == 600 &&
+        -e "${MOCK_BACKEND}/compose-container" && -e "${MOCK_BACKEND}/padm-container" ]] ||
+        fail "${protocol}: 私密权限或已启动服务错误"
+    [[ "$(grep -E '^candidate-|^geo-probe$|^up$' "${MOCK_BACKEND}/events")" == \
+        $'candidate-compose\ncandidate-sing-box\nup' ]] ||
+        fail "${protocol}: 未按 Compose、sing-box 校验后再启动"
+    [[ -f "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.timer" &&
+        -e "${MOCK_BACKEND}/enabled" && -e "${MOCK_BACKEND}/active" &&
+        ! -e "${root}/data/net/.hopping-supervisor" &&
+        ! -e "${root}/data/net/port-hopping.state" ]] ||
+        fail "${protocol}: 流量调度缺失或意外启动了跳跃"
+    status=$(dockerMain port-hopping status) || fail "${protocol}: 跳跃状态查询失败"
+    jq -e --slurpfile expected "${source}/config/spec.json" '
+      . == {state:"stopped",saved:$expected[0].port_hopping}
+    ' <<<"${status}" >/dev/null || fail "${protocol}: 跳跃没有保持 stopped 及保存的 tuple"
 }
 
 for action in unconfirmed bad-confirm; do
@@ -693,4 +809,66 @@ cmp -- "${MOCK_BACKEND}/committed-before" "${MOCK_BACKEND}/committed-after" ||
     fail 'cleaning 恢复没有清理登记或锁'
 [[ "$(grep -c '^down$' "${MOCK_BACKEND}/events" || true)" == 0 ]] ||
     fail 'cleaning 恢复停止了成功部署'
+
+prepare_target host-success
+RECOVERY_ARCHIVE="${TEST_ROOT}/host.tar"
+run_child apply ok 0
+assert_deployed "${HOST_SOURCE}"
+[[ ! -e "${root}/.restore-pending" && ! -e "${root}/locks/deployment.lock" ]] ||
+    fail '宿主共存成功事务没有清理登记或锁'
+
+for mode in nginx-fail partial-move health term; do
+    prepare_target "host-${mode}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/host.tar"
+    expected=failure
+    [[ "${mode}" != term ]] || expected=143
+    run_child apply "${mode}" "${expected}"
+    assert_empty
+    if [[ "${mode}" == nginx-fail ]]; then
+        ! grep -q '^up$' "${MOCK_BACKEND}/events" || fail '宿主共存 Nginx 失败后启动了服务'
+    elif [[ "${mode}" == partial-move ]]; then
+        [[ -e "${MOCK_BACKEND}/fault" ]] || fail '宿主共存部分写入故障未注入'
+    fi
+done
+prepare_target host-killed
+RECOVERY_ARCHIVE="${TEST_ROOT}/host.tar"
+run_child apply killed 137
+[[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/compose-container" ]] ||
+    fail '宿主共存硬杀未保留恢复登记与运行现场'
+run_child recover ok 0
+assert_empty
+
+for protocol in hy2 tuic; do
+    prepare_target "hopping-${protocol}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/hopping-${protocol}.tar"
+    run_child apply ok 0
+    assert_hopping_deployed "${protocol}"
+    [[ ! -e "${root}/.restore-pending" && ! -e "${root}/locks/deployment.lock" ]] ||
+        fail "${protocol}: 成功事务没有清理登记或锁"
+done
+
+# 代表协议复用事务故障点，不重复真实跳跃数据面验收。
+for mode in sing-box-fail first-write partial-move health int term; do
+    prepare_target "hopping-${mode}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/hopping-tuic.tar"
+    expected=failure
+    [[ "${mode}" != int ]] || expected=130
+    [[ "${mode}" != term ]] || expected=143
+    run_child apply "${mode}" "${expected}"
+    assert_empty
+    if [[ "${mode}" == sing-box-fail ]]; then
+        ! grep -q '^up$' "${MOCK_BACKEND}/events" || fail 'sing-box 校验失败后启动了服务'
+    fi
+    if [[ "${mode}" == first-write || "${mode}" == partial-move ]]; then
+        [[ -e "${MOCK_BACKEND}/fault" ]] || fail "${mode}: 跳跃恢复故障未注入"
+    fi
+done
+prepare_target hopping-killed
+RECOVERY_ARCHIVE="${TEST_ROOT}/hopping-tuic.tar"
+run_child apply killed 137
+[[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/compose-container" &&
+    ! -e "${root}/data/net/.hopping-supervisor" && ! -e "${root}/data/net/port-hopping.state" ]] ||
+    fail '跳跃恢复硬杀未保留登记，或意外恢复了运行态'
+run_child recover ok 0
+assert_empty
 printf 'docker-recovery-apply-ok: %s cases\n' "${CASES}"

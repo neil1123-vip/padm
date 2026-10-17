@@ -3183,9 +3183,10 @@ dockerRecoveryInputsPrepare() {
     done
     dockerManagedSpecMatchesDeployment "${spec}" "${input}/deployment.json" "${input}/images.env" &&
         jq -e '.schema_version == 3 and .host_integrations == [] and
-          .control == null and .control_sync == null and .reality_stream.host_website == null and
-          .port_hopping == null and .tls.http01 != true' "${spec}" >/dev/null || {
-        dockerError '恢复仅支持 v3 普通部署或受管 Reality 共存；控制角色、宿主集成、宿主网站共存、跳跃和 HTTP-01 尚未接入'
+          .control == null and .control_sync == null and
+          .reality_stream.host_website.network_mode != "host" and
+          .tls.http01 != true' "${spec}" >/dev/null || {
+        dockerError '恢复仅支持 v3 普通部署、受管或桥接宿主网站 Reality 共存及停用跳跃规格；控制角色、宿主集成、host 网络共存和 HTTP-01 尚未接入'
         return 1
     }
     # 未处理的持久输入必须拒绝，生成文件只作证据，不能作为候选执行。

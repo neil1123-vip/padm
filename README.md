@@ -1778,9 +1778,11 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 ```
 
 目标须仅安装控制骨架，配置、数据、密钥、日志和备份目录为空，且没有同项目容器。
-当前接受同架构 v3 普通部署及受管 Reality 共存：核心、手动 TLS、静态站、账号/分享身份、
+当前接受同架构 v3 普通部署、受管或桥接可达宿主网站 Reality 共存：核心、手动 TLS、静态站、账号/分享身份、
 已保存流量、Reality 目标库、下述受限 Geo 数据和停用续期登记；宿主集成、控制角色/同步、
-宿主网站共存、跳跃、HTTP-01 和 ACME 执行配置仍明确拒绝。停用分享组的悬空引用也须先修正。
+host 网络共存、HTTP-01 和 ACME 执行配置仍明确拒绝。停用分享组的悬空引用也须先修正。
+单 sing-box 双族 Hy2/TUIC 可恢复已保存的 `port_hopping` 规格；恢复后为 `stopped`，
+不恢复旧监督进程、规则或运行态。启用前须在目标主机显式执行 `port-hopping start` 并重新预检。
 Reality 仅恢复 `data/reality-targets/results.tsv`（15/16 列 TSV）及 `blocked.tsv`（4 列 `|` 分隔），
 每文件最多 16 MiB，先完整验证再按原字节复制，保留空列、重复项和自定义屏蔽原因。
 目录为 `0700 root:root`、文件为 `0600 root:root`；不联网刷新，不保证旧评分或握手仍有效。
@@ -1791,7 +1793,9 @@ Geo 仅接受包含 Xray 且 `state.enabled=false`（自动更新停用）的固
 续期仅恢复 `enabled=false` 的 DNS、standalone、webroot 或 ALPN 登记及 DNS 凭据，保持原字节和
 `0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记、HTTP-01 和实际 ACME 文件拒绝，
 仅兼容空 `data/acme` 目录。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
-不执行归档 Nginx stream 文件；宿主网站共存不在此范围。
+不执行归档 Nginx stream 文件。桥接宿主网站恢复保留域名、上游地址和端口，
+仅接受 host-gateway 或可路由 IP；回环、host 网络和未处理的 host-main 输入仍拒绝。
+网站服务、内容及其证书仍由宿主维护方提供，不随本归档恢复。
 归档的发布、签名身份、清单摘要和镜像必须与独立验签的发布完全一致。
 预览会创建 `0700` 私密暂存、按需拉取固定摘要镜像并运行候选验证容器；
 从原始规格重新生成候选，不执行归档 Compose、镜像环境文件或脚本。

@@ -101,7 +101,7 @@ docker() {
     esac
 }
 dockerCandidateCompose() {
-    local candidate=$1 marker file relative
+    local candidate=$1 marker file relative core
     shift
     [[ -d "${candidate}" && -e "${root}/locks/deployment.lock" ]] ||
         candidate_fail '候选校验没有持有部署锁'
@@ -122,7 +122,8 @@ dockerCandidateCompose() {
             --slurpfile actual "${candidate}/config/spec.json" '
           $actual[0].core == $expected[0].core and
           $actual[0].accounts == $expected[0].accounts and
-          $actual[0].subscription == $expected[0].subscription
+          $actual[0].subscription == $expected[0].subscription and
+          $actual[0].reality_stream == $expected[0].reality_stream
         ' >/dev/null || candidate_fail '恢复改变了入口、独立账号凭据或订阅身份'
         cmp -- "${SOURCE}/config/share-groups.json" "${candidate}/config/share-groups.json" ||
             candidate_fail '分享组身份或外键改变'
@@ -131,26 +132,40 @@ dockerCandidateCompose() {
           .accounts == ($expected[0].accounts | map_values(.baseline = {}))
         ' "${candidate}/business-traffic.json" >/dev/null ||
             candidate_fail '累计、限额、历史账户或 baseline 恢复错误'
-        jq -e --arg alice "${ALICE}" --arg uuid '44444444-4444-4444-8444-444444444444' '
-          any(.inbounds[]?.settings.clients[]?; .padm_account == $alice and .id == $uuid)
-        ' "${candidate}/config/xray/users.base" >/dev/null ||
-            candidate_fail '超额账号没有保留在私密基础输入'
-        jq -e --arg uuid '44444444-4444-4444-8444-444444444444' '
-          all(.inbounds[]?.settings.clients[]?; .id != $uuid)
-        ' "${candidate}/config/xray/config.json" >/dev/null ||
-            candidate_fail '超额账号仍存在于运行配置'
-        jq -e '.services.xray != null and .services.evil == null' \
+        core=$(jq -r '.core.type' "${EXPECTED_SPEC}")
+        if [[ "${core}" == xray || -f "${candidate}/config/xray/users.base" ]]; then
+            jq -e --arg alice "${ALICE}" --arg uuid '44444444-4444-4444-8444-444444444444' '
+              any(.inbounds[]?.settings.clients[]?; .padm_account == $alice and .id == $uuid)
+            ' "${candidate}/config/xray/users.base" >/dev/null ||
+                candidate_fail '超额账号没有保留在私密基础输入'
+            jq -e --arg uuid '44444444-4444-4444-8444-444444444444' '
+              all(.inbounds[]?.settings.clients[]?; .id != $uuid)
+            ' "${candidate}/config/xray/config.json" >/dev/null ||
+                candidate_fail '超额账号仍存在于运行配置'
+        else
+            jq -e --arg alice "${ALICE}" '
+              any(.inbounds[]?.users[]?; .padm_account == $alice and .password == "Alice.-~@+=:Secret")
+            ' "${candidate}/config/sing-box/users.base" >/dev/null ||
+                candidate_fail 'sing-box 超额账号的基础凭据丢失'
+            jq -e 'all(.inbounds[]?.users[]?; .password != "Alice.-~@+=:Secret")' \
+                "${candidate}/config/sing-box/config.json" >/dev/null ||
+                candidate_fail 'sing-box 超额账号仍存在于运行配置'
+        fi
+        jq -e --arg core "${core}" '.services[$core] != null and .services.evil == null' \
             "${candidate}/compose.json" >/dev/null ||
             candidate_fail '使用了源归档 Compose 或没有重新生成'
         [[ "$(stat -c %a "${candidate}/config/spec.json")" == 600 &&
-            "$(stat -c %a "${candidate}/config/xray/users.base")" == 600 &&
+            "$(stat -c %a "${candidate}/config/${core}/users.base")" == 600 &&
             "$(stat -c %a "${candidate}/config/share-groups.json")" == 600 ]] ||
             candidate_fail '私密候选文件权限过宽'
         if jq -e '.tls != null' "${EXPECTED_SPEC}" >/dev/null; then
             cmp -- "${SOURCE}/secrets/tls/${DOMAIN}.crt" "${candidate}/secrets/tls/${DOMAIN}.crt" &&
-                cmp -- "${SOURCE}/secrets/tls/${DOMAIN}.key" "${candidate}/secrets/tls/${DOMAIN}.key" &&
+                cmp -- "${SOURCE}/secrets/tls/${DOMAIN}.key" "${candidate}/secrets/tls/${DOMAIN}.key" ||
+                candidate_fail 'TLS 没有恢复到候选'
+            if jq -e '.site.mode == "static"' "${EXPECTED_SPEC}" >/dev/null; then
                 cmp -- "${SOURCE}/data/static/index.html" "${candidate}/data/static/index.html" ||
-                candidate_fail 'TLS 或静态资源没有恢复到候选'
+                    candidate_fail '静态资源没有恢复到候选'
+            fi
         else
             [[ -z "$(find "${candidate}/secrets/tls" -mindepth 1 -print -quit)" ]] ||
                 candidate_fail '无 TLS 规格意外恢复了 TLS 输入'
@@ -183,16 +198,45 @@ dockerCandidateCompose() {
             cmp -- "${candidate}/config/nginx/stream/reality.conf" \
                 <(dockerGenerateRealityStreamConfig "${EXPECTED_SPEC}" /dev/stdout) ||
                 candidate_fail '共存 stream 未由规格重新生成'
-            jq -e '.services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp"] and
-              .services.nginx.ports == ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] and
+            jq -e --slurpfile spec "${EXPECTED_SPEC}" '
+              .services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp"] and
+              .services.nginx.ports ==
+                (if $spec[0].reality_stream.host_website != null then
+                  ["0.0.0.0:24443:8443/tcp","[::]:24443:8443/tcp"] else [] end +
+                  ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"]) and
+              (if $spec[0].reality_stream.host_website != null then
+                .services.nginx.extra_hosts == ["host.docker.internal:host-gateway"]
+               else true end) and
               any(.services.nginx.volumes[]; .target == "/etc/nginx/stream.d" and .read_only == true)
             ' "${candidate}/compose.json" >/dev/null || candidate_fail '共存 Compose 映射错误'
-            jq -e '[.listeners[] | select(.listener_id == "entry-site" or .listener_id == "entry-reality")] |
-              length == 2 and all(.[]; .service == "nginx" and .public_port == 443 and .container_port == 15443)
+            jq -e --slurpfile spec "${EXPECTED_SPEC}" '
+              [.listeners[] | select(.listener_id == "entry-site" or .listener_id == "entry-reality")] |
+              length == 2 and all(.[]; .service == "nginx" and
+                if $spec[0].reality_stream.host_website != null and .listener_id == "entry-site" then
+                  .public_port == 24443 and .container_port == 8443
+                else .public_port == 443 and .container_port == 15443 end)
             ' "${candidate}/deployment.json" >/dev/null || candidate_fail '共存部署有效公网端口错误'
             grep -q '@proxy.example.com:443?' "${candidate}/data/subscription/${TOKEN}" &&
                 grep -q '@proxy.example.com:24445?' "${candidate}/data/subscription/${TOKEN}" ||
                 candidate_fail '共存订阅没有保留有效公网端口及未绑定入口'
+            if jq -e '.reality_stream.host_website != null' "${EXPECTED_SPEC}" >/dev/null; then
+                grep -q '@proxy.example.com:24443?' "${candidate}/data/subscription/${TOKEN}" ||
+                    candidate_fail '宿主共存改变了独立受管网站入口的订阅端口'
+            fi
+        fi
+        if jq -e '.port_hopping != null' "${EXPECTED_SPEC}" >/dev/null; then
+            jq -en --slurpfile expected "${EXPECTED_SPEC}" \
+                --slurpfile actual "${candidate}/config/spec.json" \
+                --slurpfile deployment "${candidate}/deployment.json" \
+                --slurpfile compose "${candidate}/compose.json" '
+              $expected[0].port_hopping as $saved |
+              $actual[0].port_hopping == $saved and $deployment[0].port_hopping == $saved and
+              $compose[0]["x-padm-port-hopping"] == $saved and
+              ($compose[0].services | keys) == ["acme","sing-box"]
+            ' >/dev/null || candidate_fail '跳跃 tuple 未同步或意外生成了跳跃服务'
+            [[ ! -e "${candidate}/data/net/.hopping-supervisor" &&
+                ! -e "${candidate}/data/net/port-hopping.state" ]] ||
+                candidate_fail '跳跃恢复候选包含运行态'
         fi
         : >"${marker}"
         printf '%s\n' "${MODE}" >>"${TEST_ROOT}/candidate-checked"
@@ -204,6 +248,10 @@ dockerCandidateCompose() {
     if [[ "$*" == --file*' nginx -t' ]]; then
         printf '%s\n' "${MODE}" >>"${TEST_ROOT}/nginx-checked"
         [[ "${MODE}" != nginx-fail ]] || return 1
+    fi
+    if [[ "$*" == 'run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json' ]]; then
+        printf '%s\n' "${MODE}" >>"${TEST_ROOT}/sing-box-checked"
+        [[ "${MODE}" != sing-box-fail ]] || return 1
     fi
     [[ "${MODE}" != validation-fail ]]
 }
@@ -444,12 +492,57 @@ jq '.reality_stream = {listener_id:"entry-reality",host_website:{
   domains:["host.example.com"],address:"host.docker.internal",port:8443}}' \
     "${VARIANT}/config/spec.json" >"${TEST_ROOT}/host.json"
 cat -- "${TEST_ROOT}/host.json" >"${VARIANT}/config/spec.json"
-dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail '宿主网站拒绝夹具无效'
+dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail '桥接宿主网站夹具无效'
 dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+HOST_SOURCE=${VARIANT}
 export_variant stream-host
 prepare_target stream-host
-run_case stream-host "${TEST_ROOT}/stream-host.tar" "${PADM_DOCKER_RC_STATE}"
-grep -q '宿主网站共存' "${LOG}" || fail '宿主网站未明确拒绝'
+EXPECTED_SPEC="${HOST_SOURCE}/config/spec.json"
+run_case stream-host "${TEST_ROOT}/stream-host.tar" 0
+jq -e '.listeners == [{listener_id:"entry-site",public_port:24443},
+  {listener_id:"entry-reality",public_port:443},{listener_id:"entry-other",public_port:24445}]' \
+    <(sed -n '/^{/,$p' "${LOG}") >/dev/null || fail '宿主共存预览改变了独立网站或未绑定入口端口'
+
+prepare_target stream-host-nginx-fail
+EXPECTED_SPEC="${HOST_SOURCE}/config/spec.json"
+MODE=nginx-fail
+run_case stream-host-nginx-fail "${TEST_ROOT}/stream-host.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q 'Nginx 候选配置校验失败' "${LOG}" || fail '宿主共存 Nginx 失败未明确拒绝'
+
+jq 'del(.["x-padm-reality-stream-host-website"])' "${TEST_ROOT}/schema.json" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+prepare_target stream-host-missing-capability
+run_case stream-host-missing-capability "${TEST_ROOT}/stream-host.tar" "${PADM_DOCKER_RC_MANIFEST}"
+grep -q '目标控制 bundle 不支持' "${LOG}" || fail '宿主共存能力缺失未明确拒绝'
+cp -- "${TEST_ROOT}/schema.json" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
+for variant in host-network loopback host-main; do
+    VARIANT="${TEST_ROOT}/variant-stream-${variant}"
+    cp -a -- "${HOST_SOURCE}" "${VARIANT}"
+    case "${variant}" in
+    host-network)
+        jq '.reality_stream.host_website |= (.address = "127.0.0.1" | .network_mode = "host")' \
+            "${VARIANT}/config/spec.json" >"${TEST_ROOT}/host.json"
+        cat -- "${TEST_ROOT}/host.json" >"${VARIANT}/config/spec.json"
+        dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail 'host 网络拒绝夹具无效'
+        dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json" ;;
+    loopback)
+        jq '.reality_stream.host_website.address = "127.0.0.1"' \
+            "${VARIANT}/config/spec.json" >"${TEST_ROOT}/host.json"
+        cat -- "${TEST_ROOT}/host.json" >"${VARIANT}/config/spec.json" ;;
+    host-main)
+        printf 'untrusted host network config;\n' >"${VARIANT}/config/nginx/stream/host-main"
+        chmod 0640 "${VARIANT}/config/nginx/stream/host-main" ;;
+    esac
+    export_variant "stream-${variant}"
+    prepare_target "stream-${variant}"
+    run_case "stream-${variant}" "${TEST_ROOT}/stream-${variant}.tar" "${PADM_DOCKER_RC_STATE}"
+    if [[ "${variant}" == host-network ]]; then
+        grep -q 'host 网络共存' "${LOG}" || fail 'host 网络共存未明确拒绝'
+    elif [[ "${variant}" == host-main ]]; then
+        grep -q '尚未接入恢复的持久输入' "${LOG}" || fail 'host-main 未处理输入未明确拒绝'
+    fi
+done
 
 archive_variant geo
 mkdir -m 0750 -- "${VARIANT}/config/xray/geo"
@@ -559,6 +652,93 @@ prepare_target no-tls
 EXPECTED_SPEC="${VARIANT}/config/spec.json"
 run_case no-tls "${TEST_ROOT}/no-tls.tar" 0
 
+for protocol in hy2 tuic; do
+    archive_variant "hopping-${protocol}" config/spec.json '
+      .core.type = "sing-box" | .core.secondary_type = null |
+      .core.protocols = [(.core.protocols[0] | del(.websocket) |
+        .id = 3 | .core = "sing-box" | .public_port = 35442 |
+        .hy2 = {domain:"ws.example.com",bandwidth_mode:"bbr",up_mbps:100,down_mbps:100,
+          obfs:null,masquerade:""})] |
+      .subscription.enabled = false | del(.site) |
+      .port_hopping = {listener_id:"entry-site",range_start:36000,range_end:36002,
+        ipv4:"198.18.1.1",ipv6:"2001:db8:1::1"}'
+    if [[ "${protocol}" == tuic ]]; then
+        jq '.core.protocols[0] |= (del(.hy2) | .id = 31 |
+          .tuic = {domain:"ws.example.com",congestion_control:"cubic",
+            auth_timeout:"3s",heartbeat:"10s",zero_rtt_handshake:false})' \
+            "${VARIANT}/config/spec.json" >"${TEST_ROOT}/hopping.json"
+        cat -- "${TEST_ROOT}/hopping.json" >"${VARIANT}/config/spec.json"
+    fi
+    rm -rf -- "${VARIANT}/config/xray" "${VARIANT}/config/nginx" \
+        "${VARIANT}/data/static" "${VARIANT}/data/subscription"
+    dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail "${protocol} 跳跃夹具无效"
+    dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+    export_variant "hopping-${protocol}"
+    prepare_target "hopping-${protocol}"
+    EXPECTED_SPEC="${VARIANT}/config/spec.json"
+    run_case "hopping-${protocol}" "${TEST_ROOT}/hopping-${protocol}.tar" 0
+done
+HOPPING_SOURCE=${VARIANT}
+prepare_target hopping-sing-box-fail
+EXPECTED_SPEC="${HOPPING_SOURCE}/config/spec.json"
+MODE=sing-box-fail
+run_case hopping-sing-box-fail "${TEST_ROOT}/hopping-tuic.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q 'sing-box 候选配置校验失败' "${LOG}" || fail 'sing-box 失败未明确拒绝'
+
+for variant in tuple topology unknown-net; do
+    VARIANT="${TEST_ROOT}/variant-hopping-${variant}"
+    cp -a -- "${HOPPING_SOURCE}" "${VARIANT}"
+    if [[ "${variant}" == unknown-net ]]; then
+        mkdir -p -- "${VARIANT}/config/net"
+        printf 'unhandled-input\n' >"${VARIANT}/config/net/unknown.conf"
+        chmod 0640 "${VARIANT}/config/net/unknown.conf"
+    else
+        filter='.port_hopping.range_start = 0'
+        [[ "${variant}" != topology ]] || filter='.core.protocols[0].address_families = ["ipv4"]'
+        jq "${filter}" "${VARIANT}/config/spec.json" >"${TEST_ROOT}/hopping.json"
+        cat -- "${TEST_ROOT}/hopping.json" >"${VARIANT}/config/spec.json"
+        dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+    fi
+    export_variant "hopping-${variant}"
+    prepare_target "hopping-${variant}"
+    run_case "hopping-${variant}" "${TEST_ROOT}/hopping-${variant}.tar" "${PADM_DOCKER_RC_STATE}"
+done
+
+# 运行态不在归档白名单，伪造完整清单及摘要也不能将监督或规则状态带入目标。
+python3 -B - "${TEST_ROOT}/hopping-tuic.tar" "${TEST_ROOT}/hopping-runtime.tar" <<'PY'
+import hashlib
+import io
+import json
+import os
+import sys
+import tarfile
+with tarfile.open(sys.argv[1], "r:") as source:
+    records = [(entry, source.extractfile(entry).read() if entry.isfile() else None)
+               for entry in source]
+manifest = json.loads(next(data for entry, data in records if entry.name == "manifest.json"))
+for path, data in (("data/net", None), ("data/net/.hopping-supervisor", None),
+                   ("data/net/.hopping-supervisor/pid", b"123\n"),
+                   ("data/net/port-hopping.state", b"runtime-state\n")):
+    entry = tarfile.TarInfo(path)
+    entry.type = tarfile.DIRTYPE if data is None else tarfile.REGTYPE
+    entry.mode = 0o700 if data is None else 0o600
+    entry.size = len(data) if data is not None else 0
+    records.append((entry, data))
+    manifest["entries"].append(dict(path=path, type="directory" if data is None else "file",
+                                    mode=entry.mode, size=entry.size,
+                                    sha256=hashlib.sha256(data).hexdigest() if data is not None else None))
+manifest["entries"].sort(key=lambda entry: entry["path"])
+with tarfile.open(sys.argv[2], "w", format=tarfile.USTAR_FORMAT) as target:
+    for entry, data in records:
+        if entry.name == "manifest.json":
+            data = json.dumps(manifest, separators=(",", ":")).encode()
+            entry.size = len(data)
+        target.addfile(entry, io.BytesIO(data) if data is not None else None)
+os.chmod(sys.argv[2], 0o600)
+PY
+prepare_target hopping-runtime
+run_case hopping-runtime "${TEST_ROOT}/hopping-runtime.tar" "${PADM_DOCKER_RC_STATE}"
+
 prepare_target corrupt
 printf 'not a recovery archive\n' >"${TEST_ROOT}/corrupt.tar"
 chmod 0600 "${TEST_ROOT}/corrupt.tar"
@@ -651,7 +831,9 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 13 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 18 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
+[[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&
+    grep -q '^sing-box-fail$' "${TEST_ROOT}/sing-box-checked" || fail 'sing-box 候选检查次数错误'
 printf 'docker-recovery-preview-ok: %s cases\n' "${CASES}"
