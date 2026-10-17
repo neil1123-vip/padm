@@ -1901,6 +1901,42 @@ dockerWireGuardMigrationRoleCheck() {
     }
 }
 
+dockerWireGuardMigrationSpecRole() {
+    local previous=$1 source=$2 input=$3 root directory
+    root=$(dockerInstallRoot) || return 1
+    directory=${input%/wireguard}
+    [[ "${directory#"${root}/.wireguard."}" =~ ^[A-Za-z0-9]{6}$ &&
+        "${source}" == "${directory}/spec.json" &&
+        -f "${source}" && ! -L "${source}" &&
+        "$(stat -c '%u:%g:%a:%h' -- "${source}")" == 0:0:600:1 ]] &&
+        dockerTrafficSafePath "${root}" "${source}" || return 1
+    # 关联改址只能改角色地址；主控同时撤权，其余身份、版本和业务输入全部冻结。
+    jq -ern --slurpfile current "${previous}" --slurpfile next "${source}" '
+      select(($current | length) == 1 and ($next | length) == 1) |
+      $current[0] as $old | $next[0] as $new |
+      if $old.control.role == "main" and $new.control.role == "main" and
+        $old.control_sync == null and $new.control_sync == null and
+        $new.control.peer.enabled == false and $new.control.peer.expires_at == 1 and
+        ($old.control.listen.address != $new.control.listen.address or
+          $old.control.peer.address != $new.control.peer.address) and
+        ($old | del(.control.listen.address,.control.peer.address,
+          .control.peer.enabled,.control.peer.expires_at)) ==
+        ($new | del(.control.listen.address,.control.peer.address,
+          .control.peer.enabled,.control.peer.expires_at))
+      then "main"
+      elif $old.control == null and $new.control == null and
+        $old.control_sync.role == "controlled" and $new.control_sync.role == "controlled" and
+        ($old.control_sync.connection | type) == "object" and
+        ($new.control_sync.connection | type) == "object" and
+        ($old.control_sync.connection.listen.address != $new.control_sync.connection.listen.address or
+          $old.control_sync.connection.peer_address != $new.control_sync.connection.peer_address) and
+        ($old | del(.control_sync.connection.listen.address,.control_sync.connection.peer_address)) ==
+        ($new | del(.control_sync.connection.listen.address,.control_sync.connection.peer_address))
+      then "controlled"
+      else empty end
+    ' 2>/dev/null
+}
+
 dockerWireGuardMigrationDependenciesCheck() {
     local spec=$1 root directory role
     role=$(jq -er 'if has("control") then "main"
@@ -7735,8 +7771,10 @@ dockerRealityStreamTransitionPrepare() {
 
 dockerConfigureApply() {
     local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} siteTitle=${9:-}
-    local specFile candidate backup answer root managedFile backupPrefix=configure geoEnabled=false renewalEnabled=false
+    local specFile candidate backup answer root managedFile wireguardRole backupPrefix=configure geoEnabled=false renewalEnabled=false
     local DOCKER_WIREGUARD_INPUT=${10:-}
+    local DOCKER_CONTROL_TRANSACTION=${DOCKER_CONTROL_TRANSACTION:-0}
+    local DOCKER_CONTROL_SYNC_TRANSACTION=${DOCKER_CONTROL_SYNC_TRANSACTION:-0}
     # 来源输入仅在本次调用栈共享，恢复复用输入但不复用来源证明。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
@@ -7759,12 +7797,27 @@ dockerConfigureApply() {
                 dockerWireGuardMigrationDirectoryCheck "${DOCKER_WIREGUARD_INPUT}" &&
                 jq -e 'any(.host_integrations[]; .type == "wireguard")' "${sourceSpec}" >/dev/null ||
                 return "${PADM_DOCKER_RC_STATE}"
-            [[ "${sourceSpec}" == "${root}/config/spec.json" ]] ||
-                return "${PADM_DOCKER_RC_STATE}"
-            dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${root}/secrets/net/wireguard" &&
-                dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${DOCKER_WIREGUARD_INPUT}" &&
-                dockerWireGuardMigrationDependenciesCheck "${sourceSpec}" ||
-                return "${PADM_DOCKER_RC_CONFLICT}"
+            if [[ "${sourceSpec}" == "${root}/config/spec.json" ]]; then
+                dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${root}/secrets/net/wireguard" &&
+                    dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${DOCKER_WIREGUARD_INPUT}" &&
+                    dockerWireGuardMigrationDependenciesCheck "${sourceSpec}" ||
+                    return "${PADM_DOCKER_RC_CONFLICT}"
+            else
+                [[ "${sourceSpec}" == "${DOCKER_WIREGUARD_INPUT%/wireguard}/spec.json" ]] ||
+                    return "${PADM_DOCKER_RC_STATE}"
+                wireguardRole=$(dockerWireGuardMigrationSpecRole "${root}/config/spec.json" \
+                    "${sourceSpec}" "${DOCKER_WIREGUARD_INPUT}") &&
+                    dockerWireGuardMigrationRoleCheck "${root}/config/spec.json" "${root}/secrets/net/wireguard" &&
+                    dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${DOCKER_WIREGUARD_INPUT}" &&
+                    dockerWireGuardMigrationDependenciesCheck "${root}/config/spec.json" ||
+                    return "${PADM_DOCKER_RC_CONFLICT}"
+                # 只在完整差异与双端地址均核准后授权本次调用，继承的控制事务继续有效。
+                case "${wireguardRole}" in
+                main) DOCKER_CONTROL_TRANSACTION=1 ;;
+                controlled) DOCKER_CONTROL_SYNC_TRANSACTION=1 ;;
+                *) return "${PADM_DOCKER_RC_CONFLICT}" ;;
+                esac
+            fi
         fi
     fi
     case "${mode}" in

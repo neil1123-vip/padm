@@ -575,7 +575,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 已登记 `start/stop` 仅操作精确审计的 WireGuard 容器。`stop` 保留规格和容器，
 `up/restart` 可重新启用；有 `control/control_sync` 依赖时拒绝单独停止。
 沿用现有 owner/preflight/run/cleanup/health，拒绝归属漂移。CLI 示例及定向、隔离 amd64 真实验收证据见实施计划；
-4C.8 的同隧道主控重绑定及 4C.9–4C.10 的单 Peer 连接迁移见下文；多 Peer、控制角色地址迁移、
+4C.8 的同隧道主控重绑定及 4C.9–4C.11 的单 Peer 连接迁移见下文；多 Peer、
 角色灾备及原生双架构、重启、公网边界不变。
 
 4C.8 新增 `control rebind --invite <私有文件> [--yes]` 及控制菜单 `19`。
@@ -586,7 +586,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 复用原锁、私密邀请、健康和失败/INT/TERM 恢复；同版幂等。
 普通 sync/reconnect 拒绝旧主控邀请，再次显式 rebind 可主动切回。
 客户端/事务/控制菜单及隔离 amd64 双部署生产 CLI、真实业务检查通过，
-该入口保持 WireGuard 参数不变，网络参数更新见 4C.9–4C.10；完整状态保持 `deferred`。
+该入口保持 WireGuard 参数不变，网络参数更新见 4C.9–4C.11；完整状态保持 `deferred`。
 
 4C.9 增加 `wireguard migrate` 和 WireGuard 子菜单 `6`，限已登记且运行健康、
 无控制角色的 4C.7 canonical 三件套。可合并更换本机地址/监听端口、Peer 地址/公钥、
@@ -603,7 +603,12 @@ endpoint 及轮换本机密钥；省略保持，endpoint `none` 清空，同配�
 被控先停自动同步；拒绝残留来源挑战。成功后沿用原邀请，防护重新执行 fresh 来源核验。
 失败和 INT/TERM 恢复撤销主控 Peer 授权，须重新邀请，不能沿用成功路径的授权。
 定向与隔离 amd64 真实双端业务、旧邀请、来源更新和失败恢复通过。
-控制角色地址变更、多 Peer、主控灾备及原生宿主验收继续 deferred；被控空目标恢复见 6A.16。
+4C.11 允许主控/已接入被控将角色地址与 canonical 隧道三件套关联迁移。
+仅白名单地址变化，主控同时撤权；身份、API 端口、版本、账号和累计冻结。
+失败及 INT/TERM 恢复旧地址/密钥并保持主控撤权；普通回滚拒绝跨控制地址。
+双方逐端迁移后重新邀请、同步及 fresh 来源核验，依赖调度/防护门禁与 4C.10 相同。
+定向与隔离 amd64 真实双端改址、加密业务、旧邀请拒绝、版本保护及失败恢复已验。
+多 Peer、主控灾备及原生宿主验收继续 deferred；被控空目标恢复见 6A.16。
 
 6A.8 将空目标恢复扩展到单 sing-box 双族 Hy2/TUIC 的已保存 `port_hopping` 规格。
 候选重新校验，身份、累计及 tuple 保留；恢复后状态为 `stopped`，不恢复旧监督进程、

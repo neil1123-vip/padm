@@ -853,6 +853,10 @@ runDockerWireGuardControlRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-control-only
 }
 
+runDockerWireGuardAddressRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-address-only
+}
+
 runDockerWireGuardRecoveryRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-recovery-only
 }
@@ -1219,6 +1223,7 @@ registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntim
 registerRegressionFunctionLeaf docker-wireguard-migration-focused runDockerWireGuardMigrationRegression
 registerRegressionFunctionLeaf docker-wireguard-cli-real runDockerWireGuardCliRealRegression
 registerRegressionFunctionLeaf docker-wireguard-control-real runDockerWireGuardControlRealRegression
+registerRegressionFunctionLeaf docker-wireguard-address-real runDockerWireGuardAddressRealRegression
 registerRegressionFunctionLeaf docker-wireguard-recovery-real runDockerWireGuardRecoveryRealRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-focused runDockerRedirectOwnershipRegression

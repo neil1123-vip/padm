@@ -84,7 +84,7 @@ dockerWireGuardMigrate() (
     trap 'status=$?; trap - EXIT INT TERM; dockerConfigurationInterrupted; exit "${status}"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    dockerConfigureApply "${root}/config/spec.json" '' '' configure '' '' '' '' '' "${input}"
+    dockerConfigureApply "${MIGRATION_SPEC:-${root}/config/spec.json}" '' '' configure '' '' '' '' '' "${input}"
 )
 fixture() {
     root=$(mktemp -d "${TEST_ROOT}/case.XXXXXX")
@@ -124,6 +124,7 @@ fixture() {
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_WIREGUARD_MIGRATION=0
     DOCKER_CONFIG_WIREGUARD_SOURCE=
+    MIGRATION_SPEC=
     MODE=ok
 }
 assertOld() {
@@ -396,6 +397,137 @@ for role in main controlled; do
     [[ "${status}" == "${PADM_DOCKER_RC_CONFLICT}" && ! -s "${CALLS}" ]]
     diff -qr -- "${root}/expected" "${root}/secrets/net/wireguard"
     assertRoleKept
+done
+
+roleAddressFixture() {
+    local role=$1 directory
+    roleFixture "${role}"
+    directory=$(mktemp -d "${root}/.wireguard.XXXXXX")
+    input="${directory}/wireguard"
+    python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate \
+        --directory "${root}/secrets/net/wireguard" --destination "${input}" \
+        --address 10.88.0.1 --peer-address 10.88.0.2 --listen-port 51821 \
+        --private-key "${root}/new-private" --public-key "${root}/new-public" \
+        --peer-public-key "$(cat "${root}/old-public")" --endpoint 192.0.2.1:51821 >/dev/null
+    MIGRATION_SPEC="${directory}/spec.json"
+    jq --arg role "${role}" '
+      if $role == "main" then
+        .control.listen.address = "10.88.0.1" | .control.peer.address = "10.88.0.2" |
+        .control.peer.enabled = false | .control.peer.expires_at = 1
+      else
+        .control_sync.connection.peer_address = "10.88.0.1" |
+        .control_sync.connection.listen.address = "10.88.0.2"
+      end' "${root}/config/spec.json" >"${MIGRATION_SPEC}"
+    chmod 0600 "${MIGRATION_SPEC}"
+}
+assertRoleRestored() {
+    local role=$1
+    diff -qr -- "${root}/expected" "${root}/secrets/net/wireguard"
+    cmp -s -- "${root}/data/traffic/state.json" "${root}/traffic-before.json"
+    if [[ "${role}" == main ]]; then
+        jq -e --slurpfile before "${root}/role-before.json" '
+          .control.peer.enabled == false and .control.peer.expires_at == 1 and
+          del(.control.peer.enabled,.control.peer.expires_at) ==
+            ($before[0] | del(.control.peer.enabled,.control.peer.expires_at))
+        ' "${root}/config/spec.json" >/dev/null
+        dockerControlStateCheck "${root}"
+    else
+        cmp -s -- "${root}/config/spec.json" "${root}/role-before.json"
+    fi
+    checks=$((checks + 1))
+}
+
+for role in main controlled; do
+    roleAddressFixture "${role}"
+    runMigration 0
+    diff -qr -- "${input}" "${root}/secrets/net/wireguard"
+    jq -en --slurpfile expected "${MIGRATION_SPEC}" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null
+    cmp -s -- "${root}/data/traffic/state.json" "${root}/traffic-before.json"
+    [[ "${role}" != main ]] || dockerControlStateCheck "${root}"
+    [[ "${DOCKER_CONTROL_TRANSACTION:-0}" == 0 && "${DOCKER_CONTROL_SYNC_TRANSACTION:-0}" == 0 ]]
+    checks=$((checks + 1))
+
+    for MODE_CASE in fail-up INT TERM owner-drift; do
+        roleAddressFixture "${role}"
+        MODE=${MODE_CASE}
+        expected=14
+        [[ "${MODE}" != INT ]] || expected=130
+        [[ "${MODE}" != TERM ]] || expected=143
+        runMigration "${expected}"
+        assertRoleRestored "${role}"
+        if [[ "${MODE}" == owner-drift ]]; then
+            ! grep -qxF stop "${CALLS}"
+        else
+            grep -qxF down "${CALLS}"
+        fi
+    done
+    for MODE_CASE in directory-drift runtime-drift; do
+        roleAddressFixture "${role}"
+        MODE=${MODE_CASE}
+        runMigration 14
+        diff -qr -- "${input}" "${root}/secrets/net/wireguard"
+        ! grep -qxF down "${CALLS}"
+        previous=$(find "${root}" -path '*/wireguard.previous/identity.json' -print)
+        [[ -n "${previous}" ]]
+        diff -qr -- "${root}/expected" "${previous%/identity.json}"
+        jq -en --slurpfile expected "${MIGRATION_SPEC}" --slurpfile actual "${root}/config/spec.json" \
+            '$actual == $expected' >/dev/null
+        cmp -s -- "${root}/data/traffic/state.json" "${root}/traffic-before.json"
+        checks=$((checks + 1))
+    done
+
+    for mutation in identity revision accounts images port role unchanged-address wrong-address \
+        public-spec linked-spec main-authorized; do
+        [[ "${mutation}" != main-authorized || "${role}" == main ]] || continue
+        roleAddressFixture "${role}"
+        case "${mutation}" in
+        identity)
+            jq 'if has("control") then .control.node_id = "00000008-1111-4111-8111-000000000008"
+              else .control_sync.controller_id = "00000008-1111-4111-8111-000000000008" end' \
+                "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        revision)
+            jq 'if has("control") then .control.revision += 1 else .control_sync.last_revision += 1 end' \
+                "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        accounts)
+            jq '.accounts[0].name = "越界修改"' "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        images)
+            jq '.images.net = "different"' "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        port)
+            jq 'if has("control") then .control.listen.port += 1
+              else .control_sync.connection.listen.port += 1 end' \
+                "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        role)
+            jq 'if has("control") then .control.role = "controlled" else .control_sync.role = "main" end' \
+                "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        unchanged-address)
+            jq --slurpfile before "${root}/role-before.json" '
+              if has("control") then
+                .control.listen.address = $before[0].control.listen.address |
+                .control.peer.address = $before[0].control.peer.address
+              else .control_sync.connection = $before[0].control_sync.connection end' \
+                "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        wrong-address)
+            jq 'if has("control") then .control.listen.address = "10.88.0.9"
+              else .control_sync.connection.peer_address = "10.88.0.9" end' \
+                "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        public-spec) chmod 0640 "${MIGRATION_SPEC}" ;;
+        linked-spec)
+            mv -- "${MIGRATION_SPEC}" "${root}/linked-spec.json"
+            ln -s -- "${root}/linked-spec.json" "${MIGRATION_SPEC}" ;;
+        main-authorized)
+            jq '.control.peer.enabled = true | .control.peer.expires_at = 2000000000' \
+                "${MIGRATION_SPEC}" >"${root}/mutation.json" ;;
+        esac
+        if [[ -f "${root}/mutation.json" ]]; then
+            mv -- "${root}/mutation.json" "${MIGRATION_SPEC}"
+            chmod 0600 "${MIGRATION_SPEC}"
+        fi
+        runMigration "${PADM_DOCKER_RC_CONFLICT}"
+        [[ ! -s "${CALLS}" ]]
+        diff -qr -- "${root}/expected" "${root}/secrets/net/wireguard"
+        assertRoleKept
+    done
 done
 
 printf 'docker-wireguard-migration-regression-ok: %s checks\n' "${checks}"

@@ -1178,7 +1178,7 @@ and container; ordinary `up/restart` can start it again. A `control` or `control
 blocks an independent stop. The existing owner/preflight/run/cleanup/health runtime is reused,
 and ownership drift is rejected. Focused checks and isolated Linux amd64 production CLI tests passed,
 including preparation from a standalone deployment, bidirectional encrypted traffic and exact-container restart.
-Multiple Peers, control-role address changes, role disaster recovery, native dual-architecture,
+Multiple Peers, role disaster recovery, native dual-architecture,
 host-reboot and public-network acceptance remain outside this checkpoint.
 
 After the managed connection is healthy, initialize the controller:
@@ -1269,7 +1269,7 @@ Ordinary sync/reconnect reject the previous controller's invitation; a later exp
 deliberately switch back. Enable auto-sync again with the new invitation after committing.
 Focused client, transaction and control-menu checks and isolated amd64 dual-deployment production
 CLI/Compose tests passed, including real traffic, health-failure recovery and preserved totals.
-Multiple Peers, control-role address changes and role disaster recovery remain deferred.
+Control-role address migration is described in 4C.11 below; multiple Peers and role disaster recovery remain deferred.
 
 4C.9 adds `wireguard migrate` and WireGuard submenu item `6` for a healthy registered single-Peer
 deployment prepared by 4C.7, without `control` or `control_sync`:
@@ -1302,7 +1302,15 @@ Unfinished source challenges are rejected. Successful migration keeps the invita
 protection again runs a fresh source check. Controller failure or INT/TERM recovery revokes Peer
 authorization and requires a new invitation. Focused and isolated amd64 dual-deployment checks passed,
 including encrypted traffic, the original invitation, fresh source proof and failure recovery.
-Multiple Peers, control-role address changes and role disaster recovery remain deferred.
+4C.11 extends the same command/menu to linked controller or joined controlled-node address changes.
+The canonical tunnel and the role's local/Peer addresses commit together. Identity, API port, accounts,
+sync revision/digest and traffic totals stay unchanged. Disable the same scheduling/protection first.
+Controller address changes revoke the old invitation; update both nodes, issue a new invitation,
+sync and verify a fresh source. Failure or INT/TERM restores the old addresses and keys while keeping
+controller authorization revoked. Ordinary rollback rejects snapshots from a different control tuple.
+Focused and isolated Linux amd64 dual-daemon tests cover migration, encrypted traffic, invitation
+revocation, same-version sync, lower-version rejection and health-failure recovery.
+Multiple Peers, controller disaster recovery and native-host/arm64/public-network acceptance remain deferred.
 After control-token rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.

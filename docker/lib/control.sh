@@ -1468,6 +1468,7 @@ dockerControlStatus() (
 
 dockerWireGuardMigrate() (
     local spec=$1 directory=$2 rotate=$3 root draft= image status=0 file unchanged=1 public derived
+    local candidateSpec=$1 previousAddresses addresses
     shift 3
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     trap 'status=$?; trap - EXIT INT TERM; dockerConfigurationInterrupted;
@@ -1510,7 +1511,27 @@ dockerWireGuardMigrate() (
     fi
     python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate --directory "${directory}" \
         --destination "${draft}/wireguard" "$@" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
-    dockerWireGuardMigrationRoleCheck "${spec}" "${draft}/wireguard" ||
+    if jq -e 'has("control") or has("control_sync")' "${spec}" >/dev/null; then
+        previousAddresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses \
+            --directory "${directory}") &&
+            addresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses \
+                --directory "${draft}/wireguard") || return "${PADM_DOCKER_RC_STATE}"
+        if [[ "${previousAddresses}" != "${addresses}" ]]; then
+            candidateSpec="${draft}/spec.json"
+            # 地址随隧道在同一事务更新；主控撤权后须重新邀请并核验来源。
+            (umask 077; jq --argjson addresses "${addresses}" '
+              if has("control") then
+                .control.listen.address = $addresses.address |
+                .control.peer.address = $addresses.peer_address |
+                .control.peer.enabled = false | .control.peer.expires_at = 1
+              else
+                .control_sync.connection.peer_address = $addresses.address |
+                .control_sync.connection.listen.address = $addresses.peer_address
+              end' "${spec}" >"${candidateSpec}") &&
+                chmod 0600 "${candidateSpec}" || return "${PADM_DOCKER_RC_STATE}"
+        fi
+    fi
+    dockerWireGuardMigrationRoleCheck "${candidateSpec}" "${draft}/wireguard" ||
         return "${PADM_DOCKER_RC_CONFLICT}"
     for file in identity.json private.key wg-padm.conf; do
         cmp -s -- "${directory}/${file}" "${draft}/wireguard/${file}" || unchanged=0
@@ -1520,8 +1541,10 @@ dockerWireGuardMigrate() (
         return 0
     fi
     # 私密候选随原配置事务一起切换；双方逐端迁移，远端握手不作为单端提交条件。
-    dockerConfigureApply "${spec}" '' '' configure '' '' '' '' '' "${draft}/wireguard" || return $?
+    dockerConfigureApply "${candidateSpec}" '' '' configure '' '' '' '' '' "${draft}/wireguard" || return $?
     printf 'WireGuard 单端迁移已提交；请在对端更新对应参数并验证连通。\n'
+    [[ "${candidateSpec}" == "${spec}" ]] ||
+        printf '控制地址已更新；双方迁移后请重新签发邀请、同步并核验控制来源。\n'
 )
 
 dockerWireGuardCommand() (

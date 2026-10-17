@@ -212,16 +212,44 @@ run_case "${PADM_DOCKER_RC_CONFLICT}" peer --peer-address 10.90.0.2 --peer-publi
 
 # 命令保持在线输入不动，完整私密候选只能作为原配置事务的第十个参数提交。
 CURRENT_PUBLIC=${PUBLIC}
+EXPECT_ROLE_ADDRESS=0
 dockerWireGuardContainer() {
     [[ "$#" == 1 && "$1" == running && "${MODE}" != owner-fail ]] || return 1
     printf '%064d\n' 1
 }
 dockerConfigureApply() {
     local candidate=${10}
-    [[ "$#" == 10 && "$1" == "${root}/config/spec.json" &&
-        "$2$3$4$5$6$7$8$9" == configure &&
+    [[ "$#" == 10 && "$2$3$4$5$6$7$8$9" == configure &&
         "${candidate}" == "${root}/.wireguard."*/wireguard &&
-        "$(snapshot)" == "${before}" ]] || fail '迁移未通过原事务或提前改写在线输入'
+        "$(snapshot)" == "${before}" &&
+        "${DOCKER_CONTROL_TRANSACTION:-0}" == 0 &&
+        "${DOCKER_CONTROL_SYNC_TRANSACTION:-0}" == 0 ]] ||
+        fail '迁移未通过原事务、提前改写在线输入或自行绕过角色门禁'
+    if [[ "${EXPECT_ROLE_ADDRESS}" == 1 ]]; then
+        [[ "$1" == "${candidate%/wireguard}/spec.json" &&
+            "$(stat -c '%u:%g:%a:%h' "$1")" == 0:0:600:1 ]] ||
+            fail '角色地址候选没有使用同一私密暂存中的受限规格'
+        jq -en --arg address "${EXPECTED_ADDRESS}" --arg peer "${EXPECTED_PEER_ADDRESS}" \
+            --slurpfile current "${root}/config/spec.json" --slurpfile next "$1" '
+          $current[0] as $c | $next[0] as $n |
+          if $c.control.role == "main" then
+            ($c | del(.control.listen.address,.control.peer.address,
+              .control.peer.enabled,.control.peer.expires_at)) ==
+            ($n | del(.control.listen.address,.control.peer.address,
+              .control.peer.enabled,.control.peer.expires_at)) and
+            $n.control.listen.address == $address and $n.control.peer.address == $peer and
+            $n.control.peer.enabled == false and $n.control.peer.expires_at == 1
+          else
+            ($c | del(.control_sync.connection.peer_address,.control_sync.connection.listen.address)) ==
+            ($n | del(.control_sync.connection.peer_address,.control_sync.connection.listen.address)) and
+            $n.control_sync.connection.peer_address == $address and
+            $n.control_sync.connection.listen.address == $peer
+          end' >/dev/null || fail '角色地址映射、主控撤权或其余字段保持不正确'
+        dockerConfigureSpecValidate "$1" || fail '角色迁移候选规格无效'
+    else
+        [[ "$1" == "${root}/config/spec.json" && ! -e "${candidate%/wireguard}/spec.json" ]] ||
+            fail '非角色地址迁移没有沿用原规格路径'
+    fi
     python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status --directory "${candidate}" >/dev/null ||
         fail '迁移没有完整私密候选'
     printf 'migrate-apply\n' >>"${CALLS}"
@@ -229,6 +257,10 @@ dockerConfigureApply() {
     [[ "${MODE}" != int ]] || { kill -INT "${BASHPID}"; return 1; }
     [[ "${MODE}" != term ]] || { kill -TERM "${BASHPID}"; return 1; }
     cp -- "${candidate}/"{identity.json,private.key,wg-padm.conf} "${root}/secrets/net/wireguard/"
+    if [[ "$1" != "${root}/config/spec.json" ]]; then
+        cp -- "$1" "${root}/config/spec.json"
+        chmod 0600 "${root}/config/spec.json"
+    fi
 }
 run_case "${PADM_DOCKER_RC_USAGE}" migrate --rotate-key --rotate-key --yes
 run_case "${PADM_DOCKER_RC_USAGE}" migrate --address 10.91.0.1 --address 10.91.0.2 --yes
@@ -259,7 +291,94 @@ run_case 0 migrate --rotate-key --yes
     fail '迁移未采用新密钥'
 CURRENT_PUBLIC=${PUBLIC}
 
-# 角色规格在其它专项已校验，此处仅定位新命令的主控/被控拒绝门禁。
+# 真实角色规格覆盖地址映射及仅允许的字段变化，失败时在线规格和隧道均保持原样。
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/standalone.json"
+for role in main controlled; do
+    addresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses \
+        --directory "${root}/secrets/net/wireguard")
+    jq --arg role "${role}" --argjson addresses "${addresses}" '
+      def account($number):
+        {id:("0000000" + $number + "-1111-4111-8111-00000000000" + $number),
+         name:("账号" + $number),enabled:true,
+         uuid:("0000010" + $number + "-1111-4111-8111-00000000010" + $number),
+         password:("MigrationPassword.000" + $number),shadowsocks_password:null,
+         listeners:["entry-main"]};
+      .accounts = [account("3"),account("4")] |
+      if $role == "main" then
+        .control = {schema_version:1,role:"main",
+          node_id:"00000001-1111-4111-8111-000000000001",
+          listen:{interface:"wg-padm",address:$addresses.address,port:18080},
+          peer:{id:"00000002-1111-4111-8111-000000000002",address:$addresses.peer_address,
+            enabled:true,expires_at:2000000000,token_sha256:("a"*64)},
+          revision:7,last_digest:("d"*64)}
+      else
+        .control_sync = {schema_version:1,role:"controlled",
+          node_id:"00000002-1111-4111-8111-000000000002",
+          controller_id:"00000001-1111-4111-8111-000000000001",
+          listener_ids:["entry-main"],last_revision:7,last_digest:("d"*64),
+          managed_accounts:[.accounts[1]],
+          connection:{listen:{interface:"wg-padm",address:$addresses.peer_address,port:18080},
+            peer_address:$addresses.address}}
+      end' "${TEST_ROOT}/standalone.json" >"${root}/config/spec.json"
+    chmod 0600 "${root}/config/spec.json"
+    dockerConfigureSpecValidate "${root}/config/spec.json" || fail "${role}: 角色夹具无效"
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/role.json"
+    address=$(jq -r '.address' <<<"${addresses}")
+    peerAddress=$(jq -r '.peer_address' <<<"${addresses}")
+    before=$(snapshot)
+    : >"${CALLS}"
+    run_case 0 migrate --address "${address}" --peer-address "${peerAddress}" --yes
+    ! grep -qF migrate-apply "${CALLS}" || fail "${role}: 同地址幂等仍提交事务"
+    port=51822
+    [[ "${role}" != controlled ]] || port=51823
+    run_case 0 migrate --listen-port "${port}" --yes
+    [[ "$(jq -S . "${root}/config/spec.json")" == "$(jq -S . "${TEST_ROOT}/role.json")" ]] ||
+        fail "${role}: 仅修改 WireGuard 端口改变了角色规格"
+    before=$(snapshot)
+    run_case "${PADM_DOCKER_RC_STATE}" migrate --address 198.18.0.1 --yes
+    run_case "${PADM_DOCKER_RC_STATE}" migrate --peer-address 127.0.0.1 --yes
+    run_case "${PADM_DOCKER_RC_STATE}" migrate --address "${peerAddress}" --yes
+    run_case "${PADM_DOCKER_RC_STATE}" migrate --peer-address "${address}" --yes
+    [[ "$(snapshot)" == "${before}" ]] || fail "${role}: 非法地址改变在线输入"
+    jq 'if has("control") then .control.listen.address = "10.254.0.1"
+        else .control_sync.connection.peer_address = "10.254.0.1" end' \
+        "${TEST_ROOT}/role.json" >"${root}/config/spec.json"
+    chmod 0600 "${root}/config/spec.json"
+    before=$(snapshot)
+    run_case "${PADM_DOCKER_RC_CONFLICT}" migrate --address 10.254.0.2 --yes
+    [[ "$(snapshot)" == "${before}" ]] || fail "${role}: 旧 tuple 漂移仍改写在线输入"
+    cp -- "${TEST_ROOT}/role.json" "${root}/config/spec.json"
+    before=$(snapshot)
+    EXPECT_ROLE_ADDRESS=1
+    EXPECTED_ADDRESS=10.92.0.1
+    EXPECTED_PEER_ADDRESS=10.92.0.2
+    [[ "${role}" != controlled ]] || {
+        EXPECTED_ADDRESS=10.93.0.1
+        EXPECTED_PEER_ADDRESS=10.93.0.2
+    }
+    for MODE in apply-fail int term; do
+        expected=${PADM_DOCKER_RC_COMPOSE}
+        [[ "${MODE}" != int ]] || expected=130
+        [[ "${MODE}" != term ]] || expected=143
+        run_case "${expected}" migrate --address "${EXPECTED_ADDRESS}" \
+            --peer-address "${EXPECTED_PEER_ADDRESS}" --yes
+        [[ "$(snapshot)" == "${before}" ]] || fail "${role}/${MODE}: 迁移失败改变在线输入"
+    done
+    MODE=ok
+    run_case 0 migrate --address "${EXPECTED_ADDRESS}" --peer-address "${EXPECTED_PEER_ADDRESS}" --yes
+    grep -q '重新签发邀请' "${LOG}" || fail "${role}: 地址改变未提醒重新邀请和来源核验"
+    before=$(snapshot)
+    EXPECTED_ADDRESS=10.94.0.1
+    [[ "${role}" != controlled ]] || EXPECTED_ADDRESS=10.95.0.1
+    run_case 0 migrate --address "${EXPECTED_ADDRESS}" --yes
+    before=$(snapshot)
+    EXPECTED_PEER_ADDRESS=10.94.0.2
+    [[ "${role}" != controlled ]] || EXPECTED_PEER_ADDRESS=10.95.0.2
+    run_case 0 migrate --peer-address "${EXPECTED_PEER_ADDRESS}" --yes
+    EXPECT_ROLE_ADDRESS=0
+done
+
+# 不完整角色规格仍在准备、设置 Peer 和迁移前拒绝。
 for role in control control_sync; do
     jq --arg role "${role}" '. + {($role):{role:"fixture"}}' "${TEST_ROOT}/base.json" \
         >"${root}/config/spec.json"
