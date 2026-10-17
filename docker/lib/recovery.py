@@ -905,7 +905,7 @@ def renewal_request(domain, data):
             or (request["schema_version"], provider) in {
                 (2, "standalone"), (3, "webroot"), (4, "alpn")})
     require(not request["enabled"] or (request["schema_version"], provider) in {
-        (2, "standalone"), (3, "webroot"), (4, "alpn")})
+        (1, "dns_acmedns"), (2, "standalone"), (3, "webroot"), (4, "alpn")})
     return provider.startswith("dns_")
 
 
@@ -1097,15 +1097,28 @@ def acme_inputs(directory, destination=None):
         request_fd = stack.enter_context(transaction_directory(renewal_fd, domain))
         observed.append((renewal_fd, domain, signature(os.fstat(request_fd))))
         request_path = "secrets/renewal/" + domain + "/request.json"
-        require(set(os.listdir(request_fd)) == {"request.json"}
+        request_files = set(os.listdir(request_fd))
+        require(request_files in ({"request.json"}, {"request.json", "credentials.env"})
                 and request_path in entries and entries[request_path]["type"] == "file")
         request_info = os.stat("request.json", dir_fd=request_fd, follow_symlinks=False)
         encoded, metadata = transaction_read(request_fd, "request.json", limit=64 * 1024)
         require(all(metadata[key] == entries[request_path][key] for key in ("size", "sha256")))
         observed.append((request_fd, "request.json", signature(request_info)))
-        renewal_request(domain, encoded)
+        dns = renewal_request(domain, encoded)
         request = read_json(encoded)
-        if request["provider"] == "alpn":
+        credentials = None
+        require(dns == ("credentials.env" in request_files))
+        if dns:
+            require(request["provider"] == "dns_acmedns")
+            credential_path = "secrets/renewal/" + domain + "/credentials.env"
+            require(credential_path in entries and entries[credential_path]["type"] == "file")
+            info = os.stat("credentials.env", dir_fd=request_fd, follow_symlinks=False)
+            credentials, metadata = transaction_read(
+                request_fd, "credentials.env", limit=acme.MAX_CONFIG)
+            require(all(metadata[key] == entries[credential_path][key] for key in ("size", "sha256")))
+            observed.append((request_fd, "credentials.env", signature(info)))
+            validation = "dns-01"
+        elif request["provider"] == "alpn":
             # HTTP-01 入口可与独立 ALPN 账户共存，材料验证方式仍由登记绑定。
             validation = "tls-alpn01"
         elif spec["tls"].get("http01") is True:
@@ -1121,7 +1134,7 @@ def acme_inputs(directory, destination=None):
             require(request["schema_version"] == 2 and request["provider"] == "standalone")
             validation = "standalone-http01"
         normalized, summary = acme.normalize_acme_home(
-            payload, domain, request["email"], validation=validation)
+            payload, domain, request["email"], validation=validation, credentials=credentials)
         stable()
         if destination is not None:
             owner, child = stack.enter_context(absolute_parent(destination, private=True))

@@ -1879,11 +1879,15 @@ standalone HTTP-01 `8080` 须匹配 schema `2` 登记且关闭 `.tls.http01`；
 webroot 固定为 `/var/lib/padm/acme-webroot`，不得残留自监听端口或自定义路径。
 TLS-ALPN-01 须匹配 schema `4`／`alpn` 登记、`Le_Webroot='alpn'` 和固定 `Le_TLSPort='8443'`，
 不得残留 `Le_HTTPPort`；可保留合法 HTTP-01 入口，后续续期仍重新预检 `443` 归属。
+DNS-01 仅接受 schema `1`／`dns_acmedns`，`Le_Webroot='dns_acmedns'` 及预登记的
+`ACMEDNS_USERNAME`、`ACMEDNS_PASSWORD`、`ACMEDNS_SUBDOMAIN`、`ACMEDNS_BASE_URL`；
+域配置与私密 `credentials.env` 四值必须完全相同，URL 须为规范 HTTPS，拒绝自监听端口。
+外部 acme-dns 注册和域名 CNAME 必须仍然有效，恢复不重建该外部服务或交互注册。
 恢复器不执行归档 shell：严格解析并重建固定 9 个文件，只丢弃已知 CSR/临时材料；
-未知配置、hook、DNS/SAN/RSA/EAB 和自定义执行路径均拒绝。私钥、公钥、证书链及固定 TLS 输出
+未知配置、hook、其它 DNS provider、SAN/RSA/EAB 和自定义执行路径均拒绝。私钥、公钥、证书链及固定 TLS 输出
 先在无网络的可信 ops 容器内验证绑定；账户和域名密钥保留。
-仅对应材料匹配且登记只有该域时，可保留 standalone、webroot 或 ALPN 的 `enabled=true`；
-健康成功后按 traffic、Geo、renewal 安装适用调度。启用 DNS 继续拒绝，
+仅对应材料匹配且登记只有该域时，可保留 standalone、webroot、ALPN 或 `dns_acmedns` 的 `enabled=true`；
+健康成功后按 traffic、Geo、renewal 安装适用调度。其它启用 DNS 登记继续拒绝，
 空 `data/acme` 不能授权启用续期。
 空 `data/acme` 仍兼容。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
 不执行归档 Nginx stream 文件。桥接宿主网站恢复保留域名、上游地址和端口，

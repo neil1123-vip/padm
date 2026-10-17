@@ -5,7 +5,7 @@ trap 'printf "docker-recovery-apply-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1 PADM_DOCKER_SKIP_CHOWN=0 PADM_DOCKER_LOCK_TIMEOUT=1
 case "${PADM_DOCKER_RECOVERY_SCOPE:-all}" in
-all|core|atomic|variants|wireguard|webroot|alpn|controller) ;;
+all|core|atomic|variants|wireguard|webroot|alpn|dns|controller) ;;
 *) exit 2 ;;
 esac
 if [[ "${1:-}" != --child ]]; then
@@ -800,10 +800,12 @@ fi
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == alpn ]]; then
-for challenge_provider in webroot alpn; do
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == alpn ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == dns ]]; then
+for challenge_provider in webroot alpn dns_acmedns; do
     [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${challenge_provider}" == webroot ]] || continue
     [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != alpn || "${challenge_provider}" == alpn ]] || continue
+    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != dns || "${challenge_provider}" == dns_acmedns ]] || continue
 CHALLENGE_SOURCE="${TEST_ROOT}/source-${challenge_provider}-enabled"
 cp -a -- "${RENEWAL_ENABLED_SOURCE}" "${CHALLENGE_SOURCE}"
 python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${CHALLENGE_SOURCE}" "${DOMAIN}" "${challenge_provider}" <<'PY'
@@ -818,20 +820,33 @@ spec.loader.exec_module(fixture)
 root, domain, provider = Path(sys.argv[2]), sys.argv[3], sys.argv[4]
 path = root / ("data/acme/" + domain + "_ecc/" + domain + ".conf")
 values = fixture.acme.assignments(path.read_bytes(), fixture.acme.DOMAIN_FIELDS)
-values["Le_Webroot"] = fixture.acme.WEBROOT if provider == "webroot" else "alpn"
+values["Le_Webroot"] = fixture.acme.WEBROOT if provider == "webroot" else provider
 values.pop("Le_HTTPPort")
 if provider == "alpn":
     values["Le_TLSPort"] = "8443"
+if provider == "dns_acmedns":
+    credentials = {
+        "ACMEDNS_USERNAME": "restore-user",
+        "ACMEDNS_PASSWORD": "restore-password",
+        "ACMEDNS_SUBDOMAIN": "restore-subdomain",
+        "ACMEDNS_BASE_URL": "https://dns.example.test",
+    }
+    values.update(credentials)
+    credentials_path = root / ("secrets/renewal/" + domain + "/credentials.env")
+    credentials_path.write_text("".join(f"{key}={value}\n" for key, value in credentials.items()))
+    credentials_path.chmod(0o600)
 path.write_bytes(fixture.acme.encoded(values))
 for relative, fields in (
     ("config/spec.json", None),
     ("secrets/renewal/" + domain + "/request.json",
-     {"schema_version": 3 if provider == "webroot" else 4, "provider": provider}),
+     {"schema_version": {"webroot": 3, "alpn": 4, "dns_acmedns": 1}[provider],
+      "provider": provider}),
 ):
     path = root / relative
     value = json.loads(path.read_bytes())
     if fields is None:
-        value["tls"]["http01"] = True
+        if provider != "dns_acmedns":
+            value["tls"]["http01"] = True
     else:
         value.update(fields)
     path.write_text(json.dumps(value))
@@ -1795,23 +1810,30 @@ fi
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == alpn ]]; then
-for renewal_provider in standalone webroot alpn; do
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == alpn ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == dns ]]; then
+for renewal_provider in standalone webroot alpn dns_acmedns; do
     [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${renewal_provider}" == webroot ]] || continue
     [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != alpn || "${renewal_provider}" == alpn ]] || continue
+    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != dns || "${renewal_provider}" == dns_acmedns ]] || continue
     RENEWAL_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
     RENEWAL_SOURCE="${RENEWAL_ENABLED_SOURCE}"
     if [[ "${renewal_provider}" != standalone ]]; then
         RENEWAL_ARCHIVE="${TEST_ROOT}/${renewal_provider}-enabled.tar"
         RENEWAL_SOURCE="${TEST_ROOT}/source-${renewal_provider}-enabled"
     fi
-# 三种验证方式复用调度撤销矩阵，定向入口只执行所选方式。
+# 各验证方式复用调度撤销矩阵，定向入口只执行所选方式。
 for backend in systemd cron; do
     prepare_target "${renewal_provider}-renewal-success-${backend}" "${backend}"
     RECOVERY_ARCHIVE="${RENEWAL_ARCHIVE}"
     run_child apply ok 0
     assert_deployed "${RENEWAL_SOURCE}"
     assert_acme_home "${root}/data/acme" "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" 750
+    if [[ "${renewal_provider}" == dns_acmedns ]]; then
+        grep -qxF "Le_Webroot='dns_acmedns'" "${root}/data/acme/${DOMAIN}_ecc/${DOMAIN}.conf" &&
+            grep -qxF "ACMEDNS_PASSWORD='restore-password'" "${root}/data/acme/${DOMAIN}_ecc/${DOMAIN}.conf" ||
+            fail 'DNS 恢复丢失验证方式或域凭据'
+    fi
     if [[ "${backend}" == systemd ]]; then
         [[ "$(grep -E '^up$|^systemctl:enable --now ' "${MOCK_BACKEND}/events")" == \
             $'up\nsystemctl:enable --now padm-docker-traffic.timer\nsystemctl:enable --now padm-docker-geo.timer\nsystemctl:enable --now padm-docker-renewal.timer' &&

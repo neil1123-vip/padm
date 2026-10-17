@@ -609,7 +609,7 @@ run_case acme-enabled "${TEST_ROOT}/acme-enabled.tar" 0
 grep -q '"acme_files": 9' "${LOG}" && grep -q '"renewal_registrations": 1' "${LOG}" ||
     fail '启用 standalone 预览缺少绑定材料和登记计数'
 
-for challenge_provider in webroot alpn; do
+for challenge_provider in webroot alpn dns_acmedns; do
 for enabled in false true; do
     VARIANT="${TEST_ROOT}/variant-acme-${challenge_provider}-${enabled}"
     cp -a -- "${ACME_SOURCE}" "${VARIANT}"
@@ -625,18 +625,30 @@ spec.loader.exec_module(fixture)
 root, domain, provider = Path(sys.argv[2]), sys.argv[3], sys.argv[5]
 path = root / ("data/acme/" + domain + "_ecc/" + domain + ".conf")
 values = fixture.acme.assignments(path.read_bytes(), fixture.acme.DOMAIN_FIELDS)
-values["Le_Webroot"] = fixture.acme.WEBROOT if provider == "webroot" else "alpn"
+values["Le_Webroot"] = fixture.acme.WEBROOT if provider == "webroot" else provider
 values.pop("Le_HTTPPort")
 if provider == "alpn":
     values["Le_TLSPort"] = "8443"
+if provider == "dns_acmedns":
+    credentials = {
+        "ACMEDNS_USERNAME": "restore-user",
+        "ACMEDNS_PASSWORD": "restore-password",
+        "ACMEDNS_SUBDOMAIN": "restore-subdomain",
+        "ACMEDNS_BASE_URL": "https://dns.example.test",
+    }
+    values.update(credentials)
+    credentials_path = root / ("secrets/renewal/" + domain + "/credentials.env")
+    credentials_path.write_text("".join(f"{key}={value}\n" for key, value in credentials.items()))
+    credentials_path.chmod(0o600)
 path.write_bytes(fixture.acme.encoded(values))
 path = root / "config/spec.json"
 value = json.loads(path.read_bytes())
-value["tls"]["http01"] = True
+if provider != "dns_acmedns":
+    value["tls"]["http01"] = True
 path.write_text(json.dumps(value))
 path = root / ("secrets/renewal/" + domain + "/request.json")
 value = json.loads(path.read_bytes())
-value.update(schema_version=3 if provider == "webroot" else 4,
+value.update(schema_version={"webroot": 3, "alpn": 4, "dns_acmedns": 1}[provider],
              provider=provider, enabled=sys.argv[4] == "true")
 path.write_text(json.dumps(value))
 PY
@@ -647,11 +659,32 @@ PY
     EXPECTED_ACME_DIR="${VARIANT}/data/acme"
     EXPECTED_RENEWAL_DIR="${VARIANT}/secrets/renewal"
     run_case "acme-${challenge_provider}-${enabled}" "${TEST_ROOT}/acme-${challenge_provider}-${enabled}.tar" 0
-    validation=webroot-http01
+    validation=dns-01
+    [[ "${challenge_provider}" != webroot ]] || validation=webroot-http01
     [[ "${challenge_provider}" != alpn ]] || validation=tls-alpn01
     grep -q "\"validation\": \"${validation}\"" "${LOG}" &&
         grep -q '"acme_files": 9' "${LOG}" || fail '预览未绑定挑战验证方式和重建材料'
+    ! grep -q 'restore-user\|restore-password\|restore-subdomain\|dns.example.test' "${LOG}" ||
+        fail '预览泄露 DNS 续期凭据'
 done
+done
+
+DNS_SOURCE=${VARIANT}
+for variant in credentials hook; do
+    VARIANT="${TEST_ROOT}/variant-acme-dns-${variant}"
+    cp -a -- "${DNS_SOURCE}" "${VARIANT}"
+    if [[ "${variant}" == credentials ]]; then
+        sed -i 's/ACMEDNS_PASSWORD=restore-password/ACMEDNS_PASSWORD=foreign-password/' \
+            "${VARIANT}/secrets/renewal/${DOMAIN}/credentials.env"
+    else
+        sed -i "s|^Le_RenewHook=''$|Le_RenewHook='touch ${TEST_ROOT}/dns-hook-executed'|" \
+            "${VARIANT}/data/acme/${DOMAIN}_ecc/${DOMAIN}.conf"
+    fi
+    export_variant "acme-dns-${variant}"
+    prepare_target "acme-dns-${variant}"
+    run_case "acme-dns-${variant}" "${TEST_ROOT}/acme-dns-${variant}.tar" "${PADM_DOCKER_RC_STATE}"
+    [[ ! -e "${TEST_ROOT}/dns-hook-executed" ]] || fail 'DNS 恢复执行了归档钩子'
+    ! grep -q 'restore-password\|foreign-password' "${LOG}" || fail '拒绝信息泄露 DNS 凭据'
 done
 
 archive_variant stream config/spec.json '
@@ -1191,7 +1224,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 31 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 33 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&

@@ -952,6 +952,26 @@ class AcmeInputTests(unittest.TestCase):
         self.write_bindings()
         self.seal()
 
+    def dns(self):
+        self.request.update(schema_version=1, provider="dns_acmedns", enabled=True)
+        self.dns_values = {
+            "ACMEDNS_USERNAME": "restore-user", "ACMEDNS_PASSWORD": "restore-password",
+            "ACMEDNS_SUBDOMAIN": "restore-subdomain",
+            "ACMEDNS_BASE_URL": "https://dns.example.test",
+        }
+        self.credentials = self.request_path.with_name("credentials.env")
+        self.credentials.write_bytes("".join(
+            key + "=" + value + "\n" for key, value in self.dns_values.items()).encode())
+        self.credentials.chmod(0o600)
+        config = self.acme.assignments(self.files[self.domain_config], self.acme.DOMAIN_FIELDS)
+        config.update(self.dns_values, Le_Webroot="dns_acmedns", Le_DNSSleep="1")
+        config.pop("Le_HTTPPort", None)
+        config.pop("Le_TLSPort", None)
+        self.files[self.domain_config] = self.acme.encoded(config)
+        (self.home / self.domain_config).write_bytes(self.files[self.domain_config])
+        self.write_bindings()
+        self.seal()
+
     def seal(self):
         archive = self.root / "source.tar"
         if archive.exists():
@@ -1066,6 +1086,84 @@ class AcmeInputTests(unittest.TestCase):
         result = recovery.acme_inputs(str(self.source), str(self.destination))
         self.assertEqual(result["acme_summary"]["validation"], "tls-alpn01")
         self.assertEqual(result["acme_files"], 9)
+
+    def test_enabled_dns_preserves_private_registration_and_exact_binding(self):
+        self.dns()
+        (self.destination / "secrets").mkdir(mode=0o700)
+        self.assertEqual(recovery.renewal_inputs(str(self.source), str(self.destination)),
+                         {"renewal_registrations": 1})
+        copied = self.destination / "secrets/renewal" / self.domain
+        for filename in ("request.json", "credentials.env"):
+            self.assertEqual((copied / filename).read_bytes(),
+                             (self.request_path.parent / filename).read_bytes())
+            self.assertEqual(stat.S_IMODE((copied / filename).stat().st_mode), 0o600)
+        result = recovery.acme_inputs(str(self.source), str(self.destination))
+        self.assertEqual(result["acme_files"], 9)
+        self.assertEqual(result["acme_summary"]["validation"], "dns-01")
+        normalized, _ = self.acme.normalize_acme_home(
+            self.files, self.domain, self.email, validation="dns-01",
+            credentials=self.credentials.read_bytes())
+        self.assertEqual({path.relative_to(self.target).as_posix(): path.read_bytes()
+                          for path in self.target.rglob("*") if path.is_file()}, normalized)
+        for value in self.dns_values.values():
+            self.assertNotIn(value, json.dumps(result))
+
+    def test_dns_allows_existing_http01_listener_and_disabled_registration(self):
+        self.dns()
+        self.spec = {"schema_version": 3, "tls": {"domain": self.domain, "http01": True},
+                     "core": {"protocols": [{"id": 21}]}}
+        self.request["enabled"] = False
+        self.write_bindings()
+        self.seal()
+        self.assertEqual(recovery.acme_inputs(str(self.source))["acme_summary"]["validation"],
+                         "dns-01")
+
+    def test_dns_rejects_foreign_provider_credentials_and_manifest_changes(self):
+        self.dns()
+        credentials = self.credentials.read_bytes()
+        for changed in (credentials.replace(b"restore-password", b"foreign-password"),
+                        credentials + b"OTHER=secret\n",
+                        credentials + b"ACMEDNS_PASSWORD=duplicate\n"):
+            with self.subTest(credentials=changed):
+                self.credentials.write_bytes(changed)
+                self.seal()
+                self.rejected()
+                with self.assertRaises(ValueError):
+                    recovery.renewal_inputs(str(self.source))
+        self.credentials.write_bytes(credentials)
+        self.seal()
+        self.credentials.write_bytes(credentials + b"\n")
+        self.rejected()
+        self.credentials.write_bytes(credentials)
+        for changes in ({"provider": "dns_cf"}, {"schema_version": 2},
+                        {"provider": "standalone", "schema_version": 2}):
+            with self.subTest(request=changes):
+                original = dict(self.request)
+                self.request.update(changes)
+                self.write_bindings()
+                self.seal()
+                self.rejected()
+                self.request = original
+        self.write_bindings()
+        self.credentials.unlink()
+        self.seal()
+        self.rejected()
+
+    def test_dns_credentials_permissions_and_read_stability_are_checked(self):
+        self.dns()
+        self.credentials.chmod(0o640)
+        self.rejected()
+        self.credentials.chmod(0o600)
+        original_read = recovery.transaction_read
+
+        def mutate_read(parent, name, *args, **kwargs):
+            result = original_read(parent, name, *args, **kwargs)
+            if name == "credentials.env":
+                self.credentials.write_bytes(b"ACMEDNS_PASSWORD=changed\n")
+            return result
+
+        with mock.patch.object(recovery, "transaction_read", side_effect=mutate_read):
+            self.rejected()
 
     def test_alpn_registration_and_challenge_materials_cannot_be_mixed(self):
         standalone = self.files[self.domain_config]

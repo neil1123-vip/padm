@@ -27,6 +27,11 @@ KEY = DIRECTORY + "/" + DOMAIN + ".key"
 LEAF = DIRECTORY + "/" + DOMAIN + ".cer"
 ROOT = DIRECTORY + "/ca.cer"
 CHAIN = DIRECTORY + "/fullchain.cer"
+DNS = {
+    "ACMEDNS_USERNAME": "restore-user", "ACMEDNS_PASSWORD": "restore-password_123",
+    "ACMEDNS_SUBDOMAIN": "restore-subdomain", "ACMEDNS_BASE_URL": "https://dns.example.test",
+}
+DNS_CREDENTIALS = "".join(key + "=" + value + "\n" for key, value in DNS.items()).encode()
 
 
 def fixture():
@@ -80,6 +85,16 @@ def alpn(files):
     values = acme.assignments(files[CONF], acme.DOMAIN_FIELDS)
     values.update(Le_Webroot="alpn", Le_TLSPort="8443")
     values.pop("Le_HTTPPort")
+    files[CONF] = acme.encoded(values)
+    return files
+
+
+def dns(files):
+    files = dict(files)
+    values = acme.assignments(files[CONF], acme.DOMAIN_FIELDS)
+    values.update(DNS, Le_Webroot="dns_acmedns", Le_DNSSleep="1")
+    values.pop("Le_HTTPPort", None)
+    values.pop("Le_TLSPort", None)
     files[CONF] = acme.encoded(values)
     return files
 
@@ -200,6 +215,50 @@ class NormalizationTests(unittest.TestCase):
                     files = dict(source)
                     config(files, CONF, Le_TLSPort=value)
                     self.rejected(files)
+
+    def test_dns_binds_exact_provider_credentials_without_exposing_them(self):
+        files = dns(self.files)
+        normalized, summary = acme.normalize_acme_home(
+            files, DOMAIN, EMAIL, validation="dns-01", credentials=DNS_CREDENTIALS)
+        self.assertEqual(summary["validation"], "dns-01")
+        self.assertEqual(summary["normalized_files"], 9)
+        self.assertEqual(acme.normalize_acme_home(
+            normalized, DOMAIN, EMAIL, validation="dns-01", credentials=DNS_CREDENTIALS),
+            (normalized, summary))
+        for value in DNS.values():
+            self.assertNotIn(value, json.dumps(summary))
+        for credentials in (None, b"", DNS_CREDENTIALS + b"OTHER=secret\n",
+                            DNS_CREDENTIALS + b"ACMEDNS_PASSWORD=other\n",
+                            DNS_CREDENTIALS.replace(b"restore-password_123", b"foreign"),
+                            DNS_CREDENTIALS.replace(b"restore-password_123", b"'quoted'"),
+                            DNS_CREDENTIALS.replace(b"https://", b"http://"),
+                            DNS_CREDENTIALS.replace(b"dns.example.test", b"dns.example.test/")):
+            with self.subTest(credentials=credentials), self.assertRaises(ValueError):
+                acme.normalize_acme_home(files, DOMAIN, EMAIL, credentials=credentials)
+        for field in DNS:
+            changed = dict(files)
+            values = acme.assignments(changed[CONF], acme.DOMAIN_FIELDS)
+            del values[field]
+            changed[CONF] = acme.encoded(values)
+            with self.subTest(missing=field), self.assertRaises(ValueError):
+                acme.normalize_acme_home(changed, DOMAIN, EMAIL, credentials=DNS_CREDENTIALS)
+
+    def test_dns_rejects_foreign_challenge_ports_hooks_and_wait_values(self):
+        for field, value in (
+            ("Le_Webroot", "dns_cf"), ("Le_HTTPPort", ""), ("Le_TLSPort", ""),
+            ("Le_RenewHook", "encoded-command"), ("Le_DNSSleep", "01"),
+            ("Le_DNSSleep", "-1"), ("Le_DNSSleep", "3601"), ("Le_DNSSleep", "$(id)"),
+        ):
+            files = dns(self.files)
+            config(files, CONF, **{field: value})
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                acme.normalize_acme_home(files, DOMAIN, EMAIL, credentials=DNS_CREDENTIALS)
+        for files in (self.files, webroot(self.files), alpn(self.files)):
+            with self.assertRaises(ValueError):
+                acme.normalize_acme_home(files, DOMAIN, EMAIL, credentials=DNS_CREDENTIALS)
+            changed = dict(files)
+            config(changed, CONF, **DNS)
+            self.rejected(changed)
 
     def test_known_transient_files_are_discarded(self):
         for path in ("http.header", DIRECTORY + "/" + DOMAIN + ".csr",
@@ -408,12 +467,12 @@ class MaterialTests(unittest.TestCase):
             "x509", "-req", "-CA", str(cls.ca_path), "-CAkey", str(cls.ca_key),
             "-set_serial", "42", "-days", days, "-copy_extensions", "copy", data=request)
 
-    def verify(self, files=None, tls_key=None, tls_fullchain=None, validation=None):
+    def verify(self, files=None, tls_key=None, tls_fullchain=None, validation=None, credentials=None):
         return acme.verify_materials(
             self.files if files is None else files, DOMAIN,
             self.domain_key if tls_key is None else tls_key,
             self.files[CHAIN] if tls_fullchain is None else tls_fullchain,
-            email=EMAIL, validation=validation)
+            email=EMAIL, validation=validation, credentials=credentials)
 
     def test_real_account_jwk_and_tls_materials(self):
         self.assertEqual(self.verify(),
@@ -447,6 +506,14 @@ class MaterialTests(unittest.TestCase):
                 self.verify(files, validation=validation)
         with self.assertRaises(ValueError):
             self.verify(files, tls_key=self.other_key, validation="tls-alpn01")
+
+    def test_dns_keeps_real_material_and_credential_binding(self):
+        files = dns(self.files)
+        self.assertEqual(self.verify(files, validation="dns-01", credentials=DNS_CREDENTIALS),
+                         {"account_key": "EC-P256", "tls_key": "EC-P256", "certificates": 2})
+        for key, credentials in ((self.other_key, DNS_CREDENTIALS), (self.domain_key, None)):
+            with self.assertRaises(ValueError):
+                self.verify(files, tls_key=key, validation="dns-01", credentials=credentials)
 
     def test_jwk_must_match_account_key_and_be_a_curve_point(self):
         for coordinates in ("foreign", "zero"):
@@ -631,6 +698,16 @@ class MaterialTests(unittest.TestCase):
             self.assertEqual(mismatch.stdout, b"")
             self.assertNotIn(b"PRIVATE KEY", mismatch.stderr)
             self.assertNotIn(EMAIL.encode(), mismatch.stderr)
+            (home / CONF).write_bytes(dns(self.files)[CONF])
+            credential_path = root / "credentials.env"
+            credential_path.write_bytes(DNS_CREDENTIALS)
+            success = subprocess.run(
+                command + ["--validation", "dns-01", "--credentials", str(credential_path)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, check=False)
+            self.assertEqual(success.returncode, 0, success.stderr.decode())
+            self.assertEqual(json.loads(success.stdout)["validation"], "dns-01")
+            for value in DNS.values():
+                self.assertNotIn(value.encode(), success.stdout + success.stderr)
             (home / CONF).write_bytes(self.files[CONF] + b"Le_DNS='private-marker'\n")
             failed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     timeout=30, check=False)

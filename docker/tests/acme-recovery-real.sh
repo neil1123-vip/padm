@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 scope=${PADM_ACME_RECOVERY_REAL_SCOPE:-standalone}
-case "${scope}" in standalone|webroot|alpn) ;; *) exit 2 ;; esac
+case "${scope}" in standalone|webroot|alpn|dns) ;; *) exit 2 ;; esac
 [[ "$#" == 0 ]] || exit 2
 scriptRoot=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 python3 - "${scriptRoot}" "${scope}" <<'PY'
@@ -32,8 +32,9 @@ assert os.getuid() == 0 and sys.platform == "linux" and Path("/.dockerenv").is_f
 assert {item["ifname"] for item in json.loads(command(["ip", "-j", "link", "show"]))} == {"lo"}
 assert not Path("/var/run/docker.sock").exists(), "不得使用宿主 Docker Socket"
 inputs = json.loads(Path("/node-images.json").read_text())
-assert set(inputs) == ({"ops", "acme", "pebble", "nginx", "xray", "sing-box"}
-                       if scope in ("webroot", "alpn") else {"ops", "acme", "pebble"})
+managed_images = {"ops", "acme", "pebble", "nginx", "xray", "sing-box"}
+assert set(inputs) == (managed_images | {"acmedns"} if scope == "dns" else
+                       managed_images if scope in ("webroot", "alpn") else {"ops", "acme", "pebble"})
 node = Path(tempfile.mkdtemp(prefix=".tmp-acme-recovery-", dir="/n"))
 docker = ["docker", "--host", f"unix://{node}/docker.sock"]
 daemon = None
@@ -46,6 +47,11 @@ api = "https://pebble:14000/dir"
 client = "padm-acme-recovery-source"
 restored = "padm-acme-recovery-restored"
 server = "padm-acme-recovery-ca"
+dns_server = "padm-acme-recovery-dns"
+dns_resolver = "padm-acme-recovery-resolver"
+dns_address = "172.29.0.53"
+resolver_address = "172.29.0.54"
+dns_credentials = {}
 expected_acme = "c7d68b021cfd6380ea83a82962abde5b484779fee0b97d38681dfa1396bbc8d7"
 phase = "daemon"
 
@@ -122,15 +128,149 @@ def diagnostic(data):
     text = re.sub(r"(/\.well-known/acme-challenge/)[A-Za-z0-9_-]+",
                   r"\1[已隐藏]", text)
     text = re.sub(r"\b(authz|challenge|Order) [A-Za-z0-9_-]{16,}", r"\1 [已隐藏]", text)
+    for name, value in dns_credentials.items():
+        text = text.replace(value, f"[已隐藏{name}]")
+    text = re.sub(r"(?im)^.*(?:ACMEDNS_(?:USERNAME|PASSWORD|SUBDOMAIN)|X-Api-(?:User|Key)|Authorization:).*$",
+                  "[已隐藏 DNS 认证行]", text)
     return text.replace(email, "[已隐藏邮箱]")
+
+
+def start_dns(config_volume, database_volume):
+    command(docker + [
+        "run", "--pull=never", "--detach", "--name", dns_server,
+        "--label", "io.padm.test=acme-recovery", "--network", network, "--ip", dns_address,
+        "--network-alias", "acme-dns", "--read-only", "--user", "10001:10001",
+        "--cap-drop", "ALL", "--cap-add", "NET_BIND_SERVICE",
+        "--security-opt", "no-new-privileges",
+        "--volume", f"{config_volume}:/etc/acme-dns:ro",
+        "--volume", f"{database_volume}:/var/lib/acme-dns",
+        "--volume", f"{ca_volume}:/ca:ro", inputs["acmedns"]["image_id"]])
+    def healthy():
+        observed = json.loads(command(docker + ["inspect", dns_server]))[0]
+        if not observed["State"]["Running"]:
+            result = subprocess.run(docker + ["logs", dns_server], capture_output=True, timeout=5)
+            logs.append(("acme-dns", result.stdout + result.stderr))
+            raise AssertionError("真实 acme-dns 服务启动失败")
+        return subprocess.run(docker + [
+            "exec", client, "curl", "--fail", "--silent", "--max-time", "2",
+            "https://acme-dns:8445/health"], capture_output=True, timeout=4).returncode == 0
+
+    wait_ready(healthy, 10)
+
+
+def dns_fixture():
+    global dns_credentials
+    config_volume, config_path = volume("dns-config")
+    database_volume, database_path = volume("dns-database")
+    os.chown(database_path, 10001, 10001)
+    config_path.chmod(0o750)
+    os.chown(config_path, 0, 10001)
+    config = config_path / "config.cfg"
+    body = f'''[general]
+listen = "0.0.0.0:53"
+protocol = "both"
+domain = "auth.padm.test"
+nsname = "auth.padm.test"
+nsadmin = "admin.padm.test"
+records = ["auth.padm.test. A {dns_address}"]
+debug = false
+[database]
+engine = "sqlite"
+connection = "/var/lib/acme-dns/acme-dns.db"
+[api]
+ip = "0.0.0.0"
+port = "8445"
+tls = "cert"
+tls_cert_fullchain = "/ca/pebble.crt"
+tls_cert_privkey = "/ca/pebble.key"
+corsorigins = []
+use_header = false
+[logconfig]
+loglevel = "error"
+logtype = "stdout"
+logformat = "text"
+'''
+    config.write_text(body)
+    config.chmod(0o640)
+    os.chown(config, 0, 10001)
+    start_dns(config_volume, database_volume)
+    registration = json.loads(command(docker + [
+        "exec", client, "curl", "--fail", "--silent", "--show-error", "--max-time", "3",
+        "--request", "POST", "https://acme-dns:8445/register"]))
+    dns_credentials = dict(zip(
+        ("ACMEDNS_BASE_URL", "ACMEDNS_USERNAME", "ACMEDNS_PASSWORD", "ACMEDNS_SUBDOMAIN"),
+        ("https://acme-dns:8445", registration["username"],
+         registration["password"], registration["subdomain"])))
+    assert re.fullmatch(r"[0-9a-f-]{36}", dns_credentials["ACMEDNS_USERNAME"])
+    assert re.fullmatch(r"[0-9a-f-]{36}", dns_credentials["ACMEDNS_SUBDOMAIN"])
+    assert re.fullmatch(r"[A-Za-z0-9_-]{32,128}", dns_credentials["ACMEDNS_PASSWORD"])
+    command(docker + ["rm", "-f", dns_server])
+    config.write_text(body.replace(
+        f'records = ["auth.padm.test. A {dns_address}"]',
+        f'records = ["auth.padm.test. A {dns_address}", '
+        f'"_acme-challenge.{domain}. CNAME {registration["fulldomain"]}."]'))
+    start_dns(config_volume, database_volume)
+    resolver_config = config_path / "unbound.conf"
+    resolver_config.write_text(f'''server:
+    interface: 0.0.0.0
+    username: ""
+    chroot: ""
+    directory: ""
+    pidfile: ""
+    use-syslog: no
+    do-ip6: no
+    module-config: "iterator"
+    access-control: 172.29.0.0/24 allow
+    local-zone: "test." nodefault
+    qname-minimisation: no
+    cache-max-ttl: 0
+    cache-max-negative-ttl: 0
+stub-zone:
+    name: "padm.test."
+    stub-addr: {dns_address}
+    stub-first: no
+    stub-prime: no
+''')
+    resolver_config.chmod(0o640)
+    os.chown(resolver_config, 0, 10001)
+    command(docker + [
+        "run", "--pull=never", "--detach", "--name", dns_resolver,
+        "--label", "io.padm.test=acme-recovery", "--network", network, "--ip", resolver_address,
+        "--read-only", "--user", "10001:10001", "--cap-drop", "ALL",
+        "--cap-add", "NET_BIND_SERVICE", "--security-opt", "no-new-privileges",
+        "--volume", f"{config_volume}:/etc/acme-dns:ro", "--entrypoint", "/usr/sbin/unbound",
+        inputs["acmedns"]["image_id"], "-d", "-c", "/etc/acme-dns/unbound.conf"])
+    wait_ready(lambda: subprocess.run(docker + [
+        "exec", client, "nslookup", "-type=NS", "auth.padm.test", resolver_address],
+        capture_output=True, timeout=4).returncode == 0, 10)
+    # 客户端的 DNS 预检显式跳过公网 DoH，CA 仍通过真实权威 DNS 查询完成挑战。
+    return [argument for name, value in dns_credentials.items() for argument in ("--env", f"{name}={value}")]
+
+
+def dns_txt():
+    observed = command(docker + [
+        "run", "--rm", "--pull=never", "--network", network, "--read-only",
+        "--user", "10001:10001", "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges", "--entrypoint", "nslookup",
+        inputs["ops"]["image_id"], "-type=TXT", f"_acme-challenge.{domain}", resolver_address])
+    assert re.search(rb'"[A-Za-z0-9_-]{43}"', observed), "真实权威 DNS 没有 ACME TXT"
+    return observed
 
 
 def managed_recovery_real():
     global phase, cron
     webroot = scope == "webroot"
-    public_port = 35466 if webroot else 443
+    dns = scope == "dns"
+    public_port = 35466 if webroot or dns else 443
     control = runpy.run_path(str(scripts / "control-two-deployment-real.py"))
-    cli, services, traffic = (control[name] for name in ("cli", "services", "traffic"))
+    raw_cli, services, traffic = (control[name] for name in ("cli", "services", "traffic"))
+
+    def cli(*arguments, **keywords):
+        try:
+            return raw_cli(*arguments, **keywords)
+        except AssertionError as error:
+            raise AssertionError(diagnostic(str(error).encode())) from None
+
     path = node
     for relative in ("bin", "home", "tmp", "private", "secrets/tls", "secrets/net/wireguard"):
         (path / relative).mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -211,9 +351,9 @@ os.execv(release_check, [release_check, *arguments])
     wrapped_docker.chmod(0o755)
     environment.update(PADM_REAL_ACME_NETWORK=network, PADM_REAL_ACME_CA=ca_volume,
                        PADM_REAL_ACME_CA_FILE=str(ca_path / "pebble.crt"),
-                       PADM_REAL_ACME_ALIAS="" if webroot else domain)
+                       PADM_REAL_ACME_ALIAS=domain if scope == "alpn" else "")
     shutil.copytree(source_home, deployed / "data/acme", dirs_exist_ok=True)
-    if not webroot:
+    if scope == "alpn":
         # 使用本地账户重新走生产初签，归档前移除夹具专用 CA 选择。
         shutil.rmtree(deployed / f"data/acme/{domain}_ecc")
         (deployed / "data/acme/account.conf").write_bytes(acme.encoded({
@@ -227,7 +367,13 @@ os.execv(release_check, [release_check, *arguments])
     (deployed / "data/acme/account.conf").write_bytes(acme.encoded({
         "USER_PATH": acme.TRUSTED_PATH, "CA_BUNDLE": ""}))
     private_tree(deployed / "data/acme")
-    cli(member, "acme", "schedule", "enable", "--domain", domain, "--email", email, f"--{scope}")
+    challenge_arguments = [f"--{scope}"]
+    if dns:
+        credentials = path / "private/credentials.env"
+        credentials.write_text("".join(f"{name}={value}\n" for name, value in dns_credentials.items()))
+        credentials.chmod(0o600)
+        challenge_arguments = ["--dns", "dns_acmedns", "--credentials", str(credentials)]
+    cli(member, "acme", "schedule", "enable", "--domain", domain, "--email", email, *challenge_arguments)
     # 客户端信任本地 CA；部署与后续证书仍来自真实签发。
     shutil.copyfile(source_tls / "root.crt", path / "secrets/tls" / (domain + ".crt"))
     client_path = path / "client"
@@ -286,6 +432,12 @@ dockerInstallCli
         command(docker + ["network", "connect", "--alias", domain, network, before_nginx["id"]])
     before_renewal_totals = json.loads(ledger_path.read_text())["accounts"]
     before_registration = (deployed / "secrets/renewal" / domain / "request.json").read_bytes()
+    if dns:
+        registered_credentials = deployed / "secrets/renewal" / domain / "credentials.env"
+        before_credentials = registered_credentials.read_bytes()
+        assert before_credentials == credentials.read_bytes(), "恢复改写 DNS 私密凭据"
+        metadata = registered_credentials.stat()
+        assert (metadata.st_uid, metadata.st_mode & 0o777, metadata.st_nlink) == (0, 0o600, 1)
     certificate = deployed / "secrets/tls" / (domain + ".crt")
     serial = command(["openssl", "x509", "-in", str(certificate), "-noout", "-serial"])
     # 先核实际 ops 的 curl 及 nonce 响应头，避免 HTTP 客户端缺陷拖到续期超时。
@@ -305,7 +457,7 @@ dockerInstallCli
     content = config.read_text()
     assert re.search(r"^Le_NextRenewTime='[0-9]+'$", content, re.M)
     config.write_text(re.sub(r"^Le_NextRenewTime='[0-9]+'$", "Le_NextRenewTime='1'", content, flags=re.M))
-    if not webroot:
+    if scope == "alpn":
         assert "Le_Webroot='alpn'" in content and "Le_TLSPort='8443'" in content
         assert "Le_HTTPPort=" not in content
         https_check = [
@@ -381,13 +533,13 @@ dockerInstallCli
     finally:
         polling.set()
         thread.join(timeout=5)
-    if not webroot:
+    if scope == "alpn":
         wait_ready(lambda: json.loads(command(docker + ["inspect", before_nginx["id"]]))[0][
             "State"]["Health"]["Status"] == "healthy", 35)
     after_services = services(member, wireguard=False)
-    if webroot:
-        assert observed_requests and not failures, "webroot 续期期间 HTTPS 入口中断：" + str(failures)
-        assert after_services["nginx"] == before_nginx, "webroot 续期重启了 Nginx"
+    if webroot or dns:
+        assert observed_requests and not failures, f"{scope} 续期期间 HTTPS 入口中断：" + str(failures)
+        assert after_services["nginx"] == before_nginx, f"{scope} 续期重启了 Nginx"
     else:
         assert observed_requests and failures, "ALPN 验收未观测到挑战期间的 HTTPS 暂停"
         assert after_services["nginx"]["id"] == before_nginx["id"]
@@ -401,6 +553,9 @@ dockerInstallCli
     assert all(actual[key][field] >= value[field] for key, value in before_renewal_totals.items()
                for field in ("upload", "download")), "生产续期回退累计流量"
     assert (deployed / "secrets/renewal" / domain / "request.json").read_bytes() == before_registration
+    if dns:
+        assert registered_credentials.read_bytes() == before_credentials
+        assert dns_txt() != initial_dns_txt, "生产续期未改变真实权威 DNS TXT"
     assert (restored_home / "ca/pebble/dir/account.key").read_bytes() == before_key
     assert acme.assignments((restored_home / "ca/pebble/dir/ca.conf").read_bytes(),
                             {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"}) == before_ca
@@ -408,7 +563,7 @@ dockerInstallCli
     if webroot:
         assert not list(challenge.iterdir()), "生产续期结束后遗留挑战"
     else:
-        assert not challenge.exists(), "ALPN 续期遗留 HTTP-01 挑战根"
+        assert not challenge.exists(), f"{scope} 续期遗留 HTTP-01 挑战根"
         assert not command(docker + ["ps", "-aq", "--filter", "label=io.padm.challenge"]).strip()
     command(["openssl", "verify", "-CAfile", str(source_tls / "root.crt"),
              "-untrusted", str(restored_home / f"{domain}_ecc/ca.cer"),
@@ -424,11 +579,11 @@ dockerInstallCli
     result = subprocess.run(docker + ["logs", server], capture_output=True, timeout=10)
     assert result.returncode == 0
     ca_log = result.stdout + result.stderr
-    assert ca_log.count(b"set VALID by completed challenge") >= (2 if webroot else 3)
+    assert ca_log.count(b"set VALID by completed challenge") >= (3 if scope == "alpn" else 2)
     if webroot:
         assert ca_log.count(f"http://{domain}:{http_port}/.well-known/acme-challenge/".encode()) >= 6
         challenge_proof = {"webroot": acme.WEBROOT, "nginx_uninterrupted": True}
-    else:
+    elif scope == "alpn":
         assert ca_log.count(b"Starting 3 validations.") >= 4
         assert b"set INVALID by completed challenge" in ca_log
         assert b"Attempting to validate w/ HTTP:" not in ca_log
@@ -436,6 +591,17 @@ dockerInstallCli
                            "challenge_failure_recovered": True, "nginx_same_container_restored": True,
                            "xray_uninterrupted": True, "https_pause_observed": True,
                            "https_response_preserved": True}
+    else:
+        assert b"DNS" in ca_log and b"Attempting to validate w/ HTTP:" not in ca_log
+        ordinary = (path / "cli.log").read_bytes() + (path / "cron.log").read_bytes()
+        ordinary += b"".join(output for _, output in logs)
+        dns_log = command(docker + ["logs", dns_server])
+        ordinary += dns_log
+        assert all(value.encode() not in ordinary for name, value in dns_credentials.items()
+                   if name != "ACMEDNS_BASE_URL"), "普通日志泄露 DNS 注册凭据"
+        challenge_proof = {"validation": "dns-01", "provider": "dns_acmedns",
+                           "authoritative_dns": True, "txt_changed": True,
+                           "credentials_bound_preserved_private": True, "nginx_uninterrupted": True}
     print(f"docker-acme-{scope}-recovery-real=" + json.dumps({
         "acme_version": "3.1.6", "release_trust": "fixture", **challenge_proof,
         "empty_target_restore": True, "production_renewal_run": True,
@@ -475,7 +641,9 @@ with (node / "daemon.log").open("wb") as daemon_log:
 
         phase = "local-ca"
         command(docker + ["network", "create", "--internal", "--label",
-                          "io.padm.test=acme-recovery", network])
+                          "io.padm.test=acme-recovery",
+                          *(["--subnet", "172.29.0.0/24", "--gateway", "172.29.0.1"] if scope == "dns" else []),
+                          network])
         inspected_network = json.loads(command(docker + ["network", "inspect", network]))[0]
         assert inspected_network["Internal"]
         ca_volume, ca_path = volume("ca")
@@ -501,7 +669,7 @@ with (node / "daemon.log").open("wb") as daemon_log:
             "--entrypoint", "openssl", inputs["ops"]["image_id"], "req",
             "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "/ca/pebble.key",
             "-out", "/ca/pebble.crt", "-subj", "/CN=pebble",
-            "-addext", "subjectAltName=DNS:pebble", "-days", "1"])
+            "-addext", "subjectAltName=DNS:pebble,DNS:acme-dns", "-days", "1"])
         command(docker + [
             "run", "--pull=never", "--detach", "--name", server,
             "--label", "io.padm.test=acme-recovery", "--network", network,
@@ -510,8 +678,10 @@ with (node / "daemon.log").open("wb") as daemon_log:
             "--volume", f"{ca_volume}:/ca:ro", "--env", "PEBBLE_VA_NOSLEEP=1",
             "--env", "PEBBLE_WFE_NONCEREJECT=0", "--env", "PEBBLE_AUTHZREUSE=0",
             inputs["pebble"]["image_id"],
-            "-config", "/ca/pebble.json", "-strict"])
+            "-config", "/ca/pebble.json", "-strict",
+            *(["-dnsserver", resolver_address + ":53"] if scope == "dns" else [])])
         start_client(client, source_volume, output_volume, ca_volume)
+        dns_environment = dns_fixture() if scope == "dns" else []
         readiness = (
             'import ssl, urllib.request; '
             'context=ssl.create_default_context(cafile="/ca/pebble.crt"); '
@@ -533,9 +703,10 @@ with (node / "daemon.log").open("wb") as daemon_log:
             "standalone": ["--standalone", "--httpport", "8080"],
             "webroot": ["--webroot", "/var/lib/padm/acme-webroot"],
             "alpn": ["--alpn", "--tlsport", "8443"],
+            "dns": ["--dns", "dns_acmedns", "--dnssleep", "1"],
         }[scope]
         run(docker + [
-            "exec", client, "/opt/acme/acme.sh", "--home", "/var/lib/padm/acme",
+            "exec", *dns_environment, client, "/opt/acme/acme.sh", "--home", "/var/lib/padm/acme",
             "--issue", *validation, "--keylength", "ec-256",
             "-d", domain, "--accountemail", email, "--server", api,
             "--ca-bundle", "/ca/pebble.crt"], timeout=120)
@@ -558,8 +729,15 @@ with (node / "daemon.log").open("wb") as daemon_log:
         before_serial = run(docker + [
             "exec", client, "openssl", "x509", "-in", f"/var/lib/padm/tls-output/{domain}.crt",
             "-noout", "-serial"])
+        if scope == "dns":
+            initial_dns_txt = dns_txt()
+            actual_domain = source_home / f"{domain}_ecc/{domain}.conf"
+            print("docker-acme-dns-material-shape=" + json.dumps({
+                "keys": sorted(re.findall(r"^([A-Za-z_][A-Za-z0-9_]*)=", actual_domain.read_text(), re.M)),
+                "credential_fields": sorted(dns_credentials), "dns_sleep": 1,
+            }), flush=True)
         command(docker + ["rm", "-f", client])
-        if scope in ("webroot", "alpn"):
+        if scope in ("webroot", "alpn", "dns"):
             managed_recovery_real()
             raise SystemExit(0)
 
@@ -694,6 +872,11 @@ with (node / "daemon.log").open("wb") as daemon_log:
                 if active_error:
                     result = subprocess.run(docker + ["logs", server], capture_output=True, timeout=5)
                     logs.append(("pebble", result.stdout + result.stderr))
+                    if scope == "dns":
+                        for service in (dns_server, dns_resolver):
+                            result = subprocess.run(docker + ["logs", service],
+                                                    capture_output=True, timeout=5)
+                            logs.append((service, result.stdout + result.stderr))
                     for label, output in logs:
                         if output:
                             print(f"acme-recovery-diagnostic: stage={label}\n"
@@ -725,7 +908,7 @@ with (node / "daemon.log").open("wb") as daemon_log:
             for mounted in sorted(owned_mounts, key=lambda path: len(path.parts), reverse=True):
                 command(["umount", "--lazy", str(mounted)])
             release_fixture = node.parent / "recovery-release"
-            if scope in ("webroot", "alpn") and release_fixture.exists():
+            if scope in ("webroot", "alpn", "dns") and release_fixture.exists():
                 shutil.rmtree(release_fixture)
             assert node.parent == Path("/n") and node.name.startswith(".tmp-acme-recovery-")
             shutil.rmtree(node)

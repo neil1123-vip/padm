@@ -8275,14 +8275,31 @@ dockerCleanupTlsCandidate() {
 }
 
 dockerRecoveryAcmeValidate() {
-    local specFile=$1 candidate=$2 domain image helper
+    local specFile=$1 candidate=$2 domain image helper credentials credentialsCopy= status=0
+    local -a credentialMount=() credentialArgs=()
     domain=$(jq -er '.tls.domain' "${specFile}") &&
         image=$(jq -er '.images.ops' "${specFile}") || return 1
+    dockerDomainIsValid "${domain}" || return 1
     helper="${DOCKER_LIB_DIR}/acme_recovery.py"
     [[ -f "${helper}" && ! -L "${helper}" ]] || return 1
     [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] ||
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${candidate}/data/acme" || return 1
+    credentials="${candidate}/secrets/renewal/${domain}/credentials.env"
+    dockerTrafficSafePath "${candidate}" "${credentials}" || return 1
+    if [[ -e "${credentials}" ]]; then
+        dockerRenewalCredentialsValidate "${credentials}" || return 1
+        # 登记保持 root 私密权限，容器只读校验一次性副本。
+        credentialsCopy=$(mktemp "${candidate}/.acme-credentials.XXXXXX") || return 1
+        if ! cat -- "${credentials}" >"${credentialsCopy}" ||
+            { [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]] &&
+                ! chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${credentialsCopy}"; }; then
+            rm -f -- "${credentialsCopy}"
+            return 1
+        fi
+        credentialMount=(--volume "${credentialsCopy}:/credentials:ro")
+        credentialArgs=(--credentials /credentials)
+    fi
     # 私密材料只读挂载且不联网；容器内使用可信 OpenSSL，不执行归档配置。
     docker run -i --rm --pull=never --network none --read-only \
         --user "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
@@ -8291,8 +8308,12 @@ dockerRecoveryAcmeValidate() {
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --volume "${candidate}/data/acme:/acme:ro" \
         --volume "${candidate}/secrets/tls:/tls:ro" \
+        "${credentialMount[@]}" \
         --entrypoint python3 "${image}" -B - check \
-        --home /acme --domain "${domain}" --tls-directory /tls <"${helper}" >/dev/null
+        --home /acme --domain "${domain}" --tls-directory /tls \
+        "${credentialArgs[@]}" <"${helper}" >/dev/null || status=$?
+    [[ -z "${credentialsCopy}" ]] || rm -f -- "${credentialsCopy}" || status=1
+    return "${status}"
 }
 
 dockerTlsValidateCandidate() {

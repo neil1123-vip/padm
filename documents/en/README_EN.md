@@ -1660,15 +1660,21 @@ Nginx TLS listener `21`-`25`/`27`/`29`. Its path is fixed at `/var/lib/padm/acme
 self-listening port fields and custom paths are rejected.
 TLS-ALPN-01 requires matching schema `4`/`alpn` registration, `Le_Webroot='alpn'`
 and `Le_TLSPort='8443'`, with no `Le_HTTPPort`. A valid HTTP-01 listener may coexist;
-future renewal still rechecks port `443` ownership. Recovery parses data without executing
+future renewal still rechecks port `443` ownership.
+DNS-01 accepts only schema `1`/`dns_acmedns`, `Le_Webroot='dns_acmedns'`, and preregistered
+`ACMEDNS_USERNAME`, `ACMEDNS_PASSWORD`, `ACMEDNS_SUBDOMAIN` and `ACMEDNS_BASE_URL`.
+All four values must exactly match private `credentials.env`; the URL must be canonical HTTPS,
+and self-listening ports are rejected. The external acme-dns registration and DNS CNAME must
+remain valid; recovery does not rebuild that service or register interactively.
+Recovery parses data without executing
 archived shell, rebuilds exactly nine files and discards only known CSR/transient material.
-Unknown configuration, hooks, DNS/SAN/RSA/EAB and custom execution paths are rejected.
+Unknown configuration, hooks, other DNS providers, SAN/RSA/EAB and custom execution paths are rejected.
 A network-disabled trusted ops container verifies private/public key, ordered certificate
 chain and fixed TLS-output bindings before preserving the account and domain keys.
-Only a matching verified standalone, webroot or ALPN registration may also use `enabled=true`, with no other domain in
+Only a matching verified standalone, webroot, ALPN or `dns_acmedns` registration may also use `enabled=true`, with no other domain in
 the renewal registry. After candidate installation
 and health checks succeed, applicable schedules are installed in traffic, Geo, then renewal order.
-Enabled DNS and all other ACME combinations remain rejected.
+Other enabled DNS providers and all other ACME combinations remain rejected.
 Preview does not install schedules. An empty `data/acme` remains compatible but cannot authorize
 enabled renewal. Focused validation, enabled recovery followed by real renewal against a local
 CA, and the 34-check daily `docker-contracts` integration gate have passed.

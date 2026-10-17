@@ -829,6 +829,18 @@ runDockerAlpnRecoveryRealRegression() {
     PADM_ACME_RECOVERY_REAL_SCOPE=alpn runDockerAcmeRecoveryRealRegression
 }
 
+runDockerDnsRecoveryApplyRegression() {
+    PADM_DOCKER_RECOVERY_SCOPE=dns runDockerRecoveryApplyRegression
+}
+
+runDockerDnsRecoveryRealRegression() {
+    PADM_ACME_RECOVERY_REAL_SCOPE=dns runDockerAcmeRecoveryRealRegression
+}
+
+listRegressionDockerDnsRecoveryChildSelectors() {
+    printf '%s\n' docker-backup docker-recovery-preview docker-dns-recovery-apply regression-dispatcher-contract
+}
+
 listRegressionDockerAlpnRecoveryChildSelectors() {
     printf '%s\n' docker-recovery-preview docker-alpn-recovery-apply
 }
@@ -1278,6 +1290,10 @@ registerRegressionFunctionLeaf docker-wireguard-recovery-apply runDockerWireGuar
 registerRegressionFunctionLeaf docker-webroot-recovery-apply runDockerWebrootRecoveryApplyRegression
 registerRegressionFunctionLeaf docker-alpn-recovery-apply runDockerAlpnRecoveryApplyRegression
 registerRegressionFunctionLeaf docker-alpn-recovery-real runDockerAlpnRecoveryRealRegression
+registerRegressionFunctionLeaf docker-dns-recovery-apply runDockerDnsRecoveryApplyRegression
+registerRegressionFunctionLeaf docker-acme-dns-recovery-real runDockerDnsRecoveryRealRegression
+registerRegressionParallelSelectorList docker-dns-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-dns-recovery-focused-${BASHPID:-$$}" listRegressionDockerDnsRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-alpn-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-alpn-recovery-focused-${BASHPID:-$$}" listRegressionDockerAlpnRecoveryChildSelectors 2
 registerRegressionFunctionLeaf docker-controller-recovery-apply runDockerControllerRecoveryApplyRegression

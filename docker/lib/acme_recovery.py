@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""固定 acme.sh 3.1.6 单域名 ECC HTTP-01/TLS-ALPN-01 状态的纯数据重建与材料校验。"""
+"""固定 acme.sh 3.1.6 单域名 ECC 状态的纯数据重建与材料校验。"""
 
 import argparse
 import base64
@@ -17,7 +17,8 @@ from urllib.parse import urlsplit
 
 TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 WEBROOT = "/var/lib/padm/acme-webroot"
-VALIDATIONS = ("standalone-http01", "webroot-http01", "tls-alpn01")
+VALIDATIONS = ("standalone-http01", "webroot-http01", "tls-alpn01", "dns-01")
+DNS_FIELDS = {"ACMEDNS_USERNAME", "ACMEDNS_PASSWORD", "ACMEDNS_SUBDOMAIN", "ACMEDNS_BASE_URL"}
 MAX_CONFIG = 64 * 1024
 MAX_FILE = 1024 * 1024
 P256_SPKI = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d03010703420004")
@@ -26,7 +27,7 @@ TIMES = ("Le_CertCreateTime", "Le_NextRenewTime", "Le_InstallCertSuccessTime")
 LINKS = ("Le_OrderFinalize", "Le_LinkOrder", "Le_LinkCert")
 OUTPUTS = ("Le_RealCertPath", "Le_RealCACertPath", "Le_RealKeyPath", "Le_RealFullChainPath")
 DOMAIN_REQUIRED = {"Le_Domain", "Le_Alt", "Le_Webroot", "Le_API", "Le_Keylength"}
-DOMAIN_FIELDS = DOMAIN_REQUIRED | {"Le_HTTPPort", "Le_TLSPort"} | set(HOOKS + TIMES + LINKS + OUTPUTS) | {
+DOMAIN_FIELDS = DOMAIN_REQUIRED | {"Le_HTTPPort", "Le_TLSPort", "Le_DNSSleep"} | DNS_FIELDS | set(HOOKS + TIMES + LINKS + OUTPUTS) | {
     field + "Str" for field in TIMES
 }
 
@@ -134,6 +135,32 @@ def ca_directory(api):
     return "ca/" + parsed.hostname + parsed.path.rstrip("/"), origin
 
 
+def dns_credentials(data):
+    """仅恢复固定 dns_acmedns 插件的预登记凭据，不触发交互注册。"""
+    require(isinstance(data, bytes) and 0 < len(data) <= MAX_CONFIG)
+    try:
+        text = data.decode("ascii")
+    except UnicodeError as error:
+        raise ValueError("ACME DNS 凭据校验失败") from error
+    values = {}
+    for line in text.split("\n"):
+        line = line.removesuffix("\r")
+        if not line or line.startswith("#"):
+            continue
+        name, separator, value = line.partition("=")
+        require(separator and name in DNS_FIELDS and name not in values)
+        values[name] = value
+    require(set(values) == DNS_FIELDS)
+    for field in ("ACMEDNS_USERNAME", "ACMEDNS_PASSWORD"):
+        require(re.fullmatch(r"[A-Za-z0-9_-]{1,256}", values[field]))
+    require(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
+                         values["ACMEDNS_SUBDOMAIN"]))
+    url = values["ACMEDNS_BASE_URL"]
+    require(not url.endswith("/"))
+    checked_url(url if urlsplit(url).path else url + "/")
+    return values
+
+
 def jwk_public(value):
     require(isinstance(value, dict) and set(value) == {"kty", "crv", "x", "y"}
             and value["kty"] == "EC" and value["crv"] == "P-256")
@@ -180,7 +207,7 @@ def account_metadata(data, email, account_url, origin):
     return public[0] if public else None
 
 
-def normalize_acme_home(files, domain, email=None, validation=None):
+def normalize_acme_home(files, domain, email=None, validation=None, credentials=None):
     """返回规范文件和非秘密摘要；路径、权限和清单信任由恢复入口负责。"""
     checked_domain(domain)
     require(isinstance(files, dict) and len(files) <= 20)
@@ -195,12 +222,20 @@ def normalize_acme_home(files, domain, email=None, validation=None):
     require(config["Le_Domain"] == domain and config["Le_Alt"] == "no"
             and config["Le_Keylength"] == "ec-256"
             and all(not config.get(field) for field in HOOKS))
+    dns = config["Le_Webroot"] == "dns_acmedns"
+    require(dns or (credentials is None and not (set(config) & (DNS_FIELDS | {"Le_DNSSleep"}))))
     if config["Le_Webroot"] == "no":
         require(config.get("Le_HTTPPort") == "8080" and "Le_TLSPort" not in config)
         observed_validation = "standalone-http01"
     elif config["Le_Webroot"] == "alpn":
         require(config.get("Le_TLSPort") == "8443" and "Le_HTTPPort" not in config)
         observed_validation = "tls-alpn01"
+    elif dns:
+        require("Le_HTTPPort" not in config and "Le_TLSPort" not in config
+                and {field: config.get(field) for field in DNS_FIELDS} == dns_credentials(credentials))
+        sleep = config.get("Le_DNSSleep", "")
+        require(sleep == "" or (re.fullmatch(r"[1-9][0-9]{0,3}", sleep) and int(sleep) <= 3600))
+        observed_validation = "dns-01"
     else:
         # 固定客户端仅在自监听方式保存端口，webroot 不接受残留或自定义端口。
         require(config["Le_Webroot"] == WEBROOT
@@ -285,9 +320,9 @@ def certificates(openssl, data):
 
 
 def verify_materials(files, domain, tls_key, tls_fullchain, openssl="openssl", email=None,
-                     validation=None):
+                     validation=None, credentials=None):
     """在可信 ops 容器内验证账户及 TLS 绑定；私钥仅通过标准输入传递。"""
-    normalized, _ = normalize_acme_home(files, domain, email, validation)
+    normalized, _ = normalize_acme_home(files, domain, email, validation, credentials)
     directory = domain + "_ecc"
     config = assignments(normalized[directory + "/" + domain + ".conf"], DOMAIN_FIELDS)
     ca, origin = ca_directory(config["Le_API"])
@@ -350,6 +385,7 @@ def main():
     check.add_argument("--tls-directory", required=True, type=Path)
     check.add_argument("--email")
     check.add_argument("--validation", choices=VALIDATIONS)
+    check.add_argument("--credentials", type=Path)
     arguments = parser.parse_args()
     try:
         checked_domain(arguments.domain)
@@ -358,13 +394,18 @@ def main():
         # 上游已完成树、清单和权限校验；此入口只接收受信暂存目录。
         files = {path.relative_to(arguments.home).as_posix(): path.read_bytes()
                  for path in arguments.home.rglob("*") if path.is_file()}
+        credentials = None
+        if arguments.credentials is not None:
+            require(arguments.credentials.is_absolute() and arguments.credentials.is_file()
+                    and arguments.credentials.stat().st_size <= MAX_CONFIG)
+            credentials = arguments.credentials.read_bytes()
         _, summary = normalize_acme_home(files, arguments.domain, arguments.email,
-                                         arguments.validation)
+                                         arguments.validation, credentials)
         summary["materials"] = verify_materials(
             files, arguments.domain,
             (arguments.tls_directory / (arguments.domain + ".key")).read_bytes(),
             (arguments.tls_directory / (arguments.domain + ".crt")).read_bytes(),
-            email=arguments.email, validation=arguments.validation)
+            email=arguments.email, validation=arguments.validation, credentials=credentials)
     except (ValueError, OSError):
         print("ACME 恢复材料检查失败", file=sys.stderr)
         return 1
