@@ -41,7 +41,7 @@ jobs:
           - docker-contracts-reality-rotation
           - docker-routing-ip-ownership
           - docker-routing-dns-csv
-          - docker-routing-core-policy-lifecycle
+          - docker-contracts-policy
           - docker-routing-core-network
     steps:
       - name: Checkout checked source

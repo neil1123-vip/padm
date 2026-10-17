@@ -383,7 +383,7 @@ runRegressionDockerContractsAggregateContract() (
     }
     for selector in docker-phase3-entries docker-contracts-reality-metadata docker-contracts-reality-rotation \
         docker-contracts-recovery docker-contracts-fast-heavy docker-contracts-fast-sites \
-        docker-contracts-phase3-tls docker-contracts-phase3-protocol docker-contracts-phase3-topology \
+        docker-contracts-phase3-tls docker-contracts-phase3-protocol docker-contracts-phase3-topology docker-contracts-policy \
         docker-contracts-setup-basic docker-contracts-setup-transports docker-contracts-system-light \
         docker-routing-ip-ownership docker-routing-core-network docker-routing-dns-csv; do
         expectedJobs=2
@@ -766,7 +766,7 @@ runDockerXhttpParallelContract() (
     bash() { [[ "$1" == -n ]]; }
     shellcheck() { :; }
     runParallelRegressionRunners() {
-        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 3 ]] || return 8
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 5 ]] || return 8
         shift
         printf '%s\n' "$@" >"${callLog}"
         return 7
@@ -774,6 +774,34 @@ runDockerXhttpParallelContract() (
     runDockerXhttpEditRegression || status=$?
     [[ "${status}" == 7 ]]
     [[ "$(<"${callLog}")" == $'xhttp-preset\nrunDockerXhttpPresetRegression\nxhttp-padding\nrunDockerXhttpPaddingRegression\nxhttp-headers\nrunDockerXhttpHeadersRegression\nxhttp-limits\nrunDockerXhttpLimitsRegression\nxhttp-download\nrunDockerXhttpDownloadRegression' ]]
+)
+
+runDockerRecoveryParallelContract() (
+    local callLog="${TMP_DIR}/recovery-apply-parallel.log" status=0 scope
+    bash() {
+        [[ "$1" == -n ]] || printf '%s\n' "${PADM_DOCKER_RECOVERY_SCOPE:-all}" >>"${callLog}"
+    }
+    shellcheck() { :; }
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 3 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+    unset PADM_DOCKER_RECOVERY_SCOPE
+    runDockerRecoveryApplyRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'recovery-core\nrunDockerRecoveryCoreApplyRegression\nrecovery-atomic\nrunDockerRecoveryAtomicApplyRegression\nrecovery-variants\nrunDockerRecoveryVariantsApplyRegression' ]]
+    : >"${callLog}"
+    for scope in core atomic variants wireguard webroot controller; do
+        PADM_DOCKER_RECOVERY_SCOPE="${scope}" runDockerRecoveryApplyRegression
+    done
+    [[ "$(<"${callLog}")" == $'core\natomic\nvariants\nwireguard\nwebroot\ncontroller' ]]
+    status=0
+    shellcheck() { return 9; }
+    : >"${callLog}"
+    runDockerRecoveryApplyRegression || status=$?
+    [[ "${status}" == 1 && ! -s "${callLog}" ]]
 )
 
 runDockerRoutingParallelContract() (
@@ -850,6 +878,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep hopping-parallel runDockerPortHoppingParallelContract
     runRegressionStep hopping-target-parallel runDockerPortHoppingTargetParallelContract
     runRegressionStep xhttp-parallel runDockerXhttpParallelContract
+    runRegressionStep recovery-parallel runDockerRecoveryParallelContract
     runRegressionStep routing-parallel runDockerRoutingParallelContract
     runRegressionStep traditional-tls-parallel runDockerTraditionalTlsParallelContract
     runRegressionStep phase4-parallel runDockerPhase4ParallelContract

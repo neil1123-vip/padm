@@ -252,7 +252,8 @@ dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${TEST_ROOT}/case-defaults.json" ||
     fail '缺 Packet/Stream 能力的旧包误拒已有 XMUX'
 fi
 
-if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == validation || "${XHTTP_SCOPE}" == edit-download ]]; then
+if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == validation ||
+    ( "${XHTTP_SCOPE}" == edit-download && "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" != 1 ) ]]; then
 # 同入口别名与独立下行身份互斥；外部对象完整显式指定，不继承上行参数。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy

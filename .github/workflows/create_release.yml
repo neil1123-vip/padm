@@ -100,18 +100,17 @@ jobs:
     with:
       source_ref: ${{ needs.static.outputs.source_sha }}
 
-  prepare:
-    name: Resolve release
-    needs: [static, native, tls, contracts]
+  plan:
+    name: Plan release
+    needs: static
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
     permissions:
-      contents: write
-      actions: write
+      contents: read
     outputs:
       release_version: ${{ steps.resolve.outputs.release_version }}
-      release_sha: ${{ steps.target.outputs.release_sha }}
+      needs_bump: ${{ steps.resolve.outputs.needs_bump }}
       deferred: ${{ steps.revision.outputs.deferred == 'true' }}
       skip: ${{ steps.revision.outputs.deferred == 'true' || steps.scope.outputs.changed != 'true' || steps.existing.outputs.result == 'true' }}
     steps:
@@ -120,15 +119,12 @@ jobs:
         with:
           ref: ${{ needs.static.outputs.source_sha }}
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Use latest workflow revision
+      - name: Check workflow revision
         id: revision
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
-          FORCE_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
         run: |
           set -euo pipefail
           if git diff --quiet "${WORKFLOW_SHA}" HEAD -- \
@@ -136,10 +132,7 @@ jobs:
             .github/workflows/docker-contracts.yml; then
             echo 'deferred=false' >>"${GITHUB_OUTPUT}"
           else
-            gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
-              -F force_release="${FORCE_RELEASE}"
             echo 'deferred=true' >>"${GITHUB_OUTPUT}"
-            echo 'Release handed to the latest workflow revision.' >>"${GITHUB_STEP_SUMMARY}"
           fi
 
       - name: Read script version and lock
@@ -271,12 +264,45 @@ jobs:
         shell: bash
         run: bash docker/release.sh preflight
 
-      - name: Bump script and lock version
-        id: bump
-        if: ${{ steps.resolve.outputs.needs_bump == 'true' && steps.existing.outputs.result != 'true' }}
+  prepare:
+    name: Resolve release
+    needs: [static, native, tls, contracts, plan]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: write
+    outputs:
+      release_version: ${{ needs.plan.outputs.release_version }}
+      release_sha: ${{ steps.target.outputs.release_sha }}
+      deferred: ${{ needs.plan.outputs.deferred }}
+      skip: ${{ needs.plan.outputs.skip }}
+    steps:
+      - name: Checkout checked source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.static.outputs.source_sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Use latest workflow revision
+        if: needs.plan.outputs.deferred == 'true'
         shell: bash
         env:
-          RELEASE_VERSION: ${{ steps.resolve.outputs.release_version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
+        run: |
+          set -euo pipefail
+          gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
+            -F force_release="${FORCE_RELEASE}"
+          echo 'Release handed to the latest workflow revision.' >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Bump script and lock version
+        id: bump
+        if: ${{ needs.plan.outputs.needs_bump == 'true' && needs.plan.outputs.skip != 'true' }}
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.release_version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
         run: |

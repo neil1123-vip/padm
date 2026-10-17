@@ -1152,22 +1152,47 @@ grep -Fq 'source_ref: ${{ needs.prepare.outputs.release_sha }}' "${RELEASE_WORKF
     fail 'Release images do not use the resolved build commit'
 grep -Eq '^  static:' "${RELEASE_WORKFLOW}" || fail 'Release static gate is not a separate job'
 grep -Eq '^  native:' "${RELEASE_WORKFLOW}" || fail 'Release native gate is not a separate job'
+# 只读发布计划与回归并行，版本提交仍等待计划和全部回归成功。
+planDefinition=$(awk '
+    /^  plan:$/ {inside = 1; next}
+    inside && /^  [^ ]/ {exit}
+    inside {print}
+' "${RELEASE_WORKFLOW}")
+for requirement in \
+    '    needs: static' \
+    '      contents: read' \
+    '      needs_bump: ${{ steps.resolve.outputs.needs_bump }}'; do
+    grep -Fxq "${requirement}" <<<"${planDefinition}" ||
+        fail "Release 只读计划合同缺失: ${requirement}"
+done
+if grep -Eq ':[[:space:]]*write$|gh workflow run |git (commit|push)|cosign sign' <<<"${planDefinition}"; then
+    fail 'Release 只读计划包含发布权限或外部写入'
+fi
 # 版本提交必须等全部回归成功，失败或取消时保留主分支版本。
 prepareDefinition=$(awk '
     /^  prepare:$/ {inside = 1; next}
     inside && /^  [^ ]/ {exit}
     inside {print}
 ' "${RELEASE_WORKFLOW}")
-grep -Fxq '    needs: [static, native, tls, contracts]' <<<"${prepareDefinition}" ||
-    fail 'Release resolution can bypass static, native, TLS or Docker contract gates'
+grep -Fxq '    needs: [static, native, tls, contracts, plan]' <<<"${prepareDefinition}" ||
+    fail 'Release resolution can bypass its read-only plan or regression gates'
 grep -Fxq "    if: github.ref == 'refs/heads/main'" <<<"${prepareDefinition}" ||
     fail 'Release resolution overrides the dependency success guard'
+for requirement in \
+    '      release_version: ${{ needs.plan.outputs.release_version }}' \
+    '      deferred: ${{ needs.plan.outputs.deferred }}' \
+    '      skip: ${{ needs.plan.outputs.skip }}' \
+    "        if: \${{ needs.plan.outputs.needs_bump == 'true' && needs.plan.outputs.skip != 'true' }}" \
+    '          RELEASE_VERSION: ${{ needs.plan.outputs.release_version }}'; do
+    grep -Fxq "${requirement}" <<<"${prepareDefinition}" ||
+        fail "Release 提交没有使用已通过的只读计划: ${requirement}"
+done
 # 拆分 job 后固定到静态门槛检出的提交，避免并发推送绕过原生回归。
 grep -Fq 'source_sha: ${{ steps.checked.outputs.source_sha }}' "${RELEASE_WORKFLOW}" ||
     fail 'Release static gate does not expose the checked source commit'
 grep -Fq "git rev-parse HEAD | sed 's/^/source_sha=/'" "${RELEASE_WORKFLOW}" ||
     fail 'Release static gate does not record its checkout commit'
-for job in native tls prepare; do
+for job in native tls plan prepare; do
     jobDefinition=$(awk -v job="${job}" '
         $0 == "  " job ":" {inside = 1; next}
         inside && /^  [^ ]/ {exit}
@@ -1242,16 +1267,13 @@ grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS' "${PR_WORKFLOW}" ||
 prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${PR_WORKFLOW}")
 [[ "${prImageNeeds}" == '    needs: [static, native, tls, contracts]' ]] ||
     fail 'PR images can run without native, TLS or contract validation'
-nativeLine=$(grep -n '^      - name: Check native regressions$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
-preflightLine=$(grep -n '^      - name: Preflight pinned APK dependencies$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
-bumpLine=$(grep -n '^      - name: Bump script and lock version$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
-[[ -n "${nativeLine}" && -n "${preflightLine}" && -n "${bumpLine}" ]] || fail 'release preflight steps are missing'
-((nativeLine < preflightLine && preflightLine < bumpLine)) || fail 'version bump precedes release preflight'
+grep -Fxq '      - name: Bump script and lock version' <<<"${prepareDefinition}" ||
+    fail '版本提交不在全部门禁之后'
 preflightStep=$(awk '
     /^      - name: Preflight pinned APK dependencies$/ {step = 1; next}
     step && /^      - / {exit}
     step {print}
-' "${RELEASE_WORKFLOW}")
+' <<<"${planDefinition}")
 grep -Fq "if: steps.scope.outputs.changed == 'true' && steps.existing.outputs.result != 'true'" <<<"${preflightStep}" ||
     fail 'APK preflight must cover new releases and failed-release retries'
 grep -Fq 'run: bash docker/release.sh preflight' <<<"${preflightStep}" || fail 'APK preflight command is missing'

@@ -5,7 +5,7 @@ trap 'printf "docker-recovery-apply-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1 PADM_DOCKER_SKIP_CHOWN=0 PADM_DOCKER_LOCK_TIMEOUT=1
 case "${PADM_DOCKER_RECOVERY_SCOPE:-all}" in
-all|wireguard|webroot|controller) ;;
+all|core|atomic|variants|wireguard|webroot|controller) ;;
 *) exit 2 ;;
 esac
 if [[ "${1:-}" != --child ]]; then
@@ -703,12 +703,19 @@ python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${SOURCE}" \
     --output "${TEST_ROOT}/private recovery archive.tar" >/dev/null || fail '归档导出失败'
 DOCKER_CONFIG_CANDIDATE=
 
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == core ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == atomic ]]; then
 GEO_ENABLED_SOURCE="${TEST_ROOT}/source-geo-enabled"
 cp -a -- "${SOURCE}" "${GEO_ENABLED_SOURCE}"
 jq '.enabled = true' "${SOURCE}/config/xray/geo/state.json" \
     >"${GEO_ENABLED_SOURCE}/config/xray/geo/state.json"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${GEO_ENABLED_SOURCE}" \
     --output "${TEST_ROOT}/geo-enabled.tar" >/dev/null || fail '启用 Geo 归档导出失败'
+fi
+
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == core ]]; then
 NO_GEO_SOURCE="${TEST_ROOT}/source-no-geo"
 cp -a -- "${SOURCE}" "${NO_GEO_SOURCE}"
 rm -rf -- "${NO_GEO_SOURCE}/config/xray/geo"
@@ -733,6 +740,7 @@ dockerGenerateDeployment "${HTTP01_SOURCE}/config/spec.json" "${HTTP01_SOURCE}/d
 printf 'untrusted archived HTTP-01 config;\n' >"${HTTP01_SOURCE}/config/nginx/default.conf"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${HTTP01_SOURCE}" \
     --output "${TEST_ROOT}/http01.tar" >/dev/null || fail 'HTTP-01 归档导出失败'
+fi
 
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != wireguard &&
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != controller ]]; then
@@ -767,6 +775,8 @@ for directory in (root / "data/acme", root / "secrets/renewal"):
 PY
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${ACME_SOURCE}" \
     --output "${TEST_ROOT}/acme.tar" >/dev/null || fail 'ACME 归档导出失败'
+
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != core ]]; then
 RENEWAL_ENABLED_SOURCE="${TEST_ROOT}/source-renewal-enabled"
 cp -a -- "${ACME_SOURCE}" "${RENEWAL_ENABLED_SOURCE}"
 find "${RENEWAL_ENABLED_SOURCE}/secrets/renewal" -mindepth 1 -maxdepth 1 \
@@ -777,11 +787,19 @@ jq '.enabled = true' "${ACME_SOURCE}/config/xray/geo/state.json" \
     >"${RENEWAL_ENABLED_SOURCE}/config/xray/geo/state.json"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${RENEWAL_ENABLED_SOURCE}" \
     --output "${TEST_ROOT}/renewal-enabled.tar" >/dev/null || fail '启用续期归档导出失败'
+
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ]]; then
 NO_RENEWAL_SOURCE="${TEST_ROOT}/source-no-renewal"
 cp -a -- "${SOURCE}" "${NO_RENEWAL_SOURCE}"
 rm -rf -- "${NO_RENEWAL_SOURCE}/secrets/renewal"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${NO_RENEWAL_SOURCE}" \
     --output "${TEST_ROOT}/no-renewal.tar" >/dev/null || fail '无续期登记归档导出失败'
+fi
+
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ]]; then
 WEBROOT_SOURCE="${TEST_ROOT}/source-webroot-enabled"
 cp -a -- "${RENEWAL_ENABLED_SOURCE}" "${WEBROOT_SOURCE}"
 python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${WEBROOT_SOURCE}" "${DOMAIN}" <<'PY'
@@ -815,7 +833,11 @@ dockerGenerateDeployment "${WEBROOT_SOURCE}/config/spec.json" "${WEBROOT_SOURCE}
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${WEBROOT_SOURCE}" \
     --output "${TEST_ROOT}/webroot-enabled.tar" >/dev/null || fail '启用 Webroot 续期归档导出失败'
 fi
+fi
+fi
 
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ]]; then
 for protocol in hy2 tuic; do
     variant="${TEST_ROOT}/source-hopping-${protocol}"
     cp -a -- "${SOURCE}" "${variant}"
@@ -846,7 +868,12 @@ for protocol in hy2 tuic; do
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${variant}" \
         --output "${TEST_ROOT}/hopping-${protocol}.tar" >/dev/null || fail "${protocol} 跳跃归档失败"
 done
+fi
 
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == wireguard ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == controller ]]; then
 printf 'dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo=\n' >"${TEST_ROOT}/wg-private"
 printf 'hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=\n' >"${TEST_ROOT}/wg-public"
 chmod 0600 "${TEST_ROOT}/wg-private" "${TEST_ROOT}/wg-public"
@@ -900,8 +927,10 @@ for role in standalone controlled; do
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${variant}" \
         --output "${TEST_ROOT}/wireguard-${role}.tar" >/dev/null || fail "${role}: WireGuard 归档失败"
 done
+fi
 
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == controller ]]; then
     CONTROLLER_SOURCE="${TEST_ROOT}/source-controller"
     cp -a -- "${TEST_ROOT}/source-wireguard-standalone" "${CONTROLLER_SOURCE}"
@@ -1244,7 +1273,8 @@ assert_hopping_deployed() {
     ' <<<"${status}" >/dev/null || fail "${protocol}: 跳跃没有保持 stopped 及保存的 tuple"
 }
 
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ]]; then
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == core ]]; then
 for action in unconfirmed bad-confirm; do
     prepare_target "${action}"
     run_child "${action}" ok "${PADM_DOCKER_RC_USAGE}"
@@ -1443,7 +1473,10 @@ for backend in systemd cron; do
     run_child recover ok 0
     assert_empty
 done
+fi
 
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == atomic ]]; then
 # 创建或复制原始快照时硬杀，恢复不得遗留锁下随机目录或触碰旧调度。
 for mode in source-mkdir source-unit source-cron source-template \
     geo-source-mkdir geo-source-unit geo-source-cron geo-source-template renewal-source-template; do
@@ -1565,7 +1598,10 @@ for mode in unit-publish-renewal-service-before unit-restore-renewal-timer-after
     [[ -z "$(find "${PADM_DOCKER_SYSTEMD_DIR}" -type f ! -perm 0644 -print -quit)" ]] ||
         fail "${mode}: 续期撤销没有恢复 unit 权限"
 done
+fi
 
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == core ]]; then
 prepare_target killed
 run_child apply killed 137
 [[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/compose-container" ]] ||
@@ -1748,8 +1784,9 @@ run_child recover ok 0
 assert_empty
 
 fi
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != wireguard &&
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != controller ]]; then
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ]]; then
 for renewal_provider in standalone webroot; do
     [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${renewal_provider}" == webroot ]] || continue
     RENEWAL_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
@@ -1872,7 +1909,8 @@ assert_empty
 done
 fi
 
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ]]; then
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ]]; then
 for protocol in hy2 tuic; do
     prepare_target "hopping-${protocol}"
     RECOVERY_ARCHIVE="${TEST_ROOT}/hopping-${protocol}.tar"
@@ -1908,8 +1946,9 @@ run_child recover ok 0
 assert_empty
 
 fi
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot &&
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != controller ]]; then
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == wireguard ]]; then
 for role in standalone controlled; do
     prepare_target "wireguard-${role}"
     RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-${role}.tar"
@@ -1977,6 +2016,7 @@ done
 fi
 
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
+    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == controller ]]; then
 for action in controller-old-confirm controller-wrong-mode controller-duplicate controller-recover-flag; do
     prepare_target "${action}"
