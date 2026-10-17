@@ -3,7 +3,7 @@ set -euo pipefail
 
 MENU_SCOPE=${PADM_DOCKER_MENU_SCOPE:-full}
 case "${MENU_SCOPE}" in
-full|routing|port-alias|tun|block-ips-resolved|xhttp|control) ;;
+full|routing|port-alias|tun|block-ips-resolved|xhttp|control|maintenance) ;;
 *) printf 'docker-menu-regression-fail: invalid scope: %s\n' "${MENU_SCOPE}" >&2; exit 1 ;;
 esac
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -1078,7 +1078,10 @@ runMaintenanceDriver() {
             targetReply "${prompt}" $'\n'
             ;;
         restore-eof) targetReply "${prompt}" $'\004' ;;
-        *) targetReply "${prompt}" $'/root/private recovery.tar\n' ;;
+        *)
+            targetReply "${prompt}" $'/root/private recovery.tar\n'
+            targetReply '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）' $'\n'
+            ;;
         esac
         ;;
     restore-apply|restore-apply-failed|restore-apply-cancel|restore-apply-eof|restore-apply-path-eof)
@@ -1088,12 +1091,70 @@ runMaintenanceDriver() {
             targetReply "${prompt}" $'\004'
         else
             targetReply "${prompt}" $'/root/private recovery.tar\n'
+            targetReply '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）' $'1\n'
             case "${scenario}" in
             restore-apply-cancel) answer=n ;;
             restore-apply-eof) answer=$'\004' ;;
             *) answer=y ;;
             esac
             targetReply '确认向空目标应用灾备归档？[y/N]' "${answer}"$'\n'
+        fi
+        ;;
+    restore-source-cancel)
+        for choice in 8 9; do
+            prompt='待预览恢复的灾备归档绝对路径（0 返回）'
+            [[ "${choice}" != 9 ]] || prompt='待应用恢复的灾备归档绝对路径（0 返回）'
+            for value in $'0\n' $'99\n' $'\004'; do
+                targetReply 'Docker 服务维护' "${choice}"$'\n'
+                targetReply "${prompt}" $'/root/private recovery.tar\n'
+                targetReply '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）' "${value}"
+            done
+        done
+        ;;
+    restore-assets|restore-assets-failed|restore-assets-apply|restore-assets-apply-failed|restore-assets-cancel|restore-assets-apply-cancel|restore-assets-reset)
+        local -a releasePrompts=('匹配归档的 manifest 绝对路径（0 返回）'
+            '匹配归档的 Sigstore bundle 绝对路径（0 返回）' '匹配归档的 control-bundle 绝对路径（0 返回）')
+        local -a releasePaths=('/root/historical release/release-manifest.json'
+            '/root/historical release/release-manifest.sigstore.json' '/root/historical release/control-bundle.tar.gz')
+        if [[ "${scenario}" == restore-assets-cancel ]]; then
+            for choice in 8 9; do
+                prompt='待预览恢复的灾备归档绝对路径（0 返回）'
+                [[ "${choice}" != 9 ]] || prompt='待应用恢复的灾备归档绝对路径（0 返回）'
+                for ((field = 0; field < ${#releasePrompts[@]}; field++)); do
+                    for answer in $'0\n' $'\n' $'\004'; do
+                        targetReply 'Docker 服务维护' "${choice}"$'\n'
+                        targetReply "${prompt}" $'/root/private recovery.tar\n'
+                        targetReply '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）' $'2\n'
+                        for ((previous = 0; previous < field; previous++)); do
+                            targetReply "${releasePrompts[previous]}" "${releasePaths[previous]}"$'\n'
+                        done
+                        targetReply "${releasePrompts[field]}" "${answer}"
+                    done
+                done
+            done
+        else
+            choice=8
+            prompt='待预览恢复的灾备归档绝对路径（0 返回）'
+            if [[ "${scenario}" == restore-assets-apply* ]]; then
+                choice=9
+                prompt='待应用恢复的灾备归档绝对路径（0 返回）'
+            fi
+            targetReply 'Docker 服务维护' "${choice}"$'\n'
+            targetReply "${prompt}" $'/root/private recovery.tar\n'
+            targetReply '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）' $'2\n'
+            for ((field = 0; field < ${#releasePrompts[@]}; field++)); do
+                targetReply "${releasePrompts[field]}" "${releasePaths[field]}"$'\n'
+            done
+            if [[ "${choice}" == 9 ]]; then
+                answer=y
+                [[ "${scenario}" != restore-assets-apply-cancel ]] || answer=n
+                targetReply '确认向空目标应用灾备归档？[y/N]' "${answer}"$'\n'
+            fi
+            if [[ "${scenario}" == restore-assets-reset ]]; then
+                targetReply 'Docker 服务维护' $'8\n'
+                targetReply "${prompt}" $'/root/private recovery.tar\n'
+                targetReply '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）' $'1\n'
+            fi
         fi
         ;;
     restore-recover|restore-recover-failed)
@@ -3496,10 +3557,22 @@ backup)
 restore)
     recordAction "$@"
     case "${2:-}" in
-    preview) [[ "$#" -eq 3 && "$3" == '/root/private recovery.tar' ]] || exit 2 ;;
-    apply)
-        [[ "$#" -eq 5 && "$3" == '/root/private recovery.tar' &&
-            "$4" == --confirm && "$5" == PADM-DOCKER-RESTORE ]] || exit 2 ;;
+    preview|apply)
+        [[ "${3:-}" == '/root/private recovery.tar' ]] || exit 2
+        restoreAction=$2
+        shift 3
+        if [[ "${1:-}" == --manifest ]]; then
+            [[ "$#" -ge 6 && "$2" == '/root/historical release/release-manifest.json' &&
+                "$3" == --bundle && "$4" == '/root/historical release/release-manifest.sigstore.json' &&
+                "$5" == --control-bundle && "$6" == '/root/historical release/control-bundle.tar.gz' ]] || exit 2
+            shift 6
+        fi
+        if [[ "${restoreAction}" == apply ]]; then
+            [[ "$#" -eq 2 && "$1" == --confirm && "$2" == PADM-DOCKER-RESTORE ]] || exit 2
+        else
+            [[ "$#" -eq 0 ]] || exit 2
+        fi
+        ;;
     recover) [[ "$#" -eq 2 ]] || exit 2 ;;
     *) exit 2 ;;
     esac
@@ -3735,10 +3808,15 @@ printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.
 : >"${TLS_WIZARD_ACTIONS}"
 runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
+fi
 
+if [[ "${MENU_SCOPE}" == full || "${MENU_SCOPE}" == maintenance ]]; then
+expectedReleaseAssets=' --manifest /root/historical release/release-manifest.json --bundle /root/historical release/release-manifest.sigstore.json --control-bundle /root/historical release/control-bundle.tar.gz'
 for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollback uninstall \
     backup-flow backup-cancel backup-eof backup-failed restore-flow restore-cancel restore-eof restore-failed \
     restore-apply restore-apply-failed restore-apply-cancel restore-apply-eof restore-apply-path-eof \
+    restore-source-cancel restore-assets restore-assets-failed restore-assets-apply restore-assets-apply-failed \
+    restore-assets-cancel restore-assets-apply-cancel restore-assets-reset \
     restore-recover restore-recover-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export MAINTENANCE_STATUS=0 MAINTENANCE_VALIDATE_STATUS=0 BACKUP_STATUS=0
@@ -3777,21 +3855,32 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
                 fail '灾备路径未保持为单个完整参数'
         fi
         ;;
-    restore-flow|restore-failed)
+    restore-flow|restore-failed|restore-assets|restore-assets-failed|restore-assets-reset)
         expectedMaintenance='restore preview /root/private recovery.tar'
-        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 2 ]] ||
+        [[ "${maintenanceCase}" != restore-assets* ]] ||
+            expectedMaintenance+="${expectedReleaseAssets}"
+        expectedMaintenanceVisits=2
+        if [[ "${maintenanceCase}" == restore-assets-reset ]]; then
+            expectedMaintenance+=$'\nrestore preview /root/private recovery.tar'
+            expectedMaintenanceVisits=3
+        fi
+        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq "${expectedMaintenanceVisits}" ]] ||
             fail '恢复预览结束了维护菜单会话'
         ! grep -Fq '[y/N]' "${CONTROL_LOG}" || fail '恢复预览增加了重复确认'
-        if [[ "${maintenanceCase}" == restore-failed ]]; then
+        if [[ "${maintenanceCase}" == *-failed ]]; then
             grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '恢复预览未保留失败退出码'
         else
-            ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" || fail '恢复预览归档路径被拆分'
+            ! grep -Fq '操作失败，退出码:' "${CONTROL_LOG}" || fail '恢复预览归档或发布资产路径被拆分'
         fi
         ;;
-    restore-apply|restore-apply-failed|restore-recover|restore-recover-failed)
+    restore-apply|restore-apply-failed|restore-assets-apply|restore-assets-apply-failed|restore-recover|restore-recover-failed)
         expectedMaintenance='restore recover'
-        [[ "${maintenanceCase}" != restore-apply* ]] ||
-            expectedMaintenance='restore apply /root/private recovery.tar --confirm PADM-DOCKER-RESTORE'
+        if [[ "${maintenanceCase}" == *apply* ]]; then
+            expectedMaintenance='restore apply /root/private recovery.tar'
+            [[ "${maintenanceCase}" != restore-assets-* ]] ||
+                expectedMaintenance+="${expectedReleaseAssets}"
+            expectedMaintenance+=' --confirm PADM-DOCKER-RESTORE'
+        fi
         [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 2 ]] ||
             fail '灾备恢复动作结束了维护菜单会话'
         if [[ "${maintenanceCase}" == *-failed ]]; then
@@ -3810,8 +3899,14 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
         grep -Fq "${maintenanceLabel}" "${CONTROL_LOG}" || fail "维护菜单缺少: ${maintenanceLabel}"
     done
 done
-unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS BACKUP_STATUS
+unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS BACKUP_STATUS expectedReleaseAssets
+fi
+if [[ "${MENU_SCOPE}" == maintenance ]]; then
+    printf 'docker-menu-maintenance-regression-ok\n'
+    exit 0
+fi
 
+if [[ "${MENU_SCOPE}" == full ]]; then
 for fail2banCase in flow cancel menu-eof invalid failed int term disable disable-failed disable-int disable-term \
     verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term \
     enable enable-cancel enable-invalid enable-failed enable-list-failed enable-int enable-term \

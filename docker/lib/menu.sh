@@ -1997,7 +1997,8 @@ dockerMenuFail2ban() {
 }
 
 dockerMenuMaintenance() {
-    local choice answer action path
+    local choice answer action path releaseSource manifest bundle controlBundle
+    local -a restoreArgs=()
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 服务维护\n'
@@ -2036,18 +2037,36 @@ dockerMenuMaintenance() {
             dockerMenuRun backup "${action}" "${path}" || true
             continue
             ;;
-        8)
-            dockerSetupRead path '待预览恢复的灾备归档绝对路径（0 返回）: ' || continue
+        8|9)
+            if [[ "${choice}" == 8 ]]; then
+                action=preview
+                dockerSetupRead path '待预览恢复的灾备归档绝对路径（0 返回）: ' || continue
+            else
+                action=apply
+                dockerSetupRead path '待应用恢复的灾备归档绝对路径（0 返回）: ' || continue
+            fi
             [[ -n "${path}" ]] || continue
-            dockerMenuRun restore preview "${path}" || true
-            continue
-            ;;
-        9)
-            dockerSetupRead path '待应用恢复的灾备归档绝对路径（0 返回）: ' || continue
-            [[ -n "${path}" ]] || continue
-            dockerSetupRead answer '确认向空目标应用灾备归档？[y/N]: ' n || continue
-            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
-            dockerMenuRun restore apply "${path}" --confirm PADM-DOCKER-RESTORE || true
+            restoreArgs=()
+            dockerSetupRead releaseSource '恢复发布资产（1 默认发布，2 自备匹配资产，0 返回）: ' 1 || continue
+            case "${releaseSource}" in
+            1) ;;
+            2)
+                dockerSetupRead manifest '匹配归档的 manifest 绝对路径（0 返回）: ' || continue
+                [[ -n "${manifest}" ]] || continue
+                dockerSetupRead bundle '匹配归档的 Sigstore bundle 绝对路径（0 返回）: ' || continue
+                [[ -n "${bundle}" ]] || continue
+                dockerSetupRead controlBundle '匹配归档的 control-bundle 绝对路径（0 返回）: ' || continue
+                [[ -n "${controlBundle}" ]] || continue
+                restoreArgs=(--manifest "${manifest}" --bundle "${bundle}" --control-bundle "${controlBundle}")
+                ;;
+            *) printf '无效选项，请重新选择。\n'; continue ;;
+            esac
+            if [[ "${action}" == apply ]]; then
+                dockerSetupRead answer '确认向空目标应用灾备归档？[y/N]: ' n || continue
+                case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+                restoreArgs+=(--confirm PADM-DOCKER-RESTORE)
+            fi
+            dockerMenuRun restore "${action}" "${path}" "${restoreArgs[@]}" || true
             continue
             ;;
         10)

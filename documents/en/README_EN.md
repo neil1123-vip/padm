@@ -1545,6 +1545,8 @@ This stage accepts ASCII USTAR paths only: at most 255 bytes per path, 100 per b
 Integrity does not establish provenance, business consistency or restore readiness.
 
 Maintenance menu `18 → 8` and this command provide a limited restore preview:
+Both preview and apply (`18 → 9`) accept either the default release or matching
+manifest, Sigstore bundle and control-bundle files; paths containing spaces are preserved.
 
 ```bash
 padm-docker restore preview /root/padm-recovery.tar

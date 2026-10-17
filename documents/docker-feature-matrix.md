@@ -481,6 +481,10 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 | 系统与脚本 | `supported` + `host-integrated` + `unsupported` | `padm-docker update`、Fail2ban 宿主集成 | BBR/网络优化不由 Docker 修改宿主内核；Fail2ban 需 `net-fail2ban`。 |
 | 高级/危险操作 | `supported` + `deferred` | 受管卸载、移除镜像、显式 purge；有限 VLESS Encryption 实验开关 | 实验限 schema 3 Xray Reality Vision/XHTTP；固定客户端组合之外与完整验收仍待补。 |
 
+维护菜单 `18 → 8/9` 的灾备预览/应用支持默认发布或自备匹配的 manifest、
+Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应用保留原确认。
+这只补齐菜单与现有 CLI 的资产输入，恢复范围仍以 6A 专项限制为准。
+
 ## 公网协议
 
 协议 ID 与原生 [`shell/core/protocols.sh`](../shell/core/protocols.sh) 的

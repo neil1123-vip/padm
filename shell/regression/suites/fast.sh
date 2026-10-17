@@ -333,6 +333,10 @@ runDockerMenuXhttpRegression() {
     PADM_DOCKER_MENU_SCOPE=xhttp runDockerMenuRegression
 }
 
+runDockerMenuMaintenanceRegression() {
+    PADM_DOCKER_MENU_SCOPE=maintenance runDockerMenuRegression
+}
+
 runDockerHttpRelayRegression() {
     bash "${PROJECT_ROOT}/docker/tests/http-relay.sh"
 }
@@ -1075,6 +1079,7 @@ registerRegressionFunctionLeaf docker-menu-routing runDockerMenuRoutingRegressio
 registerRegressionFunctionLeaf docker-menu-port-alias runDockerMenuPortAliasRegression
 registerRegressionFunctionLeaf docker-menu-tun runDockerMenuTunRegression
 registerRegressionFunctionLeaf docker-menu-xhttp runDockerMenuXhttpRegression
+registerRegressionFunctionLeaf docker-menu-maintenance runDockerMenuMaintenanceRegression
 registerRegressionFunctionLeaf docker-release runDockerReleaseRegression
 registerRegressionFunctionLeaf docker-setup runDockerSetupRegression
 registerRegressionFunctionLeaf docker-setup-core runDockerSetupRegression core

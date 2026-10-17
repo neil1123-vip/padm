@@ -8912,6 +8912,16 @@ helper/材料沿首轮已通过的独立叶子结果，证据 `.tmp-regression-d
 不把该轮夹具失败记为整体通过。临时源码包/清单已清，日志及 result 保留；
 未重复无变化完整合同或 full，原生宿主/arm64、公网可信发布和整体目标继续待完成。
 
+### 6A.17 恢复菜单匹配发布资产
+
+合并维护菜单 `18 → 8/9` 的资产选择流程，默认使用当前发布；历史归档可自备
+匹配的 manifest、Sigstore bundle 和 control-bundle，复用原 CLI 信任校验。
+数组保持含空格路径，逐字段取消、空输入和 EOF 均不调用恢复；应用沿用原确认，
+切回默认发布清空旧资产参数，不扩大 6A.16 的恢复范围。
+独立 `docker-menu-maintenance` 通过 31 个 PTY 场景，入口 `3.497` 秒，
+证据 `.tmp-regression-docker-d0b69b5fa62b4b3eba0613498a107687/`。
+随后仅明确 Sigstore 提示及夹具文件名，未重复整套菜单或 full；整体目标保持 active。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

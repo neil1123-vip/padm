@@ -1779,6 +1779,8 @@ TLS/ACME、续期登记、WireGuard 密钥、控制状态/自动同步私密登�
 归档完整性不证明来源可信、业务状态一致或恢复就绪。
 
 菜单 `18 → 8` 和以下命令提供受限的恢复预览：
+菜单可选择默认发布或自备匹配的 manifest、Sigstore bundle 与 control-bundle，
+菜单 `18 → 9` 应用恢复也使用同一选择；含空格的资产路径保持为完整参数。
 
 ```bash
 padm-docker restore preview /root/padm-recovery.tar
