@@ -854,6 +854,46 @@ for scenario in success push-race push-race-dispatch-failed; do
     esac
 done
 
+# 执行正式准备步骤，确认瞬断可重试且连续失败不能保存工具镜像。
+TOOLS_PREPARE_SCRIPT=${TEST_ROOT}/prepare-contract-tools.sh
+awk '
+    /^      - name: Prepare control and site contract tools$/ {step = 1; next}
+    step && /^        run: \|$/ {code = 1; next}
+    code {
+        if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) exit
+        sub(/^          /, ""); print
+    }
+' "${CONTRACT_WORKFLOW}" >"${TOOLS_PREPARE_SCRIPT}"
+[[ -s "${TOOLS_PREPARE_SCRIPT}" ]] || fail '工具镜像准备步骤缺失'
+(
+    toolsCalls=${TEST_ROOT}/tools-calls
+    docker() {
+        printf '%s\n' "$1" >>"${toolsCalls}"
+        [[ "$1" != build ]] || [[ "$(grep -c '^build$' "${toolsCalls}")" -gt "${toolsFailures}" ]]
+    }
+    sleep() { printf 'sleep:%s\n' "$1" >>"${toolsCalls}"; }
+    for scenario in first retry exhausted cached; do
+        export RUNNER_TEMP=${TEST_ROOT}/tools-${scenario}
+        mkdir -p "${RUNNER_TEMP}"
+        : >"${toolsCalls}"
+        toolsFailures=0
+        expected=$'build\nsave'
+        case "${scenario}" in
+        retry) toolsFailures=2; expected=$'build\nsleep:10\nbuild\nsleep:20\nbuild\nsave' ;;
+        exhausted) toolsFailures=3; expected=$'build\nsleep:10\nbuild\nsleep:20\nbuild' ;;
+        cached) : >"${RUNNER_TEMP}/padm-contract-tools.tar"; expected=load ;;
+        esac
+        actual=success
+        (source "${TOOLS_PREPARE_SCRIPT}") || actual=failure
+        if [[ "${scenario}" == exhausted ]]; then
+            [[ "${actual}" == failure ]] || fail '连续构建失败被忽略'
+        else
+            [[ "${actual}" == success ]] || fail "工具镜像准备失败：${scenario}"
+        fi
+        [[ "$(cat "${toolsCalls}")" == "${expected}" ]] || fail "工具镜像重试或缓存行为错误：${scenario}"
+    done
+)
+
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
 grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
     fail 'contract shards do not use root-safe temp directories and bounded workers'

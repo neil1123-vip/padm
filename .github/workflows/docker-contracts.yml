@@ -67,7 +67,15 @@ jobs:
           if [[ -f "${tools}" ]]; then
             docker load --input "${tools}"
           else
-            docker build --tag padm-regression:contracts shell/regression/container
+            for attempt in 1 2 3; do
+              if docker build --tag padm-regression:contracts shell/regression/container; then
+                break
+              fi
+              if [[ "${attempt}" -eq 3 ]]; then
+                exit 1
+              fi
+              sleep $((attempt * 10))
+            done
             docker save --output "${tools}" padm-regression:contracts
           fi
       - name: Run contract shard
