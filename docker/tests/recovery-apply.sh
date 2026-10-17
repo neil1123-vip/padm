@@ -900,7 +900,7 @@ if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
 printf 'dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo=\n' >"${TEST_ROOT}/wg-private"
 printf 'hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=\n' >"${TEST_ROOT}/wg-public"
 chmod 0600 "${TEST_ROOT}/wg-private" "${TEST_ROOT}/wg-public"
-for role in standalone controlled; do
+for role in standalone controlled standalone-multi; do
     [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != controller || "${role}" == standalone ]] || continue
     variant="${TEST_ROOT}/source-wireguard-${role}"
     cp -a -- "${SOURCE}" "${variant}"
@@ -941,6 +941,18 @@ for role in standalone controlled; do
         --directory "${variant}/secrets/net/wireguard" --peer-address 10.77.0.2 \
         --peer-public-key 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
         --endpoint 192.0.2.2:51820 >/dev/null
+    if [[ "${role}" == standalone-multi ]]; then
+        python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate \
+            --directory "${variant}/secrets/net/wireguard" \
+            --destination "${variant}/wireguard-multi" --peer-action add --peer-address 10.77.0.3 \
+            --peer-public-key 'REREREREREREREREREREREREREREREREREREREREREQ=' \
+            --endpoint 192.0.2.3:51820 >/dev/null
+        mv -- "${variant}/wireguard-multi/wg-padm.conf" "${variant}/secrets/net/wireguard/wg-padm.conf"
+        dockerRemoveManagedTree "${variant}" "${variant}/wireguard-multi"
+        python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers \
+            --directory "${variant}/secrets/net/wireguard" |
+            jq -e '[.peers[].address] == ["10.77.0.2","10.77.0.3"]' >/dev/null
+    fi
     chmod 0600 "${variant}/config/spec.json" "${variant}/data/traffic/state.json"
     dockerConfigureSpecValidate "${variant}/config/spec.json" || fail "${role}: WireGuard 夹具无效"
     dockerWireGuardMigrationRoleCheck "${variant}/config/spec.json" \
@@ -1981,7 +1993,7 @@ fi
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == wireguard ]]; then
-for role in standalone controlled; do
+for role in standalone controlled standalone-multi; do
     prepare_target "wireguard-${role}"
     RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-${role}.tar"
     run_child apply ok 0
@@ -2002,10 +2014,10 @@ cmp -- "${MOCK_BACKEND}/before" "${MOCK_BACKEND}/after" ||
     ! grep -q '^up$' "${MOCK_BACKEND}/events" ||
     fail '首次恢复删除了外来接口或继续启动了服务'
 
-# 复用被控归档和事务故障点，健康失败与信号都必须在接口消失后清理私密输入。
+# 无角色多 Peer 复用事务故障点，健康失败与信号都必须在接口消失后清理私密输入。
 for mode in health int term; do
     prepare_target "wireguard-${mode}"
-    RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-controlled.tar"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-standalone-multi.tar"
     expected=failure
     [[ "${mode}" != int ]] || expected=130
     [[ "${mode}" != term ]] || expected=143
@@ -2015,7 +2027,7 @@ for mode in health int term; do
 done
 for mode in ok wireguard-leftover wireguard-drift wireguard-probe-fail wireguard-probe-json; do
     prepare_target "wireguard-killed-${mode}"
-    RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-controlled.tar"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-standalone-multi.tar"
     run_child apply killed 137
     [[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/wireguard-link" &&
         -f "${root}/secrets/net/wireguard/private.key" &&

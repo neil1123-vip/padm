@@ -655,14 +655,16 @@ def wireguard_inputs(directory):
             require(all(metadata[key] == entry[key] for key in ("size", "sha256", "mode")))
             observed.append((wireguard_fd, filename, signature(info)))
         stable()
-        # 只复用规范单 Peer 解析；曲线密钥配对由可信 net 镜像另行检查。
+        # 无控制角色时复用规范 Peer 集合；曲线密钥配对由可信 net 镜像另行检查。
         import importlib.util
         module_spec = importlib.util.spec_from_file_location(
             "padm_wireguard_recovery", os.path.join(os.path.dirname(__file__), "wireguard-config.py"))
         wireguard = importlib.util.module_from_spec(module_spec)
         module_spec.loader.exec_module(wireguard)
-        _, _, configured, remote = wireguard.load(wireguard_fd, include_peer=True)
-        require(configured and remote is not None and set(os.listdir(wireguard_fd)) == filenames)
+        _, _, configured, remotes = wireguard.load(wireguard_fd, include_peers=True)
+        require(configured and remotes and set(os.listdir(wireguard_fd)) == filenames)
+        require((spec.get("control") is None and spec.get("control_sync") is None)
+                or len(remotes) == 1)
         stable()
     return {"wireguard_files": 3}
 

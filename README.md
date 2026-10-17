@@ -1661,7 +1661,7 @@ padm-docker wireguard peers remove --peer-address 10.77.0.3 --yes
 省略字段保持，`none` 清除 endpoint，至少保留一个 Peer。
 变更逐字节保留本机身份和私钥，复用完整配置事务及失败/INT/TERM 恢复，
 会重建部署服务并可能短暂中断连接。v1 主控与被控集合变更继续拒绝；
-多 Peer 的旧 `wireguard migrate` 和单 Peer 灾备恢复入口也拒绝，不能默认选择首项。
+多 Peer 的旧 `wireguard migrate` 仍拒绝，不能默认选择首项；无控制角色的多 Peer 空目标恢复见下文。
 
 已有 v1 主控可通过菜单 `15 → 20` 显式升级为 v2，再登记第二个被控：
 
@@ -1849,13 +1849,14 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 
 目标须仅安装控制骨架，配置、数据、密钥、日志和备份目录为空，且没有同项目容器。
 当前接受同架构 v3 普通部署、受管或桥接可达宿主网站 Reality 共存：核心、手动 TLS、静态站、账号/分享身份、
-已保存流量、Reality 目标库、下述受限 Geo、ACME、续期及单 Peer WireGuard 输入。
+已保存流量、Reality 目标库、下述受限 Geo、ACME、续期及 canonical WireGuard 输入。
 主控仅接受下述显式新身份恢复；其它宿主集成、自动同步授权、host 网络共存及未处理 ACME 仍拒绝。
 停用分享组的悬空引用也须先修正。
 WireGuard 要求完整 canonical `identity.json`、`private.key`、`wg-padm.conf` 三件套，
 均为 `root:root`、目录 `0700`、文件 `0600`，可信 net 镜像另核私钥与公钥配对。
-支持无角色或已接入被控；被控自动同步须先停用，归档不得含 `secrets/control-sync`。
-保留双方地址、密钥、控制身份、连接、受管快照、版本、账号及累计；恢复后重新邀请并手动同步，
+无控制角色支持非空 Peer 集合；已接入被控及下述显式重建主控仍限单 Peer。
+被控自动同步须先停用，归档不得含 `secrets/control-sync`。
+保留全部 Peer 地址、公钥和 endpoint，以及本机密钥、适用的控制身份、连接、受管快照、版本、账号及累计；被控恢复后重新邀请并手动同步，
 不清空版本防倒退门禁。恢复前先停止旧节点并确认接口消失，不能同时运行相同 WireGuard 身份。
 宿主接口、ifindex、alias、运行归属及来源挑战不随归档恢复；目标重新预检并生成运行归属。
 撤销时仅在容器和接口均确认消失后清理私密材料；探测失败或接口残留时保留现场供 `restore recover` 重试。

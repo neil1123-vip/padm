@@ -3238,7 +3238,7 @@ dockerRecoveryInputsPrepare() {
               any(.host_integrations[]; .type == "wireguard") else true end)
            end) and
           .reality_stream.host_website.network_mode != "host"' "${spec}" >/dev/null || {
-        dockerError '恢复仅支持 v3 普通部署、单 Peer WireGuard、停用自动同步的被控角色或显式重建的主控；其它宿主集成和 host 网络共存尚未接入'
+        dockerError '恢复仅支持 v3 普通部署、无控制角色的 canonical WireGuard Peer 集合、单 Peer 且停用自动同步的被控角色或显式重建的主控；其它宿主集成和 host 网络共存尚未接入'
         return 1
     }
     [[ ! -e "${input}/secrets/control-sync" && ! -L "${input}/secrets/control-sync" ]] || {
@@ -3270,7 +3270,7 @@ dockerRecoveryInputsPrepare() {
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" wireguard-inputs --directory "${input}" \
         >"${draft}/wireguard-counts.json" &&
         dockerWireGuardMigrationRoleCheck "${spec}" "${input}/secrets/net/wireguard" || {
-        dockerError 'WireGuard 恢复要求完整 canonical 单 Peer 私密输入及一致的被控连接地址'
+        dockerError 'WireGuard 恢复要求完整 canonical 私密输入；控制角色仍限单 Peer，且被控连接地址必须一致'
         return 1
     }
     printf '{}\n' >"${draft}/controller-counts.json" || return 1

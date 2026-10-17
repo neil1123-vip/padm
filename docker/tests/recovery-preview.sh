@@ -985,7 +985,7 @@ printf 'not a recovery archive\n' >"${TEST_ROOT}/corrupt.tar"
 chmod 0600 "${TEST_ROOT}/corrupt.tar"
 run_case corrupt "${TEST_ROOT}/corrupt.tar" "${PADM_DOCKER_RC_STATE}"
 
-# 单 Peer 只恢复规范三件套；被控快照与业务累计使用相同候选断言。
+# 只恢复规范三件套；无角色多 Peer 与被控快照复用业务累计和候选断言。
 archive_variant wireguard config/spec.json '
   .host_integrations = [{type:"wireguard",profile:"net-wireguard",firewall_rules:[],
     devices:["wg-padm"],schedules:[],settings:{config_file:"wg-padm.conf",interface:"wg-padm"}}]'
@@ -1011,6 +1011,28 @@ EXPECTED_WIREGUARD_DIR="${WIREGUARD_SOURCE}/secrets/net/wireguard"
 run_case wireguard "${TEST_ROOT}/wireguard.tar" 0
 grep -q '"wireguard_files": 3' "${LOG}" || fail 'WireGuard 预览缺少三文件计数'
 ! grep -q 'dwdtCnMY\|hSDwCYkw\|192.0.2.2' "${LOG}" || fail 'WireGuard 预览泄露私密配置'
+
+VARIANT="${TEST_ROOT}/variant-wireguard-multi"
+cp -a -- "${WIREGUARD_SOURCE}" "${VARIANT}"
+python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate \
+    --directory "${WIREGUARD_SOURCE}/secrets/net/wireguard" \
+    --destination "${VARIANT}/wireguard-multi" --peer-action add --peer-address 10.77.0.3 \
+    --peer-public-key 'REREREREREREREREREREREREREREREREREREREREREQ=' \
+    --endpoint 192.0.2.3:51820 >/dev/null
+mv -- "${VARIANT}/wireguard-multi/wg-padm.conf" "${VARIANT}/secrets/net/wireguard/wg-padm.conf"
+dockerRemoveManagedTree "${VARIANT}" "${VARIANT}/wireguard-multi"
+python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers \
+    --directory "${VARIANT}/secrets/net/wireguard" |
+    jq -e '[.peers[].address] == ["10.77.0.2","10.77.0.3"]' >/dev/null
+WIREGUARD_MULTI_SOURCE=${VARIANT}
+export_variant wireguard-multi
+prepare_target wireguard-multi
+EXPECTED_SPEC="${WIREGUARD_MULTI_SOURCE}/config/spec.json"
+EXPECTED_WIREGUARD_DIR="${WIREGUARD_MULTI_SOURCE}/secrets/net/wireguard"
+run_case wireguard-multi "${TEST_ROOT}/wireguard-multi.tar" 0
+grep -q '"wireguard_files": 3' "${LOG}" || fail '多 Peer 预览缺少三文件计数'
+! grep -q 'dwdtCnMY\|hSDwCYkw\|RERERERE\|192.0.2.[23]' "${LOG}" ||
+    fail '多 Peer 预览泄露私密配置'
 
 VARIANT="${TEST_ROOT}/variant-wireguard-controlled"
 cp -a -- "${WIREGUARD_SOURCE}" "${VARIANT}"
@@ -1040,6 +1062,14 @@ EXPECTED_SPEC="${CONTROLLED_SOURCE}/config/spec.json"
 EXPECTED_TRAFFIC_FILE="${CONTROLLED_SOURCE}/data/traffic/state.json"
 EXPECTED_WIREGUARD_DIR="${CONTROLLED_SOURCE}/secrets/net/wireguard"
 run_case wireguard-controlled "${TEST_ROOT}/wireguard-controlled.tar" 0
+
+VARIANT="${TEST_ROOT}/variant-wireguard-controlled-multi"
+cp -a -- "${CONTROLLED_SOURCE}" "${VARIANT}"
+cp -- "${WIREGUARD_MULTI_SOURCE}/secrets/net/wireguard/wg-padm.conf" \
+    "${VARIANT}/secrets/net/wireguard/wg-padm.conf"
+export_variant wireguard-controlled-multi
+prepare_target wireguard-controlled-multi
+run_case wireguard-controlled-multi "${TEST_ROOT}/wireguard-controlled-multi.tar" "${PADM_DOCKER_RC_STATE}"
 
 prepare_target wireguard-foreign
 EXPECTED_SPEC="${WIREGUARD_SOURCE}/config/spec.json"
@@ -1224,7 +1254,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 33 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 34 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&

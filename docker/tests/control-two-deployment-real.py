@@ -1811,9 +1811,8 @@ def wireguard_cli_real(nodes):
     print("docker-wireguard-cli-real-prepare-peer-start-stop-ownership-private-ok", flush=True)
 
 
-def wireguard_peers_real(nodes, image):
+def wireguard_peers_prepare_real(nodes):
     addresses = (*ADDRESS, "10.231.0.3")
-    gateway, first, second = nodes
     directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
     public, keys = [], []
     for index, node in enumerate(nodes):
@@ -1826,7 +1825,15 @@ def wireguard_peers_real(nodes, image):
         remote = 1 if index == 0 else 0
         cli(node, "wireguard", "peer", "--peer-address", addresses[remote],
             "--peer-public-key", public[remote], "--endpoint", f"192.0.2.{remote+1}:51820", "--yes")
-        cli(node, "wireguard", "start", "--yes")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(lambda node: cli(node, "wireguard", "start", "--yes"), nodes))
+    return addresses, public, keys
+
+
+def wireguard_peers_real(nodes, image):
+    addresses, public, keys = wireguard_peers_prepare_real(nodes)
+    gateway, first, second = nodes
+    directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
     before = [state(node) for node in nodes]
     retained = {path: path.read_bytes() for directory in directories
                 for path in (directory / "identity.json", directory / "private.key")}
@@ -1877,13 +1884,12 @@ def wireguard_peers_real(nodes, image):
     extracted.mkdir(mode=0o700)
     command(["python3", "-B", str(ROOT / "docker/lib/recovery.py"), "extract",
              "--archive", str(archive), "--directory", str(extracted)])
-    result = subprocess.run(["python3", "-B", str(ROOT / "docker/lib/recovery.py"),
-                             "wireguard-inputs", "--directory", str(extracted)],
-                            capture_output=True, timeout=10)
-    assert result.returncode == 15, "旧单 Peer 灾备门禁接受了多 Peer 材料"
+    summary = json.loads(command(["python3", "-B", str(ROOT / "docker/lib/recovery.py"),
+                                  "wireguard-inputs", "--directory", str(extracted)], timeout=10))
+    assert summary == {"wireguard_files": 3}, "规范多 Peer 灾备材料未被接受"
     canonical = json.loads(command(["python3", "-B", str(ROOT / "docker/lib/wireguard-config.py"),
                                     "peers", "--directory", str(extracted / "secrets/net/wireguard")]))
-    assert canonical == peers, "灾备拒绝场景未保留规范多 Peer 输入"
+    assert canonical == peers, "灾备材料未保留规范多 Peer 输入"
     assert all(path.read_bytes() == data for path, data in files.items())
 
     # 叶子轮换只改变目标链路；网关事务允许短暂中断，完成后必须恢复其它 Peer。
@@ -1935,6 +1941,46 @@ def wireguard_peers_real(nodes, image):
     for node in nodes:
         traffic(node, image)
     print("docker-wireguard-peers-real-three-engines-add-update-remove-rollback-encrypted-ok", flush=True)
+    return keys
+
+
+def wireguard_peers_recovery_real(nodes, image, release):
+    addresses, public, keys = wireguard_peers_prepare_real(nodes)
+    gateway = nodes[0]
+    cli(gateway, "wireguard", "peers", "add", "--peer-address", addresses[2],
+        "--peer-public-key", public[2], "--endpoint", "192.0.2.3:51820", "--yes")
+    before = [state(node) for node in nodes]
+    assert all(not item.get("control") and not item.get("control_sync") for item in before)
+    leaf_files = [{path.name: path.read_bytes()
+                   for path in (node["path"] / "deployment/secrets/net/wireguard").iterdir()}
+                  for node in nodes[1:]]
+    peers = json.loads(cli(gateway, "wireguard", "peers", "list").stdout)
+    assert peers == {"address": addresses[0], "peers": [
+        {"address": addresses[index], "public_key": public[index],
+         "endpoint": f"192.0.2.{index+1}:51820"} for index in (1, 2)]}
+    for index in (1, 2):
+        wireguard_traffic((gateway, nodes[index]), (addresses[0], addresses[index]),
+                          peer_public=(public[0], public[index]))
+    # 复用既有停机、外来接口拒绝和空目标恢复；第一条链在通用恢复检查中验证。
+    wireguard_recovery_real(nodes[:2], 0, image, release, peer_public=public[:2])
+    wireguard_traffic((gateway, nodes[2]), (addresses[0], addresses[2]),
+                      peer_public=(public[0], public[2]))
+    assert [state(node) for node in nodes] == before
+    assert json.loads(cli(gateway, "wireguard", "peers", "list").stdout) == peers
+    assert [{path.name: path.read_bytes()
+             for path in (node["path"] / "deployment/secrets/net/wireguard").iterdir()}
+            for node in nodes[1:]] == leaf_files, "恢复网关改写其它节点的私密配置"
+    for node in nodes:
+        directory = node["path"] / "deployment/secrets/net/wireguard"
+        assert {path.name for path in directory.iterdir()} == {"identity.json", "private.key", "wg-padm.conf"}
+        for path in directory.iterdir():
+            info = path.lstat()
+            assert path.is_file() and not path.is_symlink()
+            assert (info.st_uid, info.st_mode & 0o777, info.st_nlink) == (0, 0o600, 1)
+        assert set(services(node)) == {"xray", "nginx", "net-wireguard"}
+        assert not list((node["path"] / "deployment").glob(".wireguard.*"))
+        assert not (node["path"] / "deployment/locks/deployment.lock").exists()
+    print("docker-wireguard-peers-recovery-real-three-engines-empty-target-identity-traffic-ok", flush=True)
     return keys
 
 
@@ -2153,7 +2199,7 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
     return arguments
 
 
-def wireguard_recovery_real(nodes, index, image, release):
+def wireguard_recovery_real(nodes, index, image, release, peer_public=None):
     node = nodes[index]
     root = node["path"] / "deployment"
     role = "controlled" if index else "standalone"
@@ -2214,7 +2260,7 @@ dockerInstallCli
                                             for key, value in totals["accounts"].items()})
     assert not (root / "secrets/control-sync").exists()
     assert not (root / ".restore-pending").exists() and not (root / "locks/deployment.lock").exists()
-    wireguard_traffic(nodes)
+    wireguard_traffic(nodes, peer_public=peer_public)
     traffic(node, image, account_id=local[0]["id"])
     rotated = None
     if managed:
@@ -2435,11 +2481,13 @@ def main():
     modes.add_argument("--wireguard-recovery-only", action="store_true")
     modes.add_argument("--controller-recovery-only", action="store_true")
     modes.add_argument("--wireguard-peers-only", action="store_true")
+    modes.add_argument("--wireguard-peers-recovery-only", action="store_true")
     modes.add_argument("--control-peers-only", action="store_true")
     options = parser.parse_args()
     prepare_wireguard = (options.wireguard_only or options.wireguard_control_only
                          or options.wireguard_address_only or options.wireguard_recovery_only
                          or options.controller_recovery_only or options.wireguard_peers_only
+                         or options.wireguard_peers_recovery_only
                          or options.control_peers_only)
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
@@ -2451,8 +2499,9 @@ def main():
     images = {name: value["reference"] for name, value in inputs.items()}
     holders, daemons, crons, nodes, seeds = [], [], [], [], []
     proofs = []
-    three_nodes = options.wireguard_peers_only or options.control_peers_only
-    roles = (("gateway", "peer-one", "peer-two") if options.wireguard_peers_only else
+    wireguard_three_nodes = options.wireguard_peers_only or options.wireguard_peers_recovery_only
+    three_nodes = wireguard_three_nodes or options.control_peers_only
+    roles = (("gateway", "peer-one", "peer-two") if wireguard_three_nodes else
              ("controller", "controlled-one", "controlled-two") if options.control_peers_only else
              ("controller", "controlled"))
     names = ["pn" + uuid.uuid4().hex[:10] for _ in range(6 if three_nodes else 2)]
@@ -2696,6 +2745,13 @@ def main():
                 private_logs(nodes, (), keys)
                 proofs[0].update(scope="real-compose-wireguard-three-node-peer-management",
                                  release_trust="fixture", transaction_interruption="allowed")
+                return proofs
+            if options.wireguard_peers_recovery_only:
+                release = wireguard_recovery_release(nodes, images)
+                keys = wireguard_peers_recovery_real(nodes, images["sing-box"], release)
+                private_logs(nodes, (), keys)
+                proofs[0].update(scope="real-compose-wireguard-three-node-empty-target-recovery",
+                                 release_trust="fixture", canonical_peers=2)
                 return proofs
             if options.control_peers_only:
                 wireguard_recovery_release(nodes, images)

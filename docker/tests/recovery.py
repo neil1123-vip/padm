@@ -1484,6 +1484,35 @@ class WireGuardInputTests(unittest.TestCase):
                                 recovery.signature(path.stat())) for path in self.source.rglob("*")}
                 self.assertEqual(before, after)
 
+    def test_canonical_two_peers_without_control_roles_and_cli_reports_counts(self):
+        configuration = self.helper.configuration_peers(self.identity, self.private, [
+            {"address": "10.77.0.2", "public_key": self.peer_public,
+             "endpoint": "198.51.100.2:51820"},
+            {"address": "10.77.0.3", "public_key": base64.b64encode(b"D" * 32).decode(),
+             "endpoint": "198.51.100.3:51820"},
+        ])
+        self.put("wg-padm.conf", configuration)
+        self.spec.update(control=None, control_sync=None)
+        self.put_spec()
+        self.assertEqual(recovery.wireguard_inputs(str(self.source)), {"wireguard_files": 3})
+        result = subprocess.run(
+            [sys.executable, "-B", str(HELPER), "wireguard-inputs",
+             "--directory", str(self.source)], capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), {"wireguard_files": 3})
+        self.assertEqual(result.stderr, b"")
+        self.assertNotIn(self.private.encode(), result.stdout)
+        self.assertEqual((self.wireguard / "wg-padm.conf").read_bytes(), configuration)
+        for field, role in (
+            ("control_sync", {"role": "controlled"}),
+            ("control", {"schema_version": 1, "role": "main"}),
+            ("control", {"schema_version": 2, "role": "main"}),
+        ):
+            with self.subTest(field=field, role=role):
+                self.spec[field] = role
+                self.put_spec()
+                self.rejected()
+                self.spec[field] = None
+
     def test_absent_wireguard_returns_zero_but_any_secret_without_spec_is_rejected(self):
         self.spec["host_integrations"] = []
         self.put_spec()

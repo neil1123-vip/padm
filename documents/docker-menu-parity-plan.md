@@ -9134,6 +9134,25 @@ Pebble 不跳过挑战验证，不向 CA 夹具直接注入 TXT。固定客户�
 公网 CA、原生宿主/arm64、真实 systemd/重启、其它 DNS provider 与完整灾备仍待验或拒绝；
 整体目标 active，继续推进无角色多 Peer 灾备。
 
+### 6A.22 无控制角色多 Peer 空目标恢复
+
+同架构 v3 空目标接受无控制角色的 canonical 非空 WireGuard Peer 集合，
+保留原三件套、全部 Peer 地址/公钥/endpoint、本机身份密钥、账号和累计。
+复用既有解析、私密候选、安装及持久恢复事务，不增加配置格式或运行机制；
+存在主控或被控角色仍限单 Peer，v2 主控灾备和已有部署替换继续拒绝。
+普通菜单 `18 → 8/9` 与 CLI 共用该支持范围，旧节点须先停止并确认接口消失。
+健康失败、INT/TERM、硬杀及接口残留/归属漂移/探测失败保持原撤销顺序和保留现场边界。
+
+Docker Linux amd64 `docker-wireguard-recovery-focused -Jobs 2` 一次通过，
+helper `110`、材料 `35`、preview `77`、专用 apply `26` 和派发合同；
+入口 `76.102` 秒，证据 `.tmp-regression-docker-607de764cdd442ba89a96b55e9dbe050/`。
+三独立 Docker Engine/netns 的网关空目标恢复、两条双向加密链路、TLS 业务、
+账号/累计及叶子配置保持通过，入口 `218.121` 秒，恢复 apply `16.944` 秒；
+证据 `.tmp-regression-docker-13fbd4962764495fb09fa4605a9a8d16/`，发布信任为离线夹具。
+真实脚本复用既有恢复流程与最多两节点并发初始化，不重复控制面或旧多 Peer 大矩阵。
+PowerShell AST、JSON 和 diff 检查通过；仅补受影响叶子，原生宿主/arm64、
+公网/重启及完整灾备继续待验，整体目标保持 active。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

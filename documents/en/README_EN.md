@@ -1326,7 +1326,8 @@ The update address selects an existing Peer; omitted fields stay unchanged and `
 clears the endpoint. Removing the last Peer is rejected. The existing full configuration
 transaction preserves identity/key bytes and handles failure/INT/TERM; service recreation
 may briefly interrupt connections. Collection changes for v1 controllers or controlled nodes, ordinary `migrate` with
-multiple Peers and single-Peer disaster recovery with multiple Peers remain rejected.
+multiple Peers remain rejected. Empty-target recovery accepts canonical Peer collections
+only when no control role is configured, as described below.
 Native-host/arm64/public-network acceptance remains deferred;
 limited controller recovery with a new identity is described below.
 
@@ -1616,16 +1617,18 @@ The target must contain only an installed control skeleton: configuration, data,
 logs and backups must be empty, with no containers from the same project. The supported scope
 accepts same-architecture v3 ordinary deployments and managed or bridge-reachable host-website Reality coexistence with cores,
 manual TLS, static sites, account/share identities, saved traffic, Reality target libraries,
-limited Geo, ACME, renewal and single-Peer WireGuard inputs described below.
+limited Geo, ACME, renewal and canonical WireGuard inputs described below.
 Controllers require the explicit new-identity workflow below. Other host integrations,
 automatic-sync authorization, host-network coexistence and unhandled ACME combinations remain rejected.
 Dangling references in disabled share groups are also rejected.
 WireGuard requires the complete canonical `identity.json`, `private.key` and `wg-padm.conf`,
 with `root:root` ownership, directory mode `0700` and file mode `0600`; a trusted net image also
-checks the private/public key pair. Standalone and joined controlled nodes are accepted only
-with automatic sync disabled and no archived `secrets/control-sync`.
-Keys, both addresses, control identity, connection, managed snapshot, revision, accounts and totals
-are preserved. Obtain a fresh invitation and sync manually afterward; the revision floor is retained.
+checks the private/public key pair. Nodes without a control role accept a nonempty Peer collection;
+joined controlled nodes and explicit controller rebuilds below still require a single Peer.
+Controlled-node automatic sync must be disabled, with no archived `secrets/control-sync`.
+All Peer addresses, public keys and endpoints, local keys, applicable control identity, connection,
+managed snapshot, revision, accounts and totals are preserved. On a controlled node, obtain a fresh
+invitation and sync manually afterward; the revision floor is retained.
 Stop the old node and confirm its interface has disappeared before recovery; never run duplicate WireGuard identities.
 Host interfaces, ifindex, aliases, runtime ownership and source challenges are regenerated after fresh checks.
 Rollback removes private material only after both containers and the interface are confirmed absent;
