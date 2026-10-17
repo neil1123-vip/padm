@@ -2293,6 +2293,7 @@ uninstallSubscriptionWireGuardControlApply() {
     local configBackupDir= outputBackupDir= groupsBackupFile=
     local failure=
     local coreChanged=false
+    local publishEnabled=false
     local trafficSnapshot= localTrafficBaseline=false
     local -A PADM_CONTROL_UNINSTALL_ROLLBACK=([active]=false)
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
@@ -2311,6 +2312,13 @@ uninstallSubscriptionWireGuardControlApply() {
       all($ids[]; . as $id | any($groups.user_groups[]?;
         .id == $id and .control_managed != false))
     ' <<<"${state}" >/dev/null || return 1
+    if ! readNginxSubscribe; then
+        errorCard "订阅发布配置读取失败，未执行卸载"
+        return 1
+    fi
+    if [[ -n "${subscribePort:-}" ]]; then
+        publishEnabled=true
+    fi
     subscriptionLocalTrafficBaselineExists && localTrafficBaseline=true
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
     if trafficSnapshot=$(collectLocalTrafficSnapshot) &&
@@ -2370,8 +2378,12 @@ uninstallSubscriptionWireGuardControlApply() {
             fi
         fi
     fi
-    if [[ -z "${failure}" ]] && ! refreshPublishedSubscriptions '{}'; then
-        failure="卸载后本机订阅输出刷新失败"
+    if [[ -z "${failure}" ]]; then
+        if [[ "${publishEnabled}" == true ]]; then
+            refreshPublishedSubscriptions '{}' || failure="卸载后本机订阅输出刷新失败"
+        else
+            refreshLocalSubscriptions "控制面卸载" "已刷新本地订阅" || failure="卸载后本机订阅输出刷新失败"
+        fi
     fi
     if [[ "${coreChanged}" == true ]] && trafficSnapshot=$(collectLocalTrafficSnapshot); then
         writeSubscriptionTrafficSnapshot "${trafficSnapshot}" '[]' >/dev/null 2>&1 || true

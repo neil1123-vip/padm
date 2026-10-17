@@ -1071,6 +1071,85 @@ runWireGuardControlUninstallRegression() (
     grep -qx 'reload-core' "${actions}"
 
     (
+        trap 'printf "local control uninstall failed at line %s: %s\n" "${LINENO}" "${BASH_COMMAND}" >&2; [[ ! -f "${preview:-}" ]] || tail -n 20 "${preview}" >&2' ERR
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        source "${PROJECT_ROOT}/shell/core/manage.sh"
+        readInstallType() { return 0; }
+        readInstallProtocolType() { return 0; }
+        menuReadChoice() {
+            printf 'confirm:%s\n' "$1" >>"${actions}"
+            printf -v "$3" '%s' "${confirmationAnswers[confirmIndex]:-no}"
+            confirmIndex=$((confirmIndex + 1))
+        }
+        showAccounts() {
+            local account
+            while IFS= read -r account; do
+                printf '%s\n' "${account}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/${account}"
+            done < <(jq -r '.inbounds[0].settings.clients[].email | split("-VLESS_")[0]' \
+                "${configPath}02_VLESS_TCP_inbounds.json")
+            [[ "${mode}" != local-fail ]]
+        }
+        local role REGRESSION_ERROR_CARD_LOG=
+        for role in controlled main; do
+            prepareControlUninstallCase "${role}-no-publisher" "${role}"
+            REGRESSION_ERROR_CARD_LOG="${preview}"
+            local nginxConfigPath="${caseRoot}/nginx/"
+            local currentHost= currentDefaultPort= subscribePort=443 subscribeDomain=stale.example.com
+            local subscribeSalt=preserved-salt
+            mkdir -p "${nginxConfigPath}"
+            printf '%s\n' "${subscribeSalt}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/subscribeSalt"
+            printf 'stale-account\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/sub_remote_user"
+            subscriptionWireGuardWriteState '.enabled = false'
+            if [[ "${role}" == controlled ]]; then
+                subscriptionActiveGroupWrite '(.user_groups[] | select(.id == "remote-user")) |= del(.control_managed)'
+                confirmationAnswers=(yes yes)
+            fi
+            uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+            [[ "$(subscriptionWireGuardRole)" == uninitialized ]]
+            [[ ! -e "$(subscriptionWireGuardPrivateKeyFile)" && ! -e "$(subscriptionControlTokenFile)" ]]
+            [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/default/user" ]]
+            [[ -f "${PADM_SUBSCRIBE_LOCAL_DIR}/default/admin" ]]
+            [[ -f "${PADM_SUBSCRIBE_LOCAL_DIR}/default/plain-user" ]]
+            [[ -f "${PADM_SUBSCRIBE_LOCAL_DIR}/default/sub_local_user" ]]
+            if [[ "${role}" == controlled ]]; then
+                [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/default/sub_remote_user" ]]
+                subscriptionActiveGroupRead -e '(.user_groups | map(.id)) == ["local-user"]' >/dev/null
+            else
+                grep -qx 'sub_remote_user' "${PADM_SUBSCRIBE_LOCAL_DIR}/default/sub_remote_user"
+            fi
+            grep -qx 'published-subscription' "${PADM_SUBSCRIBE_DIR}/default/user"
+            grep -qx 'preserved-salt' "${PADM_SUBSCRIBE_LOCAL_DIR}/subscribeSalt"
+            [[ "${subscribeSalt}" == preserved-salt && -z "${subscribePort}" && -z "${subscribeDomain}" ]]
+        done
+
+        prepareControlUninstallCase no-publisher-local-fail
+        REGRESSION_ERROR_CARD_LOG="${preview}"
+        nginxConfigPath="${caseRoot}/nginx/"
+        mkdir -p "${nginxConfigPath}"
+        local beforeCore
+        beforeCore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
+        mode=local-fail
+        regressionExpectStatus 1 uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+        assertControlUninstallIdentityPresent
+        [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${beforeCore}" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${expectedGroups}" ]]
+        grep -qx 'local-subscription' "${PADM_SUBSCRIBE_LOCAL_DIR}/default/user"
+        grep -qx 'published-subscription' "${PADM_SUBSCRIBE_DIR}/default/user"
+        [[ "$(grep -c '^reload-core$' "${actions}")" == 2 ]]
+
+        prepareControlUninstallCase invalid-publisher
+        REGRESSION_ERROR_CARD_LOG="${preview}"
+        nginxConfigPath="${caseRoot}/nginx/"
+        mkdir -p "${nginxConfigPath}"
+        printf 'broken\n' >"${nginxConfigPath}subscribe.conf"
+        regressionExpectStatus 1 uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+        assertControlUninstallIdentityPresent
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${expectedGroups}" ]]
+        ! grep -qx 'disable' "${actions}"
+    )
+
+    (
         prepareControlUninstallCase local-share-sync
         local response beforeGroups beforeConfig
         subscriptionControlRenderSubscribeAccounts() { printf '{}\n'; }
