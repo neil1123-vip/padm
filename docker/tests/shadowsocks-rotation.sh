@@ -210,7 +210,7 @@ runSsRotationPty() {
     : >"${EVENTS}"
     rm -f -- "${FAKE_SS_ROTATION_COUNTER}"
     FAKE_SS_ROTATION_SECURITY_CHECK=1 python3 - "${STDOUT}" "${answer}" \
-        bash -u "${CLI}" edit --rotate-ss-user entry-ss-copy "${ASSET_ARGS[@]}" <<'PY'
+        bash -u "${CLI}" edit "${SS_ROTATION_FLAG}" entry-ss-copy "${ASSET_ARGS[@]}" <<'PY'
 import errno
 import os
 from pathlib import Path
@@ -268,29 +268,34 @@ PY
 
 ssRotationAssertResult() {
     local listener=$1 password=$2
-    jq -en --arg listener "${listener}" --arg password "${password}" \
+    jq -en --arg listener "${listener}" --arg password "${password}" --arg field "${SS_ROTATION_FIELD}" \
         --slurpfile old "${TEST_ROOT}/ss-before-spec.json" \
         --slurpfile new "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '
       $new[0] == ($old[0] | .core.protocols |= map(if .listener_id == $listener
-        then .shadowsocks.user_password = $password else . end))
-    ' >/dev/null || fail 'SS 轮换改写服务器密钥、其它入口或独立账号'
+        then .shadowsocks[$field] = $password else . end))
+    ' >/dev/null || fail 'SS 轮换改写其它密钥、入口或独立账号'
     cmp -s "${TEST_ROOT}/ss-before-traffic.json" "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" ||
         fail 'SS 轮换改变累计或额度'
     cmp -s "${TEST_ROOT}/ss-before-groups.json" "${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json" ||
         fail 'SS 轮换改变分享组授权或 token'
-    cmp -s "${TEST_ROOT}/ss-before-share.txt" "${PADM_DOCKER_INSTALL_DIR}/data/subscription/${SS_GROUP_TOKEN}" ||
-        fail 'SS 自用轮换改变独立账号分享内容'
+    if [[ "${SS_ROTATION_FIELD}" == user_password ]]; then
+        cmp -s "${TEST_ROOT}/ss-before-share.txt" "${PADM_DOCKER_INSTALL_DIR}/data/subscription/${SS_GROUP_TOKEN}" ||
+            fail 'SS 自用轮换改变独立账号分享内容'
+    fi
     cmp -s "${TEST_ROOT}/ss-before-xray.json" "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base" ||
         fail 'SS 轮换改变 Xray 底稿'
     jq -en --arg listener "${listener}" --arg uuid "${UUID}" --arg password "${password}" \
+        --arg field "${SS_ROTATION_FIELD}" \
         --slurpfile old "${TEST_ROOT}/ss-before-sing-box.json" \
         --slurpfile new "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/users.base" '
       def stable: .inbounds |= map(if .tag == $listener then
-        .users |= map(if .name == $uuid then del(.password) else . end) else . end);
+        if $field == "server_password" then del(.password)
+        else .users |= map(if .name == $uuid then del(.password) else . end) end else . end);
       ($old[0] | stable) == ($new[0] | stable) and
       any($new[0].inbounds[]; .tag == $listener and
-        any(.users[]; .name == $uuid and .password == $password))
-    ' >/dev/null || fail 'SS 轮换未仅更新选中自用认证'
+        if $field == "server_password" then .password == $password
+        else any(.users[]; .name == $uuid and .password == $password) end)
+    ' >/dev/null || fail 'SS 轮换未仅更新选中认证字段'
     for core in xray sing-box; do
         [[ "$(stat -c '%a' "${PADM_DOCKER_INSTALL_DIR}/config/${core}/users.base")" == 600 ]] ||
             fail 'SS 完整账号底稿权限不是 0600'
@@ -301,33 +306,39 @@ ssRotationAssertResult() {
         fail 'SS 规格权限不是 0600'
     dockerProtocolCommand links >"${TEST_ROOT}/ss-after-links.txt"
     python3 - "${TEST_ROOT}/ss-before-links.txt" "${TEST_ROOT}/ss-after-links.txt" \
-        "${listener}" "${password}" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" <<'PY'
+        "${listener}" "${password}" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${SS_ROTATION_FIELD}" \
+        "${TEST_ROOT}/ss-before-share.txt" "${PADM_DOCKER_INSTALL_DIR}/data/subscription/${SS_GROUP_TOKEN}" <<'PY'
 import json
 from pathlib import Path
 import sys
 from urllib.parse import quote, unquote, urlsplit
 
-before, after = (Path(path).read_text().splitlines() for path in sys.argv[1:3])
 listener, password = sys.argv[3:5]
 spec = json.loads(Path(sys.argv[5]).read_text())
 entry = next(item for item in spec["core"]["protocols"] if item["listener_id"] == listener)
-assert len(before) == len(after)
-changed = []
-for index, (old, new) in enumerate(zip(before, after)):
-    if old == new:
-        continue
-    old_uri, new_uri = urlsplit(old), urlsplit(new)
-    assert old_uri.scheme == new_uri.scheme == "ss"
-    assert old_uri.port == new_uri.port == entry["public_port"]
-    assert unquote(old_uri.fragment) == unquote(new_uri.fragment) == entry["name"]
-    old_keys = unquote(old_uri.password).split(":")
-    new_keys = unquote(new_uri.password).split(":")
-    assert old_keys[0] == new_keys[0] == entry["shadowsocks"]["server_password"]
-    assert old_keys[1] != new_keys[1] == password
-    assert new == old.replace(quote(":".join(old_keys), safe=""),
-                              quote(":".join(new_keys), safe=""))
-    changed.append(index)
-assert len(changed) == 1, changed
+field = sys.argv[6]
+def assert_links(old_path, new_path, expected):
+    before, after = (Path(path).read_text().splitlines() for path in (old_path, new_path))
+    assert len(before) == len(after)
+    changed = []
+    for index, (old, new) in enumerate(zip(before, after)):
+        if old == new:
+            continue
+        old_uri, new_uri = urlsplit(old), urlsplit(new)
+        assert old_uri.scheme == new_uri.scheme == "ss"
+        assert old_uri.port == new_uri.port == entry["public_port"]
+        assert old_uri.fragment == new_uri.fragment
+        old_keys = unquote(old_uri.password).split(":")
+        new_keys = unquote(new_uri.password).split(":")
+        changed_key = 0 if field == "server_password" else 1
+        assert old_keys[changed_key] != new_keys[changed_key] == password
+        assert old_keys[1-changed_key] == new_keys[1-changed_key]
+        assert new == old.replace(quote(":".join(old_keys), safe=""),
+                                  quote(":".join(new_keys), safe=""))
+        changed.append(index)
+    assert len(changed) == expected, changed
+assert_links(*sys.argv[1:3], 2 if field == "server_password" else 1)
+assert_links(*sys.argv[7:9], 1 if field == "server_password" else 0)
 PY
     cmp -s "${TEST_ROOT}/ss-after-links.txt" "${PADM_DOCKER_INSTALL_DIR}/data/subscription/${TOKEN}" ||
         fail 'SS 主订阅与实际分享链接不同步'
@@ -344,7 +355,10 @@ ssRotationSaveBefore() {
     dockerProtocolCommand links >"${TEST_ROOT}/ss-before-links.txt"
 }
 
-newState ss-rotation "${SS_ROTATION_SPEC}"
+for SS_ROTATION_FIELD in user_password server_password; do
+SS_ROTATION_FLAG=--rotate-ss-user
+[[ "${SS_ROTATION_FIELD}" != server_password ]] || SS_ROTATION_FLAG=--rotate-ss-server
+newState "ss-rotation-${SS_ROTATION_FIELD}" "${SS_ROTATION_SPEC}"
 dockerEnsureRuntimeDataPermissions
 jq -n --arg account "${SS_ACCOUNT}" --arg group "${SS_GROUP}" --arg token "${SS_GROUP_TOKEN}" '
   {schema_version:1,groups:[{id:$group,name:"Alice-SS",enabled:true,token:$token,
@@ -356,27 +370,28 @@ dockerSubscriptionPrepareCandidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 dockerEnsureRuntimeDataPermissions
 
 for listener in entry-missing vless-reality vless-ws ../../draft; do
-    runSsRotationEdit 15 "reject-${listener}" unchanged --rotate-ss-user "${listener}" --preview
+    runSsRotationEdit 15 "reject-${listener}" unchanged "${SS_ROTATION_FLAG}" "${listener}" --preview
     ! grep -Eq '^run .* rand -base64 16( |$)' "${EVENTS}" || fail '非 SS 入口仍生成密钥'
 done
-runSsRotationEdit 2 missing-listener unchanged --rotate-ss-user
-runSsRotationEdit 2 noninteractive unchanged --rotate-ss-user entry-ss
-runSsRotationEdit 2 duplicate unchanged --rotate-ss-user entry-ss --rotate-ss-user entry-ss-copy --preview
-runSsRotationEdit 2 with-spec unchanged --rotate-ss-user entry-ss --spec "${SS_ROTATION_SPEC}" --preview
-runSsRotationEdit 2 with-reality unchanged --rotate-ss-user entry-ss --regenerate-reality vless-reality --preview
-runSsRotationEdit 2 with-routing unchanged --rotate-ss-user entry-ss --dns-off --preview
-runSsRotationEdit 2 with-encryption unchanged --rotate-ss-user entry-ss \
+runSsRotationEdit 2 missing-listener unchanged "${SS_ROTATION_FLAG}"
+runSsRotationEdit 2 noninteractive unchanged "${SS_ROTATION_FLAG}" entry-ss
+runSsRotationEdit 2 duplicate unchanged "${SS_ROTATION_FLAG}" entry-ss "${SS_ROTATION_FLAG}" entry-ss-copy --preview
+runSsRotationEdit 2 mixed-rotation unchanged --rotate-ss-user entry-ss --rotate-ss-server entry-ss-copy --preview
+runSsRotationEdit 2 with-spec unchanged "${SS_ROTATION_FLAG}" entry-ss --spec "${SS_ROTATION_SPEC}" --preview
+runSsRotationEdit 2 with-reality unchanged "${SS_ROTATION_FLAG}" entry-ss --regenerate-reality vless-reality --preview
+runSsRotationEdit 2 with-routing unchanged "${SS_ROTATION_FLAG}" entry-ss --dns-off --preview
+runSsRotationEdit 2 with-encryption unchanged "${SS_ROTATION_FLAG}" entry-ss \
     --vless-encryption vless-reality enable --preview
 FAKE_SS_ROTATION_MODE=signature-fail runSsRotationEdit 16 signature-fail unchanged \
-    --rotate-ss-user entry-ss --preview
+    "${SS_ROTATION_FLAG}" entry-ss --preview
 [[ ! -e "${FAKE_SS_ROTATION_COUNTER}" ]] || fail '验签失败仍生成 SS 密钥'
 for mode in generation-fail malformed collision; do
     FAKE_SS_ROTATION_MODE=${mode} runSsRotationEdit 15 "${mode}" unchanged \
-        --rotate-ss-user entry-ss --preview
+        "${SS_ROTATION_FLAG}" entry-ss --preview
 done
 [[ "$(<"${FAKE_SS_ROTATION_COUNTER}")" == 32 ]] || fail 'SS 碰撞未在 32 次后拒绝'
 FAKE_SS_ROTATION_MODE=retry runSsRotationEdit 0 collision-retry unchanged \
-    --rotate-ss-user entry-ss --preview
+    "${SS_ROTATION_FLAG}" entry-ss --preview
 [[ "$(<"${FAKE_SS_ROTATION_COUNTER}")" == 6 ]] ||
     fail 'SS 未拒绝旧自用、其它入口或独立账号的密钥碰撞'
 awk '/^verify-signature$/ {verified=1} /^run .* rand -base64 16( |$)/ {
@@ -396,12 +411,12 @@ for field in user_password server_password; do
 done
 cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/ss-managed.json"
 rm -f -- "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
-runSsRotationEdit 15 missing-managed unchanged --rotate-ss-user entry-ss --preview
+runSsRotationEdit 15 missing-managed unchanged "${SS_ROTATION_FLAG}" entry-ss --preview
 cp "${TEST_ROOT}/ss-managed.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 
 ssRotationSaveBefore
-runSsRotationEdit 0 rotate-selected changed --rotate-ss-user entry-ss --confirm PADM-DOCKER-EDIT
+runSsRotationEdit 0 rotate-selected changed "${SS_ROTATION_FLAG}" entry-ss --confirm PADM-DOCKER-EDIT
 ssRotationAssertResult entry-ss "${FAKE_SS_ROTATION_PASSWORD}"
 ssRotationSaveBefore
 FAKE_SS_ROTATION_MODE=second runSsRotationPty confirm
@@ -414,9 +429,10 @@ for mode in health-fail commit-int commit-term; do
     [[ "${mode}" != commit-int ]] || expected=130
     [[ "${mode}" != commit-term ]] || expected=143
     FAKE_SS_ROTATION_MODE=${mode} runSsRotationEdit "${expected}" "${mode}" changed \
-        --rotate-ss-user entry-ss-other --confirm PADM-DOCKER-EDIT
+        "${SS_ROTATION_FLAG}" entry-ss-other --confirm PADM-DOCKER-EDIT
     [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] ||
         fail "${mode}: SS 轮换没有恢复完整旧部署"
+done
 done
 (
     : >"${TEST_ROOT}/ss-menu-events"
@@ -426,9 +442,13 @@ done
 entry-ss
 19
 0
+20
+entry-ss-copy
+20
+0
 0
 INPUT
-    expectedMenu=$'protocol list\nprotocol list\nedit --rotate-ss-user entry-ss\nprotocol list'
+    expectedMenu=$'protocol list\nprotocol list\nedit --rotate-ss-user entry-ss\nprotocol list\nprotocol list\nedit --rotate-ss-server entry-ss-copy\nprotocol list'
     [[ "$(<"${TEST_ROOT}/ss-menu-events")" == "${expectedMenu}" ]] ||
         fail 'SS 轮换菜单派发或取消错误'
     ! grep -Fq '[y/N]' "${STDOUT}" || fail 'SS 轮换菜单重复提交确认'

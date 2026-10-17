@@ -440,7 +440,7 @@ An existing v3 deployment can add supported protocols through the protocol menu 
 Adding the first TLS listener also requires its domain and managed certificate.
 Shadowsocks method, server key, UUID, and existing listener identity remain frozen.
 Ordinary editing and `--spec` still reject manual key changes; use the focused
-self-use user-key rotation below.
+self-use user-key or server-key rotation below.
 Deleting the last secondary-core listener disables that core; existing listener ownership cannot change.
 Copies reuse the original credentials. Listeners with the same
 UUID share accumulated traffic and quota rather than creating separate users.
@@ -469,6 +469,15 @@ other focused edits or `--spec`, and adds no schema or capability marker.
 The focused contract, Docker amd64 dual-stack TCP/UDP probes, and all 61 integrated
 contracts passed; complete management stays `deferred`.
 See [plan 3D.24](../docker-menu-parity-plan.md#3d24-shadowsocks-逐入口自用用户密钥轮换).
+
+Menu `9 → 20. Shadowsocks server-key rotation` or `edit --rotate-ss-server <listener-id>`
+reuses the same focused transaction and preview/confirmation options, changing only the selected
+listener's `shadowsocks.server_password`. Self-use and independent account user keys, UUIDs,
+other listeners, share authorizations/tokens, quotas, and accumulated traffic stay unchanged.
+The main subscription and every account URI for that listener change, so all its clients must
+reimport them. Other listeners sharing the UUID are not rotated; draining existing connections
+is not promised. Ordinary `--spec` key freezing remains. Current verification is recorded in
+plan 3D.25; host integrations and full management remain outside this scope.
 
 ```bash
 padm-docker edit

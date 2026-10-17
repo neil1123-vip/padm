@@ -169,19 +169,24 @@ dockerEditVlessEncryptionGenerate() {
         rm -f -- "${raw}" "${pair}"
 }
 
-dockerEditRotateSsUser() {
-    local draft=$1 listener=$2 image=$3 password attempt
+dockerEditRotateSsPassword() {
+    local draft=$1 listener=$2 image=$3 field=$4 password attempt label
+    case "${field}" in
+    user_password) label=自用用户 ;;
+    server_password) label=服务器 ;;
+    *) return 1 ;;
+    esac
     jq -e --arg listener "${listener}" '
       .schema_version == 3 and
       ([.core.protocols[] | select(.listener_id == $listener and .id == 30 and .core == "sing-box")] |
         length) == 1
     ' "${draft}" >/dev/null 2>&1 || {
-        dockerError '自用用户密钥轮换需要唯一 v3 sing-box Shadowsocks2022 入口'
+        dockerError "${label}密钥轮换需要唯一 v3 sing-box Shadowsocks2022 入口"
         return 1
     }
     for attempt in {1..32}; do
         password=$(dockerAccountRandomSsPassword "${image}") || {
-            dockerError 'Shadowsocks 用户密钥生成失败，未改写已安装配置'
+            dockerError "Shadowsocks ${label}密钥生成失败，未改写已安装配置"
             return 1
         }
         # 密钥只经标准输入或私密文件描述符，不进入 jq 参数或预览。
@@ -190,14 +195,14 @@ dockerEditRotateSsUser() {
             .shadowsocks.server_password == $password or .shadowsocks.user_password == $password) | not) and
           (any((.accounts // [])[]; .shadowsocks_password == $password) | not)
         ' "${draft}" >/dev/null 2>&1 || continue
-        jq --arg listener "${listener}" --rawfile password <(printf '%s' "${password}") '
+        jq --arg listener "${listener}" --arg field "${field}" --rawfile password <(printf '%s' "${password}") '
           .core.protocols |= map(if .listener_id == $listener
-            then .shadowsocks.user_password = $password else . end)
+            then .shadowsocks[$field] = $password else . end)
         ' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || return 1
         return 0
     done
-    dockerError '无法生成不冲突的 Shadowsocks 用户密钥，未改写已安装配置'
+    dockerError "无法生成不冲突的 Shadowsocks ${label}密钥，未改写已安装配置"
     return 1
 }
 
@@ -2143,7 +2148,7 @@ dockerEditTlsDomainChange() {
 dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
     local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
-    local encryptionAction= encryptionListener= ssRotateListener=
+    local encryptionAction= encryptionListener= ssRotateListener= ssRotateField=
     local realityTarget= targetHost= targetPort= targetSni=
     local realityStream= streamListener= streamWebsite=
     local streamDomains= streamAddress= streamPort=8443
@@ -2972,10 +2977,12 @@ dockerEditCommand() {
             encryptionListener=$2 encryptionAction=$3
             shift 3
             ;;
-        --rotate-ss-user)
+        --rotate-ss-user|--rotate-ss-server)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${ssRotateListener}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             ssRotateListener=$2
+            ssRotateField=user_password
+            [[ "$1" != --rotate-ss-server ]] || ssRotateField=server_password
             shift 2
             ;;
         --reality-target)
@@ -4323,10 +4330,15 @@ dockerEditCommand() {
     fi
     if [[ -n "${ssRotateListener}" ]]; then
         opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
-        dockerEditRotateSsUser "${draft}" "${ssRotateListener}" "${opsImage}" &&
+        dockerEditRotateSsPassword "${draft}" "${ssRotateListener}" "${opsImage}" "${ssRotateField}" &&
             dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
-        printf '仅轮换入口 %s 的 Shadowsocks 自用用户密钥；服务器密钥和独立账号保持，提交后重新导入链接。\n' \
-            "${ssRotateListener}"
+        if [[ "${ssRotateField}" == server_password ]]; then
+            printf '仅轮换入口 %s 的 Shadowsocks 服务器密钥；自用和独立账号用户密钥保持，该入口所有客户端须重新导入链接。\n' \
+                "${ssRotateListener}"
+        else
+            printf '仅轮换入口 %s 的 Shadowsocks 自用用户密钥；服务器密钥和独立账号保持，提交后重新导入链接。\n' \
+                "${ssRotateListener}"
+        fi
     fi
     [[ -z "${encryptionAction}" ]] ||
         printf '入口 %s 的 VLESS Encryption 将%s；提交后需重新导入链接，旧客户端参数将失效。\n' \
@@ -4435,14 +4447,14 @@ dockerEditCommand() {
 dockerEditCompatibilityValidate() {
     local editBefore=$1 editAfter=$2
     if [[ -n "${ssRotateListener:-}" ]]; then
-        jq -en --arg listener "${ssRotateListener}" \
+        jq -en --arg listener "${ssRotateListener}" --arg field "${ssRotateField}" \
             --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '
           def fixed:
             .core.protocols |= map(if .listener_id == $listener
-              then del(.shadowsocks.user_password) else . end);
+              then del(.shadowsocks[$field]) else . end);
           ($before[0] | fixed) == ($after[0] | fixed)
         ' >/dev/null 2>&1 || {
-            dockerError 'Shadowsocks 轮换仅允许选中入口的自用用户密钥变更，其它完整规格必须保持'
+            dockerError 'Shadowsocks 轮换仅允许选中入口的指定密钥变更，其它完整规格必须保持'
             return "${PADM_DOCKER_RC_STATE}"
         }
         return 0

@@ -278,6 +278,7 @@ allowed_ports = {
     "deny": set(),
     "accounts": {2081, 2082, 2085, 2086},
     "rotated": {2081, 2082, 2085, 2086},
+    "server-rotated": {2081, 2082, 2085, 2086},
 }
 assert phase in allowed_ports
 def read(sock, size):
@@ -370,7 +371,8 @@ def probe(item):
         accepted = False
     assert accepted == expected, (phase, port, transport, accepted)
     return str(port)+"/"+transport
-end_port = {"allow": 2085, "deny": 2085, "accounts": 2087, "rotated": 2089}[phase]
+end_port = {"allow": 2085, "deny": 2085, "accounts": 2087, "rotated": 2089,
+            "server-rotated": 2091}[phase]
 results = []
 # 拒绝探针单独计数，防止成功账号的请求掩盖旧密钥到达 origin。
 for expected in (True, False):
@@ -440,7 +442,7 @@ addresses=$(docker inspect "${server}" |
     jq -cer --arg project "${project}" '.[0].NetworkSettings.Networks[$project] | [.IPAddress,.GlobalIPv6Address]')
 # 只从实际 URI 解析认证和 authority；地址映射与原始 spec 无关。
 startClient() {
-    python3 - "$1" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" "${2:-}" <<'PY'
+    python3 - "$1" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" "${2:-}" "${3:-user}" <<'PY'
 import base64
 import ipaddress
 import json
@@ -487,10 +489,19 @@ if len(lines) == 2:
     modes.append(("independent", account_password))
 if sys.argv[4]:
     previous = pathlib.Path(sys.argv[4]).read_text().splitlines()
-    assert len(lines) == len(previous) == 2 and previous[1] == lines[1] and previous[0] != lines[0]
+    assert len(lines) == len(previous) == 2 and previous[0] != lines[0]
     _, old_method, old_password, old_server_key = parse(previous[0])
-    assert old_method == method and old_server_key == server_key and old_password != password
+    assert old_method == method and old_password != password
     modes.append(("old-self", old_password))
+    if sys.argv[5] == "server":
+        _, old_account_method, old_account_password, old_account_server_key = parse(previous[1])
+        assert old_method == old_account_method and old_server_key == old_account_server_key != server_key
+        assert old_password.split(":")[1] == password.split(":")[1]
+        assert old_account_password.split(":")[1] == account_password.split(":")[1]
+        assert old_account_password != account_password
+        modes.append(("old-independent", old_account_password))
+    else:
+        assert sys.argv[5] == "user" and previous[1] == lines[1] and old_server_key == server_key
 config = {"log":{"level":"warn"}, "inbounds":[], "outbounds":[], "route":{"rules":[]}}
 for mode, credential in modes:
     for family, endpoint in zip((4, 6), endpoints):
@@ -623,7 +634,7 @@ dockerProtocolCommand links >"${TEST_ROOT}/before-rotation-links.txt"
 startClient "${TEST_ROOT}/before-rotation-links.txt"
 probe accounts
 cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/rotated-spec.json"
-dockerEditRotateSsUser "${TEST_ROOT}/rotated-spec.json" entry-shadowsocks "${OPS_ID}"
+dockerEditRotateSsPassword "${TEST_ROOT}/rotated-spec.json" entry-shadowsocks "${OPS_ID}" user_password
 jq -e -s '
   .[0] as $before | .[1] as $after |
   ($before | del(.core.protocols[0].shadowsocks.user_password)) ==
@@ -634,9 +645,21 @@ publishTestSpec "${TEST_ROOT}/rotated-spec.json"
 dockerProtocolCommand links >"${TEST_ROOT}/rotated-links.txt"
 startClient "${TEST_ROOT}/rotated-links.txt" "${TEST_ROOT}/before-rotation-links.txt"
 probe rotated
+cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/server-rotated-spec.json"
+dockerEditRotateSsPassword "${TEST_ROOT}/server-rotated-spec.json" entry-shadowsocks "${OPS_ID}" server_password
+jq -e -s '
+  .[0] as $before | .[1] as $after |
+  ($before | del(.core.protocols[0].shadowsocks.server_password)) ==
+    ($after | del(.core.protocols[0].shadowsocks.server_password)) and
+  $before.core.protocols[0].shadowsocks.server_password != $after.core.protocols[0].shadowsocks.server_password
+' "${TEST_ROOT}/rotated-spec.json" "${TEST_ROOT}/server-rotated-spec.json" >/dev/null
+publishTestSpec "${TEST_ROOT}/server-rotated-spec.json"
+dockerProtocolCommand links >"${TEST_ROOT}/server-rotated-links.txt"
+startClient "${TEST_ROOT}/server-rotated-links.txt" "${TEST_ROOT}/rotated-links.txt" server
+probe server-rotated
 dockerTrafficSnapshot
 jq -e --arg uuid "${UUID}" '
   .accounts[$uuid] | .upload > 0 and .download > 0 and .limit_bytes == 0
 ' "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" >/dev/null
-printf 'docker-shadowsocks-real-ok: endpoint=isolated-compose quota=deny-restore rotation=self-user old-uri=deny independent=preserved xray=%s sing-box=%s ops=%s curl=%s\n' \
+printf 'docker-shadowsocks-real-ok: endpoint=isolated-compose quota=deny-restore rotation=self-user,server old-uri=deny independent-key=preserved xray=%s sing-box=%s ops=%s curl=%s\n' \
     "${XRAY_ID}" "${SING_ID}" "${OPS_ID}" "${CURL_ID}"

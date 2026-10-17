@@ -810,7 +810,7 @@ Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅支持 sing-box 内复制；
 已有 v3 部署可通过“协议与入口”的新增操作或 `edit --protocol-add` 添加受支持协议，
 沿用来源入口身份和已授权账号范围；首次 TLS 仍须提供域名及受管证书。
 Shadowsocks 的方法、服务器密钥、UUID 和已有入口身份冻结；普通编辑/`--spec`
-仍拒绝手改密钥，自用用户密钥须使用下面的专项轮换。
+仍拒绝手改密钥，自用用户与服务器密钥须使用下面的专项轮换。
 AnyTLS/NaiveProxy/direct Trojan 复用通用入口字段编辑，TLS 域名与 UUID 冻结，证书轮换使用证书管理入口。
 NaiveProxy 的入口域名随 TLS 身份固定，不能单独修改为其它域名或 IP。
 编辑器可从现有 Reality 入口派生其它 Reality 传输入口，不生成新账号或密钥。
@@ -835,6 +835,13 @@ padm-docker edit --rotate-ss-user <入口ID> --confirm PADM-DOCKER-EDIT
 不承诺既有连接排空。不能与其它专项或 `--spec` 组合，不新增 schema 或能力 marker。
 专项、Docker amd64 双族 TCP/UDP 真实回归及集中完整合同 61/61 项通过；
 完整管理仍 `deferred`，见[实施计划 3D.24](documents/docker-menu-parity-plan.md#3d24-shadowsocks-逐入口自用用户密钥轮换)。
+
+菜单 `9 → 20. Shadowsocks 服务器密钥轮换` 或 `edit --rotate-ss-server <入口ID>`
+复用同一专项事务，只修改选中入口的 `shadowsocks.server_password`，支持相同的预览与确认参数。
+自用及独立账号用户密钥、UUID、其它入口、分享授权/token、额度与累计保持；
+该入口的主订阅和所有账号 URI 随服务器密钥更新，所有客户端须重新导入。
+不联动同 UUID 的其它入口，不承诺旧连接排空；普通 `--spec` 的密钥冻结不变。
+本轮专项与真实链路验收见实施计划 3D.25，未据此开放宿主集成或完整管理。
 
 ```bash
 padm-docker edit
