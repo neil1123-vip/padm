@@ -109,6 +109,33 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
             self.assertNotIn(b"PrivateKey", result.stdout + result.stderr)
 
+    def test_addresses_reads_only_the_configured_public_address_pair(self):
+        self.prepare()
+        self.peer(endpoint="198.18.0.2:51821")
+        before = self.snapshot()
+        expected = {"address": "10.90.0.1", "peer_address": "10.90.0.2"}
+        self.assertEqual(wg.addresses(str(self.directory)), expected)
+        result = subprocess.run([sys.executable, "-B", str(HELPER), "addresses",
+                                 "--directory", str(self.directory)], capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), expected)
+        for secret in (PRIVATE, PUBLIC, PEER):
+            self.assertNotIn(secret.encode(), result.stdout + result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_addresses_rejects_absent_unconfigured_and_noncanonical_state(self):
+        self.rejected(wg.addresses, str(self.directory))
+        self.prepare()
+        self.rejected(wg.addresses, str(self.directory))
+        self.peer()
+        config = self.directory / "wg-padm.conf"
+        config.write_bytes(config.read_bytes() + b"PostUp = evil\n")
+        before = self.snapshot()
+        result = subprocess.run([sys.executable, "-B", str(HELPER), "addresses",
+                                 "--directory", str(self.directory)], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
     def test_only_canonical_rfc1918_addresses_and_valid_ports(self):
         for value in ("10.0.0.1", "172.16.0.1", "172.31.255.254", "192.168.255.254"):
             self.assertEqual(wg.address(value), value)

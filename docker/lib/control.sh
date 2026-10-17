@@ -1481,11 +1481,13 @@ dockerWireGuardMigrate() (
         exit "${status}"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    jq -e '.control == null and .control_sync == null and
-        any(.host_integrations[]; .type == "wireguard")' "${spec}" >/dev/null || {
-        dockerError '迁移仅支持已启用且无主控/被控角色的单 Peer WireGuard'
+    jq -e 'any(.host_integrations[]; .type == "wireguard")' "${spec}" >/dev/null || {
+        dockerError '迁移仅支持已启用的单 Peer WireGuard'
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
+    dockerWireGuardMigrationRoleCheck "${spec}" "${directory}" &&
+        dockerWireGuardMigrationDependenciesCheck "${spec}" ||
+        return "${PADM_DOCKER_RC_CONFLICT}"
     dockerWireGuardContainer running >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status --directory "${directory}") &&
         jq -e '.configured == true' <<<"${public}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
@@ -1508,6 +1510,8 @@ dockerWireGuardMigrate() (
     fi
     python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate --directory "${directory}" \
         --destination "${draft}/wireguard" "$@" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    dockerWireGuardMigrationRoleCheck "${spec}" "${draft}/wireguard" ||
+        return "${PADM_DOCKER_RC_CONFLICT}"
     for file in identity.json private.key wg-padm.conf; do
         cmp -s -- "${directory}/${file}" "${draft}/wireguard/${file}" || unchanged=0
     done
@@ -1517,7 +1521,7 @@ dockerWireGuardMigrate() (
     fi
     # 私密候选随原配置事务一起切换；双方逐端迁移，远端握手不作为单端提交条件。
     dockerConfigureApply "${spec}" '' '' configure '' '' '' '' '' "${draft}/wireguard" || return $?
-    printf 'WireGuard 单端迁移已提交；请在对端更新对应公钥、地址或 endpoint 并验证连通。\n'
+    printf 'WireGuard 单端迁移已提交；请在对端更新对应参数并验证连通。\n'
 )
 
 dockerWireGuardCommand() (

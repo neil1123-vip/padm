@@ -841,6 +841,10 @@ runDockerWireGuardCliRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-only
 }
 
+runDockerWireGuardControlRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-control-only
+}
+
 runDockerControlStateRegression() {
     bash "${PROJECT_ROOT}/docker/tests/fail2ban-metadata.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
@@ -879,8 +883,6 @@ runDockerWireGuardRuntimeRegression() {
         "${PROJECT_ROOT}/docker/tests/"wireguard-{cli,management,menu,migration}.sh &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/wireguard.sh" \
             "${PROJECT_ROOT}/docker/tests/"wireguard-{cli,management,menu,migration}.sh &&
-        python3 -B "${PROJECT_ROOT}/docker/tests/wireguard-config.py" &&
-        bash "${PROJECT_ROOT}/docker/tests/wireguard-cli.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/wireguard-management.sh" &&
         runDockerWireGuardMigrationRegression &&
         bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
@@ -888,6 +890,8 @@ runDockerWireGuardRuntimeRegression() {
 
 runDockerWireGuardMigrationRegression() {
     bash -n "${PROJECT_ROOT}/docker/lib/"{control,lifecycle,services}.sh &&
+        python3 -B "${PROJECT_ROOT}/docker/tests/wireguard-config.py" &&
+        bash "${PROJECT_ROOT}/docker/tests/wireguard-cli.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/wireguard-migration.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/wireguard-menu.sh"
 }
@@ -1200,6 +1204,7 @@ registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogC
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-wireguard-migration-focused runDockerWireGuardMigrationRegression
 registerRegressionFunctionLeaf docker-wireguard-cli-real runDockerWireGuardCliRealRegression
+registerRegressionFunctionLeaf docker-wireguard-control-real runDockerWireGuardControlRealRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-focused runDockerRedirectOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-real runDockerRedirectRealRegression

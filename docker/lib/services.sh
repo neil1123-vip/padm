@@ -1878,6 +1878,65 @@ dockerWireGuardConfigFile() {
     printf '%s\n' "${root}/secrets/net/wireguard/wg-padm.conf"
 }
 
+dockerWireGuardMigrationRoleCheck() {
+    local spec=$1 directory=$2 role addresses
+    role=$(jq -er 'if has("control") then "main"
+        elif has("control_sync") then "controlled" else "standalone" end' "${spec}") || return 1
+    [[ "${role}" != standalone ]] || return 0
+    addresses=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses \
+        --directory "${directory}") &&
+        jq -en --argjson addresses "${addresses}" --slurpfile spec "${spec}" '
+          $spec[0] as $s |
+          if $s.control.role == "main" then
+            $s.control_sync == null and
+            $addresses == {address:$s.control.listen.address,peer_address:$s.control.peer.address}
+          else
+            $s.control == null and $s.control_sync.role == "controlled" and
+            $addresses == {address:$s.control_sync.connection.peer_address,
+              peer_address:$s.control_sync.connection.listen.address}
+          end
+        ' >/dev/null 2>&1 || {
+        dockerError '控制角色迁移必须保持本机与唯一 Peer 的隧道地址不变'
+        return 1
+    }
+}
+
+dockerWireGuardMigrationDependenciesCheck() {
+    local spec=$1 root directory role
+    role=$(jq -er 'if has("control") then "main"
+        elif has("control_sync") then "controlled" else "standalone" end' "${spec}") || return 1
+    [[ "${role}" != standalone ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    if [[ "${role}" == main ]]; then
+        dockerControlLogScheduleValidate "${root}" || return 1
+        if [[ -f "${root}/data/control-log/schedule.json" ]] &&
+            jq -e '.enabled == true' "${root}/data/control-log/schedule.json" >/dev/null; then
+            dockerError '迁移前请先停用控制日志自动轮转'
+            return 1
+        fi
+        jq -e 'all(.host_integrations[]; .type != "fail2ban-control")' "${spec}" >/dev/null || {
+            dockerError '迁移前请先停用控制面 Fail2ban，迁移后重新核验来源再启用'
+            return 1
+        }
+        directory="${root}/data/control-source"
+        dockerTrafficSafePath "${root}" "${directory}" || return 1
+        if [[ -e "${directory}" || -L "${directory}" ]]; then
+            [[ -d "${directory}" &&
+                "$(stat -c '%a:%u:%g' "${directory}")" == "750:0:${PADM_DOCKER_CONTAINER_GID}" &&
+                -z "$(find "${directory}" -mindepth 1 -print -quit)" ]] || {
+                dockerError '控制来源挑战未完成或登记目录不安全，拒绝迁移'
+                return 1
+            }
+        fi
+    else
+        dockerControlSyncScheduleValidate "${root}" || return 1
+        [[ ! -e "${root}/secrets/control-sync" && ! -L "${root}/secrets/control-sync" ]] || {
+            dockerError '迁移前请先停用被控账号自动同步，连通恢复后可用原邀请重新启用'
+            return 1
+        }
+    fi
+}
+
 dockerWireGuardMigrationDirectoryCheck() {
     local directory=$1 expected=${2:-} reference=${3:-} public name
     [[ -z "${expected}" || "$(stat -c '%d:%i' "${directory}")" == "${expected}" ]] || return 1
@@ -7657,11 +7716,14 @@ dockerConfigureApply() {
             "$(stat -c '%u:%a' "${DOCKER_WIREGUARD_INPUT%/wireguard}")" == 0:700 ]] &&
             dockerTrafficSafePath "${root}" "${DOCKER_WIREGUARD_INPUT}" &&
             dockerWireGuardMigrationDirectoryCheck "${DOCKER_WIREGUARD_INPUT}" &&
-            jq -e '.control == null and .control_sync == null and
-                any(.host_integrations[]; .type == "wireguard")' "${sourceSpec}" >/dev/null ||
+            jq -e 'any(.host_integrations[]; .type == "wireguard")' "${sourceSpec}" >/dev/null ||
             return "${PADM_DOCKER_RC_STATE}"
         [[ "${sourceSpec}" == "${root}/config/spec.json" ]] ||
             return "${PADM_DOCKER_RC_STATE}"
+        dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${root}/secrets/net/wireguard" &&
+            dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${DOCKER_WIREGUARD_INPUT}" &&
+            dockerWireGuardMigrationDependenciesCheck "${sourceSpec}" ||
+            return "${PADM_DOCKER_RC_CONFLICT}"
     fi
     case "${mode}" in
     configure|preview|interactive|confirmed) ;;

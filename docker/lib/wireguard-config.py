@@ -345,6 +345,17 @@ def status(directory):
             os.close(fd)
 
 
+def addresses(directory):
+    with parent_directory(directory) as (parent, name):
+        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        try:
+            identity, _, configured, remote = load(fd, include_peer=True)
+            require(configured)
+            return {"address": identity["address"], "peer_address": remote[0]}
+        finally:
+            os.close(fd)
+
+
 def interrupted(_number, _frame):
     raise InterruptedError("WireGuard 准备已中断")
 
@@ -374,6 +385,7 @@ def main():
     migration.add_argument("--private-key")
     migration.add_argument("--public-key")
     commands.add_parser("status", allow_abbrev=False).add_argument("--directory", required=True)
+    commands.add_parser("addresses", allow_abbrev=False).add_argument("--directory", required=True)
     options = [value.partition("=")[0] for value in sys.argv[1:] if value.startswith("--")]
     if len(options) != len(set(options)):
         parser.error("WireGuard 参数不能重复")

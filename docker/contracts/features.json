@@ -305,7 +305,7 @@
       "profiles": ["subscription", "net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "4C.1–4C.6 已提供私网 API、主控初始化与邀请/轮换/撤销、被控多入口接入和手动/每 5 分钟自动同步、同连接入口重映射、同身份 API 端口更新/重连及事务/回滚保护；须先停用相关调度及防护，保留旧快照、版本和凭据碰撞门禁、本机账号及累计。隔离 amd64 双 Docker Engine 的生产 CLI/Compose、真实业务、cron、锁竞争、轮换/撤销、失败/INT/TERM 恢复和集中合同已验。4C.7 独立单 Peer WireGuard 私密准备与启停的范围见 wireguard。4C.8 新增 control rebind 和控制菜单 19，先停用被控自动同步，认证新邀请后显式更换同隧道主控身份及受管账号，可改 API 端口，保留 WireGuard 密钥/地址、入口映射、本机账号和累计；先核旧快照及全部账号映射，同 ID 认证身份不可变，异 ID 凭据碰撞拒绝，仅身份 tuple 变化时重置版本基线。同版幂等，复用原健康及失败/INT/TERM 恢复；客户端/事务/控制菜单及隔离 amd64 双部署真实业务验收通过。普通 sync/reconnect 拒绝旧邀请，再次显式 rebind 可主动切回。token 仅写外部 root 私有邀请，不进入规格/备份/普通日志；独立只读服务与客户端零能力，无公网端口映射。多 Peer、WireGuard 密钥/地址迁移、完整网络管理与角色灾备未交付；可信发布、原生双机/arm64 和宿主重启待验，完整状态保持 deferred。"
+      "reason": "4C.1–4C.6 已提供私网 API、主控初始化与邀请/轮换/撤销、被控多入口接入和手动/每 5 分钟自动同步、同连接入口重映射、同身份 API 端口更新/重连及事务/回滚保护；须先停用相关调度及防护，保留旧快照、版本和凭据碰撞门禁、本机账号及累计。隔离 amd64 双 Docker Engine 的生产 CLI/Compose、真实业务、cron、锁竞争、轮换/撤销、失败/INT/TERM 恢复和集中合同已验。4C.7 独立单 Peer WireGuard 私密准备与启停的范围见 wireguard。4C.8 新增 control rebind 和控制菜单 19，先停用被控自动同步，认证新邀请后显式更换同隧道主控身份及受管账号，可改 API 端口，保留 WireGuard 密钥/地址、入口映射、本机账号和累计；先核旧快照及全部账号映射，同 ID 认证身份不可变，异 ID 凭据碰撞拒绝，仅身份 tuple 变化时重置版本基线。同版幂等，复用原健康及失败/INT/TERM 恢复；客户端/事务/控制菜单及隔离 amd64 双部署真实业务验收通过。普通 sync/reconnect 拒绝旧邀请，再次显式 rebind 可主动切回。4C.10 复用 wireguard migrate 更新控制角色的密钥/监听端口/endpoint，固定角色登记的双方隧道地址，先停相关调度和控制面封禁；原邀请、身份/版本/账号/累计及 fresh 来源通过真实双端验收，失败恢复主控撤权并重新邀请。token 仅写外部 root 私有邀请，不进入规格/备份/普通日志；独立只读服务与客户端零能力，无公网端口映射。多 Peer、控制角色地址迁移、完整网络管理与角色灾备未交付；可信发布、原生双机/arm64 和宿主重启待验，完整状态保持 deferred。"
     },
     "acme-webroot": {
       "status": "deferred",
@@ -395,7 +395,7 @@
       "profiles": ["net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "WireGuard 接口由宿主内核拥有，默认不启用；预检/健康/撤销核对真实接口索引、公钥和随机标记，旧式活动标记拒绝接管。4C.7 提供控制菜单 18 和 wireguard status/prepare/peer/start/stop：私密准备、交换公钥后配置唯一 RFC1918 IPv4 /32 Peer，可选字面 IPv4 endpoint，监听/endpoint 端口限 1024–65535；目录/文件为 root 0700/0600，准备不替换已有密钥/Peer。首次 start 复用配置事务更新并检查部署；已登记 start/stop 只操作精确审计容器，stop 临时保留规格，up/restart 可启用，控制角色依赖时拒绝独立停止。4C.9 增加 wireguard migrate 和子菜单 6，限已登记、健康且无控制角色的 canonical 三件套；可合并更新本机地址/监听端口、Peer 地址/公钥、endpoint 和轮换本机密钥，省略保持，endpoint none 清空，同配置不重建。可信 net 镜像核旧密钥配对及生成新密钥，私密候选随原配置事务在精确停服/接口消失后整体交接；失败和 INT/TERM 恢复原目录 inode，目录/运行归属漂移保留现场。普通配置忽略环境迁移输入，普通恢复不能跨迁移覆盖密钥。双方逐端显式应用会暂时断联，单端健康不证明远端连通。现有手工配置沿用完整规格入口；多 Peer、有控制角色的网络迁移、角色灾备及原生双架构/重启/公网验收仍待交付或验收，完整管理状态不升级。"
+      "reason": "WireGuard 接口由宿主内核拥有，默认不启用；预检/健康/撤销核对真实接口索引、公钥和随机标记，旧式活动标记拒绝接管。4C.7 提供控制菜单 18 和 wireguard status/prepare/peer/start/stop：私密准备、交换公钥后配置唯一 RFC1918 IPv4 /32 Peer，可选字面 IPv4 endpoint，监听/endpoint 端口限 1024–65535；目录/文件为 root 0700/0600，准备不替换已有密钥/Peer。首次 start 复用配置事务更新并检查部署；已登记 start/stop 只操作精确审计容器，stop 临时保留规格，up/restart 可启用，控制角色依赖时拒绝独立停止。4C.9 增加 wireguard migrate 和子菜单 6，限已登记且健康的 canonical 三件套；无角色可合并更新本机地址/监听端口、Peer 地址/公钥、endpoint 和轮换本机密钥，省略保持，endpoint none 清空，同配置不重建。4C.10 允许主控与已接入被控保留角色地址更新其它连接参数；旧/新输入均核地址绑定，先停相关调度及控制面封禁，拒绝残留来源挑战。可信 net 镜像核旧密钥配对及生成新密钥，私密候选随原配置事务在精确停服/接口消失后整体交接；失败和 INT/TERM 恢复原目录 inode，主控恢复撤权后须重新邀请，目录/运行归属漂移保留现场。普通配置忽略环境迁移输入，普通恢复不能跨迁移覆盖密钥。定向及隔离 amd64 真实双端验收通过；双方逐端显式应用会暂时断联，单端健康不证明远端连通。现有手工配置沿用完整规格入口；多 Peer、控制角色地址迁移、角色灾备及原生双架构/重启/公网验收仍待交付或验收，完整管理状态不升级。"
     },
     "tun": {
       "status": "host-integrated",

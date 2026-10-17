@@ -276,10 +276,11 @@ def fail2ban_source_transaction(controller, controlled, *arguments, fail_first=F
                 combined.write(contents)
             assert (status != 0) if fail_first else (status == 0), diagnostic(
                 controller, contents.decode(errors="replace"))
-            assert len(seen) == (2 if fail_first else 1), diagnostic(
+            expected = 0 if arguments[0] == "disable" else 1
+            assert len(seen) == (2 if fail_first else expected), diagnostic(
                 controller, contents.decode(errors="replace"))
             verified_count = contents.count(b"source-verified=")
-            assert verified_count == 1, f"真实来源证明输出次数异常：{verified_count}"
+            assert verified_count == (1 if fail_first else expected), f"真实来源证明输出次数异常：{verified_count}"
             assert not registration_path.exists()
             print(f"docker-control-two-deployment-fail2ban:{arguments[0]}:"
                   f"rc={status}:nonces={len(seen)}:elapsed={time.monotonic()-started:.3f}s", flush=True)
@@ -1336,23 +1337,7 @@ assert encrypted >= 2, "underlay 缺少双向 WireGuard 加密数据包"
             server.stderr.close()
 
 
-def wireguard_migrate_real(nodes):
-    directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
-    before = [state(node) for node in nodes]
-    old_links = [json.loads(command(node["enter"] + ["ip", "-j", "link", "show", "wg-padm"]))[0]
-                 for node in nodes]
-    old_public = [json.loads(cli(node, "wireguard", "status").stdout)["public_key"] for node in nodes]
-    cli(nodes[0], "wireguard", "migrate", "--listen-port", "51821", "--yes")
-    cli(nodes[1], "wireguard", "migrate", "--endpoint", "192.0.2.1:51821", "--yes")
-    ports = (51821, 51820)
-    assert [json.loads(cli(node, "wireguard", "status").stdout)["public_key"] for node in nodes] == old_public
-    wireguard_traffic(nodes, ports=ports)
-    node, directory = nodes[0], directories[0]
-    root = node["path"] / "deployment"
-    originals = {path: path.read_bytes() for path in (
-        root / "config/spec.json", root / "deployment.json", root / "compose.json", root / "images.env",
-        directory / "identity.json", directory / "private.key", directory / "wg-padm.conf",
-    )}
+def wireguard_migrate_health_failure(node, *arguments):
     # 在真实候选完成健康检查后仅注入一次错误；候选启动、回滚和旧配置恢复都走生产事务。
     result = subprocess.run(node["enter"] + ["bash", "-c", """
 source "$1"
@@ -1371,12 +1356,32 @@ dockerComposeRun() {
 }
 dockerMain "$@"
 """, "padm-wireguard-migrate-health", str(node["path"] / "bin/padm-docker"),
-        "wireguard", "migrate", "--listen-port", "51822", "--yes"],
+        "wireguard", "migrate", *arguments, "--yes"],
         env=node["env"], capture_output=True, timeout=180)
     with (node["path"] / "cli.log").open("ab") as output:
         output.write(result.stdout + result.stderr)
     assert result.returncode == 14 and b"wireguard-migrate-injected-health-failure" in result.stderr, \
         diagnostic(node, (result.stdout + result.stderr).decode(errors="replace"))
+
+
+def wireguard_migrate_real(nodes):
+    directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
+    before = [state(node) for node in nodes]
+    old_links = [json.loads(command(node["enter"] + ["ip", "-j", "link", "show", "wg-padm"]))[0]
+                 for node in nodes]
+    old_public = [json.loads(cli(node, "wireguard", "status").stdout)["public_key"] for node in nodes]
+    cli(nodes[0], "wireguard", "migrate", "--listen-port", "51821", "--yes")
+    cli(nodes[1], "wireguard", "migrate", "--endpoint", "192.0.2.1:51821", "--yes")
+    ports = (51821, 51820)
+    assert [json.loads(cli(node, "wireguard", "status").stdout)["public_key"] for node in nodes] == old_public
+    wireguard_traffic(nodes, ports=ports)
+    node, directory = nodes[0], directories[0]
+    root = node["path"] / "deployment"
+    originals = {path: path.read_bytes() for path in (
+        root / "config/spec.json", root / "deployment.json", root / "compose.json", root / "images.env",
+        directory / "identity.json", directory / "private.key", directory / "wg-padm.conf",
+    )}
+    wireguard_migrate_health_failure(node, "--listen-port", "51822")
     assert all(path.read_bytes() == content for path, content in originals.items()), "迁移健康失败未恢复旧配置和密钥"
     assert command(node["enter"] + ["wg", "show", "wg-padm", "listen-port"]).strip() == b"51821"
     assert command(node["enter"] + ["wg", "show", "wg-padm", "public-key"]).decode().strip() == old_public[0]
@@ -1441,9 +1446,113 @@ dockerMain "$@"
     return keys
 
 
-def wireguard_cli_real(nodes):
-    public, keys, files = [], [], []
+def wireguard_control_migrate_real(nodes, invitation, image):
+    controller, controlled = nodes
+    initial = [state(node) for node in nodes]
+    published_path = controller["path"] / "deployment/config/control/state.json"
+    published = json.loads(published_path.read_text())
+    directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
+    old_public = [json.loads(cli(node, "wireguard", "status").stdout)["public_key"] for node in nodes]
+    managed_id = initial[1]["control_sync"]["managed_accounts"][0]["id"]
+    local_id = initial[1]["accounts"][0]["id"]
+    traffic(controlled, image, account_id=managed_id)
+    traffic(controlled, image, account_id=local_id)
+    ledger = controlled["path"] / "deployment/data/traffic/state.json"
+    totals = json.loads(ledger.read_text())["accounts"]
+    old_invitation = invitation.read_bytes()
+
+    def blocked(node, *arguments):
+        before, containers = state(node), services(node)
+        directory = node["path"] / "deployment/secrets/net/wireguard"
+        files = {path: path.read_bytes() for path in directory.iterdir()}
+        cli(node, "wireguard", "migrate", *arguments, "--yes", accepted=False)
+        assert state(node) == before and services(node) == containers, "依赖门禁拒绝后仍改变部署"
+        assert all(path.read_bytes() == content for path, content in files.items()), "依赖门禁拒绝后仍改变密钥"
+
+    cli(controller, "control", "log-schedule", "enable", "--yes")
+    blocked(controller, "--listen-port", "51821")
+    cli(controller, "control", "log-schedule", "disable", "--yes")
+    cli(controlled, "control", "sync-schedule", "enable", "--invite", str(invitation), "--yes")
+    blocked(controlled, "--listen-port", "51822")
+    cli(controlled, "control", "sync-schedule", "disable", "--yes")
+    old_nonce = fail2ban_source_transaction(
+        controller, controlled, "enable", "20", "60", "60", "--confirm", "PADM-DOCKER-EDIT")[0]
+    blocked(controller, "--listen-port", "51821")
+    fail2ban_source_transaction(controller, controlled, "disable", "--confirm", "PADM-DOCKER-EDIT")
+    challenge = controller["path"] / "deployment/data/control-source/challenge.json"
+    assert not challenge.exists()
+    save(challenge, {"stale": old_nonce})
+    try:
+        blocked(controller, "--listen-port", "51821")
+        assert json.loads(challenge.read_text()) == {"stale": old_nonce}
+    finally:
+        challenge.unlink()
+    blocked(controller, "--address", "10.232.0.1")
+    blocked(controlled, "--peer-address", "10.232.0.1")
+    cli(controller, "wireguard", "migrate", "--rotate-key", "--listen-port", "51821", "--yes")
+    main_public = json.loads(cli(controller, "wireguard", "status").stdout)["public_key"]
+    cli(controlled, "wireguard", "migrate", "--rotate-key", "--listen-port", "51822",
+        "--peer-public-key", main_public, "--endpoint", "192.0.2.1:51821", "--yes")
+    peer_public = json.loads(cli(controlled, "wireguard", "status").stdout)["public_key"]
+    cli(controller, "wireguard", "migrate", "--peer-public-key", peer_public,
+        "--endpoint", "192.0.2.2:51822", "--yes")
+    keys = [(directory / "private.key").read_text().strip() for directory in directories]
     for index, node in enumerate(nodes):
+        assert state(node) == initial[index], "隧道迁移改变控制身份、版本、账号或入口"
+        public = json.loads(cli(node, "wireguard", "status").stdout)
+        assert public["address"] == ADDRESS[index] and public["public_key"] != old_public[index]
+        assert command(node["enter"] + ["wg", "show", "wg-padm", "public-key"]).decode().strip() == public["public_key"]
+        assert command(node["enter"] + ["wg", "show", "wg-padm", "allowed-ips"]).decode().split() == \
+            [[peer_public, main_public][index], ADDRESS[1-index] + "/32"]
+    assert json.loads(published_path.read_text()) == published, "隧道迁移改变主控已发布身份、版本或摘要"
+    wireguard_traffic(nodes, ports=(51821, 51822))
+    cli(controlled, "control", "sync", "--invite", str(invitation))
+    assert state(controlled) == initial[1] and invitation.read_bytes() == old_invitation
+    traffic(controlled, image, account_id=managed_id)
+    traffic(controlled, image, account_id=local_id)
+    actual_totals = json.loads(ledger.read_text())["accounts"]
+    assert all(actual_totals[account_id][key] >= value[key] for account_id, value in totals.items()
+               for key in ("upload", "download")), "隧道迁移回退本机或受管账号累计"
+    fresh_nonce = fail2ban_source_transaction(
+        controller, controlled, "enable", "20", "60", "60", "--confirm", "PADM-DOCKER-EDIT")[0]
+    assert fresh_nonce != old_nonce, "隧道迁移后复用了旧来源证明"
+    fail2ban_source_transaction(controller, controlled, "disable", "--confirm", "PADM-DOCKER-EDIT")
+    before_failure = state(controller)
+    old_files = {path: path.read_bytes() for path in directories[0].iterdir()}
+    wireguard_migrate_health_failure(controller, "--listen-port", "51823")
+    expected = copy.deepcopy(before_failure)
+    expected["control"]["peer"].update(enabled=False, expires_at=1)
+    assert state(controller) == expected, "主控迁移恢复未保留身份版本或未撤销授权"
+    assert all(path.read_bytes() == content for path, content in old_files.items()), "主控迁移失败未恢复旧隧道"
+    assert command(controller["enter"] + ["wg", "show", "wg-padm", "listen-port"]).strip() == b"51821"
+    assert command(controller["enter"] + ["wg", "show", "wg-padm", "public-key"]).decode().strip() == main_public
+    wireguard_traffic(nodes, ports=(51821, 51822))
+    unauthorized(controlled, invitation)
+    previous_services, previous_ledger = services(controlled), ledger.read_bytes()
+    cli(controlled, "control", "sync", "--invite", str(invitation), accepted=False)
+    assert state(controlled) == initial[1] and services(controlled) == previous_services
+    assert ledger.read_bytes() == previous_ledger
+    rotated = controller["path"] / "private/wireguard-recovered.json"
+    cli(controller, "control", "invite", "--output", str(rotated), "--yes")
+    recovered_invite = controlled["path"] / "private/wireguard-recovered.json"
+    save(recovered_invite, json.loads(rotated.read_text()))
+    cli(controlled, "control", "sync", "--invite", str(recovered_invite))
+    assert state(controlled) == initial[1] and services(controlled) == previous_services
+    assert ledger.read_bytes() == previous_ledger, "重新邀请的同版同步改写累计"
+    traffic(controlled, image, account_id=managed_id)
+    for node in nodes:
+        root = node["path"] / "deployment"
+        services(node)
+        assert not list(root.glob(".wireguard.*")) and not list(root.glob(".candidate.*"))
+        assert not (root / "locks/deployment.lock").exists()
+        assert not list((root / "data/control-source").glob("*"))
+    print("docker-wireguard-control-real-gates-rotate-old-invite-fresh-source-recovery-ok", flush=True)
+    return rotated, keys
+
+
+def wireguard_prepare_real(nodes):
+    def prepare(index):
+        node = nodes[index]
         initial = state(node)
         assert initial["host_integrations"] == [] and not initial.get("control") and not initial.get("control_sync")
         before = services(node, wireguard=False)
@@ -1459,13 +1568,15 @@ def wireguard_cli_real(nodes):
         info = directory.lstat()
         assert directory.is_dir() and not directory.is_symlink() and info.st_uid == 0 and info.st_mode & 0o777 == 0o700
         assert {path.name for path in directory.iterdir()} == {"identity.json", "private.key"}
-        public.append(prepared["public_key"])
-        keys.append((directory / "private.key").read_text().strip())
-        assert command(["wg", "pubkey"], content=(keys[-1] + "\n").encode()).decode().strip() == public[-1]
+        private = (directory / "private.key").read_text().strip()
+        assert command(["wg", "pubkey"], content=(private + "\n").encode()).decode().strip() == prepared["public_key"]
         assert state(node) == initial and services(node, wireguard=False) == before
         cli(node, "wireguard", "prepare", "--address", ADDRESS[index], "--listen-port", "51820",
             "--yes", accepted=False)
-    for index, node in enumerate(nodes):
+        return prepared["public_key"], private
+
+    def start(index):
+        node = nodes[index]
         cli(node, "wireguard", "peer", "--peer-address", ADDRESS[1-index],
             "--peer-public-key", public[1-index], "--endpoint", f"192.0.2.{2-index}:51820", "--yes")
         directory = node["path"] / "deployment/secrets/net/wireguard"
@@ -1475,7 +1586,6 @@ def wireguard_cli_real(nodes):
             info = path.lstat()
             assert path.is_file() and not path.is_symlink() and info.st_uid == 0
             assert info.st_mode & 0o777 == 0o600 and info.st_nlink == 1
-        files.append(snapshot)
         cli(node, "wireguard", "peer", "--peer-address", ADDRESS[1-index],
             "--peer-public-key", public[1-index], "--yes", accepted=False)
         assert {path.name: path.read_bytes() for path in directory.iterdir()} == snapshot
@@ -1484,6 +1594,18 @@ def wireguard_cli_real(nodes):
         current = state(node)
         assert [item["type"] for item in current["host_integrations"]] == ["wireguard"]
         assert not current.get("control") and not current.get("control_sync")
+        return snapshot
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        prepared = list(executor.map(prepare, range(len(nodes))))
+        public = [item[0] for item in prepared]
+        keys = [item[1] for item in prepared]
+        files = list(executor.map(start, range(len(nodes))))
+    return keys, files
+
+
+def wireguard_cli_real(nodes):
+    keys, files = wireguard_prepare_real(nodes)
     wireguard_traffic(nodes)
     node = nodes[0]
     before, current = services(node), state(node)
@@ -1536,7 +1658,9 @@ def main():
     modes.add_argument("--remap-only", action="store_true")
     modes.add_argument("--rebind-only", action="store_true")
     modes.add_argument("--wireguard-only", action="store_true")
+    modes.add_argument("--wireguard-control-only", action="store_true")
     options = parser.parse_args()
+    prepare_wireguard = options.wireguard_only or options.wireguard_control_only
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
         "测试不得使用宿主或外部网络"
@@ -1634,7 +1758,7 @@ def main():
                                "netns": os.readlink(f"/proc/{pid}/ns/net")})
             assert proofs[0]["engine_id"] != proofs[1]["engine_id"]
             assert proofs[0]["netns"] != proofs[1]["netns"]
-            if options.remap_only or options.rebind_only:
+            if options.remap_only or options.rebind_only or options.wireguard_control_only:
                 # 仅在隔离 daemon 派生当前客户端，固定基础镜像且离线构建，不复用旧源码冒充本轮验收。
                 context = root / "remap-ops"
                 context.mkdir()
@@ -1672,7 +1796,7 @@ def main():
                 command(node["enter"] + ["ip", "address", "add", f"192.0.2.{index + 1}/30",
                                          "dev", "underlay"])
                 command(node["enter"] + ["ip", "link", "set", "underlay", "up"])
-                if not options.wireguard_only:
+                if not prepare_wireguard:
                     key = command(["wg", "genkey"])
                     keys.append(key.decode().strip())
                     public.append(command(["wg", "pubkey"], content=key).decode().strip())
@@ -1686,7 +1810,7 @@ def main():
                          "-keyout", str(private), "-out", str(certificate)])
                 private.chmod(0o600)
                 certificate.chmod(0o600)
-                if not options.wireguard_only:
+                if not prepare_wireguard:
                     configuration = path / "secrets/net/wireguard/wg-padm.conf"
                     configuration.write_text(
                         f"[Interface]\nPrivateKey = {keys[index]}\nAddress = {ADDRESS[index]}/32\n"
@@ -1709,7 +1833,7 @@ def main():
                     }]},
                     "tls": {"domain": domain}, "subscription": {"enabled": False, "token": "0" * 16},
                     "images": images,
-                    "host_integrations": [] if options.wireguard_only else [{
+                    "host_integrations": [] if prepare_wireguard else [{
                         "type": "wireguard", "profile": "net-wireguard", "firewall_rules": [],
                         "devices": ["wg-padm"], "schedules": [],
                         "settings": {"config_file": "wg-padm.conf", "interface": "wg-padm"},
@@ -1753,6 +1877,8 @@ def main():
                 wireguard_cli_real(nodes)
                 proofs[0]["scope"] = "real-compose-wireguard-cli-from-standalone"
                 return proofs
+            if options.wireguard_control_only:
+                keys, _ = wireguard_prepare_real(nodes)
             controller, controlled = nodes
             original_local = state(controlled)["accounts"][0]
             cli(controller, "control", "init", "--address", ADDRESS[0], "--port", "39778",
@@ -1775,6 +1901,11 @@ def main():
             assert services(controlled) == before_services, "真实幂等同步重建了服务"
             assert state(controlled) == joined
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
+            if options.wireguard_control_only:
+                rotated, migrated_keys = wireguard_control_migrate_real(nodes, controlled_invite, images["sing-box"])
+                private_logs(nodes, (invite, rotated), keys + migrated_keys)
+                proofs[0]["scope"] = "real-compose-wireguard-control-migration-from-installed-fixture"
+                return proofs
             if options.remap_only:
                 remap(controlled, controlled_invite, images["sing-box"])
                 rotated = reconnect(controller, controlled, controlled_invite, images["sing-box"])

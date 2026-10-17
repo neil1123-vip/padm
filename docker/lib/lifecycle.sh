@@ -2787,12 +2787,13 @@ dockerValidateConfigurationBackup() {
     [[ -z "$(sort "${backup}/present" | uniq -d)" ]] || return 1
     if grep -qxF secrets/net/wireguard "${backup}/present"; then
         DOCKER_WIREGUARD_INPUT="${backup}/secrets/net/wireguard"
-        jq -e '.control == null and .control_sync == null and
-            any(.host_integrations[]; .type == "wireguard")' "${backup}/config/spec.json" >/dev/null ||
+        jq -e 'any(.host_integrations[]; .type == "wireguard")' "${backup}/config/spec.json" >/dev/null ||
             return 1
         wireguardStatus=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status \
             --directory "${DOCKER_WIREGUARD_INPUT}") &&
-            jq -e '.configured == true' <<<"${wireguardStatus}" >/dev/null || return 1
+            jq -e '.configured == true' <<<"${wireguardStatus}" >/dev/null &&
+            dockerWireGuardMigrationRoleCheck "${backup}/config/spec.json" \
+                "${DOCKER_WIREGUARD_INPUT}" || return 1
     elif [[ -e "${backup}/secrets/net" || -L "${backup}/secrets/net" ]]; then
         return 1
     fi

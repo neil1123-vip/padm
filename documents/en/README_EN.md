@@ -1178,7 +1178,7 @@ and container; ordinary `up/restart` can start it again. A `control` or `control
 blocks an independent stop. The existing owner/preflight/run/cleanup/health runtime is reused,
 and ownership drift is rejected. Focused checks and isolated Linux amd64 production CLI tests passed,
 including preparation from a standalone deployment, bidirectional encrypted traffic and exact-container restart.
-Multiple Peers, network migration with control roles, role disaster recovery, native dual-architecture,
+Multiple Peers, control-role address changes, role disaster recovery, native dual-architecture,
 host-reboot and public-network acceptance remain outside this checkpoint.
 
 After the managed connection is healthy, initialize the controller:
@@ -1249,7 +1249,7 @@ the previous managed snapshot; it can also apply a newer controller account revi
 port and revision does not rebuild services. Failures and INT/TERM use the existing recovery transaction;
 explicit rollback cannot cross API ports. The old API port closes after switching. Run a fresh controller
 `source-check` before enabling source-dependent protection or log scheduling, and import the new invitation
-when enabling controlled auto-sync again. WireGuard address/key migration and multiple peers remain unsupported.
+when enabling controlled auto-sync again. Control-role address changes and multiple peers remain unsupported.
 
 4C.8 adds explicit controller rebinding on the same WireGuard tunnel through control menu `15 → 19`:
 
@@ -1269,7 +1269,7 @@ Ordinary sync/reconnect reject the previous controller's invitation; a later exp
 deliberately switch back. Enable auto-sync again with the new invitation after committing.
 Focused client, transaction and control-menu checks and isolated amd64 dual-deployment production
 CLI/Compose tests passed, including real traffic, health-failure recovery and preserved totals.
-Multiple Peers, network migration with control roles and role disaster recovery remain deferred.
+Multiple Peers, control-role address changes and role disaster recovery remain deferred.
 
 4C.9 adds `wireguard migrate` and WireGuard submenu item `6` for a healthy registered single-Peer
 deployment prepared by 4C.7, without `control` or `control_sync`:
@@ -1294,8 +1294,16 @@ Directory or runtime ownership drift preserves recovery evidence. Ordinary confi
 injected migration input, and ordinary recovery cannot replace keys across a migration.
 Focused checks and isolated amd64 dual-deployment production CLI tests passed, including changes
 on both nodes, encrypted traffic after failure recovery and unchanged-configuration checks.
-Multiple Peers, network migration with control roles and role disaster recovery remain deferred.
-After rotation, securely transfer
+4C.10 also supports a controller or joined controlled node with fixed local/Peer tunnel addresses.
+Both original and candidate inputs must match the role's registered addresses. Keys, listen ports
+and endpoints can change while role identity, sync version, accounts, listeners and totals stay unchanged.
+Disable controller log scheduling and control Fail2ban, or controlled auto-sync, before migration.
+Unfinished source challenges are rejected. Successful migration keeps the invitation usable; enabling
+protection again runs a fresh source check. Controller failure or INT/TERM recovery revokes Peer
+authorization and requires a new invitation. Focused and isolated amd64 dual-deployment checks passed,
+including encrypted traffic, the original invitation, fresh source proof and failure recovery.
+Multiple Peers, control-role address changes and role disaster recovery remain deferred.
+After control-token rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.
 The raw token is not stored in specs, backups, arguments, environment or ordinary logs. The capability-free

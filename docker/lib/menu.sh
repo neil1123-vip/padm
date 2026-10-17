@@ -1154,7 +1154,8 @@ dockerMenuWireGuard() {
         4) dockerMenuRun wireguard start || true ;;
         5) dockerMenuRun wireguard stop || true ;;
         6)
-            printf '%s\n' '仅限无控制角色的已启用单 Peer；留空保持，0 返回。双方逐端更新后须验证连通。'
+            printf '%s\n' '已启用单 Peer；控制角色须保持双方隧道地址，并先停自动同步、控制日志调度及控制面封禁。' \
+                '留空保持，0 返回。双方逐端更新后须验证连通。'
             dockerSetupRead address '本机 RFC1918 IPv4: ' &&
                 dockerSetupRead port 'UDP 监听端口: ' &&
                 dockerSetupRead peer '对端 RFC1918 IPv4: ' &&

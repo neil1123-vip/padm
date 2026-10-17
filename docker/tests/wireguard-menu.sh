@@ -100,6 +100,7 @@ runCase migrate-endpoint $'6\n\n\n\n\nnone\nn\ny\n0\n' \
     $'wireguard migrate --endpoint none\nconfirm migrate y'
 runCase migrate-rotate $'6\n\n\n\n\n\ny\ny\n0\n' \
     $'wireguard migrate --rotate-key\nconfirm migrate y'
+grep -Fq '控制角色须保持双方隧道地址' "${CONTROL_LOG}" || fail '迁移菜单未说明控制角色地址限制'
 runCase migrate-empty $'6\n\n\n\n\n\nn\n1\n0\n' 'wireguard status'
 runCase migrate-invalid $'6\n\n\n\n\n\ninvalid\n1\n0\n' 'wireguard status'
 runCase invalid $'99\n1\n0\n' 'wireguard status'
