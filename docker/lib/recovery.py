@@ -817,6 +817,123 @@ def renewal_inputs(directory, destination=None):
     return {"renewal_registrations": len(payload)}
 
 
+def acme_inputs(directory, destination=None):
+    prefix = "data/acme"
+    payload = {}
+    with contextlib.ExitStack() as stack:
+        parent, name = stack.enter_context(absolute_parent(directory, private=True))
+        root_fd = stack.enter_context(transaction_directory(parent, name, private=False))
+        observed = [(parent, name, signature(os.fstat(root_fd)))]
+        manifest_info = os.stat(MANIFEST, dir_fd=root_fd, follow_symlinks=False)
+        manifest, _ = transaction_read(root_fd, MANIFEST, limit=MAX_MANIFEST)
+        observed.append((root_fd, MANIFEST, signature(manifest_info)))
+        entries = validate_manifest(read_json(manifest))
+        expected = {path: entry for path, entry in entries.items()
+                    if path == prefix or path.startswith(prefix + "/")}
+        if "data" not in os.listdir(root_fd):
+            require(not expected)
+            return {"acme_files": 0, "acme_summary": None}
+        data_fd = stack.enter_context(transaction_directory(root_fd, "data", private=False))
+        if "acme" not in os.listdir(data_fd):
+            require(not expected)
+            return {"acme_files": 0, "acme_summary": None}
+        home_fd = stack.enter_context(transaction_directory(data_fd, "acme"))
+        observed.extend((owner, child, signature(os.fstat(fd))) for owner, child, fd in (
+            (root_fd, "data", data_fd), (data_fd, "acme", home_fd)))
+        require(prefix in expected and expected[prefix]["type"] == "directory")
+        found = {prefix}
+
+        def stable():
+            for owner, child, before in observed:
+                require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == before)
+            with absolute_parent(directory, private=True) as (owner, child):
+                require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == observed[0][2])
+
+        if not os.listdir(home_fd):
+            require(set(expected) == found)
+            stable()
+            return {"acme_files": 0, "acme_summary": None}
+        # 同目录模块也须兼容通过 importlib 载入本文件的内部检查入口。
+        import importlib.util
+        module_spec = importlib.util.spec_from_file_location(
+            "padm_acme_recovery", os.path.join(os.path.dirname(__file__), "acme_recovery.py"))
+        acme = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(acme)
+        total = 0
+
+        def read_tree(owner, relative=""):
+            nonlocal total
+            names = sorted(os.listdir(owner))
+            if relative and not names:
+                payload[relative + "/"] = b""
+            for child in names:
+                local = relative + "/" + child if relative else child
+                path = prefix + "/" + local
+                require(path in expected)
+                found.add(path)
+                if expected[path]["type"] == "directory":
+                    fd = stack.enter_context(transaction_directory(owner, child))
+                    observed.append((owner, child, signature(os.fstat(fd))))
+                    read_tree(fd, local)
+                else:
+                    info = os.stat(child, dir_fd=owner, follow_symlinks=False)
+                    encoded, metadata = transaction_read(owner, child, limit=acme.MAX_FILE)
+                    require(all(metadata[key] == expected[path][key] for key in ("size", "sha256")))
+                    total += len(encoded)
+                    require(total <= MAX_TRANSACTION_FILE)
+                    observed.append((owner, child, signature(info)))
+                    payload[local] = encoded
+                require(len(payload) <= 20)
+
+        read_tree(home_fd)
+        require(found == set(expected))
+        config_fd = stack.enter_context(transaction_directory(root_fd, "config", private=False))
+        secrets_fd = stack.enter_context(transaction_directory(root_fd, "secrets", private=False))
+        renewal_fd = stack.enter_context(transaction_directory(secrets_fd, "renewal"))
+        observed.extend((owner, child, signature(os.fstat(fd))) for owner, child, fd in (
+            (root_fd, "config", config_fd), (root_fd, "secrets", secrets_fd),
+            (secrets_fd, "renewal", renewal_fd)))
+        spec_info = os.stat("spec.json", dir_fd=config_fd, follow_symlinks=False)
+        encoded, metadata = transaction_read(config_fd, "spec.json")
+        require(all(metadata[key] == entries["config/spec.json"][key] for key in ("size", "sha256")))
+        observed.append((config_fd, "spec.json", signature(spec_info)))
+        spec = read_json(encoded)
+        require(isinstance(spec, dict) and isinstance(spec.get("tls"), dict)
+                and spec["tls"].get("http01") is not True)
+        domain = acme.checked_domain(spec["tls"].get("domain"))
+        request_fd = stack.enter_context(transaction_directory(renewal_fd, domain))
+        observed.append((renewal_fd, domain, signature(os.fstat(request_fd))))
+        request_path = "secrets/renewal/" + domain + "/request.json"
+        require(set(os.listdir(request_fd)) == {"request.json"}
+                and request_path in entries and entries[request_path]["type"] == "file")
+        request_info = os.stat("request.json", dir_fd=request_fd, follow_symlinks=False)
+        encoded, metadata = transaction_read(request_fd, "request.json", limit=64 * 1024)
+        require(all(metadata[key] == entries[request_path][key] for key in ("size", "sha256")))
+        observed.append((request_fd, "request.json", signature(request_info)))
+        renewal_request(domain, encoded)
+        request = read_json(encoded)
+        require(request["schema_version"] == 2 and request["provider"] == "standalone")
+        normalized, summary = acme.normalize_acme_home(payload, domain, request["email"])
+        stable()
+        if destination is not None:
+            owner, child = stack.enter_context(absolute_parent(destination, private=True))
+            target_fd = stack.enter_context(transaction_directory(owner, child, private=False))
+            target_data = stack.enter_context(transaction_directory(target_fd, "data", private=False))
+            target_home = stack.enter_context(transaction_directory(target_data, "acme"))
+            require(not os.listdir(target_home))
+            # 只写规范化结果；原始清单和暂态材料不进入活动目录。
+            for path, encoded in sorted(normalized.items()):
+                owner = target_home
+                parts = path.split("/")
+                for child in parts[:-1]:
+                    if child not in os.listdir(owner):
+                        os.mkdir(child, 0o700, dir_fd=owner)
+                    owner = stack.enter_context(transaction_directory(owner, child))
+                transaction_write(owner, parts[-1], encoded)
+        stable()
+    return {"acme_files": len(normalized), "acme_summary": summary}
+
+
 def transaction_encoded(metadata):
     data = json.dumps(metadata, ensure_ascii=True, separators=(",", ":")).encode()
     require(len(data) <= MAX_TRANSACTION_METADATA)
@@ -1276,6 +1393,9 @@ def main():
     renewal = commands.add_parser("renewal-inputs")
     renewal.add_argument("--directory", required=True)
     renewal.add_argument("--destination")
+    acme = commands.add_parser("acme-inputs")
+    acme.add_argument("--directory", required=True)
+    acme.add_argument("--destination")
     for action in ("begin", "prepare", "check", "commit", "clean", "metadata",
                    "schedule-save", "schedule-metadata", "unit-check", "unit-publish"):
         command = commands.add_parser("transaction-" + action)
@@ -1313,6 +1433,8 @@ def main():
             print(json.dumps(geo_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "renewal-inputs":
             print(json.dumps(renewal_inputs(args.directory, args.destination), separators=(",", ":")))
+        elif args.action == "acme-inputs":
+            print(json.dumps(acme_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "transaction-begin":
             print(json.dumps(transaction_begin(args.root, args.project), separators=(",", ":")))
         elif args.action == "transaction-prepare":

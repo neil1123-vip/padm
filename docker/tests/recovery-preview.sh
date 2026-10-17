@@ -43,6 +43,38 @@ dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
 dockerTrafficRuntimeCheck() { :; }
 dockerConfigurePortsAvailable() { :; }
 dockerTlsValidateCandidate() { :; }
+# 材料数学绑定由独立 OpenSSL 回归覆盖；此处验证恢复调用和私密候选。
+dockerRecoveryAcmeValidate() {
+    local spec=$1 candidate=$2 file
+    [[ "$#" == 2 && "${spec}" == "${candidate}/config/spec.json" &&
+        -n "${EXPECTED_ACME_DIR}" &&
+        "$(jq -r '.tls.domain' "${spec}")" == "${DOMAIN}" &&
+        "$(find "${DOCKER_RECOVERY_INPUT}/data/acme" -type f | wc -l)" == 10 &&
+        "$(find "${candidate}/data/acme" -type f | wc -l)" == 9 &&
+        -z "$(find "${candidate}/data/acme" -type d ! -perm 0700 -print -quit)" &&
+        -z "$(find "${candidate}/data/acme" -type f ! -perm 0600 -print -quit)" &&
+        -z "$(find "${candidate}/data/acme" \( ! -user root -o ! -group root \) -print -quit)" &&
+        ! -e "${candidate}/data/acme/${DOMAIN}_ecc/${DOMAIN}.csr" ]] ||
+        candidate_fail 'ACME 材料校验调用、数量或私密权限错误'
+    for file in ca/ca.example.test/dir/account.key ca/ca.example.test/dir/account.json \
+        "${DOMAIN}_ecc/${DOMAIN}.key" "${DOMAIN}_ecc/${DOMAIN}.cer" \
+        "${DOMAIN}_ecc/ca.cer" "${DOMAIN}_ecc/fullchain.cer"; do
+        cmp -- "${EXPECTED_ACME_DIR}/${file}" "${candidate}/data/acme/${file}" ||
+            candidate_fail 'ACME 原材料没有保持原字节'
+    done
+    cmp -- "${candidate}/data/acme/account.conf" \
+        <(printf "USER_PATH='%s'\nCA_BUNDLE=''\n" \
+            '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin') ||
+        candidate_fail 'ACME 账户执行配置没有重建'
+    for file in "Le_RealCertPath=''" "Le_RealCACertPath=''" \
+        "Le_RealKeyPath='/var/lib/padm/tls-output/${DOMAIN}.key'" \
+        "Le_RealFullChainPath='/var/lib/padm/tls-output/${DOMAIN}.crt'"; do
+        grep -qxF -- "${file}" "${candidate}/data/acme/${DOMAIN}_ecc/${DOMAIN}.conf" ||
+            candidate_fail 'ACME 安装输出没有重建到固定目录'
+    done
+    printf '%s\n' "${MODE}" >>"${TEST_ROOT}/acme-validated"
+    [[ "${MODE}" != acme-material-fail ]]
+}
 # REALITY 目标探测可能访问公网或调用派生容器；此处仅隔离只读检测，规格与生成保持真实。
 dockerRealityTargetsValidate() { :; }
 dockerIPv6NetworkManage() { :; }
@@ -203,7 +235,8 @@ dockerCandidateCompose() {
         [[ "$(stat -c '%u:%g:%a' "${candidate}/data/reality-targets")" == 0:0:700 ]] ||
             candidate_fail '目标库目录权限不私密'
         if [[ -n "${EXPECTED_RENEWAL_DIR}" ]]; then
-            [[ "$(find "${candidate}/secrets/renewal" -type f | wc -l)" == 5 &&
+            [[ "$(find "${candidate}/secrets/renewal" -type f | wc -l)" == \
+                "$(find "${EXPECTED_RENEWAL_DIR}" -type f | wc -l)" &&
                 -z "$(find "${candidate}/secrets/renewal" -type d ! -perm 0700 -print -quit)" &&
                 -z "$(find "${candidate}/secrets/renewal" -type f ! -perm 0600 -print -quit)" &&
                 -z "$(find "${candidate}/secrets/renewal" \( ! -user root -o ! -group root \) -print -quit)" ]] ||
@@ -384,6 +417,7 @@ prepare_target() {
     MODE=ok
     EXPECTED_GEO_DIR=
     EXPECTED_RENEWAL_DIR=
+    EXPECTED_ACME_DIR=
     EXPECTED_SPEC="${TEST_ROOT}/base.json"
     EXPECTED_TRAFFIC_FILE="${SOURCE}/data/traffic/state.json"
 }
@@ -414,6 +448,7 @@ grep -q '"reality_results": 1' "${LOG}" && grep -q '"reality_blocked": 1' "${LOG
 ! grep -q 'Example.COM\|custom-reason' "${LOG}" || fail '预览泄露目标库记录'
 grep -q '"geo_files": 0' "${LOG}" || fail '无 Geo 预览缺少兼容计数'
 grep -q '"renewal_registrations": 0' "${LOG}" || fail '无续期预览缺少兼容计数'
+grep -q '"acme_files": 0' "${LOG}" || fail '无 ACME 预览缺少兼容计数'
 
 archive_variant renewal-disabled
 mkdir -m 0700 -- "${VARIANT}/secrets/renewal"
@@ -470,6 +505,52 @@ export_variant acme-input
 prepare_target acme-input
 run_case acme-input "${TEST_ROOT}/acme-input.tar" "${PADM_DOCKER_RC_STATE}"
 grep -q 'ACME 执行配置' "${LOG}" || fail '实际 ACME 输入未明确拒绝'
+
+archive_variant acme-normalized
+python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${VARIANT}" "${DOMAIN}" <<'PY'
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sys
+
+spec = importlib.util.spec_from_file_location("acme_fixture", sys.argv[1])
+fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+root, domain = Path(sys.argv[2]), sys.argv[3]
+files = {name.replace(fixture.DOMAIN, domain): data.replace(fixture.DOMAIN.encode(), domain.encode())
+         for name, data in fixture.fixture().items()}
+files[domain + "_ecc/" + domain + ".csr"] = b"discarded-request-marker\n"
+files["secrets/renewal/" + domain + "/request.json"] = json.dumps({
+    "schema_version": 2, "domain": domain, "email": fixture.EMAIL,
+    "provider": "standalone", "enabled": False,
+}).encode()
+for name, data in files.items():
+    path = root / (name if name.startswith("secrets/") else "data/acme/" + name)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.write_bytes(data)
+    path.chmod(0o600)
+for directory in (root / "data/acme", root / "secrets/renewal"):
+    for parent, _, _ in os.walk(directory):
+        Path(parent).chmod(0o700)
+PY
+ACME_SOURCE=${VARIANT}
+export_variant acme-normalized
+prepare_target acme-normalized
+EXPECTED_ACME_DIR="${ACME_SOURCE}/data/acme"
+EXPECTED_RENEWAL_DIR="${ACME_SOURCE}/secrets/renewal"
+run_case acme-normalized "${TEST_ROOT}/acme-normalized.tar" 0
+grep -q '"acme_files": 9' "${LOG}" && grep -q '"discarded_files": 1' "${LOG}" ||
+    fail 'ACME 预览缺少重建与丢弃计数'
+! grep -q 'restore@example.test\|ca.example.test\|private-marker\|discarded-request-marker' "${LOG}" ||
+    fail 'ACME 预览泄露账户或材料'
+prepare_target acme-material-fail
+EXPECTED_ACME_DIR="${ACME_SOURCE}/data/acme"
+EXPECTED_RENEWAL_DIR="${ACME_SOURCE}/secrets/renewal"
+MODE=acme-material-fail
+run_case acme-material-fail "${TEST_ROOT}/acme-normalized.tar" "${PADM_DOCKER_RC_STATE}"
+[[ "$(cat "${TEST_ROOT}/acme-validated")" == $'ok\nacme-material-fail' ]] ||
+    fail 'ACME 材料失败没有进入恢复专项校验'
 
 archive_variant stream config/spec.json '
   .core.protocols += [{id:1,core:"xray",listener_id:"entry-reality",server:"proxy.example.com",
@@ -894,7 +975,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 21 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 23 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&

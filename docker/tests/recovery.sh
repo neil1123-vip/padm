@@ -9,6 +9,7 @@ source "${PROJECT_ROOT}/install-docker.sh"
 
 fail() { printf 'docker-backup-regression-fail: %s\n' "$*" >&2; exit 1; }
 python3 -B "${PROJECT_ROOT}/docker/tests/recovery.py"
+python3 -B "${PROJECT_ROOT}/docker/tests/acme_recovery.py"
 
 # verify 必须绕开部署、Docker 和全局恢复；调用任何一项都让测试失败。
 dockerHostPreflight() { fail 'verify 调用了 Docker 预检'; }

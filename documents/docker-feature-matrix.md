@@ -553,7 +553,7 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | TProxy TCP/UDP 和 Redirect TCP 的有限管理范围同上，两者互斥；完整 Redirect/TProxy 管理及宿主验收仍 deferred。 |
 | `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 核心 | bridge | 两核心 DNS/hosts、Direct/Block、IP/CIDR、BT、CN 预设、IPv6/WARP 和专项事务已交付；名单增删/原位替换、上游和区域自定义例外管理冻结未选字段。hosts 单键增删/替换及交互单 IP/精确 FQDN CSV 整组替换共存，原 JSON CLI 保留。手工 IP 保留原文和顺序，不改区域合成项；sing-box 可显式解析后阻断并组合 WARP/IPv6，Xray 继续拒绝。只读重叠/覆盖不推断 GeoSite 或最终流量；完整区域、语义冲突检测、原生迁移及公网/宿主/双架构验收待补。 |
 | `internal-207-access-control` | 协议与入口 -> 额外入口端口 | `deferred` | 原业务核心/Nginx | bridge | 5B.5c–5B.5e 独立 `port_aliases`、菜单/CLI 增删/原位修改/状态/默认分享与候选回滚；双栈 TCP/UDP 发布已在隔离 amd64 Linux daemon 验证，同入口认证/统计，TLS/SNI 前端不旁路，URI/主订阅/分享组逐入口选择已有别名，修改保留默认标记，恢复或删除后回退 base，不增加节点。拒绝 WS/SSH Fail2ban、TUN/TProxy 和 host-network，允许已有 WireGuard/控制面 Fail2ban；适用公网/原生宿主/arm64 与完整管理验收待补。 |
-| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有状态/启停/日志、可信首配、规格编辑/多入口/双核心、Reality 目标/参数/443 共存、TLS/ACME、账号/分享组/额度/业务备份恢复、核心/Geo、多服务器手动同步、已有单 Peer 被控自动同步和同连接重映射、4C.6 同身份 API 端口更新/被控重连、站点/路由与 WS/控制面/有限 SSH Fail2ban 菜单。6A.1 新增含私密登记的灾备导出及无 Docker 只读完整性校验；6A.2–6A.3 新增同架构普通 v3 归档在空目标上的独立发布验证、候选预览、恢复提交及持久中断恢复，保留身份和累计，拒绝未处理的持久输入、外部调度漂移和已有部署。6A.4–6A.5/6A.13 接入 Reality 目标库及含 Xray 的固定版本 Geo 三文件原字节恢复；Geo 数据每库 128 MiB，核对清单和 state 摘要并离线解析，不下载数据。enabled 严格为布尔值；true 在安装及健康检查成功后恢复每日 Geo 调度，false 或无 Geo 输入不接管已有调度。流量和 Geo 独立持久快照，统一检查外部漂移后逆序撤销；预览不安装调度。6A.6/6A.10 接入停用 DNS/standalone/webroot/ALPN 续期登记原字节恢复，DNS 要求合法凭据，非 DNS 登记拒绝凭据，保持 root 私密权限；启用续期登记及实际 ACME 文件仍拒绝，仅兼容空 `data/acme`，不恢复 CA 账户或续期调度。6A.7 接入受管 `listener_id/website_listener_id` Reality 共存空目标恢复，stream 按规格重生成并复验，预览两入口公开 `443`。6A.8 仅恢复已有合法单 sing-box 双族 Hy2/TUIC 跳跃规格，状态为 `stopped`，不恢复监督、规则或运行态。6A.9 接入桥接可达 `host_website` 空目标恢复，仅接受 host-gateway 或可路由 IP，拒绝回环、host 网络和未处理的 host-main 输入；宿主网站服务、内容及证书不随归档恢复。6A.11 保留已有 HTTP-01 规格，重建空挑战根和双栈 `80:8088`，不恢复挑战文件或启用续期。各项复用持久事务和撤销，当前验收见实施计划。仅开放已交付组合；完整协议管理、多 Peer/迁移/完整灾备、剩余宿主能力及可信发布/原生双架构完整生命周期仍待交付或验收。 |
+| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有状态/启停/日志、可信首配、规格编辑/多入口/双核心、Reality 目标/参数/443 共存、TLS/ACME、账号/分享组/额度/业务备份恢复、核心/Geo、多服务器手动同步、已有单 Peer 被控自动同步和同连接重映射、4C.6 同身份 API 端口更新/被控重连、站点/路由与 WS/控制面/有限 SSH Fail2ban 菜单。6A.1 新增含私密登记的灾备导出及无 Docker 只读完整性校验；6A.2–6A.3 新增同架构普通 v3 归档在空目标上的独立发布验证、候选预览、恢复提交及持久中断恢复，保留身份和累计，拒绝未处理的持久输入、外部调度漂移和已有部署。6A.4–6A.5/6A.13 接入 Reality 目标库及含 Xray 的固定版本 Geo 三文件原字节恢复；Geo 数据每库 128 MiB，核对清单和 state 摘要并离线解析，不下载数据。enabled 严格为布尔值；true 在安装及健康检查成功后恢复每日 Geo 调度，false 或无 Geo 输入不接管已有调度。流量和 Geo 独立持久快照，统一检查外部漂移后逆序撤销；预览不安装调度。6A.6/6A.10 接入停用 DNS/standalone/webroot/ALPN 续期登记原字节恢复，DNS 要求合法凭据，非 DNS 登记拒绝凭据，保持 root 私密权限；启用登记仍拒绝，不安装续期调度。6A.14 接入下述单域名 EC-P256 standalone ACME 账户及材料恢复，纯数据重建 9 文件并离线验证绑定，空 `data/acme` 继续兼容。6A.7 接入受管 `listener_id/website_listener_id` Reality 共存空目标恢复，stream 按规格重生成并复验，预览两入口公开 `443`。6A.8 仅恢复已有合法单 sing-box 双族 Hy2/TUIC 跳跃规格，状态为 `stopped`，不恢复监督、规则或运行态。6A.9 接入桥接可达 `host_website` 空目标恢复，仅接受 host-gateway 或可路由 IP，拒绝回环、host 网络和未处理的 host-main 输入；宿主网站服务、内容及证书不随归档恢复。6A.11 保留已有 HTTP-01 规格，重建空挑战根和双栈 `80:8088`，不恢复挑战文件或启用续期。各项复用持久事务和撤销，当前验收见实施计划。仅开放已交付组合；完整协议管理、多 Peer/迁移/完整灾备、剩余宿主能力及可信发布/原生双架构完整生命周期仍待交付或验收。 |
 | `core-lifecycle` | 核心与服务 | `supported` | 核心 profile | 宿主 CLI | 基础 `status/up/down/restart/logs/update/rollback/validate` 已可用，不代表原生全部升级管理。 |
 | `core-upgrade-assessment` | 核心与服务 -> Xray / sing-box 生命周期 | `supported` | 核心 profile | 宿主 CLI | 菜单第 13 项及 `assess` 复用只读风险扫描，使用可信候选镜像/配置副本执行版本检查、双核心配置试跑、Xray 严格模式与能力探针及已启用的 TLS/订阅/宿主前置检查；旧核心不启用严格解析时明确警告，不切换生产状态。要求受管 spec，预发布须提供匹配的可信发布资产；真实客户端连通另验。 |
 | `geo-data` | 核心与服务 -> Xray Geo 数据 | `supported` | `core-xray` | 宿主 CLI | 菜单第 14 项与 `geo status/update/schedule/auto-update` 已交付；完整受管数据经双摘要及真实 Xray 解析校验后切换读取路径，重建前采集 Xray 流量，仅重建原本运行的 Xray，失败恢复数据/Compose/运行状态；每日 01:35 systemd/cron 任务有部署归属和锁。编辑、更新和回滚保留数据及调度登记，旧 bundle 在切换前拒绝；真实上游、生产重建、宿主调度、arm64 和整机重启另验。 |
@@ -585,6 +585,13 @@ apply `88`、集中合同 `65/65` 通过；未知暂存或篡改继续拒绝。
 流量与 Geo 使用独立私密持久快照，先统一检查外部漂移，再按 Geo、流量逆序撤销。
 需要写 systemd unit 时，unit 与私密暂存须同文件系统；原子替换不回退为跨文件系统复制。
 当前验收见实施计划，完整灾备和整体菜单管理仍为 deferred。
+
+6A.14 接受 acme.sh `3.1.6`、单域名、账户及域名 EC-P256、standalone HTTP-01 `8080`，
+须有对应 schema `2` 停用续期登记，且 `.tls.http01` 不启用。恢复器不执行归档 shell，
+重建固定 9 文件，仅丢弃已知 CSR/暂态材料；拒绝 hook、DNS/SAN/RSA/EAB、
+未知配置和自定义执行路径。可信 ops 容器无网络验证密钥、有序唯一证书链及固定 TLS 输出绑定，
+保留 CA 账户和域名密钥，不安装续期调度。定向与本地 CA 实际续期验收见实施计划；
+公网 CA、其它 ACME 组合、启用续期及完整灾备仍待交付或验收。
 
 ## 第一阶段验收
 

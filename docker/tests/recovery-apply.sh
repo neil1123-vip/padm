@@ -36,6 +36,41 @@ dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
 dockerTrafficRuntimeCheck() { :; }
 dockerConfigurePortsAvailable() { :; }
 dockerTlsValidateCandidate() { :; }
+# 数学绑定由独立 OpenSSL 回归覆盖，此处检查原材料、配置重建和候选调用。
+assert_acme_home() {
+    local directory=$1 owner=$2 root_mode=$3 file
+    [[ "$(find "${directory}" -type f | wc -l)" == 9 &&
+        "$(stat -c '%u:%g:%a' "${directory}")" == "${owner}:${root_mode}" &&
+        -z "$(find "${directory}" -mindepth 1 -type d ! -perm 0700 -print -quit)" &&
+        -z "$(find "${directory}" -type f ! -perm 0600 -print -quit)" &&
+        -z "$(find "${directory}" \( ! -uid "${owner%:*}" -o ! -gid "${owner#*:}" \) -print -quit)" &&
+        ! -e "${directory}/${DOMAIN}_ecc/${DOMAIN}.csr" ]] ||
+        fail 'ACME 重建文件数量、权限或所有者错误'
+    for file in ca/ca.example.test/dir/account.key ca/ca.example.test/dir/account.json \
+        "${DOMAIN}_ecc/${DOMAIN}.key" "${DOMAIN}_ecc/${DOMAIN}.cer" \
+        "${DOMAIN}_ecc/ca.cer" "${DOMAIN}_ecc/fullchain.cer"; do
+        cmp -- "${TEST_ROOT}/source-acme/data/acme/${file}" "${directory}/${file}" ||
+            fail 'ACME 恢复改变了原材料'
+    done
+    cmp -- "${directory}/account.conf" \
+        <(printf "USER_PATH='%s'\nCA_BUNDLE=''\n" \
+            '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin') ||
+        fail 'ACME 账户执行配置没有重建'
+    for file in "Le_RealCertPath=''" "Le_RealCACertPath=''" \
+        "Le_RealKeyPath='/var/lib/padm/tls-output/${DOMAIN}.key'" \
+        "Le_RealFullChainPath='/var/lib/padm/tls-output/${DOMAIN}.crt'"; do
+        grep -qxF -- "${file}" "${directory}/${DOMAIN}_ecc/${DOMAIN}.conf" ||
+            fail 'ACME 安装输出没有重建到固定目录'
+    done
+}
+dockerRecoveryAcmeValidate() {
+    [[ "$#" == 2 && "$1" == "$2/config/spec.json" &&
+        "$(jq -r '.tls.domain' "$1")" == "${DOMAIN}" &&
+        "$(find "${DOCKER_RECOVERY_INPUT}/data/acme" -type f | wc -l)" == 10 ]] ||
+        fail 'ACME 恢复材料校验没有使用候选规格及完整归档'
+    assert_acme_home "$2/data/acme" 0:0 700
+    printf 'acme-validated\n' >>"${MOCK_BACKEND}/events"
+}
 dockerRealityTargetsValidate() { :; }
 dockerIPv6NetworkManage() { :; }
 dockerConfigureReleasePrepare() {
@@ -582,6 +617,38 @@ dockerGenerateDeployment "${HTTP01_SOURCE}/config/spec.json" "${HTTP01_SOURCE}/d
 printf 'untrusted archived HTTP-01 config;\n' >"${HTTP01_SOURCE}/config/nginx/default.conf"
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${HTTP01_SOURCE}" \
     --output "${TEST_ROOT}/http01.tar" >/dev/null || fail 'HTTP-01 归档导出失败'
+
+ACME_SOURCE="${TEST_ROOT}/source-acme"
+cp -a -- "${SOURCE}" "${ACME_SOURCE}"
+python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${ACME_SOURCE}" "${DOMAIN}" <<'PY'
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sys
+
+spec = importlib.util.spec_from_file_location("acme_fixture", sys.argv[1])
+fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+root, domain = Path(sys.argv[2]), sys.argv[3]
+files = {name.replace(fixture.DOMAIN, domain): data.replace(fixture.DOMAIN.encode(), domain.encode())
+         for name, data in fixture.fixture().items()}
+files[domain + "_ecc/" + domain + ".csr"] = b"discarded-request-marker\n"
+files["secrets/renewal/" + domain + "/request.json"] = json.dumps({
+    "schema_version": 2, "domain": domain, "email": fixture.EMAIL,
+    "provider": "standalone", "enabled": False,
+}).encode()
+for name, data in files.items():
+    path = root / (name if name.startswith("secrets/") else "data/acme/" + name)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.write_bytes(data)
+    path.chmod(0o600)
+for directory in (root / "data/acme", root / "secrets/renewal"):
+    for parent, _, _ in os.walk(directory):
+        Path(parent).chmod(0o700)
+PY
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${ACME_SOURCE}" \
+    --output "${TEST_ROOT}/acme.tar" >/dev/null || fail 'ACME 归档导出失败'
 
 for protocol in hy2 tuic; do
     variant="${TEST_ROOT}/source-hopping-${protocol}"
@@ -1287,6 +1354,47 @@ RECOVERY_ARCHIVE="${TEST_ROOT}/http01.tar"
 run_child apply killed 137
 [[ -d "${root}/.restore-pending" && -d "${root}/data/acme-webroot" &&
     -e "${MOCK_BACKEND}/compose-container" ]] || fail 'HTTP-01 硬杀未保留挑战根与恢复现场'
+run_child recover ok 0
+assert_empty
+
+prepare_target acme-success
+RECOVERY_ARCHIVE="${TEST_ROOT}/acme.tar"
+run_child apply ok 0
+assert_acme_home "${root}/data/acme" "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" 750
+jq -en --slurpfile expected "${ACME_SOURCE}/config/spec.json" \
+    --slurpfile actual "${root}/config/spec.json" '
+  $actual[0].core == $expected[0].core and $actual[0].accounts == $expected[0].accounts and
+  $actual[0].subscription == $expected[0].subscription and $actual[0].tls == $expected[0].tls
+' >/dev/null || fail 'ACME 恢复改变了入口、账号凭据或订阅身份'
+cmp -- "${ACME_SOURCE}/config/share-groups.json" "${root}/config/share-groups.json" ||
+    fail 'ACME 恢复改变了分享组'
+jq -e --slurpfile expected "${ACME_SOURCE}/data/traffic/state.json" '
+  .schema_version == $expected[0].schema_version and
+  .accounts == ($expected[0].accounts | map_values(.baseline = {}))
+' "${root}/data/traffic/state.json" >/dev/null || fail 'ACME 恢复改变了累计、限额或历史账号'
+cmp -- "${ACME_SOURCE}/secrets/renewal/${DOMAIN}/request.json" \
+    "${root}/secrets/renewal/${DOMAIN}/request.json" || fail 'ACME 停用续期登记没有保持原字节'
+[[ "$(grep -c '^acme-validated$' "${MOCK_BACKEND}/events")" == 1 &&
+    -e "${MOCK_BACKEND}/compose-container" && -e "${MOCK_BACKEND}/padm-container" &&
+    ! -e "${root}/.restore-pending" && ! -e "${root}/locks/deployment.lock" &&
+    ! -e "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.service" &&
+    ! -e "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-renewal.timer" ]] ||
+    fail 'ACME 成功事务没有校验、启动、清理，或意外安装了续期调度'
+
+for mode in health term; do
+    prepare_target "acme-${mode}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/acme.tar"
+    expected=failure
+    [[ "${mode}" != term ]] || expected=143
+    run_child apply "${mode}" "${expected}"
+    grep -qx 'acme-validated' "${MOCK_BACKEND}/events" || fail 'ACME 故障前未校验材料'
+    assert_empty
+done
+prepare_target acme-killed
+RECOVERY_ARCHIVE="${TEST_ROOT}/acme.tar"
+run_child apply killed 137
+[[ -d "${root}/.restore-pending" && -f "${root}/data/acme/account.conf" &&
+    -e "${MOCK_BACKEND}/compose-container" ]] || fail 'ACME 硬杀未保留材料与恢复现场'
 run_child recover ok 0
 assert_empty
 

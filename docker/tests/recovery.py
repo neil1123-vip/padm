@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """灾备归档的真实字节、边界与失败原子性回归。"""
 
+import base64
 import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -842,6 +844,265 @@ class RenewalInputTests(unittest.TestCase):
         self.assertEqual(result.returncode, 15)
         self.assertEqual(result.stdout, b"")
         self.assertNotIn(SECRET, result.stderr)
+
+
+class AcmeInputTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="padm-acme-recovery-",
+                                                     dir=os.environ["TMPDIR"])
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.source = self.root / "source"
+        self.home = self.source / "data/acme"
+        self.domain = "restore.example.test"
+        self.email = "restore@example.test"
+        self.ca = "ca/ca.example.test/dir"
+        self.domain_directory = self.domain + "_ecc"
+        self.domain_config = self.domain_directory + "/" + self.domain + ".conf"
+        self.key = self.domain_directory + "/" + self.domain + ".key"
+        module_spec = importlib.util.spec_from_file_location(
+            "padm_acme_input_fixture", HELPER.with_name("acme_recovery.py"))
+        self.acme = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(self.acme)
+        account_key = SECRET + b"-account\n"
+        self.files = {
+            "account.conf": self.acme.encoded({"USER_PATH": self.acme.TRUSTED_PATH}),
+            self.ca + "/account.key": account_key,
+            self.ca + "/account.json": json.dumps({
+                "status": "valid", "contact": ["mailto:" + self.email]}).encode(),
+            self.ca + "/ca.conf": self.acme.encoded({
+                "CA_EMAIL": self.email, "ACCOUNT_URL": "https://ca.example.test/accounts/1",
+                "CA_KEY_HASH": base64.b64encode(hashlib.sha256(account_key).digest()).decode()}),
+            self.domain_config: self.acme.encoded({
+                "Le_Domain": self.domain, "Le_Alt": "no", "Le_Webroot": "no",
+                "Le_API": "https://ca.example.test/dir", "Le_HTTPPort": "8080",
+                "Le_Keylength": "ec-256"}),
+            self.key: SECRET + b"-domain\n",
+            self.domain_directory + "/" + self.domain + ".cer": b"leaf\n",
+            self.domain_directory + "/ca.cer": b"issuer\n",
+            self.domain_directory + "/fullchain.cer": b"fullchain\n",
+        }
+        for name in recovery.REQUIRED:
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"docker\n" if name == "mode" else b"{}\n")
+            path.chmod(0o600)
+        self.home.mkdir(parents=True, mode=0o700)
+        for name, data in self.files.items():
+            path = self.home / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            path.chmod(0o600)
+        self.spec = {"tls": {"domain": self.domain}}
+        self.request = {"schema_version": 2, "domain": self.domain, "email": self.email,
+                        "provider": "standalone", "enabled": False}
+        self.request_path = self.source / "secrets/renewal" / self.domain / "request.json"
+        self.request_path.parent.mkdir(parents=True, mode=0o700)
+        self.spec_path = self.source / "config/spec.json"
+        self.write_bindings()
+        for path in self.source.rglob("*"):
+            if path.is_dir():
+                path.chmod(0o700)
+        self.destination = self.root / "candidate"
+        self.target = self.destination / "data/acme"
+        self.target.mkdir(parents=True, mode=0o700)
+        self.seal()
+
+    def write_bindings(self):
+        self.spec_path.write_text(json.dumps(self.spec))
+        self.request_path.write_text(json.dumps(self.request))
+        self.spec_path.chmod(0o600)
+        self.request_path.chmod(0o600)
+
+    def seal(self):
+        archive = self.root / "source.tar"
+        if archive.exists():
+            archive.unlink()
+        recovery.export_archive(str(self.source), str(archive))
+        with tarfile.open(archive, "r:") as source:
+            path = self.source / recovery.MANIFEST
+            path.write_bytes(source.extractfile(recovery.MANIFEST).read())
+            path.chmod(0o600)
+
+    def rejected(self):
+        with self.assertRaises((ValueError, OSError, KeyError)):
+            recovery.acme_inputs(str(self.source), str(self.destination))
+        self.assertEqual(list(self.target.iterdir()), [])
+
+    def test_normalized_private_copy_and_nonsecret_cli_summary(self):
+        for suffix in (".csr", ".csr.conf"):
+            path = self.home / self.domain_directory / (self.domain + suffix)
+            path.write_bytes(SECRET + b"-transient")
+            path.chmod(0o600)
+        (self.home / self.domain_directory / "backup").mkdir(mode=0o700)
+        self.seal()
+        before = {path: (path.read_bytes() if path.is_file() else None,
+                         recovery.signature(path.stat())) for path in self.source.rglob("*")}
+        result = recovery.acme_inputs(str(self.source), str(self.destination))
+        normalized, _ = self.acme.normalize_acme_home(self.files, self.domain, self.email)
+        self.assertEqual(result["acme_files"], 9)
+        self.assertEqual(result["acme_summary"]["discarded_files"], 3)
+        copied = {path.relative_to(self.target).as_posix(): path.read_bytes()
+                  for path in self.target.rglob("*") if path.is_file()}
+        self.assertEqual(copied, normalized)
+        self.assertNotEqual(copied["account.conf"], self.files["account.conf"])
+        for path in [self.target] + list(self.target.rglob("*")):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700 if path.is_dir() else 0o600)
+            self.assertEqual((path.stat().st_uid, path.stat().st_gid), (0, 0))
+        for path, (data, info) in before.items():
+            self.assertEqual(recovery.signature(path.stat()), info)
+            if data is not None:
+                self.assertEqual(path.read_bytes(), data)
+        cli = subprocess.run([sys.executable, "-B", str(HELPER), "acme-inputs",
+                              "--directory", str(self.source)], capture_output=True, check=True)
+        self.assertEqual(json.loads(cli.stdout), result)
+        self.assertEqual(cli.stderr, b"")
+        for private in (SECRET, self.domain.encode(), self.email.encode()):
+            self.assertNotIn(private, cli.stdout)
+
+    def test_absent_and_empty_home_do_not_require_tls_or_renewal_binding(self):
+        for path in sorted(self.home.rglob("*"), reverse=True):
+            path.rmdir() if path.is_dir() else path.unlink()
+        self.spec_path.write_bytes(b"{}\n")
+        self.seal()
+        empty = {"acme_files": 0, "acme_summary": None}
+        self.assertEqual(recovery.acme_inputs(str(self.source), str(self.destination)), empty)
+        self.home.rmdir()
+        self.seal()
+        self.assertEqual(recovery.acme_inputs(str(self.source)), empty)
+        self.assertEqual(list(self.target.iterdir()), [])
+
+    def test_spec_and_disabled_standalone_request_must_match(self):
+        original_spec, original_request = copy.deepcopy(self.spec), dict(self.request)
+        for value in (None, {}, {"tls": {}}, {"tls": {"domain": "other.example.test"}},
+                      {"tls": {"domain": self.domain, "http01": True}}):
+            with self.subTest(spec=value):
+                self.spec = value
+                self.write_bindings()
+                self.seal()
+                self.rejected()
+        self.spec = original_spec
+        for changes in ({"enabled": True}, {"enabled": 0}, {"domain": "other.example.test"},
+                        {"schema_version": 3, "provider": "webroot"},
+                        {"schema_version": 1, "provider": "dns_cf"},
+                        {"email": "other@example.test"}, {"extra": "not-allowed"}):
+            with self.subTest(request=changes):
+                self.request = dict(original_request, **changes)
+                self.write_bindings()
+                self.seal()
+                self.rejected()
+
+    def test_manifest_digests_tree_set_and_unknown_material_are_rejected(self):
+        for path in (self.home / self.key, self.spec_path, self.request_path):
+            original = path.read_bytes()
+            path.write_bytes(original + b"\n")
+            self.rejected()
+            path.write_bytes(original)
+        path = self.home / self.key
+        original = path.read_bytes()
+        path.unlink()
+        self.rejected()
+        path.write_bytes(original)
+        path.chmod(0o600)
+        for name in ("extra", "other.example.test_ecc", self.domain_directory + "/backup/extra"):
+            extra = self.home / name
+            extra.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            extra.write_bytes(SECRET)
+            extra.chmod(0o600)
+            self.rejected()
+            self.seal()
+            self.rejected()
+            extra.unlink()
+            if extra.parent.name == "backup":
+                extra.parent.rmdir()
+            self.seal()
+
+    def test_no_follow_private_permissions_hardlinks_ownership_and_size(self):
+        path = self.home / self.key
+        for item, mode in ((self.home, 0o750), (path.parent, 0o750), (path, 0o640)):
+            old = stat.S_IMODE(item.stat().st_mode)
+            item.chmod(mode)
+            self.rejected()
+            item.chmod(old)
+        os.chown(path, 10001, 10001)
+        self.rejected()
+        os.chown(path, 0, 0)
+        outside = self.root / "outside"
+        path.rename(outside)
+        path.symlink_to(outside)
+        self.rejected()
+        path.unlink()
+        os.link(outside, path)
+        self.rejected()
+        path.unlink()
+        outside.rename(path)
+        original = path.read_bytes()
+        os.truncate(path, self.acme.MAX_FILE + 1)
+        self.rejected()
+        path.write_bytes(original)
+        directory = self.home / self.ca
+        directory.rename(self.root / "outside-ca")
+        directory.symlink_to(self.root / "outside-ca", target_is_directory=True)
+        self.rejected()
+
+    def test_read_mutation_tree_replacement_and_copy_mutation_are_detected(self):
+        original_read = recovery.transaction_read
+
+        def mutate_read(parent, name, *args, **kwargs):
+            result = original_read(parent, name, *args, **kwargs)
+            if name == "account.key":
+                (self.home / self.ca / "account.key").write_bytes(SECRET + b"-changed")
+            return result
+
+        with mock.patch.object(recovery, "transaction_read", side_effect=mutate_read):
+            self.rejected()
+        (self.home / self.ca / "account.key").write_bytes(self.files[self.ca + "/account.key"])
+        self.seal()
+
+        def replace_read(parent, name, *args, **kwargs):
+            result = original_read(parent, name, *args, **kwargs)
+            if name == "request.json":
+                self.home.rename(self.root / "old-acme")
+                self.home.mkdir(mode=0o700)
+            return result
+
+        with mock.patch.object(recovery, "transaction_read", side_effect=replace_read):
+            self.rejected()
+        self.home.rmdir()
+        (self.root / "old-acme").rename(self.home)
+        self.seal()
+        original_write = recovery.transaction_write
+
+        def mutate_write(parent, name, data):
+            original_write(parent, name, data)
+            self.spec_path.write_bytes(b"{}\n")
+
+        with mock.patch.object(recovery, "transaction_write", side_effect=mutate_write):
+            with self.assertRaises(ValueError):
+                recovery.acme_inputs(str(self.source), str(self.destination))
+
+    def test_preexisting_candidate_or_unsafe_target_and_private_cli_rejection(self):
+        marker = self.target / "external"
+        marker.write_bytes(SECRET)
+        with self.assertRaises(ValueError):
+            recovery.acme_inputs(str(self.source), str(self.destination))
+        self.assertEqual(marker.read_bytes(), SECRET)
+        marker.unlink()
+        self.target.rmdir()
+        outside = self.root / "outside-target"
+        outside.mkdir(mode=0o700)
+        self.target.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(OSError):
+            recovery.acme_inputs(str(self.source), str(self.destination))
+        self.assertEqual(list(outside.iterdir()), [])
+        path = self.home / "account.conf"
+        path.write_bytes(b"USER_PATH='" + SECRET + b"'\n")
+        self.seal()
+        cli = subprocess.run([sys.executable, "-B", str(HELPER), "acme-inputs",
+                              "--directory", str(self.source)], capture_output=True)
+        self.assertEqual(cli.returncode, 15)
+        self.assertEqual(cli.stdout, b"")
+        self.assertNotIn(SECRET, cli.stderr)
 
 
 class GeoInputTests(unittest.TestCase):

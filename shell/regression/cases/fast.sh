@@ -7903,6 +7903,12 @@ runDockerSubscriptionSiteRealRegression() {
     PADM_TEST_SUBSCRIPTION_SITE_TEMPLATE=photos runDockerSubscriptionPublicationRealRegression
 }
 
+runDockerAcmeRecoveryRealRegression() {
+    bash -n "${PROJECT_ROOT}/docker/tests/acme-recovery-real.sh" &&
+        shellcheck --severity=error "${PROJECT_ROOT}/docker/tests/acme-recovery-real.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/acme-recovery-real.sh"
+}
+
 runDockerTuicRegression() {
     bash "${PROJECT_ROOT}/docker/tests/tuic.sh"
 }

@@ -343,7 +343,7 @@ try {
         'docker-alpn-real', 'docker-xhttp-real', 'docker-hy2-sites-real', 'docker-fail2ban-real',
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real',
         'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real', 'docker-shadowsocks-real',
-        'docker-subscription-publication-real', 'docker-subscription-site-real'
+        'docker-subscription-publication-real', 'docker-subscription-site-real', 'docker-acme-recovery-real'
     )
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real',
@@ -469,7 +469,13 @@ try {
             ops = 'padm-local/padm-ops:control-4c4b'
             net = 'padm-local/padm-net:control-4c4b'
         }
-        if ($Selector -eq 'docker-shadowsocks-real') {
+        if ($Selector -eq 'docker-acme-recovery-real') {
+            $references = [ordered]@{
+                ops = 'padm-local/padm-ops:tls-3b4'
+                acme = 'padm-tmp/acme-sample-tools:20261017-closure'
+                pebble = 'ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199'
+            }
+        } elseif ($Selector -eq 'docker-shadowsocks-real') {
             $references = [ordered]@{
                 xray = 'padm-local/padm-xray:control-4c4b'
                 'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
@@ -538,7 +544,7 @@ try {
             if ($info.Descriptor.digest -notmatch '^sha256:[a-f0-9]{64}$') {
                 throw "Node image has no real manifest digest: $name"
             }
-            $reference = "$($references[$name])@$($info.Descriptor.digest)"
+            $reference = "$(($references[$name] -split '@', 2)[0])@$($info.Descriptor.digest)"
             $nodeInputs[$name] = [ordered]@{ reference = $reference; image_id = $info.Id }
         }
         $nodeManifest = Join-Path $runDir 'node-images.json'

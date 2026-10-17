@@ -6514,6 +6514,12 @@ dockerValidateCandidate() {
             return 1
         }
     done <<<"${domains}"
+    if [[ -n "${DOCKER_RECOVERY_INPUT:-}" && -f "${candidate}/data/acme/account.conf" ]]; then
+        dockerRecoveryAcmeValidate "${specFile}" "${candidate}" || {
+            dockerError 'ACME 恢复的账户、证书链或固定 TLS 输出绑定校验失败'
+            return 1
+        }
+    fi
     if [[ "${nginxEnabled}" == true ]]; then
         # 仅解析候选配置，不启动候选核心；实际后端仍由项目网络解析。
         jq '{services:{nginx:{extra_hosts:
@@ -7565,6 +7571,15 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     fi
+    if [[ -n "${DOCKER_RECOVERY_INPUT:-}" ]] &&
+        ! { [[ -d "${candidate}/data/acme" && ! -L "${candidate}/data/acme" &&
+                -z "$(find "${candidate}/data/acme" -mindepth 1 -print -quit)" ]] &&
+            chown 0:0 "${candidate}/data/acme" && chmod 0700 "${candidate}/data/acme" &&
+            python3 -B "${DOCKER_LIB_DIR}/recovery.py" acme-inputs \
+                --directory "${DOCKER_RECOVERY_INPUT}" --destination "${candidate}" >/dev/null; }; then
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
     if ! dockerValidateCandidate "${specFile}" "${candidate}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
@@ -7792,6 +7807,27 @@ dockerCleanupTlsCandidate() {
     [[ ! -d "${candidate}" ]] || dockerRemoveManagedTree "${root}" "${candidate}" || return 1
     DOCKER_TLS_CANDIDATE=
     DOCKER_ACME_RUNNING=null
+}
+
+dockerRecoveryAcmeValidate() {
+    local specFile=$1 candidate=$2 domain image helper
+    domain=$(jq -er '.tls.domain' "${specFile}") &&
+        image=$(jq -er '.images.ops' "${specFile}") || return 1
+    helper="${DOCKER_LIB_DIR}/acme_recovery.py"
+    [[ -f "${helper}" && ! -L "${helper}" ]] || return 1
+    [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] ||
+        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
+            "${candidate}/data/acme" || return 1
+    # 私密材料只读挂载且不联网；容器内使用可信 OpenSSL，不执行归档配置。
+    docker run --rm --pull=never --network none --read-only \
+        --user "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
+        --cap-drop ALL --security-opt no-new-privileges \
+        --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+        --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+        --volume "${candidate}/data/acme:/acme:ro" \
+        --volume "${candidate}/secrets/tls:/tls:ro" --volume "${helper}:/acme_recovery.py:ro" \
+        --entrypoint python3 "${image}" -B /acme_recovery.py check \
+        --home /acme --domain "${domain}" --tls-directory /tls >/dev/null
 }
 
 dockerTlsValidateCandidate() {

@@ -1469,8 +1469,8 @@ The target must contain only an installed control skeleton: configuration, data,
 logs and backups must be empty, with no containers from the same project. The supported scope
 accepts same-architecture v3 ordinary deployments and managed or bridge-reachable host-website Reality coexistence with cores,
 manual TLS, static sites, account/share identities, saved traffic, Reality target libraries,
-limited Geo data and disabled renewal registrations described below. Host integrations,
-control roles/sync, host-network coexistence and ACME execution configuration
+limited Geo and ACME data and disabled renewal registrations described below. Host integrations,
+control roles/sync, host-network coexistence and unhandled ACME combinations
 remain rejected. Dangling references in disabled share groups are also rejected.
 An existing `.tls.http01=true` is preserved with a newly generated empty challenge root
 and dual-stack `80:8088`. Old challenge files, ACME accounts and renewal schedules are not restored;
@@ -1494,8 +1494,15 @@ Preview does not install schedules.
 Renewal recovery accepts only `enabled=false` DNS, standalone, webroot or ALPN registrations and DNS
 credentials, preserving original bytes and `0700/0600 root:root` permissions without installing
 a renewal schedule. Non-DNS registrations must not contain credentials. Enabled registrations
-and actual ACME files are rejected;
-an empty `data/acme` directory is compatible. Managed Reality coexistence regenerates stream
+remain rejected. ACME recovery accepts only acme.sh `3.1.6`, one domain, EC-P256 account
+and domain keys, and standalone HTTP-01 on `8080`, with a matching schema `2` disabled
+standalone renewal registration and `.tls.http01` disabled. It parses data without executing
+archived shell, rebuilds exactly nine files and discards only known CSR/transient material.
+Unknown configuration, hooks, DNS/SAN/RSA/EAB and custom execution paths are rejected.
+A network-disabled trusted ops container verifies private/public key, ordered certificate
+chain and fixed TLS-output bindings before preserving the account and domain keys.
+It does not install renewal schedules. An empty `data/acme` remains compatible.
+Managed Reality coexistence regenerates stream
 configuration from the spec and reports public port `443`; archived Nginx stream files are
 not executed. Bridge-reachable host-website recovery preserves domains, upstream address and port,
 accepting only host-gateway or routable IP addresses. Loopback, host networking and unhandled

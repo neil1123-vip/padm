@@ -142,6 +142,10 @@ dockerBundleSourceIsComplete() {
                 ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
         fi
     done
+    if grep -qF '/acme_recovery.py"' "${sourceRoot}/docker/lib/services.sh"; then
+        [[ -f "${sourceRoot}/docker/lib/acme_recovery.py" &&
+            ! -L "${sourceRoot}/docker/lib/acme_recovery.py" ]] || return 1
+    fi
     if [[ "${serviceReferences}" == *'/reality-targets.sh"'* ]]; then
         for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
             [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1

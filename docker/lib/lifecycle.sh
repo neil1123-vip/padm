@@ -3203,9 +3203,9 @@ dockerRecoveryInputsPrepare() {
         . == "data/traffic/state.json" or
         . == "data/reality-targets/results.tsv" or . == "data/reality-targets/blocked.tsv" or
         startswith("data/subscription/") or startswith("data/static/") or
-        startswith("secrets/tls/") or startswith("secrets/renewal/"))
+        startswith("secrets/tls/") or startswith("secrets/renewal/") or startswith("data/acme/"))
     ' "${input}/manifest.json" >/dev/null || {
-        dockerError '归档含尚未接入恢复的持久输入（如 ACME 执行配置），未准备候选'
+        dockerError '归档含尚未接入恢复的持久输入，未准备候选'
         return 1
     }
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" reality-inputs --directory "${input}" \
@@ -3218,7 +3218,12 @@ dockerRecoveryInputsPrepare() {
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" renewal-inputs --directory "${input}" \
         >"${draft}/renewal-counts.json" &&
         dockerRenewalRegistryValidate "${input}/secrets/renewal" || {
-        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记；不恢复 ACME 输入或续期调度'
+        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记；不安装续期调度'
+        return 1
+    }
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" acme-inputs --directory "${input}" \
+        >"${draft}/acme-counts.json" || {
+        dockerError 'ACME 执行配置仅接受单域名 EC-P256 standalone 的安全重建和停用续期登记'
         return 1
     }
     if jq -e '.geo_files > 0' "${draft}/geo-counts.json" >/dev/null; then
@@ -3466,12 +3471,13 @@ dockerRecoveryCommand() (
     printf '灾备恢复预览通过（未安装部署；已创建私密暂存并运行候选校验）。\n'
     jq --slurpfile reality "${stage}/draft/reality-counts.json" \
         --slurpfile geo "${stage}/draft/geo-counts.json" \
-        --slurpfile renewal "${stage}/draft/renewal-counts.json" '.spec.reality_stream as $stream |
+        --slurpfile renewal "${stage}/draft/renewal-counts.json" \
+        --slurpfile acme "${stage}/draft/acme-counts.json" '.spec.reality_stream as $stream |
       {listeners:[.spec.core.protocols[] | {listener_id,public_port:(
         if $stream != null and (.listener_id == $stream.listener_id or
           .listener_id == $stream.website_listener_id) then 443 else .public_port end)}],
       accounts:(.spec.accounts // [] | length),shares:(.shares.groups | length),
-      saved_traffic_accounts:(.traffic.accounts | length)} + $reality[0] + $geo[0] + $renewal[0]' "${stage}/draft/business.json"
+      saved_traffic_accounts:(.traffic.accounts | length)} + $reality[0] + $geo[0] + $renewal[0] + $acme[0]' "${stage}/draft/business.json"
 )
 
 dockerMain() {
