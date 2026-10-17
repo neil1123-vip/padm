@@ -107,7 +107,13 @@ runSubscriptionWireGuardMenuFlowRegression() (
         applySubscriptionWireGuardService
     }
     eval "$(declare -f disableSubscriptionWireGuardControl | sed '1s/^disableSubscriptionWireGuardControl/originalDisableSubscriptionWireGuardControl/')"
-    disableSubscriptionWireGuardControl() { recordMenuAction disableSubscriptionWireGuardControl; subscriptionWireGuardWriteState '.enabled = false'; }
+    uninstallSubscriptionWireGuardControl() {
+        recordMenuAction uninstallSubscriptionWireGuardControl
+        subscriptionWireGuardWriteState '
+          .enabled = false | .role = "uninitialized" | .peers = [] |
+          .address = "" | .endpoint_host = "" | .public_key = "" | .firewall_owned = false |
+          del(.pending_invites, .join_invite_id)'
+    }
     installSubscriptionWireGuardTools() { return 0; }
     subscriptionWireGuardEnsureKeys() {
         mkdir -p "$(subscriptionWireGuardDir)"
@@ -635,7 +641,8 @@ y"; then
 5"
         assertMenuAction installSubscriptionControlService
         assertMenuAction refreshSubscriptionWireGuardNginxControl
-        subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
+        assertMenuAction uninstallSubscriptionWireGuardControl
+        subscriptionWireGuardReadState | jq -e '.enabled == false and .role == "uninitialized"' >/dev/null
 
         subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
         printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
@@ -1074,10 +1081,27 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     testWireGuardState=$(jq -cn '{enabled:false,role:"uninitialized",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"",endpoint_host:"",public_key:"",peers:[]}')
     testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",admin:{id:"admin",name:"Admin",enabled:true,allowed_sources:["*"],traffic_limit_gb:0,token:""},sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,interval_minutes:10,last_run:"",last_status:"pending",failures:[],quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
     testGroupsState=$(normalizeTestGroupsState)
+    testGroupsState=$(jq '.user_groups = [{
+      id:"local-share",name:"Local Share",enabled:true,allowed_sources:["main"],
+      traffic_limit_gb:0,uuid:"99999999-9999-4999-8999-999999999999"
+    }]' <<<"${testGroupsState}")
     subscriptionWireGuardValidateState "${testWireGuardState}" || return 1
     testWireGuardStateValidated=true
     printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
+    (
+        groupsBefore=$(subscriptionGroupsStateRead -c '.')
+        local installSawLocalOwnership=false
+        subscriptionWireGuardInstallControlPlane() {
+            subscriptionActiveGroupRead -e '.user_groups[0].control_managed == false' >/dev/null || return 1
+            installSawLocalOwnership=true
+            return 1
+        }
+        regressionExpectStatus 1 subscriptionWireGuardJoinInvite "${joinJson}" false
+        [[ "${installSawLocalOwnership}" == true ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${groupsBefore}" ]]
+    )
     subscriptionWireGuardJoinInvite "${joinJson}" false
+    subscriptionActiveGroupRead -e '.user_groups[0].id == "local-share" and .user_groups[0].control_managed == false' >/dev/null
     subscriptionWireGuardReadState | jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${joinJson}")" '.role == "controlled" and .address == $address and .join_invite_id == $inviteId and (.peers | length) == 1 and .peers[0].id == "main"' --arg address "$(jq -r '.address' <<<"${joinJson}")" >/dev/null
     subscriptionWireGuardJoinReceiptCredential receiptCredential
     subscriptionWireGuardCredentialDecode "${receiptCredential}" | jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${joinJson}")" --arg token "${receiptToken}" '.kind == "receipt" and .invite_id == $inviteId and .token == $token' >/dev/null
@@ -1344,7 +1368,7 @@ runMenuSmokeRegression() {
     local xrayRunningState=true singBoxRunningState=false nginxRunningState=true
     local nginxReasonsMock="当前协议入口"
     local wgChoice
-    local wgAction
+    local wgAction uninstallStatus
     coreInstallType=${coreInstallType:-}
 
     menuSmokePartSelected() {
@@ -1508,7 +1532,7 @@ EOF
     showSubscriptionWireGuardPeers() { recordMenuAction showSubscriptionWireGuardPeers; }
     testSubscriptionWireGuardControl() { recordMenuAction testSubscriptionWireGuardControl; }
     restartSubscriptionWireGuardControl() { recordMenuAction restartSubscriptionWireGuardControl; }
-    disableSubscriptionWireGuardControl() { recordMenuAction disableSubscriptionWireGuardControl; }
+    uninstallSubscriptionWireGuardControl() { recordMenuAction uninstallSubscriptionWireGuardControl; }
     showSubscriptionWireGuardStatus() { recordMenuAction showSubscriptionWireGuardStatus; }
     subscriptionWireGuardReadState() {
         jq -n '{enabled:false, role:"uninitialized", address:"", peers:[]}'
@@ -2868,12 +2892,43 @@ main
 5"
         assertMenuAction showSubscriptionWireGuardPeers
         assertMenuAction showSubscriptionSourceControlUrls
-        for wgAction in "3:restartSubscriptionWireGuardControl" "4:disableSubscriptionWireGuardControl"; do
+        for wgAction in "3:restartSubscriptionWireGuardControl" "4:uninstallSubscriptionWireGuardControl"; do
             wgChoice=${wgAction%%:*}
             resetMenuActions
             manageSubscriptionMainControlDetails <<<"${wgChoice}
 5"
             assertMenuAction "${wgAction#*:}"
+        done
+        grep -q "卸载主控控制面" <<<"${output}"
+        ! grep -q "关闭主控控制面" <<<"${output}"
+        for uninstallStatus in 0 1; do
+            (
+                setMenuSmokeRole main
+                resetMenuActions
+                resetMenuRender
+                uninstallSubscriptionWireGuardControl() {
+                    recordMenuAction uninstallSubscriptionWireGuardControl
+                    setMenuSmokeRole uninitialized
+                    return "${uninstallStatus}"
+                }
+                manageSubscription <<< $'8\n4\n2\n9'
+                [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
+                [[ "${actions}" == $'showSubscriptionWireGuardStatus\nuninstallSubscriptionWireGuardControl\nshowPublishedSubscriptionLinks:\n' ]]
+                grep -q "启用主控协同" <<<"${output}"
+            )
+            (
+                setMenuSmokeRole main
+                resetMenuActions
+                resetMenuRender
+                uninstallSubscriptionWireGuardControl() {
+                    recordMenuAction uninstallSubscriptionWireGuardControl
+                    return "${uninstallStatus}"
+                }
+                manageSubscription <<< $'8\n4\n1\n5\n9'
+                [[ "$(subscriptionCurrentRoleNormalized)" == main ]]
+                [[ "${actions}" == $'showSubscriptionWireGuardStatus\nuninstallSubscriptionWireGuardControl\nshowSubscriptionWireGuardStatus\nshowSubscriptionWireGuardMainCredential\nshowSubscriptionWireGuardStatus\n' ]]
+                ! grep -q "启用主控协同" <<<"${output}"
+            )
         done
         resetMenuActions
         output=
@@ -3168,11 +3223,42 @@ yes
         grep -q "查看本机状态" <<<"${output}"
         grep -q "导入/更新主控接入凭据" <<<"${output}"
         grep -q "查看控制面与 Peer 细节" <<<"${output}"
+        grep -q "卸载被控控制面" <<<"${output}"
+        ! grep -q "关闭被控控制面" <<<"${output}"
         if grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "主控维护与排障" <<<"${output}"; then
             printf 'menu-smoke failed: controlled top-level still shows main entries\n' >&2
             return 1
         fi
         ! assertMenuAction menu
+        for uninstallStatus in 0 1; do
+            (
+                setMenuSmokeRole controlled
+                resetMenuActions
+                resetMenuRender
+                uninstallSubscriptionWireGuardControl() {
+                    recordMenuAction uninstallSubscriptionWireGuardControl
+                    setMenuSmokeRole uninitialized
+                    return "${uninstallStatus}"
+                }
+                manageSubscription <<< $'7\n2\n9'
+                [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
+                [[ "${actions}" == $'uninstallSubscriptionWireGuardControl\nshowPublishedSubscriptionLinks:\n' ]]
+                grep -q "启用主控协同" <<<"${output}"
+            )
+            (
+                setMenuSmokeRole controlled
+                resetMenuActions
+                resetMenuRender
+                uninstallSubscriptionWireGuardControl() {
+                    recordMenuAction uninstallSubscriptionWireGuardControl
+                    return "${uninstallStatus}"
+                }
+                manageSubscription <<< $'7\n4\n8'
+                [[ "$(subscriptionCurrentRoleNormalized)" == controlled ]]
+                [[ "${actions}" == $'uninstallSubscriptionWireGuardControl\nshowSubscriptionWireGuardControlledAccessCredential\n' ]]
+                ! grep -q "启用主控协同" <<<"${output}"
+            )
+        done
         resetMenuActions
         manageSubscriptionControlledHome <<<"1
 invite-credential

@@ -1774,12 +1774,16 @@ cleanupSubscriptionWireGuardControlOnUninstall() {
     local wireGuardPrivateKeyFile
     local wireGuardPublicKeyFile
     local controlServiceFile
+    local controlServerScript
+    local controlTokenFile
     wireGuardDir=$(subscriptionWireGuardSafeDir) || return 1
     wireGuardConfigFile=$(subscriptionWireGuardConfigFile) || return 1
     wireGuardStateFile=$(subscriptionWireGuardStateFile) || return 1
     wireGuardPrivateKeyFile=$(subscriptionWireGuardPrivateKeyFile) || return 1
     wireGuardPublicKeyFile=$(subscriptionWireGuardPublicKeyFile) || return 1
     controlServiceFile=$(subscriptionControlServiceFile) || return 1
+    controlServerScript=$(subscriptionControlServerScript) || return 1
+    controlTokenFile=$(subscriptionControlTokenFile) || return 1
 
     if [[ -e "${wireGuardConfigFile}" || -L "${wireGuardConfigFile}" ||
         -e "${wireGuardStateFile}" || -L "${wireGuardStateFile}" ||
@@ -1804,10 +1808,12 @@ cleanupSubscriptionWireGuardControlOnUninstall() {
         return 1
     fi
     removeInstallPath "${wireGuardConfigFile}" "WireGuard控制面配置" || return 1
-    removeInstallPath "${wireGuardStateFile}" "WireGuard控制面状态" || return 1
     removeInstallPath "${wireGuardPrivateKeyFile}" "WireGuard控制面私钥" || return 1
     removeInstallPath "${wireGuardPublicKeyFile}" "WireGuard控制面公钥" || return 1
     removeInstallPath "${controlServiceFile}" "订阅控制面systemd服务" || return 1
+    removeInstallPath "${controlServerScript}" "订阅控制服务脚本" || return 1
+    removeInstallPath "${controlTokenFile}" "订阅控制Token" || return 1
+    removeInstallPath "${wireGuardStateFile}" "WireGuard控制面状态" || return 1
     if [[ -d "${wireGuardDir}" && ! -L "${wireGuardDir}" ]] &&
         [[ -z "$(find "${wireGuardDir}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
         rmdir -- "${wireGuardDir}" >/dev/null 2>&1 || return 1

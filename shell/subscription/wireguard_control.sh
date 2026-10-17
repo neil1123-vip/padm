@@ -1464,13 +1464,16 @@ subscriptionWireGuardJoinInviteUnlocked() {
     local credentialJson=$1
     local expectedState=$2
     local publicKey=$3
-    local currentState expiresAt endpoint controlPort
+    local currentState expiresAt endpoint controlPort localGroupsState=
     currentState=$(subscriptionWireGuardReadState) || return 1
     [[ "${currentState}" == "${expectedState}" ]] || { errorCard "WireGuard 状态已变化" "请重新执行接入主控"; return 1; }
     expiresAt=$(jq -r '.expires_at' <<<"${credentialJson}") || return 1
     ((10#$(subscriptionWireGuardNow) < 10#${expiresAt})) || { errorCard "被控邀请已过期" "请先校准系统时间或让主控重建邀请"; return 1; }
     endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
     controlPort=$(subscriptionWireGuardDefaultControlPort)
+    if [[ "$(jq -r '.role' <<<"${currentState}")" == "uninitialized" ]]; then
+        localGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
+    fi
     subscriptionWireGuardWriteState \
       --arg inviteId "$(jq -r '.invite_id' <<<"${credentialJson}")" \
       --arg address "$(jq -r '.address' <<<"${credentialJson}")" \
@@ -1500,7 +1503,19 @@ subscriptionWireGuardJoinInviteUnlocked() {
         errorCard "WireGuard 被控配置未落地"
         return 1
     fi
-    subscriptionWireGuardInstallControlPlane "${expectedState}" "被控" || return 1
+    if [[ -n "${localGroupsState}" ]] &&
+        ! subscriptionActiveGroupWrite '.user_groups |= map(.control_managed = false)'; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${expectedState}" "${localGroupsState}" "本机分享账号归属记录失败" || return 1
+        errorCard "本机分享账号归属记录失败，已取消接入"
+        return 1
+    fi
+    if ! subscriptionWireGuardInstallControlPlane "${expectedState}" "被控"; then
+        if [[ -n "${localGroupsState}" ]] &&
+            ! subscriptionWireGuardRestoreGroupsState "${localGroupsState}"; then
+            subscriptionWireGuardReportRestoreFailure "接入主控失败"
+        fi
+        return 1
+    fi
 }
 
 subscriptionWireGuardJoinInvite() {
@@ -2237,4 +2252,182 @@ disableSubscriptionWireGuardControl() {
     fi
     [[ -n "${nginxBackupDir}" ]] && padmRemoveCleanupPath "${nginxBackupDir}"
     successCard "WireGuard 控制面已关闭"
+}
+
+rollbackSubscriptionWireGuardControlUninstallOnExit() {
+    [[ "${PADM_CONTROL_UNINSTALL_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_CONTROL_UNINSTALL_ROLLBACK[active]=false
+    local failure=${1:-控制面卸载中断}
+    local configBackupDir=${PADM_CONTROL_UNINSTALL_ROLLBACK[config]}
+    local outputBackupDir=${PADM_CONTROL_UNINSTALL_ROLLBACK[output]}
+    local groupsBackupFile=${PADM_CONTROL_UNINSTALL_ROLLBACK[groups]}
+    local coreChanged=${PADM_CONTROL_UNINSTALL_ROLLBACK[core_changed]}
+    local rollbackFailed=false trafficSnapshot
+    if ! subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${failure}" "${groupsBackupFile}"; then
+        failure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${failure}}"
+        rollbackFailed=true
+    fi
+    if [[ "${coreChanged}" == true && "${SUBSCRIPTION_SYNC_CONFIG_RESTORED:-false}" == true ]] &&
+        ! subscriptionSyncReconcileLocalServices; then
+        failure="${failure}，恢复配置后核心重载仍失败"
+        rollbackFailed=true
+    fi
+    if [[ "${coreChanged}" == true && "${SUBSCRIPTION_SYNC_CONFIG_RESTORED:-false}" == true ]] &&
+        trafficSnapshot=$(collectLocalTrafficSnapshot); then
+        writeSubscriptionTrafficSnapshot "${trafficSnapshot}" '[]' >/dev/null 2>&1 || true
+    fi
+    if [[ "${rollbackFailed}" == true ]]; then
+        subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
+    else
+        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
+    fi
+    errorCard "${failure}" "控制面已停止，身份文件仍保留，请修复后重试"
+    [[ "${rollbackFailed}" == false ]]
+}
+
+uninstallSubscriptionWireGuardControlApply() {
+    local expectedState=$1
+    local removeIds=$2
+    local expectedGroupsState=${3:-}
+    local state groupsState role sourceId plan
+    local configBackupDir= outputBackupDir= groupsBackupFile=
+    local failure=
+    local coreChanged=false
+    local trafficSnapshot= localTrafficBaseline=false
+    local -A PADM_CONTROL_UNINSTALL_ROLLBACK=([active]=false)
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    state=$(subscriptionWireGuardReadState) || return 1
+    groupsState=$(subscriptionGroupsStateRead -c '.') || return 1
+    if [[ "${state}" != "${expectedState}" ||
+        ( -n "${expectedGroupsState}" && "${groupsState}" != "${expectedGroupsState}" ) ]]; then
+        errorCard "控制面或订阅状态已变化，请重新确认卸载"
+        return 1
+    fi
+    role=$(jq -r '.role' <<<"${state}") || return 1
+    [[ "${role}" == "main" || "${role}" == "controlled" ]] || return 1
+    jq -e --argjson ids "${removeIds}" --argjson groups "${groupsState}" '
+      ($ids | type == "array" and all(.[]; type == "string")) and
+      all($ids[]; . as $id | any($groups.user_groups[]?;
+        .id == $id and .control_managed != false))
+    ' <<<"${state}" >/dev/null || return 1
+    subscriptionLocalTrafficBaselineExists && localTrafficBaseline=true
+    SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
+    if trafficSnapshot=$(collectLocalTrafficSnapshot) &&
+        { writeSubscriptionTrafficSnapshot "${trafficSnapshot}" '[]' >/dev/null 2>&1 ||
+            [[ "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED:-false}" == true ]]; }; then
+        :
+    elif [[ "${localTrafficBaseline}" == true ]]; then
+        errorCard "卸载前本机流量采集失败，已取消卸载以保留累计流量"
+        return 1
+    fi
+    subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir groupsBackupFile || {
+        errorCard "卸载前备份失败，未修改控制面"
+        return 1
+    }
+    if ! disableSubscriptionWireGuardControl; then
+        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
+        return 1
+    fi
+    PADM_CONTROL_UNINSTALL_ROLLBACK=(
+        [active]=true [core_changed]=false [config]="${configBackupDir}"
+        [output]="${outputBackupDir}" [groups]="${groupsBackupFile}"
+    )
+    padmRegisterExitRollback rollbackSubscriptionWireGuardControlUninstallOnExit
+    if [[ "${role}" == "controlled" ]]; then
+        plan=$(jq -cn --argjson ids "${removeIds}" \
+            '{create:[], remove:[$ids[] | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"']}') || failure="账号清理计划生成失败"
+        if [[ "${removeIds}" != '[]' ]]; then
+            coreChanged=true
+            PADM_CONTROL_UNINSTALL_ROLLBACK[core_changed]=true
+        fi
+        if [[ -z "${failure}" ]] &&
+            { ! subscriptionApplyUserGroupState '[]' "${removeIds}" ||
+                ! subscriptionSyncApplyAccountPlan "${plan}"; }; then
+            failure="主控下发账号清理失败"
+        fi
+        if [[ -z "${failure}" && "${removeIds}" != '[]' ]] &&
+            ! subscriptionSyncReconcileLocalServices; then
+            failure="账号清理后核心重载失败"
+        fi
+    else
+        while IFS= read -r sourceId; do
+            [[ -n "${sourceId}" ]] || continue
+            if ! removeSubscriptionSourceState "${sourceId}" true; then
+                failure="被控连接记录清理失败"
+                break
+            fi
+        done < <(jq -r '.sources[]? | select(.role != "main") | .id' <<<"${groupsState}")
+        if [[ -z "${failure}" ]]; then
+            if ! subscriptionSyncEnsureEnabledUserUUIDs || ! plan=$(subscriptionSyncPlan); then
+                failure="卸载后本机账号同步计划生成失败"
+            elif jq -e '(.create | length > 0) or (.remove | length > 0)' <<<"${plan}" >/dev/null; then
+                coreChanged=true
+                PADM_CONTROL_UNINSTALL_ROLLBACK[core_changed]=true
+                if ! subscriptionSyncApplyAccountPlan "${plan}" || ! subscriptionSyncReconcileLocalServices; then
+                    failure="卸载后本机账号同步失败"
+                fi
+            fi
+        fi
+    fi
+    if [[ -z "${failure}" ]] && ! refreshPublishedSubscriptions '{}'; then
+        failure="卸载后本机订阅输出刷新失败"
+    fi
+    if [[ "${coreChanged}" == true ]] && trafficSnapshot=$(collectLocalTrafficSnapshot); then
+        writeSubscriptionTrafficSnapshot "${trafficSnapshot}" '[]' >/dev/null 2>&1 || true
+    fi
+    if [[ -n "${failure}" ]]; then
+        padmRunRollback rollbackSubscriptionWireGuardControlUninstallOnExit "${failure}" || true
+        return 1
+    fi
+    PADM_CONTROL_UNINSTALL_ROLLBACK[active]=false
+    subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
+    cleanupSubscriptionWireGuardControlOnUninstall || {
+        errorCard "控制面文件清理未完成，请修复后重试"
+        return 1
+    }
+    uninstallReloadSystemdUnits || {
+        errorCard "控制面已移除，systemd 配置重载失败"
+        return 1
+    }
+    successCard "本机控制面已卸载" "已回到本机模式，代理与独立发布服务保留"
+}
+
+uninstallSubscriptionWireGuardControl() {
+    local state groupsState role roleName removeIds='[]' legacyIds='[]' confirm=
+    state=$(subscriptionWireGuardReadState) || {
+        errorCard "控制面状态读取失败，未执行卸载"
+        return 1
+    }
+    groupsState=$(subscriptionGroupsStateRead -c '.') || {
+        errorCard "订阅状态读取失败，未执行卸载"
+        return 1
+    }
+    role=$(jq -r '.role' <<<"${state}") || return 1
+    case "${role}" in
+    main) roleName=主控 ;;
+    controlled) roleName=被控 ;;
+    *) errorCard "本机尚未安装主控或被控控制面"; return 1 ;;
+    esac
+    menuLine "将移除本机${roleName}控制服务、WireGuard 密钥、Peer 和接入凭据。"
+    menuLine "保留代理内核、协议入口、本机自用账号、独立发布服务及本机自建订阅。"
+    if [[ "${role}" == "controlled" ]]; then
+        removeIds=$(jq -c '[.user_groups[]? | select(.control_managed == true) | .id]' <<<"${groupsState}") || return 1
+        legacyIds=$(jq -c '[.user_groups[]? | select(has("control_managed") | not) | .id]' <<<"${groupsState}") || return 1
+        if [[ "${legacyIds}" != '[]' ]]; then
+            warnCard "以下历史订阅账号没有来源标记，可能包含接入前的本机分享账号" \
+                "$(jq -r 'join("、")' <<<"${legacyIds}")"
+            menuReadChoice subscription_control_legacy_uninstall_confirm \
+                "确认将以上历史订阅账号一并清理？请输入 yes；其它输入取消卸载:" confirm true || return 1
+            [[ "${confirm}" == "yes" ]] || { coreCancelledStatusCard "控制面未卸载"; return 0; }
+            removeIds=$(jq -cn --argjson known "${removeIds}" --argjson legacy "${legacyIds}" '$known + $legacy | unique') || return 1
+        fi
+        menuLine "将清理的主控下发账号：$(jq -r 'if length == 0 then "无" else join("、") end' <<<"${removeIds}")"
+    else
+        menuLine "将清理本机保存的被控连接、邀请、远端凭据和订阅节点，不修改其它机器。"
+    fi
+    menuReadChoice subscription_control_uninstall_confirm \
+        "确认卸载本机${roleName}控制面？请输入 yes:" confirm true || return 1
+    [[ "${confirm}" == "yes" ]] || { coreCancelledStatusCard "控制面未卸载"; return 0; }
+    subscriptionGroupsWithLock uninstallSubscriptionWireGuardControlApply "${state}" "${removeIds}" "${groupsState}"
 }

@@ -288,7 +288,7 @@ manageSubscriptionMainHome() {
 
 manageSubscriptionControlledHome() {
     subscriptionRequireControlledRole || return 1
-    local controlledHomeStatus=
+    local controlledHomeStatus= currentRole
     while true; do
         echoContent title "\n┌─ 被控首页 ─────────────────────────────────────────"
         showSubscriptionServerRoleSummary
@@ -298,7 +298,7 @@ manageSubscriptionControlledHome() {
         menuItem 4 "显示被控更新凭据" "生成给主控更新地址、公钥、控制端口和 Token 的凭据"
         menuItem 5 "查看控制面与 Peer 细节" "显示 WireGuard 状态以及与主控的 Peer 连接细节"
         menuItem 6 "重写配置并重启被控控制面" "重写配置并重启 WireGuard 和控制服务"
-        menuDangerItem 7 "关闭被控控制面" "停止本机 WireGuard 控制面"
+        menuDangerItem 7 "卸载被控控制面" "清理主控下发账号和控制连接，保留本机代理、发布服务及自建订阅"
         menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
         menuClose
         menuReadChoice subscription_controlled_home_menu "请选择:" controlledHomeStatus || return 0
@@ -317,7 +317,11 @@ manageSubscriptionControlledHome() {
             showSubscriptionWireGuardPeers
             ;;
         6) restartSubscriptionWireGuardControl ;;
-        7) disableSubscriptionWireGuardControl ;;
+        7)
+            uninstallSubscriptionWireGuardControl || true
+            currentRole=$(subscriptionCurrentRoleNormalized) || return 1
+            [[ "${currentRole}" == "controlled" ]] || return 0
+            ;;
         8) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
@@ -326,16 +330,16 @@ manageSubscriptionControlledHome() {
 
 manageSubscriptionMainControlDetails() {
     subscriptionRequireMainRole || return 1
-    local mainControlDetailsStatus=
+    local mainControlDetailsStatus= currentRole
     while true; do
         echoContent title "\n┌─ 本机控制面 ───────────────────────────────────────"
         menuLine "这里处理主控控制面的状态、连接和恢复动作。"
-        menuLine "建议先查看凭据、Peer 和连接状态，再决定是否重启或关闭控制面。"
+        menuLine "建议先查看凭据、Peer 和连接状态，再决定是否重启或卸载控制面。"
         showSubscriptionWireGuardStatus
         menuItem 1 "显示主控维护凭据" "仅用于维护已有连接，不用于首次接入"
         menuItem 2 "查看连接详情" "一次查看 WireGuard Peer、Health 和 Sync 地址"
         menuItem 3 "重写配置并重启主控控制面" "重写配置并重启控制服务"
-        menuDangerItem 4 "关闭主控控制面" "停止本机 WireGuard 控制面"
+        menuDangerItem 4 "卸载主控控制面" "清理控制连接和远端节点记录，保留本机代理、发布服务及自建订阅"
         menuReturnItem 5 "返回主控首页" "回到上级菜单"
         menuClose
         menuReadChoice subscription_main_control_details_menu "请选择:" mainControlDetailsStatus || return 0
@@ -343,7 +347,11 @@ manageSubscriptionMainControlDetails() {
         1) showSubscriptionWireGuardMainCredential ;;
         2) showSubscriptionWireGuardPeers; showSubscriptionSourceControlUrls ;;
         3) restartSubscriptionWireGuardControl ;;
-        4) disableSubscriptionWireGuardControl ;;
+        4)
+            uninstallSubscriptionWireGuardControl || true
+            currentRole=$(subscriptionCurrentRoleNormalized) || return 1
+            [[ "${currentRole}" == "main" ]] || return 0
+            ;;
         5) return ;;
         *) coreSelectionErrorCard ;;
         esac
@@ -534,7 +542,7 @@ manageSubscriptionCatalog() {
         menuItem 6 "订阅同步" "自动同步、同步间隔、状态排障和状态备份"
         if [[ "${role}" == "main" ]]; then
             menuItem 7 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停和移除"
-            menuItem 8 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
+            menuItem 8 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/卸载"
         else
             menuItem 7 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
             menuItem 8 "接入主控" "粘贴主控邀请，将本机初始化为被控"
@@ -564,7 +572,9 @@ manageSubscriptionCatalog() {
                 currentRole=$(subscriptionCurrentRoleNormalized 2>/dev/null) || return
                 [[ "${currentRole}" != "${role}" ]] && return
             elif [[ "${role}" == "main" ]]; then
-                manageSubscriptionMainControlDetails
+                manageSubscriptionMainControlDetails || true
+                currentRole=$(subscriptionCurrentRoleNormalized) || return 1
+                [[ "${currentRole}" != "${role}" ]] && return 0
             else
                 coreSelectionErrorCard
             fi

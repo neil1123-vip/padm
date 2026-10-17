@@ -943,6 +943,331 @@ runUninstallWireGuardCleanupRegression() (
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
 )
 
+runWireGuardControlUninstallRegression() (
+    set -euo pipefail
+    trap 'printf "control uninstall regression failed at line %s: %s\n" "${LINENO}" "${BASH_COMMAND}" >&2; [[ ! -f "${preview:-}" ]] || tail -n 20 "${preview}" >&2' ERR
+    local root="${TMP_DIR}/wireguard-control-uninstall"
+    local caseRoot actions preview expectedState expectedGroups
+    local configPath singBoxConfigPath= coreInstallType=1
+    local mode=success confirmIndex=0
+    local -a confirmationAnswers=(yes)
+
+    subscriptionWireGuardConfigFile() { printf '%s/wg-padm.conf\n' "${caseRoot}"; }
+    subscriptionControlServiceFile() { printf '%s/control.service\n' "${caseRoot}"; }
+    subscriptionWireGuardNginxConfigFile() { printf '%s/control.conf\n' "${caseRoot}"; }
+    readInstallType() { return 0; }
+    readInstallProtocolType() { return 0; }
+    readNginxSubscribe() { subscribePort=443; }
+    warnCard() { printf '%s\n' "$@"; }
+    collectSubscriptionTraffic() { return 0; }
+    collectLocalTrafficSnapshot() { return 1; }
+    stopSubscriptionWireGuardControlService() { printf 'stop-wg\n' >>"${actions}"; }
+    systemctl() { printf 'systemctl:%s\n' "$*" >>"${actions}"; }
+    uninstallReloadSystemdUnits() { printf 'daemon-reload\n' >>"${actions}"; }
+    disableSubscriptionWireGuardControl() {
+        printf 'disable\n' >>"${actions}"
+        [[ "${mode}" != disable-fail ]] || return 1
+        subscriptionWireGuardWriteState '.enabled = false | .firewall_owned = false'
+    }
+    subscriptionSyncReconcileLocalServices() {
+        printf 'reload-core\n' >>"${actions}"
+        [[ "${mode}" != reload-fail ]]
+    }
+    refreshPublishedSubscriptions() {
+        printf 'publish\n' >>"${actions}"
+        [[ "${mode}" != publish-fail ]]
+    }
+    menuReadChoice() {
+        printf 'confirm:%s\n' "$1" >>"${actions}"
+        printf -v "$3" '%s' "${confirmationAnswers[confirmIndex]:-no}"
+        confirmIndex=$((confirmIndex + 1))
+    }
+
+    prepareControlUninstallCase() {
+        local scenario=$1 role=${2:-controlled}
+        caseRoot="${root}/${scenario}"
+        actions="${caseRoot}/actions.log"
+        preview="${caseRoot}/preview.log"
+        configPath="${caseRoot}/xray/"
+        PADM_WIREGUARD_CONTROL_DIR="${caseRoot}/wireguard"
+        PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE="${caseRoot}/nginx.service.d/control.conf"
+        PADM_SUBSCRIPTION_GROUPS_DIR="${caseRoot}/groups"
+        PADM_SUBSCRIBE_LOCAL_DIR="${caseRoot}/subscribe_local"
+        PADM_SUBSCRIBE_DIR="${caseRoot}/subscribe"
+        mode=success
+        confirmIndex=0
+        confirmationAnswers=(yes)
+        mkdir -p "${configPath}" "${PADM_SUBSCRIPTION_GROUPS_DIR}" \
+            "${PADM_WIREGUARD_CONTROL_DIR}" "${PADM_SUBSCRIBE_LOCAL_DIR}/default" \
+            "${PADM_SUBSCRIBE_DIR}/default"
+        : >"${actions}"
+        writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
+        subscriptionActiveGroupWrite '
+          .user_groups = [
+            {id:"remote-user",name:"Remote",enabled:true,allowed_sources:["main"],
+             traffic_limit_gb:5,uuid:"11111111-1111-4111-8111-111111111111",control_managed:true},
+            {id:"local-user",name:"Local",enabled:true,allowed_sources:["main"],
+             traffic_limit_gb:9,uuid:"22222222-2222-4222-8222-222222222222",control_managed:false}
+          ] |
+          .traffic.user_groups = {
+            "remote-user":{sources:{main:{upload:10,download:20}}},
+            "local-user":{sources:{main:{upload:30,download:40}}}
+          } |
+          .traffic.admin.sources.main = {upload:50,download:60} |
+          .traffic.sources.main = {upload:90,download:120}
+        '
+        jq -n '{inbounds:[{settings:{clients:[
+          {email:"admin-VLESS_TCP/TLS_Vision",id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+          {email:"plain-user-VLESS_TCP/TLS_Vision",id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
+          {email:"sub_remote_user-VLESS_TCP/TLS_Vision",id:"11111111-1111-4111-8111-111111111111"},
+          {email:"sub_local_user-VLESS_TCP/TLS_Vision",id:"22222222-2222-4222-8222-222222222222"}
+        ]}}]}' >"${configPath}02_VLESS_TCP_inbounds.json"
+        subscriptionWireGuardWriteState --arg role "${role}" '
+          .role = $role | .enabled = true | .address = "10.77.0.2/24" |
+          .public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" |
+          .endpoint_host = (if $role == "main" then "example.com" else "" end)
+        '
+        printf 'private\n' >"$(subscriptionWireGuardPrivateKeyFile)"
+        printf 'public\n' >"$(subscriptionWireGuardPublicKeyFile)"
+        printf 'config\n' >"$(subscriptionWireGuardConfigFile)"
+        printf 'service\n' >"$(subscriptionControlServiceFile)"
+        printf 'server\n' >"$(subscriptionControlServerScript)"
+        printf 'token\n' >"$(subscriptionControlTokenFile)"
+        printf 'local-subscription\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/user"
+        printf 'published-subscription\n' >"${PADM_SUBSCRIBE_DIR}/default/user"
+        printf 'public-listener\n' >"${caseRoot}/subscribe.conf"
+        expectedState=$(subscriptionWireGuardReadState)
+        expectedGroups=$(subscriptionGroupsStateRead -c '.')
+    }
+
+    assertControlUninstallIdentityPresent() {
+        [[ -f "$(subscriptionWireGuardStateFile)" ]]
+        [[ -f "$(subscriptionWireGuardPrivateKeyFile)" ]]
+        [[ -f "$(subscriptionWireGuardPublicKeyFile)" ]]
+        [[ -f "$(subscriptionControlServiceFile)" ]]
+        [[ -f "$(subscriptionControlServerScript)" ]]
+        [[ -f "$(subscriptionControlTokenFile)" ]]
+    }
+
+    prepareControlUninstallCase controlled
+    uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+    jq -e '[.inbounds[0].settings.clients[].email] == [
+      "admin-VLESS_TCP/TLS_Vision","plain-user-VLESS_TCP/TLS_Vision",
+      "sub_local_user-VLESS_TCP/TLS_Vision"
+    ]' "${configPath}02_VLESS_TCP_inbounds.json" >/dev/null
+    subscriptionActiveGroupRead -e '
+      (.user_groups | map(.id)) == ["local-user"] and
+      .user_groups[0].traffic_limit_gb == 9 and
+      .traffic.user_groups["remote-user"] == null and
+      .traffic.user_groups["local-user"].sources.main == {upload:30,download:40}
+    ' >/dev/null
+    [[ "$(subscriptionWireGuardRole)" == uninitialized ]]
+    [[ ! -e "$(subscriptionWireGuardConfigFile)" && ! -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
+    [[ ! -e "$(subscriptionControlServiceFile)" && ! -e "$(subscriptionControlTokenFile)" ]]
+    [[ ! -e "$(subscriptionControlServerScript)" ]]
+    grep -qx 'published-subscription' "${PADM_SUBSCRIBE_DIR}/default/user"
+    grep -qx 'local-subscription' "${PADM_SUBSCRIBE_LOCAL_DIR}/default/user"
+    grep -qx 'public-listener' "${caseRoot}/subscribe.conf"
+    grep -qx 'reload-core' "${actions}"
+
+    (
+        prepareControlUninstallCase local-share-sync
+        local response beforeGroups beforeConfig
+        subscriptionControlRenderSubscribeAccounts() { printf '{}\n'; }
+        response=$(subscriptionControlApplySync '{"desired_users":[{"id":"remote-user","uuid":"11111111-1111-4111-8111-111111111111"}],"dry_run":false}')
+        jq -e '.ok == true and .changed == false and .plan.remove == []' <<<"${response}" >/dev/null
+        subscriptionActiveGroupRead -e '
+          (.user_groups | map(.id)) == ["remote-user","local-user"] and
+          .user_groups[1].control_managed == false and .user_groups[1].traffic_limit_gb == 9
+        ' >/dev/null
+        beforeGroups=$(subscriptionGroupsStateRead -c '.')
+        beforeConfig=$(<"${configPath}02_VLESS_TCP_inbounds.json")
+        regressionExpectStatus 1 subscriptionControlApplySync \
+            '{"desired_users":[{"id":"local-user","uuid":"33333333-3333-4333-8333-333333333333"}],"dry_run":false}' \
+            >"${preview}"
+        jq -e '.error == "local_user_conflict"' "${preview}" >/dev/null
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${beforeGroups}" ]]
+        [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${beforeConfig}" ]]
+        regressionExpectStatus 1 subscriptionControlApplySync \
+            '{"desired_users":[{"id":"remote-user","uuid":"22222222-2222-4222-8222-222222222222"}],"dry_run":false}' \
+            >"${preview}"
+        jq -e '.error == "local_user_conflict"' "${preview}" >/dev/null
+        response=$(subscriptionControlApplySync '{"desired_users":[],"dry_run":false}')
+        jq -e '.ok == true and .plan.remove == ["sub_remote_user"]' <<<"${response}" >/dev/null
+        uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+        jq -e '[.inbounds[0].settings.clients[].email] == [
+          "admin-VLESS_TCP/TLS_Vision","plain-user-VLESS_TCP/TLS_Vision",
+          "sub_local_user-VLESS_TCP/TLS_Vision"
+        ]' "${configPath}02_VLESS_TCP_inbounds.json" >/dev/null
+        subscriptionActiveGroupRead -e '
+          (.user_groups | map(.id)) == ["local-user"] and .user_groups[0].control_managed == false
+        ' >/dev/null
+    )
+
+    (
+        prepareControlUninstallCase preserved-traffic
+        local counter=100
+        subscriptionActiveGroupWrite '.traffic = {admin:{sources:{}},user_groups:{},sources:{}}'
+        collectLocalTrafficSnapshot() {
+            jq -cn --argjson counter "${counter}" '{
+              ok:true,items:(["admin","sub_remote_user","sub_local_user"] | map({
+                account:.,upload:$counter,download:0,
+                cores:{xray:{upload:$counter,download:0}}
+              }))
+            }'
+        }
+        subscriptionSyncReconcileLocalServices() {
+            printf 'reload-core\n' >>"${actions}"
+            counter=0
+        }
+        writeSubscriptionTrafficSnapshot "$(collectLocalTrafficSnapshot)" '[]' || {
+            printf 'initial traffic fixture failed\n' >&2
+            return 1
+        }
+        counter=150
+        uninstallSubscriptionWireGuardControl >"${preview}" 2>&1 || {
+            cat "${preview}" "${actions}" >&2
+            return 1
+        }
+        subscriptionActiveGroupRead -e '
+          .traffic.admin.sources.main.upload == 150 and
+          .traffic.user_groups["local-user"].sources.main.upload == 150 and
+          .traffic.user_groups["local-user"].sources.main.counters.sub_local_user.xray.upload == 0
+        ' >/dev/null || { subscriptionActiveGroupRead '.traffic' >&2; return 1; }
+    )
+
+    prepareControlUninstallCase main main
+    subscriptionActiveGroupWrite '
+      .sources += [{id:"remote-edge",name:"Remote",role:"secondary",scheme:"wireguard",
+        transport:"wireguard",host:"10.77.0.3",port:39778,enabled:true,
+        sync_status:"success",control_token:"remote-secret"}] |
+      .user_groups[0].allowed_sources = ["main","remote-edge"] |
+      .user_groups[1].allowed_sources = ["*"] |
+      .traffic.user_groups["remote-user"].sources["remote-edge"] = {upload:1,download:2} |
+      .traffic.admin.sources["remote-edge"] = {upload:3,download:4} |
+      .traffic.sources["remote-edge"] = {upload:4,download:6}
+    '
+    local beforeCore
+    beforeCore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
+    uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+    [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${beforeCore}" ]]
+    subscriptionActiveGroupRead -e '
+      (.sources | map(.id)) == ["main"] and
+      (.user_groups | map(.id)) == ["remote-user","local-user"] and
+      (.user_groups | map(.traffic_limit_gb)) == [5,9] and
+      all(.user_groups[].allowed_sources[]?; . != "remote-edge") and
+      .traffic.admin.sources.main == {upload:50,download:60} and
+      .traffic.sources.main == {upload:90,download:120} and
+      .traffic.sources["remote-edge"] == null
+    ' >/dev/null
+    grep -qx 'publish' "${actions}"
+    grep -qx 'public-listener' "${caseRoot}/subscribe.conf"
+    [[ "$(subscriptionWireGuardRole)" == uninitialized ]]
+
+    prepareControlUninstallCase remote-only main
+    subscriptionActiveGroupWrite '
+      .sources += [{id:"remote-edge",name:"Remote",role:"secondary",scheme:"wireguard",
+        transport:"wireguard",host:"10.77.0.3",port:39778,enabled:true,
+        sync_status:"success",control_token:"remote-secret"}] |
+      .user_groups[0].allowed_sources = ["remote-edge"]
+    '
+    subscriptionSyncRemoveAccount sub_remote_user
+    jq -e 'all(.inbounds[0].settings.clients[]; .email != "sub_remote_user-VLESS_TCP/TLS_Vision")' \
+        "${configPath}02_VLESS_TCP_inbounds.json" >/dev/null
+    uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+    jq -e '
+      any(.inbounds[0].settings.clients[];
+        .email == "sub_remote_user-VLESS_TCP/TLS_Vision" and
+        .id == "11111111-1111-4111-8111-111111111111") and
+      any(.inbounds[0].settings.clients[]; .email == "plain-user-VLESS_TCP/TLS_Vision")
+    ' "${configPath}02_VLESS_TCP_inbounds.json" >/dev/null
+    subscriptionActiveGroupRead -e '
+      (.sources | map(.id)) == ["main"] and
+      .user_groups[0].allowed_sources == ["main"] and
+      .user_groups[0].traffic_limit_gb == 5
+    ' >/dev/null
+    grep -qx 'reload-core' "${actions}"
+    [[ "$(subscriptionWireGuardRole)" == uninitialized ]]
+
+    local failure
+    for failure in cancel state-read-fail disable-fail reload-fail publish-fail; do
+        prepareControlUninstallCase "${failure}"
+        beforeCore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
+        case "${failure}" in
+        cancel) confirmationAnswers=(no) ;;
+        state-read-fail) printf 'broken\n' >"$(subscriptionWireGuardStateFile)" ;;
+        *) mode="${failure}" ;;
+        esac
+        if [[ "${failure}" == cancel ]]; then
+            uninstallSubscriptionWireGuardControl >"${preview}" 2>&1 || true
+        else
+            regressionExpectStatus 1 uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+        fi
+        assertControlUninstallIdentityPresent
+        [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${beforeCore}" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${expectedGroups}" ]]
+        if [[ "${failure}" == cancel || "${failure}" == state-read-fail ]]; then
+            ! grep -qx 'disable' "${actions}"
+        fi
+    done
+
+    local signal status
+    for signal in INT TERM; do
+        prepareControlUninstallCase "interrupted-${signal}"
+        beforeCore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
+        status=130
+        [[ "${signal}" != TERM ]] || status=143
+        interruptControlUninstall() (
+            refreshPublishedSubscriptions() { kill -"${signal}" "${BASHPID}"; }
+            uninstallSubscriptionWireGuardControl
+        )
+        regressionExpectStatus "${status}" interruptControlUninstall >"${preview}" 2>&1
+        [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${beforeCore}" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${expectedGroups}" ]]
+        [[ "$(grep -c '^reload-core$' "${actions}")" == 2 ]]
+        assertControlUninstallIdentityPresent
+    done
+
+    (
+        prepareControlUninstallCase partial-rollback
+        beforeCore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
+        mode=publish-fail
+        subscriptionSyncRestoreSubscribeOutputBackups() { return 1; }
+        regressionExpectStatus 1 uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+        [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${beforeCore}" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${expectedGroups}" ]]
+        [[ "$(grep -c '^reload-core$' "${actions}")" == 2 ]]
+        assertControlUninstallIdentityPresent
+    )
+
+    prepareControlUninstallCase legacy-cancel
+    subscriptionActiveGroupWrite '(.user_groups[] | select(.id == "remote-user")) |= del(.control_managed)'
+    confirmationAnswers=(no)
+    expectedGroups=$(subscriptionGroupsStateRead -c '.')
+    uninstallSubscriptionWireGuardControl >"${preview}" 2>&1 || true
+    [[ "${confirmIndex}" == 1 ]]
+    grep -qx 'confirm:subscription_control_legacy_uninstall_confirm' "${actions}"
+    grep -q 'remote-user' "${preview}"
+    ! grep -qx 'disable' "${actions}"
+    assertControlUninstallIdentityPresent
+    [[ "$(subscriptionGroupsStateRead -c '.')" == "${expectedGroups}" ]]
+
+    prepareControlUninstallCase legacy-confirmed
+    subscriptionActiveGroupWrite '(.user_groups[] | select(.id == "remote-user")) |= del(.control_managed)'
+    confirmationAnswers=(yes yes)
+    uninstallSubscriptionWireGuardControl >"${preview}" 2>&1
+    [[ "${confirmIndex}" == 2 ]]
+    subscriptionActiveGroupRead -e '(.user_groups | map(.id)) == ["local-user"]' >/dev/null
+    [[ "$(subscriptionWireGuardRole)" == uninitialized ]]
+
+    prepareControlUninstallCase changed-groups
+    subscriptionActiveGroupWrite '.user_groups[0].traffic_limit_gb = 6'
+    regressionExpectStatus 1 subscriptionGroupsWithLock uninstallSubscriptionWireGuardControlApply \
+        "${expectedState}" '["remote-user"]' "${expectedGroups}" >"${preview}" 2>&1
+    ! grep -qx 'disable' "${actions}"
+    assertControlUninstallIdentityPresent
+)
+
 runWarpConfigSafeDirRegression() (
     local root="${TMP_DIR}/warp-config-safe-dir"
     local rmLog="${root}/rm.log"

@@ -97,6 +97,7 @@ listRegressionTransactionSystemChildSelectors() {
         fail2ban-managed-cleanup \
         fail2ban-apply-transaction \
         uninstall-wireguard-cleanup \
+        wireguard-control-uninstall \
         wireguard-key-transaction \
         wireguard-control-safe-dir \
         warp-config-safe-dir \
@@ -169,6 +170,7 @@ registerRegressionFunctionLeaf clean-agent-nginx-managed-remove runCleanAgentNgi
 registerRegressionFunctionLeaf fail2ban-managed-cleanup runFail2banManagedCleanupRegression
 registerRegressionFunctionLeaf fail2ban-apply-transaction runFail2banApplyTransactionRegression
 registerRegressionFunctionLeaf uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression
+registerRegressionFunctionLeaf wireguard-control-uninstall runWireGuardControlUninstallRegression
 registerRegressionFunctionLeaf wireguard-key-transaction runWireGuardKeyTransactionRegression
 registerRegressionFunctionLeaf wireguard-control-safe-dir runWireGuardControlSafeDirRegression
 registerRegressionFunctionLeaf warp-config-safe-dir runWarpConfigSafeDirRegression

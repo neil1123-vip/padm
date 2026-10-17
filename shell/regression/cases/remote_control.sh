@@ -1436,9 +1436,13 @@ JSON
                         "enabled":true,
                         "allowed_sources":["main"],
                         "traffic_limit_gb":5,
-                        "uuid":"33333333-3333-3333-3333-333333333333"
+                        "uuid":"33333333-3333-3333-3333-333333333333",
+                        "control_managed":true
                       }]
                     ' <<<"${virtualGroupsState}" >/dev/null
+                    [[ "$(subscriptionControlUserRegistryNeedsSync '[{"id":"team-a","uuid":"33333333-3333-3333-3333-333333333333"}]')" == false ]]
+                    virtualSubscriptionGroupsStateWrite 'del(.user_groups[].control_managed)'
+                    [[ "$(subscriptionControlUserRegistryNeedsSync '[{"id":"team-a","uuid":"33333333-3333-3333-3333-333333333333"}]')" == true ]]
                 )
 
                 (
@@ -1454,7 +1458,8 @@ JSON
                         "enabled":true,
                         "allowed_sources":["main"],
                         "traffic_limit_gb":5,
-                        "uuid":"33333333-3333-3333-3333-333333333333"
+                        "uuid":"33333333-3333-3333-3333-333333333333",
+                        "control_managed":true
                       }]
                     ' <<<"${virtualGroupsState}" >/dev/null
                 )

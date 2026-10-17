@@ -198,6 +198,7 @@ validateSubscriptionGroupsState() {
         (.id | state_id) and (.name | nonempty_string) and
         (.enabled | type == "boolean") and (.allowed_sources | allowed_sources) and
         (.traffic_limit_gb | count) and
+        ((has("control_managed") | not) or (.control_managed | type == "boolean")) and
         ((has("uuid") | not) or (.uuid | type == "string" and test("^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")));
       def sync_plan:
         exact(["create", "remove"]; []) and
@@ -255,7 +256,7 @@ validateSubscriptionGroupsState() {
       (.id | state_id) and (.name | nonempty_string) and
       ([.sources[]?.id] | length) == ([.sources[]?.id] | unique | length) and
       (.sources | type == "array" and length > 0 and all(.[]; source) and ([.[] | select(.role == "main")] | length == 1)) and
-      (.user_groups | type == "array" and all(.[]; principal(["uuid"]))) and
+      (.user_groups | type == "array" and all(.[]; principal(["uuid", "control_managed"]))) and
       ([.user_groups[]?.id] | length) == ([.user_groups[]?.id] | unique | length) and
       ([.user_groups[]? | select(has("uuid")) | .uuid | ascii_downcase] | length) ==
         ([.user_groups[]? | select(has("uuid")) | .uuid | ascii_downcase] | unique | length) and
@@ -709,9 +710,13 @@ subscriptionApplyUserGroupState() {
       .traffic.user_groups = (reduce $removeIds[] as $id ((.traffic.user_groups // {}); del(.[$id]))) |
       reduce $users[] as $user (.;
         if any(.user_groups[]?; .id == $user.id) then
-          .user_groups |= map(if .id == $user.id then .enabled = true | .uuid = $user.uuid else . end)
+          .user_groups |= map(if .id == $user.id then
+            .enabled = true | .uuid = $user.uuid |
+            if $user.control_managed == true then .control_managed = true else . end
+            else . end)
         else
-          .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, uuid:$user.uuid}]
+          .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, uuid:$user.uuid} +
+            (if $user.control_managed == true then {control_managed:true} else {} end)]
         end)
     '
 }
