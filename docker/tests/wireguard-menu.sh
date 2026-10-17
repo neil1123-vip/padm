@@ -17,16 +17,33 @@ if [[ "${1:-}" == wireguard || "${1:-}" == control ]]; then
             [[ ( "$#" == 6 || "$#" == 8 ) && "$3" == --peer-address &&
                 "$5" == --peer-public-key ]] || exit 2
             [[ "$#" == 6 || "$7" == --endpoint ]] || exit 2 ;;
+        peers)
+            case "${3:-}" in
+            list) [[ "$#" == 3 ]] || exit 2 ;;
+            add)
+                [[ ( "$#" == 7 || "$#" == 9 ) && "$4" == --peer-address &&
+                    "$6" == --peer-public-key ]] || exit 2
+                [[ "$#" == 7 || "$8" == --endpoint ]] || exit 2 ;;
+            update)
+                [[ ( "$#" == 7 || "$#" == 9 ) && "$4" == --peer-address &&
+                    ( "$6" == --peer-public-key || "$6" == --endpoint ) ]] || exit 2
+                [[ "$#" == 7 || ( "$6" == --peer-public-key && "$8" == --endpoint ) ]] || exit 2 ;;
+            remove) [[ "$#" == 5 && "$4" == --peer-address ]] || exit 2 ;;
+            *) exit 2 ;;
+            esac ;;
         migrate) [[ "$#" -ge 3 ]] || exit 2 ;;
         *) exit 2 ;;
         esac
     fi
     printf '%s\n' "$*" >>"${WIREGUARD_MENU_ACTIONS:?}"
-    if [[ "$1" == wireguard && "$2" != status ]]; then
+    if [[ "$1" == wireguard && "$2" != status &&
+        ! ( "$2" == peers && "$3" == list ) ]]; then
         [[ "${WIREGUARD_MENU_FOREGROUND:-0}" != 1 || ( -t 0 && -t 1 ) ]] || exit 21
-        printf 'fixture-wireguard-confirm %s: ' "$2"
+        operation=$2
+        [[ "$2" != peers ]] || operation="peers-$3"
+        printf 'fixture-wireguard-confirm %s: ' "${operation}"
         IFS= read -r reply || exit 22
-        printf 'confirm %s %s\n' "$2" "${reply}" >>"${WIREGUARD_MENU_ACTIONS}"
+        printf 'confirm %s %s\n' "${operation}" "${reply}" >>"${WIREGUARD_MENU_ACTIONS}"
         [[ "${reply}" == y ]] || exit 2
     fi
     [[ "$2" != status ]] || printf 'fixture-public-status\n'
@@ -46,6 +63,9 @@ if [[ "${1:-}" == --foreground-driver ]]; then
     prepare) args=(wireguard prepare --address 10.90.0.1 --listen-port 51820) ;;
     peer) args=(wireguard peer --peer-address 10.90.0.2 --peer-public-key "${PUBLIC}") ;;
     migrate) args=(wireguard migrate --rotate-key) ;;
+    peers-add) args=(wireguard peers add --peer-address 10.90.0.3 --peer-public-key "${PUBLIC}") ;;
+    peers-update) args=(wireguard peers update --peer-address 10.90.0.3 --endpoint none) ;;
+    peers-remove) args=(wireguard peers remove --peer-address 10.90.0.3) ;;
     start|stop) args=(wireguard "$2") ;;
     *) exit 2 ;;
     esac
@@ -81,7 +101,8 @@ runCase() {
 runCase status $'1\n0\n' 'wireguard status'
 grep -Fq fixture-public-status "${CONTROL_LOG}" || fail '状态没有显示 CLI 公开输出'
 for label in '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
-    '4. 确认启用或启动' '5. 临时停止' '6. 更新连接或轮换密钥'; do
+    '4. 确认启用或启动' '5. 临时停止' '6. 更新单 Peer 连接或轮换密钥' \
+    '7. 查看 Peer 列表' '8. 添加 Peer' '9. 更新指定 Peer' '10. 移除指定 Peer'; do
     grep -Fq "${label}" "${CONTROL_LOG}" || fail "缺少菜单 ${label}"
 done
 runCase prepare $'2\n10.90.0.1\n51821\ny\n1\n0\n' \
@@ -106,15 +127,32 @@ grep -Fq '主控撤权，双方迁移后须重新邀请并核验来源' "${CONTR
     fail '迁移菜单未说明主控改址后重新邀请'
 runCase migrate-empty $'6\n\n\n\n\n\nn\n1\n0\n' 'wireguard status'
 runCase migrate-invalid $'6\n\n\n\n\n\ninvalid\n1\n0\n' 'wireguard status'
+runCase peers-list $'7\n1\n0\n' $'wireguard peers list\nwireguard status'
+runCase peers-add "8"$'\n10.90.0.3\n'"${PUBLIC}"$'\n198.18.0.3:51821\ny\n0\n' \
+    "wireguard peers add --peer-address 10.90.0.3 --peer-public-key ${PUBLIC} --endpoint 198.18.0.3:51821"$'\nconfirm peers-add y'
+runCase peers-add-no-endpoint "8"$'\n10.90.0.3\n'"${PUBLIC}"$'\n\ny\n0\n' \
+    "wireguard peers add --peer-address 10.90.0.3 --peer-public-key ${PUBLIC}"$'\nconfirm peers-add y'
+runCase peers-update "9"$'\n10.90.0.3\n'"${PUBLIC}"$'\n198.18.0.3:51822\ny\n0\n' \
+    "wireguard peers update --peer-address 10.90.0.3 --peer-public-key ${PUBLIC} --endpoint 198.18.0.3:51822"$'\nconfirm peers-update y'
+runCase peers-update-none $'9\n10.90.0.3\n\nnone\ny\n0\n' \
+    $'wireguard peers update --peer-address 10.90.0.3 --endpoint none\nconfirm peers-update y'
+runCase peers-update-empty $'9\n10.90.0.3\n\n\n1\n0\n' 'wireguard status'
+runCase peers-remove $'10\n10.90.0.3\ny\n0\n' \
+    $'wireguard peers remove --peer-address 10.90.0.3\nconfirm peers-remove y'
 runCase invalid $'99\n1\n0\n' 'wireguard status'
 runCase empty-address $'2\n\n1\n0\n' 'wireguard status'
 runCase empty-peer $'3\n\n1\n0\n' 'wireguard status'
 runCase empty-public "3"$'\n10.90.0.2\n\n1\n0\n' 'wireguard status'
+runCase empty-peer-add $'8\n\n1\n0\n' 'wireguard status'
+runCase empty-peer-update $'9\n\n1\n0\n' 'wireguard status'
+runCase empty-peer-remove $'10\n\n1\n0\n' 'wireguard status'
 
-for choice in 2 3 6; do
+for choice in 2 3 6 8 9 10; do
     fields=(10.90.0.1 51820)
     [[ "${choice}" != 3 ]] || fields=(10.90.0.2 "${PUBLIC}" 198.18.0.2:51821)
     [[ "${choice}" != 6 ]] || fields=(10.91.0.1 51821 10.91.0.2 "${PUBLIC}" none y)
+    [[ "${choice}" != 8 && "${choice}" != 9 ]] || fields=(10.90.0.3 "${PUBLIC}" none)
+    [[ "${choice}" != 10 ]] || fields=(10.90.0.3)
     # 每个字段的 0 和 EOF 都只能取消本次操作，不能启动子 CLI。
     for ((field = 0; field < ${#fields[@]}; field++)); do
         printf -v input '%s\n' "${choice}" "${fields[@]:0:field}" 0 1 0
@@ -124,7 +162,7 @@ for choice in 2 3 6; do
     done
 done
 runCase empty-eof '' ''
-for action in prepare peer start stop migrate; do
+for action in prepare peer start stop migrate peers-add peers-update peers-remove; do
     case "${action}" in
     prepare)
         input=$'2\n10.90.0.1\n51820\nn\n1\n0\n'
@@ -135,6 +173,15 @@ for action in prepare peer start stop migrate; do
     start) input=$'4\nn\n1\n0\n'; expected='wireguard start' ;;
     stop) input=$'5\nn\n1\n0\n'; expected='wireguard stop' ;;
     migrate) input=$'6\n\n\n\n\n\ny\nn\n1\n0\n'; expected='wireguard migrate --rotate-key' ;;
+    peers-add)
+        input="8"$'\n10.90.0.3\n'"${PUBLIC}"$'\n\nn\n1\n0\n'
+        expected="wireguard peers add --peer-address 10.90.0.3 --peer-public-key ${PUBLIC}" ;;
+    peers-update)
+        input=$'9\n10.90.0.3\n\nnone\nn\n1\n0\n'
+        expected='wireguard peers update --peer-address 10.90.0.3 --endpoint none' ;;
+    peers-remove)
+        input=$'10\n10.90.0.3\nn\n1\n0\n'
+        expected='wireguard peers remove --peer-address 10.90.0.3' ;;
     esac
     runCase "cli-cancel-${action}" "${input}" "${expected}"$'\n'"confirm ${action} n"$'\nwireguard status'
 done
@@ -143,8 +190,13 @@ export WIREGUARD_MENU_FAIL_ALL=1
 runCase failures "1"$'\n2\n10.90.0.1\n51820\ny\n3\n10.90.0.2\n'"${PUBLIC}"$'\n\ny\n4\ny\n5\ny\n1\n0\n' \
     $'wireguard status\nwireguard prepare --address 10.90.0.1 --listen-port 51820\nconfirm prepare y\n'"wireguard peer --peer-address 10.90.0.2 --peer-public-key ${PUBLIC}"$'\nconfirm peer y\nwireguard start\nconfirm start y\nwireguard stop\nconfirm stop y\nwireguard status'
 [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" == 6 &&
-    "$(grep -Fc 'Docker WireGuard 单 Peer' "${CONTROL_LOG}")" == 7 ]] ||
+    "$(grep -Fc 'Docker WireGuard' "${CONTROL_LOG}")" == 7 ]] ||
     fail 'CLI 失败后没有保留退出码并返回菜单'
+runCase peers-failures "7"$'\n8\n10.90.0.3\n'"${PUBLIC}"$'\n\ny\n9\n10.90.0.3\n\nnone\ny\n10\n10.90.0.3\ny\n0\n' \
+    $'wireguard peers list\n'"wireguard peers add --peer-address 10.90.0.3 --peer-public-key ${PUBLIC}"$'\nconfirm peers-add y\nwireguard peers update --peer-address 10.90.0.3 --endpoint none\nconfirm peers-update y\nwireguard peers remove --peer-address 10.90.0.3\nconfirm peers-remove y'
+[[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" == 4 &&
+    "$(grep -Fc 'Docker WireGuard' "${CONTROL_LOG}")" == 5 ]] ||
+    fail 'Peer CLI 失败后没有保留退出码并返回菜单'
 unset WIREGUARD_MENU_FAIL_ALL
 
 runCase control-entry $'18\n1\n0\n1\n0\n' $'wireguard status\ncontrol status' dockerMenuControl
@@ -158,7 +210,7 @@ for tool in script timeout; do
     command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
 done
 export WIREGUARD_MENU_FOREGROUND=1
-for action in prepare peer start stop migrate; do
+for action in prepare peer start stop migrate peers-add peers-update peers-remove; do
     for answer in y n; do
         : >"${WIREGUARD_MENU_ACTIONS}"
         CONTROL_LOG="${TEST_ROOT}/foreground-${action}-${answer}.log"

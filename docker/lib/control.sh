@@ -1468,8 +1468,9 @@ dockerControlStatus() (
 
 dockerWireGuardMigrate() (
     local spec=$1 directory=$2 rotate=$3 root draft= image status=0 file unchanged=1 public derived
-    local candidateSpec=$1 previousAddresses addresses
+    local candidateSpec=$1 previousAddresses addresses peerAction=
     shift 3
+    [[ "${1:-}" != --peer-action ]] || peerAction=${2:-}
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     trap 'status=$?; trap - EXIT INT TERM; dockerConfigurationInterrupted;
         if [[ -n "${draft}" ]]; then
@@ -1483,9 +1484,28 @@ dockerWireGuardMigrate() (
     trap 'exit 130' INT
     trap 'exit 143' TERM
     jq -e 'any(.host_integrations[]; .type == "wireguard")' "${spec}" >/dev/null || {
-        dockerError '迁移仅支持已启用的单 Peer WireGuard'
+        dockerError '连接变更仅支持已启用的 canonical WireGuard'
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
+    if [[ -n "${peerAction}" ]]; then
+        [[ "${rotate}" == 0 ]] &&
+            jq -e '.control == null and .control_sync == null' "${spec}" >/dev/null || {
+            dockerError 'Peer 集合变更仅支持无主控、被控角色的部署，并保持本机密钥不变'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
+        public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers --directory "${directory}") ||
+            return "${PADM_DOCKER_RC_STATE}"
+        if [[ "${peerAction}" == remove ]] && [[ "$(jq '.peers | length' <<<"${public}")" == 1 ]]; then
+            dockerError '不能移除最后一个 Peer；临时停用连接请执行 wireguard stop'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        fi
+    else
+        python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" addresses --directory "${directory}" \
+            >/dev/null || {
+            dockerError '普通迁移仅支持单 Peer；多 Peer 请按地址使用 peers update 或 remove'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        }
+    fi
     dockerWireGuardMigrationRoleCheck "${spec}" "${directory}" &&
         dockerWireGuardMigrationDependenciesCheck "${spec}" ||
         return "${PADM_DOCKER_RC_CONFLICT}"
@@ -1542,20 +1562,33 @@ dockerWireGuardMigrate() (
     fi
     # 私密候选随原配置事务一起切换；双方逐端迁移，远端握手不作为单端提交条件。
     dockerConfigureApply "${candidateSpec}" '' '' configure '' '' '' '' '' "${draft}/wireguard" || return $?
-    printf 'WireGuard 单端迁移已提交；请在对端更新对应参数并验证连通。\n'
+    if [[ -n "${peerAction}" ]]; then
+        printf 'WireGuard Peer 变更已提交，本机身份和密钥保持；请验证对端连通。\n'
+    else
+        printf 'WireGuard 单端迁移已提交；请在对端更新对应参数并验证连通。\n'
+    fi
     [[ "${candidateSpec}" == "${spec}" ]] ||
         printf '控制地址已更新；双方迁移后请重新签发邀请、同步并核验控制来源。\n'
 )
 
 dockerWireGuardCommand() (
     local action=${1:-status} yes=0 rotate=0 answer root spec directory draft= image status=0 key value public parent
+    local peerAction= readOnly=0
     local -A options=()
     local -a migrationArgs=()
     [[ "$#" == 0 ]] || shift
-    case "${action}" in prepare|peer|status|start|stop|migrate) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    case "${action}" in prepare|peer|peers|status|start|stop|migrate) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    if [[ "${action}" == peers ]]; then
+        peerAction=${1:-list}
+        [[ "$#" == 0 ]] || shift
+        case "${peerAction}" in list|add|update|remove) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    fi
+    if [[ "${action}" == status || ( "${action}" == peers && "${peerAction}" == list ) ]]; then
+        readOnly=1
+    fi
     while [[ "$#" -gt 0 ]]; do
         if [[ "$1" == --yes ]]; then
-            [[ "${yes}" == 0 && "${action}" != status ]] || return "${PADM_DOCKER_RC_USAGE}"
+            [[ "${yes}" == 0 && "${readOnly}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
             yes=1; shift; continue
         fi
         if [[ "$1" == --rotate-key && "${action}" == migrate && "${rotate}" == 0 ]]; then
@@ -1563,7 +1596,9 @@ dockerWireGuardCommand() (
         fi
         case "${action}:$1" in
         prepare:--address|prepare:--listen-port|peer:--peer-address|peer:--peer-public-key|peer:--endpoint|\
-        migrate:--address|migrate:--listen-port|migrate:--peer-address|migrate:--peer-public-key|migrate:--endpoint)
+        migrate:--address|migrate:--listen-port|migrate:--peer-address|migrate:--peer-public-key|migrate:--endpoint|\
+        peers:--peer-address|peers:--peer-public-key|peers:--endpoint)
+            [[ "${action}" != peers || "${peerAction}" != list ]] || return "${PADM_DOCKER_RC_USAGE}"
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && ! -v "options[$1]" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             options[$1]=$2; shift 2 ;;
@@ -1579,13 +1614,27 @@ dockerWireGuardCommand() (
         dockerControlPrivateAddressIsValid "${options[--peer-address]:-}" &&
             [[ "${options[--peer-public-key]:-}" =~ ^[A-Za-z0-9+/]{43}=$ ]] ||
             return "${PADM_DOCKER_RC_USAGE}"
+    elif [[ "${action}" == peers && "${readOnly}" == 0 ]]; then
+        dockerControlPrivateAddressIsValid "${options[--peer-address]:-}" ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        [[ ! -v 'options[--peer-public-key]' || "${options[--peer-public-key]}" =~ ^[A-Za-z0-9+/]{43}=$ ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        case "${peerAction}" in
+        add) [[ -v 'options[--peer-public-key]' ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+        update)
+            [[ -v 'options[--peer-public-key]' || -v 'options[--endpoint]' ]] ||
+                return "${PADM_DOCKER_RC_USAGE}" ;;
+        remove)
+            [[ ! -v 'options[--peer-public-key]' && ! -v 'options[--endpoint]' ]] ||
+                return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
     fi
-    if [[ "${action}" != status && "${yes}" == 0 ]]; then
+    if [[ "${readOnly}" == 0 && "${yes}" == 0 ]]; then
         [[ -t 0 && -t 1 ]] || {
             dockerError 'WireGuard 修改需要 --yes 确认'
             return "${PADM_DOCKER_RC_USAGE}"
         }
-        dockerSetupRead answer "确认 WireGuard ${action}？stop 为临时停止，up/restart 可重新启动。[y/N]: " n ||
+        dockerSetupRead answer "确认 WireGuard ${action}${peerAction:+ ${peerAction}}？stop 为临时停止，up/restart 可重新启动。[y/N]: " n ||
             return "${PADM_DOCKER_RC_USAGE}"
         case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     fi
@@ -1609,7 +1658,13 @@ dockerWireGuardCommand() (
     dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
         dockerControlRecoveryCheck current || return "${PADM_DOCKER_RC_STATE}"
     directory="${root}/secrets/net/wireguard"
-    if [[ "${action}" == migrate ]]; then
+    if [[ "${action}" == peers && "${peerAction}" == list ]]; then
+        python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peers --directory "${directory}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        return 0
+    fi
+    if [[ "${action}" == migrate || "${action}" == peers ]]; then
+        [[ "${action}" != peers ]] || migrationArgs=(--peer-action "${peerAction}")
         for key in --address --listen-port --peer-address --peer-public-key --endpoint; do
             [[ ! -v "options[${key}]" ]] || migrationArgs+=("${key}" "${options[${key}]}")
         done

@@ -1644,7 +1644,24 @@ SSH、原生宿主 systemd/重启卸载、公网和 arm64 尚未验收。
 同版本必须保持摘要和受管账号；同步状态未变的兼容发行版快照仍可回滚。
 被控规格要求 bundle 声明回滚保护能力，不能回到缺少该保护的旧脚本。
 普通接入/同步失败或中断仍恢复事务前状态，不在本机伪造上游版本。
-控制菜单已提供单 Peer 连接维护和显式同隧道主控重绑定；多 Peer 和任意历史账号恢复仍未开放。
+控制菜单已提供单 Peer 角色连接维护和显式同隧道主控重绑定；多被控及任意历史账号恢复仍未开放。
+无主控/被控角色的已启用 canonical WireGuard 可通过菜单 `15 → 18 → 7–10`
+或以下命令按地址管理 Peer 集合：
+
+```bash
+padm-docker wireguard peers list
+padm-docker wireguard peers add --peer-address 10.77.0.3 --peer-public-key "$PEER_PUBLIC_KEY" --endpoint 192.0.2.3:51820 --yes
+padm-docker wireguard peers update --peer-address 10.77.0.3 --endpoint none --yes
+padm-docker wireguard peers remove --peer-address 10.77.0.3 --yes
+```
+
+每项仍限定唯一 RFC1918 IPv4 `/32` 和公钥；重复、任意路由及 hooks 拒绝，
+配置沿用 `4096` 字节上限。更新的地址是精确选择器，不改变该项地址；
+省略字段保持，`none` 清除 endpoint，至少保留一个 Peer。
+变更逐字节保留本机身份和私钥，复用完整配置事务及失败/INT/TERM 恢复，
+会重建部署服务并可能短暂中断连接。现有主控/被控集合变更继续拒绝；
+多 Peer 的旧 `wireguard migrate` 和单 Peer 灾备恢复入口也拒绝，不能默认选择首项。
+
 `wireguard migrate` 及其子菜单 `6` 支持主控/已接入被控的关联地址迁移，例如：
 
 ```bash

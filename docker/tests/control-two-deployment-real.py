@@ -1277,7 +1277,7 @@ def private_logs(nodes, invitations, keys):
                    for path in invitations), "自动同步 token 进入部署规格"
 
 
-def wireguard_traffic(nodes, addresses=ADDRESS, ports=(51820, 51820)):
+def wireguard_traffic(nodes, addresses=ADDRESS, ports=(51820, 51820), peer_public=None):
     servers = []
     try:
         for index, node in enumerate(nodes):
@@ -1326,8 +1326,14 @@ while True:
         encrypted += packet[udp + 8:udp + 12] == b"\\x04\\x00\\x00\\x00"
 assert encrypted >= 2, "underlay 缺少双向 WireGuard 加密数据包"
 """, addresses[index], addresses[1-index], str(ports[index]), str(ports[1-index])], timeout=15)
-            peer = command(node["enter"] + ["wg", "show", "wg-padm", "latest-handshakes"]).split()
-            transfer = command(node["enter"] + ["wg", "show", "wg-padm", "transfer"]).split()
+            peer = command(node["enter"] + ["wg", "show", "wg-padm", "latest-handshakes"]).splitlines()
+            transfer = command(node["enter"] + ["wg", "show", "wg-padm", "transfer"]).splitlines()
+            if peer_public is not None:
+                expected = peer_public[1-index].encode()
+                peer = [row for row in peer if row.split()[0] == expected]
+                transfer = [row for row in transfer if row.split()[0] == expected]
+            assert len(peer) == len(transfer) == 1
+            peer, transfer = peer[0].split(), transfer[0].split()
             assert len(peer) == 2 and int(peer[1]) > 0
             assert len(transfer) == 3 and all(int(value) > 0 for value in transfer[1:])
         print("docker-wireguard-cli-real-bidirectional-encrypted-traffic-ok", flush=True)
@@ -1337,7 +1343,7 @@ assert encrypted >= 2, "underlay 缺少双向 WireGuard 加密数据包"
             server.stderr.close()
 
 
-def wireguard_migrate_health_failure(node, *arguments):
+def wireguard_migrate_health_failure(node, *arguments, peer_action=None):
     # 在真实候选完成健康检查后仅注入一次错误；候选启动、回滚和旧配置恢复都走生产事务。
     result = subprocess.run(node["enter"] + ["bash", "-c", """
 source "$1"
@@ -1356,7 +1362,7 @@ dockerComposeRun() {
 }
 dockerMain "$@"
 """, "padm-wireguard-migrate-health", str(node["path"] / "bin/padm-docker"),
-        "wireguard", "migrate", *arguments, "--yes"],
+        "wireguard", *(("peers", peer_action) if peer_action else ("migrate",)), *arguments, "--yes"],
         env=node["env"], capture_output=True, timeout=180)
     with (node["path"] / "cli.log").open("ab") as output:
         output.write(result.stdout + result.stderr)
@@ -1803,6 +1809,133 @@ def wireguard_cli_real(nodes):
     print("docker-wireguard-cli-real-prepare-peer-start-stop-ownership-private-ok", flush=True)
 
 
+def wireguard_peers_real(nodes, image):
+    addresses = (*ADDRESS, "10.231.0.3")
+    gateway, first, second = nodes
+    directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
+    public, keys = [], []
+    for index, node in enumerate(nodes):
+        prepared = json.loads(cli(node, "wireguard", "prepare", "--address", addresses[index],
+                                  "--listen-port", "51820", "--yes").stdout)
+        public.append(prepared["public_key"])
+        keys.append((directories[index] / "private.key").read_text().strip())
+        assert command(["wg", "pubkey"], content=(keys[-1] + "\n").encode()).decode().strip() == public[-1]
+    for index, node in enumerate(nodes):
+        remote = 1 if index == 0 else 0
+        cli(node, "wireguard", "peer", "--peer-address", addresses[remote],
+            "--peer-public-key", public[remote], "--endpoint", f"192.0.2.{remote+1}:51820", "--yes")
+        cli(node, "wireguard", "start", "--yes")
+    before = [state(node) for node in nodes]
+    retained = {path: path.read_bytes() for directory in directories
+                for path in (directory / "identity.json", directory / "private.key")}
+    leaf_files = [{path.name: path.read_bytes() for path in directory.iterdir()}
+                  for directory in directories[1:]]
+
+    def listed():
+        return json.loads(cli(gateway, "wireguard", "peers", "list").stdout)
+
+    def encrypted(index, port=51820):
+        wireguard_traffic((gateway, nodes[index]), (addresses[0], addresses[index]),
+                          (51820, port), (public[0], public[index]))
+
+    def stable():
+        assert [state(node) for node in nodes] == before, "逐 Peer 管理改变主规格或本机账号"
+        assert all(path.read_bytes() == data for path, data in retained.items())
+        assert [{path.name: path.read_bytes() for path in directory.iterdir()}
+                for directory in directories[1:]] == leaf_files, "网关事务改写了其它节点的私密配置"
+        for node, directory in zip(nodes, directories):
+            assert set(services(node)) == {"xray", "nginx", "net-wireguard"}
+            assert {path.name for path in directory.iterdir()} == {"identity.json", "private.key", "wg-padm.conf"}
+            for path in directory.iterdir():
+                info = path.lstat()
+                assert path.is_file() and not path.is_symlink()
+                assert (info.st_uid, info.st_mode & 0o777, info.st_nlink) == (0, 0o600, 1)
+            assert not list((node["path"] / "deployment").glob(".wireguard.*"))
+            assert not (node["path"] / "deployment/locks/deployment.lock").exists()
+
+    cli(gateway, "wireguard", "peers", "add", "--peer-address", addresses[2],
+        "--peer-public-key", public[2], "--endpoint", "192.0.2.3:51820", "--yes")
+    peers = listed()
+    assert peers == {"address": addresses[0], "peers": [
+        {"address": addresses[index], "public_key": public[index],
+         "endpoint": f"192.0.2.{index+1}:51820"} for index in (1, 2)]}
+    stable()
+    encrypted(1)
+    encrypted(2)
+    assert [{path.name: path.read_bytes() for path in directory.iterdir()}
+            for directory in directories[1:]] == leaf_files
+    files = {path: path.read_bytes() for path in directories[0].iterdir()}
+    current_services = services(gateway)
+    cli(gateway, "wireguard", "migrate", "--listen-port", "51821", "--yes", accepted=False)
+    assert all(path.read_bytes() == data for path, data in files.items())
+    assert services(gateway) == current_services, "旧单 Peer 迁移拒绝后重建服务"
+    archive = gateway["path"] / "private/wireguard-peers.tar"
+    cli(gateway, "backup", "export", str(archive))
+    extracted = gateway["path"] / "private/wireguard-peers-input"
+    extracted.mkdir(mode=0o700)
+    command(["python3", "-B", str(ROOT / "docker/lib/recovery.py"), "extract",
+             "--archive", str(archive), "--directory", str(extracted)])
+    result = subprocess.run(["python3", "-B", str(ROOT / "docker/lib/recovery.py"),
+                             "wireguard-inputs", "--directory", str(extracted)],
+                            capture_output=True, timeout=10)
+    assert result.returncode == 15, "旧单 Peer 灾备门禁接受了多 Peer 材料"
+    canonical = json.loads(command(["python3", "-B", str(ROOT / "docker/lib/wireguard-config.py"),
+                                    "peers", "--directory", str(extracted / "secrets/net/wireguard")]))
+    assert canonical == peers, "灾备拒绝场景未保留规范多 Peer 输入"
+    assert all(path.read_bytes() == data for path, data in files.items())
+
+    # 叶子轮换只改变目标链路；网关事务允许短暂中断，完成后必须恢复其它 Peer。
+    cli(first, "wireguard", "migrate", "--listen-port", "51821", "--rotate-key", "--yes")
+    public[1] = json.loads(cli(first, "wireguard", "status").stdout)["public_key"]
+    keys.append((directories[1] / "private.key").read_text().strip())
+    for path in directories[1].iterdir():
+        if path.name != "wg-padm.conf":
+            retained[path] = path.read_bytes()
+    leaf_files[0] = {path.name: path.read_bytes() for path in directories[1].iterdir()}
+    encrypted(2)
+    cli(gateway, "wireguard", "peers", "update", "--peer-address", addresses[1],
+        "--peer-public-key", public[1], "--endpoint", "192.0.2.2:51821", "--yes")
+    assert listed() == {"address": addresses[0], "peers": [
+        {"address": addresses[1], "public_key": public[1], "endpoint": "192.0.2.2:51821"},
+        peers["peers"][1]]}
+    stable()
+    encrypted(1, 51821)
+    encrypted(2)
+    originals = {path: path.read_bytes() for path in (
+        gateway["path"] / "deployment/config/spec.json",
+        gateway["path"] / "deployment/deployment.json",
+        gateway["path"] / "deployment/compose.json",
+        gateway["path"] / "deployment/images.env", *directories[0].iterdir())}
+    wireguard_migrate_health_failure(
+        gateway, "--peer-address", addresses[2], "--endpoint", "none", peer_action="update")
+    assert all(path.read_bytes() == data for path, data in originals.items()), \
+        "逐 Peer 事务健康失败未恢复原配置"
+    stable()
+    encrypted(1, 51821)
+    encrypted(2)
+    cli(gateway, "wireguard", "peers", "remove", "--peer-address", addresses[1], "--yes")
+    assert listed()["peers"] == [peers["peers"][1]]
+    assert public[1].encode() not in command(gateway["enter"] + ["wg", "show", "wg-padm", "peers"]).split()
+    encrypted(2)
+    single_files = {path: path.read_bytes() for path in directories[0].iterdir()}
+    cli(gateway, "wireguard", "peers", "remove", "--peer-address", addresses[2], "--yes", accepted=False)
+    assert all(path.read_bytes() == data for path, data in single_files.items())
+    cli(gateway, "wireguard", "peers", "add", "--peer-address", addresses[1],
+        "--peer-public-key", public[1], "--endpoint", "192.0.2.2:51821", "--yes")
+    encrypted(1, 51821)
+    encrypted(2)
+    cli(gateway, "wireguard", "peers", "remove", "--peer-address", addresses[2], "--yes")
+    assert listed()["peers"] == [
+        {"address": addresses[1], "public_key": public[1], "endpoint": "192.0.2.2:51821"}]
+    assert public[2].encode() not in command(gateway["enter"] + ["wg", "show", "wg-padm", "peers"]).split()
+    encrypted(1, 51821)
+    stable()
+    for node in nodes:
+        traffic(node, image)
+    print("docker-wireguard-peers-real-three-engines-add-update-remove-rollback-encrypted-ok", flush=True)
+    return keys
+
+
 def wireguard_recovery_release(nodes, images):
     fixture = nodes[0]["path"].parent / "recovery-release"
     (fixture / "bin").mkdir(parents=True, mode=0o700)
@@ -2153,10 +2286,11 @@ def main():
     modes.add_argument("--wireguard-address-only", action="store_true")
     modes.add_argument("--wireguard-recovery-only", action="store_true")
     modes.add_argument("--controller-recovery-only", action="store_true")
+    modes.add_argument("--wireguard-peers-only", action="store_true")
     options = parser.parse_args()
     prepare_wireguard = (options.wireguard_only or options.wireguard_control_only
                          or options.wireguard_address_only or options.wireguard_recovery_only
-                         or options.controller_recovery_only)
+                         or options.controller_recovery_only or options.wireguard_peers_only)
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
         "测试不得使用宿主或外部网络"
@@ -2167,12 +2301,15 @@ def main():
     images = {name: value["reference"] for name, value in inputs.items()}
     holders, daemons, crons, nodes, seeds = [], [], [], [], []
     proofs = []
-    names = ["pn" + uuid.uuid4().hex[:10] for _ in range(2)]
+    roles = ("gateway", "peer-one", "peer-two") if options.wireguard_peers_only else ("controller", "controlled")
+    names = ["pn" + uuid.uuid4().hex[:10] for _ in range(6 if options.wireguard_peers_only else 2)]
+    bridge = "pb" + uuid.uuid4().hex[:10]
+    bridge_created = False
     with tempfile.TemporaryDirectory(prefix=".tmp-control-deploy-", dir="/n") as directory:
         root = Path(directory)
         root.chmod(0o700)
         try:
-            for index, role in enumerate(("controller", "controlled")):
+            for index, role in enumerate(roles):
                 node = root / role
                 node.mkdir(mode=0o700)
                 for relative in ("run", "cron", "cron.d", "bin", "home", "tmp", "private", "secrets/tls",
@@ -2252,8 +2389,12 @@ def main():
                               "env": env, "cron": cron, "cron_paused": False})
                 proofs.append({"role": role, "engine_id": info["ID"],
                                "netns": os.readlink(f"/proc/{pid}/ns/net")})
-            assert proofs[0]["engine_id"] != proofs[1]["engine_id"]
-            assert proofs[0]["netns"] != proofs[1]["netns"]
+            assert len({proof["engine_id"] for proof in proofs}) == len(roles)
+            assert len({proof["netns"] for proof in proofs}) == len(roles)
+            if options.wireguard_peers_only:
+                for node in nodes:
+                    command(node["enter"] + ["pkill", "-STOP", "-x", "cron"])
+                    node["cron_paused"] = True
             if (options.remap_only or options.rebind_only or options.wireguard_control_only
                     or options.wireguard_address_only or options.wireguard_recovery_only
                     or options.controller_recovery_only):
@@ -2286,12 +2427,25 @@ def main():
                 for node in nodes:
                     command(node["enter"] + ["pkill", "-STOP", "-x", "cron"])
                     node["cron_paused"] = True
-            command(["ip", "link", "add", names[0], "type", "veth", "peer", "name", names[1]])
+            if options.wireguard_peers_only:
+                command(["ip", "link", "add", bridge, "type", "bridge"])
+                bridge_created = True
+                command(["ip", "link", "set", bridge, "up"])
+            else:
+                command(["ip", "link", "add", names[0], "type", "veth", "peer", "name", names[1]])
             keys, public = [], []
             for index, node in enumerate(nodes):
-                command(["ip", "link", "set", names[index], "netns", str(node["pid"])])
-                command(node["enter"] + ["ip", "link", "set", names[index], "name", "underlay"])
-                command(node["enter"] + ["ip", "address", "add", f"192.0.2.{index + 1}/30",
+                if options.wireguard_peers_only:
+                    outer, inner = names[index*2:index*2+2]
+                    command(["ip", "link", "add", outer, "type", "veth", "peer", "name", inner])
+                    command(["ip", "link", "set", outer, "master", bridge])
+                    command(["ip", "link", "set", outer, "up"])
+                else:
+                    inner = names[index]
+                command(["ip", "link", "set", inner, "netns", str(node["pid"])])
+                command(node["enter"] + ["ip", "link", "set", inner, "name", "underlay"])
+                prefix = 29 if options.wireguard_peers_only else 30
+                command(node["enter"] + ["ip", "address", "add", f"192.0.2.{index + 1}/{prefix}",
                                          "dev", "underlay"])
                 command(node["enter"] + ["ip", "link", "set", "underlay", "up"])
                 if not prepare_wireguard:
@@ -2374,6 +2528,13 @@ def main():
             if options.wireguard_only:
                 wireguard_cli_real(nodes)
                 proofs[0]["scope"] = "real-compose-wireguard-cli-from-standalone"
+                return proofs
+            if options.wireguard_peers_only:
+                wireguard_recovery_release(nodes, images)
+                keys = wireguard_peers_real(nodes, images["sing-box"])
+                private_logs(nodes, (), keys)
+                proofs[0].update(scope="real-compose-wireguard-three-node-peer-management",
+                                 release_trust="fixture", transaction_interruption="allowed")
                 return proofs
             if options.wireguard_recovery_only or options.controller_recovery_only:
                 release = wireguard_recovery_release(nodes, images)
@@ -2591,6 +2752,11 @@ def main():
                     subprocess.run(["ip", "link", "delete", name], capture_output=True, timeout=3)
                 except Exception as error:
                     cleanup_errors.append(f"节点链路 {name}：{type(error).__name__}")
+            if bridge_created:
+                try:
+                    command(["ip", "link", "delete", bridge])
+                except Exception as error:
+                    cleanup_errors.append(f"测试桥 {bridge}：{type(error).__name__}")
             if cleanup_errors:
                 print("节点环境清理诊断：" + "\n".join(cleanup_errors), file=sys.stderr)
                 if not failed:

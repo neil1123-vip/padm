@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""单 Peer WireGuard 的私密准备与固定配置生成。"""
+"""WireGuard 的私密准备与规范 Peer 配置生成。"""
 
 import argparse
 import base64
@@ -121,17 +121,32 @@ def peer_values(identity, peer_address, peer_public_key, peer_endpoint):
 
 
 def configuration(identity, private, peer_address, peer_public_key, peer_endpoint):
-    peer_values(identity, peer_address, peer_public_key, peer_endpoint)
+    return configuration_peers(identity, private, [{
+        "address": peer_address, "public_key": peer_public_key, "endpoint": peer_endpoint}])
+
+
+def configuration_peers(identity, private, peers):
+    require(isinstance(peers, list) and len(peers) > 0)
+    addresses, keys = set(), set()
+    for remote in peers:
+        require(isinstance(remote, dict) and set(remote) == {"address", "public_key", "endpoint"})
+        peer_values(identity, remote["address"], remote["public_key"], remote["endpoint"])
+        require(remote["address"] not in addresses and remote["public_key"] not in keys)
+        addresses.add(remote["address"])
+        keys.add(remote["public_key"])
     text = ("[Interface]\nAddress = {address}/32\nListenPort = {listen_port}\n"
-            "PrivateKey = {private}\n\n[Peer]\nPublicKey = {public}\n"
-            "AllowedIPs = {peer}/32\n").format(**identity, private=private,
-                                             public=peer_public_key, peer=peer_address)
-    if peer_endpoint is not None:
-        text += "Endpoint = " + peer_endpoint + "\nPersistentKeepalive = 25\n"
-    return text.encode("ascii")
+            "PrivateKey = {private}\n").format(**identity, private=private)
+    for remote in sorted(peers, key=lambda item: int(ipaddress.IPv4Address(item["address"]))):
+        text += "\n[Peer]\nPublicKey = {public_key}\nAllowedIPs = {address}/32\n".format(**remote)
+        if remote["endpoint"] is not None:
+            text += "Endpoint = " + remote["endpoint"] + "\nPersistentKeepalive = 25\n"
+    data = text.encode("ascii")
+    require(len(data) <= 4096)
+    return data
 
 
-def load(directory, include_peer=False):
+def load(directory, include_peer=False, include_peers=False):
+    require(not (include_peer and include_peers))
     checked_directory(directory, private=True)
     names = set(os.listdir(directory))
     require({"identity.json", "private.key"} <= names
@@ -144,18 +159,27 @@ def load(directory, include_peer=False):
     port(identity["listen_port"])
     key(identity["public_key"])
     private = key(read_file(directory, "private.key", 45).decode("ascii").removesuffix("\n"))
-    remote_values = None
+    remote_values = []
     if "wg-padm.conf" in names:
         data = read_file(directory, "wg-padm.conf", 4096)
-        match = re.search(rb"\nPublicKey = ([A-Za-z0-9+/]{43}=)\nAllowedIPs = ([0-9.]+)/32\n"
-                          rb"(?:Endpoint = ([^\n]+)\nPersistentKeepalive = 25\n)?$", data)
-        require(match is not None)
-        public, remote, target = (part.decode("ascii") if part is not None else None
-                                  for part in match.groups())
-        require(data == configuration(identity, private, remote, public, target))
-        remote_values = remote, public, target
+        sections = data.split(b"\n[Peer]\n")
+        require(len(sections) > 1)
+        for section in sections[1:]:
+            match = re.fullmatch(rb"PublicKey = ([A-Za-z0-9+/]{43}=)\nAllowedIPs = ([0-9.]+)/32\n"
+                                 rb"(?:Endpoint = ([^\n]+)\nPersistentKeepalive = 25\n)?", section)
+            require(match is not None)
+            public, remote, target = (part.decode("ascii") if part is not None else None
+                                      for part in match.groups())
+            remote_values.append({"address": remote, "public_key": public, "endpoint": target})
+        require(data == configuration_peers(identity, private, remote_values))
     result = identity, private, "wg-padm.conf" in names
-    return result + (remote_values,) if include_peer else result
+    if include_peer:
+        # 旧迁移和灾备入口只能读取单项，不能隐式选择多 Peer 中的第一项。
+        require(len(remote_values) <= 1)
+        remote = remote_values[0] if remote_values else None
+        return result + ((remote["address"], remote["public_key"], remote["endpoint"])
+                         if remote else None,)
+    return result + (remote_values,) if include_peers else result
 
 
 def write_file(directory, name, data, publish=None):
@@ -244,31 +268,61 @@ def peer(directory, peer_address, peer_public_key, peer_endpoint=None):
 
 
 def migrate(directory, destination, own_address=None, listen_port=None, peer_address=None,
-            peer_public_key=None, peer_endpoint=None, private_key=None, public_key=None):
+            peer_public_key=None, peer_endpoint=None, private_key=None, public_key=None,
+            peer_action=None):
     require((private_key is None) == (public_key is None))
+    require(peer_action in (None, "add", "update", "remove"))
     with parent_directory(directory) as (parent, name):
         require(Path(directory) != Path(destination) and Path(directory) not in Path(destination).parents)
         source = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
         try:
-            identity, private, configured, remote = load(source, include_peer=True)
+            identity, private, configured, remotes = load(source, include_peers=True)
             require(configured)
+            if peer_action is not None:
+                identity_data = read_file(source, "identity.json", 4096)
+                private_data = read_file(source, "private.key", 45)
         finally:
             os.close(source)
     identity = dict(identity)
-    if own_address is not None:
-        identity["address"] = address(own_address)
-    if listen_port is not None:
-        identity["listen_port"] = port(listen_port)
-    if private_key is not None:
-        private, identity["public_key"] = read_key(private_key), read_key(public_key)
-    remote_address, remote_public, remote_endpoint = remote
-    if peer_address is not None:
-        remote_address = peer_address
-    if peer_public_key is not None:
-        remote_public = peer_public_key
-    if peer_endpoint is not None:
-        remote_endpoint = None if peer_endpoint == "none" else peer_endpoint
-    data = configuration(identity, private, remote_address, remote_public, remote_endpoint)
+    if peer_action is None:
+        # 旧迁移仍限定单项，不能把未选定的 Peer 当作修改目标。
+        require(len(remotes) == 1)
+        if own_address is not None:
+            identity["address"] = address(own_address)
+        if listen_port is not None:
+            identity["listen_port"] = port(listen_port)
+        if private_key is not None:
+            private, identity["public_key"] = read_key(private_key), read_key(public_key)
+        remote = remotes[0]
+        if peer_address is not None:
+            remote["address"] = peer_address
+        if peer_public_key is not None:
+            remote["public_key"] = peer_public_key
+        if peer_endpoint is not None:
+            remote["endpoint"] = None if peer_endpoint == "none" else peer_endpoint
+    else:
+        # Peer 集合变更不承载本机身份迁移，必须按地址精确选中已有项。
+        require(own_address is None and listen_port is None and private_key is None)
+        address(peer_address)
+        selected = next((item for item in remotes if item["address"] == peer_address), None)
+        if peer_action == "add":
+            require(selected is None and peer_public_key is not None)
+            remotes.append({"address": peer_address, "public_key": peer_public_key,
+                            "endpoint": None if peer_endpoint == "none" else peer_endpoint})
+        elif peer_action == "update":
+            require(selected is not None and (peer_public_key is not None or peer_endpoint is not None))
+            if peer_public_key is not None:
+                selected["public_key"] = peer_public_key
+            if peer_endpoint is not None:
+                selected["endpoint"] = None if peer_endpoint == "none" else peer_endpoint
+        else:
+            require(selected is not None and len(remotes) > 1
+                    and peer_public_key is None and peer_endpoint is None)
+            remotes.remove(selected)
+    data = configuration_peers(identity, private, remotes)
+    if peer_action is None:
+        identity_data = (json.dumps(identity, sort_keys=True) + "\n").encode()
+        private_data = (private + "\n").encode("ascii")
     with parent_directory(destination) as (parent, name):
         try:
             os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -288,8 +342,8 @@ def migrate(directory, destination, own_address=None, listen_port=None, peer_add
             finally:
                 signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
             os.fchmod(stage, 0o700)
-            write_file(stage, "private.key", (private + "\n").encode("ascii"))
-            write_file(stage, "identity.json", (json.dumps(identity, sort_keys=True) + "\n").encode())
+            write_file(stage, "private.key", private_data)
+            write_file(stage, "identity.json", identity_data)
             write_file(stage, "wg-padm.conf", data)
             os.fsync(stage)
             publish_directory(parent, temporary, name)
@@ -356,6 +410,17 @@ def addresses(directory):
             os.close(fd)
 
 
+def peers(directory):
+    with parent_directory(directory) as (parent, name):
+        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        try:
+            identity, _, configured, remotes = load(fd, include_peers=True)
+            require(configured)
+            return {"address": identity["address"], "peers": remotes}
+        finally:
+            os.close(fd)
+
+
 def interrupted(_number, _frame):
     raise InterruptedError("WireGuard 准备已中断")
 
@@ -384,8 +449,10 @@ def main():
     migration.add_argument("--endpoint")
     migration.add_argument("--private-key")
     migration.add_argument("--public-key")
+    migration.add_argument("--peer-action", choices=("add", "update", "remove"))
     commands.add_parser("status", allow_abbrev=False).add_argument("--directory", required=True)
     commands.add_parser("addresses", allow_abbrev=False).add_argument("--directory", required=True)
+    commands.add_parser("peers", allow_abbrev=False).add_argument("--directory", required=True)
     options = [value.partition("=")[0] for value in sys.argv[1:] if value.startswith("--")]
     if len(options) != len(set(options)):
         parser.error("WireGuard 参数不能重复")

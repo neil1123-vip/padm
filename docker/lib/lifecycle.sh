@@ -84,9 +84,14 @@ dockerUsage() {
   padm-docker wireguard status
   padm-docker wireguard prepare --address <RFC1918 IPv4> --listen-port <1024-65535> [--yes]
   padm-docker wireguard peer --peer-address <RFC1918 IPv4> --peer-public-key <公钥> [--endpoint <IPv4:端口>] [--yes]
+  padm-docker wireguard peers list
+  padm-docker wireguard peers add --peer-address <RFC1918 IPv4> --peer-public-key <公钥> [--endpoint <IPv4:端口>] [--yes]
+  padm-docker wireguard peers update --peer-address <已有 IPv4> [--peer-public-key <新公钥>] [--endpoint <IPv4:端口|none>] [--yes]
+  padm-docker wireguard peers remove --peer-address <已有 IPv4> [--yes]
   padm-docker wireguard migrate [--address <RFC1918 IPv4>] [--listen-port <端口>] [--peer-address <RFC1918 IPv4>] [--peer-public-key <公钥>] [--endpoint <IPv4:端口|none>] [--rotate-key] [--yes]
   padm-docker wireguard start|stop [--yes]
-    仅单 Peer wg-padm；先交换公钥再显式启动。stop 临时停连接，up/restart 可重新启动；控制角色依赖时拒绝停止
+    先交换公钥再显式启动；无控制角色的已启用 canonical 配置可按地址管理多个 Peer，保留本机身份和密钥，不能移除最后一项
+    普通 migrate 与控制角色仍限单 Peer；stop 临时停连接，up/restart 可重新启动，控制角色依赖时拒绝停止
   padm-docker edit --cdn-entry <入口 ID> <IP或域名,...> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --cdn-entry-clear <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --xhttp-preset <入口 ID> <daily|compatible|stream|single> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

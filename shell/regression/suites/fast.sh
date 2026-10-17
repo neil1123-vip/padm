@@ -908,6 +908,10 @@ runDockerWireGuardCliRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-only
 }
 
+runDockerWireGuardPeersRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-peers-only
+}
+
 runDockerWireGuardControlRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-control-only
 }
@@ -951,6 +955,10 @@ runDockerSshPreflightRegression() {
 
 runDockerSshDriverRegression() {
     python3 -B "${PROJECT_ROOT}/docker/tests/ssh-driver.py"
+}
+
+runDockerWireGuardConfigRegression() {
+    python3 -B "${PROJECT_ROOT}/docker/tests/wireguard-config.py"
 }
 
 runDockerWireGuardRuntimeRegression() {
@@ -1290,9 +1298,11 @@ registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerContr
 registerRegressionFunctionLeaf docker-control-remap-real runDockerControlRemapRealRegression
 registerRegressionFunctionLeaf docker-control-rebind-real runDockerControlRebindRealRegression
 registerRegressionFunctionLeaf docker-control-log-cron-real runDockerControlLogCronRealRegression
+registerRegressionFunctionLeaf docker-wireguard-config runDockerWireGuardConfigRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 registerRegressionFunctionLeaf docker-wireguard-migration-focused runDockerWireGuardMigrationRegression
 registerRegressionFunctionLeaf docker-wireguard-cli-real runDockerWireGuardCliRealRegression
+registerRegressionFunctionLeaf docker-wireguard-peers-real runDockerWireGuardPeersRealRegression
 registerRegressionFunctionLeaf docker-wireguard-control-real runDockerWireGuardControlRealRegression
 registerRegressionFunctionLeaf docker-wireguard-address-real runDockerWireGuardAddressRealRegression
 registerRegressionFunctionLeaf docker-wireguard-recovery-real runDockerWireGuardRecoveryRealRegression

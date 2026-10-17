@@ -45,7 +45,7 @@ dockerWireGuardContainer() {
     printf 'audit-%s\n' "$1" >>"${CALLS}"
     [[ "${MODE}" != owner-drift || "$1" != running ]] || return 1
     if [[ "${MODE}" == runtime-drift ]] &&
-        cmp -s -- "${root}/secrets/net/wireguard/identity.json" "${input}/identity.json"; then
+        cmp -s -- "${root}/secrets/net/wireguard/wg-padm.conf" "${input}/wg-padm.conf"; then
         return 1
     fi
     printf '%064d\n' 1
@@ -66,7 +66,7 @@ dockerComposeExecute() {
 dockerComposeRun() {
     [[ "$1" == up ]] || return 1
     printf 'up\n' >>"${CALLS}"
-    if cmp -s -- "${root}/secrets/net/wireguard/identity.json" "${input}/identity.json"; then
+    if cmp -s -- "${root}/secrets/net/wireguard/wg-padm.conf" "${input}/wg-padm.conf"; then
         case "${MODE}" in
         fail-up) return 1 ;;
         INT|TERM) kill -"${MODE}" "${BASHPID}"; return 1 ;;
@@ -218,6 +218,46 @@ assertOld
 checks=$((checks + 1))
 
 [[ "${checks}" == 21 ]]
+for action in add update remove; do
+    for MODE_CASE in ok fail-up INT TERM; do
+        fixture
+        directory=$(mktemp -d "${root}/.wireguard.XXXXXX")
+        python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate \
+            --directory "${root}/secrets/net/wireguard" --destination "${directory}/wireguard" \
+            --peer-action add --peer-address 10.77.0.3 \
+            --peer-public-key "$(printf '%032d' 5 | base64 -w0)" >/dev/null
+        cp -- "${directory}/wireguard/"* "${root}/secrets/net/wireguard/"
+        cp -- "${directory}/wireguard/"* "${root}/expected/"
+        input=$(mktemp -d "${root}/.wireguard.XXXXXX")/wireguard
+        arguments=(--peer-action "${action}")
+        case "${action}" in
+        add) arguments+=(--peer-address 10.77.0.4 --peer-public-key "$(printf '%032d' 6 | base64 -w0)") ;;
+        update) arguments+=(--peer-address 10.77.0.3 --endpoint 198.18.0.3:51822) ;;
+        remove) arguments+=(--peer-address 10.77.0.2) ;;
+        esac
+        python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" migrate \
+            --directory "${root}/secrets/net/wireguard" --destination "${input}" \
+            "${arguments[@]}" >/dev/null
+        for file in identity.json private.key; do
+            cmp -s -- "${root}/expected/${file}" "${input}/${file}"
+        done
+        MODE=${MODE_CASE}
+        expected=0
+        [[ "${MODE}" != fail-up ]] || expected=14
+        [[ "${MODE}" != INT ]] || expected=130
+        [[ "${MODE}" != TERM ]] || expected=143
+        runMigration "${expected}"
+        if [[ "${MODE}" == ok ]]; then
+            diff -qr -- "${input}" "${root}/secrets/net/wireguard"
+            [[ "$(grep -c '^stop$' "${CALLS}")" == 1 ]]
+            checks=$((checks + 1))
+        else
+            assertOld
+            grep -qxF down "${CALLS}"
+        fi
+        grep -qxF secrets/net/wireguard "${root}"/backups/configure.*/present
+    done
+done
 for helper in "${!controlFunctions[@]}"; do
     eval "${controlFunctions[${helper}]}"
 done

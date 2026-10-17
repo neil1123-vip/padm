@@ -1310,7 +1310,24 @@ sync and verify a fresh source. Failure or INT/TERM restores the old addresses a
 controller authorization revoked. Ordinary rollback rejects snapshots from a different control tuple.
 Focused and isolated Linux amd64 dual-daemon tests cover migration, encrypted traffic, invitation
 revocation, same-version sync, lower-version rejection and health-failure recovery.
-Multiple Peers and native-host/arm64/public-network acceptance remain deferred;
+For an enabled canonical WireGuard deployment without controller/controlled roles,
+menu `15 → 18 → 7–10` and `wireguard peers list/add/update/remove` manage individual Peers:
+
+```bash
+padm-docker wireguard peers list
+padm-docker wireguard peers add --peer-address 10.77.0.3 --peer-public-key "$PEER_PUBLIC_KEY" --endpoint 192.0.2.3:51820 --yes
+padm-docker wireguard peers update --peer-address 10.77.0.3 --endpoint none --yes
+padm-docker wireguard peers remove --peer-address 10.77.0.3 --yes
+```
+
+Each Peer has a unique RFC1918 IPv4 `/32` and public key. Arbitrary routes, hooks and
+duplicate addresses/keys are rejected; the existing 4096-byte configuration limit remains.
+The update address selects an existing Peer; omitted fields stay unchanged and `none`
+clears the endpoint. Removing the last Peer is rejected. The existing full configuration
+transaction preserves identity/key bytes and handles failure/INT/TERM; service recreation
+may briefly interrupt connections. Role-bound collection changes, ordinary `migrate` with
+multiple Peers and single-Peer disaster recovery with multiple Peers remain rejected.
+Multiple controlled servers and native-host/arm64/public-network acceptance remain deferred;
 limited controller recovery with a new identity is described below.
 After control-token rotation, securely transfer
 the new invitation and sync again. Every manual sync reads a root-private invitation outside the managed

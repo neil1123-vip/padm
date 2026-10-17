@@ -1124,9 +1124,10 @@ dockerMenuWireGuard() {
     local -a action=()
     while :; do
         DOCKER_MENU_SIGNAL=0
-        printf '\nDocker WireGuard 单 Peer\n'
+        printf '\nDocker WireGuard\n'
         printf '%s\n' '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
-            '4. 确认启用或启动' '5. 临时停止' '6. 更新连接或轮换密钥' '0. 返回'
+            '4. 确认启用或启动' '5. 临时停止' '6. 更新单 Peer 连接或轮换密钥' \
+            '7. 查看 Peer 列表' '8. 添加 Peer' '9. 更新指定 Peer' '10. 移除指定 Peer' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -1141,18 +1142,37 @@ dockerMenuWireGuard() {
                 dockerSetupRead port 'UDP 监听端口 [51820，0 返回]: ' 51820 || continue
             dockerMenuRun wireguard prepare --address "${address}" --listen-port "${port}" || true
             ;;
-        3)
+        3|8)
             dockerSetupRead peer '对端 RFC1918 IPv4（0 返回）: ' &&
                 [[ -n "${peer}" ]] &&
                 dockerSetupRead public '对端 WireGuard 公钥（0 返回）: ' &&
                 [[ -n "${public}" ]] &&
                 dockerSetupRead endpoint '对端 IPv4:UDP端口（可留空，0 返回）: ' || continue
             action=(wireguard peer --peer-address "${peer}" --peer-public-key "${public}")
+            [[ "${choice}" != 8 ]] ||
+                action=(wireguard peers add --peer-address "${peer}" --peer-public-key "${public}")
             [[ -z "${endpoint}" ]] || action+=(--endpoint "${endpoint}")
             dockerMenuRun "${action[@]}" || true
             ;;
         4) dockerMenuRun wireguard start || true ;;
         5) dockerMenuRun wireguard stop || true ;;
+        7) dockerMenuRun wireguard peers list || true ;;
+        9)
+            dockerSetupRead peer '要更新的 Peer RFC1918 IPv4（0 返回）: ' &&
+                [[ -n "${peer}" ]] &&
+                dockerSetupRead public '新公钥（留空保持，0 返回）: ' &&
+                dockerSetupRead endpoint '新 IPv4:UDP端口（留空保持，none 清空，0 返回）: ' || continue
+            action=(wireguard peers update --peer-address "${peer}")
+            [[ -z "${public}" ]] || action+=(--peer-public-key "${public}")
+            [[ -z "${endpoint}" ]] || action+=(--endpoint "${endpoint}")
+            [[ "${#action[@]}" -gt 5 ]] || continue
+            dockerMenuRun "${action[@]}" || true
+            ;;
+        10)
+            dockerSetupRead peer '要移除的 Peer RFC1918 IPv4（0 返回）: ' &&
+                [[ -n "${peer}" ]] || continue
+            dockerMenuRun wireguard peers remove --peer-address "${peer}" || true
+            ;;
         6)
             printf '%s\n' '已启用单 Peer；先停自动同步、控制日志调度及控制面封禁。' \
                 '控制角色改址会关联更新角色地址；主控撤权，双方迁移后须重新邀请并核验来源。' \

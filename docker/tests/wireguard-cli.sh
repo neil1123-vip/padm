@@ -128,7 +128,15 @@ for arguments in \
     'prepare --address 127.0.0.1 --listen-port 51820 --yes' \
     'prepare --address 10.90.0.1 --listen-port 80 --yes' \
     'peer --peer-address 10.90.0.2 --peer-public-key missing --yes' \
-    'status --yes'; do
+    'status --yes' \
+    'peers list --yes' \
+    'peers list --peer-address 10.90.0.2' \
+    'peers unknown --yes' \
+    'peers add --peer-address 10.90.0.2 --yes' \
+    'peers update --peer-address 10.90.0.2 --yes' \
+    'peers remove --peer-address 10.90.0.2 --endpoint none --yes' \
+    'peers remove --peer-address 10.90.0.2 --peer-address 10.90.0.3 --yes' \
+    'peers remove --peer-address 10.90.0.2 --rotate-key --yes'; do
     read -r -a options <<<"${arguments}"
     run_case "${PADM_DOCKER_RC_USAGE}" "${options[@]}"
 done
@@ -196,6 +204,8 @@ run_case "${PADM_DOCKER_RC_STATE}" peer --peer-address 10.90.0.1 --peer-public-k
 [[ "$(snapshot)" == "${before}" ]] || fail '重复准备或自身 Peer 改变已有输入'
 run_case 0 peer --peer-address 10.90.0.2 --peer-public-key "${PEER}" --endpoint 198.18.0.2:51821 --yes
 before=$(snapshot)
+run_case "${PADM_DOCKER_RC_CONFLICT}" peers add --peer-address 10.90.0.3 \
+    --peer-public-key "${PUBLIC}" --yes
 run_case "${PADM_DOCKER_RC_STATE}" peer --peer-address 10.90.0.3 --peer-public-key "${PEER}" --yes
 [[ "$(snapshot)" == "${before}" ]] || fail '重复 Peer 改变已有输入'
 MODE=apply-fail
@@ -213,6 +223,7 @@ run_case "${PADM_DOCKER_RC_CONFLICT}" peer --peer-address 10.90.0.2 --peer-publi
 # 命令保持在线输入不动，完整私密候选只能作为原配置事务的第十个参数提交。
 CURRENT_PUBLIC=${PUBLIC}
 EXPECT_ROLE_ADDRESS=0
+EXPECT_PEER_CHANGE=0
 dockerWireGuardContainer() {
     [[ "$#" == 1 && "$1" == running && "${MODE}" != owner-fail ]] || return 1
     printf '%064d\n' 1
@@ -252,6 +263,12 @@ dockerConfigureApply() {
     fi
     python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status --directory "${candidate}" >/dev/null ||
         fail '迁移没有完整私密候选'
+    if [[ "${EXPECT_PEER_CHANGE}" == 1 ]]; then
+        for file in identity.json private.key; do
+            cmp -s -- "${root}/secrets/net/wireguard/${file}" "${candidate}/${file}" ||
+                fail 'Peer 变更改变了本机身份或密钥'
+        done
+    fi
     printf 'migrate-apply\n' >>"${CALLS}"
     [[ "${MODE}" != apply-fail ]] || return "${PADM_DOCKER_RC_COMPOSE}"
     [[ "${MODE}" != int ]] || { kill -INT "${BASHPID}"; return 1; }
@@ -291,6 +308,67 @@ run_case 0 migrate --rotate-key --yes
     fail '迁移未采用新密钥'
 CURRENT_PUBLIC=${PUBLIC}
 
+# 集合变更按地址选择，沿用同一事务，并在多项时拒绝旧迁移的隐式选择。
+before=$(snapshot)
+EXPECT_PEER_CHANGE=1
+SECOND_PEER=$(printf '%032d' 6 | base64 -w0)
+UPDATED_PEER=$(printf '%032d' 7 | base64 -w0)
+run_case 0 peers
+jq -e '.address == "10.91.0.1" and (.peers | length) == 1 and
+    .peers[0].address == "10.91.0.2"' "${LOG}" >/dev/null
+for address in 10.91.0.1 10.91.0.2; do
+    run_case "${PADM_DOCKER_RC_STATE}" peers add --peer-address "${address}" \
+        --peer-public-key "${SECOND_PEER}" --yes
+done
+run_case "${PADM_DOCKER_RC_STATE}" peers add --peer-address 10.91.0.3 \
+    --peer-public-key "${PEER}" --yes
+run_case "${PADM_DOCKER_RC_STATE}" peers add --peer-address 10.91.0.3 \
+    --peer-public-key "${SECOND_PEER}" --endpoint 127.0.0.1:51821 --yes
+run_case "${PADM_DOCKER_RC_STATE}" peers update --peer-address 10.91.0.4 --endpoint none --yes
+[[ "$(snapshot)" == "${before}" ]] || fail '非法 Peer 变更改变了在线输入'
+for MODE in owner-fail pair-fail apply-fail int term; do
+    expected=${PADM_DOCKER_RC_STATE}
+    [[ "${MODE}" != apply-fail ]] || expected=${PADM_DOCKER_RC_COMPOSE}
+    [[ "${MODE}" != int ]] || expected=130
+    [[ "${MODE}" != term ]] || expected=143
+    run_case "${expected}" peers add --peer-address 10.91.0.3 \
+        --peer-public-key "${SECOND_PEER}" --yes
+    [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: Peer 变更失败改变了在线输入"
+done
+MODE=ok
+run_case 0 peers add --peer-address 10.91.0.3 --peer-public-key "${SECOND_PEER}" \
+    --endpoint 198.18.0.3:51821 --yes
+before=$(snapshot)
+run_case 0 peers list
+jq -e '.peers | map(.address) == ["10.91.0.2","10.91.0.3"]' "${LOG}" >/dev/null
+run_case "${PADM_DOCKER_RC_CONFLICT}" migrate --rotate-key --yes
+run_case "${PADM_DOCKER_RC_STATE}" peers remove --peer-address 10.91.0.4 --yes
+run_case "${PADM_DOCKER_RC_STATE}" peers update --peer-address 10.91.0.3 \
+    --peer-public-key "${PEER}" --yes
+[[ "$(snapshot)" == "${before}" ]] || fail '多 Peer 拒绝路径改变了在线输入'
+run_case 0 peers update --peer-address 10.91.0.3 --peer-public-key "${UPDATED_PEER}" \
+    --endpoint 198.18.0.3:51822 --yes
+before=$(snapshot)
+run_case 0 peers update --peer-address 10.91.0.3 --endpoint none --yes
+before=$(snapshot)
+: >"${CALLS}"
+run_case 0 peers update --peer-address 10.91.0.3 --endpoint none --yes
+! grep -qF migrate-apply "${CALLS}" || fail '同配置 Peer 更新仍提交事务'
+run_case 0 peers list
+jq -e --arg first "${PEER}" --arg second "${UPDATED_PEER}" '
+    .peers == [{address:"10.91.0.2",public_key:$first,endpoint:null},
+               {address:"10.91.0.3",public_key:$second,endpoint:null}]' "${LOG}" >/dev/null
+[[ "$(snapshot)" == "${before}" ]] || fail '列表或幂等更新改变了在线输入'
+run_case 0 peers remove --peer-address 10.91.0.2 --yes
+before=$(snapshot)
+run_case 0 peers list
+jq -e --arg key "${UPDATED_PEER}" '.peers ==
+    [{address:"10.91.0.3",public_key:$key,endpoint:null}]' "${LOG}" >/dev/null
+run_case "${PADM_DOCKER_RC_CONFLICT}" peers remove --peer-address 10.91.0.3 --yes
+grep -qF '不能移除最后一个 Peer' "${LOG}" || fail '最后一项拒绝没有清晰提示'
+[[ "$(snapshot)" == "${before}" ]] || fail '移除最后一项改变了在线输入'
+EXPECT_PEER_CHANGE=0
+
 # 真实角色规格覆盖地址映射及仅允许的字段变化，失败时在线规格和隧道均保持原样。
 cp -- "${root}/config/spec.json" "${TEST_ROOT}/standalone.json"
 for role in main controlled; do
@@ -327,6 +405,13 @@ for role in main controlled; do
     peerAddress=$(jq -r '.peer_address' <<<"${addresses}")
     before=$(snapshot)
     : >"${CALLS}"
+    run_case 0 peers list
+    run_case "${PADM_DOCKER_RC_CONFLICT}" peers add --peer-address 10.91.0.4 \
+        --peer-public-key "${SECOND_PEER}" --yes
+    run_case "${PADM_DOCKER_RC_CONFLICT}" peers update --peer-address "${peerAddress}" \
+        --endpoint none --yes
+    run_case "${PADM_DOCKER_RC_CONFLICT}" peers remove --peer-address "${peerAddress}" --yes
+    [[ "$(snapshot)" == "${before}" ]] || fail "${role}: Peer 集合拒绝改变了在线输入"
     run_case 0 migrate --address "${address}" --peer-address "${peerAddress}" --yes
     ! grep -qF migrate-apply "${CALLS}" || fail "${role}: 同地址幂等仍提交事务"
     port=51822

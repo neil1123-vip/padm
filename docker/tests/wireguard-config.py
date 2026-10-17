@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""单 Peer WireGuard 私密准备的 Linux root 回归。"""
+"""WireGuard 私密准备与规范 Peer 配置的 Linux root 回归。"""
 
 import base64
 import importlib.util
@@ -134,6 +134,145 @@ class ConfigurationTests(unittest.TestCase):
                                  "--directory", str(self.directory)], capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_multi_peer_configuration_has_stable_order_and_public_list_output(self):
+        self.prepare()
+        identity = json.loads((self.directory / "identity.json").read_bytes())
+        remotes = [
+            {"address": "10.90.0.10", "public_key": ROTATED_PEER, "endpoint": None},
+            {"address": "10.90.0.2", "public_key": PEER, "endpoint": "198.18.0.2:51821"},
+        ]
+        expected = list(reversed(remotes))
+        data = wg.configuration_peers(identity, PRIVATE, remotes)
+        self.assertEqual(data, wg.configuration_peers(identity, PRIVATE, expected))
+        self.assertEqual(wg.configuration_peers(identity, PRIVATE, expected[:1]),
+                         wg.configuration(identity, PRIVATE, "10.90.0.2", PEER, "198.18.0.2:51821"))
+        self.assertEqual(remotes, list(reversed(expected)))
+        config = self.directory / "wg-padm.conf"
+        config.write_bytes(data)
+        config.chmod(0o600)
+        before = self.snapshot()
+        descriptor = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            self.assertEqual(wg.load(descriptor, include_peers=True),
+                             (identity, PRIVATE, True, expected))
+            self.assertEqual(wg.load(descriptor), (identity, PRIVATE, True))
+        finally:
+            os.close(descriptor)
+        public = {"address": "10.90.0.1", "peers": expected}
+        self.assertEqual(wg.peers(str(self.directory)), public)
+        result = subprocess.run([sys.executable, "-B", str(HELPER), "peers",
+                                 "--directory", str(self.directory)], capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), public)
+        self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
+        self.assertNotIn(b"PrivateKey", result.stdout + result.stderr)
+        self.assertTrue(wg.status(str(self.directory))["configured"])
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(set(path.name for path in self.directory.iterdir()),
+                         {"identity.json", "private.key", "wg-padm.conf"})
+
+    def test_legacy_single_peer_readers_never_choose_from_multiple_peers(self):
+        self.prepare()
+        identity = json.loads((self.directory / "identity.json").read_bytes())
+        config = self.directory / "wg-padm.conf"
+        config.write_bytes(wg.configuration_peers(identity, PRIVATE, [
+            {"address": "10.90.0.2", "public_key": PEER, "endpoint": None},
+            {"address": "10.90.0.3", "public_key": ROTATED_PEER, "endpoint": None},
+        ]))
+        config.chmod(0o600)
+        before = self.snapshot()
+        descriptor = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            self.rejected(wg.load, descriptor, include_peer=True)
+            self.rejected(wg.load, descriptor, include_peer=True, include_peers=True)
+        finally:
+            os.close(descriptor)
+        self.rejected(wg.addresses, str(self.directory))
+        self.rejected(self.migrate)
+        self.rejected(self.peer)
+        result = subprocess.run([sys.executable, "-B", str(HELPER), "addresses",
+                                 "--directory", str(self.directory)], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_multi_peer_generator_rejects_duplicate_self_and_invalid_peer_fields(self):
+        self.prepare()
+        identity = json.loads((self.directory / "identity.json").read_bytes())
+        remote = {"address": "10.90.0.2", "public_key": PEER, "endpoint": None}
+        before = self.snapshot()
+        for remotes in ([], None, (remote,), [{}], [dict(remote, unknown=True)],
+                        [remote, dict(remote, public_key=ROTATED_PEER)],
+                        [remote, dict(remote, address="10.90.0.3")],
+                        [dict(remote, address=identity["address"])],
+                        [dict(remote, public_key=identity["public_key"])],
+                        [dict(remote, address="10.90.0.3\nPostUp = evil")],
+                        [dict(remote, public_key="invalid")],
+                        [dict(remote, endpoint="198.18.0.2:51820\nPostUp = evil")],
+                        [dict(remote, endpoint="127.0.0.1:51820")]):
+            with self.subTest(remotes=remotes):
+                self.rejected(wg.configuration_peers, identity, PRIVATE, remotes)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_multi_peer_parser_rejects_duplicates_hooks_routes_and_noncanonical_bytes(self):
+        self.prepare()
+        identity = json.loads((self.directory / "identity.json").read_bytes())
+        config = self.directory / "wg-padm.conf"
+        original = wg.configuration_peers(identity, PRIVATE, [
+            {"address": "10.90.0.2", "public_key": PEER, "endpoint": "198.18.0.2:51821"},
+            {"address": "10.90.0.3", "public_key": ROTATED_PEER, "endpoint": None},
+        ])
+        parts = original.split(b"\n[Peer]\n")
+        for data in (
+            original.replace(ROTATED_PEER.encode(), PEER.encode()),
+            original.replace(b"10.90.0.3/32", b"10.90.0.2/32"),
+            original.replace(ROTATED_PEER.encode(), PUBLIC.encode()),
+            original.replace(b"10.90.0.3/32", b"10.90.0.1/32"),
+            original.replace(b"10.90.0.3/32", b"10.90.0.3/24"),
+            original.replace(b"AllowedIPs = 10.90.0.3/32", b"AllowedIPs = 10.90.0.3/32,10.90.0.4/32"),
+            original + b"PostUp = evil\n",
+            original.replace(b"\n[Peer]", b"\nPostDown = evil\n[Peer]", 1),
+            original.replace(b"\n", b"\r\n"),
+            b"\n[Peer]\n".join((parts[0], parts[2], parts[1])),
+            original.replace(b"PersistentKeepalive = 25\n", b"PersistentKeepalive = 1\n"),
+        ):
+            with self.subTest(data=data):
+                config.write_bytes(data)
+                config.chmod(0o600)
+                before = self.snapshot()
+                self.rejected(wg.peers, str(self.directory))
+                self.rejected(wg.status, str(self.directory))
+                self.assertEqual(self.snapshot(), before)
+
+    def test_peer_list_reuses_original_size_limit_and_private_file_checks(self):
+        self.prepare()
+        identity = json.loads((self.directory / "identity.json").read_bytes())
+        remotes = [{"address": f"10.90.0.{index}", "public_key": base64.b64encode(bytes([index]) * 32).decode(),
+                    "endpoint": None} for index in range(2, 66)]
+        self.rejected(wg.configuration_peers, identity, PRIVATE, remotes)
+        config = self.directory / "wg-padm.conf"
+        config.write_bytes(wg.configuration_peers(identity, PRIVATE, remotes[:2]))
+        config.chmod(0o640)
+        self.rejected(wg.peers, str(self.directory))
+        config.chmod(0o600)
+        config.write_bytes(config.read_bytes() + b"\n" * 4096)
+        self.rejected(wg.peers, str(self.directory))
+        config.unlink()
+        config.symlink_to(self.private)
+        self.rejected(wg.peers, str(self.directory))
+
+    def test_peer_list_rejects_absent_and_prepared_state_without_mutation(self):
+        self.rejected(wg.peers, str(self.directory))
+        self.prepare()
+        before = self.snapshot()
+        descriptor = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            self.assertEqual(wg.load(descriptor, include_peers=True)[-1], [])
+            self.assertIsNone(wg.load(descriptor, include_peer=True)[-1])
+        finally:
+            os.close(descriptor)
+        self.rejected(wg.peers, str(self.directory))
         self.assertEqual(self.snapshot(), before)
 
     def test_only_canonical_rfc1918_addresses_and_valid_ports(self):
@@ -332,6 +471,65 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(changed, (self.directory / "wg-padm.conf").read_bytes().split(b"Endpoint = ")[0])
         self.assertNotIn(b"PersistentKeepalive", changed)
 
+    def test_peer_changes_select_address_and_preserve_identity_bytes(self):
+        self.prepare()
+        self.peer(endpoint="198.18.0.2:51821")
+        identity = self.directory / "identity.json"
+        identity.write_text(json.dumps(json.loads(identity.read_text()), indent=2))
+        (self.directory / "private.key").write_text(PRIVATE)
+        original = {path.name: path.read_bytes() for path in self.directory.iterdir()}
+        self.migrate(peer_action="add", peer_address="10.90.0.3",
+                     peer_public_key=ROTATED_PUBLIC, peer_endpoint="198.18.0.3:51821")
+        candidate = self.root / "candidate"
+        for name in ("identity.json", "private.key"):
+            self.assertEqual((candidate / name).read_bytes(), original[name])
+        self.assertEqual(candidate.stat().st_mode & 0o777, 0o700)
+        for path in candidate.iterdir():
+            self.assertEqual((path.stat().st_uid, path.stat().st_nlink, path.stat().st_mode & 0o777),
+                             (0, 1, 0o600))
+        self.assertEqual({path.name: path.read_bytes() for path in self.directory.iterdir()}, original)
+        first = wg.peers(str(candidate))["peers"][0]
+        updated = self.root / "updated"
+        wg.migrate(str(candidate), str(updated), peer_action="update", peer_address="10.90.0.3",
+                   peer_public_key=ROTATED_PEER, peer_endpoint="none")
+        self.assertEqual(wg.peers(str(updated))["peers"], [
+            first, {"address": "10.90.0.3", "public_key": ROTATED_PEER, "endpoint": None}])
+        removed = self.root / "removed"
+        wg.migrate(str(updated), str(removed), peer_action="remove", peer_address="10.90.0.2")
+        self.assertEqual(wg.peers(str(removed))["peers"], [
+            {"address": "10.90.0.3", "public_key": ROTATED_PEER, "endpoint": None}])
+        for name in ("identity.json", "private.key"):
+            self.assertEqual((removed / name).read_bytes(), original[name])
+        self.rejected(wg.migrate, str(candidate), str(self.root / "ambiguous"))
+        self.assertFalse((self.root / "ambiguous").exists())
+
+    def test_peer_changes_reject_invalid_target_and_identity_changes_without_writes(self):
+        self.prepare()
+        self.peer()
+        before = self.snapshot()
+        for arguments in (
+                {"peer_action": "add", "peer_address": "10.90.0.2", "peer_public_key": ROTATED_PEER},
+                {"peer_action": "add", "peer_address": "10.90.0.3", "peer_public_key": PEER},
+                {"peer_action": "add", "peer_address": "10.90.0.1", "peer_public_key": ROTATED_PEER},
+                {"peer_action": "add", "peer_address": "10.90.0.3"},
+                {"peer_action": "add", "peer_address": "10.90.0.3",
+                 "peer_public_key": ROTATED_PEER, "peer_endpoint": "127.0.0.1:51820"},
+                {"peer_action": "update", "peer_address": "10.90.0.3", "peer_endpoint": "none"},
+                {"peer_action": "update", "peer_address": "10.90.0.2"},
+                {"peer_action": "update", "peer_address": "10.90.0.2", "peer_public_key": PUBLIC},
+                {"peer_action": "remove", "peer_address": "10.90.0.2"},
+                {"peer_action": "remove", "peer_address": "10.90.0.3"},
+                {"peer_action": "remove", "peer_address": "10.90.0.2", "peer_endpoint": "none"},
+                {"peer_action": "update", "peer_address": "10.90.0.2",
+                 "peer_endpoint": "none", "own_address": "10.91.0.1"},
+                {"peer_action": "update", "peer_address": "10.90.0.2",
+                 "peer_endpoint": "none", "listen_port": 51821},
+                {"peer_action": "update", "peer_address": "10.90.0.2", "peer_endpoint": "none",
+                 "private_key": str(self.private), "public_key": str(self.public)}):
+            with self.subTest(arguments=arguments):
+                self.rejected(self.migrate, **arguments)
+                self.assertEqual(self.snapshot(), before)
+
     def test_migrate_rotation_requires_both_private_input_files(self):
         self.prepare()
         self.peer()
@@ -424,13 +622,15 @@ class ConfigurationTests(unittest.TestCase):
             original_publish(*arguments)
             raise InterruptedError("injected")
 
-        for target, failure in (("write_file", failed_write),
-                                ("publish_directory", OSError("injected")),
-                                ("publish_directory", interrupted_publish)):
-            with self.subTest(target=target, failure=type(failure).__name__):
-                with mock.patch.object(wg, target, side_effect=failure):
-                    self.rejected(self.migrate)
-                self.assertEqual(self.snapshot(), before)
+        for changes in ({}, {"peer_action": "add", "peer_address": "10.90.0.3",
+                             "peer_public_key": ROTATED_PEER}):
+            for target, failure in (("write_file", failed_write),
+                                    ("publish_directory", OSError("injected")),
+                                    ("publish_directory", interrupted_publish)):
+                with self.subTest(changes=changes, target=target, failure=type(failure).__name__):
+                    with mock.patch.object(wg, target, side_effect=failure):
+                        self.rejected(self.migrate, **changes)
+                    self.assertEqual(self.snapshot(), before)
 
         def racing_publish(parent, temporary, name):
             os.mkdir(name, 0o700, dir_fd=parent)
@@ -451,6 +651,7 @@ class ConfigurationTests(unittest.TestCase):
                    "--destination", str(candidate)]
         before = self.snapshot()
         for options in (["--address", "10.91.0.1", "--address=10.91.0.2"],
+                        ["--peer-action", "add", "--peer-action=remove"],
                         ["--endpoint", "none", "--endpoint", "198.18.0.3:51820"],
                         ["--private-key", str(self.private)],
                         ["--private-key", str(self.private), "--public-key", str(self.public),
@@ -463,6 +664,13 @@ class ConfigurationTests(unittest.TestCase):
         self.assertTrue(json.loads(result.stdout)["configured"])
         self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
         self.assertNotIn(b"PrivateKey", result.stdout + result.stderr)
+        result = subprocess.run(command[:command.index("--destination") + 1]
+                                + [str(self.root / "added"), "--peer-action", "add",
+                                   "--peer-address", "10.90.0.3", "--peer-public-key", ROTATED_PEER],
+                                capture_output=True, check=True)
+        self.assertTrue(json.loads(result.stdout)["configured"])
+        self.assertEqual(len(wg.peers(str(self.root / "added"))["peers"]), 2)
+        self.assertNotIn(PRIVATE.encode(), result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
