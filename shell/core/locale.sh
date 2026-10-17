@@ -38,15 +38,24 @@ uiColorCode() {
     "magenta" | "purple" | "section") printf '35' ;;
     "yellow" | "warn") printf '33' ;;
     "gray" | "muted") printf '90' ;;
-    "realityTitle") printf '38;2;139;203;200' ;;
-    "realityDomain") printf '38;2;147;197;227' ;;
-    "realitySuccess") printf '38;2;175;209;184' ;;
-    "realityCertificate") printf '38;2;221;201;157' ;;
-    "realityMetadata") printf '38;2;171;181;193' ;;
-    "realityVerification") printf '38;2;177;190;183' ;;
-    "realityRegion") printf '38;2;226;179;157' ;;
-    "realityAsn") printf '38;2;195;180;226' ;;
+    "realityTitle") uiExtendedColorCode '139;203;200' 116 36 ;;
+    "realityDomain") uiExtendedColorCode '147;197;227' 110 94 ;;
+    "realitySuccess") uiExtendedColorCode '175;209;184' 151 32 ;;
+    "realityCertificate") uiExtendedColorCode '221;201;157' 187 33 ;;
+    "realityMetadata") uiExtendedColorCode '171;181;193' 249 37 ;;
+    "realityVerification") uiExtendedColorCode '177;190;183' 250 37 ;;
+    "realityRegion") uiExtendedColorCode '226;179;157' 181 91 ;;
+    "realityAsn") uiExtendedColorCode '195;180;226' 146 35 ;;
     *) return 1 ;;
+    esac
+}
+
+uiExtendedColorCode() {
+    # 仅在终端声明支持时使用扩展色，避免旧终端把柔和配色显示成白色。
+    case "${COLORTERM:-}:${TERM:-}" in
+    truecolor:*|24bit:*|*:*-direct|*:*-truecolor|*:*-24bit) printf '38;2;%s' "$1" ;;
+    *:*256color*) printf '38;5;%s' "$2" ;;
+    *) printf '%s' "$3" ;;
     esac
 }
 

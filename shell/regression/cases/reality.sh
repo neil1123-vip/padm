@@ -846,23 +846,51 @@ runRealityTargetLocationRegression() (
         [[ ! -s "${pageLog}" ]]
         [[ "$(realityTargetResultField "$(<"${resultsFile}")" 16)" == "London, United Kingdom" ]]
         (
-            local coloredOutput plainOutput noColorFlag
-            # 用真实渲染验证字段配色、重置和无色开关，避免菜单桩掩盖串色。
+            local coloredOutput plainOutput noColorFlag colorMode domainCode successCode certificateCode asnCode regionCode
+            # 用真实渲染验证终端回退、字段重置和无色开关，避免菜单桩掩盖串色。
             source "${PROJECT_ROOT}/shell/core/locale.sh"
             unset PADM_NO_COLOR NO_COLOR
-            coloredOutput=$(showRealityTargetScanResults all once)
-            [[ "${coloredOutput}" == *$'\033[38;2;147;197;227mlocation-page.example.com:443\033[0m'* ]]
-            [[ "${coloredOutput}" == *$'\033[38;2;175;209;184mA | X25519MLKEM768=yes\033[0m'* ]]
-            [[ "${coloredOutput}" == *$'\033[38;2;221;201;157mcert=4096\033[0m'* ]]
-            [[ "${coloredOutput}" == *$'\033[38;2;175;209;184mTLS1.3=yes\033[0m'* ]]
-            [[ "${coloredOutput}" == *$'\033[38;2;195;180;226mAS64501 RemoteNet\033[0m'* ]]
-            [[ "${coloredOutput}" == *$'\033[38;2;226;179;157mLondon, United Kingdom\033[0m'* ]]
-            plainOutput=$(printf '%s' "${coloredOutput}" | sed $'s/\033\\[[0-9;]*m//g')
-            for noColorFlag in PADM_NO_COLOR NO_COLOR; do
-                printf -v "${noColorFlag}" '%s' 1
-                pageOutput=$(showRealityTargetScanResults all once)
-                [[ "${pageOutput}" != *$'\033'* && "${pageOutput}" == "${plainOutput}" ]]
-                unset "${noColorFlag}"
+            for colorMode in truecolor 256color ansi; do
+                COLORTERM= TERM=xterm-256color
+                case "${colorMode}" in
+                truecolor)
+                    COLORTERM=truecolor
+                    domainCode='38;2;147;197;227' successCode='38;2;175;209;184'
+                    certificateCode='38;2;221;201;157' asnCode='38;2;195;180;226' regionCode='38;2;226;179;157'
+                    ;;
+                256color)
+                    domainCode='38;5;110' successCode='38;5;151'
+                    certificateCode='38;5;187' asnCode='38;5;146' regionCode='38;5;181'
+                    ;;
+                ansi)
+                    TERM=xterm
+                    domainCode=94 successCode=32 certificateCode=33 asnCode=35 regionCode=91
+                    ;;
+                esac
+                coloredOutput=$(showRealityTargetScanResults all once)
+                [[ "${coloredOutput}" == *$'\033['"${domainCode}mlocation-page.example.com:443"$'\033[0m'* ]]
+                [[ "${coloredOutput}" == *$'\033['"${successCode}mA | X25519MLKEM768=yes"$'\033[0m'* ]]
+                [[ "${coloredOutput}" == *$'\033['"${certificateCode}mcert=4096"$'\033[0m'* ]]
+                [[ "${coloredOutput}" == *$'\033['"${successCode}mTLS1.3=yes"$'\033[0m'* ]]
+                [[ "${coloredOutput}" == *$'\033['"${asnCode}mAS64501 RemoteNet"$'\033[0m'* ]]
+                [[ "${coloredOutput}" == *$'\033['"${regionCode}mLondon, United Kingdom"$'\033[0m'* ]]
+                [[ "${colorMode}" == truecolor || "${coloredOutput}" != *$'\033[38;2;'* ]]
+                [[ "${colorMode}" != ansi || "${coloredOutput}" != *$'\033[38;'* ]]
+                pageOutput=$(printf '%s' "${coloredOutput}" | sed $'s/\033\\[[0-9;]*m//g')
+                plainOutput=${plainOutput:-${pageOutput}}
+                [[ "${pageOutput}" == "${plainOutput}" ]]
+                for noColorFlag in PADM_NO_COLOR NO_COLOR; do
+                    printf -v "${noColorFlag}" '%s' 1
+                    pageOutput=$(showRealityTargetScanResults all once)
+                    [[ "${pageOutput}" != *$'\033'* && "${pageOutput}" == "${plainOutput}" ]]
+                    unset "${noColorFlag}"
+                done
+            done
+            COLORTERM=24bit
+            [[ "$(uiColorCode realityDomain)" == '38;2;147;197;227' ]]
+            COLORTERM=
+            for TERM in xterm-direct xterm-truecolor xterm-24bit; do
+                [[ "$(uiColorCode realityDomain)" == '38;2;147;197;227' ]]
             done
             [[ ! -s "${pageLog}" ]]
         )
