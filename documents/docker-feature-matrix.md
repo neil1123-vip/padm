@@ -1,6 +1,6 @@
 # Docker 版功能对照表
 
-日期：2026-10-16
+日期：2026-10-18
 
 这份表是“原生菜单功能”和“Docker 当前能力”的第一阶段基线。状态只表示
 Docker 现在能否通过受管控制命令完成对应能力，不表示底层镜像里是否包含某个
@@ -8,6 +8,16 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 
 后续实施顺序和验收门槛见
 [Docker 菜单与功能对齐实施计划](docker-menu-parity-plan.md)。计划安排不改变本表的当前支持状态。
+
+2026-10-18 已补 Debian 13 原生 amd64 的正式发布验签、WS 21 首配、
+升级/回滚、整机重启、公网客户端和 Cloudflare CDN 正反例，以及
+Let's Encrypt standalone 签发、真实续期调度和 WS/SSH 精确封禁。
+SSH 项依赖测试目录权限修正，正式版本缺陷及尚未发布的源码修复见
+[本轮原生验收记录](docker-native-acceptance-2026-10-18.md)。
+Redirect 另有 IPv4 TCP/TLS 与实际规则计数证据；切换 TProxy 时远端失联，
+实际状态和原因未确认，TProxy/TUN/完整卸载及远端清理仍待补验。
+证据只覆盖记录中的组合；原生 arm64、实际到期续期和其余验收缺口继续保留，
+不据单一工作流通过升级完整管理或灾备状态。
 
 3D.11–3D.13 提供协议菜单 `14/15/16` 与
 `edit --protocol-add/--protocol-remove/--protocol-rebuild`。
