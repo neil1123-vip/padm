@@ -1330,7 +1330,7 @@ SH
         expected=0
         case "${name}" in invalid-*) expected=15 ;; term-*) expected=143 ;; esac
         actual=0
-        python3 - "${worker}" "${LOG}" "${INPUT}" "${DOMAINS_CSV}" "${name}" <<'PY' || actual=$?
+        PYTHONPATH="${PROJECT_ROOT}/docker/tests" python3 - "${worker}" "${LOG}" "${INPUT}" "${DOMAINS_CSV}" "${name}" <<'PY' || actual=$?
 import errno
 import json
 import os
@@ -1339,6 +1339,8 @@ import select
 import signal
 import sys
 import time
+
+from pty_input import wait_for_input
 
 worker, log, fixture, domains, scenario = sys.argv[1:]
 with open(fixture) as stream:
@@ -1391,6 +1393,7 @@ try:
             assert socks["username"].encode() not in output
             assert socks["password"].encode() not in output
         if scenario == "term-" + field:
+            wait_for_input(pid)
             os.kill(pid, signal.SIGTERM)
             stopped = True
             break
@@ -1514,7 +1517,7 @@ hostsInputCheck() {
         commit-int) expected=130 ;;
         esac
         actual=0
-        python3 - "${worker}" "${LOG}" "${TEST_ROOT}/hosts-input.expected.json" "${name}" <<'PY' || actual=$?
+        PYTHONPATH="${PROJECT_ROOT}/docker/tests" python3 - "${worker}" "${LOG}" "${TEST_ROOT}/hosts-input.expected.json" "${name}" <<'PY' || actual=$?
 import errno
 import json
 import os
@@ -1523,6 +1526,8 @@ import select
 import signal
 import sys
 import time
+
+from pty_input import wait_for_input
 
 worker, log, expected_file, scenario = sys.argv[1:]
 address = "2001:0DB8::11" if scenario == "ipv6" else "203.0.113.11"
@@ -1570,6 +1575,7 @@ try:
     ]:
         wait_for(prompt)
         if scenario == "term-" + field:
+            wait_for_input(pid)
             os.kill(pid, signal.SIGTERM)
         elif scenario == "eof-" + field:
             os.write(terminal, b"\x04")
@@ -1723,7 +1729,7 @@ SH
         expected=0
         case "${name}" in invalid-*) expected=15 ;; term-*) expected=143 ;; esac
         actual=0
-        python3 - "${worker}" "${LOG}" "${WARP_INPUT}" "${DOMAINS_CSV}" "${name}" <<'PY' || actual=$?
+        PYTHONPATH="${PROJECT_ROOT}/docker/tests" python3 - "${worker}" "${LOG}" "${WARP_INPUT}" "${DOMAINS_CSV}" "${name}" <<'PY' || actual=$?
 import errno
 import json
 import os
@@ -1732,6 +1738,8 @@ import select
 import signal
 import sys
 import time
+
+from pty_input import wait_for_input
 
 worker, log, fixture, domains, scenario = sys.argv[1:]
 with open(fixture) as stream:
@@ -1783,6 +1791,7 @@ try:
                         pass
             assert private not in output
         if scenario == "term-" + field:
+            wait_for_input(pid)
             os.kill(pid, signal.SIGTERM)
             stopped = True
             break

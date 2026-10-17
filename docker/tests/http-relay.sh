@@ -328,7 +328,7 @@ SH
         expected=0
         case "${name}" in invalid-*) expected=15 ;; term-*) expected=143 ;; esac
         actual=0
-        python3 - "${worker}" "${LOG}" "${INPUT}" "${name}" "${TEST_ROOT}/long-sources.json" <<'PY' || actual=$?
+        PYTHONPATH="${PROJECT_ROOT}/docker/tests" python3 - "${worker}" "${LOG}" "${INPUT}" "${name}" "${TEST_ROOT}/long-sources.json" <<'PY' || actual=$?
 import errno
 import json
 import os
@@ -337,6 +337,8 @@ import select
 import signal
 import sys
 import time
+
+from pty_input import wait_for_input
 
 worker, log, fixture, scenario, expected_sources_path = sys.argv[1:]
 with open(fixture) as stream:
@@ -390,6 +392,7 @@ try:
                     except (FileNotFoundError, ProcessLookupError, PermissionError):
                         pass
         if scenario == "term-" + field:
+            wait_for_input(pid)
             os.kill(pid, signal.SIGTERM)
             stopped = True
             break
