@@ -465,15 +465,18 @@ class RecoveryTests(unittest.TestCase):
             os.setgid(65534)
             os.setuid(65534)
 
-        # 回归 TMPDIR 的上层只允许 root 访问，非 root 夹具另放在可遍历的 /tmp。
+        # 工作区和 TMPDIR 的上层可能仅限 root，脚本与夹具一起放到可遍历的 /tmp。
         with tempfile.TemporaryDirectory(prefix="padm-recovery-nonroot-", dir="/tmp") as directory:
             Path(directory).chmod(0o711)
+            helper = Path(directory) / "recovery.py"
+            helper.write_bytes(HELPER.read_bytes())
+            helper.chmod(0o644)
             path = Path(directory) / "nonroot.tar"
             path.write_bytes(self.archive.read_bytes())
             path.chmod(0o600)
             os.chown(path, 65534, 65534)
             result = subprocess.run(
-                [sys.executable, "-B", str(HELPER), "verify", "--archive", str(path)],
+                [sys.executable, "-B", str(helper), "verify", "--archive", str(path)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
                 env={"PATH": "", "TMPDIR": str(self.base / "missing")},
                 preexec_fn=unprivileged,
