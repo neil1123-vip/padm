@@ -361,7 +361,11 @@ runRegressionDockerContractsAggregateContract() (
     cmp -s "${expected}" "${actual}"
     [[ "${shardCount}" -eq 18 ]]
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
+    ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-recovery-apply
     [[ "$(listRegressionDockerContractsFastChildSelectors | grep -c '^docker-port-hopping-preflight$')" -eq 1 ]]
+    [[ "$(listRegressionDockerContractsFastChildSelectors | grep -c '^docker-recovery-apply$')" -eq 1 ]]
+    [[ "$(listRegressionDockerContractsRecoveryChildSelectors | head -n 1)" == docker-recovery-apply ]]
+    ! listRegressionDockerContractsRealityMetadataChildSelectors | grep -qx docker-xhttp-edit
 
     # 短任务组合沿用两个 worker，给原生与 TLS 留出 runner，不依赖矩阵创建顺序。
     runFrameworkParallelRegressionSelectors() {
@@ -370,8 +374,9 @@ runRegressionDockerContractsAggregateContract() (
         shift
         printf '%s\n' "$@" >"${callLog}"
     }
-    for selector in docker-phase3-entries docker-contracts-reality-metadata docker-contracts-setup-basic \
-        docker-contracts-system-light docker-routing-core-network docker-routing-dns-csv; do
+    for selector in docker-phase3-entries docker-contracts-reality-metadata docker-contracts-recovery \
+        docker-contracts-setup-basic docker-contracts-setup-transports docker-contracts-system-light \
+        docker-routing-core-network docker-routing-dns-csv; do
         : >"${callLog}"
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
         : >"${expectedLog}"

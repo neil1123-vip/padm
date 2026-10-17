@@ -177,6 +177,7 @@ runRegressionDockerContracts() {
 listRegressionDockerContractsFastChildSelectors() {
     listRegressionDockerContractsFastHeavyChildSelectors
     listRegressionDockerContractsFastRestChildSelectors
+    listRegressionDockerContractsRecoveryChildSelectors
     printf '%s\n' docker-port-hopping-preflight
 }
 
@@ -185,38 +186,37 @@ listRegressionDockerContractsFastHeavyChildSelectors() {
 }
 
 listRegressionDockerContractsFastRestChildSelectors() {
-    # 回滚分片与安装合同先启动，避免短任务把长事务推到队尾。
+    # 按 CI 实测优先启动长事务；恢复测试独立，避免尾部只剩故障注入。
     printf '%s\n' \
-        docker-xhttp-rollback \
-        docker-phase1 \
-        docker-control-client \
         docker-tproxy-ownership \
         docker-redirect-focused \
-        docker-tun-management \
-        docker-routing-block-ips-resolved \
-        docker-http-relay \
-        docker-control-cli \
-        docker-phase5 \
+        docker-control-client \
+        docker-xhttp-rollback \
         docker-fail2ban-ownership \
-        docker-control-sync \
-        docker-release \
-        docker-geo-data \
-        docker-accounts \
-        docker-traffic \
-        docker-fail2ban-source \
-        docker-ssh-preflight \
-        docker-ssh-driver \
-        docker-permissions \
-        docker-wireguard-runtime \
-        docker-accounts-cli \
+        docker-http-relay \
+        docker-tun-management \
         docker-subscriptions \
+        docker-control-cli \
+        docker-routing-block-ips-resolved \
+        docker-phase5 \
+        docker-xhttp-validation \
+        docker-control-sync \
+        docker-geo-data \
+        docker-ssh-driver \
+        docker-traffic \
+        docker-accounts \
+        docker-ssh-preflight \
+        docker-fail2ban-source \
+        docker-permissions \
+        docker-accounts-cli \
         docker-control-api \
+        docker-wireguard-runtime \
         docker-business \
-        docker-backup \
-        docker-recovery-preview \
-        docker-recovery-apply \
-        docker-phase2 \
-        docker-xhttp-validation
+        docker-phase2
+}
+
+listRegressionDockerContractsRecoveryChildSelectors() {
+    printf '%s\n' docker-recovery-apply docker-phase1 docker-recovery-preview docker-release docker-backup
 }
 
 listRegressionDockerContractsSystemChildSelectors() {
@@ -259,12 +259,17 @@ listRegressionDockerSubscriptionPublicationChildSelectors() {
 }
 
 listRegressionDockerContractsRealityMetadataChildSelectors() {
-    printf '%s\n' docker-xhttp-edit docker-reality-parameters docker-vless-encryption docker-shadowsocks-rotation docker-reality-targets-selection docker-reality-target-library
+    printf '%s\n' docker-shadowsocks-rotation docker-reality-parameters docker-vless-encryption \
+        docker-reality-targets-selection docker-reality-target-library
 }
 
 listRegressionDockerContractsSetupBasicChildSelectors() {
-    printf '%s\n' docker-traditional-tls-base docker-setup-core \
+    printf '%s\n' docker-setup-core docker-traditional-tls-base docker-setup-tls \
         docker-traditional-tls-transports docker-setup-encrypted-tcp
+}
+
+listRegressionDockerContractsSetupTransportsChildSelectors() {
+    printf '%s\n' docker-setup-encrypted-udp docker-setup-transports
 }
 
 listRegressionDockerContractsSystemLightChildSelectors() {
@@ -1110,6 +1115,7 @@ registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegressio
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression
 registerRegressionFunctionLeaf docker-subscription-publication-real runDockerSubscriptionPublicationRealRegression
 registerRegressionFunctionLeaf docker-subscription-site-real runDockerSubscriptionSiteRealRegression
+registerRegressionFunctionLeaf docker-acme-recovery-real runDockerAcmeRecoveryRealRegression
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-backup runDockerBackupRegression
 registerRegressionFunctionLeaf docker-recovery-preview runDockerRecoveryPreviewRegression
@@ -1234,6 +1240,8 @@ registerRegressionParallelSelectorList docker-contracts-fast-heavy runFrameworkP
     "${TMP_DIR}/docker-contracts-fast-heavy-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastHeavyChildSelectors 4
 registerRegressionParallelSelectorList docker-contracts-fast-rest runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-rest-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastRestChildSelectors 4
+registerRegressionParallelSelectorList docker-contracts-recovery runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-recovery-parallel-${BASHPID:-$$}" listRegressionDockerContractsRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-routing runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-routing-parallel-${BASHPID:-$$}" listRegressionDockerContractsRoutingChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-protocol runRegressionDockerContracts \
@@ -1246,6 +1254,8 @@ registerRegressionParallelSelectorList docker-contracts-reality-metadata runFram
     "${TMP_DIR}/docker-contracts-reality-metadata-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityMetadataChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-setup-basic runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-setup-basic-parallel-${BASHPID:-$$}" listRegressionDockerContractsSetupBasicChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-setup-transports runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-setup-transports-parallel-${BASHPID:-$$}" listRegressionDockerContractsSetupTransportsChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-system-light runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-system-light-parallel-${BASHPID:-$$}" listRegressionDockerContractsSystemLightChildSelectors 2
 registerRegressionParallelSelectorList docker-routing-core-network runFrameworkParallelRegressionSelectorListWithJobs \

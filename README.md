@@ -1788,8 +1788,8 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 
 目标须仅安装控制骨架，配置、数据、密钥、日志和备份目录为空，且没有同项目容器。
 当前接受同架构 v3 普通部署、受管或桥接可达宿主网站 Reality 共存：核心、手动 TLS、静态站、账号/分享身份、
-已保存流量、Reality 目标库、下述受限 Geo 数据和停用续期登记；宿主集成、控制角色/同步、
-host 网络共存和 ACME 执行配置仍明确拒绝。停用分享组的悬空引用也须先修正。
+已保存流量、Reality 目标库、下述受限 Geo、ACME 数据和停用续期登记；宿主集成、控制角色/同步、
+host 网络共存及未处理的 ACME 组合仍明确拒绝。停用分享组的悬空引用也须先修正。
 已有 `.tls.http01=true` 可保留，按规格重建空挑战根和双栈 `80:8088`，
 不恢复旧挑战文件、ACME 账户或续期调度；目标的端口归属仍须通过现有预检。
 单 sing-box 双族 Hy2/TUIC 可恢复已保存的 `port_hopping` 规格；恢复后为 `stopped`，
@@ -1803,8 +1803,13 @@ Geo 接受包含 Xray 且 `state.enabled` 为布尔值的固定版本受管库�
 `enabled=true` 在安装和健康检查成功后恢复目标主机的每日自动更新调度；
 `enabled=false` 仍使用 Geo 数据，但不安装或接管已有 Geo 调度。预览不安装调度。
 续期仅恢复 `enabled=false` 的 DNS、standalone、webroot 或 ALPN 登记及 DNS 凭据，保持原字节和
-`0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记和实际 ACME 文件拒绝，
-仅兼容空 `data/acme` 目录。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
+`0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记仍拒绝。
+ACME 数据仅接受 acme.sh `3.1.6` 的单域名、账户及域名 EC-P256、standalone HTTP-01 `8080`，
+且必须有对应 schema `2` 的停用 standalone 续期登记、不能启用 `.tls.http01`。
+恢复器不执行归档 shell：严格解析并重建固定 9 个文件，只丢弃已知 CSR/临时材料；
+未知配置、hook、DNS/SAN/RSA/EAB 和自定义执行路径均拒绝。私钥、公钥、证书链及固定 TLS 输出
+先在无网络的可信 ops 容器内验证绑定；账户和域名密钥保留，不安装续期调度。
+空 `data/acme` 仍兼容。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
 不执行归档 Nginx stream 文件。桥接宿主网站恢复保留域名、上游地址和端口，
 仅接受 host-gateway 或可路由 IP；回环、host 网络和未处理的 host-main 输入仍拒绝。
 网站服务、内容及其证书仍由宿主维护方提供，不随本归档恢复。
@@ -2354,6 +2359,8 @@ Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回
 以本机 5 分钟内反馈为目标。原 65 项完整集合使用 `docker-contracts-full`，
 包含恢复 apply 故障注入、升级、协议、首配、菜单、多入口与路由工作流深层矩阵；
 CI 分片继续覆盖这套完整集合。
+CI 保持 18 个合同分片，将恢复和 XHTTP 编辑独立调度，合并较短首配分片；
+分片内长任务先启动，工具容器的源码和临时目录使用 tmpfs。
 两者均按当前快照匹配成功结果，`-ForceRun` 可强制实际重跑。
 Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workflow` 和 `docker-menu`；
 工作流定向复用原事务断言，不替代 Schema、生成器、其它路由矩阵和真实流量验收。

@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 10
     env:
       PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
+      CONTRACT_TOOLS: ${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight' || matrix.selector == 'docker-contracts-reality-metadata' || matrix.selector == 'docker-contracts-recovery' || matrix.selector == 'docker-xhttp-edit' }}
     strategy:
       fail-fast: true
       # 留出原生与 TLS 门禁的两个槽位，避免长分片排队。
@@ -26,18 +27,18 @@ jobs:
         selector:
           - docker-port-hopping-preflight
           - docker-contracts-fast-rest
+          - docker-contracts-recovery
+          - docker-xhttp-edit
           - docker-phase3-edit
           - docker-phase3-entries
           - docker-reality-targets-direct
-          - docker-setup-transports
+          - docker-contracts-setup-transports
           - docker-contracts-fast-heavy
           - docker-phase4-maintenance
           - docker-contracts-system-light
-          - docker-setup-encrypted-udp
           - docker-contracts-setup-basic
           - docker-contracts-reality-metadata
           - docker-reality
-          - docker-setup-tls
           - docker-routing-direct-block-ip-workflow
           - docker-routing-dns-csv
           - docker-routing-core-policy-lifecycle
@@ -49,16 +50,16 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 1
       - name: Install pinned jq
-        if: ${{ !startsWith(matrix.selector, 'docker-contracts-fast-') && !startsWith(matrix.selector, 'docker-routing-') && matrix.selector != 'docker-port-hopping-preflight' && matrix.selector != 'docker-contracts-reality-metadata' }}
+        if: env.CONTRACT_TOOLS != 'true'
         run: sudo bash shell/regression/install-ci-jq.sh
       - name: Cache contract tools
-        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight' || matrix.selector == 'docker-contracts-reality-metadata'
+        if: env.CONTRACT_TOOLS == 'true'
         uses: actions/cache@v6.1.0
         with:
           path: ${{ runner.temp }}/padm-contract-tools.tar
           key: padm-contract-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('shell/regression/container/**') }}
       - name: Prepare control and site contract tools
-        if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-') || matrix.selector == 'docker-port-hopping-preflight' || matrix.selector == 'docker-contracts-reality-metadata'
+        if: env.CONTRACT_TOOLS == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -76,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           # ML-KEM 配对校验需要工具镜像中的 OpenSSL 3.5，不能使用旧版 runner 工具。
-          if [[ "${SELECTOR}" == docker-contracts-fast-* || "${SELECTOR}" == docker-routing-* || "${SELECTOR}" == docker-port-hopping-preflight || "${SELECTOR}" == docker-contracts-reality-metadata ]]; then
+          if [[ "${CONTRACT_TOOLS}" == true ]]; then
             jobs=2
             if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi
             capabilities=()
@@ -86,6 +87,7 @@ jobs:
             fi
             git ls-files -z | tar --null -T - -cf "${RUNNER_TEMP}/padm-contracts-source.tar"
             docker run --rm --network none --init "${capabilities[@]}" \
+              --tmpfs /work:rw,exec,mode=0755 --tmpfs /tmp:rw,exec,mode=1777 \
               --env PADM_REGRESSION_PARALLEL_JOBS="${jobs}" \
               --env PADM_DOCKER_CONTRACTS_SHARED_CHECKS \
               --env PADM_REGRESSION_VERBOSE=1 \

@@ -861,6 +861,7 @@ for siteContract in \
     'docker build --tag padm-regression:contracts shell/regression/container' \
     'git ls-files -z | tar --null -T - -cf' \
     'docker run --rm --network none --init' \
+    '--tmpfs /work:rw,exec,mode=0755 --tmpfs /tmp:rw,exec,mode=1777' \
     'jobs=2' \
     'if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi' \
     '--env PADM_REGRESSION_PARALLEL_JOBS="${jobs}"' \
@@ -877,19 +878,19 @@ for shard in Heavy Rest; do
     grep -Fq "listRegressionDockerContractsFast${shard}ChildSelectors 4" "${FAST_SUITE}" ||
         fail "fast ${shard} 分片没有保留有界并发"
 done
-grep -Fq "if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')" "${CONTRACT_WORKFLOW}" &&
-    grep -Fq '"${SELECTOR}" == docker-contracts-fast-*' "${CONTRACT_WORKFLOW}" ||
-    fail 'fast 分片没有同时使用隔离工具镜像和源码快照'
-[[ "$(grep -Fc "|| matrix.selector == 'docker-port-hopping-preflight'" "${CONTRACT_WORKFLOW}")" -eq 2 ]] &&
-    grep -Fq '&& matrix.selector != '\''docker-port-hopping-preflight'\''' "${CONTRACT_WORKFLOW}" &&
-    grep -Fq '"${SELECTOR}" == docker-routing-* || "${SELECTOR}" == docker-port-hopping-preflight' "${CONTRACT_WORKFLOW}" &&
-    grep -Fq '"${SELECTOR}" == docker-contracts-fast-rest || "${SELECTOR}" == docker-port-hopping-preflight' "${CONTRACT_WORKFLOW}" ||
-    fail '端口跳跃独立分片未沿用隔离工具镜像、当前源码或所需能力'
-# ML-KEM 分片的缓存、准备和执行必须同时使用新版 OpenSSL 工具镜像。
-[[ "$(grep -Fc "|| matrix.selector == 'docker-contracts-reality-metadata'" "${CONTRACT_WORKFLOW}")" -eq 2 ]] &&
-    grep -Fq '&& matrix.selector != '\''docker-contracts-reality-metadata'\''' "${CONTRACT_WORKFLOW}" &&
-    grep -Fq '|| "${SELECTOR}" == docker-contracts-reality-metadata ]]; then' "${CONTRACT_WORKFLOW}" ||
-    fail 'ML-KEM 回归未沿用支持 OpenSSL 3.5 的隔离工具镜像'
+grep -Fq "CONTRACT_TOOLS: \${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')" "${CONTRACT_WORKFLOW}" &&
+    [[ "$(grep -Fc "if: env.CONTRACT_TOOLS == 'true'" "${CONTRACT_WORKFLOW}")" -eq 2 ]] &&
+    grep -Fq "if: env.CONTRACT_TOOLS != 'true'" "${CONTRACT_WORKFLOW}" &&
+    grep -Fq 'if [[ "${CONTRACT_TOOLS}" == true ]]; then' "${CONTRACT_WORKFLOW}" ||
+    fail '工具分片的缓存、准备和执行条件没有保持一致'
+# ML-KEM 与独立事务分片必须沿用隔离工具镜像和当前源码快照。
+for shard in docker-port-hopping-preflight docker-contracts-reality-metadata docker-contracts-recovery docker-xhttp-edit; do
+    grep -F '      CONTRACT_TOOLS:' "${CONTRACT_WORKFLOW}" |
+        grep -Fq "|| matrix.selector == '${shard}'" ||
+        fail "${shard} 未沿用隔离工具镜像和当前源码快照"
+done
+grep -Fq '"${SELECTOR}" == docker-contracts-fast-rest || "${SELECTOR}" == docker-port-hopping-preflight' "${CONTRACT_WORKFLOW}" ||
+    fail '端口跳跃独立分片未沿用所需能力'
 grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
 grep -Fq 'max-parallel: 18' "${CONTRACT_WORKFLOW}" ||
