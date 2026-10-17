@@ -10,13 +10,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$fullRegression = $Selector -in @('all', 'ci', 'ci-pr', 'docker-contracts')
-$memoryWorkspace = $Selector -eq 'docker-contracts'
+$contractRegression = $Selector -in @('docker-contracts', 'docker-contracts-full')
+$fullRegression = $contractRegression -or $Selector -in @('all', 'ci', 'ci-pr')
+$memoryWorkspace = $contractRegression
 if (-not $PSBoundParameters.ContainsKey('Jobs')) {
-    $Jobs = if ($Selector -eq 'docker-contracts') { 6 } elseif ($fullRegression) { 3 } else { 2 }
+    $Jobs = if ($contractRegression) { 6 } elseif ($fullRegression) { 3 } else { 2 }
 }
-if ($Jobs -gt 4 -and $Selector -ne 'docker-contracts') {
-    throw 'Only docker-contracts supports more than 4 jobs.'
+if ($Jobs -gt 4 -and -not $contractRegression) {
+    throw 'Only docker-contracts and docker-contracts-full support more than 4 jobs.'
 }
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $git = 'C:\Program Files\Git\cmd\git.exe'
@@ -351,7 +352,7 @@ try {
     } elseif ($Selector -in $nestedNodeSelectors) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
         @('--privileged', '--mount', 'type=volume,dst=/n')
-    } elseif ($Selector -in @('docker-ssh-driver', 'docker-contracts', 'docker-contracts-fast',
+    } elseif ($Selector -in @('docker-ssh-driver', 'docker-contracts', 'docker-contracts-full', 'docker-contracts-fast',
         'docker-contracts-fast-rest')) {
         # 仅自建受控子树的 driver 合同需要 ptrace，不挂载宿主进程或 Socket。
         @('--cap-add', 'SYS_PTRACE', '--cap-add', 'SYS_ADMIN')
@@ -566,6 +567,9 @@ try {
     }
 
     Write-Host "Regression: $Selector, $Jobs jobs, $platform"
+    if ($Selector -eq 'docker-contracts') {
+        Write-Host 'Contract scope: frequent core checks; recovery/upgrade/protocol/workflow matrices: docker-contracts-full'
+    }
     Write-Host "Artifacts: $runDir"
     $watch.Start()
     & $docker start --attach $container 2>&1 | Tee-Object -FilePath $log

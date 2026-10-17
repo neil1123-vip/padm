@@ -2344,17 +2344,24 @@ Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回
 .\shell\regression\run-docker.ps1 -Selector ui-subscription-workflow-focused
 .\shell\regression\run-docker.ps1 -Selector docker-routing-domains-workflow
 .\shell\regression\run-docker.ps1 -Selector ci -Jobs 3
+.\shell\regression\run-docker.ps1 -Selector docker-contracts -Jobs 6
+.\shell\regression\run-docker.ps1 -Selector docker-contracts-full -Jobs 6
 ```
 
 普通定向 selector 默认 `-Jobs 2`，完整 `ci`、`ci-pr`、`all` 默认 `-Jobs 3`，
-完整 `docker-contracts` 默认 `-Jobs 6`（支持 1–8）。
+`docker-contracts` 与 `docker-contracts-full` 默认 `-Jobs 6`（支持 1–8）。
+日常 `docker-contracts` 收敛为 34 项高频核心门禁，保留权限、所有权、密钥、回滚、恢复预览及控制链检查，
+以本机 5 分钟内反馈为目标。原 65 项完整集合使用 `docker-contracts-full`，
+包含恢复 apply 故障注入、升级、协议、首配、菜单、多入口与路由工作流深层矩阵；
+CI 分片继续覆盖这套完整集合。
+两者均按当前快照匹配成功结果，`-ForceRun` 可强制实际重跑。
 Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workflow` 和 `docker-menu`；
 工作流定向复用原事务断言，不替代 Schema、生成器、其它路由矩阵和真实流量验收。
 额外入口端口改动使用 `docker-entry-port-alias` 与 `docker-menu-port-alias`；
 菜单定向复用完整入口的全部别名 PTY 断言，完整 `docker-menu` 保留原集合。
 多入口/双核心拓扑改动使用 `docker-phase3-entries-topology`，
 协议增删、TLS 或重装管理改动使用 `docker-phase3-entries-management`。
-`docker-phase3-entries` 保留两组并行入口；完整合同直接调度两组，CI 分片覆盖相同叶子。
+`docker-phase3-entries` 保留管理与拓扑的并行分组；`docker-contracts-full` 直接调度这些分组，CI 分片覆盖相同叶子。
 各任务先运行匹配改动的定向回归，集成完成后集中执行完整回归。
 入口归档当前工作区的已跟踪文件和未忽略的新文件，包含未提交修改，不包含 `.git`
 和 `.tmp-*`；源码、`TMPDIR`、`HOME` 在容器内部，不挂载 Windows 工作目录。
@@ -2365,7 +2372,7 @@ Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workf
 不同 worktree 的工具输入各自复用对应标签，避免 `local` 被更新后反复构建。
 复用前仍核对 Linux 原生架构及工具内容标签，本次回归固定镜像 ID。
 同一仓库、同一 Windows 用户的各任务和 worktree 试用三个回归槽位；普通 selector 占一个，
-`ci`、`ci-pr`、`all` 和 `docker-contracts` 占两个。完整回归登记等待后，不再放行新普通任务，
+`ci`、`ci-pr`、`all`、`docker-contracts` 和 `docker-contracts-full` 占两个。完整回归登记等待后，不再放行新普通任务，
 优先等待所需槽位；取得槽位后，普通任务可以使用剩余一槽。最多三个普通任务或一套完整回归加一个普通任务，
 两套完整回归不能重叠；没有足够空位时自动等待，不保证严格 FIFO。
 排队前生成源码快照；镜像构建串行化并固定镜像 ID；异常退出后的槽位接管会先清理本入口标记的残留容器。

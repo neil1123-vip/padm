@@ -43,7 +43,7 @@ status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text
 mask = (1 << 12) | (1 << 21)
 nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-log-cron-real", "docker-routing-ipv6-real",
                        "docker-control-fail2ban-real", "docker-port-hopping-tuic-real")
-memory_workspace = sys.argv[1] == "docker-contracts"
+memory_workspace = sys.argv[1] in ("docker-contracts", "docker-contracts-full")
 
 def filesystem_type(path):
     mounts = {}
@@ -67,7 +67,7 @@ assert (probe.stat().st_uid, probe.stat().st_gid) == (10001, 10001)
 os.chown(probe, os.getuid(), os.getgid())
 assert subprocess.run([str(probe)], check=False).returncode == 0
 
-driver = sys.argv[1] in ("docker-ssh-driver", "docker-contracts", "docker-contracts-fast",
+driver = sys.argv[1] in ("docker-ssh-driver", "docker-contracts", "docker-contracts-full", "docker-contracts-fast",
                         "docker-contracts-fast-rest")
 guard = sys.argv[1] in ("docker-fail2ban-ownership", "docker-fail2ban-focused")
 expected = mask if sys.argv[1] in ("docker-control-two-node-real", "docker-routing-warp-real",
@@ -89,7 +89,7 @@ PY
 printf 'current-worktree-snapshot-ok\n'
 case "$1" in
     hold) sleep 12 ;;
-    ci|docker-contracts) sleep 8 ;;
+    ci|docker-contracts|docker-contracts-full) sleep 8 ;;
     ci-pr) sleep 60 ;;
 esac
 [[ "$1" != fail ]] || exit 7
@@ -104,7 +104,7 @@ $runner = Join-Path $runnerDir 'run-docker.ps1'
 $rejected = $false
 try { & $runner -Selector fast -Jobs 5 }
 catch {
-    if ($_.Exception.Message -notmatch '^Only docker-contracts supports more than 4 jobs') { throw }
+    if ($_.Exception.Message -notmatch '^Only docker-contracts and docker-contracts-full support more than 4 jobs') { throw }
     $rejected = $true
 }
 if (-not $rejected -or (Get-ChildItem -Directory -LiteralPath $fixture -Filter '.tmp-regression-docker-*')) {
@@ -113,11 +113,13 @@ if (-not $rejected -or (Get-ChildItem -Directory -LiteralPath $fixture -Filter '
 $ordinaryCases = if ($Scope -eq 'artifacts') {
     @(
         @{ selector = 'fast'; expected = 0 },
+        @{ selector = 'docker-contracts-full'; expected = 0 },
         @{ selector = 'fail'; expected = 7 },
         @{ selector = 'routing-socks5-source-real'; expected = 0 }
     )
 } else { @(
     @{ selector = 'fast'; expected = 0 },
+    @{ selector = 'docker-contracts-full'; expected = 0 },
     @{ selector = 'docker-contracts-other'; expected = 0 },
     @{ selector = 'fail'; expected = 7 },
     @{ selector = 'docker-control-two-node-real'; expected = 0 },
@@ -144,10 +146,14 @@ foreach ($case in $ordinaryCases) {
         Sort-Object CreationTime -Descending | Select-Object -First 1
     $result = Get-Content -Raw -LiteralPath (Join-Path $artifacts.FullName 'result.json') | ConvertFrom-Json
     if ($result.exit_code -ne $case.expected) { throw 'Wrong saved exit code.' }
-    if ($result.jobs -ne 2 -or $result.cache_hit -or $result.workspace_storage -ne 'overlay') {
+    $contractCase = $case.selector -eq 'docker-contracts-full'
+    $expectedJobs = if ($contractCase) { 6 } else { 2 }
+    $expectedStorage = if ($contractCase) { 'tmpfs' } else { 'overlay' }
+    $expectedSlots = if ($contractCase) { 2 } else { 1 }
+    if ($result.jobs -ne $expectedJobs -or $result.cache_hit -or $result.workspace_storage -ne $expectedStorage) {
         throw 'Wrong ordinary regression defaults.'
     }
-    if ($result.queue_slots -ne 1 -or $result.queue_budget -ne 3 -or $result.image_id -notmatch '^sha256:') {
+    if ($result.queue_slots -ne $expectedSlots -or $result.queue_budget -ne 3 -or $result.image_id -notmatch '^sha256:') {
         throw 'Missing queue or image evidence.'
     }
     if (-not (Select-String -Quiet -LiteralPath (Join-Path $artifacts.FullName 'regression.log') `

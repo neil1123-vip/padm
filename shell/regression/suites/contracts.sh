@@ -283,6 +283,17 @@ runRegressionDockerContractsAggregateContract() (
         docker-wireguard-runtime docker-subscriptions docker-accounts-cli
         docker-ssh-preflight docker-ssh-driver docker-business docker-backup docker-recovery-preview docker-recovery-apply docker-phase2
     )
+    local -a coreSelectors=(
+        docker-port-hopping-preflight docker-tproxy-ownership docker-redirect-focused
+        docker-reality docker-shadowsocks-rotation docker-phase4-maintenance docker-vless-encryption
+        docker-reality-parameters docker-phase4-lifecycle
+        docker-xhttp-rollback docker-recovery-preview docker-fail2ban-ownership docker-control-state
+        docker-tun-management docker-release docker-control-cli docker-routing-core-contracts docker-subscriptions
+        docker-phase5 docker-xhttp-validation
+        docker-backup docker-control-sync docker-geo-data docker-ssh-driver docker-ssh-preflight
+        docker-traffic docker-accounts docker-permissions docker-fail2ban-source docker-control-api
+        docker-accounts-cli docker-wireguard-runtime docker-business docker-phase2
+    )
 
     runFrameworkParallelRegressionSelectors() {
         [[ "${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-}" == pairs &&
@@ -294,7 +305,7 @@ runRegressionDockerContractsAggregateContract() (
     }
 
     : >"${expectedLog}"
-    for selector in "${expectedSelectors[@]}"; do
+    for selector in "${coreSelectors[@]}"; do
         printf '%s\n%s\n' "${selector}" "${selector}" >>"${expectedLog}"
     done
     local PADM_REGRESSION_PARALLEL_JOBS=''
@@ -305,7 +316,24 @@ runRegressionDockerContractsAggregateContract() (
     [[ "${status}" -eq 7 ]]
     cmp -s "${expectedLog}" "${callLog}"
 
-    # 工作流分片与本机全量套件必须恰好覆盖同一组叶子，不能漏测或重复执行。
+    : >"${expectedLog}"
+    for selector in "${expectedSelectors[@]}"; do
+        printf '%s\n%s\n' "${selector}" "${selector}" >>"${expectedLog}"
+    done
+    set +e
+    (PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-contracts-full) >/dev/null 2>&1
+    status=$?
+    set -e
+    [[ "${status}" -eq 7 ]]
+    cmp -s "${expectedLog}" "${callLog}"
+    # 精简门禁必须是全量的无重复子集，不能注册后悄悄丢失。
+    [[ "${#coreSelectors[@]}" -eq 34 ]]
+    [[ "$(printf '%s\n' "${coreSelectors[@]}" | sort -u | wc -l)" -eq 34 ]]
+    for selector in "${coreSelectors[@]}"; do
+        printf '%s\n' "${expectedSelectors[@]}" | grep -qxF "${selector}"
+    done
+
+    # 工作流分片与本机 full 套件必须恰好覆盖同一组叶子，不能漏测或重复执行。
     local workflow="${PROJECT_ROOT}/.github/workflows/docker-contracts.yml"
     local actual="${TMP_DIR}/docker-contract-shards.actual"
     local expected="${TMP_DIR}/docker-contract-shards.expected"

@@ -59,6 +59,46 @@ listRegressionDockerTlsFocusedChildSelectors() {
 }
 
 listRegressionDockerContractsChildSelectors() {
+    # 日常合同保留高频核心门禁；恢复故障注入、升级及功能矩阵在 full 与 CI 执行。
+    # 所有权与密钥长任务先启动，避免最后只剩一个长任务。
+    printf '%s\n' \
+        docker-port-hopping-preflight \
+        docker-tproxy-ownership \
+        docker-redirect-focused \
+        docker-reality \
+        docker-shadowsocks-rotation \
+        docker-phase4-maintenance \
+        docker-vless-encryption \
+        docker-reality-parameters \
+        docker-phase4-lifecycle \
+        docker-xhttp-rollback \
+        docker-recovery-preview \
+        docker-fail2ban-ownership \
+        docker-control-state \
+        docker-tun-management \
+        docker-release \
+        docker-control-cli \
+        docker-routing-core-contracts \
+        docker-subscriptions \
+        docker-phase5 \
+        docker-xhttp-validation \
+        docker-backup \
+        docker-control-sync \
+        docker-geo-data \
+        docker-ssh-driver \
+        docker-ssh-preflight \
+        docker-traffic \
+        docker-accounts \
+        docker-permissions \
+        docker-fail2ban-source \
+        docker-control-api \
+        docker-accounts-cli \
+        docker-wireguard-runtime \
+        docker-business \
+        docker-phase2
+}
+
+listRegressionDockerContractsFullChildSelectors() {
     # 长事务与两族所有权优先调度，减少完整回归尾部等待。
     printf '%s\n' \
         docker-xhttp-edit \
@@ -1182,6 +1222,8 @@ registerRegressionParallelSelectorList docker-phase3-entries runFrameworkParalle
     "${TMP_DIR}/docker-phase3-entries-${BASHPID:-$$}" listRegressionDockerPhase3EntriesChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts runRegressionDockerContracts \
     "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-full runRegressionDockerContracts \
+    "${TMP_DIR}/docker-contracts-full-parallel-${BASHPID:-$$}" listRegressionDockerContractsFullChildSelectors 2
 registerRegressionParallelSelectorList docker-vless-encryption-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-vless-encryption-parallel-${BASHPID:-$$}" listRegressionDockerVlessEncryptionChildSelectors 2
 registerRegressionParallelSelectorList docker-subscription-publication-focused runFrameworkParallelRegressionSelectorListWithJobs \
