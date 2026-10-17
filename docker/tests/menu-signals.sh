@@ -136,7 +136,13 @@ for mode in input worker edit-input edit-worker tls-input tls-worker \
         control-*)
             printf '15\n' >&3
             waitText 'Docker 控制连接' || exit 18
-            if [[ "${mode}" == control-source-* ]]; then printf '7\n' >&3; else printf '8\n' >&3; fi
+            if [[ "${mode}" == control-source-* ]]; then
+                printf '7\n' >&3
+                waitText 'Peer ID（v2 必填，v1 可留空，0 返回）' || exit 27
+                printf '\n' >&3
+            else
+                printf '8\n' >&3
+            fi
             ;;
         edit-*) printf '7\n' >&3 ;;
         tls-*) printf '8\n' >&3 ;;

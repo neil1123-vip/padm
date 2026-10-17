@@ -60,11 +60,12 @@ listRegressionDockerTlsFocusedChildSelectors() {
 
 listRegressionDockerContractsChildSelectors() {
     # 日常合同保留高频核心门禁；恢复故障注入、升级及功能矩阵在 full 与 CI 执行。
-    # 所有权与密钥长任务先启动，避免最后只剩一个长任务。
+    # 所有权、密钥及 WireGuard 集合事务先启动，避免单个长任务独占收尾。
     printf '%s\n' \
         docker-port-hopping-preflight \
         docker-tproxy-ownership \
         docker-redirect-focused \
+        docker-wireguard-runtime \
         docker-reality \
         docker-shadowsocks-rotation \
         docker-phase4-maintenance \
@@ -93,7 +94,6 @@ listRegressionDockerContractsChildSelectors() {
         docker-fail2ban-source \
         docker-control-api \
         docker-accounts-cli \
-        docker-wireguard-runtime \
         docker-business \
         docker-phase2
 }
@@ -107,6 +107,7 @@ listRegressionDockerContractsFullChildSelectors() {
         docker-xhttp-edit \
         docker-port-hopping-preflight \
         docker-tproxy-ownership \
+        docker-wireguard-runtime \
         docker-redirect-focused \
         docker-phase3-entries-management-protocol \
         docker-reality \
@@ -164,7 +165,6 @@ listRegressionDockerContractsFullChildSelectors() {
         docker-fail2ban-source \
         docker-control-api \
         docker-accounts-cli \
-        docker-wireguard-runtime \
         docker-business \
         docker-phase2
 }

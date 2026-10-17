@@ -286,14 +286,14 @@ runRegressionDockerContractsAggregateContract() (
     )
     local -a coreSelectors=(
         docker-port-hopping-preflight docker-tproxy-ownership docker-redirect-focused
-        docker-reality docker-shadowsocks-rotation docker-phase4-maintenance docker-vless-encryption
+        docker-wireguard-runtime docker-reality docker-shadowsocks-rotation docker-phase4-maintenance docker-vless-encryption
         docker-reality-parameters docker-phase4-lifecycle
         docker-xhttp-rollback docker-recovery-preview docker-fail2ban-ownership docker-control-state
         docker-tun-management docker-release docker-control-cli docker-routing-core-contracts docker-subscriptions
         docker-phase5 docker-xhttp-validation
         docker-backup docker-control-sync docker-geo-data docker-ssh-driver docker-ssh-preflight
         docker-traffic docker-accounts docker-permissions docker-fail2ban-source docker-control-api
-        docker-accounts-cli docker-wireguard-runtime docker-business docker-phase2
+        docker-accounts-cli docker-business docker-phase2
     )
 
     runFrameworkParallelRegressionSelectors() {
