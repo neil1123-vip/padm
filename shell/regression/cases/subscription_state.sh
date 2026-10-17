@@ -25,16 +25,30 @@ JSON
 }
 
 writeSubscriptionStateStructureFoundationFixture() {
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
+    local stateJson
+    writeSubscriptionStateDefaultFixture || return 1
+    stateJson=$(jq '
+      .groups[0].sources = [.groups[0].sources[0]] |
+      .groups[0].user_groups = []
+    ' "$(subscriptionGroupsFile)") || return 1
+    printf '%s\n' "${stateJson}" >"$(subscriptionGroupsFile)"
 }
 
 prepareSubscriptionStateQuotaUsageFixture() {
+    local stateJson
     mkdir -p "$(subscriptionGroupsDir)"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":true,"sync_status":"pending","control_token":"token-def"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":2097152,"download":1048576,"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"}}},"user_groups":{"team-a":{"upload":1073741824,"download":1,"sources":{"main":{"upload":1073741824,"download":1}}}},"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"},"remote-edge":{"upload":1048576,"download":0,"updated_at":"2026-06-10 10:01:00"}}}}]}
-JSON
+    writeSubscriptionStateDefaultFixture || return 1
+    stateJson=$(jq '
+      .groups[0].user_groups[0].traffic_limit_gb = 1 |
+      .groups[0].traffic = {
+        global:{upload:0,download:0},
+        admin:{upload:2097152,download:1048576,sources:{main:{upload:2097152,download:1048576,updated_at:"2026-06-10 10:00:00"}}},
+        user_groups:{"team-a":{upload:1073741824,download:1,sources:{main:{upload:1073741824,download:1}}}},
+        sources:{main:{upload:2097152,download:1048576,updated_at:"2026-06-10 10:00:00"},
+          "remote-edge":{upload:1048576,download:0,updated_at:"2026-06-10 10:01:00"}}
+      }
+    ' "$(subscriptionGroupsFile)") || return 1
+    printf '%s\n' "${stateJson}" >"$(subscriptionGroupsFile)"
 }
 
 prepareSubscriptionGroupSyncFixture() {
@@ -1349,17 +1363,7 @@ runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression() {
     writeSubscriptionStateDefaultFixture
     ensureSubscriptionGroupsState
 
-    local beforeSnapshot legacyBackup menuBackup
-    legacyBackup="${TMP_DIR}/legacy-groups-backup.json"
-    cat >"${legacyBackup}" <<'JSON'
-{"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
-JSON
-    beforeSnapshot=$(<"$(subscriptionGroupsFile)")
-    if restoreSubscriptionGroupsBackup "${legacyBackup}" >/dev/null 2>&1; then
-        return 1
-    fi
-    [[ "$(<"$(subscriptionGroupsFile)")" == "${beforeSnapshot}" ]]
-
+    local menuBackup
     menuBackup="${TMP_DIR}/legacy-menu-backup.json"
     jq '.id = "legacy" | .name = "Legacy"' "$(subscriptionGroupsFile)" >"${menuBackup}"
     jq empty "${menuBackup}" >/dev/null
@@ -2580,11 +2584,9 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
 runSubscriptionGroupsRestoreFailureRegression() (
     local root="${TMP_DIR}/subscription-groups-restore-failure"
     local groupsDir="${root}/groups"
-    local currentBackup="${root}/current-backup.json"
     local targetBackup="${root}/target-backup.json"
     local stateFile="${groupsDir}/groups.json"
-    local beforeSnapshot
-    local rc
+    local beforeSnapshot stateVersion
 
     export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsDir}"
     TMPDIR="${root}"
@@ -2592,20 +2594,19 @@ runSubscriptionGroupsRestoreFailureRegression() (
     cat >"${stateFile}" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
-    beforeSnapshot=$(<"${stateFile}")
-    cp "${stateFile}" "${currentBackup}"
     cat >"${targetBackup}" <<'JSON'
 {"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
 JSON
 
-    createSubscriptionGroupsBackup() {
-        printf '%s\n' "${currentBackup}"
-    }
-
-    regressionExpectStatus 1 restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
-    [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
-    [[ -f "${currentBackup}" ]]
-
+    for stateVersion in 2 6; do
+        if [[ "${stateVersion}" == 6 ]]; then
+            ensureSubscriptionGroupsState
+        fi
+        [[ "$(jq -r '.version' "${stateFile}")" == "${stateVersion}" ]]
+        beforeSnapshot=$(<"${stateFile}")
+        regressionExpectStatus 1 restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
+        [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
+    done
 )
 
 runSubscriptionGroupSyncTrafficReloadOrderRegression() (

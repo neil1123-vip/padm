@@ -3639,18 +3639,3 @@ CSV
     [[ "${firstFailCount}" == "1" ]]
     [[ "${secondFailCount}" == "2" ]]
 }
-
-runRealityConfigRegression() {
-    runRegressionStep reality-config-vless-encryption runRealityConfigVlessEncryptionRegression
-    runRegressionStep reality-config-scanner runRealityConfigScannerRegression
-    runRegressionStep reality-config-blocked-transaction runRealityBlockedCandidateTransactionRegression
-    runRegressionStep reality-config-unified-library-rollback runRealityUnifiedLibraryRollbackRegression
-    runRegressionStep reality-config-apply runRealityConfigApplyRegression
-    runRegressionStep reality-config-change-reload-failure runRealityConfigChangeReloadFailureRegression
-    runRegressionStep reality-config-change-subscription-refresh-failure runRealityConfigChangeSubscriptionRefreshFailureRegression
-    runRegressionStep reality-config-xhttp-download-settings runXHTTPDownloadSettingsRegression
-    runRegressionStep reality-config-stream-split runRealityStreamSplitRegression
-    runRegressionStep reality-config-refresh-subscription runRealityConfigRefreshSubscriptionRegression
-    runRegressionStep reality-config-controlled-refresh runRealityConfigControlledRefreshRegression
-    runRegressionStep reality-config-import-skip runRealityConfigImportSkipRegression
-}

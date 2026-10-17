@@ -170,18 +170,3 @@ regressionMockCurlAvailable() {
         builtin command "$@"
     }
 }
-
-regressionResetProtocolPorts() {
-    currentPort=
-    customPort=
-    xrayVLESSRealityPort=
-    xrayVLESSRealityXHTTPort=
-    singBoxVLESSVisionPort=
-    singBoxVLESSRealityVisionPort=
-    singBoxVLESSRealityGRPCPort=
-    singBoxHysteria2Port=
-    singBoxTuicPort=
-    singBoxSocks5Port=
-    hysteriaPort=
-    tuicPort=
-}

@@ -3604,12 +3604,7 @@ runInstallRefreshRejectsUnsafeScriptDirRegression() (
         cd "${root}"
         TMPDIR="${root}/tmp"
         regressionLoadInstallFunctions
-        SCRIPT_DIR="relative-script"
-        REPO_ARCHIVE_DIR="padm-main"
-        SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref"
-        SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
-        SCRIPT_MANIFEST_FILE="${SCRIPT_DIR}/.padm-module-manifest"
-        REPO_ZIP_URL="fixture.tar.gz"
+        regressionConfigureInstallRefreshFixture relative-script
         regressionMockCurlAvailable
         curl() { tar -czf "${@: -2:1}" -C "${root}/archive" padm-main; }
         refreshScriptModules 4444444444444444444444444444444444444444

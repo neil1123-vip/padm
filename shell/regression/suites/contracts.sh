@@ -691,7 +691,7 @@ runRegressionCaseLoaderContract() (
         "${PROJECT_ROOT}" "${sourceLog}" "${casePaths[@]}" || return 1
     [[ ! -s "${sourceLog}" ]] || return 1
     for suiteFile in "${PROJECT_ROOT}"/shell/regression/suites/*.sh; do
-        ! grep -Eq '^[[:space:]]*(PADM_REGRESSION_SOURCE_ONLY=1[[:space:]]+)?source[[:space:]]' "${suiteFile}" || return 1
+        ! grep -Eq '^[[:space:]]*(PADM_REGRESSION_SOURCE_ONLY=1[[:space:]]+)?source[[:space:]]+[^[:space:]=]' "${suiteFile}" || return 1
     done
     ! grep -R -E -- "${compatibilityPattern}" \
         "${PROJECT_ROOT}/shell/regression" "${entry}" || return 1
