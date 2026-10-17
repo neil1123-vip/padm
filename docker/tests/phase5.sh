@@ -894,43 +894,101 @@ awk '
     done
 )
 
+# 执行正式原生包装，验证测试失败仍回收进程，适配器失败仍运行原入口。
+HOPPING_NATIVE_SCRIPT=${TEST_ROOT}/hopping-native.sh
+awk '
+    /bash -s -- "\$\{SELECTOR\}"/ {code = 1; next}
+    code {
+        if ($0 == "          SH") exit
+        sub(/^          /, ""); print
+    }
+' "${CONTRACT_WORKFLOW}" >"${HOPPING_NATIVE_SCRIPT}"
+[[ -s "${HOPPING_NATIVE_SCRIPT}" ]] || fail '原生快照包装缺失'
+(
+    export HOPPING_FIXTURE_ROOT=${TEST_ROOT}/hopping-native
+    mkdir -p "${HOPPING_FIXTURE_ROOT}/shell/regression/container"
+    cd "${HOPPING_FIXTURE_ROOT}"
+    cat >shell/regression/container/snapshot-fork-runtime.sh <<'SH'
+padmSnapshotForkStart() {
+    [[ "${HOPPING_CASE}" != fallback ]] || return 1
+    sleep 60 &
+    export PADM_SNAPSHOT_FORK_PID=$! PADM_SNAPSHOT_FORK_CLIENT=fixture
+    printf '%s\n' "${PADM_SNAPSHOT_FORK_PID}" >"${HOPPING_FIXTURE_ROOT}/pid"
+}
+SH
+    cat >shell/subscription_groups_regression.sh <<'SH'
+[[ "$1" == docker-port-hopping-preflight ]] || exit 8
+printf '%s\n' "${PADM_SNAPSHOT_FORK_CLIENT:-fallback}" >"${HOPPING_FIXTURE_ROOT}/mode"
+[[ "${HOPPING_CASE}" != test-failed ]] || exit 7
+SH
+    for scenario in success fallback test-failed; do
+        rm -f -- pid mode
+        status=0
+        HOPPING_CASE=${scenario} bash "${HOPPING_NATIVE_SCRIPT}" docker-port-hopping-preflight || status=$?
+        if [[ "${scenario}" == test-failed ]]; then
+            [[ "${status}" -eq 7 ]] || fail '原生跳跃包装吞掉测试失败'
+        else
+            [[ "${status}" -eq 0 ]] || fail '原生跳跃包装失败'
+        fi
+        expected=fixture
+        [[ "${scenario}" != fallback ]] || expected=fallback
+        [[ "$(<mode)" == "${expected}" ]] || fail '快照适配器失败未回退'
+        if [[ -f pid ]] && kill -0 "$(<pid)" 2>/dev/null; then
+            kill "$(<pid)"
+            fail '原生跳跃包装残留快照进程'
+        fi
+    done
+)
+
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
-grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
+grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS="${jobs}" PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
     fail 'contract shards do not use root-safe temp directories and bounded workers'
 for siteContract in \
-    'docker build --tag padm-regression:contracts shell/regression/container' \
+    'docker build --target contracts --tag padm-regression:contracts shell/regression/container' \
     'git ls-files -z | tar --null -T - -cf' \
     'docker run --rm --network none --init' \
     '--tmpfs /work:rw,exec,mode=0755 --tmpfs /tmp:rw,exec,mode=1777' \
     'jobs=2' \
-    'if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi' \
+    'if [[ "${SELECTOR}" == docker-contracts-fast-rest ]]; then jobs=4; fi' \
     '--env PADM_REGRESSION_PARALLEL_JOBS="${jobs}"' \
     '--env PADM_DOCKER_CONTRACTS_SHARED_CHECKS' \
     '--env PADM_REGRESSION_VERBOSE=1' \
-    'capabilities=(--cap-add SYS_PTRACE --cap-add SYS_ADMIN --security-opt apparmor=unconfined)' \
     'padm-regression:contracts "${SELECTOR}"'; do
     grep -Fq -- "${siteContract}" "${CONTRACT_WORKFLOW}" ||
         fail '站点合同未复用隔离工具镜像、当前源码快照或有界并发'
 done
 grep -Fq 'listRegressionDockerContractsFastChildSelectors 4' "${FAST_SUITE}" ||
     fail 'docker-contracts-fast does not use four workers'
-for shard in Heavy Rest; do
-    grep -Fq "listRegressionDockerContractsFast${shard}ChildSelectors 4" "${FAST_SUITE}" ||
-        fail "fast ${shard} 分片没有保留有界并发"
+grep -Fq 'listRegressionDockerContractsFastRestChildSelectors 4' "${FAST_SUITE}" ||
+    fail 'fast rest 分片没有保留有界并发'
+for shard in Heavy Sites; do
+    grep -Fq "listRegressionDockerContractsFast${shard}ChildSelectors 2" "${FAST_SUITE}" ||
+        fail "fast ${shard} 分片没有减少长任务间的 CPU 争抢"
 done
-grep -Fq "CONTRACT_TOOLS: \${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')" "${CONTRACT_WORKFLOW}" &&
+grep -Fq "hashFiles('shell/regression/container/Dockerfile', 'shell/regression/container/entrypoint.sh')" "${CONTRACT_WORKFLOW}" ||
+    fail '工具缓存必须仅绑定实际镜像构建输入'
+grep -Fq 'FROM contracts AS full' "${PROJECT_ROOT}/shell/regression/container/Dockerfile" ||
+    fail '本机完整工具镜像没有继承 CI 合同依赖'
+grep -Fq "CONTRACT_TOOLS: \${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') }}" "${CONTRACT_WORKFLOW}" &&
     [[ "$(grep -Fc "if: env.CONTRACT_TOOLS == 'true'" "${CONTRACT_WORKFLOW}")" -eq 2 ]] &&
     grep -Fq "if: env.CONTRACT_TOOLS != 'true'" "${CONTRACT_WORKFLOW}" &&
-    grep -Fq 'if [[ "${CONTRACT_TOOLS}" == true ]]; then' "${CONTRACT_WORKFLOW}" ||
+    grep -Fq 'elif [[ "${CONTRACT_TOOLS}" == true ]]; then' "${CONTRACT_WORKFLOW}" ||
     fail '工具分片的缓存、准备和执行条件没有保持一致'
-# ML-KEM 与独立事务分片必须沿用隔离工具镜像和当前源码快照。
-for shard in docker-port-hopping-preflight docker-contracts-reality-metadata docker-contracts-recovery docker-xhttp-edit; do
-    grep -F '      CONTRACT_TOOLS:' "${CONTRACT_WORKFLOW}" |
-        grep -Fq "|| matrix.selector == '${shard}'" ||
-        fail "${shard} 未沿用隔离工具镜像和当前源码快照"
+grep -Fq "sudo python3 -c 'import jsonschema'" "${CONTRACT_WORKFLOW}" &&
+    grep -Fq 'sudo apt-get install -y python3-jsonschema' "${CONTRACT_WORKFLOW}" ||
+    fail '原生分片缺少 Schema 校验器依赖保障'
+grep -Fq "startsWith(matrix.selector, 'docker-contracts-reality-')" "${CONTRACT_WORKFLOW}" ||
+    fail 'Reality 元数据和轮换分片未沿用新版 OpenSSL'
+for hoppingContract in \
+    'if [[ "${SELECTOR}" == docker-port-hopping-preflight ]]; then' \
+    'source shell/regression/container/snapshot-fork-runtime.sh' \
+    'if ! padmSnapshotForkStart; then' \
+    'kill "${PADM_SNAPSHOT_FORK_PID}"' \
+    'wait "${PADM_SNAPSHOT_FORK_PID}"' \
+    'bash shell/subscription_groups_regression.sh "$1"'; do
+    grep -Fq "${hoppingContract}" "${CONTRACT_WORKFLOW}" ||
+        fail '原生端口跳跃分片缺少快照复用、回退或进程回收'
 done
-grep -Fq '"${SELECTOR}" == docker-contracts-fast-rest || "${SELECTOR}" == docker-port-hopping-preflight' "${CONTRACT_WORKFLOW}" ||
-    fail '端口跳跃独立分片未沿用所需能力'
 grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
 grep -Fq 'max-parallel: 18' "${CONTRACT_WORKFLOW}" ||

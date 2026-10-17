@@ -13,7 +13,7 @@ case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}" in
 *) printf 'docker-phase3-regression-fail: unknown entries branch %s\n' "${PHASE3_ENTRIES_BRANCH}" >&2; exit 1 ;;
 esac
 case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}:${PHASE3_MANAGEMENT_GROUP}" in
-*:all|entries:management:protocol|entries:management:tls) ;;
+*:all|entries:management:protocol|entries:management:tls|entries:management:tls-reinstall) ;;
 *) printf 'docker-phase3-regression-fail: unknown management group %s\n' "${PHASE3_MANAGEMENT_GROUP}" >&2; exit 1 ;;
 esac
 
@@ -1275,7 +1275,7 @@ assertSsPrivate() {
             fail 'Shadowsocks 密钥出现在预览、业务输出或外部 argv'
     done <"${DOCKER_LOG}.ss-generated"
 }
-if [[ "${PHASE3_MANAGEMENT_GROUP}" != tls ]]; then
+if [[ "${PHASE3_MANAGEMENT_GROUP}" == all || "${PHASE3_MANAGEMENT_GROUP}" == protocol ]]; then
 # 内部端口复用同一在线事务；协议差异只跑生成器，不重复整套部署。
 for invalidPort in 0 65536 031300 -1 +1 1e3 not-a-port; do
     protocolEdit 2 internal-ports-invalid-backend --internal-ports vless-ws "${invalidPort}" 8643 --preview
@@ -1707,6 +1707,7 @@ assertFirstTlsSpec() {
       ($new.websocket.domain // $new.trojan.domain // $new.tuic.domain)==$domain
     ' "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '首个 TLS 增量改变其它规格或账号授权'
 }
+if [[ "${PHASE3_MANAGEMENT_GROUP}" != tls-reinstall ]]; then
 runControl 0 protocol-first-tls-baseline configure --spec "${FIRST_TLS_REALITY}"
 firstTlsEdit 15 protocol-first-tls-input-missing --protocol-add vless-reality 21 32443 --preview
 firstTlsEdit 15 protocol-first-tls-source-missing --protocol-add vless-reality 21 32443 \
@@ -2057,7 +2058,12 @@ firstTlsEdit 15 protocol-first-tls-import-not-authorized \
     --spec "${TEST_ROOT}/protocol-first-tls-foreign.json" --preview
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '首个 TLS 增量改变累计流量或额度'
+else
+    # 重装分片从真实配置重建切点，保留非零流量、Geo、证书及独立 ACME 账号。
+    runControl 0 protocol-reinstall-baseline configure --spec "${FIRST_TLS_REALITY}"
+fi
 
+if [[ "${PHASE3_MANAGEMENT_GROUP}" != tls ]]; then
 # 重装复用完整候选事务，只用一次跨核心、协议和账号替换验证编辑边界与恢复。
 REINSTALL_SPEC="${TEST_ROOT}/reinstall-private.json"
 jq '.core.protocols[0] |= (.public_port=33443 | .name="reinstalled-hy2" |
@@ -2338,6 +2344,7 @@ jq -e --slurpfile before "${PROTOCOL_BASE}" '
         "${DOCKER_ROOT}/secrets/renewal/migrated-alpn.example.com/request.json" >/dev/null &&
     [[ ! -e "${DOCKER_ROOT}/secrets/renewal/migrated-alpn.example.com/credentials.env" ]] ||
     fail 'ALPN TLS 迁移改变其它规格，或未登记实际续期参数'
+fi
 fi
 fi
 

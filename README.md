@@ -2355,11 +2355,16 @@ Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回
 普通定向 selector 默认 `-Jobs 2`，完整 `ci`、`ci-pr`、`all` 默认 `-Jobs 3`，
 `docker-contracts` 与 `docker-contracts-full` 默认 `-Jobs 6`（支持 1–8）。
 日常 `docker-contracts` 收敛为 34 项高频核心门禁，保留权限、所有权、密钥、回滚、恢复预览及控制链检查，
-以本机 5 分钟内反馈为目标。原 65 项完整集合使用 `docker-contracts-full`，
+以本机 5 分钟内反馈为目标。完整集合使用 `docker-contracts-full`，
 包含恢复 apply 故障注入、升级、协议、首配、菜单、多入口与路由工作流深层矩阵；
 CI 分片继续覆盖这套完整集合。
-CI 保持 18 个合同分片，将恢复和 XHTTP 编辑独立调度，合并较短首配分片；
-分片内长任务先启动，工具容器的源码和临时目录使用 tmpfs。
+CI 保持 18 个合同分片，将 TLS 续期与重装拆开，分散站点、菜单、恢复和所有权长任务，
+合并较短场景；原 65 项断言全部保留，TLS 拆分后为 66 个执行单元。
+分片内长任务先启动，工具容器的源码和临时目录使用 tmpfs，
+CI 仅构建 `contracts` 工具 target，本机默认完整镜像保留 Docker daemon、Wrangler 和二维码缓存。
+恢复 apply、XHTTP 编辑及路由分片直接使用 runner 工具，省去不需要的镜像准备；
+新版 OpenSSL、站点分片继续使用隔离工具镜像；
+端口跳跃在 runner 复用同一快照适配器，配置、目标及监督检查并行执行。
 两者均按当前快照匹配成功结果，`-ForceRun` 可强制实际重跑。
 Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workflow` 和 `docker-menu`；
 工作流定向复用原事务断言，不替代 Schema、生成器、其它路由矩阵和真实流量验收。

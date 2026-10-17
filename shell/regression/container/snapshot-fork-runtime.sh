@@ -3,6 +3,8 @@
 padmSnapshotForkStart() {
     local directory sourceDirectory deadline
     sourceDirectory=$(cd -- "${BASH_SOURCE[0]%/*}" && pwd -P) || return 1
+    PADM_SNAPSHOT_FORK_ROOT=$(cd -- "${sourceDirectory}/../../.." && pwd -P) || return 1
+    export PADM_SNAPSHOT_FORK_ROOT
     directory=$(mktemp -d "${TMPDIR:-/tmp}/snapshot-fork.XXXXXX") || return 1
     chmod 0700 "${directory}" || return 1
     gcc -O2 -Wall -Wextra "${sourceDirectory}/snapshot-fork-client.c" \
@@ -10,7 +12,7 @@ padmSnapshotForkStart() {
     export PADM_SNAPSHOT_FORK_CLIENT="${directory}/client"
     export PADM_SNAPSHOT_FORK_SOCKET="${directory}/socket"
     command python3 "${sourceDirectory}/snapshot-fork-server.py" \
-        "${PADM_SNAPSHOT_FORK_SOCKET}" /work/docker/lib/services.sh \
+        "${PADM_SNAPSHOT_FORK_SOCKET}" "${PADM_SNAPSHOT_FORK_ROOT}/docker/lib/services.sh" \
         >"${directory}/server.log" 2>&1 &
     PADM_SNAPSHOT_FORK_PID=$!
     export PADM_SNAPSHOT_FORK_PID
@@ -24,7 +26,7 @@ padmSnapshotForkStart() {
         sleep 0.01
     done
     if ! command python3 "${sourceDirectory}/snapshot-fork-test.py" \
-        "${PADM_SNAPSHOT_FORK_CLIENT}" /work/docker/lib/services.sh; then
+        "${PADM_SNAPSHOT_FORK_CLIENT}" "${PADM_SNAPSHOT_FORK_ROOT}/docker/lib/services.sh"; then
         kill "${PADM_SNAPSHOT_FORK_PID}" 2>/dev/null || true
         return 1
     fi
@@ -40,8 +42,8 @@ fi
 
 python3() {
     if [[ "${FUNCNAME[1]:-}" == dockerPortHoppingTargetSnapshot && "$#" == 7 && "$1" == - &&
-        ( "${BASH_SOURCE[-1]:-}" == /work/docker/tests/port-hopping-start.sh ||
-          "${BASH_SOURCE[-1]:-}" == /work/docker/tests/port-hopping-target.sh ) &&
+        ( "${BASH_SOURCE[-1]:-}" == "${PADM_SNAPSHOT_FORK_ROOT:-}/docker/tests/port-hopping-start.sh" ||
+          "${BASH_SOURCE[-1]:-}" == "${PADM_SNAPSHOT_FORK_ROOT:-}/docker/tests/port-hopping-target.sh" ) &&
         -x "${PADM_SNAPSHOT_FORK_CLIENT:-}" ]]; then
         "${PADM_SNAPSHOT_FORK_CLIENT}" "$@"
     else

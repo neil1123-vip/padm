@@ -102,6 +102,7 @@ listRegressionDockerContractsFullChildSelectors() {
     # 按完整回归实测耗时先启动长任务，避免恢复故障矩阵独占收尾。
     printf '%s\n' \
         docker-phase3-entries-management-tls \
+        docker-phase3-entries-management-tls-reinstall \
         docker-recovery-apply \
         docker-xhttp-edit \
         docker-port-hopping-preflight \
@@ -176,20 +177,23 @@ runRegressionDockerContracts() {
 
 listRegressionDockerContractsFastChildSelectors() {
     listRegressionDockerContractsFastHeavyChildSelectors
+    listRegressionDockerContractsFastSitesChildSelectors
     listRegressionDockerContractsFastRestChildSelectors
     listRegressionDockerContractsRecoveryChildSelectors
-    printf '%s\n' docker-port-hopping-preflight
+    printf '%s\n' docker-port-hopping-preflight docker-tproxy-ownership docker-redirect-focused
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
-    printf '%s\n' docker-sites docker-entry-port-alias docker-cdn-entries docker-menu docker-control-state
+    printf '%s\n' docker-menu docker-entry-port-alias docker-cdn-entries
+}
+
+listRegressionDockerContractsFastSitesChildSelectors() {
+    printf '%s\n' docker-sites docker-control-state
 }
 
 listRegressionDockerContractsFastRestChildSelectors() {
     # 按 CI 实测优先启动长事务；恢复测试独立，避免尾部只剩故障注入。
     printf '%s\n' \
-        docker-tproxy-ownership \
-        docker-redirect-focused \
         docker-control-client \
         docker-xhttp-rollback \
         docker-fail2ban-ownership \
@@ -259,29 +263,50 @@ listRegressionDockerSubscriptionPublicationChildSelectors() {
 }
 
 listRegressionDockerContractsRealityMetadataChildSelectors() {
-    printf '%s\n' docker-shadowsocks-rotation docker-reality-parameters docker-vless-encryption \
+    printf '%s\n' docker-reality-parameters docker-vless-encryption \
         docker-reality-targets-selection docker-reality-target-library
 }
 
+listRegressionDockerContractsRealityRotationChildSelectors() {
+    printf '%s\n' docker-shadowsocks-rotation docker-reality
+}
+
 listRegressionDockerContractsSetupBasicChildSelectors() {
-    printf '%s\n' docker-setup-core docker-traditional-tls-base docker-setup-tls \
-        docker-traditional-tls-transports docker-setup-encrypted-tcp
+    printf '%s\n' docker-setup-core docker-traditional-tls-base docker-setup-tls
 }
 
 listRegressionDockerContractsSetupTransportsChildSelectors() {
-    printf '%s\n' docker-setup-encrypted-udp docker-setup-transports
+    printf '%s\n' docker-setup-encrypted-udp docker-setup-transports \
+        docker-traditional-tls-transports docker-setup-encrypted-tcp
 }
 
 listRegressionDockerContractsSystemLightChildSelectors() {
-    printf '%s\n' docker-phase4-lifecycle docker-phase6
+    printf '%s\n' docker-phase4-maintenance docker-phase4-lifecycle docker-phase6
+}
+
+listRegressionDockerContractsPhase3TlsChildSelectors() {
+    printf '%s\n' docker-phase3-entries-management-tls docker-phase3-entries-management-tls-reinstall
+}
+
+listRegressionDockerContractsPhase3ProtocolChildSelectors() {
+    printf '%s\n' docker-phase3-entries-management-protocol docker-phase3-edit
+}
+
+listRegressionDockerContractsPhase3TopologyChildSelectors() {
+    printf '%s\n' docker-phase3-entries-topology docker-reality-targets-direct
+}
+
+listRegressionDockerRoutingIpOwnershipChildSelectors() {
+    printf '%s\n' docker-tproxy-ownership docker-routing-direct-block-ip-workflow
 }
 
 listRegressionDockerRoutingCoreNetworkChildSelectors() {
-    printf '%s\n' docker-routing-core-contracts docker-routing-core-network-lifecycle
+    printf '%s\n' docker-redirect-focused docker-routing-core-network-lifecycle docker-routing-core-contracts
 }
 
 listRegressionDockerRoutingDnsCsvChildSelectors() {
-    printf '%s\n' docker-routing-dns-hosts-workflow docker-routing-hosts-input docker-routing-direct-block-csv-workflow
+    printf '%s\n' docker-routing-dns-hosts-workflow docker-routing-direct-block-csv-workflow \
+        docker-recovery-preview docker-phase1 docker-routing-hosts-input docker-release docker-backup
 }
 
 runDockerTrafficRegression() {
@@ -573,6 +598,10 @@ runDockerPhase3EntriesManagementProtocolRegression() {
 
 runDockerPhase3EntriesManagementTlsRegression() {
     runDockerPhase3EntriesRegression management tls
+}
+
+runDockerPhase3EntriesManagementTlsReinstallRegression() {
+    runDockerPhase3EntriesRegression management tls-reinstall
 }
 
 runDockerPhase4LifecycleRegression() {
@@ -888,14 +917,14 @@ runDockerRedirectRealRegression() {
 }
 
 runDockerPortHoppingPreflightRegression() {
-    runRegressionStep hopping-config runDockerPortHoppingConfigRegression &&
-        runRegressionStep hopping-read-only python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
+    runRegressionStep hopping-read-only python3 "${PROJECT_ROOT}/docker/tests/port-hopping-preflight.py" &&
         PADM_REGRESSION_PARALLEL_JOBS=4 runParallelRegressionRunners \
             "${TMP_DIR}/hopping-preflight-${BASHPID:-$$}" \
-            hopping-ownership runDockerPortHoppingOwnershipRegression \
             hopping-target runDockerPortHoppingTargetRegression \
-            hopping-probe runDockerPortHoppingProbeRegression \
-            hopping-guarded runDockerPortHoppingGuardedRegression
+            hopping-guarded runDockerPortHoppingGuardedRegression \
+            hopping-config runDockerPortHoppingConfigRegression \
+            hopping-ownership runDockerPortHoppingOwnershipRegression \
+            hopping-probe runDockerPortHoppingProbeRegression
 }
 
 runDockerPortHoppingConfigRegression() {
@@ -1075,6 +1104,7 @@ registerRegressionFunctionLeaf docker-phase3-entries-topology runDockerPhase3Ent
 registerRegressionFunctionLeaf docker-phase3-entries-management runDockerPhase3EntriesManagementRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol runDockerPhase3EntriesManagementProtocolRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management-tls runDockerPhase3EntriesManagementTlsRegression
+registerRegressionFunctionLeaf docker-phase3-entries-management-tls-reinstall runDockerPhase3EntriesManagementTlsReinstallRegression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-source-real runDockerFail2banSourceRealRegression
@@ -1254,6 +1284,7 @@ registerRegressionParallelSelectorList docker-geo runFrameworkParallelRegression
     "${TMP_DIR}/docker-geo-parallel-${BASHPID:-$$}" listRegressionDockerGeoChildSelectors 2
 listRegressionDockerPhase3EntriesChildSelectors() {
     printf '%s\n' docker-phase3-entries-management-tls docker-phase3-entries-management-protocol \
+        docker-phase3-entries-management-tls-reinstall \
         docker-phase3-entries-topology
 }
 registerRegressionParallelSelectorList docker-phase3-entries runFrameworkParallelRegressionSelectorListWithJobs \
@@ -1269,7 +1300,9 @@ registerRegressionParallelSelectorList docker-subscription-publication-focused r
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 4
 registerRegressionParallelSelectorList docker-contracts-fast-heavy runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/docker-contracts-fast-heavy-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastHeavyChildSelectors 4
+    "${TMP_DIR}/docker-contracts-fast-heavy-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastHeavyChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-fast-sites runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-fast-sites-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastSitesChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast-rest runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-rest-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastRestChildSelectors 4
 registerRegressionParallelSelectorList docker-contracts-recovery runFrameworkParallelRegressionSelectorListWithJobs \
@@ -1284,16 +1317,26 @@ registerRegressionParallelSelectorList docker-contracts-reality runFrameworkPara
     "${TMP_DIR}/docker-contracts-reality-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-reality-metadata runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-reality-metadata-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityMetadataChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-reality-rotation runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-reality-rotation-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityRotationChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-setup-basic runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/docker-contracts-setup-basic-parallel-${BASHPID:-$$}" listRegressionDockerContractsSetupBasicChildSelectors 2
+    "${TMP_DIR}/docker-contracts-setup-basic-parallel-${BASHPID:-$$}" listRegressionDockerContractsSetupBasicChildSelectors 3
 registerRegressionParallelSelectorList docker-contracts-setup-transports runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-setup-transports-parallel-${BASHPID:-$$}" listRegressionDockerContractsSetupTransportsChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-system-light runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/docker-contracts-system-light-parallel-${BASHPID:-$$}" listRegressionDockerContractsSystemLightChildSelectors 2
+    "${TMP_DIR}/docker-contracts-system-light-parallel-${BASHPID:-$$}" listRegressionDockerContractsSystemLightChildSelectors 3
+registerRegressionParallelSelectorList docker-contracts-phase3-tls runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-phase3-tls-${BASHPID:-$$}" listRegressionDockerContractsPhase3TlsChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-phase3-protocol runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-phase3-protocol-${BASHPID:-$$}" listRegressionDockerContractsPhase3ProtocolChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-phase3-topology runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-phase3-topology-${BASHPID:-$$}" listRegressionDockerContractsPhase3TopologyChildSelectors 2
+registerRegressionParallelSelectorList docker-routing-ip-ownership runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-routing-ip-ownership-${BASHPID:-$$}" listRegressionDockerRoutingIpOwnershipChildSelectors 2
 registerRegressionParallelSelectorList docker-routing-core-network runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-routing-core-network-parallel-${BASHPID:-$$}" listRegressionDockerRoutingCoreNetworkChildSelectors 2
 registerRegressionParallelSelectorList docker-routing-dns-csv runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/docker-routing-dns-csv-parallel-${BASHPID:-$$}" listRegressionDockerRoutingDnsCsvChildSelectors 2
+    "${TMP_DIR}/docker-routing-dns-csv-parallel-${BASHPID:-$$}" listRegressionDockerRoutingDnsCsvChildSelectors 3
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors
 registerRegressionParallelSelectorList fast-only runFrameworkParallelRegressionSelectorList \

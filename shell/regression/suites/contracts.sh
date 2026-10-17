@@ -265,7 +265,8 @@ runRegressionDockerContractsAggregateContract() (
     local status=0 selector scope branch group
     local -a expectedSelectors=(
         docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
-        docker-phase3-edit docker-phase3-entries-management-tls docker-phase3-entries-management-protocol
+        docker-phase3-edit docker-phase3-entries-management-tls docker-phase3-entries-management-tls-reinstall
+        docker-phase3-entries-management-protocol
         docker-phase3-entries-topology
         docker-traditional-tls-transports docker-traditional-tls-base
         docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
@@ -363,6 +364,8 @@ runRegressionDockerContractsAggregateContract() (
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
     [[ "${shardCount}" -eq 18 ]]
+    [[ "${#expectedSelectors[@]}" -eq 66 ]]
+    [[ "$(sort -u "${actual}" | wc -l)" -eq 66 ]]
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-recovery-apply
     [[ "$(listRegressionDockerContractsFastChildSelectors | grep -c '^docker-port-hopping-preflight$')" -eq 1 ]]
@@ -370,16 +373,23 @@ runRegressionDockerContractsAggregateContract() (
     [[ "$(listRegressionDockerContractsRecoveryChildSelectors | head -n 1)" == docker-recovery-apply ]]
     ! listRegressionDockerContractsRealityMetadataChildSelectors | grep -qx docker-xhttp-edit
 
-    # 短任务组合沿用两个 worker，给原生与 TLS 留出 runner，不依赖矩阵创建顺序。
+    # 分片的 worker 与工作流一致，给原生与 TLS 留出 runner，不依赖矩阵创建顺序。
+    local expectedJobs=2
     runFrameworkParallelRegressionSelectors() {
         [[ "${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-}" == pairs &&
-            "${PADM_REGRESSION_PARALLEL_JOBS:-}" == 2 ]] || return 8
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" == "${expectedJobs}" ]] || return 8
         shift
         printf '%s\n' "$@" >"${callLog}"
     }
-    for selector in docker-phase3-entries docker-contracts-reality-metadata docker-contracts-recovery \
+    for selector in docker-phase3-entries docker-contracts-reality-metadata docker-contracts-reality-rotation \
+        docker-contracts-recovery docker-contracts-fast-heavy docker-contracts-fast-sites \
+        docker-contracts-phase3-tls docker-contracts-phase3-protocol docker-contracts-phase3-topology \
         docker-contracts-setup-basic docker-contracts-setup-transports docker-contracts-system-light \
-        docker-routing-core-network docker-routing-dns-csv; do
+        docker-routing-ip-ownership docker-routing-core-network docker-routing-dns-csv; do
+        expectedJobs=2
+        case "${selector}" in
+        docker-contracts-setup-basic|docker-contracts-system-light|docker-routing-dns-csv) expectedJobs=3 ;;
+        esac
         : >"${callLog}"
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
         : >"${expectedLog}"
@@ -560,9 +570,11 @@ runRegressionDockerContractsAggregateContract() (
     runDockerPhase3EntriesManagementRegression
     runDockerPhase3EntriesManagementProtocolRegression
     runDockerPhase3EntriesManagementTlsRegression
+    runDockerPhase3EntriesManagementTlsReinstallRegression
     printf '%s\n' full:all:all:phase3.sh edit:all:all:phase3.sh entries:all:all:phase3.sh \
         entries:topology:all:phase3.sh entries:management:all:phase3.sh \
-        entries:management:protocol:phase3.sh entries:management:tls:phase3.sh >"${expectedLog}"
+        entries:management:protocol:phase3.sh entries:management:tls:phase3.sh \
+        entries:management:tls-reinstall:phase3.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_PHASE3_SCOPE:-}" ]]
     [[ -z "${PADM_DOCKER_PHASE3_ENTRIES_BRANCH:-}" ]]
@@ -719,11 +731,12 @@ runDockerPortHoppingParallelContract() (
     : >"${callLog}"
     runDockerPortHoppingPreflightRegression || status=$?
     [[ "${status}" == 7 ]]
-    printf '%s\n' hopping-config hopping-read-only \
-        hopping-ownership runDockerPortHoppingOwnershipRegression \
+    printf '%s\n' hopping-read-only \
         hopping-target runDockerPortHoppingTargetRegression \
-        hopping-probe runDockerPortHoppingProbeRegression \
-        hopping-guarded runDockerPortHoppingGuardedRegression >"${expectedLog}"
+        hopping-guarded runDockerPortHoppingGuardedRegression \
+        hopping-config runDockerPortHoppingConfigRegression \
+        hopping-ownership runDockerPortHoppingOwnershipRegression \
+        hopping-probe runDockerPortHoppingProbeRegression >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
 )
 
