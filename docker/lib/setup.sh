@@ -213,7 +213,7 @@ dockerSetupGenerateSpec() {
     local tuicCongestion=${20:-cubic} tuicAuthTimeout=${21:-3s} tuicHeartbeat=${22:-10s} tuicZeroRtt=${23:-false}
     local http01=${24:-false}
     local xrayImage opsImage singBoxImage uuid token shortId= privateKey= publicKey= keyPair wsPath= inputsFile obfsPassword=
-    local serverPassword= userPassword= grpcService=
+    local serverPassword= userPassword= grpcService= currentBundle
     [[ "${hy2Obfs}" == false || "${hy2Obfs}" == salamander || "${hy2Obfs}" == gecko ]] || return 1
     xrayImage=$(dockerManifestImageReference xray) || return 1
     opsImage=$(dockerManifestImageReference ops) || return 1
@@ -248,7 +248,10 @@ dockerSetupGenerateSpec() {
         printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "${uuid}" "${privateKey}" "${publicKey}" \
             "${shortId}" "${wsPath}" "${token}" "${obfsPassword}" "${serverPassword}" "${userPassword}" "${grpcService}" >"${inputsFile}"
     ) || return 1
+    currentBundle=$(dockerCurrentBundlePath) || return 1
     dockerManifestConfigurationInputs | jq \
+        --slurpfile currentSchema "${currentBundle}/docker/contracts/configure.schema.json" \
+        --slurpfile releaseSchema "${DOCKER_STAGED_BUNDLE_PATH}/docker/contracts/configure.schema.json" \
         --arg core "${core}" --argjson protocols "${protocols}" --arg server "${server}" \
         --argjson families "${families}" --argjson realityPort "${realityPort:-443}" \
         --arg target "${target}" --argjson targetPort "${targetPort:-443}" --arg sni "${sni}" \
@@ -343,7 +346,12 @@ dockerSetupGenerateSpec() {
         } else empty end)]},
         tls: (if $protocols == 2 or $protocols == 3 or $protocols == 6 or $protocols == 7 or $protocols == 8 or $protocols == 10 or $protocols == 11 or $protocols == 12 or $protocols == 13 or $protocols == 14 or $protocols == 15 or $protocols == 16 or $protocols == 17 then
           {domain: $domain} + (if $http01 then {http01:true} else {} end) else null end),
-        subscription: {enabled: $subscription, token: $token}, host_integrations: []}
+        subscription: {enabled: $subscription, token: $token}, host_integrations: []} |
+      if $currentSchema[0]["x-padm-site-content"] == true and
+        $releaseSchema[0]["x-padm-site-content"] == true and
+        any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or
+          .id == 25 or .id == 27 or .id == 29)
+      then .site = {mode:"default"} else . end
     ' >"${output}" || return 1
     rm -f -- "${inputsFile}" || return 1
     chmod 0600 "${output}" && dockerConfigureSpecValidate "${output}"

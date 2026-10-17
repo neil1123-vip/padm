@@ -2566,8 +2566,8 @@ dockerGenerateXrayConfig() {
                 shortIds: ["", .reality.short_id]
               }
             } + (if .id == 2 then {
-              xhttpSettings: (.xhttp | del(.xmux,.download_port,.download)) +
-                {xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}}
+              xhttpSettings: ((.xhttp | del(.xmux,.download_port,.download)) +
+                {xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}})
             } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end)),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
           } elif .id == 27 or .id == 28 or .id == 29 then {

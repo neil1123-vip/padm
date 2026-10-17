@@ -1558,8 +1558,11 @@ for tlsCase in tls-fail ws-success; do
     else
         runPty 0 "${tlsCase}" "${WS_INPUT}" setup "${ASSET_ARGS[@]}"
         jq -e '.core.protocols[0].id == 21 and .tls.domain == "ws.example.com" and .subscription.enabled and
+            .site == {mode:"default"} and
             (.subscription.token | length) >= 32 and (.core.protocols[0].websocket.path | length) >= 16' \
             "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null || fail 'WS setup omitted TLS/subscription/path fields'
+        grep -Fq '<h1>Welcome</h1>' "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf" ||
+            fail 'WS 首配未显式生成默认首页'
         [[ -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" &&
             -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key" ]] ||
             fail 'WS setup did not commit imported TLS material'

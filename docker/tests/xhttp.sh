@@ -39,6 +39,15 @@ chmod 0600 "${XHTTP_SPEC}"
 dockerConfigureSpecValidate "${XHTTP_SPEC}" || fail 'XHTTP 共享账号、双入口发布夹具无效'
 
 if [[ "${XHTTP_SCOPE}" == full || "${XHTTP_SCOPE}" == validation ]]; then
+# 系统旧版 jq 须能解析完整生成器，且生成结果与工具镜像默认 jq 一致。
+dockerGenerateXrayConfig "${XHTTP_SPEC}" "${TEST_ROOT}/generator-default.json"
+(
+    jq() { /usr/bin/jq "$@"; }
+    dockerGenerateXrayConfig "${XHTTP_SPEC}" "${TEST_ROOT}/generator-system.json"
+) || fail '系统 jq 无法解析 Xray 生成器'
+cmp <(jq -cS . "${TEST_ROOT}/generator-default.json") \
+    <(jq -cS . "${TEST_ROOT}/generator-system.json") || fail '系统 jq 的 Xray 生成结果不一致'
+
 # 三份材料每次均须解析，语法错误优先于单对象形状诊断。
 for guardCase in whitespace null array multiple spec-syntax trailing-syntax schema-syntax matrix-syntax parse-first; do
     (

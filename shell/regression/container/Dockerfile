@@ -9,7 +9,7 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     && apt-get -o Acquire::Retries=3 -o Acquire::https::CAInfo=/etc/ssl/certs/ca-certificates.crt update \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::CAInfo=/etc/ssl/certs/ca-certificates.crt install -y --no-install-recommends \
     age bash caddy ca-certificates coreutils cron curl diffutils findutils gawk git grep gzip iproute2 iptables \
-    fail2ban gcc libc6-dev nftables nginx openssl procps python3 python-is-python3 \
+    fail2ban gcc jq libc6-dev nftables nginx openssl procps python3 python-is-python3 \
     python3-h2 python3-jsonschema python3-yaml sed shellcheck tar \
     unzip util-linux wget wireguard-tools xz-utils \
     && rm -rf /var/lib/apt/lists/*
