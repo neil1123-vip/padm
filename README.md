@@ -1788,7 +1788,9 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 目标须仅安装控制骨架，配置、数据、密钥、日志和备份目录为空，且没有同项目容器。
 当前接受同架构 v3 普通部署、受管或桥接可达宿主网站 Reality 共存：核心、手动 TLS、静态站、账号/分享身份、
 已保存流量、Reality 目标库、下述受限 Geo 数据和停用续期登记；宿主集成、控制角色/同步、
-host 网络共存、HTTP-01 和 ACME 执行配置仍明确拒绝。停用分享组的悬空引用也须先修正。
+host 网络共存和 ACME 执行配置仍明确拒绝。停用分享组的悬空引用也须先修正。
+已有 `.tls.http01=true` 可保留，按规格重建空挑战根和双栈 `80:8088`，
+不恢复旧挑战文件、ACME 账户或续期调度；目标的端口归属仍须通过现有预检。
 单 sing-box 双族 Hy2/TUIC 可恢复已保存的 `port_hopping` 规格；恢复后为 `stopped`，
 不恢复旧监督进程、规则或运行态。启用前须在目标主机显式执行 `port-hopping start` 并重新预检。
 Reality 仅恢复 `data/reality-targets/results.tsv`（15/16 列 TSV）及 `blocked.tsv`（4 列 `|` 分隔），
@@ -1799,7 +1801,7 @@ Geo 仅接受包含 Xray 且 `state.enabled=false`（自动更新停用）的固
 先核对归档清单和 state 中的数据摘要，再进行无网络 Xray 解析校验；不联网下载 Geo 数据，不恢复自动更新调度。
 `enabled=false` 不停用 Geo 数据；`enabled=true` 的归档明确拒绝，不会关闭自动更新来代替恢复。
 续期仅恢复 `enabled=false` 的 DNS、standalone、webroot 或 ALPN 登记及 DNS 凭据，保持原字节和
-`0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记、HTTP-01 和实际 ACME 文件拒绝，
+`0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记和实际 ACME 文件拒绝，
 仅兼容空 `data/acme` 目录。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
 不执行归档 Nginx stream 文件。桥接宿主网站恢复保留域名、上游地址和端口，
 仅接受 host-gateway 或可路由 IP；回环、host 网络和未处理的 host-main 输入仍拒绝。

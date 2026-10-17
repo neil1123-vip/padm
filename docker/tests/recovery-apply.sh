@@ -391,6 +391,15 @@ dockerGenerateDeployment "${HOST_SOURCE}/config/spec.json" "${HOST_SOURCE}/deplo
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${HOST_SOURCE}" \
     --output "${TEST_ROOT}/host.tar" >/dev/null || fail '宿主共存归档导出失败'
 
+HTTP01_SOURCE="${TEST_ROOT}/source-http01"
+cp -a -- "${SOURCE}" "${HTTP01_SOURCE}"
+jq '.tls.http01 = true' "${SOURCE}/config/spec.json" >"${HTTP01_SOURCE}/config/spec.json"
+dockerConfigureSpecValidate "${HTTP01_SOURCE}/config/spec.json" || fail 'HTTP-01 夹具无效'
+dockerGenerateDeployment "${HTTP01_SOURCE}/config/spec.json" "${HTTP01_SOURCE}/deployment.json"
+printf 'untrusted archived HTTP-01 config;\n' >"${HTTP01_SOURCE}/config/nginx/default.conf"
+python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${HTTP01_SOURCE}" \
+    --output "${TEST_ROOT}/http01.tar" >/dev/null || fail 'HTTP-01 归档导出失败'
+
 for protocol in hy2 tuic; do
     variant="${TEST_ROOT}/source-hopping-${protocol}"
     cp -a -- "${SOURCE}" "${variant}"
@@ -510,7 +519,9 @@ assert_deployed() {
       .services.nginx.ports ==
         (if $spec[0].reality_stream.host_website != null then
           ["0.0.0.0:24443:8443/tcp","[::]:24443:8443/tcp"] else [] end +
-          ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"]) and
+          ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] +
+          if $spec[0].tls.http01 == true then
+            ["0.0.0.0:80:8088/tcp","[::]:80:8088/tcp"] else [] end) and
       (if $spec[0].reality_stream.host_website != null then
         .services.nginx.extra_hosts == ["host.docker.internal:host-gateway"]
        else true end) and
@@ -556,6 +567,7 @@ assert_deployed() {
     jq -en --slurpfile expected "${source}/config/spec.json" --slurpfile actual "${root}/config/spec.json" '
       $actual[0].core == $expected[0].core and $actual[0].accounts == $expected[0].accounts and
       $actual[0].subscription == $expected[0].subscription and
+      $actual[0].tls == $expected[0].tls and
       $actual[0].reality_stream == $expected[0].reality_stream' >/dev/null ||
         fail '恢复改变了入口、账号凭据或订阅身份'
     cmp -- "${source}/config/share-groups.json" "${root}/config/share-groups.json" ||
@@ -575,6 +587,22 @@ assert_deployed() {
         cmp -- "${source}/secrets/tls/${DOMAIN}.key" "${root}/secrets/tls/${DOMAIN}.key" &&
         cmp -- "${source}/data/static/index.html" "${root}/data/static/index.html" ||
         fail 'TLS 或静态站恢复错误'
+    if jq -e '.tls.http01 == true' "${source}/config/spec.json" >/dev/null; then
+        [[ -d "${root}/data/acme-webroot" &&
+            -z "$(find "${root}/data/acme-webroot" -mindepth 1 -print -quit)" &&
+            "$(stat -c '%u:%g:%a' "${root}/data/acme-webroot")" == \
+                "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}:750" ]] ||
+            fail 'HTTP-01 挑战根没有以运行权限重建为空目录'
+        cmp -- "${root}/config/nginx/default.conf" \
+            <(dockerGenerateNginxConfig "${source}/config/spec.json" /dev/stdout) ||
+            fail 'HTTP-01 Nginx 没有按规格重新生成'
+        jq -e 'any(.services.nginx.volumes[];
+          .source == "${PADM_DOCKER_ROOT}/data/acme-webroot" and
+          .target == "/srv/padm-acme" and .read_only == true)' \
+            "${root}/compose.json" >/dev/null || fail 'HTTP-01 挑战根挂载错误'
+    else
+        [[ ! -e "${root}/data/acme-webroot" ]] || fail '未启用 HTTP-01 却生成了挑战根'
+    fi
     [[ "$(stat -c %a "${root}/config/spec.json")" == 600 &&
         "$(stat -c %a "${root}/config/xray/users.base")" == 600 &&
         -e "${MOCK_BACKEND}/compose-container" && -e "${MOCK_BACKEND}/padm-container" ]] ||
@@ -835,6 +863,36 @@ RECOVERY_ARCHIVE="${TEST_ROOT}/host.tar"
 run_child apply killed 137
 [[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/compose-container" ]] ||
     fail '宿主共存硬杀未保留恢复登记与运行现场'
+run_child recover ok 0
+assert_empty
+
+prepare_target http01-success
+RECOVERY_ARCHIVE="${TEST_ROOT}/http01.tar"
+run_child apply ok 0
+assert_deployed "${HTTP01_SOURCE}"
+[[ ! -e "${root}/.restore-pending" && ! -e "${root}/locks/deployment.lock" ]] ||
+    fail 'HTTP-01 成功事务没有清理登记或锁'
+
+# 复用既有故障点，确认新建挑战根与部署一起撤销。
+for mode in nginx-fail partial-move health int term; do
+    prepare_target "http01-${mode}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/http01.tar"
+    expected=failure
+    [[ "${mode}" != int ]] || expected=130
+    [[ "${mode}" != term ]] || expected=143
+    run_child apply "${mode}" "${expected}"
+    assert_empty
+    if [[ "${mode}" == nginx-fail ]]; then
+        ! grep -q '^up$' "${MOCK_BACKEND}/events" || fail 'HTTP-01 Nginx 失败后启动了服务'
+    elif [[ "${mode}" == partial-move ]]; then
+        [[ -e "${MOCK_BACKEND}/fault" ]] || fail 'HTTP-01 部分写入故障未注入'
+    fi
+done
+prepare_target http01-killed
+RECOVERY_ARCHIVE="${TEST_ROOT}/http01.tar"
+run_child apply killed 137
+[[ -d "${root}/.restore-pending" && -d "${root}/data/acme-webroot" &&
+    -e "${MOCK_BACKEND}/compose-container" ]] || fail 'HTTP-01 硬杀未保留挑战根与恢复现场'
 run_child recover ok 0
 assert_empty
 

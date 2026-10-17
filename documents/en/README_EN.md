@@ -1467,8 +1467,11 @@ logs and backups must be empty, with no containers from the same project. The su
 accepts same-architecture v3 ordinary deployments and managed or bridge-reachable host-website Reality coexistence with cores,
 manual TLS, static sites, account/share identities, saved traffic, Reality target libraries,
 limited Geo data and disabled renewal registrations described below. Host integrations,
-control roles/sync, host-network coexistence, HTTP-01 and ACME execution configuration
+control roles/sync, host-network coexistence and ACME execution configuration
 remain rejected. Dangling references in disabled share groups are also rejected.
+An existing `.tls.http01=true` is preserved with a newly generated empty challenge root
+and dual-stack `80:8088`. Old challenge files, ACME accounts and renewal schedules are not restored;
+the existing target port-ownership checks still apply.
 Single sing-box dual-stack Hy2/TUIC deployments may restore the saved `port_hopping` spec.
 The restored state is `stopped`; old supervisors, rules and runtime state are not restored.
 An explicit `port-hopping start` must pass fresh checks on the target host before enabling it.
@@ -1485,8 +1488,8 @@ No Geo data is downloaded and no automatic-update schedule is restored. `enabled
 disable use of the Geo data; archives with `enabled=true` are rejected, not restored by disabling updates.
 Renewal recovery accepts only `enabled=false` DNS, standalone, webroot or ALPN registrations and DNS
 credentials, preserving original bytes and `0700/0600 root:root` permissions without installing
-a renewal schedule. Non-DNS registrations must not contain credentials. Enabled registrations,
-HTTP-01 and actual ACME files are rejected;
+a renewal schedule. Non-DNS registrations must not contain credentials. Enabled registrations
+and actual ACME files are rejected;
 an empty `data/acme` directory is compatible. Managed Reality coexistence regenerates stream
 configuration from the spec and reports public port `443`; archived Nginx stream files are
 not executed. Bridge-reachable host-website recovery preserves domains, upstream address and port,

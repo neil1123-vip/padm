@@ -8590,7 +8590,7 @@ request 上限 64 KiB、凭据上限 1 MiB，目录 `0700 root:root`、文件 `0
 普通配置更新不接管在线登记，不调用续期调度安装。
 
 本阶段明确拒绝 enabled=true、webroot/HTTP-01 和实际 ACME 文件，仅兼容空 `data/acme`；
-停用 webroot 登记的后续扩展见 6A.10，HTTP-01 和 ACME 执行态仍拒绝。
+停用 webroot 登记的后续扩展见 6A.10，HTTP-01 规格恢复见 6A.11，ACME 执行态仍拒绝。
 ACME shell 配置会被 source 并可能执行 hook，不能仅放宽白名单便宣称完整恢复。
 本项不恢复 CA 账户、已签证书的自动续期能力或宿主调度，完整灾备继续 deferred。
 集中合同已通过：helper 69 项、preview 35 场景、apply 41 场景，
@@ -8638,8 +8638,8 @@ ACME shell 配置会被 source 并可能执行 hook，不能仅放宽白名单�
 复用既有续期登记校验与私密复制，接入 schema `3`、provider `webroot`、
 `enabled=false` 的登记，保留原字节和 `0700/0600 root:root` 权限。
 与 standalone、ALPN 一样，不得夹带 DNS 凭据；启用登记仍明确拒绝。
-仅恢复停用登记，不恢复 HTTP-01 监听、ACME 账户/执行文件或续期调度；
-`.tls.http01=true` 和实际 ACME 文件继续由独立门禁拒绝，不以自动停用代替恢复。
+本项仅恢复停用登记，不恢复 HTTP-01 监听、ACME 账户/执行文件或续期调度；
+HTTP-01 规格的后续恢复见 6A.11，实际 ACME 文件继续拒绝，不以自动停用代替恢复。
 覆盖四类停用登记共存、原字节/权限、启用 webroot 和夹带凭据拒绝，
 应用继续覆盖失败、信号和硬杀撤销。2026-10-17 Docker Linux amd64 定向
 helper 69 项、apply 58 场景通过；preview 初次因旧夹具文件数断言失败，修正后 48 场景通过。
@@ -8647,6 +8647,20 @@ helper 69 项、apply 58 场景通过；preview 初次因旧夹具文件数断�
 `.tmp-regression-docker-5444b8be22734992b3ac2026a4644b13/`；preview 重跑入口 27.677 秒，
 复用同一工具镜像，仅重跑失败叶子。随后集中完整合同 `65/65` 通过，证据见 6A.9。
 不升级完整灾备、原生宿主或双架构支持状态，整体目标保持 active。
+
+### 6A.11 HTTP-01 规格的受限空目标恢复
+
+同架构 v3 空目标恢复保留已有 `.tls.http01=true` 和 TLS 身份，复用原生成器重建空
+`data/acme-webroot`，权限为容器 UID/GID 的 `0750`；Nginx 只读挂载并发布双栈 `80:8088`。
+不执行归档 Nginx，不恢复旧挑战文件、实际 ACME 输入、CA 账户或启用续期登记；
+宿主端口归属、控制角色、host 网络及其它未处理输入继续沿用原门禁。
+复用原候选、部署事务和撤销，不引入新的恢复框架。
+
+2026-10-17 Docker Linux amd64 定向 helper `69`、preview `51`、apply `66` 场景通过，
+覆盖普通/受管共存、权限/挂载/双栈端口、拒绝 ACME/启用续期，以及健康失败、
+部分写入、INT/TERM 和 SIGKILL 后跨进程撤销。入口 `76.754` 秒，未复用结果；
+证据 `.tmp-regression-docker-c2a4ec347cc5495f8bfbc0f89d89e3a3/`。
+集中完整合同将在下个集成点合并执行；完整灾备及原生宿主/arm64/公网等验收仍 deferred。
 
 ### 本轮菜单与回归收敛
 

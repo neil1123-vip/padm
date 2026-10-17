@@ -3186,9 +3186,8 @@ dockerRecoveryInputsPrepare() {
     dockerManagedSpecMatchesDeployment "${spec}" "${input}/deployment.json" "${input}/images.env" &&
         jq -e '.schema_version == 3 and .host_integrations == [] and
           .control == null and .control_sync == null and
-          .reality_stream.host_website.network_mode != "host" and
-          .tls.http01 != true' "${spec}" >/dev/null || {
-        dockerError '恢复仅支持 v3 普通部署、受管或桥接宿主网站 Reality 共存及停用跳跃规格；控制角色、宿主集成、host 网络共存和 HTTP-01 尚未接入'
+          .reality_stream.host_website.network_mode != "host"' "${spec}" >/dev/null || {
+        dockerError '恢复仅支持 v3 普通部署、受管或桥接宿主网站 Reality 共存及停用跳跃规格；控制角色、宿主集成和 host 网络共存尚未接入'
         return 1
     }
     # 未处理的持久输入必须拒绝，生成文件只作证据，不能作为候选执行。
@@ -3219,7 +3218,7 @@ dockerRecoveryInputsPrepare() {
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" renewal-inputs --directory "${input}" \
         >"${draft}/renewal-counts.json" &&
         dockerRenewalRegistryValidate "${input}/secrets/renewal" || {
-        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记；不恢复 HTTP-01、ACME 或调度'
+        dockerError '续期恢复仅接受 enabled=false 的 DNS、standalone、webroot 或 ALPN 登记；不恢复 ACME 输入或续期调度'
         return 1
     }
     if jq -e '.geo_files > 0' "${draft}/geo-counts.json" >/dev/null; then

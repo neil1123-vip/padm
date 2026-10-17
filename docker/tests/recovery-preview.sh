@@ -123,6 +123,7 @@ dockerCandidateCompose() {
           $actual[0].core == $expected[0].core and
           $actual[0].accounts == $expected[0].accounts and
           $actual[0].subscription == $expected[0].subscription and
+          $actual[0].tls == $expected[0].tls and
           $actual[0].reality_stream == $expected[0].reality_stream
         ' >/dev/null || candidate_fail '恢复改变了入口、独立账号凭据或订阅身份'
         cmp -- "${SOURCE}/config/share-groups.json" "${candidate}/config/share-groups.json" ||
@@ -170,6 +171,26 @@ dockerCandidateCompose() {
             [[ -z "$(find "${candidate}/secrets/tls" -mindepth 1 -print -quit)" ]] ||
                 candidate_fail '无 TLS 规格意外恢复了 TLS 输入'
         fi
+        if jq -e '.tls.http01 == true' "${EXPECTED_SPEC}" >/dev/null; then
+            [[ -d "${candidate}/data/acme-webroot" &&
+                -z "$(find "${candidate}/data/acme-webroot" -mindepth 1 -print -quit)" &&
+                "$(stat -c '%u:%g:%a' "${candidate}/data/acme-webroot")" == \
+                    "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}:750" ]] ||
+                candidate_fail 'HTTP-01 挑战根没有以运行权限重建为空目录'
+            cmp -- "${candidate}/config/nginx/default.conf" \
+                <(dockerGenerateNginxConfig "${EXPECTED_SPEC}" /dev/stdout) ||
+                candidate_fail 'HTTP-01 Nginx 没有按规格重新生成'
+            jq -e 'any(.services.nginx.volumes[];
+              .source == "${PADM_DOCKER_ROOT}/data/acme-webroot" and
+              .target == "/srv/padm-acme" and .read_only == true) and
+              ([.services.nginx.ports[] | select(contains(":80:"))] ==
+                ["0.0.0.0:80:8088/tcp","[::]:80:8088/tcp"])' \
+                "${candidate}/compose.json" >/dev/null ||
+                candidate_fail 'HTTP-01 挑战根挂载或双栈 80 端口错误'
+        else
+            [[ ! -e "${candidate}/data/acme-webroot" ]] ||
+                candidate_fail '未启用 HTTP-01 却生成了挑战根'
+        fi
         [[ ! -e "${TEST_ROOT}/source-compose-executed" ]] ||
             candidate_fail '源 Compose 被执行'
         for file in results.tsv blocked.tsv; do
@@ -203,7 +224,9 @@ dockerCandidateCompose() {
               .services.nginx.ports ==
                 (if $spec[0].reality_stream.host_website != null then
                   ["0.0.0.0:24443:8443/tcp","[::]:24443:8443/tcp"] else [] end +
-                  ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"]) and
+                  ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] +
+                  if $spec[0].tls.http01 == true then
+                    ["0.0.0.0:80:8088/tcp","[::]:80:8088/tcp"] else [] end) and
               (if $spec[0].reality_stream.host_website != null then
                 .services.nginx.extra_hosts == ["host.docker.internal:host-gateway"]
                else true end) and
@@ -804,10 +827,48 @@ prepare_target drift
 run_case drift "${TEST_ROOT}/drift.tar" "${PADM_DOCKER_RC_STATE}"
 
 archive_variant http01 config/spec.json '.tls.http01 = true'
+dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail 'HTTP-01 夹具无效'
 dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+printf 'untrusted archived HTTP-01 config;\n' >"${VARIANT}/config/nginx/default.conf"
+HTTP01_SOURCE=${VARIANT}
 export_variant http01
 prepare_target http01
-run_case http01 "${TEST_ROOT}/http01.tar" "${PADM_DOCKER_RC_STATE}"
+EXPECTED_SPEC="${VARIANT}/config/spec.json"
+run_case http01 "${TEST_ROOT}/http01.tar" 0
+
+VARIANT="${TEST_ROOT}/variant-http01-stream"
+cp -a -- "${STREAM_SOURCE}" "${VARIANT}"
+jq '.tls.http01 = true' "${STREAM_SOURCE}/config/spec.json" >"${VARIANT}/config/spec.json"
+dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail 'HTTP-01 共存夹具无效'
+dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+export_variant http01-stream
+prepare_target http01-stream
+EXPECTED_SPEC="${VARIANT}/config/spec.json"
+run_case http01-stream "${TEST_ROOT}/http01-stream.tar" 0
+
+for variant in acme-input renewal-enabled; do
+    VARIANT="${TEST_ROOT}/variant-http01-${variant}"
+    cp -a -- "${HTTP01_SOURCE}" "${VARIANT}"
+    if [[ "${variant}" == acme-input ]]; then
+        mkdir -p -- "${VARIANT}/data/acme"
+        chmod 0700 "${VARIANT}/data/acme"
+        printf 'ACCOUNT_CONF=must-not-execute\n' >"${VARIANT}/data/acme/account.conf"
+        chmod 0600 "${VARIANT}/data/acme/account.conf"
+    else
+        cp -a -- "${RENEWAL_SOURCE}/secrets/renewal" "${VARIANT}/secrets/"
+        jq '.enabled = true' "${VARIANT}/secrets/renewal/webroot.example.com/request.json" \
+            >"${TEST_ROOT}/request.json"
+        cat -- "${TEST_ROOT}/request.json" >"${VARIANT}/secrets/renewal/webroot.example.com/request.json"
+    fi
+    export_variant "http01-${variant}"
+    prepare_target "http01-${variant}"
+    run_case "http01-${variant}" "${TEST_ROOT}/http01-${variant}.tar" "${PADM_DOCKER_RC_STATE}"
+    if [[ "${variant}" == acme-input ]]; then
+        grep -q 'ACME 执行配置' "${LOG}" || fail 'HTTP-01 恢复接受了实际 ACME 输入'
+    else
+        grep -q 'enabled=false' "${LOG}" || fail 'HTTP-01 恢复接受了启用续期登记'
+    fi
+done
 
 archive_variant missing-tls
 rm -f -- "${VARIANT}/secrets/tls/${DOMAIN}.key"
@@ -831,7 +892,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 18 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 20 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&
