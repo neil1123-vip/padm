@@ -48,8 +48,8 @@ def diagnostic(node, output):
                   "[已隐藏私钥]", output, flags=re.S)
 
 
-def command(arguments, *, content=None, timeout=30):
-    result = subprocess.run(arguments, input=content, capture_output=True, timeout=timeout)
+def command(arguments, *, content=None, timeout=30, env=None):
+    result = subprocess.run(arguments, input=content, capture_output=True, timeout=timeout, env=env)
     if result.returncode:
         raise AssertionError(
             f"{arguments[0]} 退出码 {result.returncode}："
@@ -1651,6 +1651,193 @@ def wireguard_cli_real(nodes):
     print("docker-wireguard-cli-real-prepare-peer-start-stop-ownership-private-ok", flush=True)
 
 
+def wireguard_recovery_release(nodes, images):
+    fixture = nodes[0]["path"].parent / "recovery-release"
+    (fixture / "bin").mkdir(parents=True, mode=0o700)
+    command(["bash", "-ec", r'''
+set -Eeuo pipefail
+PROJECT_ROOT=$1 TEST_ROOT=$2 MOCK_BIN=$2/bin OPS_IMAGE=$3
+IMAGE_DIGEST=$(printf '%064d' 0)
+source "${PROJECT_ROOT}/docker/tests/configure-fixture.sh"
+dockerConfigureTestFixture
+''', "--", str(ROOT), str(fixture), images["ops"]], timeout=60)
+    manifest = fixture / "configure-release-manifest.json"
+    release = json.loads(manifest.read_text())
+    actual = {}
+    for name, reference in images.items():
+        inspected = json.loads(command(nodes[0]["docker"] + ["image", "inspect", reference]))[0]
+        digest = reference.split("@", 1)[1]
+        assert inspected["Descriptor"]["digest"] == digest
+        actual[name] = {"reference": reference, "image_id": inspected["Id"]}
+        release["images"][name] = {
+            "reference": reference, "index_digest": digest,
+            "platforms": {"linux/amd64": digest, "linux/arm64": digest},
+        }
+    save(fixture / "images.json", actual)
+    save(manifest, release)
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    signature = fixture / "configure-release-manifest.sigstore.json"
+    signed = json.loads(signature.read_text())
+    signed["manifest_sha256"] = digest
+    save(signature, signed)
+    # 发布信任沿既有离线夹具；拉取只核已载入镜像，所有恢复与 Compose 操作透传。
+    wrapper = fixture / "bin/docker"
+    wrapper.write_text(r'''#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "$#" == 2 && "$1" == pull ]]; then
+    expected=$(jq -er --arg ref "$2" '
+      [.[] | select(.reference == $ref)] | select(length == 1) | .[0].image_id
+    ' "$PADM_TEST_RECOVERY_IMAGES") || exit 1
+    "$PADM_TEST_REAL_DOCKER" image inspect "$2" |
+      jq -e --arg ref "$2" --arg id "$expected" '
+        length == 1 and .[0].Id == $id and .[0].Descriptor.digest == ($ref | split("@")[1])
+      ' >/dev/null
+    exit 0
+fi
+exec "$PADM_TEST_REAL_DOCKER" "$@"
+''')
+    wrapper.chmod(0o755)
+    arguments = ("--manifest", str(manifest), "--bundle", str(signature),
+                 "--control-bundle", str(fixture / "configure-control.tar.gz"))
+    for node in nodes:
+        node["env"].update(
+            PATH=str(fixture / "bin") + ":" + os.environ["PATH"],
+            PADM_TEST_REAL_DOCKER=shutil.which("docker"),
+            PADM_TEST_RECOVERY_IMAGES=str(fixture / "images.json"),
+        )
+
+    def configure(node):
+        spec = state(node)
+        spec["release"] = {"version": release["release"]["version"], "manifest_sha256": digest,
+                           "signature_identity": signed["identity"]}
+        path = node["path"] / "private/recovery-release-spec.json"
+        save(path, spec)
+        cli(node, "configure", "--spec", str(path), *arguments)
+        assert state(node) == spec
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(configure, nodes))
+    return arguments
+
+
+def wireguard_recovery_real(nodes, index, image, release):
+    node = nodes[index]
+    root = node["path"] / "deployment"
+    role = "controlled" if index else "standalone"
+    before = state(node)
+    managed = before.get("control_sync", {}).get("managed_accounts", [])
+    managed_ids = {account["id"] for account in managed}
+    local = [account for account in before["accounts"] if account["id"] not in managed_ids]
+    traffic(node, image, account_id=local[0]["id"])
+    if managed:
+        traffic(node, image, account_id=managed[0]["id"])
+    directory = root / "secrets/net/wireguard"
+    files = {path.name: path.read_bytes() for path in directory.iterdir()}
+    assert set(files) == {"identity.json", "private.key", "wg-padm.conf"}
+    archive = node["path"] / f"private/recovery-{role}.tar"
+    cli(node, "backup", "export", str(archive))
+    cli(node, "backup", "verify", str(archive))
+    totals = json.loads((root / "data/traffic/state.json").read_text())
+    assert not (root / "secrets/control-sync").exists()
+    old_publication = None
+    if managed:
+        controller = nodes[0]
+        publication = controller["path"] / "deployment/config/control/state.json"
+        old_publication = publication.read_bytes()
+        cli(controller, "account", "edit", managed[0]["id"], "--name", "recovered-managed")
+        assert state(controller)["control"]["revision"] > before["control_sync"]["last_revision"]
+    cli(node, "down")
+    assert not command(node["docker"] + ["ps", "-aq", "--filter",
+                                        "label=com.docker.compose.project=padm-docker"]).strip()
+    assert "wg-padm" not in {link["ifname"] for link in
+                             json.loads(command(node["enter"] + ["ip", "-j", "link"]))}
+    root.rename(node["path"] / f"deployment-before-recovery-{role}")
+    command(node["enter"] + ["bash", "-ec", r'''
+set -Eeuo pipefail
+source "$1"
+dockerAcquireDeploymentLock
+trap 'dockerReleaseDeploymentLock' EXIT
+dockerInitializeStateRoot
+dockerInstallBundle "$2"
+dockerInstallCli
+''', "--", str(ROOT / "install-docker.sh"), str(ROOT)], env=node["env"], timeout=60)
+    if not managed:
+        command(node["enter"] + ["ip", "link", "add", "wg-padm", "type", "dummy"])
+        command(node["enter"] + ["ip", "link", "set", "wg-padm", "alias", "recovery-test-foreign"])
+        try:
+            cli(node, "restore", "preview", str(archive), *release, accepted=False)
+            link = json.loads(command(node["enter"] + ["ip", "-j", "link", "show", "wg-padm"]))[0]
+            assert link["ifalias"] == "recovery-test-foreign"
+            assert all(not list((root / name).iterdir()) for name in
+                       ("config", "data", "secrets", "logs", "backups"))
+            assert not (root / ".restore-pending").exists()
+        finally:
+            command(node["enter"] + ["ip", "link", "delete", "wg-padm"])
+    cli(node, "restore", "apply", str(archive), *release, "--confirm", "PADM-DOCKER-RESTORE")
+    assert state(node) == before, "真实恢复改变了入口、账号、控制身份或同步快照"
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == files
+    restored = json.loads((root / "data/traffic/state.json").read_text())
+    assert restored == dict(totals, accounts={key: dict(value, baseline={})
+                                            for key, value in totals["accounts"].items()})
+    assert not (root / "secrets/control-sync").exists()
+    assert not (root / ".restore-pending").exists() and not (root / "locks/deployment.lock").exists()
+    wireguard_traffic(nodes)
+    traffic(node, image, account_id=local[0]["id"])
+    rotated = None
+    if managed:
+        traffic(node, image, account_id=managed[0]["id"])
+        invitation = controller["path"] / "private/recovery-invite.json"
+        cli(controller, "control", "invite", "--output", str(invitation), "--yes")
+        rotated = node["path"] / "private/recovery-invite.json"
+        save(rotated, json.loads(invitation.read_text()))
+        cli(node, "control", "sync", "--invite", str(rotated))
+        updated = state(node)
+        expected = copy.deepcopy(before)
+        expected["accounts"] = local + updated["control_sync"]["managed_accounts"]
+        expected["control_sync"] = dict(before["control_sync"], **{
+            key: updated["control_sync"][key] for key in ("managed_accounts", "last_revision", "last_digest")})
+        assert updated == expected
+        assert updated["control_sync"]["last_revision"] == state(controller)["control"]["revision"]
+        assert updated["control_sync"]["last_revision"] > before["control_sync"]["last_revision"]
+        assert updated["control_sync"]["managed_accounts"] == state(controller)["accounts"]
+        ledger = (root / "data/traffic/state.json").read_bytes()
+        current_services = services(node)
+        published = publication.read_bytes()
+        try:
+            stale = json.loads(published)
+            previous = json.loads(old_publication)
+            stale.update(revision=previous["revision"], accounts=previous["accounts"])
+            assert stale["revision"] < updated["control_sync"]["last_revision"]
+            assert stale["peer"]["token_sha256"] == hashlib.sha256(
+                json.loads(rotated.read_text())["token"].encode("ascii")).hexdigest()
+            # 保留当前授权与文件权限，先证明真实 API 返回旧版，避免把 401/503 误判为版本保护。
+            publication.write_bytes(json.dumps(stale).encode("ascii"))
+            fetched_revision = command(node["enter"] + ["python3", "-c", """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from control_client import fetch_desired, validate_invitation
+invite = validate_invitation(json.load(open(sys.argv[2])))
+print(fetch_desired(invite)["revision"])
+""", str(ROOT / "docker/images/ops"), str(rotated)], timeout=15)
+            assert int(fetched_revision) == stale["revision"]
+            cli(node, "control", "sync", "--invite", str(rotated), accepted=False)
+            assert state(node) == updated and services(node) == current_services
+            assert (root / "data/traffic/state.json").read_bytes() == ledger
+        finally:
+            publication.write_bytes(published)
+        cli(node, "control", "sync", "--invite", str(rotated))
+        assert state(node) == updated and services(node) == current_services
+        assert (root / "data/traffic/state.json").read_bytes() == ledger
+        traffic(node, image, account_id=managed[0]["id"])
+    actual = json.loads((root / "data/traffic/state.json").read_text())["accounts"]
+    assert all(actual[key][field] >= value[field] for key, value in totals["accounts"].items()
+               for field in ("upload", "download")), "真实恢复或同步回退本机、受管累计"
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == files
+    services(node)
+    print(f"docker-wireguard-recovery-real-{role}-identity-traffic-version-ok", flush=True)
+    return rotated
+
+
 def main():
     parser = argparse.ArgumentParser()
     modes = parser.add_mutually_exclusive_group()
@@ -1659,8 +1846,10 @@ def main():
     modes.add_argument("--rebind-only", action="store_true")
     modes.add_argument("--wireguard-only", action="store_true")
     modes.add_argument("--wireguard-control-only", action="store_true")
+    modes.add_argument("--wireguard-recovery-only", action="store_true")
     options = parser.parse_args()
-    prepare_wireguard = options.wireguard_only or options.wireguard_control_only
+    prepare_wireguard = (options.wireguard_only or options.wireguard_control_only
+                         or options.wireguard_recovery_only)
     assert os.getuid() == 0 and Path("/.dockerenv").is_file(), "仅在隔离 Linux 测试容器运行"
     assert [link["ifname"] for link in json.loads(command(["ip", "-j", "link"]))] == ["lo"], \
         "测试不得使用宿主或外部网络"
@@ -1758,7 +1947,8 @@ def main():
                                "netns": os.readlink(f"/proc/{pid}/ns/net")})
             assert proofs[0]["engine_id"] != proofs[1]["engine_id"]
             assert proofs[0]["netns"] != proofs[1]["netns"]
-            if options.remap_only or options.rebind_only or options.wireguard_control_only:
+            if (options.remap_only or options.rebind_only or options.wireguard_control_only
+                    or options.wireguard_recovery_only):
                 # 仅在隔离 daemon 派生当前客户端，固定基础镜像且离线构建，不复用旧源码冒充本轮验收。
                 context = root / "remap-ops"
                 context.mkdir()
@@ -1877,8 +2067,13 @@ def main():
                 wireguard_cli_real(nodes)
                 proofs[0]["scope"] = "real-compose-wireguard-cli-from-standalone"
                 return proofs
-            if options.wireguard_control_only:
+            if options.wireguard_recovery_only:
+                release = wireguard_recovery_release(nodes, images)
+                proofs[0]["release_trust"] = "fixture"
+            if options.wireguard_control_only or options.wireguard_recovery_only:
                 keys, _ = wireguard_prepare_real(nodes)
+            if options.wireguard_recovery_only:
+                wireguard_recovery_real(nodes, 0, images["sing-box"], release)
             controller, controlled = nodes
             original_local = state(controlled)["accounts"][0]
             cli(controller, "control", "init", "--address", ADDRESS[0], "--port", "39778",
@@ -1901,6 +2096,11 @@ def main():
             assert services(controlled) == before_services, "真实幂等同步重建了服务"
             assert state(controlled) == joined
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
+            if options.wireguard_recovery_only:
+                rotated = wireguard_recovery_real(nodes, 1, images["sing-box"], release)
+                private_logs(nodes, (invite, rotated), keys)
+                proofs[0]["scope"] = "real-compose-wireguard-empty-target-and-controlled-recovery"
+                return proofs
             if options.wireguard_control_only:
                 rotated, migrated_keys = wireguard_control_migrate_real(nodes, controlled_invite, images["sing-box"])
                 private_logs(nodes, (invite, rotated), keys + migrated_keys)

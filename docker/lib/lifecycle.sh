@@ -3211,10 +3211,18 @@ dockerRecoveryInputsPrepare() {
         [[ "$(stat -c %s -- "${input}/${file}")" -le 16777216 ]] || return 1
     done
     dockerManagedSpecMatchesDeployment "${spec}" "${input}/deployment.json" "${input}/images.env" &&
-        jq -e '.schema_version == 3 and .host_integrations == [] and
-          .control == null and .control_sync == null and
+        jq -e '.schema_version == 3 and
+          (.host_integrations | length <= 1 and all(.[]; .type == "wireguard")) and
+          .control == null and
+          (if .control_sync != null then
+            .control_sync.connection != null and
+            any(.host_integrations[]; .type == "wireguard") else true end) and
           .reality_stream.host_website.network_mode != "host"' "${spec}" >/dev/null || {
-        dockerError '恢复仅支持 v3 普通部署、受管或桥接宿主网站 Reality 共存及停用跳跃规格；控制角色、宿主集成和 host 网络共存尚未接入'
+        dockerError '恢复仅支持 v3 普通部署、单 Peer WireGuard 及停用自动同步的被控角色；主控、其它宿主集成和 host 网络共存尚未接入'
+        return 1
+    }
+    [[ ! -e "${input}/secrets/control-sync" && ! -L "${input}/secrets/control-sync" ]] || {
+        dockerError '被控恢复要求自动同步已停用，不能恢复归档中的持久授权'
         return 1
     }
     # 未处理的持久输入必须拒绝，生成文件只作证据，不能作为候选执行。
@@ -3227,12 +3235,21 @@ dockerRecoveryInputsPrepare() {
         . == "config/xray/geo/geosite.dat" or
         . == "config/sing-box/config.json" or . == "config/sing-box/users.base" or
         . == "config/nginx/default.conf" or . == "config/nginx/stream/reality.conf" or
+        . == "secrets/net/wireguard/identity.json" or
+        . == "secrets/net/wireguard/private.key" or
+        . == "secrets/net/wireguard/wg-padm.conf" or
         . == "data/traffic/state.json" or
         . == "data/reality-targets/results.tsv" or . == "data/reality-targets/blocked.tsv" or
         startswith("data/subscription/") or startswith("data/static/") or
         startswith("secrets/tls/") or startswith("secrets/renewal/") or startswith("data/acme/"))
     ' "${input}/manifest.json" >/dev/null || {
         dockerError '归档含尚未接入恢复的持久输入，未准备候选'
+        return 1
+    }
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" wireguard-inputs --directory "${input}" \
+        >"${draft}/wireguard-counts.json" &&
+        dockerWireGuardMigrationRoleCheck "${spec}" "${input}/secrets/net/wireguard" || {
+        dockerError 'WireGuard 恢复要求完整 canonical 单 Peer 私密输入及一致的被控连接地址'
         return 1
     }
     python3 -B "${DOCKER_LIB_DIR}/recovery.py" reality-inputs --directory "${input}" \
@@ -3299,7 +3316,7 @@ dockerRecoveryInputsPrepare() {
 }
 
 dockerRecoveryRecover() {
-    local root metadata schedule geoSchedule renewalSchedule state directory entry containers mode uid gid path profile job taskSchedule withGeo=0 withRenewal=0
+    local root metadata schedule geoSchedule renewalSchedule state directory entry containers mode uid gid path profile job taskSchedule image count links withGeo=0 withRenewal=0
     local -a compose=()
     root=$(dockerInstallRoot) || return 1
     [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
@@ -3350,6 +3367,24 @@ dockerRecoveryRecover() {
         done
         if jq -e '.networks.ipv6 != null' "${root}/.restore-pending/compose.json" >/dev/null; then
             dockerIPv6NetworkManage cleanup || return 1
+        fi
+        if jq -e 'any(.host_integrations[]; .type == "wireguard")' \
+            "${root}/.restore-pending/deployment.json" >/dev/null; then
+            count=$(grep -c '^PADM_NET_IMAGE=' "${root}/.restore-pending/images.env" || true)
+            image=$(sed -n 's/^PADM_NET_IMAGE=//p' "${root}/.restore-pending/images.env") &&
+                [[ "${count}" == 1 &&
+                    "${image}" =~ ^[a-z0-9][a-z0-9._/:@-]*:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$ &&
+                    "${image##*@}" == "$(jq -er '.images.net.index_digest' \
+                        "${root}/.restore-pending/deployment.json")" ]] || return 1
+            # 容器退出不证明宿主接口已清理；归属漂移或探测失败时保留全部私密材料。
+            links=$(dockerRealityProbeRun 10 --pull never --user 0:0 --network host --log-driver none \
+                --label io.padm.mode=docker --label "io.padm.project=${PADM_DOCKER_PROJECT}" \
+                --entrypoint ip "${image}" -j link show) &&
+                jq -e 'type == "array" and all(.[]; type == "object" and
+                  (.ifname | type == "string") and .ifname != "wg-padm")' <<<"${links}" >/dev/null || {
+                dockerError 'WireGuard 接口未确认消失，保留恢复登记、私密输入和归属证据'
+                return 1
+            }
         fi
         # 首次恢复只写这五个空骨架目录；全部确认路径后才清理。
         for directory in config data secrets logs backups; do
@@ -3409,7 +3444,7 @@ dockerRecoveryRecover() {
 }
 
 dockerRecoveryCommand() (
-    local action=${1:-} archive= confirm= manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected registration
+    local action=${1:-} archive= confirm= manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected registration wireguardSource= image public derived
     local DOCKER_RECOVERY_INPUT= DOCKER_RECOVERY_STARTED=0 DOCKER_RECOVERY_CANDIDATE=
     case "${action}" in
     recover) [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"; shift ;;
@@ -3484,6 +3519,19 @@ dockerRecoveryCommand() (
     dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
     dockerConfigureReleaseValidate "${stage}/draft/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
     DOCKER_RECOVERY_INPUT="${stage}/input"
+    if jq -e '.wireguard_files == 3' "${stage}/draft/wireguard-counts.json" >/dev/null; then
+        wireguardSource="${DOCKER_RECOVERY_INPUT}/secrets/net/wireguard"
+        image=$(jq -er '.images.net' "${stage}/draft/spec.json") &&
+            public=$(python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" status \
+                --directory "${wireguardSource}") &&
+            derived=$(dockerRealityProbeRun 10 --pull never --user 0:0 --network none --log-driver none \
+                --mount "type=bind,src=${wireguardSource},dst=/input,readonly" \
+                --entrypoint sh "${image}" -ec 'wg pubkey < /input/private.key') &&
+            [[ "${derived}" == "$(jq -er '.public_key' <<<"${public}")" ]] || {
+            dockerError 'WireGuard 私钥与登记公钥不匹配，未准备候选'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     if jq -e '.site.mode == "static"' "${stage}/draft/spec.json" >/dev/null; then
         siteSource="${stage}/input/data/static"
     elif [[ -d "${stage}/input/data/static" ]]; then
@@ -3498,18 +3546,19 @@ dockerRecoveryCommand() (
     unexpected=preview
     [[ "${action}" != apply ]] || unexpected=recovery
     dockerConfigureApply "${stage}/draft/spec.json" "${tlsSource}" '' "${unexpected}" \
-        "${stage}/draft/business.json" "${siteSource}" || return $?
+        "${stage}/draft/business.json" "${siteSource}" '' '' '' "${wireguardSource}" || return $?
     [[ "${action}" != apply ]] || return 0
     printf '灾备恢复预览通过（未安装部署；已创建私密暂存并运行候选校验）。\n'
     jq --slurpfile reality "${stage}/draft/reality-counts.json" \
         --slurpfile geo "${stage}/draft/geo-counts.json" \
         --slurpfile renewal "${stage}/draft/renewal-counts.json" \
-        --slurpfile acme "${stage}/draft/acme-counts.json" '.spec.reality_stream as $stream |
+        --slurpfile acme "${stage}/draft/acme-counts.json" \
+        --slurpfile wireguard "${stage}/draft/wireguard-counts.json" '.spec.reality_stream as $stream |
       {listeners:[.spec.core.protocols[] | {listener_id,public_port:(
         if $stream != null and (.listener_id == $stream.listener_id or
           .listener_id == $stream.website_listener_id) then 443 else .public_port end)}],
       accounts:(.spec.accounts // [] | length),shares:(.shares.groups | length),
-      saved_traffic_accounts:(.traffic.accounts | length)} + $reality[0] + $geo[0] + $renewal[0] + $acme[0]' "${stage}/draft/business.json"
+      saved_traffic_accounts:(.traffic.accounts | length)} + $reality[0] + $geo[0] + $renewal[0] + $acme[0] + $wireguard[0]' "${stage}/draft/business.json"
 )
 
 dockerMain() {

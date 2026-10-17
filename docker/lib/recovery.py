@@ -26,14 +26,16 @@ MAX_FILE = 512 * 1024 * 1024
 MAX_TOTAL = 2 * 1024 * 1024 * 1024
 CHUNK = 1024 * 1024
 REQUIRED = {"mode", "deployment.json", "images.env", "compose.json", "config/spec.json"}
+WIREGUARD_PREFIX = "secrets/net/wireguard"
+WIREGUARD_FILES = {WIREGUARD_PREFIX + "/" + name
+                   for name in ("identity.json", "private.key", "wg-padm.conf")}
 FILES = REQUIRED | {
     "config/share-groups.json",
     "data/traffic/state.json",
     "data/control-log/schedule.json",
     "data/reality-targets/blocked.tsv",
     "data/reality-targets/results.tsv",
-    "secrets/net/wireguard/wg-padm.conf",
-}
+} | WIREGUARD_FILES
 TREES = {
     "config/xray", "config/sing-box", "config/nginx", "config/net", "config/control",
     "data/subscription", "data/static", "data/acme",
@@ -100,8 +102,8 @@ def safe_mode(path, directory, mode):
         "config/spec.json", "config/share-groups.json", "data/traffic/state.json",
         "data/control-log/schedule.json", "data/reality-targets/results.tsv",
         "data/reality-targets/blocked.tsv", "data/subscription/users.base",
-        "secrets/net/wireguard/wg-padm.conf",
-    } or path.startswith(("data/acme/", "secrets/renewal/", "secrets/control-sync/"))
+    } or path in WIREGUARD_FILES or path.startswith((
+        "data/acme/", "secrets/renewal/", "secrets/control-sync/"))
     private = private or path.startswith("secrets/tls/") and path.endswith(".key")
     return mode & ~(0o600 if private else 0o640) == 0
 
@@ -589,6 +591,79 @@ def reality_inputs(directory, destination=None):
                             transaction_write(library_fd, filename, data)
     return {"reality_results": payload.get("results.tsv", (None, 0))[1],
             "reality_blocked": payload.get("blocked.tsv", (None, 0))[1]}
+
+
+def wireguard_inputs(directory):
+    with contextlib.ExitStack() as stack:
+        parent, name = stack.enter_context(absolute_parent(directory, private=True))
+        root_fd = stack.enter_context(transaction_directory(parent, name, private=False))
+        observed = [(parent, name, signature(os.fstat(root_fd)))]
+        manifest_info = os.stat(MANIFEST, dir_fd=root_fd, follow_symlinks=False)
+        manifest, _ = transaction_read(root_fd, MANIFEST, limit=MAX_MANIFEST)
+        observed.append((root_fd, MANIFEST, signature(manifest_info)))
+        entries = validate_manifest(read_json(manifest))
+        expected = {path: entry for path, entry in entries.items()
+                    if path == WIREGUARD_PREFIX or path.startswith(WIREGUARD_PREFIX + "/")}
+        config_fd = stack.enter_context(transaction_directory(root_fd, "config", private=False))
+        observed.append((root_fd, "config", signature(os.fstat(config_fd))))
+        spec_info = os.stat("spec.json", dir_fd=config_fd, follow_symlinks=False)
+        encoded, metadata = transaction_read(config_fd, "spec.json")
+        require(all(metadata[key] == entries["config/spec.json"][key] for key in ("size", "sha256")))
+        observed.append((config_fd, "spec.json", signature(spec_info)))
+        spec = read_json(encoded)
+        require(isinstance(spec, dict) and isinstance(spec.get("host_integrations"), list)
+                and all(isinstance(item, dict) and isinstance(item.get("type"), str)
+                        for item in spec["host_integrations"]))
+        enabled = sum(item["type"] == "wireguard" for item in spec["host_integrations"])
+        require(enabled <= 1)
+        require(set(expected) == ({WIREGUARD_PREFIX} | WIREGUARD_FILES if enabled else set()))
+        if enabled:
+            require(expected[WIREGUARD_PREFIX]["type"] == "directory"
+                    and expected[WIREGUARD_PREFIX]["mode"] == 0o700
+                    and all(expected[path]["type"] == "file" and expected[path]["mode"] == 0o600
+                            for path in WIREGUARD_FILES))
+
+        def stable():
+            for owner, child, before in observed:
+                require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == before)
+            with absolute_parent(directory, private=True) as (owner, child):
+                require(signature(os.stat(child, dir_fd=owner, follow_symlinks=False)) == observed[0][2])
+
+        owner = root_fd
+        for child in ("secrets", "net"):
+            if child not in os.listdir(owner):
+                require(not enabled)
+                stable()
+                return {"wireguard_files": 0}
+            child_fd = stack.enter_context(transaction_directory(owner, child, private=False))
+            observed.append((owner, child, signature(os.fstat(child_fd))))
+            owner = child_fd
+        if not enabled:
+            require("wireguard" not in os.listdir(owner))
+            stable()
+            return {"wireguard_files": 0}
+        wireguard_fd = stack.enter_context(transaction_directory(owner, "wireguard"))
+        observed.append((owner, "wireguard", signature(os.fstat(wireguard_fd))))
+        filenames = {path.rsplit("/", 1)[1] for path in WIREGUARD_FILES}
+        require(set(os.listdir(wireguard_fd)) == filenames)
+        for filename in sorted(filenames):
+            info = os.stat(filename, dir_fd=wireguard_fd, follow_symlinks=False)
+            _, metadata = transaction_read(wireguard_fd, filename,
+                                           limit=45 if filename == "private.key" else 4096)
+            entry = expected[WIREGUARD_PREFIX + "/" + filename]
+            require(all(metadata[key] == entry[key] for key in ("size", "sha256", "mode")))
+            observed.append((wireguard_fd, filename, signature(info)))
+        stable()
+        # 只复用规范单 Peer 解析；曲线密钥配对由可信 net 镜像另行检查。
+        import importlib.util
+        module_spec = importlib.util.spec_from_file_location(
+            "padm_wireguard_recovery", os.path.join(os.path.dirname(__file__), "wireguard-config.py"))
+        wireguard = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(wireguard)
+        _, _, configured, remote = wireguard.load(wireguard_fd, include_peer=True)
+        require(configured and remote is not None and set(os.listdir(wireguard_fd)) == filenames)
+        stable()
+    return {"wireguard_files": 3}
 
 
 def geo_stream(fd, size, target=None):
@@ -1393,6 +1468,8 @@ def main():
     reality = commands.add_parser("reality-inputs")
     reality.add_argument("--directory", required=True)
     reality.add_argument("--destination")
+    wireguard = commands.add_parser("wireguard-inputs")
+    wireguard.add_argument("--directory", required=True)
     geo = commands.add_parser("geo-inputs")
     geo.add_argument("--directory", required=True)
     geo.add_argument("--destination")
@@ -1435,6 +1512,8 @@ def main():
             print("灾备归档已校验并解包至私密暂存目录（{} 个文件，{} 字节）。".format(*counts))
         elif args.action == "reality-inputs":
             print(json.dumps(reality_inputs(args.directory, args.destination), separators=(",", ":")))
+        elif args.action == "wireguard-inputs":
+            print(json.dumps(wireguard_inputs(args.directory), separators=(",", ":")))
         elif args.action == "geo-inputs":
             print(json.dumps(geo_inputs(args.directory, args.destination), separators=(",", ":")))
         elif args.action == "renewal-inputs":

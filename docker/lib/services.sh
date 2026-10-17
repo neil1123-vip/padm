@@ -1949,6 +1949,25 @@ dockerWireGuardMigrationDirectoryCheck() {
     fi
 }
 
+dockerWireGuardRecoveryInputCheck() {
+    local candidate=$1 state=$2 root metadata stage
+    root=$(dockerInstallRoot) || return 1
+    [[ -n "${DOCKER_RECOVERY_INPUT:-}" && -n "${DOCKER_RECOVERY_CANDIDATE:-}" &&
+        "${candidate}" == "${DOCKER_RECOVERY_CANDIDATE}" &&
+        "${DOCKER_WIREGUARD_INPUT:-}" == "${DOCKER_RECOVERY_INPUT}/secrets/net/wireguard" ]] || return 1
+    metadata=$(python3 -B "${DOCKER_LIB_DIR}/recovery.py" transaction-metadata \
+        --root "${root}" --project "${PADM_DOCKER_PROJECT}") &&
+        stage=$(jq -er '.input_stage' <<<"${metadata}") &&
+        jq -e --arg state "${state}" --arg candidate "${candidate#"${root}/"}" \
+            '.state == $state and .candidate == $candidate' <<<"${metadata}" >/dev/null &&
+        [[ "${DOCKER_RECOVERY_INPUT}" == "${root}/${stage}/input" &&
+            "$(stat -c '%u:%g:%a' "${root}/${stage}")" == 0:0:700 &&
+            "$(stat -c '%u:%g:%a' "${DOCKER_RECOVERY_INPUT}")" == 0:0:700 ]] &&
+        dockerTrafficSafePath "${root}" "${candidate}" &&
+        dockerTrafficSafePath "${root}" "${DOCKER_WIREGUARD_INPUT}" &&
+        dockerWireGuardMigrationDirectoryCheck "${DOCKER_WIREGUARD_INPUT}"
+}
+
 dockerWireGuardMigrationInstall() {
     local candidate=$1 root directory previous ids audited pending=0 intTrap termTrap result=0
     local DOCKER_WIREGUARD_INPUT=
@@ -7188,8 +7207,22 @@ dockerInstallCandidate() {
     fi
     dockerRealityStreamTransitionPrepare "${candidate}/config/spec.json" || return 1
     if [[ -n "${DOCKER_WIREGUARD_INPUT:-}" ]]; then
-        DOCKER_CONFIG_WIREGUARD_SOURCE=${DOCKER_WIREGUARD_INPUT}
-        dockerWireGuardMigrationInstall "${candidate}" || return 1
+        if [[ -n "${DOCKER_RECOVERY_INPUT:-}" ]]; then
+            dockerWireGuardRecoveryInputCheck "${candidate}" active &&
+                dockerWireGuardMigrationDirectoryCheck "${candidate}/secrets/net/wireguard" '' \
+                    "${DOCKER_WIREGUARD_INPUT}" &&
+                dockerTrafficSafePath "${root}" "${root}/secrets/net" || return 1
+            if [[ ! -e "${root}/secrets/net" && ! -L "${root}/secrets/net" ]]; then
+                mkdir -m 0700 -- "${root}/secrets/net" || return 1
+            fi
+            [[ -d "${root}/secrets/net" &&
+                "$(stat -c '%u:%g:%a' "${root}/secrets/net")" == 0:0:700 &&
+                -z "$(find "${root}/secrets/net" -mindepth 1 -print -quit)" ]] &&
+                mv -- "${candidate}/secrets/net/wireguard" "${root}/secrets/net/" || return 1
+        else
+            DOCKER_CONFIG_WIREGUARD_SOURCE=${DOCKER_WIREGUARD_INPUT}
+            dockerWireGuardMigrationInstall "${candidate}" || return 1
+        fi
     fi
     dockerRemoveConfigurationTargets || return 1
     if grep -qxF deployment.json "${backup}/present"; then
@@ -7710,20 +7743,29 @@ dockerConfigureApply() {
     [[ -z "${businessSource}" ]] || backupPrefix=business
     if [[ -n "${DOCKER_WIREGUARD_INPUT}" ]]; then
         root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
-        [[ "${FUNCNAME[1]:-}" == dockerWireGuardMigrate &&
-            "${DOCKER_WIREGUARD_INPUT}" == "${root}/.wireguard."*/wireguard &&
-            "${DOCKER_WIREGUARD_INPUT%/wireguard}" != "${root}/.wireguard." &&
-            "$(stat -c '%u:%a' "${DOCKER_WIREGUARD_INPUT%/wireguard}")" == 0:700 ]] &&
-            dockerTrafficSafePath "${root}" "${DOCKER_WIREGUARD_INPUT}" &&
-            dockerWireGuardMigrationDirectoryCheck "${DOCKER_WIREGUARD_INPUT}" &&
-            jq -e 'any(.host_integrations[]; .type == "wireguard")' "${sourceSpec}" >/dev/null ||
-            return "${PADM_DOCKER_RC_STATE}"
-        [[ "${sourceSpec}" == "${root}/config/spec.json" ]] ||
-            return "${PADM_DOCKER_RC_STATE}"
-        dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${root}/secrets/net/wireguard" &&
-            dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${DOCKER_WIREGUARD_INPUT}" &&
-            dockerWireGuardMigrationDependenciesCheck "${sourceSpec}" ||
-            return "${PADM_DOCKER_RC_CONFLICT}"
+        if [[ "${FUNCNAME[1]:-}" == dockerRecoveryCommand ]]; then
+            [[ ( "${mode}" == preview && "${action:-}" == preview ) ||
+                ( "${mode}" == recovery && "${action:-}" == apply ) ]] &&
+                [[ "${sourceSpec}" == "${DOCKER_RECOVERY_INPUT%/input}/draft/spec.json" ]] &&
+                dockerWireGuardRecoveryInputCheck "${DOCKER_RECOVERY_CANDIDATE:-}" preparing &&
+                dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${DOCKER_WIREGUARD_INPUT}" ||
+                return "${PADM_DOCKER_RC_STATE}"
+        else
+            [[ "${FUNCNAME[1]:-}" == dockerWireGuardMigrate &&
+                "${DOCKER_WIREGUARD_INPUT}" == "${root}/.wireguard."*/wireguard &&
+                "${DOCKER_WIREGUARD_INPUT%/wireguard}" != "${root}/.wireguard." &&
+                "$(stat -c '%u:%a' "${DOCKER_WIREGUARD_INPUT%/wireguard}")" == 0:700 ]] &&
+                dockerTrafficSafePath "${root}" "${DOCKER_WIREGUARD_INPUT}" &&
+                dockerWireGuardMigrationDirectoryCheck "${DOCKER_WIREGUARD_INPUT}" &&
+                jq -e 'any(.host_integrations[]; .type == "wireguard")' "${sourceSpec}" >/dev/null ||
+                return "${PADM_DOCKER_RC_STATE}"
+            [[ "${sourceSpec}" == "${root}/config/spec.json" ]] ||
+                return "${PADM_DOCKER_RC_STATE}"
+            dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${root}/secrets/net/wireguard" &&
+                dockerWireGuardMigrationRoleCheck "${sourceSpec}" "${DOCKER_WIREGUARD_INPUT}" &&
+                dockerWireGuardMigrationDependenciesCheck "${sourceSpec}" ||
+                return "${PADM_DOCKER_RC_CONFLICT}"
+        fi
     fi
     case "${mode}" in
     configure|preview|interactive|confirmed) ;;

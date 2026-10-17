@@ -47,6 +47,7 @@ class RecoveryTests(unittest.TestCase):
             "secrets/renewal/test.example/request.json",
             "secrets/renewal/test.example/credentials.env",
             "secrets/control-sync/request.json", "secrets/control-sync/invite.json",
+            "secrets/net/wireguard/identity.json", "secrets/net/wireguard/private.key",
             "secrets/net/wireguard/wg-padm.conf",
             "data/acme/tmp.example.com/tmp.example.com.conf",
             "data/acme/log.example.com/log.example.com.key",
@@ -90,7 +91,8 @@ class RecoveryTests(unittest.TestCase):
         self.assertIn(b"\"scope\":\"managed-inputs\"", self.archive.read_bytes())
         members = self.members()
         payload = {info.name: data for info, data in members if info.isfile()}
-        self.assertEqual(payload["secrets/net/wireguard/wg-padm.conf"], SECRET)
+        for path in recovery.WIREGUARD_FILES:
+            self.assertEqual(payload[path], SECRET)
         self.assertEqual(payload["data/acme/tmp.example.com/tmp.example.com.conf"], SECRET)
         self.assertEqual(payload["data/acme/log.example.com/log.example.com.key"], SECRET)
         self.assertEqual(payload["data/acme/lock.example.com/lock.example.com.key"], SECRET)
@@ -228,6 +230,7 @@ class RecoveryTests(unittest.TestCase):
     def test_runtime_state_and_known_acme_transients_are_excluded(self):
         for name in (
             "locks/deployment.lock/pid", "data/net/wireguard/wireguard.state",
+            "data/net/wireguard/wg-padm.conf",
             "data/net/.hopping-supervisor/pid", "data/control-source/token",
             "data/acme-webroot/token", "logs/acme/acme.log", "backups/old/spec.json",
             "data/acme/http.header", "data/acme/acme.log", "data/acme/.lock",
@@ -1145,6 +1148,236 @@ class AcmeInputTests(unittest.TestCase):
         self.assertEqual(cli.returncode, 15)
         self.assertEqual(cli.stdout, b"")
         self.assertNotIn(SECRET, cli.stderr)
+
+
+class WireGuardInputTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="padm-wireguard-recovery-",
+                                                     dir=os.environ["TMPDIR"])
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.source = self.root / "source"
+        self.wireguard = self.source / recovery.WIREGUARD_PREFIX
+        self.wireguard.mkdir(parents=True, mode=0o700)
+        for name in recovery.REQUIRED:
+            path = self.source / name
+            path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+            path.write_bytes(b"docker\n" if name == "mode" else b"{}\n")
+            path.chmod(0o600)
+        module_spec = importlib.util.spec_from_file_location(
+            "padm_wireguard_input_fixture", HELPER.with_name("wireguard-config.py"))
+        self.helper = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(self.helper)
+        self.identity = {"schema_version": 1, "address": "10.77.0.1", "listen_port": 51820,
+                         "public_key": base64.b64encode(b"B" * 32).decode()}
+        self.private = base64.b64encode(b"A" * 32).decode()
+        self.peer_public = base64.b64encode(b"C" * 32).decode()
+        self.put("identity.json", json.dumps(self.identity).encode() + b"\n")
+        self.put("private.key", (self.private + "\n").encode())
+        self.configuration = self.helper.configuration(
+            self.identity, self.private, "10.77.0.2", self.peer_public, "198.51.100.2:51820")
+        self.put("wg-padm.conf", self.configuration)
+        self.spec = {"schema_version": 3, "host_integrations": [{"type": "wireguard"}]}
+        self.put_spec()
+
+    def put(self, filename, data):
+        path = self.wireguard / filename
+        path.write_bytes(data)
+        path.chmod(0o600)
+        return path
+
+    def put_spec(self):
+        path = self.source / "config/spec.json"
+        path.write_bytes(json.dumps(self.spec).encode() + b"\n")
+        path.chmod(0o600)
+        self.seal()
+
+    def seal(self):
+        archive = self.root / "source.tar"
+        if archive.exists():
+            archive.unlink()
+        recovery.export_archive(str(self.source), str(archive))
+        with tarfile.open(archive, "r:") as source:
+            path = self.source / recovery.MANIFEST
+            path.write_bytes(source.extractfile(recovery.MANIFEST).read())
+            path.chmod(0o600)
+
+    def rejected(self):
+        with self.assertRaises((ValueError, OSError)):
+            recovery.wireguard_inputs(str(self.source))
+
+    def test_canonical_standalone_and_controlled_are_read_only_and_cli_reports_counts(self):
+        for controlled in (False, True):
+            with self.subTest(controlled=controlled):
+                if controlled:
+                    self.spec["control_sync"] = {
+                        "role": "controlled", "connection": {
+                            "peer_address": "10.77.0.1",
+                            "listen": {"address": "10.77.0.2", "interface": "wg-padm", "port": 27881}}}
+                    self.put_spec()
+                before = {path: (path.read_bytes() if path.is_file() else None,
+                                 recovery.signature(path.stat())) for path in self.source.rglob("*")}
+                self.assertEqual(recovery.wireguard_inputs(str(self.source)), {"wireguard_files": 3})
+                result = subprocess.run(
+                    [sys.executable, "-B", str(HELPER), "wireguard-inputs",
+                     "--directory", str(self.source)], capture_output=True, check=True)
+                self.assertEqual(json.loads(result.stdout), {"wireguard_files": 3})
+                self.assertEqual(result.stderr, b"")
+                self.assertNotIn(self.private.encode(), result.stdout)
+                after = {path: (path.read_bytes() if path.is_file() else None,
+                                recovery.signature(path.stat())) for path in self.source.rglob("*")}
+                self.assertEqual(before, after)
+
+    def test_absent_wireguard_returns_zero_but_any_secret_without_spec_is_rejected(self):
+        self.spec["host_integrations"] = []
+        self.put_spec()
+        self.rejected()
+        for path in self.wireguard.iterdir():
+            path.unlink()
+        self.wireguard.rmdir()
+        self.seal()
+        self.assertEqual(recovery.wireguard_inputs(str(self.source)), {"wireguard_files": 0})
+        self.wireguard.mkdir(mode=0o700)
+        for filename in ("identity.json", "private.key", "wg-padm.conf"):
+            with self.subTest(filename=filename):
+                path = self.put(filename, b"unrecorded")
+                self.rejected()
+                path.unlink()
+        self.wireguard.rmdir()
+        result = subprocess.run(
+            [sys.executable, "-B", str(HELPER), "wireguard-inputs",
+             "--directory", str(self.source)], capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), {"wireguard_files": 0})
+
+    def test_missing_files_and_legacy_configuration_only_are_rejected(self):
+        for filename in ("identity.json", "private.key", "wg-padm.conf"):
+            with self.subTest(filename=filename):
+                path = self.wireguard / filename
+                data = path.read_bytes()
+                path.unlink()
+                self.rejected()
+                self.seal()
+                self.rejected()
+                self.put(filename, data)
+                self.seal()
+        (self.wireguard / "identity.json").unlink()
+        (self.wireguard / "private.key").unlink()
+        self.seal()
+        self.rejected()
+
+    def test_digest_spec_mismatch_and_extra_files_are_rejected(self):
+        path = self.wireguard / "private.key"
+        data = path.read_bytes()
+        path.write_bytes((base64.b64encode(b"D" * 32).decode() + "\n").encode())
+        self.rejected()
+        path.write_bytes(data)
+        spec = self.source / "config/spec.json"
+        original = spec.read_bytes()
+        spec.write_bytes(original + b" ")
+        self.rejected()
+        spec.write_bytes(original)
+        extra = self.put("wireguard.state", b"runtime-state")
+        self.rejected()
+        extra.unlink()
+        self.assertEqual(recovery.wireguard_inputs(str(self.source)), {"wireguard_files": 3})
+
+    def test_noncanonical_hooks_multiple_peers_and_identity_disagreement_are_rejected(self):
+        path = self.wireguard / "wg-padm.conf"
+        for data in (
+            self.configuration + b"PostUp = touch /tmp/untrusted\n",
+            self.configuration + b"\n[Peer]\nPublicKey = " + self.peer_public.encode() + b"\n",
+            self.configuration.replace(b"Address = 10.77.0.1/32", b"Address = 10.77.0.3/32"),
+            self.configuration.replace(self.private.encode(), base64.b64encode(b"D" * 32)),
+        ):
+            with self.subTest(data=data):
+                path.write_bytes(data)
+                self.seal()
+                self.rejected()
+
+    def test_private_modes_ownership_and_manifest_modes_are_required(self):
+        for filename in ("identity.json", "private.key", "wg-padm.conf"):
+            path = self.wireguard / filename
+            for kind in ("public", "foreign-user", "foreign-group"):
+                with self.subTest(filename=filename, kind=kind):
+                    if kind == "public":
+                        path.chmod(0o640)
+                        with self.assertRaises(ValueError):
+                            recovery.export_archive(str(self.source), str(self.root / "public.tar"))
+                    else:
+                        os.chown(path, 10001 if kind == "foreign-user" else 0,
+                                 10001 if kind == "foreign-group" else 0)
+                    self.rejected()
+                    path.chmod(0o600)
+                    os.chown(path, 0, 0)
+        self.wireguard.chmod(0o750)
+        self.rejected()
+        self.wireguard.chmod(0o700)
+        manifest_path = self.source / recovery.MANIFEST
+        original = manifest_path.read_bytes()
+        for path, mode in ((recovery.WIREGUARD_PREFIX, 0o750),
+                           (recovery.WIREGUARD_PREFIX + "/identity.json", 0o400)):
+            with self.subTest(path=path):
+                manifest = json.loads(original)
+                next(entry for entry in manifest["entries"] if entry["path"] == path)["mode"] = mode
+                manifest_path.write_bytes(json.dumps(manifest).encode())
+                self.rejected()
+        manifest_path.write_bytes(original)
+
+    def test_links_special_files_and_oversized_inputs_are_rejected(self):
+        path = self.wireguard / "private.key"
+        outside = self.root / "private.key"
+        path.rename(outside)
+        path.symlink_to(outside)
+        self.rejected()
+        path.unlink()
+        os.link(outside, path)
+        self.rejected()
+        path.unlink()
+        os.mkfifo(path, 0o600)
+        self.rejected()
+        path.unlink()
+        outside.rename(path)
+        moved = self.root / "wireguard"
+        self.wireguard.rename(moved)
+        self.wireguard.symlink_to(moved, target_is_directory=True)
+        self.rejected()
+        self.wireguard.unlink()
+        moved.rename(self.wireguard)
+        for filename, limit in (("identity.json", 4096), ("private.key", 45), ("wg-padm.conf", 4096)):
+            with self.subTest(filename=filename):
+                path = self.wireguard / filename
+                original = path.read_bytes()
+                os.truncate(path, limit + 1)
+                self.rejected()
+                path.write_bytes(original)
+
+    def test_changed_file_or_parent_during_validation_is_rejected(self):
+        original = recovery.transaction_read
+
+        def changed_read(owner, name, **kwargs):
+            result = original(owner, name, **kwargs)
+            if name == "private.key":
+                path = self.wireguard / name
+                info = path.stat()
+                os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000))
+            return result
+
+        with mock.patch.object(recovery, "transaction_read", side_effect=changed_read):
+            self.rejected()
+        self.seal()
+
+        def replaced_parent(owner, name, **kwargs):
+            result = original(owner, name, **kwargs)
+            if name == "wg-padm.conf":
+                moved = self.root / "moved-wireguard"
+                self.wireguard.rename(moved)
+                self.wireguard.mkdir(mode=0o700)
+                for child in moved.iterdir():
+                    self.put(child.name, child.read_bytes())
+            return result
+
+        with mock.patch.object(recovery, "transaction_read", side_effect=replaced_parent):
+            self.rejected()
 
 
 class GeoInputTests(unittest.TestCase):

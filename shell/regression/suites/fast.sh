@@ -786,6 +786,10 @@ runDockerRecoveryApplyRegression() {
         bash "${PROJECT_ROOT}/docker/tests/recovery-apply.sh"
 }
 
+runDockerWireGuardRecoveryApplyRegression() {
+    PADM_DOCKER_RECOVERY_SCOPE=wireguard runDockerRecoveryApplyRegression
+}
+
 listRegressionDockerRecoveryChildSelectors() {
     printf '%s\n' docker-recovery-apply docker-recovery-preview docker-backup docker-business regression-dispatcher-contract
 }
@@ -843,6 +847,10 @@ runDockerWireGuardCliRealRegression() {
 
 runDockerWireGuardControlRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-control-only
+}
+
+runDockerWireGuardRecoveryRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py" --wireguard-recovery-only
 }
 
 runDockerControlStateRegression() {
@@ -1181,6 +1189,7 @@ registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-backup runDockerBackupRegression
 registerRegressionFunctionLeaf docker-recovery-preview runDockerRecoveryPreviewRegression
 registerRegressionFunctionLeaf docker-recovery-apply runDockerRecoveryApplyRegression
+registerRegressionFunctionLeaf docker-wireguard-recovery-apply runDockerWireGuardRecoveryApplyRegression
 registerRegressionParallelSelectorList docker-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-recovery-focused-${BASHPID:-$$}" listRegressionDockerRecoveryChildSelectors 2
 registerRegressionParallelSelectorList docker-backup-focused runFrameworkParallelRegressionSelectorListWithJobs \
@@ -1205,6 +1214,7 @@ registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntim
 registerRegressionFunctionLeaf docker-wireguard-migration-focused runDockerWireGuardMigrationRegression
 registerRegressionFunctionLeaf docker-wireguard-cli-real runDockerWireGuardCliRealRegression
 registerRegressionFunctionLeaf docker-wireguard-control-real runDockerWireGuardControlRealRegression
+registerRegressionFunctionLeaf docker-wireguard-recovery-real runDockerWireGuardRecoveryRealRegression
 registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-focused runDockerRedirectOwnershipRegression
 registerRegressionFunctionLeaf docker-redirect-real runDockerRedirectRealRegression

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
-TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-recovery-preview.XXXXXX")
+TEST_ROOT=$(mktemp -d /root/padm-docker-recovery-preview.XXXXXX)
 trap 'rm -rf -- "${TEST_ROOT}"' EXIT
 trap 'printf "docker-recovery-preview-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2' ERR
 [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || {
@@ -96,6 +96,25 @@ dockerTrafficBeforeChange() { candidate_fail '预览采集或写入了在线流�
 dockerMaintenanceScheduleApply() { candidate_fail "预览修改了外部调度: $*"; }
 dockerRealityProbeRun() {
     local directory probe
+    if [[ "$*" == *'wg pubkey'* ]]; then
+        [[ "$#" == 16 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}" == \
+            '10 --pull never --user 0:0 --network none --log-driver none --mount' &&
+            "${12} ${13}" == '--entrypoint sh' && "${15}" == -ec &&
+            "${16}" == 'wg pubkey < /input/private.key' &&
+            "${14}" == "$(jq -r '.images.net' "${EXPECTED_SPEC}")" &&
+            -n "${EXPECTED_WIREGUARD_DIR}" ]] ||
+            candidate_fail 'WireGuard 公钥验证没有使用可信镜像和隔离参数'
+        directory=${11#type=bind,src=}
+        directory=${directory%,dst=/input,readonly}
+        cmp -- "${EXPECTED_WIREGUARD_DIR}/private.key" "${directory}/private.key" ||
+            candidate_fail 'WireGuard 公钥验证没有读取归档私钥'
+        if [[ "${MODE}" == wireguard-key-mismatch ]]; then
+            printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n'
+        else
+            jq -r '.public_key' "${EXPECTED_WIREGUARD_DIR}/identity.json"
+        fi
+        return 0
+    fi
     [[ "$#" == 13 && "$1 $2 $3 $4 $5 $6" == \
         '60 --network none --env XRAY_LOCATION_ASSET=/etc/padm/xray/geo --volume' &&
         "$7" == */config/xray/geo:/etc/padm/xray/geo:ro && "$8" == --volume &&
@@ -134,7 +153,8 @@ docker() {
     esac
 }
 dockerCandidateCompose() {
-    local candidate=$1 marker file relative core
+    local candidate=$1 marker file relative core root
+    root=$(dockerInstallRoot) || return 1
     shift
     [[ -d "${candidate}" && -e "${root}/locks/deployment.lock" ]] ||
         candidate_fail '候选校验没有持有部署锁'
@@ -157,7 +177,9 @@ dockerCandidateCompose() {
           $actual[0].accounts == $expected[0].accounts and
           $actual[0].subscription == $expected[0].subscription and
           $actual[0].tls == $expected[0].tls and
-          $actual[0].reality_stream == $expected[0].reality_stream
+          $actual[0].reality_stream == $expected[0].reality_stream and
+          $actual[0].control == $expected[0].control and
+          $actual[0].control_sync == $expected[0].control_sync
         ' >/dev/null || candidate_fail '恢复改变了入口、独立账号凭据或订阅身份'
         cmp -- "${SOURCE}/config/share-groups.json" "${candidate}/config/share-groups.json" ||
             candidate_fail '分享组身份或外键改变'
@@ -226,6 +248,23 @@ dockerCandidateCompose() {
         fi
         [[ ! -e "${TEST_ROOT}/source-compose-executed" ]] ||
             candidate_fail '源 Compose 被执行'
+        if [[ -n "${EXPECTED_WIREGUARD_DIR}" ]]; then
+            for file in identity.json private.key wg-padm.conf; do
+                cmp -- "${EXPECTED_WIREGUARD_DIR}/${file}" \
+                    "${candidate}/secrets/net/wireguard/${file}" ||
+                    candidate_fail 'WireGuard 身份或配置没有保持原字节'
+                [[ "$(stat -c '%u:%g:%a' "${candidate}/secrets/net/wireguard/${file}")" == 0:0:600 ]] ||
+                    candidate_fail 'WireGuard 候选文件权限错误'
+            done
+            [[ "$(stat -c '%u:%g:%a' "${candidate}/secrets/net/wireguard")" == 0:0:700 &&
+                ! -e "${candidate}/secrets/control-sync" ]] ||
+                candidate_fail 'WireGuard 私密目录权限错误或恢复了自动同步凭据'
+            jq -e '.services["net-wireguard"].network_mode == "host" and
+              .services["net-wireguard"].command ==
+                ["wireguard","/etc/wireguard/wg-padm.conf","wg-padm"]' \
+                "${candidate}/compose.json" >/dev/null ||
+                candidate_fail 'WireGuard 服务没有由规格重新生成'
+        fi
         for file in results.tsv blocked.tsv; do
             cmp -- "${SOURCE}/data/reality-targets/${file}" "${candidate}/data/reality-targets/${file}" ||
                 candidate_fail '目标库未按原字节恢复'
@@ -309,6 +348,10 @@ dockerCandidateCompose() {
     if [[ "$*" == 'run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json' ]]; then
         printf '%s\n' "${MODE}" >>"${TEST_ROOT}/sing-box-checked"
         [[ "${MODE}" != sing-box-fail ]] || return 1
+    fi
+    if [[ "$*" == 'run --rm --no-deps net-wireguard preflight wireguard /etc/wireguard/wg-padm.conf wg-padm unowned /run/padm-wireguard-owner' ]]; then
+        printf '%s\n' "${MODE}" >>"${TEST_ROOT}/wireguard-checked"
+        [[ "${MODE}" != wireguard-foreign ]] || return 1
     fi
     [[ "${MODE}" != validation-fail ]]
 }
@@ -418,6 +461,7 @@ prepare_target() {
     EXPECTED_GEO_DIR=
     EXPECTED_RENEWAL_DIR=
     EXPECTED_ACME_DIR=
+    EXPECTED_WIREGUARD_DIR=
     EXPECTED_SPEC="${TEST_ROOT}/base.json"
     EXPECTED_TRAFFIC_FILE="${SOURCE}/data/traffic/state.json"
 }
@@ -449,6 +493,7 @@ grep -q '"reality_results": 1' "${LOG}" && grep -q '"reality_blocked": 1' "${LOG
 grep -q '"geo_files": 0' "${LOG}" || fail '无 Geo 预览缺少兼容计数'
 grep -q '"renewal_registrations": 0' "${LOG}" || fail '无续期预览缺少兼容计数'
 grep -q '"acme_files": 0' "${LOG}" || fail '无 ACME 预览缺少兼容计数'
+grep -q '"wireguard_files": 0' "${LOG}" || fail '无 WireGuard 预览缺少兼容计数'
 
 archive_variant renewal-disabled
 mkdir -m 0700 -- "${VARIANT}/secrets/renewal"
@@ -862,6 +907,120 @@ printf 'not a recovery archive\n' >"${TEST_ROOT}/corrupt.tar"
 chmod 0600 "${TEST_ROOT}/corrupt.tar"
 run_case corrupt "${TEST_ROOT}/corrupt.tar" "${PADM_DOCKER_RC_STATE}"
 
+# 单 Peer 只恢复规范三件套；被控快照与业务累计使用相同候选断言。
+archive_variant wireguard config/spec.json '
+  .host_integrations = [{type:"wireguard",profile:"net-wireguard",firewall_rules:[],
+    devices:["wg-padm"],schedules:[],settings:{config_file:"wg-padm.conf",interface:"wg-padm"}}]'
+mkdir -p -- "${VARIANT}/secrets/net"
+rmdir -- "${VARIANT}/secrets/net/wireguard"
+printf 'dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo=\n' >"${TEST_ROOT}/wg-private"
+printf 'hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=\n' >"${TEST_ROOT}/wg-public"
+chmod 0600 "${TEST_ROOT}/wg-private" "${TEST_ROOT}/wg-public"
+python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" prepare \
+    --directory "${VARIANT}/secrets/net/wireguard" --address 10.77.0.1 --listen-port 51820 \
+    --private-key "${TEST_ROOT}/wg-private" --public-key "${TEST_ROOT}/wg-public" >/dev/null
+python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peer \
+    --directory "${VARIANT}/secrets/net/wireguard" --peer-address 10.77.0.2 \
+    --peer-public-key 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
+    --endpoint 192.0.2.2:51820 >/dev/null
+DOCKER_WIREGUARD_INPUT="${VARIANT}/secrets/net/wireguard" \
+    dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+WIREGUARD_SOURCE=${VARIANT}
+export_variant wireguard
+prepare_target wireguard
+EXPECTED_SPEC="${WIREGUARD_SOURCE}/config/spec.json"
+EXPECTED_WIREGUARD_DIR="${WIREGUARD_SOURCE}/secrets/net/wireguard"
+run_case wireguard "${TEST_ROOT}/wireguard.tar" 0
+grep -q '"wireguard_files": 3' "${LOG}" || fail 'WireGuard 预览缺少三文件计数'
+! grep -q 'dwdtCnMY\|hSDwCYkw\|192.0.2.2' "${LOG}" || fail 'WireGuard 预览泄露私密配置'
+
+VARIANT="${TEST_ROOT}/variant-wireguard-controlled"
+cp -a -- "${WIREGUARD_SOURCE}" "${VARIANT}"
+jq --arg managed 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' '
+  .accounts += [(.accounts[0] | .id = $managed | .name = "Managed" |
+    .uuid = "55555555-5555-4555-8555-555555555555" | .password = "ManagedSecret.123")] |
+  .control_sync = {schema_version:1,role:"controlled",
+    node_id:"00000002-1111-4111-8111-000000000002",
+    controller_id:"00000001-1111-4111-8111-000000000001",
+    listener_ids:["entry-site"],last_revision:7,last_digest:("d"*64),
+    managed_accounts:[.accounts[-1]],connection:{
+      listen:{interface:"wg-padm",address:"10.77.0.2",port:18080},peer_address:"10.77.0.1"}}
+' "${VARIANT}/config/spec.json" >"${TEST_ROOT}/controlled.json"
+cat -- "${TEST_ROOT}/controlled.json" >"${VARIANT}/config/spec.json"
+jq --arg alice "${ALICE}" --arg managed 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' '
+  .accounts[$managed] = (.accounts[$alice] | .name = "Managed" | .upload = 101 |
+    .download = 103 | .limit_bytes = 1000)
+' "${VARIANT}/data/traffic/state.json" >"${TEST_ROOT}/controlled-traffic.json"
+cat -- "${TEST_ROOT}/controlled-traffic.json" >"${VARIANT}/data/traffic/state.json"
+dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail 'WireGuard 被控夹具无效'
+DOCKER_WIREGUARD_INPUT="${VARIANT}/secrets/net/wireguard" \
+    dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+CONTROLLED_SOURCE=${VARIANT}
+export_variant wireguard-controlled
+prepare_target wireguard-controlled
+EXPECTED_SPEC="${CONTROLLED_SOURCE}/config/spec.json"
+EXPECTED_TRAFFIC_FILE="${CONTROLLED_SOURCE}/data/traffic/state.json"
+EXPECTED_WIREGUARD_DIR="${CONTROLLED_SOURCE}/secrets/net/wireguard"
+run_case wireguard-controlled "${TEST_ROOT}/wireguard-controlled.tar" 0
+
+prepare_target wireguard-foreign
+EXPECTED_SPEC="${WIREGUARD_SOURCE}/config/spec.json"
+EXPECTED_WIREGUARD_DIR="${WIREGUARD_SOURCE}/secrets/net/wireguard"
+MODE=wireguard-foreign
+run_case wireguard-foreign "${TEST_ROOT}/wireguard.tar" "${PADM_DOCKER_RC_STATE}"
+grep -q 'WireGuard.*前置检查失败' "${LOG}" || fail '外来 WireGuard 接口没有明确拒绝'
+
+prepare_target wireguard-key-mismatch
+EXPECTED_SPEC="${WIREGUARD_SOURCE}/config/spec.json"
+EXPECTED_WIREGUARD_DIR="${WIREGUARD_SOURCE}/secrets/net/wireguard"
+MODE=wireguard-key-mismatch
+run_case wireguard-key-mismatch "${TEST_ROOT}/wireguard.tar" "${PADM_DOCKER_RC_STATE}"
+
+for variant in missing-key missing-identity missing-conf legacy-conf address-binding sync-enabled main control-log-enabled fail2ban; do
+    VARIANT="${TEST_ROOT}/variant-wireguard-${variant}"
+    cp -a -- "${CONTROLLED_SOURCE}" "${VARIANT}"
+    case "${variant}" in
+    missing-key) rm -f -- "${VARIANT}/secrets/net/wireguard/private.key" ;;
+    missing-identity) rm -f -- "${VARIANT}/secrets/net/wireguard/identity.json" ;;
+    missing-conf) rm -f -- "${VARIANT}/secrets/net/wireguard/wg-padm.conf" ;;
+    legacy-conf) rm -f -- "${VARIANT}/secrets/net/wireguard/"{private.key,identity.json} ;;
+    address-binding)
+        jq '.control_sync.connection.peer_address = "10.77.0.9"' \
+            "${VARIANT}/config/spec.json" >"${TEST_ROOT}/variant.json"
+        cat -- "${TEST_ROOT}/variant.json" >"${VARIANT}/config/spec.json" ;;
+    sync-enabled)
+        mkdir -m 0700 -- "${VARIANT}/secrets/control-sync"
+        printf '{}\n' >"${VARIANT}/secrets/control-sync/request.json"
+        chmod 0600 "${VARIANT}/secrets/control-sync/request.json" ;;
+    main|control-log-enabled)
+        jq 'del(.control_sync) | .control = {schema_version:1,role:"main",
+          node_id:"00000001-1111-4111-8111-000000000001",
+          listen:{interface:"wg-padm",address:"10.77.0.1",port:18080},
+          peer:{id:"00000002-1111-4111-8111-000000000002",address:"10.77.0.2",
+            enabled:true,expires_at:2000000000,token_sha256:("a"*64)},revision:0,last_digest:null}' \
+            "${VARIANT}/config/spec.json" >"${TEST_ROOT}/variant.json"
+        cat -- "${TEST_ROOT}/variant.json" >"${VARIANT}/config/spec.json"
+        if [[ "${variant}" == control-log-enabled ]]; then
+            mkdir -m 0700 -- "${VARIANT}/data/control-log"
+            printf '{"schema_version":1,"enabled":true}\n' >"${VARIANT}/data/control-log/schedule.json"
+            chmod 0600 "${VARIANT}/data/control-log/schedule.json"
+        fi ;;
+    fail2ban)
+        jq '.host_integrations += [{type:"fail2ban",profile:"net-fail2ban",
+          firewall_rules:["DOCKER-USER"],devices:[],schedules:[],
+          settings:{log_file:"access.log",ports:[24443],max_retry:3,find_time:600,ban_time:600}}]' \
+            "${VARIANT}/config/spec.json" >"${TEST_ROOT}/variant.json"
+        cat -- "${TEST_ROOT}/variant.json" >"${VARIANT}/config/spec.json" ;;
+    esac
+    if [[ "${variant}" != missing-conf ]]; then
+        DOCKER_WIREGUARD_INPUT="${VARIANT}/secrets/net/wireguard" \
+            dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+    fi
+    export_variant "wireguard-${variant}"
+    prepare_target "wireguard-${variant}"
+    run_case "wireguard-${variant}" "${TEST_ROOT}/wireguard-${variant}.tar" "${PADM_DOCKER_RC_STATE}"
+done
+
 prepare_target deployed
 printf '{}\n' >"${root}/deployment.json"
 run_case deployed "${ARCHIVE}" "${PADM_DOCKER_RC_STATE}"
@@ -987,7 +1146,7 @@ for mode in int term; do
     run_case "${mode}" "${ARCHIVE}" "${expected}"
 done
 # Geo 解析失败前也已完成 Compose 候选校验。
-[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 24 ]] ||
+[[ "$(wc -l <"${TEST_ROOT}/candidate-checked")" -eq 27 ]] ||
     fail '正常、验证失败或中断场景没有经过真实候选校验'
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&

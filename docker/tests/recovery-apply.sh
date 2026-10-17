@@ -4,8 +4,12 @@ trap 'printf "docker-recovery-apply-fail: line %s, rc=%s\n" "${LINENO}" "$?" >&2
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1 PADM_DOCKER_SKIP_CHOWN=0 PADM_DOCKER_LOCK_TIMEOUT=1
+case "${PADM_DOCKER_RECOVERY_SCOPE:-all}" in
+all|wireguard) ;;
+*) exit 2 ;;
+esac
 if [[ "${1:-}" != --child ]]; then
-    TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-recovery-apply.XXXXXX")
+    TEST_ROOT=$(mktemp -d /root/padm-docker-recovery-apply.XXXXXX)
     export TEST_ROOT
     trap 'rm -rf -- "${TEST_ROOT}"' EXIT
 fi
@@ -79,6 +83,38 @@ dockerConfigureReleasePrepare() {
 }
 dockerRealityProbeRun() {
     local directory probe
+    if [[ "$*" == *'wg pubkey'* ]]; then
+        [[ "$#" == 16 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}" == \
+            '10 --pull never --user 0:0 --network none --log-driver none --mount' &&
+            "${12} ${13}" == '--entrypoint sh' && "${15}" == -ec &&
+            "${16}" == 'wg pubkey < /input/private.key' &&
+            "${14}" == "$(jq -r '.images.net' "${TEST_ROOT}/base.json")" ]] ||
+            fail 'WireGuard 公钥验证没有使用可信镜像及隔离参数'
+        directory=${11#type=bind,src=}
+        directory=${directory%,dst=/input,readonly}
+        cmp -- "${TEST_ROOT}/wg-private" "${directory}/private.key" ||
+            fail 'WireGuard 配对校验没有读取归档私钥'
+        printf 'wireguard-pubkey\n' >>"${MOCK_BACKEND}/events"
+        jq -r '.public_key' "${directory}/identity.json"
+        return 0
+    fi
+    if [[ "$*" == *'--entrypoint ip '* ]]; then
+        [[ "$#" == 19 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10} ${11} ${12} ${13} ${14} ${15}" == \
+            "10 --pull never --user 0:0 --network host --log-driver none --label io.padm.mode=docker --label io.padm.project=${PADM_DOCKER_PROJECT} --entrypoint ip" &&
+            "${16}" == "$(jq -r '.images.net' "${TEST_ROOT}/base.json")" &&
+            "${17} ${18} ${19}" == '-j link show' ]] ||
+            fail 'WireGuard 撤销接口探测没有使用可信镜像和只读命令'
+        printf 'wireguard-links\n' >>"${MOCK_BACKEND}/events"
+        [[ "${MODE}" != wireguard-probe-fail ]] || return 1
+        if [[ "${MODE}" == wireguard-probe-json ]]; then
+            printf '{"ifname":"wg-padm"}\n'
+        elif [[ -e "${MOCK_BACKEND}/wireguard-link" ]]; then
+            printf '[{"ifname":"lo"},{"ifname":"wg-padm"}]\n'
+        else
+            printf '[{"ifname":"lo"}]\n'
+        fi
+        return 0
+    fi
     [[ "$#" == 13 && "$1 $2 $3 $4 $5 $6" == \
         '60 --network none --env XRAY_LOCATION_ASSET=/etc/padm/xray/geo --volume' &&
         "$7" == */config/xray/geo:/etc/padm/xray/geo:ro && "$8" == --volume &&
@@ -120,6 +156,9 @@ dockerCandidateCompose() {
             DOCKER_TEST_OWNER=${BASHPID}
             kill_restore_owner
         fi ;;
+    'run --rm --no-deps net-wireguard preflight wireguard /etc/wireguard/wg-padm.conf wg-padm unowned /run/padm-wireguard-owner')
+        [[ ! -e "${MOCK_BACKEND}/wireguard-link" ]] || return 1
+        printf 'wireguard-preflight\n' >>"${MOCK_BACKEND}/events" ;;
     *) fail "非预期候选校验: $*" ;;
     esac
 }
@@ -129,6 +168,12 @@ dockerComposeRun() {
     printf 'up\n' >>"${MOCK_BACKEND}/events"
     : >"${MOCK_BACKEND}/compose-container"
     : >"${MOCK_BACKEND}/padm-container"
+    if jq -e 'any(.host_integrations[]; .type == "wireguard")' \
+        "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null; then
+        : >"${MOCK_BACKEND}/wireguard-link"
+        mkdir -p -- "${PADM_DOCKER_INSTALL_DIR}/data/net/wireguard"
+        printf 'owned-interface\n' >"${PADM_DOCKER_INSTALL_DIR}/data/net/wireguard/wireguard.state"
+    fi
     case "${MODE}" in
     health) return 1 ;;
     int) kill -INT "${BASHPID}" ;;
@@ -137,7 +182,7 @@ dockerComposeRun() {
     esac
 }
 dockerControlLogScheduleInstall() { :; }
-dockerControlSyncScheduleInstall() { :; }
+dockerControlSyncScheduleInstall() { fail '恢复不应安装或接管被控自动同步调度'; }
 dockerRestoreConfiguration() { fail '恢复应用调用了普通配置回滚'; }
 systemctl() {
     local prefix= timer=${!#}
@@ -525,6 +570,12 @@ if [[ "${1:-}" == compose ]]; then
     [[ "${MOCK_MODE}" != down-failure ]] || exit 1
     printf 'down\n' >>"${MOCK_BACKEND}/events"
     rm -f -- "${MOCK_BACKEND}/compose-container" "${MOCK_BACKEND}/padm-container"
+    if [[ "${MOCK_MODE}" == wireguard-leftover || "${MOCK_MODE}" == wireguard-drift ]]; then
+        [[ "${MOCK_MODE}" != wireguard-drift ]] ||
+            printf 'foreign-interface\n' >"${MOCK_BACKEND}/wireguard-link"
+    else
+        rm -f -- "${MOCK_BACKEND}/wireguard-link"
+    fi
     exit 0
 fi
 printf 'unsupported:%s\n' "$*" >>"${MOCK_BACKEND}/events"
@@ -731,6 +782,59 @@ for protocol in hy2 tuic; do
         --output "${TEST_ROOT}/hopping-${protocol}.tar" >/dev/null || fail "${protocol} 跳跃归档失败"
 done
 
+printf 'dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo=\n' >"${TEST_ROOT}/wg-private"
+printf 'hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=\n' >"${TEST_ROOT}/wg-public"
+chmod 0600 "${TEST_ROOT}/wg-private" "${TEST_ROOT}/wg-public"
+for role in standalone controlled; do
+    variant="${TEST_ROOT}/source-wireguard-${role}"
+    cp -a -- "${SOURCE}" "${variant}"
+    jq --arg role "${role}" --arg managed 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' '
+      del(.reality_stream) | .core.protocols = [.core.protocols[0]] |
+      .accounts[].listeners = ["entry-site"] |
+      .host_integrations = [{type:"wireguard",profile:"net-wireguard",firewall_rules:[],
+        devices:["wg-padm"],schedules:[],settings:{config_file:"wg-padm.conf",interface:"wg-padm"}}] |
+      if $role == "controlled" then
+        .accounts += [(.accounts[0] | .id = $managed | .name = "Managed" |
+          .uuid = "55555555-5555-4555-8555-555555555555" | .password = "ManagedSecret.123")] |
+        .control_sync = {schema_version:1,role:"controlled",
+          node_id:"00000002-1111-4111-8111-000000000002",
+          controller_id:"00000001-1111-4111-8111-000000000001",
+          listener_ids:["entry-site"],
+          last_revision:7,last_digest:("d"*64),managed_accounts:[.accounts[-1]],
+          # connection 保存主控监听地址，peer_address 才是恢复端本机地址。
+          connection:{listen:{interface:"wg-padm",address:"10.77.0.2",port:18080},
+            peer_address:"10.77.0.1"}}
+      else . end
+    ' "${SOURCE}/config/spec.json" >"${variant}/config/spec.json"
+    jq -c '.groups[].listener_ids = ["entry-site"]' "${SOURCE}/config/share-groups.json" \
+        >"${variant}/config/share-groups.json"
+    rm -rf -- "${variant}/config/nginx/stream"
+    if [[ "${role}" == controlled ]]; then
+        jq --arg alice "${ALICE}" --arg managed 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' '
+          .accounts[$managed] = (.accounts[$alice] | .name = "Managed" | .upload = 101 |
+            .download = 103 | .limit_bytes = 1000)
+        ' "${SOURCE}/data/traffic/state.json" >"${variant}/data/traffic/state.json"
+    fi
+    mkdir -p -- "${variant}/secrets/net"
+    # 候选布局已创建空目录；规范准备入口要求目标尚不存在。
+    rmdir -- "${variant}/secrets/net/wireguard" || fail "${role}: WireGuard 夹具目录非空"
+    python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" prepare \
+        --directory "${variant}/secrets/net/wireguard" --address 10.77.0.1 --listen-port 51820 \
+        --private-key "${TEST_ROOT}/wg-private" --public-key "${TEST_ROOT}/wg-public" >/dev/null
+    python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" peer \
+        --directory "${variant}/secrets/net/wireguard" --peer-address 10.77.0.2 \
+        --peer-public-key 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
+        --endpoint 192.0.2.2:51820 >/dev/null
+    chmod 0600 "${variant}/config/spec.json" "${variant}/data/traffic/state.json"
+    dockerConfigureSpecValidate "${variant}/config/spec.json" || fail "${role}: WireGuard 夹具无效"
+    dockerWireGuardMigrationRoleCheck "${variant}/config/spec.json" \
+        "${variant}/secrets/net/wireguard" || fail "${role}: WireGuard 夹具角色地址不一致"
+    DOCKER_WIREGUARD_INPUT="${variant}/secrets/net/wireguard" \
+        dockerGenerateDeployment "${variant}/config/spec.json" "${variant}/deployment.json"
+    python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${variant}" \
+        --output "${TEST_ROOT}/wireguard-${role}.tar" >/dev/null || fail "${role}: WireGuard 归档失败"
+done
+
 snapshot() {
     python3 -B - "${root}" "${1:-all}" <<'PY'
 import hashlib
@@ -788,6 +892,7 @@ assert_empty() {
     cmp -- "${MOCK_BACKEND}/schedule-before" "${MOCK_BACKEND}/schedule-after" ||
         fail '回滚未恢复宿主调度与 timer 状态'
     [[ ! -e "${MOCK_BACKEND}/compose-container" && ! -e "${MOCK_BACKEND}/padm-container" &&
+        ! -e "${MOCK_BACKEND}/wireguard-link" &&
         -z "$(find "${root}/locks" -mindepth 1 -print -quit)" ]] ||
         fail '回滚残留容器或锁'
 }
@@ -826,35 +931,48 @@ assert_deployed() {
         relative=${file#"${source}/secrets/renewal/"}
         cmp -- "${file}" "${root}/secrets/renewal/${relative}" || fail '续期登记没有保持原字节'
     done < <(find "${source}/secrets/renewal" -type f)
-    cmp -- "${root}/config/nginx/stream/reality.conf" \
-        <(dockerGenerateRealityStreamConfig "${source}/config/spec.json" /dev/stdout) ||
-        fail '恢复照搬了归档 stream，没有按规格重新生成'
-    jq -e --slurpfile spec "${source}/config/spec.json" '
-      .services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp"] and
-      .services.nginx.ports ==
-        (if $spec[0].reality_stream.host_website != null then
-          ["0.0.0.0:24443:8443/tcp","[::]:24443:8443/tcp"] else [] end +
-          ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] +
-          if $spec[0].tls.http01 == true then
-            ["0.0.0.0:80:8088/tcp","[::]:80:8088/tcp"] else [] end) and
-      (if $spec[0].reality_stream.host_website != null then
-        .services.nginx.extra_hosts == ["host.docker.internal:host-gateway"]
-       else true end) and
-      any(.services.nginx.volumes[]; .target == "/etc/nginx/stream.d" and .read_only == true)
-    ' "${root}/compose.json" >/dev/null || fail '恢复共存 Compose 映射错误'
-    jq -e --slurpfile spec "${source}/config/spec.json" '
-      [.listeners[] | select(.listener_id == "entry-site" or .listener_id == "entry-reality")] |
-      length == 2 and all(.[]; .service == "nginx" and
-        if $spec[0].reality_stream.host_website != null and .listener_id == "entry-site" then
-          .public_port == 24443 and .container_port == 8443
-        else .public_port == 443 and .container_port == 15443 end)
-    ' "${root}/deployment.json" >/dev/null || fail '恢复共存部署有效公网端口错误'
-    grep -q '@proxy.example.com:443?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" &&
-        grep -q '@proxy.example.com:24445?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" ||
-        fail '恢复共存订阅有效公网端口或未绑定入口错误'
-    if jq -e '.reality_stream.host_website != null' "${source}/config/spec.json" >/dev/null; then
+    if jq -e '.reality_stream != null' "${source}/config/spec.json" >/dev/null; then
+        cmp -- "${root}/config/nginx/stream/reality.conf" \
+            <(dockerGenerateRealityStreamConfig "${source}/config/spec.json" /dev/stdout) ||
+            fail '恢复照搬了归档 stream，没有按规格重新生成'
+        jq -e --slurpfile spec "${source}/config/spec.json" '
+          .services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp"] and
+          .services.nginx.ports ==
+            (if $spec[0].reality_stream.host_website != null then
+              ["0.0.0.0:24443:8443/tcp","[::]:24443:8443/tcp"] else [] end +
+              ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] +
+              if $spec[0].tls.http01 == true then
+                ["0.0.0.0:80:8088/tcp","[::]:80:8088/tcp"] else [] end) and
+          (if $spec[0].reality_stream.host_website != null then
+            .services.nginx.extra_hosts == ["host.docker.internal:host-gateway"]
+           else true end) and
+          any(.services.nginx.volumes[]; .target == "/etc/nginx/stream.d" and .read_only == true)
+        ' "${root}/compose.json" >/dev/null || fail '恢复共存 Compose 映射错误'
+        jq -e --slurpfile spec "${source}/config/spec.json" '
+          [.listeners[] | select(.listener_id == "entry-site" or .listener_id == "entry-reality")] |
+          length == 2 and all(.[]; .service == "nginx" and
+            if $spec[0].reality_stream.host_website != null and .listener_id == "entry-site" then
+              .public_port == 24443 and .container_port == 8443
+            else .public_port == 443 and .container_port == 15443 end)
+        ' "${root}/deployment.json" >/dev/null || fail '恢复共存部署有效公网端口错误'
+        grep -q '@proxy.example.com:443?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" &&
+            grep -q '@proxy.example.com:24445?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" ||
+            fail '恢复共存订阅有效公网端口或未绑定入口错误'
+        if jq -e '.reality_stream.host_website != null' "${source}/config/spec.json" >/dev/null; then
+            grep -q '@proxy.example.com:24443?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" ||
+                fail '宿主共存改变了独立受管网站入口的订阅端口'
+        fi
+    else
+        jq -e '.services.xray.ports == [] and
+          .services.nginx.ports == ["0.0.0.0:24443:8443/tcp","[::]:24443:8443/tcp"] and
+          all(.services.nginx.volumes[]; .target != "/etc/nginx/stream.d")' \
+            "${root}/compose.json" >/dev/null || fail 'WireGuard 普通 TLS 入口的 Compose 映射错误'
+        jq -e '[.listeners[] | select(.listener_id == "entry-site")] |
+          length == 1 and .[0].service == "nginx" and .[0].public_port == 24443 and
+          .[0].container_port == 8443' "${root}/deployment.json" >/dev/null ||
+            fail 'WireGuard 普通 TLS 入口的部署端口错误'
         grep -q '@proxy.example.com:24443?' "${root}/data/subscription/0123456789abcdef0123456789abcdef" ||
-            fail '宿主共存改变了独立受管网站入口的订阅端口'
+            fail 'WireGuard 普通 TLS 入口的订阅端口错误'
     fi
     [[ "$(grep -E '^candidate-|^geo-probe$|^up$' "${MOCK_BACKEND}/events")" == \
         $'candidate-compose\ngeo-probe\ncandidate-xray\ncandidate-nginx\ncandidate-subscription\nup' ]] ||
@@ -883,7 +1001,9 @@ assert_deployed() {
       $actual[0].core == $expected[0].core and $actual[0].accounts == $expected[0].accounts and
       $actual[0].subscription == $expected[0].subscription and
       $actual[0].tls == $expected[0].tls and
-      $actual[0].reality_stream == $expected[0].reality_stream' >/dev/null ||
+      $actual[0].reality_stream == $expected[0].reality_stream and
+      $actual[0].control == $expected[0].control and
+      $actual[0].control_sync == $expected[0].control_sync' >/dev/null ||
         fail '恢复改变了入口、账号凭据或订阅身份'
     cmp -- "${source}/config/share-groups.json" "${root}/config/share-groups.json" ||
         fail '恢复改变了分享组'
@@ -930,6 +1050,28 @@ assert_deployed() {
     else
         grep -q '# padm-docker-traffic' "${MOCK_BACKEND}/crontab" ||
             fail '恢复没有安装流量 cron'
+    fi
+    if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${source}/config/spec.json" >/dev/null; then
+        for file in identity.json private.key wg-padm.conf; do
+            cmp -- "${source}/secrets/net/wireguard/${file}" \
+                "${root}/secrets/net/wireguard/${file}" || fail '恢复改变了 WireGuard 身份或配置'
+            [[ "$(stat -c '%u:%g:%a' "${root}/secrets/net/wireguard/${file}")" == 0:0:600 ]] ||
+                fail 'WireGuard 私密文件权限错误'
+        done
+        [[ "$(stat -c '%u:%g:%a' "${root}/secrets/net/wireguard")" == 0:0:700 &&
+            -e "${MOCK_BACKEND}/wireguard-link" && ! -e "${root}/secrets/control-sync" &&
+            ! -e "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-control-sync.timer" &&
+            ! -e "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-control-sync.service" &&
+            "$(grep -c '^wireguard-pubkey$' "${MOCK_BACKEND}/events")" == 1 &&
+            "$(grep -c '^wireguard-preflight$' "${MOCK_BACKEND}/events")" == 1 ]] ||
+            fail 'WireGuard 校验、接口或停用自动同步状态错误'
+        for file in users.base config.json; do
+            jq -e --slurpfile expected "${source}/config/spec.json" '
+              . as $actual | all($expected[0].control_sync.managed_accounts[]?;
+                .uuid as $uuid | any($actual.inbounds[]?.settings.clients[]?; .id == $uuid))
+            ' "${root}/config/xray/${file}" >/dev/null ||
+                fail '恢复丢失受管账号的基础或运行认证'
+        done
     fi
 }
 assert_hopping_deployed() {
@@ -983,6 +1125,7 @@ assert_hopping_deployed() {
     ' <<<"${status}" >/dev/null || fail "${protocol}: 跳跃没有保持 stopped 及保存的 tuple"
 }
 
+if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ]]; then
 for action in unconfirmed bad-confirm; do
     prepare_target "${action}"
     run_child "${action}" ok "${PADM_DOCKER_RC_USAGE}"
@@ -1628,4 +1771,70 @@ run_child apply killed 137
     fail '跳跃恢复硬杀未保留登记，或意外恢复了运行态'
 run_child recover ok 0
 assert_empty
+
+fi
+for role in standalone controlled; do
+    prepare_target "wireguard-${role}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-${role}.tar"
+    run_child apply ok 0
+    assert_deployed "${TEST_ROOT}/source-wireguard-${role}"
+    [[ ! -e "${root}/.restore-pending" && ! -e "${root}/locks/deployment.lock" ]] ||
+        fail "${role}: WireGuard 成功恢复没有清理登记或锁"
+done
+
+prepare_target wireguard-foreign
+RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-controlled.tar"
+printf 'foreign-interface\n' >"${MOCK_BACKEND}/wireguard-link"
+run_child apply ok failure
+snapshot >"${MOCK_BACKEND}/after"
+cmp -- "${MOCK_BACKEND}/before" "${MOCK_BACKEND}/after" ||
+    fail '外来 WireGuard 接口拒绝时改变了空目标'
+[[ "$(<"${MOCK_BACKEND}/wireguard-link")" == foreign-interface &&
+    ! -e "${root}/.restore-pending" ]] &&
+    ! grep -q '^up$' "${MOCK_BACKEND}/events" ||
+    fail '首次恢复删除了外来接口或继续启动了服务'
+
+# 复用被控归档和事务故障点，健康失败与信号都必须在接口消失后清理私密输入。
+for mode in health int term; do
+    prepare_target "wireguard-${mode}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-controlled.tar"
+    expected=failure
+    [[ "${mode}" != int ]] || expected=130
+    [[ "${mode}" != term ]] || expected=143
+    run_child apply "${mode}" "${expected}"
+    grep -qx 'wireguard-links' "${MOCK_BACKEND}/events" || fail "${mode}: 撤销没有核对宿主接口"
+    assert_empty
+done
+for mode in ok wireguard-leftover wireguard-drift wireguard-probe-fail wireguard-probe-json; do
+    prepare_target "wireguard-killed-${mode}"
+    RECOVERY_ARCHIVE="${TEST_ROOT}/wireguard-controlled.tar"
+    run_child apply killed 137
+    [[ -d "${root}/.restore-pending" && -e "${MOCK_BACKEND}/wireguard-link" &&
+        -f "${root}/secrets/net/wireguard/private.key" &&
+        -f "${root}/data/net/wireguard/wireguard.state" ]] ||
+        fail "${mode}: WireGuard 硬杀没有保留登记、接口或私密现场"
+    if [[ "${mode}" != ok ]]; then
+        snapshot >"${MOCK_BACKEND}/pending-before"
+        run_child recover "${mode}" failure
+        snapshot >"${MOCK_BACKEND}/pending-after"
+        cmp -- "${MOCK_BACKEND}/pending-before" "${MOCK_BACKEND}/pending-after" ||
+            fail "${mode}: 无法证明接口消失时删除了登记、输入或密钥"
+        stage=$(jq -er '.input_stage' "${root}/.restore-pending/metadata.json")
+        [[ -d "${root}/${stage}/input/secrets/net/wireguard" &&
+            ! -e "${MOCK_BACKEND}/compose-container" && ! -e "${MOCK_BACKEND}/padm-container" ]] ||
+            fail "${mode}: 停机后没有保留持久私密输入"
+        if [[ "${mode}" == wireguard-leftover || "${mode}" == wireguard-drift ]]; then
+            [[ -e "${MOCK_BACKEND}/wireguard-link" ]] || fail "${mode}: 删除了残留或外来接口"
+            [[ "${mode}" != wireguard-drift ||
+                "$(<"${MOCK_BACKEND}/wireguard-link")" == foreign-interface ]] ||
+                fail '恢复改写了外来接口归属'
+            # 模拟操作者在外部核实并清理接口，再允许专用恢复入口继续。
+            rm -f -- "${MOCK_BACKEND}/wireguard-link"
+        fi
+    fi
+    run_child recover ok 0
+    assert_empty
+    run_child recover ok 0
+    assert_empty
+done
 printf 'docker-recovery-apply-ok: %s cases\n' "${CASES}"

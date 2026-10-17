@@ -1788,8 +1788,16 @@ padm-docker restore preview /root/padm-recovery.tar --manifest /root/release-man
 
 目标须仅安装控制骨架，配置、数据、密钥、日志和备份目录为空，且没有同项目容器。
 当前接受同架构 v3 普通部署、受管或桥接可达宿主网站 Reality 共存：核心、手动 TLS、静态站、账号/分享身份、
-已保存流量、Reality 目标库、下述受限 Geo、ACME 数据和停用续期登记；宿主集成、控制角色/同步、
-host 网络共存及未处理的 ACME 组合仍明确拒绝。停用分享组的悬空引用也须先修正。
+已保存流量、Reality 目标库、下述受限 Geo、ACME、续期及单 Peer WireGuard 输入。
+主控、其它宿主集成、自动同步授权、host 网络共存及未处理的 ACME 组合仍明确拒绝。
+停用分享组的悬空引用也须先修正。
+WireGuard 要求完整 canonical `identity.json`、`private.key`、`wg-padm.conf` 三件套，
+均为 `root:root`、目录 `0700`、文件 `0600`，可信 net 镜像另核私钥与公钥配对。
+支持无角色或已接入被控；被控自动同步须先停用，归档不得含 `secrets/control-sync`。
+保留双方地址、密钥、控制身份、连接、受管快照、版本、账号及累计；恢复后重新邀请并手动同步，
+不清空版本防倒退门禁。恢复前先停止旧节点并确认接口消失，不能同时运行相同 WireGuard 身份。
+宿主接口、ifindex、alias、运行归属及来源挑战不随归档恢复；目标重新预检并生成运行归属。
+撤销时仅在容器和接口均确认消失后清理私密材料；探测失败或接口残留时保留现场供 `restore recover` 重试。
 已有 `.tls.http01=true` 可保留，按规格重建空挑战根和双栈 `80:8088`，
 不恢复旧挑战文件、ACME 账户或续期调度；目标的端口归属仍须通过现有预检。
 单 sing-box 双族 Hy2/TUIC 可恢复已保存的 `port_hopping` 规格；恢复后为 `stopped`，
@@ -1803,12 +1811,15 @@ Geo 接受包含 Xray 且 `state.enabled` 为布尔值的固定版本受管库�
 `enabled=true` 在安装和健康检查成功后恢复目标主机的每日自动更新调度；
 `enabled=false` 仍使用 Geo 数据，但不安装或接管已有 Geo 调度。预览不安装调度。
 续期仅恢复 `enabled=false` 的 DNS、standalone、webroot 或 ALPN 登记及 DNS 凭据，保持原字节和
-`0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记仍拒绝。
+`0700/0600 root:root` 权限，非 DNS 登记不得夹带凭据，不安装续期调度；启用登记仅接受下述受限组合。
 ACME 数据仅接受 acme.sh `3.1.6` 的单域名、账户及域名 EC-P256、standalone HTTP-01 `8080`，
-且必须有对应 schema `2` 的停用 standalone 续期登记、不能启用 `.tls.http01`。
+且必须有对应 schema `2` 的 standalone 续期登记、不能启用 `.tls.http01`。
 恢复器不执行归档 shell：严格解析并重建固定 9 个文件，只丢弃已知 CSR/临时材料；
 未知配置、hook、DNS/SAN/RSA/EAB 和自定义执行路径均拒绝。私钥、公钥、证书链及固定 TLS 输出
-先在无网络的可信 ops 容器内验证绑定；账户和域名密钥保留，不安装续期调度。
+先在无网络的可信 ops 容器内验证绑定；账户和域名密钥保留。
+仅该材料匹配且登记只有该域时，可保留 schema `2` standalone 的 `enabled=true`；
+健康成功后按 traffic、Geo、renewal 安装适用调度。启用 DNS/webroot/ALPN 继续拒绝，
+空 `data/acme` 不能授权启用续期。
 空 `data/acme` 仍兼容。受管 Reality 共存从规格重新生成 stream，公开入口仍为 `443`，
 不执行归档 Nginx stream 文件。桥接宿主网站恢复保留域名、上游地址和端口，
 仅接受 host-gateway 或可路由 IP；回环、host 网络和未处理的 host-main 输入仍拒绝。
@@ -1826,10 +1837,10 @@ padm-docker restore recover
 ```
 
 首次业务写入前持久保存可信候选的停机输入、原空目录元数据和调度快照。
-安装、健康检查、流量或 Geo 调度失败及 INT/TERM 时撤销本次恢复；登记发布后的 SIGKILL
+安装、健康检查、流量、Geo 或续期调度失败及 INT/TERM 时撤销本次恢复；登记发布后的 SIGKILL
 可用菜单 `18 → 10` 或 `restore recover` 继续。普通部署命令在登记清理前拒绝运行。
 恢复失败保留现场；外部调度被改写时拒绝覆盖。已提交事务的重试只清暂存，不停止服务。
-流量和 Geo 分别持久保存调度快照；撤销前统一核对外部漂移，再按 Geo、流量的逆序恢复。
+流量、Geo 和续期分别持久保存调度快照；撤销前统一核对外部漂移，再按续期、Geo、流量的逆序恢复。
 恢复中需要写回 systemd unit 时，unit 目录必须与部署私密暂存位于同一文件系统，
 以便原子替换完整文件；跨文件系统在修改外部调度前拒绝。纯 cron 恢复不受此限制。
 登记内的提交元数据及调度 source/build 暂存使用固定私密路径，半写或硬杀后
