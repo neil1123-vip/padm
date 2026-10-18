@@ -32,7 +32,10 @@ has_call() { grep -Fxq -- "$1" "${calls}"; }
 dockerHostPreflight() { record host-preflight; }
 dockerLockInstalledDeployment() { record lock; }
 dockerReleaseDeploymentLock() { record unlock; }
-dockerComposeFile() { printf '%s\n' "${lifecycleRoot}/compose.json"; }
+dockerComposeFile() {
+    [[ "${FAIL_COMPOSE:-0}" != 1 ]] || return 1
+    printf '%s\n' "${lifecycleRoot}/compose.json"
+}
 dockerRealityStreamDeploymentCheck() { record reality; }
 dockerFail2banSourceInputsPrepare() { record fail2ban-source; }
 dockerFail2banSourceInputsCheck() { :; }
@@ -226,6 +229,19 @@ dockerLifecycleCommand down
 has_call control-log-remove || fail 'down 未移除控制日志调度'
 has_call control-sync-remove || fail 'down 未移除自动同步调度'
 has_call 'compose:down' || fail 'down 未停止 Compose'
+
+# Compose 状态损坏时，卸载必须在任何调度或服务动作前拒绝。
+reset_calls
+FAIL_COMPOSE=1
+status=0
+dockerUninstallCommand || status=$?
+unset FAIL_COMPOSE
+[[ "${status}" == "${PADM_DOCKER_RC_STATE}" ]] || fail 'Compose 状态损坏时卸载未拒绝'
+! grep -Eq '^(geo-remove|renewal-remove|control-log-remove|control-sync-remove|compose:down)$' "${calls}" ||
+    fail 'Compose 状态损坏时卸载已修改调度或服务'
+has_call 'error:Docker Compose 状态不完整，已拒绝卸载' ||
+    fail 'Compose 状态损坏时卸载未提示原因'
+assert_registration
 
 reset_calls
 dockerUninstallCommand

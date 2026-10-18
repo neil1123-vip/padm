@@ -5219,6 +5219,18 @@ Docker Linux amd64、Jobs 2 定向全部通过：`docker-tproxy-management` 50.6
 回归源码归档和清单由入口自动清理，保留结果日志；用户临时预览文件未改动。
 本地修复尚未进入正式发布，不升级透明代理、原生双架构、整机重启或完整卸载支持状态。
 
+#### 5C.2f.2 卸载前 Compose 完整性门禁
+
+`dockerUninstallCommand` 先解析安装根目录并校验现有 Compose/部署身份，
+校验失败立即返回，不再先删除 Geo、续期、控制日志或控制同步调度，也不调用
+`compose:down`；通过后沿用原有卸载、备份和清理路径。新增失败回归覆盖四类
+调度和 Compose 均未调用，并保留原调度登记不变。
+
+Linux amd64 Docker 定向回归 `docker-control-log-schedule`、Jobs 2 通过，
+入口耗时约 4.9 秒，证据 `.tmp-regression-docker-8eb8ea0e20da4a61860bc4d40cd63911/`。
+本项只修复损坏状态下的卸载顺序，不把完整卸载、原生宿主、arm64、公网或正式发布
+标记为完成；总目标继续保持 active。
+
 #### 5C.3 Fail2ban 已加载动作维护门禁
 
 在既有磁盘配置/容器身份核验之后、输出唯一容器 ID 之前，复用 net 镜像内

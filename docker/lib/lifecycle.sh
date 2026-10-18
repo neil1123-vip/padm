@@ -3077,7 +3077,7 @@ dockerPurgeStateRoot() {
 }
 
 dockerUninstallCommand() {
-    local state removeImages=0 purge=0 confirm= backup root
+    local state removeImages=0 purge=0 confirm= backup root composeConfigured=0
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --remove-images) removeImages=1; shift ;;
@@ -3104,6 +3104,14 @@ dockerUninstallCommand() {
         printf 'Docker 版 padm 未安装，无需卸载\n'
         return 0
     fi
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -e "${root}/compose.json" || -e "${root}/deployment.json" || -e "${root}/images.env" ]]; then
+        dockerComposeFile >/dev/null || {
+            dockerError 'Docker Compose 状态不完整，已拒绝卸载'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        composeConfigured=1
+    fi
     dockerPortHoppingSupervisorStopIfActive || return $?
     dockerLockInstalledDeployment || return $?
     dockerTrafficBeforeChange
@@ -3111,16 +3119,11 @@ dockerUninstallCommand() {
         dockerBackupConfiguration uninstall || return "${PADM_DOCKER_RC_STATE}"
         backup=${DOCKER_CONFIG_BACKUP}
     fi
-    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerGeoScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     dockerRenewalScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     dockerControlLogScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     dockerControlSyncScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
-    if [[ -e "${root}/compose.json" || -e "${root}/deployment.json" || -e "${root}/images.env" ]]; then
-        dockerComposeFile >/dev/null || {
-            dockerError 'Docker Compose 状态不完整，已拒绝卸载'
-            return "${PADM_DOCKER_RC_STATE}"
-        }
+    if ((composeConfigured)); then
         dockerComposeRun down || return $?
     else
         dockerTProxyDisablePrepare <(printf '{"host_integrations":[]}') ||
