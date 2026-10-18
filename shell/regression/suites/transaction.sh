@@ -142,6 +142,8 @@ registerRegressionFunctionLeaf core-port-file-transaction runCorePortFileTransac
 registerRegressionFunctionLeaf entry-helper-config runEntryHelperConfigRegression
 runRegressionCoreSafetyRollback() (
     set -euo pipefail
+    runCheckPortOpenAbortRegression
+    runCheckPortOpenIPRegression
     runCoreReleaseArchiveRejectsRegression unsafe-path
     runCoreReleaseArchiveRejectsRegression symlink-payload
     runCoreFirstInstallCommitFailureRollbackRegression

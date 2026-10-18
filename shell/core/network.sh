@@ -916,15 +916,19 @@ checkPortOpenAbort() {
     if [[ "${nginxConfigChanged}" == "true" ]] && nginxRunning; then
         runCoreServiceActionAllowFailure handleNginx stop || status=1
     fi
-    padmRestoreManagedFileBackupManifest "${backupDir}" || status=1
-    checkPortOpenRestoreCoreServiceState "${singBoxWasRunning}" singBoxRunning handleSingBox || status=1
-    checkPortOpenRestoreCoreServiceState "${xrayWasRunning}" xrayRunning handleXray || status=1
-    if [[ "${nginxConfigChanged}" == "true" ]]; then
-        if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
-            runCoreServiceActionAllowFailure handleNginx start restore || status=1
+    if [[ "${status}" -eq 0 ]]; then
+        padmRestoreManagedFileBackupManifest "${backupDir}" || status=1
+    fi
+    if [[ "${status}" -eq 0 ]]; then
+        checkPortOpenRestoreCoreServiceState "${singBoxWasRunning}" singBoxRunning handleSingBox || status=1
+        checkPortOpenRestoreCoreServiceState "${xrayWasRunning}" xrayRunning handleXray || status=1
+        if [[ "${nginxConfigChanged}" == "true" ]]; then
+            if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
+                runCoreServiceActionAllowFailure handleNginx start restore || status=1
+            fi
+        else
+            checkPortOpenRestoreCoreServiceState "${nginxWasRunning}" nginxRunning handleNginx restore || status=1
         fi
-    else
-        checkPortOpenRestoreCoreServiceState "${nginxWasRunning}" nginxRunning handleNginx restore || status=1
     fi
     if [[ "${status}" -eq 0 ]]; then
         padmRemoveCleanupPath "${backupDir}"
@@ -1043,11 +1047,20 @@ checkIP() {
     statusCard "域名 IP 检查" "检查域名 IP 中"
     local localIP=$1
     local normalizedIP
-    local extraIP
-    normalizedIP=$(echo "${localIP}" | sed '1{s/[^(]*(//;s/).*//;q}')
-    extraIP=$(echo "${localIP}" | awk -F "[,]" '{print $2}')
+    normalizedIP="${localIP#"${localIP%%[![:space:]]*}"}"
+    normalizedIP="${normalizedIP%"${normalizedIP##*[![:space:]]}"}"
+    if [[ "${normalizedIP}" == \(*\) ]]; then
+        normalizedIP=${normalizedIP:1:${#normalizedIP}-2}
+        normalizedIP="${normalizedIP#"${normalizedIP%%[![:space:]]*}"}"
+        normalizedIP="${normalizedIP%"${normalizedIP##*[![:space:]]}"}"
+    fi
 
-    if [[ -z ${localIP} ]] || ! grep -q '\.' <<<"${normalizedIP}" && ! grep -q ':' <<<"${normalizedIP}"; then
+    if [[ "${normalizedIP}" == *,* ]]; then
+        statusCard "检测到多个 IP" "请确认是否关闭 Cloudflare 云朵" "关闭云朵后等待三分钟再重试" "检测到的 IP：${localIP}"
+        return 1
+    fi
+    if ! { [[ "${normalizedIP}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && padmIsValidHostName "${normalizedIP}" ||
+        padmIsValidIPv6Address "${normalizedIP}"; }; then
         errorCard "未检测到当前域名的ip"
         echoContent title "\n┌─ 域名解析排障 ─────────────────────────────────────"
         menuLine "请依次进行下列检查"
@@ -1063,13 +1076,8 @@ checkIP() {
             statusCard "检测返回值异常" "异常结果：${localIP}" "建议手动卸载 Nginx 后重新执行脚本"
         fi
         return 1
-    else
-        if [[ "${extraIP}" == *.* || "${extraIP}" == *:* ]]; then
-            statusCard "检测到多个 IP" "请确认是否关闭 Cloudflare 云朵" "关闭云朵后等待三分钟再重试" "检测到的 IP：${localIP}"
-            return 1
-        fi
-        successCard "检查当前域名IP正确"
     fi
+    successCard "检查当前域名IP正确"
     return 0
 }
 

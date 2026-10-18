@@ -14,6 +14,81 @@ if ! declare -F regressionProtocolSelectionIncludesCompat >/dev/null 2>&1; then
     }
 fi
 
+runCheckPortOpenAbortRegression() (
+    set -euo pipefail
+    local mode nginxWasRunning
+    local events nginxState xrayState singBoxState
+    local backupDir="${TMP_DIR}/check-port-open-abort"
+    local keptBackup removedBackup
+
+    nginxRunning() { [[ "${nginxState}" == true ]]; }
+    xrayRunning() { [[ "${xrayState}" == true ]]; }
+    singBoxRunning() { [[ "${singBoxState}" == true ]]; }
+    handleNginx() {
+        events+="nginx:$1"$'\n'
+        if [[ "$1" == stop ]]; then
+            [[ "${mode}" != stop-fail ]] || return 1
+            nginxState=false
+        else
+            [[ "${events}" == *$'restore\n'* && "${2:-}" == restore ]] || return 1
+            nginxState=true
+        fi
+    }
+    handleXray() {
+        events+="xray:$1"$'\n'
+        [[ "$1" == start && "${nginxState}" == false && "${events}" == *$'restore\n'* ]] || return 1
+        xrayState=true
+    }
+    handleSingBox() {
+        events+="sing-box:$1"$'\n'
+        [[ "$1" == start && "${nginxState}" == false && "${events}" == *$'restore\n'* ]] || return 1
+        singBoxState=true
+    }
+    padmRestoreManagedFileBackupManifest() {
+        events+=$'restore\n'
+        [[ "${mode}" != restore-fail ]]
+    }
+    padmForgetCleanupPath() { keptBackup=$1; }
+    padmRemoveCleanupPath() { removedBackup=$1; }
+
+    for nginxWasRunning in true false; do
+        for mode in success stop-fail restore-fail; do
+            events= keptBackup= removedBackup=
+            nginxState=true xrayState=false singBoxState=false
+            regressionExpectStatus 1 checkPortOpenAbort "${backupDir}" true true "${nginxWasRunning}" true fixture
+            if [[ "${mode}" == success ]]; then
+                [[ "${events}" == $'nginx:stop\nrestore\nsing-box:start\nxray:start\n'* ]]
+                [[ "${nginxState}" == "${nginxWasRunning}" && "${xrayState}" == true && "${singBoxState}" == true ]]
+                [[ "${nginxWasRunning}" != true || "${events}" == *$'nginx:start\n' ]]
+                [[ "${removedBackup}" == "${backupDir}" && -z "${keptBackup}" ]]
+            else
+                [[ "${keptBackup}" == "${backupDir}" && -z "${removedBackup}" ]]
+                [[ "${xrayState}" == false && "${singBoxState}" == false && "${events}" != *:start* ]]
+                [[ "${mode}" != stop-fail || "${events}" == $'nginx:stop\n' ]]
+                [[ "${mode}" != restore-fail || "${events}" == $'nginx:stop\nrestore\n' ]]
+            fi
+        done
+    done
+
+    events= keptBackup= removedBackup=
+    nginxState=true xrayState=true singBoxState=true mode=success
+    regressionExpectStatus 1 checkPortOpenAbort "${backupDir}" true true true false fixture
+    [[ "${events}" == $'restore\n' && "${removedBackup}" == "${backupDir}" ]]
+)
+
+runCheckPortOpenIPRegression() (
+    set -euo pipefail
+    local address
+    for address in 203.0.113.1 2001:db8::1 ::1 '(203.0.113.1)' $' \t203.0.113.1\n'; do
+        checkIP "${address}" || return 1
+    done
+    for address in '' not.an.ip 'error: request failed' 999.1.1.1 1.2.3 2001:::1 \
+        '203.0.113.1, garbage' '203.0.113.1, , 198.51.100.2' '203.0.113.1,' \
+        $'203.0.113.1\nerror' 'host (203.0.113.1)' ' (203.0.113.1) extra '; do
+        regressionExpectStatus 1 checkIP "${address}" || return 1
+    done
+)
+
 runSingBoxStatsBuildRegression() (
     set -euo pipefail
     local root="${TMP_DIR}/sing-box-stats-build"
