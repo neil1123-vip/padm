@@ -1874,6 +1874,10 @@ jq -e '.schema_version==4 and .enabled and .domain=="first-alpn.example.com" and
     "${DOCKER_ROOT}/secrets/renewal/first-alpn.example.com/request.json" >/dev/null &&
     [[ ! -e "${DOCKER_ROOT}/secrets/renewal/first-alpn.example.com/credentials.env" ]] ||
     fail '首个 ALPN TLS 未登记无 DNS 凭据的 schema 4 续期'
+fi
+
+if [[ "${PHASE3_MANAGEMENT_GROUP}" != tls ]]; then
+# 首次 standalone 自建完整切点，续期和 webroot 迁移随重装分片执行。
 runControl 0 protocol-first-tls-standalone-baseline configure --spec "${FIRST_TLS_SS}"
 if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     : >"${DOCKER_LOG}"
@@ -2017,7 +2021,9 @@ grep -Fq '操作已完成，但自动续期登记失败' "${CONTROL_LOG}" &&
             sort -z | xargs -0 sha256sum | sha256sum)" == "${webrootAccountHash}" &&
         "$(sha256sum "${DOCKER_ROOT}/secrets/renewal/first-http.example.com/request.json" | cut -d ' ' -f 1)" == \
             "${renewalRequestHash}" ]] || fail '新登记失败回退成功配置、复活旧登记或丢失旧证书及账户'
+fi
 
+if [[ "${PHASE3_MANAGEMENT_GROUP}" != tls-reinstall ]]; then
 (
     export PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}"
     source "${PROJECT_ROOT}/install-docker.sh"
@@ -2056,12 +2062,12 @@ grep -Fq '操作已完成，但自动续期登记失败' "${CONTROL_LOG}" &&
 runControl 0 protocol-first-tls-foreign-baseline configure --spec "${FIRST_TLS_REALITY}"
 firstTlsEdit 15 protocol-first-tls-import-not-authorized \
     --spec "${TEST_ROOT}/protocol-first-tls-foreign.json" --preview
-[[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
-    "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '首个 TLS 增量改变累计流量或额度'
 else
     # 重装分片从真实配置重建切点，保留非零流量、Geo、证书及独立 ACME 账号。
     runControl 0 protocol-reinstall-baseline configure --spec "${FIRST_TLS_REALITY}"
 fi
+[[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
+    "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '首个 TLS 增量改变累计流量或额度'
 
 if [[ "${PHASE3_MANAGEMENT_GROUP}" != tls ]]; then
 # 重装复用完整候选事务，只用一次跨核心、协议和账号替换验证编辑边界与恢复。

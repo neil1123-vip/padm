@@ -192,7 +192,7 @@ jobs:
             ${{ matrix.image.name }}.args.PADM_VERSION=${{ inputs.version }}
             ${{ matrix.image.name }}.output=${{ inputs.push && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=docker' }}
             ${{ matrix.image.name }}.cache-from=type=gha,scope=padm-${{ matrix.image.name }}-${{ matrix.platform.name }}
-            ${{ matrix.image.name }}.cache-to=type=gha,mode=max,scope=padm-${{ matrix.image.name }}-${{ matrix.platform.name }}
+            ${{ matrix.image.name }}.cache-to=type=gha,mode=min,scope=padm-${{ matrix.image.name }}-${{ matrix.platform.name }}
 
       - name: Test the exact image
         shell: bash
@@ -252,12 +252,6 @@ jobs:
       matrix:
         image: ${{ fromJSON(needs.contract.outputs.images) }}
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_ref }}
-          fetch-depth: 1
-
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
         with:

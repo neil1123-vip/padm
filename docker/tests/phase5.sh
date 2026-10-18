@@ -1254,12 +1254,20 @@ for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
 done
 grep -Fq 'run: sudo bash shell/regression/install-ci-jq.sh' "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同分片没有安装固定版本的 jq'
-grep -Fq 'uses: docker://rhysd/actionlint:1.7.12' "${PR_WORKFLOW}" || fail 'PR workflow lint gate is missing'
+grep -Fq 'run: bash shell/regression/lint-ci-workflows.sh' "${PR_WORKFLOW}" || fail 'PR workflow lint gate is missing'
 grep -Fq 'bash shell/subscription_groups_regression.sh "${selector}"' "${PR_WORKFLOW}" ||
     fail 'PR native selector dispatch is missing'
 grep -Fq 'selector=ci-pr' "${PR_WORKFLOW}" || fail 'PR fast native profile is missing'
 grep -Fq 'selector=ci' "${PR_WORKFLOW}" || fail 'PR heavy native fallback is missing'
-grep -Fq 'uses: docker://rhysd/actionlint:1.7.12' "${RELEASE_WORKFLOW}" || fail 'Release workflow lint gate is missing'
+grep -Fq 'run: bash shell/regression/lint-ci-workflows.sh' "${RELEASE_WORKFLOW}" || fail 'Release workflow lint gate is missing'
+for lintContract in \
+    '/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz' \
+    '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8' \
+    'sha256sum --check' \
+    '"${directory}/actionlint" -color'; do
+    grep -Fq -- "${lintContract}" "${PROJECT_ROOT}/shell/regression/lint-ci-workflows.sh" ||
+        fail 'Actionlint 没有保留固定版本、归档校验或实际工作流检查'
+done
 grep -Fq 'bash shell/subscription_groups_regression.sh ci' "${RELEASE_WORKFLOW}" || fail 'Release native CI gate is missing'
 grep -Fq 'native_parallel_jobs:' "${PR_WORKFLOW}" || fail 'PR workflow lacks reproducible native concurrency input'
 grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS' "${PR_WORKFLOW}" ||

@@ -36,9 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Lint workflows
-        uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: -color
+        run: bash shell/regression/lint-ci-workflows.sh
       - name: Check shell syntax
         id: checked
         shell: bash

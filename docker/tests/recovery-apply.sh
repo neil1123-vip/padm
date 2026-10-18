@@ -779,7 +779,6 @@ PY
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${ACME_SOURCE}" \
     --output "${TEST_ROOT}/acme.tar" >/dev/null || fail 'ACME 归档导出失败'
 
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != core ]]; then
 RENEWAL_ENABLED_SOURCE="${TEST_ROOT}/source-renewal-enabled"
 cp -a -- "${ACME_SOURCE}" "${RENEWAL_ENABLED_SOURCE}"
 find "${RENEWAL_ENABLED_SOURCE}/secrets/renewal" -mindepth 1 -maxdepth 1 \
@@ -800,15 +799,11 @@ python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${NO_RENEWAL_SOURCE}" 
     --output "${TEST_ROOT}/no-renewal.tar" >/dev/null || fail '无续期登记归档导出失败'
 fi
 
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == alpn ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == dns ]]; then
 for challenge_provider in webroot alpn dns_acmedns; do
-    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${challenge_provider}" == webroot ]] || continue
-    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != alpn || "${challenge_provider}" == alpn ]] || continue
-    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != dns || "${challenge_provider}" == dns_acmedns ]] || continue
+    case "${PADM_DOCKER_RECOVERY_SCOPE:-all}:${challenge_provider}" in
+    all:*|core:webroot|atomic:alpn|atomic:dns_acmedns|webroot:webroot|alpn:alpn|dns:dns_acmedns) ;;
+    *) continue ;;
+    esac
 CHALLENGE_SOURCE="${TEST_ROOT}/source-${challenge_provider}-enabled"
 cp -a -- "${RENEWAL_ENABLED_SOURCE}" "${CHALLENGE_SOURCE}"
 python3 -B - "${PROJECT_ROOT}/docker/tests/acme_recovery.py" "${CHALLENGE_SOURCE}" "${DOMAIN}" "${challenge_provider}" <<'PY'
@@ -858,8 +853,6 @@ dockerGenerateDeployment "${CHALLENGE_SOURCE}/config/spec.json" "${CHALLENGE_SOU
 python3 -B "${DOCKER_LIB_DIR}/recovery.py" export --root "${CHALLENGE_SOURCE}" \
     --output "${TEST_ROOT}/${challenge_provider}-enabled.tar" >/dev/null || fail '启用挑战续期归档导出失败'
 done
-fi
-fi
 fi
 
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
@@ -1859,15 +1852,12 @@ run_child recover ok 0
 assert_empty
 
 fi
-if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == webroot ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == alpn ||
-    "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == dns ]]; then
 for renewal_provider in standalone webroot alpn dns_acmedns; do
-    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != webroot || "${renewal_provider}" == webroot ]] || continue
-    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != alpn || "${renewal_provider}" == alpn ]] || continue
-    [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != dns || "${renewal_provider}" == dns_acmedns ]] || continue
+    # 续期矩阵分散到现有三个 worker，避免新增挑战方式拖长 variants。
+    case "${PADM_DOCKER_RECOVERY_SCOPE:-all}:${renewal_provider}" in
+    all:*|core:webroot|atomic:alpn|atomic:dns_acmedns|variants:standalone|webroot:webroot|alpn:alpn|dns:dns_acmedns) ;;
+    *) continue ;;
+    esac
     RENEWAL_ARCHIVE="${TEST_ROOT}/renewal-enabled.tar"
     RENEWAL_SOURCE="${RENEWAL_ENABLED_SOURCE}"
     if [[ "${renewal_provider}" != standalone ]]; then
@@ -1991,7 +1981,6 @@ assert_empty
 ! grep -q '^systemctl:enable --now ' "${MOCK_BACKEND}/events" ||
     fail '健康失败后仍安装了恢复调度'
 done
-fi
 
 if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == all ||
     "${PADM_DOCKER_RECOVERY_SCOPE:-all}" == variants ]]; then

@@ -185,11 +185,12 @@ listRegressionDockerContractsFastChildSelectors() {
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
-    printf '%s\n' docker-menu docker-entry-port-alias
+    # 用短分片承接排队项，保留站点与元数据长事务的独立 worker。
+    printf '%s\n' docker-menu docker-control-state docker-reality-targets-selection docker-entry-port-alias
 }
 
 listRegressionDockerContractsFastSitesChildSelectors() {
-    printf '%s\n' docker-sites docker-wireguard-runtime docker-control-state
+    printf '%s\n' docker-sites docker-wireguard-runtime
 }
 
 listRegressionDockerContractsFastRestChildSelectors() {
@@ -261,7 +262,7 @@ listRegressionDockerSubscriptionPublicationChildSelectors() {
 
 listRegressionDockerContractsRealityMetadataChildSelectors() {
     printf '%s\n' docker-reality-parameters docker-vless-encryption \
-        docker-reality-targets-selection docker-reality-target-library
+        docker-reality-target-library
 }
 
 listRegressionDockerContractsRealityRotationChildSelectors() {
@@ -282,8 +283,7 @@ listRegressionDockerContractsSystemLightChildSelectors() {
 }
 
 listRegressionDockerContractsPhase3TlsChildSelectors() {
-    printf '%s\n' docker-phase3-entries-management-tls docker-phase3-entries-management-tls-reinstall \
-        docker-phase1 docker-setup-encrypted-tcp
+    printf '%s\n' docker-phase3-entries-management-tls docker-phase3-entries-management-tls-reinstall
 }
 
 listRegressionDockerContractsPhase3ProtocolChildSelectors() {
@@ -291,11 +291,11 @@ listRegressionDockerContractsPhase3ProtocolChildSelectors() {
 }
 
 listRegressionDockerContractsPhase3TopologyChildSelectors() {
-    printf '%s\n' docker-phase3-entries-topology docker-reality-targets-direct docker-http-relay
+    printf '%s\n' docker-phase3-entries-topology docker-reality-targets-direct docker-phase1 docker-http-relay
 }
 
 listRegressionDockerContractsPolicyChildSelectors() {
-    printf '%s\n' docker-routing-core-policy-lifecycle docker-cdn-entries
+    printf '%s\n' docker-routing-core-policy-lifecycle docker-cdn-entries docker-setup-encrypted-tcp
 }
 
 listRegressionDockerRoutingIpOwnershipChildSelectors() {
