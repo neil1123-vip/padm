@@ -9319,6 +9319,21 @@ Linux amd64、Jobs 2 下通过，入口约 `5.178` 秒，证据
 `.tmp-regression-docker-e2ea095d78134720bff937df1eb3ac8e/`，签名提交 `84c26d06`。
 这只是卸载安全门禁加固，完整卸载、原生 arm64、整机生命周期和可信发布仍待验。
 
+#### 5C.2f.3 Debian 13 amd64 恢复态复核
+
+2026-10-18 21:01（北京时间）在获授权的 `b.951101.xyz`（Debian 13、
+Docker `29.9.1`、Compose `v5.6.0`）完成只读恢复态复核：`nginx`、
+`xray`、`subscription` 三个容器均为 `healthy`，443 仅由 Nginx
+`docker-proxy` 暴露；`net-transparent` 保持 `exited (0)` 且
+`restart=no`。主机未发现 `padm`、`TPROXY`、`REDIRECT` 或 `MARK`
+规则，策略路由仅保留系统默认三表，负载 `0.26/0.08/0.02`、Swap
+使用为 `0`。证据保存在
+`.tmp-vps-native-20261018/evidence/vps-recovery-status-20261018T2057Z.json`。
+
+该复核只证明事故后的安全恢复态和透明集成关闭边界，不重新启用
+`net-transparent`，不把现有 3.40.0 发布版状态外推为当前源码的可信发布，
+也不升级 5C.2 的完整原生宿主、arm64、重启或卸载支持范围。
+
 本批整体目标保持 active，后续继续清点 deferred 与环境验收缺口。
 
 - 每阶段同步中英文使用说明、支持矩阵、权限边界及失败恢复操作。
