@@ -9353,6 +9353,16 @@ systemd timer、业务健康和公网 TLS 的完整调用链。service 以
 本项不启用透明代理，不扩大 ACME 支持组合，不把自然到期续期、原生 arm64、
 完整卸载或当前源码可信发布标记为完成；整体目标继续保持 active。
 
+#### 5C.2f.5 恢复态 orphan 透明容器清理
+
+2026-10-18 21:22（北京时间）按容器名精确删除已退出且 `restart=no` 的
+`padm-docker-net-transparent-1`，不触碰卷、业务容器或透明规则。清理后
+`padm-docker validate` 无 orphan 警告，`nginx`、`xray`、`subscription`
+仍为 `healthy`，公网 HTTPS 返回 200，项目仅保留三项业务容器。
+
+证据为 `.tmp-vps-native-20261018/evidence/transparent-orphan-cleanup-20261018T2122CST.txt`。
+本项只清理事故残留，不等同完整卸载或透明代理重新验收；整体目标继续保持 active。
+
 - 每阶段同步中英文使用说明、支持矩阵、权限边界及失败恢复操作。
   旧部署迁移明确要求完整 spec 或安全导入，不允许一条重配命令替代迁移。
 - PR 按实际改动运行合同、Compose、菜单 PTY 和定向回归；
