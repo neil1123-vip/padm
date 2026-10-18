@@ -443,23 +443,6 @@ trafficCounter() {
       END { printf "%.0f\n", total }
     '
 }
-waitTrafficIdle() {
-    local kind=$1 version=$2 transport=${1} previous current stable=0
-    [[ "${kind}" != dns ]] || transport=udp
-    previous=$(trafficCounter "${transport}" "${version}" TPROXY)
-    for ((attempt = 0; attempt < 40; attempt++)); do
-        sleep 0.05
-        current=$(trafficCounter "${transport}" "${version}" TPROXY)
-        if [[ "${current}" == "${previous}" ]]; then
-            stable=$((stable + 1))
-            (( stable >= 3 )) && return 0
-        else
-            previous=${current}
-            stable=0
-        fi
-    done
-    fail "${kind} background traffic did not become idle"
-}
 proofRows() {
     [[ ! -f "$1/$2.jsonl" ]] && printf '0\n' || jq -s 'length' "$1/$2.jsonl"
 }
@@ -482,46 +465,81 @@ forwardCheck() {
     ((after > before)) || fail "${kind} bypassed TProxy"
     assertProof "${kind}" "${TEST_ROOT}/proof" "${rows}" "${peer}"
 }
+outputProbePort=20000
 outputCheck() {
     local kind=$1 targetPort=$2 version=$3 uid=$4 captured=$5 transport=${1} gid=${6:-$4}
-    local before after markedBefore markedAfter rows destination=198.18.65.20 peer=198.18.65.10
+    local rows marked tool=iptables tag
+    local destination=198.18.65.20 peer=198.18.65.10
     [[ "${kind}" != dns ]] || transport=udp
-    if [[ "${version}" == 6 ]]; then destination=fd40:65::20 peer=fd40:65::10; fi
+    if [[ "${version}" == 6 ]]; then destination=fd40:65::20 peer=fd40:65::10 tool=ip6tables; fi
     rows=$(proofRows "${TEST_ROOT}/proof" "${kind}")
-    [[ "${captured}" == yes ]] || waitTrafficIdle "${kind}" "${version}"
-    before=$(trafficCounter "${transport}" "${version}" TPROXY)
-    markedBefore=$(trafficCounter "${transport}" "${version}" MARK)
+    outputProbePort=$((outputProbePort + 1))
+    tag="padm-output-probe:${outputProbePort}"
+    # 每次探针独占源端口；无动作的计数规则不改变转发，也不混入旧连接的重传或收尾包。
+    local -a observer=(OUTPUT -p "${transport}" -d "${destination}" --sport "${outputProbePort}"
+        --dport "${targetPort}" -m conntrack --ctstate NEW -m mark --mark "${mark}/0xffffffff"
+        -m comment --comment "${tag}")
+    net "${tool}" -w -t mangle -A "${observer[@]}"
     nsenter --target "${netPid}" --net -- setpriv --reuid "${uid}" --regid "${gid}" --clear-groups \
         --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
-        python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}"
-    after=$(trafficCounter "${transport}" "${version}" TPROXY)
-    markedAfter=$(trafficCounter "${transport}" "${version}" MARK)
+        python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}" "${outputProbePort}"
+    marked=$(net "${tool}-save" -c -t mangle | awk -v tag="${tag}" '
+      { gsub(/"/, "") }
+      $NF == tag && $(NF-1) == "--comment" {
+        split($1, fields, ":"); sub(/^\[/, "", fields[1]); total += fields[1]; found++
+      }
+      END { if (found != 1) exit 1; printf "%.0f\n", total }
+    ')
+    net "${tool}" -w -t mangle -D "${observer[@]}"
     if [[ "${captured}" == yes ]]; then
-        ((after > before && markedAfter > markedBefore)) || fail "${kind} selected UID bypassed OUTPUT/TProxy"
+        ((marked > 0)) ||
+            fail "${kind} selected UID bypassed OUTPUT/TProxy: version=${version} uid=${uid} gid=${gid} marked=${marked} sport=${outputProbePort}"
     else
-        [[ "${after}" == "${before}" && "${markedAfter}" == "${markedBefore}" ]] ||
-            fail "${kind} unselected/off UID was redirected"
+        ((marked == 0)) ||
+            fail "${kind} unselected/off UID was redirected: version=${version} uid=${uid} gid=${gid} marked=${marked} sport=${outputProbePort}"
     fi
     assertProof "${kind}" "${TEST_ROOT}/proof" "${rows}" "${peer}"
 }
 replyCheck() {
-    local kind=$1 targetPort=$2 version=$3 scope=$4 before after markedBefore markedAfter rows
+    local kind=$1 targetPort=$2 version=$3 scope=$4 before marked tool=iptables transport=${1} tag
     local destination=198.18.64.10 peer=198.18.64.20
     local -a caller=(nsenter --target "${clientPid}" --net --)
     if [[ "${version}" == 6 ]]; then destination=fd40:64::10 peer=fd40:64::20; fi
+    [[ "${kind}" != dns ]] || transport=udp
+    if [[ "${version}" == 6 ]]; then tool=ip6tables; fi
     if [[ "${scope}" == local ]]; then
         peer=${destination}
         caller=(nsenter --target "${netPid}" --net -- setpriv --reuid 65534 --regid 65534 --clear-groups
             --bounding-set=-all --inh-caps=-all --ambient-caps=-all --)
     fi
     rows=$(proofRows "${TEST_ROOT}/replies" "${kind}")
-    before=$(trafficCounter "${kind}" "${version}" TPROXY)
-    markedBefore=$(trafficCounter "${kind}" "${version}" MARK)
-    "${caller[@]}" python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}"
-    after=$(trafficCounter "${kind}" "${version}" TPROXY)
-    markedAfter=$(trafficCounter "${kind}" "${version}" MARK)
-    [[ "${after}" == "${before}" && "${markedAfter}" == "${markedBefore}" ]] ||
-        fail "${kind} ${scope} request or selected UID service reply was redirected"
+    outputProbePort=$((outputProbePort + 1))
+    tag="padm-reply-probe:${outputProbePort}"
+    local -a observer
+    if [[ "${scope}" == local ]]; then
+        observer=(OUTPUT -p "${transport}" -d "${destination}" --sport "${outputProbePort}"
+            --dport "${targetPort}" -m conntrack --ctstate NEW -m mark --mark "${mark}/0xffffffff"
+            -m comment --comment "${tag}")
+    else
+        observer=(OUTPUT -p "${transport}" -s "${destination}" --sport "${targetPort}"
+            -m conntrack --ctdir REPLY -m mark --mark "${mark}/0xffffffff"
+            -m comment --comment "${tag}")
+    fi
+    net "${tool}" -w -t mangle -A "${observer[@]}"
+    if [[ "${scope}" == local ]]; then
+        "${caller[@]}" python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}" "${outputProbePort}"
+    else
+        "${caller[@]}" python3 "${fixture}" client "${kind}" "${destination}" "${targetPort}"
+    fi
+    marked=$(net "${tool}-save" -c -t mangle | awk -v tag="${tag}" '
+      { gsub(/"/, "") }
+      $NF == tag && $(NF-1) == "--comment" {
+        split($1, fields, ":"); sub(/^\[/, "", fields[1]); total += fields[1]; found++
+      }
+      END { if (found != 1) exit 1; printf "%.0f\n", total }
+    ')
+    net "${tool}" -w -t mangle -D "${observer[@]}"
+    ((marked == 0)) || fail "${kind} ${scope} request or selected UID service reply was redirected"
     assertProof "${kind}" "${TEST_ROOT}/replies" "${rows}" "${peer}"
 }
 
@@ -642,12 +660,6 @@ for core in xray sing-box; do
             outputCheck dns 53 "${version}" 65533 yes
             outputCheck tcp 18080 "${version}" 0 no 10001
             outputCheck udp 18081 "${version}" 0 no 10001
-            replyCheck tcp 18090 "${version}" local
-            replyCheck udp 18091 "${version}" local
-            replyCheck tcp 18090 "${version}" reply
-            replyCheck udp 18091 "${version}" reply
-            forwardCheck tcp 18080 "${version}"
-            forwardCheck udp 18081 "${version}"
             tool=iptables-save
             [[ "${version}" != 6 ]] || tool=ip6tables-save
             net "${tool}" -c -t mangle | awk -v chain="${chain}-out" '
@@ -656,6 +668,12 @@ for core in xray sing-box; do
               }
               END { exit !(total > 0) }
             ' || fail 'real core and group probe did not exercise the OUTPUT bypass'
+            replyCheck tcp 18090 "${version}" local
+            replyCheck udp 18091 "${version}" local
+            replyCheck tcp 18090 "${version}" reply
+            replyCheck udp 18091 "${version}" reply
+            forwardCheck tcp 18080 "${version}"
+            forwardCheck udp 18081 "${version}"
         done
         previousChain=${chain} previousToken=${token}
         stopServer

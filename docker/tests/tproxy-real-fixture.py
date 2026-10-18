@@ -92,13 +92,14 @@ def target(root: Path, tcp_port: int, udp_port: int, dns_port: int | None = None
             server.server_close()
 
 
-def client(kind: str, host: str, port: int) -> None:
+def client(kind: str, host: str, port: int, source_port: int = 0) -> None:
     if kind == "tcp":
-        with socket.create_connection((host, port), timeout=3) as stream:
+        with socket.create_connection((host, port), timeout=3, source_address=("", source_port)) as stream:
             stream.sendall(b"tproxy-tcp-request")
             assert stream.recv(64) == b"tproxy-tcp-ok"
         return
     with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_DGRAM) as stream:
+        stream.bind(("", source_port))
         stream.settimeout(3)
         if kind == "dns":
             version = 6 if ":" in host else 4
@@ -144,7 +145,7 @@ def main() -> None:
         target(Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]),
                int(sys.argv[5]) if len(sys.argv) > 5 else None)
     elif mode == "client":
-        client(sys.argv[2], sys.argv[3], int(sys.argv[4]))
+        client(sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]) if len(sys.argv) > 5 else 0)
     elif mode == "nonunicast":
         nonunicast(sys.argv[2], sys.argv[3])
     else:
