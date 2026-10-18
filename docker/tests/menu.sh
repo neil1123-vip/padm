@@ -5786,6 +5786,16 @@ for xhttpCase in flow headers-long cancel failed invalid current status-failed s
 done
 unset XHTTP_EDIT_STATUS XHTTP_STATUS XHTTP_STATUS_FIXTURE XHTTP_LONG_HEADERS
 
+(
+    source "${PROJECT_ROOT}/docker/lib/menu.sh"
+    snapshot=previous
+    mktemp() { return 1; }
+    if dockerMenuReadProtocolStatus snapshot xhttp-status; then
+        fail '状态副本创建失败仍返回成功'
+    fi
+    [[ -z "${snapshot}" ]] || fail '状态副本创建失败仍保留旧状态'
+)
+
 # TERM 退出不能留下状态副本；不另起整套 PTY 场景。
 menuStatus=0
 printf '%s\n' fixture-xhttp-status >"${TEST_ROOT}/xhttp-status.tmp"

@@ -60,7 +60,8 @@ IP、组合模式及直连例外。Docker 已覆盖这些操作，不追加独�
 本轮细节与剩余缺口见[原生验收记录](docker-native-acceptance-2026-10-18.md)。
 Redirect 已取得 IPv4 TCP/TLS 及规则计数证据；切换 TProxy 后出现内存/Swap 耗尽与
 广播误捕获，SSH 恢复及受控重启已验证，完整循环机制仍待隔离核验。
-业务容器保持停止且 `restart=no`；规格撤销被 REALITY 目标检查拒绝，不能自动重新拉起。
+事故后已精确撤销透明集成并删除退出的 orphan；`nginx/xray/subscription` 均 healthy，
+`net-transparent` 保持关闭，不自动重新启用。最新现场证据见 5C.2f.3–5。
 TProxy/TUN、完整卸载、原生 arm64、自然到期续期与当前修复的正式发布仍须补齐。
 Desktop、离线夹具或旧版本验签不能替代这些证据，整体目标继续保持 deferred/active。
 
@@ -74,7 +75,7 @@ Debian 13 原生 amd64 VPS。Buildx 列出 arm64 平台不证明存在原生 arm
 | 门槛 | 当前证据与尚缺输入 |
 | --- | --- |
 | 当前代码集成 | 6A.21–6A.23、4C.13–4C.14 定向与真实链路证据齐备；本批 `docker-contracts-full -Jobs 6` 的 `66/66` 叶子全部通过，含完整菜单、恢复故障矩阵和升级/回滚。 |
-| 原生双架构生命周期 | amd64 已验安装、首配、正式升级/回滚、真实 systemd/整机重启及重启后业务，Redirect IPv4 TCP/TLS 与实际计数通过；TProxy 广播误捕获及资源耗尽后已恢复 SSH/重启，透明集成已精确撤销，业务保持停止；TProxy/TUN/卸载待补。原生 arm64 仍缺环境；逐架构保留源提交、内核、镜像 digest 和清理结果。 |
+| 原生双架构生命周期 | amd64 已验安装、首配、正式升级/回滚、真实 systemd/整机重启及重启后业务，Redirect IPv4 TCP/TLS 与实际计数通过；TProxy 广播误捕获及资源耗尽后已恢复 SSH/重启，透明集成已精确撤销，三项业务 healthy、orphan 已删除；TProxy/TUN/卸载待补。原生 arm64 仍缺环境；逐架构保留源提交、内核、镜像 digest 和清理结果。 |
 | 公网 CA/CDN 与客户端 | 已有授权域名与独立客户端，正式 CLI 的 Let's Encrypt 签发、Cloudflare CDN、首配/升级/回滚/重启正反例通过；新证书未到期，生产续期入口及调度的 skip 不算真实续期。 |
 | 当前版本可信发布 | 正式 3.39/3.40 的真实 manifest、签名 bundle、控制归档及 5 个镜像引用已通过生产验签和首配/升级；本轮源码修复尚未正式发布，仍需经授权发布后的对应证据。本任务未获 push 或触发发布授权。 |
 
@@ -83,6 +84,17 @@ INT/TERM、命令次数及后代清理断言。修复前 checkpoint `12` 已复�
 `docker-contracts-fast-heavy` 完整分片 `2/2` 通过，入口 `82.684` 秒；
 证据 `.tmp-ci-39050789419/summary.md`，本批完整合同同时覆盖该修复。
 以上门槛全部取得当前版本实际证据后，才重新审计整体完成状态。
+
+本轮菜单补验已复现 TProxy 状态读取时父菜单 TERM 不退出：状态 CLI 在命令替换
+子 shell 中运行，父菜单无法取得其 PID。现复用同一当前进程状态读取 helper，
+覆盖 XHTTP、TProxy/Redirect 的两个参数入口；PTY 新增两协议两分支及 XHTTP
+共 10 个 INT/TERM 场景，检查 CLI/孙进程、单次分发与状态副本清理。
+`docker-menu` Linux amd64、Jobs 2 通过，入口 `72.948` 秒，证据
+`.tmp-regression-docker-f8ba8404aae34dbeb74edaa0205e81c8/`；当前文件语法和
+ShellCheck error 通过。最后补充临时文件创建失败时清空旧状态的断言，
+`docker-menu-xhttp -Jobs 2` 通过，入口 `6.846` 秒，证据
+`.tmp-regression-docker-a54dbc82e3e14c62a1f6407cfd16c89c/`。
+未重复 full，不扩大透明代理或其它支持范围。
 
 集中完整合同入口 `756.539` 秒，排队 `4570` ms、`cache_hit=false`、源码位于容器 tmpfs；
 证据 `.tmp-regression-docker-8ad5347e3d244d269800913cee9055ff/`。实际执行全部 `66` 个

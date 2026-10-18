@@ -4,7 +4,8 @@ set -euo pipefail
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-menu-signals.XXXXXX")
 export SIGNAL_PROJECT_ROOT="${PROJECT_ROOT}" SIGNAL_TEST_ROOT="${TEST_ROOT}"
-mkdir -p "${TEST_ROOT}/config"
+export TMPDIR="${TEST_ROOT}/tmp"
+mkdir -p "${TEST_ROOT}/config" "${TMPDIR}"
 printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TEST_ROOT}/config/spec.json"
 printf '{}\n' >"${TEST_ROOT}/deployment.json"
 printf 'PADM_OPS_IMAGE=fixture\n' >"${TEST_ROOT}/images.env"
@@ -31,10 +32,10 @@ cat >"${TEST_ROOT}/cli.sh" <<'EOF'
 set -u
 case "${1:-}" in
 status) exit 0 ;;
-setup|edit|tls|control|fail2ban)
+setup|edit|tls|control|fail2ban|protocol)
     [[ "${1:-}" != control || "${2:-}" != status ]] || exit 0
     printf '%s\n' "${BASHPID}" >"${SIGNAL_TEST_ROOT}/setup.pid"
-    trap 'printf "setup-cleaned\n"; exit 143' TERM
+    trap 'printf "setup-cleaned\n" >"${SIGNAL_TEST_ROOT}/setup.cleaned"; printf "setup-cleaned\n"; exit 143' TERM
     source "${SIGNAL_PROJECT_ROOT}/docker/lib/setup.sh"
     printf 'setup-ready\n'
     waitWorker() {
@@ -48,7 +49,11 @@ setup|edit|tls|control|fail2ban)
         )
         printf '%s\n' "${workerOutput}"
     }
-    if [[ "${1:-}" == fail2ban ]]; then
+    if [[ "${1:-}" == protocol ]]; then
+        [[ "$#" -eq 2 && ( "$2" == tproxy-status || "$2" == redirect-status || "$2" == xhttp-status ) ]] || exit 2
+        printf '%s\n' "$*" >>"${SIGNAL_TEST_ROOT}/control.calls"
+        waitWorker
+    elif [[ "${1:-}" == fail2ban ]]; then
         [[ "${2:-}" == control ]] || exit 2
         case "${3:-}" in
         disable) [[ "$#" -eq 5 && "$4" == --confirm && "$5" == PADM-DOCKER-EDIT ]] || exit 2 ;;
@@ -107,18 +112,37 @@ waitText() {
 for mode in input worker edit-input edit-worker tls-input tls-worker \
     control-source-int control-source-term control-rotate-int control-rotate-term \
     fail2ban-disable-int fail2ban-disable-term fail2ban-enable-int fail2ban-enable-term \
-    fail2ban-settings-int fail2ban-settings-term; do
+    fail2ban-settings-int fail2ban-settings-term \
+    {tproxy,redirect}-{2,5}-{term,int} xhttp-2-{term,int}; do
     export SIGNAL_MODE="${mode##*-}"
-    [[ "${mode}" != control-* && "${mode}" != fail2ban-* ]] || SIGNAL_MODE=worker
+    case "${mode}" in control-*|fail2ban-*|tproxy-*|redirect-*|xhttp-*) SIGNAL_MODE=worker ;; esac
     # Linux /proc 的后代终止另行实测；MSYS2 只覆盖真实 PTY 输入。
     [[ "${SIGNAL_MODE}" != worker || "$(uname -s)" == Linux ]] || continue
     rm -f -- "${TEST_ROOT}/menu.pid" "${TEST_ROOT}/setup.pid" "${TEST_ROOT}/worker.pid" \
-        "${TEST_ROOT}/input" "${TEST_ROOT}/control.log" "${TEST_ROOT}/control.calls"
+        "${TEST_ROOT}/input" "${TEST_ROOT}/control.log" "${TEST_ROOT}/control.calls" "${TEST_ROOT}/setup.cleaned"
     mkfifo "${TEST_ROOT}/input"
     (
         exec 3>"${TEST_ROOT}/input"
         waitText 'Docker 管理菜单' || exit 11
         case "${mode}" in
+        xhttp-*)
+            printf '9\n' >&3
+            waitText 'Docker 协议与入口' || exit 32
+            printf '10\n' >&3
+            waitText 'Docker XHTTP 管理' || exit 33
+            printf '2\n' >&3
+            ;;
+        tproxy-*|redirect-*)
+            printf '17\n' >&3
+            waitText 'Docker 路由与出站' || exit 28
+            title=TProxy
+            routeChoice=43
+            [[ "${mode}" != redirect-* ]] || { title=Redirect; routeChoice=47; }
+            printf '%s\n' "${routeChoice}" >&3
+            waitText "Docker ${title} 管理" || exit 29
+            action=${mode#*-}
+            printf '%s\n' "${action%-*}" >&3
+            ;;
         fail2ban-*)
             printf '18\n' >&3
             waitText 'Docker 服务维护' || exit 21
@@ -152,7 +176,7 @@ for mode in input worker edit-input edit-worker tls-input tls-worker \
             printf '1\n' >&3
             ;;
         esac
-        waitText 'setup-ready' || exit 12
+        case "${mode}" in tproxy-*|redirect-*|xhttp-*) ;; *) waitText 'setup-ready' || exit 12 ;; esac
         if [[ "${mode}" == tls-* ]]; then
             waitText '证书操作: ' || exit 17
             if [[ "${SIGNAL_MODE}" == worker ]]; then printf '1\n\ny\n' >&3; fi
@@ -168,7 +192,15 @@ for mode in input worker edit-input edit-worker tls-input tls-worker \
         fi
         if [[ "${mode}" == *-int ]]; then
             printf '\003' >&3
-            if [[ "${mode}" == fail2ban-* ]]; then
+            if [[ "${mode}" == xhttp-* ]]; then
+                waitText 'Docker XHTTP 管理' 2 || exit 34
+                printf '0\n' >&3
+                waitText 'Docker 协议与入口' 2 || exit 35
+            elif [[ "${mode}" == tproxy-* || "${mode}" == redirect-* ]]; then
+                waitText "Docker ${title} 管理" 2 || exit 30
+                printf '0\n' >&3
+                waitText 'Docker 路由与出站' 2 || exit 31
+            elif [[ "${mode}" == fail2ban-* ]]; then
                 waitText 'Docker Fail2ban 维护' 2 || exit 24
                 printf '0\n' >&3
                 waitText 'Docker 服务维护' 2 || exit 25
@@ -199,10 +231,16 @@ for mode in input worker edit-input edit-worker tls-input tls-worker \
     expected=143
     [[ "${mode}" != *-int ]] || expected=0
     [[ "${rc}" -eq "${expected}" ]] || fail "${mode}: expected ${expected}, got ${rc}"
-    grep -Fq setup-cleaned "${TEST_ROOT}/control.log" || fail "${mode}: CLI did not clean up"
+    [[ -f "${TEST_ROOT}/setup.cleaned" ]] || fail "${mode}: CLI did not clean up"
     ! kill -0 "$(<"${TEST_ROOT}/setup.pid")" 2>/dev/null || fail "${mode}: CLI survived"
     if [[ "${SIGNAL_MODE}" == worker ]]; then
         ! kill -0 "$(<"${TEST_ROOT}/worker.pid")" 2>/dev/null || fail 'worker survived'
+    fi
+    if [[ "${mode}" == tproxy-* || "${mode}" == redirect-* || "${mode}" == xhttp-* ]]; then
+        [[ "$(<"${TEST_ROOT}/control.calls")" == "protocol ${mode%%-*}-status" ]] ||
+            fail "${mode}: protocol status backend was repeated or dispatched incorrectly"
+        ! compgen -G "${TMPDIR:-/tmp}/padm-${mode%%-*}-menu.*" >/dev/null ||
+            fail "${mode}: status snapshot survived"
     fi
     if [[ "${mode}" == control-* ]]; then
         action=source-check

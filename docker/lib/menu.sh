@@ -109,6 +109,20 @@ dockerMenuRun() {
     return "${status}"
 }
 
+dockerMenuReadProtocolStatus() {
+    local resultName=$1 statusCommand=$2 capturedStatus= statusCode=0 DOCKER_MENU_STATUS_FILE=
+    printf -v "${resultName}" '%s' ''
+    # 不在命令替换中运行 CLI，父菜单必须能中断并回收状态命令及其后代。
+    DOCKER_MENU_STATUS_FILE=$(mktemp "${TMPDIR:-/tmp}/padm-${statusCommand%-status}-menu.XXXXXX") || return 1
+    dockerMenuRun protocol "${statusCommand}" >"${DOCKER_MENU_STATUS_FILE}" || statusCode=$?
+    if [[ "${DOCKER_MENU_SIGNAL}" -eq 0 ]]; then
+        capturedStatus=$(<"${DOCKER_MENU_STATUS_FILE}")
+    fi
+    rm -f -- "${DOCKER_MENU_STATUS_FILE}"
+    printf -v "${resultName}" '%s' "${capturedStatus}"
+    return "${statusCode}"
+}
+
 dockerMenuInstall() {
     local choice specFile
     while :; do
@@ -319,7 +333,7 @@ dockerMenuPortHopping() {
 dockerMenuXhttp() {
     local choice listener preset concurrency requests seconds padding noGrpc noSse post interval buffered mode path host headers downloadPort
     local downloadAddress downloadSecurity downloadServerName downloadAlpn downloadPublicKey downloadShortId downloadSettings
-    local DOCKER_MENU_STATUS_FILE= status snapshot currentValues currentConcurrency currentRequests currentSeconds currentPadding
+    local status snapshot currentValues currentConcurrency currentRequests currentSeconds currentPadding
     local currentNoGrpc currentNoSse currentPost currentInterval currentBuffered currentKeepalive currentMode currentPath currentHost
     while :; do
         DOCKER_MENU_SIGNAL=0
@@ -344,13 +358,8 @@ dockerMenuXhttp() {
         0) return 0 ;;
         1) dockerMenuRun protocol xhttp-status || true ;;
         2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24)
-            # 在当前进程运行 CLI，保留中断处理；状态副本读完立即删除。
-            DOCKER_MENU_STATUS_FILE=$(mktemp "${TMPDIR:-/tmp}/padm-xhttp-menu.XXXXXX") || continue
             status=0
-            dockerMenuRun protocol xhttp-status >"${DOCKER_MENU_STATUS_FILE}" || status=$?
-            snapshot=$(<"${DOCKER_MENU_STATUS_FILE}")
-            rm -f -- "${DOCKER_MENU_STATUS_FILE}"
-            DOCKER_MENU_STATUS_FILE=
+            dockerMenuReadProtocolStatus snapshot xhttp-status || status=$?
             printf '%s\n' "${snapshot}"
             [[ "${status}" -eq 0 ]] || continue
             dockerSetupRead listener 'XHTTP 入口 ID（0 返回）: ' &&
@@ -1532,7 +1541,7 @@ dockerMenuTProxy() {
         0) return 0 ;;
         1) dockerMenuRun protocol "${kind}-status" || true ;;
         2|3)
-            if ! state=$(dockerMenuRun protocol "${kind}-status"); then
+            if ! dockerMenuReadProtocolStatus state "${kind}-status"; then
                 printf '%s\n' "${state}"
                 continue
             fi
@@ -1556,7 +1565,7 @@ dockerMenuTProxy() {
             ;;
         4) dockerMenuRun edit "--${kind}-off" || true ;;
         5|6|7)
-            if ! state=$(dockerMenuRun protocol "${kind}-status"); then
+            if ! dockerMenuReadProtocolStatus state "${kind}-status"; then
                 printf '%s\n' "${state}"
                 continue
             fi
