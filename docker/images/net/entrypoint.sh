@@ -1777,6 +1777,7 @@ def number(value):
 
 def audit(version, owned):
     active_mode = mode if owned else "empty"
+    bypass_types = "LOCAL,BROADCAST,MULTICAST" if version == 4 else "LOCAL"
     rules = json.loads(command(["ip", "-j", "-N", f"-{version}", "rule", "show"]))
     routes = json.loads(command(["ip", "-j", "-N", f"-{version}", "route", "show", "table", str(mark)], True))
     if target_mark != mark:
@@ -1819,7 +1820,7 @@ def audit(version, owned):
         route_present = True
 
     dump = command(["iptables" if version == 4 else "ip6tables", "-w", "-t", "mangle", "-S"])
-    present = [False] * 9
+    present = [False] * 11
     chains_present = {chain: False, output_chain: False}
     chain_order = {chain: [], output_chain: []}
     for line in dump.splitlines():
@@ -1858,8 +1859,13 @@ def audit(version, owned):
         which = None
         if args[1] == "PREROUTING" and values == dict(base, **{"-j": chain}) and modules == ["comment"]:
             which = 0
-        elif args[1] == chain and values == dict(base, **{"--dst-type": "LOCAL", "-j": "RETURN"}) and sorted(modules) == ["addrtype", "comment"]:
+        elif (args[1] == chain and values.get("--dst-type") in {"LOCAL", bypass_types}
+              and values == dict(base, **{"--dst-type": values["--dst-type"], "-j": "RETURN"})
+              and sorted(modules) == ["addrtype", "comment"]):
             which = 1
+        elif (version == 6 and args[1] == chain
+              and values == dict(base, **{"-d": "ff00::/8", "-j": "RETURN"}) and modules == ["comment"]):
+            which = 9
         elif args[1] == chain and values.get("-p") in {"tcp", "udp"} and sorted(modules) == ["comment"]:
             protocol = values["-p"]
             expected = dict(base, **{"-p": protocol, "-j": "TPROXY", "--on-port": str(port),
@@ -1870,8 +1876,13 @@ def audit(version, owned):
         elif output_uid:
             if args[1] == "OUTPUT" and values == dict(base, **{"-j": output_chain}) and modules == ["comment"]:
                 which = 4
-            elif args[1] == output_chain and values == dict(base, **{"--dst-type": "LOCAL", "-j": "RETURN"}) and sorted(modules) == ["addrtype", "comment"]:
+            elif (args[1] == output_chain and values.get("--dst-type") in {"LOCAL", bypass_types}
+                  and values == dict(base, **{"--dst-type": values["--dst-type"], "-j": "RETURN"})
+                  and sorted(modules) == ["addrtype", "comment"]):
                 which = 5
+            elif (version == 6 and args[1] == output_chain
+                  and values == dict(base, **{"-d": "ff00::/8", "-j": "RETURN"}) and modules == ["comment"]):
+                which = 10
             elif (output_all and args[1] == output_chain
                   and values == dict(base, **{"--gid-owner": "10001", "-j": "RETURN"})
                   and sorted(modules) == ["comment", "owner"]):
@@ -1889,11 +1900,14 @@ def audit(version, owned):
             raise ValueError("changed or duplicate chain rule")
         if own_chain:
             chain_order[args[1]].append(which)
-        present[which] = True
+        # 清理清单用 1/2 区分旧 LOCAL 与新放行形状，不改变持久状态格式。
+        present[which] = 2 if version == 4 and which in (1, 5) and values["--dst-type"] == bypass_types else 1
     for current, offset, identity in ((chain, 0, f"ipv{version}"), (output_chain, 4, f"ipv{version}-out")):
         indices = [offset + 1, offset + 2, offset + 3]
         if current == output_chain and output_all:
             indices = [5, 8, 6, 7]
+        if version == 6:
+            indices.insert(1, 9 if current == chain else 10)
         if chain_order[current] != [index for index in indices if present[index]]:
             raise ValueError("changed chain rule order")
         if active_mode == "empty":
@@ -1906,14 +1920,16 @@ def audit(version, owned):
     if output_all and any(present[6:8]) and not (present[5] and present[8]):
         raise ValueError("missing global OUTPUT bypass")
     complete = chains_present[chain] and all(present[:4]) and route_present and rule_present
+    complete &= present[1] == 2 if version == 4 else present[9]
     if output_uid:
         complete &= chains_present[output_chain] and all(present[4:8])
+        complete &= present[5] == 2 if version == 4 else present[10]
         if output_all:
             complete &= present[8]
     if active_mode == "full" and not complete:
         raise ValueError("incomplete TProxy resources")
     return [version, *map(int, [*present[:4], chains_present[chain], rule_present, route_present,
-                               *present[4:8], chains_present[output_chain], present[8]])]
+                               *present[4:8], chains_present[output_chain], present[8], *present[9:]])]
 
 families = {"ipv4": [4], "ipv6": [6], "dual": [4, 6]}
 # 两族全部核验成功才输出清理清单，任一漂移不能先撤销另一族。
@@ -1996,25 +2012,32 @@ tproxy_cleanup() (
         return 1
     }
     tp_comment=padm-tproxy:$tp_token
-    while read -r tp_version tp_hook tp_local tp_tcp tp_udp tp_chain_present tp_rule tp_route tp_output_hook tp_output_local tp_output_tcp tp_output_udp tp_output_present tp_output_group; do
+    while read -r tp_version tp_hook tp_local tp_tcp tp_udp tp_chain_present tp_rule tp_route tp_output_hook tp_output_local tp_output_tcp tp_output_udp tp_output_present tp_output_group tp_multicast tp_output_multicast; do
         tp_tool=iptables
         [ "$tp_version" = 4 ] || tp_tool=ip6tables
+        tp_bypass=LOCAL,BROADCAST,MULTICAST
+        [ "$tp_version" = 4 ] || tp_bypass=LOCAL
+        tp_local_types=LOCAL tp_output_local_types=LOCAL
+        [ "$tp_local" != 2 ] || tp_local_types=$tp_bypass
+        [ "$tp_output_local" != 2 ] || tp_output_local_types=$tp_bypass
         [ "$tp_output_hook" = 0 ] || "$tp_tool" -w -t mangle -D OUTPUT -m comment --comment "$tp_comment" -j "$tp_output_chain" || return 1
         if [ "$tp_output_uid" = all ]; then
             [ "$tp_output_tcp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p tcp -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
             [ "$tp_output_udp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p udp -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
             [ "$tp_output_group" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m owner --gid-owner 10001 -m comment --comment "$tp_comment" -j RETURN || return 1
-            [ "$tp_output_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || return 1
+            [ "$tp_output_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m addrtype --dst-type "$tp_output_local_types" -m comment --comment "$tp_comment" -j RETURN || return 1
         else
-            [ "$tp_output_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || return 1
+            [ "$tp_output_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -m addrtype --dst-type "$tp_output_local_types" -m comment --comment "$tp_comment" -j RETURN || return 1
             [ "$tp_output_tcp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p tcp -m owner --uid-owner "$tp_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
             [ "$tp_output_udp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -p udp -m owner --uid-owner "$tp_output_uid" -m conntrack --ctdir ORIGINAL -m comment --comment "$tp_comment" -j MARK --set-xmark "$tp_mark/0xffffffff" || return 1
         fi
+        [ "$tp_output_multicast" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_output_chain" -d ff00::/8 -m comment --comment "$tp_comment" -j RETURN || return 1
         [ "$tp_output_present" = 0 ] || "$tp_tool" -w -t mangle -X "$tp_output_chain" || return 1
         [ "$tp_hook" = 0 ] || "$tp_tool" -w -t mangle -D PREROUTING -m comment --comment "$tp_comment" -j "$tp_chain" || return 1
-        [ "$tp_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || return 1
+        [ "$tp_local" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_chain" -m addrtype --dst-type "$tp_local_types" -m comment --comment "$tp_comment" -j RETURN || return 1
         [ "$tp_tcp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_chain" -p tcp -m comment --comment "$tp_comment" -j TPROXY --on-port "$tp_port" --tproxy-mark "$tp_mark/0xffffffff" || return 1
         [ "$tp_udp" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_chain" -p udp -m comment --comment "$tp_comment" -j TPROXY --on-port "$tp_port" --tproxy-mark "$tp_mark/0xffffffff" || return 1
+        [ "$tp_multicast" = 0 ] || "$tp_tool" -w -t mangle -D "$tp_chain" -d ff00::/8 -m comment --comment "$tp_comment" -j RETURN || return 1
         [ "$tp_chain_present" = 0 ] || "$tp_tool" -w -t mangle -X "$tp_chain" || return 1
         [ "$tp_rule" = 0 ] || ip "-$tp_version" rule del pref 30000 fwmark "$tp_mark/0xffffffff" lookup "$tp_mark" protocol 186 || return 1
         if [ "$tp_route" != 0 ]; then
@@ -2075,6 +2098,9 @@ tproxy_run() {
     [ "$start_signal" -eq 0 ] || exit "$start_signal"
     for tp_version in $(tproxy_versions "$tp_family"); do
         tp_tool=iptables
+        # 广播与多播直接放行，避免核心把它们再次发回透明入口形成回流。
+        tp_bypass=LOCAL,BROADCAST,MULTICAST
+        [ "$tp_version" = 4 ] || tp_bypass=LOCAL
         if [ "$tp_version" = 4 ]; then
             ip -4 route add local 0.0.0.0/0 dev lo table "$tp_mark" proto 186 realm "$tp_realm" || die "TProxy route failed to start"
         else
@@ -2087,8 +2113,13 @@ tproxy_run() {
         "$tp_tool" -w -t mangle -N "$tp_chain" || die "TProxy chain failed to start"
         tp_created="$tp_created ipv$tp_version"
         [ "$start_signal" -eq 0 ] || exit "$start_signal"
-        "$tp_tool" -w -t mangle -A "$tp_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || die "TProxy local rule failed to start"
+        "$tp_tool" -w -t mangle -A "$tp_chain" -m addrtype --dst-type "$tp_bypass" -m comment --comment "$tp_comment" -j RETURN || die "TProxy local rule failed to start"
         [ "$start_signal" -eq 0 ] || exit "$start_signal"
+        if [ "$tp_version" = 6 ]; then
+            # IPv6 多播按目的网段放行，避免依赖 addrtype 对多播的识别。
+            "$tp_tool" -w -t mangle -A "$tp_chain" -d ff00::/8 -m comment --comment "$tp_comment" -j RETURN || die "TProxy multicast rule failed to start"
+            [ "$start_signal" -eq 0 ] || exit "$start_signal"
+        fi
         "$tp_tool" -w -t mangle -A "$tp_chain" -p tcp -m comment --comment "$tp_comment" -j TPROXY --on-port "$tp_port" --tproxy-mark "$tp_mark/0xffffffff" || die "TProxy TCP rule failed to start"
         [ "$start_signal" -eq 0 ] || exit "$start_signal"
         "$tp_tool" -w -t mangle -A "$tp_chain" -p udp -m comment --comment "$tp_comment" -j TPROXY --on-port "$tp_port" --tproxy-mark "$tp_mark/0xffffffff" || die "TProxy UDP rule failed to start"
@@ -2099,8 +2130,12 @@ tproxy_run() {
             "$tp_tool" -w -t mangle -N "$tp_output_chain" || die "TProxy OUTPUT chain failed to start"
             tp_created="$tp_created ipv$tp_version-out"
             [ "$start_signal" -eq 0 ] || exit "$start_signal"
-            "$tp_tool" -w -t mangle -A "$tp_output_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || die "TProxy OUTPUT local rule failed to start"
+            "$tp_tool" -w -t mangle -A "$tp_output_chain" -m addrtype --dst-type "$tp_bypass" -m comment --comment "$tp_comment" -j RETURN || die "TProxy OUTPUT local rule failed to start"
             [ "$start_signal" -eq 0 ] || exit "$start_signal"
+            if [ "$tp_version" = 6 ]; then
+                "$tp_tool" -w -t mangle -A "$tp_output_chain" -d ff00::/8 -m comment --comment "$tp_comment" -j RETURN || die "TProxy OUTPUT multicast rule failed to start"
+                [ "$start_signal" -eq 0 ] || exit "$start_signal"
+            fi
             if [ "$tp_output_uid" = all ]; then
                 # 全主机包含 root，只给核心专用组放行，避免核心拨号再次进入透明入口。
                 "$tp_tool" -w -t mangle -A "$tp_output_chain" -m owner --gid-owner 10001 -m comment --comment "$tp_comment" -j RETURN || die "TProxy OUTPUT core bypass failed to start"

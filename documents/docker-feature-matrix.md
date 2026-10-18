@@ -14,8 +14,9 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 Let's Encrypt standalone 签发、真实续期调度和 WS/SSH 精确封禁。
 SSH 项依赖测试目录权限修正，正式版本缺陷及尚未发布的源码修复见
 [本轮原生验收记录](docker-native-acceptance-2026-10-18.md)。
-Redirect 另有 IPv4 TCP/TLS 与实际规则计数证据；切换 TProxy 时远端失联，
-实际状态和原因未确认，TProxy/TUN/完整卸载及远端清理仍待补验。
+Redirect 另有 IPv4 TCP/TLS 与实际规则计数证据；TProxy 出现广播误捕获和内存/Swap
+耗尽后，已通过 SSH 恢复及重启验证。完整循环机制尚未实测，规格撤销被目标检查拒绝，
+业务保持停止且 `restart=no`；TProxy/TUN/完整卸载及远端清理仍待补验。
 证据只覆盖记录中的组合；原生 arm64、实际到期续期和其余验收缺口继续保留，
 不据单一工作流通过升级完整管理或灾备状态。
 

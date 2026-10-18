@@ -443,6 +443,23 @@ trafficCounter() {
       END { printf "%.0f\n", total }
     '
 }
+waitTrafficIdle() {
+    local kind=$1 version=$2 transport=${1} previous current stable=0
+    [[ "${kind}" != dns ]] || transport=udp
+    previous=$(trafficCounter "${transport}" "${version}" TPROXY)
+    for ((attempt = 0; attempt < 40; attempt++)); do
+        sleep 0.05
+        current=$(trafficCounter "${transport}" "${version}" TPROXY)
+        if [[ "${current}" == "${previous}" ]]; then
+            stable=$((stable + 1))
+            (( stable >= 3 )) && return 0
+        else
+            previous=${current}
+            stable=0
+        fi
+    done
+    fail "${kind} background traffic did not become idle"
+}
 proofRows() {
     [[ ! -f "$1/$2.jsonl" ]] && printf '0\n' || jq -s 'length' "$1/$2.jsonl"
 }
@@ -471,6 +488,7 @@ outputCheck() {
     [[ "${kind}" != dns ]] || transport=udp
     if [[ "${version}" == 6 ]]; then destination=fd40:65::20 peer=fd40:65::10; fi
     rows=$(proofRows "${TEST_ROOT}/proof" "${kind}")
+    [[ "${captured}" == yes ]] || waitTrafficIdle "${kind}" "${version}"
     before=$(trafficCounter "${transport}" "${version}" TPROXY)
     markedBefore=$(trafficCounter "${transport}" "${version}" MARK)
     nsenter --target "${netPid}" --net -- setpriv --reuid "${uid}" --regid "${gid}" --clear-groups \
@@ -506,6 +524,75 @@ replyCheck() {
         fail "${kind} ${scope} request or selected UID service reply was redirected"
     assertProof "${kind}" "${TEST_ROOT}/replies" "${rows}" "${peer}"
 }
+
+# 不启动核心，逐个发送有限广播/多播；旧规则只能使断言失败，不会形成核心回流。
+nonUnicastCounters() {
+    local tool=iptables-save
+    [[ "$1" != 6 ]] || tool=ip6tables-save
+    net "${tool}" -c -t mangle | awk -v chain="${chain}" -v tag="padm-tproxy:${token}" '
+      index($0, tag) {
+        split($1, fields, ":"); sub(/^\[/, "", fields[1]); packets = fields[1]
+        if (index($0, "-j TPROXY ") || index($0, "-j MARK ")) captured += packets
+        if ((index($0, "--dst-type ") || index($0, "-d ff00::/8 ")) && index($0, "-j RETURN")) {
+          if (index($0, "-A " chain " ")) incoming += packets
+          if (index($0, "-A " chain "-out ")) outgoing += packets
+        }
+      }
+      END { printf "%.0f %.0f %.0f\n", captured, incoming, outgoing }
+    '
+}
+nonUnicastCheck() {
+    local version=$1 scope=$2 host source=198.18.64.20 hosts='255.255.255.255 198.18.64.255 224.0.0.1'
+    local capturedBefore incomingBefore outgoingBefore capturedAfter incomingAfter outgoingAfter
+    local -a caller=(nsenter --target "${clientPid}" --net --)
+    [[ "${scope}" != output ]] || {
+        source=198.18.64.10
+        caller=(nsenter --target "${netPid}" --net -- setpriv --reuid 65534 --regid 65534
+            --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --)
+    }
+    if [[ "${version}" == 6 ]]; then
+        hosts=ff02::1 source=fd40:64::20
+        [[ "${scope}" != output ]] || source=fd40:64::10
+    fi
+    for host in ${hosts}; do
+        read -r capturedBefore incomingBefore outgoingBefore < <(nonUnicastCounters "${version}")
+        "${caller[@]}" python3 "${fixture}" nonunicast "${host}" "${source}"
+        read -r capturedAfter incomingAfter outgoingAfter < <(nonUnicastCounters "${version}")
+        [[ "${capturedAfter}" == "${capturedBefore}" ]] ||
+            fail "${scope} ${host} was captured by TPROXY/MARK"
+        if [[ "${scope}" == output ]]; then
+            ((outgoingAfter > outgoingBefore)) || fail "${host} missed the OUTPUT bypass"
+        else
+            ((incomingAfter > incomingBefore)) || fail "${host} missed the PREROUTING bypass"
+        fi
+    done
+}
+# 反例复现旧 LOCAL 规则会误捕获广播；核心仍关闭，停止后必须精确恢复基线。
+startServer 31298 129 dual all
+readState
+net iptables -w -t mangle -R "${chain}" 1 -m addrtype --dst-type LOCAL \
+    -m comment --comment "padm-tproxy:${token}" -j RETURN
+read -r capturedBefore incomingBefore outgoingBefore < <(nonUnicastCounters 4)
+nsenter --target "${clientPid}" --net -- python3 "${fixture}" nonunicast 255.255.255.255 198.18.64.20
+read -r capturedAfter incomingAfter outgoingAfter < <(nonUnicastCounters 4)
+((capturedAfter > capturedBefore && incomingAfter == incomingBefore)) ||
+    fail 'legacy LOCAL rule did not reproduce broadcast capture'
+stopServer
+assertKernel "${baseline}" 'legacy broadcast probe left owned rules or changed outside resources'
+printf 'docker-tproxy-legacy-broadcast-capture-ok: core=stopped off=clean\n'
+
+for outputScope in '' 65534 all; do
+    startServer 31298 129 dual "${outputScope}"
+    readState
+    for version in 4 6; do
+        nonUnicastCheck "${version}" prerouting
+        [[ -z "${outputScope}" ]] || nonUnicastCheck "${version}" output
+    done
+    stopServer
+    assertKernel "${baseline}" 'non-unicast probes left owned rules or changed outside resources'
+    printf 'docker-tproxy-nonunicast-ok: family=dual output=%s core=stopped broadcast=direct multicast=direct off=clean\n' \
+        "${outputScope:-off}"
+done
 
 for core in xray sing-box; do
     previousChain=

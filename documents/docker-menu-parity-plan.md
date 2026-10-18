@@ -58,8 +58,10 @@ IP、组合模式及直连例外。Docker 已覆盖这些操作，不追加独�
 公网 Let's Encrypt 签发、真实续期调度和 Cloudflare CDN 链路也已取得证据。
 实机暴露的 jq 兼容、TLS 首配首页和 SSH collector 权限缺陷已修复并本地签名提交；
 本轮细节与剩余缺口见[原生验收记录](docker-native-acceptance-2026-10-18.md)。
-Redirect 已取得 IPv4 TCP/TLS 及规则计数证据；切换 TProxy 时远端失联，实际状态和原因待查，
-需要恢复访问后继续 profile 与完整卸载。原生 arm64、自然到期续期与当前修复的正式发布仍须补齐。
+Redirect 已取得 IPv4 TCP/TLS 及规则计数证据；切换 TProxy 后出现内存/Swap 耗尽与
+广播误捕获，SSH 恢复及受控重启已验证，完整循环机制仍待隔离核验。
+业务容器保持停止且 `restart=no`；规格撤销被 REALITY 目标检查拒绝，不能自动重新拉起。
+TProxy/TUN、完整卸载、原生 arm64、自然到期续期与当前修复的正式发布仍须补齐。
 Desktop、离线夹具或旧版本验签不能替代这些证据，整体目标继续保持 deferred/active。
 
 ### 当前批次集成与最终验收门槛
@@ -72,7 +74,7 @@ Debian 13 原生 amd64 VPS。Buildx 列出 arm64 平台不证明存在原生 arm
 | 门槛 | 当前证据与尚缺输入 |
 | --- | --- |
 | 当前代码集成 | 6A.21–6A.23、4C.13–4C.14 定向与真实链路证据齐备；本批 `docker-contracts-full -Jobs 6` 的 `66/66` 叶子全部通过，含完整菜单、恢复故障矩阵和升级/回滚。 |
-| 原生双架构生命周期 | amd64 已验安装、首配、正式升级/回滚、真实 systemd/整机重启及重启后业务，Redirect IPv4 TCP/TLS 与实际计数通过；切换 TProxy 时失联，TProxy/TUN/卸载及远端清理待恢复访问后核对。原生 arm64 仍缺环境；逐架构保留源提交、内核、镜像 digest 和清理结果。 |
+| 原生双架构生命周期 | amd64 已验安装、首配、正式升级/回滚、真实 systemd/整机重启及重启后业务，Redirect IPv4 TCP/TLS 与实际计数通过；TProxy 广播误捕获及资源耗尽后已恢复 SSH/重启，规格仍保留透明 profile，业务保持停止；TProxy/TUN/卸载及远端清理待补。原生 arm64 仍缺环境；逐架构保留源提交、内核、镜像 digest 和清理结果。 |
 | 公网 CA/CDN 与客户端 | 已有授权域名与独立客户端，正式 CLI 的 Let's Encrypt 签发、Cloudflare CDN、首配/升级/回滚/重启正反例通过；新证书未到期，生产续期入口及调度的 skip 不算真实续期。 |
 | 当前版本可信发布 | 正式 3.39/3.40 的真实 manifest、签名 bundle、控制归档及 5 个镜像引用已通过生产验签和首配/升级；本轮源码修复尚未正式发布，仍需经授权发布后的对应证据。本任务未获 push 或触发发布授权。 |
 

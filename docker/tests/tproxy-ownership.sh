@@ -378,6 +378,23 @@ seed_owned() {
     grep -qx 'route_proto=186' "${FAKE_TP_STATE}/tproxy.state" &&
         grep -qx 'rule_proto=186' "${FAKE_TP_STATE}/tproxy.state" ||
         fail 'route and rule lack an explicit ownership protocol'
+    local version kernel_root bypass_types current versions='4 6'
+    [[ "${family}" != ipv4 ]] || versions=4
+    [[ "${family}" != ipv6 ]] || versions=6
+    for version in ${versions}; do
+        kernel_root=${FAKE_TP_ROOT} bypass_types=LOCAL,BROADCAST,MULTICAST
+        [[ "${version}" != 6 ]] || { kernel_root=${FAKE_TP_ROOT}/ipv6; bypass_types=LOCAL; }
+        for current in "${CHAIN}" ${output_uid:+"${CHAIN}-out"}; do
+            sed -n '1p' "${kernel_root}/${current}.rules" |
+                grep -qF -- "--dst-type ${bypass_types} -m comment --comment padm-tproxy:${TOKEN} -j RETURN" ||
+                fail "IPv${version} ${current} does not bypass broadcast/multicast first"
+            if [[ "${version}" == 6 ]]; then
+                sed -n '2p' "${kernel_root}/${current}.rules" |
+                    grep -qxF -- "-d ff00::/8 -m comment --comment padm-tproxy:${TOKEN} -j RETURN" ||
+                    fail "IPv6 ${current} lacks its separate multicast bypass"
+            fi
+        done
+    done
     : >"${FAKE_TP_WRITES}"
 }
 snapshot() {
@@ -759,6 +776,8 @@ assert_empty
 reset
 seed_owned
 OLD_TOKEN=${TOKEN} OLD_CHAIN=${CHAIN}
+# 旧版只有 LOCAL 放行，升级前的 owner 仍须可只读核验并精确撤销。
+sed -i 's/--dst-type LOCAL,BROADCAST,MULTICAST/--dst-type LOCAL/' "${FAKE_TP_ROOT}/${CHAIN}.rules"
 LIVE_STATE=${FAKE_TP_STATE}
 LIVE_HASH=$(snapshot)
 export FAKE_TP_STATE="${TEST_ROOT}/candidate-dual"
@@ -821,9 +840,11 @@ for family in ipv4 ipv6 dual; do
     for version in ${versions}; do
         kernel_root=${FAKE_TP_ROOT}
         [[ "${version}" != 6 ]] || kernel_root=${FAKE_TP_ROOT}/ipv6
+        output_count=3
+        [[ "${version}" != 6 ]] || output_count=4
         [[ -s "${kernel_root}/${CHAIN}-out.rules" &&
             -s "${kernel_root}/OUTPUT.rules" &&
-            "$(wc -l <"${kernel_root}/${CHAIN}-out.rules")" == 3 ]] ||
+            "$(wc -l <"${kernel_root}/${CHAIN}-out.rules")" == "${output_count}" ]] ||
             fail 'OUTPUT firewall resources were not created'
         grep -q -- "--uid-owner ${OUTPUT_UID} -m conntrack --ctdir ORIGINAL .* -j MARK" \
             "${kernel_root}/${CHAIN}-out.rules" || fail 'OUTPUT capture lacks UID or ORIGINAL direction'
@@ -899,7 +920,7 @@ for drift in uid direction mark local order reference hook empty; do
     reject_unchanged run-once "${PORT}" "${MARK}" dual --output-uid "${OUTPUT_UID}"
 done
 
-for point in start-output-chain start-output-1 start-output-2 start-output-3 start-output-hook; do
+for point in start-output-chain start-output-1 start-output-2 start-output-3 start-output-4 start-output-hook; do
     reset
     export FAKE_TP_MODE="fail-ipv6-${point}"
     reject run-once "${PORT}" "${MARK}" dual --output-uid "${OUTPUT_UID}"
@@ -935,11 +956,13 @@ for family in ipv4 ipv6 dual; do
         kernel_root=${FAKE_TP_ROOT}
         [[ "${version}" != 6 ]] || kernel_root=${FAKE_TP_ROOT}/ipv6
         output_rules="${kernel_root}/${CHAIN}-out.rules"
-        [[ "$(wc -l <"${output_rules}")" == 4 ]] || fail 'wrong global OUTPUT rule count'
-        sed -n '1p' "${output_rules}" | grep -q -- '--dst-type LOCAL .* -j RETURN' ||
+        output_count=4 group_line=2
+        [[ "${version}" != 6 ]] || { output_count=5; group_line=3; }
+        [[ "$(wc -l <"${output_rules}")" == "${output_count}" ]] || fail 'wrong global OUTPUT rule count'
+        sed -n '1p' "${output_rules}" | grep -q -- '--dst-type LOCAL.* -j RETURN' ||
             fail 'global OUTPUT lacks first LOCAL bypass'
-        sed -n '2p' "${output_rules}" | grep -q -- '--gid-owner 10001 .* -j RETURN' ||
-            fail 'global OUTPUT lacks second core group bypass'
+        sed -n "${group_line}p" "${output_rules}" | grep -q -- '--gid-owner 10001 .* -j RETURN' ||
+            fail 'global OUTPUT lacks core group bypass before capture'
         [[ "$(grep -c -- '--ctdir ORIGINAL .* -j MARK' "${output_rules}")" == 2 &&
             "$(grep -c -- '--uid-owner' "${output_rules}")" == 0 ]] ||
             fail 'global OUTPUT retained UID selection or lost ORIGINAL capture'
@@ -1018,6 +1041,65 @@ export FAKE_TP_MODE=fail-ipv6-cleanup-output
 reject cleanup
 [[ -f "${FAKE_TP_STATE}/tproxy.state" ]] || fail 'partial global revoke discarded recovery state'
 export FAKE_TP_MODE=ok
+accept cleanup
+assert_empty
+
+# 三种旧 OUTPUT 形态及混合清理中间态均可撤销，不放宽任意规则漂移。
+for output_uid in '' 65534 all; do
+    for legacy_scope in all prerouting; do
+        reset
+        seed_owned dual "${output_uid}"
+        for kernel_root in "${FAKE_TP_ROOT}" "${FAKE_TP_ROOT}/ipv6"; do
+            sed -i -E 's/--dst-type LOCAL(,BROADCAST)?,MULTICAST/--dst-type LOCAL/' "${kernel_root}/${CHAIN}.rules"
+            sed -i '\|-d ff00::/8 |d' "${kernel_root}/${CHAIN}.rules"
+            if [[ "${legacy_scope}" == all && -n "${output_uid}" ]]; then
+                sed -i -E 's/--dst-type LOCAL(,BROADCAST)?,MULTICAST/--dst-type LOCAL/' "${kernel_root}/${CHAIN}-out.rules"
+                sed -i '\|-d ff00::/8 |d' "${kernel_root}/${CHAIN}-out.rules"
+            fi
+        done
+        parameters=("${PORT}" "${MARK}" dual)
+        if [[ "${output_uid}" == all ]]; then parameters+=(--output-all)
+        elif [[ -n "${output_uid}" ]]; then parameters+=(--output-uid "${output_uid}"); fi
+        reject_unchanged health "${parameters[@]}"
+        accept preflight "${parameters[@]}" owned
+        accept cleanup
+        assert_empty
+    done
+done
+
+# 多播规则必须精确匹配网段、归属与顺序；缺失只能按旧形状撤销，不能报健康。
+for current in prerouting output; do
+    reset
+    seed_owned dual all
+    multicast_rules="${FAKE_TP_ROOT}/ipv6/${CHAIN}.rules"
+    [[ "${current}" != output ]] || multicast_rules="${FAKE_TP_ROOT}/ipv6/${CHAIN}-out.rules"
+    cp -- "${multicast_rules}" "${TEST_ROOT}/multicast-original.rules"
+    for drift in address duplicate order; do
+        cp -- "${TEST_ROOT}/multicast-original.rules" "${multicast_rules}"
+        case "${drift}" in
+        address) sed -i 's|ff00::/8|ff02::/16|' "${multicast_rules}" ;;
+        duplicate) sed -n '2p' "${multicast_rules}" >>"${multicast_rules}" ;;
+        order)
+            awk 'NR==1 {first=$0; next} NR==2 {print; print first; next} {print}' \
+                "${multicast_rules}" >"${TEST_ROOT}/changed-rules"
+            mv -- "${TEST_ROOT}/changed-rules" "${multicast_rules}"
+            ;;
+        esac
+        reject_unchanged health "${PORT}" "${MARK}" dual --output-all
+        reject_unchanged cleanup
+    done
+    cp -- "${TEST_ROOT}/multicast-original.rules" "${multicast_rules}"
+    sed -i '\|-d ff00::/8 |d' "${multicast_rules}"
+    reject_unchanged health "${PORT}" "${MARK}" dual --output-all
+    accept cleanup
+    assert_empty
+done
+
+# 撤销中断只留下多播放行时，仍按已有 token 识别并清理，不能丢失恢复能力。
+reset
+seed_owned dual all
+sed -i '/--dst-type/d; /-j TPROXY/d' "${FAKE_TP_ROOT}/ipv6/${CHAIN}.rules"
+sed -i '/--dst-type/d; /--gid-owner/d; /-j MARK/d' "${FAKE_TP_ROOT}/ipv6/${CHAIN}-out.rules"
 accept cleanup
 assert_empty
 printf 'docker-tproxy-ownership-regression-ok\n'

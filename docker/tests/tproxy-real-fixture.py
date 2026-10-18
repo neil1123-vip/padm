@@ -118,6 +118,26 @@ def client(kind: str, host: str, port: int) -> None:
         assert payload == b"tproxy-udp-ok" and peer[0] == host and peer[1] == port
 
 
+def nonunicast(host: str, source: str) -> None:
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_DGRAM) as stream:
+        stream.settimeout(3)
+        stream.bind((source, 0))
+        if family == socket.AF_INET:
+            stream.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            stream.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(source))
+            stream.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+            stream.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
+            destination = (host, 21027)
+        else:
+            interface = socket.if_nametoindex("eth0")
+            stream.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, interface)
+            stream.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 1)
+            stream.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, 0)
+            destination = (host, 21027, 0, interface)
+        assert stream.sendto(b"tproxy-bypass", destination) == len(b"tproxy-bypass")
+
+
 def main() -> None:
     mode = sys.argv[1]
     if mode == "target":
@@ -125,6 +145,8 @@ def main() -> None:
                int(sys.argv[5]) if len(sys.argv) > 5 else None)
     elif mode == "client":
         client(sys.argv[2], sys.argv[3], int(sys.argv[4]))
+    elif mode == "nonunicast":
+        nonunicast(sys.argv[2], sys.argv[3])
     else:
         raise SystemExit(f"unknown fixture mode: {mode}")
 
