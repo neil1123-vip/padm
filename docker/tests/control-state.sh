@@ -674,6 +674,47 @@ dockerRestoreConfiguration
 [[ "$(jq '.control.revision' "${spec}")" == "${revision}" ]]
 dockerCleanupConfigurationCandidate
 
+# 主控与普通 TProxy 共存时，旧重启字段可以规范化，不能连带放宽其它编排字段。
+(
+    root="${TEST_ROOT}/transparent-state"
+    cp -a -- "${PADM_DOCKER_INSTALL_DIR}" "${root}"
+    export PADM_DOCKER_INSTALL_DIR="${root}"
+    spec="${root}/config/spec.json"
+    jq '.host_integrations += [{type:"tproxy",profile:"net-transparent",
+      firewall_rules:["padm-tproxy"],devices:[],schedules:[],settings:{port:31298,mark:129}}]' \
+        "${spec}" >"${root}/transparent-spec.json"
+    cp -- "${root}/transparent-spec.json" "${spec}"
+    mkdir -p -- "${root}/data/net/transparent"
+    dockerGenerateCompose "${spec}" "${root}/compose.json" "${root}"
+    dockerGenerateDeployment "${spec}" "${root}/deployment.json"
+    : >"${root}/images.env"
+    dockerGenerateImagesEnv "${spec}" "${root}/images.env" "${root}"
+    dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env"
+    dockerBackupConfiguration update
+    backup=${DOCKER_CONFIG_BACKUP}
+    jq '.services["net-transparent"].restart = "unless-stopped"' \
+        "${root}/compose.json" >"${backup}/compose.json"
+    cp -a -- "${backup}/compose.json" "${root}/legacy-transparent-compose.json"
+    backupDigest=$(tar --sort=name --numeric-owner -cf - -C "${backup}" . | sha256sum)
+    before=$(tar --sort=name --numeric-owner -cf - -C "${root}" \
+        config secrets deployment.json compose.json images.env | sha256sum)
+    upCount=$(wc -l <"${TEST_ROOT}/compose.log")
+    jq '.services["net-transparent"].pids_limit += 1' \
+        "${root}/legacy-transparent-compose.json" >"${backup}/compose.json"
+    DOCKER_CONFIG_SWITCHED=1
+    if dockerRestoreConfiguration; then exit 1; fi
+    [[ "$(wc -l <"${TEST_ROOT}/compose.log")" == "${upCount}" &&
+        "${before}" == "$(tar --sort=name --numeric-owner -cf - -C "${root}" \
+            config secrets deployment.json compose.json images.env | sha256sum)" ]]
+    cp -a -- "${root}/legacy-transparent-compose.json" "${backup}/compose.json"
+    dockerRestoreConfiguration
+    jq -e '.services["net-transparent"].restart == "no"' "${root}/compose.json" >/dev/null
+    dockerControlStateCheck "${root}"
+    [[ "${DOCKER_CONFIG_SWITCHED}" == 0 &&
+        "${backupDigest}" == "$(tar --sort=name --numeric-owner -cf - -C "${backup}" . | sha256sum)" ]]
+    dockerCleanupConfigurationCandidate
+)
+
 # 旧镜像恢复保留精确旧主控编排；日志不是配置快照，不能倒退已有来源证据。
 dockerBackupConfiguration update
 legacyBackup=${DOCKER_CONFIG_BACKUP}

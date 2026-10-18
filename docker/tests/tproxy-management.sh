@@ -155,6 +155,7 @@ cp -- "${root}/config/spec.json" "${TEST_ROOT}/owner-spec.json"
 runStatus true 31298 129
 jq -e '.services.xray.network_mode == "host" and .services.xray.user == "0:0" and
   .services.xray.cap_add == ["NET_ADMIN"] and .services.xray.ports == null and
+  .services["net-transparent"].restart == "no" and
   .services["net-transparent"].command == ["tproxy","31298","129"]' "${root}/compose.json" >/dev/null
 jq -e '.host_integrations[0].settings | has("family") | not' "${root}/config/spec.json" >/dev/null
 jq -e 'any(.inbounds[]; .tag == "tproxy-in" and .port == 31298 and
@@ -436,6 +437,50 @@ runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
     [[ "$(cat "${OWNER_LOG}")" == "$(printf 'stop %s\nclean\nrm %s' "${CID}" "${CID}")" ]] ||
         fail 'stop, cleanup proof and removal order changed'
     [[ ! -e "${root}/data/net/transparent/tproxy.state" ]] || fail 'state survived successful stop'
+    (
+        for path in config/spec.json deployment.json compose.json; do
+            cp -p -- "${root}/${path}" "${TEST_ROOT}/restart-${path##*/}"
+        done
+        trap 'for path in config/spec.json deployment.json compose.json; do cp -p -- "${TEST_ROOT}/restart-${path##*/}" "${root}/${path}"; done' EXIT
+        for OWNER_KIND in tproxy redirect; do
+            jq --arg kind "${OWNER_KIND}" '
+              .host_integrations[0].type=$kind |
+              .host_integrations[0].firewall_rules=["padm-"+$kind] |
+              if $kind == "redirect" then del(.host_integrations[0].settings.mark) else . end
+            ' "${TEST_ROOT}/owner-spec.json" >"${root}/config/spec.json"
+            dockerGenerateDeployment "${root}/config/spec.json" "${root}/deployment.json"
+            dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}" |
+                jq '.services["net-transparent"].restart="unless-stopped"' >"${root}/compose.json"
+            ! dockerTProxyConfigurationCheck || fail "${OWNER_KIND}: accepted legacy startup policy"
+            dockerTProxyConfigurationCheck owner || fail "${OWNER_KIND}: rejected legacy cleanup policy"
+            writeOwnerBase
+            CLEANUP_COMMAND="run --rm --no-deps net-transparent preflight ${OWNER_KIND} 31298"
+            [[ "${OWNER_KIND}" != tproxy ]] || CLEANUP_COMMAND+=" 129"
+            CLEANUP_COMMAND+=" unowned"
+            for policy in unless-stopped no always; do
+                resetOwner
+                jq --arg policy "${policy}" '.[0].HostConfig.RestartPolicy.Name=$policy' \
+                    "${OWNER_JSON}" >"${OWNER_JSON}.next"
+                mv -- "${OWNER_JSON}.next" "${OWNER_JSON}"
+                ! dockerTProxyContainer || fail "${OWNER_KIND}: legacy container passed current audit"
+                if [[ "${policy}" == always ]]; then
+                    ! dockerTProxyDisablePrepare "${root}/config/spec.json" ||
+                        fail "${OWNER_KIND}: accepted foreign restart policy"
+                    [[ ! -s "${OWNER_LOG}" ]] || fail 'restart drift stopped a foreign owner'
+                else
+                    dockerTProxyDisablePrepare "${root}/config/spec.json"
+                    [[ "$(cat "${OWNER_LOG}")" == "$(printf 'stop %s\nclean\nrm %s' "${CID}" "${CID}")" ]] ||
+                        fail "${OWNER_KIND}: legacy cleanup order changed"
+                fi
+            done
+            rm -f -- "${root}/data/net/transparent/${OWNER_KIND}.state"
+            jq '.services["net-transparent"].command[1]="31399"' \
+                "${root}/compose.json" >"${root}/compose.json.next"
+            mv -- "${root}/compose.json.next" "${root}/compose.json"
+            ! dockerTProxyConfigurationCheck owner || fail "${OWNER_KIND}: legacy mode ignored command drift"
+        done
+    )
+    writeOwnerBase
     cp -- "${TEST_ROOT}/base.json" "${root}/config/spec.json"
     ! dockerTProxyDisablePrepare "${TEST_ROOT}/base.json" || fail 'accepted contradictory disabled spec'
     cp -- "${TEST_ROOT}/owner-spec.json" "${root}/config/spec.json"
@@ -536,6 +581,20 @@ runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
     checkLifecycle "$(printf 'prepare\ncompose up -d --force-recreate --no-deps xray\n%s\naudit' "${recreate}")" \
         up -d --force-recreate --no-deps xray
     checkLifecycle 'compose up -d --no-deps acme' up -d --no-deps acme
+    (
+        cp -p -- "${root}/compose.json" "${TEST_ROOT}/lifecycle-compose.json"
+        trap 'cp -p -- "${TEST_ROOT}/lifecycle-compose.json" "${root}/compose.json"' EXIT
+        jq '.services["net-transparent"].restart="unless-stopped"' \
+            "${root}/compose.json" >"${root}/compose.json.next"
+        mv -- "${root}/compose.json.next" "${root}/compose.json"
+        for operation in up restart; do
+            : >"${LIFECYCLE_LOG}"
+            ! dockerComposeRun "${operation}" || fail "${operation} accepted legacy restart policy"
+            [[ ! -s "${LIFECYCLE_LOG}" ]] || fail 'legacy startup stopped the existing owner'
+        done
+        checkLifecycle 'compose up -d --no-deps acme' up -d --no-deps acme
+        checkLifecycle "$(printf 'prepare\ncompose down')" down
+    )
     LIFECYCLE_MODE=stop-fail
     : >"${LIFECYCLE_LOG}"
     ! dockerComposeRun restart || fail 'restart ignored failed TProxy stop'

@@ -5176,6 +5176,34 @@ Redirect UDP 原路由、停止后的规则/路由基线恢复，以及生产 Co
 成功输入归档/清单及核验脚本清理，日志/result/verification 保留。
 原生宿主、arm64、公网、整机重启和完整卸载仍未验收；总目标保持 active。
 
+#### 5C.2f 透明规则容器禁用自动重启
+
+TProxy/Redirect 的生成编排及静态模板显式使用 `restart: "no"`，
+daemon/宿主重启后须经受管入口重新预检；本项不承诺自动恢复。
+旧 `unless-stopped` 编排只在 owner 停止/清理门禁兼容，其余字段仍逐字匹配；
+允许该旧编排对应已手工降低为 `no` 的容器，不接受其它运行策略。
+普通 `up/restart` 在停止旧 owner 前拒绝旧策略，无关 `--no-deps acme` 保持可用。
+更新重生成透明编排；旧备份先精确验证再恢复为新策略，原备份保持不变，
+避免更新或失败恢复重新发布旧自动拉起行为。现有 VPS 透明代理继续关闭。
+运行目标须有 `x-padm-transparent-managed-restart`；旧快照仍可保存和校验，
+真正恢复前再检查目标。更新也先核当前包的恢复能力，旧包须先停用透明集成再切换版本，
+避免升级失败才发现无法回滚；旧 CLI 不会自动重载新代码，首次迁移沿同一限制。
+新增回归先捕获旧实现失败，再验证管理、更新/恢复和真实容器策略；
+主控、WireGuard 与普通 TProxy 共存的旧备份同样规范化，额外编排漂移在停服前拒绝，
+恢复后原备份摘要不变。修正两处测试夹具：缺 marker 场景仅隔离包摘要边界，
+主控克隆场景先清空再生成 `images.env`，避免重复镜像键。
+Docker Linux amd64、Jobs 2 定向全部通过：`docker-tproxy-management` 50.6 秒、
+`docker-phase6` 53.0 秒、`docker-tproxy-real` 97.0 秒、`docker-control-state` 43.6 秒；
+不重复日常或全量集合，复用同一工具镜像。
+证据分别位于 `.tmp-regression-docker-a375d7a960d84a9f822bb3ccd3fce3fb/`、
+`.tmp-regression-docker-85bbed42911f45819cfba6d56521137c/`、
+`.tmp-regression-docker-42abe92598534571909af1de391ba2a5/`、
+`.tmp-regression-docker-e0dfe0a64fab4b0a90b286611adc029f/` 的日志与结果；
+清理本轮源码归档、清单及 SSH 回调临时文件，保留精简证据。
+18:55 CST 只读复核 VPS：业务三容器 healthy、Swap 使用为零、HTTPS `200`，
+透明容器保持 `exited`、`restart=no`；未部署本次源码或重新启用透明代理。
+整体目标保持 active，不升级支持状态。
+
 #### 5C.3 Fail2ban 已加载动作维护门禁
 
 在既有磁盘配置/容器身份核验之后、输出唯一容器 ID 之前，复用 net 镜像内

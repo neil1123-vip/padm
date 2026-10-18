@@ -180,6 +180,7 @@ services:
   net-transparent:
     <<: *padm-defaults
     image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}"
+    restart: "no"
     profiles: [net-transparent]
     network_mode: host
     cap_add:

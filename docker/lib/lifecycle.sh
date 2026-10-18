@@ -726,6 +726,12 @@ dockerComposeRun() {
             tproxyTouched=1
         fi
         if [[ "${tproxyTouched}" == 1 ]]; then
+            if [[ "${tproxyEnabled}" == true && "$1" != down ]]; then
+                jq -e '.services["net-transparent"].restart == "no"' "${composeFile}" >/dev/null || {
+                    dockerError '当前透明代理仍使用旧自动重启策略，请先通过 update 规范化后再启动'
+                    return "${PADM_DOCKER_RC_STATE}"
+                }
+            fi
             if [[ -f "${root}/config/spec.json" ]]; then
                 dockerTProxyDisablePrepare "${root}/config/spec.json"
             else
@@ -2709,6 +2715,14 @@ dockerUpdateCommand() {
     dockerControlSyncScheduleSpecCheck "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -f "${root}/config/spec.json" ]] &&
+        jq -e 'any(.host_integrations[]; .type == "tproxy" or .type == "redirect")' \
+            "${root}/config/spec.json" >/dev/null; then
+        dockerBundleSupportsSpec "$(dockerCurrentBundlePath)" "${root}/config/spec.json" || {
+            dockerError '旧控制包缺少透明代理受管重启能力，请先停用透明集成再更新'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" ||
         return "${PADM_DOCKER_RC_MANIFEST}"
     dockerStageReleaseBundle || {
@@ -2867,7 +2881,8 @@ dockerValidateConfigurationBackup() {
         else
             bundlePath=$(dockerCurrentBundlePath) || return 1
         fi
-        dockerBundleSupportsSpec "${bundlePath}" "${backup}/config/spec.json" || return 1
+        # 旧快照可保留和校验；真正恢复前另核目标包的当前运行能力。
+        dockerBundleSupportsSpec "${bundlePath}" "${backup}/config/spec.json" backup || return 1
         if jq -e '((.relay.http.address_families // []) | index("ipv6")) != null' \
             "${backup}/config/spec.json" >/dev/null; then
             # 恢复旧 IPv4 bridge 会折叠 IPv6 来源，须在停服前核对受管网络。

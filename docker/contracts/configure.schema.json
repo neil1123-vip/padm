@@ -19,6 +19,7 @@
   "x-padm-tproxy-ipv6": true,
   "x-padm-tproxy-output-uid": true,
   "x-padm-transparent-output-all": true,
+  "x-padm-transparent-managed-restart": true,
   "x-padm-redirect": true,
   "x-padm-site-content": true,
   "x-padm-site-templates": true,

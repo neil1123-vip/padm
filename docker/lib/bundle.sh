@@ -378,12 +378,13 @@ dockerCleanupStagedBundle() {
 }
 
 dockerBundleSupportsSpec() {
-    local bundlePath=$1 specFile=$2
+    local bundlePath=$1 specFile=$2 mode=${3:-current}
+    [[ "${mode}" == current || "${mode}" == backup ]] || return 1
     [[ -f "${bundlePath}/docker/contracts/configure.schema.json" &&
         ! -L "${bundlePath}/docker/contracts/configure.schema.json" &&
         -f "${bundlePath}/docker/contracts/features.json" &&
         ! -L "${bundlePath}/docker/contracts/features.json" ]] &&
-        jq -en --slurpfile schema "${bundlePath}/docker/contracts/configure.schema.json" \
+        jq -en --arg mode "${mode}" --slurpfile schema "${bundlePath}/docker/contracts/configure.schema.json" \
             --slurpfile features "${bundlePath}/docker/contracts/features.json" \
             --slurpfile spec "${specFile}" '
           ($spec | length) == 1 and ($spec[0] | type == "object") and
@@ -435,6 +436,10 @@ dockerBundleSupportsSpec() {
           else true end) and
           (if any($spec[0].host_integrations[]; .type == "tun") then
             $schema[0]["x-padm-tun-owned-management"] == true
+          else true end) and
+          (if $mode != "backup" and any($spec[0].host_integrations[];
+            .type == "tproxy" or .type == "redirect") then
+            $schema[0]["x-padm-transparent-managed-restart"] == true
           else true end) and
           (if any($spec[0].host_integrations[]; .type == "redirect") then
             $schema[0]["x-padm-redirect"] == true

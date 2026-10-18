@@ -1023,6 +1023,15 @@ stop the previous owner and inspect its actual resources on native Linux first.
 A SIGKILL that leaves an empty chain without token rules requires manual ownership
 verification.
 
+TProxy/Redirect disables Docker automatic restart for `net-transparent`. After a daemon
+or host restart, use the managed entry point to run preflight and start it again.
+Legacy `unless-stopped` deployments can still be audited for stop and cleanup, and
+updated under compatible control bundles. Restoring a legacy backup normalizes this
+policy while preserving the original backup. While transparent proxying is enabled,
+both current and target bundles must declare `x-padm-transparent-managed-restart`.
+Disable the integration before upgrading or reverting a bundle without this capability.
+An old CLI update process does not reload new code, so disable it before the first
+migration too. Setting `restart=no` alone does not disable the integration in the specification.
 Manage TProxy through menu `17 → 43`, or:
 
 ```bash

@@ -88,6 +88,11 @@ profiles 仍含 `core-xray,net-transparent`。`restart=no` 和停止服务只是
 再次执行 Compose 或业务启动可能覆盖此状态，不能写成 TProxy 已从规格停用。
 后续须先核对现场，再精确撤销或卸载，禁止自动拉起业务来验证事故。
 
+2026-10-18 18:55 CST 经 SSH 再核：负载 `0.06/0.02/0.00`、Swap 使用 `0 MiB`，
+`nginx/xray/subscription` 均 healthy；`net-transparent` 退出 `0`、`restart=no`。
+域名 HTTPS 返回 `200`。本轮未在该 VPS 部署源码修复或重新启用透明代理，
+规格仍按上述边界保留。
+
 ## 当前未决
 
 - 取回恢复阶段的原始日志与规则快照，核对 TUN 状态；完成受控 TProxy/TUN

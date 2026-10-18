@@ -4045,6 +4045,7 @@ dockerGenerateCompose() {
       | if ($tproxy | length) == 1 then
           .services["net-transparent"] = (defaults + {
             image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
+            restart: "no",
             profiles: ["net-transparent"],
             command: ([$tproxy[0].type, ($tproxy[0].settings.port | tostring)] +
               (if $tproxy[0].type == "tproxy" then [($tproxy[0].settings.mark | tostring)] else [] end) +
@@ -5886,7 +5887,8 @@ dockerSshFail2banDisablePrepare() {
 }
 
 dockerTProxyConfigurationCheck() {
-    local root path kind other
+    local root path kind other mode=${1:-current}
+    [[ "$#" -le 1 && ( "${mode}" == current || "${mode}" == owner ) ]] || return 1
     root=$(dockerInstallRoot) || return 1
     for path in config/spec.json deployment.json images.env compose.json data/net/transparent \
         data/net/transparent/tproxy.state data/net/transparent/redirect.state; do
@@ -5895,8 +5897,11 @@ dockerTProxyConfigurationCheck() {
     dockerComposeFile >/dev/null &&
         dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
             "${root}/deployment.json" "${root}/images.env" &&
-        cmp -s -- "${root}/compose.json" \
-            <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") &&
+        { cmp -s -- "${root}/compose.json" \
+            <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") ||
+            { [[ "${mode}" == owner ]] && cmp -s -- "${root}/compose.json" \
+                <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}" |
+                  jq '.services["net-transparent"].restart = "unless-stopped"'); }; } &&
         kind=$(jq -er '[.host_integrations[] | select(.type == "tproxy" or .type == "redirect")] |
           if length == 1 then .[0].type else error("透明集成不唯一") end' \
             "${root}/config/spec.json") || {
@@ -5912,17 +5917,18 @@ dockerTProxyConfigurationCheck() {
 }
 
 dockerTProxyContainer() (
-    local root ids container mode=${1:-running} health core coreIds coreContainer
+    local root ids container mode=${1:-running} scope=${2:-current} health core coreIds coreContainer
     local -a healthArgs=()
-    [[ "$#" -le 1 && ( "${mode}" == running || "${mode}" == exited ) ]] || return 1
+    [[ "$#" -le 2 && ( "${mode}" == running || "${mode}" == exited ) &&
+        ( "${scope}" == current || "${scope}" == owner ) ]] || return 1
     root=$(dockerInstallRoot) || return 1
-    dockerTProxyConfigurationCheck || return 1
+    dockerTProxyConfigurationCheck "${scope}" || return 1
     ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
         --filter label=com.docker.compose.service=net-transparent \
         --filter label=com.docker.compose.oneoff=False) || return 1
     [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
     container=$(docker container inspect "${ids}") || return 1
-    jq -e --arg root "${root}" --arg mode "${mode}" --arg id "${ids}" \
+    jq -e --arg root "${root}" --arg mode "${mode}" --arg scope "${scope}" --arg id "${ids}" \
         --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
       length == 1 and (.[0] as $c | $c.Config.Labels as $labels |
         $compose[0].services["net-transparent"] as $service |
@@ -5941,7 +5947,9 @@ dockerTProxyContainer() (
         $c.Config.Entrypoint == ["/usr/local/bin/padm-entrypoint"] and $c.Config.User == "0:0" and
         $c.Config.Healthcheck.Test == $service.healthcheck.test and
         $c.HostConfig.NetworkMode == "host" and $c.HostConfig.Init == $service.init and
-        $c.HostConfig.RestartPolicy.Name == $service.restart and
+        ($c.HostConfig.RestartPolicy.Name == $service.restart or
+          ($scope == "owner" and $service.restart == "unless-stopped" and
+            $c.HostConfig.RestartPolicy.Name == "no")) and
         $c.HostConfig.ReadonlyRootfs == $service.read_only and $c.HostConfig.Privileged == false and
         $c.HostConfig.PidsLimit == $service.pids_limit and
         ($c.HostConfig.PortBindings // {} | length) == 0 and
@@ -6067,7 +6075,7 @@ dockerTProxyDisablePrepare() {
         }
         return 0
     fi
-    dockerTProxyConfigurationCheck || return 1
+    dockerTProxyConfigurationCheck owner || return 1
     command=$(jq -er '.services["net-transparent"].command[]' "${root}/compose.json") || return 1
     mapfile -t commandArgs <<<"${command}"
     [[ "${#commandArgs[@]}" -ge 2 ]] || return 1
@@ -6081,10 +6089,10 @@ dockerTProxyDisablePrepare() {
             else error("unknown container state") end
           else error("container identity changed") end
         ' <<<"${before}") || return 1
-        audited=$(dockerTProxyContainer "${mode}") && [[ "${audited}" == "${ids}" ]] || return 1
+        audited=$(dockerTProxyContainer "${mode}" owner) && [[ "${audited}" == "${ids}" ]] || return 1
         # 旧配置仍完整时只停止刚审计的 CID，异常退出不能借恢复覆盖规则证据。
         [[ "${mode}" != running ]] || docker stop "${ids}" >/dev/null || return 1
-        audited=$(dockerTProxyContainer exited) && [[ "${audited}" == "${ids}" ]] || return 1
+        audited=$(dockerTProxyContainer exited owner) && [[ "${audited}" == "${ids}" ]] || return 1
     fi
     [[ ! -e "${root}/data/net/transparent/tproxy.state" &&
         ! -L "${root}/data/net/transparent/tproxy.state" &&
@@ -7188,7 +7196,8 @@ dockerCreateUpdateCandidate() {
             mkdir -p -- "${candidate}/data/net/ssh-fail2ban" "${candidate}/data/net/ssh-collector" &&
                 chmod 0700 "${candidate}/data/net/ssh-collector" || return 1
         fi
-        if jq -e '.control != null or any(.host_integrations[]; .type == "fail2ban" or .type == "fail2ban-ssh")' \
+        if jq -e '.control != null or any(.host_integrations[];
+            .type == "fail2ban" or .type == "fail2ban-ssh" or .type == "tproxy" or .type == "redirect")' \
             "${candidate}/config/spec.json" >/dev/null; then
             dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.json" "${root}" || return 1
         fi
@@ -7546,7 +7555,7 @@ dockerEnsureRuntimeDataPermissions() {
 dockerRestoreConfiguration() {
     local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic includeStatic=0
     local alpnListener=${DOCKER_CONFIG_RESTORE_ALPN_LISTENER:-} alpnTemporary= ipv6Cleanup=0
-    local legacyFail2ban=0 expectedCompose= parent
+    local legacyCompose=0 expectedCompose= parent bundlePath=
     local DOCKER_WIREGUARD_INPUT=
     local -a restorePaths=() restoreParents=()
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
@@ -7568,7 +7577,7 @@ dockerRestoreConfiguration() {
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
         [[ -f "${backup}/bundle.target" && ! -L "${backup}/bundle.target" && -O "${backup}/bundle.target" ]] || return 1
         bundleTarget=$(<"${backup}/bundle.target")
-        dockerBundlePathForTarget "${bundleTarget}" >/dev/null || return 1
+        bundlePath=$(dockerBundlePathForTarget "${bundleTarget}") || return 1
     fi
     # 已配置快照须先验证完整输入，损坏恢复点不能先停止现有服务。
     if [[ -e "${backup}/deployment.json" || -L "${backup}/deployment.json" ]] ||
@@ -7579,15 +7588,19 @@ dockerRestoreConfiguration() {
         dockerAcmeWebrootEnsure "${root}" || return 1
     fi
     if [[ -f "${backup}/config/spec.json" ]]; then
+        [[ -n "${bundlePath}" ]] || bundlePath=$(dockerCurrentBundlePath) || return 1
+        dockerBundleSupportsSpec "${bundlePath}" "${backup}/config/spec.json" || return 1
         dockerFail2banSourceInputsCheck "${backup}/config/spec.json" || return 1
         if jq -e '.control != null' "${backup}/config/spec.json" >/dev/null; then
             expectedCompose=$(dockerGenerateCompatibleControlCompose "${backup}/config/spec.json" \
                 "${backup}/compose.json" "${root}") || return 1
-        elif jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${backup}/config/spec.json" >/dev/null; then
+        elif jq -e 'any(.host_integrations[]; .type == "fail2ban" or .type == "tproxy" or .type == "redirect")' \
+            "${backup}/config/spec.json" >/dev/null; then
             expectedCompose=$(dockerGenerateCompose "${backup}/config/spec.json" /dev/stdout "${root}") || return 1
         fi
         if jq -e '.control != null' "${backup}/config/spec.json" >/dev/null &&
-            ! jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${backup}/config/spec.json" >/dev/null; then
+            ! jq -e 'any(.host_integrations[]; .type == "fail2ban" or .type == "tproxy" or .type == "redirect")' \
+                "${backup}/config/spec.json" >/dev/null; then
             cmp -s -- "${backup}/compose.json" <(printf '%s\n' "${expectedCompose}") || {
                 dockerError '主控恢复编排不受管，尚未停止或修改服务'
                 return 1
@@ -7606,8 +7619,18 @@ dockerRestoreConfiguration() {
                     dockerError 'Fail2ban 恢复编排不受管，尚未停止或修改服务'
                     return 1
                 }
-                legacyFail2ban=1
+                legacyCompose=1
             fi
+        fi
+        if jq -e 'any(.host_integrations[]; .type == "tproxy" or .type == "redirect")' \
+            "${backup}/config/spec.json" >/dev/null &&
+            ! cmp -s -- "${backup}/compose.json" <(printf '%s\n' "${expectedCompose}"); then
+            cmp -s -- "${backup}/compose.json" \
+                <(jq '.services["net-transparent"].restart = "unless-stopped"' <<<"${expectedCompose}") || {
+                dockerError 'TProxy/Redirect 恢复编排不受管，尚未停止或修改服务'
+                return 1
+            }
+            legacyCompose=1
         fi
     elif [[ -e "${backup}/deployment.json" || -e "${backup}/compose.json" ]]; then
         jq -en --slurpfile deployment "${backup}/deployment.json" \
@@ -7710,8 +7733,8 @@ dockerRestoreConfiguration() {
             cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/control/state.json" \
                 "${root}/config/control/state.json" || return 1
     fi
-    if [[ "${legacyFail2ban}" == 1 ]]; then
-        # 备份原文不变，仅规范化已验证的旧用户与重启策略，再重新取得现场证明。
+    if [[ "${legacyCompose}" == 1 ]]; then
+        # 备份原文不变，仅规范化已验证的旧用户与重启策略，再走受管启动门禁。
         printf '%s\n' "${expectedCompose}" >"${root}/compose.json" || return 1
     fi
     [[ -z "${bundleTarget}" ]] || dockerActivateBundle "${bundleTarget}" || return 1

@@ -760,6 +760,8 @@ done
 [[ "${metadataCid:-}" == "${composeContainer}" ]] ||
     fail 'real Compose metadata did not match production ownership helper'
 docker container inspect "${composeContainer}" >"${TEST_ROOT}/metadata-inspect.json"
+jq -e '.[0].HostConfig.RestartPolicy.Name == "no"' "${TEST_ROOT}/metadata-inspect.json" >/dev/null ||
+    fail 'real Compose owner retained automatic restart'
 dockerTProxyDisablePrepare <(printf '{"host_integrations":[]}')
 ! docker container inspect "${composeContainer}" >/dev/null 2>&1 ||
     fail 'production disable did not remove the audited Compose container'

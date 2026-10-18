@@ -786,6 +786,85 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
             assertRejectedUpdateCheck "subscription subscription --check"
         )
 
+        # 旧透明代理只兼容原重启字段；更新与恢复规范化现场，备份原文保持不变。
+        for kind in tproxy redirect; do
+            (
+                root="${root}/.transparent-${kind}-state"
+                export PADM_DOCKER_INSTALL_DIR="${root}" PADM_DOCKER_BIN_DIR="${root}/bin"
+                dockerInitializeStateRoot
+                dockerInstallBundle "$PHASE6_NEW_CONTROL_SOURCE" "$newCommit"
+                dockerTProxyContainer() { dockerTProxyConfigurationCheck; }
+                jq --arg kind "$kind" "
+                  .host_integrations = [{type:\$kind,profile:\"net-transparent\",
+                    firewall_rules:[\"padm-\" + \$kind],devices:[],schedules:[],
+                    settings:({port:31298} + if \$kind == \"tproxy\" then {mark:129} else {} end)}]
+                " "$oldSpec" >"${root}/transparent-spec.json"
+                dockerCreateConfigurationCandidate
+                candidate=$DOCKER_CONFIG_CANDIDATE
+                dockerGenerateCandidate "${root}/transparent-spec.json" "$candidate"
+                dockerBackupConfiguration configure
+                dockerInstallCandidate "$candidate" "$DOCKER_CONFIG_BACKUP"
+                DOCKER_CONFIG_SWITCHED=0
+                dockerCleanupConfigurationCandidate
+                # Docker 替身不会像真实启动那样创建在线归属的 bind 目录。
+                mkdir -p -- "$root/data/net/transparent"
+                jq ".services[\"net-transparent\"].restart = \"unless-stopped\"" \
+                    "$root/compose.json" >"$root/.legacy-compose.json"
+                cp -- "$root/.legacy-compose.json" "$root/compose.json"
+                source=$PHASE6_MANIFEST
+                control=$PHASE6_CONTROL_BUNDLE
+                # 旧快照仍可验证，但缺少新重启门禁的控制包不能接管更新或恢复。
+                dockerBackupConfiguration update
+                (
+                    schema="$(dockerCurrentBundlePath)/docker/contracts/configure.schema.json"
+                    cp -a -- "$schema" "$root/.marker-schema.json"
+                    before=$(tar --sort=name --numeric-owner -cf - -C "$root" \
+                        config secrets deployment.json compose.json images.env | sha256sum)
+                    logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+                    # 此处隔离包内容摘要，避免改 marker 先触发无关的清单校验。
+                    dockerBundlePathForTarget() {
+                        [[ "$1" == "$(readlink "$root/bundle")" ]] && printf "%s/%s\n" "$root" "$1"
+                    }
+                    jq "del(.[\"x-padm-transparent-managed-restart\"])" "$root/.marker-schema.json" >"$schema"
+                    dockerValidateConfigurationBackup "$DOCKER_CONFIG_BACKUP"
+                    ! dockerUpdateCommand --manifest "$source"
+                    DOCKER_CONFIG_SWITCHED=1
+                    ! dockerRestoreConfiguration
+                    ! tail -n "+$((logBefore + 1))" "$FAKE_DOCKER_LOG" |
+                        grep -Eq " (up|down|restart|stop|exec) "
+                    test "$before" == "$(tar --sort=name --numeric-owner -cf - -C "$root" \
+                        config secrets deployment.json compose.json images.env | sha256sum)"
+                    cp -a -- "$root/.marker-schema.json" "$schema"
+                )
+                dockerUpdateCommand --manifest "$source"
+                jq -e ".services[\"net-transparent\"].restart == \"no\"" "$root/compose.json" >/dev/null
+                transparentBackup=$DOCKER_CONFIG_BACKUP
+                cmp -s -- "$root/.legacy-compose.json" "$transparentBackup/compose.json"
+                cp -a -- "$transparentBackup/compose.json" "$root/.legacy-compose.json"
+                backupBefore=$(tar --sort=name --numeric-owner -cf - -C "$transparentBackup" . | sha256sum)
+                dockerCleanupStagedBundle
+
+                # 额外漂移不能借旧字段兼容绕过完整模板校验或先停止当前服务。
+                jq ".services[\"net-transparent\"].pids_limit += 1" "$root/.legacy-compose.json" \
+                    >"$transparentBackup/compose.json"
+                before=$(tar --sort=name --numeric-owner -cf - -C "$root" \
+                    config secrets deployment.json compose.json images.env | sha256sum)
+                logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+                DOCKER_CONFIG_BACKUP=$transparentBackup
+                DOCKER_CONFIG_SWITCHED=1
+                ! dockerRestoreConfiguration
+                ! tail -n "+$((logBefore + 1))" "$FAKE_DOCKER_LOG" |
+                    grep -Eq " (up|down|restart|stop|exec) "
+                test "$before" == "$(tar --sort=name --numeric-owner -cf - -C "$root" \
+                    config secrets deployment.json compose.json images.env | sha256sum)"
+                cp -a -- "$root/.legacy-compose.json" "$transparentBackup/compose.json"
+                dockerRestoreConfiguration
+                jq -e ".services[\"net-transparent\"].restart == \"no\"" "$root/compose.json" >/dev/null
+                test "$DOCKER_CONFIG_SWITCHED" == 0
+                test "$backupBefore" == "$(tar --sort=name --numeric-owner -cf - -C "$transparentBackup" . | sha256sum)"
+            )
+        done
+
         test -d "$root"
         ! dockerUninstallCommand --purge
         test -d "$root"

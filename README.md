@@ -1381,6 +1381,12 @@ OpenSSH service；从控制台或其它管理通道启用。service 须只有 Ma
 保留资源及恢复证据。此版本独占对应路由表和策略优先级，不支持共享表。
 不要直接删除 state 后重试：先停止原拥有者，并在原生 Linux 主机上核对实际资源。
 SIGKILL 若留下无 token 规则的空链，需人工确认归属后恢复，不会按同名链猜测清理。
+TProxy/Redirect 的 `net-transparent` 禁用 Docker 自动重启；daemon 或宿主重启后，
+须通过受管入口重新预检启动。旧 `unless-stopped` 编排仍可审计后停止、清理，
+并在兼容控制包下更新为新策略；旧备份恢复也规范化该策略，保留备份原文。
+启用透明集成时，当前及目标控制包须有 `x-padm-transparent-managed-restart`；
+缺少该能力的旧包须先停用集成再升级或回退。旧 CLI 升级进程不会重载新代码，
+首次迁移也先停用集成。仅设置 `restart=no` 不等于从规格停用。
 TProxy 管理入口为菜单 `17 → 43`，或以下命令：
 
 ```bash
