@@ -266,6 +266,36 @@ has_call 'error:images.env 缺失或不安全，已拒绝卸载' ||
 assert_registration
 
 reset_calls
+printf '%s\n' '{"schema_version":1,"mode":"docker","compose":{"project":"padm-docker","profiles":[]},"host_integrations":null}' \
+    >"${lifecycleRoot}/deployment.json"
+REAL_COMPOSE_GUARD=1
+status=0
+dockerUninstallCommand || status=$?
+unset REAL_COMPOSE_GUARD
+printf '%s\n' '{"schema_version":1,"mode":"docker","compose":{"project":"padm-docker","profiles":[]},"host_integrations":[]}' \
+    >"${lifecycleRoot}/deployment.json"
+[[ "${status}" == "${PADM_DOCKER_RC_STATE}" ]] || fail '部署状态损坏时卸载未拒绝'
+! grep -Eq '^(geo-remove|renewal-remove|control-log-remove|control-sync-remove|compose:down)$' "${calls}" ||
+    fail '部署状态损坏时卸载已修改调度或服务'
+has_call 'error:Docker 部署状态不完整，已拒绝卸载' ||
+    fail '部署状态损坏时卸载未提示原因'
+assert_registration
+
+reset_calls
+printf '%s\n' '{"host_integrations":null}' >"${lifecycleRoot}/config/spec.json"
+REAL_COMPOSE_GUARD=1
+status=0
+dockerUninstallCommand || status=$?
+unset REAL_COMPOSE_GUARD
+printf '%s\n' '{"host_integrations":[]}' >"${lifecycleRoot}/config/spec.json"
+[[ "${status}" == "${PADM_DOCKER_RC_STATE}" ]] || fail '配置状态损坏时卸载未拒绝'
+! grep -Eq '^(geo-remove|renewal-remove|control-log-remove|control-sync-remove|compose:down)$' "${calls}" ||
+    fail '配置状态损坏时卸载已修改调度或服务'
+has_call 'error:Docker 配置状态不完整，已拒绝卸载' ||
+    fail '配置状态损坏时卸载未提示原因'
+assert_registration
+
+reset_calls
 dockerUninstallCommand
 has_call control-log-remove || fail 'uninstall 未移除控制日志调度'
 has_call control-sync-remove || fail 'uninstall 未移除自动同步调度'

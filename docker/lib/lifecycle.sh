@@ -3119,6 +3119,21 @@ dockerUninstallCommand() {
             dockerError 'images.env 缺失或不安全，已拒绝卸载'
             return "${PADM_DOCKER_RC_STATE}"
         }
+        jq -e 'type == "object" and
+            (.compose.profiles | type == "array") and
+            (.host_integrations | type == "array")' \
+            "${root}/deployment.json" >/dev/null 2>&1 || {
+            dockerError 'Docker 部署状态不完整，已拒绝卸载'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
+            [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] &&
+                jq -e 'type == "object" and (.host_integrations | type == "array")' \
+                    "${root}/config/spec.json" >/dev/null 2>&1 || {
+                    dockerError 'Docker 配置状态不完整，已拒绝卸载'
+                    return "${PADM_DOCKER_RC_STATE}"
+                }
+        fi
     fi
     dockerPortHoppingSupervisorStopIfActive || return $?
     dockerLockInstalledDeployment || return $?
