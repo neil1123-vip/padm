@@ -17,7 +17,7 @@ cleanup() {
 }
 trap cleanup EXIT
 [[ "$(id -u)" == 0 && "$(uname -s)" == Linux ]] || exit 1
-for tool in jq python3 setpriv; do command -v "${tool}" >/dev/null; done
+for tool in jq python3 openssl setpriv; do command -v "${tool}" >/dev/null; done
 [[ -f /routing-cores/xray ]] || {
     printf 'http-relay-real: 缺少本机镜像传入的 Xray 程序\n' >&2
     exit 1

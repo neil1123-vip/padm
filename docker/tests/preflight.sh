@@ -54,7 +54,7 @@ for scenario in available missing-amd64 missing-arm64 missing-stream wrong-versi
             mkdir -p "${fixture_root}/${repo}-${arch}"
             index=${fixture_root}/${repo}-${arch}/APKINDEX
             : >"${index}"
-            for package in ca-certificates gcompat libgcc unzip nginx nginx-mod-stream python3 curl openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban; do
+            for package in ca-certificates gcompat libgcc unzip nginx nginx-mod-stream python3 coreutils curl openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban; do
                 # community 独有包与可用的旧版本均须接受，不能只检查 main 或最新版本。
                 [[ ( "${package}" == fail2ban && "${repo}" == community ) ||
                     ( "${package}" != fail2ban && "${repo}" == main ) ]] || continue

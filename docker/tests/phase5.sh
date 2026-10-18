@@ -150,7 +150,7 @@ assert_image_impact "${inputBase}" "${inputHead}" none all
 for dependency in xray:PADM_LOCK_UNZIP_VERSION sing-box:PADM_LOCK_GCOMPAT_VERSION \
     sing-box:PADM_LOCK_LIBGCC_VERSION \
     nginx:PADM_LOCK_NGINX_PACKAGE_VERSION ops:PADM_LOCK_ACME_SH_SHA256 \
-    ops:PADM_LOCK_CURL_VERSION net:PADM_LOCK_FAIL2BAN_VERSION; do
+    ops:PADM_LOCK_COREUTILS_VERSION ops:PADM_LOCK_CURL_VERSION net:PADM_LOCK_FAIL2BAN_VERSION; do
     inputBase=${inputHead}
     inputKey=${dependency#*:}
     awk -v key="${inputKey}" 'index($0, key "=") == 1 {$0 = key "=changed"} {print}' \
@@ -246,6 +246,9 @@ V: 1.30.5-r0
 P: python3
 V: 3.14.7-r2
 
+P: coreutils
+V: 9.11-r0
+
 P: curl
 V: 8.22.1-r0
 
@@ -298,6 +301,9 @@ V: 1.30.6-r0
 
 P: python3
 V: 3.14.7-r3
+
+P: coreutils
+V: 9.11-r1
 
 P: curl
 V: 8.22.1-r1
@@ -497,6 +503,7 @@ PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json"
         PADM_LOCK_LIBGCC_VERSION=15.2.0-r6 \
         PADM_LOCK_UNZIP_VERSION=6.0-r17 \
         PADM_LOCK_PYTHON3_VERSION=3.14.7-r2 \
+        PADM_LOCK_COREUTILS_VERSION=9.11-r0 \
         PADM_LOCK_CURL_VERSION=8.22.1-r0 \
         PADM_LOCK_OPENSSL_VERSION=3.5.9-r0 \
         PADM_LOCK_SOCAT_VERSION=1.8.1.4-r0 \
@@ -543,6 +550,7 @@ cmp -s "${TEST_ROOT}/core-lock.before" "${TEST_ROOT}/core-lock.after" ||
         PADM_LOCK_LIBGCC_VERSION=15.2.0-r7 \
         PADM_LOCK_UNZIP_VERSION=6.0-r18 \
         PADM_LOCK_PYTHON3_VERSION=3.14.7-r3 \
+        PADM_LOCK_COREUTILS_VERSION=9.11-r1 \
         PADM_LOCK_CURL_VERSION=8.22.1-r1 \
         PADM_LOCK_OPENSSL_VERSION=3.5.9-r1 \
         PADM_LOCK_SOCAT_VERSION=1.8.1.5-r0 \

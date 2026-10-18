@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -18,6 +19,20 @@ RESPONSE = (b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(BODY)).encode() +
             b"\r\nConnection: close\r\n\r\n" + BODY)
 USER, PASSWORD = "11111111-1111-4111-8111-111111111111", "relay:password"
 TAG, DIRECT = "padm-relay-http", "padm-relay-http-direct"
+TLS_NAME = "relay.padm.invalid"
+
+
+class TLSDestination(fixture.Destination):
+    def handle(self):
+        # 在握手前记录连接，避免把被拒绝请求误算成未到达 TLS 目的端。
+        self.server.connections += 1
+        self.request.settimeout(2)
+        try:
+            with self.server.tls_context.wrap_socket(self.request, server_side=True) as stream:
+                self.request = stream
+                super().handle()
+        except ssl.SSLError:
+            return
 
 
 def headers(stream):
@@ -28,7 +43,8 @@ def headers(stream):
     return data
 
 
-def http(host, source, listener, destination, method, password=PASSWORD, dest_name=None):
+def http(host, source, listener, destination, method, password=PASSWORD, dest_name=None,
+         tls_context=None, server_name=TLS_NAME):
     target_host = dest_name or host
     address = (f"[{target_host}]:{destination}" if ":" in target_host
                else f"{target_host}:{destination}")
@@ -48,13 +64,17 @@ def http(host, source, listener, destination, method, password=PASSWORD, dest_na
                 assert 400 <= status <= 599, header
                 return status
             if method == "CONNECT":
-                stream.sendall(b"GET /routing-check HTTP/1.1\r\nHost: fixture\r\nConnection: close\r\n\r\n")
-                assert fixture.exact(stream, len(RESPONSE)) == RESPONSE
+                with (tls_context.wrap_socket(stream, server_hostname=server_name)
+                      if tls_context else contextlib.nullcontext(stream)) as tunnel:
+                    http_host = server_name if tls_context else "fixture"
+                    tunnel.sendall(b"GET /routing-check HTTP/1.1\r\nHost: " +
+                                   http_host.encode() + b"\r\nConnection: close\r\n\r\n")
+                    assert fixture.exact(tunnel, len(RESPONSE)) == RESPONSE
             else:
                 assert b"content-length: 22\r\n" in header.lower()
                 assert fixture.exact(stream, len(BODY)) == BODY
             return status
-        except (EOFError, ConnectionResetError, BrokenPipeError):
+        except (EOFError, ConnectionResetError, BrokenPipeError, ssl.SSLEOFError):
             return 0
 
 
@@ -109,16 +129,29 @@ def main(root):
         original_hosts = hosts.read_bytes()
         stack.callback(hosts.write_bytes, original_hosts)
         hosts.write_bytes(original_hosts + b"\n127.0.0.1 relay.padm.invalid\n")
-        origins = {}
-        for host in ("127.0.0.1", "::1"):
-            server = stack.enter_context(fixture.Server((host, 0), fixture.Destination))
-            server.accepted, server.received = 0, []
-            origins[host] = server
-            thread = threading.Thread(target=server.serve_forever,
-                                      kwargs=dict(poll_interval=0.02), daemon=True)
-            thread.start()
-            stack.callback(thread.join, 1)
-            stack.callback(server.shutdown)
+        certificate, key = root / "relay-tls.crt", root / "relay-tls.key"
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256",
+                        "-days", "1", "-nodes", "-keyout", str(key),
+                        "-out", str(certificate), "-subj", f"/CN={TLS_NAME}",
+                        "-addext", f"subjectAltName=DNS:{TLS_NAME}"],
+                       check=True, stdout=subprocess.DEVNULL)
+        key.chmod(0o600)
+        tls_server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls_server.load_cert_chain(certificate, key)
+        tls_client = ssl.create_default_context(cafile=str(certificate))
+        origins, tls_origins = {}, {}
+        for destinations, handler in ((origins, fixture.Destination),
+                                      (tls_origins, TLSDestination)):
+            for host in ("127.0.0.1", "::1"):
+                server = stack.enter_context(fixture.Server((host, 0), handler))
+                server.accepted, server.received, server.connections = 0, [], 0
+                server.tls_context = tls_server
+                destinations[host] = server
+                thread = threading.Thread(target=server.serve_forever,
+                                          kwargs=dict(poll_interval=0.02), daemon=True)
+                thread.start()
+                stack.callback(thread.join, 1)
+                stack.callback(server.shutdown)
         for core in ("xray",):
             config, local, other = runtime(root)
             path = root / f"{core}.runtime.json"
@@ -152,6 +185,35 @@ def main(root):
                                 origin.server_address[1], method,
                                 dest_name="relay.padm.invalid") != 200
                     assert origin.accepted == before, "拒绝来源域名请求到达目的端"
+                for host, dest_name in (("127.0.0.1", None), ("::1", None),
+                                        ("127.0.0.1", TLS_NAME)):
+                    origin = tls_origins[host]
+                    before = origin.accepted
+                    assert http(host, host, local, origin.server_address[1], "CONNECT",
+                                dest_name=dest_name, tls_context=tls_client) == 200
+                    assert origin.accepted == before + 1, "允许来源未完成可信 TLS 请求"
+                origin = tls_origins["127.0.0.1"]
+                before = origin.connections
+                for source, password, dest_name in (
+                        ("127.0.0.2", PASSWORD, None),
+                        ("127.0.0.2", PASSWORD, TLS_NAME),
+                        ("127.0.0.1", "wrong-password", None),
+                        ("127.0.0.1", None, None)):
+                    assert http("127.0.0.1", source, local, origin.server_address[1],
+                                "CONNECT", password, dest_name=dest_name,
+                                tls_context=tls_client) != 200
+                    assert origin.connections == before, "拒绝来源或错误认证到达 TLS 目的端"
+                before_received = len(origin.received)
+                try:
+                    http("127.0.0.1", "127.0.0.1", local, origin.server_address[1],
+                         "CONNECT", tls_context=tls_client,
+                         server_name="wrong.padm.invalid")
+                except ssl.SSLCertVerificationError as error:
+                    assert "hostname mismatch" in error.verify_message.lower(), error
+                else:
+                    raise AssertionError("错误 TLS hostname 未被证书校验拒绝")
+                assert origin.connections == before + 1
+                assert len(origin.received) == before_received, "错误 hostname 发送了 HTTP 正文"
                 assert counters() == before_counters, "同名 relay 流量计入了业务账号"
                 # 同名等级 0 入站是业务统计控制对照，等级 1 relay 不参与该账号统计。
                 for host, source in (("127.0.0.1", "127.0.0.2"), ("::1", "::1")):
@@ -169,8 +231,14 @@ def main(root):
                         before = origin.accepted
                         assert http(host, host, local, origin.server_address[1], method) == 200
                         assert origin.accepted == before + 1
+                for host in ("127.0.0.1", "::1"):
+                    origin = tls_origins[host]
+                    before = origin.accepted
+                    assert http(host, host, local, origin.server_address[1], "CONNECT",
+                                tls_context=tls_client) == 200
+                    assert origin.accepted == before + 1
                 assert counters() == after_counters, "已有同名账号计数器被 relay 改变"
-            print(f"http-relay-real-{core}: HTTP/CONNECT/auth/source/direct/isolated-DNS/account-control passed",
+            print(f"http-relay-real-{core}: HTTP/CONNECT/TLS/hostname/auth/source/direct/isolated-DNS/account-control passed",
                   flush=True)
 
 

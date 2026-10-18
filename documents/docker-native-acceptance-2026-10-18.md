@@ -1,6 +1,6 @@
 # Debian 13 原生与公网验收
 
-验收日期：2026-10-18（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
+验收日期：2026-10-18–19（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
 ## 环境与可信输入
 
@@ -104,10 +104,11 @@ profiles 仍含 `core-xray,net-transparent`。`restart=no` 和停止服务只是
 - 完整卸载与 purge：当前只完成透明 orphan 清理，正式业务部署仍未 purge。
 - 公网双栈端口跳跃、旧连接排空和自动恢复：当前 VPS 无公网 IPv6，不能判定通过。
 - 新原生主机同架构 v3 空目标灾备与业务恢复：缺少可销毁的同架构第二主机。
-- webroot/ALPN 的公网 CA 组合真实验收、WARP 真实账号/公网出口和 Reality 共存专项：
-  目前只有本地 CA、受限或局部证据，保持 deferred。
-- HTTP relay 原生验证：临时 `36080` 配置后 HTTPS 目标返回
-  `curl: (35) unexpected eof`，随后已自动回滚；未扩大来源范围，不把本项标为通过。
+- webroot/ALPN 的公网 CA 候选签发、候选校验与服务恢复已通过；正式 CLI 换证及回滚仍待验。
+  WARP 真实账号/公网出口和 Reality 共存专项保持 deferred；当前 WS-only 部署不能通过
+  协议新增 CLI 创建首个 Reality，不能靠手写规格绕过支持门禁。
+- HTTP relay 原生 IPv4 到公网 HTTPS 已通过，旧 EOF 已定位为测试来源误写；
+  外部客户端的公网入口仍超时或 CONNECT 中断，未标记完整验收通过。
 - 自然到期真实续期：当前登记续期约为 `2026-12-17 08:03:22 CST`，证书到期约为
   `2027-01-16 04:29:07 CST`；调度 no-op 不算换证。
 - 当前源码修复的可信正式发布、发布后首配/升级/客户端验收：未获 push、PR 或发布授权。
@@ -125,8 +126,51 @@ systemd timer/service 执行、停用调度和 validate；现有 Geo 数据保�
 规格哈希恢复，临时目录清理完成。该结果只证明受管额外端口的局部原生路径，不等同完整
 双栈端口跳跃或旧连接排空验收。
 
-本轮所有临时远端目录和脚本均已删除。上述通过项不改变原生 arm64、透明代理、完整卸载、
-灾备、WARP、Reality 共存、HTTP relay、自然续期及可信发布的未决状态。
+此前临时远端目录和脚本均已删除。后续集中验收使用独立的本轮临时目录，
+不恢复透明代理或扩大原有来源范围。
+
+### HTTP relay 与公网 CA 集中补验
+
+HTTP relay 的旧测试名单写为 `172.17.0.1/32`，实际受管网桥网关为 `172.18.0.1`。
+修正为实际网关后，宿主回环经受管 `36080` 发布端口访问 `api.ipify.org`、
+`www.debian.org`、`example.com`，三次真实 HTTPS 证书校验均成功、返回 200。
+未允许的 VPS 公网地址访问同一入口时，CONNECT 返回 200，随后 curl 报 TLS 失败；
+Xray 同时记录真实来源及 `padm-relay-http -> blocked`。这证明旧 EOF 可以由来源拒绝触发，
+不能据此放宽为全网允许。外部客户端两次网络检查仍为超时或 CONNECT 中断，
+未形成允许来源成功证据。测试后关闭 relay，原规格 SHA256 恢复。
+
+本机现有 `docker-http-relay-real` 增加真实 TLS origin、IPv4/IPv6 和域名 CONNECT、
+严格 CA/hostname 验证、错误 hostname 拒绝以及拒绝来源/错误认证不达目标的断言；
+已有 DNS 隔离和业务流量统计对照保留。定向首跑通过，入口 `1.611` 秒，排队
+`4.727` 秒，证据 `.tmp-regression-docker-d1b798a6592b42b2aaf3f3fcc1f5d154/`。
+改动前的生产 Compose 双栈发布/来源专项也通过，入口 `12.431` 秒；
+未改发布逻辑，不重复该专项或 full。
+
+公网 CA 使用独立空候选 ACME home 与 Let's Encrypt staging，复用正式版本的挑战准备、
+执行、恢复和候选校验函数，不调用最终提交。ALPN 实际临时暂停并恢复 443 的 Nginx；
+webroot 显式临时启用 HTTP-01，挑战期间 Nginx 容器 ID/StartedAt 保持一致。
+两项均取得 `b.951101.xyz` 的 EC-P256 候选证书，发行者为
+`(STAGING) Artificial Amaranth YE1`，serial 分别为
+`2C8A4383396E37E10DF221D51A978F9F5CDA` 和 `2C18A1EA773083417325F3AAFD7CE671EB1C`。
+候选证书未安装到生产，不能计作自然续期或正式 CLI 换证。
+
+签发暴露 ops 镜像 BusyBox `date` 无法解析证书日期：
+`_ssldate2time Dec 21 17:27:28 2026 GMT` 实际失败。
+修复为安装锁定的官方 GNU coreutils，并把依赖贯通到发布锁校验、版本查询、
+ops fingerprint 和镜像 smoke；不修改上游 acme.sh。旧镜像的新 smoke 实际失败，
+修复镜像直接调用上游 `_ssldate2time` 返回正确 epoch `1797874048`。
+新镜像 smoke `2.115` 秒、`docker-phase2` `1.360` 秒、`docker-phase5` `9.898` 秒通过；
+证据分别在 `.tmp-ops-date-20261019/`、
+`.tmp-regression-docker-f5e89368841f4beab1367694bb1fcab1/` 和
+`.tmp-regression-docker-fb2f2b0113b14ccf980608b1d7a7d887/`。
+生产仍运行旧正式镜像，日期解析修复需要正式发布后才会生效。
+
+集中补验结束后，`validate` 返回 0，三个业务容器 healthy，HTTPS 返回 200 且证书校验成功；
+relay、HTTP-01 和透明集成均关闭，80/36080 无监听，续期 timer active，
+正式证书、ACME home、续期登记及原规格哈希全部保持。候选目录与挑战容器均已清理。
+脱敏日志归档为 `.tmp-vps-native-20261018/evidence/native-closure-20261019.tar.gz`，
+SHA256 为 `9f9460f46793096fb8040656a095822fbda0aaac088e0bef7fdcd2793291ca3c`；
+本轮远端临时目录、输入凭据和 curl 配置已删除，SSH 会话已退出。
 
 本轮小证据保留在 `.tmp-vps-native-20261018/`；
 原始签名输入摘要与各阶段 inspect、CLI 日志用于交叉核对。

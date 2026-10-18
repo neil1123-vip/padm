@@ -89,6 +89,11 @@ CONNECT 的目标 TLS 不会加密客户端到代理的 Basic 认证头。
 来源若已被上游 NAT、代理或 Docker Desktop 宿主回流折叠，只能按实际可见地址判断；
 不要将共享网关地址当作所有客户端真实身份。
 
+CONNECT 返回 `200` 只证明代理已接受隧道请求，来源拒绝后目标 TLS 仍可能报
+`unexpected eof`。排查时同时核对 Xray 的实际来源与 `blocked`/direct 路由，
+不能据此放宽来源范围。宿主回环经 Docker 发布端口访问时，先用
+`docker network inspect padm-docker` 核实实际网关，不假定为 `172.17.0.1`。
+
 ## 验收边界
 
 定向回归为 `docker-http-relay`、`docker-http-relay-real`、
@@ -97,6 +102,11 @@ CONNECT 的目标 TLS 不会加密客户端到代理的 Basic 认证头。
 不借真实宿主 Socket 或公网；覆盖 IPv4/IPv6 发布、真实 veth 来源和白名单，
 以及端口/来源切换后新来源生效、旧端口与旧来源拒绝。
 业务容器维持 UID `10001`、只读根和零 capabilities。
+
+真实核心专项还验证 CONNECT 内的 IPv4/IPv6 TLS、证书信任和 hostname 校验，
+错误 hostname、拒绝来源及错误认证不得发送目标 HTTP 正文。
+Debian 13 amd64 的宿主回环经受管发布端口访问三个公网 HTTPS 目标已通过；
+外部客户端入口仍未通过，该证据不替代公网来源和原生 arm64 验收。
 
 原生 Linux 宿主生命周期、公网、arm64 和可信发布仍需独立验收；
 `internal-202` 的完整矩阵继续为 `deferred`。SOCKS `201` 仍未交付：

@@ -105,6 +105,13 @@ nginx)
     ;;
 ops|net)
     docker run --rm --pull=never "${image}" health >/dev/null
+    if [[ "${name}" == ops ]]; then
+        # BusyBox date 无法解析证书到期格式，直接验证上游 ACME 的真实调用。
+        [[ "$(docker run --rm --pull=never --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --tmpfs /tmp \
+            --entrypoint /bin/sh "${image}" /opt/acme/acme.sh \
+            _ssldate2time 'Dec 21 17:27:28 2026 GMT')" == 1797874048 ]]
+    fi
     ;;
 *)
     printf 'unknown image: %s\n' "${name}" >&2
