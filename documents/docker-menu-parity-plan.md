@@ -9336,6 +9336,23 @@ Docker `29.9.1`、Compose `v5.6.0`）完成只读恢复态复核：`nginx`、
 
 本批整体目标保持 active，后续继续清点 deferred 与环境验收缺口。
 
+#### 5C.2f.4 Debian 13 amd64 续期调度真实执行
+
+2026-10-18 21:15（北京时间）在同一获授权 VPS 手动触发
+`padm-docker-renewal.service`，验证当前受管 schema 2 standalone 登记、
+systemd timer、业务健康和公网 TLS 的完整调用链。service 以
+`ExecMainStatus=0` 成功结束，timer 保持 `active/waiting` 且继续启用，
+`padm-docker acme schedule status` 保持
+`domain=b.951101.xyz enabled=true provider=standalone`；三项业务容器仍为
+`healthy`，透明容器仍为 `exited (0)`、`restart=no`，公网 HTTPS 返回 200。
+本次证书有效期至 2027-01-15，ACME 按到期窗口返回成功的 no-op，证书序列号
+未改变；因此这项证据确认真实调度和不提前换证的行为，不能替代自然到期后的
+真实换证验收。
+
+证据为 `.tmp-vps-native-20261018/evidence/acme-schedule-service-20261018T2115CST.txt`。
+本项不启用透明代理，不扩大 ACME 支持组合，不把自然到期续期、原生 arm64、
+完整卸载或当前源码可信发布标记为完成；整体目标继续保持 active。
+
 - 每阶段同步中英文使用说明、支持矩阵、权限边界及失败恢复操作。
   旧部署迁移明确要求完整 spec 或安全导入，不允许一条重配命令替代迁移。
 - PR 按实际改动运行合同、Compose、菜单 PTY 和定向回归；
