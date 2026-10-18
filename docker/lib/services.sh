@@ -8033,7 +8033,13 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_MANIFEST}"
     }
-    dockerRealityTargetsValidate "${specFile}" || {
+    # 精确撤销不依赖未改动目标在线；冻结后再次比较，不能夹带其它规格变更。
+    if [[ "${FUNCNAME[1]:-}" == dockerEditCommand &&
+        ( "${tproxyAction:-}" == off || "${tunAction:-}" == off ) ]]; then
+        dockerEditCompatibilityValidate "${normalized:-}" "${specFile}"
+    else
+        dockerRealityTargetsValidate "${specFile}"
+    fi || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }

@@ -12,6 +12,7 @@ root=${PADM_DOCKER_INSTALL_DIR}
 LOG=${TEST_ROOT}/command.log
 CALLS=${TEST_ROOT}/calls.log
 MODE=ok
+TARGET_MODE=ok
 UUID=11111111-1111-4111-8111-111111111111
 fail() { cat "${LOG}" >&2; printf 'tun-management-fail: %s\n' "$*" >&2; exit 1; }
 # 只替换宿主和容器边界；输入、候选、备份及恢复沿生产编辑事务。
@@ -23,7 +24,10 @@ dockerRequireInstalledBundle() { :; }
 dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
 dockerConfigureReleasePrepare() { :; }
 dockerConfigureReleaseValidate() { :; }
-dockerRealityTargetsValidate() { :; }
+dockerRealityTargetsValidate() {
+    printf '%s\n' "$1" >>"${TEST_ROOT}/target-calls.log"
+    [[ "${TARGET_MODE}" == ok ]]
+}
 dockerConfigurePortsAvailable() { :; }
 dockerSetupRealityPublicKey() {
     cat >/dev/null
@@ -125,6 +129,11 @@ runEdit 2 --tun-enable --tun-off --preview
 runEdit 2 --tun-enable --dns-off --preview
 runEdit 2 --tun-enable --spec "${TEST_ROOT}/base.json" --preview
 runEdit 2 --tun-enable unexpected --preview
+TARGET_MODE=fail
+targetCalls=$(wc -l <"${TEST_ROOT}/target-calls.log")
+runEdit 15 --tun-enable --preview
+[[ "$(wc -l <"${TEST_ROOT}/target-calls.log")" == "$((targetCalls + 1))" ]]
+TARGET_MODE=ok
 runEdit 0 --tun-enable --preview
 [[ "$(snapshot)" == "${before}" && ! -s "${CALLS}" ]] ||
     fail 'preview or invalid input stopped services or changed state'
@@ -212,6 +221,8 @@ done
 before=$(snapshot)
 : >"${CALLS}"
 runEdit 15 --tun-enable --preview
+TARGET_MODE=fail
+targetCalls=$(wc -l <"${TEST_ROOT}/target-calls.log")
 runEdit 0 --tun-off --preview
 [[ "$(snapshot)" == "${before}" && ! -s "${CALLS}" ]] || fail 'off preview stopped TUN or changed state'
 # 专项豁免只允许 TUN 项增删；普通规格导入不能关闭，UUID 也不能借此改动。
@@ -222,6 +233,18 @@ runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
         "${TEST_ROOT}/enabled.json" >"${TEST_ROOT}/tampered.json"
     ! dockerEditCompatibilityValidate "${TEST_ROOT}/enabled.json" "${TEST_ROOT}/tampered.json"
 )
+(
+    dockerConfigureReleaseValidate() {
+        if [[ "${FUNCNAME[1]:-}" == dockerConfigureApply ]]; then
+            jq '.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' "$1" \
+                >"${TEST_ROOT}/apply-drift.json"
+            cp -- "${TEST_ROOT}/apply-drift.json" "$1"
+        fi
+    }
+    runEdit 15 --tun-off --confirm PADM-DOCKER-EDIT
+)
+[[ "$(snapshot)" == "${before}" && ! -s "${CALLS}" ]] ||
+    fail 'TUN off with account drift changed live state'
 for MODE in health-fail interrupt-int interrupt-term; do
     rm -f -- "${TEST_ROOT}/failed-once"
     expected=14
@@ -232,6 +255,9 @@ for MODE in health-fail interrupt-int interrupt-term; do
 done
 MODE=ok
 runEdit 0 --tun-off --confirm PADM-DOCKER-EDIT
+[[ "$(wc -l <"${TEST_ROOT}/target-calls.log")" == "${targetCalls}" ]] ||
+    fail 'TUN off probed unchanged Reality target'
+TARGET_MODE=ok
 runStatus false
 runEdit 15 --tun-off --preview
 jq -en --slurpfile expected "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \

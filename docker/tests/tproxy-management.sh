@@ -12,6 +12,7 @@ root=${PADM_DOCKER_INSTALL_DIR}
 LOG=${TEST_ROOT}/command.log
 CALLS=${TEST_ROOT}/calls.log
 MODE=ok
+TARGET_MODE=ok
 UUID=11111111-1111-4111-8111-111111111111
 fail() { cat "${LOG}" >&2; printf 'tproxy-management-fail: %s\n' "$*" >&2; exit 1; }
 # 仅宿主、发布与容器边界替身；输入、候选、冻结、备份和恢复沿生产事务。
@@ -22,7 +23,10 @@ dockerRequireInstalledBundle() { :; }
 dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
 dockerConfigureReleasePrepare() { :; }
 dockerConfigureReleaseValidate() { :; }
-dockerRealityTargetsValidate() { :; }
+dockerRealityTargetsValidate() {
+    printf '%s\n' "$1" >>"${TEST_ROOT}/target-calls.log"
+    [[ "${TARGET_MODE}" == ok ]]
+}
 dockerConfigurePortsAvailable() { :; }
 dockerSetupRealityPublicKey() {
     cat >/dev/null
@@ -148,6 +152,18 @@ runEdit 2 --tproxy-settings 31298 129 --tproxy-output-off --tproxy-output-all --
 runEdit 2 --tproxy-enable 31298 129 --redirect-output-all --preview
 runEdit 15 --tproxy-enable 35441 129 --preview
 runEdit 15 --tproxy-enable 10085 129 --preview
+TARGET_MODE=fail
+targetCalls=$(wc -l <"${TEST_ROOT}/target-calls.log")
+runEdit 15 --tproxy-enable 31298 129 --preview
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    actual=0
+    dockerConfigureApply "${TEST_ROOT}/base.json" '' '' preview || actual=$?
+    [[ "${actual}" == 15 ]]
+) >"${LOG}" 2>&1 || fail 'ordinary configure bypassed failed Reality target validation'
+[[ "$(wc -l <"${TEST_ROOT}/target-calls.log")" == "$((targetCalls + 2))" ]]
+TARGET_MODE=ok
 runEdit 0 --tproxy-enable 31298 129 --preview
 [[ "$(snapshot)" == "${before}" ]] || fail 'preview or invalid input changed live state'
 runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
@@ -164,6 +180,11 @@ jq -e 'any(.inbounds[]; .tag == "tproxy-in" and .port == 31298 and
 before=$(snapshot)
 runEdit 15 --tproxy-enable 31299 131 --preview
 runEdit 15 --tproxy-settings 31298 129 --preview
+TARGET_MODE=fail
+targetCalls=$(wc -l <"${TEST_ROOT}/target-calls.log")
+runEdit 15 --tproxy-settings 31299 131 --preview
+[[ "$(wc -l <"${TEST_ROOT}/target-calls.log")" == "$((targetCalls + 1))" ]]
+TARGET_MODE=ok
 runEdit 0 --tproxy-settings 31299 131 --preview
 [[ "$(snapshot)" == "${before}" ]] || fail 'settings preview changed live state'
 runEdit 0 --tproxy-settings 31299 131 --confirm PADM-DOCKER-EDIT
@@ -191,6 +212,20 @@ runEdit 15 --spec "${TEST_ROOT}/changed.json" --confirm PADM-DOCKER-EDIT
         "${TEST_ROOT}/enabled.json" >"${TEST_ROOT}/tampered.json"
     ! dockerEditCompatibilityValidate "${TEST_ROOT}/enabled.json" "${TEST_ROOT}/tampered.json"
 )
+# 关闭只豁免不变目标的探测；进入 apply 后夹带目标漂移仍须拒绝。
+TARGET_MODE=fail
+targetCalls=$(wc -l <"${TEST_ROOT}/target-calls.log")
+(
+    dockerConfigureReleaseValidate() {
+        if [[ "${FUNCNAME[1]:-}" == dockerConfigureApply ]]; then
+            jq '.core.protocols[0].reality.target_host = "changed.example.com"' "$1" \
+                >"${TEST_ROOT}/apply-drift.json"
+            cp -- "${TEST_ROOT}/apply-drift.json" "$1"
+        fi
+    }
+    runEdit 15 --tproxy-off --confirm PADM-DOCKER-EDIT
+)
+[[ "$(snapshot)" == "${before}" ]] || fail 'off with target drift changed live state'
 runEdit 0 --tproxy-off --preview
 [[ "$(snapshot)" == "${before}" ]] || fail 'off preview changed live state'
 MODE=health-fail
@@ -199,6 +234,9 @@ runEdit 14 --tproxy-off --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail 'off failure did not restore TProxy'
 MODE=ok
 runEdit 0 --tproxy-off --confirm PADM-DOCKER-EDIT
+[[ "$(wc -l <"${TEST_ROOT}/target-calls.log")" == "${targetCalls}" ]] ||
+    fail 'TProxy off probed unchanged Reality target'
+TARGET_MODE=ok
 runStatus false null null
 jq -en --slurpfile expected "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \
     '$expected == $actual' >/dev/null
@@ -207,6 +245,17 @@ jq -e '.accounts["11111111-1111-4111-8111-111111111111"].upload == 17 and
 jq -e '.services["net-transparent"] == null and .services.xray.network_mode == null and
   .services.xray.ports == ["0.0.0.0:35441:35441/tcp"]' "${root}/compose.json" >/dev/null
 jq -e 'all(.inbounds[]; .tag != "tproxy-in")' "${root}/config/xray/config.json" >/dev/null
+runEdit 0 --redirect-enable 31298 --confirm PADM-DOCKER-EDIT
+before=$(snapshot)
+TARGET_MODE=fail
+targetCalls=$(wc -l <"${TEST_ROOT}/target-calls.log")
+runEdit 0 --redirect-off --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'Redirect off preview changed live state'
+runEdit 0 --redirect-off --confirm PADM-DOCKER-EDIT
+[[ "$(wc -l <"${TEST_ROOT}/target-calls.log")" == "${targetCalls}" ]] ||
+    fail 'Redirect off probed unchanged Reality target'
+TARGET_MODE=ok
+jq -e '.host_integrations == []' "${root}/config/spec.json" >/dev/null
 # 三种地址族共用生成路径，旧 IPv4 输入及无 marker 的发布包继续兼容。
 mkdir -- "${TEST_ROOT}/old-bundle" "${TEST_ROOT}/old-bundle/docker" "${TEST_ROOT}/old-bundle/docker/contracts"
 jq 'del(."x-padm-tproxy-ipv6")' "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \

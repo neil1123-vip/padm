@@ -88,17 +88,19 @@ profiles 仍含 `core-xray,net-transparent`。`restart=no` 和停止服务只是
 再次执行 Compose 或业务启动可能覆盖此状态，不能写成 TProxy 已从规格停用。
 后续须先核对现场，再精确撤销或卸载，禁止自动拉起业务来验证事故。
 
-2026-10-18 18:55 CST 经 SSH 再核：负载 `0.06/0.02/0.00`、Swap 使用 `0 MiB`，
-`nginx/xray/subscription` 均 healthy；`net-transparent` 退出 `0`、`restart=no`。
-域名 HTTPS 返回 `200`。本轮未在该 VPS 部署源码修复或重新启用透明代理，
-规格仍按上述边界保留。
+随后按精确撤销路径完成现场收口。2026-10-18 19:21 CST 经 SSH 只读复核：
+负载 `0.00/0.00/0.00`、Swap 使用 `0 MiB`，`nginx/xray/subscription` 均 healthy；
+`net-transparent` 退出 `0`、`restart=no`，Compose profile 仅为
+`core-xray,nginx,subscription`，`config/spec.json` 的 `host_integrations` 为空，
+`padm-native-target4.service` 已不存在，`padm-docker-traffic.timer` 为 disabled/inactive。
+本轮未在该 VPS 部署当前源码或重新启用透明代理；域名 HTTPS 与业务恢复状态保持通过。
 
 ## 当前未决
 
 - 取回恢复阶段的原始日志与规则快照，核对 TUN 状态；完成受控 TProxy/TUN
   验收、完整卸载与 purge，并撤销测试服务和残留资源。
-- 远端 `/root/padm-native-20261018/`、`/root/.tmp-padm-native-20261018/`、
-  `padm-native-target4.service` 及正式安装仍待精确清理。
+- 远端 `/root/padm-native-20261018/`、`/root/.tmp-padm-native-20261018/` 测试目录
+  仍待按证据保留策略精确清理；正式业务部署未做 purge。
 - 此 VPS 仅有公网 IPv4；不把双族端口跳跃或原生 arm64 判为通过。
 - 公网自然到期后的真实续期尚缺；当前 CLI 无强制续期参数，不能将 skip 算成功。
 - 当前修复尚需进入经授权的正式发布，再补其真实可信首配/升级；旧版本验签不能替代。
