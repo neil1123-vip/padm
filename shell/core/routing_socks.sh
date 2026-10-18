@@ -460,6 +460,8 @@ removeSocks5Routing() {
             stopSocks5SingBox || { socks5RoutingRollback "${backupDir}" "Socks5 服务停止失败" true; return 1; }
         fi
         if [[ "${unInstallSocks5RoutingStatus}" != "1" && -n "${socks5InboundPort}" ]]; then
+            # 合并文件清理也纳入已登记事务，收到中断时恢复后重载。
+            PADM_SOCKS5_RELOAD_PENDING=true
             removeManagedFileIfPresent "$(singBoxMergedConfigFile)" || {
                 padmRunRollback socks5RoutingExitRollback "Socks5 合并配置清理失败" || true
                 unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
