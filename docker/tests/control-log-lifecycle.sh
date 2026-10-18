@@ -21,6 +21,7 @@ chmod 0600 "${lifecycleRoot}/data/control-log/schedule.json"
 source "${PROJECT_ROOT}/install-docker.sh"
 eval "$(declare -f dockerValidateConfigurationBackup | sed '1s/dockerValidateConfigurationBackup/dockerProductionValidateConfigurationBackup/')"
 eval "$(declare -f dockerBackupConfiguration | sed '1s/dockerBackupConfiguration/dockerProductionBackupConfiguration/')"
+eval "$(declare -f dockerComposeFile | sed '1s/dockerComposeFile/dockerProductionComposeFile/')"
 
 calls="${TEST_ROOT}/calls.log"
 : >"${calls}"
@@ -33,6 +34,10 @@ dockerHostPreflight() { record host-preflight; }
 dockerLockInstalledDeployment() { record lock; }
 dockerReleaseDeploymentLock() { record unlock; }
 dockerComposeFile() {
+    if [[ "${REAL_COMPOSE_GUARD:-0}" == 1 ]]; then
+        dockerProductionComposeFile
+        return $?
+    fi
     [[ "${FAIL_COMPOSE:-0}" != 1 ]] || return 1
     printf '%s\n' "${lifecycleRoot}/compose.json"
 }
@@ -114,7 +119,7 @@ assert_registration
 
 # 配置备份只收录业务目录，本机调度登记必须留在原位置且不能进入快照。
 printf '%s\n' '{"services":{}}' >"${lifecycleRoot}/compose.json"
-printf '%s\n' '{"host_integrations":[]}' >"${lifecycleRoot}/deployment.json"
+printf '%s\n' '{"schema_version":1,"mode":"docker","compose":{"project":"padm-docker","profiles":[]},"host_integrations":[]}' >"${lifecycleRoot}/deployment.json"
 : >"${lifecycleRoot}/images.env"
 reset_calls
 for prefix in configure business; do
@@ -232,15 +237,32 @@ has_call 'compose:down' || fail 'down 未停止 Compose'
 
 # Compose 状态损坏时，卸载必须在任何调度或服务动作前拒绝。
 reset_calls
-FAIL_COMPOSE=1
+printf '%s\n' '{"services":[]}' >"${lifecycleRoot}/compose.json"
+REAL_COMPOSE_GUARD=1
 status=0
 dockerUninstallCommand || status=$?
+unset REAL_COMPOSE_GUARD
+printf '%s\n' '{"services":{}}' >"${lifecycleRoot}/compose.json"
 unset FAIL_COMPOSE
 [[ "${status}" == "${PADM_DOCKER_RC_STATE}" ]] || fail 'Compose 状态损坏时卸载未拒绝'
 ! grep -Eq '^(geo-remove|renewal-remove|control-log-remove|control-sync-remove|compose:down)$' "${calls}" ||
     fail 'Compose 状态损坏时卸载已修改调度或服务'
 has_call 'error:Docker Compose 状态不完整，已拒绝卸载' ||
     fail 'Compose 状态损坏时卸载未提示原因'
+assert_registration
+
+reset_calls
+rm -f -- "${lifecycleRoot}/images.env"
+REAL_COMPOSE_GUARD=1
+status=0
+dockerUninstallCommand || status=$?
+unset REAL_COMPOSE_GUARD
+printf '%s\n' 'placeholder' >"${lifecycleRoot}/images.env"
+[[ "${status}" == "${PADM_DOCKER_RC_STATE}" ]] || fail 'images.env 缺失时卸载未拒绝'
+! grep -Eq '^(geo-remove|renewal-remove|control-log-remove|control-sync-remove|compose:down)$' "${calls}" ||
+    fail 'images.env 缺失时卸载已修改调度或服务'
+has_call 'error:images.env 缺失或不安全，已拒绝卸载' ||
+    fail 'images.env 缺失时卸载未提示原因'
 assert_registration
 
 reset_calls

@@ -585,6 +585,8 @@ dockerComposeFile() {
     composeFile="${root}/compose.json"
     deploymentFile="${root}/deployment.json"
     [[ -f "${composeFile}" && ! -L "${composeFile}" ]] || return 1
+    jq -e 'type == "object" and (.services | type == "object")' \
+        "${composeFile}" >/dev/null 2>&1 || return 1
     padmDockerDeploymentIdentityValid "${deploymentFile}" || return 1
     printf '%s\n' "${composeFile}"
 }
@@ -3105,12 +3107,18 @@ dockerUninstallCommand() {
         return 0
     fi
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
-    if [[ -e "${root}/compose.json" || -e "${root}/deployment.json" || -e "${root}/images.env" ]]; then
+    if [[ -e "${root}/compose.json" || -L "${root}/compose.json" ||
+        -e "${root}/deployment.json" || -L "${root}/deployment.json" ||
+        -e "${root}/images.env" || -L "${root}/images.env" ]]; then
         dockerComposeFile >/dev/null || {
             dockerError 'Docker Compose 状态不完整，已拒绝卸载'
             return "${PADM_DOCKER_RC_STATE}"
         }
         composeConfigured=1
+        [[ -f "${root}/images.env" && ! -L "${root}/images.env" ]] || {
+            dockerError 'images.env 缺失或不安全，已拒绝卸载'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
     fi
     dockerPortHoppingSupervisorStopIfActive || return $?
     dockerLockInstalledDeployment || return $?
