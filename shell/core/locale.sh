@@ -15,9 +15,11 @@ setupLocale
 echoContent() {
     local color=$1
     local text=$2
-    local code
-    code=$(uiColorCode "${color}")
-    if [[ -z "${code}" || -n "${PADM_NO_COLOR:-}" || -n "${NO_COLOR:-}" ]]; then
+    local code=
+    if [[ -z "${PADM_NO_COLOR:-}" && -z "${NO_COLOR:-}" ]]; then
+        code=$(uiColorCode "${color}")
+    fi
+    if [[ -z "${code}" ]]; then
         ${echoType:-echo -e} "${printN:-}${text} "
         return
     fi
@@ -62,9 +64,11 @@ uiExtendedColorCode() {
 uiStyle() {
     local color=$1
     local text=$2
-    local code
-    code=$(uiColorCode "${color}")
-    if [[ -z "${code}" || -n "${PADM_NO_COLOR:-}" || -n "${NO_COLOR:-}" ]]; then
+    local code=
+    if [[ -z "${PADM_NO_COLOR:-}" && -z "${NO_COLOR:-}" ]]; then
+        code=$(uiColorCode "${color}")
+    fi
+    if [[ -z "${code}" ]]; then
         printf '%s' "${text}"
         return
     fi
@@ -93,6 +97,10 @@ menuItemWithStyle() {
     local title=$3
     local desc=${4:-}
     printf -v number '%2s' "${number}"
+    if [[ -n "${PADM_NO_COLOR:-}" || -n "${NO_COLOR:-}" ]]; then
+        uiPrintLine "│ ${number}. ${title}${desc:+  ${desc}}"
+        return
+    fi
     local line="│ $(uiStyle number "${number}.") $(uiStyle "${style}" "${title}")"
     if [[ -n "${desc}" ]]; then
         line+="  $(uiStyle value "${desc}")"

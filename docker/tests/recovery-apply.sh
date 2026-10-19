@@ -524,11 +524,11 @@ PY
     command python3 "$@"
 }
 
-if [[ "${1:-}" == --child ]]; then
-    action=$2 MODE=$3
-    archive=${5:-${TEST_ROOT}/private recovery archive.tar}
-    export PADM_DOCKER_INSTALL_DIR=$4
-    export MOCK_BACKEND="${TEST_ROOT}/backend-${4##*/}" MOCK_MODE="${MODE}"
+run_recovery_action() {
+    local action=$1 archive=${4:-${TEST_ROOT}/private recovery archive.tar}
+    MODE=$2
+    export PADM_DOCKER_INSTALL_DIR=$3
+    export MOCK_BACKEND="${TEST_ROOT}/backend-${3##*/}" MOCK_MODE="${MODE}"
     export PADM_DOCKER_SYSTEMD_DIR="${MOCK_BACKEND}/units" PADM_DOCKER_BIN_DIR="${MOCK_BACKEND}/bin"
     export PATH="${TEST_ROOT}/bin:${PATH}"
     case "${action}" in
@@ -554,8 +554,14 @@ if [[ "${1:-}" == --child ]]; then
     lock) dockerAcquireDeploymentLock ;;
     *) exit 1 ;;
     esac
+}
+
+if [[ "${1:-}" == --child ]]; then
+    run_recovery_action "$2" "$3" "$4" "${5:-}"
     exit $?
 fi
+RECOVERY_CHILD_STATE=$(declare -p "${!DOCKER_@}")
+RECOVERY_CHILD_ERR_TRAP=$(trap -p ERR)
 
 mkdir -p -- "${TEST_ROOT}/bundle/docker/contracts" "${TEST_ROOT}/bin"
 printf '%s\n' "$(printf 'a%.0s' {1..40})" >"${TEST_ROOT}/bundle/${PADM_DOCKER_BUNDLE_REF}"
@@ -1069,8 +1075,20 @@ prepare_target() {
 }
 run_child() {
     local action=$1 mode=$2 expected=$3 status=0
-    bash "${BASH_SOURCE[0]}" --child "${action}" "${mode}" "${root}" "${RECOVERY_ARCHIVE}" \
-        >"${LOG}" 2>&1 || status=$?
+    trap - ERR
+    set +e
+    (
+        set -Eeuo pipefail
+        trap - EXIT
+        eval "${RECOVERY_CHILD_ERR_TRAP}"
+        # 每例独立 fork 并恢复加载时的全局，避免重复解析生产库及继承夹具缓存。
+        unset -v "${!DOCKER_@}"
+        eval "${RECOVERY_CHILD_STATE}"
+        run_recovery_action "${action}" "${mode}" "${root}" "${RECOVERY_ARCHIVE}"
+    ) >"${LOG}" 2>&1
+    status=$?
+    set -e
+    eval "${RECOVERY_CHILD_ERR_TRAP}"
     if [[ "${expected}" == failure ]]; then
         [[ "${status}" != 0 ]] || fail "${action}/${mode}: 意外成功"
     else

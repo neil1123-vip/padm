@@ -3471,7 +3471,11 @@ cat >"${TLS_WIZARD_CLI}" <<'EOF'
 #!/usr/bin/env bash
 set -u
 DOCKER_BUNDLE_SOURCE_ROOT="${PROJECT_ROOT}"
-source "${PROJECT_ROOT}/docker/lib/services.sh"
+# 状态和协议查询仅使用下方夹具，不重复加载整套业务依赖。
+case "${1:-}" in
+status|protocol) ;;
+*) source "${PROJECT_ROOT}/docker/lib/services.sh" ;;
+esac
 source "${PROJECT_ROOT}/docker/lib/setup.sh"
 source "${PROJECT_ROOT}/shell/core/locale.sh"
 dockerError() { printf '%s\n' "$*" >&2; }
@@ -5264,6 +5268,8 @@ if [[ "${MENU_SCOPE}" == routing || "${MENU_SCOPE}" == tun || "${MENU_SCOPE}" ==
 fi
 
 if [[ "${MENU_SCOPE}" == full || "${MENU_SCOPE}" == control ]]; then
+# 完整合同中的 control-client 已运行同一控制菜单矩阵，独立菜单仍完整执行。
+if [[ "${MENU_SCOPE}" == control || "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" != 1 ]]; then
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
 for controlLabel in '4. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
@@ -5572,6 +5578,7 @@ for controlCase in sync-schedule sync-schedule-input-cancel sync-schedule-input-
     fi
 done
 unset CONTROL_SYNC_SCHEDULE_STATUS
+fi
 
 if [[ "${MENU_SCOPE}" == control ]]; then
     printf 'docker-menu-control-regression-ok\n'

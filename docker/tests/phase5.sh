@@ -1005,6 +1005,7 @@ for siteContract in \
     '--tmpfs /work:rw,exec,mode=0755 --tmpfs /tmp:rw,exec,mode=1777' \
     'jobs=2' \
     'if [[ "${SELECTOR}" == docker-contracts-fast-rest ]]; then jobs=4; fi' \
+    'if [[ "${SELECTOR}" == docker-contracts-fast-heavy ]]; then jobs=3; fi' \
     '--env PADM_REGRESSION_PARALLEL_JOBS="${jobs}"' \
     '--env PADM_DOCKER_CONTRACTS_SHARED_CHECKS' \
     '--env PADM_REGRESSION_VERBOSE=1' \
@@ -1016,10 +1017,10 @@ grep -Fq 'listRegressionDockerContractsFastChildSelectors 4' "${FAST_SUITE}" ||
     fail 'docker-contracts-fast does not use four workers'
 grep -Fq 'listRegressionDockerContractsFastRestChildSelectors 4' "${FAST_SUITE}" ||
     fail 'fast rest 分片没有保留有界并发'
-for shard in Heavy Sites; do
-    grep -Fq "listRegressionDockerContractsFast${shard}ChildSelectors 2" "${FAST_SUITE}" ||
-        fail "fast ${shard} 分片没有减少长任务间的 CPU 争抢"
-done
+grep -Fq 'listRegressionDockerContractsFastHeavyChildSelectors 3' "${FAST_SUITE}" ||
+    fail 'fast heavy 分片没有并行处理菜单外的事务'
+grep -Fq 'listRegressionDockerContractsFastSitesChildSelectors 2' "${FAST_SUITE}" ||
+    fail 'fast sites 分片没有保留有界并发'
 grep -Fq "hashFiles('shell/regression/container/Dockerfile', 'shell/regression/container/entrypoint.sh')" "${CONTRACT_WORKFLOW}" ||
     fail '工具缓存必须仅绑定实际镜像构建输入'
 grep -Fq 'FROM contracts AS full' "${PROJECT_ROOT}/shell/regression/container/Dockerfile" ||

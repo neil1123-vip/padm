@@ -5346,6 +5346,17 @@ runLocaleEchoContentUnsetPrintNRegression() {
         [[ "${output}" == *$'\033[1;31m└'* ]]
         output=$(menuClose)
         [[ "${output}" == *$'\033[1;36m└'* ]]
+        for colorFlag in PADM_NO_COLOR NO_COLOR; do
+            (
+                export "${colorFlag}=1"
+                uiColorCode() { return 9; }
+                [[ "$(uiStyle title marker)" == marker ]]
+                printN='prefix:' output=$(echoContent title 'marker\nnext')
+                [[ "${output}" == $'prefix:marker\nnext ' ]]
+                [[ "$(menuItemWithStyle recommended 2 '标题\n下一行' '描述')" == $'│  2. 标题\n下一行  描述' ]]
+                [[ "$(menuReturnItem 0 返回)" == '│  0. 返回' ]]
+            )
+        done
     )
 }
 

@@ -185,7 +185,7 @@ listRegressionDockerContractsFastChildSelectors() {
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
-    # 用短分片承接排队项，保留站点与元数据长事务的独立 worker。
+    # 三个 worker 避免菜单占用一个后，其余事务串行拖长收尾。
     printf '%s\n' docker-menu docker-control-state docker-reality-targets-selection docker-entry-port-alias
 }
 
@@ -1020,8 +1020,14 @@ runDockerWireGuardMigrationRegression() {
 }
 
 runDockerTProxyOwnershipRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/tproxy-ownership.sh" &&
-        runDockerTProxyManagementRegression
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+        "${TMP_DIR}/tproxy-ownership-${BASHPID:-$$}" \
+        ownership runDockerTProxyOwnershipOnlyRegression \
+        management runDockerTProxyManagementRegression
+}
+
+runDockerTProxyOwnershipOnlyRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/tproxy-ownership.sh"
 }
 
 runDockerRedirectOwnershipRegression() {
@@ -1466,7 +1472,7 @@ registerRegressionParallelSelectorList docker-subscription-publication-focused r
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 4
 registerRegressionParallelSelectorList docker-contracts-fast-heavy runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/docker-contracts-fast-heavy-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastHeavyChildSelectors 2
+    "${TMP_DIR}/docker-contracts-fast-heavy-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastHeavyChildSelectors 3
 registerRegressionParallelSelectorList docker-contracts-fast-sites runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-sites-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastSitesChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast-rest runFrameworkParallelRegressionSelectorListWithJobs \

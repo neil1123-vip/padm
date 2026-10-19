@@ -388,7 +388,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-routing-ip-ownership docker-routing-core-network docker-routing-dns-csv; do
         expectedJobs=2
         case "${selector}" in
-        docker-contracts-setup-basic|docker-contracts-system-light|docker-routing-dns-csv) expectedJobs=3 ;;
+        docker-contracts-fast-heavy|docker-contracts-setup-basic|docker-contracts-system-light|docker-routing-dns-csv) expectedJobs=3 ;;
         esac
         : >"${callLog}"
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
@@ -804,6 +804,19 @@ runDockerRecoveryParallelContract() (
     [[ "${status}" == 1 && ! -s "${callLog}" ]]
 )
 
+runDockerTProxyParallelContract() (
+    local callLog="${TMP_DIR}/tproxy-ownership-parallel.log" status=0
+    runParallelRegressionRunners() {
+        [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 2 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+    runDockerTProxyOwnershipRegression || status=$?
+    [[ "${status}" == 7 ]]
+    [[ "$(<"${callLog}")" == $'ownership\nrunDockerTProxyOwnershipOnlyRegression\nmanagement\nrunDockerTProxyManagementRegression' ]]
+)
+
 runDockerRoutingParallelContract() (
     local callLog="${TMP_DIR}/routing-lifecycle-parallel.log" status=0
     runParallelRegressionRunners() {
@@ -879,6 +892,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep hopping-target-parallel runDockerPortHoppingTargetParallelContract
     runRegressionStep xhttp-parallel runDockerXhttpParallelContract
     runRegressionStep recovery-parallel runDockerRecoveryParallelContract
+    runRegressionStep tproxy-parallel runDockerTProxyParallelContract
     runRegressionStep routing-parallel runDockerRoutingParallelContract
     runRegressionStep traditional-tls-parallel runDockerTraditionalTlsParallelContract
     runRegressionStep phase4-parallel runDockerPhase4ParallelContract

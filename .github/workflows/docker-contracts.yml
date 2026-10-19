@@ -96,6 +96,7 @@ jobs:
           set -euo pipefail
           jobs=2
           if [[ "${SELECTOR}" == docker-contracts-fast-rest ]]; then jobs=4; fi
+          if [[ "${SELECTOR}" == docker-contracts-fast-heavy ]]; then jobs=3; fi
           if [[ "${SELECTOR}" == docker-contracts-setup-basic || "${SELECTOR}" == docker-contracts-system-light || "${SELECTOR}" == docker-routing-dns-csv ]]; then jobs=3; fi
           if [[ "${SELECTOR}" == docker-port-hopping-preflight ]]; then
             sudo env TMPDIR=/tmp PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash -s -- "${SELECTOR}" <<'SH'
