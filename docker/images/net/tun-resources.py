@@ -279,7 +279,24 @@ def item_key(value):
     return json.dumps(stable(value), sort_keys=True, separators=(",", ":"))
 
 
-def multiset(values):
+def multiset(values, resource=None):
+    if resource == "links":
+        values = copy.deepcopy(values)
+        for link in values:
+            info = link.get("linkinfo", {})
+            if info.get("info_kind") == "bridge":
+                # 网桥倒计时会随观测时间变化；接口身份、拓扑和配置仍须精确一致。
+                data = info.get("info_data", {})
+                for timer in ("hello_timer", "tcn_timer", "topology_change_timer", "gc_timer"):
+                    data.pop(timer, None)
+    elif resource == "routes6":
+        values = copy.deepcopy(values)
+        for route in values:
+            if route.get("protocol") == "9" and "expires" in route:
+                if type(route["expires"]) is not int or route["expires"] < 0:
+                    fail("invalid IPv6 RA route lifetime")
+                # RA 自动刷新剩余寿命；到期字段和完整路由身份仍须保留。
+                route["expires"] = 0
     return Counter(item_key(value) for value in values)
 
 
@@ -322,6 +339,12 @@ def validate_conflicts(base):
     if any(link.get("ifname") == TUN_NAME for link in base["links"]):
         fail("TUN interface name is already in use")
     for item in base["nft"].get("nftables", []):
+        rule = item.get("rule", {})
+        if (rule.get("family") == "ip" and rule.get("table") == "filter"
+                and rule.get("chain") == "DOCKER-USER"
+                and isinstance(rule.get("comment"), str)
+                and rule["comment"].startswith("!sing-box: Docker compatibility ")):
+            fail("TUN Docker compatibility rule is already in use")
         table = item.get("table", {})
         if table.get("family") == "inet" and table.get("name") == "sing-box":
             fail("sing-box nft table is already in use")
@@ -372,11 +395,11 @@ def validate_conflicts(base):
 
 
 def added(before, after, key):
-    return [json.loads(value) for value in (multiset(after[key]) - multiset(before[key])).elements()]
+    return [json.loads(value) for value in (multiset(after[key], key) - multiset(before[key], key)).elements()]
 
 
 def removed(before, after, key):
-    return [json.loads(value) for value in (multiset(before[key]) - multiset(after[key])).elements()]
+    return [json.loads(value) for value in (multiset(before[key], key) - multiset(after[key], key)).elements()]
 
 
 def expected_nft(redirect_port):
@@ -467,9 +490,39 @@ def expected_nft(redirect_port):
     return items
 
 
+def expected_docker_nft():
+    return [{"rule": {
+        "family": "ip", "table": "filter", "chain": "DOCKER-USER",
+        "expr": [{"match": {"op": "==", "left": {"meta": {"key": key}}, "right": TUN_NAME}},
+                 {"counter": {"packets": 0, "bytes": 0}}, {"accept": None}],
+        "comment": f"!sing-box: Docker compatibility {direction}",
+    }} for key, direction in [("iifname", "input from tun"), ("oifname", "output to tun")]]
+
+
 def validate_nft(before, after):
     old = [item for item in before["nft"]["nftables"] if not nft_item_owned(item)]
     external = [item for item in after["nft"]["nftables"] if not nft_item_owned(item)]
+    if any(item.get("chain", {}).get("family") == "ip"
+           and item["chain"].get("table") == "filter" and item["chain"].get("name") == "DOCKER-USER"
+           for item in old):
+        indices = [index for index, item in enumerate(external)
+                   if item.get("rule", {}).get("family") == "ip"
+                   and item["rule"].get("table") == "filter" and item["rule"].get("chain") == "DOCKER-USER"]
+        compatibility = [external[index] for index in indices[:2]]
+        handles = [item["rule"].get("handle") for item in compatibility]
+        baseline_handles = {item["rule"].get("handle") for item in old
+                            if item.get("rule", {}).get("family") == "ip"
+                            and item["rule"].get("table") == "filter"}
+        if len(compatibility) != 2 or any(type(handle) is not int or handle < 1 for handle in handles) or (
+                len(set(handles)) != 2 or any(handle in baseline_handles for handle in handles)):
+            fail("unverified TUN Docker compatibility handles")
+        normalized = copy.deepcopy(compatibility)
+        for item in normalized:
+            item["rule"].pop("handle")
+        # 固定上游在已有链首插入 input/output；其余外部规则、位置与句柄完整保留。
+        if stable(normalized) != expected_docker_nft():
+            fail("unverified TUN Docker compatibility rules")
+        external = [item for index, item in enumerate(external) if index not in indices[:2]]
     if stable(old) != stable(external):
         fail("TUN changed external nft resources")
     items = [item for item in after["nft"]["nftables"] if nft_item_owned(item)]
@@ -489,6 +542,16 @@ def validate_nft(before, after):
         seen_handles.add((kind, handle))
         if kind == "set":
             for element in value.get("elem", []):
+                if isinstance(element, dict) and set(element) == {"range"}:
+                    endpoints = element["range"]
+                    if (not isinstance(endpoints, list) or len(endpoints) != 2
+                            or any(not isinstance(endpoint, str) for endpoint in endpoints)):
+                        fail("invalid TUN local address range")
+                    first, last = map(ipaddress.ip_address, endpoints)
+                    # nft 可把相邻网段合并为 interval；只接受有序的 IPv4 闭区间。
+                    if first.version != 4 or last.version != 4 or first > last:
+                        fail("unexpected TUN local address range")
+                    continue
                 prefix = element.get("prefix") if isinstance(element, dict) else None
                 address = f"{prefix['addr']}/{prefix['len']}" if isinstance(prefix, dict) else element
                 if ipaddress.ip_network(address, strict=False).version != 4:
@@ -521,10 +584,15 @@ def owned_resources(before, after):
     if len(added(before, after, "links")) != 1:
         fail("TUN bind changed an unexpected interface set")
     tun_links = [link for link in added(before, after, "links") if link.get("ifname") == TUN_NAME]
+    tun_data = tun_links[0].get("linkinfo", {}).get("info_data") if len(tun_links) == 1 else None
     if len(tun_links) != 1 or (
             tun_links[0].get("linkinfo", {}).get("info_kind") != "tun"
-            or tun_links[0].get("linkinfo", {}).get("info_data") != {
-                "multi_queue": False, "persist": False, "pi": False, "type": "tun", "vnet_hdr": True}
+            or not isinstance(tun_data, dict)
+            or any(type(tun_data.get(key)) is not bool for key in ("multi_queue", "persist", "pi", "vnet_hdr"))
+            # v1.14.2 按出站和协议栈选择可选 GSO；该布尔位仍写入完整快照审计。
+            or tun_data != {
+                "multi_queue": False, "persist": False, "pi": False, "type": "tun",
+                "vnet_hdr": tun_data.get("vnet_hdr")}
             or tun_links[0].get("mtu") != 65535
             or type(tun_links[0].get("ifindex")) is not int or tun_links[0]["ifindex"] < 1):
         fail("TUN interface identity is not verified")
@@ -613,7 +681,7 @@ def compare_active(expected, current):
         elif key == "routes4":
             original = without(original, lambda item: item.get("table") == expected["route_table"])
             observed = without(observed, lambda item: item.get("table") == expected["route_table"])
-        if multiset(original) != multiset(observed):
+        if multiset(original, key) != multiset(observed, key):
             fail(f"TUN {key} drifted")
     if nft_without_dynamic(current["nft"]) != nft_without_dynamic(after["nft"]):
         fail("TUN nft resources drifted")
@@ -623,7 +691,7 @@ def compare_clean(before, current):
     if current["netns"] != before["netns"] or current["boot_id"] != before["boot_id"]:
         fail("TUN network namespace changed before cleanup")
     for key in ("links", "addresses", "routes4", "routes6", "rules4", "rules6"):
-        if multiset(current[key]) != multiset(before[key]):
+        if multiset(current[key], key) != multiset(before[key], key):
             fail(f"TUN {key} was not fully cleaned")
     if nft_without_dynamic(current["nft"]) != nft_without_dynamic(before["nft"]):
         fail("TUN nft resources were not fully cleaned")
