@@ -403,8 +403,8 @@
       "native_action": "TUN 透明代理",
       "profiles": ["net-transparent"],
       "network_mode": "host",
-      "host_capabilities": ["NET_ADMIN", "DAC_OVERRIDE", "/dev/net/tun"],
-      "reason": "5C.2c 菜单 17→44 和 CLI 启用/关闭/规格状态，限单 sing-box、单 Reality、IPv4、无其它宿主集成。固定 padm-tun/198.18.0.1/30，全局 IPv4 TCP/UDP，IPv6 拒绝；显式 host/root/NET_ADMIN/DAC_OVERRIDE/设备且禁自动重启。DAC_OVERRIDE 仅授予透明核心，访问 UID 10001 的私密运行材料，不放宽文件权限。私密 state 绑定 CID/StartedAt/netns/boot、接口及完整规则路由；候选只读检查，正常停止并证明基线清净后才删证据，漂移、残留或异常退出保留现场。隔离 amd64 生产生命周期已验；原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
+      "host_capabilities": ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE", "/dev/net/tun"],
+      "reason": "5C.2c 菜单 17→44 和 CLI 启用/关闭/规格状态，限单 sing-box、单 Reality、IPv4、无其它宿主集成。固定 padm-tun/198.18.0.1/30，全局 IPv4 TCP/UDP，IPv6 拒绝；显式 host/root/NET_ADMIN/NET_BIND_SERVICE/DAC_OVERRIDE/设备且禁自动重启。NET_BIND_SERVICE 仅授予透明核心，允许宿主低端口监听和透明 UDP 原目的端口绑定；DAC_OVERRIDE 访问 UID 10001 的私密运行材料，不放宽文件权限。私密 state 绑定 CID/StartedAt/netns/boot、接口及完整规则路由；候选只读检查，正常停止并证明基线清净后才删证据，漂移、残留或异常退出保留现场。隔离 amd64 生产生命周期已验；原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "tproxy": {
       "status": "host-integrated",
@@ -412,8 +412,8 @@
       "native_action": "Redirect/TProxy",
       "profiles": ["net-transparent"],
       "network_mode": "host",
-      "host_capabilities": ["NET_ADMIN", "DAC_OVERRIDE"],
-      "reason": "5C.2b/2e 菜单 17→43 和 CLI 管理单 Xray/sing-box Reality 的 IPv4/IPv6/双栈 PREROUTING TCP/UDP，无其它宿主集成。OUTPUT 默认关闭，可选 UID 1–2147483647 排除 10001，或全主机包含 root 的主动 TCP/UDP；两者互斥，省略保留模式，关闭保留 PREROUTING。全主机核心 0:10001，专用 GID 10001、LOCAL/REPLY 绕过，管理核验实际核心身份。旧 schema 2/3/4 兼容，全主机 schema 5 和共享 x-padm-transparent-output-all marker；任一族或链漂移保留全部资源及 state，缺关键绕过拒绝撤销，完整核验后精确清理。需宿主转发、TPROXY target，OUTPUT 另需 owner/conntrack/MARK。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
+      "host_capabilities": ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE"],
+      "reason": "5C.2b/2e 菜单 17→43 和 CLI 管理单 Xray/sing-box Reality 的 IPv4/IPv6/双栈 PREROUTING TCP/UDP，无其它宿主集成。OUTPUT 默认关闭，可选 UID 1–2147483647 排除 10001，或全主机包含 root 的主动 TCP/UDP；两者互斥，省略保留模式，关闭保留 PREROUTING。全主机核心 0:10001，专用 GID 10001、LOCAL/REPLY 绕过，管理核验实际核心身份。NET_BIND_SERVICE 仅授予透明核心，允许宿主低端口监听和透明 UDP 原目的端口绑定。旧 schema 2/3/4 兼容，全主机 schema 5 和共享 x-padm-transparent-output-all marker；任一族或链漂移保留全部资源及 state，缺关键绕过拒绝撤销，完整核验后精确清理。需宿主转发、TPROXY target，OUTPUT 另需 owner/conntrack/MARK。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "redirect": {
       "status": "host-integrated",
@@ -421,8 +421,8 @@
       "native_action": "Redirect/TProxy",
       "profiles": ["net-transparent"],
       "network_mode": "host",
-      "host_capabilities": ["NET_ADMIN", "DAC_OVERRIDE"],
-      "reason": "5C.2d/2e 有限 Redirect TCP 管理：单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING，OUTPUT 可选 UID 或全主机主动 TCP，两者互斥；无其它宿主集成，与 TUN/TProxy 互斥。全主机包含 root，核心 0:10001，GID 10001、LOCAL/REPLY 绕过，管理核验实际核心身份；UID 模式保留 root 绕过。schema 1 兼容，全主机 schema 2 和共享 x-padm-transparent-output-all marker。两族两链完整审计后精确撤销，任一漂移或缺关键绕过保留资源与 state。UDP 保持原路由；TCP/UDP 须选 TProxy。需 nat REDIRECT target，OUTPUT 另需 owner/conntrack。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
+      "host_capabilities": ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE"],
+      "reason": "5C.2d/2e 有限 Redirect TCP 管理：单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING，OUTPUT 可选 UID 或全主机主动 TCP，两者互斥；无其它宿主集成，与 TUN/TProxy 互斥。全主机包含 root，核心 0:10001，GID 10001、LOCAL/REPLY 绕过，管理核验实际核心身份；UID 模式保留 root 绕过。NET_BIND_SERVICE 仅授予透明核心，允许宿主低端口 Reality 监听。schema 1 兼容，全主机 schema 2 和共享 x-padm-transparent-output-all marker。两族两链完整审计后精确撤销，任一漂移或缺关键绕过保留资源与 state。UDP 保持原路由；TCP/UDP 须选 TProxy。需 nat REDIRECT target，OUTPUT 另需 owner/conntrack。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "interactive-menu": {
       "status": "deferred",
@@ -475,8 +475,8 @@
       "native_action": "TUN 透明代理",
       "profiles": ["net-transparent"],
       "network_mode": "host",
-      "host_capabilities": ["NET_ADMIN", "DAC_OVERRIDE", "/dev/net/tun"],
-      "reason": "5C.2c 提供有限 TUN 管理，范围与 tun 相同：单 sing-box/单 Reality/IPv4，无其它宿主集成；全局 IPv4 TCP/UDP，IPv6 拒绝。CID/StartedAt/netns 和完整内核资源归属审计、正常停止及基线恢复后才清证据；漂移或异常退出保留现场。宿主设备和路由规则仍属于宿主内核；原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
+      "host_capabilities": ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE", "/dev/net/tun"],
+      "reason": "5C.2c 提供有限 TUN 管理，范围与 tun 相同：单 sing-box/单 Reality/IPv4，无其它宿主集成；全局 IPv4 TCP/UDP，IPv6 拒绝。NET_BIND_SERVICE 仅授予透明核心，允许宿主低端口监听和透明 UDP 原目的端口绑定。CID/StartedAt/netns 和完整内核资源归属审计、正常停止及基线恢复后才清证据；漂移或异常退出保留现场。宿主设备和路由规则仍属于宿主内核；原生宿主/arm64/公网/重启/完整卸载及完整管理待验。"
     },
     "internal-205-redirect-tproxy": {
       "status": "host-integrated",
@@ -484,8 +484,8 @@
       "native_action": "Redirect/TProxy",
       "profiles": ["net-transparent"],
       "network_mode": "host",
-      "host_capabilities": ["NET_ADMIN", "DAC_OVERRIDE"],
-      "reason": "有限 TProxy TCP/UDP 与 Redirect TCP 管理，均限单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING，无其它宿主集成。OUTPUT 可选指定 UID 或全主机主动连接；全主机包含 root，核心以 0:10001 运行，GID 10001、LOCAL/REPLY 绕过且实际身份须核验。两族两链完整审计后精确撤销，任一漂移保留现场；旧 UID/无 OUTPUT 状态兼容，全主机需共享 marker。原生宿主/arm64/公网/重启/完整卸载及完整 205 管理仍待验。"
+      "host_capabilities": ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE"],
+      "reason": "有限 TProxy TCP/UDP 与 Redirect TCP 管理，均限单 Xray/sing-box Reality、IPv4/IPv6/双栈 PREROUTING，无其它宿主集成。OUTPUT 可选指定 UID 或全主机主动连接；全主机包含 root，核心以 0:10001 运行，GID 10001、LOCAL/REPLY 绕过且实际身份须核验。NET_BIND_SERVICE 仅授予透明核心，允许宿主低端口监听和透明 UDP 原目的端口绑定。两族两链完整审计后精确撤销，任一漂移保留现场；旧 UID/无 OUTPUT 状态兼容，全主机需共享 marker。原生宿主/arm64/公网/重启/完整卸载及完整 205 管理仍待验。"
     },
     "internal-206-routing-rules": {
       "status": "deferred",
@@ -612,7 +612,7 @@
       "services": ["sing-box"],
       "address_families": ["ipv4"],
       "network_mode": "host",
-      "capabilities": ["NET_ADMIN", "DAC_OVERRIDE"],
+      "capabilities": ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE"],
       "devices": ["/dev/net/tun"]
     },
     "tproxy": {
@@ -621,7 +621,7 @@
       "services": ["core", "net-transparent"],
       "address_families": ["ipv4", "ipv6"],
       "network_mode": "host",
-      "capabilities": ["NET_ADMIN", "DAC_OVERRIDE"],
+      "capabilities": ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE"],
       "devices": []
     },
     "redirect": {
@@ -630,7 +630,7 @@
       "services": ["core", "net-transparent"],
       "address_families": ["ipv4", "ipv6"],
       "network_mode": "host",
-      "capabilities": ["NET_ADMIN", "DAC_OVERRIDE"],
+      "capabilities": ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE"],
       "devices": []
     }
   }

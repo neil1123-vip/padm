@@ -441,6 +441,13 @@ dockerBundleSupportsSpec() {
             .type == "tproxy" or .type == "redirect") then
             $schema[0]["x-padm-transparent-managed-restart"] == true
           else true end) and
+          (if $mode != "backup" then
+            all($spec[0].host_integrations[] |
+              select(.type == "tun" or .type == "tproxy" or .type == "redirect");
+              .type as $kind |
+              ($features[0].host_integrations[$kind].capabilities // [] | sort) ==
+                (["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE"] | sort))
+          else true end) and
           (if any($spec[0].host_integrations[]; .type == "redirect") then
             $schema[0]["x-padm-redirect"] == true
           else true end) and

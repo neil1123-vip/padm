@@ -2380,7 +2380,7 @@ validateFeatureMatrix() {
         (.profiles | names(["core-xray", "core-sing-box", "nginx", "nginx-stream", "acme", "subscription",
           "net-wireguard", "net-fail2ban", "net-fail2ban-control", "net-fail2ban-ssh", "net-transparent"])) and
         (.network_mode == "bridge" or .network_mode == "host" or .network_mode == "host-cli") and
-        (.host_capabilities | names(["NET_ADMIN", "DAC_OVERRIDE", "/dev/net/tun"])) and
+        (.host_capabilities | names(["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE", "/dev/net/tun"])) and
         (if .network_mode != "host" then
           .host_capabilities == [] and all(.profiles[]; startswith("net-") | not)
         else true end) and
@@ -2425,14 +2425,14 @@ validateFeatureMatrix() {
           elif ($host | index($entry.key)) != null then "host" else "bridge" end) and
         (if (["tun","tproxy","redirect","internal-204-tun","internal-205-redirect-tproxy"] |
           index($entry.key)) != null then true
-         else (.value.host_capabilities | index("DAC_OVERRIDE")) == null end)) and
+         else all(.value.host_capabilities[]; . != "DAC_OVERRIDE" and . != "NET_BIND_SERVICE") end)) and
       (.host_integrations | type == "object" and
         keys == (["fail2ban", "fail2ban-control", "fail2ban-ssh", "tun", "tproxy", "redirect", "wireguard"] | sort)) and
       all(.host_integrations | to_entries[];
         . as $entry |
         (.value | .status == "host-integrated" and .network_mode == "host" and
           .capabilities == (if (["tun","tproxy","redirect"] | index($entry.key)) != null
-            then ["NET_ADMIN","DAC_OVERRIDE"] else ["NET_ADMIN"] end) and
+            then ["NET_ADMIN","NET_BIND_SERVICE","DAC_OVERRIDE"] else ["NET_ADMIN"] end) and
           .devices == (if $entry.key == "tun" then ["/dev/net/tun"] else [] end)) and
         ($matrix.feature_matrix[if $entry.key == "fail2ban-control" or $entry.key == "fail2ban-ssh"
           then "fail2ban" else $entry.key end] |
@@ -2501,7 +2501,13 @@ del(.host_integrations["fail2ban-ssh"])
 .host_integrations["fail2ban-ssh"].capabilities = ["NET_ADMIN","SYS_PTRACE"]
 .host_integrations.wireguard.capabilities += ["DAC_OVERRIDE"]
 .feature_matrix["network-optimization"].host_capabilities += ["DAC_OVERRIDE"]
+.host_integrations.wireguard.capabilities += ["NET_BIND_SERVICE"]
+.feature_matrix["network-optimization"].host_capabilities += ["NET_BIND_SERVICE"]
 .host_integrations.tun.capabilities = ["NET_ADMIN"]
+(.host_integrations.tun.capabilities, .feature_matrix.tun.host_capabilities, .feature_matrix["internal-204-tun"].host_capabilities) |= map(select(. != "NET_BIND_SERVICE"))
+(.host_integrations.tproxy.capabilities, .feature_matrix.tproxy.host_capabilities, .feature_matrix["internal-205-redirect-tproxy"].host_capabilities) |= map(select(. != "NET_BIND_SERVICE"))
+(.host_integrations.redirect.capabilities, .feature_matrix.redirect.host_capabilities) |= map(select(. != "NET_BIND_SERVICE"))
+.host_integrations.redirect.capabilities += ["SYS_ADMIN"]
 del(.host_integrations.redirect)
 .feature_matrix.redirect.network_mode = "bridge"
 .feature_matrix.fail2ban.profiles += ["net-fail2ban-ssh-unmanaged"]

@@ -210,7 +210,7 @@ PY
             fail "ACME 权限准备吞掉 ${failedTool} 错误"
     done
 ) || fail 'ACME 私密权限合同失败'
-# 透明核心按真实编排保留 DAC_OVERRIDE，不能靠放宽文件或只改 check 用户绕过。
+# 透明核心精确保留低端口绑定与私密文件访问能力，辅助服务不能借用。
 (
     transparent="${TEST_ROOT}/transparent-permissions"
     cp -a -- "${TEST_ROOT}/acme-candidate" "${transparent}"
@@ -232,10 +232,11 @@ PY
             jq -e --arg core "${core}" '
               .services[$core].user == "0:0" and
               .services[$core].cap_drop == ["ALL"] and
-              .services[$core].cap_add == ["NET_ADMIN","DAC_OVERRIDE"] and
+              .services[$core].cap_add == ["NET_ADMIN","NET_BIND_SERVICE","DAC_OVERRIDE"] and
               .services[$core].read_only == true and
               all(.services | to_entries[] | select(.key != $core);
-                ((.value.cap_add // []) | index("DAC_OVERRIDE")) == null)
+                ((.value.cap_add // []) | index("DAC_OVERRIDE")) == null and
+                ((.value.cap_add // []) | index("NET_BIND_SERVICE")) == null)
             ' "${transparent}/compose.json" >/dev/null || fail '透明核心能力范围错误'
             assertMetadata "${transparent}/data/${core}" '750 10001 10001'
             assertMetadata "${transparent}/secrets/tls/example.com.key" '600 10001 10001'

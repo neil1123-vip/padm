@@ -3835,7 +3835,8 @@ dockerGenerateCompose() {
           | .services[$r.core.type].user =
               (if $tproxy[0].settings.output_all == true then "0:10001" else "0:0" end)
           # root 已清空默认能力，仍须访问 UID 10001 的私密运行目录和密钥。
-          | .services[$r.core.type].cap_add = ["NET_ADMIN", "DAC_OVERRIDE"]
+          # 宿主低端口 Reality 监听和透明 UDP 原目的端口绑定还需 NET_BIND_SERVICE。
+          | .services[$r.core.type].cap_add = ["NET_ADMIN", "NET_BIND_SERVICE", "DAC_OVERRIDE"]
           | del(.services[$r.core.type].ports)
           | if ($tun | length) == 1 then
               .services[$r.core.type].restart = "no"
@@ -7213,7 +7214,7 @@ dockerCreateUpdateCandidate() {
                 chmod 0700 "${candidate}/data/net/ssh-collector" || return 1
         fi
         if jq -e '.control != null or any(.host_integrations[];
-            .type == "fail2ban" or .type == "fail2ban-ssh" or .type == "tproxy" or .type == "redirect")' \
+            .type == "fail2ban" or .type == "fail2ban-ssh" or .type == "tun" or .type == "tproxy" or .type == "redirect")' \
             "${candidate}/config/spec.json" >/dev/null; then
             dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.json" "${root}" || return 1
         fi
@@ -7613,7 +7614,7 @@ dockerRestoreConfiguration() {
         if jq -e '.control != null' "${backup}/config/spec.json" >/dev/null; then
             expectedCompose=$(dockerGenerateCompatibleControlCompose "${backup}/config/spec.json" \
                 "${backup}/compose.json" "${root}") || return 1
-        elif jq -e 'any(.host_integrations[]; .type == "fail2ban" or .type == "tproxy" or .type == "redirect")' \
+        elif jq -e 'any(.host_integrations[]; .type == "fail2ban" or .type == "tun" or .type == "tproxy" or .type == "redirect")' \
             "${backup}/config/spec.json" >/dev/null; then
             expectedCompose=$(dockerGenerateCompose "${backup}/config/spec.json" /dev/stdout "${root}") || return 1
         fi
@@ -7650,6 +7651,12 @@ dockerRestoreConfiguration() {
                 return 1
             }
             legacyCompose=1
+        fi
+        if jq -e 'any(.host_integrations[]; .type == "tun")' "${backup}/config/spec.json" >/dev/null; then
+            cmp -s -- "${backup}/compose.json" <(printf '%s\n' "${expectedCompose}") || {
+                dockerError 'TUN 恢复编排不受管，尚未停止或修改服务'
+                return 1
+            }
         fi
     elif [[ -e "${backup}/deployment.json" || -e "${backup}/compose.json" ]]; then
         jq -en --slurpfile deployment "${backup}/deployment.json" \

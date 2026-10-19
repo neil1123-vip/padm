@@ -2718,10 +2718,10 @@ dockerUpdateCommand() {
     dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ -f "${root}/config/spec.json" ]] &&
-        jq -e 'any(.host_integrations[]; .type == "tproxy" or .type == "redirect")' \
+        jq -e 'any(.host_integrations[]; .type == "tun" or .type == "tproxy" or .type == "redirect")' \
             "${root}/config/spec.json" >/dev/null; then
         dockerBundleSupportsSpec "$(dockerCurrentBundlePath)" "${root}/config/spec.json" || {
-            dockerError '旧控制包缺少透明代理受管重启能力，请先停用透明集成再更新'
+            dockerError '旧控制包缺少透明代理所需权限或受管能力，请先停用透明集成再更新，更新后重新启用'
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi

@@ -85,8 +85,10 @@ for number in 66 67; do
 done
 mkdir "${TEST_ROOT}/owner"
 chmod 0750 "${TEST_ROOT}/owner"
+# 仅设置独立路由命名空间，真实核心沿用原生低端口边界。
 container=$(docker run -d --network "${networks[0]}" --ip 198.18.66.10 --ip6 fd40:66::10 \
     --cap-add NET_ADMIN --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv6.conf.all.forwarding=1 \
+    --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
     --security-opt no-new-privileges:true --init --read-only \
     --tmpfs /run:rw,nosuid,nodev,size=16m --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
     --mount "type=bind,source=${TEST_ROOT}/owner,target=/var/lib/padm/net" \
@@ -104,6 +106,8 @@ targetPid=$(docker inspect --format '{{.State.Pid}}' "${targetContainer}")
 netPid=$(docker inspect --format '{{.State.Pid}}' "${container}")
 net() { docker exec "${container}" "$@"; }
 entry() { net sh /tmp/padm-entrypoint "$@"; }
+[[ "$(net cat /proc/sys/net/ipv4/ip_unprivileged_port_start)" == 1024 ]] ||
+    fail 'router namespace did not retain the privileged port boundary'
 [[ "$(net sha256sum /tmp/padm-entrypoint | cut -d ' ' -f 1)" == \
     "$(sha256sum "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" | cut -d ' ' -f 1)" ]] ||
     fail 'container did not receive the current entrypoint'
@@ -180,6 +184,7 @@ makeCoreConfig() {
            (if $family == "ipv4" then {} else {family:$family} end))}]}
     ' >"${configDir}/spec.json"
     dockerConfigureSpecValidate "${configDir}/spec.json"
+    dockerGenerateCompose "${configDir}/spec.json" "${configDir}/compose.json"
     if [[ "${core}" == xray ]]; then
         dockerGenerateXrayConfig "${configDir}/spec.json" "${configDir}/base.json"
     else
@@ -193,13 +198,18 @@ makeCoreConfig() {
     ' "${configDir}/rendered.json" >"${configDir}/config.json"
 }
 startCore() {
-    local image
-    local -a args
+    local image capabilities capability
+    local -a args coreCapArgs=()
     image=$(jq -er --arg core "${core}" '.[$core].reference' /node-images.json)
+    capabilities=$(jq -er --arg core "${core}" '.services[$core].cap_add[]' "${configDir}/compose.json") ||
+        fail 'cannot read generated core capabilities'
+    while IFS= read -r capability; do
+        coreCapArgs+=(--cap-add "${capability}")
+    done <<<"${capabilities}"
     if [[ "${core}" == xray ]]; then args=(run -c /etc/padm/redirect/config.json)
     else args=(run -D /var/lib/padm/sing-box -c /etc/padm/redirect/config.json); fi
     coreContainer=$(docker run -d --network "container:${container}" --user 0:10001 \
-        --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges:true --read-only \
+        --cap-drop ALL "${coreCapArgs[@]}" --security-opt no-new-privileges:true --read-only \
         --tmpfs /tmp:rw,nosuid,nodev,size=16m --tmpfs /var/lib/padm/sing-box:rw,nosuid,nodev,size=16m \
         --mount "type=bind,source=${configDir},target=/etc/padm/redirect,readonly" "${image}" "${args[@]}")
     corePid=$(docker inspect --format '{{.State.Pid}}' "${coreContainer}")

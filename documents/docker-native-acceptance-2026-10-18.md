@@ -30,6 +30,10 @@
 | SSH 防护 | 专用 systemd sshd 显式监听 2222，错误认证触发 jail、精确 INPUT DROP、外部新连接超时；解封和停用成功，管理 22 保持可用。受下述正式版本目录缺陷影响，必须先修正测试目录权限。 |
 | WS 防护 | 生产启用流程中的 fresh 来源挑战由独立客户端自动响应；6 次预设无效路径触发封禁，外部后续连接超时，解封成功。 |
 | Redirect | 正式 3.40 重装为单 Xray Reality 后，IPv4、端口 `12345`、OUTPUT UID `65532` 启用及 validate 成功；该 UID 的独立 HTTPS 请求成功，实际 OUTPUT REDIRECT 计数从 `0:0` 增至 `1:60`。仅覆盖 IPv4 TCP/TLS 主动连接，不包含 UDP、IPv6、转发入口或 profile 重启。 |
+| HTTP relay | 独立外部客户端经公网 IPv4 入口访问三个 HTTPS 目标，严格 TLS 校验和 HTTP 200 通过；错误认证 407、未允许来源 blocked 通过，不包含公网 IPv6。 |
+| 卸载与同机灾备 | 保留数据卸载及最终 purge → 整机重启 → 空目标复核 → 同机 v3 灾备恢复通过；原 nginx/xray/subscription healthy、严格 HTTPS 和独立外部 WS 正反例通过，不代表全新主机灾备。 |
+| 透明代理源码矩阵 | TUN 当前 validator 的一次性只读挂载验收通过 TCP/TLS、UDP DNS、restart 与净停止后的整机重启/显式 up/down/off；TProxy 当前源码事务 helper 的 TCP/TLS 与对应生命周期通过。指定 UID UDP DNS 的早期失败已定位为缺少 `NET_BIND_SERVICE`，原生固定五元组增权对照和修复后的双核心三地址族隔离回归通过；尚不替代当前修复的正式发布镜像/CLI 及重启矩阵验收。 |
+| Reality 共存 | 受管 Vision/WS 同机正反例、Vision 同一连接空闲 75 秒及外部 WS 通过；外部 Vision 未通过。桥接与宿主回环网站 HTTPS 200/verify 0、同机 Vision 正反例和 75 秒连接通过。 |
 
 WS 挑战仅开放经过字段白名单校验的域名、端口、地址族和随机 URI。
 完整 CLI 输出保存在私有证据目录，不通过临时 HTTP 服务公开。
@@ -86,29 +90,33 @@ PADM_DOCKER_LOCK_TIMEOUT=0 padm-docker edit --tproxy-off --confirm PADM-DOCKER-E
 返回 `15`；没有绕过检查。规格仍为 installed/configured，
 profiles 仍含 `core-xray,net-transparent`。`restart=no` 和停止服务只是止血，
 再次执行 Compose 或业务启动可能覆盖此状态，不能写成 TProxy 已从规格停用。
-后续须先核对现场，再精确撤销或卸载，禁止自动拉起业务来验证事故。
+当时后续操作须先核对现场，再精确撤销或卸载；未直接拉起事故配置。
 
 随后按精确撤销路径完成现场收口。2026-10-18 19:21 CST 经 SSH 只读复核：
 负载 `0.00/0.00/0.00`、Swap 使用 `0 MiB`，`nginx/xray/subscription` 均 healthy；
 `net-transparent` 退出 `0`、`restart=no`，Compose profile 仅为
 `core-xray,nginx,subscription`，`config/spec.json` 的 `host_integrations` 为空，
 `padm-native-target4.service` 已不存在，`padm-docker-traffic.timer` 为 disabled/inactive。
-本轮未在该 VPS 部署当前源码或重新启用透明代理；域名 HTTPS 与业务恢复状态保持通过。
+该恢复阶段未部署当前源码或重新启用透明代理；域名 HTTPS 与业务恢复状态保持通过。
+用户随后明确授权同一 VPS 可销毁，本轮已转入受独立 containment/watchdog 保护的
+TProxy/TUN 集中矩阵；已取得的限定源码证据及未决边界见末节，不沿用旧恢复态
+宣称透明代理完整通过。
 
 ## 当前未决
 
 - 原生 arm64 安装、升级、回滚、重启、卸载及客户端生命周期：缺少原生 arm64 主机，不能用
   Buildx 或 amd64 仿真替代。
-- 隔离 TProxy/TUN 启停、失败恢复、整机重启和真实流量：当前 VPS 已关闭
-  `net-transparent`，事故后不再在同一实例重启透明代理。
-- 完整卸载与 purge：当前只完成透明 orphan 清理，正式业务部署仍未 purge。
+- TProxy 指定 UID UDP 的能力根因、原生单包增权对照及修复后的隔离流量回归已通过；
+  正式 `3.40` 缺少 managed-restart marker，TProxy 编辑入口正确拒绝，
+  新增能力仍需当前源码正式发布后的镜像、CLI 和原生重启矩阵验收。
+  TUN restart 首次 DNS 曾超时，后续独立复测通过，不构成连续稳定证据。
 - 公网双栈端口跳跃、旧连接排空和自动恢复：当前 VPS 无公网 IPv6，不能判定通过。
-- 新原生主机同架构 v3 空目标灾备与业务恢复：缺少可销毁的同架构第二主机。
+- 同机 v3 空目标恢复已通过；新原生主机灾备仍缺少同架构全新目标。
 - webroot/ALPN 的公网 CA 候选签发、候选校验与服务恢复已通过；正式 CLI 换证及回滚仍待验。
-  WARP 真实账号/公网出口和 Reality 共存专项保持 deferred；当前 WS-only 部署不能通过
-  协议新增 CLI 创建首个 Reality，不能靠手写规格绕过支持门禁。
-- HTTP relay 原生 IPv4 到公网 HTTPS 已通过，旧 EOF 已定位为测试来源误写；
-  外部客户端的公网入口仍超时或 CONNECT 中断，未标记完整验收通过。
+  WARP 仍缺真实账号/公网出口。Reality 已通过生产重装生成，受管/桥接同机流量、
+  75 秒连接和外部 WS 通过；宿主回环 Vision 正反例、75.001 秒同连接与严格网站
+  HTTPS 通过，外部 Vision 仍未通过。
+- HTTP relay 原生外部 IPv4 验收通过；公网 IPv6 不在本次通过范围内。
 - 自然到期真实续期：当前登记续期约为 `2026-12-17 08:03:22 CST`，证书到期约为
   `2027-01-16 04:29:07 CST`；调度 no-op 不算换证。
 - 当前源码修复的可信正式发布、发布后首配/升级/客户端验收：未获 push、PR 或发布授权。
@@ -127,7 +135,7 @@ systemd timer/service 执行、停用调度和 validate；现有 Geo 数据保�
 双栈端口跳跃或旧连接排空验收。
 
 此前临时远端目录和脚本均已删除。后续集中验收使用独立的本轮临时目录，
-不恢复透明代理或扩大原有来源范围。
+保持原有来源范围；透明代理另按新的可销毁授权和防护矩阵执行。
 
 ### HTTP relay 与公网 CA 集中补验
 
@@ -136,8 +144,9 @@ HTTP relay 的旧测试名单写为 `172.17.0.1/32`，实际受管网桥网关�
 `www.debian.org`、`example.com`，三次真实 HTTPS 证书校验均成功、返回 200。
 未允许的 VPS 公网地址访问同一入口时，CONNECT 返回 200，随后 curl 报 TLS 失败；
 Xray 同时记录真实来源及 `padm-relay-http -> blocked`。这证明旧 EOF 可以由来源拒绝触发，
-不能据此放宽为全网允许。外部客户端两次网络检查仍为超时或 CONNECT 中断，
-未形成允许来源成功证据。测试后关闭 relay，原规格 SHA256 恢复。
+不能据此放宽为全网允许。此前外部客户端两次网络检查为超时或 CONNECT 中断；
+后续补验已从独立外部客户端取得三个 HTTPS 目标严格 TLS/200、错误认证 407 和
+未允许来源 blocked 的完整 IPv4 证据。测试后关闭 relay，原规格 SHA256 恢复。
 
 本机现有 `docker-http-relay-real` 增加真实 TLS origin、IPv4/IPv6 和域名 CONNECT、
 严格 CA/hostname 验证、错误 hostname 拒绝以及拒绝来源/错误认证不达目标的断言；
@@ -170,8 +179,162 @@ relay、HTTP-01 和透明集成均关闭，80/36080 无监听，续期 timer act
 正式证书、ACME home、续期登记及原规格哈希全部保持。候选目录与挑战容器均已清理。
 脱敏日志归档为 `.tmp-vps-native-20261018/evidence/native-closure-20261019.tar.gz`，
 SHA256 为 `9f9460f46793096fb8040656a095822fbda0aaac088e0bef7fdcd2793291ca3c`；
-本轮远端临时目录、输入凭据和 curl 配置已删除，SSH 会话已退出。
+上述补验的远端临时目录、输入凭据和 curl 配置已删除，SSH 会话已退出。
 
-本轮小证据保留在 `.tmp-vps-native-20261018/`；
-原始签名输入摘要与各阶段 inspect、CLI 日志用于交叉核对。
+### 可销毁 VPS 集中验收与回归收口
+
+用户随后授权同一 VPS 可销毁。保留数据卸载及最终 purge、整机重启、空目标复核、
+同机灾备恢复已通过：boot ID 改变，空目标没有受管业务、规则或集成残留，
+随后恢复原 nginx/xray/subscription；该证据不替代全新主机灾备。
+代码已签名提交并验签：`f5b35f3a` 的 12 个文件覆盖
+ACME、权限与夹具修复，`eff6fd2c` 的 2 个文件覆盖 TUN validator 及测试；尚未正式发布。
+
+原生备份暴露通用候选权限准备把 ACME 私密文件放宽为 `0640`，本轮统一修复为
+`0600`，贯通 candidate/runtime/TLS 提交并拒绝链接和特殊文件。`up` 不会自动修复旧权限；
+旧材料显式安全修复后内容不变，backup export/verify 通过。ACME 账户恢复绑定
+`DEFAULT_ACME_SERVER` 与 `Le_API` 的来源、端口及目录，缺省 `CA_EMAIL`
+只从合法登记补齐。真实恢复后完整业务规格与 TLS 的 SHA256 保持，
+`.accounts // []` 规范化哈希与原值一致，续期 timer active 且没有 pending。
+
+透明核心读取属主 `10001` 的 `0750` 数据目录与 `0600` TLS 私钥需要
+`DAC_OVERRIDE`；后续 UDP 增权对照又确认宿主低端口绑定需要 `NET_BIND_SERVICE`。
+透明核心能力统一为 `NET_ADMIN`、`NET_BIND_SERVICE`、`DAC_OVERRIDE`，保留
+`cap_drop: ALL`、文件权限与普通核心能力，网络 sidecar 仍仅有 `NET_ADMIN`。
+权限准备保留 `data/net/transparent` 子树元数据，避免二次准备把预检创建的
+`0600 .tun.lock` 改成 `0640`；严格 validator 继续拒绝篡改。
+
+真实 TUN snapshot 暴露 bridge 动态倒计时、RA 路由到期、GSO 布尔值及 nft
+表示差异。validator 仅规范化 bridge 的 `hello_timer/tcn_timer/topology_change_timer/gc_timer`
+和协议 `9` 的合法非负整数 `expires` 倒计时，保留字段存在、全路由身份、
+其它桥配置及 nft 语义 timer；GSO 使用严格布尔校验，`DOCKER-USER` 只识别链首
+两条精确规则，IPv4 interval range 采用规范表示。完整真实 snapshot 重放及独立复审通过，
+最终 validator SHA256 为
+`d1d17b914cc7a00d6991e1d76a7124df20d9e04acf02f5da5da08794e93944af`。
+早前误报由 watchdog 正常 TERM 停止核心，intent 随后经生产 helper 真实 abort/clean
+清除；未手工删除 state，内核检查清净。
+
+本机只补与改动匹配的 Docker Linux amd64 回归：TLS `38.540` 秒、
+backup `151` 项 `19.236` 秒；日常集合原通过 `31` 项，另 `3` 项夹具修复后
+定向通过。最终补验均 exit `0`，不把原失败聚合结果改写成成功：
+
+| 定向检查 | 入口耗时 | 证据目录 |
+| --- | --- | --- |
+| permissions | `4.821` 秒 | `.tmp-regression-docker-d5fcced58da94948aec9f49f0efaf0d9/` |
+| TUN | `24.150` 秒 | `.tmp-regression-docker-fad8f1c4baa14779a98111bd63f1a3d7/` |
+| TProxy/Redirect | `54.205` 秒 | `.tmp-regression-docker-1801ec655dd54cd29b1cb2e510ed4354/` |
+| phase3-edit | `52.420` 秒 | `.tmp-regression-docker-31651b267ff244d285519abe42e95eea/` |
+| TUN resources | `1.325` 秒（测试 `202 ms`） | `.tmp-regression-docker-bfef03b40243481c8587d7d6936de329/` |
+
+该批 `services.sh` SHA256 为
+`3a474923a62b84ddc823a54cccac2d683a6e3289de13462af8c2d7b1eba3224c`。
+最终 WireGuard focused `74.858` 秒。
+其 `77` 次夹具安装改为复用并复制，单次由 `371–387 ms` 降为 `14–15 ms`，
+据此估算约节省 `28` 秒；两次 selector 不同，不能当作端到端回归提速实测。
+保留有效失败断言，不重复已经通过的日常叶子或 full。
+
+原生 TUN 当前源码通过预检冲突拒绝、enable、TCP 严格 TLS 与 UDP DNS、
+restart 后 token 改变及归属核验、down/check；净停止后整机重启（boot ID 改变）、
+显式 up、TCP 严格 TLS/UDP DNS、down/off 清理也通过。restart 首次 DNS 超时，
+后续独立的严格解析 TCP 与 UDP DNS 通过；这不证明重启后连续稳定。
+测试仅在一次性 `net-tun-check` 只读挂载当前 validator，不改 Compose、镜像 digest
+或元数据门禁，不能计作正式发布镜像或完整正式 CLI 通过。
+
+TProxy 当前源码生产事务 helper 通过 conflict、enable、TCP 严格 TLS 与规则计数、
+restart/down，以及净停止后整机重启、显式 up、TCP/down/off。正式 `3.40` 缺少
+managed-restart marker，正式 CLI 正确拒绝，helper 结果不替代发布后 CLI 验收。
+早期指定 UID 的 UDP DNS 未通过；root 访问同一 DNS 目标正常，抓包见 loopback 入包
+而无外发，监听器具有透明标志。strace 记录进程 `2230` 与监听器进程 `2250`
+（fd `8`）不一致，未建立对应关系，不能据空日志判断监听器未收包或内核丢弃。
+该批观察本身不足以确定根因；后续已关联真实 PID、FD、socket inode 并固定
+五元组完成能力对照，结果见下节，不改写原失败证据。
+两套矩阵均未改 sysctl，内存始终充足，
+未再发生资源耗尽；容器 healthy 仅作为状态，实际流量另行验证。
+
+Reality 共存使用生产入口生成规格和实际分享 URI。受管 Vision/WS 同机正反例、
+Vision 同一 TCP 连接空闲 `75` 秒后数据往返，以及独立外部 WS 通过；
+外部 Vision 未通过。桥接网站使用 nginx 容器实际 `host-gateway` 地址，
+HTTPS 返回 `200`、证书 `verify=0`，同机 Vision/75 秒通过。桥接地址校验本来不保证
+后端可达；启用成功不能代替网站实流量。宿主回环同机 Vision 正反例、
+同一 TCP socket 空闲 `75.001` 秒后再次往返、网站 HTTPS `200`/`verify=0` 均通过。
+这些结果不补齐外部 Vision、当前修复正式发布或完整支持矩阵。
+
+最终恢复后三项业务均 healthy，严格 HTTPS 返回 `200`、`verify=0`，
+独立外部 Docker WS 客户端结果再次保存为 `ok=true`、`positive=ok`、
+`negative=SSLEOFError`，见 `evidence/final-public-result-20261019.json`。
+TLS 与续期材料原字节由 restore 直接保持；ACME 先按恢复合同规范化，随后人工从
+原应急快照精确补回同账户原配置字节，并收紧普通文件为 `0600`。
+最终账号哈希保持，续期 timer active/enabled，transparent、relay、alias 均关闭。
+临时 DNS `reality-native.b.951101.xyz` 精确删除后查询为 `NXDOMAIN`。
+
+两份脱敏归档均已下载到 `.tmp-vps-native-20261018/evidence/` 并核验：
+`native-matrix-20261019-evidence.tar.gz` 的 SHA256 为
+`43a0d432158ee626f6e051fa0b16e637c8293664b70faf21299f39f1fea31053`，
+`native-matrix-20261019-diagnostics.tar.gz` 的 SHA256 为
+`b47ddca8f985e7b1135e7874ef3c6fb93b0a19c8969d85357685514d4e18d47a`。
+远端本轮目录经严格路径核对后已删除，无对应测试 unit 或进程；Docker 仅保留原三项
+健康业务，策略路由仅有三张默认表，无透明规则。本机 `.tmp-native-disposable-20261019`
+及客户端容器已删除，私密应急备份、分享输入和测试二进制已清理；
+脱敏日志、snapshots 与前述历史小证据继续保留，不改写原始归档。
 账号、客户端私密配置、私钥和 DNS/VPS 凭据不进入本文件或提交。
+
+### TProxy UDP 能力根因与定向收口
+
+原生 VPS 的 `net.ipv4.ip_unprivileged_port_start=1024` 保持不变。
+本轮关联 Xray 宿主 PID `32535`、FD `7` 和 socket inode `84673`，
+strace 确认监听器 `recvmsg` 已收到带 `IP_ORIGDSTADDR 1.1.1.1:53` 的 DNS，
+随后同一 Xray 报 `fake: socket bind: permission denied`。因此早期空 trace
+不能用作“内核未投递”的依据；`NET_ADMIN` 本身也不能授权低端口绑定。
+
+保持生产镜像、配置、UID、源端口及 DNS 目标相同，唯一增加
+`NET_BIND_SERVICE` 后，dig 返回 `0`、`NOERROR`、两条答案、查询耗时 `8 ms`，
+Xray 记录 accepted UDP 并实际外发。该最小对照确认本次失败的能力缺口，
+不等同正式 CLI、当前修复的原生重启矩阵或全部 UDP 目标已验收。
+修复只作用于 host 透明核心；普通核心不增加 capability，
+网络 helper 仍仅 `NET_ADMIN`，不以放宽 sysctl 或文件权限替代。
+
+Docker Desktop Linux amd64 的真实 TProxy 回归固定低端口门槛 `1024`，
+覆盖 Xray/sing-box 各自 IPv4、IPv6、双栈共六组，PREROUTING、指定 UID
+OUTPUT、全主机 OUTPUT 的 TCP/UDP/DNS、绕过与清理均通过。
+Redirect 对应六组 TCP、UDP 直连、绕过和清理通过。
+这避免独立网络命名空间默认低端口豁免掩盖宿主能力缺口，不替代公网双栈原生验收。
+升级兼容代码已补齐：当前 bundle 以已有三能力合同作使用门禁，backup 保持可读；
+透明生命周期包含 TUN，旧包在停服前明确要求 off → update → 重新启用。
+TUN 更新重生成 Compose，恢复精确核验模板；Phase 6 新增三透明类型及缺能力旧包
+拒绝、漂移不改服务断言，TUN 管理增加只读候选生成检查。独立只读审阅及新增
+TUN/Phase 6 定向均通过；当前修复尚未正式发布。
+
+以下七项定向均 exit `0`，仅覆盖此前权限修复快照，不证明新增升级兼容逻辑通过。
+该快照 SHA256 为：
+`d7dbf52d5c2f442086716de1d7aa9e64b078f1461e990f4243dd11cb2ffcfe25`。
+复用工具镜像，未重复 full；下表路径统一位于工作区。
+
+| 定向检查 | 入口耗时 | 证据目录 |
+| --- | --- | --- |
+| permissions | `6.394` 秒 | `.tmp-regression-docker-f0d2a24cdfc744d4af4c3a6f1397b919/` |
+| tproxy-management | `56.710` 秒 | `.tmp-regression-docker-3eeaff274d104a6487810c3d19ba2051/` |
+| tun-management | `27.396` 秒 | `.tmp-regression-docker-7e0a3072c0934004afc8347c3167647d/` |
+| phase3-edit | `55.272` 秒 | `.tmp-regression-docker-a97336126dd24e139e8d06a5b62017d7/` |
+| phase4-lifecycle | `53.284` 秒 | `.tmp-regression-docker-25cab9c6e25f4a0ba41dc40aba1e0d83/` |
+| tproxy-real | `104.278` 秒 | `.tmp-regression-docker-9418a4c84c0843769d73d2562f97d788/` |
+| redirect-real | `72.564` 秒 | `.tmp-regression-docker-061016311da5413da92b4104da7164bf/` |
+
+新增升级兼容代码另以同一源码快照完成以下两项补验，均 exit `0`：
+`4b53efc2027027ae96633bc20cd135b95913bdcc0ea7484496ac57163f7bf31e`。
+两项均为 Linux amd64、Jobs `2`、`cache_hit=false`，复用工具镜像
+`sha256:be8156c6f4c4a562ff808db15a2609dc84456fdc58712051c1f1d0d6df0215ab`，
+不以此前七项结果代替新增逻辑的补验。
+
+| 升级兼容补验 | 入口耗时 | 排队 | 证据目录 |
+| --- | --- | --- | --- |
+| tun-management | `25.516` 秒 | `5.342` 秒 | `.tmp-regression-docker-3b53620df68445b2b9964a0c13ff6b6f/` |
+| phase6 | `57.911` 秒 | `0.222` 秒 | `.tmp-regression-docker-0b6f161716b341fe984c1d868c322bcb/` |
+
+原生脱敏证据包为
+`.tmp-vps-native-20261018/evidence/native-tproxy-udp-proof-20261019.tar.gz`，
+本机已核 SHA256：
+`d113d97d1d1b982ab39248668d0f9006e8a58970edc4762bbedc68423a38896a`。
+该最小探针的四项内核资源、两条防护规则和测试容器均已清理；
+本机三个 UDP 调查临时文件也已删除。远端 11 个本批临时文件已逐项核对类型、
+精确删除并复核不存在。清理后 nginx/xray/subscription 均 healthy，
+严格 HTTPS 返回 `200`、证书 `verify=0`，IPv4 策略规则仅余默认优先级
+`0/32766/32767`。该清理及健康检查不扩大正式 CLI、重启或支持范围。

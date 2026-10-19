@@ -150,7 +150,7 @@ runEdit 0 --tun-enable --confirm PADM-DOCKER-EDIT
 cp -- "${root}/config/spec.json" "${TEST_ROOT}/enabled.json"
 runStatus true
 jq -e '.services["sing-box"].network_mode == "host" and .services["sing-box"].user == "0:0" and
-  .services["sing-box"].cap_add == ["NET_ADMIN","DAC_OVERRIDE"] and .services["sing-box"].ports == null and
+  .services["sing-box"].cap_add == ["NET_ADMIN","NET_BIND_SERVICE","DAC_OVERRIDE"] and .services["sing-box"].ports == null and
   .services["sing-box"].restart == "no" and
   .services["net-tun-check"].network_mode == "host" and
   any(.services["net-tun-check"].volumes[];
@@ -160,6 +160,27 @@ jq -e '[.inbounds[] | select(.tag == "tun-in")] == [{
   type:"tun",tag:"tun-in",interface_name:"padm-tun",address:["198.18.0.1/30"],
   dns_mode:"disabled",auto_route:true,auto_redirect:true,strict_route:true,stack:"system"}]
 ' "${root}/config/sing-box/config.json" >/dev/null
+(
+    # 候选生成也用于只读评估，必须重生成 TUN 权限且不能改动在线编排。
+    PADM_DOCKER_MANIFEST_FILE="${TEST_ROOT}/update-manifest.json"
+    jq --arg commit "$(printf b%.0s {1..40})" '
+      {release:{version:.release.version,commit:$commit},
+       images:(.images | with_entries(.value={
+         reference:.value,index_digest:(.value | split("@")[1])}))}
+    ' "${root}/config/spec.json" >"${PADM_DOCKER_MANIFEST_FILE}"
+    PADM_DOCKER_MANIFEST_SHA256=$(sha256sum "${PADM_DOCKER_MANIFEST_FILE}" | cut -d ' ' -f 1)
+    PADM_DOCKER_MANIFEST_SIGNATURE_IDENTITY=fixture
+    cp -- "${root}/compose.json" "${TEST_ROOT}/current-compose.json"
+    jq '.services["sing-box"].cap_add=["NET_ADMIN","DAC_OVERRIDE"]' \
+        "${TEST_ROOT}/current-compose.json" >"${root}/compose.json"
+    legacy=$(sha256sum "${root}/compose.json")
+    dockerCreateUpdateCandidate
+    jq -e '.services["sing-box"].cap_add == ["NET_ADMIN","NET_BIND_SERVICE","DAC_OVERRIDE"]' \
+        "${DOCKER_CONFIG_CANDIDATE}/compose.json" >/dev/null
+    [[ "${legacy}" == "$(sha256sum "${root}/compose.json")" ]]
+    dockerCleanupConfigurationCandidate
+    cp -- "${TEST_ROOT}/current-compose.json" "${root}/compose.json"
+)
 # 支持范围只保留单 sing-box、单 IPv4 Reality；合同直接命中生产规格校验。
 for mutation in '.core.type="xray" | .core.protocols[0].core="xray"' \
     '.core.protocols[0].address_families=["ipv4","ipv6"]' \

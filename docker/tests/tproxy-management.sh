@@ -170,7 +170,7 @@ runEdit 0 --tproxy-enable 31298 129 --confirm PADM-DOCKER-EDIT
 cp -- "${root}/config/spec.json" "${TEST_ROOT}/owner-spec.json"
 runStatus true 31298 129
 jq -e '.services.xray.network_mode == "host" and .services.xray.user == "0:0" and
-  .services.xray.cap_add == ["NET_ADMIN","DAC_OVERRIDE"] and .services.xray.ports == null and
+  .services.xray.cap_add == ["NET_ADMIN","NET_BIND_SERVICE","DAC_OVERRIDE"] and .services.xray.ports == null and
   .services["net-transparent"].restart == "no" and
   .services["net-transparent"].command == ["tproxy","31298","129"]' "${root}/compose.json" >/dev/null
 jq -e '.host_integrations[0].settings | has("family") | not' "${root}/config/spec.json" >/dev/null

@@ -542,6 +542,14 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 
 ## 功能和宿主边界
 
+TUN/TProxy/Redirect 的透明核心保留 `cap_drop: ALL`，仅授予 `NET_ADMIN`、
+`NET_BIND_SERVICE`、`DAC_OVERRIDE`；网络检查 helper 仍仅 `NET_ADMIN`，
+普通核心不增权。低端口能力用于宿主监听和透明 UDP 原目的端口回包，
+不放宽私密材料权限。旧透明控制包须先停用透明集成，再更新并重新启用；
+新控制器在停服前拒绝缺少三能力合同的包，历史备份可读不代表可直接恢复运行。
+权限修复已通过实流量矩阵，升级保护已通过同源码 TUN 与 Phase 6 定向补验，
+支持状态保持原值。
+
 | 功能键 | 原生入口 | Docker 状态 | Profile | 网络/权限边界 | 当前说明 |
 | --- | --- | --- | --- | --- | --- |
 | `nginx` | 站点与证书 -> 传统 TLS fallback | `supported` | `nginx` | bridge | 独立 Nginx 容器，承载 WS/HTTPUpgrade/gRPC 反代与传统 TLS fallback 的 PROXY v1 HTTP/1.1、HTTP/2 后端；默认页、静态目录、302 与传统 TLS ALPN 经菜单/CLI 事务管理。 |
@@ -561,7 +569,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 | `cdn-entry-management` | 协议与入口 -> CDN 入口管理 | `deferred` | `subscription` | bridge | 4A.5–4A.5c 提供协议 2/21/22/23/24/25 的逐入口多连接地址覆盖，菜单/CLI 状态、设置和清除，统一生成本地链接、主订阅及分享组；协议 2 只替换分享上行地址并要求 `x-padm-cdn-xhttp`，XHTTP `downloadSettings.address` 保留原入口地址；其余协议保留端口、SNI、Host/路径或 gRPC serviceName/h2 与认证，候选确认及失败恢复复用现有事务。24/25 仅已有 Xray/Nginx TLS，带映射另要求 `x-padm-cdn-grpc-tls`，旧三协议/无映射 gRPC 子集保持。其它协议、H3、公网供应商透传、真实宿主/arm64 和可信发布仍待验。 |
 | `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` / `net-fail2ban-control` / `net-fail2ban-ssh` | host + `NET_ADMIN` | WS DOCKER-USER、控制面 INPUT 与专用 SSH INPUT 的独立 owner 和菜单/CLI；SSH/control 不共存。5C.6d 单 WS 保护端口专项已验实际双栈封禁、端口迁移、SQLite 保留、来源/健康失败恢复与旧规则清理，新旧端口均需 fresh 来源，别名、Reality stream 和其它集成拒绝；WS 日志组为 `0:10001`，权限不放宽。控制认证日志支持菜单/CLI 每小时轮转检查，默认关闭、本机私有登记、同锁与旧 bundle 门禁；线上 auto 入口及隔离 amd64 原始每小时 :19 cron 自主触发、实际归档/续写/停用已验，systemd 实际定时触发待验。SSH 限原生 root systemd/cgroup v2、无存量会话且禁止 reload 的单 service/单显式监听，只消费启动后的可信密码失败。transient collector、只读日志/10 秒 guard、启停/状态/单 IP 解封已接，来源失效自动停 jail/精确清理，禁自动重启和恢复旧封禁；SSH 启用时 update/rollback/业务恢复拒绝，先受管停用。隔离 amd64 OpenSSH 10/Fail2ban 1.1 实际启停、封禁、连接 DROP、解封和来源失效清理已验；原生宿主/arm64/公网/重启卸载及完整管理仍待验收。 |
 | `wireguard` | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有。4C.7 接入控制连接菜单 `18` 及 `wireguard status/prepare/peer/start/stop`，仅支持 RFC1918 IPv4 `/32` 单 Peer，已通过定向及隔离 amd64 真实 CLI 验收。私密准备、首次部署事务、精确容器启停及限制见下文，完整管理状态不升级。 |
-| `tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 显式启用透明代理设备。 |
+| `tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `NET_BIND_SERVICE` + `DAC_OVERRIDE` + `/dev/net/tun` | 显式启用透明代理设备。 |
 | `tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 菜单 17→43 和 CLI 管理单 Xray/sing-box Reality，IPv4/IPv6/双栈 PREROUTING TCP/UDP。OUTPUT 默认关闭，可选 UID 或包含 root 的全主机主动 TCP/UDP；互斥、省略保留，关闭保留 PREROUTING。全主机核心 0:10001，GID 10001、LOCAL/REPLY 绕过；实际核心身份与两族两链均须核验。漂移或缺关键绕过保留现场；旧 schema 2/3/4 兼容，全主机 schema 5 和共享 marker。拒绝其它宿主集成；原生宿主/arm64/公网/重启/完整卸载及完整管理待验。 |
 | `redirect` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 菜单 17→47 和 CLI 管理单 Xray/sing-box Reality 1/2/26，同核心多入口；三族 PREROUTING，OUTPUT 可选 UID 或全主机主动 TCP，UDP 保持原路由。默认关闭、互斥、省略保留；全主机包含 root，核心 0:10001，GID 10001、LOCAL/REPLY 绕过，实际身份须核验。schema 1 兼容，全主机 schema 2 和共享 marker。两族两链先完整审计再精确撤销，漂移保留现场；拒绝其它宿主集成或副核心。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。 |
 | `routing-tools` | 路由与访问控制 -> WARP/IPv6/Socks5/DNS/BT/访问控制 | `deferred` | 核心 | bridge | 已交付两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、IP/CIDR、BT、CN 预设、IPv6 和用户态 WARP，以及名单、上游、模式和地址族管理。SOCKS5、已有 WARP Peer 和 hosts 支持交互直接录入，私有 JSON CLI 保留；hosts 单键增删/替换与单 IP/精确 FQDN CSV 整组录入共用完整校验和失败恢复。只读重叠/覆盖诊断不预测最终流量；SOCKS UDP 撤销、Xray 解析后阻断、完整区域/访问控制及公网/宿主/双架构验收待补。 |

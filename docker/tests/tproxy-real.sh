@@ -81,8 +81,10 @@ fail() { printf 'tproxy-real: %s\n' "$*" >&2; exit 1; }
 mkdir -p "${TEST_ROOT}/owner"
 chmod 0750 "${TEST_ROOT}/owner"
 createRouter() {
+    # 保留原生低端口边界，避免 Docker 默认 0 掩盖 UDP 回包套接字缺权。
     docker create --network "$1" "${@:2}" --cap-add NET_ADMIN \
     --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv6.conf.all.forwarding=1 \
+    --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
     --security-opt no-new-privileges:true --init --read-only \
     --tmpfs /run:rw,nosuid,nodev,size=16m --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
     --mount "type=bind,source=${TEST_ROOT}/owner,target=/var/lib/padm/net" \
@@ -313,6 +315,8 @@ targetContainer=$(docker run -d --network "${networks[1]}" --ip 198.18.65.20 --i
 clientPid=$(docker inspect --format '{{.State.Pid}}' "${clientContainer}")
 targetPid=$(docker inspect --format '{{.State.Pid}}' "${targetContainer}")
 netPid=$(docker inspect --format '{{.State.Pid}}' "${container}")
+[[ "$(net cat /proc/sys/net/ipv4/ip_unprivileged_port_start)" == 1024 ]] ||
+    fail 'router namespace did not retain the privileged port boundary'
 for resource in "${container}" "${clientContainer}" "${targetContainer}"; do
     for ((attempt = 0; attempt < 100; attempt++)); do
         docker exec "${resource}" ip -j -6 address show | jq -e '
@@ -387,6 +391,7 @@ makeCoreConfig() {
             elif $uid == "" then {} else {output_uid:($uid | tonumber)} end))}]}
     ' >"${configDir}/spec.json"
     dockerConfigureSpecValidate "${configDir}/spec.json"
+    dockerGenerateCompose "${configDir}/spec.json" "${configDir}/compose.json"
     if [[ "${core}" == xray ]]; then
         dockerGenerateXrayConfig "${configDir}/spec.json" "${configDir}/base.json"
     else
@@ -401,16 +406,21 @@ makeCoreConfig() {
     ' "${configDir}/rendered.json" >"${configDir}/config.json"
 }
 startCore() {
-    local core=$1 configDir=$2 image
-    local -a args
+    local core=$1 configDir=$2 image capabilities capability
+    local -a args coreCapArgs=()
     image=$(jq -er --arg core "${core}" '.[$core].reference' /node-images.json)
+    capabilities=$(jq -er --arg core "${core}" '.services[$core].cap_add[]' "${configDir}/compose.json") ||
+        fail 'cannot read generated core capabilities'
+    while IFS= read -r capability; do
+        coreCapArgs+=(--cap-add "${capability}")
+    done <<<"${capabilities}"
     if [[ "${core}" == xray ]]; then
         args=(run -c /etc/padm/tproxy/config.json)
     else
         args=(run -D /var/lib/padm/sing-box -c /etc/padm/tproxy/config.json)
     fi
     coreContainer=$(docker run -d --network "container:${container}" --user 0:10001 \
-        --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges:true --read-only \
+        --cap-drop ALL "${coreCapArgs[@]}" --security-opt no-new-privileges:true --read-only \
         --tmpfs /tmp:rw,nosuid,nodev,size=16m --tmpfs /var/lib/padm/sing-box:rw,nosuid,nodev,size=16m \
         --mount "type=bind,source=${configDir},target=/etc/padm/tproxy,readonly" "${image}" "${args[@]}")
     corePid=$(docker inspect --format '{{.State.Pid}}' "${coreContainer}")
