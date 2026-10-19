@@ -4602,6 +4602,9 @@ runDeploymentModeContractRegression() (
     local nativeRoot="${root}/native"
     local dockerRoot="${root}/docker"
     local dockerFixture=none
+    local processPid= readyFile="${root}/process.ready" attempt
+
+    trap '[[ -z "${processPid}" ]] || { kill "${processPid}" 2>/dev/null || true; wait "${processPid}" 2>/dev/null || true; }' EXIT
 
     export PADM_NATIVE_INSTALL_DIR="${nativeRoot}"
     export PADM_DOCKER_INSTALL_DIR="${dockerRoot}"
@@ -4617,6 +4620,81 @@ runDeploymentModeContractRegression() (
 
     [[ "$(padmDeploymentModeAtRoot "${nativeRoot}")" == "missing" ]]
     [[ "$(padmNativeDeploymentState)" == "absent" ]]
+
+    mkdir -p "${nativeRoot}" "${root}/isolated"
+    # 真实 chroot 进程在不同根目录使用同名配置路径，不应误判宿主原生安装。
+    python3 - "${readyFile}" "${root}/isolated" "${nativeRoot}/xray" <<'PY' &
+import ctypes
+import os
+import signal
+import sys
+
+ready = open(sys.argv[1], "w")
+os.chroot(sys.argv[2])
+os.chdir("/")
+if ctypes.CDLL(None).prctl(15, b"xray", 0, 0, 0) != 0:
+    raise RuntimeError("cannot set fixture process name")
+ready.write("ready\n")
+ready.close()
+signal.pause()
+PY
+    processPid=$!
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        [[ -s "${readyFile}" ]] && break
+        kill -0 "${processPid}" 2>/dev/null || return 1
+        sleep 0.01
+    done
+    [[ -s "${readyFile}" && "$(pgrep -x xray)" == "${processPid}" ]]
+    ! padmNativeManagedProcessActive
+    [[ "$(padmNativeDeploymentState)" == "absent" ]]
+    mkdir -p "${root}/isolated${nativeRoot}/xray"
+    ! padmNativeManagedProcessActive
+    kill "${processPid}"
+    wait "${processPid}" 2>/dev/null || true
+    processPid=
+    rm -f "${readyFile}"
+
+    # 外部二进制读取真正宿主受管目录仍属于原生冲突，不能按进程命名空间一概忽略。
+    python3 - "${readyFile}" "${nativeRoot}/xray" <<'PY' &
+import ctypes
+import signal
+import sys
+
+if ctypes.CDLL(None).prctl(15, b"xray", 0, 0, 0) != 0:
+    raise RuntimeError("cannot set fixture process name")
+with open(sys.argv[1], "w") as ready:
+    ready.write("ready\n")
+signal.pause()
+PY
+    processPid=$!
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        [[ -s "${readyFile}" ]] && break
+        kill -0 "${processPid}" 2>/dev/null || return 1
+        sleep 0.01
+    done
+    [[ -s "${readyFile}" ]]
+    padmNativeManagedProcessActive
+    [[ "$(padmNativeDeploymentState)" == "active" ]]
+    kill "${processPid}"
+    wait "${processPid}" 2>/dev/null || true
+    processPid=
+
+    # 原生可执行文件即使命令行隐藏安装路径，仍用真实 inode 识别。
+    mkdir -p "${nativeRoot}/xray"
+    cp "$(command -v sleep)" "${nativeRoot}/xray/xray"
+    bash -c 'exec -a core-worker "$1" 120' _ "${nativeRoot}/xray/xray" &
+    processPid=$!
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        [[ "/proc/${processPid}/exe" -ef "${nativeRoot}/xray/xray" ]] && break
+        kill -0 "${processPid}" 2>/dev/null || return 1
+        sleep 0.01
+    done
+    padmNativeManagedProcessActive
+    [[ "$(padmNativeDeploymentState)" == "active" ]]
+    kill "${processPid}"
+    wait "${processPid}" 2>/dev/null || true
+    processPid=
+    rm -rf "${nativeRoot}"
 
     mkdir -p "${nativeRoot}"
     printf '#!/usr/bin/env bash\n' >"${nativeRoot}/install.sh"

@@ -78,8 +78,11 @@ padmNativeManagedProcessActive() {
     for process in xray sing-box; do
         while IFS= read -r pid; do
             [[ "${pid}" =~ ^[0-9]+$ && -r "/proc/${pid}/cmdline" ]] || continue
+            # 容器可使用相同绝对路径，必须核对宿主受管文件或目录的实际归属。
+            [[ "/proc/${pid}/exe" -ef "${root%/}/${process}/${process}" ]] && return 0
             cmdline=$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null || true)
-            [[ "${cmdline}" == *"${root%/}/"* ]] && return 0
+            [[ "${cmdline}" == *"${root%/}/"* &&
+                "/proc/${pid}/root${root%/}" -ef "${root%/}" ]] && return 0
         done < <(pgrep -x "${process}" 2>/dev/null || true)
     done
     return 1
