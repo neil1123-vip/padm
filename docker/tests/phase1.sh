@@ -388,7 +388,7 @@ copyBundleFixture() {
     fi
     cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${target}/shell/core/deployment_mode.sh"
     cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${target}/shell/core/stats_grpc.sh"
-    cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh,static_site_renderer.sh} "${target}/shell/core/"
+    cp "${PROJECT_ROOT}/shell/core/"{locale.sh,runtime.sh,reality_targets.sh,cores.sh,static_site_renderer.sh} "${target}/shell/core/"
     mkdir -p "${target}/assets"
     cp -R "${PROJECT_ROOT}/assets/static-sites" "${target}/assets/"
     find "${PROJECT_ROOT}/documents" -maxdepth 1 -type f -name 'docker*.md' -exec cp {} "${target}/documents/" \;
@@ -546,6 +546,8 @@ for directory in bundle config data secrets logs backups locks; do
 done
 [[ -L "${DOCKER_ROOT}/bundle" ]] || fail 'bundle pointer is not a symbolic link'
 [[ -f "${DOCKER_ROOT}/bundle/shell/core/stats_grpc.sh" ]] || fail 'bundle lacks the shared stats decoder'
+[[ -f "${DOCKER_ROOT}/bundle/shell/core/locale.sh" &&
+    ! -L "${DOCKER_ROOT}/bundle/shell/core/locale.sh" ]] || fail 'bundle lacks the shared menu renderer'
 [[ -f "${DOCKER_ROOT}/bundle/shell/core/reality_targets.sh" &&
     -f "${DOCKER_ROOT}/bundle/shell/core/runtime.sh" ]] || fail 'bundle lacks the shared Reality target module'
 [[ -f "${DOCKER_ROOT}/bundle/shell/core/static_site_renderer.sh" &&
@@ -1134,7 +1136,7 @@ runControl 13 broken-bundle "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] || fail 'failed bundle refresh changed the active bundle'
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'failed bundle refresh changed persistent data'
 
-for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh \
+for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh shell/core/locale.sh \
     docker/lib/schedule.sh docker/lib/geo.sh docker/lib/control-sync.sh docker/lib/control.sh \
     docker/lib/ssh-source.py docker/lib/ssh-source-client.py docker/lib/ssh-journal.py \
     docker/lib/ssh-runtime.sh docker/lib/ssh-runtime.py docker/lib/ssh-collector.py \
@@ -1163,6 +1165,26 @@ done
     dockerEntryBundleModulesPresent "${legacySource}" &&
         dockerBundleSourceIsComplete "${legacySource}"
 ) || fail '不引用灾备 helper 的旧包被拒绝'
+
+(
+    source "${PROJECT_ROOT}/install-docker.sh" help
+    legacySource="${TEST_ROOT}/legacy-without-locale"
+    copyBundleFixture "${legacySource}"
+    rm -- "${legacySource}/shell/core/locale.sh"
+    printf '#!/usr/bin/env bash\n' >"${legacySource}/docker/lib/menu.sh"
+    dockerEntryBundleModulesPresent "${legacySource}" &&
+        dockerBundleSourceIsComplete "${legacySource}"
+) || fail '不引用共享菜单绘制器的旧包被拒绝'
+
+(
+    source "${PROJECT_ROOT}/install-docker.sh" help
+    linkedSource="${TEST_ROOT}/linked-locale"
+    copyBundleFixture "${linkedSource}"
+    rm -- "${linkedSource}/shell/core/locale.sh"
+    ln -s -- "${PROJECT_ROOT}/shell/core/locale.sh" "${linkedSource}/shell/core/locale.sh"
+    ! dockerEntryBundleModulesPresent "${linkedSource}" &&
+        ! dockerBundleSourceIsComplete "${linkedSource}"
+) || fail '共享菜单绘制器链接通过 bundle 校验'
 
 (
     source "${PROJECT_ROOT}/install-docker.sh" help

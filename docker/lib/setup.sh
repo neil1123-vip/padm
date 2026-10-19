@@ -503,16 +503,34 @@ dockerTlsManageCommand() {
         dockerError '当前规格与部署或 ops 镜像不一致，不能管理证书'
         return "${PADM_DOCKER_RC_STATE}"
     }
-    printf '\nDocker 证书管理\n当前 TLS 域名: %s\n' "${currentDomain}"
-    printf '%s\n' '1. 查看/校验受管证书' '2. 导入证书轮换' '3. ACME 申请' '4. ACME 续期' \
-        '5. 自动续期状态' '6. 启用自动续期' '7. 停用自动续期' \
-        '8. 启用 Nginx HTTP-01 入口' '9. 关闭 Nginx HTTP-01 入口' \
-        '10. 迁移入口 TLS 域名' '0. 返回'
+    echoContent title '\n┌─ Docker 证书管理 ───────────────────────────────────────'
+    menuLine "当前 TLS 域名: ${currentDomain}"
+    menuItem 1 '查看/校验受管证书'
+    menuItem 2 '导入证书轮换'
+    menuItem 3 'ACME 申请'
+    menuItem 4 'ACME 续期'
+    menuItem 5 '自动续期状态'
+    menuItem 6 '启用自动续期'
+    menuItem 7 '停用自动续期'
+    menuItem 8 '启用 Nginx HTTP-01 入口'
+    menuItem 9 '关闭 Nginx HTTP-01 入口'
+    menuItem 10 '迁移入口 TLS 域名'
+    menuReturnItem 0 '返回'
+    menuClose
     dockerSetupRead choice '证书操作: ' || return 0
     [[ "${choice}" =~ ^([1-9]|10)$ ]] || return "${PADM_DOCKER_RC_USAGE}"
     if [[ "${choice}" == 10 ]]; then
         dockerSetupRead domain '新的 TLS 域名（0 取消）: ' || return 0
         dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
+        echoContent title '\n┌─ 证书方式 ───────────────────────────────────────'
+        menuItem 1 '已有受管'
+        menuItem 2 '导入'
+        menuItem 3 'DNS-01'
+        menuItem 4 'HTTP-01 standalone'
+        menuItem 5 'HTTP-01 webroot'
+        menuItem 6 'TLS-ALPN-01'
+        menuReturnItem 0 '取消'
+        menuClose
         dockerSetupRead method '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 6=TLS-ALPN-01, 0=取消]: ' 1 || return 0
         case "${method}" in
         1) challengeArgs=(--tls-existing) ;;
@@ -569,6 +587,13 @@ dockerTlsManageCommand() {
         esac
         dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
         dockerEmailIsValid "${email}" || return "${PADM_DOCKER_RC_USAGE}"
+        echoContent title '\n┌─ ACME 验证方式 ───────────────────────────────────────'
+        menuItem 1 'DNS-01'
+        menuItem 2 'HTTP-01 standalone'
+        menuItem 3 'HTTP-01 webroot'
+        menuItem 4 'TLS-ALPN-01'
+        menuReturnItem 0 '取消'
+        menuClose
         dockerSetupRead method '验证方式 [1=DNS-01, 2=HTTP-01 standalone, 3=HTTP-01 webroot, 4=TLS-ALPN-01，默认 1，0 取消]: ' 1 || return 0
         case "${method}" in
         1)
@@ -604,10 +629,13 @@ dockerTlsManageCommand() {
     5) action=自动续期状态 ;;
     7) action=停用自动续期 ;;
     esac
-    printf '\n证书操作: %s\n域名: %s\n' "${action}" "${domain}"
+    echoContent title '\n┌─ 证书操作确认 ───────────────────────────────────────'
+    menuLine "证书操作: ${action}"
+    menuLine "域名: ${domain}"
     if [[ "${domain}" != "${currentDomain}" && "${choice}" -le 4 ]]; then
-        printf '其他域名只保存或校验证书，不修改当前入口和部署。\n'
+        menuLine '其他域名只保存或校验证书，不修改当前入口和部署。'
     fi
+    menuClose
     dockerSetupRead answer '确认执行证书操作？[y/N]: ' n || return 0
     case "${answer}" in y|Y|yes|YES) ;; *) printf '已取消证书操作。\n'; return 0 ;; esac
     case "${choice}" in
@@ -663,18 +691,51 @@ dockerSetupCommand() {
     else
         dockerSetupUnconfigured || return "${PADM_DOCKER_RC_CONFLICT}"
     fi
-    printf '\nDocker %s\n' "${operation}"
+    echoContent title "\n┌─ Docker ${operation} ───────────────────────────────────────"
+    menuItem 1 'Xray'
+    menuItem 2 'sing-box'
+    menuItem 3 'Xray+sing-box'
+    menuItem 4 'sing-box+Xray'
+    menuReturnItem 0 '取消'
+    menuClose
     dockerSetupRead coreChoice '核心 [1=Xray, 2=sing-box, 3=Xray+sing-box, 4=sing-box+Xray, 0=取消]: ' 1 || return 0
     case "${coreChoice}" in
     1|3)
         core=xray
         [[ "${coreChoice}" != 3 ]] || secondaryCore=sing-box
+        echoContent title '\n┌─ Xray 协议 ───────────────────────────────────────'
+        menuItem 1 'Reality Vision'
+        menuItem 2 'WS TLS'
+        menuItem 3 '两者'
+        menuItem 4 'Reality XHTTP'
+        menuItem 5 'Reality gRPC'
+        menuItem 11 'Trojan direct'
+        menuItem 12 'VMess WS TLS'
+        menuItem 13 'VMess HTTPUpgrade TLS'
+        menuItem 14 'VLESS gRPC TLS'
+        menuItem 15 'Trojan gRPC TLS'
+        menuItem 16 'VLESS TLS Vision'
+        menuItem 17 'Trojan TLS fallback'
+        menuReturnItem 0 '取消'
+        menuClose
         dockerSetupRead protocols '协议 [1=Reality Vision, 2=WS TLS, 3=两者, 4=Reality XHTTP, 5=Reality gRPC, 11=Trojan direct, 12=VMess WS TLS, 13=VMess HTTPUpgrade TLS, 14=VLESS gRPC TLS, 15=Trojan gRPC TLS, 16=VLESS TLS Vision, 17=Trojan TLS fallback, 0=取消]: ' 1 || return 0
         [[ "${protocols}" =~ ^[1-5]$ || "${protocols}" == 11 || "${protocols}" == 12 || "${protocols}" == 13 || "${protocols}" == 14 || "${protocols}" == 15 || "${protocols}" == 16 || "${protocols}" == 17 ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
     2|4)
         core=sing-box
         [[ "${coreChoice}" != 4 ]] || secondaryCore=xray
+        echoContent title '\n┌─ sing-box 协议 ───────────────────────────────────────'
+        menuItem 1 'Reality Vision'
+        menuItem 5 'Reality gRPC'
+        menuItem 6 'Hysteria2'
+        menuItem 7 'AnyTLS'
+        menuItem 8 'NaiveProxy'
+        menuItem 9 'Shadowsocks'
+        menuItem 10 'TUIC'
+        menuItem 11 'Trojan direct'
+        menuItem 13 'VMess HTTPUpgrade TLS'
+        menuReturnItem 0 '取消'
+        menuClose
         dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 7=AnyTLS, 8=NaiveProxy, 9=Shadowsocks, 10=TUIC, 11=Trojan direct, 13=VMess HTTPUpgrade TLS, 0=取消]: ' 1 || return 0
         [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 || "${protocols}" == 11 || "${protocols}" == 13 ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
@@ -684,6 +745,12 @@ dockerSetupCommand() {
         printf 'NaiveProxy 服务器必须与 TLS 域名一致，原生 naive+https URI 不支持独立 SNI。\n'
     dockerSetupRead server '服务器域名或 IP（0 取消）: ' || return 0
     [[ -n "${server}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+    echoContent title '\n┌─ 地址族 ───────────────────────────────────────'
+    menuItem 1 'IPv4'
+    menuItem 2 'IPv6'
+    menuItem 3 '双栈'
+    menuReturnItem 0 '取消'
+    menuClose
     dockerSetupRead familyChoice '地址族 [1=IPv4, 2=IPv6, 3=双栈, 默认 1]: ' 1 || return 0
     case "${familyChoice}" in
     1) families='["ipv4"]' ;;
@@ -695,8 +762,11 @@ dockerSetupCommand() {
         if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 && "${protocols}" != 12 && "${protocols}" != 13 && "${protocols}" != 14 && "${protocols}" != 15 && "${protocols}" != 16 && "${protocols}" != 17 ]]; then
             dockerSetupRead realityPort '主核心 Reality 入口端口 [443]: ' 443 || return 0
         fi
-        printf '\nREALITY 目标站选择\n'
-        printf '%s\n' '1. 检测候选后选择' '2. 手动输入'
+        echoContent title '\n┌─ REALITY 目标站选择 ───────────────────────────────────────'
+        menuItem 1 '检测候选后选择'
+        menuItem 2 '手动输入'
+        menuReturnItem 0 '取消'
+        menuClose
         while :; do
             dockerSetupRead targetMode '请选择 [1]（0 取消）: ' 1 || return 0
             case "${targetMode}" in
@@ -826,6 +896,15 @@ dockerSetupCommand() {
         else
             dockerSetupRead wsPort "WS TLS 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         fi
+        echoContent title '\n┌─ 证书方式 ───────────────────────────────────────'
+        menuItem 1 '已有受管'
+        menuItem 2 '导入'
+        menuItem 3 'DNS-01'
+        menuItem 4 'HTTP-01 standalone'
+        menuItem 5 'HTTP-01 webroot'
+        menuItem 6 'TLS-ALPN-01'
+        menuReturnItem 0 '取消'
+        menuClose
         dockerSetupRead tlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 6=TLS-ALPN-01, 0=取消]: ' 1 || return 0
         case "${tlsMode}" in
         1) ;;
@@ -887,43 +966,46 @@ dockerSetupCommand() {
         dockerError '主副核心不能使用同一入口端口'
         return "${PADM_DOCKER_RC_CONFLICT}"
     fi
-    printf '\n核心: %s\n协议组合: %s\n服务器: %s\n地址族: %s\n' "${core}" "${protocols}" "${server}" "${families}"
+    echoContent title "\n┌─ Docker ${operation}预览 ───────────────────────────────────────"
+    menuLine "核心: ${core}"
+    menuLine "协议组合: ${protocols}"
+    menuLine "服务器: ${server}"
+    menuLine "地址族: ${families}"
     [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 || "${protocols}" == 11 || "${protocols}" == 12 || "${protocols}" == 13 || "${protocols}" == 14 || "${protocols}" == 15 || "${protocols}" == 16 || "${protocols}" == 17 ]] ||
-        printf 'Reality: %s -> %s:%s，SNI %s\n' "${realityPort}" "${target}" "${targetPort}" "${sni}"
+        menuLine "Reality: ${realityPort} -> ${target}:${targetPort}，SNI ${sni}"
     if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
-        printf 'WS TLS: %s:%s，证书方式 %s，订阅 %s\n' "${domain}" "${wsPort}" "${tlsMode}" "${subscription}"
+        menuLine "WS TLS: ${domain}:${wsPort}，证书方式 ${tlsMode}，订阅 ${subscription}"
     elif [[ "${protocols}" == 12 ]]; then
-        printf 'VMess WS TLS: %s:%s，TLS 域名 %s，证书方式 %s\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
+        menuLine "VMess WS TLS: ${server}:${wsPort}，TLS 域名 ${domain}，证书方式 ${tlsMode}"
     elif [[ "${protocols}" == 13 ]]; then
-        printf 'VMess HTTPUpgrade TLS: %s:%s，TLS 域名 %s，证书方式 %s\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
+        menuLine "VMess HTTPUpgrade TLS: ${server}:${wsPort}，TLS 域名 ${domain}，证书方式 ${tlsMode}"
     elif [[ "${protocols}" == 14 ]]; then
-        printf 'VLESS gRPC TLS: %s:%s，TLS 域名 %s，证书方式 %s\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
+        menuLine "VLESS gRPC TLS: ${server}:${wsPort}，TLS 域名 ${domain}，证书方式 ${tlsMode}"
     elif [[ "${protocols}" == 15 ]]; then
-        printf 'Trojan gRPC TLS: %s:%s，TLS 域名 %s，证书方式 %s\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
+        menuLine "Trojan gRPC TLS: ${server}:${wsPort}，TLS 域名 ${domain}，证书方式 ${tlsMode}"
     elif [[ "${protocols}" == 16 ]]; then
-        printf 'VLESS TLS Vision: %s:%s，TLS 域名 %s，证书方式 %s，fallback HTTP/HTTP2 31300/31302\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
+        menuLine "VLESS TLS Vision: ${server}:${wsPort}，TLS 域名 ${domain}，证书方式 ${tlsMode}，fallback HTTP/HTTP2 31300/31302"
     elif [[ "${protocols}" == 17 ]]; then
-        printf 'Trojan TLS fallback: %s:%s，TLS 域名 %s，证书方式 %s，fallback HTTP/HTTP2 31300/31302\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
+        menuLine "Trojan TLS fallback: ${server}:${wsPort}，TLS 域名 ${domain}，证书方式 ${tlsMode}，fallback HTTP/HTTP2 31300/31302"
     elif [[ "${protocols}" == 6 ]]; then
-        printf 'Hysteria2: %s:%s/udp，证书方式 %s，拥塞 %s，服务端上行/下行 %s/%s Mbps，混淆 %s\n' \
-            "${domain}" "${wsPort}" "${tlsMode}" "${hy2Mode}" "${hy2Up}" "${hy2Down}" "${hy2Obfs}"
+        menuLine "Hysteria2: ${domain}:${wsPort}/udp，证书方式 ${tlsMode}，拥塞 ${hy2Mode}，服务端上行/下行 ${hy2Up}/${hy2Down} Mbps，混淆 ${hy2Obfs}"
     elif [[ "${protocols}" == 7 ]]; then
-        printf 'AnyTLS: %s:%s/tcp，证书方式 %s\n' "${domain}" "${wsPort}" "${tlsMode}"
+        menuLine "AnyTLS: ${domain}:${wsPort}/tcp，证书方式 ${tlsMode}"
     elif [[ "${protocols}" == 8 ]]; then
-        printf 'NaiveProxy: %s:%s/tcp，证书方式 %s\n' "${domain}" "${wsPort}" "${tlsMode}"
+        menuLine "NaiveProxy: ${domain}:${wsPort}/tcp，证书方式 ${tlsMode}"
     elif [[ "${protocols}" == 9 ]]; then
-        printf 'Shadowsocks: %s:%s/tcp+udp，方法 2022-blake3-aes-128-gcm\n' "${server}" "${wsPort}"
+        menuLine "Shadowsocks: ${server}:${wsPort}/tcp+udp，方法 2022-blake3-aes-128-gcm"
     elif [[ "${protocols}" == 10 ]]; then
-        printf 'TUIC: %s:%s/udp，证书方式 %s，拥塞 %s，认证超时 %s，心跳 %s，0-RTT %s\n' \
-            "${domain}" "${wsPort}" "${tlsMode}" "${tuicCongestion}" "${tuicAuthTimeout}" "${tuicHeartbeat}" "${tuicZeroRtt}"
+        menuLine "TUIC: ${domain}:${wsPort}/udp，证书方式 ${tlsMode}，拥塞 ${tuicCongestion}，认证超时 ${tuicAuthTimeout}，心跳 ${tuicHeartbeat}，0-RTT ${tuicZeroRtt}"
     elif [[ "${protocols}" == 11 ]]; then
-        printf 'Trojan direct: %s:%s/tcp，TLS 域名 %s，证书方式 %s\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
+        menuLine "Trojan direct: ${server}:${wsPort}/tcp，TLS 域名 ${domain}，证书方式 ${tlsMode}"
     fi
     [[ "${protocols}" != 12 && "${protocols}" != 13 && "${protocols}" != 14 && "${protocols}" != 15 &&
         "${protocols}" != 16 && "${protocols}" != 17 ]] ||
-        printf 'HTTPS 订阅发布: %s\n' "${subscription}"
-    [[ -z "${secondaryCore}" ]] || printf '副核心: %s，Reality 入口端口 %s\n' "${secondaryCore}" "${secondaryPort}"
-    printf '确认后将验证发布、生成账号参数并配置服务。\n'
+        menuLine "HTTPS 订阅发布: ${subscription}"
+    [[ -z "${secondaryCore}" ]] || menuLine "副核心: ${secondaryCore}，Reality 入口端口 ${secondaryPort}"
+    menuLine '确认后将验证发布、生成账号参数并配置服务。'
+    menuClose
     if [[ "${reinstall}" == 1 ]]; then
         dockerSetupRead answer '确认重新选择核心和协议并替换全部入口、账号、分享组与路由？[y/N]: ' n || return 0
     else
@@ -1882,7 +1964,23 @@ dockerEditFields() {
     local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
     local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice= zeroRttChoice
     while :; do
-        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS/HTTPUpgrade 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n11. 安装其它 Reality 传输入口\n12. XHTTP/gRPC 参数\n13. Hysteria2 参数\n14. TUIC 参数\n0. 取消\n'
+        echoContent title '\n┌─ Docker 配置编辑 ───────────────────────────────────────'
+        menuItem 1 '入口端口'
+        menuItem 2 '服务器地址'
+        menuItem 3 '地址族'
+        menuItem 4 '节点名称'
+        menuItem 5 'Reality 目标/SNI'
+        menuItem 6 'WS/HTTPUpgrade 路径'
+        menuItem 7 '订阅开关'
+        menuItem 8 '验证并预览'
+        menuItem 9 '复制入口'
+        menuItem 10 '删除入口'
+        menuItem 11 '安装其它 Reality 传输入口'
+        menuItem 12 'XHTTP/gRPC 参数'
+        menuItem 13 'Hysteria2 参数'
+        menuItem 14 'TUIC 参数'
+        menuReturnItem 0 '取消'
+        menuClose
         dockerSetupRead choice '编辑项目: ' || return 3
         [[ "${choice}" != 8 ]] || return 0
         if [[ "${choice}" == 7 ]]; then
@@ -1915,12 +2013,23 @@ dockerEditFields() {
                 targetProtocol=${protocol}
                 if [[ "${choice}" == 11 ]]; then
                     [[ "${protocol}" == 1 || "${protocol}" == 2 || "${protocol}" == 26 ]] || return 1
+                    echoContent title '\n┌─ Reality 传输 ───────────────────────────────────────'
+                    menuItem 1 'Vision'
+                    menuItem 2 'XHTTP'
+                    menuItem 26 'gRPC'
+                    menuReturnItem 0 '取消'
+                    menuClose
                     dockerSetupRead targetProtocol 'Reality 传输 [1=Vision, 2=XHTTP, 26=gRPC，0=取消]: ' "${protocol}" || return 3
                     [[ "${targetProtocol}" == 1 || "${targetProtocol}" == 2 || "${targetProtocol}" == 26 ]] || return 1
                 fi
                 sourceCore=$(jq -r --arg key "${listener}" '.core.protocols[] | select(.listener_id == $key) | .core' "${draft}") || return 1
                 primaryCore=$(jq -r '.core.type' "${draft}") || return 1
                 if [[ "${sourceCore}" == xray ]]; then defaultValue=1; else defaultValue=2; fi
+                echoContent title '\n┌─ 目标核心 ───────────────────────────────────────'
+                menuItem 1 'Xray'
+                menuItem 2 'sing-box'
+                menuReturnItem 0 '取消'
+                menuClose
                 dockerSetupRead coreChoice "目标核心 [1=Xray, 2=sing-box，空输入保留 ${sourceCore}，0=取消]: " "${defaultValue}" || return 3
                 case "${coreChoice}" in 1) targetCore=xray ;; 2) targetCore=sing-box ;; *) return 1 ;; esac
                 if [[ ( "${targetProtocol}" == 21 || "${targetProtocol}" == 22 || "${targetProtocol}" == 24 || "${targetProtocol}" == 25 || "${targetProtocol}" == 27 || "${targetProtocol}" == 29 || "${targetProtocol}" == 2 ) && "${targetCore}" != xray ]]; then
@@ -1964,6 +2073,12 @@ dockerEditFields() {
             4) field=name ;;
             5)
                 [[ "${protocol}" == 1 || "${protocol}" == 2 || "${protocol}" == 26 ]] || return 1
+                echoContent title '\n┌─ Reality 参数 ───────────────────────────────────────'
+                menuItem 1 '目标域名'
+                menuItem 2 '目标端口'
+                menuItem 3 'SNI'
+                menuReturnItem 0 '取消'
+                menuClose
                 dockerSetupRead value 'Reality 参数 [1=目标域名, 2=目标端口, 3=SNI]: ' || return 3
                 case "${value}" in
                 1) field=reality.target_host ;;
@@ -1979,6 +2094,12 @@ dockerEditFields() {
                 ;;
             12)
                 if [[ "${protocol}" == 2 ]]; then
+                    echoContent title '\n┌─ XHTTP 参数 ───────────────────────────────────────'
+                    menuItem 1 '路径'
+                    menuItem 2 'Host'
+                    menuItem 3 '模式'
+                    menuReturnItem 0 '取消'
+                    menuClose
                     dockerSetupRead value 'XHTTP 参数 [1=路径, 2=Host, 3=模式]: ' || return 3
                     case "${value}" in 1) field=xhttp.path ;; 2) field=xhttp.host ;; 3) field=xhttp.mode ;; *) return 1 ;; esac
                 elif [[ "${protocol}" == 26 ]]; then
@@ -1994,6 +2115,14 @@ dockerEditFields() {
                     dockerError '仅支持编辑已有 Hysteria2 入口；安装新 Hysteria2 请导入完整 configure 规格'
                     return 1
                 }
+                echoContent title '\n┌─ Hysteria2 参数 ───────────────────────────────────────'
+                menuItem 1 '拥塞模式'
+                menuItem 2 '服务端上行 Mbps'
+                menuItem 3 '服务端下行 Mbps'
+                menuItem 4 '混淆'
+                menuItem 5 '伪装 HTTPS/local'
+                menuReturnItem 0 '取消'
+                menuClose
                 dockerSetupRead value 'Hysteria2 参数 [1=拥塞模式, 2=服务端上行 Mbps, 3=服务端下行 Mbps, 4=混淆, 5=伪装 HTTPS/local]: ' || return 3
                 case "${value}" in
                 1) field=hy2.bandwidth_mode ;;
@@ -2009,6 +2138,13 @@ dockerEditFields() {
                     dockerError '仅支持编辑已有 TUIC 入口；安装新 TUIC 请导入完整 configure 规格'
                     return 1
                 }
+                echoContent title '\n┌─ TUIC 参数 ───────────────────────────────────────'
+                menuItem 1 '拥塞控制'
+                menuItem 2 '认证超时'
+                menuItem 3 '心跳间隔'
+                menuItem 4 '0-RTT'
+                menuReturnItem 0 '取消'
+                menuClose
                 dockerSetupRead value 'TUIC 参数 [1=拥塞控制, 2=认证超时, 3=心跳间隔, 4=0-RTT]: ' || return 3
                 case "${value}" in
                 1) field=tuic.congestion_control ;;
@@ -2031,6 +2167,12 @@ dockerEditFields() {
                   .core.protocols[] | select(.listener_id == $key) | .hy2.obfs.type //
                     "off" | if . == "off" then "1" elif . == "gecko" then "3" else "2" end
                 ' "${draft}") || return 1
+                echoContent title '\n┌─ 混淆 ───────────────────────────────────────'
+                menuItem 1 '关闭'
+                menuItem 2 'Salamander'
+                menuItem 3 'Gecko'
+                menuReturnItem 0 '取消'
+                menuClose
                 dockerSetupRead obfsChoice '混淆 [1=关闭, 2=Salamander, 3=Gecko，空输入保留]: ' "${defaultValue}" || return 3
                 case "${obfsChoice}" in
                 1) value= ;;
@@ -2040,6 +2182,12 @@ dockerEditFields() {
                 *) return 1 ;;
                 esac
             elif [[ "${field}" == address_families ]]; then
+                echoContent title '\n┌─ 地址族 ───────────────────────────────────────'
+                menuItem 1 'IPv4'
+                menuItem 2 'IPv6'
+                menuItem 3 '双栈'
+                menuReturnItem 0 '取消'
+                menuClose
                 dockerSetupRead value '地址族 [1=IPv4, 2=IPv6, 3=双栈，空输入保留]: ' "${defaultValue}" || return 3
                 [[ "${value}" =~ ^[123]$ ]] || return 1
             elif [[ "${field}" == hy2.bandwidth_mode ]]; then

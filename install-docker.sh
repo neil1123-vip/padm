@@ -480,6 +480,9 @@ dockerEntryBundleModulesPresent() {
     if grep -qF '/shell/core/cores.sh"' "${sourceRoot}/docker/lib/lifecycle.sh"; then
         [[ -f "${sourceRoot}/shell/core/cores.sh" && ! -L "${sourceRoot}/shell/core/cores.sh" ]] || return 1
     fi
+    if grep -qF '/shell/core/locale.sh"' "${sourceRoot}/docker/lib/menu.sh"; then
+        [[ -f "${sourceRoot}/shell/core/locale.sh" && ! -L "${sourceRoot}/shell/core/locale.sh" ]] || return 1
+    fi
     if grep -qF '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh" ||
         [[ -f "${sourceRoot}/docker/lib/reality-targets.sh" ]]; then
         for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do

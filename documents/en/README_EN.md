@@ -133,13 +133,37 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 
 Installation opens the menu automatically when it succeeds in an interactive terminal.
 After installation, run `padm-docker` or `padm-docker menu` for status, start/stop/restart,
-and logs. Select first configuration to choose the core, protocols, addresses, and certificates.
+and logs. Select `1. Install & reinstall → First configuration` to choose the core, protocols, addresses, and certificates.
 The wizard covers Xray Reality Vision/XHTTP/gRPC and WS TLS, and sing-box
 Reality Vision/gRPC, Hysteria2, AnyTLS, NaiveProxy, Shadowsocks, and TUIC.
 It never overwrites an existing deployment; use the editor below instead. Full protocol management remains deferred.
 `install --no-menu` disables the automatic menu. A non-interactive invocation without
 arguments only prints help without installing Docker, downloading the bundle, or
 initializing state. Existing explicit CLI commands remain available.
+
+The home screen shares the native menu's style and eight task groups:
+
+| Number | Menu | Common actions |
+| --- | --- | --- |
+| `1` | Install & reinstall | First configuration, core/protocol reselection, full-spec reinstall |
+| `2` | Subscriptions & users | `1` accounts, `2` subscriptions, `3` traffic/quotas, `4` control connection, `5` business backup |
+| `3` | Protocols & entry | REALITY, XHTTP, Hysteria2, TUIC, extra ports and CDN; `9` advanced listener management |
+| `4` | Sites & certificates | `1` TLS fallback/sites, `2` local TLS certificates |
+| `5` | Routing & access control | `1` routing tools, `2` BitTorrent, `3` access control |
+| `6` | Cores & services | Status, start/stop/restart, logs and validation; `7` upgrade assessment, `8` Geo, `9` editor |
+| `7` | System & script | `1` existing release maintenance, `2` installation status, `3` Fail2ban |
+| `8` | Advanced/dangerous actions | `1` uninstall while retaining data, `2` VLESS Encryption experiment |
+
+Specialized pages retain their existing action numbers: the old protocol menu `9`
+is now `3 → 9`, the full routing menu `17` is `5 → 1 → 9`, and maintenance menu `18`
+is `7 → 1`. SOCKS5 inbound at `5 → 1 → 3 → 2` remains unavailable, with the fixed
+cores' authentication and source-restriction limitations shown.
+Both modes retain their existing core-upgrade mechanisms; Docker still upgrades and
+rolls back a verified release bundle as a unit. The shared style also covers headings,
+lists and summary borders in menus, first configuration, TLS management and the editor.
+Specialized action numbers, input order, defaults, hidden credentials, confirmations and
+transactions remain unchanged, as does noninteractive `--preview` output.
+Feature-support boundaries and native-host acceptance requirements remain unchanged.
 
 ```bash
 padm-docker setup
@@ -165,7 +189,7 @@ Share-group HTTPS URLs use the actual public port of the first eligible listener
 public port `443`. Plan 4A.7 passed isolated amd64 tests for protocols `22–25`:
 main/group HTTPS downloads, strict TLS, and IPv4/IPv6 TCP/UDP clients.
 Public-network and native dual-architecture acceptance remain separate.
-Menu `11 → 10/11`, or `subscription content --base` / `subscription links --base`,
+Menu `2 → 2 → 10/11`, or `subscription content --base` / `subscription links --base`,
 prints the deployment's main subscription content or HTTPS URL. Content uses the existing
 node renderer, including self-use entries and enabled accounts, and remains available
 with publication disabled or Reality-only listeners. HTTPS URLs require enabled publication.
@@ -183,7 +207,7 @@ Gecko specs require `x-padm-hy2-gecko`; older unobfuscated/Salamander specs rema
 Gecko packet-size options are not exposed, and `local` serving still requires obfuscation to be disabled.
 Isolated Linux amd64 checks cover actual IPv4/IPv6 transfers for BBR, Brutal, Salamander, and Gecko.
 
-Menu item `16` manages sites on existing Nginx TLS listeners `21`-`25`, fallback
+Menu `4 → 1. Traditional TLS fallback maintenance` manages sites on existing Nginx TLS listeners `21`-`25`, fallback
 listeners `27`/`29`, or Hysteria2. Nginx supports a built-in default page, a static
 directory, and HTTP/HTTPS 302; Hysteria2 supports managed static content:
 
@@ -214,7 +238,7 @@ When no site consumer remains, the mode is cleared while static files and other 
 v3 `.site` requires the bundle capability `x-padm-site-content`.
 Managed webroot and standalone HTTP-01 are available through certificate management.
 
-Menu `16 → 8. Built-in static sites` selects `notes`, `photos`, or `docs`. Built-in
+Menu `4 → 1 → 8. Built-in static sites` selects `notes`, `photos`, or `docs`. Built-in
 themes require an existing v3 Nginx TLS listener (`21`-`25`, including standalone or mixed
 sing-box `23`), Xray fallback (`27`/`29`), or sing-box Hysteria2.
 Other Reality listeners without a website may coexist. After selecting a theme, enter a
@@ -228,7 +252,7 @@ Old bundles keep their existing default, static-directory, and
 302 workflows.
 
 For Hysteria2, publish a template or static directory first, then use protocol menu
-`12. Hysteria2` to disable obfuscation and select the local site. The CLI uses
+`4. Hysteria2` to disable obfuscation and select the local site. The CLI uses
 `edit --hy2-masquerade <listener-id> local` with `--preview/--confirm PADM-DOCKER-EDIT`.
 It validates the published site first and does not create a site or disable obfuscation automatically.
 Only managed `data/static` is mounted read-only at `/srv/padm/`; arbitrary `file://`
@@ -241,7 +265,7 @@ Local and Hysteria2-only static preparation require `x-padm-hy2-local-site`.
 Old default/HTTPS specs and Nginx static combinations without local keep their
 existing bundle compatibility. Website appearance provides no anti-detection proof.
 
-Docker protocol menu items `12. Hysteria2` and `13. TUIC` provide focused edits
+Docker protocol menu items `4. Hysteria2` and `5. TUIC` provide focused edits
 for one existing v3 sing-box listener:
 
 ```bash
@@ -430,7 +454,7 @@ per-account publishing authorization, pure-content copy, and business backup/res
 available through the account and subscription workflows; host integration and the
 complete multi-server lifecycle remain deferred.
 
-Use the menu's configuration editor or `padm-docker edit` to change public ports,
+Use menu `6 → 9` or `padm-docker edit` to change public ports,
 server addresses, address families, node names, Reality targets/SNI, WS paths, or
 subscription enablement. It uses a private draft, a value-redacted diff, and candidate
 validation before confirmation and commit. Unselected listeners, UUIDs, keys, tokens,
@@ -438,7 +462,7 @@ certificates, host integrations, and accumulated traffic remain unchanged.
 The menu can copy or delete an existing protocol listener by listener ID; the primary
 core must retain at least one listener. Reality can be copied to the other core.
 Hysteria2, AnyTLS, NaiveProxy, Shadowsocks, and TUIC can only be copied within sing-box.
-An existing v3 deployment can add supported protocols through the protocol menu or
+An existing v3 deployment can add supported protocols through menu `3 → 9 → 14` or
 `edit --protocol-add`, reusing the source identity and explicitly authorized accounts.
 Adding the first TLS listener also requires its domain and managed certificate.
 Shadowsocks method, server key, UUID, and existing listener identity remain frozen.
@@ -453,7 +477,7 @@ An older deployment without `config/spec.json` requires its complete original sp
 missing fields, additional accounts, custom routes/sites, or mismatched mount roots
 reject editing rather than reconstructing an invented spec from runtime summaries.
 
-Docker menu `9 → 19. Shadowsocks self-use user-key rotation` or these commands
+Docker menu `3 → 9 → 19. Shadowsocks self-use user-key rotation` or these commands
 rotate only `shadowsocks.user_password` on one existing v3 sing-box protocol `30` listener:
 
 ```bash
@@ -473,7 +497,7 @@ The focused contract, Docker amd64 dual-stack TCP/UDP probes, and all 61 integra
 contracts passed; complete management stays `deferred`.
 See [plan 3D.24](../docker-menu-parity-plan.md#3d24-shadowsocks-逐入口自用用户密钥轮换).
 
-Menu `9 → 20. Shadowsocks server-key rotation` or `edit --rotate-ss-server <listener-id>`
+Menu `3 → 9 → 20. Shadowsocks server-key rotation` or `edit --rotate-ss-server <listener-id>`
 reuses the same focused transaction and preview/confirmation options, changing only the selected
 listener's `shadowsocks.server_password`. Self-use and independent account user keys, UUIDs,
 other listeners, share authorizations/tokens, quotas, and accumulated traffic stay unchanged.
@@ -488,7 +512,7 @@ padm-docker edit --spec /root/original-spec.json --preview
 padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 ```
 
-The protocol/listener menu lists stable listener IDs, cores, protocols, addresses/ports,
+Advanced listener management at `3 → 9` lists stable listener IDs, cores, protocols, addresses/ports,
 and address families. It displays all or selected share links and opens the existing
 editor for changes, copies, or deletion. `protocol links` writes only URIs to stdout,
 including when HTTPS subscription publishing is disabled. It does not enable publishing,
@@ -501,7 +525,7 @@ padm-docker protocol links
 padm-docker protocol links vless-reality
 ```
 
-The protocol/listener menu adds, removes and replaces extra published ports for existing listeners.
+Extra entry port management at `3 → 6` adds, removes and replaces extra published ports for existing listeners.
 Optional v3 `port_aliases` contains up to 16 `{listener_id, public_port}` entries.
 Each alias retains the listener's TCP/UDP transports, address families, authentication,
 account identity and traffic counters. TLS still terminates at the existing Nginx frontend;
@@ -541,7 +565,7 @@ IPv4/IPv6 publishing is verified in an isolated amd64 Linux daemon;
 public hosting, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
 
-The protocol menu's port-hopping manager configures, starts, stops, clears and shares active Hy2/TUIC range DNAT.
+The port-hopping manager at `3 → 9 → 11` configures, starts, stops, clears and shares active Hy2/TUIC range DNAT.
 Optional v3 `port_hopping` stores `{listener_id, range_start, range_end, ipv4, ipv6}`
 in the specification, deployment record and Compose `x-padm-port-hopping` metadata.
 The current scope is one sing-box core,
@@ -653,7 +677,7 @@ the implementation plan records the evidence.
 Other client imports, native hosts, arm64, public networks,
 automatic TUIC client hopping, old-session drainage and complete Hy2/TUIC hopping remain `deferred`.
 
-The protocol menu's CDN address manager overrides client connection addresses for
+CDN entry management at `3 → 7` overrides client connection addresses for
 existing `2` Reality XHTTP and `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS listeners in local links, the main subscription
 and share groups. Optional v3 `cdn_entries` contains up to 16 `{listener_id, addresses}`
 records, each with 1–16 unique IP addresses or domain names. URLs, ports, whitespace
@@ -725,7 +749,7 @@ or assigned a different public port; those changes require coordinated firewall 
 3A.3 has passed local dual-core transaction, PTY, traffic, update/rollback, and Linux permission regressions. Real signed releases,
 application images, and dual-architecture client connectivity remain unverified.
 
-Docker menu `9 → 18. VLESS Encryption experiment` manages one existing schema 3
+Docker menu `8 → 2. VLESS Encryption experiment` manages one existing schema 3
 Xray Reality Vision (protocol `1`) or Reality XHTTP (protocol `2`) listener:
 
 ```bash
@@ -804,7 +828,7 @@ padm-docker logs
 padm-docker validate
 ```
 
-Service maintenance menu item 5 provides status, single-IP unban, WS site-scan
+Menu `7 → 3. Fail2ban protection` provides status, single-IP unban, WS site-scan
 enabling/disabling and settings for managed Fail2ban:
 
 ```bash
@@ -1032,7 +1056,7 @@ both current and target bundles must declare `x-padm-transparent-managed-restart
 Disable the integration before upgrading or reverting a bundle without this capability.
 An old CLI update process does not reload new code, so disable it before the first
 migration too. Setting `restart=no` alone does not disable the integration in the specification.
-Manage TProxy through menu `17 → 43`, or:
+Manage TProxy through menu `5 → 1 → 9 → 43`, or:
 
 ```bash
 padm-docker protocol tproxy-status
@@ -1071,7 +1095,7 @@ Real TCP/UDP forwarding and clean shutdown passed for both cores and all three
 families in isolated Linux amd64. Native host reboot, arm64, public-network and
 complete 5C acceptance remain pending.
 
-Manage Redirect TCP through menu `17 → 47`:
+Manage Redirect TCP through menu `5 → 1 → 9 → 47`:
 
 ```bash
 padm-docker protocol redirect-status
@@ -1107,7 +1131,7 @@ both cores and all three families in isolated Linux amd64. Whole-host state uses
 schema 2 with `output_all=true`; schema 1 remains compatible. Native host, arm64,
 public network, reboot and complete uninstall remain pending.
 
-Manage TUN through menu `17 → 44`:
+Manage TUN through menu `5 → 1 → 9 → 44`:
 
 ```bash
 padm-docker protocol tun-status
@@ -1229,12 +1253,12 @@ padm-docker control sync --invite /root/padm-control-invite.json
 ```
 
 Repeat `--listener` to map multiple existing entries, or enter comma-separated listener IDs
-in control menu `15 → 5` (up to 16). Empty segments and invalid IDs are rejected.
+in control menu `2 → 4 → 5` (up to 16). Empty segments and invalid IDs are rejected.
 Join confirms once and initializes identity,
 mapping and the initial account sync in one transaction. Failure preserves the original role, accounts
 and traffic; retrying the same revision/content does not rebuild services. Identity and WireGuard addresses
 are then fixed; a different invitation cannot reclaim them. Ordinary sync retains the committed mapping and API port.
-Control menu `15 → 15` or this command reauthenticates the same connection and replaces its mapping:
+Control menu `2 → 4 → 15` or this command reauthenticates the same connection and replaces its mapping:
 
 ```bash
 padm-docker control remap --invite /root/padm-control-invite.json --listener entry-secondary --yes
@@ -1242,7 +1266,7 @@ padm-docker control remap --invite /root/padm-control-invite.json --listener ent
 
 Disable automatic sync first, then enable it again with the same connection's invitation after committing.
 Revision, digest and the previous managed snapshot remain checked; local accounts and traffic are preserved.
-Control menu `15 → 16/17` updates and reconnects the API port for the same identity:
+Control menu `2 → 4 → 16/17` updates and reconnects the API port for the same identity:
 
 ```bash
 # 被控端先停用自动同步；主控端先停用控制日志调度和控制面 Fail2ban。
@@ -1260,7 +1284,7 @@ explicit rollback cannot cross API ports. The old API port closes after switchin
 `source-check` before enabling source-dependent protection or log scheduling, and import the new invitation
 when enabling controlled auto-sync again. Control-role address changes and multiple peers remain unsupported.
 
-4C.8 adds explicit controller rebinding on the same WireGuard tunnel through control menu `15 → 19`:
+4C.8 adds explicit controller rebinding on the same WireGuard tunnel through control menu `2 → 4 → 19`:
 
 ```bash
 padm-docker control sync-schedule disable --yes
@@ -1320,7 +1344,7 @@ controller authorization revoked. Ordinary rollback rejects snapshots from a dif
 Focused and isolated Linux amd64 dual-daemon tests cover migration, encrypted traffic, invitation
 revocation, same-version sync, lower-version rejection and health-failure recovery.
 For an enabled canonical WireGuard deployment without controller/controlled roles,
-menu `15 → 18 → 7–10` and `wireguard peers list/add/update/remove` manage individual Peers:
+menu `2 → 4 → 18 → 7–10` and `wireguard peers list/add/update/remove` manage individual Peers:
 
 ```bash
 padm-docker wireguard peers list
@@ -1335,7 +1359,7 @@ The update address selects an existing Peer; omitted fields stay unchanged and `
 clears the endpoint. Removing the last Peer is rejected. The existing full configuration
 transaction preserves identity/key bytes and handles failure/INT/TERM; service recreation
 may briefly interrupt connections. Collection changes for v1 controllers or controlled nodes remain rejected.
-Without a control role, menu `15 → 18 → 6` or the following command can migrate local fields
+Without a control role, menu `2 → 4 → 18 → 6` or the following command can migrate local fields
 while preserving every Peer address, public key and endpoint:
 
 ```bash
@@ -1351,7 +1375,7 @@ only when no control role is configured, as described below.
 Native-host/arm64/public-network acceptance remains deferred;
 limited controller recovery with a new identity is described below.
 
-An existing v1 controller can explicitly upgrade through menu `15 → 20` and register another node:
+An existing v1 controller can explicitly upgrade through menu `2 → 4 → 20` and register another node:
 
 ```bash
 padm-docker control upgrade --yes
@@ -1517,7 +1541,7 @@ padm-docker acme schedule disable --domain example.com
 padm-docker acme auto-renew
 ```
 
-Main menu item 8 validates certificates, imports replacements, or runs DNS-01/HTTP-01 standalone/webroot issue/renew.
+Menu `4 → 2. Local TLS certificate management` validates certificates, imports replacements, or runs DNS-01/HTTP-01 standalone/webroot issue/renew.
 It also explicitly enables/disables the HTTP-01 listener and manages automatic renewal.
 No deployment lock is held before final confirmation. Configured deployments use their recorded
 ops image; `--ops-image` cannot substitute a different image.
@@ -1596,7 +1620,7 @@ On success, stdout contains only JSON with `release` and `images`. It is emitted
 
 ### Recovery Archives
 
-Menu `18. Service Maintenance -> 6/7` exports managed inputs and verifies archives.
+Menu `7 → 1 → 6/7` exports managed inputs and verifies archives.
 The host requires Python 3:
 
 ```bash
@@ -1624,8 +1648,8 @@ This stage accepts ASCII USTAR paths only: at most 255 bytes per path, 100 per b
 16,384 entries, 512 MiB per file and 2 GiB total payload; limits fail without truncation.
 Integrity does not establish provenance, business consistency or restore readiness.
 
-Maintenance menu `18 → 8` and this command provide a limited restore preview:
-Both preview and apply (`18 → 9`) accept either the default release or matching
+Maintenance menu `7 → 1 → 8` and this command provide a limited restore preview:
+Both preview and apply (`7 → 1 → 9`) accept either the default release or matching
 manifest, Sigstore bundle and control-bundle files; paths containing spaces are preserved.
 
 ```bash
@@ -1716,7 +1740,7 @@ archived Compose, image environment files or scripts. Saved totals, quotas and h
 traffic keys remain; old baselines are cleared and over-quota accounts are disabled in the
 candidate. Staging is cleaned on success, failure or interruption. No deployment or schedule
 is installed. Unlike `backup verify`, preview is not completely read-only.
-The same supported scope can be applied from menu `18 → 9`; older archives still require matching release assets:
+The same supported scope can be applied from menu `7 → 1 → 9`; older archives still require matching release assets:
 
 ```bash
 padm-docker restore apply /root/padm-recovery.tar --confirm PADM-DOCKER-RESTORE
@@ -1724,7 +1748,7 @@ padm-docker restore recover
 ```
 
 For a controller, shut down and isolate the old host first, then use maintenance
-menu `18 → 11/12` or:
+menu `7 → 1 → 11/12` or:
 
 ```bash
 padm-docker restore preview /root/padm-recovery.tar --rebuild-controller
@@ -1745,7 +1769,7 @@ required; preserving the old controller identity or replacing an existing deploy
 Before the first business write, the transaction persists trusted candidate shutdown inputs,
 empty-directory metadata and schedule snapshots. Installation, health, traffic, Geo or renewal scheduling
 failures and INT/TERM roll back this restore. After registration, SIGKILL recovery can continue
-with menu `18 → 10` or `restore recover`. Ordinary deployment operations refuse pending cleanup.
+with menu `7 → 1 → 10` or `restore recover`. Ordinary deployment operations refuse pending cleanup.
 Failed recovery preserves evidence; external schedule changes are rejected rather than overwritten.
 Traffic, Geo and renewal have separate private persistent snapshots. Rollback checks all registered
 external schedules for drift before restoring renewal, Geo and traffic in reverse installation order.
@@ -1764,7 +1788,7 @@ and complete disaster recovery remain deferred.
 
 ### User Traffic and Quotas
 
-The Docker menu exposes `10. Account Management -> 9. Traffic and Quotas`.
+The Docker menu exposes `2. Subscriptions & users → 3. Traffic and quotas`.
 Saved-counter display does not collect implicitly. Collection also checks quotas;
 quota changes and resets require one confirmation, and reset retains the limit.
 Enter `0` for unlimited, or an empty value or `r` to return; use the exact displayed
@@ -2108,7 +2132,7 @@ Recommended multi-server flow:
 
 ## Routing and Access Control
 
-Docker menu `17. Routing and outbound → 1` accepts global or domain-selective authenticated SOCKS5 TCP input.
+Docker menu `5 → 1 → 3 → 1 → 1` accepts global or domain-selective authenticated SOCKS5 TCP input.
 The same terminal workflow is available through `padm-docker edit --socks5-input`.
 Username and password input is hidden and credentials stay out of process arguments and previews.
 Empty input or EOF cancels; password `0` is valid, while `0` in other fields returns.
@@ -2147,7 +2171,7 @@ bare domains get `domain:`, but category names are never guessed.
 Matcher types use OR: matching TCP uses SOCKS5, matching UDP is blocked, and unmatched
 TCP/UDP is direct. IP traffic without a usable supplied or sniffed domain is also direct;
 this is not enforced global proxying. `--socks5-global` removes only the rules.
-Menu `17`, options `34/35/36`, and `--socks5-domains-add/remove/replace` edit only
+Menu `5 → 1 → 3 → 1`, options `34/35/36`, and `--socks5-domains-add/remove/replace` edit only
 an existing nonempty domain-selective list; disabled and global modes are rejected.
 Additions normalize and deduplicate in first-seen order, with at most 256 merged rules.
 Removal matches complete normalized rules, rejects the whole batch if any item is missing,
@@ -2177,7 +2201,7 @@ not resolve domain targets just to match an IP or recheck addresses after DNS/ho
 These changes retain the same private-input and deployment transaction boundaries.
 SOCKS ingress, public WARP acceptance and complete routing management remain deferred.
 
-Menu `17`, options `14/26/27`, accepts CSV directly to set, append or remove manual
+Menu `5 → 3`, options `14/26/27`, accepts CSV directly to set, append or remove manual
 IP-block rules. The matching CLI options are `--block-ips-csv`,
 `--block-ips-add-csv` and `--block-ips-remove-csv`. Each item is trimmed, with IPv6
 spelling and CIDR host bits preserved; empty items, duplicates, invalid rules and more
@@ -2202,7 +2226,7 @@ padm-docker edit --block-ips-remove-csv '198.51.100.17/24' --confirm PADM-DOCKER
 padm-docker edit --block-ips-replace '198.51.100.0/24' '203.0.113.17/24' --preview
 ```
 
-Menu `17`, option `33`, and `--block-ips-replace <old rule> <new rule>` replace one
+Menu `5 → 3`, option `33`, and `--block-ips-replace <old rule> <new rule>` replace one
 literal IP/CIDR rule in an existing nonempty manual list. Status is shown before the
 two inputs; blank, `0` or EOF cancels either step. Both strings are kept verbatim,
 including IPv6 spelling and CIDR host bits. The complete old string must exist once;
@@ -2210,7 +2234,7 @@ the new string cannot duplicate any current item, including the old one. Replace
 preserves position and all other configuration. CSV, GeoIP, domain and generated
 regional rules are rejected. Preview, confirmation and recovery use the existing transaction.
 
-Menu `17`, option `6`, accepts a literal UDP DNS server IP, a port (blank defaults
+Menu `5 → 1 → 4`, option `6`, accepts a literal UDP DNS server IP, a port (blank defaults
 to `53`), and domain-rule CSV. `--dns-rules <IP> <port> <CSV>` creates or replaces
 the same DNS object using existing CSV normalization and transaction checks;
 private JSON through `--dns` and all other routing policies remain available.
@@ -2228,7 +2252,7 @@ padm-docker edit --dns-domains-add 'full:updates.example.net' --preview
 padm-docker edit --dns-domains-remove 'full:updates.example.net' --confirm PADM-DOCKER-EDIT
 ```
 
-Menu `17`, option `37`, and `edit --hosts-replace <existing exact FQDN> <new literal IP>`
+Menu `5 → 1 → 5`, option `37`, and `edit --hosts-replace <existing exact FQDN> <new literal IP>`
 replace one existing hosts value. They do not add, remove or edit mappings in batches.
 Only ASCII letters in the key are lowercased; whitespace is not trimmed. The address
 is kept verbatim, including IPv6 spelling and case. Whitespace, a trailing newline,
@@ -2243,7 +2267,7 @@ marker, host privilege or state is added. This is a limited management enhanceme
 complete native hosts migration remains deferred. The focused DNS/hosts and menu
 contracts and integrated Docker contracts pass (49/49).
 
-Menu `17`, options `38/39`, and `edit --hosts-add <exact FQDN> <literal IP>` /
+Menu `5 → 1 → 5`, options `38/39`, and `edit --hosts-add <exact FQDN> <literal IP>` /
 `--hosts-remove <exact FQDN>` add or remove one exact mapping. Add can create a missing
 hosts map, but any existing key returns `15` regardless of its value; use replacement
 to change an address. The merged map is limited to 256 keys. Remove requires an existing
@@ -2254,7 +2278,7 @@ the full configuration, share URIs, subscriptions and cumulative traffic are pre
 Focused Linux amd64 and menu PTY verification passes; integrated Docker contracts pass (53/53).
 Complete native hosts migration, region policy and conflict detection remain deferred.
 
-Menu `17 → 8` and interactive `edit --hosts-input` accept one literal IPv4/IPv6
+Menu `5 → 1 → 5 → 8` and interactive `edit --hosts-input` accept one literal IPv4/IPv6
 and a CSV list of exact FQDNs, replacing the whole hosts map after confirmation.
 Existing keys are removed. Domain whitespace is trimmed, ASCII letters lowercased
 and duplicates removed; 1–256 distinct exact domains are accepted. Rule prefixes,
@@ -2272,7 +2296,7 @@ padm-docker edit --hosts-remove new.example.net --confirm PADM-DOCKER-EDIT
 ```
 
 Existing DNS, Direct, Block, selective IPv6 and selective WARP domain lists support
-single-rule replacement. Menu `17`, options `30/31/32`, handles DNS/Direct/Block;
+single-rule replacement. Menu `5 → 1 → 4 → 30` handles DNS; `5 → 3 → 31/32` handles Direct/Block;
 IPv6 option `7` and WARP option `10` handle their existing selective lists. Each shows
 the current rules before asking for one old rule and one replacement:
 
@@ -2292,12 +2316,12 @@ all other configuration. Missing lists and global WARP/IPv6 modes are rejected.
 Preview, cancellation and failure/signal recovery use the existing transaction.
 Complete region and other rule management remain deferred.
 
-Menu `17 → 21 → 1` or terminal command `padm-docker edit --http-relay-input`
+Menu `5 → 1 → 7 → 1` or terminal command `padm-docker edit --http-relay-input`
 accepts the relay port, address families, hidden username/password and required source CSV.
 It requires an existing Xray and confirmation after candidate validation.
 Empty input or EOF cancels; password `0` is valid, while `0` in other fields returns.
 There is no permissive source default; the private JSON CLI and support boundaries remain.
-Menu `17 → 21`, options `4–7`, manages an existing Xray HTTP relay through
+Menu `5 → 1 → 7`, options `4–7`, manages an existing Xray HTTP relay through
 `edit --http-relay-port <port>` and `--http-relay-sources`,
 `--http-relay-sources-add`, or `--http-relay-sources-remove <CSV>`.
 CSV trims item whitespace, deduplicates in first-occurrence order and retains literal
@@ -2310,7 +2334,7 @@ backup and health-failure/signal recovery. Only an already managed Xray is suppo
 Native host, public network, arm64 and trusted-release acceptance for complete `202`
 remain deferred. See [Docker HTTP relay](../docker-http-relay.md).
 
-Menu `17`, options `10/12`, replaces Direct or Block domain rules using comma-separated
+Menu `5 → 3`, options `10/12`, replaces Direct or Block domain rules using comma-separated
 input. `--direct-domains <CSV>` and `--block-domains <CSV>` use the same normalization:
 trim whitespace, lowercase, preserve first-occurrence order while deduplicating, and
 prefix bare domains with `domain:`. They replace the whole group rather than append
@@ -2351,7 +2375,7 @@ or reject configurations. Single sing-box deployments can explicitly enable reso
 blocking as described below. Xray remains deferred: `IPOnDemand` alone does not bind
 the proxy's actual connection address or guarantee rejection on DNS failure.
 
-Menu `17 → 45/46` and `--block-ips-resolve/--block-ips-literal` switch an existing
+Menu `5 → 3 → 45/46` and `--block-ips-resolve/--block-ips-literal` switch an existing
 manual IP list between resolved and default literal-only matching. Resolved mode requires
 one sing-box core and no secondary core; WARP and `.routing.ipv6` egress policies are supported.
 Destination IPs may still be IPv4 or IPv6. Optional v3
@@ -2389,7 +2413,7 @@ padm-docker edit --direct-domains-remove 'full:updates.example.org' --preview
 padm-docker edit --block-domains-remove 'domain:ads.example.net' --confirm PADM-DOCKER-EDIT
 ```
 
-Menu `17`, options `16–17`, enables or disables detected BitTorrent blocking.
+Menu `5 → 2`, options `16–17`, enables or disables detected BitTorrent blocking.
 Optional v3 `.routing.block_bt:true` requires `x-padm-routing-block-bt`; disabling
 removes the field, while `false` and other values are rejected.
 Only traffic the core identifies as plaintext `bittorrent` is blocked.
@@ -2408,7 +2432,7 @@ Enabling adds `block_bt:true` to `routing-status`; disabling preserves all other
 routing policies and traffic totals. The existing candidate, backup and recovery
 transaction is reused, with no new listener, host privilege or firewall rule.
 
-Menu `17`, option `18`, provides a CN regional preset: `domain` matches `geosite:cn`,
+Menu `5 → 3`, option `18`, provides a CN regional preset: `domain` matches `geosite:cn`,
 `ip` matches literal destination IPs against `geoip:cn`, and `both` combines them.
 Optional v3 `.routing.region` stores `mode` and `allow_domains`, with the separate
 `x-padm-routing-region` capability marker. Default Direct exceptions match each domain
@@ -2451,7 +2475,7 @@ and other routing policies. Status reports `region.mode`, `allow_domains` and
 recheck their resolved addresses. Existing CN resource and download-failure gates
 remain in force; this is not final destination-IP filtering or complete regional management.
 
-Menu `17`, option `19`, manages IPv6 domain egress. Optional v3 `.routing.ipv6`
+Menu `5 → 1 → 2` manages IPv6 domain egress. Optional v3 `.routing.ipv6`
 stores `mode` and `domains`, gated separately by `x-padm-routing-ipv6`.
 Selective mode uses the existing four domain-rule types; global mode changes
 only the default outbound and does not remove other policies.
@@ -2485,7 +2509,7 @@ Docker daemon or host interfaces. The host still needs working IPv6 routing and
 egress. TUN/TProxy host-network mode, complete WARP and native-host acceptance
 remain outside this stage.
 
-Menu `17 → 20 → 1` and interactive `edit --warp-input` collect existing WARP Peer
+Menu `5 → 1 → 1 → 1` and interactive `edit --warp-input` collect existing WARP Peer
 parameters directly. The private key is hidden and reaches the private candidate
 only through stdin. Empty input, EOF or `0` cancels. This entry requires a TTY,
 rejects `--preview`/`--confirm` and asks for one final confirmation.

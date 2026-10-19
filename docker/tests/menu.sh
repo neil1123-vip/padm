@@ -13,6 +13,7 @@ DOCKER_LOG="${TEST_ROOT}/docker.log"
 COMPOSE_LOG="${TEST_ROOT}/compose.log"
 DOWNLOAD_MARKER="${TEST_ROOT}/download.called"
 CONTROL_LOG=
+MAIN_MENU_TITLE='padm 管理面板（Docker）'
 mkdir -p "${MOCK_BIN}" "${TEST_ROOT}/native" "${TEST_ROOT}/systemd"
 trap 'rm -rf -- "${TEST_ROOT}"' EXIT
 
@@ -92,7 +93,7 @@ cp "${MOCK_BIN}/curl" "${MOCK_BIN}/wget"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
 chmod 0755 "${MOCK_BIN}/"*
 
-export PATH="${MOCK_BIN}:${PATH}" MSYS=winsymlinks:sys SHELL
+export PATH="${MOCK_BIN}:${PATH}" MSYS=winsymlinks:sys SHELL PADM_NO_COLOR=1
 SHELL=$(command -v bash)
 export DOCKER_HOST=
 export PADM_NATIVE_INSTALL_DIR="${TEST_ROOT}/native"
@@ -112,6 +113,7 @@ runNonTty() {
 
 waitForText() {
     local pattern=$1 file=$2 count=${3:-1} deadline=$((SECONDS + 15))
+    [[ "${pattern}" != 'Docker 管理菜单' ]] || pattern=${MAIN_MENU_TITLE}
     while ((SECONDS < deadline)); do
         if [[ -f "${file}" ]] && [[ "$(grep -Fc "${pattern}" "${file}" || true)" -ge "${count}" ]]; then
             return 0
@@ -126,8 +128,8 @@ assertNoLock() {
         fail 'menu retained the deployment lock'
 }
 
-targetReply() {
-    local prompt=$1 input=$2 count
+targetReplyRaw() {
+    local prompt=$1 input=$2 count root=${TLS_WIZARD_ROOT:-${PADM_DOCKER_INSTALL_DIR}}
     count=$((${targetPrompts["${prompt}"]:-0} + 1))
     targetPrompts["${prompt}"]=${count}
     waitForText "${prompt}" "${CONTROL_LOG}" "${count}" || {
@@ -135,8 +137,74 @@ targetReply() {
         exit 31
     }
     assertNoLock
-    [[ ! -e "${TLS_WIZARD_ROOT}/locks/deployment.lock" ]] || exit 32
+    [[ ! -e "${root}/locks/deployment.lock" ]] || exit 32
     printf '%s' "${input}" >&3
+}
+
+targetReply() {
+    if [[ "$1" == 'Docker 管理菜单' ]]; then
+        targetMainReply "$2"
+    else
+        targetReplyRaw "$@"
+    fi
+}
+
+targetMainReply() {
+    local input=$1 choice=${1%$'\n'} parent
+    local -a path=()
+    for parent in "${menuParents[@]}"; do
+        targetReplyRaw "┌─ ${parent}" $'0\n'
+    done
+    menuParents=()
+    # 旧编号仅是业务场景的动作键，实际握手使用新版菜单路径。
+    case "${choice}" in
+    1|3|4|5|6|7|13|14)
+        path=('核心与服务')
+        case "${choice}" in
+        1) input=$'1\n' ;; 3) input=$'2\n' ;; 4) input=$'3\n' ;; 5) input=$'4\n' ;;
+        6) input=$'5\n' ;; 7) input=$'9\n' ;; 13) input=$'7\n' ;; 14) input=$'8\n' ;;
+        esac
+        targetReplyRaw "${MAIN_MENU_TITLE}" $'6\n'
+        ;;
+    2) input=$'1\n' ;;
+    8|16)
+        path=('站点与证书')
+        [[ "${choice}" != 8 ]] || input=$'2\n'
+        [[ "${choice}" != 16 ]] || input=$'1\n'
+        targetReplyRaw "${MAIN_MENU_TITLE}" $'4\n'
+        ;;
+    9)
+        path=('协议与入口')
+        input=$'9\n'
+        targetReplyRaw "${MAIN_MENU_TITLE}" $'3\n'
+        ;;
+    10|11|12|15)
+        path=('订阅与用户')
+        case "${choice}" in
+        10) input=$'1\n' ;; 11) input=$'2\n' ;; 12) input=$'5\n' ;; 15) input=$'4\n' ;;
+        esac
+        targetReplyRaw "${MAIN_MENU_TITLE}" $'2\n'
+        ;;
+    17)
+        path=('分流工具' '路由与访问控制')
+        input=$'9\n'
+        targetReplyRaw "${MAIN_MENU_TITLE}" $'5\n'
+        targetReplyRaw '┌─ 路由与访问控制' $'1\n'
+        ;;
+    18)
+        path=('系统与脚本')
+        input=$'1\n'
+        targetReplyRaw "${MAIN_MENU_TITLE}" $'7\n'
+        ;;
+    esac
+    if [[ "${#path[@]}" -eq 0 ]]; then
+        targetReplyRaw "${MAIN_MENU_TITLE}" "${input}"
+    else
+        targetReplyRaw "┌─ ${path[0]}" "${input}"
+        menuParents=("${path[@]}")
+        [[ "${choice}" != 4 ]] ||
+            targetReplyRaw '停止服务会中断连接，确认继续？' $'y\n'
+    fi
 }
 
 runSubscriptionsDriver() {
@@ -1953,7 +2021,7 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'19\n'
         targetReply 'Docker IPv6 域名出站' $'invalid\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
-        targetReply 'IPv6 域名规则' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply 'IPv6 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' $'Example.NET, full:Exact.Example.Com\n'
         targetReply 'Docker IPv6 域名出站' $'5\n'
         targetReply '追加 IPv6 域名规则 CSV' $'Example.NET, full:Exact.Example.Com\n'
         targetReply 'fixture-ipv6-daily-confirm [y/N]' $'y\n'
@@ -2079,9 +2147,9 @@ runRoutingDriver() {
         targetReply 'Docker 区域阻断策略' $'0\n'
         targetReply 'Docker 路由与出站' $'19\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
-        targetReply 'IPv6 域名规则' $'0\n'
+        targetReply 'IPv6 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' $'0\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
-        targetReply 'IPv6 域名规则' $'\n'
+        targetReply 'IPv6 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' $'\n'
         for input in 0 ''; do
             targetReply 'Docker IPv6 域名出站' $'5\n'
             targetReply '追加 IPv6 域名规则 CSV' "${input}"$'\n'
@@ -2358,7 +2426,7 @@ runRoutingDriver() {
     ipv6-eof)
         targetReply 'Docker 路由与出站' $'19\n'
         targetReply 'Docker IPv6 域名出站' $'1\n'
-        targetReply 'IPv6 域名规则' $'\004'
+        targetReply 'IPv6 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' $'\004'
         targetReply 'Docker IPv6 域名出站' $'5\n'
         targetReply '追加 IPv6 域名规则 CSV' $'\004'
         targetReply 'Docker IPv6 域名出站' $'6\n'
@@ -2826,6 +2894,8 @@ runPty() {
     fi
     (
         exec 3>"${pipe}"
+        local -A targetPrompts=()
+        local -a menuParents=()
         if [[ "${driver}" != plain ]]; then
             waitForText 'Docker 管理菜单' "${CONTROL_LOG}" || exit 1
             # 等待输入时现场检查，避免只验证退出后的清理。
@@ -2835,7 +2905,7 @@ runPty() {
             waitForText 'fixture-source-input: ' "${CONTROL_LOG}" || exit 11
             printf '%s\n' "${input}" >&3
         elif [[ "${driver}" == setup ]]; then
-            printf '2\n' >&3
+            targetMainReply $'2\n'
             waitForText 'Docker 安装与重装' "${CONTROL_LOG}" || exit 11
             printf '1\n' >&3
             waitForText '核心 [1=Xray, 2=sing-box, 3=Xray+sing-box, 4=sing-box+Xray, 0=取消]' "${CONTROL_LOG}" || exit 11
@@ -2847,7 +2917,7 @@ runPty() {
         elif [[ "${driver}" == install ]]; then
             runInstallDriver "${input}"
         elif [[ "${driver}" == tls ]]; then
-            printf '8\n' >&3
+            targetMainReply $'8\n'
             waitForText 'Docker 证书管理' "${CONTROL_LOG}" || exit 13
             [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 14
             if [[ "${input}" == eof ]]; then
@@ -2883,10 +2953,9 @@ runPty() {
             else
                 printf '%s' "${input}" >&3
             fi
-            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 16
-            printf '0\n' >&3
+            targetMainReply $'0\n'
         elif [[ "${driver}" == protocols ]]; then
-            printf '9\n' >&3
+            targetMainReply $'9\n'
             waitForText 'Docker 协议与入口' "${CONTROL_LOG}" || exit 18
             [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 19
             printf '2\n' >&3
@@ -2911,10 +2980,8 @@ runPty() {
             waitForText 'Docker 协议与入口' "${CONTROL_LOG}" "$([[ "${input}" == cancel ]] && printf 3 || printf 4)" || exit 25
             [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 23
             printf '0\n' >&3
-            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 24
-            printf '1\n' >&3
-            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 3 || exit 25
-            printf '0\n' >&3
+            targetMainReply $'1\n'
+            targetMainReply $'0\n'
         elif [[ "${driver}" == protocol-management ]]; then
             runProtocolManagementDriver "${input}"
         elif [[ "${driver}" == targets ]]; then
@@ -2943,7 +3010,7 @@ runPty() {
             runSubscriptionsDriver "${input}"
         elif [[ "${driver}" == accounts ]]; then
             local accountMenuCount=1
-            printf '10\n' >&3
+            targetMainReply $'10\n'
             waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 26
             printf '1\n' >&3
             accountMenuCount=$((accountMenuCount + 1))
@@ -2976,10 +3043,9 @@ runPty() {
                 waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 28
             done
             printf '0\n' >&3
-            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 29
-            printf '0\n' >&3
+            targetMainReply $'0\n'
         elif [[ "${driver}" == logs || "${driver}" == term ]]; then
-            printf '6\n' >&3
+            targetMainReply $'6\n'
             waitForText 'mock-log-ready' "${CONTROL_LOG}" || exit 3
             # 跟随日志期间也允许独立状态与定时采集争取部署锁。
             [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 4
@@ -2993,20 +3059,16 @@ runPty() {
             fi
             timeout 60 bash -u "${entry}" status >"${TEST_ROOT}/logs-concurrent-status.log" 2>&1 || exit 5
             printf '\003' >&3
-            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 6
             [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 7
-            printf '1\n' >&3
-            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 3 || exit 8
-            printf '0\n' >&3
+            targetMainReply $'1\n'
+            targetMainReply $'0\n'
         elif [[ "${driver}" != plain && "${input}" == $'\004' ]]; then
             printf '\004' >&3
         elif [[ "${driver}" != plain ]]; then
-            local menuCount=1 line
+            local line
             while IFS= read -r line || [[ -n "${line}" ]]; do
-                printf '%s\n' "${line}" >&3
-                menuCount=$((menuCount + 1))
+                targetMainReply "${line}"$'\n'
                 [[ "${line}" != 0 ]] || break
-                waitForText 'Docker 管理菜单' "${CONTROL_LOG}" "${menuCount}" || exit 8
             done <<<"${input}"
         else
             printf '%s' "${input}" >&3
@@ -3018,6 +3080,7 @@ runPty() {
     wait "${feeder}" || feederStatus=$?
     [[ "${feederStatus}" -eq 0 ]] || fail "${name}: PTY driver failed at checkpoint ${feederStatus}"
     [[ "${actual}" -eq "${expected}" ]] || fail "${name}: expected rc=${expected}, got rc=${actual}"
+    ! grep -Fq 'unbound variable' "${CONTROL_LOG}" || fail "${name}: menu or fixture used an unset variable"
     assertNoLock
     if [[ "${driver}" == logs || "${driver}" == term ]]; then
         ! kill -0 "$(<"${FAKE_LOG_PID}")" 2>/dev/null || fail "${name}: log process survived the menu action"
@@ -3025,12 +3088,12 @@ runPty() {
 }
 
 assertMenu() {
-    grep -Fq 'Docker 管理菜单' "${CONTROL_LOG}" || fail 'PTY did not enter the menu'
+    grep -Fq "${MAIN_MENU_TITLE}" "${CONTROL_LOG}" || fail 'PTY did not enter the menu'
 }
 
 assertHelpOnly() {
     grep -Fq '用法:' "${CONTROL_LOG}" || fail 'non-TTY invocation did not show usage'
-    ! grep -Fq 'Docker 管理菜单' "${CONTROL_LOG}" || fail 'non-TTY invocation entered the menu'
+    ! grep -Fq "${MAIN_MENU_TITLE}" "${CONTROL_LOG}" || fail 'non-TTY invocation entered the menu'
     [[ ! -e "${DOWNLOAD_MARKER}" ]] || fail 'help invocation attempted a module download'
     [[ ! -s "${DOCKER_LOG}" ]] || fail 'help invocation touched Docker'
     [[ ! -e "${PADM_DOCKER_INSTALL_DIR}" ]] || fail 'help invocation initialized deployment state'
@@ -3039,6 +3102,80 @@ assertHelpOnly() {
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/usr-local-bin"
 if [[ "${MENU_SCOPE}" == full ]]; then
+# 两个禁色开关分别生效，普通模式仍保留颜色。
+(
+    unset PADM_NO_COLOR NO_COLOR
+    source "${PROJECT_ROOT}/docker/lib/menu.sh"
+    [[ "$(uiStyle title marker)" == *$'\033['* ]] || fail '默认 UI 样式没有颜色'
+    for colorFlag in PADM_NO_COLOR NO_COLOR; do
+        export "${colorFlag}=1"
+        [[ "$(uiStyle title marker)" == marker &&
+            "$(echoContent title marker)" == 'marker ' ]] || fail "${colorFlag} 未关闭颜色"
+        unset "${colorFlag}"
+    done
+)
+
+# 仅替换 CLI 边界，直接用新编号核对首页、原生返回项与受限入口。
+MENU_UI_CLI="${TEST_ROOT}/menu-ui.sh"
+export MENU_UI_PROJECT_ROOT="${PROJECT_ROOT}" MENU_UI_ACTIONS="${TEST_ROOT}/menu-ui.actions"
+cat >"${MENU_UI_CLI}" <<'EOF'
+#!/usr/bin/env bash
+set -u
+source "${MENU_UI_PROJECT_ROOT}/docker/lib/setup.sh"
+source "${MENU_UI_PROJECT_ROOT}/docker/lib/menu.sh"
+dockerMenuCli() { printf '%s\n' "$0"; }
+dockerMenuRun() { printf '%s\n' "$*" >>"${MENU_UI_ACTIONS}"; }
+dockerError() { printf '%s\n' "$*" >&2; }
+PADM_DOCKER_RC_USAGE=2
+dockerMenu
+EOF
+: >"${MENU_UI_ACTIONS}"
+runPty ui-categories plain $'1\n0\n2\n6\n3\n8\n4\n3\n5\n4\n6\n3\nn\n0\n7\n5\n8\n3\n0\n' "${MENU_UI_CLI}"
+for menuLabel in '1. 安装与重装' '2. 订阅与用户' '3. 协议与入口' '4. 站点与证书' \
+    '5. 路由与访问控制' '6. 核心与服务' '7. 系统与脚本' '8. 高级/危险操作'; do
+    grep -Fq "${menuLabel}" "${CONTROL_LOG}" || fail "首页缺少原生分类: ${menuLabel}"
+done
+grep -Fq '┌─ ' "${CONTROL_LOG}" && grep -Fq '└─' "${CONTROL_LOG}" ||
+    fail '菜单未使用共享边框'
+! grep -q $'\033' "${CONTROL_LOG}" || fail 'PADM_NO_COLOR 仍输出终端转义'
+[[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 9 ]] ||
+    fail '原生分类返回项未逐次返回首页'
+[[ "$(<"${MENU_UI_ACTIONS}")" == "$(printf 'status\n%.0s' {1..9})" ]] ||
+    fail '首页重绘未逐次更新状态，或分类返回触发了业务命令'
+
+: >"${MENU_UI_ACTIONS}"
+runPty ui-socks5-unavailable plain $'5\n1\n3\n2\n4\n6\n4\n0\n' "${MENU_UI_CLI}"
+grep -Fq 'SOCKS5 入站' "${CONTROL_LOG}" && grep -Fq '不可用' "${CONTROL_LOG}" ||
+    fail 'SOCKS5 入站未说明受限原因'
+[[ "$(grep -Fc '┌─ Socks5 中继' "${CONTROL_LOG}")" -eq 2 ]] ||
+    fail '受限项未返回 Socks5 中继菜单'
+[[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 2 ]] ||
+    fail 'Socks5 中继未逐层返回首页'
+[[ "$(<"${MENU_UI_ACTIONS}")" == $'status\nstatus' ]] ||
+    fail '受限 SOCKS5 入站触发业务命令'
+
+: >"${MENU_UI_ACTIONS}"
+runPty ui-maintenance-exit plain $'7\n1\n2\ny\n' "${MENU_UI_CLI}"
+[[ "$(<"${MENU_UI_ACTIONS}")" == $'status\nupdate' ]] ||
+    fail '系统维护更新没有正确派发'
+[[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 1 &&
+    "$(grep -Fc '┌─ Docker 服务维护' "${CONTROL_LOG}")" -eq 1 ]] ||
+    fail '系统维护成功后未退出整个旧菜单会话'
+
+: >"${MENU_UI_ACTIONS}"
+CONTROL_LOG="${TEST_ROOT}/ui-routing-scope.log"
+(
+    source "${PROJECT_ROOT}/docker/lib/menu.sh"
+    dockerMenuRun() { printf '%s\n' "$*" >>"${MENU_UI_ACTIONS}"; }
+    dockerMenuRouting socks5 <<< $'16\n3\n0\n'
+) >"${CONTROL_LOG}"
+grep -Fq '1. 启用 SOCKS5 出站' "${CONTROL_LOG}" &&
+    ! grep -Fq '16. 启用 BT 协议阻断' "${CONTROL_LOG}" ||
+    fail 'SOCKS5 出站菜单未限制显示范围'
+grep -Fq '无效选项' "${CONTROL_LOG}" &&
+    [[ "$(<"${MENU_UI_ACTIONS}")" == 'protocol routing-status' ]] ||
+    fail 'SOCKS5 隐藏选项仍可执行，或拒绝后无法继续查看状态'
+
 # 单文件入口没有模块；帮助必须在下载和安装之前返回。
 ISOLATED="${TEST_ROOT}/isolated"
 mkdir -p "${ISOLATED}"
@@ -3057,7 +3194,7 @@ cp -R "${PROJECT_ROOT}/docker/lib" "${SOURCE_ROOT}/docker/lib"
 cp -R "${PROJECT_ROOT}/docker/contracts" "${SOURCE_ROOT}/docker/contracts"
 cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${SOURCE_ROOT}/shell/core/deployment_mode.sh"
 cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${SOURCE_ROOT}/shell/core/stats_grpc.sh"
-cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh,static_site_renderer.sh} "${SOURCE_ROOT}/shell/core/"
+cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh,static_site_renderer.sh,locale.sh} "${SOURCE_ROOT}/shell/core/"
 mkdir -p "${SOURCE_ROOT}/assets"
 cp -R "${PROJECT_ROOT}/assets/static-sites" "${SOURCE_ROOT}/assets/"
 TEST_REF=1111111111111111111111111111111111111111
@@ -3067,7 +3204,7 @@ export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/non-tty-bin"
 runNonTty 0 non-tty-install "${PROJECT_ROOT}/install-docker.sh" \
     install --source "${SOURCE_ROOT}" --ref "${TEST_REF}"
 [[ -f "${PADM_DOCKER_INSTALL_DIR}/mode" ]] || fail 'non-TTY install did not initialize the state'
-! grep -Fq 'Docker 管理菜单' "${CONTROL_LOG}" || fail 'non-TTY install entered the menu'
+! grep -Fq "${MAIN_MENU_TITLE}" "${CONTROL_LOG}" || fail 'non-TTY install entered the menu'
 assertNoLock
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/no-menu-state"
@@ -3075,7 +3212,7 @@ export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/no-menu-bin"
 runPty install-no-menu plain $'\004' "${PROJECT_ROOT}/install-docker.sh" \
     install --source "${SOURCE_ROOT}" --ref "${TEST_REF}" --no-menu
 [[ -f "${PADM_DOCKER_INSTALL_DIR}/mode" ]] || fail '--no-menu install did not initialize the state'
-! grep -Fq 'Docker 管理菜单' "${CONTROL_LOG}" || fail '--no-menu install entered the menu'
+! grep -Fq "${MAIN_MENU_TITLE}" "${CONTROL_LOG}" || fail '--no-menu install entered the menu'
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/usr-local-bin"
@@ -3134,7 +3271,10 @@ export TLS_WIZARD_ROOT TLS_WIZARD_CLI TLS_WIZARD_ACTIONS PROJECT_ROOT
 cat >"${TLS_WIZARD_CLI}" <<'EOF'
 #!/usr/bin/env bash
 set -u
+DOCKER_BUNDLE_SOURCE_ROOT="${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/docker/lib/services.sh"
 source "${PROJECT_ROOT}/docker/lib/setup.sh"
+source "${PROJECT_ROOT}/shell/core/locale.sh"
 dockerError() { printf '%s\n' "$*" >&2; }
 dockerInstallRoot() { printf '%s\n' "${TLS_WIZARD_ROOT}"; }
 dockerDomainIsValid() { [[ "$1" == ws.example.com || "$1" == other.example.com ]]; }
@@ -3187,7 +3327,7 @@ case "${1:-}" in
 source-input-menu)
     source "${PROJECT_ROOT}/docker/lib/menu.sh"
     dockerMenuCli() { printf '%s\n' "${TLS_WIZARD_CLI}"; }
-    printf 'Docker 管理菜单\n'
+    printf 'padm 管理面板（Docker）\n'
     shift
     dockerMenuRun "$@"
     ;;
@@ -3936,14 +4076,14 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
         ;;
     update|rollback|uninstall)
         expectedMaintenance=${maintenanceCase}
-        [[ "$(grep -Fc 'Docker 管理菜单' "${CONTROL_LOG}")" -eq 1 ]] ||
+        [[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 1 ]] ||
             fail "维护 ${maintenanceCase} 成功后仍使用旧菜单"
-        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 1 ]] ||
+        [[ "$(grep -Fc '┌─ Docker 服务维护' "${CONTROL_LOG}")" -eq 1 ]] ||
             fail "维护 ${maintenanceCase} 成功后仍留在子菜单"
         ;;
     backup-flow|backup-failed)
         expectedMaintenance=$'backup export /root/private recovery.tar\nbackup verify /root/private recovery.tar'
-        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 3 ]] ||
+        [[ "$(grep -Fc '┌─ Docker 服务维护' "${CONTROL_LOG}")" -eq 3 ]] ||
             fail '灾备操作结束了维护菜单会话'
         ! grep -Fq '[y/N]' "${CONTROL_LOG}" || fail '灾备菜单增加了重复确认'
         if [[ "${maintenanceCase}" == backup-failed ]]; then
@@ -3963,7 +4103,7 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
             expectedMaintenance+=$'\nrestore preview /root/private recovery.tar'
             expectedMaintenanceVisits=3
         fi
-        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq "${expectedMaintenanceVisits}" ]] ||
+        [[ "$(grep -Fc '┌─ Docker 服务维护' "${CONTROL_LOG}")" -eq "${expectedMaintenanceVisits}" ]] ||
             fail '恢复预览结束了维护菜单会话'
         ! grep -Fq '[y/N]' "${CONTROL_LOG}" || fail '恢复预览增加了重复确认'
         if [[ "${maintenanceCase}" == *-failed ]]; then
@@ -3980,7 +4120,7 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
                 expectedMaintenance+="${expectedReleaseAssets}"
             expectedMaintenance+=' --confirm PADM-DOCKER-RESTORE'
         fi
-        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 2 ]] ||
+        [[ "$(grep -Fc '┌─ Docker 服务维护' "${CONTROL_LOG}")" -eq 2 ]] ||
             fail '灾备恢复动作结束了维护菜单会话'
         if [[ "${maintenanceCase}" == *-failed ]]; then
             grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '灾备恢复未保留失败退出码'
@@ -4010,7 +4150,7 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedMaintenance}" ]] ||
         fail "维护 ${maintenanceCase} 参数分发错误或取消后仍执行操作"
-    for maintenanceLabel in '18. 服务维护' 'Docker 服务维护' '1. 校验部署配置' \
+    for maintenanceLabel in '1. 更新、回滚与部署维护' 'Docker 服务维护' '1. 校验部署配置' \
         '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护' \
         '6. 导出灾备归档' '7. 只读校验灾备归档' '8. 预览灾备恢复（空目标）' \
         '9. 应用灾备恢复（空目标）' '10. 恢复中断的灾备事务' \
@@ -4231,7 +4371,7 @@ for siteCase in flow title cancel static-eof redirect-eof template-eof title-eof
         expectedSite+=$'\nprotocol alpn-status\nprotocol alpn-status entry-tls\nedit --alpn entry-tls h2,http/1.1'
         expectedSite+=$'\nedit --alpn entry-tls h2,http/1.1\nedit --alpn entry-tls http/1.1,h2\nedit --alpn entry-tls http/1.1'
         expectedSite+=$'\nedit --site-template notes\nedit --site-template photos\nedit --site-template docs'
-        for label in '16. 站点管理' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' \
+        for label in '1. 传统 TLS fallback 维护' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' \
             '4. 查看站点模式' '5. ALPN 诊断' '6. 修复为推荐 ALPN' '7. 手动设置 ALPN' \
             '8. 内置静态站点' '1. 笔记（notes）' '2. 相册（photos）' '3. 文档（docs）' \
             '1. h2,http/1.1' '2. http/1.1,h2' '3. http/1.1' '0. 返回'; do
@@ -4249,6 +4389,7 @@ for siteCase in flow title cancel static-eof redirect-eof template-eof title-eof
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'ALPN 诊断失败未显示退出码'
         ;;
     esac
+    expectedSite+="${expectedSite:+$'\n'}status"
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedSite}" ]] ||
         fail "站点 ${siteCase} 参数分发错误或取消后仍执行编辑"
     case "${siteCase}" in
@@ -4874,7 +5015,8 @@ for routingCase in flow csv-long cancel socks5-input-eof socks5-input-commit-fai
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
         fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
     if [[ "${routingCase}" == flow ]]; then
-        for label in '17. 路由与出站' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
+        for label in '5. 路由与访问控制' '9. 完整路由维护' '┌─ Docker 路由与出站' \
+            '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
             '3. 查看路由状态' '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
             '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 直接录入 hosts（整组替换）' \
             '9. 关闭 hosts 覆盖' '10. 替换 Direct 直连例外' '11. 关闭 Direct 直连例外' \
@@ -4925,7 +5067,7 @@ fi
 if [[ "${MENU_SCOPE}" == full || "${MENU_SCOPE}" == control ]]; then
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
-for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
+for controlLabel in '4. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
     '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' \
     '9. 查看自动轮转状态' '10. 启用每小时轮转检查' '11. 停用自动轮转' \
     '12. 查看自动同步状态' '13. 启用或更新自动同步' '14. 停用自动同步' \
@@ -6028,7 +6170,7 @@ export FAKE_RESTART_FAIL=1
 runPty invalid-and-failed menu $'invalid\n5\n1\n0\n' "${CLI}" menu
 grep -Fq '无效' "${CONTROL_LOG}" || fail 'invalid choice was not reported'
 grep -Fq 'Docker Compose 操作失败' "${CONTROL_LOG}" || fail 'operation failure was not reported'
-[[ "$(grep -Fc 'Docker 管理菜单' "${CONTROL_LOG}")" -ge 4 ]] || fail 'failed operation did not remain in the menu'
+[[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -ge 4 ]] || fail 'failed operation did not remain in the menu'
 unset FAKE_RESTART_FAIL
 
 runPty menu-eof menu $'\004' "${CLI}" menu

@@ -53,6 +53,10 @@ dockerBundlePayloadPaths() {
     done <<<"${paths}"
     printf 'shell/core/deployment_mode.sh\n'
     printf 'shell/core/stats_grpc.sh\n'
+    if [[ "$(<"${sourceRoot}/docker/lib/menu.sh")" == *'/shell/core/locale.sh"'* ]]; then
+        [[ -f "${sourceRoot}/shell/core/locale.sh" && ! -L "${sourceRoot}/shell/core/locale.sh" ]] || return 1
+        printf 'shell/core/locale.sh\n'
+    fi
     if [[ "$(<"${sourceRoot}/docker/lib/lifecycle.sh")" == *'/shell/core/cores.sh"'* ]]; then
         [[ -f "${sourceRoot}/shell/core/cores.sh" && ! -L "${sourceRoot}/shell/core/cores.sh" ]] || return 1
         printf 'shell/core/cores.sh\n'

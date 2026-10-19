@@ -156,6 +156,27 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 `install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
 不会安装 Docker、下载 bundle 或初始化状态，现有显式 CLI 命令保持可用。
 
+首页采用与原生版相同的 8 类入口和共享菜单样式：
+
+| 编号 | 菜单 | 常用入口 |
+| --- | --- | --- |
+| `1` | 安装与重装 | 首次配置、重新选择核心与协议、完整规格重装 |
+| `2` | 订阅与用户 | `1` 账号、`2` 订阅、`3` 流量额度、`4` 控制连接、`5` 业务备份 |
+| `3` | 协议与入口 | REALITY、XHTTP、Hysteria2、TUIC、额外端口、CDN；`9` 入口高级管理 |
+| `4` | 站点与证书 | `1` 传统 TLS fallback 与站点、`2` 本机 TLS 证书 |
+| `5` | 路由与访问控制 | `1` 分流工具、`2` BT、`3` 访问控制 |
+| `6` | 核心与服务 | 状态、启停、重启、日志、校验；`7` 升级评估、`8` Geo、`9` 配置编辑 |
+| `7` | 系统与脚本 | `1` 原有发布包维护、`2` 安装状态、`3` Fail2ban |
+| `8` | 高级/危险操作 | `1` 保留数据卸载、`2` VLESS Encryption 实验 |
+
+专项页面保留原有操作编号：旧协议菜单 `9` 迁至 `3 → 9`，旧完整路由菜单 `17`
+迁至 `5 → 1 → 9`，旧服务维护菜单 `18` 迁至 `7 → 1`。
+SOCKS5 入站在 `5 → 1 → 3 → 2` 显示不可用及固定核心的鉴权、来源限制原因。
+核心升级保持两版各自原有机制，Docker 继续使用验签发布包整包升级与回滚。
+共享样式同时覆盖菜单、首次配置、TLS 管理和配置编辑中的标题、列表及摘要边框。
+专项操作编号、输入顺序、默认值、凭据隐藏、确认和事务保持原样，非交互 `--preview`
+输出不变；功能支持边界和原生宿主验收要求保持。
+
 ```bash
 padm-docker setup
 padm-docker validate
@@ -172,7 +193,7 @@ fallback 的 HTTP/1.1 和 HTTP/2 后端均提供相同订阅路由，不新增�
 分享组 HTTPS 链接使用 `core.protocols` 中首个适用入口的实际公开端口，`443` 省略；
 Reality 共存选中的 website 入口实际公开端口为 `443`。4A.7 已通过隔离 amd64 的
 22/23/24/25 HTTPS 主/组订阅下载、严格 TLS 及双族 TCP/UDP 验收；公网及原生双架构另验。
-菜单 `11 → 10/11` 或 `subscription content --base` / `subscription links --base`
+菜单 `2 → 2 → 10/11` 或 `subscription content --base` / `subscription links --base`
 直接输出部署主订阅内容或 HTTPS 链接。内容复用现有节点生成器，包含自用及启用账号，
 即使关闭发布或只有 Reality 入口仍可本地读取；HTTPS 链接要求已启用发布。
 查询不创建分享组或修改发布文件，内容和链接含凭据，仅交给获授权的客户端。
@@ -190,7 +211,7 @@ Shadowsocks 在 sing-box 首配中选 `9`，固定为 `2022-blake3-aes-128-gcm` 
 `ss://` 按 SIP002 百分号编码组合密码；超额时撤销运行入站，解除额度后恢复原密钥和监听。
 TUIC 在 sing-box 首配中选 `10`，使用单 UDP 双栈入口和受管 TLS；
 UUID 同时作为用户 ID、密码及流量账号。拥塞控制支持 `cubic`、`bbr`、`new_reno`，
-认证超时、心跳和 0-RTT 可在 `协议与入口 → 13. TUIC 管理` 或编辑菜单 `14` 管理，默认 `3s`、`10s`、关闭 0-RTT。
+认证超时、心跳和 0-RTT 可在 `协议与入口 → 5. Tuic 管理` 或编辑菜单 `14` 管理，默认 `3s`、`10s`、关闭 0-RTT。
 `tuic://` 使用 `h3`、原生 UDP 中继及严格 TLS 校验；单个双族入口可使用下述范围转发管理。
 Direct Trojan 在 Xray 或 sing-box 首配中选 `11`，使用 TCP/TLS 双栈入口，不经过 Nginx；
 UUID 作为密码及流量账号，可输出 `trojan://` 链接。服务器地址可与 TLS 域名不同，链接保留独立 SNI。
@@ -206,7 +227,7 @@ VLESS/Trojan gRPC TLS 在 Xray 首配中分别选 `14`/`15`，复用 Nginx HTTP/
 支持通用字段编辑、Xray 内复制/删除及 `vless://`/`trojan://` 链接；不接受 sing-box、宿主集成或 fallback。
 两类协议均可复用自身同域 Nginx TLS 入口发布 HTTPS 订阅，无须包含协议 `21`。
 
-Docker `协议与入口 → 12. Hysteria2 管理` 与 `13. TUIC 管理` 为已有 v3
+Docker `协议与入口 → 4. Hysteria2 管理` 与 `5. Tuic 管理` 为已有 v3
 sing-box 单入口提供专项编辑：
 
 ```bash
@@ -321,7 +342,7 @@ Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROX
 默认首页不写入站点目录，已有 `/etc/padm-docker/data/static/index.html` 优先；
 支持通用字段编辑、同核复制/删除与链接；默认页、静态目录、302 和 ALPN 已支持事务管理，4A.9 可复用自身 fallback 发布 HTTPS 订阅，宿主集成与独立发布域名仍未开放。
 
-Docker 菜单 `16. 站点管理` 管理已有 Nginx TLS 入口 `21–25`、fallback `27`/`29`
+Docker 菜单 `4 → 1. 传统 TLS fallback 维护` 管理已有 Nginx TLS 入口 `21–25`、fallback `27`/`29`
 或 Hysteria2 的静态网页：
 
 ```bash
@@ -346,7 +367,7 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 `status` 只报告 `site_mode`，不输出目标 URL。已有旧规格保持兼容，带 `.site` 的 v3
 规格要求控制 bundle 声明 `x-padm-site-content`；受管 webroot 与 standalone HTTP-01 见证书管理。
 
-菜单 `16 → 8. 内置静态站点` 可选择 `notes`、`photos` 或 `docs`。内置主题仅适用于
+菜单 `4 → 1 → 8. 内置静态站点` 可选择 `notes`、`photos` 或 `docs`。内置主题仅适用于
 已有 v3 Nginx TLS `21–25`（含纯/混合 sing-box `23`）、Xray fallback `27/29`
 或 sing-box Hysteria2；其它不提供网站的 Reality 入口可共存。选主题后可输入站名，
 回车使用主题默认值，`0` 返回；CLI `--site-title` 仅配合 `--site-template`，
@@ -354,7 +375,7 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 控制包复制，随包清单和资源完整性校验失败即拒绝；生成后只保存普通 `site.mode=static`，
 不保存主题身份或站名，之后需改名时重新选择模板；旧控制包的默认页、静态目录和 302 行为保持。
 
-Hysteria2 先通过上面的模板或目录命令发布网页，再在 `协议与入口 → 12. Hysteria2 管理`
+Hysteria2 先通过上面的模板或目录命令发布网页，再在 `协议与入口 → 4. Hysteria2 管理`
 关闭混淆、选择本地网页；CLI 使用 `edit --hy2-masquerade <入口 ID> local`，
 沿用 `--preview/--confirm PADM-DOCKER-EDIT`。操作前校验已发布网页，不自动创建站点或关闭混淆。
 只挂载受管 `data/static` 到固定只读 `/srv/padm/`，拒绝任意 `file://` 输入；
@@ -384,7 +405,7 @@ padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
-Docker 菜单 `17. 路由与出站 → 1` 提供认证 SOCKS5 TCP 全局或域名分流直接录入，
+Docker 菜单 `5 → 1 → 3 → 1 → 1` 提供认证 SOCKS5 TCP 全局或域名分流直接录入，
 也可在终端运行 `padm-docker edit --socks5-input`。用户名和密码隐藏输入，
 凭据不进入进程参数或预览；空输入或 EOF 取消，密码 `0` 是合法值，其它字段 `0` 返回。
 完整候选验证后仍需确认提交，该入口不能与 `--preview` 或 `--confirm` 组合。
@@ -416,7 +437,7 @@ CSV 输入去除首尾空白、转小写并按首次出现去重，裸域名补 
 私有 JSON 中规则须已规范化。各类规则之间为 OR，匹配 TCP 经上游、匹配 UDP 阻断，
 未匹配 TCP/UDP 直连；无域名且无法嗅探的 IP 流量也直连，不是强制全局代理。
 `--socks5-global` 仅删除域名规则、保留上游及凭据，恢复全局出站。
-菜单 `17` 的 `34/35/36` 和 `--socks5-domains-add/remove/replace` 管理已有非空域名名单；
+菜单 `5 → 1 → 3 → 1` 的 `34/35/36` 和 `--socks5-domains-add/remove/replace` 管理已有非空域名名单；
 未启用或全局模式拒绝。追加规范化后稳定去重，合并最多 256 条；
 删除按完整规范化规则匹配，缺项整批拒绝，保留剩余次序。删空关闭整个 SOCKS5，
 以后启用须重新导入私有凭据，不自动切为全局。单条替换保留原位置，
@@ -434,19 +455,19 @@ sing-box 从固定 SagerNet 源直连下载所选分类，资源缺失或下载�
 凭据保存在私有规格、受管核心配置及备份中。SOCKS5 认证链路本身不加密，须使用可信上游网络。
 完整 SOCKS 入站、WARP 和其它路由策略仍待迁移。
 
-菜单 `17` 还提供核心内 DNS 分流和精确 hosts 覆盖。两者可独立使用，也可与 SOCKS5 共存；
+菜单 `5 → 1` 的 `4. DNS 覆盖` 和 `5. DNS/hosts 覆盖` 提供核心内 DNS 分流和精确 hosts 覆盖。两者可独立使用，也可与 SOCKS5 共存；
 只改变客户端直连域名目标的解析，不改宿主 DNS、路由、防火墙或公开监听。
 DNS 私有 JSON 示例为 `{"server":"192.0.2.53","port":53,"domains":["domain:example.net"]}`，
 仅接受字面 IPv4/IPv6 UDP 服务器，`domains` 必须包含 1–256 条已规范化的
 `full:`、`domain:`、`keyword:` 或 `geosite:` 规则，各类为 OR；本阶段不提供全局 DNS、DoH 或 DoT。
-菜单 `17` 的 `6` 可直接输入服务器 IP、端口（留空默认 `53`）和域名规则 CSV，
+菜单 `5 → 1 → 4 → 6` 可直接输入服务器 IP、端口（留空默认 `53`）和域名规则 CSV，
 或使用 `--dns-rules <IP> <端口> <CSV>`；CSV 规范化与 Direct/Block 相同。
 此操作创建或整组替换 DNS 分流，保留 `--dns` 私有 JSON CLI 和其它路由子项。
-菜单 `17` 的 `28/29` 与 `--dns-domains-add/--dns-domains-remove <CSV>` 可增删已有
+菜单 `5 → 1 → 4` 的 `28/29` 与 `--dns-domains-add/--dns-domains-remove <CSV>` 可增删已有
 DNS 分流的域名名单，保留原服务器和端口。追加保留历史顺序并去重，合并后最多 256 条；
 删除按完整规范化规则匹配，任一缺项整次拒绝，删空关闭该 DNS 分流并保留其它路由。
 未启用 DNS 时增删明确拒绝；重复追加仍经过确认事务，可能更新回滚元数据。
-菜单 `17 → 41/42` 与 `edit --dns-upstream <IP> <端口>` /
+菜单 `5 → 1 → 4 → 41`、`5 → 1 → 3 → 1 → 42` 与 `edit --dns-upstream <IP> <端口>` /
 `--socks5-upstream <IP> <端口>` 可修改已有上游，保留域名名单、SOCKS5 凭据与其它配置。
 地址沿用可路由字面 IPv4/IPv6 合同并保留原文；端口显式填写 `1–65535`，没有缺省值，
 CLI 中的前导零按十进制处理。未启用或地址和端口均未变化返回 `15`；
@@ -454,7 +475,7 @@ CLI 中的前导零按十进制处理。未启用或地址和端口均未变化�
 hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–256 个小写精确域名，
 每个域名对应一个可路由字面 IPv4/IPv6；不支持 hosts 后缀、关键字或分类匹配。
 地址示例不可直接用作服务器；文件安全要求与 SOCKS5 输入相同。
-菜单 `17 → 37` 与 `edit --hosts-replace <已有精确 FQDN> <新单字面 IP>` 可替换已有
+菜单 `5 → 1 → 5 → 37` 与 `edit --hosts-replace <已有精确 FQDN> <新单字面 IP>` 可替换已有
 hosts 的一个地址，不新增、删除或批量编辑映射。域名只将 ASCII 字母转小写，不去空白；
 IP 保留原文，包括 IPv6 大小写和写法。空白、末尾换行、CSV、域名规则前缀或非法地址返回 `2`；
 缺键、未启用 hosts 或地址原文同值返回 `15`。只豁免目标键的值，其它 hosts、路由和完整配置冻结，
@@ -463,7 +484,7 @@ IP 保留原文，包括 IPv6 大小写和写法。空白、末尾换行、CSV�
 原 `--hosts <私有 JSON>` 整组入口保持，不新增 schema、marker、权限或状态。
 这是有限管理增强，不代表原生 hosts 完整迁移；DNS/hosts 定向与菜单已通过，集中完整 49 项回归通过。
 
-菜单 `17 → 38/39` 与 `edit --hosts-add <精确 FQDN> <单字面 IP>` /
+菜单 `5 → 1 → 5 → 38/39` 与 `edit --hosts-add <精确 FQDN> <单字面 IP>` /
 `--hosts-remove <精确 FQDN>` 提供单键新增和精确删除。新增可创建缺省 hosts，
 但已有键不论地址是否相同均返回 `15`，须用替换入口改地址；合并最多 256 项。
 删除要求键已存在，缺键或未启用返回 `15`；删掉最后一键关闭 hosts，
@@ -472,7 +493,7 @@ IP 保留原文，包括 IPv6 大小写和写法。空白、末尾换行、CSV�
 定向与菜单 PTY 回归，集中完整 53 项回归通过；
 完整区域策略、冲突检测及原生 hosts 完整迁移仍为 `deferred`。
 
-菜单 `17 → 8` 与交互 CLI `edit --hosts-input` 可输入一个字面 IPv4/IPv6，
+菜单 `5 → 1 → 5 → 8` 与交互 CLI `edit --hosts-input` 可输入一个字面 IPv4/IPv6，
 再输入精确 FQDN CSV，整组替换 hosts；旧键不会保留，确认前可取消。
 域名去除首尾空白、ASCII 转小写并去重，接受 1–256 个精确域名；
 不接受规则前缀、通配符或空项。IP 保留原文并复用完整规格校验。
@@ -495,7 +516,7 @@ padm-docker edit --dns-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-off --confirm PADM-DOCKER-EDIT
 ```
 
-已有域名名单可单条替换：菜单 `17` 的 `30/31/32` 分别编辑 DNS、Direct、Block，
+已有域名名单可单条替换：菜单 `5 → 1 → 4 → 30` 编辑 DNS，`5 → 3 → 31/32` 分别编辑 Direct、Block，
 IPv6 子菜单 `7` 和 WARP 子菜单 `10` 编辑已有 selective 名单。先查看当前规则，
 再输入旧规则与新规则，沿用预览和确认事务：
 
@@ -521,7 +542,7 @@ SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际
 普通 `--spec` 编辑不能绕过路由冻结。启用、替换与关闭复用原候选确认、备份和失败/信号恢复。
 `routing-status` 额外返回 DNS 服务器、域名规则和 hosts 映射，不显示 SOCKS5 凭据。
 
-菜单 `17 → 21 → 1` 或终端 `padm-docker edit --http-relay-input` 可直接录入
+菜单 `5 → 1 → 7 → 1` 或终端 `padm-docker edit --http-relay-input` 可直接录入
 已有 Xray 的中继端口、地址族、隐藏用户名/密码和必填来源 CSV；
 候选验证后确认提交，空输入/EOF 取消，密码 `0` 合法，其它字段 `0` 返回。
 来源不设开放默认值，旧私有 JSON CLI 保留，支持范围不变。
@@ -535,14 +556,14 @@ CSV 去项首尾空白、稳定去重并保留字面写法；追加保留旧顺�
 完整 `202` 的原生宿主/公网/arm64/可信发布验收继续 deferred，
 详见 [Docker HTTP 中继](documents/docker-http-relay.md)。
 
-菜单 `17` 的 `10/12` 分别替换 Direct 直连例外和 Block 域名阻断，可直接输入
+菜单 `5 → 3` 的 `10/12` 分别替换 Direct 直连例外和 Block 域名阻断，可直接输入
 逗号分隔规则；CLI `--direct-domains/--block-domains` 使用相同输入。
 CSV 去首尾空白、转小写、按首次出现去重，裸域名补 `domain:`，
 整组替换而非累加，空项/非法或超过 256 条拒绝；清空请使用对应关闭命令。
-菜单 `17` 的 `22/23` 或 `--direct-domains-add/--block-domains-add` 可增量追加：
+菜单 `5 → 3` 的 `22/23` 或 `--direct-domains-add/--block-domains-add` 可增量追加：
 保留原规则顺序，再添加首次出现的新项；对应组缺失时创建，合并后超过 256 条拒绝。
 重复追加不重复规则，确认仍沿用部署事务，可能更新回滚元数据。
-菜单 `17` 的 `24/25` 或 `--direct-domains-remove/--block-domains-remove` 可精确删除：
+菜单 `5 → 3` 的 `24/25` 或 `--direct-domains-remove/--block-domains-remove` 可精确删除：
 输入中的每条规范化规则必须已存在于对应手工列表，否则整次操作拒绝；删除保留剩余顺序，
 最后一条删除后清理该子项。不会删除区域策略、IP/CIDR 或其它路由子项。
 仍保留 root 私有 JSON 导入，格式均为
@@ -592,7 +613,7 @@ DNS 或最终目的地址，不把诊断升级成配置拒绝或完整冲突检�
 单 sing-box 已提供显式解析后 IP 阻断，见下文；Xray 继续待交付。
 本地解析结果不能代替代理实际连接地址，Xray `IPOnDemand` 不满足此门槛。
 
-菜单 `17` 的 `14/26/27` 分别直接录入、追加和精确删除 IP/CIDR 阻断 CSV，
+菜单 `5 → 3` 的 `14/26/27` 分别直接录入、追加和精确删除 IP/CIDR 阻断 CSV，
 使用独立 v3 `.routing.block_ips`；原 CLI 私有 JSON 接口保留，格式为
 `{"ips":["192.0.2.8","198.51.100.0/24","2001:db8::/32","geoip:cn"]}`。
 接受 1–256 条唯一 IPv4/纯 IPv6 字面地址或 CIDR，以及固定 `geoip:cn`；
@@ -622,7 +643,7 @@ CSV 与私有 JSON 复用相同校验、预览、确认及恢复事务，保留�
 空数组、重复项或非法输入在合并前拒绝。删空只移除手工 IP 子项，
 保留区域预设生成的 `geoip:cn` 和其它路由，预览与取消不切换配置。
 
-菜单 `17` 的 `33` 和 `--block-ips-replace <旧规则> <新规则>` 可单条替换已有手工
+菜单 `5 → 3` 的 `33` 和 `--block-ips-replace <旧规则> <新规则>` 可单条替换已有手工
 IP/CIDR 名单。先查看当前规则，再输入两个字面地址或 CIDR；原位替换并冻结其它配置。
 两值保持原文，不去空白、不转换 IPv6 写法或 CIDR 宿主位；完整字符串旧项必须
 恰好存在一次，新值不得重复或与旧项相同。不接受 CSV、GeoIP、域名和区域合成项；
@@ -637,7 +658,7 @@ Xray 复用受管/镜像 GeoIP；sing-box 从固定官方地址经直连下载 `
 关闭仅删除 IP 子项，保留域名 Block、Direct、SOCKS、DNS/hosts。
 状态追加 `block_ips.ip_rules`，完整区域策略向导与宿主目的过滤仍待迁移。
 
-菜单 `17 → 45/46` 或 `--block-ips-resolve/--block-ips-literal` 可切换已有手工
+菜单 `5 → 3 → 45/46` 或 `--block-ips-resolve/--block-ips-literal` 可切换已有手工
 IP 名单的解析模式。新模式要求单 sing-box、无副核心，支持与 WARP 或
 `.routing.ipv6` 出站策略组合；目的地址仍可为 IPv4/IPv6。v3
 `.routing.block_ips.resolve_domains:true` 需控制包声明
@@ -659,7 +680,7 @@ padm-docker edit --block-ips-resolve --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-ips-literal --confirm PADM-DOCKER-EDIT
 ```
 
-菜单 `17` 的 `16–17` 管理 BT 协议阻断，v3 `.routing.block_bt:true` 启用，
+菜单 `5 → 2` 的 `16–17` 管理 BT 协议阻断，v3 `.routing.block_bt:true` 启用，
 关闭删除字段，不接受 `false` 或其它类型；控制包须声明 `x-padm-routing-block-bt`。
 只阻断核心嗅探识别出的明文 `bittorrent`，不保证加密、混淆、DHT 或部分 uTP；
 两核心 UDP 识别范围不同，不能把开关等同于所有 BT 流量或端口封禁。
@@ -674,7 +695,7 @@ padm-docker edit --block-bt-off --confirm PADM-DOCKER-EDIT
 开关复用现有候选校验、备份与恢复事务；独立关闭保留其它路由子项及流量累计，
 `routing-status` 启用时追加 `block_bt:true`。没有新增监听、宿主权限或防火墙规则。
 
-菜单 `17` 的 `18` 提供 CN 区域预设，分别按 `geosite:cn` 域名、`geoip:cn`
+菜单 `5 → 3 → 18` 提供 CN 区域预设，分别按 `geosite:cn` 域名、`geoip:cn`
 字面目的 IP 或两者组合阻断。v3 `.routing.region` 保存 `mode` 和
 `allow_domains`，控制包须声明 `x-padm-routing-region`。
 固定直连例外为 `dl.google.com`、`apple.com`、`bing.com`、`microsoft.com`、
@@ -709,7 +730,7 @@ padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
 IP 模式不为域名目标提前解析或在解析后复查；CN 数据沿用现有资源与下载失败恢复门禁，
 不代表最终拨号 IP 过滤或完整区域策略管理。
 
-菜单 `17` 的 `19` 管理 IPv6 域名出站。v3 `.routing.ipv6` 使用独立
+菜单 `5 → 1 → 2` 管理 IPv6 域名出站。v3 `.routing.ipv6` 使用独立
 `x-padm-routing-ipv6` 门禁，保存 `mode` 与 `domains`；选择性模式接受现有四类
 域名规则，全局模式仅改变默认出口，不删除其它策略。
 
@@ -735,7 +756,7 @@ Direct 例外、域名/IP/BT 阻断优先于选择性 IPv6，选择性 IPv6 优�
 不修改原默认网络、Docker daemon 或宿主接口，宿主仍须具备 IPv6 路由与出口。
 TUN/TProxy 的宿主网络模式不属于本阶段支持范围，完整 WARP 和宿主验收继续待补。
 
-菜单 `17 → 20 → 1` 和交互 CLI `edit --warp-input` 直接录入已有 WARP Peer 参数，
+菜单 `5 → 1 → 1 → 1` 和交互 CLI `edit --warp-input` 直接录入已有 WARP Peer 参数，
 私钥隐藏输入，只经标准输入进入私有候选。空输入/EOF 或 `0` 取消；
 该入口仅交互终端，不与 `--preview`/`--confirm` 组合，最后只确认一次。
 子菜单还可关闭、查看状态或管理已有配置的分流域名、全局模式和隧道地址族；
@@ -821,7 +842,7 @@ NaiveProxy 的入口域名随 TLS 身份固定，不能单独修改为其它域�
 旧部署没有 `config/spec.json` 时，必须导入保留的完整原始 spec，匹配运行配置后才能接入；
 缺字段、额外账号、手写路由/站点或不匹配的挂载路径会拒绝编辑，不从运行摘要伪造输入。
 
-Docker 菜单 `9 → 19. Shadowsocks 自用用户密钥轮换` 或以下命令，
+Docker 菜单 `3 → 9 → 19. Shadowsocks 自用用户密钥轮换` 或以下命令，
 每次只轮换一个已有 v3 sing-box 协议 `30` 入口的 `shadowsocks.user_password`：
 
 ```bash
@@ -837,7 +858,7 @@ padm-docker edit --rotate-ss-user <入口ID> --confirm PADM-DOCKER-EDIT
 专项、Docker amd64 双族 TCP/UDP 真实回归及集中完整合同 61/61 项通过；
 完整管理仍 `deferred`，见[实施计划 3D.24](documents/docker-menu-parity-plan.md#3d24-shadowsocks-逐入口自用用户密钥轮换)。
 
-菜单 `9 → 20. Shadowsocks 服务器密钥轮换` 或 `edit --rotate-ss-server <入口ID>`
+菜单 `3 → 9 → 20. Shadowsocks 服务器密钥轮换` 或 `edit --rotate-ss-server <入口ID>`
 复用同一专项事务，只修改选中入口的 `shadowsocks.server_password`，支持相同的预览与确认参数。
 自用及独立账号用户密钥、UUID、其它入口、分享授权/token、额度与累计保持；
 该入口的主订阅和所有账号 URI 随服务器密钥更新，所有客户端须重新导入。
@@ -850,7 +871,7 @@ padm-docker edit --spec /root/original-spec.json --preview
 padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 ```
 
-菜单“协议与入口”的“核心/Nginx 内部端口”可同时修改已有 WS/HTTPUpgrade/gRPC TLS
+菜单“协议与入口 → 入口高级管理 → 核心/Nginx 内部端口”（`3 → 9 → 17`）可同时修改已有 WS/HTTPUpgrade/gRPC TLS
 （21–25）入口的核心后端端口与 Nginx TLS 内部端口，保留公开端口、账号及分享身份。
 HTTPUpgrade 支持 Xray/sing-box，其余仅 Xray；额外公开端口及受管 Reality 443 共存同步投影。
 端口须为 1–65535，并通过各容器监听、统计 API、HTTP-01 及共存端口冲突检查。
@@ -861,7 +882,7 @@ padm-docker edit --internal-ports entry-ws 31300 8446 --preview
 padm-docker edit --internal-ports entry-ws 31300 8446 --confirm PADM-DOCKER-EDIT
 ```
 
-菜单“协议与入口”的“额外入口端口”可给已有受管入口添加、删除或修改额外公开端口。
+菜单“协议与入口 → 额外入口端口管理”（`3 → 6`）可给已有受管入口添加、删除或修改额外公开端口。
 v3 可选顶层 `port_aliases` 保存最多 16 项 `{listener_id, public_port}`；
 TCP/UDP 和地址族继承目标入口，多个发布端口仍使用同一认证、入口 ID、账号与累计流量。
 TLS 入口继续经 Nginx TLS 前端；bridge 的 Reality 443 共存别名继承完整 SNI 分流，
@@ -894,7 +915,7 @@ WS/SSH Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名；
 双栈发布已在隔离 amd64 Linux daemon 验收；公网、原生宿主及 arm64 仍需独立验收，
 完整 `207` 保持 `deferred`。
 
-菜单“协议与入口 → 端口跳跃”提供 Hy2/TUIC 范围 DNAT 的配置、启停、清除及活动端口分享。
+菜单“协议与入口 → 入口高级管理 → 端口跳跃”（`3 → 9 → 11`）提供 Hy2/TUIC 范围 DNAT 的配置、启停、清除及活动端口分享。
 v3 可选 `port_hopping` 保存 `{listener_id, range_start, range_end, ipv4, ipv6}`，
 同步到部署记录和 Compose 的 `x-padm-port-hopping` 元数据。
 当前范围限于单 sing-box、单个双族 Hy2 或 TUIC 入口、已有流量统计目录，
@@ -980,7 +1001,7 @@ Hy2 使用客户端原生默认 30 秒随机换端口，最多观察 300 秒，�
 其它客户端导入、原生宿主、arm64、公网、TUIC 客户端自动跳跃、
 旧会话排空及完整 Hy2/TUIC 跳跃仍为 `deferred`。
 
-菜单“协议与入口 → CDN 连接地址”可为已有 `2` Reality XHTTP 及 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
+菜单“协议与入口 → CDN 入口管理”（`3 → 7`）可为已有 `2` Reality XHTTP 及 `21/22/23/24/25` WS/HTTPUpgrade/gRPC TLS
 入口设置多个 IP 或域名，覆盖自用链接、主订阅和分享组中的连接地址。
 v3 可选 `cdn_entries` 保存最多 16 项 `{listener_id, addresses}`，每项 1–16 个唯一地址；
 不含该字段时使用原服务器地址。地址不接受 URL、端口、空白或空项。
@@ -1010,7 +1031,7 @@ Reality gRPC 与其它 TCP/UDP 协议仍不在范围内；外部 CDN、TLS/H3 �
 `24/25` 沿用受管 Nginx HTTP/2 gRPC 反代和严格 TLS 身份，不套用 WS 的 Host/path 门禁。
 公网 CDN 供应商的 gRPC 透传仍需独立验收。
 
-菜单新增“协议与入口”，可查看稳定入口 ID、核心、协议、地址/端口及地址族，
+菜单“协议与入口 → 入口高级管理”（`3 → 9`）可查看稳定入口 ID、核心、协议、地址/端口及地址族，
 查看全部或指定入口的分享链接，并进入现有编辑器修改、复制或删除入口。
 `protocol links` 标准输出只含 URI；关闭 HTTPS 订阅发布时仍可输出本地链接，
 不会开启发布、修改受管规格或采集流量。旧部署缺少完整规格或运行配置存在漂移时拒绝输出；
@@ -1022,7 +1043,7 @@ padm-docker protocol links
 padm-docker protocol links vless-reality
 ```
 
-已有受管部署可用协议菜单 `14` 增量安装；v3 部署还可用 `15` 直接删除、`16` 保留参数重建：
+已有受管部署可用菜单 `3 → 9 → 14` 增量安装；v3 部署还可用同页 `15` 直接删除、`16` 保留参数重建：
 
 ```bash
 padm-docker edit --protocol-add vless-reality 2 28443 --preview
@@ -1123,7 +1144,7 @@ Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2/A
 带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。
 3A.3 已通过本地双核心事务、PTY、流量、更新/回滚和 Linux 权限回归；真实签名发布、业务镜像及双架构客户端连通仍待验。
 
-主菜单 `协议与入口` -> `重生成 Reality 参数` 可选择已有入口，确认后更新密钥对和 short ID。
+菜单 `协议与入口 → REALITY 管理 → 重生成 Reality 参数`（`3 → 2 → 2`）可选择已有入口，确认后更新密钥对和 short ID。
 也可使用 CLI：
 
 ```bash
@@ -1136,7 +1157,7 @@ padm-docker edit --regenerate-reality <入口ID> --confirm PADM-DOCKER-EDIT
 预览不提交，确认前的候选参数不会保留到下一次命令；普通 `edit --spec` 仍禁止手工改密钥。
 失败或中断使用配置快照恢复；公开 `rollback` 仍只回滚更新快照，不是编辑撤销命令。
 
-Docker 菜单 `9 → 18. VLESS Encryption 实验` 仅管理 schema 3 的 Xray
+Docker 菜单 `8 → 2. VLESS Encryption 实验` 仅管理 schema 3 的 Xray
 Reality Vision（协议 `1`）与 Reality XHTTP（协议 `2`）已有入口：
 
 ```bash
@@ -1209,7 +1230,7 @@ padm-docker validate
 padm-docker assess
 ```
 
-服务维护菜单第 5 项提供受管 Fail2ban 的状态、单 IP 解封、WS 站点扫描启停及参数管理：
+菜单 `7 → 3. Fail2ban 防护` 提供受管 Fail2ban 的状态、单 IP 解封、WS 站点扫描启停及参数管理：
 
 ```bash
 padm-docker fail2ban status
@@ -1387,7 +1408,7 @@ TProxy/Redirect 的 `net-transparent` 禁用 Docker 自动重启；daemon 或宿
 启用透明集成时，当前及目标控制包须有 `x-padm-transparent-managed-restart`；
 缺少该能力的旧包须先停用集成再升级或回退。旧 CLI 升级进程不会重载新代码，
 首次迁移也先停用集成。仅设置 `restart=no` 不等于从规格停用。
-TProxy 管理入口为菜单 `17 → 43`，或以下命令：
+TProxy 管理入口为菜单 `5 → 1 → 9 → 43`，或以下命令：
 
 ```bash
 padm-docker protocol tproxy-status
@@ -1422,7 +1443,7 @@ UID 范围为 `1–2147483647`，排除受管业务 UID `10001`；root 核心拨
 三种族的真实 TCP/UDP 转发和停止清理。原生宿主重启、arm64、公网及完整
 5C 仍待验收。
 
-Redirect TCP 管理入口为菜单 `17 → 47`：
+Redirect TCP 管理入口为菜单 `5 → 1 → 9 → 47`：
 
 ```bash
 padm-docker protocol redirect-status
@@ -1450,7 +1471,7 @@ OUTPUT 另需 owner/conntrack；预检不修改 sysctl。
 全主机状态使用 schema 2 的 `output_all=true`，旧 schema 1 兼容。
 原生宿主、arm64、公网、重启和完整卸载仍待验。
 
-TUN 管理入口为菜单 `17 → 44`：
+TUN 管理入口为菜单 `5 → 1 → 9 → 44`：
 
 ```bash
 padm-docker protocol tun-status
@@ -1467,7 +1488,7 @@ padm-docker edit --tun-off
 旧 bundle 缺少 TUN 管理能力时拒绝启用或恢复，不能删除 state 绕过门禁。
 Docker Linux amd64 隔离验收已通过；原生宿主、arm64、公网、整机重启和完整卸载仍待验。
 
-主菜单第 13 项“核心升级评估”或 `assess` 会验签并预拉取候选镜像，使用私有配置副本
+菜单 `6 → 7. 核心升级评估` 或 `assess` 会验签并预拉取候选镜像，使用私有配置副本
 执行菜单版升级风险扫描、实际核心配置试跑和 Xray 严格校验，以及已启用的 TLS、
 订阅和宿主集成检查。输出候选发布与实际核心版本；不备份、不采集流量、不切换
 配置或控制 bundle，也不启停现有服务。完成、失败或取消后清理候选。
@@ -1477,7 +1498,7 @@ Docker Linux amd64 隔离验收已通过；原生宿主、arm64、公网、整�
 Xray 严格解析另用未知字段探针确认；不识别严格模式的候选核心会明确显示“未启用”，
 不能将普通配置试跑通过视为严格解析通过。
 
-Xray Geo 数据可在主菜单第 14 项管理，单 Xray 和包含 Xray 的双核心部署均可用：
+Xray Geo 数据可在菜单 `6 → 8` 管理，单 Xray 和包含 Xray 的双核心部署均可用：
 
 ```bash
 padm-docker geo status
@@ -1550,11 +1571,11 @@ padm-docker control join --invite /root/padm-control-invite.json --listener entr
 padm-docker control sync --invite /root/padm-control-invite.json
 ```
 
-`--listener` 可重复指定现有入口；菜单 `15 → 5` 输入逗号分隔的入口 ID（最多 16 个），
+`--listener` 可重复指定现有入口；菜单 `2 → 4 → 5` 输入逗号分隔的入口 ID（最多 16 个），
 空段、尾逗号或非法 ID 拒绝。接入一次确认，在同一事务中初始化被控身份、固定映射并完成首轮同步。
 失败保留原角色、账号和流量；重复同步同版本同内容不重建。
 双方身份和 WireGuard 地址随后冻结，不能用另一邀请重新认领。普通同步保留已提交映射和 API 端口。
-菜单 `15 → 15` 或以下命令可在同连接上重新认证并替换映射：
+菜单 `2 → 4 → 15` 或以下命令可在同连接上重新认证并替换映射：
 
 ```bash
 padm-docker control remap --invite /root/padm-control-invite.json --listener entry-secondary --yes
@@ -1562,7 +1583,7 @@ padm-docker control remap --invite /root/padm-control-invite.json --listener ent
 
 先停用自动同步，提交后用同连接邀请重新启用；版本、摘要和旧受管快照仍须一致，
 本机账号及流量保持。轮换后安全传递新的邀请文件，再同步。
-菜单 `15 → 16/17` 提供同身份的 API 端口更新与重连，命令顺序如下：
+菜单 `2 → 4 → 16/17` 提供同身份的 API 端口更新与重连，命令顺序如下：
 
 ```bash
 # 被控端先停用自动同步；主控端先停用控制日志调度和控制面 Fail2ban。
@@ -1652,7 +1673,7 @@ SSH、原生宿主 systemd/重启卸载、公网和 arm64 尚未验收。
 普通接入/同步失败或中断仍恢复事务前状态，不在本机伪造上游版本。
 控制菜单提供单 Peer 角色连接维护、显式同隧道主控重绑定及 v2 多被控管理；
 任意历史账号恢复仍未开放。
-无主控/被控角色的已启用 canonical WireGuard 可通过菜单 `15 → 18 → 7–10`
+无主控/被控角色的已启用 canonical WireGuard 可通过菜单 `2 → 4 → 18 → 7–10`
 或以下命令按地址管理 Peer 集合：
 
 ```bash
@@ -1667,7 +1688,7 @@ padm-docker wireguard peers remove --peer-address 10.77.0.3 --yes
 省略字段保持，`none` 清除 endpoint，至少保留一个 Peer。
 变更逐字节保留本机身份和私钥，复用完整配置事务及失败/INT/TERM 恢复，
 会重建部署服务并可能短暂中断连接。v1 主控与被控集合变更继续拒绝；
-无控制角色的多 Peer 可通过菜单 `15 → 18 → 6` 或以下命令更新本机地址、监听端口和密钥：
+无控制角色的多 Peer 可通过菜单 `2 → 4 → 18 → 6` 或以下命令更新本机地址、监听端口和密钥：
 
 ```bash
 padm-docker wireguard migrate --address 10.78.0.1 --listen-port 51821 --rotate-key --yes
@@ -1678,7 +1699,7 @@ padm-docker wireguard migrate --address 10.78.0.1 --listen-port 51821 --rotate-k
 地址或密钥更新后须逐端更新远端配置，期间可能断联；健康失败和 INT/TERM 沿用原三件套恢复。
 控制角色范围不扩大；无控制角色的多 Peer 空目标恢复见下文。
 
-已有 v1 主控可通过菜单 `15 → 20` 显式升级为 v2，再登记第二个被控：
+已有 v1 主控可通过菜单 `2 → 4 → 20` 显式升级为 v2，再登记第二个被控：
 
 ```bash
 padm-docker control upgrade --yes
@@ -1756,7 +1777,7 @@ padm-docker acme schedule disable --domain example.com
 padm-docker acme auto-renew
 ```
 
-主菜单第 8 项可查看/校验证书、导入轮换、DNS-01/HTTP-01 standalone/webroot/TLS-ALPN-01 申请或续期，并显式开关 HTTP-01 入口、管理自动续期；最终确认前不持有部署锁。
+菜单 `4 → 2. 本机 TLS 证书管理` 可查看/校验证书、导入轮换、DNS-01/HTTP-01 standalone/webroot/TLS-ALPN-01 申请或续期，并显式开关 HTTP-01 入口、管理自动续期；最终确认前不持有部署锁。
 首次配置、重新选择、首个 TLS 协议安装、TLS 域名迁移，以及证书菜单申请/续期成功后，
 可复用刚输入的 ACME 邮箱、验证方式和凭据启用自动续期；默认否，`0` 或 EOF 跳过。
 登记复用独立的调度恢复事务；失败返回 `15` 并说明证书或配置已成功，旧登记和调度按原事务恢复。
@@ -1831,7 +1852,7 @@ padm-docker release --manifest /path/release-manifest.json \
 
 ### 灾备归档
 
-菜单 `18. 服务维护 → 6/7` 提供受管输入导出和只读校验，宿主需要 Python 3：
+菜单 `7 → 1 → 6/7` 提供受管输入导出和只读校验，宿主需要 Python 3：
 
 ```bash
 padm-docker backup export /root/padm-recovery.tar
@@ -1853,9 +1874,9 @@ TLS/ACME、续期登记、WireGuard 密钥、控制状态/自动同步私密登�
 16,384 项、单文件 512 MiB、正文合计 2 GiB；超限拒绝而不截断。
 归档完整性不证明来源可信、业务状态一致或恢复就绪。
 
-菜单 `18 → 8` 和以下命令提供受限的恢复预览：
+菜单 `7 → 1 → 8` 和以下命令提供受限的恢复预览：
 菜单可选择默认发布或自备匹配的 manifest、Sigstore bundle 与 control-bundle，
-菜单 `18 → 9` 应用恢复也使用同一选择；含空格的资产路径保持为完整参数。
+菜单 `7 → 1 → 9` 应用恢复也使用同一选择；含空格的资产路径保持为完整参数。
 
 ```bash
 padm-docker restore preview /root/padm-recovery.tar
@@ -1915,14 +1936,14 @@ DNS-01 仅接受 schema `1`／`dns_acmedns`，`Le_Webroot='dns_acmedns'` 及预�
 从原始规格重新生成候选，不执行归档 Compose、镜像环境文件或脚本。
 累计及限额保留，历史流量键保留，旧核心 baseline 清空，超额账号在候选中停用。
 成功、失败或中断均清理暂存，不安装部署或调度；这不同于完全只读的 `backup verify`。
-同样的支持范围可通过菜单 `18 → 9` 应用，归档不是当前发布时仍需显式提供匹配资产：
+同样的支持范围可通过菜单 `7 → 1 → 9` 应用，归档不是当前发布时仍需显式提供匹配资产：
 
 ```bash
 padm-docker restore apply /root/padm-recovery.tar --confirm PADM-DOCKER-RESTORE
 padm-docker restore recover
 ```
 
-主控须先停机并隔离旧宿主，再通过维护菜单 `18 → 11/12` 或以下命令重建：
+主控须先停机并隔离旧宿主，再通过维护菜单 `7 → 1 → 11/12` 或以下命令重建：
 
 ```bash
 padm-docker restore preview /root/padm-recovery.tar --rebuild-controller
@@ -1939,7 +1960,7 @@ v1 主控仍限单 Peer，v2 主控保留非空控制 Peer 集合及全部 WireG
 
 首次业务写入前持久保存可信候选的停机输入、原空目录元数据和调度快照。
 安装、健康检查、流量、Geo 或续期调度失败及 INT/TERM 时撤销本次恢复；登记发布后的 SIGKILL
-可用菜单 `18 → 10` 或 `restore recover` 继续。普通部署命令在登记清理前拒绝运行。
+可用菜单 `7 → 1 → 10` 或 `restore recover` 继续。普通部署命令在登记清理前拒绝运行。
 恢复失败保留现场；外部调度被改写时拒绝覆盖。已提交事务的重试只清暂存，不停止服务。
 流量、Geo 和续期分别持久保存调度快照；撤销前统一核对外部漂移，再按续期、Geo、流量的逆序恢复。
 恢复中需要写回 systemd unit 时，unit 目录必须与部署私密暂存位于同一文件系统，
@@ -1953,7 +1974,7 @@ v1 主控仍限单 Peer，v2 主控保留非空控制 Peer 集合及全部 WireG
 
 ### 用户流量与额度
 
-Docker 菜单 `10. 账号管理 → 9. 流量与额度` 可查看已保存计数、立即采集并检查额度、
+Docker 菜单 `2 → 3. 流量与额度` 可查看已保存计数、立即采集并检查额度、
 设置账号额度或重置累计。查看不隐式采集；设置和重置各确认一次，重置保留额度。
 额度 `0` 表示不限额，空输入或 `r` 返回；账号 ID 使用查看结果原文。
 采集、核心重启、锁和恢复语义沿用 CLI，失败可能已保存采样或额度状态。

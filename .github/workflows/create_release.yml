@@ -389,7 +389,7 @@ jobs:
           assets=release-assets
           mkdir -p "${assets}"
           tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -cf - \
-            install-docker.sh docker shell/core/deployment_mode.sh shell/core/stats_grpc.sh \
+            install-docker.sh docker shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/locale.sh \
             shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh versions.lock docker-bake.hcl \
             shell/core/static_site_renderer.sh assets/static-sites/sites.sha256 assets/static-sites/sites \
             documents/docker*.md | gzip -n >"${assets}/padm-docker-bundle.tar.gz"

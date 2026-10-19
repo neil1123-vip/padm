@@ -101,7 +101,7 @@ copyControlFixture() {
         docker/lib/wireguard.sh docker/lib/wireguard-config.py \
         docker/lib/port-hopping-probe.py docker/lib/port-hopping-supervisor.py docker/lib/recovery.py docker/lib/acme_recovery.py \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
-        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh shell/core/static_site_renderer.sh; do
+        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/locale.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh shell/core/static_site_renderer.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
         cp "${PROJECT_ROOT}/${relative}" "${target}/${relative}"
     done
