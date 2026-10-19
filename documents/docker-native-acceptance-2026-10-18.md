@@ -359,7 +359,7 @@ VPS 当前源码安装执行成功；该源码未正式发布。
 远端菜单 PTY 执行曾返回四组通过，总 `36853 ms`，覆盖导航/取消、首页及字段
 SIGINT、SIGTERM `143`、EOF。夹具 SHA256 为
 `9d45d9a7850bc21fc5f5379e18c2c068601f0bdb4271a311d54a21de9ffa7788`。
-原始 `menu-native.json` 仍在远端待取回，不以本机夹具自检代替原生证据。
+原始 `menu-native.json` 已取回并核对，见本批恢复证据包；不以夹具自检代替原生证据。
 
 本机独立 Docker Vision 客户端三次探针均通过：直连入口 `2443`、共存入口
 `443`、恢复阶段的 `443`。均固定公网 IP，正确 UUID 获得严格 TLS 校验的
@@ -368,27 +368,51 @@ HTTPS `200`，随机错误 UUID 在 TLS 阶段被拒绝。证据位于
 每文件为两行 JSON。它们证明对应外部流量正反例，不证明 DNS 解析或当前业务健康；
 stream/recovered 字节相同，恢复事务仍须取回远端日志核验，不能只凭文件名认定。
 
-### 本批透明测试中断与待恢复现场
+### 本批透明过载取证与业务恢复
 
 正式 `3.40` 控制包仍缺少当前能力合同，本批正式 TProxy 编辑返回 `16`，
 正确拒绝旧发布输入。随后受限 wrapper 复用已验证安装输入，调用当前源码生产
-`dockerConfigureApply`；这不等同正式发布 CLI 验收。TUN 本批尚未执行。
+`dockerConfigureApply`，但仍使用旧 net 镜像；这不等同正式发布 CLI 验收。
+TUN 本批尚未执行，当前透明重启矩阵未通过。
 
 本轮启动前 `systemctl restart padm-native-batch-guard.service` 返回 unit 不存在，
 执行链却继续启动 TProxy helper；停止后的 transient unit 不能靠 restart 重建。
-因此本轮独立防护未确认生效。随后 SSH/SFTP 超时，尚无中断时的内存、进程或
-内核资源证据，不能把此前事故根因直接套用到本轮，也不能认定自动超时已完成恢复。
-下一轮必须重新创建独立 guard，确认 active；创建或检查失败就不得启动测试。
-还须核验广播/多播绕过规则在实际捕获链之前，不能凭预先插入全局规则认定受保护。
+取回的 journal 确认 guard 在 UTC `08:59:29` 已停止，随后测试期间未运行；
+这是本轮执行保护失误。恢复前面板 CPU `100%`、内存最高 `95.1%`。
+取回的 Xray 尾部 `500` 行中，`486` 行是 `[tproxy-in >> direct]` 接收
+`255.255.255.255` 或 `23.185.168.255` 的 UDP，确认再次发生广播误捕获。
+旧 net 镜像仍只绕过 `LOCAL`；预先插入全局广播/多播规则不能证明其位于
+后插入的捕获 hook 之前。没有事故时完整规则快照，不能量化回环放大的贡献。
+前一启动的内核日志未发现 OOM 记录，也不能据此否定当时的内存压力。
 
 本机早期 `resources-progress.jsonl` 仅有 UTC `08:54:26–08:56:08` 的 `52` 个样本，
 最低 MemAvailable `478440 KiB`、SwapFree `510736 KiB`，不覆盖后续中断。
+完整 guard 文件虽有 `152` 个样本，但最后在 UTC `08:59:28`，仍不覆盖事故。
 `tproxy-progress.log` 仅记录旧门禁 `exit=16`，不能计作新矩阵通过。
-最后已知基线是单 Xray Reality `2443`，恢复目标仍为原 nginx/xray/subscription、
-严格 HTTPS、原账号/TLS/续期材料保持，透明、relay、alias 关闭。
+
+2026-10-19 控制面板重启成功，新的启动从 UTC `09:55:42` 开始，SSH 恢复。
+重启后透明容器已退出，TProxy 规则与策略路由已消失，但磁盘 owner 仍在。
+使用原镜像的 `tproxy_cleanup` 审计并撤销该 owner，删除已核验的退出容器后，
+生产 `dockerConfigureApply` 恢复事务返回 `0`。验收结果：
+
+- nginx/xray/subscription 均 healthy，`host_integrations=[]`，无透明 owner、
+  测试规则或 TUN 设备，IPv4 策略规则仅 `0/32766/32767`。
+- 原 spec、账号文件、运行中 TLS 证书/私钥、ACME 账号及原域 ACME 证书/私钥，
+  共 `7` 项逐字节等于本批原始备份；续期 timer 为 active/enabled。
+- 宿主与外部固定公网 IP 的网站 HTTPS 均 `200/verify=0`；独立本机 Docker
+  WS 客户端正确账号得到严格 TLS/HTTPS `200`，错误 UUID 在 TLS 阶段被拒绝。
+  原域名正常解析访问也返回 `200/verify=0`，本机客户端容器与卷复核无残留。
+- 清理后可用内存约 `476 MiB`，Swap 使用不足 `1 MiB`；独立临时 unit 无残留。
 
 2026-10-19 `17:13:17 CST` 已按 ID、类型、域名、地址精确删除本批临时 DNS
 `reality-native.b.951101.xyz`，API 复核记录数为 `0`，本机解析返回不存在。
-本机本轮客户端容器/卷无残留，私密分享输入及两份源码归档已清理；
-脱敏证据和恢复所需脚本保留。远端原始证据、私密备份、临时 ACME/服务/规则和
-本轮新增配置备份尚待恢复连接后核验、归档和精确清理。整体目标未完成。
+恢复证据已取回，归档排除私密 ACME 日志，本机核 SHA256 为
+`b766fe0b1c95e508b38e85635ab0d3f9f4cca5f100d923325eeee33c7489d713`，
+路径 `.tmp-native-batch-20261019/native-recovery-evidence.tar.gz`。
+WS 证据为同目录 `recovery-ws-external.json`，恢复核对为
+`evidence/recovery-verified.json`，菜单原始 JSON 也在该 evidence 目录。
+远端本批目录、私密备份、ACME 副本、源码和活动路径标记均已清理。
+按原始业务归档的备份清单做差集，精确删除本轮新增 `7` 个备份目录，
+原始备份数为 `0`；未清空其它目录。本机私密分享输入也已删除。
+透明原生测试保持暂停；必须先匹配修复后的镜像并验证独立 guard 及实际链顺序，
+防护失败立即阻断测试。恢复完成不等于透明矩阵或整体计划完成。
