@@ -3115,6 +3115,205 @@ if [[ "${MENU_SCOPE}" == full ]]; then
     done
 )
 
+# 首页仅显示摘要，服务异常、未配置和监督会话不能被误报为正常。
+(
+    source "${PROJECT_ROOT}/docker/lib/menu.sh"
+    dockerMenuRun() {
+        [[ "$*" == 'status --summary' ]] || fail '首页未使用结构化状态摘要'
+        printf '%s' "${summaryFixture}"
+        return "${summaryExit}"
+    }
+    for summaryCase in running dual no-check unhealthy unconfigured absent failed unknown empty missing-aux missing-aux-failed long hopping; do
+        summaryExit=0
+        summaryColumns=80
+        summaryFixture=$'state=active\nconfigured=yes\nrelease=3.40.0\nsite_mode=default\n'
+        case "${summaryCase}" in
+        running)
+            summaryFixture+=$'bundle_ref=53d2e5ae143f8f5afc6b458c518f6e851485e40d\nprofiles=core-xray,nginx,subscription\n'
+            summaryFixture+=$'core=xray\nprotocol=xray|1\nservice=xray|running|healthy\n'
+            summaryFixture+=$'service=nginx|running|healthy\nservice=subscription|running|healthy\n'
+            summaryFixture+=$'NAME IMAGE COMMAND SERVICE CREATED STATUS PORTS\nfixture@sha256:0123456789abcdef\n'
+            ;;
+        dual)
+            summaryFixture+=$'core=xray\ncore=sing-box\nprotocol=xray|1\nprotocol=sing-box|3\n'
+            summaryFixture+=$'service=xray|running|healthy\nservice=sing-box|running|healthy\n'
+            ;;
+        no-check) summaryFixture+=$'core=xray\nservice=xray|running|\nservice=subscription|running|\n' ;;
+        unhealthy)
+            summaryColumns=40
+            summaryFixture+=$'core=xray\ncore=sing-box\nservice=xray|running|unhealthy\nservice=sing-box|exited|\n'
+            summaryFixture+=$'service=nginx|running|unhealthy\nservice=subscription|running|starting\n'
+            ;;
+        unconfigured) summaryFixture=$'state=installed\nconfigured=no\n' ;;
+        absent) summaryFixture=$'state=absent\n' ;;
+        failed) summaryFixture+=$'core=xray\n'; summaryExit=15 ;;
+        unknown) summaryFixture+=$'core=xray\nservice=xray|mystery|mystery\n' ;;
+        empty) summaryFixture+=$'core=xray\n' ;;
+        missing-aux|missing-aux-failed)
+            summaryFixture+=$'core=xray\nservice=xray|running|healthy\nexpected_service=nginx\nexpected_service=subscription\n'
+            [[ "${summaryCase}" != missing-aux-failed ]] || summaryExit=15
+            ;;
+        long)
+            summaryColumns=40
+            summaryFixture+=$'core=xray\nprotocol=xray|1\nprotocol=xray|2\nprotocol=xray|21\nservice=xray|running|healthy\n'
+            ;;
+        hopping)
+            summaryFixture=$'state=installed\nconfigured=yes\nport_hopping=active\nlistener=entry-hy2\nrange=20000-30000\n'
+            ;;
+        esac
+        summaryOutput=$(COLUMNS="${summaryColumns}" dockerMenuStatusOverview)
+        case "${summaryCase}" in
+        running)
+            grep -Fq '核心  Xray-core    运行中 / 健康' <<<"${summaryOutput}" &&
+                grep -Fq '协议  VLESS Reality Vision' <<<"${summaryOutput}" &&
+                grep -Fq '服务  Nginx 健康 · 订阅 健康' <<<"${summaryOutput}" ||
+                fail '首页未显示核心、协议和合并服务摘要'
+            headerOutput=$(dockerMenuStatusOverview --header)
+            grep -Fq 'padm 管理面板（Docker）  v3.40.0' <<<"${headerOutput}" &&
+                grep -Fq '当前状态' <<<"${headerOutput}" &&
+                ! grep -Fq '管理面板' <<<"${summaryOutput}" ||
+                fail '版本未显示在标题旁，或独立摘要重复输出首页标题'
+            ;;
+        dual)
+            grep -A1 -F '核心  Xray-core' <<<"${summaryOutput}" | grep -Fq '协议  VLESS Reality Vision' &&
+                grep -A1 -F '核心  sing-box' <<<"${summaryOutput}" | grep -Fq '协议  Hysteria2' &&
+                [[ "$(grep -Fc 'VLESS Reality Vision' <<<"${summaryOutput}")" -eq 1 &&
+                    "$(grep -Fc 'Hysteria2' <<<"${summaryOutput}")" -eq 1 ]] ||
+                fail '首页双核心协议未按所属核心显示'
+            ;;
+        no-check)
+            grep -Fq '核心  Xray-core    运行中 / 未配置检查' <<<"${summaryOutput}" &&
+                grep -Fq '服务  订阅 运行中 / 未配置检查' <<<"${summaryOutput}" ||
+                fail '首页把未配置健康检查显示为健康'
+            ;;
+        unhealthy)
+            grep -Fq '核心  Xray-core    运行中 / 不健康' <<<"${summaryOutput}" &&
+                grep -Fq '核心  sing-box    已停止' <<<"${summaryOutput}" &&
+                grep -Fq 'Nginx 运行中 / 不健康' <<<"${summaryOutput}" &&
+                grep -Fq '订阅 运行中 / 检查中' <<<"${summaryOutput}" &&
+                ! grep -Eq 'Nginx.*订阅' <<<"${summaryOutput}" ||
+                fail '首页未保留异常状态，或窄终端辅助服务未换行'
+            ;;
+        unconfigured) grep -Fq '尚未配置' <<<"${summaryOutput}" || fail '首页未提示首次配置' ;;
+        absent) grep -Eq '未安装|尚未安装' <<<"${summaryOutput}" || fail '首页未提示尚未安装' ;;
+        failed)
+            grep -Fq '状态未完整读取' <<<"${summaryOutput}" &&
+                grep -Fq '核心  Xray-core    状态未知' <<<"${summaryOutput}" &&
+                ! grep -Fq '尚未启动' <<<"${summaryOutput}" ||
+                fail '首页状态失败将缺失核心误报为尚未启动'
+            ;;
+        unknown) grep -Fq '未知' <<<"${summaryOutput}" || fail '首页把未知服务状态显示为正常' ;;
+        empty)
+            grep -Fq '核心  Xray-core    尚未启动' <<<"${summaryOutput}" ||
+                fail '首页遗漏已配置但尚未启动的核心'
+            ;;
+        missing-aux)
+            grep -Fq 'Nginx 尚未启动' <<<"${summaryOutput}" &&
+                grep -Fq '订阅 尚未启动' <<<"${summaryOutput}" ||
+                fail '首页遗漏已配置但没有容器的辅助服务'
+            ;;
+        missing-aux-failed)
+            grep -Eq 'Nginx (状态)?未知' <<<"${summaryOutput}" &&
+                grep -Eq '订阅 (状态)?未知' <<<"${summaryOutput}" &&
+                ! grep -Fq '尚未启动' <<<"${summaryOutput}" ||
+                fail '首页状态失败把缺失辅助服务误报为尚未启动'
+            ;;
+        long)
+            [[ "$(grep -Fc 'VLESS' <<<"${summaryOutput}")" -eq 3 ]] &&
+                ! grep -Eq 'Vision.*XHTTP|XHTTP.*WS TLS' <<<"${summaryOutput}" ||
+                fail '窄终端协议未换行或遗漏已配置协议'
+            ;;
+        hopping)
+            grep -Fq '端口跳跃监督中' <<<"${summaryOutput}" &&
+                grep -Fq 'entry-hy2' <<<"${summaryOutput}" &&
+                grep -Fq '20000-30000' <<<"${summaryOutput}" &&
+                ! grep -Fq '尚未启动' <<<"${summaryOutput}" ||
+                fail '首页未正确显示端口跳跃监督会话'
+            ;;
+        esac
+        ! grep -Eq 'bundle_ref=|profiles=|IMAGE|sha256:|configured=|配置  已完成|站点  默认站点' <<<"${summaryOutput}" ||
+            fail "首页 ${summaryCase} 泄露原始长表或保留重复配置、站点行"
+        [[ "${summaryOutput}" != *$'\033'* ]] || fail "禁色首页 ${summaryCase} 仍输出终端转义"
+    done
+)
+
+# 摘要包含停止容器；默认 status 继续保留完整 Compose 输出。
+(
+    source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
+    summaryRoot="${TEST_ROOT}/status-summary"
+    mkdir -p "${summaryRoot}/config"
+    printf '%s\n' fixture-ref >"${summaryRoot}/.ref"
+    printf '%s\n' '{"padm_version":"3.40.0","core":{"type":"xray","secondary_type":"sing-box"},"compose":{"profiles":["core-xray","core-sing-box","nginx"]}}' >"${summaryRoot}/deployment.json"
+    printf '%s\n' '{"schema_version":3,"core":{"type":"xray","secondary_type":"sing-box","protocols":[{"id":1,"core":"xray"},{"id":1,"core":"xray"},{"id":1,"core":"sing-box"},{"id":3,"core":"sing-box"},{"id":3,"core":"sing-box"}]},"site":{"mode":"default"}}' >"${summaryRoot}/config/spec.json"
+    printf '%s\n' '{"services":{"nginx":{"profiles":["nginx"]},"subscription":{"profiles":["subscription"]},"resident":{},"acme":{"profiles":["nginx"]},"net-probe":{"profiles":["nginx","net-check"]}}}' >"${summaryRoot}/compose.json"
+    PADM_DOCKER_BUNDLE_REF=.ref
+    PADM_DOCKER_RC_USAGE=2
+    PADM_DOCKER_RC_STATE=15
+    summarySpecSafe=1 summarySpecValid=1
+    dockerHostPreflight() { return 0; }
+    dockerDeploymentState() { printf 'active\n'; }
+    dockerInstallRoot() { printf '%s\n' "${summaryRoot}"; }
+    dockerCurrentBundlePath() { printf '%s\n' "${summaryRoot}"; }
+    dockerLockInstalledDeployment() { return 0; }
+    dockerComposeFile() { printf '%s/compose.json\n' "${summaryRoot}"; }
+    dockerTrafficSafePath() {
+        [[ "$*" == "${summaryRoot} ${summaryRoot}/config/spec.json" ]] || fail '状态读取未检查正确的规格路径'
+        [[ "${summarySpecSafe}" == 1 ]]
+    }
+    dockerConfigureSpecValidate() {
+        [[ "${summarySpecSafe}" == 1 && "$*" == "${summaryRoot}/config/spec.json" ]] ||
+            fail '状态读取在安全路径校验前访问规格'
+        [[ "${summarySpecValid}" == 1 ]]
+    }
+    dockerComposeRun() {
+        if [[ "${summaryMode}" == 1 ]]; then
+            [[ "$#" -eq 4 && "$1" == ps && "$2" == --all && "$3" == --format &&
+                "$4" == 'service={{.Service}}|{{.State}}|{{.Health}}' ]] ||
+                fail 'status --summary 未使用稳定字段或未包含停止容器'
+            printf 'service=nginx|exited|\n'
+        else
+            [[ "$#" -eq 1 && "$1" == ps ]] || fail '默认 status 改变了 Compose ps 参数'
+            printf 'fixture-compose-table\n'
+        fi
+    }
+    summaryMode=1
+    summaryCommandOutput=$(dockerStatusCommand --summary)
+    grep -Fxq 'configured=yes' <<<"${summaryCommandOutput}" &&
+        grep -Fxq 'release=3.40.0' <<<"${summaryCommandOutput}" &&
+        grep -Fxq 'core=xray' <<<"${summaryCommandOutput}" &&
+        grep -Fxq 'core=sing-box' <<<"${summaryCommandOutput}" &&
+        grep -Fxq 'expected_service=nginx' <<<"${summaryCommandOutput}" &&
+        grep -Fxq 'expected_service=resident' <<<"${summaryCommandOutput}" &&
+        ! grep -Eq '^expected_service=(subscription|acme|net-probe)$' <<<"${summaryCommandOutput}" &&
+        [[ "$(grep -Fxc 'protocol=xray|1' <<<"${summaryCommandOutput}")" -eq 1 &&
+            "$(grep -Fxc 'protocol=sing-box|1' <<<"${summaryCommandOutput}")" -eq 1 &&
+            "$(grep -Fxc 'protocol=sing-box|3' <<<"${summaryCommandOutput}")" -eq 1 ]] &&
+        grep -Fxq 'service=nginx|exited|' <<<"${summaryCommandOutput}" ||
+        fail 'status --summary 丢失核心、预期服务、协议归属、去重或停止服务字段'
+    printf '%s\n' '{"schema_version":2,"core":{"type":"xray","protocols":[{"id":1},{"id":1}]},"site":{"mode":"default"}}' >"${summaryRoot}/config/spec.json"
+    summaryCommandOutput=$(dockerStatusCommand --summary)
+    [[ "$(grep -Fxc 'protocol=xray|1' <<<"${summaryCommandOutput}")" -eq 1 ]] &&
+        ! grep -Fq 'protocol=sing-box|' <<<"${summaryCommandOutput}" ||
+        fail 'schema 2 协议未回退到主核心或未去重'
+    for summarySpecCheck in unsafe invalid; do
+        summarySpecSafe=1 summarySpecValid=1
+        [[ "${summarySpecCheck}" != unsafe ]] || summarySpecSafe=0
+        [[ "${summarySpecCheck}" != invalid ]] || summarySpecValid=0
+        summaryCommandOutput=$(dockerStatusCommand --summary)
+        ! grep -q '^protocol=' <<<"${summaryCommandOutput}" ||
+            fail "${summarySpecCheck} 规格仍被读取为首页协议"
+    done
+    summarySpecSafe=1 summarySpecValid=1
+    summaryMode=0
+    summaryCommandOutput=$(dockerStatusCommand)
+    grep -Fxq 'fixture-compose-table' <<<"${summaryCommandOutput}" &&
+        ! grep -Eq '^(core|protocol|expected_service)=' <<<"${summaryCommandOutput}" ||
+        fail '默认 status 未保留完整 Compose 输出或新增了摘要字段'
+    summaryCommandStatus=0
+    dockerStatusCommand --summary extra >/dev/null || summaryCommandStatus=$?
+    [[ "${summaryCommandStatus}" -eq 2 ]] || fail 'status 接受了多余参数'
+)
+
 # 仅替换 CLI 边界，直接用新编号核对首页、原生返回项与受限入口。
 MENU_UI_CLI="${TEST_ROOT}/menu-ui.sh"
 export MENU_UI_PROJECT_ROOT="${PROJECT_ROOT}" MENU_UI_ACTIONS="${TEST_ROOT}/menu-ui.actions"
@@ -3140,7 +3339,7 @@ grep -Fq '┌─ ' "${CONTROL_LOG}" && grep -Fq '└─' "${CONTROL_LOG}" ||
 ! grep -q $'\033' "${CONTROL_LOG}" || fail 'PADM_NO_COLOR 仍输出终端转义'
 [[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 9 ]] ||
     fail '原生分类返回项未逐次返回首页'
-[[ "$(<"${MENU_UI_ACTIONS}")" == "$(printf 'status\n%.0s' {1..9})" ]] ||
+[[ "$(<"${MENU_UI_ACTIONS}")" == "$(printf 'status --summary\n%.0s' {1..9})" ]] ||
     fail '首页重绘未逐次更新状态，或分类返回触发了业务命令'
 
 : >"${MENU_UI_ACTIONS}"
@@ -3151,12 +3350,12 @@ grep -Fq 'SOCKS5 入站' "${CONTROL_LOG}" && grep -Fq '不可用' "${CONTROL_LOG
     fail '受限项未返回 Socks5 中继菜单'
 [[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 2 ]] ||
     fail 'Socks5 中继未逐层返回首页'
-[[ "$(<"${MENU_UI_ACTIONS}")" == $'status\nstatus' ]] ||
+[[ "$(<"${MENU_UI_ACTIONS}")" == $'status --summary\nstatus --summary' ]] ||
     fail '受限 SOCKS5 入站触发业务命令'
 
 : >"${MENU_UI_ACTIONS}"
 runPty ui-maintenance-exit plain $'7\n1\n2\ny\n' "${MENU_UI_CLI}"
-[[ "$(<"${MENU_UI_ACTIONS}")" == $'status\nupdate' ]] ||
+[[ "$(<"${MENU_UI_ACTIONS}")" == $'status --summary\nupdate' ]] ||
     fail '系统维护更新没有正确派发'
 [[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 1 &&
     "$(grep -Fc '┌─ Docker 服务维护' "${CONTROL_LOG}")" -eq 1 ]] ||
@@ -3219,7 +3418,7 @@ export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/usr-local-bin"
 runPty install-auto-menu menu $'0\n' "${PROJECT_ROOT}/install-docker.sh" \
     install --source "${SOURCE_ROOT}" --ref "${TEST_REF}"
 assertMenu
-grep -Fq 'configured=no' "${CONTROL_LOG}" || fail 'menu homepage did not run status'
+grep -Fq '尚未配置' "${CONTROL_LOG}" || fail 'menu homepage did not run status'
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 [[ -L "${CLI}" ]] || fail 'installed CLI link is missing'
 
@@ -3240,7 +3439,7 @@ assertNoLock
 
 runPty installed-no-args-menu menu $'1\n1\n0\n' "${CLI}"
 assertMenu
-[[ "$(grep -Fc 'configured=no' "${CONTROL_LOG}")" -ge 3 ]] || fail 'repeated status did not complete'
+[[ "$(grep -Fc '尚未配置' "${CONTROL_LOG}")" -ge 3 ]] || fail 'repeated status did not complete'
 
 snapshotBefore=$(find "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" \
     "${PADM_DOCKER_INSTALL_DIR}/secrets" "${PADM_DOCKER_INSTALL_DIR}/backups" -type f -print)
@@ -6158,7 +6357,7 @@ unset TRAFFIC_SHOW_STATUS TRAFFIC_ACTION_STATUS
 
 : >"${COMPOSE_LOG}"
 runPty repeated-status-restart menu $'1\n1\n5\n1\n0\n' "${CLI}" menu
-[[ "$(grep -Ec ' ps$' "${COMPOSE_LOG}")" -ge 4 ]] || fail 'repeated configured status did not complete'
+[[ "$(grep -Ec ' ps( |$)' "${COMPOSE_LOG}")" -ge 4 ]] || fail 'repeated configured status did not complete'
 [[ "$(grep -Ec ' restart$' "${COMPOSE_LOG}")" -eq 1 ]] || fail 'restart was not dispatched exactly once'
 
 : >"${COMPOSE_LOG}"
@@ -6180,7 +6379,7 @@ assertMenu
 export FAKE_LOG_STREAM=1
 runPty logs-interrupt logs '' "${CLI}" menu
 grep -Eq ' logs --tail 100 --follow$' "${COMPOSE_LOG}" || fail 'menu logs did not forward bounded follow arguments'
-[[ "$(grep -Ec ' ps$' "${COMPOSE_LOG}")" -ge 3 ]] || fail 'status did not work during and after interrupting logs'
+[[ "$(grep -Ec ' ps( |$)' "${COMPOSE_LOG}")" -ge 3 ]] || fail 'status did not work during and after interrupting logs'
 grep -Fq 'configured=yes' "${TEST_ROOT}/logs-concurrent-status.log" ||
     fail 'status could not run while logs followed'
 unset FAKE_LOG_STREAM

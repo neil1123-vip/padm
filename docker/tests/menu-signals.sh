@@ -129,7 +129,9 @@ for mode in input worker edit-input edit-worker tls-input tls-worker \
     mkfifo "${TEST_ROOT}/input"
     (
         exec 3>"${TEST_ROOT}/input"
-        waitText 'padm 管理面板（Docker）' || exit 11
+        if [[ "${mode}" != status-* ]]; then
+            waitText 'padm 管理面板（Docker）' || exit 11
+        fi
         case "${mode}" in
         status-*) ;;
         xhttp-*)

@@ -259,7 +259,7 @@ dockerUsage() {
   padm-docker acme schedule <enable|disable|status> [续期输入参数]
   padm-docker acme auto-renew
   padm-docker validate
-  padm-docker status
+  padm-docker status [--summary]
   padm-docker traffic <show|collect>
   padm-docker traffic limit <账号 ID> <额度 GiB，0 不限额>
   padm-docker traffic reset <账号 ID>
@@ -2296,8 +2296,12 @@ dockerPortHoppingSupervisorChangeCheck() {
 }
 
 dockerStatusCommand() {
-    local state bundlePath ref root siteMode=unknown result
-    [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    local state bundlePath ref root composeFile siteMode=unknown result summary=0
+    if [[ "$#" -eq 1 && "$1" == --summary ]]; then
+        summary=1
+    elif [[ "$#" -ne 0 ]]; then
+        return "${PADM_DOCKER_RC_USAGE}"
+    fi
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     state=$(dockerDeploymentState) || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${state}" == "absent" ]]; then
@@ -2322,19 +2326,40 @@ dockerStatusCommand() {
     ref=$(<"${bundlePath}/${PADM_DOCKER_BUNDLE_REF}")
     printf 'state=%s\nbundle_ref=%s\n' "${state}" "${ref}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
-    if ! dockerComposeFile >/dev/null; then
+    if ! composeFile=$(dockerComposeFile); then
         printf 'configured=no\n'
         return 0
     fi
     printf 'configured=yes\nrelease=%s\nprofiles=%s\n' \
         "$(jq -r '.padm_version' "${root}/deployment.json")" \
         "$(jq -r '.compose.profiles | join(",")' "${root}/deployment.json")"
+    if [[ "${summary}" -eq 1 ]]; then
+        jq -r '.core.type, (.core.secondary_type // empty) |
+          select(. == "xray" or . == "sing-box") | "core=\(.)"' \
+            "${root}/deployment.json" || return "${PADM_DOCKER_RC_STATE}"
+        jq -r --slurpfile deployment "${root}/deployment.json" '
+          .services | to_entries[] | select(.key != "acme") |
+          select((.value.profiles // [] | index("net-check")) == null) |
+          select((.value.profiles // [] | length) == 0 or
+            any(.value.profiles[]; . as $p | $deployment[0].compose.profiles | index($p))) |
+          "expected_service=\(.key)"' "${composeFile}" || return "${PADM_DOCKER_RC_STATE}"
+    fi
     if dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
         dockerConfigureSpecValidate "${root}/config/spec.json" >/dev/null 2>&1; then
         siteMode=$(jq -r '.site.mode // "legacy"' "${root}/config/spec.json") || return "${PADM_DOCKER_RC_STATE}"
+        if [[ "${summary}" -eq 1 ]]; then
+            jq -r '. as $request |
+              [.core.protocols[] | {core:(.core // $request.core.type), id}] |
+              unique_by([.core, .id])[] | "protocol=\(.core)|\(.id)"' \
+                "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+        fi
     fi
     printf 'site_mode=%s\n' "${siteMode}"
-    dockerComposeRun ps
+    if [[ "${summary}" -eq 1 ]]; then
+        dockerComposeRun ps --all --format 'service={{.Service}}|{{.State}}|{{.Health}}'
+    else
+        dockerComposeRun ps
+    fi
 }
 
 dockerLifecycleCommand() {

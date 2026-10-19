@@ -35,20 +35,179 @@ dockerMenuOptions() {
     menuClose
 }
 
+dockerMenuServiceStatus() {
+    local runtime=$1 health=$2 label color=warn
+    case "${runtime}" in
+    running)
+        case "${health}" in
+        healthy) label='运行中 / 健康'; color=ok ;;
+        unhealthy) label='运行中 / 不健康'; color=danger ;;
+        starting) label='运行中 / 检查中' ;;
+        '') label='运行中 / 未配置检查' ;;
+        *) label='运行中 / 健康未知' ;;
+        esac
+        ;;
+    exited|dead) label=已停止; color=danger ;;
+    restarting) label=重启中 ;;
+    paused) label=已暂停 ;;
+    created) label=尚未启动 ;;
+    missing) label=状态未知 ;;
+    removing) label=移除中 ;;
+    *) label=未知 ;;
+    esac
+    [[ "${3:-}" != compact || "${runtime}:${health}" != running:healthy ]] || label=健康
+    uiStyle "${color}" "${label}"
+}
+
+dockerMenuProtocolName() {
+    case "$1" in
+    1) printf 'VLESS Reality Vision' ;;
+    2) printf 'VLESS Reality XHTTP' ;;
+    3) printf 'Hysteria2' ;;
+    4) printf 'AnyTLS' ;;
+    5) printf 'NaiveProxy' ;;
+    21) printf 'VLESS WS TLS' ;;
+    22) printf 'VMess WS TLS' ;;
+    23) printf 'VMess HTTPUpgrade TLS' ;;
+    24) printf 'VLESS gRPC TLS' ;;
+    25) printf 'Trojan gRPC TLS' ;;
+    26) printf 'VLESS Reality gRPC' ;;
+    27) printf 'VLESS TCP TLS Vision' ;;
+    28) printf 'Trojan TCP TLS direct' ;;
+    29) printf 'Trojan TCP TLS fallback' ;;
+    30) printf 'Shadowsocks' ;;
+    31) printf 'TUIC' ;;
+    *) printf '未知协议（%s）' "$1" ;;
+    esac
+}
+
 dockerMenuStatusOverview() {
-    local line status=0 DOCKER_MENU_STATUS_FILE=
-    DOCKER_MENU_STATUS_FILE=$(mktemp "${TMPDIR:-/tmp}/padm-menu-status.XXXXXX") || {
-        menuMutedLine '当前状态读取失败，可在核心与服务中重试'
-        return 0
-    }
-    dockerMenuRun status >"${DOCKER_MENU_STATUS_FILE}" || status=$?
+    local key value state= configured= release= hopping= listener= range=
+    local row service runtime health label core protocol name line prefix width status=0
+    local auxiliary= auxiliaryWidth=0 item= itemWidth wide DOCKER_MENU_STATUS_FILE=
+    local -a services=() expectedServices=() cores=() protocols=()
+    local -A coreStatus=()
+    if DOCKER_MENU_STATUS_FILE=$(mktemp "${TMPDIR:-/tmp}/padm-menu-status.XXXXXX"); then
+        dockerMenuRun status --summary >"${DOCKER_MENU_STATUS_FILE}" || status=$?
+    else
+        status=1
+    fi
     if [[ "${DOCKER_MENU_SIGNAL}" -eq 0 && -f "${DOCKER_MENU_STATUS_FILE}" ]]; then
-        while IFS= read -r line || [[ -n "${line}" ]]; do
-            menuLine "${line}"
+        while IFS='=' read -r key value || [[ -n "${key}" ]]; do
+            case "${key}" in
+            state) state=${value} ;;
+            configured) configured=${value} ;;
+            release) release=${value} ;;
+            core) cores+=("${value}") ;;
+            protocol) protocols+=("${value}") ;;
+            port_hopping) hopping=${value} ;;
+            listener) listener=${value} ;;
+            range) range=${value} ;;
+            service) services+=("${value}") ;;
+            expected_service) expectedServices+=("${value}") ;;
+            esac
         done <"${DOCKER_MENU_STATUS_FILE}"
     fi
-    rm -f -- "${DOCKER_MENU_STATUS_FILE}"
-    [[ "${status}" -eq 0 ]] || menuMutedLine '状态未完整读取，可在核心与服务中重试'
+    [[ -z "${DOCKER_MENU_STATUS_FILE}" ]] || rm -f -- "${DOCKER_MENU_STATUS_FILE}"
+    [[ "${DOCKER_MENU_SIGNAL}" -eq 0 ]] || return 0
+    if [[ "${1:-}" == --header ]]; then
+        dockerMenuHeader "padm 管理面板（Docker）${release:+  v${release}}"
+        menuLine 'Xray-core / sing-box 节点安装与运维'
+        menuLine '安装、订阅、入口、站点、路由、核心、系统各归一处'
+        menuSection '├─ 当前状态 ───────────────────────────────────────'
+    fi
+    if [[ "${state}" == absent ]]; then
+        menuLine "$(uiStyle warn '尚未安装')"
+    elif [[ "${configured}" == no ]]; then
+        menuLine "$(uiStyle warn '尚未配置')"
+    elif [[ "${hopping}" == active ]]; then
+        menuLine "$(uiStyle warn '端口跳跃监督中')"
+        menuLine "入口  ${listener}    端口范围  ${range}"
+    elif [[ "${configured}" == yes ]]; then
+        width=${COLUMNS:-80}
+        [[ "${width}" =~ ^[0-9]+$ ]] || width=80
+        width=$((width > 40 ? width - 8 : 32))
+        for service in "${expectedServices[@]}"; do
+            [[ " ${services[*]} " != *" ${service}|"* ]] || continue
+            runtime=created
+            [[ "${status}" -eq 0 ]] || runtime=missing
+            services+=("${service}|${runtime}|")
+        done
+        for row in "${services[@]}"; do
+            IFS='|' read -r service runtime health <<<"${row}"
+            case "${service}" in
+            xray|sing-box)
+                coreStatus["${service}"]=$(dockerMenuServiceStatus "${runtime}" "${health}")
+                [[ " ${cores[*]} " == *" ${service} "* ]] || cores+=("${service}")
+                continue
+                ;;
+            nginx) name=Nginx ;;
+            subscription) name=订阅 ;;
+            '') continue ;;
+            *) name=${service} ;;
+            esac
+            label=$(dockerMenuServiceStatus "${runtime}" "${health}" compact)
+            item="${name} ${label}"
+            line="${name} $(PADM_NO_COLOR=1 dockerMenuServiceStatus "${runtime}" "${health}" compact)"
+            wide=${line//[ -~]/}
+            itemWidth=$((${#line} + ${#wide}))
+            if [[ -n "${auxiliary}" && $((auxiliaryWidth + itemWidth + 3)) -gt "${width}" ]]; then
+                auxiliary+=$'\n'
+                auxiliaryWidth=0
+            elif [[ "${auxiliaryWidth}" -gt 0 ]]; then
+                auxiliary+=' · '
+                auxiliaryWidth=$((auxiliaryWidth + 3))
+            fi
+            auxiliary+="${item}"
+            auxiliaryWidth=$((auxiliaryWidth + itemWidth))
+        done
+        for core in "${cores[@]}"; do
+            name=${core}
+            [[ "${core}" != xray ]] || name=Xray-core
+            label=${coreStatus[${core}]:-}
+            if [[ -z "${label}" ]]; then
+                label=尚未启动
+                [[ "${status}" -eq 0 ]] || label=状态未知
+                label=$(uiStyle warn "${label}")
+            fi
+            menuLine "核心  $(uiStyle value "${name}")    ${label}"
+            line=
+            prefix='协议  '
+            for row in "${protocols[@]}"; do
+                IFS='|' read -r service protocol <<<"${row}"
+                [[ "${service}" == "${core}" ]] || continue
+                name=$(dockerMenuProtocolName "${protocol}")
+                if [[ -n "${line}" && $((${#line} + ${#name} + 3)) -gt "${width}" ]]; then
+                    menuLine "${prefix}${line}"
+                    prefix='      '
+                    line=
+                fi
+                [[ -z "${line}" ]] || line+=' · '
+                line+="${name}"
+            done
+            if [[ -n "${line}" ]]; then
+                menuLine "${prefix}${line}"
+            else
+                menuMutedLine '协议  未读取到已配置协议'
+            fi
+        done
+        if [[ -n "${auxiliary}" ]]; then
+            prefix='服务  '
+            while IFS= read -r line; do
+                menuMutedLine "${prefix}${line}"
+                prefix='      '
+            done <<<"${auxiliary}"
+        fi
+        if [[ "${#cores[@]}" -eq 0 ]]; then
+            menuLine "$(uiStyle warn '核心信息未知')"
+        fi
+        if [[ "${#services[@]}" -eq 0 && "${#cores[@]}" -eq 0 && "${status}" -eq 0 ]]; then
+            menuLine "$(uiStyle warn '尚未启动')"
+        fi
+    fi
+    if [[ "${status}" -ne 0 || -z "${state}" ]]; then
+        menuLine "$(uiStyle warn '状态未完整读取，可在核心与服务中重试')"
+    fi
 }
 
 dockerMenuTerminateTree() {
@@ -2520,11 +2679,7 @@ dockerMenu() {
     trap 'dockerMenuInterrupted 143' TERM
     while :; do
         DOCKER_MENU_SIGNAL=0
-        dockerMenuHeader 'padm 管理面板（Docker）'
-        menuLine 'Xray-core / sing-box 节点安装与运维'
-        menuLine '安装、订阅、入口、站点、路由、核心、系统各归一处'
-        menuSection '├─ 当前状态 ───────────────────────────────────────'
-        dockerMenuStatusOverview
+        dockerMenuStatusOverview --header
         menuSection '├─ 任务入口 ───────────────────────────────────────'
         menuItem 1 '安装与重装' '首次配置、重新选择核心与协议和完整规格重装'
         menuItem 2 '订阅与用户' '账号、分享订阅、流量额度和多服务器同步'
