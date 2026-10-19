@@ -30,7 +30,7 @@ fi
 
 source "${PROJECT_ROOT}/docker/lib/setup.sh"
 source "${PROJECT_ROOT}/docker/lib/menu.sh"
-export PADM_DOCKER_RC_STATE=15
+export PADM_DOCKER_RC_STATE=15 PADM_NO_COLOR=1
 dockerError() { printf 'padm-docker: %s\n' "$*" >&2; }
 # 只替换安装路径边界，菜单分发、输入、子进程和失败处理保留生产实现。
 dockerMenuCli() { printf '%s\n' "${SELF}"; }

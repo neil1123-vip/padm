@@ -54,7 +54,7 @@ fi
 # 只替换安装路径，菜单输入、选项分发、子进程和失败处理均使用生产实现。
 source "${PROJECT_ROOT}/docker/lib/setup.sh"
 source "${PROJECT_ROOT}/docker/lib/menu.sh"
-export PADM_DOCKER_RC_STATE=15
+export PADM_DOCKER_RC_STATE=15 PADM_NO_COLOR=1
 dockerError() { printf 'padm-docker: %s\n' "$*" >&2; }
 dockerMenuCli() { printf '%s\n' "${SELF}"; }
 
