@@ -3834,7 +3834,8 @@ dockerGenerateCompose() {
           | .services[$r.core.type].network_mode = "host"
           | .services[$r.core.type].user =
               (if $tproxy[0].settings.output_all == true then "0:10001" else "0:0" end)
-          | .services[$r.core.type].cap_add = ["NET_ADMIN"]
+          # root 已清空默认能力，仍须访问 UID 10001 的私密运行目录和密钥。
+          | .services[$r.core.type].cap_add = ["NET_ADMIN", "DAC_OVERRIDE"]
           | del(.services[$r.core.type].ports)
           | if ($tun | length) == 1 then
               .services[$r.core.type].restart = "no"
@@ -4364,6 +4365,18 @@ dockerTlsRuntimePermissions() {
         "${ownership[@]}" || return 1
 }
 
+dockerAcmeRuntimePermissions() {
+    local directory=$1
+    [[ -e "${directory}" || -L "${directory}" ]] || return 0
+    dockerSiteTreeValidate "${directory}" || return 1
+    # 账户、域名私钥和续期配置全部私密，不能沿用业务文件的组可读权限。
+    find "${directory}" \
+        \( -type d -exec chmod u=rwx,g=rx,o=,a-s {} + \) -o \
+        \( -type f -exec chmod 0600 {} + \) || return 1
+    [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] ||
+        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
+}
+
 dockerPrepareCandidatePermissions() {
     local candidate=$1 directory privateFile
     local -a privateFiles=()
@@ -4378,7 +4391,8 @@ dockerPrepareCandidatePermissions() {
                 -z "$(find "${candidate}/${directory}" -mindepth 1 -print -quit)" ]] || return 1
         fi
     done
-    dockerSiteTreeValidate "${candidate}/data/static" || return 1
+    dockerSiteTreeValidate "${candidate}/data/static" &&
+        dockerAcmeRuntimePermissions "${candidate}/data/acme" || return 1
     if jq -e '.tls.http01 == true' "${candidate}/config/spec.json" >/dev/null 2>&1; then
         [[ -d "${candidate}/data/acme-webroot" && ! -L "${candidate}/data/acme-webroot" ]] || return 1
         chmod 0750 "${candidate}/data/acme-webroot" || return 1
@@ -4390,7 +4404,9 @@ dockerPrepareCandidatePermissions() {
         [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
     fi
+    # 透明网络锁和归属登记由运行时校验，通用权限准备不得改写或修复其证据。
     find "${candidate}/config" "${candidate}/data" "${candidate}/logs" \
+        \( -path "${candidate}/data/acme" -o -path "${candidate}/data/net/transparent" \) -prune -o \
         \( -type d -exec chmod 0750 {} + \) -o \
         \( -type f ! -path "${candidate}/config/spec.json" ! -name share-groups.json ! -name users.base \
             -exec chmod 0640 {} + \) || return 1
@@ -4413,7 +4429,7 @@ dockerPrepareCandidatePermissions() {
             chown "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/control-source" || return 1
         fi
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
-            "${candidate}/data/xray" "${candidate}/data/sing-box" "${candidate}/data/acme" \
+            "${candidate}/data/xray" "${candidate}/data/sing-box" \
             "${candidate}/logs/nginx" || return 1
     fi
     # 完整输入含停用账号凭据，只允许宿主 root 读取，不交给容器组。
@@ -7493,6 +7509,7 @@ dockerEnsureRuntimeDataPermissions() {
         logs/nginx logs/subscription logs/acme; do
         if [[ -e "${root}/${directory}" || -L "${root}/${directory}" ]]; then
             [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
+            [[ "${directory}" != data/net/transparent ]] || continue
         else
             missingDirectories+=("${root}/${directory}")
         fi
@@ -7501,6 +7518,7 @@ dockerEnsureRuntimeDataPermissions() {
     ((${#missingDirectories[@]} == 0)) ||
         mkdir -p -- "${missingDirectories[@]}" || return 1
     chmod 0750 "${directories[@]}" || return 1
+    dockerAcmeRuntimePermissions "${root}/data/acme" || return 1
     if jq -e 'any(.host_integrations[]; .type == "fail2ban-ssh")' "${root}/config/spec.json" >/dev/null 2>&1; then
         # collector 只允许宿主 root 访问，未启用 SSH 时不创建其运行状态。
         dockerTrafficSafePath "${root}" "${root}/data/net/ssh-collector" &&
@@ -7530,14 +7548,15 @@ dockerEnsureRuntimeDataPermissions() {
             -exec chmod 0640 {} + \) || return 1
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
-            "${root}/data/xray" "${root}/data/sing-box" "${root}/data/acme" \
+            "${root}/data/xray" "${root}/data/sing-box" \
             "${root}/logs/nginx" || return 1
         find "${root}/config" ! -path "${root}/config/spec.json" ! -name share-groups.json ! -name users.base \
             -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/static" \
             "${root}/logs/subscription" "${root}/logs/acme" \
             "${root}/data/subscription" || return 1
-        chown -R 0:0 "${root}/data/net" || return 1
+        find "${root}/data/net" -path "${root}/data/net/transparent" -prune -o \
+            -exec chown -h 0:0 {} + || return 1
     fi
     for privateFile in config/spec.json config/share-groups.json config/xray/users.base config/sing-box/users.base; do
         [[ -e "${root}/${privateFile}" || -L "${root}/${privateFile}" ]] || continue
@@ -8674,6 +8693,7 @@ dockerCommitTlsCandidate() {
     [[ -d "${candidate}" && ! -L "${candidate}" ]] &&
         unsafe=$(find "${candidate}" ! -type f ! -type d -print -quit) &&
         [[ -z "${unsafe}" ]] || return 1
+    dockerAcmeRuntimePermissions "${candidate}/acme" || return 1
     if [[ -e "${targetDir}" || -L "${targetDir}" ]]; then
         [[ -d "${targetDir}" && ! -L "${targetDir}" ]] &&
             unsafe=$(find "${targetDir}" ! -type f ! -type d -print -quit) &&
@@ -9409,6 +9429,7 @@ for line in sys.stdin.read().splitlines():
         raise SystemExit(1)
     seen.add(name)
     env[name] = value
+os.umask(0o077)
 os.execvpe("/opt/acme/acme.sh",
     ["acme.sh", "--home", "/var/lib/padm/acme", *sys.argv[1:]], env)
 ' "$@" <"${input}"; then status=0; else status=$?; fi
@@ -9463,7 +9484,7 @@ dockerAcmeCommand() {
 
 dockerAcmeApply() {
     local action=$1 domain=$2 email=$3 provider=$4 credentials=$5 image=$6
-    local root candidate status unsafe
+    local root candidate status
     local -a keyArgs=() issueKeyArgs=(--keylength 2048) challengeArgs=(--dns "${provider}")
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${action}" == renew &&
@@ -9481,18 +9502,10 @@ dockerAcmeApply() {
     dockerTrafficSafePath "${root}" "${root}/data/acme" || return "${PADM_DOCKER_RC_STATE}"
     mkdir -- "${candidate}/acme" || return "${PADM_DOCKER_RC_STATE}"
     if [[ -e "${root}/data/acme" ]]; then
-        [[ -d "${root}/data/acme" ]] &&
-            unsafe=$(find "${root}/data/acme" ! -type f ! -type d -print -quit) &&
-            [[ -z "${unsafe}" ]] ||
-            return "${PADM_DOCKER_RC_STATE}"
+        dockerSiteTreeValidate "${root}/data/acme" || return "${PADM_DOCKER_RC_STATE}"
         cp -a -- "${root}/data/acme/." "${candidate}/acme/" || return "${PADM_DOCKER_RC_STATE}"
     fi
-    find "${candidate}/acme" -type d -exec chmod 0750 {} + &&
-        find "${candidate}/acme" -type f -exec chmod 0600 {} + || return "${PADM_DOCKER_RC_STATE}"
-    if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
-        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/acme" ||
-            return "${PADM_DOCKER_RC_STATE}"
-    fi
+    dockerAcmeRuntimePermissions "${candidate}/acme" || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${provider}" == standalone || "${provider}" == webroot || "${provider}" == alpn ]]; then
         dockerAcmeRuntimeSnapshot "${domain}" || return "${PADM_DOCKER_RC_STATE}"
         case "${provider}" in
@@ -9550,11 +9563,6 @@ dockerAcmeApply() {
         dockerCleanupTlsCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }
-    # acme.sh 可能创建宽权限文件，提交前恢复最小账户读取权限。
-    unsafe=$(find "${candidate}/acme" ! -type f ! -type d -print -quit) &&
-        [[ -z "${unsafe}" ]] &&
-        find "${candidate}/acme" -type d -exec chmod 0750 {} + &&
-        find "${candidate}/acme" -type f -exec chmod 0600 {} + || return "${PADM_DOCKER_RC_STATE}"
     if ! dockerTlsValidateCandidate "${image}" "${candidate}" "${domain}" ||
         ! dockerCommitTlsCandidate "${candidate}" "${domain}"; then
         dockerCleanupTlsCandidate || true

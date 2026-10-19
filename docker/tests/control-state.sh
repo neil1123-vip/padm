@@ -695,7 +695,16 @@ dockerCleanupConfigurationCandidate
     jq '.services["net-transparent"].restart = "unless-stopped"' \
         "${root}/compose.json" >"${backup}/compose.json"
     cp -a -- "${backup}/compose.json" "${root}/legacy-transparent-compose.json"
-    backupDigest=$(tar --sort=name --numeric-owner -cf - -C "${backup}" . | sha256sum)
+    backupTreeDigest() (
+        # 恢复校验会创建再删除临时文件，只排除备份根目录的预期 mtime 变化。
+        cd -- "$1"
+        {
+            stat -c '%a %u %g' .
+            find . -mindepth 1 -maxdepth 1 -print0 | sort -z |
+                tar --sort=name --numeric-owner --null -T - -cf -
+        } | sha256sum
+    )
+    backupDigest=$(backupTreeDigest "${backup}")
     before=$(tar --sort=name --numeric-owner -cf - -C "${root}" \
         config secrets deployment.json compose.json images.env | sha256sum)
     upCount=$(wc -l <"${TEST_ROOT}/compose.log")
@@ -711,7 +720,7 @@ dockerCleanupConfigurationCandidate
     jq -e '.services["net-transparent"].restart == "no"' "${root}/compose.json" >/dev/null
     dockerControlStateCheck "${root}"
     [[ "${DOCKER_CONFIG_SWITCHED}" == 0 &&
-        "${backupDigest}" == "$(tar --sort=name --numeric-owner -cf - -C "${backup}" . | sha256sum)" ]]
+        "${backupDigest}" == "$(backupTreeDigest "${backup}")" ]]
     dockerCleanupConfigurationCandidate
 )
 

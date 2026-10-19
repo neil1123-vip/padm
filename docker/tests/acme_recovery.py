@@ -37,7 +37,8 @@ DNS_CREDENTIALS = "".join(key + "=" + value + "\n" for key, value in DNS.items()
 def fixture():
     account_key = b"account-private-marker\n"
     return {
-        "account.conf": acme.encoded({"USER_PATH": acme.TRUSTED_PATH}),
+        "account.conf": acme.encoded({
+            "DEFAULT_ACME_SERVER": API, "USER_PATH": acme.TRUSTED_PATH}),
         CA + "/account.key": account_key,
         CA + "/account.json": json.dumps({
             "status": "valid", "contact": ["mailto:" + EMAIL],
@@ -65,7 +66,7 @@ def fixture():
 
 def config(files, path, **changes):
     fields = acme.DOMAIN_FIELDS if path == CONF else {
-        "USER_PATH", "CA_BUNDLE", "CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"}
+        "USER_PATH", "CA_BUNDLE", "DEFAULT_ACME_SERVER", "CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"}
     values = acme.assignments(files[path], fields)
     values.update(changes)
     files[path] = acme.encoded(values)
@@ -337,6 +338,50 @@ class NormalizationTests(unittest.TestCase):
         config(files, "account.conf", USER_PATH=acme.TRUSTED_PATH, CA_BUNDLE="")
         self.assertEqual(acme.normalize_acme_home(files, DOMAIN)[1]["normalized_files"], 9)
 
+    def test_default_ca_binds_current_domain_and_is_discarded(self):
+        for api in (API, API + "/"):
+            with self.subTest(api=api):
+                files = dict(self.files)
+                config(files, "account.conf", DEFAULT_ACME_SERVER=api)
+                normalized, summary = acme.normalize_acme_home(files, DOMAIN, EMAIL)
+                self.assertEqual(normalized["account.conf"],
+                                 acme.encoded({"USER_PATH": acme.TRUSTED_PATH, "CA_BUNDLE": ""}))
+                self.assertEqual(acme.normalize_acme_home(normalized, DOMAIN, EMAIL),
+                                 (normalized, summary))
+
+    def test_default_ca_rejects_url_drift_and_execution(self):
+        for api in (
+            "", "https://foreign.example.test:14000/dir", "https://ca.example.test:14001/dir",
+            "https://ca.example.test/dir", "https://ca.example.test:14000/other",
+            "http://ca.example.test:14000/dir", "https://user@ca.example.test:14000/dir",
+            API + "?x=1", API + "#fragment", "https://ca.example.test:14000/a/../dir",
+            "https://ca.example.test:14000/%64ir", "$(id)", "`id`", API + ";id",
+        ):
+            with self.subTest(api=api):
+                files = dict(self.files)
+                config(files, "account.conf", DEFAULT_ACME_SERVER=api)
+                self.rejected(files)
+        self.rejected({**self.files, "account.conf":
+                       self.files["account.conf"] + acme.encoded({"DEFAULT_ACME_SERVER": API})})
+
+    def test_missing_ca_email_requires_valid_matching_registration(self):
+        files = dict(self.files)
+        ca_config = acme.assignments(files[CA + "/ca.conf"],
+                                     {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"})
+        del ca_config["CA_EMAIL"]
+        files[CA + "/ca.conf"] = acme.encoded(ca_config)
+        normalized, summary = acme.normalize_acme_home(files, DOMAIN, EMAIL)
+        self.assertEqual(acme.assignments(normalized[CA + "/ca.conf"],
+                                         {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"}),
+                         {**ca_config, "CA_EMAIL": EMAIL})
+        self.assertEqual(acme.normalize_acme_home(normalized, DOMAIN, EMAIL),
+                         (normalized, summary))
+        for email in (None, "", False, "invalid", "other@example.test", EMAIL + "\n"):
+            with self.subTest(email=email), self.assertRaises(ValueError):
+                acme.normalize_acme_home(files, DOMAIN, email)
+        config(files, CA + "/ca.conf", CA_EMAIL="other@example.test")
+        self.rejected(files)
+
     def test_account_hash_email_and_same_origin_are_enforced(self):
         for field, value in (
             ("CA_KEY_HASH", "invalid"), ("CA_EMAIL", "other@example.test"),
@@ -477,6 +522,12 @@ class MaterialTests(unittest.TestCase):
     def test_real_account_jwk_and_tls_materials(self):
         self.assertEqual(self.verify(),
                          {"account_key": "EC-P256", "tls_key": "EC-P256", "certificates": 2})
+        files = dict(self.files)
+        ca_config = acme.assignments(files[CA + "/ca.conf"],
+                                     {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"})
+        del ca_config["CA_EMAIL"]
+        files[CA + "/ca.conf"] = acme.encoded(ca_config)
+        self.assertEqual(self.verify(files)["certificates"], 2)
         files = dict(self.files)
         account = json.loads(files[CA + "/account.json"])
         del account["key"]

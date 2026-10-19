@@ -216,7 +216,8 @@ def normalize_acme_home(files, domain, email=None, validation=None, credentials=
     directory = domain + "_ecc"
     domain_path = directory + "/" + domain + ".conf"
     require("account.conf" in files and domain_path in files)
-    account = assignments(files["account.conf"], {"USER_PATH", "CA_BUNDLE"}, {"USER_PATH"})
+    account = assignments(files["account.conf"],
+                          {"USER_PATH", "CA_BUNDLE", "DEFAULT_ACME_SERVER"}, {"USER_PATH"})
     require(account["USER_PATH"] == TRUSTED_PATH and not account.get("CA_BUNDLE"))
     config = assignments(files[domain_path], DOMAIN_FIELDS, DOMAIN_REQUIRED)
     require(config["Le_Domain"] == domain and config["Le_Alt"] == "no"
@@ -243,6 +244,9 @@ def normalize_acme_home(files, domain, email=None, validation=None, credentials=
         observed_validation = "webroot-http01"
     require(validation is None or validation == observed_validation)
     ca, origin = ca_directory(config["Le_API"])
+    # 上游默认 CA 仅接受当前域名已验证的同目录和来源，重建时不保留全局选择。
+    if "DEFAULT_ACME_SERVER" in account:
+        require(ca_directory(account["DEFAULT_ACME_SERVER"]) == (ca, origin))
     required = {"account.conf", domain_path, ca + "/account.key", ca + "/account.json",
                 ca + "/ca.conf", directory + "/" + domain + ".key",
                 directory + "/" + domain + ".cer", directory + "/ca.cer",
@@ -252,10 +256,13 @@ def normalize_acme_home(files, domain, email=None, validation=None, credentials=
     require(required <= set(files) and set(files) <= required | discarded)
     require(directory + "/backup/" not in files or files[directory + "/backup/"] == b"")
     ca_config = assignments(files[ca + "/ca.conf"], {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"},
-                            {"CA_EMAIL", "ACCOUNT_URL", "CA_KEY_HASH"})
-    address = ca_config["CA_EMAIL"]
-    require(re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}", address)
+                            {"ACCOUNT_URL", "CA_KEY_HASH"})
+    # 上游账户可省略邮箱，只能由调用方提供的受管续期登记补全。
+    address = ca_config.get("CA_EMAIL", email)
+    require(isinstance(address, str)
+            and re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}", address)
             and (email is None or email == address))
+    ca_config["CA_EMAIL"] = address
     checked_url(ca_config["ACCOUNT_URL"], origin)
     require(ca_config["CA_KEY_HASH"] ==
             base64.b64encode(hashlib.sha256(files[ca + "/account.key"]).digest()).decode())

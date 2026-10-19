@@ -63,8 +63,7 @@ assertRuntimeSecrets() {
     assertMetadata "${root}/secrets" '700 0 0'
     assertMetadata "${root}/secrets/tls/example.com.key" '600 10001 10001'
     assertMetadata "${root}/secrets/tls/example.com.crt" '640 0 10001'
-    [[ "$(stat -c '%u %g' "${root}/data/acme/account.conf")" == '10001 10001' ]] ||
-        fail 'ACME account was not restored to the container user'
+    assertMetadata "${root}/data/acme/account.conf" '600 10001 10001'
     # 进入实际 bind 子目录视图后降权，不让宿主私密父目录影响容器读取结论。
     (
         cd "${root}/secrets/tls"
@@ -142,6 +141,224 @@ jq -r '.images | "PADM_XRAY_IMAGE=" + .xray, "PADM_SINGBOX_IMAGE=" + ."sing-box"
     "PADM_NGINX_IMAGE=" + .nginx, "PADM_OPS_IMAGE=" + .ops, "PADM_NET_IMAGE=" + .net' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${PADM_DOCKER_INSTALL_DIR}/images.env"
 dockerEnsureRuntimeDataPermissions
+# 旧候选曾将全部 ACME 材料放宽为组可读；运行时准备须修复且不改内容。
+mkdir -p "${PADM_DOCKER_INSTALL_DIR}/data/acme/example.com_ecc"
+printf 'domain-private-key\n' >"${PADM_DOCKER_INSTALL_DIR}/data/acme/example.com_ecc/example.com.key"
+chmod 0640 "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" \
+    "${PADM_DOCKER_INSTALL_DIR}/data/acme/example.com_ecc/example.com.key"
+chmod 2750 "${PADM_DOCKER_INSTALL_DIR}/data/acme/example.com_ecc"
+acmeDigest=$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" \
+    "${PADM_DOCKER_INSTALL_DIR}/data/acme/example.com_ecc/example.com.key")
+dockerEnsureRuntimeDataPermissions || fail '旧 ACME 权限修复失败'
+assertRuntimeSecrets
+assertMetadata "${PADM_DOCKER_INSTALL_DIR}/data/acme/example.com_ecc" '750 10001 10001'
+assertMetadata "${PADM_DOCKER_INSTALL_DIR}/data/acme/example.com_ecc/example.com.key" '600 10001 10001'
+[[ "$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" \
+    "${PADM_DOCKER_INSTALL_DIR}/data/acme/example.com_ecc/example.com.key")" == "${acmeDigest}" ]] ||
+    fail 'ACME 权限修复改动账户或私钥内容'
+# 配置切换、升级和首配共用候选权限入口，ACME 树不能重新变成 0640。
+(
+    candidate="${TEST_ROOT}/acme-candidate"
+    mkdir -p "${candidate}/config" "${candidate}/data/"{static,subscription,xray,sing-box} \
+        "${candidate}/logs/nginx"
+    cp -a -- "${PADM_DOCKER_INSTALL_DIR}/data/acme" "${candidate}/data/"
+    cp -a -- "${PADM_DOCKER_INSTALL_DIR}/secrets" "${candidate}/"
+    cp -- "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${candidate}/config/"
+    for file in mode deployment.json compose.json images.env; do
+        cp -- "${PADM_DOCKER_INSTALL_DIR}/${file}" "${candidate}/"
+    done
+    cp -- "${candidate}/images.env" "${candidate}/images.runtime.env"
+    chmod 0640 "${candidate}/data/acme/account.conf" \
+        "${candidate}/data/acme/example.com_ecc/example.com.key"
+    dockerPrepareCandidatePermissions "${candidate}" || fail 'ACME 候选权限准备失败'
+    assertMetadata "${candidate}/data/acme/account.conf" '600 10001 10001'
+    assertMetadata "${candidate}/data/acme/example.com_ecc/example.com.key" '600 10001 10001'
+    # 直接使用归档库存检查，防止权限修复与备份安全边界再次漂移。
+    python3 -B - "${PROJECT_ROOT}" "${candidate}" <<'PY' || exit 1
+import importlib.util
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("recovery", sys.argv[1] + "/docker/lib/recovery.py")
+recovery = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(recovery)
+fd = os.open(sys.argv[2], os.O_RDONLY | os.O_DIRECTORY)
+try:
+    assert "data/acme/account.conf" in recovery.inventory(fd)
+finally:
+    os.close(fd)
+PY
+    printf 'outside-secret\n' >"${TEST_ROOT}/acme-outside"
+    chmod 0600 "${TEST_ROOT}/acme-outside"
+    chown 12345:12345 "${TEST_ROOT}/acme-outside"
+    for entryType in symlink hardlink fifo; do
+        case "${entryType}" in
+        symlink) ln -s "${TEST_ROOT}/acme-outside" "${candidate}/data/acme/unsafe" ;;
+        hardlink) ln "${TEST_ROOT}/acme-outside" "${candidate}/data/acme/unsafe" ;;
+        fifo) mkfifo "${candidate}/data/acme/unsafe" ;;
+        esac
+        ! dockerPrepareCandidatePermissions "${candidate}" || fail "ACME 候选接受 ${entryType}"
+        assertMetadata "${TEST_ROOT}/acme-outside" '600 12345 12345'
+        rm -- "${candidate}/data/acme/unsafe"
+    done
+    for failedTool in chmod chown find; do
+        mockBin="${TEST_ROOT}/acme-${failedTool}"
+        mkdir -- "${mockBin}"
+        printf '#!/bin/sh\nexit 17\n' >"${mockBin}/${failedTool}"
+        chmod 0755 "${mockBin}/${failedTool}"
+        ! PATH="${mockBin}:${PATH}" dockerAcmeRuntimePermissions "${candidate}/data/acme" ||
+            fail "ACME 权限准备吞掉 ${failedTool} 错误"
+    done
+) || fail 'ACME 私密权限合同失败'
+# 透明核心按真实编排保留 DAC_OVERRIDE，不能靠放宽文件或只改 check 用户绕过。
+(
+    transparent="${TEST_ROOT}/transparent-permissions"
+    cp -a -- "${TEST_ROOT}/acme-candidate" "${transparent}"
+    for core in xray sing-box; do
+        for kind in tun tproxy redirect; do
+            [[ "${kind}:${core}" != tun:xray ]] || continue
+            jq --arg core "${core}" --arg kind "${kind}" '
+              .schema_version = 3 | .core.type = $core | .core.secondary_type = null |
+              .core.protocols |= map(.core = $core | .listener_id = "entry-main" |
+                .address_families = ["ipv4"]) |
+              .host_integrations = [{type:$kind,profile:"net-transparent",schedules:[],
+                firewall_rules:[if $kind == "tun" then "sing-box-auto-redirect" else "padm-" + $kind end],
+                devices:(if $kind == "tun" then ["/dev/net/tun"] else [] end),
+                settings:(if $kind == "tun" then {interface:"padm-tun",address:"198.18.0.1/30"}
+                  elif $kind == "tproxy" then {port:31298,mark:1} else {port:31298} end)}]
+            ' "${PROJECT_ROOT}/docker/configure.example.json" >"${transparent}/config/spec.json"
+            dockerGenerateCompose "${transparent}/config/spec.json" "${transparent}/compose.json" "${transparent}"
+            dockerPrepareCandidatePermissions "${transparent}" || fail '透明核心候选权限准备失败'
+            jq -e --arg core "${core}" '
+              .services[$core].user == "0:0" and
+              .services[$core].cap_drop == ["ALL"] and
+              .services[$core].cap_add == ["NET_ADMIN","DAC_OVERRIDE"] and
+              .services[$core].read_only == true and
+              all(.services | to_entries[] | select(.key != $core);
+                ((.value.cap_add // []) | index("DAC_OVERRIDE")) == null)
+            ' "${transparent}/compose.json" >/dev/null || fail '透明核心能力范围错误'
+            assertMetadata "${transparent}/data/${core}" '750 10001 10001'
+            assertMetadata "${transparent}/secrets/tls/example.com.key" '600 10001 10001'
+            (
+                cd "${transparent}/data/${core}" || exit 1
+                ! setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
+                    sh -c 'cd . && printf blocked >permission-check' >/dev/null 2>&1 ||
+                    fail '无 DAC 能力的 root 意外取得私密数据写权限'
+                # NET_ADMIN 与文件访问无关，子进程只保留生成编排所需的 DAC 位。
+                setpriv --bounding-set=-all,+dac_override --inh-caps=-all --ambient-caps=-all -- \
+                    sh -c 'cd . && printf writable >permission-check && test "$(cat permission-check)" = writable' || exit 1
+                rm -- permission-check
+            ) || fail "透明核心 ${core}/${kind} 无法访问数据目录"
+            (
+                cd "${transparent}/secrets/tls" || exit 1
+                ! setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
+                    cat example.com.key >/dev/null 2>&1 ||
+                    fail '无 DAC 能力的 root 意外读取私钥'
+                setpriv --bounding-set=-all,+dac_override --inh-caps=-all --ambient-caps=-all -- \
+                    sh -c 'test "$(cat example.com.key)" = private-key && test -r example.com.crt'
+            ) || fail "透明核心 ${core}/${kind} 无法读取私密 TLS"
+            jq '.host_integrations = []' "${transparent}/config/spec.json" >"${transparent}/regular.json"
+            mv -- "${transparent}/regular.json" "${transparent}/config/spec.json"
+            dockerGenerateCompose "${transparent}/config/spec.json" "${transparent}/compose.json" "${transparent}"
+            PADM_DOCKER_INSTALL_DIR=${transparent} dockerEnsureRuntimeDataPermissions ||
+                fail '关闭透明模式后运行权限准备失败'
+            jq -e --arg core "${core}" '
+              .services[$core].user == null and (.services[$core].cap_add // []) == []
+            ' "${transparent}/compose.json" >/dev/null || fail '普通核心保留透明能力'
+            (
+                cd "${transparent}/data/${core}" || exit 1
+                setpriv --reuid 10001 --regid 10001 --clear-groups --bounding-set=-all \
+                    --inh-caps=-all --ambient-caps=-all -- sh -c 'printf regular >permission-check' || exit 1
+                rm -- permission-check
+                cd "${transparent}/secrets/tls" || exit 1
+                setpriv --reuid 10001 --regid 10001 --clear-groups --bounding-set=-all \
+                    --inh-caps=-all --ambient-caps=-all -- sh -c 'test "$(cat example.com.key)" = private-key'
+            ) || fail '普通核心或 ops 用户无法访问原私密材料'
+        done
+    done
+) || fail '透明核心实际文件权限合同失败'
+# 首次预检创建的锁须经过二次权限准备；坏证据必须保留，由真实归属校验拒绝。
+(
+    candidate="${TEST_ROOT}/tun-ownership-permissions"
+    cp -a -- "${TEST_ROOT}/acme-candidate" "${candidate}" || exit 1
+    ownership="${candidate}/data/net/transparent"
+    mkdir -p -- "${ownership}" || exit 1
+    tunOwnershipValidate() {
+        python3 -B - "${PROJECT_ROOT}/docker/images/net/tun-resources.py" "${ownership}" <<'PY'
+import importlib.util
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("tun_resources", sys.argv[1])
+runtime = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runtime)
+runtime.ROOT = sys.argv[2]
+runtime.STATE_PATH = os.path.join(runtime.ROOT, "tun.state")
+for _ in range(2):
+    runtime.lock()
+    runtime.state_metadata()
+    os.close(runtime.LOCK)
+    runtime.LOCK = None
+PY
+    }
+    tunOwnershipValidate || fail '首次 TUN 锁创建失败'
+    printf 'kept-ownership-state\n' >"${ownership}/tun.state"
+    chmod 0600 "${ownership}/tun.state" || exit 1
+    lockIdentity=$(stat -c '%d:%i:%a:%u:%g:%h' -- "${ownership}/.tun.lock")
+    stateDigest=$(sha256sum "${ownership}/tun.state")
+    for preparation in candidate runtime; do
+        case "${preparation}" in
+        candidate) dockerPrepareCandidatePermissions "${candidate}" || exit 1 ;;
+        runtime) PADM_DOCKER_INSTALL_DIR=${candidate} dockerEnsureRuntimeDataPermissions || exit 1 ;;
+        esac
+        tunOwnershipValidate || fail "${preparation} 权限准备破坏 TUN 锁或归属登记"
+        [[ "$(stat -c '%d:%i:%a:%u:%g:%h' -- "${ownership}/.tun.lock")" == "${lockIdentity}" &&
+            "$(sha256sum "${ownership}/tun.state")" == "${stateDigest}" ]] ||
+            fail '权限准备替换或改写 TUN 归属证据'
+    done
+    for entry in "${ownership}/.tun.lock" "${ownership}/tun.state" "${ownership}"; do
+        safeMode=0600
+        [[ "${entry}" != "${ownership}" ]] || safeMode=0750
+        for corruption in mode owner; do
+            case "${corruption}" in
+            mode) chmod 0770 "${entry}" || exit 1 ;;
+            owner) chown 12345:12345 "${entry}" || exit 1 ;;
+            esac
+            unsafeIdentity=$(stat -c '%d:%i:%a:%u:%g:%h' -- "${entry}")
+            dockerPrepareCandidatePermissions "${candidate}" || exit 1
+            PADM_DOCKER_INSTALL_DIR=${candidate} dockerEnsureRuntimeDataPermissions || exit 1
+            [[ "$(stat -c '%d:%i:%a:%u:%g:%h' -- "${entry}")" == "${unsafeIdentity}" ]] ||
+                fail '通用权限准备掩盖被篡改的 TUN 归属证据'
+            ! tunOwnershipValidate >"${TEST_ROOT}/tun-ownership-invalid.log" 2>&1 ||
+                fail '真实 TUN validator 接受被篡改的归属证据'
+            chmod "${safeMode}" "${entry}" && chown 0:0 "${entry}" || exit 1
+        done
+    done
+    mv -- "${ownership}/tun.state" "${candidate}/saved-tun.state" || exit 1
+    for linkType in symlink hardlink; do
+        case "${linkType}" in
+        symlink)
+            ln -s "${candidate}/saved-tun.state" "${ownership}/tun.state" || exit 1
+            ! dockerPrepareCandidatePermissions "${candidate}" || fail 'TUN 候选接受符号链接'
+            ;;
+        hardlink)
+            ln "${candidate}/saved-tun.state" "${ownership}/tun.state" || exit 1
+            dockerPrepareCandidatePermissions "${candidate}" || exit 1
+            ;;
+        esac
+        PADM_DOCKER_INSTALL_DIR=${candidate} dockerEnsureRuntimeDataPermissions || exit 1
+        ! tunOwnershipValidate >"${TEST_ROOT}/tun-ownership-invalid.log" 2>&1 ||
+            fail "真实 TUN validator 接受 ${linkType}"
+        assertMetadata "${candidate}/saved-tun.state" '600 0 0'
+        rm -- "${ownership}/tun.state" || exit 1
+    done
+    printf 'outside-owner\n' >"${TEST_ROOT}/tun-owner-outside"
+    chmod 0600 "${TEST_ROOT}/tun-owner-outside" &&
+        chown 12345:12345 "${TEST_ROOT}/tun-owner-outside" || exit 1
+    ln -s "${TEST_ROOT}/tun-owner-outside" "${candidate}/data/net/outside-link" || exit 1
+    PADM_DOCKER_INSTALL_DIR=${candidate} dockerEnsureRuntimeDataPermissions || exit 1
+    assertMetadata "${TEST_ROOT}/tun-owner-outside" '600 12345 12345'
+) || fail 'TUN 归属证据权限合同失败'
 # 复现实机留下的空 collector 目录，SSH 状态不能影响普通部署的恢复。
 (
     sshRoot="${TEST_ROOT}/ssh-collector-runtime"

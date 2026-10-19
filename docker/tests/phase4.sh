@@ -1899,7 +1899,7 @@ runControl 15 reject-dualstack-tun configure --spec "${TUN_SPEC}"
 : >"${DOCKER_LOG}"
 runControl 0 tproxy configure --spec "${TPROXY_SPEC}"
 jq -e '
-  .services.xray.network_mode == "host" and .services.xray.cap_add == ["NET_ADMIN"] and
+  .services.xray.network_mode == "host" and .services.xray.cap_add == ["NET_ADMIN","DAC_OVERRIDE"] and
   ((.services.xray.devices // []) | length) == 0 and
   .services["net-transparent"].network_mode == "host" and
   .services["net-transparent"].cap_add == ["NET_ADMIN"] and

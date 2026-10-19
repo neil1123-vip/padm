@@ -14,6 +14,13 @@ checks=0
 # 运行生产候选、备份、安装和恢复；仅替换无关业务验证与 Docker 边界。
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
+# 种子只安装一次；每例复制独立文件，恢复仍核验真实 bundle。
+BUNDLE_FIXTURE=${TEST_ROOT}/bundle-seed
+(
+    export PADM_DOCKER_INSTALL_DIR=${BUNDLE_FIXTURE}
+    dockerInitializeStateRoot
+    dockerInstallBundle "${PROJECT_ROOT}" "$(printf 'a%.0s' {1..40})"
+)
 declare -A controlFunctions=()
 for helper in dockerControlTransitionValidate dockerControlSyncTransitionValidate \
     dockerControlRestorePrepare dockerControlStateCheck; do
@@ -91,6 +98,8 @@ fixture() {
     export PADM_DOCKER_INSTALL_DIR=${root}
     mkdir -m 0700 -- "${root}/config" "${root}/secrets" "${root}/data" "${root}/backups"
     mkdir -m 0700 -- "${root}/secrets/net" "${root}/data/traffic"
+    dockerInitializeStateRoot
+    cp -a -- "${BUNDLE_FIXTURE}/.bundles" "${BUNDLE_FIXTURE}/bundle" "${root}/"
     input=$(mktemp -d "${root}/.wireguard.XXXXXX")/wireguard
     printf '%s\n' '{"schema_version":3,"core":{"type":"xray","secondary_type":null,"protocols":[]},
         "tls":null,"images":{"net":"fixture"},"host_integrations":[{"type":"wireguard"}]}' >"${root}/config/spec.json"

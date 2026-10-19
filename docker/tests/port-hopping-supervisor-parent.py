@@ -261,6 +261,26 @@ def deployment_command(root, function, *arguments, accepted=False, boundary="",
             "跳跃监督会话仍在运行或残留")), result.stderr
 
 
+def uninstall_fixture(root):
+    # 卸载前置检查使用真实生成的完整状态，监督测试不能绕过部署文件门禁。
+    body = r'''
+source "$1"
+dockerInitializeStateRoot
+dockerInstallBundle "$2" "$(printf 'a%.0s' {1..40})"
+cp -- "$2/docker/configure.example.json" "$PADM_DOCKER_INSTALL_DIR/config/spec.json"
+dockerGenerateCompose "$PADM_DOCKER_INSTALL_DIR/config/spec.json" "$PADM_DOCKER_INSTALL_DIR/compose.json"
+dockerGenerateDeployment "$PADM_DOCKER_INSTALL_DIR/config/spec.json" "$PADM_DOCKER_INSTALL_DIR/deployment.json"
+dockerGenerateImagesEnv "$PADM_DOCKER_INSTALL_DIR/config/spec.json" "$PADM_DOCKER_INSTALL_DIR/images.env" "$PADM_DOCKER_INSTALL_DIR"
+dockerManagedSpecMatchesDeployment "$PADM_DOCKER_INSTALL_DIR/config/spec.json" "$PADM_DOCKER_INSTALL_DIR/deployment.json" "$PADM_DOCKER_INSTALL_DIR/images.env"
+dockerComposeFile >/dev/null
+'''
+    result = subprocess.run(
+        ["bash", "-Eeuo", "pipefail", "-c", body, "test", str(ROOT / "install-docker.sh"), str(ROOT)],
+        env=dict(os.environ, PADM_DOCKER_INSTALL_DIR=str(root)),
+        capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def deployment_gate_cases(base):
     count = 0
     commands = (
@@ -1242,6 +1262,8 @@ def main():
             installation = base / case
             (installation / "data/net").mkdir(parents=True, mode=0o700)
             installation.chmod(0o700)
+            if case.endswith("-uninstall"):
+                uninstall_fixture(installation)
             if case.startswith("invalid-finished"):
                 (installation / "invalid-finished").touch()
             if case in {"change-failed", "invalid-update-gate", "invalid-changed"}:
@@ -1379,8 +1401,6 @@ def main():
                         lifecycle=True, usage=True)
                     assert MODULE["control"]("status", str(installation))["owner"] == owner
                     assert not (installation / "actions").exists()
-                    if uninstall:
-                        (installation / "compose.json").write_text("{}")
                     valid = not case.startswith("invalid")
                     deployment_command(installation, function, *arguments,
                                        lifecycle=True, accepted=valid)

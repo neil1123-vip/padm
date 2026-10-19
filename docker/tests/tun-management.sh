@@ -150,7 +150,7 @@ runEdit 0 --tun-enable --confirm PADM-DOCKER-EDIT
 cp -- "${root}/config/spec.json" "${TEST_ROOT}/enabled.json"
 runStatus true
 jq -e '.services["sing-box"].network_mode == "host" and .services["sing-box"].user == "0:0" and
-  .services["sing-box"].cap_add == ["NET_ADMIN"] and .services["sing-box"].ports == null and
+  .services["sing-box"].cap_add == ["NET_ADMIN","DAC_OVERRIDE"] and .services["sing-box"].ports == null and
   .services["sing-box"].restart == "no" and
   .services["net-tun-check"].network_mode == "host" and
   any(.services["net-tun-check"].volumes[];
