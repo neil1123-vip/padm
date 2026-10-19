@@ -2,6 +2,11 @@
 
 验收日期：2026-10-18–19（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
+**当前现场（2026-10-19 17:16 CST）**：本批 TProxy 源码 helper 启动后 SSH
+握手持续超时，恢复、透明关闭、业务健康和远端清理均未核验。ZgoCloud 账户登录
+已过期，旧控制面板 token 无效。下文较早的恢复成功记录不代表当前状态；
+暂停新透明测试，须先恢复控制入口、止住测试并恢复原业务。
+
 ## 环境与可信输入
 
 - 获授权的 Debian 13 amd64 VPS，内核 `6.12.113+deb13-amd64`，真实 systemd、cgroup v2。
@@ -33,7 +38,7 @@
 | HTTP relay | 独立外部客户端经公网 IPv4 入口访问三个 HTTPS 目标，严格 TLS 校验和 HTTP 200 通过；错误认证 407、未允许来源 blocked 通过，不包含公网 IPv6。 |
 | 卸载与同机灾备 | 保留数据卸载及最终 purge → 整机重启 → 空目标复核 → 同机 v3 灾备恢复通过；原 nginx/xray/subscription healthy、严格 HTTPS 和独立外部 WS 正反例通过，不代表全新主机灾备。 |
 | 透明代理源码矩阵 | TUN 当前 validator 的一次性只读挂载验收通过 TCP/TLS、UDP DNS、restart 与净停止后的整机重启/显式 up/down/off；TProxy 当前源码事务 helper 的 TCP/TLS 与对应生命周期通过。指定 UID UDP DNS 的早期失败已定位为缺少 `NET_BIND_SERVICE`，原生固定五元组增权对照和修复后的双核心三地址族隔离回归通过；尚不替代当前修复的正式发布镜像/CLI 及重启矩阵验收。 |
-| Reality 共存 | 受管 Vision/WS 同机正反例、Vision 同一连接空闲 75 秒及外部 WS 通过；外部 Vision 未通过。桥接与宿主回环网站 HTTPS 200/verify 0、同机 Vision 正反例和 75 秒连接通过。 |
+| Reality 共存 | 受管 Vision/WS 同机正反例、Vision 同一连接空闲 75 秒及外部 WS 通过；本批另取得外部 Vision 直连及 443 共存三次正反例，限定条件见末节。桥接与宿主回环网站 HTTPS 200/verify 0、同机 Vision 正反例和 75 秒连接通过。 |
 
 WS 挑战仅开放经过字段白名单校验的域名、端口、地址族和随机 URI。
 完整 CLI 输出保存在私有证据目录，不通过临时 HTTP 服务公开。
@@ -115,7 +120,7 @@ TProxy/TUN 集中矩阵；已取得的限定源码证据及未决边界见末节
 - webroot/ALPN 的公网 CA 候选签发、候选校验与服务恢复已通过；正式 CLI 换证及回滚仍待验。
   WARP 仍缺真实账号/公网出口。Reality 已通过生产重装生成，受管/桥接同机流量、
   75 秒连接和外部 WS 通过；宿主回环 Vision 正反例、75.001 秒同连接与严格网站
-  HTTPS 通过，外部 Vision 仍未通过。
+  HTTPS 通过；本批外部 Vision 三次正反例通过，但不替代正式发布及完整恢复验收。
 - HTTP relay 原生外部 IPv4 验收通过；公网 IPv6 不在本次通过范围内。
 - 自然到期真实续期：当前登记续期约为 `2026-12-17 08:03:22 CST`，证书到期约为
   `2027-01-16 04:29:07 CST`；调度 no-op 不算换证。
@@ -338,3 +343,52 @@ TUN/Phase 6 定向均通过；当前修复尚未正式发布。
 精确删除并复核不存在。清理后 nginx/xray/subscription 均 healthy，
 严格 HTTPS 返回 `200`、证书 `verify=0`，IPv4 策略规则仅余默认优先级
 `0/32766/32767`。该清理及健康检查不扩大正式 CLI、重启或支持范围。
+
+### 本批安装入口、菜单与外部 Vision 补验
+
+本批源码基于 `53d2e5ae`。安装入口原先仅凭进程命令行含 `/etc/padm/` 判定原生
+部署，误把 Docker 内同名配置路径识别为宿主安装。修复核对受管 executable
+或进程根目录中受管路径与宿主路径的 inode，继续拒绝真正原生部署。
+两条负断言再改为显式失败，防止断言失败后继续执行掩盖错误。
+Docker Linux amd64 `platform-rest -Jobs 2` 两轮 exit `0`，分别为
+`6.880` 秒和断言强化后的 `7.012` 秒，均无缓存复用，不重复 full。
+最终证据为 `.tmp-regression-docker-1cf631b46bdc47b9a7215a4f0c65077a/`，
+源码 SHA256 `dd054679fa3b443a11f128707ffa7c0af4fa2179d9e023f0a416aff2522b171f`。
+VPS 当前源码安装执行成功；该源码未正式发布。
+
+远端菜单 PTY 执行曾返回四组通过，总 `36853 ms`，覆盖导航/取消、首页及字段
+SIGINT、SIGTERM `143`、EOF。夹具 SHA256 为
+`9d45d9a7850bc21fc5f5379e18c2c068601f0bdb4271a311d54a21de9ffa7788`。
+原始 `menu-native.json` 仍在远端待取回，不以本机夹具自检代替原生证据。
+
+本机独立 Docker Vision 客户端三次探针均通过：直连入口 `2443`、共存入口
+`443`、恢复阶段的 `443`。均固定公网 IP，正确 UUID 获得严格 TLS 校验的
+HTTPS `200`，随机错误 UUID 在 TLS 阶段被拒绝。证据位于
+`.tmp-native-batch-20261019/reality-external-{direct,stream,recovered}.json`，
+每文件为两行 JSON。它们证明对应外部流量正反例，不证明 DNS 解析或当前业务健康；
+stream/recovered 字节相同，恢复事务仍须取回远端日志核验，不能只凭文件名认定。
+
+### 本批透明测试中断与待恢复现场
+
+正式 `3.40` 控制包仍缺少当前能力合同，本批正式 TProxy 编辑返回 `16`，
+正确拒绝旧发布输入。随后受限 wrapper 复用已验证安装输入，调用当前源码生产
+`dockerConfigureApply`；这不等同正式发布 CLI 验收。TUN 本批尚未执行。
+
+本轮启动前 `systemctl restart padm-native-batch-guard.service` 返回 unit 不存在，
+执行链却继续启动 TProxy helper；停止后的 transient unit 不能靠 restart 重建。
+因此本轮独立防护未确认生效。随后 SSH/SFTP 超时，尚无中断时的内存、进程或
+内核资源证据，不能把此前事故根因直接套用到本轮，也不能认定自动超时已完成恢复。
+下一轮必须重新创建独立 guard，确认 active；创建或检查失败就不得启动测试。
+还须核验广播/多播绕过规则在实际捕获链之前，不能凭预先插入全局规则认定受保护。
+
+本机早期 `resources-progress.jsonl` 仅有 UTC `08:54:26–08:56:08` 的 `52` 个样本，
+最低 MemAvailable `478440 KiB`、SwapFree `510736 KiB`，不覆盖后续中断。
+`tproxy-progress.log` 仅记录旧门禁 `exit=16`，不能计作新矩阵通过。
+最后已知基线是单 Xray Reality `2443`，恢复目标仍为原 nginx/xray/subscription、
+严格 HTTPS、原账号/TLS/续期材料保持，透明、relay、alias 关闭。
+
+2026-10-19 `17:13:17 CST` 已按 ID、类型、域名、地址精确删除本批临时 DNS
+`reality-native.b.951101.xyz`，API 复核记录数为 `0`，本机解析返回不存在。
+本机本轮客户端容器/卷无残留，私密分享输入及两份源码归档已清理；
+脱敏证据和恢复所需脚本保留。远端原始证据、私密备份、临时 ACME/服务/规则和
+本轮新增配置备份尚待恢复连接后核验、归档和精确清理。整体目标未完成。

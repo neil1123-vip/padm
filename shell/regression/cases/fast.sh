@@ -4645,10 +4645,10 @@ PY
         sleep 0.01
     done
     [[ -s "${readyFile}" && "$(pgrep -x xray)" == "${processPid}" ]]
-    ! padmNativeManagedProcessActive
+    if padmNativeManagedProcessActive; then return 1; fi
     [[ "$(padmNativeDeploymentState)" == "absent" ]]
     mkdir -p "${root}/isolated${nativeRoot}/xray"
-    ! padmNativeManagedProcessActive
+    if padmNativeManagedProcessActive; then return 1; fi
     kill "${processPid}"
     wait "${processPid}" 2>/dev/null || true
     processPid=
