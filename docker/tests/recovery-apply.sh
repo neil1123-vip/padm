@@ -45,7 +45,7 @@ assert_acme_home() {
     local directory=$1 owner=$2 root_mode=$3 file
     [[ "$(find "${directory}" -type f | wc -l)" == 9 &&
         "$(stat -c '%u:%g:%a' "${directory}")" == "${owner}:${root_mode}" &&
-        -z "$(find "${directory}" -mindepth 1 -type d ! -perm 0700 -print -quit)" &&
+        -z "$(find "${directory}" -mindepth 1 -type d ! -perm "${root_mode}" -print -quit)" &&
         -z "$(find "${directory}" -type f ! -perm 0600 -print -quit)" &&
         -z "$(find "${directory}" \( ! -uid "${owner%:*}" -o ! -gid "${owner#*:}" \) -print -quit)" &&
         ! -e "${directory}/${DOMAIN}_ecc/${DOMAIN}.csr" ]] ||
