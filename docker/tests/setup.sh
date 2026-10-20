@@ -243,7 +243,13 @@ run)
             [[ -z "$(cat)" ]] || exit 1
             printf 'alpn-private-input-empty\n' >>"${FAKE_SETUP_EVENTS}"
         fi
-        [[ "${mode}" != acme-fail ]] || exit 1
+        if [[ "${mode}" == acme-fail ||
+            ( "${mode}" == acme-export-fail && " $* " == *' --install-cert '* ) ]]; then
+            printf 'stdout: DNS_TOKEN=fake\n'
+            printf 'stderr: private-acme-error\n' >&2
+            [[ "${mode}" != acme-fail ]] || exit 37
+            exit 41
+        fi
         output= account= domain= provider=no previous=
         for argument in "$@"; do
             if [[ "${previous}" == --volume && "${argument}" == *:/var/lib/padm/tls-output ]]; then
@@ -1607,14 +1613,23 @@ printf 'DNS_TOKEN=fake\n' >"${TEST_ROOT}/dns.env"
 chmod 0600 "${TEST_ROOT}/dns.env"
 printf -v DNS_INPUT '1\n2\nproxy.example.com\n1\nws.example.com\n24444\n3\nadmin@example.com\ndns_cf\n%s\ny\ny\n' \
     "${TEST_ROOT}/dns.env"
-for dnsCase in acme-fail dns-success dns-renewal-cancel dns-renewal-fail; do
+for dnsCase in acme-fail acme-export-fail dns-success dns-renewal-cancel dns-renewal-fail; do
     newState "${dnsCase}"
-    if [[ "${dnsCase}" == acme-fail ]]; then
-        export FAKE_SETUP_MODE=acme-fail
+    if [[ "${dnsCase}" == acme-fail || "${dnsCase}" == acme-export-fail ]]; then
+        export FAKE_SETUP_MODE=${dnsCase}
         runPty 15 "${dnsCase}" "${DNS_INPUT}" setup "${ASSET_ARGS[@]}"
         assertUnconfigured
         [[ ! -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" ]] ||
             fail 'failed DNS-01 retained candidate ACME account'
+        stage=issue status=37
+        [[ "${dnsCase}" != acme-export-fail ]] || { stage=install-cert; status=41; }
+        diagnostic="${PADM_DOCKER_INSTALL_DIR}/logs/acme/diagnostics/last-error.log"
+        grep -Fq "阶段: ${stage}, 底层 rc: ${status}, 私密日志: ${diagnostic}" "${CONTROL_LOG}" &&
+            grep -qxF 'stdout: DNS_TOKEN=fake' "${diagnostic}" &&
+            grep -qxF 'stderr: private-acme-error' "${diagnostic}" &&
+            [[ "$(stat -c '%a:%u:%h' "${diagnostic}")" == 600:0:1 &&
+                "$(stat -c '%a:%u' "${diagnostic%/*}")" == 700:0 ]] ||
+            fail '首配 ACME 失败未保存私密原始诊断或阶段退出码'
         unset FAKE_SETUP_MODE
     else
         expected=0

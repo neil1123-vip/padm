@@ -59,6 +59,7 @@ DOCKER_ACME_RECOVERY=
 DOCKER_ACME_RUNNING=null
 DOCKER_ACME_WEBROOT=
 DOCKER_ACME_WEBROOT_INODE=
+DOCKER_ACME_DIAGNOSTIC=
 
 dockerConfigureSchemaFile() {
     printf '%s\n' "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/contracts/configure.schema.json"
@@ -9363,7 +9364,9 @@ dockerAcmeChallengePrepare() {
 
 dockerAcmeRenewProbe() {
     local image=$1 credentials=$2 account=$3 output=$4 domain=$5 config hook status=0
+    local DOCKER_ACME_RENEW_PROBE=1
     shift 5
+    DOCKER_ACME_DIAGNOSTIC=
     config="${account}/${domain}/${domain}.conf"
     [[ -f "${config}" ]] || config="${account}/${domain}_ecc/${domain}.conf"
     [[ -f "${config}" && ! -L "${config}" &&
@@ -9386,14 +9389,59 @@ dockerAcmeRenewProbe() {
         return 0
     fi
     [[ "${status}" != 2 ]] || return 2
-    return 1
+    [[ "${status}" != 0 ]] || status=1
+    return "${status}"
+}
+
+dockerAcmeDiagnosticPrepare() {
+    local root directory cursor mode logFile
+    root=$(dockerInstallRoot) || return 1
+    directory="${root}/logs/acme/diagnostics"
+    logFile="${directory}/last-error.log"
+    dockerTrafficSafePath "${root}" "${logFile}" || return 1
+    cursor=${directory}
+    while [[ -n "${cursor}" ]]; do
+        if [[ -e "${cursor}" ]]; then
+            [[ -d "${cursor}" && ! -L "${cursor}" &&
+                "$(stat -c %u -- "${cursor}")" == 0 ]] || return 1
+            mode=$(stat -c %a -- "${cursor}") || return 1
+            # 受管父目录不能被其它用户替换，根外只允许 root 的 sticky 临时目录。
+            (( (8#${mode} & 022) == 0 )) ||
+                { [[ "${cursor}" != "${root}" && "${cursor}" != "${root}/"* ]] &&
+                    (( (8#${mode} & 01000) != 0 )); } || return 1
+        fi
+        [[ "${cursor}" != / ]] || break
+        cursor=${cursor%/*}
+        [[ -n "${cursor}" ]] || cursor=/
+    done
+    if [[ -e "${directory}" ]]; then
+        [[ "$(stat -c %a -- "${directory}")" == 700 ]] || return 1
+    fi
+    if [[ -e "${logFile}" || -L "${logFile}" ]]; then
+        [[ -f "${logFile}" && ! -L "${logFile}" &&
+            "$(stat -c '%a:%u:%h' -- "${logFile}")" == 600:0:1 ]] || return 1
+    fi
+    for cursor in "${root}/logs" "${root}/logs/acme" "${directory}"; do
+        if [[ ! -e "${cursor}" ]]; then
+            (umask 077; mkdir -- "${cursor}") || return 1
+        fi
+    done
+    if [[ ! -e "${logFile}" ]]; then
+        (umask 077; set -C; : >"${logFile}") || return 1
+    fi
+    printf '%s\n' "${logFile}"
+}
+
+dockerAcmeFailure() {
+    dockerError "$3 (阶段: $1, 底层 rc: $2, 私密日志: ${DOCKER_ACME_DIAGNOSTIC:-不可用})"
 }
 
 dockerAcmeRun() {
     local image=$1 credentials=$2 acmeData=$3 output=$4
-    local status input=/dev/null
+    local status diagnostic input=/dev/null
     local -a ports=() containerArgs=() webrootMount=()
     shift 4
+    DOCKER_ACME_DIAGNOSTIC=
     if [[ -n "${credentials}" ]]; then
         dockerRenewalCredentialsValidate "${credentials}" || return 1
         input=${credentials}
@@ -9411,6 +9459,7 @@ dockerAcmeRun() {
         DOCKER_ACME_CONTAINER="padm-acme-${BASHPID:-$$}-${RANDOM}"
         containerArgs=(--name "${DOCKER_ACME_CONTAINER}" --label "io.padm.challenge=${DOCKER_ACME_CONTAINER}")
     fi
+    diagnostic=$(dockerAcmeDiagnosticPrepare) || return 1
     if docker run --rm -i --read-only --cap-drop ALL "${ports[@]}" "${containerArgs[@]}" \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
@@ -9439,7 +9488,15 @@ for line in sys.stdin.read().splitlines():
 os.umask(0o077)
 os.execvpe("/opt/acme/acme.sh",
     ["acme.sh", "--home", "/var/lib/padm/acme", *sys.argv[1:]], env)
-' "$@" <"${input}"; then status=0; else status=$?; fi
+' "$@" <"${input}" >"${diagnostic}" 2>&1; then status=0; else status=$?; fi
+    if [[ "${status}" == 0 || ( "${status}" == 2 && "${1:-}" == --renew ) ]] ||
+        { [[ "${DOCKER_ACME_RENEW_PROBE:-0}" == 1 && "${status}" != 0 &&
+            -f "${output}/renew.due" && ! -L "${output}/renew.due" ]] &&
+            [[ "$(<"${output}/renew.due")" == due ]]; }; then
+        rm -f -- "${diagnostic}" || return 1
+    else
+        DOCKER_ACME_DIAGNOSTIC=${diagnostic}
+    fi
     return "${status}"
 }
 
@@ -9525,9 +9582,10 @@ dockerAcmeApply() {
             if dockerAcmeRenewProbe "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
                 "${domain}" "${keyArgs[@]}"; then status=0; else status=$?; fi
             if [[ "${status}" != 0 ]]; then
+                [[ "${status}" == 2 ]] ||
+                    dockerAcmeFailure renew-probe "${status}" '候选 ACME 续期预检失败，服务未暂停'
                 dockerCleanupTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
                 [[ "${status}" != 2 ]] || return 2
-                dockerError '候选 ACME 续期预检失败，服务未暂停'
                 return "${PADM_DOCKER_RC_STATE}"
             fi
         fi
@@ -9536,7 +9594,8 @@ dockerAcmeApply() {
     if [[ "${action}" == "issue" ]]; then
         dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
             --issue "${challengeArgs[@]}" "${issueKeyArgs[@]}" -d "${domain}" --accountemail "${email}" >/dev/null 2>&1 || {
-            dockerError '候选 ACME 申请失败，现有证书和 ACME 账户未修改'
+            status=$?
+            dockerAcmeFailure issue "${status}" '候选 ACME 申请失败，现有证书和 ACME 账户未修改'
             dockerAcmeChallengeRestore || return "${PADM_DOCKER_RC_STATE}"
             dockerCleanupTlsCandidate || true
             return "${PADM_DOCKER_RC_STATE}"
@@ -9554,10 +9613,11 @@ dockerAcmeApply() {
             status=$?
         fi
         if [[ "${status}" != 0 ]]; then
+            [[ "${status}" == 2 ]] ||
+                dockerAcmeFailure renew "${status}" '候选 ACME 续期失败，现有证书和 ACME 账户未修改'
             dockerAcmeChallengeRestore || return "${PADM_DOCKER_RC_STATE}"
             dockerCleanupTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
             [[ "${status}" != 2 ]] || return 2
-            dockerError '候选 ACME 续期失败，现有证书和 ACME 账户未修改'
             return "${PADM_DOCKER_RC_STATE}"
         fi
     fi
@@ -9566,7 +9626,8 @@ dockerAcmeApply() {
         --install-cert -d "${domain}" "${keyArgs[@]}" \
         --fullchain-file "/var/lib/padm/tls-output/${domain}.crt" \
         --key-file "/var/lib/padm/tls-output/${domain}.key" >/dev/null 2>&1 || {
-        dockerError '候选证书导出失败，现有证书和 ACME 账户未修改'
+        status=$?
+        dockerAcmeFailure install-cert "${status}" '候选证书导出失败，现有证书和 ACME 账户未修改'
         dockerCleanupTlsCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }

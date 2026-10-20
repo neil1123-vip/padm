@@ -30,6 +30,7 @@ ACME_RUN_IMPLEMENTATION=$(declare -f dockerAcmeRun)
 DOMAIN=example.com
 MODE=ok
 RAW_ACME_RUN=0
+RAW_ACME_STATUS=0
 RUNNING_ID=$(printf 'a%.0s' {1..64})
 STOPPED_ID=$(printf 'b%.0s' {1..64})
 HTTPS_ID=$(printf 'c%.0s' {1..64})
@@ -180,7 +181,17 @@ docker() {
     if [[ "${RAW_ACME_RUN}" == 1 ]]; then
         printf '%s\n' "$*" >>"${TEST_ROOT}/acme-docker.args"
         [[ -z "$(cat)" ]] || fail 'HTTP 验证向工具注入了 DNS 凭据'
-        return 0
+        if [[ "${RAW_ACME_STATUS}" != 0 ]]; then
+            printf 'stdout: private-dns-token\n'
+            printf 'stderr: private-acme-error\n' >&2
+            if [[ "${RAW_ACME_DUE:-0}" == 1 ]]; then
+                for argument in "$@"; do
+                    [[ "${argument}" != *:/var/lib/padm/tls-output ]] ||
+                        printf due >"${argument%:/var/lib/padm/tls-output}/renew.due"
+                done
+            fi
+        fi
+        return "${RAW_ACME_STATUS}"
     fi
     printf 'validate\n' >>"${TEST_ROOT}/ops.log"
     for argument in "$@"; do
@@ -314,7 +325,7 @@ dockerAcmeRun() {
     ) || fail '容器 UID 不能更新候选账户'
     if [[ ( "${MODE}" == issue-fail && "${action}" == --issue ) ||
         ( "${MODE}" == renew-fail && "${action}" == --renew ) ||
-        ( "${MODE}" == export-fail && "${action}" == --install-cert ) ]]; then return 1; fi
+        ( "${MODE}" == export-fail && "${action}" == --install-cert ) ]]; then return 37; fi
     if [[ "${MODE}" == term-issue && "${action}" == --issue ]]; then kill -TERM "${BASHPID}"; fi
     if [[ "${MODE}" == int-issue && "${action}" == --issue ]]; then kill -INT "${BASHPID}"; fi
     if [[ "${action}" == --install-cert ]]; then
@@ -761,6 +772,14 @@ for MODE_CASE in issue-fail renew-fail export-fail validity-fail match-fail ngin
     [[ "${MODE}" != term-* ]] || EXPECTED=143
     runControl "${EXPECTED}" acme "${ACTION}" --domain "${DOMAIN}" --email admin@example.com --dns dns_test --credentials "${CREDENTIALS}"
     [[ "$(materials)" == "${before}" ]] || fail "${MODE}: 失败或中断未恢复证书与账户"
+    case "${MODE}" in
+    issue-fail|renew-fail|export-fail)
+        stage=${MODE%-fail}
+        [[ "${stage}" != export ]] || stage=install-cert
+        grep -Fq "阶段: ${stage}, 底层 rc: 37" "${TEST_ROOT}/control.log" ||
+            fail "${MODE}: 未保留失败阶段和底层退出码"
+        ;;
+    esac
     assertPermissions
 done
 
@@ -1328,6 +1347,77 @@ grep -Fq -- '--publish 0.0.0.0:443:8443/tcp --publish [::]:443:8443/tcp' "${TEST
     fail 'TLS-ALPN 运行器未使用双族 443 到非 root 容器 8443 的受限映射'
 ! grep -Eq -- '--network host|--cap-add|--publish [^ ]*:80:' "${TEST_ROOT}/acme-docker.args" ||
     fail 'TLS-ALPN 运行器扩大网络权限或发布了无关 80'
+# 真实运行器必须保留私密原始输出，成功、跳过和预检到期不留下失败诊断。
+DOCKER_ACME_PORT_PUBLISH=0
+RAW_ACME_STATUS=37
+if dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" \
+    --issue -d "${DOMAIN}" >"${TEST_ROOT}/runner.log" 2>&1; then
+    fail '运行器吞掉了 Docker 失败'
+else
+    [[ "$?" == 37 ]] || fail '运行器改写了 Docker 退出码'
+fi
+diagnostic="${PADM_DOCKER_INSTALL_DIR}/logs/acme/diagnostics/last-error.log"
+[[ "${DOCKER_ACME_DIAGNOSTIC}" == "${diagnostic}" &&
+    "$(stat -c '%a:%u:%h' "${diagnostic}")" == 600:0:1 &&
+    "$(stat -c '%a:%u' "${diagnostic%/*}")" == 700:0 &&
+    ! -s "${TEST_ROOT}/runner.log" ]] || fail 'ACME 原始错误泄露或日志权限不私密'
+grep -qxF 'stdout: private-dns-token' "${diagnostic}" &&
+    grep -qxF 'stderr: private-acme-error' "${diagnostic}" || fail '未保存 ACME 完整原始输出'
+RAW_ACME_STATUS=0
+dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" --renew -d "${DOMAIN}"
+[[ ! -e "${diagnostic}" && -z "${DOCKER_ACME_DIAGNOSTIC}" ]] || fail '成功保留了旧诊断'
+RAW_ACME_STATUS=2
+if dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" --renew -d "${DOMAIN}"; then
+    fail '未到续期时间被改写为成功'
+else
+    [[ "$?" == 2 && ! -e "${diagnostic}" && -z "${DOCKER_ACME_DIAGNOSTIC}" ]] ||
+        fail '未到续期时间保留了失败诊断'
+fi
+mkdir -p "${DOCKER_TLS_CANDIDATE}/acme/${DOMAIN}"
+printf "Le_PreHook='printf original-hook'\n" >"${DOCKER_TLS_CANDIDATE}/acme/${DOMAIN}/${DOMAIN}.conf"
+RAW_ACME_DUE=1 RAW_ACME_STATUS=37
+dockerAcmeRenewProbe "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" "${DOMAIN}"
+[[ ! -e "${diagnostic}" && -z "${DOCKER_ACME_DIAGNOSTIC}" &&
+    ! -e "${DOCKER_TLS_CANDIDATE}/renew.due" ]] || fail '预检到期保留了失败诊断'
+RAW_ACME_DUE=0
+if dockerAcmeRenewProbe "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" "${DOMAIN}"; then
+    fail '预检真实失败被当作到期'
+else
+    [[ "$?" == 37 && -f "${diagnostic}" ]] || fail '预检真实失败丢失退出码或诊断'
+fi
+rm -- "${diagnostic}"
+# 拒绝坏路径，不能先修饰权限或截断外部文件再使用。
+printf 'untouched\n' >"${TEST_ROOT}/private-log-target"
+chmod 0600 "${TEST_ROOT}/private-log-target"
+for unsafeLog in symlink hardlink owner mode parent-symlink parent-writable; do
+    case "${unsafeLog}" in
+    symlink) ln -s "${TEST_ROOT}/private-log-target" "${diagnostic}" ;;
+    hardlink) ln "${TEST_ROOT}/private-log-target" "${diagnostic}" ;;
+    owner|mode)
+        cp -- "${TEST_ROOT}/private-log-target" "${diagnostic}"
+        if [[ "${unsafeLog}" == owner ]]; then chown 10001 "${diagnostic}"
+        else chmod 0640 "${diagnostic}"; fi
+        ;;
+    parent-symlink)
+        mv -- "${diagnostic%/*}" "${PADM_DOCKER_INSTALL_DIR}/private-diagnostics"
+        ln -s "${PADM_DOCKER_INSTALL_DIR}/private-diagnostics" "${diagnostic%/*}"
+        ;;
+    parent-writable) chmod 0770 "${PADM_DOCKER_INSTALL_DIR}/logs" ;;
+    esac
+    : >"${TEST_ROOT}/acme-docker.args"
+    reject dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" --renew -d "${DOMAIN}"
+    [[ ! -s "${TEST_ROOT}/acme-docker.args" &&
+        "$(<"${TEST_ROOT}/private-log-target")" == untouched ]] || fail "${unsafeLog}: 坏诊断路径仍运行或改写外部文件"
+    case "${unsafeLog}" in
+    parent-symlink)
+        rm -- "${diagnostic%/*}"
+        mv -- "${PADM_DOCKER_INSTALL_DIR}/private-diagnostics" "${diagnostic%/*}"
+        ;;
+    parent-writable) chmod 0750 "${PADM_DOCKER_INSTALL_DIR}/logs" ;;
+    *) rm -- "${diagnostic}" ;;
+    esac
+done
+RAW_ACME_STATUS=0
 RAW_ACME_RUN=0
 DOCKER_ACME_CONTAINER=
 DOCKER_ACME_PORT_PUBLISH=0

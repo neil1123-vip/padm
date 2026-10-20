@@ -436,16 +436,18 @@ dockerSetupStageCertificate() {
         else
             status=$?
         fi
-        dockerAcmeChallengeRestore || return 1
         if [[ "${status}" != 0 ]]; then
-            dockerError '候选 ACME 申请失败，现有证书和配置未修改'
+            dockerAcmeFailure issue "${status}" '候选 ACME 申请失败，现有证书和配置未修改'
+            dockerAcmeChallengeRestore || return 1
             return 1
         fi
+        dockerAcmeChallengeRestore || return 1
         dockerAcmeRun "${opsImage}" "${credentials}" "${candidate}/acme" "${candidate}/tls" \
                 --install-cert -d "${domain}" "${keyArgs[@]}" \
             --fullchain-file "/var/lib/padm/tls-output/${domain}.crt" \
             --key-file "/var/lib/padm/tls-output/${domain}.key" >/dev/null 2>&1 || {
-            dockerError '候选证书导出失败，现有证书和配置未修改'
+            status=$?
+            dockerAcmeFailure install-cert "${status}" '候选证书导出失败，现有证书和配置未修改'
             return 1
         }
         ;;

@@ -2,10 +2,11 @@
 
 验收日期：2026-10-18–20（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
-**当前现场（2026-10-20）**：3.41 正式升级后，旧升级器遗漏的 locale 清单已独立比对并修复，
-validate、正式 restart、整机重启、严格 HTTPS 和外部 WS 正反例通过，透明代理保持关闭。
+**当前现场（2026-10-20）**：3.41.1 已正式发布并验签升级，新增依赖路径表已进入运行 bundle，
+assess、update、validate、正式 restart、整机重启、严格 HTTPS 和外部 WS 正反例通过，透明代理保持关闭。
 正式 webroot/ALPN `acme issue` 各取得新证书并完成在线换证；第三次申请提前失败，
-ACME 消费失败回滚仍未通过，本轮不再签发。原业务、材料字节/权限和定时器已恢复；
+本轮不再签发。3.41.1 缓存 ACME 导出后真实消费失败恢复通过，正式 issue/renew 全链仍缺；
+原业务、材料字节/权限和定时器已恢复；
 本轮临时资源及私密材料清理结果见末节，不把两条签发路径通过计作整体完成。
 
 ## 环境与可信输入
@@ -131,8 +132,8 @@ TProxy/TUN 集中矩阵；已取得的限定源码证据及未决边界见末节
 - HTTP relay 原生外部 IPv4 验收通过；公网 IPv6 不在本次通过范围内。
 - 自然到期真实续期：当前登记续期约为 `2026-12-17 08:03:22 CST`，证书到期约为
   `2027-01-16 04:29:07 CST`；调度 no-op 不算换证。
-- 3.41 已正式发布并升级；本轮新增升级依赖路径表修复仍待新发布和原生升级验收，
-  本轮没有新增 push、PR 或发布授权。
+- 3.41.1 已正式发布并完成原生验签升级，新增依赖路径表已生效；
+  后续 ACME 失败私密诊断修复尚未进入正式包。
 - 明确拒绝的恢复、协议与宿主组合保持原边界，不因本批环境验收扩大支持状态。
 
 ## 2026-10-19 追加原生收口记录
@@ -527,4 +528,65 @@ SHA256 `e8268d0b2be11d2dc71afd54268f28cde39c96ec89c890963c4e5d669584e740`；
 `.tmp-regression-docker-93c479fe5f4141fcad540f64fc25a111/`、
 `.tmp-regression-docker-9447918c37ca482d89bacff571327308/`。
 原生 arm64、公网 IPv6、新机灾备、WARP 实账号、自然续期、ACME 消费失败回滚、
-透明启用矩阵及本轮升级修复的正式发布仍未完成。
+透明启用矩阵及本轮升级修复的正式发布在当时仍未完成；路径表发布接续下节。
+
+### 3.41.1 路径表发布与原生升级
+
+正式 Release run `39380475292` 已成功，3.41.1 源提交为
+`b0fd3a07ea92615541449cda3f4166df48f07aeb`，发布于 UTC `06:33:29`。
+控制包 SHA256 为
+`2f464de653652f29022d74b6a667e5772dfc6d36838a3e03360d8b07ca332cd9`。
+VPS 使用 Cosign 验签并核对归档摘要，正式 `assess`、`update`、`validate` 均返回 0；
+新 bundle 的 `bundle.paths`、locale 和共享核心依赖存在，bundle ref 匹配源提交。
+正式 `restart` 后已等到 nginx/xray/subscription 全部 healthy，未把 starting 算作通过。
+续期与流量 timer 均 active/enabled，系统无 failed unit，IPv4/IPv6 策略规则保持默认。
+
+独立外部客户端固定 VPS 公网 IPv4，网站严格 TLS 返回 `200/verify=0`；
+Docker WS 客户端正确 UUID 得到严格 TLS/HTTPS 200，错误 UUID 在 TLS 阶段被拒绝。
+升级生成的正式回滚点 `update.t5vJXt` 和旧 bundles 保留。
+本轮未对升级过程部署连续资源采样，不声明升级全过程峰值。
+
+ACME 错误诊断改为共享运行器保存私密原始输出，失败入口显示阶段、底层退出码与安全路径。
+日志位于 `logs/acme/diagnostics/last-error.log`，目录 0700、文件 0600，拒绝链接、
+非 root 属主及可被其它用户替换的父路径；终端不回显原始输出。
+成功、正常续期 skip 和预检 due 清除无效诊断，保持既有 CLI 15/续期 2 语义。
+Docker Linux amd64 定向 `docker-tls-focused` 为 40.049 秒、
+`docker-setup-tls` 为 69.772 秒，均 exit 0；未重复日常集合或 full。
+这不能补回第三次签发已经丢弃的输出，也不能仅凭 rc 判断具体 CA 原因。
+
+### 3.41.1 离线消费失败恢复与重启
+
+使用正式安装 bundle、受管 ops 及缓存 ECC 账户/证书，容器以 `--network none`
+执行 `acme.sh --install-cert --reloadcmd true`，全程 CA 请求为 0。
+候选先通过真实校验；仅对本轮提交临时 key 注入随机不匹配私钥，
+真实 `dockerCommitTlsCandidate` 切换 ACME 树后被 Nginx `key values mismatch` 拒绝。
+原事务自动恢复，TLS/ACME 的完整字节、mode、uid、gid 与原快照一致；
+候选 marker 消失，旧在线指纹、严格 TLS/HTTP 200、三项服务健康及透明关闭状态通过。
+runner 为 `Result=success/ExecMainStatus=0`。
+
+该结果证明缓存 ACME 导出后的共享提交事务能从真实消费者失败中恢复。
+候选证书与原证书相同，没有证明新在线证书再切回旧证书，也不替代正式
+issue/renew 消费失败全链或 fresh 公网挑战。新增诊断代码尚未在该正式 VPS 运行。
+
+外层状态恢复及 verify 返回 0，续期/流量 timer 恢复 active/enabled。
+独立 guard 正常退出、未触发，共记录 594 个两秒资源样本，持续 1186.479 秒；
+最低 MemAvailable `412492 KiB`、最低 SwapFree `514040 KiB`、最高 load1 `0.9`。
+采样仅覆盖重启前的离线验收，不覆盖前面的升级或后面的整机重启。
+
+随后对正式 3.41.1 整机 reboot，boot ID 从
+`23a97514-b7e9-49f0-9d23-1fe5cfb13b1f` 变为
+`2c686c25-2623-401e-b19c-e866db90b181`。
+重连后外层状态再次 verify 通过，三项服务 healthy，timer active/enabled，
+IPv4/IPv6 策略规则与重启前一致，透明保持关闭、无 failed unit；
+可用内存约 553 MiB、swap 使用 0。
+独立外部 Docker WS 客户端正确账号严格 TLS/HTTPS 200、错误 UUID 拒绝；
+固定 VPS IPv4 的网站 HTTPS 为 `200/verify=0`。
+
+脱敏证据为 `.tmp-release-upgrade-20261020/native-3411-evidence.tar.gz`，
+SHA256 `2481155cdc607fb6ddc6f6ca1477b942f5f81e4fe598aeaba332c701b64d1fe2`。
+公网复核为同目录 `ws-post-reboot.log`、`https-post-reboot.json`。
+正式回滚点 `update.t5vJXt`、原有两个 update 备份和旧 bundles 保留；
+本轮 TLS 测试备份 `tls.Znpksg`、两个远端私密目录、临时 unit、三个 `/tmp`
+日志及本机分享 URI、known_hosts、发布中间归档均已清理，SSH 已退出。
+UTC `09:15:23` 离场核对三项业务 healthy、timer active/enabled、无 failed unit；
+最终记录为同目录 `final-close.json`，归档脱敏扫描通过。
