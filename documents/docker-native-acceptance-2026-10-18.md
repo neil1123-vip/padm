@@ -1,11 +1,12 @@
 # Debian 13 原生与公网验收
 
-验收日期：2026-10-18–19（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
+验收日期：2026-10-18–20（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
-**当前现场（2026-10-19 19:22 CST）**：SSH 与原三项业务已恢复，透明测试继续暂停。
-本轮两次真实证书签发后的正式 TLS 安装、真实 Nginx 失败回滚及原材料恢复通过；
-公网严格 HTTPS 和外部 WS 正反例通过。临时工具、备份、私密材料及远端工作目录已清理。
-正式 ACME 全链仍受旧受管镜像限制，不把分段验收或业务恢复计作整体完成。
+**当前现场（2026-10-20）**：3.41 正式升级后，旧升级器遗漏的 locale 清单已独立比对并修复，
+validate、正式 restart、整机重启、严格 HTTPS 和外部 WS 正反例通过，透明代理保持关闭。
+正式 webroot/ALPN `acme issue` 各取得新证书并完成在线换证；第三次申请提前失败，
+ACME 消费失败回滚仍未通过，本轮不再签发。原业务、材料字节/权限和定时器已恢复；
+本轮临时资源及私密材料清理结果见末节，不把两条签发路径通过计作整体完成。
 
 ## 环境与可信输入
 
@@ -20,6 +21,10 @@
 | --- | --- | --- |
 | 3.39.0 | `6b2d31bbbcbad1b9b5d9f261b625ef0a4d45cdf0` | `c49394b968e3267e6e8bfc646fc11e8b9790d7e83f483baf2017e4d4dbd77093` |
 | 3.40.0 | `6f3676355f621bf5d4a10eb043ba4dc23cbf2084` | `467a4e4ec801e3c8ba4f3da63a44fe7f97edc12085b698cffdfecc1704b247d3` |
+
+3.41.0 的源提交为 `13b5b5726f35f774ca3a69d4d1ed507007407559`，
+控制包 SHA256 为 `4b314c1e4964a2d70b37dd605ab03d63273b25fa3b2e0f7b823a7265a3ba10fd`；
+正式签名和归档 digest 已核验，具体升级修复与镜像边界见 2026-10-20 记录。
 
 ## 已取得证据
 
@@ -112,21 +117,22 @@ TProxy/TUN 集中矩阵；已取得的限定源码证据及未决边界见末节
 - 原生 arm64 安装、升级、回滚、重启、卸载及客户端生命周期：缺少原生 arm64 主机，不能用
   Buildx 或 amd64 仿真替代。
 - TProxy 指定 UID UDP 的能力根因、原生单包增权对照及修复后的隔离流量回归已通过；
-  正式 `3.40` 缺少 managed-restart marker，TProxy 编辑入口正确拒绝，
-  新增能力仍需当前源码正式发布后的镜像、CLI 和原生重启矩阵验收。
+  3.41 正式 net/validator 与验签包逐文件一致，但透明代理按最新授权保持关闭，
+  正式 CLI 启用后的连续重启矩阵仍未执行。
   TUN restart 首次 DNS 曾超时，后续独立复测通过，不构成连续稳定证据。
 - 公网双栈端口跳跃、旧连接排空和自动恢复：当前 VPS 无公网 IPv6，不能判定通过。
 - 同机 v3 空目标恢复已通过；新原生主机灾备仍缺少同架构全新目标。
-- webroot/ALPN 的独立 staging 公网挑战、候选校验与服务恢复已通过；本轮新增真实签发后
-  正式 `tls install` 换证与 Nginx 失败回滚。签发复用 CA 授权，未重新验证挑战入口；
-  正式 `acme issue` 全链仍待当前修复的受管发布升级。
+- webroot/ALPN 的独立 staging 公网挑战、正式 `tls install` 换证与 Nginx 失败回滚已通过；
+  3.41 正式 `acme issue` 两条签发安装路径通过，本轮 fresh 公网挑战未核实，
+  第三次申请在候选阶段失败，未覆盖正式 ACME 消费失败回滚。
   WARP 仍缺真实账号/公网出口。Reality 已通过生产重装生成，受管/桥接同机流量、
   75 秒连接和外部 WS 通过；宿主回环 Vision 正反例、75.001 秒同连接与严格网站
   HTTPS 通过；本批外部 Vision 三次正反例通过，但不替代正式发布及完整恢复验收。
 - HTTP relay 原生外部 IPv4 验收通过；公网 IPv6 不在本次通过范围内。
 - 自然到期真实续期：当前登记续期约为 `2026-12-17 08:03:22 CST`，证书到期约为
   `2027-01-16 04:29:07 CST`；调度 no-op 不算换证。
-- 当前源码修复的可信正式发布、发布后首配/升级/客户端验收：未获 push、PR 或发布授权。
+- 3.41 已正式发布并升级；本轮新增升级依赖路径表修复仍待新发布和原生升级验收，
+  本轮没有新增 push、PR 或发布授权。
 - 明确拒绝的恢复、协议与宿主组合保持原边界，不因本批环境验收扩大支持状态。
 
 ## 2026-10-19 追加原生收口记录
@@ -453,3 +459,72 @@ WS 证据为同目录 `recovery-ws-external.json`，恢复核对为
 已删除并退出 SSH。本轮新增 `5` 个备份、候选、临时 unit、工具镜像和私密副本均已清理；
 本机分享输入及镜像归档已删除。未重复日常集合或 full，也未扩大支持范围。
 正式 ACME 全链、当前透明重启矩阵及既有环境缺口继续未完成。
+
+## 2026-10-20 正式升级与原生补验
+
+SSH 主机 ED25519 指纹经用户在控制台独立提供并核对为
+`SHA256:K3xTlRmHLGP/jSuM1KhSqyGaA0zMvrUl9lmcAcVEhUo`。
+正式 3.41.0 发布签名和控制包核验通过；受管 ops 的 GNU 日期解析以及正式
+net/validator 与控制包的一致性均已验证。透明代理始终关闭。
+
+### 升级依赖遗漏修复
+
+旧升级进程沿用旧 `dockerBundlePayloadPaths`，即使新归档含 `shell/core/locale.sh`，
+复制和写 manifest 时仍会漏掉它，导致安装后 CLI 失败。本轮没有改写验签归档；
+安装 payload 与正式归档逐文件比对一致后，在副本演练官方 manifest 生成流程，
+差异仅补 locale。按新 manifest 摘要建 bundle 目录，以官方激活函数切换，
+并按 staging 规则规范权限；正式 `padm-docker validate` 返回 0，旧 bundle 保留。
+
+源码改为由新发布包携带纯数据 `docker/contracts/bundle.paths`，升级器验证外部依赖表，
+同时完整枚举 docker 目录，保留旧包兼容、已知必需文件与站点资源校验。
+绝对路径、穿越、重复、缺失、反斜杠、漏已知依赖及软/硬链接均拒绝。
+回归验证未知于当前枚举器的新文件被复制并进入新 manifest。
+旧版进程无法追溯获得新逻辑，本次现场迁移修复与今后路径表发布分别计证。
+
+### 正式 ACME 与恢复
+
+UTC `03:40:34–03:41:03`，使用正式 3.41.0 CLI 和受管 ops，
+webroot、ALPN 各完成一次 `acme issue`。两次均取得新证书、在线指纹变化，
+严格 TLS、HTTP 200 与 nginx/xray/subscription 健康通过，没有使用独立签发工具。
+本轮未取得 CA 重新访问挑战入口的证据，不能宣称 fresh challenge 通过或确认授权复用。
+
+第三次原计划固定 Nginx 私钥触发真实消费者失败，但申请在候选阶段提前失败，
+尚未到达消费校验。生产入口丢弃了 acme.sh 的原始 stdout/stderr，现有日志只能证明
+候选申请失败，不能判断限额或其它具体 CA 原因。累计 3 次后停止签发；
+runner 为 `exit_code=1/restored=true`，不得计作正式 ACME 消费失败回滚通过。
+原证书经正式 TLS 安装恢复，全部受保护状态树的内容与权限和原快照一致。
+
+### 重启、保护与清理
+
+独立 systemd 资源 guard 在验收前为 active，整机重启前安装临时启动单元，
+重连后再次确认 active；保护未触发。阈值为可用内存 150 MiB、剩余 swap 96 MiB、
+load1 4，连续 3 次或 45 分钟超时即停止测试并恢复。未记录连续资源样本，
+不把几个现场值外推为整个过程的资源峰值。
+
+正式 `restart` 和整机 reboot 均通过；boot ID 变化，三项业务 healthy，
+原状态树字节/权限匹配，续期与流量 timer 均 active/enabled，
+IPv4/IPv6 策略规则与重启前一致，`host_integrations=[]`。
+外层快照曾在中断后的 timer 暂停期采集；原采集值已保留，
+以两份一致的中断前 active/enabled 记录校准 timer 基线，没有改动状态树摘要。
+重启后可用内存约 538 MiB、swap 使用 0；外部固定公网 IP 的严格 HTTPS 为
+200/verify=0，独立 Docker WS 客户端正确账号 HTTP 200、错误 UUID 拒绝。
+关闭状态的重启不替代 TProxy/TUN 启用矩阵。
+
+本轮新增 5 个 TLS/configure 测试备份、候选和临时 guard 已清理，
+原有两个 update 备份与旧 bundle 保留；归档摘要核对后已删除远端私密工作目录并退出 SSH。
+离场复核三项业务 healthy、定时器 active/enabled，无 failed unit；
+本机分享 URI、临时 HOME/TMPDIR、已解包源码及中间归档已删除。
+脱敏原生证据为 `.tmp-release-native-20261020/native-release-evidence.tar.gz`，
+SHA256 `e8268d0b2be11d2dc71afd54268f28cde39c96ec89c890963c4e5d669584e740`；
+只收录 JSON、公开证书元数据、boot ID 和阶段标记，不包含私密材料及原始申请日志。
+外部结果为同目录 `ws-external.json`、`https-external.json`；
+归档后的最终清理记录为同目录 `final-close.json`。
+
+本机复用同一工具镜像，当前修复的定向 `docker-bundle-focused` 为 106.516 秒、
+`docker-phase5` 为 10.253 秒；34 项 `docker-contracts -Jobs 6` 为 218.604 秒，均返回 0，
+未复用旧结果，未运行 full。证据目录分别为
+`.tmp-regression-docker-80ea123be040476d8289f776c2f7df05/`、
+`.tmp-regression-docker-93c479fe5f4141fcad540f64fc25a111/`、
+`.tmp-regression-docker-9447918c37ca482d89bacff571327308/`。
+原生 arm64、公网 IPv6、新机灾备、WARP 实账号、自然续期、ACME 消费失败回滚、
+透明启用矩阵及本轮升级修复的正式发布仍未完成。

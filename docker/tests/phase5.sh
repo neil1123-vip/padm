@@ -41,7 +41,7 @@ done
 CONTROL_PACK_SCRIPT="${TEST_ROOT}/pack-control.sh"
 awk '
     /^      - name: Build control bundle and release manifest$/ {step = 1; next}
-    step && /^          tar --sort=name / {packing = 1}
+    step && /^          bundleStage=/ {packing = 1}
     packing {
         sub(/^          /, ""); print
         if ($0 ~ /[|] gzip -n /) exit
@@ -56,6 +56,8 @@ mkdir -p "${TEST_ROOT}/workflow-assets" "${TEST_ROOT}/workflow-control"
 ) || fail 'release workflow could not package current control source'
 tar -xzf "${TEST_ROOT}/workflow-assets/padm-docker-bundle.tar.gz" \
     -C "${TEST_ROOT}/workflow-control"
+[[ -f "${TEST_ROOT}/workflow-control/docker/contracts/bundle.paths" ]] ||
+    fail 'release workflow omitted the declarative payload paths'
 bash -u -c 'source "$1/install-docker.sh"; dockerBundleSourceIsComplete "$2"' \
     bash "${PROJECT_ROOT}" "${TEST_ROOT}/workflow-control" ||
     fail 'release workflow packaged incomplete control source'

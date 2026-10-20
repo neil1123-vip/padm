@@ -120,6 +120,56 @@ copyControlFixture "${TEST_ROOT}/control-v2" compatible-control
 jq '.properties.schema_version = {enum: [1, 2]}' \
     "${TEST_ROOT}/control-v2/docker/contracts/configure.schema.json" >"${TEST_ROOT}/v2-schema.json"
 mv -- "${TEST_ROOT}/v2-schema.json" "${TEST_ROOT}/control-v2/docker/contracts/configure.schema.json"
+(
+    source "${PROJECT_ROOT}/docker/lib/bundle.sh"
+    futureRoot="${TEST_ROOT}/control-new"
+    futurePath=shell/core/future-bundle-fixture.sh
+    pathList="${futureRoot}/docker/contracts/bundle.paths"
+    savedPaths="${TEST_ROOT}/new-bundle.paths"
+    printf '#!/usr/bin/env bash\n' >"${futureRoot}/${futurePath}"
+    dockerBundleDefaultPayloadPaths "${futureRoot}" >"${TEST_ROOT}/default-payload.paths"
+    ! grep -qxF "${futurePath}" "${TEST_ROOT}/default-payload.paths" ||
+        fail 'future payload fixture is already known to the loaded enumerator'
+    awk '$0 != "install-docker.sh" && $0 !~ /^docker\//' \
+        "${TEST_ROOT}/default-payload.paths" >"${savedPaths}"
+    printf '%s\n' "${futurePath}" >>"${savedPaths}"
+    cp -- "${savedPaths}" "${pathList}"
+    dockerBundlePayloadPaths "${futureRoot}" >"${TEST_ROOT}/declared-payload.paths" ||
+        fail 'declarative payload paths were rejected'
+    grep -qxF "${futurePath}" "${TEST_ROOT}/declared-payload.paths" ||
+        fail 'target payload paths lost a dependency unknown to the loaded enumerator'
+    for invalid in duplicate absolute traversal backslash missing omitted-known symlink parent-link hardlink index-link; do
+        case "${invalid}" in
+        duplicate) printf '%s\n' "${futurePath}" >>"${pathList}" ;;
+        absolute) printf '/outside\n' >>"${pathList}" ;;
+        traversal) printf '../outside\n' >>"${pathList}" ;;
+        backslash) printf 'shell/core/unsafe\\path\n' >>"${pathList}" ;;
+        missing) printf 'shell/core/missing-payload.sh\n' >>"${pathList}" ;;
+        omitted-known) grep -vxF shell/core/locale.sh "${savedPaths}" >"${pathList}" ;;
+        symlink)
+            ln -s -- future-bundle-fixture.sh "${futureRoot}/shell/core/linked-payload.sh"
+            printf 'shell/core/linked-payload.sh\n' >>"${pathList}"
+            ;;
+        parent-link)
+            ln -s -- core "${futureRoot}/shell/linked-core"
+            printf 'shell/linked-core/future-bundle-fixture.sh\n' >>"${pathList}"
+            ;;
+        hardlink)
+            ln -- "${futureRoot}/${futurePath}" "${futureRoot}/shell/core/linked-payload.sh"
+            printf 'shell/core/linked-payload.sh\n' >>"${pathList}"
+            ;;
+        index-link)
+            rm -- "${pathList}"
+            ln -s -- "${savedPaths}" "${pathList}"
+            ;;
+        esac
+        if dockerBundlePayloadPaths "${futureRoot}" >/dev/null; then
+            fail "unsafe declarative payload paths were accepted: ${invalid}"
+        fi
+        rm -f -- "${pathList}" "${futureRoot}/shell/core/linked-payload.sh" "${futureRoot}/shell/linked-core"
+        cp -- "${savedPaths}" "${pathList}"
+    done
+) || fail 'declarative payload path boundary checks failed'
 tar -czf "${CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-new" install-docker.sh docker shell assets
 tar -czf "${FAILED_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-failed" install-docker.sh docker shell assets
 tar -czf "${LEGACY_CONTROL_BUNDLE}" -C "${CONTROL_SOURCE}" install-docker.sh docker shell assets
@@ -263,6 +313,12 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         newBundle=$(readlink "$root/bundle")
         test "$newBundle" != "$oldBundle"
         assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        currentPath=$(dockerCurrentBundlePath)
+        cmp -- "$PHASE6_NEW_CONTROL_SOURCE/shell/core/future-bundle-fixture.sh" \
+            "$currentPath/shell/core/future-bundle-fixture.sh"
+        grep -qF "  shell/core/future-bundle-fixture.sh" "$currentPath/$PADM_DOCKER_BUNDLE_MANIFEST"
+        bash -u -c "source \"\$1/docker/lib/bundle.sh\"; dockerValidateBundle \"\$1\"" \
+            bash "$currentPath"
         successfulBackup=$DOCKER_CONFIG_BACKUP
         test "$(<"$successfulBackup/bundle.target")" == "$oldBundle"
         ! grep -qxF bundle.target "$successfulBackup/present"

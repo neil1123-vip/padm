@@ -35,6 +35,53 @@ dockerBundleSiteTemplatePaths() (
 )
 
 dockerBundlePayloadPaths() {
+    local sourceRoot=$1 defaultPaths path parent child linkCounts
+    local pathList="${sourceRoot}/docker/contracts/bundle.paths"
+    defaultPaths=$(dockerBundleDefaultPayloadPaths "${sourceRoot}") || return 1
+    if [[ ! -e "${pathList}" && ! -L "${pathList}" ]]; then
+        printf '%s\n' "${defaultPaths}"
+        return 0
+    fi
+    [[ -f "${pathList}" && ! -L "${pathList}" ]] || return 1
+    local -A knownPaths=() declaredPaths=()
+    local -a extraPaths=() checkedFiles=("${pathList}")
+    while IFS= read -r path; do
+        knownPaths["${path}"]=1
+    done <<<"${defaultPaths}"
+    # 新包用纯数据声明新增依赖，不能在完整性校验前执行目标包的控制代码。
+    while IFS= read -r path || [[ -n "${path}" ]]; do
+        dockerBundleRelativePathIsSafe "${path}" &&
+            [[ "${path}" != *'\'* && -z "${declaredPaths["${path}"]:-}" ]] || return 1
+        case "${path}" in
+        install-docker.sh | docker | docker/* | "${PADM_DOCKER_BUNDLE_MANIFEST}" | "${PADM_DOCKER_BUNDLE_REF}") return 1 ;;
+        esac
+        [[ -f "${sourceRoot}/${path}" && ! -L "${sourceRoot}/${path}" ]] || return 1
+        child=${path}
+        parent=${child%/*}
+        while [[ "${parent}" != "${child}" ]]; do
+            [[ -d "${sourceRoot}/${parent}" && ! -L "${sourceRoot}/${parent}" ]] || return 1
+            child=${parent}
+            parent=${child%/*}
+        done
+        declaredPaths["${path}"]=1
+        checkedFiles+=("${sourceRoot}/${path}")
+        [[ -n "${knownPaths["${path}"]:-}" ]] || extraPaths+=("${path}")
+    done <"${pathList}"
+    # 路径表不能删去旧版本已知的必需模块或绕过静态模板资源校验。
+    while IFS= read -r path; do
+        case "${path}" in install-docker.sh | docker/*) continue ;; esac
+        [[ -n "${declaredPaths["${path}"]:-}" ]] || return 1
+    done <<<"${defaultPaths}"
+    linkCounts=$(stat -c %h -- "${checkedFiles[@]}") || return 1
+    while IFS= read -r path; do
+        [[ "${path}" == 1 ]] || return 1
+    done <<<"${linkCounts}"
+    printf '%s\n' "${defaultPaths}"
+    ((${#extraPaths[@]} == 0)) || printf '%s\n' "${extraPaths[@]}"
+    return 0
+}
+
+dockerBundleDefaultPayloadPaths() {
     local sourceRoot=$1 path paths templatePaths
     [[ -f "${sourceRoot}/install-docker.sh" && ! -L "${sourceRoot}/install-docker.sh" ]] || return 1
     [[ -d "${sourceRoot}/docker" && ! -L "${sourceRoot}/docker" ]] || return 1
