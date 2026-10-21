@@ -869,6 +869,10 @@ runDockerWebrootRecoveryRealRegression() {
     PADM_ACME_RECOVERY_REAL_SCOPE=webroot runDockerAcmeRecoveryRealRegression
 }
 
+runDockerRealityStreamCliRealRegression() {
+    python3 "${PROJECT_ROOT}/docker/tests/reality-stream-cli-real.py"
+}
+
 listRegressionDockerWebrootRecoveryChildSelectors() {
     printf '%s\n' docker-backup docker-recovery-preview docker-webroot-recovery-apply
 }
@@ -1259,6 +1263,7 @@ registerRegressionFunctionLeaf docker-http-relay-published-real runDockerHttpRel
 registerRegressionFunctionLeaf docker-entry-port-alias runDockerEntryPortAliasRegression
 registerRegressionFunctionLeaf docker-cdn-entries runDockerCdnEntriesRegression
 registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRegression
+registerRegressionFunctionLeaf docker-reality-stream-cli-real runDockerRealityStreamCliRealRegression
 registerRegressionFunctionLeaf docker-alpn-real runDockerAlpnRealRegression
 registerRegressionFunctionLeaf docker-xhttp runDockerXhttpRegression
 registerRegressionFunctionLeaf docker-xhttp-validation runDockerXhttpValidationRegression

@@ -1,6 +1,6 @@
 # Docker 菜单与功能对齐实施计划
 
-修订日期：2026-10-21
+修订日期：2026-10-22
 
 本计划替代聊天中的六步菜单对齐方案，落实该方案的审计修正。它是
 [功能对照表](docker-feature-matrix.md)之后的实施路线，不是重做
@@ -71,7 +71,7 @@
 | 新主机灾备恢复 | 同机空目标通过，新主机未完成 | 同架构全新主机、v3 空目标、业务恢复和失败保护；同机 purge 后恢复不能替代 |
 | webroot/ALPN 公网 CA 组合 | 3.41 正式签发安装及 3.41.1 缓存消费失败恢复通过；本地 CA 四条新证书消费失败链已补齐，公网正式全链仍未完成 | 10 月 21 日在现有隔离夹具补齐两种挑战的 `acme issue` 和 `acme auto-renew`：新证书及 ACME 树提交后，真实 Nginx 拒绝错配私钥，旧在线证书、TLS/ACME 字节及权限、业务和累计保持，随后正常续期通过。发布信任仍为 fixture，不能替代正式公网全链、新证书在线生效再回退或 fresh 公网挑战。第三次公网申请的原始输出不可恢复，不断言原因且不再补签 |
 | WARP 真实账号与公网出口 | 未完成 | 真实账号、双栈出口和故障恢复证据 |
-| Reality 共存专项 | 原生部分通过，仍未完成 | 受管 Vision/WS 同机正反例、Vision 同连接空闲 75 秒及外部 WS 通过；桥接和宿主回环网站 HTTPS 200/verify 0、同机 Vision 正反例/75 秒通过。早前外部 Vision 直连及 443 共存限定正反例已取得，完整失败恢复仍须补齐 |
+| Reality 共存专项 | 原生部分通过，隔离 amd64 CLI 失败恢复矩阵已补齐；原生完整验收仍未完成 | 既有原生流量证据保留；本轮三种拓扑的启停、六向拓扑切换健康失败和两个窗口 TERM 共 24 个恢复场景通过，恢复后 Vision/XHTTP、错误 Vision 账号及严格网站 TLS 通过。发布信任、目标元数据和 CA 使用本地夹具；正式 bundle 的原生失败恢复、重启及环境缺口仍须补齐 |
 | HTTP relay 原生路径 | 原生外部 IPv4 通过 | 独立外部客户端访问三个公网 HTTPS 目标均严格 TLS/200，错误认证 407、未允许来源 blocked；不外推公网 IPv6 或 SOCKS UDP 支持 |
 | 自然到期真实续期 | 未完成 | 等待登记窗口（约 2026-12-17）后的真实换证，不伪造到期 |
 | 当前修复可信发布 | 3.41.1 路径表及 3.41.2 ACME 诊断已发布并通过原生升级 | 路径表版本的验签、正式升级、restart、整机重启及外部 HTTPS/WS 通过。诊断提交 `e89cb144` 签名 G，Release `39399653170` 的 30 项任务通过；3.41.2 Cosign/digest、assess/update/validate、断网原始错误留存/权限/成功清除通过，业务材料不变 |
@@ -1343,6 +1343,41 @@ master 以 root 绑定低端口，worker 降至 `10001:10001`，只增加
 确认及可信备份后才停止本项目 `nginx/xray/nginx-stream`，实测绑定 `443` 与
 `127.0.0.1:15443` 后安装候选；端口竞争、失败和 TERM 均沿用完整备份恢复。
 旧 d1 控制包缺少 `x-padm-reality-stream-host-network` 时，在备份、停服前拒绝规格、更新和回滚。
+
+#### 3D.3e 真实 CLI 共存失败恢复矩阵
+
+2026-10-21–22 新增 `docker-reality-stream-cli-real`，复用隔离节点和发布夹具，
+调用实际安装后的 `padm-docker configure/edit/protocol/traffic`，不替换配置事务。
+仅支持 Docker Linux 原生 amd64、rootful 独立 Engine/netns，读取镜像前拒绝其它架构；
+不发布宿主端口、不挂生产 Docker socket，透明代理始终关闭。
+
+受管网站、桥接可达独立网站和宿主回环网站三种拓扑分别验证启用、关闭及两两切换：
+12 个健康失败场景使用真实容器 `unhealthy`、健康检查退出码 `17`；
+12 个 TERM 场景分别在旧 443 owner 已停止、候选已真实健康但事务未提交时中断 CLI。
+恢复后逐项核对规格、部署元数据、TLS/非空 ACME 树的字节、权限、属主、链接数，
+以及 crontab/cron.d、分享 URI、账号和不下降的流量累计；再次验证 Vision/XHTTP
+实际流量、错误 Vision 账号拒绝、网站严格 CA/SNI 和精确 HTTP 200/正文。
+独立网站容器身份及启动时间保持，锁、候选和隔离环境均清理。
+
+实际恢复暴露私密备份统一 `0600` 后，三份部署元数据未重建运行权限的问题。
+共享 `dockerRestoreConfiguration` 在启动前恢复 `compose.json/images.env/deployment.json`
+为既有合同要求的 `0640`，不改变私密规格或备份权限；权限合同新增对应断言。
+selector 接入现有 nested-daemon 精确白名单，近似名称不获额外能力，未加入日常慢矩阵。
+
+| 验证 | 结果 / 入口耗时 | 证据目录 |
+| --- | --- | --- |
+| 真实 CLI 恢复矩阵，Jobs 2 | 24/24，1109988 ms | `.tmp-regression-docker-64ee378c91ee433b96f7b0d9f4497e2d/` |
+| 权限合同，Jobs 2 | 通过，6495 ms | `.tmp-regression-docker-e5d038e8bfbc4ae2bdc9828e0ea29288/` |
+| 日常 `docker-contracts`，Jobs 6 | 34/34，281236 ms | `.tmp-regression-docker-ff7f5732b8ef4ca09c8b527771a2a25c/` |
+| 回归入口合同及精确/近似名称隔离 | 通过 | `.tmp-reality-stream-cli-evidence/` |
+
+三组实际回归均 `cache_hit=false`，复用同一工具镜像；最后仅补充 amd64 前置门禁，
+容器内语法及双架构分支自检通过，不重复 24 场景或 daily/full。
+发布信任、目标 DNS/ASN/质量元数据和 CA 为本地夹具；真实协议连接未替换。
+cron 验证真实登记的恢复，进程在矩阵中暂停，不证明自然触发、systemd 或整机重启。
+Vision 承载拓扑事务，XHTTP 验证恢复后的正流量，不扩充为 XHTTP 选中入口或错误账号全矩阵。
+本轮失败快照仅保留脱敏日志、结果和镜像清单，删除归档及路径清单。
+正式 bundle 原生恢复、其它环境与整体计划仍未完成。
 
 #### 3D.4 XHTTP 预设与客户端 XMUX
 

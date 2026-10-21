@@ -7788,6 +7788,8 @@ dockerRestoreConfiguration() {
             }
         fi
         dockerEnsureRuntimeDataPermissions || return 1
+        # 私密备份统一收紧为 0600，恢复后重建部署元数据的运行权限。
+        chmod 0640 "${root}/compose.json" "${root}/images.env" "${root}/deployment.json" || return 1
         dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null || {
             dockerError "配置文件已恢复，但服务或 Fail2ban 来源复验未完成，保留备份: ${backup}"
             return 1

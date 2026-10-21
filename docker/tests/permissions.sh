@@ -458,6 +458,9 @@ dockerRestoreConfiguration || fail 'runtime backup restore failed'
 [[ "$(sha256sum "${wsDatabase}" "${controlDatabase}")" == "${databaseDigest}" ]] ||
     fail 'configuration restore overwrote or crossed Fail2ban database scopes'
 assertMetadata "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '600 0 0'
+for metadata in compose.json images.env deployment.json; do
+    assertMetadata "${PADM_DOCKER_INSTALL_DIR}/${metadata}" '640 0 0'
+done
 dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
     "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env" || fail 'restored spec was inconsistent'
 (

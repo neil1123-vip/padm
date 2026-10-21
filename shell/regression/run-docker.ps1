@@ -347,7 +347,8 @@ try {
         'docker-fail2ban-source-real', 'docker-control-fail2ban-real',
         'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real', 'docker-shadowsocks-real',
         'docker-subscription-publication-real', 'docker-subscription-site-real', 'docker-acme-recovery-real',
-        'docker-webroot-recovery-real', 'docker-alpn-recovery-real', 'docker-acme-dns-recovery-real'
+        'docker-webroot-recovery-real', 'docker-alpn-recovery-real', 'docker-acme-dns-recovery-real',
+        'docker-reality-stream-cli-real'
     )
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real',

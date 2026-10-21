@@ -49,7 +49,7 @@ nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-l
                        "docker-wireguard-peers-recovery-real",
                        "docker-wireguard-peers-migration-real",
                        "docker-wireguard-address-real", "docker-webroot-recovery-real", "docker-alpn-recovery-real",
-                       "docker-acme-dns-recovery-real")
+                       "docker-acme-dns-recovery-real", "docker-reality-stream-cli-real")
 memory_workspace = sys.argv[1] in ("docker-contracts", "docker-contracts-full")
 
 def filesystem_type(path):
@@ -159,6 +159,8 @@ $ordinaryCases = if ($Scope -eq 'artifacts') {
     @{ selector = 'docker-acme-dns-recovery-real-other'; expected = 0 },
     @{ selector = 'docker-alpn-recovery-real-other'; expected = 0 },
     @{ selector = 'docker-webroot-recovery-real-other'; expected = 0 },
+    @{ selector = 'docker-reality-stream-cli-real'; expected = 0 },
+    @{ selector = 'docker-reality-stream-cli-real-other'; expected = 0 },
     @{ selector = 'docker-control-rebind-real'; expected = 0 },
     @{ selector = 'docker-control-rebind-real-other'; expected = 0 },
     @{ selector = 'docker-control-log-cron-real'; expected = 0 },
