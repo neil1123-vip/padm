@@ -2,8 +2,8 @@
 
 验收日期：2026-10-18–20（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
-**当前现场（2026-10-20）**：3.41.1 已正式发布并验签升级，新增依赖路径表已进入运行 bundle，
-assess、update、validate、正式 restart、整机重启、严格 HTTPS 和外部 WS 正反例通过，透明代理保持关闭。
+**当前现场（2026-10-20）**：3.41.2 已正式发布并验签升级，依赖路径表与 ACME 私密诊断均进入运行 bundle；
+3.41.1 的正式 restart、整机重启、严格 HTTPS 和外部 WS 正反例通过，透明代理保持关闭。
 正式 webroot/ALPN `acme issue` 各取得新证书并完成在线换证；第三次申请提前失败，
 本轮不再签发。3.41.1 缓存 ACME 导出后真实消费失败恢复通过，正式 issue/renew 全链仍缺；
 原业务、材料字节/权限和定时器已恢复；
@@ -566,7 +566,8 @@ runner 为 `Result=success/ExecMainStatus=0`。
 
 该结果证明缓存 ACME 导出后的共享提交事务能从真实消费者失败中恢复。
 候选证书与原证书相同，没有证明新在线证书再切回旧证书，也不替代正式
-issue/renew 消费失败全链或 fresh 公网挑战。新增诊断代码尚未在该正式 VPS 运行。
+issue/renew 消费失败全链或 fresh 公网挑战。本次离线回滚使用 3.41.1；
+新增诊断的 3.41.2 实机验收见下节。
 
 外层状态恢复及 verify 返回 0，续期/流量 timer 恢复 active/enabled。
 独立 guard 正常退出、未触发，共记录 594 个两秒资源样本，持续 1186.479 秒；
@@ -590,3 +591,45 @@ SHA256 `2481155cdc607fb6ddc6f6ca1477b942f5f81e4fe598aeaba332c701b64d1fe2`。
 日志及本机分享 URI、known_hosts、发布中间归档均已清理，SSH 已退出。
 UTC `09:15:23` 离场核对三项业务 healthy、timer active/enabled、无 failed unit；
 最终记录为同目录 `final-close.json`，归档脱敏扫描通过。
+
+### 3.41.2 诊断修复可信发布与原生验收
+
+签名提交 `e89cb144236b7b419d0ff6f451b53ba3cda7e142` 的 SSH 签名为 G，
+按用户授权推送；Release run `39399653170` 的 30 项任务全部 success。
+正式 3.41.2 发布于 UTC `09:24:42`，源提交为
+`c2688ce06d43f4899aaab6dd6e969aec4263c58e`，控制包 SHA256 为
+`8e70d1f4b9a9a758935856840fc6027c75cec1635ad2fdc1cb73255ca68cf744`。
+镜像依照正式 manifest 复用 3.41.0 digest，没有强制重新打镜像标签。
+
+VPS 由正式 3.41.1 CLI 完成 Cosign 验签及摘要核对，assess、update、validate 返回 0；
+运行 bundle ref 与 3.41.2 源提交一致。TLS、完整 ACME、续期、订阅及 webroot 树的
+字节、mode、uid、gid 保持；业务规格只变更 `release` 元数据，透明保持关闭。
+正式升级回滚点为 `update.s3aMp6`，原有三个 update 备份继续保留。
+
+持有正式部署锁，通过新 bundle 的真实共享运行器和受管 ops 执行固定无效参数；
+额外施加 `--network none --pull never`，使用独立空账户目录，CA 请求为 0。
+底层 rc=1，原始输出与私密副本逐字一致，日志 0600/root/单链接，目录 0700；
+终端不泄露原文，阶段/rc/安全路径提示通过。随后真实 `--version` 成功，
+旧诊断自动清除，本轮账户目录与日志均清理。
+该结果验证正式诊断运行器，不宣称重现第三次公网申请原因或正式签发全链失败。
+
+独立 guard 贯穿本次 assess/update/validate/诊断，正常退出、未触发；
+146 个两秒样本持续 290.812 秒，最低 MemAvailable `463780 KiB`、
+最低 SwapFree `516044 KiB`、最高 load1 `2.87`。
+升级后三项业务 healthy，两个 timer 均 active/enabled、无 failed unit，
+本地严格 SNI HTTPS 为 `200/verify=0`。本轮不重复 3.41.1 已通过的整机重启。
+
+外部验收固定源站 IPv4：HTTPS `200/verify=0`；公网 WS 正确 UUID 严格 TLS/HTTP
+200，错误 UUID 在 TLS 阶段被拒绝。透明代理保持关闭。
+
+脱敏证据为 `.tmp-release-diagnostics-20261020/native-3412-evidence.tar.gz`，
+SHA256 `ea4c0b9b9183ea660b3c1ce85c6e6aed74be37cdc6efbf5cd0bbe88287124aef`。
+公网结果保留为同目录 `https-external.json`、`ws-external.log`。本机私密 WS URI、
+临时 known_hosts、正式 bundle/manifest 副本及一次性验收脚本已清理。
+原 SSH 会话已不存在，当前公钥认证失败；未恢复交互 root 登录，因此远端
+`/root/.tmp-padm-release-native.UDMdBR` 尚未完成最终核对/清理，不能沿用早先的
+`final-close.json` 推断该目录已清除。恢复授权连接后只需核对此精确目录及业务状态。
+
+本阶段关闭不等于整体计划完成：正式 ACME issue/renew 消费失败回滚与 fresh
+challenge、透明启用重启矩阵、原生 arm64、公网 IPv6、新主机灾备、WARP 实账号、
+Reality 完整失败恢复和自然续期仍未完成；透明代理继续关闭。
