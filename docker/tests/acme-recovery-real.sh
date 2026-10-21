@@ -17,6 +17,8 @@ import re
 import runpy
 import shutil
 import signal
+import socket
+import ssl
 import stat
 import subprocess
 import sys
@@ -326,12 +328,13 @@ def managed_recovery_real():
     release = control["wireguard_recovery_release"]([member], images)
     environment = member["env"]
     acme = module("padm_real_webroot_acme", root / "docker/lib/acme_recovery.py")
-    # 只给本地 CA 注入网络和信任；挑战、证书提交及服务恢复仍走生产调用。
+    # 只注入本地 CA 和一次性消费故障；挑战、证书提交及服务恢复仍走生产调用。
     wrapped_docker = Path(environment["PATH"].split(":")[0]) / "docker"
     previous_wrapper = wrapped_docker.with_name("docker-release-check")
     wrapped_docker.rename(previous_wrapper)
     wrapped_docker.write_text(r'''#!/usr/bin/env python3
-import os, sys
+import hashlib, json, os, subprocess, sys
+from pathlib import Path
 arguments = sys.argv[1:]
 if arguments and arguments[0] == "run" and any('os.execvpe("/opt/acme/acme.sh"' in item for item in arguments):
     # 仅让夹具的 NextRenewTime=1 保持到期，不被本地 CA 的未来 ARI 窗口覆盖。
@@ -345,6 +348,22 @@ if arguments and arguments[0] == "run" and any('os.execvpe("/opt/acme/acme.sh"' 
     alias = os.environ.get("PADM_REAL_ACME_ALIAS")
     if alias:
         arguments[1:1] = ["--network-alias", alias]
+fault = os.environ.get("PADM_REAL_ACME_CONSUMER_FAILURE")
+if (fault and Path(fault).is_file() and arguments[0] == "compose" and
+        arguments[-7:] == ["exec", "-T", "nginx", "nginx", "-e", "/dev/stderr", "-t"]):
+    marker = Path(fault)
+    request = json.loads(marker.read_text())
+    deployed = Path(os.environ["PADM_DOCKER_INSTALL_DIR"])
+    domain = request["domain"]
+    serial = subprocess.check_output([
+        "openssl", "x509", "-in", str(deployed / f"secrets/tls/{domain}.crt"), "-noout", "-serial"])
+    material = (deployed / f"data/acme/{domain}_ecc/{domain}.cer").read_bytes()
+    assert serial.decode() != request["previous_serial"], "消费故障前未提交新证书"
+    assert hashlib.sha256(material).hexdigest() != request["previous_acme"], "消费故障前未切换 ACME 树"
+    marker.unlink()
+    marker.with_suffix(".proof").write_text(json.dumps({"serial": serial.decode(), "acme_committed": True}))
+    # 候选已通过真实校验；只在首次 Nginx 消费前换错私钥，让 Nginx 自己拒绝并触发生产回滚。
+    (deployed / f"secrets/tls/{domain}.key").write_bytes(Path(request["wrong_key"]).read_bytes())
 release_check = os.path.join(os.path.dirname(sys.argv[0]), "docker-release-check")
 os.execv(release_check, [release_check, *arguments])
 ''')
@@ -508,6 +527,74 @@ dockerInstallCli
         traffic(member, images["sing-box"])
         before_nginx = recovered["nginx"]
         before_renewal_totals = json.loads(ledger_path.read_text())["accounts"]
+    if webroot or scope == "alpn":
+        def protected_tree(directory):
+            result = {}
+            for item in [directory, *sorted(directory.rglob("*"))]:
+                metadata = item.lstat()
+                assert not item.is_symlink() and (item.is_dir() or item.is_file())
+                result[str(item.relative_to(directory))] = (
+                    item.read_bytes() if item.is_file() else None,
+                    stat.S_IMODE(metadata.st_mode), metadata.st_uid, metadata.st_gid, metadata.st_nlink)
+            return result
+
+        def online_serial():
+            context = ssl.create_default_context(cafile=str(source_tls / "root.crt"))
+            with socket.create_connection(("127.0.0.1", public_port), timeout=3) as stream:
+                with context.wrap_socket(stream, server_hostname=domain) as secured:
+                    certificate = secured.getpeercert(binary_form=True)
+            return command(["openssl", "x509", "-inform", "DER", "-noout", "-serial"], content=certificate)
+
+        wrong_key = path / "private/consumer-wrong.key"
+        command(["openssl", "genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256",
+                 "-out", str(wrong_key)])
+        wrong_key.chmod(0o600)
+        account_config = restored_home / "account.conf"
+        previous_account = account_config.read_bytes()
+        account_config.write_bytes(acme.encoded({
+            "USER_PATH": acme.TRUSTED_PATH, "CA_BUNDLE": "", "DEFAULT_ACME_SERVER": api}))
+        for action in ("issue", "auto-renew"):
+            phase = f"{scope}-production-{action}-consumer-failure"
+            previous_services = services(member, wireguard=False)
+            previous_online = online_serial()
+            previous_acme = protected_tree(restored_home)
+            previous_tls = protected_tree(certificate.parent)
+            previous_ledger = ledger_path.read_bytes()
+            marker = path / "private" / f"consumer-{action}.json"
+            marker.write_text(json.dumps({
+                "domain": domain, "previous_serial": serial.decode(), "wrong_key": str(wrong_key),
+                "previous_acme": hashlib.sha256(
+                    (restored_home / f"{domain}_ecc/{domain}.cer").read_bytes()).hexdigest()}))
+            environment["PADM_REAL_ACME_CONSUMER_FAILURE"] = str(marker)
+            try:
+                arguments = ("--domain", domain, "--email", email, f"--{scope}") if action == "issue" else ()
+                rejected = cli(member, "acme", action, *arguments, accepted=False)
+            finally:
+                environment.pop("PADM_REAL_ACME_CONSUMER_FAILURE", None)
+            assert not marker.exists(), "失败链未到达真实消费者"
+            proof = json.loads(marker.with_suffix(".proof").read_text())
+            assert proof["acme_committed"] and proof["serial"] != serial.decode()
+            assert b"key values mismatch" in rejected.stdout + rejected.stderr, "未触发真实 Nginx 私钥拒绝"
+            wait_ready(lambda: json.loads(command(docker + ["inspect", before_nginx["id"]]))[0][
+                "State"]["Health"]["Status"] == "healthy", 35)
+            recovered = services(member, wireguard=False)
+            assert recovered["nginx"]["id"] == previous_services["nginx"]["id"]
+            assert recovered["xray"] == previous_services["xray"]
+            assert protected_tree(restored_home) == previous_acme, "消费失败未完整恢复 ACME 字节和权限"
+            assert protected_tree(certificate.parent) == previous_tls, "消费失败未完整恢复 TLS 字节和权限"
+            assert ledger_path.read_bytes() == previous_ledger
+            assert (deployed / "secrets/renewal" / domain / "request.json").read_bytes() == before_registration
+            assert control["state"](member) == before
+            assert online_serial() == previous_online == serial, "消费失败未恢复旧在线证书"
+            assert not list(deployed.glob(".tls.*")) and not (deployed / "locks/deployment.lock").exists()
+            assert not command(docker + ["ps", "-aq", "--filter", "label=io.padm.challenge"]).strip()
+            if webroot:
+                assert not list(challenge.iterdir())
+            traffic(member, images["sing-box"])
+            print(f"docker-acme-{scope}-{action}-consumer-failure-recovered", flush=True)
+        account_config.write_bytes(previous_account)
+        before_nginx = recovered["nginx"]
+        before_renewal_totals = json.loads(ledger_path.read_text())["accounts"]
     polling, failures = threading.Event(), []
     observed_requests = []
 
@@ -607,6 +694,7 @@ dockerInstallCli
         "empty_target_restore": True, "production_renewal_run": True,
         "forced_due": {"Le_NextRenewTime": 1, "NO_ARI": "1"},
         "serial_changed": True, "https_requests": len(observed_requests),
+        "new_certificate_consumer_failure_rollback": ["issue", "auto-renew"] if webroot or scope == "alpn" else [],
         "account_domain_key_identity_preserved": True, "traffic_preserved": True,
         "challenge_cleaned": True, "network": "internal",
     }), flush=True)

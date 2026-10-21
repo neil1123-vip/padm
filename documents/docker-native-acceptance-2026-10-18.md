@@ -633,3 +633,30 @@ SHA256 `ea4c0b9b9183ea660b3c1ce85c6e6aed74be37cdc6efbf5cd0bbe88287124aef`。
 本阶段关闭不等于整体计划完成：正式 ACME issue/renew 消费失败回滚与 fresh
 challenge、透明启用重启矩阵、原生 arm64、公网 IPv6、新主机灾备、WARP 实账号、
 Reality 完整失败恢复和自然续期仍未完成；透明代理继续关闭。
+
+### 2026-10-21 本地 CA 新证书消费失败补验
+
+复用 `acme-recovery-real.sh` 的既有 webroot/ALPN 部署、内部 Pebble CA 和发布信任
+夹具，新增两种挑战各自的 `acme issue`、`acme auto-renew` 消费失败验收，共四条链。
+调用生产 CLI 完成真实签发与候选校验，确认新序列证书和新 ACME 树已提交后，
+仅在首次 Nginx 校验前替换为错配私钥，真实 Nginx 报 `key values mismatch`，
+CLI 返回 15 并执行原恢复事务，不伪造消费者退出码。
+
+四条链均核对 TLS/ACME 完整字节、mode、uid、gid、链接数，旧在线证书、
+规格、续期登记、累计流量、原 Nginx 容器和未重启的 Xray 均保持；
+挑战、候选及部署锁清理，真实业务复测通过。故障后再次正常续期成功，
+证书序列改变且证书链验证通过。ALPN 原有挑战失败恢复及 HTTPS 暂停断言仍通过。
+
+Docker Linux amd64、Jobs 2，复用工具镜像，两组均 `cache_hit=false`：
+`docker-webroot-recovery-real` 为 `103672 ms`，证据
+`.tmp-regression-docker-7916a79bd63d4004b8a70fcd7adb8132/`；
+`docker-alpn-recovery-real` 为 `141172 ms`，证据
+`.tmp-regression-docker-bb5ba78741a7498eb081c394654a9a98/`。
+同一源码快照摘要为 `D0CAFE5A099144E93E25CA3B20F08BA1714D0D637C5A0044869FA7A17062A47C`。
+入口同时通过 Bash 语法及 ShellCheck error；未重复 daily/full。
+
+本轮所有私钥、临时材料和 nested daemon 资源由原夹具清理；本机仅保留脱敏日志、
+结果和镜像清单，两个主机指纹检查临时文件已删除，用户原有临时项未动。
+本轮未连接 VPS，远端精确临时目录仍待授权 SSH 连接恢复后核对。
+这些证据限定为本地 CA、强制到期和发布信任夹具，不证明正式公网全链、
+新证书在线生效再回退或自然续期；透明保持关闭，整体计划未完成。
