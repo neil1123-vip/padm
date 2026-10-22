@@ -690,7 +690,7 @@ SwapFree `482732 KiB`、最高 load1 `3.22`。
 并确认上传/下载记账增加。正常启用、正常停用和恢复原 WS 业务也返回 0。
 
 独立 Docker 公网 Vision 在 443 连续两次 TLS ConnectionResetError，正确/错误 UUID
-均 reset，同机通过但服务端未见对应 accepted 请求，根因未确定，不能计为公网通过。
+均 reset，同机通过但服务端未见对应 accepted 请求，当时根因未确定，不能计为公网通过。
 达到两次后停止重试；原 runner 因等待外部复核超时失败，但 outer restore=0。
 保留已通过启用 3 点，接续停用 3 点，最终 runner_exit=0/outer_restore=0，
 acceptance-complete 及 matrix passed=6，最终 guard completed=true/triggered=false。
@@ -725,3 +725,42 @@ UTC `02:44:02` 离场：三服务 healthy、两 timer active/enabled、无 faile
 六点仅证明本拓扑原生失败恢复，不替代其它原生拓扑、XHTTP 全矩阵或整机重启；
 本次公网 Vision 失败、正式 ACME 全链/fresh 挑战、透明启用重启矩阵、原生 arm64、
 公网 IPv6、新主机灾备、WARP 实账号及自然续期仍未完成，整体计划保持未完成。
+
+### 2026-10-22 公网 Vision reset 的测试端路径定位
+
+后续只读核对两端 Xray 均为 `26.3.27/d2758a0`。现有 VPS 443 已恢复为原 Nginx WS，
+只装载 `b.951101.xyz` 证书，不含 pgxn 证书或 REALITY stream。
+Docker 客户端固定连接 `23.185.168.63:443`，分别使用 b 域、pgxn、Debian、pgxn SNI，
+四次严格 TLS 均成功且证书主体随 SNI 改变；VPS 同期抓包仅见一条 TCP 连接，
+17 包、内核丢包 0。该现象说明固定 IP 没有保证流量确实到达 VPS。
+
+本机 Docker Desktop 手动 HTTP/HTTPS 代理为 `127.0.0.1:10808`，该 v2rayN/Xray
+入口启用 TLS sniffing、`destOverride=["http","tls"]`、`routeOnly=false`。
+另有 Proxifier 将 curl、SSH 等进程送入同一入口，故 `curl --noproxy` 也不等于直连。
+显式通过 10808 的 SOCKS 请求仍指定 VPS IP，但 pgxn SNI 得到真实 pgxn 证书。
+这与 Xray 官方入站定义吻合：非 routeOnly 嗅探会用域名重置目标地址。
+本轮只读原代理配置，未修改或重启用户的代理服务。
+
+两种不改写目标的对照均指向原 VPS：SSH 封装下 pgxn SNI 因域名不符而严格校验失败，
+b 域通过；临时原生 Xray 只监听回环并固定转发 VPS 443、关闭嗅探，pgxn 请求返回
+VPS Nginx 404，b 域返回原网站 200。未开放通用 SOCKS 或任意目标转发。
+
+另启动独立临时 Xray Vision 2443，使用正式镜像、随机账号/密钥和 pgxn 目标，
+不改原部署、不占生产 443，限制 96 MiB 内存并由 systemd 15 分钟自动停止。
+普通公网与 SSH 两条路径均 `Verified=true`、严格 HTTPS 200，错误 UUID 拒绝，
+服务端 accepted/invalid-user 与两条客户端结果对应。
+原公网 443 路径复现 `ConnectionResetError`，底层为 `uConn.Verified: false`、
+`REALITY: received real certificate (potential MITM or redirection)`。
+由此将问题收窄为测试端上游 TLS 嗅探改写目标，不再归为未解释的 VPS 服务故障。
+
+证据保留 `.tmp-vision-diagnose-20261022/diagnosis.json`、严格 TLS 对照 JSONL、
+三组探针结果、脱敏客户端日志、`local-routing-sanitized.json` 和 `remote-close.json`。
+原始 AuthKey/debug 日志、临时 URI、主机密钥文件、脚本和 VPS 抓包均已清；
+SSH/回环转发已停，临时容器/卷已回收。UTC `04:08:35` 清理核验：
+四份生产配置哈希不变、三服务 healthy、两 timer active/enabled、严格本机 HTTPS 成功、
+无 failed unit、透明保持关闭。
+
+原两次失败未保留底层日志，本轮是同环境目标改写及同样 reset 的后续复现；
+443 复现发生于原 WS 已恢复之后，独立 2443 通过也不能替代正式 bundle 共存验收。
+因此不把原两次改写为通过；正式 443 共存须先隔离或修正测试端嗅探再复验。
+未重复完整回归，未改变生产代码、代理设置或支持矩阵，整体计划仍未完成。
