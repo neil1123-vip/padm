@@ -4,10 +4,12 @@
 
 **当前现场（2026-10-23）**：3.41.4 已正式发布并验签升级；Vision/XHTTP 三拓扑故障恢复、
 公网双模式、同 handler 独立下行及六点实际整机重启已取得限定范围证据。
+原失败前序的两次 bridge 重启及 host 前测补验通过，未复现不等于根因已修复。
 原 WS、材料/权限、调度与严格 TLS 均已恢复并复核，本轮临时资源已清理，透明代理保持关闭。
 正式 webroot/ALPN `acme issue` 各取得新证书并完成在线换证；第三次申请提前失败，
-当轮停止签发，本批未发新 CA 请求。3.41.1 缓存 ACME 导出后真实消费失败恢复通过，
-正式 issue/renew 全链与其它环境缺口仍保留；不把局部通过计作整体完成。
+当轮停止签发。2026-10-23 正式 3.41.4 webroot issue 新证书消费失败全链通过；
+3.41.1 缓存 ACME 导出后真实消费失败恢复证据保留。正式 renew/ALPN 消费失败链、
+fresh 挑战与其它环境缺口仍保留；不把局部通过计作整体完成。
 
 ## 环境与可信输入
 
@@ -971,3 +973,80 @@ SwapFree `519612 KiB`；证书仍至 2027-01-15，未发新 CA 请求。
 本批未改生产代码，未重复 daily/full。公网独立下行身份、TLS/h3/CDN、
 正式 ACME 消费失败全链/fresh、透明启用重启、原生 arm64、IPv6、
 新主机灾备、WARP 实账号及自然续期继续未完成；整体计划仍未完成。
+
+### 2026-10-23 原 XHTTP 失败前序定向补验
+
+在同一正式 3.41.4 VPS 按原失败前序执行 bridge Vision 实际重启、bridge
+XHTTP 实际重启，再在同一 boot 切换至 host-gateway Vision:443、
+XHTTP:2444，仅补原失败 pre-public，不执行第三次重启。
+两次真实 boot、原容器自然启动及五个公网矩阵探针均通过；核对脱敏实际
+Compose/inspect/PortBindings、材料/权限、timer、跨 boot guard/deadline，
+原 WS 基线及恢复后正反例、网站严格 HTTPS 均通过。
+
+`runner_exit=0`、`official_restore=0`、`outer_restore=0`、`verify=0`，
+guard `completed=true/triggered=false`。独立 Linux 归档门禁通过；
+`.tmp-native-xhttp-transition-20261023/native-xhttp-transition-evidence.tar.gz`
+SHA256 为 `25a7cb2ffee943e2d32edbd0647069dc5a4b002e25d48f215d6f2751c272e1a1`。
+六个测试 unit、四份 CLI 精确点名的配置备份及远端工作目录已清理，
+五份正式 update 备份保留；本机 URI、二进制、payload 和转发输入已清。
+清理时 unit 卸载后 reset-failed 的接续错误原样保留；限定仅 reset failed
+unit，六案自检通过后清理成功。
+
+本轮未复现原 XHTTP 超时。旧失败缺当时真实映射与服务端日志，仍不足以
+区分公网迟滞和切换残留，不将通过写为根因修复；原失败归档继续保留。
+
+### 2026-10-23 正式 webroot issue 消费失败全链
+
+在同一 Debian 13 amd64、正式 3.41.4 bundle 上调用生产 CLI：
+`acme issue --webroot` 单次申请，没有操作者重试。先保留缓存 CA 账户、
+移走本域材料，确保新 key；新证书 DER、序列号与 issuer 已独立捕获，
+系统 CA 信任链及域名校验通过。新证书 SHA256：
+`09e5dceabf34ae98705d20ad06b8b60e163e09061256e5460c1e984ec9a5e27a`，
+issuer 为 `Let's Encrypt YE1`，序列号 `0605E3C5CD24172A8129F48CDFFB4A8C94ED`。
+
+受管 `default.conf` 全程不改。先用独立旧 key pin 验证 Nginx baseline，
+随后移除该配置；仅本轮 PATH 的 Docker 参数转发器在首次真实消费者
+`nginx -t` 前确认新 TLS 与 ACME 证书相同、新 key 不同旧 key、候选 marker
+已提交到 ACME 树，才一次性重建 pin。真实 Nginx 报 `key values mismatch`，
+CLI 返回 `15` 并自动恢复旧证书和 ACME 状态，未用模拟退出码替代消费失败。
+
+| 核对项 | 实际结果 |
+| --- | --- |
+| 新证书与注入时点 | 新 DER、受信任链和域名通过；新 TLS/ACME 及 marker 提交后注入 |
+| 自动回滚 | TLS/完整 ACME 字节、mode、uid、gid、链接数等于失败前快照 |
+| 业务与累计 | 旧在线证书保持；三业务 healthy；账户累计不回退 |
+| 完整恢复 | 正式恢复、outer restore、verify 均 `0`；timer active/enabled |
+| 独立公网复验 | 原 WS 正 UUID 严格 HTTPS 200、错 UUID 拒绝；网站严格 TLS/200 |
+| 保护 | guard completed=true/triggered=false；透明全程关闭 |
+
+44 个两秒资源样本最低 MemAvailable `444780 KiB`、SwapFree `510944 KiB`，
+最高 load1 `4.29`。本轮 guard 沿用六点重启的持续负载判断：连续三样本
+MemAvailable 低于 150 MiB、SwapFree 低于 96 MiB、load1 高于 8，或
+load1 高于 4 且 load5 高于 3 时恢复；成功还须等待 guard 最终结束且无
+stop/trigger 标记，不能以 runner 正常退出掩盖恢复末尾触发。
+
+首轮将注入写入受管配置，被 webroot 一致性门禁正确拒绝，CLI `15`，
+未发 CA 请求；旧 guard 仅看 load1，`4.49/4.49/4.21` 三样本触发。
+最低 MemAvailable `461884 KiB`、SwapFree `511456 KiB`，不能称内存耗尽。
+首轮原始失败和私密诊断独立保留在 `attempt-1/`，公开归档 SHA256：
+`1e774cdbdee943538bb04b242f0630abcc37d0f7c961f6abf246cc0d1374862e`。
+恢复后两次本机探针启动失败分别暴露 `-d`、`-p` 被 PowerShell advanced
+包装函数解析为通用参数；统一改为普通函数原样透传，两个参数自检及
+实际公网复验通过。原启动失败另留证，未修改 VPS 或追加 CA 请求。
+
+Bash 语法、ShellCheck error、离线脚本自检、supervisor 四分支与 guard
+自检通过；独立 Linux 归档门禁核对真实新证书、注入、CLI 15、完整恢复、
+公网结果、资源样本和脱敏通过。成功公开归档
+`.tmp-native-acme-fullchain-20261023/native-acme-fullchain-evidence.tar.gz`
+SHA256：`a874327b70a1ad9c3320843bd9fe2781c0b593492abd5863ffafd2e24c9cc533`。
+私密日志单独取回，未进入公开归档。两轮远端工作目录及本轮三份、首轮
+两份按材料关系和完整树 SHA 认领的备份已精确清理，五份正式 update
+备份保留；本机 URI、xray、payload、转发输入及测试容器已清理。
+
+离场三业务 healthy、两 timer active/enabled、主动 traffic 成功、
+无 failed unit；严格 HTTPS `200/verify=0`、透明关闭，load1 `0.04`、
+MemAvailable `496984 KiB`、SwapFree `510944 KiB`。旧证书仍至
+2027-01-15，新签发证书只进入失败候选，未成为在线证书。
+本批关闭的仅为正式 webroot issue 消费失败全链；不证明 fresh 授权挑战、
+正式 renew/ALPN 消费失败链、新证书在线生效再回退或自然续期。未改生产
+代码，未重复 daily/full；其它环境缺口及整体计划继续未完成。
