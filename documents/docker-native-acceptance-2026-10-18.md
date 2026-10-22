@@ -660,3 +660,68 @@ Docker Linux amd64、Jobs 2，复用工具镜像，两组均 `cache_hit=false`�
 本轮未连接 VPS，远端精确临时目录仍待授权 SSH 连接恢复后核对。
 这些证据限定为本地 CA、强制到期和发布信任夹具，不证明正式公网全链、
 新证书在线生效再回退或自然续期；透明保持关闭，整体计划未完成。
+
+### 2026-10-22 正式 3.41.4 升级与受管共存六点恢复
+
+用户恢复公钥后，以固定 ED25519 主机指纹连接；未改 SSH 认证策略或尝试密码登录。
+正式 3.41.4 源提交 `e2a2248953af907bea33c1b881788e0912a38b97`，控制包 SHA256
+`c55828df56b17a5f64473f17d9528fff977f4bcb5932f177c366358085131ed7`。
+VPS 通过生产 Cosign 验签，assess/update/validate 均返回 0，运行 bundle ref 匹配；
+TLS、完整 ACME、续期、订阅及 webroot 的字节、mode、uid、gid 保持，
+业务 spec 除 release/images 保持，正式升级回滚点为 `update.dPN15p`。
+升级 guard 正常结束：38 个两秒样本、74.462 秒，最低 MemAvailable `416804 KiB`、
+SwapFree `482732 KiB`、最高 load1 `3.22`。
+
+恢复矩阵限定 Debian 13 原生 amd64、正式 bundle、受管网站 bridge 拓扑：
+临时 Vision 入口直连 2443，共存公开 443，绑定既有 `vless-ws`。
+公网 Reality 目标为 `pgxn.org`（A `88.198.49.178`，当时无 AAAA），
+正式 schema 和风险门通过，不使用目标 DNS/ASN/质量元数据或发布信任夹具。
+故障 wrapper 只在现有 Docker 调用处注入故障，不替换生产事务。
+
+| 方向 | 故障点 | 真实结果 |
+| --- | --- | --- |
+| 启用、停用 | 候选安装后健康失败 | 两点均真实 unhealthy/ExitCode 17，CLI 14 |
+| 启用、停用 | 旧 443 owner 已停、候选尚未安装时 TERM | 两点 CLI 143，恢复原规格 |
+| 启用、停用 | 候选已真实健康、事务提交前 TERM | 两点 CLI 143，恢复原规格 |
+
+六点均核对规格、部署元数据、TLS/ACME/续期/订阅的字节、mode、uid、gid、链接数，
+分享 URI、累计不下降、timer 文件/enabled/active，以及部署锁/候选清理；
+每点恢复后实际运行同机 Vision 正流量、错误 UUID 拒绝、网站严格 HTTPS，
+并确认上传/下载记账增加。正常启用、正常停用和恢复原 WS 业务也返回 0。
+
+独立 Docker 公网 Vision 在 443 连续两次 TLS ConnectionResetError，正确/错误 UUID
+均 reset，同机通过但服务端未见对应 accepted 请求，根因未确定，不能计为公网通过。
+达到两次后停止重试；原 runner 因等待外部复核超时失败，但 outer restore=0。
+保留已通过启用 3 点，接续停用 3 点，最终 runner_exit=0/outer_restore=0，
+acceptance-complete 及 matrix passed=6，最终 guard completed=true/triggered=false。
+恢复原业务后，独立公网 WS 正确 UUID 严格 TLS/HTTP 200、错误 UUID 被拒绝，
+固定源站 IPv4 的网站 HTTPS `200/verify=0`。
+
+早期两次保护器按旧 load1>4 阈值中止，内存仍充足；一次 guard 恢复未直接完成，
+后续外层恢复/verify 成功。另一次脚本误把快照时主动暂停的 timer 当作丢失，已修正。
+这些失败均归档，不表述为整个批次从未失败。保护器保留 MemAvailable<150 MiB、
+SwapFree<96 MiB 硬阈值；负载调整为 load1>8，或 load1>4 且 load5>3，连续 3 次触发，
+最长 45 分钟。重操作前等待 load1≤1.1；本轮未启用透明代理。
+成功启用/停用矩阵分两段采样，共 810 条、采样时长和 `1623.565` 秒，
+最低 MemAvailable `357080 KiB`、SwapFree `487984 KiB`、最高 load1 `6.00`；
+这是分段和，不是连续总耗时，也不覆盖全部早期失败尝试。
+
+脱敏归档 `.tmp-native-3414-20261022/native-3414-evidence.tar.gz` 共 62 文件，SHA256
+`1b63574c5e4d574bc40725d48a4114477c7c816f2c0745475a441ddb85ae2bff`。
+包含升级、六点断言、资源分段、早期失败及公网失败，不含 private、URI 或原始业务日志。
+本机 Linux 容器离线复核路径、JSON、脚本语法、脱敏及结果门禁通过。
+证据目录另保留 `archive-summary.json`、`archive-verified.json`、`ws-external.log`、
+`https-external.json`、`remote-close.log` 和 `final-remote-state.log`。
+
+精确清除 19 个本轮 configure 测试备份及保护中止遗留 `.edit.bAO1jz`，不按宽泛前缀删除；
+保留 `update.dPN15p`、`update.LnP9nE`、`update.pDAJCS`、`update.s3aMp6`、
+`update.t5vJXt` 五个正式备份。本轮两个远端工作目录及此前待清理的
+`/root/.tmp-padm-release-native.UDMdBR`、上传脚本已清；原有 pre-recovery 目录未动。
+本机分享 URI、known_hosts、manifest 副本及一次性脚本已清，用户原有临时项未动。
+UTC `02:44:02` 离场：三服务 healthy、两 timer active/enabled、无 failed unit、
+无事务暂存，load1/load5 均 `0.00`，MemAvailable 约 433 MiB、SwapFree 约 484 MiB。
+
+本轮无生产代码修改，未重复已通过的 24 场景、权限合同、日常 34 项或 full。
+六点仅证明本拓扑原生失败恢复，不替代其它原生拓扑、XHTTP 全矩阵或整机重启；
+本次公网 Vision 失败、正式 ACME 全链/fresh 挑战、透明启用重启矩阵、原生 arm64、
+公网 IPv6、新主机灾备、WARP 实账号及自然续期仍未完成，整体计划保持未完成。
