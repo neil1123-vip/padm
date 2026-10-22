@@ -8,8 +8,9 @@
 原 WS、材料/权限、调度与严格 TLS 均已恢复并复核，本轮临时资源已清理，透明代理保持关闭。
 正式 webroot/ALPN `acme issue` 各取得新证书并完成在线换证；第三次申请提前失败，
 当轮停止签发。2026-10-23 正式 3.41.4 webroot issue 新证书消费失败全链通过；
-3.41.1 缓存 ACME 导出后真实消费失败恢复证据保留。正式 renew/ALPN 消费失败链、
-fresh 挑战与其它环境缺口仍保留；不把局部通过计作整体完成。
+3.41.1 缓存 ACME 导出后真实消费失败恢复证据保留；standalone auto-renew
+消费失败回滚已补验。ALPN 消费失败链、fresh 挑战与其它环境缺口仍保留；
+不把局部通过计作整体完成。
 
 ## 环境与可信输入
 
@@ -1047,6 +1048,34 @@ SHA256：`a874327b70a1ad9c3320843bd9fe2781c0b593492abd5863ffafd2e24c9cc533`。
 无 failed unit；严格 HTTPS `200/verify=0`、透明关闭，load1 `0.04`、
 MemAvailable `496984 KiB`、SwapFree `510944 KiB`。旧证书仍至
 2027-01-15，新签发证书只进入失败候选，未成为在线证书。
-本批关闭的仅为正式 webroot issue 消费失败全链；不证明 fresh 授权挑战、
-正式 renew/ALPN 消费失败链、新证书在线生效再回退或自然续期。未改生产
-代码，未重复 daily/full；其它环境缺口及整体计划继续未完成。
+本批关闭的为正式 webroot issue 与 standalone auto-renew 消费失败全链；
+不证明 fresh 授权挑战、ALPN 消费失败链、新证书在线生效再回退或自然续期。
+未改生产代码，未重复 daily/full；其它环境缺口及整体计划继续未完成。
+
+### 2026-10-23 正式 standalone auto-renew 消费失败全链
+
+在同一 Debian 13 amd64、正式 3.41.4 bundle 上调用生产 CLI：
+`acme auto-renew` 单次执行，provider 为现有 `standalone` 登记。测试仅在
+快照完成后把本轮候选输入强制到期（`Le_NextRenewTime=1`、新域名 key、
+`NO_ARI=1`），未通过正式 CLI 环境变量注入 ACME 参数，也未自动重试 CA。
+正式 CLI 取得新的 Let's Encrypt 候选证书并通过系统信任链与域名校验，
+新证书未上线前被真实 Nginx 消费校验拒绝。
+
+| 核对项 | 实际结果 |
+| --- | --- |
+| 续期动作 | `auto-renew`，provider `standalone`，正式 CLI 调用 1 次 |
+| 消费失败 | 真实 `key values mismatch`，CLI 返回 `15` |
+| 自动回滚 | TLS/完整 ACME 字节、mode、uid、gid、链接数恢复到失败前；旧在线证书保持 |
+| 业务与调度 | 三业务 healthy；累计不回退；renewal/traffic timer active/enabled |
+| 外层保护 | runner、outer restore、verify 均 `0`；resource guard `completed=true/triggered=false` |
+| 透明代理 | 始终关闭 |
+
+公开归档 `.tmp-native-acme-fullchain-20261023/native-acme-fullchain-evidence.tar.gz`
+SHA256：`6ede108e71bc7d2a3e84ea895b372d884d256db4938214233b340bbb1aa1c390`；
+独立 Linux 门禁以 `action=auto-renew/provider=standalone` 复核通过。
+本轮资源样本 23 个，最低 MemAvailable `449944 KiB`、SwapFree `510688 KiB`，
+最高 load1 `3.39`。远端工作目录与认领备份已精确清理，五份正式 update
+备份保留；透明代理保持关闭。
+
+本节只关闭正式 standalone auto-renew 消费失败回滚子项，不外推 ALPN、
+fresh 公网挑战、新证书在线生效再回退、自然续期或其它环境；整体计划继续未完成。
