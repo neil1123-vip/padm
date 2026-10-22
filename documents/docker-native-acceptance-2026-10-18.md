@@ -814,3 +814,37 @@ load1 `0.17`、MemAvailable 约 452 MiB、SwapFree 约 493 MiB。
 不改变生产代码与支持矩阵。其它原生 Reality 拓扑/重启、XHTTP 原生矩阵、
 正式 ACME issue/renew 消费失败全链及 fresh 公网挑战、透明启用重启矩阵、
 原生 arm64、公网 IPv6、新主机灾备、WARP 实账号及自然续期仍未完成。
+
+### 2026-10-22 原生 Vision/XHTTP 拓扑收口与远端清理
+
+在同一台 Debian 13 amd64 测试 VPS、正式 3.41.4 bundle 上完成本批剩余的
+Vision/XHTTP 原生故障恢复收口；透明代理全程关闭。Vision host/loopback 的
+启停三故障点和两次互切共 14 点已通过；XHTTP bridge、host-gateway、
+host-loopback 的启停三故障点和两次互切共 20 点已通过。每个通过点均验证
+正确/错误 UUID、严格 HTTPS 200、XHTTP HTTP/2、Host/mode、上传下载记账、
+候选/部署锁清理、原规格材料和三项业务健康。
+
+XHTTP bridge 早期 3 点触发资源看门狗，随后完成恢复；另有历史暂存残留和
+控制器中断，均保留原始失败证据并在恢复后继续。最终 D 阶段剩余 bridge 1
+点加 host 6 点为 7 点，E 阶段 loopback 6 点加 host/loopback 互切 2 点为
+8 点，均为 `runner_exit=0`、`official_restore=0`、`outer_restore=0`、
+`verify=0`，guard 最终 `completed=true/triggered=false`。
+
+脱敏归档 `.tmp-native-topologies-20261022/native-topologies-final.tar.gz`
+共 264 个文件，SHA256
+`58b22a95a73111a059acfd6794d5d5438a937cab13fe57c832851c8bec19e5de`。
+Docker Linux 工具容器内的 `verify-archive.py` 通过，统计 34 个唯一点
+（Vision 14、XHTTP 20），不含私密材料。早期三个看门狗归档的空
+`outer-state/verify.json` 不作为结果读取，门禁改用同阶段 `restore.json`
+及 runner/guard 恢复字段校验，没有补造测试输出。
+
+用户已授权精确清理测试 VPS。脚本在删除前复核三业务容器 healthy、renewal/
+traffic timer active/enabled、透明关闭、正式协议和无部署锁；随后删除本轮
+8 个远端工作目录及 83 个新增 `configure.*` 备份，保留
+`update.LnP9nE`、`update.dPN15p`、`update.pDAJCS`、`update.s3aMp6`、
+`update.t5vJXt` 五个正式备份。远端清理返回 0。
+
+本批没有把 XHTTP 隔离 CLI 24 点、`packet-up`、`stream-up`、独立下行、
+整机重启、正式公网 ACME 消费失败全链、fresh 挑战、透明启用重启矩阵、
+原生 arm64、IPv6、新主机灾备、WARP 实账号或自然续期写成已完成；整体计划
+仍未完成。

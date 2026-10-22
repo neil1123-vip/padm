@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，正式 3.39/3.40 的原生 amd64 验签、首配及公网客户端已验；3.41.1 已正式发布并验签升级，新增依赖路径表和 locale 进入运行 bundle，assess/update/validate、restart、整机重启与公网客户端通过 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入；3D.3c 受管共存的原生同机 Vision/WS 正反例和 Vision 75 秒连接通过，外部 WS 及后续限定外部 Vision 正反例通过；3D.3d1 桥接与 3D.3d2 宿主回环网站的同机 Vision 正反例、75 秒连接和严格 HTTPS 通过；3D.25 增加 SS 逐入口服务器密钥轮换，XHTTP 长 JSON 菜单输入已修复 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入；3D.3c 受管共存的原生同机 Vision/WS 正反例和 Vision 75 秒连接通过，外部 WS 及后续限定外部 Vision 正反例通过；3D.3d1 桥接与 3D.3d2 宿主回环网站的同机 Vision 正反例、75 秒连接和严格 HTTPS 通过；2026-10-22 原生 Vision host/loopback 14 点、XHTTP bridge/host-gateway/host-loopback 20 点故障恢复与互切通过；3D.25 增加 SS 逐入口服务器密钥轮换，XHTTP 长 JSON 菜单输入已修复 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 4A.1–4A.9、4B.1–4B.2 已交付；4C.1–4C.6 私网 API、主控/被控、手动/自动同步及 API 端口维护已验；4C.7–4C.11 单 Peer 建链、维护、重绑定与迁移通过定向及真实双端验收；4C.12 无角色多 Peer、4C.13 多被控逐节点管理和 4C.14 无角色多 Peer 本机迁移通过隔离 amd64 验收；v2 主控新身份灾备接续 6A.23，原生环境仍待验 | 稳定分享身份与双核心认证/统计、本机用户业务、手动/自动同步、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 5A.1–5A.3c、5B.1–5B.4b 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设、IPv6 bridge 与用户态 WARP 本地 Peer 验收已通过；5B.5a HTTP 中继和 5B.5c–5B.5d 额外端口/默认分享已通过适用本地真实验收；5C 已交付受管网络归属及 WS/控制面 Fail2ban，8c.3 专用 SSH collector/jail、菜单启停/解封与隔离 amd64 实际封禁/DROP/来源失效清理已验；本轮 Geo、临时 `2443` alias 及 HTTP relay 原生外部 IPv4 通过；TUN 当前源码的 TCP/TLS、UDP DNS、启停及净停后重启/显式启动通过，TProxy TCP/TLS 同矩阵通过，指定 UID UDP 缺权已修且原生单一增权对照及隔离矩阵通过，升级保护补验通过；正式 CLI/原生 arm64/双栈跳跃仍待验，SOCKS UDP 继续拒绝 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 6A.1–6A.23 部分交付私密导出、校验、同架构 v3 空目标恢复与持久中断接管；受限 Reality/Geo/HTTP-01/停用跳跃规格、无角色多 Peer/单 Peer 被控及隔离旧主控后的 v1/v2 新身份恢复见各阶段；单域 EC-P256 的 standalone、受管 webroot、ALPN 与 dns_acmedns 材料/启用续期恢复通过合同和本地 CA 实际续期；原生卸载、purge 和同机空目标灾备通过；3.41 正式两种签发换证及关闭透明的重启通过，3.41.1 路径表发布升级和缓存 ACME 导出后真实消费失败恢复通过；正式 issue/renew 消费失败全链、新主机灾备、原生双架构、自然续期、WARP/Reality 完整验收仍待完成 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
@@ -71,7 +71,7 @@
 | 新主机灾备恢复 | 同机空目标通过，新主机未完成 | 同架构全新主机、v3 空目标、业务恢复和失败保护；同机 purge 后恢复不能替代 |
 | webroot/ALPN 公网 CA 组合 | 3.41 正式签发安装及 3.41.1 缓存消费失败恢复通过；本地 CA 四条新证书消费失败链已补齐，公网正式全链仍未完成 | 10 月 21 日在现有隔离夹具补齐两种挑战的 `acme issue` 和 `acme auto-renew`：新证书及 ACME 树提交后，真实 Nginx 拒绝错配私钥，旧在线证书、TLS/ACME 字节及权限、业务和累计保持，随后正常续期通过。发布信任仍为 fixture，不能替代正式公网全链、新证书在线生效再回退或 fresh 公网挑战。第三次公网申请的原始输出不可恢复，不断言原因且不再补签 |
 | WARP 真实账号与公网出口 | 未完成 | 真实账号、双栈出口和故障恢复证据 |
-| Reality 共存专项 | 隔离 amd64 24 点、正式 3.41.4 受管网站原生 6 点恢复及 443 公网共存复验通过；完整验收仍未完成 | 两次公网 reset 定位到测试端 TLS 嗅探改写目标，原失败保留。经仅回环监听、固定唯一 VPS:443 的无嗅探 TCP 通道，正式受管 bridge 的 Vision/WS 公网正反例、网站严格 HTTPS、服务端抓包关联及双向记账通过；原 WS 字节/权限/timer 恢复和恢复后公网探针通过。其它原生拓扑、XHTTP 全矩阵及重启仍缺 |
+| Reality 共存专项 | 原生 Vision host/loopback 14 点、XHTTP bridge/host-gateway/host-loopback 20 点恢复与互切通过；隔离 CLI XHTTP 24 点及完整环境验收仍未完成 | 两次公网 reset 定位到测试端 TLS 嗅探改写目标，原失败保留。经仅回环监听、固定唯一 VPS:443 的无嗅探 TCP 通道，正式受管 bridge 的 Vision/WS 公网正反例、网站严格 HTTPS、服务端抓包关联及双向记账通过；原 WS 字节/权限/timer 恢复和恢复后公网探针通过。仍缺隔离 CLI XHTTP 24 点、`packet-up`/`stream-up`、独立下行、整机重启及其它原生环境矩阵 |
 | HTTP relay 原生路径 | 原生外部 IPv4 通过 | 独立外部客户端访问三个公网 HTTPS 目标均严格 TLS/200，错误认证 407、未允许来源 blocked；不外推公网 IPv6 或 SOCKS UDP 支持 |
 | 自然到期真实续期 | 未完成 | 等待登记窗口（约 2026-12-17）后的真实换证，不伪造到期 |
 | 当前修复可信发布 | 3.41.4 正式发布及原生升级通过 | `577a256e` 签名 G，Release `39632309765` 的 30 项成功、1 项条件跳过。恢复 SSH 后以生产 Cosign 验签完成 assess/update/validate，运行源 `e2a22489`，原业务材料与权限保持，正式回滚点保留；不替代尚缺的功能和环境验收 |
@@ -1423,7 +1423,19 @@ WS 基线、共存的 Vision/WS 正确 UUID 严格 HTTPS 200、错误 UUID 拒�
 `18332e479b2a553dedd07d6cfd665611839b92865458f9af0d1f2bd703f57fb7`；
 失败尝试及恢复结果保留，5 个远端测试目录、13 个 configure 测试备份已精确清理，
 5 个正式 update 备份保留。未重复本机功能矩阵、日常或 full；
-其它原生拓扑/重启、XHTTP 及其余环境缺口仍按上表保留，整体计划未完成。
+隔离 CLI XHTTP 24 点、`packet-up`、`stream-up`、独立下行、整机重启及其余环境缺口仍按上表保留，整体计划未完成。
+
+2026-10-22 同一台 Debian 13 amd64 测试 VPS 的正式 3.41.4 bundle 又完成
+原生 Vision/XHTTP 拓扑收口，透明代理全程关闭。Vision host/loopback 的启停三故障点
+和两次互切共 14 点通过；XHTTP bridge、host-gateway、host-loopback 的启停三故障点
+和两次互切共 20 点通过。每个点均核对正确/错误 UUID、严格 HTTPS 200、XHTTP
+HTTP/2、Host/mode、上传下载记账、候选与部署锁清理、原规格材料和三项业务健康。
+Docker Linux 离线门禁统计 34 个唯一通过点，归档
+`.tmp-native-topologies-20261022/native-topologies-final.tar.gz` 的 SHA256 为
+`58b22a95a73111a059acfd6794d5d5438a937cab13fe57c832851c8bec19e5de`。
+本段不把隔离 CLI XHTTP 24 点、`packet-up`、`stream-up`、独立下行、整机重启、
+正式公网 ACME 消费失败全链、fresh 挑战、透明启用重启矩阵、原生 arm64、IPv6、
+新主机灾备、WARP 实账号或自然续期写成已完成。
 
 #### 3D.4 XHTTP 预设与客户端 XMUX
 
@@ -1457,8 +1469,9 @@ HTTP/2、五组 XMUX 创建及单并发/自定义的并发上限分支。服务�
 真实脚本的 jq 作用域/必需字段错误和独审发现的派生丢 XMUX 回归均已修复；
 失败日志保留，重复源码归档在验收后清理，证据 `.tmp-xhttp-close/acceptance.md`。
 不据此宣称长时复用或吞吐收益；有限 Padding 见 3D.5，首部开关见 3D.6，四项 packet/stream limits 见 3D.7。
-其它 sc*、自定义 headers、downloadSettings、H3/CDN、
-上下行分离和完整协议管理仍 `deferred`，公网、原生宿主、arm64 和可信发布仍待验。
+其它 sc*、自定义 headers、downloadSettings、H3/CDN、上下行分离和完整协议管理仍
+`deferred`；隔离 CLI XHTTP 24 点、`packet-up`、`stream-up`、独立下行、整机重启、
+原生 arm64、IPv6、新主机灾备、WARP 实账号和自然续期仍待验。
 
 #### 3D.5 有限 XHTTP Padding
 

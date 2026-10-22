@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import argparse
+import ast
 import copy
 import hashlib
 import importlib.util
@@ -148,6 +150,11 @@ def record(path, value):
     path.chmod(0o600)
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+def candidate_owner(candidate):
+    owners = {entry["service"] for entry in candidate["listeners"]
+              if entry["public_port"] == 443 and entry["transport"] == "tcp"}
+    assert len(owners) == 1, "候选必须有唯一 443/TCP 服务"
+    return next(iter(owners))
 
 if len(args) == 2 and args[0] == "pull":
     images = json.loads(Path(os.environ["PADM_TEST_RECOVERY_IMAGES"]).read_text())
@@ -206,8 +213,7 @@ if args and args[0] == "compose" and "up" in args and "--wait" in args and armed
     assert fault["kind"] in ("health", "term-up") and (private / "stopped.json").is_file()
     assert sha(deployment / "config/spec.json") != fault["before"], "候选尚未提交"
     assert all(not inspect(identifier)["State"]["Running"] for identifier in fault["owners"])
-    spec = json.loads((deployment / "config/spec.json").read_text())
-    service = "nginx-stream" if spec.get("reality_stream", {}).get("host_website", {}).get("network_mode") == "host" else "nginx"
+    service = candidate_owner(json.loads((deployment / "deployment.json").read_text()))
     if fault["kind"] == "term-up":
         armed.rename(private / "consumed.json")
         result = execute(args)
@@ -382,32 +388,42 @@ def links(node):
     return values
 
 
-def traffic(node, images):
-    values = links(node)
+def client_configuration(spec, values):
     config = {"log": {"loglevel": "info"}, "inbounds": [], "outbounds": [],
               "routing": {"rules": []}}
-    selected = current(node).get("reality_stream", {}).get("listener_id")
+    selected = (spec.get("reality_stream") or {}).get("listener_id")
+    entries = {entry["listener_id"]: entry for entry in spec["core"]["protocols"]}
     for value in values:
         uri = urllib.parse.urlsplit(value)
         if uri.username != ACCOUNT_UUID:
             continue
-        query = {key: item[0] for key, item in urllib.parse.parse_qs(uri.query).items()}
+        pairs = urllib.parse.parse_qs(uri.query, keep_blank_values=True, strict_parsing=True)
+        assert all(len(item) == 1 and item[0] for item in pairs.values()), pairs
+        query = {key: item[0] for key, item in pairs.items()}
         if query.get("security") != "reality":
             continue
+        assert query["type"] in ("tcp", "xhttp")
         listener = "entry-vision" if query["type"] == "tcp" else "entry-xhttp"
-        expected = 443 if selected == listener else 443 if listener == "entry-vision" else 35442
+        expected = 443 if selected == listener else entries[listener]["public_port"]
         assert uri.port == expected and query["pbk"] == PUBLIC_KEY and query["sni"] == TARGET
         settings = {"network": query["type"], "security": "reality", "realitySettings": {
             "serverName": query["sni"], "fingerprint": query["fp"],
             "publicKey": query["pbk"], "shortId": query["sid"]}}
-        user = {"id": ACCOUNT_UUID, "encryption": "none"}
+        assert query["encryption"] == "none"
+        user = {"id": ACCOUNT_UUID, "encryption": query["encryption"]}
         if listener == "entry-vision":
+            assert query["flow"] == "xtls-rprx-vision"
             user["flow"] = query["flow"]
         else:
+            assert "flow" not in query
             settings["xhttpSettings"] = {key: query[key] for key in ("path", "host", "mode")}
-        for invalid in (False, True) if listener == "entry-vision" else (False,):
+            if "extra" in query:
+                extra = json.loads(query["extra"])
+                assert isinstance(extra, dict)
+                settings["xhttpSettings"]["extra"] = extra
+        for invalid in (False, True):
             tag = listener + ("-invalid" if invalid else "")
-            port = 2083 if invalid else 2081 if listener == "entry-vision" else 2082
+            port = (2081 if listener == "entry-vision" else 2082) + (2 if invalid else 0)
             client = copy.deepcopy(user)
             if invalid:
                 client["id"] = "00000099-1111-4111-8111-000000000099"
@@ -417,6 +433,77 @@ def traffic(node, images):
                 "vnext": [{"address": "127.0.0.1", "port": uri.port, "users": [client]}]},
                 "streamSettings": settings})
             config["routing"]["rules"].append({"type": "field", "inboundTag": [tag], "outboundTag": tag})
+    assert len(config["outbounds"]) == 4 and {item["tag"] for item in config["outbounds"]} == {
+        "entry-vision", "entry-vision-invalid", "entry-xhttp", "entry-xhttp-invalid"}
+    return config
+
+
+def selfcheck():
+    extra = {"noSSEHeader": False, "headers": {"X-Test": "value & next"},
+             "downloadSettings": {"address": "download.padm.test", "port": 2445}}
+
+    def uri(network, port, options):
+        query = {"encryption": "none", "security": "reality", "sni": TARGET,
+                 "fp": "chrome", "pbk": PUBLIC_KEY, "sid": "6ba85179e30d4fc2", "type": network}
+        if network == "tcp":
+            query["flow"] = "xtls-rprx-vision"
+        else:
+            query.update(path="/test xhttp/", host=TARGET, mode="auto")
+            if options is not None:
+                query["extra"] = json.dumps(options)
+        return f"vless://{ACCOUNT_UUID}@{DOMAIN}:{port}?" + urllib.parse.urlencode(query)
+
+    rejected = 0
+    for selected, options in ((None, None), ("entry-vision", extra), ("entry-xhttp", extra)):
+        spec = {"core": {"protocols": [{"listener_id": "entry-vision", "public_port": 2443},
+                                     {"listener_id": "entry-xhttp", "public_port": 2444}]},
+                "reality_stream": {"listener_id": selected} if selected else None}
+        ports = {"entry-vision": 443 if selected == "entry-vision" else 2443,
+                 "entry-xhttp": 443 if selected == "entry-xhttp" else 2444}
+        values = [uri("tcp", ports["entry-vision"], None), uri("xhttp", ports["entry-xhttp"], options)]
+        config = client_configuration(spec, values)
+        outbounds = {item["tag"]: item for item in config["outbounds"]}
+        assert {item["port"] for item in config["inbounds"]} == {2081, 2082, 2083, 2084}
+        for listener, port in ports.items():
+            good, bad = outbounds[listener], outbounds[listener + "-invalid"]
+            assert good["settings"]["vnext"][0]["port"] == port
+            assert good["settings"]["vnext"][0]["users"][0]["id"] == ACCOUNT_UUID
+            assert bad["settings"]["vnext"][0]["users"][0]["id"] != ACCOUNT_UUID
+            assert good["streamSettings"] == bad["streamSettings"]
+        assert outbounds["entry-vision"]["settings"]["vnext"][0]["users"][0]["flow"] == "xtls-rprx-vision"
+        assert "flow" not in outbounds["entry-xhttp"]["settings"]["vnext"][0]["users"][0]
+        assert outbounds["entry-xhttp"]["streamSettings"]["xhttpSettings"].get("extra") == options
+        for invalid in ([values[0], uri("xhttp", ports["entry-xhttp"] + 1, options)],
+                        [values[0], values[1] + "&mode=packet-up"], values + values[:1],
+                        [values[0], values[1] + "&flow=xtls-rprx-vision"]):
+            try:
+                client_configuration(spec, invalid)
+            except AssertionError:
+                rejected += 1
+            else:
+                raise AssertionError("非法 URI 集合未拒绝")
+
+    # 直接校验故障注入器实际使用的选择函数，不另写一套 owner 逻辑。
+    helper = next(node for node in ast.parse(WRAPPER).body
+                  if isinstance(node, ast.FunctionDef) and node.name == "candidate_owner")
+    namespace = {}
+    exec(compile(ast.Module(body=[helper], type_ignores=[]), "WRAPPER", "exec"), namespace)
+    for services in (["xray"], ["nginx"], ["nginx-stream"], [], ["xray", "nginx"]):
+        candidate = {"listeners": [{"public_port": 443, "transport": "tcp", "service": service}
+                                   for service in services]}
+        candidate["listeners"].append({"public_port": 443, "transport": "udp", "service": "ignored"})
+        try:
+            owner = namespace["candidate_owner"](candidate)
+        except AssertionError:
+            assert len(services) != 1
+            rejected += 1
+        else:
+            assert len(services) == 1 and owner == services[0]
+    print(f"reality-cli-selfcheck-ok: uri-configurations=3 owner-services=3 rejected={rejected}")
+
+
+def traffic(node, images):
+    config = client_configuration(current(node), links(node))
     folder = node["path"] / "client"
     folder.mkdir(mode=0o755, exist_ok=True)
     save(folder / "config.json", config)
@@ -445,17 +532,18 @@ def traffic(node, images):
                         output += command(node["docker"] + ["logs", "--tail", "40", identifier]).decode()
                     raise AssertionError(shared.diagnostic(node, output)[-8000:])
                 time.sleep(0.1)
-        rejected = subprocess.run(node["enter"] + [
-            "curl", "-fsS", "--max-time", "2", "--noproxy", "", "--socks5-hostname",
-            "127.0.0.1:2083", f"http://{GATEWAY}:38999/proof"], capture_output=True, timeout=4)
-        assert rejected.returncode != 0 and not rejected.stdout, "未授权账号流量未拒绝"
+        for port in (2083, 2084):
+            rejected = subprocess.run(node["enter"] + [
+                "curl", "-fsS", "--max-time", "2", "--noproxy", "", "--socks5-hostname",
+                f"127.0.0.1:{port}", f"http://{GATEWAY}:38999/proof"], capture_output=True, timeout=4)
+            assert rejected.returncode != 0 and not rejected.stdout, f"未授权账号流量未拒绝: {port}"
         cli(node, "traffic", "collect")
         after = totals(node)
         assert after["upload"] > before["upload"]
         assert after["download"] >= before["download"] + len(b"padm-reality-cli-proof\n" * 2048) * 2
     finally:
         command(node["docker"] + ["rm", "-f", client])
-    stream = current(node).get("reality_stream", {})
+    stream = current(node).get("reality_stream") or {}
     host = HOST_DOMAIN if stream.get("host_website") else DOMAIN
     port = 443 if stream else 35443
     command(node["enter"] + ["python3", "-c", r'''
@@ -487,7 +575,7 @@ else:
     raise AssertionError("错误 SNI 未拒绝")
 ''', str(node["path"] / "certs/ca.crt"), host, str(port)])
     clean(node)
-    print("reality-cli-traffic-ok:vision+xhttp+account-reject+strict-tls-sni", flush=True)
+    print("reality-cli-traffic-ok:vision+xhttp+both-account-reject+strict-tls-sni", flush=True)
 
 
 def edit(node, arguments, *, accepted=True):
@@ -531,11 +619,12 @@ def failed_transaction(node, images, label, arguments, *, fault="health"):
     print(f"reality-cli-recovery-ok:{label}:{proof['stage']}", flush=True)
 
 
-def matrix(node, images):
+def matrix(node, images, selected):
+    listener = "entry-" + selected
     modes = {
-        "bridge": ("--reality-stream", "entry-vision", "entry-website"),
-        "host": ("--reality-stream-host", "entry-vision", HOST_DOMAIN, GATEWAY, "8446"),
-        "loopback": ("--reality-stream-loopback", "entry-vision", HOST_DOMAIN, "127.0.0.1", "8446"),
+        "bridge": ("--reality-stream", listener, "entry-website"),
+        "host": ("--reality-stream-host", listener, HOST_DOMAIN, GATEWAY, "8446"),
+        "loopback": ("--reality-stream-loopback", listener, HOST_DOMAIN, "127.0.0.1", "8446"),
     }
     disable = ("--reality-stream", "off")
     command(node["enter"] + ["python3", "-c", r'''
@@ -584,10 +673,18 @@ with socket.create_connection(("reality.target.test", 8446), timeout=3) as conne
                 failed_transaction(node, images, mode + "-to-" + other + "-health", destination)
         edit(node, disable)
         traffic(node, images)
-    print("reality-cli-matrix-ok:3-enable+3-disable+6-topology-health+12-term", flush=True)
+    print(f"reality-cli-matrix-ok:selected={selected}:"
+          "3-enable+3-disable+6-topology-health+12-term", flush=True)
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--selected", choices=("vision", "xhttp"), default="vision")
+    parser.add_argument("--selfcheck", action="store_true")
+    arguments = parser.parse_args()
+    if arguments.selfcheck:
+        selfcheck()
+        return
     assert sys.platform == "linux" and os.geteuid() == 0 and Path("/.dockerenv").is_file()
     assert os.uname().machine == "x86_64", "本验收仅覆盖原生 Linux amd64，不使用跨架构模拟"
     inputs = json.loads(Path("/node-images.json").read_text(encoding="utf-8-sig"))
@@ -682,8 +779,9 @@ def main():
                 "release": {"version": "3.15.0", "manifest_sha256": "1" * 64,
                             "signature_identity": "local-test-only-not-release-verified"},
                 "core": {"type": "xray", "secondary_type": None, "protocols": [
-                    entry(1, "entry-vision", 443) | {"reality": reality},
-                    entry(2, "entry-xhttp", 35442) | {
+                    entry(1, "entry-vision", 443 if arguments.selected == "vision" else 35442) | {
+                        "reality": reality},
+                    entry(2, "entry-xhttp", 443 if arguments.selected == "xhttp" else 35442) | {
                         "reality": reality, "xhttp": {"path": "/cli-xhttp", "host": TARGET, "mode": "auto"}},
                     entry(21, "entry-website", 35443) | {"websocket": {
                         "domain": DOMAIN, "path": "cliws-test", "backend_port": 31297, "tls_port": 8443}}]},
@@ -709,12 +807,12 @@ def main():
                 path.chmod(0o600)
             command(ns + ["bash", "-ec", 'source "$1"; dockerAcmeRuntimePermissions "$2"', "--",
                           str(root / "deployment/bundle/install-docker.sh"), str(acme)], env=env)
-            matrix(node, images)
+            matrix(node, images, arguments.selected)
             print("reality-cli-environment-proof=" + json.dumps({
                 "engine_id": info["ID"], "netns": os.readlink(f"/proc/{pid}/ns/net"),
                 "scope": "isolated-linux-amd64-cli-transactions", "release_trust": "local-fixture",
                 "target_metadata": "local-fixture", "public_reality_target": False,
-                "transparent_enabled": False}), flush=True)
+                "selected": arguments.selected, "transparent_enabled": False}), flush=True)
         finally:
             failed = sys.exc_info()[0] is not None
             errors = []
