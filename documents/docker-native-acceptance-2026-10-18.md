@@ -764,3 +764,53 @@ SSH/回环转发已停，临时容器/卷已回收。UTC `04:08:35` 清理核验
 443 复现发生于原 WS 已恢复之后，独立 2443 通过也不能替代正式 bundle 共存验收。
 因此不把原两次改写为通过；正式 443 共存须先隔离或修正测试端嗅探再复验。
 未重复完整回归，未改变生产代码、代理设置或支持矩阵，整体计划仍未完成。
+
+### 2026-10-22 正式 443 共存公网复验
+
+在原 Debian 13 amd64 VPS、正式 3.41.4 bundle 上补验受管网站 bridge 拓扑，
+源 `e2a2248953af907bea33c1b881788e0912a38b97`，控制包及生产验签素材与前节相同。
+通过正式 `configure` 建立临时 Vision，再用正式 `edit --reality-stream`
+绑定 `entry-native-reality-vision` 与 `vless-ws`；目标保持 `pgxn.org:443`。
+不替换生产事务、不使用发布信任或目标质量元数据夹具，透明代理始终关闭。
+
+独立 Docker 客户端通过本机原生 Xray 的回环 TCP 转发，唯一目标固定为
+`23.185.168.63:443`、关闭嗅探；容器经 `host.docker.internal:18443` 接入。
+转发仅监听 `127.0.0.1`，不提供通用代理、不改全局 v2rayN/Proxifier/Docker 设置。
+公网 TLS 对照先确认 b 域严格校验并返回 200、pgxn SNI 收到 VPS 证书并产生
+主机名不匹配；本轮不是 SSH 封装路径，固定目标不再被 SNI 改写。
+
+| 检查 | 结果 |
+| --- | --- |
+| 原 WS 公网基线 | 正确 UUID 严格 HTTPS 200；错误 UUID 拒绝 |
+| 正式 443 共存 Vision | 正确 UUID 严格 HTTPS 200；错误 UUID 拒绝 |
+| 同一 443 共存 WS | 正确 UUID 严格 HTTPS 200；错误 UUID 拒绝 |
+| 共存网站 | b 域严格 TLS 校验、HTTP 200 |
+| 服务端关联及记账 | 抓包 510 包、内核丢包 0；双向累计增加且无账号累计回退 |
+| 恢复原 WS | 正式恢复、外层恢复和 verify 均 0；字节/权限/timer 保持 |
+| 恢复后公网复验 | WS 正反例通过、网站严格 HTTPS 200 |
+
+最终 runner_exit=0，guard completed=true/triggered=false；87 个两秒资源样本，
+采样时长 `173.246` 秒，最低 MemAvailable `323624 KiB`、SwapFree `505104 KiB`，
+最高 load1 `5.23`。该时长仅覆盖最后成功 runner，不包括此前失败、审批或清理等待。
+资源门禁沿用前节，不将短时峰值描述为所有尝试均无异常。
+
+此前客户端夹具权限、重复 guard、审批超时及采集错误均保留，不改写为成功。
+本轮第一次公网正反例已通过，但 tcpdump 默认降权无法写入私密目录，
+runner=1、恢复=0；随后读取自检也发现同样限制，尚未变更部署即停止。
+最终通过父进程预先打开文件、以继承的 stdout/stdin 完成抓包读写，
+保留 tcpdump 降权及私密目录权限；读写自检通过后才运行最后一轮。
+
+归档 `.tmp-vision443-final/native443-evidence.tar.gz`，SHA256
+`18332e479b2a553dedd07d6cfd665611839b92865458f9af0d1f2bd703f57fb7`，
+包含五次 runner 的脱敏结果、资源样本、最终正反例、抓包统计、记账与恢复断言。
+Linux 容器验证归档摘要、路径、38 份 JSON、3 个 Python 脚本语法、关键结果及脱敏通过；
+不含原始抓包、私密输入或业务 URI。本机保留基线/恢复后探针、关闭报告和验证结果。
+5 个远端测试目录及 13 个日志精确列明的 configure 测试备份已清理，
+5 个正式 update 备份全部保留；本机固定转发、客户端容器/卷及临时 URI 已清。
+UTC `09:12:19` 离场：三服务 healthy、两 timer active/enabled、无 failed unit，
+load1 `0.17`、MemAvailable 约 452 MiB、SwapFree 约 493 MiB。
+
+本轮只补受管 bridge 的正式公网链路，不重复 6 点恢复、本机 24 场景、daily 或 full，
+不改变生产代码与支持矩阵。其它原生 Reality 拓扑/重启、XHTTP 原生矩阵、
+正式 ACME issue/renew 消费失败全链及 fresh 公网挑战、透明启用重启矩阵、
+原生 arm64、公网 IPv6、新主机灾备、WARP 实账号及自然续期仍未完成。
