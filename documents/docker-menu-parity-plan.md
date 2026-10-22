@@ -71,7 +71,7 @@
 | 新主机灾备恢复 | 同机空目标通过，新主机未完成 | 同架构全新主机、v3 空目标、业务恢复和失败保护；同机 purge 后恢复不能替代 |
 | webroot/ALPN 公网 CA 组合 | 3.41 正式签发安装及 3.41.1 缓存消费失败恢复通过；本地 CA 四条新证书消费失败链已补齐，公网正式全链仍未完成 | 10 月 21 日在现有隔离夹具补齐两种挑战的 `acme issue` 和 `acme auto-renew`：新证书及 ACME 树提交后，真实 Nginx 拒绝错配私钥，旧在线证书、TLS/ACME 字节及权限、业务和累计保持，随后正常续期通过。发布信任仍为 fixture，不能替代正式公网全链、新证书在线生效再回退或 fresh 公网挑战。第三次公网申请的原始输出不可恢复，不断言原因且不再补签 |
 | WARP 真实账号与公网出口 | 未完成 | 真实账号、双栈出口和故障恢复证据 |
-| Reality 共存专项 | 原生 Vision host/loopback 14 点、XHTTP 三拓扑 20 点恢复与互切通过；隔离 CLI XHTTP 24 点及正式公网双模式三拓扑 6 点通过，完整环境验收仍未完成 | 两次公网 reset 定位到测试端 TLS 嗅探改写目标，原失败保留。固定唯一 VPS 的无嗅探 TCP 通道验证正式公网正反账号、网站严格 HTTPS、精确 HTTP/2、Host/mode 和双向记账；原 WS 字节/权限/timer 恢复及恢复后公网探针通过。仍缺独立下行、整机重启及其它原生环境矩阵；六个模式点不证明大上传分段或性能 |
+| Reality 共存专项 | 原生 Vision 14 点、XHTTP 20 点恢复与互切、隔离 CLI XHTTP 24 点及正式公网双模式三拓扑 6 点通过；同 handler 下行 1 正例/3 拒绝、双协议三拓扑实际重启 6 点通过，完整环境验收仍未完成 | 固定唯一 VPS 的无嗅探通道验证公网账号正反例、严格网站、HTTP/2、Host/mode、双向记账及原材料/权限/timer 恢复。六点重启核对原容器自然启动与跨 boot 保护；首轮未选中 XHTTP 超时根因仍未确定，失败证据保留。下行限同 Reality 身份、同 handler；仍缺公网独立身份、TLS/h3 等环境矩阵，不证明大上传分段或性能 |
 | HTTP relay 原生路径 | 原生外部 IPv4 通过 | 独立外部客户端访问三个公网 HTTPS 目标均严格 TLS/200，错误认证 407、未允许来源 blocked；不外推公网 IPv6 或 SOCKS UDP 支持 |
 | 自然到期真实续期 | 未完成 | 等待登记窗口（约 2026-12-17）后的真实换证，不伪造到期 |
 | 当前修复可信发布 | 3.41.4 正式发布及原生升级通过 | `577a256e` 签名 G，Release `39632309765` 的 30 项成功、1 项条件跳过。恢复 SSH 后以生产 Cosign 验签完成 assess/update/validate，运行源 `e2a22489`，原业务材料与权限保持，正式回滚点保留；不替代尚缺的功能和环境验收 |
@@ -121,6 +121,31 @@ verify 均为 `0`，guard `completed=true/triggered=false`，透明全程关闭�
 证据位于 `.tmp-native-xhttp-modes-20261022/`。远端两个工作目录及 CLI 日志
 点名的 12 个配置备份已精确清理，五个正式 update 备份保留。
 独立下行、重启及其余环境缺口继续按上表推进，整体计划仍未完成。
+
+随后通过正式 CLI 新建单个 bridge 下行点：保留原 WS/网站 `443`，
+XHTTP 上行 `2444`，别名 `2443` 指向同一容器内 `2444` handler，再登记完整
+Reality download settings。严格 HTTPS 正例通过，客户端 PID 独占 socket
+同时观察到两个端口；仅改下行 SID、仅改下行端口、错 UUID 三个完整业务
+反例均拒绝，单 outbound 无回退出口。原 WS 正反例、网站、双向累计和
+正式/外层恢复及 verify 通过，guard 未触发。Linux 离线门禁通过，归档
+`.tmp-native-xhttp-down-20261023/native-xhttp-down-evidence.tar.gz` 的 SHA256：
+`70a4a9e954917eded5717c103f621902ae80acdab66c7c4f06ce1ee382d94055`。
+远端目录、CLI 日志点名的四份配置备份和本地敏感输入已清理；本点仅证明
+同 handler、同 Reality 身份的独立端点，不证明公网独立身份、TLS/h3 或重启。
+
+接续完成正式 3.41.4 的 Vision/XHTTP × host-gateway/bridge/host-loopback
+六点实际整机重启，XHTTP 固定 `packet-up`。六个新 boot、12 个前后公网
+探针及原 WS 恢复均通过；核对原容器 ID 自然启动、材料/权限和 timer 不变、
+当前 boot 的 guard 样本及八分钟断联恢复期限。未用 up/restart 修复后冒充
+自然恢复，正式/外层恢复与 verify 均为 `0`，guard 未触发，透明始终关闭。
+Linux 离线门禁通过，成功归档
+`.tmp-native-reality-reboot-20261023/native-reality-reboot-evidence.tar.gz` SHA256：
+`1f0f838c999f1cbb3515096ddde0a265779fe61622bfe0f0cd0b88f59728c214`。
+首轮仅 bridge 两点通过，host-gateway 重启前未选中 XHTTP:2444 业务 TLS
+超时；原失败和成功恢复证据原样保留，本轮未复现不代表根因已修复。
+六个测试 unit、七份 CLI 点名备份及远端目录已清理，五份正式 update 备份
+保留；原服务、调度、严格 TLS 和透明关闭再次复核通过。本批未改生产代码，
+不重复 daily/full，不将六点重启通过计作整体计划完成。
 
 ### 当前批次集成与最终验收门槛
 

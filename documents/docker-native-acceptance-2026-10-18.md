@@ -1,13 +1,13 @@
 # Debian 13 原生与公网验收
 
-验收日期：2026-10-18–20（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
+验收日期：2026-10-18–23（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
-**当前现场（2026-10-20）**：3.41.2 已正式发布并验签升级，依赖路径表与 ACME 私密诊断均进入运行 bundle；
-3.41.1 的正式 restart、整机重启、严格 HTTPS 和外部 WS 正反例通过，透明代理保持关闭。
+**当前现场（2026-10-23）**：3.41.4 已正式发布并验签升级；Vision/XHTTP 三拓扑故障恢复、
+公网双模式、同 handler 独立下行及六点实际整机重启已取得限定范围证据。
+原 WS、材料/权限、调度与严格 TLS 均已恢复并复核，本轮临时资源已清理，透明代理保持关闭。
 正式 webroot/ALPN `acme issue` 各取得新证书并完成在线换证；第三次申请提前失败，
-本轮不再签发。3.41.1 缓存 ACME 导出后真实消费失败恢复通过，正式 issue/renew 全链仍缺；
-原业务、材料字节/权限和定时器已恢复；
-本轮临时资源及私密材料清理结果见末节，不把两条签发路径通过计作整体完成。
+当轮停止签发，本批未发新 CA 请求。3.41.1 缓存 ACME 导出后真实消费失败恢复通过，
+正式 issue/renew 全链与其它环境缺口仍保留；不把局部通过计作整体完成。
 
 ## 环境与可信输入
 
@@ -891,3 +891,83 @@ SHA256 为 `54fca8e695aeb00480ef0ca1b1920c4b5d357cb13ce99fba02eb4382751ef267`。
 本批只证明准确模式及上述业务，不证明大上传分段、性能、独立下行或重启。
 正式公网 ACME 消费失败全链、fresh 挑战、透明启用重启矩阵、原生 arm64、
 IPv6、新主机灾备、WARP 实账号及自然续期仍未完成；整体计划仍未完成。
+
+### 2026-10-23 同 handler 独立下行公网点
+
+正式 3.41.4 CLI 在 Docker bridge 拓扑保留原 WS/网站 `443`，创建 XHTTP
+上行 `2444`，通过 `edit --port-alias` 将下行 `2443` 指向同一 Xray 容器内
+`2444` handler，再通过 `edit --xhttp-download-settings` 登记完整 Reality
+对象。服务端 deployment 及实际 PortBindings 均确认两个公开端口归同
+handler；客户端完整核对正式 URI 的字段，只映射固定 TCP 通道的地址和端口。
+
+严格公网 HTTPS 200 正例通过，HTTP/2、Host `pgxn.org` 和上行 `packet-up`
+日志准确；同一客户端 PID 独占的 ESTABLISHED socket 同时观察到映射端口
+`12444/12443`。分别使用新进程测试错 UUID、仅改下行 SID、仅改下行端口
+到原 WS `443`，三项完整业务均拒绝；每项仅一个 outbound、无回退出口，
+客户端仍存活且上行设置未变。原 WS 正反例和网站严格 TLS 同时通过，
+三次探针的双向累计增长且无账号回退。
+
+`runner_exit=0`、`official_restore=0`、`outer_restore=0`、`verify=0`，
+guard `completed=true/triggered=false`，恢复后公网 WS 通过。隔离 Linux
+容器的纯 selfcheck、6 个 Python AST、Bash 语法、ShellCheck error 和最终
+`verify-evidence.py` 门禁通过。脱敏归档
+`.tmp-native-xhttp-down-20261023/native-xhttp-down-evidence.tar.gz` 的 SHA256：
+`70a4a9e954917eded5717c103f621902ae80acdab66c7c4f06ce1ee382d94055`。
+
+远端目录与 baseline/alias/download-edit/restore-official 四条 CLI 日志
+明确点名的四份配置备份已精确清理，五个正式 update 备份保留；再次核对
+原材料/权限、三业务 healthy、两 timer active/enabled、透明关闭和无暂存。
+离场 traffic 主动采集成功、无 failed unit，load1 `0.42`、MemAvailable
+`453964 KiB`、SwapFree `504648 KiB`。本地 URI、二进制及测试容器已清理。
+
+此点只关闭同 handler、同 Reality 身份的独立下行端点子范围；
+公网独立 Reality 身份、TLS/h3/CDN、其它下行拓扑、整机重启及性能未覆盖，
+其余缺口按计划继续保留。
+
+### 2026-10-23 Vision/XHTTP 六点实际重启
+
+正式 3.41.4 bundle、源 `e2a2248953af907bea33c1b881788e0912a38b97`，
+在同一 Debian 13 amd64 VPS 执行 Vision/XHTTP × host-gateway、受管 bridge、
+host-loopback 六点整机重启，XHTTP 固定 `packet-up`，透明全程关闭。
+每点前后均验证双协议账号正反例、严格网站 HTTPS、精确 HTTP/2/Host/mode
+及双向累计；bridge 同时验证原 WS，宿主网站拓扑核对独立正文。
+
+六个新 boot ID 和 12 个前后公网探针均通过。每点核对原容器 ID 不变、
+StartedAt 变化及相同重启策略，等待容器自然健康，不调用 up/restart 修复后
+冒充成功；材料字节/权限与续期、traffic timer 保持。持久 guard、网站和
+worker 自动跨 boot 运行，保护证据绑定当前 boot 的真实样本；八分钟断联
+恢复期限在原材料、调度及恢复后公网 WS 全部通过前保持。
+host-loopback 指 nginx-stream 使用 host 网络，Xray 仍为 bridge，
+选中 `443` 映射至 `127.0.0.1:15443`，未将 Xray 改成 host 网络。
+
+首轮 bridge 两点通过后，Vision/host-gateway 重启前未选中 XHTTP:2444
+业务 TLS 超时，未执行第三次重启。正式/外层恢复与 verify 均为 `0`，
+恢复后公网 WS 通过；根因未确定，不能凭第二轮通过宣称修复。
+首轮原归档保留在 `attempt-1/native-reality-reboot-evidence.tar.gz`，SHA256
+`4676572f8afae5233e565b7127f1791cd156dfe4bf7fcfa1c08993a01170c325`。
+第二轮增加脱敏实际 Compose/PortBindings 和异常服务端私密诊断，
+改按 host→bridge→loopback 优先复测失败点，未放宽超时、资源门槛或增加重试。
+打包前本机旧 payload 冲突在部署前退出，核对路径后精确清旧 payload；
+原控制器错误保留，不计入 VPS 成功证据。
+
+第二轮 `runner_exit=0`、`official_restore=0`、`outer_restore=0`、`verify=0`，
+guard `completed=true/triggered=false`，原 WS 恢复后公网正反例通过。
+独立 Linux 容器 `verify-evidence.py` 核对六 boot、12 探针、原容器、
+材料/调度、跨 boot 保护及真实端口映射通过。成功脱敏归档
+`.tmp-native-reality-reboot-20261023/native-reality-reboot-evidence.tar.gz` SHA256：
+`1f0f838c999f1cbb3515096ddde0a265779fe61622bfe0f0cd0b88f59728c214`。
+
+离场初查出现 traffic 失败，journal 保留配置切换期间 TERM/143；
+随后定时采集及清理前主动采集均成功。六个 owned unit、七份 CLI 日志精确
+点名的 `configure.*` 备份和远端目录已删除，五份正式 update 备份保留。
+清理首次在 unit 已卸载后 reset-failed 返回 not-loaded，尚未删除目录或
+备份；调整为卸载前 reset 并验证六项接续/拒绝自检后完成，不吞掉原错误。
+本机 URI、xray 二进制、payload、重复失败日志及客户端/验证容器已清，
+首轮失败归档与成功归档摘要均未改变。
+
+最终三业务 healthy、两 timer active/enabled、无 failed unit，严格 TLS
+HTTPS 200、透明关闭，load1 `0.00`、MemAvailable `532572 KiB`、
+SwapFree `519612 KiB`；证书仍至 2027-01-15，未发新 CA 请求。
+本批未改生产代码，未重复 daily/full。公网独立下行身份、TLS/h3/CDN、
+正式 ACME 消费失败全链/fresh、透明启用重启、原生 arm64、IPv6、
+新主机灾备、WARP 实账号及自然续期继续未完成；整体计划仍未完成。
