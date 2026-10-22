@@ -848,3 +848,46 @@ traffic timer active/enabled、透明关闭、正式协议和无部署锁；随�
 整机重启、正式公网 ACME 消费失败全链、fresh 挑战、透明启用重启矩阵、
 原生 arm64、IPv6、新主机灾备、WARP 实账号或自然续期写成已完成；整体计划
 仍未完成。
+
+### 2026-10-23 XHTTP 隔离恢复与正式公网双模式
+
+本批补齐原生拓扑收口后明确保留的两个缺口。新增独立 selector
+`docker-reality-stream-xhttp-cli-real`，共用既有 CLI 矩阵并显式选择 XHTTP；
+Vision 入口显式选择 Vision。权限白名单按完整名称匹配，两个准确名称
+及两个近似名称的 4 项 Linux 容器检查通过；新增定向
+`-Scope reality-stream`，不重复完整队列测试。分派合同 `1.951` 秒通过，
+Bash 语法、ShellCheck error 和 PowerShell parser 通过。
+
+隔离 `linux/amd64`、Jobs 2 的当前源码快照完成 24/24 恢复点：
+三拓扑启停三故障点及六次定向互切，12 个真实 unhealthy 退出 `14`、
+12 个 TERM 退出 `143`。每点核对原规格、权限、调度、分享 URI、双协议
+正确/错误账号、严格网站 TLS 和累计；入口耗时 `1019979 ms`，未命中缓存。
+证据为 `.tmp-regression-docker-084cdabf0a7b4eb49bbc318edd077395/`。
+
+正式 Debian 13 amd64 VPS、3.41.4 bundle 源
+`e2a2248953af907bea33c1b881788e0912a38b97`，通过正式 CLI 的
+`compatible/stream` 预设，在 bridge、host-gateway、host-loopback 逐一验证
+`packet-up/stream-up`，共 6 个唯一公网点。客户端仅通过回环固定转发连接
+唯一测试 VPS，校验正确/错误 UUID、严格网站 HTTPS 200、精确 HTTP/2、
+Host `pgxn.org`、准确 mode 和双向累计；两个宿主网站拓扑还核对独立正文。
+原 WS 基线与最终恢复后的公网正反例均通过。
+
+首轮在配置成功后立即断言无锁，遇到已启动的流量调度竞争而失败；
+正式/外层恢复与 verify 全为 `0`，恢复后公网 WS 通过。首轮原始失败归档
+保留在 `attempt-1/`；沿用现有故障矩阵 30 秒等锁门槛重跑后六点通过，
+未放宽 guard。最终 `runner_exit=0`、`official_restore=0`、
+`outer_restore=0`、`verify=0`，guard `completed=true/triggered=false`。
+离场初查的 traffic 失败来自配置切换 TERM（143）；原始日志保留，
+恢复后定时采集及主动启动均成功，不以清除失败状态代替验证。
+
+成功归档 `.tmp-native-xhttp-modes-20261022/native-xhttp-modes-evidence.tar.gz`
+SHA256 为 `54fca8e695aeb00480ef0ca1b1920c4b5d357cb13ce99fba02eb4382751ef267`。
+隔离 Linux 容器运行 `verify-evidence.py`，同时核对 24 个唯一恢复点、
+12×14/12×143、4 项权限检查、首轮真实失败、正式六点及完整恢复通过。
+远端两轮目录和各 CLI 日志明确点名的 12 个 `configure.*` 备份已清理，
+保留五个正式 `update.*` 备份；清理前再次 verify，确认原 WS、三业务健康、
+两 timer active/enabled、无候选/编辑暂存、无部署锁和透明关闭。
+
+本批只证明准确模式及上述业务，不证明大上传分段、性能、独立下行或重启。
+正式公网 ACME 消费失败全链、fresh 挑战、透明启用重启矩阵、原生 arm64、
+IPv6、新主机灾备、WARP 实账号及自然续期仍未完成；整体计划仍未完成。

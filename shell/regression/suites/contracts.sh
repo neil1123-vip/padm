@@ -643,6 +643,14 @@ runRegressionDockerContractsAggregateContract() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-control-log-cron-real
     printf '%s\n' "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py --log-schedule-cron-only" >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+
+    # 两种共存入口共用矩阵，必须精确选择协议，不能误跑默认 Vision。
+    : >"${callLog}"
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-reality-stream-cli-real
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-reality-stream-xhttp-cli-real
+    printf '%s\n' "${PROJECT_ROOT}/docker/tests/reality-stream-cli-real.py --selected vision" \
+        "${PROJECT_ROOT}/docker/tests/reality-stream-cli-real.py --selected xhttp" >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
 )
 
 runRegressionTargetedBatchHelpers() (

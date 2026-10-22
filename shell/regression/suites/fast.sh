@@ -870,7 +870,11 @@ runDockerWebrootRecoveryRealRegression() {
 }
 
 runDockerRealityStreamCliRealRegression() {
-    python3 "${PROJECT_ROOT}/docker/tests/reality-stream-cli-real.py"
+    python3 "${PROJECT_ROOT}/docker/tests/reality-stream-cli-real.py" --selected "${1:-vision}"
+}
+
+runDockerRealityStreamXhttpCliRealRegression() {
+    runDockerRealityStreamCliRealRegression xhttp
 }
 
 listRegressionDockerWebrootRecoveryChildSelectors() {
@@ -1264,6 +1268,7 @@ registerRegressionFunctionLeaf docker-entry-port-alias runDockerEntryPortAliasRe
 registerRegressionFunctionLeaf docker-cdn-entries runDockerCdnEntriesRegression
 registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRegression
 registerRegressionFunctionLeaf docker-reality-stream-cli-real runDockerRealityStreamCliRealRegression
+registerRegressionFunctionLeaf docker-reality-stream-xhttp-cli-real runDockerRealityStreamXhttpCliRealRegression
 registerRegressionFunctionLeaf docker-alpn-real runDockerAlpnRealRegression
 registerRegressionFunctionLeaf docker-xhttp runDockerXhttpRegression
 registerRegressionFunctionLeaf docker-xhttp-validation runDockerXhttpValidationRegression

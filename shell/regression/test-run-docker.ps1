@@ -1,7 +1,7 @@
 #requires -Version 7.3
 [CmdletBinding()]
 param(
-    [ValidateSet('all', 'artifacts')]
+    [ValidateSet('all', 'artifacts', 'reality-stream')]
     [string]$Scope = 'all'
 )
 
@@ -49,7 +49,8 @@ nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-l
                        "docker-wireguard-peers-recovery-real",
                        "docker-wireguard-peers-migration-real",
                        "docker-wireguard-address-real", "docker-webroot-recovery-real", "docker-alpn-recovery-real",
-                       "docker-acme-dns-recovery-real", "docker-reality-stream-cli-real")
+                       "docker-acme-dns-recovery-real", "docker-reality-stream-cli-real",
+                       "docker-reality-stream-xhttp-cli-real")
 memory_workspace = sys.argv[1] in ("docker-contracts", "docker-contracts-full")
 
 def filesystem_type(path):
@@ -161,6 +162,8 @@ $ordinaryCases = if ($Scope -eq 'artifacts') {
     @{ selector = 'docker-webroot-recovery-real-other'; expected = 0 },
     @{ selector = 'docker-reality-stream-cli-real'; expected = 0 },
     @{ selector = 'docker-reality-stream-cli-real-other'; expected = 0 },
+    @{ selector = 'docker-reality-stream-xhttp-cli-real'; expected = 0 },
+    @{ selector = 'docker-reality-stream-xhttp-cli-real-other'; expected = 0 },
     @{ selector = 'docker-control-rebind-real'; expected = 0 },
     @{ selector = 'docker-control-rebind-real-other'; expected = 0 },
     @{ selector = 'docker-control-log-cron-real'; expected = 0 },
@@ -176,6 +179,9 @@ $ordinaryCases = if ($Scope -eq 'artifacts') {
     @{ selector = 'docker-port-hopping-tuic-real'; expected = 0 },
     @{ selector = 'docker-port-hopping-tuic-real-other'; expected = 0 }
 ) }
+if ($Scope -eq 'reality-stream') {
+    $ordinaryCases = @($ordinaryCases | Where-Object { $_.selector -like 'docker-reality-stream-*' })
+}
 foreach ($case in $ordinaryCases) {
     & $runner -Selector $case.selector
     if ($LASTEXITCODE -ne $case.expected) { throw "Wrong exit code for $($case.selector): $LASTEXITCODE" }
@@ -204,6 +210,11 @@ foreach ($case in $ordinaryCases) {
         (Test-Path -LiteralPath (Join-Path $artifacts.FullName 'routing-cores'))) {
         throw 'Successful routing regression retained extracted core binaries.'
     }
+}
+
+if ($Scope -eq 'reality-stream') {
+    Write-Host 'regression-docker-reality-stream-check-ok'
+    exit 0
 }
 
 if ($Scope -eq 'artifacts') {
