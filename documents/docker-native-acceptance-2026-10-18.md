@@ -1,8 +1,8 @@
 # Debian 13 原生与公网验收
 
-验收日期：2026-10-18–23（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
+验收日期：2026-10-18–24（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
-**当前现场（2026-10-23）**：3.41.5 已正式发布并在 VPS 验签升级，ACME stdin 修复已生效；
+**当前现场（2026-10-24）**：3.41.5 已正式发布并在 VPS 验签升级，ACME stdin 修复已生效；
 Vision/XHTTP 三拓扑故障恢复、
 公网双模式、同 handler 独立下行及六点实际整机重启已取得限定范围证据。
 原失败前序的两次 bridge 重启及 host 前测补验通过，未复现不等于根因已修复。
@@ -12,7 +12,8 @@ Vision/XHTTP 三拓扑故障恢复、
 3.41.1 缓存 ACME 导出后真实消费失败恢复证据保留；standalone auto-renew
 消费失败回滚已补验。ALPN issue 消费失败回滚及同张新证书在线往返通过；
 ALPN auto-renew 消费失败回滚已补验。fresh 新账户真实挑战成功，随后以零 CA 请求
-完成同张证书在线往返；两轮申请验收的夹具失败保留，不能计为单次 fresh 完整链通过。
+完成同张证书在线往返。2026-10-24 修正夹具后的单次 fresh 完整链已通过；
+此前两轮失败记录原样保留，不把后续通过覆盖到旧 runner。
 原材料、三业务及调度已恢复，测试暂存和认领备份已清，透明代理保持关闭；
 不把局部通过计作整体完成。
 
@@ -131,8 +132,8 @@ TProxy/TUN 集中矩阵；已取得的限定源码证据及未决边界见末节
 - 公网双栈端口跳跃、旧连接排空和自动恢复：当前 VPS 无公网 IPv6，不能判定通过。
 - 同机 v3 空目标恢复已通过；新原生主机灾备仍缺少同架构全新目标。
 - 正式 webroot/ALPN issue、standalone/ALPN auto-renew 消费失败回滚已分别通过。
-  fresh 真实挑战和零 CA 的同证书在线往返已取得证据，但单次 fresh 完整验收仍缺：
-  两轮申请的夹具失败记录保留，不能用后续接续改写原 runner。
+  2026-10-24 单次 fresh ALPN 真实挑战、消费失败完整回滚及同证书在线往返通过；
+  此前两轮申请的夹具失败记录保留，自然续期仍待验。
   WARP 仍缺真实账号/公网出口。Reality 已通过生产重装生成，受管/桥接同机流量、
   75 秒连接和外部 WS 通过；宿主回环 Vision 正反例、75.001 秒同连接与严格网站
   HTTPS 通过；本批外部 Vision 三次正反例通过，但不替代正式发布及完整恢复验收。
@@ -1187,3 +1188,33 @@ Bash/ShellCheck、离线夹具、supervisor 六分支及后代进程组清理检
 未重复 daily/full。单次 fresh 完整链、透明启用重启、原生 arm64、IPv6、
 新主机灾备、WARP 实账号、独立 Reality/TLS/h3 和自然续期仍待验，
 原 XHTTP 超时未定根因，整体计划继续未完成。
+
+### 2026-10-24 单次 fresh ALPN 完整链
+
+在正式 3.41.5 上以隔离后的空账户执行一次 `acme issue --alpn`，没有操作者重试。
+修正后的夹具保留原账户 `10001:10001/0600` 属主及权限，真实日志按序出现
+新建账户、注册、`Verifying`、TLS server、`Success` 和签发成功。
+新 Let's Encrypt 候选通过系统信任链及域名校验；仅在新 TLS/ACME 及 marker
+提交后注入旧 key pin，真实 Nginx mismatch、CLI `15` 后完整回滚，
+TLS/全部 ACME 字节、mode、uid、gid 和链接数严格相等。
+
+同一 runner 随后经正式 `tls install` 上线同张候选，独立公网验证新指纹，
+再正式恢复旧证书和原账户。新在线及恢复阶段分别绑定本轮 nonce、
+时间、boot ID、响应与证书摘要；WS 正向严格 TLS/200、错误 UUID 拒绝、
+网站严格 TLS/200 均通过。runner、正式恢复、outer restore、verify 全为 `0`，
+guard 完成未触发；46 个样本最低 MemAvailable `385580 KiB`、
+SwapFree `507432 KiB`，最高 load1 `3.55`。
+
+fresh 归档门禁现在必须包含在线往返文件、在线/完成阶段及新证书公网 receipt；
+使用已有归档的合成副本验证一个正例、缺往返文件/阶段/receipt 三个拒绝反例，
+CA 请求为 `0`。Bash/ShellCheck、离线夹具、supervisor 六分支、进程组和 guard
+自检均通过，未重复 daily/full。
+
+证据在 `.tmp-native-acme-fullchain-20261023/alpn-issue-3415-fresh-20261024/`，
+公开归档 `native-acme-fullchain-evidence.tar.gz` SHA256：
+`09fd285cbdeb557ba7bddaec10fd7d538d6b2ecad4c91bcd152a9894c86a0339`。
+远端目录及 `tls.0L0xQ0`、`tls.6atT5Z`、`tls.5QNFQJ` 已按归属清理，
+六份正式 update 回滚点保留；本机私密输入、二进制和探针容器已清，
+源码与公私分离归档保留。三业务及调度恢复、主动 traffic 成功，透明始终关闭。
+本节关闭单次 fresh ALPN 完整链子项，不代表自然续期、其它 CA/provider
+或其余原生环境矩阵通过，整体计划继续未完成。
