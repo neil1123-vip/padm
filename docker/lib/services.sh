@@ -9441,12 +9441,13 @@ dockerAcmeFailure() {
 dockerAcmeRun() {
     local image=$1 credentials=$2 acmeData=$3 output=$4
     local status diagnostic input=/dev/null
-    local -a ports=() containerArgs=() webrootMount=()
+    local -a ports=() containerArgs=() webrootMount=() stdinArgs=()
     shift 4
     DOCKER_ACME_DIAGNOSTIC=
     if [[ -n "${credentials}" ]]; then
         dockerRenewalCredentialsValidate "${credentials}" || return 1
         input=${credentials}
+        stdinArgs=(-i)
     fi
     case "${DOCKER_ACME_PORT_PUBLISH}" in
     0) ;;
@@ -9462,7 +9463,8 @@ dockerAcmeRun() {
         containerArgs=(--name "${DOCKER_ACME_CONTAINER}" --label "io.padm.challenge=${DOCKER_ACME_CONTAINER}")
     fi
     diagnostic=$(dockerAcmeDiagnosticPrepare) || return 1
-    if docker run --rm -i --read-only --cap-drop ALL "${ports[@]}" "${containerArgs[@]}" \
+    # 无凭据时关闭容器 stdin，避免暂停业务后仍等待 Docker 的交互管道 EOF。
+    if docker run --rm "${stdinArgs[@]}" --read-only --cap-drop ALL "${ports[@]}" "${containerArgs[@]}" \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --volume "${acmeData}:/var/lib/padm/acme" \

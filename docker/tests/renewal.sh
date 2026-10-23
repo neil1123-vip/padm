@@ -838,6 +838,7 @@ newState stdin-credentials
         "${PADM_DOCKER_INSTALL_DIR}/secrets/tls" --renew -d a.example.com
 )
 grep -qF "${SECRET}" "${TEST_ROOT}/docker.stdin" || fail '续期没有将凭据放进 stdin'
+grep -Eq -- '(^| )-i( |$)' "${TEST_ROOT}/docker.args" || fail 'DNS 凭据没有启用 Docker stdin'
 if grep -qF "${SECRET}" "${TEST_ROOT}/docker.args" "${TEST_ROOT}/docker.env" ||
     grep -Eq -- '(^| )--env-file( |$)|(^| )--env( |$)' "${TEST_ROOT}/docker.args"; then
     fail '续期凭据暴露到 Docker 参数或环境元数据'

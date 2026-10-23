@@ -9,7 +9,8 @@
 正式 webroot/ALPN `acme issue` 各取得新证书并完成在线换证；第三次申请提前失败，
 当轮停止签发。2026-10-23 正式 3.41.4 webroot issue 新证书消费失败全链通过；
 3.41.1 缓存 ACME 导出后真实消费失败恢复证据保留；standalone auto-renew
-消费失败回滚已补验。ALPN 消费失败链、fresh 挑战与其它环境缺口仍保留；
+消费失败回滚已补验。ALPN issue 消费失败回滚及同张新证书在线往返通过；
+ALPN auto-renew 卡在容器 stdin，源码修复待可信发布后补验；fresh 挑战与其它环境缺口仍保留；
 不把局部通过计作整体完成。
 
 ## 环境与可信输入
@@ -1048,9 +1049,9 @@ SHA256：`a874327b70a1ad9c3320843bd9fe2781c0b593492abd5863ffafd2e24c9cc533`。
 无 failed unit；严格 HTTPS `200/verify=0`、透明关闭，load1 `0.04`、
 MemAvailable `496984 KiB`、SwapFree `510944 KiB`。旧证书仍至
 2027-01-15，新签发证书只进入失败候选，未成为在线证书。
-本批关闭的为正式 webroot issue 与 standalone auto-renew 消费失败全链；
-不证明 fresh 授权挑战、ALPN 消费失败链、新证书在线生效再回退或自然续期。
-未改生产代码，未重复 daily/full；其它环境缺口及整体计划继续未完成。
+当时关闭的为正式 webroot issue 与 standalone auto-renew 消费失败全链。
+后续发现 standalone 的公网文件沿用前案、远端清理未完成；已补齐本案独立
+证明并精确清理，修正结果及 ALPN 接续如下；整体计划继续未完成。
 
 ### 2026-10-23 正式 standalone auto-renew 消费失败全链
 
@@ -1070,12 +1071,56 @@ MemAvailable `496984 KiB`、SwapFree `510944 KiB`。旧证书仍至
 | 外层保护 | runner、outer restore、verify 均 `0`；resource guard `completed=true/triggered=false` |
 | 透明代理 | 始终关闭 |
 
-公开归档 `.tmp-native-acme-fullchain-20261023/native-acme-fullchain-evidence.tar.gz`
-SHA256：`6ede108e71bc7d2a3e84ea895b372d884d256db4938214233b340bbb1aa1c390`；
+最终公开归档 `.tmp-native-acme-fullchain-20261023/standalone-renew/native-acme-fullchain-evidence.tar.gz`
+SHA256：`61237019a4e86a22ab4f8425e5d23e87335cdf35ec539755c29c70ff14af92c0`；
 独立 Linux 门禁以 `action=auto-renew/provider=standalone` 复核通过。
+原始归档 `6ede108e…` 保留为 `original-run-evidence.tar.gz`。新公网结果携带
+本案 nonce、开始/结束时间、响应与证书 SHA256，旧 nonce 拒绝检查通过；
+两份认领备份 `tls.9oksEJ`、`tls.gakNJ8` 与远端目录已补清，私密日志已取回。
 本轮资源样本 23 个，最低 MemAvailable `449944 KiB`、SwapFree `510688 KiB`，
 最高 load1 `3.39`。远端工作目录与认领备份已精确清理，五份正式 update
 备份保留；透明代理保持关闭。
 
 本节只关闭正式 standalone auto-renew 消费失败回滚子项，不外推 ALPN、
 fresh 公网挑战、新证书在线生效再回退、自然续期或其它环境；整体计划继续未完成。
+
+### 2026-10-23 正式 ALPN issue 与同张证书在线往返
+
+正式 3.41.4 的 `acme issue --alpn` 单次取得新受信任证书，提交后注入
+旧 key pin，真实 Nginx `key values mismatch`，CLI `15` 自动回滚。
+随后单独正式 `tls install` 将同张候选上线，独立公网确认新指纹
+`f72de8fd45226c9df87e79381f5eaab998e134e44ee32cf108ee603a2ddb668c`，
+再恢复原指纹 `e30e977c8a39eaf92f3289a4b315dd6360b16a34529829900fd6a5b8dce191d8`。
+在线及恢复探针分别绑定新 nonce、时间和内容摘要，未增加 CA 请求。
+
+正式/外层恢复、原材料与权限、业务、累计、timer 均通过，guard 未触发。
+40 个样本最低 MemAvailable `423176 KiB`、SwapFree `510688 KiB`，
+最高 load1 `2.73`。`alpn-issue/native-acme-fullchain-evidence.tar.gz` SHA256：
+`7733b37535d97b20a227f364493a3dbf7b2f046cda618cdf3be4560f16a87c69`。
+独立 Linux 门禁及只读复核通过；目录和三份认领备份已清理。该结果不证明
+fresh CA challenge 或自然续期。
+
+### 2026-10-23 ALPN auto-renew 失败、恢复及源码修复
+
+快照后仅在测试账户将 `Le_Webroot='no'` 精确改为 `'alpn'`，正式启用
+ALPN 登记后强制到期。Nginx 已暂停，但 Python 入口卡在 `sys.stdin.read()`，
+尚未 exec acme.sh；Docker CLI stdin 为 `/dev/null`，容器 stdin 为管道，
+等待点 `pipe_read`，`OpenStdin/StdinOnce=true`。底层 EOF 原因尚未确认。
+
+停止测试 unit 时监督器恢复子进程也收到 TERM；原 runner
+`runner_exit=-1/outer_restore=-15/verify=-1` 保留。独立 SSH 另行执行既有
+outer restore/verify，核对材料与权限、三业务、timer 和透明关闭，再以新
+nonce 完成公网 WS 正反例及严格 TLS 网站 `200`。独立恢复门禁明确输出
+`acceptance_passed=false/recovery_verified=true`。328 个样本最低
+MemAvailable `414008 KiB`、SwapFree `510688 KiB`、最高 load1 `2.54`。
+`alpn-auto-renew/native-acme-fullchain-evidence.tar.gz` SHA256：
+`d4dafa6bbf2b8d5b07b353e90bbe8da1fc14f4e8bbc63b563354cde10ab3211b`。
+私密日志分离保留；本轮目录及 `tls.f7jZ6L` 已清，五份正式 update 备份保留。
+
+`dockerAcmeRun` 改为仅 DNS 凭据非空时传 `-i`，无凭据关闭容器 stdin；
+凭据仍经 stdin，不进入 Docker 参数或环境。修复前新断言失败，修复后
+`docker-tls-focused -Jobs 2` 的 TLS 与 renewal 均通过，总耗时 `39.436` 秒，
+证据 `.tmp-regression-docker-8c94b91549b242f092ccbff583e9d43a/`。
+同 VPS 断网容器的空输入/合成凭据检查均进入 acme.sh，未申请证书或暂停业务；
+它不替代修复进入可信发布包后的正式 ALPN auto-renew 补验。
+未重复 daily/full；透明继续关闭，其余环境缺口及整体计划保持未完成。

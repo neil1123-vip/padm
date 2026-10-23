@@ -28,7 +28,7 @@
 | 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入；3D.3c 受管共存的原生同机 Vision/WS 正反例和 Vision 75 秒连接通过，外部 WS 及后续限定外部 Vision 正反例通过；3D.3d1 桥接与 3D.3d2 宿主回环网站的同机 Vision 正反例、75 秒连接和严格 HTTPS 通过；2026-10-22 原生 Vision host/loopback 14 点、XHTTP bridge/host-gateway/host-loopback 20 点故障恢复与互切通过；3D.25 增加 SS 逐入口服务器密钥轮换，XHTTP 长 JSON 菜单输入已修复 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 4A.1–4A.9、4B.1–4B.2 已交付；4C.1–4C.6 私网 API、主控/被控、手动/自动同步及 API 端口维护已验；4C.7–4C.11 单 Peer 建链、维护、重绑定与迁移通过定向及真实双端验收；4C.12 无角色多 Peer、4C.13 多被控逐节点管理和 4C.14 无角色多 Peer 本机迁移通过隔离 amd64 验收；v2 主控新身份灾备接续 6A.23，原生环境仍待验 | 稳定分享身份与双核心认证/统计、本机用户业务、手动/自动同步、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 5A.1–5A.3c、5B.1–5B.4b 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设、IPv6 bridge 与用户态 WARP 本地 Peer 验收已通过；5B.5a HTTP 中继和 5B.5c–5B.5d 额外端口/默认分享已通过适用本地真实验收；5C 已交付受管网络归属及 WS/控制面 Fail2ban，8c.3 专用 SSH collector/jail、菜单启停/解封与隔离 amd64 实际封禁/DROP/来源失效清理已验；本轮 Geo、临时 `2443` alias 及 HTTP relay 原生外部 IPv4 通过；TUN 当前源码的 TCP/TLS、UDP DNS、启停及净停后重启/显式启动通过，TProxy TCP/TLS 同矩阵通过，指定 UID UDP 缺权已修且原生单一增权对照及隔离矩阵通过，升级保护补验通过；正式 CLI/原生 arm64/双栈跳跃仍待验，SOCKS UDP 继续拒绝 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
-| 6. 发布与完整验收 | 6A.1–6A.23 部分交付私密导出、校验、同架构 v3 空目标恢复与持久中断接管；受限 Reality/Geo/HTTP-01/停用跳跃规格、无角色多 Peer/单 Peer 被控及隔离旧主控后的 v1/v2 新身份恢复见各阶段；单域 EC-P256 的 standalone、受管 webroot、ALPN 与 dns_acmedns 材料/启用续期恢复通过合同和本地 CA 实际续期；原生卸载、purge 和同机空目标灾备通过；3.41 正式两种签发换证及关闭透明的重启通过，3.41.1 路径表发布升级和缓存 ACME 导出后真实消费失败恢复通过；3.41.4 正式 webroot issue 与 standalone auto-renew 消费失败回滚通过，ALPN、新主机灾备、原生双架构、自然续期、WARP/Reality 完整验收仍待完成 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
+| 6. 发布与完整验收 | 6A.1–6A.23 部分交付私密导出、校验、同架构 v3 空目标恢复与持久中断接管；受限 Reality/Geo/HTTP-01/停用跳跃规格、无角色多 Peer/单 Peer 被控及隔离旧主控后的 v1/v2 新身份恢复见各阶段；单域 EC-P256 的 standalone、受管 webroot、ALPN 与 dns_acmedns 材料/启用续期恢复通过合同和本地 CA 实际续期；原生卸载、purge 和同机空目标灾备通过；3.41 正式两种签发换证及关闭透明的重启通过，3.41.1 路径表发布升级和缓存 ACME 导出后真实消费失败恢复通过；3.41.4 正式 webroot/ALPN issue 与 standalone auto-renew 消费失败回滚、ALPN 同张新证书在线往返通过；ALPN auto-renew、fresh 挑战、新主机灾备、原生双架构、自然续期、WARP/Reality 完整验收仍待完成 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 ### 剩余收口清单
 
@@ -69,7 +69,7 @@
 | 完整卸载与 purge | 本机原生范围通过 | 保留数据卸载、purge、整机重启后空目标无残留及同机灾备恢复通过；恢复后三项业务健康、外部 WS 正反例及 TLS/账号核对通过，不替代新主机灾备 |
 | 公网双栈端口跳跃 | 未完成 | 公网 IPv6、旧连接排空、自动恢复及宿主规则证据 |
 | 新主机灾备恢复 | 同机空目标通过，新主机未完成 | 同架构全新主机、v3 空目标、业务恢复和失败保护；同机 purge 后恢复不能替代 |
-| webroot/ALPN 公网 CA 组合 | 3.41 正式签发安装及 3.41.1 缓存消费失败恢复通过；本地 CA 四链通过；3.41.4 正式 webroot issue 与 standalone auto-renew 消费失败回滚通过 | issue/auto-renew 均取得受信任的新 Let's Encrypt 候选，真实 Nginx 拒绝旧 key，CLI 15 自动回滚；完整材料/权限、旧在线证书、业务、累计及外层恢复通过。仍缺正式 ALPN 消费失败链、fresh 公网挑战及新证书在线生效再回退；不把缓存授权签发或本地 CA 夹具等同于这些范围。此前无原始日志的第三次申请仍不定性 |
+| webroot/ALPN 公网 CA 组合 | 3.41.4 正式 webroot/ALPN issue、standalone auto-renew 消费失败回滚及 ALPN 同张新证书在线往返通过；ALPN auto-renew 失败待修复发布后补验 | ALPN auto-renew 在 Python 入口等待 stdin，尚未 exec acme.sh；独立恢复及公网复验通过，失败保留。源码已让无凭据任务关闭 stdin，DNS 凭据仍经 stdin。正式发布后补验；fresh 公网挑战和自然续期仍缺，不把缓存授权或本地 CA 夹具等同于这些范围。此前无原始日志的第三次申请仍不定性 |
 | WARP 真实账号与公网出口 | 未完成 | 真实账号、双栈出口和故障恢复证据 |
 | Reality 共存专项 | 原生 Vision 14 点、XHTTP 20 点恢复与互切、隔离 CLI XHTTP 24 点及正式公网双模式三拓扑 6 点通过；同 handler 下行 1 正例/3 拒绝、双协议三拓扑实际重启 6 点通过；原失败前序两次重启及 host 前测补验通过，完整环境验收仍未完成 | 固定唯一 VPS 的无嗅探通道验证公网账号正反例、严格网站、HTTP/2、Host/mode、双向记账及原材料/权限/timer 恢复。六点重启核对原容器自然启动与跨 boot 保护；原前序补验未复现未选中 XHTTP 超时，根因仍未确定，失败证据保留。下行限同 Reality 身份、同 handler；仍缺公网独立身份、TLS/h3 等环境矩阵，不证明大上传分段或性能 |
 | HTTP relay 原生路径 | 原生外部 IPv4 通过 | 独立外部客户端访问三个公网 HTTPS 目标均严格 TLS/200，错误认证 407、未允许来源 blocked；不外推公网 IPv6 或 SOCKS UDP 支持 |
@@ -170,10 +170,10 @@ SHA256：`a874327b70a1ad9c3320843bd9fe2781c0b593492abd5863ffafd2e24c9cc533`。
 断网脚本自检与独立归档门禁通过；首轮前置门禁拒绝及资源 guard 触发保留，
 未算成功或内存耗尽。本机探针包装参数冲突已统一修正，两次启动失败另留证。
 
-本批关闭正式 webroot issue 与 standalone auto-renew 消费失败子项，不外推
-ALPN、fresh 挑战、新证书在线生效再回退或自然续期。远端认领备份与目录、
-本地 URI/二进制/payload/容器已清，五份正式 update 备份保留；透明始终关闭，
-支持范围不变，整体计划继续未完成。未改生产代码，未重复 daily/full。
+当时关闭正式 webroot issue 与 standalone auto-renew 消费失败子项。
+后续核对发现 standalone 清理未完成且公网文件沿用前案；已补新 nonce 公网
+证明并清理两份认领备份及远端目录，最终归档与 ALPN 接续结果见下文。
+五份正式 update 备份保留；透明始终关闭，支持范围及整体未完成状态保持。
 
 ### 2026-10-23 正式 standalone auto-renew 消费失败回滚
 
@@ -185,13 +185,34 @@ renew probe、签发和候选提交；未通过 `PADM_*`/`ACME_*` 环境变量�
 
 TLS/完整 ACME 树的字节、权限、属主、链接数与失败前一致，旧在线证书、
 三业务健康、账户累计、timer 状态和透明关闭均保持；runner、outer restore、
-verify 均为 `0`，resource guard 未触发。公开归档 SHA256：
-`6ede108e71bc7d2a3e84ea895b372d884d256db4938214233b340bbb1aa1c390`，
-独立 Linux 门禁按 `auto-renew/standalone` 复核通过。
+verify 均为 `0`，resource guard 未触发。补齐本案独立公网 nonce、时间和
+摘要后，最终归档位于 `.tmp-native-acme-fullchain-20261023/standalone-renew/`，
+SHA256：`61237019a4e86a22ab4f8425e5d23e87335cdf35ec539755c29c70ff14af92c0`；
+独立 Linux 门禁按 `auto-renew/standalone` 复核通过，原始归档另行保留。
 
 本阶段只完成 standalone auto-renew 消费失败回滚，不代表 ALPN、fresh 公网
 挑战、自然续期、新证书在线生效再回退、arm64、IPv6、新主机灾备或透明启用
 重启矩阵完成；总目标保持 active，透明代理继续关闭。
+
+### 2026-10-23 ALPN 在线往返与续期 stdin 修复
+
+正式 3.41.4 ALPN issue 单次取得受信任新证书，提交后真实 Nginx key
+失配触发 CLI `15` 回滚；随后单独调用正式 `tls install`，将同张新证书
+上线，经独立公网确认新指纹后恢复旧证书，未追加 CA 请求。40 个资源样本、
+正式/外层恢复、业务、累计与 timer 均通过。`alpn-issue/` 归档 SHA256：
+`7733b37535d97b20a227f364493a3dbf7b2f046cda618cdf3be4560f16a87c69`。
+
+ALPN auto-renew 仅在快照后的测试账户将 `Le_Webroot=no` 改为 `alpn`，
+启用正式登记并强制到期。该轮失败：Nginx 已暂停，容器 Python 卡在
+`sys.stdin.read()`，尚未 exec acme.sh；底层 EOF 原因未确认。原 runner
+`-1/-15/-1` 保留，独立恢复与新 nonce 公网复验通过。失败归档 SHA256：
+`d4dafa6bbf2b8d5b07b353e90bbe8da1fc14f4e8bbc63b563354cde10ab3211b`。
+本轮目录与唯一认领备份已清，不计作续期验收通过。
+
+共享 `dockerAcmeRun` 仅在有 DNS 凭据时使用 `-i`，无凭据关闭 stdin。
+修复前新增断言失败，修复后 TLS/renewal 定向回归通过，耗时 `39.436` 秒；
+VPS 断网容器的空输入和合成凭据检查通过，不替代新可信包的正式补验。
+未重复 daily/full；透明继续关闭，fresh 挑战及其余环境缺口仍保留。
 
 ### 当前批次集成与最终验收门槛
 

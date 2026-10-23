@@ -1328,6 +1328,8 @@ RAW_ACME_RUN=1
 : >"${TEST_ROOT}/acme-docker.args"
 dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" --renew -d "${DOMAIN}"
 ! grep -Fq -- '--publish' "${TEST_ROOT}/acme-docker.args" || fail '未准备挑战时运行器发布了宿主端口'
+! grep -Eq -- '(^| )-i( |$)' "${TEST_ROOT}/acme-docker.args" ||
+    fail '无凭据的 ACME 运行器仍打开交互 stdin，可能等待 Docker EOF'
 : >"${TEST_ROOT}/acme-docker.args"
 DOCKER_ACME_PORT_PUBLISH=1
 dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" \
