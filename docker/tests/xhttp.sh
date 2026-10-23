@@ -52,8 +52,8 @@ cmp <(jq -cS . "${TEST_ROOT}/generator-default.json") \
 for guardCase in whitespace null array multiple spec-syntax trailing-syntax schema-syntax matrix-syntax parse-first; do
     (
         guardSpec="${TEST_ROOT}/guard-${guardCase}.json"
-        guardSchema=$(dockerConfigureSchemaFile)
-        guardMatrix=$(dockerFeatureMatrixFile)
+        guardSchema="${DOCKER_BUNDLE_SOURCE_ROOT}/docker/contracts/configure.schema.json"
+        guardMatrix="${DOCKER_BUNDLE_SOURCE_ROOT}/docker/contracts/features.json"
         expected='配置规格必须是单个 JSON 对象'
         cp -- "${XHTTP_SPEC}" "${guardSpec}"
         case "${guardCase}" in
