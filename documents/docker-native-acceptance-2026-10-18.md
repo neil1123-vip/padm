@@ -1218,3 +1218,34 @@ CA 请求为 `0`。Bash/ShellCheck、离线夹具、supervisor 六分支、进�
 源码与公私分离归档保留。三业务及调度恢复、主动 traffic 成功，透明始终关闭。
 本节关闭单次 fresh ALPN 完整链子项，不代表自然续期、其它 CA/provider
 或其余原生环境矩阵通过，整体计划继续未完成。
+
+### 2026-10-24 同 handler 独立下行完整公网接续矩阵
+
+在正式 `3.41.5`、同一 Debian 13 amd64 VPS 上接续前一轮独立下行验收。
+首轮已通过的 Reality 四模式与 h2 `auto` 保留为 `5/12` 前缀证据；在
+h2 `stream-one/packet-up/stream-up` 及 h3 `auto/stream-one/packet-up/stream-up`
+七个剩余点上重新使用正式 CLI 和同一 XHTTP handler。接续轮复用首轮已验签
+资产、基线和上行后端配置摘要，前置下行 Reality 身份重新生成且与上行身份
+严格不同；透明代理始终关闭。
+
+接续矩阵七点均通过，原 WS 基线和恢复后 WS 正反例、严格 TLS、网站 `200`、
+双向 traffic 增长均通过；`runner_exit=0`、正式恢复 `0`、`outer_restore=0`、
+`verify=0`。`resource-guard` `completed=true/triggered=false`，接续公开归档
+`native-evidence.tar.gz` SHA256：
+`be415a9939847a67e668418fc8a18f70a5c35c3a299529431c13f7d337ec902a`；
+私密归档 SHA256：
+`7db58df094b3cfcbb5fce43c6f69255632a2bcc93b49b811199506576492baf9`。
+接续样本最低 MemAvailable `355808 KiB`、最低 SwapFree `489368 KiB`，
+最高 load1 `5.36`；guard 未触发恢复。
+
+双轮独立验证器核对首轮 `5` 点/`5` 个正业务与接续 `7` 点/`7` 个正业务，
+合计 `12` 点、`12` 个正业务、`11` 个身份拒绝和 `4` 个控制项，
+`coverage_complete=true`。首轮 `first_round_guard_triggered=true`、
+接续 `guard_triggered=false`，因此 `single_run_passed=false`、
+`all_rounds_clean=false`；这表示完整覆盖已经取得，不把两轮结果改写成
+单次无故障成功。
+
+本节只关闭同 handler、同正式后端的独立下行 h2/h3 模式覆盖；`formal_service_native_h3=false`，
+不代表正式服务端原生 h3/CDN、独立 Reality/TLS 公网身份、整机重启、透明启用、
+原生 arm64、IPv6、新主机灾备、WARP 实账号、自然续期或原 XHTTP 超时根因已解决。
+远端目录和本机测试容器已清，公私归档分离保留，透明代理继续关闭，整体计划仍未完成。

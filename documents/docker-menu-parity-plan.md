@@ -9658,6 +9658,29 @@ ACME 材料共 `7` 项与原备份逐字节一致，续期 timer active/enabled�
 仍缺条件；正式 ACME CLI 全链、当前透明重启矩阵仍待验。
 支持范围保持原合同，整体目标未完成。
 
+#### 5C.2f.7 3.41.5 同 handler 独立下行接续收口
+
+2026-10-24 在同一 Debian 13 amd64 VPS、正式 `3.41.5` 上完成前一轮失败
+前缀后的接续矩阵。首轮独立下行公网矩阵实际通过 `5/12` 点后由资源 guard
+中止并恢复；本节不覆盖或改写该失败。接续轮复用已验签资产、上行后端配置
+和基线，重新生成与上行严格不同的前置下行 Reality 身份，执行剩余 h2
+`stream-one/packet-up/stream-up` 与 h3 `auto/stream-one/packet-up/stream-up`
+共 `7` 点。
+
+七点均通过，原 WS 基线/恢复后正反例、严格 TLS、网站 `200` 和双向 traffic
+增长通过；正式恢复、outer restore、verify 全为 `0`。guard
+`completed=true/triggered=false`。接续公开/私密归档 SHA256 分别为
+`be415a9939847a67e668418fc8a18f70a5c35c3a299529431c13f7d337ec902a` 和
+`7db58df094b3cfcbb5fce43c6f69255632a2bcc93b49b811199506576492baf9`。
+双轮离线验证确认 `coverage_complete=true`、`12` 点/`12` 个正业务、
+`11` 个身份拒绝和 `4` 个控制项；首轮 guard 触发、接续轮未触发，
+所以 `single_run_passed=false`、`all_rounds_clean=false`。
+
+该阶段只把同 handler 正式后端的独立下行 h2/h3 模式标记为“覆盖完成”，
+不升级正式服务端原生 h3/CDN、独立 Reality/TLS 公网身份、整机重启、透明
+启用、原生 arm64、IPv6、新主机灾备、WARP、自然续期或原 XHTTP 超时根因。
+透明代理继续关闭，整体 5C 与总计划保持 active。
+
 - 每阶段同步中英文使用说明、支持矩阵、权限边界及失败恢复操作。
   旧部署迁移明确要求完整 spec 或安全导入，不允许一条重配命令替代迁移。
 - PR 按实际改动运行合同、Compose、菜单 PTY 和定向回归；
