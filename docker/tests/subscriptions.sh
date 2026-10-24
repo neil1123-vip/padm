@@ -210,9 +210,44 @@ rm -- "${STATE_FILE}"
 
 reject dockerSubscriptionCommand list --json extra
 reject dockerSubscriptionCommand create --accounts "${ALICE},${ALICE}"
+reject dockerSubscriptionCommand create --listeners entry-ws,entry-ws
 reject dockerSubscriptionCommand create --listeners entry-missing
 reject dockerSubscriptionCommand create --accounts "${ALICE}" --listeners entry-ws
 reject dockerSubscriptionCommand edit share-not-valid --name invalid
+
+# 输入顺序不影响分享集合；显式参数和默认账号都须满足状态文件的有序约束。
+(
+    sourceSpec="${SPEC}"
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/unordered-input"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    mkdir -p -- "$(dirname -- "${SPEC}")" "${PADM_DOCKER_INSTALL_DIR}/data/subscription"
+    jq '.accounts |= reverse' "${sourceSpec}" >"${SPEC}"
+    chmod 0600 "${SPEC}"
+    for orderCase in explicit defaults; do
+        args=(create --name "${orderCase}")
+        if [[ "${orderCase}" == explicit ]]; then
+            args+=(--accounts "${BOB},${ALICE}" --listeners entry-ws,entry-reality)
+        fi
+        orderGroup=$(dockerSubscriptionCommand "${args[@]}") ||
+            fail "${orderCase}: 未排序输入创建失败"
+        orderState=$(jq -ce --arg id "${orderGroup}" --arg alice "${ALICE}" --arg bob "${BOB}" '
+          .groups[] | select(.id == $id) |
+          select(.account_ids == [$alice, $bob] and
+            .listener_ids == ["entry-reality", "entry-ws"])
+        ' "${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json") ||
+            fail "${orderCase}: 分享集合未规范化"
+        dockerSubscriptionCommand edit "${orderGroup}" --accounts "${ALICE}" \
+            --listeners entry-reality || fail '分享组缩减失败'
+        dockerSubscriptionCommand edit "${orderGroup}" --accounts "${BOB},${ALICE}" \
+            --listeners entry-ws,entry-reality || fail '未排序输入编辑失败'
+        [[ "$(jq -c --arg id "${orderGroup}" '.groups[] | select(.id == $id)' \
+            "${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json")" == "${orderState}" ]] ||
+            fail "${orderCase}: 未排序编辑未恢复原分享集合或改变组身份"
+        dockerSubscriptionCommand content "${orderGroup}" >"${TEST_ROOT}/unordered-content.txt"
+        [[ "$(wc -l <"${TEST_ROOT}/unordered-content.txt")" == 2 ]] ||
+            fail "${orderCase}: 分享内容遗漏账号或入口"
+    done
+)
 
 GROUP=$(dockerSubscriptionCommand create --name Team --accounts "${ALICE}" --listeners entry-reality)
 GROUP_TOKEN=$(jq -er --arg id "${GROUP}" '.groups[] | select(.id == $id) | .token' \

@@ -159,14 +159,14 @@ dockerSubscriptionCommaIds() {
           ($raw | split(",")) as $items |
           if ($items | length) >= 1 and ($items | unique | length) == ($items | length) and
              all($items[]; test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"))
-          then $items else error("invalid accounts") end
+          then ($items | sort) else error("invalid accounts") end
         ' ;;
     listeners)
         jq -cn --arg raw "${raw}" '
           ($raw | split(",")) as $items |
           if ($items | length) >= 1 and ($items | unique | length) == ($items | length) and
              all($items[]; test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$"))
-          then $items else error("invalid listeners") end
+          then ($items | sort) else error("invalid listeners") end
         ' ;;
     *) return 1 ;;
     esac
@@ -175,7 +175,7 @@ dockerSubscriptionCommaIds() {
 dockerSubscriptionDefaultIds() {
     local specFile=$1 kind=$2
     case "${kind}" in
-    accounts) jq -c '[.accounts[]? | select(.enabled) | .id]' "${specFile}" ;;
+    accounts) jq -c '[.accounts[]? | select(.enabled) | .id] | sort' "${specFile}" ;;
     listeners) jq -c '[.core.protocols[].listener_id] | unique' "${specFile}" ;;
     *) return 1 ;;
     esac
