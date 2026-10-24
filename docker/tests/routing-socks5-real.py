@@ -1,5 +1,6 @@
 import contextlib
 import copy
+import http.client
 import json
 import os
 from pathlib import Path
@@ -118,10 +119,10 @@ def connect(host, address, destination, http_host="fixture", destination_host=No
         exact(conn, {1: 4, 4: 16}[header[3]] + 2)
         conn.sendall(b"GET /routing-check HTTP/1.1\r\nHost: " + http_host.encode("ascii") +
                      b"\r\nConnection: close\r\n\r\n")
-        result = b""
-        while part := conn.recv(4096):
-            result += part
-        return result.endswith(b"routing-destination-ok")
+        # 代理可能延迟关闭 TCP；完整 HTTP 正文已足够证明业务，不等待额外 EOF。
+        with http.client.HTTPResponse(conn) as response:
+            response.begin()
+            return response.status == 200 and response.read() == b"routing-destination-ok"
 
 
 def udp(host, address, destination, destination_host=None):

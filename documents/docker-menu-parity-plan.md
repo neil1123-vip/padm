@@ -8954,6 +8954,19 @@ ops 内 Python/OpenSSL ML-KEM-768 校验从 stdin 接收 seed 与 public 并验�
 Bash/ShellCheck error、PowerShell AST 和 diff 检查通过；已解决失败的源码包、
 清单及核心/客户端副本与旧可行性脚本已清理，保留脱敏日志和结果。
 
+2026-10-24 补验发现共享 SOCKS5 客户端已收到完整 HTTP 响应，却仍等待 TCP EOF，
+会将代理延迟关闭误报为握手失败。改用标准库 `HTTPResponse` 按响应长度完成读取，
+同时要求状态 `200` 与精确正文；新增不返回 EOF、`503`、错误正文的确定性检查。
+Encryption 客户端保留 URI 的 XHTTP `extra`，失败日志先脱敏再截尾。
+最终 `docker-vless-encryption-real -Jobs 2` 通过 16 个正例、8 个负例，
+内部 `14.686` 秒，入口 `15.923` 秒，证据
+`.tmp-regression-docker-bce938063b8a4e8ca07b8773ca9cee98/`；
+直接调用方 `docker-routing-socks5-real -Jobs 2` 双核心、双地址族、两种模式
+共 8 组通过，内部 `38.052` 秒，入口 `39.289` 秒，证据
+`.tmp-regression-docker-3cc2806c3df44f8692fcba2910c2ef14/`。
+最后的脱敏顺序调整另经无网络 Linux 容器语法及长密钥裁剪检查通过。
+两次修复前失败证据保留；此处只修复本地回归误判，不认定为历史公网 XHTTP 超时根因。
+
 `vless-encryption` 从 `unsupported` 调整为 `deferred`，仅表示有限子能力已交付；
 其它客户端、算法、公网、原生宿主、arm64 和完整协议管理不据此升级，
 整体实施计划保持 active。

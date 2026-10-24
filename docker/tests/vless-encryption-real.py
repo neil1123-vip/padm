@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import contextlib
 import copy
+import io
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
+from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -127,6 +129,8 @@ def xray_client(uri, local):
     }
     if query["type"] == "xhttp":
         stream["xhttpSettings"] = {key: query[key] for key in ("path", "host", "mode")}
+        if "extra" in query:
+            stream["xhttpSettings"]["extra"] = json.loads(query["extra"])
     return {
         "log": {"loglevel": "debug"},
         "inbounds": [{"listen": "127.0.0.1", "port": local, "protocol": "socks",
@@ -135,6 +139,37 @@ def xray_client(uri, local):
             "address": parsed.hostname, "port": parsed.port, "users": [user],
         }]}, "streamSettings": stream}],
     }
+
+
+def client_projection_check():
+    extra = {"noSSEHeader": True, "xmux": {"maxConcurrency": "16-32"}}
+    query = {"encryption": "none", "type": "xhttp", "security": "reality",
+             "sni": "target.padm.test", "fp": "chrome", "pbk": PUBLIC_KEY,
+             "sid": "6ba85179e30d4fc2", "path": "/check", "host": "target.padm.test",
+             "mode": "packet-up", "extra": json.dumps(extra)}
+    uri = f"vless://{UUID}@127.0.0.1:2444?" + urllib.parse.urlencode(query)
+    actual = xray_client(uri, 2080)["outbounds"][0]["streamSettings"]["xhttpSettings"]
+    assert actual == {key: query[key] for key in ("path", "host", "mode")} | {"extra": extra}
+    del query["extra"]
+    uri = f"vless://{UUID}@127.0.0.1:2444?" + urllib.parse.urlencode(query)
+    assert "extra" not in xray_client(uri, 2080)["outbounds"][0]["streamSettings"]["xhttpSettings"]
+
+
+def connection_completion_check():
+    for status, body, expected in ((200, b"routing-destination-ok", True),
+                                   (503, b"routing-destination-ok", False),
+                                   (200, b"wrong-body", False)):
+        response = (f"HTTP/1.1 {status} Test\r\nContent-Length: {len(body)}\r\n\r\n".encode()
+                    + body)
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        # 正文之后不返回 EOF，精确复现代理连接尚未关闭的误判。
+        connection.recv.side_effect = [
+            b"\x05\x00", b"\x05\x00\x00\x01", bytes(6), response, TimeoutError("no EOF")]
+        connection.makefile.return_value = io.BytesIO(response)
+        with patch.object(socket, "create_connection", return_value=connection):
+            assert connect("127.0.0.1", 2080, 443) is expected
+        assert connection.recv.call_count == 3, "HTTP 正文完成后仍等待 TCP EOF"
 
 
 def probe(root, uri, client, name, origin, allowed):
@@ -169,7 +204,12 @@ def probe(root, uri, client, name, origin, allowed):
             connected = connect("127.0.0.1", local, origin.server_address[1])
         except (OSError, EOFError, AssertionError):
             connected = False
-    assert connected == allowed, name + " 实际连接结果不符"
+    if connected != allowed:
+        # 临时目录退出后即删除，失败时保留脱敏握手日志以区分配置错误与超时。
+        logs = [directory / "client.log", *sorted(root.glob("*.log"))]
+        diagnostic = "\n".join(path.name + ":\n" + scrub(path.read_text(errors="replace"))[-4000:]
+                               for path in logs if path.is_file())
+        raise AssertionError(name + " 实际连接结果不符\n" + diagnostic)
     assert origin.accepted == before + int(allowed), name + " 目标连接计数不符"
     if client == "mihomo":
         assert source.read_bytes() == (uri + "\n").encode(), "客户端修改了原始 URI"
@@ -289,6 +329,8 @@ def check(root):
 
 if __name__ == "__main__":
     try:
+        client_projection_check()
+        connection_completion_check()
         xray_version = checked([XRAY, "version"]).decode().splitlines()[0]
         mihomo_version = checked([MIHOMO, "-v"]).decode().splitlines()[0]
         assert "26.3.27" in xray_version and "d2758a0" in xray_version, xray_version
