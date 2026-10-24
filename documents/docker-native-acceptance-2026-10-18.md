@@ -1699,3 +1699,66 @@ SwapFree `505020 KiB`，最高 load1 `1.69`、load5 `0.82`。
 控制器容器/转发和独验容器已停止清理，透明保持 inactive。
 本轮不证明 UDP 业务、IPv6、WARP、重启或其它客户端；无生产代码变化，
 未重复 daily/full，整体计划仍未完成。
+
+### 2026-10-24 3.41.6 路由与 UDP 合并真实重启
+
+固定同一 Debian 13 amd64 VPS、正式 `3.41.6`、source
+`56223a1eff500c2a77c13d14e84cb66a97c86c62`、普通 bridge、公网 IPv4、
+Mihomo `v1.19.28` 原生 URI 导入，不混换 `3.41.7`。原 WS → 纯 sing-box
+重启前 → 重启后 → 恢复 WS，共四阶段、14 正例/10 拒绝；
+另有 12 次 UDP 前后正控，不重复计入上述主例数。
+
+一次真实 VPS 重启的 boot ID 从
+`27461660-19bc-4e08-9567-33627676ef46` 变为
+`125369c6-77f7-409d-97b9-37c97d19cabf`。同一组受管容器按原重启策略自然恢复，
+未用 configure、up 或 restart 替代重启后的业务验证。每个 pre/post 阶段均完成
+hosts、DNS、解析后 IP 阻断、认证 SOCKS5 TCP 四项，以及 TUIC `2464/udp`、
+SS2022 基口 `2465`、默认别名 `2467` 的 UDP 正反例。错身份均在同端口执行
+“正控 → 拒绝 → 正控”；共 6 个 TCP 原点 nonce、18 个有效 UDP nonce
+各到达一次，6 个拒绝 UDP nonce 零到达。UDP 回环原点直连，不经过 SOCKS；
+这些结果不扩大 SOCKS UDP 支持范围。
+
+四份实际归档在 Docker `--network none` 内独立核验通过：
+四份原请求/响应与顺序、URI/provider/运行配置、实际客户端二进制、
+loader 与映射核心的独立身份、24 个逐尝试抓包窗口和 96 份客户端抓包
+请求/应答原件均匹配。先验证实际四档成功，再逐项篡改客户端二进制、
+provider 路径、全部响应副本顺序、boot ID、原容器身份、原点事件、
+拒绝抓包长度、映射核心摘要、正式恢复退出码和 guard 状态；
+10 项负控均被拒绝，未通过放宽验收条件消除失败。
+
+原材料 before/after/verify 字节与权限/属主清单相等，调度及累计保持。
+`runner_exit=official_restore=outer_restore=verify=0`，guard 正常完成未触发，
+原 WS 恢复于 `2026-10-24T15:05:44Z` 完成。257 个资源样本分属重启前
+132 个、重启后 125 个；最低 MemAvailable `396556 KiB`、
+SwapFree `505020 KiB`，最高 load1 `2.57`、load5 `0.75`。
+未跨 boot 直接相减 monotonic 时间。
+
+前三轮失败分别封存在 `attempt-1/`、`attempt-2/`、`attempt-3/`：
+
+- 首轮在 combined-pre 客户端导入前失败，0 pure 业务/0 重启。`mapped_uri`
+  误改 contextmanager 包装层，真实生成器仍检查旧端口 `2470`；修正真实函数
+  作用域后，SS2465 实际导入成功，故意恢复旧映射的负控准确失败。
+- 第二轮在首 TUIC 窗口的离线解码失败，0 重启。AppArmor 拒绝 tcpdump
+  直接读取私密路径；改为父进程预开 stdin、`tcpdump -r -` 后，同 VPS 原安全
+  策略下正负控通过，未调整 AppArmor。原 pcap/stderr 和 seq2 缺失响应保留；
+  控制器的恢复序号绑定修正经自检，并在第三轮真实早恢复中生效。
+- 第三轮原 WS 到外部 HTTPS 目标发生 `SSLEOFError`，未进入 pure/未重启；
+  根因未确定。自动恢复和正式/outer/verify 全 `0`，原档保留。同冻结源码的
+  第四轮才完整通过，不将新成功倒推为已证明该 EOF 是瞬态故障。
+
+三轮失败均由 root 断网独核并被完整成功验收器拒绝，恢复与精确清理证据保留。
+证据 `.tmp-native-routing-udp-reboot-20261024/` 的最终四档 SHA256：
+公开归档 `96bb75fce5630ed62af04590e01c35ca0b106253b4d329f3c0f33f8b0f1c23cd`；
+私密归档 `e591c1a0cf92b9cbc468389b02aadc2a7a231a6f5bafc1c49ecd6e90f0c06bfa`；
+原客户端归档 `bb45556461d49d2f8a318bdde6205989886a8f0304819ed3aa606670dbf7c3f0`；
+实际源码归档 `98cc366e81a3981187b4da8a29c8761bffd6a97a2408d4ead47ae984d0ac7263`。
+
+独验后已精确清除 5 个本轮 systemd 单元、2 份 CLI 认领备份及唯一远端目录，
+保留其它备份和 `update.SR95Tw`。nginx/xray/subscription 健康，调度匹配，
+2464/2465/2467 TCP/UDP 关闭，443 开放，透明保持 inactive。本机控制器和
+断网独验容器、18443 转发、已入档并逐字核对的重复源码/运行散件已清；
+最终四档、三轮失败原档和清理结果保留。
+
+本轮不重复 Hy2、网站/订阅常态矩阵或全量回归；无生产源码变化，
+不声称本次说明提交已运行 CI。仍不证明透明启用重启、IPv6、自动跳跃、
+WARP、其它核心/客户端/算法、性能长稳或完整能力，整体计划继续未完成。

@@ -480,6 +480,19 @@ binary. Original files and timers were restored and test resources removed.
 Earlier failures remain archived. Hy2 probes were not repeated; automatic
 hopping, IPv6 and reboot remain outside this evidence.
 
+A subsequent combined routing/UDP check completed one actual VPS reboot. Four
+stages (original WS, before reboot, after reboot, restored WS) passed 14 positive
+cases and 10 refusals. Pure sing-box hosts/DNS, post-resolution IP blocking,
+authenticated SOCKS5 TCP routing, and IPv4 UDP on TUIC and SS2022 base/default-alias
+ports recovered naturally with the same managed container identities and a changed
+boot ID. Six TCP origin nonces and 18 valid UDP nonces arrived exactly once; six
+refused UDP nonces never arrived. Independent offline checks of all four archives,
+24 separate captures and 10 artifact-tampering controls passed. Original files,
+timers and WS were restored, and test resources were removed. Three earlier failed
+runs remain archived. Transparent proxying stayed disabled; this does not prove
+enabled-transparent reboot, SOCKS UDP, IPv6, automatic hopping, other clients or
+completion of the overall plan.
+
 Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
 It publishes TCP and UDP on the same port for either address family and needs no TLS.
 Confirmation generates independent server/user keys; UUID is the shared traffic identity.
