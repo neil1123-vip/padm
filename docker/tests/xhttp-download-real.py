@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""固定 Xray 的独立下行身份、TLS/h2/h3 与共享会话实链路。"""
+"""固定 Xray 的独立下行身份、TLS/h2/h3、共享会话及大流完整性。"""
 
 import argparse
 import copy
@@ -18,6 +18,7 @@ import urllib.parse
 
 
 helpers = runpy.run_path(str(Path(__file__).with_name("xhttp-headers-real.py")))
+transfers = runpy.run_path(str(Path(__file__).with_name("stream-integrity-real.py")))
 unused_port, stop, ready, read_exact, xray_process = (
     helpers[name] for name in ("unused_port", "stop", "ready", "read_exact", "xray_process"))
 USER = helpers["USER"]
@@ -47,6 +48,7 @@ def projection(output, label, upload, download):
         "reality": {"server_name": "upload.padm.test", "public_key": PRIMARY_PUBLIC,
                     "private_key": PRIMARY_KEY, "short_id": PRIMARY_SID},
         "xhttp": {"path": "/shared/", "host": "upload.padm.test", "mode": "auto",
+                  "scMaxEachPostBytes": 16384,
                   "download": download}}]}}
     spec_path, links_path = output / (label + ".spec.json"), output / (label + ".links")
     spec_path.write_text(json.dumps(spec))
@@ -60,7 +62,8 @@ def projection(output, label, upload, download):
     assert uri.scheme == "vless" and uri.hostname == "127.0.0.1" and uri.port == upload
     assert uri.username == USER
     extra = json.loads(query["extra"])
-    assert set(extra) == {"downloadSettings"}, extra
+    assert set(extra) == {"downloadSettings", "scMaxEachPostBytes"}, extra
+    assert extra["scMaxEachPostBytes"] == 16384
     projected = extra["downloadSettings"]
     assert projected["address"] == download["address"] and projected["port"] == download["port"]
     assert projected["network"] == "xhttp" and projected["security"] == download["security"]
@@ -73,7 +76,7 @@ def projection(output, label, upload, download):
                               "extra": extra}}
 
 
-def exchange(binary, output, label, upload, stream, echo_port, success=True):
+def exchange(binary, output, label, upload, stream, echo_port, success=True, bulk=False):
     socks_port = unused_port()
     config = {"log": {"loglevel": "debug"},
               "inbounds": [{"listen": "127.0.0.1", "port": socks_port, "protocol": "socks",
@@ -83,6 +86,7 @@ def exchange(binary, output, label, upload, stream, echo_port, success=True):
                   "users": [{"id": USER, "encryption": "none"}]}]}, "streamSettings": stream}]}
     process, log = xray_process(binary, config, output / ("client-" + label))
     received = b""
+    bulk_proofs = []
     try:
         ready(process, socks_port)
         try:
@@ -96,15 +100,20 @@ def exchange(binary, output, label, upload, stream, echo_port, success=True):
                 read_exact(socks, 6 if response[3] == 1 else 18)
                 payload = ("padm-xhttp-download:" + label + ":").encode() * 1024
                 socks.sendall(payload)
-                received = read_exact(socks, len(payload))
-                assert received == payload, (label, len(received))
+                # 负例只要泄漏一个业务字节就失败，避免部分正文后断连被误记为拒绝。
+                received = read_exact(socks, len(payload)) if success else socks.recv(1)
+                if success:
+                    assert received == payload, (label, len(received))
+                if bulk:
+                    for size in (1048576, 8388608):
+                        bulk_proofs.append(transfers["exchange"](socks, size))
         except (OSError, AssertionError) as error:
             if success:
                 raise AssertionError(f"{label} 业务回显失败") from error
         if not success:
             assert not received, f"{label} 破坏下行后业务仍成功"
         print(f"docker-xhttp-download-observed={label} echo={success}", flush=True)
-        return {"case": label, "echo": success}
+        return {"case": label, "echo": success, "transfers": bulk_proofs}
     finally:
         stop(process)
         log.close()
@@ -122,6 +131,7 @@ def main():
     assert version.startswith("Xray 26.3.27 "), "Xray 版本不匹配"
     evidence = {"xray_version": version, "cases": [], "shared_backend": True}
     processes = []
+    transfers["selfcheck"]()
     echo = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Echo)
     echo.daemon_threads = True
     threading.Thread(target=echo.serve_forever, daemon=True).start()
@@ -144,7 +154,8 @@ def main():
                       {"listen": "127.0.0.1", "port": backend, "protocol": "vless",
                        "settings": {"clients": [{"id": USER}], "decryption": "none"},
                        "streamSettings": {"network": "xhttp", "security": "none",
-                                          "xhttpSettings": {"path": "/shared/", "mode": "auto"}}},
+                                          "xhttpSettings": {"path": "/shared/", "mode": "auto",
+                                                            "scMaxEachPostBytes": 16384}}},
                       raw_front(target, echo.server_address[1], "tls", tls),
                       raw_front(upload, backend, "reality", {
                           "dest": f"127.0.0.1:{target}", "serverNames": ["upload.padm.test"],
@@ -198,7 +209,8 @@ def main():
                     stream["xhttpSettings"]["extra"]["downloadSettings"]["tlsSettings"][
                         "pinnedPeerCertSha256"] = certificate_hash
                 evidence["cases"].append(exchange(arguments.xray, output, label,
-                    upload, stream, echo.server_address[1]))
+                    upload, stream, echo.server_address[1],
+                    bulk=mode in ("packet-up", "stream-up")))
                 observed_log = (output / ("client-" + label + ".log")).read_text()
                 expected_http = "3" if transport == "h3" else "2"
                 assert f"HTTP version {expected_http}, host download.padm.test" in observed_log, observed_log[-4000:]
@@ -219,10 +231,16 @@ def main():
                     "pinnedPeerCertSha256"] = "00" * 32
                 evidence["cases"].append(exchange(arguments.xray, output, transport + "-broken-certificate",
                     upload, broken, echo.server_address[1], success=False))
+        bulk_cases = [item for item in evidence["cases"] if item["transfers"]]
+        assert len(bulk_cases) == 6 and all(
+            [proof["upload_bytes"] for proof in item["transfers"]] == [1048576, 8388608]
+            and all(proof["upload_bytes"] == proof["download_bytes"] for proof in item["transfers"])
+            for item in bulk_cases)
         evidence["passed"] = True
         print("docker-xhttp-download-real-ok: independent-reality=key/sid/sni tls=verified-h2/h3 "
               "download-modes=auto/stream-one/packet-up/stream-up backend=shared "
-              f"echo=12 rejection=8 cases={len(evidence['cases'])}", flush=True)
+              f"echo=12 rejection=8 cases={len(evidence['cases'])} "
+              "bulk=12 sizes=1MiB/8MiB packet-limit=16KiB digest=sha256", flush=True)
     except BaseException:
         for path in sorted(output.glob("*.log")):
             print(f"{path.name}:\n{path.read_text()[-4000:]}", file=sys.stderr)

@@ -394,7 +394,11 @@ This manages client metadata only. An external frontend must already exist and
 relay to the same XHTTP handler and authentication. It does not construct a
 TLS/H3/CDN topology or connect unrelated backends without shared sessions.
 The four `sc*` parameters exposed by the current native menu are covered.
-Public frontend and host/arm64 acceptance, performance benefits, and full management remain `deferred`.
+On Debian 13 amd64, formal `3.41.5` passed bidirectional SHA256 integrity checks
+over ordinary bridge with fixed Xray `26.3.27` and Mihomo `v1.19.28`:
+packet-up and stream-up, each at 1 MiB and 8 MiB, with a 16 KiB POST limit.
+This does not establish exact segmentation counts, throughput or sustained stability.
+Formal native h3/CDN, other environments and full management remain `deferred`.
 
 The same site menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:

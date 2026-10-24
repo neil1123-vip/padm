@@ -334,7 +334,10 @@ URI 使用对象自己的地址、安全身份和三项 XHTTP 字段，不继承
 预设及其它编辑保留对象，复制/派生只清除新入口对象，服务端配置不写入客户端字段。
 本功能只管理客户端元数据，外部前置必须已部署并转回同一 XHTTP handler 及认证。
 不会自动建设 TLS/H3/CDN 拓扑，也不能将上下行指向无会话关联的独立后端；
-当前原生菜单的四项 `sc*` 参数已覆盖；公网前置验收、宿主/arm64、性能收益和完整管理仍待补。
+当前原生菜单的四项 `sc*` 参数已覆盖。正式 `3.41.5` 在 Debian 13 amd64 普通
+bridge 上，固定 Xray `26.3.27` / Mihomo `v1.19.28` 的 packet-up、stream-up
+各通过 1 MiB、8 MiB 双向 SHA256 完整性校验；POST 上限为 16 KiB。
+这不证明精确分段数、吞吐或长时稳定性；正式原生 h3/CDN、其它环境和完整管理仍待补。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；
