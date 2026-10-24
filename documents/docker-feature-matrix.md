@@ -597,7 +597,7 @@ TUN/TProxy/Redirect 的透明核心保留 `cap_drop: ALL`，仅授予 `NET_ADMIN
 | `script-update` | 系统与脚本 -> 更新 padm | `supported` | 无 | 宿主 CLI | `padm-docker update` 处理签名 bundle、镜像和配置事务。 |
 | `network-optimization` | 系统与脚本 -> 网络优化 | `unsupported` | 无 | host | Docker 不修改宿主 BBR/fq。 |
 | `uninstall` | 高级/危险操作 -> 卸载脚本 | `supported` | 无 | 宿主 CLI | 受管卸载、移除镜像和显式 purge。 |
-| `vless-encryption` | 高级/危险操作 -> VLESS Encryption 实验 | `deferred` | `core-xray` | bridge | 5C.10 提供菜单 9→18、`edit --vless-encryption ID enable/disable` 及 `protocol encryption-status [ID]`，限 schema 3 Xray 协议 1/2；配置与 URI、私密配对校验、失败恢复及旧 bundle marker 门禁已接入。固定 Xray 26.3.27/Mihomo v1.19.28 的 Linux amd64 真实实验通过，其它客户端、算法、公网、原生宿主/arm64 与完整能力仍待验。 |
+| `vless-encryption` | 高级/危险操作 -> VLESS Encryption 实验 | `deferred` | `core-xray` | bridge | 5C.10 提供菜单 8→2、`edit --vless-encryption ID enable/disable` 及 `protocol encryption-status [ID]`，限 schema 3 Xray 协议 1/2；配置与 URI、私密配对校验、失败恢复及旧 bundle marker 门禁已接入。固定 Xray 26.3.27/Mihomo v1.19.28 的 Linux amd64 实验和正式 3.41.5 的 Debian 13 amd64 公网启停矩阵通过，含逐入口隔离、旧 none/错 UUID/错配拒绝和原配置恢复；其它客户端、算法、arm64、加密启用重启与完整能力仍待验。 |
 
 4C.7 单 Peer WireGuard 先以 `wireguard prepare` 生成本机私密身份，仅输出公钥等公开状态，
 交换公钥后用 `wireguard peer` 固定唯一 RFC1918 IPv4 `/32` 对端；可选字面 IPv4 endpoint，

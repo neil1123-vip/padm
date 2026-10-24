@@ -71,7 +71,8 @@
 | 新主机灾备恢复 | 同机空目标通过，新主机未完成 | 同架构全新主机、v3 空目标、业务恢复和失败保护；同机 purge 后恢复不能替代 |
 | webroot/ALPN 公网 CA 组合 | 正式 webroot/ALPN issue、standalone/ALPN auto-renew 消费失败回滚及 ALPN 同张新证书在线往返通过；3.41.5 stdin 修复已在正式包补验 | 2026-10-24 单次 fresh ALPN 新账户挑战、真实消费者失败完整回滚及同证书在线往返通过，runner/outer/verify 全 0，guard 未触发；此前两轮夹具失败归档不变。自然续期仍缺，不把强制到期、缓存授权或本地 CA 等同自然续期；此前无原始日志的第三次申请仍不定性 |
 | WARP 真实账号与公网出口 | 未完成 | 真实账号、双栈出口和故障恢复证据 |
-| Reality 共存专项 | 原生 Vision 14 点、XHTTP 20 点恢复与互切、隔离 CLI XHTTP 24 点及正式公网双模式三拓扑 6 点通过；同 handler 下行 1 正例/3 拒绝、双协议三拓扑实际重启 6 点通过；原失败前序两次重启及 host 前测补验通过，完整环境验收仍未完成 | 固定唯一 VPS 的无嗅探通道验证公网账号正反例、严格网站、HTTP/2、Host/mode、双向记账及原材料/权限/timer 恢复。六点重启核对原容器自然启动与跨 boot 保护；原前序补验未复现未选中 XHTTP 超时，根因仍未确定，失败证据保留。下行限同 Reality 身份、同 handler；仍缺公网独立身份、TLS/h3 等环境矩阵，不证明大上传分段或性能 |
+| Reality 共存专项 | 原生 Vision 14 点、XHTTP 20 点恢复与互切、隔离 CLI XHTTP 24 点及正式公网双模式三拓扑 6 点通过；双协议三拓扑实际重启 6 点、原失败前序补验通过；同 handler 的独立下行 Reality/h2/h3 四模式合计 12 点分两轮覆盖完成，首轮 guard 触发记录保留 | 固定唯一 VPS 的无嗅探通道验证公网账号正反例、严格网站、HTTP/2、Host/mode、双向记账及原材料/权限/timer 恢复。正式服务端原生 h3/CDN、大上传分段、性能及其余环境矩阵仍缺；原 XHTTP TLS 握手超时根因未确定，本轮 EOF/extra 探针修复不解释该历史失败 |
+| VLESS Encryption 原生公网 | 正式 3.41.5 的 Debian 13 amd64 六阶段通过 | 固定 Xray 26.3.27/Mihomo v1.19.28，28 个正例、38 个拒绝及双向记账、逐入口隔离、关闭恢复通过；其它客户端、算法、arm64、加密启用后的整机重启与完整能力仍待验 |
 | HTTP relay 原生路径 | 原生外部 IPv4 通过 | 独立外部客户端访问三个公网 HTTPS 目标均严格 TLS/200，错误认证 407、未允许来源 blocked；不外推公网 IPv6 或 SOCKS UDP 支持 |
 | 自然到期真实续期 | 未完成 | 等待登记窗口（约 2026-12-17）后的真实换证，不伪造到期 |
 | 当前修复可信发布 | 3.41.5 正式发布及原生验签升级通过 | Release `39946059875` 的 32/32 作业成功；生产 Cosign 验签、assess/update/validate 和新 nonce 公网 WS/严格 TLS 通过，运行源 `a1f62355`，含 ACME stdin 修复；业务材料/权限保持，六份正式 update 回滚点保留。升级及 ALPN 补验归档见原生记录，不替代其它环境验收 |
@@ -8909,7 +8910,7 @@ Gecko 72.148 秒、TUIC 35.809 秒、Salamander 284.505 秒，内部总耗时 28
 #### 5C.10 VLESS Encryption 有限实验管理
 
 仅开放 schema 3、Xray Reality Vision（协议 `1`）和 Reality XHTTP（协议 `2`）
-已有入口的独立实验开关；菜单 `9 → 18. VLESS Encryption 实验` 与
+已有入口的独立实验开关；菜单 `8 → 2. VLESS Encryption 实验` 与
 `edit --vless-encryption ID enable|disable` 共用预览、一次确认、候选发布和失败恢复，
 支持 `--preview` 或 `--confirm PADM-DOCKER-EDIT`。
 `protocol encryption-status [ID]` 只显示开关状态，不输出密钥。
@@ -8967,8 +8968,21 @@ Encryption 客户端保留 URI 的 XHTTP `extra`，失败日志先脱敏再截�
 最后的脱敏顺序调整另经无网络 Linux 容器语法及长密钥裁剪检查通过。
 两次修复前失败证据保留；此处只修复本地回归误判，不认定为历史公网 XHTTP 超时根因。
 
+修复已以签名提交 `1e33cc4c` 推送。CI `40054989499` 对该提交完成门禁：
+`24` 个作业成功、`3` 个发布作业按条件跳过、`0` 个失败；未为仅测试改动重复发布。
+
+同日正式 `3.41.5` 在 Debian 13 amd64 完成原 WS、未加密双入口、仅 Vision
+加密、双入口加密、关闭和原 WS 恢复六阶段。固定 Xray `26.3.27/d2758a0`
+与 Mihomo `v1.19.28` 消费正式 CLI URI，`28` 个严格 TLS/HTTP 200 正例、
+`38` 个错 UUID/旧 none/交叉配对拒绝均通过。未选入口 URI 不变、两组密钥不同、
+关闭后 URI 等于原基线和各阶段双向记账均通过；通道预检确认宿主未按 SNI
+改写固定 VPS 目标。正式配置恢复、外层材料/权限/timer 恢复和 verify 全为 `0`，
+独立 Linux 归档核验通过，guard 未触发。公开归档 SHA256：
+`daf38382d4fd49c5a128dfc23ab70f9974d86a5c81945bb46412d0ebe63ebe77`，
+证据位于 `.tmp-native-vless-encryption-20261024/`，详见原生验收记录。
+
 `vless-encryption` 从 `unsupported` 调整为 `deferred`，仅表示有限子能力已交付；
-其它客户端、算法、公网、原生宿主、arm64 和完整协议管理不据此升级，
+其它客户端、算法、arm64、加密启用后的整机重启和完整协议管理不据此升级，
 整体实施计划保持 active。
 
 #### 近期菜单一致性修补（跨 4A/5B/5C）

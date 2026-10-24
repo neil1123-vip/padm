@@ -1249,3 +1249,36 @@ h2 `stream-one/packet-up/stream-up` 及 h3 `auto/stream-one/packet-up/stream-up`
 不代表正式服务端原生 h3/CDN、独立 Reality/TLS 公网身份、整机重启、透明启用、
 原生 arm64、IPv6、新主机灾备、WARP 实账号、自然续期或原 XHTTP 超时根因已解决。
 远端目录和本机测试容器已清，公私归档分离保留，透明代理继续关闭，整体计划仍未完成。
+
+### 2026-10-24 VLESS Encryption 正式公网矩阵
+
+在同一 Debian 13 amd64 VPS 上使用验签正式 `3.41.5`、源 `a1f62355`，
+通过正式 CLI 添加 bridge Reality Vision/XHTTP 并逐入口启停实验加密。
+原 WS `443` 保留；独立 Linux 客户端使用固定 Xray `26.3.27/d2758a0` 与
+Mihomo `v1.19.28`，后者直接导入原分享 URI。固定无嗅探公网通道预检确认：
+原网站严格 TLS/200、对同一目标使用 `pgxn.org` SNI 返回域名失配，未改写为目标站。
+
+原 WS、未加密双入口、仅 Vision 加密、双入口加密、关闭、原 WS 恢复六阶段通过。
+`28` 个正例均为真实严格 TLS/HTTP 200 且有正文，`38` 个负例覆盖错 UUID、
+旧 `none` 与两个独立加密配对交叉使用；逐阶段 nonce 唯一、客户端版本及二进制摘要
+一致。未选入口 URI 不变、两配对不同、关闭后 URI 与 baseline 一致；六阶段
+双向 traffic 增长、累计不回退，原网站始终严格 TLS/200。
+
+`runner_exit=official_restore=outer_restore=verify=0`，原材料字节与权限、
+timer 和三业务健康恢复，透明始终关闭。guard `completed=true/triggered=false`；
+`423` 个样本最低 MemAvailable `345196 KiB`、最低 SwapFree `495572 KiB`，
+最高 load1 `4.71`，样本覆盖 `846.403` 秒。独立断网 Linux 核验按完整阶段、
+客户端与身份组合检查集合无缺项、无重复，并核对恢复和 guard 结果。
+
+证据位于 `.tmp-native-vless-encryption-20261024/`。公开归档
+`public-evidence.tar.gz` SHA256：
+`daf38382d4fd49c5a128dfc23ab70f9974d86a5c81945bb46412d0ebe63ebe77`；
+私密归档 `private-evidence.tar.gz` SHA256：
+`896d5b922f89f89610ee764d89e5b700a5f2c61e8f9421abcf3823b5a5004273`。
+远端按 `实际新增备份 == CLI 认领备份` 精确删除本轮六份 configure 快照和
+唯一测试目录；其它备份保留。清理后业务健康、timer 一致、443 开放、
+2443/2444 关闭、runner/guard 停止。`cleanup-remote.json` 复核通过；
+本机容器、固定转发、二进制、输入与私密散件已清，公私归档分离保留。
+该证据关闭固定版本组合的原生 amd64 公网加密启停子项，不代表其它客户端、
+算法、arm64、加密启用后的整机重启、自然续期或原 XHTTP 超时根因已解决。
+未重复本机 daily/full，整体计划仍未完成。
