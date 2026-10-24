@@ -43,6 +43,11 @@ HTTPUpgrade 原生 URI 导入也未通过，手工对照不代替原生导入。
 各项原始失败与环境边界见[原生验收记录](docker-native-acceptance-2026-10-18.md)，
 完整协议管理及整体计划继续 `deferred`。
 
+同日正式 `3.41.6` 经固定新旧三件套与生产 Cosign 验签、正式 `update` 升级；
+独立断网核验确认前后 WS 2 正/2 拒绝、原 URI、业务字节/权限、timer 和累计保持，
+仅 release/images 改变，正式回滚点 `update.SR95Tw` 保留。
+本轮可信包已包含分享组合法未排序列表修复，证据不替代其余环境验收。
+
 3D.11–3D.13 提供协议菜单 `14/15/16` 与
 `edit --protocol-add/--protocol-remove/--protocol-rebuild`。
 新增接受已有受管 v1/v2/v3，旧规格仅在成功确认后迁移；

@@ -431,6 +431,13 @@ checks and resource-body hashes. Original WS, file permissions and timers were
 restored before precise cleanup. IPv6, UDP, reboot and other clients remain outside
 this evidence; see the [native acceptance record](../docker-native-acceptance-2026-10-18.md).
 
+The same VPS then upgraded to formal `3.41.6` through Cosign verification and the
+official `update` command. Native WS checks passed before and after the upgrade:
+two positive cases and two refusals. The URI, business files and permissions,
+timers and traffic totals were preserved; only spec release/images changed.
+Rollback point `update.SR95Tw` remains. This release includes the fix for valid
+unsorted share-group listener lists; other environment checks remain open.
+
 Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
 It publishes TCP and UDP on the same port for either address family and needs no TLS.
 Confirmation generates independent server/user keys; UUID is the shared traffic identity.

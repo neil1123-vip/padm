@@ -1459,3 +1459,28 @@ guard `completed=true/triggered=false`，最低 MemAvailable `378528 KiB`、
 加固版源码另存，未冒充已结束本轮的执行输入。
 该证据仅关闭上述固定客户端和环境的站点/ALPN 子项，整体计划仍未完成；
 未改生产代码，不重复 daily/full。
+
+### 2026-10-24 3.41.6 正式升级与业务保持
+
+同一 Debian 13 amd64 VPS 从正式 `3.41.5` 升级至 `3.41.6`，运行源
+`56223a1eff500c2a77c13d14e84cb66a97c86c62`。新旧清单、Sigstore bundle
+及控制包均固定摘要，生产 Cosign 验签后执行正式 `update`。
+升级前后固定 Mihomo `v1.19.28` 原生 WS 共 2 正例、2 拒绝，严格 TLS、
+网站和错 SNI 检查通过；两份原客户端请求与远端请求逐项相等。
+完整 spec 只改变 release/images，业务材料字节、属主权限、URI、
+两个 timer 和累计保持；保留唯一新增回滚点 `update.SR95Tw` 及既有备份。
+
+`runner_exit=official_restore=outer_restore=verify=0`，保留新版基线，
+guard `completed=true/triggered=false`。执行时间 `09:16:29–09:17:47 UTC`。
+独立断网核验检查固定发布材料、原始请求/响应、客户端配置、业务树元数据、
+计量、调度和备份集合；原始资源 39 样本覆盖 `76.422` 秒，
+最低 MemAvailable `416448 KiB`、SwapFree `505904 KiB`，最高 load1 `2.44`。
+
+证据 `.tmp-native-upgrade-3416-20261024/`：
+公开归档 SHA256 `72e60b4ac733f6c109700cc082e534302c45296b127345ceb506191eb80c28b1`；
+私密归档 SHA256 `89ea0e4aa6c13fe7f69a4596d50cdfd15fa8b8f03b34cd50f3f92aad38664846`；
+实际源码归档 SHA256 `85f8affe044ff18f61ae770fd94d5e1b0232de6e6e1f590753cff6d66e747f35`；
+原客户端归档 SHA256 `322c42b48c8978cee92a9a397628c3ee0a3e16040ed06f7cd317eb4723147100`。
+客户端大二进制未重复放入归档，独验另读保留的原实际二进制并核固定摘要。
+此次运行包含合法未排序分享组列表修复；不改变其它客户端、架构、网络和透明支持范围。
+透明保持关闭，整体计划仍未完成。

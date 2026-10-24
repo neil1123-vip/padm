@@ -411,6 +411,11 @@ padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
 原 WS、材料权限和调度恢复后已精确清理。该证据不包含 IPv6、UDP、重启或其它客户端；
 完整支持边界见[原生验收记录](documents/docker-native-acceptance-2026-10-18.md)。
 
+同日正式 `3.41.6` 已在该 VPS 经 Cosign 验签和正式 `update` 升级。
+升级前后 WS 原生客户端共 2 正例、2 拒绝通过，URI、业务材料字节与权限、
+调度及累计保持；仅规格的 release/images 改变，保留 `update.SR95Tw` 回滚点。
+本次运行包含分享组合法未排序列表修复，不代表其余环境验收完成。
+
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
