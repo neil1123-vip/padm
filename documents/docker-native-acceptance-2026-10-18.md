@@ -1399,3 +1399,63 @@ timer 和三业务健康恢复。`192` 样本覆盖 `382.755` 秒，最低 MemAv
 只关闭固定 Mihomo、amd64 普通 bridge 的两类 SS 轮换公网 IPv4 TCP 子项，
 不代表 UDP、IPv6、重启、旧连接排空、其它算法/客户端、宿主集成或完整管理。
 透明继续关闭，整体计划仍未完成；没有生产代码变化，不重复本机 daily/full。
+
+### 2026-10-24 TLS 客户端边界与 UDP 部分证据
+
+TLS 两轮失败均已恢复并精确清理，保留在
+`.tmp-native-tls-combined-20261024/attempt-1/` 与 `attempt-2/`。
+第二轮主/组订阅下载、15/7 节点导入及协议 22 原生业务通过，随后协议 23 失败中止。
+固定 Mihomo `v1.19.28` 的 VMess HTTPUpgrade 原生 URI 导入首包非 HTTP；
+显式 `network=ws` 与 `ws-opts.v2ray-http-upgrade=true` 的手工对照发出正确 GET。
+不修改正式 URI 迁就客户端，也不把手工对照写成原生 URI 矩阵通过。
+诊断归档位于 `httpupgrade-diagnostic/`，公开归档 SHA256 为
+`154ab8ba27fa1b3d69483910029dd4bd85c677a57ae698eb6b520e8ae6666950`。
+
+UDP 证据位于 `.tmp-native-udp-combined-20261024/`。首轮 SSH255 中断，
+取得 18 正例、14 拒绝，34 个有效 UDP nonce 各到达一次、10 个拒绝 nonce 零到达；
+迟获的原客户端请求单独保留，不覆盖当时输入链不足的独验结论。
+第二轮原 WS、六 UDP 入口基线、默认分享和替换别名阶段通过；
+删除别名阶段前五个 UDP 正例通过，TUIC 正例约 12 秒超时，业务原点零到达，
+其后两项删除端口拒绝、原 WS 正反例未执行。恢复原 WS 的独立阶段通过。
+
+第二轮实际独验共 31 正例、16 拒绝，48 个有效 nonce 各到达一次、
+11 个拒绝 nonce 零到达，完整输入链成立；五类篡改拒绝实测通过。
+`runner_exit=1`、正式/outer/verify 为 `0`，不产生矩阵成功结论；
+guard 无触发记录，也无完成记录。最低 MemAvailable `355928 KiB`、
+SwapFree `483980 KiB`，最高 load1 `5.10`，没有连续三个样本越界。
+五份 CLI 认领备份及唯一远端目录已精确清理，三服务、timer、443 恢复，
+`2460–2467` TCP/UDP 关闭，透明关闭。第二轮公开/私密归档 SHA256 分别为
+`fcdbf4f1dde0091e87b3b4dca7b53755f8c7a236168539b06935bb39e4bae532`、
+`26d2f4a354173309fb992d080b22927d999129046b628505930ccb45b9bf5ec9`。
+TUIC 当前 URI 与上一成功阶段一致；现有材料不足以确定公网 QUIC、丢包或服务端根因。
+后续只定向补未完成项，不重复整个 UDP 矩阵，不用后续通过解释旧超时。
+
+### 2026-10-24 站点与 fallback ALPN 原生收口
+
+验签正式 `3.41.5`、源 `a1f62355`，同一 Debian 13 amd64 VPS，
+普通 bridge、公网 IPv4 TCP，固定 Mihomo `v1.19.28` 原生 file provider。
+保留原 WS `443`，增加 Xray `27/29` 两入口 `2455/2456`、一个独立账号和分享组。
+两入口分别执行逆序、仅 HTTP/1.1、推荐顺序，再切换 notes/photos/docs 三主题
+及 302；notes 使用含中文、引号、尖括号和反斜杠的站名。
+13 阶段共 57 正例、35 拒绝，22 次主/组严格 HTTPS 下载与 22 次错 token 404、
+230 次资源 200、45 次资源 404、5 次 302、88 项 ALPN、35 次错 SNI 均通过。
+
+独立断网 Linux 核验不导入运行器或客户端，从固定正式 bundle 重算主题资源正文，
+检查认证、ALPN 次序、订阅内容、特殊字符转义、Location、原材料字节/权限和调度；
+13 份原客户端请求与远端逐阶段请求逐项相等。
+`runner_exit=official_restore=outer_restore=verify=0`，
+guard `completed=true/triggered=false`，最低 MemAvailable `378528 KiB`、
+最高 load1 `4.02`。执行时间 `08:38:07–09:06:47 UTC`，共 `28m40s`。
+
+证据 `.tmp-native-sites-alpn-20261024/`：
+公开归档 SHA256 `d4344f542e513b49cc4d8fc318c9f58ed54b8aa63d1e136d0a15791941d98026`；
+私密归档 SHA256 `a6d5f151773f41b9e7ba7d8472385675e21f75bb6de7886369e6ad87c6273c5a`；
+实际执行源码归档 SHA256 `22d3dd86583114bcad3a3309e8d4f03ef37437b4e6458f76dc99dbeb6d1c724d`；
+原客户端归档 SHA256 `25585b3b50a3b578909597a8d989c06812722ccd5501ba00932a7eeb47e1cc4c`。
+12 份 CLI 认领备份和唯一远端目录已精确删除，其它备份保留；
+三业务健康、timer 匹配，测试端口关闭、443 开放、透明两 unit inactive。
+本机容器、forward、私密散件及重复保险副本已清，四份归档保留。
+结束后另行修复控制器取证失败仍删容器的问题，并用实际 finally 的成功/失败两路自检；
+加固版源码另存，未冒充已结束本轮的执行输入。
+该证据仅关闭上述固定客户端和环境的站点/ALPN 子项，整体计划仍未完成；
+未改生产代码，不重复 daily/full。

@@ -423,6 +423,14 @@ fallbacks, Nginx, or orchestration drift remain rejected. Preview/cancellation d
 not write live files; health failure and INT/TERM restore the original state,
 including any pre-repair ALPN drift.
 
+On October 24, 2026, formal `3.41.5` passed 13 native stages on Debian 13 amd64,
+ordinary bridge and public IPv4 TCP: both fallback listeners' three ALPN orders,
+all three site themes, an escaped title, and a 302 redirect. Independent checks
+confirmed 57 positive cases, 35 refusals, main/group HTTPS subscriptions, 88 ALPN
+checks and resource-body hashes. Original WS, file permissions and timers were
+restored before precise cleanup. IPv6, UDP, reboot and other clients remain outside
+this evidence; see the [native acceptance record](../docker-native-acceptance-2026-10-18.md).
+
 Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
 It publishes TCP and UDP on the same port for either address family and needs no TLS.
 Confirmation generates independent server/user keys; UUID is the shared traffic identity.

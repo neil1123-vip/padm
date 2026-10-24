@@ -405,6 +405,12 @@ padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
 完整账号输入和运行配置都核对，其它入口、账号、路由、fallback、Nginx 或编排漂移继续拒绝。
 预览和取消不写生产文件，健康失败及 INT/TERM 恢复原状态，包括修复前的 ALPN 漂移。
 
+2026-10-24，正式 `3.41.5` 在 Debian 13 amd64 普通 bridge、公网 IPv4 TCP 上，
+完成 `27/29` 逆序、仅 HTTP/1.1、推荐顺序，以及三套主题、特殊站名和 302 跳转。
+13 阶段共 57 正例、35 拒绝，主/组 HTTPS 订阅、88 项 ALPN 与资源正文摘要均通过独立核验，
+原 WS、材料权限和调度恢复后已精确清理。该证据不包含 IPv6、UDP、重启或其它客户端；
+完整支持边界见[原生验收记录](documents/docker-native-acceptance-2026-10-18.md)。
+
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
