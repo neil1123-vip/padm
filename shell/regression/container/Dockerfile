@@ -7,10 +7,10 @@ FROM debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c
 COPY --from=docker-cli /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::CAInfo=/etc/ssl/certs/ca-certificates.crt update \
-    && apt-get -o Acquire::Retries=3 -o Acquire::https::CAInfo=/etc/ssl/certs/ca-certificates.crt install -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o Acquire::https::CAInfo=/etc/ssl/certs/ca-certificates.crt install -y --no-install-recommends \
     age bash caddy ca-certificates coreutils cron curl diffutils findutils gawk git grep gzip iproute2 iptables \
     fail2ban gcc jq libc6-dev nftables nginx openssl procps python3 python-is-python3 \
-    python3-h2 python3-jsonschema python3-yaml sed shellcheck tar \
+    python3-h2 python3-jsonschema python3-yaml sed shellcheck tar tcpdump tshark \
     unzip util-linux wget wireguard-tools xz-utils \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker

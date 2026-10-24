@@ -9790,6 +9790,43 @@ SwapFree `520932 KiB`，最高 load1 `1.85`。
 不证明精确 POST 分段数、性能/长时稳定、正式原生 h3/CDN 或历史握手超时根因。
 透明代理保持关闭，整体计划仍未完成。
 
+#### 5C.2f.9 实际 POST 计数与有界连接
+
+2026-10-25 固定正式验签 `3.41.6`、source
+`56223a1eff500c2a77c13d14e84cb66a97c86c62`，在同一 Debian 13 amd64、
+普通 bridge、公网 IPv4 上单次配置 packet-up `2444` 和 stream-up `2445`，
+保留原 WS `443`。唯一客户端为 Xray `26.3.27/d2758a0`，不启用 VLESS
+Encryption。12 主例含原/恢复 WS 各正反例，以及每模式
+1 MiB 正控、错误 UUID、8 MiB 正控和 60 秒同业务连接观察，共 8 正/4 拒。
+
+8 份逐例原始 pcap 与客户端 TLS keylog 在两个独立断网容器中重新解密，
+以 `tcp.stream + http2.streamid` 标识实际请求，不按业务大小推算。
+按上述每模式四例顺序，packet-up 的 POST 数为 `65/1/513/206`，
+stream-up 为 `1/1/1/1`。正例 POST 均有双向 END_STREAM 和 `200`；
+packet-up 正文逐 POST 不超过 `16384`，序号按 session 跨 TCP 连续检查。
+stream-up 不套 16 KiB 上限，也不预设单 POST。错误 UUID 通过真实身份、
+原点零到达及前后正控判定，不强加成功终态。原点仅在 Xray 命名空间回环
+监听，28 个有效 nonce 各一次、共 56 个 start/complete 事件；两持续例
+各 12 次往返并复用同一 peer，观察 60.000138/60.000158 秒、实际业务跨度
+56.017092/56.025879 秒，不称性能或长稳通过。
+
+两次完整独验通过；实际 pcap 截断、TLS key 替换、packet 序号重复、
+业务 nonce 不符共 4 项实物负控均被拒绝。原材料字节/权限、调度、累计和
+恢复均核对通过，正式恢复、outer restore、verify 全 `0`，guard 未触发；
+213 个资源样本最低 MemAvailable `406140 KiB`、最高 load1 `3.09`。
+首轮在 prepare 暂停 timer 后仍强验 active 而退出，0 configure/0 业务；
+恢复及清理已独核，失败四档保留。改为 baseline 在暂停前取样，并仅在
+before-configure 强验暂停态，其余阶段仍强验 active；状态错误和权限篡改自检通过。
+
+新增 `xhttp-post-observe.py` 和 `xhttp-posts-real.py` 复用已有真实业务与
+`docker-xhttp-real` 入口；工具镜像一次补齐 tcpdump/tshark，复用固定 Xray
+二进制。TLS/Reality × 两模式共 4 例的真实 VLESS 身份、1 MiB 双向字节、
+双 END_STREAM/200 及 19 项负控通过，定向入口 `66.724` 秒通过。
+同源码首轮原有 reality-auto 小回显超时仍保留，未放宽期限或推断其根因，
+无变化不重复 daily/full。四档摘要与恢复清理证据见原生验收记录；
+精确计数仅覆盖本节固定 Xray 组合，不扩展 Mihomo、其它环境、正式原生
+h3/CDN、性能或长稳。透明保持关闭，整体计划仍未完成。
+
 - 每阶段同步中英文使用说明、支持矩阵、权限边界及失败恢复操作。
   旧部署迁移明确要求完整 spec 或安全导入，不允许一条重配命令替代迁移。
 - PR 按实际改动运行合同、Compose、菜单 PTY 和定向回归；

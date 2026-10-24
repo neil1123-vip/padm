@@ -396,9 +396,19 @@ TLS/H3/CDN topology or connect unrelated backends without shared sessions.
 The four `sc*` parameters exposed by the current native menu are covered.
 On Debian 13 amd64, formal `3.41.5` passed bidirectional SHA256 integrity checks
 over ordinary bridge with fixed Xray `26.3.27` and Mihomo `v1.19.28`:
-packet-up and stream-up, each at 1 MiB and 8 MiB, with a 16 KiB POST limit.
-This does not establish exact segmentation counts, throughput or sustained stability.
+packet-up and stream-up, each at 1 MiB and 8 MiB. The 16 KiB limit applies
+to each packet-up POST body; it does not limit stream-up bodies.
+On 2026-10-25, formal `3.41.6` with fixed Xray on the same amd64/IPv4/bridge
+environment passed independent decryption of raw captures using TLS keylogs.
+The 1 MiB, 8 MiB, and 60-second observation cases recorded `65/513/206`
+packet-up POSTs and `1/1/1` stream-up POSTs. Positive POSTs ended in both
+directions with HTTP `200`; wrong UUIDs produced no origin transactions.
+Each mode completed 12 round trips on one business connection, with about
+60 seconds observed and business spans of 56.017/56.026 seconds.
+These counts do not cover Mihomo, throughput or sustained stability.
 Formal native h3/CDN, other environments and full management remain `deferred`.
+See the [native acceptance record](../docker-native-acceptance-2026-10-18.md)
+for the exact scope and evidence.
 
 The same site menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:

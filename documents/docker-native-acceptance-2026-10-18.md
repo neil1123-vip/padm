@@ -1762,3 +1762,86 @@ SwapFree `505020 KiB`，最高 load1 `2.57`、load5 `0.75`。
 本轮不重复 Hy2、网站/订阅常态矩阵或全量回归；无生产源码变化，
 不声称本次说明提交已运行 CI。仍不证明透明启用重启、IPv6、自动跳跃、
 WARP、其它核心/客户端/算法、性能长稳或完整能力，整体计划继续未完成。
+
+### 2026-10-25 3.41.6 XHTTP 实际 POST 与有界连接
+
+对应计划 5C.2f.9。固定同一 Debian 13 amd64 VPS、普通 bridge、公网 IPv4、
+正式验签 `3.41.6`，source
+`56223a1eff500c2a77c13d14e84cb66a97c86c62`，bundle SHA256
+`4b441c5fe4fdfef58986f0c133972e8ff53db1dd95ead27f0990e89050657f2d`，
+manifest SHA256
+`1348ae73776cdd43e8ced23b6cb120da4e03327afffa303655c0d8a15b909982`。
+唯一客户端 Xray `26.3.27/d2758a0`，实际二进制 SHA256
+`8255dd939c34cf966cc91517b6324dd3c8d0bcf49ffac8beca049a38c46845ed`。
+原生客户端工具镜像固定 `be8156c6`，离线观察工具镜像为 `73f8f813`，
+不混记为同一镜像。日期按北京时间记录，原件 UTC 为 2026-10-24，
+证据目录沿用 `.tmp-native-xhttp-posts-20261024/`。
+
+单次 configure 保留原 WS `443`，添加 packet-up `2444`、stream-up `2445`，
+不启用 VLESS Encryption，不重启 VPS。每模式按 1 MiB 正控、错 UUID、
+8 MiB 正控、60 秒同业务连接执行；另有原/恢复 WS 各正反例。
+12 主例共 8 正、4 拒，8 个 XHTTP 窗口分别抓包。正式配置与 URI 一致保留
+`scMaxEachPostBytes=16384`、`scMinPostsIntervalMs=5`、
+`scMaxBufferedPosts=16`、`scStreamUpServerSecs="1-2"`。
+
+| 实际 POST 计数 | 1 MiB 正控 | 错 UUID | 8 MiB 正控 | 60 秒观察 |
+| --- | ---: | ---: | ---: | ---: |
+| packet-up | 65 | 1，拒绝 | 513 | 206 |
+| stream-up | 1 | 1，拒绝 | 1 | 1 |
+
+次数来自原始 pcap 与客户端 TLS keylog 的独立 HTTP/2 解密，
+以 `tcp.stream + http2.streamid` 去重，不按业务大小推算。
+正例 POST 均实际双向 END_STREAM/HTTP `200`；packet-up 单次正文
+不超过 16384 字节，序号按 session 跨 TCP 检查连续。stream-up 不适用该
+正文上限，也不预设 POST 数。错 UUID 使用真实错误身份、原点零到达及前后
+正控判定，不强加成功状态。8 份抓包均零内核丢包，保留原始抓包、解密命令、
+tshark 版本、PDML 和逐帧观察；TCP 乱序重组显式开启，累计重组正文经 fragment
+及长度验证后仅取当前帧实际载荷，避免重复计数。
+
+回显原点只监听 Xray 网络命名空间的 `127.0.0.1:18888`，不新增公网原点。
+28 个有效 nonce 各到达一次，对应 56 个 start/complete 事件；两个错误身份
+nonce 零到达。持续例每模式在同一业务连接/同一原点 peer 完成 12 次 256 KiB
+往返，观察窗分别为 `60.000138`/`60.000158` 秒，实际业务跨度分别为
+`56.017092`/`56.025879` 秒。上传 VLESS 身份、目标、业务 nonce/字节/SHA256
+和下行逐字节回显均由解密字节重验，只证明该有界观察，不称性能或长稳。
+
+两个独立 `--network none` 容器各完整核对四档及 8 份 pcap；
+第二个在完整 baseline 通过后执行实际 pcap 截断、TLS 密钥替换、
+packet 序号重复、业务 nonce 不符 4 项实物负控，均被拒绝。
+原材料 before/after/verify 的字节、权限和属主相等；baseline、业务后与恢复
+调度严格匹配，配置前仅两个 timer 为精确暂停态。累计增长且恢复不回退，
+正式恢复、outer restore、verify 全 `0`，guard 正常完成未触发。
+213 个资源样本最低 MemAvailable `406140 KiB`、最高 load1 `3.09`。
+
+首轮 prepare 在 outer snapshot 暂停 timer 后，baseline 仍强验 active 而失败，
+0 configure、0 业务、0 单元安装；恢复与原材料权限已独核，失败四档保留于
+`attempt-1/`。将 baseline 移到暂停前，并仅在 before-configure 显式强验暂停态，
+其它阶段仍强验 active；暂停/恢复正控、5 项错误状态及权限篡改自检通过后，
+第二轮才完成上述矩阵。首轮未被回写为成功。
+
+新增 `docker/tests/xhttp-post-observe.py` 与 `xhttp-posts-real.py`，
+接入已有 `docker-xhttp-real`，复用受信固定 Xray 和真实回显逻辑。
+工具层从官方 apt 一次补齐 tcpdump/tshark；TLS/Reality × 两模式 4 例，
+真实 VLESS/业务字节/双 END_STREAM/200 和 19 项负控通过，新增部分
+`37.070` 秒，完整定向入口 `66.724` 秒。相同源码和镜像的首轮在原有
+reality-auto 小回显超时，尚未进入新 POST 检查；原错保留，未放宽期限、
+不倒推根因。未重复 daily/full，不声称本次提交已运行 CI。
+
+最终四档 SHA256：
+
+- 公开归档 `d44bc95acd4c34e0b325162476dc46390c9c5bc1a55c65758e8b3e7893b5e1a4`。
+- 私密归档 `e52fde75fba30bf914847352e426be906c27feec44b39e61cdf068dc7a74ac59`。
+- 原客户端归档 `60d43f589995cfcb280fbfd62300a5a07fc39a01c3edc0febda7d30e65b15ac5`。
+- 实际源码归档 `201c2bd115ebe873ae1e3d4e72649a5d384ab78419923c7e175c82da48665157`。
+
+两次独验后按冻结清场器精确删除 5 个本轮 systemd 单元、2 份 CLI 认领
+configure 备份和唯一远端目录，保留其它备份及 `update.SR95Tw`。
+nginx/xray/subscription 健康，原调度匹配，443 开放、2444/2445 关闭，
+透明 inactive。本轮本机容器、转发进程及 18443/12444/12445 监听已清除，
+独验容器已删除；四档、失败原件、解码及清理结果保留。
+
+本节只关闭上述固定 Xray 组合的实际 POST 计数和有界连接子项，不扩大至
+Mihomo 计数、正式原生 h3/CDN、性能长稳、其它核心/客户端/算法或环境。
+透明继续关闭；arm64、IPv6、新主机、多机控制/WG、WARP 实账号、
+自然续期及历史 Vision reset/XHTTP/TUIC 超时根因仍未由本节证明，
+整体计划继续未完成。

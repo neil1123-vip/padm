@@ -336,8 +336,15 @@ URI 使用对象自己的地址、安全身份和三项 XHTTP 字段，不继承
 不会自动建设 TLS/H3/CDN 拓扑，也不能将上下行指向无会话关联的独立后端；
 当前原生菜单的四项 `sc*` 参数已覆盖。正式 `3.41.5` 在 Debian 13 amd64 普通
 bridge 上，固定 Xray `26.3.27` / Mihomo `v1.19.28` 的 packet-up、stream-up
-各通过 1 MiB、8 MiB 双向 SHA256 完整性校验；POST 上限为 16 KiB。
-这不证明精确分段数、吞吐或长时稳定性；正式原生 h3/CDN、其它环境和完整管理仍待补。
+各通过 1 MiB、8 MiB 双向 SHA256 完整性校验；
+16 KiB 仅为 packet-up 单次 POST 正文上限，不限制 stream-up 正文。
+2026-10-25 正式 `3.41.6`、同一 amd64/IPv4/bridge 环境，固定 Xray 的原始
+抓包与 TLS keylog 独立解密通过：packet-up 的 1 MiB、8 MiB、60 秒观察分别
+实测 `65/513/206` 个 POST，stream-up 分别实测 `1/1/1`；正例均为双向
+END_STREAM 和 HTTP `200`，错误 UUID 的原点事务零到达。两模式各在同一业务
+连接完成 12 次往返，观察约 60 秒、实际业务跨度分别约 56.017/56.026 秒。
+该计数不扩展至 Mihomo，也不证明吞吐或长时稳定性；正式原生 h3/CDN、
+其它环境和完整管理仍待补。详细范围与证据见[原生验收记录](documents/docker-native-acceptance-2026-10-18.md)。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；

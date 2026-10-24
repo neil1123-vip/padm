@@ -49,7 +49,7 @@ with (node / "daemon.log").open("wb") as log:
         for item in inputs.values():
             image = json.loads(command(docker + ["image", "inspect", item["reference"]]))[0]
             assert image["Id"] == item["image_id"]
-        # 首部观察使用同一个受信固定镜像的二进制，直接在外层 Linux 回环运行。
+        # 观察前置复用同一个受信固定镜像的二进制，在外层 Linux 回环运行。
         binary_container = command(docker + ["create", inputs["xray"]["image_id"]]).decode().strip()
         binary = node / "xray"
         command(docker + ["cp", f"{binary_container}:/usr/local/bin/xray", str(binary)])
@@ -64,6 +64,10 @@ with (node / "daemon.log").open("wb") as log:
             "python3", str(scripts / "xhttp-download-real.py"), "--xray", str(binary),
             "--out", str(node / "download")])
         assert child.wait(timeout=90) == 0, "XHTTP 独立下行实链路失败"
+        child = subprocess.Popen([
+            "python3", str(scripts / "xhttp-posts-real.py"), "--xray", str(binary),
+            "--out", str(node / "posts")])
+        assert child.wait(timeout=120) == 0, "XHTTP 实际 POST 抓包观察失败"
         child = subprocess.Popen([
             "bash", str(scripts / "xhttp-real.sh"),
             *(inputs[name]["image_id"] for name in ("xray", "ops"))],
