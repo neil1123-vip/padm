@@ -507,8 +507,14 @@ listener's `shadowsocks.server_password`. Self-use and independent account user 
 other listeners, share authorizations/tokens, quotas, and accumulated traffic stay unchanged.
 The main subscription and every account URI for that listener change, so all its clients must
 reimport them. Other listeners sharing the UUID are not rotated; draining existing connections
-is not promised. Ordinary `--spec` key freezing remains. Current verification is recorded in
-plan 3D.25; host integrations and full management remain outside this scope.
+is not promised. Ordinary `--spec` key freezing remains. Verified release `3.41.5` passed
+native public IPv4 TCP testing on Debian 13 amd64 with ordinary bridge networking:
+fixed Mihomo `v1.19.28` imported the original SIP002 URIs, with 17 positive and 9 rejected
+cases across five phases. An independent offline verifier checked both listeners, self-use
+and independent accounts, exact field preservation, traffic totals, and original WS restoration.
+This evidence excludes UDP, IPv6, reboot, and draining existing connections; host integrations
+and full management remain outside scope. See
+[plan 3D.25a](../docker-menu-parity-plan.md#3d25a-两类-ss-密钥轮换原生验收).
 
 ```bash
 padm-docker edit

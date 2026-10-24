@@ -1361,3 +1361,41 @@ timer 和三业务健康恢复。`192` 样本覆盖 `382.755` 秒，最低 MemAv
 仅关闭固定客户端、amd64 普通 bridge、未启用 VLESS Encryption 的双模式
 大流完整性子项。精确分段数、性能与长时稳定、正式服务端原生 h3/CDN、
 其它环境和原历史握手超时根因仍未证明；透明保持关闭，整体计划仍未完成。
+
+### 2026-10-24 SS 自用与服务器密钥轮换
+
+验签正式 `3.41.5`、源 `a1f62355`，同一 Debian 13 amd64 VPS，
+普通 bridge 保留原 WS `443` 并增加 sing-box SS2022 AES-128 两入口
+`2446/2447`。两入口共用自用 UUID、各用不同密钥，另关联一个独立账号。
+固定 Mihomo `v1.19.28` 直接通过原生 file provider 导入正式 SIP002 URI，
+只替换连接 authority，保留原百分号编码认证段；只验 IPv4 TCP。
+
+原 WS、baseline、自用轮换、服务器轮换、恢复原 WS 五阶段通过，
+分别为 `1/1`、`5/2`、`5/2`、`5/3`、`1/1` 个正例/拒绝，合计 `17/9`。
+正例均为真实严格 TLS/200 且有正文，拒绝覆盖错 WS UUID、仅服务器密钥、
+旧自用 URI 及服务器轮换后的旧独立账号 URI。
+整个 spec 精确比较，两个正式轮换命令分别只放行选中入口一个密钥字段；
+其它入口、独立用户密钥、UUID、token、分享组及额度保持。
+三个 SS 阶段检查 Xray/sing-box 真实非 host 网络和唯一 IPv4 TCP 映射；
+各阶段双向累计增长、全部账号累计不回退。
+
+`runner_exit=official_restore=outer_restore=verify=0`，原材料字节/权限、
+两个 timer 与三业务健康恢复；guard `completed=true/triggered=false`。
+独立断网 Linux 核验按精确阶段与身份集合检查无重复、缺项，并关联新旧 URI
+摘要、冻结字段和固定客户端二进制。`230` 样本覆盖 `460.042` 秒，
+最低 MemAvailable `360256 KiB`、SwapFree `492444 KiB`，最高 load1 `4.34`。
+
+证据 `.tmp-native-ss-rotation-20261024/`：公开归档 SHA256
+`29777353997849c1b8dabcadb5bebdc5e9e249fa5fc60802988b6fef1d95f00e`；
+私密归档 SHA256
+`4a9f2107bcb536720e0c5d00f76eb4bd9580adb1201d55240554cfcd7bb6dfa7`；
+执行源码归档 SHA256
+`d0cfd3ef69dd717505aafdf1a0a20556ff615d35555a3f3f14322b0d521f320c`。
+`cleanup-remote.json` 确认实际新增集合与 CLI 认领精确匹配后，删除四份本轮
+备份及唯一远端目录，其它备份保留。清理后业务 healthy、两个 timer 匹配，
+`443` 开放、`2446/2447` 关闭，runner/guard 停止、透明两 unit inactive。
+本机客户端容器、转发、二进制和私密散件已清，公私、客户端及执行源码分开归档。
+
+只关闭固定 Mihomo、amd64 普通 bridge 的两类 SS 轮换公网 IPv4 TCP 子项，
+不代表 UDP、IPv6、重启、旧连接排空、其它算法/客户端、宿主集成或完整管理。
+透明继续关闭，整体计划仍未完成；没有生产代码变化，不重复本机 daily/full。

@@ -2233,8 +2233,8 @@ packet/stream 采用状态中的有效值，不宣称原样保留底层显式零
 真实四镜像摘要保存在该次 `node-images.json` 与脱敏日志。
 Bash/ShellCheck error、PowerShell AST、JSON 和 diff 检查通过。
 已清理本轮已解决失败的源码包/清单，成功输入由入口自动清理，保留日志/result。
-完整协议/用户管理、公网、原生宿主/arm64 与其它客户端
-不因本子项升级支持，整体实施计划保持 active。
+该次未证明公网、原生宿主/arm64 与其它客户端；后续固定组合的原生证据见 3D.25a。
+完整协议/用户管理不因本子项升级支持，整体实施计划保持 active。
 
 #### 3D.25 Shadowsocks 逐入口服务器密钥轮换
 
@@ -2250,6 +2250,43 @@ Bash/ShellCheck error、PowerShell AST、JSON 和 diff 检查通过。
 真实证据 `.tmp-regression-docker-15892a140d0442a893e0eb694fd89f11/`；
 集中完整合同 `65/65`，入口 `529.143` 秒，证据见 6A.9。
 宿主集成、其它方法、完整协议/用户管理及外部环境验收仍 deferred。
+
+#### 3D.25a 两类 SS 密钥轮换原生验收
+
+2026-10-24 使用验签正式 `3.41.5`、源 `a1f62355`，在 Debian 13 amd64
+普通 bridge 一次配置两个 sing-box SS2022 AES-128 入口 `2446/2447`，
+保留原 WS `443`。两个入口共用自用 UUID、使用不同密钥，并关联一个独立账号。
+固定 Mihomo `v1.19.28` 原生导入正式 SIP002 URI，仅替换连接 authority，
+不重编码认证段；测试仅 IPv4 TCP，透明代理始终关闭。
+
+原 WS、SS baseline、自用密钥轮换、服务器密钥轮换、原 WS 恢复五阶段，
+`17` 个严格 TLS/200 业务正例与 `9` 个身份拒绝全部通过。
+服务器密钥单独使用、旧自用 URI、服务器轮换后的旧独立账号 URI 均拒绝；
+每阶段原 WS、当前 SS 自用与独立账号按预期可用。
+正式 `edit --rotate-ss-user/--rotate-ss-server` 分别只修改选中入口一个字段；
+完整规格精确比较，其它入口、独立用户密钥、UUID、token、分享组和额度冻结，
+双向累计增长且所有账号累计不回退。三个 SS 阶段另核对真实核心网络模式
+及 `0.0.0.0:2446/2447` 的唯一 TCP 映射，没有 host 网络替代。
+
+`runner_exit=official_restore=outer_restore=verify=0`，原材料字节/权限、
+两个 timer 与三业务健康恢复；guard `completed=true/triggered=false`。
+主代理在断网 Linux 容器独立核验五阶段精确集合、URI 摘要前后关联、
+固定客户端、字段冻结、记账及恢复，`17/9` 无缺项或重复。
+`230` 个资源样本覆盖 `460.042` 秒，最低 MemAvailable `360256 KiB`、
+SwapFree `492444 KiB`，最高 load1 `4.34`。
+证据 `.tmp-native-ss-rotation-20261024/`，公开归档 SHA256
+`29777353997849c1b8dabcadb5bebdc5e9e249fa5fc60802988b6fef1d95f00e`；
+私密归档 SHA256
+`4a9f2107bcb536720e0c5d00f76eb4bd9580adb1201d55240554cfcd7bb6dfa7`。
+实际新增备份集合与 CLI 认领的四份精确匹配后删除，唯一远端目录已清，
+其它备份保留；清理后 `443` 开、`2446/2447` 闭、业务 healthy、timer 匹配、
+runner/guard 停止且透明两 unit inactive，见 `cleanup-remote.json`。
+本机客户端容器、转发、二进制和私密散件已清，公私及源码归档分离保留。
+
+只关闭固定客户端、amd64 普通 bridge 的两类 SS 轮换公网 IPv4 TCP 子项。
+UDP、IPv6、重启、既有连接排空、其它算法/客户端、宿主集成和完整管理
+不由本证据证明；本轮未改生产代码，不重复已通过的本机 daily/full，
+整体实施计划仍未完成。
 
 ## 第四步：用户、订阅与服务维护
 

@@ -418,7 +418,10 @@ Docker 账号子命令支持 SS 账号创建、复制、授权关联/移除、�
 客户端须重新导入；专项、amd64 双族 TCP/UDP 真实探针及完整合同通过，
 3D.25 增加菜单 `9 → 20` 与 `edit --rotate-ss-server ID`，只修改选中入口服务器密钥；
 自用/独立账号用户密钥、其它入口、授权/token、额度与累计保持，该入口所有客户端须重新导入。
-专项与真实链路的当前验收见实施计划；宿主集成与完整管理仍未开放。
+3D.25a 补正式 `3.41.5`、Debian 13 amd64 普通 bridge 的公网 IPv4 TCP 原生验收：
+固定 Mihomo 原生导入 SIP002，五阶段 `17` 正/`9` 拒绝及两入口、独立账号、
+精确字段/累计保持、原 WS 恢复通过，归档已独立断网核验。
+本轮不覆盖 UDP、IPv6、重启和旧连接排空；宿主集成与完整管理仍未开放。
 3C.7 新增 sing-box TUIC：v3 首配、导入、通用字段与拥塞/认证超时/心跳/0-RTT 参数编辑、
 同核复制/删除及分享链接；单 UDP 双栈入口，复用受管 TLS 与 UUID 流量账号。
 默认 `cubic`、`3s`、`10s` 和关闭 0-RTT；有限范围转发见 5C.9d，宿主集成及完整管理尚未开放。
@@ -540,7 +543,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 | 27 | VLESS TCP TLS Vision | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + fallback | v3 首配、导入、通用编辑、同核复制/删除及 URI；Xray TLS/Vision 与 PROXY v1 HTTP/1.1、HTTP/2 回落，UUID 共享额度；默认页/静态/302 与逐入口 ALPN 可事务管理，宿主集成与完整管理未开放。 |
 | 28 | Trojan TCP TLS direct | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 两核首配、导入、通用编辑、跨核心复制/删除及 URI；受管 TLS、UUID 密码共享流量额度，fallback、宿主集成及完整管理未开放。 |
 | 29 | Trojan TCP TLS fallback | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + fallback | v3 首配、导入、通用编辑、同核复制/删除及 URI；Trojan 直接终止 TLS，无额外 VLESS 前端，PROXY v1 HTTP/1.1、HTTP/2 回落，UUID 共享额度；默认页/静态/302 与逐入口 ALPN 可事务管理，宿主集成与完整管理未开放。 |
-| 30 | Shadowsocks | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP + UDP | v3 SS2022 AES-128 多用户首配、导入、通用编辑、同核复制/删除及 SIP002 链接；3D.12 增量新增首次生成私密双密钥，同 UUID 已有 SS 保留原密钥。3D.24 仅轮换选中入口的自用用户密钥，服务器密钥、其它入口及独立账号不变，专项/amd64 实链路/完整合同通过。无需 TLS，UUID 共享统计额度，宿主集成及完整管理未开放。 |
+| 30 | Shadowsocks | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP + UDP | v3 SS2022 AES-128 多用户首配、导入、通用编辑、同核复制/删除及 SIP002 链接；3D.12 增量新增首次生成私密双密钥，同 UUID 已有 SS 保留原密钥。3D.24/25 分别轮换选中入口自用/服务器密钥，其余字段冻结；专项、amd64 双栈容器实链路及完整合同通过，3D.25a 补固定 Mihomo 的原生公网 IPv4 TCP 五阶段 17 正/9 拒绝。无需 TLS，UUID 共享统计额度，宿主集成及完整管理未开放。 |
 | 31 | TUIC | 协议与入口 -> Tuic 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 首配、导入、入口/拥塞/认证超时/心跳/0-RTT 编辑、同核复制/删除及 URI；3D.8 菜单 13 提供状态、各参数专项和推荐值恢复，开启 0-RTT 确认重放风险；受管 TLS、UUID 共享额度。5C.9d 提供单核心、单个双族入口的监督范围 DNAT 和活动单端口分享，要求新 bundle marker；5C.9f 补固定 Mihomo 的首尾普通 URI 导入验收，固定客户端自动换端口与完整管理仍 deferred。 |
 
 ### 内部服务端能力

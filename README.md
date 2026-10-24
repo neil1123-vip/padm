@@ -866,7 +866,11 @@ padm-docker edit --rotate-ss-user <入口ID> --confirm PADM-DOCKER-EDIT
 自用及独立账号用户密钥、UUID、其它入口、分享授权/token、额度与累计保持；
 该入口的主订阅和所有账号 URI 随服务器密钥更新，所有客户端须重新导入。
 不联动同 UUID 的其它入口，不承诺旧连接排空；普通 `--spec` 的密钥冻结不变。
-本轮专项与真实链路验收见实施计划 3D.25，未据此开放宿主集成或完整管理。
+正式 `3.41.5` 已在 Debian 13 amd64 普通 bridge 完成两类轮换的公网 IPv4 TCP 验收：
+固定 Mihomo `v1.19.28` 原生导入 SIP002 URI，五阶段 `17` 正例、`9` 拒绝通过，
+核对两入口、自用/独立账号、精确字段冻结、累计和原 WS 恢复，并经断网独立核验。
+此证据不包含 UDP、IPv6、重启或旧连接排空；宿主集成与完整管理仍未开放。
+详见[实施计划 3D.25a](documents/docker-menu-parity-plan.md#3d25a-两类-ss-密钥轮换原生验收)。
 
 ```bash
 padm-docker edit
