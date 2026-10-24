@@ -1282,3 +1282,40 @@ timer 和三业务健康恢复，透明始终关闭。guard `completed=true/trig
 该证据关闭固定版本组合的原生 amd64 公网加密启停子项，不代表其它客户端、
 算法、arm64、加密启用后的整机重启、自然续期或原 XHTTP 超时根因已解决。
 未重复本机 daily/full，整体计划仍未完成。
+
+### 2026-10-24 双入口加密真实整机重启
+
+在上述 Debian 13 amd64 VPS 上，继续使用验签正式 `3.41.5`、源 `a1f62355`，
+固定 Xray `26.3.27/d2758a0` 与 Mihomo `v1.19.28`。本轮仅覆盖普通 bridge
+三入口部署：原 WS `443`、分别启用加密的 Vision `2443` 与 XHTTP `2444`
+（packet-up），没有 `reality_stream` 或 host 网络，透明代理始终关闭。
+
+原 WS、双加密重启前、双加密重启后、恢复原 WS 四阶段共 `16` 个严格 TLS/200
+正例、`32` 个错 UUID/旧 none/交叉配对拒绝通过；客户端摘要固定、nonce 唯一。
+原 boot `46dcd1a1-48b9-4d99-b628-ba939909fc21` 实际变为
+`27461660-19bc-4e08-9567-33627676ef46`。新 boot 在任何 configure/up/restart 前
+观察 nginx/xray/subscription 自动启动：三个原容器 ID 保持、StartedAt 改变，
+restart policy 一致。加密 URI、材料字节/权限和两个业务 timer 保持，
+跨 boot 累计不回退；四阶段双向记账增长。
+
+五个持久测试 unit 提供 worker、guard、正式恢复及八分钟断联期限；新 boot
+的 guard 真实样本与恢复 timer 剩余 `475.126` 秒均核验。随后正式 configure
+原 WS、outer restore/verify、最终公网 WS 全通过，
+`runner_exit=official_restore=outer_restore=verify=0`，guard 未触发。
+`357` 个资源样本覆盖两个 boot，最低 MemAvailable `315048 KiB`、
+SwapFree `499980 KiB`，最高 load1 `4.45`。只读预检无 global IPv6 地址和默认路由，
+不能据此完成公网双栈验收。
+
+独立断网 Linux 核验通过，证据 `.tmp-native-encryption-reboot-20261024/`：
+公开归档 `public-evidence.tar.gz` SHA256
+`6702b69a2009808669904ccfc122e9e22bf1553c2f8d792c049ed28ee45cfbad`；
+私密归档 `private-evidence.tar.gz` SHA256
+`6133406703162acb3507f08446550031231c30777eb776c4240e4e719c00edf6`。
+按归档摘要、unit 原内容和 CLI 日志认领精确清理本轮五个持久单元、四份 configure
+备份及唯一目录，其它备份保留。清理后公网严格 TLS/200、三业务健康、两个 timer
+active、透明两 unit inactive，443 开放且 2443/2444 关闭。本机客户端容器、
+forward、二进制和私密散件已清，公私证据与 runner 源码分开归档保留；
+`cleanup-remote.json`、`cleanup-local.json` 和 `final-clean-state.json` 复核通过。
+本轮只关闭固定客户端、amd64、普通 bridge 双入口加密的真实重启子项。
+其它拓扑/客户端/算法、arm64、透明启用重启、自然续期及历史 XHTTP 超时根因
+不由本证据证明；整体计划仍未完成，未重复无变化的 daily/full。

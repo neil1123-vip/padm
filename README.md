@@ -1176,8 +1176,10 @@ padm-docker edit --vless-encryption <入口ID> disable --confirm PADM-DOCKER-EDI
 重复启用或关闭返回 `15`；轮换须先关闭再启用，每次变更后重新导入分享 URI。
 更新/回滚的目标 bundle 缺少 `x-padm-vless-encryption` 时拒绝带实验配置的操作。
 固定 Xray `26.3.27` / Mihomo `v1.19.28` 的 Linux amd64 实验和正式
-`3.41.5` 在 Debian 13 amd64 上的公网启用、逐入口隔离、错误身份拒绝及关闭恢复已通过；
-其它客户端、算法、arm64 和加密启用后的整机重启未验，完整能力继续 `deferred`，
+`3.41.5` 在 Debian 13 amd64 上的公网启用、逐入口隔离、错误身份拒绝、关闭恢复，
+以及 bridge 双入口加密后的真实整机重启恢复已通过；原容器自然启动、原 URI、
+材料权限、调度和累计均保持。其它客户端、算法、arm64 及其它拓扑的加密重启未验，
+完整能力继续 `deferred`，
 验收证据见[实施计划 5C.10](documents/docker-menu-parity-plan.md#5c10-vless-encryption-有限实验管理)。
 
 离线使用同一 Release 的三个资产：

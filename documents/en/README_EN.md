@@ -772,8 +772,10 @@ Updates/rollbacks with experimental configuration reject bundles lacking
 `x-padm-vless-encryption`. Fixed Xray `26.3.27` and Mihomo `v1.19.28` passed the
 Linux amd64 experiments and the released `3.41.5` public-network enable/disable
 matrix on Debian 13 amd64, including listener isolation, invalid-identity rejection,
-and restoration. Other clients, algorithms, arm64, and host reboot with encryption
-enabled remain unverified. The complete feature remains `deferred`; see
+and restoration. A real host reboot with both bridge listeners encrypted also passed:
+the original containers started automatically, retaining the same URIs, material permissions,
+schedules, and traffic totals. Other clients, algorithms, arm64, and encrypted reboots
+with other topologies remain unverified. The complete feature remains `deferred`; see
 [acceptance evidence in plan 5C.10](../docker-menu-parity-plan.md#5c10-vless-encryption-有限实验管理).
 
 For offline use, provide all three assets from the same Release:

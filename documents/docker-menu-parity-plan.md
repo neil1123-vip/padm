@@ -72,7 +72,7 @@
 | webroot/ALPN 公网 CA 组合 | 正式 webroot/ALPN issue、standalone/ALPN auto-renew 消费失败回滚及 ALPN 同张新证书在线往返通过；3.41.5 stdin 修复已在正式包补验 | 2026-10-24 单次 fresh ALPN 新账户挑战、真实消费者失败完整回滚及同证书在线往返通过，runner/outer/verify 全 0，guard 未触发；此前两轮夹具失败归档不变。自然续期仍缺，不把强制到期、缓存授权或本地 CA 等同自然续期；此前无原始日志的第三次申请仍不定性 |
 | WARP 真实账号与公网出口 | 未完成 | 真实账号、双栈出口和故障恢复证据 |
 | Reality 共存专项 | 原生 Vision 14 点、XHTTP 20 点恢复与互切、隔离 CLI XHTTP 24 点及正式公网双模式三拓扑 6 点通过；双协议三拓扑实际重启 6 点、原失败前序补验通过；同 handler 的独立下行 Reality/h2/h3 四模式合计 12 点分两轮覆盖完成，首轮 guard 触发记录保留 | 固定唯一 VPS 的无嗅探通道验证公网账号正反例、严格网站、HTTP/2、Host/mode、双向记账及原材料/权限/timer 恢复。正式服务端原生 h3/CDN、大上传分段、性能及其余环境矩阵仍缺；原 XHTTP TLS 握手超时根因未确定，本轮 EOF/extra 探针修复不解释该历史失败 |
-| VLESS Encryption 原生公网 | 正式 3.41.5 的 Debian 13 amd64 六阶段通过 | 固定 Xray 26.3.27/Mihomo v1.19.28，28 个正例、38 个拒绝及双向记账、逐入口隔离、关闭恢复通过；其它客户端、算法、arm64、加密启用后的整机重启与完整能力仍待验 |
+| VLESS Encryption 原生公网 | 正式 3.41.5 的 Debian 13 amd64 六阶段及 bridge 双入口加密真实重启通过 | 固定 Xray 26.3.27/Mihomo v1.19.28，启停 28 正/38 拒绝；新增一次整机重启 16 正/32 拒绝，原容器自然启动、原 URI/材料权限/调度/累计保持及正式恢复通过；其它客户端、算法、arm64、其它拓扑加密重启与完整能力仍待验 |
 | HTTP relay 原生路径 | 原生外部 IPv4 通过 | 独立外部客户端访问三个公网 HTTPS 目标均严格 TLS/200，错误认证 407、未允许来源 blocked；不外推公网 IPv6 或 SOCKS UDP 支持 |
 | 自然到期真实续期 | 未完成 | 等待登记窗口（约 2026-12-17）后的真实换证，不伪造到期 |
 | 当前修复可信发布 | 3.41.5 正式发布及原生验签升级通过 | Release `39946059875` 的 32/32 作业成功；生产 Cosign 验签、assess/update/validate 和新 nonce 公网 WS/严格 TLS 通过，运行源 `a1f62355`，含 ACME stdin 修复；业务材料/权限保持，六份正式 update 回滚点保留。升级及 ALPN 补验归档见原生记录，不替代其它环境验收 |
@@ -8981,8 +8981,19 @@ Encryption 客户端保留 URI 的 XHTTP `extra`，失败日志先脱敏再截�
 `daf38382d4fd49c5a128dfc23ab70f9974d86a5c81945bb46412d0ebe63ebe77`，
 证据位于 `.tmp-native-vless-encryption-20261024/`，详见原生验收记录。
 
+同日再以正式 `3.41.5` 补齐 bridge 双入口加密真实整机重启：原 WS、加密重启前、
+加密重启后和原 WS 恢复四阶段共 `16` 正例、`32` 拒绝全部通过。两个 boot ID 不同，
+nginx/xray/subscription 原容器 ID 保持且 StartedAt 改变；未调用 up/restart 修复后
+冒充自然恢复。重启前后 URI、材料字节/权限及 timer 一致，累计不回退，
+每阶段双向记账增长；新 boot 的 guard 新鲜样本和八分钟恢复期限均核验通过。
+正式 configure 恢复、outer restore/verify 和最终公网 WS 全通过，guard 未触发。
+独立断网 Linux 核验共 `357` 个样本，最低 MemAvailable `315048 KiB`、
+SwapFree `499980 KiB`，最高 load1 `4.45`。证据
+`.tmp-native-encryption-reboot-20261024/evidence-check.json`，公开归档 SHA256：
+`6702b69a2009808669904ccfc122e9e22bf1553c2f8d792c049ed28ee45cfbad`。
+
 `vless-encryption` 从 `unsupported` 调整为 `deferred`，仅表示有限子能力已交付；
-其它客户端、算法、arm64、加密启用后的整机重启和完整协议管理不据此升级，
+其它客户端、算法、arm64、其它拓扑的加密重启和完整协议管理不据此升级，
 整体实施计划保持 active。
 
 #### 近期菜单一致性修补（跨 4A/5B/5C）
