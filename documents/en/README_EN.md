@@ -444,6 +444,14 @@ subscription downloads and four wrong-token refusals passed, including a share g
 created from seven valid unsorted listeners. Protocol 23 native URI import in Mihomo
 `v1.19.28` remains unsuccessful; manual controls do not count as native import success.
 
+Routing checks on the same bundle verified the original WS and 15 business stages:
+50 positive cases and 31 refusals across selective/global SOCKS5 TCP on both cores
+and post-resolution blocking on sing-box, including authentication refusal, upstream
+unavailability and recovery. Finalization failed on changed Docker veth addresses,
+so the original run remains failed. Original files and timers were restored; a
+separate WS probe passed one positive case, one refusal and strict website TLS/200.
+Test resources were then removed precisely.
+
 Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
 It publishes TCP and UDP on the same port for either address family and needs no TLS.
 Confirmation generates independent server/user keys; UUID is the shared traffic identity.
