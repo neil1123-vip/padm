@@ -452,6 +452,14 @@ so the original run remains failed. Original files and timers were restored; a
 separate WS probe passed one positive case, one refusal and strict website TLS/200.
 Test resources were then removed precisely.
 
+A separate four-stage UDP check passed 9 positive cases and 7 refusals for TUIC,
+SS2022 base/default-alias ports, alias removal and WS recovery. Eleven valid UDP
+nonces arrived exactly once; three refused nonces never reached the origin.
+Independent checks matched 22 actual client configurations/URIs and the running
+binary. Original files and timers were restored and test resources removed.
+Earlier failures remain archived. Hy2 probes were not repeated; automatic
+hopping, IPv6 and reboot remain outside this evidence.
+
 Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
 It publishes TCP and UDP on the same port for either address family and needs no TLS.
 Confirmation generates independent server/user keys; UUID is the shared traffic identity.
