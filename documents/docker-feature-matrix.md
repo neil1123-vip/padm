@@ -50,7 +50,10 @@ Debian 13 amd64、普通 bridge、公网 IPv4 TCP、固定 Mihomo `v1.19.28`，
 
 正式 `3.41.6` 的 TLS 四阶段实际独验通过：原生 13 正/8 拒绝，HTTPUpgrade
 手工对照 6 正/3 拒绝，4 次主/组下载及 4 次错 token 拒绝，七入口未排序
-分享组已验证。协议 23 原生 URI 导入的既有失败不因此关闭，整体仍 `deferred`。
+分享组已验证。协议 23 原生 URI 导入的既有失败不因此关闭。固定 Mihomo 的源码及
+同 binary 三个断网假身份对照已定位：导入保留 `network=httpupgrade`，发送端
+仅 `network=ws` 进入升级分支，前者实际发出普通 TLS 内的非 HTTP 首包。
+正式 URI 不变，手工对照不算原生成功，整体仍 `deferred`。
 
 同包路由原 WS 与 15 业务阶段独验取得 50 正/31 拒绝，覆盖两核心选择性/全局
 SOCKS5 TCP、纯 sing-box 解析后阻断及认证拒绝/上游不可用/恢复。

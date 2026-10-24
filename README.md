@@ -419,7 +419,9 @@ padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
 正式 `3.41.6` 随后完成 TLS 四阶段限定验收：原生客户端 13 正/8 拒绝，
 HTTPUpgrade 手工对照 6 正/3 拒绝，主/组订阅 4 次下载及 4 次错 token 拒绝，
 并验证合法未排序的七入口分享组。固定 Mihomo `v1.19.28` 的协议 23 原生
-URI 导入仍未通过，手工对照不计入原生成功；具体边界见上述验收记录。
+URI 导入仍未通过，已用固定源码和同一二进制的三个断网假身份对照定位：
+客户端保留 `network=httpupgrade`，但仅 `network=ws` 进入升级分支，实际回落到
+普通 TCP/TLS。正式 URI 保持不变，手工对照不计入原生成功；具体边界见上述验收记录。
 
 同包路由原 WS 与 15 个业务阶段独验取得 50 正/31 拒绝，覆盖两核心
 选择性/全局 SOCKS5 TCP 和纯 sing-box 解析后阻断的认证拒绝、上游不可用及恢复。

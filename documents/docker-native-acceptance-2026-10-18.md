@@ -1587,3 +1587,28 @@ v3 实际运行二进制补档 SHA256 `345a885d63037c948c8b21f6971bf78554e5e7a99
 2460–2467 TCP/UDP 关闭、443 开放。本机运行容器、转发和重复原始散件已清。
 未重复 Hy2 探针或默认别名替换 CLI，不证明自动跳跃、IPv6、重启、其它客户端、
 性能或完整管理；本批无生产代码变更，不重复 daily/full，整体计划仍未完成。
+
+### 2026-10-24 HTTPUpgrade 原生导入根因复现
+
+固定官方 Mihomo `v1.19.28` tag 对应 commit
+`cbd11db1e13a75d8e680e0fe7742c95be4cba2be`。其
+`common/convert/converter.go:308–317,356–390` 保留 `network=httpupgrade`
+并生成 `ws-opts`，未归一为 `ws` 或设置 `v2ray-http-upgrade=true`；
+`adapter/outbound/vmess.go:164–175` 仅在 `network=ws` 进入升级引擎，
+`249–258` 的默认分支使用普通 TLS，`NewVmess` 从 `490` 行开始的 switch
+未拒绝未知 network。此前“转换器显式改成 TCP”的诊断不准确，以该源码链为准。
+
+使用与原生验收相同的实际二进制，SHA256 为
+`788bb454fb613d8a060795ed4a6f4c3dae1f110b91556b21796771c1ac89a804`，
+在 Docker `--network none` 中，以假 UUID、`.invalid` 域名及本地可信证书执行
+三个对照；均成功导入、严格 TLS 1.3 和正确 SNI。原生 URI 与直接配置
+`network=httpupgrade` 的首包分别为 133、124 字节，均非 HTTP；
+手工 `network=ws` 加升级标志发出 134 字节的正确 GET、Host、Upgrade。
+源码和记录的摘要、tag/commit、三例身份与结果经独立核对一致。
+
+证据 `.tmp-httpupgrade-rootcause-20261024/evidence.tar.gz`，SHA256 为
+`066eb8a15b30c482e3e773905b0e572e3ee89ce1049bda28efb8f5ba1d31ad81`，
+包含固定官方源码、tag、复现输入和结果；容器、提取 binary 和假证书已清。
+该证据定位固定客户端的导入/发送分支限制，不修改 padm 的正式
+`net=httpupgrade` URI，也不把手工对照或后续服务器通过晋升为原生 URI 成功。
+未操作 VPS，不证明其它客户端版本；原公网失败及整体未完成状态保持。

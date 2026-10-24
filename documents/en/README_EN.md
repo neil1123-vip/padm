@@ -442,7 +442,10 @@ Formal `3.41.6` then passed four bounded TLS stages: 13 native positive cases an
 8 refusals, plus 6 positive and 3 refused manual HTTPUpgrade controls. Four main/group
 subscription downloads and four wrong-token refusals passed, including a share group
 created from seven valid unsorted listeners. Protocol 23 native URI import in Mihomo
-`v1.19.28` remains unsuccessful; manual controls do not count as native import success.
+`v1.19.28` remains unsuccessful. Fixed source and three offline fake-identity controls
+with the same binary locate the cause: the importer retains `network=httpupgrade`,
+but only `network=ws` selects the upgrade path, so it falls through to plain TCP/TLS.
+Production URIs remain unchanged; manual controls do not count as native import success.
 
 Routing checks on the same bundle verified the original WS and 15 business stages:
 50 positive cases and 31 refusals across selective/global SOCKS5 TCP on both cores
