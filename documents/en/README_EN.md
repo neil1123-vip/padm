@@ -455,6 +455,14 @@ so the original run remains failed. Original files and timers were restored; a
 separate WS probe passed one positive case, one refusal and strict website TLS/200.
 Test resources were then removed precisely.
 
+A separate five-stage check on the same release passed pure sing-box routing with
+Nginx website and subscription publication: 8 positive cases and 7 refusals,
+including one positive and one refused manual HTTPUpgrade control. Main/group
+HTTPS downloads and wrong-token refusals passed; all five website bodies matched
+the actual Nginx inline return. Actual client inputs, recovery and precise cleanup
+were independently checked. Earlier failures remain; system-resolver fallback and
+native HTTPUpgrade import are not proved by this check.
+
 A separate four-stage UDP check passed 9 positive cases and 7 refusals for TUIC,
 SS2022 base/default-alias ports, alias removal and WS recovery. Eleven valid UDP
 nonces arrived exactly once; three refused nonces never reached the origin.

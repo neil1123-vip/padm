@@ -1525,7 +1525,10 @@ SOCKS5 TCP，以及纯 sing-box SS2022 入口的解析后 IP 阻断；各路径�
 正常、认证拒绝、认证恢复、上游不可用和恢复。独立断网核验取得
 50 正例、31 拒绝，49 个原点 nonce 各一次、30 个拒绝 nonce 零到达；
 16 份原客户端请求/响应与远端相等，27 份完整客户端配置/URI 及实际二进制另核。
-混合核心开启解析后阻断的拒绝与原部署不变也有独立证据。
+该轮另以 `configure --preview` 的非零退出声称验证混合核心解析后阻断拒绝。
+后核正式 `3.41.6` 的 `dockerConfigureCommand` 不接受 `--preview`，在规格验证前
+即返回用法码 `2`；因此撤回该原生语义门禁子结论，只保留参数拒绝及部署未变事实。
+这不改变上述实际业务阶段的 50 正例、31 拒绝和原点记录。
 
 正式恢复、outer restore 和 verify 日志各唯一 `rc=0`，原材料字节/权限、
 规格及 timer 恢复，三项服务健康。随后全宿主地址相等断言失败：
@@ -1612,3 +1615,46 @@ v3 实际运行二进制补档 SHA256 `345a885d63037c948c8b21f6971bf78554e5e7a99
 该证据定位固定客户端的导入/发送分支限制，不修改 padm 的正式
 `net=httpupgrade` URI，也不把手工对照或后续服务器通过晋升为原生 URI 成功。
 未操作 VPS，不证明其它客户端版本；原公网失败及整体未完成状态保持。
+
+### 2026-10-24 3.41.6 纯 sing-box 路由与发布共存
+
+固定同一 Debian 13 amd64 VPS、正式 `3.41.6`、普通 bridge、公网 IPv4 TCP、
+Mihomo `v1.19.28`。原 WS → 纯 sing-box `23/30` → 原 WS，仅两次正式
+configure（含恢复）。五个客户端阶段共 8 正例、7 拒绝，其中 HTTPUpgrade
+手工对照另计 1 正/1 拒绝，原生部分为 7 正/6 拒绝。纯部署始终只有
+sing-box、Nginx 和 subscription 三个运行服务；同一容器集合完成健康、
+SOCKS 认证拒绝及恢复，无额外 configure。解析后阻断、hosts 优先、DNS 分流、
+直连重叠及独立账号业务取得 6 个有效原点 nonce 各一次、5 个拒绝零到达。
+
+主订阅精确 3 URI，分享组只含独立 SS 账号的 1 URI；CLI、发布文件、实际 HTTPS
+下载正文和客户端选择相等。两次严格下载、两次错 token 404 通过。
+五阶段网站正文精确等于运行中 Nginx 配置内的 53 字节 inline return 200
+literal；配置原件与宿主正式配置字节一致，pure 来源容器 ID 与 inspect 相符。
+派生的 `*-index.html` 仅为比对正文，不是部署中的静态文件。
+
+四份实际归档经 Docker 断网独核，包含实际 binary、五份原请求/响应、
+逐例 URI/provider/手工配置、DNS/SOCKS/原点事件、网站原件及身份。
+原材料 before/after/verify 字节摘要、权限/属主清单相等，稳定宿主地址保持，
+计量无回退，恢复四项全 `0`，guard 正常完成且未触发。
+篡改实际网站来源容器 ID 的最小检查被拒绝。
+86 个资源样本覆盖 `170.541` 秒，最低 MemAvailable `393104 KiB`、
+SwapFree `504436 KiB`，最高 load1 `3.28`、load5 `1.07`；
+恢复 WS 于 `2026-10-24T12:36:51.094Z` 完成。
+
+证据 `.tmp-native-routing-publication-20261024/`：
+公开归档 SHA256 `00454e4ba23c52fa9da68a43e5cbd639515363a8622b5ad5dc4d21490f202aa1`；
+私密归档 SHA256 `2c15386845f5f06c59ee3becd84cc329a5220b91cab11ec1df540eef9a05bfba`；
+实际源码归档 SHA256 `bbad197c32a5f09b9a04df65979ed39a0250c0c0162de7d69f924281b26013c2`；
+原客户端归档 SHA256 `bc3d1b98a03da7521cb20734aaffad0f5fc3cfbba1163c5d343b642685e827de`。
+前两次准备分别因不支持的 `configure --preview`、错误假设存在静态首页而停止，
+均在客户端请求和 pure configure 前，原档保留。第二次正式/outer/verify
+恢复全 `0`，唯一认领恢复备份已清。第三次改用正式 schema 函数只读验证、
+从实际 Nginx 取正文，并先离线生成同候选集中核对路径与 CLI。
+旧路由同一 preview 所声称的原生语义门禁结论已撤回，见前节。
+
+独验后精确删除两份本轮 CLI 认领备份和唯一远端目录，保留其它备份及
+`update.SR95Tw`；三服务健康、调度匹配、2470 TCP/UDP 关闭、443 开放。
+本机容器、转发及已归档的请求/响应、candidate、payload 散件已清。
+SS 虽有 TCP/UDP 映射，本轮只测 TCP；不证明系统解析器回退陷阱、UDP 业务、
+IPv6、WARP、重启或原生 HTTPUpgrade URI 导入，旧失败保留，透明关闭。
+本批无生产代码变更，不重复 daily/full；完整路由管理与整体计划仍未完成。
