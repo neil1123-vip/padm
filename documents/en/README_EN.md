@@ -438,6 +438,12 @@ timers and traffic totals were preserved; only spec release/images changed.
 Rollback point `update.SR95Tw` remains. This release includes the fix for valid
 unsorted share-group listener lists; other environment checks remain open.
 
+Formal `3.41.6` then passed four bounded TLS stages: 13 native positive cases and
+8 refusals, plus 6 positive and 3 refused manual HTTPUpgrade controls. Four main/group
+subscription downloads and four wrong-token refusals passed, including a share group
+created from seven valid unsorted listeners. Protocol 23 native URI import in Mihomo
+`v1.19.28` remains unsuccessful; manual controls do not count as native import success.
+
 Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
 It publishes TCP and UDP on the same port for either address family and needs no TLS.
 Confirmation generates independent server/user keys; UUID is the shared traffic identity.

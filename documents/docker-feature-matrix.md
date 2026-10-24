@@ -48,6 +48,10 @@ HTTPUpgrade 原生 URI 导入也未通过，手工对照不代替原生导入。
 仅 release/images 改变，正式回滚点 `update.SR95Tw` 保留。
 本轮可信包已包含分享组合法未排序列表修复，证据不替代其余环境验收。
 
+正式 `3.41.6` 的 TLS 四阶段实际独验通过：原生 13 正/8 拒绝，HTTPUpgrade
+手工对照 6 正/3 拒绝，4 次主/组下载及 4 次错 token 拒绝，七入口未排序
+分享组已验证。协议 23 原生 URI 导入的既有失败不因此关闭，整体仍 `deferred`。
+
 3D.11–3D.13 提供协议菜单 `14/15/16` 与
 `edit --protocol-add/--protocol-remove/--protocol-rebuild`。
 新增接受已有受管 v1/v2/v3，旧规格仅在成功确认后迁移；

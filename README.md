@@ -416,6 +416,11 @@ padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
 调度及累计保持；仅规格的 release/images 改变，保留 `update.SR95Tw` 回滚点。
 本次运行包含分享组合法未排序列表修复，不代表其余环境验收完成。
 
+正式 `3.41.6` 随后完成 TLS 四阶段限定验收：原生客户端 13 正/8 拒绝，
+HTTPUpgrade 手工对照 6 正/3 拒绝，主/组订阅 4 次下载及 4 次错 token 拒绝，
+并验证合法未排序的七入口分享组。固定 Mihomo `v1.19.28` 的协议 23 原生
+URI 导入仍未通过，手工对照不计入原生成功；具体边界见上述验收记录。
+
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
