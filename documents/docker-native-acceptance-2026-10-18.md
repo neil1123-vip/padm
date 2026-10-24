@@ -1658,3 +1658,44 @@ SwapFree `504436 KiB`，最高 load1 `3.28`、load5 `1.07`；
 SS 虽有 TCP/UDP 映射，本轮只测 TCP；不证明系统解析器回退陷阱、UDP 业务、
 IPv6、WARP、重启或原生 HTTPUpgrade URI 导入，旧失败保留，透明关闭。
 本批无生产代码变更，不重复 daily/full；完整路由管理与整体计划仍未完成。
+
+### 2026-10-24 3.41.6 系统解析器回退陷阱
+
+固定同一 Debian 13 amd64 VPS、正式 `3.41.6`、普通 bridge、公网 IPv4 TCP、
+Mihomo `v1.19.28` 原生 URI 导入。原 WS → 纯 SS2022 系统解析 A →
+仅增两个 exact DNS 选择器的 B → 原 WS；含恢复三次 configure。
+四阶段独验通过 6 正例、4 拒绝，其中系统解析正例 4 个、指定 DNS 拒绝 2 个。
+
+A 将两个随机域名仅写入实际 sing-box 容器的 Docker hosts 文件，解析到
+未被阻断的 `127.0.0.2`，两次认证 SOCKS 出站业务成功。B 使用同名、相同
+hosts 映射及其它配置，只增加两个 exact DNS 选择器；夹具分别返回 SERVFAIL
+和丢弃查询。实际核心日志明确结束两次请求，客户端均为 `RemoteDisconnected`，
+不是客户端等待超时。指定查询真实到达 DNS 夹具，两拒绝无 SOCKS 连接或原点
+到达；第三个未匹配域名严格按“正控 → 两拒绝 → 正控”完成，4 个有效原点
+nonce 各一次。容器 hosts 按原字节、inode、权限恢复，容器及宿主 resolv.conf
+不变，未修改宿主 hosts。
+
+独立断网核验实际四归档、四份原请求/响应、URI/provider、生成配置和原始日志。
+正式镜像使用 gcompat loader；取证分别绑定 loader 的 exe/摘要、实际 core
+的 map_files 引用与容器 root 文件的 stat/inode/摘要，保留原 maps 和 NUL
+分隔 cmdline，不把 loader 当作 sing-box。将实际两份核心记录的 core 摘要
+同时替换为 loader 摘要的最小篡改负控被拒。原材料 before/after/verify 清单相等，
+恢复四项全 `0`，guard 正常完成未触发，四阶段计量增长与不回退检查通过。
+115 个资源样本覆盖 `228.603` 秒，最低 MemAvailable `411476 KiB`、
+SwapFree `505020 KiB`，最高 load1 `1.69`、load5 `0.82`。
+
+证据 `.tmp-native-resolver-trap-20261024/`：
+公开归档 SHA256 `790ed752b0ae57c526ad401af3a7c5238c1c6d0f2faacf4361d7bc00929d672b`；
+私密归档 SHA256 `2d58a3e6cc718ae128295d2033e2ef6da51402ae52d26a4ebcda86939118d051`；
+实际源码归档 SHA256 `d3a8863d38de2f0afeb588f7f3e53e09fed79ea1a713b86a361e22214ae74601`；
+原客户端归档 SHA256 `83eec5bc21ea26b11c6e053e916b78e20923abb916e9091b562ddb1808d92fc7`。
+前两轮在 A 业务前错误认定 init 或 loader 的进程身份；首轮未保存原异常栈，
+不补造。第三轮程序恢复成功，但 JSON 对象键排序把末尾正控提前，独验拒绝
+整轮通过；三轮原档与恢复/清理材料保留。显式执行序列经真实记录器的排序请求
+离线自检后，第四轮才完成上述完整矩阵，不将先前失败改写为通过。
+
+独验后已精确删除三份本轮 CLI 认领备份和唯一远端目录，保留其它备份及
+`update.SR95Tw`；三服务健康、调度匹配、2470 TCP/UDP 关闭、443 开放，
+控制器容器/转发和独验容器已停止清理，透明保持 inactive。
+本轮不证明 UDP 业务、IPv6、WARP、重启或其它客户端；无生产代码变化，
+未重复 daily/full，整体计划仍未完成。

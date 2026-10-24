@@ -463,6 +463,15 @@ the actual Nginx inline return. Actual client inputs, recovery and precise clean
 were independently checked. Earlier failures remain; system-resolver fallback and
 native HTTPUpgrade import are not proved by this check.
 
+A separate four-stage system-resolver fallback check on the same release passed
+6 positive cases and 4 refusals. Two random names first completed business requests
+through the actual container hosts file; adding only exact DNS selectors then
+produced core-ended SERVFAIL and dropped-query failures, with no system fallback
+or origin arrival. Client timeouts never counted as refusals. An unmatched name
+passed before and after both failures. Container hosts and host resolver files
+were restored. Three earlier evidence or ordering failures remain archived; this
+check covers fixed-client IPv4 TCP, without extending UDP or reboot support.
+
 A separate four-stage UDP check passed 9 positive cases and 7 refusals for TUIC,
 SS2022 base/default-alias ports, alias removal and WS recovery. Eleven valid UDP
 nonces arrived exactly once; three refused nonces never reached the origin.
