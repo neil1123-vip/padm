@@ -57,6 +57,7 @@ if [[ "${SUBSCRIPTION_PUBLICATION}" == 1 ]]; then
 fi
 [[ -z "${SUBSCRIPTION_SITE_TEMPLATE}" ]] || TEST_NAME="${TEST_NAME}-photos"
 for tool in docker jq python3 sha256sum tar openssl awk diff; do command -v "${tool}" >/dev/null; done
+python3 -B "${PROJECT_ROOT}/docker/tests/tls-uri-xray.py" --selfcheck
 stage=images
 XRAY_ID=$(docker image inspect --format '{{.Id}}' "${XRAY_REF}")
 SING_ID=$(docker image inspect --format '{{.Id}}' "${SING_REF}")
@@ -552,11 +553,13 @@ alpn=$(jq -c '.core.protocols[0].fallback_tls.alpn // ["h2","http/1.1"]' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json")
 python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" \
     "${TRANSPORT}" "${PUBLICATION_NAME:-${TEST_NAME}}" "${DOMAIN}" "${APP_PROTOCOL}" "${CDN_ENTRIES}" \
-    "${cdnPhase}" "${alpn}" "${PUBLICATION_UUID:-${UUID}}" "${SUBSCRIPTION_PUBLICATION}" <<'PY'
+    "${cdnPhase}" "${alpn}" "${PUBLICATION_UUID:-${UUID}}" "${SUBSCRIPTION_PUBLICATION}" \
+    "${PROJECT_ROOT}/docker/tests/tls-uri-xray.py" <<'PY'
 import base64
 import ipaddress
 import json
 import pathlib
+import runpy
 import sys
 import urllib.parse
 import uuid
@@ -611,6 +614,17 @@ def parse(line, server=servers[0], label=names[0]):
     assert str(uuid.UUID(value["id"])) == value["id"]
     return value
 values = [parse(line, server, label) for line, server, label in zip(lines, servers, names)]
+xray_client = runpy.run_path(sys.argv[13])["xray_client"]
+for line, value in zip(lines, values):
+    converted = xray_client(line, 2080)["outbounds"][0]
+    assert converted["protocol"] == app
+    stream = converted["streamSettings"]
+    assert stream["network"] == transport and stream["tlsSettings"]["serverName"] == domain
+    assert stream["tlsSettings"]["allowInsecure"] is False
+    remote = converted["settings"]["servers" if app == "trojan" else "vnext"][0]
+    assert remote["address"] == value["add"] and remote["port"] == int(value["port"])
+    user = remote if app == "trojan" else remote["users"][0]
+    assert user["password" if app == "trojan" else "id"] == identity
 value = values[0]
 if app != "vmess":
     sample = urllib.parse.urlsplit(lines[0])

@@ -1,8 +1,10 @@
 # Debian 13 原生与公网验收
 
-验收日期：2026-10-18–24（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
+验收日期：2026-10-18–25（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
-**当前现场（2026-10-24）**：3.41.5 已正式发布并在 VPS 验签升级，ACME stdin 修复已生效；
+**当前现场（2026-10-25）**：VPS 已验签升级至正式 3.41.6，包含 ACME stdin 和分享组合法未排序列表修复；
+固定 Xray 的 TLS 七入口显式 URI 转换互通已通过四阶段独验并清场；
+XHTTP 实际 POST 计数和 60 秒有界连接证据也已补齐，不扩大原生 URI 导入或长稳范围。
 Vision/XHTTP 三拓扑故障恢复、
 公网双模式、同 handler 独立下行及六点实际整机重启已取得限定范围证据。
 原失败前序的两次 bridge 重启及 host 前测补验通过，未复现不等于根因已修复。
@@ -1845,3 +1847,58 @@ Mihomo 计数、正式原生 h3/CDN、性能长稳、其它核心/客户端/算�
 透明继续关闭；arm64、IPv6、新主机、多机控制/WG、WARP 实账号、
 自然续期及历史 Vision reset/XHTTP/TUIC 超时根因仍未由本节证明，
 整体计划继续未完成。
+
+### 2026-10-25 3.41.6 固定 Xray 的 TLS 七入口转换互通
+
+对应计划 5C.2f.10。沿用同一 Debian 13 amd64、普通 bridge、公网 IPv4 TCP，
+正式 `3.41.6`、源提交 `56223a1eff500c2a77c13d14e84cb66a97c86c62`，
+bundle/manifest 摘要与上节相同，生产 Cosign `Verified OK` 已复核。
+唯一客户端 Xray `26.3.27/d2758a0`，二进制 SHA256
+`8255dd939c34cf966cc91517b6324dd3c8d0bcf49ffac8beca049a38c46845ed`，
+客户端镜像固定 `9f96453256b30374c66c90d676953402d47ec9f1fbc1aa251feb1bde21985f31`。
+
+原 WS → TLS 七入口共存 → 纯 sing-box 23 → 恢复 WS 四阶段通过；
+七入口为 22/Xray、23/Xray、23/sing-box、24/Xray、25/Xray、27/Xray、
+29/Xray，临时端口 `2450–2456`。逐阶段正/拒分别为 `1/1`、`15/8`、
+`2/1`、`1/1`，合计 30 例＝19 正、11 错认证拒绝。另有 4 次主/组
+严格 HTTPS 下载及 4 次错 token `404`、2 次分享组业务、11 次错 SNI 拒绝。
+七入口合法未排序分享组保持同一身份，纯 sing-box 23 阶段从 `2452`
+发布网站与主/组订阅。正例 URI 来自实际 HTTPS 下载正文，CLI、发布文件、
+下载正文逐字相等；配置只映射连接地址/端口，认证、SNI、ALPN、Host、
+path、serviceName、flow 均保持。
+
+本轮明确为 `uri-to-xray-config`，不是 Xray 原生 URI 导入；
+`raw_uri_matrix_passed=false`、`native_uri_import=false`。
+不修改正式 URI，也不把本轮成功用于关闭 Mihomo 原生 HTTPUpgrade 限制。
+新增测试转换器 `docker/tests/tls-uri-xray.py`，7 种正式模板及 14 项负控
+自检通过；接入 `vmess-real.sh` 的实际 links 核对与 `vmess.sh` 日常合同。
+`docker-vmess -Jobs 2` 在当前源码 Docker 快照实跑 `227.036` 秒通过，
+`cache_hit=false`；没有重复 daily/full，不声称本次提交已运行 CI。
+
+四档在 `--network none`、只读证据挂载的容器中独验通过，核实际执行源码、
+二进制、四份原请求/响应、逐条订阅转换、仅地址/端口映射、计量和原件恢复。
+完整 baseline 后，真实归档中的 TLS 放宽、下载正文替换、额度改变、
+恢复原件字节篡改 4 项负控均被拒绝。145 个资源样本最低 MemAvailable
+`369248 KiB`、最高 load1 `3.35`，guard 正常完成且未触发；
+正式恢复、outer restore、verify 全 `0`。材料字节/属主权限、调度匹配，
+双向累计增长且不回退，透明始终关闭。
+
+证据目录 `.tmp-native-tls-xray-20261025/`，四档 SHA256：
+
+- 公开归档 `91cf80e4ad1d85804596222c7cdaa9d92e267bad7da1be8ed32647e89cee4794`。
+- 私密归档 `ba1a9f53087f999c37cf8f59dd805411cc3db49d7150945ab7592f98252362d2`。
+- 原客户端归档 `43904c1c0125166e03a849309bba9e0575b16e8f3fb973b7d0d10cebd965d47d`。
+- 实际源码归档 `68d261ea3b4f2a3ec1d6a46115514541fd926dec0f09cededff19f1bc247ec07`。
+
+独验后按上述公开/私密摘要核对远端，精确删除唯一测试目录及 CLI 认领的
+3 份备份，其它备份与 `update.SR95Tw` 保留。三项业务健康、timer 匹配，
+443 开放，`2450–2456` 关闭，runner/guard inactive，透明 inactive。
+本机客户端/转发已停止删除；重复源码、配置、URI 和二进制均先入档逐字
+核对后删除，四档、私有观察归档、独验器及清理证明保留。清理脚本先遇空
+tar 文件流处理错误，删除前已修正；删除后汇总报错，随后只读补核全部
+预定路径消失与四档摘要不变，没有重复删除或丢弃原证据。
+
+本节不验证 UDP、VPS 重启、原生 URI 导入、其它核心/客户端/算法或环境，
+不解释历史 Vision reset、XHTTP/TUIC 超时；透明启用重启按要求不做。
+原生 arm64、IPv6、新主机灾备、多机控制/WG、WARP 实账号、自然续期、
+正式原生 h3/CDN 和性能长稳仍未完成，整体计划继续未完成。

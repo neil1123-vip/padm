@@ -457,6 +457,18 @@ with the same binary locate the cause: the importer retains `network=httpupgrade
 but only `network=ws` selects the upgrade path, so it falls through to plain TCP/TLS.
 Production URIs remain unchanged; manual controls do not count as native import success.
 
+On 2026-10-25, the same release passed seven TLS entry combinations using fixed
+Xray `26.3.27/d2758a0` with explicit URI-to-config conversion. Original WS, combined
+entries, pure sing-box 23 and restored WS passed 19 positive cases and 11 authentication
+refusals, plus four strict HTTPS subscription downloads, four wrong-token 404s,
+two group business checks and 11 wrong-SNI refusals. Positive URIs came from actual
+downloads; only connection addresses and ports were mapped. Four archives and four
+physical tampering controls passed offline verification; original materials, permissions,
+timers and traffic totals were preserved, and test resources were removed.
+This is converted interoperability, not native Xray URI import, and does not remove
+the Mihomo HTTPUpgrade limitation. Transparent proxying stays disabled; other
+environments and complete management remain unverified.
+
 Routing checks on the same bundle verified the original WS and 15 business stages:
 50 positive cases and 31 refusals across selective/global SOCKS5 TCP on both cores
 and post-resolution blocking on sing-box, including authentication refusal, upstream

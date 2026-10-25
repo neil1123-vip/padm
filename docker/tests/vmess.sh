@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+python3 -B "$(dirname -- "${BASH_SOURCE[0]}")/tls-uri-xray.py" --selfcheck
+
 # 完整协议基线只串接一次，CI 不重复运行前置入口。
 if [[ "${PADM_DOCKER_TRADITIONAL_TLS_SCOPE:-full}" == transports ]]; then
     # 传输分段只初始化共有夹具，基础协议已由互补分段验收。
