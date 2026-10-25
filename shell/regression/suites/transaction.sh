@@ -143,6 +143,7 @@ registerRegressionFunctionLeaf entry-helper-config runEntryHelperConfigRegressio
 runRegressionCoreSafetyRollback() (
     set -euo pipefail
     runCheckPortOpenAbortRegression
+    runCheckPortOpenRejectsPgrepFalsePositiveRegression
     runCheckPortOpenIPRegression
     runCoreReleaseArchiveRejectsRegression unsafe-path
     runCoreReleaseArchiveRejectsRegression symlink-payload

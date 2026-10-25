@@ -76,6 +76,41 @@ runCheckPortOpenAbortRegression() (
     [[ "${events}" == $'restore\n' && "${removedBackup}" == "${backupDir}" ]]
 )
 
+runCheckPortOpenRejectsPgrepFalsePositiveRegression() (
+    set -euo pipefail
+    local events= btDomain= curlLog="${TMP_DIR}/check-port-open-curl.log"
+
+    allowPort() { return 0; }
+    checkPortOpenBackupCreate() { printf -v "$1" '%s' fixture; }
+    singBoxRunning() { return 1; }
+    xrayRunning() { return 1; }
+    pgrep() {
+        if [[ "$1" == -f && "${2:-}" == nginx ]]; then
+            printf '12345\n'
+            return 0
+        fi
+        return 1
+    }
+    runCoreServiceActionAllowFailure() { events+="${1}:${2}"$'\n'; }
+    cleanAgentNginxConf() { return 0; }
+    hasIPv6Connectivity() { return 1; }
+    writeCheckPortOpenNginxConfig() { return 0; }
+    nginxStartFailureCard() { events+="start-failure"$'\n'; }
+    removeCheckPortOpenNginxConfig() { events+="remove-config"$'\n'; }
+    padmRestoreManagedFileBackupManifest() { events+="restore-config"$'\n'; }
+    padmRemoveCleanupPath() { events+="cleanup:$1"$'\n'; }
+    errorCard() { events+="error:$1"$'\n'; }
+    curl() { printf '%s\n' "$*" >>"${curlLog}"; }
+    successCard() { events+="success"$'\n'; }
+    statusCard() { events+="status"$'\n'; }
+
+    : >"${curlLog}"
+    regressionExpectStatus 1 checkPortOpen 2443 example.com
+    [[ "${events}" == *$'start-failure\n'* ]]
+    [[ "${events}" == *$'restore-config\n'* && "${events}" == *$'cleanup:fixture\n'* ]]
+    [[ ! -s "${curlLog}" ]]
+)
+
 runCheckPortOpenIPRegression() (
     set -euo pipefail
     local address

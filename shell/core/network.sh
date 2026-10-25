@@ -994,7 +994,7 @@ checkPortOpen() {
             checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "端口检测 Nginx 启动失败"
             return 1
         fi
-        if [[ -z $(pgrep -f "nginx") ]]; then
+        if ! nginxRunning; then
             nginxStartFailureCard "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
             removeCheckPortOpenNginxConfig || true
             checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "端口检测未发现 Nginx 进程"
