@@ -149,14 +149,22 @@ def negative_checks(case, client_cancel=False, terminal_required=True):
 
         def server_first(tree):
             root = tree.getroot()
-            packet = next(packet for packet in root.findall("packet")
-                          if observer["one"](packet, "tcp.flags.fin") in ("1", "True")
-                          and observer["one"](packet, "tcp.dstport") == str(report["port"]))
-            early = ET.fromstring(ET.tostring(packet))
+            request = next(packet for packet in root.findall("packet")
+                           if observer["one"](packet, "tcp.dstport") == str(report["port"]))
+            early = ET.fromstring(ET.tostring(request))
+            for protocol in list(early.findall("proto")):
+                if protocol.get("name") == "http2":
+                    early.remove(protocol)
             wrong_direction(early)
-            number = observer["fields"](early, "frame.number")[0]
-            number.set("show", str(int(number.get("show")) - 1))
-            root.insert(list(root).index(packet), early)
+            first_http2 = min(int(observer["one"](packet, "frame.number"))
+                              for packet in root.findall("packet")
+                              if packet.find("proto[@name='http2']") is not None)
+            observer["fields"](early, "frame.number")[0].set("show", str(first_http2 - 1))
+            for name, value in (("tcp.flags.syn", "False"), ("tcp.flags.fin", "True"),
+                                ("tcp.flags.reset", "False"), ("tcp.flags.ack", "True"),
+                                ("tcp.len", "0"), ("frame.cap_len", "54"), ("frame.len", "54")):
+                observer["fields"](early, name)[0].set("show", value)
+            root.insert(list(root).index(request), early)
 
         def missing_cancel(tree):
             for item in observer["fields"](tree.getroot(), "http2.rst_stream.error"):
@@ -171,9 +179,9 @@ def negative_checks(case, client_cancel=False, terminal_required=True):
             expect("missing-client-fin", lambda tree: terminal(tree, remove_fin))
             expect("foreign-connection-fin", lambda tree: terminal(tree, wrong_connection))
             expect("server-fin", lambda tree: terminal(tree, wrong_direction))
-            expect("server-first-fin", server_first)
         expect("missing-client-cancel", missing_cancel)
         expect("business-corrupt", body)
+        expect("server-first-fin", server_first)
         expect("strict-end-stream", lambda tree: None, cancel=False)
     elif not client_cancel:
         expect("missing-end-stream", missing_end)

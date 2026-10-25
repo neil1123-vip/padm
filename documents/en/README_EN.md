@@ -405,7 +405,12 @@ packet-up POSTs and `1/1/1` stream-up POSTs. Positive POSTs ended in both
 directions with HTTP `200`; wrong UUIDs produced no origin transactions.
 Each mode completed 12 round trips on one business connection, with about
 60 seconds observed and business spans of 56.017/56.026 seconds.
-These counts do not cover Mihomo, throughput or sustained stability.
+Those formal counts cover only the fixed production Xray combination, not
+throughput or sustained stability. On 2026-10-26, a local Docker Linux run also
+tested 1 MiB real echoes for fixed Xray Reality/TLS and Mihomo Reality across
+packet-up and stream-up: each packet-up recorded 65 POSTs and each stream-up
+recorded one. The Mihomo cancellation lifecycle and a synthetic server-first-FIN
+parser negative control passed. This is not VPS/public Mihomo acceptance.
 Formal native h3/CDN, other environments and full management remain `deferred`.
 See the [native acceptance record](../docker-native-acceptance-2026-10-18.md)
 for the exact scope and evidence.

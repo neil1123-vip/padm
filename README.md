@@ -343,8 +343,12 @@ bridge 上，固定 Xray `26.3.27` / Mihomo `v1.19.28` 的 packet-up、stream-up
 实测 `65/513/206` 个 POST，stream-up 分别实测 `1/1/1`；正例均为双向
 END_STREAM 和 HTTP `200`，错误 UUID 的原点事务零到达。两模式各在同一业务
 连接完成 12 次往返，观察约 60 秒、实际业务跨度分别约 56.017/56.026 秒。
-该计数不扩展至 Mihomo，也不证明吞吐或长时稳定性；正式原生 h3/CDN、
-其它环境和完整管理仍待补。详细范围与证据见[原生验收记录](documents/docker-native-acceptance-2026-10-18.md)。
+上述正式计数仅为固定 Xray 生产组合，不证明吞吐或长时稳定性。2026-10-26
+另在本地 Docker Linux 对固定 Xray Reality/TLS、Mihomo Reality 的 packet-up/
+stream-up 各跑 1 MiB 真实回显；各 packet-up 计得 65 个 POST，各 stream-up
+计得 1 个 POST，并验证 Mihomo 取消生命周期及解析器的合成服务端先 FIN 负控。
+这不是 VPS/公网验收；正式原生 h3/CDN、其它环境和完整管理仍待补。详细范围与
+证据见[原生验收记录](documents/docker-native-acceptance-2026-10-18.md)。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；

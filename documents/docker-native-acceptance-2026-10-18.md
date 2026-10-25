@@ -1902,3 +1902,23 @@ tar 文件流处理错误，删除前已修正；删除后汇总报错，随后�
 不解释历史 Vision reset、XHTTP/TUIC 超时；透明启用重启按要求不做。
 原生 arm64、IPv6、新主机灾备、多机控制/WG、WARP 实账号、自然续期、
 正式原生 h3/CDN 和性能长稳仍未完成，整体计划继续未完成。
+
+### 2026-10-26 本地 Docker XHTTP POST 与取消负控
+
+在本机 Docker Linux `amd64` 使用当前工作区快照运行
+`docker-xhttp-real -Jobs 2 -ForceRun`，入口通过，`cache_hit=false`，
+总耗时 `84.782` 秒。固定 Xray `26.3.27/d2758a0` 与 Mihomo
+`v1.19.28`，分别覆盖 Xray Reality/TLS 和 Mihomo Reality 的
+packet-up、stream-up，共 6 组 1 MiB 实际回显。各 packet-up 均独立解密
+并计得 65 个 POST，各 stream-up 均计得 1 个 POST；真实 VLESS 业务字节
+与逐字节回显校验通过。此为本地容器互通证据，不是 VPS、公网或生产验收。
+
+Mihomo stream-up 取消例在业务完成后停止客户端，HTTP/2 CANCEL 与进程生命
+周期检查通过；抓包未稳定包含客户端 SYN/FIN，因此仍使用生命周期证据，
+不声称观察到真实 TCP FIN。新增离线负控合成同一连接、早于 HTTP/2 业务的
+服务端 FIN PDML，解析器按预期拒绝；该合成帧只验证拒绝逻辑，不是线上抓包。
+本轮报告及日志保留在
+`.tmp-regression-docker-a611a1aead7e441ca9a1985c1ad6917e/`；
+测试容器退出时清除了每次运行的 pcap、TLS keylog 与 PDML，未保留这些原始材料。
+透明代理保持关闭；正式 Mihomo 公网验收、性能/长稳及其余环境仍未完成，
+整体计划继续未完成。

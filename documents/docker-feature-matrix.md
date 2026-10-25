@@ -459,8 +459,11 @@ stream-up 实测 `1/1/1/1`；正例全部双 END_STREAM/200，packet-up 单次�
 观察器接入已有 `docker-xhttp-real`，复用固定二进制和工具镜像；新增 TLS/Reality
 双模式 4 例及 19 项负控，定向入口 66.724 秒通过。同源码前轮既有 reality-auto
 超时保留，不倒推根因，不重复 daily/full。
-精确计数不扩大至 Mihomo；性能/长时稳定、正式原生 h3/CDN、其它环境及完整管理
-继续 `deferred`，透明代理保持关闭，整体计划未完成。
+2026-10-26 本地 Docker `docker-xhttp-real -Jobs 2 -ForceRun` 增补固定 Mihomo
+`v1.19.28` Reality 的实际计数：packet-up `65`、stream-up `1`，并通过
+取消生命周期和合成服务端先 FIN 负控；该项是本地容器证据，不是公网 Mihomo
+验收。性能/长时稳定、正式原生 h3/CDN、其它环境及完整管理继续 `deferred`，
+透明代理保持关闭，整体计划未完成。
 填充字节分布、抗识别、长时复用和吞吐收益未证明；本地 amd64 合同、菜单、
 定向 limits 30.079 秒、真实 XHTTP 25.743 秒、菜单校正后 55.976 秒、
 dispatcher 2.217 秒，完整 `docker-contracts` 一次通过（383.362 秒，

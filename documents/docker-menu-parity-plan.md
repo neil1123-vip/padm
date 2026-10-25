@@ -75,7 +75,7 @@
 | TLS 原生客户端与 HTTPUpgrade | 正式 3.41.6 的 Mihomo 限定验收及 Xray 显式转换七入口四阶段通过，原生协议 23 的固定客户端限制保留 | 固定 Mihomo：原生 13 正/8 拒绝、HTTPUpgrade 手工 6 正/3 拒绝；新增固定 Xray 正式 URI→配置互通 19 正/11 拒绝、主组 4 下载/4 错 token/2 组业务及 11 错 SNI，四档和 4 项实物负控独验通过。正式 URI 不变；Xray 转换成功不等于原生 URI 导入，不改变 Mihomo 仅 ws 进入升级分支的已定位限制 |
 | SOCKS5 TCP 与解析后阻断 | 正式 3.41.6 的 pure 路由/发布、系统解析器回退及 pure 路由合并真实重启通过，旧失败保留 | 发布补验 8 正/7 拒绝、回退补验 6 正/4 拒绝已独核；新增路由/UDP 合并四阶段 14 正/10 拒绝、一次真实重启，原容器自然恢复 hosts/DNS、解析后阻断及认证 SOCKS5 TCP，6 个 TCP 原点 nonce 各一次。原 WS、材料/权限/调度和累计保持，四档独验及 10 项实物篡改负控通过，测试资源已清。旧 16 阶段 matrix=false、回退前三轮及本次前三轮失败均保留；IPv6/WARP、其它核心/客户端重启和原生 HTTPUpgrade 导入限制仍未补齐 |
 | UDP 别名与 TUIC | 正式 3.41.6 最小补验及基口/默认别名合并真实重启通过，旧失败保留 | 既有四阶段 9 正/7 拒绝及唯一 remove edit 保留；新增 TUIC `2464`、SS2022 基口 `2465`/默认别名 `2467` 的 IPv4 UDP 在同一次实际重启后自然恢复，18 个有效 UDP nonce 各一次、6 个拒绝零到达，错身份均有同端口前后正控；24 独立抓包/96 份请求应答原件独核，恢复清理完成。本次前三轮失败及旧 TUIC 超时不改写；Hy2 探针/默认别名替换 CLI 未重复，IPv6、自动跳跃、其它客户端与完整管理仍缺；回环原点直连不代表 SOCKS UDP |
-| Reality 共存专项 | 原生 Vision 14 点、XHTTP 20 点恢复与互切、隔离 CLI XHTTP 24 点及正式公网双模式三拓扑 6 点通过；双协议三拓扑实际重启 6 点、原失败前序补验通过；同 handler 的独立下行 Reality/h2/h3 四模式合计 12 点分两轮覆盖完成，首轮 guard 触发记录保留；普通 bridge 双模式、双客户端的 1/8 MiB 大流完整性 8 组通过 | 固定唯一 VPS 的无嗅探通道验证公网账号正反例、严格网站、HTTP/2、Host/mode、双向记账及原材料/权限/timer 恢复。5C.2f.9 已以原始 pcap/keylog 关闭固定 Xray 的实际 POST 计数及 60 秒有界连接子项；Mihomo 计数、性能/长时稳定、正式服务端原生 h3/CDN 及其余环境仍缺。原 XHTTP 探针的业务 TLS 握手超时根因未确定，不能直接认定为外层 XHTTP 握手超时，后续通过不解释该历史失败 |
+| Reality 共存专项 | 原生 Vision 14 点、XHTTP 20 点恢复与互切、隔离 CLI XHTTP 24 点及正式公网双模式三拓扑 6 点通过；双协议三拓扑实际重启 6 点、原失败前序补验通过；同 handler 的独立下行 Reality/h2/h3 四模式合计 12 点分两轮覆盖完成，首轮 guard 触发记录保留；普通 bridge 双模式、双客户端的 1/8 MiB 大流完整性 8 组通过；5C.2f.11 本地 Docker 双客户端实际 POST 计数及取消负控通过 | 固定唯一 VPS 的无嗅探通道验证公网账号正反例、严格网站、HTTP/2、Host/mode、双向记账及原材料/权限/timer 恢复。5C.2f.9 已以原始 pcap/keylog 关闭固定 Xray 的正式 POST 计数及 60 秒有界连接子项；5C.2f.11 仅为本地 Docker 客户端互通，不替代 Mihomo 公网验收。性能/长时稳定、正式服务端原生 h3/CDN 及其余环境仍缺。原 XHTTP 探针的业务 TLS 握手超时根因未确定，不能直接认定为外层 XHTTP 握手超时，后续通过不解释该历史失败 |
 | VLESS Encryption 原生公网 | 正式 3.41.5 的 Debian 13 amd64 六阶段及 bridge 双入口加密真实重启通过 | 固定 Xray 26.3.27/Mihomo v1.19.28，启停 28 正/38 拒绝；新增一次整机重启 16 正/32 拒绝，原容器自然启动、原 URI/材料权限/调度/累计保持及正式恢复通过；其它客户端、算法、arm64、其它拓扑加密重启与完整能力仍待验 |
 | HTTP relay 原生路径 | 原生外部 IPv4 通过 | 独立外部客户端访问三个公网 HTTPS 目标均严格 TLS/200，错误认证 407、未允许来源 blocked；不外推公网 IPv6 或 SOCKS UDP 支持 |
 | 自然到期真实续期 | 未完成 | 等待登记窗口（约 2026-12-17）后的真实换证，不伪造到期 |
@@ -9848,6 +9848,26 @@ verify 全 `0`。原材料权限、调度及累计保持，原 WS 已恢复。
 四档及核验/清理证据保留在 `.tmp-native-tls-xray-20261025/`。
 未重复公网矩阵或 daily/full，不扩大 UDP、重启、其它客户端或环境范围，
 透明继续关闭，整体计划仍未完成。
+
+#### 5C.2f.11 本地 Docker XHTTP 双客户端 POST 与取消负控
+
+2026-10-26 对当前工作区快照强制运行
+`docker-xhttp-real -Jobs 2 -ForceRun`，本机 Docker Linux `amd64`，
+`Jobs=2`、`cache_hit=false`、入口总耗时 `84.782` 秒。固定 Xray
+`26.3.27/d2758a0` 与 Mihomo `v1.19.28`，完成 Xray Reality/TLS 和
+Mihomo Reality 的 packet-up、stream-up 共 6 组 1 MiB 实际回显。
+各 packet-up 实测 65 个 POST，各 stream-up 实测 1 个 POST；
+解密正文、真实 VLESS 身份与回显校验通过。Mihomo stream-up 客户端停止及
+HTTP/2 CANCEL 生命周期通过，但抓包未稳定包含客户端 SYN/FIN，按生命周期
+取证，不声称观察到 TCP FIN。新增同连接早于 HTTP/2 业务的合成服务端 FIN
+PDML 负控通过，确认解析器拒绝该输入；合成帧不是实测流量。
+
+入口日志与结果保留于
+`.tmp-regression-docker-a611a1aead7e441ca9a1985c1ad6917e/`；
+每次运行的原始 pcap、TLS keylog、PDML 随隔离测试容器清理，未持久化。
+此阶段仅补本地 Docker 客户端交互及解析器负控，不代替正式 VPS/公网 Mihomo
+验收，不扩大性能/长稳、正式原生 h3/CDN 或其他环境范围。透明保持关闭，
+整体计划仍未完成。
 
 - 每阶段同步中英文使用说明、支持矩阵、权限边界及失败恢复操作。
   旧部署迁移明确要求完整 spec 或安全导入，不允许一条重配命令替代迁移。
