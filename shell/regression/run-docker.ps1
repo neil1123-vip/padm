@@ -395,7 +395,7 @@ try {
     & $docker cp $snapshot "${container}:/snapshot.tar"
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
     if ($Selector -in @('docker-port-hopping-share-real', 'docker-vless-encryption-real',
-        'docker-vless-encryption-focused')) {
+        'docker-vless-encryption-focused', 'docker-xhttp-real')) {
         # 固定实际导入器版本，仅复制到本次容器，不更新共用工具镜像。
         $uriClientReference = 'metacubex/mihomo:v1.19.28@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312'
         $uriClientInfo = & $docker image inspect $uriClientReference

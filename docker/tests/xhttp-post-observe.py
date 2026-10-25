@@ -28,16 +28,31 @@ def unique(headers, name):
     return values[0] if values else None
 
 
-def parse(pdml, mode, path, port, success=True, maxpost=16384):
+def parse(pdml, mode, path, port, success=True, maxpost=16384, client_cancel=False,
+          terminal_required=True):
     assert mode in ("packet-up", "stream-up") and path.startswith("/")
+    assert not client_cancel or (success and mode == "stream-up"), "取消观察仅用于完整 stream-up 业务"
     base = path.rstrip("/") + "/"
     root = ET.parse(pdml).getroot()
     packets = root.findall("packet")
     assert packets, "空抓包"
-    streams, frames = {}, []
+    streams, frames, tcp_events = {}, [], []
     for packet in packets:
         assert int(one(packet, "frame.cap_len")) == int(one(packet, "frame.len")), "抓包截断"
         assert not fields(packet, "_ws.malformed"), "畸形数据帧"
+        source, target = one(packet, "tcp.srcport"), one(packet, "tcp.dstport")
+        if client_cancel and str(port) in (source, target):
+            flags = {name: one(packet, "tcp.flags." + name) in ("1", "True")
+                     for name in ("syn", "fin", "reset", "ack")}
+            tcp_events.append({
+                "frame_number": int(one(packet, "frame.number")),
+                "time_epoch": one(packet, "frame.time_epoch"),
+                "tcp_stream": int(one(packet, "tcp.stream")),
+                "direction": "response" if source == str(port) else "request",
+                "source_port": int(source), "target_port": int(target),
+                "source_address": one(packet, "ip.src", one(packet, "ipv6.src")),
+                "target_address": one(packet, "ip.dst", one(packet, "ipv6.dst")),
+                "data_bytes": int(one(packet, "tcp.len")), **flags})
         for protocol in packet.findall("proto"):
             if protocol.get("name") != "http2":
                 continue
@@ -124,7 +139,7 @@ def parse(pdml, mode, path, port, success=True, maxpost=16384):
         status = unique(record["response_headers"], ":status")
         if success:
             assert status == "200", f"响应非 200：{key} {status}"
-        if success and method == "POST":
+        if success and method == "POST" and not client_cancel:
             assert record["request_end_stream"], f"POST 缺少 END_STREAM：{key}"
             assert record["response_end_stream"], f"POST 响应缺少 END_STREAM：{key}"
         if method == "POST":
@@ -144,15 +159,55 @@ def parse(pdml, mode, path, port, success=True, maxpost=16384):
         sequences = next(iter(sessions.values()))
         assert len(set(sequences)) == len(sequences), "packet-up 序号重复"
         assert sorted(sequences) == list(range(len(sequences))), "packet-up 序号不连续"
+    termination = None
+    if client_cancel:
+        # 仅计完整单连接单 POST；客户端取消不冒充双向 END_STREAM。
+        assert len(posts) == len(gets) == 1, "取消观察仅支持单 POST 和单 GET"
+        connections = {row["tcp_stream"] for row in requests}
+        assert len(connections) == 1, "取消观察不支持跨连接拼接"
+        tcp = next(iter(connections))
+        events = [row for row in tcp_events if row["tcp_stream"] == tcp]
+        starts = [row for row in events if row["direction"] == "request"
+                  and row["syn"] and not row["ack"]]
+        closes = [row for row in events if row["direction"] == "request" and row["fin"]]
+        if terminal_required or starts or closes:
+            assert starts and closes, "缺少同连接的客户端 SYN/FIN"
+        close = closes[0] if closes else None
+        if close:
+            assert starts[0]["frame_number"] < min(row["frame_number"] for row in frames)
+            assert max(row["frame_number"] for row in frames) <= close["frame_number"], (
+                "FIN 早于 HTTP/2 结束")
+        assert not any(row["direction"] == "response" and row["fin"]
+                       and (close is None or row["frame_number"] <= close["frame_number"])
+                       for row in events), "服务端先发送 FIN"
+        if close:
+            assert not any(row["reset"] and row["frame_number"] < close["frame_number"]
+                           for row in events), "客户端 FIN 前发生 TCP 复位"
+            assert not any(row["direction"] == "request" and row["data_bytes"]
+                           and row["frame_number"] > close["frame_number"] for row in events), (
+                "FIN 后仍有上传")
+        resets = [row for row in frames if row["type"] == 3]
+        assert resets and all(row["direction"] == "request" and row["reset_error"] == "8"
+                              and row["tcp_stream"] == tcp for row in resets), "非客户端 CANCEL"
+        assert any(row["http2_stream"] == gets[0]["http2_stream"] for row in resets), "缺少下行取消"
+        assert min(row["frame_number"] for row in resets) > max(
+            row["frame_number"] for row in frames if row["data_bytes"]), "完整业务前已取消"
+        assert gets[0]["request_end_stream"], "GET 请求不完整"
+        termination = {"kind": "client-cancel", "evidence": "tcp-fin" if close else "lifecycle",
+                       "client_syn": starts[0] if starts else None,
+                       "client_fin": close, "resets": resets}
     return {
         "schema": 1, "mode": mode, "success_expected": success,
+        "termination_policy": "client-cancel" if client_cancel else "end-stream",
+        "termination": termination,
         "packets": len(packets), "post_count": len(posts),
         "post_body_bytes": sum(row["body_bytes"] for row in posts),
         "tcp_connections": sorted({row["tcp_stream"] for row in requests}),
         "requests": requests, "frames": frames}
 
 
-def observe(pcap, keylog, port, mode, path, output, success=True, maxpost=16384):
+def observe(pcap, keylog, port, mode, path, output, success=True, maxpost=16384,
+            client_cancel=False, terminal_required=True):
     pcap, keylog, output = Path(pcap), Path(keylog), Path(output)
     output.mkdir(parents=True, exist_ok=True)
     assert pcap.stat().st_size > 24, "空抓包"
@@ -175,7 +230,8 @@ def observe(pcap, keylog, port, mode, path, output, success=True, maxpost=16384)
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     assert not re.search(r"cut short|truncat|malformed|decryption failed",
                          result.stderr.decode(errors="replace"), re.I), "tshark 拒绝不完整抓包"
-    proof = parse(output / "tshark.pdml", mode, path, port, success, maxpost)
+    proof = parse(output / "tshark.pdml", mode, path, port, success, maxpost, client_cancel,
+                  terminal_required)
     proof.update(pcap_sha256=sha(pcap), keylog_sha256=sha(keylog),
                  pdml_sha256=sha(output / "tshark.pdml"),
                  observer_sha256=sha(__file__), port=port, base_path=path)
@@ -191,9 +247,11 @@ def main():
     parser.add_argument("--mode", required=True, choices=("packet-up", "stream-up"))
     parser.add_argument("--path", required=True)
     parser.add_argument("--reject", action="store_true")
+    parser.add_argument("--client-cancel", action="store_true")
     arguments = parser.parse_args()
     result = observe(arguments.pcap, arguments.keylog, arguments.port,
-                     arguments.mode, arguments.path, arguments.out, not arguments.reject)
+                     arguments.mode, arguments.path, arguments.out, not arguments.reject,
+                     client_cancel=arguments.client_cancel)
     print(json.dumps({key: result[key] for key in (
         "schema", "mode", "post_count", "post_body_bytes", "tcp_connections", "pcap_sha256")}))
 

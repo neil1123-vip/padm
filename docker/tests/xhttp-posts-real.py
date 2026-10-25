@@ -1,4 +1,4 @@
-"""固定 Xray 的 TLS/Reality 实际回显与离线 POST 观察自检。"""
+"""固定 Xray/Mihomo 的实际回显与离线 POST 观察自检。"""
 import argparse
 import hashlib
 import json
@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import uuid
+import urllib.parse
 import xml.etree.ElementTree as ET
 
 
@@ -51,6 +52,33 @@ def launch(binary, config, prefix):
     return process, log
 
 
+def launch_mihomo(binary, config, prefix):
+    stream = config["outbounds"][0]["streamSettings"]
+    target = config["outbounds"][0]["settings"]["vnext"][0]
+    security, xhttp = stream["realitySettings"], stream["xhttpSettings"]
+    query = dict(encryption="none", security="reality", sni=security["serverName"],
+                 fp=security["fingerprint"], pbk=security["publicKey"], sid=security["shortId"],
+                 type="xhttp", path=xhttp["path"], host=xhttp["host"], mode=xhttp["mode"],
+                 extra=json.dumps(xhttp["extra"], separators=(",", ":")))
+    uri = ("vless://" + target["users"][0]["id"] + "@127.0.0.1:" + str(target["port"])
+           + "?" + urllib.parse.urlencode(query) + "#observe")
+    source = prefix.parent / "uri.txt"
+    source.write_text(uri + "\n")
+    projected = {
+        "mode": "rule", "log-level": "debug", "ipv6": False,
+        "proxy-providers": {"source": {"type": "file", "path": str(source),
+            "health-check": {"enable": False}, "override": {"ip-version": "ipv4"}}},
+        "proxy-groups": [{"name": "entry", "type": "select", "use": ["source"]}],
+        "listeners": [{"name": "entry", "type": "socks", "listen": "127.0.0.1",
+                       "port": config["inbounds"][0]["port"], "proxy": "entry"}],
+        "rules": ["MATCH,REJECT"]}
+    prefix.with_suffix(".json").write_text(json.dumps(projected, indent=2))
+    log = prefix.with_suffix(".log").open("wb")
+    process = subprocess.Popen([binary, "-d", str(prefix.parent), "-f", str(prefix.with_suffix(".json"))],
+                               stdout=log, stderr=log)
+    return process, log
+
+
 def ready(process, listen):
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
@@ -63,18 +91,20 @@ def ready(process, listen):
     raise AssertionError("监听没有就绪")
 
 
-def negative_checks(case):
+def negative_checks(case, client_cancel=False, terminal_required=True):
     original = case / "decoded/tshark.pdml"
     report = json.loads((case / "case.json").read_text())
     rejected = []
 
-    def expect(name, mutate):
+    def expect(name, mutate, cancel=client_cancel):
         tree = ET.parse(original)
         mutate(tree)
         path = case / ("negative-" + name + ".pdml")
         tree.write(path)
         try:
-            observer["parse"](path, report["mode"], report["path"], report["port"])
+            decoded = observer["parse"](path, report["mode"], report["path"], report["port"],
+                                        client_cancel=cancel, terminal_required=terminal_required)
+            verify_business(decoded, report, report["destination"])
         except (AssertionError, ValueError):
             rejected.append(name)
         else:
@@ -96,7 +126,57 @@ def negative_checks(case):
                 observer["fields"](item, "http2.header.value")[0].set("show", "403")
 
     expect("truncated", truncate)
-    expect("missing-end-stream", missing_end)
+    if client_cancel:
+        def terminal(tree, change):
+            matched = False
+            for packet in tree.getroot().findall("packet"):
+                if observer["one"](packet, "tcp.flags.fin") in ("1", "True"):
+                    change(packet)
+                    matched = True
+            assert matched
+
+        def remove_fin(packet):
+            observer["fields"](packet, "tcp.flags.fin")[0].set("show", "False")
+
+        def wrong_connection(packet):
+            observer["fields"](packet, "tcp.stream")[0].set("show", "999")
+
+        def wrong_direction(packet):
+            left = observer["fields"](packet, "tcp.srcport")[0]
+            right = observer["fields"](packet, "tcp.dstport")[0]
+            left.set("show", str(report["port"]))
+            right.set("show", "1")
+
+        def server_first(tree):
+            root = tree.getroot()
+            packet = next(packet for packet in root.findall("packet")
+                          if observer["one"](packet, "tcp.flags.fin") in ("1", "True")
+                          and observer["one"](packet, "tcp.dstport") == str(report["port"]))
+            early = ET.fromstring(ET.tostring(packet))
+            wrong_direction(early)
+            number = observer["fields"](early, "frame.number")[0]
+            number.set("show", str(int(number.get("show")) - 1))
+            root.insert(list(root).index(packet), early)
+
+        def missing_cancel(tree):
+            for item in observer["fields"](tree.getroot(), "http2.rst_stream.error"):
+                item.set("show", "0")
+
+        def body(tree):
+            item = observer["fields"](tree.getroot(), "http2.data.data")[0]
+            raw = bytes.fromhex(item.get("value"))
+            item.set("value", bytes([raw[0] ^ 1]).hex() + raw[1:].hex())
+
+        if terminal_required:
+            expect("missing-client-fin", lambda tree: terminal(tree, remove_fin))
+            expect("foreign-connection-fin", lambda tree: terminal(tree, wrong_connection))
+            expect("server-fin", lambda tree: terminal(tree, wrong_direction))
+            expect("server-first-fin", server_first)
+        expect("missing-client-cancel", missing_cancel)
+        expect("business-corrupt", body)
+        expect("strict-end-stream", lambda tree: None, cancel=False)
+    elif not client_cancel:
+        expect("missing-end-stream", missing_end)
     expect("non-200", response)
     if report["mode"] == "packet-up":
         def sequence(tree):
@@ -109,7 +189,7 @@ def negative_checks(case):
                         changed += 1
             assert changed
         expect("duplicate-sequence", sequence)
-    else:
+    elif not client_cancel:
         def reassembled(tree):
             changed = 0
             for frame in observer["fields"](tree.getroot(), "http2.stream"):
@@ -164,6 +244,7 @@ def negative_inputs(case, port):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--xray", required=True)
+    parser.add_argument("--mihomo")
     parser.add_argument("--out", type=Path, required=True)
     arguments = parser.parse_args()
     output = arguments.out
@@ -173,6 +254,10 @@ def main():
     started = time.monotonic()
     version = subprocess.check_output([arguments.xray, "version"]).decode()
     assert version.startswith("Xray 26.3.27 ")
+    mihomo_version = None
+    if arguments.mihomo:
+        mihomo_version = subprocess.check_output([arguments.mihomo, "-v"]).decode()
+        assert mihomo_version.startswith("Mihomo Meta v1.19.28 ")
     cert, key = output / "target.crt", output / "target.key"
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
                     "-days", "1", "-subj", "/CN=observe.padm.test",
@@ -200,17 +285,21 @@ def main():
         threading.Thread(target=server.serve_forever, daemon=True).start()
     proofs = []
     try:
-        for security in ("reality", "tls"):
+        for client_kind, security in ([("xray", "reality"), ("xray", "tls")] +
+                                      ([("mihomo", "reality")] if arguments.mihomo else [])):
             for mode in ("packet-up", "stream-up"):
-                case = output / (security + "-" + mode)
+                case = output / (("" if client_kind == "xray" else "mihomo-") + security + "-" + mode)
                 case.mkdir(mode=0o700)
                 public, socks = port(), port()
                 path = "/observe/"
                 keylog, pcap = case / "master.keys", case / "capture.pcap"
+                client_cancel = client_kind == "mihomo" and mode == "stream-up"
                 settings = {"alpn": ["h2"], "certificates": [{
                     "certificateFile": str(cert), "keyFile": str(key)}]} if security == "tls" else {
                     "dest": "127.0.0.1:" + str(target.server_address[1]),
                     "serverNames": ["observe.padm.test"], "privateKey": PRIVATE, "shortIds": [SID]}
+                if client_kind == "mihomo":
+                    settings["masterKeyLog"] = str(keylog)
                 server_config = {"log": {"loglevel": "debug"}, "inbounds": [{
                     "listen": "127.0.0.1", "port": public, "protocol": "vless",
                     "settings": {"clients": [{"id": USER}], "decryption": "none"},
@@ -235,6 +324,7 @@ def main():
                         "host": "observe.padm.test", "path": path, "mode": mode,
                         "extra": {"scMaxEachPostBytes": 16384}}}}]}
                 processes = []
+                lifecycle = {}
                 capture = None
                 capture_log = (case / "tcpdump.log").open("wb")
                 try:
@@ -246,45 +336,76 @@ def main():
                         stdout=capture_log, stderr=capture_log)
                     time.sleep(2)
                     assert capture.poll() is None
-                    client, log = launch(arguments.xray, client_config, case / "client")
+                    client, log = (launch_mihomo(arguments.mihomo, client_config, case / "client")
+                                   if client_kind == "mihomo" else
+                                   launch(arguments.xray, client_config, case / "client"))
                     processes.append((client, log))
                     ready(client, socks)
                     with transfer["connect"](("127.0.0.1", socks), echo.server_address) as connection:
                         proof = transfer["exchange"](connection, 1048576)
+                        lifecycle["business_complete_epoch"] = time.time()
                         connection.shutdown(socket.SHUT_WR)
                         connection.settimeout(5)
                         assert connection.recv(1) == b"", "回显结束后有额外字节"
+                    lifecycle["socks_eof_epoch"] = time.time()
                     time.sleep(.3)
                 finally:
                     for process, log in reversed(processes):
+                        if client_cancel and process is server:
+                            assert server.poll() is None, "客户端关闭期间服务端已退出"
+                            lifecycle["server_stop_epoch"] = time.time()
+                        if client_cancel and process is client:
+                            lifecycle["client_stop_requested_epoch"] = time.time()
                         stop(process)
+                        if client_cancel and process is client:
+                            lifecycle["client_exited_epoch"] = time.time()
                         log.close()
                     if capture is not None:
                         time.sleep(1)
+                        lifecycle["capture_stop_epoch"] = time.time()
                         capture.send_signal(signal.SIGINT)
                         capture.wait(timeout=5)
                     capture_log.close()
+                    (case / "lifecycle.json").write_text(json.dumps(lifecycle, indent=2))
                 assert re.search(r"^0 packets dropped by kernel$", (case / "tcpdump.log").read_text(),
                                  re.M), "抓包丢包"
                 binding = {"security": security, "mode": mode, "port": public, "path": path,
+                           "client_kind": client_kind, "native_uri_import": client_kind == "mihomo",
+                           "client_sha256": observer["sha"](arguments.mihomo if client_kind == "mihomo"
+                                                            else arguments.xray),
+                           "client_version": mihomo_version if client_kind == "mihomo" else version,
+                           "keylog_source": "server" if client_kind == "mihomo" else "client",
+                           "destination": list(echo.server_address),
                            "xray_sha256": observer["sha"](arguments.xray), "xray_version": version,
                            "client_config_sha256": observer["sha"](case / "client.json"),
                            "server_config_sha256": observer["sha"](case / "server.json"), **proof}
+                binding["lifecycle_sha256"] = observer["sha"](case / "lifecycle.json")
                 (case / "case.json").write_text(json.dumps(binding, indent=2))
-                observed = observer["observe"](pcap, keylog, public, mode, path, case / "decoded")
+                # Mihomo 停止时的 TCP FIN 分段受进程退出时序影响；正向门禁以解密业务和生命周期为准。
+                observed = observer["observe"](
+                    pcap, keylog, public, mode, path, case / "decoded",
+                    client_cancel=client_cancel, terminal_required=not client_cancel)
                 verify_business(observed, proof, echo.server_address)
+                if client_cancel:
+                    assert lifecycle["business_complete_epoch"] <= lifecycle[
+                        "client_stop_requested_epoch"] < lifecycle["server_stop_epoch"], (
+                            "客户端停止不在业务完成与服务端停止之间")
                 if mode == "packet-up":
                     assert observed["post_count"] > 1
                 else:
                     assert max(row["body_bytes"] for row in observed["requests"]) > 16384
-                rejected = negative_checks(case)
+                # 负控仍覆盖解密业务；终止分段不稳定时只跳过依赖 SYN/FIN 的变异。
+                rejected = negative_checks(case, client_cancel, terminal_required=not client_cancel)
                 if security == "reality" and mode == "packet-up":
                     rejected.extend(negative_inputs(case, public))
                 proofs.append({"case": case.name, "post_count": observed["post_count"],
                                "post_body_bytes": observed["post_body_bytes"],
+                               "termination_policy": ("client-process-stop" if client_cancel
+                                                      else observed["termination_policy"]),
                                "tcp_connections": observed["tcp_connections"], "negative_checks": rejected})
                 print(json.dumps(proofs[-1]), flush=True)
         result = {"passed": True, "xray_version": version,
+                  "mihomo_version": mihomo_version,
                   "xray_sha256": observer["sha"](arguments.xray), "cases": proofs,
                   "elapsed_seconds": round(time.monotonic() - started, 3)}
         (output / "selfcheck.json").write_text(json.dumps(result, indent=2))

@@ -66,6 +66,7 @@ with (node / "daemon.log").open("wb") as log:
         assert child.wait(timeout=90) == 0, "XHTTP 独立下行实链路失败"
         child = subprocess.Popen([
             "python3", str(scripts / "xhttp-posts-real.py"), "--xray", str(binary),
+            "--mihomo", "/uri-client/mihomo",
             "--out", str(node / "posts")])
         assert child.wait(timeout=120) == 0, "XHTTP 实际 POST 抓包观察失败"
         child = subprocess.Popen([
