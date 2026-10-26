@@ -2128,6 +2128,15 @@ arm64、IPv6、整机重启和任意 SSH 服务不由本轮证明，整体计划
 `197CB359DB0BDAE7FBE4A8D2FF90988EB0021A7CB32C188ED1328B72D44CBE2F`。
 本轮不增加 `NET_RAW`、不修改宿主 sysctl，不启用透明代理。
 
+随后补验权限允许但远端只丢弃 Echo 的场景：`docker-tun-real` 三阶段实际执行
+`70.779 s`，`exit=0`、`cache_hit=false`。正常阶段 wire 请求/回复与应用回复
+各 `1`；远端过滤阶段 TUN 与 wire 请求各 `1`，目标丢弃计数 `1`，
+wire/应用回复均为 `0`；核心缺权阶段 TUN 请求 `1`、wire 请求/回复及应用回复
+均为 `0`。三阶段 TCP/UDP 均往返成功，诊断保持只读，清理后网络基线恢复。
+这也验证了组范围允许不会被诊断为 Echo 已可达，未使用本地合成回复。
+证据 `.tmp-regression-docker-75fa27b0f5224516bc34e12780f44bd8/`，
+源码摘要 `5AD08B3349BCAE0AF8DCC2469070127A3D9AF3C82A06AD0E8B133507348EAC1B`。
+
 该结果只关闭当前源码的隔离 Linux/amd64 TUN/IPv4 Echo 子项；原生宿主、
 arm64、公网、IPv6/traceroute/PMTU、整机重启及透明启用矩阵仍未完成，
 不把 Echo 直连结果外推为代理隧道或其它协议健康，整体计划继续未完成。

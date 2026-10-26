@@ -20,9 +20,10 @@
   证据 `.tmp-native-ssh-3418-20261026/verification.json`；
   私密归档 SHA256=`a42db50675a521a0dcc3fa74d1342dc554d201a334ea9fb9fe0d3e1a5eb7a6b8`。
 - 当前源码 TUN/ICMP 定向回归通过：`docker-tun-management` 36.366 s、
-  `docker-tun-real` 60.664 s、`docker-menu-tun` 2.115 s，均 `exit=0`；
-  direct/拒绝组范围、TCP/UDP 保持、动态计数结构负控、旧模板兼容和只读诊断通过。
-  三次 `cache_hit=false`，证据目录见原生验收记录。
+  `docker-tun-real` 70.779 s、`docker-menu-tun` 2.115 s，均 `exit=0`；
+  direct/远端仅过滤 Echo/核心缺权三阶段通过，无伪造回复、TCP/UDP 正常；
+  动态计数结构负控、旧模板兼容和只读诊断通过，均 `cache_hit=false`；
+  最新实流量证据 `.tmp-regression-docker-75fa27b0f5224516bc34e12780f44bd8/`。
 - 6A.24：`3.41.6 → 3.41.8 → 3.41.6 → 3.41.8` 升级/回滚闭环通过；
   WS、严格 TLS、URI/source、权限/timer/累计及 4 项实物负控通过。
 - TUN IPv4 Echo、XHTTP CANCEL FIN、Mihomo 固定组合、TLS 七入口、

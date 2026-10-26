@@ -1575,6 +1575,7 @@ ICMP 可以失败，普通 TCP/UDP 服务不因此停止，也不自动修改宿
 `tun-diagnose` 仅读取受管核心进程的身份、能力和所在网络空间的组范围，
 报告 `ping_group_allowed`、`net_raw_effective`；读取失败为 `unknown` 并保留原因。
 `ping_group_allowed=true` 只表示组范围允许，不代表 socket 创建成功或目标可达。
+远端可能只过滤 Echo；即使组范围允许且 TCP/UDP 正常，Echo 仍可能超时。
 `socket_probe`、`echo_roundtrip` 与 `capture` 明确标为未验证，诊断不发包、不启停核心。
 旧 TUN 模板仍可查询、诊断和关闭；缺少显式规则时报告 `policy_dependent`，
 仅更新镜像会保留原配置，后续配置重新生成时才写入该规则。
