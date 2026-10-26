@@ -177,20 +177,22 @@ def parse(pdml, mode, path, port, success=True, maxpost=16384, client_cancel=Fal
             assert starts[0]["frame_number"] < min(row["frame_number"] for row in frames)
             assert max(row["frame_number"] for row in frames) <= close["frame_number"], (
                 "FIN 早于 HTTP/2 结束")
+        resets = [row for row in frames if row["type"] == 3]
+        assert resets and all(row["direction"] == "request" and row["reset_error"] == "8"
+                              and row["tcp_stream"] == tcp for row in resets), "非客户端 CANCEL"
+        first_cancel = min(row["frame_number"] for row in resets)
+        # 转发链路可先收到服务端 FIN；关闭因果以客户端 CANCEL 为准。
         assert not any(row["direction"] == "response" and row["fin"]
-                       and (close is None or row["frame_number"] <= close["frame_number"])
-                       for row in events), "服务端先发送 FIN"
+                       and row["frame_number"] <= first_cancel
+                       for row in events), "客户端 CANCEL 前服务端已发送 FIN"
         if close:
             assert not any(row["reset"] and row["frame_number"] < close["frame_number"]
                            for row in events), "客户端 FIN 前发生 TCP 复位"
             assert not any(row["direction"] == "request" and row["data_bytes"]
                            and row["frame_number"] > close["frame_number"] for row in events), (
                 "FIN 后仍有上传")
-        resets = [row for row in frames if row["type"] == 3]
-        assert resets and all(row["direction"] == "request" and row["reset_error"] == "8"
-                              and row["tcp_stream"] == tcp for row in resets), "非客户端 CANCEL"
         assert any(row["http2_stream"] == gets[0]["http2_stream"] for row in resets), "缺少下行取消"
-        assert min(row["frame_number"] for row in resets) > max(
+        assert first_cancel > max(
             row["frame_number"] for row in frames if row["data_bytes"]), "完整业务前已取消"
         assert gets[0]["request_end_stream"], "GET 请求不完整"
         termination = {"kind": "client-cancel", "evidence": "tcp-fin" if close else "lifecycle",

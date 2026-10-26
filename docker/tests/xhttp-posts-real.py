@@ -147,7 +147,7 @@ def negative_checks(case, client_cancel=False, terminal_required=True):
             left.set("show", str(report["port"]))
             right.set("show", "1")
 
-        def server_first(tree):
+        def server_fin(tree, position):
             root = tree.getroot()
             request = next(packet for packet in root.findall("packet")
                            if observer["one"](packet, "tcp.dstport") == str(report["port"]))
@@ -156,15 +156,20 @@ def negative_checks(case, client_cancel=False, terminal_required=True):
                 if protocol.get("name") == "http2":
                     early.remove(protocol)
             wrong_direction(early)
-            first_http2 = min(int(observer["one"](packet, "frame.number"))
-                              for packet in root.findall("packet")
-                              if packet.find("proto[@name='http2']") is not None)
-            observer["fields"](early, "frame.number")[0].set("show", str(first_http2 - 1))
             for name, value in (("tcp.flags.syn", "False"), ("tcp.flags.fin", "True"),
                                 ("tcp.flags.reset", "False"), ("tcp.flags.ack", "True"),
                                 ("tcp.len", "0"), ("frame.cap_len", "54"), ("frame.len", "54")):
                 observer["fields"](early, name)[0].set("show", value)
-            root.insert(list(root).index(request), early)
+            if position in ("before-cancel", "after-cancel"):
+                anchor = next(packet for packet in root.findall("packet")
+                              if observer["fields"](packet, "http2.rst_stream.error"))
+                root.insert(list(root).index(anchor) + int(position == "after-cancel"), early)
+            else:
+                anchor = next(packet for packet in root.findall("packet")
+                              if packet.find("proto[@name='http2']") is not None)
+                root.insert(list(root).index(anchor), early)
+            for index, packet in enumerate(root.findall("packet"), 1):
+                observer["fields"](packet, "frame.number")[0].set("show", str(index))
 
         def missing_cancel(tree):
             for item in observer["fields"](tree.getroot(), "http2.rst_stream.error"):
@@ -181,7 +186,19 @@ def negative_checks(case, client_cancel=False, terminal_required=True):
             expect("server-fin", lambda tree: terminal(tree, wrong_direction))
         expect("missing-client-cancel", missing_cancel)
         expect("business-corrupt", body)
-        expect("server-first-fin", server_first)
+        expect("server-first-fin", lambda tree: server_fin(tree, "before-http2"))
+        expect("server-fin-before-cancel", lambda tree: server_fin(tree, "before-cancel"))
+        # 合成正控仅验证取消后的响应关闭顺序，不作为线上 FIN 证据。
+        tree = ET.parse(original)
+        server_fin(tree, "after-cancel")
+        path = case / "positive-server-fin-after-cancel.pdml"
+        tree.write(path)
+        try:
+            decoded = observer["parse"](path, report["mode"], report["path"], report["port"],
+                                        client_cancel=True, terminal_required=terminal_required)
+            verify_business(decoded, report, report["destination"])
+        finally:
+            path.unlink()
         expect("strict-end-stream", lambda tree: None, cancel=False)
     elif not client_cancel:
         expect("missing-end-stream", missing_end)
