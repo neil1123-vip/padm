@@ -26,6 +26,12 @@ MAX_CGROUPS = 256
 MAX_PIDS = 4096
 
 
+class MembersChanged(Failure):
+    def __init__(self, listener=None):
+        super().__init__("SSH unit 的 cgroup 成员在核验期间变化")
+        self.listener = listener
+
+
 def unit_name(value):
     if (not isinstance(value, str) or len(value) > 255
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@:-]*\.service", value)):
@@ -149,7 +155,21 @@ def unit_listener(unit, master, local, port, deadline=None):
     pids = cgroup_pids(unit["control_group"], deadline)
     if master["pid"] != unit["main_pid"] or master["pid"] not in pids:
         raise Failure("SSH master 不是所选 unit 的 MainPID")
-    members = tuple(member_snapshot(pid, unit["control_group"], master["netns"]) for pid in pids)
+    def snapshot_members(listener=None):
+        rows = []
+        for pid in pids:
+            try:
+                rows.append(member_snapshot(pid, unit["control_group"], master["netns"]))
+            except (FileNotFoundError, ProcessLookupError):
+                if pid == master["pid"]:
+                    raise
+                current = cgroup_pids(unit["control_group"], deadline)
+                if master["pid"] in current and pid not in current:
+                    raise MembersChanged(listener) from None
+                raise
+        return tuple(rows)
+
+    members = snapshot_members()
     listeners = []
     for family in (4, 6):
         check_deadline(deadline)
@@ -168,22 +188,38 @@ def unit_listener(unit, master, local, port, deadline=None):
         raise Failure("SSH unit 必须只有一个唯一显式 TCP 监听")
     listener = listeners[0]
     ssh.socket_fd(*listener["owners"][0], listener["inode"])
-    if (cgroup_pids(unit["control_group"], deadline) != pids
-            or tuple(member_snapshot(pid, unit["control_group"], master["netns"])
-                     for pid in pids) != members):
-        raise Failure("SSH unit 的 cgroup 成员在核验期间变化")
+    current = cgroup_pids(unit["control_group"], deadline)
+    if master["pid"] not in current:
+        raise Failure("SSH master 已离开所选 unit 的 cgroup")
+    if current != pids:
+        raise MembersChanged(listener)
+    if snapshot_members(listener) != members:
+        raise Failure("SSH unit 的进程或网络空间在核验期间变化")
     return listener
 
 
 def unit_snapshot(requested, local, port, deadline=None):
     unit = read_unit(requested, deadline)
     master = ssh.read_process(unit["main_pid"], ssh.MASTER_EXES)
-    listener = unit_listener(unit, master, local, port, deadline)
-    if (read_unit(requested, deadline) != unit
-            or ssh.read_process(unit["main_pid"], ssh.MASTER_EXES) != master):
-        raise Failure("SSH unit 或 MainPID 在核验期间变化")
-    check_deadline(deadline)
-    return {"unit": unit, "master": {"process": master, "socket": listener}}
+    previous_listener = None
+    # 认证子进程会自然进出；只重取一次完整证据，并固定原 unit、master 和已见监听。
+    for attempt in range(2):
+        listener = None
+        try:
+            listener = unit_listener(unit, master, local, port, deadline)
+        except MembersChanged as error:
+            if attempt:
+                raise
+            previous_listener = error.listener
+        else:
+            if previous_listener is not None and listener != previous_listener:
+                raise Failure("SSH unit 的监听在重新核验期间变化")
+        if (read_unit(requested, deadline) != unit
+                or ssh.read_process(unit["main_pid"], ssh.MASTER_EXES) != master):
+            raise Failure("SSH unit 或 MainPID 在核验期间变化")
+        check_deadline(deadline)
+        if listener is not None:
+            return {"unit": unit, "master": {"process": master, "socket": listener}}
 
 
 def verify_unit_record(record, snapshot, evidence):

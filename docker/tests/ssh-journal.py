@@ -246,6 +246,78 @@ class UnitContracts(unittest.TestCase):
                     self.assertRaises(journal.Failure):
                 journal.unit_snapshot(UNIT, LOCAL, PORT)
 
+    def snapshot_with_members(self, pids, *, members=None, rows=None, units=None, masters=None):
+        with patch.object(journal, "read_unit", return_value=UNIT_STATE, side_effect=units), \
+                patch.object(ssh, "read_process", return_value=MASTER, side_effect=masters), \
+                patch.object(journal, "cgroup_pids", side_effect=pids), \
+                patch.object(journal, "member_snapshot", side_effect=members or (
+                    lambda pid, *_: (pid, 254155, NETNS, GROUP))), \
+                patch.object(ssh, "run_command", return_value="listeners") as commands, \
+                patch.object(ssh, "parse_ss", side_effect=rows or [
+                    [LISTENER], [], [LISTENER], []]), \
+                patch.object(ssh, "socket_fd"):
+            result = journal.unit_snapshot(UNIT, LOCAL, PORT)
+        return result, commands.call_count
+
+    def test_snapshot_retries_one_non_main_member_join_or_exit(self):
+        for initial, final in (((16, 19), (16,)), ((16,), (16, 19))):
+            with self.subTest(initial=initial, final=final):
+                result, commands = self.snapshot_with_members([initial, final, final, final])
+                self.assertEqual(result, SNAPSHOT)
+                self.assertEqual(commands, 4)
+        for missing in (FileNotFoundError, ProcessLookupError):
+            for read in (1, 2):
+                seen = 0
+                def members(pid, *_):
+                    nonlocal seen
+                    if pid == 19:
+                        seen += 1
+                        if seen == read:
+                            raise missing("child exited")
+                    return pid, 254155, NETNS, GROUP
+                inventory = [(16, 19), (16,), (16,), (16,)]
+                if read == 2:
+                    inventory.insert(1, (16, 19))
+                with self.subTest(missing=missing, read=read):
+                    result, commands = self.snapshot_with_members(inventory, members=members)
+                    self.assertEqual(result, SNAPSHOT)
+                    self.assertEqual(commands, 2 if read == 1 else 4)
+
+    def test_membership_retry_keeps_original_generation_and_listener(self):
+        for units, masters, rows in (
+            ([UNIT_STATE, {**UNIT_STATE, "invocation_id": "d" * 32}], None, None),
+            (None, [MASTER, {**MASTER, "starttime": MASTER["starttime"] + 1}], None),
+            (None, None, [[LISTENER], [], [{**LISTENER, "inode": 14338537}], []]),
+        ):
+            with self.subTest(units=units, masters=masters, rows=rows), \
+                    self.assertRaises(journal.Failure):
+                self.snapshot_with_members([(16, 19), (16,), (16,), (16,)],
+                                           units=units, masters=masters, rows=rows)
+        with self.assertRaises(journal.Failure):
+            self.snapshot_with_members([(16, 19), (16,), (16,), (16, 23)])
+        extra = {**LISTENER, "local": ("2001:db8::10", PORT), "owners": ((23, 5),)}
+        with self.assertRaises(journal.Failure):
+            self.snapshot_with_members([(16, 19), (16, 23), (16, 23)],
+                                       rows=[[LISTENER], [], [LISTENER], [extra]])
+
+    def test_membership_retry_does_not_hide_unsafe_or_unproven_changes(self):
+        for failure in (PermissionError("private"), journal.Failure("namespace changed"),
+                        FileNotFoundError("still a member"), ProcessLookupError("still a member")):
+            def members(pid, *_):
+                if pid == 19:
+                    raise failure
+                return pid, 254155, NETNS, GROUP
+            with self.subTest(failure=failure), \
+                    self.assertRaises((journal.Failure, OSError)):
+                self.snapshot_with_members([(16, 19), (16, 19)], members=members)
+        for inventory in ([(16, 19), (19,)], [(19,), (16,)]):
+            with self.subTest(inventory=inventory), self.assertRaises(journal.Failure):
+                self.snapshot_with_members(inventory)
+        with self.assertRaises(journal.Failure):
+            self.snapshot_with_members([(16, 19), (16, 19)], members=[
+                (16, 254155, NETNS, GROUP), (19, 254155, NETNS, GROUP),
+                (16, 254155, NETNS, GROUP), (19, 254156, NETNS, GROUP)])
+
     def test_fresh_record_requires_trusted_single_unit_fields(self):
         self.assertEqual(journal.verify_unit_record(RECORD, SNAPSHOT, EVIDENCE),
                          {"cursor": "event-cursor", "mono": 2541632562})

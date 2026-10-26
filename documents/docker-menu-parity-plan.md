@@ -7589,8 +7589,22 @@ arm64、IPv6、整机重启和完整生命周期仍不由本轮证明，整体�
 已恢复原规格字节、材料及权限、timer、全部备份；三业务 healthy，严格公网
 TLS/200 复核通过，测试 unit/collector/新增 net 路径和远端暂存、客户端均清理。
 仅允许核对当前 Nginx 容器身份后的 Docker 内网 IP 变化，其余规则严格比较。
-修复纳入可信镜像/bundle 后仍须补原生重新启用和封禁/解封；任意 SSH、
-arm64、IPv6 和透明启用矩阵未扩范围，整体计划继续未完成。
+修复已签名提交 `888b62e4` 并发布正式 `3.42.1`，32 项发布任务成功；
+三件套独立验签、300 个包内源码核对通过，仅 net 镜像重建。VPS 正式升级后
+guard 连续 `25408 ms`、20 次 runtime 核验健康，首轮真实封禁、外部超时与
+解封恢复通过；第二轮认证子进程自然退出导致 cgroup 成员采样变化，
+collector 安全清退，矩阵仍按失败记录。
+
+第二故障修复仅对可证明的非 MainPID 加入/退出完整重取证一次，并固定原
+unit、master 和已见监听；连续变化、代次、namespace、权限及额外监听仍拒绝。
+旧实现 6 项确定性失败，修复后 `docker-ssh-preflight -Jobs 2` 用时 `5569 ms`
+通过，证据 `.tmp-regression-docker-a6b3340b3b904ab1b2d2ca86fc07fec4`、
+`.tmp-regression-docker-1ef66cc96813436ca4a9b2df7429ce89`。
+原生失败归档断网独验 `.tmp-native-ssh-guard-close-20261027/verification.json`，
+SHA256=`a5118709229da0ce40f292f283e818baa46001732a7ee5286a46272525a45e95`；
+原规格、材料权限、timer 及业务恢复，测试资源与远端暂存已清理。
+成员采样修复进入可信 bundle 后仍须补两轮封禁/解封及来源失效清理；
+任意 SSH、arm64、IPv6 和透明启用矩阵未扩范围，整体计划继续未完成。
 
 #### 5C.9a Hy2/TUIC 固定客户端与现有 UDP alias 前置
 
