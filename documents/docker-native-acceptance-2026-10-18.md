@@ -2288,3 +2288,29 @@ arm64、公网、IPv6/traceroute/PMTU、整机重启及透明启用矩阵仍未�
 证据 `.tmp-tun-icmp-release-3420-20261026/verification.json`、
 `cosign-verify.log` 和 `contracts-fast-rest.log`。GH CLI 首次取日志被本机缓存目录
 权限拒绝，提权只读重取成功；未操作 VPS、未发起新的发布，整体计划仍未完成。
+
+### 2026-10-27 正式 TUN 关闭态原生诊断
+
+正式 `3.42.2`/source=`4aaa9158`，Debian 13 原生 amd64，
+通过固定主机指纹 SSH 的 stdin 执行验收，不上传远端脚本、不启用透明或发 ICMP。
+正式 CLI 的 `protocol tun-status` 和 `protocol tun-diagnose` 实际 `3830 ms`
+通过，enabled=false，权限字段 null，socket/Echo 均为 not_tested；
+宿主允许组范围的只读观测不代表业务核心 socket 或 Echo 已验证。
+
+13 个关键文件的 SHA256/权限/归属、三业务 CID/StartedAt/健康与运行身份、
+两族路由/规则、nft 结构、timer、sysctl 和 netns 前后一致，
+无 padm-tun、tun.state、net-transparent、oneoff 或 `.protocol.*` 残留。
+比较只排除 nft counter 下 packets/bytes 和 bridge 自然递减的 gc_timer；
+首轮原件因 GC 倒计时误判保留，修正夹具后真实补跑通过。
+远端无本轮脚本或测试资源，本地临时 HOME/TMPDIR 已清理，未重复 daily/full。
+
+共享工具镜像的断网容器内先复制到 Linux 文件系统再独验，通过后不复跑。
+验证器核对原始 stdout、解析值与精确关闭态字段、全部实物快照及正式源码摘要；
+文件内容、容器身份、接口 MTU、规则结构、虚报已测、stdout/parsed 不符、
+nft 规则结构七项内存篡改全部拒绝，结果 `verification.json` 保留。
+
+证据 `.tmp-native-icmp-off-20261027/native.json`，SHA256：
+`93b5b17ed4d41de53042de5f85e2e5824edf67bd280365167bd9c07c438ebcda`。
+本项只补原生关闭态输出与无持久副作用证据；真实 TUN 收发必须启用宿主透明
+接管，受透明保持关闭约束，原生启用态/公网/重启、IPv6/traceroute/PMTU
+及整体计划仍未完成。

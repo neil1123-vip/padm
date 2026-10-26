@@ -25,6 +25,10 @@
   SQLite inode/封禁保留及恢复通过；6 个 fresh nonce、4 份数据库、
   4 次公网受封禁超时。断网独验与 6 项篡改拒绝通过，失败原件保留。
   `.tmp-native-ws-migration-20261027/verification.json`；完整证据已归档。
+- 正式包原生 TUN 关闭态 status/diagnose 3830 ms 通过；13 个文件、
+  容器身份、双族路由/规则、调度与 sysctl 不变，ICMP 未发包。
+  断网独验及 7 项篡改拒绝通过，正式源码摘要匹配；本轮临时目录清理。
+  `.tmp-native-icmp-off-20261027/verification.json`；不抵扣启用态收发缺口。
 - VPS 原规格字节、材料及权限、timer、备份均恢复；业务健康。
   SSH/WS 测试路径、远端暂存、客户端已清理；清场后严格 TLS/443/200。
 - 8c.4 正式 3.41.8 原生 SSH 来源失效清理、TUN/ICMP 当前源码定向矩阵、
@@ -33,7 +37,8 @@
 ## 未决
 
 - WS 原编排未整轮成功；公网旧端口 TCP 拒绝、原生 IPv6 未证明。
-- ICMP 原生宿主/arm64/公网/重启、IPv6/traceroute/PMTU。
+- ICMP 原生启用态收发/arm64/公网/重启、IPv6/traceroute/PMTU；
+  真实 TUN 必须启用宿主透明接管，受透明保持关闭约束。
 - 原生 arm64、IPv6/双栈、新主机灾备、多机控制/WG、WARP 实账号、
   约 2026-12-17 自然 ACME 续期缺条件；VPS 无全局 IPv6/默认路由。
 - 公网 h3/CDN、其它客户端/算法、性能长稳未扩范围；gRPC Cloudflare

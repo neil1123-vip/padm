@@ -5414,6 +5414,19 @@ Bash/ShellCheck error、PowerShell AST 和 diff 检查通过。
 复用工具/离线镜像，未扩大三槽预算；本轮输入清理，日志/result 保留。
 原生宿主、arm64、公网、整机重启和完整卸载仍待验，5C 及总目标保持 active。
 
+2026-10-27 正式 `3.42.2` 在 Debian 13 原生 amd64 完成关闭态
+`protocol tun-status`/`protocol tun-diagnose`，实际 `3830 ms`。
+输出保持 enabled=false、权限字段 null、socket/Echo 为 not_tested；
+13 个关键文件的摘要/权限/归属、业务容器身份/代次、双族路由/规则、
+nft 结构、timer 和 sysctl 前后一致，无 TUN、oneoff 或候选残留。
+只排除 nft 动态计数及 bridge 自然递减的 `gc_timer`，原快照保留；
+首轮仅因 GC 倒计时误判的失败原件保留，修正夹具后实际补跑通过。
+独立验证器在断网容器 Linux 文件系统核对原件及正式源码摘要，
+文件/容器身份/MTU/规则/虚报已测/stdout 不符/nft 结构七项篡改全部拒绝。
+证据 `.tmp-native-icmp-off-20261027/verification.json`。无 ICMP 发包，
+未创建远端脚本或测试资源，不重复 daily/full。真实 TUN 收发需要启用宿主
+透明接管，受透明保持关闭约束；原生启用态/公网/重启缺口不抵扣。
+
 #### 5C.2d Redirect TCP 菜单、事务与真实转发
 
 菜单 `17 → 47` 与 `protocol redirect-status`、
