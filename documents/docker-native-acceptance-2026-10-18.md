@@ -2,8 +2,9 @@
 
 验收日期：2026-10-18–26（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
-**当前现场（2026-10-26）**：VPS 已完成正式 `3.41.6 → 3.41.8 → 3.41.6 → 3.41.8` 升级/回滚闭环，
-最终源为 `e671328e`；四阶段公网 WS 4 正/4 拒绝、材料/权限/调度/累计及独立负控通过，
+**当前现场（2026-10-26）**：VPS 已完成正式 `3.41.6 → 3.41.8 → 3.41.6 → 3.41.8 → 3.42.0`，
+其中前四阶段构成 `3.41.8` 升级/回滚闭环，最终运行正式 `3.42.0` bundle；
+四阶段公网 WS 4 正/4 拒绝、材料/权限/调度/累计及独立负控通过，
 三运行镜像绑定正式 manifest，ops 的 curl `8.23.0-r0` 可执行，透明保持关闭；
 固定 Xray 的 TLS 七入口显式 URI 转换互通已通过四阶段独验并清场；
 XHTTP 实际 POST 计数和 60 秒有界连接证据也已补齐，不扩大原生 URI 导入或长稳范围。
@@ -2066,6 +2067,28 @@ Docker bundle 内，不宣称该原生修复已由本次升级安装。未新增
 其它客户端或性能长稳证据，不解释旧 Vision/XHTTP/TUIC 失败；透明启用重启按要求不做，
 整体计划仍未完成。
 
+### 2026-10-26 正式 3.42.0 升级与重启后复核
+
+在同一 Debian 13 amd64、普通 bridge、公网 IPv4 VPS 上，使用已独立验签的正式
+`v3.42.0` 三件套执行 `3.41.8 → 3.42.0` 更新。活动 bundle ref 为
+`489d16c9d1db77591daa36e2f47c645f6d057d90`，manifest SHA256 为
+`99dab8c8739ad38467f3e8cd00353828596d2bb27f63b2850156822243db695a`，
+Sigstore identity 为
+`https://github.com/neil1123-vip/padm/.github/workflows/create_release.yml@refs/heads/main`。
+运行中的 Xray、Nginx、ops 三镜像摘要分别核对为
+`c2ea68d092cb583d7b076b542af67a9d42e6dd49a631083e7e33128f735c8b34`、
+`86e64bdfc2e06bfea83239d9db3d60ed51f93d0b0de4b350cc282b7153d93eb0`、
+`dd3841cf39713cc8762e12bd6debc48f3e6ce2edad10dfb9cb2c3fe2a4525e9a`。
+
+随后完成整机重启，重启后 Docker active，`nginx`、`xray`、`subscription`
+均为 `healthy`，`padm-docker validate` 返回 `0`，公网 HTTPS 返回 `200`，
+续期 timer 保持 active。透明代理保持关闭：无 `net-transparent` 容器，
+`host_integrations=[]`，未发现 TPROXY、REDIRECT 或 MARK 规则。
+
+证据为 `.tmp-native-upgrade-3420-20261026/verification.json`。本轮只验证
+正式升级与重启后的恢复，不重复 3.41.8 回滚；不新增 arm64、IPv6/双栈、
+自然到期续期或透明启用重启矩阵证据，整体计划仍未完成。
+
 ### 2026-10-26 正式 SSH 专用来源补验
 
 在正式 3.41.8/source=`e671328e` 的 Debian 13 amd64 上，新增短期专用
@@ -2140,3 +2163,23 @@ wire/应用回复均为 `0`；核心缺权阶段 TUN 请求 `1`、wire 请求/�
 该结果只关闭当前源码的隔离 Linux/amd64 TUN/IPv4 Echo 子项；原生宿主、
 arm64、公网、IPv6/traceroute/PMTU、整机重启及透明启用矩阵仍未完成，
 不把 Echo 直连结果外推为代理隧道或其它协议健康，整体计划继续未完成。
+
+### 2026-10-26 TUN/ICMP 发布包独验
+
+功能提交 `7f12133f` 对应的既有自动 Release 流水线 `40321534513` 已完成，
+`30` 项成功、`1` 项 Smoke 条件跳过；下载 `docker-contracts-fast-rest` 原始日志，
+确认 `docker-tun-icmp-ok` 和 `docker-tun-management-ok` 均实际出现。
+发布 `v3.42.0` 的提交为 `489d16c9`，相对功能提交仅修改两个版本文件。
+
+本轮只读下载公开三件套，复用官方 Cosign `v3.0.6` 镜像在隔离 Linux 容器验签，
+固定 `create_release.yml@refs/heads/main` 身份和 GitHub Actions OIDC issuer，
+结果 `Verified OK`。三个资产 SHA256 与 GitHub 发布记录一致，控制包摘要也与
+已验签 manifest 绑定；包内 `300` 个源码文件逐一匹配发布提交的 Git blob，
+唯一生成文件为 `docker/contracts/bundle.paths`。新诊断入口、ICMP 路由生成器
+和两项 ICMP 测试文件均在包内，没有遗漏发布依赖。
+
+五组镜像的 index、amd64 和 arm64 摘要与已独验的 `3.41.8` 相同，
+本轮未重复拉取或运行镜像；这不新增原生宿主、arm64 或公网 ICMP 的运行证据。
+证据 `.tmp-tun-icmp-release-3420-20261026/verification.json`、
+`cosign-verify.log` 和 `contracts-fast-rest.log`。GH CLI 首次取日志被本机缓存目录
+权限拒绝，提权只读重取成功；未操作 VPS、未发起新的发布，整体计划仍未完成。

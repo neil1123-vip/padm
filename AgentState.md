@@ -4,12 +4,12 @@
 
 ## 当前
 
-- `main/origin/main=f858bf8a`；8c.4 正式 SSH 原生补验已签名并推送。
+- `main/origin/main=a30a5036`；TUN/ICMP 源码及远端过滤证据已提交。
 - 整体计划仍未完成；透明代理保持关闭，不以阶段通过替代整体完成。
-- VPS：Debian 13 amd64、普通 bridge、公网 IPv4、正式 `3.41.8`；
-  source=`e671328e`，三业务 healthy，timer/source/材料恢复。
-- 3.41.8 release 32 项全成功，修复 CI 24 成功、3 条件跳过、零失败；
-  不重复发布。
+- VPS：Debian 13 amd64、普通 bridge、公网 IPv4、正式 `3.42.0`；
+  bundle ref=`489d16c9`，manifest=`99dab8c8`，三业务 healthy，timer/source/材料恢复。
+- v3.42.0 已由既有流水线自动发布（`489d16c9`），CI 30 成功、1 条件跳过；
+  三件套独立验签、300 个包内源码文件与发布提交核对通过，不重复发布。
 - 本机回归仅 Docker Linux，复用工具镜像；不重复 daily/full。
 
 ## 最近完成
@@ -24,6 +24,11 @@
   direct/远端仅过滤 Echo/核心缺权三阶段通过，无伪造回复、TCP/UDP 正常；
   动态计数结构负控、旧模板兼容和只读诊断通过，均 `cache_hit=false`；
   最新实流量证据 `.tmp-regression-docker-75fa27b0f5224516bc34e12780f44bd8/`。
+- v3.42.0 的 CI 日志确认 ICMP/TUN 合同实际成功；5 镜像摘要与已验 3.41.8 一致；
+  `.tmp-tun-icmp-release-3420-20261026/verification.json`，本轮未操作 VPS。
+- VPS 已用正式 `3.42.0` bundle 完成 `3.41.8 → 3.42.0` 升级并完成整机重启后复核；
+  `validate`/HTTPS 200、三业务 healthy、续期 timer active，透明集成仍关闭。
+  证据 `.tmp-native-upgrade-3420-20261026/verification.json`。
 - 6A.24：`3.41.6 → 3.41.8 → 3.41.6 → 3.41.8` 升级/回滚闭环通过；
   WS、严格 TLS、URI/source、权限/timer/累计及 4 项实物负控通过。
 - TUN IPv4 Echo、XHTTP CANCEL FIN、Mihomo 固定组合、TLS 七入口、

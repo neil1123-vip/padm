@@ -80,7 +80,7 @@
 | HTTP relay 原生路径 | 原生外部 IPv4 通过 | 独立外部客户端访问三个公网 HTTPS 目标均严格 TLS/200，错误认证 407、未允许来源 blocked；不外推公网 IPv6 或 SOCKS UDP 支持 |
 | SSH 专用来源防护 | 正式 3.41.8 原生 IPv4 补验通过 | 8c.4：collector 初始不存在，由正式 CLI 零人工 chmod 创建 root 0700；4 次真实错误认证、2 轮精确 INPUT 封禁、外部超时与解封恢复通过。来源服务失效后 jail 正常退出，2102 ms 清除规则；原规格字节、材料权限和 timer 保持。管理 22 始终可达，不外推任意 SSH 服务、arm64、IPv6 或重启恢复 |
 | 自然到期真实续期 | 未完成 | 等待登记窗口（约 2026-12-17）后的真实换证，不伪造到期 |
-| 当前修复可信发布 | 3.41.8 发布物独验及 Debian 13 amd64 正式升级/回滚闭环通过 | 6A.24 完成 `3.41.6 → 3.41.8 → 3.41.6 → 3.41.8`，四阶段公网 WS 4 正/4 拒绝、严格 TLS、URI/材料权限/调度/累计保持及 4 项实物篡改负控通过；最终源为 `e671328e`，三运行镜像绑定正式 manifest，ops 的 curl `8.23.0-r0` 可执行。两份 update 和一份 rollback 安全快照均保留。正式三件套、Cosign、298 个源码文件和五镜像双架构证据不变；原生 `network.sh` 不在 Docker bundle 内，不外推其它环境 |
+| 当前修复可信发布 | 3.42.0 发布物独验及 Debian 13 amd64 正式升级、重启后复核通过；3.41.8 回滚闭环保持通过 | 6A.24 完成 `3.41.6 → 3.41.8 → 3.41.6 → 3.41.8`，四阶段公网 WS 4 正/4 拒绝、严格 TLS、URI/材料权限/调度/累计保持及 4 项实物篡改负控通过；随后在同一 VPS 完成 `3.41.8 → 3.42.0` 并整机重启，`validate`/HTTPS 200、三业务 healthy、续期 timer active、透明集成关闭。最终 3.42.0 bundle ref 为 `489d16c9`，manifest 为 `99dab8c8`，三运行镜像绑定已验 manifest；原生 `network.sh` 不在 Docker bundle 内，不外推其它环境 |
 
 原生 `manageCDN` 只有地址设置/清空和 H3 使用说明；原生区域菜单提供 CN 域名、
 IP、组合模式及直连例外。Docker 已覆盖这些操作，不追加独立 H3 参数开关、任意国家
@@ -9691,6 +9691,25 @@ ops 内 curl `8.23.0-r0` 可执行；原生 `network.sh` 仍不属于 Docker bun
 最终证据 `.tmp-native-upgrade-3418-final-20261026/verification.json`；
 远端四目录已清，本机先逐字节核对四档再删除 108 个副本、`392091808` 字节。
 无运行源码变更，不重复 daily/full。透明始终关闭，其余环境缺口和整体未完成状态不变。
+
+### 6A.25 正式 3.42.0 升级与重启后复核
+
+2026-10-26 在同一 Debian 13 amd64、普通 bridge、公网 IPv4 VPS 上，使用已独立
+验签的正式 `3.42.0` bundle 完成 `3.41.8 → 3.42.0` 更新并整机重启。
+活动 bundle ref 为 `489d16c9d1db77591daa36e2f47c645f6d057d90`，manifest
+SHA256 为 `99dab8c8739ad38467f3e8cd00353828596d2bb27f63b2850156822243db695a`；
+Sigstore identity 固定为
+`https://github.com/neil1123-vip/padm/.github/workflows/create_release.yml@refs/heads/main`。
+
+重启后 Docker active，`nginx`、`xray`、`subscription` 均为 `healthy`，
+`padm-docker validate` 返回 `0`，公网 HTTPS 返回 `200`，续期 timer active。
+透明代理保持关闭：无 `net-transparent` 容器，`host_integrations=[]`，无
+TPROXY、REDIRECT 或 MARK 规则。证据
+`.tmp-native-upgrade-3420-20261026/verification.json`。
+
+本阶段只关闭正式 `3.42.0` 升级及重启后恢复的 amd64 子项，不重复 3.41.8
+回滚闭环；不新增 arm64、IPv6/双栈、自然到期续期、透明启用重启矩阵、新主机
+灾备或其它客户端证据，整体计划仍保持 active。
 
 ### 本轮菜单与回归收敛
 
