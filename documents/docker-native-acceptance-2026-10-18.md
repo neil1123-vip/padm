@@ -2,8 +2,8 @@
 
 验收日期：2026-10-18–27（北京时间）。本阶段补原生 amd64 证据，不代表整体计划完成。
 
-**当前现场（2026-10-27）**：VPS 已完成正式 `3.41.6 → 3.41.8 → 3.41.6 → 3.41.8 → 3.42.0 → 3.42.1`，
-其中前四阶段构成 `3.41.8` 升级/回滚闭环，最终运行正式 `3.42.1` bundle；
+**当前现场（2026-10-27）**：VPS 已完成正式 `3.41.6 → 3.41.8 → 3.41.6 → 3.41.8 → 3.42.0 → 3.42.1 → 3.42.2`，
+其中前四阶段构成 `3.41.8` 升级/回滚闭环，最终运行正式 `3.42.2` bundle；
 四阶段公网 WS 4 正/4 拒绝、材料/权限/调度/累计及独立负控通过，
 三运行镜像绑定正式 manifest，ops 的 curl `8.23.0-r0` 可执行，透明保持关闭；
 固定 Xray 的 TLS 七入口显式 URI 转换互通已通过四阶段独验并清场；
@@ -2175,6 +2175,62 @@ master 及已见监听，连续变化、主进程/代次、namespace、权限、
 `a5118709229da0ce40f292f283e818baa46001732a7ee5286a46272525a45e95`。
 沿用已实测 boot=`8703c6d6-786a-4dd2-b4e2-78a7a9dd3b27`，没有在 3.42.1
 再次重启；不扩大任意 SSH、arm64、IPv6、透明或长稳范围，整体计划未完成。
+
+### 2026-10-27 成员采样修复正式原生闭环
+
+签名提交 `ef5194eb` 已发布正式 `3.42.2`/source=`4aaa9158`；
+流水线 `40369406371` 30 项成功、1 项 Smoke 条件跳过。三件套摘要、
+Sigstore 身份及全部 300 个包内源码独验通过，五组镜像全部复用 3.42.1。
+正式 `3.42.1 → 3.42.2` 升级保持材料权限、调度、业务规格和 boot。
+
+专用 IPv4 单监听 22220、管理 22 独立，正式 CLI 零人工 chmod 重新启用。
+四次真实错误密码完成两轮封禁，各次精确 INPUT DROP 与公网超时均通过；
+首轮正式 unban 后恢复，第二轮封禁后连续 `26180 ms`、21 次 runtime
+核验健康。停止来源后 jail 正常退出 0、guard 和 owner state 清退、
+IPv4/IPv6 规则回到基线；再次启动测试来源后公网可连接，管理 22 始终可达。
+
+正式恢复、清理、实物读回和断网独验通过，原规格字节、材料权限、timer、
+全部备份保持；三业务 healthy、严格公网 TLS/200、透明关闭。
+测试 unit/collector/net 路径、客户端及远端暂存均清理。证据
+`.tmp-native-ssh-members-close-20261027/verification.json`；
+私密归档 SHA256：
+`cb5ee5a6c1c6ebfb47c7c741913588ae6396b8b2975e4dddd117cae603deb253`。
+两版失败原件保留；复用既有真实 boot，本版未再次重启。
+本节只关闭可信包的专用来源 IPv4 双轮恢复子项，任意 SSH、arm64、
+IPv6、透明启用和整体计划仍未完成。
+
+### 2026-10-27 正式 WS IPv4 端口事务有限补验
+
+Debian 13 原生 amd64、正式 `3.42.2`/source=`4aaa9158`，单直接 WS、
+单公开端口与单 jail。正确 TLS SNI、错误 HTTP Host 产生 3 次真实 404
+并封禁。错误来源拒绝、暂停候选 Nginx 的真实健康失败均回滚旧端口；
+正常 `443 → 25443` 迁移保留 SQLite inode 和封禁记录。
+4 次公网受封禁请求均超时、DROP 计数增加、请求 nonce 未进入 Nginx；
+宿主旧监听、旧 hook、旧 owner 清退，6 个 fresh nonce、4 份 SQLite 实物。
+固定现有 HTTP CONNECT 路径，两端口抓包确认同一公网来源，
+未豁免正式来源校验；用正式 unban 清理检测窗口内旧日志造成的基线重封。
+
+原编排保留 `exit 1`：旧端口探针漏接实际 TLS handshake timeout，
+补充分类后未重跑整轮。后续独验精确绑定原始 Codex 工具调用/输出、
+同轮 migration nonce、`old-closed/443`、宿主清退及恢复正控
+`recovery-client.json`。只证明固定 HTTP CONNECT 路径下，旧 HTTPS
+请求未完成 TLS；未定位超时发生在上游，未观察公网 TCP 拒绝，
+未生成虚假的旧端口成功记录，也不称整轮 runner 通过。
+
+断网独验通过，trigger、final-target、challenge-tls、database、
+restore、tool-observation 六项实物篡改全部拒绝。
+原规格字节、材料权限、timer、累计及备份恢复，管理 22 可达，
+三业务 healthy；远端暂存、两个本轮容器及本地控制归档清理，
+25443 无监听，清场后严格公网 TLS/443/200 再次通过，透明保持关闭。
+失败原件与冻结脚本保留，证据
+`.tmp-native-ws-migration-20261027/verification.json`、
+`negative-verification.json`、`remote-cleanup.json`、`post-cleanup-client.json`；
+原生原件 SHA256：
+`0468ec8da72ffef07eeb15408e61caded7694cb9d5c0ca9dbc032c5cdc0ecbd9`；
+完整归档 SHA256：
+`89b381c5bc138338abeda0fbf65040d677143f11e3009a04a5bf6d9ad2cfde64`。
+本节只关闭单 WS IPv4 迁移与失败恢复的有限事务子项；原编排整轮成功、
+公网旧端口 TCP 拒绝、原生 IPv6/arm64、透明启用和整体计划仍未完成。
 
 ### 2026-10-26 当前源码 TUN/ICMP 定向补验
 

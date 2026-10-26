@@ -5950,6 +5950,29 @@ SSH/control 或其它宿主集成以及额外编辑组合明确拒绝。
 不证明 Cosign 发布、首次安装或公网；实际 CLI、候选、Compose、
 owner/runtime/SQLite/双栈防火墙与失败恢复不替换为桩。
 
+2026-10-27 在 Debian 13 原生 amd64、正式 `3.42.2`/source=`4aaa9158`
+补完单 WS 公网 IPv4 端口事务的有限证据。正确 TLS SNI、错误 HTTP Host
+产生 3 次真实 404 并封禁；错误来源拒绝、暂停候选 Nginx 后的真实健康
+失败均恢复旧端口。正常 `443 → 25443` 迁移保留 SQLite inode 和封禁记录，
+4 次公网受封禁请求超时、DROP 计数增加且请求 nonce 未进入 Nginx；
+宿主旧监听、旧 hook 和旧 owner 清退，6 个 fresh nonce、4 份 SQLite 实物。
+公网客户端固定 HTTP CONNECT，使两端口均实测同一来源；未放宽产品来源校验。
+原规格字节、材料权限、timer 和累计恢复，三业务 healthy；
+远端暂存、两个本轮容器及本地控制归档清理后，严格 TLS/443/200 再次通过。
+
+原编排仍为 `exit 1`：旧端口探针未接纳实际 TLS handshake timeout；
+后续补分类未重跑整轮。独验绑定原始工具调用/输出、同轮 migration nonce、
+`old-closed/443`、宿主清退与真实 `recovery-client.json`，只接纳
+“固定 HTTP CONNECT 路径下，旧 HTTPS 请求未完成 TLS”；不能定位超时
+发生在上游，不能称公网 TCP 拒绝/关闭，也未伪造旧端口探针成功。
+断网独验及 trigger、final-target、challenge-tls、database、restore、
+tool-observation 六项实物篡改拒绝通过；失败原件保留。
+证据 `.tmp-native-ws-migration-20261027/verification.json`；
+原生原件 SHA256=`0468ec8da72ffef07eeb15408e61caded7694cb9d5c0ca9dbc032c5cdc0ecbd9`，
+完整归档 SHA256=`89b381c5bc138338abeda0fbf65040d677143f11e3009a04a5bf6d9ad2cfde64`。
+仅关闭上述有限事务子项；原编排整轮成功、公网旧端口 TCP 拒绝、
+原生 IPv6/arm64、透明启用与整体计划仍未完成，透明代理保持关闭。
+
 #### 5C.7a 控制 API 可信来源日志底座
 
 生产 `control_api.py` 的标准输出改为固定记录：
@@ -7603,7 +7626,16 @@ unit、master 和已见监听；连续变化、代次、namespace、权限及额
 原生失败归档断网独验 `.tmp-native-ssh-guard-close-20261027/verification.json`，
 SHA256=`a5118709229da0ce40f292f283e818baa46001732a7ee5286a46272525a45e95`；
 原规格、材料权限、timer 及业务恢复，测试资源与远端暂存已清理。
-成员采样修复进入可信 bundle 后仍须补两轮封禁/解封及来源失效清理；
+成员采样修复已签名推送 `ef5194eb`，正式 `3.42.2`/source=`4aaa9158`
+发布门禁 30 项成功、1 项 Smoke 条件跳过，三件套验签与 300 个源码核对通过，
+五组镜像全部复用。正式升级后两轮真实封禁和公网超时、一次正式解封、
+来源失效清退通过；第二轮封禁后 `26180 ms`、21 次 runtime 检查健康。
+停止来源后 jail exit=0、guard/owner state/规则清退，重新启动专用来源后公网
+可达，管理 22 全程可达。原规格字节、材料权限、timer、规则与业务完整恢复，
+测试路径、远端暂存和客户端已清，全部备份保留。
+断网独验 `.tmp-native-ssh-members-close-20261027/verification.json` 通过，
+归档 SHA256=`cb5ee5a6c1c6ebfb47c7c741913588ae6396b8b2975e4dddd117cae603deb253`。
+复用此前真实重启 boot，未将 3.42.2 本轮补验称为新版本再次整机重启；
 任意 SSH、arm64、IPv6 和透明启用矩阵未扩范围，整体计划继续未完成。
 
 #### 5C.9a Hy2/TUIC 固定客户端与现有 UDP alias 前置
