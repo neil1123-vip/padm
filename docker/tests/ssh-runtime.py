@@ -122,6 +122,41 @@ class RuntimeTests(unittest.TestCase):
                 runtime.Directory(missing)
             self.assertFalse(Path(missing).exists())
 
+    def test_guard_read_retries_only_one_atomic_replacement(self):
+        with tempfile.TemporaryDirectory(dir="/root") as path:
+            directory = self.directory(path)
+            guard = Path(path, "guard.json")
+            payload = {"schema": 1, "token": "a" * 32}
+            guard.write_text(json.dumps(payload))
+            guard.chmod(0o600)
+            original_open = os.open
+            for replacements in (1, 2):
+                remaining = replacements
+                def replace_after_open(*args, **kwargs):
+                    nonlocal remaining
+                    descriptor = original_open(*args, **kwargs)
+                    if args[0] == "guard.json" and remaining:
+                        temporary = Path(path, ".guard-next")
+                        temporary.write_text(json.dumps(payload))
+                        temporary.chmod(0o600)
+                        os.replace(temporary, guard)
+                        remaining -= 1
+                    return descriptor
+                with self.subTest(replacements=replacements), \
+                        patch.object(runtime.os, "open", side_effect=replace_after_open):
+                    if replacements == 1:
+                        self.assertEqual(directory.read("guard.json"), payload)
+                    else:
+                        with self.assertRaises(runtime.Failure):
+                            directory.read("guard.json")
+            guard.chmod(0o644)
+            with self.assertRaises(runtime.Failure):
+                directory.read("guard.json")
+            guard.chmod(0o600)
+            os.link(guard, Path(path, "guard-link"))
+            with self.assertRaises(runtime.Failure):
+                directory.read("guard.json")
+
 
 if __name__ == "__main__":
     unittest.main()

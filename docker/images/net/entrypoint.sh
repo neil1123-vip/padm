@@ -522,18 +522,32 @@ def collector_guard():
         raise ValueError("unsafe SSH collector directory mode")
     if not os.statvfs(directory).f_flag & os.ST_RDONLY:
         raise ValueError("SSH collector guard mount is writable")
-    descriptor = os.open(directory + "/guard.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    with os.fdopen(descriptor, "rb") as handle:
-        before = os.fstat(handle.fileno())
-        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
-                or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1
-                or before.st_size > 4096):
-            raise ValueError("unsafe SSH collector guard")
-        data = handle.read(4097)
-        after = os.fstat(handle.fileno())
-    if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
-            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
-        raise ValueError("SSH collector guard changed while reading")
+    # 原子轮换会解绑已打开的旧 inode；只在证实路径已替换时重读一次。
+    guard_path = directory + "/guard.json"
+    for attempt in range(2):
+        descriptor = os.open(guard_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(descriptor, "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+                    or stat.S_IMODE(before.st_mode) != 0o600 or before.st_size > 4096):
+                raise ValueError("unsafe SSH collector guard")
+            if before.st_nlink != 1:
+                if attempt == 0 and before.st_nlink == 0:
+                    current = os.lstat(guard_path)
+                    if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+                        continue
+                raise ValueError("unsafe SSH collector guard")
+            data = handle.read(4097)
+            after = os.fstat(handle.fileno())
+        if (after.st_nlink != 1 or
+                (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+            if attempt == 0 and after.st_nlink == 0:
+                current = os.lstat(guard_path)
+                if (current.st_dev, current.st_ino) != (after.st_dev, after.st_ino):
+                    continue
+            raise ValueError("SSH collector guard changed while reading")
+        break
     def unique(pairs):
         result = {}
         for key, value in pairs:

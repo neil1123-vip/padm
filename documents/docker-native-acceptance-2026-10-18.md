@@ -2127,6 +2127,31 @@ SNI，不判定根因；既有不嗅探固定目标通道的严格 TLS/200、错
 仅关闭专用无存量会话、显式单监听、密码失败格式的原生 IPv4 子项；
 arm64、IPv6、整机重启和任意 SSH 服务不由本轮证明，整体计划仍未完成。
 
+### 2026-10-27 SSH 整机重启与 guard 轮换故障
+
+正式 3.42.0/source=`489d16c9`、Debian 13 amd64、专用单监听 IPv4 `22220`：
+真实错误密码触发精确 INPUT DROP，公网新连接超时，管理 `22` 始终可达。
+仍封禁时整机重启，boot 从 `d3243e56-b911-4d88-b7bb-2fb44a94cda1`
+变为 `8703c6d6-786a-4dd2-b4e2-78a7a9dd3b27`。三业务自动恢复 healthy，
+旧 jail exit=`0`、`restart=no`，transient collector/guard/规则清退；
+旧 owner 不被接管，status 拒绝，正式 CLI 停用可退役残留。严格公网 TLS/200
+与续期 timer 通过，透明代理未启用。
+
+重新启用返回成功，约 12 秒后 jail 因 `unsafe SSH collector guard` 清退，
+而 collector 仍 active、runtime check=`0`、guard age=`792 ms`。
+源码及确定性旧实现回归确认：每秒原子轮换与读取竞态会让旧 inode 的
+`st_nlink=0`，或只改变 ctime，被误判为不安全文件。修复已在两个读取端
+限定重读一次；正常轮换通过，连续轮换、同 inode 修改、权限及硬链接仍拒绝。
+本地 `docker-ssh-preflight` 与 `docker-fail2ban-ownership` 均通过；
+正式可信包包含修复后仍须补原生重新启用、封禁和解封，当前不宣称恢复通过。
+
+失败矩阵及断网独验：
+`.tmp-native-ssh-reboot-3420-20261027/verification.json`；
+私密归档 SHA256=`a1b869022b69803b5cd883e69baefa6b1f772353a0aeab565dbe4128f039f76c`。
+正式 CLI 已恢复原规格字节、材料与权限、timer 和所有备份；最终三业务
+healthy、严格公网 TLS/200。测试 unit/collector/net 路径、远端暂存和独立
+客户端已清；未扩大任意 SSH、arm64、IPv6、长稳或透明代理范围。
+
 ### 2026-10-26 当前源码 TUN/ICMP 定向补验
 
 本轮针对未提交源码在 Docker Desktop Linux/amd64 中复用

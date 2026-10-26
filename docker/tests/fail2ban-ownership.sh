@@ -681,6 +681,82 @@ if sh "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" fail2ban-ssh ssh.service
 # guard 失效时没有任何防火墙写入，正确夹具仍须经过生产门禁。
 reset
 run ssh-seed "${SSH_TOKEN}" 198.51.100.10 22220
+# 在真实只读挂载上确定性替换 guard，覆盖读取前后两个轮换窗口。
+/usr/bin/python3 - "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" "${GUARD_ROOT}" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import time
+from unittest.mock import patch
+
+source = Path(sys.argv[1]).read_text()
+namespace = dict(os=os, re=re, stat=stat, json=json, time=time,
+                 target=os.environ["PADM_SSH_COLLECTOR_TARGET"],
+                 ports=[os.environ["PADM_SSH_COLLECTOR_PORT"]])
+body = source[source.index("\ndef collector_guard():") + 1:source.index("\ndef hook(port):")]
+exec(compile(body, "<production-collector-guard>", "exec"), namespace)
+check = namespace["collector_guard"]
+guard = Path(sys.argv[2]) / "guard.json"
+valid = guard.read_bytes()
+original_open, original_fstat = os.open, os.fstat
+
+def exercise(window, replacements, accepted):
+    guard.write_bytes(valid)
+    guard.chmod(0o600)
+    pending, reads = replacements, {}
+    def rotate():
+        nonlocal pending
+        temporary = guard.with_name(".guard-race")
+        temporary.write_bytes(valid)
+        temporary.chmod(0o600)
+        os.replace(temporary, guard)
+        pending -= 1
+    def opened(path, *args, **kwargs):
+        descriptor = original_open(path, *args, **kwargs)
+        if path == "/run/padm/ssh-collector/guard.json":
+            reads[descriptor] = 0
+            if window == "open" and pending:
+                rotate()
+        return descriptor
+    def metadata(descriptor):
+        result = original_fstat(descriptor)
+        if descriptor in reads:
+            reads[descriptor] += 1
+            if reads[descriptor] == 1:
+                if window == "read" and pending:
+                    rotate()
+                elif window == "same-inode":
+                    os.utime(guard, ns=(result.st_atime_ns, result.st_mtime_ns + 1_000_000))
+        return result
+    if window == "permissions":
+        guard.chmod(0o644)
+    elif window == "hardlink":
+        os.link(guard, guard.with_name("linked"))
+    try:
+        with patch.object(os, "open", side_effect=opened), \
+                patch.object(os, "fstat", side_effect=metadata):
+            try:
+                check()
+            except ValueError:
+                assert not accepted, (window, replacements)
+            else:
+                assert accepted, (window, replacements)
+        assert pending == 0, (window, replacements, pending)
+    finally:
+        if window == "hardlink":
+            guard.with_name("linked").unlink()
+        guard.chmod(0o600)
+
+for window in ("open", "read"):
+    exercise(window, 1, True)
+    exercise(window, 2, False)
+for window in ("same-inode", "permissions", "hardlink"):
+    exercise(window, 0, False)
+print("ssh-guard-atomic-replacement-ok")
+PY
 for mutation in token unit target port boot invocation expired; do
     ssh_guard_refresh
     python3 - "${GUARD_ROOT}/guard.json" "${mutation}" <<'PY'

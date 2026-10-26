@@ -73,19 +73,26 @@ class Directory:
             raise
 
     def read(self, name, optional=False):
-        try:
-            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.fd)
-        except FileNotFoundError:
-            if optional:
-                return None
-            raise
-        with os.fdopen(fd, "r", encoding="utf-8") as handle:
-            current = os.fstat(handle.fileno())
-            if (not stat.S_ISREG(current.st_mode) or current.st_uid != 0
-                    or stat.S_IMODE(current.st_mode) != 0o600
-                    or current.st_nlink != 1 or not 1 <= current.st_size <= 4096):
-                raise Failure("SSH collector 的受管文件权限或大小无效")
-            rows = collector.ssh.parse_json_lines(handle.read(4097))
+        for attempt in range(2):
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.fd)
+            except FileNotFoundError:
+                if optional:
+                    return None
+                raise
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                current = os.fstat(handle.fileno())
+                if name == "guard.json" and attempt == 0 and current.st_nlink == 0:
+                    replacement = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
+                    # 原子轮换会撤销旧 inode 的链接，只对已确认换代的 guard 重读一次。
+                    if (replacement.st_dev, replacement.st_ino) != (current.st_dev, current.st_ino):
+                        continue
+                if (not stat.S_ISREG(current.st_mode) or current.st_uid != 0
+                        or stat.S_IMODE(current.st_mode) != 0o600
+                        or current.st_nlink != 1 or not 1 <= current.st_size <= 4096):
+                    raise Failure("SSH collector 的受管文件权限或大小无效")
+                rows = collector.ssh.parse_json_lines(handle.read(4097))
+            break
         if len(rows) != 1:
             raise Failure("SSH collector 的受管 JSON 无效")
         return rows[0]

@@ -1,63 +1,42 @@
 # Agent State
 
-> 当前快照；详细证据见 Git、原生验收记录及 `.tmp-*`。
+> 当前快照；详细证据见 Git、验收记录及 `.tmp-*`。
 
 ## 当前
 
-- `main/origin/main=f74045c2`；TUN/ICMP 源码及远端过滤证据已提交。
-- 整体计划仍未完成；透明代理保持关闭，不以阶段通过替代整体完成。
-- VPS：Debian 13 amd64、普通 bridge、公网 IPv4、正式 `3.42.0`；
-  bundle ref=`489d16c9`，manifest=`99dab8c8`，三业务 healthy，timer/source/材料恢复。
-- v3.42.0 已由既有流水线自动发布（`489d16c9`），CI 30 成功、1 条件跳过；
-  三件套独立验签、300 个包内源码文件与发布提交核对通过，不重复发布。
-- 本机回归仅 Docker Linux，复用工具镜像；不重复 daily/full。
+- 整体计划未完成；透明代理保持关闭，不以阶段通过替代整体完成。
+- VPS：Debian 13 amd64、bridge、公网 IPv4、正式 `3.42.0`；
+  bundle=`489d16c9`，三业务 healthy、严格公网 TLS/200、续期 timer active。
+- 本机 Docker Linux 可用；共享工具镜像，未重复 daily/full。
+- 待发布：SSH guard 原子轮换竞态修复，涉及 net 与 runtime 两个读取端。
+  仅对确认已换 inode 的旧 fd 重读一次，全部安全校验保留。
 
 ## 最近完成
 
-- 8c.4：正式 CLI 零人工 chmod 创建 root `0700`；4 次错密码、2 轮封禁、
-  外部超时、解封恢复、管理 22 可达；来源失效后 `jail exit=0`，
-  IPv4/IPv6 规则 2102 ms 清理，3 项越界负控通过。
-  证据 `.tmp-native-ssh-3418-20261026/verification.json`；
-  私密归档 SHA256=`a42db50675a521a0dcc3fa74d1342dc554d201a334ea9fb9fe0d3e1a5eb7a6b8`。
-- 当前源码 TUN/ICMP 定向回归通过：`docker-tun-management` 36.366 s、
-  `docker-tun-real` 70.779 s、`docker-menu-tun` 2.115 s，均 `exit=0`；
-  direct/远端仅过滤 Echo/核心缺权三阶段通过，无伪造回复、TCP/UDP 正常；
-  动态计数结构负控、旧模板兼容和只读诊断通过，均 `cache_hit=false`；
-  最新实流量证据 `.tmp-regression-docker-75fa27b0f5224516bc34e12780f44bd8/`。
-- 2026-10-27 复核剩余项：TUN/ICMP 的 IPv6 不是单纯补用例，现有 schema、
-  生成器、诊断和真实夹具均固定 IPv4；VPS 同样没有全局 IPv6/默认路由，
-  因而继续保持设计级 `deferred`，不伪造公网或双栈证据。
-- 当前本机 Docker Desktop Linux API 返回权限错误，未在不可用条件下回退
-  MSYS2，也未重复已有回归；本轮没有可安全关闭的新原生项。
-- v3.42.0 的 CI 日志确认 ICMP/TUN 合同实际成功；5 镜像摘要与已验 3.41.8 一致；
-  `.tmp-tun-icmp-release-3420-20261026/verification.json`，本轮未操作 VPS。
-- VPS 已用正式 `3.42.0` bundle 完成 `3.41.8 → 3.42.0` 升级并完成整机重启后复核；
-  `validate`/HTTPS 200、三业务 healthy、续期 timer active，透明集成仍关闭。
-  证据 `.tmp-native-upgrade-3420-20261026/verification.json`。
-- 2026-10-26 通过已核对主机指纹的 SSH 做当前真值复核：Debian 13、Docker 29.9.1，
-  `padm-docker validate` 返回 0、三业务 healthy、HTTPS 200、续期 timer active；
-  无透明容器、iptables/nft 透明规则或 validate 残留运行容器。证据
-  `.tmp-native-close-3420-20261026/verification.json`。
-- 6A.24：`3.41.6 → 3.41.8 → 3.41.6 → 3.41.8` 升级/回滚闭环通过；
-  WS、严格 TLS、URI/source、权限/timer/累计及 4 项实物负控通过。
-- TUN IPv4 Echo、XHTTP CANCEL FIN、Mihomo 固定组合、TLS 七入口、
-  3.41.8 三件套/Cosign/五镜像双架构已完成对应验收；证据目录见
-  `documents/docker-native-acceptance-2026-10-18.md`。
+- 8c.5：真实错误认证、精确 DROP、外部超时后整机重启；旧 jail exit=0、
+  restart=no，collector/guard/规则清退，旧 owner 拒绝复用及正式停用通过。
+  重新启用失败：正常 guard 轮换被误拒；未把安全停用当作恢复成功。
+  `.tmp-native-ssh-reboot-3420-20261027/verification.json`。
+- 旧实现 runtime/net 均已确定性复现；修复定向回归通过：
+  `docker-ssh-preflight` 5744 ms、`docker-fail2ban-ownership` 31785 ms。
+  双读取窗口、连续轮换、同 inode 修改、权限和硬链接负控均覆盖。
+- VPS 原规格字节、材料及权限、timer、备份均恢复；业务健康。
+  测试 unit/collector/net 路径、远端暂存、客户端已清理。
+- 8c.4 正式 3.41.8 原生 SSH 来源失效清理、TUN/ICMP 当前源码定向矩阵、
+  3.41.6/3.41.8 升级回滚及正式 3.42.0 升级重启已完成各自有限范围。
 
 ## 未决
 
-- ICMP 尚缺原生宿主、arm64、公网、重启、IPv6/traceroute/PMTU。
-- Mihomo 尚未扩展其它环境/客户端/算法/性能长稳；正式原生 h3/CDN、
-  其它客户端、固定 ML-KEM 外算法也未扩范围。
-- 24/25 gRPC Cloudflare 公网透传缺有效 Zone 授权；旧 token 无效，
-  不重复无变化公网矩阵。
-- 原生 arm64、IPv6/双栈、新主机灾备、多机原生控制/WG、WARP 实账号、
-  约 2026-12-17 自然续期缺条件；VPS 当前无全局 IPv6/默认路由。
+- guard 修复须进入可信 net 镜像与 bundle，再补原生重新启用、封禁/解封。
+- ICMP 原生宿主/arm64/公网/重启、IPv6/traceroute/PMTU。
+- 原生 arm64、IPv6/双栈、新主机灾备、多机控制/WG、WARP 实账号、
+  约 2026-12-17 自然 ACME 续期缺条件；VPS 无全局 IPv6/默认路由。
+- 公网 h3/CDN、其它客户端/算法、性能长稳未扩范围；gRPC Cloudflare
+  透传缺有效 Zone 授权，不重跑无变化矩阵。
 - 透明启用重启按要求不做；SOCKS UDP、Xray 解析后阻断继续拒绝。
-- 旧 Vision reset、XHTTP 业务 TLS 超时、TUIC 超时缺原现场材料，根因未定。
+- 旧 Vision reset、XHTTP TLS 超时、TUIC 超时缺原现场材料，根因未定。
 
 ## 工作区注意
 
-- TUN/ICMP 源码改动必须保留，不能回滚或混入 SSH 文档阶段提交。
-- 既有未跟踪 `.tmp-ci-timeout-actionlint.tar.gz`、`.tmp-reality-palette-preview*`、
-  `.tmp-remote-xray-config.json`、`NUL` 不要误删。
+- 保留既有未跟踪 `.tmp-ci-timeout-actionlint.tar.gz`、
+  `.tmp-reality-palette-preview*`、`.tmp-remote-xray-config.json`、`NUL`。

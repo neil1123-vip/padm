@@ -7556,6 +7556,42 @@ SNI 拒绝通过既有固定目标通道复核，不用该成功解释直连 EOF
 仅关闭上述正式版本的专用来源 IPv4 子项；任意 SSH、额外认证格式、
 arm64、IPv6、整机重启和完整生命周期仍不由本轮证明，整体计划继续未完成。
 
+### 8c.5：原生重启安全停用与 guard 原子轮换修复
+
+2026-10-27 在正式 3.42.0/source=`489d16c9`、Debian 13 amd64 上，
+专用显式 IPv4 `22220` 的真实错误认证、精确 INPUT DROP、外部超时及管理
+`22` 正控通过；仍封禁时整机重启，boot ID 确实变化。三业务自动恢复健康，
+旧 jail 正常退出 `0` 且 `restart=no`，transient collector 消失、guard 与
+规则清理，旧 owner 保留且 status 拒绝；正式 CLI 可停用并退役旧 owner。
+重启后严格公网 TLS/200 通过，透明始终关闭。
+
+正式 CLI 重新启用返回成功后，jail 在约 12 秒后报
+`unsafe SSH collector guard` 并正常清退，collector 仍健康、凭证未过期。
+根因为每秒 `os.replace` 轮换 guard 后，已打开旧 inode 的链接数归零，
+或读取期间 ctime 改变；容器 guard 与宿主 runtime 将正常轮换误判为越界。
+两个生产读取端只在旧 fd 的链接数为 `0` 且当前路径已换 inode 时重读一次，
+保留 root/0600/单链接、内容稳定性、JSON、token、boot 和 TTL 校验；
+不增加重试配置、依赖或自动重启承诺。
+
+旧实现确定性红色证据：
+`.tmp-regression-docker-e340db94904e47bb8abdd3a0eec0b061`（runtime）、
+`.tmp-regression-docker-e88f7f8d385c488fb0e2fed0393b36fb`（net）。
+修复后 `docker-ssh-preflight -Jobs 2` 通过，入口 `5744 ms`；
+`docker-fail2ban-ownership -Jobs 2` 通过，入口 `31785 ms`，在真实私有只读
+挂载上覆盖 open/fstat 与前后 fstat 两个轮换窗口及连续轮换、同 inode 修改、
+权限与硬链接负控。证据分别为
+`.tmp-regression-docker-b8d1627064f746b491e723c5ebb81c90`、
+`.tmp-regression-docker-4c6eebeec1b14ebe979ed7ab9ec209c7`。
+
+原生矩阵按失败记录，未把安全停用成功改写为重新启用通过：
+`.tmp-native-ssh-reboot-3420-20261027/verification.json`，私密归档 SHA256
+`a1b869022b69803b5cd883e69baefa6b1f772353a0aeab565dbe4128f039f76c`。
+已恢复原规格字节、材料及权限、timer、全部备份；三业务 healthy，严格公网
+TLS/200 复核通过，测试 unit/collector/新增 net 路径和远端暂存、客户端均清理。
+仅允许核对当前 Nginx 容器身份后的 Docker 内网 IP 变化，其余规则严格比较。
+修复纳入可信镜像/bundle 后仍须补原生重新启用和封禁/解封；任意 SSH、
+arm64、IPv6 和透明启用矩阵未扩范围，整体计划继续未完成。
+
 #### 5C.9a Hy2/TUIC 固定客户端与现有 UDP alias 前置
 
 复用 `docker-entry-port-alias-real` 的唯一隔离 daemon、离线固定镜像、
