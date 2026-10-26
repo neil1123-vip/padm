@@ -1180,8 +1180,9 @@ runDockerTunManagementRegression() {
         "${PROJECT_ROOT}/docker/tests/tun-management.sh" &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/setup.sh" "${PROJECT_ROOT}/docker/lib/menu.sh" \
             "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" \
-            "${PROJECT_ROOT}/docker/tests/tun-management.sh" &&
+            "${PROJECT_ROOT}/docker/tests/tun-management.sh" "${PROJECT_ROOT}/docker/tests/tun-icmp.sh" &&
         runDockerTunResourcesRegression &&
+        bash "${PROJECT_ROOT}/docker/tests/tun-icmp.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/tun-management.sh"
 }
 

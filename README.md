@@ -1552,6 +1552,7 @@ TUN 管理入口为菜单 `5 → 1 → 9 → 44`：
 
 ```bash
 padm-docker protocol tun-status
+padm-docker protocol tun-diagnose
 padm-docker edit --tun-enable
 padm-docker edit --tun-off
 ```
@@ -1564,6 +1565,21 @@ padm-docker edit --tun-off
 候选只读检查在线归属；异常退出、残留或漂移保留现场，不自动接管或清理。
 旧 bundle 缺少 TUN 管理能力时拒绝启用或恢复，不能删除 state 绕过门禁。
 Docker Linux amd64 隔离验收已通过；原生宿主、arm64、公网、整机重启和完整卸载仍待验。
+
+TUN 的 IPv4 Echo 请求明确交给 `direct`，不增加 `CAP_NET_RAW`。
+这里验证的是直连出口的 Echo 往返，不能据此判断 Reality 入口、代理隧道或 TCP/UDP 服务健康；
+Echo 失败也不能单独判定这些服务故障。
+核心在 raw socket 权限不足时可回退到受 `net.ipv4.ping_group_range` 约束的
+ping socket；范围检查使用核心的有效 GID 或附加组。组范围不允许或其它系统策略拒绝时，
+ICMP 可以失败，普通 TCP/UDP 服务不因此停止，也不自动修改宿主 sysctl 或扩大能力。
+`tun-diagnose` 仅读取受管核心进程的身份、能力和所在网络空间的组范围，
+报告 `ping_group_allowed`、`net_raw_effective`；读取失败为 `unknown` 并保留原因。
+`ping_group_allowed=true` 只表示组范围允许，不代表 socket 创建成功或目标可达。
+`socket_probe`、`echo_roundtrip` 与 `capture` 明确标为未验证，诊断不发包、不启停核心。
+旧 TUN 模板仍可查询、诊断和关闭；缺少显式规则时报告 `policy_dependent`，
+仅更新镜像会保留原配置，后续配置重新生成时才写入该规则。
+TUN 仍拒绝与 SOCKS/WARP 等 `routing` 配置共存，不通过直连或本地构造回复掩盖不支持的出站。
+这项能力限定基本 IPv4 Echo，不承诺 traceroute、IPv6 ICMP 或 PMTU；也不增加全局 ICMP 丢弃规则。
 
 菜单 `6 → 7. 核心升级评估` 或 `assess` 会验签并预拉取候选镜像，使用私有配置副本
 执行菜单版升级风险扫描、实际核心配置试跑和 Xray 严格校验，以及已启用的 TLS、

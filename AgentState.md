@@ -4,7 +4,7 @@
 
 ## 当前
 
-- `main/origin/main=16a7a4ae`；8c.4 正式 SSH 原生补验已通过，待签名提交。
+- `main/origin/main=f858bf8a`；8c.4 正式 SSH 原生补验已签名并推送。
 - 整体计划仍未完成；透明代理保持关闭，不以阶段通过替代整体完成。
 - VPS：Debian 13 amd64、普通 bridge、公网 IPv4、正式 `3.41.8`；
   source=`e671328e`，三业务 healthy，timer/source/材料恢复。
@@ -19,6 +19,10 @@
   IPv4/IPv6 规则 2102 ms 清理，3 项越界负控通过。
   证据 `.tmp-native-ssh-3418-20261026/verification.json`；
   私密归档 SHA256=`a42db50675a521a0dcc3fa74d1342dc554d201a334ea9fb9fe0d3e1a5eb7a6b8`。
+- 当前源码 TUN/ICMP 定向回归通过：`docker-tun-management` 36.366 s、
+  `docker-tun-real` 60.664 s、`docker-menu-tun` 2.115 s，均 `exit=0`；
+  direct/拒绝组范围、TCP/UDP 保持、动态计数结构负控、旧模板兼容和只读诊断通过。
+  三次 `cache_hit=false`，证据目录见原生验收记录。
 - 6A.24：`3.41.6 → 3.41.8 → 3.41.6 → 3.41.8` 升级/回滚闭环通过；
   WS、严格 TLS、URI/source、权限/timer/累计及 4 项实物负控通过。
 - TUN IPv4 Echo、XHTTP CANCEL FIN、Mihomo 固定组合、TLS 七入口、

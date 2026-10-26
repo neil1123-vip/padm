@@ -1576,6 +1576,7 @@ dockerEditBaselineValidate() {
                 [[ -e "${baseline}/${directory}/${token}" ]] || continue
                 [[ -f "${root}/${directory}/${token}" ]] &&
                     jq -e -n --arg alpn "${alpnListener}" --arg directory "${directory}" \
+                        --arg integrations "${integrationTypes}" \
                         --slurpfile expected "${baseline}/${directory}/${token}" \
                         --slurpfile actual "${root}/${directory}/${token}" \
                         '
@@ -1585,7 +1586,16 @@ dockerEditBaselineValidate() {
                               .inbounds |= map(if .tag == $alpn then
                                 del(.streamSettings.tlsSettings.alpn) else . end)
                             else . end;
-                          ($expected | map(comparable)) == ($actual | map(comparable))
+                          ($expected | map(comparable)) as $e |
+                          ($actual | map(comparable)) as $a |
+                          $e == $a or (
+                            # 仅兼容旧 TUN 模板缺少此规则，其余字段仍严格比对。
+                            $directory == "config/sing-box" and
+                            ($integrations | split(",") | index("tun") != null) and
+                            ($e | map(if .route.rules == [{
+                              inbound:["tun-in"],network:"icmp",action:"route",outbound:"direct"
+                            }] then del(.route.rules) else . end)) == $a
+                          )
                         ' >/dev/null 2>&1 || {
                     dockerError '核心账号或参数与完整规格不一致，不能无损接入编辑'
                     return 1
@@ -2815,6 +2825,7 @@ dockerGenerateSingBoxConfig() {
       (($r.routing.hosts // {}) | keys) as $host_domains |
       ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
       ($resolve or $ipv6 or $warp or $resolve_ips) as $dns_enabled |
+      (any($r.host_integrations[]; .type == "tun")) as $tun |
       (($domains + ($r.routing.dns.domains // []) +
         ($r.routing.direct.domains // []) + ($r.routing.block.domains // []) +
         ($r.routing.ipv6.domains // []) + ($r.routing.warp.domains // [])) |
@@ -2969,9 +2980,13 @@ dockerGenerateSingBoxConfig() {
           elif $warp_global then "padm-warp"
           elif $r.routing.socks5 != null and ($selective | not) then "padm-socks5" else "direct" end),
           auto_detect_interface: true} +
-          (if $r.routing.socks5 != null or $resolve or $actions then
+          (if $tun or $r.routing.socks5 != null or $resolve or $actions then
             # 先排除直连例外再阻断或代理；例外在 hosts/DNS 解析后选路，避免跳过解析。
-            {rules: ((if $selective or $actions then [{action: "sniff", timeout: "1s"}]
+            {rules: ((if $tun then
+                # 受管 TUN 与 routing 互斥，Echo 明确交给支持 ICMP 的 direct，避免未接管时合成回复。
+                [{inbound: ["tun-in"], network: "icmp", action: "route", outbound: "direct"}]
+              else [] end) +
+              (if $selective or $actions then [{action: "sniff", timeout: "1s"}]
                 else [] end) +
               [$block_matches[] | exclude_direct(.; $direct_matches) + {action: "reject"}] +
               [$ip_matches[] | exclude_direct(.; $direct_matches) + {action: "reject"}] +

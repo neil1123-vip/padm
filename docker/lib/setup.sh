@@ -1372,13 +1372,133 @@ dockerEditHttpRelayInput() {
     ) && chmod 0600 "${target}"
 }
 
+dockerTunDiagnose() (
+    local spec=$1 workspace=$2 root enabled policy=not_applicable base cid snapshot observed after
+    local started afterStarted
+    local errorFile="${workspace}/icmp-runtime.err"
+    root=$(dockerInstallRoot) || return 1
+    enabled=$(jq -r 'any(.host_integrations[]; .type == "tun")' "${spec}") || return 1
+    if [[ "${enabled}" == true ]]; then
+        policy=$(jq -r 'if any(.route.rules[]?;
+          .network == "icmp" and .action == "route" and .outbound == "direct" and
+          ((.inbound // []) | index("tun-in") != null))
+          then "direct" else "policy_dependent" end' \
+            "${root}/config/sing-box/config.json") || return 1
+    fi
+    base=$(jq -cn --argjson enabled "${enabled}" --arg policy "${policy}" '
+      {enabled:$enabled,family:"ipv4",policy:$policy,capture:"not_verified",
+       runtime:(if $enabled then "unknown" else "not_applicable" end),
+       ping_group_allowed:null,net_raw_effective:null,
+       socket_probe:"not_tested",echo_roundtrip:"not_tested"}') || return 1
+    [[ "${enabled}" == true ]] || { printf '%s\n' "${base}"; return 0; }
+    if ! cid=$(dockerTunContainer running metadata 2>"${errorFile}"); then
+        jq -cn --argjson base "${base}" --rawfile detail "${errorFile}" '
+          $base + {reason:"core_unavailable_or_drift",detail:$detail}'
+        return
+    fi
+    if ! started=$(docker container inspect --format '{{.State.StartedAt}}' "${cid}" 2>"${errorFile}") ||
+        [[ ! "${started}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]]; then
+        jq -cn --argjson base "${base}" --rawfile detail "${errorFile}" '
+          $base + {reason:"core_start_time_unavailable",
+            detail:(if $detail == "" then "invalid container start time" else $detail end)}'
+        return
+    fi
+    # 只读取核心自身的身份与能力；exec shell 的权限不能充当核心 socket 实测。
+    # libcronet 的预加载仅供核心使用，诊断 shell 及其工具必须清空以兼容 musl。
+    if ! snapshot=$(docker exec --env LD_PRELOAD= "${cid}" sh -ec '
+      core_process() {
+        case "$1" in
+          /usr/local/bin/sing-box)
+            [ "$(tr "\000" "\n" | sed -n "2p")" = run ]
+            return ;;
+          /lib/ld-musl-x86_64.so.1) loader=ld-linux-x86-64.so.2 ;;
+          /lib/ld-musl-aarch64.so.1) loader=ld-linux-aarch64.so.1 ;;
+          *) return 1 ;;
+        esac
+        # gcompat 经 musl 加载核心，只接受镜像中已知的完整参数前缀。
+        expected=$(printf "%s\n" "$loader" --argv0 /usr/local/bin/sing-box \
+          --preload "/lib/libgcompat.so.0 /usr/local/lib/libcronet.so" \
+          -- /usr/local/bin/sing-box run)
+        [ "$(tr "\000" "\n" | sed -n "1,8p")" = "$expected" ]
+      }
+      core=
+      for proc in /proc/[0-9]*; do
+        core_process "$(readlink "$proc/exe" 2>/dev/null)" < "$proc/cmdline" || continue
+        [ -z "$core" ] || { echo "multiple sing-box run processes" >&2; exit 1; }
+        core=$proc
+      done
+      [ -n "$core" ] || { echo "sing-box run process not found" >&2; exit 1; }
+      started=$(awk "{print \$22}" "$core/stat")
+      awk "/^(Pid|Uid|Gid|Groups|CapEff|CapBnd|NoNewPrivs|Seccomp):/" "$core/status"
+      netns=$(readlink "$core/ns/net")
+      [ "$netns" = "$(readlink /proc/self/ns/net)" ] ||
+        { echo "core and diagnostic network namespaces differ" >&2; exit 1; }
+      range=$(cat /proc/sys/net/ipv4/ping_group_range)
+      printf "StartTime: %s\nNetNS: %s\nPingGroupRange: %s\n" \
+        "$started" "$netns" "$range"
+      [ "$started" = "$(awk "{print \$22}" "$core/stat")" ] ||
+        { echo "sing-box process changed during diagnosis" >&2; exit 1; }
+    ' 2>"${errorFile}"); then
+        jq -cn --argjson base "${base}" --rawfile detail "${errorFile}" '
+          $base + {reason:"core_metadata_unavailable",detail:$detail}'
+        return
+    fi
+    if ! observed=$(jq -Rsc '
+      def numbers: split(" ") | map(select(length > 0) | tonumber);
+      split("\n") | map(select(length > 0) |
+        capture("^(?<key>[A-Za-z]+):[ \t]*(?<value>.*)$")) |
+      from_entries |
+      .Uid = (.Uid | gsub("\t";" ") | numbers) |
+      .Gid = (.Gid | gsub("\t";" ") | numbers) |
+      .Groups = (.Groups | gsub("\t";" ") | numbers) |
+      .PingGroupRange = (.PingGroupRange | gsub("\t";" ") | numbers) |
+      if (.Uid | length) != 4 or (.Gid | length) != 4 or
+        (.PingGroupRange | length) != 2 or
+        (.CapEff | test("^[0-9a-fA-F]{16}$") | not) or
+        (.CapBnd | test("^[0-9a-fA-F]{16}$") | not) or
+        (.Pid | test("^[1-9][0-9]*$") | not) or
+        (.StartTime | test("^[0-9]+$") | not) or
+        (.NetNS | test("^net:\\[[0-9]+\\]$") | not)
+      then error("invalid core ICMP metadata") else . end |
+      . as $m |
+      {runtime:"observed",pid:(.Pid | tonumber),starttime:.StartTime,
+       uid:.Uid[1],gid:.Gid[1],groups:.Groups,netns:.NetNS,
+       cap_effective:.CapEff,cap_bounding:.CapBnd,
+       no_new_privileges:(.NoNewPrivs | tonumber),seccomp:(.Seccomp | tonumber),
+       ping_group_range:.PingGroupRange,
+       ping_group_allowed:any(([.Gid[1]] + .Groups)[];
+         . >= $m.PingGroupRange[0] and . <= $m.PingGroupRange[1]),
+       net_raw_effective:((.CapEff | ascii_downcase | .[-4:-3]) as $digit |
+         ("0123456789abcdef" | index($digit)) | floor / 2 | floor % 2 == 1)}
+    ' <<<"${snapshot}" 2>"${errorFile}"); then
+        jq -cn --argjson base "${base}" --rawfile detail "${errorFile}" '
+          $base + {reason:"invalid_core_metadata",detail:$detail}'
+        return
+    fi
+    if ! after=$(dockerTunContainer running metadata 2>"${errorFile}") || [[ "${after}" != "${cid}" ]]; then
+        jq -cn --argjson base "${base}" --rawfile detail "${errorFile}" '
+          $base + {reason:"core_changed_during_diagnosis",detail:$detail}'
+        return
+    fi
+    # 容器重启仍沿用同一个 ID，启动时间也必须与采样前一致。
+    if ! afterStarted=$(docker container inspect --format '{{.State.StartedAt}}' "${cid}" 2>"${errorFile}") ||
+        [[ "${afterStarted}" != "${started}" ]]; then
+        jq -cn --argjson base "${base}" --rawfile detail "${errorFile}" '
+          $base + {reason:"core_changed_during_diagnosis",
+            detail:(if $detail == "" then "container start time changed during diagnosis" else $detail end)}'
+        return
+    fi
+    jq -cn --argjson base "${base}" --argjson observed "${observed}" --arg cid "${cid}" '
+      $base + $observed + {container_id:$cid}'
+)
+
 dockerProtocolCommand() (
     local action=${1:-} listener= root workspace original normalized selected status targetAction=
     local selectedHost selectedPort selectedSni
     local -a targetArgs=()
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
-    list|stream-status|routing-status|port-alias-status|tproxy-status|redirect-status|tun-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    list|stream-status|routing-status|port-alias-status|tproxy-status|redirect-status|tun-status|tun-diagnose) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
     links|cdn-status|xhttp-status|encryption-status|hy2-status|tuic-status|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
@@ -1466,6 +1586,10 @@ dockerProtocolCommand() (
         jq '[.host_integrations[] | select(.type == "tun")][0] as $tun |
           {enabled:($tun != null),interface:($tun.settings.interface // null),
            address:($tun.settings.address // null),family:"ipv4",scope:"global",ipv6:"reject"}' "${normalized}"
+        return $?
+    fi
+    if [[ "${action}" == tun-diagnose ]]; then
+        dockerTunDiagnose "${normalized}" "${workspace}"
         return $?
     fi
     if [[ "${action}" == hy2-status || "${action}" == tuic-status ]]; then

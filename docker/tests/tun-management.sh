@@ -124,6 +124,12 @@ jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
 before=$(snapshot)
 : >"${CALLS}"
 runStatus false
+(dockerMain protocol tun-diagnose) >"${LOG}" 2>&1 || fail 'disabled diagnosis failed'
+jq -e '.enabled == false and .runtime == "not_applicable" and
+  .ping_group_allowed == null and .socket_probe == "not_tested"' "${LOG}" >/dev/null
+assertClean
+[[ "$(snapshot)" == "${before}" && ! -s "${CALLS}" ]] ||
+    fail 'disabled diagnosis touched live state'
 runEdit 15 --tun-off --preview
 runEdit 2 --tun-enable --tun-off --preview
 runEdit 2 --tun-enable --dns-off --preview
@@ -149,6 +155,115 @@ MODE=ok
 runEdit 0 --tun-enable --confirm PADM-DOCKER-EDIT
 cp -- "${root}/config/spec.json" "${TEST_ROOT}/enabled.json"
 runStatus true
+(
+    diagnosticBefore=$(snapshot)
+    CID=$(printf 'a%.0s' {1..64})
+    DIAG_MODE=ok
+    dockerTunContainer() {
+        [[ "$*" == 'running metadata' ]] || return 1
+        if [[ "${DIAG_MODE}" == missing ]]; then
+            printf 'fixture core metadata drift\n' >&2
+            return 1
+        fi
+        printf '%s\n' "${CID}"
+    }
+    docker() {
+        if [[ "$#" -eq 5 && "$1" == container && "$2" == inspect &&
+            "$3" == --format && "$4" == '{{.State.StartedAt}}' && "$5" == "${CID}" ]]; then
+            if [[ "${DIAG_MODE}" == start-fail ]]; then
+                printf 'fixture container inspect denied\n' >&2
+                return 1
+            fi
+            if [[ "${DIAG_MODE}" == restarted &&
+                -e "${TEST_ROOT}/diagnostic-started-once" ]]; then
+                printf '2026-10-26T00:00:01Z\n'
+            else
+                : >"${TEST_ROOT}/diagnostic-started-once"
+                printf '2026-10-26T00:00:00Z\n'
+            fi
+            return
+        fi
+        [[ "$#" -eq 7 && "$1" == exec && "$2" == --env && "$3" == LD_PRELOAD= &&
+            "$4" == "${CID}" && "$5" == sh && "$6" == -ec ]] || return 1
+        if [[ "${DIAG_MODE}" == ok ]]; then
+            # 直接执行生产采样脚本中的识别函数，避免固定元数据桩掩盖加载器差异。
+            recognitionScript=${7%%$'\n      core='*}
+            [[ "${recognitionScript}" != "$7" ]] || fail 'missing core process matcher'
+            checkCoreProcess() {
+                local expected=$1 executable=$2 actual=0
+                shift 2
+                printf '%s\0' "$@" |
+                    sh -ec "${recognitionScript}"$'\ncore_process "$1"' sh "${executable}" || actual=$?
+                [[ "${actual}" == "${expected}" ]] ||
+                    fail "core process matcher: ${executable}, expected ${expected}, actual ${actual}"
+            }
+            checkCoreProcess 0 /usr/local/bin/sing-box /usr/local/bin/sing-box run -c /dev/stdin
+            checkCoreProcess 1 /usr/local/bin/sing-box /usr/local/bin/sing-box check -c /dev/stdin
+            for architecture in x86_64 aarch64; do
+                loader=ld-linux-aarch64.so.1
+                [[ "${architecture}" != x86_64 ]] || loader=ld-linux-x86-64.so.2
+                prefix=("${loader}" --argv0 /usr/local/bin/sing-box --preload
+                    "/lib/libgcompat.so.0 /usr/local/lib/libcronet.so" -- /usr/local/bin/sing-box)
+                checkCoreProcess 0 "/lib/ld-musl-${architecture}.so.1" "${prefix[@]}" run -c /dev/stdin
+                checkCoreProcess 1 "/lib/ld-musl-${architecture}.so.1" "${prefix[@]}" check -c /dev/stdin
+                checkCoreProcess 1 "/lib/ld-musl-${architecture}.so.1" "${loader}" \
+                    --argv0 /usr/local/bin/sing-box --preload /lib/libgcompat.so.0 \
+                    /usr/local/lib/libcronet.so -- /usr/local/bin/sing-box run -c /dev/stdin
+                prefix[1]=--unexpected
+                checkCoreProcess 1 "/lib/ld-musl-${architecture}.so.1" "${prefix[@]}" run -c /dev/stdin
+            done
+            checkCoreProcess 1 /lib/ld-musl-unknown.so.1 /usr/local/bin/sing-box run
+        fi
+        if [[ "${DIAG_MODE}" == unreadable ]]; then
+            printf 'fixture proc access denied\n' >&2
+            return 1
+        fi
+        printf 'Pid: 42\nUid: 0 10001 0 0\nGid: 0 10001 0 0\nGroups: 7 10001\n'
+        printf 'CapEff: %s\nCapBnd: 0000000000001402\nNoNewPrivs: 1\nSeccomp: 2\n' \
+            "$(if [[ "${DIAG_MODE}" == raw ]]; then printf 0000000000003402; else printf 0000000000001402; fi)"
+        printf 'StartTime: 1234\nNetNS: net:[42]\n'
+        if [[ "${DIAG_MODE}" == denied ]]; then
+            printf 'PingGroupRange: 8 8\n'
+        elif [[ "${DIAG_MODE}" == malformed ]]; then
+            printf 'PingGroupRange: invalid\n'
+        else
+            printf 'PingGroupRange: 7 7\n'
+        fi
+    }
+    for DIAG_MODE in ok denied raw missing unreadable malformed start-fail restarted; do
+        rm -f -- "${TEST_ROOT}/diagnostic-started-once"
+        (dockerMain protocol tun-diagnose) >"${LOG}" 2>&1 ||
+            fail "${DIAG_MODE}: diagnosis failed"
+        if [[ "${DIAG_MODE}" == missing || "${DIAG_MODE}" == unreadable ||
+            "${DIAG_MODE}" == malformed || "${DIAG_MODE}" == start-fail ||
+            "${DIAG_MODE}" == restarted ]]; then
+            jq -e '.enabled and .runtime == "unknown" and
+              .ping_group_allowed == null and .net_raw_effective == null and
+              (.detail | length > 0)' "${LOG}" >/dev/null
+            [[ "${DIAG_MODE}" != missing ]] ||
+                grep -q 'fixture core metadata drift' "${LOG}"
+            [[ "${DIAG_MODE}" != unreadable ]] ||
+                grep -q 'fixture proc access denied' "${LOG}"
+            [[ "${DIAG_MODE}" != start-fail ]] ||
+                grep -q 'fixture container inspect denied' "${LOG}"
+            [[ "${DIAG_MODE}" != restarted ]] ||
+                jq -e '.reason == "core_changed_during_diagnosis"' "${LOG}" >/dev/null
+        else
+            jq -e --arg mode "${DIAG_MODE}" '
+              .enabled and .runtime == "observed" and .uid == 10001 and .gid == 10001 and
+              .groups == [7,10001] and .ping_group_allowed == ($mode != "denied") and
+              .net_raw_effective == ($mode == "raw") and .capture == "not_verified" and
+              .socket_probe == "not_tested" and .echo_roundtrip == "not_tested"
+            ' "${LOG}" >/dev/null
+        fi
+        assertClean
+        [[ "$(snapshot)" == "${diagnosticBefore}" ]] ||
+            fail "${DIAG_MODE}: diagnosis changed live state"
+    done
+    if (dockerMain protocol tun-diagnose unexpected) >"${LOG}" 2>&1; then
+        fail 'diagnosis accepted an unexpected argument'
+    fi
+)
 jq -e '.services["sing-box"].network_mode == "host" and .services["sing-box"].user == "0:0" and
   .services["sing-box"].cap_add == ["NET_ADMIN","NET_BIND_SERVICE","DAC_OVERRIDE"] and .services["sing-box"].ports == null and
   .services["sing-box"].restart == "no" and
@@ -160,8 +275,9 @@ jq -e '[.inbounds[] | select(.tag == "tun-in")] == [{
   type:"tun",tag:"tun-in",interface_name:"padm-tun",address:["198.18.0.1/30"],
   dns_mode:"disabled",auto_route:true,auto_redirect:true,strict_route:true,stack:"system"}]
 ' "${root}/config/sing-box/config.json" >/dev/null
-(
+checkUpdateCandidate() (
     # 候选生成也用于只读评估，必须重生成 TUN 权限且不能改动在线编排。
+    candidateBefore=$(snapshot)
     PADM_DOCKER_MANIFEST_FILE="${TEST_ROOT}/update-manifest.json"
     jq --arg commit "$(printf b%.0s {1..40})" '
       {release:{version:.release.version,commit:$commit},
@@ -177,10 +293,17 @@ jq -e '[.inbounds[] | select(.tag == "tun-in")] == [{
     dockerCreateUpdateCandidate
     jq -e '.services["sing-box"].cap_add == ["NET_ADMIN","NET_BIND_SERVICE","DAC_OVERRIDE"]' \
         "${DOCKER_CONFIG_CANDIDATE}/compose.json" >/dev/null
+    for path in config.json users.base; do
+        cmp -s -- "${root}/config/sing-box/${path}" \
+            "${DOCKER_CONFIG_CANDIDATE}/config/sing-box/${path}" ||
+            fail "update candidate changed core configuration: ${path}"
+    done
     [[ "${legacy}" == "$(sha256sum "${root}/compose.json")" ]]
     dockerCleanupConfigurationCandidate
     cp -- "${TEST_ROOT}/current-compose.json" "${root}/compose.json"
+    [[ "$(snapshot)" == "${candidateBefore}" ]] || fail 'update assessment changed live state'
 )
+checkUpdateCandidate
 # 支持范围只保留单 sing-box、单 IPv4 Reality；合同直接命中生产规格校验。
 for mutation in '.core.type="xray" | .core.protocols[0].core="xray"' \
     '.core.protocols[0].address_families=["ipv4","ipv6"]' \
@@ -239,7 +362,53 @@ done
         [[ "$(cat "${CALLS}")" == "${expected}" ]] || fail "${LIFECYCLE_MODE}: wrong TUN lifecycle recovery"
     done
 )
+# 旧 TUN 模板没有 rules 字段，仍须允许诊断与关闭，且不能借兼容放行其他漂移。
+for path in config.json users.base; do
+    jq -e '.route.rules == [
+      {inbound:["tun-in"],network:"icmp",action:"route",outbound:"direct"}
+    ]' "${root}/config/sing-box/${path}" >/dev/null
+    jq 'del(.route.rules)' "${root}/config/sing-box/${path}" >"${TEST_ROOT}/legacy-tun.json"
+    cp -- "${TEST_ROOT}/legacy-tun.json" "${root}/config/sing-box/${path}"
+done
 before=$(snapshot)
+: >"${CALLS}"
+runStatus true
+(
+    dockerTunContainer() { printf 'fixture core unavailable\n' >&2; return 1; }
+    dockerMain protocol tun-diagnose
+) >"${LOG}" 2>&1 || fail 'legacy TUN diagnosis failed'
+jq -e '.enabled and .policy == "policy_dependent" and .runtime == "unknown"' "${LOG}" >/dev/null
+assertClean
+(
+    cp -- "${root}/config/sing-box/config.json" "${TEST_ROOT}/legacy-config.json"
+    jq '.log.level = "debug"' "${TEST_ROOT}/legacy-config.json" >"${TEST_ROOT}/legacy-drift.json"
+    cp -- "${TEST_ROOT}/legacy-drift.json" "${root}/config/sing-box/config.json"
+    runEdit 15 --tun-off --preview
+    cp -- "${TEST_ROOT}/legacy-config.json" "${root}/config/sing-box/config.json"
+)
+[[ "$(snapshot)" == "${before}" && ! -s "${CALLS}" ]] ||
+    fail 'legacy TUN read-only checks changed live state'
+checkUpdateCandidate
+MODE=health-fail
+rm -f -- "${TEST_ROOT}/failed-once"
+runEdit 14 --spec "${TEST_ROOT}/enabled.json" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail 'regeneration failure did not restore legacy TUN'
+MODE=ok
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/enabled.json" '' '' configure
+    for path in config.json users.base; do
+        jq -e '.route.rules == [
+          {inbound:["tun-in"],network:"icmp",action:"route",outbound:"direct"}
+        ]' "${root}/config/sing-box/${path}" >/dev/null
+    done
+    # 成功重生成后再走生产恢复，确认旧快照不会被新模板悄悄改写。
+    DOCKER_CONFIG_SWITCHED=1
+    dockerRestoreConfiguration
+) >"${LOG}" 2>&1 || fail 'legacy TUN regeneration/restore failed'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail 'restore did not preserve legacy TUN snapshot'
 : >"${CALLS}"
 runEdit 15 --tun-enable --preview
 TARGET_MODE=fail

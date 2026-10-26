@@ -2103,3 +2103,31 @@ SNI，不判定根因；既有不嗅探固定目标通道的严格 TLS/200、错
 复用 Paramiko 依赖镜像。无运行源码变化，不重复 daily/full 或制造 release。
 仅关闭专用无存量会话、显式单监听、密码失败格式的原生 IPv4 子项；
 arm64、IPv6、整机重启和任意 SSH 服务不由本轮证明，整体计划仍未完成。
+
+### 2026-10-26 当前源码 TUN/ICMP 定向补验
+
+本轮针对未提交源码在 Docker Desktop Linux/amd64 中复用
+`padm-regression:local-c7b9508f3f52687088ed089057fdfdd5931df0026935e9c57def4e07674e26fd`
+完成三个定向 selector，均为实际执行、非缓存结果：
+
+- `docker-tun-management`：`36.366 s`，`exit=0`；
+  `tun-diagnose` 关闭态只读、核心身份/能力/组范围采样、容器重启漂移、
+  旧 TUN 模板兼容、候选生成/恢复和 3 项不支持路由拒绝通过。
+- `docker-tun-real`：`60.664 s`，`exit=0`；
+  固定 `sing-box 1.14.4` 镜像摘要与 `versions.lock` 一致，新增 nft 动态计数
+  对照拒绝结构变化；隔离 veth 目标上的 IPv4 Echo 在 `ping_group_range`
+  允许时经 `direct` 往返，范围拒绝时无 wire 回包，TCP/UDP 仍成功；
+  诊断不发包、不改变 owner 或网络资源，异常退出仍拒绝并保留现场。
+- `docker-menu-tun`：`2.115 s`，`exit=0`；TUN 菜单入口回归通过。
+
+真实流量证据目录分别为
+`.tmp-regression-docker-0ec23e4d68b047a4bec64db132870170/`、
+`.tmp-regression-docker-8984671b397542209b77a53aa10cd1aa/`、
+`.tmp-regression-docker-86b7c4ed45394bb0a5e547e9467e395e/`；三次
+`cache_hit=false`，源码摘要均为
+`197CB359DB0BDAE7FBE4A8D2FF90988EB0021A7CB32C188ED1328B72D44CBE2F`。
+本轮不增加 `NET_RAW`、不修改宿主 sysctl，不启用透明代理。
+
+该结果只关闭当前源码的隔离 Linux/amd64 TUN/IPv4 Echo 子项；原生宿主、
+arm64、公网、IPv6/traceroute/PMTU、整机重启及透明启用矩阵仍未完成，
+不把 Echo 直连结果外推为代理隧道或其它协议健康，整体计划继续未完成。

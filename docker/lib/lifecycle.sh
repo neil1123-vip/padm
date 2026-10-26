@@ -194,6 +194,7 @@ dockerUsage() {
   padm-docker protocol tproxy-status
   padm-docker protocol redirect-status
   padm-docker protocol tun-status
+  padm-docker protocol tun-diagnose
   padm-docker protocol port-alias-status
   padm-docker protocol cdn-status [入口 ID]
   padm-docker account list [--json]
