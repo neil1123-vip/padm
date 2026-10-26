@@ -8,8 +8,10 @@
 - VPS：Debian 13 amd64、bridge、公网 IPv4、正式 `3.42.2`；
   bundle=`4aaa9158`，三业务 healthy、严格公网 TLS/200、续期 timer active。
 - 本机 Docker Linux 可用；共享工具镜像，未重复 daily/full。
-- 5C.6d 正式包单 WS IPv4 端口事务有限子项已完成独验与清场；
-  原编排 exit 1；旧端口只证明固定 CONNECT 路径未完成 TLS，未观察 TCP 拒绝。
+- 5C.6d 新轮单 WS IPv4 端口事务整轮通过，456187 ms、exit 0；
+  断网独验及 9 项篡改拒绝通过，已恢复清场，旧轮失败不改写。
+- 原生账号与额度整轮验收进行中：`.tmp-native-account-workflow-20261027/`；
+  远端同名 account-workflow 暂存，native.py restore 可独立恢复。
 
 ## 最近完成
 
@@ -21,10 +23,10 @@
   `.tmp-native-ssh-members-close-20261027/verification.json` 通过。
 - 复用 3.42.0 已发生的真实重启，3.42.2 未新重启；两版失败原件保留。
   第二故障 6 项红测及修复定向 5569 ms，全部安全负控保持。
-- WS 真实 404 封禁、错误来源/健康失败恢复、443 → 25443 迁移、
-  SQLite inode/封禁保留及恢复通过；6 个 fresh nonce、4 份数据库、
-  4 次公网受封禁超时。断网独验与 6 项篡改拒绝通过，失败原件保留。
-  `.tmp-native-ws-migration-20261027/verification.json`；完整证据已归档。
+- 新轮 WS 真实封禁、两类失败回滚、443 → 25443 迁移、正式解封、
+  双侧新端口正控及旧端口 TLS EOF 负控通过；6 个 fresh nonce、
+  4 份 SQLite、4 次公网受封禁超时，原 inode/封禁保持。
+  `.tmp-native-ws-close-20261027/verification.json`；完整归档已核摘要。
 - 正式包原生 TUN 关闭态 status/diagnose 3830 ms 通过；13 个文件、
   容器身份、双族路由/规则、调度与 sysctl 不变，ICMP 未发包。
   断网独验及 7 项篡改拒绝通过，正式源码摘要匹配；本轮临时目录清理。
@@ -36,7 +38,7 @@
 
 ## 未决
 
-- WS 原编排未整轮成功；公网旧端口 TCP 拒绝、原生 IPv6 未证明。
+- WS 公网旧端口 TCP 拒绝、原生 IPv6 未证明；固定 CONNECT 只证 TLS EOF。
 - ICMP 原生启用态收发/arm64/公网/重启、IPv6/traceroute/PMTU；
   真实 TUN 必须启用宿主透明接管，受透明保持关闭约束。
 - 原生 arm64、IPv6/双栈、新主机灾备、多机控制/WG、WARP 实账号、

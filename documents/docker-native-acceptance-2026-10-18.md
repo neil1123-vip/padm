@@ -2229,8 +2229,31 @@ restore、tool-observation 六项实物篡改全部拒绝。
 `0468ec8da72ffef07eeb15408e61caded7694cb9d5c0ca9dbc032c5cdc0ecbd9`；
 完整归档 SHA256：
 `89b381c5bc138338abeda0fbf65040d677143f11e3009a04a5bf6d9ad2cfde64`。
-本节只关闭单 WS IPv4 迁移与失败恢复的有限事务子项；原编排整轮成功、
-公网旧端口 TCP 拒绝、原生 IPv6/arm64、透明启用和整体计划仍未完成。
+该轮只关闭单 WS IPv4 迁移与失败恢复的有限事务子项，原编排未整轮成功；
+旧失败原件和有限结论原样保留。
+
+### 2026-10-27 正式 WS IPv4 全流程重跑
+
+独立新轮 `.tmp-native-ws-close-20261027/` 在同一正式包完整执行启用、
+真实 404 封禁、错误来源回滚、暂停候选 Nginx 的健康失败回滚、
+`443 → 25443` 迁移、正式解封、端口正反例、恢复及清场。
+runner `exit 0`、`456187 ms`；6 个 fresh nonce、4 份 SQLite 实物，
+4 次受封禁公网请求在 TLS handshake 阶段超时且 DROP 增加，nonce 不入 Nginx。
+原 inode 和封禁保持，迁移解封后两次新端口严格 TLS/200 正控包围
+旧 `443` 的 TLS handshake EOF 负控。固定 HTTP CONNECT 路径未观察
+公网 TCP connection refused，不把 TLS EOF 外推为公网 TCP 拒绝。
+
+断网独验通过；trigger、final-target、challenge-tls、database、restore、
+old-port-stage、old-port-outcome、runner、migration-positive 九项实物篡改
+均拒绝。原规格字节、材料权限、timer、原账号累计恢复；三业务 healthy、
+管理 22 可达、25443 无监听，透明保持关闭。远端暂存与两个本轮容器
+已清理，清场后严格公网 TLS/443/200 再次成功（781 ms）。
+原件归档 SHA256：
+`eacf304b71221d406f206378c168bfd3c7c80e491b5f9ef20ba423bec154c1b8`；
+完整归档 SHA256：
+`650f018c893cf092090423bf37e6ab88ef45d66dfe676a7d9fabe17c21060b3c`。
+本轮只关闭正式包单 WS IPv4 全流程子项；公网旧端口 TCP 拒绝、
+原生 IPv6/arm64、透明启用与整体计划仍未完成。
 
 ### 2026-10-26 当前源码 TUN/ICMP 定向补验
 
