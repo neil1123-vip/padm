@@ -4,7 +4,7 @@
 
 ## 当前
 
-- `main/origin/main=a30a5036`；TUN/ICMP 源码及远端过滤证据已提交。
+- `main/origin/main=eb6a3aca`；TUN/ICMP 源码及远端过滤证据已提交。
 - 整体计划仍未完成；透明代理保持关闭，不以阶段通过替代整体完成。
 - VPS：Debian 13 amd64、普通 bridge、公网 IPv4、正式 `3.42.0`；
   bundle ref=`489d16c9`，manifest=`99dab8c8`，三业务 healthy，timer/source/材料恢复。
