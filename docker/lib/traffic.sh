@@ -316,7 +316,7 @@ dockerTrafficRestartCore() {
 dockerTrafficApplyQuotas() (
     local coreList core root directory base config state switching=false committed=false
     local -a cores=() changed=() restored=()
-    local -A temporary=() backup=() keep=()
+    local -A temporary=() candidateDirs=() backup=() keep=()
     coreList=$(dockerTrafficCore) || return 1
     mapfile -t cores <<<"${coreList}"
     root=$(dockerInstallRoot) || return 1
@@ -337,6 +337,7 @@ dockerTrafficApplyQuotas() (
     fi
     for core in "${cores[@]}"; do
         [[ -z "${temporary[${core}]:-}" ]] || rm -f -- "${temporary[${core}]}"
+        [[ -z "${candidateDirs[${core}]:-}" ]] || rmdir -- "${candidateDirs[${core}]}"
         [[ "${keep[${core}]:-false}" == true || -z "${backup[${core}]:-}" ]] || rm -f -- "${backup[${core}]}"
     done' EXIT
     trap 'exit 130' INT
@@ -347,21 +348,26 @@ dockerTrafficApplyQuotas() (
         config=${directory}/config.json
         dockerTrafficSafePath "${root}" "${base}" && dockerTrafficSafePath "${root}" "${config}" || return 1
         [[ -f "${base}" && -f "${config}" ]] || return 1
-        temporary[${core}]=$(mktemp "${directory}/.traffic-candidate.XXXXXX") || return 1
+        # Xray 要求扩展名，子目录避免健康检查提前合并未提交候选。
+        candidateDirs[${core}]=$(mktemp -d "${directory}/.traffic-candidate.XXXXXX") || return 1
+        chmod 0750 "${candidateDirs[${core}]}" || return 1
+        temporary[${core}]=${candidateDirs[${core}]}/config.json
         dockerTrafficRender "${core}" "${base}" "${state}" >"${temporary[${core}]}" || return 1
         cmp -s "${temporary[${core}]}" "${config}" || changed+=("${core}")
     done
     [[ "${#changed[@]}" -gt 0 ]] || return 0
     # 全部候选验证通过后统一切换；失败或中断都由退出事务恢复两核心配置。
     for core in "${cores[@]}"; do
+        directory=${root}/config/${core}
         chmod 0640 "${temporary[${core}]}" || return 1
         if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
             chown "0:${PADM_DOCKER_CONTAINER_GID:-10001}" "${temporary[${core}]}" || return 1
+            chown "0:${PADM_DOCKER_CONTAINER_GID:-10001}" "${candidateDirs[${core}]}" || return 1
         fi
         if [[ "${core}" == xray ]]; then
-            dockerComposeRun run --rm --no-deps xray -test -format json -config "/etc/padm/xray/${temporary[${core}]##*/}" || return 1
+            dockerComposeRun run --rm --no-deps xray -test -format json -config "/etc/padm/xray/${temporary[${core}]#"${directory}/"}" || return 1
         else
-            dockerComposeRun run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c "/etc/padm/sing-box/${temporary[${core}]##*/}" || return 1
+            dockerComposeRun run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c "/etc/padm/sing-box/${temporary[${core}]#"${directory}/"}" || return 1
         fi
     done
     for core in "${changed[@]}"; do

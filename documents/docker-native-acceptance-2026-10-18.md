@@ -2255,6 +2255,34 @@ old-port-stage、old-port-outcome、runner、migration-positive 九项实物篡�
 本轮只关闭正式包单 WS IPv4 全流程子项；公网旧端口 TCP 拒绝、
 原生 IPv6/arm64、透明启用与整体计划仍未完成。
 
+### 2026-10-27 原生账号与额度缺陷收口
+
+正式 `3.42.2`、Debian 13 amd64、单 IPv4 WS，原生 CLI 完成账号
+创建/复制/改名、停用/启用的 4 阶段。固定 Mihomo 原生 URI 导入后，
+13 个业务严格 TLS/200 正例、1 个停用身份拒绝通过，原账号前后正控保持。
+首次准备路径假设失败、批量部署后资源门禁失败及 SSH 回执断连原件保留；
+资源门槛不降低，增加有上限回落等待，按落盘请求/当前规格复核后接续。
+
+额度 1073 字节应用时，正式 Xray `26.10.21` 拒绝无合法扩展名的
+`.traffic-candidate.*`；正式命令 rc `1`，最终 runner 保留 `exit_code=1`，
+额度撤销恢复、轮换及删除整轮继续未完成。正式 restore 已解除临时额度并
+删测试账号，原规格字节、材料权限、timer、原累计保持。私密原件下载核摘要，
+断网独验核 4 阶段客户端实物、错误日志及完整恢复后才清场；远端暂存、
+两个本轮容器已清，三业务 healthy、管理 22 可达、透明关闭。
+清场后公网严格 TLS/443/200 为 743 ms。
+
+共享额度函数已改独立 `0750` 子目录/config.json、文件 `0640` 和同组归属，
+避免 Xray 健康扫描合并未提交候选。先红后绿的定向回归入口 5014 ms，
+固定正式 Xray 非 root 断网实物五项对照及最终日常 34/34、
+207118 ms 通过；无需重跑 full，修复未作为已发布原生成功。
+证据 `.tmp-native-account-workflow-20261027/failure-verification.json`、
+`xray-evidence/result.json`、`remote-cleanup.json`、`post-cleanup-client.json`；
+原件归档 SHA256：
+`3f9f2edef720d0e55e46004bb8e714b30fa00f7d3ccb23c88d1853279d6f4d4c`；
+完整失败归档 SHA256：
+`b1e19d83b92e0a9056d3dcd1f86d3c7d58657f871471f6a1afc6fe572bbec32a`。
+待可信修复包再验后续整轮，原生 arm64/IPv6 及整体计划仍未完成。
+
 ### 2026-10-26 当前源码 TUN/ICMP 定向补验
 
 本轮针对未提交源码在 Docker Desktop Linux/amd64 中复用

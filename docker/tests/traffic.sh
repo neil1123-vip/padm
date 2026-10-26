@@ -40,7 +40,15 @@ dockerComposeRun() {
         [[ "${QUERY_MODE}" != changed-during-primary ]] || : >"${TEST_ROOT}/changed-during-primary"
         printf '%s\n' "${XSTATS:-${STATS}}"
         ;;
-    run) [[ "${MODE}" != check-fail && ( "${MODE}" != check-fail-singbox || "$4" != sing-box ) ]] ;;
+    run)
+        local core=$4 candidate=${!#} hostCandidate
+        [[ "${candidate}" == "/etc/padm/${core}/.traffic-candidate."*/config.json ]] ||
+            fail '额度候选必须在独立子目录中保留 JSON 扩展名'
+        hostCandidate=${PADM_DOCKER_INSTALL_DIR}/config/${core}/${candidate#"/etc/padm/${core}/"}
+        [[ -f "${hostCandidate}" && "$(stat -c %a "$(dirname -- "${hostCandidate}")")" == 750 ]] ||
+            fail '额度候选目录权限或文件无效'
+        [[ "${MODE}" != check-fail && ( "${MODE}" != check-fail-singbox || "$4" != sing-box ) ]]
+        ;;
     restart)
         if [[ "${MODE}" == restart-interrupt-singbox && "$3" == sing-box &&
             ! -e "${TEST_ROOT}/restart-failed" ]]; then
@@ -449,4 +457,6 @@ ln -s "${PADM_DOCKER_INSTALL_DIR}/data.real" "${PADM_DOCKER_INSTALL_DIR}/data"
 reject dockerTrafficReadState
 reject dockerTrafficWriteState <"${STATE}"
 cmp -s "${STATE}" "${TEST_ROOT}/before-state" || fail '符号链接检查修改了状态'
+[[ -z "$(find "${TEST_ROOT}" -type d -name '.traffic-candidate.*' -print -quit)" ]] ||
+    fail '额度候选临时目录未清理'
 printf 'docker-traffic-regression: ok\n'
