@@ -2065,3 +2065,41 @@ Docker bundle 内，不宣称该原生修复已由本次升级安装。未新增
 新主机灾备、多机原生控制/WG、WARP 实账号、自然续期、正式原生 h3/CDN、
 其它客户端或性能长稳证据，不解释旧 Vision/XHTTP/TUIC 失败；透明启用重启按要求不做，
 整体计划仍未完成。
+
+### 2026-10-26 正式 SSH 专用来源补验
+
+在正式 3.41.8/source=`e671328e` 的 Debian 13 amd64 上，新增短期专用
+systemd sshd，仅显式监听 `23.185.168.63:22220`，管理 `22` 不变。
+collector 初始不存在，通过正式 `fail2ban ssh enable` 自动创建 root `0700`
+目录；未人工 chmod，补齐 10 月 18 日旧正式版本需人工修复目录的证据缺口。
+其余配置、来源、运行器与 jail 均使用正式 bundle，不挂载当前未发布源码。
+
+独立 Docker 客户端 Paramiko `3.5.1` 固定用户已核对的 ED25519 指纹，
+4 次真实错误密码认证共触发 2 轮封禁。独立读取实际规则，核对唯一 INPUT
+挂钩仅含目标 `/32`、端口 `22220`、NEW 与专用随机链，精确来源 DROP；
+外部新建连接超时，正式解封后重连成功，管理 `22` 始终可新建连接。
+第二轮封禁后停止专用来源服务，collector guard 撤销，jail exit=`0`
+且未 OOM，owner state 删除，IPv4/IPv6 规则 `2102 ms` 内恢复基线。
+
+正式停用后，规格 SHA256 与完整字节、业务/分享组/订阅/TLS/ACME/续期/
+webroot 材料及 mode/uid/gid、两个 timer、source 全部匹配。三业务 healthy，
+新增 collector/锁/jail 状态路径、专用 unit/监听/运行 collector 均已清理；
+全部 33 份原有备份及新增 `configure.JljKFp`、`configure.xA6v7b` 保留。
+最终 UTC `11:55:04`：load1=`0.08`、MemAvailable 约 `445 MiB`，
+透明规格为空；不作性能或长稳结论。
+
+断网容器独验原档、最终实物读回、客户端结果和 3 项合成越界规则负控通过。
+私密归档 SHA256：
+`a42db50675a521a0dcc3fa74d1342dc554d201a334ea9fb9fe0d3e1a5eb7a6b8`；
+证据 `.tmp-native-ssh-3418-20261026/verification.json`。
+首次本地 apt 因 cap-drop ALL 无法 setgroups/setuid，未操作 VPS；
+改在依赖镜像安装，客户端仍禁用全部能力。矩阵及恢复已通过后，
+封装 tar 因同目录创建输出而报 `file changed as we read it`，改用明确文件
+归档并重新读回实物，未重跑矩阵。附加直连 TLS 探针 EOF，原探针未记录失败
+SNI，不判定根因；既有不嗅探固定目标通道的严格 TLS/200、错误 SNI 拒绝均通过，
+不把后续成功改写为直连通过。上述未完整运行及原脚本均保留。
+
+归档下载核摘要后精确删除远端暂存；本机客户端、独验容器与转发均已停止清理，
+复用 Paramiko 依赖镜像。无运行源码变化，不重复 daily/full 或制造 release。
+仅关闭专用无存量会话、显式单监听、密码失败格式的原生 IPv4 子项；
+arm64、IPv6、整机重启和任意 SSH 服务不由本轮证明，整体计划仍未完成。
