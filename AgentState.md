@@ -4,7 +4,7 @@
 
 ## 当前
 
-- `main/origin/main=c7d02ef6`；TUN/ICMP 源码及远端过滤证据已提交。
+- `main/origin/main=f74045c2`；TUN/ICMP 源码及远端过滤证据已提交。
 - 整体计划仍未完成；透明代理保持关闭，不以阶段通过替代整体完成。
 - VPS：Debian 13 amd64、普通 bridge、公网 IPv4、正式 `3.42.0`；
   bundle ref=`489d16c9`，manifest=`99dab8c8`，三业务 healthy，timer/source/材料恢复。
@@ -24,6 +24,11 @@
   direct/远端仅过滤 Echo/核心缺权三阶段通过，无伪造回复、TCP/UDP 正常；
   动态计数结构负控、旧模板兼容和只读诊断通过，均 `cache_hit=false`；
   最新实流量证据 `.tmp-regression-docker-75fa27b0f5224516bc34e12780f44bd8/`。
+- 2026-10-27 复核剩余项：TUN/ICMP 的 IPv6 不是单纯补用例，现有 schema、
+  生成器、诊断和真实夹具均固定 IPv4；VPS 同样没有全局 IPv6/默认路由，
+  因而继续保持设计级 `deferred`，不伪造公网或双栈证据。
+- 当前本机 Docker Desktop Linux API 返回权限错误，未在不可用条件下回退
+  MSYS2，也未重复已有回归；本轮没有可安全关闭的新原生项。
 - v3.42.0 的 CI 日志确认 ICMP/TUN 合同实际成功；5 镜像摘要与已验 3.41.8 一致；
   `.tmp-tun-icmp-release-3420-20261026/verification.json`，本轮未操作 VPS。
 - VPS 已用正式 `3.42.0` bundle 完成 `3.41.8 → 3.42.0` 升级并完成整机重启后复核；
