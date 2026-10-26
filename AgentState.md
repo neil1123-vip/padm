@@ -4,7 +4,7 @@
 
 ## 当前
 
-- `main/origin/main=eb6a3aca`；TUN/ICMP 源码及远端过滤证据已提交。
+- `main/origin/main=c7d02ef6`；TUN/ICMP 源码及远端过滤证据已提交。
 - 整体计划仍未完成；透明代理保持关闭，不以阶段通过替代整体完成。
 - VPS：Debian 13 amd64、普通 bridge、公网 IPv4、正式 `3.42.0`；
   bundle ref=`489d16c9`，manifest=`99dab8c8`，三业务 healthy，timer/source/材料恢复。
@@ -29,6 +29,10 @@
 - VPS 已用正式 `3.42.0` bundle 完成 `3.41.8 → 3.42.0` 升级并完成整机重启后复核；
   `validate`/HTTPS 200、三业务 healthy、续期 timer active，透明集成仍关闭。
   证据 `.tmp-native-upgrade-3420-20261026/verification.json`。
+- 2026-10-26 通过已核对主机指纹的 SSH 做当前真值复核：Debian 13、Docker 29.9.1，
+  `padm-docker validate` 返回 0、三业务 healthy、HTTPS 200、续期 timer active；
+  无透明容器、iptables/nft 透明规则或 validate 残留运行容器。证据
+  `.tmp-native-close-3420-20261026/verification.json`。
 - 6A.24：`3.41.6 → 3.41.8 → 3.41.6 → 3.41.8` 升级/回滚闭环通过；
   WS、严格 TLS、URI/source、权限/timer/累计及 4 项实物负控通过。
 - TUN IPv4 Echo、XHTTP CANCEL FIN、Mihomo 固定组合、TLS 七入口、
