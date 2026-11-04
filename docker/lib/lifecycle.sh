@@ -41,6 +41,8 @@ dockerUsage() {
     迁移已有 TLS 域名，保留账号、分享身份和累计；自动续期登记另行管理
   padm-docker edit --protocol-remove <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --protocol-rebuild <入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --protocol-rebuild <入口 ID> --repair-nginx [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+    仅修复 v3 TLS 21–25/27/29 的受管 Nginx 配置，保留完整规格；带站点 Fail2ban 时先停用防护
   padm-docker edit --site-static <独立站点目录> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-template <notes|photos|docs> [--site-title <2–60 字符站名>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-redirect <HTTP/HTTPS URL> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

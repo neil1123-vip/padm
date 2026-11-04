@@ -2821,15 +2821,23 @@ runProtocolManagementDriver() {
         done
         targetReply 'Docker 协议与入口' $'17\n'
         targetReply '入口 ID（0 返回）' $'\004'
+        for action in 0 eof; do
+            reply=$'0\n'
+            [[ "${action}" != eof ]] || reply=$'\004'
+            targetReply 'Docker 协议与入口' $'21\n'
+            targetReply 'Nginx TLS 入口 ID（0 返回）' "${reply}"
+        done
     fi
-    for action in 14 15 16 17; do
+    for action in 14 15 16 17 21; do
         targetReply 'Docker 协议与入口' "${action}"$'\n'
-        [[ "${scenario}" != status-failed ]] || continue
+        [[ "${scenario}" != status-failed || "${action}" == 21 ]] || continue
         if [[ "${action}" == 14 ]]; then
             targetReply '源入口 ID（沿用账号、地址；0 返回）' $'entry-fixture\n'
             targetReply '目标核心 [1=Xray，2=sing-box，空输入沿用源核心，0 返回]' $'\n'
             targetReply '目标协议 ID（0 返回）' $'31\n'
             targetReply '新公开端口（0 返回）' $'30443\n'
+        elif [[ "${action}" == 21 ]]; then
+            targetReply 'Nginx TLS 入口 ID（0 返回）' $'entry-fixture\n'
         else
             targetReply '入口 ID（0 返回）' $'entry-fixture\n'
             if [[ "${action}" == 17 ]]; then
@@ -3634,7 +3642,8 @@ edit)
                 ( "$4:$7" == 28:xray || "$4:$7" == 30:sing-box ) ]] || exit 2
         fi
     elif [[ "${2:-}" == --protocol-remove || "${2:-}" == --protocol-rebuild ]]; then
-        [[ "$#" -eq 3 && "$3" == entry-fixture ]] || exit 2
+        [[ "$3" == entry-fixture &&
+            ( "$#" -eq 3 || ( "$#" -eq 4 && "$2" == --protocol-rebuild && "$4" == --repair-nginx ) ) ]] || exit 2
     elif [[ "${2:-}" == --internal-ports ]]; then
         [[ "$#" -eq 5 && "$3" == entry-fixture && "$4" == 31350 && "$5" == 8650 ]] || exit 2
     elif [[ "${2:-}" == --fail2ban-port ]]; then
@@ -5832,8 +5841,9 @@ for managementCase in flow failed status-failed; do
     [[ "${managementCase}" != failed ]] || SITE_EDIT_STATUS=15
     [[ "${managementCase}" != status-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=15
     runPty "protocol-management-${managementCase}" protocol-management "${managementCase}" "${TLS_WIZARD_CLI}" menu
-    expectedManagement=$'edit --protocol-add entry-fixture 31 30443\nedit --protocol-remove entry-fixture\nedit --protocol-rebuild entry-fixture\nedit --internal-ports entry-fixture 31350 8650\nedit --protocol-add entry-fixture 28 30443 --protocol-core xray\nedit --protocol-add entry-fixture 30 30443 --protocol-core sing-box'
-    [[ "${managementCase}" != status-failed ]] || expectedManagement=
+    expectedManagement=$'edit --protocol-add entry-fixture 31 30443\nedit --protocol-remove entry-fixture\nedit --protocol-rebuild entry-fixture\nedit --internal-ports entry-fixture 31350 8650\nedit --protocol-rebuild entry-fixture --repair-nginx\nedit --protocol-add entry-fixture 28 30443 --protocol-core xray\nedit --protocol-add entry-fixture 30 30443 --protocol-core sing-box'
+    [[ "${managementCase}" != status-failed ]] ||
+        expectedManagement='edit --protocol-rebuild entry-fixture --repair-nginx'
     [[ "$(grep -v '^protocol list$' "${TLS_WIZARD_ACTIONS}" || true)" == "${expectedManagement}" ]] ||
         fail "协议管理 ${managementCase} 分发错误或取消后仍写入"
     [[ "${managementCase}" != flow ]] || grep -Fq '30 Shadowsocks2022' "${CONTROL_LOG}" ||
@@ -5842,6 +5852,7 @@ for managementCase in flow failed status-failed; do
         grep -Fq '11. 端口跳跃（双族 Hy2/TUIC；TUIC 仅范围转发）' "${CONTROL_LOG}" ||
         fail '协议菜单未明确 TUIC 仅范围转发边界'
     grep -Fq '17. 核心/Nginx 内部端口' "${CONTROL_LOG}" || fail '内部端口入口没有接入协议菜单'
+    grep -Fq '21. 修复受管 Nginx 配置' "${CONTROL_LOG}" || fail 'Nginx 修复入口没有接入协议菜单'
     [[ "${managementCase}" == flow ]] ||
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -ge 3 ]] ||
         fail "协议管理 ${managementCase} 未保留退出码或返回菜单"

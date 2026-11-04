@@ -1,6 +1,6 @@
 # Docker 菜单与功能对齐实施计划
 
-修订日期：2026-10-27
+修订日期：2026-11-04
 
 本计划替代聊天中的六步菜单对齐方案，落实该方案的审计修正。它是
 [功能对照表](docker-feature-matrix.md)之后的实施路线，不是重做
@@ -2295,6 +2295,61 @@ runner/guard 停止且透明两 unit inactive，见 `cleanup-remote.json`。
 UDP、IPv6、重启、既有连接排空、其它算法/客户端、宿主集成和完整管理
 不由本证据证明；本轮未改生产代码，不重复已通过的本机 daily/full，
 整体实施计划仍未完成。
+
+#### 3D.26 公开协议管理状态逐项验收
+
+按原生当前菜单动作核对 16 个公开协议，复用已有增量安装、字段编辑、
+复制、删除、保身份重建、账号/额度、分享、TLS 和各协议专项事务。
+新增正式 CLI 回归覆盖 20 个协议/核心组合，检查预览、新增、端口编辑、
+重建、链接刷新、复制/删除及启动失败恢复；凭据、其它入口和累计保持。
+`management_status` 按各协议声明范围统一为 `supported`，
+不将公网、arm64 或宿主生命周期验收合并到这个状态。
+
+本阶段补齐两项实际缺口：
+
+- v3 Xray Reality `1/2/26` 的可选成对 `mldsa65_seed/mldsa65_verify`、
+  `x-padm-reality-mldsa65` 门禁、重生成时探测/生成或复用/清除、
+  OpenSSL 经 stdin 派生验证、Xray 配置、`pqv` 和同身份 XHTTP 下行投影。
+  按原生 `target_host:port` 的 SNI 探测段决定，不外推独立 SNI 可用性；
+  超时、缺失握手结果或错配中止，sing-box/v1/v2 拒绝新字段，旧无配对输入兼容。
+- `edit --protocol-rebuild ID --repair-nginx` 与菜单 `3 → 9 → 21`，
+  只豁免受管顶层 `default.conf` 正文差异或缺失，保持完整规格，
+  其余文件、部署、证书、权限和属主仍核验。拒绝站点 Fail2ban、
+  额外文件及符号/硬链接；预览/取消不改现场，失败恢复原字节或原缺失。
+  菜单列表失败仍能输入修复 ID。
+
+另放行 WS Fail2ban 部署中未保护 21 的增删与公开端口编辑，
+受保护来源身份/核心/端口/地址族/内部 TLS 端口/域名在初始及最终草稿冻结；
+保护端口仍走 5C.6d 专项，22–25 及其它宿主组合保持拒绝。
+Hy2/TUIC 范围管理沿用单 sing-box、单个双族入口及手动监督，
+不承诺崩溃或开机自动恢复，TUIC 不宣称客户端自动换端口。
+
+2026-11-04 在 Docker Desktop Linux amd64、复用
+`padm-regression:local` 工具镜像验证，以下均 exit 0、非缓存：
+
+| selector | 入口耗时 | `.tmp-regression-docker-` 结果后缀 |
+| --- | ---: | --- |
+| `docker-phase3-entries-management-protocol -Jobs 2` | 555947 ms | `7c4a553c5072478ebe45cc3223875c66` |
+| `docker-reality-parameters -Jobs 2` | 167987 ms | `aeb4cd17ec8948f5b07484ca018e6492` |
+| `docker-menu -Jobs 2` | 139362 ms | `3f432647364d443ea2caabe0c477d251` |
+| `docker-phase3-edit -Jobs 2` | 52509 ms | `f0f1be61c7b547059bb4952d8d66d69c` |
+| `docker-port-hopping-config -Jobs 2` | 30623 ms | `6636b76bfce349888704c9f3a24e4463` |
+| `docker-contracts -Jobs 6` | 213505 ms，34/34 | `e3bd7b65a4fc449da5e5e29578252039` |
+
+此前本轮 `docker-fail2ban-focused`、`docker-traditional-tls-base` 和
+`docker-fail2ban-source` 分别为 185409/209890/4236 ms、exit 0；
+证据后缀为 `29b524b5e1ff41d1a4821bac327ab3cc`、
+`bbca07c5433745abbe75325457db0caf`、`d1f69b1c5b364aea9e5110d5cde75cbc`。
+完整谓词 434 个差分用例通过；固定 Xray `v26.10.21` 与 ops OpenSSL
+断网交叉验证 32 字节 seed、1952 字节 verify 的派生一致，等长错 seed 拒绝，
+未输出或持久化测试秘密。
+
+保留首次谓词摘要、修复权限预期及 AWK 语法失败原件，
+后缀 `37278adae2714f36a908629e76e5e3f8`、
+`103f7eb0b13045f6979f3ab7815553eb`、
+`d2787a099c8e40a39cd63f5b1ef540b3`，后续通过不覆盖失败。
+本轮未跑 full，未补公网、原生 arm64、宿主重启或实际 ML-DSA 客户端连通；
+已有配对入口向 sing-box 复制仍拒绝，不静默降级。整体实施计划仍未完成。
 
 ## 第四步：用户、订阅与服务维护
 

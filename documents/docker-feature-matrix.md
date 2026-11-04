@@ -1,6 +1,6 @@
 # Docker 版功能对照表
 
-日期：2026-10-18
+修订日期：2026-11-04
 
 这份表是“原生菜单功能”和“Docker 当前能力”的第一阶段基线。状态只表示
 Docker 现在能否通过受管控制命令完成对应能力，不表示底层镜像里是否包含某个
@@ -337,6 +337,20 @@ Hy2/TUIC 停止后再由新客户端进程验证拒绝。三种独立场景按�
 协议的 `status` 只表示通过首次向导或 JSON spec 配置并运行的能力；`management_status`
 另行表示原生协议管理工作流的迁移状态。初始配置可运行不代表完整菜单管理已支持。
 
+3D.26 按当前原生菜单实际动作逐协议验收管理状态，不再把全部协议固定为 `deferred`。
+16 个公开协议的新增、复制、字段编辑、保身份重建、删除、
+链接刷新和失败恢复形成闭环，配合已有账号/分享、TLS 及协议专项合同，标为 `supported`。
+这里的支持范围沿用各协议行中的核心和组合约束；公网、arm64、全机生命周期及其它客户端
+仍独立验收。Hy2/TUIC 的范围管理限单 sing-box、单个双族入口和手动监督，
+不承诺崩溃或开机自动恢复，TUIC 不宣称客户端自动换端口。
+`1/2/26` 补齐 v3 Xray Reality ML-DSA-65 生成/复用、配对校验、配置和 `pqv` 分享传播；
+仅参数重生成时按原生 `target_host:port` 的 SNI 探测段决定，独立 SNI 的可用性不由此证明。
+`21–25/27/29` 补齐 `--protocol-rebuild ID --repair-nginx` 及菜单 `3 → 9 → 21`，
+只豁免受管 `default.conf` 正文损坏或缺失，其它配置、部署、权限和属主仍严格核验，
+站点 Fail2ban 组合拒绝。未保护 WS 21 可正常增删与改端口，受保护来源保持冻结。
+下文早期阶段的“完整管理尚未交付”是当时的结论；当前协议管理状态以本节及逐项表为准，
+不改变其它功能或环境验收的 `deferred`。
+
 3D.1 已接入逐入口 Reality 参数重生成：菜单或 `edit --regenerate-reality <入口 ID>`
 更新私钥、公钥和 short ID，支持两核心 Vision/gRPC 及 Xray XHTTP。
 保留 UUID、目标/SNI、端口、其它入口和额度，更新分享链接及已启用的 HTTPS 发布内容；
@@ -351,7 +365,7 @@ PQC 和 CDN 风险算法。缓存选择仍重新验签和复测，再按 Docker 
 扫描进度、非零状态下的有效结果导入和失败批次继续处理共用原生实现，
 中断先清理后台扫描再删除临时目录。
 公网扫描、部署网络候选可用性及原生 arm64 仍待环境验收；有限 443 共存已交付，范围见对应专项，
-协议完整 `management_status` 继续为 `deferred`。
+协议管理状态接续 3D.26，环境验收边界保持。
 
 3A.3 已通过本地回归：v3 明确主副核心与每个入口归属，两核心合计最多 16 个入口，
 菜单和 `edit --spec` 可复制、删除现有协议入口；v1/v2 的配置及备份恢复继续兼容。
@@ -590,9 +604,9 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`reinstall`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；3D.11–3D.13 提供旧规格迁移后的增量新增、核心选择、新 SS 密钥、首个 TLS 证书联动以及 v3 删除/保身份重建。3D.14 提供重新选择和完整规格重装，并撤销旧分享授权、保留累计及失败恢复；3D.15 提供保身份 TLS 域名迁移，3D.16 可在 ACME 成功后显式登记新域名续期，旧登记不迁移。真实发布连通未完成。 |
+| 安装与重装 | 协议管理 `supported`，环境验收另列 | `install`、可信发布输入 `release`、交互首配 `setup`、`reinstall`、`edit`、`configure`、候选校验及恢复 | 支持 16 个协议的完整原始 spec、多入口与主副核心、增量新增、复制/删除、字段编辑和保身份重建；3D.26 增加 Nginx 受限修复。完整重装撤销旧分享身份并保留累计，TLS 域名迁移与 ACME 续期登记保持独立；公网、arm64 和完整宿主验收另列。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号与双核心认证/统计、账号/分享组及业务备份恢复、主控管理与被控接入/手动同步、已有单 Peer 被控自动同步 CLI/菜单、WireGuard 宿主集成 | 4A.7 的 HTTPS 发布复用至少一个 `21–25` 入口与同域受管 TLS，隔离 amd64 主/组实链路已验；独立域名/证书发布、H3 和完整多服务器工作流未迁移。隔离 amd64 双部署事务及真实 cron 自主同步已验，WireGuard 需 `net-wireguard`；原生双机、arm64 和重启另验。 |
-| 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`23` VMess HTTPUpgrade TLS、`24` VLESS gRPC TLS、`25` Trojan gRPC TLS、`26` Reality gRPC、`27` TLS Vision fallback、`28` direct Trojan、`29` Trojan TLS fallback、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口、Reality 传输派生、参数重生成和目标站管理；有限 Reality 443 共存及 2/21/22/23/24/25 CDN 连接地址覆盖 | XHTTP、VMess WS、gRPC TLS 和传统 TLS fallback 仅限 Xray，Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；HTTPUpgrade 支持两核心；完整协议管理、完整 UDP 端口跳跃、其余 CDN 和完整内部路由工作流尚未开放；Fail2ban WS 增删及通用端口编辑拒绝，单入口保护端口专项见 5C.6d。 |
+| 协议与入口 | 配置运行与管理工作流 `supported` | 16 个公开协议的新增、编辑、复制、删除、保身份重建、分享和失败恢复，以及账号/额度与各协议专项管理；Reality ML-DSA-65、受限 Nginx 修复见 3D.26，有限 443 共存及 2/21/22/23/24/25 CDN 覆盖沿用原边界 | 各协议核心限制见逐项表。WS Fail2ban 只冻结受保护来源，保护端口迁移走 5C.6d；Hy2/TUIC 范围限单 sing-box、单个双族入口和手动监督。公网、arm64、宿主生命周期、其它 CDN 和完整内部路由验收不由管理状态证明。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、保身份域名迁移、DNS-01 与 HTTP-01 standalone/受管 webroot 本地事务、Nginx WebSocket/HTTPUpgrade/gRPC HTTP/2 入口及传统 TLS fallback；默认页、静态目录、302、受管三主题、Hysteria2 local 与逐入口 ALPN 事务管理 | 域名迁移不迁移续期登记；隔离 amd64 TLS ALPN 和 H3 已有实测；公网 CA、宿主生命周期及原生双架构验收待补。 |
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同；5B.1–5B.4i 两核心 SOCKS5 TCP 出站、DNS/hosts、域名 Direct/Block、目的 IP、明文 BT、CN 预设、IPv6 与用户态 WARP 子能力；已有 DNS/选择性 SOCKS5/IPv6/WARP 名单增删、七类域名及手工字面 IP/CIDR 单条原位替换、已有 hosts 单键地址替换；5B.5a 已有 Xray 的 HTTP 中继事务 | SOCKS5 名单定向、菜单及完整 49 项回归已通过；hosts 单键替换定向与菜单已通过，集中完整 49 项回归通过；SOCKS UDP 发布、完整区域/访问控制仍未交付；WARP 公网出口、IPv6/HTTP 公网发布、真实宿主及双架构验收待补，完整状态不升级。 |
 | 核心与服务 | `supported` + `deferred` | 基础状态、启动、停止、重启、日志、更新、回滚、配置校验、可信候选核心试跑与升级风险扫描、Xray Geo 状态/更新/每日任务 | 评估要求受管 spec；预发布须有匹配的可信发布资产，不现场构建；Geo 的本地合同及真实 amd64 解析/权限已验收，真实上游、生产重建、宿主调度和双架构生命周期另验；当前不是原生全部生命周期管理。 |
@@ -611,22 +625,22 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 
 | ID | 能力 | 原生入口 | 配置运行状态 | 管理状态 | 核心 | Compose profile | 网络/监听 | 原因 |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | 支持单核心或主副核心配置、字段编辑及跨核心同协议多入口；完整管理未迁移。 |
-| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；3D.4 四预设、XMUX 三键自定义/清除，3D.5 Padding `1..4096`，3D.6 两项首部开关已交付。3D.7 四项原生 packet/stream limits 的状态、事务、清除与复制/派生继承；前三项 `0..2147483647` 整数，末项为整数或正序范围；`0`/`0-0` 保留显式值、状态折算核心默认，要求 `x-padm-xhttp-limits`。3D.10 提供模式、成对路径/Host、七项高级参数及推荐恢复。3D.20 支持客户端请求首部设置/清除、状态和统一链接，1–8 项、名称 1–64 位、值 0–256 位可打印 ASCII，拒绝大小写重复及核心保留字段，要求 `x-padm-xhttp-request-headers`；不提供服务端响应或访问认证。3D.21 支持同入口已登记非默认分享额外端口的下行绑定及清除，要求 `x-padm-xhttp-download`；链接沿用来源 Reality 身份/路径/Host，固定下行模式 `auto`，复制/派生的新入口清除绑定。3D.22 支持独立外部下行地址与 TLS h2/h3 或 Reality 身份元数据，要求 `x-padm-xhttp-download-settings`；与原端口绑定互斥、共用清除，URI 不继承上行高级参数，其它编辑保留，复制/派生仅清除新入口绑定。4A.5c 支持逐入口多连接 CDN 地址设置/清除、状态和统一链接输出，要求 `x-padm-cdn-xhttp`；只替换分享上行地址，保留原入口端口与 XHTTP `downloadSettings.address`，不自动建设 TLS/H3/CDN 拓扑。外部前置须已部署并回到同一 XHTTP handler/认证，不支持无会话关联的独立后端；公网前置、宿主/arm64、完整管理及性能收益继续 deferred。 |
-| 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、导入、BBR/Brutal、Salamander/Gecko、HTTPS 伪装编辑、复制及分享链接；3D.8–3D.9 菜单 12 提供状态、带宽、混淆与伪装单入口专项，BBR 保留速率，密码仅私密文件或静默输入。Gecko 要求新能力标记，不开放包长参数。已有入口可两步发布受管静态网页并启用 local，固定只读目录且无混淆，操作先验证已发布网页。复用受管 TLS 和 UUID 流量账号；端口跳跃限单 sing-box、双族 Hy2 的内部监督手动管理，5C.9f–5C.9g 补固定 Mihomo 的 Brutal + Salamander/Gecko 原范围 URI 导入验收，完整跳跃与协议管理仍 deferred。 |
-| 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用字段编辑、同核复制/删除及分享链接；复用受管 TLS 与 UUID 流量账号，域名与凭据冻结，宿主集成组合及完整管理未开放。 |
-| 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用编辑、同核复制/删除及原生 URI；入口与 TLS 同域，UUID 用户名/密码共享统计额度；QUIC、独立 IP/SNI 覆盖及完整管理未开放。 |
-| 21 | VLESS WS TLS | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | 已有多入口 Xray 后端、Nginx 反代和同域 TLS；5C.6d 单直接 WS 21/单集成/单保护端口的专项迁移接入菜单和事务，新旧端口均要求 fresh 来源；关联入口增删、通用端口编辑及完整管理仍拒绝。 |
-| 22 | VMess WS TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 支持首配、导入、入口与 WS 路径编辑、同核复制/删除及 `vmess://` 分享；固定 `alterId=0`，4A.7 自身同域 Nginx TLS 发布已通过隔离 amd64 实测，宿主集成及完整管理未开放。 |
-| 23 | VMess HTTPUpgrade TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` / `nginx` | bridge / TCP + Nginx | v3 两核心首配、导入、入口/路径编辑、跨核心复制/删除及分享；固定 `alterId=0`，UUID 共享额度，4A.7 含纯 sing-box 的自身同域 Nginx TLS 发布已通过隔离 amd64 实测，宿主集成及完整管理未开放。 |
-| 24 | VLESS gRPC TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 首配、导入、入口/服务名编辑、同核复制/删除及 `vless://` 分享；Nginx HTTP/2 反代，UUID 共享额度，4A.7 自身同域 Nginx TLS 发布已通过隔离 amd64 实测，宿主集成、fallback 及完整管理未开放。 |
-| 25 | Trojan gRPC TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 首配、导入、入口/服务名编辑、同核复制/删除及 `trojan://` 分享；Nginx HTTP/2 反代，UUID 共享额度，4A.7 自身同域 Nginx TLS 发布已通过隔离 amd64 实测，宿主集成、fallback 及完整管理未开放。 |
-| 26 | VLESS Reality gRPC | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 支持首配、导入、service name 编辑、跨核心复制及分享链接；完整管理未迁移。 |
-| 27 | VLESS TCP TLS Vision | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + fallback | v3 首配、导入、通用编辑、同核复制/删除及 URI；Xray TLS/Vision 与 PROXY v1 HTTP/1.1、HTTP/2 回落，UUID 共享额度；默认页/静态/302 与逐入口 ALPN 可事务管理，宿主集成与完整管理未开放。 |
-| 28 | Trojan TCP TLS direct | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 两核首配、导入、通用编辑、跨核心复制/删除及 URI；受管 TLS、UUID 密码共享流量额度，fallback、宿主集成及完整管理未开放。 |
-| 29 | Trojan TCP TLS fallback | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + fallback | v3 首配、导入、通用编辑、同核复制/删除及 URI；Trojan 直接终止 TLS，无额外 VLESS 前端，PROXY v1 HTTP/1.1、HTTP/2 回落，UUID 共享额度；默认页/静态/302 与逐入口 ALPN 可事务管理，宿主集成与完整管理未开放。 |
-| 30 | Shadowsocks | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP + UDP | v3 SS2022 AES-128 多用户首配、导入、通用编辑、同核复制/删除及 SIP002 链接；3D.12 增量新增首次生成私密双密钥，同 UUID 已有 SS 保留原密钥。3D.24/25 分别轮换选中入口自用/服务器密钥，其余字段冻结；专项、amd64 双栈容器实链路及完整合同通过，3D.25a 补固定 Mihomo 的原生公网 IPv4 TCP 五阶段 17 正/9 拒绝。无需 TLS，UUID 共享统计额度，宿主集成及完整管理未开放。 |
-| 31 | TUIC | 协议与入口 -> Tuic 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 首配、导入、入口/拥塞/认证超时/心跳/0-RTT 编辑、同核复制/删除及 URI；3D.8 菜单 13 提供状态、各参数专项和推荐值恢复，开启 0-RTT 确认重放风险；受管 TLS、UUID 共享额度。5C.9d 提供单核心、单个双族入口的监督范围 DNAT 和活动单端口分享，要求新 bundle marker；5C.9f 补固定 Mihomo 的首尾普通 URI 导入验收，固定客户端自动换端口与完整管理仍 deferred。 |
+| 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `supported` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 支持首配、增量新增、编辑、跨核心复制/删除、保身份重建与分享；账号/额度、目标站、Reality 参数及有限 443 共存沿用现有事务。Xray ML-DSA-65 生成/复用、配对校验和 `pqv` 分享见 3D.26；sing-box 拒绝该字段，公网与 arm64 验收另列。 |
+| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `supported` | Xray | `core-xray` | bridge / TCP | v3 支持首配、增量新增、编辑、同核复制/删除、保身份重建与分享；四预设、XMUX、Padding、首部、packet/stream limits、模式/路径/Host/高级参数及推荐恢复见 3D.4–3D.10。客户端请求首部、同入口下行端口和独立下行设置见 3D.20–3D.22；复制/派生只清除新入口下行绑定。多连接 CDN 上行覆盖保留下行地址，外部前置须回到同一 handler/认证，不自动建设 TLS/H3/CDN；Xray ML-DSA-65 和同身份下行分享见 3D.26。公网前置、宿主/arm64 和性能收益仍待验。 |
+| 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `supported` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、增量新增、编辑、复制/删除、保身份重建与分享，账号/额度、TLS 轮换和域名迁移复用现有事务。3D.8–3D.9 提供 BBR/Brutal、Salamander/Gecko 和伪装专项；local 先发布受管只读静态网页且无混淆，Gecko 不开放包长参数。端口范围限单 sing-box、单个双族入口、内部监督手动管理，不承诺崩溃或开机自动恢复；5C.9f–5C.9g 已验固定 Mihomo 原范围 URI 导入，公网和 arm64 验收另列。 |
+| 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `supported` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、增量新增、编辑、同核复制/删除、保身份重建与分享；受管 TLS 轮换和域名专项迁移、独立账号/额度与分享组已交付。纯 AnyTLS 使用本地分享，HTTPS 订阅需同域 Nginx TLS 入口；宿主集成组合仍拒绝，公网和 arm64 验收另列。 |
+| 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `supported` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、增量新增、编辑、同核复制/删除、保身份重建与原生 URI；入口与 TLS 同域，支持 TLS 轮换和域名专项迁移、独立账号/额度与分享组。仅 TCP，QUIC 和独立 IP/SNI 覆盖仍拒绝；HTTPS 订阅需同域 Nginx TLS 入口，公网和 arm64 验收另列。 |
+| 21 | VLESS WS TLS | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `supported` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 增删改、复制、保身份重建与分享；TLS 轮换/迁移、账号/额度和 Nginx 受限修复已交付。WS Fail2ban 仅冻结受保护来源，未保护 21 可增删与改端口；保护端口迁移使用 5C.6d 专项，修复须先停防护；公网与 arm64 验收另列。 |
+| 22 | VMess WS TLS | 安装与重装 -> 自定义安装 | `supported` | `supported` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 增删改、同核复制、保身份重建及 `vmess://` 分享，固定 `alterId=0`；TLS 轮换/迁移、账号/额度和 Nginx 受限修复已交付。4A.7 自身同域发布有隔离 amd64 实测；宿主集成组合拒绝，公网与 arm64 验收另列。 |
+| 23 | VMess HTTPUpgrade TLS | 安装与重装 -> 自定义安装 | `supported` | `supported` | Xray / sing-box | `core-xray` / `core-sing-box` / `nginx` | bridge / TCP + Nginx | v3 两核心增删改、跨核心复制、保身份重建及分享，固定 `alterId=0`；TLS 轮换/迁移、账号/额度和 Nginx 受限修复已交付。4A.7 含纯 sing-box 自身同域发布有隔离 amd64 实测；宿主集成组合拒绝，公网与 arm64 验收另列。 |
+| 24 | VLESS gRPC TLS | 安装与重装 -> 自定义安装 | `supported` | `supported` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 增删改、同核复制、保身份重建及 `vless://` 分享；Nginx HTTP/2 反代、TLS 轮换/迁移、账号/额度和受限修复已交付。4A.7 自身同域发布有隔离 amd64 实测；宿主集成组合拒绝，公网与 arm64 验收另列。 |
+| 25 | Trojan gRPC TLS | 安装与重装 -> 自定义安装 | `supported` | `supported` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 增删改、同核复制、保身份重建及 `trojan://` 分享；Nginx HTTP/2 反代、TLS 轮换/迁移、账号/额度和受限修复已交付。4A.7 自身同域发布有隔离 amd64 实测；宿主集成组合拒绝，公网与 arm64 验收另列。 |
+| 26 | VLESS Reality gRPC | 安装与重装 -> 自定义安装 | `supported` | `supported` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 增删改、service name、跨核心复制、保身份重建及分享；账号/额度、目标站及 Reality 参数管理沿用现有事务。Xray ML-DSA-65 生成/复用、配对校验和 `pqv` 分享见 3D.26；sing-box 拒绝该字段，443 共存不适用，公网与 arm64 验收另列。 |
+| 27 | VLESS TCP TLS Vision | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `supported` | Xray | `core-xray` / `nginx` | bridge / TCP + fallback | v3 增删改、同核复制、保身份重建及 URI；Xray TLS/Vision 与 PROXY v1 HTTP/1.1、HTTP/2 回落，账号/额度、TLS 轮换/迁移、默认页/静态/302、ALPN 和 Nginx 受限修复已交付；宿主集成拒绝，公网与 arm64 验收另列。 |
+| 28 | Trojan TCP TLS direct | 安装与重装 -> 自定义安装 | `supported` | `supported` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 两核首配、增量新增、编辑、跨核心复制/删除、保身份重建及 URI；TLS 轮换和域名专项迁移、独立账号/额度与分享组已交付。HTTPS 订阅需同域 Nginx TLS 入口；fallback 使用独立协议 29，宿主集成组合仍拒绝，公网和 arm64 验收另列。 |
+| 29 | Trojan TCP TLS fallback | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `supported` | Xray | `core-xray` / `nginx` | bridge / TCP + fallback | v3 增删改、同核复制、保身份重建及 URI；Trojan 直接终止 TLS，PROXY v1 HTTP/1.1、HTTP/2 回落，无额外 VLESS 前端。账号/额度、TLS 轮换/迁移、默认页/静态/302、ALPN 和 Nginx 受限修复已交付；宿主集成拒绝，公网与 arm64 验收另列。 |
+| 30 | Shadowsocks | 安装与重装 -> 自定义安装 | `supported` | `supported` | sing-box | `core-sing-box` | bridge / TCP + UDP | v3 SS2022 AES-128 多用户首配、增量新增、编辑、同核复制/删除、保身份重建与 SIP002 链接；同 UUID 已有 SS 保留原密钥。3D.24/25 轮换选中入口自用/服务器密钥，保持其它字段及账号；专项、amd64 双栈实链路及固定 Mihomo 原生公网 IPv4 TCP 轮换已验。无需 TLS，独立账号/额度和分享组已交付；HTTPS 订阅需同域 Nginx TLS 入口，宿主集成组合仍拒绝，arm64 等验收另列。 |
+| 31 | TUIC | 协议与入口 -> Tuic 管理 | `supported` | `supported` | sing-box | `core-sing-box` | bridge / UDP | v3 首配、增量新增、编辑、同核复制/删除、保身份重建与 URI；3D.8 提供拥塞/认证超时/心跳/0-RTT 专项及推荐恢复，独立账号/额度、分享组、TLS 轮换和域名迁移复用现有事务。5C.9d 的监督范围 DNAT 和活动单端口分享限单 sing-box、单个双族入口，5C.9f 已验固定 Mihomo 首尾 URI 导入；不宣称客户端自动换端口或崩溃/开机自动恢复，宿主集成组合仍拒绝，公网和 arm64 验收另列。 |
 
 ### 内部服务端能力
 

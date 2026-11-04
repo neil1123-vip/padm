@@ -1524,6 +1524,66 @@ if [[ "${PHASE4_BRANCH}" == port || "${PHASE4_BRANCH}" == recovery ]]; then
 fi
 
 if [[ -z "${PHASE4_BRANCH}" || "${PHASE4_BRANCH}" == port ]]; then
+# 未保护 WS 的普通管理保留原 jail，提交仍重新验证已有保护入口的来源。
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-unprotected-add edit --protocol-add entry-main-ws 21 26444 \
+    --confirm PADM-DOCKER-EDIT
+jq -e '.core.protocols | any(.listener_id == "entry-1" and .id == 21 and .public_port == 26444)' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail '未保护 WS 新增没有提交新入口'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 1 ]] &&
+    grep -q '^source-witness entry-main-ws ipv4 198.51.100.9 ' "${DOCKER_LOG}" ||
+    fail '未保护 WS 新增没有仅验证原保护入口'
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    dockerEditEntryAdd "${DOCKER_ROOT}/config/spec.json" entry-main-ws 21 xray 26445 copy \
+        "${TEST_ROOT}/fail2ban-unprotected-copy.json"
+)
+FAIL2BAN_UNPROTECTED_BEFORE=$(fail2banManagedSnapshot)
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-unprotected-copy-preview edit \
+    --spec "${TEST_ROOT}/fail2ban-unprotected-copy.json" --preview
+! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|down|restart)( |$)' "${DOCKER_LOG}" ||
+    fail '未保护 WS 复制预览改变运行服务'
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_UNPROTECTED_BEFORE}" ]] ||
+    fail '未保护 WS 复制预览改变受管文件'
+jq '.core.protocols |= map(if .listener_id == "entry-1" then .public_port = 26446 else . end)' \
+    "${DOCKER_ROOT}/config/spec.json" >"${TEST_ROOT}/fail2ban-unprotected-port.json"
+
+# 初始草稿合法时，预览之后注入的保护地址族漂移仍必须被最终兼容守卫拦住。
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    dockerHostPreflight() { return 0; }
+    dockerLockInstalledDeployment() { return 0; }
+    dockerComposeFile() { printf '%s\n' "${DOCKER_ROOT}/compose.json"; }
+    dockerEditBaselineValidate() { return 0; }
+    dockerConfigureReleasePrepare() { return 0; }
+    dockerConfigureReleaseValidate() { return 0; }
+    dockerAcmeWebrootTransitionValidate() { return 0; }
+    dockerEditPreview() {
+        jq '.core.protocols |= map(if .listener_id == "entry-main-ws" then
+          .address_families = ["ipv4","ipv6"] else . end)' "$2" >"$2.next" &&
+            mv -- "$2.next" "$2"
+    }
+    dockerConfigureApply() { fail '普通管理允许最终草稿改写保护来源'; }
+    PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}"
+    status=0
+    dockerEditCommand --spec "${TEST_ROOT}/fail2ban-unprotected-port.json" --preview \
+        --manifest "${CONFIGURE_MANIFEST}" || status=$?
+    [[ "${status}" -eq 15 ]] || fail '最终草稿的保护来源漂移没有被拒绝'
+    dockerSetupCleanup
+) >"${TEST_ROOT}/fail2ban-unprotected-freeze.log" 2>&1 || {
+    cat "${TEST_ROOT}/fail2ban-unprotected-freeze.log" >&2
+    fail '普通 WS 管理的最终来源冻结检查失败'
+}
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_UNPROTECTED_BEFORE}" ]] ||
+    fail '拒绝最终草稿后改变受管文件'
+runControl 0 fail2ban-unprotected-port edit \
+    --spec "${TEST_ROOT}/fail2ban-unprotected-port.json" --confirm PADM-DOCKER-EDIT
+runControl 0 fail2ban-unprotected-remove edit --protocol-remove entry-1 \
+    --confirm PADM-DOCKER-EDIT
+cmp -s "${TEST_ROOT}/fail2ban-settings-subset.json" "${DOCKER_ROOT}/config/spec.json" ||
+    fail '未保护 WS 删除后没有恢复原有入口和封禁参数'
+
 # 专项端口迁移保留通用导入拒绝，只允许一个 WS 入口和一个受管 jail。
 for args in \
     '--fail2ban-port' \

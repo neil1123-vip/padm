@@ -60,6 +60,53 @@ for filter in \
     reject dockerFail2banSourcePlan "${TEST_ROOT}/invalid.json" >/dev/null
 done
 
+# 普通管理只冻结受保护入口，未保护 WS 可以新增、复制、改端口和删除。
+for action in copy protocol; do
+    dockerEditEntryAdd "${TEST_ROOT}/spec.json" entry-source-ws 21 xray 24446 "${action}" \
+        "${TEST_ROOT}/added.json"
+    dockerConfigureSpecValidate "${TEST_ROOT}/added.json"
+    dockerEditCompatibilityValidate "${TEST_ROOT}/spec.json" "${TEST_ROOT}/added.json"
+    [[ "$(dockerFail2banSourcePlan "${TEST_ROOT}/added.json")" == "${plan}" ]]
+done
+jq '.core.protocols |= map(if .listener_id == "entry-1" then .public_port = 24447 else . end)' \
+    "${TEST_ROOT}/added.json" >"${TEST_ROOT}/moved.json"
+dockerConfigureSpecValidate "${TEST_ROOT}/moved.json"
+dockerEditCompatibilityValidate "${TEST_ROOT}/added.json" "${TEST_ROOT}/moved.json"
+[[ "$(dockerFail2banSourcePlan "${TEST_ROOT}/moved.json")" == "${plan}" ]]
+dockerEditEntryRemove "${TEST_ROOT}/moved.json" entry-1 "${TEST_ROOT}/removed.json"
+dockerConfigureSpecValidate "${TEST_ROOT}/removed.json"
+dockerEditCompatibilityValidate "${TEST_ROOT}/moved.json" "${TEST_ROOT}/removed.json"
+jq -e --slurpfile original "${TEST_ROOT}/spec.json" '. == $original[0]' \
+    "${TEST_ROOT}/removed.json" >/dev/null
+reject dockerEditEntryRemove "${TEST_ROOT}/spec.json" entry-source-ws \
+    "${TEST_ROOT}/invalid-remove.json" >/dev/null
+for protocol in 22 23 24 25; do
+    reject dockerEditEntryAdd "${TEST_ROOT}/spec.json" entry-source-ws "${protocol}" xray 24446 \
+        protocol "${TEST_ROOT}/invalid-add.json" >/dev/null
+done
+reject dockerEditEntryAdd "${TEST_ROOT}/spec.json" entry-source-ws 23 sing-box 24446 \
+    protocol "${TEST_ROOT}/invalid-add.json" >/dev/null
+
+# 直接兼容验证与最终草稿必须同样拒绝保护归属或来源漂移。
+for filter in \
+    '.core.protocols |= map(if .public_port == 24444 then .public_port = 24445
+      elif .public_port == 24445 then .public_port = 24444 else . end)' \
+    '.core.protocols |= map(if .public_port == 24444 then .public_port = 24446
+      elif .public_port == 24446 then .public_port = 24444 else . end)' \
+    '.core.protocols |= map(select(.listener_id != "entry-source-ws"))' \
+    '.core.protocols |= map(if .listener_id == "entry-source-ws" then
+      .listener_id = "recreated-ws" else . end)' \
+    '.core.protocols |= map(if .listener_id == "entry-source-ws" then
+      .address_families = ["ipv4"] else . end)' \
+    '.core.protocols |= map(if .listener_id == "entry-source-ws" then .id = 22 else . end)' \
+    '.core.protocols |= map(if .listener_id == "entry-source-ws" then
+      .websocket.tls_port = 8446 else . end)' \
+    '.tls.domain = "changed.example.com"'; do
+    jq "${filter}" "${TEST_ROOT}/added.json" >"${TEST_ROOT}/invalid-edit.json"
+    reject dockerEditCompatibilityValidate "${TEST_ROOT}/added.json" \
+        "${TEST_ROOT}/invalid-edit.json" >/dev/null
+done
+
 # 两份恢复规格的地址族并集必须先收齐，不能继承上一事务的来源输入。
 jq '.core.protocols[].address_families = ["ipv4"]' "${TEST_ROOT}/spec.json" >"${TEST_ROOT}/ipv4.json"
 jq '.core.protocols[].address_families = ["ipv6"]' "${TEST_ROOT}/spec.json" >"${TEST_ROOT}/ipv6.json"

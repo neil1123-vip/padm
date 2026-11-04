@@ -18,7 +18,10 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 `padm-docker menu` 可查看状态、启停重启和日志，选择“安装与重装 → 首次配置”收集核心、协议、地址和证书。
 当前向导支持 Xray Reality Vision/XHTTP/gRPC、sing-box Reality Vision/gRPC/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC，以及两核心 direct Trojan、VMess HTTPUpgrade TLS，
 以及 Xray VLESS WS TLS、VMess WS TLS、VLESS/Trojan gRPC TLS、VLESS TCP TLS Vision、Trojan TLS fallback 或 Reality Vision + WS TLS；
-已有部署可从同一菜单选择重装，或改用下述保身份编辑入口；完整协议管理仍待后续阶段交付。
+已有部署可从同一菜单选择重装，或改用下述保身份编辑入口。
+16 个公开协议的管理状态已按声明的核心和组合更新为 `supported`；
+新增、编辑、复制、保身份重建、删除、分享和失败恢复均有命令入口。
+公网、arm64 和完整宿主生命周期仍单独验收，详见[功能对照表](docker-feature-matrix.md#状态定义)。
 `install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
 不会安装 Docker、下载 bundle 或初始化状态，现有显式 CLI 命令保持可用。
 
@@ -120,7 +123,7 @@ Hy2 带宽按服务端方向填写，整数范围 `1..1000000` Mbps；Brutal 菜
 TUIC 时长接受 1–6 位正整数加 `ms/s/m/h`，恢复推荐值为 `cubic/3s/10s/false`。
 0-RTT 默认关闭，开启菜单要求确认重放风险。专项不能与规格导入或其它专项混用，
 仅改选中字段，保留认证、TLS、其它入口、其它参数和累计额度；
-沿用预览、确认、发布和失败恢复。完整协议管理及宿主集成组合仍未开放；TUIC 范围转发见下文。
+沿用预览、确认、发布和失败恢复；宿主集成组合仍拒绝，TUIC 范围转发见下文。
 
 Docker `协议与入口 → XHTTP 管理` 可管理已有 v3 Xray 协议 `2` 的模式、
 路径/Host、预设、XMUX、Padding、首部、四项原生 packet/stream limits 及下行分离：
@@ -213,7 +216,7 @@ END_STREAM 和 HTTP `200`，错误 UUID 的原点事务零到达。两模式各�
 另在本地 Docker Linux 对固定 Xray Reality/TLS、Mihomo Reality 的 packet-up/
 stream-up 各跑 1 MiB 真实回显；各 packet-up 计得 65 个 POST，各 stream-up
 计得 1 个 POST，并验证 Mihomo 取消生命周期及解析器的合成服务端先 FIN 负控。
-这不是 VPS/公网验收；正式原生 h3/CDN、其它环境和完整管理仍待补。详细范围与
+这不是 VPS/公网验收；正式原生 h3/CDN 和其它环境仍待补。详细范围与
 证据见[原生验收记录](docker-native-acceptance-2026-10-18.md)。
 
 VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/`17`。
@@ -306,7 +309,7 @@ URI 导入仍未通过，已用固定源码和同一二进制的三个断网假�
 正式 URI 来自实际下载正文，只映射连接地址/端口；四档和 4 项实物篡改负控
 独验通过，原材料权限、调度及累计保持，测试资源已清。
 这是 URI→Xray 配置转换互通，不代表 Xray 原生 URI 导入，也不改变上述
-Mihomo HTTPUpgrade 限制；透明保持关闭，其它环境和完整管理仍待验。
+Mihomo HTTPUpgrade 限制；透明保持关闭，其它环境仍待验。
 
 同包路由原 WS 与 15 个业务阶段独验取得 50 正/31 拒绝，覆盖两核心
 选择性/全局 SOCKS5 TCP 和纯 sing-box 解析后阻断的认证拒绝、上游不可用及恢复。
@@ -792,7 +795,7 @@ padm-docker edit --rotate-ss-user <入口ID> --confirm PADM-DOCKER-EDIT
 主订阅和该入口自用 URI 更新，独立账号分享组内容保持；客户端须重新导入，
 不承诺既有连接排空。不能与其它专项或 `--spec` 组合，不新增 schema 或能力 marker。
 专项、Docker amd64 双族 TCP/UDP 真实回归及集中完整合同 61/61 项通过；
-完整管理仍 `deferred`，见[实施计划 3D.24](docker-menu-parity-plan.md#3d24-shadowsocks-逐入口自用用户密钥轮换)。
+轮换范围见[实施计划 3D.24](docker-menu-parity-plan.md#3d24-shadowsocks-逐入口自用用户密钥轮换)，协议管理状态接续 3D.26。
 
 菜单 `3 → 9 → 20. Shadowsocks 服务器密钥轮换` 或 `edit --rotate-ss-server <入口ID>`
 复用同一专项事务，只修改选中入口的 `shadowsocks.server_password`，支持相同的预览与确认参数。
@@ -802,7 +805,7 @@ padm-docker edit --rotate-ss-user <入口ID> --confirm PADM-DOCKER-EDIT
 正式 `3.41.5` 已在 Debian 13 amd64 普通 bridge 完成两类轮换的公网 IPv4 TCP 验收：
 固定 Mihomo `v1.19.28` 原生导入 SIP002 URI，五阶段 `17` 正例、`9` 拒绝通过，
 核对两入口、自用/独立账号、精确字段冻结、累计和原 WS 恢复，并经断网独立核验。
-此证据不包含 UDP、IPv6、重启或旧连接排空；宿主集成与完整管理仍未开放。
+此证据不包含 UDP、IPv6、重启或旧连接排空；宿主集成组合仍拒绝。
 详见[实施计划 3D.25a](docker-menu-parity-plan.md#3d25a-两类-ss-密钥轮换原生验收)。
 
 ```bash
@@ -1018,6 +1021,16 @@ v1/v2 沿用现有迁移器生成 v3 草稿，确认成功后才更新部署；�
 主核心最后入口、Reality 共存及 Fail2ban 保护仍须先处理。
 重建保留完整规格与身份，并沿用候选验证、确认和失败恢复。
 现有事务可能统一重建所有核心，要求当前部署与受管规格匹配。
+受管 Nginx `default.conf` 缺失或正文损坏时，可用菜单 `3 → 9 → 21` 或：
+
+```bash
+padm-docker edit --protocol-rebuild entry-1 --repair-nginx --preview
+padm-docker edit --protocol-rebuild entry-1 --repair-nginx --confirm PADM-DOCKER-EDIT
+```
+
+仅适用于 v3 的 `21–25/27/29`，完整规格保持不变；其它配置、部署、证书、
+权限和属主仍严格核验，符号链接、硬链接或额外文件拒绝。
+站点 Fail2ban 须先停用；预览或取消不改现场，提交失败恢复原正文或原缺失状态。
 需要重新选择核心和协议时，使用“安装与重装 → 重新选择核心与协议”或
 `padm-docker reinstall`，复用首次向导的核心、协议、地址和四种证书来源选择。
 最终确认后生成新账号、密钥和分享身份，替换全部入口、分享组与路由；
@@ -1037,7 +1050,7 @@ padm-docker reinstall --spec /root/reinstall.json --confirm PADM-DOCKER-REINSTAL
 再确认并使用现有备份、健康检查与恢复。`edit` 的身份冻结保持。
 证书须已受管或通过重装向导显式准备；控制角色、HTTP-01 webroot、共存和
 宿主规则转换仍受对应门禁约束，不能用重装绕开。
-完整协议管理继续为 `deferred`。
+协议管理状态见功能对照表；重装不会扩大所列支持组合。
 
 已有 TLS 部署可从“证书管理 → 10. 迁移入口 TLS 域名”，或使用：
 
@@ -1079,9 +1092,11 @@ gRPC TLS 对应 `grpc_tls.backend_port` 与 `grpc_tls.tls_port`，
 删除最后一个适用发布入口（`21–25/27/29`）会关闭订阅；仍有 Hysteria2、AnyTLS、NaiveProxy、TUIC 或 direct Trojan 时保留规格中的 TLS，
 否则将 `tls` 设为 `null`，受管 TLS/ACME 文件与 token 均保留。
 Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan/VMess WS/HTTPUpgrade/gRPC TLS/传统 TLS fallback 基础入口已交付；
-逐入口 Reality 参数重生成、目标库/扫描、有限 443 共存与 XHTTP 管理已交付，具体边界见各专项说明；完整协议管理仍为 `deferred`。
+逐入口 Reality 参数重生成、目标库/扫描、有限 443 共存与 XHTTP 管理已交付，具体边界见各专项说明。
 更新或回滚的目标 bundle 必须同时支持规格版本及每个入口的协议/核心组合。
-带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。
+带 Fail2ban 的部署可增删或修改未受保护 WS 21 的公开端口；
+受保护入口身份、核心、地址族、公开端口、内部 TLS 端口和域名保持冻结，
+保护端口迁移使用专项，不能通过交换端口或删除后重建绕过。
 3A.3 已通过本地双核心事务、PTY、流量、更新/回滚和 Linux 权限回归；真实签名发布、业务镜像及双架构客户端连通仍待验。
 
 菜单 `协议与入口 → REALITY 管理 → 重生成 Reality 参数`（`3 → 2 → 2`）可选择已有入口，确认后更新密钥对和 short ID。
@@ -1096,6 +1111,16 @@ padm-docker edit --regenerate-reality <入口ID> --confirm PADM-DOCKER-EDIT
 提交后需重新导入该入口链接，已启用的 HTTPS 订阅内容同步更新。
 预览不提交，确认前的候选参数不会保留到下一次命令；普通 `edit --spec` 仍禁止手工改密钥。
 失败或中断使用配置快照恢复；公开 `rollback` 仍只回滚更新快照，不是编辑撤销命令。
+
+v3 Xray 的 Reality `1/2/26` 在参数重生成时，还按原生 `target_host:port`
+探测中带 SNI 的握手结果决定 ML-DSA-65：TLS 1.3、X25519MLKEM768 且证书链
+超过 3500 字节时生成或复用已有配对；成功探测不满足条件时清除，探测失败中止。
+独立 `server_name` 的可用性仍须单独验证。seed 只在私密输入中流转，
+可信 ops OpenSSL 通过标准输入派生并核对 verify，错配拒绝；
+普通编辑不能改写配对。核心配置、`pqv` 分享及同身份 XHTTP 下行同步更新，
+提交后重新导入链接。带配对的更新/恢复要求 `x-padm-reality-mldsa65`；
+旧无配对规格保持兼容，sing-box 不接受该字段；已有配对的来源只能向 Xray
+复制或派生，不能借跨核心复制静默清除该安全参数。
 
 Docker 菜单 `8 → 2. VLESS Encryption 实验` 仅管理 schema 3 的 Xray
 Reality Vision（协议 `1`）与 Reality XHTTP（协议 `2`）已有入口：

@@ -527,6 +527,10 @@ dockerBundleSupportsSpec() {
           (if any($spec[0].core.protocols[]; has("vless_encryption")) then
             $schema[0]["x-padm-vless-encryption"] == true
           else true end) and
+          (if any($spec[0].core.protocols[]; (.reality // {}) |
+              has("mldsa65_seed") or has("mldsa65_verify")) then
+            $schema[0]["x-padm-reality-mldsa65"] == true
+          else true end) and
           (if any($spec[0].core.protocols[]; (.fallback_tls // {}) | has("alpn")) then
             $schema[0]["x-padm-fallback-alpn"] == true
           else true end) and

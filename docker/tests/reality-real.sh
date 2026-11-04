@@ -115,7 +115,8 @@ if [[ "${MODE}" == regenerate ]]; then
         jq -en --arg listener "${listener}" --slurpfile before "${TEST_ROOT}/before-regenerate.json" \
             --slurpfile after "${SPEC}" '
           def fixed: .core.protocols |= map(if .listener_id == $listener then
-            del(.reality.private_key,.reality.public_key,.reality.short_id) else . end);
+            del(.reality.private_key,.reality.public_key,.reality.short_id,
+              .reality.mldsa65_seed,.reality.mldsa65_verify) else . end);
           (first($before[0].core.protocols[] | select(.listener_id == $listener)).reality) as $old |
           (first($after[0].core.protocols[] | select(.listener_id == $listener)).reality) as $new |
           ($before[0] | fixed) == ($after[0] | fixed) and
@@ -131,7 +132,8 @@ if [[ "${MODE}" == regenerate ]]; then
             --slurpfile after "${candidate}/config/${core}/users.base" '
           def fixed: .inbounds |= map(
             if $core == "xray" and .tag == "entry-xhttp" then
-              del(.streamSettings.realitySettings.privateKey,.streamSettings.realitySettings.shortIds)
+              del(.streamSettings.realitySettings.privateKey,.streamSettings.realitySettings.shortIds,
+                .streamSettings.realitySettings.mldsa65Seed,.streamSettings.realitySettings.mldsa65Verify)
             elif $core == "sing-box" and .tag == "entry-grpc-sing" then
               del(.tls.reality.private_key,.tls.reality.short_id)
             else . end);
@@ -169,6 +171,8 @@ def parse(line):
     q = urllib.parse.parse_qs(uri.query, keep_blank_values=True)
     assert uri.scheme == "vless" and uri.username and uri.password is None and uri.hostname == "proxy.padm.test"
     required = {"encryption","security","sni","fp","pbk","sid","type"}
+    if "pqv" in q:
+        required.add("pqv")
     if q.get("type") == ["xhttp"]:
         required |= {"path","host","mode"}
     elif q.get("type") == ["grpc"]:
@@ -202,6 +206,8 @@ for line in lines:
                 "realitySettings":{"serverName":q["sni"],"fingerprint":q["fp"],
                                    "publicKey":q["pbk"],"shortId":q["sid"]},
                 "xhttpSettings":{"path":q["path"],"host":q["host"],"mode":q["mode"]}}})
+        if "pqv" in q:
+            xray["outbounds"][-1]["streamSettings"]["realitySettings"]["mldsa65Verify"] = q["pqv"]
     else:
         port = {35452:2082,35453:2083}[uri.port]
         host = {35452:"xray",35453:"sing-box"}[uri.port]
@@ -229,14 +235,15 @@ if sys.argv[3] == "regenerate":
     for port in (35451,35453):
         before = previous[port][2]
         after = current[port][2]
-        assert {k:v for k,v in before.items() if k not in ("pbk","sid")} == {
-            k:v for k,v in after.items() if k not in ("pbk","sid")}
+        assert {k:v for k,v in before.items() if k not in ("pbk","sid","pqv")} == {
+            k:v for k,v in after.items() if k not in ("pbk","sid","pqv")}
         assert previous[port][1].username == current[port][1].username
         assert before["pbk"] != after["pbk"] and before["sid"] != after["sid"]
     old_xray = copy.deepcopy(xray)
     old_xray["inbounds"][0]["port"] = 2084
     old_xray["outbounds"][0]["streamSettings"]["realitySettings"].update(
         publicKey=previous[35451][2]["pbk"],shortId=previous[35451][2]["sid"])
+    old_xray["outbounds"][0]["streamSettings"]["realitySettings"].pop("mldsa65Verify", None)
     old_sing = copy.deepcopy(sing)
     old_sing["inbounds"] = [dict(old_sing["inbounds"][1],listen_port=2085)]
     old_sing["outbounds"] = [old_sing["outbounds"][1]]

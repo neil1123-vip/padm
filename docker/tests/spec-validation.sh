@@ -41,9 +41,9 @@ for prefix, body in blocks:
         baseline += "\n" + protocol_prefix
         protocol_prefix = "elif"
     baseline += body
-# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行、跳跃、VLESS Encryption 及 TLS fallback 订阅发布的完整谓词。
+# 摘要锁定含透明转发、解析后 IP、Gecko、XHTTP 独立下行、跳跃、VLESS Encryption、Reality ML-DSA-65 及 TLS fallback 订阅发布的完整谓词。
 if hashlib.sha256(re.sub(r"\s+", "", baseline).encode()).hexdigest() != (
-    "0bbf98fb487f5c16422ffd14963e29004d60e0ceb6603df467fdb723566f0cab"
+    "7277966c9c09512978e1f5a53d06fd48ba1cb5119aa9bc2ca2b51c0270857a11"
 ):
     raise RuntimeError("static blocks differ from the original full predicate")
 (output / "baseline.jq").write_text(baseline)
@@ -123,6 +123,28 @@ for protocol_id in protocol_ids:
     spec["core"]["protocols"] = [entry]
     spec["tls"] = None if protocol_id in (1, 2, 26, 30) else {"domain": domain}
     cases[f"valid-protocol-{protocol_id}"] = spec
+# 此处只核对材料形状；真实公私配对由 Reality 参数回归验证。
+mldsa65 = {"mldsa65_seed": "A" * 43, "mldsa65_verify": "A" * 2603}
+for protocol_id in (1, 2, 26):
+    spec = copy.deepcopy(cases[f"valid-protocol-{protocol_id}"])
+    spec["core"]["protocols"][0]["reality"].update(mldsa65)
+    cases[f"valid-reality-mldsa65-{protocol_id}"] = spec
+for field, value in mldsa65.items():
+    for index, invalid in enumerate((None, value[:-1], value + "A", value[:-1] + "B", value + "\n")):
+        spec = copy.deepcopy(cases["valid-reality-mldsa65-1"])
+        spec["core"]["protocols"][0]["reality"][field] = invalid
+        cases[f"invalid-reality-mldsa65-{field}-{index}"] = spec
+    spec = copy.deepcopy(cases["valid-reality-mldsa65-1"])
+    del spec["core"]["protocols"][0]["reality"][field]
+    cases[f"invalid-reality-mldsa65-missing-{field}"] = spec
+for protocol_id in (1, 26):
+    spec = copy.deepcopy(cases[f"valid-reality-mldsa65-{protocol_id}"])
+    spec["core"]["type"] = spec["core"]["protocols"][0]["core"] = "sing-box"
+    cases[f"invalid-reality-mldsa65-sing-box-{protocol_id}"] = spec
+for version in (1, 2):
+    spec = copy.deepcopy(cases[f"reality-v{version}"])
+    spec["core"]["protocols"][0]["reality"].update(mldsa65)
+    cases[f"invalid-reality-mldsa65-schema-{version}"] = spec
 # 发布仅复用受管 TLS 网站入口，其它核心端 TLS 协议仍不独立发布。
 for protocol_id in protocol_ids:
     spec = copy.deepcopy(cases[f"valid-protocol-{protocol_id}"])
@@ -582,6 +604,7 @@ for file in "${TEST_ROOT}"/*.json; do
         "${file##*/}" != invalid-block-ips-resolved-* &&
         "${file##*/}" != invalid-hy2-gecko-* &&
         "${file##*/}" != invalid-port-hopping-* &&
+        "${file##*/}" != invalid-reality-mldsa65-* &&
         "${file##*/}" != invalid-subscription-* &&
         "${file##*/}" != invalid-xhttp-limits-* &&
         "${file##*/}" != invalid-xhttp-download-* &&

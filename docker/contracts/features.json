@@ -4,7 +4,7 @@
     {
       "id": 1,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray", "sing-box"],
       "profiles": ["core-xray", "core-sing-box"],
       "native_menu": "安装与重装 / 协议与入口",
@@ -13,12 +13,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑、跨核心复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；Xray Vision 可与受管 TLS 入口、桥接可达宿主网站或显式 host 网络回环网站进行 443 共存，宿主网站证书与内容仍由 5A 维护，完整协议管理尚未迁移。"
+      "reason": "v3 支持 Xray/sing-box 首配、增量新增、入口编辑、跨核心复制/删除、保身份重建、分享及失败恢复；独立账号/额度与分享组复用现有事务。逐入口 Reality 参数重生成和目标检测/目标库/扫描/PQC 管理已接入；Xray 的 ML-DSA-65 按原生 target_host:port 探测生成/复用，不证明独立 SNI 可用性，校验配对后投影配置和 pqv 分享，要求 x-padm-reality-mldsa65；sing-box 拒绝该字段。Xray Vision 可与受管 TLS 入口、桥接可达宿主网站或显式 host 网络回环网站进行有限 443 共存，宿主网站证书与内容仍由 5A 维护；公网、arm64 与完整宿主验收另列。"
     },
     {
       "id": 2,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray"],
       "profiles": ["core-xray"],
       "native_menu": "协议与入口",
@@ -27,12 +27,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray XHTTP Reality 首配、规格导入、入口编辑/复制、分享链接、逐入口 Reality 参数重生成、目标站管理及有限 443 共存。已有单入口支持四预设、XMUX 三键、Padding 1-4096、noGRPCHeader/noSSEHeader、四项 packet/stream limits、模式、成对路径/Host、七项高级参数和推荐恢复；复用冻结、候选发布及失败恢复，保持其它入口、认证和额度。显式 XMUX/Padding/首部开关/limits 分别要求对应 x-padm-xhttp-* 能力。3D.20 增加客户端请求首部设置/清除、状态和 URI extra 投影：1-8 项，名称 1-64 位字母/数字/连字符且以字母或数字开头、忽略大小写唯一，值 0-256 位可打印 ASCII；拒绝 Host、连接控制、Content-Type、Referer 等保留字段，要求 x-padm-xhttp-request-headers。预设/高级参数/推荐恢复保留请求首部，复制/派生继承；首部内容进入分享链接和订阅，不提供服务端响应首部或访问认证。3D.21 增加同入口已登记非默认分享额外端口的下行绑定及清除，要求 x-padm-xhttp-download；URI extra.downloadSettings 沿用来源服务器、Reality 身份、路径/Host 和其它传输参数，下行模式固定 auto，服务端不投影客户端绑定。预设/高级/推荐恢复保留，复制/派生保留源绑定并清除新入口绑定。3D.22 增加独立外部下行地址与 TLS h2/h3 或 Reality 身份元数据，要求 x-padm-xhttp-download-settings；完整 xhttp.download 对象与 download_port 互斥，共用清除，URI 仅使用对象自己的地址、安全身份及 path/host/mode，不继承上行高级参数。其它编辑保留，复制/派生仅清除新入口绑定。外部前置须已部署并回到同一 XHTTP handler/认证，不自动建设 TLS/H3/CDN 拓扑，不支持无会话关联的独立后端；当前原生菜单的四项 sc* 参数已覆盖，公网前置、宿主/arm64 及完整管理验收仍 deferred，性能和抗识别收益未证明。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、增量新增、规格导入、入口编辑、同核复制/删除、保身份重建、分享及失败恢复，复用独立账号/额度与分享组、目标站和有限 443 共存。四预设、XMUX 三键、Padding 1-4096、两项首部开关、四项 packet/stream limits、模式、路径/Host、七项高级参数及推荐恢复沿用对应 x-padm-xhttp-* 门禁。客户端请求首部限 1-8 项、名称 1-64 位、值 0-256 位可打印 ASCII，拒绝保留名及大小写重复，会进入 URI 和订阅，不提供服务端响应或访问认证。同入口非默认额外端口下行沿用本入口 Reality 身份，模式 auto；独立 xhttp.download 与 download_port 互斥，仅使用自己的地址/身份/路径/Host/模式。其它编辑保留，复制/派生只清除新入口下行绑定。3D.26 补齐 Xray ML-DSA-65 生成/复用、配对校验、配置/pqv 及同身份下行投影，要求 x-padm-reality-mldsa65；按原生 target_host:port 探测，不证明独立 SNI 可用性。外部前置须回到同一 handler/认证，不自动建设 TLS/H3/CDN 拓扑；公网前置、宿主/arm64 另验，性能和抗识别收益未证明。"
     },
     {
       "id": 3,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["sing-box"],
       "profiles": ["core-sing-box"],
       "native_menu": "协议与入口",
@@ -41,12 +41,12 @@
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box Hysteria2 首配、完整规格导入、入口与带宽模式编辑、Salamander/Gecko 混淆、HTTPS 伪装及分享链接。3D.8–3D.9 提供菜单 12、hy2-status 和单入口带宽/混淆/伪装专项；Brutal 一次设置模式及服务端上下行 1..1000000 Mbps，BBR 只改模式并保留速率，密码仅严格私密 JSON 或静默输入，非选中字段冻结，复用发布和失败恢复。Gecko 要求 x-padm-hy2-gecko，旧无混淆/Salamander 子集兼容，隔离 amd64 双族实际传输已验；包长等高级 Gecko 参数不开放。5A.1c 为已有入口提供受管静态网页：先发布目录或 notes/photos/docs，再将伪装设置 local；操作先验证已发布网页，固定只读 /srv/padm/，site.static 且 obfs=null，Nginx 可共用网页，拒绝任意 file URL。local 及纯 Hy2 静态准备规格要求 x-padm-hy2-local-site；local 启用时 default/302/混淆拒绝，关闭保留文件。复用受管证书和 UUID 流量账号，端口跳跃限内部监督、单 sing-box 和双族 Hy2，完整跳跃及宿主集成组合仍待补，网页外观不证明抗识别。"
+      "reason": "v3 支持 sing-box Hysteria2 首配、增量新增、入口编辑、同核复制/删除、保身份重建及分享；独立账号/额度与分享组、受管 TLS 轮换和域名迁移复用现有事务。3D.8–3D.9 提供带宽/混淆/伪装专项：Brutal 一次设置模式及上下行 1..1000000 Mbps，BBR 保留速率，密码仅私密 JSON 或静默输入。Gecko 要求 x-padm-hy2-gecko，包长等高级参数不开放。5A.1c 的 local 伪装先验证已发布受管静态网页，固定只读 /srv/padm/、site.static 且 obfs=null，拒绝任意 file URL；要求 x-padm-hy2-local-site，关闭保留文件。跳跃管理限单 sing-box、单个双族入口、内部监督手动启停，不承诺崩溃或开机自动恢复，不与其它宿主集成组合；公网和 arm64 验收另列，网页外观不证明抗识别。"
     },
     {
       "id": 4,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["sing-box"],
       "profiles": ["core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -55,12 +55,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box AnyTLS 首配、完整规格导入、入口编辑、同核复制与删除及分享链接；复用受管证书和 UUID 流量账号，TLS 域名按身份合同冻结，宿主集成组合及完整用户/订阅管理尚未开放。"
+      "reason": "v3 支持 sing-box AnyTLS 首配、增量新增、入口编辑、同核复制/删除、保身份重建及分享链接；支持受管 TLS 轮换和专项域名迁移、独立账号/额度与分享组，候选失败恢复原业务。纯 AnyTLS 使用本地分享，HTTPS 订阅需同域 Nginx TLS 入口；宿主集成组合仍拒绝，不据管理状态外推公网、arm64 或完整宿主验收。"
     },
     {
       "id": 5,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["sing-box"],
       "profiles": ["core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -69,12 +69,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box NaiveProxy 首配、完整规格导入、入口编辑、同核复制与删除及分享链接；域名入口与证书域名一致，复用受管 TLS 和 UUID 流量账号，宿主集成组合及完整管理尚未开放。"
+      "reason": "v3 支持 sing-box NaiveProxy 首配、增量新增、入口编辑、同核复制/删除、保身份重建及原生 URI；域名入口始终与证书域名一致，支持受管 TLS 轮换和专项域名迁移、独立账号/额度与分享组，候选失败恢复原业务。仅 TCP，独立 IP/SNI、QUIC 与宿主集成组合不开放；HTTPS 订阅需同域 Nginx TLS 入口，公网和 arm64 验收另列。"
     },
     {
       "id": 21,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray"],
       "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装",
@@ -83,12 +83,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持交互首配、完整规格导入及现有入口/WS 路径编辑，Xray 可为主核心或副核心；已有 Nginx 端证书轮换，完整协议管理尚未迁移。"
+      "reason": "v3 支持 Xray 首配、增量新增、入口/WS 路径编辑、同核复制/删除、保身份重建、分享及失败恢复；支持受管 TLS 轮换/域名迁移、独立账号/额度与分享组。--protocol-rebuild 配合 --repair-nginx 可恢复缺失或损坏的受管 Nginx 正文，完整规格、其余配置与权限仍严格冻结，站点 Fail2ban 组合拒绝。已有 WS Fail2ban 可增删或改端口未受保护的 21 入口，受保护来源保持不变；保护端口迁移使用专项。公网、arm64 与完整宿主验收另列。"
     },
     {
       "id": 22,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray"],
       "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -97,12 +97,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray VMess WS TLS 首配、完整规格导入、入口与 WS 路径编辑、同核复制与删除及 vmess 分享链接；alterId 固定为 0，复用 Nginx、受管 TLS 和 UUID 流量账号，宿主集成组合及完整管理尚未开放。"
+      "reason": "v3 支持 Xray VMess WS TLS 首配、增量新增、入口/路径编辑、同核复制/删除、保身份重建、vmess 分享及失败恢复；alterId 固定为 0，复用 Nginx、受管 TLS 轮换/域名迁移、独立账号/额度与分享组。--repair-nginx 受限修复保留完整规格和其它配置；宿主集成组合仍拒绝，公网与 arm64 验收另列。"
     },
     {
       "id": 23,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray", "sing-box"],
       "profiles": ["core-xray", "core-sing-box", "nginx"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -111,12 +111,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray/sing-box VMess HTTPUpgrade TLS 首配、完整规格导入、入口与路径编辑、跨核心复制与删除及 vmess 分享链接；alterId 固定为 0，复用 Nginx、受管 TLS 和 UUID 流量账号，宿主集成组合及完整管理尚未开放。"
+      "reason": "v3 支持 Xray/sing-box VMess HTTPUpgrade TLS 首配、增量新增、入口/路径编辑、跨核心复制/删除、保身份重建、vmess 分享及失败恢复；alterId 固定为 0，复用 Nginx、受管 TLS 轮换/域名迁移、独立账号/额度与分享组。--repair-nginx 受限修复保留完整规格和其它配置；宿主集成组合仍拒绝，公网与 arm64 验收另列。"
     },
     {
       "id": 24,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray"],
       "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -125,12 +125,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray VLESS gRPC TLS 首配、完整规格导入、入口与服务名编辑、同核复制与删除及 vless 分享链接；复用 Nginx HTTP/2 反代、受管 TLS 和 UUID 流量账号，不依赖原生 fallback/PROXY 拓扑，宿主集成组合及完整管理尚未开放。"
+      "reason": "v3 支持 Xray VLESS gRPC TLS 首配、增量新增、入口/服务名编辑、同核复制/删除、保身份重建、vless 分享及失败恢复；复用 Nginx HTTP/2 反代、受管 TLS 轮换/域名迁移、独立账号/额度与分享组。--repair-nginx 受限修复保留完整规格和其它配置，不依赖原生 fallback/PROXY 拓扑；宿主集成组合仍拒绝，公网与 arm64 验收另列。"
     },
     {
       "id": 25,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray"],
       "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -139,12 +139,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray Trojan gRPC TLS 首配、完整规格导入、入口与服务名编辑、同核复制与删除及 trojan 分享链接；复用 Nginx HTTP/2 反代、受管 TLS 和 UUID 流量账号，不依赖原生 fallback/PROXY 拓扑，宿主集成组合及完整管理尚未开放。"
+      "reason": "v3 支持 Xray Trojan gRPC TLS 首配、增量新增、入口/服务名编辑、同核复制/删除、保身份重建、trojan 分享及失败恢复；复用 Nginx HTTP/2 反代、受管 TLS 轮换/域名迁移、独立账号/额度与分享组。--repair-nginx 受限修复保留完整规格和其它配置，不依赖原生 fallback/PROXY 拓扑；宿主集成组合仍拒绝，公网与 arm64 验收另列。"
     },
     {
       "id": 26,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray", "sing-box"],
       "profiles": ["core-xray", "core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -153,12 +153,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray/sing-box Reality gRPC 首配、完整规格导入、概览和分享链接、入口及 serviceName 编辑、跨核心复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；443 共存和完整管理尚未迁移。"
+      "reason": "v3 支持 Xray/sing-box Reality gRPC 首配、增量新增、入口/serviceName 编辑、跨核心复制/删除、保身份重建、分享及失败恢复，复用独立账号/额度与分享组。逐入口 Reality 参数重生成、目标检测/目标库/扫描/PQC 管理与 Xray ML-DSA-65 配对校验、配置/pqv 分享已接入；ML-DSA-65 仅 v3 Xray，要求 x-padm-reality-mldsa65，sing-box 拒绝。443 共存不在此协议范围内，公网、arm64 与完整宿主验收另列。"
     },
     {
       "id": 27,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray"],
       "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装 / 传统 TLS 兼容安装",
@@ -167,12 +167,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray VLESS TCP TLS Vision 首配、完整规格导入、通用字段编辑、同核复制与删除及 vless 分享链接；Xray 终止受管 TLS，固定 PROXY v1 回落到 Nginx HTTP/1.1 和 HTTP/2 后端，UUID 共享流量额度；默认页、静态目录、302 与逐入口 ALPN 诊断/三种顺序共用配置事务，宿主集成及完整管理尚未开放。"
+      "reason": "v3 支持 Xray VLESS TCP TLS Vision 首配、增量新增、字段编辑、同核复制/删除、保身份重建、vless 分享及失败恢复；Xray 终止受管 TLS，固定 PROXY v1 回落到 Nginx HTTP/1.1 和 HTTP/2 后端，复用独立账号/额度与分享组。TLS 轮换/域名迁移、默认页/静态/302、逐入口 ALPN 诊断/三种顺序及 --repair-nginx 受限修复共用配置事务；宿主集成仍拒绝，公网与 arm64 验收另列。"
     },
     {
       "id": 28,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray", "sing-box"],
       "profiles": ["core-xray", "core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -181,12 +181,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray/sing-box direct Trojan 首配、完整规格导入、入口编辑、跨核心复制与删除及分享链接；TCP TLS 双栈，复用受管证书和 UUID 流量账号，TLS 域名按身份合同冻结，fallback、宿主集成组合及完整管理尚未开放。"
+      "reason": "v3 支持 Xray/sing-box direct Trojan 首配、增量新增、入口编辑、跨核心复制/删除、保身份重建及 URI；支持受管 TLS 轮换和专项域名迁移、独立账号/额度与分享组，候选失败恢复原业务。TCP TLS 双栈，HTTPS 订阅需同域 Nginx TLS 入口；fallback 使用独立协议 29，宿主集成组合仍拒绝，公网及 arm64 验收另列。"
     },
     {
       "id": 29,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["xray"],
       "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装 / 传统 TLS 兼容安装",
@@ -195,12 +195,12 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray Trojan TCP TLS fallback 首配、完整规格导入、通用字段编辑、同核复制与删除及 trojan 分享链接；Trojan 入口直接终止受管 TLS，固定 PROXY v1 回落到 Nginx HTTP/1.1 和 HTTP/2 后端，无额外 VLESS 前端，UUID 共享流量额度；默认页、静态目录、302 与逐入口 ALPN 诊断/三种顺序共用配置事务，宿主集成及完整管理尚未开放。"
+      "reason": "v3 支持 Xray Trojan TCP TLS fallback 首配、增量新增、字段编辑、同核复制/删除、保身份重建、trojan 分享及失败恢复；Trojan 直接终止受管 TLS，固定 PROXY v1 回落到 Nginx HTTP/1.1 和 HTTP/2 后端，无额外 VLESS 前端，复用独立账号/额度与分享组。TLS 轮换/域名迁移、默认页/静态/302、逐入口 ALPN 诊断/三种顺序及 --repair-nginx 受限修复共用配置事务；宿主集成仍拒绝，公网与 arm64 验收另列。"
     },
     {
       "id": 30,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["sing-box"],
       "profiles": ["core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
@@ -209,12 +209,12 @@
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box Shadowsocks 2022 AES-128 多用户首配、完整规格导入、入口编辑、同核复制与删除及 SIP002 分享链接；TCP/UDP 双栈，复用 UUID 流量与额度。账号子命令支持创建、复制、授权关联/移除、独立密钥轮换及失败恢复。3D.24 提供菜单 9→19 与 edit --rotate-ss-user 的逐入口自用用户密钥轮换。3D.25 增加菜单 9→20 与 edit --rotate-ss-server，只修改选中入口 server_password；两类专项均保持其它字段、其它入口（包括同 UUID）、独立账号用户密钥、授权/token、额度及累计。服务器轮换后该入口所有客户端须重新导入。当前专项和实链路证据见实施计划；宿主集成组合和完整协议/用户管理仍未开放。"
+      "reason": "v3 支持 sing-box Shadowsocks 2022 AES-128 多用户首配、增量新增、入口编辑、同核复制/删除、保身份重建及 SIP002 链接；TCP/UDP 双栈，复用 UUID 流量与额度。支持独立账号创建/复制/授权关联/移除/密钥轮换与分享组。3D.24/25 的逐入口自用用户/服务器密钥轮换保持其它入口、独立账号密钥、授权/token、额度及累计，候选失败恢复原业务；服务器轮换后该入口所有客户端须重新导入。纯 SS 使用本地分享，HTTPS 订阅需同域 Nginx TLS 入口；固定 AES-128 方法与宿主集成拒绝边界保持，公网及 arm64 验收另列。"
     },
     {
       "id": 31,
       "status": "supported",
-      "management_status": "deferred",
+      "management_status": "supported",
       "cores": ["sing-box"],
       "profiles": ["core-sing-box"],
       "native_menu": "协议与入口",
@@ -223,7 +223,7 @@
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 sing-box TUIC 首配、完整规格导入、入口与拥塞控制/认证超时/心跳/0-RTT 参数编辑、同核复制与删除及分享链接。3D.8 提供菜单 13、tuic-status 和单入口拥塞/连接/0-RTT 专项；恢复推荐 cubic/3s/10s/false，时长为 1-6 位正整数加 ms/s/m/h，开启 0-RTT 菜单确认重放风险。仅选中字段解冻，其它入口、认证、TLS、统计与额度保持，复用发布和失败恢复。5C.9d 接通单 sing-box、单个双族 TUIC 入口的监督范围 DNAT、保存/启停/清除及 restart/update/rollback 协调，要求 x-padm-port-hopping-tuic；活动 share 默认范围首端口，指定端口仅接受活动范围并复用普通 tuic URI，静态订阅保持。固定客户端无 server_ports/hop_interval，不宣称自动换端口；自动恢复、宿主集成组合及完整管理仍 deferred。"
+      "reason": "v3 支持 sing-box TUIC 首配、增量新增、入口编辑、同核复制/删除、保身份重建及分享，独立账号/额度与分享组、受管 TLS 轮换和域名迁移复用现有事务。3D.8 提供拥塞/认证超时/心跳/0-RTT 专项及推荐 cubic/3s/10s/false，时长为 1-6 位正整数加 ms/s/m/h，开启 0-RTT 菜单确认重放风险；非选中字段冻结，候选失败恢复原业务。5C.9d 的范围 DNAT、保存/启停/清除及 restart/update/rollback 协调限单 sing-box、单个双族入口，要求 x-padm-port-hopping-tuic；活动 share 默认范围首端口，指定端口仅接受活动范围，静态订阅保持。原生与 Docker 均不宣称客户端自动换端口；监督须手动启用，不承诺崩溃或开机自动恢复，宿主集成组合仍拒绝，公网和 arm64 验收另列。"
     }
   ],
   "features": {
@@ -368,7 +368,7 @@
       "profiles": ["core-xray", "nginx", "nginx-stream"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已支持容器内受管 TLS 入口、桥接可达宿主网站或独立 host 网络分流入口与一个 Xray Vision/XHTTP 后端的 443 共存，菜单提供状态、开启、更换和关闭，沿用配置事务及失败恢复；宿主网站支持多个 SNI、host-gateway、可路由 IP 或 127.0.0.1/::1 回环，证书和内容仍由网站维护方负责；原生宿主、完整协议管理和公网验收仍为 deferred。"
+      "reason": "已支持容器内受管 TLS 入口、桥接可达宿主网站或独立 host 网络分流入口与一个 Xray Vision/XHTTP 后端的 443 共存，菜单提供状态、开启、更换和关闭，沿用配置事务及失败恢复；宿主网站支持多个 SNI、host-gateway、可路由 IP 或 127.0.0.1/::1 回环，证书和内容仍由网站维护方负责；完整环境验收仍为 deferred，协议管理状态见逐协议记录。"
     },
     "cdn-entry-management": {
       "status": "deferred",
@@ -431,7 +431,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已提供可信首配、规格/多入口/双核心、Reality/TLS/ACME、账号/分享/额度、业务备份、核心/Geo、多被控逐节点管理、站点/路由及适用 Fail2ban 菜单。6A.1–6A.23 提供受管私密输入导出、完整性校验、同架构 v3 空目标预览/恢复及持久中断接管；保留业务身份和累计，拒绝已有部署替换、未处理输入与外部调度漂移。Reality 库、固定 Geo 原字节及摘要/离线解析、受管/桥接可达网站共存、HTTP-01 空挑战根、停用 Hy2/TUIC 跳跃规格均按专项边界恢复，不复制宿主规则或外部网站。ACME 限固定 acme.sh 3.1.6、单域 EC-P256、standalone 8080/schema 2、固定受管 webroot/schema 3、ALPN 8443/schema 4 或 dns_acmedns/schema 1；四项 DNS 凭据须与域配置精确绑定，外部注册/CNAME 须有效。纯数据重建固定 9 文件，在无网络可信 ops 校验密钥、证书链和 TLS 输出绑定；拒绝其它 DNS 材料、hook、未知字段、SAN/RSA/EAB 及自定义执行路径。启用续期须唯一域及完整匹配材料，健康后按 traffic、Geo、renewal 安装适用调度；独立私密快照、统一漂移预检、逆序撤销及 unit 原子替换。停用/无登记不接管外部任务，空 ACME 不能授权启用，预览不装调度。无控制角色 canonical 非空 Peer 集合及停用自动同步的单 Peer 被控可恢复；主控接受 v1 单 Peer 或 v2 非空集合，须停机隔离旧宿主后重建全部控制身份并撤权，再逐端新邀请/rebind，不导入旧认证日志及来源现场。完整协议管理、v2 关联迁移、其它宿主能力和原生双架构/公网/重启/可信发布仍待交付或验收，整体保持 deferred；当前证据见实施计划。"
+      "reason": "已提供可信首配、规格/多入口/双核心、Reality/TLS/ACME、账号/分享/额度、业务备份、核心/Geo、多被控逐节点管理、站点/路由及适用 Fail2ban 菜单。6A.1–6A.23 提供受管私密输入导出、完整性校验、同架构 v3 空目标预览/恢复及持久中断接管；保留业务身份和累计，拒绝已有部署替换、未处理输入与外部调度漂移。Reality 库、固定 Geo 原字节及摘要/离线解析、受管/桥接可达网站共存、HTTP-01 空挑战根、停用 Hy2/TUIC 跳跃规格均按专项边界恢复，不复制宿主规则或外部网站。ACME 限固定 acme.sh 3.1.6、单域 EC-P256、standalone 8080/schema 2、固定受管 webroot/schema 3、ALPN 8443/schema 4 或 dns_acmedns/schema 1；四项 DNS 凭据须与域配置精确绑定，外部注册/CNAME 须有效。纯数据重建固定 9 文件，在无网络可信 ops 校验密钥、证书链和 TLS 输出绑定；拒绝其它 DNS 材料、hook、未知字段、SAN/RSA/EAB 及自定义执行路径。启用续期须唯一域及完整匹配材料，健康后按 traffic、Geo、renewal 安装适用调度；独立私密快照、统一漂移预检、逆序撤销及 unit 原子替换。停用/无登记不接管外部任务，空 ACME 不能授权启用，预览不装调度。无控制角色 canonical 非空 Peer 集合及停用自动同步的单 Peer 被控可恢复；主控接受 v1 单 Peer 或 v2 非空集合，须停机隔离旧宿主后重建全部控制身份并撤权，再逐端新邀请/rebind，不导入旧认证日志及来源现场。3D.26 的 16 个公开协议管理状态见逐项记录；v2 关联迁移、其它宿主能力和原生双架构/公网/重启/可信发布仍待交付或验收，整体保持 deferred；当前证据见实施计划。"
     },
     "routing-tools": {
       "status": "deferred",

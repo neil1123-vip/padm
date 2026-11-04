@@ -1398,6 +1398,91 @@ protocolEdit 15 internal-ports-still-frozen-in-spec --spec "${PROTOCOL_BASE}" --
     done
 ) || fail '内部端口枚举、冻结或共存生成合同失败'
 runControl 0 internal-ports-restore-baseline configure --spec "${PROTOCOL_BASE}"
+# 修复只重建受管 Nginx 正文，缺失与损坏的失败事务都保留原现场。
+protocolEdit 2 nginx-repair-needs-rebuild --repair-nginx --preview
+protocolEdit 2 nginx-repair-reject-add --protocol-add vless-ws 21 34443 --repair-nginx --preview
+protocolEdit 2 nginx-repair-reject-duplicate --protocol-rebuild vless-ws \
+    --repair-nginx --repair-nginx --preview
+protocolEdit 2 nginx-repair-reject-import --protocol-rebuild vless-ws --repair-nginx \
+    --spec "${PROTOCOL_BASE}" --preview
+protocolEdit 15 nginx-repair-reject-reality --protocol-rebuild vless-reality --repair-nginx --preview
+NGINX_REPAIR_EXPECTED="${TEST_ROOT}/nginx-repair-expected.conf"
+cp -p -- "${DOCKER_ROOT}/config/nginx/default.conf" "${NGINX_REPAIR_EXPECTED}"
+NGINX_REPAIR_HEALTHY_HASH=$(editLiveHash)
+printf 'broken nginx configuration;\n' >"${DOCKER_ROOT}/config/nginx/default.conf"
+protocolEdit 15 nginx-repair-ordinary-rebuild-refused --protocol-rebuild vless-ws --preview
+protocolEdit 0 nginx-repair-damaged-preview --protocol-rebuild vless-ws --repair-nginx --preview
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    nginxRepairCancelHash=$(editLiveHash)
+    runEditPty $'n\n' 0 --protocol-rebuild vless-ws --repair-nginx
+    [[ "$(editLiveHash)" == "${nginxRepairCancelHash}" ]] || fail '取消 Nginx 修复改变线上'
+    assertEditCleanup
+fi
+FAKE_DOCKER_MODE=tls-validity-fail protocolEdit 15 nginx-repair-certificate-invalid \
+    --protocol-rebuild vless-ws --repair-nginx --preview
+FAKE_DOCKER_MODE=core-validate-fail protocolEdit 15 nginx-repair-core-invalid \
+    --protocol-rebuild vless-ws --repair-nginx --preview
+cp -p -- "${DOCKER_ROOT}/config/xray/config.json" "${TEST_ROOT}/nginx-repair-core.json"
+jq '.log.loglevel="debug"' "${TEST_ROOT}/nginx-repair-core.json" \
+    >"${DOCKER_ROOT}/config/xray/config.json"
+protocolEdit 15 nginx-repair-reject-core-drift --protocol-rebuild vless-ws --repair-nginx --preview
+cp -p -- "${TEST_ROOT}/nginx-repair-core.json" "${DOCKER_ROOT}/config/xray/config.json"
+cp -p -- "${DOCKER_ROOT}/compose.json" "${TEST_ROOT}/nginx-repair-compose.json"
+jq '.services.nginx.restart="no"' "${TEST_ROOT}/nginx-repair-compose.json" \
+    >"${DOCKER_ROOT}/compose.json"
+protocolEdit 15 nginx-repair-reject-compose-drift --protocol-rebuild vless-ws --repair-nginx --preview
+cp -p -- "${TEST_ROOT}/nginx-repair-compose.json" "${DOCKER_ROOT}/compose.json"
+cp -p -- "${NGINX_REPAIR_EXPECTED}" "${DOCKER_ROOT}/config/nginx/extra.conf"
+protocolEdit 15 nginx-repair-reject-extra-file --protocol-rebuild vless-ws --repair-nginx --preview
+rm -- "${DOCKER_ROOT}/config/nginx/extra.conf"
+for path in config/nginx/default.conf secrets/tls/proxy.example.com.crt config/xray/config.json; do
+    chmod 0666 "${DOCKER_ROOT}/${path}"
+    protocolEdit 15 nginx-repair-reject-permissions --protocol-rebuild vless-ws --repair-nginx --preview
+    chmod 0640 "${DOCKER_ROOT}/${path}"
+done
+if [[ "${TEST_SKIP_CHOWN}" == 0 ]]; then
+    chown 12345:12345 "${DOCKER_ROOT}/config/nginx/default.conf"
+    protocolEdit 15 nginx-repair-reject-owner --protocol-rebuild vless-ws --repair-nginx --preview
+    chown "0:10001" "${DOCKER_ROOT}/config/nginx/default.conf"
+    chown "0:10001" "${DOCKER_ROOT}/compose.json"
+    protocolEdit 15 nginx-repair-reject-host-config-group --protocol-rebuild vless-ws --repair-nginx --preview
+    chown 0:0 "${DOCKER_ROOT}/compose.json"
+fi
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up protocolEdit 14 nginx-repair-damaged-start-rollback \
+    --protocol-rebuild vless-ws --repair-nginx --confirm PADM-DOCKER-EDIT
+grep -qxF 'broken nginx configuration;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
+    fail 'Nginx 修复启动失败没有恢复原损坏正文'
+protocolEdit 0 nginx-repair-damaged-commit --protocol-rebuild vless-ws --repair-nginx \
+    --confirm PADM-DOCKER-EDIT
+[[ "$(editLiveHash)" == "${NGINX_REPAIR_HEALTHY_HASH}" ]] ||
+    fail '损坏 Nginx 修复改变规格、核心、凭据或业务文件'
+rm -- "${DOCKER_ROOT}/config/nginx/default.conf"
+protocolEdit 15 nginx-repair-missing-ordinary-refused --protocol-rebuild vless-ws --preview
+protocolEdit 0 nginx-repair-missing-preview --protocol-rebuild vless-ws --repair-nginx --preview
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up protocolEdit 14 nginx-repair-missing-start-rollback \
+    --protocol-rebuild vless-ws --repair-nginx --confirm PADM-DOCKER-EDIT
+[[ ! -e "${DOCKER_ROOT}/config/nginx/default.conf" ]] ||
+    fail 'Nginx 修复启动失败没有恢复原缺失状态'
+ln -s "${NGINX_REPAIR_EXPECTED}" "${DOCKER_ROOT}/config/nginx/default.conf"
+protocolEdit 15 nginx-repair-reject-symlink --protocol-rebuild vless-ws --repair-nginx --preview
+rm -- "${DOCKER_ROOT}/config/nginx/default.conf"
+ln "${NGINX_REPAIR_EXPECTED}" "${DOCKER_ROOT}/config/nginx/default.conf"
+protocolEdit 15 nginx-repair-reject-hardlink --protocol-rebuild vless-ws --repair-nginx --preview
+rm -- "${DOCKER_ROOT}/config/nginx/default.conf"
+protocolEdit 0 nginx-repair-missing-commit --protocol-rebuild vless-ws --repair-nginx \
+    --confirm PADM-DOCKER-EDIT
+[[ "$(editLiveHash)" == "${NGINX_REPAIR_HEALTHY_HASH}" ]] ||
+    fail '缺失 Nginx 修复改变规格、核心、凭据或业务文件'
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    jq '.host_integrations=[{type:"fail2ban"}]' "${PROTOCOL_BASE}" \
+        >"${TEST_ROOT}/nginx-repair-protected.json"
+    ! dockerEditNginxRepairInputsValidate "${TEST_ROOT}/nginx-repair-protected.json" \
+        "${DOCKER_ROOT}" vless-ws >"${TEST_ROOT}/nginx-repair-protected.log" 2>&1 ||
+        fail 'Nginx 修复绕过站点 Fail2ban 来源见证'
+) || fail 'Nginx 修复组合边界检查失败'
 # 旧格式先迁移私密草稿；预览和取消保留线上格式，确认才写入 v3。
 for version in 1 2; do
     jq --argjson version "${version}" '.schema_version=$version | del(.accounts,.core.secondary_type) |
@@ -1653,6 +1738,63 @@ jq -e --slurpfile before "${TEST_ROOT}/protocol-ss-installed.json" '
       (.core.protocols[] | select(.listener_id=="entry-1") | .shadowsocks)' \
         "${TEST_ROOT}/protocol-ss-reused.json" >/dev/null || fail '同 UUID 来源新增改写原 Shadowsocks 密钥'
 ) || fail 'Shadowsocks 复制身份失败'
+
+# 逐协议走正式 CLI 闭环，管理状态不能只凭模板可生成或核心可启动升级。
+for managementCase in '1 xray' '1 sing-box' '2 xray' '3 sing-box' '4 sing-box' '5 sing-box' \
+    '21 xray' '22 xray' '23 xray' '23 sing-box' '24 xray' '25 xray' \
+    '26 xray' '26 sing-box' '27 xray' '28 xray' '28 sing-box' '29 xray' \
+    '30 sing-box' '31 sing-box'; do
+    read -r managementProtocol managementCore <<<"${managementCase}"
+    managementName="management-${managementProtocol}-${managementCore}"
+    managementSource=vless-ws
+    case "${managementProtocol}" in 1|2|26) managementSource=vless-reality ;; esac
+    runControl 0 "${managementName}-baseline" configure --spec "${PROTOCOL_BASE}"
+    protocolEdit 0 "${managementName}-preview" --protocol-add "${managementSource}" "${managementProtocol}" \
+        32443 --protocol-core "${managementCore}" --preview
+    protocolEdit 0 "${managementName}-add" --protocol-add "${managementSource}" "${managementProtocol}" \
+        32443 --protocol-core "${managementCore}" --confirm PADM-DOCKER-EDIT
+    jq -e --argjson id "${managementProtocol}" --arg core "${managementCore}" \
+        --slurpfile before "${PROTOCOL_BASE}" '
+      (.core.protocols | map(select(.listener_id != "entry-1"))) == $before[0].core.protocols and
+      (. | del(.core.protocols,.core.secondary_type)) ==
+        ($before[0] | del(.core.protocols,.core.secondary_type)) and
+      any(.core.protocols[]; .listener_id == "entry-1" and .id == $id and .core == $core)
+    ' "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "${managementName}: 新增漂移既有业务"
+    jq '.core.protocols |= map(if .listener_id == "entry-1" then
+      .public_port = 32444 | .name = "Managed" else . end)' \
+        "${DOCKER_ROOT}/config/spec.json" >"${TEST_ROOT}/management-edited.json"
+    protocolEdit 0 "${managementName}-edit" --spec "${TEST_ROOT}/management-edited.json" \
+        --confirm PADM-DOCKER-EDIT
+    protocolEdit 0 "${managementName}-rebuild" --protocol-rebuild entry-1 --confirm PADM-DOCKER-EDIT
+    jq -e --slurpfile before "${TEST_ROOT}/management-edited.json" '. == $before[0]' \
+        "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "${managementName}: 重建改变身份或参数"
+    runControl 0 "${managementName}-links" protocol links entry-1
+    cp -- "${CONTROL_LOG}" "${TEST_ROOT}/management-links.txt"
+    if [[ "${managementProtocol}" == 22 || "${managementProtocol}" == 23 ]]; then
+        sed -n 's|^vmess://||p' "${TEST_ROOT}/management-links.txt" | base64 -d |
+            jq -e '.port == "32444"' >/dev/null || fail "${managementName}: VMess 分享仍使用旧端口"
+    else
+        grep -Fq ':32444' "${TEST_ROOT}/management-links.txt" || fail "${managementName}: 分享仍使用旧端口"
+    fi
+    protocolEdit 0 "${managementName}-copy" --protocol-add entry-1 "${managementProtocol}" \
+        32445 --protocol-core "${managementCore}" --confirm PADM-DOCKER-EDIT
+    jq -e '
+      def identity: del(.listener_id,.public_port,
+        .websocket.backend_port,.websocket.tls_port,.httpupgrade.backend_port,.httpupgrade.tls_port,
+        .grpc_tls.backend_port,.grpc_tls.tls_port);
+      (.core.protocols[] | select(.listener_id == "entry-1") | identity) ==
+      (.core.protocols[] | select(.listener_id == "entry-2") | identity)
+    ' "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "${managementName}: 复制改写凭据或参数"
+    protocolEdit 0 "${managementName}-remove-copy" --protocol-remove entry-2 --confirm PADM-DOCKER-EDIT
+    jq -e --slurpfile before "${TEST_ROOT}/management-edited.json" '. == $before[0]' \
+        "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "${managementName}: 删除副本漂移源入口"
+    rm -f -- "${TEST_ROOT}/fail-once"
+    FAKE_DOCKER_MODE=fail-next-up protocolEdit 14 "${managementName}-remove-rollback" \
+        --protocol-remove entry-1 --confirm PADM-DOCKER-EDIT
+    protocolEdit 0 "${managementName}-remove" --protocol-remove entry-1 --confirm PADM-DOCKER-EDIT
+    jq -e --slurpfile before "${PROTOCOL_BASE}" '. == $before[0]' \
+        "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "${managementName}: 删除没有恢复原规格"
+done
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '旧版迁移、跨核心或 Shadowsocks 增量改变累计与额度'
 else
@@ -2407,7 +2549,7 @@ validateFeatureMatrix() {
       (.protocols | type == "array" and length > 0) and
       ([.protocols[] | {id, cores, transport, udp_support}] | sort_by(.id)) == ($registry[0] | sort_by(.id)) and
       all(.protocols[];
-        metadata and .management_status == "deferred" and
+        metadata and .management_status == "supported" and
         .network_mode == "bridge" and .host_capabilities == [] and
         if .status == "supported" then
           (.profiles | sort) == ([.cores[] | "core-\(.)"] +
@@ -2515,7 +2657,13 @@ del(.host_integrations.redirect)
 .feature_matrix["internal-204-tun"].host_capabilities = ["NET_ADMIN"]
 .protocols[3].transport = "quic"
 .protocols[14].udp_support = "no"
-.protocols[0].management_status = "supported"
+.protocols[0].management_status = "deferred"
+(.protocols[] | select(.id == 3)).management_status = "deferred"
+(.protocols[] | select(.id == 4)).management_status = "deferred"
+(.protocols[] | select(.id == 5)).management_status = "unsupported"
+(.protocols[] | select(.id == 28)).management_status = "host-integrated"
+(.protocols[] | select(.id == 30)).management_status = "deferred"
+(.protocols[] | select(.id == 31)).management_status = "deferred"
 (.protocols[] | select(.id == 29)) |= (.status = "supported" | .profiles = ["core-sing-box"])
 .feature_matrix.subscription.requires.core = "sing-box"
 .feature_matrix.subscription.requires.protocol_ids = [1]

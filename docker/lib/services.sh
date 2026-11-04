@@ -553,7 +553,14 @@ dockerConfigureSpecValidate() {
               (.encryption | type == "string" and
                 test("^mlkem768x25519plus\\.native\\.0rtt\\.[A-Za-z0-9_-]{1578}[AEIMQUYcgkosw048](?![\\s\\S])")))
            else true end) and
-          (.reality | exact(["server_name", "target_host", "target_port", "private_key", "public_key", "short_id"]) and
+          (if .reality | has("mldsa65_seed") or has("mldsa65_verify") then
+            $request.schema_version == 3 and .core == "xray" and
+            (.reality | has("mldsa65_seed") and has("mldsa65_verify") and
+              (.mldsa65_seed | type == "string" and test("^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]\\z")) and
+              (.mldsa65_verify | type == "string" and test("^[A-Za-z0-9_-]{2602}[AEIMQUYcgkosw048]\\z")))
+           else true end) and
+          (.reality | exact(["server_name", "target_host", "target_port", "private_key", "public_key", "short_id"] +
+            (if has("mldsa65_seed") then ["mldsa65_seed","mldsa65_verify"] else [] end)) and
             (.server_name | hostname) and (.target_host | hostname) and (.target_port | port) and
             (.private_key | test("^[A-Za-z0-9_-]{43}$")) and
             (.public_key | test("^[A-Za-z0-9_-]{43}$")) and
@@ -1477,8 +1484,49 @@ dockerManagedSpecMatchesDeployment() {
     ' "${specFile}" >/dev/null 2>&1 || return 1
 }
 
+dockerEditNginxRepairInputsValidate() {
+    local specFile=$1 root=$2 listener=$3 path metadata owner group mode links expectedOwner expectedGroup expectedMode
+    jq -e --arg listener "${listener}" '
+      .schema_version == 3 and
+      ([.core.protocols[] | select(.listener_id == $listener and
+        (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29))] |
+        length == 1) and all(.host_integrations[]; .type != "fail2ban")
+    ' "${specFile}" >/dev/null 2>&1 || {
+        dockerError 'Nginx 修复需要 v3 受管 TLS 入口；站点 Fail2ban 依赖原配置的来源见证，不能在此修复'
+        return 1
+    }
+    for path in config data/subscription secrets/tls; do
+        dockerTrafficSafePath "${root}" "${root}/${path}" &&
+            [[ -d "${root}/${path}" && ! -L "${root}/${path}" ]] || return 1
+    done
+    [[ ! -e "${root}/config/nginx/default.conf" ||
+        ( -f "${root}/config/nginx/default.conf" && ! -L "${root}/config/nginx/default.conf" ) ]] || return 1
+    # 只修正文或缺失文件，不借重建接管其它属主、链接或权限漂移。
+    while IFS= read -r -d '' path; do
+        metadata=$(stat -c '%u:%g:%a:%h' -- "${path}") || return 1
+        IFS=: read -r owner group mode links <<<"${metadata}"
+        expectedOwner=0 expectedGroup=${PADM_DOCKER_CONTAINER_GID} expectedMode=640
+        if [[ -d "${path}" ]]; then
+            expectedMode=750
+        elif [[ -f "${path}" && ! -L "${path}" && "${links}" == 1 ]]; then
+            case "${path}" in
+            "${root}/compose.json"|"${root}/deployment.json"|"${root}/images.env") expectedGroup=0 ;;
+            "${root}/config/spec.json"|"${root}/config/share-groups.json"|*/users.base) expectedMode=600 expectedGroup=0 ;;
+            "${root}/secrets/tls/"*.key) expectedMode=600 expectedOwner=${PADM_DOCKER_CONTAINER_UID} ;;
+            esac
+        else return 1; fi
+        [[ "${mode}" == "${expectedMode}" ]] || return 1
+        if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
+            [[ "${owner}" == "${expectedOwner}" && "${group}" == "${expectedGroup}" ]] || return 1
+        else
+            [[ -O "${path}" ]] || return 1
+        fi
+    done < <(find "${root}/config" "${root}/data/subscription" "${root}/secrets/tls" \
+        "${root}/compose.json" "${root}/deployment.json" "${root}/images.env" -print0)
+}
+
 dockerEditBaselineValidate() {
-    local specFile=$1 workspace=$2 alpnListener=${3:-} root baseline core directory state token invalidPath
+    local specFile=$1 workspace=$2 alpnListener=${3:-} nginxRepairListener=${4:-} root baseline core directory state token invalidPath
     local metadata http01 subscriptionEnabled integrationTypes realityStream hostStream coreTypes
     local -a managedPaths=()
     root=$(dockerInstallRoot) || return 1
@@ -1494,6 +1542,10 @@ dockerEditBaselineValidate() {
             managedPaths+=("${root}/${token}")
         fi
     done
+    if [[ -n "${nginxRepairListener}" ]]; then
+        [[ -z "${alpnListener}" ]] &&
+            dockerEditNginxRepairInputsValidate "${specFile}" "${root}" "${nginxRepairListener}" || return 1
+    fi
     if ((${#managedPaths[@]} > 0)); then
         invalidPath=$(find "${managedPaths[@]}" ! -type f ! -type d -print -quit) || return 1
         [[ -z "${invalidPath}" ]] || return 1
@@ -1602,7 +1654,15 @@ dockerEditBaselineValidate() {
                 }
             done
         else
-            if [[ "${directory}" == config/nginx ]]; then
+            if [[ "${directory}" == config/nginx && -n "${nginxRepairListener}" ]]; then
+                # 私有基线只接纳顶层正文差异，其余 Nginx 文件仍须逐一精确一致。
+                if [[ -f "${root}/${directory}/default.conf" ]]; then
+                    cp -- "${root}/${directory}/default.conf" "${baseline}/${directory}/default.conf" || return 1
+                else
+                    rm -f -- "${baseline}/${directory}/default.conf" || return 1
+                fi
+                diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1
+            elif [[ "${directory}" == config/nginx ]]; then
                 dockerNginxDirectoryMatches "${specFile}" "${baseline}/${directory}" "${root}/${directory}"
             else
                 diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1
@@ -2568,14 +2628,15 @@ dockerGenerateXrayConfig() {
             streamSettings: ({
               network: (if .id == 1 then "tcp" elif .id == 2 then "xhttp" else "grpc" end),
               security: "reality",
-              realitySettings: {
+              realitySettings: ({
                 show: false,
                 target: "\(.reality.target_host):\(.reality.target_port)",
                 xver: 0,
                 serverNames: [.reality.server_name],
                 privateKey: .reality.private_key,
                 shortIds: ["", .reality.short_id]
-              }
+              } + (if .reality.mldsa65_seed != null then
+                {mldsa65Seed:.reality.mldsa65_seed,mldsa65Verify:.reality.mldsa65_verify} else {} end))
             } + (if .id == 2 then {
               xhttpSettings: ((.xhttp | del(.xmux,.download_port,.download)) +
                 {xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}})
@@ -3611,15 +3672,21 @@ dockerGenerateSubscription() {
         if ($addresses | length) > 1 then .name += "-" + (($index + 1) | tostring) else . end
       else . end |
       if .id == 1 then
-        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=\((.vless_encryption.encryption // "none") | @uri)&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=\((.vless_encryption.encryption // "none") | @uri)&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)" +
+          (if .reality.mldsa65_verify != null then "&pqv=\(.reality.mldsa65_verify | @uri)" else "" end) +
+          "&type=tcp#\(.name | @uri)"
       elif .id == 2 then
-        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=\((.vless_encryption.encryption // "none") | @uri)&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=\((.vless_encryption.encryption // "none") | @uri)&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)" +
+          (if .reality.mldsa65_verify != null then "&pqv=\(.reality.mldsa65_verify | @uri)" else "" end) +
+          "&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
           ((. as $entry | .xhttp | del(.path,.host,.mode,.download_port,.download) |
             if $entry.xhttp.download_port != null then
               .downloadSettings = {
                 address:$downloadServer,port:$entry.xhttp.download_port,network:"xhttp",security:"reality",
                 realitySettings:{serverName:$entry.reality.server_name,fingerprint:"chrome",
-                  publicKey:$entry.reality.public_key,shortId:$entry.reality.short_id},
+                  publicKey:$entry.reality.public_key,shortId:$entry.reality.short_id} +
+                  (if $entry.reality.mldsa65_verify != null then
+                    {mldsa65Verify:$entry.reality.mldsa65_verify} else {} end),
                 xhttpSettings:($entry.xhttp | del(.download_port,.download) | .mode = "auto")}
             elif $entry.xhttp.download != null then
               $entry.xhttp.download as $down |
@@ -3636,7 +3703,9 @@ dockerGenerateSubscription() {
             if length > 0 then "&extra=\(. | tojson | @uri)" else "" end) +
           "#\(.name | @uri)"
       elif .id == 26 then
-        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)" +
+          (if .reality.mldsa65_verify != null then "&pqv=\(.reality.mldsa65_verify | @uri)" else "" end) +
+          "&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"
       elif .id == 28 then
         "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.trojan.domain | @uri)&fp=chrome&sni=\(.trojan.domain | @uri)&alpn=\("http/1.1" | @uri)#\(.name | @uri)"
       elif .id == 27 then
@@ -6773,6 +6842,44 @@ dockerValidateHostIntegrations() {
     fi
 }
 
+dockerRealityMldsa65Validate() {
+    local specFile=$1 image=$2 pairs
+    pairs=$(jq -c '[.core.protocols[] | .reality | select(.mldsa65_seed != null) |
+      {mldsa65_seed,mldsa65_verify}]' "${specFile}") || return 1
+    [[ "${pairs}" != '[]' ]] || return 0
+    # ML-DSA 的 PKCS8 seed 经 stdin 派生公钥，不使用会暴露秘密的 Xray -i 参数。
+    printf '%s\n' "${pairs}" |
+        docker run --rm -i --read-only --network none --log-driver none --cap-drop ALL \
+            --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+            --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+            --entrypoint python3 "${image}" -c '
+import base64
+import json
+import subprocess
+import sys
+
+def raw(value, length):
+    decoded = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+    if len(decoded) != length or base64.urlsafe_b64encode(decoded).decode().rstrip("=") != value:
+        raise ValueError("ML-DSA 编码无效")
+    return decoded
+
+try:
+    for pair in json.load(sys.stdin):
+        seed = raw(pair["mldsa65_seed"], 32)
+        public = raw(pair["mldsa65_verify"], 1952)
+        result = subprocess.run(
+            ["openssl", "pkey", "-inform", "DER", "-pubout", "-outform", "DER"],
+            input=bytes.fromhex("3034020100300b060960864801650304031204228020") + seed,
+            capture_output=True, check=True, timeout=10,
+        ).stdout
+        if result != bytes.fromhex("308207b2300b0609608648016503040312038207a100") + public:
+            raise ValueError("ML-DSA 公私材料不匹配")
+except Exception:
+    sys.exit(1)
+' >/dev/null 2>&1
+}
+
 dockerVlessEncryptionValidate() {
     local specFile=$1 image=$2 pairs
     pairs=$(jq -c '[.core.protocols[] | .vless_encryption | select(. != null)]' "${specFile}") || return 1
@@ -6832,6 +6939,10 @@ dockerValidateCandidate() {
       else join("|") end' "${specFile}") || return 1
     IFS='|' read -r http01 hasSite hasTls tlsDomain image subscriptionEnabled hasControl coreTypes <<<"${metadata}"
     IFS=',' read -r -a cores <<<"${coreTypes}"
+    dockerRealityMldsa65Validate "${specFile}" "${image}" || {
+        dockerError 'Reality ML-DSA-65 配对校验失败；需要支持 ML-DSA-65 的受信 ops OpenSSL'
+        return 1
+    }
     dockerVlessEncryptionValidate "${specFile}" "${image}" || {
         dockerError 'VLESS Encryption 配对校验失败；需要支持 ML-KEM-768 的受信 ops OpenSSL'
         return 1

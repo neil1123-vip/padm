@@ -119,26 +119,74 @@ dockerSetupRealityKeyPair() {
 
 dockerEditRegenerateReality() {
     local draft=$1 listener=$2 xrayImage opsImage keyPair privateKey publicKey shortId
+    local core target tlsPing chainLength mldsa65= seed= verify=
     local credentials="${1}.credentials" temporary="${1}.next"
     xrayImage=$(dockerManifestImageReference xray) || return 1
     opsImage=$(dockerManifestImageReference ops) || return 1
     keyPair=$(dockerSetupRealityKeyPair "${xrayImage}" "${opsImage}") || return 1
     read -r privateKey publicKey <<<"${keyPair}"
     shortId=$(dockerSetupRandomHex "${opsImage}" 8) || return 1
+    core=$(jq -er --arg listener "${listener}" '.core.type as $core |
+      .core.protocols[] | select(.listener_id == $listener) | .core // $core' "${draft}") || return 1
+    if [[ "${core}" == xray ]]; then
+        target=$(jq -er --arg listener "${listener}" '.core.protocols[] |
+          select(.listener_id == $listener) | "\(.reality.target_host):\(.reality.target_port)"' "${draft}") || return 1
+        tlsPing=$(dockerRealityProbeRun 20 --log-driver none "${xrayImage}" tls ping "${target}" 2>/dev/null) || {
+            dockerError 'Reality ML-DSA-65 目标检测失败'
+            return 1
+        }
+        awk '/Pinging with SNI/{inSni=1; next}
+          inSni && /Handshake succeeded/{handshake=1}
+          inSni && /TLS [Vv]ersion:.*TLS(v| )1\.3/{tls13=1}
+          inSni && /Certificate chain/ && $5 ~ /^[0-9]+$/ && $5 + 0 > 0 {chain=1}
+          END{exit handshake && tls13 && chain ? 0 : 1}' <<<"${tlsPing}" || {
+            dockerError 'Reality ML-DSA-65 目标检测结果不完整'
+            return 1
+        }
+        chainLength=$(awk '/Pinging with SNI/{inSni=1; next}
+          inSni && /Certificate chain/{print $5; exit}' <<<"${tlsPing}")
+        # 与原生一致，仅 SNI 检测的 PQC 和足够长证书链允许启用 ML-DSA。
+        if awk '/Pinging with SNI/{inSni=1; next}
+            inSni && /TLS Post-Quantum key exchange:.*X25519MLKEM768/{found=1}
+            END{exit found ? 0 : 1}' <<<"${tlsPing}" &&
+            [[ "${chainLength}" =~ ^[0-9]+$ && "${chainLength}" -gt 3500 ]]; then
+            seed=$(jq -r --arg listener "${listener}" '.core.protocols[] |
+              select(.listener_id == $listener) | .reality.mldsa65_seed // empty' "${draft}") || return 1
+            verify=$(jq -r --arg listener "${listener}" '.core.protocols[] |
+              select(.listener_id == $listener) | .reality.mldsa65_verify // empty' "${draft}") || return 1
+            if [[ -z "${seed}" ]]; then
+                mldsa65=$(dockerSetupTool "${xrayImage}" mldsa65 2>/dev/null) || {
+                    dockerError 'Reality ML-DSA-65 生成失败'
+                    return 1
+                }
+                seed=$(awk '$1 ~ /^Seed:?$/ {print $2; exit}' <<<"${mldsa65}")
+                verify=$(awk '$1 ~ /^Verify:?$/ {print $2; exit}' <<<"${mldsa65}")
+            fi
+            [[ "${seed}" =~ ^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$ &&
+                "${verify}" =~ ^[A-Za-z0-9_-]{2602}[AEIMQUYcgkosw048]$ ]] || {
+                dockerError 'Reality ML-DSA-65 参数不完整或格式错误'
+                return 1
+            }
+        fi
+    fi
     # 重生成秘密只在私密草稿中流转，不传给进程参数或预览输出。
     (
         umask 077
-        printf '%s\n%s\n%s\n' "${privateKey}" "${publicKey}" "${shortId}" >"${credentials}"
+        printf '%s\n%s\n%s\n%s\n%s\n' "${privateKey}" "${publicKey}" "${shortId}" "${seed}" "${verify}" >"${credentials}"
     ) || return 1
     jq --arg listener "${listener}" --rawfile credentials "${credentials}" '
       ($credentials | split("\n")) as $keys |
       .core.protocols |= map(if .listener_id != $listener then . else
         if .reality.private_key == $keys[0] or .reality.public_key == $keys[1] or .reality.short_id == $keys[2]
         then error("Reality 参数未更新") else
-          .reality.private_key = $keys[0] | .reality.public_key = $keys[1] | .reality.short_id = $keys[2]
+          .reality.private_key = $keys[0] | .reality.public_key = $keys[1] | .reality.short_id = $keys[2] |
+          .reality |= (if $keys[3] == "" then del(.mldsa65_seed,.mldsa65_verify)
+            else . + {mldsa65_seed:$keys[3],mldsa65_verify:$keys[4]} end)
         end end)
     ' "${draft}" >"${temporary}" 2>/dev/null &&
-        chmod 0600 "${temporary}" && mv -f -- "${temporary}" "${draft}" &&
+        chmod 0600 "${temporary}" &&
+        dockerRealityMldsa65Validate "${temporary}" "${opsImage}" &&
+        mv -f -- "${temporary}" "${draft}" &&
         rm -f -- "${credentials}"
 }
 
@@ -1904,16 +1952,49 @@ dockerEditHy2PasswordRead() {
     printf -v "${variable}" '%s' "${password}"
 }
 
+dockerEditFail2banSourcesValidate() {
+    local before=$1 after=$2
+    if [[ "${fail2banType:-fail2ban}" == fail2ban ]]; then
+        case "${fail2banAction:-}" in off|settings|port) return 0 ;; esac
+    fi
+    # 保护归属按入口身份冻结，不能用交换端口或删后重建绕过来源验证。
+    jq -en --slurpfile before "${before}" --slurpfile after "${after}" '
+      def sources:
+        . as $spec |
+        [.host_integrations[]? | select(.type == "fail2ban") | .settings.ports[]] |
+        sort as $ports |
+        [$ports[] as $port |
+          [$spec.core.protocols[] | select(.id == 21 and .public_port == $port)] as $entries |
+          if ($entries | length) != 1 then error("保护端口需要唯一 WS 入口") else
+            $entries[0] |
+            {listener_id:(.listener_id // "vless-ws"),core:(.core // $spec.core.type),
+             public_port,address_families:(.address_families | sort),
+             internal_port:(.websocket.tls_port // 8443),
+             domain:($spec.tls.domain | ascii_downcase)}
+          end];
+      if any($before[0].host_integrations[]?; .type == "fail2ban") then
+        ($before[0] | sources) == ($after[0] | sources)
+      else true end
+    ' >/dev/null 2>&1 || {
+        dockerError '带 Fail2ban 的 WS 入口端口需联动封禁规则；普通编辑必须保留受保护入口及其来源计划'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+}
+
 dockerEditEntryRemove() {
     local draft=$1 listener=$2 output=$3
     jq -e --arg key "${listener}" '
+      . as $spec |
       ([.core.protocols[] | select(.listener_id == $key)] | length) == 1 and
       all(.accounts[]?; .listeners != [$key]) and
       (.reality_stream == null or
         (.reality_stream.listener_id != $key and .reality_stream.website_listener_id != $key)) and
       (all(.host_integrations[]; .type != "fail2ban") or
         all(.core.protocols[] | select(.listener_id == $key);
-          .id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25))
+          (.id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25) or
+          (.id == 21 and (.public_port as $port |
+            all($spec.host_integrations[] | select(.type == "fail2ban");
+              (.settings.ports | index($port)) == null)))))
     ' "${draft}" >/dev/null 2>&1 || {
         dockerError '删除需要唯一入口；请先处理账号最后关联、Reality 共存或 Fail2ban 保护'
         return 1
@@ -1982,7 +2063,8 @@ dockerEditEntryAdd() {
       $selected[0] as $source |
       if (supported($targetProtocol; $targetCore) | not) or
         ($targetCore != .core.type and (.host_integrations | length) != 0) or
-        (($targetProtocol | nginx) and any(.host_integrations[]; .type == "fail2ban")) or
+        (($targetProtocol | nginx) and $targetProtocol != 21 and
+          any(.host_integrations[]; .type == "fail2ban")) or
         ($action == "copy" and $targetProtocol != $source.id) or
         ($action == "derive" and
           (($source.id | reality | not) or ($targetProtocol | reality | not))) or
@@ -2128,9 +2210,13 @@ dockerEditFields() {
                 dockerError 'Reality 443 共存绑定入口不能改原端口、地址族或删除；请先关闭共存'
                 return 1
             fi
-            if [[ ( "${protocol}" == 21 || "${protocol}" == 22 || "${protocol}" == 23 || "${protocol}" == 24 || "${protocol}" == 25 ) && ( "${choice}" == 1 || "${choice}" == 9 || "${choice}" == 10 ) ]] &&
-                jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${draft}" >/dev/null; then
-                dockerError '带 Fail2ban 的 WS 入口需联动封禁规则，本阶段未开放端口或入口数量修改'
+            if [[ "${choice}" == 1 || "${choice}" == 3 || "${choice}" == 10 ]] &&
+                jq -e --arg key "${listener}" '
+                  . as $spec | any(.core.protocols[] | select(.listener_id == $key);
+                    .public_port as $port | any($spec.host_integrations[];
+                      .type == "fail2ban" and (.settings.ports | index($port)) != null))
+                ' "${draft}" >/dev/null; then
+                dockerError '受保护 WS 入口的端口、地址族或删除需联动封禁规则；请先停用防护或使用端口专项'
                 return 1
             fi
             if [[ "${choice}" == 10 ]]; then
@@ -2454,6 +2540,7 @@ dockerEditCommand() {
     local protocolKind= protocolListener= protocolPatch='{}' protocolId=0
     local protocolPatchFile= hy2ObfsType= hy2ObfsFile= hy2ObfsPassword=
     local entryAction= entryListener= entryProtocol=0 entryPort=0 entryCore= entrySsCredentials=
+    local nginxRepair=0 nginxRepairListener=
     local entrySsGenerate=0 entrySsReady=0 entrySsServer= entrySsUser= entrySsImage= entrySsAttempt=
     local entryTlsDomain= entryTlsMode= entryTlsCert= entryTlsKey= entryTlsEmail=
     local entryTlsProvider= entryTlsCredentials= entryTlsSource= answer
@@ -2543,6 +2630,11 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             entryAction=${1#--protocol-} entryListener=$2
             shift 2
+            ;;
+        --repair-nginx)
+            [[ "${nginxRepair}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            nginxRepair=1
+            shift
             ;;
         --site-static|--site-redirect)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${siteMode}" ]] ||
@@ -3485,6 +3577,11 @@ dockerEditCommand() {
     fi
     [[ -z "${entryCore}" || "${entryAction}" == add ]] ||
         return "${PADM_DOCKER_RC_USAGE}"
+    [[ "${nginxRepair}" == 0 || "${entryAction}" == rebuild ]] || {
+        dockerError '--repair-nginx 只能与 --protocol-rebuild 一起修复受管 Nginx 正文'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
+    [[ "${nginxRepair}" == 0 ]] || nginxRepairListener=${entryListener}
     if [[ -n "${entryTlsDomain}${entryTlsMode}" && -z "${tlsMigrateDomain}" ]]; then
         [[ "${entryAction}" == add ]] || return "${PADM_DOCKER_RC_USAGE}"
         case "${entryProtocol}" in 1|2|26|30) return "${PADM_DOCKER_RC_USAGE}" ;; esac
@@ -3565,14 +3662,7 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         fi
     fi
-    if jq -en --slurpfile before "${original}" --slurpfile after "${draft}" '
-      any($before[0].host_integrations[]; .type == "fail2ban") and
-      (([$before[0].core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) | .public_port] | sort) !=
-       ([$after[0].core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) | .public_port] | sort))
-    ' >/dev/null 2>&1; then
-        dockerError '带 Fail2ban 的 WS 入口端口需联动封禁规则，本阶段未开放端口或入口数量修改'
-        return "${PADM_DOCKER_RC_STATE}"
-    fi
+    dockerEditFail2banSourcesValidate "${normalized}" "${draft}" || return $?
     if [[ -n "${specFile}" && "${imported}" -eq 0 ]]; then
         dockerConfigureSpecMigrate "${draft}" "${draft}.v3" &&
             mv -f -- "${draft}.v3" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
@@ -3729,6 +3819,8 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_STATE}"
         else
             printf '保留入口 %s 的完整参数和身份，重新生成部署；配置事务可能统一重建所有核心。\n' "${entryListener}"
+            [[ "${nginxRepair}" == 0 ]] ||
+                printf '仅允许受管 Nginx default.conf 缺失或正文损坏；其它配置、权限和部署归属仍须完整匹配。\n'
         fi
     fi
     if [[ -n "${tproxyAction}" ]]; then
@@ -4549,7 +4641,7 @@ dockerEditCommand() {
     fi
     # 取消与非法草稿先结束；合法输入仍须先核对在线基线，再准备发布或生成凭据。
     dockerEditCompatibilityValidate "${normalized}" "${draft}" || return $?
-    dockerEditBaselineValidate "${original}" "${workspace}" "${alpnListener}" ||
+    dockerEditBaselineValidate "${original}" "${workspace}" "${alpnListener}" "${nginxRepairListener}" ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ -z "${manifest}" ]]; then
         version=$(jq -r '.release.version' "${original}") || return "${PADM_DOCKER_RC_STATE}"
@@ -4603,7 +4695,7 @@ dockerEditCommand() {
             dockerError 'Reality 参数生成或校验失败，未改写已安装配置'
             return "${PADM_DOCKER_RC_STATE}"
         }
-        printf '仅重生成入口 %s 的 Reality 密钥及 short ID；提交后需重新导入该入口链接。\n' "${regenerateReality}"
+        printf '仅重生成入口 %s 的 Reality 密钥及 short ID，Xray 同时检测并生成或复用 ML-DSA-65；提交后需重新导入该入口链接。\n' "${regenerateReality}"
     fi
     if [[ "${encryptionAction}" == enable ]]; then
         dockerEditVlessEncryptionGenerate "${draft}" "${encryptionListener}" &&
@@ -4730,6 +4822,7 @@ dockerEditCommand() {
 
 dockerEditCompatibilityValidate() {
     local editBefore=$1 editAfter=$2
+    dockerEditFail2banSourcesValidate "${editBefore}" "${editAfter}" || return $?
     if [[ -n "${ssRotateListener:-}" ]]; then
         jq -en --arg listener "${ssRotateListener}" --arg field "${ssRotateField}" \
             --slurpfile before "${editBefore}" --slurpfile after "${editAfter}" '
@@ -4819,7 +4912,9 @@ dockerEditCompatibilityValidate() {
         .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name, .grpc_tls.service_name,
         .hy2.bandwidth_mode, .hy2.up_mbps, .hy2.down_mbps, .hy2.obfs, .hy2.masquerade,
         .tuic.congestion_control, .tuic.auth_timeout, .tuic.heartbeat, .tuic.zero_rtt_handshake) |
-        if .listener_id == $regenerate then del(.reality.private_key, .reality.public_key, .reality.short_id) else . end;
+        if .listener_id == $regenerate then
+          del(.reality.private_key,.reality.public_key,.reality.short_id,.reality.mldsa65_seed,.reality.mldsa65_verify)
+        else . end;
       def reality: .id == 1 or .id == 2 or .id == 26;
       def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
       def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled, .site);
@@ -4837,7 +4932,7 @@ dockerEditCompatibilityValidate() {
         else . end;
       def special: .core.protocols |= map(
         if $regenerate != "" and .listener_id == $regenerate then
-          del(.reality.private_key, .reality.public_key, .reality.short_id)
+          del(.reality.private_key,.reality.public_key,.reality.short_id,.reality.mldsa65_seed,.reality.mldsa65_verify)
         elif $target != "" and .listener_id == $target then
           del(.reality.target_host, .reality.target_port, .reality.server_name)
         else . end);

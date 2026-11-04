@@ -26,6 +26,7 @@
   "x-padm-hy2-local-site": true,
   "x-padm-hy2-gecko": true,
   "x-padm-vless-encryption": true,
+  "x-padm-reality-mldsa65": true,
   "x-padm-fallback-alpn": true,
   "x-padm-acme-webroot": true,
   "x-padm-routing-socks5": true,
@@ -1567,6 +1568,14 @@
         "uuid": {
           "$ref": "#/$defs/uuid"
         }
+      },
+      "if": {
+        "required": ["reality"],
+        "properties": {"reality": {"required": ["mldsa65_seed"]}}
+      },
+      "then": {
+        "required": ["core"],
+        "properties": {"core": {"const": "xray"}}
       }
     },
     "vless_encryption": {
@@ -1630,6 +1639,10 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["server_name", "target_host", "target_port", "private_key", "public_key", "short_id"],
+              "dependentRequired": {
+                "mldsa65_seed": ["mldsa65_verify"],
+                "mldsa65_verify": ["mldsa65_seed"]
+              },
               "properties": {
                 "server_name": {
                   "$ref": "#/$defs/hostname"
@@ -1651,6 +1664,18 @@
                 "short_id": {
                   "type": "string",
                   "pattern": "^(?:[a-f0-9]{2}){1,8}$"
+                },
+                "mldsa65_seed": {
+                  "type": "string",
+                  "minLength": 43,
+                  "maxLength": 43,
+                  "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048](?![\\s\\S])"
+                },
+                "mldsa65_verify": {
+                  "type": "string",
+                  "minLength": 2603,
+                  "maxLength": 2603,
+                  "pattern": "^[A-Za-z0-9_-]{2602}[AEIMQUYcgkosw048](?![\\s\\S])"
                 }
               }
             }
