@@ -877,6 +877,10 @@ runDockerRealityStreamXhttpCliRealRegression() {
     runDockerRealityStreamCliRealRegression xhttp
 }
 
+runDockerRealityMldsa65RealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/reality-mldsa65-real.sh"
+}
+
 listRegressionDockerWebrootRecoveryChildSelectors() {
     printf '%s\n' docker-backup docker-recovery-preview docker-webroot-recovery-apply
 }
@@ -1270,6 +1274,7 @@ registerRegressionFunctionLeaf docker-cdn-entries runDockerCdnEntriesRegression
 registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRegression
 registerRegressionFunctionLeaf docker-reality-stream-cli-real runDockerRealityStreamCliRealRegression
 registerRegressionFunctionLeaf docker-reality-stream-xhttp-cli-real runDockerRealityStreamXhttpCliRealRegression
+registerRegressionFunctionLeaf docker-reality-mldsa65-real runDockerRealityMldsa65RealRegression
 registerRegressionFunctionLeaf docker-alpn-real runDockerAlpnRealRegression
 registerRegressionFunctionLeaf docker-xhttp runDockerXhttpRegression
 registerRegressionFunctionLeaf docker-xhttp-validation runDockerXhttpValidationRegression

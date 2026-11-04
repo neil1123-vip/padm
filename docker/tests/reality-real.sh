@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # 只在本次唯一项目与命名卷中验收，不连接或覆盖现有 padm 部署。
-[[ "$#" == 3 || ( "$#" == 4 && "$4" == regenerate ) ]] || {
-    printf 'usage: reality-real.sh <local-xray> <local-sing-box> <local-ops> [regenerate]\n' >&2
+[[ "$#" == 3 || ( "$#" == 4 && ( "$4" == regenerate || "$4" == mldsa65 ) ) ]] || {
+    printf 'usage: reality-real.sh <local-xray> <local-sing-box> <local-ops> [regenerate|mldsa65]\n' >&2
     exit 2
 }
 [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || {
@@ -30,7 +30,10 @@ cleanup() {
     ids=$(docker ps -aq --filter "label=io.padm.test=${project}")
     if [[ -n "${ids}" ]]; then
         if [[ "${status}" != 0 ]]; then
-            while IFS= read -r id; do docker logs "${id}" >&2 || true; done <<<"${ids}"
+            while IFS= read -r id; do
+                printf 'docker-reality-real-container-log: %s\n' "$(docker inspect --format '{{.Name}}' "${id}")" >&2
+                docker logs "${id}" >&2 || true
+            done <<<"${ids}"
         fi
         docker rm -f ${ids} >/dev/null || status=1
     fi
@@ -78,6 +81,49 @@ jq -n --arg uuid "${UUID}" --arg public "${PUBLIC_KEY}" --arg private "${PRIVATE
    host_integrations:[]}
 ' >"${SPEC}"
 chmod 0600 "${SPEC}"
+if [[ "${MODE}" == mldsa65 ]]; then
+    # 固定核心生成真实配对；直接装入隔离夹具，不冒充 CLI 目标探测自动启用验收。
+    (umask 077; dockerSetupTool "${XRAY_ID}" mldsa65 >"${TEST_ROOT}/mldsa65.keys")
+    python3 - "${SPEC}" "${TEST_ROOT}/mldsa65.keys" "${TEST_ROOT}/mldsa65-mismatch.json" <<'PY'
+import base64
+import json
+import pathlib
+import sys
+
+spec, keys, mismatch = map(pathlib.Path, sys.argv[1:])
+pair = dict(line.split(":", 1) for line in keys.read_text().splitlines() if ":" in line)
+seed, verify = (pair[name].strip() for name in ("Seed", "Verify"))
+for value, size in ((seed, 32), (verify, 1952)):
+    raw = base64.b64decode(value+"="*(-len(value)%4), altchars=b"-_", validate=True)
+    assert len(raw) == size and base64.urlsafe_b64encode(raw).decode().rstrip("=") == value
+value = json.loads(spec.read_text())
+for item in value["core"]["protocols"]:
+    item["reality"].update(target_host="reality-target.padm.test", target_port=8443)
+entry = next(item for item in value["core"]["protocols"] if item["listener_id"] == "entry-xhttp")
+entry["reality"].update(mldsa65_seed=seed, mldsa65_verify=verify)
+spec.write_text(json.dumps(value))
+public = bytearray(base64.urlsafe_b64decode(verify+"="*(-len(verify)%4)))
+public[0] ^= 1
+entry["reality"]["mldsa65_verify"] = base64.urlsafe_b64encode(public).decode().rstrip("=")
+mismatch.write_text(json.dumps(value))
+mismatch.chmod(0o600)
+PY
+    dockerConfigureSpecValidate "${SPEC}" || {
+        printf 'ML-DSA real fixture schema validation failed\n' >&2
+        exit 1
+    }
+    dockerRealityMldsa65Validate "${SPEC}" "${OPS_ID}" || {
+        printf 'ML-DSA real pair derivation validation failed\n' >&2
+        exit 1
+    }
+    dockerConfigureSpecValidate "${TEST_ROOT}/mldsa65-mismatch.json"
+    if dockerRealityMldsa65Validate "${TEST_ROOT}/mldsa65-mismatch.json" "${OPS_ID}"; then
+        printf 'ML-DSA mismatched real pair accepted\n' >&2
+        exit 1
+    fi
+    rm -f -- "${TEST_ROOT}/mldsa65.keys" "${TEST_ROOT}/mldsa65-mismatch.json"
+    printf 'docker-reality-mldsa65-pair-ok: source=fixed-xray real-pair=accepted mismatched-pair=rejected\n'
+fi
 dockerConfigureSpecValidate "${SPEC}"
 dockerCreateConfigurationCandidate
 candidate=${DOCKER_CONFIG_CANDIDATE}
@@ -220,8 +266,26 @@ for line in lines:
             "transport":{"type":q["type"],"service_name":q["serviceName"]}})
         sing["route"]["rules"].append({"inbound":["socks-"+tag],"action":"route","outbound":tag})
 assert len(xray["outbounds"]) == 1 and len(sing["outbounds"]) == 2
+if sys.argv[3] == "mldsa65":
+    xray["log"]["loglevel"] = "info"
+    sing["log"]["level"] = "info"
 (out/"client-xray.json").write_text(json.dumps(xray))
 (out/"client-sing.json").write_text(json.dumps(sing))
+if sys.argv[3] == "mldsa65":
+    import base64
+    verify = xray["outbounds"][0]["streamSettings"]["realitySettings"]["mldsa65Verify"]
+    assert len(verify) == 2603
+    wrong_verify = copy.deepcopy(xray)
+    wrong_verify["inbounds"][0]["port"] = 2086
+    public = bytearray(base64.urlsafe_b64decode(verify+"="*(-len(verify)%4)))
+    public[0] ^= 1
+    wrong_verify["outbounds"][0]["streamSettings"]["realitySettings"]["mldsa65Verify"] = (
+        base64.urlsafe_b64encode(public).decode().rstrip("="))
+    wrong_auth = copy.deepcopy(xray)
+    wrong_auth["inbounds"][0]["port"] = 2087
+    wrong_auth["outbounds"][0]["settings"]["vnext"][0]["users"][0]["id"] = "22222222-2222-4222-8222-222222222222"
+    (out/"client-wrong-verify.json").write_text(json.dumps(wrong_verify))
+    (out/"client-wrong-auth.json").write_text(json.dumps(wrong_auth))
 if sys.argv[3] == "regenerate":
     previous = {}
     current = {}
@@ -261,11 +325,70 @@ if [[ "${MODE}" == regenerate ]]; then
     cp "${TEST_ROOT}/client-old-xray.json" "${TEST_ROOT}/runtime/client/old-xray.json"
     cp "${TEST_ROOT}/client-old-sing.json" "${TEST_ROOT}/runtime/client/old-sing.json"
 fi
+if [[ "${MODE}" == mldsa65 ]]; then
+    cp "${TEST_ROOT}/client-wrong-verify.json" "${TEST_ROOT}/runtime/client/wrong-verify.json"
+    cp "${TEST_ROOT}/client-wrong-auth.json" "${TEST_ROOT}/runtime/client/wrong-auth.json"
+    mkdir -p "${TEST_ROOT}/runtime/target"
+    # 目标只提供并发 TLS 握手；串行 s_server 会让另一条 Reality 握手等待前一连接。
+    cat >"${TEST_ROOT}/runtime/target/server.py" <<'PY'
+import socketserver
+import ssl
+
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.minimum_version = ssl.TLSVersion.TLSv1_3
+context.maximum_version = ssl.TLSVersion.TLSv1_3
+context.load_cert_chain("/target/cert.pem", "/target/key.pem")
+context.set_alpn_protocols(["h2", "http/1.1"])
+
+class Target(socketserver.BaseRequestHandler):
+    def handle(self):
+        try:
+            self.request.settimeout(10)
+            with context.wrap_socket(self.request, server_side=True) as tls:
+                while tls.recv(65536):
+                    pass
+        except OSError:
+            pass
+
+class Server(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+with Server(("0.0.0.0", 8443), Target) as server:
+    server.serve_forever()
+PY
+fi
 printf 'padm-reality-real-proof\n' >"${TEST_ROOT}/runtime/origin/proof.txt"
 # docker cp 到停止容器可能重写归属；tar 流保持生产夹具的 UID/GID 和权限模式。
 tar -cpf - -C "${TEST_ROOT}" runtime |
     docker run --rm -i --pull=never --label "io.padm.test=${project}" --user 0 \
         --mount "type=volume,source=${volume},target=/test" --entrypoint tar "${OPS_ID}" -xpf - -C /test
+if [[ "${MODE}" == mldsa65 ]]; then
+    # 长证书留出签名空间，本地目标避免公网证书轮换和出口条件影响握手结论。
+    docker run --rm --pull=never --network none --log-driver none --label "io.padm.test=${project}" \
+        --user 0 --mount "type=volume,source=${volume},target=/test" --entrypoint python3 "${OPS_ID}" -c '
+import os
+import pathlib
+import shutil
+import subprocess
+
+os.umask(0o077)
+root = pathlib.Path("/test/runtime/target")
+names = ["DNS:www.debian.org","DNS:reality-target.padm.test"] + [
+    "DNS:padding-%03d.padm.test"%n for n in range(160)]
+subprocess.run(["openssl","req","-x509","-newkey","rsa:2048","-sha256","-days","1","-nodes",
+    "-subj","/CN=www.debian.org","-addext","subjectAltName="+",".join(names),
+    "-keyout",str(root/"key.pem"),"-out",str(root/"cert.pem")],
+    check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
+der = subprocess.check_output(["openssl","x509","-in",str(root/"cert.pem"),"-outform","DER"])
+assert len(der) > 3500, len(der)
+for path in root.iterdir():
+    os.chown(path,10001,10001)
+os.chmod(root/"server.py",0o644)
+shutil.copyfile(root/"cert.pem","/test/runtime/client/target-cert.pem")
+os.chmod("/test/runtime/client/target-cert.pem",0o644)
+'
+fi
 COMPOSE="${TEST_ROOT}/compose.json"
 jq --arg project "${project}" --arg volume "${volume}" --arg xray "${XRAY_ID}" \
     --arg sing "${SING_ID}" --arg ops "${OPS_ID}" --arg mode "${MODE}" '
@@ -299,6 +422,20 @@ jq --arg project "${project}" --arg volume "${volume}" --arg xray "${XRAY_ID}" \
       .command = ["run","-c","/etc/padm/client/old-xray.json"]) |
     .services["client-old-sing"] = (.services["client-sing"] |
       .command = ["run","-c","/etc/padm/client/old-sing.json"])
+  else . end |
+  if $mode == "mldsa65" then
+    .services["reality-target"] = {image:$ops,read_only:true,init:true,cap_drop:["ALL"],
+      labels:{"io.padm.test":$project},entrypoint:["python3","/target/server.py"],
+      networks:{default:{aliases:["reality-target.padm.test"]}},
+      healthcheck:{test:["CMD","python3","-c",
+        "import socket; socket.create_connection((\"127.0.0.1\",8443),timeout=1).close()"],
+        interval:"1s",timeout:"2s",retries:30},
+      volumes:[{type:"volume",source:"files",target:"/target",read_only:true,
+        volume:{nocopy:true,subpath:"runtime/target"}}]} |
+    .services["client-wrong-verify"] = (.services["client-xray"] |
+      .command = ["run","-c","/etc/padm/client/wrong-verify.json"]) |
+    .services["client-wrong-auth"] = (.services["client-xray"] |
+      .command = ["run","-c","/etc/padm/client/wrong-auth.json"])
   else . end
 ' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >"${COMPOSE}"
 compose() {
@@ -313,15 +450,78 @@ if [[ "${MODE}" == regenerate ]]; then
     compose run --rm --no-deps client-old-xray -test -c /etc/padm/client/old-xray.json >/dev/null
     compose run --rm --no-deps client-old-sing check -c /etc/padm/client/old-sing.json >/dev/null
 fi
+if [[ "${MODE}" == mldsa65 ]]; then
+    compose run --rm --no-deps client-wrong-verify -test -c /etc/padm/client/wrong-verify.json >/dev/null
+    compose run --rm --no-deps client-wrong-auth -test -c /etc/padm/client/wrong-auth.json >/dev/null
+    compose up -d --pull never --wait --wait-timeout 60 reality-target
+    # 只给独立探针信任夹具证书；真实 Reality 客户端仍通过分享材料验签。
+    compose run --rm --no-deps -e SSL_CERT_FILE=/etc/padm/client/target-cert.pem client-xray \
+        tls ping reality-target.padm.test:8443 >"${TEST_ROOT}/target-ping.txt"
+    awk '/Pinging with SNI/{inSni=1; next}
+      inSni && /Handshake succeeded/{handshake=1}
+      inSni && /TLS Version:.*TLS 1\.3/{tls13=1}
+      inSni && /TLS Post-Quantum key exchange:.*true.*X25519MLKEM768/{pqc=1}
+      inSni && /Certificate chain/ && $5 + 0 > 3500 {chain=1}
+      END{exit handshake && tls13 && pqc && chain ? 0 : 1}' "${TEST_ROOT}/target-ping.txt" || {
+        cat "${TEST_ROOT}/target-ping.txt" >&2
+        exit 1
+    }
+    docker run --rm --pull=never --network "${project}" --label "io.padm.test=${project}" \
+        --mount "type=volume,source=${volume},target=/test,readonly" --entrypoint python3 "${OPS_ID}" -c '
+import socket
+import ssl
+
+context=ssl.create_default_context(cafile="/test/runtime/client/target-cert.pem")
+context.set_alpn_protocols(["h2","http/1.1"])
+with socket.create_connection(("reality-target.padm.test",8443),timeout=5) as sock:
+    with context.wrap_socket(sock,server_hostname="reality-target.padm.test") as tls:
+        assert tls.version()=="TLSv1.3" and tls.selected_alpn_protocol()=="h2"
+        assert len(tls.getpeercert(binary_form=True)) > 3500
+print("docker-reality-target-probe-ok: tls=1.3 pqc=X25519MLKEM768 alpn=h2 chain=long")
+'
+    # 固定新核心默认阻断 VLESS 私网出口；只在隔离副本允许本次 origin 的 TCP 8088。
+    # 不修改生产生成原件、分享材料或认证校验，仅添加本次测试原点的放行规则。
+    generated_xray_hash=$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json")
+    compose up -d --pull never --wait --wait-timeout 60 origin
+    origin_ips=$(docker inspect --format '{{json .NetworkSettings.Networks}}' "$(compose ps -q origin)" |
+        jq -ce '[.[] | .IPAddress,.GlobalIPv6Address | select(length>0)] | select(length>0)')
+    docker run --rm --pull=never --network none --label "io.padm.test=${project}" --user 0 \
+        --mount "type=volume,source=${volume},target=/test" --entrypoint python3 "${OPS_ID}" -c '
+import ipaddress
+import json
+import pathlib
+import sys
+
+path=pathlib.Path("/test/runtime/config/xray/config.json")
+value=json.loads(path.read_text())
+outbound=next(item for item in value["outbounds"] if item["tag"]=="direct")
+assert outbound["protocol"]=="freedom"
+settings=outbound.setdefault("settings",{})
+assert "finalRules" not in settings
+addresses=[ipaddress.ip_address(value) for value in json.loads(sys.argv[1])]
+assert addresses
+settings["finalRules"]=[{"action":"allow","network":"tcp","port":"8088",
+    "ip":[str(ipaddress.ip_network(str(address))) for address in addresses]}]
+value["log"]["loglevel"]="info"
+path.write_text(json.dumps(value))
+print("docker-reality-origin-fixture-ok: exact-addresses=%s tcp-port=8088 test-only=true"%len(addresses))
+' "${origin_ips}"
+    [[ "$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json")" == "${generated_xray_hash}" ]]
+    compose run --rm --no-deps xray -test -confdir /etc/padm/xray >/dev/null
+fi
 compose up -d --pull never --wait --wait-timeout 60 xray sing-box origin
 compose up -d --pull never client-xray client-sing
 if [[ "${MODE}" == regenerate ]]; then
     compose up -d --pull never client-old-xray client-old-sing
 fi
+if [[ "${MODE}" == mldsa65 ]]; then
+    compose up -d --pull never client-wrong-verify client-wrong-auth
+fi
 # 只等待 SOCKS 监听，然后每条 URI 执行一次真正请求，不用重试掩盖握手错误。
 docker run --rm --pull=never --network "${project}" --label "io.padm.test=${project}" \
     --entrypoint python3 "${OPS_ID}" -c '
 import concurrent.futures
+import http.client
 import socket
 import struct
 import sys
@@ -340,7 +540,7 @@ def connect(endpoint):
             time.sleep(0.05)
     return sock
 
-def probe(endpoint):
+def request_proof(endpoint):
     host,port = endpoint
     with connect(endpoint) as sock:
         sock.settimeout(20)
@@ -368,19 +568,53 @@ def probe(endpoint):
             raise AssertionError(header)
         receive(2)
         sock.sendall(b"GET /proof.txt HTTP/1.1\r\nHost: origin\r\nConnection: close\r\n\r\n")
-        response=b""
-        while True:
-            part=sock.recv(4096)
-            if not part:
-                break
-            response+=part
-        head,body=response.split(b"\r\n\r\n",1)
-        assert head.startswith(b"HTTP/1.0 200") or head.startswith(b"HTTP/1.1 200"), head
-        assert body==b"padm-reality-real-proof\n", response
+        expected=b"padm-reality-real-proof\n"
+        body=b""
+        stage="http-headers"
+        with http.client.HTTPResponse(sock) as response:
+            try:
+                response.begin()
+                assert response.status == 200, response.status
+                assert response.headers.get_all("Content-Length") == [str(len(expected))]
+                assert response.getheader("Transfer-Encoding") is None
+                stage="http-body"
+                while len(body) < len(expected):
+                    part=response.read1(len(expected)-len(body))
+                    if not part:
+                        raise http.client.IncompleteRead(body,len(expected)-len(body))
+                    body+=part
+                assert body == expected, body
+            except (EOFError,OSError,AssertionError,ValueError,http.client.HTTPException) as error:
+                error.add_note("HTTP proof stage=%s body_received=%s expected=%s parsed_headers=%s"%(
+                    stage,len(body),len(expected),len(response.headers or [])))
+                raise
     return "%s:%s"%(host,port)
+
+def probe(endpoint):
+    print("docker-reality-probe-start: %s:%s"%endpoint,flush=True)
+    try:
+        result=request_proof(endpoint)
+    except (EOFError,OSError,AssertionError,ValueError,http.client.HTTPException) as error:
+        error.add_note("Reality proof endpoint: %s:%s"%endpoint)
+        raise
+    print("docker-reality-probe-ok: "+result,flush=True)
+    return result
+
 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-    results=list(pool.map(probe,(("client-xray",2081),("client-sing",2082),("client-sing",2083))))
-print("docker-reality-real-probe-ok: source=protocol-links socks="+",".join(results))
+    futures={pool.submit(probe,endpoint):endpoint for endpoint in (
+        ("client-xray",2081),("client-sing",2082),("client-sing",2083))}
+    results=[]
+    failures=[]
+    for future in concurrent.futures.as_completed(futures):
+        try:
+            results.append(future.result())
+        except (EOFError,OSError,AssertionError,ValueError,http.client.HTTPException) as error:
+            endpoint=futures[future]
+            print("docker-reality-probe-failed: %s:%s %s: %s"%(
+                *endpoint,type(error).__name__,error),file=sys.stderr,flush=True)
+            failures.append(error)
+if not failures:
+    print("docker-reality-real-probe-ok: source=protocol-links socks="+",".join(results))
 if sys.argv[1] == "regenerate":
     for endpoint in (("client-old-xray",2084),("client-old-sing",2085)):
         with connect(endpoint) as sock:
@@ -389,10 +623,30 @@ if sys.argv[1] == "regenerate":
             assert sock.recv(2) == b"\x05\x00", ("old client SOCKS unavailable",endpoint)
         try:
             probe(endpoint)
-        except (EOFError,OSError,AssertionError,ValueError):
+        except (EOFError,OSError,AssertionError,ValueError,http.client.HTTPException):
             print("docker-reality-old-credential-rejected: %s:%s"%endpoint)
         else:
             raise AssertionError(("old Reality credential accepted",endpoint))
+if sys.argv[1] == "mldsa65":
+    for endpoint, reason in ((("client-wrong-verify",2086),"wrong-verify"),
+                             (("client-wrong-auth",2087),"wrong-authentication")):
+        probe(("client-xray",2081))
+        with connect(endpoint) as sock:
+            sock.settimeout(5)
+            sock.sendall(b"\x05\x01\x00")
+            assert sock.recv(2) == b"\x05\x00", ("negative client SOCKS unavailable",endpoint)
+        try:
+            probe(endpoint)
+        except (EOFError,OSError,AssertionError,ValueError,http.client.HTTPException):
+            print("docker-reality-mldsa65-rejected: "+reason)
+        else:
+            raise AssertionError(("invalid ML-DSA client accepted",reason))
+        probe(("client-xray",2081))
+    print("docker-reality-mldsa65-real-ok: source=protocol-links pqv=used valid-before-and-after=passed")
+if failures:
+    raise ExceptionGroup("Reality positive proof failed",failures)
 ' "${MODE}"
-printf 'docker-reality-real-ok: mode=%s target=www.debian.org endpoint=isolated-compose xray=%s sing-box=%s ops=%s\n' \
-    "${MODE}" "${XRAY_ID}" "${SING_ID}" "${OPS_ID}"
+target=www.debian.org
+[[ "${MODE}" != mldsa65 ]] || target=reality-target.padm.test
+printf 'docker-reality-real-ok: mode=%s target=%s endpoint=isolated-compose xray=%s sing-box=%s ops=%s\n' \
+    "${MODE}" "${target}" "${XRAY_ID}" "${SING_ID}" "${OPS_ID}"

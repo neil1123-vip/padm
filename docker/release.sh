@@ -123,7 +123,8 @@ validate_lock() {
     [[ "${PADM_LOCK_XRAY_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid Xray version'
     [[ "${PADM_LOCK_XRAY_AMD64_ASSET}" == Xray-linux-64.zip &&
         "${PADM_LOCK_XRAY_ARM64_ASSET}" == Xray-linux-arm64-v8a.zip ]] || die 'invalid Xray assets'
-    [[ "${PADM_LOCK_SING_BOX_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid sing-box version'
+    [[ "${PADM_LOCK_SING_BOX_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-padm\.[1-9][0-9]*)?$ ]] ||
+        die 'invalid sing-box version'
     singBoxVersion=${PADM_LOCK_SING_BOX_VERSION#v}
     [[ "${PADM_LOCK_SING_BOX_AMD64_ASSET}" == "sing-box-${singBoxVersion}-linux-amd64.tar.gz" &&
         "${PADM_LOCK_SING_BOX_ARM64_ASSET}" == "sing-box-${singBoxVersion}-linux-arm64.tar.gz" ]] ||
@@ -220,7 +221,8 @@ latest_sing_box_stats_tag() {
     releases=$(gh api 'repos/neil1123-vip/padm/releases?per_page=100' --paginate --slurp) ||
         die 'failed to query sing-box stats releases'
     tag=$(jq -er '.[][] | select(.draft == false and .prerelease == false) | .tag_name |
-        select(test("^sing-box-v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("sing-box-")' \
+        select(test("^sing-box-v[0-9]+\\.[0-9]+\\.[0-9]+(-padm\\.[1-9][0-9]*)?$")) |
+        ltrimstr("sing-box-")' \
         <<<"${releases}" | sort -V | tail -n 1) || die 'no published stable sing-box stats release'
     printf '%s\n' "${tag}"
 }
@@ -350,7 +352,7 @@ refresh_alpine_packages() {
 }
 
 refresh_upstreams() {
-    local tool xrayTag singBoxTag singBoxVersion acmeTag acmeVersion tmpRoot changed=false
+    local tool xrayTag singBoxTag singBoxVersion singBoxUpstreamTag singBoxUpstreamVersion acmeTag acmeVersion tmpRoot changed=false
     local alpineMinor alpineMetadata alpineTag alpineDigest alpineVersion alpineBase apkUpdates package packageVersion
     local xrayVersion xrayAmd64Asset xrayAmd64Sha256 xrayArm64Asset xrayArm64Sha256
     local singBoxAmd64Asset singBoxAmd64Sha256 singBoxArm64Asset singBoxArm64Sha256 acmeUrl acmeSha256
@@ -372,9 +374,12 @@ refresh_upstreams() {
     alpineTag=${alpineMetadata%%$'\t'*}
     alpineDigest=${alpineMetadata#*$'\t'}
     [[ "${xrayTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid Xray release tag: ${xrayTag}"
-    [[ "${singBoxTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid sing-box release tag: ${singBoxTag}"
+    [[ "${singBoxTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-padm\.[1-9][0-9]*)?$ ]] ||
+        die "invalid sing-box release tag: ${singBoxTag}"
     [[ "${acmeTag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid acme.sh release tag: ${acmeTag}"
     singBoxVersion=${singBoxTag#v}
+    singBoxUpstreamTag=${singBoxTag%%-padm.*}
+    singBoxUpstreamVersion=${singBoxUpstreamTag#v}
     acmeVersion=${acmeTag#v}
     if [[ "${alpineTag}" == "${PADM_LOCK_ALPINE_VERSION}" ]]; then
         [[ "${alpineDigest}" == "${PADM_LOCK_ALPINE_BASE#*@}" ]] || updateAlpine=true
@@ -479,12 +484,12 @@ refresh_upstreams() {
         singBoxArm64Asset="sing-box-${singBoxVersion}-linux-arm64.tar.gz"
         statsRelease=$(gh api "repos/neil1123-vip/padm/releases/tags/sing-box-${singBoxTag}") ||
             die 'failed to query sing-box stats assets'
-        upstreamRelease=$(gh api "repos/SagerNet/sing-box/releases/tags/${singBoxTag}") ||
+        upstreamRelease=$(gh api "repos/SagerNet/sing-box/releases/tags/${singBoxUpstreamTag}") ||
             die 'failed to query sing-box upstream assets'
         jq -e --arg tag "sing-box-${singBoxTag}" \
             '.tag_name == $tag and .draft == false and .prerelease == false' <<<"${statsRelease}" >/dev/null ||
             die 'sing-box stats release is not stable'
-        jq -e --arg tag "${singBoxTag}" \
+        jq -e --arg tag "${singBoxUpstreamTag}" \
             '.tag_name == $tag and .draft == false and .prerelease == false' <<<"${upstreamRelease}" >/dev/null ||
             die 'sing-box upstream release is not stable'
         for asset in "sing-box-${singBoxVersion}-source.tar.gz" SHA256SUMS; do
@@ -499,6 +504,7 @@ refresh_upstreams() {
                 "https://github.com/neil1123-vip/padm/releases/download/sing-box-${singBoxTag}/${asset}" \
                 "${tmpRoot}/${asset}") || die "failed to download sing-box stats ${arch} asset"
             [[ "${actualDigest}" == "${expectedDigest}" ]] || die "sing-box stats ${arch} digest mismatch"
+            asset="sing-box-${singBoxUpstreamVersion}-linux-${arch}.tar.gz"
             expectedDigest=$(release_asset_sha256 "${asset}" <<<"${upstreamRelease}") ||
                 die "missing verified sing-box upstream asset: ${asset}"
             if [[ "${arch}" == amd64 ]]; then

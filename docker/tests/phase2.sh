@@ -124,6 +124,9 @@ jq -e '
     (.group.default.targets | sort) == ["net", "nginx", "ops", "sing-box", "xray"] and
     all(.target[]; (.platforms | sort) == ["linux/amd64", "linux/arm64"]) and
     all(.target[]; .args.ALPINE_BASE == $base) and
+    .target["sing-box"].args.SING_BOX_VERSION == $singBoxVersion and
+    .target["sing-box"].args.SING_BOX_AMD64_ASSET == $singBoxAmd64Asset and
+    .target["sing-box"].args.SING_BOX_ARM64_ASSET == $singBoxArm64Asset and
     .target["sing-box"].args.SING_BOX_AMD64_SHA256 == $singBoxAmd64 and
     .target["sing-box"].args.SING_BOX_ARM64_SHA256 == $singBoxArm64 and
     .target["sing-box"].args.LIBGCC_VERSION == $libgcc and
@@ -131,6 +134,9 @@ jq -e '
     .target.ops.args.CURL_VERSION == $curl and
     all(.target[]; (.tags | length) == 1 and (all(.tags[]; (contains(":latest") | not))))
 ' --arg base "${PADM_LOCK_ALPINE_BASE}" \
+    --arg singBoxVersion "${PADM_LOCK_SING_BOX_VERSION}" \
+    --arg singBoxAmd64Asset "${PADM_LOCK_SING_BOX_AMD64_ASSET}" \
+    --arg singBoxArm64Asset "${PADM_LOCK_SING_BOX_ARM64_ASSET}" \
     --arg singBoxAmd64 "${PADM_LOCK_SING_BOX_AMD64_SHA256}" \
     --arg singBoxArm64 "${PADM_LOCK_SING_BOX_ARM64_SHA256}" \
     --arg libgcc "${PADM_LOCK_LIBGCC_VERSION}" \

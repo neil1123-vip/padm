@@ -651,6 +651,12 @@ runRegressionDockerContractsAggregateContract() (
     printf '%s\n' "${PROJECT_ROOT}/docker/tests/reality-stream-cli-real.py --selected vision" \
         "${PROJECT_ROOT}/docker/tests/reality-stream-cli-real.py --selected xhttp" >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+
+    : >"${callLog}"
+    bash() { printf '%s\n' "$1" >>"${callLog}"; }
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-reality-mldsa65-real
+    printf '%s\n' "${PROJECT_ROOT}/docker/tests/reality-mldsa65-real.sh" >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
 )
 
 runRegressionTargetedBatchHelpers() (

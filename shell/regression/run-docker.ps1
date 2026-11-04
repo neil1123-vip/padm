@@ -348,7 +348,7 @@ try {
         'docker-tproxy-real', 'docker-redirect-real', 'docker-tun-real', 'docker-shadowsocks-real',
         'docker-subscription-publication-real', 'docker-subscription-site-real', 'docker-acme-recovery-real',
         'docker-webroot-recovery-real', 'docker-alpn-recovery-real', 'docker-acme-dns-recovery-real',
-        'docker-reality-stream-cli-real', 'docker-reality-stream-xhttp-cli-real'
+        'docker-reality-stream-cli-real', 'docker-reality-stream-xhttp-cli-real', 'docker-reality-mldsa65-real'
     )
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real',
@@ -474,7 +474,23 @@ try {
             ops = 'padm-local/padm-ops:control-4c4b'
             net = 'padm-local/padm-net:control-4c4b'
         }
-        if ($Selector -in @('docker-acme-recovery-real', 'docker-webroot-recovery-real', 'docker-alpn-recovery-real',
+        if ($Selector -eq 'docker-reality-mldsa65-real') {
+            # 固定核心与 OpenSSL；专用标签让离线导入保留可解析的镜像名。
+            $pinnedImages = [ordered]@{
+                'padm-local/padm-xray:mldsa65-26.10.31' = 'ghcr.io/neil1123-vip/padm-xray@sha256:0f768569d91783b640b911da2956c7db5f3d4607852a8489968c3a571cd45bf7'
+                'padm-local/padm-sing-box:tun-1.14.4' = 'ghcr.io/neil1123-vip/padm-sing-box@sha256:7c58562b7a6f1988d9850b5d425e9f446e04f2df63ab10542f160ab5581129ed'
+                'padm-local/padm-ops:mldsa65-openssl-3.5.9' = 'ghcr.io/neil1123-vip/padm-ops@sha256:3f00355db580fabb2c9eaea8c1cd8fcd43f286acc6bf9499e12870cec03d20a1'
+            }
+            foreach ($tag in $pinnedImages.Keys) {
+                & $docker image tag $pinnedImages[$tag] $tag
+                if ($LASTEXITCODE -ne 0) { throw "Cannot tag the pinned ML-DSA image: $tag" }
+            }
+            $references = [ordered]@{
+                xray = 'padm-local/padm-xray:mldsa65-26.10.31'
+                'sing-box' = 'padm-local/padm-sing-box:tun-1.14.4'
+                ops = 'padm-local/padm-ops:mldsa65-openssl-3.5.9'
+            }
+        } elseif ($Selector -in @('docker-acme-recovery-real', 'docker-webroot-recovery-real', 'docker-alpn-recovery-real',
             'docker-acme-dns-recovery-real')) {
             $references = [ordered]@{
                 ops = 'padm-local/padm-ops:acme-curl-6a18'

@@ -305,7 +305,7 @@
       "profiles": ["subscription", "net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "4C.1–4C.11 已提供私网 API、逐节点邀请/轮换/撤销、被控多入口接入、手动/每 5 分钟自动同步、重映射、同身份端口更新/重连、显式主控 rebind 和单 Peer 关联地址/连接迁移；保留身份、版本门禁、本机账号及累计，操作前停用相关调度和防护。4C.13 增加显式 v1→v2 主控升级、peers 非空集合、稳定节点 ID、独立来源/token/有效期及逐项 CLI/菜单；HTTP、邀请和被控保持 v1，旧邀请有效，v2 目标操作强制 Peer ID。先配置 canonical WG /32 再登记，先撤销再移除且保留至少一项；未登记隧道项可维护。API 总并发8、同源一个处理和一个最多100ms交接，监听不等待；来源与token共同匹配。逐项变更不增加共享账号版本，失败仅保留全部可信计划中完整未变的授权，其余禁用；配置事务可能短暂影响全部连接。隔离 amd64 一主两被控的授权/故障隔离、真实TLS业务、版本/累计及最终API双来源补验通过。token只写外部root私有邀请，不入规格/备份/普通日志，API和客户端零能力，无公网映射。6A.23 接入同架构 v3 空目标的 v2 主控新身份恢复：旧主控须停机隔离，保留完整 canonical WG 集合、地址及业务，全部控制 ID/token hash 换新并撤权，各被控须新邀请/rebind；不导入旧控制日志或来源现场。v2关联地址/密钥迁移及控制面Fail2ban拒绝；完整灾备、原生宿主/arm64、公网、重启和可信发布待验，整体保持deferred。"
+      "reason": "4C.1–4C.11 已提供私网 API、逐节点邀请/轮换/撤销、被控多入口接入、手动/每 5 分钟自动同步、重映射、同身份端口更新/重连、显式主控 rebind 和单 Peer 关联地址/连接迁移；保留身份、版本门禁、本机账号及累计，操作前停用相关调度和防护。4C.13 增加显式 v1→v2 主控升级、peers 非空集合、稳定节点 ID、独立来源/token/有效期及逐项 CLI/菜单；HTTP、邀请和被控保持 v1，旧邀请有效，v2 目标操作强制 Peer ID。先配置 canonical WG /32 再登记，先撤销再移除且保留至少一项；未登记隧道项可维护。API 总并发 8，同源一个处理和一个最多 100 ms 交接，监听不等待；来源与 token 共同匹配。逐项变更不增加共享账号版本，失败仅保留全部可信计划中完整未变的授权，其余禁用；配置事务可能短暂影响全部连接。隔离 amd64 一主两被控的授权/故障隔离、真实 TLS 业务、版本/累计及最终 API 双来源补验通过。token 只写外部 root 私有邀请，不入规格/备份/普通日志，API 和客户端零能力，无公网映射。6A.23 接入同架构 v3 空目标的 v2 主控新身份恢复：旧主控须停机隔离，保留完整 canonical WG 集合、地址及业务，全部控制 ID/token hash 换新并撤权，各被控须新邀请/rebind；不导入旧控制日志或来源现场。原生多机、arm64、新主机灾备、重启及匹配当前源码的可信发布验收仍缺，故保留 deferred；v2 关联地址/密钥迁移和控制面 Fail2ban 是明确拒绝的组合，不列为新增开发。灾备及宿主网络证据分别归 interactive-menu、wireguard，不重复计缺口。"
     },
     "acme-webroot": {
       "status": "deferred",
@@ -314,7 +314,7 @@
       "profiles": ["acme", "nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5A.3b 已提供受管 Nginx HTTP-01 webroot 菜单/CLI 与自动续期：v3 显式开启双栈 80:8088，只读稳定挑战根，ops 仅写独占 active；归属、端口、挂载与 token 树校验，不暂停 Nginx，失败和信号恢复，启用续期时保护关闭与回滚。公网 CA、真实宿主生命周期及原生双架构未验，完整状态仍 deferred。"
+      "reason": "5A.3b 已提供受管 Nginx HTTP-01 webroot 菜单/CLI 与自动续期：v3 显式开启双栈 80:8088，只读稳定挑战根，ops 仅写独占 active；归属、端口、挂载与 token 树校验，不暂停 Nginx，失败和信号恢复，启用续期时保护关闭与回滚。原生记录已验证 Debian 13 amd64 的正式 webroot 公网签发、在线换证，以及 3.41.4 新证书消费失败全链回滚；不再列为完全缺少公网 CA 证据。自然到期续期、原生 arm64/公网 IPv6 和当前版本适用组合的生命周期仍待验，故保留 deferred；调度 no-op、强制到期和旧版本通过不能替代这些证据。自然续期与 acme-standalone 共用同一环境门槛，不重复计数。"
     },
     "acme-standalone": {
       "status": "deferred",
@@ -323,7 +323,7 @@
       "profiles": ["acme"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5A.3a/5A.3c 已提供 HTTP-01 standalone 与 TLS-ALPN-01 的首配、重新选择、首个 TLS、迁移、菜单/CLI 和自动续期；非 root ops 临时双栈 80:8080 或 443:8443，实际归属检查，仅暂停本部署原运行拥有者，失败与信号恢复。ALPN 无凭据，登记 schema 4，拒绝不兼容旧 bundle；Fail2ban Nginx 拒绝自监听停启。公网 CA、原生 Linux/双架构及宿主生命周期待验，完整状态仍 deferred。"
+      "reason": "5A.3a/5A.3c 已提供 HTTP-01 standalone 与 TLS-ALPN-01 的首配、重新选择、首个 TLS、迁移、菜单/CLI 和自动续期；非 root ops 临时双栈 80:8080 或 443:8443，实际归属检查，仅暂停本部署原运行拥有者，失败与信号恢复。ALPN 无凭据，登记 schema 4，拒绝不兼容旧 bundle；Fail2ban Nginx 拒绝自监听停启。Debian 13 amd64 正式 standalone 公网签发、3.41.4 standalone auto-renew/ALPN issue 消费失败回滚、同张 ALPN 证书在线往返，以及 3.41.5 ALPN auto-renew 回滚和单次 fresh ALPN 完整链均已留证。自然到期续期、原生 arm64/公网 IPv6 和当前版本适用组合的生命周期仍待验，故保留 deferred；不将 fresh 申请或强制到期称为自然续期，不扩展其它 CA/provider。自然续期归同一 ACME 环境门槛。"
     },
     "site-static-redirect-alpn": {
       "status": "deferred",
@@ -332,7 +332,7 @@
       "profiles": ["nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5A.1 默认页、静态目录和 302、5A.1b–5A.1e 受管 notes/photos/docs 模板及可选站名与 5A.2 逐入口 ALPN 诊断、推荐修复及三种顺序提供菜单/CLI；模板用于已有 v3 Nginx TLS 21–25（含纯或混合 sing-box 23）、Xray 27/29 或 Hysteria2。站名复用原生校验与 HTML 转义，只写入公开网页，不入规格。5A.1c Hysteria2 local 使用共享受管静态目录、固定只读挂载且无混淆，local 启用时 default/302 拒绝，纯 Hy2 只开放静态网页。随包资源清单纳入 bundle 验证，主题不写入规格。内容、规格与生成结果纳入候选、备份及失败/信号恢复。专项仅放行所选 ALPN 字段漂移，拒绝覆盖其它配置；隔离 amd64 27/29 的真实双栈 TLS ALPN、h1/h2 fallback/404、PROXY 来源及认证，以及 sing-box 23 模板资源与主/组订阅双栈共存已验。公网及原生双架构验收待补，组合能力仍 deferred；webroot/standalone ACME 另列。"
+      "reason": "5A.1 默认页、静态目录和 302、5A.1b–5A.1e 受管 notes/photos/docs 模板及可选站名与 5A.2 逐入口 ALPN 诊断、推荐修复及三种顺序提供菜单/CLI；模板用于已有 v3 Nginx TLS 21–25（含纯或混合 sing-box 23）、Xray 27/29 或 Hysteria2。站名复用原生校验与 HTML 转义，只写入公开网页，不入规格。5A.1c Hysteria2 local 使用共享受管静态目录、固定只读挂载且无混淆，local 启用时 default/302 拒绝，纯 Hy2 只开放静态网页。随包资源清单纳入 bundle 验证，主题不写入规格。内容、规格与生成结果纳入候选、备份及失败/信号恢复。专项仅放行所选 ALPN 字段漂移，拒绝覆盖其它配置；隔离 amd64 27/29 双栈 ALPN/fallback、sing-box 23 模板及主/组订阅共存已验。正式 3.41.5 在 Debian 13 amd64、bridge、公网 IPv4 和固定 Mihomo v1.19.28 的 13 阶段通过 57 正例/35 拒绝，含三主题/特殊站名/302、订阅、ALPN 与恢复。原生 arm64/公网 IPv6、其它适用组合及当前版本生命周期仍待验，故保留 deferred；已通过子项不重复列为完全未验，ACME 归独立条目。"
     },
     "entry-port-management": {
       "status": "deferred",
@@ -341,7 +341,7 @@
       "profiles": ["core-xray"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v2/v3 已支持最多 16 个入口、复制/删除及端口事务，v3 明确核心归属；5B.5c–5B.5d 额外公开端口的菜单/CLI 增删、状态与默认分享选择已交付，沿用原认证、统计和 TLS/SNI 前端，候选失败恢复，本地真实发布已验。受管/桥接可达宿主网站的 Reality 443 共存可使用别名；拒绝 WS/SSH Fail2ban、TUN/TProxy 与 host-network 组合，允许已有 WireGuard/控制面 Fail2ban。3D.18 专项菜单/CLI 可修改已有 21–25 入口的核心后端及 Nginx TLS 内部端口，HTTPUpgrade 支持双核心、其余仅 Xray，同步别名和受管共存投影并校验监听冲突，拒绝站点 Fail2ban；既有身份和普通导入的内部端口仍冻结。端口跳跃完整管理、适用公网/原生宿主/arm64 及完整管理仍待交付或验收。"
+      "reason": "v2/v3 已支持最多 16 个入口、复制/删除及端口事务，v3 明确核心归属；5B.5c–5B.5e 额外公开端口的菜单/CLI 增删、原位修改、状态与默认分享选择已交付，沿用原认证、统计和 TLS/SNI 前端及候选失败恢复，本地双栈发布已验。受管/桥接可达宿主网站的 Reality 443 共存可使用别名；额外端口别名拒绝 WS/SSH Fail2ban、TUN/TProxy 与 host-network 组合，允许已有 WireGuard/控制面 Fail2ban；3D.26 已另行放行活动 WS 防护下未保护入口的基础增删改。3D.18 专项可修改已有 21–25 入口的核心后端及 Nginx TLS 内部端口，HTTPUpgrade 支持双核心、其余仅 Xray，同步别名/共存投影并校验冲突，拒绝站点 Fail2ban；普通导入的内部端口仍冻结。正式 3.41.6 的固定 Mihomo/amd64/bridge/公网 IPv4 已验证 SS2022 默认别名、删除与基口恢复，并补 TUIC/SS 和路由合并真实重启；不外推其它端口组合。原生 arm64/公网 IPv6 及匹配当前源码的适用生命周期仍待验，故保留 deferred。别名证据与 internal-207-access-control 共用；Hy2/TUIC 跳跃沿用单 sing-box、单个双族入口及手动监督边界，不追加 TUIC 客户端自动换端口或崩溃/开机自动恢复。"
     },
     "reality-target-management": {
       "status": "supported",
@@ -368,7 +368,7 @@
       "profiles": ["core-xray", "nginx", "nginx-stream"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已支持容器内受管 TLS 入口、桥接可达宿主网站或独立 host 网络分流入口与一个 Xray Vision/XHTTP 后端的 443 共存，菜单提供状态、开启、更换和关闭，沿用配置事务及失败恢复；宿主网站支持多个 SNI、host-gateway、可路由 IP 或 127.0.0.1/::1 回环，证书和内容仍由网站维护方负责；完整环境验收仍为 deferred，协议管理状态见逐协议记录。"
+      "reason": "已支持容器内受管 TLS 入口、桥接可达宿主网站或独立 host 网络分流入口与一个 Xray Vision/XHTTP 后端的 443 共存，菜单提供状态、开启、更换和关闭，沿用配置事务及失败恢复；宿主网站支持多个 SNI、host-gateway、可路由 IP 或 127.0.0.1/::1 回环，证书和内容仍由网站维护方负责。原生记录已取得固定 Debian 13 amd64 的三拓扑恢复、受管 bridge 公网 Vision/XHTTP 正反例及六点实际重启限定证据，不再笼统标为原生宿主或公网全未验。原生 arm64/公网 IPv6、其它组合及匹配当前源码的发布/生命周期仍待验，故保留 deferred；旧 Vision reset/XHTTP 超时原件及根因未定结论保持，不把后续通过写成历史故障修复。协议管理已按 3D.26 另行 supported。"
     },
     "cdn-entry-management": {
       "status": "deferred",
@@ -377,7 +377,7 @@
       "profiles": ["subscription"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "4A.5–4A.5c 提供协议 2 Reality XHTTP、21/22/23 WS/HTTPUpgrade、24/25 gRPC TLS 的逐入口多连接地址覆盖、菜单/CLI 状态、设置和清除，统一刷新本地链接、主订阅及分享组，保留 Reality、SNI、Host/路径、XHTTP 模式或 gRPC serviceName/h2、端口与认证并复用候选和失败恢复。协议 2 带 CDN 映射时要求 x-padm-cdn-xhttp；24/25 带 CDN 映射时要求 x-padm-cdn-grpc-tls；原三协议及无映射的 gRPC 旧包子集仍兼容。原生 CDN 菜单仅提供 H3 使用说明，不另设参数开关或自动建设外部 TLS/H3 拓扑；其它协议及公网 CDN 实际验收仍在范围外，完整环境验收保持 deferred。"
+      "reason": "4A.5–4A.5c 提供协议 2 Reality XHTTP、21/22/23 WS/HTTPUpgrade、24/25 gRPC TLS 的逐入口多连接地址覆盖、菜单/CLI 状态、设置和清除，统一刷新本地链接、主订阅及分享组，保留 Reality、SNI、Host/路径、XHTTP 模式或 gRPC serviceName/h2、端口与认证并复用候选和失败恢复。协议 2 带 CDN 映射时要求 x-padm-cdn-xhttp；24/25 带 CDN 映射时要求 x-padm-cdn-grpc-tls；原三协议及无映射的 gRPC 旧包子集仍兼容。原生记录已有固定 Debian 13 amd64 的 Cloudflare WS 地址/SNI/Host 公网正反例，不能写成全部缺公网 CDN 证据；XHTTP/h3 和 gRPC 供应商透传、原生 arm64/公网 IPv6 及当前版本适用组合仍缺，故保留 deferred。原生 CDN 菜单仅提供 H3 说明，不追加参数开关、其它协议或自动建设外部 TLS/H3 拓扑。"
     },
     "fail2ban": {
       "status": "host-integrated",
@@ -431,7 +431,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已提供可信首配、规格/多入口/双核心、Reality/TLS/ACME、账号/分享/额度、业务备份、核心/Geo、多被控逐节点管理、站点/路由及适用 Fail2ban 菜单。6A.1–6A.23 提供受管私密输入导出、完整性校验、同架构 v3 空目标预览/恢复及持久中断接管；保留业务身份和累计，拒绝已有部署替换、未处理输入与外部调度漂移。Reality 库、固定 Geo 原字节及摘要/离线解析、受管/桥接可达网站共存、HTTP-01 空挑战根、停用 Hy2/TUIC 跳跃规格均按专项边界恢复，不复制宿主规则或外部网站。ACME 限固定 acme.sh 3.1.6、单域 EC-P256、standalone 8080/schema 2、固定受管 webroot/schema 3、ALPN 8443/schema 4 或 dns_acmedns/schema 1；四项 DNS 凭据须与域配置精确绑定，外部注册/CNAME 须有效。纯数据重建固定 9 文件，在无网络可信 ops 校验密钥、证书链和 TLS 输出绑定；拒绝其它 DNS 材料、hook、未知字段、SAN/RSA/EAB 及自定义执行路径。启用续期须唯一域及完整匹配材料，健康后按 traffic、Geo、renewal 安装适用调度；独立私密快照、统一漂移预检、逆序撤销及 unit 原子替换。停用/无登记不接管外部任务，空 ACME 不能授权启用，预览不装调度。无控制角色 canonical 非空 Peer 集合及停用自动同步的单 Peer 被控可恢复；主控接受 v1 单 Peer 或 v2 非空集合，须停机隔离旧宿主后重建全部控制身份并撤权，再逐端新邀请/rebind，不导入旧认证日志及来源现场。3D.26 的 16 个公开协议管理状态见逐项记录；v2 关联迁移、其它宿主能力和原生双架构/公网/重启/可信发布仍待交付或验收，整体保持 deferred；当前证据见实施计划。"
+      "reason": "已提供可信首配、规格/多入口/双核心、Reality/TLS/ACME、账号/分享/额度、业务备份、核心/Geo、多被控逐节点管理、站点/路由及适用 Fail2ban 菜单。6A.1–6A.23 提供受管私密输入导出、完整性校验、同架构 v3 空目标预览/恢复及持久中断接管；保留业务身份和累计，拒绝已有部署替换、未处理输入与外部调度漂移。Reality 库、固定 Geo 原字节及摘要/离线解析、受管/桥接可达网站共存、HTTP-01 空挑战根、停用 Hy2/TUIC 跳跃规格均按专项边界恢复，不复制宿主规则或外部网站。ACME 限固定 acme.sh 3.1.6、单域 EC-P256、standalone 8080/schema 2、固定受管 webroot/schema 3、ALPN 8443/schema 4 或 dns_acmedns/schema 1；四项 DNS 凭据须与域配置精确绑定，外部注册/CNAME 须有效。纯数据重建固定 9 文件，在无网络可信 ops 校验密钥、证书链和 TLS 输出绑定；拒绝其它 DNS 材料、hook、未知字段、SAN/RSA/EAB 及自定义执行路径。启用续期须唯一域及完整匹配材料，健康后按 traffic、Geo、renewal 安装适用调度；独立私密快照、统一漂移预检、逆序撤销及 unit 原子替换。停用/无登记不接管外部任务，空 ACME 不能授权启用，预览不装调度。无控制角色 canonical 非空 Peer 集合及停用自动同步的单 Peer 被控可恢复；主控接受 v1 单 Peer 或 v2 非空集合，须停机隔离旧宿主后重建全部控制身份并撤权，再逐端新邀请/rebind，不导入旧认证日志及来源现场。本机代码项随 6A.23 收口，3D.26 的 16 个公开协议管理已 supported；原生记录另有正式安装/升级回滚/公网/重启、同机空目标恢复及账号/业务恢复限定证据。新原生主机灾备、arm64/公网 IPv6、当前源码可信发布和适用宿主生命周期仍缺，故整体保留 deferred；各专项未决只在所属条目计一次，明确拒绝的 v2 关联迁移、已有部署替换等不新增为开发要求。"
     },
     "routing-tools": {
       "status": "deferred",
@@ -440,7 +440,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已交付两核心认证 SOCKS5 TCP 全局/选择性出站、DNS/精确 hosts、域名 Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT、CN 区域预设、IPv6 AAAA-only 出站和用户态 WARP。菜单/CLI 支持既有名单增删及单条替换、hosts 单键增删/替换、DNS/SOCKS5 上游修改和区域模式/自定义例外；5B.4u 支持 SOCKS5 上游、静默认证及全局/域名模式直接录入，5B.4v 支持已有 WARP Peer 七字段直接录入、静默私钥，5B.4w 支持一个字面 IP 与 1–256 个精确 FQDN 的 hosts 整组直接录入，旧私有 JSON CLI 保留。有限重叠与 full/domain/keyword 覆盖诊断只读，不预测最终流量。Direct 优先，关闭保留其它策略，代理或匹配 DNS 失败不回退；私有参数、其它配置与累计冻结，复用候选及失败/信号恢复。5B.4r/4s 提供单 sing-box、无副核心的显式解析后 IP 阻断及 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析，重新阻断后立即选路，代理绑定已检查的字面地址，解析失败拒绝；缺省字面模式保持，基础 flag 与组合分别由独立 bundle marker 保护。Xray 解析后阻断、SOCKS UDP 入站认证撤销、完整区域/语义冲突检测仍未交付。WARP 本地加密 Peer 已验，Cloudflare 账号、公网出口及原生宿主/arm64/可信发布仍待验，整体 deferred 不升级。"
+      "reason": "已交付两核心认证 SOCKS5 TCP 全局/选择性出站、DNS/精确 hosts、域名 Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT、CN 区域预设、IPv6 AAAA-only 出站和用户态 WARP。菜单/CLI 支持既有名单增删及单条替换、hosts 单键增删/替换、DNS/SOCKS5 上游修改和区域模式/自定义例外；5B.4u 支持 SOCKS5 上游、静默认证及全局/域名模式直接录入，5B.4v 支持已有 WARP Peer 七字段直接录入、静默私钥，5B.4w 支持一个字面 IP 与 1–256 个精确 FQDN 的 hosts 整组直接录入，旧私有 JSON CLI 保留。有限重叠与 full/domain/keyword 覆盖诊断只读，不预测最终流量。Direct 优先，关闭保留其它策略，代理或匹配 DNS 失败不回退；私有参数、其它配置与累计冻结，复用候选及失败/信号恢复。5B.4r/4s 提供单 sing-box、无副核心的显式解析后 IP 阻断及 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析，重新阻断后立即选路，代理绑定已检查的字面地址，解析失败拒绝；缺省字面模式保持，基础 flag 与组合分别由独立 bundle marker 保护。正式 3.41.6 的 amd64/bridge/公网 IPv4 已验两核心 SOCKS5 TCP/路由、纯 sing-box 发布共存和 DNS 回退拒绝，sing-box 路由与 TUIC/SS 的合并真实重启也通过。WARP 仍缺真实 Cloudflare 账号/公网出口，原生 arm64/公网 IPv6 及当前版本适用组合仍待验，故保留 deferred。Xray 解析后阻断和 SOCKS UDP 因固定核心反例继续拒绝；任意国家向导、最终流量语义引擎不在范围，不另列开发项。路由证据与 internal-206-routing-rules 共用，SOCKS 入站限制归 internal-201-socks-relay。"
     },
     "internal-201-socks-relay": {
       "status": "deferred",
@@ -449,7 +449,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.1–5B.2 已交付认证 SOCKS5 TCP 全局及域名分流出站；公网 SOCKS 入站和完整中继管理尚未交付，201 不作为公开节点协议。固定 sing-box v1.14.2 的动态 BND 不能直接用 bridge 固定端口发布，活动 UDP 关联还会把真实数据报来源替换为已认证 TCP 来源，使未认证及来源名单之外的 IP 借用关联；关闭 TCP 后监听撤销，但 host-network 无法修复活动会话鉴权。Xray 26.3.27 的 UDP 来源许可不随控制关闭撤销；两核心均不满足完整入站要求，不开放菜单或降为 TCP-only。"
+      "reason": "5B.1–5B.2 已交付认证 SOCKS5 TCP 全局及域名分流出站；201 不作为公开节点协议。5B.5b–5B.5b.1 的固定 sing-box v1.14.2 反例表明动态 BND 不能直接用 bridge 固定端口发布，活动 UDP 关联还会把真实数据报来源替换为已认证 TCP 来源，使未认证及来源名单之外的 IP 借用关联；关闭 TCP 后监听撤销，但 host-network 无法修复活动会话鉴权。Xray 26.3.27 的 UDP 来源许可不随控制关闭撤销；两核心均不满足完整入站要求，故保留 deferred 并明确拒绝，不开放菜单或降为 TCP-only。只有固定核心行为发生相关变化并重新证明发布、真实来源、会话鉴权及控制关闭撤销，才重新评估该限制；不是缺少一轮环境回归，也不列为当前必须新增的开发。TCP 出站及其原生证据归 routing-tools。"
     },
     "internal-202-http-relay": {
       "status": "deferred",
@@ -458,7 +458,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.5a 提供已有受管 Xray 的独立认证 HTTP/CONNECT 入站、字面来源允许名单、专项编辑/关闭、脱敏状态和候选回滚；5B.5a.2 支持端口、地址族、静默认证与必填来源 CSV 直接录入，旧私有 JSON CLI 保留。全部目的走专属直连，不继承全局出站，也不参与业务账号额度。双栈发布与真实来源已在隔离 amd64 Linux daemon 验证，IPv6 relay 只接入受管 bridge，旧包和旧 plain bridge 恢复明确拒绝；旧部署须先关闭中继或改为 IPv4 再升级。sing-box v1.14.2 会信任 X-Forwarded-For 改写路由来源且没有关闭选项，合同明确拒绝。202 不作为公开节点协议；真实宿主、公网、arm64 和可信发布验收尚未完成，完整状态保持 deferred。"
+      "reason": "5B.5a 提供已有受管 Xray 的独立认证 HTTP/CONNECT 入站、字面来源允许名单、专项编辑/关闭、脱敏状态和候选回滚；5B.5a.2 支持端口、地址族、静默认证与必填来源 CSV 直接录入，旧私有 JSON CLI 保留。全部目的走专属直连，不继承全局出站，也不参与业务账号额度。双栈发布与真实来源已在隔离 amd64 Linux daemon 验证，IPv6 relay 只接入受管 bridge，旧包和旧 plain bridge 恢复明确拒绝；旧部署须先关闭中继或改为 IPv4 再升级。Debian 13 amd64 原生外部 IPv4 已通过三个 HTTPS 目标严格 TLS/200、错误认证 407 和未允许来源 blocked，不再列为完全无宿主或公网证据。公网 IPv6、原生 arm64 及匹配当前源码的可信发布/生命周期仍待验，故保留 deferred。sing-box v1.14.2 信任 X-Forwarded-For 改写路由来源且无关闭选项，继续明确拒绝，不列为新增跨核心需求；202 不作为公开节点协议。"
     },
     "internal-203-wireguard": {
       "status": "host-integrated",
@@ -494,7 +494,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "两核心 DNS、精确 hosts、Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT 和 CN 区域预设已交付；菜单/CLI 支持名单增删/单条替换、hosts 单键管理及单 IP/精确 FQDN CSV 整组直接录入、DNS/SOCKS5 上游修改和区域模式/自定义例外，配置及累计保护复用部署事务。IPv6 与用户态 WARP 保持独立所有权，Direct 优先，解析或代理失败不回退。只读精确重叠和 full/domain/keyword 覆盖不推断 GeoSite、DNS 或最终流量。5B.4r/4s 菜单 17→45/46 与 --block-ips-resolve/--block-ips-literal 提供已有手工 IP 名单的解析模式：仅单 sing-box、无副核心，支持 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析后重新匹配 IP 并立即选路，代理绑定经检查的字面地址，DNS 失败拒绝；缺省及旧状态保持，基础 flag 由 x-padm-routing-block-ips-resolve 保护，组合另需 x-padm-routing-block-ips-resolve-egress。名单编辑保留模式，删空/关闭移除；模式专项只允许 flag 漂移，支持预览、健康失败/INT/TERM 恢复。Xray、完整区域及语义冲突检测、原生宿主/arm64/公网仍待交付或验收，206 不作为公开节点协议，整体 deferred 不升级。"
+      "reason": "两核心 DNS、精确 hosts、Direct/Block、字面 IP/CIDR/geoip:cn、明文 BT 和 CN 区域预设已交付；菜单/CLI 支持名单增删/单条替换、hosts 单键管理及单 IP/精确 FQDN CSV 整组直接录入、DNS/SOCKS5 上游修改和区域模式/自定义例外，配置及累计保护复用部署事务。IPv6 与用户态 WARP 保持独立所有权，Direct 优先，解析或代理失败不回退。只读精确重叠和 full/domain/keyword 覆盖不推断 GeoSite、DNS 或最终流量。5B.4r/4s 菜单 17→45/46 与 --block-ips-resolve/--block-ips-literal 提供已有手工 IP 名单的解析模式：仅单 sing-box、无副核心，支持 WARP/IPv6 出站组合；各路径按出站地址族从 hosts/指定 DNS/local 解析后重新匹配 IP 并立即选路，代理绑定经检查的字面地址，DNS 失败拒绝；缺省及旧状态保持，基础 flag 由 x-padm-routing-block-ips-resolve 保护，组合另需 x-padm-routing-block-ips-resolve-egress。名单编辑保留模式，删空/关闭移除；模式专项只允许 flag 漂移，支持预览、健康失败/INT/TERM 恢复。与 routing-tools 共用正式 3.41.6 原生 amd64/公网 IPv4 路由、DNS 拒绝回退和合并真实重启证据，不重复计已完成子项。WARP 真实账号/公网出口、原生 arm64/公网 IPv6 及当前版本适用组合仍待验，故保留 deferred。固定 Xray 解析后阻断反例继续拒绝；原生 CN 预设已覆盖，不追加任意国家向导或最终流量语义引擎，206 不作为公开节点协议。"
     },
     "internal-207-access-control": {
       "status": "deferred",
@@ -503,7 +503,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.5c–5B.5d 提供已有受管入口的额外 Compose 发布端口：独立 v3 port_aliases、菜单/CLI 添加/删除/状态与默认分享选择、候选验证和失败恢复，复用原入口认证、账号/统计以及 TLS/完整 SNI 前端，不加核心或任意目的转发。双栈 TCP/UDP 发布已在隔离 amd64 Linux daemon 验证。share_default 只切换该入口的 URI、主订阅和分享组；恢复 base 或删除默认别名回退原公开入口。拒绝 WS/SSH Fail2ban、TUN/TProxy 和 host-network 组合，允许已有 WireGuard/控制面 Fail2ban；适用公网、原生宿主、arm64 和可信发布尚未验收，207 完整状态保持 deferred。"
+      "reason": "5B.5c–5B.5e 提供已有受管入口的额外 Compose 发布端口：独立 v3 port_aliases、菜单/CLI 添加/删除/原位修改/状态与默认分享选择、候选验证和失败恢复，复用原入口认证、账号/统计以及 TLS/完整 SNI 前端，不加核心或任意目的转发。双栈 TCP/UDP 发布已在隔离 amd64 Linux daemon 验证。share_default 只切换该入口的 URI、主订阅和分享组；原位修改保留顺序及默认标记，恢复 base 或删除默认别名回退原公开入口。与 entry-port-management 共用正式 3.41.6 的 amd64/bridge/公网 IPv4 SS2022 默认别名、删除/基口恢复和路由/UDP 合并真实重启证据，不重复计数。原生 arm64/公网 IPv6 及匹配当前源码的可信发布/适用生命周期仍待验，故保留 deferred。拒绝 WS/SSH Fail2ban、TUN/TProxy 和 host-network，允许已有 WireGuard/控制面 Fail2ban；这些明确边界不列为新增开发，207 不作为公开节点协议。"
     },
     "core-lifecycle": {
       "status": "supported",
@@ -566,7 +566,7 @@
       "profiles": ["core-xray"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5C.10 已交付 schema 3 Xray Reality Vision/XHTTP 逐入口实验开关、状态、配置/URI 投影、ML-KEM-768 配对校验及能力 marker 更新/回滚门禁；仅固定 Xray 26.3.27/Mihomo v1.19.28 的 Linux amd64 实验已验，其它客户端、算法、公网、原生宿主/arm64 与完整能力验收仍 deferred。"
+      "reason": "5C.10 已交付 schema 3 Xray Reality Vision/XHTTP 逐入口实验开关、状态、配置/URI 投影、ML-KEM-768 配对校验及能力 marker 更新/回滚门禁。固定 Xray 26.3.27/Mihomo v1.19.28 除 Linux amd64 实验外，正式 3.41.5 在 Debian 13 amd64/bridge/公网 IPv4 的六阶段启停矩阵 28 正/38 拒绝、双入口加密真实整机重启 16 正/32 拒绝均通过；原容器自然启动、URI/材料权限/调度/累计及正式恢复已核验，不再泛写无原生、公网或重启证据。其它客户端/算法、原生 arm64/公网 IPv6、其它拓扑及匹配当前源码的可信发布/生命周期仍未覆盖，故保留 deferred；不把固定组合证据外推完整实验能力，也不与 3D.26 的 Reality ML-DSA-65 混为同一能力。"
     }
   },
   "host_integrations": {

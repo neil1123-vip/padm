@@ -96,29 +96,46 @@ async function main() {
     check('push', { changed: 'true', verify: 'true' }, '0'.repeat(40));
     check('push', { changed: 'true', verify: 'true' }, 'f'.repeat(40));
 
+    // 同一上游映射到独立 padm 身份，未知修订拒绝，不借用上游预发布标签。
+    write('shell/core/singbox_build.sh', fs.readFileSync(path.join(project, 'shell/core/singbox_build.sh')));
+    write('versions.lock', fs.readFileSync(path.join(project, 'versions.lock')));
+    const lockScript = script('Read version lock');
+    write('output', '');
+    shell(lockScript, { REQUESTED_VERSION: 'v1.14.4', GITHUB_OUTPUT: path.join(root, 'output') });
+    assert.match(fs.readFileSync(path.join(root, 'output'), 'utf8'), /^version=v1\.14\.4-padm\.1\nupstream=v1\.14\.4\n/);
+    shell(lockScript, { REQUESTED_VERSION: 'v1.14.4-padm.2', GITHUB_OUTPUT: path.join(root, 'output') }, false);
+
     const resolve = new (Object.getPrototypeOf(async function () {}).constructor)('github', 'context', 'core', script('Resolve immutable source and release assets', 'script'));
     const digest = 'a'.repeat(64);
     const version = 'v1.14.1';
     process.env.LOCK_VERSION = version;
     process.env.LOCK_AMD64 = digest;
     process.env.LOCK_ARM64 = digest;
-    process.env.REQUESTED_VERSION = '';
     const asset = name => ({ name, size: 100, digest: `sha256:${digest}` });
     const release = { draft: false, assets: ['linux-amd64.tar.gz', 'linux-arm64.tar.gz', 'source.tar.gz'].map(suffix => asset(`sing-box-1.14.1-${suffix}`)).concat(asset('SHA256SUMS')) };
-    async function decision(existing, verify, expected, badDigest = false) {
+    async function decision(existing, verify, expected, badDigest = false, buildVersion = version, upstreamVersion = version) {
         const outputs = {};
         let upstreamCalls = 0;
+        process.env.BUILD_VERSION = buildVersion;
+        process.env.UPSTREAM_VERSION = upstreamVersion;
+        process.env.LOCK_VERSION = upstreamVersion;
         process.env.VERIFY_EXISTING = verify;
         const github = { rest: {
-            repos: { getReleaseByTag: async ({ owner }) => {
+            repos: { getReleaseByTag: async ({ owner, tag }) => {
                 if (owner === 'SagerNet') {
+                    assert.equal(tag, upstreamVersion);
                     upstreamCalls++;
-                    return { data: { ...release, tag_name: version } };
+                    return { data: { ...release, tag_name: upstreamVersion,
+                        assets: release.assets.map(item => ({ ...item, name: item.name.replace('1.14.1', upstreamVersion.slice(1)) })) } };
                 }
+                assert.equal(tag, `sing-box-${buildVersion}`);
                 if (!existing) throw Object.assign(new Error('missing'), { status: 404 });
                 return { data: existing };
             } },
-            git: { getRef: async () => ({ data: { object: { type: 'commit', sha: 'b'.repeat(40) } } }) }
+            git: { getRef: async ({ ref }) => {
+                assert.equal(ref, `tags/${upstreamVersion}`);
+                return { data: { object: { type: 'commit', sha: 'b'.repeat(40) } } };
+            } }
         } };
         process.env.LOCK_ARM64 = badDigest ? 'c'.repeat(64) : digest;
         const call = () => resolve(github, { repo: { owner: 'test', repo: 'padm' } }, { setOutput: (key, value) => { outputs[key] = value; } });
@@ -135,6 +152,12 @@ async function main() {
     await decision({ ...release, draft: true }, 'false', { skip: 'false', publish: 'true' });
     await decision({ ...release, assets: [] }, 'true', /Published release is incomplete/);
     await decision(release, 'true', /digest differs/, true);
+    const revised = { ...release, assets: release.assets.map(item => ({ ...item, name: item.name.replace('1.14.1', '1.14.4-padm.1') })) };
+    await decision(null, 'false', { skip: 'false', publish: 'true' }, false, 'v1.14.4-padm.1', 'v1.14.4');
+    await decision(revised, 'false', { skip: 'true', publish: 'false' }, false, 'v1.14.4-padm.1', 'v1.14.4');
+    await decision(revised, 'true', { skip: 'false', publish: 'false' }, false, 'v1.14.4-padm.1', 'v1.14.4');
+    await decision(null, 'true', /digest differs/, true, 'v1.14.4-padm.1', 'v1.14.4');
+    assert.equal(shell('version=v1.14.4-padm.1; [[ "${version%-padm.*}" != *-* ]] && printf stable'), 'stable');
 
     // 执行实际候选步骤，确认包进入覆盖上下文，构建或 smoke 失败均向上传播。
     const alpine = script('Verify candidate in the Alpine image');

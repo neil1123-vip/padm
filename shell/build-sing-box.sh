@@ -5,13 +5,16 @@ if [[ $# != 6 ]]; then
     printf 'Usage: %s <version> <commit> <arch> <source-dir> <output-dir> <upstream-sha256>\n' "$0" >&2
     exit 2
 fi
-version=$1
+project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=core/singbox_build.sh
+source "${project_root}/shell/core/singbox_build.sh"
+version=$(singBoxBuildVersion "$1")
+upstream_version=$(singBoxUpstreamVersion "${version}")
 commit=$2
 arch=$3
 source_dir=$(realpath -- "$4")
 output_dir=$(realpath -m -- "$5")
 upstream_sha256=$6
-[[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]
 [[ "${commit}" =~ ^[0-9a-f]{40}$ && "${upstream_sha256}" =~ ^[0-9a-f]{64}$ ]]
 case "$(uname -s):$(uname -m):${arch}" in
 Linux:x86_64:amd64 | Linux:aarch64:arm64) ;;
@@ -23,7 +26,6 @@ for file in go.mod go.sum LICENSE release/DEFAULT_BUILD_TAGS release/LDFLAGS .gi
     [[ -s "${source_dir}/${file}" && ! -L "${source_dir}/${file}" ]]
 done
 
-project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 tmp_dir=$(mktemp -d "${project_root}/.tmp-sing-box-build.XXXXXX")
 server_pid=
 http_pid=
@@ -49,23 +51,22 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 package="sing-box-${version#v}-linux-${arch}"
+upstream_package="sing-box-${upstream_version#v}-linux-${arch}"
 package_dir="${tmp_dir}/${package}"
 mkdir -p -- "${package_dir}" "${output_dir}" "${tmp_dir}/conf"
 curl --fail --location --retry 3 --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' \
     --output "${tmp_dir}/upstream.tar.gz" \
-    "https://github.com/SagerNet/sing-box/releases/download/${version}/${package}.tar.gz"
+    "https://github.com/SagerNet/sing-box/releases/download/${upstream_version}/${upstream_package}.tar.gz"
 printf '%s  %s\n' "${upstream_sha256}" "${tmp_dir}/upstream.tar.gz" | sha256sum --check --strict -
 # Extract only the matching library; the upstream binary is never installed.
-library_listing=$(tar -tvzf "${tmp_dir}/upstream.tar.gz" "${package}/libcronet.so")
+library_listing=$(tar -tvzf "${tmp_dir}/upstream.tar.gz" "${upstream_package}/libcronet.so")
 [[ "${library_listing:0:1}" == '-' && "${library_listing}" != *$'\n'* ]]
-tar -xOzf "${tmp_dir}/upstream.tar.gz" "${package}/libcronet.so" >"${package_dir}/libcronet.so"
+tar -xOzf "${tmp_dir}/upstream.tar.gz" "${upstream_package}/libcronet.so" >"${package_dir}/libcronet.so"
 [[ -s "${package_dir}/libcronet.so" ]]
 chmod 644 "${package_dir}/libcronet.so"
 
 build_tags="$(<"${source_dir}/release/DEFAULT_BUILD_TAGS"),with_purego,with_v2ray_api"
 ldflags="-X github.com/sagernet/sing-box/constant.Version=${version#v} $(<"${source_dir}/release/LDFLAGS") -s -w -buildid="
-# shellcheck source=core/singbox_build.sh
-source "${project_root}/shell/core/singbox_build.sh"
 buildSingBoxStatsBinary "${version}" "${arch}" "${source_dir}" "${package_dir}/sing-box"
 binary="${package_dir}/sing-box"
 version_output=$("${binary}" version)
@@ -168,11 +169,20 @@ server_pid=
 cp -- "${source_dir}/LICENSE" "${package_dir}/LICENSE"
 cronet_commit=$(tr -d '\r\n' <"${source_dir}/.github/CRONET_GO_VERSION")
 [[ "${cronet_commit}" =~ ^[0-9a-f]{40}$ ]]
-jq -n --arg version "${version}" --arg commit "${commit}" --arg tags "${build_tags}" \
+jq -n --arg version "${version}" --arg upstream_version "${upstream_version}" \
+    --arg builder_sha256 "$(sha256sum "${project_root}/shell/core/singbox_build.sh" | cut -d ' ' -f 1)" \
+    --arg commit "${commit}" --arg tags "${build_tags}" \
     --arg ldflags "${ldflags}" --arg go "$(go version)" --arg arch "${arch}" \
     --arg upstream_sha256 "${upstream_sha256}" --arg source_asset "sing-box-${version#v}-source.tar.gz" \
     --arg cronet_sha256 "$(sha256sum "${package_dir}/libcronet.so" | cut -d ' ' -f 1)" --arg cronet_commit "${cronet_commit}" \
-    '{upstream: "https://github.com/SagerNet/sing-box", version: $version, commit: $commit,
+    '{upstream: "https://github.com/SagerNet/sing-box", version: $version, upstream_version: $upstream_version, commit: $commit,
+      builder_sha256: $builder_sha256,
+      patches: (if $version == "v1.14.4-padm.1" then [{
+        file: "common/tls/reality_client.go",
+        source_sha256: "38a5d553fffd108afca51bde0b0888512d2f4633daa608e03767838b8fdcdbc0",
+        patched_sha256: "48f79ad8caa53ace78c54d61e57d1f9e57dfd4bae384081e3ff65654c8fca2de",
+        purpose: "Preserve Chrome hybrid key shares for Reality; authentication unchanged."
+      }] else [] end),
       source_asset: $source_asset, build_tags: $tags, ldflags: $ldflags, go: $go,
       goos: "linux", goarch: $arch, cgo_enabled: false,
       upstream_asset_sha256: $upstream_sha256, libcronet_sha256: $cronet_sha256,
@@ -183,7 +193,24 @@ source_epoch=$(git -C "${source_dir}" show -s --format=%ct "${commit}")
 tar --sort=name --mtime="@${source_epoch}" --owner=0 --group=0 --numeric-owner \
     -C "${tmp_dir}" -cf - "${package}" | gzip -n >"${output_dir}/${package}.tar.gz"
 if [[ "${arch}" == amd64 ]]; then
-    git -C "${source_dir}" archive --format=tar --prefix="sing-box-${version#v}/" "${commit}" |
+    source_package="sing-box-${version#v}"
+    mkdir -p "${tmp_dir}/source/${source_package}/PADM_BUILD"
+    git -C "${source_dir}" archive --format=tar "${commit}" | tar -xf - -C "${tmp_dir}/source/${source_package}"
+    cp -- "${project_root}/shell/core/singbox_build.sh" "${tmp_dir}/source/${source_package}/PADM_BUILD/"
+    cp -- "${package_dir}/BUILD_INFO.json" "${tmp_dir}/source/${source_package}/PADM_BUILD/"
+    if [[ "${version}" == v1.14.4-padm.1 ]]; then
+        prepareSingBoxRealitySource "${source_dir}/common/tls/reality_client.go" \
+            "${tmp_dir}/source/${source_package}/PADM_BUILD/reality_client.go"
+    fi
+    printf '%s\n' \
+        'Upstream source is unchanged. PADM_BUILD contains the exact builder, build identity and patched Reality source.' \
+        'Use the Go version in BUILD_INFO.json. Download modules pinned by go.sum, then run from this source root:' \
+        "source PADM_BUILD/singbox_build.sh; buildSingBoxStatsBinary ${version} ${arch} \"\$PWD\" \"\$PWD/sing-box\"" \
+        'For arm64, use a matching native Linux arm64 runner and replace amd64 with arm64.' \
+        'The builder verifies the upstream Reality file before applying its temporary Go overlay.' \
+        >"${tmp_dir}/source/${source_package}/PADM_BUILD/README"
+    tar --sort=name --mtime="@${source_epoch}" --owner=0 --group=0 --numeric-owner \
+        -C "${tmp_dir}/source" -cf - "${source_package}" |
         gzip -n >"${output_dir}/sing-box-${version#v}-source.tar.gz"
 fi
 printf 'Built and verified %s\n' "${output_dir}/${package}.tar.gz"

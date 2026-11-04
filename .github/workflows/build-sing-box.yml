@@ -87,10 +87,16 @@ jobs:
         if: steps.inputs.outputs.changed == 'true'
         id: lock
         shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           . ./versions.lock
-          printf 'version=%s\namd64=%s\narm64=%s\n' "${PADM_LOCK_SING_BOX_VERSION}" \
+          . ./shell/core/singbox_build.sh
+          version=$(singBoxBuildVersion "${REQUESTED_VERSION:-${PADM_LOCK_SING_BOX_VERSION}}")
+          upstream=$(singBoxUpstreamVersion "${version}")
+          printf 'version=%s\nupstream=%s\nlock_version=%s\namd64=%s\narm64=%s\n' \
+            "${version}" "${upstream}" "${PADM_LOCK_SING_BOX_VERSION}" \
             "${PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256}" "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" >>"${GITHUB_OUTPUT}"
 
       - name: Preflight pinned Alpine dependencies
@@ -103,16 +109,20 @@ jobs:
         id: resolve
         uses: actions/github-script@v9
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
-          LOCK_VERSION: ${{ steps.lock.outputs.version }}
+          BUILD_VERSION: ${{ steps.lock.outputs.version }}
+          UPSTREAM_VERSION: ${{ steps.lock.outputs.upstream }}
+          LOCK_VERSION: ${{ steps.lock.outputs.lock_version }}
           LOCK_AMD64: ${{ steps.lock.outputs.amd64 }}
           LOCK_ARM64: ${{ steps.lock.outputs.arm64 }}
           VERIFY_EXISTING: ${{ steps.inputs.outputs.verify }}
         with:
           script: |
-            const version = process.env.REQUESTED_VERSION || process.env.LOCK_VERSION;
-            if (!/^v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(version)) {
-              throw new Error(`Unsupported upstream version: ${version}`);
+            const version = process.env.BUILD_VERSION;
+            const upstreamVersion = process.env.UPSTREAM_VERSION;
+            if (!/^v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+|-padm\.[1-9]\d*)?$/.test(version) ||
+                !/^v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(upstreamVersion) ||
+                version.replace(/-padm\.\d+$/, '') !== upstreamVersion) {
+              throw new Error(`Unsupported build/upstream version: ${version}/${upstreamVersion}`);
             }
             const base = `sing-box-${version.slice(1)}`;
             const tag = `sing-box-${version}`;
@@ -131,22 +141,24 @@ jobs:
             core.setOutput('skip', skip ? 'true' : 'false');
             if (skip) return;
             const upstream = { owner: 'SagerNet', repo: 'sing-box' };
-            let { data: { object } } = await github.rest.git.getRef({ ...upstream, ref: `tags/${version}` });
+            let { data: { object } } = await github.rest.git.getRef({ ...upstream, ref: `tags/${upstreamVersion}` });
             for (let depth = 0; object.type === 'tag' && depth < 5; depth++) {
               ({ data: { object } } = await github.rest.git.getTag({ ...upstream, tag_sha: object.sha }));
             }
             if (object.type !== 'commit' || !/^[0-9a-f]{40}$/.test(object.sha)) {
               throw new Error('Upstream tag did not resolve to a commit');
             }
-            const { data: release } = await github.rest.repos.getReleaseByTag({ ...upstream, tag: version });
-            if (release.draft || release.tag_name !== version) throw new Error('Upstream release is unavailable');
+            const { data: release } = await github.rest.repos.getReleaseByTag({ ...upstream, tag: upstreamVersion });
+            if (release.draft || release.tag_name !== upstreamVersion) throw new Error('Upstream release is unavailable');
+            const upstreamBase = `sing-box-${upstreamVersion.slice(1)}`;
             const matrix = { include: ['amd64', 'arm64'].map(arch => {
-              const assets = release.assets.filter(asset => asset.name === `${base}-linux-${arch}.tar.gz`);
+              const assets = release.assets.filter(asset => asset.name === `${upstreamBase}-linux-${arch}.tar.gz`);
               if (assets.length !== 1 || !/^sha256:[0-9a-f]{64}$/.test(assets[0].digest || '') || assets[0].size <= 0) {
                 throw new Error(`Missing verified upstream asset for ${arch}`);
               }
               const sha256 = assets[0].digest.slice(7);
-              if (version === process.env.LOCK_VERSION && sha256 !== process.env[`LOCK_${arch.toUpperCase()}`]) {
+              if (upstreamVersion === process.env.LOCK_VERSION.replace(/-padm\.\d+$/, '') &&
+                  sha256 !== process.env[`LOCK_${arch.toUpperCase()}`]) {
                 throw new Error(`Upstream ${arch} digest differs from versions.lock`);
               }
               return { arch, runner: arch === 'amd64' ? 'ubuntu-latest' : 'ubuntu-24.04-arm', sha256 };
@@ -249,7 +261,7 @@ jobs:
           assets+=(SHA256SUMS)
           tag="sing-box-${VERSION}"
           prerelease=false
-          [[ "${VERSION}" != *-* ]] || prerelease=true
+          [[ "${VERSION%-padm.*}" != *-* ]] || prerelease=true
           printf '%s\n\n%s\n%s\n%s\n' \
             "sing-box ${VERSION} with per-user traffic statistics for padm." \
             "Source: https://github.com/SagerNet/sing-box/tree/${SOURCE_COMMIT}" \

@@ -158,7 +158,7 @@ checkSingBoxStatsReleaseAsset() {
     local version=$1 tmpDir=$2 metadata count
     local asset="sing-box-${version#v}${singBoxCoreCPUVendor}.tar.gz"
     local url="https://api.github.com/repos/neil1123-vip/padm/releases/tags/sing-box-${version}"
-    [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]] || return 1
+    singBoxUpstreamVersion "${version}" >/dev/null || return 1
     # 只有明确的 404 或缺资产才提供编译入口，网络、限流和校验失败不能改走来源。
     if ! metadata=$(fetchUrlToStdout "${url}" 1); then
         local status
@@ -239,15 +239,17 @@ ensureSingBoxBuildGo() {
 
 buildSingBoxReleaseBinaryToTempDir() (
     set -euo pipefail
-    local version=$1 tmpDir=$2 arch sourceCommit sourceDir goBin cacheParent cacheMode cachePath
+    local version=$1 tmpDir=$2 arch sourceCommit sourceDir goBin cacheParent cacheMode cachePath upstreamVersion upstreamAsset
     case "$(uname -s):$(uname -m):${singBoxCoreCPUVendor}" in
     Linux:x86_64:-linux-amd64) arch=amd64 ;;
     Linux:aarch64:-linux-arm64) arch=arm64 ;;
     *) errorCard "本机编译仅支持原生 Linux amd64/arm64"; return 1 ;;
     esac
-    [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]] || return 1
+    upstreamVersion=$(singBoxUpstreamVersion "${version}") || return 1
+    [[ "$(singBoxBuildVersion "${version}")" == "${version}" ]] || return 1
     local cacheDir="${PADM_SINGBOX_BUILD_CACHE:-/etc/padm/cache/sing-box-build}"
     local asset="sing-box-${version#v}-linux-${arch}.tar.gz"
+    upstreamAsset="sing-box-${upstreamVersion#v}-linux-${arch}.tar.gz"
     local extractedDir="${tmpDir}/${asset%.tar.gz}"
     cacheDir=$(padmRequireSafeAbsolutePath "${cacheDir}") || return 1
     cacheParent="${cacheDir}"
@@ -263,7 +265,7 @@ buildSingBoxReleaseBinaryToTempDir() (
         (( (8#${cacheMode} & 0022) == 0 )) || return 1
         chmod 700 "${cachePath}" || return 1
     done
-    sourceCommit=$(resolveGitHubCommitRef SagerNet/sing-box "${version}") || return 1
+    sourceCommit=$(resolveGitHubCommitRef SagerNet/sing-box "${upstreamVersion}") || return 1
     sourceDir="${tmpDir}/source"
     downloadUrlToFileBounded "https://codeload.github.com/SagerNet/sing-box/tar.gz/${sourceCommit}" \
         "${tmpDir}/source.tar.gz" 52428800 300 || return 1
@@ -271,10 +273,10 @@ buildSingBoxReleaseBinaryToTempDir() (
     padmEnsureSafeDirectory "${sourceDir}" || return 1
     tar -xzf "${tmpDir}/source.tar.gz" --strip-components=1 -C "${sourceDir}" || return 1
     ensureSingBoxBuildGo "${sourceDir}" "${cacheDir}" "${arch}" goBin || return 1
-    downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}" || return 1
-    validateCoreTarArchive "${tmpDir}/${asset}" || return 1
+    downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${upstreamVersion}" "${upstreamAsset}" || return 1
+    validateCoreTarArchive "${tmpDir}/${upstreamAsset}" || return 1
     padmEnsureSafeDirectory "${extractedDir}" || return 1
-    tar -xOzf "${tmpDir}/${asset}" "${asset%.tar.gz}/libcronet.so" >"${extractedDir}/libcronet.so" || return 1
+    tar -xOzf "${tmpDir}/${upstreamAsset}" "${upstreamAsset%.tar.gz}/libcronet.so" >"${extractedDir}/libcronet.so" || return 1
     [[ -s "${extractedDir}/libcronet.so" ]] || return 1
     chmod 644 "${extractedDir}/libcronet.so" || return 1
     # 工具链和 Go 缓存独立保存，候选源码与二进制仍随本次事务清理。
@@ -2314,7 +2316,7 @@ confirmCoreUpgrade() {
     local core=$1
     local version=$2
     local channel=$3
-    local confirmVar currentVersion repo metadata currentChannel=类型未知
+    local confirmVar currentVersion currentTag repo metadata currentChannel=类型未知
     if [[ "${core}" == "sing-box" ]]; then
         repo=SagerNet/sing-box
         currentVersion=$(getSingBoxCurrentVersion) || currentVersion=
@@ -2323,9 +2325,14 @@ confirmCoreUpgrade() {
         currentVersion=$(coreXrayCurrentVersion) || currentVersion=
     fi
     if [[ -n "${currentVersion}" && "${currentVersion}" != 未安装 ]]; then
+        currentTag="${currentVersion}"
+        if [[ "${core}" == sing-box && "${currentVersion}" == *-padm.* ]]; then
+            repo=neil1123-vip/padm
+            currentTag="sing-box-${currentVersion}"
+        fi
         if [[ "${currentVersion}" =~ ^[A-Za-z0-9._+-]{1,128}$ ]] &&
-            padmCaptureCancelableCommand metadata fetchUrlToStdout "https://api.github.com/repos/${repo}/releases/tags/${currentVersion}" 1 10; then
-            currentChannel=$(jq -ser --arg tag "${currentVersion}" '
+            padmCaptureCancelableCommand metadata fetchUrlToStdout "https://api.github.com/repos/${repo}/releases/tags/${currentTag}" 1 10; then
+            currentChannel=$(jq -ser --arg tag "${currentTag}" '
                 select(length == 1) | .[0] |
                 select(type == "object" and .tag_name == $tag and .draft == false) |
                 if .prerelease == true then "预发布版"
@@ -2377,6 +2384,7 @@ upgradeSingBoxCore() {
     local prerelease=${1:-false} version=${2:-} candidateDir
     [[ -n "${version}" ]] || padmCaptureCancelableCommand version coreUpstreamReleaseTags SagerNet/sing-box "${prerelease}" 1 || version=
     [[ -n "${version}" ]] || { errorCard "无法获取 sing-box 目标版本"; return 1; }
+    version=$(singBoxBuildVersion "${version}") || return 1
     padmCreateTempPath candidateDir -d "$(coreTmpFilePath padm-sing-box-upgrade.XXXXXX)" || return 1
     if ! prepareSingBoxUpgradeBinary "${version}" "${candidateDir}"; then
         padmRemoveCleanupPath "${candidateDir}"

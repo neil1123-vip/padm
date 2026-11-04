@@ -268,12 +268,16 @@ ShellCheck error 通过。最后补充临时文件创建失败时清空旧状态
 
 当前机器可读支持状态以
 [`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 的初始
-配置运行已支持，协议管理工作流仍为 `deferred`。4A.7 已将发布入口扩展到至少一个
+配置运行及声明范围内的管理工作流均为 `supported`，逐项证据见 3D.26。
+14 个功能汇总键仍为 `deferred`，已有证据、剩余门槛和明确拒绝范围见
+[2026-11-04 对账表](docker-deferred-status-2026-11-04.md)；汇总键有重叠，不按 14 项新增功能计数。
+4A.7 已将发布入口扩展到至少一个
 现有 Nginx TLS 协议 `21–25` 和同域受管 TLS；4A.9 增加 Xray fallback `27/29` 的双后端发布，不能由“可以生成链接”
 推断任意协议或独立域名、证书的 HTTPS 发布已经支持。
 第一步的回归使用模拟 Docker，不能代替真实容器、SSH 终端和客户端连通验证。
 2A 基线为 `a1c6287`、2B 为 `0833d4c`。2C 的模拟服务集成、真实 Linux 权限和
-PTY 信号已有定向证据；真实签名发布、镜像运行和客户端连通尚未验收，不升级完整管理状态。
+PTY 信号已有定向证据；后续正式 Debian 13 amd64 发布、镜像运行和客户端连通
+已补限定证据，当前范围见顶部状态和原生验收记录，不外推 arm64 或公网 IPv6。
 
 ## 固定实施规则
 
@@ -2350,6 +2354,192 @@ Hy2/TUIC 范围管理沿用单 sing-box、单个双族入口及手动监督，
 `d2787a099c8e40a39cd63f5b1ef540b3`，后续通过不覆盖失败。
 本轮未跑 full，未补公网、原生 arm64、宿主重启或实际 ML-DSA 客户端连通；
 已有配对入口向 sing-box 复制仍拒绝，不静默降级。整体实施计划仍未完成。
+
+#### 3D.27 新增管理能力真实验收与 deferred 对账
+
+2026-11-04 补 3D.26 新增能力的当前源码容器验收。复用
+`padm-regression:local`，在 Docker Desktop Linux amd64 的独立快照和
+隔离 daemon 内运行，不连接生产部署，不挂宿主 Docker socket。
+初轮修改验收夹具、派发入口和文档；本节末尾另记 Reality 客户端构建修订，
+生产协议管理逻辑保持 3D.26。
+
+`docker-fail2ban-source-real -Jobs 2` 整轮 exit 0、`cache_hit=false`，
+耗时 `471430 ms`；证据为
+`.tmp-regression-docker-e0b03ef4a99e46aa8b0746869cca5945/`，
+固定本地镜像身份见该目录 `node-images.json`，WS 事务使用当前源码重建 net
+入口。其余业务镜像沿用该实测夹具的固定版本，不代表当前 lock 中所有版本均已验。
+
+- 已安装 CLI 在活动 WS 防护下新增未保护入口 `26444`、改为 `26446`、删除，
+  每步均重新验证双栈来源。原保护入口完整规格、集成、jail 字节、SQLite inode
+  与封禁保持；owner token/chain、唯一 DOCKER-USER hook、DROP 增长和第二客户端
+  放行通过，两个旧端口均实际 TCP 拒绝。
+- 受保护入口及未保护入口共 16 次双栈真实 VLESS/WS 业务，每次严格验证 TLS
+  和完整 `24576` 字节正文，另有对应 16 次错 UUID 拒绝；原来源失败、
+  真实健康失败回滚、受保护端口迁移和正常停用均保留验证，共 12 个事务。
+- 停用防护后分别破坏、删除 `default.conf`，先证服务失效；候选完成校验后、
+  真实 Compose 启动前注入无效 directive，透传 Docker 的真实失败。
+  两例均记录 Compose exit 1、精确候选 ID 的 `die` exitCode 1 和错误日志；
+  CLI exit 14 后分别恢复原损坏字节、原缺失状态，其它受管文件保持。
+  随后两次正常修复精确恢复健康配置、声明的重启策略和双栈 TLS/WS，
+  SQLite 封禁及 inode 保持。
+
+首两轮分别因自动重启期间的状态采样、对 stopped 容器修改 restart 的取证
+方法失败，原件保留于后缀 `c5807e4b538e47c8851590ff48ea3bc5`、
+`99858b6c7a844466960394743ce86fb0`，不改写为通过。改用同 ID 的历史
+`die` 事件后整轮通过，未放宽业务、回滚或退出条件。
+
+14 个 `feature_matrix` deferred 项已完成[逐项对账](docker-deferred-status-2026-11-04.md)。
+合同只改这 14 个 reason，36 项状态仍为 13 supported、8 host-integrated、
+14 deferred、1 unsupported；14 键、14 表格行及恢复 reason 后整份 JSON
+与 HEAD 一致的断言通过。已有原生证据注明版本与组合，环境门槛去重归属，
+明确拒绝的组合不新增为开发项；协议管理状态及 schema 不变。
+
+新增 `docker-reality-mldsa65-real` 独立入口；其 PowerShell 权限自检
+`test-run-docker.ps1 -Scope reality-mldsa65` 通过，精确名称取得隔离 daemon
+所需权限，近似名称不放行，源码快照及无宿主 socket 断言保持。
+`regression-dispatcher-contract -Jobs 2` exit 0、`2001 ms`，证据后缀
+`8e1100e82bfa441a82147dbf289caa79`；PowerShell AST 检查通过。
+ML-DSA 夹具固定 Xray `26.10.21`、sing-box `1.14.4` 与 ops OpenSSL
+`3.5.9`，不可变镜像身份随每次结果归档。配对由固定 Xray 真实生成并直接装入
+测试规格，经正式校验、生成器及 `protocol links` 输出后转客户端配置，
+`pqv`、认证、SNI、Host、path 保持；此处不证明 CLI 目标探测自动启用整链。
+本地目标独立断言 TLS 1.3、X25519MLKEM768、长证书及 h2，实际客户端不跳过验签。
+目标采用同 OpenSSL 的 Python 并发握手，避免串行 `s_server` 阻塞其它握手。
+固定新 Xray 默认阻断 VLESS 等入站访问私网，只在隔离 runtime 副本对实际
+origin 的精确 IP 和 TCP `8088` 添加 `finalRules allow`，原生产生成文件摘要保持；
+未添加其它目标的放行规则，未改生产配置，不声称独验了其它目标的默认策略。
+局部正反证据见
+`.tmp-reality-hop-probe{,-allow,-concurrent}.log`。
+
+前六轮完整失败原件后缀为 `17de3b8fe97f46a186f76d4aca7602e3`、
+`0302095ab61345908b33ba3c955f9b08`、`bbe5fab1f8e44491866e35766e5a4470`、
+`d4bce24826e84bbcb69d7af22aa19cbc`、`feb4edf725f6455886317de9a53c78d9`、
+`837857ee04a74d3cad0138abbce1eed8`，均不计通过。第六轮 XHTTP ML-DSA
+及 sing-box gRPC 已返回完整正文，但 sing-box→Xray gRPC 仍超时，负控尚未执行。
+第七轮在不放宽断言的前提下，将基线失败汇总移到 ML-DSA 正反例之后；
+结果 `.tmp-regression-docker-59318e0829a9424c83ce7f1eb7b31432/`、
+`52766 ms`、非缓存、整轮 exit 1。XHTTP ML-DSA 共 5 次完整正文通过，
+含错误 verify、错误 UUID 前后的 4 次正确连接；两个错误客户端均拒绝，
+ML-DSA 子项通过，但整轮仍因 sing-box→Xray gRPC 超时保留失败。
+`parsed_headers=0` 只表示未完成 HTTP 头解析，不作为 socket 收到零字节的证明。
+
+同固定核心的局部对照保留在 `.tmp-reality-cross-core-first.log`、
+`.tmp-reality-cross-core-versions.log`：Xray→Xray Reality gRPC、
+sing-box→Xray 明文 gRPC 均通过；去除 XHTTP/ML-DSA 入站仍能复现
+sing-box→Xray Reality gRPC 超时。sing-box `1.14.2/1.14.4` 对 Xray
+`26.10.21` 均失败，sing-box `1.14.4` 对原固定 Xray `26.3.27` 通过。
+这限定版本与测试目标下的互通问题仍未关闭，不外推所有公网目标或客户端；
+未换旧核心、删除基线或延长超时来将失败轮变绿。
+最后一次 `.tmp-reality-cross-core-alpn.log` 诊断重现相同三路结果，
+但没有取得 ALPN 直接元数据，故 ALPN 仅为候选原因，不作为已确认根因。
+
+变基最新 `origin/main`（`a4882d6a`）后，当前 lock 的 Xray 为 `26.10.31`，
+sing-box 仍为 `1.14.4`。专用入口将 Xray 固定摘要更新为
+`sha256:0f768569d91783b640b911da2956c7db5f3d4607852a8489968c3a571cd45bf7`，
+并保持原来的正反例、认证、目标及 20 秒请求超时。当前整轮结果
+`.tmp-regression-docker-d18652f4a6a5462698d2c881461d07ce/` 为 exit 1、
+`56112 ms`、非缓存：正式链接/pqv 的 XHTTP ML-DSA 5 次完整正文、
+错 verify/UUID 拒绝及 sing-box→sing-box gRPC 通过，唯一失败仍为
+sing-box→Xray Reality gRPC。本轮成功子项不改写为整轮通过。
+
+当前版本的兼容边界已由固定源码及实际 ClientHello 对照确认：
+Xray `v26.10.31/go.mod` 固定依赖 `github.com/xtls/reality`
+`v0.0.0-20261014101318-83f621788ca8`；该提交 `tls.go:215–238`
+要求 `X25519MLKEM768` 的 `1216` 字节 key share，且必须位于可选
+`X25519` 之前，缺失时在认证解密之前退出接入分支。
+sing-box `v1.14.4/common/tls/reality_client.go:149–160` 则主动从
+supported groups 和 key shares 中剔除 `X25519MLKEM768`。
+上游源码归档于 `.tmp-reality-cross-core-sources/`，分别来自
+`XTLS/Xray-core` 固定标签、`XTLS/REALITY` 固定提交及 `SagerNet/sing-box`
+固定标签的上述文件；不依据主分支推断已发布行为。
+
+`.tmp-reality-cross-core-current.log` 记录无外网 Linux 容器内的最小对照：
+Xray→Xray Reality gRPC 和 sing-box→Xray 明文 gRPC 完整正文通过，
+sing-box→Xray Reality gRPC 超时。只观察 TLS key share 类型和长度，
+未开启 Reality `show` 或输出认证材料；实际 Xray ClientHello 包含
+`4588/1216`（混合组）及 `29/32`（X25519），sing-box 只有 `29/32`
+和 GREASE，混合组存在/缺失断言通过。该不兼容足以解释当前复现，
+无需以 `minClientVer` 或 ALPN 猜测替代证据；不外推未测的传输及公网组合。
+后续应修复或更新客户端握手实现，再以同一正反例复验；当前没有通过配置
+参数补齐该客户端被剔除的 key share，未降级服务端限制、换旧核心或删除基线。
+
+随后完成仅限 `chrome` 的本地客户端候选验证，未替换正式统计包：
+复用统计版固定 upstream commit `c005f35300ce76427dc285481ec5695f5b179cd2`、
+Go `1.25.5` 及共享 `buildSingBoxStatsBinary` 的完整 flags。未改源码的重编译
+二进制 SHA256 为 `942642ef5fbe1aff33358508c0ff202ba256531f22ee35135ee57a8d4b0e5ee9`，
+与现有镜像提取的原二进制逐字节一致；候选只删除上述 hybrid 过滤、
+冗余第二次 `BuildHandshakeState` 及未使用导入，保留 HKDF/AEAD、认证和证书校验。
+补丁 SHA256 为 `672256e4949409eb4b05ed4e088ea3b8e685b6fea07c64c408ccffc87baa368c`，
+候选二进制为 `f64669745f88cb5b19dbed9ef7ffd735760863c0b8aab03b83635242eac064ab`。
+原始来源归档、实际候选源码、补丁、构建脚本及 `provenance.json` 留在
+`.tmp-reality-client-candidate/`，构建和诊断日志为 `.tmp-reality-client-*.log`。
+工具链下载先因 `.sha256` 地址返回 HTML 而拒绝，改用官方 Go 下载 JSON 的
+精确 SHA256 校验后继续，未跳过校验或安装到 Windows 宿主。
+
+`.tmp-reality-client-hybrid-auth.log` 中三路正文均通过；候选实际发送
+hybrid 后接普通 X25519。错 Reality 公钥、错 short ID、错 UUID 客户端
+均先确认 SOCKS 握手可用，再分别拒绝完整业务，检查窗口内原点请求数不增长，
+每个反例前后正确客户端均返回完整正文。此负控独立于 Xray ML-DSA 错 verify。
+`.tmp-reality-client-hybrid-legacy.log` 另证候选可连接原 sing-box `1.14.4`
+服务端和旧 Xray `26.3.27`；旧核心只作兼容检查，不代替新核心验收。
+
+以独立候选镜像
+`padm-local/padm-sing-box:reality-hybrid-candidate@sha256:c7f5a4e719f4aa4e58adaa0be876a1d9151742cb01519b600a4f1a03427f4ec3`
+运行原 `docker-reality-mldsa65-real -Jobs 2` 的完整正反例；
+临时入口副本只改根路径及候选镜像映射，沿用原队列、源码快照及测试文件。
+结果 `.tmp-regression-docker-b1691163f8884208b843d3df51b788f3/` 为
+exit 0、`34670 ms`、非缓存：原三路正例、ML-DSA 五次正文及两个反例均通过。
+正常入口仍固定正式 sing-box 原镜像，因此原包 `d18652f4...` 的失败状态保持。
+
+此候选不承诺所有指纹。实际 uTLS `v1.8.7` 的 Chrome Auto 为 Chrome 133，
+其普通 X25519 私钥位于 `KeyShareKeys.Ecdhe`，与服务端当前优先选择一致；
+hybrid-only 指纹需另选 `MlkemEcdhe`，旧 Firefox 指纹也未因删过滤自动补出
+hybrid share。上述认证反例仍只证明该 Chrome 候选；不外推其它指纹。
+
+随后接入独立构建身份 `v1.14.4-padm.1`，upstream 仍为 `v1.14.4`。
+共享 `singbox_build.sh` 将上游版本解析为该修订，严格核对 Reality 文件的
+原始 SHA256 `38a5d553fffd108afca51bde0b0888512d2f4633daa608e03767838b8fdcdbc0`，
+删除同样 17 行后核对
+`48f79ad8caa53ace78c54d61e57d1f9e57dfd4bae384081e3ff65654c8fca2de`，
+通过临时 Go overlay 构建，原 upstream checkout 保持干净；未知修订或源码失配拒绝。
+CI 与本机缺包编译共用该实现，升级入口、候选目录和二进制版本使用同一修订身份。
+
+CI 发布坐标改为独立 `sing-box-v1.14.4-padm.1` 及带修订号的三份归档；
+Cronet 继续使用上游基础版本资产及原摘要。`BUILD_INFO.json` 记录 upstream
+版本/提交、构建版本、builder 摘要及补丁前后摘要；源码包包含原 upstream
+源码和 `PADM_BUILD` 的精确 builder、修改后源码、构建信息及重建命令。
+已发布的完整 release 仍只验证、不覆盖；`-padm.N` 作为稳定构建修订排序，
+lock 刷新仅接受已发布且两架构资产、源码及摘要完整的包，失败与降级保持原锁。
+当前 `versions.lock` 及正式 sing-box 镜像仍保持原件，未填入未发布制品的摘要。
+
+Docker Linux amd64 定向回归均 exit 0、非缓存：
+`sing-box-stats-build` 最终 `6349 ms`，结果后缀 `5e273cc4b75a438eb57156a4a327ee1a`；
+`docker-phase2` 为 `1477 ms`、`7beb3ab012bb491a9f92805203b172cd`；
+`docker-phase5` 为 `14081 ms`、`e8aef1e0dbf349feaf606a8babb5dda1`。
+覆盖修订坐标、数字排序/幂等/降级、源码失配及构建/下载/校验失败拒绝。
+
+真实正式构建与来源包重建材料在 `.tmp-sing-box-revision/`。
+使用原 Go `1.25.5` 与已有缓存，正式构建脚本的版本、merge/check、
+Hysteria2/TUIC 完整业务与用户统计、Cronet 启动和 QueryStats 均通过；
+从生成源码包重建与发行二进制逐字节一致，二进制 SHA256 为
+`02f27ee9f755f28f929122a6c8f44e2f939548a81101bc0aed4226f6799305ee`。
+本地 amd64 包 SHA256 为
+`873b8ee1b6f96c5e3c3dc5e30b063a70977f3c6efffc3020d4a07fa1dbac36bc`，
+源码包为 `fd0c1a46f828ad29650db30c0ecb81c0194bdd2fbd9304109459666f03bc4095`；
+这些是本地未发布材料，不作为正式 lock 值。
+首次构建因容器 Git 仅支持 GnuTLS、Windows 快照 CRLF 两个环境准备问题失败，
+修正容器准备步骤后通过，原失败日志分别保留，不覆盖。
+
+以上述包和正式 Dockerfile/锁定 Alpine 依赖构建候选镜像，
+固定为 `sha256:ab7164df39029c222ce070688b19bd62a456b300a76d081c682212236e1513d0`。
+临时入口与正常入口仍严格只有根路径两行、镜像映射两行不同，沿用原队列和测试。
+原 `docker-reality-mldsa65-real -Jobs 2` 的结果
+`.tmp-regression-docker-e7ace564849548f488492b60409e1f2a/` 为 exit 0、
+`35191 ms`、非缓存，三路业务及 ML-DSA 五次正文和两个反例均通过。
+正式旧包失败状态仍保持；原生 arm64 构建/验收、外部发布及随后真实摘要刷新
+尚未执行。用户已授权本轮签名提交、推送及双架构 CI 通过后发布；
+当前进入发布与正式资产核验闭环，未跑 full；
+透明代理保持关闭，整体计划仍未完成。
 
 ## 第四步：用户、订阅与服务维护
 
@@ -10272,7 +10462,8 @@ POST，stream-up 实测 `1/1/1/1`。两个持续例均在同一业务连接完�
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
 [`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]`，
-并要求菜单和管理差距为 `deferred`；后续按真实交付更新这些基线断言，
+同时要求上述 16 个协议的 `management_status` 为 `supported`，
+功能汇总键 `interactive-menu` 和 `reality-coexistence` 仍为 `deferred`；
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。
 不得只删除断言或只修改 `features.json` 来宣称完成。
 
@@ -10281,8 +10472,10 @@ POST，stream-up 实测 `1/1/1/1`。两个持续例均在同一业务连接完�
 主控管理、被控接入/手动同步及回滚保护，4C.4a 已完成真实加密链路和规划验收；
 4C.4b 的真实双部署事务验证见上；后续进入 5A 站点与剩余证书流程，
 4C.8 已交付同隧道显式主控重绑定；完整角色/网络迁移与灾备另行定义。
-3B.4 的真实 DNS、整机重启及原生 arm64 证据，以及第二步真实发布与连通证据继续待补，
-发布门禁不因本地测试通过而放宽。第三步复用 2C 的规格保存和恢复事务，
+正式 Debian 13 amd64 的签名发布、公网连通、证书签发及整机重启已有
+对应限定证据；原生 arm64、公网 IPv6、自然到期续期、新主机灾备等仍待补，
+不将旧版本和固定组合的通过外推当前全部组合。发布门禁不因本地测试通过而放宽。
+第三步复用 2C 的规格保存和恢复事务，
 4A 依赖 3A 的编辑/迁移合同；
 4C 可在 4A 和最小 WireGuard 前置通过后独立验收，不阻塞本机日常管理。
 端口跳跃明确依赖 5C；所有阶段均执行适用的取消、异常、恢复及真实环境检查。

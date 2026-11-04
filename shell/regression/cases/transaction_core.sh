@@ -640,6 +640,14 @@ runSingBoxStatsBuildRegression() (
             prepareSingBoxUpgradeBinary "${targetVersion}" "${upgradeCandidate}" || return 1
             [[ "$(<"${sentinel}")" == sentinel && -L "${fixedBuildLog}" ]] || return 1
         ) || return 1
+        # 上游正式版入口解析到 padm 修订，候选目录和安装版本使用同一身份。
+        targetVersion=v1.14.4-padm.1
+        : >"${events}"
+        upgradeSingBoxCore false v1.14.4 || return 1
+        [[ "$(<"${events}")" == $'build\ninstall' &&
+            "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" &&
+            "$(<"${root}/installed/libcronet.so")" == old-cronet ]] || return 1
+        padmRemoveCleanupPath "${upgradeCandidate}"
     ) || return 1
     (
         # CI 与运行时共享统计标签与上游参数，失败必须返回构建器状态。
@@ -669,6 +677,14 @@ runSingBoxStatsBuildRegression() (
         regressionExpectFailure buildSingBoxStatsBinary bad amd64 "${sourceDir}" "${binary}" || return 1
         regressionExpectFailure buildSingBoxStatsBinary "${version}" 386 "${sourceDir}" "${binary}" || return 1
         [[ ! -s "${args}" ]] || return 1
+        [[ "$(singBoxBuildVersion v1.14.4)" == v1.14.4-padm.1 &&
+            "$(singBoxUpstreamVersion v1.14.4-padm.1)" == v1.14.4 ]] || return 1
+        regressionExpectFailure singBoxBuildVersion v1.14.4-padm.2 || return 1
+        mkdir -p "${sourceDir}/common/tls"
+        printf 'changed upstream Reality source\n' >"${sourceDir}/common/tls/reality_client.go"
+        regressionExpectFailure buildSingBoxStatsBinary v1.14.4-padm.1 amd64 "${sourceDir}" "${binary}" || return 1
+        [[ ! -s "${args}" &&
+            "$(<"${sourceDir}/common/tls/reality_client.go")" == 'changed upstream Reality source' ]] || return 1
     ) || return 1
     (
         # Go 工具链按源码选择并复用；下载内容 SHA 不符时不能写入缓存。
@@ -739,7 +755,8 @@ runSingBoxStatsBuildRegression() (
 runSingBoxLocalBuildRealRegression() (
     set -euo pipefail
     source "${PROJECT_ROOT}/versions.lock"
-    local version="${PADM_LOCK_SING_BOX_VERSION}" arch singBoxCoreCPUVendor
+    local version arch singBoxCoreCPUVendor
+    version=$(singBoxBuildVersion "${PADM_LOCK_SING_BOX_VERSION}")
     case "$(uname -s):$(uname -m)" in
     Linux:x86_64) arch=amd64 ;;
     Linux:aarch64) arch=arm64 ;;

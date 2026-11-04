@@ -447,6 +447,31 @@ if [[ "$#" == 2 && "$1" == pull ]]; then
     printf 'local-test-only-offline-pull=%s\n' "$2"
     exit 0
 fi
+if [[ -n "${PADM_TEST_WS_NGINX_FAILURE:-}" && -f "$PADM_TEST_WS_NGINX_FAILURE" && "$1" == compose ]]; then
+    for argument in "$@"; do
+        [[ "$argument" == up ]] || continue
+        rm -- "$PADM_TEST_WS_NGINX_FAILURE"
+        started=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)
+        printf 'padm_injected_candidate_failure;\n' >"$PADM_DOCKER_INSTALL_DIR/config/nginx/default.conf"
+        status=0
+        "$PADM_TEST_REAL_DOCKER" "$@" || status=$?
+        identity=$("$PADM_TEST_REAL_DOCKER" ps -aq \
+            --filter label=com.docker.compose.project=padm-docker \
+            --filter label=com.docker.compose.service=nginx \
+            --filter label=com.docker.compose.oneoff=False)
+        # 自动重启会暂时重置 inspect 退出码，使用本次候选的真实退出事件取证。
+        "$PADM_TEST_REAL_DOCKER" events --since "$started" \
+            --until "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" \
+            --filter type=container --filter event=die --filter "container=$identity" \
+            --format '{{json .}}' >"$PADM_TEST_WS_NGINX_FAILURE.events.jsonl"
+        "$PADM_TEST_REAL_DOCKER" inspect "$identity" |
+            jq --argjson status "$status" --slurpfile events "$PADM_TEST_WS_NGINX_FAILURE.events.jsonl" \
+                '[.[] | {id:.Id,state:.State,compose_status:$status,die_events:$events}]' \
+                >"$PADM_TEST_WS_NGINX_FAILURE.json"
+        "$PADM_TEST_REAL_DOCKER" logs "$identity" >"$PADM_TEST_WS_NGINX_FAILURE.log" 2>&1
+        exit "$status"
+    done
+fi
 exec "$PADM_TEST_REAL_DOCKER" "$@"
 ''')
     wrapper.chmod(0o755)
@@ -458,6 +483,19 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
                "--control-bundle", str(fixture / "configure-control.tar.gz")]
     used_nonces = set()
     transactions = []
+    traffic_proofs, repair_proofs = [], []
+    client_binary = fixture / "bin/sing-box"
+    client_image = command(docker + [
+        "create", "--network", "none", inputs["sing-box"]["reference"]]).decode().strip()
+    try:
+        for source, target in (("/usr/local/bin/sing-box", client_binary),
+                               ("/usr/local/lib/libcronet.so", fixture / "bin/libcronet.so")):
+            command(docker + ["cp", client_image + ":" + source, str(target)])
+    finally:
+        command(docker + ["rm", client_image])
+    client_binary.chmod(0o755)
+    client_environment = dict(os.environ, LD_LIBRARY_PATH=str(fixture / "bin"))
+    command([str(client_binary), "version"], env=client_environment)
 
     def service(name):
         return command(docker + ["ps", "-aq", "--filter",
@@ -468,10 +506,83 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
     def state():
         return json.loads((deployment / "config/spec.json").read_text())
 
+    def websocket_traffic(listener, label):
+        current = state()
+        entry = next(row for row in current["core"]["protocols"] if row["listener_id"] == listener)
+        account = next((row for row in current.get("accounts", [])
+                        if listener in row["listeners"]), entry)
+        body = b"padm-real-ws-management\n" * 1024
+        server = subprocess.Popen(["python3", "-c", r'''
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"padm-real-ws-management\n" * 1024
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *arguments):
+        pass
+HTTPServer(("0.0.0.0", 38999), Handler).serve_forever()
+'''], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            wait_ready(lambda: subprocess.run(
+                ["python3", "-c",
+                 "import socket; socket.create_connection(('127.0.0.1',38999),.2).close()"],
+                capture_output=True, timeout=2).returncode == 0,
+                "真实 WS 证据服务没有启动", 5)
+            for family in SOURCES:
+                for accepted in (True, False):
+                    config = dict(
+                        inbounds=[dict(type="socks", listen="127.0.0.1", listen_port=1080)],
+                        outbounds=[dict(
+                            type="vless", server=HOST[family], server_port=entry["public_port"],
+                            uuid=account["uuid"] if accepted else "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                            tls=dict(enabled=True, server_name="source.padm.test",
+                                     certificate_path=str(deployment / "secrets/tls/source.padm.test.crt")),
+                            transport=dict(type="ws", path=f"/{entry['websocket']['path']}ws",
+                                           headers={"Host": "source.padm.test"}))])
+                    path = fixture / "ws-client.json"
+                    path.write_text(json.dumps(config))
+                    enter = ["nsenter", "--target", str(clients[1].pid), "--net", "--"]
+                    with (output_root / f"ws-flow.{label}.{family}.{accepted}.log").open("wb") as log:
+                        process = subprocess.Popen(
+                            enter + [str(client_binary), "run", "-c", str(path)],
+                            env=client_environment, stdout=log, stderr=log)
+                        try:
+                            wait_ready(lambda: subprocess.run(
+                                enter + ["python3", "-c",
+                                         "import socket; socket.create_connection(('127.0.0.1',1080),.2).close()"],
+                                capture_output=True, timeout=2).returncode == 0,
+                                "真实 WS 客户端没有启动", 5)
+                            result = subprocess.run(enter + [
+                                "curl", "--fail", "--silent", "--show-error", "--noproxy", "",
+                                "--socks5-hostname", "127.0.0.1:1080", "--max-time", "3",
+                                f"http://{HOST['ipv4']}:38999/{label}"], capture_output=True, timeout=5)
+                            if accepted:
+                                assert result.returncode == 0 and result.stdout == body, (
+                                    label, family, result.stderr.decode(errors="replace"))
+                            else:
+                                assert result.returncode != 0 and result.stdout != body, (
+                                    "错误 WS 凭据获得了业务数据", label, family)
+                        finally:
+                            stop(process)
+                traffic_proofs.append(dict(case=label, listener_id=listener, family=family,
+                                           public_port=entry["public_port"], bytes=len(body),
+                                           strict_tls=True, wrong_uuid_rejected=True))
+        finally:
+            stop(server)
+        print(f"ws-management-real-traffic-passed={label}:{listener}", flush=True)
+
     def run_cli(label, arguments, failure=None):
         previous_nginx = service("nginx")
         release_inputs = release if arguments[0] == "edit" else []
-        process = subprocess.Popen(["bash", str(cli), *arguments, *release_inputs], env=environment,
+        run_environment = environment
+        if failure == "nginx":
+            marker = output_root / f"ws-port.{label}.start-failure"
+            marker.touch(mode=0o600)
+            run_environment = dict(environment, PADM_TEST_WS_NGINX_FAILURE=str(marker))
+        process = subprocess.Popen(["bash", str(cli), *arguments, *release_inputs], env=run_environment,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, bufsize=0)
         transcript, pending, challenges, proofs = bytearray(), b"", [], []
         rejected, paused = False, None
@@ -564,7 +675,7 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
                             proofs.append(proof)
             status = process.wait(timeout=5)
             assert status == (14 if failure else 0), (label, status, transcript.decode(errors="replace"))
-            if failure:
+            if failure in ("source", "health"):
                 assert state()["core"]["protocols"][0]["public_port"] == PORT
                 assert {row["family"] for row in proofs if row["public_port"] == PORT} == set(SOURCES)
                 if failure == "source":
@@ -574,9 +685,21 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
                     assert paused and not any(row["public_port"] == 25444 for row in challenges)
                     assert any(word in transcript for word in (
                         b"paused", b"unhealthy", b"not healthy", b"timeout")), transcript
+            elif failure == "nginx":
+                assert not marker.exists() and not challenges and not proofs
+                failed = json.loads(marker.with_suffix(marker.suffix + ".json").read_text())
+                assert len(failed) == 1 and failed[0]["compose_status"] != 0, failed
+                die_events = failed[0]["die_events"]
+                assert die_events and all(event["Type"] == "container" and event["Action"] == "die"
+                    and event["Actor"]["ID"] == failed[0]["id"]
+                    and int(event["Actor"]["Attributes"]["exitCode"]) != 0 for event in die_events), failed
+                assert b'unknown directive "padm_injected_candidate_failure"' in (
+                    marker.with_suffix(marker.suffix + ".log").read_bytes())
+                repair_proofs.append(dict(case=label, real_start_failure=failed))
             else:
-                assert len(challenges) == len(proofs) == 2
-                assert {row["family"] for row in proofs} == set(SOURCES)
+                protected = any(row["type"] == "fail2ban" for row in state()["host_integrations"])
+                assert len(challenges) == len(proofs) == (2 if protected else 0)
+                assert {row["family"] for row in proofs} == (set(SOURCES) if protected else set())
             assert not (deployment / "locks/deployment.lock").exists()
             assert not list(deployment.glob(".candidate.*"))
             transactions.append(dict(case=label, status=status, challenges=challenges,
@@ -609,11 +732,19 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
         wait_ready(lambda: bans() == expected_bans, "旧 SQLite 双栈封禁没有恢复")
         assert database_bans() >= expected_bans
         assert database.stat().st_ino == database_inode, "端口事务替换了 SQLite"
+        owner = dict(line.split("=", 1) for line in
+                     (deployment / "data/net/fail2ban/fail2ban.state").read_text().splitlines())
+        assert owner["ports"] == str(port) and owner["ipv6"] == "yes", owner
+        assert owner["chain"] == "padm-f2b-" + owner["token"][:12], owner
         for family, table in (("ipv4", "iptables"), ("ipv6", "ip6tables")):
             net = service("net-fail2ban")
             rules = command(docker + ["exec", net, table + "-save", "-c"]).decode()
-            hook = next(line for line in rules.splitlines() if "-A DOCKER-USER " in line and "padm-f2b" in line)
+            hooks = [line for line in rules.splitlines()
+                     if "-A DOCKER-USER " in line and "padm-f2b" in line]
+            assert len(hooks) == 1, hooks
+            hook = hooks[0]
             assert f"--ctorigdstport {port}" in hook, hook
+            assert "padm-f2b:" + owner["token"] in hook and "-j " + owner["chain"] in hook, hook
             assert f"--ctorigdstport {PORT if port == 25444 else 25444}" not in rules, rules
             address = str(ipaddress.ip_address(SOURCES[family][0]))
             line = next(row for row in rules.splitlines() if f"-s {address}/" in row and "-j DROP" in row)
@@ -656,6 +787,55 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
     wait_ready(lambda: database_bans() >= expected_bans, "真实日志封禁没有写入 SQLite")
     database_inode = database.stat().st_ino
     enforce(PORT)
+    protected_spec = state()
+    protected_entry = protected_spec["core"]["protocols"][0]
+    jail_files = {str(path.relative_to(deployment)): path.read_bytes()
+                  for path in (deployment / "config/net/fail2ban").iterdir() if path.is_file()}
+
+    def protected_unchanged():
+        current = state()
+        assert next(row for row in current["core"]["protocols"]
+                    if row["listener_id"] == "entry-source-ws") == protected_entry
+        assert current["host_integrations"] == protected_spec["host_integrations"]
+        assert all((deployment / path).read_bytes() == value for path, value in jail_files.items())
+        enforce(PORT)
+
+    websocket_traffic("entry-source-ws", "protected-before")
+    run_cli("unprotected-add", ["edit", "--protocol-add", "entry-source-ws", "21", "26444",
+                               "--confirm", "PADM-DOCKER-EDIT"])
+    added = next(row for row in state()["core"]["protocols"] if row["listener_id"] == "entry-1")
+    assert added["public_port"] == 26444 and set(added["address_families"]) == set(SOURCES), added
+    protected_unchanged()
+    websocket_traffic("entry-source-ws", "protected-after-add")
+    websocket_traffic("entry-1", "unprotected-add")
+    for family in SOURCES:
+        assert client(clients[0], family, port=26444) == {"status": 200}, "旧封禁误伤未保护 WS"
+    changed = state()
+    next(row for row in changed["core"]["protocols"]
+         if row["listener_id"] == "entry-1")["public_port"] = 26446
+    changed_path = fixture / "unprotected-port.json"
+    changed_path.write_text(json.dumps(changed))
+    run_cli("unprotected-port", ["edit", "--spec", str(changed_path),
+                                "--confirm", "PADM-DOCKER-EDIT"])
+    protected_unchanged()
+    websocket_traffic("entry-source-ws", "protected-after-port")
+    websocket_traffic("entry-1", "unprotected-port")
+    for family in SOURCES:
+        assert client(clients[0], family, port=26446) == {"status": 200}, "旧封禁误伤未保护新端口"
+        closed = subprocess.run(
+            ["nsenter", "--target", str(clients[1].pid), "--net", "--", "python3", str(SCRIPT),
+             "client", family, "/", SOURCES[family][0], "26444"], capture_output=True, timeout=5)
+        assert closed.returncode != 0 and b"ConnectionRefusedError" in closed.stderr, closed.stderr
+    run_cli("unprotected-remove", ["edit", "--protocol-remove", "entry-1",
+                                  "--confirm", "PADM-DOCKER-EDIT"])
+    assert state() == protected_spec, "删除未保护 WS 没有恢复原规格"
+    protected_unchanged()
+    websocket_traffic("entry-source-ws", "protected-after-remove")
+    for family in SOURCES:
+        closed = subprocess.run(
+            ["nsenter", "--target", str(clients[1].pid), "--net", "--", "python3", str(SCRIPT),
+             "client", family, "/", SOURCES[family][0], "26446"], capture_output=True, timeout=5)
+        assert closed.returncode != 0 and b"ConnectionRefusedError" in closed.stderr, closed.stderr
     frozen = {name: (deployment / name).read_bytes() for name in (
         "config/spec.json", "compose.json", "deployment.json", "images.env",
         "config/nginx/default.conf", "config/xray/config.json")}
@@ -681,6 +861,52 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
             ["nsenter", "--target", str(clients[1].pid), "--net", "--", "python3", str(SCRIPT),
              "client", family, "/", SOURCES[family][0], str(PORT)], capture_output=True, timeout=5)
         assert refused.returncode != 0 and b"ConnectionRefusedError" in refused.stderr, refused.stderr
+    run_cli("disable", ["edit", "--fail2ban-off", "--confirm", "PADM-DOCKER-EDIT"])
+    assert not state()["host_integrations"]
+    jail_absent(docker)
+    assert not (deployment / "data/net/fail2ban/fail2ban.state").exists()
+    for table in ("iptables-save", "ip6tables-save"):
+        assert b"padm-f2b" not in command(docker + [
+            "run", "--rm", "--network", "host", "--cap-drop", "ALL", "--cap-add", "NET_ADMIN",
+            "--entrypoint", table, actual["net"]["reference"]])
+    default = deployment / "config/nginx/default.conf"
+    healthy = {name: (deployment / name).read_bytes() for name in (
+        "config/spec.json", "compose.json", "deployment.json", "images.env",
+        "config/nginx/default.conf", "config/xray/config.json",
+        "secrets/tls/source.padm.test.crt", "secrets/tls/source.padm.test.key")}
+    for damage in ("damaged", "missing"):
+        broken = b"padm_original_broken_nginx;\n"
+        if damage == "damaged":
+            default.write_bytes(broken)
+        else:
+            default.unlink()
+        command(docker + ["restart", "--time", "1", service("nginx")], timeout=15)
+        for family in SOURCES:
+            failed = subprocess.run(
+                ["nsenter", "--target", str(clients[1].pid), "--net", "--", "curl",
+                 "--fail", "--silent", "--show-error", "--noproxy", "*", "--max-time", "2",
+                 "--cacert", str(deployment / "secrets/tls/source.padm.test.crt"),
+                 "--resolve", f"source.padm.test:25444:{HOST[family] if family == 'ipv4' else '[' + HOST[family] + ']'}",
+                 "https://source.padm.test:25444/"], capture_output=True, timeout=4)
+            assert failed.returncode != 0, ("损坏或缺失 Nginx 仍有公开响应", damage, family)
+        before_repair = {name: (deployment / name).read_bytes()
+                         for name in healthy if name != "config/nginx/default.conf"}
+        arguments = ["edit", "--protocol-rebuild", "entry-source-ws", "--repair-nginx",
+                     "--confirm", "PADM-DOCKER-EDIT"]
+        run_cli(f"nginx-{damage}-rollback", arguments, "nginx")
+        assert (default.read_bytes() == broken if damage == "damaged" else not default.exists()), (
+            "真实启动失败没有还原 Nginx 原件", damage)
+        assert all((deployment / name).read_bytes() == value for name, value in before_repair.items())
+        run_cli(f"nginx-{damage}-repair", arguments)
+        assert all((deployment / name).read_bytes() == value for name, value in healthy.items())
+        restart = json.loads((deployment / "compose.json").read_text())["services"]["nginx"]["restart"]
+        assert inspect(docker, service("nginx"))["HostConfig"]["RestartPolicy"]["Name"] == restart
+        for family in SOURCES:
+            assert client(clients[0], family, port=25444) == {"status": 200}
+        websocket_traffic("entry-source-ws", f"nginx-{damage}-repair")
+        assert database_bans() >= expected_bans and database.stat().st_ino == database_inode
+        repair_proofs.append(dict(case=f"nginx-{damage}-repair", restored_original=True,
+                                  strict_tls_ws=True, unrelated_files_unchanged=True))
     result = subprocess.run(["bash", str(cli), "down"], env=environment, capture_output=True, timeout=35)
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     assert database_bans() >= expected_bans and database.stat().st_ino == database_inode
@@ -691,6 +917,7 @@ exec "$PADM_TEST_REAL_DOCKER" "$@"
     evidence = dict(scope="local-test-only-not-release-verified", images=actual,
                     net_entrypoint_sha256=hashlib.sha256((context / "entrypoint.sh").read_bytes()).hexdigest(),
                     sqlite_bans=sorted(database_bans()), transactions=transactions,
+                    websocket_traffic=traffic_proofs, nginx_repair=repair_proofs,
                     old_port_closed=True, old_rules_removed=True)
     (output_root / "ws-port.evidence.json").write_text(json.dumps(evidence, indent=2))
     print("fail2ban-ws-port-transaction-evidence=" + json.dumps(evidence, sort_keys=True), flush=True)

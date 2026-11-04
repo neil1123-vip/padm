@@ -1,7 +1,7 @@
 #requires -Version 7.3
 [CmdletBinding()]
 param(
-    [ValidateSet('all', 'artifacts', 'reality-stream')]
+    [ValidateSet('all', 'artifacts', 'reality-stream', 'reality-mldsa65')]
     [string]$Scope = 'all'
 )
 
@@ -50,7 +50,7 @@ nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-l
                        "docker-wireguard-peers-migration-real",
                        "docker-wireguard-address-real", "docker-webroot-recovery-real", "docker-alpn-recovery-real",
                        "docker-acme-dns-recovery-real", "docker-reality-stream-cli-real",
-                       "docker-reality-stream-xhttp-cli-real")
+                       "docker-reality-stream-xhttp-cli-real", "docker-reality-mldsa65-real")
 memory_workspace = sys.argv[1] in ("docker-contracts", "docker-contracts-full")
 
 def filesystem_type(path):
@@ -164,6 +164,8 @@ $ordinaryCases = if ($Scope -eq 'artifacts') {
     @{ selector = 'docker-reality-stream-cli-real-other'; expected = 0 },
     @{ selector = 'docker-reality-stream-xhttp-cli-real'; expected = 0 },
     @{ selector = 'docker-reality-stream-xhttp-cli-real-other'; expected = 0 },
+    @{ selector = 'docker-reality-mldsa65-real'; expected = 0 },
+    @{ selector = 'docker-reality-mldsa65-real-other'; expected = 0 },
     @{ selector = 'docker-control-rebind-real'; expected = 0 },
     @{ selector = 'docker-control-rebind-real-other'; expected = 0 },
     @{ selector = 'docker-control-log-cron-real'; expected = 0 },
@@ -181,6 +183,9 @@ $ordinaryCases = if ($Scope -eq 'artifacts') {
 ) }
 if ($Scope -eq 'reality-stream') {
     $ordinaryCases = @($ordinaryCases | Where-Object { $_.selector -like 'docker-reality-stream-*' })
+}
+if ($Scope -eq 'reality-mldsa65') {
+    $ordinaryCases = @($ordinaryCases | Where-Object { $_.selector -like 'docker-reality-mldsa65-*' })
 }
 foreach ($case in $ordinaryCases) {
     & $runner -Selector $case.selector
@@ -214,6 +219,10 @@ foreach ($case in $ordinaryCases) {
 
 if ($Scope -eq 'reality-stream') {
     Write-Host 'regression-docker-reality-stream-check-ok'
+    exit 0
+}
+if ($Scope -eq 'reality-mldsa65') {
+    Write-Host 'regression-docker-reality-mldsa65-check-ok'
     exit 0
 }
 

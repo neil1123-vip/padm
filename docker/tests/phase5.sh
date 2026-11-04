@@ -368,31 +368,50 @@ case "$*" in
     if [[ "${PADM_TEST_STATS_FAILURE:-}" == no-stable ]]; then
         printf '%s\n' '[[{"tag_name":"sing-box-v9.8.7","draft":true,"prerelease":false}]]'
     else
-        printf '%s\n' '[[{"tag_name":"v99.0.0","draft":false,"prerelease":false},
-          {"tag_name":"sing-box-v9.7.0","draft":false,"prerelease":false},
+        version=${PADM_TEST_STATS_VERSION:-9.8.7}
+        jq -n --arg version "${version}" --arg base "${version%%-padm.*}" \
+            --arg older "${PADM_TEST_STATS_OLDER_VERSION:-9.7.0}" '
+          [[{"tag_name":"v99.0.0","draft":false,"prerelease":false},
+          {"tag_name":("sing-box-v" + $older),"draft":false,"prerelease":false},
           {"tag_name":"sing-box-v99.0.0","draft":true,"prerelease":false},
           {"tag_name":"sing-box-v98.0.0","draft":false,"prerelease":true},
-          {"tag_name":"sing-box-v97.0.0-alpha.1","draft":false,"prerelease":false}],
-          [{"tag_name":"sing-box-v9.8.7","draft":false,"prerelease":false}]]'
+          {"tag_name":"sing-box-v97.0.0-alpha.1","draft":false,"prerelease":false},
+          {"tag_name":"sing-box-v96.0.0-padm.0","draft":false,"prerelease":false},
+          {"tag_name":"sing-box-v96.0.0-padm.01","draft":false,"prerelease":false},
+          {"tag_name":"sing-box-v96.0.0-padm.1-extra","draft":false,"prerelease":false},
+          {"tag_name":("sing-box-v" + $base + "-padm.99"),"draft":true,"prerelease":false},
+          {"tag_name":("sing-box-v" + $base + "-padm.98"),"draft":false,"prerelease":true}],
+          [{"tag_name":("sing-box-v" + $version),"draft":false,"prerelease":false}]]'
     fi ;;
-*repos/neil1123-vip/padm/releases/tags/sing-box-v9.8.7*|*repos/SagerNet/sing-box/releases/tags/v9.8.7*)
+*repos/neil1123-vip/padm/releases/tags/sing-box-v*|*repos/SagerNet/sing-box/releases/tags/v*)
     prefix=sing-box
-    tag=sing-box-v9.8.7
+    version=${PADM_TEST_STATS_VERSION:-9.8.7}
+    tag=sing-box-v${version}
+    [[ "$2" == "repos/neil1123-vip/padm/releases/tags/${tag}" ]] ||
+        [[ "$*" == *repos/SagerNet/* ]] || exit 1
     if [[ "$*" == *repos/SagerNet/* ]]; then
         prefix=upstream
-        tag=v9.8.7
+        version=${version%%-padm.*}
+        tag=v${version}
+        [[ "$2" == "repos/SagerNet/sing-box/releases/tags/${tag}" ]] || exit 1
     fi
-    jq -n --arg tag "${tag}" --arg failure "${PADM_TEST_STATS_FAILURE:-}" \
+    jq -n --arg tag "${tag}" --arg version "${version}" --arg prefix "${prefix}" \
+        --arg failure "${PADM_TEST_STATS_FAILURE:-}" \
         --arg amd64 "$(printf '%s' "${prefix}-amd64" | sha256sum | awk '{print $1}')" \
         --arg arm64 "$(printf '%s' "${prefix}-arm64" | sha256sum | awk '{print $1}')" '
       {tag_name: $tag, draft: false, prerelease: false, assets: [
-        {name: "sing-box-9.8.7-linux-amd64.tar.gz", size: 100, digest: ("sha256:" + $amd64)},
-        {name: "sing-box-9.8.7-linux-arm64.tar.gz", size: 100, digest: ("sha256:" + $arm64)},
-        {name: "sing-box-9.8.7-source.tar.gz", size: 100, digest: ("sha256:" + $amd64)},
+        {name: ("sing-box-" + $version + "-linux-amd64.tar.gz"), size: 100, digest: ("sha256:" + $amd64)},
+        {name: ("sing-box-" + $version + "-linux-arm64.tar.gz"), size: 100, digest: ("sha256:" + $arm64)},
+        {name: ("sing-box-" + $version + "-source.tar.gz"), size: 100, digest: ("sha256:" + $amd64)},
         {name: "SHA256SUMS", size: 100, digest: ("sha256:" + $amd64)}]} |
       if $failure == "missing-asset" then .assets |= map(select(.name != "SHA256SUMS"))
+      elif $failure == "missing-source" then .assets |= map(select(.name | endswith("-source.tar.gz") | not))
+      elif $failure == "missing-arch" then .assets |= map(select(.name | endswith("-linux-arm64.tar.gz") | not))
       elif $failure == "missing-digest" then .assets[1].digest = null
       elif $failure == "duplicate-asset" then .assets += [.assets[0]]
+      elif $failure == ($prefix + "-draft") then .draft = true
+      elif $failure == ($prefix + "-prerelease") then .prerelease = true
+      elif $failure == "upstream-missing-digest" and $prefix == "upstream" then .assets[1].digest = null
       else . end' ;;
 *repos/acmesh-official/acme.sh/releases/latest*) printf '%s\n' '{"tag_name":"v8.7.6","draft":false,"prerelease":false}' ;;
 *) exit 1 ;;
@@ -428,12 +447,18 @@ https://hub.docker.com/v2/repositories/library/alpine/tags*)
     ;;
 *Xray-linux-64.zip) printf '%s' xray-amd64 >"${output}" ;;
 *Xray-linux-arm64-v8a.zip) printf '%s' xray-arm64 >"${output}" ;;
-https://github.com/neil1123-vip/padm/releases/download/sing-box-v9.8.7/sing-box-9.8.7-linux-amd64.tar.gz)
-    printf '%s' sing-box-amd64 >"${output}" ;;
-https://github.com/neil1123-vip/padm/releases/download/sing-box-v9.8.7/sing-box-9.8.7-linux-arm64.tar.gz)
-    [[ "${PADM_TEST_STATS_FAILURE:-}" != download ]] || exit 22
-    printf '%s' sing-box-arm64 >"${output}"
-    [[ "${PADM_TEST_STATS_FAILURE:-}" != checksum ]] || printf '%s' corrupt >>"${output}" ;;
+https://github.com/neil1123-vip/padm/releases/download/sing-box-v*/sing-box-*-linux-*.tar.gz)
+    version=${PADM_TEST_STATS_VERSION:-9.8.7}
+    arch=${url##*-linux-}
+    arch=${arch%.tar.gz}
+    [[ "${arch}" == amd64 || "${arch}" == arm64 ]] || exit 1
+    [[ "${url}" == "https://github.com/neil1123-vip/padm/releases/download/sing-box-v${version}/sing-box-${version}-linux-${arch}.tar.gz" ]] ||
+        exit 1
+    if [[ "${arch}" == arm64 && "${PADM_TEST_STATS_FAILURE:-}" == download ]]; then exit 22; fi
+    printf '%s' "sing-box-${arch}" >"${output}"
+    if [[ "${arch}" == arm64 && "${PADM_TEST_STATS_FAILURE:-}" == checksum ]]; then
+        printf '%s' corrupt >>"${output}"
+    fi ;;
 *acmesh-official/acme.sh/tar.gz/refs/tags/v8.7.6) printf '%s' acme-sh >"${output}" ;;
 *) exit 1 ;;
 esac
@@ -579,12 +604,67 @@ grep -Fq 'ca-certificates latest version 20260612-r0 is older than lock 20260613
 cmp -s "${UPDATER_ROOT}/versions.lock.newer" "${UPDATER_ROOT}/versions.lock" ||
     fail 'upstream refresh changed the lock after an APK downgrade'
 
+# 同一上游的稳定修订按数字递增，新上游仍高于旧上游的任意修订。
+refresh_stats_version() {
+    PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
+        PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+        PADM_TEST_STATS_VERSION="$1" PADM_TEST_STATS_OLDER_VERSION="${2:-9.7.0}" \
+        bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams
+}
+cp "${UPDATER_ROOT}/versions.lock.once" "${UPDATER_ROOT}/versions.lock"
+previousStatsVersion=9.8.7
+for statsVersion in 9.8.7-padm.1 9.8.7-padm.2 9.8.7-padm.10 9.8.8; do
+    refresh_stats_version "${statsVersion}" "${previousStatsVersion}" >"${TEST_ROOT}/stats-revision.log" 2>&1 ||
+        { cat "${TEST_ROOT}/stats-revision.log"; fail "stats revision ${statsVersion} refresh failed"; }
+    (
+        # shellcheck disable=SC1091
+        . "${UPDATER_ROOT}/versions.lock"
+        [[ "${PADM_LOCK_SING_BOX_VERSION}" == "v${statsVersion}" &&
+            "${PADM_LOCK_SING_BOX_AMD64_ASSET}" == "sing-box-${statsVersion}-linux-amd64.tar.gz" &&
+            "${PADM_LOCK_SING_BOX_ARM64_ASSET}" == "sing-box-${statsVersion}-linux-arm64.tar.gz" &&
+            "${PADM_LOCK_SING_BOX_AMD64_SHA256}" == "$(printf '%s' sing-box-amd64 | sha256sum | awk '{print $1}')" &&
+            "${PADM_LOCK_SING_BOX_ARM64_SHA256}" == "$(printf '%s' sing-box-arm64 | sha256sum | awk '{print $1}')" &&
+            "${PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256}" == "$(printf '%s' upstream-amd64 | sha256sum | awk '{print $1}')" &&
+            "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" == "$(printf '%s' upstream-arm64 | sha256sum | awk '{print $1}')" ]]
+    ) || fail "stats revision ${statsVersion} lock identity drifted"
+    cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.revision"
+    refresh_stats_version "${statsVersion}" "${previousStatsVersion}" >"${TEST_ROOT}/stats-revision.log" 2>&1 ||
+        fail "stats revision ${statsVersion} idempotent refresh failed"
+    grep -Fxq 'upstream-lock-current' "${TEST_ROOT}/stats-revision.log" ||
+        fail "stats revision ${statsVersion} was not current"
+    cmp -s "${UPDATER_ROOT}/versions.lock.revision" "${UPDATER_ROOT}/versions.lock" ||
+        fail "stats revision ${statsVersion} current lock was rewritten"
+    if refresh_stats_version "${previousStatsVersion}" >"${TEST_ROOT}/stats-downgrade.log" 2>&1; then
+        fail "stats revision ${statsVersion} accepted downgrade to ${previousStatsVersion}"
+    fi
+    grep -Fq "sing-box latest release v${previousStatsVersion} is older than lock v${statsVersion}" \
+        "${TEST_ROOT}/stats-downgrade.log" || fail 'stats revision downgrade guard was not reached'
+    cmp -s "${UPDATER_ROOT}/versions.lock.revision" "${UPDATER_ROOT}/versions.lock" ||
+        fail "stats revision ${statsVersion} downgrade changed the lock"
+    previousStatsVersion=${statsVersion}
+done
+
+for invalidVersion in 9.8.7-padm.0 9.8.7-padm.01 9.8.7-padm1 9.8.7-padm.1-extra 9.8.7-alpha.1; do
+    sed -E \
+        -e "s/^PADM_LOCK_SING_BOX_VERSION=.*/PADM_LOCK_SING_BOX_VERSION=v${invalidVersion}/" \
+        -e "s/^PADM_LOCK_SING_BOX_AMD64_ASSET=.*/PADM_LOCK_SING_BOX_AMD64_ASSET=sing-box-${invalidVersion}-linux-amd64.tar.gz/" \
+        -e "s/^PADM_LOCK_SING_BOX_ARM64_ASSET=.*/PADM_LOCK_SING_BOX_ARM64_ASSET=sing-box-${invalidVersion}-linux-arm64.tar.gz/" \
+        "${UPDATER_ROOT}/versions.lock.once" >"${UPDATER_ROOT}/versions.lock"
+    if bash "${UPDATER_ROOT}/docker/release.sh" validate-lock >"${TEST_ROOT}/invalid-stats-version.log" 2>&1; then
+        fail "stats lock accepted invalid version ${invalidVersion}"
+    fi
+    grep -Fq 'invalid sing-box version' "${TEST_ROOT}/invalid-stats-version.log" ||
+        fail "stats lock rejected ${invalidVersion} for the wrong reason"
+done
+
 # 发布不完整或下载失败时，任何核心的锁值都必须保持原样。
-for failure in no-stable missing-asset missing-digest duplicate-asset download checksum \
+for failure in no-stable missing-asset missing-source missing-arch missing-digest duplicate-asset download checksum \
+    sing-box-draft sing-box-prerelease upstream-draft upstream-prerelease upstream-missing-digest \
     alpine-api apk-download apk-parse arch-mismatch stream-mismatch; do
     cp "${UPDATER_ROOT}/versions.lock.original" "${UPDATER_ROOT}/versions.lock"
     if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
         PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+        PADM_TEST_STATS_VERSION=9.8.7-padm.1 \
         PADM_TEST_STATS_FAILURE="${failure}" \
         bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >"${TEST_ROOT}/refresh-failure.log" 2>&1; then
         fail "upstream refresh accepted ${failure}"
