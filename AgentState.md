@@ -15,21 +15,21 @@
 
 ## 最近完成
 
-- 2026-11-04：3D.26 的 16 个公开协议管理 supported，定向及 daily
-  34/34 通过；ML-DSA 配对、投影及受管 Nginx 窄修复见实施计划。
+- 2026-11-04：3D.26 的 16 个协议管理 supported，定向及 daily 34/34 通过。
 - 3D.27：Nginx 缺失/损坏真实启动失败回滚和修复、活动 WS 防护下
   未保护入口增删改通过；双栈 16 正/16 错 UUID 拒绝，SQLite/规则保持。
   `docker-fail2ban-source-real` 471430 ms/exit 0/非缓存；
   原件 `.tmp-regression-docker-e0b03ef4a99e46aa8b0746869cca5945/`。
 - 14 个 deferred 已逐项对账，合同只改 reason，状态/schema 不变；
   已有原生证据、剩余环境条件和拒绝边界见 2026-11-04 对账表。
-- Reality 修订 `1.14.4-padm.1` 已接构建、来源包、下载与 lock 刷新；
-  本地 amd64 正式构建及来源包逐字节重建通过，材料 `.tmp-sing-box-revision/`。
-  新镜像原整轮 exit 0/35191 ms，结果 `e7ace564...`；
-  构建事务/phase2/phase5 定向均通过，未改变正式 lock 或旧镜像。
-- 本轮验收与构建修订已整理并暂存，提交标题/正文沿用现有格式；
-  用户已授权签名提交、推送及双架构 CI 通过后发布，当前进入发布闭环。
-  正式 lock 待发布资产核验后更新。
+- 已签名提交并推送 `4c8ff0c2`；Reality 修订 `1.14.4-padm.1` 已发布。
+  CI `41849182833` 原生双架构构建、功能检查及 Alpine smoke 全通过。
+  四资产 API/SHA256SUMS、源码补丁与 Cronet 摘要正确；旧版资产未变。
+  正式 amd64 与来源包重建候选逐字节相同，材料 `.tmp-publish-sing-box-20261104/`。
+  正式下载镜像 Reality 整轮 exit 0/33505 ms，结果 `559f73c0...`；
+  真实 lock 已更新，phase2 exit 0/1585 ms，待提交及应用发布。
+- 应用 CI `41849182832` 的协议分片超过 10 分钟被取消，其余 21 检查通过。
+  该子项旧本机成功耗时 556 秒；仅该分片改 20 分钟，保留原断言，待新 CI。
 - 原生 3.42.3 账号与业务恢复已清场并断网独验，失败原件保留；
   `.tmp-native-account-close-20261027/verification.json`、
   `.tmp-native-business-close-20261027/verification.json`。
@@ -47,12 +47,10 @@
   透传缺有效 Zone 授权，不重跑无变化矩阵。
 - 透明启用重启按要求不做；SOCKS UDP、Xray 解析后阻断继续拒绝。
 - 旧 Vision reset、XHTTP TLS 超时、TUIC 超时缺原现场材料，根因未定。
-- 当前正式 sing-box `1.14.4`→Xray `26.10.31` Reality gRPC 仍失败；
-  selector `d18652f4...` exit 1/56112 ms，ML-DSA 正反例子项通过。
-  根因是服务端要求混合 key share、客户端主动剔除；本地删除过滤候选
-  已用相同整轮和错公钥/short ID/UUID 前后正控验证，未降认证或放宽基线。
-  修订仅证 Chrome；hybrid-only/其它指纹未收口。剩原生 arm64 构建/验收、
-  发布新修订并刷新真实 lock 已获授权；不覆盖既有 1.14.4 资产，见 3D.27。
+- 旧正式 sing-box `1.14.4`→Xray `26.10.31` 失败原件 `d18652f4...` 保留。
+  新修订已保留 Chrome 混合 key share，正式包整轮通过，认证/证书基线不变。
+  hybrid-only/其它指纹及 arm64 Reality 整轮未证明；普通本机 selector 仍固定旧镜像。
+  应用镜像/控制包发布与正式镜像补验待 CI；不覆盖旧版资产，见 3D.27。
   配对直接装测试规格，不证明 CLI 自动启用整链或独立 SNI；
   sing-box 拒绝配对及带配对来源的跨核心复制。
 

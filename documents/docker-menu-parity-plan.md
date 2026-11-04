@@ -2541,6 +2541,31 @@ Hysteria2/TUIC 完整业务与用户统计、Cronet 启动和 QueryStats 均通�
 当前进入发布与正式资产核验闭环，未跑 full；
 透明代理保持关闭，整体计划仍未完成。
 
+2026-11-04 随后签名提交并推送 `4c8ff0c2`。CI `41849182833` 在
+amd64 与原生 arm64 runner 上完成构建、业务/用户统计及 Alpine smoke，
+全部通过后发布独立 `sing-box-v1.14.4-padm.1`。四份下载资产逐项核对
+API digest 和 `SHA256SUMS`；两架构 `BUILD_INFO` 的版本、原提交、builder、
+补丁和 Cronet 摘要正确；发布前后旧 `sing-box-v1.14.4` 的资产 ID/摘要/大小不变。
+正式 amd64 包摘要与上述本地包相同，二进制也与来源包重建候选逐字节相同；
+正式 arm64 包 SHA256 为
+`46efe2309fd184eac5b9d9ebcb70b08868b987f3c95eebe7e407acbf9a41d847`，
+正式源码包为 `c9e47e3ab0417de9ab267b99aed5a99956e0371b9e5961e67a8d4711b4e99d7e`。
+核验材料 `.tmp-publish-sing-box-20261104/`；不将源码归档元数据差异当成二进制差异。
+
+使用真实摘要更新 `versions.lock`，保留上游 Cronet 摘要；正式 Dockerfile 从
+发布坐标下载并校验后构建镜像
+`sha256:6ade5a42bd70d10feedd154e4f7cb7cd561736c8de939db96cc6bca4debf9805`。
+同一临时入口只换根路径两行和镜像映射两行，原 Reality/ML-DSA 整轮
+`.tmp-regression-docker-559f73c06c3848218cc04e6cfb241c3c/` 为
+exit 0、33505 ms、非缓存，三路正文、五次 ML-DSA 正控及两反例均通过。
+真实 lock 的 `docker-phase2` 为 exit 0、1585 ms，结果 `df50b628...`。
+普通入口仍固定旧镜像；arm64 仅证原生构建/功能和 smoke，未证 Reality 整轮。
+
+应用发布 CI `41849182832` 的协议合同分片超过 10 分钟被取消，其余
+21 个检查通过，应用镜像与控制包未发布。该子项此前本机成功耗时 555947 ms，
+云端还包括工具准备与两个其它子项；仅该分片上限改为 20 分钟，未删减断言。
+真实 lock 与时限调整待新一轮应用 CI 验证。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

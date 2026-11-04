@@ -15,7 +15,7 @@ jobs:
   contracts:
     name: Docker contracts (${{ matrix.selector }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.selector == 'docker-contracts-phase3-protocol' && 20 || 10 }}
     env:
       PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
       # 协议分片包含控制日志测试，日志路径的全部祖先必须归 root 所有。
