@@ -26,10 +26,14 @@
   CI `41849182833` 原生双架构构建、功能检查及 Alpine smoke 全通过。
   四资产 API/SHA256SUMS、源码补丁与 Cronet 摘要正确；旧版资产未变。
   正式 amd64 与来源包重建候选逐字节相同，材料 `.tmp-publish-sing-box-20261104/`。
-  正式下载镜像 Reality 整轮 exit 0/33505 ms，结果 `559f73c0...`；
-  真实 lock 已更新，phase2 exit 0/1585 ms，待提交及应用发布。
-- 应用 CI `41849182832` 的协议分片超过 10 分钟被取消，其余 21 检查通过。
-  该子项旧本机成功耗时 556 秒；仅该分片改 20 分钟，保留原断言，待新 CI。
+  正式下载镜像 Reality 整轮 exit 0/33505 ms，结果 `559f73c0...`。
+- 真实 lock 已签名提交 `80a6e76c` 并推送，phase2 exit 0/1585 ms。
+  应用 `3.43.0`/`15af503b` 已发布，CI `41852313298` 全通过；
+  清单 Cosign/OIDC/API 摘要及控制包 303 源码逐字节核对通过。
+  正常入口固定签名清单的新 GHCR 镜像，Reality 整轮 exit 0/32946 ms，
+  结果 `4b422d65...`；模拟入口检查因自动审批两次超时未启动。
+- 原 CI 协议分片超 10 分钟取消；仅该分片改 20 分钟后云端 1021 秒通过，
+  原断言不变；本机对应子项 562980 ms/exit 0，结果 `43043bc8...`。
 - 原生 3.42.3 账号与业务恢复已清场并断网独验，失败原件保留；
   `.tmp-native-account-close-20261027/verification.json`、
   `.tmp-native-business-close-20261027/verification.json`。
@@ -49,8 +53,7 @@
 - 旧 Vision reset、XHTTP TLS 超时、TUIC 超时缺原现场材料，根因未定。
 - 旧正式 sing-box `1.14.4`→Xray `26.10.31` 失败原件 `d18652f4...` 保留。
   新修订已保留 Chrome 混合 key share，正式包整轮通过，认证/证书基线不变。
-  hybrid-only/其它指纹及 arm64 Reality 整轮未证明；普通本机 selector 仍固定旧镜像。
-  应用镜像/控制包发布与正式镜像补验待 CI；不覆盖旧版资产，见 3D.27。
+  hybrid-only/其它指纹及 arm64 Reality 整轮未证明；旧版资产保持，见 3D.27。
   配对直接装测试规格，不证明 CLI 自动启用整链或独立 SNI；
   sing-box 拒绝配对及带配对来源的跨核心复制。
 

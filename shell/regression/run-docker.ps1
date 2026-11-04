@@ -478,7 +478,7 @@ try {
             # 固定核心与 OpenSSL；专用标签让离线导入保留可解析的镜像名。
             $pinnedImages = [ordered]@{
                 'padm-local/padm-xray:mldsa65-26.10.31' = 'ghcr.io/neil1123-vip/padm-xray@sha256:0f768569d91783b640b911da2956c7db5f3d4607852a8489968c3a571cd45bf7'
-                'padm-local/padm-sing-box:tun-1.14.4' = 'ghcr.io/neil1123-vip/padm-sing-box@sha256:7c58562b7a6f1988d9850b5d425e9f446e04f2df63ab10542f160ab5581129ed'
+                'padm-local/padm-sing-box:mldsa65-1.14.4-padm.1' = 'ghcr.io/neil1123-vip/padm-sing-box:3.43.0@sha256:aaee34c8dfec06a3bcf3683145a2f63be1171e3919fe9ed826ddd71b6ad56b2e'
                 'padm-local/padm-ops:mldsa65-openssl-3.5.9' = 'ghcr.io/neil1123-vip/padm-ops@sha256:3f00355db580fabb2c9eaea8c1cd8fcd43f286acc6bf9499e12870cec03d20a1'
             }
             foreach ($tag in $pinnedImages.Keys) {
@@ -487,7 +487,7 @@ try {
             }
             $references = [ordered]@{
                 xray = 'padm-local/padm-xray:mldsa65-26.10.31'
-                'sing-box' = 'padm-local/padm-sing-box:tun-1.14.4'
+                'sing-box' = 'padm-local/padm-sing-box:mldsa65-1.14.4-padm.1'
                 ops = 'padm-local/padm-ops:mldsa65-openssl-3.5.9'
             }
         } elseif ($Selector -in @('docker-acme-recovery-real', 'docker-webroot-recovery-real', 'docker-alpn-recovery-real',
