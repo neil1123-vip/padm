@@ -57,7 +57,10 @@ async function main() {
     const inputs = ['.github/workflows/build-sing-box.yml', 'shell/build-sing-box.sh',
         'shell/core/singbox_build.sh',
         'shell/subscription/traffic.sh', 'shell/core/stats_grpc.sh', 'docker-bake.hcl',
-        'docker/images/sing-box/Dockerfile', 'docker/tests/image-smoke.sh', 'docker/tests/sing-box-build.cjs'];
+        'docker/images/sing-box/Dockerfile', 'docker/tests/image-smoke.sh', 'docker/tests/sing-box-build.cjs',
+        'docker/tests/reality-real.sh', 'docker/tests/reality-key-share-real.sh',
+        'docker/tests/reality-key-share-real_test.go', 'docker/tests/reality-hybrid-only-real_test.go',
+        'shell/regression/container/Dockerfile', 'shell/regression/install-ci-jq.sh'];
     write('.gitignore', 'output\n');
     write('versions.lock', fs.readFileSync(path.join(project, 'versions.lock')));
     for (const file of inputs) write(file, '# fixture\n');
@@ -85,7 +88,9 @@ async function main() {
         before = head;
     }
     for (const file of inputs) {
-        assert.ok(workflow.includes(`      - '${file === 'docker/images/sing-box/Dockerfile' ? 'docker/images/sing-box/**' : file}'`), `Missing trigger: ${file}`);
+        const trigger = file === 'docker/images/sing-box/Dockerfile' ? 'docker/images/sing-box/**'
+            : file.startsWith('shell/regression/container/') ? 'shell/regression/container/**' : file;
+        assert.ok(workflow.includes(`      - '${trigger}'`), `Missing trigger: ${file}`);
         write(file, '# changed\n');
         const head = commit();
         check('push', { changed: 'true', verify: 'true' });
@@ -103,7 +108,10 @@ async function main() {
     write('output', '');
     shell(lockScript, { REQUESTED_VERSION: 'v1.14.4', GITHUB_OUTPUT: path.join(root, 'output') });
     assert.match(fs.readFileSync(path.join(root, 'output'), 'utf8'), /^version=v1\.14\.4-padm\.1\nupstream=v1\.14\.4\n/);
-    shell(lockScript, { REQUESTED_VERSION: 'v1.14.4-padm.2', GITHUB_OUTPUT: path.join(root, 'output') }, false);
+    write('output', '');
+    shell(lockScript, { REQUESTED_VERSION: 'v1.14.4-padm.2', GITHUB_OUTPUT: path.join(root, 'output') });
+    assert.match(fs.readFileSync(path.join(root, 'output'), 'utf8'), /^version=v1\.14\.4-padm\.2\nupstream=v1\.14\.4\n/);
+    shell(lockScript, { REQUESTED_VERSION: 'v1.14.4-padm.3', GITHUB_OUTPUT: path.join(root, 'output') }, false);
 
     const resolve = new (Object.getPrototypeOf(async function () {}).constructor)('github', 'context', 'core', script('Resolve immutable source and release assets', 'script'));
     const digest = 'a'.repeat(64);
@@ -113,13 +121,16 @@ async function main() {
     process.env.LOCK_ARM64 = digest;
     const asset = name => ({ name, size: 100, digest: `sha256:${digest}` });
     const release = { draft: false, assets: ['linux-amd64.tar.gz', 'linux-arm64.tar.gz', 'source.tar.gz'].map(suffix => asset(`sing-box-1.14.1-${suffix}`)).concat(asset('SHA256SUMS')) };
-    async function decision(existing, verify, expected, badDigest = false, buildVersion = version, upstreamVersion = version) {
+    async function decision(existing, verify, expected, badDigest = false, buildVersion = version, upstreamVersion = version,
+        event = 'push', publish = '') {
         const outputs = {};
         let upstreamCalls = 0;
         process.env.BUILD_VERSION = buildVersion;
         process.env.UPSTREAM_VERSION = upstreamVersion;
         process.env.LOCK_VERSION = upstreamVersion;
         process.env.VERIFY_EXISTING = verify;
+        process.env.EVENT_NAME = event;
+        process.env.PUBLISH_RELEASE = publish;
         const github = { rest: {
             repos: { getReleaseByTag: async ({ owner, tag }) => {
                 if (owner === 'SagerNet') {
@@ -144,7 +155,8 @@ async function main() {
         assert.equal(outputs.skip, expected.skip);
         assert.equal(outputs.publish, expected.publish);
         assert.equal(upstreamCalls, expected.skip === 'true' ? 0 : 1);
-        if (outputs.skip !== 'true') assert.deepEqual(JSON.parse(outputs.matrix).include.map(item => item.arch), ['amd64', 'arm64']);
+        if (outputs.skip !== 'true') assert.deepEqual(JSON.parse(outputs.matrix).include.map(item => [item.arch, item.runner]),
+            [['amd64', 'ubuntu-latest'], ['arm64', 'ubuntu-24.04-arm']]);
     }
     await decision(release, 'false', { skip: 'true', publish: 'false' });
     await decision(release, 'true', { skip: 'false', publish: 'false' });
@@ -157,6 +169,18 @@ async function main() {
     await decision(revised, 'false', { skip: 'true', publish: 'false' }, false, 'v1.14.4-padm.1', 'v1.14.4');
     await decision(revised, 'true', { skip: 'false', publish: 'false' }, false, 'v1.14.4-padm.1', 'v1.14.4');
     await decision(null, 'true', /digest differs/, true, 'v1.14.4-padm.1', 'v1.14.4');
+    await decision(null, 'true', { skip: 'false', publish: 'false' }, false,
+        'v1.14.4-padm.2', 'v1.14.4', 'workflow_dispatch', 'false');
+    await decision({ ...release, draft: true }, 'true', { skip: 'false', publish: 'false' }, false,
+        'v1.14.4-padm.2', 'v1.14.4', 'workflow_dispatch', 'false');
+    await decision(null, 'true', { skip: 'false', publish: 'true' }, false,
+        'v1.14.4-padm.2', 'v1.14.4', 'workflow_dispatch', 'true');
+    await decision(null, 'false', { skip: 'false', publish: 'true' }, false,
+        version, version, 'schedule', 'true');
+    const callable = workflow.split('  workflow_call:\n')[1].split('  push:\n')[0];
+    const dispatch = workflow.split('  workflow_dispatch:\n')[1].split('\npermissions:')[0];
+    assert.match(callable, /publish:[\s\S]*type: boolean\s+default: true/);
+    assert.match(dispatch, /publish:[\s\S]*type: boolean\s+default: false/);
     assert.equal(shell('version=v1.14.4-padm.1; [[ "${version%-padm.*}" != *-* ]] && printf stable'), 'stable');
 
     // 执行实际候选步骤，确认包进入覆盖上下文，构建或 smoke 失败均向上传播。
@@ -176,6 +200,52 @@ async function main() {
     shell(mock + alpine, { ...env, BUILD_STATUS: '1' }, false);
     shell(mock + alpine, { ...env, SMOKE_STATUS: '1' }, false);
     assert.ok(workflow.indexOf('Verify candidate in the Alpine image') < workflow.indexOf('uses: actions/upload-artifact@'));
+
+    // 执行实际 Reality 编排命令，验证候选身份、失败传播及临时提取容器清理。
+    write('docker/tests/reality-real.sh',
+        'set -eu\n[[ "$*" == "pinned-xray padm-sing-box-candidate:amd64 pinned-ops mldsa65" ]]\nexit "${REALITY_STATUS:-0}"\n');
+    write('shell/regression/install-ci-jq.sh', 'exit "${JQ_STATUS:-0}"\n');
+    const reality = script('Verify native Reality candidate');
+    const fixed = script('Verify fixed Reality key shares');
+    const realityEnv = { ARCH: 'amd64', XRAY_IMAGE: 'pinned-xray', OPS_IMAGE: 'pinned-ops', RUNNER_TEMP: root };
+    const realityMock = `sudo() { "$@"; }
+docker() { [[ "$1" == pull && "$2" == --platform && "$3" == linux/amd64 ]] || return 90; return "\${PULL_STATUS:-0}"; }
+`;
+    shell(realityMock + reality, realityEnv);
+    shell(realityMock + reality, { ...realityEnv, PULL_STATUS: '1' }, false);
+    shell(realityMock + reality, { ...realityEnv, JQ_STATUS: '1' }, false);
+    shell(realityMock + reality, { ...realityEnv, REALITY_STATUS: '1' }, false);
+    const fixedMock = `go() { [[ "$1" == env ]] || return 90; printf '%s' /verified-cache; }
+docker() {
+    case "$1" in
+    build) [[ "$*" == *'--platform linux/amd64 --target contracts'* ]] || return 90; return "\${BUILD_STATUS:-0}" ;;
+    create) [[ "$*" == 'create --network none pinned-xray' ]] || return 91; printf extractor ;;
+    cp) [[ "$2" == 'extractor:/usr/local/bin/xray' ]] || return 92; return "\${COPY_STATUS:-0}" ;;
+    run)
+        [[ "$*" == *'--network bridge --init'* && "$*" == *'dst=/snapshot.tar,readonly'* &&
+           "$*" == *'dst=/routing-cores,readonly'* && "$*" == *'dst=/sing-box-build-cache/upstream-v1.14.4,readonly'* &&
+           "$*" == *'src=/verified-cache,dst=/sing-box-build-cache/go,readonly'* &&
+           "$*" == *'src=/verified-cache,dst=/sing-box-build-cache/gopath/pkg/mod,readonly'* &&
+           "$*" == *'padm-regression:contracts docker-reality-hybrid-only-real'* ]] || return 93
+        [[ -s "\${RUNNER_TEMP}/reality-source.tar" ]] || return 94
+        return "\${FIXED_STATUS:-0}" ;;
+    rm) [[ "$*" == 'rm --volumes extractor' ]] || return 95; printf cleaned >"\${RUNNER_TEMP}/extractor-cleaned" ;;
+    *) return 96 ;;
+    esac
+}
+`;
+    shell(fixedMock + fixed, realityEnv);
+    assert.equal(fs.readFileSync(path.join(root, 'extractor-cleaned'), 'utf8'), 'cleaned');
+    shell(fixedMock + fixed, { ...realityEnv, BUILD_STATUS: '1' }, false);
+    for (const envKey of ['COPY_STATUS', 'FIXED_STATUS']) {
+        fs.unlinkSync(path.join(root, 'extractor-cleaned'));
+        shell(fixedMock + fixed, { ...realityEnv, [envKey]: '1' }, false);
+        assert.equal(fs.readFileSync(path.join(root, 'extractor-cleaned'), 'utf8'), 'cleaned');
+    }
+    for (const name of ['Verify native Reality candidate', 'Verify fixed Reality key shares']) {
+        assert.match(workflow.split(`      - name: ${name}\n`)[1], /^        if: needs\.prepare\.outputs\.version == 'v1\.14\.4-padm\.2'\n/);
+        assert.ok(workflow.indexOf(name) < workflow.indexOf('uses: actions/upload-artifact@'));
+    }
     assert.match(workflow, /needs: \[prepare, build\]\s+if: needs\.prepare\.outputs\.publish == 'true' && needs\.build\.result == 'success'/);
     console.log('sing-box-build-regression-ok');
 }

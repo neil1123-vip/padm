@@ -365,9 +365,10 @@ try {
         # SSH guard 夹具只在容器私有 mount 空间验证真实只读挂载。
         @('--cap-add', 'SYS_ADMIN')
     } else { @() }
-    $networkMode = if ($Selector -eq 'sing-box-local-build-real') { 'bridge' } else { 'none' }
+    $networkMode = if ($Selector -in @('sing-box-local-build-real', 'docker-reality-key-share-real',
+        'docker-reality-hybrid-only-real')) { 'bridge' } else { 'none' }
     $networkEnvironment = @()
-    if ($Selector -eq 'sing-box-local-build-real') {
+    if ($networkMode -eq 'bridge') {
         foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')) {
             $value = [Environment]::GetEnvironmentVariable($name)
             if (-not $value) { continue }
@@ -428,7 +429,7 @@ try {
         'docker-routing-direct-block-real', 'docker-routing-block-ips-real', 'docker-routing-block-ips-resolved-real',
         'docker-routing-block-ips-resolved-egress-real', 'docker-routing-block-bt-real',
         'docker-routing-region-real', 'docker-routing-warp-real', 'docker-http-relay-real',
-        'docker-vless-encryption-real', 'docker-vless-encryption-focused')) {
+        'docker-vless-encryption-real', 'docker-vless-encryption-focused', 'docker-reality-hybrid-only-real')) {
         # 仅复制已有本机镜像的程序到隔离回归容器，不安装宿主工具或挂载 Docker Socket。
         $cores = Join-Path $runDir 'routing-cores'
         New-Item -ItemType Directory -Path $cores | Out-Null
@@ -441,8 +442,11 @@ try {
                 'docker-routing-block-ips-resolved-egress-real') -and
                 $entry.name -eq 'xray') { continue }
             if ($Selector -in @('docker-http-relay-real', 'docker-vless-encryption-real',
-                'docker-vless-encryption-focused') -and
+                'docker-vless-encryption-focused', 'docker-reality-hybrid-only-real') -and
                 $entry.name -eq 'sing-box') { continue }
+            if ($Selector -eq 'docker-reality-hybrid-only-real') {
+                $entry.reference = 'ghcr.io/neil1123-vip/padm-xray@sha256:0f768569d91783b640b911da2956c7db5f3d4607852a8489968c3a571cd45bf7'
+            }
             $info = & $docker image inspect $entry.reference
             if ($LASTEXITCODE -ne 0) { throw "Required routing image is missing: $($entry.reference)" }
             $info = $info | ConvertFrom-Json | Select-Object -First 1

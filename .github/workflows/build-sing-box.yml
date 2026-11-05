@@ -4,9 +4,14 @@ on:
   workflow_call:
     inputs:
       version:
-        description: 'Upstream sing-box tag to build'
+        description: 'sing-box tag or supported padm revision to build'
         required: true
         type: string
+      publish:
+        description: 'Publish a missing release after verification'
+        required: false
+        type: boolean
+        default: true
   push:
     branches: [main]
     paths:
@@ -20,12 +25,23 @@ on:
       - 'docker/images/sing-box/**'
       - 'docker/tests/image-smoke.sh'
       - 'docker/tests/sing-box-build.cjs'
+      - 'docker/tests/reality-real.sh'
+      - 'docker/tests/reality-key-share-real.sh'
+      - 'docker/tests/reality-key-share-real_test.go'
+      - 'docker/tests/reality-hybrid-only-real_test.go'
+      - 'shell/regression/container/**'
+      - 'shell/regression/install-ci-jq.sh'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Upstream sing-box tag (empty uses versions.lock)'
+        description: 'sing-box tag or padm revision (empty uses versions.lock)'
         required: false
         type: string
+      publish:
+        description: 'Publish a missing release after verification'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,7 +82,9 @@ jobs:
             git cat-file -e "${BEFORE_SHA}:versions.lock"; then
             if git diff --quiet "${BEFORE_SHA}" HEAD -- .github/workflows/build-sing-box.yml shell/build-sing-box.sh shell/core/singbox_build.sh \
               shell/subscription/traffic.sh shell/core/stats_grpc.sh docker-bake.hcl docker/images/sing-box \
-              docker/tests/image-smoke.sh docker/tests/sing-box-build.cjs; then
+              docker/tests/image-smoke.sh docker/tests/sing-box-build.cjs docker/tests/reality-real.sh \
+              docker/tests/reality-key-share-real.sh docker/tests/reality-key-share-real_test.go \
+              docker/tests/reality-hybrid-only-real_test.go shell/regression/container shell/regression/install-ci-jq.sh; then
               runtime_keys='^PADM_LOCK_(ALPINE_BASE|CA_CERTIFICATES_VERSION|GCOMPAT_VERSION|LIBGCC_VERSION)='
               previous=$(git show "${BEFORE_SHA}:versions.lock" | grep -E "${runtime_keys}")
               current=$(grep -E "${runtime_keys}" versions.lock)
@@ -115,6 +133,8 @@ jobs:
           LOCK_AMD64: ${{ steps.lock.outputs.amd64 }}
           LOCK_ARM64: ${{ steps.lock.outputs.arm64 }}
           VERIFY_EXISTING: ${{ steps.inputs.outputs.verify }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUBLISH_RELEASE: ${{ inputs.publish }}
         with:
           script: |
             const version = process.env.BUILD_VERSION;
@@ -136,7 +156,8 @@ jobs:
               asset.name === name && asset.size > 0 && /^sha256:[0-9a-f]{64}$/.test(asset.digest || '')).length === 1);
             if (existing && !existing.draft && !complete) throw new Error('Published release is incomplete; repair it explicitly');
             core.setOutput('version', version);
-            core.setOutput('publish', complete ? 'false' : 'true');
+            const publish = process.env.EVENT_NAME === 'push' || process.env.PUBLISH_RELEASE === 'true';
+            core.setOutput('publish', !complete && publish ? 'true' : 'false');
             const skip = complete && process.env.VERIFY_EXISTING !== 'true';
             core.setOutput('skip', skip ? 'true' : 'false');
             if (skip) return;
@@ -221,6 +242,45 @@ jobs:
             --set "sing-box.args.VCS_REF=${GITHUB_SHA}" \
             --set "sing-box.tags=padm-sing-box-candidate:${ARCH}"
           bash docker/tests/image-smoke.sh "padm-sing-box-candidate:${ARCH}" sing-box
+      - name: Verify native Reality candidate
+        if: needs.prepare.outputs.version == 'v1.14.4-padm.2'
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          XRAY_IMAGE: ghcr.io/neil1123-vip/padm-xray@sha256:0f768569d91783b640b911da2956c7db5f3d4607852a8489968c3a571cd45bf7
+          OPS_IMAGE: ghcr.io/neil1123-vip/padm-ops@sha256:3f00355db580fabb2c9eaea8c1cd8fcd43f286acc6bf9499e12870cec03d20a1
+        run: |
+          set -euo pipefail
+          docker pull --platform "linux/${ARCH}" "${XRAY_IMAGE}"
+          docker pull --platform "linux/${ARCH}" "${OPS_IMAGE}"
+          sudo bash shell/regression/install-ci-jq.sh
+          # 原整轮使用本次交付镜像与固定配对，不修改候选二进制或指纹。
+          sudo env TMPDIR="${RUNNER_TEMP}" bash docker/tests/reality-real.sh \
+            "${XRAY_IMAGE}" "padm-sing-box-candidate:${ARCH}" "${OPS_IMAGE}" mldsa65
+      - name: Verify fixed Reality key shares
+        if: needs.prepare.outputs.version == 'v1.14.4-padm.2'
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          XRAY_IMAGE: ghcr.io/neil1123-vip/padm-xray@sha256:0f768569d91783b640b911da2956c7db5f3d4607852a8489968c3a571cd45bf7
+        run: |
+          set -euo pipefail
+          docker build --platform "linux/${ARCH}" --target contracts \
+            --tag padm-regression:contracts shell/regression/container
+          git ls-files -z | tar --null -T - -cf "${RUNNER_TEMP}/reality-source.tar"
+          mkdir -p "${RUNNER_TEMP}/reality-xray"
+          extractor=$(docker create --network none "${XRAY_IMAGE}")
+          trap 'docker rm --volumes "${extractor}"' EXIT
+          docker cp "${extractor}:/usr/local/bin/xray" "${RUNNER_TEMP}/reality-xray/xray"
+          # 测试容器内解包当前源码；只读复用本次构建的固定上游、工具链和模块下载缓存。
+          docker run --rm --network bridge --init \
+            --env PADM_REGRESSION_PARALLEL_JOBS=2 --env PADM_REGRESSION_VERBOSE=1 \
+            --mount "type=bind,src=${RUNNER_TEMP}/reality-source.tar,dst=/snapshot.tar,readonly" \
+            --mount "type=bind,src=${PWD}/.tmp-sing-box-source,dst=/sing-box-build-cache/upstream-v1.14.4,readonly" \
+            --mount "type=bind,src=$(go env GOROOT),dst=/sing-box-build-cache/go,readonly" \
+            --mount "type=bind,src=$(go env GOMODCACHE),dst=/sing-box-build-cache/gopath/pkg/mod,readonly" \
+            --mount "type=bind,src=${RUNNER_TEMP}/reality-xray,dst=/routing-cores,readonly" \
+            padm-regression:contracts docker-reality-hybrid-only-real
       - uses: actions/upload-artifact@v7
         with:
           name: sing-box-${{ needs.prepare.outputs.version }}-${{ matrix.arch }}

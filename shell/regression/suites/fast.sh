@@ -881,6 +881,14 @@ runDockerRealityMldsa65RealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/reality-mldsa65-real.sh"
 }
 
+runDockerRealityKeyShareRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/reality-key-share-real.sh"
+}
+
+runDockerRealityHybridOnlyRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/reality-key-share-real.sh" handshake
+}
+
 listRegressionDockerWebrootRecoveryChildSelectors() {
     printf '%s\n' docker-backup docker-recovery-preview docker-webroot-recovery-apply
 }
@@ -1275,6 +1283,8 @@ registerRegressionFunctionLeaf docker-cdn-entries-real runDockerCdnEntriesRealRe
 registerRegressionFunctionLeaf docker-reality-stream-cli-real runDockerRealityStreamCliRealRegression
 registerRegressionFunctionLeaf docker-reality-stream-xhttp-cli-real runDockerRealityStreamXhttpCliRealRegression
 registerRegressionFunctionLeaf docker-reality-mldsa65-real runDockerRealityMldsa65RealRegression
+registerRegressionFunctionLeaf docker-reality-key-share-real runDockerRealityKeyShareRealRegression
+registerRegressionFunctionLeaf docker-reality-hybrid-only-real runDockerRealityHybridOnlyRealRegression
 registerRegressionFunctionLeaf docker-alpn-real runDockerAlpnRealRegression
 registerRegressionFunctionLeaf docker-xhttp runDockerXhttpRegression
 registerRegressionFunctionLeaf docker-xhttp-validation runDockerXhttpValidationRegression

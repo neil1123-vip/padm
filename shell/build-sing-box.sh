@@ -177,11 +177,15 @@ jq -n --arg version "${version}" --arg upstream_version "${upstream_version}" \
     --arg cronet_sha256 "$(sha256sum "${package_dir}/libcronet.so" | cut -d ' ' -f 1)" --arg cronet_commit "${cronet_commit}" \
     '{upstream: "https://github.com/SagerNet/sing-box", version: $version, upstream_version: $upstream_version, commit: $commit,
       builder_sha256: $builder_sha256,
-      patches: (if $version == "v1.14.4-padm.1" then [{
+      patches: (if $version == "v1.14.4-padm.1" or $version == "v1.14.4-padm.2" then [{
         file: "common/tls/reality_client.go",
         source_sha256: "38a5d553fffd108afca51bde0b0888512d2f4633daa608e03767838b8fdcdbc0",
-        patched_sha256: "48f79ad8caa53ace78c54d61e57d1f9e57dfd4bae384081e3ff65654c8fca2de",
-        purpose: "Preserve Chrome hybrid key shares for Reality; authentication unchanged."
+        patched_sha256: (if $version == "v1.14.4-padm.2" then
+          "2f4a710cd7fbb6068eb8fd0e2af1f60982f7a9ce2b96ce67699467ac96ed6c57"
+          else "48f79ad8caa53ace78c54d61e57d1f9e57dfd4bae384081e3ff65654c8fca2de" end),
+        purpose: (if $version == "v1.14.4-padm.2" then
+          "Preserve hybrid key shares and share their X25519 private key between Reality authentication and TLS when a standalone share is absent."
+          else "Preserve Chrome hybrid key shares for Reality; authentication unchanged." end)
       }] else [] end),
       source_asset: $source_asset, build_tags: $tags, ldflags: $ldflags, go: $go,
       goos: "linux", goarch: $arch, cgo_enabled: false,
@@ -198,9 +202,9 @@ if [[ "${arch}" == amd64 ]]; then
     git -C "${source_dir}" archive --format=tar "${commit}" | tar -xf - -C "${tmp_dir}/source/${source_package}"
     cp -- "${project_root}/shell/core/singbox_build.sh" "${tmp_dir}/source/${source_package}/PADM_BUILD/"
     cp -- "${package_dir}/BUILD_INFO.json" "${tmp_dir}/source/${source_package}/PADM_BUILD/"
-    if [[ "${version}" == v1.14.4-padm.1 ]]; then
+    if [[ "${version}" == v1.14.4-padm.1 || "${version}" == v1.14.4-padm.2 ]]; then
         prepareSingBoxRealitySource "${source_dir}/common/tls/reality_client.go" \
-            "${tmp_dir}/source/${source_package}/PADM_BUILD/reality_client.go"
+            "${tmp_dir}/source/${source_package}/PADM_BUILD/reality_client.go" "${version}"
     fi
     printf '%s\n' \
         'Upstream source is unchanged. PADM_BUILD contains the exact builder, build identity and patched Reality source.' \

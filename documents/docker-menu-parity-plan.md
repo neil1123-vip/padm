@@ -2582,6 +2582,55 @@ exit 0、32946 ms、非缓存；三路业务、五次 ML-DSA 正控及两个反�
 真实正常入口已验证。未改生产 VPS、未启用透明代理、未跑 full。
 本次修订发布闭环完成；hybrid-only/其它指纹、arm64 Reality 整轮和整体计划仍未收口。
 
+2026-11-05 针对 `uTLS v1.8.7` 增加固定 Chrome ClientHello key-share 形态检查，
+从 `.1/.2` 实际补丁输出提取认证私钥选择逻辑，比较 X25519 公钥与 ECDH 秘密。
+冷启动运行 `docker-reality-key-share-real -Jobs 2`，下载并校验 Go `1.25.5`，
+按固定 `go.mod/go.sum` 获取模块后 exit 0/30467 ms：`.1` 仅 hybrid-only 拒绝，
+`.2` 的双 share、hybrid-only、X25519-only 均匹配，空 share 仍拒绝。
+结果 `.tmp-regression-docker-312787367f0b42339646e6ee781ce7e8/`。
+此项只证明私钥选择，不是 `.2` 完整二进制或 Reality 握手；该修订未构建、未发布，
+正式 lock、镜像和旧资产均未改。完整 hybrid-only 整轮、其它指纹及 arm64 Reality
+整轮仍未证明；随机指纹超时不作为固定 hybrid-only 的证据。
+
+随后补入 `docker-reality-hybrid-only-real -Jobs 2`，编译完整实际 Reality 客户端源码，
+仅将 ClientHello 工厂替换为固定 Chrome 双 share/hybrid-only 夹具，不摘抄认证或验签逻辑。
+实际发送的 ClientHello 经 uTLS 解析核对组和长度；本地 TLS 1.3 hybrid 目标、固定
+Xray `26.10.31` 与独立 HTTP 原点均在测试容器内运行，不访问生产。
+初版 `.2` 仅回退局部认证变量，通过密钥检查后仍在 uTLS 的 TLS 1.3 非空私钥检查
+报 `internal error`；失败结果 `027374a02c2f475c86d75688b99e4115` 保留。
+修正为只在 `KeyShareKeys.Ecdhe` 为空时赋值 `MlkemEcdhe`，使认证与后续 TLS
+共用同一 X25519 私钥；双 share 仍优先普通 share，空 share 仍拒绝。
+最终补丁源码 SHA256 为
+`2f4a710cd7fbb6068eb8fd0e2af1f60982f7a9ce2b96ce67699467ac96ed6c57`。
+
+固定输入真实回归 `42031f9c816749689e4f9f18d112b864` 为 exit 0/37625 ms、非缓存。
+`.1` 双 share 业务与认证反例通过，hybrid-only 稳定复现 `nil ecdheKey`；
+最终 `.2` 两种形态均完成经原校验器验证的 Reality 握手和完整 VLESS 正文。
+每种形态的错公钥、错 short ID、错 UUID 均无法到达原点，正确请求前后均通过。
+此证据为带固定输入工厂的完整客户端源码测试，不冒充未改指纹交付二进制的 hybrid-only 整轮。
+
+完整 amd64 候选使用原 Go `1.25.5`、upstream commit、正式构建脚本及全部 flags，
+版本/merge/check、Hy2/TUIC 业务及用户统计、Cronet 启动和 QueryStats 全通过；
+来源包重建与候选二进制逐字节相同，二进制 SHA256 为
+`851b4161701ee3ac8db76040462cd6924f3d24c24151b7d7cf2d4c7a13c3cb09`。
+本地包 SHA256 `028cfa30d9c3b050b8f1ca20946f3b368da6c834af510ceaa039f7605e71cc7c`，
+源码包 SHA256 `cf4d8dbcf802404f61104a07018dea3d99e6d9393f1fc2e4c8733188485d6441`；
+材料 `.tmp-reality-revision2/final/` 及同目录上层构建日志。
+本地镜像 `padm-local/padm-sing-box:1.14.4-padm.2-candidate` 固定摘要
+`sha256:2202eea28911d1a736743ca6b3af7f7f47df51b1978ea96a8b355cdf5090f219`，
+仅以候选覆盖正式运行环境的二进制/构建材料；原回归入口副本仅改根路径两行及镜像映射两行。
+原 Reality/ML-DSA 完整正反例 `78c76689ebfe4ca48d7d7db595515a27` 为 exit 0/34875 ms；
+`sing-box-stats-build` 为 5592 ms，`docker-phase5` 为 13177 ms，均 exit 0、非缓存。
+`.2` 未发布，正式 lock/镜像仍为 `.1`，无提交、推送或生产变更。
+原生 arm64 构建/Reality、其它指纹及公网组合仍未验，未跑 full。
+
+2026-11-05 将候选验收接入 `build-sing-box.yml`：`.2` 在 amd64 和原生 arm64
+分别运行固定 key-share 完整客户端源码测试及原 Reality/ML-DSA 业务整轮，后者使用该架构本次构建的候选二进制。
+workflow_dispatch 的 `publish` 默认 false；验证通过不会自动发布，发布需显式启用。
+`docker-phase5` exit 0/13450 ms、非缓存，actionlint 通过；尚未提交或触发远端 CI。
+本轮没有证明可由现有生产配置稳定构造 hybrid-only ClientHello；该形态由完整客户端源码测试工厂覆盖，
+不增加生产指纹开关，也不将此测试称为交付二进制 hybrid-only 验收。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

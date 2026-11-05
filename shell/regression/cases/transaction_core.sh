@@ -678,8 +678,10 @@ runSingBoxStatsBuildRegression() (
         regressionExpectFailure buildSingBoxStatsBinary "${version}" 386 "${sourceDir}" "${binary}" || return 1
         [[ ! -s "${args}" ]] || return 1
         [[ "$(singBoxBuildVersion v1.14.4)" == v1.14.4-padm.1 &&
-            "$(singBoxUpstreamVersion v1.14.4-padm.1)" == v1.14.4 ]] || return 1
-        regressionExpectFailure singBoxBuildVersion v1.14.4-padm.2 || return 1
+            "$(singBoxUpstreamVersion v1.14.4-padm.1)" == v1.14.4 &&
+            "$(singBoxBuildVersion v1.14.4-padm.2)" == v1.14.4-padm.2 &&
+            "$(singBoxUpstreamVersion v1.14.4-padm.2)" == v1.14.4 ]] || return 1
+        regressionExpectFailure singBoxBuildVersion v1.14.4-padm.3 || return 1
         mkdir -p "${sourceDir}/common/tls"
         printf 'changed upstream Reality source\n' >"${sourceDir}/common/tls/reality_client.go"
         regressionExpectFailure buildSingBoxStatsBinary v1.14.4-padm.1 amd64 "${sourceDir}" "${binary}" || return 1

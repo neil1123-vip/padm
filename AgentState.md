@@ -10,29 +10,26 @@
 - 本机 Docker Linux 可用，复用工具镜像，未跑 full。
 - 原生账号 8 阶段及恢复整轮通过，508821 ms/exit 0；
   26 正/5 拒绝、断网独验及 13 项篡改拒绝通过，已恢复清场。
-- 4A.4 业务备份/preview/merge/replace、真实健康失败回滚与分享授权恢复
-  7 阶段通过，616534 ms/exit 0；断网独验及 10 项篡改拒绝通过并清场。
+- 4A.4 备份/恢复、健康失败回滚与分享授权 7 阶段通过（616534 ms/exit 0）；
+  断网独验及 10 项篡改拒绝通过并清场。
 
 ## 最近完成
 
 - 2026-11-04：3D.26 的 16 个协议管理 supported，定向及 daily 34/34 通过。
-- 3D.27：Nginx 缺失/损坏真实启动失败回滚和修复、活动 WS 防护下
-  未保护入口增删改通过；双栈 16 正/16 错 UUID 拒绝，SQLite/规则保持。
-  `docker-fail2ban-source-real` 471430 ms/exit 0/非缓存；
-  原件 `.tmp-regression-docker-e0b03ef4a99e46aa8b0746869cca5945/`。
-- 14 个 deferred 已逐项对账，合同只改 reason，状态/schema 不变；
-  已有原生证据、剩余环境条件和拒绝边界见 2026-11-04 对账表。
-- 已签名提交并推送 `4c8ff0c2`；Reality 修订 `1.14.4-padm.1` 已发布。
-  CI `41849182833` 原生双架构构建、功能检查及 Alpine smoke 全通过。
-  四资产 API/SHA256SUMS、源码补丁与 Cronet 摘要正确；旧版资产未变。
-  正式 amd64 与来源包重建候选逐字节相同，材料 `.tmp-publish-sing-box-20261104/`。
-  正式下载镜像 Reality 整轮 exit 0/33505 ms，结果 `559f73c0...`。
-- 真实 lock 已签名提交 `80a6e76c` 并推送，phase2 exit 0/1585 ms。
-  应用 `3.43.0`/`15af503b` 已发布，CI `41852313298` 全通过；
-  清单 Cosign/OIDC/API 摘要及控制包 303 源码逐字节核对通过。
-  正常入口固定签名清单的新 GHCR 镜像，Reality 整轮 exit 0/32946 ms，
-  结果 `4b422d65...`；模拟入口检查因自动审批两次超时未启动。
-- 原 CI 协议分片超 10 分钟取消；仅该分片改 20 分钟后云端 1021 秒通过，
+- 3D.27 Nginx/WS/双栈 UUID 回滚与拒绝验收通过；
+  `docker-fail2ban-source-real` 471430 ms/exit 0，原件 `.tmp-regression-docker-e0b03ef4a99e46aa8b0746869cca5945/`。
+- 14 个 deferred 已对账；合同只改 reason，状态/schema 不变，详见 2026-11-04 对账表。
+- 已签名推送 `4c8ff0c2`；Reality `.1` 已发布，CI `41849182833` 双架构构建、
+  功能及 Alpine smoke 通过；四资产核验、旧版不变，amd64 来源包重建一致。
+- 正式下载镜像 Reality 整轮 exit 0/33505 ms；结果 `559f73c0...`。
+- 2026-11-05：Reality `.2` 固定 hybrid-only 源码业务/认证反例、amd64 正式构建/来源重建及
+  原 ML-DSA 整轮通过；候选未发布，材料 `.tmp-reality-revision2/`。
+- `.2` 已接入双原生架构 Reality/ML-DSA 候选和固定输入源码门禁；
+  workflow 手动触发默认不发布。`docker-phase5` exit 0/13450 ms，actionlint 通过；未触发远端 CI。
+- 真实 lock 已签名推送 `80a6e76c`，phase2 exit 0/1585 ms；应用 `3.43.0`/
+  `15af503b` 的 CI、签名清单及 303 源码核对通过。正式镜像 Reality 整轮
+  exit 0/32946 ms，结果 `4b422d65...`；模拟入口检查两次审批超时未启动。
+- 原 CI 协议分片超 10 分钟取消；仅该分片改 20 分钟后 1021 秒通过，
   原断言不变；本机对应子项 562980 ms/exit 0，结果 `43043bc8...`。
 - 原生 3.42.3 账号与业务恢复已清场并断网独验，失败原件保留；
   `.tmp-native-account-close-20261027/verification.json`、
@@ -53,7 +50,7 @@
 - 旧 Vision reset、XHTTP TLS 超时、TUIC 超时缺原现场材料，根因未定。
 - 旧正式 sing-box `1.14.4`→Xray `26.10.31` 失败原件 `d18652f4...` 保留。
   新修订已保留 Chrome 混合 key share，正式包整轮通过，认证/证书基线不变。
-  hybrid-only/其它指纹及 arm64 Reality 整轮未证明；旧版资产保持，见 3D.27。
+  `.2` 固定输入源码测试已验；交付二进制 hybrid-only、其它指纹及 arm64 整轮未验。
   配对直接装测试规格，不证明 CLI 自动启用整链或独立 SNI；
   sing-box 拒绝配对及带配对来源的跨核心复制。
 
