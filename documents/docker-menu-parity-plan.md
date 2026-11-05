@@ -2621,13 +2621,31 @@ Xray `26.10.31` 与独立 HTTP 原点均在测试容器内运行，不访问生�
 仅以候选覆盖正式运行环境的二进制/构建材料；原回归入口副本仅改根路径两行及镜像映射两行。
 原 Reality/ML-DSA 完整正反例 `78c76689ebfe4ca48d7d7db595515a27` 为 exit 0/34875 ms；
 `sing-box-stats-build` 为 5592 ms，`docker-phase5` 为 13177 ms，均 exit 0、非缓存。
-`.2` 未发布，正式 lock/镜像仍为 `.1`，无提交、推送或生产变更。
-原生 arm64 构建/Reality、其它指纹及公网组合仍未验，未跑 full。
+`.2` 未发布，正式 lock/镜像仍为 `.1`；修复和候选验收门禁已签名推送，
+无生产变更。其它指纹及公网组合仍未验，未跑 full。
 
 2026-11-05 将候选验收接入 `build-sing-box.yml`：`.2` 在 amd64 和原生 arm64
 分别运行固定 key-share 完整客户端源码测试及原 Reality/ML-DSA 业务整轮，后者使用该架构本次构建的候选二进制。
 workflow_dispatch 的 `publish` 默认 false；验证通过不会自动发布，发布需显式启用。
-`docker-phase5` exit 0/13450 ms、非缓存，actionlint 通过；尚未提交或触发远端 CI。
+`docker-phase5` exit 0/13450 ms、非缓存，actionlint 通过。
+已签名推送 `724ab2c0`/`57d01126`；远端仅验证 run `41950689348` 成功，
+amd64 和原生 arm64 的构建、功能检查、Alpine smoke、原 Reality/ML-DSA 业务整轮、
+固定 key-share 完整客户端源码测试均通过；发布 job 按 `publish=false` 跳过。
+首轮 `41946946307` 的固定 share 首个 dual 请求 3 秒超时：
+服务端已完成 ClientFinished，但 REALITY 启动探测缓存尚未就绪时按 5 秒轮询。
+仅将测试限时校准到 10 秒，保留所有认证和业务断言，不加入请求重试。
+受控 `.1`、`.2` 各 10 轮通过，含一轮 5.15 秒等待；正常定向入口
+`docker-reality-hybrid-only-real -Jobs 2` exit 0/36715 ms、非缓存。
+失败原件和诊断见 `.tmp-reality-ci-41946946307/`；
+成功日志、双架构候选包和摘要归档于 `.tmp-reality-ci-41950689348/`。
+同提交自动触发的独立 Release `41950639031` 最终 cancelled：
+协议分片 job `126993548970` 的 GitHub 注解明确为超过 20 分钟执行上限。
+分片内 `docker-phase3-edit` 为 116523 ms、`docker-control-cli` 为 45220 ms，均通过；
+`docker-phase3-entries-management-protocol` 已派发但未返回完成标记。
+其子项输出在完成后才汇总，现有日志不能证明内部卡点或仅为耗时波动；
+未继续加时或无变化重跑。其余已执行 job 成功，后续版本提交、镜像和发布 job 均跳过。
+注解与原日志归档于本轮候选证据目录的 `release-annotations.json`、`release-protocol.log`；
+`.2` 专用双架构候选成功不替代完整 Release 门禁，此独立问题仍未关闭。
 本轮没有证明可由现有生产配置稳定构造 hybrid-only ClientHello；该形态由完整客户端源码测试工厂覆盖，
 不增加生产指纹开关，也不将此测试称为交付二进制 hybrid-only 验收。
 

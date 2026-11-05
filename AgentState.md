@@ -22,15 +22,13 @@
 - 已签名推送 `4c8ff0c2`；Reality `.1` 已发布，CI `41849182833` 双架构构建、
   功能及 Alpine smoke 通过；四资产核验、旧版不变，amd64 来源包重建一致。
 - 正式下载镜像 Reality 整轮 exit 0/33505 ms；结果 `559f73c0...`。
-- 2026-11-05：`.2` 已签名推送 `724ab2c0`；CI `41946946307` 双原生架构
-  构建、Alpine、Reality/ML-DSA 通过，固定 share 首个 dual 超时。
-- 已将 3 秒限时校准为 10 秒，覆盖 REALITY 5 秒启动轮询；定向 36715 ms/
-  exit 0，待 CI 复验；候选未发布，原件 `.tmp-reality-ci-41946946307/`。
+- 2026-11-05：`.2` 已签名推送 `724ab2c0`/`57d01126`；CI `41950689348`
+  双原生架构构建、Alpine、Reality/ML-DSA、固定 share 全通过，发布跳过。
+- 测试限时改为 10 秒覆盖 REALITY 5 秒启动轮询；定向 36715 ms/exit 0，
+  受控 20 轮通过，含 5.15 秒等待；候选与证据 `.tmp-reality-ci-41950689348/`，未发布。
 - 真实 lock 已签名推送 `80a6e76c`，phase2 exit 0/1585 ms；应用 `3.43.0`/
   `15af503b` 的 CI、签名清单及 303 源码核对通过。正式镜像 Reality 整轮
   exit 0/32946 ms，结果 `4b422d65...`；模拟入口检查两次审批超时未启动。
-- 原 CI 协议分片超 10 分钟取消；仅该分片改 20 分钟后 1021 秒通过，
-  原断言不变；本机对应子项 562980 ms/exit 0，结果 `43043bc8...`。
 - 原生 3.42.3 账号与业务恢复已清场并断网独验，失败原件保留；
   `.tmp-native-account-close-20261027/verification.json`、
   `.tmp-native-business-close-20261027/verification.json`。
@@ -39,10 +37,12 @@
 
 ## 未决
 
+- Release `41950639031` 协议分片超 20 分钟取消，其余已执行项通过；
+  `docker-phase3-entries-management-protocol` 未完成，原件见本轮 CI 证据目录。
 - WS 公网旧端口 TCP 拒绝、原生 IPv6 未证明；固定 CONNECT 只证 TLS EOF。
 - ICMP 原生启用态收发/arm64/公网/重启、IPv6/traceroute/PMTU；
   真实 TUN 必须启用宿主透明接管，受透明保持关闭约束。
-- 原生 arm64、IPv6/双栈、新主机灾备、多机控制/WG、WARP 实账号、
+- 原生 arm64 整机、IPv6/双栈、新主机灾备、多机控制/WG、WARP 实账号、
   约 2026-12-17 自然 ACME 续期缺条件；VPS 无全局 IPv6/默认路由。
 - 公网 h3/CDN、其它客户端/算法、性能长稳未扩范围；gRPC Cloudflare
   透传缺有效 Zone 授权，不重跑无变化矩阵。
@@ -50,7 +50,7 @@
 - 旧 Vision reset、XHTTP TLS 超时、TUIC 超时缺原现场材料，根因未定。
 - 旧正式 sing-box `1.14.4`→Xray `26.10.31` 失败原件 `d18652f4...` 保留。
   新修订已保留 Chrome 混合 key share，正式包整轮通过，认证/证书基线不变。
-  `.2` 交付二进制 hybrid-only、其它指纹未验；固定 share 双原生架构待 CI 复验。
+  `.2` 交付二进制 hybrid-only、其它指纹未验。
   配对直接装测试规格，不证明 CLI 自动启用整链或独立 SNI；
   sing-box 拒绝配对及带配对来源的跨核心复制。
 

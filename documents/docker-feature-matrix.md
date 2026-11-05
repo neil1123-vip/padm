@@ -373,11 +373,15 @@ Hy2/TUIC 停止后再由新客户端进程验证拒绝。三种独立场景按�
 2026-11-05 `.2` 候选补齐共享私钥状态，固定双 share/hybrid-only 的完整客户端源码测试
 均通过真实 Reality/VLESS 业务及错公钥/short ID/UUID 拒绝；仅替换测试中的 ClientHello
 工厂并核对实际线上 share，不改变认证或验签。完整 amd64 二进制构建、来源包重建一致及
-原 Reality/ML-DSA 整轮均通过。其它指纹、未改指纹交付二进制的 hybrid-only 整轮、
-arm64 Reality 仍未证明；`.2` 未发布，正式 lock/镜像不变。
+原 Reality/ML-DSA 整轮均通过。其它指纹、未改指纹交付二进制的 hybrid-only 整轮
+仍未证明；`.2` 未发布，正式 lock/镜像不变。
 来源、结果及正式交付门槛见实施计划 3D.27。
 `.2` 双原生架构 Reality 候选门禁已接入构建工作流，手动触发默认只验证；
-远端 CI 尚未运行，未提交/推送，不据此宣称 arm64 实测通过。
+已签名推送 `724ab2c0`/`57d01126`，远端 run `41950689348` 成功。
+amd64、原生 arm64 的候选构建、功能检查、Alpine、原 Reality/ML-DSA 整轮和
+固定 share 源码业务/认证拒绝均通过，发布 job 跳过；详细证据见实施计划。
+独立自动 Release `41950639031` 的协议分片超 20 分钟取消，长子项尚待定位；
+上述候选门禁成功不代表整套 Release 通过，`.2` 仍未发布。
 
 3D.1 已接入逐入口 Reality 参数重生成：菜单或 `edit --regenerate-reality <入口 ID>`
 更新私钥、公钥和 short ID，支持两核心 Vision/gRPC 及 Xray XHTTP。
