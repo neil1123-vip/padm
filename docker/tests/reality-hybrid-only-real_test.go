@@ -179,7 +179,8 @@ func TestRealityHybridOnlyHandshake(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer raw.Close()
-				raw.SetDeadline(time.Now().Add(3 * time.Second))
+				// REALITY 启动探测缓存未就绪时按 5 秒轮询，限时需覆盖该等待。
+				raw.SetDeadline(time.Now().Add(10 * time.Second))
 				wire := &realityWireConn{Conn: raw}
 				secured, err := cfg.(*RealityClientConfig).ClientHandshake(context.Background(), wire)
 				if wire.hello != nil {

@@ -22,10 +22,10 @@
 - 已签名推送 `4c8ff0c2`；Reality `.1` 已发布，CI `41849182833` 双架构构建、
   功能及 Alpine smoke 通过；四资产核验、旧版不变，amd64 来源包重建一致。
 - 正式下载镜像 Reality 整轮 exit 0/33505 ms；结果 `559f73c0...`。
-- 2026-11-05：Reality `.2` 固定 hybrid-only 源码业务/认证反例、amd64 正式构建/来源重建及
-  原 ML-DSA 整轮通过；候选未发布，材料 `.tmp-reality-revision2/`。
-- `.2` 已接入双原生架构 Reality/ML-DSA 候选和固定输入源码门禁；
-  workflow 手动触发默认不发布。`docker-phase5` exit 0/13450 ms，actionlint 通过；未触发远端 CI。
+- 2026-11-05：`.2` 已签名推送 `724ab2c0`；CI `41946946307` 双原生架构
+  构建、Alpine、Reality/ML-DSA 通过，固定 share 首个 dual 超时。
+- 已将 3 秒限时校准为 10 秒，覆盖 REALITY 5 秒启动轮询；定向 36715 ms/
+  exit 0，待 CI 复验；候选未发布，原件 `.tmp-reality-ci-41946946307/`。
 - 真实 lock 已签名推送 `80a6e76c`，phase2 exit 0/1585 ms；应用 `3.43.0`/
   `15af503b` 的 CI、签名清单及 303 源码核对通过。正式镜像 Reality 整轮
   exit 0/32946 ms，结果 `4b422d65...`；模拟入口检查两次审批超时未启动。
@@ -50,7 +50,7 @@
 - 旧 Vision reset、XHTTP TLS 超时、TUIC 超时缺原现场材料，根因未定。
 - 旧正式 sing-box `1.14.4`→Xray `26.10.31` 失败原件 `d18652f4...` 保留。
   新修订已保留 Chrome 混合 key share，正式包整轮通过，认证/证书基线不变。
-  `.2` 固定输入源码测试已验；交付二进制 hybrid-only、其它指纹及 arm64 整轮未验。
+  `.2` 交付二进制 hybrid-only、其它指纹未验；固定 share 双原生架构待 CI 复验。
   配对直接装测试规格，不证明 CLI 自动启用整链或独立 SNI；
   sing-box 拒绝配对及带配对来源的跨核心复制。
 
