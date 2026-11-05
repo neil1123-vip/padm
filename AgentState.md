@@ -5,7 +5,7 @@
 ## 当前
 
 - 整体计划未完成；透明代理保持关闭，不以阶段通过替代整体完成。
-- `.2` 独立发布、正式 lock/应用交付及已授权 VPS 升级完成。
+- `.2` 发布、正式 lock/应用交付、VPS 升级及固定客户端公网 Reality 验收完成。
 - VPS：Debian 13 amd64、bridge、公网 IPv4、正式 `3.43.2`/source=`d8bac249`；
   保留 Xray/协议 21，三业务 healthy、无 OOM，透明关闭，两个 timer active/enabled。
 - 本机 Docker Linux 可用，复用工具镜像，未跑 full。
@@ -18,24 +18,22 @@
 
 - 3D.26 的 16 个协议管理 supported；3D.27 Nginx/WS/双栈 UUID 通过；
   14 个 deferred 已对账，合同仅改 reason，原件见实施计划。
-- 2026-11-05：`.2` 正式发布，CI `42008070777` 双原生架构构建、Alpine、
-  Reality/ML-DSA、固定 share 全通过；四资产与已验候选一致，旧 `.1` 不变。
-- lock `.2`/`8b71c705`：phase2 1666 ms、daily 34/34/259710 ms 均 exit 0、
-  非缓存；正式镜像 Reality/ML-DSA 整轮 34504 ms/exit 0、非缓存。
-- 应用 `3.43.2`/`d8bac249` 发布：CI `42010549859` 32 job 成功、零跳过，
-  18 分片、双架构 smoke 通过；协议 job 12 分 34 秒，保留 2 worker/20 分钟限额。
-  三资产摘要、独立 Sigstore 验签及 306 源码核对通过。
-- VPS `3.42.5`→`3.43.2` 成功，正式 validate、镜像绑定、配置/材料权限保持；
-  公网严格 TLS/200→错 UUID 拒绝→TLS/200；19 条身份/限额/逐账号累计保持，
-  自然采集新增上传 3555、下载 43868 字节；客户端夹具与容器已清理。
-- 本轮恢复点 `update.956SI1` 保存真实旧版 `3.42.5`，正式只读校验器通过，
-  且为最新有效 update 快照；未额外执行生产回滚或整机重启。
+- 2026-11-05：`.2` 正式发布，run `42008070777` 双原生架构/Alpine、
+  Reality/ML-DSA/固定 share 通过；四资产与候选一致，旧 `.1` 不变。
+  lock `8b71c705` 的 phase2/daily 34/34、正式镜像整轮均 exit 0、非缓存。
+- 应用 `3.43.2`/`d8bac249`：run `42010549859` 32 job 成功、零跳过；
+  三资产摘要、独立验签、306 源码及双架构镜像绑定通过。
+  VPS `3.42.5`→`3.43.2`、原 WS 公网正反正及恢复点 `update.956SI1` 校验通过。
   证据 `.tmp-release-revision2-20261105/`、`.tmp-revision2-vps-prep-20261105/`。
-- 原生 3.42.3 账号与业务恢复已清场并断网独验，失败原件保留；
-  `.tmp-native-account-close-20261027/verification.json`、
-  `.tmp-native-business-close-20261027/verification.json`。
-  正式 run 40406148426 三件套验签及 300 源码核对通过，
-  材料权限、timer、boot 和累计保持；未新增生产改动或本版整机重启。
+- 正式 `.2` 客户端→正式 Xray，公网 IPv4/Reality/gRPC/chrome 五阶段完成：
+  两正控严格 TLS/200；错公钥/SID 明确未接纳并回落，错 UUID 明确拒绝。
+  客户端两项超时及 false 原值保留；独立服务端关联和 3 项篡改拒绝通过。
+  诊断轮上传 3561、下载 43868 字节；临时端口、容器、网络、密钥和 URI 已清。
+  清场后 20 项现网断言及 19 条账号累计下界通过；生产 ID/StartedAt、boot、
+  材料权限、timer 均保持，透明关闭。未证明公网 ML-DSA/hybrid-only。
+  证据 `.tmp-reality-public-revision2-20261105/verification.json`。
+- 原生 3.42.3 账号/业务恢复已清场并断网独验，失败原件保留；
+  `.tmp-native-account-close-20261027/`、`.tmp-native-business-close-20261027/`。
 
 ## 未决
 
@@ -49,7 +47,7 @@
 - 透明启用重启按要求不做；SOCKS UDP、Xray 解析后阻断继续拒绝。
 - 旧 Vision reset、XHTTP TLS 超时、TUIC 超时缺原现场材料，根因未定。
 - 旧 sing-box `1.14.4`→Xray `26.10.31` 失败原件 `d18652f4...` 保留；
-  `.2` 正式包/镜像整轮通过，交付二进制 hybrid-only、其它指纹/公网组合未验。
+  `.2` 正式包/镜像整轮及上述固定公网组合通过，其它指纹/公网组合未验。
   VPS 维持 Xray，不能把本次升级当成活动 sing-box 业务证明。
   配对直接装测试规格，不证明 CLI 自动启用整链或独立 SNI；
   sing-box 拒绝配对及带配对来源的跨核心复制。
