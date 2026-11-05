@@ -13,8 +13,14 @@ case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}" in
 *) printf 'docker-phase3-regression-fail: unknown entries branch %s\n' "${PHASE3_ENTRIES_BRANCH}" >&2; exit 1 ;;
 esac
 case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}:${PHASE3_MANAGEMENT_GROUP}" in
-*:all|entries:management:protocol|entries:management:tls|entries:management:tls-reinstall) ;;
+*:all|entries:management:protocol|entries:management:protocol-xray|entries:management:protocol-sing-box|entries:management:tls|entries:management:tls-reinstall) ;;
 *) printf 'docker-phase3-regression-fail: unknown management group %s\n' "${PHASE3_MANAGEMENT_GROUP}" >&2; exit 1 ;;
+esac
+PHASE3_MANAGEMENT_CORE=all
+case "${PHASE3_MANAGEMENT_GROUP}" in
+protocol-*)
+    PHASE3_MANAGEMENT_CORE=${PHASE3_MANAGEMENT_GROUP#protocol-}
+    PHASE3_MANAGEMENT_GROUP=protocol ;;
 esac
 
 export FAKE_PHASE3_HOST_SYSTEM FAKE_PHASE3_HOST_STAT
@@ -1745,6 +1751,8 @@ for managementCase in '1 xray' '1 sing-box' '2 xray' '3 sing-box' '4 sing-box' '
     '26 xray' '26 sing-box' '27 xray' '28 xray' '28 sing-box' '29 xray' \
     '30 sing-box' '31 sing-box'; do
     read -r managementProtocol managementCore <<<"${managementCase}"
+    # 两个核心分片共同覆盖完整矩阵，公共事务与拒绝断言仍各自执行。
+    [[ "${PHASE3_MANAGEMENT_CORE}" == all || "${managementCore}" == "${PHASE3_MANAGEMENT_CORE}" ]] || continue
     managementName="management-${managementProtocol}-${managementCore}"
     managementSource=vless-ws
     case "${managementProtocol}" in 1|2|26) managementSource=vless-reality ;; esac

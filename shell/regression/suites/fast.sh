@@ -109,7 +109,8 @@ listRegressionDockerContractsFullChildSelectors() {
         docker-tproxy-ownership \
         docker-wireguard-runtime \
         docker-redirect-focused \
-        docker-phase3-entries-management-protocol \
+        docker-phase3-entries-management-protocol-xray \
+        docker-phase3-entries-management-protocol-sing-box \
         docker-reality \
         docker-sites \
         docker-shadowsocks-rotation \
@@ -287,7 +288,8 @@ listRegressionDockerContractsPhase3TlsChildSelectors() {
 }
 
 listRegressionDockerContractsPhase3ProtocolChildSelectors() {
-    printf '%s\n' docker-phase3-entries-management-protocol docker-phase3-edit docker-control-cli
+    printf '%s\n' docker-phase3-entries-management-protocol-xray \
+        docker-phase3-entries-management-protocol-sing-box docker-phase3-edit docker-control-cli
 }
 
 listRegressionDockerContractsPhase3TopologyChildSelectors() {
@@ -600,7 +602,7 @@ runDockerPhase3EntriesManagementRegression() {
 }
 
 runDockerPhase3EntriesManagementProtocolRegression() {
-    runDockerPhase3EntriesRegression management protocol
+    runDockerPhase3EntriesRegression management "${1:-protocol}"
 }
 
 runDockerPhase3EntriesManagementTlsRegression() {
@@ -1258,6 +1260,8 @@ registerRegressionFunctionLeaf docker-phase3-edit runDockerPhase3EditRegression
 registerRegressionFunctionLeaf docker-phase3-entries-topology runDockerPhase3EntriesTopologyRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management runDockerPhase3EntriesManagementRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol runDockerPhase3EntriesManagementProtocolRegression
+registerRegressionFunctionLeaf docker-phase3-entries-management-protocol-xray runDockerPhase3EntriesManagementProtocolRegression protocol-xray
+registerRegressionFunctionLeaf docker-phase3-entries-management-protocol-sing-box runDockerPhase3EntriesManagementProtocolRegression protocol-sing-box
 registerRegressionFunctionLeaf docker-phase3-entries-management-tls runDockerPhase3EntriesManagementTlsRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management-tls-reinstall runDockerPhase3EntriesManagementTlsReinstallRegression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
@@ -1481,7 +1485,8 @@ registerRegressionParallelSelectorList docker-core-assessment runFrameworkParall
 registerRegressionParallelSelectorList docker-geo runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-geo-parallel-${BASHPID:-$$}" listRegressionDockerGeoChildSelectors 2
 listRegressionDockerPhase3EntriesChildSelectors() {
-    printf '%s\n' docker-phase3-entries-management-tls docker-phase3-entries-management-protocol \
+    printf '%s\n' docker-phase3-entries-management-tls \
+        docker-phase3-entries-management-protocol-xray docker-phase3-entries-management-protocol-sing-box \
         docker-phase3-entries-management-tls-reinstall \
         docker-phase3-entries-topology
 }

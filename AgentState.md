@@ -16,16 +16,16 @@
 ## 最近完成
 
 - 2026-11-04：3D.26 的 16 个协议管理 supported，定向及 daily 34/34 通过。
-- 3D.27 Nginx/WS/双栈 UUID 回滚与拒绝验收通过；
-  `docker-fail2ban-source-real` 471430 ms/exit 0，原件 `.tmp-regression-docker-e0b03ef4a99e46aa8b0746869cca5945/`。
+- 3D.27 Nginx/WS/双栈 UUID 回滚与拒绝验收通过，原件见实施计划。
 - 14 个 deferred 已对账；合同只改 reason，状态/schema 不变，详见 2026-11-04 对账表。
 - 已签名推送 `4c8ff0c2`；Reality `.1` 已发布，CI `41849182833` 双架构构建、
   功能及 Alpine smoke 通过；四资产核验、旧版不变，amd64 来源包重建一致。
-- 正式下载镜像 Reality 整轮 exit 0/33505 ms；结果 `559f73c0...`。
 - 2026-11-05：`.2` 已签名推送 `724ab2c0`/`57d01126`；CI `41950689348`
   双原生架构构建、Alpine、Reality/ML-DSA、固定 share 全通过，发布跳过。
 - 测试限时改为 10 秒覆盖 REALITY 5 秒启动轮询；定向 36715 ms/exit 0，
   受控 20 轮通过，含 5.15 秒等待；候选与证据 `.tmp-reality-ci-41950689348/`，未发布。
+- 协议矩阵按核心拆分，公共断言、2 worker、20 分钟限额保留；定向 4/4、
+  489663 ms/exit 0，调度合同 3492 ms；本机完成，证据 `.tmp-protocol-shard-close-20261105/`。
 - 真实 lock 已签名推送 `80a6e76c`，phase2 exit 0/1585 ms；应用 `3.43.0`/
   `15af503b` 的 CI、签名清单及 303 源码核对通过。正式镜像 Reality 整轮
   exit 0/32946 ms，结果 `4b422d65...`；模拟入口检查两次审批超时未启动。
@@ -38,7 +38,7 @@
 ## 未决
 
 - Release `41950639031` 协议分片超 20 分钟取消，其余已执行项通过；
-  `docker-phase3-entries-management-protocol` 未完成，原件见本轮 CI 证据目录。
+  本机拆分已通过，远端待验；推送 main 可触发应用发布，须确认。
 - WS 公网旧端口 TCP 拒绝、原生 IPv6 未证明；固定 CONNECT 只证 TLS EOF。
 - ICMP 原生启用态收发/arm64/公网/重启、IPv6/traceroute/PMTU；
   真实 TUN 必须启用宿主透明接管，受透明保持关闭约束。

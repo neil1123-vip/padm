@@ -2646,6 +2646,26 @@ amd64 和原生 arm64 的构建、功能检查、Alpine smoke、原 Reality/ML-D
 未继续加时或无变化重跑。其余已执行 job 成功，后续版本提交、镜像和发布 job 均跳过。
 注解与原日志归档于本轮候选证据目录的 `release-annotations.json`、`release-protocol.log`；
 `.2` 专用双架构候选成功不替代完整 Release 门禁，此独立问题仍未关闭。
+2026-11-05 本机原完整协议子项重新执行成功，内部 679404 ms、入口 681042 ms、
+exit 0、非缓存；期间持续推进至最后组合，未复现固定挂死。
+原长子项含 20 组协议/核心的完整 CLI 闭环，现保留原完整 selector，
+只将该矩阵按 Xray 11 组、sing-box 9 组拆为两个独立叶子；
+两叶各自保留公共事务、权限、取消、拒绝及恢复断言。
+新增 group 先校验再归一为 `protocol`，仅在矩阵 baseline 前按核心过滤；
+原 `all`、`protocol` 行为及 TLS 分支边界保留，生产逻辑不变。
+协议 CI、entries 与 full 聚合使用两叶；CI/full 实际展开集合由 66 改为 67，
+日常 34 项、18 个工作流分片、2 个 worker 和该分片 20 分钟限额均不变。
+`regression-dispatcher-contract -Jobs 2` exit 0/3492 ms，验证参数、非法范围和集合一致性。
+原协议聚合入口 `docker-contracts-phase3-protocol -Jobs 2` 4/4 成功、
+exit 0/489663 ms、非缓存：Xray 465100 ms、sing-box 413610 ms、
+编辑 63790 ms、控制 CLI 22845 ms，内部聚合 487960 ms。
+各次使用当前源码快照与相同工具镜像，材料 `.tmp-protocol-shard-close-20261105/`。
+本机原长子项与新聚合范围不同，不将该耗时对比作为相同工作量的加速比；
+远端能否稳定落在 20 分钟内仍待实测，未跑 full。
+提交前已核对三份测试源码 SHA256 均与上述成功回归一致；远端 main 与本地基线一致。
+推送会触发自动 Release；相对正式 `v3.43.0`，发布范围仍包含此前
+`shell/core/singbox_build.sh` 改动，门禁通过可能自动发布下一应用版本。
+本轮停在签名提交，推送及其自动应用发布需明确确认；独立 `.2` 候选仍未发布。
 本轮没有证明可由现有生产配置稳定构造 hybrid-only ClientHello；该形态由完整客户端源码测试工厂覆盖，
 不增加生产指纹开关，也不将此测试称为交付二进制 hybrid-only 验收。
 

@@ -266,7 +266,7 @@ runRegressionDockerContractsAggregateContract() (
     local -a expectedSelectors=(
         docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
         docker-phase3-edit docker-phase3-entries-management-tls docker-phase3-entries-management-tls-reinstall
-        docker-phase3-entries-management-protocol
+        docker-phase3-entries-management-protocol-xray docker-phase3-entries-management-protocol-sing-box
         docker-phase3-entries-topology
         docker-traditional-tls-transports docker-traditional-tls-base
         docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
@@ -364,8 +364,8 @@ runRegressionDockerContractsAggregateContract() (
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
     [[ "${shardCount}" -eq 18 ]]
-    [[ "${#expectedSelectors[@]}" -eq 66 ]]
-    [[ "$(sort -u "${actual}" | wc -l)" -eq 66 ]]
+    [[ "${#expectedSelectors[@]}" -eq 67 ]]
+    [[ "$(sort -u "${actual}" | wc -l)" -eq 67 ]]
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-recovery-apply
     [[ "$(listRegressionDockerContractsFastChildSelectors | grep -c '^docker-port-hopping-preflight$')" -eq 1 ]]
@@ -545,7 +545,8 @@ runRegressionDockerContractsAggregateContract() (
         grep -q 'unknown entries branch' "${callLog}"
     done
     for selector in full:all:protocol edit:all:tls entries:all:protocol entries:topology:tls \
-        entries:management:unknown; do
+        full:all:protocol-xray edit:all:protocol-sing-box entries:all:protocol-xray \
+        entries:topology:protocol-sing-box entries:management:unknown; do
         IFS=: read -r scope branch group <<<"${selector}"
         if PADM_DOCKER_PHASE3_SCOPE="${scope}" PADM_DOCKER_PHASE3_ENTRIES_BRANCH="${branch}" \
             PADM_DOCKER_PHASE3_MANAGEMENT_GROUP="${group}" \
@@ -569,11 +570,14 @@ runRegressionDockerContractsAggregateContract() (
     runDockerPhase3EntriesTopologyRegression
     runDockerPhase3EntriesManagementRegression
     runDockerPhase3EntriesManagementProtocolRegression
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-phase3-entries-management-protocol-xray
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-phase3-entries-management-protocol-sing-box
     runDockerPhase3EntriesManagementTlsRegression
     runDockerPhase3EntriesManagementTlsReinstallRegression
     printf '%s\n' full:all:all:phase3.sh edit:all:all:phase3.sh entries:all:all:phase3.sh \
         entries:topology:all:phase3.sh entries:management:all:phase3.sh \
-        entries:management:protocol:phase3.sh entries:management:tls:phase3.sh \
+        entries:management:protocol:phase3.sh entries:management:protocol-xray:phase3.sh \
+        entries:management:protocol-sing-box:phase3.sh entries:management:tls:phase3.sh \
         entries:management:tls-reinstall:phase3.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_PHASE3_SCOPE:-}" ]]
