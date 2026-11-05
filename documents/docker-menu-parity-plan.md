@@ -2684,6 +2684,27 @@ Xray 797874 ms、sing-box 708443 ms、编辑 114311 ms、控制 CLI 43491 ms，�
 本轮没有证明可由现有生产配置稳定构造 hybrid-only ClientHello；该形态由完整客户端源码测试工厂覆盖，
 不增加生产指纹开关，也不将此测试称为交付二进制 hybrid-only 验收。
 
+2026-11-05 用户明确授权 `.2` 独立发布及 VPS 升级，包含正式 lock/应用交付。
+从 `f034c5a1` 启动 `build-sing-box.yml` 的 `publish=true`，run `42008070777`
+全部通过：amd64、原生 arm64 的本次构建、Alpine smoke、真实 Reality/ML-DSA 业务、
+固定 share 完整源码测试及发布 job 均成功。
+正式 `sing-box-v1.14.4-padm.2` 发布 id `435039401`，时间 `2026-11-05T10:11:44Z`。
+四资产 API 摘要、下载文件与 SHA256SUMS 一致，两个二进制包和来源包均与已验候选逐字节相同；
+1573 个来源普通文件、BUILD_INFO、ELF 架构、固定上游和补丁身份全部核对通过。
+amd64 正式包 SHA256 `028cfa30d9c3b050b8f1ca20946f3b368da6c834af510ceaa039f7605e71cc7c`，
+arm64 为 `30f3b105ecae0acc6dd5e480e71ecb1c66ad6818740984b9d7d20f787d776935`；
+旧 `.1` 发布及资产 id、摘要、长度不变，核心资产本身没有 Sigstore 签名。
+`versions.lock` 仅更新核心版本、两个包名和两个摘要，官方上游摘要不变。
+Docker Linux amd64 `docker-phase2 -Jobs 2` exit 0/1666 ms，
+`docker-contracts -Jobs 6` 日常 34/34、exit 0/259710 ms，均非缓存、同一源码快照。
+当前准备应用 CI/正式镜像发布、独立应用验签、正式 `.2` 镜像真实回归及 VPS 升级。
+VPS 只读元数据核对纠正旧快照：真实应用为 `3.42.5`，source `813fd481`、
+当前 bundle `.bundles/3a10380167dea1920686a34e90726e578473f500c8a4aab362ef211f3c90e809`；
+active core 为 Xray、协议 `21`，无 secondary core，透明关闭、流量/续期 timer active。
+本轮按真实 `3.42.5` 保留回滚基线，不自动切换核心或新增业务。
+材料 `.tmp-release-revision2-20261105/` 和 `.tmp-revision2-vps-prep-20261105/`；
+交付二进制 hybrid-only、其它指纹和公网组合仍未证明，本轮未跑 full。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

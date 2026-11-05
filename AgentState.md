@@ -5,8 +5,9 @@
 ## 当前
 
 - 整体计划未完成；透明代理保持关闭，不以阶段通过替代整体完成。
-- VPS：Debian 13 amd64、bridge、公网 IPv4、正式 `3.42.3`；
-  bundle=`36efda04`，三业务 healthy、严格公网 TLS/200、续期 timer active。
+- 已授权 `.2` 独立发布、正式 lock/应用交付及 VPS 升级，当前执行中。
+- VPS 实时基线：Debian 13 amd64、bridge、公网 IPv4、正式 `3.42.5`；
+  source=`813fd481`，三业务 healthy、透明关闭，流量/续期 timer active。
 - 本机 Docker Linux 可用，复用工具镜像，未跑 full。
 - 原生账号 8 阶段及恢复整轮通过，508821 ms/exit 0；
   26 正/5 拒绝、断网独验及 13 项篡改拒绝通过，已恢复清场。
@@ -18,12 +19,12 @@
 - 2026-11-04：3D.26 的 16 个协议管理 supported，定向及 daily 34/34 通过。
 - 3D.27 Nginx/WS/双栈 UUID 回滚与拒绝验收通过，原件见实施计划。
 - 14 个 deferred 已对账；合同只改 reason，状态/schema 不变，详见 2026-11-04 对账表。
-- Reality `.1` 已发布，CI `41849182833` 双架构构建、功能及 Alpine smoke
-  通过；四资产及 amd64 来源包重建核验通过。
-- 2026-11-05：`.2` 已签名推送 `724ab2c0`/`57d01126`；CI `41950689348`
-  双原生架构构建、Alpine、Reality/ML-DSA、固定 share 全通过，发布跳过。
+- 2026-11-05：`.2` 正式发布，CI `42008070777` 双原生架构构建、Alpine、
+  Reality/ML-DSA、固定 share 全通过；四资产与已验候选一致，旧 `.1` 不变。
+- 正式 lock 已切 `.2`；phase2 1666 ms、daily 34/34/259710 ms 均 exit 0、
+  非缓存；应用 CI 与 VPS 升级待执行，证据 `.tmp-release-revision2-20261105/`。
 - 测试限时改为 10 秒覆盖 REALITY 5 秒启动轮询；定向 36715 ms/exit 0，
-  受控 20 轮通过，含 5.15 秒等待；候选与证据 `.tmp-reality-ci-41950689348/`，未发布。
+  受控 20 轮通过，含 5.15 秒等待；候选与证据 `.tmp-reality-ci-41950689348/`。
 - 协议矩阵按核心拆分，公共断言、2 worker、20 分钟限额保留；本机定向
   4/4、489663 ms/exit 0，调度合同 3492 ms；已签名推送 `a7604399`。
 - Release `42003075411` 成功，18 分片全通过；协议 job 14 分 25 秒、
@@ -31,8 +32,6 @@
 - 应用 `3.43.1`/`fb140662` 已自动发布；三资产摘要、独立签名及 306 源码
   核对通过，5 个双架构镜像复用 `3.43.0`；正式 sing-box 仍 `.1`。
   证据 `.tmp-protocol-shard-close-20261105/verification.json`。
-- 正式 `.1` 镜像 Reality 整轮 exit 0/32946 ms，结果 `4b422d65...`；
-  模拟入口检查两次审批超时未启动。
 - 原生 3.42.3 账号与业务恢复已清场并断网独验，失败原件保留；
   `.tmp-native-account-close-20261027/verification.json`、
   `.tmp-native-business-close-20261027/verification.json`。
