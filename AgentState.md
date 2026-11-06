@@ -6,6 +6,8 @@
 
 - 整体计划未完成；透明代理保持关闭，不以阶段通过替代整体完成。
 - `.2` 发布、正式 lock/应用交付、VPS 升级及固定客户端公网 Reality 验收完成。
+- 正式 `3.43.3` 的资产/签名/源码和五镜像双架构绑定已独验；VPS 未随本轮升级。
+- 独立 sing-box `3.43.3` 固定公网五阶段、认证独验及清场完成；现网未升级。
 - VPS：Debian 13 amd64、bridge、公网 IPv4、正式 `3.43.2`/source=`d8bac249`；
   保留 Xray/协议 21，三业务 healthy、无 OOM，透明关闭，两个 timer active/enabled。
 - 本机 Docker Linux 可用，复用工具镜像，未跑 full。
@@ -16,24 +18,20 @@
 
 ## 最近完成
 
-- 3D.26 的 16 个协议管理 supported；3D.27 Nginx/WS/双栈 UUID 通过；
-  14 个 deferred 已对账，合同仅改 reason，原件见实施计划。
-- 2026-11-05：`.2` 正式发布，run `42008070777` 双原生架构/Alpine、
-  Reality/ML-DSA/固定 share 通过；四资产与候选一致，旧 `.1` 不变。
-  lock `8b71c705` 的 phase2/daily 34/34、正式镜像整轮均 exit 0、非缓存。
-- 应用 `3.43.2`/`d8bac249`：run `42010549859` 32 job 成功、零跳过；
-  三资产摘要、独立验签、306 源码及双架构镜像绑定通过。
-  VPS `3.42.5`→`3.43.2`、原 WS 公网正反正及恢复点 `update.956SI1` 校验通过。
-  证据 `.tmp-release-revision2-20261105/`、`.tmp-revision2-vps-prep-20261105/`。
-- 正式 `.2` 客户端→正式 Xray，公网 IPv4/Reality/gRPC/chrome 五阶段完成：
-  两正控严格 TLS/200；错公钥/SID 明确未接纳并回落，错 UUID 明确拒绝。
-  客户端两项超时及 false 原值保留；独立服务端关联和 3 项篡改拒绝通过。
-  诊断轮上传 3561、下载 43868 字节；临时端口、容器、网络、密钥和 URI 已清。
-  清场后 20 项现网断言及 19 条账号累计下界通过；生产 ID/StartedAt、boot、
-  材料权限、timer 均保持，透明关闭。未证明公网 ML-DSA/hybrid-only。
-  证据 `.tmp-reality-public-revision2-20261105/verification.json`。
-- 原生 3.42.3 账号/业务恢复已清场并断网独验，失败原件保留；
-  `.tmp-native-account-close-20261027/`、`.tmp-native-business-close-20261027/`。
+- 16 个协议管理 supported，14 个 deferred 已对账；明细及早期验收见实施计划。
+- 正式 `.2` 与 `3.43.2` 发布物独验、双架构门禁及 VPS 升级通过；
+  原 WS 业务与真实恢复点 `update.956SI1` 保持，证据 `.tmp-release-revision2-20261105/`。
+- `.2`→Xray 固定公网 IPv4/Reality/gRPC/chrome 两正控及三负例通过；
+  客户端超时/false 原件保留，服务端独立关联通过，临时对象已清。
+  证据 `.tmp-reality-public-revision2-20261105/`；不外推公网 ML-DSA/hybrid-only。
+- `3.43.3`/`bb39c079` 仅更新 Alpine `3.24.4`；run `42209522565` 40 job 全成功，
+  三资产/精确验签/306 源码及五镜像双架构绑定通过；证据 `.tmp-release-3433-20261106/`。
+- 2026-11-06：独立 sing-box `3.43.3`，固定 amd64/IPv4/Reality/gRPC/chrome：
+  正式 CLI 分享一致、两正控严格 TLS/200、三服务端明确拒绝及双向统计独验通过；
+  5 项篡改自检通过；错公钥/SID 客户端超时与 false 原件保留，不按超时判拒绝。
+  临时容器/网络/私密材料已清、`25444/TCP` 关闭；现网 48 项复核与 19 条累计保持。
+  证据 `.tmp-singbox-server-public-20261106/`；断网准备失败及旧 StartedAt 差异原件保留。
+  历史 Docker 于北京时间 11-06 02:00:25–30 停启，触发者未知；本轮生命周期未变。
 
 ## 未决
 

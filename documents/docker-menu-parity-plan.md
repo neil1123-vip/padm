@@ -2763,6 +2763,61 @@ active/enabled timer 均保持，19 条账号身份/限额及逐账号累计下�
 认证业务，不证明公网 PQ/ML-DSA、hybrid-only、其它指纹、IPv6/arm64、
 现网活动 sing-box 服务端、长稳或本版整机重启；未重复 full 或扩大 14 项 deferred 状态。
 
+2026-11-06 正式 `3.43.3` 发布物独立核验通过。
+依赖提交 `c4b710c737273b7ce9df4c3875b8f816a7a4606b` 仅将 Alpine
+`3.24.3` 更新为固定摘要的 `3.24.4`，核心版本和包摘要不变；
+自动版本提交为 `bb39c079a942e0977b161384149cdaa5ee6056e2`。
+Release run `42209522565` 的 40 个 job 全部成功、零跳过，含 18 个合同分片、
+五种镜像的 amd64/原生 arm64 共 10 个 smoke。协议 job 为 12 分 23 秒，
+仍保留 2 worker 和 20 分钟限额，不将单轮成功外推长期耗时稳定。
+五镜像本轮均因基础镜像更新而重建，未将旧摘要复用当作本轮重建验收。
+正式发布时间 `2026-11-06T11:35:04Z`；三资产 API 摘要和长度与下载文件一致，
+控制包 SHA256 `6bd319eba679b993c667b19f61ae421564bc0cd9e9e49d2a60753169e6c90bad`。
+复用固定摘要 Cosign `v3.1.3`，独立验证 manifest 的精确
+`create_release.yml@refs/heads/main` 身份和 GitHub OIDC 签名通过。
+标签、发布提交、306 个包内源码的原始 Git blob 和正式 `.2` 两架构锁摘要均匹配；
+另有唯一生成文件 `docker/contracts/bundle.paths`，未规范或改写下载包。
+签名 manifest 中的五组索引及 10 个架构摘要与实时 GHCR 标签和固定索引逐项一致，
+sing-box 正式镜像为
+`ghcr.io/neil1123-vip/padm-sing-box:3.43.3@sha256:671e2d67cba387022ac7fd951cf5b69ccea0054a93dbf7c0104f278c511247af`。
+原始元数据、三资产、独立验签、源码检查、CI 与实时索引证据保存在
+`.tmp-release-3433-20261106/`。本次未重跑本机 full、未升级或操作 VPS，
+仍保留 `3.43.2` 的现网范围；不将发布物核验外推 `3.43.3` 公网或宿主生命周期。
+
+2026-11-06 独立 sing-box 服务端固定公网五阶段验收与清场完成。
+新证据目录 `.tmp-singbox-server-public-20261106/`；`local/verification.json`
+记录原生 Linux amd64 Docker 断网 7 项通过：正式 `3.43.3` 控制包生成候选、
+Compose 独立根/项目及单个 IPv4 `25444/TCP` 绑定、正式镜像配置解析、
+镜像内 `.2` 核心摘要、URI 篡改拒绝、5 份客户端配置和正式分享输入映射。
+工具容器无宿主挂载或 socket，已删除；本轮未跑本机 full。
+离线分享只执行正式下层生成器；获授权后，实际调用完整 `protocol links`
+并逐字比对通过，再启动独立项目 `padm-singbox-public-20261106`。
+15 分钟自动清理已建立，本轮在期限前主动清场；未触发到期清理。
+正式 `.2` 客户端在固定 amd64、IPv4、Reality/gRPC/chrome 下执行
+正确认证、错公钥、错 SID、错 UUID、恢复正控五阶段。两个正控均严格 TLSv1.3、
+HTTP 200，正文各 `15863` 字节；账号 upload/download 分别增长
+`1790/21934`、`1789/21934` 字节，三个负控双向增量均为 `0`。
+错公钥/SID 的客户端原始超时和 `client_gates_passed=false` 保留，不作为拒绝证据。
+服务端逐阶段唯一源连接明确记录 `hs.c.conn == conn: false` 与同端点 `forwarded SNI`；
+错 UUID 则 Reality 接纳、握手完成后由 VLESS 明确拒绝精确派生 UUID。
+`verification.json` 的独立判定通过：五个同源唯一连接、容器/PID/StartedAt
+恒等、8 份生产快照相等、正式/运行认证摘要相等、5 份 URI 配置独立派生一致；
+64 份输入证据已散列，5 类篡改夹具均命中预期拒绝断言。
+临时容器、网络、8 类远端私密路径及本地 URI 已清，`25444/TCP` 释放，
+临时 timer/service inactive；`final-baseline/verification.json` 为完整 `48/48` 通过。
+现网仍为 `3.43.2`、Xray/WS `443`，19 条身份/限额/逐账号累计、材料权限、
+三容器 ID/StartedAt、boot 和两个 timer 均保持，透明关闭。
+三轮准备失败原件保留在 `local-failed-1/2/3/`：Bash 比较换行、
+完整 CLI 的 daemon 预检依赖、辅助 shell 继承 Cronet 预加载环境；
+修正均限临时验收脚本，正式镜像的核心启动环境未改写。
+VPS 只读 `prep/readiness.json` 的当前前置条件通过，`25444/TCP` 空闲；
+业务、权限、timer、透明关闭和 19 条账号身份/限额/累计保持。
+原 `prep/verification.json` 因三容器 StartedAt 与昨日不同保留 `passed=false`。
+日志显示 Docker 服务于北京时间 `2026-11-06 02:00:25–02:00:30` 停启，
+原容器 ID 与 boot 未变、触发者未知；较晚样本确认当前生命周期稳定且健康。
+本轮未升级现网、切换核心或重启业务；只关闭上述固定组合的独立服务端子项，
+不外推 IPv6/arm64、其它指纹/客户端、公网 PQ/ML-DSA、长稳或宿主生命周期。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份
