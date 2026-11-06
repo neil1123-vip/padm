@@ -119,7 +119,7 @@ dockerSetupRealityKeyPair() {
 
 dockerEditRegenerateReality() {
     local draft=$1 listener=$2 xrayImage opsImage keyPair privateKey publicKey shortId
-    local core target tlsPing chainLength mldsa65= seed= verify=
+    local core target targetHost targetPort serverName targetIp tlsPing chainLength mldsa65= seed= verify=
     local credentials="${1}.credentials" temporary="${1}.next"
     xrayImage=$(dockerManifestImageReference xray) || return 1
     opsImage=$(dockerManifestImageReference ops) || return 1
@@ -130,8 +130,21 @@ dockerEditRegenerateReality() {
       .core.protocols[] | select(.listener_id == $listener) | .core // $core' "${draft}") || return 1
     if [[ "${core}" == xray ]]; then
         target=$(jq -er --arg listener "${listener}" '.core.protocols[] |
-          select(.listener_id == $listener) | "\(.reality.target_host):\(.reality.target_port)"' "${draft}") || return 1
-        tlsPing=$(dockerRealityProbeRun 20 --log-driver none "${xrayImage}" tls ping "${target}" 2>/dev/null) || {
+          select(.listener_id == $listener) |
+          [.reality.target_host,.reality.target_port,.reality.server_name] | @tsv' "${draft}") || return 1
+        IFS=$'\t' read -r targetHost targetPort serverName <<<"${target}" || return 1
+        # 连接实际目标地址，证书与 PQC 检测仍使用配置的独立 SNI。
+        targetIp=$(dockerRealityProbeRun 20 --log-driver none --entrypoint python3 "${opsImage}" -c '
+import socket
+import sys
+
+print(socket.getaddrinfo(sys.argv[1], None, type=socket.SOCK_STREAM)[0][4][0])
+' "${targetHost}" 2>/dev/null) || {
+            dockerError 'Reality ML-DSA-65 目标地址解析失败'
+            return 1
+        }
+        tlsPing=$(dockerRealityProbeRun 20 --log-driver none "${xrayImage}" tls ping \
+            -ip "${targetIp}" "${serverName}:${targetPort}" 2>/dev/null) || {
             dockerError 'Reality ML-DSA-65 目标检测失败'
             return 1
         }
@@ -162,8 +175,9 @@ dockerEditRegenerateReality() {
                 seed=$(awk '$1 ~ /^Seed:?$/ {print $2; exit}' <<<"${mldsa65}")
                 verify=$(awk '$1 ~ /^Verify:?$/ {print $2; exit}' <<<"${mldsa65}")
             fi
+            # 避免部分 libc 限制长重复次数，仍严格检查长度和末位编码。
             [[ "${seed}" =~ ^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$ &&
-                "${verify}" =~ ^[A-Za-z0-9_-]{2602}[AEIMQUYcgkosw048]$ ]] || {
+                ${#verify} -eq 2603 && "${verify}" =~ ^[A-Za-z0-9_-]*[AEIMQUYcgkosw048]$ ]] || {
                 dockerError 'Reality ML-DSA-65 参数不完整或格式错误'
                 return 1
             }

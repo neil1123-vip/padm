@@ -2818,6 +2818,76 @@ VPS 只读 `prep/readiness.json` 的当前前置条件通过，`25444/TCP` 空�
 本轮未升级现网、切换核心或重启业务；只关闭上述固定组合的独立服务端子项，
 不外推 IPv6/arm64、其它指纹/客户端、公网 PQ/ML-DSA、长稳或宿主生命周期。
 
+2026-11-06 ML-DSA 正式 CLI 自动启用整链已执行 VPS 隔离演练，尚未验收通过。
+证据与执行材料在 `.tmp-mldsa-cli-public-20261106/README.md`；
+公共工具及正式三件套等 7 份输入上传后摘要通过。实际只执行两轮，
+当前本地 `exercise.py`/`inputs.sha256` 是未上传的后续草案，不代表远端已执行输入。
+自动启用固定走正式 `edit --regenerate-reality`，初始规格不含 ML-DSA 字段；
+完整 CLI 固定项目及调度路径，不能只换状态目录操作生产 daemon。
+本机正式安装、真实验签和五镜像 pull 已通过，configure 则被 `cloudflare_relay`
+安全门拒绝。严格证书验证下，连接 LibreOffice 固定 IPv4 和文档地址 `192.0.2.1`、
+SNI 同为 `cloudflare.com` 时均得到相同 Cloudflare 证书，证实本机出口按 SNI 改路由；
+原件 `local-egress-strict-tls.jsonl` 保留。VPS 只读预检的两次 SNI/PQ/长链及 h2
+通过只证明候选可探测，不替代正式 configure 安全门。
+首轮在外层隔离条件检查失败，未执行正式 CLI；原始 `production-after.json`
+为空、`cleanup_exit=1`，不改判通过。临时对象删除后，独立只读复核与原生产快照
+完全一致，证据分别保存在 `live/attempt-1/` 和 `live/snapshot-recheck.log`。
+第二轮独立 daemon、私有 cron 及正式验签/install/五镜像 pull 成功；
+configure 对 `www.libreoffice.org:443` 返回 `unknown`，尚未进入重生成或客户端。
+目标同时解析 A/AAAA；VPS 无全局 IPv6/默认路由，固定 AAAA 的真实核心探测明确
+`network is unreachable`，而正式安全门按全部地址聚合最差结果，未放宽或替换探测。
+第二轮 `live/attempt-2/cleanup.json` 为 `execution_exit=1/cleanup_exit=0`，
+生产前后快照完全一致；临时容器、两个匿名卷和工具 tag 已清理，无端口发布。
+`live/final-readonly.json` 再次确认现网 `3.43.2` 健康、生命周期/部署未变、
+两个 timer active/enabled 及临时对象不存在。采样约 156.3 MiB/12% CPU，
+不是资源峰值，未证明完整业务预算足够。
+准备独立 SNI 路径时另发现正式重生成仅传 `target_host:port`，忽略 `server_name`。
+本地已改为用 ops 标准库解析目标，再由 Xray `tls ping -ip` 连接该地址并验证配置 SNI；
+解析失败仍拒绝，原严格 SNI/TLS 1.3/PQ/长链及配对校验保持。
+定向 `docker-reality-parameters -Jobs 2` 通过（190194 ms/exit 0），证据
+`.tmp-regression-docker-40b2f39cc68a42139c1129c2660ed4cc/`；先前两次新增夹具
+失败分别为非法数字目标及 mock 将错误 SNI 拒绝硬编码到 443，原件保留。
+真实核心只读 `tls ping -ip 65.109.131.19 www.libreoffice.org:443` 的 SNI 段
+通过 TLS 1.3/X25519MLKEM768/4492 字节链，见 `live/independent-sni-real.log`；
+该命令检查不替代正式 CLI 或完整安全门。独立审阅未发现剩余问题，未跑 full。
+当前合同的 `target_host` 只接受域名，因此未执行的固定 IPv4 草案不可用于正式 CLI；
+不能将数字地址探测结果当作合法配置或整链证明。后续先选择全部解析地址可达的
+合法候选域名，再以包含修复的新正式发布物复跑。未提交、推送或发布本地修复。
+自动启用、实际配置/分享、两正控/错 pqv/错 UUID 与重建仍待验；
+公网客户端验收另行准备授权，不修改 supported/deferred 矩阵或宣称整体收口。
+现网保持 `3.43.2`、Xray/WS `443`、透明关闭，本轮未升级或重启现网。
+
+2026-11-07 ML-DSA 后续实测，证据 `.tmp-mldsa-targets-20261107/README.md`。
+VPS 实际 ops 容器解析全部 25 个内置候选，仅 `pgxn.org` 为 IPv4-only，
+固定到 `88.198.49.178`；两次真实核心严格 SNI 均为
+TLS 1.3/X25519MLKEM768/4307 字节链，独立 OpenSSL 明确证书通过与 ALPN h2。
+目标与 SNI 同为 `pgxn.org`，不触发独立 SNI 缺陷，因此本轮仍使用未改动的正式
+`3.43.3` 三件套，无需用工作区修复替换正式包。临时脚本只同步候选、客户端
+固定 SNI 与新 stage；归档中的工具标签仍为 `:20261106`，固定 ID 保持。
+新目录 7 份输入摘要远端全部通过，旧两轮及非法固定 IP 草案均未覆盖。
+断网语法、正式 Xray 四配置、3 项分享篡改及 pqv 单字节变异自检通过；
+本机自检首次 `docker rm -v` 因容器仍在 sleep 被拒绝，核对归属后已 `rm -fv` 清场。
+第三轮沿已授权的独立 daemon/私有调度/两个匿名卷范围执行，无宿主挂载或端口发布。
+正式验签、install、五镜像 pull 及 **configure 完整安全门通过（exit 0）**；
+随后正式 `edit --regenerate-reality` 返回 15，明确报
+`invalid regular expression ... {2602} ... Invalid contents of {}`。
+工具环境为 Alpine `3.24.2`/Bash `5.3.9`（musl），公钥已到格式校验，
+但长重复正则被 libc 拒绝，尚未进入分享、四阶段握手或重建。
+原 `live/cleanup.json` 为 execution 1/cleanup 0、生产前后快照完全一致；
+`final-readonly.json` 确认生产健康/生命周期/部署、timer 和临时容器/卷/tag 清场。
+现网仍为 `3.43.2`/source `d8bac249`、Xray/WS `443`、透明关闭，未升级或重启。
+本地只将公钥格式检查改为长度恰为 2603、全串原 base64url 字符集及原规范末位，
+保留 seed 判据与后续配对派生校验；新增短、长、非法字符和非规范末位 4 个负例。
+标准 Docker `docker-reality-parameters -Jobs 2` 通过（203353 ms/exit 0），证据
+`.tmp-regression-docker-c8a2456cb4614c63a5c53cd97c8a92aa/`。
+固定 Alpine 工具内直接调用实际源码函数：旧正式函数复现错误，
+本地函数接受有效值并拒绝上述 4 类非法值；仅替代 Docker/密码学生成边界，
+不将格式检查当作真实配对或业务证明。首次临时夹具变量被 Bash local 遮蔽，
+旧新函数均失败，原件保留；改用独立 fixture 变量后才通过第二次检查。
+本地两项修复均未提交、推送或发布；后续以含修复的新正式包继续自动启用、
+实际配置与分享、两正控、明确负例和重建保留检查，不重跑已知失败的旧正式路径。
+本轮未跑 full，不修改 supported/deferred 矩阵，也不宣称正式 ML-DSA 整链通过。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

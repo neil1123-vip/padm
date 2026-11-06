@@ -112,6 +112,10 @@ run)
         generation-fail|reuse) exit 1 ;;
         bad-seed) seed=invalid ;;
         bad-verify) verify=invalid ;;
+        short-verify) verify=${verify:1} ;;
+        long-verify) verify="${verify}A" ;;
+        bad-verify-character) verify="!${verify:1}" ;;
+        noncanonical-verify) verify="${verify:0:2602}B" ;;
         mismatch) verify="B${verify:1}" ;;
         esac
         printf 'Seed: %s\nVerify: %s\n' "${seed}" "${verify}"
@@ -143,6 +147,11 @@ run)
     fi
     previous=
     for argument in "$@"; do
+        if [[ "${previous}" == -c && "${argument}" == *'socket.getaddrinfo(sys.argv[1], None'* ]]; then
+            [[ "${FAKE_REGEN_RESOLVE_FAIL:-0}" != 1 ]] || exit 1
+            printf '192.0.2.1\n'
+            exit 0
+        fi
         if [[ "${previous}" == -c && ( "${argument}" == *302e020100300506032b656e04220420* ||
             "${argument}" == *3034020100300b060960864801650304031204228020* ) ]]; then
             exec python3 -c "${argument}"
@@ -158,7 +167,7 @@ run)
             printf 'Pinging without SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nCertificate chain total length: 4096\n' ;;
         esac
         printf 'Pinging with SNI\n'
-        if [[ " $* " == *' cloudflare.com:443 '* ]]; then
+        if [[ " $* " == *' cloudflare.com:'* ]]; then
             printf 'Handshake failure: certificate does not match SNI\n'
         else
             printf 'Handshake succeeded\nTLS Version:\tTLS 1.3\n'
@@ -384,6 +393,21 @@ FAKE_REGEN_HEALTH_FAIL=1 runParameterEdit 14 health-fail-restored changed \
     fail 'Reality 健康失败未恢复完整旧部署'
 parameterAssertCleanup
 
+# 连接目标域名解析出的地址，并验证配置的独立 SNI。
+jq '
+  (.core.protocols[] | select(.listener_id == "entry-grpc-xray") | .reality) |=
+    (.target_host = "target.example.net" | .target_port = 8443 | .server_name = "sni.example.net")
+' "${REGEN_SPEC}" >"${TEST_ROOT}/independent-sni.json"
+chmod 0600 "${TEST_ROOT}/independent-sni.json"
+newState independent-sni "${TEST_ROOT}/independent-sni.json"
+runParameterEdit 0 independent-sni unchanged --regenerate-reality entry-grpc-xray --preview
+grep -qF ' target.example.net' "${EVENTS}" &&
+    grep -qF ' tls ping -ip 192.0.2.1 sni.example.net:8443' "${EVENTS}" ||
+    fail 'Reality 重生成未分开使用实际目标地址与配置 SNI'
+FAKE_REGEN_RESOLVE_FAIL=1 runParameterEdit 15 resolve-fail unchanged \
+    --regenerate-reality entry-grpc-xray --preview
+! grep -qF ' tls ping ' "${EVENTS}" || fail 'Reality 目标解析失败仍发起 TLS 探测'
+
 # 已有材料仍须配对校验；复用和降级只影响选中入口。
 MLDSA_SPEC="${TEST_ROOT}/mldsa-valid.json"
 jq --rawfile seed <(printf '%s' "${REGEN_MLDSA_SEED}") \
@@ -417,7 +441,8 @@ for mode in no-pqc short-chain no-sni-pqc; do
     ! grep -Eq '^run .* mldsa65$' "${EVENTS}" || fail "${mode}: 不适合目标仍生成 ML-DSA"
 done
 newState mldsa-failures "${REGEN_SPEC}"
-for mode in probe-fail timeout malformed-ping generation-fail bad-seed bad-verify mismatch; do
+for mode in probe-fail timeout malformed-ping generation-fail bad-seed bad-verify \
+    short-verify long-verify bad-verify-character noncanonical-verify mismatch; do
     FAKE_REGEN_MLDSA_MODE=${mode} runParameterEdit 15 "mldsa-${mode}" unchanged \
         --regenerate-reality entry-xhttp --preview
 done
