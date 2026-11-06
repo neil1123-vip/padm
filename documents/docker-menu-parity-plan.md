@@ -2888,6 +2888,37 @@ TLS 1.3/X25519MLKEM768/4307 字节链，独立 OpenSSL 明确证书通过与 ALP
 实际配置与分享、两正控、明确负例和重建保留检查，不重跑已知失败的旧正式路径。
 本轮未跑 full，不修改 supported/deferred 矩阵，也不宣称正式 ML-DSA 整链通过。
 
+2026-11-07 正式 `3.43.4` 已发布，修复提交 `461bfa43` 连同 `6462a616`
+推送后由工作流生成 `51d5f658`。Release run `42260071838` 为
+30 success/1 skipped，18 个合同分片全部通过。三资产 API 摘要/长度、
+精确 Cosign 身份、306 个包内 Git blob、提交父关系及五镜像双架构绑定独验通过；
+五镜像复用 `3.43.3` 已签名索引，本次未重建或新增 smoke。
+证据 `.tmp-release-3434-20261107/README.md`。
+首轮正式包隔离已完成验签、安装、configure、自动重生成和完整 CLI 分享，
+并建立严格业务 TLS 1.3；临时客户端局部变量 `http` 遮蔽 `http.client`，
+真实 HTTPResponse 路径抛 `UnboundLocalError`，故整轮保留失败。
+execution 1/cleanup 0、生产快照一致，原件 `.tmp-mldsa-cli-3434-20261107/`。
+第二轮只修临时变量为 `http_response`，补实际 `client.exchange` 的 HTTP 200/503、
+正文长度及摘要断网自检；真实 HTTPResponse 未 mock，仅自检网络边界被替代。
+冻结输入和远端 7 项摘要一致，正式整链无 mock，150309 ms 通过，
+证据 `.tmp-mldsa-cli-3434-r2-20261107/README.md`。
+初始规格不带配对，正式 CLI 自动生成 ML-DSA 配对并写入配置，分享 pqv 一致；
+两正控均为严格业务 TLS 1.3、HTTP 200、15863 字节，正文 SHA256 同为
+`06bdc137f5ecc3dfc8ec29ce208b46dd1e1baa82812e52c06aae1987adc1757d`。
+错 pqv 为单字节变异，非超时 ConnectionReset、无业务 TLS，日志含合成证书
+零有效期 X.509 拒绝；固定核心不直接记录 ML-DSA 失败，故仅判
+`controlled_pqv_rejection=true`、`direct_mldsa_error_logged=false`。
+错 UUID 为非超时 SSLEOF、无业务 TLS，并有服务端明确 UUID 拒绝。
+四阶段服务端 ID/镜像/启动时刻及规格字节不变，正式重建保持规格且服务健康。
+`live/verification.json` passed true，execution 0/cleanup 0、生产前后快照一致；
+无端口发布或秘密导出，客户端 show 关闭。独立终审通过，最终只读证据确认
+生产 `3.43.2` 健康、部署/boot/CLI/容器生命周期未变、两个 timer active/enabled，
+临时容器、两个匿名卷及工具 tag 均不存在。收尾两次检查脚本错误原件保留，
+以 SCP 原始脚本取得的 `final-readonly-complete.json` 为完成证据。
+结论限于隔离 amd64/IPv4/Reality/gRPC/chrome/pgxn.org；本轮未升级或重启现网，
+公网客户端、独立 SNI、其它算法/核心/指纹、arm64/IPv6、长稳和完整资源预算仍未证明。
+未重跑 full，16 supported/14 deferred 矩阵保持。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份
