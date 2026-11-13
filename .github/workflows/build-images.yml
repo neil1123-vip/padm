@@ -61,7 +61,7 @@ jobs:
 
       - name: Install Cosign
         if: ${{ !inputs.contracts_only && inputs.push }}
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
 
       - name: Resolve changed image inputs
         id: plan
@@ -265,7 +265,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
 
       - name: Download tested platform digests
         if: ${{ matrix.image.reference == '' }}
