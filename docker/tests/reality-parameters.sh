@@ -458,6 +458,15 @@ jq '(.core.protocols[] | select(.id == 2) | .xhttp.download_port) = 35444 |
   .port_aliases = [{listener_id:"entry-xhttp",public_port:35444}]
 ' "${MLDSA_SPEC}" >"${TEST_ROOT}/mldsa-download.json"
 dockerGenerateSubscription "${TEST_ROOT}/mldsa-download.json" "${TEST_ROOT}/mldsa-links.txt" local
+# 回归镜像同时保留发行版 jq，防止新版解析器掩盖宿主版本的语法不兼容。
+if [[ -x /usr/bin/jq ]]; then
+    (
+        jq() { /usr/bin/jq "$@"; }
+        dockerGenerateSubscription "${TEST_ROOT}/mldsa-download.json" "${TEST_ROOT}/mldsa-links-system-jq.txt" local
+    ) || fail '发行版 jq 无法渲染 XHTTP 下行分享'
+    cmp "${TEST_ROOT}/mldsa-links.txt" "${TEST_ROOT}/mldsa-links-system-jq.txt" ||
+        fail '发行版 jq 的 XHTTP/ML-DSA 分享输出不一致'
+fi
 python3 - "${TEST_ROOT}/mldsa-links.txt" <<'PY'
 import json
 import os

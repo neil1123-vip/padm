@@ -3683,10 +3683,10 @@ dockerGenerateSubscription() {
             if $entry.xhttp.download_port != null then
               .downloadSettings = {
                 address:$downloadServer,port:$entry.xhttp.download_port,network:"xhttp",security:"reality",
-                realitySettings:{serverName:$entry.reality.server_name,fingerprint:"chrome",
+                realitySettings:({serverName:$entry.reality.server_name,fingerprint:"chrome",
                   publicKey:$entry.reality.public_key,shortId:$entry.reality.short_id} +
                   (if $entry.reality.mldsa65_verify != null then
-                    {mldsa65Verify:$entry.reality.mldsa65_verify} else {} end),
+                    {mldsa65Verify:$entry.reality.mldsa65_verify} else {} end)),
                 xhttpSettings:($entry.xhttp | del(.download_port,.download) | .mode = "auto")}
             elif $entry.xhttp.download != null then
               $entry.xhttp.download as $down |
