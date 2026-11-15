@@ -3415,8 +3415,45 @@ dockerRecoveryInputsPrepare() {
     }
 }
 
+dockerRecoveryPreviewResourcesEmpty() {
+    local project=$1 resources label
+    for label in com.docker.compose.project io.padm.project; do
+        resources=$(docker ps -aq --filter "label=${label}=${project}") &&
+            [[ -z "${resources}" ]] &&
+            resources=$(docker network ls -q --filter "label=${label}=${project}") &&
+            [[ -z "${resources}" ]] || return 1
+    done
+    resources=$(docker network ls -q --filter "name=^${project}(-ipv6)?$") &&
+        [[ -z "${resources}" ]]
+}
+
+dockerRecoveryPreviewIsolate() {
+    local candidate=$1 project
+    [[ "${candidate}" == "${DOCKER_RECOVERY_CANDIDATE:-}" &&
+        "${candidate##*/}" =~ ^\.candidate\.[A-Za-z0-9]{6}$ ]] || return 1
+    project=${candidate##*.}
+    project="padm-docker-assess-${project,,}"
+    # 原子发布隔离编排前拒绝已有资源，恢复只能回收发布后归本次预览所有的资源。
+    dockerRecoveryPreviewResourcesEmpty "${project}" || {
+        dockerError "恢复预览隔离项目已有资源或检查失败: ${project}"
+        return 1
+    }
+    jq --arg project "${project}" '
+      .name = $project | .networks.default.name = $project |
+      .networks.default.labels["io.padm.project"] = $project |
+      if .networks.ipv6 != null then
+        .networks.ipv6.name = ($project + "-ipv6") |
+        .networks.ipv6.labels["io.padm.project"] = $project
+      else . end
+    ' "${candidate}/compose.json" >"${candidate}/compose.preview.json" &&
+        chmod 0600 "${candidate}/compose.preview.json" &&
+        mv -- "${candidate}/compose.preview.json" "${candidate}/compose.json" || return 1
+    DOCKER_ASSESS_PROJECT=${project}
+    DOCKER_ASSESS_CANDIDATE=${candidate}
+}
+
 dockerRecoveryRecover() {
-    local root metadata schedule geoSchedule renewalSchedule state directory entry containers mode uid gid path profile job taskSchedule image count links withGeo=0 withRenewal=0
+    local root metadata schedule geoSchedule renewalSchedule state directory entry containers mode uid gid path profile job taskSchedule image count links project withGeo=0 withRenewal=0
     local -a compose=()
     root=$(dockerInstallRoot) || return 1
     [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
@@ -3440,6 +3477,29 @@ dockerRecoveryRecover() {
     [[ "${geoSchedule}" == null ]] || withGeo=1
     [[ "${renewalSchedule}" == null ]] || withRenewal=1
     state=$(jq -er '.state' <<<"${metadata}") || return 1
+    if [[ "${state}" == preparing ]]; then
+        directory=$(jq -er '.candidate' <<<"${metadata}") || return 1
+        path="${root}/${directory}"
+        project=${directory##*.}
+        project="padm-docker-assess-${project,,}"
+        if [[ -f "${path}/compose.json" && ! -L "${path}/compose.json" ]] &&
+            jq -e --arg project "${project}" '.name == $project' "${path}/compose.json" >/dev/null 2>&1; then
+            jq -e --arg project "${project}" '
+              .networks.default.name == $project and
+              .networks.default.labels["io.padm.project"] == $project and
+              (.networks.ipv6 == null or
+                (.networks.ipv6.name == ($project + "-ipv6") and
+                 .networks.ipv6.labels["io.padm.project"] == $project))
+            ' "${path}/compose.json" >/dev/null || return 1
+            DOCKER_ASSESS_PROJECT=${project}
+            DOCKER_ASSESS_CANDIDATE=${path}
+            dockerAssessCleanup &&
+                dockerRecoveryPreviewResourcesEmpty "${project}" || {
+                dockerError "恢复预览隔离资源未完全清理: ${project}"
+                return 1
+            }
+        fi
+    fi
     if [[ "${state}" == active ]]; then
         # 全部外部状态先核对，再按安装的逆序撤销，避免覆盖共享 crontab 的外部漂移。
         for mode in 1 0; do
@@ -3547,6 +3607,7 @@ dockerRecoveryCommand() (
     local action=${1:-} archive= confirm= manifest= bundle= controlBundle= root stage= status=0 siteSource= tlsSource= unexpected registration wireguardSource= image public derived
     local rebuildController=0
     local DOCKER_RECOVERY_INPUT= DOCKER_RECOVERY_STARTED=0 DOCKER_RECOVERY_CANDIDATE= DOCKER_RECOVERY_CONTROLLER_SPEC=
+    local DOCKER_ASSESS_PROJECT= DOCKER_ASSESS_CANDIDATE=
     case "${action}" in
     recover) [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"; shift ;;
     preview|apply)

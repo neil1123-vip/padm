@@ -7946,6 +7946,11 @@ dockerRestoreConfiguration() {
 dockerCleanupConfigurationCandidate() {
     local root candidate=${DOCKER_CONFIG_CANDIDATE:-}
     [[ -n "${candidate}" ]] || return 0
+    # 恢复预览须先按持久登记回收隔离资源，再删除候选及其中的私密材料。
+    if [[ "${DOCKER_RECOVERY_STARTED:-0}" == 1 && "${action:-}" == preview &&
+        "${candidate}" == "${DOCKER_RECOVERY_CANDIDATE:-}" ]]; then
+        return 0
+    fi
     if [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 1 && "${DOCKER_CONFIG_WIREGUARD_MIGRATION:-0}" == 1 ]]; then
         dockerError "WireGuard 恢复未完成，保留原私密目录和候选: ${candidate}"
         return 1
@@ -8232,6 +8237,10 @@ dockerConfigureApply() {
             python3 -B "${DOCKER_LIB_DIR}/recovery.py" acme-inputs \
                 --directory "${DOCKER_RECOVERY_INPUT}" --destination "${candidate}" >/dev/null; }; then
         dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ "${mode}" == preview && "${FUNCNAME[1]:-}" == dockerRecoveryCommand ]] &&
+        ! dockerRecoveryPreviewIsolate "${candidate}"; then
         return "${PADM_DOCKER_RC_STATE}"
     fi
     if ! dockerValidateCandidate "${specFile}" "${candidate}"; then

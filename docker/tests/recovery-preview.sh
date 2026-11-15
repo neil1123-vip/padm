@@ -37,6 +37,7 @@ candidate_fail() {
 # 仅替换宿主、发布下载和容器执行；归档、业务、生成、权限与锁走生产代码。
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
+eval "$(declare -f dockerCandidateCompose | sed '1s/dockerCandidateCompose/dockerCandidateComposeReal/')"
 dockerHostPreflight() { :; }
 dockerRequireInstalledBundle() { :; }
 dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
@@ -77,7 +78,22 @@ dockerRecoveryAcmeValidate() {
 }
 # REALITY 目标探测可能访问公网或调用派生容器；此处仅隔离只读检测，规格与生成保持真实。
 dockerRealityTargetsValidate() { :; }
-dockerIPv6NetworkManage() { :; }
+dockerIPv6NetworkManage() {
+    local action=${1:-} project=${2:-${PADM_DOCKER_PROJECT}} file
+    case "${action}" in
+    check) docker_test_network_add "${project}" ipv6 "${project}-ipv6" ;;
+    cleanup)
+        [[ "${MODE}" != cleanup-fail ]] || return 1
+        [[ "${MODE}" != ipv6-residual ]] || return 0
+        for file in "${TEST_ROOT}/networks/"*; do
+            [[ -f "${file}" ]] || continue
+            if jq -e --arg project "${project}" '.project == $project and .kind == "ipv6"' "${file}" >/dev/null; then
+                rm -f -- "${file}"
+            fi
+        done ;;
+    *) candidate_fail "非预期 IPv6 网络调用: $*" ;;
+    esac
+}
 dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
 dockerConfigureSchemaFile() { printf '%s\n' "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"; }
 dockerConfigureReleasePrepare() {
@@ -162,19 +178,125 @@ dockerRealityProbeRun() {
     printf '%s\n' "${MODE}" >>"${TEST_ROOT}/geo-probed"
     [[ "${MODE}" != geo-probe-fail ]]
 }
+docker_test_network_add() {
+    local project=$1 kind=$2 name=$3 id
+    id=$(printf '%s:%s:%s' "${project}" "${kind}" "${name}" | sha256sum | cut -c1-12)
+    jq -cn --arg id "${id}" --arg project "${project}" --arg kind "${kind}" --arg name "${name}" \
+        '{id:$id,project:$project,kind:$kind,name:$name}' >"${TEST_ROOT}/networks/${id}"
+}
+resource_snapshot() {
+    find "${TEST_ROOT}/networks" "${TEST_ROOT}/containers" -type f -exec cat -- {} + | sort
+}
 docker() {
-    [[ "${1:-}" == ps && "$#" -eq 4 && "$2" == -aq && "$3" == --filter ]] ||
-        candidate_fail "非预期 Docker 调用: $*"
-    case "$4" in
-    "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}")
-        [[ "${MODE}" != compose-container ]] || printf '0123456789ab\n' ;;
-    "label=io.padm.project=${PADM_DOCKER_PROJECT}")
-        [[ "${MODE}" != padm-container ]] || printf '0123456789ab\n' ;;
-    *) candidate_fail "非预期项目容器查询: $*" ;;
+    local command=${1:-} directory= project= kind= name= oneoff= file id composeFile= envFile= filter
+    shift
+    case "${command}" in
+    compose)
+        while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+            --project-name) project=$2; shift 2 ;;
+            --project-directory) directory=$2; shift 2 ;;
+            --env-file) envFile=$2; shift 2 ;;
+            --file) [[ -n "${composeFile}" ]] || composeFile=$2; shift 2 ;;
+            --profile) [[ "$2" == '*' ]] || candidate_fail '候选 Compose profile 错误'; shift 2 ;;
+            *) break ;;
+            esac
+        done
+        name=${directory##*.candidate.}
+        [[ "${project}" =~ ^padm-docker-assess-[a-z0-9]{6}$ &&
+            "${project}" != "${PADM_DOCKER_PROJECT}" &&
+            "${project}" == "padm-docker-assess-${name,,}" &&
+            "${envFile}" == "${directory}/images.env" &&
+            "${composeFile}" == "${directory}/compose.json" &&
+            "$(stat -c '%u:%a' "${composeFile}")" == 0:600 ]] ||
+            candidate_fail '恢复预览未使用持久隔离 Compose、随机项目或私密权限'
+        jq -e --arg project "${project}" '
+          .name == $project and .networks.default.name == $project and
+          .networks.default.labels["io.padm.project"] == $project and
+          (.networks.ipv6 == null or (.networks.ipv6.name == ($project + "-ipv6") and
+            .networks.ipv6.labels["io.padm.project"] == $project))
+        ' "${composeFile}" >/dev/null || candidate_fail '隔离 Compose 没有隔离全部网络'
+        : >"${TEST_ROOT}/compose-called-${root##*/}"
+        case "${1:-}" in
+        config) return 0 ;;
+        run)
+            docker_test_network_add "${project}" default "${project}"
+            id=$(printf '%s:oneoff' "${project}" | sha256sum | cut -c1-12)
+            jq -cn --arg id "${id}" --arg project "${project}" --arg directory "${directory}" \
+                '{id:$id,project:$project,directory:$directory,oneoff:"True"}' \
+                >"${TEST_ROOT}/containers/${id}"
+            case "${MODE}" in
+            int) kill -INT "${RECOVERY_PREVIEW_PID}"; return 130 ;;
+            term) kill -TERM "${RECOVERY_PREVIEW_PID}"; return 143 ;;
+            kill) kill -KILL "${RECOVERY_PREVIEW_PID}"; return 137 ;;
+            cleanup-fail) return 0 ;;
+            esac
+            rm -f -- "${TEST_ROOT}/containers/${id}"
+            [[ "${MODE}" != validation-fail ]]
+            return $? ;;
+        *) candidate_fail "非预期候选 Compose 命令: $*" ;;
+        esac ;;
+    ps) [[ "${1:-}" == -aq ]] || candidate_fail "非预期容器查询: $*"; shift; kind=containers ;;
+    network)
+        case "${1:-}" in
+        ls) [[ "${2:-}" == -q ]] || candidate_fail "非预期网络查询: $*"; shift 2; kind=networks ;;
+        rm)
+            printf '%s\n' "$*" >>"${TEST_ROOT}/removed-${root##*/}"
+            [[ "${MODE}" != cleanup-fail ]] || return 1
+            shift
+            for id in "$@"; do rm -f -- "${TEST_ROOT}/networks/${id}"; done
+            return 0 ;;
+        *) candidate_fail "非预期网络命令: $*" ;;
+        esac ;;
+    rm)
+        printf '%s\n' "$*" >>"${TEST_ROOT}/removed-${root##*/}"
+        [[ "${1:-}" == -f && "${MODE}" != cleanup-fail ]] || return 1
+        shift
+        for id in "$@"; do rm -f -- "${TEST_ROOT}/containers/${id}"; done
+        return 0 ;;
+    *) candidate_fail "非预期 Docker 调用: ${command} $*" ;;
     esac
+    command=${kind}
+    kind=
+    while [[ "$#" -gt 0 ]]; do
+        [[ "$1" == --filter && "$#" -ge 2 ]] || candidate_fail "非预期资源查询参数: $*"
+        filter=$2
+        case "${filter}" in
+        label=com.docker.compose.project=*|label=io.padm.project=*) project=${filter#*=}; project=${project#*=} ;;
+        label=com.docker.compose.project.working_dir=*) directory=${filter#label=com.docker.compose.project.working_dir=} ;;
+        label=com.docker.compose.oneoff=*) oneoff=${filter#label=com.docker.compose.oneoff=} ;;
+        label=com.docker.compose.network=*) kind=${filter#label=com.docker.compose.network=} ;;
+        name=*) name=${filter#name=} ;;
+        *) candidate_fail "非预期资源筛选: ${filter}" ;;
+        esac
+        shift 2
+    done
+    if [[ "${project}" == "${PADM_DOCKER_PROJECT}" ]]; then
+        [[ "${MODE}" != compose-container && "${MODE}" != padm-container ]] || printf '0123456789ab\n'
+    elif [[ "${project}" == padm-docker-assess-* &&
+        ! -e "${TEST_ROOT}/collision-${root##*/}" ]]; then
+        case "${MODE}" in
+        project-network-collision) docker_test_network_add "${project}" default "foreign-${project}" ;;
+        name-network-collision) docker_test_network_add foreign default "${project}" ;;
+        esac
+        if [[ "${MODE}" == *-network-collision ]]; then
+            : >"${TEST_ROOT}/collision-${root##*/}"
+            resource_snapshot >"${TEST_ROOT}/resources-before"
+        fi
+    fi
+    for file in "${TEST_ROOT}/${command}/"*; do
+        [[ -f "${file}" ]] || continue
+        jq -r --arg project "${project}" --arg kind "${kind}" --arg name "${name}" \
+            --arg directory "${directory}" --arg oneoff "${oneoff}" '
+          select(($project == "" or .project == $project) and
+            ($kind == "" or .kind == $kind) and ($name == "" or ((.name // "") | test($name))) and
+            ($directory == "" or .directory == $directory) and ($oneoff == "" or .oneoff == $oneoff)) | .id
+        ' "${file}"
+    done
 }
 dockerCandidateCompose() {
     local candidate=$1 marker file relative core root
+    RECOVERY_PREVIEW_PID=${BASHPID}
     root=$(dockerInstallRoot) || return 1
     shift
     [[ -d "${candidate}" && -e "${root}/locks/deployment.lock" ]] ||
@@ -382,10 +504,6 @@ dockerCandidateCompose() {
         fi
         : >"${marker}"
         printf '%s\n' "${MODE}" >>"${TEST_ROOT}/candidate-checked"
-        case "${MODE}" in
-        int) kill -INT "${BASHPID}" ;;
-        term) kill -TERM "${BASHPID}" ;;
-        esac
     fi
     if [[ "$*" == --file*' nginx -t' ]]; then
         printf '%s\n' "${MODE}" >>"${TEST_ROOT}/nginx-checked"
@@ -399,7 +517,7 @@ dockerCandidateCompose() {
         printf '%s\n' "${MODE}" >>"${TEST_ROOT}/wireguard-checked"
         [[ "${MODE}" != wireguard-foreign ]] || return 1
     fi
-    [[ "${MODE}" != validation-fail ]]
+    dockerCandidateComposeReal "${candidate}" "$@"
 }
 
 mkdir -p -- "${TEST_ROOT}/bundle/docker/contracts"
@@ -511,16 +629,25 @@ prepare_target() {
     EXPECTED_CONTROLLER_REBUILD=false
     EXPECTED_SPEC="${TEST_ROOT}/base.json"
     EXPECTED_TRAFFIC_FILE="${SOURCE}/data/traffic/state.json"
+    if [[ ! -d "${TEST_ROOT}/networks" ]]; then
+        mkdir -m 0700 -- "${TEST_ROOT}/networks" "${TEST_ROOT}/containers"
+        docker_test_network_add "${PADM_DOCKER_PROJECT}" default "${PADM_DOCKER_PROJECT}"
+        docker_test_network_add "${PADM_DOCKER_PROJECT}" ipv6 "${PADM_DOCKER_PROJECT}-ipv6"
+    fi
 }
 run_case() {
     local name=$1 archive=$2 expected=$3 status=0
     shift 3
     snapshot >"${TEST_ROOT}/before.json"
+    resource_snapshot >"${TEST_ROOT}/resources-before"
     (dockerMain restore preview "${archive}" "$@") >"${LOG}" 2>&1 || status=$?
     [[ "${status}" -eq "${expected}" ]] || fail "${name}: 退出码 ${status}，预期 ${expected}"
     snapshot >"${TEST_ROOT}/after.json"
     cmp -- "${TEST_ROOT}/before.json" "${TEST_ROOT}/after.json" ||
         fail "${name}: 预览改变了目标或留下暂存"
+    resource_snapshot >"${TEST_ROOT}/resources-after"
+    cmp -- "${TEST_ROOT}/resources-before" "${TEST_ROOT}/resources-after" ||
+        fail "${name}: 预览残留资源或改变了既有正式网络"
     [[ ! -e "${root}/locks/deployment.lock" && ! -L "${root}/locks/deployment.lock" ]] ||
         fail "${name}: 部署锁没有释放"
     [[ ! -e "${TEST_ROOT}/source-compose-executed" ]] || fail "${name}: 源 Compose 被执行"
@@ -1358,4 +1485,54 @@ done
 grep -q '^nginx-fail$' "${TEST_ROOT}/nginx-checked" || fail '未执行 Nginx 失败校验'
 [[ "$(wc -l <"${TEST_ROOT}/sing-box-checked")" -eq 4 ]] &&
     grep -q '^sing-box-fail$' "${TEST_ROOT}/sing-box-checked" || fail 'sing-box 候选检查次数错误'
+
+archive_variant preview-ipv6 config/spec.json '.routing = {ipv6:{mode:"global",domains:[]}}'
+dockerConfigureSpecValidate "${VARIANT}/config/spec.json" || fail 'IPv6 网络恢复夹具无效'
+dockerGenerateDeployment "${VARIANT}/config/spec.json" "${VARIANT}/deployment.json"
+IPV6_SOURCE=${VARIANT}
+export_variant preview-ipv6
+# 清理持续失败、假成功和硬中断都必须留下可恢复归属；后续 recover 只回收本次随机资源。
+for mode in cleanup-fail ipv6-residual kill; do
+    prepare_target "${mode}"
+    MODE=${mode}
+    recoveryArchive=${ARCHIVE}
+    if [[ "${mode}" == ipv6-residual ]]; then
+        EXPECTED_SPEC="${IPV6_SOURCE}/config/spec.json"
+        recoveryArchive="${TEST_ROOT}/preview-ipv6.tar"
+    fi
+    snapshot >"${TEST_ROOT}/before.json"
+    resource_snapshot >"${TEST_ROOT}/resources-before"
+    status=0
+    (dockerMain restore preview "${recoveryArchive}") >"${LOG}" 2>&1 || status=$?
+    expected=${PADM_DOCKER_RC_STATE}
+    [[ "${mode}" != kill ]] || expected=137
+    [[ "${status}" == "${expected}" ]] || fail "${mode}: 未返回预期失败状态 ${expected}，实际 ${status}"
+    candidate=$(find "${root}" -mindepth 1 -maxdepth 1 -type d -name '.candidate.*' -print -quit)
+    [[ -d "${root}/.restore-pending" && -n "${candidate}" &&
+        -f "${candidate}/compose.json" &&
+        "$(stat -c '%u:%a' "${candidate}/compose.json")" == 0:600 &&
+        ( "${mode}" == ipv6-residual || -n "$(find "${TEST_ROOT}/containers" -type f -print -quit)" ) ]] ||
+        fail "${mode}: 未保留恢复事务、私密隔离编排或未清场 oneoff"
+    resource_snapshot >"${TEST_ROOT}/resources-after"
+    ! cmp -s -- "${TEST_ROOT}/resources-before" "${TEST_ROOT}/resources-after" ||
+        fail "${mode}: 故障桩没有留下应由 recover 清理的资源"
+    MODE=ok
+    (dockerMain restore recover) >>"${LOG}" 2>&1 || fail "${mode}: restore recover 未完成精确清场"
+    snapshot >"${TEST_ROOT}/after.json"
+    resource_snapshot >"${TEST_ROOT}/resources-after"
+    cmp -- "${TEST_ROOT}/before.json" "${TEST_ROOT}/after.json" &&
+        cmp -- "${TEST_ROOT}/resources-before" "${TEST_ROOT}/resources-after" ||
+        fail "${mode}: recover 未恢复骨架、残留随机资源或改变正式网络"
+    [[ ! -e "${root}/locks/deployment.lock" ]] || fail "${mode}: recover 未释放部署锁"
+    CASES=$((CASES + 2))
+done
+for mode in project-network-collision name-network-collision; do
+    prepare_target "${mode}"
+    MODE=${mode}
+    run_case "${mode}" "${ARCHIVE}" "${PADM_DOCKER_RC_STATE}"
+    [[ -f "${TEST_ROOT}/collision-${root##*/}" &&
+        ! -e "${TEST_ROOT}/compose-called-${root##*/}" &&
+        ! -e "${TEST_ROOT}/removed-${root##*/}" ]] ||
+        fail "${mode}: 未拒绝既有随机项目或同名网络，或误删了未取得归属的资源"
+done
 printf 'docker-recovery-preview-ok: %s cases\n' "${CASES}"

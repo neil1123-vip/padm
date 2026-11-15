@@ -186,6 +186,11 @@ dockerCandidateCompose() {
 }
 dockerComposeRun() {
     [[ "$1" == up ]] || fail "非预期在线动作: $*"
+    jq -e --arg project "${PADM_DOCKER_PROJECT}" '
+      .name == $project and .networks.default.name == $project and
+      (.networks.ipv6 == null or .networks.ipv6.name == ($project + "-ipv6"))
+    ' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail '恢复应用误用了预览隔离项目或网络'
     DOCKER_TEST_OWNER=${BASHPID}
     printf 'up\n' >>"${MOCK_BACKEND}/events"
     : >"${MOCK_BACKEND}/compose-container"
@@ -574,6 +579,23 @@ cat >"${TEST_ROOT}/bin/docker" <<'SH'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 [[ "${MOCK_MODE}" != offline ]] || exit 1
+# 预览网络清场由独立回归覆盖；本后端未模拟创建隔离资源。
+if [[ "${1:-}" == network && "${2:-}" == ls && "${3:-}" == -q &&
+    "${4:-}" == --filter && ( "$#" == 5 ||
+        ( "$#" == 7 && "$6" == --filter && "$7" == label=com.docker.compose.network=default ) ) ]]; then
+    case "$5" in
+    label=com.docker.compose.project=padm-docker-assess-?????? | \
+        label=io.padm.project=padm-docker-assess-?????? | \
+        name=^padm-docker-assess-??????'(-ipv6)?$') exit 0 ;;
+    esac
+fi
+if [[ "${1:-}" == ps && "${2:-}" == -aq && "${3:-}" == --filter &&
+    "${4:-}" == label=com.docker.compose.project=padm-docker-assess-?????? &&
+    "$#" == 8 && "$5" == --filter &&
+    "$6" == label=com.docker.compose.project.working_dir="${PADM_DOCKER_INSTALL_DIR}/.candidate."?????? &&
+    "$7" == --filter && "$8" == label=com.docker.compose.oneoff=True ]]; then
+    exit 0
+fi
 if [[ "${1:-}" == ps && "${2:-}" == -aq && "$#" == 8 &&
     "$3" == --filter && "$4" == label=com.docker.compose.project=padm-docker &&
     "$5" == --filter && "$7" == --filter && "$8" == label=com.docker.compose.oneoff=False ]]; then
