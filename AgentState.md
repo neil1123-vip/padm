@@ -40,8 +40,8 @@
   已回迁正式 443，属历史证据限制，不再作为当前待执行项；公网 IPv6 仍未验。
 - ICMP 原生启用态收发/arm64/公网/重启、IPv6/traceroute/PMTU 未验；
   TUN/透明启用重启按要求不做。SOCKS UDP、Xray 解析后阻断继续拒绝。
-- 原生 arm64、完整双栈、多机控制/WG、WARP 实 Peer 及自然 ACME 换证仍缺证据；
-  公网 h3/CDN、其它客户端/算法和性能长稳未扩范围。
+- 原生控制同步须先有可隔离、可销毁的空白双机；不在当前 A/B 跑至少 13 次重建。
+- arm64、完整双栈、多 Peer/WG 灾备、WARP 实 Peer、自然换证、公网 h3/CDN 及长稳缺证据。
   gRPC Cloudflare 透传缺有效 Zone 授权，不重跑无变化矩阵。
 - 旧 Vision reset、XHTTP/TUIC 超时缺原材料；旧 sing-box→Xray 失败原件
   `d18652f4...` 保留。固定公网组合不外推其它组合或活动 sing-box 业务。
