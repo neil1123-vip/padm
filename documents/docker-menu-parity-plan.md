@@ -68,7 +68,7 @@
 | TProxy/TUN 真实启停与恢复 | 当前源码部分通过，完整流程未完成 | TUN TCP/TLS、UDP DNS、冲突拒绝、启停、净停后重启/显式启动通过；restart 首次 DNS 曾超时，独立补验通过。TProxy TCP/TLS 同矩阵通过；指定 UID UDP 缺少 NET_BIND_SERVICE 的原生对照及修复后隔离矩阵通过。3.41 的 net/validator 与验签控制包一致；按最新授权保持透明关闭，未执行正式启用重启矩阵，关闭状态的整机重启不替代该矩阵 |
 | 完整卸载与 purge | 本机原生范围通过 | 保留数据卸载、purge、整机重启后空目标无残留及同机灾备恢复通过；恢复后三项业务健康、外部 WS 正反例及 TLS/账号核对通过，不替代新主机灾备 |
 | 公网双栈端口跳跃 | 未完成 | 公网 IPv6、旧连接排空、自动恢复及宿主规则证据 |
-| 新主机灾备恢复 | Debian 13 amd64/bridge/IPv4/Xray WS 恢复及单次整机重启通过 | 6A.31–6A.32：B 正式 `.7` 控制入口恢复原 `.4` 归档，apply exit 0；19 条账目及材料/权限保持，原三容器重启后自然 healthy、两 timer 恢复，隔离先于 Docker；默认桥阻断/业务网对照和经 A 转发的公网 WS 两正两负通过，清场及 A 稳定状态通过。原失败保留，不外推其它组合或实际续期 |
+| 新主机灾备恢复 | 固定 B Xray WS 恢复/重启及本地单 Peer 角色/WG 新机恢复通过 | 6A.31–6A.32：B 正式 `.7` 控制入口恢复原 `.4` 归档，apply exit 0；19 条账目及材料/权限保持，原三容器重启后自然 healthy、两 timer 恢复，隔离先于 Docker；默认桥阻断/业务网对照和经 A 转发的公网 WS 两正两负通过，清场及 A 稳定状态通过。6A.46 另补正式 `.7` 本地完整独立内核双机的单 Peer 空目标角色/WG 恢复、新控制身份/rebind、原日历自主同步与 TLS/计量。原失败保留，不外推其它组合、断网恢复或实际续期 |
 | 账号生命周期与额度 | 正式 3.42.3 原生 IPv4 单 WS 整轮通过 | 4A.2b：创建/复制/改名、停用/启用、1073 字节额度及解除、轮换、删除共 8 阶段与恢复，508821 ms/exit 0，26 正/5 拒绝；断网独验及 13 项篡改拒绝通过，原规格字节/材料权限/调度/历史累计保持并清场。旧 3.42.2 额度失败保留；不外推双核心、IPv6/arm64 |
 | 业务备份与分享恢复 | 正式 3.42.3 原生 IPv4 单 WS 整轮通过 | 4A.4：backup/preview、损坏拒绝及真实消费者失败回滚、merge/replace 与分享授权恢复共 7 阶段，616534 ms/exit 0；22 正/8 拒绝、23 次严格 HTTPS 订阅下载及 10 项篡改拒绝通过。原规格字节/材料权限/timer/历史累计保持，已恢复清场；不外推其它核心/协议、IPv6/arm64 或新机灾备 |
 | webroot/ALPN 公网 CA 组合 | 正式 webroot/ALPN issue、standalone/ALPN auto-renew 消费失败回滚及 ALPN 同张新证书在线往返通过；3.41.5 stdin 修复已在正式包补验 | 2026-10-24 单次 fresh ALPN 新账户挑战、真实消费者失败完整回滚及同证书在线往返通过，runner/outer/verify 全 0，guard 未触发；此前两轮夹具失败归档不变。自然续期仍缺，不把强制到期、缓存授权或本地 CA 等同自然续期；此前无原始日志的第三次申请仍不定性 |
@@ -11368,6 +11368,64 @@ SHA-256 `28efbaf27a01acc88bc73d76bc28bbfeb60b52ada035474232e58b2db959b628`；
 失败保留，原失败同因及稳定可靠性未证，不计控制面防护通过。
 公网多机、多 Peer、arm64/IPv6、角色/WG 新机灾备及长稳仍缺。
 未连接/重启 A/B、修改运行源码/合同或支持状态，16 supported/14 deferred 不变。
+
+### 6A.46 正式单 Peer 控制角色与 WireGuard 新机恢复
+
+2026-11-17，使用正式 `3.43.7`/`2f17e6ac2159390f46265fa71e6131ac85da38f2`，
+在本地可销毁的双 QEMU TCG guest 上执行新机恢复；每机 `2 vCPU/2 GiB`、
+Debian 13 amd64、完整独立内核/systemd/Engine、IPv4、单 Peer、固定 Xray TLS。
+正式 manifest SHA-256 为
+`9db18a00c85792d5b30745b77fab58abf707b9ce467a30ef8031e1249200b132`，
+bundle 为 `4eb8cc7291d2ec96f54394cfe517bd93d1f48ff4655ccbaae1aca0f21de9b8f7`。
+不使用或修改生产 A/B，不把本地原点别名计为公网。
+
+旧源双机先正式停同步并清持久授权/unit，暂停 traffic timer、collect 后，
+完成正式 export、verify 与双归档复制，再正常关机隔离旧源。
+从官方 Debian base 建立全新目标，核对新的 machine/SSH/Engine 身份、
+初始无 PADM/Docker 数据、安装后目录空态；安装正式骨架并按签名清单拉取五镜像，
+每机 `13` 份源码和实际镜像 ID 绑定通过。目标准备和正式恢复均保留网络：
+原恢复入口始终按 digest pull，不能称断网恢复。
+
+双端正式 preview 后目录仍为空，正式 apply 均成功。主控显式 rebuild 后使用新控制
+身份、revision `0` 并撤权；WG 身份/地址/密钥、业务、额度及历史累计保持。
+旧 token 两次 HTTP `401`，旧邀请 CLI `rc 11`；新邀请普通 sync 同样 `rc 11`，
+显式 rebind 成功。原 `OnCalendar=*-*-* *:0/5:15` 自主传播 `0 → 1`，
+同 boot、无 drop-in，trigger/service/journal 时序绑定通过。
+严格 TLS 错 UUID 对照为零原点请求，managed/core 正例正文分别为
+`311296/286720` 字节，完整正文摘要及 managed 计量增量通过。
+
+保留两次驱动失败：首次源导出误把人读输出解析为 JSON，`JSONDecodeError`，
+只有 index 0 完成归档，正常关机；修正读取后双归档正式验证通过。
+首次恢复双端 apply 均 `rc 0`，随后验收脚本误要求 `deployment.json` 与源字节相等，
+driver exit 1，仍正常关机、父盘保持。正式入口会为新目标重生成文件：
+`deployment.json` 的 `previous_manifest_sha256=null`，spec 经 jq 重序列化。
+新轮从源 tar 经 `jq '.previous_manifest_sha256=null'` 精确重算 deployment 摘要，
+从已全语义核对的 snapshot spec 经 `jq '.'` 重算 spec 摘要；
+权限/属主和其它静态文件摘要保持精确比较，未放宽为任意文件差异。
+重生成断言的 `2` 个正例与 `4` 个篡改反例通过，原失败不改判。
+
+成功源导出 `174.543806` 秒、新目标准备 `271.440746` 秒、
+成功恢复轮 `1124.160779` 秒；最终正常关机 `6.978220` 秒，
+QEMU exit `0/0`、无强停，六份父盘及官方 base 摘要保持。
+独验初稿因 `*-after-*` 误命中 `schedule-status-after` 而 exit 1；
+改为按 metadata.label 精确检查后，仅重跑断网独验，不重跑 guest。
+最终独验 exit 0、`passed=true/restore_verified=true`，绑定 `3002` 份原件，
+其中重核旧 CLI `1691` 份和 rollback `1634` 份，集合重叠、不相加。
+七个驱动/核验容器均 exited、无 OOM，专用私密卷无活动容器。
+
+原件仅留私密卷 `padm-native-kernel-probe-20261116`；规格、邀请、nonce、
+私钥和磁盘不整体导出。成功恢复 run 为 `/work/control-dr-restore-1794855892577708988`；
+runner SHA-256 `ba2b27cb5aa07a7304e37ab474e0128941d8af3feacd68af126aff3cad9c712b`，
+verifier 为 `b5516396a117c077920b3a4e42705fafc94873325f0e01e17da9dfdaf0a54e02`。
+公开摘要 `.tmp-native-control-vms-20261116/dr-verification.json`，
+SHA-256 `2af6eb5d6d37d2b5d86bd8575db58c32ad52472d57f071d46bb963331a5d2b39`；
+容器终态见同目录 `dr-driver-states.json`。
+
+只关闭固定本地 amd64/IPv4/单 Peer 的新机控制角色与 WG 恢复子项。
+公网多机、多 Peer、arm64/IPv6、其它核心、信号/断电恢复、控制面防护与长稳仍缺；
+旧来源检查失败及原失败同因未证保持，原 30 秒窗口不变。
+未修改运行源码/合同/支持状态或重复回归，16 supported/14 deferred 不变；
+未连接/重启生产 A/B，未推送或发布。恢复联网，仅事后独验断网。
 
 ### 本轮菜单与回归收敛
 

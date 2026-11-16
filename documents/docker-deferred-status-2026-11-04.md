@@ -30,7 +30,7 @@
 | G | [原生记录](docker-native-acceptance-2026-10-18.md)：正式安装/首配、升级回滚、重启、卸载/purge 后同机 v3 空目标恢复，3.42.3 账号及业务备份/分享恢复整轮。账号/业务原件 `.tmp-native-account-close-20261027/`、`.tmp-native-business-close-20261027/`；不代表新主机或全组合。 |
 | F | [实施计划 3D.27](docker-menu-parity-plan.md#3d27-新增管理能力真实验收与-deferred-对账)：正式 `3.43.4` 可信发布、来源及五镜像绑定；Debian 13 amd64/bridge/IPv4 的 `.2 → .4` 升级和固定 WS 公网正负例；固定 amd64/IPv4/Reality/gRPC/chrome/pgxn.org 的 ML-DSA 正式 CLI 公网四阶段及重建；同 IP、同证书别名独立 SNI 仅隔离整链。11-08 次日只读复核通过，不替代宿主重启、实际回滚或长稳。原件 `.tmp-release-3434-20261107/`、`.tmp-vps-upgrade-3434-20261107/`、`.tmp-mldsa-public-3434-20261107/`、`.tmp-mldsa-sni-3434-20261107/`、`.tmp-vps-post-upgrade-3434-20261108/`。 |
 | B | [实施计划 6A.29–6A.32](docker-menu-parity-plan.md)：正式 `3.43.7` 可信发布；独立 B Debian 13 amd64/bridge/IPv4 的原 `.4` 归档预览与自动清场、外部续期隔离、正式恢复、公网 Xray WS 443 正反例及单次整机重启通过。控制入口为 `.7`，业务与五镜像保持原 `.4`；公网经 A 临时 SSH TCP 转发，不计 Windows 直连或原生 URI 导入。原件 `.tmp-release-3437-20261116/`、`.tmp-native-dr-preview-3437-20261116/`、`.tmp-native-dr-acme-isolation-20261116/`、`.tmp-native-dr-apply-3437-20261116/`、`.tmp-native-dr-reboot-3437-20261116/`。 |
-| W | [实施计划 6A.35–6A.45](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。6A.43 只定位新跟踪轮在相等快照后的 30 秒相对时限检查拒绝，不证明原失败同因。6A.44 补齐预加载正式 helper 条件下的固定本地 server fresh 见证；6A.45 另补完整 Peer CLI 预热及当前 nonce 的正式 CLI/主控 rc 0 闭环，首轮准备失败保留、锁 owner 未查无归因，30 秒窗不变、防护未验。只关闭上述固定子项，不等同信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启或角色/WG 灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
+| W | [实施计划 6A.35–6A.46](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。6A.43 只定位新跟踪轮在相等快照后的 30 秒相对时限检查拒绝，不证明原失败同因。6A.44 补齐预加载正式 helper 条件下的固定本地 server fresh 见证；6A.45 另补完整 Peer CLI 预热及当前 nonce 的正式 CLI/主控 rc 0 闭环，首轮准备失败保留、锁 owner 未查无归因，30 秒窗不变、防护未验。6A.46 补齐固定本地单 Peer 的全新空目标正式恢复、新控制身份/rebind、WG 身份保持、原日历自主传播及 TLS/计量；恢复联网、独验断网，3002 份原件绑定。只关闭上述固定子项，不等同信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启/灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
 
 ## 14 项对账
 
@@ -40,14 +40,14 @@
 
 | deferred 项 | 已有证据 | 未决完成条件 | 明确限制与重复归属 |
 | --- | --- | --- | --- |
-| `subscription-multiserver` | P：私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步、隔离 amd64 双/三节点业务和授权隔离；6A.19/6A.23 新身份灾备。W 补齐原生固定单 Peer 隧道，以及正式 `.7` 本地独立完整内核双机的账号自主增删、启用态真实重启、固定地址密钥/端口迁移、关联改址撤权、新邀请恢复、原日历自主同步、业务和累计；6A.42 另补主控改址真实 bind 失败恢复、仅撤权及新邀请同版同步；6A.44 的预加载 helper 与 6A.45 的完整 Peer CLI 预热条件分别补齐固定本地 server fresh 见证。 | 公网多机控制同步、arm64/IPv6、控制角色及 WG/多 Peer 新主机灾备、多 Peer 适用重启证据；防护未验，6A.41/6A.43 失败保留且原失败同因未证，6A.45 首轮准备锁无 owner 归因，不外推信号/断电及其它故障或长稳。 | v2 关联地址/密钥迁移、控制面 Fail2ban 拒绝，不新增开发。控制 API 无公网映射；公网业务验证不等于公开 API。灾备归 `interactive-menu`，宿主隧道归 `wireguard`。 |
+| `subscription-multiserver` | P：私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步、隔离 amd64 双/三节点业务和授权隔离；6A.19/6A.23 新身份灾备。W 补齐原生固定单 Peer 隧道，以及正式 `.7` 本地独立完整内核双机的账号自主增删、启用态真实重启、固定地址密钥/端口迁移、关联改址撤权、新邀请恢复、原日历自主同步、业务和累计；6A.42 另补主控改址真实 bind 失败恢复、仅撤权及新邀请同版同步；6A.44 的预加载 helper 与 6A.45 的完整 Peer CLI 预热条件分别补齐固定本地 server fresh 见证。6A.46 补齐固定本地 amd64/IPv4/单 Peer 角色/WG 新机恢复、新控制身份/rebind 及自主同步、TLS/计量。 | 公网多机控制同步、arm64/IPv6、多 Peer 新主机灾备及适用重启证据；恢复联网，不计断网恢复。防护未验，6A.41/6A.43 失败保留且原失败同因未证，6A.45 首轮准备锁无 owner 归因，不外推信号/断电及其它故障或长稳。 | v2 关联地址/密钥迁移、控制面 Fail2ban 拒绝，不新增开发。控制 API 无公网映射；公网业务验证不等于公开 API。灾备归 `interactive-menu`，宿主隧道归 `wireguard`。 |
 | `acme-webroot` | P+A：稳定只读根与独占写入、归属/树校验、不停 Nginx；正式公网签发/在线换证及 3.41.4 新证书消费失败完整回滚。 | 真实登记自然到期续期；原生 arm64/公网 IPv6、当前版本尚未覆盖的适用生命周期。 | 自然续期与下一行共用一项门槛，约 2026-12-17 的窗口须以实际登记为准。no-op、强制到期、fresh 申请均不能替代自然到期。 |
 | `acme-standalone` | P+A：HTTP-01/TLS-ALPN-01 及原拥有者暂停/恢复；正式签发、standalone/ALPN 消费失败回滚、ALPN 在线往返和单次 fresh 完整链。 | 同一 ACME 自然续期门槛；原生 arm64/公网 IPv6、当前其它适用生命周期。 | 仅暂停本部署原运行拥有者；站点 Fail2ban 的自监听停启仍拒绝。其它 CA/provider 不借本次证据扩大范围。 |
 | `site-static-redirect-alpn` | P+S：模板/local/ALPN 事务及隔离双栈；固定正式 3.41.5 公网 13 阶段，包括特殊站名、302、订阅与完整恢复。 | 原生 arm64/公网 IPv6、其它既定适用组合和当前版本生命周期。 | Hy2 local 固定受管只读目录且无混淆，纯 Hy2 只开放 static。ACME 另行归属，不把公网站点/ALPN 重新列为完全未验。 |
 | `entry-port-management` | P+U+R：多入口、额外端口、默认分享/原位改端口、内部端口专项；SS2022 公网 IPv4 默认别名/删除及限定合并重启。 | 原生 arm64/公网 IPv6、其它既定端口组合及当前版本适用生命周期。 | 与内部 207 共用别名证据。额外端口别名拒绝 WS/SSH Fail2ban、TUN/TProxy、host-network 组合；3D.26 已另行放行活动 WS 防护下未保护入口的基础增删改。跳跃限单 sing-box/单个双族入口/手动监督，不承诺 TUIC 客户端自动换端口或崩溃/开机恢复。 |
 | `reality-coexistence` | P+C：受管、桥接宿主和 host 回环三拓扑恢复；限定公网 Vision/XHTTP 正反例与六点真实重启。 | 原生 arm64/公网 IPv6、其它既定共存组合及当前版本尚未覆盖的适用生命周期。 | 一个 Xray Vision/XHTTP 后端，网站证书/内容仍由原维护方负责。旧 reset/超时根因未定；3D.26 协议管理 supported 不重列为缺口。 |
 | `cdn-entry-management` | P+D：2/21/22/23/24/25 地址覆盖和链接/订阅投影；固定 Cloudflare WS 公网正反例。 | 既定 XHTTP/h3 与 gRPC 供应商透传、原生 arm64/公网 IPv6 和当前其它适用组合；gRPC 仍缺有效 Zone 条件。 | H3 只有使用说明，不新增开关、其它协议或自动建设外部 TLS/H3/CDN；WS 通过不外推其它传输。 |
-| `interactive-menu` | P+G+B：6A.23 本机代码收口；3D.26 的 16 个公开协议管理 supported；正式安装/升级回滚/公网/重启、同机灾备及账号/业务恢复限定证据；B 正式 `.7` 从原 `.4` 归档完成固定 Xray WS 新主机恢复和单次整机重启。 | 自然续期、arm64/公网 IPv6、其它核心/协议、控制角色及 WG/多 Peer 新主机灾备与各专项尚缺的适用生命周期。 | 汇总项，不重复计下属各行。已有部署替换、其它 ACME 材料、未处理输入、v2 关联迁移等保持拒绝，不追加开发。 |
+| `interactive-menu` | P+G+B+W：6A.23 本机代码收口；3D.26 的 16 个公开协议管理 supported；正式安装/升级回滚/公网/重启、同机灾备及账号/业务恢复限定证据；B 正式 `.7` 从原 `.4` 归档完成固定 Xray WS 新主机恢复和单次整机重启。6A.46 另补本地完整独立内核双机的 amd64/IPv4/单 Peer 新机角色/WG 恢复、新身份/rebind、自主同步和 TLS/计量。 | 自然续期、arm64/公网 IPv6、其它核心/协议、公网多机/多 Peer 角色/WG 新主机灾备与各专项尚缺的适用生命周期。 | 汇总项，不重复计下属各行。已有部署替换、其它 ACME 材料、未处理输入、v2 关联迁移等保持拒绝，不追加开发。 |
 | `routing-tools` | P+R：两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、CN 与名单管理；sing-box 解析后阻断、pure 发布共存、DNS 拒绝回退和限定合并重启。 | WARP 真实 Cloudflare 账号/公网出口；原生 arm64/公网 IPv6、当前其它适用组合。 | 与内部 206 共用证据/条件；SOCKS 入站限制归内部 201。固定 Xray 解析后阻断拒绝；原生 CN 预设已覆盖，不追加任意国家向导或最终流量语义引擎。 |
 | `internal-201-socks-relay` | P：5B.5b/5B.5b.1 已证固定 sing-box 的动态 BND/活动关联真实来源问题及 Xray 许可不随控制关闭撤销。 | 当前按限制关闭，无一轮普通环境回归可以使其成立；仅在相关核心行为变化后，重证发布、真实来源、会话鉴权及控制关闭撤销，才重新评估。 | 不开放完整入站、不降为 TCP-only、不增加辅助核心。host-network 不能修复鉴权。TCP 出站归 `routing-tools`；201 不作为公开节点协议。 |
 | `internal-202-http-relay` | P+H：Xray 认证 HTTP/CONNECT、字面来源白名单、管理/回滚；隔离 amd64 双栈和原生外部 IPv4 三目标 TLS/200、407、来源拒绝。 | 公网 IPv6、原生 arm64、当前版本尚未覆盖的适用生命周期。 | sing-box 信任 X-Forwarded-For 覆盖来源且无关闭选项，固定反例继续拒绝。专属直连、不计业务额度，不扩跨核心；202 不作为公开节点协议。 |
@@ -165,3 +165,24 @@ passed true，绑定 1691 份原件，其中重核旧 1490 份。
 原失败同因、稳定可靠性及控制面防护未证，原 30 秒窗不变。
 未连接/重启 A/B 或修改支持状态，新机灾备仍缺，16 supported/14 deferred 不变；
 公开摘要 `.tmp-native-control-vms-20261116/source-cli-warm-verification.json`。
+
+6A.46 随后补齐正式 `.7` 固定本地 amd64/IPv4/单 Peer 的新机角色/WG 恢复。
+旧源正式停同步、清授权/unit、collect/export/verify 后正常关机隔离；
+从官方 Debian base 建双空目标，新 machine/SSH/Engine 身份、初始无 PADM/Docker
+数据、每机 13 份源码及五镜像绑定通过。双端正式 preview 不落地、apply 成功，
+主控显式 rebuild 换控制身份、revision 0 并撤权，WG 身份/地址/密钥和业务/额度/累计保持。
+旧 token 两次 401，旧邀请与新邀请普通 sync 均 rc 11；显式 rebind 后原日历
+`OnCalendar=*-*-* *:0/5:15` 同 boot、无 drop-in 自主 `0 → 1`。
+严格 TLS 错 UUID 零原点请求，managed/core 正文 311296/286720 字节及计量增量通过。
+源导出人读输出误按 JSON 解析、首次恢复误要求重生成文件与源字节相等两次驱动
+失败保留，均正常关机；重生成 deployment/spec 的精确摘要断言经 2 正/4 篡改反例核对。
+独验初稿 glob 误命中 `schedule-status-after` 的 exit 1 保留，改为 metadata.label
+精确检查后仅重跑独验；成功恢复 1124.161 秒、正常关机 6.978 秒、QEMU exit 0/0，
+父盘及官方 base 摘要保持。正式恢复联网按 digest pull，仅事后独验断网，
+最终 exit 0、passed/restore_verified true，绑定 3002 份原件；重核旧 CLI 1691 份和
+rollback 1634 份，集合重叠、不相加，七个容器均退出且无 OOM，私密卷无活动容器。
+公开摘要 `.tmp-native-control-vms-20261116/dr-verification.json`，
+SHA-256 `2af6eb5d6d37d2b5d86bd8575db58c32ad52472d57f071d46bb963331a5d2b39`。
+未连接/重启 A/B，未改运行源码/合同、重复回归、推送或发布；
+公网多机、多 Peer、arm64/IPv6、其它核心、信号/断电、控制面防护及长稳仍缺，
+原 30 秒窗口及 16 supported/14 deferred 不变，旧失败不改判。
