@@ -11084,6 +11084,46 @@ control init/invite/join 及原定五分钟 systemd 同步启用。API 只监听
 本地完整内核双机单 Peer 自主增删及业务子项；公网多机、arm64/IPv6、迁移、多 Peer、
 角色/WG 灾备、启用态重启及长稳仍未验，16 supported/14 deferred 不变。
 
+### 6A.39 正式单 Peer 控制角色与 WG 启用态真实重启
+
+2026-11-16，复用 6A.38 已正常关机的两台完整独立内核 guest，从各自磁盘创建
+child qcow2；父盘不直接启动，开始和最终断网独验 SHA256 相同。正式 `.7`、
+原 machine/Engine 身份、22 份安装源码和 10 份镜像绑定保持；本轮未连接或修改 A/B。
+两端仍为 Debian 13 amd64、单 Peer、隔离 socket 网卡和原 TLS/WS 入口。
+
+正式新增账号的源版本由 `2 → 3`，原五分钟 systemd 日历自主传播后完成
+错 UUID 拒绝、正确账号完整 `270336` 字节和采集。两端并行执行
+`systemctl reboot --no-block`；QEMU PID 与进程 start ticks 保持、guest boot ID
+变化，重启就绪 `69.864` 秒。原 7 个业务/控制/WG 容器 ID 和镜像 ID 保持，
+StartedAt 更新，原 `unless-stopped` 自然恢复且 healthy、无 OOM；machine/Engine、
+规格、配置/私密普通文件内容及权限、WG 公钥/Peer 和原 systemd unit 保持。
+未采集目录权限，不将文件权限比对外推到目录。
+
+每个 boot 分别取得 WG 传输基线再做双向 ping，双向计数均增长。重启后同账号
+完整 `278528` 字节、错 UUID 拒绝通过；新账号 upload/download 从
+`115/270452` 增至 `230/549096`，下载增量 `278644` 覆盖本次完整正文。
+正式删除推进 `3 → 4`，原日历在新 boot 自主传播，旧 UUID 拒绝、本机账号完整
+`303104` 字节及最终采集通过，删除保留历史账目。两次传播分别绑定同 boot 的
+单调时序、真实新 invocation/journal、原 loaded unit、摘要和实际核心用户。
+六个独立严格 TLS 客户端及 nonce 未复用；负例原点零到达，正例精确一次。
+
+第一轮因 Docker Desktop 自动更新中断：驱动 exit `137`、OOMKilled=false，
+安装器原日志显示 `--auto-update --auto-close-and-start-app`；尚未执行计划重启，
+不计成功。原件保留，待 Engine 恢复后从原父盘新建 child 重跑，未改自动更新设置。
+第二轮 `896.679` 秒通过；两 guest 最终正常 Power down，关机 `6.672` 秒、
+QEMU/驱动均 exit 0，无强停或活动 guest。固定工具镜像下 `--network none` 独验
+通过，绑定 `1029` 份原件、两轮尝试，并重新核对既有 351 份证据。
+证据 `.tmp-native-control-vms-20261116/README.md`、`reboot-result.json`、
+`reboot-verification.json`；私密快照和磁盘只保留专用卷，不整体导出。
+
+本项只关闭固定正式版本、本地完整独立内核双机、单 Peer 控制角色/WG 的启用态
+重启及重启后自主同步/业务/累计子项。隔离原点别名不代表公网；公网多机、
+arm64/IPv6、迁移、多 Peer 重启、角色/WG 新机灾备及长稳仍未验。
+完整 JSON 比对确认仅改变三个功能 reason，支持状态保持 16 supported/14 deferred。
+`docker-phase3-edit -Jobs 2` 在 Linux amd64 以 `62847 ms`、exit 0、无缓存通过；
+结果 `.tmp-regression-docker-d64f5e4be3c44837acc9a373ca56d2b5/`。
+未改运行源码、重复生产重启、跑 daily/full、推送或发布。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

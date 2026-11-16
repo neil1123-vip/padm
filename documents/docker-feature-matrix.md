@@ -43,6 +43,13 @@ WG/多 Peer 新机恢复及长稳仍待验，16 supported/14 deferred 不变。
 6A.37 补齐本机隔离双 Engine 的 purge、原无角色归档恢复及最新业务合并复演，
 核对累计、身份、最新额度、受管控制材料和 cron 清场；不代替生产角色撤回或 systemd 验收。
 
+6A.38–6A.39 随后以真实验签的正式 `.7`，在本地可销毁 Debian 13 amd64 的完整
+独立内核/systemd/Engine 双 QEMU guest 上完成单 Peer 账号自主增删，以及控制角色/WG
+启用态双 guest 真实重启。原 7 个容器自然恢复、两 boot 双向加密、六组严格 TLS
+正反例、重启后自主删除和全量下载增量通过，最终正常关机；原中断轮次保留，
+1029 份原件断网绑定。隔离原点别名不等于公网；arm64/IPv6、公网多机、迁移、
+多 Peer 重启、角色/WG 新机灾备及长稳仍待验，完整网络管理状态不升级。
+
 2026-10-18 已补 Debian 13 原生 amd64 的正式发布验签、WS 21 首配、
 升级/回滚、整机重启、公网客户端和 Cloudflare CDN 正反例，以及
 Let's Encrypt standalone 签发、真实续期调度和 WS/SSH 精确封禁。
@@ -733,7 +740,7 @@ TUN/TProxy/Redirect 的透明核心保留 `cap_drop: ALL`，仅授予 `NET_ADMIN
 | `entry-port-management` | 协议与入口 -> 入口端口管理 | `deferred` | 核心 | bridge | 多入口/别名增删、原位修改、默认分享及内部端口专项已交付。正式 3.41.6 的固定 Mihomo/amd64/bridge/公网 IPv4 SS 默认别名/删除/基口恢复与路由/UDP 合并重启已验，和内部 207 共用。arm64/公网 IPv6、其它组合及当前源码生命周期仍缺。额外端口别名保持原宿主组合拒绝；活动 WS 防护下未保护入口的基础增删改按 3D.26 放行。Hy2/TUIC 单 sing-box、单个双族入口及手动监督不承诺客户端自动换端口或崩溃/开机恢复。 |
 | `cdn-entry-management` | 协议与入口 -> CDN 入口管理 | `deferred` | `subscription` | bridge | 协议 2/21/22/23/24/25 的地址覆盖、状态/设置/清除及链接/订阅投影已交付，Reality/SNI/Host/路径/serviceName/认证保持，沿用对应 marker。原生固定 amd64 Cloudflare WS 地址/SNI/Host 公网正反例已验；XHTTP/h3、gRPC 供应商透传及 arm64/IPv6、当前版本其它适用组合仍缺。H3 只有使用说明，不新增开关、其它协议或自动建设外部 TLS/H3 拓扑。 |
 | `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` / `net-fail2ban-control` / `net-fail2ban-ssh` | host + `NET_ADMIN` | WS DOCKER-USER、控制面 INPUT 与专用 SSH INPUT 的独立 owner 和菜单/CLI；SSH/control 不共存。5C.6d 单 WS 保护端口专项已验实际双栈封禁、端口迁移、SQLite 保留、来源/健康失败恢复与旧规则清理，新旧端口均需 fresh 来源，别名、Reality stream 和其它集成拒绝；WS 日志组为 `0:10001`，权限不放宽。控制认证日志支持菜单/CLI 每小时轮转检查，默认关闭、本机私有登记、同锁与旧 bundle 门禁；线上 auto 入口及隔离 amd64 原始每小时 :19 cron 自主触发、实际归档/续写/停用已验，systemd 实际定时触发待验。SSH 限原生 root systemd/cgroup v2、无存量会话且禁止 reload 的单 service/单显式监听，只消费启动后的可信密码失败。transient collector、只读日志/10 秒 guard、启停/状态/单 IP 解封已接，来源失效自动停 jail/精确清理，禁自动重启和恢复旧封禁；SSH 启用时 update/rollback/业务恢复拒绝，先受管停用。隔离 amd64 OpenSSH 10/Fail2ban 1.1 实际启停、封禁、连接 DROP、解封和来源失效清理已验；原生宿主/arm64/公网/重启卸载及完整管理仍待验收。 |
-| `wireguard` | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有。4C.7 接入控制连接菜单 `18` 及 `wireguard status/prepare/peer/start/stop`，仅支持 RFC1918 IPv4 `/32` 单 Peer，已通过定向及隔离 amd64 真实 CLI 验收；6A.35 补齐原生双机固定 Debian 13/amd64/IPv4 的准备、配对、首次启用、停启、加密传输与原规格恢复。清场含精确手工删除材料；控制同步、多 Peer、迁移、灾备及启用态重启不借此通过，完整管理状态不升级。 |
+| `wireguard` | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有。4C.7 接入控制连接菜单 `18` 及 `wireguard status/prepare/peer/start/stop`，仅支持 RFC1918 IPv4 `/32` 单 Peer，已通过定向及隔离 amd64 真实 CLI 验收；6A.35 补齐原生双机固定 Debian 13/amd64/IPv4 的准备、配对、首次启用、停启、加密传输与原规格恢复，清场含精确手工删除材料。6A.38–6A.39 补齐正式 `.7` 本地完整独立内核双机的控制自主增删、单 Peer 启用态真实重启、原容器自然恢复、加密/业务/累计；公网多机、arm64/IPv6、迁移、多 Peer 重启及角色/WG 新机灾备仍待验，完整管理状态不升级。 |
 | `tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `NET_BIND_SERVICE` + `DAC_OVERRIDE` + `/dev/net/tun` | 显式启用透明代理设备。 |
 | `tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 菜单 17→43 和 CLI 管理单 Xray/sing-box Reality，IPv4/IPv6/双栈 PREROUTING TCP/UDP。OUTPUT 默认关闭，可选 UID 或包含 root 的全主机主动 TCP/UDP；互斥、省略保留，关闭保留 PREROUTING。全主机核心 0:10001，GID 10001、LOCAL/REPLY 绕过；实际核心身份与两族两链均须核验。漂移或缺关键绕过保留现场；旧 schema 2/3/4 兼容，全主机 schema 5 和共享 marker。拒绝其它宿主集成；原生宿主/arm64/公网/重启/完整卸载及完整管理待验。 |
 | `redirect` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 菜单 17→47 和 CLI 管理单 Xray/sing-box Reality 1/2/26，同核心多入口；三族 PREROUTING，OUTPUT 可选 UID 或全主机主动 TCP，UDP 保持原路由。默认关闭、互斥、省略保留；全主机包含 root，核心 0:10001，GID 10001、LOCAL/REPLY 绕过，实际身份须核验。schema 1 兼容，全主机 schema 2 和共享 marker。两族两链先完整审计再精确撤销，漂移保留现场；拒绝其它宿主集成或副核心。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。 |
