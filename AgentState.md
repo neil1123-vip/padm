@@ -4,7 +4,7 @@
 
 ## 当前
 
-- 整体未收口；16 个协议管理 supported、14 个 deferred，矩阵未变。
+- 整体未收口；16 个协议管理 supported、14 个 deferred，支持状态未变。
 - A、B 业务均 Debian 13 amd64/bridge/IPv4、透明关闭；A 正式 `.4`/`51d5f658`，DNS 未改。
 - B 正式 `.7`/`2f17e6ac` 控制入口已从原 `.4` 归档恢复业务；未升级归档或五镜像。
 - B 固定 Xray/WS 443 恢复通过；三业务 healthy、两个 timer active/enabled。
@@ -15,6 +15,9 @@
 
 ## 最近完成
 
+- 合同 `interactive-menu` 说明已对齐正式 `.7` 发布及 B 固定新机恢复/重启证据；
+  仅此 reason 改变，Docker `docker-phase3-edit -Jobs 2` exit 0/56.492 秒。
+  证据 `.tmp-feature-reason-sync-20261116/`；本机提交，待实际应用变更时一并发布。
 - `.7` run `43747237740` 30 success/1 skipped，资产验签/源码及五镜像双架构绑定通过；
   沿用 `.5` 镜像。证据 `.tmp-release-3437-20261116/`。
 - 11-16，B apply exit 0；规格/分享、19 条账目、TLS/续期/Geo/9 份 ACME 及权限保持，
@@ -24,8 +27,6 @@
   原三容器自然 healthy、两 timer 恢复，材料/权限/镜像保持；隔离及公网 WS 正反例通过。
   19 账号身份/额度/累计保持，最终 191447283 字节；A 稳定、清场及独核通过。
   证据 `.tmp-native-dr-reboot-3437-20261116/README.md`。
-- 11-16，B IPv6 ipify 严格 TLS/200/出口 B 通过，Cloudflare errno 113/整轮 exit 1；
-  B→A 443 正/25443 拒绝/443 正通过，不补历史窗口；见 `.tmp-native-wg-public-20261116/`。
 - A/B 同登记自然续期阈值已核为北京时间 2026-12-17 08:03:22，非 timer 执行时间；
   均未到期，未强制换证。只读证据 `.tmp-native-closure-audit-20261116/`。
 
