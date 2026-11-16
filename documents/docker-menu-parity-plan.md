@@ -10913,6 +10913,14 @@ B 实际具备 `2401:1fe0:2::79c/79d/79e` 和 IPv6 默认路由；原生 socket 
 这仅证明 B 到固定目标的 IPv6 出口，不能继续笼统写 B 无 IPv6，也不计完整双栈、
 Docker IPv6、公网入站或当前应用的 IPv6 验收。A 仍无全球 IPv6 地址。
 
+随后本机原生 IPv6 socket 指定 B IPv6、默认严格 TLS 得 200，但本地端点为 `::1`；
+同一唯一请求 nonce 在 A 的 Nginx 日志命中一次、来源为 IPv4，在 B 没有命中。
+两端实际 443 均仅映射 `0.0.0.0`，业务 bridge 的 `EnableIPv6=false`。
+这次请求实际到达 A，不计 B 公网 IPv6 通过，也不等同 B 公网 IPv6 拒绝测试。
+两端原 boot、三容器 ID/StartedAt 和 healthy/重启计数保持；未修改配置或重复重启。
+输入绑定与 nonce 对照见 `.tmp-native-ipv6-public-20261116/README.md`。
+后续须取得可由服务端见证的独立 IPv6 客户端路径及受管 IPv6 入口，才执行业务正反例。
+
 同一 B 宿主绕过代理、直连 A 数字 IPv4，按 `443 → 25443 → 443` 得严格 TLS/200、
 TCP ECONNREFUSED、严格 TLS/200，关闭“当前临时迁移端口未清退”的疑问。
 10-27 迁移窗口缺少的是当时旧 `443` 的公网 TCP 拒绝；彼时已回迁正式 `443`，
