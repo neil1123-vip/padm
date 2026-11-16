@@ -11260,6 +11260,43 @@ cache_hit=false 通过；结果
 `.tmp-regression-docker-b159cd93b25b49e7b5821d1381f4b836/`，
 工具镜像 `sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`。
 
+### 6A.43 正式来源见证拒绝分支诊断
+
+2026-11-17，从 6A.41 首次来源检查失败后正常关机的两份磁盘各建 child，
+保持正式 `.7`、Debian 13 amd64 完整独立内核/systemd/Engine、22 份源码和
+10 份镜像绑定；继承原关联改址撤权现场，不使用 6A.42 的版本 5 恢复现场。
+不重跑迁移、不连接 A/B，不扩大正式 30 秒安全窗口。
+
+首次准备因 helper AST 误执行动态赋值而 NameError，尚未启动 guest，驱动 exit 1。
+第二次误要求停用 timer 的 UnitFileState 为 disabled，实际为 inactive/空值，
+在来源检查前断言失败、驱动 exit 1；两 guest 正常关机 `6.787` 秒。
+修正验收准备后，正式 `sync-schedule status` 确认 `enabled=false`，unit 和私密登记
+均缺失；第三次只执行一次正式来源检查并捕获 Bash xtrace。
+
+本轮 helper 已返回 `verified`，第二次 `dockerControlSourceSnapshot` 与初次相等，
+随后执行 `((SECONDS - started < 30))` 立即 `return 15`。后续墙钟、登记及
+最终回执检查未执行，EXIT 清理进入和退出均为 15，不是清理制造的失败。
+未出现 `source-verified`；挑战、临时目录和部署锁清场，规格、普通文件、
+服务、WG 身份及限额保持，历史累计不降。
+
+请求的自定义 PS4 未被子 Bash 继承，实际为默认 xtrace，没有逐行时间戳或
+PID/函数元数据；最小非私密实验也复现该格式限制。因此只定位本轮的相对时限
+拒绝分支，不声称快照精确耗时、原 6A.41 同因或 fresh 来源见证通过。
+原始跟踪 `3638960` 字节，仅留专用私密卷，SHA256 为
+`794d7bd68a7421f8293e399403274328cdbd75b7ac071668e1bde0d6c934fc95`。
+
+第三次诊断驱动 exit 0 仅表示诊断完成，正式 source-check 仍为 rc 15；
+耗时 `148.976` 秒，正常关机 `6.818` 秒，两次已启动双机均 QEMU exit 0、无强停。
+两次父盘初始/最终摘要保持，三个驱动终态 `1/1/0`、最终无活动 guest。
+断网独验绑定 `1384` 份原件，其中复核前轮 `1222` 份。公开摘要见
+`.tmp-native-control-vms-20261116/source-diagnostic-verification.json`、
+`source-default-trace-summary.json` 及 `source-diagnostic-driver-states.json`；
+规格、邀请、密钥、磁盘及原 trace 未导出。
+
+只关闭本轮拒绝分支诊断，不关闭来源见证、控制面防护或旧失败根因。
+未改运行源码、合同或支持状态；仅文档更新，未重复回归、重启生产、推送或发布。
+公网、多 Peer、arm64/IPv6、角色/WG 新机灾备及长稳仍缺。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

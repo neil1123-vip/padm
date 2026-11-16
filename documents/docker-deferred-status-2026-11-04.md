@@ -30,7 +30,7 @@
 | G | [原生记录](docker-native-acceptance-2026-10-18.md)：正式安装/首配、升级回滚、重启、卸载/purge 后同机 v3 空目标恢复，3.42.3 账号及业务备份/分享恢复整轮。账号/业务原件 `.tmp-native-account-close-20261027/`、`.tmp-native-business-close-20261027/`；不代表新主机或全组合。 |
 | F | [实施计划 3D.27](docker-menu-parity-plan.md#3d27-新增管理能力真实验收与-deferred-对账)：正式 `3.43.4` 可信发布、来源及五镜像绑定；Debian 13 amd64/bridge/IPv4 的 `.2 → .4` 升级和固定 WS 公网正负例；固定 amd64/IPv4/Reality/gRPC/chrome/pgxn.org 的 ML-DSA 正式 CLI 公网四阶段及重建；同 IP、同证书别名独立 SNI 仅隔离整链。11-08 次日只读复核通过，不替代宿主重启、实际回滚或长稳。原件 `.tmp-release-3434-20261107/`、`.tmp-vps-upgrade-3434-20261107/`、`.tmp-mldsa-public-3434-20261107/`、`.tmp-mldsa-sni-3434-20261107/`、`.tmp-vps-post-upgrade-3434-20261108/`。 |
 | B | [实施计划 6A.29–6A.32](docker-menu-parity-plan.md)：正式 `3.43.7` 可信发布；独立 B Debian 13 amd64/bridge/IPv4 的原 `.4` 归档预览与自动清场、外部续期隔离、正式恢复、公网 Xray WS 443 正反例及单次整机重启通过。控制入口为 `.7`，业务与五镜像保持原 `.4`；公网经 A 临时 SSH TCP 转发，不计 Windows 直连或原生 URI 导入。原件 `.tmp-release-3437-20261116/`、`.tmp-native-dr-preview-3437-20261116/`、`.tmp-native-dr-acme-isolation-20261116/`、`.tmp-native-dr-apply-3437-20261116/`、`.tmp-native-dr-reboot-3437-20261116/`。 |
-| W | [实施计划 6A.35–6A.42](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败，不计 fresh 来源见证或防护通过。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。只关闭上述固定子项，不等同信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启或角色/WG 灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
+| W | [实施计划 6A.35–6A.43](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败，不计 fresh 来源见证或防护通过。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。6A.43 只定位新跟踪轮在相等快照后的 30 秒相对时限检查拒绝，不证明原失败同因，见证仍未通过。只关闭上述固定子项，不等同信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启或角色/WG 灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
 
 ## 14 项对账
 
@@ -127,3 +127,13 @@ TLS/完整正文计量通过，本轮未重测自主传播。断网独验共绑�
 其中复核前轮 1222 份，故障归档 29 项；三次正常关机，无活动 guest。
 未连接或修改 A/B；只关闭上述固定故障子项，不外推信号/断电、其它故障、
 fresh 来源见证、新机灾备、公网多机、其它架构或长稳，16 supported/14 deferred 不变。
+
+6A.43 从 6A.41 原失败后正常关机磁盘新建 child，保持正式 `.7`，不重跑迁移。
+两次准备失败分别为 guest 启动前的 NameError、来源检查前的 timer 状态误断言，
+原 exit 1/1 保持；最后仅执行一次正式来源检查，rc 15，不产生 source-verified。
+helper 回执 verified、第二次快照相等，随后 30 秒相对时限检查立即拒绝；
+EXIT 清理进入和退出均为 15，后续墙钟/登记检查未执行。默认 xtrace 缺逐行计时，
+只证明本轮分支，不认定原 6A.41 同因，也不计 fresh 见证或防护通过。
+断网独验绑定 1384 份原件，其中复核前轮 1222 份；两次启动双机均正常关机、
+父盘摘要保持，最终无活动 guest，敏感 trace 仅留私密卷。
+未连接/修改 A/B、改变源码/合同/支持状态、重复回归、重启生产、推送或发布。
