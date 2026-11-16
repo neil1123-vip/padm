@@ -11213,6 +11213,53 @@ invocation、journal、单调时序、摘要与实际核心用户；没有手动
 `.tmp-regression-docker-66a13c2889014244b1e6cdc8af1042b4/`。
 未采目录权限，未跑 daily/full、推送或发布。
 
+### 6A.42 正式单 Peer 主控关联改址真实故障恢复
+
+2026-11-16，接续 6A.41 已正常关机磁盘，各建新 child，保持正式 `.7`、
+Debian 13 amd64 独立完整内核/systemd/Engine、22 份源码和 10 份镜像绑定。
+停用被控同步后，独立宿主进程只以 `IP_FREEBIND` 占用候选
+`10.231.93.1:39778`，旧 `.92.1` 不冲突；未替换正式源码、镜像或 Compose 返回码。
+正式 `wireguard migrate --address 10.231.93.1 --peer-address 10.231.92.2 --yes`
+真实安装候选规格/私密配置并切换内核 WG 地址；同一候选 control 容器的
+start/die `78`、正式镜像 inspect 和日志 `[Errno 98] Address in use` 绑定。
+候选实际 `/32`、端口、私钥摘要、公钥和 endpoint 同时复核，不以预检拒绝代替回滚。
+
+CLI `rc 14` 进入正式恢复，原 `.92.1/.2` 地址、密钥、监听端口、持久配置、
+控制身份、版本 `5`、账号及 TLS 保持；主控规格/发布状态仅撤权
+`enabled=false/expires_at=1`，普通文件内容及权限按精确白名单核对。
+同一故障进程/boot 继续占用 `.93.1:39778`，直至旧地址 healthy、正式 migrate
+no-op 返回 0 后才释放，排除手工解除故障后才恢复。
+
+首轮因验收日志误要求 `Address already in use` 而停止，实际正式日志为
+`Address in use`，驱动 exit 1 保留；两 guest 正常关机 `6.988` 秒。
+新 child 接续真实旧 token `401` 后，旧邀请正式 sync 返回授权失配 `rc 11`，
+验收误沿用前轮地址身份不匹配 `rc 10`，再次 exit 1，正常关机 `6.362` 秒。
+两次只修验收接续，不改正式代码、不重跑迁移、不将失败整轮改判成功。
+最终从最近正常关机磁盘各建 child，核最近父盘继承及新 boot，接续旧 token
+拒绝、双向加密、新邀请私密转交、同版无变化同步和原 loaded unit/五分钟日历恢复。
+原邀请 `rc 11` 拒绝使用上一 boot 原件，不重复该命令；本轮不重测自主传播。
+
+四组独立严格 TLS 的完整正文依次为 `262144/0/253952/262144` 字节，
+包括错误 UUID 原点零到达、受管与本机账号正控；客户端、nonce、payload 和
+凭据摘要独验。受管 upload/download `575/1294916 → 690/1548984`，
+下载差 `254068` 覆盖接续受管正文 `253952`；逐 ID 累计不降、限额保持。
+最终接续 `324.312` 秒，正常关机 `5.537` 秒，QEMU/驱动 exit 0；
+三次均无强停，最终无活动 guest。两次接续父盘初始摘要先落盘且始末保持；
+首轮未落盘原父盘初始摘要，不宣称该段始末摘要保持。
+
+断网独验共绑定 `1634` 份原件，其中复核前轮 `1222` 份；另核故障归档 `29` 项。
+三段驱动 exit `1/1/0` 分别保留。公开结果为
+`.tmp-native-control-vms-20261116/rollback-result.json`、`rollback-verification.json`
+及 `rollback-driver-states.json`；规格、邀请、私钥、磁盘和原始故障归档仅留私密卷。
+仅关闭固定本地正式单 Peer 主控关联改址的真实 bind 失败恢复及接续业务子项；
+信号/断电恢复、其它故障、fresh 来源见证、新机灾备、多 Peer、公网、arm64/IPv6
+和长稳不外推。未采目录权限，未连接或修改 A/B，未跑 daily/full、推送或发布。
+完整 JSON 比较确认合同只更新三个 reason，支持状态与约束均不变。
+Linux amd64 `docker-phase3-edit -Jobs 2` 以 `56363 ms`、exit 0、
+cache_hit=false 通过；结果
+`.tmp-regression-docker-b159cd93b25b49e7b5821d1381f4b836/`，
+工具镜像 `sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
