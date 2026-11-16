@@ -57,6 +57,14 @@ WG/多 Peer 新机恢复及长稳仍待验，16 supported/14 deferred 不变。
 仅关闭固定 amd64/IPv4/单 Peer 子项，公网多机、多 Peer、arm64/IPv6、其它核心、
 信号/断电、控制面防护及长稳仍待验，16 supported/14 deferred 不变。
 
+同日 6A.47 单次正式控制防护 enable 返回 rc 14，当前 nonce 完整 Peer CLI rc 0，
+无 source-verified；原启用失败保持。随后从失败盘新 child 断网审计恢复通过：
+规格/文件/WG/额度保持、累计不降、规则与临时材料清场，严格 TLS 业务及计量通过。
+唯一原 nonce 回执在原窗口内，具体拒绝分支未证，不沿用旧失败归因。
+首轮审计遇锁断言失败保留；只改有界只读清场观察，未重复 enable 或放宽 30 秒门禁。
+断网独验绑定 1994 份原件，恢复审计通过，防护与具体拒绝分支均未证；
+16 supported/14 deferred 不变，未连接或重启 A/B。
+
 2026-10-18 已补 Debian 13 原生 amd64 的正式发布验签、WS 21 首配、
 升级/回滚、整机重启、公网客户端和 Cloudflare CDN 正反例，以及
 Let's Encrypt standalone 签发、真实续期调度和 WS/SSH 精确封禁。
@@ -866,6 +874,21 @@ SHA-256 `2af6eb5d6d37d2b5d86bd8575db58c32ad52472d57f071d46bb963331a5d2b39`。
 未连接/重启 A/B 或改运行源码/合同，未重复回归、推送或发布；
 仅补固定本地单 Peer 新机恢复，公网多机、多 Peer、arm64/IPv6、其它核心、
 信号/断电、控制面防护及长稳仍缺，16 supported/14 deferred 不变。
+6A.47 另补正式控制防护单次 enable rc 14 后的恢复审计，Peer 当前 nonce CLI rc 0，
+主控无 source-verified，恢复后唯一同 nonce 回执时间在原窗口内；具体分支与旧失败同因未证。
+首轮审计在恢复不变量通过后遇部署锁断言失败，正常关机、失败保持，未采集 owner 或归因。
+仅增加最长 110 秒只读清场观察，连续两次稳定；从原失败盘新 child 断网审计通过。
+规格/文件/源码与实际镜像、WG/额度保持，累计不降、双向收发增长；
+无控制 jail/owner/规则/挑战/临时探测残留，WS 保持，部署锁及 Peer 容器稳定清场。
+严格 TLS 错 UUID 零原点请求，managed/core 正文 303104/278528 字节及 managed 计量增量通过。
+最终审计 144.083 秒、正常关机 5.288 秒、QEMU exit 0/0，父盘摘要保持。
+断网独验 exit 0、recovery_audit_passed true，绑定 1994 份（重核旧 1691 份），
+整体 passed/control_protection_verified/failure_branch_proven 均 false。
+独验首稿误套 active/enabled timer 断言的失败保留；修为原 inactive/空 UnitFileState
+精确状态后只重跑独验。五容器均退出、无 OOM，专用卷无活动容器。
+公开摘要 `.tmp-native-control-vms-20261116/protection-verification.json`，
+SHA-256 `5a33de750c8e5b9bc811c1f072f493371379fe8939067528002ae9083e87a9cc`。
+原启用及首轮审计失败不改判；不重复 enable，防护未通过、30 秒门禁及支持状态不变。
 控制角色多 Peer 及原生宿主验收继续 deferred；被控空目标恢复见 6A.16，主控新身份恢复见 6A.19。
 
 4C.12 为无控制角色的已启用 canonical 配置提供 `wireguard peers list/add/update/remove`

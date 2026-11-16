@@ -11427,6 +11427,75 @@ SHA-256 `2af6eb5d6d37d2b5d86bd8575db58c32ad52472d57f071d46bb963331a5d2b39`；
 未修改运行源码/合同/支持状态或重复回归，16 supported/14 deferred 不变；
 未连接/重启生产 A/B，未推送或发布。恢复联网，仅事后独验断网。
 
+### 6A.47 正式控制防护启用拒绝与恢复审计
+
+2026-11-17，从 6A.45 正常关机父盘各建新 child，使用正式 `.7`、
+Debian 13 amd64、完整独立内核/systemd/Engine 双机、IPv4、单 Peer。
+保留原 30 秒来源门禁；全零 dummy nonce 完整 Peer CLI 预热 `rc 0`，
+回执不变、连续两次稳定清场后，单次执行正式
+`padm-docker fail2ban control enable 20 600 3600 --confirm PADM-DOCKER-EDIT`。
+该过程联网按固定 `.7` 下载正式资产并按 digest 拉镜像，不计断网启用。
+
+正式 enable 返回 `rc 14`，只生成一个 challenge；当前 nonce 的完整 Peer
+source-probe CLI 返回 `rc 0`，主控没有输出 `source-verified`。
+stderr 报告候选部署启动或健康检查失败、正在恢复旧配置及主控恢复完成。
+完整 enable 命令耗时 `302.077` 秒，包含下载和部署，不是 challenge 耗时。
+失败后双机正常关机 `8.901` 秒，QEMU exit `0/0`、无强停、父盘摘要保持；
+不生成成功 result，不将 Peer `rc 0` 或恢复提示当作防护通过。
+
+仅从失败后正常关机磁盘另建 child 做恢复审计，不重复 enable。
+首轮已通过规格/文件/WG/额度及安全资源比较，但随后采样见部署锁存在，
+`deployment_lock_absent` 断言失败；未进入业务验证，正常关机 `6.000` 秒，
+父盘摘要保持。未采集锁 owner，不归因 timer 或 CLI 遗留，也不认定清场完成。
+保留该轮及原启用失败，只将主控清场改为最长 `110` 秒只读观察，
+要求连续两次无部署锁、挑战和临时材料；不删锁、不停 timer。
+
+最终仍从原启用失败盘新建 child，在 network none 下完成恢复审计。
+双端正式身份、规格、静态文件摘要/权限/属主、22 份源码、实际服务镜像、
+WG 身份/密钥/地址/端口、同步调度状态和额度精确保持，历史累计不降；
+双向 WG 加密收发增长，主控 API 仍使用 host 私网监听。
+没有 Fail2ban jail、owner state、控制面 IPv4/IPv6 规则、挑战或临时探测残留，
+WS 数据及其规则保持，双端部署锁和 Peer 探测容器稳定清场。
+恢复后仅只读核对原 challenge 的唯一同 nonce `401` 回执，其时间在原窗口内；
+这不能定位正式 enable 的具体拒绝分支，不沿用 6A.43 归因。
+
+严格 TLS 错 UUID 返回非零且零原点请求；managed/core 正例完整正文分别为
+`303104/278528` 字节，正文摘要和 managed 上传/下载增量通过。
+原点仍为隔离 guest loopback 与精确 underlay 路由，不计公网。
+最终审计 `144.082500` 秒，正常关机 `5.287992` 秒，QEMU exit `0/0`、
+无强停；两轮审计及原启用的父盘摘要均保持。
+正式启用失败驱动中尚未触达的 owner KV/JSON 和新增 integration 字段断言问题
+不是本次 `rc 14` 原因；审计按正式 KV 原文读取，未修改失败原件。
+
+原件仅留私密卷 `padm-native-kernel-probe-20261116`；规格、nonce、邀请、
+私钥及磁盘不整体导出。原启用 run 为 `/work/control-protection-1794858855887982156`，
+成功恢复审计为 `/work/control-protection-recovery-1794860114560029598`。
+原启用 driver SHA-256
+`5987edf4cd5e32cc0f62b84e65b4ac27d3e7bc731cbc83e9e5263fa983ae1ff0`，
+成功审计 driver 为
+`b9d122036de68bce2cff7a3c90d65ae103addaa39e110677e2a3e4990629330b`。
+
+独验初稿误要求已停用的 Peer 同步 timer 为 active/enabled，exit 1；
+原实际与恢复后的状态均为 `ActiveState=inactive`、空 `UnitFileState`。
+保留首稿和日志，改为该精确状态并继续逐阶段与 prior/baseline 全比较后，
+只重跑断网独验，不重跑 guest。最终独验 exit 0，`verification_completed=true`、
+`recovery_audit_passed=true`；整体 `passed=false`、`control_protection_verified=false`、
+`failure_branch_proven=false`，不把成功退出误写成防护通过。
+共绑定 `1994` 份原件，其中逐项重核旧 CLI `1691` 份。
+独验器 SHA-256
+`1ab3c1a5c52476cdcece2d6c0ef43168add00ac64fa491cb26149f9112116cfc`，
+公开摘要 `.tmp-native-control-vms-20261116/protection-verification.json`，
+SHA-256 `5a33de750c8e5b9bc811c1f072f493371379fe8939067528002ae9083e87a9cc`。
+三个驱动和两个独验容器均 exited、无 OOM；专用卷无活动容器。
+终态见同目录 `protection-final-states.json`，原首轮独验错误不改判。
+该终态文件在独验结束后生成，不计入上述 1994 份；SHA-256
+`f2d9b08693e0c0746c1583369dfdc32eac836109d15d537c5697b0f0d27944e5`。
+
+本项只补正式启用失败后的固定本地恢复证据，控制面防护仍未通过，
+具体失败分支、旧失败同因及稳定性未证。未重复 enable 或放宽原 30 秒门禁；
+未连接/重启 A/B、修改运行源码/合同/支持状态或重复回归，未推送或发布。
+公网多机、多 Peer、arm64/IPv6、信号/断电和长稳仍缺，16 supported/14 deferred 不变。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

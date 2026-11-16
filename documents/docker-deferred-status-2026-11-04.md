@@ -30,7 +30,7 @@
 | G | [原生记录](docker-native-acceptance-2026-10-18.md)：正式安装/首配、升级回滚、重启、卸载/purge 后同机 v3 空目标恢复，3.42.3 账号及业务备份/分享恢复整轮。账号/业务原件 `.tmp-native-account-close-20261027/`、`.tmp-native-business-close-20261027/`；不代表新主机或全组合。 |
 | F | [实施计划 3D.27](docker-menu-parity-plan.md#3d27-新增管理能力真实验收与-deferred-对账)：正式 `3.43.4` 可信发布、来源及五镜像绑定；Debian 13 amd64/bridge/IPv4 的 `.2 → .4` 升级和固定 WS 公网正负例；固定 amd64/IPv4/Reality/gRPC/chrome/pgxn.org 的 ML-DSA 正式 CLI 公网四阶段及重建；同 IP、同证书别名独立 SNI 仅隔离整链。11-08 次日只读复核通过，不替代宿主重启、实际回滚或长稳。原件 `.tmp-release-3434-20261107/`、`.tmp-vps-upgrade-3434-20261107/`、`.tmp-mldsa-public-3434-20261107/`、`.tmp-mldsa-sni-3434-20261107/`、`.tmp-vps-post-upgrade-3434-20261108/`。 |
 | B | [实施计划 6A.29–6A.32](docker-menu-parity-plan.md)：正式 `3.43.7` 可信发布；独立 B Debian 13 amd64/bridge/IPv4 的原 `.4` 归档预览与自动清场、外部续期隔离、正式恢复、公网 Xray WS 443 正反例及单次整机重启通过。控制入口为 `.7`，业务与五镜像保持原 `.4`；公网经 A 临时 SSH TCP 转发，不计 Windows 直连或原生 URI 导入。原件 `.tmp-release-3437-20261116/`、`.tmp-native-dr-preview-3437-20261116/`、`.tmp-native-dr-acme-isolation-20261116/`、`.tmp-native-dr-apply-3437-20261116/`、`.tmp-native-dr-reboot-3437-20261116/`。 |
-| W | [实施计划 6A.35–6A.46](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。6A.43 只定位新跟踪轮在相等快照后的 30 秒相对时限检查拒绝，不证明原失败同因。6A.44 补齐预加载正式 helper 条件下的固定本地 server fresh 见证；6A.45 另补完整 Peer CLI 预热及当前 nonce 的正式 CLI/主控 rc 0 闭环，首轮准备失败保留、锁 owner 未查无归因，30 秒窗不变、防护未验。6A.46 补齐固定本地单 Peer 的全新空目标正式恢复、新控制身份/rebind、WG 身份保持、原日历自主传播及 TLS/计量；恢复联网、独验断网，3002 份原件绑定。只关闭上述固定子项，不等同信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启/灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
+| W | [实施计划 6A.35–6A.47](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。6A.43 只定位新跟踪轮在相等快照后的 30 秒相对时限检查拒绝，不证明原失败同因。6A.44 补齐预加载正式 helper 条件下的固定本地 server fresh 见证；6A.45 另补完整 Peer CLI 预热及当前 nonce 的正式 CLI/主控 rc 0 闭环，首轮准备失败保留、锁 owner 未查无归因，30 秒窗不变。6A.46 补齐固定本地单 Peer 的全新空目标正式恢复、新控制身份/rebind、WG 身份保持、原日历自主传播及 TLS/计量；恢复联网、独验断网，3002 份原件绑定。6A.47 单次正式防护启用 rc 14、未 verified，随后新 child 断网恢复审计通过；窗口内原回执不定位拒绝分支，首轮审计遇锁失败保留，不重复 enable，防护未通过。只关闭上述固定子项，不等同信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启/灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
 
 ## 14 项对账
 
@@ -40,7 +40,7 @@
 
 | deferred 项 | 已有证据 | 未决完成条件 | 明确限制与重复归属 |
 | --- | --- | --- | --- |
-| `subscription-multiserver` | P：私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步、隔离 amd64 双/三节点业务和授权隔离；6A.19/6A.23 新身份灾备。W 补齐原生固定单 Peer 隧道，以及正式 `.7` 本地独立完整内核双机的账号自主增删、启用态真实重启、固定地址密钥/端口迁移、关联改址撤权、新邀请恢复、原日历自主同步、业务和累计；6A.42 另补主控改址真实 bind 失败恢复、仅撤权及新邀请同版同步；6A.44 的预加载 helper 与 6A.45 的完整 Peer CLI 预热条件分别补齐固定本地 server fresh 见证。6A.46 补齐固定本地 amd64/IPv4/单 Peer 角色/WG 新机恢复、新控制身份/rebind 及自主同步、TLS/计量。 | 公网多机控制同步、arm64/IPv6、多 Peer 新主机灾备及适用重启证据；恢复联网，不计断网恢复。防护未验，6A.41/6A.43 失败保留且原失败同因未证，6A.45 首轮准备锁无 owner 归因，不外推信号/断电及其它故障或长稳。 | v2 关联地址/密钥迁移、控制面 Fail2ban 拒绝，不新增开发。控制 API 无公网映射；公网业务验证不等于公开 API。灾备归 `interactive-menu`，宿主隧道归 `wireguard`。 |
+| `subscription-multiserver` | P：私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步、隔离 amd64 双/三节点业务和授权隔离；6A.19/6A.23 新身份灾备。W 补齐原生固定单 Peer 隧道，以及正式 `.7` 本地独立完整内核双机的账号自主增删、启用态真实重启、固定地址密钥/端口迁移、关联改址撤权、新邀请恢复、原日历自主同步、业务和累计；6A.42 另补主控改址真实 bind 失败恢复、仅撤权及新邀请同版同步；6A.44 的预加载 helper 与 6A.45 的完整 Peer CLI 预热条件分别补齐固定本地 server fresh 见证。6A.46 补齐固定本地 amd64/IPv4/单 Peer 角色/WG 新机恢复、新控制身份/rebind 及自主同步、TLS/计量；6A.47 补齐正式防护启用失败后的固定本地恢复审计。 | 公网多机控制同步、arm64/IPv6、多 Peer 新主机灾备及适用重启证据；恢复联网，不计断网恢复。6A.47 正式防护 enable rc 14，恢复审计通过但防护未通过；窗口内回执不定位拒绝分支。6A.41/6A.43 失败保持且原失败同因未证，准备/审计遇锁未查 owner，不外推信号/断电及其它故障或长稳。 | v2 关联地址/密钥迁移、控制面 Fail2ban 拒绝，不新增开发。控制 API 无公网映射；公网业务验证不等于公开 API。灾备归 `interactive-menu`，宿主隧道归 `wireguard`。 |
 | `acme-webroot` | P+A：稳定只读根与独占写入、归属/树校验、不停 Nginx；正式公网签发/在线换证及 3.41.4 新证书消费失败完整回滚。 | 真实登记自然到期续期；原生 arm64/公网 IPv6、当前版本尚未覆盖的适用生命周期。 | 自然续期与下一行共用一项门槛，约 2026-12-17 的窗口须以实际登记为准。no-op、强制到期、fresh 申请均不能替代自然到期。 |
 | `acme-standalone` | P+A：HTTP-01/TLS-ALPN-01 及原拥有者暂停/恢复；正式签发、standalone/ALPN 消费失败回滚、ALPN 在线往返和单次 fresh 完整链。 | 同一 ACME 自然续期门槛；原生 arm64/公网 IPv6、当前其它适用生命周期。 | 仅暂停本部署原运行拥有者；站点 Fail2ban 的自监听停启仍拒绝。其它 CA/provider 不借本次证据扩大范围。 |
 | `site-static-redirect-alpn` | P+S：模板/local/ALPN 事务及隔离双栈；固定正式 3.41.5 公网 13 阶段，包括特殊站名、302、订阅与完整恢复。 | 原生 arm64/公网 IPv6、其它既定适用组合和当前版本生命周期。 | Hy2 local 固定受管只读目录且无混淆，纯 Hy2 只开放 static。ACME 另行归属，不把公网站点/ALPN 重新列为完全未验。 |
@@ -186,3 +186,28 @@ SHA-256 `2af6eb5d6d37d2b5d86bd8575db58c32ad52472d57f071d46bb963331a5d2b39`。
 未连接/重启 A/B，未改运行源码/合同、重复回归、推送或发布；
 公网多机、多 Peer、arm64/IPv6、其它核心、信号/断电、控制面防护及长稳仍缺，
 原 30 秒窗口及 16 supported/14 deferred 不变，旧失败不改判。
+
+6A.47 单次正式控制防护 enable 返回 rc 14，唯一 challenge 的完整 Peer
+source-probe CLI rc 0，主控无 source-verified，原失败保持；完整命令
+302.077 秒含正式下载/部署，不作为 challenge 耗时。
+随后只从失败后正常关机盘另建 child 审计恢复，不重复 enable。
+首轮恢复不变量通过后遇部署锁断言失败，未进入业务；正常关机 6.000 秒，
+未采集 owner，不归因 timer/CLI 遗留。仅改为最长 110 秒只读清场观察，
+连续两次无部署锁/挑战/临时材料后继续，不删锁或停 timer。
+最终 network none 审计通过：规格/文件/源码与实际镜像、WG 身份/地址/端口、
+调度和额度保持，累计不降、双向加密收发增长；无 jail/owner/控制规则残留，
+WS 资源保持，挑战、临时材料、锁及 Peer 探测容器稳定清场。
+严格 TLS 错 UUID 零原点请求；managed/core 正文 303104/278528 字节及
+managed 计量增量通过。原唯一同 nonce 回执时间在原窗口内，不能定位具体拒绝分支，
+也不证明旧失败同因。最终审计 144.083 秒、正常关机 5.288 秒，
+QEMU exit 0/0、父盘摘要保持；原启用正常关机 8.901 秒，全部原失败保持。
+独验首稿误要求已停用的 Peer timer active/enabled，exit 1 保留；改为原
+inactive/空 UnitFileState 精确状态后，只重跑断网独验，最终 exit 0。
+绑定 1994 份原件（重核旧 1691 份），recovery_audit_passed true，
+整体 passed/control_protection_verified/failure_branch_proven 均 false。
+五容器均退出、无 OOM，专用卷无活动容器；公开摘要
+`.tmp-native-control-vms-20261116/protection-verification.json`，
+SHA-256 `5a33de750c8e5b9bc811c1f072f493371379fe8939067528002ae9083e87a9cc`。
+只补固定本地 amd64/IPv4/单 Peer 的失败恢复，不计控制防护通过；
+未改运行源码/合同/支持状态、重复回归、推送或发布，未连接/重启 A/B，
+原 30 秒门禁及 16 supported/14 deferred 不变。
