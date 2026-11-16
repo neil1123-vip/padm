@@ -11049,6 +11049,41 @@ TLS/ACME 和正式业务；不在它们上面执行至少 13 次业务重建。r
 原生同步证据，须真实覆盖账号增删、systemd 自主传播和业务传输后才计验收。
 本轮未操作 VPS、重启、发布或跑 full，支持状态保持。
 
+### 6A.38 独立完整内核双机的正式自主同步验收
+
+2026-11-16，按 6A.37 的前提取得两台可销毁 Debian 13 amd64 QEMU TCG guest，
+各自具有完整 `6.12.116+deb13-cloud-amd64` 内核、systemd、machine/boot ID
+及独立 Docker Engine；不是共用外层 WSL2 内核的双 daemon。两端通过隔离 socket
+网卡互联，SSH 只映射外层容器回环。官方 cloud 镜像固定 `20261111-2659`，
+SHA512 与官方 HTTPS 元数据相符，未独立核验 Debian 签名。
+
+两端真实 Cosign 验签正式 `3.43.7` / `2f17e6ac`，使用正式安装器安装、固定
+manifest 五镜像、TLS 安装及 configure；实际 Engine `29.9.3` / Compose `5.7.1`，
+该包版本不是 manifest 固定项。正式 WG prepare/peer/start 后双向 ping 通过，
+control init/invite/join 及原定五分钟 systemd 同步启用。API 只监听 WG 私网，
+无 Docker 公网端口映射。正式账号新增、删除的源版本 `0 → 1 → 2` 自主传播通过，
+未手动触发同步或修改 timer；逐次核对同 boot 的 trigger/start/exit/observe 单调
+时序、唯一 invocation journal、`ExecMainStatus=0`、原 unit、摘要和实际核心用户。
+
+四个独立客户端严格 TLS 检查通过：错误 UUID 拒绝、新增账号完整 `270336` 字节、
+删除后旧 UUID 拒绝、本机账号完整 `303104` 字节。新增账号采集前 download 为 0，
+采集后 upload/download 为 `230/270452`；各阶段逐 ID 累计不降，删除保留历史账目。
+初轮时间格式、接续 journal 参数及私网原点被 freedom finalrule 阻断的三次失败保留。
+沿用首次真实新增传播原件，未以随后 no-op 替代；最终流量原点改为 guest0 回环
+别名 `93.184.216.34/32`，guest1 仅经隔离网卡精确路由。两端原点准备前后正式
+核心配置摘要一致，未放宽 finalrule；该别名不是公网业务验收。
+
+成功接续 `450.357` 秒；断网独验绑定 351 份证据、全部 4 次传播尝试、22 份安装
+源码及 10 份镜像绑定。两 guest 内核正常 Power down、QEMU 和驱动退出均 0，
+关机 `10.505` 秒，低于驱动 90 秒强停分支；专用私密卷保留原件且无活动 guest。
+证据 `.tmp-native-control-vms-20261116/README.md`、`verification.json`。
+功能合同仅更新 `subscription-multiserver.reason`，完整 JSON 比对确认其余字段不变；
+`docker-phase3-edit -Jobs 2` 在 Linux amd64 以 `58430 ms`、exit 0、无缓存通过，
+结果 `.tmp-regression-docker-2a7599847906489d94685fade4675d83/`。
+本轮未连接 A/B、改生产状态、跑 daily/full、推送或发布。仅关闭固定正式版本的
+本地完整内核双机单 Peer 自主增删及业务子项；公网多机、arm64/IPv6、迁移、多 Peer、
+角色/WG 灾备、启用态重启及长稳仍未验，16 supported/14 deferred 不变。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
