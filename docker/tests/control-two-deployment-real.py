@@ -1254,7 +1254,7 @@ else:
     return rotated
 
 
-def private_logs(nodes, invitations, keys):
+def private_logs(nodes, invitations, keys, *, wireguard=True):
     secrets = [json.loads(path.read_text())["token"] for path in invitations] + keys
     for member in nodes:
         specs = [json.loads((member["path"] / "spec.json").read_text()), state(member)]
@@ -1271,7 +1271,7 @@ def private_logs(nodes, invitations, keys):
     for node in nodes:
         logs = b"".join((node["path"] / name).read_bytes()
                         for name in ("cli.log", "seed.log", "seed-private.log", "cron.log"))
-        for item in services(node).values():
+        for item in services(node, wireguard=wireguard).values():
             logs += command(node["docker"] + ["logs", item["id"]])
         assert all(secret.encode() not in logs for secret in secrets), "真实 CLI 日志泄露秘密"
         assert all(json.loads(path.read_text())["token"].encode() not in
@@ -2435,6 +2435,113 @@ dockerInstallCli
         "--confirm", "PADM-DOCKER-RESTORE-CONTROLLER-ISOLATED")
 
 
+def standalone_recovery_checkpoint(node, image):
+    before = state(node)
+    assert not before.get("control") and not before.get("control_sync")
+    assert not before["host_integrations"]
+    cli(node, "traffic", "limit", before["accounts"][0]["id"], "1")
+    traffic(node, image)
+    archive = node["path"] / "private/standalone-recovery.tar"
+    cli(node, "backup", "export", str(archive))
+    cli(node, "backup", "verify", str(archive))
+    node["standalone_recovery"] = {
+        "archive": archive, "spec": before,
+        "traffic": json.loads((node["path"] / "deployment/data/traffic/state.json").read_text()),
+    }
+
+
+def control_standalone_recovery_real(nodes, invitation, image, release):
+    controlled = nodes[1]
+    cli(controlled, "control", "sync-schedule", "enable", "--invite", str(invitation), "--yes")
+    assert b"auto-sync" in command(controlled["enter"] + ["crontab", "-l"])
+    for node in reversed(nodes):
+        root = node["path"] / "deployment"
+        checkpoint = node["standalone_recovery"]
+        original = checkpoint["spec"]
+        ledger = root / "data/traffic/state.json"
+        cli(node, "traffic", "limit", original["accounts"][0]["id"], "2")
+        # down/backup 的采集失败不会阻断；先独立确认在线采集成功，再停服保存账目。
+        cli(node, "traffic", "collect")
+        collected = json.loads(ledger.read_text())["accounts"]
+        cli(node, "down")
+        assert not command(node["docker"] + ["ps", "-aq", "--filter",
+                                            "label=com.docker.compose.project=padm-docker"]).strip()
+        business = node["path"] / "private/standalone-latest-business.json"
+        cli(node, "business", "backup", str(business))
+        latest = json.loads(business.read_text())
+        assert latest["accounts"] == state(node)["accounts"]
+        assert latest["traffic"] == json.loads(ledger.read_text())
+        for account in original["accounts"]:
+            current_account = next(value for value in latest["accounts"] if value["id"] == account["id"])
+            assert all(current_account[key] == account[key] for key in
+                       ("uuid", "password", "shadowsocks_password", "listeners"))
+            previous = checkpoint["traffic"]["accounts"][account["id"]]
+            latest_account = latest["traffic"]["accounts"][account["id"]]
+            assert latest_account["download"] > previous["download"]
+            assert latest_account["limit_bytes"] == 2 * previous["limit_bytes"] > 0
+        for key, value in collected.items():
+            actual = latest["traffic"]["accounts"][key]
+            assert all(actual[field] >= value[field] for field in ("upload", "download"))
+            assert actual["limit_bytes"] == value["limit_bytes"]
+        cli(node, "uninstall", "--purge", "--confirm", "PADM-DOCKER-PURGE")
+        assert not root.exists() and not (node["path"] / "bin/padm-docker").exists()
+        assert "wg-padm" not in {link["ifname"] for link in
+                                 json.loads(command(node["enter"] + ["ip", "-j", "link"]))}
+        command(node["enter"] + ["bash", "-ec", r'''
+set -Eeuo pipefail
+source "$1"
+dockerAcquireDeploymentLock
+trap 'dockerReleaseDeploymentLock' EXIT
+dockerInitializeStateRoot
+dockerInstallBundle "$2"
+dockerInstallCli
+''', "--", str(ROOT / "install-docker.sh"), str(ROOT)], env=node["env"], timeout=60)
+        corrupt = node["path"] / "private/standalone-corrupt.tar"
+        corrupt.write_bytes(checkpoint["archive"].read_bytes()[:128])
+        corrupt.chmod(0o600)
+        cli(node, "restore", "apply", str(corrupt), *release,
+            "--confirm", "PADM-DOCKER-RESTORE", accepted=False)
+        assert all(not list((root / name).iterdir()) for name in
+                   ("config", "data", "secrets", "logs", "backups"))
+        assert not (root / ".restore-pending").exists()
+        cli(node, "restore", "apply", str(checkpoint["archive"]), *release,
+            "--confirm", "PADM-DOCKER-RESTORE")
+        assert state(node) == original
+        restored = json.loads(ledger.read_text())["accounts"]
+        assert restored == {key: dict(value, baseline={})
+                            for key, value in checkpoint["traffic"]["accounts"].items()}
+        previous_services = services(node, wireguard=False)
+        previous_ledger = ledger.read_bytes()
+        invalid = node["path"] / "private/standalone-invalid-business.json"
+        save(invalid, {})
+        cli(node, "business", "restore", str(invalid), "--strategy", "merge", "--yes", accepted=False)
+        assert state(node) == original and services(node, wireguard=False) == previous_services
+        assert ledger.read_bytes() == previous_ledger
+        cli(node, "business", "preview", str(business), "--strategy", "merge")
+        assert state(node) == original and services(node, wireguard=False) == previous_services
+        assert ledger.read_bytes() == previous_ledger
+        cli(node, "business", "restore", str(business), "--strategy", "merge", "--yes")
+        expected = dict(original, accounts=latest["accounts"], subscription=latest["subscription"])
+        assert state(node) == expected, "恢复无角色部署后合并业务改变了非业务规格"
+        actual = json.loads(ledger.read_text())["accounts"]
+        assert set(actual) == set(restored) | set(latest["traffic"]["accounts"])
+        for key, value in latest["traffic"]["accounts"].items():
+            assert all(actual[key][field] >= value[field] for field in ("upload", "download"))
+            assert actual[key]["limit_bytes"] == value["limit_bytes"], "原额度发生变化"
+        for relative in ("config/control", "data/control-source", "data/control-log",
+                         "secrets/control-sync", "logs/control", "secrets/net/wireguard"):
+            assert not list((root / relative).rglob("*")), f"控制角色残留：{relative}"
+        cron = command(node["enter"] + ["crontab", "-l"])
+        assert b"auto-sync" not in cron and b"auto-log-rotate" not in cron
+        assert set(services(node, wireguard=False)) == {"xray", "nginx"}
+        for account in latest["accounts"]:
+            traffic(node, image, account_id=account["id"])
+        assert not (root / ".restore-pending").exists() and not (root / "locks/deployment.lock").exists()
+        print(f"docker-control-standalone-recovery:{node['path'].name}:"
+              f"accounts={len(latest['accounts'])}:ledger={len(actual)}:"
+              "purge-restore-merge-traffic-schedule-ok", flush=True)
+
+
 def controller_peers_recovery_real(nodes, image, release):
     controller = nodes[0]
     addresses, public, keys = wireguard_peers_prepare_real(nodes)
@@ -3003,6 +3110,9 @@ def main():
             if options.wireguard_recovery_only or options.controller_recovery_only:
                 release = wireguard_recovery_release(nodes, images)
                 proofs[0]["release_trust"] = "fixture"
+                if options.controller_recovery_only:
+                    for node in nodes:
+                        standalone_recovery_checkpoint(node, images["sing-box"])
             if (options.wireguard_control_only or options.wireguard_address_only
                     or options.wireguard_recovery_only or options.controller_recovery_only):
                 keys, _ = wireguard_prepare_real(nodes)
@@ -3032,8 +3142,9 @@ def main():
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
             if options.controller_recovery_only:
                 rotated = controller_recovery_real(nodes, controlled_invite, images["sing-box"], release)
-                private_logs(nodes, (invite, rotated), keys)
-                proofs[0]["scope"] = "real-compose-controller-isolated-empty-target-recovery"
+                control_standalone_recovery_real(nodes, rotated, images["sing-box"], release)
+                private_logs(nodes, (invite, rotated), keys, wireguard=False)
+                proofs[0]["scope"] = "real-compose-controller-isolated-recovery-and-standalone-return"
                 return proofs
             if options.wireguard_recovery_only:
                 rotated = wireguard_recovery_real(nodes, 1, images["sing-box"], release)
