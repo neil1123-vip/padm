@@ -11332,6 +11332,43 @@ READY 早于主控检查启动；先传错 nonce，正式 helper 完成 `401` �
 不计控制面防护通过。公网多机、多 Peer、arm64/IPv6、角色/WG 新机灾备及长稳
 仍缺。未连接/重启 A/B，未改运行源码、合同或支持状态，未重复回归、推送或发布。
 
+### 6A.45 预热完整 Peer CLI 的本地来源见证
+
+2026-11-17，继续从 6A.41 首次失败后正常关机的原父盘各建新 child，
+保持正式 `.7`、Debian 13 amd64、完整独立内核/systemd/Engine 双机和单 Peer。
+22 份运行源码、此前 10 份镜像及发布 bundle/manifest 绑定保持，
+未改主控检查、快照、回执或原 30 秒窗口。
+
+首次准备轮完整 dummy nonce `source-probe` CLI `rc 0`，预热前后回执 inode、
+字节数、摘要、mode、uid/gid 及场景完全相等；随后 Peer 临时目录与探测容器为空，
+但部署锁仍在，准备断言失败、driver exit 1。该轮没有执行主控 source-check，
+没有当前 nonce probe 或 result；未采集锁 owner，不能归因流量 timer 或认定
+探测 CLI 遗留锁。原失败原件保留，双机正常关机 `7.510` 秒、父盘摘要保持。
+
+只将清场观察改为有界只读轮询：最长 `110` 秒，记录锁 owner 元数据，
+要求连续两次临时目录、探测容器和部署锁均为空；不删锁、不关闭 timer。
+随后唯一新轮再次从原父盘新建 child，先以全零 dummy nonce 完整执行正式
+`padm-docker control source-probe`，`rc 0`，回执及场景仍完全不变；
+稳定清场完成后才启动原正式主控 `control source-check`。
+观察唯一新 challenge 后，Peer 使用当前 nonce 完整执行正式 `source-probe`
+CLI `rc 0`，完成早于主控终态；主控 `rc 0`，唯一精确 `source-verified`
+与唯一同 nonce 的 `401` 来源回执匹配。最终挑战、临时目录及锁清场，
+Peer 探测容器为空且连续两次稳定；未留常驻探测进程。
+
+前后规格、文件、服务、WG 身份/端口、限额保持，累计不降，双端 WG 收发增长。
+新轮驱动 `149.230` 秒，正常关机 `5.131` 秒，QEMU exit `0/0`、无强停，
+父盘实际摘要保持。断网独验 exit 0、passed true，绑定 `1691` 份原件，
+其中逐项重核 6A.44 的 `1490` 份，并保留首次准备失败。
+公开摘要 `.tmp-native-control-vms-20261116/source-cli-warm-verification.json`，
+SHA-256 `28efbaf27a01acc88bc73d76bc28bbfeb60b52ada035474232e58b2db959b628`；
+规格、nonce、邀请、密钥及磁盘仅留私密卷。
+
+本项补齐固定本地单 Peer、完整 CLI 预热条件下的 server fresh 来源见证，
+不把 6A.44 的 helper 预加载结果改写成完整 CLI 结果；旧 6A.41/6A.43
+失败保留，原失败同因及稳定可靠性未证，不计控制面防护通过。
+公网多机、多 Peer、arm64/IPv6、角色/WG 新机灾备及长稳仍缺。
+未连接/重启 A/B、修改运行源码/合同或支持状态，16 supported/14 deferred 不变。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
