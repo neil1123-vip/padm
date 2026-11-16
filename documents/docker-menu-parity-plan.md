@@ -11168,6 +11168,51 @@ Power down，关机 `6.853` 秒，QEMU/驱动 exit 0，无强停或活动 guest�
 `.tmp-regression-docker-d9e0e889458545498851153c00cfbbd2/`。
 未改运行源码、跑 daily/full、推送或发布。
 
+### 6A.41 正式单 Peer 控制角色关联改址与新邀请恢复
+
+2026-11-16，接续 6A.40 的正式 `.7`、Debian 13 amd64 完整独立内核双 QEMU
+单 Peer 控制角色，从已正常关机的两份磁盘各建 child，不启动父盘。
+machine/Engine、22 份安装源码和 10 份镜像绑定保持；停用同步后，两次正式
+`wireguard migrate` 将 `10.231.91.1/.2` 关联改为 `10.231.92.1/.2`。
+规格差异仅含双方角色地址及主控撤权 `enabled=false/expires_at=1`，
+控制身份、版本 `4`、账号映射、密钥、端口 `51821/51822`、TLS 与历史累计保持。
+持久配置的本机地址/AllowedIPs 精确 `/32`、公钥、endpoint 和 `root:root 0600`
+同内核及最终文件绑定；新地址双向加密通过。旧 token 从实际新源 `.92.2` 到
+新目标 `.92.1` 得到 `401`，原邀请正式 sync 返回 `rc 10`，前后无副作用。
+
+首轮随后执行真实随机来源挑战，正式 probe 返回 0，回执匹配 nonce、
+新来源/目标与 `401`，但 `source-check` 返回 `rc 15`，没有 `source-verified`。
+原 30 秒安全窗口和正式源码未改，失败原件保持，原因未定；不计 fresh 来源见证
+或控制面防护启用通过。驱动 exit 1，两 guest 正常关机 `6.774` 秒，无强停。
+正式 invite/sync/调度启用不依赖该独立见证；控制面防护仍须同锁 fresh 见证。
+
+从首轮正常关机 child 再各建 child，冷启动核对改址/撤权规格、普通文件和
+WG 身份保持、boot 改变、挑战登记已清理。正式生成新邀请，经 root 私有 stdin
+转交，控制 ID/节点 ID 保持、token 与地址 tuple 换新；主控授权仅允许相应
+enabled/有效期/token 摘要变化。正式同版 sync 不改变被控规格、文件、服务或账目。
+恢复原 loaded unit/五分钟日历，正式修改名称后 `4 → 5` 自主传播，绑定同 boot
+invocation、journal、单调时序、摘要与实际核心用户；没有手动触发这次传播。
+
+六组独立严格 TLS 跨两段完成：错误 UUID 两次均拒绝且原点零到达，
+受管/本机账号正控依次完整 `262144/270336/253952/253952` 字节，nonce 独立。
+接续前受管 upload/download `345/778588`，最终 `460/1032656`，下载差
+`254068` 覆盖接续后受管正文 `253952`；逐 ID 累计不降、限额保持。
+接续 `552.616` 秒，最终正常关机 `6.011` 秒，QEMU/接续驱动 exit 0、无强停。
+接续的两份父盘始末摘要保持；首轮未落盘迁移父盘的初始摘要，不宣称该段
+始末摘要保持。两轮均保留原件、最终无活动 guest，不把首轮改判为整轮成功。
+
+固定工具镜像断网独验通过，共绑定 `1222` 份原件，其中复核前轮 `837` 份，
+源码和镜像绑定保持。公开结果见 `.tmp-native-control-vms-20261116/README.md`、
+`address-result.json`、`address-verification.json`、`address-attempt1.log`；
+邀请、私钥、规格和磁盘仅留专用私密卷，未整体导出。
+只关闭固定本地正式单 Peer 的关联改址、撤权和新邀请恢复子项；fresh 来源见证、
+完整内核迁移失败恢复、新机灾备、公网多机、arm64/IPv6、多 Peer 和长稳仍缺。
+未连接/修改 A/B 或运行源码，16 supported/14 deferred 不变。
+完整 JSON 比较确认仅三个 reason 变化；Linux amd64 `docker-phase3-edit -Jobs 2`
+以 `55873 ms`、exit 0、无缓存通过，结果
+`.tmp-regression-docker-66a13c2889014244b1e6cdc8af1042b4/`。
+未采目录权限，未跑 daily/full、推送或发布。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
