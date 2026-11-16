@@ -65,6 +65,10 @@ WG/多 Peer 新机恢复及长稳仍待验，16 supported/14 deferred 不变。
 断网独验绑定 1994 份原件，恢复审计通过，防护与具体拒绝分支均未证；
 16 supported/14 deferred 不变，未连接或重启 A/B。
 
+6A.49 新跟踪轮另证 21 次 pending、原 30 秒相对门槛返回 HOST 10，
+外层恢复后 enable 14；未进入 verified 后快照或 Commit，不追认 6A.47 同因。
+驱动事后容器 ID 比较失败保留，独验只确认静态恢复与正常关机，不计防护通过。
+
 2026-10-18 已补 Debian 13 原生 amd64 的正式发布验签、WS 21 首配、
 升级/回滚、整机重启、公网客户端和 Cloudflare CDN 正反例，以及
 Let's Encrypt standalone 签发、真实续期调度和 WS/SSH 精确封禁。
@@ -902,6 +906,21 @@ pidfd 单次 TERM，正式 rc 143；旧址/WG 恢复且仅撤权，旧 token 401
 SHA-256 `48661ce36089f7ba3d8e2326e2591fd82e85d7d10c3e4d181b47f623d6a01696`。
 仅补固定 TERM 子项，其它信号/断电、公网、多 Peer、arm64/IPv6、防护及长稳仍缺；
 未改源码/合同/支持状态、连接生产或重复回归、推送、发布。
+
+6A.49 在正式 `.7` 本地完整内核双机单 Peer 的新带跟踪 enable 轮次定位拒绝：
+21 次 result=pending，同一 Witness Bash 的 SECONDS 190→220，原 30 秒门槛
+返回 HOST 10、外层恢复后 enable 14；只有挑战前 Snapshot，无 current/Recheck/Commit。
+Peer 完整 CLI rc 0、宿主总耗时 31.983262 秒包含检查和清理，
+不据此判断 HTTP 时点，不将 TCG/xtrace 新轮结论外推 6A.47 或旧失败。
+恢复重建主控四服务 ID/StartedAt，使驱动 services 全等断言失败、exit 1 保留；
+前后健康/静态/镜像/账目比较通过，未执行 final_peer/final_security，
+故完整恢复审计和防护仍未通过。两 guest 正常关机 4.848023 秒、
+QEMU exit 0/0、父盘摘要保持；两个容器 exit 1/0、无 OOM、私密卷无活动容器。
+断网独验 1803 份、重核旧 1691 份，diagnosis_verified true；passed、
+control_protection_verified、full_recovery_audit_verified、original_failure_cause_proven false。
+公开摘要 `.tmp-native-control-vms-20261116/protection-diagnostic-verification.json`，
+SHA-256 `c148a12c61c1d19a7a73fd8f6b2e2ff6a1701d6d4eb270d735f602885f600ccf`。
+未改运行源码/合同/窗口/支持状态、访问生产或重复回归、推送、发布。
 
 控制角色多 Peer 及原生宿主验收继续 deferred；被控空目标恢复见 6A.16，主控新身份恢复见 6A.19。
 

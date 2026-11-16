@@ -224,3 +224,18 @@ SHA-256 `5a33de750c8e5b9bc811c1f072f493371379fe8939067528002ae9083e87a9cc`。
 `48661ce36089f7ba3d8e2326e2591fd82e85d7d10c3e4d181b47f623d6a01696`。
 仅关闭固定 TERM 子项，其它信号/断电、公网多机、多 Peer、arm64/IPv6、防护及长稳仍缺。
 未改运行源码/合同/支持状态、连接/重启 A/B、重复回归、推送或发布。
+
+6A.49 只定位新的正式 `.7` 本地完整内核双机单 Peer 带跟踪 enable 拒绝分支：
+同一 Witness Bash 连续 21 次 pending，SECONDS 190→220 后在原 30 秒门槛
+返回 HOST 10，外层恢复后 enable 14；仅挑战前一次 Snapshot，无 current/Recheck/Commit。
+完整 Peer CLI rc 0、宿主总计 31.983262 秒包含检查和清理，不据此判断 HTTP 时点，
+不将 TCG/xtrace 新轮结论外推 6A.47 或旧失败。驱动因恢复重建主控四服务的
+ID/StartedAt 比较失败、exit 1 保留；独验只确认前后健康/静态/镜像/账目和
+正常关机，final_peer/final_security 未执行，不计完整恢复审计或防护通过。
+QEMU exit 0/0、正常关机 4.848023 秒、父盘保持，私密卷无活动容器。
+断网独验 1803 份、重核旧 1691 份，diagnosis_verified true，passed、
+control_protection_verified、full_recovery_audit_verified、original_failure_cause_proven false。
+公开摘要 `.tmp-native-control-vms-20261116/protection-diagnostic-verification.json`，
+SHA-256 `c148a12c61c1d19a7a73fd8f6b2e2ff6a1701d6d4eb270d735f602885f600ccf`。
+原窗口、旧失败及 16 supported/14 deferred 保持；未改运行源码/合同、
+连接/重启 A/B、重复回归、推送或发布。

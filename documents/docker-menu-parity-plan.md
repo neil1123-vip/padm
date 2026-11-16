@@ -11544,6 +11544,51 @@ SHA-256 `30546c01fbc53b381d2fc89598e2dda9d4ab6626e444746b073bb95c2e99aa6c`。
 旧失败及原 30 秒来源门禁保持，16 supported/14 deferred 不变。
 未修改运行源码/合同、重复回归、连接/重启 A/B、推送或发布。
 
+### 6A.49 正式控制防护新跟踪轮拒绝分支
+
+2026-11-17，从 6A.45 正常关机父盘各建新 child，固定正式 `.7`、
+Debian 13 amd64/IPv4、完整独立内核/systemd/Engine 双机、单 Peer。
+完整 Peer CLI dummy 预热、回执保持和稳定清场后，单次正式 enable 加 Bash
+xtrace；不改正式源码或 30 秒窗口。驱动保留 bridge 以下载正式固定资产、
+按 digest 拉镜像，仅后续独验 network none，不计断网启用。
+
+本次正式 enable 返回 `14`，单 challenge，当前 nonce 完整 Peer CLI 返回 `0`，
+主控无 `source-verified`。私密 trace 精确记录同一 Witness Bash
+`started=190`、连续 `21` 次 `result=pending`，`SECONDS=220` 时在
+`control.sh:1055` 的 `(( SECONDS - started < 30 ))` 退出循环，
+随后 `control.sh:1080` 返回 HOST `10`，外层恢复后返回 `14`。
+只有一次挑战前 Snapshot，无 `current=`，未进入
+`dockerControlSourceWitnessRecheck` 或 `dockerFail2banStartManagedCommit`。
+这与 6A.43 的 verified 后快照门槛分支不同，不证明 6A.47 或更旧失败同因。
+Peer 整条 CLI 宿主计时 `31.983262` 秒包含前置检查及清理；
+不跨宿主/guest 时钟比较，不据此判断 HTTP 发出或到达时点。
+
+原驱动在事后 `services` 全等断言失败，exit `1` 保留、不生成成功 result：
+正式失败恢复重建主控四服务，容器 ID 和 StartedAt 改变。
+独立只读比较确认除此两字段外的服务属性、镜像及被控三服务保持，
+双端身份、boot、源码、规格、文件、WG、调度与额度保持、累计不降。
+前后健康快照通过，但原驱动未执行后续 final_peer/final_security；
+不宣称完整安全清场或业务恢复审计。两 guest 正常关机 `4.848023` 秒，
+QEMU exit `0/0`、无强停，父盘摘要保持；专用卷无活动容器。
+
+原件仅留私密卷 `padm-native-kernel-probe-20261116`，
+run `/work/control-protection-1794865229234027022`；不整体导出 trace、
+规格、nonce、邀请、密钥或磁盘。driver SHA-256
+`4fda9fe62712897299bb3e4e8ee0c45a6786560fddebb99f3e1f1588df6e6a1f`；
+私密 trace `60901893` 字节，SHA-256
+`6ce2ddd56399c8f71f8498e9715b17dff8090c938f65a296ed746de8a23d2f83`。
+断网独验 exit `0`，绑定 `1803` 份原件，重核旧 `1691` 份；
+`diagnosis_verified=true`；`passed`、`control_protection_verified`、
+`full_recovery_audit_verified`、`original_failure_cause_proven` 均为 false。
+独验器 SHA-256
+`b789e7c503c0faa41d799cd02e5c2a8b6fcfc4b64da7969972a7e06f4e876b66`；
+公开摘要 `.tmp-native-control-vms-20261116/protection-diagnostic-verification.json`，
+SHA-256 `c148a12c61c1d19a7a73fd8f6b2e2ff6a1701d6d4eb270d735f602885f600ccf`。
+driver/独验容器分别 bridge/none、exit `1/0`、无 OOM。
+只关闭新轮拒绝分支诊断；TCG/xtrace 开销、旧失败同因、防护及长稳未证。
+16 supported/14 deferred 不变；未连接/重启 A/B、改运行源码/合同、
+重复回归、推送或发布。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
