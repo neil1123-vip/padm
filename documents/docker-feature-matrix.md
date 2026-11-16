@@ -889,6 +889,20 @@ SHA-256 `2af6eb5d6d37d2b5d86bd8575db58c32ad52472d57f071d46bb963331a5d2b39`。
 公开摘要 `.tmp-native-control-vms-20261116/protection-verification.json`，
 SHA-256 `5a33de750c8e5b9bc811c1f072f493371379fe8939067528002ae9083e87a9cc`。
 原启用及首轮审计失败不改判；不重复 enable，防护未通过、30 秒门禁及支持状态不变。
+
+6A.48 随后补齐同一固定本地单 Peer 的正式关联改址 TERM 恢复：
+候选规格/WG/内核地址实际切换后，绑定锁 owner、正式入口及迁移 Bash 身份，
+pidfd 单次 TERM，正式 rc 143；旧址/WG 恢复且仅撤权，旧 token 401。
+新邀请同版同步及原调度恢复，文件/22 份源码/镜像/额度保持，累计不降、
+双向加密及严格 TLS/计量通过，managed/core 正文 270336/245760 字节。
+断网驱动 483.320 秒、正常关机 5.138 秒，QEMU exit 0/0、父盘摘要保持。
+独验两稿的默认端口/漏空 stop 失败保留，未重跑 guest；最终断网独验 1439 份，
+重核旧 1222 份，四容器已退出、无 OOM、专用卷无活动容器。
+公开摘要 `.tmp-native-control-vms-20261116/term-verification.json`，
+SHA-256 `48661ce36089f7ba3d8e2326e2591fd82e85d7d10c3e4d181b47f623d6a01696`。
+仅补固定 TERM 子项，其它信号/断电、公网、多 Peer、arm64/IPv6、防护及长稳仍缺；
+未改源码/合同/支持状态、连接生产或重复回归、推送、发布。
+
 控制角色多 Peer 及原生宿主验收继续 deferred；被控空目标恢复见 6A.16，主控新身份恢复见 6A.19。
 
 4C.12 为无控制角色的已启用 canonical 配置提供 `wireguard peers list/add/update/remove`

@@ -11496,6 +11496,54 @@ SHA-256 `5a33de750c8e5b9bc811c1f072f493371379fe8939067528002ae9083e87a9cc`。
 未连接/重启 A/B、修改运行源码/合同/支持状态或重复回归，未推送或发布。
 公网多机、多 Peer、arm64/IPv6、信号/断电和长稳仍缺，16 supported/14 deferred 不变。
 
+### 6A.48 正式单 Peer 迁移 TERM 恢复
+
+2026-11-17，从 6A.41 已独验的正常关机父盘各建新 child，使用正式
+`3.43.7`、Debian 13 amd64/IPv4、完整独立内核/systemd/Engine 双机、单 Peer。
+先正式停用被控同步调度，原规格及其余文件保持，再执行原正式
+`padm-docker wireguard migrate --address 10.231.93.1 --peer-address 10.231.92.2 --yes`。
+全程 network none，不连接生产 A/B，不占端口制造第二种故障。
+
+只读观察到候选规格、WG 配置及内核地址均已切到 `10.231.93.1` 后，
+精确核对部署锁 owner、`/usr/bin/bash`、正式 CLI 入口、argv、父子关系与
+start ticks，以 pidfd 锁定实际迁移 Bash，单次发送 TERM。
+候选、发送意图和成功回执同 boot 且单调时间有序；不向外层 CLI 猜测 PID 发信号。
+正式命令返回 `143`，旧 `10.231.92.1`、两端 WG 身份/密钥/端口
+`51821/51822` 和实际镜像恢复，控制规格与 state 只保留撤权差异。
+原授权 token 的真实来源请求返回 `401`，候选、私密 draft 和部署锁清场。
+
+两端文件摘要/权限/属主、22 份源码、账号身份和额度保持，历史累计不降；
+双向 WG 加密收发增长。严格 TLS 错 UUID 非零且零原点请求；
+managed/core 正文分别 `270336/245760` 字节，独立重算 payload 与客户端配置、
+正例输入摘要，managed 上传及完整下载计量增量通过。
+原点为隔离 loopback/underlay，不计公网业务。
+新邀请同版同步成功，邀请文件摘要精确绑定新输入，原 request/unit 及
+`ActiveState=active`、`UnitFileState=enabled` 恢复；未重测自主账号传播。
+
+驱动 `483.319883` 秒，正常关机 `5.137593` 秒，QEMU exit `0/0`、无强停，
+父盘摘要保持。只进行一次迁移，后续独验不启动 guest。
+独验首稿误写默认 WG 端口，第二稿漏归档中的零字节 `stop` 文件，均 exit 1；
+两稿及错误日志保留。完整只读复核后修为实际端口与精确归档清单，
+同时删除任意正文长度下界，改按固定 payload 精确核对长度和摘要。
+最终断网独验 exit 0、`passed/term_recovery_verified=true`，绑定 `1439` 份，
+逐项重核旧 `1222` 份；驱动和三个独验容器均 exited、无 OOM，私密卷无活动容器。
+
+原件仅留私密卷 `padm-native-kernel-probe-20261116`，
+run `/work/control-term-1794862520280639981`；未整体导出规格、邀请、私钥或磁盘。
+driver SHA-256
+`8a8e1d36f90308e0a7737e469184d2ba3e43f227d4a02ad965f72565eb05cae5`，
+最终独验器 SHA-256
+`c6ca034eed91a017ac990f21a71ab185c794cce29fdba010a937ad01f7049c26`。
+公开摘要 `.tmp-native-control-vms-20261116/term-verification.json`，
+SHA-256 `48661ce36089f7ba3d8e2326e2591fd82e85d7d10c3e4d181b47f623d6a01696`。
+同目录 `term-final-states.json` 在独验后生成，不计入上述 1439 份；
+SHA-256 `30546c01fbc53b381d2fc89598e2dda9d4ab6626e444746b073bb95c2e99aa6c`。
+
+仅关闭固定本地正式单 Peer 关联改址的 TERM 恢复子项，不外推其它信号、
+断电/任意故障、公网多机、多 Peer、arm64/IPv6、防护或长稳。
+旧失败及原 30 秒来源门禁保持，16 supported/14 deferred 不变。
+未修改运行源码/合同、重复回归、连接/重启 A/B、推送或发布。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
