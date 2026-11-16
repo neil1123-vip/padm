@@ -11589,6 +11589,41 @@ driver/独验容器分别 bridge/none、exit `1/0`、无 OOM。
 16 supported/14 deferred 不变；未连接/重启 A/B、改运行源码/合同、
 重复回归、推送或发布。
 
+### 6A.50 宿主预检单次 daemon 查询
+
+2026-11-17，将 `dockerHostPreflight` 每次调用的四次 `docker info`
+合并为一次 `docker info --format '{{json .}}'`，从同一响应读取 OS、
+架构和安全模式。先拒绝非唯一 JSON 对象，保留 root/Linux、daemon 可达、
+架构支持与匹配、rootless、Unix socket/context 和 Compose 门禁。
+无跨调用缓存，不改来源见证的 30 秒窗口；调用者的成功/失败接口不变。
+同步 12 处测试桩，phase1 补单次查询、16 个损坏/不支持输入、
+跨调用 daemon 失效及匹配 arm64 正例。
+
+当前源码快照 `885b4e4b86f306bc0fe6583877a0bf3f6d8652cc13da68ea967cc64f0d2d42ca`
+在 Docker Desktop Linux amd64、固定工具镜像
+`sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`
+通过 `docker-phase1 -Jobs 2`、日常 `docker-contracts -Jobs 6` 的
+34/34 项及 `docker-port-hopping-target -Jobs 2`，均实际执行、无缓存命中。
+定向/日常/补验入口分别为 39.621/227.323/85.478 秒；target 已由日常
+preflight 间接覆盖，额外一次结果保留，不继续重复。证据分别为
+`.tmp-regression-docker-f99a9de3397d400a9aea03f33e337215/`、
+`.tmp-regression-docker-ecf5c9ce4ed244419d026bfbcec93dd6/`、
+`.tmp-regression-docker-a0a1e78db52d4bc99394927a8b71cb40/`。
+
+只读基准以 `31b5f149` 为基线，固定相同工具镜像及真实本机 daemon，
+源码先复制到容器 Linux 文件系统；容器 network none，输入及 socket 只读挂载。
+每版预热一次、交替各取八次，独立 fd 计数逐次断言 info 查询 4→1。
+整体预检中位耗时 172.7498955→80.487861 ms，减少约 92.262 ms/53.4%。
+基准容器正常退出 0、无 OOM；精简终态见同目录 `container-state.json`。
+证据 `.tmp-preflight-info-20261117/benchmark-result.json`，
+SHA-256 `526240d1ea79fea10d1bd14eb313f53608a65da823b2a6300ff77a2497de04f1`；
+脚本 SHA-256 `29152280c115ea8039763a243e8ea3e08fdd96a88ddc97169176a41e2851285d`。
+输入摘要及八次样本均已复核，候选与当前 bootstrap 一致。
+
+本轮仅完成内部预检去重；不外推 TCG/原生双机耗时，不证明正式 `.7`
+防护失败已修复。候选完整 Peer CLI/防护及其恢复仍待真实环境验收，
+6A.49 原失败与 16 supported/14 deferred 保持；未访问或重启 A/B。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

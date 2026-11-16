@@ -46,17 +46,21 @@ set -u
 mode=${FAKE_DOCKER_MODE:-ok}
 case "${1:-}" in
 info)
+    printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG:?}"
     [[ "${mode}" != "daemon-fail" ]] || exit 1
     if [[ "${2:-}" == "--format" ]]; then
         case "${3:-}" in
-        '{{.OSType}}') printf 'linux\n' ;;
-        '{{.Architecture}}') printf '%s\n' "${FAKE_DAEMON_ARCH:-x86_64}" ;;
-        '{{json .SecurityOptions}}')
-            if [[ "${mode}" == "rootless" ]]; then
-                printf '["name=rootless"]\n'
-            else
-                printf '["name=seccomp,profile=builtin"]\n'
+        '{{json .}}')
+            if [[ -v FAKE_DOCKER_INFO ]]; then
+                printf '%s\n' "${FAKE_DOCKER_INFO}"
+                exit 0
             fi
+            securityOptions='["name=seccomp,profile=builtin"]'
+            if [[ "${mode}" == "rootless" ]]; then
+                securityOptions='["name=rootless"]'
+            fi
+            printf '{"OSType":"linux","Architecture":"%s","SecurityOptions":%s}\n' \
+                "${FAKE_DAEMON_ARCH:-x86_64}" "${securityOptions}"
             ;;
         *) exit 1 ;;
         esac
@@ -1049,6 +1053,42 @@ for failureMode in daemon-fail rootless; do
     [[ ! -e "${failedRoot}" ]] || fail "${failureMode} preflight wrote state"
 done
 unset FAKE_DOCKER_MODE
+
+# 每次预检只读一次 daemon，拒绝损坏字段，后续调用必须重新查询。
+(
+    export PATH="${MOCK_BIN}:${PATH}" DOCKER_HOST=
+    source "${PROJECT_ROOT}/docker/lib/bootstrap.sh"
+    : >"${DOCKER_CALL_LOG}"
+    dockerHostPreflight || fail 'single-info: valid daemon was rejected'
+    [[ "$(grep -c '^info' "${DOCKER_CALL_LOG}")" == 1 &&
+        "$(<"${DOCKER_CALL_LOG}")" == 'info --format {{json .}}' ]] ||
+        fail 'single-info: preflight queried daemon more than once'
+    for FAKE_DOCKER_INFO in '' not-json null '[]' '{}' \
+        '{"OSType":"linux"} {"Architecture":"x86_64"} {"SecurityOptions":[]}' \
+        '{"OSType":1,"Architecture":"x86_64","SecurityOptions":[]}' \
+        '{"OSType":"windows","Architecture":"x86_64","SecurityOptions":[]}' \
+        '{"OSType":"linux","Architecture":null,"SecurityOptions":[]}' \
+        '{"OSType":"linux","Architecture":"arm64","SecurityOptions":[]}' \
+        '{"OSType":"linux","Architecture":"riscv64","SecurityOptions":[]}' \
+        '{"OSType":"linux","Architecture":"x86_64"}' \
+        '{"OSType":"linux","Architecture":"x86_64","SecurityOptions":null}' \
+        '{"OSType":"linux","Architecture":"x86_64","SecurityOptions":{}}' \
+        '{"OSType":"linux","Architecture":"x86_64","SecurityOptions":"rootful"}' \
+        '{"OSType":"linux","Architecture":"x86_64","SecurityOptions":["name=Rootless"]}'; do
+        export FAKE_DOCKER_INFO
+        if dockerHostPreflight >"${CONTROL_LOG}" 2>&1; then
+            fail "single-info: invalid daemon information accepted: ${FAKE_DOCKER_INFO}"
+        fi
+    done
+    unset FAKE_DOCKER_INFO
+    export FAKE_DOCKER_MODE=daemon-fail
+    if dockerHostPreflight >"${CONTROL_LOG}" 2>&1; then
+        fail 'single-info: preflight reused stale daemon information'
+    fi
+    unset FAKE_DOCKER_MODE
+    export FAKE_UNAME_ARCH=aarch64 FAKE_DAEMON_ARCH=arm64
+    dockerHostPreflight || fail 'single-info: matching arm64 daemon was rejected'
+) || fail 'single-info preflight checks failed'
 
 export FAKE_DOCKER_MODE=active
 runControl 11 unlabeled-active-containers "${TEST_ROOT}/active-without-state" "${NATIVE_ROOT}" \

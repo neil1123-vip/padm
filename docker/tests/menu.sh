@@ -50,9 +50,7 @@ case "${1:-}" in
 info)
     if [[ "${2:-}" == --format ]]; then
         case "${3:-}" in
-        '{{.OSType}}') printf 'linux\n' ;;
-        '{{.Architecture}}') printf 'x86_64\n' ;;
-        '{{json .SecurityOptions}}') printf '["name=seccomp,profile=builtin"]\n' ;;
+        '{{json .}}') printf '{"OSType":"linux","Architecture":"x86_64","SecurityOptions":["name=seccomp,profile=builtin"]}\n' ;;
         *) exit 1 ;;
         esac
     fi

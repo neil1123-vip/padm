@@ -195,9 +195,7 @@ docker() {
     printf '%s\n' "$*" >>"${TEST_ROOT}/commands.log"
     case "$*" in
     info) return 0 ;;
-    'info --format {{.OSType}}') printf 'linux\n' ;;
-    'info --format {{.Architecture}}') uname -m ;;
-    'info --format {{json .SecurityOptions}}') printf '[]\n' ;;
+    'info --format {{json .}}') printf '{"OSType":"linux","Architecture":"%s","SecurityOptions":[]}\n' "$(uname -m)" ;;
     'context inspect --format {{.Endpoints.docker.Host}}') printf 'unix:///var/run/docker.sock\n' ;;
     'compose version --short') printf '2.39.0\n' ;;
     'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=sing-box --filter label=com.docker.compose.oneoff=False')

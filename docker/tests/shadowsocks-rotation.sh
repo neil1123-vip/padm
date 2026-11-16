@@ -102,9 +102,7 @@ printf '%s\n' "$*" >>"${FAKE_PROTOCOL_EVENTS:?}"
 case "${1:-}" in
 info)
     case "${3:-}" in
-    '{{.OSType}}') printf 'linux\n' ;;
-    '{{.Architecture}}') printf '%s\n' "${FAKE_PROTOCOL_ARCH:?}" ;;
-    '{{json .SecurityOptions}}') printf '["name=seccomp,profile=builtin"]\n' ;;
+    '{{json .}}') printf '{"OSType":"linux","Architecture":"%s","SecurityOptions":["name=seccomp,profile=builtin"]}\n' "${FAKE_PROTOCOL_ARCH:?}" ;;
     esac ;;
 context) printf 'unix:///var/run/docker.sock\n' ;;
 ps|pull) ;;

@@ -68,7 +68,7 @@ dockerRequireCommand() {
 }
 
 dockerHostPreflight() {
-    local hostArch daemonArch daemonOs securityOptions endpoint composeVersion
+    local hostArch daemonInfo daemonArch daemonOs securityOptions endpoint composeVersion
     [[ -n "${BASH_VERSION:-}" && "${BASH_VERSINFO[0]:-0}" -ge 4 ]] || {
         dockerError 'Docker 版需要 Bash 4 或更高版本'
         return 1
@@ -91,16 +91,17 @@ dockerHostPreflight() {
         dockerError '缺少 curl 或 wget，无法获取预构建发布资产'
         return 1
     fi
-    docker info >/dev/null 2>&1 || {
+    daemonInfo=$(docker info --format '{{json .}}' 2>/dev/null) || {
         dockerError 'Docker daemon 不可用或当前 root 无访问权限'
         return 1
     }
-    daemonOs=$(docker info --format '{{.OSType}}' 2>/dev/null) || return 1
+    daemonOs=$(jq -ser 'select(length == 1) | .[0] | objects | .OSType | strings' \
+        <<<"${daemonInfo}" 2>/dev/null) || return 1
     [[ "${daemonOs}" == "linux" ]] || {
         dockerError 'Docker daemon 必须运行 Linux 容器'
         return 1
     }
-    daemonArch=$(dockerNormalizeArchitecture "$(docker info --format '{{.Architecture}}' 2>/dev/null)") || {
+    daemonArch=$(dockerNormalizeArchitecture "$(jq -er '.Architecture | strings' <<<"${daemonInfo}" 2>/dev/null)") || {
         dockerError 'Docker daemon 架构不受支持'
         return 1
     }
@@ -108,8 +109,7 @@ dockerHostPreflight() {
         dockerError 'Docker daemon 架构与本地主机不一致'
         return 1
     }
-    securityOptions=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null) || return 1
-    jq -e 'type == "array"' <<<"${securityOptions}" >/dev/null 2>&1 || {
+    securityOptions=$(jq -ce '.SecurityOptions | arrays' <<<"${daemonInfo}" 2>/dev/null) || {
         dockerError '无法确认 Docker daemon 安全模式'
         return 1
     }
