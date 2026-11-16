@@ -30,7 +30,7 @@
 | G | [原生记录](docker-native-acceptance-2026-10-18.md)：正式安装/首配、升级回滚、重启、卸载/purge 后同机 v3 空目标恢复，3.42.3 账号及业务备份/分享恢复整轮。账号/业务原件 `.tmp-native-account-close-20261027/`、`.tmp-native-business-close-20261027/`；不代表新主机或全组合。 |
 | F | [实施计划 3D.27](docker-menu-parity-plan.md#3d27-新增管理能力真实验收与-deferred-对账)：正式 `3.43.4` 可信发布、来源及五镜像绑定；Debian 13 amd64/bridge/IPv4 的 `.2 → .4` 升级和固定 WS 公网正负例；固定 amd64/IPv4/Reality/gRPC/chrome/pgxn.org 的 ML-DSA 正式 CLI 公网四阶段及重建；同 IP、同证书别名独立 SNI 仅隔离整链。11-08 次日只读复核通过，不替代宿主重启、实际回滚或长稳。原件 `.tmp-release-3434-20261107/`、`.tmp-vps-upgrade-3434-20261107/`、`.tmp-mldsa-public-3434-20261107/`、`.tmp-mldsa-sni-3434-20261107/`、`.tmp-vps-post-upgrade-3434-20261108/`。 |
 | B | [实施计划 6A.29–6A.32](docker-menu-parity-plan.md)：正式 `3.43.7` 可信发布；独立 B Debian 13 amd64/bridge/IPv4 的原 `.4` 归档预览与自动清场、外部续期隔离、正式恢复、公网 Xray WS 443 正反例及单次整机重启通过。控制入口为 `.7`，业务与五镜像保持原 `.4`；公网经 A 临时 SSH TCP 转发，不计 Windows 直连或原生 URI 导入。原件 `.tmp-release-3437-20261116/`、`.tmp-native-dr-preview-3437-20261116/`、`.tmp-native-dr-acme-isolation-20261116/`、`.tmp-native-dr-apply-3437-20261116/`、`.tmp-native-dr-reboot-3437-20261116/`。 |
-| W | [实施计划 6A.35–6A.43](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败，不计 fresh 来源见证或防护通过。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。6A.43 只定位新跟踪轮在相等快照后的 30 秒相对时限检查拒绝，不证明原失败同因，见证仍未通过。只关闭上述固定子项，不等同信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启或角色/WG 灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
+| W | [实施计划 6A.35–6A.44](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。6A.43 只定位新跟踪轮在相等快照后的 30 秒相对时限检查拒绝，不证明原失败同因。6A.44 在预加载正式 helper 的新条件下补齐固定本地 server fresh 见证，主控 CLI rc 0；完整 peer source-probe CLI 和防护未补验，旧失败不改判。只关闭上述固定子项，不等同信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启或角色/WG 灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
 
 ## 14 项对账
 
@@ -40,7 +40,7 @@
 
 | deferred 项 | 已有证据 | 未决完成条件 | 明确限制与重复归属 |
 | --- | --- | --- | --- |
-| `subscription-multiserver` | P：私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步、隔离 amd64 双/三节点业务和授权隔离；6A.19/6A.23 新身份灾备。W 补齐原生固定单 Peer 隧道，以及正式 `.7` 本地独立完整内核双机的账号自主增删、启用态真实重启、固定地址密钥/端口迁移、关联改址撤权、新邀请恢复、原日历自主同步、业务和累计；6A.42 另补主控改址真实 bind 失败恢复、仅撤权及新邀请同版同步。 | 公网多机控制同步、arm64/IPv6、控制角色及 WG/多 Peer 新主机灾备、多 Peer 适用重启证据；6A.41 fresh 来源见证 rc 15 保留失败，不外推信号/断电及其它故障。 | v2 关联地址/密钥迁移、控制面 Fail2ban 拒绝，不新增开发。控制 API 无公网映射；公网业务验证不等于公开 API。灾备归 `interactive-menu`，宿主隧道归 `wireguard`。 |
+| `subscription-multiserver` | P：私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步、隔离 amd64 双/三节点业务和授权隔离；6A.19/6A.23 新身份灾备。W 补齐原生固定单 Peer 隧道，以及正式 `.7` 本地独立完整内核双机的账号自主增删、启用态真实重启、固定地址密钥/端口迁移、关联改址撤权、新邀请恢复、原日历自主同步、业务和累计；6A.42 另补主控改址真实 bind 失败恢复、仅撤权及新邀请同版同步；6A.44 补预加载正式 helper 条件下的本地 server fresh 见证。 | 公网多机控制同步、arm64/IPv6、控制角色及 WG/多 Peer 新主机灾备、多 Peer 适用重启证据；完整 peer source-probe CLI 未补验，6A.41/6A.43 失败保留且原失败同因未证，不外推信号/断电及其它故障。 | v2 关联地址/密钥迁移、控制面 Fail2ban 拒绝，不新增开发。控制 API 无公网映射；公网业务验证不等于公开 API。灾备归 `interactive-menu`，宿主隧道归 `wireguard`。 |
 | `acme-webroot` | P+A：稳定只读根与独占写入、归属/树校验、不停 Nginx；正式公网签发/在线换证及 3.41.4 新证书消费失败完整回滚。 | 真实登记自然到期续期；原生 arm64/公网 IPv6、当前版本尚未覆盖的适用生命周期。 | 自然续期与下一行共用一项门槛，约 2026-12-17 的窗口须以实际登记为准。no-op、强制到期、fresh 申请均不能替代自然到期。 |
 | `acme-standalone` | P+A：HTTP-01/TLS-ALPN-01 及原拥有者暂停/恢复；正式签发、standalone/ALPN 消费失败回滚、ALPN 在线往返和单次 fresh 完整链。 | 同一 ACME 自然续期门槛；原生 arm64/公网 IPv6、当前其它适用生命周期。 | 仅暂停本部署原运行拥有者；站点 Fail2ban 的自监听停启仍拒绝。其它 CA/provider 不借本次证据扩大范围。 |
 | `site-static-redirect-alpn` | P+S：模板/local/ALPN 事务及隔离双栈；固定正式 3.41.5 公网 13 阶段，包括特殊站名、302、订阅与完整恢复。 | 原生 arm64/公网 IPv6、其它既定适用组合和当前版本生命周期。 | Hy2 local 固定受管只读目录且无混淆，纯 Hy2 只开放 static。ACME 另行归属，不把公网站点/ALPN 重新列为完全未验。 |
@@ -137,3 +137,14 @@ EXIT 清理进入和退出均为 15，后续墙钟/登记检查未执行。默�
 断网独验绑定 1384 份原件，其中复核前轮 1222 份；两次启动双机均正常关机、
 父盘摘要保持，最终无活动 guest，敏感 trace 仅留私密卷。
 未连接/修改 A/B、改变源码/合同/支持状态、重复回归、重启生产、推送或发布。
+
+6A.44 随后从 6A.41 原失败父盘的新 child，先在正式 ops 镜像内预加载
+`control_client.source_probe` 等待 stdin nonce，再执行原正式主控 source-check。
+错 nonce 不产生当前 nonce 回执且挑战仍在；当前 nonce 得到唯一回执及
+source-verified，主控 CLI rc 0。镜像 ID、helper 与发布 bundle 摘要绑定，
+临时探测容器无挂载/密钥、exit 0 且已清场；前后规格/文件/服务/WG 身份/限额
+保持，累计不降，双端 WG 收发增长。单次驱动 147.905 秒、正常关机 6.870 秒，
+父盘摘要保持、无强停/活动 guest。断网独验绑定 1490 份原件，其中重核旧 1384 份。
+只关闭预加载 helper 条件下的固定本地 server fresh 见证；完整 peer source-probe
+CLI、防护和原失败同因未证，30 秒窗不变，旧失败不改判。未连接/重启 A/B、
+修改运行源码/合同/支持状态、重复回归、推送或发布，16 supported/14 deferred 不变。

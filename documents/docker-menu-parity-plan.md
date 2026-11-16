@@ -11297,6 +11297,41 @@ PID/函数元数据；最小非私密实验也复现该格式限制。因此只�
 未改运行源码、合同或支持状态；仅文档更新，未重复回归、重启生产、推送或发布。
 公网、多 Peer、arm64/IPv6、角色/WG 新机灾备及长稳仍缺。
 
+### 6A.44 预加载正式探测 helper 的本地来源见证
+
+2026-11-17，从 6A.41 首次失败后正常关机的父盘各建新 child，继承改址及撤权
+现场；不是 6A.42 的版本 5 恢复现场。保持正式 `.7`、Debian 13 amd64 的完整
+独立内核/systemd/Engine 双机、22 份运行源码和此前 10 份镜像绑定。
+冷启动核对规格、文件、身份及 WG tuple 继承、boot 变化、累计不降；
+被控正式 schedule status 为 `enabled=false`，主控仍为撤权状态。
+
+本轮采用明确不同的验收准备：先在被控正式 ops 镜像中加载
+`/opt/padm/control_client.py` 的 `source_probe`，等待 stdin nonce，再执行原正式
+`padm-docker control source-check`。临时探测容器使用 host 网络、
+`10001:10001`、只读根、cap-drop ALL、no-new-privileges，无挂载或密钥；
+实际镜像 ID 绑定原正式 ops，模块摘要与可信发布 bundle 对应源码一致。
+预先核实际源 `.92.2` 到目标 `.92.1` 的路由确经 `wg-padm`。
+未修改主控 CLI、快照、回执或 30 秒门禁，没有 xtrace。
+
+READY 早于主控检查启动；先传错 nonce，正式 helper 完成 `401` 检查，
+当前 nonce 回执仍为空、挑战仍在、主控进程仍存活且未输出 verified；
+再传当前 nonce，helper 完成、主控 CLI `rc 0`，唯一精确 `source-verified` 与
+唯一同 nonce 回执匹配。前后核挑战、临时目录及部署锁清场；
+临时探测容器 exit 0 且精确名称查询为空，未留常驻探测进程。
+规格、文件、服务、WG 身份/端口、限额保持，累计不降，双端 WG 收发均增长。
+
+单次驱动 `147.905` 秒，正常关机 `6.870` 秒，QEMU exit `0/0`、无强停；
+父盘开机前与关机后摘要保持。断网独验绑定 `1490` 份原件，其中重新核对
+6A.43 的 `1384` 份；驱动和核验容器均 network none、exit 0、无 OOM，
+最终私密卷无活动容器。公开摘要见
+`.tmp-native-control-vms-20261116/source-prepared-verification.json`、
+`source-prepared-driver-states.json` 及 README；规格、nonce、邀请、密钥及磁盘仅留私密卷。
+
+只关闭固定本地单 Peer、预加载正式 helper 条件下的 server fresh 来源见证。
+完整 peer `source-probe` CLI 未补验，旧 6A.41/6A.43 失败保留，原失败同因未证；
+不计控制面防护通过。公网多机、多 Peer、arm64/IPv6、角色/WG 新机灾备及长稳
+仍缺。未连接/重启 A/B，未改运行源码、合同或支持状态，未重复回归、推送或发布。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
