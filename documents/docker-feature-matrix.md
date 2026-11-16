@@ -1,6 +1,6 @@
 # Docker 版功能对照表
 
-修订日期：2026-11-04
+修订日期：2026-11-16
 
 这份表是“原生菜单功能”和“Docker 当前能力”的第一阶段基线。状态只表示
 Docker 现在能否通过受管控制命令完成对应能力，不表示底层镜像里是否包含某个
@@ -26,6 +26,13 @@ SOCKS5 入站保留不可用说明；两版核心升级机制保持原样，Dock
 [14 项 deferred 对账](docker-deferred-status-2026-11-04.md)。
 下文按日期保留的早期“未验/未交付”结论不覆盖后续正式证据；当前结论以该对账、
 本表现状行及[原生验收记录](docker-native-acceptance-2026-10-18.md)为准。
+
+2026-11-16 正式 `3.43.7` 的可信发布已验；B `.7` 控制入口从原 `.4` 归档完成
+预览自动清场、外部续期隔离、正式恢复及单次整机重启，业务与五镜像保持原 `.4`。
+固定 Debian 13/amd64/bridge/IPv4/Xray WS 443 公网正反例经 A 临时 SSH TCP 转发
+通过，不计 Windows 直连或原生 URI 导入；A 仍为 `.4`，业务、材料、调度与 DNS 未改。
+证据见实施计划 6A.29–6A.32；自然续期、arm64/IPv6、其它核心/协议、控制角色和
+WG/多 Peer 新机恢复及长稳仍待验，16 supported/14 deferred 不变。
 
 2026-10-18 已补 Debian 13 原生 amd64 的正式发布验签、WS 21 首配、
 升级/回滚、整机重启、公网客户端和 Cloudflare CDN 正反例，以及
@@ -637,7 +644,7 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
 | 安装与重装 | 协议管理 `supported`，环境验收另列 | `install`、可信发布输入 `release`、交互首配 `setup`、`reinstall`、`edit`、`configure`、候选校验及恢复 | 支持 16 个协议的完整原始 spec、多入口与主副核心、增量新增、复制/删除、字段编辑和保身份重建；3D.26 增加 Nginx 受限修复。完整重装撤销旧分享身份并保留累计，TLS 域名迁移与 ACME 续期登记保持独立；公网、arm64 和完整宿主验收另列。 |
-| 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号与双核心认证/统计、账号/分享组及业务备份恢复；单 Peer 迁移、v2 多被控管理、手动/自动同步及限定新身份灾备 | HTTPS 发布复用至少一个 `21–25/27/29` 及同域受管 TLS；正式 3.42.3 原生账号与业务恢复已验，隔离 amd64 双/三节点业务及自动同步已验。原生多机、arm64、新主机灾备及当前源码可信发布仍缺；独立发布域名/证书、v2 关联迁移和控制面 Fail2ban 是明确边界，不追加为开发项。 |
+| 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号与双核心认证/统计、账号/分享组及业务备份恢复；单 Peer 迁移、v2 多被控管理、手动/自动同步及限定新身份灾备 | HTTPS 发布复用至少一个 `21–25/27/29` 及同域受管 TLS；正式 3.42.3 原生账号与业务恢复已验，隔离 amd64 双/三节点业务及自动同步已验。原生多机、arm64、控制角色及 WG/多 Peer 的新主机灾备与适用重启仍缺；固定 B 单 Xray WS 恢复不替代这些证据。独立发布域名/证书、v2 关联迁移和控制面 Fail2ban 是明确边界，不追加为开发项。 |
 | 协议与入口 | 配置运行与管理工作流 `supported` | 16 个公开协议的新增、编辑、复制、删除、保身份重建、分享和失败恢复，以及账号/额度与各协议专项管理；Reality ML-DSA-65、受限 Nginx 修复见 3D.26，有限 443 共存及 2/21/22/23/24/25 CDN 覆盖沿用原边界 | 各协议核心限制见逐项表。WS Fail2ban 只冻结受保护来源，保护端口迁移走 5C.6d；Hy2/TUIC 范围限单 sing-box、单个双族入口和手动监督。公网、arm64、宿主生命周期、其它 CDN 和完整内部路由验收不由管理状态证明。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS、ACME、默认页/静态/302、三主题、Hysteria2 local 及逐入口 ALPN 事务；正式 webroot/standalone/ALPN 公网签发、消费失败回滚及固定组合的站点/ALPN 13 阶段已有证据 | 自然到期续期、原生 arm64/公网 IPv6 及当前版本其它适用组合仍待验；旧版本限定通过不等于全版本/全组合通过。域名迁移不迁移旧续期登记，ACME 自然续期门槛只计一次。 |
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成；两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、IP/CIDR、BT、CN 预设、IPv6/WARP 及名单/上游/模式管理；Xray HTTP 中继；固定原生 IPv4 路由、HTTP 中继、UDP 别名及限定真实重启已有证据 | WARP 真实账号/公网出口、原生 arm64/公网 IPv6、原生多机及适用透明生命周期仍缺。固定核心的 SOCKS UDP/Xray 解析后阻断继续拒绝；不追加任意国家向导、预测最终流量的语义引擎或任意目的转发。路由/内部 206、端口/内部 207 分别共用证据与未决条件。 |
@@ -682,7 +689,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 | ID | 能力 | 原生入口 | Docker 状态 | Docker 边界 |
 | ---: | --- | --- | --- | --- |
 | 201 | Socks 中继 | 路由与访问控制 -> 分流工具 | `deferred` | TCP 出站归 `routing-tools`；固定 sing-box 活动 UDP 关联可被未认证来源借用，Xray 许可不随控制关闭撤销，host-network 不能修复。保持拒绝、不降为 TCP-only；仅在相关固定核心行为变化并重证完整鉴权后重新评估，不列为当前开发项。 |
-| 202 | HTTP 中继 | 路由与访问控制 -> 分流工具 | `deferred` | Xray 私有认证 HTTP/CONNECT、真实来源规则、管理和回滚已交付；隔离 amd64 双栈及原生外部 IPv4 三目标严格 TLS/200、407/来源拒绝通过。公网 IPv6、arm64 及当前源码发布/生命周期仍待验；sing-box 来源头绕过继续明确拒绝。 |
+| 202 | HTTP 中继 | 路由与访问控制 -> 分流工具 | `deferred` | Xray 私有认证 HTTP/CONNECT、真实来源规则、管理和回滚已交付；隔离 amd64 双栈及原生外部 IPv4 三目标严格 TLS/200、407/来源拒绝通过。公网 IPv6、arm64 及当前版本尚未覆盖的适用生命周期仍待验；sing-box 来源头绕过继续明确拒绝。 |
 | 203 | WireGuard | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard`、host network、`NET_ADMIN`。 |
 | 204 | TUN | 路由与访问控制 | `host-integrated` | 菜单 17→44 和 CLI 启用/关闭/规格状态；单 sing-box/单 Reality/IPv4，无其它宿主集成。固定接口和地址，host network、root、`NET_ADMIN`、`/dev/net/tun`；全局 IPv4 TCP/UDP，IPv6 拒绝。审计完整归属、正常停止及基线恢复后清证据；漂移或异常退出保留现场。 |
 | 205 | Redirect/TProxy | 路由与访问控制 | `host-integrated` | `net-transparent`、host network、`NET_ADMIN`。 |
@@ -707,13 +714,13 @@ TUN/TProxy/Redirect 的透明核心保留 `cap_drop: ALL`，仅授予 `NET_ADMIN
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `nginx` / `subscription` | bridge | 4A.7/4A.9 复用至少一个 `21–25/27/29` 入口及同域受管 TLS，含纯 sing-box `23`；无 `21` 需 `x-padm-subscription-nginx-tls`，含 fallback 发布另需 `x-padm-subscription-fallback-tls`。HTTP/1.1 与 HTTP/2 后端共用 token 路由。部署/分享组 token 沿用，分享 URL 按首个适用入口的实际公开端口；独立域名/证书发布与 H3 未迁移，27/29 新范围验收见 4A.9。 |
 | `subscription-traffic` | 账号管理 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/collect/limit/reset；菜单 `10 -> 9` 查看不隐式采集，额度 `0` 表示不限额，设置/重置各确认一次，重置保留额度。沿用 CLI 采样与失败副作用；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1–4A.4 账号底座、账号 CLI/菜单事务、独立 token 分享组及业务备份恢复已交付；账号/入口筛选、启停/轮换、纯内容与 HTTPS 链接，账号/组/额度/累计 merge/replace 恢复均复用候选事务，轮换与恢复不回退最新累计。4A.2a 凭据不进外部 argv，修复首次 SS 关联生成与迁移入口选择；已有账号须显式设置新增入口授权。CDN/H3 与完整多服务器工作流按独立功能边界验收。 |
-| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.14 的私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步和隔离 amd64 双/三节点业务已验；6A.19/6A.23 支持隔离旧主控后的 v1/v2 新身份空目标恢复并撤权/rebind。原生多机、arm64、新主机灾备、重启及当前源码可信发布仍缺。v2 关联地址/密钥迁移、控制面 Fail2ban 明确拒绝，不新增为开发项；灾备及网络门槛分别归 `interactive-menu`、`wireguard`。 |
+| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.14 的私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步和隔离 amd64 双/三节点业务已验；6A.19/6A.23 支持隔离旧主控后的 v1/v2 新身份空目标恢复并撤权/rebind。原生多机、arm64、控制角色及 WG/多 Peer 的新主机灾备与适用重启仍缺，固定 B 单 Xray WS 恢复不替代这些证据。v2 关联地址/密钥迁移、控制面 Fail2ban 明确拒绝，不新增为开发项；灾备及网络门槛分别归 `interactive-menu`、`wireguard`。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 菜单/CLI、稳定只读挑战根、ops 独占 `active/`、不停 Nginx 和失败恢复已交付。Debian 13 amd64 正式公网签发/在线换证、3.41.4 消费失败全链回滚已验；自然到期续期、原生 arm64/公网 IPv6 和当前版本其它适用生命周期仍缺。自然续期与 `acme-standalone` 共用门槛，旧版本通过不外推当前全组合。 |
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | 宿主预检 + bridge | HTTP-01/TLS-ALPN-01 菜单/CLI、自动续期及原拥有者暂停/恢复已交付。原生正式公网签发、standalone/ALPN 消费失败回滚、同张新证书在线往返，以及 3.41.5 单次 fresh ALPN 完整链通过；自然续期、arm64/公网 IPv6 与当前其它适用生命周期仍缺。fresh 申请/强制到期不是自然续期，Fail2ban Nginx 自监听停启仍拒绝。 |
 | `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` / `core-sing-box` | bridge | 站点/三主题/特殊站名/302、Hy2 local 和 ALPN 事务已交付；隔离 amd64 双栈与 sing-box 23 发布共存已验。正式 3.41.5 在 Debian 13 amd64/bridge/公网 IPv4、固定 Mihomo 的 13 阶段取得 57 正/35 拒绝并恢复。arm64/公网 IPv6、其它适用组合及当前版本生命周期仍缺；ACME 归独立条目。 |
 | `reality-target-management` | 协议与入口 -> REALITY 管理 -> 目标站管理 | `supported` | 核心 profile | 宿主 CLI | 对齐原生 8 项管理及首配候选检测/手动输入；检测 TLS/PQC/ASN/证书链、刷新库、网段/同 ASN 抽样扫描、A 级筛选分页与逐入口切换、host[:port]/独立 SNI、黑名单；扫描进度和部分结果处理共用原生，B/C 手动告警，全部地址按最差评分及 CDN 风险判定，缓存切换重新复测，Docker 私密状态与事务恢复独立于原生。 |
 | `reality-parameter-management` | 协议与入口 -> REALITY 管理 -> 重新生成参数 | `supported` | 核心 profile | 宿主 CLI | 菜单/CLI 按入口重生成密钥对和 short ID，派生校验、候选确认和失败恢复；账号、目标、其它入口及额度保持，链接和已启用发布同步更新。 |
-| `reality-coexistence` | 协议与入口 -> REALITY 管理 -> 443 共存分流 | `deferred` | `core-xray` / `nginx` / `nginx-stream` | 宿主 CLI | 受管 TLS、桥接可达宿主网站或 host 回环网站与 Xray Vision/XHTTP 的有限共存已交付；原生固定 amd64 三拓扑恢复、受管 bridge 公网正反例和六点实际重启已有证据。arm64/公网 IPv6、其它组合及当前源码发布/生命周期仍缺；网站证书/内容归原维护方，旧 reset/超时根因未定不因后续通过关闭。 |
+| `reality-coexistence` | 协议与入口 -> REALITY 管理 -> 443 共存分流 | `deferred` | `core-xray` / `nginx` / `nginx-stream` | 宿主 CLI | 受管 TLS、桥接可达宿主网站或 host 回环网站与 Xray Vision/XHTTP 的有限共存已交付；原生固定 amd64 三拓扑恢复、受管 bridge 公网正反例和六点实际重启已有证据。arm64/公网 IPv6、其它组合及当前版本尚未覆盖的适用生命周期仍缺；网站证书/内容归原维护方，旧 reset/超时根因未定不因后续通过关闭。 |
 | `entry-port-management` | 协议与入口 -> 入口端口管理 | `deferred` | 核心 | bridge | 多入口/别名增删、原位修改、默认分享及内部端口专项已交付。正式 3.41.6 的固定 Mihomo/amd64/bridge/公网 IPv4 SS 默认别名/删除/基口恢复与路由/UDP 合并重启已验，和内部 207 共用。arm64/公网 IPv6、其它组合及当前源码生命周期仍缺。额外端口别名保持原宿主组合拒绝；活动 WS 防护下未保护入口的基础增删改按 3D.26 放行。Hy2/TUIC 单 sing-box、单个双族入口及手动监督不承诺客户端自动换端口或崩溃/开机恢复。 |
 | `cdn-entry-management` | 协议与入口 -> CDN 入口管理 | `deferred` | `subscription` | bridge | 协议 2/21/22/23/24/25 的地址覆盖、状态/设置/清除及链接/订阅投影已交付，Reality/SNI/Host/路径/serviceName/认证保持，沿用对应 marker。原生固定 amd64 Cloudflare WS 地址/SNI/Host 公网正反例已验；XHTTP/h3、gRPC 供应商透传及 arm64/IPv6、当前版本其它适用组合仍缺。H3 只有使用说明，不新增开关、其它协议或自动建设外部 TLS/H3 拓扑。 |
 | `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` / `net-fail2ban-control` / `net-fail2ban-ssh` | host + `NET_ADMIN` | WS DOCKER-USER、控制面 INPUT 与专用 SSH INPUT 的独立 owner 和菜单/CLI；SSH/control 不共存。5C.6d 单 WS 保护端口专项已验实际双栈封禁、端口迁移、SQLite 保留、来源/健康失败恢复与旧规则清理，新旧端口均需 fresh 来源，别名、Reality stream 和其它集成拒绝；WS 日志组为 `0:10001`，权限不放宽。控制认证日志支持菜单/CLI 每小时轮转检查，默认关闭、本机私有登记、同锁与旧 bundle 门禁；线上 auto 入口及隔离 amd64 原始每小时 :19 cron 自主触发、实际归档/续写/停用已验，systemd 实际定时触发待验。SSH 限原生 root systemd/cgroup v2、无存量会话且禁止 reload 的单 service/单显式监听，只消费启动后的可信密码失败。transient collector、只读日志/10 秒 guard、启停/状态/单 IP 解封已接，来源失效自动停 jail/精确清理，禁自动重启和恢复旧封禁；SSH 启用时 update/rollback/业务恢复拒绝，先受管停用。隔离 amd64 OpenSSH 10/Fail2ban 1.1 实际启停、封禁、连接 DROP、解封和来源失效清理已验；原生宿主/arm64/公网/重启卸载及完整管理仍待验收。 |
@@ -723,13 +730,13 @@ TUN/TProxy/Redirect 的透明核心保留 `cap_drop: ALL`，仅授予 `NET_ADMIN
 | `redirect` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 菜单 17→47 和 CLI 管理单 Xray/sing-box Reality 1/2/26，同核心多入口；三族 PREROUTING，OUTPUT 可选 UID 或全主机主动 TCP，UDP 保持原路由。默认关闭、互斥、省略保留；全主机包含 root，核心 0:10001，GID 10001、LOCAL/REPLY 绕过，实际身份须核验。schema 1 兼容，全主机 schema 2 和共享 marker。两族两链先完整审计再精确撤销，漂移保留现场；拒绝其它宿主集成或副核心。原生宿主/arm64/公网/重启/完整卸载及完整管理待验。 |
 | `routing-tools` | 路由与访问控制 -> WARP/IPv6/Socks5/DNS/BT/访问控制 | `deferred` | 核心 | bridge | 两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、IP/CIDR、BT、CN、IPv6/WARP 及名单/上游/模式管理已交付。正式 3.41.6 原生 amd64 公网 IPv4 路由、pure 发布共存、DNS 拒绝回退及 sing-box 路由/UDP 合并重启已验。WARP 真实账号/出口、arm64/公网 IPv6 与当前其它组合仍缺；固定核心 SOCKS UDP/Xray 解析后阻断继续拒绝，任意国家及最终流量语义引擎不在范围。路由证据归此行，内部 206 不重复计数。 |
 | `internal-201-socks-relay` | 路由与访问控制 -> Socks 中继 | `deferred` | 核心 | bridge | 固定 sing-box 活动 UDP 关联可被未认证来源借用、Xray 26.3.27 许可不随控制关闭撤销的反例已证；host-network 不能修复。保持拒绝、不降为 TCP-only；相关核心行为变化并重证发布/真实来源/会话鉴权/关闭撤销后才重新评估，不列当前开发项。TCP 出站归 `routing-tools`。 |
-| `internal-202-http-relay` | 路由与访问控制 -> HTTP 中继 | `deferred` | `core-xray` | bridge | Xray 认证 HTTP/CONNECT、来源白名单、交互管理及候选回滚已交付；专属直连且不计业务额度，隔离 amd64 双栈与真实来源已验。原生外部 IPv4 三 HTTPS 目标严格 TLS/200、407 与来源拒绝通过；公网 IPv6、arm64 及当前源码发布/生命周期仍缺。sing-box 来源头覆盖继续拒绝，不扩为跨核心开发；202 不作为公开节点协议。 |
+| `internal-202-http-relay` | 路由与访问控制 -> HTTP 中继 | `deferred` | `core-xray` | bridge | Xray 认证 HTTP/CONNECT、来源白名单、交互管理及候选回滚已交付；专属直连且不计业务额度，隔离 amd64 双栈与真实来源已验。原生外部 IPv4 三 HTTPS 目标严格 TLS/200、407 与来源拒绝通过；公网 IPv6、arm64 及当前版本尚未覆盖的适用生命周期仍缺。sing-box 来源头覆盖继续拒绝，不扩为跨核心开发；202 不作为公开节点协议。 |
 | `internal-203-wireguard` | 订阅与用户 / 路由 -> WireGuard | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有；4C.3a 核验真实归属后预检/健康/撤销，活动旧式标记需先正常停止旧容器。4C.7 增加受限单 Peer 准备与启停入口，已通过定向及隔离 amd64 真实 CLI 验收，不新增运行机制。 |
 | `internal-204-tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 5C.2c 菜单 17→44 与 CLI 启用/关闭/状态；限单 sing-box、单 Reality、IPv4、无其它宿主集成。全局 IPv4 TCP/UDP，IPv6 拒绝；CID/StartedAt/netns/接口/规则/路由完整绑定，候选只读检查，正常停止且基线清净才清 state。隔离 amd64 生产启停/重启/漂移拒绝/异常退出保留现场已验；原生宿主/arm64/公网/重启/完整卸载及完整管理仍待验。 |
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | TProxy TCP/UDP 和 Redirect TCP 的有限管理范围同上，两者互斥；完整 Redirect/TProxy 管理及宿主验收仍 deferred。 |
 | `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 核心 | bridge | 已交付规则与名单/上游/例外管理、sing-box 解析后阻断及 WARP/IPv6 组合；与 `routing-tools` 共用正式 3.41.6 原生 IPv4 路由/DNS 拒绝回退及真实重启证据和环境门槛。WARP 账号/出口、arm64/公网 IPv6 仍缺；Xray 固定反例拒绝，CN 预设已覆盖，不追加任意国家/最终流量语义引擎。206 不作为公开节点协议。 |
-| `internal-207-access-control` | 协议与入口 -> 额外入口端口 | `deferred` | 原业务核心/Nginx | bridge | 别名增删/原位修改/默认分享、认证/统计/TLS/SNI 投影及候选回滚已交付；与 `entry-port-management` 共用正式 3.41.6 SS2022 公网 IPv4 别名/删除和路由/UDP 合并重启证据。arm64/公网 IPv6、其它组合及当前源码发布/生命周期仍缺。WS/SSH Fail2ban、TUN/TProxy、host-network 拒绝边界不新增为开发项，不提供任意目的转发。 |
-| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 本机代码项已随 6A.23 收口，16 个公开协议管理按 3D.26 supported。已有各菜单与私密导出/验证、同架构 v3 空目标恢复及持久中断接管；v1/v2 主控须隔离旧宿主、换全部控制身份、撤权并逐端新邀请/rebind，ACME/调度/Peer 边界保持。原生正式安装、升级回滚、公网/重启、同机灾备和账号/业务恢复已有限定证据；新原生主机、arm64/公网 IPv6、当前源码发布及适用宿主生命周期仍缺。专项门槛按所属条目计一次，拒绝组合不再列为待开发。 |
+| `internal-207-access-control` | 协议与入口 -> 额外入口端口 | `deferred` | 原业务核心/Nginx | bridge | 别名增删/原位修改/默认分享、认证/统计/TLS/SNI 投影及候选回滚已交付；与 `entry-port-management` 共用正式 3.41.6 SS2022 公网 IPv4 别名/删除和路由/UDP 合并重启证据。arm64/公网 IPv6、其它组合及当前版本尚未覆盖的适用生命周期仍缺。WS/SSH Fail2ban、TUN/TProxy、host-network 拒绝边界不新增为开发项，不提供任意目的转发。 |
+| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 本机代码项已随 6A.23 收口，16 个公开协议管理按 3D.26 supported。已有各菜单与私密导出/验证、同架构 v3 空目标恢复及持久中断接管；v1/v2 主控须隔离旧宿主、换全部控制身份、撤权并逐端新邀请/rebind，ACME/调度/Peer 边界保持。原生正式安装、升级回滚、公网/重启、同机灾备和账号/业务恢复已有证据；6A.29–6A.32 补齐正式 `.7` 控制入口从原 `.4` 归档在 B 固定 Debian 13/amd64/IPv4/bridge/Xray WS 443 组合的新主机恢复与单次整机重启。自然续期、arm64/公网 IPv6、其它核心/协议、控制角色及 WG/多 Peer 灾备和其它适用生命周期仍缺。专项门槛按所属条目计一次，拒绝组合不再列为待开发。 |
 | `core-lifecycle` | 核心与服务 | `supported` | 核心 profile | 宿主 CLI | 基础 `status/up/down/restart/logs/update/rollback/validate` 已可用，不代表原生全部升级管理。 |
 | `core-upgrade-assessment` | 核心与服务 -> Xray / sing-box 生命周期 | `supported` | 核心 profile | 宿主 CLI | 菜单第 13 项及 `assess` 复用只读风险扫描，使用可信候选镜像/配置副本执行版本检查、双核心配置试跑、Xray 严格模式与能力探针及已启用的 TLS/订阅/宿主前置检查；旧核心不启用严格解析时明确警告，不切换生产状态。要求受管 spec，预发布须提供匹配的可信发布资产；真实客户端连通另验。 |
 | `geo-data` | 核心与服务 -> Xray Geo 数据 | `supported` | `core-xray` | 宿主 CLI | 菜单第 14 项与 `geo status/update/schedule/auto-update` 已交付；完整受管数据经双摘要及真实 Xray 解析校验后切换读取路径，重建前采集 Xray 流量，仅重建原本运行的 Xray，失败恢复数据/Compose/运行状态；每日 01:35 systemd/cron 任务有部署归属和锁。编辑、更新和回滚保留数据及调度登记，旧 bundle 在切换前拒绝；真实上游、生产重建、宿主调度、arm64 和整机重启另验。 |
