@@ -11621,8 +11621,57 @@ SHA-256 `526240d1ea79fea10d1bd14eb313f53608a65da823b2a6300ff77a2497de04f1`；
 输入摘要及八次样本均已复核，候选与当前 bootstrap 一致。
 
 本轮仅完成内部预检去重；不外推 TCG/原生双机耗时，不证明正式 `.7`
-防护失败已修复。候选完整 Peer CLI/防护及其恢复仍待真实环境验收，
+防护失败已修复。此时候选完整 CLI/防护及恢复待验，后续结果见 6A.51；
 6A.49 原失败与 16 supported/14 deferred 保持；未访问或重启 A/B。
+
+### 6A.51 候选预检完整 CLI 与防护恢复验收
+
+2026-11-17，从 6A.45 已正常关机父盘各建 child，固定本地完整独立内核、
+Debian 13 amd64/IPv4、单 Peer、原正式 `.7` 镜像及其它源码；
+仅 bootstrap 使用 `2c57a014`，候选文件 SHA-256
+`059ef70cdde552829be72f953f45fe7441b5641e711ba3f393a4c35c29c2cb6e`。
+未修改来源见证 30 秒窗口，不把本轮视为正式 `.7` 验收。
+
+准备检查先因旧源码快照不含 bootstrap 而 exit `1`，guest 未启动。
+首轮 run `/work/control-protection-1794868683898648019` 直接替换安装文件，
+正式包完整性门禁拒绝 dummy source-probe `rc 12`，尚未执行 enable；
+驱动 exit `1`、两机正常关机、父盘保持，失败及脚本原件保留。
+这是验收准备错误，未关闭校验或改判。随后从原父盘重建独立 child，
+复制正式源码到 guest 临时目录，仅替换 bootstrap，通过原
+`dockerBundleSourceDigest` 计算摘要，执行正式
+`install --source --ref sha256:… --no-menu`。两端候选 ref 均为
+`sha256:202f40c327c85075c225b305c826650862e564d1b7d3b7c4b73f07302422d89c`，
+安装、权限和实际源码绑定通过；归档其余源码保持，未复用损坏 child。
+
+run `/work/control-protection-1794869072835626093` 完整 dummy CLI 预热通过，
+只执行一次防护 enable、单挑战；完整当前 nonce Peer CLI 返回 `0`，
+主控输出一次 `source-verified`，唯一回执落在挑战窗内。
+启用事务仍返回 `14`，只给出候选启动/健康检查失败的通用提示后恢复。
+完整 Peer CLI 宿主耗时 `12.998553147` 秒，不能据此判断 HTTP 发出时点，
+不推定旧失败同因、精确拒绝分支或预检优化已解决防护失败。
+本轮没有进入真实封禁/解封分支，业务检查均在恢复后。
+
+恢复审计验证候选源码/ref、machine/Engine/boot、规格、私密普通文件
+内容/权限/归属、镜像、WG 身份及调度保持，限额与历史账号保持且累计不降；
+控制 jail、owner state、IPv4/IPv6 规则、挑战、临时资源与部署锁清场，
+WS 资源保持，Peer 稳定清场。三个独立严格 TLS 客户端错误身份正文 `0`，
+受管和本机完整正文 `311296/286720` 字节，正例逐 nonce 精确到达、
+独立重建配置/正文及受管计量增长通过。负例随机凭据未独立还原，
+只绑定驱动原件与负例观测；不计启用态业务或公网验收。
+
+驱动 `415.598350502` 秒，正常关机 `5.93612505` 秒，
+QEMU exit `0/0`、无强停、父盘摘要保持。驱动 exit `1` 忠实保留防护失败，
+`driver_assertions_passed`、`recovery_audit_passed` 为 true，`passed` 为 false。
+断网独验 exit `0`，绑定 `1957` 份原件，含旧 `1691` 份及首轮失败；
+两容器无 OOM，专用私密卷 `padm-native-kernel-probe-20261116` 无活动容器。
+公开摘要 `.tmp-native-control-vms-20261116/candidate-preflight-installed-verification.json`，
+SHA-256 `15f14eefc8d9681f8c0643481cde626b51b12930eeac2a7e2853f38cef636d9e`；
+独验器 `5a57b7eaa188aef3d0ad3dc6795441c62f3f07f8c08303d814b91cc86a55b1db`，
+驱动 `be481c59b0e6d98361b0dcd583c3f98f77c2b14739b3334a31468597c595f249`。
+精简容器终态见同目录 `candidate-preflight-installed-final-states.json`，
+SHA-256 `1db2e6cfcb93b347d1ab6b3c69444be5471950b02468ef375660babd41280b6d`。
+仅补候选的来源见证及失败恢复证据；正式版与候选防护均未通过，
+16 supported/14 deferred 不变，未连接/重启 A/B、推送或发布。
 
 ### 本轮菜单与回归收敛
 
