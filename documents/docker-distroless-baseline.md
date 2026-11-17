@@ -68,6 +68,17 @@ ARM64 实际结果须以本次远端执行为准，接入门禁本身不算验�
 证据 `.tmp-regression-docker-6839b5299e6e4bb38b8278098cbac270/`；
 之后两处发布修复由上述最终 phase5 验证，不重复全量。
 
+Release `44055641704` 的 18 个合同分片及 10 个原生 smoke 全通过，
+但 ARM64 的离线导入后找不到原 config ID，真实运行尚未开始，发布被阻止；
+自动版本提交 `fe5233f9` 只准备了 `3.43.8`，不代表正式发布。
+固定 amd64/jq 的真实对照证实 classic 与 containerd 的 ID 表示不同，
+仅给导出镜像补标签仍不足。现让内层匹配宿主的 overlay2/overlayfs，
+未知驱动拒绝，使用命名导出并保留导入后的原 ID 精确比较。
+同类型存储的两组 ID 及运行检查通过；三容器、三匿名卷和临时标签已清场。
+证据 `.tmp-docker-load-repro-20261117/summary.json`，不替代远端 ARM64 验收。
+最终 `docker-phase5 -Jobs 2` 的 9 个包装场景及既有检查通过，13.359 秒；
+证据 `.tmp-regression-docker-69525f2938764caabd33e7df8f508440/`，actionlint 通过。
+
 复验入口（需先构建五个 `padm-distroless/padm-<名称>:local` 候选）：
 
 ```powershell

@@ -967,6 +967,12 @@ bash -n "${RUNTIME_SCRIPT}" || fail 'ARM64 真实运行门禁语法错误'
     docker() {
         printf '%s\n' "$*" >>"${RUNNER_TEMP}/calls"
         case "$1 $2" in
+        'info --format')
+            case "${RUNTIME_CASE}" in
+            unsupported-store) printf 'vfs\n' ;;
+            containerd) printf 'overlayfs\n' ;;
+            *) printf 'overlay2\n' ;;
+            esac ;;
         'pull --platform')
             [[ "$3" == linux/arm64 && "$4" == "${PADM_REGISTRY}/padm-"*"@${RUNTIME_DIGEST}" ]] ;;
         'image inspect')
@@ -974,9 +980,16 @@ bash -n "${RUNTIME_SCRIPT}" || fail 'ARM64 真实运行门禁语法错误'
             [[ "${RUNTIME_CASE}" != wrong-arch ]] || architecture=amd64
             jq -n --arg id "${RUNTIME_DIGEST}" --arg arch "${architecture}" \
                 '[{Id: $id, Os: "linux", Architecture: $arch}]' ;;
-        'save --output') : >"$3" ;;
+        'tag '*)
+            [[ "${RUNTIME_CASE}" != failed-tag ]] || return 9
+            [[ "$2" == "${RUNTIME_DIGEST}" && "$3" == padm-runtime/padm-*:pinned ]] ;;
+        'save --output')
+            [[ "${*:4}" == 'padm-runtime/padm-xray:pinned padm-runtime/padm-sing-box:pinned padm-runtime/padm-nginx:pinned padm-runtime/padm-ops:pinned padm-runtime/padm-net:pinned' ]] ||
+                return 1
+            : >"$3" ;;
         'create --privileged')
             [[ "$*" == *'--network none --init --mount type=volume,dst=/n'* &&
+               "$*" == *"--env PADM_TEST_DOCKER_DRIVER=${driver}"* &&
                "$*" == *'padm-regression:runtime docker-distroless-real' &&
                "$*" != *docker.sock* ]] || return 1
             printf 'runtime-fixture\n' ;;
@@ -992,7 +1005,7 @@ bash -n "${RUNTIME_SCRIPT}" || fail 'ARM64 真实运行门禁语法错误'
     }
     git() { [[ "$*" == 'ls-files -z' ]] && printf 'install-docker.sh\0'; }
     export -f docker git
-    for scenario in built mixed wrong-arch missing-digest failed-start failed-exit; do
+    for scenario in built mixed containerd unsupported-store wrong-arch missing-digest failed-tag failed-start failed-exit; do
         export RUNTIME_CASE=${scenario} RUNNER_TEMP=${TEST_ROOT}/runtime-${scenario}
         mkdir -p "${RUNNER_TEMP}/platforms"
         PADM_IMAGES='[]'
@@ -1012,14 +1025,15 @@ bash -n "${RUNTIME_SCRIPT}" || fail 'ARM64 真实运行门禁语法错误'
         status=0
         bash "${RUNTIME_SCRIPT}" >"${RUNNER_TEMP}/output" 2>&1 || status=$?
         case "${scenario}" in
-        built|mixed)
+        built|mixed|containerd)
             [[ "${status}" -eq 0 ]] || { cat "${RUNNER_TEMP}/output" >&2; fail "运行门禁误拒绝：${scenario}"; }
             jq -e --arg id "${RUNTIME_DIGEST}" 'length == 5 and all(.[]; .reference == $id and .image_id == $id)' \
                 "${RUNNER_TEMP}/node-images.json" >/dev/null || fail '运行门禁未绑定精确镜像 ID'
             ;;
         *) [[ "${status}" -ne 0 ]] || fail "运行门禁未拒绝：${scenario}" ;;
         esac
-        if [[ "${scenario}" != wrong-arch && "${scenario}" != missing-digest ]]; then
+        if [[ "${scenario}" != unsupported-store && "${scenario}" != wrong-arch &&
+            "${scenario}" != missing-digest && "${scenario}" != failed-tag ]]; then
             grep -qx 'rm --force --volumes runtime-fixture' "${RUNNER_TEMP}/calls" ||
                 fail "运行门禁未清场：${scenario}"
         fi
@@ -1316,7 +1330,8 @@ grep -Fq 'native_parallel_jobs:' "${PR_WORKFLOW}" || fail 'PR workflow lacks rep
 grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS' "${PR_WORKFLOW}" ||
     fail 'PR workflow does not pass native concurrency to the selector'
 prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${PR_WORKFLOW}")
-[[ "${prImageNeeds}" == '    needs: [static, native, tls, contracts]' ]] ||
+[[ "${prImageNeeds}" == '    needs: [static, native, tls, contracts]' ||
+    "${prImageNeeds}" == '    needs: [static, native, tls, signing, contracts]' ]] ||
     fail 'PR images can run without native, TLS or contract validation'
 grep -Fxq '      - name: Bump script and lock version' <<<"${prepareDefinition}" ||
     fail '版本提交不在全部门禁之后'

@@ -25,10 +25,15 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # 嵌套 daemon 只操作隔离容器，复用离线 net 镜像，不挂宿主 Socket。
+case "${PADM_TEST_DOCKER_DRIVER:-overlayfs}" in
+overlay2) storage=(--feature containerd-snapshotter=false --storage-driver overlay2) ;;
+overlayfs) storage=(--feature containerd-snapshotter=true --storage-driver overlayfs) ;;
+*) printf 'unsupported isolated Docker storage driver\n' >&2; exit 1 ;;
+esac
 export DOCKER_HOST="unix://${TEST_ROOT}/docker.sock"
 dockerd --host "${DOCKER_HOST}" --data-root "${TEST_ROOT}/docker" \
     --exec-root "${TEST_ROOT}/run" --pidfile "${TEST_ROOT}/daemon.pid" \
-    --feature containerd-snapshotter=true --storage-driver overlayfs \
+    "${storage[@]}" \
     --bridge none --iptables=false --ip6tables=false >"${TEST_ROOT}/daemon.log" 2>&1 &
 daemon=$!
 ready=0

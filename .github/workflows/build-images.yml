@@ -297,6 +297,8 @@ jobs:
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}"
           jq -e 'map(.name) | sort == ["net","nginx","ops","sing-box","xray"]' <<<"${PADM_IMAGES}" >/dev/null
+          driver=$(docker info --format '{{.Driver}}')
+          case "${driver}" in overlay2|overlayfs) ;; *) exit 1 ;; esac
           manifest='{}'
           refs=()
           for name in xray sing-box nginx ops net; do
@@ -311,7 +313,10 @@ jobs:
             identity=$(jq -er '.[0].Id | select(test("^sha256:[0-9a-f]{64}$"))' <<<"${info}")
             manifest=$(jq -c --arg name "${name}" --arg identity "${identity}" --arg source "${reference}" \
               '. + {($name): {reference: $identity, image_id: $identity, source_reference: $source}}' <<<"${manifest}")
-            refs+=("${identity}")
+            # 保留命名入口，匹配存储方式的内层仍按原镜像 ID 严格核验。
+            export_ref="padm-runtime/padm-${name}:pinned"
+            docker tag "${identity}" "${export_ref}"
+            refs+=("${export_ref}")
           done
           printf '%s\n' "${manifest}" >"${RUNNER_TEMP}/node-images.json"
           docker save --output "${RUNNER_TEMP}/node-images.tar" "${refs[@]}"
@@ -326,6 +331,7 @@ jobs:
           # 复用本机隔离入口，不挂宿主 Socket，也不开放公网。
           container=$(docker create --privileged --network none --init --mount type=volume,dst=/n \
             --env PADM_REGRESSION_PARALLEL_JOBS=2 --env PADM_REGRESSION_VERBOSE=1 \
+            --env "PADM_TEST_DOCKER_DRIVER=${driver}" \
             padm-regression:runtime docker-distroless-real)
           docker cp "${RUNNER_TEMP}/runtime-source.tar" "${container}:/snapshot.tar"
           docker cp "${RUNNER_TEMP}/node-images.tar" "${container}:/node-images.tar"
