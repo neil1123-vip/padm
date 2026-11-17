@@ -1,0 +1,37 @@
+name: Dependabot Automation
+
+on:
+  workflow_run:
+    workflows: [Docker CI]
+    types: [completed]
+  schedule:
+    - cron: '37 4 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dependabot-automation
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout trusted automation
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Promote validated Dependabot updates
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const reconcile = require('./.github/scripts/dependabot-merge.cjs');
+            await reconcile({ github, context, core });

@@ -1208,6 +1208,11 @@ runDockerTunResourcesRegression() {
     bash "${PROJECT_ROOT}/docker/tests/tun-resources.sh"
 }
 
+runDependabotAutomationRegression() {
+    node --test "${PROJECT_ROOT}/docker/tests/dependabot-automation.cjs"
+}
+
+registerRegressionFunctionLeaf dependabot-automation runDependabotAutomationRegression
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
 registerRegressionFunctionLeaf static-sites runStaticSitesRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety

@@ -3,6 +3,8 @@ name: Docker CI
 on:
   pull_request:
     paths:
+      - '.github/dependabot.yml'
+      - '.github/scripts/**'
       - '.github/workflows/**'
       - 'docker/**'
       - 'docker-bake.hcl'
@@ -95,6 +97,20 @@ jobs:
         shell: bash
         run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused
 
+  signing:
+    name: Cosign install and signature checks
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.static.outputs.source_sha }}
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+      - name: Check signing and tamper rejection
+        run: bash shell/regression/check-cosign.sh
+
   contracts:
     needs: static
     uses: ./.github/workflows/docker-contracts.yml
@@ -102,7 +118,7 @@ jobs:
       source_ref: ${{ needs.static.outputs.source_sha }}
 
   images:
-    needs: [static, native, tls, contracts]
+    needs: [static, native, tls, signing, contracts]
     uses: ./.github/workflows/build-images.yml
     concurrency:
       group: docker-ci-head-${{ github.event.pull_request.head.sha || github.sha }}

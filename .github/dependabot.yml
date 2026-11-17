@@ -3,5 +3,11 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: daily
+    groups:
+      action-updates:
+        update-types:
+          - major
+          - minor
+          - patch
     open-pull-requests-limit: 5

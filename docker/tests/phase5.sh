@@ -66,6 +66,7 @@ bash -n "${RELEASE_SCRIPT}" "${PROJECT_ROOT}/docker/tests/image-smoke.sh" || fai
 jq empty "${SCHEMA_FILE}" || fail 'release manifest schema is invalid JSON'
 bash "${RELEASE_SCRIPT}" validate-lock | grep -qx 'release-lock-ok' || fail 'release lock validation failed'
 bash "${PROJECT_ROOT}/docker/tests/refresh-upstreams.sh"
+node --test "${PROJECT_ROOT}/docker/tests/dependabot-automation.cjs"
 node "${PROJECT_ROOT}/docker/tests/sing-box-build.cjs"
 bash "${PROJECT_ROOT}/docker/tests/preflight.sh"
 
