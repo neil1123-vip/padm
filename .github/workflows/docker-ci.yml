@@ -15,6 +15,10 @@ on:
       - 'assets/**'
   workflow_dispatch:
     inputs:
+      native_host_probe:
+        description: Run only the isolated native ARM64 host preflight
+        default: false
+        type: boolean
       native_parallel_jobs:
         description: Top-level native regression workers (2-4 for benchmark/recovery)
         required: false
@@ -31,6 +35,7 @@ concurrency:
 jobs:
   static:
     name: Native static checks
+    if: ${{ !inputs.native_host_probe }}
     timeout-minutes: 10
     runs-on: ubuntu-latest
     outputs:
@@ -129,3 +134,64 @@ jobs:
       registry: ghcr.io/neil1123-vip
       push: false
       base_ref: ${{ github.event.pull_request.base.sha || '' }}
+
+  native-host-probe:
+    name: Native ARM64 host preflight
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.native_host_probe }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      - name: Collect native host capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee "${RUNNER_TEMP}/native-arm64-host-preflight.json"
+          import json
+          import os
+          import platform
+          import subprocess
+          from pathlib import Path
+
+          def probe(arguments):
+              result = subprocess.run(arguments, capture_output=True, text=True, timeout=30)
+              return dict(arguments=arguments, returncode=result.returncode,
+                          stdout=result.stdout, stderr=result.stderr)
+
+          commands = {
+              "uname": ["uname", "-a"],
+              "pid1": ["cat", "/proc/1/comm"],
+              "systemd": ["systemctl", "is-system-running"],
+              "docker_service": ["systemctl", "show", "docker.service",
+                                 "-p", "ActiveState", "-p", "UnitFileState", "-p", "MainPID"],
+              "sudo": ["sudo", "-n", "true"],
+              "compose": ["docker", "compose", "version", "--short"],
+              "root_mount": ["findmnt", "-n", "-o", "FSTYPE,SOURCE", "/"],
+              "global_ipv6": ["ip", "-j", "-6", "address", "show", "scope", "global"],
+              "kvm": ["test", "-c", "/dev/kvm"],
+          }
+          values = {name: probe(arguments) for name, arguments in commands.items()}
+          engine = probe(["docker", "info", "--format", "{{json .}}"])
+          assert engine["returncode"] == 0, engine
+          info = json.loads(engine["stdout"])
+          engine["stdout"] = {key: info[key] for key in (
+              "Architecture", "OSType", "KernelVersion", "OperatingSystem", "ServerVersion",
+              "Driver", "DriverStatus", "CgroupDriver", "CgroupVersion", "SecurityOptions")}
+          result = dict(
+              source=os.environ["GITHUB_SHA"], run_id=os.environ["GITHUB_RUN_ID"],
+              architecture=platform.machine(), os_release=Path("/etc/os-release").read_text(),
+              probes=values, docker=engine,
+              nested_virtualization_available=values["kvm"]["returncode"] == 0,
+          )
+          assert result["architecture"] == "aarch64"
+          assert values["pid1"]["stdout"].strip() == "systemd"
+          assert values["sudo"]["returncode"] == values["compose"]["returncode"] == 0
+          assert info["Architecture"] in {"aarch64", "arm64"} and info["OSType"] == "linux"
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - name: Preserve capability evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-arm64-host-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-arm64-host-preflight.json
+          if-no-files-found: error
