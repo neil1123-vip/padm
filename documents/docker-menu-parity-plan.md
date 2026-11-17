@@ -12183,6 +12183,51 @@ Docker Desktop Linux amd64 使用相同工具镜像、`-Jobs 2`，两组不复�
 本轮未复跑原生 VM，未证明正式控制面防护通过或原生见证截止问题解决；
 未访问或重启生产、扩跑 daily/full、推送或发布，`16 supported/14 deferred` 保持。
 
+### 6A.64 KVM 双机控制防护子项与恢复元数据边界
+
+2026-11-17，停止按 TCG 计时继续微调产品代码，复用 WSL 内已安装的匹配内核
+KVM 模块。最小探针通过后，非 privileged 工具容器仅映射 `/dev/kvm`；
+两台独立 Debian 13 amd64 guest 使用新 child 盘，QEMU 固定 `kvm/host`，
+逐台 QMP 确认 `enabled=true,present=true`，没有 TCG 回退。
+模块仍加载，未配置持久加载，也未重启 Windows、WSL 或生产 A/B。
+
+固定签名候选 `5c16680c6b627e4db0dc59f340ad6f82bf39d0b9` 的 bootstrap、
+control、lifecycle 三份源码，仍是正式 `.7` 归档加候选源码，不能称新正式发布。
+保留两机六次正式资产 GET、manifest/Cosign 门禁、唯一来源 CLI、完整即时校验、
+三次采样、原 `30` 秒窗口、真实防护与恢复断言；未插桩。
+前两轮分别停于冻结夹具缺少规范化空 `devices/schedules`、
+把 Docker inspect 的 `CAP_NET_ADMIN` 写为 `NET_ADMIN`。
+修正只影响观察器，完整对象和唯一能力仍精确比较，额外设备/能力负控拒绝；
+原失败轮保持，r2 断网独验绑定 `144` 份证据，整体和恢复仍为 `false`。
+
+r3 正式 enable 返回 `0`，唯一 challenge、完整 Peer 来源 CLI 和窗口内唯一回执通过；
+`21` 次真实 `401` 请求后触发封禁、阻断超时、DROP 增加 `1`、解封后恢复 `401`。
+启用态错误身份拒绝、受管及核心身份严格 TLS 业务通过，受管账目增长；
+停用命令返回 `0`，之后三项业务、账目及健康快照完成。
+六次业务 nonce 和客户端进程分别独立；相同正例身份的客户端配置应保持相同，
+不能要求六份配置摘要互异。随机错误身份原 stdin 仍不可重建，保留该独验限制。
+
+整轮仍返回 `1`：恢复阶段要求所有文件逐字节不变，但主控 `deployment.json`
+摘要改变，权限保持；两机规格、其余配置/材料及镜像保持，Peer 文件全部相同。
+使用固定正式归档中的确定性 `dockerGenerateDeployment`，以原规格、WG 端口和
+四组已知 bundle/previous-manifest 输入断网重建，前后完整字节摘要各唯一命中。
+实际仅 `bundle_version` 从正式 `2f17e6ac` 刷新为已安装候选
+`sha256:b476f8ae7e7b5e45b669c07a96785df2059335416bcfcc02c96e4be0a5862727`；
+`previous_manifest_sha256` 未变，原始快照、权限及安装 ref 另行绑定。
+这是候选安装后重配的元数据更新，不能据此补判未执行的断言。
+
+最终停用安全、Peer 清场和额外源码检查未执行，完整恢复及整轮通过仍未证明。
+停用 stderr 的镜像/Compose 日志及八条 orphan 警告原样保留，不要求 stderr 为空。
+两 guest 正常关机 `4.386` 秒，QEMU 均 `0`、无强停，父盘不变，驱动无 OOM。
+断网独验绑定 `231` 份证据，`protection_checks_verified=true`、
+`restoration_business_verified=true`，但 `passed=false,recovery_audit_passed=false`；
+报告 `kvm-r3-verification.json` SHA-256
+`b6beb2cd0fdec703bb167fb19e7136a152f680eafdcb80450567b6b57dce97f4`。
+证据 `.tmp-native-control-vms-20261116/.tmp-kvm-5c16680c/`；
+旧 TCG 失败不改判，不作跨环境性能比较，不外推公网、多 Peer、arm64/IPv6 或生产。
+下一步只修正候选元数据预期并补缺失终态采样，再评估一次完整验收；
+本轮不再开 VM，未扩跑 daily/full、推送或发布，`16 supported/14 deferred` 保持。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
