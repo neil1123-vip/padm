@@ -20,7 +20,7 @@ on:
         default: false
         type: boolean
       native_host_lifecycle:
-        description: Run only formal release lifecycle acceptance on an isolated ARM64 host
+        description: Run Engine auto-install and formal sing-box lifecycle on an isolated ARM64 host
         default: false
         type: boolean
       native_parallel_jobs:
@@ -204,7 +204,7 @@ jobs:
           if-no-files-found: error
 
   native-host-lifecycle:
-    name: Formal native ARM64 host lifecycle
+    name: Formal native ARM64 Engine and sing-box lifecycle
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.native_host_lifecycle }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
@@ -222,6 +222,7 @@ jobs:
           set -euo pipefail
           sudo env PATH="${PATH}" GITHUB_SHA="${GITHUB_SHA}" GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
             GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" \
+            GITHUB_ACTIONS="${GITHUB_ACTIONS}" RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT}" \
             python3 -B shell/regression/native-arm64-host-lifecycle.py \
             --work "${RUNNER_TEMP}/padm-arm64-host"
       - name: Preserve sanitized acceptance evidence
