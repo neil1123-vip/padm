@@ -119,6 +119,9 @@ jobs:
 
   images:
     needs: [static, native, tls, signing, contracts]
+    permissions:
+      contents: read
+      packages: read
     uses: ./.github/workflows/build-images.yml
     concurrency:
       group: docker-ci-head-${{ github.event.pull_request.head.sha || github.sha }}
