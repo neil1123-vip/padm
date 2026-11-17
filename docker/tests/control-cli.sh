@@ -607,6 +607,8 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
         printf '%s\n' "${nonce}" >>"${TEST_ROOT}/source-completions.log"
         if [[ "${WITNESS_COMMIT_CASE:-}" == drift ]]; then
             touch "${TEST_ROOT}/source-drift"
+        elif [[ "${WITNESS_COMMIT_CASE:-}" == expired ]]; then
+            expires=$(date +%s)
         elif [[ "${WITNESS_COMMIT_CASE:-}" == signal ]]; then
             kill -TERM "${BASHPID}"
         fi
@@ -627,6 +629,17 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
         "$(grep -c '^lock$' "${TEST_ROOT}/host.log")" == "${fixtureLockCount}" &&
         "$(grep -c '^unlock$' "${TEST_ROOT}/host.log")" == "${fixtureUnlockCount}" &&
         -z "$(find "${root}" -maxdepth 1 -name '.control-source.*' -print -quit)" ]]
+    # 已验证来源在回调过期仍须拒绝，清理登记但保留父事务锁。
+    WITNESS_COMMIT_CASE=expired
+    status=0
+    dockerControlSourceWitnessLocked dockerFail2banStartManagedCommit >"${TEST_ROOT}/source-check.log" \
+        2>"${TEST_ROOT}/source-check.err" || status=$?
+    [[ "${status}" == 15 && ! -e "${sourceDirectory}/challenge.json" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")" == "${fixtureLockOwner}" &&
+        "$(grep -c '^lock$' "${TEST_ROOT}/host.log")" == "${fixtureLockCount}" &&
+        "$(grep -c '^unlock$' "${TEST_ROOT}/host.log")" == "${fixtureUnlockCount}" &&
+        -z "$(find "${root}" -maxdepth 1 -name '.control-source.*' -print -quit)" ]]
+    [[ "$(grep -c '^source-verified=' "${TEST_ROOT}/source-check.log")" == 1 ]]
     # 完成回调中断只清理本次登记，子见证不能释放父事务锁。
     WITNESS_COMMIT_CASE=signal
     status=0

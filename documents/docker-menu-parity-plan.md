@@ -11673,6 +11673,64 @@ SHA-256 `1db2e6cfcb93b347d1ab6b3c69444be5471950b02468ef375660babd41280b6d`。
 仅补候选的来源见证及失败恢复证据；正式版与候选防护均未通过，
 16 supported/14 deferred 不变，未连接/重启 A/B、推送或发布。
 
+### 6A.52 候选防护 Recheck 超截止观察与过期拒绝合同
+
+2026-11-17，复用 6A.51 的正式 `.7` 加候选 bootstrap、正式本地源码安装及
+独立双机 child，只增加 DEBUG 元数据跟踪；未修改运行源码、原 30 秒窗口或
+安全门槛。run `/work/control-protection-1794870905600222987` 仅执行一次
+enable、单挑战，完整 Peer CLI rc `0`、一次 `source-verified`，
+enable 仍 rc `14`。跟踪仅含时间、PID、函数、行号、前次状态、SECONDS、
+started 与 expires，不记录凭据、业务变量内容或完整 xtrace。
+
+同一挑战的 Commit 入口时间 `1794871296.861252`，SECONDS `260`、
+started `235`，相对已用 `25` 秒；expires 为 `1794871301`。
+配置检查约 `1.04` 秒、清场约 `5.76` 秒后，Recheck 入口时间
+`1794871303.705851`、SECONDS `267`，相对已用 `32` 秒。
+元数据停在 `control.sh:1089` 的锁/date 合取门槛，返回
+`lifecycle.sh:987` 时前次状态为 `1`；未到 `1090` 相对门槛或下一次
+Snapshot，未启动 jail。只观察到本轮 Recheck 入口已经超截止并在该门槛
+拒绝，不把元数据当作所有动态谓词值的独立证明，不外推旧失败同因。
+
+驱动末尾在 `candidate-preflight-installed-baseline:235` 的
+`assert disabled["deployment_lock_absent"]` 再次失败，最终安全采样仍见
+部署锁；owner 未查，不归因为 timer 或无害瞬态。前面的最终双机快照及
+jail/state/规则检查已执行，但未到 final_peer 和 extra_final_sources，
+`passed`、`driver_assertions_passed`、`recovery_audit_passed` 均保持 false。
+驱动耗时 `488.110803252` 秒，两机正常关机 `7.23830238` 秒，
+QEMU exit `0/0`、无强停、父盘摘要保持。首次容器创建因只读 `/input`
+父挂载无法建立 bootstrap 子挂载而失败，未运行 guest，创建错误原件保留。
+
+驱动 SHA-256 `ee44d0d820b7e3c32017884c3307bad8e63a67c3473e7026b0849296c7e7e5b0`；
+1047 条元数据的原始 trace SHA-256
+`efacf2acc4153c93c0f8db708dc97e725092806e7e43055b686d3f5b4062390e`。
+首稿断网独验因子 shell 入口/EXIT 的 reported line 映射断言失败，
+exit `1`、未生成成功摘要；原稿、错误和终态保留，不修改原始观察。
+
+修正观察器后，正文 `1002` 条、子 shell 入口 `20` 条、EXIT trap `25` 条
+均逐条绑定正式归档源码。入口保留原 reported line、正文位置为 null，
+独立给出 definition_line，并约束紧邻同函数的新 PID、首条正文和相同计时
+上下文；不把入口行号伪映射为正文。最终断网独验 exit `0`、无 OOM，
+独立绑定本轮 `172` 份原件，固定摘要引用旧 `1957` 份而不重复全量重核。
+`diagnosis_verified` 为 true；`passed`、`recovery_audit_passed`、
+`rejection_branch_proven`、`original_failure_cause_proven` 仍为 false。
+公开摘要 `.tmp-native-control-vms-20261116/candidate-preflight-diagnostic-verification.json`，
+SHA-256 `a017f7650e3f0945e1e350e9f6ac906cdb6e82f4a4a23c5ffde2ff223931e85e`；
+独验器 SHA-256 `c22576071a13dbc819b71ca5f5d09ae3a1992f01fc401999d600861e6329a8d4`。
+驱动/首稿独验/最终独验 exit `1/1/0`，均无 OOM；私密卷无活动容器。
+容器创建错误及各终态由同目录 `candidate-preflight-diagnostic-final-states.json`
+分别绑定，SHA-256
+`dd6740c5a94b6ff78c5fcb3977d002d3fa4525dc485905189ff30db1297a6496`；
+不以独验 exit `0` 改判防护或完整恢复失败。
+
+`docker/tests/control-cli.sh` 补已 verified 后回调过期的拒绝合同：
+真实 Recheck 返回 `15`，挑战/临时材料清场，父事务锁及 lock/unlock
+计数保持。`docker-control-cli -Jobs 2` 在当前 Linux amd64 源码快照
+`526ef30b4d1259f61d14ea080c0ee29969a9f5140b0285764a966f0d0c60dd04`
+实际执行通过，入口 `21.631` 秒、exit `0`、无缓存命中，证据
+`.tmp-regression-docker-983902de5d6742fca2460a364591b004/`。
+仅新增测试；防护及完整恢复仍未通过，16 supported/14 deferred 不变，
+未连接/重启 A/B、放宽安全窗口、推送、发布或重复 daily/full。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
