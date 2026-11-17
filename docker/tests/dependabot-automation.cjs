@@ -67,6 +67,7 @@ function fixture(options = {}) {
     let promoted = false;
     let branchUpdated = false;
     let dispatchFailed = false;
+    let releaseReads = 0;
     function method(name, handler) {
         return async params => {
             calls.push({ name, params });
@@ -135,13 +136,17 @@ function fixture(options = {}) {
             })
         },
         actions: {
-            listWorkflowRuns: method('actions.listWorkflowRuns', params => ({
-                total_count: params.workflow_id === 'create_release.yml' ? (options.releaseRuns ?? []).length
-                    : options.noRun ? 0 : options.runs?.length ?? 1,
-                workflow_runs: params.workflow_id === 'create_release.yml' ? options.releaseRuns ?? []
-                    : options.noRun ? [] : options.runs ? options.runs.map(item => ({ ...run, ...item }))
-                        : options.conflict ? [{ ...run, head_sha: newer, head_branch: otherPr.head.ref }] : [run]
-            })),
+            listWorkflowRuns: method('actions.listWorkflowRuns', params => {
+                if (params.workflow_id === 'create_release.yml') {
+                    releaseReads++;
+                    const releases = options.releaseAfterRead && releaseReads >= options.releaseAfterRead
+                        ? [{ head_sha: head, event: 'push', status: 'queued' }] : options.releaseRuns ?? [];
+                    return { total_count: releases.length, workflow_runs: releases };
+                }
+                const history = options.noRun ? [] : options.runs ? options.runs.map(item => ({ ...run, ...item }))
+                    : options.conflict ? [{ ...run, head_sha: newer, head_branch: otherPr.head.ref }] : [run];
+                return { total_count: history.length, workflow_runs: history };
+            }),
             listJobsForWorkflowRun: method('actions.listJobsForWorkflowRun', () => ({ total_count: jobs.length, jobs })),
             createWorkflowDispatch: method('actions.createWorkflowDispatch', params => {
                 if (options.failRelease && params.workflow_id === 'create_release.yml' && !dispatchFailed) {
@@ -177,7 +182,10 @@ function fixture(options = {}) {
         eventName: 'workflow_dispatch',
         payload: { repository: { full_name: `${owner}/${repo}`, default_branch: 'main' } }
     };
-    return { github, core, context, calls, messages, pr, run };
+    return {
+        github, core, context, calls, messages, pr, run,
+        workflowTokenConfigured: true, sleep: async () => {},
+    };
 }
 
 async function execute(options) {
@@ -189,6 +197,13 @@ async function execute(options) {
 function writes(state) {
     return state.calls.filter(call => /updateRef|updateBranch|createWorkflowDispatch/.test(call.name));
 }
+
+test('未配置专用工作流凭据时在任何 API 调用前明确失败', async () => {
+    const state = fixture();
+    delete state.workflowTokenConfigured;
+    await assert.rejects(() => automate(state), /DEPENDABOT_AUTOMATION_TOKEN.*Workflows write/);
+    assert.deepEqual(state.calls, []);
+});
 
 test('合入通过当前 CI 的小版本提交并接续发布', async () => {
     const state = await execute();
@@ -231,13 +246,11 @@ for (const [name, options] of [
     });
 }
 
-test('同步落后的基线并显式派发新 CI', async () => {
+test('同步落后的基线后等待 PAT 自然触发 CI', async () => {
     const state = await execute({ behind: true });
     const update = state.calls.find(call => call.name === 'pulls.updateBranch');
     assert.equal(update.params.expected_head_sha, head);
-    const ci = state.calls.find(call => call.name === 'actions.createWorkflowDispatch');
-    assert.equal(ci.params.workflow_id, 'docker-ci.yml');
-    assert.equal(ci.params.ref, state.pr.head.ref);
+    assert.equal(state.calls.some(call => call.name === 'actions.createWorkflowDispatch'), false);
     assert.equal(state.calls.some(call => call.name === 'git.updateRef'), false);
 });
 
@@ -367,6 +380,13 @@ test('已提升的候选在后续候选 API 失败前立即接续发布', async 
         call.params.pull_number === 12);
     assert.ok(dispatch >= 0 && dispatch < failedRead, '已提升提交必须先派发发布，再读取后续候选');
     assert.equal(state.calls.filter(call => call.name === 'git.updateRef').length, 1);
+});
+
+test('等待 PAT push 的发布记录出现后不重复派发', async () => {
+    const state = await execute({ releaseAfterRead: 3 });
+    assert.equal(state.calls.filter(call => call.name === 'actions.listWorkflowRuns' &&
+        call.params.workflow_id === 'create_release.yml').length, 3);
+    assert.equal(state.calls.some(call => call.name === 'actions.createWorkflowDispatch'), false);
 });
 
 test('下一轮为已合入 main 的机器人提交补派发布', async () => {

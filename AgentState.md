@@ -27,7 +27,8 @@
   断网只读独验通过；`.tmp-native-arm64-host-20261117/`。原始私密输出未上传。
 - CI 修复 `781b770e` 已推、run `44078479350` success；独立 `.44` 发布 run
   `44081637875` 全过含 ARM64 runtime，不替代 `.44` 宿主整轮，A/B 未升级。
-- Dependabot 40 例及 phase5/双版 Cosign 已验，真实线上事件待验。
+- Dependabot 内置令牌同步 workflow 遭 403；修复后 42 例及 Actionlint 通过。
+  待配 `DEPENDABOT_AUTOMATION_TOKEN` 后线上验证；PAT 事件已适配。
 - jq、health/Peer 合并定向已验；旧计时/失败边界见 6A.62。
 - 原生双机证据 `.tmp-native-control-vms-20261116/`；控制角色撤回及 A/B 恢复
   已清场，0 显式账号、各 19 条历史账目；`.7` 资产验签及双架构绑定通过。

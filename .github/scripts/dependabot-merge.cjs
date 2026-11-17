@@ -33,7 +33,13 @@ function actionVersionUpdate(before, after) {
   return changes > 0 && normalize(before) === normalize(after);
 }
 
-module.exports = async ({ github, context, core }) => {
+module.exports = async ({
+  github, context, core, workflowTokenConfigured = false,
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+}) => {
+  if (!workflowTokenConfigured) {
+    throw new Error('Configure the DEPENDABOT_AUTOMATION_TOKEN repository secret with Actions, Contents, Pull requests and Workflows write permissions. GITHUB_TOKEN cannot synchronize workflow updates.');
+  }
   const repo = context.repo;
   const { data: repository } = await github.rest.repos.get(repo);
   const branch = repository.default_branch;
@@ -56,16 +62,19 @@ module.exports = async ({ github, context, core }) => {
     await github.rest.actions.createWorkflowDispatch({ ...repo, workflow_id: 'docker-ci.yml', ref });
     core.info(`Docker CI dispatched for ${ref}.`);
   };
-  const ensureRelease = async sha => {
-    const releases = await github.paginate(github.rest.actions.listWorkflowRuns, {
-      ...repo, workflow_id: 'create_release.yml', head_sha: sha, per_page: 100,
-    });
-    if (!releases.some(run => run.head_sha === sha)) {
-      await github.rest.actions.createWorkflowDispatch({
-        ...repo, workflow_id: 'create_release.yml', ref: branch, inputs: { force_release: 'false' },
+  const ensureRelease = async (sha, waitForPush = false) => {
+    const attempts = waitForPush ? 4 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const releases = await github.paginate(github.rest.actions.listWorkflowRuns, {
+        ...repo, workflow_id: 'create_release.yml', head_sha: sha, per_page: 100,
       });
-      core.info('Release dispatched with force_release=false.');
+      if (releases.some(run => run.head_sha === sha)) return;
+      if (attempt + 1 < attempts) await sleep(2000);
     }
+    await github.rest.actions.createWorkflowDispatch({
+      ...repo, workflow_id: 'create_release.yml', ref: branch, inputs: { force_release: 'false' },
+    });
+    core.info('Release dispatched with force_release=false.');
   };
   let promoted = false;
   for (const candidate of candidates) {
@@ -128,18 +137,18 @@ module.exports = async ({ github, context, core }) => {
         core.warning(`PR #${pr.number} cannot update automatically: ${error.message}`);
         continue;
       }
-      // updateBranch 异步完成；先确认新 head 已包含 main，再派发 CI。
+      // PAT 更新会触发 PR CI；确认同步完成，缺失运行由后续巡检补派。
       for (let attempt = 0; attempt < 6; attempt++) {
         ({ data: pr } = await github.rest.pulls.get({ ...repo, pull_number: pr.number }));
         if (pr.head.sha !== previous &&
             ['ahead', 'identical'].includes((await compare(current.commit.sha, pr.head.sha)).status)) break;
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await sleep(2000);
       }
       if (pr.head.sha === previous ||
           !['ahead', 'identical'].includes((await compare(current.commit.sha, pr.head.sha)).status)) {
         throw new Error(`PR #${pr.number} branch update is not ready; rerun automation after GitHub finishes updating it.`);
       }
-      await dispatchCi(pr.head.ref);
+      core.info(`PR #${pr.number} updated; waiting for its pull_request CI.`);
       continue;
     }
     const history = (await runs(pr.head.sha)).filter(run =>
@@ -172,7 +181,7 @@ module.exports = async ({ github, context, core }) => {
     core.info(`Promoted PR #${pr.number} at tested commit ${pr.head.sha}.`);
     promoted = true;
     // 先接续已合入提交的发布，避免后续候选异常挡住派发。
-    await ensureRelease(pr.head.sha);
+    await ensureRelease(pr.head.sha, true);
   }
   // shortcut: 补派只匹配当前 main；需要跨提交恢复时再跟踪发布状态。
   if (promoted) return;
