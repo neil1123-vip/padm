@@ -77,6 +77,8 @@ class Acceptance(base.Acceptance):
         self.servers = []
         self.clients = {}
         self.requests = []
+        self.https_connections = []
+        self.deferred_failures = []
         self.checks = []
         self.account_uuid = str(uuid.uuid4())
         self.record("specialties-identity", {
@@ -197,10 +199,20 @@ class Acceptance(base.Acceptance):
                 pass
 
         self.origin = self.server(http.server.ThreadingHTTPServer((ORIGIN, 0), Origin))
-        self.https_origin = http.server.ThreadingHTTPServer((ORIGIN, 0), Origin)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(certfile=str(cert), keyfile=str(key))
-        self.https_origin.socket = context.wrap_socket(self.https_origin.socket, server_side=True)
+
+        class HttpsOrigin(http.server.ThreadingHTTPServer):
+            def get_request(self):
+                connection, peer = super().get_request()
+                owner.https_connections.append({"peer": peer[0]})
+                try:
+                    return context.wrap_socket(connection, server_side=True), peer
+                except BaseException:
+                    connection.close()
+                    raise
+
+        self.https_origin = HttpsOrigin((ORIGIN, 0), Origin)
         self.server(self.https_origin)
         self.start_clients()
 
@@ -427,6 +439,7 @@ class Acceptance(base.Acceptance):
 
     def relay_probe(self, label, port, accepted, password="relay-password", *, https=False, expected_status=None):
         before = len(self.requests)
+        connections_before = len(self.https_connections)
         nonce = "/" + uuid.uuid4().hex
         headers = self.private / (label + ".headers")
         origin = self.https_origin if https else self.origin
@@ -439,20 +452,24 @@ class Acceptance(base.Acceptance):
         )
         code = self.commands[-1]["exit"]
         requests = self.requests[before:]
+        connections = self.https_connections[connections_before:]
         expected = (nonce.encode() + b"\n") * 4096
-        require((code == 0 and output == expected and len(requests) == 1 and requests[0]["path"] == nonce)
-                if accepted else (code != 0 and not output and not requests), "relay result mismatch")
         statuses = [int(line.split()[1]) for line in headers.read_text().splitlines() if line.startswith("HTTP/")]
-        if expected_status is not None:
-            require(expected_status in statuses, "expected HTTP status not witnessed")
-        if accepted and https:
-            require(statuses == [200, 200], "HTTPS CONNECT tunnel or destination status mismatch")
         self.record(label, {"accepted": accepted, "curl_exit": code, "nonce": nonce,
                             "origin_requests": requests, "body_sha256": digest(output),
                             "expected_sha256": digest(expected), "body_bytes": len(output),
                             "statuses": statuses, "strict_https_connect": https,
+                            "https_origin_connections": connections,
                             "response_headers": self.public_bytes(label + ".headers", headers.read_bytes()),
                             "response_body": self.public_bytes(label + ".body", output)})
+        require((code == 0 and output == expected and len(requests) == 1 and requests[0]["path"] == nonce
+                 and len(connections) == int(https))
+                if accepted else (code not in (0, 28) and not output and not requests and not connections),
+                "relay result mismatch")
+        if expected_status is not None:
+            require(expected_status in statuses, "expected HTTP status not witnessed")
+        if accepted and https:
+            require(statuses == [200, 200], "HTTPS CONNECT tunnel or destination status mismatch")
         self.checks.append(label)
 
     def relay(self):
@@ -468,7 +485,22 @@ class Acceptance(base.Acceptance):
         self.relay_probe("relay-new-connect", RELAY_NEW, True, https=True)
         self.relay_probe("relay-old-port-rejected", RELAY, False)
         self.edit("--http-relay-sources", "198.18.1.2/32", label="relay-source-deny")
-        self.relay_probe("relay-source-rejected", RELAY_NEW, False)
+        spec = json.loads((ROOT / "config/spec.json").read_text())
+        runtime = json.loads((ROOT / "config/xray/config.json").read_text())
+        policy = runtime["routing"]["rules"][:2]
+        require(spec["relay"]["http"]["source_ips"] == ["198.18.1.2/32"], "relay source edit not persisted")
+        require(policy == [
+            {"type": "field", "inboundTag": ["padm-relay-http"], "source": ["198.18.1.2/32"],
+             "outboundTag": "padm-relay-http-direct"},
+            {"type": "field", "inboundTag": ["padm-relay-http"], "outboundTag": "blocked"},
+        ], "relay source policy mismatch")
+        self.record("relay-source-policy", {"source_ips": spec["relay"]["http"]["source_ips"], "rules": policy})
+        # 保留来源异常的失败判定，同时完成独立站点专项，避免重复整轮。
+        for label, https in (("relay-source-connect-rejected", True), ("relay-source-rejected", False)):
+            try:
+                self.relay_probe(label, RELAY_NEW, False, https=https)
+            except AssertionError:
+                self.deferred_failures.append(label)
         self.edit("--http-relay-off", label="relay-off")
         self.relay_probe("relay-off-rejected", RELAY_NEW, False)
         self.checkpoint("relay-restored", restored=True)
@@ -562,11 +594,14 @@ class Acceptance(base.Acceptance):
         self.cli("restart", label="formal-restart")
         self.checkpoint("restarted")
         self.website("site-after-restart")
-        self.record("specialties", {"passed": True, "checks": self.checks, "phases": self.phases,
+        self.record("specialties", {"passed": not self.deferred_failures,
+                                    "failed_checks": self.deferred_failures,
+                                    "checks": self.checks, "phases": self.phases,
                                     "version": NEW["version"], "source": NEW["commit"],
                                     "scope": "native-arm64-ipv4-local-origin-two-cores",
                                     "reboot_tested": False, "public_inbound_tested": False,
                                     "h2_requests_tested": True, "connect_https_tested": True})
+        require(not self.deferred_failures, "relay source checks failed: " + ",".join(self.deferred_failures))
 
     def cleanup(self):
         for server, thread in self.servers:
