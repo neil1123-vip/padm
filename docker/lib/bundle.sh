@@ -366,7 +366,7 @@ dockerValidateBundle() {
 }
 
 dockerStageBundle() {
-    local sourceRoot=$1 requestedRef=${2:-} root bundlesRoot stageDir candidate relativePath ref payloadPaths
+    local sourceRoot=$1 requestedRef=${2:-} stagingParent=${3:-} root bundlesRoot stageDir candidate relativePath ref payloadPaths
     local -a payloadFiles=()
     root=$(dockerInstallRoot) || return 1
     bundlesRoot="${root}/.bundles"
@@ -379,7 +379,11 @@ dockerStageBundle() {
         dockerError '无法确定 Docker bundle ref'
         return 1
     }
-    stageDir=$(mktemp -d "${bundlesRoot}/.stage.XXXXXX") || return 1
+    if [[ -n "${stagingParent}" ]]; then
+        dockerManagedPathIsSafe "${root}" "${stagingParent}" &&
+            [[ -d "${stagingParent}" && ! -L "${stagingParent}" && -O "${stagingParent}" ]] || return 1
+    fi
+    stageDir=$(mktemp -d "${stagingParent:-${bundlesRoot}}/.stage.XXXXXX") || return 1
     candidate="${stageDir}/bundle"
     # 创建候选目录前登记，复制或校验中断时统一清理本次 stage。
     DOCKER_STAGED_BUNDLE_DIR=${stageDir}
@@ -657,7 +661,7 @@ dockerStageReleaseBundle() {
         return "${PADM_DOCKER_RC_STATE}"
     fi
     ref=$(jq -er '.release.commit' "${PADM_DOCKER_MANIFEST_FILE}") || return 1
-    dockerStageBundle "${sourceRoot}" "${ref}"
+    dockerStageBundle "${sourceRoot}" "${ref}" "${2:-}"
 }
 
 dockerActivateStagedBundle() {

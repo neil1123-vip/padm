@@ -1337,10 +1337,10 @@ dockerConfigureSpecMigrate() (
 )
 
 dockerConfigureReleasePrepare() {
-    local siteTemplate=${4:-} status=0
+    local siteTemplate=${4:-} stagingParent=${5:-} status=0
     DOCKER_CONFIG_RELEASE_INPUTS=
-    dockerManifestPrepare "${1:-}" "${2:-}" "${3:-}" || return "${PADM_DOCKER_RC_MANIFEST}"
-    dockerStageReleaseBundle "${siteTemplate}" >&2 || status=$?
+    dockerManifestPrepare "${1:-}" "${2:-}" "${3:-}" "${stagingParent}" || return "${PADM_DOCKER_RC_MANIFEST}"
+    dockerStageReleaseBundle "${siteTemplate}" "${stagingParent}" >&2 || status=$?
     if [[ "${status}" -ne 0 ]]; then
         [[ -n "${siteTemplate}" && "${status}" -eq "${PADM_DOCKER_RC_STATE}" ]] &&
             return "${status}"

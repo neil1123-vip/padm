@@ -78,6 +78,11 @@ dockerRecoveryAcmeValidate() {
 dockerRealityTargetsValidate() { :; }
 dockerIPv6NetworkManage() { :; }
 dockerConfigureReleasePrepare() {
+    local stage=${5:-} registered
+    registered=$(jq -er '.input_stage' "${root}/.restore-pending/metadata.json") || return 1
+    [[ "${stage}" == "${root}/${registered}" && "${4:-}" == '' ]] ||
+        fail '发布输入未放进已登记的恢复暂存目录'
+    mkdir -m 0700 -- "${stage}/.manifest.fixture" "${stage}/.stage.fixture" || return 1
     DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/bundle"
     DOCKER_CONFIG_RELEASE_INPUTS=$(jq -c '{release,images}' "${TEST_ROOT}/base.json")
 }

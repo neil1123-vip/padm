@@ -114,12 +114,16 @@ dockerManifestVerifierCheck() {
 
 dockerManifestPrepare() {
     local source=${1:-${PADM_DOCKER_RELEASE_MANIFEST_URL_DEFAULT}}
-    local bundle=${2:-} controlSource=${3:-}
+    local bundle=${2:-} controlSource=${3:-} stagingParent=${4:-}
     local root tempDir arch controlUrl controlSha expectedSha
     dockerManifestCleanup || return 1
     dockerManifestVerifierCheck || return 1
     root=$(dockerInstallRoot) || return 1
-    tempDir=$(mktemp -d "${root}/.manifest.XXXXXX") || return 1
+    if [[ -n "${stagingParent}" ]]; then
+        dockerManagedPathIsSafe "${root}" "${stagingParent}" &&
+            [[ -d "${stagingParent}" && ! -L "${stagingParent}" && -O "${stagingParent}" ]] || return 1
+    fi
+    tempDir=$(mktemp -d "${stagingParent:-${root}}/.manifest.XXXXXX") || return 1
     dockerManagedPathIsSafe "${root}" "${tempDir}" || {
         rm -rf -- "${tempDir}"
         return 1

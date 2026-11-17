@@ -3741,7 +3741,8 @@ dockerRecoveryCommand() (
         return "${PADM_DOCKER_RC_STATE}"
     [[ "${rebuildController}" != 1 ]] ||
         DOCKER_RECOVERY_CONTROLLER_SPEC="${stage}/draft/controller-spec.json"
-    dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    # 验签和 bundle 暂存随已登记的恢复输入一起回收，不能依赖 EXIT trap。
+    dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" '' "${stage}" || return $?
     dockerConfigureReleaseValidate "${stage}/draft/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
     DOCKER_RECOVERY_INPUT="${stage}/input"
     if jq -e '.wireguard_files == 3' "${stage}/draft/wireguard-counts.json" >/dev/null; then
