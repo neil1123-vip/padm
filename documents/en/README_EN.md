@@ -2748,6 +2748,10 @@ Maintainers can run the `Build sing-box Traffic Stats` Actions workflow, leaving
 
 Dependabot checks GitHub Actions daily and groups major, minor, and patch updates, all eligible for automatic promotion. `Dependabot Automation` reconciles updates after successful Docker CI runs and daily at 04:37 UTC, with a manual entry point as well. Only same-repository Dependabot PRs containing allowed stable Action reference upgrades qualify; downgrades are rejected. A stale branch is updated and explicitly sent through CI. Once the latest run for the exact commit passes, including Cosign installation, local signing, verification, and tamper rejection, that tested commit is fast-forwarded to `main` without force and Release is dispatched when needed without forcing a version. Other file or logic changes, requested changes, and genuine test failures require manual handling. Main branch protection stops direct promotion until a compatible merge policy is configured. Local signing checks do not replace production OIDC signing and trusted identity verification.
 
+Before enabling it, add `DEPENDABOT_AUTOMATION_TOKEN` under the repository's Settings → Secrets and variables → Actions. Use a fine-grained PAT restricted to this repository with read/write access to `Actions`, `Contents`, `Pull requests`, and `Workflows`, and replace it before expiration. The built-in `GITHUB_TOKEN` cannot synchronize branches that change workflow files, and YAML `permissions` cannot grant this access. Without the secret, automation fails clearly before any API call and does not promote a branch.
+
+Branch synchronization with the PAT starts CI through `pull_request`; a later reconciliation dispatches missing runs. After promotion, automation briefly waits for the `push` Release run to appear before dispatching a fallback.
+
 ## System and Script
 
 `System & script` handles padm itself and host-level helper features:

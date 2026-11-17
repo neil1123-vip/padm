@@ -541,6 +541,10 @@ Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官�
 
 Dependabot 每日检查 GitHub Actions，将大版本、次版本和补丁更新合为一组，均可自动合入。`Dependabot Automation` 在 Docker CI 成功后以及每天北京时间 12:37 检查更新，也可手动运行。它只处理同仓库 Dependabot PR 中允许的稳定版 Action 引用升级，拒绝降级；主分支前进时自动同步更新分支并补派 CI，精确提交的最新 CI 及 Cosign 安装、本地签验和篡改拒绝检查通过后，将受测提交非强制快进合入 `main`，再按需派发 Release，不强制生成新版本。其它文件或逻辑变化、人工要求修改和真实测试失败均留待人工处理；启用主分支保护后会停止直接提升，须先配置兼容的合并门禁。本地签验不替代正式发布时的 OIDC 签名和可信身份验证。
 
+启用前，在仓库的 Settings → Secrets and variables → Actions 中配置 `DEPENDABOT_AUTOMATION_TOKEN`。使用仅授权本仓库的 fine-grained PAT，授予 `Actions`、`Contents`、`Pull requests`、`Workflows` 的读写权限；到期后需更换。内置 `GITHUB_TOKEN` 无法同步含 workflow 文件变化的分支，不能通过 YAML 的 `permissions` 增加该权限。未配置 Secret 时自动化会在任何 API 调用前明确失败，不会提升分支。
+
+专用 PAT 同步分支后由 `pull_request` 事件启动 CI，缺失运行由后续巡检补派；提升后先等待 `push` 触发的 Release 记录，仍无记录才显式补派。
+
 ## 系统与脚本
 
 `系统与脚本` 负责 padm 自身和宿主机辅助项：

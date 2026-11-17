@@ -1,6 +1,6 @@
 # Docker 菜单与功能对齐实施计划
 
-修订日期：2026-11-16
+修订日期：2026-11-17
 
 本计划替代聊天中的六步菜单对齐方案，落实该方案的审计修正。它是
 [功能对照表](docker-feature-matrix.md)之后的实施路线，不是重做
@@ -64,7 +64,7 @@
 
 | 项目 | 当前结论 | 最小缺口 |
 | --- | --- | --- |
-| 原生 arm64 生命周期 | 未完成 | 可销毁的原生 arm64 Debian 主机及同架构镜像 digest |
+| 原生 arm64 生命周期 | 6A.67–6A.68 固定 Ubuntu ARM64/IPv4 的 Xray WS、纯 sing-box Trojan 七阶段和正式 Engine 自动安装通过，整体未完成 | 已取得可销毁原生宿主、签名资产与实际 ARM64 镜像绑定；整机重启、其它发行版/协议及适用专项仍待验 |
 | TProxy/TUN 真实启停与恢复 | 当前源码部分通过，完整流程未完成 | TUN TCP/TLS、UDP DNS、冲突拒绝、启停、净停后重启/显式启动通过；restart 首次 DNS 曾超时，独立补验通过。TProxy TCP/TLS 同矩阵通过；指定 UID UDP 缺少 NET_BIND_SERVICE 的原生对照及修复后隔离矩阵通过。3.41 的 net/validator 与验签控制包一致；按最新授权保持透明关闭，未执行正式启用重启矩阵，关闭状态的整机重启不替代该矩阵 |
 | 完整卸载与 purge | 本机原生范围通过 | 保留数据卸载、purge、整机重启后空目标无残留及同机灾备恢复通过；恢复后三项业务健康、外部 WS 正反例及 TLS/账号核对通过，不替代新主机灾备 |
 | 公网双栈端口跳跃 | 未完成 | 公网 IPv6、旧连接排空、自动恢复及宿主规则证据 |
@@ -12318,6 +12318,139 @@ before，不沿用 6A.65 的候选元数据例外。两机各 `312` 个实际 pa
 不外推生产、公网、多 Peer、ARM64 宿主生命周期、其它故障或长稳。
 未访问、升级或重启 A/B，未重复 daily/full 或发布应用；
 `16 supported/14 deferred` 不变，整体计划仍未完成。
+
+### 6A.67 正式原生 ARM64 宿主生命周期整轮
+
+2026-11-17，在独立 GitHub `ubuntu-24.04-arm` 宿主完成正式 `.7 → .8`
+固定生命周期，run `44080509205`、验收源提交
+`8da8899f2b9bc0ddae3a3870b8b6ad9c8cecb523`。实际为 aarch64、
+Ubuntu `24.04.5`、内核 `7.0.0-1017-azure`、PID 1 systemd；
+rootful Docker `28.0.4`、Compose `2.38.2`、overlay2/cgroup v2。
+Docker active/enabled，systemd 总体 degraded 的失败 unit 为 `mnt.mount`；
+无全球 IPv6 和 `/dev/kvm`，不将该宿主称为全部服务健康。
+
+七阶段均通过：正式 `.7` 安装与独立账号 → `.8` update → `.7` rollback →
+再次 `.8` update → restart → down/up → 默认保留卸载后 reinstall/up，
+最后正式 purge。回滚认领本轮首次 update 快照；restart 容器 ID 保持、
+StartedAt 改变，down 后无容器/监听且连接失败，up 得到新容器。
+Job 用时 `6m2s`；369 条命令首末墙钟 `354.625` 秒，不混为单个命令耗时。
+
+每阶段严格 TLS 的 core 与独立账号完整取得 `256 KiB` 随机正文，
+唯一 nonce 和真实 Xray bridge 来源绑定；错误 UUID 均拒绝，初始错误 SNI 拒绝，
+合计 `22` 个全新 sing-box 客户端。业务 origin 为临时 lo 地址
+`93.184.216.34/32`，属于本地隔离业务，不计公网入站。
+业务文件字节/权限/属主保持，spec 除 release/images 外 invariant 保持，
+`0600 root:root`；两账号身份和额度不变、累计不降，独立账号每阶段双向增长。
+最终两个账号各 upload `798`、download `1835820`；独立账号限额 `1073741824`
+字节，core 为 `0`。两版固定签名 manifest → `10` 份 raw ARM64 platform
+manifest → config digest → 各阶段实际容器镜像逐层绑定。
+`.7`/`.8` bundle 计数 `306/313` 包含生成 ref、不含清单，实际 payload
+为 `305/312`，不与 6A.66 的 payload 口径混用。
+
+正式 purge 默认保留镜像，再精确清理本轮新增镜像和 origin 地址。
+容器/网络/卷/镜像集合恢复初始状态，受管根、CLI、unit 均清除，Docker 保持
+active；未全局 prune。原始 ZIP `177880` 字节与 GitHub API digest 相同，
+本地精确归档 `56` 份脱敏工件。固定 Linux 工具镜像中 `4` 个独验负控通过；
+输入只读、断网独验 passed，核对来源/索引、资产/镜像、七阶段业务/规格/
+账目、客户端正文/nonce/来源、快照、启停和清场。
+
+- 驱动 SHA-256：
+  `3412e304091593d88a6f588ff3087cf802824cecc438bba972d2607f5e49efea`。
+- 原始 ZIP SHA-256：
+  `55949745e0366f3aa1d167dfcfb0e3a443bd797c43bde3474d3a8a8e52c8a1a2`。
+- 结果 SHA-256：
+  `cb90e2c3098fb0e50ef6fd70de93a0f5c57350422aa542cfe2f1855bf445b0bc`。
+- 独验报告 `independent-output/read-only-verification.json` SHA-256：
+  `3c0246b0878685e5af2795efa62982e36fa6f5ecb8a76d72b83130272f154907`。
+- 证据：`.tmp-native-arm64-host-20261117/`；远端工件保留至
+  `2026-12-01T12:15:35Z`，已下载本地。私钥、完整配置、UUID、原始命令输出未上传。
+
+预检原 run `44076776913` 因 reusable images caller 缺 `packages: read`
+在调度前失败，原件保持；只补 caller 的 `contents: read`、`packages: read` 后，
+预检 `44077168332` 通过。主线修复 `781b770e` 的 Release run
+`44078479350` 已 success，应用发布及镜像 smoke/runtime/publish 按计划跳过。
+临时验收模式和一次性驱动保留隔离分支，不直接合并主线。
+
+归档期间，独立上游版本自动更新 `f67b0f8c` 推进 Debian snapshot 至
+`20261116T000000Z`，发布源 `da790587` 的正式 `v3.44.0` 于北京时间
+`2026-11-17 20:30:29` 发布。Release run `44081637875` 的 `41` 个 job
+全部 success，含 ARM64 runtime；公开 release/run/jobs JSON 已一并归档。
+它不扩大本轮固定 `.7/.8` 的宿主整轮结论，A/B 未因此升级。
+
+仅补固定 Ubuntu ARM64/IPv4/Xray WS 的正式宿主生命周期；
+预装 Engine 不计自动安装，未验整机重启、公网入站/IPv6、多 Peer、自然 ACME、
+其它核心/协议组合或长稳。独验依赖固定资产哈希和采集的 Cosign 成功返回码，
+未再次密码学验签，私密命令流及实时宿主状态不在离线独验范围。
+未访问、升级或重启 A/B，未重复 daily/full；本次文档和权限修复未触发应用发布；
+旧失败不改判，`16 supported/14 deferred` 不变，整体计划仍未完成。
+
+### 6A.68 正式 ARM64 Engine 自动安装与纯 sing-box 生命周期
+
+2026-11-17，在另一独立 GitHub `ubuntu-24.04-arm` 宿主完成正式
+`.8 → .44` 纯 sing-box Trojan TLS/id 28 的完整生命周期，run
+`44093133554`、签名验收源 `c8ee532f5f432af782ef41ace1471afa74434928`。
+固定正式 `.8`/`6e880813a92c6518678ec518d292d585c2cb775d` 与
+`.44`/`da7905877b1ee59abbf632ad866963a02da94bf7`，不随 latest 漂移。
+Ubuntu `24.04.5`/aarch64、内核 `7.0.0-1017-azure`、PID 1 systemd；
+原失败 unit `mnt.mount` 保持，不称整机全部服务健康。
+
+先确认无 PADM、容器、卷及自定义网络，移除 runner 的三个 Docker 核心包、
+实际选中且路径/摘要受限的两个独立插件，真实 `command -v docker` 确认入口
+不存在、服务 inactive。随后固定正式 `.44` 的 `install-docker.sh install
+--source --ref --no-menu` 接收 `y`，执行官方 Engine/Compose 自动安装。
+安装后五包版本均绑定官方 Ubuntu noble/stable ARM64 APT 来源，实际选中的
+buildx/compose 路径归属对应插件包；Docker `29.10.0`/Compose `5.7.2`
+active/enabled。bootstrap PADM 根正式 purge 后建立生命周期基线；
+这证明预装包移除后的自动安装，不称原始裸 OS 安装或原预装版本恢复。
+
+七阶段为 `.8` 安装 → `.44` update → `.8` 认领快照 rollback → 再次
+`.44` update → restart → down/up → 默认保留卸载/reinstall/up，最后正式
+purge。常驻服务仅 sing-box，无 Xray/Nginx 运行文件；Trojan 直接 TLS、
+`http/1.1`、两密码/稳定统计身份及 v2ray_api 绑定。
+每阶段 core/独立账号取得完整 `256 KiB` nonce 正文，错密码均拒绝，
+初始错 SNI 拒绝，共 `22` 个全新严格 TLS 客户端，真实 bridge 来源绑定。
+业务 origin 仅本地 lo `93.184.216.34/32`。业务材料字节/权限/属主、规格
+不变量、两账目身份和额度保持；独立账号每阶段双向增长、两账目累计不降。
+最终各 upload `798`、download `1835820`，独立账号额度 `1073741824` 字节。
+两版 bundle 文件 `313/314` 含生成 ref，不含清单；payload 为 `312/313`。
+
+两份固定签名 release manifest → 十份 raw index → 唯一 linux/arm64
+descriptor → raw platform manifest → config → 实际镜像/服务逐层绑定。
+实际为 overlay2/config-ID；containerd index-ID 只补严格条件分支及负控，
+不记为本轮原生实测。六次镜像查询保留公开 ID 的原始顺序和重复项，
+独验先重建原始 stdout 摘要/长度，再核保留卸载、purge 和清场的精确集合，
+不把列表顺序变化当集合变化。容器/网络/卷/镜像恢复安装后的生命周期基线，
+受管根/CLI/unit 和 origin 清除，Docker 保持 active，未全局 prune。
+
+Job `5m28s`，405 条命令首末墙钟 `320.960` 秒。归档 `69` 份脱敏工件，
+原始 ZIP `195425` 字节与 GitHub API digest 一致；驱动 `25` 项、
+独验器 `19` 项负控通过，两个冻结工具均只读独审通过。
+固定 Linux 工具镜像中断网、输入只读、无额外权限的独验 passed。
+
+- 驱动 SHA-256：
+  `9a64191047ca0b41bb2370d0a541fe23aa93dff64f1e74887207d3ec5561d564`。
+- 独验器 SHA-256：
+  `c31ad0c97159eab9002e1902e2a9c02c62b2aa10b585ee4535d8873682c53101`。
+- 原始 ZIP SHA-256：
+  `1e08f6b82dad1d199929f30bb420898cd2855515e2619d9bbdceb56c5e753d4f`。
+- 独验报告 SHA-256：
+  `e900e4d1425c6952d506e4cd2fd47e6cae02b84d2eab78b8cca6694105bfcb88`。
+- 原件 `.tmp-native-arm64-singbox-20261117/attempt-2/`，报告
+  `independent-output/read-only-verification.json`；远端工件到期
+  `2026-12-01T13:34:24Z`，已下载本地。私密命令流未上传。
+
+首轮 `44089540200` 的实际生命周期/清场通过，离线独验未通过，原判保持。
+初版验证器误拒安装前插件 `unknown ok not-installed` 的合法空版本；
+只对该精确状态修正后，验证器又因 Docker 列表顺序变化拒绝原始摘要比较，
+而首轮工件未保留可重算的 ID 序列。两份失败报告及对应验证器快照保持，
+补充公开 ID 序列后使用新宿主重跑，不放松镜像集合门槛。
+
+仅关闭 `interactive-menu` 的上述固定 Engine 安装和纯 sing-box 宿主
+生命周期子项；其它发行版/协议/专项、公网入站/IPv6、宿主重启、自然续期、
+多 Peer 和长稳仍待验。独验核固定资产哈希和采集的 Cosign 成功返回码，
+未再次密码学验签；私密流、实时宿主和 APT 原始查询全文不在离线独验范围。
+未访问、升级或重启 A/B，未重复 daily/full，临时驱动/工作流仍留隔离分支；
+本次主线仅记录证据，不触发应用发布。`16 supported/14 deferred` 不变。
 
 ### 本轮菜单与回归收敛
 

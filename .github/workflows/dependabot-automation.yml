@@ -20,9 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: write
-      contents: write
-      pull-requests: write
+      contents: read
     steps:
       - name: Checkout trusted automation
         uses: actions/checkout@v7
@@ -31,7 +29,13 @@ jobs:
           persist-credentials: false
       - name: Promote validated Dependabot updates
         uses: actions/github-script@v9
+        env:
+          WORKFLOW_TOKEN_CONFIGURED: ${{ secrets.DEPENDABOT_AUTOMATION_TOKEN != '' }}
         with:
+          github-token: ${{ secrets.DEPENDABOT_AUTOMATION_TOKEN || github.token }}
           script: |
             const reconcile = require('./.github/scripts/dependabot-merge.cjs');
-            await reconcile({ github, context, core });
+            await reconcile({
+              github, context, core,
+              workflowTokenConfigured: process.env.WORKFLOW_TOKEN_CONFIGURED === 'true',
+            });
