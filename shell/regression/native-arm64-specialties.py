@@ -17,6 +17,7 @@ import struct
 import threading
 import time
 import traceback
+import urllib.parse
 import uuid
 
 
@@ -102,6 +103,13 @@ class Acceptance(base.Acceptance):
         path.write_text(json.dumps(value))
         path.chmod(0o600)
         return str(path)
+
+    def public_bytes(self, name, raw):
+        path = self.evidence / name
+        require(not path.exists() and path.parent == self.evidence, "unsafe evidence path")
+        path.write_bytes(raw)
+        path.chmod(0o644)
+        return {"file": name, "sha256": digest(raw), "bytes": len(raw)}
 
     def edit(self, *arguments, label, expected=0):
         raw = self.command(
@@ -238,7 +246,7 @@ class Acceptance(base.Acceptance):
                 require(time.monotonic() < deadline, "client listener deadline exceeded")
                 time.sleep(0.2)
 
-    def probe(self, name, label, accepted=True, host=ORIGIN, *, via=None, dns=None, http_host=None):
+    def probe(self, name, label, accepted=True, host=ORIGIN, *, via=None, dns=None, http_host=None, auth_refusal=False):
         nonce = "/" + uuid.uuid4().hex
         before = len(self.requests)
         auth_before = via.auth if via else 0
@@ -254,6 +262,7 @@ class Acceptance(base.Acceptance):
         code = self.commands[-1]["exit"]
         requests = self.requests[before:]
         expected = (nonce.encode() + b"\n") * 4096
+        expected_peers = set()
         if accepted:
             require(code == 0 and output == expected and len(requests) == 1 and requests[0]["path"] == nonce,
                     "business payload or nonce mismatch")
@@ -261,20 +270,27 @@ class Acceptance(base.Acceptance):
             core = self.clients[name]["core"]
             peers = {row["IPAddress"] for row in services[core]["NetworkSettings"]["Networks"].values()
                      if row.get("IPAddress")}
-            require(requests[0]["peer"] in ({ORIGIN} if via else peers), "unexpected origin peer")
+            expected_peers = {ORIGIN} if via else peers
+            require(requests[0]["peer"] in expected_peers, "unexpected origin peer")
         else:
             require(code != 0 and not output and not requests, "rejected business reached origin")
         delta = via.connects - connects_before if via else 0
+        auth_delta = via.auth - auth_before if via else 0
         if via:
-            require(delta == int(accepted) and via.auth - auth_before == int(accepted), "SOCKS route mismatch")
+            require(delta == int(accepted) and auth_delta == int(accepted or auth_refusal), "SOCKS route mismatch")
         record = {
             "label": label, "client": name, "accepted": accepted, "curl_exit": code,
             "nonce": nonce, "body_bytes": len(output), "body_sha256": digest(output),
             "expected_bytes": len(expected), "expected_sha256": digest(expected),
             "origin_requests": requests, "socks_connects_delta": delta,
+            "socks_auth_delta": auth_delta, "socks_auth_refusal": auth_refusal,
+            "expected_origin_peers": sorted(expected_peers),
             "dns_requests": dns.requests[dns_before:] if dns else [],
             "http_host": http_host,
             "strict_tls": True, "local_origin": True,
+            "tls_server_name": "wrong.padm.test" if name == "wrong-sni" else DOMAIN,
+            "client_container": self.clients[name]["container"],
+            "client_image": self.releases[NEW["version"]][1]["images"]["sing-box"]["reference"],
         }
         self.record(label, record)
         self.checks.append(label)
@@ -308,8 +324,16 @@ class Acceptance(base.Acceptance):
             "ledger_before": self.public_ledger(current), "ledger_after": self.public_ledger(after),
             "spec_restored": restored, "business_restored": restored,
             "spec_sha256": digest((ROOT / "config/spec.json").read_bytes()),
+            "spec_invariant_sha256": digest(json.dumps({
+                key: value for key, value in json.loads((ROOT / "config/spec.json").read_text()).items()
+                if key not in ("release", "images")
+            }, sort_keys=True, separators=(",", ":")).encode()),
+            "account_identity_sha256": digest(self.account.encode()),
             "business_tree": self.business_tree(),
-            "services": {name: {"id": row["Id"], "image_id": row["Image"]} for name, row in services.items()},
+            "services": {name: {"id": row["Id"], "image_id": row["Image"],
+                                 "ipv4": sorted(item["IPAddress"] for item in row["NetworkSettings"]["Networks"].values()
+                                                if item.get("IPAddress"))}
+                         for name, row in services.items()},
         })
         self.phases.append(label)
 
@@ -332,8 +356,22 @@ class Acceptance(base.Acceptance):
     def share_port(self, port, label):
         raw = self.cli("share", "content", "--base", label=label)
         lines = [line for line in raw.decode().splitlines() if line.startswith("trojan://")]
-        require(any(f":{port}?" in line or f":{port}#" in line for line in lines), "default share port missing")
-        self.record(label, {"expected_port": port, "matched": True, "private_output_sha256": digest(raw)})
+        projection = []
+        for line in lines:
+            parsed = urllib.parse.urlsplit(line)
+            projection.append({"scheme": parsed.scheme, "host": parsed.hostname, "port": parsed.port,
+                               "name": urllib.parse.unquote(parsed.fragment),
+                               "credential_sha256": digest(urllib.parse.unquote(parsed.username or "").encode())})
+        expected = [
+            {"name": name, "credential_sha256": digest(credential.encode())}
+            for name, credential in (("arm64-trojan", self.core_credential),
+                                     ("arm64-trojan-arm64-independent", self.managed_password))
+        ]
+        for item in expected:
+            require(any(row == {"scheme": "trojan", "host": DOMAIN, "port": port, **item} for row in projection),
+                    "default share port or credential missing")
+        self.record(label, {"expected_port": port, "expected_accounts": expected,
+                            "projection": projection, "private_output_sha256": digest(raw)})
 
     def routing(self):
         helpers_path = Path(__file__).parents[2] / "docker/tests/routing-socks5-real.py"
@@ -356,9 +394,7 @@ class Acceptance(base.Acceptance):
             self.probe(name, "socks-global-" + name, via=upstream)
         upstream.reject = True
         for name in PORTS:
-            before = upstream.auth
-            self.probe(name, "socks-auth-rejected-" + name, False)
-            require(upstream.auth == before + 1, "SOCKS authentication refusal not witnessed")
+            self.probe(name, "socks-auth-rejected-" + name, False, via=upstream, auth_refusal=True)
         upstream.reject = False
         self.edit("--socks5-domains", "full:select.padm.test", label="socks-selective")
         for name in PORTS:
@@ -414,7 +450,9 @@ class Acceptance(base.Acceptance):
         self.record(label, {"accepted": accepted, "curl_exit": code, "nonce": nonce,
                             "origin_requests": requests, "body_sha256": digest(output),
                             "expected_sha256": digest(expected), "body_bytes": len(output),
-                            "statuses": statuses, "strict_https_connect": https})
+                            "statuses": statuses, "strict_https_connect": https,
+                            "response_headers": self.public_bytes(label + ".headers", headers.read_bytes()),
+                            "response_body": self.public_bytes(label + ".body", output)})
         self.checks.append(label)
 
     def relay(self):
@@ -450,7 +488,9 @@ class Acceptance(base.Acceptance):
                      if line.lower().startswith("location:")]
         require(locations == [location], "HTTP/2 redirect location mismatch")
         self.record(label, {"strict_tls": True, "http_version": version, "status": status, "location": location,
-                            "body_sha256": digest(body.read_bytes())})
+                            "body_sha256": digest(body.read_bytes()),
+                            "response_headers": self.public_bytes(label + ".headers", headers.read_bytes()),
+                            "response_body": self.public_bytes(label + ".body", body.read_bytes())})
         self.checks.append(label)
 
     def website(self, label, *, status=200, contains=None, body=None, location=None, alpn="http/1.1"):
@@ -463,13 +503,16 @@ class Acceptance(base.Acceptance):
                 response = http.client.HTTPResponse(connection)
                 response.begin()
                 output = response.read()
+                response_headers = list(response.getheaders())
                 require(response.status == status and response.getheader("Location") == location, "site status/location mismatch")
                 if contains is not None:
                     require(contains in output, "site marker missing")
                 if body is not None:
                     require(output == body, "site body mismatch")
         self.record(label, {"strict_tls": True, "alpn": alpn, "status": status, "location": location,
-                            "body_sha256": digest(output), "body_bytes": len(output)})
+                            "body_sha256": digest(output), "body_bytes": len(output),
+                            "normalized_headers": response_headers,
+                            "response_body": self.public_bytes(label + ".body", output)})
         self.checks.append(label)
 
     def sites(self):
@@ -552,6 +595,30 @@ def selfcheck():
             pass
         else:
             raise AssertionError("malformed DNS accepted")
+    edns = question[:10] + b"\x00\x01" + question[12:] + b"\x00\x00\x29\x04\xd0\x00\x00\x00\x00\x00\x00"
+    require(parse_dns(edns) == ("dns.padm.test", 1, len(question)), "EDNS question mismatch")
+    dns = socketserver.ThreadingUDPServer(("127.0.0.1", 0), Dns)
+    dns.requests = []
+    thread = threading.Thread(target=dns.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for request, status, answers in (
+            (question, 0, 1), (edns, 0, 1),
+            (question[:12] + b"\x09error-dns" + question[16:], 2, 0),
+            (question[:-4] + b"\x00\x1c\x00\x01", 0, 0),
+        ):
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as channel:
+                channel.settimeout(2)
+                channel.sendto(request, dns.server_address)
+                response = channel.recv(4096)
+            require(response[:2] == request[:2] and response[3] & 15 == status
+                    and int.from_bytes(response[6:8], "big") == answers, "DNS fixture response mismatch")
+            if answers:
+                require(response[-4:] == socket.inet_aton(ORIGIN), "DNS fixture address mismatch")
+    finally:
+        dns.shutdown()
+        dns.server_close()
+        thread.join(timeout=5)
     print("specialties-selfcheck=passed")
 
 
