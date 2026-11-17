@@ -91,14 +91,26 @@ def xray_projection(uri, local, helper):
     return result
 
 
-def mihomo_projection(local):
+def mihomo_projection(uri, local):
+    parsed, query = uri_parts(uri)
+    require("pqv" not in query, "fixed Mihomo ML-DSA projection is outside this acceptance")
+    node = {
+        "name": "entry", "type": "vless", "server": parsed.hostname, "port": parsed.port,
+        "uuid": parsed.username, "tls": True, "encryption": query["encryption"],
+        "network": query["type"], "ip-version": "ipv4",
+        "client-fingerprint": query["fp"], "servername": query["sni"],
+        "reality-opts": {"public-key": query["pbk"], "short-id": query["sid"],
+                         "support-x25519mlkem768": True},
+    }
+    if "flow" in query:
+        node["flow"] = query["flow"]
+    if query["type"] == "xhttp":
+        node["xhttp-opts"] = {key: query[key] for key in ("path", "host", "mode")}
+        if "extra" in query:
+            node["xhttp-opts"]["extra"] = json.loads(query["extra"])
     return {
         "mode": "rule", "log-level": "debug", "ipv6": False,
-        "proxy-providers": {"source": {
-            "type": "file", "path": "/input/provider.txt", "health-check": {"enable": False},
-            "override": {"ip-version": "ipv4"},
-        }},
-        "proxy-groups": [{"name": "entry", "type": "select", "use": ["source"]}],
+        "proxies": [node],
         "listeners": [{"name": "entry", "type": "socks", "listen": "127.0.0.1",
                        "port": local, "proxy": "entry"}],
         "rules": ["MATCH,REJECT"],
@@ -196,6 +208,8 @@ class Acceptance(specialties.Acceptance):
             "specialties_driver_sha256": digest(SPECIALTIES_PATH.read_bytes()),
             "base_driver_sha256": digest(specialties.BASE_PATH.read_bytes()),
             "release": NEW, "scope": "native-arm64-ipv4-local-origin-reality-encryption",
+            "clients": ["signed-release-xray", "pinned-mihomo-v1.19.28-explicit-hybrid"],
+            "mihomo_original_uri_import_claimed": False,
             "cli_tmpdir": self.env["TMPDIR"],
             "cli_tmpdir_metadata": {"uid": temporary.st_uid, "gid": temporary.st_gid,
                                     "mode": temporary.st_mode & 0o7777},
@@ -528,12 +542,13 @@ class Acceptance(specialties.Acceptance):
         with socket.socket() as channel:
             channel.bind(("127.0.0.1", 0))
             local = channel.getsockname()[1]
-        config = xray_projection(uri, local, self.xray_helper) if client == "xray" else mihomo_projection(local)
+        config = xray_projection(uri, local, self.xray_helper) if client == "xray" else mihomo_projection(uri, local)
         (directory / "config.json").write_text(json.dumps(config))
         (directory / "config.json").chmod(0o644)
         if client == "mihomo":
-            (directory / "provider.txt").write_text(uri + "\n")
-            (directory / "provider.txt").chmod(0o644)
+            # 固定版本的 URI 导入丢失 hybrid 参数，显式投影并保留原分享取证。
+            (directory / "source-uri.txt").write_text(uri + "\n")
+            (directory / "source-uri.txt").chmod(0o644)
         image = self.releases[NEW["version"]][1]["images"]["xray"]["reference"] if client == "xray" else MIHOMO["reference"]
         arguments = ["run", "-c", "/input/config.json"] if client == "xray" else ["-d", "/tmp", "-f", "/input/config.json"]
         isolation = [
@@ -542,7 +557,7 @@ class Acceptance(specialties.Acceptance):
             "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=32m",
         ]
         if client == "mihomo":
-            isolation.extend(["--env", "SAFE_PATHS=/input"])
+            isolation.extend(["--tmpfs", "/root/.config/mihomo:rw,noexec,nosuid,nodev,size=8m"])
         try:
             self.command(["docker", "run", "--rm", *isolation, image, *arguments,
                           *(["-test"] if client == "xray" else ["-t"])], label + "-config-test")
@@ -571,6 +586,8 @@ class Acceptance(specialties.Acceptance):
             nonce = "/" + uuid.uuid4().hex
             output = self.command(
                 ["curl", "--fail", "--silent", "--show-error", "--max-time", "8", "--noproxy", "",
+                 # 正反例都发送足够首包，避免旧 none 请求在 ML-KEM 校验前等到超时。
+                 "--header", "X-Padm-Probe: " + "p" * 4096,
                  "--socks5-hostname", "127.0.0.1:" + str(local),
                  f"http://{ORIGIN}:{self.origin.server_port}{nonce}"],
                 label + "-request", timeout=12, allowed=tuple(range(126)),
@@ -583,7 +600,9 @@ class Acceptance(specialties.Acceptance):
             log_command = self.command_diagnostic(label)
             row = {
                 "kind": "proxy", "label": label, "phase": phase, "listener": listener, "client": client,
+                "client_projection": "formal-uri-xray" if client == "xray" else "formal-uri-mihomo-explicit-hybrid",
                 "accepted": accepted, "negative_kind": negative_kind, "curl_exit": command["exit"],
+                "request_padding_bytes": 4096,
                 "command_sequence": command["sequence"], "nonce": nonce,
                 "response_body": self.public_bytes(label + ".body", output),
                 "expected_sha256": digest(expected), "expected_bytes": len(expected),
@@ -603,11 +622,11 @@ class Acceptance(specialties.Acceptance):
                     and not view["privileged"] and view["user"] == "10001:10001"
                     and "no-new-privileges:true" in view["security_opt"], "client isolation mismatch")
             if client == "mihomo":
-                require((directory / "provider.txt").read_text() == uri + "\n", "client changed formal URI")
+                require((directory / "source-uri.txt").read_text() == uri + "\n", "original formal URI record changed")
             return label
         finally:
             if container:
-                self.command(["docker", "rm", "-f", container], label + "-client-remove")
+                self.command(["docker", "rm", "-fv", container], label + "-client-remove")
                 self.containers.discard(container)
 
     def tls_probe(self, label, phase, server_name, address, port, *, expected=None,
@@ -841,7 +860,9 @@ class Acceptance(specialties.Acceptance):
             "site_checks": self.site_checks, "proxy_count": len(self.proxy_checks),
             "site_count": len(self.site_checks), "checkpoint_count": len(self.phases),
             "scope": "native-arm64-ipv4-local-origin-reality-encryption",
-            "clients": ["signed-release-xray", "pinned-mihomo-v1.19.28"],
+            "clients": ["signed-release-xray", "pinned-mihomo-v1.19.28-explicit-hybrid"],
+            "mihomo_original_uri_import_claimed": False,
+            "prior_failed_full_matrix_run": "44135799536",
             "website_scope": "local-443-front-local-transparent-relay-public-A-https-backend",
             "public_inbound_tested": False, "reboot_tested": False, "ipv6_tested": False,
             "engine_installation_tested": False, "local_tls_termination_for_host_website": False,
@@ -885,6 +906,26 @@ def selfcheck():
     require(stream["realitySettings"]["mldsa65Verify"] == "verify"
             and stream["xhttpSettings"] == {"path": "/test", "host": TARGET, "mode": "packet-up",
                                             "extra": {"noSSEHeader": True}}, "formal URI client projection mismatch")
+    mihomo_query = {key: value for key, value in query.items() if key != "pqv"}
+    parsed = urllib.parse.urlsplit(uri)
+    mihomo_uri = urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(mihomo_query)))
+    node = mihomo_projection(mihomo_uri, 2080)["proxies"][0]
+    require(node["server"] == "127.0.0.1" and node["port"] == 35467
+            and node["uuid"] == parsed.username and node["encryption"] == "none"
+            and node["client-fingerprint"] == "chrome" and node["servername"] == TARGET
+            and node["network"] == "xhttp" and node["ip-version"] == "ipv4"
+            and node["reality-opts"] == {"public-key": "public", "short-id": "0123456789abcdef",
+                                       "support-x25519mlkem768": True}
+            and node["xhttp-opts"] == stream["xhttpSettings"], "Mihomo explicit hybrid projection mismatch")
+    changed_node = mihomo_projection(mutate_uri(mihomo_uri, credential="wrong", encryption="other"), 2080)["proxies"][0]
+    require(changed_node == {**node, "uuid": "wrong", "encryption": "other"},
+            "Mihomo negative URI projection changed unrelated fields")
+    try:
+        mihomo_projection(uri, 2080)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("unverified fixed Mihomo ML-DSA projection accepted")
     changed = mutate_uri(uri, credential="wrong", encryption="other")
     parsed, changed_query = uri_parts(changed)
     require(parsed.username == "wrong" and changed_query == {**query, "encryption": "other"},

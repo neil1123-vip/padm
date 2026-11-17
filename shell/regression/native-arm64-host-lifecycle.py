@@ -441,6 +441,10 @@ class Acceptance:
         require(ipaddress.ip_address(ORIGIN).is_global, "origin fixture must avoid private target policy")
         self.initial_objects = self.objects("objects-before")
         self.initial_images = self.image_ids("images-before")
+        systemd_state = self.command(
+            ["systemctl", "is-system-running", "--wait"], "systemd-state", timeout=180, allowed=(0, 1)
+        ).decode().strip()
+        require(systemd_state in ("running", "degraded"), "systemd startup incomplete")
         self.record(
             "host",
             {
@@ -449,9 +453,7 @@ class Acceptance:
                 "os_release": Path("/etc/os-release").read_text(),
                 "boot_id_sha256": digest(Path("/proc/sys/kernel/random/boot_id").read_bytes()),
                 "pid1": "systemd",
-                "systemd_state": self.command(
-                    ["systemctl", "is-system-running"], "systemd-state", allowed=(0, 1)
-                ).decode().strip(),
+                "systemd_state": systemd_state,
                 "failed_units": self.command(
                     ["systemctl", "--failed", "--no-pager", "--plain", "--no-legend"],
                     "systemd-failed-units",
@@ -1043,7 +1045,7 @@ class Acceptance:
             try:
                 if client:
                     self.command(["docker", "logs", client], label + "-client-logs", allowed=tuple(range(126)))
-                    self.command(["docker", "rm", "-f", client], label + "-client-remove")
+                    self.command(["docker", "rm", "-fv", client], label + "-client-remove")
                     self.containers.discard(client)
             finally:
                 origin.shutdown()
@@ -1273,7 +1275,7 @@ class Acceptance:
                     traceback.print_exc(file=stream)
 
         for client in tuple(self.containers):
-            attempt("client-remove", lambda client=client: self.command(["docker", "rm", "-f", client], "cleanup-client"))
+            attempt("client-remove", lambda client=client: self.command(["docker", "rm", "-fv", client], "cleanup-client"))
         if self.owns_root and ROOT.exists():
             def purge():
                 require(not ROOT.is_symlink() and (ROOT / "mode").read_text().strip() == "docker", "cleanup root ownership marker missing")
