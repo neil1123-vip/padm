@@ -57,6 +57,11 @@ WG/多 Peer 新机恢复及长稳仍待验，16 supported/14 deferred 不变。
 仅关闭固定 amd64/IPv4/单 Peer 子项，公网多机、多 Peer、arm64/IPv6、其它核心、
 信号/断电、控制面防护及长稳仍待验，16 supported/14 deferred 不变。
 
+后续 [6A.71–6A.72](docker-menu-parity-plan.md#6a71-正式本地三节点控制验收与-icmp-首配阻塞)
+已补正式 `.44` 固定本地 amd64/IPv4 一主两被控的自主同步、三机重启、
+单 Peer 撤权及双 Peer 空白主控灾备。表中多 Peer 重启与灾备待验范围
+不再包括这两个固定组合；不外推公网、arm64/IPv6、其它拓扑或灾后重启。
+
 同日 6A.47 单次正式控制防护 enable 返回 rc 14，当前 nonce 完整 Peer CLI rc 0，
 无 source-verified；原启用失败保持。随后从失败盘新 child 断网审计恢复通过：
 规格/文件/WG/额度保持、累计不降、规则与临时材料清场，严格 TLS 业务及计量通过。
