@@ -11924,6 +11924,33 @@ daily/full、生产重启、推送或发布，`16 supported/14 deferred` 不变�
 下一步只补提交回调失败边界的固定步骤名、原始 rc 和时间，保留原返回、
 安全时限及恢复语义，再决定是否需要有界重验；整体仍未完成。
 
+### 6A.57 提交回调的最小失败诊断
+
+2026-11-17，仅修改 `dockerFail2banStartManagedCommit` 的失败观察。
+配置与清场、规格与见证复核、jail 启动与容器验证分别保留原顺序和短路，
+失败向 stderr 输出固定函数名、步骤名、原始 `rc` 和 Bash `SECONDS`。
+覆盖 guard、WS/控制配置与清场、来源、规格、witness-recheck、jail-up、
+WS/控制容器和 SSH 启动共 `12` 个边界；不输出参数、nonce、规格或哈希正文，
+不开 xtrace，不增加跨调用缓存。非 SSH 失败仍返回 `1`，SSH 尾码保持；
+成功无新增输出，来源窗口、健康期限、父锁和外层恢复逻辑不变。
+
+在原 `fail2ban-start.sh` 末尾隔离执行真实回调，覆盖全部失败边界；
+为外部边界注入不同非 `1` 返回码，检查诊断保留原码、失败后的步骤不执行、
+SSH 尾码保持及成功静默。guard/spec 使用真实锁/phase 和规格摘要，
+完整锚定日志格式拒绝测试中的私密路径、正文、来源快照或 SSH 参数泄漏。
+只读代码复审通过。本机 Linux amd64 当前源码快照
+`8386e57918473a6b0eab6d8244f560626634908becb395da273a1398057d47a4`
+通过 `docker-fail2ban-source -Jobs 2` 和 `docker-control-cli -Jobs 2`，
+入口分别 `3.890/20.918` 秒、exit `0`、均无缓存命中，工具镜像仍为
+`sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`。
+证据 `.tmp-regression-docker-5e519443338a41679c4526a3f2769621/`、
+`.tmp-regression-docker-eabd30c860c1434f9853650eb41bb508/`。
+
+诊断与合同通过不定位旧轮失败，也不代表防护通过。下一步固定签名候选，
+复用原网络/正式 manifest 门禁及完整恢复断言，仅做一次有界隔离重验。
+未扩大回归、修改安全时限、访问生产、推送或发布；
+`16 supported/14 deferred` 保持，整体仍未完成。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

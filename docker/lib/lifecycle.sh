@@ -972,26 +972,72 @@ dockerFail2banStartManagedVerified() {
 }
 
 dockerFail2banStartManagedCommit() {
+    local mf_status
+    # 失败仅记录固定步骤和数值，避免来源凭据或规格正文进入日志。
     [[ "${mf_phase:-}" == witnessed && -n "${mf_hash:-}" &&
-        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${mf_lockOwner}" ]] || return 1
-    { [[ "${mf_ws}" != true ]] || { dockerFail2banConfigurationCheck && dockerFail2banCleanCheck; }; } &&
-        { [[ "${mf_control}" != true ]] ||
-            { dockerControlFail2banConfigurationCheck && dockerControlFail2banCleanCheck; }; } || return 1
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${mf_lockOwner}" ]] || {
+        dockerError "dockerFail2banStartManagedCommit step=guard rc=$? seconds=${SECONDS}"
+        return 1
+    }
+    if [[ "${mf_ws}" == true ]]; then
+        dockerFail2banConfigurationCheck || {
+            dockerError "dockerFail2banStartManagedCommit step=ws-config rc=$? seconds=${SECONDS}"
+            return 1
+        }
+        dockerFail2banCleanCheck || {
+            dockerError "dockerFail2banStartManagedCommit step=ws-clean rc=$? seconds=${SECONDS}"
+            return 1
+        }
+    fi
+    if [[ "${mf_control}" == true ]]; then
+        dockerControlFail2banConfigurationCheck || {
+            dockerError "dockerFail2banStartManagedCommit step=control-config rc=$? seconds=${SECONDS}"
+            return 1
+        }
+        dockerControlFail2banCleanCheck || {
+            dockerError "dockerFail2banStartManagedCommit step=control-clean rc=$? seconds=${SECONDS}"
+            return 1
+        }
+    fi
     for ((mf_index = 0; mf_index < ${#mf_tuples[@]}; mf_index++)); do
         mf_listener=$(jq -er '.listener_id' <<<"${mf_tuples[mf_index]}") &&
             mf_family=$(jq -er '.family' <<<"${mf_tuples[mf_index]}") &&
             mf_current=$(dockerFail2banSourceContainer "${mf_listener}" "${mf_family}") &&
-            [[ "${mf_current}" == "${mf_snapshots[mf_index]}" ]] || return 1
+            [[ "${mf_current}" == "${mf_snapshots[mf_index]}" ]] || {
+            dockerError "dockerFail2banStartManagedCommit step=source rc=$? seconds=${SECONDS}"
+            return 1
+        }
     done
-    [[ "$(sha256sum -- "${mf_spec}")" == "${mf_hash}" ]] &&
-        { [[ "${mf_control}" != true ]] || dockerControlSourceWitnessRecheck; } || return 1
+    [[ "$(sha256sum -- "${mf_spec}")" == "${mf_hash}" ]] || {
+        dockerError "dockerFail2banStartManagedCommit step=spec rc=$? seconds=${SECONDS}"
+        return 1
+    }
+    [[ "${mf_control}" != true ]] || dockerControlSourceWitnessRecheck || {
+        dockerError "dockerFail2banStartManagedCommit step=witness-recheck rc=$? seconds=${SECONDS}"
+        return 1
+    }
     if [[ "${#mf_jails[@]}" -gt 0 ]]; then
         dockerComposeExecute up -d --no-deps --wait \
-            --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${mf_jails[@]}" >/dev/null &&
-            { [[ "${mf_ws}" != true ]] || dockerFail2banContainer >/dev/null; } &&
-            { [[ "${mf_control}" != true ]] || dockerControlFail2banContainer >/dev/null; } || return 1
+            --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${mf_jails[@]}" >/dev/null || {
+            dockerError "dockerFail2banStartManagedCommit step=jail-up rc=$? seconds=${SECONDS}"
+            return 1
+        }
+        [[ "${mf_ws}" != true ]] || dockerFail2banContainer >/dev/null || {
+            dockerError "dockerFail2banStartManagedCommit step=ws-container rc=$? seconds=${SECONDS}"
+            return 1
+        }
+        [[ "${mf_control}" != true ]] || dockerControlFail2banContainer >/dev/null || {
+            dockerError "dockerFail2banStartManagedCommit step=control-container rc=$? seconds=${SECONDS}"
+            return 1
+        }
     fi
-    [[ "${mf_ssh}" != true ]] || dockerSshFail2banStartVerified "${mf_sshMode}"
+    if [[ "${mf_ssh}" == true ]]; then
+        dockerSshFail2banStartVerified "${mf_sshMode}" || {
+            mf_status=$?
+            dockerError "dockerFail2banStartManagedCommit step=ssh-start rc=${mf_status} seconds=${SECONDS}"
+            return "${mf_status}"
+        }
+    fi
 }
 
 dockerPortHoppingTargetProjectCheck() {

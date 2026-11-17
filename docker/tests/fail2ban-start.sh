@@ -241,4 +241,76 @@ resetCase health-fail
 reject dockerFail2banStartVerified >"${TEST_ROOT}/output.log" 2>&1
 jq -se 'any(.[]; .kind == "compose" and (.args | index("net-fail2ban")) != null) and
   .[-1].kind == "health"' "${TEST_ROOT}/events.jsonl" >/dev/null
+
+# 直接运行真实提交回调，只替换外部边界，核对失败原码和短路顺序。
+(
+    dockerError() { printf '%s\n' "$*" >&2; }
+    commitBoundary() {
+        printf '%s\n' "$1" >>"${TEST_ROOT}/commit-events"
+        [[ "$1" != "${commitFailure}" ]] || return "${commitFailureRc}"
+    }
+    dockerFail2banConfigurationCheck() { commitBoundary ws-config; }
+    dockerFail2banCleanCheck() { commitBoundary ws-clean; }
+    dockerControlFail2banConfigurationCheck() { commitBoundary control-config; }
+    dockerControlFail2banCleanCheck() { commitBoundary control-clean; }
+    dockerFail2banSourceContainer() {
+        commitBoundary source || return $?
+        printf 'private-source-snapshot\n'
+    }
+    dockerControlSourceWitnessRecheck() { commitBoundary witness-recheck; }
+    dockerComposeExecute() { commitBoundary jail-up; }
+    dockerFail2banContainer() { commitBoundary ws-container; }
+    dockerControlFail2banContainer() { commitBoundary control-container; }
+    dockerSshFail2banStartVerified() { commitBoundary ssh-start; }
+    commitCase() {
+        local commitFailure=$1 commitFailureRc=$2 status expected= step
+        local mf_phase=witnessed mf_hash mf_lockOwner=${BASHPID} mf_ws=true mf_control=true
+        local mf_ssh=true mf_sshMode=private-ssh-mode mf_spec="${TEST_ROOT}/private-spec-nonce.json"
+        local DOCKER_DEPLOYMENT_LOCK_DIR="${TEST_ROOT}/commit-lock"
+        local -a mf_tuples=('{"listener_id":"private-listener","family":"ipv4"}')
+        local -a mf_snapshots=(private-source-snapshot) mf_jails=(net-fail2ban net-fail2ban-control)
+        local -a order=(ws-config ws-clean control-config control-clean source witness-recheck
+            jail-up ws-container control-container ssh-start)
+        mkdir -p "${DOCKER_DEPLOYMENT_LOCK_DIR}"
+        printf '%s\n' "${mf_lockOwner}" >"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+        printf 'private-spec-token\n' >"${mf_spec}"
+        mf_hash=$(sha256sum -- "${mf_spec}")
+        if [[ "${commitFailure}" == guard ]]; then
+            mf_phase=private-unwitnessed
+        elif [[ "${commitFailure}" == spec ]]; then
+            printf 'private-spec-drift\n' >>"${mf_spec}"
+        fi
+        : >"${TEST_ROOT}/commit-events"
+        if dockerFail2banStartManagedCommit >"${TEST_ROOT}/commit.stdout" 2>"${TEST_ROOT}/output.log"; then
+            status=0
+        else
+            status=$?
+        fi
+        [[ ! -s "${TEST_ROOT}/commit.stdout" ]]
+        if [[ "${commitFailure}" != guard ]]; then
+            for step in "${order[@]}"; do
+                expected+="${step}"$'\n'
+                if [[ "${step}" == "${commitFailure}" ||
+                    ( "${commitFailure}" == spec && "${step}" == source ) ]]; then
+                    break
+                fi
+            done
+        fi
+        [[ "$(<"${TEST_ROOT}/commit-events")" == "${expected%$'\n'}" ]]
+        if [[ "${commitFailure}" == ok ]]; then
+            [[ "${status}" == 0 && ! -s "${TEST_ROOT}/output.log" ]]
+        else
+            if [[ "${commitFailure}" == ssh-start ]]; then
+                [[ "${status}" == "${commitFailureRc}" ]]
+            else
+                [[ "${status}" == 1 ]]
+            fi
+            [[ "$(<"${TEST_ROOT}/output.log")" =~ ^dockerFail2banStartManagedCommit[[:space:]]step=${commitFailure}[[:space:]]rc=${commitFailureRc}[[:space:]]seconds=[0-9]+$ ]]
+        fi
+    }
+    for commitCase in guard:1 ws-config:21 ws-clean:22 control-config:23 control-clean:24 source:25 \
+        spec:1 witness-recheck:26 jail-up:27 ws-container:28 control-container:29 ssh-start:30 ok:0; do
+        commitCase "${commitCase%:*}" "${commitCase#*:}"
+    done
+)
 printf 'docker-fail2ban-start-contract-ok\n'
