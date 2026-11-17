@@ -19,6 +19,10 @@ on:
         description: Run only the isolated native ARM64 host preflight
         default: false
         type: boolean
+      native_host_lifecycle:
+        description: Run only formal release lifecycle acceptance on an isolated ARM64 host
+        default: false
+        type: boolean
       native_parallel_jobs:
         description: Top-level native regression workers (2-4 for benchmark/recovery)
         required: false
@@ -35,7 +39,7 @@ concurrency:
 jobs:
   static:
     name: Native static checks
-    if: ${{ !inputs.native_host_probe }}
+    if: ${{ !inputs.native_host_probe && !inputs.native_host_lifecycle }}
     timeout-minutes: 10
     runs-on: ubuntu-latest
     outputs:
@@ -198,3 +202,33 @@ jobs:
           name: native-arm64-host-preflight-${{ github.run_id }}
           path: ${{ runner.temp }}/native-arm64-host-preflight.json
           if-no-files-found: error
+
+  native-host-lifecycle:
+    name: Formal native ARM64 host lifecycle
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.native_host_lifecycle }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned jq
+        run: sudo bash shell/regression/install-ci-jq.sh
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+      - name: Validate driver assertions
+        run: python3 -B shell/regression/native-arm64-host-lifecycle.py --selfcheck
+      - name: Exercise formal host lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env PATH="${PATH}" GITHUB_SHA="${GITHUB_SHA}" GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
+            GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" \
+            python3 -B shell/regression/native-arm64-host-lifecycle.py \
+            --work "${RUNNER_TEMP}/padm-arm64-host"
+      - name: Preserve sanitized acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-arm64-host-lifecycle-${{ github.run_id }}
+          path: ${{ runner.temp }}/padm-arm64-host/evidence
+          if-no-files-found: error
+          retention-days: 14
