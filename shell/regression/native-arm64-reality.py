@@ -291,9 +291,17 @@ class Acceptance(specialties.Acceptance):
                     "service isolation changed")
             require("no-new-privileges:true" in host["SecurityOpt"], "service privilege boundary changed")
             if name == "nginx-stream":
-                require(host["NetworkMode"] == "host" and row["Config"]["User"] == "0:0"
-                        and set(host["CapAdd"]) == {"NET_BIND_SERVICE", "SETGID", "SETUID", "KILL"},
-                        "loopback stream isolation mismatch")
+                isolated = (host["NetworkMode"] == "host" and row["Config"]["User"] == "0:0"
+                            and {cap.removeprefix("CAP_") for cap in (host["CapAdd"] or [])}
+                            == {"NET_BIND_SERVICE", "SETGID", "SETUID", "KILL"})
+                if not isolated:
+                    self.record(label + "-loopback-isolation-failure", {
+                        "network_mode": host["NetworkMode"], "user": row["Config"]["User"],
+                        "cap_add": host["CapAdd"], "cap_drop": host["CapDrop"],
+                        "readonly_rootfs": host["ReadonlyRootfs"], "privileged": host["Privileged"],
+                        "security_opt": host["SecurityOpt"],
+                    })
+                require(isolated, "loopback stream isolation mismatch")
             else:
                 require(host["NetworkMode"] != "host" and set(row["NetworkSettings"]["Networks"]) == {"padm-docker"},
                         "service bridge network mismatch")
@@ -959,6 +967,42 @@ def selfcheck():
         require(not result_valid(row, body), "invalid runtime result accepted")
         rejected += 1
     require(len(ENCRYPTION_PHASES) == 5 and len(TOPOLOGY_PHASES) == 6, "phase matrix changed")
+    acceptance.spec = lambda: {"reality_stream": {"host_website": {"network_mode": "host"}}}
+    acceptance.command = lambda *args: b"xray nginx stream"
+    failures = []
+    acceptance.record = lambda label, row: failures.append((label, row))
+    rows = [{
+        "Config": {"Labels": {"com.docker.compose.service": name},
+                   "User": "0:0" if name == "nginx-stream" else "10001:10001"},
+        "State": {"Running": True, "Health": {"Status": "healthy"}},
+        "HostConfig": {"ReadonlyRootfs": True, "Privileged": False, "CapDrop": ["ALL"],
+                       "SecurityOpt": ["no-new-privileges:true"],
+                       "NetworkMode": "host" if name == "nginx-stream" else "padm-docker",
+                       "CapAdd": ["CAP_NET_BIND_SERVICE", "CAP_SETGID", "CAP_SETUID", "CAP_KILL"]
+                       if name == "nginx-stream" else []},
+        "NetworkSettings": {"Networks": {} if name == "nginx-stream" else {"padm-docker": {}}},
+    } for name in ("xray", "nginx", "nginx-stream")]
+    acceptance.json_command = lambda *args: rows
+    acceptance.services("prefixed-capabilities")
+    rows[-1]["HostConfig"]["CapAdd"] = ["NET_BIND_SERVICE", "SETGID", "SETUID", "KILL"]
+    acceptance.services("unprefixed-capabilities")
+    for section, key, value in (
+        ("HostConfig", "CapAdd", ["CAP_NET_BIND_SERVICE", "CAP_SETGID", "CAP_SETUID", "CAP_KILL", "CAP_SYS_ADMIN"]),
+        ("HostConfig", "CapAdd", ["CAP_NET_BIND_SERVICE", "CAP_SETGID", "CAP_SETUID"]),
+        ("HostConfig", "NetworkMode", "padm-docker"),
+        ("Config", "User", "10001:10001"),
+    ):
+        previous = rows[-1][section][key]
+        rows[-1][section][key] = value
+        try:
+            acceptance.services("invalid-loopback-isolation")
+        except AssertionError as error:
+            require(str(error) == "loopback stream isolation mismatch", "unexpected isolation rejection")
+            rejected += 1
+        else:
+            raise AssertionError("invalid loopback isolation accepted")
+        rows[-1][section][key] = previous
+    require(len(failures) == 4, "loopback isolation failure evidence missing")
     print(json.dumps({"reality_selfcheck": "pass", "negative_controls": rejected, "network_used": False}))
 
 
