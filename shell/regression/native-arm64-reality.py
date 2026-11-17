@@ -654,6 +654,8 @@ class Acceptance(specialties.Acceptance):
                     response.begin()
                     status, response_headers = response.status, list(response.getheaders())
                     body = response.read()
+                    # 完成 TLS 关闭握手，避免未读记录在 TCP close 时触发中继 RST。
+                    channel.unwrap().close()
         except (OSError, http.client.HTTPException) as error:
             error_type = type(error).__name__
         deadline = time.monotonic() + 2
