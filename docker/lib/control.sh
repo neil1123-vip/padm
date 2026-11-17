@@ -225,6 +225,9 @@ dockerControlPrivateAddressIsValid() {
 dockerControlPeerCheck() {
     # 同时比对完整在线集合；v2 只按指定地址核验，不把第一项当成目标。
     DOCKER_COMPOSE_TIMEOUT=10 dockerComposeRun exec -T net-wireguard bash -euo pipefail -c '
+if [[ "$3" == 1 ]]; then
+    /usr/local/bin/padm-entrypoint wireguard-health wg-padm
+fi
 configured=$(wg-quick strip /etc/wireguard/wg-padm.conf | awk -v address="$1/32" -v multiple="$2" '"'"'
     function finish() {
         if (section != "[Peer]") return
@@ -260,7 +263,7 @@ configured=$(wg-quick strip /etc/wireguard/wg-padm.conf | awk -v address="$1/32"
 '"'"')
 actual=$(wg show wg-padm allowed-ips)
 [[ "$(printf "%s\n" "$actual" | LC_ALL=C sort)" == "$(printf "%s\n" "$configured" | LC_ALL=C sort)" ]]
-' padm-control-peer "$1" "${2:-0}" >/dev/null 2>&1
+' padm-control-peer "$1" "${2:-0}" "${3:-0}" >/dev/null 2>&1
 }
 
 dockerControlPeerSelect() {
@@ -406,19 +409,19 @@ dockerControlRequireMain() {
 }
 
 dockerControlInviteRuntimeCheck() {
-    local spec=$1 image address peerAddress multiple=0 peers
+    local spec=$1 image address peerAddress multiple=0 peers checkHealth=1
     address=$(jq -er '.control.listen.address' "${spec}") &&
         dockerControlPrivateAddressIsValid "${address}" &&
-        dockerCurrentOwnsHostIntegration wireguard &&
-        DOCKER_COMPOSE_TIMEOUT=10 dockerComposeRun exec -T net-wireguard \
-            /usr/local/bin/padm-entrypoint wireguard-health wg-padm >/dev/null 2>&1 ||
+        dockerCurrentOwnsHostIntegration wireguard ||
         return "${PADM_DOCKER_RC_HOST}"
     jq -e '.control.schema_version == 2' "${spec}" >/dev/null && multiple=1
     peers=$(jq -er 'if .control.schema_version == 1 then .control.peer.address
         else .control.peers[].address end' "${spec}") || return "${PADM_DOCKER_RC_STATE}"
     while IFS= read -r peerAddress; do
         dockerControlPrivateAddressIsValid "${peerAddress}" &&
-            dockerControlPeerCheck "${peerAddress}" "${multiple}" || return "${PADM_DOCKER_RC_HOST}"
+            dockerControlPeerCheck "${peerAddress}" "${multiple}" "${checkHealth}" ||
+            return "${PADM_DOCKER_RC_HOST}"
+        checkHealth=0
     done <<<"${peers}"
     image=$(dockerAccountImage ops) || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityProbeRun 10 --user 10001:10001 --network host \

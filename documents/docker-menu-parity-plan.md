@@ -11731,6 +11731,30 @@ SHA-256 `a017f7650e3f0945e1e350e9f6ac906cdb6e82f4a4a23c5ffde2ff223931e85e`；
 仅新增测试；防护及完整恢复仍未通过，16 supported/14 deferred 不变，
 未连接/重启 A/B、放宽安全窗口、推送、发布或重复 daily/full。
 
+### 6A.53 邀请侧 WireGuard 健康与 Peer 核验合并
+
+2026-11-17，`dockerControlInviteRuntimeCheck` 将单独的 WireGuard health
+调用合入首次 `dockerControlPeerCheck` 的既有容器 Bash；单 Peer 从两次
+Compose exec 减为一次，v2 的 N 个 Peer 从 N+1 次减为 N 次。
+第三内部参数默认不附带 health，Init、Client 和独立 Peer 操作保持原调用；
+每次邀请侧调用均从 health 开始，未添加跨调用缓存。完整配置/在线
+Peer 与 AllowedIPs 集合仍逐 Peer 比对，独立宿主地址探针保持。
+健康与首 Peer 共用原 `10` 秒有界 exec，任一失败仍拒绝。
+完整 Snapshot、内核清场及来源见证 `30` 秒窗口未改。
+
+定向合同实际执行生产 Bash，覆盖单 Peer 的 `1 exec/1 health`、
+下一次调用的健康失效、v2 的 `2 exec/1 health` 及非首 Peer 漂移拒绝。
+同步邀请测试桩的健康失败条件。当前 Linux amd64 源码快照
+`d9856bd34f6b6cb9c8b51636bbdf9811b2027f8acb1495761c71508df9fe2fce`
+通过 `docker-control-cli -Jobs 2` 和 `docker-contracts -Jobs 6` 的
+`34/34` 项，入口分别 `20.596/222.589` 秒、均 exit `0` 且无缓存命中，
+复用工具镜像 `sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`。
+证据 `.tmp-regression-docker-d6022dd1734645af8197d118dcaa7563/`、
+`.tmp-regression-docker-b8e5082afe034cb4913524ba8ecabdc8/`。
+只读复审未发现实质问题；真实 TCG/原生耗时及防护通过尚待候选验收，
+不把减少调用次数等同于修复 6A.52 超截止或部署锁失败。
+支持状态保持 `16 supported/14 deferred`，未运行 full、访问生产或发布。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

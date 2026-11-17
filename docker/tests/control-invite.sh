@@ -76,7 +76,10 @@ dockerReleaseDeploymentLock() { printf 'unlock\n' >>"${TEST_ROOT}/host.log"; }
 dockerConfigureReleaseReuseInstalled() { :; }
 dockerManagedSpecMatchesDeployment() { [[ ! -f "${TEST_ROOT}/bad-deployment" ]]; }
 dockerCurrentOwnsHostIntegration() { [[ "$1" == wireguard && ! -f "${TEST_ROOT}/unowned" ]]; }
-dockerControlPeerCheck() { [[ "$1" == 10.77.0.2 && ! -f "${TEST_ROOT}/bad-peer" ]]; }
+dockerControlPeerCheck() {
+    [[ "$1" == 10.77.0.2 && ! -f "${TEST_ROOT}/bad-peer" ]] &&
+        { [[ "${3:-0}" != 1 ]] || [[ ! -f "${TEST_ROOT}/bad-health" ]]; }
+}
 dockerComposeRun() {
     [[ "${DOCKER_COMPOSE_TIMEOUT:-}" == 10 && "$1" == exec && "$2" == -T ]] || return 1
     case "$3" in
@@ -448,7 +451,10 @@ dockerControlCommand invite --output "${firstOutput}" --yes >/dev/null
 dockerControlCommand upgrade --yes >/dev/null
 firstId=$(jq -r '.control.peers[0].id' "${spec}")
 secondId=55555555-5555-4555-8555-555555555555
-dockerControlPeerCheck() { [[ "$1" == 10.77.0.2 || "$1" == 10.77.0.3 ]]; }
+dockerControlPeerCheck() {
+    [[ "$1" == 10.77.0.2 || "$1" == 10.77.0.3 ]] &&
+        { [[ "${3:-0}" != 1 ]] || [[ ! -f "${TEST_ROOT}/bad-health" ]]; }
+}
 dockerAccountRandomUuid() { printf '%s\n' "${secondId}"; }
 dockerSetupRandomHex() { [[ "$2" == 32 ]] && printf e%.0s {1..64}; }
 dockerControlCommand peers add --peer-address 10.77.0.3 --yes >/dev/null

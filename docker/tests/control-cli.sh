@@ -94,17 +94,25 @@ cp -- "${CONTROL_WG_CONFIG}" "${TEST_ROOT}/safe-wg.conf"
 cp -- "${CONTROL_WG_ACTUAL}" "${TEST_ROOT}/safe-wg.actual"
 wg-quick() { [[ "$1" == strip ]] && cat -- "${CONTROL_WG_CONFIG}"; }
 wg() { [[ "$*" == 'show wg-padm allowed-ips' ]] && cat -- "${CONTROL_WG_ACTUAL}"; }
-export -f wg wg-quick
+controlWireguardEntrypoint() {
+    printf 'health\n' >>"${CONTROL_WG_CONFIG%/*}/wg-health.log"
+    [[ "$*" == 'wireguard-health wg-padm' && ! -f "${CONTROL_WG_CONFIG%/*}/bad-health" ]]
+}
+export -f wg wg-quick controlWireguardEntrypoint
 dockerComposeRun() {
     [[ "${DOCKER_COMPOSE_TIMEOUT:-}" == 10 && "$1" == exec && "$2" == -T ]] || return 1
     case "$3" in
     net-wireguard)
+        printf 'exec\n' >>"${TEST_ROOT}/wg-exec.log"
         if [[ "$4" == /usr/local/bin/padm-entrypoint ]]; then
             [[ "$*" == 'exec -T net-wireguard /usr/local/bin/padm-entrypoint wireguard-health wg-padm' &&
                 ! -f "${TEST_ROOT}/bad-health" ]]
         else
             shift 3
-            "$@"
+            local arguments=("$@")
+            [[ "${arguments[0]}" == bash && "${arguments[3]}" == -c ]] || return 1
+            arguments[4]=${arguments[4]//\/usr\/local\/bin\/padm-entrypoint/controlWireguardEntrypoint}
+            "${arguments[@]}"
         fi
         ;;
     control)
@@ -254,6 +262,33 @@ jq -e 'keys == ["authorization","controller_id","healthy","listen","node_id","pe
   .role == "main" and .healthy == true and .revision == 0 and
   .authorization == {enabled:false, expires_at:1}' <<<"${json}" >/dev/null
 cp -- "${spec}" "${TEST_ROOT}/main.json"
+(
+    # 健康和完整 Peer 集合共用一次 exec；多 Peer 仍逐项核验且每次调用重新检查健康。
+    : >"${TEST_ROOT}/wg-exec.log"
+    : >"${TEST_ROOT}/wg-health.log"
+    dockerControlInviteRuntimeCheck "${spec}"
+    [[ "$(wc -l <"${TEST_ROOT}/wg-exec.log")" == 1 &&
+        "$(wc -l <"${TEST_ROOT}/wg-health.log")" == 1 ]]
+    touch "${TEST_ROOT}/bad-health"
+    reject dockerControlInviteRuntimeCheck "${spec}"
+    rm -- "${TEST_ROOT}/bad-health"
+    [[ "$(wc -l <"${TEST_ROOT}/wg-health.log")" == 2 ]]
+    jq '.control |= (.schema_version = 2 | .peers = [
+      .peer, (.peer | .id = "55555555-5555-4555-8555-555555555555" | .address = "10.77.0.3")
+    ] | del(.peer))' "${spec}" >"${TEST_ROOT}/runtime-v2.json"
+    printf '[Peer]\nPublicKey = %s\nAllowedIPs = 10.77.0.3/32\n' \
+        "$(printf D%.0s {1..43})=" >>"${CONTROL_WG_CONFIG}"
+    printf '%s\t10.77.0.3/32\n' "$(printf D%.0s {1..43})=" >>"${CONTROL_WG_ACTUAL}"
+    : >"${TEST_ROOT}/wg-exec.log"
+    : >"${TEST_ROOT}/wg-health.log"
+    dockerControlInviteRuntimeCheck "${TEST_ROOT}/runtime-v2.json"
+    [[ "$(wc -l <"${TEST_ROOT}/wg-exec.log")" == 2 &&
+        "$(wc -l <"${TEST_ROOT}/wg-health.log")" == 1 ]]
+    sed -i 's@10.77.0.3/32@10.77.0.4/32@' "${CONTROL_WG_ACTUAL}"
+    reject dockerControlInviteRuntimeCheck "${TEST_ROOT}/runtime-v2.json"
+    cp -- "${TEST_ROOT}/safe-wg.conf" "${CONTROL_WG_CONFIG}"
+    cp -- "${TEST_ROOT}/safe-wg.actual" "${CONTROL_WG_ACTUAL}"
+)
 (
     # 端口变更沿用主控事务；旁路调度和网络异常不能触发部署。
     cp -p -- "${root}/config/control/state.json" "${TEST_ROOT}/main-state.json"
