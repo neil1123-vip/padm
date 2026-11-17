@@ -73,7 +73,10 @@ chmod 0600 "${root}/secrets/net/wireguard/wg-padm.conf"
 export CONTROL_WG_CONFIG="${root}/secrets/net/wireguard/wg-padm.conf"
 export CONTROL_TEST_ROOT="${TEST_ROOT}"
 export CONTROL_PEER_KEY="$(printf B%.0s {1..43})="
-wg-quick() { [[ "$1" == strip ]] && cat -- "${CONTROL_WG_CONFIG}"; }
+wg-quick() {
+    printf 'peer\n' >>"${CONTROL_TEST_ROOT}/wg-runtime.log"
+    [[ "$1" == strip ]] && cat -- "${CONTROL_WG_CONFIG}"
+}
 wg() {
     [[ "$*" == 'show wg-padm allowed-ips' ]] || return 1
     if [[ -f "${CONTROL_TEST_ROOT}/bad-peer" ]]; then
@@ -83,6 +86,7 @@ wg() {
     fi
 }
 ip() {
+    printf 'route\n' >>"${CONTROL_TEST_ROOT}/wg-runtime.log"
     [[ "$*" == '-4 route get 10.77.0.1 from 10.77.0.2' ]] || return 1
     if [[ -f "${CONTROL_TEST_ROOT}/bad-route" ]]; then
         printf '10.77.0.1 from 10.77.0.2 dev eth0\n'
@@ -92,7 +96,11 @@ ip() {
         printf '10.77.0.1 from 10.77.0.2 dev wg-padm\n'
     fi
 }
-export -f wg wg-quick ip
+controlWireguardEntrypoint() {
+    printf 'health\n' >>"${CONTROL_TEST_ROOT}/wg-runtime.log"
+    [[ "$*" == 'wireguard-health wg-padm' && ! -f "${CONTROL_TEST_ROOT}/bad-health" ]]
+}
+export -f wg wg-quick ip controlWireguardEntrypoint
 
 # 网络使用桩；私有文件、生产客户端规划器和配置候选/备份/恢复均实际执行。
 dockerHostPreflight() { printf 'host\n' >>"${TEST_ROOT}/host.log"; }
@@ -118,12 +126,16 @@ dockerComposeRun() {
     printf '%s\n' "$*" >>"${TEST_ROOT}/compose.log"
     if [[ "$1" == exec ]]; then
         [[ "${DOCKER_COMPOSE_TIMEOUT:-}" == 10 && "$2" == -T && "$3" == net-wireguard ]] || return 1
+        printf 'exec\n' >>"${TEST_ROOT}/wg-exec.log"
         if [[ "$4" == /usr/local/bin/padm-entrypoint ]]; then
-            [[ "$*" == 'exec -T net-wireguard /usr/local/bin/padm-entrypoint wireguard-health wg-padm' &&
-                ! -f "${TEST_ROOT}/bad-health" ]]
+            [[ "$*" == 'exec -T net-wireguard /usr/local/bin/padm-entrypoint wireguard-health wg-padm' ]] &&
+                controlWireguardEntrypoint "${@:5}"
         else
             shift 3
-            "$@"
+            local arguments=("$@")
+            [[ "${arguments[0]}" == bash && "${arguments[3]}" == -c ]] || return 1
+            arguments[4]=${arguments[4]//\/usr\/local\/bin\/padm-entrypoint/controlWireguardEntrypoint}
+            "${arguments[@]}"
         fi
         return $?
     fi
@@ -219,6 +231,28 @@ traffic=$(sha256sum "${root}/data/traffic/state.json")
 original=$(sha256sum "${spec}")
 args=(--invite "${invite}" --listener entry-reality --yes)
 rm -f -- "${TEST_ROOT}/host.log"
+
+# 合并检查仍须健康先行；失败不得继续 Peer 或路由检查。
+(
+    : >"${TEST_ROOT}/wg-exec.log"
+    : >"${TEST_ROOT}/wg-runtime.log"
+    dockerControlClientRuntimeCheck "${invite}"
+    [[ "$(wc -l <"${TEST_ROOT}/wg-exec.log")" == 2 &&
+        "$(<"${TEST_ROOT}/wg-runtime.log")" == $'health\npeer\nroute' ]] ||
+        fail '被控运行检查未合并健康和 Peer exec'
+    for marker in bad-health bad-peer; do
+        : >"${TEST_ROOT}/wg-exec.log"
+        : >"${TEST_ROOT}/wg-runtime.log"
+        touch "${TEST_ROOT}/${marker}"
+        reject dockerControlClientRuntimeCheck "${invite}"
+        rm -- "${TEST_ROOT}/${marker}"
+        expected=health
+        [[ "${marker}" != bad-peer ]] || expected+=$'\npeer'
+        [[ "$(wc -l <"${TEST_ROOT}/wg-exec.log")" == 1 &&
+            "$(<"${TEST_ROOT}/wg-runtime.log")" == "${expected}" ]] ||
+            fail "被控运行检查未在 ${marker} 短路"
+    done
+)
 
 reject dockerControlCommand join
 reject dockerControlCommand join --invite "${invite}" --yes

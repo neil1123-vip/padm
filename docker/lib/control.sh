@@ -843,9 +843,7 @@ dockerControlClientRuntimeCheck() {
         dockerControlPrivateAddressIsValid "${peerAddress}" &&
         [[ "${address}" != "${peerAddress}" ]] &&
         dockerCurrentOwnsHostIntegration wireguard &&
-        DOCKER_COMPOSE_TIMEOUT=10 dockerComposeRun exec -T net-wireguard \
-            /usr/local/bin/padm-entrypoint wireguard-health wg-padm >/dev/null 2>&1 &&
-        dockerControlPeerCheck "${address}" || return "${PADM_DOCKER_RC_HOST}"
+        dockerControlPeerCheck "${address}" 0 1 || return "${PADM_DOCKER_RC_HOST}"
     DOCKER_COMPOSE_TIMEOUT=10 dockerComposeRun exec -T net-wireguard bash -euo pipefail -c '
 ip -4 route get "$1" from "$2" | awk -v source="$2" '"'"'
     NR == 1 {

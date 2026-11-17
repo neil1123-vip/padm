@@ -12154,6 +12154,35 @@ QEMU exit `0/0`、无强制关机、父盘不变；驱动 exit `1`、无 OOM，
 原恢复断言未删除。本轮未改生产、重启生产、扩跑回归、推送或发布；
 控制面防护与整体计划仍未完成，`16 supported/14 deferred` 保持。
 
+### 6A.63 被控运行预检合并健康与 Peer 调用
+
+2026-11-17，`dockerControlClientRuntimeCheck` 复用已有
+`dockerControlPeerCheck "${address}" 0 1`，与主控邀请预检采用相同健康入口。
+先验证健康，再校验完整配置 Peer 和在线 AllowedIPs 集合；成功路径由三次
+Compose exec 减为两次，指定源地址路由仍独立核验。地址与 owner 门禁、完整
+Peer 比对、错误返回和失败后拒绝后续网络请求或写入的顺序保持。
+
+health 与 Peer 现在共用一次 `10` 秒 Compose 执行预算，原来分别各有 `10` 秒；
+这是更紧的执行上限，超时仍拒绝，路由保留独立 `10` 秒预算。
+不改变三次来源采样、即时 clean、回执或双时限，也不放宽 `30` 秒见证窗口。
+四个调用入口 SourceProbe、ClientApply、SyncSchedule 和 AutoSync 已只读复审。
+
+真实运行预检的隔离夹具新增精确调用与顺序断言：成功恰有两次 exec、健康仅一次；
+health 或 Peer 失败均在一次 exec 内短路，后续 Peer 或路由不会继续。
+既有坏 Peer、错误设备及错误源地址的集成拒绝和恢复场景保留。
+Docker Desktop Linux amd64 使用相同工具镜像、`-Jobs 2`，两组不复用结果的定向回归通过：
+
+| Selector | 耗时 | 证据目录 |
+| --- | --- | --- |
+| `docker-control-client` | `80.803` 秒 | `.tmp-regression-docker-2caaeeba04434b7797d0c6286824f34e/` |
+| `docker-control-cli` | `23.813` 秒 | `.tmp-regression-docker-8c2fa977fc7a4c51a0a21fd806301cb0/` |
+
+前者覆盖客户端规划、join/sync/remap/reconnect/rebind、同步调度及控制菜单；
+后者覆盖控制 CLI、邀请、日志调度及生命周期。两次使用各自当前工作区快照，
+`result.json` 分别记录源码 SHA-256；不声明两次归档完全相同或据此比较性能。
+本轮未复跑原生 VM，未证明正式控制面防护通过或原生见证截止问题解决；
+未访问或重启生产、扩跑 daily/full、推送或发布，`16 supported/14 deferred` 保持。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
