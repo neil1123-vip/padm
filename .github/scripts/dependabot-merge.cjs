@@ -9,6 +9,7 @@ const requiredJobs = [
   'Native static checks', 'Native shell and workflow checks',
   'TLS transactions and renewal', 'Cosign install and signature checks',
 ];
+const triggerGraceMs = 10 * 60 * 1000;
 
 function actionVersionUpdate(before, after) {
   const pattern = /^([ \t]*(?:-[ \t]*)?uses:[ \t]+)([\w./-]+)@(v\d+(?:\.\d+){0,2})([ \t]*(?:#[^\r\n]*)?)$/gm;
@@ -36,11 +37,18 @@ function actionVersionUpdate(before, after) {
 module.exports = async ({
   github, context, core, workflowTokenConfigured = false,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  now = () => Date.now(),
 }) => {
+  const repo = context.repo;
+  const eventRun = context.eventName === 'workflow_run' ? context.payload.workflow_run : null;
+  if (context.eventName === 'workflow_run' && (!eventRun ||
+      eventRun.conclusion !== 'success' ||
+      !['pull_request', 'workflow_dispatch'].includes(eventRun.event) ||
+      eventRun.head_repository?.full_name !== `${repo.owner}/${repo.repo}` ||
+      !eventRun.head_branch?.startsWith('dependabot/github_actions/'))) return;
   if (!workflowTokenConfigured) {
     throw new Error('Configure the DEPENDABOT_AUTOMATION_TOKEN repository secret with Actions, Contents, Pull requests and Workflows write permissions. GITHUB_TOKEN cannot synchronize workflow updates.');
   }
-  const repo = context.repo;
   const { data: repository } = await github.rest.repos.get(repo);
   const branch = repository.default_branch;
   if (branch !== 'main') throw new Error('Dependabot automation requires the main default branch.');
@@ -62,15 +70,17 @@ module.exports = async ({
     await github.rest.actions.createWorkflowDispatch({ ...repo, workflow_id: 'docker-ci.yml', ref });
     core.info(`Docker CI dispatched for ${ref}.`);
   };
-  const ensureRelease = async (sha, waitForPush = false) => {
-    const attempts = waitForPush ? 4 : 1;
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      const releases = await github.paginate(github.rest.actions.listWorkflowRuns, {
-        ...repo, workflow_id: 'create_release.yml', head_sha: sha, per_page: 100,
-      });
-      if (releases.some(run => run.head_sha === sha)) return;
-      if (attempt + 1 < attempts) await sleep(2000);
+  const ensureRelease = async (sha, mergedAt) => {
+    const releases = await github.paginate(github.rest.actions.listWorkflowRuns, {
+      ...repo, workflow_id: 'create_release.yml', head_sha: sha, per_page: 100,
+    });
+    if (releases.some(run => run.head_sha === sha)) return;
+    const elapsed = now() - Date.parse(mergedAt);
+    if (!Number.isFinite(elapsed) || elapsed < triggerGraceMs) {
+      core.info(`Waiting for the push-triggered Release at ${sha}; later inspection will recover a missing run.`);
+      return;
     }
+    if ((await main()).commit.sha !== sha) return;
     await github.rest.actions.createWorkflowDispatch({
       ...repo, workflow_id: 'create_release.yml', ref: branch, inputs: { force_release: 'false' },
     });
@@ -79,15 +89,19 @@ module.exports = async ({
   let promoted = false;
   for (const candidate of candidates) {
     if (candidate.user.login !== 'dependabot[bot]') continue;
+    if (eventRun && (candidate.head.sha !== eventRun.head_sha ||
+        candidate.head.ref !== eventRun.head_branch)) continue;
     let { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: candidate.number });
     if (pr.state !== 'open' || pr.draft || pr.user.login !== 'dependabot[bot]' ||
         pr.base.ref !== branch || pr.head.repo?.full_name !== repository.full_name ||
         !pr.head.ref.startsWith('dependabot/github_actions/') ||
-        pr.changed_files < 1 || pr.changed_files > 50) continue;
+        pr.changed_files < 1 || pr.changed_files > 50 ||
+        (eventRun && (pr.head.sha !== eventRun.head_sha || pr.head.ref !== eventRun.head_branch))) continue;
     const current = await main();
-    // 当前仓库沿用受测提交快进；新增保护规则后交回平台合并门禁。
+    // 当前仓库沿用非强制写入；新增保护规则后交回平台合并门禁。
     if (current.protected) throw new Error('main is protected; configure the required PR merge policy before enabling promotion.');
     const diff = await compare(current.commit.sha, pr.head.sha);
+    if (diff.status === 'identical') continue;
     const files = await github.paginate(github.rest.pulls.listFiles, {
       ...repo, pull_number: pr.number, per_page: 100,
     });
@@ -157,8 +171,19 @@ module.exports = async ({
       .sort((a, b) => Date.parse(b.updated_at || b.created_at) -
         Date.parse(a.updated_at || a.created_at) || b.id - a.id);
     const latest = history[0];
-    if (!latest || latest.conclusion === 'action_required') {
-      await dispatchCi(pr.head.ref);
+    if (!latest) {
+      const elapsed = now() - Date.parse(pr.updated_at);
+      if (Number.isFinite(elapsed) && elapsed < triggerGraceMs) {
+        core.info(`PR #${pr.number} was recently updated; waiting for its pull_request CI.`);
+      } else {
+        await dispatchCi(pr.head.ref);
+      }
+      continue;
+    }
+    if (latest.conclusion === 'action_required') {
+      if (latest.event === 'pull_request' && !history.some(run => run.event === 'workflow_dispatch')) {
+        await dispatchCi(pr.head.ref);
+      }
       continue;
     }
     if (latest.status !== 'completed' || latest.conclusion !== 'success') continue;
@@ -176,21 +201,27 @@ module.exports = async ({
     if (checked.state !== 'open' || checked.draft || checked.base.ref !== branch ||
         checked.head.repo?.full_name !== repository.full_name || checked.head.sha !== pr.head.sha ||
         finalMain.commit.sha !== current.commit.sha || finalMain.protected) continue;
-    // 非强制快进保证 main 并发前进时拒绝写入，也不产生未经测试的合并提交。
-    await github.rest.git.updateRef({ ...repo, ref: `heads/${branch}`, sha: pr.head.sha, force: false });
-    core.info(`Promoted PR #${pr.number} at tested commit ${pr.head.sha}.`);
+    const { data: tested } = await github.rest.git.getCommit({ ...repo, commit_sha: pr.head.sha });
+    // 受测文件树保持不变，main 作为第一父提交让单提交差异只显示依赖更新。
+    const { data: merge } = await github.rest.git.createCommit({
+      ...repo, message: `${pr.title} (#${pr.number})`,
+      tree: tested.tree.sha, parents: [current.commit.sha, pr.head.sha],
+    });
+    // 非强制更新在 main 并发前进时拒绝覆盖。
+    await github.rest.git.updateRef({ ...repo, ref: `heads/${branch}`, sha: merge.sha, force: false });
+    core.info(`Merged PR #${pr.number} at ${merge.sha} using the tested tree from ${pr.head.sha}.`);
     promoted = true;
-    // 先接续已合入提交的发布，避免后续候选异常挡住派发。
-    await ensureRelease(pr.head.sha, true);
+    await ensureRelease(merge.sha, new Date(now()).toISOString());
   }
   // shortcut: 补派只匹配当前 main；需要跨提交恢复时再跟踪发布状态。
-  if (promoted) return;
+  if (promoted || eventRun) return;
   const current = await main();
   const closed = await github.paginate(github.rest.pulls.list, {
     ...repo, state: 'closed', base: branch, sort: 'updated', direction: 'desc', per_page: 100,
   });
-  if (closed.some(pr => pr.user.login === 'dependabot[bot]' &&
-    pr.merged_at && pr.merge_commit_sha === current.commit.sha)) {
-    await ensureRelease(current.commit.sha);
+  const merged = closed.find(pr => pr.user.login === 'dependabot[bot]' &&
+    pr.merged_at && pr.merge_commit_sha === current.commit.sha);
+  if (merged) {
+    await ensureRelease(current.commit.sha, merged.merged_at);
   }
 };

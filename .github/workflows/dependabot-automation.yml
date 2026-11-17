@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows: [Docker CI]
     types: [completed]
+    branches: ['dependabot/github_actions/**']
   schedule:
     - cron: '37 4 * * *'
   workflow_dispatch:
@@ -27,7 +28,7 @@ jobs:
         with:
           ref: main
           persist-credentials: false
-      - name: Promote validated Dependabot updates
+      - name: Merge validated Dependabot updates
         uses: actions/github-script@v9
         env:
           WORKFLOW_TOKEN_CONFIGURED: ${{ secrets.DEPENDABOT_AUTOMATION_TOKEN != '' }}

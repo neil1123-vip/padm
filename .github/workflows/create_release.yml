@@ -341,7 +341,7 @@ jobs:
   images:
     name: Validate or publish images
     needs: [prepare, contracts]
-    if: ${{ needs.prepare.outputs.deferred == 'false' }}
+    if: ${{ needs.prepare.outputs.deferred == 'false' && needs.prepare.outputs.skip != 'true' }}
     uses: ./.github/workflows/build-images.yml
     permissions:
       contents: read
@@ -351,8 +351,7 @@ jobs:
       version: ${{ needs.prepare.outputs.release_version || 'dev' }}
       source_ref: ${{ needs.prepare.outputs.release_sha }}
       registry: ghcr.io/neil1123-vip
-      push: ${{ needs.prepare.outputs.skip != 'true' }}
-      contracts_only: ${{ needs.prepare.outputs.skip == 'true' }}
+      push: true
     secrets: inherit
 
   release:

@@ -1194,7 +1194,6 @@ grep -Fq "      - 'docker/**'" "${RELEASE_WORKFLOW}" ||
 if grep -Eq "^      - '!(docker/tests/\*\*|docker/release[.]sh)'$" "${RELEASE_WORKFLOW}"; then
     fail 'main workflow filters out Docker tests or release fixes'
 fi
-grep -Fq 'contracts_only:' "${RELEASE_WORKFLOW}" || fail 'main workflow lacks contracts-only validation'
 grep -Fq "if: \${{ !inputs.contracts_only }}" "${BUILD_WORKFLOW}" ||
     fail 'contracts-only validation does not gate image work'
 grep -Fq -- "-F force_release=\"\${FORCE_RELEASE}\"" "${RELEASE_WORKFLOW}" ||
@@ -1283,9 +1282,20 @@ for workflow in "${RELEASE_WORKFLOW}" "${PR_WORKFLOW}"; do
     grep -Fq 'source_ref: ${{ needs.static.outputs.source_sha }}' <<<"${contractDefinition}" ||
         fail "contracts do not validate the checked source commit: ${workflow}"
 done
-releaseImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${RELEASE_WORKFLOW}")
-[[ "${releaseImageNeeds}" == '    needs: [prepare, contracts]' ]] ||
+releaseImageDefinition=$(awk '
+    /^  images:$/ {inside = 1; next}
+    inside && /^  [^ ]/ {exit}
+    inside {print}
+' "${RELEASE_WORKFLOW}")
+grep -Fxq '    needs: [prepare, contracts]' <<<"${releaseImageDefinition}" ||
     fail 'Release images can bypass failed contract shards'
+grep -Fxq "    if: \${{ needs.prepare.outputs.deferred == 'false' && needs.prepare.outputs.skip != 'true' }}" <<<"${releaseImageDefinition}" ||
+    fail '无需发布或需要移交时仍然调用镜像工作流'
+grep -Fxq '      push: true' <<<"${releaseImageDefinition}" ||
+    fail '真正发布没有开启镜像推送'
+if grep -Fq 'contracts_only:' <<<"${releaseImageDefinition}"; then
+    fail 'Release 仍在重复执行无需发布的镜像合同检查'
+fi
 grep -Fq '.github/workflows/docker-contracts.yml; then' "${RELEASE_WORKFLOW}" ||
     fail 'latest workflow revision check omits the contract workflow'
 

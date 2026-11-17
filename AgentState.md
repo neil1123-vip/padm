@@ -27,8 +27,9 @@
 - 6A.67 ARM64/Xray WS `.7/.8` 七阶段及清场独验，56 工件；
   `.tmp-native-arm64-host-20261117/`。6A.66 正式 `.8` 双 KVM 升级/防护/
   全文件恢复独验，1940 工件 `.tmp-formal-control-3438-20261117/`；均已清场。
-- Dependabot 内置令牌同步 workflow 遭 403；修复后 42 例及 Actionlint 通过。
-  待配 `DEPENDABOT_AUTOMATION_TOKEN` 后线上验证；PAT 事件已适配。
+- Dependabot PR #11/`34649a0b` 闭环，Release `44120778615` 成功。
+  合并保留受测树/main 第一父，事件关联及 10 分钟补派去重；62 例、
+  docker-phase5/Actionlint 已验；新 PR 线上待验。
 - 原生双机证据 `.tmp-native-control-vms-20261116/`；A/B 已清场，
   0 显式账号、各 19 条历史账目；`.7` 资产验签及双架构绑定通过。
 - A/B 自然续期阈值：北京时间 2026-12-17 08:03:22，非 timer 时间；未到期未换证。

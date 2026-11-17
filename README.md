@@ -539,11 +539,11 @@ Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官�
 
 `Refresh Upstream Versions` 每天北京时间 11:17 调度检查官方 sing-box 最新稳定版（GitHub 调度可能延迟），也可手动运行。发现尚未发布的统计版时，自动调用上述双架构构建工作流；日常巡检复用已完整发布的版本。刷新在独立临时分支更新 Docker 版本锁，完成锁校验、依赖预检和该提交的 Docker CI 后，仅在 `main` 基线未变化且差异仅含 `versions.lock` 时快进合入，再显式派发 Release；派发失败后可补派。真实测试失败或并发基线变化会停止，不会绕过验证。统计版构建失败时工作流仍报告失败，但允许为已发布版本刷新基础镜像与 Debian 快照锁；失败候选不会进入锁。自动刷新只选择本仓库已发布的正式统计版，忽略草稿和预发布版。需要预发布版时仍可手动指定 `version` 运行统计版工作流。
 
-Dependabot 每日检查 GitHub Actions，将大版本、次版本和补丁更新合为一组，均可自动合入。`Dependabot Automation` 在 Docker CI 成功后以及每天北京时间 12:37 检查更新，也可手动运行。它只处理同仓库 Dependabot PR 中允许的稳定版 Action 引用升级，拒绝降级；主分支前进时自动同步更新分支并补派 CI，精确提交的最新 CI 及 Cosign 安装、本地签验和篡改拒绝检查通过后，将受测提交非强制快进合入 `main`，再按需派发 Release，不强制生成新版本。其它文件或逻辑变化、人工要求修改和真实测试失败均留待人工处理；启用主分支保护后会停止直接提升，须先配置兼容的合并门禁。本地签验不替代正式发布时的 OIDC 签名和可信身份验证。
+Dependabot 每日检查 GitHub Actions，将大版本、次版本和补丁更新合为一组，均可自动合入。`Dependabot Automation` 只响应 Dependabot 分支的 Docker CI 成功事件，并匹配该事件的分支和提交；每天北京时间 12:37 全量巡检，也可手动运行。它只处理同仓库 Dependabot PR 中允许的稳定版 Action 引用升级，拒绝降级；主分支前进时自动同步更新分支，精确提交的最新 CI 及 Cosign 安装、本地签验和篡改拒绝检查通过后，以 PR 标题生成合并提交，保持受测文件树不变、`main` 为第一父提交，再非强制更新 `main`。单提交差异因此只显示本次依赖升级，完整历史仍保留分支同步提交。其它文件或逻辑变化、人工要求修改和真实测试失败均留待人工处理；启用主分支保护后会停止直接合入，须先配置兼容的合并门禁。本地签验不替代正式发布时的 OIDC 签名和可信身份验证。
 
 启用前，在仓库的 Settings → Secrets and variables → Actions 中配置 `DEPENDABOT_AUTOMATION_TOKEN`。使用仅授权本仓库的 fine-grained PAT，授予 `Actions`、`Contents`、`Pull requests`、`Workflows` 的读写权限；到期后需更换。内置 `GITHUB_TOKEN` 无法同步含 workflow 文件变化的分支，不能通过 YAML 的 `permissions` 增加该权限。未配置 Secret 时自动化会在任何 API 调用前明确失败，不会提升分支。
 
-专用 PAT 同步分支后由 `pull_request` 事件启动 CI，缺失运行由后续巡检补派；提升后先等待 `push` 触发的 Release 记录，仍无记录才显式补派。
+专用 PAT 同步分支后由 `pull_request` 事件启动 CI；更新不足 10 分钟时等待自然触发，之后由巡检补派缺失运行。同一提交已有手动 CI 时，不再因原生 CI 待审批而反复补派；排队、运行中及真实失败均不自动重跑。合入后由 `push` 触发 Release，定时或手动巡检只在合入至少 10 分钟、当前 `main` 仍为该合并提交且无发布记录时补派，已有失败发布也保留。Release 不强制生成新版本；主分支回归继续保留，无需发布时跳过已经做过合同检查的镜像工作流。
 
 ## 系统与脚本
 
