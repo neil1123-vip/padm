@@ -64,7 +64,7 @@
 
 | 项目 | 当前结论 | 最小缺口 |
 | --- | --- | --- |
-| 原生 arm64 生命周期 | 6A.67–6A.68 固定 Ubuntu ARM64/IPv4 的 Xray WS、纯 sing-box Trojan 七阶段和正式 Engine 自动安装通过，整体未完成 | 已取得可销毁原生宿主、签名资产与实际 ARM64 镜像绑定；整机重启、其它发行版/协议及适用专项仍待验 |
+| 原生 arm64 生命周期 | 6A.67–6A.70 固定 Ubuntu ARM64/IPv4 的 Xray WS、纯 sing-box Trojan 七阶段，正式 Engine 自动安装及 Reality/Encryption 等专项通过，整体未完成 | 已取得可销毁原生宿主、签名资产与实际 ARM64 镜像绑定；整机重启、其它发行版/协议及尚缺的适用专项仍待验 |
 | TProxy/TUN 真实启停与恢复 | 当前源码部分通过，完整流程未完成 | TUN TCP/TLS、UDP DNS、冲突拒绝、启停、净停后重启/显式启动通过；restart 首次 DNS 曾超时，独立补验通过。TProxy TCP/TLS 同矩阵通过；指定 UID UDP 缺少 NET_BIND_SERVICE 的原生对照及修复后隔离矩阵通过。3.41 的 net/validator 与验签控制包一致；按最新授权保持透明关闭，未执行正式启用重启矩阵，关闭状态的整机重启不替代该矩阵 |
 | 完整卸载与 purge | 本机原生范围通过 | 保留数据卸载、purge、整机重启后空目标无残留及同机灾备恢复通过；恢复后三项业务健康、外部 WS 正反例及 TLS/账号核对通过，不替代新主机灾备 |
 | 公网双栈端口跳跃 | 未完成 | 公网 IPv6、旧连接排空、自动恢复及宿主规则证据 |
@@ -12533,6 +12533,98 @@ HTTP/2 降级、额度变化和清场失败。验证器 SHA-256
 不合并应用源码，主线仅记录证据，不触发应用发布。
 公网/IPv6、整机重启、自然续期、WARP、多 Peer 和其它既定组合不在本轮范围，
 未访问或修改 A/B，`16 supported/14 deferred` 不变。
+
+### 6A.70 正式 ARM64 Reality 共存与 VLESS Encryption 集中验收
+
+2026-11-18（北京时间），在独立 GitHub `ubuntu-24.04-arm` 宿主集中验收
+固定正式 `v3.44.0`/`da7905877b1ee59abbf632ad866963a02da94bf7` 的
+Reality Vision/XHTTP 共存与 VLESS Encryption。实际为 Ubuntu `24.04.5`/
+`aarch64`、kernel `7.0.0-1017-azure`、systemd、Docker `28.0.4`/
+Compose `2.38.2`/`overlay2`；复用预装 Engine，不重测安装或整机重启。
+前置等待 systemd 启动完成后记录 `degraded`，原 `mnt.mount` 失败保持，
+不称整机全健康。业务 origin 仅临时 lo `93.184.216.34/32`，不计公网入站。
+
+第七轮 run `44146178086`，签名验收源
+`261048c4327e408f44e5a4f685a236805eb5b478`，CI job `10m16s` 成功；
+`19` checkpoint、`64` 个代理探针/独立 nonce、`16` 个站点检查及
+`29` 个辅助采样、正式 purge 和精确清场均经断网只读独验通过。具体补齐：
+
+- Encryption：普通 bridge 双入口的 none、Vision 开启、双入口开启、
+  双入口服务 restart、恢复 none 五阶段；正式 CLI 精确拒绝结构有效的
+  错误配对，旧 none、错误 encryption 的运行拒绝及两客户端正例通过。
+- 共存：受管站点、桥接 host website、host loopback 三拓扑分别覆盖
+  Vision/XHTTP，含启用、关闭恢复、错误 UUID/SNI 拒绝；两次 loopback
+  服务 restart 与一次 Encryption restart 均有实际容器重启见证。
+  受管站点使用本地测试 CA；host/loopback 站点链路仅为 runner 本地
+  `443 → 透明 TCP relay → 固定公网 A HTTPS 后端`，TLS 在 A 终止，
+  runner 不接收生产私钥。公网后端不等同 ARM64 公网入站。
+- 客户端：验签正式 Xray 的 URI 字段投影及固定 Mihomo `v1.19.28`
+  显式 hybrid 投影，后者固定 `support-x25519mlkem768=true`，保留
+  Vision flow、XHTTP path/host/mode/extra 与 encryption/Reality 字段；
+  不声称原 URI 直接导入成功，遇 `pqv` 明确拒绝，不验 ML-DSA。
+  所有代理正反例统一 `4096` 字节请求头；curl `--max-time 8`、
+  命令 timeout `12` 及超时拒绝门不变，旧短请求 curl `28` 不改判为合法拒绝。
+
+各 checkpoint 的正式 bundle 均为 `314` 个文件（含生成 ref、不含 manifest，
+payload 为 `313`），五份签名 ARM64 index/manifest 与实际镜像、固定
+Mihomo index/ARM64 manifest 链均绑定。两账目身份/额度保持，managed
+额度 `1 GiB`、每阶段双向计量增长，core 累计恒零，不称两账目都增长。
+初始 spec raw 为 `e4b74bca…`，首次恢复后为 `9cb80aa3…` 并在后续六次
+关闭恢复保持；恢复的规范化语义摘要均回到初始 `b3209cd9…`。
+只称现场完整 JSON 语义恢复，不称跨首次 CLI 序列化字节一致；完整私密
+spec/URI/配对语义依赖固定驱动现场断言，离线只核公开摘要，不重建私密内容。
+
+下载 `292` 份脱敏原件，artifact `14357362595`，ZIP `639283` 字节；
+ZIP/API digest SHA-256
+`c19ff554f8d9e2e802477ecee7c2f9c0bc94246fc53184bebc2e5085c3324fd3`，
+ZIP 成员集合、提取字节及 SHA 索引精确一致。驱动原始 LF SHA-256
+`47994154574a2c468b820e8f390f3ea0c88bbba0c4a9fa21287ccb83b5733420`，
+基类 `c4520c5c917ad42ff01928777593d3cf5cf4f08c28f742a1da4661cbe6710a6e`；
+result SHA-256
+`f543d2b83f0411f6595d462a0d96ca90b6c47dccfec91b063b68851bcc6f28b9`。
+独验使用固定工具镜像
+`sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`，
+`network=none`、rootfs 只读、唯一输入只读挂载、cap-drop ALL、
+no-new-privileges，无 Docker socket；前后输入 SHA 一致，exit `0` 后容器清场。
+`46` 项组件负控及 `41` 项重建完整 index 的工件篡改负控全部拒绝，
+覆盖来源/驱动、URI 投影、请求填充、计量/额度、恢复语义、loopback 权限、
+重启、配对拒绝、TLS/中继及清场。成功站点中继仍严格要求 `error_type=null`，未放宽。
+验证器 SHA-256
+`e34906923ba432b272ff50321ca98e95c7a57f58171aeda4e065ea99297090cc`；
+`attempt-7/independent-output/verifier-stdout.json` SHA-256
+`895653939b059575766309e7d7c27c6006dc873af6539937ff7feb05da8e730f`，
+同目录 `isolation-and-verifier-summary.json` SHA-256
+`5a6f2be640d4667249e1eb3432903d5f760d99fdaf6744ef56d4ade996e59d93`。
+
+此前六轮原件和失败结论保持，传输完整性通过不等同验收通过：
+
+| 原轮 run / 验收源 | 原结论与保留边界 |
+| --- | --- |
+| `44127669662`/`6c29fcd8`、`44129987638`/`7a2d55cb` | 各 `28` 工件、清场通过，wrongpair 在预期密码学拒绝门前失败；驱动 schema 与 TMPDIR 所有者条件的定位另有原件，不改原判。 |
+| `44132406563`/`ea1ed69b` | `41` 工件、清场通过，Mihomo config-test 失败；公开原件无该命令诊断正文，不外推其根因。 |
+| `44135799536`/`134ef12d` | `43` 工件、整轮及清场失败，原 URI 导入 Reality Auth false；宿主仍 starting，新增卷仅有 size/hash，未公开远端 Mounts，不称完整清场或直接证明卷归属。 |
+| `44141092333`/`fb78c9cf` | `149` 工件、九 checkpoint、清场通过，在 loopback service-inspect 断言失败；另有两份旁路采样虽完整收到 TLS 正文，仍被严格 relay 门拒绝。私密 inspect 不匹配字段不能离线重建。 |
+| `44144073814`/`cea9c53b` | `292` 工件、CI 成功及清场通过，正式断网只读独验实 exit `1`/`relay_transfer_witness`；45 份站点/辅助采样中 `12` 条 relay reset 被拒绝，不计成功基线的 `41` 整件负控。 |
+
+第六轮正式隔离独验摘要
+`attempt-6/independent-strict-rejection-audit/isolation-and-verifier-summary.json`
+SHA-256 `48be378bcdc96e0013af10cd9a2d58c79c8fc6a53e9a926f4ef04a61bfa12f48`。
+本机实际 create（不启动应用）证实 Docker inspect 的 `CAP_` 前缀，
+驱动只归一化名称后精确比四项能力集合；未放宽权限。Windows/Linux
+共 `24` 个 direct-close 对照均产生 RST、`24` 个 unwrap 对照均无错，
+只改 Python 旁路 TLS 采样在完整 read 后 `unwrap().close()`，原失败不改判。
+本机匿名卷另有实际 Mounts 复现；两份早期残卷在无引用、创建秒唯一配对及
+逐文件 SHA/元数据与固定镜像初始 home 完全一致后精确清场，归属仍是该限定
+证据推断，不替代第四轮缺失的远端 Mounts。新客户端仅 `rm -fv` 自有容器，
+无全局 prune。原 URI 失败、旧短请求超时、初稿与各轮验证器快照均保留。
+
+原件 `.tmp-native-arm64-reality-20261117/`。仅关闭上述固定正式 ARM64
+子项；其它客户端/算法、Mihomo 原 URI 导入、其它拓扑的加密生命周期、
+宿主重启、公网入站/IPv6、自然续期、多 Peer 及长稳仍待验。独验核固定
+资产哈希和采集的 Cosign 成功返回码，未再次密码学验签；不实时观察宿主，
+归档 API 也未重新联网查询。不登录或变更生产 A/B，仅只读访问固定 A HTTPS
+后端，不传生产私钥。临时驱动/工作流留隔离分支，不合并应用源码；
+主线只记证据，不触发应用发布，`16 supported/14 deferred` 不变。
 
 ### 本轮菜单与回归收敛
 

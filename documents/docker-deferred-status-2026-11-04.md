@@ -1,6 +1,6 @@
 # Docker deferred 状态对账
 
-初始对账：2026-11-04；更新至 2026-11-17（北京时间）。
+初始对账：2026-11-04；更新至 2026-11-18（北京时间）。
 
 本表对齐 `docker/contracts/features.json` 的 14 个 `feature_matrix` deferred 项，
 只修正原因和证据归属，不修改状态枚举、schema 或支持组合。36 项功能中的
@@ -32,7 +32,7 @@
 | B | [实施计划 6A.29–6A.32](docker-menu-parity-plan.md)：正式 `3.43.7` 可信发布；独立 B Debian 13 amd64/bridge/IPv4 的原 `.4` 归档预览与自动清场、外部续期隔离、正式恢复、公网 Xray WS 443 正反例及单次整机重启通过。控制入口为 `.7`，业务与五镜像保持原 `.4`；公网经 A 临时 SSH TCP 转发，不计 Windows 直连或原生 URI 导入。原件 `.tmp-release-3437-20261116/`、`.tmp-native-dr-preview-3437-20261116/`、`.tmp-native-dr-acme-isolation-20261116/`、`.tmp-native-dr-apply-3437-20261116/`、`.tmp-native-dr-reboot-3437-20261116/`。 |
 | W | [实施计划 6A.35–6A.48](docker-menu-parity-plan.md)：A/B Debian 13/amd64/IPv4 单 Peer 的正式 WG 准备、配对、首次启用、停启、加密及原规格恢复通过，密钥精确手工清场，业务/账目/隔离保持。另在可销毁、完整独立内核/systemd/Engine 的双 QEMU guest 上，正式 `.7` 的账号增删、原 systemd 自主传播及严格 TLS 业务通过；6A.39 补齐单 Peer 控制角色/WG 启用态双 guest 真实重启、7 个原容器自然恢复、重启后自主删除、六组 TLS 正反例及累计。6A.40 补齐固定地址密钥/端口迁移；6A.41 补齐关联改址撤权、新地址拒绝旧凭据、新邀请恢复及原日历自主传播、六组 TLS 和计量，两段均正常关机。6A.41 的 source-check rc 15 保留失败。6A.42 补齐固定本地主控改址的真实 bind 失败恢复、持故障恢复旧址及仅撤权、新邀请同版同步、原调度与业务；两次验收断言失败原判保持，三次正常关机，未重测自主传播。6A.43 只定位新跟踪轮在相等快照后的 30 秒相对时限检查拒绝，不证明原失败同因。6A.44 补齐预加载正式 helper 条件下的固定本地 server fresh 见证；6A.45 另补完整 Peer CLI 预热及当前 nonce 的正式 CLI/主控 rc 0 闭环，首轮准备失败保留、锁 owner 未查无归因，30 秒窗不变。6A.46 补齐固定本地单 Peer 的全新空目标正式恢复、新控制身份/rebind、WG 身份保持、原日历自主传播及 TLS/计量；恢复联网、独验断网，3002 份原件绑定。6A.47 单次正式防护启用 rc 14、未 verified，随后新 child 断网恢复审计通过；窗口内原回执不定位拒绝分支，首轮审计遇锁失败保留，不重复 enable，防护未通过。6A.48 补齐实际候选切换后 pidfd TERM、rc 143、旧址/WG 恢复及撤权、新邀请/原调度和 TLS/计量，断网独验 1439 份。只关闭上述固定子项，不等同其它信号/断电及其它故障、公网多机、arm64/IPv6、多 Peer 重启/灾备。原件 `.tmp-native-wg-cli-20261116/`、`.tmp-native-control-readiness-20261116/`、`.tmp-native-control-vms-20261116/`。 |
 | K | [实施计划 6A.66](docker-menu-parity-plan.md#6a66-正式-v3438-双-kvm-升级与控制防护完整恢复)：正式 `.8`/`6e880813`、本地 Debian 13 amd64/IPv4/单 Peer KVM 双机，完整升级、控制防护及严格恢复通过。六次真实下载、每机 312 个 payload 文件和五镜像绑定、真实 22 次 401 封禁/DROP/解封、启停后 TLS/计量、终态安全及 Peer 清场均通过；稳定 `.8` before 全文件精确恢复，无候选元数据例外。断网独验绑定 1940 份本轮/基线证据、17 负控通过；正常关机、父盘保持。6A.65 候选及 6A.47、6A.64 旧失败保持；根目录权限和其余环境边界见原节。原件 `.tmp-formal-control-3438-20261117/`。 |
-| N | [6A.67](docker-menu-parity-plan.md#6a67-正式原生-arm64-宿主生命周期整轮) 的原生 Ubuntu ARM64/IPv4/Xray WS 正式 `.7/.8` 七阶段、22 客户端及 56 工件独验通过。另补 [6A.68](docker-menu-parity-plan.md#6a68-正式-arm64-engine-自动安装与纯-sing-box-生命周期)：移除 runner 预装包后，正式 `.44` 入口自动安装官方 Docker 29.10.0/Compose 5.7.2；纯 sing-box Trojan TLS/id 28 的 `.8/.44` 七阶段、22 严格 TLS 客户端、两账目/额度/计量、10 ARM64 index/manifest 与实际镜像、业务材料及精确清场通过，69 份工件断网只读独验及 19 负控通过。再补 [6A.69](docker-menu-parity-plan.md#6a69-正式-arm64-入口路由中继与站点集中专项)：正式 `.44`/Xray 29+sing-box 28 的别名/默认分享、双核心路由、Xray HTTP/严格 HTTPS CONNECT、站点/ALPN 和服务重启；58 检查/六 checkpoint、126 工件断网只读独验、31 组件及 19 完整工件负控通过。旧失败与首次 spec 序列化差异保留，第二轮中继异常根因未定。origin 仅本地 lo、无宿主重启，不外推裸 OS、公网、IPv6、其它既定组合。原件 `.tmp-native-arm64-host-20261117/`、`.tmp-native-arm64-singbox-20261117/`、`.tmp-native-arm64-specialties-20261117/`。 |
+| N | [6A.67](docker-menu-parity-plan.md#6a67-正式原生-arm64-宿主生命周期整轮) 的原生 Ubuntu ARM64/IPv4/Xray WS 正式 `.7/.8` 七阶段、22 客户端及 56 工件独验通过。另补 [6A.68](docker-menu-parity-plan.md#6a68-正式-arm64-engine-自动安装与纯-sing-box-生命周期)：移除 runner 预装包后，正式 `.44` 入口自动安装官方 Docker 29.10.0/Compose 5.7.2；纯 sing-box Trojan TLS/id 28 的 `.8/.44` 七阶段、22 严格 TLS 客户端、两账目/额度/计量、10 ARM64 index/manifest 与实际镜像、业务材料及精确清场通过，69 份工件断网只读独验及 19 负控通过。再补 [6A.69](docker-menu-parity-plan.md#6a69-正式-arm64-入口路由中继与站点集中专项)：正式 `.44`/Xray 29+sing-box 28 的别名/默认分享、双核心路由、Xray HTTP/严格 HTTPS CONNECT、站点/ALPN 和服务重启；58 检查/六 checkpoint、126 工件断网只读独验、31 组件及 19 完整工件负控通过。[6A.70](docker-menu-parity-plan.md#6a70-正式-arm64-reality-共存与-vless-encryption-集中验收) 补齐固定 `.44` 的 Reality Vision/XHTTP 三拓扑共存、普通 bridge 双入口 Encryption 启停/恢复、三次服务 restart 及正反例；19 checkpoint/64 proxy/16 site/29 辅助采样、292 工件断网只读独验、46 组件及 41 完整工件负控通过。Mihomo 限显式 hybrid 投影，不称原 URI 导入通过；首次 spec 仅语义恢复，旧失败保留，第六轮 CI 成功仍因 12 relay reset 被独验拒绝。业务 origin 仅本地 lo；受管站点用测试 CA，host/loopback 本地 443 透明中继至固定 A HTTPS 后端，不计 ARM64 公网入站、不传生产私钥。无宿主重启，不外推裸 OS、IPv6、其它既定组合。原件 `.tmp-native-arm64-host-20261117/`、`.tmp-native-arm64-singbox-20261117/`、`.tmp-native-arm64-specialties-20261117/`、`.tmp-native-arm64-reality-20261117/`。 |
 
 ## 14 项对账
 
@@ -47,15 +47,15 @@
 | `acme-standalone` | P+A：HTTP-01/TLS-ALPN-01 及原拥有者暂停/恢复；正式签发、standalone/ALPN 消费失败回滚、ALPN 在线往返和单次 fresh 完整链。 | 同一 ACME 自然续期门槛；原生 arm64/公网 IPv6、当前其它适用生命周期。 | 仅暂停本部署原运行拥有者；站点 Fail2ban 的自监听停启仍拒绝。其它 CA/provider 不借本次证据扩大范围。 |
 | `site-static-redirect-alpn` | P+S+N：模板/local/ALPN 事务及隔离双栈；固定正式 3.41.5 公网 13 阶段，包括特殊站名、302、订阅与完整恢复。N/6A.69 补正式 `.44` 原生 ARM64/Xray 29 的三模板/特殊标题、static/302、三种 ALPN 顺序、实际 HTTP/2 和服务重启。 | 公网 IPv6、其它既定 ARM64/协议组合及尚缺的适用生命周期；固定本地 origin 不计 ARM64 公网。 | Hy2 local 固定受管只读目录且无混淆，纯 Hy2 只开放 static。ACME 另行归属，不把公网站点/ALPN 重新列为完全未验。 |
 | `entry-port-management` | P+U+R+N：多入口、额外端口、默认分享/原位改端口、内部端口专项；SS2022 公网 IPv4 默认别名/删除及限定合并重启。N/6A.69 补正式 `.44` 原生 ARM64/sing-box Trojan 的别名/默认分享/原位替换/删除及基口恢复，双核心恢复和服务重启业务通过。 | 公网 IPv6、其它既定 ARM64/端口组合及尚缺的适用生命周期；固定本地 origin 不计 ARM64 公网。 | 与内部 207 共用别名证据。额外端口别名拒绝 WS/SSH Fail2ban、TUN/TProxy、host-network 组合；3D.26 已另行放行活动 WS 防护下未保护入口的基础增删改。跳跃限单 sing-box/单个双族入口/手动监督，不承诺 TUIC 客户端自动换端口或崩溃/开机恢复。 |
-| `reality-coexistence` | P+C：受管、桥接宿主和 host 回环三拓扑恢复；限定公网 Vision/XHTTP 正反例与六点真实重启。 | 原生 arm64/公网 IPv6、其它既定共存组合及当前版本尚未覆盖的适用生命周期。 | 一个 Xray Vision/XHTTP 后端，网站证书/内容仍由原维护方负责。旧 reset/超时根因未定；3D.26 协议管理 supported 不重列为缺口。 |
+| `reality-coexistence` | P+C+N：受管、桥接宿主和 host 回环三拓扑恢复；限定公网 Vision/XHTTP 正反例与六点真实重启。N/6A.70 补正式 `.44` 原生 ARM64/IPv4 的三拓扑 × 双入口、关闭恢复、loopback 服务 restart 及正反例。 | 公网 IPv6、ARM64 整机重启、其它既定共存组合及当前版本尚缺的适用生命周期；本地入口与公网网站后端不等于 ARM64 公网入站。 | 一个 Xray Vision/XHTTP 后端，网站证书/内容仍由原维护方负责。N 的 host/loopback 仅经本地透明 TCP relay 到固定 A HTTPS 后端，不传生产私钥；旧 reset/超时不因本轮成功改判，3D.26 协议管理 supported 不重列为缺口。 |
 | `cdn-entry-management` | P+D：2/21/22/23/24/25 地址覆盖和链接/订阅投影；固定 Cloudflare WS 公网正反例。 | 既定 XHTTP/h3 与 gRPC 供应商透传、原生 arm64/公网 IPv6 和当前其它适用组合；gRPC 仍缺有效 Zone 条件。 | H3 只有使用说明，不新增开关、其它协议或自动建设外部 TLS/H3/CDN；WS 通过不外推其它传输。 |
-| `interactive-menu` | P+G+B+W+K+N：6A.23 本机代码收口；3D.26 的 16 个公开协议管理 supported；正式安装/升级回滚/公网/重启、同机灾备及账号/业务恢复限定证据；B 正式 `.7` 从原 `.4` 归档完成固定 Xray WS 新主机恢复和单次整机重启。6A.46 另补本地完整独立内核双机的 amd64/IPv4/单 Peer 新机角色/WG 恢复、新身份/rebind、自主同步和 TLS/计量；K 补齐正式 `.8` 本地双 KVM 完整升级、防护及严格恢复；N 补齐 Ubuntu ARM64/IPv4/Xray WS `.7/.8`、纯 sing-box Trojan `.8/.44` 七阶段及 `.44` 官方 Engine 自动安装和清场，6A.69 再补固定 `.44` 入口/路由/中继/站点四类专项及服务重启。 | 自然续期、ARM64 其它既定组合及整机重启、公网 IPv6、其它核心/协议及发行版适用安装、公网多机/多 Peer 角色/WG 新主机灾备与各专项尚缺的适用生命周期。 | 汇总项，不重复计下属各行。已有部署替换、其它 ACME 材料、未处理输入、v2 关联迁移等保持拒绝，不追加开发。 |
+| `interactive-menu` | P+G+B+W+K+N：6A.23 本机代码收口；3D.26 的 16 个公开协议管理 supported；正式安装/升级回滚/公网/重启、同机灾备及账号/业务恢复限定证据；B 正式 `.7` 从原 `.4` 归档完成固定 Xray WS 新主机恢复和单次整机重启。6A.46 另补本地完整独立内核双机的 amd64/IPv4/单 Peer 新机角色/WG 恢复、新身份/rebind、自主同步和 TLS/计量；K 补齐正式 `.8` 本地双 KVM 完整升级、防护及严格恢复；N 补齐 Ubuntu ARM64/IPv4/Xray WS `.7/.8`、纯 sing-box Trojan `.8/.44` 七阶段及 `.44` 官方 Engine 自动安装和清场，6A.69 再补固定 `.44` 入口/路由/中继/站点四类专项及服务重启，6A.70 补固定 Reality 三拓扑与普通 bridge 双入口 Encryption 集中验收、恢复及三次服务 restart。 | 自然续期、ARM64 其它既定组合及整机重启、公网 IPv6、其它核心/协议及发行版适用安装、公网多机/多 Peer 角色/WG 新主机灾备与各专项尚缺的适用生命周期。 | 汇总项，不重复计下属各行。N 的原点限本地 lo、host/loopback 站点限本地中继至固定公网后端，不计 ARM64 公网入站。已有部署替换、其它 ACME 材料、未处理输入、v2 关联迁移等保持拒绝，不追加开发。 |
 | `routing-tools` | P+R+N：两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、CN 与名单管理；sing-box 解析后阻断、pure 发布共存、DNS 拒绝回退和限定合并重启。N/6A.69 补正式 `.44` 原生 ARM64/Xray 29+sing-box 28 的 SOCKS 全局/选择匹配/绕过/认证拒绝、DNS/hosts、Direct/Block 及恢复/服务重启。 | WARP 真实 Cloudflare 账号/公网出口；公网 IPv6、其它既定 ARM64/路由组合及尚缺的适用生命周期。 | 与内部 206 共用证据/条件；SOCKS 入站限制归内部 201。N 的 DNS 错误拒绝不单独证明系统解析器无回退。固定 Xray 解析后阻断拒绝；原生 CN 预设已覆盖，不追加任意国家向导或最终流量语义引擎。 |
 | `internal-201-socks-relay` | P：5B.5b/5B.5b.1 已证固定 sing-box 的动态 BND/活动关联真实来源问题及 Xray 许可不随控制关闭撤销。 | 当前按限制关闭，无一轮普通环境回归可以使其成立；仅在相关核心行为变化后，重证发布、真实来源、会话鉴权及控制关闭撤销，才重新评估。 | 不开放完整入站、不降为 TCP-only、不增加辅助核心。host-network 不能修复鉴权。TCP 出站归 `routing-tools`；201 不作为公开节点协议。 |
 | `internal-202-http-relay` | P+H+N：Xray 认证 HTTP/CONNECT、字面来源白名单、管理/回滚；隔离 amd64 双栈和原生外部 IPv4 三目标 TLS/200、407、来源拒绝。N/6A.69 补正式 `.44` 原生 ARM64 的认证 HTTP/严格 HTTPS CONNECT、改端口、HTTP/CONNECT 来源拒绝、关闭及业务恢复；负例原点 TCP/请求为零。 | 公网 IPv6、其它既定 ARM64/中继组合及尚缺的适用生命周期；固定本地 origin 不计 ARM64 公网，第二轮空成功异常根因未定。 | sing-box 信任 X-Forwarded-For 覆盖来源且无关闭选项，固定反例继续拒绝。专属直连、不计业务额度，不扩跨核心；202 不作为公开节点协议。 |
 | `internal-206-routing-rules` | P+R+N，与 `routing-tools` 共用规则/名单、原生 IPv4 路由/DNS 拒绝回退及限定真实重启；N/6A.69 另补固定正式 `.44` ARM64 双核心规则及服务重启。 | 同 `routing-tools`：WARP 账号/出口、公网 IPv6、其它既定 ARM64/路由组合及尚缺的适用生命周期，不重复计数。 | Xray 固定反例继续拒绝；只读重叠/覆盖不预测 GeoSite/DNS/最终流量。不追加任意国家/语义引擎；206 不作为公开节点协议。 |
 | `internal-207-access-control` | P+U+R+N，与 `entry-port-management` 共用发布别名、默认分享/原位修改及固定原生公网 IPv4/重启证据；N/6A.69 另补正式 `.44` ARM64/sing-box Trojan 别名与双核心恢复/服务重启。 | 同端口管理的公网 IPv6、其它既定 ARM64/端口组合及尚缺的适用生命周期，不重复计数。 | 只复用已有入口认证、统计及 TLS/SNI，不做任意目的转发。拒绝宿主组合保持原边界；207 不作为公开节点协议。 |
-| `vless-encryption` | P+E：配对/投影/marker/失败恢复，固定正式 3.41.5 amd64 公网启停与普通 bridge 双加密入口真实重启。 | 其它既定客户端/算法、原生 arm64/公网 IPv6、其它拓扑和当前版本尚未覆盖的适用生命周期。 | 只按固定 Xray/Mihomo 组合及 schema 3 Reality 1/2 实验范围使用。不能与 3D.27/F 的 ML-DSA-65 签名验证证据相互替代；未验组合不暗中开放。 |
+| `vless-encryption` | P+E+N：配对/投影/marker/失败恢复，固定正式 3.41.5 amd64 公网启停与普通 bridge 双加密入口真实重启。N/6A.70 补固定正式 `.44` 原生 ARM64/IPv4 普通 bridge 双入口的五阶段启停/服务 restart/恢复、精确错误配对与旧 none/错误 encryption 拒绝，正式 Xray 与 Mihomo v1.19.28 显式 hybrid 正例通过。 | 其它既定客户端/算法、Mihomo 原 URI 直接导入、ARM64 整机重启/公网入站/IPv6、其它拓扑的加密生命周期及当前版本尚缺的适用生命周期。 | 只按固定 Xray/Mihomo 组合及 schema 3 Reality 1/2 实验范围使用；N 固定显式 X25519MLKEM768，不宣称原 URI 导入成功。不能与 3D.27/F 的 ML-DSA-65 签名验证证据相互替代；未验组合不暗中开放，旧失败和 curl 28 不改判。 |
 
 ## 本轮更新边界
 
@@ -277,3 +277,16 @@ Trojan TLS/id 28 `.8/.44` 七阶段；run `44093133554`/`c8ee532f`、
 仅关闭上述固定子项，复用预装 Engine、本地 lo origin 和服务 restart 分别不替代
 自动安装、公网入站和整机重启；其它组合/生命周期、公网 IPv6、自然续期、
 WARP、多 Peer 及长稳仍待验，A/B 未访问或改动，16 supported/14 deferred 不变。
+
+6A.70/N 再补固定正式 `.44` 原生 ARM64/IPv4 的 Reality Vision/XHTTP
+三拓扑共存及普通 bridge 双入口 Encryption 启停/恢复、三次服务 restart。
+第七轮 `44146178086`/`261048c4` 的 292 工件、19 checkpoint、64 proxy、
+16 site/29 辅助采样经断网只读独验通过，46 组件及 41 完整工件负控全部拒绝。
+前五轮失败和第六轮 CI 成功但独验因 12 relay reset 拒绝均保持；
+原 URI 导入、短请求超时不改判，仅固定 Mihomo 显式 hybrid 投影通过。
+恢复保持现场 JSON 语义，首次序列化前后字节不同，不称私密语义离线重算。
+业务 origin 仅本地 lo；受管站点用测试 CA，host/loopback 经本地 443
+透明中继至固定公网 A HTTPS 后端，不计 ARM64 公网入站，不传生产私钥。
+本轮不登录或变更生产 A/B、不重测 Engine 安装或宿主重启；其它组合/算法、
+加密拓扑生命周期、公网 IPv6、自然续期、多 Peer 及长稳仍待验。
+主线仅记证据、不合并临时驱动或触发应用发布，16 supported/14 deferred 不变。
