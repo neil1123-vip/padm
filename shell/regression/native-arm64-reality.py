@@ -541,8 +541,17 @@ class Acceptance(specialties.Acceptance):
             "--user", "10001:10001", "--mount", f"type=bind,src={directory},dst=/input,readonly",
             "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=32m",
         ]
-        self.command(["docker", "run", "--rm", *isolation, image, *arguments,
-                      *(["-test"] if client == "xray" else ["-t"])], label + "-config-test")
+        if client == "mihomo":
+            isolation.extend(["--env", "SAFE_PATHS=/input"])
+        try:
+            self.command(["docker", "run", "--rm", *isolation, image, *arguments,
+                          *(["-test"] if client == "xray" else ["-t"])], label + "-config-test")
+        except AssertionError:
+            self.record(label + "-config-failure", {
+                "kind": "client-config-failure", "label": label, "phase": phase,
+                "listener": listener, "client": client, **self.command_diagnostic(label),
+            })
+            raise
         config_test_sequence = self.commands[-1]["sequence"]
         container = self.command(["docker", "run", "-d", *isolation, image, *arguments],
                                  label + "-client-start").decode().strip()
@@ -862,6 +871,8 @@ def selfcheck():
     acceptance = object.__new__(Acceptance)
     acceptance.known_secrets = ["private-material", 443, None, ""]
     require(acceptance.scrub("private-material:443") == "<redacted>:443", "mixed secret scrub failed")
+    require(acceptance.scrub("failed vless://private-material@example.test?key=value\n" + "x" * 48)
+            == "failed <private-uri>\n<opaque-material>", "client diagnostic scrub failed")
     helpers = runpy.run_path(str(Path(__file__).parents[2] / "docker/tests/vless-encryption-real.py"))
     query = {
         "encryption": "none", "security": "reality", "sni": TARGET, "fp": "chrome",
