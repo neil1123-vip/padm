@@ -11951,6 +11951,56 @@ SSH 尾码保持及成功静默。guard/spec 使用真实锁/phase 和规格摘�
 未扩大回归、修改安全时限、访问生产、推送或发布；
 `16 supported/14 deferred` 保持，整体仍未完成。
 
+### 6A.58 候选提交的 WitnessRecheck 拒绝及恢复独验
+
+2026-11-17，仅继续本地 Debian 13 amd64/TCG、IPv4 单 Peer 隔离验收。
+固定签名提交 `9f51e31dafbd437160afbd497e0dc8f1c508d134`，候选范围为
+bootstrap/control/lifecycle 三源码；前两项摘要保持，lifecycle SHA-256
+`81eabb24851c8f4cb38ba5e63a9a5afa02fed45deb418cab7f3797d0b1d56203`。
+只扩展原驱动的来源/安装/归档绑定，不改网络和正式 manifest 门禁、
+唯一原 enable、安全时限、业务恢复及 finally；三个变化脚本的断网自检
+及独立只读复审通过。新轮 `/work/control-protection-1794889457575495382`，
+来源 ref `sha256:cb5a66094d345243ba505395408903467442a4765a73b4600999e13c134cde9c`。
+
+两机共六次 GET 的 SHA/大小通过；正式 manifest gate rc `0`，
+耗时 `13705.554577` 毫秒。唯一 enable rc `14`、耗时
+`257642.976044` 毫秒，恰有一次 challenge、一行 source-verified 和
+一次完整 Peer CLI，后者 `15290.850723` 毫秒。stderr `8415` 字节，
+SHA-256 `934bf622455102994536a459d45c1cbe20adeb4055d1dfa8e4c3073c838c19d4`，
+唯一固定诊断为
+`dockerFail2banStartManagedCommit step=witness-recheck rc=1 seconds=219`。
+由此确认本轮提交回调在 WitnessRecheck 拒绝；`SECONDS` 是 Bash 计数，
+不据此推定见证窗口超期，也不能区分内部时限、锁或来源状态谓词。
+
+失败后严格 TLS 三例、错身份零到达及两类有效身份正文
+`311296/286720` 字节通过；配置、私密文件、镜像、WG、来源、调度、
+额度、账目不回退及受管计量增长、稳定清场通过。沿用负例凭据未独立
+重构的限制。双机正常关机，QEMU exit `0/0`、无强制关机、父盘不变；
+驱动容器 exit `1`、无 OOM。原 result 保持
+`passed=false/recovery_audit_passed=true/driver_assertions_passed=true`；
+防护、封禁/解除封禁及启用态业务仍未通过。
+
+独验器固定复用 6A.56 原 verifier 摘要，显式绑定本轮三源码、run、
+result 和驱动；额外严格检查完整 stderr 摘要与唯一诊断。解析器五个负例、
+独立只读复审及断网只读证据卷独验通过，绑定本轮 `199` 份证据；
+独验容器 exit `0`、无 OOM。只引用固定旧摘要，不重复旧树审计。
+最终只读确认私密卷无活动容器，密钥、nonce、规格和磁盘仍仅留私密卷。
+脱敏摘要位于
+`.tmp-native-control-vms-20261116/.tmp-commit-diagnostic-9f51e31d/`：
+
+- `commit-diagnostic-verification.json` SHA-256
+  `cffc2ff768aad8e6fdc4a77823a1a80646a87e0a06f329bad374d365b4a7a6c2`。
+- `verify-commit-diagnostic.py` SHA-256
+  `826c585525297f06868479a356201a1a0c0c34306f64f2948b7541cfea81b5fe`。
+- 原 result SHA-256
+  `5f6a624a5445f8bb5f1673e65dd0b858092bb8e9476ebd83cb77d49d6ae0a764`。
+- 驱动 SHA-256
+  `7071e75679d4026109a446254a2d1c62cb1da3344060dd718752f747b64a860b`。
+
+下一步只定位 Recheck 内的具体拒绝谓词，保留安全窗口与恢复语义，
+不再盲目重试 VM。本轮未改生产、重复生产重启、扩跑回归、推送或发布；
+`16 supported/14 deferred` 保持，整体仍未完成。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
