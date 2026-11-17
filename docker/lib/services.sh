@@ -3120,17 +3120,17 @@ dockerGenerateSingBoxConfig() {
             public_key: $r.routing.warp.peer_public_key, reserved: $r.routing.warp.reserved,
             allowed_ips: ["0.0.0.0/0", "::/0"]}]}]
       } else {} end) + (if $dns_enabled then {
-        dns: {servers: [{type: "local", tag: "padm-local"},
+        dns: ({servers: [{type: "local", tag: "padm-local"},
           (if $r.routing.hosts != null then
             {type: "hosts", tag: "padm-hosts", predefined: $r.routing.hosts} else empty end),
           (if $r.routing.dns != null then {type: "udp", tag: "padm-dns",
             server: $r.routing.dns.server, server_port: $r.routing.dns.port} else empty end)],
           final: "padm-local"} +
           (if $resolve_ips then {rules:
-            (if ($host_domains | length) > 0 then
+            ((if ($host_domains | length) > 0 then
               [{domain: $host_domains, server: "padm-hosts"}] else [] end) +
-            [$dns_matches[] | . + {server: "padm-dns"}]}
-           else {} end)
+            [$dns_matches[] | . + {server: "padm-dns"}])}
+           else {} end))
       } else {} end) |
       if $r.accounts != null then
         .inbounds |= map(. as $inbound |
