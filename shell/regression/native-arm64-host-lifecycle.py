@@ -156,6 +156,16 @@ def image_id_kind(image_id, config_digest, index_digest, containerd_image_store)
     return "containerd-index"
 
 
+def image_id_output(raw):
+    rows = raw.decode().splitlines()
+    require(
+        all(re.fullmatch(r"sha256:[0-9a-f]{64}", row) for row in rows)
+        and raw == "".join(row + "\n" for row in rows).encode(),
+        "invalid Docker image ID output",
+    )
+    return rows
+
+
 def preserved(before, after):
     require(set(before) == set(after), "traffic identity set changed")
     for account, row in before.items():
@@ -373,11 +383,9 @@ class Acceptance:
         }
 
     def image_ids(self, label):
-        return set(
-            self.command(["docker", "image", "ls", "-aq", "--no-trunc"], label)
-            .decode()
-            .split()
-        )
+        rows = image_id_output(self.command(["docker", "image", "ls", "-aq", "--no-trunc"], label))
+        self.commands[-1]["stdout_image_ids"] = rows
+        return set(rows)
 
     def preflight(self):
         require(os.geteuid() == 0, "root required")
@@ -1398,6 +1406,19 @@ def selfcheck():
         except AssertionError:
             image_rejected += 1
     require(image_rejected == 3, "image ID negative controls failed")
+    image_rows = [config_id, index_id, config_id]
+    require(
+        image_id_output("".join(row + "\n" for row in image_rows).encode()) == image_rows
+        and image_id_output(b"") == [],
+        "image ID output lost order or duplicate references",
+    )
+    image_output_rejected = 0
+    for raw in (b"not-an-image\n", config_id.encode(), (config_id + "\r\n").encode()):
+        try:
+            image_id_output(raw)
+        except AssertionError:
+            image_output_rejected += 1
+    require(image_output_rejected == 3, "image ID output negative controls failed")
     baseline = {"a": {"upload": 3, "download": 4, "limit_bytes": 1024}}
     preserved(baseline, {"a": {"upload": 5, "download": 7, "limit_bytes": 1024}})
     rejected = 0
@@ -1433,6 +1454,7 @@ def selfcheck():
     print(json.dumps({
         "selfcheck": "pass", "negative_controls": rejected,
         "trojan_negative_controls": runtime_rejected, "image_id_negative_controls": image_rejected,
+        "image_output_negative_controls": image_output_rejected,
         "pure_sing_box_trojan": True, "network_used": False,
     }))
 
