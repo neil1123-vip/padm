@@ -181,6 +181,9 @@ class RelayServer(socketserver.ThreadingTCPServer):
 class Acceptance(specialties.Acceptance):
     def __init__(self, work):
         super().__init__(work)
+        # 正式 Reality 探测拒绝临时路径中 runner 用户拥有的祖先目录。
+        self.env["TMPDIR"] = "/tmp"
+        temporary = Path(self.env["TMPDIR"]).stat()
         self.proxy_checks = []
         self.site_checks = []
         self.checkpoint_rows = {}
@@ -193,6 +196,9 @@ class Acceptance(specialties.Acceptance):
             "specialties_driver_sha256": digest(SPECIALTIES_PATH.read_bytes()),
             "base_driver_sha256": digest(specialties.BASE_PATH.read_bytes()),
             "release": NEW, "scope": "native-arm64-ipv4-local-origin-reality-encryption",
+            "cli_tmpdir": self.env["TMPDIR"],
+            "cli_tmpdir_metadata": {"uid": temporary.st_uid, "gid": temporary.st_gid,
+                                    "mode": temporary.st_mode & 0o7777},
             "engine_reinstallation_requested": False,
             "public_inbound_tested": False, "reboot_tested": False,
             "relay": {"listen": ["0.0.0.0", RELAY_PORT], "upstream": [WEBSITE_IP, 443],
