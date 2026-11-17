@@ -11795,6 +11795,67 @@ exit `0`，均无 OOM，私密卷无活动容器。独验绑定本轮 `125` 份�
 未再次尝试 enable；下一次双机尝试前先确认 manifest 获取链路可用。
 未重复生产重启、回归、推送或发布，`16 supported/14 deferred` 不变。
 
+### 6A.55 候选验签拒绝、中断证据及新覆层恢复
+
+2026-11-17，仅在本地 Debian 13 amd64/TCG 单 Peer 双机继续验收，
+候选提交、bootstrap/control SHA 及来源摘要保持 6A.54 的固定绑定。
+新驱动在原预热和 Peer 清场之后、唯一原 enable 之前，分别从两机下载
+固定 `.7` manifest、Sigstore bundle 和控制 bundle。共 `6` 次 GET
+均 rc `0`，大小和 SHA-256 匹配原发布材料，未使用 retry、关闭证书校验、
+修改 DNS、代理或安全窗口。门禁失败会阻止 enable 并进入原 finally；
+断网自检及只读复审通过。网络采样仅证明采样时可达，不替代正式下载和验签。
+
+本轮 `/work/control-protection-1794879630112179288` 的唯一 enable
+耗时 `20.049278466` 秒、rc `16`，stderr 精确为原生产入口的 Cosign
+验签拒绝，共 `107` 字节，SHA-256
+`117a3f2bfad4a8ca7e1d03ab0621a1019f32ab050235ad0a60598ed100f19c52`。
+challenge、source-verified 及挑战 Peer CLI 均为 `0`，未进入防护、
+启用态业务或禁用后恢复。初始锁采样存在 PID `3505`，进程前后为
+`bash`、PPID `1`、start ticks `8475`，cgroup 为
+`padm-docker-traffic.service`，锁身份前后稳定；预热采样锁不存在。
+这些是两个采样时刻，不能解释本轮验签失败或 6A.52 的旧锁原因。
+
+北京时间 `2026-11-17 09:46:10.5` 本机重启，原驱动 finally 未完成。
+两机 poweroff 命令均 rc `0`，仅第一台 console 有完整 Power down 标记；
+原 `candidate-result.json`、`parents-final.json` 和 `shutdown.json` 均缺失。
+原容器 exit `255`、无 OOM；Docker 恢复时记录的 FinishedAt
+不当作虚拟机实际停止时间。原正式父盘当前摘要仍匹配初始值，
+但不据此补造原轮完整关机或恢复通过。首个独验错误套用了 6A.54 的
+“两个锁采样均不存在”要求而 exit `1`，原脚本及容器保留；
+新独验逐字段核对本轮真实锁身份和竞态，exit `0`、绑定 `120` 份证据，
+只引用旧 `1957/172` 份固定摘要，不重复旧树审计。
+
+保留原两份中断盘，`qemu-img check` 只读检查均 rc `0/check-errors=0`。
+新覆层 `/work/control-candidate-network-recovery-1794881643727607564`
+未再次 enable，复用原恢复流程；核对候选来源、规格、私密文件、镜像、
+WG 密钥/Peer/端口、调度及账目不回退，双向 WG ping、稳定清场通过。
+严格 TLS 错身份零到达，两类有效身份分别返回 `303104/278528` 字节；
+受管账号 download/upload 累计分别增加 `303220/115` 字节。
+随机负例凭据未在独验中重新构造，保留既有证据边界。
+
+恢复业务之后，在同一来宾上用原 Cosign 二进制、原固定 manifest 和
+Sigstore bundle、生产 identity/issuer 单独执行一次验签，未更换工具、
+时钟或信任规则，rc `0`、耗时 `2561.383372` 毫秒，stderr 为
+`Verified OK` 加换行。二进制 SHA-256
+`a57926e24b07f02b5baf3be81f9a5988e9e45d8a1ca8ca500cdf56d10e69f887`
+与初始安装相同。该诊断成功不能证明原正式验签为何失败。
+恢复轮总耗时 `155.826502187` 秒，正常关机 `5.007764908` 秒，
+QEMU exit `0/0`、无强制关机，原中断盘摘要不变；驱动和断网独验均
+exit `0`、无 OOM，恢复独验绑定 `192` 份证据。新覆层恢复通过，
+不回填原驱动结果，也不代表控制面防护已通过。
+
+脱敏摘要保存在 `.tmp-native-control-vms-20261116/`：
+`candidate-runtime-network-verification.json` SHA-256
+`e397fbbc4ccd5fdc2e53c752251442b15da5d6962eec3d7a20f68068385ece5e`；
+`candidate-network-recovery-verification.json` SHA-256
+`c67f039bf0d74985b083b36a3a6ce980d2e46078f16ab3cc79b977d643a1b1f5`；
+`candidate-runtime-network-final-states.json` SHA-256
+`c9a1ca508f2f478878148014875668a1c8a5c9406a67a7d5d2249237806d80ad`。
+原始规格、nonce、密钥和磁盘仅留私密卷，无活动容器。
+本轮不修改生产源码，不重复 daily/full 或生产重启，不推送或发布；
+整体仍未完成，`16 supported/14 deferred` 不变。下一步先取得正式
+Cosign 失败的原始诊断，确认前置条件后再推进防护验收。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
