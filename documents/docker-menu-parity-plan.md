@@ -11755,6 +11755,46 @@ Peer 与 AllowedIPs 集合仍逐 Peer 比对，独立宿主地址探针保持。
 不把减少调用次数等同于修复 6A.52 超截止或部署锁失败。
 支持状态保持 `16 supported/14 deferred`，未运行 full、访问生产或发布。
 
+### 6A.54 双源码候选的 manifest 网络前置失败
+
+2026-11-17，从原父盘建立一次 Debian 13 amd64/TCG 单 Peer 双机候选，
+绑定签名提交 `63c61a81e5c15c7102329621d2d7f33be178960c`；安装前后核对
+其它正式 `.7` 源码、五镜像、业务规格及密钥，账目不回退。bootstrap SHA-256
+`059ef70cdde552829be72f953f45fe7441b5641e711ba3f393a4c35c29c2cb6e`，
+control SHA-256 `7e309f3278fab628880cf2a7de5763851f0798242b1850937aefea223650ec6d`。
+两机均通过原 `install --source --ref --no-menu` 安装双源码，重算来源
+`sha256:c7fe818154fb3591bd7c809f7bb9973bd936de76c14c40e791e50495192a03ad`，
+核对安装后内容、属主、模式、bundle ref 及其它正式来源；未直接覆盖安装文件。
+
+候选驱动在启用成功分支补回原启用态 TLS 业务/计量断言，保留禁用后的恢复
+业务、完整 Snapshot、封禁/解除封禁、锁缺失、Peer 清场和父盘/关机断言。
+安全观察器只读采样锁前后身份、严格十进制 PID 和有限进程身份，
+不采 cmdline/environ，不删除锁或放宽失败判定。断网自检及只读复审通过；
+仅执行一次原 enable，来源见证的 `30` 秒窗口未改。
+
+本次 run `/work/control-protection-1794876002901790627` 的 enable 返回 `16`；
+stdout 为空，stderr 精确为 curl `(28) Connection timed out after 10002 milliseconds`
+及“无法获取 release manifest”，共 `87` 字节。challenge、source-verified
+和挑战 Peer CLI 均为 `0`；manifest 获取失败发生在来源挑战前。
+命令宿主耗时 `59.429387051` 秒，不能据此推断 WG 调用合并后的见证耗时。
+驱动原失败处理仅接受 rc `14`，对本轮 rc `16` 的断言失败原件保持；
+未到 post-attempt 安全采样、启用态业务、禁用后业务、最终 Snapshot、
+锁缺失、final Peer 及 extra final sources，防护及完整恢复均保持未通过。
+初始/预热两次采样前后锁均不存在、进程为空且未见竞态，仅代表两个采样时刻，
+不代表整次尝试，也不解释 6A.52 的锁持有者、timer 或旧失败原因。
+
+本次总耗时 `183.868838374` 秒，两机正常关机 `6.213785269` 秒，
+QEMU exit 均为 `0`、无强制关机、父盘不变。驱动 exit `1`、断网独验
+exit `0`，均无 OOM，私密卷无活动容器。独验绑定本轮 `125` 份证据，
+仅引用旧 `1957` 份及诊断 `172` 份固定摘要，不重复旧树全量核查。
+脱敏证据位于 `.tmp-native-control-vms-20261116/`：
+`candidate-runtime-protection-verification.json` SHA-256
+`78e0d0eec2b3be06859316d42636819768f65d4d20fe743ba5a6f76f4911129b`；
+`candidate-runtime-protection-final-states.json` SHA-256
+`c83738d5e60ead9664c91d109d91e8ae9f804425f7aeec8c647ce35ae13a65a7`。
+未再次尝试 enable；下一次双机尝试前先确认 manifest 获取链路可用。
+未重复生产重启、回归、推送或发布，`16 supported/14 deferred` 不变。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
