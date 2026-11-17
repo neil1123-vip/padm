@@ -12027,6 +12027,62 @@ snapshot-match、receipt、realtime-after、elapsed-after。保留原求值顺�
 复用原门禁与恢复断言做一次有界隔离验收；未改生产、推送或发布，
 `16 supported/14 deferred` 保持，整体仍未完成。
 
+### 6A.60 本轮见证截止拒绝的限定独验
+
+2026-11-17，固定签名提交 `2b44ea2b3379e9631c13d3d7e2e83693dec276c2`，
+仅控制源码变化，SHA-256 为
+`98db267cf5b7dffc35c392d5ed2e091d9a1d27cdcbeeae5c78dc8ad5e639d565`，
+bootstrap/lifecycle 保持 6A.58 的三源码范围与摘要。三个驱动只更新
+提交、摘要和唯一输出名，逐字独立复审及原三项断网自检通过；
+网络/正式 manifest 门禁、唯一原 enable、安全时限和恢复断言保持。
+新轮 `/work/control-protection-1794893435793473616`，来源 ref
+`sha256:aed897938626c2b61ab3653138431894a0c7cb2531f419ad4089c2375ec574e1`。
+
+两机六次 GET 通过，正式 manifest gate rc `0`、`14125.622031` 毫秒；
+唯一 enable rc `14`、`268953.247829` 毫秒，恰有一次 challenge、
+一行 source-verified 和一次完整 Peer CLI，后者 `14723.984609` 毫秒。
+stderr `8487` 字节、SHA-256
+`aaca29f19c38c2f8dc68f731f3f740d56b069cdf551eeb386756bce6a601b4f0`；
+唯一内部/外层诊断依次为：
+
+```text
+dockerControlSourceWitnessRecheck step=realtime-before rc=1 seconds=225
+dockerFail2banStartManagedCommit step=witness-recheck rc=1 seconds=225
+```
+
+本轮已通过上下文与锁 owner，拒绝于实时快照复核前的
+`date +%s < expires` 条件，后续谓词不执行。不据此推定其它轮的内部分支、
+时钟变化原因或全部耗时由 clean 造成；来源窗口仍为原 `30` 秒。
+
+失败后严格 TLS 三例、错身份零到达和有效身份正文 `311296/286720`
+字节通过；配置、私密文件、镜像、WG、来源、调度、额度、账目不回退、
+受管计量增长及清场通过。原 result 保持
+`passed=false/recovery_audit_passed=true/driver_assertions_passed=true`。
+整轮 `476.302009986` 秒，正常关机 `6.0874307789999875` 秒，
+QEMU exit `0/0`、无强制关机、父盘不变。驱动 exit `1`、无 OOM；
+防护、封禁/解除封禁及启用态业务仍未通过，负例凭据重构限制保持。
+
+独验固定父 verifier 和本轮三源码，完整 stderr 摘要及双层唯一诊断均
+严格匹配；解析器 `11` 种步骤及五项负例通过。断网只读独验 exit `0`，
+绑定本轮 `202` 份证据；仅本轮 `rejection_branch_proven` 和
+`internal_recheck_predicate_proven` 为 true，旧轮谓词及原始根因仍为 false。
+独验器与驱动终态均无 OOM，最终私密卷无活动容器；不重复旧树审计。
+脱敏摘要位于
+`.tmp-native-control-vms-20261116/.tmp-recheck-diagnostic-2b44ea2b/`：
+
+- `recheck-diagnostic-verification.json` SHA-256
+  `4f97e531618671c35454af5bd230abb81884e6c36c8d4674254935be00d9542d`。
+- `verify-recheck-diagnostic.py` SHA-256
+  `ce797f03a36e13bc3ac2071d3d62172a2288243e13469a91ef517340ba79fe2e`。
+- 原 result SHA-256
+  `60c76dc42ab701d1d82f2be92b3c2ddb6f2beb4976e2ef403c20e012b566ea23`。
+- 驱动 SHA-256
+  `8a8b8f996a96ec51ed6c892b6397b5e13381f4e46582474106aeb96e62088d77`。
+
+下一步检查能否复用受管容器执行相同即时预检，减少启动开销；不前移
+或缓存 clean 结论，不放宽窗口，不盲目重复 VM。本轮未访问或重启生产、
+扩跑回归、推送或发布；`16 supported/14 deferred` 保持，整体未完成。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
