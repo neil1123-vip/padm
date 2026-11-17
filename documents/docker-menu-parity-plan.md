@@ -11856,6 +11856,74 @@ exit `0`、无 OOM，恢复独验绑定 `192` 份证据。新覆层恢复通过�
 整体仍未完成，`16 supported/14 deferred` 不变。下一步先取得正式
 Cosign 失败的原始诊断，确认前置条件后再推进防护验收。
 
+### 6A.56 正式 manifest 前检通过及候选提交失败恢复
+
+2026-11-17，仅继续本地 Debian 13 amd64/TCG、IPv4 单 Peer 隔离验收，
+候选来源保持 6A.54 的签名提交与摘要绑定。先从 6A.55 恢复盘创建单机
+新覆层 `/work/control-formal-manifest-diagnostic-1794883864508437098`，
+source 原安装入口并调用一次原 `dockerManifestPrepare`，固定正式 `.7`
+URL、Cosign 二进制、identity/issuer 和三份发布材料；未 enable、stage
+或 pull。正式函数 rc `0`、耗时 `14287.309416` 毫秒，实际 Cosign rc
+`0`、stderr 为 `Verified OK` 加换行，二进制 SHA-256 仍为
+`a57926e24b07f02b5baf3be81f9a5988e9e45d8a1ca8ca500cdf56d10e69f887`。
+来源、配置、私密文件、镜像、WG 和账目保持；单机正常关机、父盘不变。
+该正式路径通过不解释 6A.55 原验签拒绝。保留两个启动 VM 前的失败：
+镜像已含 Python ENTRYPOINT，重复入口导致 exit `2`；AST 误选非 Constant
+的 `SNAPSHOT` 赋值导致 exit `1`。修正选择后，真实 helper 断网自检通过。
+独验 exit `0`，绑定本轮 `56` 份证据。
+
+双机新轮 `/work/control-protection-1794884480047489456` 复用固定原驱动，
+在两机网络门禁之后、唯一原 enable 之前增加上述正式 manifest 门禁。
+两机共 `6` 次 GET 的 SHA/大小通过，正式门禁 rc `0`、耗时
+`11658.979435` 毫秒，临时材料清场正常；原来源窗口、业务、恢复和
+finally 断言保持。驱动断网自检及只读复审通过。
+
+唯一 enable 耗时 `250785.029534` 毫秒、rc `14`；恰有 `1` 次 challenge、
+`1` 行 source-verified 和 `1` 次完整 Peer CLI，后者耗时
+`13509.014751` 毫秒。stderr `8344` 字节，SHA-256
+`02ac2a6640d46e8f5a7f435313bc10bc7e926d51fd43b6a2d9b01da3491eedbc`，
+唯一明确拒绝为“候选部署启动或健康检查失败，正在恢复旧配置”。
+只读复审现有日志可见四个业务容器重建后均 Healthy；source-verified 后
+出现提交回调的第二个临时 preflight 容器，随后触发恢复。可限定为已经
+执行到 `dockerFail2banStartManagedCommit` 的第二次 `CleanCheck`，
+但缺该检查、spec/source、WitnessRecheck 及 jail 启动各自的原始 rc。
+未见受管 jail 容器的创建/启动记录，不据日志缺失断言它未执行；
+不能归因为 Recheck 超期或某个具体容器健康失败。
+
+失败后严格 TLS 三例、错身份零到达及两类有效身份正文
+`311296/286720` 字节通过；配置、私密文件、镜像、WG、来源、调度、
+额度、账目不回退及受管计量增长、稳定清场通过。沿用原负例凭据未独立
+重构的限制。初始锁不存在；预热采样为 PID `3857`、`bash`、PPID `1`、
+start ticks `9648`、`padm-docker-traffic.service`，前后身份稳定；
+post/disabled 采样锁不存在。这些只描述采样时刻，不解释失败原因。
+整轮 `433.08197634499993` 秒，正常关机 `5.9968922319999365` 秒，
+QEMU exit `0/0`、无强制关机、父盘不变。原 result 保持
+`passed=false/recovery_audit_passed=true/driver_assertions_passed=true`；
+防护、封禁/解除封禁及启用态业务没有通过，不能用恢复通过替代。
+
+断网独验 exit `0`、绑定本轮 `197` 份证据，仅引用固定旧摘要，
+不重复旧树审计。驱动容器 exit `1`、无 OOM；最后只读确认私密卷无
+活动容器，原始密钥、nonce、规格和磁盘仍仅留私密卷。脱敏摘要位于
+`.tmp-native-control-vms-20261116/`：
+
+- `formal-manifest-verification.json` SHA-256
+  `a993c76ea6b947e30df66055eca5adfca2b16d2db7ad05c4e4ae1b6e372f5d22`。
+- `formal-gated-verification.json` SHA-256
+  `45702de267dfdcdc6d8218673eaa59c385b35f92f8c518a48c59b64f386805e1`。
+- `formal-gated-driver-state.json` SHA-256
+  `afac86ebcdab43c22b53e17407ac9b4d8e73a8b38f180ff8659eb62390c97f46`。
+
+单机/双机驱动 SHA-256 分别为
+`4b35e3e4703b9369a59e1d5bfab2c6f6fc035498a5b31d5f33ca633231ded38c`、
+`331fdd447210824b96b58e0a65d89f178be65cf34f1cfda6d1a59baff637314c`；
+两独验器分别为
+`0676c80f801de4d630e9eb64230ceb4c55ef11fc9d367ab863460cb25c6d4d7a`、
+`557d359e5833538ba925d71fcac0a6917729806198d4cd703f61eac17376d04b`。
+本轮不再 enable 或为读取 journal 重启 VM，不改生产源码，不重复
+daily/full、生产重启、推送或发布，`16 supported/14 deferred` 不变。
+下一步只补提交回调失败边界的固定步骤名、原始 rc 和时间，保留原返回、
+安全时限及恢复语义，再决定是否需要有界重验；整体仍未完成。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
