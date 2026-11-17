@@ -34,6 +34,12 @@
 | K | [实施计划 6A.66](docker-menu-parity-plan.md#6a66-正式-v3438-双-kvm-升级与控制防护完整恢复)：正式 `.8`/`6e880813`、本地 Debian 13 amd64/IPv4/单 Peer KVM 双机，完整升级、控制防护及严格恢复通过。六次真实下载、每机 312 个 payload 文件和五镜像绑定、真实 22 次 401 封禁/DROP/解封、启停后 TLS/计量、终态安全及 Peer 清场均通过；稳定 `.8` before 全文件精确恢复，无候选元数据例外。断网独验绑定 1940 份本轮/基线证据、17 负控通过；正常关机、父盘保持。6A.65 候选及 6A.47、6A.64 旧失败保持；根目录权限和其余环境边界见原节。原件 `.tmp-formal-control-3438-20261117/`。 |
 | N | [6A.67](docker-menu-parity-plan.md#6a67-正式原生-arm64-宿主生命周期整轮) 的原生 Ubuntu ARM64/IPv4/Xray WS 正式 `.7/.8` 七阶段、22 客户端及 56 工件独验通过。另补 [6A.68](docker-menu-parity-plan.md#6a68-正式-arm64-engine-自动安装与纯-sing-box-生命周期)：移除 runner 预装包后，正式 `.44` 入口自动安装官方 Docker 29.10.0/Compose 5.7.2；纯 sing-box Trojan TLS/id 28 的 `.8/.44` 七阶段、22 严格 TLS 客户端、两账目/额度/计量、10 ARM64 index/manifest 与实际镜像、业务材料及精确清场通过，69 份工件断网只读独验及 19 负控通过。再补 [6A.69](docker-menu-parity-plan.md#6a69-正式-arm64-入口路由中继与站点集中专项)：正式 `.44`/Xray 29+sing-box 28 的别名/默认分享、双核心路由、Xray HTTP/严格 HTTPS CONNECT、站点/ALPN 和服务重启；58 检查/六 checkpoint、126 工件断网只读独验、31 组件及 19 完整工件负控通过。[6A.70](docker-menu-parity-plan.md#6a70-正式-arm64-reality-共存与-vless-encryption-集中验收) 补齐固定 `.44` 的 Reality Vision/XHTTP 三拓扑共存、普通 bridge 双入口 Encryption 启停/恢复、三次服务 restart 及正反例；19 checkpoint/64 proxy/16 site/29 辅助采样、292 工件断网只读独验、46 组件及 41 完整工件负控通过。Mihomo 限显式 hybrid 投影，不称原 URI 导入通过；首次 spec 仅语义恢复，旧失败保留，第六轮 CI 成功仍因 12 relay reset 被独验拒绝。业务 origin 仅本地 lo；受管站点用测试 CA，host/loopback 本地 443 透明中继至固定 A HTTPS 后端，不计 ARM64 公网入站、不传生产私钥。无宿主重启，不外推裸 OS、IPv6、其它既定组合。原件 `.tmp-native-arm64-host-20261117/`、`.tmp-native-arm64-singbox-20261117/`、`.tmp-native-arm64-specialties-20261117/`、`.tmp-native-arm64-reality-20261117/`。 |
 
+M：[6A.71](docker-menu-parity-plan.md#6a71-正式本地三节点控制验收与-icmp-首配阻塞)
+补齐正式 `.44` 本地 Debian 13 amd64/IPv4 的一主两被控、6 次原 timer 自主
+同步、16 次业务探测、三机整机重启和单 Peer 撤权隔离；3986 份原件断网
+只读独验通过，三机正常关机。该证据归 `subscription-multiserver`，
+不替代公网多机或多 Peer 新主机灾备；下表的固定本地三节点重启缺口已关闭。
+
 ## 14 项对账
 
 “未决完成条件”只列既定范围内尚缺的证据。正式 `3.43.4`、`3.43.7` 与 `3.43.8` 的共同可信发布门槛
