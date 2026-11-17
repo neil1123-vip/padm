@@ -12452,6 +12452,88 @@ Job `5m28s`，405 条命令首末墙钟 `320.960` 秒。归档 `69` 份脱敏工
 未访问、升级或重启 A/B，未重复 daily/full，临时驱动/工作流仍留隔离分支；
 本次主线仅记录证据，不触发应用发布。`16 supported/14 deferred` 不变。
 
+### 6A.69 正式 ARM64 入口路由中继与站点集中专项
+
+2026-11-17，在独立 GitHub `ubuntu-24.04-arm` 宿主集中验收固定正式
+`v3.44.0`/`da7905877b1ee59abbf632ad866963a02da94bf7` 的四类专项：
+sing-box Trojan 入口别名与默认分享、两核心路由、Xray HTTP/HTTPS CONNECT
+中继，以及 Xray fallback 站点/ALPN。业务组合为 Xray Trojan fallback/id 29
+和 sing-box direct Trojan/id 28；origin 仅临时 lo `93.184.216.34/32`，
+不计公网。复用 runner 的 Docker/Compose，不重复 Engine 安装。
+
+首轮 `44103560897`/`5fb5926d` 的 `57` 项现场检查及六 checkpoint、
+正式 purge 和精确清场通过，job `10m14s`。已保存 `90` 份脱敏工件及
+GitHub ZIP/API 摘要绑定；部分早期投影缺原始响应，不能称完整离线独验通过。
+第二轮 `44106208536`/`aa97b39e` 补齐原件，但来源白名单拒绝例的 curl
+返回 `0`、正文 `0` 字节，驱动严格拒绝，整轮失败；失败前未保存该例响应头
+及原点增量，不能定位其分支，也不据此认定白名单绕过或合法拒绝。
+该轮 `76` 份原件及成功清场保持。第三轮 `44110229250`/`145d1255`
+新增先落证后断言、HTTPS 原点 TCP 建连计数和 CONNECT 来源拒绝；
+因误取运行配置前两条规则、包含前置统计 API 规则而在新增策略断言失败，
+未执行其后的来源探针/站点，`76` 份原件与成功清场保持。
+随后仅改为按中继 inbound tag 提取规则、断言前保存投影；
+空 `200`、curl `0` 或超时不放宽为拒绝通过。
+
+第四轮为 `44112277450`，签名验收源
+`7808de09c33c395c28ab1898f32c2bd4e09f3d91`，job `9m56s` 成功；
+`58` 项现场检查、六 checkpoint、正式 purge 及精确清场通过。
+实际宿主 Ubuntu `24.04.5`/`aarch64`、kernel `7.0.0-1017-azure`、
+Docker `28.0.4`/Compose `2.38.2`/`overlay2`，PID 1 为 systemd；
+原 `mnt.mount` 失败保持，不称整机全健康。具体补齐：
+
+- 入口：别名新增、默认分享、原位 `35468 → 35469` 替换、旧端口拒绝、
+  删除和基口恢复；四条分享投影及跨核心凭据摘要绑定。
+- 路由：双核心 SOCKS5 TCP 的全局/选择匹配/绕过和错误认证拒绝，
+  DNS/hosts、Direct 优先于 Block 及域名阻断；恢复后双核心业务通过。
+  DNS 错误拒绝不单独证明系统解析器无回退。
+- 中继：Xray 认证 HTTP、严格 HTTPS CONNECT、`38180 → 38181` 改端口、
+  旧端口/来源/关闭拒绝。第四轮 HTTP 来源拒绝 curl `52`、无响应状态；
+  CONNECT 虽先回代理 `200`，后续 TLS curl `35` 且原点 TCP 建连为零，
+  不把代理 `200` 当成业务成功。两例原点请求均为零，原始头/正文已绑定。
+- 站点：三模板/特殊标题、static、302、fallback 三种 ALPN 顺序，
+  实际协商 HTTP/2 与 HTTP/1.1、恢复默认和服务重启后业务通过。
+
+`36` 份核心 payload 探针、`9` 份中继及 `13` 份站点探针合计 `58`；
+六阶段固定正式 bundle 的 `314` 个文件、五份 ARM64 index/manifest 与实际
+镜像、业务材料、两账目身份及额度保持。managed 账号额度 `1 GiB`，
+各 checkpoint 双向计量增长；core 账目累计保持零，不称两账目都增长。
+原始 spec 从 configured 的 `976b28c2…` 经首轮 CLI 编辑为 `aa700d75…`，
+后五阶段字节摘要保持；六阶段非 release/images 的规范化语义摘要一致，
+现场恢复还按完整 JSON 对象相等断言，重启后亦保持。
+
+下载 `126` 份脱敏原件，artifact `14342775323`、ZIP `195994` 字节，
+ZIP/API SHA-256
+`a1524da04803cbac62d55fb2ffc93a64c818f0f25905d5a467d74ab39e1d1922`；
+ZIP 成员集合及逐文件摘要与提取原件精确一致。驱动原始 LF 源 SHA-256
+`e6210e7e42bb537da59f630df09f480cca13e4871a5d90f44c78b40fcfc66a92`，
+基类 `9a64191047ca0b41bb2370d0a541fe23aa93dff64f1e74887207d3ec5561d564`；
+result SHA-256
+`d56ce89f799ccaab6cd33ea1caaedf3c98bc0502a6db8549f163ec024fb3c8ca`。
+断网只读独验通过：固定工具镜像
+`sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`，
+`network=none`、rootfs 只读、输入仅单一只读挂载、cap-drop ALL、
+no-new-privileges，无 Docker socket，exit `0` 后精确清理。
+`31` 项组件负控及 `19` 项重建完整 index 后的工件篡改负控全部拒绝，
+包括业务语义摘要漂移、后续 raw 字节漂移、来源拒绝仍连到原点、
+HTTP/2 降级、额度变化和清场失败。验证器 SHA-256
+`cd9adab08daaefbaeda96559794dbbf808348a366dd99277279e4e0fd2aa06b8`，
+报告 `attempt-4/independent-output/read-only-verification.json` SHA-256
+`017dd75ae738949292af3c1c4d9cd2415b189d41098546168bce029071d45679`。
+首稿误要求跨首次 CLI 序列化的 spec 字节相等，原拒绝及验证器快照保留在
+`first-rejection/`；仅修验收器并重跑离线核验，未重跑宿主。
+完整私密 spec 未上传，规范化摘要剔除 release/images，完整语义恢复
+依赖固定驱动前五 checkpoint 的完整 JSON 相等现场断言，不能称离线重算；
+分享亦仅脱敏投影绑定。独验核固定资产哈希及采集的 Cosign 成功返回码，
+未再次密码学验签，私密命令流和实时宿主不在离线独观范围。
+
+四轮 ZIP 均已下载并核对 GitHub API digest，旧失败不改判；
+第二轮空成功异常根因仍未定位，第三轮为验收规则选取错误，
+第四轮通过不外推第二轮同因。原件 `.tmp-native-arm64-specialties-20261117/`。
+只关闭上述固定正式 ARM64 子项；临时驱动/工作流留在隔离分支，
+不合并应用源码，主线仅记录证据，不触发应用发布。
+公网/IPv6、整机重启、自然续期、WARP、多 Peer 和其它既定组合不在本轮范围，
+未访问或修改 A/B，`16 supported/14 deferred` 不变。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
