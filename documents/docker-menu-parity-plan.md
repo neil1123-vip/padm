@@ -12319,6 +12319,71 @@ before，不沿用 6A.65 的候选元数据例外。两机各 `312` 个实际 pa
 未访问、升级或重启 A/B，未重复 daily/full 或发布应用；
 `16 supported/14 deferred` 不变，整体计划仍未完成。
 
+### 6A.67 正式原生 ARM64 宿主生命周期整轮
+
+2026-11-17，在独立 GitHub `ubuntu-24.04-arm` 宿主完成正式 `.7 → .8`
+固定生命周期，run `44080509205`、验收源提交
+`8da8899f2b9bc0ddae3a3870b8b6ad9c8cecb523`。实际为 aarch64、
+Ubuntu `24.04.5`、内核 `7.0.0-1017-azure`、PID 1 systemd；
+rootful Docker `28.0.4`、Compose `2.38.2`、overlay2/cgroup v2。
+Docker active/enabled，systemd 总体 degraded 的失败 unit 为 `mnt.mount`；
+无全球 IPv6 和 `/dev/kvm`，不将该宿主称为全部服务健康。
+
+七阶段均通过：正式 `.7` 安装与独立账号 → `.8` update → `.7` rollback →
+再次 `.8` update → restart → down/up → 默认保留卸载后 reinstall/up，
+最后正式 purge。回滚认领本轮首次 update 快照；restart 容器 ID 保持、
+StartedAt 改变，down 后无容器/监听且连接失败，up 得到新容器。
+Job 用时 `6m2s`；369 条命令首末墙钟 `354.625` 秒，不混为单个命令耗时。
+
+每阶段严格 TLS 的 core 与独立账号完整取得 `256 KiB` 随机正文，
+唯一 nonce 和真实 Xray bridge 来源绑定；错误 UUID 均拒绝，初始错误 SNI 拒绝，
+合计 `22` 个全新 sing-box 客户端。业务 origin 为临时 lo 地址
+`93.184.216.34/32`，属于本地隔离业务，不计公网入站。
+业务文件字节/权限/属主保持，spec 除 release/images 外 invariant 保持，
+`0600 root:root`；两账号身份和额度不变、累计不降，独立账号每阶段双向增长。
+最终两个账号各 upload `798`、download `1835820`；独立账号限额 `1073741824`
+字节，core 为 `0`。两版固定签名 manifest → `10` 份 raw ARM64 platform
+manifest → config digest → 各阶段实际容器镜像逐层绑定。
+`.7`/`.8` bundle 计数 `306/313` 包含生成 ref、不含清单，实际 payload
+为 `305/312`，不与 6A.66 的 payload 口径混用。
+
+正式 purge 默认保留镜像，再精确清理本轮新增镜像和 origin 地址。
+容器/网络/卷/镜像集合恢复初始状态，受管根、CLI、unit 均清除，Docker 保持
+active；未全局 prune。原始 ZIP `177880` 字节与 GitHub API digest 相同，
+本地精确归档 `56` 份脱敏工件。固定 Linux 工具镜像中 `4` 个独验负控通过；
+输入只读、断网独验 passed，核对来源/索引、资产/镜像、七阶段业务/规格/
+账目、客户端正文/nonce/来源、快照、启停和清场。
+
+- 驱动 SHA-256：
+  `3412e304091593d88a6f588ff3087cf802824cecc438bba972d2607f5e49efea`。
+- 原始 ZIP SHA-256：
+  `55949745e0366f3aa1d167dfcfb0e3a443bd797c43bde3474d3a8a8e52c8a1a2`。
+- 结果 SHA-256：
+  `cb90e2c3098fb0e50ef6fd70de93a0f5c57350422aa542cfe2f1855bf445b0bc`。
+- 独验报告 `independent-output/read-only-verification.json` SHA-256：
+  `3c0246b0878685e5af2795efa62982e36fa6f5ecb8a76d72b83130272f154907`。
+- 证据：`.tmp-native-arm64-host-20261117/`；远端工件保留至
+  `2026-12-01T12:15:35Z`，已下载本地。私钥、完整配置、UUID、原始命令输出未上传。
+
+预检原 run `44076776913` 因 reusable images caller 缺 `packages: read`
+在调度前失败，原件保持；只补 caller 的 `contents: read`、`packages: read` 后，
+预检 `44077168332` 通过。主线修复 `781b770e` 的 Release run
+`44078479350` 已 success，应用发布及镜像 smoke/runtime/publish 按计划跳过。
+临时验收模式和一次性驱动保留隔离分支，不直接合并主线。
+
+归档期间，独立上游版本自动更新 `f67b0f8c` 推进 Debian snapshot 至
+`20261116T000000Z`，发布源 `da790587` 的正式 `v3.44.0` 于北京时间
+`2026-11-17 20:30:29` 发布。Release run `44081637875` 的 `41` 个 job
+全部 success，含 ARM64 runtime；公开 release/run/jobs JSON 已一并归档。
+它不扩大本轮固定 `.7/.8` 的宿主整轮结论，A/B 未因此升级。
+
+仅补固定 Ubuntu ARM64/IPv4/Xray WS 的正式宿主生命周期；
+预装 Engine 不计自动安装，未验整机重启、公网入站/IPv6、多 Peer、自然 ACME、
+其它核心/协议组合或长稳。独验依赖固定资产哈希和采集的 Cosign 成功返回码，
+未再次密码学验签，私密命令流及实时宿主状态不在离线独验范围。
+未访问、升级或重启 A/B，未重复 daily/full；本次文档和权限修复未触发应用发布；
+旧失败不改判，`16 supported/14 deferred` 不变，整体计划仍未完成。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
