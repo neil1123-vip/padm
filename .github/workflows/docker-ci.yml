@@ -204,7 +204,7 @@ jobs:
           if-no-files-found: error
 
   native-host-lifecycle:
-    name: Formal native ARM64 Engine and sing-box lifecycle
+    name: Formal native ARM64 consolidated specialties
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.native_host_lifecycle }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
@@ -215,15 +215,15 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
       - name: Validate driver assertions
-        run: python3 -B shell/regression/native-arm64-host-lifecycle.py --selfcheck
-      - name: Exercise formal host lifecycle
+        run: python3 -B shell/regression/native-arm64-specialties.py --selfcheck
+      - name: Exercise formal host specialties
         shell: bash
         run: |
           set -euo pipefail
           sudo env PATH="${PATH}" GITHUB_SHA="${GITHUB_SHA}" GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
             GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" \
             GITHUB_ACTIONS="${GITHUB_ACTIONS}" RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT}" \
-            python3 -B shell/regression/native-arm64-host-lifecycle.py \
+            python3 -B shell/regression/native-arm64-specialties.py \
             --work "${RUNNER_TEMP}/padm-arm64-host"
       - name: Preserve sanitized acceptance evidence
         if: always()
