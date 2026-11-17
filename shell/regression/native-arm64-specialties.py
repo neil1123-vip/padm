@@ -487,14 +487,14 @@ class Acceptance(base.Acceptance):
         self.edit("--http-relay-sources", "198.18.1.2/32", label="relay-source-deny")
         spec = json.loads((ROOT / "config/spec.json").read_text())
         runtime = json.loads((ROOT / "config/xray/config.json").read_text())
-        policy = runtime["routing"]["rules"][:2]
+        policy = [row for row in runtime["routing"]["rules"] if "padm-relay-http" in row.get("inboundTag", [])]
+        self.record("relay-source-policy", {"source_ips": spec["relay"]["http"]["source_ips"], "rules": policy})
         require(spec["relay"]["http"]["source_ips"] == ["198.18.1.2/32"], "relay source edit not persisted")
         require(policy == [
             {"type": "field", "inboundTag": ["padm-relay-http"], "source": ["198.18.1.2/32"],
              "outboundTag": "padm-relay-http-direct"},
             {"type": "field", "inboundTag": ["padm-relay-http"], "outboundTag": "blocked"},
         ], "relay source policy mismatch")
-        self.record("relay-source-policy", {"source_ips": spec["relay"]["http"]["source_ips"], "rules": policy})
         # 保留来源异常的失败判定，同时完成独立站点专项，避免重复整轮。
         for label, https in (("relay-source-connect-rejected", True), ("relay-source-rejected", False)):
             try:
