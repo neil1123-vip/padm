@@ -884,9 +884,10 @@ dockerControlSourceSnapshot() (
         inspected=$(docker container inspect "${ids}") &&
             image=$(jq -er --arg service "${service}" \
                 '.images[if $service == "control" then "ops" else "net" end]' "${spec}") || return 1
-        jq -e --arg root "${root}" --arg image "${image}" --arg service "${service}" \
+        snapshots=$(jq -cen --arg root "${root}" --arg image "${image}" --arg service "${service}" \
+            --argjson previous "${snapshots}" --argjson current "${inspected}" \
             --slurpfile compose "${root}/compose.json" '
-          length == 1 and (.[0] as $c | $compose[0].services[$service] as $s |
+          $current | select(length == 1 and (.[0] as $c | $compose[0].services[$service] as $s |
             ($c.Id | type == "string" and test("^[a-f0-9]{64}$")) and
             $c.State.Status == "running" and $c.State.Running == true and
             $c.State.Restarting == false and $c.State.Paused == false and $c.State.Dead == false and
@@ -916,14 +917,12 @@ dockerControlSourceSnapshot() (
             all($c.Mounts[]; .Type == "bind") and
             ($c.Mounts | map({source:.Source,target:.Destination,read_only:(.RW | not)}) | sort_by(.target)) ==
               ($s.volumes | map({source:(.source | sub("^\\$\\{PADM_(DOCKER|NET)_ROOT\\}"; $root)),
-                target,read_only}) | sort_by(.target)))
-        ' <<<"${inspected}" >/dev/null || {
+                target,read_only}) | sort_by(.target)))) |
+          $previous + [.[0] | {id:.Id,started_at:.State.StartedAt,restart_count:.RestartCount}]
+        ') || {
             dockerError "控制来源快照的 ${service} 容器状态或归属漂移"
             return 1
         }
-        snapshots=$(jq -cn --argjson previous "${snapshots}" --argjson current "${inspected}" \
-            '$previous + [$current[0] | {id:.Id,started_at:.State.StartedAt,restart_count:.RestartCount}]') ||
-            return 1
     done
     hashes=
     for file in config/spec.json config/control/state.json compose.json deployment.json images.env \

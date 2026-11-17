@@ -491,9 +491,16 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
         elif [[ "$*" == "container inspect ${controlId}" ]]; then
             cat -- "${TEST_ROOT}/snapshot-control.json"
         elif [[ "$*" == "container inspect ${netId}" ]]; then
+            if [[ "${SNAPSHOT_FAULT:-}" == malformed ]]; then printf '{\n'; return 0; fi
             jq --arg fault "${SNAPSHOT_FAULT:-}" '
               if $fault == "extra-cap" then .[0].HostConfig.CapAdd += ["CAP_NET_RAW"]
               elif $fault == "wrong-mount" then .[0].Mounts[0].Source += ".wrong"
+              elif $fault == "unhealthy" then .[0].State.Health.Status = "unhealthy"
+              elif $fault == "duplicate" then . + .
+              elif $fault == "multi-document" then
+                (. | .[0].State.Health.Status = "unhealthy"), .
+              elif $fault == "restarted" then
+                .[0].RestartCount = 1 | .[0].State.StartedAt = "2026-10-10T00:01:00.000Z"
               else . end
             ' "${TEST_ROOT}/snapshot-net-wireguard.json"
         else
@@ -501,9 +508,15 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
         fi
     }
     dockerControlSourceSnapshot >"${TEST_ROOT}/snapshot.json"
-    jq -e '(.containers | length == 2) and
+    jq -e --arg controlId "${controlId}" --arg netId "${netId}" '
+      .containers == [
+        {id:$controlId,started_at:"2026-10-10T00:00:00.000Z",restart_count:0},
+        {id:$netId,started_at:"2026-10-10T00:00:00.000Z",restart_count:0}] and
       (.hashes | split("\n") | map(select(length > 0)) | length == 7)' \
         "${TEST_ROOT}/snapshot.json" >/dev/null
+    SNAPSHOT_FAULT=restarted dockerControlSourceSnapshot >"${TEST_ROOT}/snapshot-restarted.json"
+    jq -e '.containers[1].started_at == "2026-10-10T00:01:00.000Z" and
+      .containers[1].restart_count == 1' "${TEST_ROOT}/snapshot-restarted.json" >/dev/null
     # 已切换事务仅在同锁完成回调内可检查当前配置，其它恢复计划仍阻止发布。
     DOCKER_CONFIG_SWITCHED=1
     reject dockerControlSourceSnapshot
@@ -532,8 +545,12 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
         sha256sum() { return 1; }
         reject dockerControlSourceSnapshot
     )
-    for SNAPSHOT_FAULT in extra-cap wrong-mount; do
-        reject dockerControlSourceSnapshot
+    for SNAPSHOT_FAULT in extra-cap wrong-mount unhealthy duplicate malformed multi-document; do
+        status=0
+        dockerControlSourceSnapshot >"${TEST_ROOT}/snapshot-fault.json" \
+            2>"${TEST_ROOT}/rejected.log" || status=$?
+        [[ "${status}" == 1 && ! -s "${TEST_ROOT}/snapshot-fault.json" ]] ||
+            fail "非法来源快照不得输出部分结果: ${SNAPSHOT_FAULT}:${status}"
     done
 )
 

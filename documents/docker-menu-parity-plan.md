@@ -12083,6 +12083,35 @@ QEMU exit `0/0`、无强制关机、父盘不变。驱动 exit `1`、无 OOM；
 或缓存 clean 结论，不放宽窗口，不盲目重复 VM。本轮未访问或重启生产、
 扩跑回归、推送或发布；`16 supported/14 deferred` 保持，整体未完成。
 
+### 6A.61 来源快照内的 jq 调用合并
+
+2026-11-17，评估后保留 receipt 后的中间来源快照：省去该采样会改变
+短暂漂移的检测范围和 `source-verified` 输出时点。现有 `net-wireguard`
+缺少 Fail2ban 配置、日志与状态挂载，不能直接承接原完整即时预检。
+
+仅将 `dockerControlSourceSnapshot` 每个容器的完整 jq 校验与三字段投影
+合并，每次快照少启动 `2` 个 jq 进程；仍通过 `--argjson current`
+要求唯一 JSON 文档。原容器谓词、顺序、hash、三次采样、clean、登记/
+回执、双时限及成功输出保持。拒绝仍归一为 `1`，不输出部分快照；
+多文档等解析拒绝现在也输出统一容器漂移提示，不要求 stderr 逐字不变。
+
+现有实物 fixture 精确断言两容器投影、合法代次变化，以及额外能力、
+错误挂载、不健康、重复容器、损坏 JSON 和先无效后有效多文档的六种
+拒绝与空 stdout。独立只读复审通过。本机 Linux amd64、`Jobs=2`，
+同一当前源码快照
+`28d198a580565fe6c3c4d176a52354eecb78a1506b252ae385c209889b45cc7a`
+通过 `docker-control-cli` 与 `docker-fail2ban-source`，入口分别
+`24.975/6.210` 秒、exit `0`、无缓存命中，工具镜像仍为
+`sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`。
+证据 `.tmp-regression-docker-7486821bd855428c9028fad770200a42/`、
+`.tmp-regression-docker-9936fc60961a4f74beadabdc51948cf8/`；
+初版验证后保留单文档边界的修订已实际重跑，不复用初版成功结果。
+
+本节仅证明进程数减少和定向合同通过，不证明原生性能收益、截止问题
+解决或防护通过。6A.60 的失败原件保持；下一步对完整即时路径分段计时，
+不再盲目重跑 VM。本轮未访问或重启生产、扩跑 daily/full、推送或发布；
+`16 supported/14 deferred` 保持，整体未完成。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
