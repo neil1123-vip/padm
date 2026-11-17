@@ -97,7 +97,12 @@ dockerIPv6NetworkManage() {
 dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
 dockerConfigureSchemaFile() { printf '%s\n' "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"; }
 dockerConfigureReleasePrepare() {
-    printf '%s\n' "$@" >"${TEST_ROOT}/release-arguments"
+    local registered
+    registered=$(jq -er '.input_stage' "${root}/.restore-pending/metadata.json") || return 1
+    [[ "$#" == 5 && "$4" == '' && "$5" == "${root}/${registered}" ]] ||
+        candidate_fail '发布输入未放进已登记的恢复暂存目录'
+    mkdir -m 0700 -- "$5/.manifest.fixture" "$5/.stage.fixture" || return 1
+    printf '%s\n' "$1" "$2" "$3" >"${TEST_ROOT}/release-arguments"
     DOCKER_STAGED_BUNDLE_PATH="${TEST_ROOT}/bundle"
     DOCKER_CONFIG_RELEASE_INPUTS=$(jq -c '{release,images}' "${TEST_ROOT}/base.json") || return 1
     if [[ "${MODE}" == release-mismatch ]]; then
