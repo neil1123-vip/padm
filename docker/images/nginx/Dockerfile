@@ -1,22 +1,38 @@
 # syntax=docker/dockerfile:1.8
 
-ARG ALPINE_BASE
-FROM ${ALPINE_BASE}
+ARG NGINX_BASE
+ARG DISTROLESS_STATIC_BASE
+FROM ${NGINX_BASE} AS runtime-files
+
+ARG DEBIAN_SNAPSHOT
+ARG NGINX_VERSION
+
+RUN set -eux; \
+    test "$(nginx -v 2>&1)" = "nginx version: nginx/${NGINX_VERSION}"; \
+    nginx -V 2>&1 | grep -Eq -- '(^| )--with-stream( |$)'; \
+    rm -f /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list.d/nginx.list; \
+    printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ trixie main\n\
+deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' \
+        "${DEBIAN_SNAPSHOT}" "${DEBIAN_SNAPSHOT}" > /etc/apt/sources.list; \
+    apt-get update; \
+    apt-get install --no-install-recommends -y busybox-static python3
+
+COPY --from=runtime /export-runtime.py /usr/local/bin/export-runtime
+
+RUN set -eux; \
+    python3 /usr/local/bin/export-runtime /out/rootfs /bin/busybox /usr/sbin/nginx /etc/nginx/mime.types; \
+    install -d /out/rootfs/usr/bin; \
+    for applet in sh awk cat; do ln -s busybox "/out/rootfs/bin/${applet}"; done; \
+    ln -s /bin/busybox /out/rootfs/usr/bin/wget; \
+    install -d -o 10001 -g 10001 /out/rootfs/etc/nginx/http.d /out/rootfs/etc/nginx/stream.d /out/rootfs/srv/padm
+
+FROM ${DISTROLESS_STATIC_BASE}
 
 ARG TARGETARCH
 ARG NGINX_VERSION
-ARG NGINX_PACKAGE_VERSION
-ARG CA_CERTIFICATES_VERSION
 
-RUN set -eux; \
-    apk add --no-cache \
-        "ca-certificates=${CA_CERTIFICATES_VERSION}" \
-        "nginx=${NGINX_PACKAGE_VERSION}" \
-        "nginx-mod-stream=${NGINX_PACKAGE_VERSION}"; \
-    addgroup -S -g 10001 padm; \
-    adduser -S -D -H -u 10001 -G padm padm; \
-    mkdir -p /etc/nginx/http.d /etc/nginx/stream.d /srv/padm; \
-    chown -R 10001:10001 /etc/nginx/http.d /etc/nginx/stream.d /srv/padm
+COPY --from=runtime-files /out/rootfs/ /
+COPY --from=runtime /passwd /group /nsswitch.conf /etc/
 
 COPY --chown=10001:10001 --chmod=0644 nginx.conf /etc/nginx/nginx.conf
 COPY --chown=10001:10001 --chmod=0644 default.conf /etc/nginx/http.d/default.conf

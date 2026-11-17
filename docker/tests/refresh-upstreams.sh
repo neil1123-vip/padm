@@ -50,7 +50,7 @@ for step in prepare update save ci promote release; do
     [[ -s "${test_root}/${step}.sh" ]] || fail "workflow step is missing: ${step}"
 done
 # 无更新时不提交候选或等待 CI；已有机器人更新可补发 Release。
-for step in 'Validate the refreshed lock' 'Preflight refreshed Alpine dependencies' \
+for step in 'Validate the refreshed lock' 'Preflight refreshed distroless dependencies' \
     'Save update branch' 'Ensure Docker CI' 'Promote validated update'; do
     awk -v step="${step}" '
         $0 == "      - name: " step {found = 1; next}

@@ -335,6 +335,7 @@ try {
     }
 
     $nestedNodeSelectors = @(
+        'docker-distroless-real',
         'docker-control-two-deployment-real', 'docker-control-remap-real', 'docker-control-log-cron-real',
         'docker-control-rebind-real', 'docker-control-peers-real',
         'docker-routing-ipv6-real', 'docker-wireguard-cli-real', 'docker-wireguard-peers-real', 'docker-wireguard-control-real',
@@ -478,7 +479,11 @@ try {
             ops = 'padm-local/padm-ops:control-4c4b'
             net = 'padm-local/padm-net:control-4c4b'
         }
-        if ($Selector -eq 'docker-reality-mldsa65-real') {
+        if ($Selector -eq 'docker-distroless-real') {
+            foreach ($name in @($references.Keys)) {
+                $references[$name] = "padm-distroless/padm-${name}:local"
+            }
+        } elseif ($Selector -eq 'docker-reality-mldsa65-real') {
             # 固定核心与 OpenSSL；专用标签让离线导入保留可解析的镜像名。
             $pinnedImages = [ordered]@{
                 'padm-local/padm-xray:mldsa65-26.10.31' = 'ghcr.io/neil1123-vip/padm-xray@sha256:0f768569d91783b640b911da2956c7db5f3d4607852a8489968c3a571cd45bf7'

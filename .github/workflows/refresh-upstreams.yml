@@ -97,7 +97,7 @@ jobs:
           bash docker/release.sh validate-lock
           # 完整 Docker contract 由更新分支的 Docker CI 统一执行。
 
-      - name: Preflight refreshed Alpine dependencies
+      - name: Preflight refreshed distroless dependencies
         if: steps.update.outputs.changed == 'true'
         shell: bash
         run: bash docker/release.sh preflight

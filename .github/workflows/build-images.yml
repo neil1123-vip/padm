@@ -55,7 +55,7 @@ jobs:
           bash -n install-docker.sh docker/release.sh docker/tests/image-smoke.sh
           jq empty docker/contracts/*.json
 
-      - name: Preflight pinned Alpine dependencies
+      - name: Preflight pinned distroless dependencies
         shell: bash
         run: bash docker/release.sh preflight
 
@@ -190,7 +190,7 @@ jobs:
             ${{ matrix.image.name }}.platform=${{ matrix.platform.value }}
             ${{ matrix.image.name }}.tags=${{ inputs.push && format('{0}/padm-{1}', inputs.registry, matrix.image.name) || format('{0}/padm-{1}:{2}', inputs.registry, matrix.image.name, inputs.version) }}
             ${{ matrix.image.name }}.args.PADM_VERSION=${{ inputs.version }}
-            ${{ matrix.image.name }}.output=${{ inputs.push && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=docker' }}
+            ${{ matrix.image.name }}.output=${{ inputs.push && 'type=image,push-by-digest=true,name-canonical=true,push=true,compression=gzip,compression-level=9,force-compression=true' || 'type=docker,compression=gzip,compression-level=9,force-compression=true' }}
             ${{ matrix.image.name }}.cache-from=type=gha,scope=padm-${{ matrix.image.name }}-${{ matrix.platform.name }}
             ${{ matrix.image.name }}.cache-to=type=gha,mode=min,scope=padm-${{ matrix.image.name }}-${{ matrix.platform.name }}
 

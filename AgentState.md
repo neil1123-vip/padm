@@ -15,6 +15,8 @@
 
 ## 最近完成
 
+- 11-17 distroless 合计减 20.7%，保留完整 Geo；审计修复宿主 stream 配置，
+  五镜像补验通过；体积及未验边界见 `documents/docker-distroless-baseline.md`。
 - 11-17 6A.64 固定 5c16680c 的 KVM 双机单 Peer，enable、真实封禁/DROP/解封、
   启用态及停用后三业务/账目子项通过；整轮 rc 1，完整恢复未证。
   仅 deployment.bundle_version 切到已装候选 ref；正式生成器重建前后字节命中。

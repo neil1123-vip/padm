@@ -3626,7 +3626,6 @@ dockerGenerateRealityStreamMain() {
     mkdir -p -- "$(dirname -- "${target}")" || return 1
     # 专用宿主入口不加载 HTTP 配置，不占宿主 8080 或扩大其它监听。
     cat >"${target}" <<'EOF'
-load_module /usr/lib/nginx/modules/ngx_stream_module.so;
 user padm padm;
 worker_processes auto;
 error_log /dev/stderr notice;

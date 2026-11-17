@@ -257,7 +257,7 @@ jobs:
               : 'false';
           result-encoding: string
 
-      - name: Preflight pinned APK dependencies
+      - name: Preflight pinned distroless dependencies
         if: steps.scope.outputs.changed == 'true' && steps.existing.outputs.result != 'true'
         shell: bash
         run: bash docker/release.sh preflight

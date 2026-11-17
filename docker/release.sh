@@ -6,26 +6,7 @@ LOCK_FILE=${PROJECT_ROOT}/versions.lock
 VERSION_FILE=${PROJECT_ROOT}/shell/core/version.sh
 MANIFEST_SCHEMA=${PROJECT_ROOT}/docker/contracts/release-manifest.schema.json
 IMAGE_NAMES=(xray sing-box nginx ops net)
-APK_PACKAGES=(ca-certificates gcompat libgcc unzip nginx nginx-mod-stream python3 coreutils curl openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban)
-declare -A APK_LOCK_KEYS=(
-    [ca-certificates]=PADM_LOCK_CA_CERTIFICATES_VERSION
-    [gcompat]=PADM_LOCK_GCOMPAT_VERSION
-    [libgcc]=PADM_LOCK_LIBGCC_VERSION
-    [unzip]=PADM_LOCK_UNZIP_VERSION
-    [nginx]=PADM_LOCK_NGINX_PACKAGE_VERSION
-    [nginx-mod-stream]=PADM_LOCK_NGINX_PACKAGE_VERSION
-    [python3]=PADM_LOCK_PYTHON3_VERSION
-    [coreutils]=PADM_LOCK_COREUTILS_VERSION
-    [curl]=PADM_LOCK_CURL_VERSION
-    [openssl]=PADM_LOCK_OPENSSL_VERSION
-    [socat]=PADM_LOCK_SOCAT_VERSION
-    [bash]=PADM_LOCK_BASH_VERSION
-    [iproute2]=PADM_LOCK_IPROUTE2_VERSION
-    [iptables]=PADM_LOCK_IPTABLES_VERSION
-    [nftables]=PADM_LOCK_NFTABLES_VERSION
-    [wireguard-tools]=PADM_LOCK_WIREGUARD_TOOLS_VERSION
-    [fail2ban]=PADM_LOCK_FAIL2BAN_VERSION
-)
+BASE_LOCK_KEYS=(DEBIAN_BASE DISTROLESS_STATIC_BASE PYTHON_BASE NGINX_BASE)
 
 die() {
     printf 'padm-release: %s\n' "$*" >&2
@@ -93,17 +74,16 @@ validate_lock() {
     load_lock
     for variable in \
         PADM_LOCK_SCHEMA PADM_LOCK_PLATFORM_AMD64 PADM_LOCK_PLATFORM_ARM64 \
-        PADM_LOCK_VERSION PADM_LOCK_SOURCE_URL PADM_LOCK_ALPINE_VERSION PADM_LOCK_ALPINE_BASE \
-        PADM_LOCK_CA_CERTIFICATES_VERSION PADM_LOCK_GCOMPAT_VERSION PADM_LOCK_LIBGCC_VERSION PADM_LOCK_XRAY_VERSION PADM_LOCK_XRAY_AMD64_ASSET \
+        PADM_LOCK_VERSION PADM_LOCK_SOURCE_URL PADM_LOCK_DEBIAN_BASE PADM_LOCK_DEBIAN_SNAPSHOT \
+        PADM_LOCK_DISTROLESS_STATIC_BASE PADM_LOCK_PYTHON_BASE PADM_LOCK_NGINX_BASE \
+        PADM_LOCK_XRAY_VERSION PADM_LOCK_XRAY_AMD64_ASSET \
         PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_ASSET PADM_LOCK_XRAY_ARM64_SHA256 \
-        PADM_LOCK_UNZIP_VERSION PADM_LOCK_SING_BOX_VERSION PADM_LOCK_SING_BOX_AMD64_ASSET \
+        PADM_LOCK_SING_BOX_VERSION PADM_LOCK_SING_BOX_AMD64_ASSET \
         PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_ASSET PADM_LOCK_SING_BOX_ARM64_SHA256 \
         PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256 PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256 \
-        PADM_LOCK_NGINX_VERSION PADM_LOCK_NGINX_PACKAGE_VERSION PADM_LOCK_ACME_SH_VERSION \
+        PADM_LOCK_NGINX_VERSION PADM_LOCK_ACME_SH_VERSION \
         PADM_LOCK_ACME_SH_URL PADM_LOCK_ACME_SH_SHA256 PADM_LOCK_PYTHON3_VERSION \
-        PADM_LOCK_COREUTILS_VERSION PADM_LOCK_CURL_VERSION PADM_LOCK_OPENSSL_VERSION PADM_LOCK_SOCAT_VERSION PADM_LOCK_BASH_VERSION \
-        PADM_LOCK_IPROUTE2_VERSION PADM_LOCK_IPTABLES_VERSION PADM_LOCK_NFTABLES_VERSION \
-        PADM_LOCK_WIREGUARD_TOOLS_VERSION PADM_LOCK_FAIL2BAN_VERSION PADM_LOCK_PATCHES; do
+        PADM_LOCK_PATCHES; do
         [[ -n "${!variable:-}" ]] || die "missing lock variable: ${variable}"
     done
     [[ "${PADM_LOCK_SCHEMA}" == 1 ]] || die 'unsupported lock schema'
@@ -116,10 +96,15 @@ validate_lock() {
         is_semver "${expected}" || die 'requested version is not semver'
         [[ "${expected}" == "${scriptVersion}" ]] || die 'requested version differs from source'
     fi
-    [[ "${PADM_LOCK_ALPINE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid Alpine version'
-    [[ "${PADM_LOCK_ALPINE_BASE}" == "alpine:${PADM_LOCK_ALPINE_VERSION}@${PADM_LOCK_ALPINE_BASE#*@}" &&
-        "${PADM_LOCK_ALPINE_BASE}" =~ ^alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] ||
-        die 'Alpine base is not pinned by digest'
+    [[ "${PADM_LOCK_DEBIAN_SNAPSHOT}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || die 'invalid Debian snapshot'
+    [[ "${PADM_LOCK_DEBIAN_BASE}" =~ ^debian:trixie-slim@sha256:[0-9a-f]{64}$ ]] ||
+        die 'Debian base is not pinned by digest'
+    [[ "${PADM_LOCK_DISTROLESS_STATIC_BASE}" =~ ^gcr\.io/distroless/static-debian13@sha256:[0-9a-f]{64}$ ]] ||
+        die 'distroless base is not pinned by digest'
+    [[ "${PADM_LOCK_PYTHON3_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ &&
+        "${PADM_LOCK_PYTHON_BASE}" == "python:${PADM_LOCK_PYTHON3_VERSION}-slim-trixie@"* &&
+        "${PADM_LOCK_PYTHON_BASE#*@}" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        die 'Python base differs from version or is not pinned by digest'
     [[ "${PADM_LOCK_XRAY_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid Xray version'
     [[ "${PADM_LOCK_XRAY_AMD64_ASSET}" == Xray-linux-64.zip &&
         "${PADM_LOCK_XRAY_ARM64_ASSET}" == Xray-linux-arm64-v8a.zip ]] || die 'invalid Xray assets'
@@ -130,21 +115,13 @@ validate_lock() {
         "${PADM_LOCK_SING_BOX_ARM64_ASSET}" == "sing-box-${singBoxVersion}-linux-arm64.tar.gz" ]] ||
         die 'invalid sing-box assets'
     [[ "${PADM_LOCK_NGINX_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid nginx version'
+    [[ "${PADM_LOCK_NGINX_BASE}" == "nginx:${PADM_LOCK_NGINX_VERSION}-trixie@"* &&
+        "${PADM_LOCK_NGINX_BASE#*@}" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        die 'nginx base differs from version or is not pinned by digest'
     [[ "${PADM_LOCK_ACME_SH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid acme.sh version'
     [[ "${PADM_LOCK_ACME_SH_URL}" == "https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/${PADM_LOCK_ACME_SH_VERSION}" ||
         "${PADM_LOCK_ACME_SH_URL}" == "https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/v${PADM_LOCK_ACME_SH_VERSION}" ]] ||
         die 'invalid acme.sh URL'
-    for variable in \
-        PADM_LOCK_CA_CERTIFICATES_VERSION PADM_LOCK_GCOMPAT_VERSION PADM_LOCK_LIBGCC_VERSION \
-        PADM_LOCK_UNZIP_VERSION PADM_LOCK_NGINX_PACKAGE_VERSION PADM_LOCK_PYTHON3_VERSION \
-        PADM_LOCK_COREUTILS_VERSION PADM_LOCK_CURL_VERSION PADM_LOCK_OPENSSL_VERSION PADM_LOCK_SOCAT_VERSION PADM_LOCK_BASH_VERSION \
-        PADM_LOCK_IPROUTE2_VERSION PADM_LOCK_IPTABLES_VERSION PADM_LOCK_NFTABLES_VERSION \
-        PADM_LOCK_WIREGUARD_TOOLS_VERSION PADM_LOCK_FAIL2BAN_VERSION; do
-        [[ "${!variable}" =~ ^[A-Za-z0-9][A-Za-z0-9.+:~_-]*$ ]] || die "invalid APK version: ${variable}"
-    done
-    [[ "${PADM_LOCK_NGINX_PACKAGE_VERSION}" == "${PADM_LOCK_NGINX_VERSION}" ||
-        "${PADM_LOCK_NGINX_PACKAGE_VERSION}" == "${PADM_LOCK_NGINX_VERSION}-r"* ]] ||
-        die 'nginx package version differs from nginx version'
     for variable in \
         PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_SHA256 \
         PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_SHA256 \
@@ -168,22 +145,19 @@ image_lock_inputs() {
         case "${key}" in
         PADM_LOCK_VERSION|PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256|PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256)
             continue ;;
-        PADM_LOCK_ALPINE_VERSION|PADM_LOCK_ALPINE_BASE)
+        PADM_LOCK_DEBIAN_BASE|PADM_LOCK_DEBIAN_SNAPSHOT|PADM_LOCK_DISTROLESS_STATIC_BASE)
             owner=all ;;
         PADM_LOCK_XRAY_VERSION|PADM_LOCK_XRAY_AMD64_ASSET|PADM_LOCK_XRAY_AMD64_SHA256|\
-        PADM_LOCK_XRAY_ARM64_ASSET|PADM_LOCK_XRAY_ARM64_SHA256|PADM_LOCK_UNZIP_VERSION)
+        PADM_LOCK_XRAY_ARM64_ASSET|PADM_LOCK_XRAY_ARM64_SHA256)
             owner=xray ;;
         PADM_LOCK_SING_BOX_VERSION|PADM_LOCK_SING_BOX_AMD64_ASSET|PADM_LOCK_SING_BOX_AMD64_SHA256|\
-        PADM_LOCK_SING_BOX_ARM64_ASSET|PADM_LOCK_SING_BOX_ARM64_SHA256|PADM_LOCK_GCOMPAT_VERSION|PADM_LOCK_LIBGCC_VERSION)
+        PADM_LOCK_SING_BOX_ARM64_ASSET|PADM_LOCK_SING_BOX_ARM64_SHA256)
             owner=sing-box ;;
-        PADM_LOCK_NGINX_VERSION|PADM_LOCK_NGINX_PACKAGE_VERSION)
+        PADM_LOCK_NGINX_VERSION|PADM_LOCK_NGINX_BASE)
             owner=nginx ;;
         PADM_LOCK_ACME_SH_VERSION|PADM_LOCK_ACME_SH_URL|PADM_LOCK_ACME_SH_SHA256|\
-        PADM_LOCK_PYTHON3_VERSION|PADM_LOCK_COREUTILS_VERSION|PADM_LOCK_CURL_VERSION|PADM_LOCK_OPENSSL_VERSION|PADM_LOCK_SOCAT_VERSION)
+        PADM_LOCK_PYTHON3_VERSION|PADM_LOCK_PYTHON_BASE)
             owner=ops ;;
-        PADM_LOCK_BASH_VERSION|PADM_LOCK_IPROUTE2_VERSION|PADM_LOCK_IPTABLES_VERSION|\
-        PADM_LOCK_NFTABLES_VERSION|PADM_LOCK_WIREGUARD_TOOLS_VERSION|PADM_LOCK_FAIL2BAN_VERSION)
-            owner=net ;;
         # 共同输入及尚未归类的新键按影响所有镜像处理。
         *) owner=all ;;
         esac
@@ -199,7 +173,7 @@ image_inputs_unchanged() {
     head=$(git -C "${PROJECT_ROOT}" rev-parse --verify --end-of-options "${head}^{commit}" 2>/dev/null) || return 1
     git -C "${PROJECT_ROOT}" merge-base --is-ancestor "${base}" "${head}" || return 1
     git -C "${PROJECT_ROOT}" diff --quiet "${base}" "${head}" -- \
-        "docker/images/${image}" docker-bake.hcl docker/release.sh \
+        "docker/images/${image}" docker/runtime docker-bake.hcl docker/release.sh \
         .github/workflows/build-images.yml || return 1
     baseLock=$(git -C "${PROJECT_ROOT}" show "${base}:versions.lock") || return 1
     headLock=$(git -C "${PROJECT_ROOT}" show "${head}:versions.lock") || return 1
@@ -241,127 +215,120 @@ download_sha256() {
     sha256sum "${output}" | awk '{print $1}'
 }
 
-alpine_tag_metadata() {
-    local minor=$1 response tag
-    response=$(curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
-        "https://hub.docker.com/v2/repositories/library/alpine/tags?page_size=100&name=${minor}&ordering=last_updated") ||
-        die 'failed to query Alpine Docker tags'
-    tag=$(jq -er --arg prefix "${minor}." '
-        .results[] | .name | select(test("^" + $prefix + "[0-9]+$"))
-    ' <<<"${response}" | sort -V | tail -n 1) || die "no stable Alpine patch release for ${minor}"
-    jq -e --arg tag "${tag}" '
-        .results[] | select(.name == $tag) |
-        (.digest | select(test("^sha256:[0-9a-f]{64}$"))) and
-        ([.images[] | select(.os == "linux" and .architecture == "amd64")] | length > 0) and
-        ([.images[] | select(.os == "linux" and .architecture == "arm64")] | length > 0)
-    ' <<<"${response}" >/dev/null || die "Alpine tag ${tag} has no verified amd64/arm64 image"
-    printf '%s\t%s\n' "${tag}" "$(jq -er --arg tag "${tag}" '.results[] | select(.name == $tag) | .digest' <<<"${response}")"
+image_index() {
+    local reference=$1 output=$2 repository selector token url actual
+    repository=${reference%@*}
+    if [[ "${reference}" == *@* ]]; then
+        selector=${reference#*@}
+    else
+        selector=${repository##*:}
+    fi
+    if [[ "${repository}" == gcr.io/distroless/* ]]; then
+        repository=${repository#gcr.io/}
+        [[ "${reference}" == *@* ]] || repository=${repository%:*}
+        url="https://gcr.io/v2/${repository}/manifests/${selector}"
+        token=
+    else
+        repository=${repository%%:*}
+        token=$(curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/${repository}:pull" |
+            jq -er '.token | select(type == "string" and length > 0)') ||
+            die "failed to authenticate official ${repository} image query"
+        url="https://registry-1.docker.io/v2/library/${repository}/manifests/${selector}"
+    fi
+    local -a headers=(-H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json')
+    [[ -z "${token}" ]] || headers+=(-H "Authorization: Bearer ${token}")
+    curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 120 \
+        --max-filesize 4194304 "${headers[@]}" --output "${output}" "${url}" ||
+        die "failed to query base image: ${reference}"
+    jq -e '
+        (.schemaVersion == 2) and
+        (.mediaType == "application/vnd.oci.image.index.v1+json" or
+         .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json")
+    ' "${output}" >/dev/null || die "invalid base image index: ${reference}"
+    jq -e '[.manifests[] | select(.platform.os == "linux")] as $platforms |
+        all(["amd64", "arm64"][]; . as $arch |
+          [$platforms[] | select(.platform.architecture == $arch) |
+            .digest | select(test("^sha256:[0-9a-f]{64}$"))] | length == 1)' \
+        "${output}" >/dev/null || die "base image lacks unique amd64/arm64 manifests: ${reference}"
+    actual="sha256:$(sha256sum "${output}" | awk '{print $1}')"
+    [[ "${reference}" != *@* || "${actual}" == "${selector}" ]] ||
+        die "base image index digest mismatch: ${reference}"
+    printf '%s\n' "${actual}"
 }
 
-apk_index_package_versions() {
-    local index=$1 package=${2:-}
-    tar -xOzf "${index}" APKINDEX | awk -v package="${package}" '
-        function emit() {
-            if (!record) return
-            if (name == "" || version == "") exit 1
-            if (package == "") print name "\t" version
-            else if (name == package) print version
-            entries++
-            name = version = ""
-            record = 0
-        }
-        NF { record = 1 }
-        /^P:/ { name = substr($0, 3); sub(/^[[:space:]]+/, "", name) }
-        /^V:/ { version = substr($0, 3); sub(/^[[:space:]]+/, "", version) }
-        /^[[:space:]]*$/ { emit() }
-        END { emit(); if (!entries) exit 1 }
-    '
+latest_image_reference() {
+    local reference=$1 output=$2 repository tag response prefix suffix digest
+    repository=${reference%@*}
+    if [[ "${repository}" == gcr.io/distroless/* ]]; then
+        digest=$(image_index "${repository}:latest" "${output}") || return 1
+        printf '%s@%s\n' "${repository}" "${digest}"
+        return
+    fi
+    tag=${repository#*:}
+    repository=${repository%%:*}
+    if [[ "${repository}" == python || "${repository}" == nginx ]]; then
+        prefix=${tag%%-*}
+        prefix=${prefix%.*}
+        suffix=${tag#*-}
+        response=$(curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
+            "https://hub.docker.com/v2/repositories/library/${repository}/tags?page_size=100&name=${prefix}.") ||
+            die "failed to query official ${repository} patch tags"
+        tag=$(jq -er --arg prefix "${prefix}." --arg suffix "-${suffix}" '
+            .results[].name | select(startswith($prefix) and endswith($suffix)) |
+            select(ltrimstr($prefix) | rtrimstr($suffix) | test("^[0-9]+$"))
+        ' <<<"${response}" | sort -V | tail -n 1) || die "no stable ${repository} patch tag"
+    fi
+    digest=$(image_index "${repository}:${tag}" "${output}") || return 1
+    printf '%s:%s@%s\n' "${repository}" "${tag}" "${digest}"
 }
 
-download_apk_indexes() {
-    local minor=$1 tmpRoot=$2 arch repo index
-    for arch in x86_64 aarch64; do
-        for repo in main community; do
-            index="${tmpRoot}/apkindex-${repo}-${arch}.tar.gz"
-            curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 120 \
-                --max-filesize 16777216 --output "${index}" \
-                "https://dl-cdn.alpinelinux.org/alpine/v${minor}/${repo}/${arch}/APKINDEX.tar.gz" ||
-                die "failed to download Alpine ${minor} ${repo}/${arch} APK index; retry or run Refresh Upstream Versions"
-            [[ -s "${index}" ]] || die "empty Alpine ${minor} ${repo}/${arch} APK index; retry or run Refresh Upstream Versions"
-        done
+verify_debian_snapshot() {
+    local snapshot=$1 tmpRoot=$2 archive suite output
+    for suite in trixie trixie-updates trixie-security; do
+        archive=debian
+        [[ "${suite}" != trixie-security ]] || archive=debian-security
+        output="${tmpRoot}/${suite}.InRelease"
+        curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 120 \
+            --max-filesize 4194304 --output "${output}" \
+            "https://snapshot.debian.org/archive/${archive}/${snapshot}/dists/${suite}/InRelease" ||
+            die "Debian snapshot ${snapshot} ${suite} is unavailable"
+        grep -Fxq -- '-----BEGIN PGP SIGNED MESSAGE-----' "${output}" &&
+            grep -Fxq -- '-----BEGIN PGP SIGNATURE-----' "${output}" &&
+            grep -Fxq -- "Codename: ${suite}" "${output}" &&
+            grep -Eq '^Architectures:.*(^|[[:space:]])amd64([[:space:]]|$)' "${output}" &&
+            grep -Eq '^Architectures:.*(^|[[:space:]])arm64([[:space:]]|$)' "${output}" ||
+            die "invalid Debian snapshot metadata: ${snapshot} ${suite}"
     done
 }
 
 preflight() (
-    local tool tmpRoot minor arch repo package key expected candidates versions
+    local tool tmpRoot key variable
     validate_lock
-    for tool in curl tar awk grep; do
+    for tool in curl jq sha256sum awk grep; do
         command -v "${tool}" >/dev/null 2>&1 || die "missing preflight tool: ${tool}"
     done
     tmpRoot=$(mktemp -d "${PROJECT_ROOT}/.tmp-release-preflight.XXXXXX")
     trap 'rm -rf -- "${tmpRoot}"' EXIT
-    minor=${PADM_LOCK_ALPINE_VERSION%.*}
-    download_apk_indexes "${minor}" "${tmpRoot}"
-    for arch in x86_64 aarch64; do
-        candidates=
-        # 每个索引只解压、校验一次，保留全部可用版本。
-        for repo in main community; do
-            versions=$(apk_index_package_versions "${tmpRoot}/apkindex-${repo}-${arch}.tar.gz") ||
-                die "invalid Alpine ${minor} ${repo}/${arch} APK index; retry or run Refresh Upstream Versions"
-            candidates+="${versions}"$'\n'
-        done
-        for package in "${APK_PACKAGES[@]}"; do
-            key=${APK_LOCK_KEYS[${package}]}
-            expected=${!key}
-            grep -Fxq -- "${package}"$'\t'"${expected}" <<<"${candidates}" ||
-                die "Alpine ${minor} ${arch} locked APK ${package}=${expected} is unavailable; run Refresh Upstream Versions and merge its versions.lock update before publishing"
-        done
+    for key in "${BASE_LOCK_KEYS[@]}"; do
+        variable="PADM_LOCK_${key}"
+        image_index "${!variable}" "${tmpRoot}/${key}.json" >/dev/null
     done
+    # 正式 apt 安装继续使用基础镜像自带的 Debian archive keyring 验签。
+    verify_debian_snapshot "${PADM_LOCK_DEBIAN_SNAPSHOT}" "${tmpRoot}"
     printf 'release-preflight-ok\n'
 )
 
-refresh_alpine_packages() {
-    local minor=$1 tmpRoot=$2 package arch repo index candidate best candidates
-    shift 2
-    local -a packages=("$@")
-    local -A latest=()
-    download_apk_indexes "${minor}" "${tmpRoot}"
-    for arch in x86_64 aarch64; do
-        for package in "${packages[@]}"; do
-            best=
-            for repo in main community; do
-                index="${tmpRoot}/apkindex-${repo}-${arch}.tar.gz"
-                candidates=$(apk_index_package_versions "${index}" "${package}") ||
-                    die "failed to parse Alpine ${minor} ${repo}/${arch} APK index"
-                while IFS= read -r candidate; do
-                    [[ -n "${candidate}" ]] || continue
-                    if [[ -z "${best}" ]] || is_newer_semver "${best}" "${candidate}"; then
-                        best=${candidate}
-                    fi
-                done <<<"${candidates}"
-            done
-            [[ -n "${best}" ]] || die "Alpine ${minor} has no ${package} package for ${arch}"
-            latest["${arch}:${package}"]=${best}
-        done
-    done
-    for package in "${packages[@]}"; do
-        [[ "${latest[x86_64:${package}]}" == "${latest[aarch64:${package}]}" ]] ||
-            die "Alpine ${package} differs by architecture: x86_64=${latest[x86_64:${package}]} aarch64=${latest[aarch64:${package}]}"
-        printf '%s\t%s\n' "${package}" "${latest[x86_64:${package}]}"
-    done
-}
-
 refresh_upstreams() {
     local tool xrayTag singBoxTag singBoxVersion singBoxUpstreamTag singBoxUpstreamVersion acmeTag acmeVersion tmpRoot changed=false
-    local alpineMinor alpineMetadata alpineTag alpineDigest alpineVersion alpineBase apkUpdates package packageVersion
     local xrayVersion xrayAmd64Asset xrayAmd64Sha256 xrayArm64Asset xrayArm64Sha256
     local singBoxAmd64Asset singBoxAmd64Sha256 singBoxArm64Asset singBoxArm64Sha256 acmeUrl acmeSha256
     local singBoxAmd64UpstreamSha256 singBoxArm64UpstreamSha256 statsRelease upstreamRelease
-    local nginxVersion nginxPackageVersion lockUpdates
-    local arch asset expectedDigest actualDigest current apkLockKey
-    local updateXray=false updateSingBox=false updateAcme=false updateAlpine=false updateApk=false
-    local -A apkVersions=()
-    for tool in gh jq curl sha256sum sort tail awk tar; do
+    local nginxVersion pythonVersion lockUpdates key variable reference snapshot
+    local arch asset expectedDigest actualDigest
+    local updateXray=false updateSingBox=false updateAcme=false
+    local -A bases=()
+    for tool in gh jq curl sha256sum sort tail awk date grep; do
         command -v "${tool}" >/dev/null 2>&1 || die "missing upstream refresh tool: ${tool}"
     done
     validate_lock
@@ -369,10 +336,6 @@ refresh_upstreams() {
     xrayTag=$(latest_release_tag XTLS/Xray-core)
     singBoxTag=$(latest_sing_box_stats_tag)
     acmeTag=$(latest_release_tag acmesh-official/acme.sh)
-    alpineMinor=${PADM_LOCK_ALPINE_VERSION%.*}
-    alpineMetadata=$(alpine_tag_metadata "${alpineMinor}")
-    alpineTag=${alpineMetadata%%$'\t'*}
-    alpineDigest=${alpineMetadata#*$'\t'}
     [[ "${xrayTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid Xray release tag: ${xrayTag}"
     [[ "${singBoxTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-padm\.[1-9][0-9]*)?$ ]] ||
         die "invalid sing-box release tag: ${singBoxTag}"
@@ -381,13 +344,6 @@ refresh_upstreams() {
     singBoxUpstreamTag=${singBoxTag%%-padm.*}
     singBoxUpstreamVersion=${singBoxUpstreamTag#v}
     acmeVersion=${acmeTag#v}
-    if [[ "${alpineTag}" == "${PADM_LOCK_ALPINE_VERSION}" ]]; then
-        [[ "${alpineDigest}" == "${PADM_LOCK_ALPINE_BASE#*@}" ]] || updateAlpine=true
-    elif is_newer_semver "${PADM_LOCK_ALPINE_VERSION}" "${alpineTag}"; then
-        updateAlpine=true
-    else
-        die "Alpine latest patch ${alpineTag} is older than lock ${PADM_LOCK_ALPINE_VERSION}"
-    fi
 
     if [[ "${xrayTag#v}" == "${PADM_LOCK_XRAY_VERSION#v}" ]]; then
         :
@@ -412,41 +368,35 @@ refresh_upstreams() {
     fi
     tmpRoot=$(mktemp -d "${TMPDIR:-/tmp}/padm-upstream-refresh.XXXXXX")
     trap 'rm -rf -- "${tmpRoot}"' RETURN
-    apkUpdates=$(refresh_alpine_packages "${alpineMinor}" "${tmpRoot}" "${APK_PACKAGES[@]}")
-    while IFS=$'\t' read -r package packageVersion; do
-        apkLockKey=${APK_LOCK_KEYS[${package}]:-}
-        [[ -n "${apkLockKey}" ]] || die "unexpected Alpine package: ${package}"
-        current=${!apkLockKey}
-        apkVersions["${package}"]=${packageVersion}
-        if [[ "${packageVersion}" == "${current}" ]]; then
-            :
-        elif is_newer_semver "${current}" "${packageVersion}"; then
-            updateApk=true
-        else
-            die "Alpine ${package} latest version ${packageVersion} is older than lock ${current}"
+    for key in "${BASE_LOCK_KEYS[@]}"; do
+        variable="PADM_LOCK_${key}"
+        reference=$(latest_image_reference "${!variable}" "${tmpRoot}/${key}.json") ||
+            die "failed to refresh ${variable}"
+        bases["${key}"]=${reference}
+        if [[ "${reference}" != "${!variable}" ]]; then
+            changed=true
+            printf '%s: refreshed official image\n' "${key}"
         fi
-    done <<<"${apkUpdates}"
-    nginxPackageVersion=${apkVersions[nginx]}
-    # 动态模块复用 Nginx 包版本锁，不能安装与主程序 ABI 不一致的版本。
-    [[ "${apkVersions[nginx-mod-stream]}" == "${nginxPackageVersion}" ]] ||
-        die 'Alpine nginx-mod-stream version does not match nginx'
-    nginxVersion=${nginxPackageVersion%%-r*}
-    is_semver "${nginxVersion}" || die "invalid Alpine nginx version: ${nginxPackageVersion}"
-    if [[ "${updateAlpine}" == true ]]; then
+    done
+    nginxVersion=${bases[NGINX_BASE]#nginx:}
+    nginxVersion=${nginxVersion%%-*}
+    pythonVersion=${bases[PYTHON_BASE]#python:}
+    pythonVersion=${pythonVersion%%-*}
+    [[ "${nginxVersion}" == "${PADM_LOCK_NGINX_VERSION}" ]] ||
+        is_newer_semver "${PADM_LOCK_NGINX_VERSION}" "${nginxVersion}" ||
+        die 'official nginx patch tag is older than lock'
+    [[ "${pythonVersion}" == "${PADM_LOCK_PYTHON3_VERSION}" ]] ||
+        is_newer_semver "${PADM_LOCK_PYTHON3_VERSION}" "${pythonVersion}" ||
+        die 'official Python patch tag is older than lock'
+    snapshot=$(date -u -d yesterday +%Y%m%dT000000Z)
+    [[ "${snapshot}" > "${PADM_LOCK_DEBIAN_SNAPSHOT}" ]] || snapshot=${PADM_LOCK_DEBIAN_SNAPSHOT}
+    verify_debian_snapshot "${snapshot}" "${tmpRoot}"
+    if [[ "${snapshot}" != "${PADM_LOCK_DEBIAN_SNAPSHOT}" ]]; then
         changed=true
-        alpineVersion=${alpineTag}
-        alpineBase="alpine:${alpineTag}@${alpineDigest}"
-        printf 'Alpine: %s -> %s\n' "${PADM_LOCK_ALPINE_VERSION}" "${alpineVersion}"
-    else
-        alpineVersion=${PADM_LOCK_ALPINE_VERSION}
-        alpineBase=${PADM_LOCK_ALPINE_BASE}
-    fi
-    if [[ "${updateApk}" == true ]]; then
-        changed=true
-        printf 'Alpine APK: refreshed locked package versions\n'
+        printf 'Debian snapshot: %s -> %s\n' "${PADM_LOCK_DEBIAN_SNAPSHOT}" "${snapshot}"
     fi
     if [[ "${updateXray}" == false && "${updateSingBox}" == false && "${updateAcme}" == false &&
-        "${updateAlpine}" == false && "${updateApk}" == false ]]; then
+        "${changed}" == false ]]; then
         rm -rf -- "${tmpRoot}"
         trap - RETURN
         printf 'upstream-lock-current\n'
@@ -532,8 +482,7 @@ refresh_upstreams() {
 
     [[ "${changed}" == true ]] || die 'upstream refresh did not produce an update'
     lockUpdates=$(printf '%s\n' \
-        "PADM_LOCK_ALPINE_VERSION=${alpineVersion}" \
-        "PADM_LOCK_ALPINE_BASE=${alpineBase}" \
+        "PADM_LOCK_DEBIAN_SNAPSHOT=${snapshot}" \
         "PADM_LOCK_XRAY_VERSION=${xrayVersion}" \
         "PADM_LOCK_XRAY_AMD64_ASSET=${xrayAmd64Asset}" \
         "PADM_LOCK_XRAY_AMD64_SHA256=${xrayAmd64Sha256}" \
@@ -547,12 +496,12 @@ refresh_upstreams() {
         "PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256=${singBoxAmd64UpstreamSha256}" \
         "PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256=${singBoxArm64UpstreamSha256}" \
         "PADM_LOCK_NGINX_VERSION=${nginxVersion}" \
-        "PADM_LOCK_NGINX_PACKAGE_VERSION=${nginxPackageVersion}" \
+        "PADM_LOCK_PYTHON3_VERSION=${pythonVersion}" \
         "PADM_LOCK_ACME_SH_VERSION=${acmeVersion}" \
         "PADM_LOCK_ACME_SH_URL=${acmeUrl}" \
         "PADM_LOCK_ACME_SH_SHA256=${acmeSha256}")
-    for package in "${APK_PACKAGES[@]}"; do
-        lockUpdates+=$'\n'"${APK_LOCK_KEYS[${package}]}=${apkVersions[${package}]}"
+    for key in "${BASE_LOCK_KEYS[@]}"; do
+        lockUpdates+=$'\n'"PADM_LOCK_${key}=${bases[${key}]}"
     done
     apply_lock_updates "${LOCK_FILE}" "${tmpRoot}/versions.lock" "${lockUpdates}"
     cp -- "${LOCK_FILE}" "${tmpRoot}/versions.lock.original"
@@ -691,6 +640,7 @@ manifest_generate() {
     done
     tmpRoot=$(mktemp -d "${TMPDIR:-/tmp}/padm-release-manifest.XXXXXX")
     trap 'rm -rf -- "${tmpRoot}"' RETURN
+    # 旧客户端要求 upstream 精确五键；alpine=none 表示已移除，基础镜像摘要保留在版本锁中。
     jq -n \
         --arg version "${version}" \
         --arg commit "${commit}" \
@@ -702,7 +652,6 @@ manifest_generate() {
         --slurpfile nginx "${resultsDir}/nginx.json" \
         --slurpfile ops "${resultsDir}/ops.json" \
         --slurpfile net "${resultsDir}/net.json" \
-        --arg alpine "${PADM_LOCK_ALPINE_VERSION}" \
         --arg xrayVersion "${PADM_LOCK_XRAY_VERSION}" \
         --arg singBoxVersion "${PADM_LOCK_SING_BOX_VERSION}" \
         --arg nginxVersion "${PADM_LOCK_NGINX_VERSION}" \
@@ -718,7 +667,7 @@ manifest_generate() {
             ops: ($ops[0] | {reference, index_digest, platforms}),
             net: ($net[0] | {reference, index_digest, platforms})
           },
-          upstream: {alpine: $alpine, xray: $xrayVersion, sing_box: $singBoxVersion,
+          upstream: {alpine: "none", xray: $xrayVersion, sing_box: $singBoxVersion,
             nginx: $nginxVersion, acme_sh: $acmeVersion},
           formats: {compose: 1, config: 1, data: 1},
           compatibility: {

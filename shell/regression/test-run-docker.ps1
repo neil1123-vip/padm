@@ -1,7 +1,7 @@
 #requires -Version 7.3
 [CmdletBinding()]
 param(
-    [ValidateSet('all', 'artifacts', 'reality-stream', 'reality-mldsa65')]
+    [ValidateSet('all', 'artifacts', 'reality-stream', 'reality-mldsa65', 'distroless')]
     [string]$Scope = 'all'
 )
 
@@ -41,7 +41,7 @@ import subprocess
 from pathlib import Path
 status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
 mask = (1 << 12) | (1 << 21)
-nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-control-log-cron-real", "docker-routing-ipv6-real",
+nested = sys.argv[1] in ("docker-distroless-real", "docker-control-two-deployment-real", "docker-control-log-cron-real", "docker-routing-ipv6-real",
                        "docker-control-fail2ban-real", "docker-port-hopping-tuic-real", "docker-wireguard-cli-real",
                        "docker-wireguard-peers-real", "docker-control-peers-real",
                        "docker-control-rebind-real", "docker-wireguard-control-real", "docker-wireguard-recovery-real",
@@ -179,13 +179,18 @@ $ordinaryCases = if ($Scope -eq 'artifacts') {
     @{ selector = 'docker-control-fail2ban-real'; expected = 0 },
     @{ selector = 'docker-control-fail2ban-real-other'; expected = 0 },
     @{ selector = 'docker-port-hopping-tuic-real'; expected = 0 },
-    @{ selector = 'docker-port-hopping-tuic-real-other'; expected = 0 }
+    @{ selector = 'docker-port-hopping-tuic-real-other'; expected = 0 },
+    @{ selector = 'docker-distroless-real'; expected = 0 },
+    @{ selector = 'docker-distroless-real-other'; expected = 0 }
 ) }
 if ($Scope -eq 'reality-stream') {
     $ordinaryCases = @($ordinaryCases | Where-Object { $_.selector -like 'docker-reality-stream-*' })
 }
 if ($Scope -eq 'reality-mldsa65') {
     $ordinaryCases = @($ordinaryCases | Where-Object { $_.selector -like 'docker-reality-mldsa65-*' })
+}
+if ($Scope -eq 'distroless') {
+    $ordinaryCases = @($ordinaryCases | Where-Object { $_.selector -like 'docker-distroless-*' })
 }
 foreach ($case in $ordinaryCases) {
     & $runner -Selector $case.selector
@@ -223,6 +228,10 @@ if ($Scope -eq 'reality-stream') {
 }
 if ($Scope -eq 'reality-mldsa65') {
     Write-Host 'regression-docker-reality-mldsa65-check-ok'
+    exit 0
+}
+if ($Scope -eq 'distroless') {
+    Write-Host 'regression-docker-distroless-check-ok'
     exit 0
 }
 

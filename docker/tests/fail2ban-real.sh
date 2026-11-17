@@ -20,7 +20,8 @@ source "${PROJECT_ROOT}/docker/lib/services.sh"
 docker() { cat >"${TEST_ROOT}/fail2ban-audit.py"; }
 dockerFail2banRuntimeAudit aaaaaaaaaaaa
 unset -f docker
-mkdir -p "${TEST_ROOT}/config/net/fail2ban" "${TEST_ROOT}/logs/nginx"
+mkdir -p "${TEST_ROOT}/config/net/fail2ban" "${TEST_ROOT}/logs/nginx" "${TEST_ROOT}/collector"
+chmod 0700 "${TEST_ROOT}/collector"
 jq -n '{
   core: {protocols: [
     {id: 21, public_port: 24444, address_families: ["ipv4"]},
@@ -46,9 +47,11 @@ for family in ipv4 dual; do
     [[ "${family}" != ipv4 ]] || config="${MOUNT_ROOT}/ipv4.local"
     MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm -i --network none \
         --cap-add NET_ADMIN --security-opt no-new-privileges:true --read-only \
-        --tmpfs /run:rw --tmpfs /tmp:rw --tmpfs /var/lib/padm/net:rw,exec \
+        --tmpfs /run:rw,mode=0755 --tmpfs /tmp:rw --tmpfs /var/lib/padm/net:rw,exec \
         -e "PADM_TEST_FAMILY=${family}" \
         --mount "type=bind,source=${MOUNT_ROOT},target=/test,readonly" \
+        --mount "type=bind,source=${MOUNT_ROOT}/collector,target=/run/padm/ssh-collector,readonly" \
+        --mount "type=bind,source=${MOUNT_ROOT}/collector,target=/collector-fixture" \
         --mount "type=bind,source=${MOUNT_ROOT}/entrypoint.sh,target=/usr/local/bin/padm-entrypoint,readonly" \
         --mount "type=bind,source=${config},target=/etc/fail2ban/fail2ban.local,readonly" \
         --mount "type=bind,source=${MOUNT_ROOT}/config/net/fail2ban/padm.local,target=/etc/fail2ban/jail.d/padm.local,readonly" \
@@ -146,6 +149,34 @@ ssh_owner_real() {
     cat >/tmp/ssh-owner.sh <<'SH'
 #!/bin/sh
 set -eu
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+import time
+
+root = Path("/collector-fixture")
+root.chmod(0o700)
+os.chown(root, 0, 0)
+with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as handle:
+    boot = handle.read().strip().replace("-", "")
+guard = {
+    "schema": 1,
+    "token": os.environ["PADM_SSH_COLLECTOR_TOKEN"],
+    "unit": os.environ["PADM_SSH_COLLECTOR_UNIT"],
+    "target": os.environ["PADM_SSH_COLLECTOR_TARGET"],
+    "port": int(os.environ["PADM_SSH_COLLECTOR_PORT"]),
+    "boot": boot,
+    "invocation": "1234567890abcdef1234567890abcdef",
+    "monotonic_ns": time.monotonic_ns(),
+}
+stage = root / ".guard.json"
+with stage.open("w", encoding="ascii") as handle:
+    json.dump(guard, handle)
+stage.chmod(0o600)
+os.chown(stage, 0, 0)
+stage.replace(root / "guard.json")
+PY
 . /tmp/ssh-functions.sh
 STATE_ROOT=/var/lib/padm/net/ssh-owner
 fail2ban_ssh_scope
@@ -160,7 +191,8 @@ seed)
     ;;
 preflight) fail2ban_ssh_preflight "$@" ;;
 action) fail2ban_action "$@" ;;
-health) fail2ban_ssh_health ;;
+# 本夹具只测 owner/action，不启动 SSH jail，直接验证相同的 guard 和资源门禁。
+health) fail2ban_state_read "$STATE_ROOT" && fail2ban_resources guard && fail2ban_resources health ;;
 clean) fail2ban_ssh_clean "$@" ;;
 cleanup) fail2ban_cleanup "$@" ;;
 *) exit 1 ;;
@@ -202,6 +234,9 @@ SH
     ssh_token=abcdefabcdefabcdefabcdefabcdefab
     ssh_chain=padm-f2bs-abcdefabcdef
     for ssh_target in 198.51.100.10 2001:db8::10; do
+        export PADM_SSH_COLLECTOR_TOKEN=1234567890abcdef1234567890abcdef
+        export PADM_SSH_COLLECTOR_UNIT=padm-ssh-fixture.service
+        export PADM_SSH_COLLECTOR_TARGET=$ssh_target PADM_SSH_COLLECTOR_PORT=22220
         ssh_table=iptables ssh_other=ip6tables ssh_peer=192.0.2.20 ssh_mask=32
         case "$ssh_target" in *:*)
             ssh_table=ip6tables ssh_other=iptables ssh_peer=2001:db8::20 ssh_mask=128

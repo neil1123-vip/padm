@@ -7,13 +7,16 @@ trap 'rm -rf -- "${test_root}"' EXIT
 fail() { printf 'preflight-test: %s\n' "$*" >&2; exit 1; }
 mkdir -p "${test_root}/project/docker" "${test_root}/project/shell/core" "${test_root}/bin"
 cp "${project_root}/docker/release.sh" "${test_root}/project/docker/release.sh"
-cp "${project_root}/versions.lock" "${test_root}/project/versions.lock"
 cp "${project_root}/shell/core/version.sh" "${test_root}/project/shell/core/version.sh"
+jq -n '{schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json", manifests: [
+    {digest: ("sha256:" + ("a" * 64)), platform: {os: "linux", architecture: "amd64"}},
+    {digest: ("sha256:" + ("b" * 64)), platform: {os: "linux", architecture: "arm64"}}]}' \
+    >"${test_root}/index.json"
+index_digest=$(sha256sum "${test_root}/index.json" | awk '{print $1}')
+sed -E "s/@sha256:[0-9a-f]{64}$/@sha256:${index_digest}/" "${project_root}/versions.lock" \
+    >"${test_root}/project/versions.lock"
 cp "${test_root}/project/versions.lock" "${test_root}/lock.before"
 cp "${test_root}/project/shell/core/version.sh" "${test_root}/version.before"
-real_tar=$(command -v tar)
-    # shellcheck source=/dev/null
-. "${test_root}/project/versions.lock"
 
 cat >"${test_root}/bin/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -25,81 +28,81 @@ while [[ "$#" -gt 0 ]]; do
     *) url=$1; shift ;;
     esac
 done
-[[ -n "${output}" && "${url}" == "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_MINOR}/"* ]]
 printf '%s\n' "${url}" >>"${FIXTURE_ROOT}/calls"
-repo=$(case "${url}" in */main/*) printf main ;; */community/*) printf community ;; *) exit 1 ;; esac)
-arch=$(case "${url}" in */x86_64/*) printf x86_64 ;; */aarch64/*) printf aarch64 ;; *) exit 1 ;; esac)
-if [[ "${SCENARIO}" == network && "${arch}:${repo}" == aarch64:main ]]; then
-    printf 'simulated network failure\n' >&2
-    exit 22
-fi
-cp "${FIXTURE_ROOT}/${repo}-${arch}.tar.gz" "${output}"
+case "${url}" in
+https://auth.docker.io/token\?*)
+    [[ "${SCENARIO}" != auth ]] || { printf '{}\n'; exit; }
+    printf '{"token":"fixture-token"}\n'
+    ;;
+*/manifests/sha256:*)
+    [[ -n "${output}" ]]
+    [[ "${SCENARIO}" != network ]] || { printf 'simulated network failure\n' >&2; exit 22; }
+    cp "${INDEX_FIXTURE}" "${output}"
+    case "${SCENARIO}" in
+    missing-amd64|missing-arm64)
+        arch=${SCENARIO#missing-}
+        jq --arg arch "${arch}" '.manifests |= map(select(.platform.architecture != $arch))' \
+            "${output}" >"${output}.next"
+        mv "${output}.next" "${output}" ;;
+    duplicate-arch)
+        jq '.manifests += [.manifests[0]]' "${output}" >"${output}.next"
+        mv "${output}.next" "${output}" ;;
+    invalid-digest)
+        jq '.manifests[1].digest = "sha256:invalid"' "${output}" >"${output}.next"
+        mv "${output}.next" "${output}" ;;
+    invalid-index) printf '{}\n' >"${output}" ;;
+    digest-mismatch) printf '\n' >>"${output}" ;;
+    esac
+    ;;
+https://snapshot.debian.org/archive/*/InRelease)
+    [[ -n "${output}" ]]
+    suite=${url%/InRelease}
+    suite=${suite##*/}
+    [[ "${SCENARIO}" != snapshot-network ]] || exit 22
+    {
+        printf '%s\n' '-----BEGIN PGP SIGNED MESSAGE-----' 'Hash: SHA256' ''
+        printf 'Codename: %s\nArchitectures: amd64 arm64\n' "${suite}"
+        printf '%s\n' '-----BEGIN PGP SIGNATURE-----' fixture '-----END PGP SIGNATURE-----'
+    } >"${output}"
+    case "${SCENARIO}" in
+    snapshot-suite) sed -i 's/Codename:.*/Codename: bookworm/' "${output}" ;;
+    snapshot-arch) sed -i 's/Architectures:.*/Architectures: amd64/' "${output}" ;;
+    snapshot-unsigned) sed -i '/BEGIN PGP SIGNATURE/d' "${output}" ;;
+    esac
+    ;;
+*) exit 1 ;;
+esac
 EOF
 chmod +x "${test_root}/bin/curl"
-cat >"${test_root}/bin/tar" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ " $* " == *" -xOzf "* ]]; then
-    printf '1\n' >>"${FIXTURE_ROOT}/tar-calls"
-fi
-exec "${REAL_TAR}" "$@"
-EOF
-chmod +x "${test_root}/bin/tar"
 
-for scenario in available missing-amd64 missing-arm64 missing-stream wrong-version corrupt invalid-index network; do
+for scenario in available missing-amd64 missing-arm64 duplicate-arch invalid-digest invalid-index \
+    digest-mismatch network auth snapshot-network snapshot-suite snapshot-arch snapshot-unsigned; do
     fixture_root=${test_root}/${scenario}
     mkdir -p "${fixture_root}"
-    for arch in x86_64 aarch64; do
-        for repo in main community; do
-            mkdir -p "${fixture_root}/${repo}-${arch}"
-            index=${fixture_root}/${repo}-${arch}/APKINDEX
-            : >"${index}"
-            for package in ca-certificates gcompat libgcc unzip nginx nginx-mod-stream python3 coreutils curl openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban; do
-                # community 独有包与可用的旧版本均须接受，不能只检查 main 或最新版本。
-                [[ ( "${package}" == fail2ban && "${repo}" == community ) ||
-                    ( "${package}" != fail2ban && "${repo}" == main ) ]] || continue
-                key=${package^^}
-                key=PADM_LOCK_${key//-/_}_VERSION
-                [[ "${package}" != nginx && "${package}" != nginx-mod-stream ]] || key=PADM_LOCK_NGINX_PACKAGE_VERSION
-                expected=${!key}
-                [[ "${package}:${scenario}:${arch}" != nginx-mod-stream:missing-stream:aarch64 ]] || continue
-                if [[ "${package}" == ca-certificates &&
-                    ( "${scenario}:${arch}" == missing-amd64:x86_64 || "${scenario}:${arch}" == missing-arm64:aarch64 ) ]]; then
-                    continue
-                fi
-                if [[ "${package}:${scenario}:${arch}" == ca-certificates:wrong-version:aarch64 ]]; then
-                    expected=19990101-r0
-                fi
-                printf 'P:%s\nV:%s\n\nP:%s\nV:9999.0-r0\n\n' "${package}" "${expected}" "${package}" >>"${index}"
-            done
-            if [[ "${scenario}:${repo}:${arch}" == invalid-index:community:aarch64 ]]; then
-                printf 'P:broken-without-version\n\n' >>"${index}"
-            fi
-            tar -czf "${fixture_root}/${repo}-${arch}.tar.gz" -C "${fixture_root}/${repo}-${arch}" APKINDEX
-        done
-    done
-    [[ "${scenario}" != corrupt ]] || printf 'invalid tar archive\n' >"${fixture_root}/community-aarch64.tar.gz"
     actual=success
     PATH="${test_root}/bin:${PATH}" FIXTURE_ROOT="${fixture_root}" SCENARIO="${scenario}" \
-        REAL_TAR="${real_tar}" \
-        ALPINE_MINOR="${PADM_LOCK_ALPINE_VERSION%.*}" \
+        INDEX_FIXTURE="${test_root}/index.json" \
         bash "${test_root}/project/docker/release.sh" preflight >"${fixture_root}/output" 2>&1 || actual=failure
     if [[ "${scenario}" == available ]]; then
-        [[ "${actual}" == success ]] || { cat "${fixture_root}/output"; fail 'available locked APKs rejected'; }
+        [[ "${actual}" == success ]] || { cat "${fixture_root}/output"; fail 'valid immutable inputs rejected'; }
         grep -Fxq 'release-preflight-ok' "${fixture_root}/output" || fail 'success not reported'
-        [[ "$(wc -l <"${fixture_root}/calls")" -eq 4 ]] || fail 'both architectures and repositories were not checked'
-        [[ "$(wc -l <"${fixture_root}/tar-calls")" -eq 4 ]] ||
-            fail 'each APK index should be extracted exactly once'
+        [[ "$(grep -c '/manifests/sha256:' "${fixture_root}/calls")" -eq 4 ]] ||
+            fail 'all four base indices were not checked'
+        [[ "$(grep -c '/InRelease$' "${fixture_root}/calls")" -eq 3 ]] ||
+            fail 'all Debian snapshot suites were not checked'
     else
         [[ "${actual}" == failure ]] || fail "${scenario} passed"
-        grep -Fq 'Refresh Upstream Versions' "${fixture_root}/output" || fail "${scenario}: missing recovery hint"
         case "${scenario}" in
-        missing-amd64) grep -Fq "x86_64 locked APK ca-certificates=${PADM_LOCK_CA_CERTIFICATES_VERSION} is unavailable" "${fixture_root}/output" ;;
-        missing-arm64|wrong-version) grep -Fq "aarch64 locked APK ca-certificates=${PADM_LOCK_CA_CERTIFICATES_VERSION} is unavailable" "${fixture_root}/output" ;;
-        missing-stream) grep -Fq "aarch64 locked APK nginx-mod-stream=${PADM_LOCK_NGINX_PACKAGE_VERSION} is unavailable" "${fixture_root}/output" ;;
-        corrupt|invalid-index) grep -Fq 'community/aarch64 APK index' "${fixture_root}/output" ;;
-        network) grep -Fq 'failed to download Alpine' "${fixture_root}/output" && grep -Fq 'simulated network failure' "${fixture_root}/output" ;;
-        esac || { cat "${fixture_root}/output"; fail "${scenario}: wrong failure"; }
+        missing-*|duplicate-arch|invalid-digest) expected='lacks unique amd64/arm64 manifests' ;;
+        invalid-index) expected='invalid base image index' ;;
+        digest-mismatch) expected='base image index digest mismatch' ;;
+        network) expected='failed to query base image' ;;
+        auth) expected='failed to authenticate official' ;;
+        snapshot-network) expected='is unavailable' ;;
+        snapshot-*) expected='invalid Debian snapshot metadata' ;;
+        esac
+        grep -Fq "${expected}" "${fixture_root}/output" ||
+            { cat "${fixture_root}/output"; fail "${scenario}: wrong failure"; }
     fi
     cmp -s "${test_root}/lock.before" "${test_root}/project/versions.lock" || fail "${scenario}: lock changed"
     cmp -s "${test_root}/version.before" "${test_root}/project/shell/core/version.sh" || fail "${scenario}: script version changed"

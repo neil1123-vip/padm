@@ -1164,7 +1164,7 @@ v3 编辑还要求当前控制脚本及同部署版本的可信发布资产支�
 
 需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3（`release-manifest.sigstore.json`，签名内嵌）和 `padm-docker-bundle.tar.gz`，更新时会校验 bundle 签名和摘要。
 
-`main` 的安装入口、运行脚本、Docker 配置、镜像输入或版本锁存在未发布变化时才自动发布。Docker 测试、发布脚本和 CI 文件变化也会触发 `Release` 检查；没有待发布运行变化时只跑 Docker 契约测试，不递增版本、不构建镜像、不发布附件。若前次发布失败，修复测试或 CI 后的推送会继续处理尚未发布的运行变化。仅文档变化不触发。PR 的 `Docker CI` 先运行独立的 actionlint 和全部 Shell 语法门槛，再按改动范围运行 `ci-pr` 或完整 `ci` 原生回归，门槛通过后才构建镜像；`Release` 会在版本递增前执行完整门槛，并只读预检两架构 Alpine 索引中的锁定 APK 版本。版本提交后当前 Release run 会交给新的 run 接管，避免同一版本重复构建。发布任务串行处理最新 `main`，三个附件全部上传并核对摘要后才公开 Release。需要重试或主动发布时运行 `Release` 工作流；PR 和手动镜像验证使用 `Docker CI`。
+`main` 的安装入口、运行脚本、Docker 配置、镜像输入或版本锁存在未发布变化时才自动发布。Docker 测试、发布脚本和 CI 文件变化也会触发 `Release` 检查；没有待发布运行变化时只跑 Docker 契约测试，不递增版本、不构建镜像、不发布附件。若前次发布失败，修复测试或 CI 后的推送会继续处理尚未发布的运行变化。仅文档变化不触发。PR 的 `Docker CI` 先运行独立的 actionlint 和全部 Shell 语法门槛，再按改动范围运行 `ci-pr` 或完整 `ci` 原生回归，门槛通过后才构建镜像；`Release` 会在版本递增前执行完整门槛，并只读预检锁定基础镜像的双架构索引及 Debian 快照元数据，正式构建时由 apt 校验快照签名。版本提交后当前 Release run 会交给新的 run 接管，避免同一版本重复构建。发布任务串行处理最新 `main`，三个附件全部上传并核对摘要后才公开 Release。需要重试或主动发布时运行 `Release` 工作流；PR 和手动镜像验证使用 `Docker CI`。
 
 CI 按每个镜像的目录、共享构建定义及实际锁定依赖判断是否重建；未变化的镜像沿用上一份已验签 manifest 的 `tag@sha256`，其标签可能早于当前脚本版本，并只执行 manifest、平台摘要和签名校验。每个变化镜像的两个架构各构建一次，按精确摘要测试后合并并签名；没有可信基线时完整重建。SBOM、provenance 和镜像签名保存在 OCI 仓库，诊断 JSON 仅作为保留 7 天的 Actions artifact，不再作为 Release 附件重复上传。
 
@@ -1172,7 +1172,7 @@ CI 按每个镜像的目录、共享构建定义及实际锁定依赖判断是�
 
 ## 五个镜像
 
-五个镜像都由仓库中的 Dockerfile 定义，当前统一以锁定的 Alpine 3.24.1 基础镜像构建；基础 digest、上游版本和架构校验值由 `versions.lock` 锁定，再由 CI 构建 `amd64/arm64` 多架构镜像。一个镜像可以被多个 Compose service 复用，但不同长期职责仍是独立容器。
+五个镜像都由仓库中的 Dockerfile 定义，运行层统一使用锁定 digest 的 Debian 13 `distroless/static` 底座；从固定 Debian 快照和官方构建镜像中按需导出 glibc、动态库及工具。基础 digest、快照、上游版本和架构校验值由 `versions.lock` 锁定，再由 CI 构建 `amd64/arm64` 多架构镜像。保留 CA、时区、NSS、许可证和 BusyBox 诊断 shell，不含包管理器。Xray 保留完整 Geo 数据。一个镜像可以被多个 Compose service 复用，但不同长期职责仍是独立容器。体积与本机验收边界见 [distroless 验收记录](docker-distroless-baseline.md)。
 
 | 镜像 | 职责 | 宿主集成 |
 | --- | --- | --- |

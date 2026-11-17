@@ -14,6 +14,9 @@ cleanup() {
         wait "${daemon}" 2>/dev/null || true
     fi
     [[ "${status}" -eq 0 ]] || cat "${TEST_ROOT}/daemon.log" >&2
+    if mountpoint -q "${TEST_ROOT}/run/netns/default"; then
+        umount "${TEST_ROOT}/run/netns/default" || return 1
+    fi
     rm -rf -- "${TEST_ROOT}"
     return "${status}"
 }
@@ -40,6 +43,7 @@ export PADM_TEST_NET_IMAGE
 [[ "$(docker image inspect --format '{{.Id}}' "${PADM_TEST_NET_IMAGE}")" == \
     "$(jq -er '.net.image_id' /node-images.json)" ]]
 case "${PADM_NET_REAL_CASE:-fail2ban}" in
+distroless) python3 "${PROJECT_ROOT}/docker/tests/distroless-real.py" ;;
 fail2ban) bash "${PROJECT_ROOT}/docker/tests/fail2ban-real.sh" ;;
 tproxy) bash "${PROJECT_ROOT}/docker/tests/tproxy-real.sh" ;;
 redirect) bash "${PROJECT_ROOT}/docker/tests/redirect-real.sh" ;;

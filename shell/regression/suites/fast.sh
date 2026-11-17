@@ -685,6 +685,10 @@ runDockerFail2banRealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
 }
 
+runDockerDistrolessRealRegression() {
+    PADM_NET_REAL_CASE=distroless bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
+}
+
 runDockerFail2banSourceRealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/fail2ban-source-real.sh"
 }
@@ -1266,6 +1270,7 @@ registerRegressionFunctionLeaf docker-phase3-entries-management-tls runDockerPha
 registerRegressionFunctionLeaf docker-phase3-entries-management-tls-reinstall runDockerPhase3EntriesManagementTlsReinstallRegression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
+registerRegressionFunctionLeaf docker-distroless-real runDockerDistrolessRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-source-real runDockerFail2banSourceRealRegression
 registerRegressionFunctionLeaf docker-control-fail2ban-real runDockerControlFail2banRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-ownership runDockerFail2banOwnershipRegression

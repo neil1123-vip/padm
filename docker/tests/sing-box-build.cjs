@@ -57,7 +57,7 @@ async function main() {
     const inputs = ['.github/workflows/build-sing-box.yml', 'shell/build-sing-box.sh',
         'shell/core/singbox_build.sh',
         'shell/subscription/traffic.sh', 'shell/core/stats_grpc.sh', 'docker-bake.hcl',
-        'docker/images/sing-box/Dockerfile', 'docker/tests/image-smoke.sh', 'docker/tests/sing-box-build.cjs',
+        'docker/images/sing-box/Dockerfile', 'docker/runtime/export-runtime.py', 'docker/tests/image-smoke.sh', 'docker/tests/sing-box-build.cjs',
         'docker/tests/reality-real.sh', 'docker/tests/reality-key-share-real.sh',
         'docker/tests/reality-key-share-real_test.go', 'docker/tests/reality-hybrid-only-real_test.go',
         'shell/regression/container/Dockerfile', 'shell/regression/install-ci-jq.sh'];
@@ -78,8 +78,8 @@ async function main() {
     for (const [key, changed, verify] of [
         ['XRAY_VERSION', 'false', 'false'], ['SING_BOX_AMD64_SHA256', 'false', 'false'],
         ['SING_BOX_VERSION', 'true', 'false'], ['SING_BOX_ARM64_UPSTREAM_SHA256', 'true', 'true'],
-        ['ALPINE_BASE', 'true', 'true'], ['CA_CERTIFICATES_VERSION', 'true', 'true'],
-        ['GCOMPAT_VERSION', 'true', 'true'], ['LIBGCC_VERSION', 'true', 'true']
+        ['DEBIAN_BASE', 'true', 'true'], ['DEBIAN_SNAPSHOT', 'true', 'true'],
+        ['DISTROLESS_STATIC_BASE', 'true', 'true']
     ]) {
         const lock = fs.readFileSync(path.join(root, 'versions.lock'), 'utf8');
         write('versions.lock', lock.replace(new RegExp(`^PADM_LOCK_${key}=.*$`, 'm'), `PADM_LOCK_${key}=changed`));
@@ -89,6 +89,7 @@ async function main() {
     }
     for (const file of inputs) {
         const trigger = file === 'docker/images/sing-box/Dockerfile' ? 'docker/images/sing-box/**'
+            : file.startsWith('docker/runtime/') ? 'docker/runtime/**'
             : file.startsWith('shell/regression/container/') ? 'shell/regression/container/**' : file;
         assert.ok(workflow.includes(`      - '${trigger}'`), `Missing trigger: ${file}`);
         write(file, '# changed\n');
@@ -184,7 +185,7 @@ async function main() {
     assert.equal(shell('version=v1.14.4-padm.1; [[ "${version%-padm.*}" != *-* ]] && printf stable'), 'stable');
 
     // 执行实际候选步骤，确认包进入覆盖上下文，构建或 smoke 失败均向上传播。
-    const alpine = script('Verify candidate in the Alpine image');
+    const candidate = script('Verify candidate in the distroless image');
     write('versions.lock', fs.readFileSync(path.join(project, 'versions.lock')));
     write('package/sing-box', 'candidate-binary');
     fs.mkdirSync(path.join(root, '.tmp-sing-box-artifacts'));
@@ -192,14 +193,15 @@ async function main() {
     write('docker/tests/image-smoke.sh', '[[ "$1" == padm-sing-box-candidate:amd64 && "$2" == sing-box ]]\nexit "${SMOKE_STATUS:-0}"\n');
     const mock = `docker() {
         [[ "$*" == *'sing-box.platform=linux/amd64'* && "$*" == *'sing-box.contexts.fetch=.tmp-sing-box-image'* && "$*" == *'sing-box.args.SING_BOX_VERSION=v1.14.1'* && "$*" == *'--load'* ]] || return 90
+        [[ "$*" == *'sing-box.output=type=docker,compression=gzip,compression-level=9,force-compression=true'* ]] || return 92
         [[ "$(cat .tmp-sing-box-image/out/sing-box)" == candidate-binary ]] || return 91
         return "${'${BUILD_STATUS:-0}'}"
     }\n`;
     const env = { VERSION: version, ARCH: 'amd64', GITHUB_SHA: 'b'.repeat(40) };
-    shell(mock + alpine, env);
-    shell(mock + alpine, { ...env, BUILD_STATUS: '1' }, false);
-    shell(mock + alpine, { ...env, SMOKE_STATUS: '1' }, false);
-    assert.ok(workflow.indexOf('Verify candidate in the Alpine image') < workflow.indexOf('uses: actions/upload-artifact@'));
+    shell(mock + candidate, env);
+    shell(mock + candidate, { ...env, BUILD_STATUS: '1' }, false);
+    shell(mock + candidate, { ...env, SMOKE_STATUS: '1' }, false);
+    assert.ok(workflow.indexOf('Verify candidate in the distroless image') < workflow.indexOf('uses: actions/upload-artifact@'));
 
     // 执行实际 Reality 编排命令，验证候选身份、失败传播及临时提取容器清理。
     write('docker/tests/reality-real.sh',

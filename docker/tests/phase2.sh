@@ -13,7 +13,7 @@ fail() {
     exit 1
 }
 
-for tool in jq grep find sort; do
+for tool in jq grep find sort python3; do
     command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
 done
 
@@ -31,17 +31,16 @@ set +a
 
 requiredLockVariables=(
     PADM_LOCK_SCHEMA PADM_LOCK_PLATFORM_AMD64 PADM_LOCK_PLATFORM_ARM64
-    PADM_LOCK_VERSION PADM_LOCK_SOURCE_URL PADM_LOCK_ALPINE_VERSION PADM_LOCK_ALPINE_BASE
-    PADM_LOCK_CA_CERTIFICATES_VERSION PADM_LOCK_GCOMPAT_VERSION PADM_LOCK_LIBGCC_VERSION PADM_LOCK_XRAY_VERSION PADM_LOCK_XRAY_AMD64_ASSET
+    PADM_LOCK_VERSION PADM_LOCK_SOURCE_URL PADM_LOCK_DEBIAN_BASE PADM_LOCK_DEBIAN_SNAPSHOT
+    PADM_LOCK_DISTROLESS_STATIC_BASE PADM_LOCK_PYTHON_BASE PADM_LOCK_NGINX_BASE
+    PADM_LOCK_XRAY_VERSION PADM_LOCK_XRAY_AMD64_ASSET
     PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_ASSET PADM_LOCK_XRAY_ARM64_SHA256
-    PADM_LOCK_UNZIP_VERSION PADM_LOCK_SING_BOX_VERSION PADM_LOCK_SING_BOX_AMD64_ASSET
+    PADM_LOCK_SING_BOX_VERSION PADM_LOCK_SING_BOX_AMD64_ASSET
     PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_ASSET PADM_LOCK_SING_BOX_ARM64_SHA256
     PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256 PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256
-    PADM_LOCK_NGINX_VERSION PADM_LOCK_NGINX_PACKAGE_VERSION PADM_LOCK_ACME_SH_VERSION
+    PADM_LOCK_NGINX_VERSION PADM_LOCK_ACME_SH_VERSION
     PADM_LOCK_ACME_SH_URL PADM_LOCK_ACME_SH_SHA256 PADM_LOCK_PYTHON3_VERSION
-    PADM_LOCK_COREUTILS_VERSION PADM_LOCK_CURL_VERSION PADM_LOCK_OPENSSL_VERSION PADM_LOCK_SOCAT_VERSION PADM_LOCK_BASH_VERSION
-    PADM_LOCK_IPROUTE2_VERSION PADM_LOCK_IPTABLES_VERSION PADM_LOCK_NFTABLES_VERSION
-    PADM_LOCK_WIREGUARD_TOOLS_VERSION PADM_LOCK_FAIL2BAN_VERSION PADM_LOCK_PATCHES
+    PADM_LOCK_PATCHES
 )
 for variableName in "${requiredLockVariables[@]}"; do
     [[ -n "${!variableName:-}" ]] || fail "missing lock variable: ${variableName}"
@@ -52,8 +51,8 @@ done
 [[ "${PADM_LOCK_PLATFORM_ARM64}" == linux/arm64 ]] || fail 'arm64 platform drifted'
 scriptVersion=$(sed -n 's/^SCRIPT_VERSION="\([^"]*\)"/\1/p' "${PROJECT_ROOT}/shell/core/version.sh")
 [[ -n "${scriptVersion}" && "${PADM_LOCK_VERSION}" == "${scriptVersion}" ]] || fail 'padm version drifted from versions.lock'
-[[ "${PADM_LOCK_ALPINE_BASE}" =~ ^alpine:[0-9]+[.][0-9]+[.][0-9]+@sha256:[0-9a-f]{64}$ ]] ||
-    fail 'Alpine base is not pinned by tag and digest'
+bash "${PROJECT_ROOT}/docker/release.sh" validate-lock >/dev/null || fail 'base image locks are invalid'
+python3 "${PROJECT_ROOT}/docker/tests/runtime-export.py" || fail 'runtime export contract failed'
 for variableName in \
     PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_SHA256 \
     PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_SHA256 \
@@ -69,7 +68,8 @@ mapfile -t imageNames < <(find "${PROJECT_ROOT}/docker/images" -mindepth 1 -maxd
 for imageName in "${imageNames[@]}"; do
     dockerfile="${PROJECT_ROOT}/docker/images/${imageName}/Dockerfile"
     [[ -f "${dockerfile}" && ! -L "${dockerfile}" ]] || fail "missing Dockerfile: ${imageName}"
-    grep -Fq 'FROM ${ALPINE_BASE}' "${dockerfile}" || fail "${imageName} does not use the locked base"
+    finalFrom=$(awk '/^FROM / {line = $0} END {print line}' "${dockerfile}")
+    [[ "${finalFrom}" == 'FROM ${DISTROLESS_STATIC_BASE}' ]] || fail "${imageName} does not use the locked distroless runtime"
     grep -Fq 'org.opencontainers.image.source=' "${dockerfile}" || fail "${imageName} lacks OCI labels"
     grep -Fq "io.padm.image=\"${imageName}\"" "${dockerfile}" || fail "${imageName} identity label drifted"
     grep -Fq 'io.padm.architecture=' "${dockerfile}" || fail "${imageName} lacks architecture label"
@@ -82,21 +82,20 @@ done
 
 grep -Fxq 'ENTRYPOINT ["/usr/sbin/nginx", "-e", "/dev/stderr"]' \
     "${PROJECT_ROOT}/docker/images/nginx/Dockerfile" || fail 'Nginx 初始错误日志未接入 stderr'
-grep -Fq '"nginx-mod-stream=${NGINX_PACKAGE_VERSION}"' \
-    "${PROJECT_ROOT}/docker/images/nginx/Dockerfile" || fail 'Nginx stream 模块未锁定相同包版本'
-grep -Fxq 'load_module /usr/lib/nginx/modules/ngx_stream_module.so;' \
-    "${PROJECT_ROOT}/docker/images/nginx/nginx.conf" || fail 'Nginx 未加载 stream 模块'
+grep -Fq -- '--with-stream' "${PROJECT_ROOT}/docker/images/nginx/Dockerfile" ||
+    fail 'Nginx 未校验静态编入的 stream 支持'
 grep -Fxq 'include /etc/nginx/stream.d/*.conf;' \
     "${PROJECT_ROOT}/docker/images/nginx/nginx.conf" || fail 'Nginx 缺少独立 stream 配置入口'
-grep -Fq '"curl=${CURL_VERSION}"' "${PROJECT_ROOT}/docker/images/ops/Dockerfile" ||
-    fail 'ops 的 ACME HTTP 客户端未锁定 curl'
-grep -Fq '"coreutils=${COREUTILS_VERSION}"' "${PROJECT_ROOT}/docker/images/ops/Dockerfile" ||
-    fail 'ops 的证书到期日期解析未锁定 GNU coreutils'
+grep -Fq 'DEBIAN_SNAPSHOT' "${PROJECT_ROOT}/docker/images/ops/Dockerfile" ||
+    fail 'ops 的 ACME 和日期工具未固定 Debian 快照'
 
-if grep -ERni 'fail2ban|wireguard|iptables|nftables|python3|acme[.]sh' \
-    "${PROJECT_ROOT}/docker/images/xray" "${PROJECT_ROOT}/docker/images/sing-box" >/dev/null; then
-    fail 'core images contain ops or net tooling'
-fi
+for imageName in xray sing-box; do
+    if awk '/^FROM / {runtime = ""} {runtime = runtime $0 ORS} END {printf "%s", runtime}' \
+        "${PROJECT_ROOT}/docker/images/${imageName}/Dockerfile" |
+        grep -Ei 'fail2ban|wireguard|iptables|nftables|python3|acme[.]sh' >/dev/null; then
+        fail 'core runtime images contain ops or net tooling'
+    fi
+done
 if grep -ERni 'docker[.]sock|privileged|SYS_ADMIN|:latest([^A-Za-z0-9_.-]|$)' \
     "${PROJECT_ROOT}/versions.lock" "${PROJECT_ROOT}/docker-bake.hcl" \
     "${PROJECT_ROOT}/docker/images" "${PROJECT_ROOT}/docker/compose.yaml" >/dev/null; then
@@ -123,26 +122,57 @@ bakeJson="${TEST_ROOT}/bake.json"
 jq -e '
     (.group.default.targets | sort) == ["net", "nginx", "ops", "sing-box", "xray"] and
     all(.target[]; (.platforms | sort) == ["linux/amd64", "linux/arm64"]) and
-    all(.target[]; .args.ALPINE_BASE == $base) and
+    all(.target[]; .args.DEBIAN_BASE == $base and .args.DEBIAN_SNAPSHOT == $snapshot and
+        .contexts.runtime == "docker/runtime") and
+    all(.target[]; .args.DISTROLESS_STATIC_BASE == $static) and
+    all(.target[]; .output == [{
+        type: "image", compression: "gzip", "compression-level": "9", "force-compression": "true"
+    }]) and
     .target["sing-box"].args.SING_BOX_VERSION == $singBoxVersion and
     .target["sing-box"].args.SING_BOX_AMD64_ASSET == $singBoxAmd64Asset and
     .target["sing-box"].args.SING_BOX_ARM64_ASSET == $singBoxArm64Asset and
     .target["sing-box"].args.SING_BOX_AMD64_SHA256 == $singBoxAmd64 and
     .target["sing-box"].args.SING_BOX_ARM64_SHA256 == $singBoxArm64 and
-    .target["sing-box"].args.LIBGCC_VERSION == $libgcc and
-    .target.ops.args.COREUTILS_VERSION == $coreutils and
-    .target.ops.args.CURL_VERSION == $curl and
+    .target.ops.args.PYTHON_BASE == $python and
+    .target.nginx.args.NGINX_BASE == $nginx and
     all(.target[]; (.tags | length) == 1 and (all(.tags[]; (contains(":latest") | not))))
-' --arg base "${PADM_LOCK_ALPINE_BASE}" \
+' --arg base "${PADM_LOCK_DEBIAN_BASE}" \
+    --arg snapshot "${PADM_LOCK_DEBIAN_SNAPSHOT}" \
+    --arg static "${PADM_LOCK_DISTROLESS_STATIC_BASE}" \
     --arg singBoxVersion "${PADM_LOCK_SING_BOX_VERSION}" \
     --arg singBoxAmd64Asset "${PADM_LOCK_SING_BOX_AMD64_ASSET}" \
     --arg singBoxArm64Asset "${PADM_LOCK_SING_BOX_ARM64_ASSET}" \
     --arg singBoxAmd64 "${PADM_LOCK_SING_BOX_AMD64_SHA256}" \
     --arg singBoxArm64 "${PADM_LOCK_SING_BOX_ARM64_SHA256}" \
-    --arg libgcc "${PADM_LOCK_LIBGCC_VERSION}" \
-    --arg coreutils "${PADM_LOCK_COREUTILS_VERSION}" \
-    --arg curl "${PADM_LOCK_CURL_VERSION}" \
+    --arg python "${PADM_LOCK_PYTHON_BASE}" \
+    --arg nginx "${PADM_LOCK_NGINX_BASE}" \
     "${bakeJson}" >/dev/null || fail 'Bake output drifted from the lock contract'
+
+# CI 会整体替换 output；同时检查发布和显式加载，防止覆盖时丢失压缩参数。
+for exporter in image docker; do
+    output="type=${exporter}"
+    flags=(--print)
+    if [[ "${exporter}" == image ]]; then
+        output+=',push-by-digest=true,name-canonical=true,push=true'
+    else
+        flags+=(--load)
+    fi
+    output+=',compression=gzip,compression-level=9,force-compression=true'
+    grep -Fq "'${output}'" "${PROJECT_ROOT}/.github/workflows/build-images.yml" ||
+        fail "CI ${exporter} exporter lost the compression contract"
+    (
+        cd "${PROJECT_ROOT}"
+        "${DOCKER_BIN}" buildx bake "${flags[@]}" --set "*.output=${output}" >"${bakeJson}"
+    ) || fail "Bake ${exporter} export parsing failed"
+    jq -e --arg type "${exporter}" '
+        all(.target[]; (.output | length) == 1 and all(.output[];
+            .type == $type and .compression == "gzip" and
+            .["compression-level"] == "9" and .["force-compression"] == "true" and
+            (if $type == "image" then
+                .push == "true" and .["push-by-digest"] == "true" and .["name-canonical"] == "true"
+             else true end)))
+    ' "${bakeJson}" >/dev/null || fail "Bake ${exporter} exporter lost the compression contract"
+done
 
 digest=$(printf '1%.0s' {1..64})
 imagesEnv="${TEST_ROOT}/images.env"

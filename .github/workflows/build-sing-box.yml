@@ -23,6 +23,7 @@ on:
       - 'shell/core/stats_grpc.sh'
       - 'docker-bake.hcl'
       - 'docker/images/sing-box/**'
+      - 'docker/runtime/**'
       - 'docker/tests/image-smoke.sh'
       - 'docker/tests/sing-box-build.cjs'
       - 'docker/tests/reality-real.sh'
@@ -81,11 +82,11 @@ jobs:
             "${BEFORE_SHA}" != 0000000000000000000000000000000000000000 ]] &&
             git cat-file -e "${BEFORE_SHA}:versions.lock"; then
             if git diff --quiet "${BEFORE_SHA}" HEAD -- .github/workflows/build-sing-box.yml shell/build-sing-box.sh shell/core/singbox_build.sh \
-              shell/subscription/traffic.sh shell/core/stats_grpc.sh docker-bake.hcl docker/images/sing-box \
+              shell/subscription/traffic.sh shell/core/stats_grpc.sh docker-bake.hcl docker/images/sing-box docker/runtime \
               docker/tests/image-smoke.sh docker/tests/sing-box-build.cjs docker/tests/reality-real.sh \
               docker/tests/reality-key-share-real.sh docker/tests/reality-key-share-real_test.go \
               docker/tests/reality-hybrid-only-real_test.go shell/regression/container shell/regression/install-ci-jq.sh; then
-              runtime_keys='^PADM_LOCK_(ALPINE_BASE|CA_CERTIFICATES_VERSION|GCOMPAT_VERSION|LIBGCC_VERSION)='
+              runtime_keys='^PADM_LOCK_(DEBIAN_BASE|DEBIAN_SNAPSHOT|DISTROLESS_STATIC_BASE)='
               previous=$(git show "${BEFORE_SHA}:versions.lock" | grep -E "${runtime_keys}")
               current=$(grep -E "${runtime_keys}" versions.lock)
               [[ "${previous}" != "${current}" ]] || verify=false
@@ -117,7 +118,7 @@ jobs:
             "${version}" "${upstream}" "${PADM_LOCK_SING_BOX_VERSION}" \
             "${PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256}" "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" >>"${GITHUB_OUTPUT}"
 
-      - name: Preflight pinned Alpine dependencies
+      - name: Preflight pinned distroless dependencies
         if: steps.inputs.outputs.changed == 'true'
         shell: bash
         run: bash docker/release.sh preflight
@@ -221,7 +222,7 @@ jobs:
           bash shell/build-sing-box.sh "${VERSION}" "${COMMIT}" "${ARCH}" \
             .tmp-sing-box-source .tmp-sing-box-artifacts "${UPSTREAM_SHA256}"
       - uses: docker/setup-buildx-action@v4
-      - name: Verify candidate in the Alpine image
+      - name: Verify candidate in the distroless image
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -236,6 +237,7 @@ jobs:
             --strip-components=1 -C .tmp-sing-box-image/out
           # 用本次候选包覆盖下载阶段，运行层与正式镜像共用 Dockerfile 和锁定依赖。
           docker buildx bake --file docker-bake.hcl sing-box --load \
+            --set 'sing-box.output=type=docker,compression=gzip,compression-level=9,force-compression=true' \
             --set "sing-box.platform=linux/${ARCH}" \
             --set 'sing-box.contexts.fetch=.tmp-sing-box-image' \
             --set "sing-box.args.SING_BOX_VERSION=${VERSION}" \

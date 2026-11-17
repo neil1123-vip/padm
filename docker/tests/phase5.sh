@@ -74,6 +74,7 @@ mkdir -p "${INPUT_ROOT}/docker/tests" "${INPUT_ROOT}/.github/workflows" "${INPUT
 cp "${RELEASE_SCRIPT}" "${INPUT_ROOT}/docker/release.sh"
 cp "${PROJECT_ROOT}/versions.lock" "${PROJECT_ROOT}/docker-bake.hcl" "${INPUT_ROOT}/"
 cp -R "${PROJECT_ROOT}/docker/images" "${INPUT_ROOT}/docker/images"
+cp -R "${PROJECT_ROOT}/docker/runtime" "${INPUT_ROOT}/docker/runtime"
 cp "${BUILD_WORKFLOW}" "${INPUT_ROOT}/.github/workflows/build-images.yml"
 cp "${PROJECT_ROOT}/docker/tests/image-smoke.sh" "${INPUT_ROOT}/docker/tests/image-smoke.sh"
 git -C "${INPUT_ROOT}" init -q
@@ -127,7 +128,9 @@ assert_image_impact() {
     local base=$1 head=$2 affected=$3 image actual expected
     for image in xray sing-box nginx ops net; do
         expected=unchanged
-        [[ "${affected}" != all && "${affected}" != "${image}" ]] || expected=changed
+        if [[ "${affected}" == all || "${affected}" == "${image}" ]]; then
+            expected=changed
+        fi
         if bash "${INPUT_ROOT}/docker/release.sh" image-inputs-unchanged "${base}" "${head}" "${image}"; then
             actual=unchanged
         else
@@ -148,11 +151,10 @@ printf '\n# 补充运行验证\n' >>"${INPUT_ROOT}/docker/tests/image-smoke.sh"
 inputHead=$(input_commit)
 assert_image_impact "${inputBase}" "${inputHead}" none all
 
-# 按实际 Bake 参数覆盖每个镜像的独立依赖，避免把上游升级放大为全量构建。
-for dependency in xray:PADM_LOCK_UNZIP_VERSION sing-box:PADM_LOCK_GCOMPAT_VERSION \
-    sing-box:PADM_LOCK_LIBGCC_VERSION \
-    nginx:PADM_LOCK_NGINX_PACKAGE_VERSION ops:PADM_LOCK_ACME_SH_SHA256 \
-    ops:PADM_LOCK_COREUTILS_VERSION ops:PADM_LOCK_CURL_VERSION net:PADM_LOCK_FAIL2BAN_VERSION; do
+# 按实际 Bake 参数覆盖独立依赖与共享基础镜像，避免遗漏必须重建的镜像。
+for dependency in xray:PADM_LOCK_XRAY_AMD64_SHA256 sing-box:PADM_LOCK_SING_BOX_AMD64_SHA256 \
+    nginx:PADM_LOCK_NGINX_BASE ops:PADM_LOCK_ACME_SH_SHA256 ops:PADM_LOCK_PYTHON_BASE \
+    all:PADM_LOCK_DISTROLESS_STATIC_BASE; do
     inputBase=${inputHead}
     inputKey=${dependency#*:}
     awk -v key="${inputKey}" 'index($0, key "=") == 1 {$0 = key "=changed"} {print}' \
@@ -167,9 +169,17 @@ inputHead=$(input_commit)
 assert_image_impact "${inputBase}" "${inputHead}" ops
 
 inputBase=${inputHead}
-sed 's/^PADM_LOCK_CA_CERTIFICATES_VERSION=.*/PADM_LOCK_CA_CERTIFICATES_VERSION=changed/' \
+printf '\n# 网络工具变更\n' >>"${INPUT_ROOT}/docker/images/net/Dockerfile"
+inputHead=$(input_commit)
+assert_image_impact "${inputBase}" "${inputHead}" net
+inputBase=${inputHead}
+sed 's/^PADM_LOCK_DEBIAN_SNAPSHOT=.*/PADM_LOCK_DEBIAN_SNAPSHOT=changed/' \
     "${INPUT_ROOT}/versions.lock" >"${INPUT_ROOT}/lock.next"
 mv "${INPUT_ROOT}/lock.next" "${INPUT_ROOT}/versions.lock"
+inputHead=$(input_commit)
+assert_image_impact "${inputBase}" "${inputHead}" all
+inputBase=${inputHead}
+printf '\n# 共享运行时变更\n' >>"${INPUT_ROOT}/docker/runtime/export-runtime.py"
 inputHead=$(input_commit)
 assert_image_impact "${inputBase}" "${inputHead}" all
 inputBase=${inputHead}
@@ -195,14 +205,15 @@ git -C "${INPUT_ROOT}" checkout -q "${inputHead}"
 
 UPDATER_ROOT=${TEST_ROOT}/updater
 MOCK_BIN=${TEST_ROOT}/mock-bin
-APK_FIXTURE_ROOT=${TEST_ROOT}/apk-fixtures
-mkdir -p "${UPDATER_ROOT}/docker" "${UPDATER_ROOT}/shell/core" "${MOCK_BIN}" "${APK_FIXTURE_ROOT}"
+mkdir -p "${UPDATER_ROOT}/docker" "${UPDATER_ROOT}/shell/core" "${MOCK_BIN}"
 cp "${RELEASE_SCRIPT}" "${UPDATER_ROOT}/docker/release.sh"
 # 模拟升级使用固定起点，避免真实锁升级后超过模拟上游；真实锁已在前面单独验证。
 sed -E \
-    -e 's/^(PADM_LOCK_[A-Z0-9_]+_VERSION)=.*/\1=0.0.1/' \
-    -e 's/^PADM_LOCK_ALPINE_VERSION=.*/PADM_LOCK_ALPINE_VERSION=3.24.1/' \
-    -e "s|^PADM_LOCK_ALPINE_BASE=.*|PADM_LOCK_ALPINE_BASE=alpine:3.24.1@sha256:${IMAGE_DIGEST}|" \
+    -e 's/^PADM_LOCK_ACME_SH_VERSION=.*/PADM_LOCK_ACME_SH_VERSION=0.0.1/' \
+    -e 's/^PADM_LOCK_NGINX_VERSION=.*/PADM_LOCK_NGINX_VERSION=1.30.1/' \
+    -e "s|^PADM_LOCK_NGINX_BASE=.*|PADM_LOCK_NGINX_BASE=nginx:1.30.1-trixie@sha256:${IMAGE_DIGEST}|" \
+    -e 's/^PADM_LOCK_PYTHON3_VERSION=.*/PADM_LOCK_PYTHON3_VERSION=3.14.1/' \
+    -e "s|^PADM_LOCK_PYTHON_BASE=.*|PADM_LOCK_PYTHON_BASE=python:3.14.1-slim-trixie@sha256:${IMAGE_DIGEST}|" \
     -e 's/^(PADM_LOCK_(XRAY|SING_BOX)_VERSION)=.*/\1=v0.0.1/' \
     -e 's/^PADM_LOCK_SING_BOX_AMD64_ASSET=.*/PADM_LOCK_SING_BOX_AMD64_ASSET=sing-box-0.0.1-linux-amd64.tar.gz/' \
     -e 's/^PADM_LOCK_SING_BOX_ARM64_ASSET=.*/PADM_LOCK_SING_BOX_ARM64_ASSET=sing-box-0.0.1-linux-arm64.tar.gz/' \
@@ -210,152 +221,16 @@ sed -E \
     "${PROJECT_ROOT}/versions.lock" >"${UPDATER_ROOT}/versions.lock"
 cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.original"
 cp "${PROJECT_ROOT}/shell/core/version.sh" "${UPDATER_ROOT}/shell/core/version.sh"
-ALPINE_DIGEST=$(printf 'd%.0s' {1..64})
-ALPINE_NEXT_DIGEST=$(printf 'e%.0s' {1..64})
-cat >"${TEST_ROOT}/alpine-tags.json" <<EOF
-{"results":[{"name":"3.24.2","digest":"sha256:${ALPINE_DIGEST}","images":[{"os":"linux","architecture":"amd64"},{"os":"linux","architecture":"arm64"}]}]}
-EOF
-cat >"${TEST_ROOT}/alpine-tags-next.json" <<EOF
-{"results":[{"name":"3.24.3","digest":"sha256:${ALPINE_NEXT_DIGEST}","images":[{"os":"linux","architecture":"amd64"},{"os":"linux","architecture":"arm64"}]}]}
-EOF
-create_apk_fixture() {
-    local mode=$1 repo=$2 arch=$3 root
-    root=${TEST_ROOT}/apk-build/${mode}-${repo}-${arch}
-    mkdir -p "${root}"
-    if [[ "${mode}" == invalid ]]; then
-        printf 'not an APK index\n' >"${root}/APKINDEX"
-    else
-        case "${mode}:${arch}" in
-        normal:*) cat >"${root}/APKINDEX" <<'EOF'
-P: ca-certificates
-V: 20260612-r0
-
-P: gcompat
-V: 1.1.0-r5
-
-P: libgcc
-V: 15.2.0-r6
-
-P: unzip
-V: 6.0-r17
-
-P: nginx
-V: 1.30.5-r0
-
-P: nginx-mod-stream
-V: 1.30.5-r0
-
-P: python3
-V: 3.14.7-r2
-
-P: coreutils
-V: 9.11-r0
-
-P: curl
-V: 8.22.1-r0
-
-P: openssl
-V: 3.5.9-r0
-
-P: socat
-V: 1.8.1.4-r0
-
-P: bash
-V: 5.3.10-r0
-
-P: iproute2
-V: 7.0.1-r0
-
-P: iptables
-V: 1.8.14-r0
-
-P: nftables
-V: 1.1.7-r0
-
-P: wireguard-tools
-V: 1.0.20260224-r0
-
-P: fail2ban
-V: 1.1.0-r4
-EOF
-            ;;
-        mismatch:aarch64) sed 's/20260612-r0/20260613-r0/' \
-                "${TEST_ROOT}/apk-build/normal-main-x86_64/APKINDEX" >"${root}/APKINDEX" ;;
-        mismatch:*) cp "${TEST_ROOT}/apk-build/normal-main-x86_64/APKINDEX" "${root}/APKINDEX" ;;
-        next:*) cat >"${root}/APKINDEX" <<'EOF'
-P: ca-certificates
-V: 20260613-r0
-
-P: gcompat
-V: 1.1.0-r6
-
-P: libgcc
-V: 15.2.0-r7
-
-P: unzip
-V: 6.0-r18
-
-P: nginx
-V: 1.30.6-r0
-
-P: nginx-mod-stream
-V: 1.30.6-r0
-
-P: python3
-V: 3.14.7-r3
-
-P: coreutils
-V: 9.11-r1
-
-P: curl
-V: 8.22.1-r1
-
-P: openssl
-V: 3.5.9-r1
-
-P: socat
-V: 1.8.1.5-r0
-
-P: bash
-V: 5.3.11-r0
-
-P: iproute2
-V: 7.0.2-r0
-
-P: iptables
-V: 1.8.15-r0
-
-P: nftables
-V: 1.1.8-r0
-
-P: wireguard-tools
-V: 1.0.20260225-r0
-
-P: fail2ban
-V: 1.1.0-r5
-EOF
-            ;;
-        esac
-    fi
-    tar -czf "${APK_FIXTURE_ROOT}/${mode}-${repo}-${arch}.tar.gz" -C "${root}" APKINDEX
-}
-for mode in normal mismatch next invalid; do
-    for repo in main community; do
-        for arch in x86_64 aarch64; do
-            create_apk_fixture "${mode}" "${repo}" "${arch}"
-        done
-    done
+for mode in normal next; do
+    jq -n --arg mode "${mode}" '{schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json",
+        annotations: {fixture: $mode}, manifests: [
+          {digest: ("sha256:" + ("a" * 64)), platform: {os: "linux", architecture: "amd64"}},
+          {digest: ("sha256:" + ("b" * 64)), platform: {os: "linux", architecture: "arm64"}}]}' \
+        >"${TEST_ROOT}/${mode}-index.json"
 done
-for repo in main community; do
-    for arch in x86_64 aarch64; do
-        root="${TEST_ROOT}/apk-build/stream-mismatch-${repo}-${arch}"
-        mkdir -p "${root}"
-        awk '/^P: nginx-mod-stream$/ {module = 1}
-             module && /^V:/ {$0 = "V: 1.30.4-r1"; module = 0}
-             {print}' "${TEST_ROOT}/apk-build/normal-${repo}-${arch}/APKINDEX" >"${root}/APKINDEX"
-        tar -czf "${APK_FIXTURE_ROOT}/stream-mismatch-${repo}-${arch}.tar.gz" -C "${root}" APKINDEX
-    done
-done
+BASE_DIGEST=$(sha256sum "${TEST_ROOT}/normal-index.json" | awk '{print $1}')
+BASE_NEXT_DIGEST=$(sha256sum "${TEST_ROOT}/next-index.json" | awk '{print $1}')
+export PADM_TEST_IMAGE_FIXTURES="${TEST_ROOT}"
 cat >"${MOCK_BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -430,20 +305,44 @@ while [[ "$#" -gt 0 ]]; do
 done
 [[ -n "${url}" ]] || exit 1
 case "${url}" in
-https://hub.docker.com/v2/repositories/library/alpine/tags*)
-    [[ "${PADM_TEST_STATS_FAILURE:-}" != alpine-api ]] || exit 22
-    cat "${PADM_TEST_ALPINE_TAGS}"
+https://auth.docker.io/token\?*)
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != image-auth ]] || { printf '{}\n'; exit; }
+    printf '{"token":"fixture-token"}\n'
     ;;
-*dl-cdn.alpinelinux.org/alpine/*/APKINDEX.tar.gz)
-    [[ "${PADM_TEST_STATS_FAILURE:-}" != apk-download ]] || exit 22
-    [[ -n "${output}" ]] || exit 1
-    mode=${PADM_TEST_APK_MODE:-normal}
-    [[ "${PADM_TEST_STATS_FAILURE:-}" != apk-parse ]] || mode=invalid
-    [[ "${PADM_TEST_STATS_FAILURE:-}" != arch-mismatch ]] || mode=mismatch
-    [[ "${PADM_TEST_STATS_FAILURE:-}" != stream-mismatch ]] || mode=stream-mismatch
-    repo=$(case "${url}" in */main/*) printf main ;; *) printf community ;; esac)
-    arch=$(case "${url}" in */x86_64/*) printf x86_64 ;; *) printf aarch64 ;; esac)
-    cp "${PADM_TEST_APK_FIXTURES}/${mode}-${repo}-${arch}.tar.gz" "${output}"
+https://hub.docker.com/v2/repositories/library/python/tags*|https://hub.docker.com/v2/repositories/library/nginx/tags*)
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != tags-api ]] || exit 22
+    if [[ "${url}" == *library/python/* ]]; then version=3.14.7; suffix=slim-trixie
+    else version=1.30.5; suffix=trixie; fi
+    if [[ "${PADM_TEST_BASE_MODE:-normal}" == next ]]; then
+        if [[ "${suffix}" == trixie ]]; then version=1.30.6; else version=3.14.8; fi
+    elif [[ "${PADM_TEST_BASE_MODE:-normal}" == downgrade ]]; then
+        if [[ "${suffix}" == trixie ]]; then version=1.30.1; else version=3.14.1; fi
+    fi
+    jq -n --arg tag "${version}-${suffix}" '{results: [{name: $tag}, {name: "99.0.0-rc1-trixie"}]}'
+    ;;
+*/manifests/*)
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != image-api ]] || exit 22
+    mode=${PADM_TEST_BASE_MODE:-normal}
+    [[ "${mode}" != downgrade ]] || mode=normal
+    cp "${PADM_TEST_IMAGE_FIXTURES}/${mode}-index.json" "${output}"
+    case "${PADM_TEST_STATS_FAILURE:-}" in
+    image-index) printf '{}\n' >"${output}" ;;
+    image-arch)
+        jq '.manifests |= map(select(.platform.architecture != "arm64"))' "${output}" >"${output}.next"
+        mv "${output}.next" "${output}" ;;
+    esac
+    ;;
+https://snapshot.debian.org/archive/*/InRelease)
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != snapshot-api ]] || exit 22
+    suite=${url%/InRelease}
+    suite=${suite##*/}
+    {
+        printf '%s\n' '-----BEGIN PGP SIGNED MESSAGE-----' 'Hash: SHA256' ''
+        printf 'Codename: %s\nArchitectures: amd64 arm64\n' "${suite}"
+        printf '%s\n' '-----BEGIN PGP SIGNATURE-----' fixture '-----END PGP SIGNATURE-----'
+    } >"${output}"
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != snapshot-invalid ]] ||
+        sed -i 's/Codename:.*/Codename: bookworm/' "${output}"
     ;;
 *Xray-linux-64.zip) printf '%s' xray-amd64 >"${output}" ;;
 *Xray-linux-arm64-v8a.zip) printf '%s' xray-arm64 >"${output}" ;;
@@ -499,8 +398,7 @@ for scenario in stable draft prerelease alpha invalid empty api; do
     fi
 done
 
-PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
-    PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+PATH="${MOCK_BIN}:${PATH}" \
     bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
     fail 'upstream lock refresh failed'
 (
@@ -520,33 +418,16 @@ PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json"
     [[ "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" == "$(printf '%s' upstream-arm64 | sha256sum | awk '{print $1}')" ]]
     [[ "${PADM_LOCK_ACME_SH_VERSION}" == 8.7.6 ]]
     [[ "${PADM_LOCK_ACME_SH_URL}" == */refs/tags/v8.7.6 ]]
-    [[ "${PADM_LOCK_ALPINE_VERSION}" == 3.24.2 ]]
-    [[ "${PADM_LOCK_ALPINE_BASE}" == "alpine:3.24.2@sha256:${ALPINE_DIGEST}" ]]
+    [[ "${PADM_LOCK_DEBIAN_BASE}" == "debian:trixie-slim@sha256:${BASE_DIGEST}" ]]
+    [[ "${PADM_LOCK_DISTROLESS_STATIC_BASE}" == "gcr.io/distroless/static-debian13@sha256:${BASE_DIGEST}" ]]
+    [[ "${PADM_LOCK_DEBIAN_SNAPSHOT}" == "$(date -u -d yesterday +%Y%m%dT000000Z)" ]]
     [[ "${PADM_LOCK_NGINX_VERSION}" == 1.30.5 ]]
-    [[ "${PADM_LOCK_NGINX_PACKAGE_VERSION}" == 1.30.5-r0 ]]
-    for expected in \
-        PADM_LOCK_CA_CERTIFICATES_VERSION=20260612-r0 \
-        PADM_LOCK_GCOMPAT_VERSION=1.1.0-r5 \
-        PADM_LOCK_LIBGCC_VERSION=15.2.0-r6 \
-        PADM_LOCK_UNZIP_VERSION=6.0-r17 \
-        PADM_LOCK_PYTHON3_VERSION=3.14.7-r2 \
-        PADM_LOCK_COREUTILS_VERSION=9.11-r0 \
-        PADM_LOCK_CURL_VERSION=8.22.1-r0 \
-        PADM_LOCK_OPENSSL_VERSION=3.5.9-r0 \
-        PADM_LOCK_SOCAT_VERSION=1.8.1.4-r0 \
-        PADM_LOCK_BASH_VERSION=5.3.10-r0 \
-        PADM_LOCK_IPROUTE2_VERSION=7.0.1-r0 \
-        PADM_LOCK_IPTABLES_VERSION=1.8.14-r0 \
-        PADM_LOCK_NFTABLES_VERSION=1.1.7-r0 \
-        PADM_LOCK_WIREGUARD_TOOLS_VERSION=1.0.20260224-r0 \
-        PADM_LOCK_FAIL2BAN_VERSION=1.1.0-r4; do
-        key=${expected%%=*}
-        [[ "${!key}" == "${expected#*=}" ]]
-    done
+    [[ "${PADM_LOCK_NGINX_BASE}" == "nginx:1.30.5-trixie@sha256:${BASE_DIGEST}" ]]
+    [[ "${PADM_LOCK_PYTHON3_VERSION}" == 3.14.7 ]]
+    [[ "${PADM_LOCK_PYTHON_BASE}" == "python:3.14.7-slim-trixie@sha256:${BASE_DIGEST}" ]]
 ) || fail 'upstream lock refresh produced wrong values'
 cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.once"
-PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
-    PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+PATH="${MOCK_BIN}:${PATH}" \
     bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
     fail 'idempotent upstream lock refresh failed'
 cmp -s "${UPDATER_ROOT}/versions.lock.once" "${UPDATER_ROOT}/versions.lock" ||
@@ -554,60 +435,40 @@ cmp -s "${UPDATER_ROOT}/versions.lock.once" "${UPDATER_ROOT}/versions.lock" ||
 
 grep -E '^PADM_LOCK_(XRAY|SING_BOX|ACME_SH)_' "${UPDATER_ROOT}/versions.lock" \
     >"${TEST_ROOT}/core-lock.before"
-PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags-next.json" \
-    PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=next \
+PATH="${MOCK_BIN}:${PATH}" PADM_TEST_BASE_MODE=next \
     bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
-    fail 'Alpine/APK-only upstream refresh failed'
+    fail 'base-only upstream refresh failed'
 grep -E '^PADM_LOCK_(XRAY|SING_BOX|ACME_SH)_' "${UPDATER_ROOT}/versions.lock" \
     >"${TEST_ROOT}/core-lock.after"
 cmp -s "${TEST_ROOT}/core-lock.before" "${TEST_ROOT}/core-lock.after" ||
-    fail 'Alpine/APK-only refresh changed core locks'
+    fail 'base-only refresh changed core locks'
 (
     set -a
     # shellcheck disable=SC1091
     . "${UPDATER_ROOT}/versions.lock"
     set +a
-    [[ "${PADM_LOCK_ALPINE_VERSION}" == 3.24.3 ]]
-    [[ "${PADM_LOCK_ALPINE_BASE}" == "alpine:3.24.3@sha256:${ALPINE_NEXT_DIGEST}" ]]
+    [[ "${PADM_LOCK_DEBIAN_BASE}" == "debian:trixie-slim@sha256:${BASE_NEXT_DIGEST}" ]]
+    [[ "${PADM_LOCK_DISTROLESS_STATIC_BASE}" == "gcr.io/distroless/static-debian13@sha256:${BASE_NEXT_DIGEST}" ]]
     [[ "${PADM_LOCK_NGINX_VERSION}" == 1.30.6 ]]
-    [[ "${PADM_LOCK_NGINX_PACKAGE_VERSION}" == 1.30.6-r0 ]]
-    for expected in \
-        PADM_LOCK_CA_CERTIFICATES_VERSION=20260613-r0 \
-        PADM_LOCK_GCOMPAT_VERSION=1.1.0-r6 \
-        PADM_LOCK_LIBGCC_VERSION=15.2.0-r7 \
-        PADM_LOCK_UNZIP_VERSION=6.0-r18 \
-        PADM_LOCK_PYTHON3_VERSION=3.14.7-r3 \
-        PADM_LOCK_COREUTILS_VERSION=9.11-r1 \
-        PADM_LOCK_CURL_VERSION=8.22.1-r1 \
-        PADM_LOCK_OPENSSL_VERSION=3.5.9-r1 \
-        PADM_LOCK_SOCAT_VERSION=1.8.1.5-r0 \
-        PADM_LOCK_BASH_VERSION=5.3.11-r0 \
-        PADM_LOCK_IPROUTE2_VERSION=7.0.2-r0 \
-        PADM_LOCK_IPTABLES_VERSION=1.8.15-r0 \
-        PADM_LOCK_NFTABLES_VERSION=1.1.8-r0 \
-        PADM_LOCK_WIREGUARD_TOOLS_VERSION=1.0.20260225-r0 \
-        PADM_LOCK_FAIL2BAN_VERSION=1.1.0-r5; do
-        key=${expected%%=*}
-        [[ "${!key}" == "${expected#*=}" ]]
-    done
-) || fail 'Alpine/APK-only refresh produced wrong values'
+    [[ "${PADM_LOCK_NGINX_BASE}" == "nginx:1.30.6-trixie@sha256:${BASE_NEXT_DIGEST}" ]]
+    [[ "${PADM_LOCK_PYTHON3_VERSION}" == 3.14.8 ]]
+    [[ "${PADM_LOCK_PYTHON_BASE}" == "python:3.14.8-slim-trixie@sha256:${BASE_NEXT_DIGEST}" ]]
+) || fail 'base-only refresh produced wrong values'
 
-# 固定模拟起点后，真正的包版本降级仍必须拒绝且保留原锁。
+# 固定模拟起点后，官方镜像版本降级仍必须拒绝且保留原锁。
 cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.newer"
-if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags-next.json" \
-    PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_BASE_MODE=downgrade \
     bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >"${TEST_ROOT}/downgrade.log" 2>&1; then
-    fail 'upstream refresh accepted an APK downgrade'
+    fail 'upstream refresh accepted a base image downgrade'
 fi
-grep -Fq 'ca-certificates latest version 20260612-r0 is older than lock 20260613-r0' \
-    "${TEST_ROOT}/downgrade.log" || fail 'upstream refresh did not reach the APK downgrade guard'
+grep -Fq 'official nginx patch tag is older than lock' \
+    "${TEST_ROOT}/downgrade.log" || fail 'upstream refresh did not reach the base version downgrade guard'
 cmp -s "${UPDATER_ROOT}/versions.lock.newer" "${UPDATER_ROOT}/versions.lock" ||
-    fail 'upstream refresh changed the lock after an APK downgrade'
+    fail 'upstream refresh changed the lock after a base image downgrade'
 
 # 同一上游的稳定修订按数字递增，新上游仍高于旧上游的任意修订。
 refresh_stats_version() {
-    PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
-        PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+    PATH="${MOCK_BIN}:${PATH}" \
         PADM_TEST_STATS_VERSION="$1" PADM_TEST_STATS_OLDER_VERSION="${2:-9.7.0}" \
         bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams
 }
@@ -660,10 +521,9 @@ done
 # 发布不完整或下载失败时，任何核心的锁值都必须保持原样。
 for failure in no-stable missing-asset missing-source missing-arch missing-digest duplicate-asset download checksum \
     sing-box-draft sing-box-prerelease upstream-draft upstream-prerelease upstream-missing-digest \
-    alpine-api apk-download apk-parse arch-mismatch stream-mismatch; do
+    tags-api image-auth image-api image-index image-arch snapshot-api snapshot-invalid; do
     cp "${UPDATER_ROOT}/versions.lock.original" "${UPDATER_ROOT}/versions.lock"
-    if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
-        PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+    if PATH="${MOCK_BIN}:${PATH}" \
         PADM_TEST_STATS_VERSION=9.8.7-padm.1 \
         PADM_TEST_STATS_FAILURE="${failure}" \
         bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >"${TEST_ROOT}/refresh-failure.log" 2>&1; then
@@ -671,10 +531,6 @@ for failure in no-stable missing-asset missing-source missing-arch missing-diges
     fi
     cmp -s "${UPDATER_ROOT}/versions.lock.original" "${UPDATER_ROOT}/versions.lock" ||
         fail "upstream refresh changed the lock after ${failure}"
-    if [[ "${failure}" == stream-mismatch ]]; then
-        grep -Fq 'nginx-mod-stream version does not match nginx' "${TEST_ROOT}/refresh-failure.log" ||
-            fail 'upstream refresh did not reach the stream ABI guard'
-    fi
 done
 
 for name in xray sing-box nginx ops net; do
@@ -708,10 +564,26 @@ bash "${RELEASE_SCRIPT}" validate-manifest "${MANIFEST}" | grep -qx 'release-man
 jq -e --arg version "${CURRENT_VERSION}" '
   .schema_version == 1 and .release.version == $version and
   (.images | keys | sort) == ["net", "nginx", "ops", "sing-box", "xray"] and
+  (.upstream | keys | sort) == ["acme_sh", "alpine", "nginx", "sing_box", "xray"] and
+  .upstream.alpine == "none" and
   .compatibility.architectures == ["amd64", "arm64"] and
   (.compatibility.profiles | index("nginx-stream") != null) and
   .migrations == []
 ' "${MANIFEST}" >/dev/null || fail 'generated manifest fields are wrong'
+# 验证器保持迁移前 HEAD 原样，直接验证现有客户端可读取新的 none 清单。
+bash -c 'source "$1"; dockerManifestValidate "$2"' bash "${PROJECT_ROOT}/docker/lib/manifest.sh" "${MANIFEST}" ||
+    fail 'historical runtime rejected the distroless upgrade manifest'
+jq '.upstream.alpine = "3.24.4"' "${MANIFEST}" >"${MANIFEST}.legacy"
+bash "${RELEASE_SCRIPT}" validate-manifest "${MANIFEST}.legacy" >/dev/null &&
+    bash -c 'source "$1"; dockerManifestValidate "$2"' bash "${PROJECT_ROOT}/docker/lib/manifest.sh" "${MANIFEST}.legacy" ||
+    fail 'historical Alpine manifest no longer supports rollback'
+for upstream in '.upstream.debian = "trixie"' 'del(.upstream.alpine)' '.upstream.unexpected = "value"'; do
+    jq "${upstream}" "${MANIFEST}" >"${MANIFEST}.bad"
+    if bash "${RELEASE_SCRIPT}" validate-manifest "${MANIFEST}.bad" >/dev/null 2>&1 ||
+        bash -c 'source "$1"; dockerManifestValidate "$2"' bash "${PROJECT_ROOT}/docker/lib/manifest.sh" "${MANIFEST}.bad" >/dev/null 2>&1; then
+        fail 'manifest validator accepted incomplete or unknown upstream fields'
+    fi
+done
 
 cp "${RESULTS_DIR}/xray.json" "${TEST_ROOT}/xray.original.json"
 reusedReference="ghcr.io/neil1123-vip/padm-xray:0.0.1@sha256:${IMAGE_DIGEST}"
@@ -1153,8 +1025,8 @@ grep -Fq 'linux/arm64' "${BUILD_WORKFLOW}" || fail 'build workflow lacks arm64'
 grep -Eq '^[[:space:]]+provenance:.*mode=max' "${BUILD_WORKFLOW}" || fail 'provenance attestation is not enabled'
 grep -Eq '^[[:space:]]+sbom:.*inputs[.]push' "${BUILD_WORKFLOW}" || fail 'SBOM attestation is not enabled'
 grep -Fq 'cosign sign' "${BUILD_WORKFLOW}" || fail 'image signing is not enabled'
-grep -Fq 'Preflight pinned Alpine dependencies' "${BUILD_WORKFLOW}" ||
-    fail 'image workflow does not preflight pinned Alpine dependencies'
+grep -Fq 'Preflight pinned distroless dependencies' "${BUILD_WORKFLOW}" ||
+    fail 'image workflow does not preflight pinned distroless dependencies'
 grep -Fq 'max-parallel: 10' "${BUILD_WORKFLOW}" ||
     fail 'smoke matrix does not allow all ten native platform builds'
 grep -Fq 'max-parallel: 5' "${BUILD_WORKFLOW}" ||
@@ -1369,13 +1241,13 @@ prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; e
 grep -Fxq '      - name: Bump script and lock version' <<<"${prepareDefinition}" ||
     fail '版本提交不在全部门禁之后'
 preflightStep=$(awk '
-    /^      - name: Preflight pinned APK dependencies$/ {step = 1; next}
+    /^      - name: Preflight pinned distroless dependencies$/ {step = 1; next}
     step && /^      - / {exit}
     step {print}
 ' <<<"${planDefinition}")
 grep -Fq "if: steps.scope.outputs.changed == 'true' && steps.existing.outputs.result != 'true'" <<<"${preflightStep}" ||
-    fail 'APK preflight must cover new releases and failed-release retries'
-grep -Fq 'run: bash docker/release.sh preflight' <<<"${preflightStep}" || fail 'APK preflight command is missing'
+    fail 'distroless preflight must cover new releases and failed-release retries'
+grep -Fq 'run: bash docker/release.sh preflight' <<<"${preflightStep}" || fail 'distroless preflight command is missing'
 
 grep -Fq "cron: '17 3 * * *'" "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh is not scheduled daily'
 singBoxCall=$(awk '
@@ -1417,10 +1289,10 @@ grep -Fq 'gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref
     fail 'upstream workflow does not hand off to the gated release'
 grep -Fq 'permissions: {}' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow keeps broad top-level write permissions'
 grep -Fq 'timeout-minutes: 30' "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh has no timeout'
-grep -Fq 'Preflight refreshed Alpine dependencies' "${UPSTREAM_WORKFLOW}" ||
-    fail 'upstream refresh does not preflight the refreshed Alpine lock'
-grep -Fq 'Preflight pinned Alpine dependencies' "${SING_BOX_WORKFLOW}" ||
-    fail 'sing-box workflow does not preflight the candidate Alpine runtime'
+grep -Fq 'Preflight refreshed distroless dependencies' "${UPSTREAM_WORKFLOW}" ||
+    fail 'upstream refresh does not preflight the refreshed distroless lock'
+grep -Fq 'Preflight pinned distroless dependencies' "${SING_BOX_WORKFLOW}" ||
+    fail 'sing-box workflow does not preflight the candidate distroless runtime'
 grep -Fq 'cancel-in-progress: ${{ github.event_name == '\''push'\'' }}' "${SING_BOX_WORKFLOW}" ||
     fail 'sing-box workflow does not cancel stale push builds'
 grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS:-3' "${FAST_SUITE}" ||
