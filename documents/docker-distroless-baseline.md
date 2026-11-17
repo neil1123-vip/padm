@@ -1,6 +1,7 @@
 # Distroless 镜像验收记录
 
-日期：2026-11-17。范围：五个运行镜像迁移及两轮体积优化，本机为 `linux/amd64`。
+日期：2026-11-17。范围：五个运行镜像迁移及两轮体积优化，本机为 `linux/amd64`，
+正式发布覆盖原生双架构构建、冒烟及 ARM64 真实运行。
 
 ## 实现
 
@@ -59,7 +60,7 @@ Fail2ban 复用测试挂载源码入口前，先断言候选入口 SHA-256 与�
 本机包装回归覆盖混合复用、错架构、缺摘要、启动失败、非零退出和清场，
 最终 `docker-phase5 -Jobs 2` 10.953 秒通过；两份工作流的 actionlint 通过。
 证据 `.tmp-regression-docker-25a48451ff7945f89732c4876a0838f7/`。
-ARM64 实际结果须以本次远端执行为准，接入门禁本身不算验收通过。
+原生 ARM64 实际结果及边界见下述正式发布核验。
 
 远端 `44053903394` 暴露 sing-box 候选覆盖整个 fetch 阶段后缺少
 `/out/rootfs` 的双架构构建错误。现将下载包阶段独立为 package，候选仅覆盖包；
@@ -70,7 +71,7 @@ ARM64 实际结果须以本次远端执行为准，接入门禁本身不算验�
 
 Release `44055641704` 的 18 个合同分片及 10 个原生 smoke 全通过，
 但 ARM64 的离线导入后找不到原 config ID，真实运行尚未开始，发布被阻止；
-自动版本提交 `fe5233f9` 只准备了 `3.43.8`，不代表正式发布。
+该失败轮的自动版本提交 `fe5233f9` 只准备了 `3.43.8`，当时未正式发布。
 固定 amd64/jq 的真实对照证实 classic 与 containerd 的 ID 表示不同，
 仅给导出镜像补标签仍不足。现让内层匹配宿主的 overlay2/overlayfs，
 未知驱动拒绝，使用命名导出并保留导入后的原 ID 精确比较。
@@ -78,6 +79,22 @@ Release `44055641704` 的 18 个合同分片及 10 个原生 smoke 全通过，
 证据 `.tmp-docker-load-repro-20261117/summary.json`，不替代远端 ARM64 验收。
 最终 `docker-phase5 -Jobs 2` 的 9 个包装场景及既有检查通过，13.359 秒；
 证据 `.tmp-regression-docker-69525f2938764caabd33e7df8f508440/`，actionlint 通过。
+
+Release `44062180595` 于北京时间 2026-11-17 18:27:41 正式发布 `v3.43.8`，
+来源及标签均为 `6e880813a92c6518678ec518d292d585c2cb775d`，复用已准备版本。
+41 个任务全部成功、无跳过：18 个合同分片、10 个原生 build/smoke、
+ARM64 真实运行及五镜像发布均通过。ARM64 真实运行耗时 74.240 秒，
+工件及实际 job 日志中的 15 个成功标记一致；原镜像 ID 校验保持。
+
+发布后独验确认三资产的 SHA-256 和长度、313 个源码文件的 Git blob、
+完整 payload 路径集合及生成的 `bundle.paths` 字节一致；清单经固定 Cosign
+工具独立验签，成功记录绑定本轮 run、源码及清单/签名包/日志摘要。
+五镜像均本轮新建，实时 GHCR 索引及版本标签与 CI 原件一致；双平台摘要、
+smoke 构建索引、ARM64 config ID 和真实运行 ID 完整绑定，保留 attestation。
+五镜像验签依据本次 CI 声明和成功日志，未另作本机独立镜像验签。
+核验器的 2 正例/7 反例自检及 7 个实际证据反例通过，成功报告未被替换。
+证据 `.tmp-runtime-release-20261117/application-verification.json` 及同目录
+`negative-verification.json`；旧失败原件保持，A/B VPS 未升级或重启。
 
 复验入口（需先构建五个 `padm-distroless/padm-<名称>:local` 候选）：
 
@@ -88,7 +105,8 @@ Release `44055641704` 的 18 个合同分片及 10 个原生 smoke 全通过，
 .\shell\regression\test-run-docker.ps1 -Scope distroless
 ```
 
-ARM64 构建及运行等待远端门禁；未验证生产部署、自然续期、压力与长期稳定性；
+原生 ARM64 CI 构建及运行已验；ARM64 宿主生命周期、生产部署、
+自然续期、压力与长期稳定性未验，16 supported / 14 deferred 保持；
 控制 HTTP 冒烟不证明 WireGuard 握手，Fail2ban 复用夹具保留 Docker 默认
 capabilities。未运行完整漏洞扫描。Python 上游标签发现限第一页
 100 条，未来标签增长可能导致漏更。

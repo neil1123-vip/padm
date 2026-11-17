@@ -15,8 +15,10 @@
 
 ## 最近完成
 
-- 11-17 distroless 合计减 20.7%，保留完整 Geo；审计修复宿主 stream 配置，
-  五镜像补验通过；体积及未验边界见 `documents/docker-distroless-baseline.md`。
+- 11-17 distroless 合计减 20.7%，完整 Geo 保留；`.8`/`6e880813` 正式发布。
+  41 门禁、10 原生 smoke、ARM64 真实运行及发布独验通过；313 源码文件、
+  完整包清单、三资产及五镜像双平台绑定一致，7 个证据反例均拒绝。
+  证据 `.tmp-runtime-release-20261117/`；边界见 distroless 验收记录。
 - 11-17 6A.65 固定 5c16680c 的 KVM 双机单 Peer，防护及完整恢复通过；
   真实封禁/DROP/解封、启停后三业务/账目、终态安全/Peer 清场/源码均已独验。
   仅接受正式生成器已重建的候选版本字节更新，权限及其它文件仍精确比较。
@@ -30,7 +32,7 @@
 ## 未决
 
 - B 保留恢复部署及续期隔离；nftables 重载会清表，规则变化须核表和探针。
-  实际续期、arm64/IPv6、其它核心及公网/多 Peer 角色/WG 新机恢复未验。
+  实际续期、ARM64 宿主生命周期/IPv6、其它核心及公网/多 Peer 新机恢复未验。
 - 控制同步/启用态重启/密钥端口迁移仅补固定本地完整内核双机单 Peer；
   关联改址、真实 bind 失败恢复及预热后完整 peer CLI 来源见证已补。
   TERM 恢复仅补固定本地单 Peer；其它信号/断电、公网多机、多 Peer 重启/灾备
@@ -45,10 +47,7 @@
 - WARP 实 Peer、自然换证、公网 h3/CDN 缺条件；gRPC Cloudflare 缺有效 Zone。
   旧 Vision reset/XHTTP/TUIC 超时根因未定；旧 sing-box→Xray 失败原件保持。
   固定公网组合不外推活动 sing-box；拒绝配对及带配对来源的跨核心复制。
-- full 67 项/845.194 秒及修复后 phase5/13.359 秒通过；sing-box 双架构通过。
-  Release `44055641704` 的 18 合同/10 smoke 通过，ARM64 导入 ID 失败阻止发布。
-  已匹配宿主存储并命名导出，原 ID 校验保留；实际 ARM64 待新轮远端。
-  ML-DSA 仍限 amd64/IPv4/Reality/gRPC/chrome。
+- ML-DSA 仍限 amd64/IPv4/Reality/gRPC/chrome。
 
 ## 工作区注意
 
