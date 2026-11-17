@@ -2,7 +2,7 @@
 
 ARG DEBIAN_BASE
 ARG DISTROLESS_STATIC_BASE
-FROM ${DEBIAN_BASE} AS fetch
+FROM ${DEBIAN_BASE} AS dependencies
 
 ARG TARGETARCH
 ARG DEBIAN_SNAPSHOT
@@ -22,6 +22,8 @@ deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s
 
 COPY --from=runtime /export-runtime.py /usr/local/bin/export-runtime
 
+FROM dependencies AS package
+
 RUN set -eux; \
     case "${TARGETARCH}" in \
         amd64) asset="${SING_BOX_AMD64_ASSET}"; sha256="${SING_BOX_AMD64_SHA256}" ;; \
@@ -33,6 +35,16 @@ RUN set -eux; \
     echo "${sha256}  /tmp/${asset}" | sha256sum -c -; \
     mkdir /out; \
     tar -xzf "/tmp/${asset}" --strip-components=1 -C /out; \
+    test -x /out/sing-box; \
+    test -s /out/libcronet.so; \
+    test -s /out/LICENSE; \
+    test -s /out/BUILD_INFO.json
+
+FROM dependencies AS fetch
+
+COPY --from=package /out/ /out/
+
+RUN set -eux; \
     test -x /out/sing-box; \
     test -s /out/libcronet.so; \
     test -s /out/LICENSE; \

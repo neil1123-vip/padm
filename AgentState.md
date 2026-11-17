@@ -46,7 +46,8 @@
 - WARP 实 Peer、自然换证、公网 h3/CDN 缺条件；gRPC Cloudflare 缺有效 Zone。
   旧 Vision reset/XHTTP/TUIC 超时根因未定；旧 sing-box→Xray 失败原件保持。
   固定公网组合不外推活动 sing-box；拒绝配对及带配对来源的跨核心复制。
-- 未跑 full；ML-DSA 仅固定 amd64/IPv4/Reality/gRPC/chrome，不外推其它组合或长稳。
+- 发布前基线 full 67 项/845.194 秒通过；最终发布修复 phase5/10.953 秒通过。
+  ARM64 固定摘要真实运行待远端；ML-DSA 仍限 amd64/IPv4/Reality/gRPC/chrome。
 
 ## 工作区注意
 

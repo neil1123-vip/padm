@@ -235,11 +235,11 @@ jobs:
           mkdir -p .tmp-sing-box-image/out
           tar -xzf ".tmp-sing-box-artifacts/sing-box-${VERSION#v}-linux-${ARCH}.tar.gz" \
             --strip-components=1 -C .tmp-sing-box-image/out
-          # 用本次候选包覆盖下载阶段，运行层与正式镜像共用 Dockerfile 和锁定依赖。
+          # 只覆盖下载包，保留正式镜像的依赖导出及运行层组装。
           docker buildx bake --file docker-bake.hcl sing-box --load \
             --set 'sing-box.output=type=docker,compression=gzip,compression-level=9,force-compression=true' \
             --set "sing-box.platform=linux/${ARCH}" \
-            --set 'sing-box.contexts.fetch=.tmp-sing-box-image' \
+            --set 'sing-box.contexts.package=.tmp-sing-box-image' \
             --set "sing-box.args.SING_BOX_VERSION=${VERSION}" \
             --set "sing-box.args.VCS_REF=${GITHUB_SHA}" \
             --set "sing-box.tags=padm-sing-box-candidate:${ARCH}"

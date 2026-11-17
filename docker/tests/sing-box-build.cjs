@@ -184,15 +184,26 @@ async function main() {
     assert.match(dispatch, /publish:[\s\S]*type: boolean\s+default: false/);
     assert.equal(shell('version=v1.14.4-padm.1; [[ "${version%-padm.*}" != *-* ]] && printf stable'), 'stable');
 
-    // 执行实际候选步骤，确认包进入覆盖上下文，构建或 smoke 失败均向上传播。
+    // 候选只覆盖包阶段，依赖导出和最终 rootfs 必须沿用正式构建路径。
     const candidate = script('Verify candidate in the distroless image');
+    const imageDockerfile = fs.readFileSync(path.join(project, 'docker/images/sing-box/Dockerfile'), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(imageDockerfile, /^FROM \$\{DEBIAN_BASE\} AS dependencies$/m);
+    const packageStage = imageDockerfile.split('FROM dependencies AS package\n')[1]?.split('\nFROM ')[0];
+    assert.ok(packageStage, 'Missing independently replaceable package stage');
+    assert.match(packageStage, /curl -fLsS[\s\S]*sha256sum -c -[\s\S]*tar -xzf/);
+    const runtimeStage = imageDockerfile.split('FROM dependencies AS fetch\n')[1]?.split('\nFROM ')[0];
+    assert.ok(runtimeStage, 'Missing shared runtime assembly stage');
+    assert.match(runtimeStage, /COPY --from=package \/out\/ \/out\//);
+    assert.match(runtimeStage, /python3 \/usr\/local\/bin\/export-runtime \/out\/rootfs/);
+    assert.match(imageDockerfile, /COPY --from=fetch \/out\/rootfs\/ \//);
+    assert.doesNotMatch(candidate, /sing-box\.contexts\.fetch=/);
     write('versions.lock', fs.readFileSync(path.join(project, 'versions.lock')));
     write('package/sing-box', 'candidate-binary');
     fs.mkdirSync(path.join(root, '.tmp-sing-box-artifacts'));
     shell('tar -czf .tmp-sing-box-artifacts/sing-box-1.14.1-linux-amd64.tar.gz package');
     write('docker/tests/image-smoke.sh', '[[ "$1" == padm-sing-box-candidate:amd64 && "$2" == sing-box ]]\nexit "${SMOKE_STATUS:-0}"\n');
     const mock = `docker() {
-        [[ "$*" == *'sing-box.platform=linux/amd64'* && "$*" == *'sing-box.contexts.fetch=.tmp-sing-box-image'* && "$*" == *'sing-box.args.SING_BOX_VERSION=v1.14.1'* && "$*" == *'--load'* ]] || return 90
+        [[ "$*" == *'sing-box.platform=linux/amd64'* && "$*" == *'sing-box.contexts.package=.tmp-sing-box-image'* && "$*" == *'sing-box.args.SING_BOX_VERSION=v1.14.1'* && "$*" == *'--load'* ]] || return 90
         [[ "$*" == *'sing-box.output=type=docker,compression=gzip,compression-level=9,force-compression=true'* ]] || return 92
         [[ "$(cat .tmp-sing-box-image/out/sing-box)" == candidate-binary ]] || return 91
         return "${'${BUILD_STATUS:-0}'}"

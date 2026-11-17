@@ -949,6 +949,83 @@ awk '
     done
 )
 
+# 执行真实门禁包装，覆盖混合复用、架构错误、缺失摘要和容器失败。
+RUNTIME_SCRIPT=${TEST_ROOT}/runtime-candidates.sh
+awk '
+    /^      - name: Test pinned runtime candidates$/ {step = 1; next}
+    step && /^        run: \|$/ {code = 1; next}
+    code {
+        if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) exit
+        sub(/^          /, ""); print
+    }
+' "${BUILD_WORKFLOW}" >"${RUNTIME_SCRIPT}"
+[[ -s "${RUNTIME_SCRIPT}" ]] || fail 'ARM64 真实运行门禁缺失'
+bash -n "${RUNTIME_SCRIPT}" || fail 'ARM64 真实运行门禁语法错误'
+(
+    export GITHUB_WORKSPACE=${PROJECT_ROOT} PADM_REGISTRY=example.invalid/padm
+    export RUNTIME_DIGEST="sha256:${IMAGE_DIGEST}"
+    docker() {
+        printf '%s\n' "$*" >>"${RUNNER_TEMP}/calls"
+        case "$1 $2" in
+        'pull --platform')
+            [[ "$3" == linux/arm64 && "$4" == "${PADM_REGISTRY}/padm-"*"@${RUNTIME_DIGEST}" ]] ;;
+        'image inspect')
+            local architecture=arm64
+            [[ "${RUNTIME_CASE}" != wrong-arch ]] || architecture=amd64
+            jq -n --arg id "${RUNTIME_DIGEST}" --arg arch "${architecture}" \
+                '[{Id: $id, Os: "linux", Architecture: $arch}]' ;;
+        'save --output') : >"$3" ;;
+        'create --privileged')
+            [[ "$*" == *'--network none --init --mount type=volume,dst=/n'* &&
+               "$*" == *'padm-regression:runtime docker-distroless-real' &&
+               "$*" != *docker.sock* ]] || return 1
+            printf 'runtime-fixture\n' ;;
+        cp*) [[ -f "$2" && "$3" == runtime-fixture:/* ]] ;;
+        'start --attach')
+            [[ "${RUNTIME_CASE}" != failed-start ]] || return 7
+            printf 'distroless-runtime-fixture-ok\n' ;;
+        'inspect --format')
+            if [[ "${RUNTIME_CASE}" == failed-exit ]]; then printf '7\n'; else printf '0\n'; fi ;;
+        'rm --force') [[ "$*" == 'rm --force --volumes runtime-fixture' ]] ;;
+        *) return 1 ;;
+        esac
+    }
+    git() { [[ "$*" == 'ls-files -z' ]] && printf 'install-docker.sh\0'; }
+    export -f docker git
+    for scenario in built mixed wrong-arch missing-digest failed-start failed-exit; do
+        export RUNTIME_CASE=${scenario} RUNNER_TEMP=${TEST_ROOT}/runtime-${scenario}
+        mkdir -p "${RUNNER_TEMP}/platforms"
+        PADM_IMAGES='[]'
+        for name in xray sing-box nginx ops net; do
+            reference=
+            if [[ "${scenario}" == mixed && "${name}" != net ]]; then
+                reference="${PADM_REGISTRY}/padm-${name}@${RUNTIME_DIGEST}"
+            fi
+            PADM_IMAGES=$(jq -c --arg name "${name}" --arg reference "${reference}" \
+                '. + [{name: $name, reference: $reference}]' <<<"${PADM_IMAGES}")
+            if [[ "${scenario}" != missing-digest ]]; then
+                jq -n --arg digest "${RUNTIME_DIGEST}" '{digest: $digest}' \
+                    >"${RUNNER_TEMP}/platforms/${name}-arm64.json"
+            fi
+        done
+        export PADM_IMAGES
+        status=0
+        bash "${RUNTIME_SCRIPT}" >"${RUNNER_TEMP}/output" 2>&1 || status=$?
+        case "${scenario}" in
+        built|mixed)
+            [[ "${status}" -eq 0 ]] || { cat "${RUNNER_TEMP}/output" >&2; fail "运行门禁误拒绝：${scenario}"; }
+            jq -e --arg id "${RUNTIME_DIGEST}" 'length == 5 and all(.[]; .reference == $id and .image_id == $id)' \
+                "${RUNNER_TEMP}/node-images.json" >/dev/null || fail '运行门禁未绑定精确镜像 ID'
+            ;;
+        *) [[ "${status}" -ne 0 ]] || fail "运行门禁未拒绝：${scenario}" ;;
+        esac
+        if [[ "${scenario}" != wrong-arch && "${scenario}" != missing-digest ]]; then
+            grep -qx 'rm --force --volumes runtime-fixture' "${RUNNER_TEMP}/calls" ||
+                fail "运行门禁未清场：${scenario}"
+        fi
+    done
+)
+
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
 grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS="${jobs}" PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
     fail 'contract shards do not use root-safe temp directories and bounded workers'
@@ -1036,6 +1113,9 @@ publishDefinition=$(awk '
     inside && /^  [^ ]/ {exit}
     inside {print}
 ' "${BUILD_WORKFLOW}")
+grep -Fq 'needs: [contract, smoke, runtime]' <<<"${publishDefinition}" &&
+    grep -Fq "needs.runtime.result == 'success' || (needs.contract.outputs.build_required != 'true' && needs.runtime.result == 'skipped')" <<<"${publishDefinition}" ||
+    fail '镜像发布没有等待真实运行通过，或错误接受有新构建的跳过结果'
 grep -Fq 'driver: docker' <<<"${publishDefinition}" ||
     fail '镜像索引发布仍启动不需要的 BuildKit 容器'
 grep -Fq 'packages: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks package write permission'

@@ -53,6 +53,21 @@ Fail2ban 复用测试挂载源码入口前，先断言候选入口 SHA-256 与�
 本机证据位于 `.tmp-regression-docker-d8364bd8b884411aa7eb134cf1d63e26/`。
 该夹具验证 owner/action、封禁及清理，不代表 SSH 日志采集整链。
 
+发布流程增加原生 ARM64 的同一真实运行门禁：下载本轮 smoke 的固定摘要，
+混合旧版复用引用后逐个核对架构，以精确镜像 ID 离线送入隔离 daemon。
+未挂宿主 Socket、未开放公网；失败、取消或有新构建却跳过均阻止镜像发布。
+本机包装回归覆盖混合复用、错架构、缺摘要、启动失败、非零退出和清场，
+最终 `docker-phase5 -Jobs 2` 10.953 秒通过；两份工作流的 actionlint 通过。
+证据 `.tmp-regression-docker-25a48451ff7945f89732c4876a0838f7/`。
+ARM64 实际结果须以本次远端执行为准，接入门禁本身不算验收通过。
+
+远端 `44053903394` 暴露 sing-box 候选覆盖整个 fetch 阶段后缺少
+`/out/rootfs` 的双架构构建错误。现将下载包阶段独立为 package，候选仅覆盖包；
+正式依赖安装、strip、许可证和 rootfs 导出仍共用 fetch，原失败保持。
+基线 `df5656be` 的本机 full 实际 67 项全部通过，845.194 秒、无结果复用，
+证据 `.tmp-regression-docker-6839b5299e6e4bb38b8278098cbac270/`；
+之后两处发布修复由上述最终 phase5 验证，不重复全量。
+
 复验入口（需先构建五个 `padm-distroless/padm-<名称>:local` 候选）：
 
 ```powershell
@@ -62,7 +77,7 @@ Fail2ban 复用测试挂载源码入口前，先断言候选入口 SHA-256 与�
 .\shell\regression\test-run-docker.ps1 -Scope distroless
 ```
 
-未验证 ARM64 构建及运行、生产部署、自然续期、压力与长期稳定性；
+ARM64 构建及运行等待远端门禁；未验证生产部署、自然续期、压力与长期稳定性；
 控制 HTTP 冒烟不证明 WireGuard 握手，Fail2ban 复用夹具保留 Docker 默认
-capabilities。未运行 full 或完整漏洞扫描。Python 上游标签发现限第一页
+capabilities。未运行完整漏洞扫描。Python 上游标签发现限第一页
 100 条，未来标签增长可能导致漏更。
