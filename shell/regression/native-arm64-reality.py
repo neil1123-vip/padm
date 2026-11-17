@@ -105,6 +105,26 @@ def mihomo_projection(local):
     }
 
 
+def baseline_spec(protocols, core_credential, account, account_uuid, password, token):
+    return {
+        "schema_version": 3,
+        "core": {"type": "xray", "secondary_type": None, "protocols": [
+            *copy.deepcopy(protocols), {
+                "id": 21, "core": "xray", "listener_id": "entry-website", "server": "127.0.0.1",
+                "public_port": WS_PORT, "address_families": ["ipv4"], "name": "arm64-website",
+                "uuid": core_credential,
+                "websocket": {"domain": DOMAIN, "path": "arm64-ws",
+                              "backend_port": 31297, "tls_port": 8443},
+            },
+        ]},
+        "accounts": [{"id": account, "name": "arm64-independent", "enabled": True,
+                      "uuid": account_uuid, "password": password, "shadowsocks_password": None,
+                      "listeners": list(PORTS)}],
+        "tls": {"domain": DOMAIN}, "subscription": {"enabled": False, "token": token},
+        "host_integrations": [], "site": {"mode": "default"},
+    }
+
+
 def result_valid(row, body):
     if row["accepted"]:
         return (
@@ -352,19 +372,8 @@ class Acceptance(specialties.Acceptance):
             require(set(pair) == {"decryption", "encryption"}, "encryption tool output incomplete")
             pairs.append(pair)
             self.known_secrets.extend(pair.values())
-        protocols.append({
-            "id": 21, "core": "xray", "listener_id": "entry-website", "server": "127.0.0.1",
-            "public_port": WS_PORT, "address_families": ["ipv4"], "name": "arm64-website",
-            "uuid": self.core_credential, "websocket": {"domain": DOMAIN, "path": "/arm64-ws"},
-        })
-        spec = {
-            "schema_version": 3, "core": {"type": "xray", "secondary_type": None, "protocols": protocols},
-            "accounts": [{"id": self.account, "name": "arm64-independent", "enabled": True,
-                          "uuid": self.account_uuid, "password": self.managed_password,
-                          "shadowsocks_password": None, "listeners": list(PORTS)}],
-            "tls": {"domain": DOMAIN}, "subscription": {"enabled": False, "token": uuid.uuid4().hex},
-            "host_integrations": [], "site": {"mode": "default"},
-        }
+        spec = baseline_spec(protocols, self.core_credential, self.account, self.account_uuid,
+                             self.managed_password, uuid.uuid4().hex)
         spec = base.expected_spec(spec, NEW, manifest)
         self.remember(spec)
         wrong = copy.deepcopy(spec)
@@ -867,6 +876,11 @@ def selfcheck():
     require(projection["query"]["pqv"] == digest(b"verify") and projection["query"]["pbk"] == digest(b"public")
             and projection["query"]["sid"] == digest(b"0123456789abcdef")
             and projection["query"]["encryption"] == digest(b"none"), "URI material hash projection mismatch")
+    specimen = baseline_spec([], "core", "account", "account-uuid", "password", "token")
+    website = specimen["core"]["protocols"][0]["websocket"]
+    require(website == {"domain": DOMAIN, "path": "arm64-ws", "backend_port": 31297, "tls_port": 8443}
+            and re.fullmatch(r"[A-Za-z0-9_-]{8,64}", website["path"]),
+            "v3 website backend/TLS ports or path contract changed")
     valid = {"accepted": True, "curl_exit": 0, "expected_bytes": 2, "expected_sha256": digest(b"ok"),
              "nonce": "/nonce", "origin_tcp": [{"peer": "172.18.0.2"}],
              "origin_requests": [{"path": "/nonce", "peer": "172.18.0.2"}],
