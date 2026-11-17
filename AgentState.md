@@ -16,14 +16,17 @@
 
 ## 最近完成
 
-- 6A.68 原生 Ubuntu ARM64 的正式 `.44` Engine 自动安装、纯 sing-box Trojan
-  `.8/.44` 七阶段通过；run `44093133554`/`c8ee532f`，69 工件/22 客户端、
-  两账目/10 镜像/清场断网只读独验通过；`.tmp-native-arm64-singbox-20261117/`。
-  安装前移除 runner 预装包，不称裸 OS；首轮运行通过、两次独验失败保持。
-- 6A.66 正式 `.8` 双 KVM 升级、防护及全文件恢复独验通过，正常关机、父盘保持。
-  1940 份证据 `.tmp-formal-control-3438-20261117/`；旧失败保持。
-- 6A.67 Ubuntu ARM64/IPv4/Xray WS 正式 `.7/.8` 七阶段及清场独验通过，
-  56 脱敏工件 `.tmp-native-arm64-host-20261117/`；私密原始输出未上传。
+- 6A.69 正式 `.44` ARM64/Xray 29+sing-box 28 的入口/双核心路由/HTTP 与
+  严格 CONNECT/站点 ALPN、服务重启及清场通过；run `44112277450`/`7808de09`。
+  126 工件/58 检查/六 checkpoint 断网只读独验、31+19 负控通过；
+  `.tmp-native-arm64-specialties-20261117/`，旧失败及首稿独验拒绝保持。
+  首次编辑只保持 JSON 语义；私密语义依赖现场断言，第二轮中继异常根因未定。
+- 6A.68 正式 `.44` ARM64 Engine 安装、纯 sing-box `.8/.44` 七阶段独验通过；
+  69 工件/22 客户端/两账目/10 镜像，`.tmp-native-arm64-singbox-20261117/`。
+  移除预装包后安装，不称裸 OS；首轮运行通过、两次独验失败保持。
+- 6A.67 ARM64/Xray WS `.7/.8` 七阶段及清场独验，56 工件；
+  `.tmp-native-arm64-host-20261117/`。6A.66 正式 `.8` 双 KVM 升级/防护/
+  全文件恢复独验，1940 工件 `.tmp-formal-control-3438-20261117/`；均已清场。
 - Dependabot 内置令牌同步 workflow 遭 403；修复后 42 例及 Actionlint 通过。
   待配 `DEPENDABOT_AUTOMATION_TOKEN` 后线上验证；PAT 事件已适配。
 - 原生双机证据 `.tmp-native-control-vms-20261116/`；A/B 已清场，
@@ -34,7 +37,7 @@
 
 - B 保留恢复部署及续期隔离；nftables 重载会清表，规则变化须核表和探针。
   实际续期、ARM64 其它组合/整机重启、IPv6、公网/多 Peer 新机恢复未验；
-  ARM64 origin 仅本地 lo，Engine 安装及两核心只覆盖 6A.67–6A.68 固定组合。
+  ARM64 origin 仅本地 lo，安装/两核心/专项只覆盖 6A.67–6A.69 固定组合。
 - 控制同步/启用态重启/密钥端口迁移仅补固定本地完整内核双机单 Peer；
   bind/TERM 恢复及预热后完整 Peer CLI 见证已补；其它信号/断电、
   公网多机、多 Peer 重启/灾备及长稳仍缺；`.8` 防护不外推生产/公网。
