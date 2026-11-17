@@ -12272,6 +12272,53 @@ r4 enable 返回 `0`，唯一 challenge、唯一完整 Peer CLI、唯一窗口�
 或长稳，不作 TCG/KVM 性能比较。旧失败保持，未访问或重启生产、扩跑
 daily/full、推送或发布，`16 supported/14 deferred` 保持，整体计划仍未完成。
 
+### 6A.66 正式 v3.43.8 双 KVM 升级与控制防护完整恢复
+
+2026-11-17，将 6A.65 的候选防护验收推进到固定正式 `v3.43.8`，
+提交 `6e880813a92c6518678ec518d292d585c2cb775d`。复用完整独立内核、
+systemd、Docker Engine 的本地 Debian 13 amd64/IPv4/单 Peer 双机父盘，
+新建独立 child 盘。每机实际下载三份固定正式 URL 资产，六次 SHA/长度均匹配；
+各一次正式 `padm-docker update` 升级完整控制包和五镜像，均返回 `0`。
+正式入口保留内置 manifest/Cosign 门禁，不安装候选文件或来源插桩。
+
+update 的 `previous_manifest_sha256` 保留旧 `.7`，后续正常配置会更新到当前 `.8`；
+因此每机再执行一次同规格正式 `configure`，核对角色、WG、账号、密钥和账目身份
+保持后，建立独立、稳定的 `.8` before。最终文件字节、权限和属主严格等于该
+before，不沿用 6A.65 的候选元数据例外。两机各 `312` 个实际 payload 文件、
+生成 ref/manifest、安装子目录权限、原 manifest 字节及五镜像均精确核对。
+本轮 guest 的镜像 ID 精确等于正式 index digest；独验另核五份原始 index
+和 amd64 manifest 的 SHA、唯一平台 descriptor、RepoDigests 及容器实际 ID，
+不把本轮 index ID 当作 config digest。
+
+保留唯一完整 Peer CLI、三次即时来源采样、即时 clean 和原 `30` 秒窗口。
+正式防护启用返回 `0`；`22` 次真实 `401` 后封禁，阻断超时、DROP 增加 `1`，
+解封恢复 `401`。启用态及停用后各三项严格 TLS 正反例和受管计量增长通过。
+终态安全、唯一回执、部署锁释放、Peer 连续清场、两机最终全包绑定及正常关机
+均已实际执行，独验核对顺序。
+
+整轮 `408.342` 秒，正常关机 `2.951` 秒，QEMU `[0,0]`、无强停、无 OOM，
+父盘不变；非 privileged，仅映射 `/dev/kvm`，两机 QMP 确认 KVM。
+首容器因设备缺失在 VM 启动前失败；WSL 刚启动且已有模块未加载，
+加载现有 `kvm_intel` 后以新容器执行，失败状态保持，无安装、持久配置变更或重启。
+断网只读独验通过，绑定 `1940` 份本轮及复用基线证据；Linux 内 `17` 个负控
+自检通过。前两次独验的镜像 ID 假设及旧 helper SHA 引用错误原件保留，
+仅修观察器，未改驱动或运行原件，也未重跑双机。
+
+- run：`control-protection-1794913371566390958`。
+- 驱动 SHA-256：
+  `494958b65f3327696d09a733f771edcf578905a1b4628b8a8501e218be32c0da`。
+- 结果 SHA-256：
+  `20a580a6c212d771d752a42ac7834ac8f6748710e5647980d8066c8085bde9a9`。
+- 独验报告 `formal-verification.json` SHA-256：
+  `e47cb70c57990bd5c9ae6ba938f5cdb3e155f6142024ba52d0ab416edc12d3df`。
+- 证据：`.tmp-formal-control-3438-20261117/`；私密卷未整体导出。
+
+仅补固定本地正式版升级、防护及完整恢复；bundle 根目录权限未单独采样，
+随机错误身份原 stdin 未重建。6A.47、6A.64 及其它旧失败不改判；
+不外推生产、公网、多 Peer、ARM64 宿主生命周期、其它故障或长稳。
+未访问、升级或重启 A/B，未重复 daily/full 或发布应用；
+`16 supported/14 deferred` 不变，整体计划仍未完成。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
