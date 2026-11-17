@@ -1085,19 +1085,30 @@ dockerControlSourceWitnessLocked() {
 }
 
 dockerControlSourceWitnessRecheck() {
+    local recheckStep=context recheckStatus
     # 仅供同锁挑战完成回调使用；登记与快照不能跨事务缓存。
     [[ -n "${registration:-}" && -n "${snapshot:-}" && -n "${nonce:-}" &&
         "${completion:-}" == dockerFail2banStartManagedCommit ]] &&
-        [[ "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${witnessOwner}" &&
-            "$(date +%s)" -lt "${expires}" ]] &&
-        ((SECONDS - started < 30)) &&
-        [[ "$(stat -c '%d:%i:%a:%u:%g:%h' "${challenge}")" == "${registration}" &&
-            "$(sha256sum "${challenge}")" == "${registrationHash}" ]] &&
-        current=$(dockerControlSourceSnapshot) && [[ "${current}" == "${snapshot}" ]] &&
-        [[ "$(dockerControlSourceReceipt "${receipt}" "${cursor}" "${nonce}" \
-          "${peerAddress}" "$(jq -r .control.listen.address "${spec}")" \
-          "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}")" == verified &&
-            "$(date +%s)" -lt "${expires}" ]] && ((SECONDS - started < 30))
+        { recheckStep=lock-owner
+          [[ "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${witnessOwner}" ]]; } &&
+        { recheckStep=realtime-before; [[ "$(date +%s)" -lt "${expires}" ]]; } &&
+        { recheckStep=elapsed-before; ((SECONDS - started < 30)); } &&
+        { recheckStep=registration-stat
+          [[ "$(stat -c '%d:%i:%a:%u:%g:%h' "${challenge}")" == "${registration}" ]]; } &&
+        { recheckStep=registration-hash; [[ "$(sha256sum "${challenge}")" == "${registrationHash}" ]]; } &&
+        { recheckStep=snapshot-read; current=$(dockerControlSourceSnapshot); } &&
+        { recheckStep=snapshot-match; [[ "${current}" == "${snapshot}" ]]; } &&
+        { recheckStep=receipt
+          [[ "$(dockerControlSourceReceipt "${receipt}" "${cursor}" "${nonce}" \
+            "${peerAddress}" "$(jq -r .control.listen.address "${spec}")" \
+            "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}")" == verified ]]; } &&
+        { recheckStep=realtime-after; [[ "$(date +%s)" -lt "${expires}" ]]; } &&
+        { recheckStep=elapsed-after; ((SECONDS - started < 30)); } || {
+        recheckStatus=$?
+        # 只记录固定步骤和数值，不展开登记、锁、来源或回执内容。
+        dockerError "dockerControlSourceWitnessRecheck step=${recheckStep} rc=${recheckStatus} seconds=${SECONDS}"
+        return "${recheckStatus}"
+    }
 }
 
 dockerControlSourceCheck() (

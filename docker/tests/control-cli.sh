@@ -706,6 +706,86 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
     )
 )
 (
+    # 独立检查真实复核函数；登记和摘要用实物，外部依赖记录短路前缀。
+    challenge="${TEST_ROOT}/recheck-private-challenge.json"
+    DOCKER_DEPLOYMENT_LOCK_DIR="${TEST_ROOT}/recheck-private-lock"
+    mkdir -- "${DOCKER_DEPLOYMENT_LOCK_DIR}"
+    printf 'private-challenge-material\n' >"${challenge}"
+    witnessOwner=${BASHPID}
+    recheckPid=${BASHPID}
+    completion=dockerFail2banStartManagedCommit
+    snapshot=private-source-snapshot
+    nonce=private-source-nonce
+    receipt=private-receipt cursor=private-cursor peerAddress=10.77.0.2
+    since=private-since until=private-until expires=2
+    recheckEvents="${TEST_ROOT}/recheck-events.log"
+    expectedEvents=(lock date stat hash snapshot receipt date)
+    cat() { printf 'lock\n' >>"${recheckEvents}"; command cat "$@"; }
+    stat() { printf 'stat\n' >>"${recheckEvents}"; command stat "$@"; }
+    sha256sum() { printf 'hash\n' >>"${recheckEvents}"; command sha256sum "$@"; }
+    date() {
+        [[ "$*" == +%s ]] || return 1
+        printf 'date\n' >>"${recheckEvents}"
+        if [[ "${recheckCase}" == realtime-before ]] ||
+            { [[ "${recheckCase}" == realtime-after ]] && grep -qx receipt "${recheckEvents}"; }; then
+            printf '2\n'
+        else
+            printf '1\n'
+        fi
+    }
+    dockerControlSourceSnapshot() {
+        printf 'snapshot\n' >>"${recheckEvents}"
+        [[ "${recheckCase}" != snapshot-read ]] || return 37
+        if [[ "${recheckCase}" == snapshot-match ]]; then
+            printf 'private-changed-snapshot\n'
+        else
+            printf '%s\n' "${snapshot}"
+        fi
+    }
+    # 回执完成后推进父 shell 时钟，无需真实等待 30 秒。
+    trap 'SECONDS=$((SECONDS + 30))' USR1
+    dockerControlSourceReceipt() {
+        printf 'receipt\n' >>"${recheckEvents}"
+        [[ "${recheckCase}" != elapsed-after ]] || kill -USR1 "${recheckPid}"
+        if [[ "${recheckCase}" == receipt ]]; then printf 'pending\n'; else printf 'verified\n'; fi
+    }
+    for recheckCase in context lock-owner realtime-before elapsed-before registration-stat \
+        registration-hash snapshot-read snapshot-match receipt realtime-after elapsed-after ok; do
+        printf '%s\n' "${witnessOwner}" >"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+        registration=$(command stat -c '%d:%i:%a:%u:%g:%h' "${challenge}")
+        registrationHash=$(command sha256sum "${challenge}")
+        SECONDS=100
+        started=${SECONDS}
+        expectedStatus=1
+        case "${recheckCase}" in
+        context) registration=; expectedCount=0 ;;
+        lock-owner) printf 'other-owner\n' >"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"; expectedCount=1 ;;
+        realtime-before) expectedCount=2 ;;
+        elapsed-before) started=$((SECONDS - 30)); expectedCount=2 ;;
+        registration-stat) registration=private-changed-registration; expectedCount=3 ;;
+        registration-hash) registrationHash=private-changed-hash; expectedCount=4 ;;
+        snapshot-read) expectedStatus=37; expectedCount=5 ;;
+        snapshot-match) expectedCount=5 ;;
+        receipt) expectedCount=6 ;;
+        realtime-after|elapsed-after) expectedCount=7 ;;
+        ok) expectedStatus=0; expectedCount=7 ;;
+        esac
+        : >"${recheckEvents}"
+        status=0
+        dockerControlSourceWitnessRecheck >"${TEST_ROOT}/recheck.stdout" \
+            2>"${TEST_ROOT}/recheck.stderr" || status=$?
+        [[ "${status}" == "${expectedStatus}" && ! -s "${TEST_ROOT}/recheck.stdout" ]]
+        [[ "$(<"${recheckEvents}")" == "$(printf '%s\n' "${expectedEvents[@]:0:${expectedCount}}")" ]]
+        if [[ "${recheckCase}" == ok ]]; then
+            [[ ! -s "${TEST_ROOT}/recheck.stderr" ]]
+        else
+            [[ "$(wc -l <"${TEST_ROOT}/recheck.stderr")" == 1 ]]
+            grep -Ex "dockerControlSourceWitnessRecheck step=${recheckCase} rc=${expectedStatus} seconds=[0-9]+" \
+                "${TEST_ROOT}/recheck.stderr" >/dev/null
+        fi
+    done
+)
+(
     dockerControlAccessLogEnsure "${root}"
     dockerControlSourceSnapshot() {
         if [[ -f "${TEST_ROOT}/rotation-drift" ]]; then printf 'changed\n'; else printf 'stable\n'; fi

@@ -12001,6 +12001,32 @@ result 和驱动；额外严格检查完整 stderr 摘要与唯一诊断。解�
 不再盲目重试 VM。本轮未改生产、重复生产重启、扩跑回归、推送或发布；
 `16 supported/14 deferred` 保持，整体仍未完成。
 
+### 6A.59 WitnessRecheck 的内部拒绝诊断
+
+2026-11-17，仅为 `dockerControlSourceWitnessRecheck` 原条件链增加
+`11` 个固定失败步骤：context、lock-owner、realtime-before、
+elapsed-before、registration-stat、registration-hash、snapshot-read、
+snapshot-match、receipt、realtime-after、elapsed-after。保留原求值顺序、
+短路、`current` 写入和原始返回码；前后两组真实时间与 `SECONDS` 检查、
+同锁要求、挑战登记、来源快照、回执与外层清场不变。失败只输出固定函数/
+步骤名、原始 rc 和 Bash `SECONDS`，不展开私密上下文；成功静默，
+不增加快照缓存或延长来源窗口。
+
+现有控制 CLI 合同新增独立子 shell，使用实物登记/stat/hash，覆盖全部
+失败步骤、快照读取非 `1` 原码 `37`、精确外部调用短路前缀及成功静默；
+局部信号推进测试时钟，不做真实 30 秒等待或影响后续用例。代码与测试
+独立只读复审通过。本机 Linux amd64、`Jobs=2` 的当前源码快照
+`ae593731be8b084c55ba82f63fde15fc423a60837536c3617c26adfb980a3267`
+通过 `docker-control-cli` 与 `docker-fail2ban-source`，入口分别
+`22.302/4.157` 秒、exit `0`、无缓存命中；工具镜像仍为
+`sha256:73f8f81324b9f8bf5a28ab24299de7b4b2811e0483e40968ca973cba99ca784a`。
+证据 `.tmp-regression-docker-4457f0438c8f49aea4464702c03e2f6a/`、
+`.tmp-regression-docker-f38df57ed8cd494da6aa3204443abe49/`。
+
+本节不解释 6A.58 的具体内部拒绝，不代表防护通过。下一步固定签名候选，
+复用原门禁与恢复断言做一次有界隔离验收；未改生产、推送或发布，
+`16 supported/14 deferred` 保持，整体仍未完成。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；
