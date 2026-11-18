@@ -560,6 +560,11 @@ def validate_nft(before, after):
     for item in normalized:
         if "set" in item:
             item["set"].pop("elem", None)
+        for expression in item.get("rule", {}).get("expr", []):
+            queue = expression.get("queue")
+            # nft 可把单个队列标志输出为字符串；不接受其它标志或字段。
+            if isinstance(queue, dict) and queue.get("flags") == "bypass":
+                queue["flags"] = ["bypass"]
     if stable(normalized, handles=False) != stable(expected_nft(redirect_ports[0]), handles=False):
         fail("sing-box nft resource closure is unverified")
     return redirect_ports[0]

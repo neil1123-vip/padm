@@ -76,6 +76,32 @@ assert {key: owned[key] for key in ("ifindex", "route_table", "redirect_port")} 
 tun.compare_active(owned, active)
 tun.compare_clean(before, before)
 
+# Debian 13 的 nft 1.1.3 将单个队列标志输出为字符串。
+scalar_queue = copy.deepcopy(active)
+queue_count = 0
+for item in scalar_queue["nft"]["nftables"]:
+    for expression in item.get("rule", {}).get("expr", []):
+        if "queue" in expression:
+            expression["queue"]["flags"] = "bypass"
+            queue_count += 1
+assert queue_count == 8
+scalar_owned = tun.owned_resources(before, scalar_queue)
+tun.compare_active(scalar_owned, scalar_queue)
+assert all(expression["queue"]["flags"] == "bypass"
+           for item in scalar_queue["nft"]["nftables"]
+           for expression in item.get("rule", {}).get("expr", []) if "queue" in expression)
+for field, value in [
+    ("flags", ""), ("flags", None), ("flags", False), ("flags", []),
+    ("flags", "fanout"), ("flags", ["fanout"]), ("flags", ["bypass", "fanout"]),
+    ("flags", ["bypass", "bypass"]), ("num", 101), ("extra", True),
+]:
+    drift = copy.deepcopy(scalar_queue)
+    queue = next(expression["queue"] for item in drift["nft"]["nftables"]
+                 for expression in item.get("rule", {}).get("expr", []) if "queue" in expression)
+    queue[field] = value
+    refused(lambda: tun.owned_resources(before, drift), f"queue {field}/{value}")
+    refused(lambda: tun.compare_active(scalar_owned, drift), f"active queue {field}/{value}")
+
 # 固定核心可按出站和协议栈关闭 GSO；只允许 vnet_hdr 的两个布尔值。
 for vnet_hdr in (False, True):
     tun_active = copy.deepcopy(active)
