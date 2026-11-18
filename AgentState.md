@@ -46,7 +46,7 @@
   B 静态网关 FAILED；同内核隔离切换保留 RA 选路，公网回滚待验。
   B `.7` 公网 IPv6 限源中继：WS/Hy2/TUIC 正反例、计量、Xray 29 站点九项及清场通过。
   初轮受影响的 docker0 已恢复，续期隔离已复验。生产 443 仅 IPv4。
-  公网保源、直连、站点 CLI 事务、其它协议及容量待验。
+  HTTP 中继 202 原生 IPv6 保源通过。Docker 公网直连、CLI 事务及容量待验。
 - ICMP 已验限 Debian 13/amd64/IPv4；arm64/公网/IPv6/traceroute/PMTU/重启未验；
   TUN/透明启用重启按要求不做。SOCKS UDP、Xray 解析后阻断继续拒绝。
 - `.7` WARP 原生 B 五分钟双核心各 21/21。Desktop 的 sing-box 间歇缺握手应答。
