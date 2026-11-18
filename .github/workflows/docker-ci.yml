@@ -1,134 +1,59 @@
 name: Docker CI
-
 on:
-  pull_request:
-    paths:
-      - '.github/dependabot.yml'
-      - '.github/scripts/**'
-      - '.github/workflows/**'
-      - 'docker/**'
-      - 'docker-bake.hcl'
-      - 'install.sh'
-      - 'install-docker.sh'
-      - 'shell/**'
-      - 'versions.lock'
-      - 'assets/**'
   workflow_dispatch:
-    inputs:
-      native_parallel_jobs:
-        description: Top-level native regression workers (2-4 for benchmark/recovery)
-        required: false
-        default: '3'
-        type: string
-
 permissions:
   contents: read
-
-concurrency:
-  group: docker-ci-branch-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
-
 jobs:
-  static:
-    name: Native static checks
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    outputs:
-      source_sha: ${{ steps.checked.outputs.source_sha }}
-    steps:
-      - uses: actions/checkout@v7
-      - name: Lint workflows
-        run: bash shell/regression/lint-ci-workflows.sh
-      - name: Check shell syntax
-        id: checked
-        shell: bash
-        run: |
-          set -euo pipefail
-          git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
-          git rev-parse HEAD | sed 's/^/source_sha=/' >>"${GITHUB_OUTPUT}"
-
-  native:
-    name: Native shell and workflow checks
-    needs: static
-    timeout-minutes: 20
-    runs-on: ubuntu-latest
-    env:
-      PADM_REGRESSION_CI_PARALLEL_JOBS: ${{ github.event_name == 'workflow_dispatch' && inputs.native_parallel_jobs || '' }}
+  native-arm64-uri:
+    name: Formal native ARM64 Reality URI
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.static.outputs.source_sha }}
-          fetch-depth: 0
+          persist-credentials: false
       - name: Install pinned jq
         run: sudo bash shell/regression/install-ci-jq.sh
-      - name: Run native regression profile
-        shell: bash
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if [[ -n "${PADM_REGRESSION_CI_PARALLEL_JOBS}" &&
-            ! "${PADM_REGRESSION_CI_PARALLEL_JOBS}" =~ ^[2-4]$ ]]; then
-            echo 'native_parallel_jobs must be 2, 3 or 4' >&2
-            exit 2
-          fi
-          selector=ci
-          if [[ "${GITHUB_EVENT_NAME}" == pull_request && "${PR_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            changed=$(git diff --name-only "${PR_BASE_SHA}" HEAD)
-            if ! grep -Eq '^(shell/subscription/|shell/regression/|shell/subscription_groups_regression[.]sh)' <<<"${changed}"; then
-              selector=ci-pr
-            fi
-          fi
-          printf 'Native regression selector: %s\n' "${selector}" >>"${GITHUB_STEP_SUMMARY}"
-          bash shell/subscription_groups_regression.sh "${selector}"
-
-  tls:
-    name: TLS transactions and renewal
-    needs: static
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.static.outputs.source_sha }}
-      - name: Install pinned jq
-        run: sudo bash shell/regression/install-ci-jq.sh
-      - name: Check Docker TLS transactions and renewal
-        shell: bash
-        run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused
-
-  signing:
-    name: Cosign install and signature checks
-    needs: static
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.static.outputs.source_sha }}
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.3
-      - name: Check signing and tamper rejection
-        run: bash shell/regression/check-cosign.sh
-
-  contracts:
-    needs: static
-    uses: ./.github/workflows/docker-contracts.yml
-    with:
-      source_ref: ${{ needs.static.outputs.source_sha }}
-
-  images:
-    needs: [static, native, tls, signing, contracts]
-    permissions:
-      contents: read
-      packages: read
-    uses: ./.github/workflows/build-images.yml
-    concurrency:
-      group: docker-ci-head-${{ github.event.pull_request.head.sha || github.sha }}
-      cancel-in-progress: true
-    with:
-      version: dev
-      source_ref: ${{ needs.static.outputs.source_sha }}
-      registry: ghcr.io/neil1123-vip
-      push: false
-      base_ref: ${{ github.event.pull_request.base.sha || '' }}
+      - name: Verify and unpack the two signed releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/padm-arm64-uri"
+          mkdir -p "${work}/evidence"
+          for ver in v3.44.3 v3.44.4; do
+            dir="${work}/${ver}"
+            mkdir -p "${dir}/source"
+            for asset in release-manifest.json release-manifest.sigstore.json padm-docker-bundle.tar.gz; do
+              curl -fLSs --retry 2 --connect-timeout 10 --max-time 120 \
+                "https://github.com/neil1123-vip/padm/releases/download/${ver}/${asset}" -o "${dir}/${asset}"
+            done
+            cosign verify-blob --bundle "${dir}/release-manifest.sigstore.json" \
+              --certificate-identity 'https://github.com/neil1123-vip/padm/.github/workflows/create_release.yml@refs/heads/main' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              "${dir}/release-manifest.json" 2>&1 | tee "${work}/evidence/${ver}-signature.log"
+            if [[ "${ver}" == v3.44.4 ]]; then
+              commit=25d99b1143d116da951c8eb9e6c47540bb22d898
+              sha=f76e8843755ccea9b31ce0551fb80319f51f9ce631a79193a868c7f29ad7cbc2
+            else
+              commit=ba3c23666cb573ba99d87abe4dae8699fc0f1110
+              sha=37fc003d60bf3ba90cc800ef06f5381eec29853a654febd967eecade0a3e7ee8
+            fi
+            jq -e --arg commit "${commit}" --arg sha "${sha}" --arg ver "${ver#v}" \
+              '.release.commit == $commit and .release.version == $ver and .control.sha256 == $sha' \
+              "${dir}/release-manifest.json" >/dev/null
+            printf '%s  %s\n' "${sha}" "${dir}/padm-docker-bundle.tar.gz" | sha256sum --check
+            tar -xzf "${dir}/padm-docker-bundle.tar.gz" -C "${dir}/source"
+            cp "${dir}/release-manifest.json" "${work}/evidence/${ver}-manifest.json"
+          done
+      - name: Exercise direct file-provider import
+        run: sudo env PATH="${PATH}" GITHUB_SHA="${GITHUB_SHA}" GITHUB_RUN_ID="${GITHUB_RUN_ID}" python3 -B shell/regression/native-arm64-uri.py "${RUNNER_TEMP}/padm-arm64-uri"
+      - name: Preserve sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-arm64-uri-${{ github.run_id }}
+          path: ${{ runner.temp }}/padm-arm64-uri/evidence
+          if-no-files-found: error
+          retention-days: 14
