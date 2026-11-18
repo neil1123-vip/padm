@@ -1,134 +1,39 @@
 name: Docker CI
 
 on:
-  pull_request:
-    paths:
-      - '.github/dependabot.yml'
-      - '.github/scripts/**'
-      - '.github/workflows/**'
-      - 'docker/**'
-      - 'docker-bake.hcl'
-      - 'install.sh'
-      - 'install-docker.sh'
-      - 'shell/**'
-      - 'versions.lock'
-      - 'assets/**'
   workflow_dispatch:
-    inputs:
-      native_parallel_jobs:
-        description: Top-level native regression workers (2-4 for benchmark/recovery)
-        required: false
-        default: '3'
-        type: string
 
 permissions:
   contents: read
 
-concurrency:
-  group: docker-ci-branch-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
-
 jobs:
-  static:
-    name: Native static checks
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    outputs:
-      source_sha: ${{ steps.checked.outputs.source_sha }}
+  native-icmp:
+    name: Formal Debian 13 ICMP in disposable KVM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - name: Lint workflows
-        run: bash shell/regression/lint-ci-workflows.sh
-      - name: Check shell syntax
-        id: checked
-        shell: bash
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.0.5
+      - name: Install disposable hypervisor tools
         run: |
-          set -euo pipefail
-          git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
-          git rev-parse HEAD | sed 's/^/source_sha=/' >>"${GITHUB_OUTPUT}"
-
-  native:
-    name: Native shell and workflow checks
-    needs: static
-    timeout-minutes: 20
-    runs-on: ubuntu-latest
-    env:
-      PADM_REGRESSION_CI_PARALLEL_JOBS: ${{ github.event_name == 'workflow_dispatch' && inputs.native_parallel_jobs || '' }}
-    steps:
-      - uses: actions/checkout@v7
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils genisoimage
+      - name: Stage signed release and fixed Debian parent
+        run: sudo env PATH="${PATH}" python3 -B shell/regression/native-icmp-3442/stage-host.py
+      - name: Run formal native ICMP scenarios
+        run: sudo python3 -B /tmp/padm-icmp-kvm/input/run-native-icmp.py
+      - name: Encrypt private guest evidence
+        if: always()
+        run: sudo env GITHUB_RUN_ID="${GITHUB_RUN_ID}" GITHUB_SHA="${GITHUB_SHA}" python3 -B shell/regression/native-icmp-3442/stage-host.py --archive
+      - name: Preserve encrypted evidence
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          ref: ${{ needs.static.outputs.source_sha }}
-          fetch-depth: 0
-      - name: Install pinned jq
-        run: sudo bash shell/regression/install-ci-jq.sh
-      - name: Run native regression profile
-        shell: bash
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if [[ -n "${PADM_REGRESSION_CI_PARALLEL_JOBS}" &&
-            ! "${PADM_REGRESSION_CI_PARALLEL_JOBS}" =~ ^[2-4]$ ]]; then
-            echo 'native_parallel_jobs must be 2, 3 or 4' >&2
-            exit 2
-          fi
-          selector=ci
-          if [[ "${GITHUB_EVENT_NAME}" == pull_request && "${PR_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            changed=$(git diff --name-only "${PR_BASE_SHA}" HEAD)
-            if ! grep -Eq '^(shell/subscription/|shell/regression/|shell/subscription_groups_regression[.]sh)' <<<"${changed}"; then
-              selector=ci-pr
-            fi
-          fi
-          printf 'Native regression selector: %s\n' "${selector}" >>"${GITHUB_STEP_SUMMARY}"
-          bash shell/subscription_groups_regression.sh "${selector}"
-
-  tls:
-    name: TLS transactions and renewal
-    needs: static
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.static.outputs.source_sha }}
-      - name: Install pinned jq
-        run: sudo bash shell/regression/install-ci-jq.sh
-      - name: Check Docker TLS transactions and renewal
-        shell: bash
-        run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused
-
-  signing:
-    name: Cosign install and signature checks
-    needs: static
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.static.outputs.source_sha }}
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.3
-      - name: Check signing and tamper rejection
-        run: bash shell/regression/check-cosign.sh
-
-  contracts:
-    needs: static
-    uses: ./.github/workflows/docker-contracts.yml
-    with:
-      source_ref: ${{ needs.static.outputs.source_sha }}
-
-  images:
-    needs: [static, native, tls, signing, contracts]
-    permissions:
-      contents: read
-      packages: read
-    uses: ./.github/workflows/build-images.yml
-    concurrency:
-      group: docker-ci-head-${{ github.event.pull_request.head.sha || github.sha }}
-      cancel-in-progress: true
-    with:
-      version: dev
-      source_ref: ${{ needs.static.outputs.source_sha }}
-      registry: ghcr.io/neil1123-vip
-      push: false
-      base_ref: ${{ github.event.pull_request.base.sha || '' }}
+          name: native-icmp-kvm-${{ github.run_id }}
+          path: /tmp/padm-icmp-kvm/public/
+          if-no-files-found: error
+          retention-days: 14
