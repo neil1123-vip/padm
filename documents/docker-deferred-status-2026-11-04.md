@@ -63,6 +63,9 @@ M：[6A.71](docker-menu-parity-plan.md#6a71-正式本地三节点控制验收与
 
 `subscription-multiserver` 与 `interactive-menu` 的多 Peer 灾备及重启缺口均已排除
 M 验证通过的固定本地 amd64/IPv4 双 Peer 组合；公网、其它组合和断电不计入本次通过。
+[6A.77](docker-menu-parity-plan.md#6a77-双-peer-拓扑单被控新机恢复) 另关闭同一
+拓扑下只替换一台被控的子项：主控及另一被控保持在线，旧邀请拒绝，
+双端原 timer 自主同步、TLS 和计量通过，1380 份证据离线独验，四机正常关机。
 正式 `3.43.4`、`3.43.7` 与 `3.43.8` 的共同可信发布门槛
 已取得，见 F、B 及[distroless 正式发布独验](docker-distroless-baseline.md)；后续正式 `.3` 发布绑定见 I。本地双 Peer 灾备及灾后重启已由 M 补齐，不替代各专项尚缺的公网环境、宿主生命周期或其它新主机灾备证据，
 不为每行重复发布或跑全套。公网 IPv6 等共用门槛按实际适用组合集中验收。
