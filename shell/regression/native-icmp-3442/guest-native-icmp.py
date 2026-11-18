@@ -23,6 +23,11 @@ BUNDLE_SHA = "0fdd626929a39ec60663355ec117e15e28f173af04167559514cecc11ba3598d"
 SIGNATURE_SHA = "8a0486dc0457f8e6123c89415c512a4cdbc883fa6230e501e4f3ec37b99668d3"
 COMMIT = "13f00bdfe41a4d7cc0607eba822b01dfd5c8b799"
 REALITY_TARGET = "b.951101.xyz"
+ASSET_ARGS = ("--manifest", str(INPUT / "assets/release-manifest.json"),
+              "--bundle", str(INPUT / "assets/release-manifest.sigstore.json"),
+              "--control-bundle", str(INPUT / "assets/padm-docker-bundle.tar.gz"))
+REGISTRY_PROBE = ("curl", "--silent", "--show-error", "--max-time", "30",
+                  "--output", "/dev/null", "--write-out", "%{http_code}\n", "https://ghcr.io/v2/")
 NEGATIVE_SCRIPT = ('set +e; output=$(timeout --foreground -k 2 25 docker run --rm --network host '
                    '--read-only --cap-drop ALL --security-opt no-new-privileges "$1" '
                    'tls ping -ip 192.0.2.1 cloudflare.com:443 2>&1); code=$?; '
@@ -269,9 +274,7 @@ def prepare(preflight_target):
         state = command("query-" + unit, "systemctl", "show", unit, "-p", "LoadState").decode()
         if state.strip() != "LoadState=not-found":
             command("stop-" + unit, "systemctl", "stop", unit)
-    arguments = ("--manifest", str(INPUT / "assets/release-manifest.json"),
-                 "--bundle", str(INPUT / "assets/release-manifest.sigstore.json"),
-                 "--control-bundle", str(INPUT / "assets/padm-docker-bundle.tar.gz"))
+    arguments = ASSET_ARGS
     command("egress-xray-pull", "docker", "pull", manifest["images"]["xray"]["reference"], timeout=900)
     command("guest-egress-negative", "bash", "-ec", NEGATIVE_SCRIPT, "bash",
             manifest["images"]["xray"]["reference"], timeout=50)
@@ -342,6 +345,7 @@ def main():
     target_created = False
     validation_route = None
     enabled = False
+    hosts_original = None
     try:
         if args.preflight_target:
             RESULT["scope"] = "formal-3.44.2-native-amd64-reality-preflight"
@@ -349,6 +353,14 @@ def main():
         prepare(args.preflight_target)
         if args.preflight_target:
             return
+        hosts = Path("/etc/hosts")
+        RESULT["registry_hosts_before"] = file_record(hosts)
+        hosts_original = hosts.read_bytes()
+        assert b"ghcr.io" not in hosts_original
+        hosts.write_bytes(hosts_original + b"\n10.0.2.100 ghcr.io\n")
+        resolved = command("registry-resolve", "getent", "ahostsv4", "ghcr.io").decode().splitlines()
+        assert resolved and all(row.split()[0] == "10.0.2.100" for row in resolved)
+        assert command("registry-preflight", *REGISTRY_PROBE).strip() == b"401"
         cli("baseline-down", "down")
         assert not command("baseline-container-set", "docker", "ps", "-aq").strip()
         original_ping_range = Path("/proc/sys/net/ipv4/ping_group_range").read_text()
@@ -414,7 +426,8 @@ def main():
                 ]:
                     command(label, "ip", "netns", "exec", "padm-icmp-target", *arguments)
             scenario["enable_command"] = len(COMMANDS) + 1
-            cli(mode + "-enable", "edit", "--tun-enable", "--confirm", "PADM-DOCKER-EDIT", timeout=900)
+            cli(mode + "-enable", "edit", "--tun-enable", "--confirm", "PADM-DOCKER-EDIT",
+                *ASSET_ARGS, timeout=900)
             enabled = True
             command(mode + "-stop-traffic-timer", "systemctl", "stop", "padm-docker-traffic.timer")
             before = network(mode + "-diagnose-before")
@@ -445,6 +458,7 @@ def main():
             values = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
             assert not int(values["CapEff"].strip(), 16) & (1 << 13)
             assert int(values["Gid"].split()[1]) == 0 and 10001 not in map(int, values["Groups"].split())
+            assert command(mode + "-registry-before", *REGISTRY_PROBE).strip() == b"401"
             scenario["traffic_before"] = network(mode + "-traffic-before")
             scenario["probe_command"] = len(COMMANDS) + 1
             scenario["probe"] = obj(mode + "-probe", "python3", "-B", str(INPUT / "probe-native-icmp.py"), mode)
@@ -464,8 +478,10 @@ def main():
             scenario["permission_error_observed"] = "permission denied" in logs.lower() or "operation not permitted" in logs.lower()
             if mode == "denied":
                 assert scenario["permission_error_observed"], "denied Echo did not produce a core permission error"
+            assert command(mode + "-registry", *REGISTRY_PROBE).strip() == b"401"
             scenario["off_command"] = len(COMMANDS) + 1
-            cli(mode + "-off", "edit", "--tun-off", "--confirm", "PADM-DOCKER-EDIT", timeout=900)
+            cli(mode + "-off", "edit", "--tun-off", "--confirm", "PADM-DOCKER-EDIT",
+                *ASSET_ARGS, timeout=900)
             enabled = False
             cli(mode + "-off-down", "down")
             assert not command(mode + "-off-container-set", "docker", "ps", "-aq").strip()
@@ -489,7 +505,8 @@ def main():
         cleanup = {"passed": True}
         try:
             if enabled:
-                cli("cleanup-tun-off", "edit", "--tun-off", "--confirm", "PADM-DOCKER-EDIT", timeout=900)
+                cli("cleanup-tun-off", "edit", "--tun-off", "--confirm", "PADM-DOCKER-EDIT",
+                    *ASSET_ARGS, timeout=900)
             if original_ping_range is not None:
                 Path("/proc/sys/net/ipv4/ping_group_range").write_text(original_ping_range)
             if target is not None:
@@ -514,6 +531,14 @@ def main():
                 assert Path("/proc/sys/kernel/random/boot_id").read_text().strip() == RESULT["native"]["boot_id"]
         except BaseException:
             cleanup.update(passed=False, error=traceback.format_exc())
+        if hosts_original is not None:
+            try:
+                hosts.write_bytes(hosts_original)
+                RESULT["registry_hosts_after"] = file_record(hosts)
+                assert RESULT["registry_hosts_after"] == RESULT["registry_hosts_before"]
+                cleanup["hosts_restored"] = True
+            except BaseException:
+                cleanup.update(passed=False, hosts_restored=False, hosts_error=traceback.format_exc())
         RESULT["cleanup"] = cleanup
         RESULT["passed"] = (RESULT.get("scenarios_passed", False) or
                             RESULT.get("preflight", {}).get("passed", False)) and cleanup["passed"] and "error" not in RESULT

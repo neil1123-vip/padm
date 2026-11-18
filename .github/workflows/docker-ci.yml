@@ -21,7 +21,7 @@ jobs:
       - name: Install disposable hypervisor tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils genisoimage
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils genisoimage socat
       - name: Stage signed release and fixed Debian parent
         run: sudo env PATH="${PATH}" python3 -B shell/regression/native-icmp-3442/stage-host.py
       - name: Run formal native ICMP scenarios

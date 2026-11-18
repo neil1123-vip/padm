@@ -25,6 +25,11 @@ BUNDLE_SHA = "0fdd626929a39ec60663355ec117e15e28f173af04167559514cecc11ba3598d"
 SIGNATURE_SHA = "8a0486dc0457f8e6123c89415c512a4cdbc883fa6230e501e4f3ec37b99668d3"
 GUEST_INPUT = "/root/padm-icmp-input"
 CLI = "/usr/local/bin/padm-docker"
+ASSET_ARGS = ("--manifest", f"{GUEST_INPUT}/assets/release-manifest.json",
+              "--bundle", f"{GUEST_INPUT}/assets/release-manifest.sigstore.json",
+              "--control-bundle", f"{GUEST_INPUT}/assets/padm-docker-bundle.tar.gz")
+REGISTRY_PROBE = ("curl", "--silent", "--show-error", "--max-time", "30",
+                  "--output", "/dev/null", "--write-out", "%{http_code}\n", "https://ghcr.io/v2/")
 TARGET_NS = ("ip", "netns", "exec", "padm-icmp-target")
 SCOPE = "formal-3.44.2-native-amd64-host-icmp-ipv4"
 SIGNER = "https://github.com/neil1123-vip/padm/.github/workflows/create_release.yml@refs/heads/main"
@@ -618,15 +623,20 @@ def scenario_evidence(evidence, commands, mode, scenario, guest):
               ("enable", "diagnose", "inspect", "core-status", "probe", "off", "off-status", "core-log")}
     order = [mode + "-baseline-links", labels["enable"], mode + "-diagnose-before-ip6tables",
              labels["diagnose"], mode + "-diagnose-after-links", labels["inspect"],
-             labels["core-status"], labels["probe"], labels["core-log"], labels["off"],
+             labels["core-status"], mode + "-registry-before", labels["probe"],
+             labels["core-log"], mode + "-registry", labels["off"],
              mode + "-off-down", mode + "-off-container-set",
              mode + "-after-off-ip6tables", labels["off-status"]]
     commands.ordered(*order)
     for name in ("enable", "diagnose", "probe", "off"):
         equal(scenario[name + "_command"], commands.seq(labels[name]), "reported sequence was not observed")
     confirm = ("--confirm", "PADM-DOCKER-EDIT")
-    commands.bytes(labels["enable"], CLI, "edit", "--tun-enable", *confirm)
-    commands.bytes(labels["off"], CLI, "edit", "--tun-off", *confirm)
+    commands.bytes(labels["enable"], CLI, "edit", "--tun-enable", *confirm, *ASSET_ARGS)
+    equal(commands.bytes(mode + "-registry-before", *REGISTRY_PROBE).strip(), b"401",
+          "registry TLS path failed before the active TUN probe")
+    equal(commands.bytes(mode + "-registry", *REGISTRY_PROBE).strip(), b"401",
+          "registry TLS path failed while TUN was active")
+    commands.bytes(labels["off"], CLI, "edit", "--tun-off", *confirm, *ASSET_ARGS)
     commands.bytes(mode + "-off-down", CLI, "down")
     equal(commands.bytes(mode + "-off-container-set", "docker", "ps", "-aq").strip(),
           b"", "containers remained after the official off/down")
@@ -732,9 +742,7 @@ def guest_evidence(evidence, formal):
           b"LoadState=not-found", "an Engine already existed before installation")
     equal(commands.bytes("initial-containers", "docker", "ps", "-a",
                          "--format", "{{json .}}").strip(), b"", "unexpected initial Docker containers")
-    args = ("--manifest", f"{GUEST_INPUT}/assets/release-manifest.json",
-            "--bundle", f"{GUEST_INPUT}/assets/release-manifest.sigstore.json",
-            "--control-bundle", f"{GUEST_INPUT}/assets/padm-docker-bundle.tar.gz")
+    args = ASSET_ARGS
     xray = guest["release"]["images"]["xray"]["reference"]
     commands.bytes("egress-xray-pull", "docker", "pull", xray)
     negative = commands.bytes("guest-egress-negative", "bash", "-ec", NEGATIVE_SCRIPT, "bash", xray)
@@ -794,6 +802,15 @@ def guest_evidence(evidence, formal):
                        "via", route["gateway"], "dev", "wan")
         commands.bytes("cleanup-control-plane-route-" + str(index), "ip", "route", "delete", prefix,
                        "via", route["gateway"], "dev", "wan")
+    resolved = commands.bytes("registry-resolve", "getent", "ahostsv4", "ghcr.io").decode().splitlines()
+    require(resolved and all(row.split()[0] == "10.0.2.100" for row in resolved),
+            "registry was not using the fixed guest forward")
+    equal(commands.bytes("registry-preflight", *REGISTRY_PROBE).strip(), b"401",
+          "registry TLS preflight failed")
+    equal(guest["registry_hosts_before"], guest["registry_hosts_after"],
+          "registry hosts file content or metadata was not restored")
+    file_record(guest["registry_hosts_before"])
+    require(guest["cleanup"]["hosts_restored"] is True, "registry hosts restoration failed")
     evidence.read("target-server.log")
     initial = network_snapshot(evidence, commands, "initial-network", guest["initial_network"], host)
     final = network_snapshot(evidence, commands, "final-network", guest["final_network"], host)
@@ -815,7 +832,8 @@ def guest_evidence(evidence, formal):
                 "distro-jq-version", "distro-jq-owner", "distro-jq-verify",
                 "native-arch", "native-engine", "initial-containers",
                 "egress-xray-pull", "guest-egress-negative", "formal-configure",
-                "account-create", "account-limit", "baseline-down", "baseline-container-set",
+                "account-create", "account-limit", "registry-resolve", "registry-preflight",
+                "baseline-down", "baseline-container-set",
                 "initial-network-ip6tables", "validation-wan", "host-validation-route",
                 "control-plane-route-0", "control-plane-route-1",
                 "target-netns", "host-target-route", "host-target-default"]
@@ -908,6 +926,16 @@ def semantic_controls(archive, formal):
         row, = [row for row in commands if row["label"] == "direct-enable"]
         row["argv"][2] = "--tun-off"
 
+    def missing_assets(_, __, commands):
+        row, = [row for row in commands if row["label"] == "direct-off"]
+        row["argv"] = row["argv"][:-len(ASSET_ARGS)]
+
+    def registry(_, command_bytes, __):
+        command_bytes("direct-registry-before", b"200\n")
+
+    def hosts(guest, _, __):
+        guest["registry_hosts_after"]["bytes"] += 1
+
     return [
         rejected("probe-netns-substitution", probe_field("direct", ["caller_netns"], lambda _: "net:[1]"),
                  "probe did not run in guest host netns"),
@@ -928,6 +956,9 @@ def semantic_controls(archive, formal):
         rejected("off-changed-quota", quota, "ledger identity changed: limit_bytes"),
         rejected("owner-evidence-mirror", owner, "raw snapshot differs"),
         rejected("changed-formal-enable-command", cli_order, "unexpected command: direct-enable"),
+        rejected("missing-local-signed-assets", missing_assets, "unexpected command: direct-off"),
+        rejected("registry-response-changed", registry, "registry TLS path failed before"),
+        rejected("hosts-not-restored", hosts, "registry hosts file content or metadata"),
     ]
 
 
@@ -952,6 +983,11 @@ def host_evidence(evidence, sources, report, archive):
             and launch[launch.index("-accel") + 1] == "kvm"
             and launch[launch.index("-cpu") + 1] == "host" and "-no-reboot" in launch,
             "unexpected guest accelerator, CPU, disk or reboot policy")
+    require(launch.count("-netdev") == 1 and
+            launch[launch.index("-netdev") + 1] ==
+            "user,id=wan,ipv6=off,hostfwd=tcp:127.0.0.1:2221-:22,"
+            "guestfwd=tcp:10.0.2.100:443-cmd:socat - TCP:ghcr.io:443",
+            "registry guest forward or SSH isolation changed")
     child, parent = disk
     equal(launch[launch.index("-drive") + 1], f"file={child['filename']},if=virtio,format=qcow2",
           "running disk is not the experiment overlay")
