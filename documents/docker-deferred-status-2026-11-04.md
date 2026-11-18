@@ -82,9 +82,9 @@ M 验证通过的固定本地 amd64/IPv4 双 Peer 组合；公网、其它组合
 | `interactive-menu` | P+G+B+W+K+N+M+I：6A.23 本机代码收口；3D.26 的 16 个公开协议管理 supported；正式安装/升级回滚/公网/重启、同机灾备及账号/业务恢复限定证据；B 正式 `.7` 从原 `.4` 归档完成固定 Xray WS 新主机恢复和单次整机重启。6A.46 另补本地完整独立内核双机的 amd64/IPv4/单 Peer 新机角色/WG 恢复、新身份/rebind、自主同步和 TLS/计量；K 补齐正式 `.8` 本地双 KVM 完整升级、防护及严格恢复；N 补齐 Ubuntu ARM64/IPv4/Xray WS `.7/.8`、纯 sing-box Trojan `.8/.44` 七阶段及 `.44` 官方 Engine 自动安装和清场，6A.69 再补固定 `.44` 入口/路由/中继/站点四类专项及服务重启，6A.70 补固定 Reality 三拓扑与普通 bridge 双入口 Encryption 集中验收、恢复及三次服务 restart。M 补固定本地双 Peer 主控灾备/灾后重启与正式 `.3` 控制入口断电恢复/重试，I 补正式 `.3` 发布绑定及固定 amd64 ICMP 三场景。 | 自然续期、ARM64 其它既定组合及整机重启、公网 IPv6、其它核心/协议及发行版适用安装、公网多机控制/灾备、其它既定多 Peer 角色/WG 灾备拓扑及各专项尚缺的适用生命周期。 | 汇总项，不重复计下属各行。N 的原点限本地 lo、host/loopback 站点限本地中继至固定公网后端，不计 ARM64 公网入站。M 的本地双 Peer 与恢复中断点不外推公网或其它故障，I 不外推其它架构或启用态重启。已有部署替换、其它 ACME 材料、未处理输入、v2 关联迁移等保持拒绝，不追加开发。 |
 | `routing-tools` | P+R+N：两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、CN 与名单管理；sing-box 解析后阻断、pure 发布共存、DNS 拒绝回退和限定合并重启。N/6A.69 补正式 `.44` 原生 ARM64/Xray 29+sing-box 28 的 SOCKS 全局/选择匹配/绕过/认证拒绝、DNS/hosts、Direct/Block 及恢复/服务重启。[正式 `.7` WARP 公网出站](#正式-v3447-的-warp-公网出站) 补齐两核心使用真实 Peer 的全局 IPv4、全局 IPv6、选择性 IPv4 HTTPS 出站。 | WARP 跨路径失败根因和长稳。其它路由组合的公网 IPv6 及适用生命周期待补。 | 与内部 206 共用证据/条件；SOCKS 入站限制归内部 201。N 的 DNS 错误拒绝不单独证明系统解析器无回退。固定 Xray 解析后阻断拒绝；原生 CN 预设已覆盖，不追加任意国家向导或最终流量语义引擎。 |
 | `internal-201-socks-relay` | P：5B.5b/5B.5b.1 已证固定 sing-box 的动态 BND/活动关联真实来源问题及 Xray 许可不随控制关闭撤销。 | 当前按限制关闭，无一轮普通环境回归可以使其成立；仅在相关核心行为变化后，重证发布、真实来源、会话鉴权及控制关闭撤销，才重新评估。 | 不开放完整入站、不降为 TCP-only、不增加辅助核心。host-network 不能修复鉴权。TCP 出站归 `routing-tools`；201 不作为公开节点协议。 |
-| `internal-202-http-relay` | P+H+N：Xray 认证 HTTP/CONNECT、字面来源白名单、管理/回滚；隔离 amd64 双栈和原生外部 IPv4 三目标 TLS/200、407、来源拒绝。N/6A.69 补正式 `.44` 原生 ARM64 的认证 HTTP/严格 HTTPS CONNECT、改端口、HTTP/CONNECT 来源拒绝、关闭及业务恢复；负例原点 TCP/请求为零。`.8` 隔离双栈回归及 B 原生 Xray 公网 IPv6 真实来源正反例通过。 | 公网 IPv6 受管 Docker 发布与 CLI 生命周期、其它既定中继组合。第二轮空成功异常根因未定。 | B 原生试验使用单一回环原点。sing-box 的 `X-Forwarded-For` 来源限制按既有合同处理。202 为内部专属直连。 |
+| `internal-202-http-relay` | P+H+N：Xray 认证 HTTP/CONNECT、字面来源白名单、管理/回滚；隔离 amd64 双栈和原生外部 IPv4 三目标 TLS/200、407、来源拒绝。N/6A.69 补正式 `.44` 原生 ARM64 的认证 HTTP/严格 HTTPS CONNECT、改端口、HTTP/CONNECT 来源拒绝、关闭及业务恢复；负例原点 TCP/请求为零。正式 `.8` 隔离双栈真实 CLI 的启用、端口/名单切换、关闭恢复及 24 组探测通过。B 原生 Xray 公网 IPv6 真实来源正反例通过。 | 公网 IPv6 受管 Docker 发布与该环境的 CLI 生命周期、其它既定中继组合。第二轮空成功异常根因未定。 | B 原生试验使用单一回环原点。sing-box 的 `X-Forwarded-For` 来源限制按既有合同处理。202 为内部专属直连。 |
 | `internal-206-routing-rules` | P+R+N，与 `routing-tools` 共用规则/名单、原生 IPv4 路由/DNS 拒绝回退及限定真实重启；N/6A.69 另补固定正式 `.44` ARM64 双核心规则及服务重启。沿用正式 `.7` 的真实 WARP Peer 出站记录。 | 同 `routing-tools` 的 WARP 跨路径、公网 IPv6 及适用生命周期。 | Xray 固定反例继续拒绝；只读重叠/覆盖不预测 GeoSite/DNS/最终流量。不追加任意国家/语义引擎；206 不作为公开节点协议。 |
-| `internal-207-access-control` | P+U+R+N，与 `entry-port-management` 共用发布别名、默认分享/原位修改及固定原生公网 IPv4/重启证据；N/6A.69 另补正式 `.44` ARM64/sing-box Trojan 别名与双核心恢复/服务重启。 | 同端口管理的公网 IPv6、其它既定 ARM64/端口组合及尚缺的适用生命周期，不重复计数。 | 只复用已有入口认证、统计及 TLS/SNI，不做任意目的转发。拒绝宿主组合保持原边界；207 不作为公开节点协议。 |
+| `internal-207-access-control` | P+U+R+N，与 `entry-port-management` 共用发布别名、默认分享/原位修改及固定原生公网 IPv4/重启证据；N/6A.69 另补正式 `.44` ARM64/sing-box Trojan 别名与双核心恢复/服务重启。正式 `.8` 隔离双栈 Xray WS 的真实 CLI 和严格 TLS 通过。 | 同端口管理的公网 IPv6、其它既定端口组合及尚缺的适用生命周期，不重复计数。 | 只复用已有入口认证、统计及 TLS/SNI，不做任意目的转发。拒绝宿主组合保持原边界；207 不作为公开节点协议。 |
 | `vless-encryption` | P+E+N：配对/投影/marker/失败恢复，固定正式 3.41.5 amd64 公网启停与普通 bridge 双加密入口真实重启。N/6A.70 补固定正式 `.44` 原生 ARM64/IPv4 普通 bridge 双入口的五阶段启停/服务 restart/恢复、精确错误配对与旧 none/错误 encryption 拒绝，正式 Xray 与 Mihomo v1.19.28 显式 hybrid 正例通过。[6A.76](docker-menu-parity-plan.md#6a76-mihomo-原始-reality-uri-导入) 补隔离 amd64 和原生 ARM64 的 Mihomo v1.19.31 Vision/XHTTP 原 URI 导入（Encryption 开/关），及普通 gRPC 原 URI；原生 ARM64 五个正例、18 个负例和清场通过。 | 其它既定客户端/算法、其它环境的 Mihomo 原 URI 导入、ARM64 整机重启/公网入站/IPv6、其它拓扑的加密生命周期及当前版本尚缺的适用生命周期。 | 只按固定 Xray/Mihomo 组合及 schema 3 Reality 1/2 实验范围使用；N 的显式 X25519MLKEM768 证据和旧原 URI 失败不改判。不能与 3D.27/F 的 ML-DSA-65 签名验证证据相互替代；未验组合不暗中开放，旧 curl 28 不改判。 |
 
 ## 本轮更新边界
@@ -459,9 +459,26 @@ CONNECT 隧道内的 HTTP 均返回 200，错误及缺失凭据返回 407。名�
 来源见证，回环原点仅收到允许阶段两个正例。首轮预检、后续 systemd 日志启动及
 缺少 `Connection: close` 的客户端超时原样保留。最终退出码为 0，临时单元、
 目录及端口已清理，生产容器、`docker0`、路由、规则、转发及守护进程基线一致。
-公网证据限原生 Xray 监听，受管 Docker 发布和 CLI 生命周期仍待验。夹具和原件
+这轮公网证据覆盖原生 Xray 监听。夹具和原件
 为验收 worktree 的 `.tmp-native-ipv6-http-relay.ps1` 与
 `.tmp-native-ipv6-http-relay-checks.log`。
+
+北京时间 2026-11-19，从已验签的正式 `.8` 包安装真实 CLI，在独立 Docker
+Engine 29.8.2 上配置 Xray WS 和测试证书。`207` 经真实 `edit` 完成别名新增、
+默认分享、替换、恢复默认与移除。双栈严格 TLS 握手、新旧端口切换及规格恢复
+通过。此轮 `207` 探测覆盖 TLS 层。
+
+`202` 经真实 `edit` 启用双栈中继、修改端口、反转 IPv4/IPv6 来源名单并关闭。
+改动前后分别执行两地址族、HTTP 和严格 TLS CONNECT、允许来源与正确认证、
+错误认证及拒绝来源共 24 组，原点精确收到 8 个正例。错误认证返回 `407`。
+限源 HTTP 返回空体 `503`，限源 CONNECT 在代理返回 `200` 后未建立目标 TLS。
+关闭前后的端口探针和规格复核通过。原点补齐 `Content-Length` 后，CONNECT
+正例收到完整正文且 curl 退出 `0`。此前各次测试失败原样保留。
+
+本轮 `207` 与 `202` 分别见验收 worktree 的
+`.tmp-formal3448-dualstack-cli-attempt7.log` 与
+`.tmp-formal3448-dualstack-cli-relay-r3.log`。公网 Docker 直连仍需独立 IPv6
+测试地址。B 的候选地址用于 SSH 管理。
 
 北京时间 2026-11-18，使用 `v3.44.5` 源码快照及清单绑定的 amd64 `ops`、`nginx`、`xray`、
 `sing-box` 镜像，在独立断网 daemon 内补验 ACME。Pebble 本地 CA、发布信任夹具
