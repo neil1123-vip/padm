@@ -505,6 +505,29 @@ B 的原生 Debian 对照使用同一一次性 WARP 配置顺序启动 Xray 三�
 生产容器、网桥、路由及防火墙基线复核通过。原件在
 `.tmp-warp-daily-close/padm-warp-native-466b4ee24692.log`。失败轮保留。
 
+2026-11-19，Docker Desktop（Engine 29.9.3，WSL2 内核 6.6.87.2）用同一个临时
+Peer 和相同的正式核心构件做八轮交替测试。全局 IPv4 下，Xray 在 bridge、host
+各 4/4，sing-box 各 0/4。
+首轮抓包因工具默认切换 UID 失败，所用 Peer 已撤销。修正后完成八轮。
+共用外部 UDP socket 的附加试验中，Xray 有握手请求无应答，sing-box 无握手
+到达回环转发器，两个核心在该夹具下各 0/4。
+
+原始 bridge 路径另用一个临时 Peer 走 Xray、sing-box、sing-box、Xray 四轮。
+Xray 两轮各 2/2，sing-box 先 2/2、后 0/2。成功的三轮在容器 `eth0` 各看到
+一个按源端口和索引匹配的握手应答。失败轮的六个握手请求设备标记均正确，
+同接口无握手应答，另收到五个其它 UDP 包。该轮故障在探针的 TLS 建立之前，
+丢失位置、其它路径的失败原因和长稳待验。三个正式采样轮次的 Peer 均已撤销，
+临时容器余量为零。原件为验收 worktree 内的 `.tmp-warp-network-crossover-retest.log`、
+`.tmp-warp-shared-socket-result.log` 和 `.tmp-warp-direct-headers-result.log`。
+
+同日，B 在原生 Debian 的临时 systemd 单元用同一 Peer 交替启动两个核心，
+Xray 通过 5/5，sing-box 通过 6/6。随后用另一个临时 Peer 各运行一个持续
+300 秒的进程，双核心各通过 21/21 次全局 IPv4 HTTPS 采样。每次校验 `warp=on`、
+出口地址族及与直连出口的差异。两轮设备均已撤销，临时缓存、监听和容器已清，
+生产容器、路由、`docker0` 和防火墙基线一致。原件
+`.tmp-warp-daily-close/padm-warp-native-7eb2fe85b858.log` 及
+`.tmp-warp-daily-close/padm-warp-native-c7215f6eb799.log`。
+
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
 从验签发布 `44306096595` 的 amd64 Xray 镜像

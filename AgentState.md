@@ -49,7 +49,7 @@
   公网保源、直连、站点 CLI 事务、其它协议及容量待验。
 - ICMP 已验限 Debian 13/amd64/IPv4；arm64/公网/IPv6/traceroute/PMTU/重启未验；
   TUN/透明启用重启按要求不做。SOCKS UDP、Xray 解析后阻断继续拒绝。
-- `.7` WARP 五分钟 Xray/host、sing-box/bridge 各 20/20，交叉组合失败。
+- `.7` WARP 原生 B 五分钟双核心各 21/21。Desktop 的 sing-box 间歇缺握手应答。
   CDN 缺代理测试记录及设置核验。
   Vision reset/XHTTP/TUIC 旧超时根因未定；旧跨核心失败原件保持。
   固定公网组合不外推活动 sing-box；拒绝配对及带来源的跨核心复制。
