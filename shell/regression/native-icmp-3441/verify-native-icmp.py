@@ -619,6 +619,7 @@ def scenario_evidence(evidence, commands, mode, scenario, guest):
     order = [mode + "-baseline-links", labels["enable"], mode + "-diagnose-before-ip6tables",
              labels["diagnose"], mode + "-diagnose-after-links", labels["inspect"],
              labels["core-status"], labels["probe"], labels["core-log"], labels["off"],
+             mode + "-off-down", mode + "-off-container-set",
              mode + "-after-off-ip6tables", labels["off-status"]]
     commands.ordered(*order)
     for name in ("enable", "diagnose", "probe", "off"):
@@ -626,6 +627,9 @@ def scenario_evidence(evidence, commands, mode, scenario, guest):
     confirm = ("--confirm", "PADM-DOCKER-EDIT")
     commands.bytes(labels["enable"], CLI, "edit", "--tun-enable", *confirm)
     commands.bytes(labels["off"], CLI, "edit", "--tun-off", *confirm)
+    commands.bytes(mode + "-off-down", CLI, "down")
+    equal(commands.bytes(mode + "-off-container-set", "docker", "ps", "-aq").strip(),
+          b"", "containers remained after the official off/down")
     diagnosed = commands.obj(labels["diagnose"], CLI, "protocol", "tun-diagnose")
     equal(scenario["diagnosis"], diagnosed, "diagnosis did not match official CLI output")
     expected = dict(enabled=True, runtime="observed", family="ipv4", policy="direct", uid=0,
@@ -782,6 +786,14 @@ def guest_evidence(evidence, formal):
     path = (validation_ip + "/32", "via", route["gateway"], "dev", "wan")
     commands.bytes("host-validation-route", "ip", "route", "add", *path)
     commands.bytes("cleanup-validation-route", "ip", "route", "delete", *path)
+    commands.bytes("baseline-down", CLI, "down")
+    equal(commands.bytes("baseline-container-set", "docker", "ps", "-aq").strip(), b"",
+          "containers existed at the stopped baseline")
+    for index, prefix in enumerate(("0.0.0.0/1", "128.0.0.0/1")):
+        commands.bytes("control-plane-route-" + str(index), "ip", "route", "add", prefix,
+                       "via", route["gateway"], "dev", "wan")
+        commands.bytes("cleanup-control-plane-route-" + str(index), "ip", "route", "delete", prefix,
+                       "via", route["gateway"], "dev", "wan")
     evidence.read("target-server.log")
     initial = network_snapshot(evidence, commands, "initial-network", guest["initial_network"], host)
     final = network_snapshot(evidence, commands, "final-network", guest["final_network"], host)
@@ -803,11 +815,14 @@ def guest_evidence(evidence, formal):
                 "distro-jq-version", "distro-jq-owner", "distro-jq-verify",
                 "native-arch", "native-engine", "initial-containers",
                 "egress-xray-pull", "guest-egress-negative", "formal-configure",
-                "account-create", "account-limit", "initial-network-ip6tables",
-                "validation-wan", "host-validation-route", "target-netns", "host-target-route", "host-target-default"]
+                "account-create", "account-limit", "baseline-down", "baseline-container-set",
+                "initial-network-ip6tables", "validation-wan", "host-validation-route",
+                "control-plane-route-0", "control-plane-route-1",
+                "target-netns", "host-target-route", "host-target-default"]
     for mode in MODES:
         ordering += [mode + "-baseline-links", mode + "-off-status"]
-    commands.ordered(*ordering, "cleanup-veth", "cleanup-netns", "cleanup-validation-route", "final-network-links")
+    commands.ordered(*ordering, "cleanup-veth", "cleanup-netns", "cleanup-validation-route",
+                     "cleanup-control-plane-route-0", "cleanup-control-plane-route-1", "final-network-links")
     material = guest["initial_material"]
     for mode in MODES:
         for stage in ("materials_before", "materials_after"):

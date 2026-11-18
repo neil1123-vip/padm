@@ -349,6 +349,8 @@ def main():
         prepare(args.preflight_target)
         if args.preflight_target:
             return
+        cli("baseline-down", "down")
+        assert not command("baseline-container-set", "docker", "ps", "-aq").strip()
         original_ping_range = Path("/proc/sys/net/ipv4/ping_group_range").read_text()
         RESULT["initial_network"] = network("initial-network")
         RESULT["initial_material"] = materials()
@@ -359,6 +361,9 @@ def main():
         path = [ip + "/32", "via", route["gateway"], "dev", route["dev"]]
         command("host-validation-route", "ip", "route", "add", *path)
         validation_route = path
+        for index, prefix in enumerate(("0.0.0.0/1", "128.0.0.0/1")):
+            command("control-plane-route-" + str(index), "ip", "route", "add", prefix,
+                    "via", route["gateway"], "dev", "wan")
         command("target-netns", "ip", "netns", "add", "padm-icmp-target")
         target_created = True
         setup_commands = [
@@ -462,6 +467,8 @@ def main():
             scenario["off_command"] = len(COMMANDS) + 1
             cli(mode + "-off", "edit", "--tun-off", "--confirm", "PADM-DOCKER-EDIT", timeout=900)
             enabled = False
+            cli(mode + "-off-down", "down")
+            assert not command(mode + "-off-container-set", "docker", "ps", "-aq").strip()
             scenario["after_off"] = network(mode + "-after-off")
             scenario["materials_after"] = materials()
             unchanged_material(scenario["materials_before"], scenario["materials_after"])
@@ -496,6 +503,9 @@ def main():
                 command("cleanup-netns", "ip", "netns", "delete", "padm-icmp-target")
             if validation_route is not None:
                 command("cleanup-validation-route", "ip", "route", "delete", *validation_route)
+                for index, prefix in enumerate(("0.0.0.0/1", "128.0.0.0/1")):
+                    command("cleanup-control-plane-route-" + str(index), "ip", "route", "delete", prefix,
+                            "via", route["gateway"], "dev", "wan")
             if "initial_network" in RESULT:
                 RESULT["final_network"] = network("final-network")
                 assert normalized(RESULT["initial_network"], False) == normalized(RESULT["final_network"], False), "final resources differ"
