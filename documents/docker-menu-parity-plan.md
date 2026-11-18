@@ -12655,7 +12655,7 @@ REALITY 目标探测拒绝和 Debian 13 `jq 1.7` 无法编译 sing-box DNS 渲�
 `226ceb2f` 对 `dns` 与 `rules` 的复合对象值显式分组；正式原包在 Debian
 `jq 1.7` 重现失败，修复后普通/TUN 渲染及解析后 IP 阻断合同通过，
 `jq 1.8.2` 的同一 TUN 合同通过。不改生成语义、能力或支持状态；
-真实 Echo、过滤、缺权与 TCP/UDP 需从下一签名正式包补验。
+当时真实 Echo、过滤、缺权与 TCP/UDP 仍待下一签名正式包补验；后续结果见 6A.75。
 
 ### 6A.72 正式本地双 Peer 主控新机灾备
 
@@ -12734,6 +12734,65 @@ timer。两个 Peer 各完成两次自然同步，修订 `1 → 2`，无手工�
 只读独验，聚合 SHA-256
 `1854fb004fa9e5471088ae55fbc6a0308427599fc02a89bcd0360ec7ef0b975f`。
 普通发布包 `docker-release` 回归通过；状态仍为 `16 supported/14 deferred`。
+
+正式补验随后使用 `v3.44.3`/`ba3c2366` 控制入口恢复同一封存的 `.44`
+业务，在实际 `active` 窗口冻结命令树并强停唯一新 VM。冷启动后 boot ID
+变化、原 marker/spec 摘要保持；两次 `restore recover` 均回到空目标，
+`.manifest.*`、`.stage.*`、事务标记、锁及旧容器全部清除，同一归档重试
+成功且服务 healthy。规格、WG/TLS 材料和额度保持，历史累计不减；
+控制身份按灾备规则重建。最终正常关机、QEMU exit `0`，父盘与旧封存的
+`1697` 文件摘要前后相同。首次容器因缺 `/dev/kvm` 退出 `127`、未启动
+VM 的失败保留；加载已存在的匹配模块后才执行本次实验。
+
+执行及主代理独验均使用 run 内冻结源码、旧源码和两套正式资产，输入只读、
+断网且不映射 KVM 的复核得到同一 `116` 文件聚合 SHA-256：
+`8893c253d1bbe01f369d2d14560589c917298e122a412759c575bf0ea6ea5647`。
+原件 `.tmp-native-restore-powercut-formal3443-20261118/`，入口
+`evidence-index.json`、`verified-file-hashes.json`、`verify-frozen.ps1`；
+私密卷 `padm-restore-powercut-formal3443-20261118` 中路径为
+`/out/restore-powercut-formal3443-1794976457566446920`。
+只补正式 `.3` 控制入口恢复旧 `.44` 业务的该中断点、幂等清理和重试；
+未重跑双 Peer 重绑、原 timer 或全部 `.3` 业务，不外推物理掉电或公网。
+
+### 6A.75 正式 v3.44.3 发布绑定与 ICMP 三场景
+
+2026-11-18（北京时间），正式 `v3.44.3`/`ba3c2366` 的 Release run
+`44233188541` 通过 `30` 个门禁，ARM64 runtime 与 image smoke 两项
+明确 skipped。三附件、两次确定性重建、清单和五镜像的签名及双架构
+digest 绑定经独立核验通过；镜像引用复用 `.1/.2`，不把本次跳过的
+runtime/smoke 写为重新执行。证据
+`.tmp-release-3443-44231991439/verified-release.json`。
+
+以该正式版本为唯一父提交冻结 ICMP r2 夹具 `2bb4191f`，run
+`44241272794` 在本地独立 Debian 13/amd64 KVM guest、host-network、
+IPv4、纯 sing-box TUN 下完成三场景：
+
+- direct：TUN request、wire request、wire reply、Echo reply 各 `1`。
+- filtered：TUN/wire request 各 `1`、目标过滤计数增长，无 wire/Echo reply。
+- denied：TUN request `1`，无 wire request/reply；实际核心线程在同一
+  探针窗口先收到 RAW ICMP socket `EPERM`、再收到 DGRAM `EACCES`。
+
+三场景的 TCP/UDP nonce、实际诊断核心 PID/命名空间、无 `NET_RAW`、
+owner/网络资源、材料/额度/累计，以及 `off`/`down` 恢复全部通过。
+缺权由核心 syscall 原件证明，普通核心日志为空，不冒充错误日志。
+strace 主动 SIGINT 实测返回 `-2`，仅在无强杀、全部线程脱离且核心
+PID/starttime 保持时接受。最后正常关机，QEMU exit `0`、父盘摘要保持。
+
+完整冻结验证器断网、只读独验通过，绑定 `662` 份 guest 文件、`314`
+条命令和 `13` 个资产；`24` 项组件及 `17` 项语义负控均拒绝篡改。
+执行源码与签名夹具逐字绑定，ZIP/CMS/明文摘要已核验。入口
+`.tmp-release-3443-44231991439/verified-icmp-r2-44241272794.json`；
+冻结驱动 SHA-256
+`0883a61a5337cc36c11b6228a6bfc0d4143426d600e7a7c214b20f74174274b3`，
+独验器 SHA-256
+`fc70b5d868c4e9f6d8fd3cda4744248e96531c4e5c5220eebbb435587497e61d`。
+旧 run `44235384435` 的 init PID 误读、缺权日志空及收尾缺 `down`
+保持失败，只承认其已独验的失败前缀，不改判为整轮通过。
+
+只关闭上述固定正式 Debian 13/amd64/host-network/IPv4 的 ICMP 子项。
+ARM64、公网、IPv6、traceroute/PMTU、启用态重启及长稳未验；TUN/透明
+启用态重启按用户要求不做。未登录、升级或重启生产 A/B；临时夹具留隔离
+分支，原件和私钥不提交。支持状态保持 `16 supported/14 deferred`。
 
 ### 本轮菜单与回归收敛
 
