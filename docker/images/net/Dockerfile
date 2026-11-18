@@ -29,7 +29,7 @@ RUN set -eux; \
         /bin/busybox /bin/sh /bin/bash /usr/bin/env /usr/bin/cmp \
         /usr/bin/python3 /usr/lib/python3 /usr/lib/python3.* \
         /usr/bin/fail2ban-client /usr/bin/fail2ban-server /etc/fail2ban \
-        /usr/bin/wg /usr/bin/wg-quick /usr/sbin/ip /usr/sbin/nft \
+        /usr/bin/wg /usr/bin/wg-quick /usr/sbin/ip /usr/bin/ss /usr/sbin/nft \
         /usr/sbin/iptables /usr/sbin/ip6tables \
         /usr/sbin/iptables-save /usr/sbin/ip6tables-save \
         /usr/sbin/iptables-restore /usr/sbin/ip6tables-restore \
@@ -49,6 +49,7 @@ RUN set -eux; \
     chroot /out/rootfs /usr/bin/fail2ban-client --version; \
     chroot /out/rootfs /usr/sbin/iptables --version; \
     chroot /out/rootfs /usr/sbin/nft --version; \
+    chroot /out/rootfs /usr/bin/ss --version; \
     chroot /out/rootfs /usr/bin/wg --version; \
     dpkg-query -W -f='${Package}\t${Version}\n' > /out/rootfs/usr/share/padm/build-packages.txt
 

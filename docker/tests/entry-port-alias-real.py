@@ -26,6 +26,9 @@ command, stop, wait_ready, namespaces, exact = (
     helpers[name] for name in ("command", "stop", "wait_ready", "namespaces", "exact"))
 HOST = helpers["HOST"]
 HOSTS = helpers["HOSTS"]
+# This address exists only in the offline test namespace. The ingress
+# fixture's 198.18.0.0/15 is blocked by Xray's default final rule.
+ORIGIN_HOST = "192.0.0.33"
 TCP_PORT, UDP_PORT, TLS_PORT = 18080, 18081, 18443
 BODY = b"padm-entry-port-alias-proof"
 PORTS = {"xray": (35441, 36441), "sing-box": (35442, 36442)}
@@ -83,8 +86,8 @@ def fixture(root):
     context.minimum_version = ssl.TLSVersion.TLSv1_3
     context.set_alpn_protocols(["h2", "http/1.1"])
     context.load_cert_chain(root / "target.crt", root / "target.key")
-    with socketserver.ThreadingTCPServer((HOST, TCP_PORT), TcpOrigin) as tcp, \
-            socketserver.ThreadingUDPServer((HOST, UDP_PORT), UdpOrigin) as udp, \
+    with socketserver.ThreadingTCPServer((ORIGIN_HOST, TCP_PORT), TcpOrigin) as tcp, \
+            socketserver.ThreadingUDPServer((ORIGIN_HOST, UDP_PORT), UdpOrigin) as udp, \
             ThreadedTlsTarget((HOST, TLS_PORT), TlsTarget) as tls:
         tls.context = context
         for server in (tcp, udp, tls):
@@ -105,7 +108,7 @@ def socks(port, transport, timeout):
     try:
         stream.sendall(b"\x05\x01\x00")
         assert exact(stream, 2) == b"\x05\x00"
-        destination = socket.inet_aton(HOST) + struct.pack("!H", TCP_PORT)
+        destination = socket.inet_aton(ORIGIN_HOST) + struct.pack("!H", TCP_PORT)
         if transport == "udp":
             destination = b"\x00" * 6
         stream.sendall(b"\x05" + bytes([1 if transport == "tcp" else 3]) + b"\x00\x01" +
@@ -147,7 +150,7 @@ def probe_one(item, phase):
                     stream.bind(bind)
                     stream.settimeout(timeout)
                     payload = BODY + struct.pack("!H", local_port) + phase.encode()
-                    stream.sendto(b"\x00\x00\x00\x01" + socket.inet_aton(HOST) +
+                    stream.sendto(b"\x00\x00\x00\x01" + socket.inet_aton(ORIGIN_HOST) +
                                   struct.pack("!H", UDP_PORT) + payload, destination)
                     response, _ = stream.recvfrom(65535)
                     assert response[:4] == b"\x00\x00\x00\x01"
@@ -524,6 +527,11 @@ def hy2_dnat_probe(root, cert, enter, off_enter, processes, server_address, dock
             HOSTS["ipv4"], HOSTS["ipv6"]]).decode().strip()
         try:
             def pid1_ready():
+                status = json.loads(command(docker + ["inspect", identity]))[0]["State"]
+                if not status["Running"]:
+                    logs = subprocess.run(docker + ["logs", identity], stdout=subprocess.PIPE,
+                                          stderr=subprocess.STDOUT, text=True, timeout=5).stdout
+                    raise RuntimeError(f"port-hopping owner exited ({status['ExitCode']}): {logs}")
                 current = pid1_root / "port-hopping.state"
                 return current.exists() and b"phase=active\n" in current.read_bytes()
             wait_ready(pid1_ready)
@@ -735,6 +743,7 @@ def run(root):
                 image = json.loads(command(docker + ["image", "inspect", item["reference"]]))[0]
                 assert image["Id"] == item["image_id"]
             clients = namespaces()
+            command(["ip", "addr", "add", f"{ORIGIN_HOST}/32", "dev", "lo"])
             command(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
                      "-subj", "/CN=target.padm.test", "-keyout", str(root / "target.key"),
                      "-out", str(root / "target.crt")])

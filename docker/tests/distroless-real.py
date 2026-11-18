@@ -394,6 +394,7 @@ assert not any(path.name.startswith(("_test", "_xxtest", "_ctypes_test", "xx")) 
         ip6tables --version
         nft --version
         wg --version
+        ss -H -u -a -n
         ip link add dev wg-probe type wireguard
         wg show wg-probe
         ip link delete dev wg-probe
