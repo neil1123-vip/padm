@@ -4625,8 +4625,14 @@ dockerGenerateCandidate() {
 }
 
 dockerCandidateCompose() (
-    local candidate=$1
+    local candidate=$1 composeFile="${1}/compose.json" checkFile
+    local -a extraFiles=()
     shift
+    while [[ "${1:-}" == --file ]]; do
+        [[ $# -ge 2 ]] || return 1
+        extraFiles+=(--file "$2")
+        shift 2
+    done
     # 候选只使用已验证的 env-file，宿主导出变量不能覆盖镜像和挂载根。
     unset PADM_DOCKER_ROOT PADM_NET_ROOT PADM_XRAY_IMAGE PADM_SINGBOX_IMAGE \
         PADM_NGINX_IMAGE PADM_OPS_IMAGE PADM_NET_IMAGE
@@ -4637,9 +4643,19 @@ dockerCandidateCompose() (
         fi
         ;;
     esac
+    if [[ "${1:-}" == run ]]; then
+        # Configuration checks must not create a bridge in an active TUN owner's interface baseline.
+        checkFile=$(mktemp "${candidate}/.compose-check.XXXXXX") || return 1
+        trap 'rm -f -- "${checkFile}"' EXIT
+        jq '.services |= with_entries(.value |=
+          if (.network_mode // "bridge") == "bridge"
+          then .network_mode = "none" | del(.networks) else . end)' \
+            "${composeFile}" >"${checkFile}" || return 1
+        composeFile=${checkFile}
+    fi
     docker compose --project-name "${DOCKER_ASSESS_PROJECT:-${PADM_DOCKER_PROJECT}}" \
         --project-directory "${candidate}" --env-file "${candidate}/images.env" \
-        --file "${candidate}/compose.json" --profile '*' "$@" </dev/null
+        --file "${composeFile}" "${extraFiles[@]}" --profile '*' "$@" </dev/null
 )
 
 dockerCurrentOwnsHostIntegration() {

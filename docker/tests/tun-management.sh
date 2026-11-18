@@ -19,6 +19,7 @@ fail() { cat "${LOG}" >&2; printf 'tun-management-fail: %s\n' "$*" >&2; exit 1; 
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
 TUN_DISABLE_PREPARE=$(declare -f dockerTunDisablePrepare)
+CANDIDATE_COMPOSE=$(declare -f dockerCandidateCompose)
 dockerHostPreflight() { :; }
 dockerRequireInstalledBundle() { :; }
 dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
@@ -552,5 +553,50 @@ jq -e 'all(.inbounds[]; .tag != "tun-in")' "${root}/config/sing-box/config.json"
     dockerValidateHostIntegrations "${TEST_ROOT}/enabled.json" "${TEST_ROOT}/candidate"
     [[ "$(cat "${CALLS}")" == "candidate ${TEST_ROOT}/candidate run --rm --no-deps --volume ${SERVICE_ROOT}/data/net/transparent:/var/lib/padm/net:ro net-tun-check tun-resources preflight" ]] ||
         fail 'candidate did not audit the existing owner state read-only'
+)
+(
+    eval "${CANDIDATE_COMPOSE}"
+    candidate=${TEST_ROOT}/compose-check
+    mkdir -p "${candidate}"
+    printf '{"services":{"sing-box":{"image":"fixture","networks":["default"]},"net-tun-check":{"image":"fixture","network_mode":"host"}},"networks":{"default":{"name":"fixture"}}}\n' \
+        >"${candidate}/compose.json"
+    printf '{"services":{"nginx":{"extra_hosts":["sing-box:127.0.0.1"]}}}\n' \
+        >"${candidate}/nginx-check.json"
+    : >"${candidate}/images.env"
+    original=$(sha256sum "${candidate}/compose.json")
+    docker() {
+        local previous= argument file=
+        for argument in "$@"; do
+            if [[ "${previous}" == --file ]]; then
+                [[ -f "${argument}" ]] || return 1
+                if [[ -z "${file}" ]]; then
+                    file=${argument}
+                else
+                    cmp -- "${argument}" "${candidate}/nginx-check.json" || return 1
+                fi
+            fi
+            previous=${argument}
+        done
+        cp -- "${file}" "${candidate}/observed.json"
+        return "${composeStatus:-0}"
+    }
+    for prefix in direct overlay; do
+        arguments=()
+        [[ "${prefix}" != overlay ]] || arguments=(--file "${candidate}/nginx-check.json")
+        dockerCandidateCompose "${candidate}" "${arguments[@]}" run --rm --no-deps sing-box check
+        jq -e '.services["sing-box"].network_mode == "none" and
+          .services["sing-box"].networks == null and
+          .services["net-tun-check"].network_mode == "host"' \
+            "${candidate}/observed.json" >/dev/null || fail 'candidate check can create a bridge'
+    done
+    dockerCandidateCompose "${candidate}" config --format json
+    cmp -- "${candidate}/compose.json" "${candidate}/observed.json" ||
+        fail 'candidate config validation did not use the original composition'
+    composeStatus=7
+    status=0
+    dockerCandidateCompose "${candidate}" run --rm --no-deps sing-box check || status=$?
+    [[ "${status}" == 7 && "$(sha256sum "${candidate}/compose.json")" == "${original}" &&
+        -z "$(find "${candidate}" -name '.compose-check.*' -print -quit)" ]] ||
+        fail 'candidate check changed its source, lost an error or left temporary composition'
 )
 printf 'docker-tun-management-ok\n'

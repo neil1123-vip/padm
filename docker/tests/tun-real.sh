@@ -171,6 +171,27 @@ dockerValidateHostIntegrations "${root}/config/spec.json" "${root}"
 [[ "$(sha256sum "${stateFile}")" == "${stateHash}" ]] ||
     fail 'read-only candidate preflight changed the live owner'
 
+# An off candidate must not add its bridge before the active owner's cleanup audit.
+offCandidate="${TEST_ROOT}/off-candidate"
+mkdir -p "${offCandidate}"
+jq '.host_integrations = []' "${root}/config/spec.json" >"${offCandidate}/spec.json"
+dockerGenerateCompose "${offCandidate}/spec.json" "${offCandidate}/compose.json" "${root}"
+dockerGenerateImagesEnv "${offCandidate}/spec.json" "${offCandidate}/images.env" "${root}"
+snapshot >"${TEST_ROOT}/candidate-before.log"
+for argument in version --invalid-candidate-check; do
+    status=0
+    dockerCandidateCompose "${offCandidate}" run --rm --no-deps sing-box "${argument}" \
+        >"${TEST_ROOT}/candidate-${argument}.log" 2>&1 || status=$?
+    [[ ("${argument}" == version && "${status}" == 0) ||
+        ("${argument}" != version && "${status}" != 0) ]] || fail 'wrong candidate check result'
+    snapshot >"${TEST_ROOT}/candidate-after.log"
+    compareSnapshots "${TEST_ROOT}/candidate-before.log" "${TEST_ROOT}/candidate-after.log"
+    dockerTunContainer running >/dev/null
+done
+[[ -z "$(docker network ls --quiet --filter label=com.docker.compose.project=padm-docker)" &&
+    "$(sha256sum "${stateFile}")" == "${stateHash}" ]] ||
+    fail 'candidate check created a project network or changed the live owner'
+
 # 本测试插入的规则只有恢复后才允许重启，拒绝时容器及归属证据保持原样。
 snapshot >"${TEST_ROOT}/drift-before.log"
 nft add rule inet sing-box output counter comment tun-real-drift
