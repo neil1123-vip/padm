@@ -94,7 +94,8 @@ def main():
         "-smp", "2", "-m", "2048", "-display", "none", "-monitor", "none", "-serial", "stdio",
         "-no-reboot", "-drive", f"file={child},if=virtio,format=qcow2", "-cdrom", str(run / "seed.iso"),
         "-netdev", "user,id=wan,ipv6=off,hostfwd=tcp:127.0.0.1:2221-:22,"
-                   "guestfwd=tcp:10.0.2.100:443-cmd:socat - TCP:ghcr.io:443",
+                   "guestfwd=tcp:10.0.2.100:443-cmd:socat - TCP:ghcr.io:443,"
+                   "guestfwd=tcp:10.0.2.101:443-cmd:socat - TCP:tuf-repo-cdn.sigstore.dev:443",
         "-device", f"virtio-net-pci,netdev=wan,mac={MAC}",
     ]
     (run / "qemu.json").write_text(json.dumps(launch) + "\n")

@@ -28,6 +28,10 @@ ASSET_ARGS = ("--manifest", str(INPUT / "assets/release-manifest.json"),
               "--control-bundle", str(INPUT / "assets/padm-docker-bundle.tar.gz"))
 REGISTRY_PROBE = ("curl", "--silent", "--show-error", "--max-time", "30",
                   "--output", "/dev/null", "--write-out", "%{http_code}\n", "https://ghcr.io/v2/")
+SIGNATURE_PROBE = ("cosign", "verify-blob", "--bundle", ASSET_ARGS[3],
+                   "--certificate-identity-regexp",
+                   r"^https://github\.com/neil1123-vip/padm/\.github/workflows/create_release\.yml@refs/heads/main$",
+                   "--certificate-oidc-issuer", "https://token.actions.githubusercontent.com", ASSET_ARGS[1])
 NEGATIVE_SCRIPT = ('set +e; output=$(timeout --foreground -k 2 25 docker run --rm --network host '
                    '--read-only --cap-drop ALL --security-opt no-new-privileges "$1" '
                    'tls ping -ip 192.0.2.1 cloudflare.com:443 2>&1); code=$?; '
@@ -356,11 +360,14 @@ def main():
         hosts = Path("/etc/hosts")
         RESULT["registry_hosts_before"] = file_record(hosts)
         hosts_original = hosts.read_bytes()
-        assert b"ghcr.io" not in hosts_original
-        hosts.write_bytes(hosts_original + b"\n10.0.2.100 ghcr.io\n")
+        assert all(name not in hosts_original for name in (b"ghcr.io", b"tuf-repo-cdn.sigstore.dev"))
+        hosts.write_bytes(hosts_original + b"\n10.0.2.100 ghcr.io\n10.0.2.101 tuf-repo-cdn.sigstore.dev\n")
         resolved = command("registry-resolve", "getent", "ahostsv4", "ghcr.io").decode().splitlines()
         assert resolved and all(row.split()[0] == "10.0.2.100" for row in resolved)
+        resolved = command("trust-resolve", "getent", "ahostsv4", "tuf-repo-cdn.sigstore.dev").decode().splitlines()
+        assert resolved and all(row.split()[0] == "10.0.2.101" for row in resolved)
         assert command("registry-preflight", *REGISTRY_PROBE).strip() == b"401"
+        command("trust-preflight", *SIGNATURE_PROBE)
         cli("baseline-down", "down")
         assert not command("baseline-container-set", "docker", "ps", "-aq").strip()
         original_ping_range = Path("/proc/sys/net/ipv4/ping_group_range").read_text()
@@ -479,6 +486,7 @@ def main():
             if mode == "denied":
                 assert scenario["permission_error_observed"], "denied Echo did not produce a core permission error"
             assert command(mode + "-registry", *REGISTRY_PROBE).strip() == b"401"
+            command(mode + "-trust", *SIGNATURE_PROBE)
             scenario["off_command"] = len(COMMANDS) + 1
             cli(mode + "-off", "edit", "--tun-off", "--confirm", "PADM-DOCKER-EDIT",
                 *ASSET_ARGS, timeout=900)

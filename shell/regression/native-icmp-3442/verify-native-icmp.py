@@ -30,6 +30,10 @@ ASSET_ARGS = ("--manifest", f"{GUEST_INPUT}/assets/release-manifest.json",
               "--control-bundle", f"{GUEST_INPUT}/assets/padm-docker-bundle.tar.gz")
 REGISTRY_PROBE = ("curl", "--silent", "--show-error", "--max-time", "30",
                   "--output", "/dev/null", "--write-out", "%{http_code}\n", "https://ghcr.io/v2/")
+SIGNATURE_PROBE = ("cosign", "verify-blob", "--bundle", ASSET_ARGS[3],
+                   "--certificate-identity-regexp",
+                   r"^https://github\.com/neil1123-vip/padm/\.github/workflows/create_release\.yml@refs/heads/main$",
+                   "--certificate-oidc-issuer", "https://token.actions.githubusercontent.com", ASSET_ARGS[1])
 TARGET_NS = ("ip", "netns", "exec", "padm-icmp-target")
 SCOPE = "formal-3.44.2-native-amd64-host-icmp-ipv4"
 SIGNER = "https://github.com/neil1123-vip/padm/.github/workflows/create_release.yml@refs/heads/main"
@@ -624,7 +628,7 @@ def scenario_evidence(evidence, commands, mode, scenario, guest):
     order = [mode + "-baseline-links", labels["enable"], mode + "-diagnose-before-ip6tables",
              labels["diagnose"], mode + "-diagnose-after-links", labels["inspect"],
              labels["core-status"], mode + "-registry-before", labels["probe"],
-             labels["core-log"], mode + "-registry", labels["off"],
+             labels["core-log"], mode + "-registry", mode + "-trust", labels["off"],
              mode + "-off-down", mode + "-off-container-set",
              mode + "-after-off-ip6tables", labels["off-status"]]
     commands.ordered(*order)
@@ -636,6 +640,7 @@ def scenario_evidence(evidence, commands, mode, scenario, guest):
           "registry TLS path failed before the active TUN probe")
     equal(commands.bytes(mode + "-registry", *REGISTRY_PROBE).strip(), b"401",
           "registry TLS path failed while TUN was active")
+    commands.bytes(mode + "-trust", *SIGNATURE_PROBE)
     commands.bytes(labels["off"], CLI, "edit", "--tun-off", *confirm, *ASSET_ARGS)
     commands.bytes(mode + "-off-down", CLI, "down")
     equal(commands.bytes(mode + "-off-container-set", "docker", "ps", "-aq").strip(),
@@ -805,8 +810,12 @@ def guest_evidence(evidence, formal):
     resolved = commands.bytes("registry-resolve", "getent", "ahostsv4", "ghcr.io").decode().splitlines()
     require(resolved and all(row.split()[0] == "10.0.2.100" for row in resolved),
             "registry was not using the fixed guest forward")
+    resolved = commands.bytes("trust-resolve", "getent", "ahostsv4", "tuf-repo-cdn.sigstore.dev").decode().splitlines()
+    require(resolved and all(row.split()[0] == "10.0.2.101" for row in resolved),
+            "trust root was not using the fixed guest forward")
     equal(commands.bytes("registry-preflight", *REGISTRY_PROBE).strip(), b"401",
           "registry TLS preflight failed")
+    commands.bytes("trust-preflight", *SIGNATURE_PROBE)
     equal(guest["registry_hosts_before"], guest["registry_hosts_after"],
           "registry hosts file content or metadata was not restored")
     file_record(guest["registry_hosts_before"])
@@ -832,7 +841,8 @@ def guest_evidence(evidence, formal):
                 "distro-jq-version", "distro-jq-owner", "distro-jq-verify",
                 "native-arch", "native-engine", "initial-containers",
                 "egress-xray-pull", "guest-egress-negative", "formal-configure",
-                "account-create", "account-limit", "registry-resolve", "registry-preflight",
+                "account-create", "account-limit", "registry-resolve", "trust-resolve",
+                "registry-preflight", "trust-preflight",
                 "baseline-down", "baseline-container-set",
                 "initial-network-ip6tables", "validation-wan", "host-validation-route",
                 "control-plane-route-0", "control-plane-route-1",
@@ -936,6 +946,10 @@ def semantic_controls(archive, formal):
     def hosts(guest, _, __):
         guest["registry_hosts_after"]["bytes"] += 1
 
+    def trust(_, __, commands):
+        row, = [row for row in commands if row["label"] == "direct-trust"]
+        row["argv"].insert(1, "--offline")
+
     return [
         rejected("probe-netns-substitution", probe_field("direct", ["caller_netns"], lambda _: "net:[1]"),
                  "probe did not run in guest host netns"),
@@ -959,6 +973,7 @@ def semantic_controls(archive, formal):
         rejected("missing-local-signed-assets", missing_assets, "unexpected command: direct-off"),
         rejected("registry-response-changed", registry, "registry TLS path failed before"),
         rejected("hosts-not-restored", hosts, "registry hosts file content or metadata"),
+        rejected("changed-trust-verifier-command", trust, "unexpected command: direct-trust"),
     ]
 
 
@@ -986,7 +1001,8 @@ def host_evidence(evidence, sources, report, archive):
     require(launch.count("-netdev") == 1 and
             launch[launch.index("-netdev") + 1] ==
             "user,id=wan,ipv6=off,hostfwd=tcp:127.0.0.1:2221-:22,"
-            "guestfwd=tcp:10.0.2.100:443-cmd:socat - TCP:ghcr.io:443",
+            "guestfwd=tcp:10.0.2.100:443-cmd:socat - TCP:ghcr.io:443,"
+            "guestfwd=tcp:10.0.2.101:443-cmd:socat - TCP:tuf-repo-cdn.sigstore.dev:443",
             "registry guest forward or SSH isolation changed")
     child, parent = disk
     equal(launch[launch.index("-drive") + 1], f"file={child['filename']},if=virtio,format=qcow2",
