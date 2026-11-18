@@ -325,7 +325,7 @@ for listener in vless-reality entry-vision-sing entry-xhttp entry-grpc-xray entr
     expected=${selected//${PUBLIC_KEY}/${REGEN_PUBLIC}}
     expected=${expected//6ba85179e30d4fc2/${FAKE_REGEN_SHORT}}
     if [[ "${listener}" != entry-vision-sing && "${listener}" != entry-grpc-sing ]]; then
-        expected=${expected/"&type="/"&pqv=${REGEN_MLDSA_VERIFY}&type="}
+        expected=${expected/"&support-x25519mlkem768="/"&pqv=${REGEN_MLDSA_VERIFY}&support-x25519mlkem768="}
         jq -e --arg listener "${listener}" --rawfile seed <(printf '%s' "${REGEN_MLDSA_SEED}") \
             --rawfile verify <(printf '%s' "${REGEN_MLDSA_VERIFY}") '
           any(.inbounds[]; .tag == $listener and

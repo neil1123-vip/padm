@@ -12794,6 +12794,26 @@ ARM64、公网、IPv6、traceroute/PMTU、启用态重启及长稳未验；TUN/�
 启用态重启按用户要求不做。未登录、升级或重启生产 A/B；临时夹具留隔离
 分支，原件和私钥不提交。支持状态保持 `16 supported/14 deferred`。
 
+### 6A.76 Mihomo 原始 Reality URI 导入
+
+2026-11-18（北京时间），共享生成器为 Xray Reality `1/2/26` 输出
+`support-x25519mlkem768=true`；显式入口核心优先于默认核心。sing-box、
+其它协议及服务端配置保持。Mihomo 上游 `518c7036` 的 URI 映射已包含于
+`v1.19.31`，旧 `v1.19.28` 导入器不读取该参数。
+
+隔离 Docker Linux amd64 使用正式 `.3` 清单的 Xray 镜像与固定 Mihomo
+`v1.19.31`，对 Vision/XHTTP × 未启用/启用 VLESS Encryption 验证 `22` 点：
+`4` 个旧 URI 认证失败、`4` 个候选原 URI 由 Mihomo file provider 直接导入通过、
+`4` 个 Xray URI 转换兼容通过、`10` 个错 UUID/错 SNI/加密入口旧 none 拒绝。
+成功点均校验严格 HTTPS、`139264` 字节正文 SHA-256 与唯一原点 nonce；
+拒绝点 curl `35`、零正文及零原点请求。完整 Reality 参数合同通过；
+gRPC 只核 URI 合同，不计真实导入。
+
+原件 `.tmp-mihomo-raw-uri-20261118/attempt-2/`，容器已清场；首轮测试原点
+因临时私钥权限未启动，保留失败。成功轮未分别封存两阶段完整服务端配置；
+固定本地连接不外推 ARM64、公网入站、整机重启或其它客户端。6A.70 的旧版
+ARM64 原 URI 失败不改判；支持状态保持 `16 supported/14 deferred`。
+
 ### 本轮菜单与回归收敛
 
 明确的 CSV 列表输入复用现有非 canonical 读取，修复长列表在 PTY 下截断；

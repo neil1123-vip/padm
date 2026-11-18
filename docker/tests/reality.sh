@@ -156,8 +156,8 @@ for core in xray sing-box; do
     ' >/dev/null || fail "${core}: 新传输未共享额度或额度改写传输参数"
 done
 
-XHTTP_URI="vless://${UUID}@[2001:db8::1]:25443?encryption=none&security=reality&sni=www.example.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=6ba85179e30d4fc2&type=xhttp&host=www.example.com&path=%2Fpadm%2Fpath-1&mode=auto#Reality-XHTTP"
-GRPC_XRAY_URI="vless://${UUID}@[2001:db8::1]:25444?encryption=none&security=reality&sni=www.example.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=6ba85179e30d4fc2&type=grpc&alpn=h2&path=padm-grpc_1&serviceName=padm-grpc_1#Reality-gRPC-Xray"
+XHTTP_URI="vless://${UUID}@[2001:db8::1]:25443?encryption=none&security=reality&sni=www.example.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=6ba85179e30d4fc2&support-x25519mlkem768=true&type=xhttp&host=www.example.com&path=%2Fpadm%2Fpath-1&mode=auto#Reality-XHTTP"
+GRPC_XRAY_URI="vless://${UUID}@[2001:db8::1]:25444?encryption=none&security=reality&sni=www.example.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=6ba85179e30d4fc2&support-x25519mlkem768=true&type=grpc&alpn=h2&path=padm-grpc_1&serviceName=padm-grpc_1#Reality-gRPC-Xray"
 GRPC_SING_URI="vless://${UUID}@[2001:db8::1]:25445?encryption=none&security=reality&sni=www.example.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=6ba85179e30d4fc2&type=grpc&alpn=h2&path=padm-grpc_2&serviceName=padm-grpc_2#Reality-gRPC-sing"
 runRead 0 new-disabled-links dockerProtocolCommand links
 [[ "$(<"${STDOUT}")" == "${REALITY_URI}"$'\n'"${XHTTP_URI}"$'\n'"${GRPC_XRAY_URI}"$'\n'"${GRPC_SING_URI}" ]] ||

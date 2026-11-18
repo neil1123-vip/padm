@@ -3673,10 +3673,12 @@ dockerGenerateSubscription() {
       if .id == 1 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=\((.vless_encryption.encryption // "none") | @uri)&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)" +
           (if .reality.mldsa65_verify != null then "&pqv=\(.reality.mldsa65_verify | @uri)" else "" end) +
+          (if (.core // $request.core.type) == "xray" then "&support-x25519mlkem768=true" else "" end) +
           "&type=tcp#\(.name | @uri)"
       elif .id == 2 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=\((.vless_encryption.encryption // "none") | @uri)&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)" +
           (if .reality.mldsa65_verify != null then "&pqv=\(.reality.mldsa65_verify | @uri)" else "" end) +
+          (if (.core // $request.core.type) == "xray" then "&support-x25519mlkem768=true" else "" end) +
           "&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)" +
           ((. as $entry | .xhttp | del(.path,.host,.mode,.download_port,.download) |
             if $entry.xhttp.download_port != null then
@@ -3704,6 +3706,7 @@ dockerGenerateSubscription() {
       elif .id == 26 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)" +
           (if .reality.mldsa65_verify != null then "&pqv=\(.reality.mldsa65_verify | @uri)" else "" end) +
+          (if (.core // $request.core.type) == "xray" then "&support-x25519mlkem768=true" else "" end) +
           "&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"
       elif .id == 28 then
         "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.trojan.domain | @uri)&fp=chrome&sni=\(.trojan.domain | @uri)&alpn=\("http/1.1" | @uri)#\(.name | @uri)"

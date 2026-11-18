@@ -74,7 +74,7 @@ UUID=11111111-1111-4111-8111-111111111111
 PUBLIC_KEY=hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo
 PRIVATE_KEY=dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo
 TOKEN=0123456789abcdef0123456789abcdef
-REALITY_URI="vless://${UUID}@[2001:db8::1]:24443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=6ba85179e30d4fc2&type=tcp#Primary-Reality"
+REALITY_URI="vless://${UUID}@[2001:db8::1]:24443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=6ba85179e30d4fc2&support-x25519mlkem768=true&type=tcp#Primary-Reality"
 WS_URI="vless://${UUID}@proxy.example.com:24444?encryption=none&security=tls&sni=ws.example.com&type=ws&host=ws.example.com&path=%2Fabcdefghws#Main%3AWS"
 SING_URI="vless://${UUID}@secondary.example.com:24445?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=6ba85179e30d4fc2&type=tcp#Secondary-Reality"
 SPEC="${TEST_ROOT}/spec.json"
@@ -179,6 +179,16 @@ if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" == 1 ]]; then
     dockerConfigureSpecMigrate "${SPEC}" "${TEST_ROOT}/v3.json"
     return 0
 fi
+
+jq '.core.type = "sing-box"' "${SPEC}" >"${TEST_ROOT}/inherited-sing-share.json"
+dockerGenerateSubscription "${TEST_ROOT}/inherited-sing-share.json" "${STDOUT}"
+[[ "$(<"${STDOUT}")" == "${REALITY_URI/&support-x25519mlkem768=true/}"$'\n'"${WS_URI}" ]] ||
+    fail '继承 sing-box 核心的分享错误增加 hybrid 参数'
+jq '.core.protocols[0].core = "xray"' "${TEST_ROOT}/inherited-sing-share.json" \
+    >"${TEST_ROOT}/explicit-xray-share.json"
+dockerGenerateSubscription "${TEST_ROOT}/explicit-xray-share.json" "${STDOUT}"
+[[ "$(<"${STDOUT}")" == "${REALITY_URI}"$'\n'"${WS_URI}" ]] ||
+    fail '显式 Xray 核心的分享未覆盖 sing-box 默认核心'
 
 bash "${PROJECT_ROOT}/docker/tests/spec-validation.sh"
 bash "${PROJECT_ROOT}/docker/tests/generation-metadata.sh"

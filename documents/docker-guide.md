@@ -66,6 +66,9 @@ Reality 共存选中的 website 入口实际公开端口为 `443`。4A.7 已通�
 直接输出部署主订阅内容或 HTTPS 链接。内容复用现有节点生成器，包含自用及启用账号，
 即使关闭发布或只有 Reality 入口仍可本地读取；HTTPS 链接要求已启用发布。
 查询不创建分享组或修改发布文件，内容和链接含凭据，仅交给获授权的客户端。
+Xray Reality 分享链接带 `support-x25519mlkem768=true`，sing-box 链接不变。
+Mihomo `v1.19.31` 已在隔离 Linux amd64 环境直接导入 Vision/XHTTP 原链接，
+涵盖启用和未启用 VLESS Encryption；`v1.19.28` 的 URI 导入器不读取此字段。
 Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander/Gecko 混淆和 HTTPS 伪装；
 带宽按服务端方向输入，分享链接自动转换为客户端方向。
 首配混淆输入 `y` 选择 Salamander、`gecko` 选择 Gecko、`n` 关闭；已有入口在 Hysteria2 参数菜单切换类型，空密码保留已有值。
