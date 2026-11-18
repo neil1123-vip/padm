@@ -49,7 +49,8 @@
   B IPv6 兼作 SSH，Docker 公网直连待测试地址；容量待验。
 - ICMP 已验限 Debian 13/amd64/IPv4；arm64/公网/IPv6/traceroute/PMTU/重启未验；
   TUN/透明启用重启按要求不做。SOCKS UDP、Xray 解析后阻断继续拒绝。
-- `.7` WARP 原生 B 五分钟双核心各 21/21。Desktop 的 sing-box 间歇缺握手应答。
+- `.7` WARP 原生 B 全局 IPv4 五分钟双核心各 21/21。全局 IPv6、选择性 IPv4
+  各 120 秒，四组各 9/9。设备撤销与清场通过。Desktop 间歇缺握手应答。
   CDN 缺代理测试记录及设置核验。
   Vision reset/XHTTP/TUIC 旧超时根因未定；旧跨核心失败原件保持。
   固定公网组合不外推活动 sing-box；拒绝配对及带来源的跨核心复制。

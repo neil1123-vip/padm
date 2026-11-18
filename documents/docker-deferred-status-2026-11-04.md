@@ -564,6 +564,14 @@ Xray 通过 5/5，sing-box 通过 6/6。随后用另一个临时 Peer 各运行�
 `.tmp-warp-daily-close/padm-warp-native-7eb2fe85b858.log` 及
 `.tmp-warp-daily-close/padm-warp-native-c7215f6eb799.log`。
 
+同日，B 复用正式 `.7` 生成器和 amd64 核心，在独立的临时 systemd 单元中
+依次测试 Xray、sing-box 的全局 IPv6 和选择性 IPv4。四组各持续至少 120 秒，
+各通过 9/9 次 HTTPS 采样。匹配请求验证 `warp=on`、出口地址族和与直连出口的差异，
+选择性 IPv4 的未匹配请求返回 `warp=off`。临时设备已撤销，进程退出码为 `0`，
+本机临时容器余量为零。B 的临时目录、缓存及监听已清，生产容器、网桥、路由和
+防火墙与前置快照一致。原件 `.tmp-warp-daily-close/padm-warp-native-17fab55522f0.log`。
+采样范围为固定原生宿主的出站探针。其它路径、长稳和受管部署故障恢复仍待验。
+
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
 从验签发布 `44306096595` 的 amd64 Xray 镜像
