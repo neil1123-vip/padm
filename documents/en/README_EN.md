@@ -196,8 +196,8 @@ with publication disabled or Reality-only listeners. HTTPS URLs require enabled 
 These queries create no share-group state and do not change published files.
 Content and URLs contain credentials and should only reach authorized clients.
 Xray Reality share URIs include `support-x25519mlkem768=true`; sing-box URIs are unchanged.
-Mihomo `v1.19.31` passed direct URI import on isolated Linux amd64 for Vision and
-XHTTP with and without VLESS Encryption, and for gRPC with `encryption=none`.
+Mihomo `v1.19.31` passed direct URI import on isolated Linux amd64 and native ARM64
+for Vision and XHTTP with and without VLESS Encryption, and for gRPC with `encryption=none`.
 The `v1.19.28` URI importer ignores this field.
 The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` with mode `0600`.
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
