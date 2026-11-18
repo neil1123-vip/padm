@@ -428,7 +428,10 @@ Xray 双端和本轮负载。公网及更长时间的稳定性仍待验证。
 已关闭。回显原点每轮只有原来的两个连接，首尾端口的双栈新连接均被拒，
 NAT 规则恢复。Hy2 复测抓包中，两个 `docker-proxy` 监听进程保持原 PID。
 停止后 IPv4 旧流仍从范围端口收到回包，IPv6 仅观察到目标基础端口回包。
-IPv4 自然排空时间及两族差异原因待核。
+两种协议另各静置 150 秒，期间探针暂停发送业务数据，抓包仍观察到同一
+IPv4 路径的 UDP 报文往返，Hy2 为 28 包，TUIC 为 60 包。两条 IPv4
+旧流随后在原连接上回显成功。该环境的 UDP conntrack 超时为 30 秒，
+双向流超时为 120 秒。两族差异和停止后的最终排空时间待核。
 
 随后在相同隔离环境中先停止跳跃，再分别用 Compose 和实际安装的同版
 `padm-docker restart` 重启原 sing-box 容器。两种协议的原容器均以原镜像
@@ -441,5 +444,6 @@ IPv4 自然排空时间及两族差异原因待核。
 及 `.tmp-formal3447-{hy2,tuic}-existing-flow-r3.log`。抓包摘要在
 `.tmp-formal3447-hy2-flow-path.log`，重启结果见
 `.tmp-formal3447-{hy2,tuic}-flow-restart-r4.log` 和
-`.tmp-formal3447-{hy2,tuic}-flow-cli.log`。公网双栈和跨启动恢复仍待验，TUIC
-客户端自动换端口超出当前支持范围。
+`.tmp-formal3447-{hy2,tuic}-flow-cli.log`，静置观测见
+`.tmp-formal3447-{hy2,tuic}-idle.log`。公网双栈和跨启动恢复仍待验，
+TUIC 客户端自动换端口超出当前支持范围。
