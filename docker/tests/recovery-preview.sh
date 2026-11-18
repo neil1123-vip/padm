@@ -212,9 +212,21 @@ docker() {
             "${project}" != "${PADM_DOCKER_PROJECT}" &&
             "${project}" == "padm-docker-assess-${name,,}" &&
             "${envFile}" == "${directory}/images.env" &&
-            "${composeFile}" == "${directory}/compose.json" &&
             "$(stat -c '%u:%a' "${composeFile}")" == 0:600 ]] ||
             candidate_fail '恢复预览未使用持久隔离 Compose、随机项目或私密权限'
+        if [[ "${1:-}" == run ]]; then
+            [[ "${composeFile}" == "${directory}"/.compose-check.?????? &&
+                -f "${composeFile}" && ! -L "${composeFile}" ]] ||
+                candidate_fail '恢复预览检查未使用私密候选内的临时编排'
+            cmp <(jq -S '.services |= with_entries(.value |=
+              if (.network_mode // "bridge") == "bridge"
+              then .network_mode = "none" | del(.networks) else . end)' "${directory}/compose.json") \
+                <(jq -S . "${composeFile}") ||
+                candidate_fail '恢复预览检查改变了网络隔离以外的编排'
+        else
+            [[ "${composeFile}" == "${directory}/compose.json" ]] ||
+                candidate_fail '恢复预览配置校验未使用原始编排'
+        fi
         jq -e --arg project "${project}" '
           .name == $project and .networks.default.name == $project and
           .networks.default.labels["io.padm.project"] == $project and
