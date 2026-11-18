@@ -1103,10 +1103,11 @@ HTTPServer(("0.0.0.0", 38999), Handler).serve_forever()
             image, "run", "-c", "/input/config.json",
         ]).decode().strip()
         deadline = time.monotonic() + 10
+        origin = node.get("traffic_origin", "172.31.0.1")
         while True:
             result = subprocess.run(node["enter"] + [
                 "curl", "-fsS", "--max-time", "3", "--noproxy", "",
-                "--socks5-hostname", "127.0.0.1:1080", "http://172.31.0.1:38999/proof",
+                "--socks5-hostname", "127.0.0.1:1080", f"http://{origin}:38999/proof",
             ], capture_output=True, timeout=5)
             if not result.returncode:
                 assert result.stdout == b"padm-real-control-traffic\n" * 2048

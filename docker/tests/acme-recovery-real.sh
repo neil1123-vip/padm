@@ -291,7 +291,11 @@ def managed_recovery_real():
         ["pgrep", "-x", "cron"], capture_output=True).returncode == 0, 5)
     # 调度安装仍走生产路径，暂停真实进程以避免自动采集干扰手动恢复和续期断言。
     cron.send_signal(signal.SIGSTOP)
-    member = {"path": path, "enter": [], "docker": docker, "env": environment}
+    # 使用断网命名空间的回环原点，兼容拒绝私网目标的正式 Xray。
+    traffic_origin = "192.0.0.33"
+    command(["ip", "addr", "add", f"{traffic_origin}/32", "dev", "lo"])
+    member = {"path": path, "enter": [], "docker": docker, "env": environment,
+              "traffic_origin": traffic_origin}
     images = {name: inputs[name]["reference"] for name in ("ops", "nginx", "xray", "sing-box")}
     # 本场景不启动 net；保留唯一的已载入引用，满足发布夹具对五类镜像的精确校验。
     images["net"] = inputs["acme"]["reference"]
