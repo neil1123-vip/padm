@@ -80,10 +80,10 @@ M 验证通过的固定本地 amd64/IPv4 双 Peer 组合；公网、其它组合
 | `reality-coexistence` | P+C+N：受管、桥接宿主和 host 回环三拓扑恢复；限定公网 Vision/XHTTP 正反例与六点真实重启。N/6A.70 补正式 `.44` 原生 ARM64/IPv4 的三拓扑 × 双入口、关闭恢复、loopback 服务 restart 及正反例。 | 公网 IPv6、ARM64 整机重启、其它既定共存组合及当前版本尚缺的适用生命周期；本地入口与公网网站后端不等于 ARM64 公网入站。 | 一个 Xray Vision/XHTTP 后端，网站证书/内容仍由原维护方负责。N 的 host/loopback 仅经本地透明 TCP relay 到固定 A HTTPS 后端，不传生产私钥；旧 reset/超时不因本轮成功改判，3D.26 协议管理 supported 不重列为缺口。 |
 | `cdn-entry-management` | P+D：2/21/22/23/24/25 地址覆盖和链接/订阅投影；固定 Cloudflare WS 公网正反例。2026-11-18 两个 Cloudflare 权威 DNS 均对现网业务名仅返回源站 A 记录。 | 既定 XHTTP/h3 与 gRPC 供应商透传、公网 IPv6 和当前其它适用组合。现有 Zone 已委派，仍缺可用的代理测试记录及经核实的 gRPC/HTTP/3 设置。 | H3 验证客户端到边缘实际协商和源站业务，不将边缘支持外推到源站。H3 只有使用说明，不新增开关、其它协议或自动建设外部 TLS/H3/CDN；WS 通过不外推其它传输。 |
 | `interactive-menu` | P+G+B+W+K+N+M+I：6A.23 本机代码收口；3D.26 的 16 个公开协议管理 supported；正式安装/升级回滚/公网/重启、同机灾备及账号/业务恢复限定证据；B 正式 `.7` 从原 `.4` 归档完成固定 Xray WS 新主机恢复和单次整机重启。6A.46 另补本地完整独立内核双机的 amd64/IPv4/单 Peer 新机角色/WG 恢复、新身份/rebind、自主同步和 TLS/计量；K 补齐正式 `.8` 本地双 KVM 完整升级、防护及严格恢复；N 补齐 Ubuntu ARM64/IPv4/Xray WS `.7/.8`、纯 sing-box Trojan `.8/.44` 七阶段及 `.44` 官方 Engine 自动安装和清场，6A.69 再补固定 `.44` 入口/路由/中继/站点四类专项及服务重启，6A.70 补固定 Reality 三拓扑与普通 bridge 双入口 Encryption 集中验收、恢复及三次服务 restart。M 补固定本地双 Peer 主控灾备/灾后重启与正式 `.3` 控制入口断电恢复/重试，I 补正式 `.3` 发布绑定及固定 amd64 ICMP 三场景。 | 自然续期、ARM64 其它既定组合及整机重启、公网 IPv6、其它核心/协议及发行版适用安装、公网多机控制/灾备、其它既定多 Peer 角色/WG 灾备拓扑及各专项尚缺的适用生命周期。 | 汇总项，不重复计下属各行。N 的原点限本地 lo、host/loopback 站点限本地中继至固定公网后端，不计 ARM64 公网入站。M 的本地双 Peer 与恢复中断点不外推公网或其它故障，I 不外推其它架构或启用态重启。已有部署替换、其它 ACME 材料、未处理输入、v2 关联迁移等保持拒绝，不追加开发。 |
-| `routing-tools` | P+R+N：两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、CN 与名单管理；sing-box 解析后阻断、pure 发布共存、DNS 拒绝回退和限定合并重启。N/6A.69 补正式 `.44` 原生 ARM64/Xray 29+sing-box 28 的 SOCKS 全局/选择匹配/绕过/认证拒绝、DNS/hosts、Direct/Block 及恢复/服务重启。 | WARP 真实 Cloudflare 账号/公网出口；公网 IPv6、其它既定 ARM64/路由组合及尚缺的适用生命周期。 | 与内部 206 共用证据/条件；SOCKS 入站限制归内部 201。N 的 DNS 错误拒绝不单独证明系统解析器无回退。固定 Xray 解析后阻断拒绝；原生 CN 预设已覆盖，不追加任意国家向导或最终流量语义引擎。 |
+| `routing-tools` | P+R+N：两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、CN 与名单管理；sing-box 解析后阻断、pure 发布共存、DNS 拒绝回退和限定合并重启。N/6A.69 补正式 `.44` 原生 ARM64/Xray 29+sing-box 28 的 SOCKS 全局/选择匹配/绕过/认证拒绝、DNS/hosts、Direct/Block 及恢复/服务重启。[正式 `.7` WARP 公网出站](#正式-v3447-的-warp-公网出站) 在固定路径上补齐两核心使用真实 Peer 的全局 IPv4 HTTPS 出站。 | WARP 跨路径失败根因、真实 Peer 的 IPv6/选择性和长稳。其它路由组合的公网 IPv6 及适用生命周期待补。 | 与内部 206 共用证据/条件；SOCKS 入站限制归内部 201。N 的 DNS 错误拒绝不单独证明系统解析器无回退。固定 Xray 解析后阻断拒绝；原生 CN 预设已覆盖，不追加任意国家向导或最终流量语义引擎。 |
 | `internal-201-socks-relay` | P：5B.5b/5B.5b.1 已证固定 sing-box 的动态 BND/活动关联真实来源问题及 Xray 许可不随控制关闭撤销。 | 当前按限制关闭，无一轮普通环境回归可以使其成立；仅在相关核心行为变化后，重证发布、真实来源、会话鉴权及控制关闭撤销，才重新评估。 | 不开放完整入站、不降为 TCP-only、不增加辅助核心。host-network 不能修复鉴权。TCP 出站归 `routing-tools`；201 不作为公开节点协议。 |
 | `internal-202-http-relay` | P+H+N：Xray 认证 HTTP/CONNECT、字面来源白名单、管理/回滚；隔离 amd64 双栈和原生外部 IPv4 三目标 TLS/200、407、来源拒绝。N/6A.69 补正式 `.44` 原生 ARM64 的认证 HTTP/严格 HTTPS CONNECT、改端口、HTTP/CONNECT 来源拒绝、关闭及业务恢复；负例原点 TCP/请求为零。 | 公网 IPv6、其它既定 ARM64/中继组合及尚缺的适用生命周期；固定本地 origin 不计 ARM64 公网，第二轮空成功异常根因未定。 | sing-box 信任 X-Forwarded-For 覆盖来源且无关闭选项，固定反例继续拒绝。专属直连、不计业务额度，不扩跨核心；202 不作为公开节点协议。 |
-| `internal-206-routing-rules` | P+R+N，与 `routing-tools` 共用规则/名单、原生 IPv4 路由/DNS 拒绝回退及限定真实重启；N/6A.69 另补固定正式 `.44` ARM64 双核心规则及服务重启。 | 同 `routing-tools`：WARP 账号/出口、公网 IPv6、其它既定 ARM64/路由组合及尚缺的适用生命周期，不重复计数。 | Xray 固定反例继续拒绝；只读重叠/覆盖不预测 GeoSite/DNS/最终流量。不追加任意国家/语义引擎；206 不作为公开节点协议。 |
+| `internal-206-routing-rules` | P+R+N，与 `routing-tools` 共用规则/名单、原生 IPv4 路由/DNS 拒绝回退及限定真实重启；N/6A.69 另补固定正式 `.44` ARM64 双核心规则及服务重启。沿用正式 `.7` 的真实 WARP Peer 全局 IPv4 出站记录。 | 同 `routing-tools` 的 WARP 跨路径、公网 IPv6 及适用生命周期。 | Xray 固定反例继续拒绝；只读重叠/覆盖不预测 GeoSite/DNS/最终流量。不追加任意国家/语义引擎；206 不作为公开节点协议。 |
 | `internal-207-access-control` | P+U+R+N，与 `entry-port-management` 共用发布别名、默认分享/原位修改及固定原生公网 IPv4/重启证据；N/6A.69 另补正式 `.44` ARM64/sing-box Trojan 别名与双核心恢复/服务重启。 | 同端口管理的公网 IPv6、其它既定 ARM64/端口组合及尚缺的适用生命周期，不重复计数。 | 只复用已有入口认证、统计及 TLS/SNI，不做任意目的转发。拒绝宿主组合保持原边界；207 不作为公开节点协议。 |
 | `vless-encryption` | P+E+N：配对/投影/marker/失败恢复，固定正式 3.41.5 amd64 公网启停与普通 bridge 双加密入口真实重启。N/6A.70 补固定正式 `.44` 原生 ARM64/IPv4 普通 bridge 双入口的五阶段启停/服务 restart/恢复、精确错误配对与旧 none/错误 encryption 拒绝，正式 Xray 与 Mihomo v1.19.28 显式 hybrid 正例通过。[6A.76](docker-menu-parity-plan.md#6a76-mihomo-原始-reality-uri-导入) 补隔离 amd64 和原生 ARM64 的 Mihomo v1.19.31 Vision/XHTTP 原 URI 导入（Encryption 开/关），及普通 gRPC 原 URI；原生 ARM64 五个正例、18 个负例和清场通过。 | 其它既定客户端/算法、其它环境的 Mihomo 原 URI 导入、ARM64 整机重启/公网入站/IPv6、其它拓扑的加密生命周期及当前版本尚缺的适用生命周期。 | 只按固定 Xray/Mihomo 组合及 schema 3 Reality 1/2 实验范围使用；N 的显式 X25519MLKEM768 证据和旧原 URI 失败不改判。不能与 3D.27/F 的 ML-DSA-65 签名验证证据相互替代；未验组合不暗中开放，旧 curl 28 不改判。 |
 
@@ -426,6 +426,24 @@ A 的自然续期待北京时间 `2026-12-17 08:03:22` 阈值后的实际调度�
 功能合同的 13 条 `reason` 已对齐 ARM64 收口口径、双 Peer 恢复和上述专项证据。
 结构化对比仅发现说明字段变化，`docker-phase3` 通过。回归原件
 `.tmp-regression-docker-dd3f0669f08d48398fd5c6277cd6feda/`。
+
+## 正式 v3.44.7 的 WARP 公网出站
+
+北京时间 2026-11-19，以一次性免费设备取得真实 Cloudflare WARP Peer。
+使用正式发布源码渲染全局 IPv4 WARP 配置，复用签名清单绑定的 amd64 核心。
+测试以回环 SOCKS 入口接入生成的路由和 WireGuard 配置。断网环境的规格校验及
+两个核心的回环启动通过。
+
+- 本机隔离 Linux 容器里的 Xray 返回 `warp=on`，与同环境 `warp=off` 对照
+  的公网出口地址不同。早期 Xray 请求重置与该轮 sing-box 请求超时均保留。
+- A 用非特权进程运行相同夹具，sing-box 返回 `warp=on`，与 A 的直连对照
+  的公网出口地址不同。该轮 Xray 请求重置。设备撤销成功，随后独立复核临时
+  目录和回环端口已清除，三个生产容器健康。
+
+早期规格夹具的入口 ID 与 Reality 公钥错误已修正，失败保留。测试设备按轮撤销，
+测试输入和探针见 `.tmp-warp-daily-close/`。两核心均已有固定路径的一次公网 HTTPS
+出站见证。跨网络路径的重置和超时根因、IPv6 出站、选择性路由在真实 Peer 上的
+表现和长稳仍待验证。路由与内部 206 的状态保持 deferred。
 
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
