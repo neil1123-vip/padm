@@ -185,7 +185,7 @@ try:
     assert "v1.19.31" in images["mihomo"]["version"]
     command("origin-certificate", [
         "docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges:true",
+        "--user", "0:0", "--security-opt", "no-new-privileges:true",
         "--mount", f"type=bind,src={WORK},dst=/output", "--entrypoint", "openssl", TOOLS,
         "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
         "-subj", "/CN=93.184.216.34", "-addext", "subjectAltName=IP:93.184.216.34",
@@ -193,7 +193,7 @@ try:
     ])
     command("target-certificate", [
         "docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges:true",
+        "--user", "0:0", "--security-opt", "no-new-privileges:true",
         "--mount", f"type=bind,src={WORK},dst=/output", "--entrypoint", "openssl", TOOLS,
         "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
         "-subj", "/CN=" + SNI, "-addext",
