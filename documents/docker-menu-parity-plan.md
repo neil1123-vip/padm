@@ -12807,12 +12807,23 @@ ARM64、公网、IPv6、traceroute/PMTU、启用态重启及长稳未验；TUN/�
 `4` 个 Xray URI 转换兼容通过、`10` 个错 UUID/错 SNI/加密入口旧 none 拒绝。
 成功点均校验严格 HTTPS、`139264` 字节正文 SHA-256 与唯一原点 nonce；
 拒绝点 curl `35`、零正文及零原点请求。完整 Reality 参数合同通过；
-gRPC 只核 URI 合同，不计真实导入。
+该 22 点不包含 gRPC。
 
 原件 `.tmp-mihomo-raw-uri-20261118/attempt-2/`，容器已清场；首轮测试原点
 因临时私钥权限未启动，保留失败。成功轮未分别封存两阶段完整服务端配置；
 固定本地连接不外推 ARM64、公网入站、整机重启或其它客户端。6A.70 的旧版
 ARM64 原 URI 失败不改判；支持状态保持 `16 supported/14 deferred`。
+
+正式 `v3.44.4`/`25d99b11` 后补 Xray gRPC Reality `26`、`encryption=none`。
+同一正式 Xray 镜像和 Mihomo `v1.19.31` 在 Linux amd64 共用无外网容器
+网络命名空间；本地 TLS 目标及 HTTPS 原点各自独立，不映射宿主端口。
+正式包两次生成的 URI 原文直接交给 file provider，均通过 Reality 认证和
+严格 HTTPS，分别核对 `139264` 字节正文 SHA-256 与唯一原点 nonce。
+正式 `v3.44.3` 的旧 URI 未协商混合握手，转入本地 TLS 目标后证书验证拒绝；
+错 UUID、SNI、gRPC 服务名同样拒绝。四个负例均为 curl `35`，无正文或
+新原点连接。最终六点、正式包绑定和清场复核通过，临时私钥已删除。
+原件 `.tmp-mihomo-grpc-3444/attempt-3/`；前两轮的夹具缺依赖及错误日志断言
+保留失败。此验证不覆盖公网、ARM64 或其它 gRPC 客户端。
 
 ### 本轮菜单与回归收敛
 
