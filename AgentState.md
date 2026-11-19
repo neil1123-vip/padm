@@ -32,14 +32,14 @@
   Reality 共存/Encryption 及清场通过。Mihomo 限显式 hybrid 投影。
 - 本地单 Peer 双机同步、重启、迁移、bind/TERM、新机 WG 恢复通过，已关机。
   `.8` 升级、控制防护和全文件恢复已独验。
-- Dependabot 去重定向已验，真实新 PR 待验；jq/health/Peer 定向已验。
+- TUN 真机、恢复预览及 XHTTP 回滚通过。Dependabot 新 PR 待验。
 
 ## 未决
 
 - B 续期隔离保持；nftables 重载会清表，变更须核表和探针。
   实际续期、ARM64 整机重启/其它组合/公网入站、IPv6/长稳未验；
   Reality 其它加密生命周期和原 URI 组合未验，spec 恢复限语义。
-- 双 Peer 经 A 公网 SSH 中继的同步/主控灾备通过。原生跨宿主、其它拓扑和长稳待验。
+- 双 Peer 经 A 公网 SSH 与 B 公网 UDP 中继灾备通过。B 来宾组网返回 10，跨宿主待验。
   控制迁移限本地单 Peer，保留三次采样、即时清场及 30 秒窗口。
 - 独立 SNI：别名整链、TLS 对照已验；跨站点被拒（3D.27）。
   A 无全局 IPv6；B 公网 TCP/22 与本机 Linux 客户端路径已互证。
