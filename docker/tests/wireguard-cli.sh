@@ -27,7 +27,10 @@ fail() { cat "${LOG}" >&2; printf 'wireguard-cli-fail: %s\n' "$*" >&2; exit 1; }
 source "${PROJECT_ROOT}/install-docker.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/docker/lib/control.sh"
-dockerHostPreflight() { printf 'preflight\n' >>"${CALLS}"; }
+dockerHostPreflight() {
+    printf 'preflight\n' >>"${CALLS}"
+    [[ "${MODE}" != host-fail ]]
+}
 dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
 dockerManagedSpecMatchesDeployment() { [[ "${MODE}" != drift ]]; }
 dockerConfigureReleaseReuseInstalled() { printf 'release\n' >>"${CALLS}"; }
@@ -184,11 +187,16 @@ CASES=$((CASES + 1))
 assert_clean
 [[ ! -s "${CALLS}" && "$(snapshot)" == "${before}" ]] || fail '取消仍执行了后端或修改'
 
-for MODE in drift release-fail key-fail; do
+for MODE in host-fail drift release-fail key-fail; do
     expected=${PADM_DOCKER_RC_STATE}
     [[ "${MODE}" != release-fail ]] || expected=${PADM_DOCKER_RC_MANIFEST}
     [[ "${MODE}" != key-fail ]] || expected=${PADM_DOCKER_RC_HOST}
+    [[ "${MODE}" != host-fail ]] || expected=${PADM_DOCKER_RC_HOST}
     run_case "${expected}" prepare --address 10.90.0.1 --listen-port 51820 --yes
+    case "${MODE}" in
+        host-fail) grep -Fxq 'WireGuard 宿主预检失败' "${LOG}" || fail '缺少宿主预检错误' ;;
+        key-fail) grep -Fxq 'WireGuard 密钥容器失败（退出码 1）' "${LOG}" || fail '缺少密钥容器错误' ;;
+    esac
     [[ "$(snapshot)" == "${before}" ]] || fail "${MODE}: 失败改变已有输入"
 done
 MODE=ok

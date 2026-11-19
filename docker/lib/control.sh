@@ -1851,7 +1851,10 @@ dockerWireGuardCommand() (
             return "${PADM_DOCKER_RC_USAGE}"
         case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     fi
-    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerHostPreflight || {
+        dockerError 'WireGuard 宿主预检失败'
+        return "${PADM_DOCKER_RC_HOST}"
+    }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     # 在部署锁收紧目录权限前拒绝不安全的原路径。
     for parent in "${root}" "${root}/config" "${root}/secrets" "${root}/secrets/net"; do
@@ -1944,8 +1947,10 @@ dockerWireGuardCommand() (
         chmod 0700 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityProbeRun 10 --pull never --user 0:0 --network none --log-driver none \
         --mount "type=bind,src=${draft},dst=/input" --entrypoint sh "${image}" -ec \
-        'umask 077; wg genkey > /input/private.key; wg pubkey < /input/private.key > /input/public.key' ||
+        'umask 077; wg genkey > /input/private.key; wg pubkey < /input/private.key > /input/public.key' || {
+        dockerError "WireGuard 密钥容器失败（退出码 $?）"
         return "${PADM_DOCKER_RC_HOST}"
+    }
     [[ -d "${root}/secrets/net" ]] || mkdir -m 0700 -- "${root}/secrets/net" ||
         return "${PADM_DOCKER_RC_STATE}"
     python3 -B "${DOCKER_LIB_DIR}/wireguard-config.py" prepare --directory "${directory}" \
