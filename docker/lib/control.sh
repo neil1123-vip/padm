@@ -1945,7 +1945,8 @@ dockerWireGuardCommand() (
     image=$(jq -er '.images.net' "${spec}") || return "${PADM_DOCKER_RC_STATE}"
     draft=$(mktemp -d "${root}/.wireguard.XXXXXX") &&
         chmod 0700 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
-    dockerRealityProbeRun 10 --pull never --user 0:0 --network none --log-driver none \
+    # The key container took 36 seconds on a constrained KVM guest during acceptance.
+    dockerRealityProbeRun 60 --pull never --user 0:0 --network none --log-driver none \
         --mount "type=bind,src=${draft},dst=/input" --entrypoint sh "${image}" -ec \
         'umask 077; wg genkey > /input/private.key; wg pubkey < /input/private.key > /input/public.key' || {
         dockerError "WireGuard 密钥容器失败（退出码 $?）"

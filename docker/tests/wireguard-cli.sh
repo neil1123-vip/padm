@@ -49,7 +49,7 @@ dockerRealityProbeRun() {
         return
     fi
     [[ "$#" == 16 && "$1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}" == \
-        '10 --pull never --user 0:0 --network none --log-driver none --mount' &&
+        "${keyTimeout} --pull never --user 0:0 --network none --log-driver none --mount" &&
         "${12} ${13}" == '--entrypoint sh' && "${15}" == -ec &&
         "${14}" == "$(jq -r '.images.net' "${root}/config/spec.json")" &&
         "${16}" == 'umask 077; wg genkey > /input/private.key; wg pubkey < /input/private.key > /input/public.key' ]] ||
@@ -116,8 +116,9 @@ assert_clean() {
     ! grep -qF -- "${PRIVATE}" "${LOG}" || fail '命令输出泄露 WireGuard 私钥'
 }
 run_case() {
-    local expected=$1 actual=0
+    local expected=$1 actual=0 keyTimeout=10
     shift
+    [[ "$1" != prepare ]] || keyTimeout=60
     (dockerWireGuardCommand "$@") >"${LOG}" 2>&1 || actual=$?
     [[ "${actual}" == "${expected}" ]] || fail "$*: 退出码 ${actual}，预期 ${expected}"
     assert_clean
