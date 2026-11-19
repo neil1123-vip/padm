@@ -706,3 +706,30 @@ IPv4 路径的 UDP 报文往返，Hy2 为 28 包，TUIC 为 60 包。两条 IPv4
 `.tmp-formal3447-{hy2,tuic}-flow-cli.log`，静置观测见
 `.tmp-formal3447-{hy2,tuic}-idle.log`。公网双栈和跨启动恢复仍待验，
 TUIC 客户端自动换端口超出当前支持范围。
+
+断流排空补验中，停止跳跃后两种协议各剩一条 IPv4 旧映射。暂停客户端核心
+及目标容器后，静默抓包窗口内均为零 UDP 包。Hy2 在 `120.039` 秒观察到旧
+映射消失，TUIC 在 `120.038` 秒观察到。探针每两秒采样，双向 UDP 超时为
+120 秒。两轮 NAT 恢复，两个范围端口的双栈新连接均被拒，测试容器已删除。
+此处关闭固定隔离拓扑的断流排空验证，持续有报文的旧流和公网双栈仍待验。
+日志为 `.tmp-hopping-3447-drain-{hy2,tuic}-r3.log`，SHA-256 分别为
+`6c0501a2bbeb11ae640a342ddee83873deb9fcabf10a44cda2673ef3577efcf7` 与
+`94e1d4e1c352d4d6373febd9fb7aa567e2f116d6166499ba177f87ee007690e2`。
+
+## 公网中继控制同步与灾备
+
+2026-11-19，北京时间。正式 `v3.44.0` 上的一主两 Peer 同在本机的独立
+Debian 13 amd64 KVM 来宾。两条 WireGuard 链路经 VPS A 的公网 IPv4 SSH
+会话往返。控制 API 继续绑定 WireGuard 地址。
+
+两台 Peer 在灾前及灾后各通过原 systemd 定时器同步一次。旧主控关机后，
+空白替代机验包并显式重建主控，WireGuard 身份保持。两份旧邀请返回 HTTP
+`401`，两端显式重绑并继续同步。灾后严格 TLS 正反例与双向计量通过。
+A 记录四个方向分别转发 67、69、65、76 个 WireGuard type 4 报文。
+四台来宾正常关机，SSH 中继退出，A 的三个生产容器均健康。
+
+断网只读复核确认 915 份 JSON 原件，聚合 SHA-256
+`43a806ecca6823e7cf571941aab32402f22d6583f7b52a4c49b01dbc127d579d`。
+证据在卷 `padm-native-kernel-probe-20261116` 的
+`control-multipeer-1795082492893391608`。原生跨宿主、公网 UDP 同步及
+其它灾备拓扑仍待验。16 supported、14 deferred。
