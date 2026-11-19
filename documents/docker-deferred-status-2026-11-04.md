@@ -768,4 +768,13 @@ WireGuard 身份。第一台 Peer 首次显式重绑失败，保留该轮证据�
 密钥容器返回 `137`，同轮独立探针耗时 38.066 秒。已查的宿主与来宾
 内核日志无 OOM 记录。两轮三个来宾均正常关机，临时目录和端口已清场。
 原件为 `control-multipeer-1795109071744863074`、
-`control-multipeer-1795112093581856321`。合同计数为 16 supported、14 deferred。
+`control-multipeer-1795112093581856321`。
+
+`.11` 第三轮在 384 MiB 的 B 来宾复验。公网 UDP 双向回显、正式验签安装、
+五镜像核对、业务配置、`wireguard prepare` 和 `peer` 均通过。
+`wireguard start` 的候选 WireGuard、Xray 和 nginx 检查已经运行，随后
+Compose 启动 WireGuard，报告 Xray healthy 和 nginx started。验收脚本在
+1,200 秒后仍未取得 CLI 退出码。变更前的 Xray 统计采集也曾失败，保留原
+累计流量。本轮未到公网 WireGuard 握手及控制同步阶段，阻塞点待定位。
+三个来宾均正常关机，B 的临时目录与端口已清场。原件为同卷
+`control-multipeer-1795114780858815793`。合同计数为 16 supported、14 deferred。
