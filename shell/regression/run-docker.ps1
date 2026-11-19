@@ -528,10 +528,15 @@ try {
             $references = [ordered]@{ net = 'padm-local/padm-net:control-4c4b' }
         } elseif ($Selector -eq 'docker-tun-real') {
             # 固定摘要导入时需保留普通标签，否则嵌套 daemon 无法解析 tag@digest。
-            & $docker image tag 'ghcr.io/neil1123-vip/padm-sing-box:3.41.7@sha256:7c58562b7a6f1988d9850b5d425e9f446e04f2df63ab10542f160ab5581129ed' 'padm-local/padm-sing-box:tun-1.14.4'
+            $tunCoreDigest = @{
+                'linux/amd64' = 'sha256:a3c43fdb8eeed373921e7b62d8bdff640e60d1182cf53f497de748110a275aeb'
+                'linux/arm64' = 'sha256:369ecd7d4ba7cd3cd1ad71d4730a7d3a4a39528c4ce3cbf1beec45e022139ec9'
+            }[$platform]
+            $tunCoreTag = 'padm-local/padm-sing-box:tun-1.14.4-padm.2'
+            & $docker image tag "ghcr.io/neil1123-vip/padm-sing-box@$tunCoreDigest" $tunCoreTag
             if ($LASTEXITCODE -ne 0) { throw 'Cannot tag the pinned TUN core image.' }
             $references = [ordered]@{
-                'sing-box' = 'padm-local/padm-sing-box:tun-1.14.4'
+                'sing-box' = $tunCoreTag
                 net = 'padm-local/padm-net:control-4c4b'
             }
         } elseif ($Selector -in @('docker-tproxy-real', 'docker-redirect-real')) {
