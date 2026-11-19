@@ -50,8 +50,8 @@
 - ICMP 已验限 Debian 13/amd64/IPv4；arm64/公网/IPv6/traceroute/PMTU/重启未验；
   TUN/透明启用重启按要求不做。SOCKS UDP、Xray 解析后阻断继续拒绝。
 - `.7` WARP 原生 B 全局 IPv4 各 21/21，另四组各 9/9。
-  `.8` 三模式、重启和关闭已验，断链复测三轮基线超时。
-  CDN 缺代理测试记录及设置核验。
+  `.8` 全局 IPv4 断链恢复通过，10 分钟双核采样为 0/40、34/40。
+  CDN 控制台待登录，待核代理记录和设置。
   Vision reset/XHTTP/TUIC 旧超时根因未定；旧跨核心失败原件保持。
   固定公网组合不外推活动 sing-box；拒绝配对及带来源的跨核心复制。
   ML-DSA 仍限 amd64/IPv4/Reality/gRPC/chrome。

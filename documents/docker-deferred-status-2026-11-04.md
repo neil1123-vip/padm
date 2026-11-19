@@ -599,13 +599,54 @@ Xray 通过 5/5，sing-box 通过 6/6。随后用另一个临时 Peer 各运行�
 `0b0fe55526b559f8967e602e23141baaf72c0c7b2248bc93a5e0413823669e03`。
 
 此前 `r7` 的重启后即时探测返回 curl `97`，设备撤销成功，虚机正常关机等待超时。
-旧轮原件保留。公网出站长稳、跨路径握手异常及受管故障注入恢复仍待验。
+旧轮原件保留。
 
 `r9` 和 `r10` 的全局 IPv4 双核心基线均通过，分别在全局 IPv6 和选择性 IPv4
 切换后探测超时（curl `28`）。`r11` 将场景缩至全局 IPv4，Xray 基线通过，
 sing-box 探测超时。三轮均在断链注入前退出，设备已撤销，虚机已正常关机。
 原件在 `.tmp-warp-daily-close/managed-guest-r9.log`、`managed-guest-r10.log`
 和 `managed-guest-r11.log`。
+
+`r12` 在同一正式包的独立虚机内完成全局 IPv4 断链与恢复。Xray 和 sing-box
+在注入前首轮均返回 `warp=on`。虚机加入 WARP 对端的 `/32` 黑洞路由后，
+宿主直连对照仍成功，两个业务入口分别超时（curl `28`），响应正文均为空。
+保持黑洞路由时，正式 `edit --warp-off` 恢复两个入口的直连，规格和两份核心
+配置摘要回到基线。移除黑洞路由后确认路由表无残留，测试设备撤销，虚机正常关机。
+外层接口记录到 62 个对端 UDP 包，内核丢包计数为 `0`。原件
+`.tmp-warp-daily-close/managed-guest-r12.log`，SHA-256
+`ab4ac457b0d64f747eacb1ee19e5545452e6e21fa61c92da05dc78acb800742c`。
+
+`r13` 的 10 分钟双核心采样在基线阶段退出。Xray 全局 IPv4 首次探测通过，
+sing-box 连续四次在 12 秒窗口内超时。两次探测阶段分别对应两个外层 UDP
+源端口。超时阶段的端口向对端发出 11 个 148 字节报文，未观察到该端口的回包。
+同一接口上另一个端口与对端有往返，内核抓包丢包计数为 `0`。
+设备已撤销，虚机正常关机。原件 `.tmp-warp-daily-close/managed-guest-r13.log`，
+SHA-256 `0b93d0bfbf6ce3d8db27ae11b6b8cd389e7efc149e5e227f9ec643f7e6e47d67`。
+
+`r14` 在同一虚机和同一个测试 Peer 上，先暂停 Xray 容器再探测 sing-box。
+恢复 Xray 后，两入口按顺序探测。三个探测均首次返回 IPv4 `warp=on`。
+关闭 WARP 后两入口均恢复直连，规格和配置摘要复原。设备撤销，虚机正常关机。
+原件 `.tmp-warp-daily-close/managed-guest-r14.log`，SHA-256
+`3cd89c303711e8fb13deaeb9cccdc35a908182ed96b65d962779907b6360fea4`。
+
+`r15` 在相同拓扑下完成 600 秒全局 IPv4 采样。两入口共用一个临时 WARP
+设备，每 15 秒并行发起一组严格 HTTPS 请求。Xray 为 `0/40`，sing-box
+为 `34/40`。其余 46 次均为 curl `28`。抓包尾段观察到一个 UDP 源端口
+持续发送 148 字节报文且没有回包，另一个端口有双向流量。正式关闭 WARP
+后，两入口首轮恢复直连，规格和核心配置摘要匹配基线。设备已撤销，虚机
+正常关机。原件 `.tmp-warp-daily-close/managed-guest-r15.log`，SHA-256
+`7750f6036dcc81f49e4b3dabe12f9f74e015edd8dc66fb54df407cee9ccc1bfb`。
+
+`r16` 在独立虚机内按共享设备、sing-box 独立设备、恢复共享设备运行各 90 秒。
+每段重启 sing-box，Xray 进程的启动时间保持一致。Xray 三段均为 `6/6`，
+sing-box 依次为 `6/6`、`5/6`、`5/6`。独立设备阶段出现一次 curl `97`，
+恢复共享阶段出现一次 curl `28`。这三段尚不足以确定共享设备与故障的关系。
+恢复共享配置后，正式关闭 WARP，两入口恢复直连，规格和核心配置摘要匹配
+基线。两台测试设备均已撤销，虚机正常关机。原件
+`.tmp-warp-daily-close/managed-guest-r16.log`，SHA-256
+`421121177bc2eee4a3654870d7707864b43a7b040e80b5b894cc15c082fbe7ef`。
+
+双核心公网长稳、握手回包丢失位置及其它模式故障注入仍待验。
 
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
