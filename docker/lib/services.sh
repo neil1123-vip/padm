@@ -1527,7 +1527,7 @@ dockerEditNginxRepairInputsValidate() {
 
 dockerEditBaselineValidate() {
     local specFile=$1 workspace=$2 alpnListener=${3:-} nginxRepairListener=${4:-} root baseline core directory state token invalidPath
-    local metadata http01 subscriptionEnabled integrationTypes realityStream hostStream coreTypes
+    local metadata http01 subscriptionEnabled integrationTypes realityStream hostStream coreTypes legacySubscriptions
     local -a managedPaths=()
     root=$(dockerInstallRoot) || return 1
     [[ -z "${alpnListener}" ]] || jq -e --arg listener "${alpnListener}" '
@@ -1664,6 +1664,24 @@ dockerEditBaselineValidate() {
                 diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1
             elif [[ "${directory}" == config/nginx ]]; then
                 dockerNginxDirectoryMatches "${specFile}" "${baseline}/${directory}" "${root}/${directory}"
+            elif [[ "${directory}" == data/subscription ]] &&
+                ! diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1 &&
+                jq -e 'any(.core.protocols[]; .id == 22 or .id == 23)' "${specFile}" >/dev/null; then
+                # 主订阅和各分享组可能独立刷新，只接受完整的新旧生成正文。
+                legacySubscriptions="${workspace}/legacy-subscriptions"
+                mkdir -p -- "${legacySubscriptions}/data/subscription" "${legacySubscriptions}/config" || return 1
+                if [[ "${subscriptionEnabled}" == true ]]; then
+                    token=$(jq -er '.subscription.token' "${specFile}") || return 1
+                    dockerGenerateSubscription "${specFile}" "${legacySubscriptions}/${directory}/${token}" published auto || return 1
+                fi
+                dockerSubscriptionPrepareCandidate "${specFile}" "${legacySubscriptions}" '' auto || return 1
+                for token in "${legacySubscriptions}/${directory}/"*; do
+                    [[ -f "${token}" ]] || continue
+                    if cmp -s -- "${token}" "${root}/${directory}/${token##*/}"; then
+                        cp -- "${token}" "${baseline}/${directory}/${token##*/}" || return 1
+                    fi
+                done
+                diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1
             else
                 diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1
             fi || {
@@ -3636,13 +3654,13 @@ EOF
 }
 
 dockerGenerateSubscription() {
-    local specFile=$1 target=$2 mode=${3:-published}
+    local specFile=$1 target=$2 mode=${3:-published} vmessCipher=${4:-aes-128-gcm}
     case "${mode}" in
     published) jq -e '.subscription.enabled == true' "${specFile}" >/dev/null || return 0 ;;
     local) ;;
     *) return 1 ;;
     esac
-    jq -r '
+    jq -r --arg vmessCipher "${vmessCipher}" '
       def authority: if contains(":") then "[\(.)]" else . end;
       . as $request |
       .core.protocols[] | . as $entry |
@@ -3739,7 +3757,7 @@ dockerGenerateSubscription() {
         (.websocket // .httpupgrade) as $transport |
         "vmess://" + ({
           v: "2", ps: .name, add: .server, port: (.public_port | tostring), id: .uuid,
-          aid: "0", scy: "auto", net: (if .id == 23 then "httpupgrade" else "ws" end),
+          aid: "0", scy: $vmessCipher, net: (if .id == 23 then "httpupgrade" else "ws" end),
           type: "none", host: $transport.domain,
           path: ("/" + $transport.path + (if .id == 23 then "" else "ws" end)),
           tls: "tls", sni: $transport.domain

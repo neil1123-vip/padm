@@ -373,6 +373,35 @@ compose() { docker compose --project-name "${project}" --file "${COMPOSE}" --pro
 stage=services
 compose config --format json >/dev/null
 if [[ "${CORE}" == xray ]]; then
+    if [[ "${CDN_ENTRIES}" == 1 ]]; then
+        # 新版 Xray 默认拒绝私网目标。只在隔离测试副本允许本次原点的业务端口。
+        compose up -d --pull never --wait --wait-timeout 60 origin
+        originIp=$(docker inspect --format '{{json .NetworkSettings.Networks}}' "$(compose ps -q origin)" |
+            jq -er --arg project "${project}" '.[$project].IPAddress | select(length > 0)')
+        # 原点只监听 IPv4，IPv6 探针仍通过双栈 TLS 入口访问它。
+        jq --arg ip "${originIp}" '.services.xray.extra_hosts += ["origin=" + $ip]' "${COMPOSE}" >"${COMPOSE}.tmp"
+        mv -- "${COMPOSE}.tmp" "${COMPOSE}"
+        docker run --rm --pull=never --network none --label "io.padm.test=${project}" --user 0 \
+            --mount "type=volume,source=${volume},target=/test" --entrypoint python3 "${OPS_ID}" -c '
+import ipaddress
+import json
+import pathlib
+import sys
+
+path = pathlib.Path("/test/runtime/config/xray/config.json")
+value = json.loads(path.read_text())
+outbound = next(item for item in value["outbounds"] if item["tag"] == "direct")
+assert outbound["protocol"] == "freedom"
+settings = outbound.setdefault("settings", {})
+assert "finalRules" not in settings
+origin = str(ipaddress.IPv4Address(sys.argv[1])) + "/32"
+settings["finalRules"] = [
+    {"action": "allow", "network": network, "port": port, "ip": [origin]}
+    for network, port in (("tcp", "8088"), ("udp", "8089"))
+]
+path.write_text(json.dumps(value))
+' "${originIp}"
+    fi
     compose run --rm --no-deps xray -test -config /etc/padm/xray/config.json >/dev/null
 else
     compose run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null
@@ -608,7 +637,7 @@ def parse(line, server=servers[0], label=names[0]):
     assert list(value) == ["v","ps","add","port","id","aid","scy","net","type","host","path","tls","sni"]
     assert raw.decode() == json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     assert value == {"v":"2","ps":label,"add":server,"port":str(share_port),
-                     "id":identity,"aid":"0","scy":"auto","net":transport,
+                     "id":identity,"aid":"0","scy":"aes-128-gcm","net":transport,
                      "type":"none","host":domain,"path":"/padmvmess"+("ws" if transport == "ws" else ""),
                      "tls":"tls","sni":domain}
     assert str(uuid.UUID(value["id"])) == value["id"]

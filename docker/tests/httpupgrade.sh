@@ -73,7 +73,7 @@ if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${HTTPUPGRADE_SPEC}" 2>/dev/null
     fail '旧规格 bundle 接受 HTTPUpgrade'
 fi
 HTTPUPGRADE_JSON=$(jq -cn --arg uuid "${UUID}" '
-  {v:"2",ps:"HTTPUpgrade:test",add:"2001:db8::1",port:"24444",id:$uuid,aid:"0",scy:"auto",
+  {v:"2",ps:"HTTPUpgrade:test",add:"2001:db8::1",port:"24444",id:$uuid,aid:"0",scy:"aes-128-gcm",
    net:"httpupgrade",type:"none",host:"ws.example.com",path:"/abcdefgh",tls:"tls",sni:"ws.example.com"}')
 HTTPUPGRADE_URI="vmess://$(printf '%s' "${HTTPUPGRADE_JSON}" | base64 | tr -d '\n')"
 for core in xray sing-box; do

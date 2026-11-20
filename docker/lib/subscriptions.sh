@@ -72,7 +72,7 @@ dockerSubscriptionStatePath() {
 }
 
 dockerSubscriptionPrepareCandidate() {
-    local specFile=$1 candidate=$2 source=${3:-} state group token
+    local specFile=$1 candidate=$2 source=${3:-} vmessCipher=${4:-aes-128-gcm} state group token
     if [[ -n "${source}" ]]; then
         state=$(jq -ces 'select('"${DOCKER_SUBSCRIPTION_STATE_JQ}"') | .[0]' \
             "${source}" 2>/dev/null) || return 1
@@ -95,7 +95,7 @@ dockerSubscriptionPrepareCandidate() {
             dockerError '分享 token 与主订阅冲突'
             return 1
         }
-        dockerSubscriptionRender "${specFile}" "${group}" "${candidate}/data/subscription/${token}" || return 1
+        dockerSubscriptionRender "${specFile}" "${group}" "${candidate}/data/subscription/${token}" "${vmessCipher}" || return 1
     done < <(jq -c '.groups[] | select(.enabled)' <<<"${state}")
 }
 
@@ -218,7 +218,7 @@ dockerSubscriptionFindGroup() {
 }
 
 dockerSubscriptionRender() {
-    local specFile=$1 groupJson=$2 target=$3 root tempSpec token status isStdout=0
+    local specFile=$1 groupJson=$2 target=$3 vmessCipher=${4:-aes-128-gcm} root tempSpec token status isStdout=0
     root=$(dockerInstallRoot) || return 1
     token=$(jq -er '.token' <<<"${groupJson}") || return 1
     dockerSubscriptionTokenIsValid "${token}" || return 1
@@ -257,7 +257,7 @@ dockerSubscriptionRender() {
             return 1
         }
     fi
-    dockerGenerateSubscription "${tempSpec}" "${target}"
+    dockerGenerateSubscription "${tempSpec}" "${target}" published "${vmessCipher}"
     status=$?
     rm -f -- "${tempSpec}" || [[ "${status}" -ne 0 ]] || status=1
     if ((isStdout)); then

@@ -525,6 +525,15 @@ dockerSubscriptionStateWrite "${root}/config/share-groups.json" \
 ) >"${LOG}" 2>&1 || fail '初始化 CDN 夹具失败'
 assertClean
 assertInstalledShare
+# 旧主订阅和已刷新的分享组可并存，任一正文被篡改仍拒绝编辑。
+mainShare="${root}/data/subscription/0123456789abcdef"
+dockerGenerateSubscription "${root}/config/spec.json" "${mainShare}" published auto
+printf '%s\n' tampered >>"${mainShare}"
+runEdit 15 --cdn-entry entry-21 edge.example.com --preview
+dockerGenerateSubscription "${root}/config/spec.json" "${mainShare}" published auto
+runEdit 0 --cdn-entry entry-21 edge.example.com --preview
+dockerSubscriptionRender "${root}/config/spec.json" "${group}" \
+    "${root}/data/subscription/cdn-transaction-token" auto
 # 模拟旧 bundle 更新后的在线正文，首次 CDN 提交须补齐解析器与入口校验。
 cp -- "${root}/config/nginx/default.conf" "${TEST_ROOT}/nginx-installed-strict.conf"
 makeLegacyNginx "${root}/config/spec.json" "${TEST_ROOT}/nginx-installed-strict.conf" \

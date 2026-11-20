@@ -93,7 +93,7 @@ serializeVmessShareJson() {
         --arg path "${path}" \
         --arg network "${network}" \
         --arg add "${add}" \
-        '{port:$port,ps:$ps,tls:"tls",id:$id,aid:0,v:2,host:$host,type:"none",path:$path,net:$network,add:$add,method:"none",peer:$host,sni:$host}'
+        '{port:$port,ps:$ps,tls:"tls",id:$id,aid:0,v:2,host:$host,type:"none",path:$path,net:$network,add:$add,method:"aes-128-gcm",scy:"aes-128-gcm",peer:$host,sni:$host}'
 }
 
 serializeVlessRealityVisionLink() {

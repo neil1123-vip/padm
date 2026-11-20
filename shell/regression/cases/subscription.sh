@@ -1514,11 +1514,12 @@ defaultBase64Code vmessws 443 tls-vmess-user uuid-vmess "edge.example.com" "/vme
 vmessWsLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-vmess-user")
 [[ "${vmessWsLink}" == vmess://* ]]
 vmessWsJson=$(printf '%s' "${vmessWsLink#vmess://}" | base64 -d)
-jq -e '.port == 443 and .ps == "tls-vmess-user" and .net == "ws" and .path == "/vmess-ws" and .add == "edge.example.com"' <<<"${vmessWsJson}" >/dev/null
+jq -e '.scy == "aes-128-gcm" and .method == .scy and .port == 443 and .ps == "tls-vmess-user" and .net == "ws" and .path == "/vmess-ws" and .add == "edge.example.com"' <<<"${vmessWsJson}" >/dev/null
 grep -qxF "green     ${vmessWsJson}\\n" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 assertCapturedSubscribeOutputs "tls-vmess-user" "${vmessWsLink}" "edge.example.com" "tls.example.com" "ws" "vmess"
 assertDisplayedDefaultSubscribeLink "tls-vmess-user" "通用链接：VMess WS TLS"
-jq -e '.[0].alter_id == 0 and .[0].transport.max_early_data == 2048 and .[0].transport.headers.Host == "tls.example.com" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-vmess-user" >/dev/null || { printf 'assert-fail:vmess-ws-transport-host\n' >&2; return 1; }
+grep -qxF '    cipher: aes-128-gcm' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-vmess-user"
+jq -e '.[0].security == "aes-128-gcm" and .[0].alter_id == 0 and .[0].transport.max_early_data == 2048 and .[0].transport.headers.Host == "tls.example.com" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-vmess-user" >/dev/null || { printf 'assert-fail:vmess-ws-transport-host\n' >&2; return 1; }
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="2001:db8::10"
@@ -1544,11 +1545,12 @@ httpUpgradeLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-httpupgrade-
 [[ "${httpUpgradeLink}" == vmess://* ]]
 [[ "${httpUpgradeLink}" != " "* ]]
 httpUpgradeJson=$(printf '%s' "${httpUpgradeLink#vmess://}" | base64 -d)
-jq -e '.port == 443 and .ps == "tls-httpupgrade-user" and .net == "httpupgrade" and .path == "/upgrade" and .add == "edge.example.com"' <<<"${httpUpgradeJson}" >/dev/null
+jq -e '.scy == "aes-128-gcm" and .method == .scy and .port == 443 and .ps == "tls-httpupgrade-user" and .net == "httpupgrade" and .path == "/upgrade" and .add == "edge.example.com"' <<<"${httpUpgradeJson}" >/dev/null
 grep -qxF "green     ${httpUpgradeJson}\\n" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 assertCapturedSubscribeOutputs "tls-httpupgrade-user" "${httpUpgradeLink}" "edge.example.com" "tls.example.com" "httpupgrade" "vmess"
 assertDisplayedDefaultSubscribeLink "tls-httpupgrade-user" "通用链接：VMess HTTPUpgrade TLS"
-jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].transport.host == "tls.example.com" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-httpupgrade-user" >/dev/null || { printf 'assert-fail:vmess-httpupgrade-transport-host\n' >&2; return 1; }
+grep -qxF '    cipher: aes-128-gcm' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-httpupgrade-user"
+jq -e '.[0].security == "aes-128-gcm" and .[0].transport.path == "/upgrade" and .[0].transport.host == "tls.example.com" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-httpupgrade-user" >/dev/null || { printf 'assert-fail:vmess-httpupgrade-transport-host\n' >&2; return 1; }
 unset REGRESSION_ECHO_LOG
 [[ "${httpUpgradeBoundaryFailed}" -eq 0 ]] || return 1
 }

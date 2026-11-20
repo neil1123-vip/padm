@@ -37,7 +37,7 @@ def xray_client(uri, local):
         assert set(value) == {
             "v", "ps", "add", "port", "id", "aid", "scy", "net", "type",
             "host", "path", "tls", "sni"}
-        assert value["v"] == "2" and value["aid"] == "0" and value["scy"] == "auto"
+        assert value["v"] == "2" and value["aid"] == "0" and value["scy"] in ("auto", "aes-128-gcm")
         assert value["type"] == "none" and value["tls"] == "tls"
         assert value["net"] in ("ws", "httpupgrade")
         text(value["ps"])
@@ -46,7 +46,7 @@ def xray_client(uri, local):
         network, sni = value["net"], text(value["sni"])
         host, path = text(value["host"]), text(value["path"])
         assert path.startswith("/") and host == sni
-        user = {"id": identity, "alterId": 0, "security": "auto"}
+        user = {"id": identity, "alterId": 0, "security": value["scy"]}
         tls = {"serverName": sni, "allowInsecure": False}
     else:
         parsed = urllib.parse.urlsplit(uri)
@@ -120,7 +120,7 @@ def xray_client(uri, local):
 def selfcheck():
     identity, domain = "11111111-1111-4111-8111-111111111111", "TLS.padm.test"
     base = {"v": "2", "ps": "entry", "add": "127.0.0.1", "port": "2450", "id": identity,
-            "aid": "0", "scy": "auto", "net": "ws", "type": "none", "host": domain,
+            "aid": "0", "scy": "aes-128-gcm", "net": "ws", "type": "none", "host": domain,
             "path": "/中文/path?x=1", "tls": "tls", "sni": domain}
     def vmess(value):
         return "vmess://" + base64.b64encode(
@@ -139,6 +139,7 @@ def selfcheck():
         (uri("vless", vless | {"type": "tcp", "fp": "chrome", "alpn": "http/1.1,h2",
                              "flow": "xtls-rprx-vision"}), "vless", "tcp"),
         (uri("trojan", trojan | {"type": "tcp", "security": "tls", "alpn": "h2,http/1.1"}), "trojan", "tcp"),
+        (vmess(dict(base, scy="auto")), "vmess", "ws"),
     ]
     for source, protocol, network in rows:
         result = xray_client(source, 2080)

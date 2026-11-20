@@ -76,7 +76,7 @@ if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${VMESS_SPEC}" 2>/dev/null; then
     fail '旧规格 bundle 接受 VMess'
 fi
 VMESS_JSON=$(jq -cn --arg uuid "${UUID}" '
-  {v:"2",ps:"VMess:test",add:"2001:db8::1",port:"24444",id:$uuid,aid:"0",scy:"auto",
+  {v:"2",ps:"VMess:test",add:"2001:db8::1",port:"24444",id:$uuid,aid:"0",scy:"aes-128-gcm",
    net:"ws",type:"none",host:"ws.example.com",path:"/abcdefghws",tls:"tls",sni:"ws.example.com"}')
 VMESS_URI="vmess://$(printf '%s' "${VMESS_JSON}" | base64 | tr -d '\n')"
 
@@ -112,7 +112,7 @@ runRead 0 vmess-links dockerProtocolCommand links entry-vmess
 [[ "$(<"${STDOUT}")" == "${VMESS_URI}" && "$(wc -l <"${STDOUT}")" == 1 ]] ||
     fail 'VMess Base64 JSON 链接不精确或混入额外输出'
 printf '%s' "${VMESS_URI#vmess://}" | base64 -d | jq -e --arg uuid "${UUID}" '
-  . == {v:"2",ps:"VMess:test",add:"2001:db8::1",port:"24444",id:$uuid,aid:"0",scy:"auto",
+  . == {v:"2",ps:"VMess:test",add:"2001:db8::1",port:"24444",id:$uuid,aid:"0",scy:"aes-128-gcm",
     net:"ws",type:"none",host:"ws.example.com",path:"/abcdefghws",tls:"tls",sni:"ws.example.com"}' >/dev/null ||
     fail 'VMess 分享字段或 aid 错误'
 runRead 0 vmess-list dockerProtocolCommand list
