@@ -777,4 +777,18 @@ Compose 启动 WireGuard，报告 Xray healthy 和 nginx started。验收脚本�
 1,200 秒后仍未取得 CLI 退出码。变更前的 Xray 统计采集也曾失败，保留原
 累计流量。本轮未到公网 WireGuard 握手及控制同步阶段，阻塞点待定位。
 三个来宾均正常关机，B 的临时目录与端口已清场。原件为同卷
-`control-multipeer-1795114780858815793`。合同计数为 16 supported、14 deferred。
+`control-multipeer-1795114780858815793`。
+
+从同轮本地 Peer 的正常关机子盘创建独立快照，在断网、384 MiB 来宾、
+480 MiB 上限、70% 单核配额及直写磁盘对照中，`wireguard start` 在
+24.8 秒返回 0。WireGuard 接口已启用，WireGuard、Xray、nginx 三服务均
+健康，来宾正常关机。对照只覆盖本地启动，原件为同卷
+`wan-start-only-1795118734527673118`。
+
+本机使用正式 `.11` 绑定的 net 镜像，在独立容器内与 B 的独立网络命名空间
+直连。密文 UDP 直接到达 B 公网 IPv4 的测试监听端口。双方均记录握手且
+各收 4/4 个隧道 ICMP 回包，WireGuard 收发计数互证为 1,116/1,172 字节。
+临时命名空间、接口和端口已复核清理。原件 `native-direct-proof.json` 的
+SHA-256 为 `f3112bb09701f66c7c6e9ef1073fd7d6e2571dd892da05e876e9d8ddf9971c43`。
+本轮覆盖公网传输。正式跨宿主同步与灾备仍待验，合同计数保持
+16 supported、14 deferred。
