@@ -52,7 +52,7 @@
   TUN/透明启用重启按要求不做。SOCKS UDP、Xray 解析后阻断继续拒绝。
 - `.7` WARP IPv4：A 两核心顺序各 15 分钟、60/60，B 各 21/21。
   `.8` 断链恢复通过，r17 共享和独立均超时，`.11` 并发 32/40、36/40。
-  Cloudflare gRPC/XHTTP H3 隔离透传通过。
+  CDN 公网透传已清场，隔离链路通过 4/6。
   Vision reset/XHTTP/TUIC 旧超时根因未定；旧跨核心失败原件保持。
   固定公网组合不外推活动 sing-box；拒绝配对及带来源的跨核心复制。
   ML-DSA 仍限 amd64/IPv4/Reality/gRPC/chrome。

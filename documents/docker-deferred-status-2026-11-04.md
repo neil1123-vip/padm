@@ -693,6 +693,18 @@ XHTTP 客户端仅提供 `h3`，镜像所用 Xray 冻结版本按此配置选用
 `56b6c9ac29ddab194c188ca8ee0a4af165a63c4dee0e4e1ae7e1cfd29ee4fe19`、
 `c45381095ba98e06d1d6a60463fec84faade5826a85bbd7e27933201c906e4b6`。
 
+同日只读复核，Cloudflare 区域无 Origin Rules，两台权威 DNS 对测试域名的
+A/AAAA 均返回 NXDOMAIN。使用正式 `.11` 源码的离线 CDN 管理事务回归通过，
+发布和宿主服务动作由夹具替代。另用正式四个 amd64 镜像运行真实容器链路。
+原夹具的私网测试原点被 Xray 默认出口规则拦截，21/24/25 的首个 TCP 正例超时。
+在测试副本指定本轮 IPv4 原点和两个业务端口后，Xray 21/24/25 与 sing-box 23
+通过地址覆盖、清除、认证正反例和服务保持检查。Xray 22/23 的正例在 VMess
+请求收到 EOF，服务端报 `unknown security type: UNKNOWN`。
+保留通过和失败原件，临时测试夹具未合入。公网受管 CLI 全生命周期仍待验。
+原件在 `.tmp-cdn-managed-34411/`，事务和分组链路日志 SHA-256 分别为
+`0abfd04ac8ef79232dbaeeb62b41032bbbd717eb255ea67dccf7a8b540053503`、
+`3b4ce9197d25f2c5effb48129bcd5d2a78268fc297a84a2c44567c872213a756`。
+
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
 从验签发布 `44306096595` 的 amd64 Xray 镜像
