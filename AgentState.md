@@ -32,7 +32,7 @@
   Reality 共存/Encryption 及清场通过。Mihomo 限显式 hybrid 投影。
 - 本地单 Peer 双机同步、重启、迁移、bind/TERM、新机 WG 恢复通过，已关机。
   `.8` 升级、控制防护和全文件恢复已独验。
-- TUN 真机、恢复预览及 XHTTP 回滚通过。Dependabot 新 PR 待验。
+- TUN 真机、恢复预览及 XHTTP 回滚通过。Dependabot #11 已合并。
 
 ## 未决
 
@@ -50,7 +50,8 @@
   B IPv6 兼作 SSH。隔离直连 WS/限源已验，公网待专用地址，容量待验。
 - ICMP 已验限 Debian 13/amd64/IPv4；arm64/公网/IPv6/traceroute/PMTU/重启未验；
   TUN/透明启用重启按要求不做。SOCKS UDP、Xray 解析后阻断继续拒绝。
-- `.7` WARP 原生 B 全局 IPv4 各 21/21，另四组各 9/9。
+- `.7` WARP IPv4：B 各 21/21，A 两核心顺序各 15 分钟、60/60。
+  B 另四组各 9/9。
   `.8` 全局 IPv4 断链恢复通过，10 分钟双核采样为 0/40、34/40。
   CDN 控制台待登录，待核代理记录和设置。
   Vision reset/XHTTP/TUIC 旧超时根因未定；旧跨核心失败原件保持。
