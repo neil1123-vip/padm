@@ -975,8 +975,12 @@ padm-docker edit --cdn-entry-clear entry-ws --confirm PADM-DOCKER-EDIT
 时拒绝带该字段的配置、更新和恢复。仅覆盖 `24/25` 时另要求
 `x-padm-cdn-grpc-tls`；协议 `2` 另需 `x-padm-cdn-xhttp`，只替换上行连接地址，
 保留 Reality 身份及独立下行地址。旧包可继续处理原三种覆盖及没有覆盖的 gRPC TLS。
-Reality gRPC 与其它 TCP/UDP 协议仍不在范围内；外部 CDN、TLS/H3 和下行服务须已部署。
-原生 CDN 菜单只有 H3 使用说明，不另设 H3 参数开关。公网透传与完整环境验收仍为 `deferred`。
+协议 `2` 的上行仍需能够接收 Reality 握手的地址。使用 CDN 的 HTTPS/H3 边缘做下行时，
+用 `--xhttp-download-settings` 显式指定下行地址、TLS 身份和 `alpn:["h3"]`，
+并将下行前置接到处理上行请求的同一 XHTTP handler。
+Reality gRPC 与其它 TCP/UDP 协议仍不在 CDN 覆盖范围内。
+原生 CDN 菜单提供 H3 使用说明，H3 由独立下行配置指定。
+固定已验组合和待测范围见 [Docker deferred 状态对账](docker-deferred-status-2026-11-04.md)。
 
 新生成的 `21/22/23` TLS 前端拒绝错误 Host；无 CDN 字段的完整旧 Nginx
 正文可继续通过只读和编辑基线，下一次确认配置编辑会生成新正文。

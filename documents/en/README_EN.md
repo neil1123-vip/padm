@@ -813,10 +813,13 @@ reject configuration, updates and restoration containing the field.
 Overrides for `24/25` also require `x-padm-cdn-grpc-tls`; protocol `2` requires
 `x-padm-cdn-xhttp` and changes only the upstream connection address, preserving Reality
 identity and any independent download address. Older bundles can still handle the original
-three override types and gRPC TLS listeners without overrides. Reality gRPC and other TCP/UDP
-protocols remain outside this scope; external CDN, TLS/H3 and download services must already exist.
-The native CDN menu provides H3 guidance rather than a separate parameter switch.
-Public passthrough and complete environment acceptance remain `deferred`.
+three override types and gRPC TLS listeners without overrides.
+Protocol `2` still needs an upload address that accepts Reality handshakes. To use a CDN's
+HTTPS/H3 edge for downloads, set the download address, TLS identity, and `alpn:["h3"]` with
+`--xhttp-download-settings` and route the download frontend to the same XHTTP handler as the upload.
+Reality gRPC and other TCP/UDP protocols remain outside this scope.
+The native CDN menu points to this download setting for H3.
+See the [Docker deferred ledger](../docker-deferred-status-2026-11-04.md) for tested combinations.
 
 Newly generated `21/22/23` TLS frontends reject an incorrect Host. Without CDN
 fields, the complete legacy Nginx output remains valid for reads and edit baselines;
