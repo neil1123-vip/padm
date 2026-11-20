@@ -792,3 +792,12 @@ Compose 启动 WireGuard，报告 Xray healthy 和 nginx started。验收脚本�
 SHA-256 为 `f3112bb09701f66c7c6e9ef1073fd7d6e2571dd892da05e876e9d8ddf9971c43`。
 本轮覆盖公网传输。正式跨宿主同步与灾备仍待验，合同计数保持
 16 supported、14 deferred。
+
+B 复用正式 `.11` 的已验签测试盘，来宾业务配置退出 0，耗时 331.1 秒。
+随后 `wireguard prepare` 的 SSH 连接在 banner 阶段超时，来宾正常关机。
+另一轮在 344 MiB 来宾复用同盘时，B 本机也未取得转发端口的 SSH banner。
+宿主采样的 CPU steal 达 71%–77%，测试 cgroup 未见 OOM。测试期间生产
+订阅容器上报 unhealthy，33 秒后恢复 healthy，期间停止了测试来宾。
+两台本地正式来宾正常关机，B 的三个生产容器复核健康，测试端口关闭。
+原件为同卷 `wan-start-resume-1795133827680095337`、
+`wan-start-resume-1795135508726738864`、`control-multipeer-1795135795151727567`。
