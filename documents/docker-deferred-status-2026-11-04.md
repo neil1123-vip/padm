@@ -810,6 +810,26 @@ amd64 镜像。VPS A 仅接受 Cloudflare 来源到临时 TCP/8443，经 SSH 回
 原件 `container-cdn-public.log` 的 SHA-256 为
 `ba924356011146df1049caaefc0141b4884d90cccdea4153392d9c31ce249198`。
 
+### 正式 v3.44.13 的 XHTTP 地址覆盖与独立下行
+
+2026-11-21，在 VPS B 的隔离容器中验签安装 `.13`，外层不映射端口。
+正式 CLI 配置 Xray Reality/XHTTP 后完成地址覆盖预览、发布、换址和清除。
+预览保留原订阅，发布和换址的入口状态、链接与订阅一致。覆盖仅修改上行
+地址，独立 H3 下行的地址、TLS 身份与 ALPN 保持。packet-up 实际回显及
+错误 UUID、错误 Reality 身份拒绝通过。清除后订阅与实链路恢复，测试资源
+已清理，B 三项生产服务健康。本机初轮被正式门禁以 `cloudflare_relay`
+拒绝，B 从另一条公网出口通过同一门禁。原件 `.tmp-padm-wan-3e7ea788aa/`
+的 `xhttp-vps.log` SHA-256 为 `9debab4a609eefa8e3da0e087dff22ed9adcfcf3edf55d19f95d214b5edca488`。
+
+隔离实链路另使用同版生成的链接及清单绑定的 Xray 26.11.9。测试前置将
+Reality 上行和独立下行接到同一 XHTTP handler。独立 Reality、TLS h2、
+TLS h3 各四种模式通过，共 12 正例、8 负例及 12 次 1/8 MiB 双向完整性校验。
+TLS 使用测试证书指纹，H3 有客户端日志见证。原件 `.tmp-cdn-xhttp-34413/`
+的 `offline-r6.log` SHA-256 为 `c8f4822c8dc23382e809b6fe185d491496dffb817be7987f8460061d9cd39620`。
+
+公网 H3 联合验收需要外部下行前置接入同一处理器。正式生成的 Reality 入口
+缺少这样的明文接入口，现有 Cloudflare 透传和本节隔离证据分别记账。
+
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
 从验签发布 `44306096595` 的 amd64 Xray 镜像
