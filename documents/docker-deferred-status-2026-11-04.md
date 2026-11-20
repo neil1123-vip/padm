@@ -916,3 +916,15 @@ B 复用正式 `.11` 的已验签测试盘，来宾业务配置退出 0，耗时
 B 的复用测试盘已在停机后清理。
 原件为同卷 `wan-start-resume-1795133827680095337`、
 `wan-start-resume-1795135508726738864`、`control-multipeer-1795135795151727567`。
+
+2026-11-20，正式 `.12` 在 Windows Docker Desktop 的隔离 Linux 节点中验签
+安装并核对五镜像。半核配额、432 MiB 和外层 512 线程上限下，正式 CLI 完成
+WS 部署、WireGuard 启动和对端更新。双向各收 4/4 次 ICMP 回包，两端均记录
+握手，正式节点收发计数为 1,116/1,204 字节，WireGuard、Xray 与 nginx 健康。
+初轮 helper 的 `runc` 启动失败在无业务容器上同样复现。测试用 Docker 的
+systemd 单元默认只允许 76 个线程，单元计数器记录 418 次触顶。去掉该单元
+的重复限额并保留外层上限后，相同安全参数的 helper 连续通过 3/3。
+原件 `capacity-local-pair-final.log` 的 SHA-256 为
+`72f1beb2a857f156befa3fbf40890e2c4c95d185c4f6d63db8dfcbb65b7694c1`。
+本轮进度为本机节点预检。A/B 仅只读核对，两机生产服务健康，
+VPS B 的正式跨宿主定时同步和灾备整链继续待验。
