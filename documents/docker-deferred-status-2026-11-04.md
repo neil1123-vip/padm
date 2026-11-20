@@ -683,6 +683,12 @@ sing-box 为 12/24、2/24、11/24。失败均为 curl `28`。两种设备安排�
 `.tmp-warp-managed-crossover/diagnostic-34412/diagnostic.log`，SHA-256
 `d099382979c4735f3d7e2de43d806b77819ff9e522f13289644371b125d4096b`。
 
+同一来宾拓扑改为依次暂停另一个核心，Xray 通过 2/8，sing-box 通过 3/8。
+11 次超时中有 4 次已完成 TLS 握手，两个核心各 2 次。单独运行亦可复现。
+外层捕获 501 个报文，抓包丢弃为 0。两个核心恢复运行并关闭 WARP 后均恢复
+直连，配置返回基线。测试设备撤销，来宾正常关机。原件
+`.tmp-warp-managed-crossover/solo-34412/diagnostic.log`，SHA-256
+`c428e9c9e6370d1470a56af8c45b6ed27338d61066d8d6885ed19188ce11d8f6`。
 双核心公网长稳、握手回包丢失位置及其它模式故障注入仍待验。
 
 ## Cloudflare 隔离透传
