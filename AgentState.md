@@ -51,8 +51,8 @@
 - ICMP 已验限 Debian 13/amd64/IPv4；arm64/公网/IPv6/traceroute/PMTU/重启未验；
   TUN/透明启用重启按要求不做。SOCKS UDP、Xray 解析后阻断继续拒绝。
 - `.7` WARP IPv4：A 两核心顺序各 15 分钟、60/60，B 各 21/21。
-  `.8` 断链恢复通过，双核并发共享及独立 Peer 均超时，见 r17。
-  CDN 控制台待登录，待核代理记录和设置。
+  `.8` 断链恢复通过，r17 共享和独立均超时，`.11` 并发 32/40、36/40。
+  Cloudflare gRPC/H3 已开，业务记录仅 DNS。
   Vision reset/XHTTP/TUIC 旧超时根因未定；旧跨核心失败原件保持。
   固定公网组合不外推活动 sing-box；拒绝配对及带来源的跨核心复制。
   ML-DSA 仍限 amd64/IPv4/Reality/gRPC/chrome。
