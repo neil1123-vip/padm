@@ -718,6 +718,15 @@ Xray 通过 8/60，sing-box 通过 4/60，同批直连 60/60。108 次 WARP
 `direct-34413-udp.log` 为
 `dea39ede9b561110db03cc71789f4535949004873b74bf6a0aedc55ab09f1dd6`。
 
+同日使用正式 `.13` 的相同双核心配置在 VPS B 的隔离 Debian 容器复验。
+独立 Engine 测试限 0.34 核、368 MiB，未映射外部端口。共享一次性
+Peer 的 360 秒采样中，Xray 与 sing-box 均通过 14/24，直连 24/24。
+20 次超时中，Xray 有 1 次、sing-box 有 3 次完成 TLS 后未收到首字节。
+两个入口关闭 WARP 后首轮恢复直连，规格和配置摘要与基线一致。
+设备已撤销，测试容器和网桥已清理，B 三项生产服务及默认网桥隔离复核通过。
+故障在独立公网出口仍可复现。原件 `.tmp-padm-wan-bd9b6ae9d4/` 的
+`warp-vps-soak.log` SHA-256 为 `217e7d6287a7cbe86884dc2c1fef4ca089a3ad1ac16fa87bae5999e0ad699e8a`。
+
 ## Cloudflare 隔离透传
 
 2026-11-20，Cloudflare 区域已启用 gRPC、HTTP/3，SSL/TLS 为「完全」。
