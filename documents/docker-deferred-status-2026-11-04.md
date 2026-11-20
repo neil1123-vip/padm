@@ -746,7 +746,21 @@ QEMU 转发在 Docker 容器内能完成 TLS，在 Windows 的 Docker 发布端�
 处超时。A 的临时转发已关闭，生产三容器健康，Cloudflare 无本轮规则，
 两台权威 DNS 确认测试域名无记录。Windows 系统盘再次耗尽，Docker Desktop
 停止，E 盘测试子盘已移除。源站直连原件在上述证据卷的
-`control-multipeer-1795166625230504153`。公网受管流程仍待验。
+`control-multipeer-1795166625230504153`。该轮未走通公网受管流程。
+
+2026-11-20，正式 `.12` 的 Xray VLESS gRPC/IPv4 受管流程通过公网验收。
+在 Windows Docker Desktop 的隔离 Linux 容器内验签安装控制包，核对五个正式
+amd64 镜像。VPS A 仅接受 Cloudflare 来源到临时 TCP/8443，经 SSH 回环转发
+到独立源站，并验证源站证书、SNI 与 HTTP/2 ALPN。
+预览不改订阅。发布与换址后，状态、链接和订阅正文一致，通过 Cloudflare
+使用已发布域名成功传输，两阶段均拒绝错误认证和错误 SNI。换址时新增的
+`192.0.2.12` 只核对发布内容。清除后订阅正文恢复为初始字节，直连正反例
+再次通过，每阶段三项服务健康。公网标记为 `a5d6e06b1c57135e-LAX` 与
+`a5d6e1862c1e3b32-LAX`，转发独立记录 7 次 Cloudflare 来源连接。
+临时代理 A 记录、精确域名规则、本机测试容器及其卷均已清理。两台权威 DNS
+均返回 NXDOMAIN，A 的 8443/18443 均关闭，三项生产服务健康。
+原件 `container-cdn-public.log` 的 SHA-256 为
+`ba924356011146df1049caaefc0141b4884d90cccdea4153392d9c31ce249198`。
 
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
