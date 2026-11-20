@@ -673,6 +673,16 @@ sing-box 为 12/24、2/24、11/24。失败均为 curl `28`。两种设备安排�
 `.tmp-warp-managed-crossover/formal-34411-soak.log`，SHA-256
 `2d0f80dfccb227c083e3aeeaf3721d30b1c8566399366f0cebf6976470bcf588`。
 
+2026-11-20，正式 `v3.44.12` 共用一个 WARP Peer 并发采样 360 秒。Xray 通过
+8/24，sing-box 通过 4/24。36 次 curl `28` 中有 5 次已完成 TLS 握手，
+但超时前未收到 HTTP 首字节。另 31 次未记录连接完成时间。按来宾与外层
+时钟偏移区间核对，每次超时所在窗口均有外层 WireGuard UDP 入站和出站。
+抓包共 2,340 个报文，抓包丢弃为 0。下一轮需按单核心或独立外层流归因，
+以区分并发报文与超时流量。关闭 WARP 后两个入口恢复直连，规格及配置回到
+基线。测试设备已撤销，来宾正常关机。原件为
+`.tmp-warp-managed-crossover/diagnostic-34412/diagnostic.log`，SHA-256
+`d099382979c4735f3d7e2de43d806b77819ff9e522f13289644371b125d4096b`。
+
 双核心公网长稳、握手回包丢失位置及其它模式故障注入仍待验。
 
 ## Cloudflare 隔离透传
