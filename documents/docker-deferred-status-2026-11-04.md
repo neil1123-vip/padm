@@ -741,6 +741,13 @@ CDN 地址覆盖与清除及服务状态。旧主订阅与新分享组可共存�
 正式来宾结果为证据卷 `padm-cdn-34412-native-proof` 内
 `control-multipeer-1795156925310133845`。公网受管流程仍需单独验证。
 
+同版 Xray VLESS gRPC 受管源站补验了直连正例、错误认证及错误 SNI 拒绝。
+QEMU 转发在 Docker 容器内能完成 TLS，在 Windows 的 Docker 发布端口
+处超时。A 的临时转发已关闭，生产三容器健康，Cloudflare 无本轮规则，
+两台权威 DNS 确认测试域名无记录。Windows 系统盘再次耗尽，Docker Desktop
+停止，E 盘测试子盘已移除。源站直连原件在上述证据卷的
+`control-multipeer-1795166625230504153`。公网受管流程仍待验。
+
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
 从验签发布 `44306096595` 的 amd64 Xray 镜像
