@@ -947,3 +947,19 @@ SHA-256 `6ba82a508725d9e162660f653e36d56f0cbfb58519d26c2a5867e8c32bd950d9`。
 严格 TLS 正例及错误 UUID、错误 SNI 拒绝各两项通过，灾后双向累计增长。
 四个测试容器与测试网桥已清理。原件 `.tmp-padm-wan-1abc13b07d/` 的
 `events.json` SHA-256 为 `65b15997f9910980295bb50e90bad5381afdac4531a5b94092931eaa2b75598c`。
+
+### 公网被控入组后的 WireGuard 端点丢失
+
+正式 `.12` 在本机与 VPS B 间完成公网握手、双向各 4/4 探针及 B 入组。
+前两轮启用 B 的自动同步返回 `11`。第三轮记录到 B 的 WireGuard 容器
+重建、接口索引 `24 → 34`、学习的 Endpoint 变为 `(none)`。主控再次探测
+4 发 0 收，本轮止于该探测。三轮都清理了 B 的测试 UDP，三项生产服务健康。
+第三轮原件 `.tmp-padm-wan-1c65836363/` 中的 `events.json` SHA-256 为
+`97d33461cbdee1cc87221f88bdea0c8065df300ab2097cd32e21993e2f863149`。
+
+`192f8d9d` 仅在被控同步事务中保留未变且健康的 WireGuard 服务。本机
+`docker-controller-peers-recovery-real` 通过，被控端在入组、同步、空主控
+恢复后的重绑和再次同步中保持原容器及已学习端点。自动同步合同也通过。
+两份回归日志 SHA-256 分别为
+`b7d186c3f87ea6762e967f30334d235c64b9df9bf4c7475e575854279f44e5ce` 与
+`6088eef64daf4d8b3ad3d2c5ff92ac4d5eba06fad0c8f53daea7bcb4a11640b4`。
