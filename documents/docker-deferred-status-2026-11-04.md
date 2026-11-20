@@ -727,6 +727,18 @@ Peer 的 360 秒采样中，Xray 与 sing-box 均通过 14/24，直连 24/24。
 故障在独立公网出口仍可复现。原件 `.tmp-padm-wan-bd9b6ae9d4/` 的
 `warp-vps-soak.log` SHA-256 为 `217e7d6287a7cbe86884dc2c1fef4ca089a3ad1ac16fa87bae5999e0ad699e8a`。
 
+在本机用同一正式配置另跑 240 秒，每批交替请求 Cloudflare trace 和固定
+IPv4 的自有 HTTPS 源站。每个目标八批。trace 两个核心均为 8/8，自有
+源站 Xray 为 8/8，sing-box 为 7/8。直连对照 16/16，TLS 和预期正文通过。
+自有源站日志在七批见到直连和两个 WARP 出口，余下一批只见直连及一个
+WARP 出口。该批 sing-box 在建立 TLS 前超时。自有源站同样可复现超时，
+故障仍有间歇性。关闭 WARP 后配置摘要回到基线，设备和容器已清理。
+
+原件 `.tmp-warp-managed-crossover/` 的 `targets-34413.log` 和
+`targets-34413-origin.log` 的 SHA-256 分别为
+`ddd5df1b010f5fdb79ecd84ec050022c3fad937b2b54dbc7cc04b424dd00f5ad` 和
+`703b1de67b9f1bef428b9e7fa2c7e820f9015dc22b1c87de9923f4d0a4a68679`。
+
 ## Cloudflare 隔离透传
 
 2026-11-20，Cloudflare 区域已启用 gRPC、HTTP/3，SSL/TLS 为「完全」。
