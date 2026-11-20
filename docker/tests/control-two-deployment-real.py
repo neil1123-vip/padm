@@ -1812,7 +1812,7 @@ def wireguard_cli_real(nodes):
     print("docker-wireguard-cli-real-prepare-peer-start-stop-ownership-private-ok", flush=True)
 
 
-def wireguard_peers_prepare_real(nodes):
+def wireguard_peers_prepare_real(nodes, *, passive_last=False):
     addresses = (*ADDRESS, "10.231.0.3")
     directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
     public, keys = [], []
@@ -1824,8 +1824,9 @@ def wireguard_peers_prepare_real(nodes):
         assert command(["wg", "pubkey"], content=(keys[-1] + "\n").encode()).decode().strip() == public[-1]
     for index, node in enumerate(nodes):
         remote = 1 if index == 0 else 0
+        endpoint = () if passive_last and index == 2 else ("--endpoint", f"192.0.2.{remote+1}:51820")
         cli(node, "wireguard", "peer", "--peer-address", addresses[remote],
-            "--peer-public-key", public[remote], "--endpoint", f"192.0.2.{remote+1}:51820", "--yes")
+            "--peer-public-key", public[remote], *endpoint, "--yes")
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         list(executor.map(lambda node: cli(node, "wireguard", "start", "--yes"), nodes))
     return addresses, public, keys
@@ -2545,7 +2546,14 @@ dockerInstallCli
 
 def controller_peers_recovery_real(nodes, image, release):
     controller = nodes[0]
-    addresses, public, keys = wireguard_peers_prepare_real(nodes)
+    passive = nodes[2]
+    addresses, public, keys = wireguard_peers_prepare_real(nodes, passive_last=True)
+
+    def passive_link():
+        endpoint = command(passive["enter"] + ["wg", "show", "wg-padm", "endpoints"]).split()
+        assert endpoint == [public[0].encode(), b"192.0.2.1:51820"], "被控丢失学习到的 Endpoint"
+        return services(passive)["net-wireguard"]
+
     root = controller["path"] / "deployment"
     local = [state(node)["accounts"][0] for node in nodes]
     cli(controller, "control", "init", "--address", addresses[0], "--port", "39778",
@@ -2562,7 +2570,13 @@ def controller_peers_recovery_real(nodes, image, release):
         invitation = node["path"] / "private/recovery-old.json"
         save(invitation, json.loads(path.read_text()))
         invitations.append(invitation)
+        if node is passive:
+            wireguard_traffic((controller, node), (addresses[0], addresses[index]),
+                              peer_public=(public[0], public[index]))
+            passive_wireguard = passive_link()
         cli(node, "control", "join", "--invite", str(invitation), "--listener", "entry-ws", "--yes")
+        if node is passive:
+            assert passive_link() == passive_wireguard
         source_check(controller, node, (addresses[0], addresses[index]), peer["id"])
     crossed = nodes[1]["path"] / "private/recovery-crossed.json"
     save(crossed, dict(json.loads(invitations[1].read_text()), peer_address=addresses[1]))
@@ -2572,6 +2586,7 @@ def controller_peers_recovery_real(nodes, image, release):
         cli(controller, "account", "edit", account, "--name", name)
     for node, invitation in zip(nodes[1:], invitations):
         cli(node, "control", "sync", "--invite", str(invitation))
+    assert passive_link() == passive_wireguard
     before, *joined = [state(node) for node in nodes]
     assert all(item["control_sync"]["last_revision"] == before["control"]["revision"] > 1 for item in joined)
     for index, node in enumerate(nodes):
@@ -2628,6 +2643,8 @@ def controller_peers_recovery_real(nodes, image, release):
         save(invitation, json.loads(output.read_text()))
         assert json.loads(invitation.read_text())["token"] != json.loads(invitations[index-1].read_text())["token"]
         cli(node, "control", "rebind", "--invite", str(invitation), "--yes")
+        if node is passive:
+            assert passive_link() == passive_wireguard
         current = state(node)
         sync = current["control_sync"]
         assert sync["controller_id"] == fresh["node_id"] and sync["node_id"] == peer["id"]
@@ -2641,6 +2658,8 @@ def controller_peers_recovery_real(nodes, image, release):
     cli(controller, "account", "edit", account, "--name", "controller-peers-recovery-next-version")
     for index, (node, invitation) in enumerate(zip(nodes[1:], rotated), 1):
         cli(node, "control", "sync", "--invite", str(invitation))
+        if node is passive:
+            assert passive_link() == passive_wireguard
         current = state(node)
         assert current["control_sync"]["last_revision"] == state(controller)["control"]["revision"] == 1
         assert current["control_sync"]["managed_accounts"] == state(controller)["accounts"]

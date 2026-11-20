@@ -8109,6 +8109,8 @@ dockerRealityStreamTransitionPrepare() {
 dockerConfigureApply() {
     local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-} siteTemplate=${7:-} sharesSource=${8:-} siteTitle=${9:-}
     local specFile candidate backup answer root managedFile wireguardRole backupPrefix=configure geoEnabled=false renewalEnabled=false
+    local wireguardContainer= recreateServices
+    local -a recreateTargets=()
     local DOCKER_WIREGUARD_INPUT=${10:-}
     local DOCKER_CONTROL_TRANSACTION=${DOCKER_CONTROL_TRANSACTION:-0}
     local DOCKER_CONTROL_SYNC_TRANSACTION=${DOCKER_CONTROL_SYNC_TRANSACTION:-0}
@@ -8369,9 +8371,28 @@ dockerConfigureApply() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     backup=${DOCKER_CONFIG_BACKUP}
+    # A controlled peer can rely on an endpoint learned by the live WireGuard interface.
+    if [[ "${DOCKER_CONTROL_SYNC_TRANSACTION}" == 1 && -z "${DOCKER_WIREGUARD_INPUT}" ]] &&
+        cmp -s -- "${root}/compose.json" "${candidate}/compose.json" &&
+        cmp -s -- "${root}/images.env" "${candidate}/images.runtime.env" &&
+        recreateServices=$(jq -er --slurpfile deployment "${candidate}/deployment.json" '
+          .services as $services | $deployment[0].compose.profiles as $profiles |
+          if $services["net-wireguard"] == null or ($profiles | index("net-wireguard")) == null or
+             ($deployment[0].host_integrations | map(.type)) != ["wireguard"] or
+             any($services[]; (.depends_on // {} | has("net-wireguard")))
+          then empty
+          else $services | to_entries[] | select(.key != "net-wireguard") |
+            select((.value.profiles // [] | length) == 0 or
+              any(.value.profiles[]; . as $profile | $profiles | index($profile))) | .key
+          end
+        ' "${candidate}/compose.json") &&
+        wireguardContainer=$(dockerWireGuardContainer running 2>/dev/null); then
+        mapfile -t recreateTargets <<<"${recreateServices}"
+    fi
     if ! dockerInstallCandidate "${candidate}" "${backup}" ||
         ! dockerEnsureRuntimeDataPermissions ||
-        ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
+        ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${recreateTargets[@]}" ||
+        { [[ -n "${wireguardContainer}" ]] && [[ "$(dockerWireGuardContainer running)" != "${wireguardContainer}" ]]; } ||
         ! dockerTrafficScheduleInstall ||
         ! dockerRenewalScheduleInstall ||
         ! dockerGeoScheduleInstall ||
