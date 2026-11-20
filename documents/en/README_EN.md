@@ -826,8 +826,8 @@ fields, the complete legacy Nginx output remains valid for reads and edit baseli
 the next confirmed configuration edit generates the new output. CDN fields require
 the new output. Partial Host-gate removal or other manual drift is rejected.
 Listeners `24/25` retain managed Nginx HTTP/2 gRPC proxying and strict TLS identity.
-The WS Host/path gates do not apply to gRPC. Public CDN provider passthrough still
-requires separate acceptance.
+The WS Host/path gates do not apply to gRPC. The v3.44.12 managed Xray VLESS gRPC
+workflow passed public acceptance on Cloudflare over IPv4.
 
 `--preview` does not commit, collect traffic, or start/stop application services.
 Validation still verifies the release, pulls images, and runs candidate checks.
