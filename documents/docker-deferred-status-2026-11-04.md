@@ -695,6 +695,29 @@ sing-box 为 12/24、2/24、11/24。失败均为 curl `28`。两种设备安排�
 已经交付，也无法定位这两次未见回包的环节。
 双核心公网长稳、握手回包丢失位置及其它模式故障注入仍待验。
 
+### 正式 v3.44.13 的 Docker Desktop 出站对照
+
+2026-11-21，在 Docker Desktop 的隔离 Debian 13 容器内启动独立 Engine，
+验签安装 `v3.44.13` / `7e46256b`，按正式清单拉取五个镜像。外层经
+Docker Desktop bridge 出公网，取消此前试验的 QEMU 用户态网络转发。
+正式双核心部署共用一个一次性 WARP Peer，连续 900 秒。每 15 秒从两个
+入口经 WARP 请求同一个 HTTPS trace，同时从外层测试容器直连该地址。
+Xray 通过 8/60，sing-box 通过 4/60，同批直连 60/60。108 次 WARP
+超时中有 13 次已完成 TLS 握手但未收到首字节。
+
+在隔离容器的外层接口抓到 463 个 WARP UDP 报文，内核抓包丢弃为 0。
+完整覆盖的超时窗口内，按运行时套接字端口核对，Xray 有 6 次、sing-box
+有 8 次在各自端口见到双向报文。另一次 Xray 超时窗口只观察到出站。
+取消 QEMU 转发后故障仍可复现。报文摘要只证明相应端口的活动，丢包位置
+仍待在独立的公网出口路径上对照。正式 `edit --warp-off` 后，两个入口
+均在首轮恢复直连，部署规格和两份核心配置摘要与基线一致。临时设备已撤销，
+部署容器、注册容器和抓包容器均已退出并清理。
+
+原件 `.tmp-warp-managed-crossover/`。`direct-34413-separate.log` 的 SHA-256
+为 `8cc4a4769dde15eb2347a847ab52dbc34785c2b3bcbb1f7456eddc6fafeab856`，
+`direct-34413-udp.log` 为
+`dea39ede9b561110db03cc71789f4535949004873b74bf6a0aedc55ab09f1dd6`。
+
 ## Cloudflare 隔离透传
 
 2026-11-20，Cloudflare 区域已启用 gRPC、HTTP/3，SSL/TLS 为「完全」。
