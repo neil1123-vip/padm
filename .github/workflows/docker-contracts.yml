@@ -7,22 +7,26 @@ on:
         description: Full source commit to validate
         required: true
         type: string
+      subset:
+        description: Run all shards, only long shards, or the remaining shards
+        default: all
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  contracts:
+  long:
+    if: inputs.subset != 'remaining'
     name: Docker contracts (${{ matrix.selector }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
+    env: &contract-env
       PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
       # 协议分片需要工具容器内的 OpenSSL 与 root 所有的控制日志路径。
       CONTRACT_TOOLS: ${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') || startsWith(matrix.selector, 'docker-contracts-phase3-protocol-') }}
     strategy:
       fail-fast: true
-      max-parallel: 26
       matrix:
         selector:
           - docker-contracts-fast-heavy
@@ -31,27 +35,15 @@ jobs:
           - docker-contracts-setup-basic
           - docker-contracts-system-light
           - docker-routing-core-network
-          - docker-contracts-phase3-protocol-ports
-          - docker-contracts-phase3-protocol-migrate
           - docker-contracts-phase3-protocol-lifecycle
+          - docker-contracts-phase3-topology
+          - docker-contracts-fast-rest
           - docker-contracts-phase3-protocol-1
           - docker-contracts-phase3-protocol-2
           - docker-contracts-phase3-protocol-3
           - docker-contracts-phase3-protocol-4
           - docker-contracts-phase3-protocol-5
-          - docker-contracts-phase3-protocol-commands
-          - docker-contracts-fast-rest
-          - docker-xhttp-edit
-          - docker-contracts-phase3-tls
-          - docker-contracts-phase3-topology
-          - docker-contracts-setup-transports
-          - docker-contracts-reality-metadata
-          - docker-contracts-reality-rotation
-          - docker-routing-ip-ownership
-          - docker-contracts-policy
-          - docker-port-hopping-preflight
-          - docker-contracts-fast-sites
-    steps:
+    steps: &contract-steps
       - name: Checkout checked source
         uses: actions/checkout@v7
         with:
@@ -136,3 +128,27 @@ jobs:
           else
             sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS="${jobs}" PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash shell/subscription_groups_regression.sh "${SELECTOR}"
           fi
+
+  remaining:
+    if: inputs.subset != 'long'
+    name: Docker contracts (${{ matrix.selector }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env: *contract-env
+    strategy:
+      fail-fast: true
+      matrix:
+        selector:
+          - docker-contracts-phase3-protocol-ports
+          - docker-contracts-phase3-protocol-migrate
+          - docker-contracts-phase3-protocol-commands
+          - docker-xhttp-edit
+          - docker-contracts-phase3-tls
+          - docker-contracts-setup-transports
+          - docker-contracts-reality-metadata
+          - docker-contracts-reality-rotation
+          - docker-routing-ip-ownership
+          - docker-contracts-policy
+          - docker-port-hopping-preflight
+          - docker-contracts-fast-sites
+    steps: *contract-steps

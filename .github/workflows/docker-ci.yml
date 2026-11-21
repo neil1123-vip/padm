@@ -49,7 +49,6 @@ jobs:
 
   native:
     name: Native shell and workflow checks
-    needs: static
     timeout-minutes: 20
     runs-on: ubuntu-latest
     env:
@@ -57,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.static.outputs.source_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Install pinned jq
         run: sudo bash shell/regression/install-ci-jq.sh
@@ -111,11 +110,18 @@ jobs:
       - name: Check signing and tamper rejection
         run: bash shell/regression/check-cosign.sh
 
+  long_contracts:
+    uses: ./.github/workflows/docker-contracts.yml
+    with:
+      source_ref: ${{ github.sha }}
+      subset: long
+
   contracts:
     needs: static
     uses: ./.github/workflows/docker-contracts.yml
     with:
       source_ref: ${{ needs.static.outputs.source_sha }}
+      subset: remaining
 
   images:
     needs: static

@@ -358,7 +358,7 @@ runRegressionDockerContractsAggregateContract() (
     done < <(awk '
         /^        selector:$/ {inside = 1; next}
         inside && /^          - / {sub(/^          - /, ""); print; next}
-        inside {exit}
+        inside {inside = 0}
     ' "${workflow}")
     printf '%s\n' "${expectedSelectors[@]}" | sort >"${expected}"
     sort -o "${actual}" "${actual}"
