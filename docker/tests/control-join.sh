@@ -182,6 +182,10 @@ dockerRealityProbeRun() {
     if [[ -f "${TEST_ROOT}/interrupt-client" ]]; then
         kill -s "$(<"${TEST_ROOT}/interrupt-client")" "${BASHPID}"
     fi
+    if [[ -f "${TEST_ROOT}/invalid-draft" ]]; then
+        printf '{}\n'
+        return 0
+    fi
     python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" "${directory}" "${remap}" "${reconnect}" "${rebind}" "${listeners[@]}" <<'PY'
 import json
 import sys
@@ -325,6 +329,16 @@ for marker in bad-deployment unowned bad-health bad-peer bad-route bad-source ba
         "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
     check_clean
 done
+grep -Fq '私网认证或同步规划失败' "${TEST_ROOT}/rejected.log"
+touch "${TEST_ROOT}/invalid-draft"
+status=0
+dockerControlCommand join "${args[@]}" >"${TEST_ROOT}/rejected.log" 2>&1 || status=$?
+rm -- "${TEST_ROOT}/invalid-draft"
+[[ "${status}" -eq "${PADM_DOCKER_RC_CONFLICT}" ]]
+grep -Fq '同步候选规格校验失败' "${TEST_ROOT}/rejected.log"
+[[ "$(sha256sum "${spec}")" == "${original}" &&
+    "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
+check_clean
 [[ "$(tail -n 1 "${TEST_ROOT}/host.log")" == unlock ]]
 touch "${TEST_ROOT}/fail-up"
 reject dockerControlCommand join "${args[@]}"

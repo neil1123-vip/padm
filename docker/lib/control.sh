@@ -1291,6 +1291,7 @@ dockerControlClientBuildDraft() {
 dockerControlClientApply() (
     local action=$1 invitation= yes=0 answer root spec draft= parent metadata mode status=0
     local confirmation='确认接入主控并同步到选定入口？[y/N]: '
+    local failure='私网认证或同步规划失败'
     local -a listeners=()
     shift
     while [[ "$#" -gt 0 ]]; do
@@ -1384,11 +1385,13 @@ dockerControlClientApply() (
         (umask 077; dockerConfigureSpecMigrate "${spec}" "${draft}/spec.json") ||
         return "${PADM_DOCKER_RC_STATE}"
     dockerControlClientRuntimeCheck "${draft}/invite.json" || return $?
-    (umask 077; dockerControlClientBuildDraft "${draft}" "${listeners[@]}" >"${draft}/next.json") &&
-        dockerConfigureSpecValidate "${draft}/next.json" || {
+    (umask 077; dockerControlClientBuildDraft "${draft}" "${listeners[@]}" >"${draft}/next.json") && {
+        failure='同步候选规格校验失败'
+        dockerConfigureSpecValidate "${draft}/next.json"
+    } || {
         status=$?
         [[ "${status}" != 130 && "${status}" != 143 ]] || return "${status}"
-        dockerError '私网认证或同步规划失败，保留当前角色、账号和配置'
+        dockerError "${failure}，保留当前角色、账号和配置"
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
     if jq -en --slurpfile current "${spec}" --slurpfile next "${draft}/next.json" \
