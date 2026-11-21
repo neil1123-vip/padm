@@ -818,11 +818,16 @@ for scenario in success push-race push-race-dispatch-failed; do
         git --git-dir="${bumpRoot}/remote.git" show main:versions.lock | grep -Fxq 'PADM_LOCK_VERSION=3.8.1' ||
             fail 'release bump did not push the version commit' ;;
     push-race | push-race-dispatch-failed)
-        [[ "${actual}" == failure ]] || fail 'release bump overwrote a concurrent main update'
         grep -q '^workflow run create_release.yml ' "${bumpRoot}/calls" || fail 'race recovery did not dispatch successor'
         [[ "$(git --git-dir="${bumpRoot}/remote.git" rev-parse main)" == "${raceSha}" ]] ||
             fail 'race recovery changed the concurrent main head'
-        [[ ! -s "${bumpRoot}/output.env" ]] || fail 'race recovery exposed an unpushed build commit' ;;
+        if [[ "${scenario}" == push-race ]]; then
+            [[ "${actual}" == success && "$(cat "${bumpRoot}/output.env")" == handoff=true ]] ||
+                fail 'successful dispatch did not hand off the release'
+        else
+            [[ "${actual}" == failure && ! -s "${bumpRoot}/output.env" ]] ||
+                fail 'failed dispatch was reported as a successful handoff'
+        fi ;;
     esac
 done
 
@@ -1241,7 +1246,8 @@ grep -Fxq "    if: github.ref == 'refs/heads/main'" <<<"${prepareDefinition}" ||
 for requirement in \
     '      release_version: ${{ needs.plan.outputs.release_version }}' \
     '      deferred: ${{ needs.plan.outputs.deferred }}' \
-    '      skip: ${{ needs.plan.outputs.skip }}' \
+    "      skip: \${{ needs.plan.outputs.skip == 'true' || steps.bump.outputs.handoff == 'true' }}" \
+    "        if: steps.bump.outputs.handoff != 'true'" \
     "        if: \${{ needs.plan.outputs.needs_bump == 'true' && needs.plan.outputs.skip != 'true' }}" \
     '          RELEASE_VERSION: ${{ needs.plan.outputs.release_version }}'; do
     grep -Fxq "${requirement}" <<<"${prepareDefinition}" ||

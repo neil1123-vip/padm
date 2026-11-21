@@ -275,7 +275,7 @@ jobs:
       release_version: ${{ needs.plan.outputs.release_version }}
       release_sha: ${{ steps.target.outputs.release_sha }}
       deferred: ${{ needs.plan.outputs.deferred }}
-      skip: ${{ needs.plan.outputs.skip }}
+      skip: ${{ needs.plan.outputs.skip == 'true' || steps.bump.outputs.handoff == 'true' }}
     steps:
       - name: Checkout checked source
         uses: actions/checkout@v7
@@ -319,6 +319,8 @@ jobs:
               gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
                 -F force_release="${FORCE_RELEASE}"
               echo '::notice::Main advanced; a new release run will resolve the latest source.'
+              echo 'handoff=true' >>"${GITHUB_OUTPUT}"
+              exit 0
             fi
             exit 1
           fi
@@ -328,6 +330,7 @@ jobs:
 
       - name: Resolve build commit
         id: target
+        if: steps.bump.outputs.handoff != 'true'
         shell: bash
         run: |
           set -euo pipefail
