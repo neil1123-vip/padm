@@ -261,8 +261,8 @@ listRegressionDockerSubscriptionPublicationChildSelectors() {
 }
 
 listRegressionDockerContractsRealityMetadataChildSelectors() {
-    printf '%s\n' docker-reality-parameters docker-vless-encryption \
-        docker-reality-target-library
+    printf '%s\n' docker-reality-parameters-regeneration docker-vless-encryption \
+        docker-reality-parameters-target-and-mldsa docker-reality-target-library
 }
 
 listRegressionDockerContractsRealityRotationChildSelectors() {
@@ -605,6 +605,14 @@ runDockerPhase3EntriesManagementRegression() {
 
 runDockerPhase3EntriesManagementProtocolRegression() {
     runDockerPhase3EntriesRegression management "${1:-protocol}"
+}
+
+runDockerPhase3ProtocolMatrixRegression() {
+    PADM_REGRESSION_PARALLEL_JOBS=2 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runDockerPhase3EntriesManagementProtocolRegression \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/phase3-protocol-matrix-${BASHPID:-$$}" \
+            "protocol-$1-1" "protocol-$1-2"
 }
 
 runDockerPhase3ProtocolLifecycleRegression() {
@@ -1277,6 +1285,8 @@ registerRegressionFunctionLeaf docker-setup-tls runDockerSetupRegression tls
 registerRegressionFunctionLeaf docker-protocol runDockerProtocolRegression
 registerRegressionFunctionLeaf docker-reality runDockerRealityRegression
 registerRegressionFunctionLeaf docker-reality-parameters runDockerRealityParametersRegression
+registerRegressionFunctionLeaf docker-reality-parameters-regeneration runDockerRealityParametersRegression regeneration
+registerRegressionFunctionLeaf docker-reality-parameters-target-and-mldsa runDockerRealityParametersRegression target-and-mldsa
 registerRegressionFunctionLeaf docker-vless-encryption runDockerVlessEncryptionRegression
 registerRegressionFunctionLeaf docker-vless-encryption-real runDockerVlessEncryptionRealRegression
 registerRegressionFunctionLeaf docker-reality-targets runDockerRealityTargetsRegression
@@ -1309,9 +1319,13 @@ registerRegressionFunctionLeaf docker-phase3-entries-management-protocol runDock
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol-xray runDockerPhase3EntriesManagementProtocolRegression protocol-xray
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol-sing-box runDockerPhase3EntriesManagementProtocolRegression protocol-sing-box
 registerRegressionFunctionLeaf docker-contracts-phase3-protocol-lifecycle runDockerPhase3ProtocolLifecycleRegression
-for phase3ProtocolPart in ports migrate 1 2 3 4 5; do
+for phase3ProtocolPart in ports migrate; do
     registerRegressionFunctionLeaf "docker-contracts-phase3-protocol-${phase3ProtocolPart}" \
         runDockerPhase3EntriesManagementProtocolRegression "protocol-${phase3ProtocolPart}"
+done
+for phase3ProtocolPart in {1..5}; do
+    registerRegressionFunctionLeaf "docker-contracts-phase3-protocol-${phase3ProtocolPart}" \
+        runDockerPhase3ProtocolMatrixRegression "${phase3ProtocolPart}"
 done
 unset phase3ProtocolPart
 registerRegressionFunctionLeaf docker-phase3-entries-management-tls runDockerPhase3EntriesManagementTlsRegression
@@ -1575,7 +1589,7 @@ registerRegressionParallelSelectorList docker-contracts-system runFrameworkParal
 registerRegressionParallelSelectorList docker-contracts-reality runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-reality-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-reality-metadata runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/docker-contracts-reality-metadata-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityMetadataChildSelectors 2
+    "${TMP_DIR}/docker-contracts-reality-metadata-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityMetadataChildSelectors 3
 registerRegressionParallelSelectorList docker-contracts-reality-rotation runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-reality-rotation-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityRotationChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-setup-basic runFrameworkParallelRegressionSelectorListWithJobs \

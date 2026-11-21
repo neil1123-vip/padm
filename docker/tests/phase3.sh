@@ -13,14 +13,18 @@ case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}" in
 *) printf 'docker-phase3-regression-fail: unknown entries branch %s\n' "${PHASE3_ENTRIES_BRANCH}" >&2; exit 1 ;;
 esac
 case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}:${PHASE3_MANAGEMENT_GROUP}" in
-*:all|entries:management:protocol|entries:management:protocol-xray|entries:management:protocol-sing-box|entries:management:protocol-ports|entries:management:protocol-migrate|entries:management:protocol-lifecycle|entries:management:protocol-lifecycle-reality|entries:management:protocol-lifecycle-tls|entries:management:protocol-[1-5]|entries:management:tls|entries:management:tls-reinstall) ;;
+*:all|entries:management:protocol|entries:management:protocol-xray|entries:management:protocol-sing-box|entries:management:protocol-ports|entries:management:protocol-migrate|entries:management:protocol-lifecycle|entries:management:protocol-lifecycle-reality|entries:management:protocol-lifecycle-tls|entries:management:protocol-[1-5]|entries:management:protocol-[1-5]-[12]|entries:management:tls|entries:management:tls-reinstall) ;;
 *) printf 'docker-phase3-regression-fail: unknown management group %s\n' "${PHASE3_MANAGEMENT_GROUP}" >&2; exit 1 ;;
 esac
 PHASE3_MANAGEMENT_CORE=all
 PHASE3_PROTOCOL_PART=all
+PHASE3_MATRIX_BATCH=all
 case "${PHASE3_MANAGEMENT_GROUP}" in
 protocol-xray|protocol-sing-box)
     PHASE3_MANAGEMENT_CORE=${PHASE3_MANAGEMENT_GROUP#protocol-}
+    PHASE3_MANAGEMENT_GROUP=protocol ;;
+protocol-[1-5]-[12])
+    IFS=- read -r _ PHASE3_PROTOCOL_PART PHASE3_MATRIX_BATCH <<<"${PHASE3_MANAGEMENT_GROUP}"
     PHASE3_MANAGEMENT_GROUP=protocol ;;
 protocol-*)
     PHASE3_PROTOCOL_PART=${PHASE3_MANAGEMENT_GROUP#protocol-}
@@ -1771,9 +1775,11 @@ for managementCase in '1 xray' '1 sing-box' '2 xray' '3 sing-box' '4 sing-box' '
     '26 xray' '26 sing-box' '27 xray' '28 xray' '28 sing-box' '29 xray' \
     '30 sing-box' '31 sing-box'; do
     read -r managementProtocol managementCore <<<"${managementCase}"
-    if [[ "${PHASE3_PROTOCOL_PART}" != all ]] &&
-        (( managementIndex++ % 5 + 1 != PHASE3_PROTOCOL_PART )); then
-        continue
+    managementCaseIndex=$((managementIndex++))
+    if [[ "${PHASE3_PROTOCOL_PART}" != all ]]; then
+        (( managementCaseIndex % 5 + 1 == PHASE3_PROTOCOL_PART )) || continue
+        [[ "${PHASE3_MATRIX_BATCH}" == all ]] ||
+            (( managementCaseIndex / 5 % 2 + 1 == PHASE3_MATRIX_BATCH )) || continue
     fi
     [[ "${PHASE3_MANAGEMENT_CORE}" == all || "${managementCore}" == "${PHASE3_MANAGEMENT_CORE}" ]] || continue
     managementName="management-${managementProtocol}-${managementCore}"

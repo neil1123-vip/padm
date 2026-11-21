@@ -7935,7 +7935,7 @@ runDockerRealityRegression() {
 
 runDockerRealityParametersRegression() {
     PADM_DOCKER_TEST_FIXTURE_ONLY="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" \
-        bash "${PROJECT_ROOT}/docker/tests/reality-parameters.sh"
+        bash "${PROJECT_ROOT}/docker/tests/reality-parameters.sh" "${1:-all}"
 }
 
 runDockerVlessEncryptionRegression() {

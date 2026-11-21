@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PARAMETER_SCOPE=${1:-all}
+case "${PARAMETER_SCOPE}" in
+    all|regeneration|target-and-mldsa) ;;
+    *) printf 'unknown Reality parameter scope: %s\n' "${PARAMETER_SCOPE}" >&2; exit 2 ;;
+esac
+
 # 复用可信资产、双核候选、恢复和 URI 基线，只替换宿主及容器边界。
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/reality.sh"
@@ -268,6 +274,7 @@ PY
     ! grep -Eq '^compose .* up -d ' "${EVENTS}" || fail "${name}: 取消时启动了候选"
 }
 
+if [[ "${PARAMETER_SCOPE}" != target-and-mldsa ]]; then
 newState reality-parameters "${REGEN_SPEC}"
 dockerEnsureRuntimeDataPermissions
 # 共享账号保持封禁状态，重生成只影响传输认证材料。
@@ -391,6 +398,9 @@ FAKE_REGEN_HEALTH_FAIL=1 runParameterEdit 14 health-fail-restored changed \
     fail 'Reality 健康失败未恢复完整旧部署'
 parameterAssertCleanup
 
+fi
+
+if [[ "${PARAMETER_SCOPE}" != regeneration ]]; then
 # 连接目标域名解析出的地址，并验证配置的独立 SNI。
 jq '
   (.core.protocols[] | select(.listener_id == "entry-grpc-xray") | .reality) |=
@@ -546,4 +556,5 @@ if dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${MLDSA_SPEC}" 2>/dev/null; then
     fail '旧 bundle 接受 ML-DSA 字段'
 fi
 dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${REGEN_SPEC}" || fail 'ML-DSA marker 误拒旧规格'
+fi
 printf 'docker-reality-parameters-regression-ok\n'

@@ -361,14 +361,15 @@ runRegressionDockerContractsAggregateContract() (
         inside {inside = 0}
     ' "${workflow}")
     {
-        printf '%s\n' "${expectedSelectors[@]}" | grep -vx docker-recovery-apply
+        printf '%s\n' "${expectedSelectors[@]}" | grep -vxE 'docker-recovery-apply|docker-reality-parameters'
         printf '%s\n' docker-recovery-apply-{core,atomic,variants}
+        printf '%s\n' docker-reality-parameters-{regeneration,target-and-mldsa}
     } | sort >"${expected}"
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
     [[ "${shardCount}" -eq 31 ]]
     [[ "${#expectedSelectors[@]}" -eq 73 ]]
-    [[ "$(sort -u "${actual}" | wc -l)" -eq 75 ]]
+    [[ "$(sort -u "${actual}" | wc -l)" -eq 76 ]]
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-recovery-apply
     [[ "$(listRegressionDockerContractsFastChildSelectors | grep -c '^docker-port-hopping-preflight$')" -eq 1 ]]
@@ -392,7 +393,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-routing-ip-ownership docker-routing-core-network docker-routing-dns-csv; do
         expectedJobs=2
         case "${selector}" in
-        docker-contracts-setup-basic|docker-contracts-system-light|docker-routing-dns-csv) expectedJobs=3 ;;
+        docker-contracts-reality-metadata|docker-contracts-setup-basic|docker-contracts-system-light|docker-routing-dns-csv) expectedJobs=3 ;;
         esac
         : >"${callLog}"
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
@@ -455,6 +456,15 @@ runRegressionDockerContractsAggregateContract() (
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-}" ]]
     [[ -z "${PADM_DOCKER_REALITY_TARGETS_SCOPE:-}" ]]
+
+    (
+        bash() { printf '%s\n' "$2" >>"${callLog}"; }
+        : >"${callLog}"
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-reality-parameters-regeneration
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-reality-parameters-target-and-mldsa
+        printf '%s\n' regeneration target-and-mldsa >"${expectedLog}"
+        cmp -s "${expectedLog}" "${callLog}"
+    )
 
     # 完整菜单保留原集合，定向入口只向同一脚本传入 scope。
     bash() { printf '%s:%s\n' "${PADM_DOCKER_MENU_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
@@ -586,9 +596,21 @@ runRegressionDockerContractsAggregateContract() (
     runDockerPhase3EntriesManagementProtocolRegression
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-phase3-entries-management-protocol-xray
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-phase3-entries-management-protocol-sing-box
-    for group in ports migrate 1 2 3 4 5; do
+    for group in ports migrate; do
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "docker-contracts-phase3-protocol-${group}"
     done
+    (
+        runFrameworkParallelRegressionSelectors() {
+            [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 2 &&
+                "${PADM_REGRESSION_PARALLEL_SELECTOR_MODE}" == selectors ]] || return 8
+            shift
+            local part
+            for part in "$@"; do "${PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER}" "${part}" || return; done
+        }
+        for group in {1..5}; do
+            PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "docker-contracts-phase3-protocol-${group}"
+        done
+    )
     (
         runParallelRegressionRunners() {
             [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 2 && "$2:$4" == reality:tls ]] || return 8
@@ -602,7 +624,9 @@ runRegressionDockerContractsAggregateContract() (
         entries:topology:all:phase3.sh entries:management:all:phase3.sh \
         entries:management:protocol:phase3.sh entries:management:protocol-xray:phase3.sh \
         entries:management:protocol-sing-box:phase3.sh \
-        entries:management:protocol-{ports,migrate,1,2,3,4,5,lifecycle-reality,lifecycle-tls}:phase3.sh \
+        entries:management:protocol-{ports,migrate}:phase3.sh \
+        entries:management:protocol-{1..5}-{1,2}:phase3.sh \
+        entries:management:protocol-{lifecycle-reality,lifecycle-tls}:phase3.sh \
         entries:management:tls:phase3.sh \
         entries:management:tls-reinstall:phase3.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
