@@ -923,8 +923,17 @@ runDockerControlSyncRegression() {
 }
 
 runDockerControlClientRegression() {
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+        "${TMP_DIR}/docker-control-client-${BASHPID:-$$}" \
+        join runDockerControlJoinRegression client runDockerControlClientAndScheduleRegression
+}
+
+runDockerControlJoinRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/control-join.sh"
+}
+
+runDockerControlClientAndScheduleRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-client.py" &&
-        bash "${PROJECT_ROOT}/docker/tests/control-join.sh" &&
         runDockerControlSyncScheduleRegression &&
         PADM_DOCKER_MENU_SCOPE=control runDockerMenuRegression
 }
