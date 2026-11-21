@@ -1242,13 +1242,15 @@ fi
 if [[ "${PHASE3_ENTRIES_BRANCH}" != topology ]]; then
 # 新增、删除和保身份重建复用 entries 的真实候选事务，不重复核心与协议矩阵。
 protocolEdit() {
-    local expected=$1 name=$2 before
+    local expected=$1 name=$2 before=
     shift 2
-    before=$(editLiveHash)
+    if [[ "${expected}" != 0 || " $* " == *' --preview '* ]]; then
+        before=$(editLiveHash)
+    fi
     : >"${DOCKER_LOG}"
     runControl "${expected}" "${name}" edit "$@"
     assertEditCleanup
-    if [[ "${expected}" != 0 || " $* " == *' --preview '* ]]; then
+    if [[ -n "${before}" ]]; then
         [[ "$(editLiveHash)" == "${before}" ]] || fail "${name}: 拒绝、预览或失败恢复改变在线状态"
     fi
     if [[ " $* " == *' --preview '* ]]; then
@@ -1755,6 +1757,10 @@ fi
 
 # 逐协议走正式 CLI 闭环，管理状态不能只凭模板可生成或核心可启动升级。
 if [[ "${PHASE3_PROTOCOL_PART}" == all || "${PHASE3_PROTOCOL_PART}" == [1-5] ]]; then
+    # 完整组先结束迁移和 Shadowsocks 场景，独立分片已处于相同基线。
+    if [[ "${PHASE3_PROTOCOL_PART}" == all ]]; then
+        runControl 0 protocol-matrix-baseline configure --spec "${PROTOCOL_BASE}"
+    fi
 managementIndex=0
 for managementCase in '1 xray' '1 sing-box' '2 xray' '3 sing-box' '4 sing-box' '5 sing-box' \
     '21 xray' '22 xray' '23 xray' '23 sing-box' '24 xray' '25 xray' \
@@ -1769,7 +1775,6 @@ for managementCase in '1 xray' '1 sing-box' '2 xray' '3 sing-box' '4 sing-box' '
     managementName="management-${managementProtocol}-${managementCore}"
     managementSource=vless-ws
     case "${managementProtocol}" in 1|2|26) managementSource=vless-reality ;; esac
-    runControl 0 "${managementName}-baseline" configure --spec "${PROTOCOL_BASE}"
     protocolEdit 0 "${managementName}-preview" --protocol-add "${managementSource}" "${managementProtocol}" \
         32443 --protocol-core "${managementCore}" --preview
     protocolEdit 0 "${managementName}-add" --protocol-add "${managementSource}" "${managementProtocol}" \
@@ -1815,6 +1820,8 @@ for managementCase in '1 xray' '1 sing-box' '2 xray' '3 sing-box' '4 sing-box' '
     protocolEdit 0 "${managementName}-remove" --protocol-remove entry-1 --confirm PADM-DOCKER-EDIT
     jq -e --slurpfile before "${PROTOCOL_BASE}" '. == $before[0]' \
         "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "${managementName}: 删除没有恢复原规格"
+    [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
+        "${PROTOCOL_TRAFFIC_HASH}" ]] || fail "${managementName}: 删除没有保留流量和额度"
 done
 fi
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
