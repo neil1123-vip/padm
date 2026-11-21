@@ -196,7 +196,6 @@ done
 snapshot >"${TEST_ROOT}/drift-before.log"
 nft add rule inet sing-box output counter comment tun-real-drift
 snapshot >"${TEST_ROOT}/drift-after.log"
-drift=$(<"${TEST_ROOT}/drift-after.log")
 if compareSnapshots "${TEST_ROOT}/drift-before.log" "${TEST_ROOT}/drift-after.log" \
     >"${TEST_ROOT}/drift-compare.log" 2>&1; then
     fail 'snapshot comparison accepted an added nft rule'
@@ -205,7 +204,9 @@ stateHash=$(sha256sum "${stateFile}")
 if dockerComposeRun restart --no-deps sing-box >"${TEST_ROOT}/drift.log" 2>&1; then
     fail 'restart accepted foreign nft drift'
 fi
-[[ "$(snapshot)" == "${drift}" && "$(sha256sum "${stateFile}")" == "${stateHash}" &&
+snapshot >"${TEST_ROOT}/drift-rejected.log"
+compareSnapshots "${TEST_ROOT}/drift-after.log" "${TEST_ROOT}/drift-rejected.log" &&
+[[ "$(sha256sum "${stateFile}")" == "${stateHash}" &&
     "$(docker inspect --format '{{.State.Running}}' "${cid}")" == true ]] ||
     fail 'drift rejection changed resources, evidence or core'
 handle=$(nft -j -a list chain inet sing-box output |
@@ -256,6 +257,44 @@ printf 'docker-tun-compose-ok: bind=verified drift=rejected restart=new-owner of
     ip netns exec padm-icmp-target ip link set icmp-peer up
     ip netns exec padm-icmp-target ip addr add 203.0.113.200/32 dev lo
     ip route add default via 192.0.2.2 dev icmp-uplink
+    # 固定地址关闭 DAD，三次探测共用同一路由和真实远端。
+    ip -6 addr add 2001:db8:1::1/64 dev icmp-uplink nodad
+    ip netns exec padm-icmp-target ip -6 addr add 2001:db8:1::2/64 dev icmp-peer nodad
+    ip netns exec padm-icmp-target ip -6 addr add 2001:db8:2::200/128 dev lo nodad
+    ip -6 route add 2001:db8:2::200/128 via 2001:db8:1::2 dev icmp-uplink
+    # 禁止 IPv6 时邻居发现也可能被拒绝。固定夹具邻居，单独观测 Echo 和路由恢复。
+    uplinkMac=$(ip -j link show dev icmp-uplink | jq -er '.[0].address')
+    peerMac=$(ip netns exec padm-icmp-target ip -j link show dev icmp-peer | jq -er '.[0].address')
+    ip -6 neigh replace 2001:db8:1::2 lladdr "${peerMac}" nud permanent dev icmp-uplink
+    ip netns exec padm-icmp-target ip -6 neigh replace 2001:db8:1::1 lladdr "${uplinkMac}" nud permanent dev icmp-peer
+    printf '0 2147483647\n' >/proc/sys/net/ipv4/ping_group_range
+    icmpProbe="${PROJECT_ROOT}/docker/tests/tun-icmp-real.py"
+    ip -j -6 route get 2001:db8:2::200 >"${TEST_ROOT}/icmp-v6-route-baseline.log"
+    python3 "${icmpProbe}" ipv6-baseline
+    dockerComposeRun up --no-deps sing-box >"${TEST_ROOT}/icmp-v6-up.log" 2>&1
+    snapshot >"${TEST_ROOT}/icmp-v6-before.log"
+    python3 "${icmpProbe}" ipv6-reject
+    snapshot >"${TEST_ROOT}/icmp-v6-after.log"
+    compareSnapshots "${TEST_ROOT}/icmp-v6-before.log" "${TEST_ROOT}/icmp-v6-after.log"
+    ipv6RejectPackets() {
+        tail -n 1 "$1" | jq -er '[.nftables[] | .rule? | select(.chain == "output_udp_icmp") |
+          .expr | select(any(.[]; .reject?.type == "icmpv6" and .reject?.expr == "no-route")) |
+          .[] | .counter?.packets // empty] | select(length == 1) | .[0]'
+    }
+    rejectBefore=$(ipv6RejectPackets "${TEST_ROOT}/icmp-v6-before.log")
+    rejectAfter=$(ipv6RejectPackets "${TEST_ROOT}/icmp-v6-after.log")
+    ((rejectAfter > rejectBefore)) || fail 'IPv6 Echo did not hit the managed reject rule'
+    printf 'docker-tun-ipv6-reject-ok: counter=%s→%s\n' "${rejectBefore}" "${rejectAfter}"
+    dockerComposeRun down >"${TEST_ROOT}/icmp-v6-down.log" 2>&1
+    [[ ! -e "${stateFile}" ]] || fail 'IPv6 scenario left TUN ownership'
+    ip -j -6 route get 2001:db8:2::200 >"${TEST_ROOT}/icmp-v6-route-restored.log"
+    cmp -s "${TEST_ROOT}/icmp-v6-route-baseline.log" "${TEST_ROOT}/icmp-v6-route-restored.log" ||
+        fail 'IPv6 route differs after TUN cleanup'
+    ip -j -6 neigh show dev icmp-uplink >"${TEST_ROOT}/icmp-v6-neighbors.log"
+    python3 "${icmpProbe}" ipv6-restored
+    ip -6 route del 2001:db8:2::200/128 via 2001:db8:1::2 dev icmp-uplink
+    ip -6 neigh del 2001:db8:1::2 dev icmp-uplink
+    ip -6 addr del 2001:db8:1::1/64 dev icmp-uplink
     ip netns exec padm-icmp-target python3 "${PROJECT_ROOT}/docker/tests/tun-icmp-real.py" \
         serve "${TEST_ROOT}/icmp-ready" >"${TEST_ROOT}/icmp-target.log" 2>&1 &
     targetServer=$!

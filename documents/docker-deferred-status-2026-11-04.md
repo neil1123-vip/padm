@@ -1174,3 +1174,15 @@ B 的被控 `control join` 退出 `11`，入组失败原因待查。本轮 VPS B
 `a77b09f194b91556d099850090fe47f07df73821279d2f8822b710d44ab2c488` 和
 `fd2d2b0d98aba29a7bc0e6a7d92f62bc295de230cf2b8386c175a104a9863ba7`。
 公网单被控替换和公网 IPv6 灾备仍待验。
+
+### TUN 启闭的 IPv6 拒绝回归
+
+2026-11-21，主线 `f23ed61e` 的 TUN 在 Docker Desktop 隔离 Linux amd64 环境中，
+用固定邻居的独立网络命名空间验证 IPv6 Echo。启用前和正常关闭后各收到一个对应
+的远端回包。启用时，受管 ICMPv6 `no-route` 规则计数增加，出口未出现该次 Echo 请求。
+关闭后目标路由与基线一致，TUN 归属状态已清除。
+
+完整 `docker-tun-real` 同轮通过，包含 IPv4 direct、filtered、denied、TCP/UDP、
+拒绝规则漂移及异常退出后保留证据。IPv6 动态邻居恢复、原生宿主、公网及 PMTU 待验。
+原件 `.tmp-regression-docker-3de7bbd4c4fd4f40a6cb428daca05326/regression.log`，SHA-256
+`2de9c56e9cc23659f940cae614e2df18da3cafbbbad697e0a137b2389b470cc6`。

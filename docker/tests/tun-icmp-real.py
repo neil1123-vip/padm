@@ -12,6 +12,7 @@ import uuid
 
 
 TARGET = "203.0.113.200"
+TARGET_V6 = "2001:db8:2::200"
 PORT = 35991
 
 
@@ -121,8 +122,44 @@ def probe(mode):
     print(json.dumps({"mode": mode, **counts, "tcp": True, "udp": True}, sort_keys=True))
 
 
+def probe_ipv6(mode):
+    nonce = uuid.uuid4().bytes
+    packet = struct.pack("!BBHHH", 128, 0, 0, 0, 1) + nonce
+    with (socket.socket(socket.AF_INET6, socket.SOCK_DGRAM, socket.IPPROTO_ICMPV6) as ping,
+          socket.socket(socket.AF_PACKET, socket.SOCK_DGRAM, socket.htons(0x0003)) as wire):
+        ping.settimeout(2)
+        wire.bind(("icmp-uplink", 0))
+        wire.setblocking(False)
+        ping.connect((TARGET_V6, 0))
+        ping.send(packet)
+        if mode == "ipv6-reject":
+            try:
+                ping.recv(1024)
+            except TimeoutError:
+                pass
+            else:
+                raise AssertionError("IPv6 Echo succeeded while TUN was enabled")
+        else:
+            reply = ping.recv(1024)
+            assert reply[:2] == b"\x81\x00" and reply[8:] == nonce, "wrong IPv6 Echo reply"
+        requests = 0
+        while True:
+            try:
+                frame = wire.recv(65535)
+            except BlockingIOError:
+                break
+            if (len(frame) >= 48 and frame[0] >> 4 == 6 and frame[6] == socket.IPPROTO_ICMPV6
+                    and frame[24:40] == socket.inet_pton(socket.AF_INET6, TARGET_V6)
+                    and frame[40:42] == b"\x80\x00" and frame[48:] == nonce):
+                requests += 1
+        assert requests == (mode != "ipv6-reject"), (mode, requests)
+    print(json.dumps({"mode": mode, "wire_requests": requests, "result": "pass"}, sort_keys=True))
+
+
 if sys.argv[1] == "serve":
     serve(sys.argv[2])
+elif sys.argv[1] in ("ipv6-baseline", "ipv6-reject", "ipv6-restored"):
+    probe_ipv6(sys.argv[1])
 else:
     # 探测者使用单独的组；缺权阶段只限制核心组，避免把调用者失败算作核心拒绝。
     os.setgroups([10001])
