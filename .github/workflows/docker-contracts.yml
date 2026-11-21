@@ -34,7 +34,7 @@ jobs:
           - docker-contracts-fast-rest
           - docker-contracts-setup-basic
           - docker-port-hopping-preflight
-          - docker-entry-port-alias
+          - docker-routing-ip-ownership
           - docker-recovery-apply
           - docker-routing-dns-csv
           - docker-routing-core-network
@@ -152,5 +152,5 @@ jobs:
           - docker-contracts-phase3-protocol-migrate
           - docker-contracts-phase3-protocol-lifecycle
           - docker-contracts-phase3-protocol-commands
-          - docker-routing-ip-ownership
+          - docker-entry-port-alias
     steps: *contract-steps
