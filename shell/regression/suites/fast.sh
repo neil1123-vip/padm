@@ -176,6 +176,7 @@ runRegressionDockerContracts() {
 }
 
 listRegressionDockerContractsFastChildSelectors() {
+    printf '%s\n' docker-menu
     listRegressionDockerContractsFastHeavyChildSelectors
     listRegressionDockerContractsFastSitesChildSelectors
     listRegressionDockerContractsFastRestChildSelectors
@@ -185,8 +186,7 @@ listRegressionDockerContractsFastChildSelectors() {
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
-    # 三个 worker 避免菜单占用一个后，其余事务串行拖长收尾。
-    printf '%s\n' docker-menu docker-control-state docker-reality-targets-selection docker-entry-port-alias
+    printf '%s\n' docker-control-state docker-reality-targets-selection docker-entry-port-alias
 }
 
 listRegressionDockerContractsFastSitesChildSelectors() {

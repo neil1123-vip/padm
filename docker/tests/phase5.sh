@@ -948,7 +948,7 @@ awk '
         fi
     }
     export CONTRACT_TOOLS=true RUNNER_TEMP=${TEST_ROOT}
-    for SELECTOR in docker-contracts-fast-rest docker-contracts-fast-heavy docker-contracts-fast-sites \
+    for SELECTOR in docker-menu docker-contracts-fast-rest docker-contracts-fast-heavy docker-contracts-fast-sites \
         docker-contracts-reality-metadata docker-contracts-reality-rotation docker-contracts-phase3-protocol-commands \
         docker-contracts-phase3-protocol-{ports,migrate,lifecycle,1,2,3,4,5}; do
         export SELECTOR
@@ -1077,7 +1077,7 @@ grep -Fq "hashFiles('shell/regression/container/Dockerfile', 'shell/regression/c
     fail '工具缓存必须仅绑定实际镜像构建输入'
 grep -Fq 'FROM contracts AS full' "${PROJECT_ROOT}/shell/regression/container/Dockerfile" ||
     fail '本机完整工具镜像没有继承 CI 合同依赖'
-grep -Fq "CONTRACT_TOOLS: \${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') || startsWith(matrix.selector, 'docker-contracts-phase3-protocol-') }}" "${CONTRACT_WORKFLOW}" &&
+grep -Fq "CONTRACT_TOOLS: \${{ matrix.selector == 'docker-menu' || startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') || startsWith(matrix.selector, 'docker-contracts-phase3-protocol-') }}" "${CONTRACT_WORKFLOW}" &&
     [[ "$(grep -Fc "if: env.CONTRACT_TOOLS == 'true'" "${CONTRACT_WORKFLOW}")" -eq 2 ]] &&
     grep -Fq "if: env.CONTRACT_TOOLS != 'true'" "${CONTRACT_WORKFLOW}" &&
     grep -Fq 'elif [[ "${CONTRACT_TOOLS}" == true ]]; then' "${CONTRACT_WORKFLOW}" ||

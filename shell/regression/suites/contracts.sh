@@ -363,7 +363,7 @@ runRegressionDockerContractsAggregateContract() (
     printf '%s\n' "${expectedSelectors[@]}" | sort >"${expected}"
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
-    [[ "${shardCount}" -eq 26 ]]
+    [[ "${shardCount}" -eq 27 ]]
     [[ "${#expectedSelectors[@]}" -eq 73 ]]
     [[ "$(sort -u "${actual}" | wc -l)" -eq 73 ]]
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
