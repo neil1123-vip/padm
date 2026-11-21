@@ -29,16 +29,12 @@ jobs:
       fail-fast: true
       matrix:
         selector:
+          # Keep the first wave within the observed runner capacity alongside static and native.
           - docker-menu
-          - docker-contracts-fast-sites
           - docker-contracts-fast-rest
-          - docker-contracts-setup-basic
-          - docker-port-hopping-preflight
-          - docker-routing-ip-ownership
           - docker-recovery-apply-core
           - docker-recovery-apply-atomic
           - docker-recovery-apply-variants
-          - docker-routing-dns-csv
           - docker-routing-core-network
           - docker-contracts-system-light
           - docker-contracts-phase3-topology
@@ -147,6 +143,11 @@ jobs:
       fail-fast: true
       matrix:
         selector:
+          - docker-contracts-fast-sites
+          - docker-contracts-setup-basic
+          - docker-routing-dns-csv
+          - docker-routing-ip-ownership
+          - docker-port-hopping-preflight
           - docker-contracts-fast-heavy
           - docker-contracts-setup-transports
           - docker-setup-encrypted-udp
