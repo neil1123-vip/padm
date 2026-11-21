@@ -770,6 +770,18 @@ WARP 出口。该批 sing-box 在建立 TLS 前超时。自有源站同样可复
 `ddd5df1b010f5fdb79ecd84ec050022c3fad937b2b54dbc7cc04b424dd00f5ad` 和
 `703b1de67b9f1bef428b9e7fa2c7e820f9015dc22b1c87de9923f4d0a4a68679`。
 
+
+2026-11-21，沿用正式 `3.44.13` 的双核心隔离部署和同一临时 IPv4 WARP
+Peer。依次以 MTU 1280、1180、1280 重启两核心并各采样 120 秒。
+Xray 依次通过 2/8、1/8、0/8，sing-box 为 0/8、4/8、0/8。
+同期直连 24/24。两核心共 39 次超时和两次 TLS EOF，较小 MTU 下仍出现失败。
+样本不足以量化 MTU 的影响，长稳和故障定位仍待验。
+
+关闭 WARP 后两入口均在首轮恢复直连，部署规格及两份核心配置摘要与
+停用基线一致。临时设备已撤销，隔离部署已清理。原件
+`.tmp-warp-managed-crossover/mtu-34413.log` 的 SHA-256 为
+`efe944ecaa874fa9794ecc98c8248d62715231e620e218f909a726d77a39e9ff`。
+
 ## Cloudflare 隔离透传
 
 2026-11-20，Cloudflare 区域已启用 gRPC、HTTP/3，SSL/TLS 为「完全」。
