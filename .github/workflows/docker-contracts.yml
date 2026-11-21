@@ -33,10 +33,10 @@ jobs:
           - docker-contracts-fast-sites
           - docker-recovery-apply
           - docker-routing-dns-csv
+          - docker-routing-core-network
           - docker-contracts-system-light
           - docker-port-hopping-preflight
           - docker-contracts-phase3-topology
-          - docker-contracts-fast-rest
           - docker-contracts-reality-metadata
           - docker-contracts-reality-rotation
           - docker-contracts-setup-transports
@@ -146,7 +146,7 @@ jobs:
         selector:
           - docker-contracts-fast-heavy
           - docker-contracts-setup-basic
-          - docker-routing-core-network
+          - docker-contracts-fast-rest
           - docker-contracts-phase3-protocol-ports
           - docker-contracts-phase3-protocol-migrate
           - docker-contracts-phase3-protocol-lifecycle
