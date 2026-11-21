@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      retried_after_main_change:
+        description: The initial refresh already retried after main advanced
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -154,25 +159,40 @@ jobs:
           printf 'Update %s passed Docker CI run %s.\n' "${commit_sha}" "${ci_run_id}" >>"${GITHUB_STEP_SUMMARY}"
 
       - name: Promote validated update
+        id: promote
         if: steps.update.outputs.changed == 'true'
         shell: bash
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE_SHA: ${{ steps.pending.outputs.base_sha }}
           COMMIT_SHA: ${{ steps.save.outputs.commit_sha }}
+          RETRIED_AFTER_MAIN_CHANGE: ${{ inputs.retried_after_main_change || false }}
         run: |
           set -euo pipefail
-          git fetch origin main
-          # main 已前进时重新生成、验证更新，不合入未经验证的合并提交。
-          [[ "$(git rev-parse FETCH_HEAD)" == "${BASE_SHA}" ]] || {
-            echo 'main changed during validation; retry the upstream refresh.' >&2; exit 1;
-          }
           [[ "$(git diff --name-only "${BASE_SHA}" "${COMMIT_SHA}")" == versions.lock ]] || {
             echo 'The validated update changes files outside versions.lock.' >&2; exit 1;
           }
-          git push origin "${COMMIT_SHA}:refs/heads/main"
-          printf 'Promoted validated update %s to main.\n' "${COMMIT_SHA}" >>"${GITHUB_STEP_SUMMARY}"
+          git fetch origin main
+          if [[ "$(git rev-parse FETCH_HEAD)" == "${BASE_SHA}" ]]; then
+            if git push origin "${COMMIT_SHA}:refs/heads/main"; then
+              echo 'promoted=true' >>"${GITHUB_OUTPUT}"
+              printf 'Promoted validated update %s to main.\n' "${COMMIT_SHA}" >>"${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+            git fetch origin main
+            [[ "$(git rev-parse FETCH_HEAD)" != "${BASE_SHA}" ]] || exit 1
+          fi
+          # main 已前进时，从最新提交重新生成锁和验证。
+          if [[ "${RETRIED_AFTER_MAIN_CHANGE}" == true ]]; then
+            echo 'main advanced again during the retried upstream refresh.' >&2
+            exit 1
+          fi
+          gh workflow run refresh-upstreams.yml --repo "${GITHUB_REPOSITORY}" --ref main \
+            -F retried_after_main_change=true
+          echo 'Main advanced. Queued one fresh upstream refresh.' >>"${GITHUB_STEP_SUMMARY}"
 
       - name: Ensure Release
+        if: steps.update.outputs.changed != 'true' || steps.promote.outputs.promoted == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

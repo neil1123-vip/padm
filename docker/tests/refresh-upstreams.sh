@@ -17,6 +17,9 @@ git() {
             --force*|-f|+*) printf 'Unexpected forced push\n' >&2; return 98 ;;
             esac
         done
+        if [[ "${2-}" == origin && "${3-}" == *:refs/heads/main && -n "${CONCURRENT_MAIN_SHA:-}" ]]; then
+            "${git_binary}" --git-dir="${case_root}/remote.git" update-ref refs/heads/main "${CONCURRENT_MAIN_SHA}" || return
+        fi
     fi
     if [[ "${git_binary}" == *.exe ]]; then
         case "${1-}" in
@@ -59,6 +62,12 @@ for step in 'Validate the refreshed lock' 'Preflight refreshed distroless depend
         END {exit !gated}
     ' "${workflow}" || fail "unchanged update is not gated: ${step}"
 done
+awk '
+    $0 == "      - name: Ensure Release" {found = 1; next}
+    found && /^      - name:/ {exit}
+    found && $0 == "        if: steps.update.outputs.changed != '\''true'\'' || steps.promote.outputs.promoted == '\''true'\''" {gated = 1}
+    END {exit !gated}
+' "${workflow}" || fail 'Release must require promotion or an unchanged lock'
 ! grep -Eq 'gh pr |pull-requests:|checks:' "${workflow}" || fail 'refresh workflow still uses PR permissions or commands'
 grep -Fq 'bash docker/release.sh validate-lock' "${workflow}" || fail 'refreshed lock validation is missing'
 if grep -Fq 'bash docker/tests/phase5.sh' "${workflow}"; then
@@ -80,6 +89,9 @@ gh() {
     'workflow run docker-ci.yml')
         [[ "$(argument_value --ref "$@")" == "${BRANCH}" ]] || return 98
         [[ "${scenario}" != dispatch-failure ]] || return 1 ;;
+    'workflow run refresh-upstreams.yml')
+        [[ "$(argument_value --ref "$@")" == main ]] || return 98
+        [[ "$(argument_value -F "$@")" == retried_after_main_change=true ]] || return 98 ;;
     'workflow run create_release.yml')
         [[ "$(argument_value --ref "$@")" == main ]] || return 98
         [[ "$(argument_value -F "$@")" == force_release=false ]] || return 98
@@ -136,12 +148,14 @@ assert_remote() {
     [[ "$(git --git-dir="${case_root}/remote.git" rev-parse refs/heads/codex/upstream-versions-existing)" == "${original_sha}" ]] || fail "${scenario}: existing update branch changed"
 }
 
-for scenario in success unchanged main-race head-before-ci head-after-ci push-rejected \
+for scenario in success unchanged main-race main-race-during-push main-race-retried head-before-ci head-after-ci push-rejected \
     ci-failure ci-missing dispatch-failure unrelated-file release-dispatch-failure release-dispatch-docs; do
     case_root=${test_root}/${scenario}
     runner_root=${case_root}/runner
     export case_root scenario
     export GITHUB_RUN_ATTEMPT=1 REFRESH_UNCHANGED=false
+    export RETRIED_AFTER_MAIN_CHANGE=false CONCURRENT_MAIN_SHA=
+    [[ "${scenario}" != main-race-retried ]] || RETRIED_AFTER_MAIN_CHANGE=true
     mkdir -p "${case_root}"
     : >"${case_root}/gh-calls"
     (
@@ -226,15 +240,21 @@ for scenario in success unchanged main-race head-before-ci head-after-ci push-re
     expect_success ci
     [[ "$(grep -c '^workflow run docker-ci.yml ' "${case_root}/gh-calls")" == 1 ]] || fail "${scenario}: CI was not dispatched once"
     expected_main=${BASE_SHA}
-    if [[ "${scenario}" == main-race ]]; then
+    if [[ "${scenario}" == main-race* ]]; then
         (
             cd "${case_root}/seed"
             printf 'concurrent\n' >shared.txt
             git add shared.txt
             git commit -m concurrent
-            git push origin main
+            git push origin HEAD:refs/heads/concurrent
+            git rev-parse HEAD >../concurrent-sha
         ) >"${case_root}/race.log" 2>&1
-        expected_main=$(git --git-dir="${case_root}/remote.git" rev-parse refs/heads/main)
+        expected_main=$(cat "${case_root}/concurrent-sha")
+        if [[ "${scenario}" == main-race-during-push ]]; then
+            CONCURRENT_MAIN_SHA=${expected_main}
+        else
+            git --git-dir="${case_root}/remote.git" update-ref refs/heads/main "${expected_main}"
+        fi
     elif [[ "${scenario}" == push-rejected ]]; then
         printf '%s\n' '#!/usr/bin/env bash' 'while read -r old new ref; do' \
             '    [[ "${ref}" != refs/heads/main ]] || exit 1' 'done' >"${case_root}/remote.git/hooks/pre-receive"
@@ -242,6 +262,7 @@ for scenario in success unchanged main-race head-before-ci head-after-ci push-re
     fi
     if [[ "${scenario}" == success || "${scenario}" == release-dispatch-* ]]; then
         expect_success promote
+        grep -Fxq 'promoted=true' "${GITHUB_OUTPUT}" || fail "${scenario}: successful promotion was not reported"
         expected_main=${COMMIT_SHA}
         ! grep -q '^workflow run create_release.yml ' "${case_root}/gh-calls" || fail 'promotion dispatched Release before its dedicated step'
         if [[ "${scenario}" == release-dispatch-* ]]; then
@@ -279,8 +300,14 @@ for scenario in success unchanged main-race head-before-ci head-after-ci push-re
             [[ "$(grep -c '^workflow run create_release.yml ' "${case_root}/gh-calls")" == 1 ]] || fail 'validated update did not dispatch one release'
         fi
         git --git-dir="${case_root}/remote.git" show main:versions.lock | grep -Fxq 'PADM_LOCK_XRAY_VERSION=v1.1.0' || fail 'main lock was not refreshed'
+    elif [[ "${scenario}" == main-race || "${scenario}" == main-race-during-push ]]; then
+        expect_success promote
+        [[ "$(grep -c '^workflow run refresh-upstreams.yml ' "${case_root}/gh-calls")" == 1 ]] || fail "${scenario}: refresh was not requeued once"
+        ! grep -Fxq 'promoted=true' "${GITHUB_OUTPUT}" || fail "${scenario}: queued retry reported promotion"
+        ! grep -q '^workflow run create_release.yml ' "${case_root}/gh-calls" || fail "${scenario}: queued retry dispatched a release"
     else
         expect_failure promote
+        ! grep -q '^workflow run refresh-upstreams.yml ' "${case_root}/gh-calls" || fail "${scenario}: rejected update queued another refresh"
         ! grep -q '^workflow run create_release.yml ' "${case_root}/gh-calls" || fail "${scenario}: rejected update dispatched a release"
     fi
     assert_remote "${expected_main}"

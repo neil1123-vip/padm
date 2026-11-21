@@ -944,7 +944,8 @@ awk '
     }
     export CONTRACT_TOOLS=true RUNNER_TEMP=${TEST_ROOT}
     for SELECTOR in docker-contracts-fast-rest docker-contracts-fast-heavy docker-contracts-fast-sites \
-        docker-contracts-reality-metadata docker-contracts-reality-rotation docker-contracts-phase3-protocol; do
+        docker-contracts-reality-metadata docker-contracts-reality-rotation docker-contracts-phase3-protocol-commands \
+        docker-contracts-phase3-protocol-{ports,migrate,lifecycle,1,2,3,4,5}; do
         export SELECTOR
         (source "${CONTRACT_RUN_SCRIPT}") || fail "合同分片能力配置错误：${SELECTOR}"
     done
@@ -1071,7 +1072,7 @@ grep -Fq "hashFiles('shell/regression/container/Dockerfile', 'shell/regression/c
     fail '工具缓存必须仅绑定实际镜像构建输入'
 grep -Fq 'FROM contracts AS full' "${PROJECT_ROOT}/shell/regression/container/Dockerfile" ||
     fail '本机完整工具镜像没有继承 CI 合同依赖'
-grep -Fq "CONTRACT_TOOLS: \${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') || matrix.selector == 'docker-contracts-phase3-protocol' }}" "${CONTRACT_WORKFLOW}" &&
+grep -Fq "CONTRACT_TOOLS: \${{ startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') || startsWith(matrix.selector, 'docker-contracts-phase3-protocol-') }}" "${CONTRACT_WORKFLOW}" &&
     [[ "$(grep -Fc "if: env.CONTRACT_TOOLS == 'true'" "${CONTRACT_WORKFLOW}")" -eq 2 ]] &&
     grep -Fq "if: env.CONTRACT_TOOLS != 'true'" "${CONTRACT_WORKFLOW}" &&
     grep -Fq 'elif [[ "${CONTRACT_TOOLS}" == true ]]; then' "${CONTRACT_WORKFLOW}" ||
@@ -1093,8 +1094,10 @@ for hoppingContract in \
 done
 grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
-grep -Fq 'max-parallel: 18' "${CONTRACT_WORKFLOW}" ||
-    fail 'CI 合同矩阵没有给原生与 TLS 门禁保留两个槽位'
+for part in ports migrate lifecycle 1 2 3 4 5 commands; do
+    grep -Fxq "          - docker-contracts-phase3-protocol-${part}" "${CONTRACT_WORKFLOW}" ||
+        fail "CI 合同矩阵缺少协议分片：${part}"
+done
 if grep -Fq 'subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}"; then
     fail 'image workflow repeats the contract suite'
 fi
@@ -1340,10 +1343,10 @@ grep -Fq 'bash shell/subscription_groups_regression.sh ci' "${RELEASE_WORKFLOW}"
 grep -Fq 'native_parallel_jobs:' "${PR_WORKFLOW}" || fail 'PR workflow lacks reproducible native concurrency input'
 grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS' "${PR_WORKFLOW}" ||
     fail 'PR workflow does not pass native concurrency to the selector'
-prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${PR_WORKFLOW}")
-[[ "${prImageNeeds}" == '    needs: [static, native, tls, contracts]' ||
-    "${prImageNeeds}" == '    needs: [static, native, tls, signing, contracts]' ]] ||
-    fail 'PR images can run without native, TLS or contract validation'
+prImages=$(sed -n '/^  images:$/,$p' "${PR_WORKFLOW}")
+grep -Fxq '    needs: static' <<<"${prImages}" &&
+    grep -Fxq '      push: false' <<<"${prImages}" ||
+    fail '并行镜像检查必须依赖静态验证并禁止推送'
 grep -Fxq '      - name: Bump script and lock version' <<<"${prepareDefinition}" ||
     fail '版本提交不在全部门禁之后'
 preflightStep=$(awk '

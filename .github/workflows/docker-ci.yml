@@ -118,7 +118,7 @@ jobs:
       source_ref: ${{ needs.static.outputs.source_sha }}
 
   images:
-    needs: [static, native, tls, signing, contracts]
+    needs: static
     permissions:
       contents: read
       packages: read

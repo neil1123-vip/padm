@@ -266,7 +266,7 @@ runRegressionDockerContractsAggregateContract() (
     local -a expectedSelectors=(
         docker-xhttp-edit docker-xhttp-rollback docker-xhttp-validation
         docker-phase3-edit docker-phase3-entries-management-tls docker-phase3-entries-management-tls-reinstall
-        docker-phase3-entries-management-protocol-xray docker-phase3-entries-management-protocol-sing-box
+        docker-contracts-phase3-protocol-{ports,migrate,lifecycle,1,2,3,4,5}
         docker-phase3-entries-topology
         docker-traditional-tls-transports docker-traditional-tls-base
         docker-setup-transports docker-setup-encrypted-udp docker-port-hopping-preflight
@@ -363,9 +363,9 @@ runRegressionDockerContractsAggregateContract() (
     printf '%s\n' "${expectedSelectors[@]}" | sort >"${expected}"
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
-    [[ "${shardCount}" -eq 18 ]]
-    [[ "${#expectedSelectors[@]}" -eq 67 ]]
-    [[ "$(sort -u "${actual}" | wc -l)" -eq 67 ]]
+    [[ "${shardCount}" -eq 26 ]]
+    [[ "${#expectedSelectors[@]}" -eq 73 ]]
+    [[ "$(sort -u "${actual}" | wc -l)" -eq 73 ]]
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-recovery-apply
     [[ "$(listRegressionDockerContractsFastChildSelectors | grep -c '^docker-port-hopping-preflight$')" -eq 1 ]]
@@ -383,7 +383,8 @@ runRegressionDockerContractsAggregateContract() (
     }
     for selector in docker-phase3-entries docker-contracts-reality-metadata docker-contracts-reality-rotation \
         docker-contracts-recovery docker-contracts-fast-heavy docker-contracts-fast-sites \
-        docker-contracts-phase3-tls docker-contracts-phase3-protocol docker-contracts-phase3-topology docker-contracts-policy \
+        docker-contracts-phase3-tls docker-contracts-phase3-protocol docker-contracts-phase3-protocol-commands \
+        docker-contracts-phase3-topology docker-contracts-policy \
         docker-contracts-setup-basic docker-contracts-setup-transports docker-contracts-system-light \
         docker-routing-ip-ownership docker-routing-core-network docker-routing-dns-csv; do
         expectedJobs=2
@@ -572,12 +573,16 @@ runRegressionDockerContractsAggregateContract() (
     runDockerPhase3EntriesManagementProtocolRegression
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-phase3-entries-management-protocol-xray
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-phase3-entries-management-protocol-sing-box
+    for group in ports migrate lifecycle 1 2 3 4 5; do
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "docker-contracts-phase3-protocol-${group}"
+    done
     runDockerPhase3EntriesManagementTlsRegression
     runDockerPhase3EntriesManagementTlsReinstallRegression
     printf '%s\n' full:all:all:phase3.sh edit:all:all:phase3.sh entries:all:all:phase3.sh \
         entries:topology:all:phase3.sh entries:management:all:phase3.sh \
         entries:management:protocol:phase3.sh entries:management:protocol-xray:phase3.sh \
-        entries:management:protocol-sing-box:phase3.sh entries:management:tls:phase3.sh \
+        entries:management:protocol-sing-box:phase3.sh \
+        entries:management:protocol-{ports,migrate,lifecycle,1,2,3,4,5}:phase3.sh entries:management:tls:phase3.sh \
         entries:management:tls-reinstall:phase3.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_PHASE3_SCOPE:-}" ]]

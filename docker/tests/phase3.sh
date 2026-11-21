@@ -13,13 +13,17 @@ case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}" in
 *) printf 'docker-phase3-regression-fail: unknown entries branch %s\n' "${PHASE3_ENTRIES_BRANCH}" >&2; exit 1 ;;
 esac
 case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}:${PHASE3_MANAGEMENT_GROUP}" in
-*:all|entries:management:protocol|entries:management:protocol-xray|entries:management:protocol-sing-box|entries:management:tls|entries:management:tls-reinstall) ;;
+*:all|entries:management:protocol|entries:management:protocol-xray|entries:management:protocol-sing-box|entries:management:protocol-ports|entries:management:protocol-migrate|entries:management:protocol-lifecycle|entries:management:protocol-[1-5]|entries:management:tls|entries:management:tls-reinstall) ;;
 *) printf 'docker-phase3-regression-fail: unknown management group %s\n' "${PHASE3_MANAGEMENT_GROUP}" >&2; exit 1 ;;
 esac
 PHASE3_MANAGEMENT_CORE=all
+PHASE3_PROTOCOL_PART=all
 case "${PHASE3_MANAGEMENT_GROUP}" in
-protocol-*)
+protocol-xray|protocol-sing-box)
     PHASE3_MANAGEMENT_CORE=${PHASE3_MANAGEMENT_GROUP#protocol-}
+    PHASE3_MANAGEMENT_GROUP=protocol ;;
+protocol-*)
+    PHASE3_PROTOCOL_PART=${PHASE3_MANAGEMENT_GROUP#protocol-}
     PHASE3_MANAGEMENT_GROUP=protocol ;;
 esac
 
@@ -1280,6 +1284,7 @@ assertSsPrivate() {
     done <"${DOCKER_LOG}.ss-generated"
 }
 if [[ "${PHASE3_MANAGEMENT_GROUP}" == all || "${PHASE3_MANAGEMENT_GROUP}" == protocol ]]; then
+if [[ "${PHASE3_PROTOCOL_PART}" == all || "${PHASE3_PROTOCOL_PART}" == ports ]]; then
 # 内部端口复用同一在线事务；协议差异只跑生成器，不重复整套部署。
 for invalidPort in 0 65536 031300 -1 +1 1e3 not-a-port; do
     protocolEdit 2 internal-ports-invalid-backend --internal-ports vless-ws "${invalidPort}" 8643 --preview
@@ -1402,6 +1407,8 @@ protocolEdit 15 internal-ports-still-frozen-in-spec --spec "${PROTOCOL_BASE}" --
     done
 ) || fail '内部端口枚举、冻结或共存生成合同失败'
 runControl 0 internal-ports-restore-baseline configure --spec "${PROTOCOL_BASE}"
+fi
+if [[ "${PHASE3_PROTOCOL_PART}" == all || "${PHASE3_PROTOCOL_PART}" == migrate ]]; then
 # 修复只重建受管 Nginx 正文，缺失与损坏的失败事务都保留原现场。
 protocolEdit 2 nginx-repair-needs-rebuild --repair-nginx --preview
 protocolEdit 2 nginx-repair-reject-add --protocol-add vless-ws 21 34443 --repair-nginx --preview
@@ -1509,6 +1516,8 @@ for version in 1 2; do
         "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "v${version} 增量未迁移固定入口身份"
 done
 runControl 0 protocol-restore-v3-baseline configure --spec "${PROTOCOL_BASE}"
+fi
+if [[ "${PHASE3_PROTOCOL_PART}" == all || "${PHASE3_PROTOCOL_PART}" == lifecycle ]]; then
 protocolEdit 2 protocol-add-usage --protocol-add vless-reality 2 0 --preview
 protocolEdit 2 protocol-core-needs-add --protocol-rebuild vless-reality --protocol-core sing-box --preview
 protocolEdit 2 protocol-core-invalid --protocol-add vless-reality 2 28443 --protocol-core invalid --preview
@@ -1742,14 +1751,20 @@ jq -e --slurpfile before "${TEST_ROOT}/protocol-ss-installed.json" '
       (.core.protocols[] | select(.listener_id=="entry-1") | .shadowsocks)' \
         "${TEST_ROOT}/protocol-ss-reused.json" >/dev/null || fail '同 UUID 来源新增改写原 Shadowsocks 密钥'
 ) || fail 'Shadowsocks 复制身份失败'
+fi
 
 # 逐协议走正式 CLI 闭环，管理状态不能只凭模板可生成或核心可启动升级。
+if [[ "${PHASE3_PROTOCOL_PART}" == all || "${PHASE3_PROTOCOL_PART}" == [1-5] ]]; then
+managementIndex=0
 for managementCase in '1 xray' '1 sing-box' '2 xray' '3 sing-box' '4 sing-box' '5 sing-box' \
     '21 xray' '22 xray' '23 xray' '23 sing-box' '24 xray' '25 xray' \
     '26 xray' '26 sing-box' '27 xray' '28 xray' '28 sing-box' '29 xray' \
     '30 sing-box' '31 sing-box'; do
     read -r managementProtocol managementCore <<<"${managementCase}"
-    # 两个核心分片共同覆盖完整矩阵，公共事务与拒绝断言仍各自执行。
+    if [[ "${PHASE3_PROTOCOL_PART}" != all ]] &&
+        (( managementIndex++ % 5 + 1 != PHASE3_PROTOCOL_PART )); then
+        continue
+    fi
     [[ "${PHASE3_MANAGEMENT_CORE}" == all || "${managementCore}" == "${PHASE3_MANAGEMENT_CORE}" ]] || continue
     managementName="management-${managementProtocol}-${managementCore}"
     managementSource=vless-ws
@@ -1801,6 +1816,7 @@ for managementCase in '1 xray' '1 sing-box' '2 xray' '3 sing-box' '4 sing-box' '
     jq -e --slurpfile before "${PROTOCOL_BASE}" '. == $before[0]' \
         "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail "${managementName}: 删除没有恢复原规格"
 done
+fi
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '旧版迁移、跨核心或 Shadowsocks 增量改变累计与额度'
 else

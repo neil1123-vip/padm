@@ -109,8 +109,7 @@ listRegressionDockerContractsFullChildSelectors() {
         docker-tproxy-ownership \
         docker-wireguard-runtime \
         docker-redirect-focused \
-        docker-phase3-entries-management-protocol-xray \
-        docker-phase3-entries-management-protocol-sing-box \
+        docker-contracts-phase3-protocol-{ports,migrate,lifecycle,1,2,3,4,5} \
         docker-reality \
         docker-sites \
         docker-shadowsocks-rotation \
@@ -290,6 +289,10 @@ listRegressionDockerContractsPhase3TlsChildSelectors() {
 listRegressionDockerContractsPhase3ProtocolChildSelectors() {
     printf '%s\n' docker-phase3-entries-management-protocol-xray \
         docker-phase3-entries-management-protocol-sing-box docker-phase3-edit docker-control-cli
+}
+
+listRegressionDockerContractsPhase3CommandsChildSelectors() {
+    printf '%s\n' docker-phase3-edit docker-control-cli
 }
 
 listRegressionDockerContractsPhase3TopologyChildSelectors() {
@@ -1271,6 +1274,11 @@ registerRegressionFunctionLeaf docker-phase3-entries-management runDockerPhase3E
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol runDockerPhase3EntriesManagementProtocolRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol-xray runDockerPhase3EntriesManagementProtocolRegression protocol-xray
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol-sing-box runDockerPhase3EntriesManagementProtocolRegression protocol-sing-box
+for phase3ProtocolPart in ports migrate lifecycle 1 2 3 4 5; do
+    registerRegressionFunctionLeaf "docker-contracts-phase3-protocol-${phase3ProtocolPart}" \
+        runDockerPhase3EntriesManagementProtocolRegression "protocol-${phase3ProtocolPart}"
+done
+unset phase3ProtocolPart
 registerRegressionFunctionLeaf docker-phase3-entries-management-tls runDockerPhase3EntriesManagementTlsRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management-tls-reinstall runDockerPhase3EntriesManagementTlsReinstallRegression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
@@ -1542,6 +1550,8 @@ registerRegressionParallelSelectorList docker-contracts-phase3-tls runFrameworkP
     "${TMP_DIR}/docker-contracts-phase3-tls-${BASHPID:-$$}" listRegressionDockerContractsPhase3TlsChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-phase3-protocol runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-phase3-protocol-${BASHPID:-$$}" listRegressionDockerContractsPhase3ProtocolChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-phase3-protocol-commands runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-phase3-commands-${BASHPID:-$$}" listRegressionDockerContractsPhase3CommandsChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-phase3-topology runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-phase3-topology-${BASHPID:-$$}" listRegressionDockerContractsPhase3TopologyChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-policy runFrameworkParallelRegressionSelectorListWithJobs \
