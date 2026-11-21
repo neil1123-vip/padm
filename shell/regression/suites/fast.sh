@@ -795,11 +795,12 @@ runDockerRecoveryPreviewRegression() {
 }
 
 runDockerRecoveryApplyRegression() {
+    local scope=${1:-${PADM_DOCKER_RECOVERY_SCOPE:-all}}
     bash -n "${PROJECT_ROOT}/docker/tests/recovery-apply.sh" &&
         shellcheck --severity=error "${PROJECT_ROOT}/docker/lib/"{bootstrap,lifecycle,schedule,services}.sh \
             "${PROJECT_ROOT}/docker/tests/recovery-apply.sh" || return 1
-    if [[ "${PADM_DOCKER_RECOVERY_SCOPE:-all}" != all ]]; then
-        bash "${PROJECT_ROOT}/docker/tests/recovery-apply.sh"
+    if [[ "${scope}" != all ]]; then
+        PADM_DOCKER_RECOVERY_SCOPE="${scope}" bash "${PROJECT_ROOT}/docker/tests/recovery-apply.sh"
         return
     fi
     PADM_REGRESSION_PARALLEL_JOBS=3 runParallelRegressionRunners \
@@ -1359,6 +1360,9 @@ registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-backup runDockerBackupRegression
 registerRegressionFunctionLeaf docker-recovery-preview runDockerRecoveryPreviewRegression
 registerRegressionFunctionLeaf docker-recovery-apply runDockerRecoveryApplyRegression
+registerRegressionFunctionLeaf docker-recovery-apply-core runDockerRecoveryApplyRegression core
+registerRegressionFunctionLeaf docker-recovery-apply-atomic runDockerRecoveryApplyRegression atomic
+registerRegressionFunctionLeaf docker-recovery-apply-variants runDockerRecoveryApplyRegression variants
 registerRegressionFunctionLeaf docker-wireguard-recovery-apply runDockerWireGuardRecoveryApplyRegression
 registerRegressionParallelSelectorList docker-wireguard-recovery-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-wireguard-recovery-focused-${BASHPID:-$$}" listRegressionDockerWireGuardRecoveryChildSelectors 2

@@ -360,12 +360,15 @@ runRegressionDockerContractsAggregateContract() (
         inside && /^          - / {sub(/^          - /, ""); print; next}
         inside {inside = 0}
     ' "${workflow}")
-    printf '%s\n' "${expectedSelectors[@]}" | sort >"${expected}"
+    {
+        printf '%s\n' "${expectedSelectors[@]}" | grep -vx docker-recovery-apply
+        printf '%s\n' docker-recovery-apply-{core,atomic,variants}
+    } | sort >"${expected}"
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
-    [[ "${shardCount}" -eq 29 ]]
+    [[ "${shardCount}" -eq 31 ]]
     [[ "${#expectedSelectors[@]}" -eq 73 ]]
-    [[ "$(sort -u "${actual}" | wc -l)" -eq 73 ]]
+    [[ "$(sort -u "${actual}" | wc -l)" -eq 75 ]]
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-recovery-apply
     [[ "$(listRegressionDockerContractsFastChildSelectors | grep -c '^docker-port-hopping-preflight$')" -eq 1 ]]
@@ -820,6 +823,11 @@ runDockerRecoveryParallelContract() (
         PADM_DOCKER_RECOVERY_SCOPE="${scope}" runDockerRecoveryApplyRegression
     done
     [[ "$(<"${callLog}")" == $'core\natomic\nvariants\nwireguard\nwebroot\ncontroller' ]]
+    : >"${callLog}"
+    for scope in core atomic variants; do
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "docker-recovery-apply-${scope}"
+    done
+    [[ "$(<"${callLog}")" == $'core\natomic\nvariants' ]]
     status=0
     shellcheck() { return 9; }
     : >"${callLog}"
