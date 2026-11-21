@@ -29,23 +29,19 @@ jobs:
       fail-fast: true
       matrix:
         selector:
+          # Reserve two of the twenty observed runner slots for static and native checks.
           - docker-menu
           - docker-contracts-fast-sites
           - docker-contracts-fast-rest
           - docker-contracts-setup-basic
-          - docker-port-hopping-preflight
-          - docker-routing-ip-ownership
           - docker-recovery-apply-core
           - docker-recovery-apply-atomic
           - docker-recovery-apply-variants
           - docker-routing-dns-csv
           - docker-routing-core-network
-          - docker-contracts-system-light
-          - docker-contracts-phase3-topology
           - docker-contracts-reality-metadata
           - docker-contracts-reality-rotation
           - docker-xhttp-edit
-          - docker-contracts-policy
           - docker-contracts-phase3-tls
           - docker-contracts-phase3-protocol-1
           - docker-contracts-phase3-protocol-2
@@ -147,6 +143,11 @@ jobs:
       fail-fast: true
       matrix:
         selector:
+          - docker-port-hopping-preflight
+          - docker-routing-ip-ownership
+          - docker-contracts-system-light
+          - docker-contracts-phase3-topology
+          - docker-contracts-policy
           - docker-contracts-fast-heavy
           - docker-contracts-setup-transports
           - docker-setup-encrypted-udp

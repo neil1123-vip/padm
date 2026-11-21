@@ -138,7 +138,8 @@ jobs:
     if: ${{ !inputs.contracts_only && needs.contract.outputs.build_required == 'true' }}
     strategy:
       fail-fast: true
-      max-parallel: 10
+      # Leave capacity for the contract matrix during Docker CI.
+      max-parallel: ${{ inputs.push && 10 || 4 }}
       matrix:
         image: ${{ fromJSON(needs.contract.outputs.build_images) }}
         platform:

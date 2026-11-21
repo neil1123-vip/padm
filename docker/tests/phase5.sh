@@ -1126,8 +1126,8 @@ grep -Eq '^[[:space:]]+sbom:.*inputs[.]push' "${BUILD_WORKFLOW}" || fail 'SBOM a
 grep -Fq 'cosign sign' "${BUILD_WORKFLOW}" || fail 'image signing is not enabled'
 grep -Fq 'Preflight pinned distroless dependencies' "${BUILD_WORKFLOW}" ||
     fail 'image workflow does not preflight pinned distroless dependencies'
-grep -Fq 'max-parallel: 10' "${BUILD_WORKFLOW}" ||
-    fail 'smoke matrix does not allow all ten native platform builds'
+grep -Fq 'max-parallel: ${{ inputs.push && 10 || 4 }}' "${BUILD_WORKFLOW}" ||
+    fail 'smoke matrix must allow ten release builds and limit CI runner use'
 grep -Fq 'max-parallel: 5' "${BUILD_WORKFLOW}" ||
     fail 'publish matrix does not allow all five images'
 publishDefinition=$(awk '
