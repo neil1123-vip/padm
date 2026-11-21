@@ -363,7 +363,7 @@ runRegressionDockerContractsAggregateContract() (
     printf '%s\n' "${expectedSelectors[@]}" | sort >"${expected}"
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
-    [[ "${shardCount}" -eq 28 ]]
+    [[ "${shardCount}" -eq 29 ]]
     [[ "${#expectedSelectors[@]}" -eq 73 ]]
     [[ "$(sort -u "${actual}" | wc -l)" -eq 73 ]]
     ! listRegressionDockerContractsFastRestChildSelectors | grep -qx docker-port-hopping-preflight
@@ -389,7 +389,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-routing-ip-ownership docker-routing-core-network docker-routing-dns-csv; do
         expectedJobs=2
         case "${selector}" in
-        docker-contracts-fast-heavy|docker-contracts-setup-basic|docker-contracts-system-light|docker-routing-dns-csv) expectedJobs=3 ;;
+        docker-contracts-setup-basic|docker-contracts-system-light|docker-routing-dns-csv) expectedJobs=3 ;;
         esac
         : >"${callLog}"
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"

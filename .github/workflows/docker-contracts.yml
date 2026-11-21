@@ -24,7 +24,7 @@ jobs:
     env: &contract-env
       PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
       # 协议分片需要工具容器内的 OpenSSL 与 root 所有的控制日志路径。
-      CONTRACT_TOOLS: ${{ matrix.selector == 'docker-menu' || startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') || startsWith(matrix.selector, 'docker-contracts-phase3-protocol-') }}
+      CONTRACT_TOOLS: ${{ matrix.selector == 'docker-menu' || matrix.selector == 'docker-entry-port-alias' || startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-contracts-reality-') || startsWith(matrix.selector, 'docker-contracts-phase3-protocol-') }}
     strategy:
       fail-fast: true
       matrix:
@@ -33,7 +33,8 @@ jobs:
           - docker-contracts-fast-sites
           - docker-contracts-fast-rest
           - docker-contracts-setup-basic
-          - docker-setup-encrypted-udp
+          - docker-port-hopping-preflight
+          - docker-entry-port-alias
           - docker-recovery-apply
           - docker-routing-dns-csv
           - docker-routing-core-network
@@ -101,7 +102,6 @@ jobs:
           set -euo pipefail
           jobs=2
           if [[ "${SELECTOR}" == docker-contracts-fast-rest ]]; then jobs=4; fi
-          if [[ "${SELECTOR}" == docker-contracts-fast-heavy ]]; then jobs=3; fi
           if [[ "${SELECTOR}" == docker-contracts-setup-basic || "${SELECTOR}" == docker-contracts-system-light || "${SELECTOR}" == docker-routing-dns-csv ]]; then jobs=3; fi
           if [[ "${SELECTOR}" == docker-port-hopping-preflight ]]; then
             sudo env TMPDIR=/tmp PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash -s -- "${SELECTOR}" <<'SH'
@@ -147,7 +147,7 @@ jobs:
         selector:
           - docker-contracts-fast-heavy
           - docker-contracts-setup-transports
-          - docker-port-hopping-preflight
+          - docker-setup-encrypted-udp
           - docker-contracts-phase3-protocol-ports
           - docker-contracts-phase3-protocol-migrate
           - docker-contracts-phase3-protocol-lifecycle

@@ -176,7 +176,7 @@ runRegressionDockerContracts() {
 }
 
 listRegressionDockerContractsFastChildSelectors() {
-    printf '%s\n' docker-menu
+    printf '%s\n' docker-menu docker-entry-port-alias
     listRegressionDockerContractsFastHeavyChildSelectors
     listRegressionDockerContractsFastSitesChildSelectors
     listRegressionDockerContractsFastRestChildSelectors
@@ -186,7 +186,7 @@ listRegressionDockerContractsFastChildSelectors() {
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
-    printf '%s\n' docker-control-state docker-reality-targets-selection docker-entry-port-alias
+    printf '%s\n' docker-control-state docker-reality-targets-selection
 }
 
 listRegressionDockerContractsFastSitesChildSelectors() {
@@ -1520,7 +1520,7 @@ registerRegressionParallelSelectorList docker-subscription-publication-focused r
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 4
 registerRegressionParallelSelectorList docker-contracts-fast-heavy runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/docker-contracts-fast-heavy-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastHeavyChildSelectors 3
+    "${TMP_DIR}/docker-contracts-fast-heavy-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastHeavyChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast-sites runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-sites-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastSitesChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast-rest runFrameworkParallelRegressionSelectorListWithJobs \
