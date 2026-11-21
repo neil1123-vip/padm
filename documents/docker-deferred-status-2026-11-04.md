@@ -78,7 +78,7 @@ M 验证通过的固定本地 amd64/IPv4 双 Peer 组合；公网、其它组合
 | `site-static-redirect-alpn` | P+S+N：模板/local/ALPN 事务及隔离双栈；固定正式 3.41.5 公网 13 阶段，包括特殊站名、302、订阅与完整恢复。N/6A.69 补正式 `.44` 原生 ARM64/Xray 29 的三模板/特殊标题、static/302、三种 ALPN 顺序、实际 HTTP/2 和服务重启。B 补正式 `.7` Xray 29 限源中继的公网 IPv6 站点九项及清场。 | 公网 IPv6 直连、其它既定协议组合及适用生命周期。 | B 的 IPv6 证据限站点运行，CLI 编辑、恢复事务见已有组合。Hy2 local 固定受管只读目录且无混淆，纯 Hy2 只开放 static。ACME 另行归属。 |
 | `entry-port-management` | P+U+R+N：多入口、额外端口、默认分享/原位改端口、内部端口专项；SS2022 公网 IPv4 默认别名/删除及限定合并重启。N/6A.69 补正式 `.44` 原生 ARM64/sing-box Trojan 的别名/默认分享/原位替换/删除及基口恢复，双核心恢复和服务重启业务通过。 | 公网 IPv6、其它既定 ARM64/端口组合及尚缺的适用生命周期；固定本地 origin 不计 ARM64 公网。 | 与内部 207 共用别名证据。额外端口别名拒绝 WS/SSH Fail2ban、TUN/TProxy、host-network 组合；3D.26 已另行放行活动 WS 防护下未保护入口的基础增删改。跳跃限单 sing-box/单个双族入口/手动监督，不承诺 TUIC 客户端自动换端口或崩溃/开机恢复。 |
 | `reality-coexistence` | P+C+N：受管、桥接宿主和 host 回环三拓扑恢复；限定公网 Vision/XHTTP 正反例与六点真实重启。N/6A.70 补正式 `.44` 原生 ARM64/IPv4 的三拓扑 × 双入口、关闭恢复、loopback 服务 restart 及正反例。 | 公网 IPv6、ARM64 整机重启、其它既定共存组合及当前版本尚缺的适用生命周期；本地入口与公网网站后端不等于 ARM64 公网入站。 | 一个 Xray Vision/XHTTP 后端，网站证书/内容仍由原维护方负责。N 的 host/loopback 仅经本地透明 TCP relay 到固定 A HTTPS 后端，不传生产私钥；旧 reset/超时不因本轮成功改判，3D.26 协议管理 supported 不重列为缺口。 |
-| `cdn-entry-management` | P+D：2/21/22/23/24/25 地址覆盖和链接/订阅投影；固定 Cloudflare WS 公网正反例。[Cloudflare 隔离透传](#cloudflare-隔离透传) 补齐固定 Xray gRPC 与 XHTTP packet-up/H3 公网透传。正式 `.12` 的 Xray VLESS gRPC 公网受管流程通过。正式 `.13` 补齐 XHTTP 地址覆盖与独立 H3 下行的隔离验收。 | 公网 IPv6、其它核心和传输组合、XHTTP Reality 上行与公网 H3 下行共享会话。 | H3 验证客户端到边缘，实测回源 HTTP/2。H3 只有使用说明，不新增开关、其它协议或自动建设外部 TLS/H3/CDN。 |
+| `cdn-entry-management` | P+D：2/21/22/23/24/25 地址覆盖和链接/订阅投影；固定 Cloudflare WS 公网正反例。[Cloudflare 隔离透传](#cloudflare-隔离透传) 补齐固定 Xray gRPC 与 XHTTP packet-up/H3 公网透传。正式 `.12` 的 Xray VLESS gRPC 公网受管流程通过。正式 `.13` 补齐 XHTTP 地址覆盖与独立 H3 下行的隔离验收。正式 `v3.45.0` 的 Xray 镜像通过 Reality 上行与公网 H3 下行共享会话夹具。 | 公网 IPv6、其它核心和传输组合、正式 CLI 生成配置的公网共享会话。 | H3 验证客户端到边缘，实测回源 HTTP/2。H3 只有使用说明，不新增开关、其它协议或自动建设外部 TLS/H3/CDN。 |
 | `interactive-menu` | P+G+B+W+K+N+M+I：6A.23 本机代码收口；3D.26 的 16 个公开协议管理 supported；正式安装/升级回滚/公网/重启、同机灾备及账号/业务恢复限定证据；B 正式 `.7` 从原 `.4` 归档完成固定 Xray WS 新主机恢复和单次整机重启。6A.46 另补本地完整独立内核双机的 amd64/IPv4/单 Peer 新机角色/WG 恢复、新身份/rebind、自主同步和 TLS/计量；K 补齐正式 `.8` 本地双 KVM 完整升级、防护及严格恢复；N 补齐 Ubuntu ARM64/IPv4/Xray WS `.7/.8`、纯 sing-box Trojan `.8/.44` 七阶段及 `.44` 官方 Engine 自动安装和清场，6A.69 再补固定 `.44` 入口/路由/中继/站点四类专项及服务重启，6A.70 补固定 Reality 三拓扑与普通 bridge 双入口 Encryption 集中验收、恢复及三次服务 restart。M 补固定本地双 Peer 主控灾备/灾后重启与正式 `.3` 控制入口断电恢复/重试，I 补正式 `.3` 发布绑定及固定 amd64 ICMP 三场景。正式 `.13` 补齐固定公网 IPv4 双 Peer 主控灾备。 | 自然续期、ARM64 其它既定组合及整机重启、公网 IPv6、其它核心/协议及发行版适用安装、其它既定多 Peer 角色/WG 灾备拓扑及各专项尚缺的适用生命周期。 | 汇总项，不重复计下属各行。N 的原点限本地 lo、host/loopback 站点限本地中继至固定公网后端，不计 ARM64 公网入站。M 的本地双 Peer 与恢复中断点不外推公网或其它故障，I 不外推其它架构或启用态重启。已有部署替换、其它 ACME 材料、未处理输入、v2 关联迁移等保持拒绝，不追加开发。 |
 | `routing-tools` | P+R+N：两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、CN 与名单管理；sing-box 解析后阻断、pure 发布共存、DNS 拒绝回退和限定合并重启。N/6A.69 补正式 `.44` 原生 ARM64/Xray 29+sing-box 28 的 SOCKS 全局/选择匹配/绕过/认证拒绝、DNS/hosts、Direct/Block 及恢复/服务重启。[正式 `.7` WARP 公网出站](#正式-v3447-的-warp-公网出站) 补齐两核心使用真实 Peer 的全局 IPv4、全局 IPv6、选择性 IPv4 HTTPS 出站。 | WARP 跨路径失败根因和长稳。其它路由组合的公网 IPv6 及适用生命周期待补。 | 与内部 206 共用证据/条件；SOCKS 入站限制归内部 201。N 的 DNS 错误拒绝不单独证明系统解析器无回退。固定 Xray 解析后阻断拒绝；原生 CN 预设已覆盖，不追加任意国家向导或最终流量语义引擎。 |
 | `internal-201-socks-relay` | P：5B.5b/5B.5b.1 已证固定 sing-box 的动态 BND/活动关联真实来源问题及 Xray 许可不随控制关闭撤销。 | 当前按限制关闭，无一轮普通环境回归可以使其成立；仅在相关核心行为变化后，重证发布、真实来源、会话鉴权及控制关闭撤销，才重新评估。 | 不开放完整入站、不降为 TCP-only、不增加辅助核心。host-network 不能修复鉴权。TCP 出站归 `routing-tools`；201 不作为公开节点协议。 |
@@ -858,8 +858,28 @@ TLS h3 各四种模式通过，共 12 正例、8 负例及 12 次 1/8 MiB 双向
 TLS 使用测试证书指纹，H3 有客户端日志见证。原件 `.tmp-cdn-xhttp-34413/`
 的 `offline-r6.log` SHA-256 为 `c8f4822c8dc23382e809b6fe185d491496dffb817be7987f8460061d9cd39620`。
 
-公网 H3 联合验收需要外部下行前置接入同一处理器。正式生成的 Reality 入口
-缺少这样的明文接入口，现有 Cloudflare 透传和本节隔离证据分别记账。
+### 正式 v3.45.0 Xray 镜像的公网共享会话
+
+2026-11-21，在 VPS A 的隔离服务使用 `v3.45.0` 清单绑定的 Linux amd64 Xray，
+将公网 IPv4 的 Reality 上行和独立 H3 下行接到同一回环 XHTTP handler。
+Windows Docker Desktop 的 Linux 客户端直连 A，随后改用独立的 VPS B 客户端
+验证 Cloudflare 下行。本机直达 Cloudflare 的 QUIC 探针超时，B 的 HTTP/3
+健康探针返回 204。Cloudflare 临时规则仅匹配测试域名，回源至 A 的 TLS/8443。
+B 的客户端记录 HTTP/3，A 的 Caddy 记录对应 GET 为 HTTP/2 且带 Cloudflare Ray 标头。
+
+两种路径各完成双向 1 MiB 摘要校验，均拒绝错误证书指纹和错误 UUID。
+每轮回环原点精确记录 1,064,960 字节，含完整性校验前的 16 KiB 预热。
+两台 VPS 的临时夹具、Cloudflare 代理记录及回源规则已清理，两台权威 DNS
+对 A/AAAA 均返回 NXDOMAIN。A 的三个生产容器 ID、启动时间、重启次数和健康状态前后一致。
+
+原件在验收工作树 `.tmp-xhttp-public/`。日志 SHA-256：
+
+- `direct-r6.log` `05645e6482408ecc72c40a72a93d10427b6a41d11d1ccc9f8f52b20848739bcb`
+- `cdn-r2.log` `5790d85616f59520b1741ac72f4ad66e938eebfd03194e892e447a6b7b7d5413`
+- `dns-cleanup.log` `c57654d1c1436d23ebd554e9528d6134addce82c7bc994ca90683d4c2b11643b`
+
+本轮限固定公网 IPv4/Xray 夹具。正式 CLI 生成的 Reality 入口缺少外部下行
+接入同一处理器的接口，受管联合公网流程仍待验。合同计数为 16 supported、14 deferred。
 
 ## 正式 v3.44.7 的 XHTTP 持续传输
 
