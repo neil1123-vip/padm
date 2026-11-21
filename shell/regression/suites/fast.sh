@@ -1078,8 +1078,18 @@ runDockerRedirectOwnershipRegression() {
             "${PROJECT_ROOT}/docker/lib/services.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh" \
             "${PROJECT_ROOT}/docker/tests/redirect-ownership.sh" \
             "${PROJECT_ROOT}/docker/tests/redirect-management.sh" &&
-        bash "${PROJECT_ROOT}/docker/tests/redirect-ownership.sh" &&
-        bash "${PROJECT_ROOT}/docker/tests/redirect-management.sh" &&
+        PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+            "${TMP_DIR}/redirect-focused-${BASHPID:-$$}" \
+            ownership runDockerRedirectOwnershipOnlyRegression \
+            management runDockerRedirectManagementMenuRegression
+}
+
+runDockerRedirectOwnershipOnlyRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/redirect-ownership.sh"
+}
+
+runDockerRedirectManagementMenuRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/redirect-management.sh" &&
         bash "${PROJECT_ROOT}/docker/tests/redirect-menu.sh"
 }
 
