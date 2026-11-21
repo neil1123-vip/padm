@@ -2,6 +2,11 @@
 set -euo pipefail
 
 MENU_SCOPE=${PADM_DOCKER_MENU_SCOPE:-full}
+MENU_SKIP_ROUTING=0
+if [[ "${MENU_SCOPE}" == non-routing ]]; then
+    MENU_SCOPE=full
+    MENU_SKIP_ROUTING=1
+fi
 case "${MENU_SCOPE}" in
 full|routing|port-alias|tun|block-ips-resolved|xhttp|control|maintenance) ;;
 *) printf 'docker-menu-regression-fail: invalid scope: %s\n' "${MENU_SCOPE}" >&2; exit 1 ;;
@@ -4612,7 +4617,8 @@ done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 fi
 
-if [[ "${MENU_SCOPE}" != port-alias && "${MENU_SCOPE}" != xhttp && "${MENU_SCOPE}" != control ]]; then
+if [[ "${MENU_SKIP_ROUTING}" == 0 && "${MENU_SCOPE}" != port-alias &&
+    "${MENU_SCOPE}" != xhttp && "${MENU_SCOPE}" != control ]]; then
 for routingCase in flow csv-long cancel socks5-input-eof socks5-input-commit-failed domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-input-eof hosts-input-status-failed hosts-input-commit-failed direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed direct-domains-remove-eof block-domains-remove-eof direct-block-remove-invalid direct-block-remove-failed block-ips-file-eof block-ips-add-eof block-ips-remove-eof block-ips-change-failed dns-domains-add-eof dns-domains-remove-eof dns-domains-change-invalid dns-domains-change-failed region-eof region-allow-invalid region-allow-failed region-mode-flow region-mode-cancel region-mode-failed ipv6-eof warp-eof \
     domain-replace-flow domain-replace-cancel domain-replace-invalid domain-replace-status-failed \
     domain-replace-state-failed domain-replace-confirm-cancel domain-replace-confirm-eof domain-replace-commit-failed \

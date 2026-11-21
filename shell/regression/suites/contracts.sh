@@ -468,6 +468,16 @@ runRegressionDockerContractsAggregateContract() (
     printf '%s\n' full:menu.sh routing:menu.sh port-alias:menu.sh tun:menu.sh xhttp:menu.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_MENU_SCOPE:-}" ]]
+    (
+        runParallelRegressionRunners() {
+            [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 2 && "$2:$4" == menu:routing ]] || return 8
+            "$3" && "$5"
+        }
+        : >"${callLog}"
+        PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerMenuRegression
+        printf '%s\n' non-routing:menu.sh routing:menu.sh >"${expectedLog}"
+        cmp -s "${expectedLog}" "${callLog}"
+    )
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-routing]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-port-alias]}" == function ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-menu-tun]}" == function ]]

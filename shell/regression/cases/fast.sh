@@ -7904,7 +7904,17 @@ runDockerPhase1Regression() {
 }
 
 runDockerMenuRegression() {
+    if [[ "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" == 1 && "${PADM_DOCKER_MENU_SCOPE:-full}" == full ]]; then
+        PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+            "${TMP_DIR}/docker-menu-${BASHPID:-$$}" \
+            menu runDockerMenuNonRoutingRegression routing runDockerMenuRoutingRegression
+        return $?
+    fi
     bash "${PROJECT_ROOT}/docker/tests/menu.sh"
+}
+
+runDockerMenuNonRoutingRegression() {
+    PADM_DOCKER_MENU_SCOPE=non-routing runDockerMenuRegression
 }
 
 runDockerReleaseRegression() {
