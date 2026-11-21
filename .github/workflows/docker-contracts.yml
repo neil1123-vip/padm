@@ -30,11 +30,13 @@ jobs:
       matrix:
         selector:
           - docker-contracts-fast-heavy
+          - docker-contracts-fast-sites
           - docker-recovery-apply
           - docker-routing-dns-csv
           - docker-contracts-setup-basic
           - docker-contracts-system-light
           - docker-routing-core-network
+          - docker-port-hopping-preflight
           - docker-contracts-phase3-topology
           - docker-contracts-fast-rest
           - docker-contracts-reality-metadata
@@ -149,6 +151,4 @@ jobs:
           - docker-contracts-phase3-protocol-2
           - docker-contracts-phase3-protocol-5
           - docker-routing-ip-ownership
-          - docker-port-hopping-preflight
-          - docker-contracts-fast-sites
     steps: *contract-steps
