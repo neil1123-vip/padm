@@ -292,8 +292,14 @@ printf 'docker-tun-compose-ok: bind=verified drift=rejected restart=new-owner of
         fail 'IPv6 route differs after TUN cleanup'
     ip -j -6 neigh show dev icmp-uplink >"${TEST_ROOT}/icmp-v6-neighbors.log"
     python3 "${icmpProbe}" ipv6-restored
-    ip -6 route del 2001:db8:2::200/128 via 2001:db8:1::2 dev icmp-uplink
     ip -6 neigh del 2001:db8:1::2 dev icmp-uplink
+    ip netns exec padm-icmp-target ip -6 neigh del 2001:db8:1::1 dev icmp-peer
+    python3 "${icmpProbe}" ipv6-restored
+    ip -j -6 neigh show to 2001:db8:1::2 dev icmp-uplink |
+        jq -e --arg mac "${peerMac}" 'length == 1 and .[0].lladdr == $mac and
+          (.[0].state | any(. == "REACHABLE" or . == "STALE" or . == "DELAY"))' >/dev/null
+    printf 'docker-tun-ipv6-neighbor-recovery-ok\n'
+    ip -6 route del 2001:db8:2::200/128 via 2001:db8:1::2 dev icmp-uplink
     ip -6 addr del 2001:db8:1::1/64 dev icmp-uplink
     ip netns exec padm-icmp-target python3 "${PROJECT_ROOT}/docker/tests/tun-icmp-real.py" \
         serve "${TEST_ROOT}/icmp-ready" >"${TEST_ROOT}/icmp-target.log" 2>&1 &

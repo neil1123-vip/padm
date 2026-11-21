@@ -1183,6 +1183,12 @@ B 的被控 `control join` 退出 `11`，入组失败原因待查。本轮 VPS B
 关闭后目标路由与基线一致，TUN 归属状态已清除。
 
 完整 `docker-tun-real` 同轮通过，包含 IPv4 direct、filtered、denied、TCP/UDP、
-拒绝规则漂移及异常退出后保留证据。IPv6 动态邻居恢复、原生宿主、公网及 PMTU 待验。
+拒绝规则漂移及异常退出后保留证据。原生宿主、公网及 PMTU 待验。
 原件 `.tmp-regression-docker-3de7bbd4c4fd4f40a6cb428daca05326/regression.log`，SHA-256
 `2de9c56e9cc23659f940cae614e2df18da3cafbbbad697e0a137b2389b470cc6`。
+
+补验在 TUN 关闭后清除两端的固定邻居。IPv6 Echo 恢复，出口动态学到对端 MAC，
+邻居状态检查通过。未固定邻居的早期运行曾超时，自然收敛时间仍未确定。
+完整 `docker-tun-real` 同轮通过，原件
+`.tmp-regression-docker-2e405b77437644ae9e3c88083f0b6a7e/regression.log`，SHA-256
+`7f39a37e2887dbd443718b6b1fad59e20de621ec4d829b91d64de2b8423fa95b`。
