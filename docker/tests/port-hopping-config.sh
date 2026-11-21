@@ -566,9 +566,11 @@ os.close(slave)
 output = bytearray()
 
 def expect(text, count=1):
-    deadline = time.monotonic() + 3
+    # The PTY shares a runner with the other port-hopping checks.
+    deadline = time.monotonic() + 10
     while output.count(text.encode()) < count:
-        assert process.poll() is None and time.monotonic() < deadline, output.decode()
+        status = process.poll()
+        assert status is None and time.monotonic() < deadline, (text, count, status, output.decode())
         if select.select([master], [], [], 0.05)[0]:
             output.extend(os.read(master, 65536))
 
@@ -582,7 +584,7 @@ try:
     expect("Docker 端口跳跃（单个双族 Hy2/TUIC；TUIC 仅范围转发）", 2)
     expect("请选择: ", 3)
     os.write(master, b"0\n0\n")
-    assert process.wait(timeout=3) == 0, output.decode()
+    assert process.wait(timeout=10) == 0, output.decode()
 finally:
     if process.poll() is None:
         process.kill()
