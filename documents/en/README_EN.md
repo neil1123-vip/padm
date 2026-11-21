@@ -1315,7 +1315,9 @@ padm-docker wireguard stop --yes
 
 Reverse `.1/.2` on the other node and use that node's actual Peer public key and reachable endpoint.
 Both tunnel addresses must be RFC1918 IPv4 `/32`, with exactly one Peer. `--endpoint` is optional
-and accepts a literal IPv4 address; both its port and the local listen port must be `1024–65535`.
+and accepts `IPv4:port` or `[IPv6]:port`. Use a compressed lowercase global unicast or unique local
+IPv6 address. Both the endpoint port and the local listen port must be `1024–65535`.
+Set a reachable IPv4 endpoint before downgrading to a release that supports only IPv4 endpoints.
 Preparation and Peer configuration require an installed deployment without WireGuard or control roles.
 The private directory is `0700 root:root`, files are `0600 root:root`, and commands expose only public
 identity/status data. Existing keys, Peer configuration and unknown contents are never replaced.

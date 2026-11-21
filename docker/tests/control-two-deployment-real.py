@@ -1280,7 +1280,7 @@ def private_logs(nodes, invitations, keys, *, wireguard=True):
                    for path in invitations), "自动同步 token 进入部署规格"
 
 
-def wireguard_traffic(nodes, addresses=ADDRESS, ports=(51820, 51820), peer_public=None):
+def wireguard_traffic(nodes, addresses=ADDRESS, ports=(51820, 51820), peer_public=None, *, ipv6_transport=False):
     servers = []
     try:
         for index, node in enumerate(nodes):
@@ -1303,6 +1303,7 @@ client.bind((sys.argv[1], 0))
 client.settimeout(1)
 payload = b"padm-wireguard-encrypted-proof:" + os.urandom(96)
 ports = (int(sys.argv[3]), int(sys.argv[4]))
+ipv6_transport = sys.argv[5] == "ipv6"
 for _ in range(10):
     client.sendto(payload, (sys.argv[2], 39899))
     try:
@@ -1321,14 +1322,20 @@ while True:
     except BlockingIOError:
         break
     assert payload not in packet, "underlay 出现隧道明文"
-    if len(packet) < 42 or packet[12:14] != b"\\x08\\x00" or packet[23] != 17:
-        continue
-    udp = 14 + (packet[14] & 15) * 4
+    if ipv6_transport:
+        if len(packet) < 66 or packet[12:14] != b"\\x86\\xdd" or packet[20] != 17:
+            continue
+        udp = 54
+    else:
+        if len(packet) < 42 or packet[12:14] != b"\\x08\\x00" or packet[23] != 17:
+            continue
+        udp = 14 + (packet[14] & 15) * 4
     observed = (int.from_bytes(packet[udp:udp + 2], "big"), int.from_bytes(packet[udp + 2:udp + 4], "big"))
     if observed == ports or observed == ports[::-1]:
         encrypted += packet[udp + 8:udp + 12] == b"\\x04\\x00\\x00\\x00"
 assert encrypted >= 2, "underlay 缺少双向 WireGuard 加密数据包"
-""", addresses[index], addresses[1-index], str(ports[index]), str(ports[1-index])], timeout=15)
+""", addresses[index], addresses[1-index], str(ports[index]), str(ports[1-index]),
+                                        "ipv6" if ipv6_transport else "ipv4"], timeout=15)
             peer = command(node["enter"] + ["wg", "show", "wg-padm", "latest-handshakes"]).splitlines()
             transfer = command(node["enter"] + ["wg", "show", "wg-padm", "transfer"]).splitlines()
             if peer_public is not None:
@@ -1812,7 +1819,7 @@ def wireguard_cli_real(nodes):
     print("docker-wireguard-cli-real-prepare-peer-start-stop-ownership-private-ok", flush=True)
 
 
-def wireguard_peers_prepare_real(nodes, *, passive_last=False):
+def wireguard_peers_prepare_real(nodes, *, passive_last=False, ipv6_transport=False):
     addresses = (*ADDRESS, "10.231.0.3")
     directories = [node["path"] / "deployment/secrets/net/wireguard" for node in nodes]
     public, keys = [], []
@@ -1824,7 +1831,8 @@ def wireguard_peers_prepare_real(nodes, *, passive_last=False):
         assert command(["wg", "pubkey"], content=(keys[-1] + "\n").encode()).decode().strip() == public[-1]
     for index, node in enumerate(nodes):
         remote = 1 if index == 0 else 0
-        endpoint = () if passive_last and index == 2 else ("--endpoint", f"192.0.2.{remote+1}:51820")
+        target = f"[fd00:231::{remote+1}]:51820" if ipv6_transport else f"192.0.2.{remote+1}:51820"
+        endpoint = () if passive_last and index == 2 else ("--endpoint", target)
         cli(node, "wireguard", "peer", "--peer-address", addresses[remote],
             "--peer-public-key", public[remote], *endpoint, "--yes")
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -2547,11 +2555,11 @@ dockerInstallCli
 def controller_peers_recovery_real(nodes, image, release):
     controller = nodes[0]
     passive = nodes[2]
-    addresses, public, keys = wireguard_peers_prepare_real(nodes, passive_last=True)
+    addresses, public, keys = wireguard_peers_prepare_real(nodes, passive_last=True, ipv6_transport=True)
 
     def passive_link():
         endpoint = command(passive["enter"] + ["wg", "show", "wg-padm", "endpoints"]).split()
-        assert endpoint == [public[0].encode(), b"192.0.2.1:51820"], "被控丢失学习到的 Endpoint"
+        assert endpoint == [public[0].encode(), b"[fd00:231::1]:51820"], "被控丢失学习到的 IPv6 Endpoint"
         return services(passive)["net-wireguard"]
 
     root = controller["path"] / "deployment"
@@ -2560,7 +2568,7 @@ def controller_peers_recovery_real(nodes, image, release):
         "--peer-address", addresses[1], "--yes")
     cli(controller, "control", "upgrade", "--yes")
     cli(controller, "wireguard", "peers", "add", "--peer-address", addresses[2],
-        "--peer-public-key", public[2], "--endpoint", "192.0.2.3:51820", "--yes")
+        "--peer-public-key", public[2], "--endpoint", "[fd00:231::3]:51820", "--yes")
     cli(controller, "control", "peers", "add", "--peer-address", addresses[2], "--yes")
     invitations = []
     for index, node in enumerate(nodes[1:], 1):
@@ -2572,7 +2580,7 @@ def controller_peers_recovery_real(nodes, image, release):
         invitations.append(invitation)
         if node is passive:
             wireguard_traffic((controller, node), (addresses[0], addresses[index]),
-                              peer_public=(public[0], public[index]))
+                              peer_public=(public[0], public[index]), ipv6_transport=True)
             passive_wireguard = passive_link()
         cli(node, "control", "join", "--invite", str(invitation), "--listener", "entry-ws", "--yes")
         if node is passive:
@@ -2664,7 +2672,7 @@ def controller_peers_recovery_real(nodes, image, release):
         assert current["control_sync"]["last_revision"] == state(controller)["control"]["revision"] == 1
         assert current["control_sync"]["managed_accounts"] == state(controller)["accounts"]
         wireguard_traffic((controller, node), (addresses[0], addresses[index]),
-                          peer_public=(public[0], public[index]))
+                          peer_public=(public[0], public[index]), ipv6_transport=True)
         traffic(node, image, account_id=account)
         traffic(node, image, account_id=local[index]["id"])
     traffic(controller, image, account_id=account)
@@ -3007,8 +3015,12 @@ def main():
                 command(["ip", "link", "set", inner, "netns", str(node["pid"])])
                 command(node["enter"] + ["ip", "link", "set", inner, "name", "underlay"])
                 prefix = 29 if three_nodes else 30
-                command(node["enter"] + ["ip", "address", "add", f"192.0.2.{index + 1}/{prefix}",
-                                         "dev", "underlay"])
+                if options.controller_peers_recovery_only:
+                    command(node["enter"] + ["ip", "-6", "address", "add", f"fd00:231::{index + 1}/64",
+                                             "dev", "underlay", "nodad"])
+                else:
+                    command(node["enter"] + ["ip", "address", "add", f"192.0.2.{index + 1}/{prefix}",
+                                             "dev", "underlay"])
                 command(node["enter"] + ["ip", "link", "set", "underlay", "up"])
                 if not prepare_wireguard:
                     key = command(["wg", "genkey"])
@@ -3124,7 +3136,7 @@ def main():
                 release = wireguard_recovery_release(nodes, images)
                 controller_peers_recovery_real(nodes, images["sing-box"], release)
                 proofs[0].update(scope="real-compose-controller-peers-isolated-empty-target-recovery",
-                                 release_trust="fixture", peers=2, identities_rebuilt=True,
+                                 release_trust="fixture", underlay="ipv6", peers=2, identities_rebuilt=True,
                                  grants_disabled=True, both_peers_rebound=True)
                 return proofs
             if options.wireguard_recovery_only or options.controller_recovery_only:

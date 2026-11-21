@@ -76,6 +76,24 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertTrue(wg.status(str(self.directory))["configured"])
 
+    def test_ipv6_endpoint_round_trip_and_invalid_rejection(self):
+        self.prepare()
+        before = self.snapshot()
+        for invalid in ("2001:db8::2:51820", "[::]:51820", "[::1]:51820", "[fe80::2%eth0]:51820",
+                        "[ff02::2]:51820", "[::ffff:192.0.2.2]:51820", "[2001:db8::2%eth0]:51820",
+                        "[2001:0db8::2]:51820", "[2001:db8::2]:65536", "[2001:db8::2]:999",
+                        "[2001:db8::2]:51820\nPostUp = test"):
+            with self.subTest(endpoint=invalid):
+                self.rejected(self.peer, endpoint=invalid)
+                self.assertEqual(self.snapshot(), before)
+        self.assertTrue(self.peer(endpoint="[2001:db8::2]:51820")["configured"])
+        self.assertIn(b"Endpoint = [2001:db8::2]:51820\n", (self.directory / "wg-padm.conf").read_bytes())
+        self.assertTrue(wg.status(str(self.directory))["configured"])
+        self.migrate(peer_endpoint="[fd00::3]:51821")
+        candidate = self.root / "candidate"
+        self.assertIn(b"Endpoint = [fd00::3]:51821\n", (candidate / "wg-padm.conf").read_bytes())
+        self.assertTrue(wg.status(str(candidate))["configured"])
+
     def test_peer_without_endpoint_and_duplicate_calls_do_not_overwrite(self):
         self.prepare()
         self.peer()

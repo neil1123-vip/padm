@@ -21,6 +21,7 @@ import sys
 IDENTITY_FIELDS = {"schema_version", "address", "listen_port", "public_key"}
 PRIVATE_NETWORKS = tuple(ipaddress.IPv4Network(value) for value in
                          ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+IPV6_ENDPOINT_NETWORKS = (ipaddress.IPv6Network("2000::/3"), ipaddress.IPv6Network("fc00::/7"))
 
 
 def require(condition):
@@ -52,11 +53,17 @@ def port(value):
 def endpoint(value):
     host, separator, number = value.rpartition(":")
     require(separator and re.fullmatch(r"[1-9][0-9]{3,4}", number))
+    port(int(number))
+    if host.startswith("[") and host.endswith("]"):
+        literal = host[1:-1]
+        parsed = ipaddress.IPv6Address(literal)
+        require(parsed.scope_id is None and str(parsed) == literal
+                and any(parsed in network for network in IPV6_ENDPOINT_NETWORKS))
+        return value
     parsed = ipaddress.IPv4Address(host)
     require(str(parsed) == host and not parsed.is_loopback and not parsed.is_multicast
             and not parsed.is_link_local and int(parsed) >> 24 != 0
             and int(parsed) < int(ipaddress.IPv4Address("224.0.0.0")))
-    port(int(number))
     return value
 
 

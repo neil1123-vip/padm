@@ -788,8 +788,9 @@ TUN/TProxy/Redirect 的透明核心保留 `cap_drop: ALL`，仅授予 `NET_ADMIN
 | `vless-encryption` | 高级/危险操作 -> VLESS Encryption 实验 | `deferred` | `core-xray` | bridge | 5C.10 提供菜单 8→2、`edit --vless-encryption ID enable/disable` 及 `protocol encryption-status [ID]`，限 schema 3 Xray 协议 1/2；配置与 URI、私密配对校验、失败恢复及旧 bundle marker 门禁已接入。固定 Xray 26.3.27/Mihomo v1.19.28 的 Linux amd64 实验和正式 3.41.5 的 Debian 13 amd64 公网启停矩阵通过，含逐入口隔离、旧 none/错 UUID/错配拒绝和原配置恢复；bridge 双入口加密后的真实整机重启也通过，原容器自然启动、URI/材料权限/调度及累计保持。其它客户端、算法、arm64、其它拓扑加密重启与完整能力仍待验。 |
 
 4C.7 单 Peer WireGuard 先以 `wireguard prepare` 生成本机私密身份，仅输出公钥等公开状态，
-交换公钥后用 `wireguard peer` 固定唯一 RFC1918 IPv4 `/32` 对端；可选字面 IPv4 endpoint，
-监听及 endpoint 端口均为 `1024–65535`。准备和设置对端仅适用尚无 WireGuard 和控制角色的部署；
+交换公钥后用 `wireguard peer` 固定唯一 RFC1918 IPv4 `/32` 对端；endpoint 可填字面 `IPv4:端口` 或 `[IPv6]:端口`。
+IPv6 使用压缩小写形式的全球单播或唯一本地地址。监听及 endpoint 端口均为 `1024–65535`。
+降级到只接受 IPv4 endpoint 的版本前，须先把该部署的 IPv6 endpoint 改回可达的 IPv4 endpoint。准备和设置对端仅适用尚无 WireGuard 和控制角色的部署；
 私密目录/文件为 `0700/0600 root:root`，拒绝覆盖或更换已有密钥/Peer，手工配置仍走原完整规格入口。
 控制连接菜单 `18` 提供状态、本机准备、设置对端、启动和临时停止。
 首次 `wireguard start` 显式确认后复用配置事务增加 WireGuard 集成，可能更新并检查全部署；

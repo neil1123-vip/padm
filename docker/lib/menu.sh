@@ -1368,7 +1368,7 @@ dockerMenuWireGuard() {
                 [[ -n "${peer}" ]] &&
                 dockerSetupRead public '对端 WireGuard 公钥（0 返回）: ' &&
                 [[ -n "${public}" ]] &&
-                dockerSetupRead endpoint '对端 IPv4:UDP端口（可留空，0 返回）: ' || continue
+                dockerSetupRead endpoint '对端 IPv4:UDP端口 或 [IPv6]:UDP端口（可留空，0 返回）: ' || continue
             action=(wireguard peer --peer-address "${peer}" --peer-public-key "${public}")
             [[ "${choice}" != 8 ]] ||
                 action=(wireguard peers add --peer-address "${peer}" --peer-public-key "${public}")
@@ -1382,7 +1382,7 @@ dockerMenuWireGuard() {
             dockerSetupRead peer '要更新的 Peer RFC1918 IPv4（0 返回）: ' &&
                 [[ -n "${peer}" ]] &&
                 dockerSetupRead public '新公钥（留空保持，0 返回）: ' &&
-                dockerSetupRead endpoint '新 IPv4:UDP端口（留空保持，none 清空，0 返回）: ' || continue
+                dockerSetupRead endpoint '新 IPv4:UDP端口 或 [IPv6]:UDP端口（留空保持，none 清空，0 返回）: ' || continue
             action=(wireguard peers update --peer-address "${peer}")
             [[ -z "${public}" ]] || action+=(--peer-public-key "${public}")
             [[ -z "${endpoint}" ]] || action+=(--endpoint "${endpoint}")
@@ -1403,7 +1403,7 @@ dockerMenuWireGuard() {
                 dockerSetupRead port 'UDP 监听端口: ' &&
                 dockerSetupRead peer '对端 RFC1918 IPv4: ' &&
                 dockerSetupRead public '对端公钥: ' &&
-                dockerSetupRead endpoint '对端 IPv4:UDP端口（none 清空）: ' &&
+                dockerSetupRead endpoint '对端 IPv4:UDP端口 或 [IPv6]:UDP端口（none 清空）: ' &&
                 dockerSetupRead rotate '轮换本机密钥？[y/N]: ' n || continue
             action=(wireguard migrate)
             [[ -z "${address}" ]] || action+=(--address "${address}")
