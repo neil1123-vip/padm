@@ -782,6 +782,16 @@ Xray 依次通过 2/8、1/8、0/8，sing-box 为 0/8、4/8、0/8。
 `.tmp-warp-managed-crossover/mtu-34413.log` 的 SHA-256 为
 `efe944ecaa874fa9794ecc98c8248d62715231e620e218f909a726d77a39e9ff`。
 
+
+同一正式版另测 HTTP/1.1 连接复用。每组由一个 curl 进程连续发两次请求，
+每条路径八组。直连 16/16，八次复用均返回预期正文。Xray 8/16，
+其中三次复用成功。sing-box 4/16，新连接的请求可成功；两组首个请求
+成功，第二个请求未建立新连接，在收到首字节前超时。复用已有连接仍可
+复现故障。关闭 WARP 后两入口首轮恢复直连，规格和配置摘要回到基线，
+临时设备已撤销，隔离部署已清理。原件
+`.tmp-warp-managed-crossover/reuse-34413.log` 的 SHA-256 为
+`a872e9007833f2cdd9f64a0ea2b08f17d28833ebb3632842bd84781413aca2f9`。
+
 ## Cloudflare 隔离透传
 
 2026-11-20，Cloudflare 区域已启用 gRPC、HTTP/3，SSL/TLS 为「完全」。
