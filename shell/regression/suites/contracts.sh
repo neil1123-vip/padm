@@ -586,16 +586,24 @@ runRegressionDockerContractsAggregateContract() (
     runDockerPhase3EntriesManagementProtocolRegression
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-phase3-entries-management-protocol-xray
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-phase3-entries-management-protocol-sing-box
-    for group in ports migrate lifecycle 1 2 3 4 5; do
+    for group in ports migrate 1 2 3 4 5; do
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "docker-contracts-phase3-protocol-${group}"
     done
+    (
+        runParallelRegressionRunners() {
+            [[ "${PADM_REGRESSION_PARALLEL_JOBS}" == 2 && "$2:$4" == reality:tls ]] || return 8
+            "$3" && "$5"
+        }
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-contracts-phase3-protocol-lifecycle
+    )
     runDockerPhase3EntriesManagementTlsRegression
     runDockerPhase3EntriesManagementTlsReinstallRegression
     printf '%s\n' full:all:all:phase3.sh edit:all:all:phase3.sh entries:all:all:phase3.sh \
         entries:topology:all:phase3.sh entries:management:all:phase3.sh \
         entries:management:protocol:phase3.sh entries:management:protocol-xray:phase3.sh \
         entries:management:protocol-sing-box:phase3.sh \
-        entries:management:protocol-{ports,migrate,lifecycle,1,2,3,4,5}:phase3.sh entries:management:tls:phase3.sh \
+        entries:management:protocol-{ports,migrate,1,2,3,4,5,lifecycle-reality,lifecycle-tls}:phase3.sh \
+        entries:management:tls:phase3.sh \
         entries:management:tls-reinstall:phase3.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_PHASE3_SCOPE:-}" ]]

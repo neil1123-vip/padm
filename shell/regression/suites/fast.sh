@@ -607,6 +607,21 @@ runDockerPhase3EntriesManagementProtocolRegression() {
     runDockerPhase3EntriesRegression management "${1:-protocol}"
 }
 
+runDockerPhase3ProtocolLifecycleRegression() {
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionRunners \
+        "${TMP_DIR}/phase3-protocol-lifecycle-${BASHPID:-$$}" \
+        reality runDockerPhase3ProtocolLifecycleRealityRegression \
+        tls runDockerPhase3ProtocolLifecycleTlsRegression
+}
+
+runDockerPhase3ProtocolLifecycleRealityRegression() {
+    runDockerPhase3EntriesManagementProtocolRegression protocol-lifecycle-reality
+}
+
+runDockerPhase3ProtocolLifecycleTlsRegression() {
+    runDockerPhase3EntriesManagementProtocolRegression protocol-lifecycle-tls
+}
+
 runDockerPhase3EntriesManagementTlsRegression() {
     runDockerPhase3EntriesRegression management tls
 }
@@ -1293,7 +1308,8 @@ registerRegressionFunctionLeaf docker-phase3-entries-management runDockerPhase3E
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol runDockerPhase3EntriesManagementProtocolRegression
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol-xray runDockerPhase3EntriesManagementProtocolRegression protocol-xray
 registerRegressionFunctionLeaf docker-phase3-entries-management-protocol-sing-box runDockerPhase3EntriesManagementProtocolRegression protocol-sing-box
-for phase3ProtocolPart in ports migrate lifecycle 1 2 3 4 5; do
+registerRegressionFunctionLeaf docker-contracts-phase3-protocol-lifecycle runDockerPhase3ProtocolLifecycleRegression
+for phase3ProtocolPart in ports migrate 1 2 3 4 5; do
     registerRegressionFunctionLeaf "docker-contracts-phase3-protocol-${phase3ProtocolPart}" \
         runDockerPhase3EntriesManagementProtocolRegression "protocol-${phase3ProtocolPart}"
 done

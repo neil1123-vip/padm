@@ -13,7 +13,7 @@ case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}" in
 *) printf 'docker-phase3-regression-fail: unknown entries branch %s\n' "${PHASE3_ENTRIES_BRANCH}" >&2; exit 1 ;;
 esac
 case "${PHASE3_SCOPE}:${PHASE3_ENTRIES_BRANCH}:${PHASE3_MANAGEMENT_GROUP}" in
-*:all|entries:management:protocol|entries:management:protocol-xray|entries:management:protocol-sing-box|entries:management:protocol-ports|entries:management:protocol-migrate|entries:management:protocol-lifecycle|entries:management:protocol-[1-5]|entries:management:tls|entries:management:tls-reinstall) ;;
+*:all|entries:management:protocol|entries:management:protocol-xray|entries:management:protocol-sing-box|entries:management:protocol-ports|entries:management:protocol-migrate|entries:management:protocol-lifecycle|entries:management:protocol-lifecycle-reality|entries:management:protocol-lifecycle-tls|entries:management:protocol-[1-5]|entries:management:tls|entries:management:tls-reinstall) ;;
 *) printf 'docker-phase3-regression-fail: unknown management group %s\n' "${PHASE3_MANAGEMENT_GROUP}" >&2; exit 1 ;;
 esac
 PHASE3_MANAGEMENT_CORE=all
@@ -1519,7 +1519,8 @@ for version in 1 2; do
 done
 runControl 0 protocol-restore-v3-baseline configure --spec "${PROTOCOL_BASE}"
 fi
-if [[ "${PHASE3_PROTOCOL_PART}" == all || "${PHASE3_PROTOCOL_PART}" == lifecycle ]]; then
+if [[ "${PHASE3_PROTOCOL_PART}" == all || "${PHASE3_PROTOCOL_PART}" == lifecycle ||
+    "${PHASE3_PROTOCOL_PART}" == lifecycle-reality ]]; then
 protocolEdit 2 protocol-add-usage --protocol-add vless-reality 2 0 --preview
 protocolEdit 2 protocol-core-needs-add --protocol-rebuild vless-reality --protocol-core sing-box --preview
 protocolEdit 2 protocol-core-invalid --protocol-add vless-reality 2 28443 --protocol-core invalid --preview
@@ -1583,7 +1584,10 @@ jq -e --slurpfile before "${PROTOCOL_BASE}" '
 protocolEdit 15 protocol-remove-last-account-link --protocol-remove vless-reality --preview
 [[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == \
     "${PROTOCOL_TRAFFIC_HASH}" ]] || fail '协议增删或重建改变累计流量与额度'
+fi
 
+if [[ "${PHASE3_PROTOCOL_PART}" == all || "${PHASE3_PROTOCOL_PART}" == lifecycle ||
+    "${PHASE3_PROTOCOL_PART}" == lifecycle-tls ]]; then
 runControl 0 protocol-tls-management-baseline configure --spec "${PROTOCOL_TLS}"
 (
     source "${PROJECT_ROOT}/install-docker.sh"
