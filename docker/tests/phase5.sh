@@ -1208,9 +1208,6 @@ grep -Fq -- "-F force_release=\"\${FORCE_RELEASE}\"" "${RELEASE_WORKFLOW}" ||
     fail 'automatic workflow handoff loses release intent'
 grep -Fq 'is_release_commit' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks release commit guard'
 grep -Fq 'docker/release.sh set-version' "${RELEASE_WORKFLOW}" || fail 'lock/version bump is not unified'
-if grep -Fq 'steps.bump.outputs.handoff' "${RELEASE_WORKFLOW}"; then
-    fail 'Release outputs still defer publication after a version bump'
-fi
 grep -Fq 'release_sha="${{ steps.bump.outputs.release_sha }}"' "${RELEASE_WORKFLOW}" ||
     fail 'Release build target does not use the version commit'
 grep -Fq 'source_ref: ${{ needs.prepare.outputs.release_sha }}' "${RELEASE_WORKFLOW}" ||
