@@ -33,6 +33,7 @@ jobs:
           - docker-contracts-fast-sites
           - docker-contracts-fast-rest
           - docker-contracts-setup-basic
+          - docker-setup-encrypted-udp
           - docker-recovery-apply
           - docker-routing-dns-csv
           - docker-routing-core-network

@@ -274,8 +274,7 @@ listRegressionDockerContractsSetupBasicChildSelectors() {
 }
 
 listRegressionDockerContractsSetupTransportsChildSelectors() {
-    printf '%s\n' docker-setup-encrypted-udp docker-setup-transports \
-        docker-traditional-tls-transports
+    printf '%s\n' docker-setup-transports docker-traditional-tls-transports
 }
 
 listRegressionDockerContractsSystemLightChildSelectors() {
