@@ -41,7 +41,10 @@ jobs:
           - docker-contracts-reality-rotation
           - docker-contracts-setup-transports
           - docker-xhttp-edit
+          - docker-contracts-policy
+          - docker-contracts-phase3-tls
           - docker-contracts-phase3-protocol-1
+          - docker-contracts-phase3-protocol-3
           - docker-contracts-phase3-protocol-4
     steps: &contract-steps
       - name: Checkout checked source
@@ -144,11 +147,8 @@ jobs:
           - docker-contracts-phase3-protocol-lifecycle
           - docker-contracts-phase3-protocol-commands
           - docker-contracts-phase3-protocol-2
-          - docker-contracts-phase3-protocol-3
           - docker-contracts-phase3-protocol-5
-          - docker-contracts-phase3-tls
           - docker-routing-ip-ownership
-          - docker-contracts-policy
           - docker-port-hopping-preflight
           - docker-contracts-fast-sites
     steps: *contract-steps
