@@ -1200,9 +1200,18 @@ B 的被控 `control join` 退出 `11`，入组失败原因待查。本轮 VPS B
 ICMP Time Exceeded，以及带 DF 的 1400 字节 UDP 载荷的 Fragmentation
 Needed（报告 MTU 1280）。TUN direct 启用时，发送端在各 2.5 秒窗口内
 均未收到对应错误。关闭后，两类错误恢复，网络基线和完整 `docker-tun-real`
-检查通过。此结果限 IPv4 UDP 的发送端错误队列，转发侧报文和其它探测方法待查。
+检查通过。
 
 临时探针未合入回归，补丁和日志留在
 `.tmp-regression-docker-5a2af2d6149d4e7a9fc65c33c3173954/`。
 `regression.log` SHA-256 为
 `ba860b34acc1610bf7adf08589074b643627ae66c69b6091e77e28677192584c`。
+
+出口抓包显示，TUN direct 启用时，TTL 1 的探针以 TTL 64 发出，
+两条出站探针的 DF 都为 0。出口两次均收到 ICMP Port Unreachable，
+发送端错误队列未收到。关闭后的出站 TTL、DF 和两类 ICMP 回报均恢复至基线。
+此结果限固定 sing-box 1.14.4-padm.2 的 IPv4 UDP。其它探测方法、公网
+和原生宿主仍待验。完整回归 `104.891 s` 通过。
+补丁和日志留在 `.tmp-regression-docker-08a406bbf3f44e698a8a529e88c0f0bc/`。
+`regression.log` SHA-256 为
+`c4e594a67e6874ba7f298b2dc343d8aeb1322b7c930a436871244816155b8ea9`。
