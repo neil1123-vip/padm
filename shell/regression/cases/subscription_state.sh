@@ -808,7 +808,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" != *'"upload"'* ]]
         trafficOutput=$(showUserSubscriptions)
         [[ "${trafficOutput}" == *"订阅 1：Team A（team-a）"* ]]
-        [[ "${trafficOutput}" == *"状态：已启用 / 额度：1 GB / 限额：已超限(100%)"* ]]
+        [[ "${trafficOutput}" == *"状态：已启用 / 额度：1 GB / 用量状态：已超限(100%)"* ]]
         [[ "${trafficOutput}" == *"服务器：全部"* ]]
         [[ "${trafficOutput}" != *"状态：true"* ]]
         trafficOutput=$(showSubscriptionTrafficOverview)
