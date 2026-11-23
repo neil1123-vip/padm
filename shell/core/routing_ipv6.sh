@@ -31,7 +31,7 @@ ipv6Routing() {
 
     menuDangerItem 4 "卸载 IPv6 分流" "移除 IPv6 分流配置"
 
-    menuReturnItem 0 "返回路由与访问控制" "回到上级菜单"
+    menuReturnItem 0 "返回分流工具" "回到上级菜单"
 
     menuClose
 

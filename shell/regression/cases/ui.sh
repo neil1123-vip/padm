@@ -2045,15 +2045,15 @@ EOF
         mainMenuStatusArgs=
         PADM_INSTALL_STATUS_READY=1
         local menuSmokePwd=$PWD
-        originalCoreMainMenu <<< $'\n6\n0\n0'
+        originalCoreMainMenu <<< $'6\n\n0'
         cd "${menuSmokePwd}" || return 1
-        [[ "$(grep -c '^安装与重装$' <<<"${menuItems}")" == "3" ]]
-        [[ "${mainMenuShowStatusCount}" == "3" ]]
+        [[ "$(grep -c '^安装与重装$' <<<"${menuItems}")" == "2" ]]
+        [[ "${mainMenuShowStatusCount}" == "2" ]]
         [[ "${mainMenuWgetCount}" == "1" ]]
         [[ "${mainMenuMkdirCount}" == "1" ]]
         [[ "${mainMenuAliasCount}" == "1" ]]
-        [[ "${mainMenuStatusArgs}" == $'cached\nnone\nnone\n' ]]
-        assertMenuAction 'errorCard:输入有误，请重新输入'
+        [[ "${mainMenuStatusArgs}" == $'cached\nnone\n' ]]
+        ! assertMenuAction 'errorCard:输入有误，请重新输入'
         ! assertMenuAction unexpected-network-version-fetch
 
         resetMenuRender
@@ -2107,13 +2107,17 @@ EOF
             echoContent() { printf '%s\n' "$*" >>"${siteMenuRenderLog}"; }
             manageTraditionalTlsFallback() { recordMenuAction manageTraditionalTlsFallback; }
             manageTLSCertificates() { recordMenuAction manageTLSCertificates; }
+            manageTraditionalTlsStaticSite() { recordMenuAction manageTraditionalTlsStaticSite; }
             : >"${siteMenuRenderLog}"
             resetMenuActions
-            siteCertificateMenu <<< $'3\n0'
+            resetMenuRender
+            siteCertificateMenu <<< $'4\n3\n\n'
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction manageTraditionalTlsFallback
             ! assertMenuAction manageTLSCertificates
-            [[ "$(wc -l <"${siteMenuRenderLog}")" == "2" ]]
+            assertMenuAction manageTraditionalTlsStaticSite
+            [[ "${menuNumbers}" == $'1\n2\n3\n0:return\n1\n2\n3\n0:return\n1\n2\n3\n0:return\n' ]]
+            [[ "$(wc -l <"${siteMenuRenderLog}")" == "3" ]]
         )
         resetMenuActions
         output=

@@ -98,10 +98,10 @@ runRegressionUiSmokeSuiteRoot() {
         selectCoreInstall() { originalSelectCoreInstall; }
         : >"${menuRenderLog}"
         resetMenuActions
-        installMenu <<< $'5\n\n0\n0'
+        installMenu <<< $'5\n\n0'
         [[ "$(grep -cF '安装与重装 ─' "${menuRenderLog}")" == 2 ]]
-        [[ "$(grep -cF '选择核心 ─' "${menuRenderLog}")" == 2 ]]
-        assertMenuAction 'errorCard:选择错误'
+        [[ "$(grep -cF '选择核心 ─' "${menuRenderLog}")" == 1 ]]
+        ! assertMenuAction 'errorCard:选择错误'
         ! assertMenuAction customXrayInstall
         ! assertMenuAction customSingBoxInstall
     )

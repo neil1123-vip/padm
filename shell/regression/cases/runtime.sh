@@ -142,7 +142,7 @@ runMenuReadChoiceRegression() (
     menuReadChoice regression_menu_allow_empty "请选择:" value true < <(printf '\n')
     [[ -z "${value}" ]]
     menuReadChoice regression_menu_empty "请选择:" value interactive < <(printf '\n')
-    [[ -z "${value}" ]]
+    [[ "${value}" == 0 ]]
     regressionExpectStatus 1 menuReadChoice regression_menu_eof "请选择:" value interactive </dev/null
 
     AUTO_INSTALL=true
@@ -185,6 +185,7 @@ runInstallWorkflowRegression() (
     menuClose() { :; }
     statusCard() { :; }
     menuItem() { renderedIds+="$1"$'\n'; }
+    menuReturnItem() { renderedIds+="$1"$'\n'; }
     protocolMenuDescription() { printf 'regression'; }
     errorCard() { errors=$((errors + 1)); }
     showAutoInstallSummary() { :; }
@@ -253,15 +254,18 @@ runInstallWorkflowRegression() (
         [[ -z "${customPort}" ]]
     )
 
-    # 纠错只读取当前安装输入，中文逗号与两位协议号都使用真实能力库校验。
-    exec {inputFd}< <(printf '999\n0,1\n1，2\nnext-parent-action\n')
+    # 菜单连续编号，中文逗号多选映射为协议 ID，旧的跳号输入原地纠错。
+    exec {inputFd}< <(printf '999\n0,1\n21\n1，10\nnext-parent-action\n')
     selectCoreInstallProtocols xray <&"${inputFd}"
-    [[ "${selectCustomInstallType}" == ",1,2," && "${errors}" == "2" ]]
+    [[ "${selectCustomInstallType}" == ",1,28," && "${errors}" == "3" ]]
+    [[ "${renderedIds}" == $'1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n0\n' ]]
     read -r -u "${inputFd}" nextInput
     [[ "${nextInput}" == "next-parent-action" ]]
     exec {inputFd}<&-
-    selectCoreInstallProtocols sing-box <<<"31"
-    [[ "${selectCustomInstallType}" == ",31," ]]
+    renderedIds=
+    selectCoreInstallProtocols sing-box <<<"2,9"
+    [[ "${selectCustomInstallType}" == ",3,31," ]]
+    [[ "${renderedIds}" == $'1\n2\n3\n4\n5\n6\n7\n8\n9\n0\n' ]]
 
     renderedIds=
     exec {inputFd}< <(printf 'next-parent-action\n')
@@ -285,7 +289,7 @@ runInstallWorkflowRegression() (
             [[ "${nextInput}" == next-parent-action ]]
             exec {inputFd}<&-
         done
-        exec {inputFd}< <(printf '28,25\n29,25\nnext-parent-action\n')
+        exec {inputFd}< <(printf '10,7\n11,7\nnext-parent-action\n')
         selectCoreInstallProtocols xray <&"${inputFd}"
         [[ "${selectCustomInstallType}" == ,29,25, && "${errors}" == 8 ]]
         read -r -u "${inputFd}" nextInput
@@ -309,12 +313,15 @@ runInstallWorkflowRegression() (
     selectCustomInstallType=previous
     regressionExpectStatus 1 selectCoreInstallProtocols xray < <(printf 'invalid')
     [[ -z "${selectCustomInstallType}" ]]
-    exec {inputFd}< <(printf '\n0\nnext-parent-action\n')
-    regressionExpectStatus 1 selectCoreInstallProtocols xray <&"${inputFd}"
-    [[ -z "${selectCustomInstallType}" ]]
-    read -r -u "${inputFd}" nextInput
-    [[ "${nextInput}" == "next-parent-action" ]]
-    exec {inputFd}<&-
+    local cancelKey
+    for cancelKey in "" 0; do
+        exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${cancelKey}")
+        regressionExpectStatus 1 selectCoreInstallProtocols xray <&"${inputFd}"
+        [[ -z "${selectCustomInstallType}" ]]
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == "next-parent-action" ]]
+        exec {inputFd}<&-
+    done
 
     AUTO_PROTOCOLS=999
     for AUTO_INSTALL in true 1 false; do

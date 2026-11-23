@@ -14,7 +14,13 @@ dockerMenuHeader() {
 }
 
 dockerMenuOptions() {
-    local option number label
+    local option number label mapActions=0
+    if [[ "$1" == --map ]]; then
+        # 映射写入调用方的局部数组，兼容 Bash 4.0。
+        mapActions=1
+        menuActionNumbers=(0)
+        shift
+    fi
     for option in "$@"; do
         number=${option%%.*}
         if [[ ! "${number}" =~ ^[0-9]+$ ]]; then
@@ -26,9 +32,13 @@ dockerMenuOptions() {
             continue
         fi
         label=${option#*. }
-        if [[ "${number}" == 0 || "${label}" == 返回* ]]; then
-            menuReturnItem "${number}" "${label}"
+        if [[ "${number}" == 0 ]]; then
+            menuReturnItem 0 "${label}"
         else
+            if [[ "${mapActions}" -eq 1 ]]; then
+                menuActionNumbers+=("${number}")
+                number=$((${#menuActionNumbers[@]} - 1))
+            fi
             menuItem "${number}" "${label}"
         fi
     done
@@ -339,13 +349,11 @@ dockerMenuInstall() {
         menuLine '直连优先 Reality Vision；需要 CDN 可选 Reality XHTTP；NaiveProxy 需要真实域名与证书'
         menuLine '首次配置和重装使用同一向导；需要保留现有身份与配置时，请从核心与服务进入编辑配置'
         dockerMenuOptions '1. 首次配置' '2. 重新选择核心与协议' '3. 从完整规格重装' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun setup || true ;;
         2) dockerMenuRun reinstall || true ;;
         3)
@@ -367,13 +375,11 @@ dockerMenuProtocols() {
         dockerMenuHeader 'Docker 协议与入口'
         menuLine '入口 ID、增量安装和密钥轮换等专项维护'
         dockerMenuOptions '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '9. CDN 连接地址' '10. XHTTP 管理' '11. 端口跳跃（双族 Hy2/TUIC；TUIC 仅范围转发）' '12. Hysteria2 管理' '13. TUIC 管理' '14. 增量安装协议入口' '15. 删除协议入口' '16. 保留参数重建' '17. 核心/Nginx 内部端口' '18. VLESS Encryption 实验' '19. 轮换 Shadowsocks 自用用户密钥' '20. 轮换 Shadowsocks 服务器密钥' '21. 修复受管 Nginx 配置' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol list || true ;;
         2)
             printf '入口 ID（空输入查看全部，0 返回）: '
@@ -478,7 +484,7 @@ dockerMenuVlessEncryption() {
         dockerMenuOptions '仅支持 schema 3 的 Xray Reality Vision/XHTTP，已验范围仅固定 Xray/Mihomo 组合。' \
             '启用或关闭后须重新导入分享 URI。' \
             '1. 查看状态' '2. 启用并生成新参数' '3. 关闭' '0. 返回'
-        dockerSetupRead choice '请选择: ' || return 0
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || return 0
         case "${choice}" in
         1) dockerMenuRun protocol encryption-status || true ;;
         2|3)
@@ -502,9 +508,8 @@ dockerMenuPortHopping() {
             '4. 停止跳跃' '5. 清除保存配置' \
             '6. 输出活动分享链接（Hy2 范围/TUIC 首端口）' '7. 输出指定活动端口链接' \
             '8. 核验并清理残留会话' '0. 返回'
-        dockerSetupRead choice '请选择: ' || return 0
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || return 0
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun port-hopping status || true ;;
         2)
             dockerSetupRead listener 'Hy2/TUIC 入口 ID（0 返回）: ' || continue
@@ -552,10 +557,11 @@ dockerMenuXhttp() {
     local downloadAddress downloadSecurity downloadServerName downloadAlpn downloadPublicKey downloadShortId downloadSettings
     local status snapshot currentValues currentConcurrency currentRequests currentSeconds currentPadding
     local currentNoGrpc currentNoSse currentPost currentInterval currentBuffered currentKeepalive currentMode currentPath currentHost
+    local -a menuActionNumbers=()
     while :; do
         DOCKER_MENU_SIGNAL=0
         dockerMenuHeader 'Docker XHTTP 管理（已有 Xray Reality 入口）'
-        dockerMenuOptions '普通设置' '1. 查看状态' '2. 日常预设' '3. 兼容预设' '4. 流式预设' \
+        dockerMenuOptions --map '普通设置' '1. 查看状态' '2. 日常预设' '3. 兼容预设' '4. 流式预设' \
             '5. 单并发预设' '14. 设置模式' \
             '高级设置' '23. XMUX 日常并发' '24. XMUX 单并发' '6. 自定义 XMUX' '7. 恢复缺省 XMUX' \
             '15. 设置路径和 Host' \
@@ -566,13 +572,12 @@ dockerMenuXhttp() {
             '18. 设置请求首部（JSON）' '19. 清除请求首部' \
             '实验功能' \
             '20. 设置下行端口' '21. 关闭上下行分离' '22. 设置独立下行' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
+        [[ ! "${choice}" =~ ^[1-9][0-9]?$ ]] || choice=${menuActionNumbers[choice]:-}
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol xhttp-status || true ;;
         2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24)
             status=0
@@ -729,13 +734,11 @@ dockerMenuHysteria2() {
         dockerMenuOptions '1. 查看状态' '2. BBR 自适应' '3. Brutal 固定带宽' \
             '4. Salamander 混淆' '5. Gecko 混淆' '6. 关闭混淆' \
             '7. HTTPS 伪装' '8. 本地网页' '9. 关闭伪装' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol hy2-status || true ;;
         2|3|4|5|6|7|8|9)
             dockerMenuRun protocol hy2-status || continue
@@ -786,13 +789,11 @@ dockerMenuTuic() {
         dockerMenuHeader 'Docker TUIC 管理（已有 sing-box v3 入口）'
         dockerMenuOptions '1. 查看状态' '2. cubic' '3. bbr' '4. new_reno' \
             '5. 连接参数' '6. 开启 0-RTT' '7. 关闭 0-RTT' '8. 恢复推荐默认' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol tuic-status || true ;;
         2|3|4|5|6|7|8)
             dockerMenuRun protocol tuic-status || continue
@@ -834,13 +835,11 @@ dockerMenuCdnEntries() {
         DOCKER_MENU_SIGNAL=0
         dockerMenuHeader 'Docker CDN 连接地址'
         dockerMenuOptions '1. 查看状态' '2. 设置地址（Reality XHTTP/WS/HTTPUpgrade/gRPC TLS）' '3. 清除覆盖' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol cdn-status || true ;;
         2|3)
             dockerMenuRun protocol cdn-status || continue
@@ -866,13 +865,11 @@ dockerMenuPortAliases() {
         dockerMenuHeader 'Docker 额外入口端口'
         dockerMenuOptions '1. 查看额外端口' '2. 添加端口' '3. 删除端口' \
             '4. 选择默认分享端口' '5. 恢复原入口' '6. 修改额外端口' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol port-alias-status || true ;;
         2|3)
             dockerMenuRun protocol list || continue
@@ -923,13 +920,11 @@ dockerMenuRealityStream() {
         dockerMenuHeader 'Docker Reality 443 共存'
         dockerMenuOptions '1. 查看状态' '2. 受管 TLS 网站开启或更换默认 Reality' '3. 关闭共存' \
             '4. 宿主网站开启或更换默认 Reality' '5. 宿主回环网站（host 网络）' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol stream-status || true ;;
         2)
             dockerMenuRun protocol list || continue
@@ -974,13 +969,11 @@ dockerMenuRealityTargets() {
         dockerMenuOptions '1. 检测当前目标' '2. 刷新目标库' '3. 扫描指定网段' \
             '4. 同 ASN 抽样扫描' '5. 查看/切换 A 级目标' '6. 手动设置目标站' \
             '7. 查看目标站黑名单' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1)
             dockerSetupRead listener 'Reality 入口 ID（空输入检测全部，0 返回）: ' || continue
             if [[ -n "${listener}" ]]; then
@@ -1041,7 +1034,7 @@ dockerMenuRealityTargetActions() {
     while :; do
         printf '\nReality 目标站后续操作\n'
         printf '%s\n' '1. 查看/切换 A 级目标' '2. 加入目标站黑名单' '0. 返回'
-        dockerSetupRead choice '请选择: ' || return 0
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || return 0
         case "${choice}" in
         1)
             status=0
@@ -1080,13 +1073,11 @@ dockerMenuAccounts() {
             '8. 轮换凭据' \
             '9. 流量与额度' \
             '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun account list || true ;;
         2)
             action=(account create)
@@ -1156,13 +1147,11 @@ dockerMenuTraffic() {
         dockerMenuHeader 'Docker 流量与额度'
         dockerMenuOptions '1. 查看已存流量与额度' '2. 立即采集并检查额度' \
             '3. 设置账号额度' '4. 重置账号累计' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun traffic show || true ;;
         2) dockerMenuRun traffic collect || true ;;
         3|4)
@@ -1209,13 +1198,11 @@ dockerMenuSubscriptions() {
             '10. 输出部署主订阅内容' \
             '11. 输出部署主订阅 HTTPS 链接' \
             '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun subscription list || true ;;
         2)
             action=(subscription create)
@@ -1290,13 +1277,11 @@ dockerMenuSubscriptionPublish() {
         DOCKER_MENU_SIGNAL=0
         dockerMenuHeader 'Docker HTTPS 订阅发布'
         dockerMenuOptions '1. 查看发布状态' '2. 启用 HTTPS 订阅发布' '3. 停用 HTTPS 订阅发布' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun subscription publish status || true ;;
         2) dockerMenuRun subscription publish enable || true ;;
         3)
@@ -1318,13 +1303,11 @@ dockerMenuBusiness() {
         DOCKER_MENU_SIGNAL=0
         dockerMenuHeader 'Docker 业务备份恢复'
         dockerMenuOptions '1. 创建业务备份' '2. 预览业务恢复' '3. 恢复业务备份' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1)
             dockerSetupRead file '备份保存绝对路径（0 返回）: ' || continue
             dockerMenuRun business backup "${file}" || true
@@ -1354,13 +1337,11 @@ dockerMenuGeo() {
         dockerMenuHeader 'Docker Xray Geo 数据'
         dockerMenuOptions '1. 查看状态' '2. 立即更新' '3. 启用每日更新' \
             '4. 停用每日更新' '5. 查看调度状态' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun geo status || true ;;
         2)
             dockerSetupRead version 'Geo 发布固定 tag（空输入使用最新发布，0 返回）: ' || continue
@@ -1393,13 +1374,11 @@ dockerMenuWireGuard() {
         dockerMenuOptions '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
             '4. 确认启用或启动' '5. 临时停止' '6. 迁移本机参数或单 Peer 连接' \
             '7. 查看 Peer 列表' '8. 添加 Peer' '9. 更新指定 Peer' '10. 移除指定 Peer' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun wireguard status || true ;;
         2)
             dockerSetupRead address '本机 RFC1918 IPv4（0 返回）: ' &&
@@ -1481,13 +1460,11 @@ dockerMenuControl() {
             '15. 重映射受管账号入口（同连接）' '16. 更新主控 API 端口' \
             '17. 被控同身份重连' '18. WireGuard 建链与维护' '19. 更换主控身份（同隧道）' \
             '20. 升级多 Peer 主控' '21. 查看控制 Peer' '22. 登记控制 Peer' '23. 移除控制 Peer' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun control status || true ;;
         2)
             dockerSetupRead address '主控 WireGuard IPv4（0 返回）: ' &&
@@ -1599,13 +1576,11 @@ dockerMenuSites() {
         dockerMenuHeader 'Docker 站点管理'
         dockerMenuOptions '1. 默认页' '2. 发布静态目录' '3. 302 跳转' '4. 查看站点模式' \
             '5. ALPN 诊断' '6. 修复为推荐 ALPN' '7. 手动设置 ALPN' '8. 内置静态站点' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun edit --site-default || true ;;
         2)
             dockerSetupRead directory '独立静态站点目录绝对路径（0 返回）: ' &&
@@ -1635,7 +1610,7 @@ dockerMenuSites() {
             fi
             dockerMenuHeader 'Docker 手动设置 ALPN'
             dockerMenuOptions '1. h2,http/1.1' '2. http/1.1,h2' '3. http/1.1' '0. 返回'
-            dockerSetupRead alpnChoice '请选择 ALPN 顺序（0 返回）: ' || continue
+            dockerSetupReadChoice alpnChoice '请选择 ALPN 顺序（0 或回车返回）: ' || continue
             case "${alpnChoice}" in
             1) dockerMenuRun edit --alpn "${listener}" h2,http/1.1 || true ;;
             2) dockerMenuRun edit --alpn "${listener}" http/1.1,h2 || true ;;
@@ -1647,7 +1622,7 @@ dockerMenuSites() {
             dockerMenuHeader 'Docker 内置静态站点'
             menuLine 'Hysteria2 发布后，在已有入口参数中关闭混淆并将伪装设置为 local。'
             dockerMenuOptions '1. 笔记（notes）' '2. 相册（photos）' '3. 文档（docs）' '0. 返回'
-            dockerSetupRead templateChoice '请选择站点主题（0 返回）: ' || continue
+            dockerSetupReadChoice templateChoice '请选择站点主题（0 或回车返回）: ' || continue
             case "${templateChoice}" in
             1) siteTemplate=notes ;;
             2) siteTemplate=photos ;;
@@ -1676,13 +1651,11 @@ dockerMenuRegion() {
             '5. 追加自定义直连例外' '6. 删除自定义直连例外' \
             '7. 单条替换自定义直连例外' '8. 查看路由状态' \
             '9. 仅切换已有区域模式（保留自定义例外）' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1|2|3)
             case "${choice}" in 1) mode=both ;; 2) mode=domain ;; 3) mode=ip ;; esac
             printf '默认直连例外: %s\n' "$(jq -r 'map(ltrimstr("domain:")) | join(",")' \
@@ -1739,13 +1712,11 @@ dockerMenuIPv6() {
             '3. 关闭 IPv6 出站策略' '4. 查看路由状态' \
             '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
             '7. 单条替换 IPv6 域名规则' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1)
             dockerSetupRead domains 'IPv6 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' '' csv &&
                 [[ -n "${domains}" ]] || continue
@@ -1788,13 +1759,11 @@ dockerMenuTProxy() {
         dockerMenuOptions '1. 查看状态' "2. 启用 ${title}" "3. 修改 ${title} 参数" "4. 关闭 ${title}" \
             '5. 设置本机转发 UID' '6. 关闭本机转发（保留 PREROUTING）' \
             '7. 全主机本机转发（绕过核心专用 GID 10001）' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol "${kind}-status" || true ;;
         2|3)
             if ! dockerMenuReadProtocolStatus state "${kind}-status"; then
@@ -1855,13 +1824,11 @@ dockerMenuTun() {
         DOCKER_MENU_SIGNAL=0
         dockerMenuHeader 'Docker TUN 管理'
         dockerMenuOptions '1. 查看状态' '2. 启用 TUN' '3. 关闭 TUN' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun protocol tun-status || true ;;
         2)
             printf '%s\n' 'TUN 将接管宿主全局流量；当前 IPv4 模式会拒绝 IPv6 流量。'
@@ -1876,6 +1843,7 @@ dockerMenuTun() {
 dockerMenuRouting() {
     local choice input server port oldRule newRule action
     local scope=${1:-all} title='Docker 路由与出站' visibleOptions=
+    local -a menuActionNumbers=()
     case "${scope}" in
     all) ;;
     socks5) title='Socks5 出站'; visibleOptions='0 1 2 3 4 5 34 35 36 42' ;;
@@ -1888,7 +1856,7 @@ dockerMenuRouting() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         dockerMenuHeader "${title}"
-        DOCKER_MENU_VISIBLE_OPTIONS="${visibleOptions}" dockerMenuOptions '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' '3. 查看路由状态' \
+        DOCKER_MENU_VISIBLE_OPTIONS="${visibleOptions}" dockerMenuOptions --map '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' '3. 查看路由状态' \
             '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
             '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 直接录入 hosts（整组替换）' \
             '9. 关闭 hosts 覆盖' '10. 替换 Direct 直连例外' \
@@ -1908,18 +1876,12 @@ dockerMenuRouting() {
             '39. 精确删除 hosts 映射' '40. 移除全部访问控制' \
             '41. 修改已有 DNS 上游' '42. 修改已有 SOCKS5 上游' '43. TProxy 管理' '44. TUN 管理' \
             '45. IP 阻断加入域名解析结果（sing-box）' '46. IP 阻断仅匹配字面地址' '47. Redirect TCP 管理' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
-        if [[ -n "${visibleOptions}" &&
-            " ${visibleOptions} " != *" ${choice} "* ]]; then
-            printf '无效选项，请重新选择。\n'
-            continue
-        fi
+        [[ ! "${choice}" =~ ^[1-9][0-9]?$ ]] || choice=${menuActionNumbers[choice]:-}
         case "${choice}" in
-        0) return 0 ;;
         1)
             dockerMenuRun protocol routing-status || continue
             dockerMenuRun edit --socks5-input || true
@@ -2095,13 +2057,11 @@ dockerMenuHttpRelay() {
         dockerMenuOptions '1. 直接录入认证与来源规则' '2. 关闭 HTTP 中继' '3. 查看路由状态' \
             '4. 修改中继端口' '5. 替换来源允许名单' '6. 追加来源允许名单' \
             '7. 精确删除来源允许名单（删空拒绝）' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1)
             dockerMenuRun protocol routing-status || continue
             printf 'HTTP 中继只接受已有受管 Xray；sing-box 的代理头来源覆盖不满足来源限制。\n'
@@ -2140,13 +2100,11 @@ dockerMenuWarp() {
             '6. 切换 WARP IPv4 隧道地址族' '7. 切换 WARP IPv6 隧道地址族' \
             '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' \
             '10. 单条替换 WARP 域名规则' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1)
             dockerMenuRun protocol routing-status || continue
             dockerMenuRun edit --warp-input || true
@@ -2198,13 +2156,11 @@ dockerMenuFail2ban() {
             '15. 查看 SSH 防护状态' '16. 解封 SSH 单个 IP' '17. 停用 SSH 防护' \
             '18. 启用专用 SSH service 防护' '19. 修改 SSH 防护参数' \
             '20. 修改单入口 WS 保护端口' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun fail2ban status || true ;;
         7) dockerMenuRun fail2ban control status || true ;;
         15) dockerMenuRun fail2ban ssh status || true ;;
@@ -2329,13 +2285,11 @@ dockerMenuMaintenance() {
             '5. Fail2ban 维护' '6. 导出灾备归档' '7. 只读校验灾备归档' '8. 预览灾备恢复（空目标）' \
             '9. 应用灾备恢复（空目标）' '10. 恢复中断的灾备事务' \
             '11. 预览主控灾备（新身份）' '12. 应用主控灾备（新身份）' '0. 返回'
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车返回）: '; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0) return 0 ;;
         1) dockerMenuRun validate || true; continue ;;
         2)
             dockerSetupRead answer '确认更新镜像与控制脚本？[y/N]: ' n || continue
@@ -2429,10 +2383,10 @@ dockerMenuSubscriptionUsers() {
         menuItem 3 '流量与额度' '查看、采集、限额和重置累计'
         menuItem 4 '控制连接' 'WireGuard、主控/被控与同步'
         menuItem 5 '业务备份恢复' '账号和分享组的分范围备份'
-        menuItem 7 'HTTPS 订阅发布' '查看、启用和停用本机公网发布'
+        menuItem 6 'HTTPS 订阅发布' '查看、启用和停用本机公网发布'
         menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2442,7 +2396,7 @@ dockerMenuSubscriptionUsers() {
         3) dockerMenuTraffic ;;
         4) dockerMenuControl ;;
         5) dockerMenuBusiness ;;
-        7) dockerMenuSubscriptionPublish ;;
+        6) dockerMenuSubscriptionPublish ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2459,7 +2413,7 @@ dockerMenuRealityManagement() {
         menuItem 3 'Reality 443 共存' '受管 TLS 站点或宿主网站分流'
         menuReturnItem 0 '返回协议与入口' '回到上级菜单'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2490,10 +2444,10 @@ dockerMenuProtocolEntries() {
         menuItem 5 'Tuic 管理' '拥塞、认证、心跳和 0-RTT'
         menuItem 6 '额外入口端口管理' '公开端口与默认分享入口'
         menuItem 7 'CDN 入口管理' '连接地址覆盖和 H3 使用说明'
-        menuItem 9 '入口高级管理' '增量安装、复制删除、重建、端口跳跃和密钥轮换'
+        menuItem 8 '入口高级管理' '增量安装、复制删除、重建、端口跳跃和密钥轮换'
         menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2505,7 +2459,7 @@ dockerMenuProtocolEntries() {
         5) dockerMenuTuic ;;
         6) dockerMenuPortAliases ;;
         7) dockerMenuCdnEntries ;;
-        9) dockerMenuProtocols ;;
+        8) dockerMenuProtocols ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2520,15 +2474,15 @@ dockerMenuSiteCertificates() {
         menuLine 'Reality 的 target/SNI 不使用这里的本机 TLS 证书'
         menuItem 1 '传统 TLS fallback 维护' '静态站点、302 重定向、ALPN 诊断和修复'
         menuItem 2 '本机 TLS 证书管理' '校验、轮换、申请与续期'
-        menuItem 4 '本地静态站点' '导入目录或使用内置主题'
+        menuItem 3 '本地静态站点' '导入目录或使用内置主题'
         menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
         case "${choice}" in
-        1|4) dockerMenuSites ;;
+        1|3) dockerMenuSites ;;
         2) dockerMenuRun tls manage || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
@@ -2547,7 +2501,7 @@ dockerMenuSocks5() {
         menuItem 3 '卸载 Socks5 出站' '关闭本机受管 SOCKS5 出站'
         menuReturnItem 0 '返回分流工具' '回到上级菜单'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2571,12 +2525,12 @@ dockerMenuRoutingTools() {
         menuItem 3 'Socks5 中继' '认证出站和入站支持边界'
         menuItem 4 'DNS 覆盖' '上游服务器和域名规则'
         menuItem 5 'DNS/hosts 覆盖' '精确域名与 IP 映射'
-        menuItem 7 'HTTP 中继入站' '认证和来源允许名单'
-        menuItem 8 'WireGuard 连接' '本机身份和 Peer 管理'
-        menuItem 9 '完整路由维护' '全部路由专项及 TProxy、Redirect 和 TUN'
+        menuItem 6 'HTTP 中继入站' '认证和来源允许名单'
+        menuItem 7 'WireGuard 连接' '本机身份和 Peer 管理'
+        menuItem 8 '完整路由维护' '全部路由专项及 TProxy、Redirect 和 TUN'
         menuReturnItem 0 '返回路由与访问控制' '回到上级菜单'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2586,9 +2540,9 @@ dockerMenuRoutingTools() {
         3) dockerMenuSocks5 ;;
         4) dockerMenuRouting dns ;;
         5) dockerMenuRouting hosts ;;
-        7) dockerMenuHttpRelay ;;
-        8) dockerMenuWireGuard ;;
-        9) dockerMenuRouting ;;
+        6) dockerMenuHttpRelay ;;
+        7) dockerMenuWireGuard ;;
+        8) dockerMenuRouting ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2606,7 +2560,7 @@ dockerMenuRoutingAccess() {
         menuItem 3 '访问控制' '域名/IP 阻断、直连例外和区域策略'
         menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2636,7 +2590,7 @@ dockerMenuCoreServices() {
         menuItem 9 '编辑配置/导入原始规格' '沿用原配置确认与恢复事务'
         menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2670,7 +2624,7 @@ dockerMenuSystem() {
         menuMutedLine '网络优化沿用宿主机设置；此菜单不修改宿主机内核参数'
         menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2693,7 +2647,7 @@ dockerMenuDanger() {
         menuDangerItem 2 'VLESS Encryption 实验' '沿用当前固定核心的实验支持范围'
         menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
-        dockerSetupRead choice '请选择: ' || {
+        dockerSetupReadChoice choice '请选择（回车返回）: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         }
@@ -2735,15 +2689,13 @@ dockerMenu() {
         menuReturnItem 0 '退出' '结束当前菜单会话'
         menuClose
         DOCKER_MENU_SIGNAL=0
-        printf '请选择: '
-        if ! IFS= read -r choice; then
+        if ! dockerSetupReadChoice choice '请选择（回车退出）: '; then
             if [[ "${DOCKER_MENU_SIGNAL}" -eq 130 ]]; then
                 continue
             fi
             break
         fi
         case "${choice}" in
-        0) break ;;
         1) dockerMenuInstall ;;
         2) dockerMenuSubscriptionUsers ;;
         3) dockerMenuProtocolEntries ;;

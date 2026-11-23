@@ -30,7 +30,7 @@ socks5Routing() {
 }
 # Socks5 入站菜单
 socks5InboundRoutingMenu() {
-    local backupDir= selectType=
+    local backupDir= selectType= inboundStatus
     local PADM_PORT_ALLOW_TRANSACTION_ACTIVE=false
     local PADM_PORT_ALLOW_TRANSACTION_KEYS=
     local PADM_SOCKS5_ROLLBACK_PENDING=false PADM_SOCKS5_BACKUP_DIR= PADM_SOCKS5_RELOAD_PENDING=false
@@ -57,7 +57,20 @@ socks5InboundRoutingMenu() {
             socks5RoutingRegisterExitRollback "${backupDir}"
             PADM_PORT_ALLOW_TRANSACTION_ACTIVE=true
             PADM_PORT_ALLOW_TRANSACTION_KEYS=
-            if ! setSocks5Inbound; then
+            inboundStatus=0
+            setSocks5Inbound || inboundStatus=$?
+            if [[ "${inboundStatus}" == 2 ]]; then
+                # DNS 类型选择取消时尚未写入配置，只需撤销本次开放的防火墙端口。
+                if ! padmRunRollback padmRollbackPortAllowTransaction; then
+                    errorCard "Socks5 入站配置已取消，但新增端口防火墙规则回滚失败"
+                    return 1
+                fi
+                PADM_PORT_ALLOW_TRANSACTION_ACTIVE=false
+                PADM_SOCKS5_ROLLBACK_PENDING=false
+                unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
+                padmRemoveCleanupPath "${backupDir}"
+                continue
+            elif [[ "${inboundStatus}" != 0 ]]; then
                 padmRunRollback socks5RoutingExitRollback "Socks5 入站配置失败" || true
                 return 1
             fi
@@ -538,14 +551,17 @@ setSocks5Inbound() {
     menuLine "需要保证 VPS 支持相应的 DNS 解析"
     menuRecommendedItem 1 "IPv4" "默认解析策略"
     menuItem 2 "IPv6" "IPv6 解析策略"
+    menuReturnItem 0 "返回"
     menuClose
 
-    autoRead socks5_inbound_ip_type "IP类型:" socks5InboundDomainStrategyStatus || return 1
+    autoRead socks5_inbound_ip_type "IP类型[回车使用 IPv4]:" socks5InboundDomainStrategyStatus || return 1
     local domainStrategy=
     if [[ -z "${socks5InboundDomainStrategyStatus}" || "${socks5InboundDomainStrategyStatus}" == "1" ]]; then
         domainStrategy="ipv4_only"
     elif [[ "${socks5InboundDomainStrategyStatus}" == "2" ]]; then
         domainStrategy="ipv6_only"
+    elif [[ "${socks5InboundDomainStrategyStatus}" == "0" ]]; then
+        return 2
     else
         errorCard "选择类型错误"
         return 1

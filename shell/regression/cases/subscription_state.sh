@@ -858,7 +858,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
             printf '%s\n' "${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT:-unset}" >>"${lockTimeoutLog}"
             return 1
         }
-        autoRead() { printf -v "$3" '%s' 7; }
+        autoRead() { printf -v "$3" '%s' 0; }
         echoContent() { :; }
         menuLine() { printf '%s\n' "$*"; }
         menuItem() { :; }
@@ -1491,7 +1491,7 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
     (
         local backupRoot="${TMP_DIR}/subscription-backup-number-selection"
         local backupSelectionInput selectedSubscriptionGroupsBackupFile
-        local index
+        local index inputFd nextInput
         mkdir -p "${backupRoot}"
         for index in {1..10}; do
             printf '{}\n' >"${backupRoot}/${index}.json"
@@ -1502,31 +1502,32 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
                 printf '%s/%s.json\n' "${backupRoot}" "${backupIndex}"
             done
         }
-        menuReadChoice() { printf -v "$3" '%s' "${backupSelectionInput}"; }
         userResultCard() { :; }
         menuLine() { :; }
         menuReturnItem() { [[ "$1" == 0 ]]; }
         menuClose() { :; }
         errorCard() { :; }
         for backupSelectionInput in 08 09 010; do
-            selectSubscriptionGroupsBackupFile
+            selectSubscriptionGroupsBackupFile <<<"${backupSelectionInput}"
             [[ "${selectedSubscriptionGroupsBackupFile}" == "${backupRoot}/$((10#${backupSelectionInput})).json" ]]
         done
-        backupSelectionInput=0
-        selectedSubscriptionGroupsBackupFile=stale
-        selectSubscriptionGroupsBackupFile
-        [[ -z "${selectedSubscriptionGroupsBackupFile}" ]]
+        for backupSelectionInput in "" 0; do
+            selectedSubscriptionGroupsBackupFile=stale
+            exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${backupSelectionInput}")
+            restoreSubscriptionGroupsBackupMenu <&"${inputFd}"
+            [[ -z "${selectedSubscriptionGroupsBackupFile}" ]]
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+        done
         for backupSelectionInput in 00 11 99999999999999999999999999999999999999999999; do
             selectedSubscriptionGroupsBackupFile=stale
-            regressionExpectStatus 1 selectSubscriptionGroupsBackupFile
+            regressionExpectStatus 1 selectSubscriptionGroupsBackupFile <<<"${backupSelectionInput}"
             [[ -z "${selectedSubscriptionGroupsBackupFile}" ]]
         done
         backupSelectionInput="${backupRoot}/10.json"
-        selectSubscriptionGroupsBackupFile
+        selectSubscriptionGroupsBackupFile <<<"${backupSelectionInput}"
         [[ "${selectedSubscriptionGroupsBackupFile}" == "${backupSelectionInput}" ]]
-        menuReadChoice() { IFS= read -r "$3"; }
-        selectSubscriptionGroupsBackupFile <<< $'\n1'
-        [[ "${selectedSubscriptionGroupsBackupFile}" == "${backupRoot}/1.json" ]]
     )
 }
 

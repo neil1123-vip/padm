@@ -62,6 +62,10 @@ dockerSetupRead() {
     printf -v "${variable}" '%s' "${inputValue:-${default}}"
 }
 
+dockerSetupReadChoice() {
+    dockerSetupRead "$1" "$2" && [[ -n "${!1}" ]]
+}
+
 dockerSetupTool() {
     local image=$1
     shift
@@ -581,7 +585,7 @@ dockerTlsManageCommand() {
     menuItem 10 '迁移入口 TLS 域名'
     menuReturnItem 0 '返回'
     menuClose
-    dockerSetupRead choice '证书操作: ' || return 0
+    dockerSetupReadChoice choice '证书操作（回车返回）: ' || return 0
     [[ "${choice}" =~ ^([1-9]|10)$ ]] || return "${PADM_DOCKER_RC_USAGE}"
     if [[ "${choice}" == 10 ]]; then
         dockerSetupRead domain '新的 TLS 域名（0 取消）: ' || return 0
@@ -728,6 +732,7 @@ dockerSetupCommand() {
     local tuicCongestion=cubic tuicAuthTimeout=3s tuicHeartbeat=10s tuicZeroRtt=false
     local email= provider= credentials= subscription=false http01=false answer= root candidate= status=0
     local targetMode probeInputs releasePrepared=0 reinstall=0 operation=首次配置 applyMode=configure sharesSource=''
+    local -a protocolOptions
     if [[ "${1:-}" == --reinstall ]]; then
         reinstall=1 operation=重装 applyMode=confirmed
         shift
@@ -773,38 +778,39 @@ dockerSetupCommand() {
         menuItem 3 '两者'
         menuItem 4 'Reality XHTTP'
         menuItem 5 'Reality gRPC'
-        menuItem 11 'Trojan direct'
-        menuItem 12 'VMess WS TLS'
-        menuItem 13 'VMess HTTPUpgrade TLS'
-        menuItem 14 'VLESS gRPC TLS'
-        menuItem 15 'Trojan gRPC TLS'
-        menuItem 16 'VLESS TLS Vision'
-        menuItem 17 'Trojan TLS fallback'
+        menuItem 6 'Trojan direct'
+        menuItem 7 'VMess WS TLS'
+        menuItem 8 'VMess HTTPUpgrade TLS'
+        menuItem 9 'VLESS gRPC TLS'
+        menuItem 10 'Trojan gRPC TLS'
+        menuItem 11 'VLESS TLS Vision'
+        menuItem 12 'Trojan TLS fallback'
         menuReturnItem 0 '取消'
         menuClose
-        dockerSetupRead protocols '协议 [1=Reality Vision, 2=WS TLS, 3=两者, 4=Reality XHTTP, 5=Reality gRPC, 11=Trojan direct, 12=VMess WS TLS, 13=VMess HTTPUpgrade TLS, 14=VLESS gRPC TLS, 15=Trojan gRPC TLS, 16=VLESS TLS Vision, 17=Trojan TLS fallback, 0=取消]: ' 1 || return 0
-        [[ "${protocols}" =~ ^[1-5]$ || "${protocols}" == 11 || "${protocols}" == 12 || "${protocols}" == 13 || "${protocols}" == 14 || "${protocols}" == 15 || "${protocols}" == 16 || "${protocols}" == 17 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        protocolOptions=(0 1 2 3 4 5 11 12 13 14 15 16 17)
         ;;
     2|4)
         core=sing-box
         [[ "${coreChoice}" != 4 ]] || secondaryCore=xray
         echoContent title '\n┌─ sing-box 协议 ───────────────────────────────────────'
         menuItem 1 'Reality Vision'
-        menuItem 5 'Reality gRPC'
-        menuItem 6 'Hysteria2'
-        menuItem 7 'AnyTLS'
-        menuItem 8 'NaiveProxy'
-        menuItem 9 'Shadowsocks'
-        menuItem 10 'TUIC'
-        menuItem 11 'Trojan direct'
-        menuItem 13 'VMess HTTPUpgrade TLS'
+        menuItem 2 'Reality gRPC'
+        menuItem 3 'Hysteria2'
+        menuItem 4 'AnyTLS'
+        menuItem 5 'NaiveProxy'
+        menuItem 6 'Shadowsocks'
+        menuItem 7 'TUIC'
+        menuItem 8 'Trojan direct'
+        menuItem 9 'VMess HTTPUpgrade TLS'
         menuReturnItem 0 '取消'
         menuClose
-        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 7=AnyTLS, 8=NaiveProxy, 9=Shadowsocks, 10=TUIC, 11=Trojan direct, 13=VMess HTTPUpgrade TLS, 0=取消]: ' 1 || return 0
-        [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 || "${protocols}" == 11 || "${protocols}" == 13 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        protocolOptions=(0 1 5 6 7 8 9 10 11 13)
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
+    dockerSetupRead protocols '协议 [默认 1，0 取消]: ' 1 || return 0
+    [[ "${protocols}" =~ ^[1-9][0-9]?$ && -n "${protocolOptions[protocols]:-}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+    protocols=${protocolOptions[protocols]}
     [[ "${protocols}" != 8 ]] ||
         printf 'NaiveProxy 服务器必须与 TLS 域名一致，原生 naive+https URI 不支持独立 SNI。\n'
     dockerSetupRead server '服务器域名或 IP（0 取消）: ' || return 0
@@ -2210,7 +2216,7 @@ dockerEditFields() {
         menuItem 14 'TUIC 参数'
         menuReturnItem 0 '取消'
         menuClose
-        dockerSetupRead choice '编辑项目: ' || return 3
+        dockerSetupReadChoice choice '编辑项目（回车取消）: ' || return 3
         [[ "${choice}" != 8 ]] || return 0
         if [[ "${choice}" == 7 ]]; then
             dockerSetupRead value '启用 HTTPS 订阅？[y/N]: ' n || return 3
@@ -2249,11 +2255,13 @@ dockerEditFields() {
                     echoContent title '\n┌─ Reality 传输 ───────────────────────────────────────'
                     menuItem 1 'Vision'
                     menuItem 2 'XHTTP'
-                    menuItem 26 'gRPC'
+                    menuItem 3 'gRPC'
                     menuReturnItem 0 '取消'
                     menuClose
-                    dockerSetupRead targetProtocol 'Reality 传输 [1=Vision, 2=XHTTP, 26=gRPC，0=取消]: ' "${protocol}" || return 3
-                    [[ "${targetProtocol}" == 1 || "${targetProtocol}" == 2 || "${targetProtocol}" == 26 ]] || return 1
+                    defaultValue=${protocol}
+                    [[ "${protocol}" != 26 ]] || defaultValue=3
+                    dockerSetupRead targetProtocol "Reality 传输 [默认 ${defaultValue}，0 取消]: " "${defaultValue}" || return 3
+                    case "${targetProtocol}" in 1|2) ;; 3) targetProtocol=26 ;; *) return 1 ;; esac
                 fi
                 sourceCore=$(jq -r --arg key "${listener}" '.core.protocols[] | select(.listener_id == $key) | .core' "${draft}") || return 1
                 primaryCore=$(jq -r '.core.type' "${draft}") || return 1
@@ -2312,7 +2320,7 @@ dockerEditFields() {
                 menuItem 3 'SNI'
                 menuReturnItem 0 '取消'
                 menuClose
-                dockerSetupRead value 'Reality 参数 [1=目标域名, 2=目标端口, 3=SNI]: ' || return 3
+                dockerSetupReadChoice value 'Reality 参数（回车取消）: ' || return 3
                 case "${value}" in
                 1) field=reality.target_host ;;
                 2) field=reality.target_port ;;
@@ -2333,7 +2341,7 @@ dockerEditFields() {
                     menuItem 3 '模式'
                     menuReturnItem 0 '取消'
                     menuClose
-                    dockerSetupRead value 'XHTTP 参数 [1=路径, 2=Host, 3=模式]: ' || return 3
+                    dockerSetupReadChoice value 'XHTTP 参数（回车取消）: ' || return 3
                     case "${value}" in 1) field=xhttp.path ;; 2) field=xhttp.host ;; 3) field=xhttp.mode ;; *) return 1 ;; esac
                 elif [[ "${protocol}" == 26 ]]; then
                     field=grpc.service_name
@@ -2356,7 +2364,7 @@ dockerEditFields() {
                 menuItem 5 '伪装 HTTPS/local'
                 menuReturnItem 0 '取消'
                 menuClose
-                dockerSetupRead value 'Hysteria2 参数 [1=拥塞模式, 2=服务端上行 Mbps, 3=服务端下行 Mbps, 4=混淆, 5=伪装 HTTPS/local]: ' || return 3
+                dockerSetupReadChoice value 'Hysteria2 参数（回车取消）: ' || return 3
                 case "${value}" in
                 1) field=hy2.bandwidth_mode ;;
                 2) field=hy2.up_mbps ;;
@@ -2378,7 +2386,7 @@ dockerEditFields() {
                 menuItem 4 '0-RTT'
                 menuReturnItem 0 '取消'
                 menuClose
-                dockerSetupRead value 'TUIC 参数 [1=拥塞控制, 2=认证超时, 3=心跳间隔, 4=0-RTT]: ' || return 3
+                dockerSetupReadChoice value 'TUIC 参数（回车取消）: ' || return 3
                 case "${value}" in
                 1) field=tuic.congestion_control ;;
                 2) field=tuic.auth_timeout ;;

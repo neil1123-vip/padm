@@ -10,10 +10,10 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 协议与入口、站点与证书、路由与访问控制、核心与服务、系统与脚本、
 高级/危险操作 8 类，并复用共享菜单样式。当前路径见 [README](../README.md#docker-版)；
 下文历史记录的顶层 `9` 协议、`17` 路由和 `18` 维护，分别对应
-`3 → 9`、`5 → 1 → 9` 和 `7 → 1`，专项操作编号保留。
+`3 → 8`、`5 → 1 → 8` 和 `7 → 1`。菜单按可见操作连续编号。
 SOCKS5 入站保留不可用说明；两版核心升级机制保持原样，Docker 继续整包验签升级与回滚。
 共享样式也覆盖首次配置、TLS 管理和配置编辑的标题、列表及摘要边框；
-专项操作编号、输入顺序、默认值、凭据隐藏、确认与事务和非交互 `--preview` 输出保持。
+输入顺序、默认值、凭据隐藏、确认与事务和非交互 `--preview` 输出保持。
 本表支持状态和历史验收结论不变。
 
 后续实施顺序和验收门槛见
@@ -402,7 +402,7 @@ Hy2/TUIC 停止后再由新客户端进程验证拒绝。三种独立场景按�
 不承诺崩溃或开机自动恢复，TUIC 不宣称客户端自动换端口。
 `1/2/26` 补齐 v3 Xray Reality ML-DSA-65 生成/复用、配对校验、配置和 `pqv` 分享传播；
 仅参数重生成时按原生 `target_host:port` 的 SNI 探测段决定，独立 SNI 的可用性不由此证明。
-`21–25/27/29` 补齐 `--protocol-rebuild ID --repair-nginx` 及菜单 `3 → 9 → 21`，
+`21–25/27/29` 补齐 `--protocol-rebuild ID --repair-nginx` 及菜单 `3 → 8 → 21`，
 只豁免受管 `default.conf` 正文损坏或缺失，其它配置、部署、权限和属主仍严格核验，
 站点 Fail2ban 组合拒绝。未保护 WS 21 可正常增删与改端口，受保护来源保持冻结。
 下文早期阶段的“完整管理尚未交付”是当时的结论；当前协议管理状态以本节及逐项表为准，
@@ -753,8 +753,8 @@ TUN/TProxy/Redirect 的透明核心保留 `cap_drop: ALL`，仅授予 `NET_ADMIN
 | `nginx` | 站点与证书 -> 传统 TLS fallback | `supported` | `nginx` | bridge | 独立 Nginx 容器，承载 WS/HTTPUpgrade/gRPC 反代与传统 TLS fallback 的 PROXY v1 HTTP/1.1、HTTP/2 后端；默认页、静态目录、302 与传统 TLS ALPN 经菜单/CLI 事务管理。 |
 | `tls-files` | 站点与证书 -> 本机 TLS 证书 | `supported` | `nginx` / `acme` | bridge | 菜单/CLI 校验、导入轮换和只读挂载；Nginx 与 Xray/sing-box 逐消费者校验、重载/重建及健康失败恢复旧证书。核心端仅交付受管 TLS 文件底座，不代表新增协议或完整管理。 |
 | `acme-dns` | 站点与证书 -> 本机 TLS 证书 | `supported` | `acme` | bridge + 宿主 CLI 调度 | 菜单/CLI DNS-01 issue/renew 及自动续期启停/状态；root 私有输入、唯一 systemd/cron 任务、部署锁和候选账户/证书事务；未到期跳过，更新/回滚保留最新输入，卸载只撤销受管任务。 |
-| `subscription` | 订阅与用户 -> HTTPS 订阅发布（`2 → 7`） | `supported` | `nginx` / `subscription` | bridge | 4A.7/4A.9 复用至少一个 `21–25/27/29` 入口及同域受管 TLS，含纯 sing-box `23`；无 `21` 需 `x-padm-subscription-nginx-tls`，含 fallback 发布另需 `x-padm-subscription-fallback-tls`。HTTP/1.1 与 HTTP/2 后端共用 token 路由。菜单及 `subscription publish` 可查看状态和启停，保留账号、分享组与 token；分享 URL 按首个适用入口的实际公开端口。独立域名/证书发布与 H3 未迁移，27/29 新范围验收见 4A.9。 |
-| `subscription-traffic` | 账号管理 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/collect/limit/reset；菜单 `10 -> 9` 查看不隐式采集，额度 `0` 表示不限额，设置/重置各确认一次，重置保留额度。沿用 CLI 采样与失败副作用；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
+| `subscription` | 订阅与用户 -> HTTPS 订阅发布（`2 → 6`） | `supported` | `nginx` / `subscription` | bridge | 4A.7/4A.9 复用至少一个 `21–25/27/29` 入口及同域受管 TLS，含纯 sing-box `23`；无 `21` 需 `x-padm-subscription-nginx-tls`，含 fallback 发布另需 `x-padm-subscription-fallback-tls`。HTTP/1.1 与 HTTP/2 后端共用 token 路由。菜单及 `subscription publish` 可查看状态和启停，保留账号、分享组与 token；分享 URL 按首个适用入口的实际公开端口。独立域名/证书发布与 H3 未迁移，27/29 新范围验收见 4A.9。 |
+| `subscription-traffic` | 订阅与用户 -> 流量与额度（`2 → 3`） | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/collect/limit/reset；查看不隐式采集，额度 `0` 表示不限额，设置/重置各确认一次，重置保留额度。沿用 CLI 采样与失败副作用；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1–4A.4 账号底座、账号 CLI/菜单事务、独立 token 分享组及业务备份恢复已交付；账号/入口筛选、启停/轮换、纯内容与 HTTPS 链接，账号/组/额度/累计 merge/replace 恢复均复用候选事务，轮换与恢复不回退最新累计。4A.2a 凭据不进外部 argv，修复首次 SS 关联生成与迁移入口选择；已有账号须显式设置新增入口授权。CDN/H3 与完整多服务器工作流按独立功能边界验收。 |
 | `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.14 的私网 API、单 Peer 迁移、v2 多被控逐节点管理、自动同步和隔离 amd64 双/三节点业务已验；6A.19/6A.23 支持隔离旧主控后的 v1/v2 新身份空目标恢复并撤权/rebind。6A.38–6A.41 补齐正式 `.7` 本地完整独立内核双机的单 Peer 自主增删、启用态真实重启、固定地址密钥/端口迁移，以及关联改址撤权、新邀请恢复、原日历自主修改传播、业务与累计；6A.41 的 source-check rc 15 保留失败。6A.44 的预加载 helper 与 6A.45 的完整 Peer CLI 预热条件分别补齐固定本地 server fresh 见证；后者当前 nonce 完整 Peer CLI/主控均 rc 0，首轮准备失败保留且锁 owner 未查无归因，30 秒窗不变，防护和原失败同因未证。6A.46 补齐固定本地 amd64/IPv4/单 Peer 新机角色/WG 恢复、新控制身份/rebind、原日历自主传播及 TLS/计量；恢复联网，仅独验断网。公网多机、arm64/IPv6、多 Peer 新主机灾备及适用重启仍缺，固定 B 单 Xray WS 恢复不替代这些证据。v2 关联地址/密钥迁移、控制面 Fail2ban 明确拒绝，不新增为开发项；灾备及网络门槛分别归 `interactive-menu`、`wireguard`。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 菜单/CLI、稳定只读挑战根、ops 独占 `active/`、不停 Nginx 和失败恢复已交付。Debian 13 amd64 正式公网签发/在线换证、3.41.4 消费失败全链回滚已验；自然到期续期、原生 arm64/公网 IPv6 和当前版本其它适用生命周期仍缺。自然续期与 `acme-standalone` 共用门槛，旧版本通过不外推当前全组合。 |

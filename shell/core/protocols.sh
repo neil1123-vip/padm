@@ -407,7 +407,7 @@ protocolCoreUnsupportedReason() {
     done
     if [[ "${core}" == xray ]] && protocolSelectionHasAny "${selection}" 28 &&
         protocolSelectionHasAny "${selection}" 21 22 23 24 25 27 29; then
-        printf 'Trojan TCP TLS direct（28）不能与 TLS 回落协议共用入口；需要组合时请将 28 改为 29'
+        printf 'Trojan TCP TLS direct（协议 ID 28）不能与 TLS 回落协议共用入口；需要组合时请选择 Trojan TCP TLS fallback（协议 ID 29）'
         return 0
     fi
     return 1
@@ -437,13 +437,15 @@ protocolSelectionCurrentIdsForCore() {
 protocolRegistryMenuByLifecycle() {
     local allowedIds=$1
     local lifecycle=$2
+    local -n choiceIds=$3
     local ids id
     ids=$(protocolCapabilityIdsByLifecycle "${lifecycle}")
     IFS=',' read -ra idArray <<<"${ids}"
     for id in "${idArray[@]}"; do
         [[ -n "${id}" ]] || continue
         protocolSelectionHasAny "${allowedIds}" "${id}" || continue
-        menuItem "${id}" "$(protocolCapabilityMeta "${id}" name)" "$(protocolMenuDescription "${id}")"
+        choiceIds+=("${id}")
+        menuItem "$((${#choiceIds[@]} - 1))" "$(protocolCapabilityMeta "${id}" name)" "$(protocolMenuDescription "${id}")"
     done
 }
 

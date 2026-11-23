@@ -1311,10 +1311,10 @@ EOF
         pageChoiceSequence="f 1"
         regressionExpectStatus 2 showRealityTargetScanResults all interactive 2
         [[ "${realityTargetHost}" == "page-11.example.com" ]]
-        pageChoiceSequence="r R  0 1"
+        pageChoiceSequence="r R  1"
         regressionExpectStatus 3 showRealityTargetScanResults all interactive
         [[ "${pageChoiceSequence}" == 1 ]]
-        [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "7" ]]
+        [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "6" ]]
         REALITY_TARGET_RESULT_PAGE_SIZE=0
         showRealityTargetScanResults all once
         local qualityMenus=0 changed=0
@@ -1327,6 +1327,9 @@ EOF
         autoConfirm() { printf -v "$4" '%s' y; }
         changeInstalledRealityTarget() { changed=$((changed + 1)); }
         showRealityTargetQualityActions fixture.example.com:443 <<< $'1\n0\n1\n1'
+        [[ "${qualityMenus}" == 2 && "${changed}" == 1 ]]
+        qualityMenus=0
+        showRealityTargetQualityActions fixture.example.com:443 <<< $'1\n\n'
         [[ "${qualityMenus}" == 2 && "${changed}" == 1 ]]
         qualityMenus=0
         showRealityTargetQualityActions fixture.example.com:443 <<< '1'
@@ -1652,6 +1655,8 @@ manual.example.com:8443
         unset PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN
     )
     regressionExpectStatus 2 selectRealityTargetCandidateInteractive <<< $'0\n1'
+    regressionExpectStatus 2 selectRealityTargetCandidateInteractive <<< $'\n1'
+    regressionExpectStatus 1 selectRealityTargetCandidateInteractive </dev/null
 
     if [[ -n "${oldCandidatesFile}" ]]; then
         export PADM_REALITY_TARGET_CANDIDATES_FILE="${oldCandidatesFile}"

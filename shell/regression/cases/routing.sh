@@ -1772,7 +1772,7 @@ runRoutingRejectsUnsafeDirRegression() (
 runSocks5UdpAssociateRegression() (
     local root="${TMP_DIR}/socks5-udp-associate"
     local allowAllMode=true
-    local partialKey= inputKey beforePartial
+    local partialKey= inputKey beforePartial ipType=
     local socks5RoutingUUID=keep-uuid socks5InboundDomainStrategyStatus=keep-family
     local socks5InboundRoutingDomainStatus=keep-mode socks5InboundRoutingDomain=keep-domains
 
@@ -1794,7 +1794,7 @@ YAML
     autoRead() {
         case "$1" in
         socks5_inbound_uuid) printf -v "$3" 'udp-associate-user' ;;
-        socks5_inbound_ip_type) printf -v "$3" '1' ;;
+        socks5_inbound_ip_type) printf -v "$3" '%s' "${ipType}" ;;
         socks5_inbound_source_ips) printf -v "$3" '10.0.0.1,10.0.0.2' ;;
         socks5_inbound_allow_all)
             if [[ "${allowAllMode}" == "true" ]]; then
@@ -1810,6 +1810,51 @@ YAML
         [[ "$1" != "${partialKey}" ]]
     }
 
+    ipType=0
+    regressionExpectStatus 2 setSocks5Inbound
+    [[ ! -e "${singBoxConfigPath}20_socks5_inbounds.json" ]]
+    (
+        local inputFd nextInput restoreStatus menuStatus viewed rollbackCalls errorText cancelBackup
+        unset AUTO_INSTALL
+        readInstallType() { :; }
+        installSingBox() { :; }
+        autoRead() {
+            case "$1" in
+            socks5_inbound_uuid) printf -v "$3" 'udp-associate-user' ;;
+            *) IFS= read -r "$3" ;;
+            esac
+        }
+        readSingBoxPortResult() {
+            local -n resultRef=$1
+            resultRef=(10891)
+            PADM_PORT_ALLOW_TRANSACTION_KEYS=port:ufw:tcp:10891
+        }
+        padmRollbackPortAllowTransaction() {
+            [[ "${PADM_PORT_ALLOW_TRANSACTION_KEYS}" == port:ufw:tcp:10891 ]] || return 1
+            rollbackCalls=$((rollbackCalls + 1))
+            cancelBackup=${PADM_SOCKS5_BACKUP_DIR}
+            return "${restoreStatus}"
+        }
+        showSingBoxRoutingRules() { viewed=$((viewed + 1)); }
+        errorCard() { errorText=$1; }
+        for restoreStatus in 0 1; do
+            menuStatus=0 viewed=0 rollbackCalls=0 errorText= cancelBackup=
+            exec {inputFd}< <(printf '1\n0\n2\n\nnext-parent-action\n')
+            socks5InboundRoutingMenu <&"${inputFd}" || menuStatus=$?
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${menuStatus}" == "${restoreStatus}" && "${rollbackCalls}" == 1 &&
+                ! -e "${singBoxConfigPath}20_socks5_inbounds.json" ]] || return 1
+            if [[ "${restoreStatus}" == 0 ]]; then
+                [[ "${viewed}" == 1 && "${nextInput}" == next-parent-action &&
+                    -z "${errorText}" && ! -e "${cancelBackup}" ]] || return 1
+            else
+                [[ "${viewed}" == 0 && "${nextInput}" == 2 &&
+                    "${errorText}" == *'防火墙规则回滚失败' ]] || return 1
+            fi
+        done
+    ) || return 1
+    ipType=
     setSocks5Inbound
     jq -e '
       .inbounds[0].type == "socks" and
@@ -1875,6 +1920,7 @@ YAML
     ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null
 
     # 模拟 read 已写入不完整末行却返回 EOF，所有阶段必须在写配置前退出。
+    ipType=1
     beforePartial=$(sha256sum "${singBoxConfigPath}"*.json)
     for inputKey in socks5_inbound_uuid socks5_inbound_ip_type socks5_inbound_source_ips \
         socks5_inbound_allow_all socks5_inbound_domains; do

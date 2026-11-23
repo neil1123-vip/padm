@@ -3154,7 +3154,8 @@ installSingBoxReality() {
 selectCoreInstallProtocols() {
     local core=$1
     local preselectedProtocols=${2:-}
-    local allowedIds unsupportedReason=
+    local allowedIds unsupportedReason= choice
+    local -a protocolIdsByChoice=(0) inputChoices=()
     allowedIds=$(protocolSelectionCurrentIdsForCore "${core}") || return 1
     selectCustomInstallType=
     if [[ -z "${preselectedProtocols}" ]]; then
@@ -3163,14 +3164,14 @@ selectCoreInstallProtocols() {
         if [[ "${core}" == "xray" ]]; then
             menuLine "推荐新人：优先选 1；需要 XHTTP 时选 2"
         else
-            menuLine "推荐新人：优先选 1 或 3；XHTTP 为 Xray-only"
+            menuLine "推荐新人：优先选 1 或 2；XHTTP 为 Xray-only"
         fi
         menuLine "传统 TLS 类协议仅在客户端兼容或迁移需要时选择"
         menuLine "Reality 不申请本机证书；严格域名模式仅支持单选 Reality Vision"
         menuLine "推荐能力"
-        protocolRegistryMenuByLifecycle "${allowedIds}" recommended
+        protocolRegistryMenuByLifecycle "${allowedIds}" recommended protocolIdsByChoice
         menuLine "高级能力"
-        protocolRegistryMenuByLifecycle "${allowedIds}" advanced
+        protocolRegistryMenuByLifecycle "${allowedIds}" advanced protocolIdsByChoice
         menuReturnItem 0 "取消"
         menuClose
     fi
@@ -3178,13 +3179,24 @@ selectCoreInstallProtocols() {
         if [[ -n "${preselectedProtocols}" ]]; then
             selectCustomInstallType=${preselectedProtocols}
         else
-            menuReadChoice protocols "请选择协议[逗号分隔多选]:" selectCustomInstallType true || return 1
+            menuReadChoice protocols "请选择协议[逗号分隔多选，回车或 0 取消]:" selectCustomInstallType interactive || return 1
             if [[ "${selectCustomInstallType}" == 0 ]]; then
                 selectCustomInstallType=
                 return 1
             fi
         fi
         selectCustomInstallType=$(protocolSelectionNormalizeCsv "${selectCustomInstallType}") || return 1
+        if [[ -z "${preselectedProtocols}${AUTO_INSTALL:-}" ]]; then
+            IFS=',' read -ra inputChoices <<<"${selectCustomInstallType#,}"
+            selectCustomInstallType=,
+            for choice in "${inputChoices[@]}"; do
+                if [[ ! "${choice}" =~ ^[1-9][0-9]?$ || -z "${protocolIdsByChoice[choice]:-}" ]]; then
+                    selectCustomInstallType=
+                    break
+                fi
+                selectCustomInstallType+="${protocolIdsByChoice[choice]},"
+            done
+        fi
         unsupportedReason=$(protocolCoreUnsupportedReason "${core}" "${selectCustomInstallType}" 2>/dev/null || true)
         if [[ -z "${unsupportedReason}" && "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] &&
             protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then

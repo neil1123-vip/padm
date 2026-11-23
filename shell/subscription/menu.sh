@@ -551,7 +551,7 @@ manageSubscriptionCatalog() {
         if publicationConfig=$(nginxConfigFilePath subscribe.conf) &&
             [[ -f "${publicationConfig}" && ! -L "${publicationConfig}" ]]; then
             canDisablePublication=true
-            menuDangerItem 10 "停用发布服务" "停用本机公网订阅链接，保留已保存的订阅和节点配置"
+            menuDangerItem 9 "停用发布服务" "停用本机公网订阅链接，保留已保存的订阅和节点配置"
         fi
         menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
@@ -586,7 +586,7 @@ manageSubscriptionCatalog() {
                 coreSelectionErrorCard
             fi
             ;;
-        10)
+        9)
             if [[ "${canDisablePublication}" != "true" ]]; then
                 coreSelectionErrorCard
                 continue
@@ -1274,7 +1274,7 @@ editUserSubscriptionsMenu() {
         if [[ -n "${pendingFields}" ]]; then
             editPrompt="请选择[回车保存并立即同步]:"
         else
-            editPrompt="请选择:"
+            editPrompt="请选择（回车返回）："
         fi
         menuReadChoice edit_user_subscription_menu "${editPrompt}" choice true || return 1
         if [[ "${choice}" == 0 ]]; then
@@ -1282,10 +1282,7 @@ editUserSubscriptionsMenu() {
             return 1
         fi
         if [[ -z "${choice}" ]]; then
-            if [[ -z "${pendingFields}" ]]; then
-                coreSelectionErrorCard
-                continue
-            fi
+            [[ -n "${pendingFields}" ]] || return 0
             choice=$((6 - fieldOffset))
         fi
         fieldChoices=$(jq -ern --arg choice "${choice}" --argjson offset "${fieldOffset}" '
@@ -1597,7 +1594,7 @@ manageSubscriptionPendingInvites() {
         done <<<"${inviteRows}"
         menuClose
         while true; do
-            menuReadChoice subscription_cancel_invite_alias "输入要取消的唯一别名[0 返回，纯数字别名使用 id:别名]:" alias interactive || return 0
+            menuReadChoice subscription_cancel_invite_alias "输入要取消的唯一别名[回车或 0 返回，纯数字别名使用 id:别名]:" alias interactive || return 0
             [[ "${alias}" != 0 ]] || return 0
             alias=${alias#id:}
             inviteId=$(jq -r --arg alias "${alias}" 'first(.[]? | select(.alias == $alias)).invite_id // empty' <<<"${pendingJson}") || return 1

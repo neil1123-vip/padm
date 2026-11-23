@@ -597,17 +597,18 @@ for signal in int term; do
     unset FAKE_SETUP_MODE
 done
 
-for candidateCase in success return eof final-no no-a signature-fail; do
+for candidateCase in success return empty eof final-no no-a signature-fail; do
     newState "candidates-${candidateCase}"
     export FAKE_SETUP_MODE=candidates
     input=$'1\n1\nproxy.example.com\n1\n24443\n\n'
     expected=0
     case "${candidateCase}" in
     success) input+=$'1\n\ny\n' ;;
-    return) input+=$'r\n' ;;
+    return) input+=$'r\n0\n' ;;
+    empty) input+=$'\n' ;;
     eof) input+=$'\004' ;;
     final-no) input+=$'1\n\nn\n' ;;
-    no-a) FAKE_SETUP_MODE=ok; input+=$'r\n' ;;
+    no-a) FAKE_SETUP_MODE=ok; input+=$'0\n' ;;
     signature-fail) FAKE_SETUP_MODE=signature-fail; expected=16 ;;
     esac
     runPty "${expected}" "candidates-${candidateCase}" "${input}" setup "${ASSET_ARGS[@]}"
@@ -628,6 +629,8 @@ for candidateCase in success return eof final-no no-a signature-fail; do
         fail '首配候选交互占用了部署锁'
     if [[ "${candidateCase}" == signature-fail ]]; then
         [[ ! -s "${EVENTS}" ]] || fail '候选探测绕过发布验签'
+    elif [[ "${candidateCase}" == return ]]; then
+        grep -Fq '输入无效，请输入编号或 n/p/f/a/m，0 返回' "${CONTROL_LOG}" || fail '候选菜单仍接受旧返回键'
     elif [[ "${candidateCase}" == no-a ]]; then
         grep -Fq '总数：0' "${CONTROL_LOG}" || fail '候选菜单包含未实测 A 级目标'
     fi
@@ -858,7 +861,7 @@ REINSTALL_RUNTIME=(
     "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base"
     "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json"
 )
-REINSTALL_SS_INPUT=$'2\n9\nnext.example.com\n3\n24459\ny\n'
+REINSTALL_SS_INPUT=$'2\n6\nnext.example.com\n3\n24459\ny\n'
 before=$(sha256sum "${REINSTALL_RUNTIME[@]}" "${REINSTALL_DATA[@]}")
 export FAKE_SETUP_UUID=22222222-2222-4222-8222-222222222222 FAKE_SETUP_HEX=b
 export FAKE_SETUP_MODE=health-fail-once
@@ -917,7 +920,7 @@ for transportCase in xray-xhttp xray-grpc singbox-grpc; do
     case "${transportCase}" in
     xray-xhttp) core=xray; protocol=2; input=${REALITY_INPUT/$'1\n1\n'/$'1\n4\n'} ;;
     xray-grpc) core=xray; protocol=26; input=${REALITY_INPUT/$'1\n1\n'/$'1\n5\n'} ;;
-    singbox-grpc) core=sing-box; protocol=26; input=${SINGBOX_INPUT/$'2\n1\n'/$'2\n5\n'} ;;
+    singbox-grpc) core=sing-box; protocol=26; input=${SINGBOX_INPUT/$'2\n1\n'/$'2\n2\n'} ;;
     esac
     before=$(snapshot)
     runPty 0 "${transportCase}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
@@ -963,7 +966,7 @@ for dualCase in dual-xray dual-singbox dual-xray-xhttp dual-xray-grpc dual-singb
         input=${input/$'3\n1\n'/$'3\n5\n'}; protocol=26; listener=entry-reality-grpc
         ;;
     dual-singbox-grpc)
-        input=${input/$'4\n1\n'/$'4\n5\n'}; protocol=26; listener=entry-reality-grpc
+        input=${input/$'4\n1\n'/$'4\n2\n'}; protocol=26; listener=entry-reality-grpc
         ;;
     esac
     runPty 0 "${dualCase}" "${input}" setup "${ASSET_ARGS[@]}"
@@ -1000,8 +1003,8 @@ fi
 if [[ "${SECTION}" == all || "${SECTION}" == encrypted ||
     "${SECTION}" == encrypted-udp || "${SECTION}" == encrypted-tcp ]]; then
 # Shadowsocks 首配不读取 TLS 或订阅参数，仅在确认后生成两份独立密码。
-SS_INPUT=$'2\n9\nproxy.example.com\n3\n24459\ny\n'
-DUAL_SS_INPUT=$'4\n9\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\n24459\ny\n'
+SS_INPUT=$'2\n6\nproxy.example.com\n3\n24459\ny\n'
+DUAL_SS_INPUT=$'4\n6\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\n24459\ny\n'
 if [[ "${SECTION}" != encrypted-tcp ]]; then
 for ssCase in ss-default dual-ss; do
     newState "${ssCase}"
@@ -1138,17 +1141,17 @@ else
     cp -- "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/ss-original.json"
 fi
 
-printf -v HY2_INPUT '2\n6\nproxy.example.com\n1\nhy2.example.com\n24449\n\n\n\nn\n\n2\n%s\n%s\ny\n' \
+printf -v HY2_INPUT '2\n3\nproxy.example.com\n1\nhy2.example.com\n24449\n\n\n\nn\n\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_HY2_INPUT '4\n6\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhy2.example.com\n24449\nbrutal\n120\n60\ny\nhttps://www.example.com/health\n2\n%s\n%s\ny\n' \
+printf -v DUAL_HY2_INPUT '4\n3\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhy2.example.com\n24449\nbrutal\n120\n60\ny\nhttps://www.example.com/health\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v ANYTLS_INPUT '2\n7\nproxy.example.com\n3\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
+printf -v ANYTLS_INPUT '2\n4\nproxy.example.com\n3\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_ANYTLS_INPUT '4\n7\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
+printf -v DUAL_ANYTLS_INPUT '4\n4\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v NAIVE_INPUT '2\n8\nnaive.example.com\n3\n\n24455\n2\n%s\n%s\ny\n' \
+printf -v NAIVE_INPUT '2\n5\nnaive.example.com\n3\n\n24455\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_NAIVE_INPUT '4\n8\nnaive.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nnaive.example.com\n24455\n2\n%s\n%s\ny\n' \
+printf -v DUAL_NAIVE_INPUT '4\n5\nnaive.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nnaive.example.com\n24455\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 if [[ "${SECTION}" != encrypted-udp ]]; then
 for tlsProtocolCase in anytls-default dual-anytls naive-default dual-naive; do
@@ -1229,7 +1232,7 @@ for rejectedSetup in naive-domain naive-port; do
     newState "${rejectedSetup}"
     before=$(snapshot)
     if [[ "${rejectedSetup}" == naive-domain ]]; then
-        input=$'2\n8\nproxy.example.com\n1\nnaive.example.com\n'; expected=2
+        input=$'2\n5\nproxy.example.com\n1\nnaive.example.com\n'; expected=2
     else
         input=${DUAL_NAIVE_INPUT/24455/24445}; expected=11
     fi
@@ -1714,9 +1717,9 @@ for naiveTlsCase in managed dns-success dns-fail; do
         cp -- "${TEST_ROOT}/cert.pem" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/naive.example.com.crt"
         cp -- "${TEST_ROOT}/key.pem" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/naive.example.com.key"
         chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/naive.example.com.key"
-        input=$'2\n8\nnaive.example.com\n1\n\n24455\n1\ny\n'
+        input=$'2\n5\nnaive.example.com\n1\n\n24455\n1\ny\n'
     else
-        printf -v input '2\n8\nnaive.example.com\n1\n\n24455\n3\nadmin@example.com\ndns_cf\n%s\ny\n' \
+        printf -v input '2\n5\nnaive.example.com\n1\n\n24455\n3\nadmin@example.com\ndns_cf\n%s\ny\n' \
             "${TEST_ROOT}/dns.env"
     fi
     if [[ "${naiveTlsCase}" == dns-fail ]]; then
@@ -1767,7 +1770,7 @@ runPty 0 edit-xhttp $'12\nentry-1\n1\n/new-xhttp\n12\nentry-1\n2\ncdn.example.co
 jq -e '.core.protocols[1] | .id == 2 and .reality.server_name == "next.example.com" and
     .xhttp == {path: "/new-xhttp", host: "cdn.example.com", mode: "packet-up"}' "${SPEC}" >/dev/null ||
     fail 'existing XHTTP transport or Reality parameter editing failed'
-runPty 0 derive-grpc $'11\nentry-1\n26\n2\n24447\n8\ny\n' edit "${ASSET_ARGS[@]}"
+runPty 0 derive-grpc $'11\nentry-1\n3\n2\n24447\n8\ny\n' edit "${ASSET_ARGS[@]}"
 jq -e '.core.secondary_type == "sing-box" and
   (.core.protocols[2] | .id == 26 and .listener_id == "entry-2" and .core == "sing-box" and
     .grpc == {service_name: "grpc"} and .xhttp == null) and
@@ -1802,9 +1805,9 @@ fi
 
 if [[ "${SECTION}" == all || "${SECTION}" == encrypted || "${SECTION}" == encrypted-udp ]]; then
 # TUIC 复用首配与编辑事务；取消、凭据冻结和 TLS 消费者删除均检查受管状态。
-printf -v TUIC_INPUT '2\n10\nproxy.example.com\n3\ntuic.example.com\n24465\n\n\n\nn\n2\n%s\n%s\ny\n' \
+printf -v TUIC_INPUT '2\n7\nproxy.example.com\n3\ntuic.example.com\n24465\n\n\n\nn\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_TUIC_INPUT '4\n10\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntuic.example.com\n24465\nbbr\n8s\n20s\ny\n2\n%s\n%s\ny\n' \
+printf -v DUAL_TUIC_INPUT '4\n7\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntuic.example.com\n24465\nbbr\n8s\n20s\ny\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for tuicCase in tuic-default dual-tuic; do
     newState "${tuicCase}"
@@ -1940,13 +1943,13 @@ fi
 if [[ "${SECTION}" == all || "${SECTION}" == transports ]]; then
 if [[ -z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == trojan ]]; then
 # Trojan direct 在两核心共用 UUID/password，复制和删除沿用受管编辑事务。
-printf -v TROJAN_INPUT '1\n11\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+printf -v TROJAN_INPUT '1\n6\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v SING_TROJAN_INPUT '2\n11\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+printf -v SING_TROJAN_INPUT '2\n8\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_TROJAN_INPUT '3\n11\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+printf -v DUAL_TROJAN_INPUT '3\n6\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_SING_TROJAN_INPUT '4\n11\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+printf -v DUAL_SING_TROJAN_INPUT '4\n8\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for trojanCase in trojan-xray trojan-sing dual-trojan-xray dual-trojan-sing; do
     newState "${trojanCase}"
@@ -2087,9 +2090,9 @@ fi
 
 if [[ -z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == ws-vmess ]]; then
 # VMess WS TLS 复用现有 WS 事务，单核不发布、双核发布均由首配明确选择。
-printf -v VMESS_INPUT '1\n12\nproxy.example.com\n3\nvmess.example.com\n24481\n2\n%s\n%s\nn\ny\n' \
+printf -v VMESS_INPUT '1\n7\nproxy.example.com\n3\nvmess.example.com\n24481\n2\n%s\n%s\nn\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_VMESS_INPUT '3\n12\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nvmess.example.com\n24481\n2\n%s\n%s\ny\ny\n' \
+printf -v DUAL_VMESS_INPUT '3\n7\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nvmess.example.com\n24481\n2\n%s\n%s\ny\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for vmessCase in vmess-single vmess-dual; do
     newState "${vmessCase}"
@@ -2195,23 +2198,23 @@ fi
 
 if [[ -z "${TRANSPORT_GROUP}" || "${TRANSPORT_GROUP}" == httpupgrade ]]; then
 # HTTPUpgrade 与 WS 共用受管 TLS，但入口路径及两核后端保持独立。
-printf -v HTTPUPGRADE_INPUT '1\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\nn\ny\n' \
+printf -v HTTPUPGRADE_INPUT '1\n8\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\nn\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for httpupgradeCase in httpupgrade-xray httpupgrade-sing dual-httpupgrade-xray dual-httpupgrade-sing; do
-    core=xray; coreChoice=1; single=true
+    core=xray; coreChoice=1; protocolChoice=8; single=true
     case "${httpupgradeCase}" in
-    httpupgrade-sing) core=sing-box; coreChoice=2 ;;
+    httpupgrade-sing) core=sing-box; coreChoice=2; protocolChoice=9 ;;
     dual-httpupgrade-xray) coreChoice=3; single=false ;;
-    dual-httpupgrade-sing) core=sing-box; coreChoice=4; single=false ;;
+    dual-httpupgrade-sing) core=sing-box; coreChoice=4; protocolChoice=9; single=false ;;
     esac
     subscription=false; subscriptionAnswer=n
     [[ "${core}" != sing-box ]] || { subscription=true; subscriptionAnswer=y; }
     if [[ "${single}" == true ]]; then
-        printf -v input '%s\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\n%s\ny\n' \
-            "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem" "${subscriptionAnswer}"
+        printf -v input '%s\n%s\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\n%s\ny\n' \
+            "${coreChoice}" "${protocolChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem" "${subscriptionAnswer}"
     else
-        printf -v input '%s\n13\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhttpupgrade.example.com\n24485\n2\n%s\n%s\n%s\ny\n' \
-            "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem" "${subscriptionAnswer}"
+        printf -v input '%s\n%s\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhttpupgrade.example.com\n24485\n2\n%s\n%s\n%s\ny\n' \
+            "${coreChoice}" "${protocolChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem" "${subscriptionAnswer}"
     fi
     newState "${httpupgradeCase}"
     before=$(snapshot)
@@ -2411,8 +2414,8 @@ done
 
 # 两类 Xray gRPC TLS 复用首配事务，不生成无用 Reality 凭据。
 for grpcProtocol in 24 25; do
-    grpcChoice=14; backend=31301; scheme=vless; listener=entry-vless-grpc-tls
-    [[ "${grpcProtocol}" != 25 ]] || { grpcChoice=15; backend=31304; scheme=trojan; listener=entry-trojan-grpc-tls; }
+    grpcChoice=9; backend=31301; scheme=vless; listener=entry-vless-grpc-tls
+    [[ "${grpcProtocol}" != 25 ]] || { grpcChoice=10; backend=31304; scheme=trojan; listener=entry-trojan-grpc-tls; }
     printf -v grpcInput '1\n%s\nproxy.example.com\n3\ngrpc.example.com\n24491\n2\n%s\n%s\nn\ny\n' \
         "${grpcChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
     for grpcTopology in single dual; do
@@ -2574,8 +2577,8 @@ for grpcProtocol in 24 25; do
 done
 # 传统 TLS 首配仍走同一候选事务，fallback 后端不承担 TLS。
 for fallbackProtocol in 27 29; do
-    fallbackChoice=16; listener=entry-vless-tls-vision
-    [[ "${fallbackProtocol}" != 29 ]] || { fallbackChoice=17; listener=entry-trojan-tls-fallback; }
+    fallbackChoice=11; listener=entry-vless-tls-vision
+    [[ "${fallbackProtocol}" != 29 ]] || { fallbackChoice=12; listener=entry-trojan-tls-fallback; }
     printf -v fallbackInput '1\n%s\nproxy.example.com\n3\nfallback.example.com\n24501\n2\n%s\n%s\nn\ny\n' \
         "${fallbackChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
     for fallbackTopology in single dual; do

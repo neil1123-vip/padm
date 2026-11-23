@@ -178,7 +178,7 @@ targetMainReply() {
         ;;
     9)
         path=('协议与入口')
-        input=$'9\n'
+        input=$'8\n'
         targetReplyRaw "${MAIN_MENU_TITLE}" $'3\n'
         ;;
     10|11|12|15)
@@ -190,7 +190,7 @@ targetMainReply() {
         ;;
     17)
         path=('分流工具' '路由与访问控制')
-        input=$'9\n'
+        input=$'8\n'
         targetReplyRaw "${MAIN_MENU_TITLE}" $'5\n'
         targetReplyRaw '┌─ 路由与访问控制' $'1\n'
         ;;
@@ -419,7 +419,6 @@ runTargetsDriver() {
         targetReply 'Reality 目标站后续操作' $'r\n'
         targetReply 'Reality 目标站后续操作' $'R\n'
         targetReply 'Reality 目标站后续操作' $'\n'
-        targetReply 'Reality 目标站后续操作' $'0\n'
         ;;
     int|term)
         targetReply 'Docker Reality 目标站' $'1\n'
@@ -649,7 +648,7 @@ runXhttpDriver() {
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         done
         for answer in custom defaults; do
-            targetReply 'Docker XHTTP 管理' $'6\n'
+            targetReply 'Docker XHTTP 管理' $'9\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             if [[ "${answer}" == custom ]]; then
                 targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' $'8-16\n'
@@ -661,17 +660,17 @@ runXhttpDriver() {
                 targetReply 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]' $'\n'
             fi
         done
-        targetReply 'Docker XHTTP 管理' $'7\n'
+        targetReply 'Docker XHTTP 管理' $'10\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         for answer in $'64\n' $'128-256\n' $'\n'; do
-            targetReply 'Docker XHTTP 管理' $'8\n'
+            targetReply 'Docker XHTTP 管理' $'12\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' "${answer}"
         done
-        targetReply 'Docker XHTTP 管理' $'9\n'
+        targetReply 'Docker XHTTP 管理' $'13\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         for answer in 'true false' 'false true' 'false false' defaults; do
-            targetReply 'Docker XHTTP 管理' $'10\n'
+            targetReply 'Docker XHTTP 管理' $'14\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             if [[ "${answer}" == defaults ]]; then
                 grpc='' sse=''
@@ -681,10 +680,10 @@ runXhttpDriver() {
             targetReply 'noGRPCHeader（true/false，0 返回）[false]' "${grpc}"$'\n'
             targetReply 'noSSEHeader（true/false，0 返回）[false]' "${sse}"$'\n'
         done
-        targetReply 'Docker XHTTP 管理' $'11\n'
+        targetReply 'Docker XHTTP 管理' $'15\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         for answer in custom defaults native-defaults; do
-            targetReply 'Docker XHTTP 管理' $'12\n'
+            targetReply 'Docker XHTTP 管理' $'16\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             case "${answer}" in
             custom) post=16384 interval=5 buffered=16 seconds=1-2 ;;
@@ -696,30 +695,30 @@ runXhttpDriver() {
             targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]' "${buffered}"$'\n'
             targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]' "${seconds}"$'\n'
         done
-        targetReply 'Docker XHTTP 管理' $'13\n'
+        targetReply 'Docker XHTTP 管理' $'17\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
-        targetReply 'Docker XHTTP 管理' $'18\n'
+        targetReply 'Docker XHTTP 管理' $'20\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）' $'{"x-trace":"edge value","x-route":"v3"}\n'
-        targetReply 'Docker XHTTP 管理' $'19\n'
+        targetReply 'Docker XHTTP 管理' $'21\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         ;;
     headers-long)
-        targetReply 'Docker XHTTP 管理' $'18\n'
+        targetReply 'Docker XHTTP 管理' $'20\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）' "${XHTTP_LONG_HEADERS}"$'\n'
         ;;
     cancel)
         targetReply 'Docker XHTTP 管理' $'99\n'
         for answer in $'0\n' $'\n' $'\004' $'--invalid\n'; do
-            for choice in 2 6 7 8 9 10 11 23 24; do
+            for choice in 2 9 10 12 13 14 15 7 8; do
                 targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
                 targetReply 'XHTTP 入口 ID（0 返回）' "${answer}"
             done
         done
         for answer in $'0\n' $'\004'; do
             for field in concurrency requests seconds; do
-                targetReply 'Docker XHTTP 管理' $'6\n'
+                targetReply 'Docker XHTTP 管理' $'9\n'
                 targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
                 if [[ "${field}" == concurrency ]]; then
                     targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' "${answer}"
@@ -733,11 +732,11 @@ runXhttpDriver() {
                 targetReply 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]' $'50-100\n'
                 targetReply 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]' "${answer}"
             done
-            targetReply 'Docker XHTTP 管理' $'8\n'
+            targetReply 'Docker XHTTP 管理' $'12\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' "${answer}"
             for field in grpc sse; do
-                targetReply 'Docker XHTTP 管理' $'10\n'
+                targetReply 'Docker XHTTP 管理' $'14\n'
                 targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
                 if [[ "${field}" == grpc ]]; then
                     targetReply 'noGRPCHeader（true/false，0 返回）[false]' "${answer}"
@@ -747,22 +746,22 @@ runXhttpDriver() {
                 targetReply 'noSSEHeader（true/false，0 返回）[false]' "${answer}"
             done
         done
-        for choice in 12 13; do
+        for choice in 16 17; do
             targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'0\n'
         done
-        targetReply 'Docker XHTTP 管理' $'12\n'
+        targetReply 'Docker XHTTP 管理' $'16\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]' $'16384\n'
         targetReply 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[30]' $'5\n'
         targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]' $'16\n'
         targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]' $'0\n'
-        targetReply 'Docker XHTTP 管理' $'18\n'
+        targetReply 'Docker XHTTP 管理' $'20\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'0\n'
-        targetReply 'Docker XHTTP 管理' $'19\n'
+        targetReply 'Docker XHTTP 管理' $'21\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'\004'
         for answer in $'0\n' $'\n' $'\004'; do
-            targetReply 'Docker XHTTP 管理' $'18\n'
+            targetReply 'Docker XHTTP 管理' $'20\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）' "${answer}"
         done
@@ -772,7 +771,7 @@ runXhttpDriver() {
             targetReply 'Docker XHTTP 管理' $'2\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         fi
-        targetReply 'Docker XHTTP 管理' $'6\n'
+        targetReply 'Docker XHTTP 管理' $'9\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         if [[ "${scenario}" == invalid ]]; then
             targetReply 'XMUX 最大并发（整数或 from-to）[16-32，0 返回]' $'not-range\n'
@@ -782,21 +781,21 @@ runXhttpDriver() {
         targetReply 'XMUX 每连接请求数（0-0 表示零）[600-900，0 返回]' $'50-100\n'
         targetReply 'XMUX 连接复用秒数（0-0 表示零）[1800-3000，0 返回]' $'120-180\n'
         if [[ "${scenario}" == failed ]]; then
-            targetReply 'Docker XHTTP 管理' $'7\n'
+            targetReply 'Docker XHTTP 管理' $'10\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         fi
-        targetReply 'Docker XHTTP 管理' $'8\n'
+        targetReply 'Docker XHTTP 管理' $'12\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         if [[ "${scenario}" == invalid ]]; then
             targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' $'not-range\n'
         else
             targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' $'128-256\n'
-            targetReply 'Docker XHTTP 管理' $'9\n'
+            targetReply 'Docker XHTTP 管理' $'13\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         fi
         if [[ "${scenario}" == invalid ]]; then
             for field in grpc sse; do
-                targetReply 'Docker XHTTP 管理' $'10\n'
+                targetReply 'Docker XHTTP 管理' $'14\n'
                 targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
                 grpc=false sse=false
                 if [[ "${field}" == grpc ]]; then
@@ -808,14 +807,14 @@ runXhttpDriver() {
                 targetReply 'noSSEHeader（true/false，0 返回）[false]' "${sse}"$'\n'
             done
         else
-            targetReply 'Docker XHTTP 管理' $'10\n'
+            targetReply 'Docker XHTTP 管理' $'14\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply 'noGRPCHeader（true/false，0 返回）[false]' $'true\n'
             targetReply 'noSSEHeader（true/false，0 返回）[false]' $'false\n'
-            targetReply 'Docker XHTTP 管理' $'11\n'
+            targetReply 'Docker XHTTP 管理' $'15\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         fi
-        targetReply 'Docker XHTTP 管理' $'12\n'
+        targetReply 'Docker XHTTP 管理' $'16\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         if [[ "${scenario}" == invalid ]]; then post=not-number; else post=16384; fi
         targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]' "${post}"$'\n'
@@ -823,48 +822,48 @@ runXhttpDriver() {
         targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[30]' $'16\n'
         targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]' $'1-2\n'
         if [[ "${scenario}" == failed ]]; then
-            targetReply 'Docker XHTTP 管理' $'13\n'
+            targetReply 'Docker XHTTP 管理' $'17\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
-            targetReply 'Docker XHTTP 管理' $'18\n'
+            targetReply 'Docker XHTTP 管理' $'20\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）' $'{"x-trace":"edge value"}\n'
-            targetReply 'Docker XHTTP 管理' $'19\n'
+            targetReply 'Docker XHTTP 管理' $'21\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         else
-            targetReply 'Docker XHTTP 管理' $'18\n'
+            targetReply 'Docker XHTTP 管理' $'20\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply 'XHTTP 请求首部 JSON 对象（0 返回，空值取消）' $'not-json\n'
         fi
         ;;
     current)
-        targetReply 'Docker XHTTP 管理' $'23\n'
+        targetReply 'Docker XHTTP 管理' $'7\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-missing\n'
-        targetReply 'Docker XHTTP 管理' $'6\n'
+        targetReply 'Docker XHTTP 管理' $'9\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XMUX 最大并发（整数或 from-to）[4-8，0 返回]' $'\n'
         targetReply 'XMUX 每连接请求数（0-0 表示零）[0-0，0 返回]' $'\n'
         targetReply 'XMUX 连接复用秒数（0-0 表示零）[0-0，0 返回]' $'\n'
-        targetReply 'Docker XHTTP 管理' $'8\n'
+        targetReply 'Docker XHTTP 管理' $'12\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'Padding 字节数（1..4096 整数或 from-to）[17-19，0 返回]' $'\n'
-        targetReply 'Docker XHTTP 管理' $'10\n'
+        targetReply 'Docker XHTTP 管理' $'14\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'noGRPCHeader（true/false，0 返回）[false]' $'\n'
         targetReply 'noSSEHeader（true/false，0 返回）[true]' $'\n'
-        targetReply 'Docker XHTTP 管理' $'12\n'
+        targetReply 'Docker XHTTP 管理' $'16\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[8192]' $'\n'
         targetReply 'packet-up POST 最小间隔毫秒（default=缺省，0 返回）[5]' $'\n'
         targetReply 'packet-up 最多缓存 POST 数（default=缺省，0 返回）[7]' $'\n'
         targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[10-15]' $'\n'
-        targetReply 'Docker XHTTP 管理' $'14\n'
+        targetReply 'Docker XHTTP 管理' $'6\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XHTTP 模式（auto/packet-up/stream-up，0 返回）[stream-up]' $'\n'
-        targetReply 'Docker XHTTP 管理' $'15\n'
+        targetReply 'Docker XHTTP 管理' $'11\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XHTTP 路径（以 / 开头，0 返回）[/current/path]' $'\n'
         targetReply 'XHTTP Host（非空域名，0 返回）[current.example.net]' $'\n'
-        targetReply 'Docker XHTTP 管理' $'16\n'
+        targetReply 'Docker XHTTP 管理' $'18\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'Padding 字节数（1..4096 整数或 from-to）[17-19，0 返回]' $'\n'
         targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[8192]' $'\n'
@@ -875,11 +874,11 @@ runXhttpDriver() {
         targetReply 'noSSEHeader（true/false，0 返回）[true]' $'\n'
         ;;
     status-invalid|status-incomplete)
-        targetReply 'Docker XHTTP 管理' $'23\n'
+        targetReply 'Docker XHTTP 管理' $'7\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         ;;
     status-failed)
-        for choice in 2 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
+        for choice in 2 12 13 14 15 16 17 6 11 18 19 20 21 22 23 24 7 8; do
             targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
         done
         ;;
@@ -889,25 +888,25 @@ runXhttpDriver() {
     flow|failed|invalid)
         if [[ "${scenario}" == flow ]]; then
             for answer in packet-up stream-up auto; do
-                targetReply 'Docker XHTTP 管理' $'14\n'
+                targetReply 'Docker XHTTP 管理' $'6\n'
                 targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
                 [[ "${answer}" != auto ]] || answer=
                 targetReply 'XHTTP 模式（auto/packet-up/stream-up，0 返回）[auto]' "${answer}"$'\n'
             done
         else
-            targetReply 'Docker XHTTP 管理' $'14\n'
+            targetReply 'Docker XHTTP 管理' $'6\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             answer=packet-up
             [[ "${scenario}" != invalid ]] || answer=stream-one
             targetReply 'XHTTP 模式（auto/packet-up/stream-up，0 返回）[auto]' "${answer}"$'\n'
         fi
-        targetReply 'Docker XHTTP 管理' $'15\n'
+        targetReply 'Docker XHTTP 管理' $'11\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         answer=/custom/path
         [[ "${scenario}" != invalid ]] || answer=no-leading-slash
         targetReply 'XHTTP 路径（以 / 开头，0 返回）' "${answer}"$'\n'
         targetReply 'XHTTP Host（非空域名，0 返回）' $'edge.example.net\n'
-        targetReply 'Docker XHTTP 管理' $'16\n'
+        targetReply 'Docker XHTTP 管理' $'18\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         answer=64-128
         [[ "${scenario}" != invalid ]] || answer=not-range
@@ -919,31 +918,31 @@ runXhttpDriver() {
         targetReply 'noGRPCHeader（true/false，0 返回）[false]' $'false\n'
         targetReply 'noSSEHeader（true/false，0 返回）[false]' $'true\n'
         if [[ "${scenario}" != invalid ]]; then
-            targetReply 'Docker XHTTP 管理' $'17\n'
+            targetReply 'Docker XHTTP 管理' $'19\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         fi
         ;;
     cancel)
         for answer in $'0\n' $'\004'; do
-            targetReply 'Docker XHTTP 管理' $'14\n'
+            targetReply 'Docker XHTTP 管理' $'6\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply 'XHTTP 模式（auto/packet-up/stream-up，0 返回）[auto]' "${answer}"
         done
-        targetReply 'Docker XHTTP 管理' $'15\n'
+        targetReply 'Docker XHTTP 管理' $'11\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XHTTP 路径（以 / 开头，0 返回）' $'0\n'
-        targetReply 'Docker XHTTP 管理' $'15\n'
+        targetReply 'Docker XHTTP 管理' $'11\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XHTTP 路径（以 / 开头，0 返回）' $'/custom/path\n'
         targetReply 'XHTTP Host（非空域名，0 返回）' $'\004'
-        targetReply 'Docker XHTTP 管理' $'15\n'
+        targetReply 'Docker XHTTP 管理' $'11\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'XHTTP 路径（以 / 开头，0 返回）' $'/custom/path\n'
         targetReply 'XHTTP Host（非空域名，0 返回）' $'0\n'
-        targetReply 'Docker XHTTP 管理' $'16\n'
+        targetReply 'Docker XHTTP 管理' $'18\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' $'0\n'
-        targetReply 'Docker XHTTP 管理' $'16\n'
+        targetReply 'Docker XHTTP 管理' $'18\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         targetReply 'Padding 字节数（1..4096 整数或 from-to）[100-1000，0 返回]' $'\n'
         targetReply 'packet-up 单个 POST 最大字节数（default=缺省，0 返回）[1000000]' $'\n'
@@ -952,29 +951,29 @@ runXhttpDriver() {
         targetReply 'stream-up 服务端保活秒数（整数或 from-to，0-0=缺省，0 返回）[20-80]' $'\n'
         targetReply 'noGRPCHeader（true/false，0 返回）[false]' $'\n'
         targetReply 'noSSEHeader（true/false，0 返回）[false]' $'\004'
-        targetReply 'Docker XHTTP 管理' $'17\n'
+        targetReply 'Docker XHTTP 管理' $'19\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'0\n'
         ;;
     esac
     case "${scenario}" in
     flow|failed|invalid)
-        targetReply 'Docker XHTTP 管理' $'20\n'
+        targetReply 'Docker XHTTP 管理' $'22\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         answer=9443
         [[ "${scenario}" != invalid ]] || answer=not-port
         targetReply '下行端口（已登记的额外非默认分享端口，0 返回，空值取消）' "${answer}"$'\n'
         if [[ "${scenario}" != invalid ]]; then
-            targetReply 'Docker XHTTP 管理' $'21\n'
+            targetReply 'Docker XHTTP 管理' $'23\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         fi
         ;;
     cancel)
-        targetReply 'Docker XHTTP 管理' $'20\n'
+        targetReply 'Docker XHTTP 管理' $'22\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'0\n'
-        targetReply 'Docker XHTTP 管理' $'21\n'
+        targetReply 'Docker XHTTP 管理' $'23\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'\004'
         for answer in $'0\n' $'\n' $'\004'; do
-            targetReply 'Docker XHTTP 管理' $'20\n'
+            targetReply 'Docker XHTTP 管理' $'22\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply '下行端口（已登记的额外非默认分享端口，0 返回，空值取消）' "${answer}"
         done
@@ -984,7 +983,7 @@ runXhttpDriver() {
     flow|failed|invalid)
         for security in tls reality; do
             [[ "${scenario}" == flow || "${security}" == tls ]] || continue
-            targetReply 'Docker XHTTP 管理' $'22\n'
+            targetReply 'Docker XHTTP 管理' $'24\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             if [[ "${security}" == tls ]]; then
                 targetReply '下行地址（0 返回，空值取消）' $'download.example.net\n'
@@ -1013,15 +1012,15 @@ runXhttpDriver() {
         done
         ;;
     cancel)
-        targetReply 'Docker XHTTP 管理' $'22\n'
+        targetReply 'Docker XHTTP 管理' $'24\n'
         targetReply 'XHTTP 入口 ID（0 返回）' $'0\n'
         for answer in $'\n' $'\003'; do
-            targetReply 'Docker XHTTP 管理' $'22\n'
+            targetReply 'Docker XHTTP 管理' $'24\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply '下行地址（0 返回，空值取消）' "${answer}"
         done
         for security in tls reality; do
-            targetReply 'Docker XHTTP 管理' $'22\n'
+            targetReply 'Docker XHTTP 管理' $'24\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
             targetReply '下行地址（0 返回，空值取消）' $'download.example.net\n'
             targetReply '下行端口 [443，0 返回]' $'\n'
@@ -1040,7 +1039,7 @@ runXhttpDriver() {
         ;;
     esac
     if [[ "${scenario}" == flow || "${scenario}" == failed || "${scenario}" == current ]]; then
-        for choice in 23 24; do
+        for choice in 7 8; do
             targetReply 'Docker XHTTP 管理' "${choice}"$'\n'
             targetReply 'XHTTP 入口 ID（0 返回）' $'entry-xhttp\n'
         done
@@ -1854,6 +1853,7 @@ runControlDriver() {
 
 runSitesDriver() {
     local scenario=$1 alpnOrder alpnAction themeChoice
+    local alpnPrompt='请选择 ALPN 顺序（0 或回车返回）' themePrompt='请选择站点主题（0 或回车返回）'
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'16\n'
     : >"${TLS_WIZARD_ACTIONS}"
@@ -1874,17 +1874,17 @@ runSitesDriver() {
         for alpnOrder in 1 2 3; do
             targetReply 'Docker 站点管理' $'7\n'
             targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
-            targetReply '请选择 ALPN 顺序（0 返回）' "${alpnOrder}"$'\n'
+            targetReply "${alpnPrompt}" "${alpnOrder}"$'\n'
         done
         for themeChoice in 1 2 3; do
             targetReply 'Docker 站点管理' $'8\n'
-            targetReply '请选择站点主题（0 返回）' "${themeChoice}"$'\n'
+            targetReply "${themePrompt}" "${themeChoice}"$'\n'
             targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' $'\n'
         done
         ;;
     title)
         targetReply 'Docker 站点管理' $'8\n'
-        targetReply '请选择站点主题（0 返回）' $'1\n'
+        targetReply "${themePrompt}" $'1\n'
         targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' \
             $'中文 & <站点> "双引" \'单引\' | \\\n'
         ;;
@@ -1901,27 +1901,26 @@ runSitesDriver() {
             targetReply 'Docker 站点管理' "${alpnAction}"$'\n'
             targetReply 'TLS fallback 入口 ID（0 返回）' $'\n'
         done
-        targetReply 'Docker 站点管理' $'7\n'
-        targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
-        targetReply '请选择 ALPN 顺序（0 返回）' $'0\n'
-        targetReply 'Docker 站点管理' $'7\n'
-        targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
-        targetReply '请选择 ALPN 顺序（0 返回）' $'invalid\n'
-        for themeChoice in 0 invalid; do
+        for alpnOrder in 0 '' invalid; do
+            targetReply 'Docker 站点管理' $'7\n'
+            targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
+            targetReply "${alpnPrompt}" "${alpnOrder}"$'\n'
+        done
+        for themeChoice in 0 '' invalid; do
             targetReply 'Docker 站点管理' $'8\n'
-            targetReply '请选择站点主题（0 返回）' "${themeChoice}"$'\n'
+            targetReply "${themePrompt}" "${themeChoice}"$'\n'
         done
         targetReply 'Docker 站点管理' $'8\n'
-        targetReply '请选择站点主题（0 返回）' $'1\n'
+        targetReply "${themePrompt}" $'1\n'
         targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' $'0\n'
         ;;
     template-eof)
         targetReply 'Docker 站点管理' $'8\n'
-        targetReply '请选择站点主题（0 返回）' $'\004'
+        targetReply "${themePrompt}" $'\004'
         ;;
     title-eof)
         targetReply 'Docker 站点管理' $'8\n'
-        targetReply '请选择站点主题（0 返回）' $'1\n'
+        targetReply "${themePrompt}" $'1\n'
         targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' $'\004'
         ;;
     static-eof|redirect-eof)
@@ -1949,7 +1948,7 @@ runSitesDriver() {
                 targetReply 'TLS fallback 入口 ID（0 返回）' $'\004'
             else
                 targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
-                targetReply '请选择 ALPN 顺序（0 返回）' $'\004'
+                targetReply "${alpnPrompt}" $'\004'
             fi
             ;;
         esac
@@ -1962,9 +1961,9 @@ runSitesDriver() {
         targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
         targetReply 'Docker 站点管理' $'7\n'
         targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
-        targetReply '请选择 ALPN 顺序（0 返回）' $'2\n'
+        targetReply "${alpnPrompt}" $'2\n'
         targetReply 'Docker 站点管理' $'8\n'
-        targetReply '请选择站点主题（0 返回）' $'1\n'
+        targetReply "${themePrompt}" $'1\n'
         targetReply '站名（2–60 个字符，空输入使用主题默认值，0 返回）' $'\n'
         targetReply 'Docker 站点管理' $'4\n'
         ;;
@@ -3362,7 +3361,7 @@ PADM_DOCKER_RC_USAGE=2
 dockerMenu
 EOF
 : >"${MENU_UI_ACTIONS}"
-runPty ui-categories plain $'1\n0\n2\n6\n0\n3\n8\n2\n4\n0\n0\n4\n3\n0\n5\n4\n1\n6\n0\n0\n6\n3\nn\n0\n7\n5\n0\n8\n3\n0\n0\n' "${MENU_UI_CLI}"
+runPty ui-categories plain $'1\n\n2\n7\n0\n3\n9\n2\n4\n0\n0\n4\n4\n\n5\n4\n1\n9\n\n0\n6\n3\nn\n0\n7\n5\n\n8\n3\n0\n\n' "${MENU_UI_CLI}"
 for menuLabel in '1. 安装与重装' '2. 订阅与用户' '3. 协议与入口' '4. 站点与证书' \
     '5. 路由与访问控制' '6. 核心与服务' '7. 系统与脚本' '8. 高级/危险操作'; do
     grep -Fq "${menuLabel}" "${CONTROL_LOG}" || fail "首页缺少原生分类: ${menuLabel}"
@@ -3378,28 +3377,36 @@ grep -Fq '┌─ ' "${CONTROL_LOG}" && grep -Fq '└─' "${CONTROL_LOG}" ||
     fail '首页重绘未逐次更新状态，或分类返回触发了业务命令'
 
 : >"${MENU_UI_ACTIONS}"
-runPty ui-menu-order plain $'2\n0\n3\n0\n4\n0\n5\n1\n0\n0\n0\n' "${MENU_UI_CLI}"
+runPty ui-menu-order plain $'2\n\n3\n3\n0\n\n4\n0\n5\n2\n0\n3\n\n1\n3\n1\n0\n\n4\n0\n5\n\n0\n0\n0\n' "${MENU_UI_CLI}"
 awk '
-    /^┌─ (订阅与用户|协议与入口|站点与证书|分流工具) / { menu = $2; last = -1; next }
+    /^┌─ (订阅与用户|协议与入口|站点与证书|分流工具|Docker XHTTP 管理（[^）]+）|BT 下载管理|访问控制|Socks5 出站|DNS 覆盖|DNS\/hosts 覆盖) / {
+        split($0, title, " ─"); menu = title[1]; last = 0; returned = 0; next
+    }
     !menu { next }
     /^│ +[0-9]+\./ {
         option = $2 + 0
-        if (last == 0 || (option > 0 && option <= last)) invalid = 1
+        if (returned || (option > 0 && option != last + 1)) invalid = 1
+        if (option == 0) returned = 1
         last = option
     }
     /^└─/ {
-        if (last != 0) invalid = 1
+        if (!returned) invalid = 1
         seen[menu] = 1
         menu = ""
     }
-    END { exit invalid || length(seen) != 4 }
-' "${CONTROL_LOG}" || fail '分类菜单功能编号未递增，或 0 返回未放在最后'
+    END { exit invalid || length(seen) != 10 }
+' "${CONTROL_LOG}" || fail '菜单功能编号不连续，或 0 返回未放在最后'
 [[ "$(<"${MENU_UI_ACTIONS}")" == "$(printf 'status --summary\n%.0s' {1..5})" ]] ||
-    fail '输入 0 未逐层返回，或触发了业务命令'
+    fail '输入 0 或回车未逐层返回，或触发了业务命令'
 
 : >"${MENU_UI_ACTIONS}"
-runPty ui-subscription-publish plain $'2\n7\n1\n3\nn\n3\ny\n2\n0\n0\n0\n' "${MENU_UI_CLI}"
-grep -Fq '7. HTTPS 订阅发布' "${CONTROL_LOG}" &&
+runPty ui-routing-projection plain $'5\n2\n1\n2\n3\n17\n0\n1\n4\n7\n0\n41\n0\n0\n0\n0\n' "${MENU_UI_CLI}"
+[[ "$(<"${MENU_UI_ACTIONS}")" == $'status --summary\nprotocol routing-status\nedit --block-bt\nedit --block-bt-off\nprotocol routing-status\nstatus --summary' ]] ||
+    fail '路由投影的显示编号未映射到 BT 操作，或无效编号触发了操作'
+
+: >"${MENU_UI_ACTIONS}"
+runPty ui-subscription-publish plain $'2\n6\n1\n3\nn\n3\ny\n2\n0\n0\n0\n' "${MENU_UI_CLI}"
+grep -Fq '6. HTTPS 订阅发布' "${CONTROL_LOG}" &&
     grep -Fq '公网订阅发布：已启用' "${CONTROL_LOG}" &&
     grep -Fq '本机公网订阅链接将无法刷新' "${CONTROL_LOG}" ||
     fail 'HTTPS 订阅发布入口、状态或停用提示缺失'
@@ -3430,14 +3437,15 @@ runPty ui-maintenance-exit plain $'7\n1\n2\ny\n' "${MENU_UI_CLI}"
 : >"${MENU_UI_ACTIONS}"
 CONTROL_LOG="${TEST_ROOT}/ui-routing-scope.log"
 (
+    source "${PROJECT_ROOT}/docker/lib/setup.sh"
     source "${PROJECT_ROOT}/docker/lib/menu.sh"
     dockerMenuRun() { printf '%s\n' "$*" >>"${MENU_UI_ACTIONS}"; }
-    dockerMenuRouting socks5 <<< $'16\n3\n0\n'
+    dockerMenuRouting socks5 <<< $'16\n3\n\n'
 ) >"${CONTROL_LOG}"
 grep -Fq '1. 启用 SOCKS5 出站' "${CONTROL_LOG}" &&
-    ! grep -Fq '16. 启用 BT 协议阻断' "${CONTROL_LOG}" ||
+    ! grep -Fq '启用 BT 协议阻断' "${CONTROL_LOG}" ||
     fail 'SOCKS5 出站菜单未限制显示范围'
-grep -Fq '无效选项' "${CONTROL_LOG}" &&
+[[ "$(grep -Fc '无效选项' "${CONTROL_LOG}")" -eq 1 ]] &&
     [[ "$(<"${MENU_UI_ACTIONS}")" == 'protocol routing-status' ]] ||
     fail 'SOCKS5 隐藏选项仍可执行，或拒绝后无法继续查看状态'
 
@@ -5290,7 +5298,7 @@ for routingCase in flow csv-long cancel socks5-input-eof socks5-input-commit-fai
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
         fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
     if [[ "${routingCase}" == flow ]]; then
-        for label in '5. 路由与访问控制' '9. 完整路由维护' '┌─ Docker 路由与出站' \
+        for label in '5. 路由与访问控制' '8. 完整路由维护' '┌─ Docker 路由与出站' \
             '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
             '3. 查看路由状态' '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
             '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 直接录入 hosts（整组替换）' \
@@ -6185,18 +6193,18 @@ for xhttpCase in flow headers-long cancel failed invalid current status-failed s
         fail "XHTTP ${xhttpCase} 参数分发错误或取消后执行编辑"
     grep -Fq '10. XHTTP 管理' "${CONTROL_LOG}" || fail 'XHTTP 管理未接入协议菜单'
     grep -Fq '已有 Xray Reality 入口' "${CONTROL_LOG}" || fail 'XHTTP 菜单未显示支持范围'
-    for label in 普通设置 高级设置 实验功能 '23. XMUX 日常并发' '24. XMUX 单并发'; do
+    for label in 普通设置 高级设置 实验功能 '7. XMUX 日常并发' '8. XMUX 单并发'; do
         grep -Fq "${label}" "${CONTROL_LOG}" || fail "XHTTP 菜单缺少 ${label}"
     done
-    grep -Fq '8. 设置 Padding' "${CONTROL_LOG}" &&
-        grep -Fq '9. 恢复缺省 Padding' "${CONTROL_LOG}" || fail 'XHTTP Padding 菜单入口缺失'
-    grep -Fq '10. 设置首部开关' "${CONTROL_LOG}" &&
-        grep -Fq '11. 恢复缺省首部' "${CONTROL_LOG}" || fail 'XHTTP Header 菜单入口缺失'
-    grep -Fq '12. 设置 packet/stream 参数' "${CONTROL_LOG}" &&
-        grep -Fq '13. 恢复缺省 packet/stream' "${CONTROL_LOG}" || fail 'XHTTP packet/stream 菜单入口缺失'
-    for label in '14. 设置模式' '15. 设置路径和 Host' '16. 统一高级参数' '17. 恢复推荐默认' \
-        '18. 设置请求首部（JSON）' '19. 清除请求首部' \
-        '20. 设置下行端口' '21. 关闭上下行分离' '22. 设置独立下行'; do
+    grep -Fq '12. 设置 Padding' "${CONTROL_LOG}" &&
+        grep -Fq '13. 恢复缺省 Padding' "${CONTROL_LOG}" || fail 'XHTTP Padding 菜单入口缺失'
+    grep -Fq '14. 设置首部开关' "${CONTROL_LOG}" &&
+        grep -Fq '15. 恢复缺省首部' "${CONTROL_LOG}" || fail 'XHTTP Header 菜单入口缺失'
+    grep -Fq '16. 设置 packet/stream 参数' "${CONTROL_LOG}" &&
+        grep -Fq '17. 恢复缺省 packet/stream' "${CONTROL_LOG}" || fail 'XHTTP packet/stream 菜单入口缺失'
+    for label in '6. 设置模式' '11. 设置路径和 Host' '18. 统一高级参数' '19. 恢复推荐默认' \
+        '20. 设置请求首部（JSON）' '21. 清除请求首部' \
+        '22. 设置下行端口' '23. 关闭上下行分离' '24. 设置独立下行'; do
         grep -Fq "${label}" "${CONTROL_LOG}" || fail "XHTTP 菜单缺少 ${label}"
     done
     if [[ "${xhttpCase}" == flow || "${xhttpCase}" == cancel || "${xhttpCase}" == failed || "${xhttpCase}" == invalid ]]; then
@@ -6334,8 +6342,8 @@ for targetCase in cancel eof failed int term; do
             fail "target ${targetCase} left the checker alive"
     elif [[ "${targetCase}" == failed ]]; then
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed target check was not reported'
-        [[ "$(grep -Fc '无效选项，请重新选择。' "${CONTROL_LOG}")" -eq 4 ]] ||
-            fail '目标站后续操作仍接受旧返回键或回车'
+        [[ "$(grep -Fc '无效选项，请重新选择。' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail '目标站后续操作仍接受旧返回键，或回车未返回'
     elif [[ "${targetCase}" == cancel ]]; then
         [[ "$(grep -Fc '无效选项，请重新选择。' "${CONTROL_LOG}")" -eq 6 ]] ||
             fail '目标站或刷新范围仍接受旧返回键'

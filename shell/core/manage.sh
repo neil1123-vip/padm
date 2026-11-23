@@ -427,7 +427,7 @@ manageVlessEncryptionExperiment() {
         vlessEncryptionStateSummary
         menuDangerItem 1 "启用实验开关" "优先应用到 Reality XHTTP，否则应用到 Reality Vision"
         menuItem 2 "关闭实验开关" "恢复 decryption=none 并删除实验订阅参数"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回高级/危险操作" "回到上级菜单"
         echoContent title "└──────────────────────────────────────────────────"
         menuReadChoice vless_encryption_menu "请选择:" selectVlessEncryptionMenu interactive || return 0
         case "${selectVlessEncryptionMenu}" in
@@ -490,7 +490,7 @@ selectPanelCertDomain() {
         menuReturnItem 0 "返回"
         while true; do
             selectBTDomain=
-            autoRead bt_domain_select "请输入编号选择:" selectBTDomain || return 2
+            menuReadChoice bt_domain_select "请输入编号选择:" selectBTDomain interactive || return 2
             [[ "${selectBTDomain}" != 0 ]] || return 2
             btDomain=$(awk -F ':' -v selected="${selectBTDomain}" '$1 == selected {print $2; exit}' <<<"${certList}")
             [[ -n "${btDomain}" ]] && return 0
@@ -945,7 +945,7 @@ manageTraditionalTlsStaticSite() {
         menuReturnItem 0 "返回" "回到上级菜单"
         menuClose
         selectInstallNginxBlogType=
-        menuReadChoice nginx_blog_menu "请选择:" selectInstallNginxBlogType interactive || return 0
+        menuReadChoice nginx_blog_menu "请选择操作（回车或 0 返回）：" selectInstallNginxBlogType interactive || return 0
 
         if [[ "${selectInstallNginxBlogType}" == import ]]; then
             sourceDirectory=
@@ -1682,7 +1682,8 @@ addCorePort() {
             fi
             printf '%s\n' "${portEntries}"
             portIndex=
-            autoRead extra_core_delete_port "请输入要删除的端口编号:" portIndex || return 0
+            menuReadChoice extra_core_delete_port "请输入要删除的端口编号[0 或回车取消]:" portIndex interactive || return 0
+            [[ "${portIndex}" != 0 ]] || continue
             port=$(corePortResolveByIndex "${portIndex}") || { errorCard "入口端口列表读取失败"; return 1; }
             if [[ -n "${port}" ]]; then
                 if ! corePortApplyReloadTransaction corePortRemove "${port}"; then

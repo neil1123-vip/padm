@@ -1823,7 +1823,7 @@ selectRealityTargetCandidateInteractive() {
         (( page < 1 )) && page=1
         showRealityTargetCandidatePage "${filter}" "${page}" "${pageSize}" candidateSnapshot
         menuReadChoice reality_target_candidate "请选择候选编号或操作:" choice true || return 1
-        case "${choice}" in
+        case "${choice:-0}" in
         n | N)
             (( page < maxPage )) && page=$((page + 1))
             ;;
@@ -1852,7 +1852,7 @@ selectRealityTargetCandidateInteractive() {
             return 0
             ;;
         0)
-            # 仅显式返回时，调用方才重新打开上一层菜单。
+            # 与读取中断区分，调用方据此重新打开上一层菜单。
             return 2
             ;;
         *)
@@ -2770,7 +2770,7 @@ showRealityTargetQualityActions() {
         menuReturnItem 0 "返回" "回到 REALITY 目标站管理"
         menuClose
         menuReadChoice reality_target_quality_action "请选择后续操作:" action true || return 0
-        case "${action}" in
+        case "${action:-0}" in
         1)
             status=0
             changeRealityTargetFromScanResults || status=$?
@@ -2913,7 +2913,7 @@ showRealityTargetScanResults() {
             return 0
         fi
         menuReadChoice reality_target_result_page "请选择本页编号切换，或输入 n/p/f/0:" choice true || return 0
-        case "${choice}" in
+        case "${choice:-0}" in
         n|N)
             (( page < maxPage )) && page=$((page + 1))
             ;;

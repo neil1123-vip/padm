@@ -819,7 +819,7 @@ portHoppingMenu() {
         menuReturnItem 0 "返回"
         menuClose
         selectPortHoppingStatus=
-        menuReadChoice port_hopping_menu "请选择:" selectPortHoppingStatus || return 0
+        menuReadChoice port_hopping_menu "请选择:" selectPortHoppingStatus interactive || return 0
         case "${selectPortHoppingStatus}" in
         1)
             [[ "${stateRangeFallback}" == false ]] || {

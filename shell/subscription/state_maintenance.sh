@@ -83,11 +83,7 @@ selectSubscriptionGroupsBackupFile() {
     done
     menuReturnItem 0 "返回"
     menuClose
-    while true; do
-        menuReadChoice subscription_backup_choice "请输入备份编号或完整路径:" backupChoice interactive || return 0
-        [[ -z "${backupChoice}" ]] || break
-        coreSelectionErrorCard
-    done
+    menuReadChoice subscription_backup_choice "请输入备份编号或完整路径（回车或 0 返回）：" backupChoice interactive || return 0
     [[ "${backupChoice}" != 0 ]] || return 0
     if [[ "${backupChoice}" =~ ^[0-9]+$ ]]; then
         backupIndex=${backupChoice#"${backupChoice%%[!0]*}"}
@@ -203,6 +199,7 @@ restoreSubscriptionGroupsBackupMenu() {
     local confirm=
     selectSubscriptionGroupsBackupFile || return 1
     backupFile=${selectedSubscriptionGroupsBackupFile}
+    [[ -n "${backupFile}" ]] || return 0
     statusCard "即将恢复订阅状态" "目标备份：${backupFile}" "确认后会先备份当前状态、配置和订阅输出，再执行完整同步"
     autoRead subscription_restore_confirm "恢复会覆盖当前状态并重新同步。确认请输入 yes:" confirm
     if [[ "${confirm}" != "yes" ]]; then

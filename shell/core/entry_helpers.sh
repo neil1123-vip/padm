@@ -1101,7 +1101,7 @@ bbrInstall() {
         menuItem 2 "启用官方 BBR + fq" "写入 ${PADM_BBR_SYSCTL_CONF}"
         menuItem 3 "关闭 padm BBR 设置" "只删除 padm 写入的 sysctl 配置"
         menuDangerItem 4 "高级：第三方 TCP 加速脚本" "可能换内核、改引导、需要重启"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回系统与脚本" "回到上级菜单"
         menuClose
         installBBRStatus=
         menuReadChoice bbr_menu "请选择:" installBBRStatus interactive || return 0

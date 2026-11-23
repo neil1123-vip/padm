@@ -2071,6 +2071,9 @@ runProtocolEntryMenuSyncRegression() (
     corePortResolveByIndex() { :; }
     addCorePort <<< $'3\nbad\n0'
     [[ ! -s "${log}" ]]
+    corePortResolveByIndex() { printf 'unexpected-resolve\n' >>"${log}"; return 1; }
+    addCorePort <<< $'3\n0\n3\n\n0'
+    [[ ! -s "${log}" ]]
     corePortResolveByIndex() { return 1; }
     regressionExpectStatus 1 addCorePort <<< $'3\n1'
     [[ "$(<"${log}")" == 'error:入口端口列表读取失败' ]]
@@ -2285,7 +2288,7 @@ runCorePortMenuStateRegression() (
     local installReads=0 singBoxReads=0
     local root="${TMP_DIR}/core-port-menu-state"
     local configPath="${root}/config/" cards="${root}/cards.log" output="${root}/output.log" mutations="${root}/mutations.log"
-    local rendered="${root}/menu.log"
+    local rendered="${root}/menu.log" deletePrompts=0
     mkdir -p "${root}"
     coreInstallType=1
     readInstallType() {
@@ -2300,13 +2303,13 @@ runCorePortMenuStateRegression() (
     menuItem() { printf 'item:%s:%s\n' "$1" "$2" >>"${rendered}"; }
     menuReturnItem() { printf 'return:%s:%s\n' "$1" "$2" >>"${rendered}"; }
     menuClose() { :; }
-    menuReadChoice() {
-        local choice
-        IFS= read -r choice || return 1
-        printf -v "$3" '%s' "${choice}"
+    autoRead() {
+        if [[ "$1" == extra_core_delete_port ]]; then
+            deletePrompts=$((deletePrompts + 1))
+        fi
+        IFS= read -r "$3"
     }
     statusCard() { printf '%s\n' "$*" >>"${cards}"; }
-    autoRead() { printf 'unexpected-input:%s\n' "$1" >>"${mutations}"; return 1; }
     corePortApplyReloadTransaction() { printf 'apply\n' >>"${mutations}"; return 1; }
     denyPort() { printf 'deny\n' >>"${mutations}"; return 1; }
     refreshManagedProtocolSubscriptions() { printf 'refresh\n' >>"${mutations}"; return 1; }
@@ -2314,7 +2317,7 @@ runCorePortMenuStateRegression() (
     addCorePort >"${output}" <<< $'1\n3\n0'
     [[ "${installReads}:${singBoxReads}" == 1:1 ]]
     [[ "$(grep -c '额外入口端口 暂无额外入口 原监听端口仍保留' "${cards}")" == 2 ]]
-    [[ ! -s "${mutations}" ]]
+    [[ "${deletePrompts}" == 0 && ! -s "${mutations}" ]]
     grep -q '额外入口端口管理' "${rendered}"
     grep -qx 'item:1:查看额外入口' "${rendered}"
     grep -qx 'item:2:添加额外入口' "${rendered}"
@@ -2340,7 +2343,11 @@ runCorePortMenuStateRegression() (
 
     addCorePort >"${output}" <<< $'3\n'
     [[ "$(<"${output}")" == $'1:2053\n2:2083' ]]
-    [[ "$(<"${mutations}")" == 'unexpected-input:extra_core_delete_port' ]]
+    [[ "${deletePrompts}" == 1 && ! -s "${mutations}" ]]
+
+    addCorePort >"${output}" <<< $'3\n\n0'
+    [[ "$(<"${output}")" == $'1:2053\n2:2083' ]]
+    [[ "${deletePrompts}" == 2 && ! -s "${mutations}" ]]
 )
 
 runProtocolEntryStoredInputRegression() (

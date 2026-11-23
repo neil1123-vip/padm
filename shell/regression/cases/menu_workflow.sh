@@ -41,9 +41,9 @@ runSubscriptionMenuWorkflowCoreRegression() (
         for role in uninitialized main; do
             actions=
             : >"${errorLog}"
-            manageSubscriptionCatalog "${role}" <<< $'1\n9\n\n2\n0\n1'
+            manageSubscriptionCatalog "${role}" <<< $'1\n9\n2\n\n1'
             [[ "${actions}" == 'install status sync links links ' ]]
-            [[ "$(grep -c '选择错误，请重新选择' "${errorLog}")" == 2 ]]
+            [[ "$(grep -c '选择错误，请重新选择' "${errorLog}")" == 1 ]]
         done
         actions= installStatus=1
         manageSubscriptionCatalog uninitialized <<< $'1\n0' || true
@@ -76,16 +76,19 @@ runSubscriptionMenuWorkflowCoreRegression() (
 
             printf '%s\n' '受管订阅配置' >"${publicationPath}"
             : >"${displayLog}"
-            manageSubscriptionCatalog "${role}" <<< $'0\n10\nyes'
-            [[ "$(awk '/^[0-9]+ / {print $1}' "${displayLog}")" == $'1\n2\n3\n4\n5\n6\n7\n8\n10\n0' ]]
+            manageSubscriptionCatalog "${role}" <<< $'\n9\nyes'
+            [[ "$(awk '/^[0-9]+ / {print $1}' "${displayLog}")" == $'1\n2\n3\n4\n5\n6\n7\n8\n9\n0' ]]
+            [[ -f "${publicationPath}" && "${disableCount}" == 0 ]]
             grep -q '^0 返回主菜单' "${displayLog}"
-            manageSubscriptionCatalog "${role}" <<< $'10\ny\n0'
+            : >"${errorLog}"
+            manageSubscriptionCatalog "${role}" <<< $'10\n9\ny\n0'
+            [[ "$(grep -c '选择错误，请重新选择' "${errorLog}")" == 1 ]]
             [[ -f "${publicationPath}" && "${disableCount}" == 0 ]]
 
             : >"${displayLog}"
-            manageSubscriptionCatalog "${role}" <<< $'10\nyes\n10\n0'
+            manageSubscriptionCatalog "${role}" <<< $'9\nyes\n9\n0'
             [[ ! -e "${publicationPath}" && "${disableCount}" == 1 ]]
-            [[ "$(grep -c '^10 停用发布服务' "${displayLog}")" == 1 ]]
+            [[ "$(grep -c '^9 停用发布服务' "${displayLog}")" == 1 ]]
         done
         [[ "${publicationReads}" == 0 ]]
 
@@ -832,8 +835,10 @@ runSubscriptionMenuDraftRegression() (
         }
         : >"${errorLog}"
         : >"${statusLog}"
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'\n9\n0'
-        [[ "$(grep -c '选择错误，请重新选择' "${errorLog}")" == 2 ]]
+        editUserSubscriptionsMenu '["alpha"]' <<< $'\n1'
+        [[ ! -s "${errorLog}" && ! -s "${statusLog}" ]]
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'9\n0'
+        [[ "$(grep -c '选择错误，请重新选择' "${errorLog}")" == 1 ]]
         grep -q '操作未执行' "${statusLog}"
         [[ "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'3\n1\n0'

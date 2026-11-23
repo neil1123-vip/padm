@@ -1401,6 +1401,9 @@ menuReadChoice() {
     local readStatus
 
     [[ -n "${resultVar}" ]] || return 2
+    if [[ "${allowEmpty}" == interactive && "${prompt}" == "请选择:" ]]; then
+        prompt="请选择编号（回车或 0 返回）："
+    fi
     printf -v "${resultVar}" '%s' ""
     autoRead "${key}" "${prompt}" "${resultVar}"
     readStatus=$?
@@ -1410,6 +1413,7 @@ menuReadChoice() {
     fi
     if [[ -z "${!resultVar}" && "${allowEmpty}" != "true" ]]; then
         [[ "${allowEmpty}" == interactive && -z "${AUTO_INSTALL:-}" ]] || return 1
+        printf -v "${resultVar}" '%s' 0
     fi
     return 0
 }

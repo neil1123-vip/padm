@@ -96,7 +96,7 @@ siteCertificateMenu() {
         menuLine "Reality target/SNI 伪装目标仍由 Reality 目标站管理，二者不要混淆"
         menuItem 1 "传统 TLS fallback 维护" "静态站点、302 重定向、ALPN 诊断/修复"
         menuItem 2 "本机 TLS 证书管理" "续签或查看 /etc/padm/tls 证书"
-        menuItem 4 "本地静态站点" "导入自有网站或使用内置布局起点"
+        menuItem 3 "本地静态站点" "导入自有网站或使用内置布局起点"
         menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectSiteCertificateMenuType=
@@ -104,7 +104,7 @@ siteCertificateMenu() {
         case "${selectSiteCertificateMenuType}" in
         1) manageTraditionalTlsFallback 1 || true; continue ;;
         2) manageTLSCertificates || true; continue ;;
-        4) manageTraditionalTlsStaticSite || true; continue ;;
+        3) manageTraditionalTlsStaticSite || true; continue ;;
         0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
@@ -551,7 +551,7 @@ menu() {
         menuReturnItem 0 "退出" "结束当前菜单会话"
         menuClose
         selectMainMenuType=
-        menuReadChoice main_menu "请选择:" selectMainMenuType interactive || return 0
+        menuReadChoice main_menu "请选择编号（回车或 0 退出）：" selectMainMenuType interactive || return 0
         PADM_INSTALL_STATUS_READY=0
         case ${selectMainMenuType} in
         1)
