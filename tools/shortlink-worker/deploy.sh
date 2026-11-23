@@ -294,19 +294,18 @@ process.stdin.on("end", () => {
         fi
         saveCredentials=true
         printf '%s\n' \
-            '  获取 Token：打开 https://dash.cloudflare.com/profile/api-tokens' \
-            '  选择 Create Token（创建令牌）→ Create Custom Token（创建自定义令牌）' \
-            '  名称填 padm-shortlink' \
-            '  权限 1：Account（账户）→ Workers Scripts（Workers 脚本）' \
-            '  → Edit（编辑）' \
-            '  权限 2：Account（账户）→ Workers KV Storage（Workers KV 存储）' \
-            '  → Edit（编辑）' \
-            '  Account Resources（账户资源）：Include（包含）→ Specific account（指定账户）' \
-            '  → 目标 Cloudflare 账户' \
-            '  Continue to summary（继续查看摘要）→ Create Token（创建令牌）' \
-            '  复制 Token（只显示一次）' \
-            '  Account ID：Workers & Pages（Workers 与 Pages）→ Account Details（账户详情）' \
-            '  → Account ID（账户 ID）' >&3
+            '  打开 https://dash.cloudflare.com/profile/api-tokens' \
+            '  点击 Create Token（创建令牌）。' \
+            '  在「令牌名称」（Token name）填 padm-shortlink。' \
+            '  在「策略」列表选第一项「从头开始」（Custom）。' \
+            '  点击 Add new policy（添加新策略），选择 Account（账户）策略。' \
+            '  资源范围仅包含要部署 Worker 的 Cloudflare 账户。' \
+            '  搜索 Workers Scripts 和 Workers KV Storage，两项均勾选 Edit。' \
+            '  写权限在摘要中显示为 Write。Edit 已包含读取和列出权限。' \
+            '  点击 Continue to summary（继续查看摘要），核对账户及两项权限。' \
+            '  点击 Create Token（创建令牌），复制只显示一次的 Token。' \
+            '  回到目标账户，按 Ctrl+K（macOS 按 Cmd+K）打开控制台搜索。' \
+            '  搜索并选择 Copy account ID，复制账户 ID。' >&3
         if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
             printf '%s' '  Cloudflare API Token（隐藏输入）: ' >&3
             read -r -s -u 3 CLOUDFLARE_API_TOKEN

@@ -23,8 +23,12 @@ bash tools/shortlink-worker/deploy.sh
 - Linux x86_64 或 ARM64、glibc 2.35+，支持 `apt-get`、`dnf` 或 `yum`；建议使用
   Debian 12+、Ubuntu 22.04+ 或 Rocky/AlmaLinux 10+。
 - root 或 sudo 权限，用于安装依赖及保存 padm 配置。
-- Cloudflare API Token，具备目标账号的 `Workers Scripts Edit` 和 `Workers KV Storage Edit`
-  权限；Account ID 可从 Cloudflare 账号概览获取。
+- Cloudflare 用户 API Token。填好令牌名称后，在「策略」中选第一项「从头开始」（`Custom`），
+  然后添加 `Account` 策略，只包含目标账户。勾选 `Workers Scripts` 和 `Workers KV Storage`
+  的 `Edit` 权限，摘要中显示为 `Write`。`Edit` 已包含读取和列出权限。
+  [创建 API Token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
+- Cloudflare Account ID。在目标账户按 `Ctrl+K`（macOS 按 `Cmd+K`），搜索并选择
+  `Copy account ID`。[查找 Account ID](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/#copy-your-account-id)
 
 首次运行时，脚本交互收集 Token 和 Account ID，Token 隐藏输入。
 随后用 `age` 口令加密保存凭据，设置口令时需输入两次；直接回车会生成口令，请妥善记录。

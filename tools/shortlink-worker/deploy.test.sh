@@ -366,12 +366,15 @@ for mode, domain in cases:
     instructions = (
         "https://dash.cloudflare.com/profile/api-tokens",
         "Create Token（创建令牌）",
-        "Create Custom Token（创建自定义令牌）",
-        "Account（账户）→ Workers Scripts（Workers 脚本）",
-        "Workers KV Storage（Workers KV 存储）",
-        "Account Resources（账户资源）：Include（包含）→ Specific account（指定账户）",
+        "「令牌名称」（Token name）填 padm-shortlink",
+        "「策略」列表选第一项「从头开始」（Custom）",
+        "Add new policy（添加新策略），选择 Account（账户）策略",
+        "资源范围仅包含要部署 Worker 的 Cloudflare 账户",
+        "Workers Scripts 和 Workers KV Storage，两项均勾选 Edit",
+        "写权限在摘要中显示为 Write",
+        "Edit 已包含读取和列出权限",
         "Continue to summary（继续查看摘要）",
-        "Account Details（账户详情）",
+        "Copy account ID",
         "只显示一次",
     ) if mode == "color" else ()
     for instruction in instructions:
