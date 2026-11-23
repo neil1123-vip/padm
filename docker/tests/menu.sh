@@ -3325,7 +3325,7 @@ if [[ "${MENU_SCOPE}" == full ]]; then
     [[ "${summaryCommandStatus}" -eq 2 ]] || fail 'status 接受了多余参数'
 )
 
-# 仅替换 CLI 边界，直接用新编号核对首页、原生返回项与受限入口。
+# 仅替换 CLI 边界，直接核对首页、兼容返回键与受限入口。
 MENU_UI_CLI="${TEST_ROOT}/menu-ui.sh"
 export MENU_UI_PROJECT_ROOT="${PROJECT_ROOT}" MENU_UI_ACTIONS="${TEST_ROOT}/menu-ui.actions"
 cat >"${MENU_UI_CLI}" <<'EOF'
@@ -3357,6 +3357,26 @@ grep -Fq '┌─ ' "${CONTROL_LOG}" && grep -Fq '└─' "${CONTROL_LOG}" ||
     fail '原生分类返回项未逐次返回首页'
 [[ "$(<"${MENU_UI_ACTIONS}")" == "$(printf 'status --summary\n%.0s' {1..9})" ]] ||
     fail '首页重绘未逐次更新状态，或分类返回触发了业务命令'
+
+: >"${MENU_UI_ACTIONS}"
+runPty ui-menu-order plain $'2\n0\n3\n0\n4\n0\n5\n1\n0\n4\n0\n' "${MENU_UI_CLI}"
+awk '
+    /^┌─ (订阅与用户|协议与入口|站点与证书|分流工具) / { menu = $2; last = -1; next }
+    !menu { next }
+    /^│ +[0-9]+\./ {
+        option = $2 + 0
+        if (last == 0 || (option > 0 && option <= last)) invalid = 1
+        last = option
+    }
+    /^└─/ {
+        if (last != 0) invalid = 1
+        seen[menu] = 1
+        menu = ""
+    }
+    END { exit invalid || length(seen) != 4 }
+' "${CONTROL_LOG}" || fail '分类菜单功能编号未递增，或 0 返回未放在最后'
+[[ "$(<"${MENU_UI_ACTIONS}")" == "$(printf 'status --summary\n%.0s' {1..5})" ]] ||
+    fail '输入 0 未逐层返回，或触发了业务命令'
 
 : >"${MENU_UI_ACTIONS}"
 runPty ui-subscription-publish plain $'2\n7\n1\n3\nn\n3\ny\n2\n0\n6\n0\n' "${MENU_UI_CLI}"

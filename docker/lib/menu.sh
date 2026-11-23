@@ -2415,7 +2415,7 @@ dockerMenuSubscriptionUsers() {
         menuItem 4 '控制连接' 'WireGuard、主控/被控与同步'
         menuItem 5 '业务备份恢复' '账号和分享组的分范围备份'
         menuItem 7 'HTTPS 订阅发布' '查看、启用和停用本机公网发布'
-        menuReturnItem 6 '返回主菜单' '回到 padm 管理面板'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2427,8 +2427,8 @@ dockerMenuSubscriptionUsers() {
         3) dockerMenuTraffic ;;
         4) dockerMenuControl ;;
         5) dockerMenuBusiness ;;
-        6) return 0 ;;
         7) dockerMenuSubscriptionPublish ;;
+        6) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2477,8 +2477,8 @@ dockerMenuProtocolEntries() {
         menuItem 5 'Tuic 管理' '拥塞、认证、心跳和 0-RTT'
         menuItem 6 '额外入口端口管理' '公开端口与默认分享入口'
         menuItem 7 'CDN 入口管理' '连接地址覆盖和 H3 使用说明'
-        menuReturnItem 8 '返回主菜单' '回到 padm 管理面板'
         menuItem 9 '入口高级管理' '增量安装、复制删除、重建、端口跳跃和密钥轮换'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2492,8 +2492,8 @@ dockerMenuProtocolEntries() {
         5) dockerMenuTuic ;;
         6) dockerMenuPortAliases ;;
         7) dockerMenuCdnEntries ;;
-        8) return 0 ;;
         9) dockerMenuProtocols ;;
+        8) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2509,7 +2509,7 @@ dockerMenuSiteCertificates() {
         menuItem 1 '传统 TLS fallback 维护' '静态站点、302 重定向、ALPN 诊断和修复'
         menuItem 2 '本机 TLS 证书管理' '校验、轮换、申请与续期'
         menuItem 4 '本地静态站点' '导入目录或使用内置主题'
-        menuReturnItem 3 '返回主菜单' '回到 padm 管理面板'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2561,10 +2561,10 @@ dockerMenuRoutingTools() {
         menuItem 3 'Socks5 中继' '认证出站和入站支持边界'
         menuItem 4 'DNS 覆盖' '上游服务器和域名规则'
         menuItem 5 'DNS/hosts 覆盖' '精确域名与 IP 映射'
-        menuReturnItem 6 '返回路由与访问控制' '回到上级菜单'
         menuItem 7 'HTTP 中继入站' '认证和来源允许名单'
         menuItem 8 'WireGuard 连接' '本机身份和 Peer 管理'
         menuItem 9 '完整路由维护' '全部路由专项及 TProxy、Redirect 和 TUN'
+        menuReturnItem 0 '返回路由与访问控制' '回到上级菜单'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2576,10 +2576,10 @@ dockerMenuRoutingTools() {
         3) dockerMenuSocks5 ;;
         4) dockerMenuRouting dns ;;
         5) dockerMenuRouting hosts ;;
-        6) return 0 ;;
         7) dockerMenuHttpRelay ;;
         8) dockerMenuWireGuard ;;
         9) dockerMenuRouting ;;
+        6) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

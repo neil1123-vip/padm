@@ -40,7 +40,7 @@ runSubscriptionMenuWorkflowCoreRegression() (
         showPublishedSubscriptionLinks() { actions+="links "; }
         for role in uninitialized main; do
             actions=
-            manageSubscriptionCatalog "${role}" <<< $'1\n2\n9'
+            manageSubscriptionCatalog "${role}" <<< $'1\n2\n9\n1'
             [[ "${actions}" == 'install status sync links links ' ]]
         done
         actions= installStatus=1
@@ -69,16 +69,19 @@ runSubscriptionMenuWorkflowCoreRegression() (
         for role in uninitialized main; do
             disableCount=0
             : >"${displayLog}"
-            manageSubscriptionCatalog "${role}" <<< $'10\n9'
-            [[ "$(<"${displayLog}")" != *'停用发布服务'* && "${disableCount}" == 0 ]]
+            manageSubscriptionCatalog "${role}" <<< '0'
+            [[ "$(awk '/^[0-9]+ / {print $1}' "${displayLog}")" == $'1\n2\n3\n4\n5\n6\n7\n8\n0' ]]
 
             printf '%s\n' '受管订阅配置' >"${publicationPath}"
-            manageSubscriptionCatalog "${role}" <<< $'10\ny\n9'
-            grep -q '^10 停用发布服务' "${displayLog}"
+            : >"${displayLog}"
+            manageSubscriptionCatalog "${role}" <<< $'0\n10\nyes'
+            [[ "$(awk '/^[0-9]+ / {print $1}' "${displayLog}")" == $'1\n2\n3\n4\n5\n6\n7\n8\n10\n0' ]]
+            grep -q '^0 返回主菜单' "${displayLog}"
+            manageSubscriptionCatalog "${role}" <<< $'10\ny\n0'
             [[ -f "${publicationPath}" && "${disableCount}" == 0 ]]
 
             : >"${displayLog}"
-            manageSubscriptionCatalog "${role}" <<< $'10\nyes\n10\n9'
+            manageSubscriptionCatalog "${role}" <<< $'10\nyes\n10\n0'
             [[ ! -e "${publicationPath}" && "${disableCount}" == 1 ]]
             [[ "$(grep -c '^10 停用发布服务' "${displayLog}")" == 1 ]]
         done

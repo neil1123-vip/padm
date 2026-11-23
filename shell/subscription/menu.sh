@@ -553,7 +553,7 @@ manageSubscriptionCatalog() {
             canDisablePublication=true
             menuDangerItem 10 "停用发布服务" "停用本机公网订阅链接，保留已保存的订阅和节点配置"
         fi
-        menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus || return 0
         case "${subscriptionCatalogStatus}" in
@@ -586,7 +586,6 @@ manageSubscriptionCatalog() {
                 coreSelectionErrorCard
             fi
             ;;
-        9) return 0 ;;
         10)
             if [[ "${canDisablePublication}" != "true" ]]; then
                 coreSelectionErrorCard
@@ -600,6 +599,7 @@ manageSubscriptionCatalog() {
                 statusCard "已取消停用发布服务"
             fi
             ;;
+        0|9) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
