@@ -936,6 +936,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     local controlRoot="${TMP_DIR}/remote-control-handle-inline-helpers"
     local configDir="${controlRoot}/config"
     local desiredBySource
+    local sources edgeAccount secondAccount payload drainedUsers
     local credentialPlan
     local healthResponse
     local syncResponse
@@ -1070,6 +1071,78 @@ JSON
     desiredBySource=$(subscriptionRemoteDesiredUsersBySource '[{"id":"edge"}]')
     jq -e '.["edge"][0].uuid == "22222222-2222-2222-2222-222222222222" and (.["edge"][0] | keys) == ["account","id","uuid"]' <<<"${desiredBySource}" >/dev/null
     subscriptionActiveGroupRead -e '.user_groups[0].uuid == "22222222-2222-2222-2222-222222222222"' >/dev/null
+
+    # 旧来源完整同步时初始化独立账号，预览与控制 Token 更新不改动其凭据。
+    local oldBackup currentBackup
+    setSubscriptionSourceCredential edge 10.77.0.2 39778 test-token || return 1
+    addSubscriptionSourceState edge-b 'Edge B' 10.77.0.3 39778 || return 1
+    setSubscriptionSourceCredential edge-b 10.77.0.3 39778 other-token || return 1
+    oldBackup=$(createSubscriptionGroupsBackup) || return 1
+    sources=$(subscriptionRemoteControlSources) || return 1
+    edgeAccount=$(subscriptionRemoteAdminAccountName edge)
+    secondAccount=$(subscriptionRemoteAdminAccountName edge-b)
+    desiredBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}" '' preview) || return 1
+    jq -e --arg account "${secondAccount}" '.["edge-b"][0].account == $account' <<<"${desiredBySource}" >/dev/null || return 1
+    cmp -s "${oldBackup}" "$(subscriptionGroupsFile)" || return 1
+
+    desiredBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}" '' apply) || return 1
+    currentBackup=$(createSubscriptionGroupsBackup) || return 1
+    jq -e '[.sources[] | select(.role == "secondary") | .admin_uuid] | all(type == "string")' "${currentBackup}" >/dev/null || return 1
+    setSubscriptionSourceCredential edge 10.77.0.2 39778 rotated-token || return 1
+    sources=$(subscriptionRemoteControlSources) || return 1
+    [[ "${desiredBySource}" == "$(subscriptionRemoteDesiredUsersBySource "${sources}" '' apply)" ]] || return 1
+    subscriptionGroupsStateReplace "${oldBackup}" "$(subscriptionGroupsFile)" "$(subscriptionGroupsFile)" || return 1
+    sources=$(subscriptionRemoteControlSources) || return 1
+    [[ "${desiredBySource}" == "$(subscriptionRemoteDesiredUsersBySource "${sources}")" ]] || return 1
+    jq -e --arg a "${edgeAccount}" --arg b "${secondAccount}" '
+      [.edge[].account] == ["sub_team_a", $a] and
+      [.["edge-b"][].account] == [$b] and
+      ([.[][] | .uuid] | unique | length) == 3
+    ' <<<"${desiredBySource}" >/dev/null || return 1
+    payload=$(subscriptionRemoteControlPayload '{}' false "${desiredBySource}" edge-b)
+    jq -e '
+      keys == ["desired_users", "dry_run"] and .dry_run == false and
+      (.desired_users | length == 1 and (.[0] | keys == ["id", "uuid"]))
+    ' <<<"${payload}" >/dev/null
+    (
+        subscriptionRemoteApplyDesiredUsersForSource() {
+            printf '%s\n' "$2" >>"${controlRoot}/admin-drain.jsonl"
+        }
+        local source
+        source=$(jq -c '.[0]' <<<"${sources}")
+        subscriptionRemoteDrainSource "${source}" drainedUsers
+        subscriptionRemoteRestoreSourceUsersIfEnabled "${source}" "${drainedUsers}"
+        jq -e -s --argjson expected "${desiredBySource}" '
+          . == [{"edge":[]}, {edge:$expected.edge}]
+        ' "${controlRoot}/admin-drain.jsonl" >/dev/null || return 1
+
+        local oldSource
+        oldSource=$(jq -c '.sources[] | select(.id == "edge")' "${oldBackup}") || return 1
+        : >"${controlRoot}/admin-drain.jsonl"
+        setSubscriptionRemoteSourceEnabled edge false "${oldSource}" || return 1
+        subscriptionActiveGroupRead -e --argjson original "${source}" '
+          any(.sources[]; .id == "edge" and .enabled == false and .admin_uuid == $original.admin_uuid)
+        ' >/dev/null || return 1
+        setSubscriptionRemoteSourceEnabled edge true || return 1
+        [[ "${desiredBySource}" == "$(subscriptionRemoteDesiredUsersBySource "$(subscriptionRemoteControlSources)")" ]] || return 1
+        jq -e -s '. == [{"edge":[]}]' "${controlRoot}/admin-drain.jsonl" >/dev/null || return 1
+
+        : >"${controlRoot}/admin-drain.jsonl"
+        setSubscriptionSourceEnabled() { return 1; }
+        if setSubscriptionRemoteSourceEnabled edge false "${oldSource}"; then
+            return 1
+        fi
+        jq -e -s --argjson expected "${desiredBySource}" '
+          . == [{"edge":[]}, {edge:$expected.edge}]
+        ' "${controlRoot}/admin-drain.jsonl" >/dev/null
+    ) || return 1
+
+    printf '%s\n' '{"version":' >"$(subscriptionGroupsFile)" || return 1
+    subscriptionGroupsStateReplace "${currentBackup}" "$(subscriptionGroupsFile)" "$(subscriptionGroupsFile)" || return 1
+    cmp -s "${currentBackup}" "$(subscriptionGroupsFile)" || return 1
+    setSubscriptionSourceEnabled edge false || return 1
+    restoreSubscriptionGroupsBackup "${currentBackup}" || return 1
+    cmp -s "${currentBackup}" "$(subscriptionGroupsFile)" || return 1
 
     cat >"${configDir}/01_inbounds.json" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-VLESS_WS","id":"33333333-3333-3333-3333-333333333333"}]}}]}

@@ -189,6 +189,7 @@ validateSubscriptionGroupsState() {
         (. as $object | all($required[]; . as $key | $object | has($key)));
       def nonempty_string: type == "string" and length > 0;
       def state_id: type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$");
+      def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$");
       def count: type == "number" and . == floor and . >= 0;
       def allowed_sources:
         type == "array" and length > 0 and all(.[]; . == "*" or state_id) and
@@ -199,7 +200,7 @@ validateSubscriptionGroupsState() {
         (.enabled | type == "boolean") and (.allowed_sources | allowed_sources) and
         (.traffic_limit_gb | count) and
         ((has("control_managed") | not) or (.control_managed | type == "boolean")) and
-        ((has("uuid") | not) or (.uuid | type == "string" and test("^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")));
+        ((has("uuid") | not) or (.uuid | valid_uuid));
       def sync_plan:
         exact(["create", "remove"]; []) and
         (.create | type == "array" and all(.[]?; nonempty_string)) and
@@ -219,13 +220,14 @@ validateSubscriptionGroupsState() {
           .port == 0 and .enabled == true and .sync_status == "local"
         else
           exact(["id", "name", "role", "scheme", "transport", "host", "port", "enabled", "sync_status"];
-            ["control_token", "last_sync_changed", "last_sync_plan", "last_sync_error", "sync_failure_count", "sync_circuit_open_until"]) and
+            ["control_token", "admin_uuid", "last_sync_changed", "last_sync_plan", "last_sync_error", "sync_failure_count", "sync_circuit_open_until"]) and
           .role == "secondary" and .scheme == "wireguard" and .transport == "wireguard" and
           (.id | state_id) and (.name | nonempty_string) and (.host | nonempty_string) and
           (.port | type == "number" and . == floor and . >= 1 and . <= 65535) and
           (.enabled | type == "boolean") and
           (.sync_status == "pending" or .sync_status == "success" or .sync_status == "failed") and
           ((has("control_token") | not) or (.control_token | nonempty_string)) and
+          ((has("admin_uuid") | not) or (.admin_uuid | valid_uuid)) and
           ((has("last_sync_changed") | not) or (.last_sync_changed | type == "boolean")) and
           ((has("last_sync_plan") | not) or (.last_sync_plan | sync_plan)) and
           ((has("last_sync_error") | not) or (.last_sync_error | sync_error)) and
@@ -463,6 +465,7 @@ subscriptionGroupsStateRead() {
 subscriptionGroupsStateReplaceUnlocked() {
     local sourceFile=$1
     local targetFile=$2
+    local previousFile=${3:-}
     local normalizedFile=
     local sourceVersion
     local tmpFile
@@ -478,11 +481,21 @@ subscriptionGroupsStateReplaceUnlocked() {
         sourceFile=${normalizedFile}
     fi
     padmCreateTempFileForTarget tmpFile "${targetFile}" state || return 1
-    if ! cp "${sourceFile}" "${tmpFile}"; then
+    if [[ -n "${previousFile}" && -f "${previousFile}" ]] &&
+        validateSubscriptionGroupsState "${previousFile}" 2>/dev/null; then
+        jq --slurpfile previous "${previousFile}" '
+          ($previous[0].sources // [] | map(select(has("admin_uuid")) | {key:.id, value:{host,admin_uuid}}) | from_entries) as $admin |
+          .sources |= map(. as $source | $admin[.id] as $saved |
+            if .role == "secondary" and (has("admin_uuid") | not) and $saved.host == $source.host then
+              .admin_uuid = $saved.admin_uuid else . end)
+        ' "${sourceFile}" >"${tmpFile}"
+    else
+        cp "${sourceFile}" "${tmpFile}"
+    fi || {
         padmRemoveCleanupPath "${tmpFile}"
         [[ -n "${normalizedFile}" ]] && padmRemoveCleanupPath "${normalizedFile}"
         return 1
-    fi
+    }
     if ! validateSubscriptionGroupsState "${tmpFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
         [[ -n "${normalizedFile}" ]] && padmRemoveCleanupPath "${normalizedFile}"

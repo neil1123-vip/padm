@@ -2254,6 +2254,7 @@ n"
         manageSubscriptionLocalHome <<<"0"
         grep -q "返回主菜单" <<<"${output}"
         grep -q "查看当前订阅链接" <<<"${output}"
+        grep -qF "管理员订阅包含本机协议配置中的节点" <<<"${output}"
         resetMenuActions
         output=
         manageSubscriptionLocalHome <<<"0"
@@ -2444,7 +2445,8 @@ invite-credential"
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"0"
-        grep -q "本机自用订阅来自协议配置" <<<"${output}"
+        grep -qF "管理员订阅汇总本机和已启用被控服务器的可用节点" <<<"${output}"
+        grep -qF "只读查看已发布的管理员订阅和分享订阅" <<<"${output}"
         grep -q "查看当前订阅链接" <<<"${output}"
         grep -q "立即完整同步" <<<"${output}"
         grep -q "安装/更新发布服务" <<<"${output}"

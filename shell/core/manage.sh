@@ -2833,9 +2833,8 @@ renderAllSubscribeUserOutputs() {
 
 subscriptionPublishAccounts() {
     local localBase=$1
-    local enabledUsers
+    local enabledUsers accountRows hasLocalOutput
     local localAccounts=
-    local stagedAccounts=
     local publishAccounts=
     local account=
     local defaultFile
@@ -2857,26 +2856,28 @@ subscriptionPublishAccounts() {
         mainPublishSourceAvailable=true
     fi
     enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
-    while IFS=$'\t' read -r account allowsMain hasRemote; do
+    accountRows=$(subscriptionActiveGroupRead -r --argjson enabledUsers "${enabledUsers}" --arg localAccounts "${localAccounts}" '
+      [.user_groups[]?
+       | select(.control_managed == true and (.id | test("^padm-admin-[a-f0-9]{32}$")))
+       | .id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'] as $internalAccounts |
+      (
+        ($localAccounts | split("\n")[] | [., false, false, true]),
+        ($enabledUsers[]? | [(.account // ""), (.allows_main // false), (.has_remote // false), false])
+      ) |
+      select(.[0] as $account | $account != "" and ($internalAccounts | index($account) == null)) |
+      @tsv') || return 1
+    while IFS=$'\t' read -r account allowsMain hasRemote hasLocalOutput; do
         [[ -n "${account}" ]] || continue
-        if [[ "${allowsMain}" == "true" && "${mainPublishSourceAvailable}" == "true" ]]; then
-            stagedAccounts+="${account}"$'\n'
+        if [[ "${hasLocalOutput}" == "true" || ( "${allowsMain}" == "true" && "${mainPublishSourceAvailable}" == "true" ) ]]; then
+            publishAccounts+="${account}"$'\n'
             continue
         fi
         if [[ "${remoteScopeEnabled}" == "true" && "${hasRemote}" == "true" ]]; then
             SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
-            stagedAccounts+="${account}"$'\n'
+            publishAccounts+="${account}"$'\n'
         fi
-    done < <(subscriptionActiveGroupRead -r --argjson enabledUsers "${enabledUsers}" '
-      . as $group |
-      $enabledUsers[]?
-      | [
-          (.account // ""),
-          ((.allows_main // false) | tostring),
-          ((.has_remote // false) | tostring)
-        ]
-      | @tsv')
-    publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++' | sed '/^$/d')
+    done <<<"${accountRows}"
+    publishAccounts=$(awk 'length($0) > 0 && !seen[$0]++' <<<"${publishAccounts}")
     if [[ "${remoteScopeEnabled}" == "true" && "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" != "0" ]]; then
         while IFS= read -r account; do
             [[ -n "${account}" ]] || continue
@@ -2887,7 +2888,9 @@ subscriptionPublishAccounts() {
         done <<<"${publishAccounts}"
     fi
     SUBSCRIPTION_PUBLISH_ACCOUNTS=${publishAccounts}
-    [[ -n "${publishAccounts}" ]] && printf '%s\n' "${publishAccounts}"
+    if [[ -n "${publishAccounts}" ]]; then
+        printf '%s\n' "${publishAccounts}"
+    fi
 }
 
 cleanupStaleSubscribeOutputs() {
@@ -3156,6 +3159,18 @@ subscribeUnlocked() {
 }
 
 subscribe() {
+    if [[ "$#" -le 2 && "${1:-}" == "false" && "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]] &&
+        subscriptionRemoteScopeEnabled && subscriptionHasEnabledRemoteSources; then
+        local syncStatus=0
+        readInstallProtocolType || return 1
+        installSubscribe || return 1
+        refreshPublishedSubscriptions || syncStatus=$?
+        if [[ -z "${2:-}" && "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]] &&
+            ! showPublishedSubscriptionLinks && [[ "${syncStatus}" == "0" ]]; then
+            syncStatus=1
+        fi
+        return "${syncStatus}"
+    fi
     subscriptionGroupsWithLock subscribeUnlocked "$@"
 }
 
@@ -3178,6 +3193,9 @@ showSubscriptionUrlCard() {
     local title=$1
     local email=$2
     local url=$3
+    if [[ -n "${email}" && "${email}" != sub_* ]]; then
+        title="管理员 · ${title}"
+    fi
     echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
     [[ -n "${email}" ]] && menuLine "账号：${email}"
     menuLine "订阅地址：${url}"

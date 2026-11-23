@@ -1015,10 +1015,23 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
     local publishRoot="${TMP_DIR}/subscription-output-publish-accounts"
     local localBase="${publishRoot}/local"
     local mainCheckFile="${publishRoot}/main-check-count"
-    local output
+    local output groupFixture
+    local activeInternalId=padm-admin-11111111111111111111111111111111
+    local disabledInternalId=padm-admin-22222222222222222222222222222222
+    local manualId=padm-admin-33333333333333333333333333333333
+    local disabledInternalAccount manualAccount
+    disabledInternalAccount=$(subscriptionSyncAccountName "${disabledInternalId}")
+    manualAccount=$(subscriptionSyncAccountName "${manualId}")
     mkdir -p "${localBase}/default"
     : >"${localBase}/default/local-keep"
+    : >"${localBase}/default/${disabledInternalAccount}"
     printf '0\n' >"${mainCheckFile}"
+    groupFixture=$(jq -cn --arg active "${activeInternalId}" --arg disabled "${disabledInternalId}" --arg manual "${manualId}" '
+      {sources:[{id:"main"}], user_groups:
+        (["team-a", "team-b", $active, $disabled, $manual] | map({id:., name:., enabled:(. != $disabled), allowed_sources:["main"]}))} |
+      .user_groups[2].control_managed = true |
+      .user_groups[3].control_managed = true |
+      .user_groups[4].control_managed = false')
 
     subscriptionGroupsStateRead() {
         if [[ "$*" == "-r .id" ]]; then
@@ -1036,21 +1049,14 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
             printf '%s\n' "$(( $(<"${mainCheckFile}") + 1 ))" >"${mainCheckFile}"
             return 0
         fi
-        if [[ "$*" == *'--argjson enabledUsers '* && "$*" == *'.allows_main // false'* && "$*" == *'.has_remote // false'* && "$*" == *'@tsv'* ]]; then
-            printf 'sub_team_a\ttrue\tfalse\nsub_team_b\ttrue\tfalse\n'
-            return 0
-        fi
-        return 1
-    }
-    subscriptionActiveEnabledUsersJson() {
-        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["main"],"allows_main":true,"has_remote":false},{"id":"team-b","account":"sub_team_b","allowed_sources":["main"],"allows_main":true,"has_remote":false}]\n'
+        jq "$@" <<<"${groupFixture}"
     }
     subscriptionSyncFindUserByAccountName() {
         return 99
     }
 
     output=$(subscriptionPublishAccounts "${localBase}")
-    [[ "${output}" == $'local-keep\nsub_team_a\nsub_team_b' ]]
+    [[ "${output}" == $'local-keep\nsub_team_a\nsub_team_b\n'"${manualAccount}" ]]
     [[ "$(<"${mainCheckFile}")" == "1" ]]
 )
 
@@ -1099,7 +1105,7 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
             return 1
         fi
         if [[ "$*" == *'--argjson enabledUsers '* && "$*" == *'.has_remote // false'* && "$*" == *'@tsv'* ]]; then
-            printf 'sub_team_a\tfalse\ttrue\n'
+            printf 'sub_team_a\tfalse\ttrue\tfalse\n'
             return 0
         fi
         return 1
@@ -1365,63 +1371,122 @@ runSubscriptionOutputRemoteOnlyAllFailedRestoreRegression() (
 
 runSubscriptionOutputMixedLocalRemoteAllFailedPublishesLocalRegression() (
     set -euo pipefail
+    trap 'printf "assert-fail:subscription-output-mixed-all-failed:%s\n" "${LINENO}" >&2' ERR
     local root="${TMP_DIR}/subscription-output-mixed-all-failed"
     local localBase="${root}/local"
     local publicBase="${root}/public"
-    local publishStage="${root}/stage"
-    local shareAccount=sub_team_a
-    local emailMd5 adminMd5 format
-    local currentDefaultPort=443
+    local configPath="${root}/xray/" singBoxConfigPath= coreInstallType=1
+    local configFile="${configPath}07_VLESS_vision_reality_inbounds.json"
+    local adminId=11111111-1111-1111-1111-111111111111
+    local remoteId=22222222-2222-2222-2222-222222222222
+    local SCRIPT_DIR="${PROJECT_ROOT}"
+    local subscribeSalt=test-salt
+    local adminMd5 remoteAdminAccount snapshots xhttpSnapshots decodedDefault localClashServers clashServers format
+    local shareMd5 shareId=33333333-3333-3333-3333-333333333333
 
-    mkdir -p \
-        "${root}/tmp" \
-        "${localBase}/default" \
-        "${publicBase}/default" \
-        "${publicBase}/clashMeta" \
-        "${publicBase}/clashMetaProfiles" \
-        "${publicBase}/sing-box_profiles" \
-        "${publicBase}/sing-box" \
-        "${publishStage}"/{default,clashMeta,clashMetaProfiles,sing-box_profiles,sing-box}
+    mkdir -p "${root}/tmp" "${configPath}" "${localBase}" "${publicBase}"
     TMPDIR="${root}/tmp"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localBase}"
-    export PADM_SUBSCRIBE_DIR="${publishStage}"
-    export PADM_SUBSCRIBE_PREVIOUS_DIR="${publicBase}"
-    subscribeSalt=test-salt
-    subscribeDomain=example.com
-    subscribePort=443
-    emailMd5=$(printf '%s\n' "${shareAccount}${subscribeSalt}" | md5sum | awk '{print $1}')
+    export PADM_SUBSCRIBE_DIR="${publicBase}"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+    source "${SCRIPT_DIR}/shell/core/runtime.sh"
+    source "${SCRIPT_DIR}/shell/subscription/output.sh"
+    printf '%s\n' "${subscribeSalt}" >"${localBase}/subscribeSalt"
     adminMd5=$(printf '%s\n' "admin${subscribeSalt}" | md5sum | awk '{print $1}')
-    printf 'new-local\n' >"${localBase}/default/${shareAccount}"
-    printf 'new-admin\n' >"${localBase}/default/admin"
-    printf 'old-admin\n' >"${publicBase}/default/${adminMd5}"
-    printf 'old-combined-default\n' >"${publicBase}/default/${emailMd5}"
-    printf 'old-combined-clash\n' >"${publicBase}/clashMeta/${emailMd5}"
-    printf 'old-combined-clash-profile\n' >"${publicBase}/clashMetaProfiles/${emailMd5}"
-    printf '[{"tag":"old-combined"}]\n' >"${publicBase}/sing-box_profiles/${emailMd5}"
-    printf '{"outbounds":[{"tag":"old-combined"}]}\n' >"${publicBase}/sing-box/${emailMd5}"
+    jq -cn --arg uuid "${adminId}" '
+      {inbounds:[{port:443},{
+        settings:{clients:[{email:"admin-vless_reality_vision",id:$uuid}],decryption:"none"},
+        streamSettings:{realitySettings:{serverNames:["www.ibm.com"],publicKey:"public-key",
+          privateKey:"private-key",target:"www.ibm.com:443"}}
+      }]}' >"${configFile}"
 
-    subscriptionRemoteScopeEnabled() { return 0; }
-    subscriptionRemoteSubscribeSourcesForAccount() {
-        case "$1" in
-        "${shareAccount}") printf -v "$2" '%s' $'edge-a\nedge-b' ;;
-        admin) printf -v "$2" '%s' '' ;;
-        *) return 1 ;;
-        esac
+    subscriptionWireGuardReadState() { printf '%s\n' '{"role":"main","enabled":true}'; }
+    readNginxSubscribe() {
+        subscribeType=https
+        subscribeDomain=main.example.com
+        subscribePort=39778
     }
-    subscriptionActiveGroupRead() {
-        case "$*" in
-        *'--arg id edge-a'*) printf '%s\n' '{"id":"edge-a","host":"a.example.com","port":443}' ;;
-        *'--arg id edge-b'*) printf '%s\n' '{"id":"edge-b","host":"b.example.com","port":443}' ;;
-        *) return 1 ;;
-        esac
+    readInstallType() { return 0; }
+    readConfigHostPathUUID() {
+        currentHost=main.example.com currentPath= currentDefaultPort=443
+        realityEntryHost=main.example.com
     }
+    readSingBoxConfig() { return 0; }
+    realityStreamPublicPortForProtocol() { return 0; }
+    corePortSubscriptionPort() { printf '%s\n' "${2:-$1}"; }
 
-    # 复现完整同步同时发布本机自用和含被控来源的分享订阅。
-    renderAllSubscribeUserOutputs "${localBase}" false true $'admin\n'"${shareAccount}" "" '{"edge-a":null,"edge-b":null}'
-    [[ "$(base64 -d "${publishStage}/default/${adminMd5}")" == 'new-admin' ]]
-    [[ "$(base64 -d "${publishStage}/default/${emailMd5}")" == 'new-local' ]]
-    for format in clashMeta clashMetaProfiles sing-box_profiles sing-box; do
-        [[ ! -e "${publishStage}/${format}/${emailMd5}" ]]
+    ensureSubscriptionGroupsState
+    generateSubscribeOutputsUnlocked false true "" "" '{}'
+    [[ "${SUBSCRIPTION_PUBLISH_ACCOUNTS}" == admin ]]
+    cp -a "${publicBase}" "${root}/local-only"
+    localClashServers=$(sed -n 's/^    server: //p' "${publicBase}/clashMeta/${adminMd5}")
+    [[ -n "${localClashServers}" ]]
+    addSubscriptionSourceState edge-a 'Edge A' edge.example.com 443
+    remoteAdminAccount=$(subscriptionRemoteAdminAccountName edge-a)
+    snapshots=$(jq -cn --arg account "${remoteAdminAccount}" \
+        --arg default "$(printf 'vless://%s@edge.example.com:443?type=tcp#%s-vless_reality_vision\n' "${remoteId}" "${remoteAdminAccount}" | base64 -w 0)" \
+        --arg clash "  - name: \"${remoteAdminAccount}-vless_reality_vision\""$'\n    server: edge.example.com' '
+          {"edge-a":{($account):{default:$default,clash_meta:$clash,
+            sing_box:[{tag:($account+"-vless_reality_vision"),type:"vless",server:"edge.example.com"}]}}}')
+    generateSubscribeOutputsUnlocked false true "" "" "${snapshots}"
+    [[ "${SUBSCRIPTION_PUBLISH_ACCOUNTS}" == admin ]]
+    decodedDefault=$(base64 -d "${publicBase}/default/${adminMd5}")
+    [[ "${decodedDefault}" == "vless://${adminId}@main.example.com:443?"*$'\n'"vless://${remoteId}@edge.example.com:443?"* ]]
+    [[ "${decodedDefault}" != *"${remoteAdminAccount}"* ]]
+    clashServers=$(sed -n 's/^    server: //p' "${publicBase}/clashMeta/${adminMd5}")
+    [[ "${clashServers}" == "${localClashServers}"$'\nedge.example.com' ]] || {
+        printf 'assert-fail:unexpected-admin-clash-servers:%q\n' "${clashServers}" >&2
+        return 1
+    }
+    ! grep -qF "${remoteAdminAccount}" "${publicBase}/clashMeta/${adminMd5}"
+    grep -qF "/s/clashMeta/${adminMd5}" "${publicBase}/clashMetaProfiles/${adminMd5}"
+    jq -e --arg account "${remoteAdminAccount}" --slurpfile baseline "${root}/local-only/sing-box/${adminMd5}" '
+      [.outbounds[] | select(.type == "vless") | .server] ==
+        ([$baseline[0].outbounds[] | select(.type == "vless") | .server] + ["edge.example.com"])
+      and all(.outbounds[]; (.tag | contains($account) | not))
+    ' "${publicBase}/sing-box/${adminMd5}" >/dev/null
+
+    xhttpSnapshots=$(jq -c --arg account "${remoteAdminAccount}" \
+        --arg default "$(printf 'vless://%s@edge.example.com:443?type=xhttp#%s-vless_xhttp\n' "${remoteId}" "${remoteAdminAccount}" | base64 -w 0)" \
+        --arg clash "  - name: \"${remoteAdminAccount}-vless_xhttp\""$'\n    server: edge.example.com\n    network: xhttp' '
+          ."edge-a"[$account] |= (.default=$default | .clash_meta=$clash | .sing_box=[])
+        ' <<<"${snapshots}")
+    generateSubscribeOutputsUnlocked false true "" "" "${xhttpSnapshots}"
+    decodedDefault=$(base64 -d "${publicBase}/default/${adminMd5}")
+    [[ "${decodedDefault}" == "vless://${adminId}@main.example.com:443?"*$'\n'"vless://${remoteId}@edge.example.com:443?type=xhttp#"* ]]
+    grep -qx '    network: xhttp' "${publicBase}/clashMeta/${adminMd5}"
+    for format in sing-box_profiles sing-box; do
+        cmp "${root}/local-only/${format}/${adminMd5}" "${publicBase}/${format}/${adminMd5}"
+    done
+
+    # 先从已有合并输出回落，再验证停用来源时忽略仍然有效的快照。
+    generateSubscribeOutputsUnlocked false true "" "" '{"edge-a":null}'
+    for format in default clashMeta clashMetaProfiles sing-box_profiles sing-box; do
+        cmp "${root}/local-only/${format}/${adminMd5}" "${publicBase}/${format}/${adminMd5}"
+    done
+    generateSubscribeOutputsUnlocked false true "" "" "${snapshots}"
+    setSubscriptionSourceEnabled edge-a false
+    generateSubscribeOutputsUnlocked false true "" "" "${snapshots}"
+    for format in default clashMeta clashMetaProfiles sing-box_profiles sing-box; do
+        cmp "${root}/local-only/${format}/${adminMd5}" "${publicBase}/${format}/${adminMd5}"
+    done
+
+    addUserSubscriptionState team-a 'Team A' '["*"]'
+    subscriptionApplyUserGroupState "$(jq -cn --arg uuid "${shareId}" '[{id:"team-a",uuid:$uuid}]')" '[]'
+    subscriptionSyncApplyAccountPlan "$(subscriptionSyncPlan)"
+    shareMd5=$(printf '%s\n' "sub_team_a${subscribeSalt}" | md5sum | awk '{print $1}')
+    generateSubscribeOutputsUnlocked false true "" "" '{}'
+    cp -a "${publicBase}" "${root}/share-local-only"
+    setSubscriptionSourceEnabled edge-a true
+    snapshots=$(jq -c --arg account "${remoteAdminAccount}" '
+      ."edge-a".sub_team_a = (."edge-a"[$account] |
+        .sing_box[0].tag = "sub_team_a-vless_reality_vision")
+    ' <<<"${snapshots}")
+    generateSubscribeOutputsUnlocked false true "" "" "${snapshots}"
+    [[ "$(base64 -d "${publicBase}/default/${shareMd5}")" == *"@edge.example.com:443?"* ]]
+    generateSubscribeOutputsUnlocked false true "" "" '{"edge-a":null}'
+    for format in default clashMeta clashMetaProfiles sing-box_profiles sing-box; do
+        cmp "${root}/share-local-only/${format}/${shareMd5}" "${publicBase}/${format}/${shareMd5}"
     done
 )
 

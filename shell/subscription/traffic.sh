@@ -533,6 +533,9 @@ writeSubscriptionTrafficSnapshot() {
     local outputVar=${3:-}
     local items
     local remoteComplete
+    local remoteAdminAccounts='{}'
+    local successfulSourceIds sourceId adminAccount
+    local -a remoteAdminAccountEntries=()
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
     SUBSCRIPTION_TRAFFIC_COMPLETE=false
     SUBSCRIPTION_TRAFFIC_VALIDATION_FAILED=false
@@ -564,7 +567,19 @@ writeSubscriptionTrafficSnapshot() {
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
-    if ! subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" '
+    if [[ "${remoteResults}" != '[]' ]]; then
+        successfulSourceIds=$(jq -r '.[] | select(.status == "success") | .source_id' <<<"${remoteResults}") || return 1
+        while IFS= read -r sourceId; do
+            [[ -n "${sourceId}" ]] || continue
+            adminAccount=$(subscriptionRemoteAdminAccountName "${sourceId}") || return 1
+            remoteAdminAccountEntries+=("${sourceId}"$'\t'"${adminAccount}")
+        done <<<"${successfulSourceIds}"
+        remoteAdminAccounts=$(jq -cn --args '
+          $ARGS.positional | map(split("\t") | {key:.[0], value:.[1]}) | from_entries
+        ' -- "${remoteAdminAccountEntries[@]}") || return 1
+    fi
+    if ! subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" \
+        --argjson remoteAdminAccounts "${remoteAdminAccounts}" '
       def counterTotal($counters):
         {upload:([$counters[]?.upload] | add // 0), download:([$counters[]?.download] | add // 0)};
       def resetDelta($old; $current; $known):
@@ -616,14 +631,22 @@ writeSubscriptionTrafficSnapshot() {
       (sourceTotal($group.traffic.admin.sources.main; $adminItems)) as $mainAdminTraffic |
       ($remoteResults | map(select(.status == "success") | . as $result |
         (mapped($result.response.items; $accountIdMap)) as $mappedItems |
-        {source_id:$result.source_id, items:$mappedItems, user_items_by_id:indexedById($mappedItems | map(select(.account | startswith("sub_"))))})) as $remote |
+        ($remoteAdminAccounts[$result.source_id] // "") as $expectedAdminAccount |
+        (if any($group.user_groups[];
+          .id == $accountIdMap[$expectedAdminAccount] and .enabled and
+          (.allowed_sources | index("*") != null or index($result.source_id) != null))
+         then null else $expectedAdminAccount end) as $adminAccount |
+        {source_id:$result.source_id, items:$mappedItems,
+         admin_items:($mappedItems | map(select((.account | startswith("sub_") | not) or .account == $adminAccount))),
+         user_items_by_id:indexedById($mappedItems | map(select(.account != $adminAccount and
+           (.account | startswith("sub_")))))})) as $remote |
       ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.sources[$result.source_id]; $result.items)}) | from_entries) as $remoteSourceTraffic |
       (keepSources($group.traffic.sources; $sourceIdSet) + {main:$mainTraffic} + $remoteSourceTraffic) as $sourceTraffic |
-      ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.admin.sources[$result.source_id]; ($result.items | map(select(.account | startswith("sub_") | not))))}) | from_entries) as $remoteAdminSourceTraffic |
+      ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.admin.sources[$result.source_id]; $result.admin_items)}) | from_entries) as $remoteAdminSourceTraffic |
       (keepSources($group.traffic.admin.sources; $sourceIdSet) + {main:$mainAdminTraffic} + $remoteAdminSourceTraffic) as $adminSourceTraffic |
       ($group.user_groups | map(
         . as $user |
-        (sourceTotal(($group.traffic.user_groups[$user.id].sources.main // {}); ($userItemsById[$user.id] // []))) as $mainUserTraffic |
+        (sourceTotal($group.traffic.user_groups[$user.id].sources.main; ($userItemsById[$user.id] // []))) as $mainUserTraffic |
         ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.user_groups[$user.id].sources[$result.source_id]; ($result.user_items_by_id[$user.id] // []))}) | from_entries) as $remoteUserSourceTraffic |
         (keepSources($group.traffic.user_groups[$user.id].sources; $sourceIdSet) + {main:$mainUserTraffic} + $remoteUserSourceTraffic) as $userSourceTraffic |
         {key:$user.id, value:{sources:$userSourceTraffic}}
