@@ -23,15 +23,15 @@ ipv6Routing() {
     while true; do
         echoContent title "\n┌─ IPv6 分流 ────────────────────────────────────────"
 
-    menuItem 1 "查看已分流域名" "显示当前 IPv6 分流规则"
+    menuItem 1 "查看分流规则"
 
-    menuItem 2 "添加域名" "添加 IPv6 出站分流规则"
+    menuItem 2 "添加域名" "让指定域名使用 IPv6 直连"
 
-    menuDangerItem 3 "设置 IPv6 全局" "删除其他出站并全局走 IPv6"
+    menuDangerItem 3 "切换全局出站" "清除其他出站规则，改用 IPv6 直连"
 
-    menuDangerItem 4 "卸载 IPv6 分流" "移除 IPv6 分流配置"
+    menuDangerItem 4 "移除 IPv6 分流" "移除域名分流及 IPv6 出站配置"
 
-    menuReturnItem 0 "返回分流工具" "回到上级菜单"
+    menuReturnItem 0 "返回分流工具"
 
     menuClose
 
@@ -47,19 +47,19 @@ ipv6Routing() {
     elif [[ "${ipv6Status}" == "2" ]]; then
 
         if ! hasIPv6Connectivity; then
-            errorCard "不支持ipv6"
+            errorCard "未检测到可用的 IPv6 连接"
             return 1
         fi
 
-        echoContent title "\n┌─ IPv6 分流规则说明 ────────────────────────────────"
+        echoContent title "\n┌─ 添加 IPv6 分流规则 ───────────────────────────────"
 
-        menuLine "请按 README 中的分流说明配置域名或规则"
+        menuLine "多个域名或规则用英文逗号分隔，规则格式见 README"
 
         menuClose
 
 
 
-        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList || return 0
+        autoRead routing_domain_rules "请输入域名规则：" domainList || return 0
 
         if [[ -z "${domainList}" ]]; then
             coreDomainRequiredErrorCard
@@ -67,7 +67,7 @@ ipv6Routing() {
         fi
 
         routingConfigApplyTransaction "添加 IPv6 分流失败" false false addIPv6RoutingConfig "${domainList}" || return 1
-        successMessage="添加完毕"
+        successMessage="已添加 IPv6 分流规则"
 
 
 
@@ -76,8 +76,8 @@ ipv6Routing() {
 
 
         warnCard \
-            "会删除所有设置的分流规则" \
-            "会删除 IPv6 之外的所有出站规则"
+            "将清除现有分流并改用 IPv6 全局出站" \
+            "使用 Xray 时也会移除现有的 BT 阻断和访问控制规则"
 
         autoConfirm ipv6_global_confirm "确认设置 IPv6 全局出站？" n IPv6OutStatus
 
@@ -85,11 +85,11 @@ ipv6Routing() {
 
         if [[ "${IPv6OutStatus}" == "y" ]]; then
             if ! hasIPv6Connectivity; then
-                errorCard "不支持ipv6"
+                errorCard "未检测到可用的 IPv6 连接"
                 return 1
             fi
             routingConfigApplyTransaction "设置 IPv6 全局出站失败" false false setIPv6GlobalRoutingConfig || return 1
-            successMessage="IPv6全局出站设置完毕"
+            successMessage="已切换到 IPv6 全局出站"
 
         else
 
@@ -104,8 +104,8 @@ ipv6Routing() {
 
 
     elif [[ "${ipv6Status}" == "4" ]]; then
-        routingConfigApplyTransaction "卸载 IPv6 分流失败" false false removeIPv6RoutingConfig || return 1
-        successMessage="IPv6分流卸载成功"
+        routingConfigApplyTransaction "移除 IPv6 分流失败" false false removeIPv6RoutingConfig || return 1
+        successMessage="已移除 IPv6 分流"
 
     elif [[ "${ipv6Status}" == "0" ]]; then
 

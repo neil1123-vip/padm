@@ -6,14 +6,12 @@ routingToolsMenu() {
     local selectType
     while true; do
         echoContent title "\n┌─ 分流工具 ─────────────────────────────────────────"
-        menuLine "按域名或规则把服务端出站流量改走指定出口"
-        menuLine "WARP、Socks5 全局模式会删除其他出站规则，启用前请确认用途"
-        menuItem 1 "WARP 出站" "Cloudflare WARP WireGuard 出站，依赖第三方注册工具"
-        menuItem 2 "IPv6 出站" "按域名或全局走 IPv6 direct 出站"
-        menuItem 3 "Socks5 中继" "接入外部 Socks5 或给其他机器提供 Socks5 入站"
-        menuItem 4 "DNS 覆盖" "为指定域名改用指定 DNS 解析"
-        menuItem 5 "DNS/hosts 覆盖" "把指定域名解析到指定后端 IP"
-        menuReturnItem 0 "返回路由与访问控制" "回到上级菜单"
+        menuItem 1 "WARP 出站" "通过 Cloudflare WARP 转发流量"
+        menuItem 2 "IPv6 出站" "按域名或全局使用 IPv6 直连"
+        menuItem 3 "Socks5 中继" "配置中继出站或入站监听"
+        menuItem 4 "DNS 覆盖" "为指定域名选择 DNS 服务器"
+        menuItem 5 "DNS/hosts 覆盖" "将指定域名解析到固定 IP"
+        menuReturnItem 0 "返回路由与访问控制"
         menuClose
 
         selectType=

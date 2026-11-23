@@ -420,14 +420,12 @@ manageVlessEncryptionExperiment() {
         readInstallType || return 1
         readInstallProtocolType || return 1
         echoContent title "\n┌─ VLESS Encryption 实验功能 ─────────────────────────"
-        menuLine "最佳性能组合：Reality Vision 使用 VLESS Encryption + XTLS Vision"
-        menuLine "CDN 场景：Reality XHTTP 使用 VLESS Encryption + XTLS Vision + XHTTP XMUX"
-        menuLine "启用后可能只有部分客户端可用；需 Mihomo v1.19.13+，sing-box 暂不支持"
-        menuLine "默认推荐仍是 Reality Vision，不建议新手启用"
+        menuLine "Reality Vision 可搭配 XTLS Vision，Reality XHTTP 可再搭配 XMUX"
+        menuLine "客户端兼容性有限，需 Mihomo v1.19.13 或更新版本，sing-box 暂不支持"
         vlessEncryptionStateSummary
-        menuDangerItem 1 "启用实验开关" "优先应用到 Reality XHTTP，否则应用到 Reality Vision"
-        menuItem 2 "关闭实验开关" "恢复 decryption=none 并删除实验订阅参数"
-        menuReturnItem 0 "返回高级/危险操作" "回到上级菜单"
+        menuDangerItem 1 "启用 VLESS Encryption" "优先应用于 Reality XHTTP，其次为 Reality Vision"
+        menuItem 2 "关闭 VLESS Encryption" "恢复 decryption=none，移除实验订阅参数"
+        menuReturnItem 0 "返回高级与危险操作"
         echoContent title "└──────────────────────────────────────────────────"
         menuReadChoice vless_encryption_menu "请选择:" selectVlessEncryptionMenu interactive || return 0
         case "${selectVlessEncryptionMenu}" in
@@ -858,15 +856,14 @@ manageTraditionalTlsFallback() {
     local selectTraditionalTlsMenu=
     while true; do
         echoContent title "\n┌─ 传统 TLS fallback 维护 ───────────────────────────"
-        menuLine "仅用于传统 TLS fallback / WS / gRPC / Trojan 兼容维护"
-        menuLine "Reality Vision / Reality XHTTP 不依赖此处 ALPN 或静态站点"
-        menuRecommendedItem 1 "重建 fallback 配置" "alone.conf 缺失或不完整时重建 Nginx 承接层"
+        menuMutedLine "适用于传统 TLS fallback、WS、gRPC 与 Trojan 兼容维护"
+        menuRecommendedItem 1 "重建 fallback 配置" "在 alone.conf 缺失或不完整时修复 Nginx 配置"
         menuItem 2 "更换静态站点" "更换本机 Nginx fallback 页面"
         menuItem 3 "302 重定向管理" "添加或移除 fallback 根路由重定向"
         menuItem 4 "ALPN 诊断" "检查 h2 fallback、ALPN 与 Nginx 承接层是否匹配"
         menuRecommendedItem 5 "修复为推荐 ALPN" "存在 h2 fallback 时设置 h2,http/1.1"
         menuItem 6 "手动设置 ALPN" "兼容排障时手动调整 ALPN 顺序"
-        menuReturnItem 0 "返回站点与证书" "回到上级菜单"
+        menuReturnItem 0 "返回站点与证书"
         menuClose
         selectTraditionalTlsMenu=
         menuReadChoice traditional_tls_menu "请选择:" selectTraditionalTlsMenu interactive || return 0
@@ -936,13 +933,13 @@ manageTraditionalTlsStaticSite() {
     local selectInstallNginxBlogType= sourceDirectory= siteTitle=
     while true; do
         echoContent title "\n┌─ 本地静态站点 ─────────────────────────────────────"
-        menuLine "目录：${nginxStaticPath}；支持 Nginx 与原生 Hysteria2 file://"
-        menuLine "优先维护自己的完整网站；更换自有网页前保存私有备份"
-        menuRecommendedItem import "导入自有网站" "从独立静态目录复制完整内容，保留源文件"
+        menuLine "站点目录：${nginxStaticPath}（Nginx 或原生 Hysteria2 file://）"
+        menuLine "更换前请备份当前站点"
+        menuRecommendedItem import "导入自有网站" "复制静态目录，保留源文件"
         menuItem notes "笔记布局起点" "示例文章、阅读记录和完整内页"
         menuItem photos "摄影布局起点" "示例照片、观察笔记和图集内页"
         menuItem docs "文档布局起点" "示例目录、入门和配置文档"
-        menuReturnItem 0 "返回" "回到上级菜单"
+        menuReturnItem 0 "返回"
         menuClose
         selectInstallNginxBlogType=
         menuReadChoice nginx_blog_menu "请选择操作（回车或 0 返回）：" selectInstallNginxBlogType interactive || return 0
@@ -975,11 +972,10 @@ manageTraditionalTlsRedirect() {
     local redirectStatus='' redirectDomain=''
     while true; do
         echoContent title "\n┌─ 302 重定向管理 ───────────────────────────────────"
-        menuLine "重定向优先级更高；配置后根路由静态站点将不起作用"
-        menuLine "如想恢复静态站点展示，需要先删除 302 重定向配置"
-        menuItem 1 "添加" "写入 302 重定向目标"
-        menuItem 2 "删除" "移除当前 302 重定向"
-        menuReturnItem 0 "返回" "回到传统 TLS fallback 维护"
+        menuLine "启用后，站点首页会跳转。删除重定向可恢复静态首页。"
+        menuItem 1 "添加重定向" "设置跳转地址"
+        menuItem 2 "删除重定向"
+        menuReturnItem 0 "返回传统 TLS fallback 维护"
         menuClose
         redirectStatus=
         menuReadChoice nginx_redirect_menu "请选择:" redirectStatus interactive || return 0
@@ -1146,7 +1142,7 @@ setTraditionalTlsAlpnManual() {
         menuRecommendedItem 1 "h2,http/1.1" "推荐用于存在 h2 fallback/gRPC 的场景"
         menuItem 2 "http/1.1,h2" "旧客户端兼容排障"
         menuItem 3 "http/1.1" "仅 HTTP/1.1"
-        menuReturnItem 0 "返回" "回到传统 TLS fallback 维护"
+        menuReturnItem 0 "返回传统 TLS fallback 维护"
         menuClose
         selectAlpnManual=
         menuReadChoice traditional_tls_alpn_manual "请选择:" selectAlpnManual interactive || return 0
@@ -1629,14 +1625,13 @@ addCorePort() {
         portChanged=false
         firewallStatus=0
         echoContent title "\n┌─ 额外入口端口管理 ─────────────────────────────────"
-        menuLine "为 Xray 增加额外 TCP 入口，原入口不变"
-        menuLine "支持批量添加；已安装 Hysteria2 时同步 UDP 入口"
+        menuLine "新增 Xray TCP 端口后，原入口仍可用"
+        menuLine "已安装 Hysteria2 时，同时添加 UDP 入口"
         menuLine "可设置订阅默认入口，变更后自动同步订阅"
-        menuLine "示例：2053,2083,2087"
         menuItem 1 "查看额外入口" "查看端口和订阅默认入口"
-        menuItem 2 "添加额外入口" "批量添加新端口"
-        menuItem 3 "删除额外入口" "移除已添加端口"
-        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
+        menuItem 2 "添加额外入口" "可一次添加多个端口"
+        menuItem 3 "删除额外入口"
+        menuReturnItem 0 "返回协议与入口"
         menuClose
         menuReadChoice core_port_menu "请选择:" selectNewPortType interactive || return 0
         case "${selectNewPortType}" in
@@ -2232,20 +2227,19 @@ manageCDN() {
         currentAddress=$(cdnCurrentAddress) || { errorCard "读取 CDN 入口地址失败"; return 1; }
 
         echoContent title "\n┌─ CDN 入口管理 ─────────────────────────────────────"
-        menuLine "这里只覆盖订阅里的客户端连接地址，不修改 Reality target/SNI 或 XHTTP 参数"
-        menuLine "多个 CDN CNAME、优选 IP 或入口域名可用英文逗号分隔，订阅会生成多条节点"
+        menuLine "入口地址仅用于订阅中的客户端连接"
         menuLine "当前入口地址：${currentAddress}"
         if currentProtocolHas 2; then
-            menuLine "当前已安装 Reality XHTTP，可直接调整入口地址"
+            menuLine "当前协议：Reality XHTTP"
         elif currentProtocolHasAny 21 22 23 24 25; then
-            menuLine "当前是传统 TLS/CDN 协议，仅建议用于旧客户端兼容"
+            menuLine "当前协议：传统 TLS/CDN，适合旧客户端兼容"
         else
-            menuLine "未检测到 XHTTP 能力；新建 XHTTP 节点建议安装协议 2：$(xrayProtocolName 2)"
+            menuLine "未安装 XHTTP。新建 XHTTP 节点可选协议 2（$(xrayProtocolName 2)）。"
         fi
         menuItem 1 "设置入口地址" "写入 CDN CNAME、优选 IP 或自有域名"
         menuItem 2 "清空入口地址" "恢复订阅使用安装入口地址"
         menuItem 3 "CDN / H3 使用说明" "查看协议选择和排障提示"
-        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
+        menuReturnItem 0 "返回协议与入口"
         menuClose
         menuReadChoice cdn_menu "请选择:" selectCDNType interactive || return 0
 
@@ -3255,14 +3249,14 @@ manageRealityTarget() {
         menuLine "目标 ASN（缓存）：${targetAsnSummary}"
         menuLine "网络关系（缓存）：${networkMatchSummary}"
         showRealityTargetPqcSummary || true
-        menuItem 1 "检测当前目标" "复测 TLS/PQC、ASN 与网络关系，并查看证书链"
-        menuItem 2 "刷新目标库" "按范围复测目标库或候选清单并更新质量结果"
-        menuItem 3 "扫描指定网段" "运行 RealiTLScanner，发现目标并加入目标库"
-        menuItem 4 "同 ASN 抽样扫描" "从本机 ASN 公告前缀随机抽样，发现目标并加入目标库"
-        menuItem 5 "查看/切换 A 级目标" "分页查看目标库中的 A 级目标并切换"
+        menuItem 1 "检测当前目标" "复测 TLS/PQC、证书链、ASN 和网络关系"
+        menuItem 2 "刷新目标库" "复测已有目标或推荐候选，更新评级"
+        menuItem 3 "扫描指定网段" "用 RealiTLScanner 查找并导入目标"
+        menuItem 4 "同 ASN 抽样扫描" "从本机 ASN 公告前缀抽样，查找并导入目标"
+        menuItem 5 "查看/切换 A 级目标" "浏览目标库中的 A 级目标"
         menuItem 6 "手动设置目标站" "输入 host[:port] 和可选 SNI"
-        menuItem 7 "查看目标站黑名单" "显示不会参与目标库刷新或扫描导入的目标"
-        menuReturnItem 0 "返回" "回到 REALITY 管理"
+        menuItem 7 "查看目标站黑名单" "查看刷新和扫描时排除的目标"
+        menuReturnItem 0 "返回 REALITY 管理"
         menuClose
         menuReadChoice reality_target_manage_menu "请选择：" selectTargetMenu interactive || return 0
         case "${selectTargetMenu}" in
@@ -3275,7 +3269,7 @@ manageRealityTarget() {
             echoContent title "\n┌─ REALITY 刷新范围 ───────────────────────────────"
             menuItem 1 "目标库 + 推荐候选" "复测目标库中的 A 级目标，并补测推荐候选"
             menuItem 2 "推荐候选" "仅复测推荐候选，不额外合并目标库"
-            menuReturnItem 0 "返回" "回到目标站管理"
+            menuReturnItem 0 "返回目标站管理"
             menuClose
             menuReadChoice reality_target_refresh_scope "请选择刷新范围[默认1]：" refreshChoice true || return 0
             case "${refreshChoice:-1}" in
@@ -3410,14 +3404,13 @@ manageReality() {
             refreshRealityState=false
         fi
         echoContent title "\n┌─ REALITY 管理 ─────────────────────────────────────"
+        menuMutedLine "443 共存分流按真实网站域名匹配，其他 SNI 转发至 Reality。"
         menuItem 1 "重新生成 Reality 参数" "生成或复用密钥；保留账号、入口与传输设置"
         menuItem 2 "目标站管理" "查看、检测或切换 Reality 伪装目标"
         menuItem 3 "配置 443 共存分流" "同机真实网站与 Reality 共用公网 443"
-        menuItem 4 "查看当前分流状态" "检查 state、Nginx stream 与后端监听"
+        menuItem 4 "查看当前分流状态" "检查 Nginx stream 与后端监听"
         menuItem 5 "关闭 443 共存分流" "恢复 Reality 原入口端口并清理分流配置"
-        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
-        menuLine "Reality 不需要本机伪装站点；443 共存分流仅用于同机真实网站"
-        menuLine "分流时只填写真实网站域名，其他 SNI 默认转给 Reality"
+        menuReturnItem 0 "返回协议与入口"
         menuClose
         menuReadChoice reality_manage_menu "请选择:" selectRealityManageType interactive || return 0
 
@@ -3833,7 +3826,7 @@ manageXHTTPPresets() {
         menuItem 2 "兼容优先" "packet-up，适合未知 CDN/反代"
         menuItem 3 "性能优先" "stream-up，适合 H2/gRPC 兼容链路"
         menuItem 4 "测速/单并发" "auto + maxConcurrency=1"
-        menuReturnItem 0 "返回" "回到 XHTTP 普通设置"
+        menuReturnItem 0 "返回 XHTTP 普通设置"
         menuClose
         menuReadChoice xhttp_preset_menu "请选择:" selectXHTTPPreset interactive || return 0
         case "${selectXHTTPPreset}" in
@@ -3854,7 +3847,7 @@ manageXHTTPMode() {
         menuRecommendedItem 1 "auto" "推荐默认，由 Xray 自动选择"
         menuItem 2 "packet-up" "兼容性最强"
         menuItem 3 "stream-up" "流式上行，效率更高"
-        menuReturnItem 0 "返回" "回到 XHTTP 普通设置"
+        menuReturnItem 0 "返回 XHTTP 普通设置"
         menuClose
         menuReadChoice xhttp_mode_menu "请选择:" selectXHTTPMode interactive || return 0
         case "${selectXHTTPMode}" in
@@ -3874,7 +3867,7 @@ manageXHTTPXmux() {
         menuItem 1 "日常随机复用" "maxConcurrency 16-32"
         menuItem 2 "单并发" "maxConcurrency 1，测速/排障"
         menuItem 3 "自定义范围" "自定义 maxConcurrency/request/time"
-        menuReturnItem 0 "返回" "回到 XHTTP 高级设置"
+        menuReturnItem 0 "返回 XHTTP 高级设置"
         menuClose
         menuReadChoice xhttp_xmux_menu "请选择:" selectXHTTPXmux interactive || return 0
         case "${selectXHTTPXmux}" in
@@ -3891,12 +3884,12 @@ manageXHTTPNormal() {
     local selectXHTTPNormal=
     while true; do
         echoContent title "\n┌─ XHTTP 普通设置 ───────────────────────────────────"
-        menuLine "普通设置面向日常/CDN 使用，优先选择场景预设"
+        menuLine "日常或 CDN 场景可先选择预设"
         menuItem 1 "查看当前配置" "显示 mode、path、host、XMUX 与高级状态"
         menuItem 2 "场景预设" "日常、兼容、性能、测速"
         menuItem 3 "mode 设置" "auto / packet-up / stream-up"
         menuItem 4 "CDN / H3 使用说明" "查看 Cloudflare、H3 和兼容性提示"
-        menuReturnItem 0 "返回 XHTTP 管理" "回到上级菜单"
+        menuReturnItem 0 "返回 XHTTP 管理"
         menuClose
         menuReadChoice xhttp_normal_menu "请选择:" selectXHTTPNormal interactive || return 0
         case "${selectXHTTPNormal}" in
@@ -3914,12 +3907,11 @@ manageXHTTPAdvanced() {
     local selectXHTTPAdvanced=
     while true; do
         echoContent title "\n┌─ XHTTP 高级设置 ───────────────────────────────────"
-        menuLine "高级设置会改变复用、path/host 或 packet/stream 细节"
         menuItem 1 "XMUX 设置" "日常、单并发或自定义范围"
         menuItem 2 "path / host 设置" "CDN 域前置或特殊反代场景"
         menuItem 3 "header / packet / stream 参数" "xPadding、sc*、gRPC/SSE header"
         menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
-        menuReturnItem 0 "返回 XHTTP 管理" "回到上级菜单"
+        menuReturnItem 0 "返回 XHTTP 管理"
         menuClose
         menuReadChoice xhttp_advanced_menu "请选择:" selectXHTTPAdvanced interactive || return 0
         case "${selectXHTTPAdvanced}" in
@@ -3937,10 +3929,10 @@ manageXHTTPExperiment() {
     local selectXHTTPExperiment=
     while true; do
         echoContent title "\n┌─ XHTTP 实验功能 ───────────────────────────────────"
-        menuLine "实验功能依赖客户端、CDN 和反代行为；填错会导致连接失败"
+        menuLine "请确认客户端和实际链路支持独立下行。下行参数填错会导致连接失败。"
         menuDangerItem 1 "启用上下行分离" "配置独立下行 downloadSettings"
-        menuItem 2 "关闭上下行分离" "删除 downloadSettings"
-        menuReturnItem 0 "返回 XHTTP 管理" "回到上级菜单"
+        menuItem 2 "关闭上下行分离" "恢复使用同一个入口"
+        menuReturnItem 0 "返回 XHTTP 管理"
         menuClose
         menuReadChoice xhttp_experiment_menu "请选择:" selectXHTTPExperiment interactive || return 0
         case "${selectXHTTPExperiment}" in
@@ -3972,14 +3964,13 @@ manageXHTTP() {
     fi
     while true; do
         echoContent title "\n┌─ XHTTP 管理 ───────────────────────────────────────"
-        menuLine "这里只调整 XHTTP 协议参数；CDN 连接地址在 协议与入口 -> CDN 入口管理"
-        menuLine "普通设置优先；高级和实验功能适合明确知道客户端与线路能力时使用"
+        menuLine "CDN 连接地址在「协议与入口 → CDN 入口管理」设置"
         xhttpSettingsSummary || return 1
         menuItem 1 "普通设置" "状态、场景预设、mode 与使用说明"
         menuItem 2 "高级设置" "XMUX、path/host、header/packet/stream 参数"
-        menuDangerItem 3 "实验功能" "上下行分离等高风险能力"
+        menuDangerItem 3 "实验功能" "为下行流量配置独立入口"
         menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
-        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
+        menuReturnItem 0 "返回协议与入口"
         menuClose
         menuReadChoice xhttp_manage_menu "请选择:" selectXHTTPManageType interactive || return 0
 
@@ -4103,10 +4094,9 @@ manageHysteria2Bandwidth() {
             { errorCard "读取 Hysteria2 配置失败"; return 1; }
         echoContent title "\n┌─ Hysteria2 拥塞模式 ───────────────────────────────"
         menuLine "当前模式：${currentMode}"
-        menuLine "Brutal 适合带宽稳定且可测速的线路；BBR 适合波动、移动网络或不确定线路"
-        menuItem 1 "Brutal" "固定带宽；切换时可调整上下行 Mbps"
-        menuRecommendedItem 2 "BBR" "自适应带宽；无需填写速率"
-        menuReturnItem 0 "返回" "回到 Hysteria2 管理"
+        menuItem 1 "Brutal" "适合稳定线路，需填写上下行速率"
+        menuRecommendedItem 2 "BBR" "适合移动或带宽波动的线路"
+        menuReturnItem 0 "返回 Hysteria2 管理"
         menuClose
         menuReadChoice hysteria_bandwidth_manage_menu "请选择:" selectMode interactive || return 0
         case "${selectMode}" in
@@ -4129,7 +4119,7 @@ manageHysteria() {
         fi
         hysteria2Status=
         echoContent title "\n┌─ Hysteria2 管理 ───────────────────────────────────"
-        menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络场景"
+        menuLine "使用 sing-box，可与现有 Xray 并行运行"
         configFile=$(hysteria2ConfigFile) || return 1
         if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
             hysteria2SettingsSummary "${configFile}" || return 1
@@ -4139,9 +4129,9 @@ manageHysteria() {
             menuItem 4 "拥塞模式" "切换 Brutal 固定带宽或 BBR 自适应"
             hysteria2Status=true
         else
-            menuItem 1 "安装" "新增 Hysteria2 入站配置"
+            menuItem 1 "安装 Hysteria2"
         fi
-        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
+        menuReturnItem 0 "返回协议与入口"
         menuClose
         menuReadChoice hysteria_menu "请选择:" installHysteria2Status interactive || return 0
         if [[ "${installHysteria2Status}" == "1" ]]; then
@@ -4276,11 +4266,10 @@ manageTuicCongestionControl() {
     local selectTuicCongestion=
     while true; do
         echoContent title "\n┌─ Tuic 拥塞控制 ────────────────────────────────────"
-        menuLine "sing-box 默认 cubic；bbr 可在高带宽或长距离链路手动尝试"
         menuRecommendedItem 1 "cubic" "默认推荐"
-        menuItem 2 "bbr" "高带宽/长距离链路可试"
-        menuItem 3 "new_reno" "兼容保守"
-        menuReturnItem 0 "返回" "回到 Tuic 管理"
+        menuItem 2 "bbr" "可用于高带宽或长距离链路"
+        menuItem 3 "new_reno" "侧重兼容性"
+        menuReturnItem 0 "返回 Tuic 管理"
         menuClose
         menuReadChoice tuic_congestion_menu "请选择:" selectTuicCongestion interactive || return 0
         case "${selectTuicCongestion}" in
@@ -4297,12 +4286,12 @@ manageTuicAdvanced() {
     local selectTuicAdvanced=
     while true; do
         echoContent title "\n┌─ Tuic 高级设置 ────────────────────────────────────"
-        menuLine "高级参数直接写入 sing-box Tuic inbound，写入后会 merge 校验并 reload"
+        menuLine "保存后会校验并重新加载 sing-box 配置"
         menuItem 1 "连接参数" "设置 auth_timeout 与 heartbeat"
-        menuDangerItem 2 "启用 0-RTT" "减少握手但增加重放风险"
-        menuRecommendedItem 3 "关闭 0-RTT" "恢复上游推荐的安全默认值"
+        menuDangerItem 2 "启用 0-RTT" "减少握手延迟，增加重放风险"
+        menuRecommendedItem 3 "关闭 0-RTT"
         menuRecommendedItem 4 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
-        menuReturnItem 0 "返回 Tuic 管理" "回到上级菜单"
+        menuReturnItem 0 "返回 Tuic 管理"
         menuClose
         menuReadChoice tuic_advanced_menu "请选择:" selectTuicAdvanced interactive || return 0
         case "${selectTuicAdvanced}" in
@@ -4326,8 +4315,7 @@ manageTuic() {
         fi
         tuicStatus=
         echoContent title "\n┌─ Tuic 管理 ────────────────────────────────────────"
-        menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络或 QUIC/HTTP3 客户端场景"
-        menuLine "不作为新人默认推荐"
+        menuLine "使用 sing-box，可与现有 Xray 并行运行"
         configFile=$(tuicConfigFile) || return 1
         if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
             tuicSettingsSummary || return 1
@@ -4339,9 +4327,9 @@ manageTuic() {
             menuRecommendedItem 6 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
             tuicStatus=true
         else
-            menuItem 1 "安装" "新增 Tuic 入站配置"
+            menuItem 1 "安装 Tuic"
         fi
-        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
+        menuReturnItem 0 "返回协议与入口"
         menuClose
         menuReadChoice tuic_menu "请选择:" installTuicStatus interactive || return 0
         if [[ "${installTuicStatus}" == "1" ]]; then

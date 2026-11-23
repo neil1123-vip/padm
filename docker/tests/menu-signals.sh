@@ -205,7 +205,7 @@ for mode in input worker edit-input edit-worker tls-input tls-worker \
         esac
         case "${mode}" in tproxy-*|redirect-*|xhttp-*|status-*) ;; *) waitText 'setup-ready' || exit 12 ;; esac
         if [[ "${mode}" == tls-* ]]; then
-            waitText '证书操作（回车返回）: ' || exit 17
+            waitText '请选择证书操作（0 或回车返回）: ' || exit 17
             if [[ "${SIGNAL_MODE}" == worker ]]; then printf '1\n\ny\n' >&3; fi
         fi
         if [[ "${SIGNAL_MODE}" == worker ]]; then
@@ -219,7 +219,7 @@ for mode in input worker edit-input edit-worker tls-input tls-worker \
         fi
         if [[ "${mode}" == status-int ]]; then
             printf '\003' >&3
-            waitText '请选择（回车退出）: ' || exit 48
+            waitText '请选择编号（0 或回车退出）: ' || exit 48
             # 自动状态读取被中断后，真正的 EOF 必须结束会话，不能再次读取状态。
             printf '\004' >&3
             for ((attempt = 0; attempt < 100; attempt++)); do

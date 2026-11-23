@@ -1044,7 +1044,7 @@ checkPortOpen() {
 
 # 检查 IP 回源结果
 checkIP() {
-    statusCard "域名 IP 检查" "检查域名 IP 中"
+    statusCard "域名解析检查" "正在检查域名解析结果"
     local localIP=$1
     local normalizedIP
     normalizedIP="${localIP#"${localIP%%[![:space:]]*}"}"
@@ -1056,28 +1056,21 @@ checkIP() {
     fi
 
     if [[ "${normalizedIP}" == *,* ]]; then
-        statusCard "检测到多个 IP" "请确认是否关闭 Cloudflare 云朵" "关闭云朵后等待三分钟再重试" "检测到的 IP：${localIP}"
+        statusCard "检测到多个 IP" "请确认 Cloudflare DNS 记录已切换为「仅 DNS」，等待解析生效后重试" "解析结果：${localIP}"
         return 1
     fi
     if ! { [[ "${normalizedIP}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && padmIsValidHostName "${normalizedIP}" ||
         padmIsValidIPv6Address "${normalizedIP}"; }; then
-        errorCard "未检测到当前域名的ip"
+        errorCard "域名未解析到有效的 IP 地址"
         echoContent title "\n┌─ 域名解析排障 ─────────────────────────────────────"
-        menuLine "请依次进行下列检查"
-        menuLine "检查域名是否书写正确"
-        menuLine "检查域名 DNS 解析是否正确"
-        menuLine "如解析正确，请等待 DNS 生效，预计三分钟内生效"
-        menuLine "如报 Nginx 启动问题，请手动启动 nginx 查看错误；仍无法处理请提交 issue"
+        menuLine "1. 核对域名拼写及 DNS 的 A 或 AAAA 记录"
+        menuLine "2. 如果刚更新 DNS 记录，等待解析生效后重试"
+        menuLine "3. 如果 Nginx 启动失败，查看服务日志，排查失败原因"
+        [[ -n "${localIP}" ]] && menuLine "解析结果：${localIP}"
         menuClose
-
-        statusCard "后续建议" "如以上设置都正确，请重新安装纯净系统后再次尝试"
-
-        if [[ -n ${localIP} ]]; then
-            statusCard "检测返回值异常" "异常结果：${localIP}" "建议手动卸载 Nginx 后重新执行脚本"
-        fi
         return 1
     fi
-    successCard "检查当前域名IP正确"
+    successCard "域名已解析到有效的 IP 地址"
     return 0
 }
 
@@ -1090,7 +1083,7 @@ checkPort() {
     local port=$1
     local portProcess
     portProcess=$(lsof -nP -i "tcp:${port}" | grep LISTEN)
-    errorCard "${port}端口被占用"
+    errorCard "端口 ${port} 已被占用"
     echoContent yellow "${portProcess}"
 
     if echo "${portProcess}" | grep -qiE "nginx|openresty"; then
@@ -1109,7 +1102,7 @@ checkPort() {
         fi
         sleep 1
     else
-        autoRead stop_port_process_confirm "是否停止占用${port}端口的进程并继续安装？[y/n]:" stopPortProcessStatus
+        autoRead stop_port_process_confirm "停止占用端口 ${port} 的进程并继续安装？[y/n]：" stopPortProcessStatus
         if [[ "${stopPortProcessStatus}" == "y" ]]; then
             lsof -t -a -i "tcp:${port}" -sTCP:LISTEN | xargs -r kill
             sleep 1

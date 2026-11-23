@@ -730,7 +730,7 @@ subscriptionControlledTransitionPreflight() {
         return 1
     fi
     if [[ "${subscribeConfigState:-}" == "valid" || -n "${subscribePort:-}" ]]; then
-        errorCard "检测到活动公网订阅发布服务，不能切换为被控" "请先选择 本机订阅首页 -> 10. 停用发布服务"
+        errorCard "检测到活动公网订阅发布服务，不能切换为被控" "请先在本机订阅首页选择「停用发布服务」"
         return 1
     fi
     if ! currentCrontab=$(readUserCrontabContent); then
@@ -2422,7 +2422,7 @@ uninstallSubscriptionWireGuardControl() {
     *) errorCard "本机尚未安装主控或被控控制面"; return 1 ;;
     esac
     menuLine "将移除本机${roleName}控制服务、WireGuard 密钥、Peer 和接入凭据。"
-    menuLine "保留代理内核、协议入口、本机自用账号、独立发布服务及本机自建订阅。"
+    menuLine "保留代理内核、协议入口、管理员账号、独立发布服务和本机自建订阅。"
     if [[ "${role}" == "controlled" ]]; then
         removeIds=$(jq -c '[.user_groups[]? | select(.control_managed == true) | .id]' <<<"${groupsState}") || return 1
         legacyIds=$(jq -c '[.user_groups[]? | select(has("control_managed") | not) | .id]' <<<"${groupsState}") || return 1
@@ -2430,16 +2430,16 @@ uninstallSubscriptionWireGuardControl() {
             warnCard "以下历史订阅账号没有来源标记，可能包含接入前的本机分享账号" \
                 "$(jq -r 'join("、")' <<<"${legacyIds}")"
             menuReadChoice subscription_control_legacy_uninstall_confirm \
-                "确认将以上历史订阅账号一并清理？请输入 yes；其它输入取消卸载:" confirm true || return 1
+                "输入 yes 一并清理上述历史订阅账号，其余输入取消卸载：" confirm true || return 1
             [[ "${confirm}" == "yes" ]] || { coreCancelledStatusCard "控制面未卸载"; return 0; }
             removeIds=$(jq -cn --argjson known "${removeIds}" --argjson legacy "${legacyIds}" '$known + $legacy | unique') || return 1
         fi
         menuLine "将清理的主控下发账号：$(jq -r 'if length == 0 then "无" else join("、") end' <<<"${removeIds}")"
     else
-        menuLine "将清理本机保存的被控连接、邀请、远端凭据和订阅节点，不修改其它机器。"
+        menuLine "仅清理本机保存的被控连接、邀请、远端凭据和订阅节点。"
     fi
     menuReadChoice subscription_control_uninstall_confirm \
-        "确认卸载本机${roleName}控制面？请输入 yes:" confirm true || return 1
+        "输入 yes 确认卸载本机${roleName}控制面：" confirm true || return 1
     [[ "${confirm}" == "yes" ]] || { coreCancelledStatusCard "控制面未卸载"; return 0; }
     subscriptionGroupsWithLock uninstallSubscriptionWireGuardControlApply "${state}" "${removeIds}" "${groupsState}"
 }

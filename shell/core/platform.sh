@@ -3,7 +3,7 @@
 checkCentosSELinux() {
     if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" == "Enforcing" ]; then
         echoContent title "\n┌─ SELinux 检测 ─────────────────────────────────────"
-        menuLine "检测到 SELinux 已开启，请手动关闭后重新执行脚本"
+        menuLine "SELinux 处于强制模式，请调整 SELinux 模式后重新运行 padm"
         menuClose
         exit 1
     fi

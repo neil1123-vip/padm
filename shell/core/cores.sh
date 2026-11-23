@@ -2408,8 +2408,8 @@ selectCoreVersion() {
         errorCard "获取版本列表失败，请稍后重试"
         return 2
     fi
-    echoContent title "\n┌─ ${title} 版本选择 ─────────────────────────────────"
-    menuLine "回车使用最新正式版；选择序号可升级或回退"
+    echoContent title "\n┌─ ${title} 选择版本 ─────────────────────────────────"
+    menuLine "回车使用最新正式版，输入编号可升级或回退"
     awk -F'|' '{printf "│ %d. %s [%s]\n", NR, $1, $2 == "true" ? "预发布版" : "正式版"}' <<<"${versions}"
     menuReturnItem 0 "返回"
     menuClose
@@ -2999,9 +2999,9 @@ configureRealityDomainMode() {
 
     if [[ "${strictRequested}" != "true" ]]; then
         echoContent title "\n┌─ Reality 安装方式 ─────────────────────────────────"
-        menuItem 1 "普通 Reality" "客户端入口使用服务器 IP、历史入口或 --entry-host"
-        menuItem 2 "严格域名 Reality" "客户端入口必须是解析到本机的自有域名"
-        menuLine "entry 是客户端连接地址；target/SNI 是 REALITY 伪装目标"
+        menuItem 1 "普通 Reality" "使用服务器 IP、上次的入口或 --entry-host"
+        menuItem 2 "严格域名 Reality" "使用解析到本机的自有域名"
+        menuLine "entry 是客户端连接地址，target 和 SNI 用于 REALITY 握手"
         menuReturnItem 0 "返回"
         menuClose
         while true; do
@@ -3159,18 +3159,18 @@ selectCoreInstallProtocols() {
     allowedIds=$(protocolSelectionCurrentIdsForCore "${core}") || return 1
     selectCustomInstallType=
     if [[ -z "${preselectedProtocols}" ]]; then
-        echoContent title "\n┌─ ${core} 个性化安装 ──────────────────────────────────"
-        menuLine "可输入单个编号，或用中英文逗号多选"
+        echoContent title "\n┌─ ${core} · 选择协议 ──────────────────────────────────"
+        menuLine "输入协议编号，可用中英文逗号分隔多个编号"
         if [[ "${core}" == "xray" ]]; then
-            menuLine "推荐新人：优先选 1；需要 XHTTP 时选 2"
+            menuLine "直连可选 1，需要 XHTTP 时选 2"
         else
-            menuLine "推荐新人：优先选 1 或 2；XHTTP 为 Xray-only"
+            menuLine "首次安装可选 1 或 2。XHTTP 需使用 Xray。"
         fi
-        menuLine "传统 TLS 类协议仅在客户端兼容或迁移需要时选择"
-        menuLine "Reality 不申请本机证书；严格域名模式仅支持单选 Reality Vision"
-        menuLine "推荐能力"
+        menuLine "旧客户端兼容或迁移时可选传统 TLS"
+        menuLine "严格域名模式仅支持单选 Reality Vision"
+        menuLine "推荐协议"
         protocolRegistryMenuByLifecycle "${allowedIds}" recommended protocolIdsByChoice
-        menuLine "高级能力"
+        menuLine "高级协议"
         protocolRegistryMenuByLifecycle "${allowedIds}" advanced protocolIdsByChoice
         menuReturnItem 0 "取消"
         menuClose
@@ -3308,8 +3308,8 @@ selectCoreInstall() {
     progressCard "1" "选择核心安装"
     while true; do
         echoContent title "\n┌─ 选择核心 ─────────────────────────────────────────"
-        menuRecommendedItem 1 "Xray-core" "推荐新人优先选择，Reality Vision 与 Reality XHTTP 场景验证最多"
-        menuItem 2 "sing-box" "适合 Hysteria2、Tuic、Naive、AnyTLS 或统一 sing-box 配置"
+        menuRecommendedItem 1 "Xray-core" "推荐用于 Reality Vision 或 Reality XHTTP"
+        menuItem 2 "sing-box" "适合 Hysteria2、Tuic、NaiveProxy 与 AnyTLS"
         menuReturnItem 0 "返回安装与重装"
         menuClose
         selectCoreType=

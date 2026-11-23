@@ -444,7 +444,7 @@ INPUT
     expected=$'protocol list\nprotocol encryption-status\nprotocol encryption-status\nedit --vless-encryption vless-reality enable\nprotocol encryption-status\nedit --vless-encryption entry-xhttp disable'
     [[ "$(<"${TEST_ROOT}/menu-events")" == "${expected}" ]] || fail 'Encryption 菜单派发错误'
     grep -Fq '重新导入分享 URI' "${STDOUT}" || fail 'Encryption 菜单缺少客户端重导提示'
-    grep -Fq '固定 Xray/Mihomo' "${STDOUT}" || fail 'Encryption 菜单缺少实验支持范围'
+    grep -Fq '已验证固定版本的 Xray 与 Mihomo 组合。' "${STDOUT}" || fail 'Encryption 菜单缺少实验支持范围'
     ! grep -Fq '[y/N]' "${STDOUT}" || fail 'Encryption 菜单重复提交确认'
 )
 (

@@ -18,12 +18,13 @@ showSubscriptionServerRoleSummary() {
     main) roleText="主控" ;;
     controlled) roleText="被控" ;;
     uninitialized)
-        menuLine "多服务器角色：$(uiStyle value "未启用")；可直接使用本机订阅"
+        menuLine "多服务器同步：$(uiStyle value "未启用")"
         return 0
         ;;
     *) return 1 ;;
     esac
-    menuLine "当前服务器角色：$(uiStyle value "${roleText}")；WireGuard 控制面：$(uiStyle value "${enabledText}")；内网地址：$(uiStyle value "${address}")；Peer：$(uiStyle value "${peerCount}")"
+    menuLine "当前服务器角色：$(uiStyle value "${roleText}") / WireGuard：$(uiStyle value "${enabledText}")"
+    menuLine "内网地址：$(uiStyle value "${address}") / Peer：$(uiStyle value "${peerCount}")"
 }
 
 subscriptionCurrentRoleNormalized() {
@@ -292,14 +293,14 @@ manageSubscriptionControlledHome() {
     while true; do
         echoContent title "\n┌─ 被控首页 ─────────────────────────────────────────"
         showSubscriptionServerRoleSummary
-        menuItem 1 "接入主控" "粘贴主控邀请，完成接入并生成对应回执"
-        menuItem 2 "查看本机状态" "查看角色、地址、Peer 和 WireGuard 状态"
-        menuItem 3 "导入/更新主控接入凭据" "仅更新已有连接的主控端点或身份"
-        menuItem 4 "显示被控更新凭据" "生成给主控更新地址、公钥、控制端口和 Token 的凭据"
-        menuItem 5 "查看控制面与 Peer 细节" "显示 WireGuard 状态以及与主控的 Peer 连接细节"
-        menuItem 6 "重写配置并重启被控控制面" "重写配置并重启 WireGuard 和控制服务"
+        menuItem 1 "接入主控" "粘贴邀请并生成接入回执"
+        menuItem 2 "查看本机状态" "角色、内网地址与 WireGuard 状态"
+        menuItem 3 "更新主控接入凭据" "导入主控的新端点或身份"
+        menuItem 4 "显示被控更新凭据" "供主控更新本机的连接信息"
+        menuItem 5 "查看控制面与 Peer 细节" "检查与主控的 WireGuard 连接"
+        menuItem 6 "修复并重启控制面" "重写配置并重启 WireGuard 与控制服务"
         menuDangerItem 7 "卸载被控控制面" "清理主控下发账号和控制连接，保留本机代理、发布服务及自建订阅"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         menuReadChoice subscription_controlled_home_menu "请选择:" controlledHomeStatus interactive || return 0
         case "${controlledHomeStatus}" in
@@ -333,14 +334,12 @@ manageSubscriptionMainControlDetails() {
     local mainControlDetailsStatus= currentRole
     while true; do
         echoContent title "\n┌─ 本机控制面 ───────────────────────────────────────"
-        menuLine "这里处理主控控制面的状态、连接和恢复动作。"
-        menuLine "建议先查看凭据、Peer 和连接状态，再决定是否重启或卸载控制面。"
         showSubscriptionWireGuardStatus
-        menuItem 1 "显示主控维护凭据" "仅用于维护已有连接，不用于首次接入"
-        menuItem 2 "查看连接详情" "一次查看 WireGuard Peer、Health 和 Sync 地址"
-        menuItem 3 "重写配置并重启主控控制面" "重写配置并重启控制服务"
+        menuItem 1 "显示主控维护凭据" "供被控服务器更新连接"
+        menuItem 2 "查看连接详情" "WireGuard Peer、健康检查与同步地址"
+        menuItem 3 "修复并重启控制面" "重写配置并重启 WireGuard 与控制服务"
         menuDangerItem 4 "卸载主控控制面" "清理控制连接和远端节点记录，保留本机代理、发布服务及自建订阅"
-        menuReturnItem 0 "返回主控首页" "回到上级菜单"
+        menuReturnItem 0 "返回主控首页"
         menuClose
         menuReadChoice subscription_main_control_details_menu "请选择:" mainControlDetailsStatus interactive || return 0
         case "${mainControlDetailsStatus}" in
@@ -538,26 +537,26 @@ manageSubscriptionCatalog() {
         else
             menuLine "管理员订阅包含本机协议配置中的节点。"
         fi
-        menuItem 1 "安装/更新发布服务" "配置公网发布入口，随后完整同步"
-        menuItem 2 "查看当前订阅链接" "选择已发布的管理员订阅或分享订阅，再查看链接"
-        menuItem 3 "分享订阅" "新建或维护已有分享订阅"
-        menuItem 4 "流量与限额" "查看流量明细，并处理超限和自动限额"
-        menuItem 5 "立即完整同步" "同步账号及启用来源；已配置发布服务时更新并显示链接"
-        menuItem 6 "订阅同步" "自动同步、同步间隔、状态排障和状态备份"
+        menuItem 1 "安装/更新发布服务" "设置公网地址并发布订阅"
+        menuItem 2 "查看当前订阅链接" "选择管理员订阅或分享订阅"
+        menuItem 3 "分享订阅" "新建、编辑与启停"
+        menuItem 4 "流量与限额" "用量、额度与超限处理"
+        menuItem 5 "立即完整同步" "同步各启用来源的账号并更新发布"
+        menuItem 6 "订阅同步" "自动同步、排障与状态备份"
         if [[ "${role}" == "main" ]]; then
-            menuItem 7 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停和移除"
-            menuItem 8 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/卸载"
+            menuItem 7 "管理被控服务器" "邀请、连接检查、凭据与启停"
+            menuItem 8 "维护本机控制面" "连接详情、维护凭据、重启与卸载"
         else
-            menuItem 7 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
-            menuItem 8 "接入主控" "粘贴主控邀请，将本机初始化为被控"
+            menuItem 7 "启用主控协同" "设为主控，保留现有订阅和服务"
+            menuItem 8 "接入主控" "粘贴邀请，将本机设为被控"
         fi
         canDisablePublication=false
         if publicationConfig=$(nginxConfigFilePath subscribe.conf) &&
             [[ -f "${publicationConfig}" && ! -L "${publicationConfig}" ]]; then
             canDisablePublication=true
-            menuDangerItem 9 "停用发布服务" "停用本机公网订阅链接，保留已保存的订阅和节点配置"
+            menuDangerItem 9 "停用发布服务" "本机公网链接将无法刷新，保留订阅和节点配置"
         fi
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus interactive || return 0
         case "${subscriptionCatalogStatus}" in
@@ -664,7 +663,7 @@ showUserSubscriptions() {
         esac
         sourceText=${sources//,/、}
         [[ "${sourceText}" == "*" ]] && sourceText="全部"
-        menuLine "状态：${enabledText} / 额度：$(uiStyle value "${limitText}") / 限额：${quotaText}"
+        menuLine "状态：${enabledText} / 额度：$(uiStyle value "${limitText}") / 用量状态：${quotaText}"
         menuLine "服务器：$(uiStyle value "${sourceText}")"
     done <<<"${output}"
     menuClose
@@ -701,7 +700,7 @@ selectSubscriptionSourceId() {
         sourceIndex=$((sourceIndex + 1))
         menuItem "${sourceIndex}" "${sourceName}（${rowSourceId}）" "${sourceHost}:${sourcePort} / ${sourceEnabled} / 同步：${sourceStatus}"
     done <<<"${sourceRows}"
-    menuLine "输入编号或服务器 ID；纯数字 ID 使用 id:ID"
+    menuLine "输入编号或服务器 ID，纯数字 ID 写作 id:ID。"
     menuReturnItem 0 "返回"
     menuClose
     while true; do
@@ -746,7 +745,7 @@ selectUserSubscriptionSources() {
         sourceIndex=$((sourceIndex + 1))
         menuItem "${sourceIndex}" "${sourceName}（${sourceId}）" "${sourceEnabled}"
     done <<<"${sourceRows}"
-    menuLine "*：全部服务器；可用逗号多选编号或 ID；纯数字 ID 使用 id:ID"
+    menuLine "输入编号或服务器 ID，逗号多选，* 选全部。纯数字 ID 写作 id:ID。"
     menuReturnItem 0 "返回"
     menuClose
     while true; do
@@ -790,7 +789,7 @@ createAndSyncUserSubscriptionWizard() {
     createdUserSubscriptionId=
     createdUserSubscriptionIds='[]'
     while true; do
-        menuReadChoice user_subscription_id "请输入分享订阅 ID[逗号分隔可批量新建，回车取消]:" id || return 1
+        menuReadChoice user_subscription_id "输入分享订阅 ID（逗号分隔可批量新建，回车取消）：" id || return 1
         idsJson=$(jq -ecn --arg value "${id}" '
           $value | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
           select(length > 0 and all(.[]; length <= 64 and test("^[A-Za-z0-9_-]+$"))) |
@@ -819,7 +818,7 @@ createAndSyncUserSubscriptionWizard() {
             else
                 selectUserSubscriptionSources user_subscription_sources "请选择节点范围[回车默认 main]:" sourceJson || return 1
                 while true; do
-                    menuReadChoice user_subscription_traffic_limit "请输入订阅额度 GB[回车/0 为不限]:" limit true || return 1
+                    menuReadChoice user_subscription_traffic_limit "输入订阅额度（GB，回车或 0 表示不限）：" limit true || return 1
                     limit=${limit:-0}
                     [[ "${limit}" =~ ^[0-9]+$ ]] && break
                     errorCard "订阅额度必须是数字"
@@ -913,19 +912,19 @@ selectUserSubscriptionId() {
         fi
         menuItem "${itemIndex}" "${name}（${id}）" "状态：${enabled} / 已保存用量：${usage} / 额度：${limit} / ${quota}"
     done <<<"${userRows}"
-    [[ "${allowCreate}" == "true" ]] && menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
+    [[ "${allowCreate}" == "true" ]] && menuItem "+" "新建分享订阅" "创建后立即同步"
     if [[ "${allowMultiple}" == "true" ]]; then
-        menuItem "@on" "选择全部已启用订阅"
-        menuItem "@off" "选择全部已停用订阅"
-        menuItem "@over" "选择全部已超限订阅" "包含已停用但仍超限的订阅"
-        menuLine "输入编号或订阅 ID；逗号分隔可多选，* 选择全部；纯数字 ID 使用 id:ID"
+        menuItem "@on" "已启用的订阅"
+        menuItem "@off" "已停用的订阅"
+        menuItem "@over" "已超限的订阅" "包括已停用的超限订阅"
+        menuLine "输入编号或订阅 ID，逗号多选，* 选全部。纯数字 ID 写作 id:ID。"
     else
-        menuLine "输入编号或订阅 ID；纯数字 ID 使用 id:ID"
+        menuLine "输入编号或订阅 ID，纯数字 ID 写作 id:ID。"
     fi
     menuReturnItem 0 "返回"
     menuClose
     while true; do
-        menuReadChoice select_user_subscription_id "请选择订阅:" choice interactive || return 1
+        menuReadChoice select_user_subscription_id "请选择订阅：" choice interactive || return 1
         [[ "${choice}" != 0 ]] || return 1
         if [[ "${allowCreate}" == "true" && "${choice}" == "+" ]]; then
             selectedUserSubscriptionId=+
@@ -1041,7 +1040,7 @@ browsePublishedSubscriptionLinks() {
         index=$((choice - 1))
         readPublishedSubscriptionLinks show "${publishedUserIds[index]}" "" "${publishedAccounts[index]}" || continue
         while true; do
-            menuReadChoice published_subscription_links_return "按回车或输入 0 返回订阅名单：" choice interactive || return 0
+            menuReadChoice published_subscription_links_return "回车或输入 0 返回订阅列表：" choice interactive || return 0
             [[ "${choice}" != 0 ]] || break
             coreSelectionErrorCard
         done
@@ -1186,7 +1185,7 @@ removeUserSubscriptionMenu() {
     if [[ -n "${idsJson}" ]]; then
         selectedLabel=$(jq -r 'join("、")' <<<"${idsJson}") || return 1
     fi
-    menuReadChoice remove_user_subscription_confirm "删除订阅 ${selectedLabel} 会移除状态；同步后会删除对应托管账号。确认请输入 yes：" confirm || return 1
+    menuReadChoice remove_user_subscription_confirm "将删除订阅 ${selectedLabel} 的记录，并在同步后移除对应托管账号。输入 yes 确认：" confirm || return 1
     if [[ "${confirm}" != "yes" ]]; then
         coreCancelledStatusCard "操作未执行"
         return 1
@@ -1211,7 +1210,7 @@ validateUserSubscriptionDraftSnapshot() {
     jq -e --argjson expected "${expectedJson}" '
       (map({id,uuid}) | sort_by(.id)) == ($expected | map({id,uuid}) | sort_by(.id))
     ' <<<"${currentJson}" >/dev/null || {
-        errorCard "所选订阅身份已变化，无法保留草稿" "请选 8 重新读取并丢弃草稿"
+        errorCard "所选订阅身份已变化，无法保留草稿" "请选择「重新读取并丢弃草稿」"
         return 1
     }
     conflictingFields=$(jq -r --argjson expected "${expectedJson}" --argjson patch "${patchJson}" '
@@ -1228,7 +1227,7 @@ validateUserSubscriptionDraftSnapshot() {
         else empty end] | join("、")
     ' <<<"${currentJson}") || return 1
     if [[ -n "${conflictingFields}" ]]; then
-        errorCard "草稿字段已被其他操作修改，未刷新" "冲突字段：${conflictingFields}" "请选 8 重新读取并丢弃草稿"
+        errorCard "草稿字段已被其他操作修改，未刷新" "冲突字段：${conflictingFields}" "请选择「重新读取并丢弃草稿」"
         return 1
     fi
 }
@@ -1293,7 +1292,7 @@ editUserSubscriptionsMenu() {
         effectiveJson=$(jq -c --argjson patch "${patchJson}" 'map(. + $patch)' <<<"${expectedJson}") || return 1
         pendingFields=$(jq -r "keys | ${fieldLabelsJq}" <<<"${patchJson}") || return 1
         echoContent title "\n┌─ 编辑分享订阅 ─────────────────────────────────────"
-        menuLine "已选订阅：${selectedCount} 个；修改会先保留为草稿，保存时一次性同步"
+        menuLine "已选订阅：${selectedCount} 个"
         if [[ -n "${pendingFields}" ]]; then
             menuLine "待保存字段：${pendingFields}"
         else
@@ -1302,9 +1301,7 @@ editUserSubscriptionsMenu() {
         if [[ "${selectedCount}" == "1" ]]; then
             currentName=$(jq -r '.[0].name' <<<"${effectiveJson}")
             menuLine "当前名称：${currentName}"
-            menuItem 1 "设置名称" "当前：${currentName}"
-        else
-            menuLine "批量编辑不会修改订阅名称"
+            menuItem 1 "设置名称"
         fi
         currentSources=$(jq -c '.[0].allowed_sources' <<<"${effectiveJson}") || return 1
         if [[ "$(jq -r 'map(.allowed_sources | tojson) | unique | length' <<<"${effectiveJson}")" == "1" ]]; then
@@ -1320,20 +1317,21 @@ editUserSubscriptionsMenu() {
         else
             menuLine "当前订阅额度：多个值（回车保留各自设置）"
         fi
-        menuItem "$((2 - fieldOffset))" "设置节点范围" "批量订阅使用相同节点范围"
-        menuItem "$((3 - fieldOffset))" "设置订阅额度" "0 表示不限"
-        menuItem "$((4 - fieldOffset))" "启用所选订阅" "额度超限时会拒绝启用"
-        menuItem "$((5 - fieldOffset))" "停用所选订阅" "保存后同步移除对应托管账号"
-        menuItem "$((6 - fieldOffset))" "保存并立即同步" "自动保留其他字段的最新变化；冲突时保留草稿"
-        menuItem "$((7 - fieldOffset))" "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
-        menuItem "$((8 - fieldOffset))" "刷新并保留草稿" "读取最新状态；身份或草稿字段冲突时拒绝刷新"
-        menuLine "字段可用逗号连续选择（例 $((2 - fieldOffset)),$((3 - fieldOffset))）；末尾加 $((6 - fieldOffset)) 填写后直接保存；取消和重新读取单独选择"
-        menuReturnItem 0 "取消并丢弃草稿" "返回分享订阅"
+        menuItem "$((2 - fieldOffset))" "设置节点范围"
+        menuItem "$((3 - fieldOffset))" "设置订阅额度"
+        menuItem "$((4 - fieldOffset))" "启用所选订阅" "开启自动超限处理时拒绝启用超限订阅"
+        menuItem "$((5 - fieldOffset))" "停用所选订阅" "同步后移除对应托管账号"
+        menuItem "$((6 - fieldOffset))" "保存并立即同步" "合并其他字段的最新修改，遇到冲突时保留草稿"
+        menuItem "$((7 - fieldOffset))" "重新读取并丢弃草稿"
+        menuItem "$((8 - fieldOffset))" "刷新并保留草稿" "订阅身份或草稿字段冲突时停止刷新"
+        menuLine "用逗号分隔多个编号，如 $((2 - fieldOffset)),$((3 - fieldOffset))。末尾加 $((6 - fieldOffset)) 可直接保存。"
+        menuLine "取消或重新读取时，请单独输入编号。"
+        menuReturnItem 0 "取消并丢弃草稿"
         menuClose
         if [[ -n "${pendingFields}" ]]; then
-            editPrompt="请选择[回车保存并立即同步]:"
+            editPrompt="请选择编号（回车保存并立即同步）："
         else
-            editPrompt="请选择（回车返回）："
+            editPrompt="请选择编号（回车返回）："
         fi
         menuReadChoice edit_user_subscription_menu "${editPrompt}" choice true || return 1
         if [[ "${choice}" == 0 ]]; then
@@ -1358,7 +1356,7 @@ editUserSubscriptionsMenu() {
             case "${choice}" in
             1)
                 value=
-                menuReadChoice edit_user_subscription_name "请输入新名称[回车保留]:" value true || return 1
+                menuReadChoice edit_user_subscription_name "输入新名称（回车保留）：" value true || return 1
                 [[ -n "${value}" ]] || continue
                 patchJson=$(jq -c --arg value "${value}" '. + {name:$value}' <<<"${patchJson}") || return 1
                 ;;
@@ -1379,7 +1377,7 @@ editUserSubscriptionsMenu() {
             3)
                 while true; do
                     value=
-                    menuReadChoice edit_user_subscription_limit "请输入订阅额度 GB[回车保留各自设置，0 为不限]:" value true || return 1
+                    menuReadChoice edit_user_subscription_limit "输入订阅额度（GB，回车保留各自设置，0 表示不限）：" value true || return 1
                     [[ -z "${value}" || "${value}" =~ ^[0-9]+$ ]] && break
                     errorCard "订阅额度必须是数字"
                 done
@@ -1515,25 +1513,25 @@ manageUserSubscriptionsMenu() {
             menuLine "已选订阅：${selectedCount} 个"
         fi
         while IFS= read -r line; do menuLine "${line}"; done <<<"${summary}"
-        menuItem 1 "查看当前已发布链接" "只读查看，不等待同步或重建订阅"
-        menuItem 2 "查看当前流量" "只读查看累计流量和额度状态"
-        menuItem 3 "编辑订阅配置" "名称、节点范围、额度和启停一次保存并同步"
-        menuItem 4 "立即同步并更新链接" "同步后查看当前链接，不改变自动同步设置"
+        menuItem 1 "查看当前已发布链接"
+        menuItem 2 "查看当前流量" "已保存的用量与限额状态"
+        menuItem 3 "编辑订阅配置" "名称、节点范围、额度和启停状态"
+        menuItem 4 "立即同步并查看链接"
         if [[ "${selectedCount}" != "1" ]]; then
-            menuItem 5 "启用所选订阅" "整批启用并同步，任一订阅超限则不写入"
-            menuItem "${disableChoice}" "停用所选订阅" "整批停用并同步移除对应托管账号"
+            menuItem 5 "启用所选订阅" "开启自动超限处理时，需全部订阅在额度内"
+            menuItem "${disableChoice}" "停用所选订阅" "同步后移除对应托管账号"
         elif [[ "${targetEnabled}" == "true" ]]; then
-            menuItem 5 "启用当前订阅" "启用后立即同步，额度超限时会拒绝启用"
+            menuItem 5 "启用当前订阅" "开启自动超限处理时，超限订阅无法启用"
         else
-            menuItem 5 "停用当前订阅" "停用后立即同步并移除对应托管账号"
+            menuItem 5 "停用当前订阅" "同步后移除对应托管账号"
         fi
-        menuDangerItem "${deleteChoice}" "删除订阅" "删除记录；同步后移除对应托管账号"
-        menuItem "${switchChoice}" "切换订阅" "选择另一订阅继续管理"
+        menuDangerItem "${deleteChoice}" "删除订阅" "删除记录，同步后移除对应托管账号"
+        menuItem "${switchChoice}" "切换订阅"
         if [[ "${selectedCount}" == "1" ]]; then
-            menuItem "${copyChoice}" "按当前配置新建订阅" "复制节点范围和额度，不复制身份、流量和令牌"
+            menuItem "${copyChoice}" "按当前配置新建订阅" "仅沿用节点范围和额度"
         fi
-        menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
-        menuReturnItem 0 "返回上级菜单" "结束当前订阅管理"
+        menuItem "+" "新建分享订阅" "创建后立即同步"
+        menuReturnItem 0 "返回"
         menuClose
         menuReadChoice "${menuKey}" "请选择:" userSubscriptionItemStatus interactive || return 0
         case "${userSubscriptionItemStatus}" in
@@ -1600,13 +1598,13 @@ manageUserSubscriptionsMenu() {
 createSubscriptionWireGuardInviteMenu() {
     local alias= inviteCredential=
     echoContent title "\n┌─ 创建被控邀请 ─────────────────────────────────────"
-    menuLine "主控将自动预留别名和 WireGuard 地址；邀请只在本次结果中显示。"
+    menuLine "主控会为邀请预留别名和 WireGuard 地址。"
     menuClose
-    autoRead subscription_invite_alias "请输入被控服务器别名[英文/数字/短横线，例 hk-1，回车取消]:" alias || return 1
+    autoRead subscription_invite_alias "输入被控别名（1–64 个英文字母、数字、下划线或短横线，回车取消）：" alias || return 1
     [[ -n "${alias}" ]] || return 1
-    statusCard "正在创建被控邀请" "正在检查别名并预留地址；若有同步任务运行，将等待它完成"
+    statusCard "正在创建被控邀请" "检查别名并预留地址。有同步任务时会等待完成。"
     subscriptionWireGuardCreateInvite "${alias}" inviteCredential || return 1
-    statusCard "被控邀请已创建" "被控别名：${alias}" "被控邀请：${inviteCredential}" "邀请有效期 24 小时，请通过可信通道传递；丢失时取消并重建" "WireGuard 使用 UDP，控制 API 只在隧道内使用 HTTP；此步骤不需要 TLS 证书"
+    statusCard "被控邀请已创建" "被控别名：${alias}" "被控邀请：${inviteCredential}" "邀请有效期为 24 小时。请通过可信通道传递，丢失后可取消并重建。" "控制 API 通过 WireGuard 隧道内的 HTTP 访问，无需 TLS 证书。"
 }
 
 subscriptionWireGuardInviteLocalTime() {
@@ -1649,11 +1647,11 @@ manageSubscriptionPendingInvites() {
             return 0
         fi
         while IFS=$'\t' read -r alias address expiresAt remainingSeconds statusText; do
-            menuLine "别名：${alias}；地址：${address}；过期：$(subscriptionWireGuardInviteLocalTime "${expiresAt}")；剩余：$(subscriptionWireGuardInviteRemainingText "${remainingSeconds}")；状态：${statusText}"
+            menuLine "${alias} / ${address} / ${statusText} / 到期：$(subscriptionWireGuardInviteLocalTime "${expiresAt}") / 剩余：$(subscriptionWireGuardInviteRemainingText "${remainingSeconds}")"
         done <<<"${inviteRows}"
         menuClose
         while true; do
-            menuReadChoice subscription_cancel_invite_alias "输入要取消的唯一别名[回车或 0 返回，纯数字别名使用 id:别名]:" alias interactive || return 0
+            menuReadChoice subscription_cancel_invite_alias "输入要取消的别名（回车或 0 返回，纯数字别名写作 id:别名）：" alias interactive || return 0
             [[ "${alias}" != 0 ]] || return 0
             alias=${alias#id:}
             inviteId=$(jq -r --arg alias "${alias}" 'first(.[]? | select(.alias == $alias)).invite_id // empty' <<<"${pendingJson}") || return 1
@@ -1661,7 +1659,7 @@ manageSubscriptionPendingInvites() {
             errorCard "待完成邀请别名无效，请重新输入"
         done
         warnCard "取消邀请" "若接入曾中断，将同时清理该别名的部分 Peer、来源和凭据"
-        menuReadChoice subscription_cancel_invite_confirm "确认取消 ${alias}？[y/N]:" confirmCancel true || return 0
+        menuReadChoice subscription_cancel_invite_confirm "确认取消 ${alias}？[y/N] " confirmCancel true || return 0
         [[ "$(normalizeYesNo "${confirmCancel}")" == "y" ]] || { statusCard "已保留待完成邀请"; continue; }
         subscriptionWireGuardCancelInvite "${alias}" "${inviteId}" || return 1
         successCard "待完成邀请已取消" "已释放别名和预留地址：${alias}"
@@ -1675,10 +1673,10 @@ removeSubscriptionControlledServerMenu() {
     local sourcesJson source confirm=
     local localOnlyConfirm=
     echoContent title "\n┌─ 移除被控服务器 ───────────────────────────────────"
-    menuLine "删除前会自动清理用户订阅中的该来源；使用 * 的订阅范围会保留。"
+    menuLine "移除该服务器后，分享订阅的指定范围会移除该来源。选用全部来源（*）的订阅继续跟随可用来源。"
     sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
     if [[ -z "${sourceId}" ]]; then
-        selectSubscriptionSourceId "${sourcesJson}" "请选择要删除的被控服务器:" sourceId delete_subscription_source || return 1
+        selectSubscriptionSourceId "${sourcesJson}" "选择要移除的被控服务器：" sourceId delete_subscription_source || return 1
     fi
     source=$(jq -ce --arg id "${sourceId}" 'first(.[]? | select(.id == $id))' <<<"${sourcesJson}") || {
         errorCard "被控服务器源已不存在，请刷新后重试"
@@ -1686,13 +1684,13 @@ removeSubscriptionControlledServerMenu() {
     }
     expectedSource=${expectedSource:-${source}}
     menuReadChoice delete_subscription_source_confirm \
-        "确认移除 ${sourceId} 及对应 WireGuard Peer？请输入 yes:" confirm true || return 1
+        "将移除 ${sourceId} 及对应的 WireGuard Peer。输入 yes 确认：" confirm true || return 1
     [[ "${confirm}" == "yes" ]] || { coreCancelledStatusCard "服务器源未移除"; return 0; }
     if ! subscriptionWireGuardRemovePeerAndSource "${sourceId}" "${expectedSource}" "${expectedPeer}"; then
         if [[ "${SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR:-}" == "remote" ]]; then
             warnCard "远端服务器不可达或清理失败" "仅本地移除会删除本机来源和 WireGuard Peer，但不会删除远端账号；请在远端手工清理后再确认"
             menuReadChoice subscription_source_local_remove_confirm \
-                "确认仅本地移除 ${sourceId}？[y/N]:" localOnlyConfirm true || return 1
+                "只在本机移除 ${sourceId}？[y/N] " localOnlyConfirm true || return 1
             if [[ "$(normalizeYesNo "${localOnlyConfirm}")" == "y" ]]; then
                 if subscriptionWireGuardRemovePeerAndSourceLocalOnly "${sourceId}" "${expectedSource}" "${expectedPeer}"; then
                     if runSubscriptionSyncAfterMutation "被控服务器仅本地移除" "" true; then
@@ -1730,7 +1728,7 @@ changeSubscriptionSourceEnabledMenu() {
     userResultCard "被控服务器启用状态"
     sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
     if [[ -z "${sourceId}" ]]; then
-        selectSubscriptionSourceId "${sourcesJson}" "请选择要启用或停用的被控服务器:" sourceId subscription_source_enabled_id || return 1
+        selectSubscriptionSourceId "${sourcesJson}" "选择要启用或停用的被控服务器：" sourceId subscription_source_enabled_id || return 1
     fi
     source=$(jq -c --arg id "${sourceId}" 'first(.[]? | select(.id == $id))' <<<"${sourcesJson}") || return 1
     if [[ -z "${source}" || "${source}" == "null" ]]; then
@@ -1750,13 +1748,13 @@ changeSubscriptionSourceEnabledMenu() {
     fi
     if [[ "${targetEnabled}" == "false" ]]; then
         actionText="停用"
-        effectText="清理远端托管账号后停用并立即同步；保留 Peer、Token 和历史状态"
+        effectText="清理远端托管账号后停用并同步，保留 Peer、Token 和历史状态"
     else
         actionText="启用"
-        effectText="启用后立即同步并更新公网发布；保留 Peer、Token 和历史状态"
+        effectText="启用后同步并更新公网发布，保留 Peer、Token 和历史状态"
     fi
     warnCard "${actionText}被控服务器" "目标：${sourceId}（${sourceName}）" "${effectText}"
-    menuReadChoice subscription_source_enabled_confirm "确认${actionText} ${sourceId}？[y/N]:" confirm true || return 1
+    menuReadChoice subscription_source_enabled_confirm "确认${actionText} ${sourceId}？[y/N] " confirm true || return 1
     [[ "$(normalizeYesNo "${confirm}")" == "y" ]] || { coreCancelledStatusCard "服务器源状态未修改"; return 0; }
     if ! setSubscriptionRemoteSourceEnabled "${sourceId}" "${targetEnabled}" "${expectedSource}"; then
         errorCard "${SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR:-被控服务器状态更新失败}"
@@ -1771,13 +1769,12 @@ manageSubscriptionServers() {
     local serverStatus= completedSourceId=
     while true; do
         echoContent title "\n┌─ 被控服务器 ───────────────────────────────────────"
-        menuLine "待接入服务器使用邀请和回执；已有服务器选择一次即可连续维护。"
-        menuItem 1 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
-        menuItem 2 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
-        menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
-        menuItem 4 "管理已有被控服务器" "状态、凭据、启停、连接检查和移除"
-        menuItem 5 "查看服务器总览" "只读查看所有来源的状态"
-        menuReturnItem 0 "返回主控首页" "回到上级菜单"
+        menuItem 1 "创建被控邀请" "为别名预留 WireGuard 地址"
+        menuItem 2 "完成被控接入" "导入回执，沿用预留的别名和地址"
+        menuItem 3 "管理待完成邀请" "查看到期时间或取消邀请"
+        menuItem 4 "管理已接入服务器" "连接检查、凭据、启停与移除"
+        menuItem 5 "查看服务器总览" "各来源上次记录的状态"
+        menuReturnItem 0 "返回主控首页"
         menuClose
         menuReadChoice server_source_menu "请选择:" serverStatus interactive || return 0
         case "${serverStatus}" in
@@ -1804,7 +1801,7 @@ manageSubscriptionServerItem() {
         sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
         sourceId=$(jq -r 'if length == 1 then .[0].id else empty end' <<<"${sourcesJson}") || return 1
         if [[ -z "${sourceId}" ]]; then
-            selectSubscriptionSourceId "${sourcesJson}" "请选择要管理的被控服务器:" sourceId || return 0
+            selectSubscriptionSourceId "${sourcesJson}" "选择要管理的被控服务器：" sourceId || return 0
         fi
     fi
     while true; do
@@ -1822,18 +1819,18 @@ manageSubscriptionServerItem() {
         targetEnabled=$(jq -r '.enabled != true' <<<"${source}") || return 1
         echoContent title "\n┌─ 管理被控服务器 ───────────────────────────────────"
         while IFS= read -r line; do menuLine "${line}"; done <<<"${summary}"
-        menuItem 1 "更新当前服务器凭据" "更新地址、公钥、控制端口和 Token"
+        menuItem 1 "更新服务器凭据" "导入地址、公钥、控制端口和 Token"
         if [[ "${targetEnabled}" == "true" ]]; then
-            menuItem 2 "启用当前服务器并同步" "保留现有凭据"
+            menuItem 2 "启用服务器并同步" "保留现有凭据"
         else
-            menuItem 2 "停用当前服务器并同步" "清理远端托管账号，保留 Peer、Token 和历史状态"
+            menuItem 2 "停用服务器并同步" "清理远端托管账号，保留 Peer、Token 和历史状态"
         fi
-        menuItem 3 "检查当前服务器连接" "只请求当前服务器的 Health"
-        menuItem 4 "立即完整同步" "更新本机、所有启用来源和已配置的订阅发布"
-        menuItem 5 "刷新当前状态" "重新读取已保存的服务器状态"
+        menuItem 3 "检查服务器连接"
+        menuItem 4 "立即完整同步" "同步本机及已启用的被控并更新发布"
+        menuItem 5 "刷新已保存状态"
         menuDangerItem 6 "移除当前服务器" "清理远端托管账号并移除来源和 Peer"
-        menuItem 7 "切换服务器" "选择另一服务器继续维护"
-        menuReturnItem 0 "返回服务器列表" "回到被控服务器"
+        menuItem 7 "切换服务器"
+        menuReturnItem 0 "返回被控服务器"
         menuClose
         menuReadChoice subscription_server_item_menu "请选择:" choice interactive || return 0
         case "${choice}" in
@@ -1880,7 +1877,7 @@ manageSubscriptionServerItem() {
             fi
             chosenId=$(jq -r 'if length == 1 then .[0].id else empty end' <<<"${sourcesJson}") || continue
             if [[ -n "${chosenId}" ]] ||
-                selectSubscriptionSourceId "${sourcesJson}" "请选择要切换的被控服务器:" chosenId; then
+                selectSubscriptionSourceId "${sourcesJson}" "选择要切换到的被控服务器：" chosenId; then
                 sourceId=${chosenId}
             fi
             ;;
@@ -1896,7 +1893,7 @@ addOtherSubscribe() {
     local completedAlias=
     [[ -z "${resultVar}" ]] || printf -v "${resultVar}" '%s' ""
     echoContent title "\n┌─ 完成被控接入 ─────────────────────────────────────"
-    menuLine "粘贴接入回执，自动使用创建邀请时预留的别名和地址。"
+    menuLine "请粘贴被控生成的接入回执。系统会沿用邀请预留的别名和地址。"
     menuClose
     subscriptionWireGuardReadCredential receipt "接入回执" credentialJson || return 1
     subscriptionWireGuardCompleteInvite "${credentialJson}" completedAlias || return 1
@@ -1967,8 +1964,7 @@ setSubscriptionSourceControlTokenMenu() {
     local sourceOutput=
     local source=
     echoContent title "\n┌─ 更新被控服务器凭据 ───────────────────────────────"
-    menuLine "这里更新一个被控服务器的接入凭据。"
-    menuLine "仅用于更新已有被控连接；首次接入请使用邀请和回执。系统会更新地址、端口和 Token。"
+    menuLine "请粘贴被控更新凭据，更新地址、公钥、控制端口和 Token。首次接入请使用邀请和回执。"
     [[ -z "${sourceId}" ]] || menuLine "当前目标：${sourceId}"
     menuClose
     subscriptionWireGuardReadCredential controlled "被控接入凭据" credentialJson || return 1
@@ -1986,7 +1982,7 @@ setSubscriptionSourceControlTokenMenu() {
             sourceId=$(jq -r --arg host "${host}" --argjson port "${port}" \
                 'first(.[]? | select(.host == $host and .port == $port)).id' <<<"${sourcesJson}") || return 1
         else
-            selectSubscriptionSourceId "${sourcesJson}" "请选择要更新凭据的被控服务器:" sourceId subscription_source_id || return 1
+            selectSubscriptionSourceId "${sourcesJson}" "选择要更新凭据的被控服务器：" sourceId subscription_source_id || return 1
         fi
     fi
     source=$(jq -c --arg id "${sourceId}" 'first(.[]? | select(.id == $id))' <<<"${sourcesJson}") || return 1
@@ -2071,18 +2067,18 @@ manageSubscriptionSyncDiagnostics() {
     fi
     while true; do
         echoContent title "\n┌─ 同步状态与排障 ───────────────────────────────────"
-        menuItem 1 "查看最近同步结果与失败列表" "显示组状态和各来源最近同步结果"
-        menuItem 2 "检查本机服务与发布状态" "显示服务器角色和公网订阅服务状态"
-        menuItem 3 "查看本机同步计划" "预览本机 create/remove"
+        menuItem 1 "查看最近同步结果" "整体结果与各来源状态"
+        menuItem 2 "检查本机与发布服务" "本机角色与公网发布状态"
+        menuItem 3 "查看本机同步计划" "预览将新增或移除的本机账号"
         if [[ "${roleAction}" == "remote" ]]; then
-            menuItem 4 "查看远端同步计划" "对启用来源执行 dry-run"
-            menuItem 5 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
-            menuItem 6 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
-            menuItem 7 "强制立即重试" "临时跳过来源冷却并完整同步，不修改失败计数"
+            menuItem 4 "查看被控同步计划" "预览已启用被控的账号变更"
+            menuItem 5 "检查被控服务器连接" "检查范围为全部已启用的被控"
+            menuItem 6 "查看自动同步定时任务"
+            menuItem 7 "立即重试完整同步" "跳过各来源的重试等待"
         else
-            menuItem 4 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
+            menuItem 4 "查看自动同步定时任务"
         fi
-        menuReturnItem 0 "返回订阅同步" "回到上级菜单"
+        menuReturnItem 0 "返回订阅同步"
         menuClose
         menuReadChoice subscription_sync_diagnostics_menu "请选择:" diagnosticStatus interactive || return 0
         case "${diagnosticStatus}" in
@@ -2141,15 +2137,14 @@ manageSubscriptionSyncSettings() {
         summary=$(jq -r '[if .enabled then "开启" else "关闭" end, (.interval_minutes | tostring), .last_status, (if .last_run == "" then "未运行" else .last_run end), (.failure_count | tostring)] | @tsv' <<<"${syncStatus}") || return 1
         IFS=$'\t' read -r enabledText interval lastStatus lastRun failureCount <<<"${summary}"
         echoContent title "\n┌─ 订阅同步 ─────────────────────────────────────────"
-        menuLine "自动同步：${enabledText}"
-        menuLine "同步间隔：${interval} 分钟"
+        menuLine "自动同步：${enabledText} / 间隔：${interval} 分钟"
         menuLine "最近结果：${lastStatus} / ${lastRun}"
-        menuLine "失败数量：${failureCount}"
-        menuItem 1 "开启/关闭自动同步" "控制后台定时同步及节点配置变更通知；手动管理动作仍立即同步"
-        menuItem 2 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"
-        menuItem 3 "状态与排障" "查看失败、健康、计划和定时任务"
-        menuItem 4 "状态备份与恢复" "查看、备份、恢复或重建 groups.json"
-        menuReturnItem 0 "${returnText}" "回到上级菜单"
+        menuLine "失败记录：${failureCount} 条"
+        menuItem 1 "开启/关闭自动同步" "切换定时同步与节点变更通知"
+        menuItem 2 "设置同步间隔" "1–59 分钟"
+        menuItem 3 "状态与排障" "同步结果、连接检查、同步计划与定时任务"
+        menuItem 4 "状态备份与恢复" "备份、恢复或重建订阅状态"
+        menuReturnItem 0 "${returnText}"
         menuClose
         menuReadChoice sync_settings_menu "请选择:" syncSettingsStatus interactive || return 0
         case "${syncSettingsStatus}" in
@@ -2167,7 +2162,7 @@ manageSubscriptionSyncSettings() {
             expectedInterval=${interval}
             while true; do
                 menuReadChoice sync_interval_minutes \
-                    "请输入同步间隔分钟[回车保留 ${expectedInterval} 分钟]:" interval true || return 0
+                    "输入同步间隔（分钟，回车保留 ${expectedInterval} 分钟）：" interval true || return 0
                 [[ -n "${interval}" ]] || break
                 subscriptionGroupSyncIntervalValid "${interval}" || {
                     errorCard "同步间隔需为 1-59 分钟"

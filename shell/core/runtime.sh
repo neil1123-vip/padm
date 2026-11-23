@@ -1402,7 +1402,7 @@ menuReadChoice() {
 
     [[ -n "${resultVar}" ]] || return 2
     if [[ "${allowEmpty}" == interactive && "${prompt}" == "请选择:" ]]; then
-        prompt="请选择编号（回车或 0 返回）："
+        prompt="请选择编号（回车返回）："
     fi
     printf -v "${resultVar}" '%s' ""
     autoRead "${key}" "${prompt}" "${resultVar}"

@@ -1046,7 +1046,7 @@ try:
             if not part:
                 break
             output.extend(part)
-            if sys.argv[2] in ("derive", "copy") and not editing and "编辑项目（回车取消）: ".encode() in output:
+            if sys.argv[2] in ("derive", "copy") and not editing and "请选择编辑项目（0 或回车取消）: ".encode() in output:
                 payload = b"11\nentry-xhttp\n\n\n45443\n8\n" if sys.argv[2] == "derive" \
                     else b"9\nentry-xhttp\n\n45443\n8\n"
                 os.write(master, payload)

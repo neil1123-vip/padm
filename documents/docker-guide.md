@@ -36,7 +36,7 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 | `5` | 路由与访问控制 | `1` 分流工具、`2` BT、`3` 访问控制 |
 | `6` | 核心与服务 | 状态、启停、重启、日志、校验；`7` 升级评估、`8` Geo、`9` 配置编辑 |
 | `7` | 系统与脚本 | `1` 原有发布包维护、`2` 安装状态、`3` Fail2ban |
-| `8` | 高级/危险操作 | `1` 保留数据卸载、`2` VLESS Encryption 实验 |
+| `8` | 高级与危险操作 | `1` 卸载服务与控制命令（保留数据）、`2` VLESS Encryption 实验 |
 
 旧协议菜单 `9` 迁至 `3 → 8`，旧完整路由菜单 `17`
 迁至 `5 → 1 → 8`，旧服务维护菜单 `18` 迁至 `7 → 1`。
@@ -267,7 +267,7 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 `status` 只报告 `site_mode`，不输出目标 URL。已有旧规格保持兼容，带 `.site` 的 v3
 规格要求控制 bundle 声明 `x-padm-site-content`；受管 webroot 与 standalone HTTP-01 见证书管理。
 
-菜单 `4 → 1 → 8. 内置静态站点` 可选择 `notes`、`photos` 或 `docs`。内置主题仅适用于
+菜单 `4 → 1 → 8. 发布内置站点` 可选择 `notes`、`photos` 或 `docs`。内置主题仅适用于
 已有 v3 Nginx TLS `21–25`（含纯/混合 sing-box `23`）、Xray fallback `27/29`
 或 sing-box Hysteria2；其它不提供网站的 Reality 入口可共存。选主题后可输入站名，
 回车使用主题默认值，`0` 返回；CLI `--site-title` 仅配合 `--site-template`，

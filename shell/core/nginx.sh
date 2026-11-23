@@ -575,7 +575,7 @@ configureRealityStreamSplitApply() {
 
     if currentProtocolHas 1 && currentProtocolHas 2; then
         echoContent title "\n┌─ 默认 Reality 后端 ───────────────────────────────"
-        menuLine "SNI stream 的 default 只能转给一个 Reality 后端"
+        menuLine "公网 443 只能选一个默认 Reality 后端"
         menuRecommendedItem 1 "Reality Vision" "公网 443 默认转发到 Vision"
         menuRecommendedItem 2 "Reality XHTTP" "公网 443 默认转发到 XHTTP"
         menuReturnItem 0 "返回"

@@ -632,7 +632,7 @@ for candidateCase in success return empty eof final-no no-a signature-fail; do
     elif [[ "${candidateCase}" == return ]]; then
         grep -Fq '输入无效，请输入编号或 n/p/f/a/m，0 返回' "${CONTROL_LOG}" || fail '候选菜单仍接受旧返回键'
     elif [[ "${candidateCase}" == no-a ]]; then
-        grep -Fq '总数：0' "${CONTROL_LOG}" || fail '候选菜单包含未实测 A 级目标'
+        grep -Fq '共 0 项' "${CONTROL_LOG}" || fail '候选菜单包含未实测 A 级目标'
     fi
     unset FAKE_SETUP_MODE
 done

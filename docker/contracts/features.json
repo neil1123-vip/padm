@@ -552,7 +552,7 @@
     },
     "uninstall": {
       "status": "supported",
-      "native_menu": "高级/危险操作",
+      "native_menu": "高级与危险操作",
       "native_action": "卸载脚本",
       "profiles": [],
       "network_mode": "host-cli",
@@ -561,7 +561,7 @@
     },
     "vless-encryption": {
       "status": "deferred",
-      "native_menu": "高级/危险操作",
+      "native_menu": "高级与危险操作",
       "native_action": "VLESS Encryption 实验",
       "profiles": ["core-xray"],
       "network_mode": "bridge",

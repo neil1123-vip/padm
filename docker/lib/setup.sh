@@ -572,12 +572,12 @@ dockerTlsManageCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     echoContent title '\n┌─ Docker 证书管理 ───────────────────────────────────────'
-    menuLine "当前 TLS 域名: ${currentDomain}"
-    menuItem 1 '查看/校验受管证书'
-    menuItem 2 '导入证书轮换'
-    menuItem 3 'ACME 申请'
-    menuItem 4 'ACME 续期'
-    menuItem 5 '自动续期状态'
+    menuLine "当前 TLS 域名  ${currentDomain}"
+    menuItem 1 '查看并校验证书'
+    menuItem 2 '导入新证书'
+    menuItem 3 '通过 ACME 申请证书'
+    menuItem 4 '通过 ACME 续期'
+    menuItem 5 '查看自动续期状态'
     menuItem 6 '启用自动续期'
     menuItem 7 '停用自动续期'
     menuItem 8 '启用 Nginx HTTP-01 入口'
@@ -585,21 +585,21 @@ dockerTlsManageCommand() {
     menuItem 10 '迁移入口 TLS 域名'
     menuReturnItem 0 '返回'
     menuClose
-    dockerSetupReadChoice choice '证书操作（回车返回）: ' || return 0
+    dockerSetupReadChoice choice '请选择证书操作（0 或回车返回）: ' || return 0
     [[ "${choice}" =~ ^([1-9]|10)$ ]] || return "${PADM_DOCKER_RC_USAGE}"
     if [[ "${choice}" == 10 ]]; then
         dockerSetupRead domain '新的 TLS 域名（0 取消）: ' || return 0
         dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
-        echoContent title '\n┌─ 证书方式 ───────────────────────────────────────'
-        menuItem 1 '已有受管'
-        menuItem 2 '导入'
+        echoContent title '\n┌─ 证书来源 ───────────────────────────────────────'
+        menuItem 1 '使用已有受管证书'
+        menuItem 2 '导入证书文件'
         menuItem 3 'DNS-01'
         menuItem 4 'HTTP-01 standalone'
         menuItem 5 'HTTP-01 webroot'
         menuItem 6 'TLS-ALPN-01'
         menuReturnItem 0 '取消'
         menuClose
-        dockerSetupRead method '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 6=TLS-ALPN-01, 0=取消]: ' 1 || return 0
+        dockerSetupRead method '请选择证书来源（默认 1，0 取消）: ' 1 || return 0
         case "${method}" in
         1) challengeArgs=(--tls-existing) ;;
         2)
@@ -662,7 +662,7 @@ dockerTlsManageCommand() {
         menuItem 4 'TLS-ALPN-01'
         menuReturnItem 0 '取消'
         menuClose
-        dockerSetupRead method '验证方式 [1=DNS-01, 2=HTTP-01 standalone, 3=HTTP-01 webroot, 4=TLS-ALPN-01，默认 1，0 取消]: ' 1 || return 0
+        dockerSetupRead method '请选择验证方式（默认 1，0 取消）: ' 1 || return 0
         case "${method}" in
         1)
             dockerSetupRead provider 'DNS provider（dns_*，0 取消）: ' || return 0
@@ -698,8 +698,8 @@ dockerTlsManageCommand() {
     7) action=停用自动续期 ;;
     esac
     echoContent title '\n┌─ 证书操作确认 ───────────────────────────────────────'
-    menuLine "证书操作: ${action}"
-    menuLine "域名: ${domain}"
+    menuLine "操作  ${action}"
+    menuLine "域名  ${domain}"
     if [[ "${domain}" != "${currentDomain}" && "${choice}" -le 4 ]]; then
         menuLine '其他域名只保存或校验证书，不修改当前入口和部署。'
     fi
@@ -763,11 +763,11 @@ dockerSetupCommand() {
     echoContent title "\n┌─ Docker ${operation} ───────────────────────────────────────"
     menuItem 1 'Xray'
     menuItem 2 'sing-box'
-    menuItem 3 'Xray+sing-box'
-    menuItem 4 'sing-box+Xray'
+    menuItem 3 'Xray + sing-box' '以 Xray 为主核心'
+    menuItem 4 'sing-box + Xray' '以 sing-box 为主核心'
     menuReturnItem 0 '取消'
     menuClose
-    dockerSetupRead coreChoice '核心 [1=Xray, 2=sing-box, 3=Xray+sing-box, 4=sing-box+Xray, 0=取消]: ' 1 || return 0
+    dockerSetupRead coreChoice '请选择核心（默认 1，0 取消）: ' 1 || return 0
     case "${coreChoice}" in
     1|3)
         core=xray
@@ -775,7 +775,7 @@ dockerSetupCommand() {
         echoContent title '\n┌─ Xray 协议 ───────────────────────────────────────'
         menuItem 1 'Reality Vision'
         menuItem 2 'WS TLS'
-        menuItem 3 '两者'
+        menuItem 3 'Reality Vision + WS TLS'
         menuItem 4 'Reality XHTTP'
         menuItem 5 'Reality gRPC'
         menuItem 6 'Trojan direct'
@@ -808,7 +808,7 @@ dockerSetupCommand() {
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
-    dockerSetupRead protocols '协议 [默认 1，0 取消]: ' 1 || return 0
+    dockerSetupRead protocols '请选择协议（默认 1，0 取消）: ' 1 || return 0
     [[ "${protocols}" =~ ^[1-9][0-9]?$ && -n "${protocolOptions[protocols]:-}" ]] || return "${PADM_DOCKER_RC_USAGE}"
     protocols=${protocolOptions[protocols]}
     [[ "${protocols}" != 8 ]] ||
@@ -821,7 +821,7 @@ dockerSetupCommand() {
     menuItem 3 '双栈'
     menuReturnItem 0 '取消'
     menuClose
-    dockerSetupRead familyChoice '地址族 [1=IPv4, 2=IPv6, 3=双栈, 默认 1]: ' 1 || return 0
+    dockerSetupRead familyChoice '请选择地址族（默认 1，0 取消）: ' 1 || return 0
     case "${familyChoice}" in
     1) families='["ipv4"]' ;;
     2) families='["ipv6"]' ;;
@@ -834,11 +834,11 @@ dockerSetupCommand() {
         fi
         echoContent title '\n┌─ REALITY 目标站选择 ───────────────────────────────────────'
         menuItem 1 '检测候选后选择'
-        menuItem 2 '手动输入'
+        menuItem 2 '手动输入目标站'
         menuReturnItem 0 '取消'
         menuClose
         while :; do
-            dockerSetupRead targetMode '请选择 [1]（0 取消）: ' 1 || return 0
+            dockerSetupRead targetMode '请选择目标站设置方式（默认 1，0 取消）: ' 1 || return 0
             case "${targetMode}" in
             1)
                 # 探测镜像必须来自已验签的发布，交互期间不持有部署锁。
@@ -966,16 +966,16 @@ dockerSetupCommand() {
         else
             dockerSetupRead wsPort "WS TLS 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         fi
-        echoContent title '\n┌─ 证书方式 ───────────────────────────────────────'
-        menuItem 1 '已有受管'
-        menuItem 2 '导入'
+        echoContent title '\n┌─ 证书来源 ───────────────────────────────────────'
+        menuItem 1 '使用已有受管证书'
+        menuItem 2 '导入证书文件'
         menuItem 3 'DNS-01'
         menuItem 4 'HTTP-01 standalone'
         menuItem 5 'HTTP-01 webroot'
         menuItem 6 'TLS-ALPN-01'
         menuReturnItem 0 '取消'
         menuClose
-        dockerSetupRead tlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 5=HTTP-01 webroot, 6=TLS-ALPN-01, 0=取消]: ' 1 || return 0
+        dockerSetupRead tlsMode '请选择证书来源（默认 1，0 取消）: ' 1 || return 0
         case "${tlsMode}" in
         1) ;;
         2)
@@ -2204,19 +2204,19 @@ dockerEditFields() {
         menuItem 2 '服务器地址'
         menuItem 3 '地址族'
         menuItem 4 '节点名称'
-        menuItem 5 'Reality 目标/SNI'
-        menuItem 6 'WS/HTTPUpgrade 路径'
-        menuItem 7 '订阅开关'
+        menuItem 5 'Reality 目标站和 SNI'
+        menuItem 6 'WS / HTTPUpgrade 路径'
+        menuItem 7 'HTTPS 订阅开关'
         menuItem 8 '验证并预览'
         menuItem 9 '复制入口'
         menuItem 10 '删除入口'
-        menuItem 11 '安装其它 Reality 传输入口'
-        menuItem 12 'XHTTP/gRPC 参数'
+        menuItem 11 '添加 Reality 传输入口'
+        menuItem 12 'XHTTP / gRPC 参数'
         menuItem 13 'Hysteria2 参数'
         menuItem 14 'TUIC 参数'
         menuReturnItem 0 '取消'
         menuClose
-        dockerSetupReadChoice choice '编辑项目（回车取消）: ' || return 3
+        dockerSetupReadChoice choice '请选择编辑项目（0 或回车取消）: ' || return 3
         [[ "${choice}" != 8 ]] || return 0
         if [[ "${choice}" == 7 ]]; then
             dockerSetupRead value '启用 HTTPS 订阅？[y/N]: ' n || return 3
@@ -2320,7 +2320,7 @@ dockerEditFields() {
                 menuItem 3 'SNI'
                 menuReturnItem 0 '取消'
                 menuClose
-                dockerSetupReadChoice value 'Reality 参数（回车取消）: ' || return 3
+                dockerSetupReadChoice value '请选择 Reality 参数（0 或回车取消）: ' || return 3
                 case "${value}" in
                 1) field=reality.target_host ;;
                 2) field=reality.target_port ;;
@@ -2341,7 +2341,7 @@ dockerEditFields() {
                     menuItem 3 '模式'
                     menuReturnItem 0 '取消'
                     menuClose
-                    dockerSetupReadChoice value 'XHTTP 参数（回车取消）: ' || return 3
+                    dockerSetupReadChoice value '请选择 XHTTP 参数（0 或回车取消）: ' || return 3
                     case "${value}" in 1) field=xhttp.path ;; 2) field=xhttp.host ;; 3) field=xhttp.mode ;; *) return 1 ;; esac
                 elif [[ "${protocol}" == 26 ]]; then
                     field=grpc.service_name
@@ -2358,13 +2358,13 @@ dockerEditFields() {
                 }
                 echoContent title '\n┌─ Hysteria2 参数 ───────────────────────────────────────'
                 menuItem 1 '拥塞模式'
-                menuItem 2 '服务端上行 Mbps'
-                menuItem 3 '服务端下行 Mbps'
+                menuItem 2 '服务端上行带宽（Mbps）'
+                menuItem 3 '服务端下行带宽（Mbps）'
                 menuItem 4 '混淆'
-                menuItem 5 '伪装 HTTPS/local'
+                menuItem 5 '伪装方式（HTTPS / 本地站点）'
                 menuReturnItem 0 '取消'
                 menuClose
-                dockerSetupReadChoice value 'Hysteria2 参数（回车取消）: ' || return 3
+                dockerSetupReadChoice value '请选择 Hysteria2 参数（0 或回车取消）: ' || return 3
                 case "${value}" in
                 1) field=hy2.bandwidth_mode ;;
                 2) field=hy2.up_mbps ;;
@@ -2386,7 +2386,7 @@ dockerEditFields() {
                 menuItem 4 '0-RTT'
                 menuReturnItem 0 '取消'
                 menuClose
-                dockerSetupReadChoice value 'TUIC 参数（回车取消）: ' || return 3
+                dockerSetupReadChoice value '请选择 TUIC 参数（0 或回车取消）: ' || return 3
                 case "${value}" in
                 1) field=tuic.congestion_control ;;
                 2) field=tuic.auth_timeout ;;

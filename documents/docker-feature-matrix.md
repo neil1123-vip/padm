@@ -8,7 +8,7 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 
 当前导航（2026-10-19）：Docker 首页已按原生版归为安装与重装、订阅与用户、
 协议与入口、站点与证书、路由与访问控制、核心与服务、系统与脚本、
-高级/危险操作 8 类，并复用共享菜单样式。当前路径见 [README](../README.md#docker-版)；
+高级与危险操作 8 类，并复用共享菜单样式。当前路径见 [README](../README.md#docker-版)；
 下文历史记录的顶层 `9` 协议、`17` 路由和 `18` 维护，分别对应
 `3 → 8`、`5 → 1 → 8` 和 `7 → 1`。菜单按可见操作连续编号。
 SOCKS5 入站保留不可用说明；两版核心升级机制保持原样，Docker 继续整包验签升级与回滚。
@@ -692,7 +692,7 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成；两核心 SOCKS5 TCP、DNS/hosts、Direct/Block、IP/CIDR、BT、CN 预设、IPv6/WARP 及名单/上游/模式管理；Xray HTTP 中继；固定原生 IPv4 路由、HTTP 中继、UDP 别名及限定真实重启已有证据 | WARP 真实账号/公网出口、原生 arm64/公网 IPv6、原生多机及适用透明生命周期仍缺。固定核心的 SOCKS UDP/Xray 解析后阻断继续拒绝；不追加任意国家向导、预测最终流量的语义引擎或任意目的转发。路由/内部 206、端口/内部 207 分别共用证据与未决条件。 |
 | 核心与服务 | `supported` + `deferred` | 基础状态、启动、停止、重启、日志、更新、回滚、配置校验、可信候选核心试跑与升级风险扫描、Xray Geo 状态/更新/每日任务 | 评估要求受管 spec；预发布须有匹配的可信发布资产，不现场构建；Geo 的本地合同及真实 amd64 解析/权限已验收，真实上游、生产重建、宿主调度和双架构生命周期另验；当前不是原生全部生命周期管理。 |
 | 系统与脚本 | `supported` + `host-integrated` + `unsupported` | `padm-docker update`、Fail2ban 宿主集成 | BBR/网络优化不由 Docker 修改宿主内核；Fail2ban 需 `net-fail2ban`。 |
-| 高级/危险操作 | `supported` + `deferred` | 受管卸载、移除镜像、显式 purge；有限 VLESS Encryption 实验开关 | 实验限 schema 3 Xray Reality Vision/XHTTP；固定客户端组合之外与完整验收仍待补。 |
+| 高级与危险操作 | `supported` + `deferred` | 受管卸载、移除镜像、显式 purge；有限 VLESS Encryption 实验开关 | 实验限 schema 3 Xray Reality Vision/XHTTP；固定客户端组合之外与完整验收仍待补。 |
 
 维护菜单 `18 → 8/9` 的灾备预览/应用支持默认发布或自备匹配的 manifest、
 Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应用保留原确认。
@@ -784,8 +784,8 @@ TUN/TProxy/Redirect 的透明核心保留 `cap_drop: ALL`，仅授予 `NET_ADMIN
 | `geo-data` | 核心与服务 -> Xray Geo 数据 | `supported` | `core-xray` | 宿主 CLI | 菜单第 14 项与 `geo status/update/schedule/auto-update` 已交付；完整受管数据经双摘要及真实 Xray 解析校验后切换读取路径，重建前采集 Xray 流量，仅重建原本运行的 Xray，失败恢复数据/Compose/运行状态；每日 01:35 systemd/cron 任务有部署归属和锁。编辑、更新和回滚保留数据及调度登记，旧 bundle 在切换前拒绝；真实上游、生产重建、宿主调度、arm64 和整机重启另验。 |
 | `script-update` | 系统与脚本 -> 更新 padm | `supported` | 无 | 宿主 CLI | `padm-docker update` 处理签名 bundle、镜像和配置事务。 |
 | `network-optimization` | 系统与脚本 -> 网络优化 | `unsupported` | 无 | host | Docker 不修改宿主 BBR/fq。 |
-| `uninstall` | 高级/危险操作 -> 卸载脚本 | `supported` | 无 | 宿主 CLI | 受管卸载、移除镜像和显式 purge。 |
-| `vless-encryption` | 高级/危险操作 -> VLESS Encryption 实验 | `deferred` | `core-xray` | bridge | 5C.10 提供菜单 8→2、`edit --vless-encryption ID enable/disable` 及 `protocol encryption-status [ID]`，限 schema 3 Xray 协议 1/2；配置与 URI、私密配对校验、失败恢复及旧 bundle marker 门禁已接入。固定 Xray 26.3.27/Mihomo v1.19.28 的 Linux amd64 实验和正式 3.41.5 的 Debian 13 amd64 公网启停矩阵通过，含逐入口隔离、旧 none/错 UUID/错配拒绝和原配置恢复；bridge 双入口加密后的真实整机重启也通过，原容器自然启动、URI/材料权限/调度及累计保持。其它客户端、算法、arm64、其它拓扑加密重启与完整能力仍待验。 |
+| `uninstall` | 高级与危险操作 -> 卸载脚本 | `supported` | 无 | 宿主 CLI | 受管卸载、移除镜像和显式 purge。 |
+| `vless-encryption` | 高级与危险操作 -> VLESS Encryption 实验 | `deferred` | `core-xray` | bridge | 5C.10 提供菜单 8→2、`edit --vless-encryption ID enable/disable` 及 `protocol encryption-status [ID]`，限 schema 3 Xray 协议 1/2；配置与 URI、私密配对校验、失败恢复及旧 bundle marker 门禁已接入。固定 Xray 26.3.27/Mihomo v1.19.28 的 Linux amd64 实验和正式 3.41.5 的 Debian 13 amd64 公网启停矩阵通过，含逐入口隔离、旧 none/错 UUID/错配拒绝和原配置恢复；bridge 双入口加密后的真实整机重启也通过，原容器自然启动、URI/材料权限/调度及累计保持。其它客户端、算法、arm64、其它拓扑加密重启与完整能力仍待验。 |
 
 4C.7 单 Peer WireGuard 先以 `wireguard prepare` 生成本机私密身份，仅输出公钥等公开状态，
 交换公钥后用 `wireguard peer` 固定唯一 RFC1918 IPv4 `/32` 对端；endpoint 可填字面 `IPv4:端口` 或 `[IPv6]:端口`。

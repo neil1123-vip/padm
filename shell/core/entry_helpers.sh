@@ -874,11 +874,11 @@ printNetworkOptimizationStatus() {
     fi
 
     echoContent title "\n┌─ 网络优化状态 ────────────────────────────────────"
-    menuLine "当前内核：${kernel}"
-    menuLine "当前拥塞控制：${currentCongestion}"
-    menuLine "可用拥塞控制：${availableCongestion}"
-    menuLine "当前默认 qdisc：${currentQdisc}"
-    menuLine "BBR 是否可用：${bbrStatus}"
+    menuLine "内核：${kernel}"
+    menuLine "拥塞控制：${currentCongestion}"
+    menuLine "可用算法：${availableCongestion}"
+    menuLine "默认队列调度（qdisc）：${currentQdisc}"
+    menuLine "BBR：${bbrStatus}"
     menuLine "padm BBR 配置：${padmStatus}"
     menuClose
 }
@@ -920,7 +920,7 @@ enableOfficialBbrFq() {
     fi
 
     if ! padmBbrAvailable; then
-        statusCard "BBR 不可用" "当前内核不支持 BBR" "padm 不会自动安装或切换内核" "如需第三方内核，请使用高级脚本并自行确认风险"
+        statusCard "BBR 不可用" "启用 BBR + fq 需要内核支持 BBR"
         return
     fi
 
@@ -934,7 +934,7 @@ enableOfficialBbrFq() {
         if ! sysctl -p "${PADM_BBR_SYSCTL_CONF}" >"${existingLogFile}" 2>&1; then
             bbrEnableFailureCard "现有 sysctl 配置应用失败，未改动首次启用前状态" "日志：${existingLogFile}"
         elif [[ "$(readSysctlValue net.ipv4.tcp_congestion_control)" == "bbr" && "$(readSysctlValue net.core.default_qdisc)" == "fq" ]]; then
-            statusCard "BBR 已启用" "沿用已有 padm 配置和首次启用前状态"
+            statusCard "BBR 已启用" "已应用现有 padm 配置，并保留首次启用前的记录"
         else
             bbrEnableFailureCard "现有配置已应用但当前状态未完全匹配，未改动首次启用前状态" "日志：${existingLogFile}"
         fi
@@ -1001,7 +1001,7 @@ EOF
     fi
 
     if [[ "$(readSysctlValue net.ipv4.tcp_congestion_control)" == "bbr" && "$(readSysctlValue net.core.default_qdisc)" == "fq" ]]; then
-        statusCard "BBR 已启用" "当前拥塞控制：bbr" "当前默认 qdisc：fq"
+        statusCard "BBR + fq 已启用"
     else
         if ! removeManagedFilesIfPresent "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"; then
             restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
@@ -1019,7 +1019,7 @@ EOF
 
 disablePadmBbr() {
     if [[ ! -f "${PADM_BBR_SYSCTL_CONF}" ]]; then
-        statusCard "无需关闭" "padm 未写入 BBR 配置" "不会改动其它 sysctl 文件"
+        statusCard "没有可移除的配置" "padm 未写入 BBR 配置"
         printNetworkOptimizationStatus
         return
     fi
@@ -1043,16 +1043,15 @@ disablePadmBbr() {
     sysctl --system >"${logFile}" 2>&1 || true
     sysctl -w "net.ipv4.tcp_congestion_control=${previousCongestion}" >>"${logFile}" 2>&1 || true
     sysctl -w "net.core.default_qdisc=${previousQdisc}" >>"${logFile}" 2>&1 || true
-    statusCard "padm BBR 已关闭" "已删除 ${PADM_BBR_SYSCTL_CONF}" "已尝试恢复启用前的拥塞控制和 qdisc" "未改动用户其它 sysctl 配置"
+    statusCard "已移除 padm 的 BBR 配置" "已删除 ${PADM_BBR_SYSCTL_CONF}" "已尝试恢复启用前的拥塞控制和队列调度"
     printNetworkOptimizationStatus
 }
 
 runThirdPartyTcpAccelerationScript() {
     warnCard \
         "来源：ylx2016/Linux-NetSpeed" \
-        "可能安装第三方或旧内核、修改 grub 引导，并要求重启" \
-        "生产节点慎用；padm 不校验该脚本内部行为" \
-        "默认推荐仍是官方内核自带 BBR + fq"
+        "可能安装第三方或旧内核、修改 GRUB 引导，并要求重启" \
+        "脚本行为由第三方控制，请评估对生产节点的影响"
     autoConfirm third_party_tcp_confirm "确认下载并运行第三方 TCP 加速脚本？" n confirmThirdPartyTcp
     if [[ "${confirmThirdPartyTcp}" != "y" ]]; then
         coreCancelledStatusCard "未运行第三方 TCP 加速脚本"
@@ -1096,12 +1095,11 @@ bbrInstall() {
     local installBBRStatus=
     while true; do
         echoContent title "\n┌─ 网络优化 ─────────────────────────────────────────"
-        menuLine "默认推荐官方内核自带 BBR + fq；不自动换内核"
-        menuItem 1 "查看网络优化状态" "内核、拥塞控制、qdisc、BBR 可用性"
-        menuItem 2 "启用官方 BBR + fq" "写入 ${PADM_BBR_SYSCTL_CONF}"
-        menuItem 3 "关闭 padm BBR 设置" "只删除 padm 写入的 sysctl 配置"
-        menuDangerItem 4 "高级：第三方 TCP 加速脚本" "可能换内核、改引导、需要重启"
-        menuReturnItem 0 "返回系统与脚本" "回到上级菜单"
+        menuItem 1 "查看网络状态" "内核、拥塞控制、队列调度和 BBR 可用性"
+        menuRecommendedItem 2 "启用 BBR + fq" "使用现有内核，写入 ${PADM_BBR_SYSCTL_CONF}"
+        menuItem 3 "移除 padm 的 BBR 配置" "尝试恢复启用前的系统设置"
+        menuDangerItem 4 "运行第三方 TCP 加速脚本" "可能更换内核、修改引导并要求重启"
+        menuReturnItem 0 "返回系统与脚本"
         menuClose
         installBBRStatus=
         menuReadChoice bbr_menu "请选择:" installBBRStatus interactive || return 0
@@ -1242,19 +1240,19 @@ checkLog() {
     fi
 
     echoContent title "\n┌─ 日志管理 ─────────────────────────────────────────"
-    menuLine "建议仅调试时打开 access 日志"
+    menuLine "建议仅在排障期间开启 access 日志"
 
     if [[ "${logStatus}" == "false" ]]; then
-        menuItem 1 "打开 access 日志" "写入 access/error 调试日志配置"
+        menuItem 1 "打开 access 日志" "启用 access 和 error 调试日志"
     else
-        menuItem 1 "关闭 access 日志" "停止写入 access 调试日志"
+        menuItem 1 "关闭 access 日志"
     fi
 
-    menuItem 2 "监听 access 日志" "tail -f access.log"
-    menuItem 3 "监听 error 日志" "tail -f error.log"
-    menuItem 4 "查看证书定时任务日志" "查看 TLS cron 日志"
-    menuItem 5 "查看证书安装日志" "查看证书申请/安装日志"
-    menuItem 6 "清空日志" "清理当前日志文件"
+    menuItem 2 "监听 access 日志" "实时查看访问记录"
+    menuItem 3 "监听 error 日志" "实时查看错误记录"
+    menuItem 4 "查看证书定时任务日志"
+    menuItem 5 "查看证书安装日志"
+    menuItem 6 "清空日志" "删除现有日志内容"
     menuReturnItem 0 "返回"
     menuClose
 

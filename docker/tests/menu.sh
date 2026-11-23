@@ -2935,7 +2935,7 @@ runPty() {
             targetMainReply $'2\n'
             waitForText 'Docker 安装与重装' "${CONTROL_LOG}" || exit 11
             printf '1\n' >&3
-            waitForText '核心 [1=Xray, 2=sing-box, 3=Xray+sing-box, 4=sing-box+Xray, 0=取消]' "${CONTROL_LOG}" || exit 11
+            waitForText '请选择核心（默认 1，0 取消）' "${CONTROL_LOG}" || exit 11
             printf '0\n' >&3
             waitForText 'Docker 安装与重装' "${CONTROL_LOG}" 2 || exit 12
             printf '0\n' >&3
@@ -2963,7 +2963,7 @@ runPty() {
                 printf '\004' >&3
             elif [[ "${input}" == method-eof ]]; then
                 printf '3\n\nadmin@example.com\n' >&3
-                waitForText '验证方式 [1=DNS-01' "${CONTROL_LOG}" || exit 17
+                waitForText '请选择验证方式（默认 1，0 取消）' "${CONTROL_LOG}" || exit 17
                 printf '\004' >&3
             elif [[ "${input}" == offer-eof ]]; then
                 printf '3\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\n' >&3
@@ -2971,7 +2971,7 @@ runPty() {
                 printf '\004' >&3
             elif [[ "${input}" == migrate-source-eof ]]; then
                 printf '10\nother.example.com\n' >&3
-                waitForText '证书 [1=已有受管' "${CONTROL_LOG}" || exit 17
+                waitForText '请选择证书来源（默认 1，0 取消）' "${CONTROL_LOG}" || exit 17
                 printf '\004' >&3
             elif [[ "${input}" == migrate-final-eof ]]; then
                 printf '10\nother.example.com\n1\n' >&3
@@ -3196,8 +3196,8 @@ if [[ "${MENU_SCOPE}" == full ]]; then
                 grep -Fq '服务  Nginx 健康 · 订阅 健康' <<<"${summaryOutput}" ||
                 fail '首页未显示核心、协议和合并服务摘要'
             headerOutput=$(dockerMenuStatusOverview --header)
-            grep -Fq 'padm 管理面板（Docker）  v3.40.0' <<<"${headerOutput}" &&
-                grep -Fq '当前状态' <<<"${headerOutput}" &&
+            grep -Fq 'padm 管理面板（Docker） · v3.40.0' <<<"${headerOutput}" &&
+                grep -Fq '核心  Xray-core    运行中 / 健康' <<<"${headerOutput}" &&
                 ! grep -Fq '管理面板' <<<"${summaryOutput}" ||
                 fail '版本未显示在标题旁，或独立摘要重复输出首页标题'
             ;;
@@ -3363,7 +3363,7 @@ EOF
 : >"${MENU_UI_ACTIONS}"
 runPty ui-categories plain $'1\n\n2\n7\n0\n3\n9\n2\n4\n0\n0\n4\n4\n\n5\n4\n1\n9\n\n0\n6\n3\nn\n0\n7\n5\n\n8\n3\n0\n\n' "${MENU_UI_CLI}"
 for menuLabel in '1. 安装与重装' '2. 订阅与用户' '3. 协议与入口' '4. 站点与证书' \
-    '5. 路由与访问控制' '6. 核心与服务' '7. 系统与脚本' '8. 高级/危险操作'; do
+    '5. 路由与访问控制' '6. 核心与服务' '7. 系统与脚本' '8. 高级与危险操作'; do
     grep -Fq "${menuLabel}" "${CONTROL_LOG}" || fail "首页缺少原生分类: ${menuLabel}"
 done
 grep -Fq '┌─ ' "${CONTROL_LOG}" && grep -Fq '└─' "${CONTROL_LOG}" ||
@@ -4653,9 +4653,9 @@ for siteCase in flow title cancel static-eof redirect-eof template-eof title-eof
         expectedSite+=$'\nprotocol alpn-status\nprotocol alpn-status entry-tls\nedit --alpn entry-tls h2,http/1.1'
         expectedSite+=$'\nedit --alpn entry-tls h2,http/1.1\nedit --alpn entry-tls http/1.1,h2\nedit --alpn entry-tls http/1.1'
         expectedSite+=$'\nedit --site-template notes\nedit --site-template photos\nedit --site-template docs'
-        for label in '1. 传统 TLS fallback 维护' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' \
-            '4. 查看站点模式' '5. ALPN 诊断' '6. 修复为推荐 ALPN' '7. 手动设置 ALPN' \
-            '8. 内置静态站点' '1. 笔记（notes）' '2. 相册（photos）' '3. 文档（docs）' \
+        for label in '1. 传统 TLS fallback 维护' '1. 使用默认页' '2. 发布静态目录' '3. 设置 302 跳转' \
+            '4. 查看站点模式' '5. 诊断 ALPN' '6. 恢复推荐 ALPN' '7. 手动设置 ALPN' \
+            '8. 发布内置站点' '1. 笔记（notes）' '2. 相册（photos）' '3. 文档（docs）' \
             '1. h2,http/1.1' '2. http/1.1,h2' '3. http/1.1' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "站点菜单缺少: ${label}"
         done
@@ -4676,7 +4676,7 @@ for siteCase in flow title cancel static-eof redirect-eof template-eof title-eof
         fail "站点 ${siteCase} 参数分发错误或取消后仍执行编辑"
     case "${siteCase}" in
     flow|title|cancel|template-eof|title-eof|failed)
-        grep -Fq 'Hysteria2 发布后，在已有入口参数中关闭混淆并将伪装设置为 local。' \
+        grep -Fq '要将此站点用于 Hysteria2 伪装，请在发布后关闭混淆，再将伪装设为 local。' \
             "${CONTROL_LOG}" || fail "站点 ${siteCase} 未说明 Hy2 local 的两步流程"
         ;;
     esac
@@ -5178,7 +5178,7 @@ for routingCase in flow csv-long cancel socks5-input-eof socks5-input-commit-fai
             fail 'HTTP 中继日常编辑没有每次只确认一次'
         [[ "$(grep -Fc "操作失败，退出码: ${httpRelayExit}" "${CONTROL_LOG}" || true)" -eq "${httpRelayFailureCount}" ]] ||
             fail 'HTTP 中继取消或编辑失败未显示退出码并继续诊断'
-        for label in '1. 直接录入认证与来源规则' '4. 修改中继端口' '5. 替换来源允许名单' '6. 追加来源允许名单' \
+        for label in '1. 配置认证与来源规则' '4. 修改中继端口' '5. 替换来源允许名单' '6. 追加来源允许名单' \
             '7. 精确删除来源允许名单（删空拒绝）'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "HTTP 中继菜单缺少: ${label}"
         done
@@ -5301,22 +5301,22 @@ for routingCase in flow csv-long cancel socks5-input-eof socks5-input-commit-fai
         for label in '5. 路由与访问控制' '8. 完整路由维护' '┌─ Docker 路由与出站' \
             '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
             '3. 查看路由状态' '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
-            '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 直接录入 hosts（整组替换）' \
+            '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 替换全部 hosts 映射' \
             '9. 关闭 hosts 覆盖' '10. 替换 Direct 直连例外' '11. 关闭 Direct 直连例外' \
             '12. 替换 Block 域名阻断' '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' '17. 关闭 BT 协议阻断' \
-            '18. 区域阻断策略' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
-            '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' \
+            '18. 区域阻断策略' '1. 阻断中国域名和 IP（geosite:cn + geoip:cn）' '2. 仅阻断中国域名（geosite:cn）' \
+            '3. 仅阻断中国 IP（geoip:cn）' '4. 关闭区域阻断' \
             '5. 追加自定义直连例外' '6. 删除自定义直连例外' \
             '7. 单条替换自定义直连例外' '8. 查看路由状态' \
-            '9. 仅切换已有区域模式（保留自定义例外）' \
+            '9. 切换已启用的阻断模式（保留自定义例外）' \
             '替换自定义直连例外规则（逗号分隔，留空清空，0 返回）' '19. IPv6 域名出站' \
-            '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' \
+            '1. 替换 IPv6 域名规则' '2. 设为默认出站' '3. 关闭 IPv6 出站策略' \
             '5. 追加 IPv6 域名规则' '6. 精确删除 IPv6 域名规则' \
             '精确删除 IPv6 域名规则 CSV（删空关闭；domain:/full:/keyword:/geosite:，0 返回）' \
             '7. 单条替换 IPv6 域名规则' \
-            '1. 直接录入 WARP Peer' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
-            '5. 切换 WARP 全局出站' '6. 切换 WARP IPv4 隧道地址族' '7. 切换 WARP IPv6 隧道地址族' \
+            '1. 配置 WARP Peer' '2. 关闭 WARP 出站' '4. 替换 WARP 域名规则' \
+            '5. 切换到全局出站' '6. 使用 IPv4 隧道' '7. 使用 IPv6 隧道' \
             '8. 追加 WARP 域名规则' '9. 精确删除 WARP 域名规则' \
             '精确删除 WARP 域名规则 CSV（删空关闭，需重新录入或导入 WARP；domain:/full:/keyword:/geosite:，0 返回）' \
             '10. 单条替换 WARP 域名规则' \
@@ -5920,9 +5920,9 @@ for managementCase in flow failed status-failed; do
     [[ "${managementCase}" != flow ]] || grep -Fq '30 Shadowsocks2022' "${CONTROL_LOG}" ||
         fail '协议新增菜单没有 Shadowsocks2022 目标'
     [[ "${managementCase}" != flow ]] ||
-        grep -Fq '11. 端口跳跃（双族 Hy2/TUIC；TUIC 仅范围转发）' "${CONTROL_LOG}" ||
+        grep -Fq '11. 端口跳跃（双栈 Hysteria2 / TUIC 范围转发）' "${CONTROL_LOG}" ||
         fail '协议菜单未明确 TUIC 仅范围转发边界'
-    grep -Fq '17. 核心/Nginx 内部端口' "${CONTROL_LOG}" || fail '内部端口入口没有接入协议菜单'
+    grep -Fq '17. 核心与 Nginx 内部端口' "${CONTROL_LOG}" || fail '内部端口入口没有接入协议菜单'
     grep -Fq '21. 修复受管 Nginx 配置' "${CONTROL_LOG}" || fail 'Nginx 修复入口没有接入协议菜单'
     [[ "${managementCase}" == flow ]] ||
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -ge 3 ]] ||
@@ -6029,7 +6029,8 @@ for cdnCase in flow cancel failed; do
     expectedCdn+=$'\nprotocol cdn-status'
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedCdn}" ]] ||
         fail "CDN ${cdnCase} 参数分发错误或取消后执行编辑"
-    grep -Fq '2. 设置地址（Reality XHTTP/WS/HTTPUpgrade/gRPC TLS）' "${CONTROL_LOG}" ||
+    grep -Fq '2. 设置连接地址' "${CONTROL_LOG}" &&
+        grep -Fq '支持 Reality XHTTP 和使用 TLS 的 WS、HTTPUpgrade、gRPC 入口' "${CONTROL_LOG}" ||
         fail 'CDN 菜单未显示 gRPC TLS 支持范围'
     if [[ "${cdnCase}" == failed ]]; then
         [[ "$(grep -Fc '操作失败，退出码: 15' "${CONTROL_LOG}")" -eq 2 ]] ||
@@ -6384,8 +6385,8 @@ for subscriptionCase in flow cancel eof; do
     fi
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedSubscriptions}" ]] ||
         fail "subscriptions ${subscriptionCase} 参数分发错误或取消后仍执行操作"
-    grep -Fq '10. 输出部署主订阅内容' "${CONTROL_LOG}" &&
-        grep -Fq '11. 输出部署主订阅 HTTPS 链接' "${CONTROL_LOG}" || fail '主订阅菜单入口缺失'
+    grep -Fq '10. 查看主订阅内容' "${CONTROL_LOG}" &&
+        grep -Fq '11. 查看主订阅 HTTPS 链接' "${CONTROL_LOG}" || fail '主订阅菜单入口缺失'
 done
 
 # 七个 PTY 会话复用同一夹具，不重复流量后端或展开协议矩阵。
@@ -6439,10 +6440,10 @@ for trafficCase in flow cancel eof status-failed invalid unknown failed; do
         "$(grep -Fc '确认清零账号' "${CONTROL_LOG}" || true)" -eq "${resetConfirmations}" ]] ||
         fail "traffic ${trafficCase} 确认次数不正确"
     grep -Fq '9. 流量与额度' "${CONTROL_LOG}" &&
-        grep -Fq '1. 查看已存流量与额度' "${CONTROL_LOG}" &&
-        grep -Fq '2. 立即采集并检查额度' "${CONTROL_LOG}" &&
+        grep -Fq '1. 查看流量与额度' "${CONTROL_LOG}" &&
+        grep -Fq '2. 采集流量并检查额度' "${CONTROL_LOG}" &&
         grep -Fq '3. 设置账号额度' "${CONTROL_LOG}" &&
-        grep -Fq '4. 重置账号累计' "${CONTROL_LOG}" ||
+        grep -Fq '4. 清零账号用量' "${CONTROL_LOG}" ||
         fail 'traffic 菜单入口缺失'
     [[ "${resetConfirmations}" -eq 0 ]] ||
         grep -Fq '上传和下载累计（保留额度）' "${CONTROL_LOG}" ||

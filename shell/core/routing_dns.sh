@@ -30,12 +30,11 @@ dnsRouting() {
     fi
     local selectType=
     while true; do
-        echoContent title "\n┌─ DNS 分流 ─────────────────────────────────────────"
-        menuLine "只改变核心内指定域名的 DNS 解析，不会修改系统 DNS"
-        menuLine "适合少量域名定向解析；如果目标是固定后端 IP，优先用 DNS/hosts 覆盖"
-        menuItem 1 "添加" "添加 DNS 分流配置"
-        menuDangerItem 2 "卸载" "移除 DNS 分流配置"
-        menuReturnItem 0 "返回分流工具" "回到上一级分流菜单"
+        echoContent title "\n┌─ DNS 覆盖 ─────────────────────────────────────────"
+        menuLine "覆盖仅作用于核心内指定域名的解析"
+        menuItem 1 "配置 DNS 覆盖" "为指定域名选择 DNS 服务器"
+        menuDangerItem 2 "移除 DNS 覆盖" "移除 padm 设置的域名 DNS 服务器规则"
+        menuReturnItem 0 "返回分流工具"
         menuClose
         selectType=
         menuReadChoice dns_routing_menu "请选择:" selectType interactive || return 0
@@ -58,11 +57,10 @@ sniRouting() {
     local selectType=
     while true; do
         echoContent title "\n┌─ DNS/hosts 覆盖 ───────────────────────────────────"
-        menuLine "把指定域名在核心内解析到指定 IP；这不是 Nginx/TCP 反向代理"
-        menuLine "Xray 支持 geosite/domain 规则；sing-box 仅支持具体域名的精确映射"
-        menuItem 1 "添加" "添加 DNS/hosts 覆盖规则"
-        menuDangerItem 2 "卸载" "移除 DNS/hosts 覆盖配置"
-        menuReturnItem 0 "返回分流工具" "回到上一级分流菜单"
+        menuLine "Xray 支持 geosite 和域名规则，sing-box 仅匹配完整域名"
+        menuItem 1 "配置 DNS/hosts 覆盖" "将指定域名解析到固定 IP"
+        menuDangerItem 2 "移除 DNS/hosts 覆盖" "取消固定 IP 映射"
+        menuReturnItem 0 "返回分流工具"
         menuClose
         selectType=
         menuReadChoice sni_routing_menu "请选择:" selectType interactive || return 0
@@ -319,17 +317,17 @@ updateXrayDNSRoutingConfig() {
 setUnlockSNI() { dnsRoutingApplyTransaction setUnlockSNIApply; }
 
 setUnlockSNIApply() {
-    autoRead sni_routing_ip "请输入要覆盖到的 IP:" setSNIP || return 0
+    autoRead sni_routing_ip "请输入目标 IP：" setSNIP || return 0
     if [[ -n ${setSNIP} ]]; then
         dnsRoutingValidateHostIP "${setSNIP}" || return 1
         echoContent title "\n┌─ DNS/hosts 覆盖规则 ───────────────────────────────"
-        menuLine "Xray 录入示例：netflix,disney,hulu"
-        menuLine "sing-box 仅支持具体域名或 full: 域名，精确匹配，不包含子域名"
+        menuLine "Xray 示例：netflix,disney,hulu"
+        menuLine "sing-box 示例：example.com,full:api.example.com（精确匹配完整域名）"
         menuClose
 
         dnsRoutingBackupCreate || { errorCard "DNS/hosts 覆盖配置备份失败，已取消修改"; return 1; }
         if [[ "${coreInstallType}" == 1 ]]; then
-            autoRead sni_xray_domains "请按照上面示例录入域名:" xrayDomainList ||
+            autoRead sni_xray_domains "请输入 Xray 域名规则：" xrayDomainList ||
                 { dnsRoutingAbortChange "DNS/hosts 覆盖已取消" || return 1; return 0; }
             dnsRoutingValidateDomainList "${xrayDomainList}" ||
                 { dnsRoutingAbortChange "DNS/hosts 域名规则为空"; return 1; }
@@ -358,8 +356,7 @@ setUnlockSNIApply() {
             fi
         fi
         if [[ -n "${singBoxConfigPath}" ]]; then
-            echoContent yellow "录入示例:www.netflix.com,www.google.com"
-            autoRead sni_singbox_domains "请按照上面示例录入域名:" singboxDomainList ||
+            autoRead sni_singbox_domains "请输入 sing-box 域名：" singboxDomainList ||
                 { dnsRoutingAbortChange "DNS/hosts 覆盖已取消" || return 1; return 0; }
             addSingBoxDNSConfig "${setSNIP}" "${singboxDomainList}" "predefined" || { dnsRoutingAbortChange "DNS/hosts 覆盖配置写入失败"; return 1; }
         fi
@@ -406,7 +403,7 @@ addXrayDNSConfig() {
         local xrayPatch
         xrayPatch=$(jq -n --arg ip "${ip}" --argjson domains "${domains}" '{servers:[{address:$ip,port:53,domains:$domains}],hosts:{}}') || return 1
         if ! updateXrayDNSRoutingConfig add-dns "${xrayPatch}"; then
-            errorCard "DNS 分流配置写入失败，已保留旧配置"
+            errorCard "DNS 覆盖配置写入失败，已保留旧配置"
             return 1
         fi
     fi
@@ -578,40 +575,40 @@ addSingBoxDNSConfig() {
         fi
     fi
 }
-# 设置 DNS 分流
+# 设置 DNS 覆盖
 setUnlockDNS() { dnsRoutingApplyTransaction setUnlockDNSApply; }
 
 setUnlockDNSApply() {
-    autoRead dns_routing_server "请输入分流的DNS:" setDNS || return 0
+    autoRead dns_routing_server "请输入 DNS 服务器：" setDNS || return 0
     if [[ -n ${setDNS} ]]; then
-        echoContent title "\n┌─ DNS 分流规则 ─────────────────────────────────────"
-        menuLine "录入示例：netflix,disney,hulu"
+        echoContent title "\n┌─ DNS 覆盖规则 ─────────────────────────────────────"
+        menuLine "示例：netflix,disney,hulu"
         menuClose
-        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList || return 0
+        autoRead routing_domain_rules "请输入域名规则：" domainList || return 0
 
-        dnsRoutingBackupCreate || { errorCard "DNS 分流配置备份失败，已取消修改"; return 1; }
+        dnsRoutingBackupCreate || { errorCard "DNS 覆盖配置备份失败，已取消修改"; return 1; }
         if ! addXrayDNSConfig "${setDNS}" "${domainList}"; then
-            dnsRoutingAbortChange "DNS 分流配置写入失败"
+            dnsRoutingAbortChange "DNS 覆盖配置写入失败"
             return 1
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
-            addSingBoxOutbound 01_direct_outbound || { errorCard "sing-box direct 出站写入失败，已保留旧配置"; dnsRoutingAbortChange "DNS 分流配置写入失败"; return 1; }
+            addSingBoxOutbound 01_direct_outbound || { errorCard "sing-box direct 出站写入失败，已保留旧配置"; dnsRoutingAbortChange "DNS 覆盖配置写入失败"; return 1; }
             if ! addSingBoxDNSConfig "${setDNS}" "${domainList}"; then
-                dnsRoutingAbortChange "DNS 分流配置写入失败"
+                dnsRoutingAbortChange "DNS 覆盖配置写入失败"
                 return 1
             fi
         fi
 
-        dnsRoutingReloadOrRollback "DNS 分流" || return 1
+        dnsRoutingReloadOrRollback "DNS 覆盖" || return 1
 
-        echoContent title "\n┌─ DNS 分流排障建议 ─────────────────────────────────"
-        menuLine "如仍无法观看，可先重启 VPS 后再测试客户端"
-        menuLine "仍异常时，先卸载 DNS 解锁，再修改本地 /etc/resolv.conf"
-        menuLine "修改后重启 VPS，使系统 DNS 与分流配置重新生效"
+        echoContent title "\n┌─ DNS 覆盖排障 ────────────────────────────────────"
+        menuLine "客户端仍无法访问时，可先重启 VPS 后重试"
+        menuLine "问题持续时，先移除 DNS 覆盖，再检查本机 /etc/resolv.conf"
+        menuLine "如需修改系统 DNS，保存后重启 VPS 并再次测试客户端"
         menuClose
     else
-        errorCard "dns不可为空"
+        errorCard "DNS 服务器不能为空"
     fi
     return 0
 }
@@ -646,13 +643,13 @@ removeUnlockRoutingConfigApply() {
 
     dnsRoutingReloadOrRollback "${title}" || return 1
 
-    successCard "卸载成功"
+    successCard "已移除 ${title}"
 
     return 0
 }
 
-# 移除 DNS 分流
-removeUnlockDNS() { removeUnlockRoutingConfig "DNS 分流" 1; }
+# 移除 DNS 覆盖
+removeUnlockDNS() { removeUnlockRoutingConfig "DNS 覆盖" 1; }
 
 # 移除 DNS/hosts 覆盖
 removeUnlockSNI() { removeUnlockRoutingConfig "DNS/hosts 覆盖"; }

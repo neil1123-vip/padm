@@ -17,23 +17,21 @@ btTools() {
     while true; do
         echoContent title "\n┌─ BT 下载管理 ──────────────────────────────────────"
 
-    menuLine "通过核心协议嗅探识别 bittorrent 后阻断"
+    menuLine "核心通过协议嗅探识别 BitTorrent 流量"
 
-    menuLine "只能覆盖可识别流量；加密、混淆或部分 uTP 场景可能绕过"
-
-    menuLine "Xray：协议规则 + 入站 sniffing；sing-box：sniff action + protocol 规则"
+    menuLine "加密、混淆及部分 uTP 流量可能无法识别"
 
     echo
 
     showBTBlockStatus
 
-    menuItem 1 "启用 BT 阻断" "阻断已识别的 bittorrent 流量"
+    menuItem 1 "启用 BT 阻断" "拦截识别出的 BitTorrent 流量"
 
-    menuItem 2 "关闭 BT 阻断" "移除 BT 协议阻断规则"
+    menuItem 2 "关闭 BT 阻断" "移除 BT 阻断规则"
 
-    menuItem 3 "查看当前状态" "显示 Xray / sing-box 规则状态"
+    menuItem 3 "查看状态" "检查 Xray 与 sing-box 的阻断规则"
 
-    menuReturnItem 0 "返回路由与访问控制" "回到上级菜单"
+    menuReturnItem 0 "返回路由与访问控制"
 
     menuClose
 
@@ -118,7 +116,7 @@ showBTBlockStatus() {
 
     if [[ "${hasStatus}" == "false" ]]; then
 
-        menuLine "当前未检测到可管理的 Xray 或 sing-box 配置"
+        menuLine "未检测到可管理的 Xray 或 sing-box 配置"
 
     fi
 

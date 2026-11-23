@@ -1057,7 +1057,7 @@ selectRealityAsnSampleSize() {
     menuItem 4 "大规模 10000 个 IP" "耗时更长，谨慎使用"
     menuItem 5 "手动输入数量" "自定义本次抽样 IP 数"
     menuItem 6 "全量扫描 高风险" "扫描全部公告前缀，可能数量很大"
-    menuReturnItem 0 "返回" "回到 REALITY 目标站管理"
+    menuReturnItem 0 "返回 REALITY 目标站管理"
     menuClose
     while true; do
         menuReadChoice reality_asn_sample_size "请选择抽样规模[默认2]:" selected true || return 1
@@ -1762,8 +1762,8 @@ showRealityTargetCandidatePage() {
     end=$(( page * pageSize ))
 
     echoContent title "\n┌─ REALITY 目标站候选 ───────────────────────────────"
-    menuLine "筛选：${filter}；第 ${page} 页；总数：${total}"
-    menuLine "输入编号选择；n 下一页；p 上一页；f 筛选；a 全部；m 手动输入"
+    menuLine "筛选：${filter} · 第 ${page} 页 · 共 ${total} 项"
+    menuLine "输入编号选择。n 下一页 / p 上一页 / f 筛选 / a 全部 / m 手动输入"
     if [[ "${total}" == "0" ]]; then
         menuLine "没有匹配候选，请更换筛选条件或手动输入"
     fi
@@ -1837,7 +1837,7 @@ selectRealityTargetCandidateInteractive() {
             ;;
         f | F)
             echoContent title "\n┌─ REALITY 候选筛选 ─────────────────────────────────"
-            menuLine "可输入：recommended/manual/all，或域名、名称、区域、分类关键词"
+            menuLine "可输入 recommended、manual、all 或域名、名称、地区、分类关键词"
             menuClose
             autoRead reality_target_filter "请输入筛选条件[回车全部]：" filter || return 1
             filter=${filter:-all}
@@ -2326,7 +2326,7 @@ selectRealityScannerRange() {
     menuItem 7 "扩大 /19（8190 台）" "${range19:-无法自动计算，需手动输入}"
     menuItem 8 "扩大 /18（16382 台）" "${range18:-无法自动计算，需手动输入}"
     menuItem 9 "手动输入" "输入自定义 IP/CIDR、IP、域名或 RealiTLScanner 支持的 addr"
-    menuReturnItem 0 "返回" "回到 REALITY 目标站管理"
+    menuReturnItem 0 "返回 REALITY 目标站管理"
     menuClose
     while true; do
         menuReadChoice reality_scanner_range_menu "请选择扫描范围[默认1]:" selectRange true || return 1
@@ -2765,9 +2765,9 @@ showRealityTargetQualityActions() {
     local action confirm status
     while true; do
         echoContent title "\n┌─ REALITY 目标站后续操作 ─────────────────────────────"
-        menuItem 1 "查看/切换 A 级目标" "打开目标库中的 A 级目标并切换"
-        menuItem 2 "加入目标站黑名单" "后续不参与目标库刷新和扫描导入"
-        menuReturnItem 0 "返回" "回到 REALITY 目标站管理"
+        menuItem 1 "查看/切换 A 级目标" "浏览目标库"
+        menuItem 2 "加入目标站黑名单" "后续刷新和扫描时排除该目标"
+        menuReturnItem 0 "返回 REALITY 目标站管理"
         menuClose
         menuReadChoice reality_target_quality_action "请选择后续操作:" action true || return 0
         case "${action:-0}" in
@@ -2841,7 +2841,7 @@ selectRealityTargetScanResultFilter() {
         menuItem 3 "同提供商" "只看同一提供商的 A 级目标"
         menuItem 4 "同网络" "显示同 ASN 和同提供商的 A 级目标"
         menuItem 5 "RealiTLScanner" "只看网段扫描发现的 A 级目标"
-        menuReturnItem 0 "返回" "回到 A 级目标列表"
+        menuReturnItem 0 "返回 A 级目标列表"
         menuClose
     } >&2
     while true; do
@@ -2894,7 +2894,8 @@ showRealityTargetScanResults() {
         (( end > total )) && end=${total}
         titleFilter=$(realityTargetFilterTitle "${filter}")
         echoContent realityTitle "\n┌─ REALITY A 级目标：${titleFilter} ───────────────────────────────"
-        menuLine "筛选条件：${filter}；第 ${page}/${maxPage} 页；总数：${total}；n 下一页；p 上一页；f 重新筛选"
+        menuLine "筛选：${filter} · 第 ${page}/${maxPage} 页 · 共 ${total} 项"
+        menuLine "n 下一页 / p 上一页 / f 重新筛选"
         pageIndex=1
         for ((itemIndex = start; itemIndex < end; itemIndex++)); do
             line=${filteredResults[itemIndex]}

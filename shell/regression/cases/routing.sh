@@ -1147,8 +1147,11 @@ runAccessControlMatcherRegression() (
     (
         local configPath= coreInstallType=2 choice=0
         coreNotInstalledErrorCard() { return 99; }
-        menuReadChoice() { choice=1; printf -v "$3" '7'; }
-        accessControlMenu >/dev/null || return 1
+        autoRead() {
+            choice=$((choice + 1))
+            IFS= read -r "$3"
+        }
+        accessControlMenu >/dev/null <<<"0" || return 1
         [[ "${choice}" == "1" ]]
     ) || return 1
     singBoxConfigPath=
@@ -2104,7 +2107,7 @@ runDNSRoutingFailureReturnRegression() (
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["old-xray"]' "${configPath}11_dns.json" >/dev/null
         [[ -z "${DNS_ROUTING_ACTIVE_BACKUP_DIR:-}" ]]
-        grep -q 'DNS 分流核心重载失败，旧配置已恢复但核心重载仍失败' "${errorLog}"
+        grep -q 'DNS 覆盖核心重载失败，旧配置已恢复但核心重载仍失败' "${errorLog}"
         [[ -f "${retainedBackup}/manifest" ]]
     )
 
@@ -2265,6 +2268,6 @@ JSON
         [[ "$(wc -l <"${reloadMarker}")" == "1" ]]
         [[ -d "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
         [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" ]]
-        grep -q 'DNS 分流核心重载失败，且旧配置恢复失败' "${errorLog}"
+        grep -q 'DNS 覆盖核心重载失败，且旧配置恢复失败' "${errorLog}"
     )
 )

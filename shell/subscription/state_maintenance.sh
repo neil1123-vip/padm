@@ -79,11 +79,11 @@ selectSubscriptionGroupsBackupFile() {
     fi
     userResultCard "选择状态备份"
     for index in "${!backups[@]}"; do
-        menuLine "$((index + 1)). ${backups[${index}]}"
+        menuItem "$((index + 1))" "${backups[${index}]}"
     done
     menuReturnItem 0 "返回"
     menuClose
-    menuReadChoice subscription_backup_choice "请输入备份编号或完整路径（回车或 0 返回）：" backupChoice interactive || return 0
+    menuReadChoice subscription_backup_choice "输入备份编号或完整路径（回车或 0 返回）：" backupChoice interactive || return 0
     [[ "${backupChoice}" != 0 ]] || return 0
     if [[ "${backupChoice}" =~ ^[0-9]+$ ]]; then
         backupIndex=${backupChoice#"${backupChoice%%[!0]*}"}
@@ -200,8 +200,8 @@ restoreSubscriptionGroupsBackupMenu() {
     selectSubscriptionGroupsBackupFile || return 1
     backupFile=${selectedSubscriptionGroupsBackupFile}
     [[ -n "${backupFile}" ]] || return 0
-    statusCard "即将恢复订阅状态" "目标备份：${backupFile}" "确认后会先备份当前状态、配置和订阅输出，再执行完整同步"
-    autoRead subscription_restore_confirm "恢复会覆盖当前状态并重新同步。确认请输入 yes:" confirm
+    statusCard "恢复订阅状态" "目标备份：${backupFile}" "恢复前会备份当前状态、配置和订阅输出，恢复后执行完整同步。"
+    autoRead subscription_restore_confirm "恢复将覆盖当前状态。输入 yes 确认：" confirm
     if [[ "${confirm}" != "yes" ]]; then
         coreCancelledStatusCard "状态恢复未执行"
         return 1
@@ -219,8 +219,8 @@ resetSubscriptionGroupsStateMenu() {
     local confirm=
     ensureSubscriptionGroupsState || return 1
     showSubscriptionGroupsStateSummary || return 1
-    statusCard "即将重建订阅状态" "这会把 groups.json 重置为默认空状态" "确认后会先备份当前状态、配置和订阅输出，再执行完整同步"
-    autoRead subscription_reset_confirm "确认重建并重新同步请输入 yes:" confirm
+    statusCard "重建订阅状态" "将 groups.json 重置为默认空状态。" "重建前会备份当前状态、配置和订阅输出，重建后执行完整同步。"
+    autoRead subscription_reset_confirm "输入 yes 确认重建并同步：" confirm
     if [[ "${confirm}" != "yes" ]]; then
         coreCancelledStatusCard "订阅状态未重建"
         return 1
@@ -256,12 +256,12 @@ manageSubscriptionStateBackups() {
     fi
     while true; do
         echoContent title "\n┌─ 状态备份与恢复 ───────────────────────────────────"
-        menuLine "这里只管理 groups.json 状态；恢复和重建都会先自动备份当前状态"
-        menuItem 1 "查看当前状态摘要" "显示订阅用户、服务器源、同步状态和流量更新时间"
-        menuItem 2 "创建状态备份" "保存当前 groups.json 到 backups 目录"
-        menuItem 3 "恢复状态备份" "选择备份，确认后先备份当前状态再覆盖"
-        menuDangerItem 4 "重建订阅状态" "确认后先备份当前状态，再重置为空的默认订阅组"
-        menuReturnItem 0 "${returnText}" "回到上级菜单"
+        menuLine "恢复和重建前会自动备份当前状态。"
+        menuItem 1 "查看当前状态摘要" "查看订阅、节点来源、同步和流量更新时间"
+        menuItem 2 "创建状态备份" "将当前 groups.json 保存到 backups 目录"
+        menuItem 3 "恢复状态备份" "用选定的备份覆盖当前状态"
+        menuDangerItem 4 "重建订阅状态" "重置为空的默认订阅组"
+        menuReturnItem 0 "${returnText}"
         menuClose
         menuReadChoice subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus interactive || return 0
         case "${subscriptionStateBackupStatus}" in

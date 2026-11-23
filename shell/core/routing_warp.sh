@@ -58,29 +58,29 @@ installWarpReg() {
     if [[ ! -f "${warpBinary}" || ! -s "${warpBinary}" || ! -x "${warpBinary}" ]]; then
         echo
         echoContent title "\n┌─ warp-reg 第三方工具 ──────────────────────────────"
-        menuLine "依赖第三方程序，请熟知其中风险"
+        menuLine "WARP 账号注册需要运行第三方工具 warp-reg"
         menuLine "项目地址：https://github.com/badafans/warp-reg"
         menuClose
 
-        autoRead warp_reg_install "warp-reg未安装，是否安装？[y/n]:" installWarpRegStatus || return 1
+        autoRead warp_reg_install "需要安装 warp-reg，是否继续？[y/n]：" installWarpRegStatus || return 1
 
         if [[ "${installWarpRegStatus}" == "y" ]]; then
 
             mkdir -p "${warpDir}" || return 1
             if ! downloadGitHubReleaseAsset -P "${warpDir}/" badafans/warp-reg v1.0 "${warpRegCoreCPUVendor}"; then
-                errorCard "warp-reg下载失败"
+                errorCard "warp-reg 下载失败"
                 return 1
             fi
             if [[ ! -s "${warpDir}/${warpRegCoreCPUVendor}" ]]; then
-                errorCard "warp-reg文件异常"
+                errorCard "warp-reg 文件无效"
                 return 1
             fi
             mv "${warpDir}/${warpRegCoreCPUVendor}" "${warpBinary}" || {
-                errorCard "warp-reg文件安装失败"
+                errorCard "warp-reg 安装失败"
                 return 1
             }
             chmod 755 "${warpBinary}" || {
-                errorCard "warp-reg权限设置失败"
+                errorCard "warp-reg 权限设置失败"
                 return 1
             }
 
@@ -240,21 +240,19 @@ removeWireGuardRoutingConfig() {
 
 warpRoutingReg() {
     local type=$2
-    local title="WARP 分流 ${type}"
+    local title="WARP ${type} 分流"
     local address= successMessage= domainList=
     [[ "${type}" == "IPv4" || "${type}" == "IPv6" ]] || {
-        errorCard "IP获取失败，退出安装"
+        errorCard "无法确定 WARP 出站的 IP 类型"
         return 1
     }
     progressCard "$1" "${title}"
     echoContent title "\n┌─ ${title} ────────────────────────────────────────"
-    menuLine "依赖 Cloudflare WARP WireGuard 出站与第三方 warp-reg 账号注册工具"
-    menuLine "适合少量域名或明确场景分流；全局模式会移除其他出站规则"
-    menuItem 1 "查看已分流域名" "显示当前 WARP ${type} 分流规则"
-    menuItem 2 "添加域名" "添加 WARP ${type} 出站分流规则"
-    menuDangerItem 3 "设置 WARP 全局" "删除其他出站并全局走 WARP ${type}"
-    menuDangerItem 4 "卸载 WARP 分流" "移除 WARP ${type} 分流配置"
-    menuReturnItem 0 "返回 WARP 出站" "回到 WARP 出站菜单"
+    menuItem 1 "查看分流规则"
+    menuItem 2 "添加域名" "让指定域名使用 WARP ${type} 出站"
+    menuDangerItem 3 "切换全局出站" "清除其他出站规则，改用 WARP ${type} 转发"
+    menuDangerItem 4 "移除 WARP 分流" "停用 WARP ${type} 出站"
+    menuReturnItem 0 "返回 WARP 出站"
     menuClose
     local warpStatus
     while true; do
@@ -270,11 +268,10 @@ warpRoutingReg() {
         showWireGuardDomain "${type}"
         return 0
     elif [[ "${warpStatus}" == "2" ]]; then
-        echoContent title "\n┌─ WARP 分流规则说明 ────────────────────────────────"
-        menuLine "支持 sing-box、Xray-core"
-        menuLine "请按 README 中的分流说明配置域名或规则"
+        echoContent title "\n┌─ 添加 WARP 分流规则 ────────────────────────────────"
+        menuLine "多个域名或规则用英文逗号分隔，规则格式见 README"
         menuClose
-        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList || return 0
+        autoRead routing_domain_rules "请输入域名规则：" domainList || return 0
         if [[ -z "${domainList}" ]]; then
             coreDomainRequiredErrorCard
             return 1
@@ -283,25 +280,25 @@ warpRoutingReg() {
         readConfigWarpReg || return 1
         address=$(warpRoutingAddress "${type}") || return 1
         routingConfigApplyTransaction "添加 WARP ${type} 分流失败" false true addWireGuardRoute "${type}" outboundTag "${domainList}" || return 1
-        successMessage="添加完毕"
+        successMessage="已添加 WARP ${type} 分流规则"
     elif [[ "${warpStatus}" == "3" ]]; then
         warnCard \
-            "会删除所有设置的分流规则" \
-            "会删除除 WARP[第三方] 之外的所有出站规则"
+            "将清除现有分流并改用 WARP ${type} 全局出站" \
+            "使用 Xray 时也会移除现有的 BT 阻断和访问控制规则"
         autoConfirm warp_global_confirm "确认设置 WARP 全局出站？" n warpOutStatus
         if [[ "${warpOutStatus}" == "y" ]]; then
             installWarpReg || return 1
             readConfigWarpReg || return 1
             address=$(warpRoutingAddress "${type}") || return 1
             routingConfigApplyTransaction "设置 WARP ${type} 全局出站失败" false true setWireGuardGlobalRoutingConfig "${type}" || return 1
-            successMessage="WARP全局出站设置完毕"
+            successMessage="已切换到 WARP ${type} 全局出站"
         else
             coreCancelledStatusCard "未设置 WARP 全局出站"
             return 0
         fi
     elif [[ "${warpStatus}" == "4" ]]; then
-        routingConfigApplyTransaction "卸载 WARP ${type} 分流失败" false true removeWireGuardRoutingConfig "${type}" || return 1
-        successMessage="卸载WARP ${type}分流完毕"
+        routingConfigApplyTransaction "移除 WARP ${type} 分流失败" false true removeWireGuardRoutingConfig "${type}" || return 1
+        successMessage="已移除 WARP ${type} 分流"
     fi
     [[ -n "${successMessage}" ]] && successCard "${successMessage}"
 }
@@ -311,11 +308,10 @@ warpRoutingMenu() {
     local warpRoutingType=
     while true; do
         echoContent title "\n┌─ WARP 出站 ────────────────────────────────────────"
-        menuLine "通过 Cloudflare WARP WireGuard 出站，常用于 IPv4/IPv6 出口切换"
-        menuLine "依赖第三方 warp-reg 获取账号参数；Cloudflare 服务状态或策略变化会影响可用性"
-        menuItem 1 "WARP IPv4" "使用 IPv4 WARP 地址作为出站"
-        menuItem 2 "WARP IPv6" "使用 IPv6 WARP 地址作为出站"
-        menuReturnItem 0 "返回分流工具" "回到上一级分流菜单"
+        menuLine "使用第三方 warp-reg 注册账号，可用性取决于 Cloudflare 服务"
+        menuItem 1 "WARP IPv4" "通过 WARP 的 IPv4 地址出站"
+        menuItem 2 "WARP IPv6" "通过 WARP 的 IPv6 地址出站"
+        menuReturnItem 0 "返回分流工具"
         menuClose
         warpRoutingType=
         menuReadChoice warp_routing_type_menu "请选择:" warpRoutingType interactive || return 0

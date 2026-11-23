@@ -206,7 +206,7 @@ jq -e '.host != "" and .port == 443 and .sni != ""' \
 beforeLibrary=$(sha256sum "${STATE}/results.tsv")
 FAKE_TARGET_GRADE=C dockerRealityTargetAction "${SPEC}" candidates "${TEST_ROOT}/selection/no-a.json" \
     <<<'0' >"${TEST_ROOT}/candidates-no-a"
-grep -q '总数：0' "${TEST_ROOT}/candidates-no-a" || fail '首配候选展示非 A 级'
+grep -Fq '共 0 项' "${TEST_ROOT}/candidates-no-a" || fail '首配候选展示非 A 级'
 [[ ! -e "${TEST_ROOT}/selection/no-a.json" &&
     "${beforeLibrary}" == "$(sha256sum "${STATE}/results.tsv")" ]] || fail '首配取消改变持久目标库'
 selectedStatus=0

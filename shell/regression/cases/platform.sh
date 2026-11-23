@@ -121,7 +121,7 @@ EOF
     ' _ "${root}" "${PROJECT_ROOT}" "${repeatStatus}" "${repeatHelper}"
     grep -qx "sysctl:-p ${root}/repeat-sysctl.conf" "${repeatHelper}"
     ! grep -q '^unexpected-commit:' "${repeatHelper}"
-    grep -q 'BBR 已启用|沿用已有 padm 配置和首次启用前状态' "${repeatStatus}"
+    grep -q 'BBR 已启用|已应用现有 padm 配置，并保留首次启用前的记录' "${repeatStatus}"
     grep -qx 'previous_congestion=reno' "${root}/repeat.state"
     grep -qx 'previous_qdisc=cake' "${root}/repeat.state"
 
@@ -281,7 +281,7 @@ EOF
     grep -q 'sysctl:-w net.ipv4.tcp_congestion_control=reno' "${disableHelper}" || return 1
     grep -q 'sysctl:-w net.core.default_qdisc=cake' "${disableHelper}" || return 1
     [[ ! -e "${root}/disable-sourced.marker" ]]
-    grep -q 'padm BBR 已关闭|已删除 '"${root}"'/disable-sysctl.conf' "${disableStatus}" || return 1
+    grep -q '已移除 padm 的 BBR 配置|已删除 '"${root}"'/disable-sysctl.conf' "${disableStatus}" || return 1
 
     printf 'net.core.default_qdisc = fq\n' >"${root}/disable-cleanup-fail-sysctl.conf" || return 1
     printf 'previous_congestion=reno\nprevious_qdisc=cake\n' >"${root}/disable-cleanup-fail.state" || return 1

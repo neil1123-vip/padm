@@ -451,14 +451,8 @@ runSubscriptionCapabilityDispatchRegression() {
         return 1
     fi
 
-    if ! declare -F protocolCapabilityStatusLabel >/dev/null; then
-        printf 'assert-fail:missing protocolCapabilityStatusLabel\n' >&2
-        return 1
-    fi
-    assertEquals 'VLESS Reality Vision [recommended, nginx:none]' "$(protocolCapabilityStatusLabel 1)" "status-label:1"
-    assertEquals 'VMess HTTPUpgrade TLS [advanced, nginx:http_front] 风险:HTTPUpgrade 属高级方案，新装优先 XHTTP' "$(protocolCapabilityStatusLabel 23)" "status-label:23"
     if grep -Fq 'VLESS+Reality+Vision' "${stateFile}" || grep -Fq 'VMess+TLS+HTTPUpgrade' "${stateFile}"; then
-        printf 'assert-fail:showInstallStatus should use capability status labels instead of hard-coded names\n' >&2
+        printf 'assert-fail:showInstallStatus should render names from the protocol registry\n' >&2
         return 1
     fi
     if grep -Fq 'pgrep -f "xray/xray"' "${stateFile}" || grep -Fq 'pgrep -f "sing-box/sing-box"' "${stateFile}"; then
@@ -473,16 +467,18 @@ runInstallStatusVlessEncryptionRegression() (
     coreInstallType=1
     readInstallProtocolType() { currentInstallProtocolType=",1,"; }
     xrayRunning() { return 0; }
-    echoContent() { printf '%s\n' "$*" >>"${outputFile}"; }
+    menuLine() { printf '%s\n' "$1" >>"${outputFile}"; }
 
     printf '%s\n' '{"enabled":true,"encryption":"active-encryption","decryption":"active-decryption"}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
     showInstallStatus
-    grep -Fq 'VLESS Encryption [experimental]' "${outputFile}"
+    grep -Fxq '核心：Xray-core · 运行中' "${outputFile}"
+    grep -Fxq '已安装协议：VLESS Reality Vision' "${outputFile}"
+    grep -Fxq 'VLESS Encryption：已启用（实验功能）' "${outputFile}"
 
     : >"${outputFile}"
     printf '%s\n' '{"enabled":false}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
     showInstallStatus
-    ! grep -Fq 'VLESS Encryption [experimental]' "${outputFile}"
+    ! grep -Fq 'VLESS Encryption' "${outputFile}"
 )
 
 runSingBoxPlainInboundHostFallbackRegression() {
@@ -1472,11 +1468,11 @@ runProtocolEntryConfigUpdateRegression() (
             menuLine() { printf '%s\n' "$*" >>"${menuLog}"; }
             manageCDN 1 <<< $'1\ncdn.example.com\n0'
             [[ "$(<"${root}/cdn")" == cdn.example.com ]]
-            grep -q '当前是传统 TLS/CDN 协议' "${menuLog}"
+            grep -q '当前协议：传统 TLS/CDN' "${menuLog}"
             currentInstallProtocolType=,2,
             manageCDN 1 <<< $'1\nxhttp.example.com\n0'
             [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
-            grep -q '当前已安装 Reality XHTTP' "${menuLog}"
+            grep -q '当前协议：Reality XHTTP' "${menuLog}"
             currentInstallProtocolType=,1,
             manageCDN 1 <<< $'1\n\n0'
             [[ "$(<"${root}/cdn")" == xhttp.example.com ]]

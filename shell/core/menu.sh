@@ -4,21 +4,16 @@ installMenu() {
     while true; do
         echoContent title "\n┌─ 安装与重装 ───────────────────────────────────────"
         if [[ -n "${coreInstallType}" ]]; then
-            menuLine "检测到已有安装；以下入口会重建核心与协议配置，请先确认已备份"
-        else
-            menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 -> 立即同步并更新链接"
+            menuLine "重装会重建核心与协议配置，请先备份"
+            menuMutedLine "只需补装 Hysteria2 或 Tuic 时，请到「协议与入口」增量安装"
         fi
-        menuLine "已有 Xray 想保留并补装 sing-box 协议时，请从 协议与入口 -> Hysteria2/Tuic 增量安装"
-        menuLine "怎么选：直连/有域名选 1；需要 CDN/反代选 2；没有域名选 3；需要 TLS 指纹抗性可选 4"
-        menuLine "高级：想手选核心和协议选 5；旧客户端、迁移或已有 TLS/fallback 架构选 6"
-        menuLine "概念：entry 是客户端连接地址；target/SNI 是 Reality 伪装目标，不是同一个概念"
-        menuRecommendedItem 1 "推荐直连 Reality Vision" "新手首选；稳定、配置少，有域名或直连入口都适合"
-        menuRecommendedItem 2 "推荐 CDN Reality XHTTP" "需要 CDN/反代时选择；客户端兼容要求更高"
-        menuItem 3 "无域名 Reality" "没有域名时选择；用服务器 IP 或自定义 entry-host"
-        menuRecommendedItem 4 "TLS 指纹抗性 NaiveProxy" "需要真实域名和证书；不是无域名 Reality 替代"
-        menuItem 5 "自定义安装" "手动选择核心和协议组合，适合熟悉参数的人"
-        menuItem 6 "传统 TLS 兼容安装" "仅用于旧客户端、迁移或已有 TLS/fallback 架构"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuRecommendedItem 1 "推荐直连 Reality Vision" "首次安装推荐，使用自有域名直连"
+        menuRecommendedItem 2 "推荐 CDN Reality XHTTP" "适合 CDN 或反代，客户端需支持 XHTTP"
+        menuItem 3 "无域名 Reality" "使用服务器 IP 或自定义入口"
+        menuRecommendedItem 4 "TLS 指纹抗性 NaiveProxy" "需自有域名和可信证书"
+        menuItem 5 "自定义安装" "手动选择核心和协议"
+        menuItem 6 "传统 TLS 兼容安装" "兼容旧客户端或迁移已有 TLS fallback"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         selectInstallType=
         menuReadChoice install_type "请选择:" selectInstallType interactive || return 0
@@ -60,17 +55,14 @@ protocolEntryMenu() {
     local selectProtocolMenuType=
     while true; do
         echoContent title "\n┌─ 协议与入口 ───────────────────────────────────────"
-        menuLine "这里集中管理客户端入口、入站协议和订阅中的连接地址"
-        menuLine "证书/静态站点去 站点与证书；分流/阻断去 路由与访问控制"
-        menuLine "已有 Xray 时，Hysteria2/Tuic 可增量启用 sing-box 辅助核心，不会删除 Xray"
-        menuItem 1 "查看全部协议链接" "本机自用链接和二维码；无需域名或订阅发布服务"
-        menuItem 2 "REALITY 管理" "目标站、密钥、443 共存分流和 Reality 参数"
-        menuItem 3 "XHTTP 管理" "普通/高级/实验分层调整 Reality XHTTP"
-        menuItem 4 "Hysteria2 管理" "安装、卸载或管理 UDP 端口跳跃"
+        menuItem 1 "查看全部协议链接" "查看本机节点链接和二维码"
+        menuItem 2 "REALITY 管理" "目标站、密钥和 443 共存分流"
+        menuItem 3 "XHTTP 管理" "设置传输、XMUX 和独立下行"
+        menuItem 4 "Hysteria2 管理" "安装、卸载和端口跳跃"
         menuItem 5 "Tuic 管理" "安装、卸载和高级参数"
-        menuItem 6 "额外入口端口管理" "为已安装 Xray 追加或移除入口端口"
-        menuItem 7 "CDN 入口管理" "订阅入口地址覆盖、CDN/H3 使用说明"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuItem 6 "额外入口端口管理" "为 Xray 添加或删除监听端口"
+        menuItem 7 "CDN 入口管理" "覆盖订阅中的入口地址"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         menuReadChoice protocol_entry_menu "请选择:" selectProtocolMenuType interactive || return 0
         case "${selectProtocolMenuType}" in
@@ -91,13 +83,11 @@ siteCertificateMenu() {
     local selectSiteCertificateMenuType=
     while true; do
         echoContent title "\n┌─ 站点与证书 ───────────────────────────────────────"
-        menuLine "这里维护本地站点、传统 TLS fallback、302、ALPN 和本机 TLS 证书"
-        menuLine "Reality 不使用本机 TLS 证书；这里的证书只服务传统 TLS、站点或订阅"
-        menuLine "Reality target/SNI 伪装目标仍由 Reality 目标站管理，二者不要混淆"
-        menuItem 1 "传统 TLS fallback 维护" "静态站点、302 重定向、ALPN 诊断/修复"
+        menuMutedLine "本机证书供传统 TLS、站点和订阅发布使用"
+        menuItem 1 "传统 TLS fallback 维护" "重建站点配置、设置重定向和 ALPN"
         menuItem 2 "本机 TLS 证书管理" "续签或查看 /etc/padm/tls 证书"
-        menuItem 3 "本地静态站点" "导入自有网站或使用内置布局起点"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuItem 3 "本地静态站点" "导入网站或使用内置布局"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         selectSiteCertificateMenuType=
         menuReadChoice site_certificate_menu "请选择:" selectSiteCertificateMenuType interactive || return 0
@@ -115,12 +105,11 @@ routingAccessMenu() {
     local selectRoutingAccessMenuType=
     while true; do
         echoContent title "\n┌─ 路由与访问控制 ───────────────────────────────────"
-        menuLine "这里管理服务端出站、分流、BT 阻断和访问限制，不是客户端配置教程"
-        menuLine "阻断/区域策略可能影响系统更新、证书申请和应用连接，执行前先看说明"
+        menuMutedLine "阻断规则可能影响系统更新、证书申请和应用连接"
         menuItem 1 "分流工具" "WARP、IPv6、Socks5、DNS/hosts 覆盖"
-        menuItem 2 "BT 下载管理" "P2P/BT 下载访问控制"
+        menuItem 2 "BT 下载管理" "查看和设置 BT 下载限制"
         menuItem 3 "访问控制" "域名/IP 阻断、直连例外、区域阻断"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         selectRoutingAccessMenuType=
         menuReadChoice routing_access_menu "请选择:" selectRoutingAccessMenuType interactive || return 0
@@ -138,13 +127,11 @@ systemScriptMenu() {
     local selectSystemMenuType=
     while true; do
         echoContent title "\n┌─ 系统与脚本 ───────────────────────────────────────"
-        menuLine "这里维护 padm 脚本自身和宿主机网络辅助项"
-        menuLine "核心版本、服务、日志和配置校验请去 核心与服务"
-        menuItem 1 "更新 padm 脚本" "更新脚本文件"
-        menuItem 2 "查看脚本安装状态" "显示入口校验、版本、ref 和 manifest"
-        menuItem 3 "Fail2ban 防护" "SSH 和 /s/control/ 的最小防护入口"
-        menuItem 4 "网络优化" "查看或启用官方 BBR + fq"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuItem 1 "更新 padm 脚本"
+        menuItem 2 "查看脚本安装状态" "版本、安装来源和文件校验"
+        menuItem 3 "Fail2ban 防护" "SSH 和订阅控制接口防护"
+        menuItem 4 "网络优化" "查看或启用 BBR + fq"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         selectSystemMenuType=
         menuReadChoice system_script_menu "请选择:" selectSystemMenuType interactive || return 0
@@ -162,11 +149,10 @@ systemScriptMenu() {
 advancedDangerMenu() {
     local selectDangerMenuType=
     while true; do
-        echoContent title "\n┌─ 高级/危险操作 ────────────────────────────────────"
-        menuLine "这里只放不可逆、实验性或容易影响现有连接的操作"
-        menuDangerItem 1 "卸载脚本" "移除脚本和相关配置，执行前请确认备份"
-        menuDangerItem 2 "VLESS Encryption 实验" "Xray-only，高级兼容性实验开关"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        echoContent title "\n┌─ 高级与危险操作 ──────────────────────────────────"
+        menuDangerItem 1 "卸载脚本" "移除脚本和相关配置，请先备份"
+        menuDangerItem 2 "VLESS Encryption 实验" "仅支持 Xray，启用前请核对客户端兼容性"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         selectDangerMenuType=
         menuReadChoice danger_menu "请选择:" selectDangerMenuType interactive || return 0
@@ -254,7 +240,6 @@ showCoreStatusOverview() {
     else
         menuLine "Nginx 服务: $(coreDisplayState "未安装")"
     fi
-    menuMutedLine "首页只读取本地状态；版本和预发布信息仅在明确动作时获取"
     menuClose
 }
 
@@ -280,8 +265,8 @@ coreLifecycleMenu() {
     while true; do
         echoContent title "\n┌─ ${title} 生命周期 ─────────────────────────────────"
         menuItem 1 "升级/切换版本" "${upgradeText}"
-        menuItem 2 "检查与诊断" "检查当前配置并扫描已知升级风险"
-        menuReturnItem 0 "返回核心与服务" "回到核心与服务"
+        menuItem 2 "检查与诊断" "校验配置，检查升级风险"
+        menuReturnItem 0 "返回核心与服务"
         menuClose
         selection=
         menuReadChoice "${menuKey}" "请选择:" selection interactive || return 0
@@ -355,17 +340,17 @@ coreServiceControlMenu() {
         serviceStatus=$(coreMenuServiceState "${serviceName}")
         echoContent title "\n┌─ ${title} 服务控制 ─────────────────────────────────"
         menuLine "当前状态: $(coreDisplayState "${serviceStatus}")"
-        menuItem 1 "启动" "服务已运行时不重复启动"
-        menuItem 2 "停止" "会中断当前连接，执行前再次确认"
-        menuItem 3 "重启" "完整停止后重新启动"
+        menuItem 1 "启动"
+        menuItem 2 "停止" "会中断连接"
+        menuItem 3 "重启" "会短暂中断连接"
         if [[ "${serviceName}" == "nginx" ]]; then
             if [[ "${serviceStatus}" == "运行中" ]]; then
-                menuItem 4 "reload" "先执行 nginx -t，再平滑重载"
+                menuItem 4 "reload" "校验配置后平滑重载"
             else
                 menuItem 4 "reload（不可用）" "Nginx 未运行，无法平滑重载"
             fi
         fi
-        menuReturnItem 0 "返回服务运行态" "回到服务列表"
+        menuReturnItem 0 "返回服务运行态"
         menuClose
         selectServiceAction=
         menuReadChoice core_service_control "请选择:" selectServiceAction interactive || return 0
@@ -411,7 +396,7 @@ coreAllServicesMenu() {
         else
             menuItem 3 "Nginx 服务（只读）" "非 padm 当前依赖，不提供服务动作"
         fi
-        menuReturnItem 0 "返回核心与服务" "回到核心与服务"
+        menuReturnItem 0 "返回核心与服务"
         menuClose
         selectCoreService=
         menuReadChoice core_services_menu "请选择:" selectCoreService interactive || return 0
@@ -447,7 +432,7 @@ coreLogsMenu() {
             menuItem 3 "开启 sing-box 调试日志" "记录调试日志并实时查看"
         fi
         menuItem 4 "Nginx 配置检查" "执行 nginx -t，不重载服务"
-        menuReturnItem 0 "返回核心与服务" "回到核心与服务"
+        menuReturnItem 0 "返回核心与服务"
         menuClose
         selectLogs=
         menuReadChoice core_logs_menu "请选择:" selectLogs interactive || return 0
@@ -477,7 +462,7 @@ xrayGeoDataMenu() {
         menuItem 1 "更新 Xray Geo 数据" "更新 geosite.dat / geoip.dat"
         menuItem 2 "查看 Xray Geo 状态" "查看文件、版本和自动更新状态"
         menuItem 3 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
-        menuReturnItem 0 "返回核心与服务" "回到核心与服务"
+        menuReturnItem 0 "返回核心与服务"
         menuClose
         selectGeoAction=
         menuReadChoice xray_geo_menu "请选择:" selectGeoAction interactive || return 0
@@ -496,13 +481,12 @@ coreVersionManageMenu() {
     while true; do
         showCoreStatusOverview
         echoContent title "\n┌─ 核心与服务 ───────────────────────────────────────"
-        menuLine "安装与重装只在主菜单；未安装时仍可查看状态和只读扫描"
-        menuItem 1 "Xray-core 生命周期" "版本切换和三项配置检查"
-        menuItem 2 "sing-box 生命周期" "版本切换和三项配置检查"
+        menuItem 1 "Xray-core 生命周期" "版本切换与配置检查"
+        menuItem 2 "sing-box 生命周期" "版本切换与配置检查"
         menuItem 3 "服务运行态" "Xray、sing-box 和 padm 依赖的 Nginx"
         menuItem 4 "日志与诊断" "Xray、sing-box 日志和 Nginx 配置检查"
         menuItem 5 "Xray Geo 数据" "更新、查看状态或设置自动更新"
-        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单"
         menuClose
         selectCore=
         menuReadChoice core_manage_menu "请选择:" selectCore interactive || return 0
@@ -528,30 +512,25 @@ menu() {
     checkWgetShowProgress
     aliasInstall || return 1
     while true; do
-        echoContent title "\n┌─ padm 管理面板 ───────────────────────────────────"
-        menuLine "Xray-core / sing-box 节点安装与运维脚本"
-        menuLine "版本：$(getScriptVersion)"
-        menuLine "原则：安装、订阅、入口、站点、路由、核心、系统各归一处"
-        menuSection "├─ 当前状态 ───────────────────────────────────────"
+        menuSection "\n┌─ padm 管理面板 · $(getScriptVersion)"
         if [[ "${PADM_INSTALL_STATUS_READY:-}" == "1" ]]; then
             showInstallStatus cached
         else
             showInstallStatus
         fi
-        menuSection "├─ 任务入口 ───────────────────────────────────────"
-        menuItem 1 "安装与重装" "含新手选择指引；推荐直连/CDN/无域名 Reality、NaiveProxy、自定义和传统 TLS"
-        menuItem 2 "订阅与用户" "发布链接、创建和维护分享订阅、流量限额与多服务器同步"
-        menuItem 3 "协议与入口" "本机协议链接与二维码、REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口"
-        menuItem 4 "站点与证书" "传统 TLS fallback 站点、302、ALPN 和 TLS 证书"
-        menuItem 5 "路由与访问控制" "分流、BT、域名/IP 阻断、直连例外和区域阻断"
-        menuItem 6 "核心与服务" "核心生命周期、服务运行态、日志诊断和 Xray Geo 数据"
-        menuItem 7 "系统与脚本" "更新 padm、网络优化和宿主机辅助项"
-        menuDangerItem 8 "高级/危险操作" "卸载和实验性高风险开关"
-        menuLine "新人建议：1 安装与重装里先看怎么选；安装后 2 查看订阅"
-        menuReturnItem 0 "退出" "结束当前菜单会话"
+        menuSection "├─ 功能菜单 ────────────────────────────────────────"
+        menuItem 1 "安装与重装" "选择核心和协议"
+        menuItem 2 "订阅与用户" "发布与分享订阅、流量限额、多服务器同步"
+        menuItem 3 "协议与入口" "节点链接、入站设置和 CDN 入口"
+        menuItem 4 "站点与证书" "静态站点、TLS fallback 和证书"
+        menuItem 5 "路由与访问控制" "分流、BT 限制和阻断规则"
+        menuItem 6 "核心与服务" "版本、服务、日志和 Geo 数据"
+        menuItem 7 "系统与脚本" "更新 padm、系统防护和网络优化"
+        menuDangerItem 8 "高级与危险操作" "卸载和实验功能"
+        menuReturnItem 0 "退出"
         menuClose
         selectMainMenuType=
-        menuReadChoice main_menu "请选择编号（回车或 0 退出）：" selectMainMenuType interactive || return 0
+        menuReadChoice main_menu "请选择编号（回车退出）：" selectMainMenuType interactive || return 0
         PADM_INSTALL_STATUS_READY=0
         case ${selectMainMenuType} in
         1)

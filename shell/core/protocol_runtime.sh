@@ -171,9 +171,9 @@ initHysteria2Network() {
     fi
 
     while true; do
-        menuLine "Brutal：适合客户端与服务端之间带宽较稳定的线路；需手填上下行，可从实测速率的 70%-80% 起步"
-        menuLine "BBR：适合带宽波动、移动网络或多人共享出口；无需手填带宽，不确定时建议选 2"
-        menuLine "此处 BBR 是 Hysteria2/QUIC 自适应拥塞控制，与系统 TCP BBR 设置无关"
+        menuLine "Brutal：适合稳定线路，可从实测速率的 70%–80% 起步"
+        menuLine "BBR：适合移动网络和共享出口，自动适应带宽波动"
+        menuLine "此处设置 Hysteria2 的 QUIC 拥塞控制"
         echoContent yellow "请选择 Hysteria2 拥塞模式：1 Brutal（固定带宽），2 BBR（自适应），0 返回，回车保持 ${existingBandwidthMode}"
         menuReadChoice hysteria_bandwidth_mode "模式[1 Brutal/2 BBR/0 返回，回车保持]:" bandwidthMode true || return 1
         bandwidthMode=${bandwidthMode:-${existingBandwidthMode}}
@@ -431,9 +431,8 @@ addPortHopping() {
 
     echoContent title "\n┌─ 端口跳跃配置 ─────────────────────────────────────"
     menuLine "仅支持 Hysteria2、Tuic"
-    menuLine "端口跳跃用于 UDP 场景，当前脚本通过系统防火墙转发到实际协议端口"
-    menuLine "Hysteria2 官方新版也支持服务端端口范围监听；当前方式仍是兼容的手动转发方案"
-    menuLine "推荐范围：30000-40000 中选择约 1000 个端口，避免和其他端口跳跃范围重叠"
+    menuLine "通过防火墙将指定范围的 UDP 端口转发至协议监听端口"
+    menuLine "可在 30000–40000 内选约 1000 个端口，避开其他转发范围"
     menuClose
 
     echoContent yellow "请输入端口跳跃的范围，例如[30000-31000]"
@@ -814,7 +813,7 @@ portHoppingMenu() {
     while true; do
         echoContent title "\n┌─ 端口跳跃 ─────────────────────────────────────────"
         menuItem 1 "添加端口跳跃" "配置 UDP 端口范围转发到当前服务端口"
-        menuItem 2 "删除端口跳跃" "移除当前端口跳跃规则"
+        menuItem 2 "删除端口跳跃"
         menuItem 3 "查看端口跳跃" "显示当前端口跳跃范围"
         menuReturnItem 0 "返回"
         menuClose
@@ -899,7 +898,7 @@ initTuicProtocol() {
     echoContent title "\n┌─ Tuic 拥塞控制算法 ─────────────────────────────────"
     menuRecommendedItem 1 "cubic" "sing-box 默认算法"
     menuItem 2 "bbr" "高带宽或长距离链路可尝试"
-    menuItem 3 "new_reno" "兼容保守拥塞控制"
+    menuItem 3 "new_reno" "侧重兼容性"
     menuReturnItem 0 "返回"
     menuClose
     while true; do
@@ -1123,19 +1122,19 @@ collectRealityProfile() {
         selectAutoRecommendedRealityTarget || return 1
     else
         echoContent title "\n┌─ Reality 伪装目标 ─────────────────────────────────"
-        menuLine "entry：客户端连接到你的服务器地址，已在订阅中作为 server/@host 使用"
-        menuLine "target：REALITY 伪装访问的外部真实 HTTPS 站点，写入服务端握手配置"
-        menuLine "SNI：REALITY 握手域名，默认等于 target host；除非明确知道原因，不要单独改"
-        menuLine "候选列表仅展示 cdn_risk=no 的实测 A 级结果，不推荐 B/C 级备选"
+        menuLine "入口（entry）：客户端从订阅读取的连接地址"
+        menuLine "目标（target）：服务端 REALITY 握手使用的外部 HTTPS 站点"
+        menuLine "SNI：REALITY 握手域名，通常沿用目标站域名"
+        menuLine "候选列表仅展示通过实测且无 CDN 风险的 A 级目标"
         menuLine "PQC/ML-DSA-65 场景需要目标站支持 X25519MLKEM768 且证书链足够长"
         menuClose
         while true; do
             echoContent title "┌─ REALITY 目标站选择 ───────────────────────────────"
-            menuItem 1 "检测候选后选择" "先检测全部候选，再从 A 级结果中选择"
+            menuItem 1 "检测候选后选择" "检测全部候选并列出 A 级目标"
             menuItem 2 "手动输入" "输入 host 或 host:port，端口默认 443"
             menuReturnItem 0 "返回"
             menuClose
-            menuReadChoice reality_target_mode "请选择[默认1]:" selectRealityTargetMode true || return 1
+            menuReadChoice reality_target_mode "请选择编号（回车选 1）：" selectRealityTargetMode true || return 1
             case "${selectRealityTargetMode:-1}" in
             1)
                 candidateStatus=0

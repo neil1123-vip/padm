@@ -23,7 +23,7 @@ runMenu() {
     : >"${TEST_ROOT}/calls"
     dockerMenuTProxy redirect <<<"$1" >"${TEST_ROOT}/output"
     [[ "$(cat "${TEST_ROOT}/calls")" == "$2" ]]
-    grep -q '仅捕获 TCP' "${TEST_ROOT}/output"
+    grep -Fq '仅接管 TCP，UDP 沿用原路由。' "${TEST_ROOT}/output"
 }
 runMenu $'1\n2\n31301\nipv6\n3\n31302\nipv4\n5\n65533\n7\n6\n4\n1\n0' \
     $'protocol redirect-status\nprotocol redirect-status\nedit --redirect-enable 31301 --redirect-family ipv6\nprotocol redirect-status\nedit --redirect-settings 31302 --redirect-family ipv4\nprotocol redirect-status\nedit --redirect-settings 31298 --redirect-family dual --redirect-output-uid 65533\nprotocol redirect-status\nedit --redirect-settings 31298 --redirect-family dual --redirect-output-all\nprotocol redirect-status\nedit --redirect-settings 31298 --redirect-family dual --redirect-output-off\nedit --redirect-off\nprotocol redirect-status'

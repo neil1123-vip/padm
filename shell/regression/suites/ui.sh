@@ -35,8 +35,8 @@ runRegressionUiSmokeSuiteRoot() {
     eval "$(declare -f manageFail2ban | sed '1s/^manageFail2ban /originalManageFail2ban /')"
     menu() { recordMenuAction menu; }
     menuLine() { output+="$*"$'\n'; }
-    menuItem() { output+="$2 $3"$'\n'; }
-    menuRecommendedItem() { output+="$2 $3"$'\n'; }
+    menuItem() { output+="$2 ${3:-}"$'\n'; }
+    menuRecommendedItem() { output+="$2 ${3:-}"$'\n'; }
     menuReturnItem() { output+="$2 ${3:-}"$'\n'; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
@@ -63,8 +63,8 @@ runRegressionUiSmokeSuiteRoot() {
 
     installMenu <<<"6"
     assertMenuAction selectCoreInstall
-    grep -q "不知道怎么选时，建议直接选 1" <<<"${output}"
-    grep -q "entry 是客户端连接地址" <<<"${output}"
+    grep -q "推荐直连 Reality Vision" <<<"${output}"
+    grep -q "使用服务器 IP 或自定义入口" <<<"${output}"
 
     (
         local menuRenderLog="${TMP_DIR}/core-select-menu-render.log"

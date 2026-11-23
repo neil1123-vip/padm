@@ -8,13 +8,12 @@ socks5Routing() {
     fi
     local selectType=
     while true; do
-        echoContent title "\n┌─ Socks5 分流 ──────────────────────────────────────"
-        menuLine "用于两台机器之间中继出站，不建议把入站暴露给不可信网络"
-        menuLine "出站适合本机把部分域名转发到落地机；入站适合落地机只允许指定源 IP 访问"
-        menuItem 1 "Socks5 出站" "转发机/代理机配置"
-        menuItem 2 "Socks5 入站" "解锁机/落地机配置"
-        menuItem 3 "卸载" "移除 Socks5 分流配置"
-        menuReturnItem 0 "返回分流工具" "回到上一级分流菜单"
+        echoContent title "\n┌─ Socks5 中继 ──────────────────────────────────────"
+        menuLine "入站仅应向可信的源 IP 开放"
+        menuItem 1 "Socks5 出站" "将本机流量转发到落地机"
+        menuItem 2 "Socks5 入站" "在落地机监听来自转发机的流量"
+        menuItem 3 "移除中继配置" "选择移除出站、入站或两者"
+        menuReturnItem 0 "返回分流工具"
         menuClose
         selectType=
         menuReadChoice socks5_menu "请选择:" selectType interactive || return 0
@@ -39,11 +38,11 @@ socks5InboundRoutingMenu() {
     while true; do
         readInstallType
         echoContent title "\n┌─ Socks5 入站 ──────────────────────────────────────"
-        menuItem 1 "安装 Socks5 入站" "配置解锁机/落地机入站"
-        menuItem 2 "查看分流规则" "显示当前入站分流规则"
-        menuItem 3 "添加分流规则" "更新入站分流域名"
-        menuItem 4 "查看入站配置" "显示端口、用户与密码"
-        menuReturnItem 0 "返回 Socks5 分流" "回到上级菜单"
+        menuItem 1 "配置入站" "设置监听端口、访问来源和域名规则"
+        menuItem 2 "查看分流规则"
+        menuItem 3 "替换分流规则" "重新指定允许访问的域名"
+        menuItem 4 "查看入站配置" "显示端口、用户名和密码"
+        menuReturnItem 0 "返回 Socks5 中继"
         menuClose
         selectType=
         menuReadChoice socks5_inbound_menu "请选择:" selectType interactive || return 0
@@ -116,10 +115,10 @@ socks5InboundRoutingMenu() {
         4)
             if [[ -f "${singBoxConfigPath}20_socks5_inbounds.json" ]]; then
                 echoContent title "\n┌─ Socks5 入站信息 ──────────────────────────────────"
-                menuLine "下列内容需要配置到其他机器的出站，请不要在本机进行代理行为"
+                menuLine "请将下列参数填入转发机的 Socks5 出站配置"
                 menuLine "端口：$(jq .inbounds[0].listen_port "${singBoxConfigPath}20_socks5_inbounds.json")"
-                menuLine "用户名称：$(jq -r .inbounds[0].users[0].username "${singBoxConfigPath}20_socks5_inbounds.json")"
-                menuLine "用户密码：$(jq -r .inbounds[0].users[0].password "${singBoxConfigPath}20_socks5_inbounds.json")"
+                menuLine "用户名：$(jq -r .inbounds[0].users[0].username "${singBoxConfigPath}20_socks5_inbounds.json")"
+                menuLine "密码：$(jq -r .inbounds[0].users[0].password "${singBoxConfigPath}20_socks5_inbounds.json")"
                 menuClose
             else
                 errorCard "未安装相应功能"
@@ -139,11 +138,11 @@ socks5OutboundRoutingMenu() {
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     while true; do
         echoContent title "\n┌─ Socks5 出站 ──────────────────────────────────────"
-        menuItem 1 "安装 Socks5 出站" "配置转发机/代理机出站"
-        menuDangerItem 2 "设置 Socks5 全局转发" "删除其他出站并全局走 Socks5"
-        menuItem 3 "查看分流规则" "显示当前出站分流规则"
-        menuItem 4 "添加分流规则" "更新出站分流域名"
-        menuReturnItem 0 "返回 Socks5 分流" "回到上级菜单"
+        menuItem 1 "配置出站" "连接落地机并指定要转发的域名"
+        menuDangerItem 2 "切换全局出站" "清除其他出站规则，改用 Socks5 转发"
+        menuItem 3 "查看分流规则"
+        menuItem 4 "替换分流规则" "重新指定要转发的域名"
+        menuReturnItem 0 "返回 Socks5 中继"
         menuClose
         selectType=
         menuReadChoice socks5_outbound_menu "请选择:" selectType interactive || return 0
@@ -181,7 +180,7 @@ socks5OutboundRoutingMenu() {
             PADM_SOCKS5_ROLLBACK_PENDING=false
             unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
             padmRemoveCleanupPath "${backupDir}"
-            successCard "Socks5全局出站设置完毕"
+            successCard "已切换到 Socks5 全局出站"
             ;;
         3)
             showSingBoxRoutingRules socks5_01_outbound_route
@@ -214,8 +213,8 @@ socks5OutboundRoutingMenu() {
 setSocks5OutboundRoutingAll() {
 
     warnCard \
-        "会删除所有已经设置的分流规则，包括其他分流（warp、IPv6 等）" \
-        "会删除 Socks5 之外的所有出站规则"
+        "将清除现有分流并改用 Socks5 全局出站" \
+        "使用 Xray 时也会移除现有的 BT 阻断和访问控制规则"
     autoConfirm socks5_global_confirm "确认设置 Socks5 全局出站？" n socksOutStatus
 
     if [[ "${socksOutStatus}" == "y" ]]; then
@@ -385,11 +384,11 @@ removeSocks5Routing() {
         backupDir=
         socks5InboundPort=
         socks5InboundConfig=
-        echoContent title "\n┌─ 卸载 Socks5 分流 ─────────────────────────────────"
-        menuItem 1 "卸载 Socks5 出站" "移除出站转发配置"
-        menuItem 2 "卸载 Socks5 入站" "移除入站监听配置"
-        menuDangerItem 3 "卸载全部" "同时移除 Socks5 出站和入站配置"
-        menuReturnItem 0 "返回 Socks5 分流" "回到上级菜单"
+        echoContent title "\n┌─ 移除 Socks5 中继配置 ─────────────────────────────"
+        menuItem 1 "移除出站" "停用出站转发"
+        menuItem 2 "移除入站" "停用入站监听"
+        menuDangerItem 3 "移除全部" "同时停用出站转发和入站监听"
+        menuReturnItem 0 "返回 Socks5 中继"
         menuClose
         unInstallSocks5RoutingStatus=
         menuReadChoice socks5_uninstall_menu "请选择:" unInstallSocks5RoutingStatus interactive || return 0
@@ -523,15 +522,14 @@ setSocks5Inbound() {
     local socks5RoutingUUID= socks5InboundDomainStrategyStatus=
     local -a result=()
     echoContent title "\n┌─ 配置 Socks5 入站 ─────────────────────────────────"
-    menuLine "解锁机、落地机入站配置"
+    menuLine "在落地机配置中继监听"
     menuClose
     echoContent title "\n┌─ Socks5 入站端口 ─────────────────────────────────"
     echo
     readSingBoxPortResult result "${singBoxSocks5Port}" || return 1
-    statusCard "入站 Socks5" "端口：${result[-1]}" "此端口需要配置到其他机器出站，请不要进行代理行为"
+    statusCard "Socks5 入站端口" "端口：${result[-1]}" "请将此端口填入转发机的 Socks5 出站配置"
 
-    echoContent yellow "\n请输入自定义UUID[需合法]，[回车]随机UUID"
-    autoRead socks5_inbound_uuid "UUID:" socks5RoutingUUID || return 1
+    autoRead socks5_inbound_uuid "请输入有效的 UUID（回车随机生成）： " socks5RoutingUUID || return 1
     if [[ -z "${socks5RoutingUUID}" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
             socks5RoutingUUID=$("$(coreXrayBinaryPath)" uuid)
@@ -540,21 +538,21 @@ setSocks5Inbound() {
         fi
     fi
     if [[ -z "${socks5RoutingUUID}" ]]; then
-        errorCard "UUID生成失败"
+        errorCard "UUID 生成失败"
         return 1
     fi
     echo
-    echoContent green "用户名称：${socks5RoutingUUID}"
-    echoContent green "用户密码：${socks5RoutingUUID}"
+    echoContent green "用户名：${socks5RoutingUUID}"
+    echoContent green "密码：${socks5RoutingUUID}"
 
     echoContent title "\n┌─ Socks5 DNS 解析类型 ──────────────────────────────"
-    menuLine "需要保证 VPS 支持相应的 DNS 解析"
-    menuRecommendedItem 1 "IPv4" "默认解析策略"
-    menuItem 2 "IPv6" "IPv6 解析策略"
+    menuLine "请选择本机支持的 DNS 解析类型"
+    menuRecommendedItem 1 "IPv4" "默认"
+    menuItem 2 "IPv6"
     menuReturnItem 0 "返回"
     menuClose
 
-    autoRead socks5_inbound_ip_type "IP类型[回车使用 IPv4]:" socks5InboundDomainStrategyStatus || return 1
+    autoRead socks5_inbound_ip_type "请选择解析类型（回车使用 IPv4）：" socks5InboundDomainStrategyStatus || return 1
     local domainStrategy=
     if [[ -z "${socks5InboundDomainStrategyStatus}" || "${socks5InboundDomainStrategyStatus}" == "1" ]]; then
         domainStrategy="ipv4_only"
@@ -588,10 +586,10 @@ setSocks5InboundRouting() {
         socks5InboundRoutingIPs=$(jq '[.route.rules[0] | recurse(.rules[]?) | .source_ip_cidr[]?] | unique' "${singBoxConfigPath}socks5_02_inbound_route.json") || return 1
     else
         echoContent title "\n┌─ Socks5 入站访问源 ────────────────────────────────"
-        menuLine "请输入允许访问的 IP 地址，多个 IP 用英文逗号分隔"
+        menuLine "多个来源 IP 用英文逗号分隔"
         menuLine "示例：1.1.1.1,2.2.2.2"
         menuClose
-        autoRead socks5_inbound_source_ips "IP:" socks5InboundRoutingIPs || return 1
+        autoRead socks5_inbound_source_ips "请输入允许访问的来源 IP：" socks5InboundRoutingIPs || return 1
 
         if [[ -z "${socks5InboundRoutingIPs}" ]]; then
             coreIPRequiredErrorCard
@@ -601,17 +599,16 @@ setSocks5InboundRouting() {
     fi
 
     echoContent title "\n┌─ Socks5 域名分流 ─────────────────────────────────"
-    menuLine "请输入要分流的域名"
-    menuLine "支持 Xray-core geosite 匹配，支持 sing-box 1.8+ rule_set 匹配"
-    menuLine "非增量添加，会替换原有规则；无法匹配则使用 domain 精确匹配"
+    menuLine "新规则会替换原有规则"
+    menuLine "直接填写域名按后缀匹配，添加 full: 前缀可精确匹配，支持 geosite 分类"
     menuClose
 
-    autoRead socks5_inbound_allow_all "是否允许所有网站？请选择[y/n]:" socks5InboundRoutingDomainStatus || return 1
+    autoRead socks5_inbound_allow_all "允许访问所有网站？[y/n]：" socks5InboundRoutingDomainStatus || return 1
     if [[ "${socks5InboundRoutingDomainStatus}" == "y" ]]; then
         addSingBoxRouteRule "01_direct_outbound" "" "socks5_02_inbound_route" || return 1
     else
-        echoContent yellow "录入示例:netflix,openai,example.com\n"
-        autoRead socks5_inbound_domains "域名:" socks5InboundRoutingDomain || return 1
+        echoContent yellow "示例：netflix,openai,example.com\n"
+        autoRead socks5_inbound_domains "请输入允许访问的域名：" socks5InboundRoutingDomain || return 1
         if [[ -z "${socks5InboundRoutingDomain}" ]]; then
             coreDomainRequiredErrorCard
             return 1
@@ -645,28 +642,28 @@ setSocks5InboundRouting() {
 setSocks5Outbound() {
 
     echoContent title "\n┌─ 配置 Socks5 出站 ─────────────────────────────────"
-    menuLine "转发机、代理机出站配置"
+    menuLine "填写落地机的 Socks5 入站参数"
     menuClose
     echo
-    autoRead socks5_outbound_ip "请输入落地机IP地址:" socks5RoutingOutboundIP
+    autoRead socks5_outbound_ip "请输入落地机 IP 地址：" socks5RoutingOutboundIP
     if [[ -z "${socks5RoutingOutboundIP}" ]]; then
         coreIPRequiredErrorCard
         return 1
     fi
     echo
-    autoRead socks5_outbound_port "请输入落地机端口:" socks5RoutingOutboundPort
+    autoRead socks5_outbound_port "请输入落地机端口：" socks5RoutingOutboundPort
     if ! validPortNumber "${socks5RoutingOutboundPort}"; then
         errorCard "端口不合法"
         return 1
     fi
     echo
-    autoRead socks5_outbound_username "请输入用户名:" socks5RoutingOutboundUserName
+    autoRead socks5_outbound_username "请输入用户名：" socks5RoutingOutboundUserName
     if [[ -z "${socks5RoutingOutboundUserName}" ]]; then
         errorCard "用户名不可为空"
         return 1
     fi
     echo
-    autoRead socks5_outbound_password "请输入用户密码:" socks5RoutingOutboundPassword
+    autoRead socks5_outbound_password "请输入密码：" socks5RoutingOutboundPassword
     if [[ -z "${socks5RoutingOutboundPassword}" ]]; then
         errorCard "用户密码不可为空"
         return 1
@@ -697,12 +694,11 @@ setSocks5OutboundRouting() {
     fi
 
     echoContent title "\n┌─ Socks5 域名分流 ─────────────────────────────────"
-    menuLine "请输入要分流的域名"
-    menuLine "支持 Xray-core geosite 匹配，支持 sing-box 1.8+ rule_set 匹配"
-    menuLine "非增量添加，会替换原有规则；无法匹配则使用 domain 精确匹配"
+    menuLine "新规则会替换原有规则"
+    menuLine "直接填写域名按后缀匹配，添加 full: 前缀可精确匹配，支持 geosite 分类"
     menuClose
-    echoContent yellow "录入示例:netflix,openai,example.com\n"
-    autoRead socks5_outbound_domains "域名:" socks5RoutingOutboundDomain
+    echoContent yellow "示例：netflix,openai,example.com\n"
+    autoRead socks5_outbound_domains "请输入要转发的域名：" socks5RoutingOutboundDomain
     if [[ -z "${socks5RoutingOutboundDomain}" ]]; then
         coreDomainRequiredErrorCard
         return 1

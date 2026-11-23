@@ -30,16 +30,14 @@ accessControlMenu() {
     local accessControlStatus=
     while true; do
         echoContent title "\n┌─ 访问控制 ─────────────────────────────────────────"
-        menuLine "管理域名/IP 阻断、直连例外和区域阻断规则"
-        menuLine "这是服务端出站与访问限制，不会修改客户端订阅入口"
-        menuLine "Xray 使用 routing + blackhole/direct；sing-box 使用 rule_set/domain_suffix/ip_cidr"
-        menuItem 1 "查看当前访问控制" "显示 Xray / sing-box 当前阻断与例外"
-        menuItem 2 "添加域名阻断" "添加 geosite 或自定义域名阻断"
-        menuItem 3 "添加 IP/CIDR 阻断" "添加自定义 IP、CIDR 或 geoip 规则"
-        menuItem 4 "添加直连例外" "添加优先直连域名规则"
-        menuDangerItem 5 "区域阻断策略" "屏蔽 geosite:cn / geoip:cn 等高风险策略"
-        menuItem 6 "移除访问控制" "按类型移除阻断或例外规则"
-        menuReturnItem 0 "返回路由与访问控制" "回到上级菜单"
+        menuLine "规则作用于服务端出站"
+        menuItem 1 "查看规则" "显示 Xray 与 sing-box 的阻断和例外"
+        menuItem 2 "添加域名阻断" "支持 geosite 和自定义域名"
+        menuItem 3 "添加 IP 阻断" "支持单个 IP、CIDR 网段和 geoip:cn"
+        menuItem 4 "添加直连例外" "让指定域名优先直连"
+        menuDangerItem 5 "区域阻断策略" "按中国大陆域名或 IP 规则阻断"
+        menuItem 6 "移除规则" "按类型移除阻断或例外"
+        menuReturnItem 0 "返回路由与访问控制"
         menuClose
 
         accessControlStatus=
@@ -58,7 +56,7 @@ accessControlMenu() {
 }
 
 showAccessControlStatus() {
-    echoContent title "\n┌─ 当前访问控制 ─────────────────────────────────────"
+    echoContent title "\n┌─ 访问控制规则 ─────────────────────────────────────"
     if [[ "${coreInstallType}" == "1" && -f "${configPath}09_routing.json" ]]; then
         menuLine "Xray 域名阻断："
         jq -r '.routing.rules[]? | select(.outboundTag=="blackhole_out" and (.domain != null)) | .domain[]?' "${configPath}09_routing.json" | sed 's/^/  /' || true
@@ -143,10 +141,9 @@ addBlockedDomainsApply() {
     local domainList
     echoContent title "\n┌─ 添加域名阻断 ─────────────────────────────────────"
     menuLine "示例：openai,geosite:category-ads-all,domain:example.com,full:api.example.com,keyword:tracker"
-    menuLine "具体域名会按 domain/domain_suffix 匹配，不再生成宽泛 regexp"
-    menuLine "添加规则为增量配置，不会删除之前设置的内容"
+    menuLine "直接填写域名时，规则按域名后缀匹配。新规则会追加到现有配置"
     menuClose
-    autoRead access_block_domains "请录入要阻断的域名或规则:" domainList || return 1
+    autoRead access_block_domains "请输入要阻断的域名或规则：" domainList || return 1
     if [[ -z "${domainList//[[:space:],]/}" ]]; then
         coreDomainRequiredErrorCard
         return 1
@@ -170,9 +167,9 @@ addBlockedIPs() { accessControlApplyTransaction addBlockedIPsApply; }
 addBlockedIPsApply() {
     local ipList normalizedIPs
     echoContent title "\n┌─ 添加 IP/CIDR 阻断 ────────────────────────────────"
-    menuLine "录入示例：1.1.1.1,8.8.8.8,1.1.1.0/24,2400:3200::/32,cn"
+    menuLine "示例：1.1.1.1,8.8.8.8,1.1.1.0/24,2400:3200::/32,cn"
     menuClose
-    autoRead access_block_ips "请录入 IP/CIDR:" ipList || return 1
+    autoRead access_block_ips "请输入 IP、CIDR、cn 或 geoip:cn：" ipList || return 1
     normalizedIPs=$(validateAccessIPList "${ipList}") || { errorCard "IP/CIDR 格式错误"; return 1; }
     if [[ -z "${normalizedIPs}" ]]; then
         errorCard "IP/CIDR 不可为空"
@@ -197,9 +194,9 @@ addDirectAllowDomainsApply() {
     local allowDomainList
     echoContent title "\n┌─ 添加直连例外 ─────────────────────────────────────"
     menuLine "直连例外会优先于阻断规则，适合系统更新、证书签发或必要服务"
-    menuLine "录入示例：dl.google.com,apple.com,domain:example.com,full:api.example.com"
+    menuLine "示例：dl.google.com,apple.com,domain:example.com,full:api.example.com"
     menuClose
-    autoRead access_allow_domains "请录入直连例外域名:" allowDomainList || return 1
+    autoRead access_allow_domains "请输入直连例外域名：" allowDomainList || return 1
     if [[ -z "${allowDomainList//[[:space:],]/}" ]]; then
         coreDomainRequiredErrorCard
         return 1
@@ -226,12 +223,12 @@ manageRegionalBlockPolicyApply() {
         allowDomainList="dl.google.com,apple.com,bing.com,microsoft.com,gstatic.com,xn--ngstr-lra8j.com,googleapis.com,googleapis.cn"
         extraAllowDomainList=
         echoContent title "\n┌─ 区域阻断策略 ─────────────────────────────────────"
-        menuLine "危险操作：可能影响系统更新、证书签发、应用连接和客户端服务"
+        menuLine "区域阻断可能影响系统更新、证书签发、应用连接和客户端服务"
         menuLine "默认直连例外：${allowDomainList}"
-        menuDangerItem 1 "屏蔽 geosite:cn + geoip:cn" "同时阻断大陆域名和大陆 IP"
-        menuDangerItem 2 "仅屏蔽 geosite:cn" "只按域名规则阻断"
-        menuDangerItem 3 "仅屏蔽 geoip:cn" "只按 IP 规则阻断"
-        menuReturnItem 0 "返回" "回到访问控制"
+        menuDangerItem 1 "阻断大陆域名和 IP" "geosite:cn + geoip:cn"
+        menuDangerItem 2 "仅阻断大陆域名" "geosite:cn"
+        menuDangerItem 3 "仅阻断大陆 IP" "geoip:cn"
+        menuReturnItem 0 "返回访问控制"
         menuClose
         policyStatus=
         menuReadChoice access_region_policy "请选择:" policyStatus interactive || return 0
@@ -240,7 +237,7 @@ manageRegionalBlockPolicyApply() {
         1 | 2 | 3) ;;
         *) coreSelectionErrorCard "选择错误"; continue ;;
         esac
-        autoRead access_region_extra_allow "追加直连例外域名[可留空，多个用英文逗号]:" extraAllowDomainList || return 0
+        autoRead access_region_extra_allow "追加直连例外域名（可留空，多个用英文逗号分隔）：" extraAllowDomainList || return 0
         if [[ -n "${extraAllowDomainList}" ]]; then
             allowDomainList="${allowDomainList},${extraAllowDomainList}"
         fi
@@ -280,12 +277,12 @@ removeAccessControlMenuApply() {
     local removeStatus=
     while true; do
         echoContent title "\n┌─ 移除访问控制 ─────────────────────────────────────"
-        menuItem 1 "只移除域名阻断" "保留 IP 阻断和直连例外"
-        menuItem 2 "只移除 IP/CIDR 阻断" "保留域名阻断和直连例外"
-        menuItem 3 "只移除直连例外" "保留阻断规则"
-        menuItem 4 "只移除区域阻断" "移除 cn 域名/IP 区域策略"
+        menuItem 1 "移除域名阻断" "保留 IP 阻断和直连例外"
+        menuItem 2 "移除 IP 阻断" "保留域名阻断和直连例外"
+        menuItem 3 "移除直连例外" "保留阻断规则"
+        menuItem 4 "移除区域阻断" "移除 geosite:cn 和 geoip:cn 规则"
         menuDangerItem 5 "移除全部访问控制" "移除域名/IP 阻断、区域阻断和直连例外"
-        menuReturnItem 0 "返回" "回到访问控制"
+        menuReturnItem 0 "返回访问控制"
         menuClose
         removeStatus=
         menuReadChoice access_remove_menu "请选择:" removeStatus interactive || return 0

@@ -233,8 +233,8 @@ switchDNSAPI() {
     nextDNSAPIStatus=$(normalizeYesNo "${nextDNSAPIStatus}")
     if [[ "${nextDNSAPIStatus}" == "y" ]]; then
         echoContent title "\n┌─ DNS API ──────────────────────────────────────────"
-        menuRecommendedItem 1 "cloudflare" "默认 DNS API"
-        menuItem 2 "aliyun" "阿里云 DNS API"
+        menuRecommendedItem 1 "Cloudflare" "默认 DNS API"
+        menuItem 2 "阿里云" "阿里云 DNS API"
         menuReturnItem 0 "返回"
         menuClose
         autoRead dns_api_type "请选择[回车]使用默认:" selectDNSAPIType || return 1
@@ -829,11 +829,10 @@ showTLSCertificateStatus() {
 manageTLSCertificates() {
     while true; do
         echoContent title "\n┌─ 本机 TLS 证书管理 ───────────────────────────────"
-        menuLine "这里查看本机 TLS 证书状态，并按需执行续签检查"
-        menuItem 1 "查看证书状态" "显示来源、剩余天数和定时续签状态"
-        menuItem 2 "立即执行续签检查" "沿用现有 renew 逻辑，按状态决定是否真正续签"
-        menuItem 3 "查看续签定时任务" "显示是否已配置 RenewTLS cron"
-        menuReturnItem 0 "返回站点与证书" "回到上级菜单"
+        menuItem 1 "查看证书状态" "证书来源、剩余有效期和自动续签状态"
+        menuItem 2 "立即执行续签检查" "检查有效期，需要时执行续签"
+        menuItem 3 "查看续签定时任务" "检查 RenewTLS 定时任务"
+        menuReturnItem 0 "返回站点与证书"
         menuClose
         tlsCertificateMenuStatus=
         menuReadChoice tls_certificate_menu "请选择:" tlsCertificateMenuStatus interactive || return 0

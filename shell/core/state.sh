@@ -934,54 +934,36 @@ readConfigHostPathUUID() {
 
 
 # 状态展示
-protocolCapabilityStatusLabel() {
-    local protocolId=$1
-    local name lifecycle nginxMode risk
-    name=$(protocolCapabilityMeta "${protocolId}" name 2>/dev/null) || return 1
-    lifecycle=$(protocolCapabilityMeta "${protocolId}" lifecycle 2>/dev/null) || return 1
-    nginxMode=$(protocolCapabilityMeta "${protocolId}" nginx_mode 2>/dev/null) || return 1
-    risk=$(protocolCapabilityMeta "${protocolId}" risk_note 2>/dev/null || true)
-    printf '%s [%s, nginx:%s]' "${name}" "${lifecycle}" "${nginxMode}"
-    [[ -n "${risk}" ]] && printf ' 风险:%s' "${risk}"
-}
-
 showInstallStatus() {
-    if [[ -n "${coreInstallType}" ]]; then
-        local protocolId statusLabel
-        local vlessEncryptionStateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
-        if [[ "${coreInstallType}" == 1 ]]; then
-            if xrayRunning; then
-                echoContent yellow "\n核心: Xray-core[运行中]"
-            else
-                echoContent yellow "\n核心: Xray-core[未运行]"
-            fi
+    local protocolId name category protocols= coreStatus="未运行"
+    local vlessEncryptionStateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
+    case "${coreInstallType}" in
+    1)
+        xrayRunning && coreStatus="运行中"
+        menuLine "核心：Xray-core · ${coreStatus}"
+        ;;
+    2)
+        singBoxRunning && coreStatus="运行中"
+        menuLine "核心：sing-box · ${coreStatus}"
+        ;;
+    *)
+        menuLine "核心：未安装"
+        return 0
+        ;;
+    esac
 
-        elif [[ "${coreInstallType}" == 2 ]]; then
-            if singBoxRunning; then
-                echoContent yellow "\n核心: sing-box[运行中]"
-            else
-                echoContent yellow "\n核心: sing-box[未运行]"
-            fi
-        fi
-        # 直接调用默认刷新；菜单首帧可传 cached 复用启动阶段的状态快照。
-        [[ "${1:-refresh}" == "cached" ]] || readInstallProtocolType || return 1
+    # 直接调用默认刷新；菜单首帧可传 cached 复用启动阶段的状态快照。
+    [[ "${1:-refresh}" == "cached" ]] || readInstallProtocolType || return 1
 
-        if [[ -n ${currentInstallProtocolType} ]]; then
-            echoContent yellow "已安装协议: \c"
-        fi
-        while IFS='|' read -r protocolId _; do
-            currentProtocolHas "${protocolId}" || continue
-            statusLabel=$(protocolCapabilityStatusLabel "${protocolId}" 2>/dev/null || true)
-            [[ -n "${statusLabel}" ]] || continue
-            echoContent yellow "${statusLabel} \c"
-        done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
-        if [[ "${coreInstallType}" == "1" && -f "${vlessEncryptionStateFile}" ]] &&
-            currentProtocolHasAny 1 2 &&
-            jq -e '.enabled == true' "${vlessEncryptionStateFile}" >/dev/null 2>&1; then
-            echoContent yellow "VLESS Encryption [experimental] \c"
-        fi
-        if [[ -n ${currentInstallProtocolType} ]]; then
-            echo
-        fi
+    while IFS='|' read -r protocolId name category _; do
+        [[ "${category}" == node ]] || continue
+        currentProtocolHas "${protocolId}" || continue
+        protocols+="${protocols:+、}${name}"
+    done < <(protocolCapabilityRegistry)
+    menuLine "已安装协议：${protocols:-无}"
+    if [[ "${coreInstallType}" == "1" && -f "${vlessEncryptionStateFile}" ]] &&
+        currentProtocolHasAny 1 2 &&
+        jq -e '.enabled == true' "${vlessEncryptionStateFile}" >/dev/null 2>&1; then
+        menuLine "VLESS Encryption：已启用（实验功能）"
     fi
 }

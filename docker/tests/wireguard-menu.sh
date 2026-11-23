@@ -100,9 +100,9 @@ runCase() {
 
 runCase status $'1\n0\n' 'wireguard status'
 grep -Fq fixture-public-status "${CONTROL_LOG}" || fail '状态没有显示 CLI 公开输出'
-for label in '1. 查看准备状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
-    '4. 确认启用或启动' '5. 临时停止' '6. 迁移本机参数或单 Peer 连接' \
-    '7. 查看 Peer 列表' '8. 添加 Peer' '9. 更新指定 Peer' '10. 移除指定 Peer'; do
+for label in '1. 查看本机状态和公钥' '2. 准备本机密钥' '3. 设置对端' \
+    '4. 启用或启动连接' '5. 临时停止连接' '6. 迁移本机参数或单 Peer 连接' \
+    '7. 查看 Peer 列表' '8. 添加 Peer' '9. 更新 Peer' '10. 移除 Peer'; do
     grep -Fq "${label}" "${CONTROL_LOG}" || fail "缺少菜单 ${label}"
 done
 runCase prepare $'2\n10.90.0.1\n51821\ny\n1\n0\n' \

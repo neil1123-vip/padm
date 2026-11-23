@@ -965,8 +965,7 @@ EOF
 
     # VLESS_TCP/reality
     if protocolSelectionIncludes "${selectCustomInstallType}" 1 "$1"; then
-        echoContent title "\n┌─ 配置 VLESS Reality ───────────────────────────────"
-        menuLine "生成 Xray Reality Vision 入站配置"
+        echoContent title "\n┌─ 配置 VLESS Reality Vision ───────────────────────────────"
         menuClose
 
         initRealityProfile || return 1
@@ -1063,7 +1062,6 @@ EOF
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 26 "$1"; then
         echoContent title "\n┌─ 配置 VLESS Reality gRPC ──────────────────────────"
-        menuLine "生成 Xray Reality gRPC 入站配置"
         menuClose
 
         initRealityProfile || return 1
@@ -1164,7 +1162,6 @@ initSingBoxConfigApply() {
     # VLESS Vision
     if protocolSelectionIncludes "${selectCustomInstallType}" 27 "$1"; then
         echoContent title "\n┌─ 配置 VLESS Vision ────────────────────────────────"
-        menuLine "开始配置 VLESS Vision 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 27 "${singBoxVLESSVisionPort}" || return 1
@@ -1198,7 +1195,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 21 "$1"; then
         echoContent title "\n┌─ 配置 VLESS WS ────────────────────────────────────"
-        menuLine "开始配置 VLESS WS 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 21 "${singBoxVLESSWSPort}" || return 1
@@ -1238,7 +1234,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 22 "$1"; then
         echoContent title "\n┌─ 配置 VMess WS ────────────────────────────────────"
-        menuLine "开始配置 VMess WS 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 22 "${singBoxVMessWSPort}" || return 1
@@ -1279,7 +1274,6 @@ EOF
     # VLESS_Reality_Vision
     if protocolSelectionIncludes "${selectCustomInstallType}" 1 "$1"; then
         echoContent title "\n┌─ 配置 VLESS Reality Vision ────────────────────────"
-        menuLine "开始配置 VLESS Reality Vision 协议端口"
         menuClose
         initRealityProfile || return 1
         initRealityKey || return 1
@@ -1326,7 +1320,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 26 "$1"; then
         echoContent title "\n┌─ 配置 VLESS Reality gRPC ──────────────────────────"
-        menuLine "开始配置 VLESS Reality gRPC 协议端口"
         menuClose
         initRealityProfile || return 1
         initRealityKey || return 1
@@ -1372,7 +1365,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 3 "$1"; then
         echoContent title "\n┌─ 配置 Hysteria2 ───────────────────────────────────"
-        menuLine "开始配置 Hysteria2 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 3 "${singBoxHysteria2Port}" || return 1
@@ -1433,7 +1425,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 28 "$1"; then
         echoContent title "\n┌─ 配置 Trojan ──────────────────────────────────────"
-        menuLine "开始配置 Trojan 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 28 "${singBoxTrojanPort}" || return 1
@@ -1462,7 +1453,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 30 "$1"; then
         echoContent title "\n┌─ 配置 Shadowsocks ─────────────────────────────────"
-        menuLine "开始配置 Shadowsocks 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 30 "${singBoxShadowsocksPort}" || return 1
@@ -1511,7 +1501,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 31 "$1"; then
         echoContent title "\n┌─ 配置 Tuic ────────────────────────────────────────"
-        menuLine "开始配置 Tuic 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 31 "${singBoxTuicPort}" || return 1
@@ -1549,7 +1538,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 5 "$1"; then
         echoContent title "\n┌─ 配置 Naive ───────────────────────────────────────"
-        menuLine "开始配置 Naive 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 5 "${singBoxNaivePort}" || return 1
@@ -1578,7 +1566,6 @@ EOF
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 23 "$1"; then
         echoContent title "\n┌─ 配置 VMess HTTPUpgrade ───────────────────────────"
-        menuLine "开始配置 VMess HTTPUpgrade 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 23 "${singBoxVMessHTTPUpgradePort}" || return 1
@@ -1625,7 +1612,6 @@ EOF
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 4 "$1"; then
         echoContent title "\n┌─ 配置 AnyTLS ──────────────────────────────────────"
-        menuLine "开始配置 AnyTLS 协议端口"
         menuClose
         echo
         readSingBoxProtocolPort result 4 "${singBoxAnyTLSPort}" || return 1

@@ -1353,7 +1353,7 @@ runCoreSelectionRetryActionRegression() (
 
     for entry in "${expectedCounts[@]}"; do
         IFS='|' read -r file expectedCount <<<"${entry}"
-        actualCount=$(grep -cF 'coreSelectionRetryAction ' "${PROJECT_ROOT}/${file}")
+        actualCount=$(grep -cF 'coreSelectionRetryAction ' "${PROJECT_ROOT}/${file}") || [[ "$?" == 1 ]] || return 1
         [[ "${actualCount}" == "${expectedCount}" ]]
     done
     for entry in "${expectedPatterns[@]}"; do
@@ -1913,7 +1913,7 @@ EOF
                     resetMenuActions
                     regressionExpectStatus 1 ipv6Routing <<< $'3\ny' || return 1
                     assertMenuAction hasIPv6Connectivity || return 1
-                    assertMenuAction 'warnCard:会删除所有设置的分流规则 会删除 IPv6 之外的所有出站规则' || return 1
+                    assertMenuAction 'warnCard:将清除现有分流并改用 IPv6 全局出站 使用 Xray 时也会移除现有的 BT 阻断和访问控制规则' || return 1
                     ! grep -q '^ipv6-transaction:' <<<"${actions}" || return 1
                     resetMenuActions
                     ipv6Routing <<< $'3\nn' || return 1
@@ -2209,7 +2209,7 @@ EOF
             : >"${sourceReadLog}"
             originalChangeSubscriptionSourceEnabledMenu
             [[ "$(wc -l <"${sourceReadLog}")" == "1" ]]
-            [[ "${warning}" == *'启用后立即同步并更新公网发布'* ]]
+            [[ "${warning}" == *'启用后同步并更新公网发布'* ]]
         )
         (
             local sourceReadLog="${TMP_DIR}/source-remove-menu-read.log"
@@ -2238,7 +2238,7 @@ EOF
         [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n0:return\n' ]]
         [[ "${menuItems}" == $'安装/更新发布服务\n查看当前订阅链接\n分享订阅\n流量与限额\n立即完整同步\n订阅同步\n'* ]]
         ! assertMenuAction menu
-        grep -q "多服务器角色：.*未启用；可直接使用本机订阅" <<<"${output}"
+        grep -q "多服务器同步：.*未启用" <<<"${output}"
         grep -q "启用主控协同" <<<"${output}"
         grep -q "接入主控" <<<"${output}"
         if grep -q "本机单独使用" <<<"${output}" || grep -q "这台作为主控" <<<"${output}" || grep -q "这台作为被控" <<<"${output}"; then
@@ -2542,9 +2542,9 @@ main
 2
 0"
         grep -q "查看当前已发布链接" <<<"${output}"
-        grep -q "立即同步并更新链接" <<<"${output}"
+        grep -q "立即同步并查看链接" <<<"${output}"
         grep -q "查看当前流量" <<<"${output}"
-        grep -q "返回上级菜单" <<<"${output}"
+        grep -qx '返回 ' <<<"${output}"
         ! grep -q "输入编号或订阅 ID" <<<"${output}"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
         assertMenuAction 'runSubscriptionGroupSync:'
@@ -2718,7 +2718,7 @@ main
             : >"${pendingInviteJqLog}"
             output=
             originalManageSubscriptionPendingInvites
-            grep -q '别名：edge-a' <<<"${output}"
+            grep -Fq 'edge-a / 10.77.0.2/24' <<<"${output}"
             [[ "$(wc -l <"${pendingInviteJqLog}")" == "1" ]]
             [[ -z "${cancelCalled}" ]]
         )
@@ -3249,7 +3249,7 @@ yes
         manageSubscription <<<"0"
         grep -q "接入主控" <<<"${output}"
         grep -q "查看本机状态" <<<"${output}"
-        grep -q "导入/更新主控接入凭据" <<<"${output}"
+        grep -q "更新主控接入凭据" <<<"${output}"
         grep -q "查看控制面与 Peer 细节" <<<"${output}"
         grep -q "卸载被控控制面" <<<"${output}"
         ! grep -q "关闭被控控制面" <<<"${output}"

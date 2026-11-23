@@ -871,25 +871,23 @@ showFail2banRuntimeStatus() {
     local enabledCsv jail
     showFail2banStatusSummary
     if ! fail2banInstalled; then
-        menuLine "当前未安装 fail2ban；启用推荐防护时会自动安装。"
+        menuLine "未安装 Fail2ban，启用推荐防护时会自动安装"
         return 0
     fi
     enabledCsv=$(fail2banCurrentEnabledJailsCsv)
     if [[ -z "${enabledCsv}" ]]; then
-        menuLine "当前没有启用 padm 管理的 jail。"
+        menuLine "未启用 padm 管理的 jail"
     else
-        menuLine "当前启用 jail：${enabledCsv}"
+        menuLine "已启用的 jail：${enabledCsv}"
     fi
     if fail2banControlSurfaceEnabled; then
         menuLine "控制面日志：$(fail2banPadmControlLogFile)"
     fi
     if fail2banCurrentNginxScanEnabled; then
         menuLine "站点扫描日志：$(fail2banNginxAccessLogFile)"
-    else
-        menuLine "站点扫描扩展默认关闭；仅在站点探测较多时建议开启。"
     fi
     if fail2banServiceActive && command -v fail2ban-client >/dev/null 2>&1; then
-        menuLine "fail2ban-client status："
+        menuLine "服务详情（fail2ban-client status）"
         while IFS= read -r jail; do
             [[ -n "${jail}" ]] || continue
             menuLine "${jail}"
@@ -900,11 +898,11 @@ showFail2banRuntimeStatus() {
 showFail2banBans() {
     local jailName
     if ! fail2banInstalled; then
-        errorCard "当前未安装 fail2ban"
+        errorCard "未安装 Fail2ban"
         return 1
     fi
     if ! fail2banServiceActive; then
-        errorCard "fail2ban 当前未运行"
+        errorCard "Fail2ban 未运行"
         return 1
     fi
     menuLine "全局状态："
@@ -928,18 +926,17 @@ manageFail2ban() {
     local selectFail2banMenuType=
     while true; do
         echoContent title "\n┌─ Fail2ban 防护 ────────────────────────────────────"
-        menuLine "这里只管理 padm 当前用到的 SSH、/s/control/ 与站点扫描扩展防护，不扩展成通用安全平台。"
-        menuLine "推荐策略会按本机角色和控制面启用状态自动判断。站点扫描扩展默认关闭，只在站点探测较多时建议开启。"
-        menuLine "当前角色：$(uiStyle value "$(fail2banRoleText)")；控制面：$(uiStyle value "$(fail2banControlSurfaceText)")；当前策略：$(uiStyle value "$(fail2banCurrentProfileLabel)")；站点扫描扩展：$(uiStyle value "$(fail2banNginxScanStatusText)")"
-        menuItem 1 "查看当前防护状态" "查看角色、推荐策略、当前 jail 和服务状态"
-        menuItem 2 "启用推荐防护" "自动选择 仅 SSH 或 SSH + 控制面 防护"
-        menuItem 3 "只启用 SSH 防护" "适合未启用主控/被控控制面，或先做最小接入"
-        menuItem 4 "启用 SSH + 控制面防护" "同时保护 SSH 和 WireGuard 内网 /s/control/ 端点"
-        menuItem 5 "启用站点扫描扩展防护" "默认关闭；仅在公开站点遭遇明显探测时再开启"
-        menuItem 6 "关闭站点扫描扩展防护" "恢复为纯基线防护，不影响 SSH / 控制面基线策略"
-        menuItem 7 "查看当前封禁" "查看 fail2ban 当前 jail 与被封禁 IP"
-        menuDangerItem 8 "停用 padm 管理的防护" "保留 fail2ban 软件包，只关闭 padm 管理的 jail"
-        menuReturnItem 0 "返回系统与脚本" "回到上级菜单"
+        menuLine "角色：$(uiStyle value "$(fail2banRoleText)")  控制面：$(uiStyle value "$(fail2banControlSurfaceText)")"
+        menuLine "防护策略：$(uiStyle value "$(fail2banCurrentProfileLabel)")  站点扫描扩展：$(uiStyle value "$(fail2banNginxScanStatusText)")"
+        menuItem 1 "查看防护状态" "推荐策略、已启用的 jail 和服务状态"
+        menuItem 2 "启用推荐防护" "按控制面状态选择 SSH 或 SSH + 控制面防护"
+        menuItem 3 "仅启用 SSH 防护" "适合未启用控制面的服务器"
+        menuItem 4 "启用 SSH + 控制面防护" "保护 SSH 和 WireGuard 内网的 /s/control/ 接口"
+        menuItem 5 "启用站点扫描扩展" "未启用基础防护时会一并应用推荐策略"
+        menuItem 6 "关闭站点扫描扩展" "停用站点扫描 jail"
+        menuItem 7 "查看封禁状态" "显示各 jail 正在封禁的 IP"
+        menuDangerItem 8 "停用 padm 防护" "关闭 padm 管理的 jail，保留 Fail2ban 软件包"
+        menuReturnItem 0 "返回系统与脚本"
         menuClose
         selectFail2banMenuType=
         menuReadChoice fail2ban_menu "请选择:" selectFail2banMenuType interactive || return 0

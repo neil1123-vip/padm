@@ -788,7 +788,7 @@ showAdminSubscriptionTraffic() {
       subscriptionTrafficLines(.traffic.admin.sources; $sourceNames; "admin") | .[]')
     output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
         subscriptionActiveGroupRead -r "${jqProgram}") || return 1
-    showSubscriptionTrafficCard "我的流量" "${output}"
+    showSubscriptionTrafficCard "管理员流量" "${output}"
 }
 
 showUserSubscriptionTraffic() {
@@ -862,21 +862,21 @@ manageTrafficAndQuota() {
         *) quotaAutoApplyText="暂不可读"; quotaAutoApplyTarget= ;;
         esac
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
-        menuLine "总览来自已保存的统计；采集和超限处理按需执行。"
+        menuLine "总览显示上次保存的流量统计。"
         menuLine "自动执行超限处理：${quotaAutoApplyText}"
-        menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
-        menuItem 2 "管理分享订阅与额度" "选择一次查看用量、修改额度、启停或同步；支持多选"
-        menuItem 3 "我的流量" "自用账号按服务器统计"
-        menuItem 4 "服务器流量" "全部账号按服务器统计"
-        menuDangerItem 5 "执行超限处理并同步" "停用超额订阅，更新本机、被控服务器和订阅发布"
+        menuItem 1 "刷新并显示总览" "采集本机账号流量并保存"
+        menuItem 2 "管理分享订阅与额度" "查看用量、修改额度和启停订阅，支持多选"
+        menuItem 3 "管理员流量" "按服务器查看管理员账号流量"
+        menuItem 4 "服务器流量" "按服务器查看全部账号流量"
+        menuDangerItem 5 "执行超限处理并同步" "停用超限订阅，同步账号和发布链接"
         if [[ "${quotaAutoApplyTarget}" == "true" ]]; then
-            menuItem 6 "开启自动执行超限处理" "完整同步前自动停用超额订阅"
+            menuItem 6 "开启自动超限处理" "完整同步前自动停用超限订阅"
         elif [[ "${quotaAutoApplyTarget}" == "false" ]]; then
-            menuItem 6 "关闭自动执行超限处理" "保留流量统计，超额订阅改为手动处理"
+            menuItem 6 "关闭自动超限处理" "继续统计流量，改为手动处理超限订阅"
         else
             menuItem 6 "自动限额状态暂不可读" "恢复状态后再修改"
         fi
-        menuReturnItem 0 "返回订阅首页" "回到本机或主控首页"
+        menuReturnItem 0 "返回订阅首页"
         menuClose
         menuReadChoice traffic_quota_menu "请选择:" trafficQuotaStatus interactive || return 0
         case "${trafficQuotaStatus}" in
