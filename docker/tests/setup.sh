@@ -604,10 +604,10 @@ for candidateCase in success return eof final-no no-a signature-fail; do
     expected=0
     case "${candidateCase}" in
     success) input+=$'1\n\ny\n' ;;
-    return) input+=$'r\n' ;;
+    return) input+=$'0\n' ;;
     eof) input+=$'\004' ;;
     final-no) input+=$'1\n\nn\n' ;;
-    no-a) FAKE_SETUP_MODE=ok; input+=$'r\n' ;;
+    no-a) FAKE_SETUP_MODE=ok; input+=$'0\n' ;;
     signature-fail) FAKE_SETUP_MODE=signature-fail; expected=16 ;;
     esac
     runPty "${expected}" "candidates-${candidateCase}" "${input}" setup "${ASSET_ARGS[@]}"
