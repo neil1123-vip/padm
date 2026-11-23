@@ -14,16 +14,16 @@ socks5Routing() {
         menuItem 1 "Socks5 出站" "转发机/代理机配置"
         menuItem 2 "Socks5 入站" "解锁机/落地机配置"
         menuItem 3 "卸载" "移除 Socks5 分流配置"
-        menuReturnItem 4 "返回分流工具" "回到上一级分流菜单"
+        menuReturnItem 0 "返回分流工具" "回到上一级分流菜单"
         menuClose
         selectType=
-        menuReadChoice socks5_menu "请选择:" selectType || return 0
+        menuReadChoice socks5_menu "请选择:" selectType interactive || return 0
 
         case "${selectType}" in
         1) socks5OutboundRoutingMenu || true; continue ;;
         2) socks5InboundRoutingMenu || true; continue ;;
         3) removeSocks5Routing || true; continue ;;
-        4) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -43,10 +43,10 @@ socks5InboundRoutingMenu() {
         menuItem 2 "查看分流规则" "显示当前入站分流规则"
         menuItem 3 "添加分流规则" "更新入站分流域名"
         menuItem 4 "查看入站配置" "显示端口、用户与密码"
-        menuReturnItem 5 "返回 Socks5 分流" "回到上级菜单"
+        menuReturnItem 0 "返回 Socks5 分流" "回到上级菜单"
         menuClose
         selectType=
-        menuReadChoice socks5_inbound_menu "请选择:" selectType || return 0
+        menuReadChoice socks5_inbound_menu "请选择:" selectType interactive || return 0
         case "${selectType}" in
         1)
             totalProgress=1
@@ -112,7 +112,7 @@ socks5InboundRoutingMenu() {
                 errorCard "未安装相应功能"
             fi
             ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -130,10 +130,10 @@ socks5OutboundRoutingMenu() {
         menuDangerItem 2 "设置 Socks5 全局转发" "删除其他出站并全局走 Socks5"
         menuItem 3 "查看分流规则" "显示当前出站分流规则"
         menuItem 4 "添加分流规则" "更新出站分流域名"
-        menuReturnItem 5 "返回 Socks5 分流" "回到上级菜单"
+        menuReturnItem 0 "返回 Socks5 分流" "回到上级菜单"
         menuClose
         selectType=
-        menuReadChoice socks5_outbound_menu "请选择:" selectType || return 0
+        menuReadChoice socks5_outbound_menu "请选择:" selectType interactive || return 0
         case "${selectType}" in
         1)
             backupDir=
@@ -191,7 +191,7 @@ socks5OutboundRoutingMenu() {
             unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
             padmRemoveCleanupPath "${backupDir}"
             ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -376,16 +376,16 @@ removeSocks5Routing() {
         menuItem 1 "卸载 Socks5 出站" "移除出站转发配置"
         menuItem 2 "卸载 Socks5 入站" "移除入站监听配置"
         menuDangerItem 3 "卸载全部" "同时移除 Socks5 出站和入站配置"
-        menuReturnItem 4 "返回 Socks5 分流" "回到上级菜单"
+        menuReturnItem 0 "返回 Socks5 分流" "回到上级菜单"
         menuClose
         unInstallSocks5RoutingStatus=
-        menuReadChoice socks5_uninstall_menu "请选择:" unInstallSocks5RoutingStatus || return 0
+        menuReadChoice socks5_uninstall_menu "请选择:" unInstallSocks5RoutingStatus interactive || return 0
         case "${unInstallSocks5RoutingStatus}" in
         1 | 2 | 3)
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 卸载配置备份失败"; return 1; }
             socks5RoutingRegisterExitRollback "${backupDir}"
             ;;
-        4)
+        0)
             return 0
             ;;
         *)

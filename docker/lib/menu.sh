@@ -307,6 +307,10 @@ dockerMenuRun() {
         status=${DOCKER_MENU_SIGNAL}
     fi
     DOCKER_MENU_CHILD_PID=
+    if [[ "${status}" -eq 3 && "${PADM_DOCKER_REALITY_MENU_SELECT:-}" == 1 &&
+        "${1:-}" == protocol && "${2:-}" == select-target ]]; then
+        return 3
+    fi
     if [[ "${status}" -ne 0 && "${status}" -ne 130 ]]; then
         dockerError "操作失败，退出码: ${status}"
     fi
@@ -969,14 +973,14 @@ dockerMenuRealityTargets() {
         dockerMenuRun protocol target-status || true
         dockerMenuOptions '1. 检测当前目标' '2. 刷新目标库' '3. 扫描指定网段' \
             '4. 同 ASN 抽样扫描' '5. 查看/切换 A 级目标' '6. 手动设置目标站' \
-            '7. 查看目标站黑名单' '8. 返回'
+            '7. 查看目标站黑名单' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
             return 0
         fi
         case "${choice}" in
-        0|8|9|10) return 0 ;;
+        0) return 0 ;;
         1)
             dockerSetupRead listener 'Reality 入口 ID（空输入检测全部，0 返回）: ' || continue
             if [[ -n "${listener}" ]]; then
@@ -988,15 +992,16 @@ dockerMenuRealityTargets() {
             dockerMenuRealityTargetActions "${listener}"
             ;;
         2)
-            printf '\nReality 刷新范围\n'
-            printf '%s\n' '1. 目标库 + 推荐候选' '2. 推荐候选' '3. 返回'
-            dockerSetupRead scope '请选择刷新范围 [1]: ' 1 || continue
-            case "${scope}" in
-            1) dockerMenuRun protocol refresh-targets recommended || true ;;
-            2) dockerMenuRun protocol refresh-targets recommended_only || true ;;
-            3|r|R) ;;
-            *) printf '无效选项，请重新选择。\n' ;;
-            esac
+            while :; do
+                printf '\nReality 刷新范围\n'
+                printf '%s\n' '1. 目标库 + 推荐候选' '2. 推荐候选' '0. 返回'
+                dockerSetupRead scope '请选择刷新范围 [1]: ' 1 || break
+                case "${scope}" in
+                1) dockerMenuRun protocol refresh-targets recommended || true; break ;;
+                2) dockerMenuRun protocol refresh-targets recommended_only || true; break ;;
+                *) printf '无效选项，请重新选择。\n' ;;
+                esac
+            done
             ;;
         3) dockerMenuRun protocol scan-targets || true ;;
         4) dockerMenuRun protocol scan-targets-asn || true ;;
@@ -1020,31 +1025,42 @@ dockerMenuRealityTargets() {
 }
 
 dockerMenuRealityTargetSelect() {
-    local listener
+    local listener status=0
     dockerSetupRead listener '切换目标的 Reality 入口 ID（0 返回）: ' "${1:-}" &&
         [[ -n "${listener}" ]] || return 0
-    dockerMenuRun protocol select-target "${listener}" || true
+    if [[ "${2:-}" == followup ]]; then
+        PADM_DOCKER_REALITY_MENU_SELECT=1 dockerMenuRun protocol select-target "${listener}" || status=$?
+        [[ "${status}" != 3 ]] || return 3
+    else
+        dockerMenuRun protocol select-target "${listener}" || true
+    fi
 }
 
 dockerMenuRealityTargetActions() {
-    local choice listener=${1:-} answer
-    printf '\nReality 目标站后续操作\n'
-    printf '%s\n' '1. 查看/切换 A 级目标' '2. 加入目标站黑名单' '3. 返回'
-    dockerSetupRead choice '请选择 [3]: ' 3 || return 0
-    case "${choice}" in
-    1) dockerMenuRealityTargetSelect "${listener}" ;;
-    2)
-        dockerSetupRead listener '加入黑名单的 Reality 入口 ID（0 返回）: ' "${listener}" &&
-            [[ -n "${listener}" ]] || return 0
-        dockerMenuRun protocol targets "${listener}" || return 0
-        dockerSetupRead answer '确认将该入口当前目标加入黑名单？[y/N]: ' n || return 0
-        case "${answer}" in
-        y|Y|yes|YES) dockerMenuRun protocol block-current-target "${listener}" || true ;;
+    local choice listener=${1:-} answer status
+    while :; do
+        printf '\nReality 目标站后续操作\n'
+        printf '%s\n' '1. 查看/切换 A 级目标' '2. 加入目标站黑名单' '0. 返回'
+        dockerSetupRead choice '请选择: ' || return 0
+        case "${choice}" in
+        1)
+            status=0
+            dockerMenuRealityTargetSelect "${listener}" followup || status=$?
+            [[ "${status}" != 3 ]] || continue
+            ;;
+        2)
+            dockerSetupRead listener '加入黑名单的 Reality 入口 ID（0 返回）: ' "${listener}" &&
+                [[ -n "${listener}" ]] || return 0
+            dockerMenuRun protocol targets "${listener}" || return 0
+            dockerSetupRead answer '确认将该入口当前目标加入黑名单？[y/N]: ' n || return 0
+            case "${answer}" in
+            y|Y|yes|YES) dockerMenuRun protocol block-current-target "${listener}" || true ;;
+            esac
+            ;;
+        *) printf '无效选项，请重新选择。\n'; continue ;;
         esac
-        ;;
-    3|r|R) ;;
-    *) printf '无效选项，请重新选择。\n' ;;
-    esac
+        return 0
+    done
 }
 
 dockerMenuAccounts() {
@@ -1155,9 +1171,8 @@ dockerMenuTraffic() {
                 [[ -n "${accountId}" ]] || continue
             if [[ "${choice}" == 3 ]]; then
                 # 额度 0 表示不限额，不能使用把 0 当返回键的共用输入函数。
-                printf '额度 GiB（0 不限额，空输入/r 返回）: '
-                IFS= read -r limit || continue
-                case "${limit}" in ''|r|R) continue ;; esac
+                printf '额度 GiB（0 不限额，空输入取消）: '
+                IFS= read -r limit && [[ -n "${limit}" ]] || continue
                 confirmation="确认设置账号 ${accountId} 的额度为 ${limit} GiB（0 不限额）？[y/N]: "
             else
                 confirmation="确认清零账号 ${accountId} 的上传和下载累计（保留额度）？[y/N]: "
@@ -2415,7 +2430,7 @@ dockerMenuSubscriptionUsers() {
         menuItem 4 '控制连接' 'WireGuard、主控/被控与同步'
         menuItem 5 '业务备份恢复' '账号和分享组的分范围备份'
         menuItem 7 'HTTPS 订阅发布' '查看、启用和停用本机公网发布'
-        menuReturnItem 6 '返回主菜单' '回到 padm 管理面板'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2427,7 +2442,6 @@ dockerMenuSubscriptionUsers() {
         3) dockerMenuTraffic ;;
         4) dockerMenuControl ;;
         5) dockerMenuBusiness ;;
-        6) return 0 ;;
         7) dockerMenuSubscriptionPublish ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
@@ -2443,7 +2457,7 @@ dockerMenuRealityManagement() {
         menuItem 1 '目标站管理' '检测、扫描、目标库、切换和黑名单'
         menuItem 2 '重生成 Reality 参数' '按入口轮换密钥对和 short ID'
         menuItem 3 'Reality 443 共存' '受管 TLS 站点或宿主网站分流'
-        menuReturnItem 4 '返回协议与入口' '回到上级菜单'
+        menuReturnItem 0 '返回协议与入口' '回到上级菜单'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2457,7 +2471,6 @@ dockerMenuRealityManagement() {
             dockerMenuRun edit --regenerate-reality "${listener}" || true
             ;;
         3) dockerMenuRealityStream ;;
-        4) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2477,8 +2490,8 @@ dockerMenuProtocolEntries() {
         menuItem 5 'Tuic 管理' '拥塞、认证、心跳和 0-RTT'
         menuItem 6 '额外入口端口管理' '公开端口与默认分享入口'
         menuItem 7 'CDN 入口管理' '连接地址覆盖和 H3 使用说明'
-        menuReturnItem 8 '返回主菜单' '回到 padm 管理面板'
         menuItem 9 '入口高级管理' '增量安装、复制删除、重建、端口跳跃和密钥轮换'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2492,7 +2505,6 @@ dockerMenuProtocolEntries() {
         5) dockerMenuTuic ;;
         6) dockerMenuPortAliases ;;
         7) dockerMenuCdnEntries ;;
-        8) return 0 ;;
         9) dockerMenuProtocols ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
@@ -2509,7 +2521,7 @@ dockerMenuSiteCertificates() {
         menuItem 1 '传统 TLS fallback 维护' '静态站点、302 重定向、ALPN 诊断和修复'
         menuItem 2 '本机 TLS 证书管理' '校验、轮换、申请与续期'
         menuItem 4 '本地静态站点' '导入目录或使用内置主题'
-        menuReturnItem 3 '返回主菜单' '回到 padm 管理面板'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2518,7 +2530,6 @@ dockerMenuSiteCertificates() {
         case "${choice}" in
         1|4) dockerMenuSites ;;
         2) dockerMenuRun tls manage || true ;;
-        3) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2534,7 +2545,7 @@ dockerMenuSocks5() {
         menuItem 1 'Socks5 出站' '全局或域名分流与上游维护'
         menuItem 2 'Socks5 入站（不可用）' '查看限制原因'
         menuItem 3 '卸载 Socks5 出站' '关闭本机受管 SOCKS5 出站'
-        menuReturnItem 4 '返回分流工具' '回到上级菜单'
+        menuReturnItem 0 '返回分流工具' '回到上级菜单'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2544,7 +2555,6 @@ dockerMenuSocks5() {
         1) dockerMenuRouting socks5 ;;
         2) statusCard 'SOCKS5 入站不可用' '固定核心存在 UDP 鉴权或来源限制失效的问题，未开放入站' ;;
         3) dockerMenuRun edit --socks5-off || true ;;
-        4) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2561,10 +2571,10 @@ dockerMenuRoutingTools() {
         menuItem 3 'Socks5 中继' '认证出站和入站支持边界'
         menuItem 4 'DNS 覆盖' '上游服务器和域名规则'
         menuItem 5 'DNS/hosts 覆盖' '精确域名与 IP 映射'
-        menuReturnItem 6 '返回路由与访问控制' '回到上级菜单'
         menuItem 7 'HTTP 中继入站' '认证和来源允许名单'
         menuItem 8 'WireGuard 连接' '本机身份和 Peer 管理'
         menuItem 9 '完整路由维护' '全部路由专项及 TProxy、Redirect 和 TUN'
+        menuReturnItem 0 '返回路由与访问控制' '回到上级菜单'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2576,7 +2586,6 @@ dockerMenuRoutingTools() {
         3) dockerMenuSocks5 ;;
         4) dockerMenuRouting dns ;;
         5) dockerMenuRouting hosts ;;
-        6) return 0 ;;
         7) dockerMenuHttpRelay ;;
         8) dockerMenuWireGuard ;;
         9) dockerMenuRouting ;;
@@ -2595,7 +2604,7 @@ dockerMenuRoutingAccess() {
         menuItem 1 '分流工具' 'WARP、IPv6、Socks5 和 DNS/hosts'
         menuItem 2 'BT 下载管理' '明文 BT 协议阻断'
         menuItem 3 '访问控制' '域名/IP 阻断、直连例外和区域策略'
-        menuReturnItem 4 '返回主菜单' '回到 padm 管理面板'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2605,7 +2614,6 @@ dockerMenuRoutingAccess() {
         1) dockerMenuRoutingTools ;;
         2) dockerMenuRouting bt ;;
         3) dockerMenuRouting access ;;
-        4) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2660,7 +2668,7 @@ dockerMenuSystem() {
         menuItem 2 '查看安装状态' '部署状态和控制 bundle 版本'
         menuItem 3 'Fail2ban 防护' 'SSH、站点和控制面防护'
         menuMutedLine '网络优化沿用宿主机设置；此菜单不修改宿主机内核参数'
-        menuReturnItem 5 '返回主菜单' '回到 padm 管理面板'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2670,7 +2678,6 @@ dockerMenuSystem() {
         1) dockerMenuMaintenance || return 1 ;;
         2) dockerMenuRun status || true ;;
         3) dockerMenuFail2ban ;;
-        5) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2684,7 +2691,7 @@ dockerMenuDanger() {
         menuLine '这里集中容易中断连接或影响兼容性的操作'
         menuDangerItem 1 '卸载服务与控制命令' '保留状态、配置和数据，执行前再次确认'
         menuDangerItem 2 'VLESS Encryption 实验' '沿用当前固定核心的实验支持范围'
-        menuReturnItem 3 '返回主菜单' '回到 padm 管理面板'
+        menuReturnItem 0 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -2698,7 +2705,6 @@ dockerMenuDanger() {
             esac
             ;;
         2) dockerMenuVlessEncryption ;;
-        3) return 0 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

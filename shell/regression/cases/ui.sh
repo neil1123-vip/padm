@@ -261,7 +261,7 @@ main.example.com
 
     wireGuardMenuAddEdgePeer() {
         local receiptJson receiptCredential reservedInvite
-        local itemChoices=${1:-8}
+        local itemChoices=${1:-0}
         resetMenuActions
         if subscriptionWireGuardCreateInvite main reservedInvite >/dev/null 2>&1; then
             return 1
@@ -274,7 +274,7 @@ main.example.com
         manageSubscriptionServers <<<"2
 ${receiptCredential}
 ${itemChoices}
-6"
+0"
         [[ "${healthCallCount}" == "0" ]]
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
@@ -342,7 +342,7 @@ SH
                 printf '{"ok":true}\n'
             }
             selectSubscriptionSourceId() { sourceSelectCount=$((sourceSelectCount + 1)); return 99; }
-            wireGuardMenuAddEdgePeer $'3\n8'
+            wireGuardMenuAddEdgePeer $'3\n0'
             [[ "${sourceSelectCount}" == "0" && "$(<"${healthLog}")" == edge-a ]]
             [[ "$(grep -cxF 'runSubscriptionGroupSync:' <<<"${actions}")" == "1" ]]
         )
@@ -638,7 +638,7 @@ y"; then
         resetMenuActions
         manageSubscriptionMainControlDetails <<<"3
 4
-5"
+0"
         assertMenuAction installSubscriptionControlService
         assertMenuAction refreshSubscriptionWireGuardNginxControl
         assertMenuAction uninstallSubscriptionWireGuardControl
@@ -1767,12 +1767,12 @@ EOF
             routingAccessMenu() { recordMenuAction routingAccessMenu; }
             : >"${routingToolsRenderLog}"
             resetMenuActions
-            routingToolsMenu <<<"6"
+            routingToolsMenu <<<"0"
             ! assertMenuAction routingAccessMenu
             [[ "$(wc -l <"${routingToolsRenderLog}")" == "1" ]]
             : >"${routingToolsRenderLog}"
             resetMenuActions
-            routingToolsMenu <<< $'bad\n6'
+            routingToolsMenu <<< $'6\n0'
             assertMenuAction 'errorCard:选择错误'
             [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
             ! assertMenuAction routingAccessMenu
@@ -1783,7 +1783,7 @@ EOF
             }
             : >"${routingToolsRenderLog}"
             resetMenuActions
-            routingToolsMenu <<< $'1\n6'
+            routingToolsMenu <<< $'1\n0\n0'
             assertMenuAction warpRoutingMenu
             [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
 
@@ -1791,7 +1791,7 @@ EOF
             sniRouting() { recordMenuAction sniRouting; }
             : >"${routingToolsRenderLog}"
             resetMenuActions
-            routingToolsMenu <<< $'5\n6'
+            routingToolsMenu <<< $'5\n0'
             assertMenuAction sniRouting
             ! assertMenuAction 'errorCard:此功能不支持Hysteria2、Tuic'
             [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
@@ -1805,7 +1805,7 @@ EOF
             accessControlMenu() { recordMenuAction accessControlMenu; }
             : >"${routingAccessRenderLog}"
             resetMenuActions
-            routingAccessMenu <<< $'bad\n4'
+            routingAccessMenu <<< $'4\n0'
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction routingToolsMenu
             ! assertMenuAction btTools
@@ -1818,7 +1818,7 @@ EOF
             }
             : >"${routingAccessRenderLog}"
             resetMenuActions
-            routingAccessMenu <<< $'1\n6\n4'
+            routingAccessMenu <<< $'1\n0\n0'
             assertMenuAction routingToolsMenu
             [[ "$(wc -l <"${routingAccessRenderLog}")" == "2" ]]
         )
@@ -1834,7 +1834,7 @@ EOF
             echoContent() { printf '%s\n' "$*" >>"${routingMenuRenderLog}"; }
             : >"${routingMenuRenderLog}"
             resetMenuActions
-            dnsRouting <<< $'bad\n3'
+            dnsRouting <<< $'3\n0'
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction routingToolsMenu
             [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
@@ -1843,24 +1843,24 @@ EOF
                 singBoxConfigPath=/tmp/menu-smoke-sing-box/
                 coreNotInstalledErrorCard() { recordMenuAction coreNotInstalledErrorCard; }
                 resetMenuActions
-                dnsRouting <<< $'1\n3'
+                dnsRouting <<< $'1\n0'
                 assertMenuAction setUnlockDNS
                 ! assertMenuAction coreNotInstalledErrorCard
                 resetMenuActions
-                sniRouting <<< $'1\n3'
+                sniRouting <<< $'1\n0'
                 assertMenuAction setUnlockSNI
                 ! assertMenuAction coreNotInstalledErrorCard
             )
             : >"${routingMenuRenderLog}"
             resetMenuActions
-            sniRouting <<< $'bad\n3'
+            sniRouting <<< $'3\n0'
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction routingToolsMenu
             [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
             : >"${routingMenuRenderLog}"
             resetMenuActions
             warpRoutingReg() { recordMenuAction "warpRoutingReg:$*"; }
-            warpRoutingMenu <<< $'bad\n3'
+            warpRoutingMenu <<< $'3\n0'
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction routingToolsMenu
             [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
@@ -1873,14 +1873,14 @@ EOF
                 routingAccessMenu() { recordMenuAction routingAccessMenu; }
                 : >"${routingMenuRenderLog}"
                 resetMenuActions
-                btTools <<< $'bad\n4'
+                btTools <<< $'4\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction routingAccessMenu
                 [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
 
                 : >"${routingMenuRenderLog}"
                 resetMenuActions
-                ipv6Routing <<< $'bad\n5'
+                ipv6Routing <<< $'5\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction routingAccessMenu
                 [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
@@ -1894,14 +1894,14 @@ EOF
                     showIPv6Routing() { recordMenuAction showIPv6Routing; }
                     routingConfigApplyTransaction() { recordMenuAction "ipv6-transaction:$4:${5:-}"; }
                     warnCard() { recordMenuAction "warnCard:$*"; }
-                    for ipv6Choice in 1 4 5; do
+                    for ipv6Choice in 1 4 0; do
                         resetMenuActions
                         ipv6Routing <<<"${ipv6Choice}" || return 1
                         ! assertMenuAction hasIPv6Connectivity || return 1
                         case "${ipv6Choice}" in
                         1) assertMenuAction showIPv6Routing || return 1 ;;
                         4) assertMenuAction 'ipv6-transaction:removeIPv6RoutingConfig:' || return 1 ;;
-                        5) [[ -z "${actions}" ]] || return 1 ;;
+                        0) [[ -z "${actions}" ]] || return 1 ;;
                         esac
                     done
                     resetMenuActions
@@ -1947,7 +1947,7 @@ EOF
                 socks5InboundRoutingMenu() { recordMenuAction socks5InboundRoutingMenu; }
                 removeSocks5Routing() { recordMenuAction removeSocks5Routing; }
                 resetMenuActions
-                socks5Routing <<< $'bad\n4'
+                socks5Routing <<< $'4\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction routingToolsMenu
                 [[ "$(wc -l <"${socksMenuRenderLog}")" == "2" ]]
@@ -1957,7 +1957,7 @@ EOF
                 readInstallType() { :; }
                 socks5Routing() { recordMenuAction socks5Routing; }
                 resetMenuActions
-                socks5InboundRoutingMenu <<< $'bad\n5'
+                socks5InboundRoutingMenu <<< $'5\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction socks5Routing
                 [[ "$(wc -l <"${socksMenuRenderLog}")" == "4" ]]
@@ -1966,7 +1966,7 @@ EOF
             (
                 socks5Routing() { recordMenuAction socks5Routing; }
                 resetMenuActions
-                socks5OutboundRoutingMenu <<< $'bad\n5'
+                socks5OutboundRoutingMenu <<< $'5\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction socks5Routing
                 [[ "$(wc -l <"${socksMenuRenderLog}")" == "6" ]]
@@ -1975,7 +1975,7 @@ EOF
             (
                 socks5Routing() { recordMenuAction socks5Routing; }
                 resetMenuActions
-                removeSocks5Routing <<< $'bad\n4'
+                removeSocks5Routing <<< $'4\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction socks5Routing
                 [[ "$(wc -l <"${socksMenuRenderLog}")" == "8" ]]
@@ -1995,7 +1995,7 @@ EOF
 
             (
                 resetMenuActions
-                originalAccessControlMenu <<< $'bad\n7'
+                originalAccessControlMenu <<< $'7\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction routingAccessMenu
                 [[ "$(wc -l <"${accessMenuRenderLog}")" == "2" ]]
@@ -2003,7 +2003,7 @@ EOF
 
             (
                 resetMenuActions
-                manageRegionalBlockPolicy <<< $'bad\n4'
+                manageRegionalBlockPolicy <<< $'4\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction accessControlMenu
                 [[ "$(wc -l <"${accessMenuRenderLog}")" == "4" ]]
@@ -2011,7 +2011,7 @@ EOF
 
             (
                 resetMenuActions
-                removeAccessControlMenu <<< $'bad\n6'
+                removeAccessControlMenu <<< $'6\n0'
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction accessControlMenu
                 [[ "$(wc -l <"${accessMenuRenderLog}")" == "6" ]]
@@ -2027,7 +2027,7 @@ EOF
         PADM_XRAY_DIR="${TMP_DIR}/missing-xray" \
             PADM_XRAY_BINARY="${TMP_DIR}/missing-xray/xray" \
             PADM_SINGBOX_BINARY="${TMP_DIR}/missing-sing-box" \
-            coreVersionManageMenu <<<"6"
+            coreVersionManageMenu <<<"0"
         [[ "${menuItems}" == $'Xray-core 生命周期\nsing-box 生命周期\n服务运行态\n日志与诊断\nXray Geo 数据\n返回主菜单\n' ]]
         ! grep -qxF '安装与重装' <<<"${menuItems}"
         ! grep -qF '配置健康与兼容' <<<"${menuItems}"
@@ -2045,20 +2045,20 @@ EOF
         mainMenuStatusArgs=
         PADM_INSTALL_STATUS_READY=1
         local menuSmokePwd=$PWD
-        originalCoreMainMenu <<<'6
-6'
+        originalCoreMainMenu <<< $'\n6\n0\n0'
         cd "${menuSmokePwd}" || return 1
-        [[ "$(grep -c '^安装与重装$' <<<"${menuItems}")" == "2" ]]
-        [[ "${mainMenuShowStatusCount}" == "2" ]]
+        [[ "$(grep -c '^安装与重装$' <<<"${menuItems}")" == "3" ]]
+        [[ "${mainMenuShowStatusCount}" == "3" ]]
         [[ "${mainMenuWgetCount}" == "1" ]]
         [[ "${mainMenuMkdirCount}" == "1" ]]
         [[ "${mainMenuAliasCount}" == "1" ]]
-        [[ "${mainMenuStatusArgs}" == $'cached\nnone\n' ]]
+        [[ "${mainMenuStatusArgs}" == $'cached\nnone\nnone\n' ]]
+        assertMenuAction 'errorCard:输入有误，请重新输入'
         ! assertMenuAction unexpected-network-version-fetch
 
         resetMenuRender
         customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
-        installMenu <<<"7"
+        installMenu <<<"0"
         ! assertMenuAction menu
         resetMenuActions
         installMenu <<<"4"
@@ -2067,13 +2067,13 @@ EOF
         installMenu <<<"5"
         assertMenuAction selectCoreInstall
         resetMenuActions
-        protocolEntryMenu <<<"8"
+        protocolEntryMenu <<<"0"
         ! assertMenuAction menu
         (
             showLocalProtocolLinks() { recordMenuAction showLocalProtocolLinks; }
             resetMenuActions
             output=
-            protocolEntryMenu <<< $'1\n8'
+            protocolEntryMenu <<< $'1\n0'
             assertMenuAction showLocalProtocolLinks
             grep -q "查看全部协议链接" <<<"${output}"
             ! assertMenuAction showAccounts
@@ -2091,7 +2091,7 @@ EOF
             manageCDN() { recordMenuAction manageCDN; }
             : >"${protocolMenuRenderLog}"
             resetMenuActions
-            protocolEntryMenu <<< $'bad\n8'
+            protocolEntryMenu <<< $'8\n0'
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction showLocalProtocolLinks
             ! assertMenuAction manageReality
@@ -2109,7 +2109,7 @@ EOF
             manageTLSCertificates() { recordMenuAction manageTLSCertificates; }
             : >"${siteMenuRenderLog}"
             resetMenuActions
-            siteCertificateMenu <<< $'bad\n3'
+            siteCertificateMenu <<< $'3\n0'
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction manageTraditionalTlsFallback
             ! assertMenuAction manageTLSCertificates
@@ -2124,9 +2124,9 @@ EOF
         currentRealityNetworkProfile() { : >"${realityMenuNetworkMarker}"; return 1; }
         protocolEntryMenu <<<"2
 2
-10
-6
-8"
+0
+0
+0"
         grep -q "检测当前目标" <<<"${output}"
         grep -q "目标 ASN（缓存）" <<<"${output}"
         grep -q "网络关系（缓存）" <<<"${output}"
@@ -2228,8 +2228,8 @@ EOF
         setMenuSmokeRole uninitialized
         resetMenuActions
         resetMenuRender
-        manageSubscription <<<"9" || true
-        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n9:return\n' ]]
+        manageSubscription <<<"0" || true
+        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n0:return\n' ]]
         [[ "${menuItems}" == $'安装/更新发布服务\n查看当前订阅链接\n分享订阅\n流量与限额\n立即完整同步\n订阅同步\n'* ]]
         ! assertMenuAction menu
         grep -q "多服务器角色：.*未启用；可直接使用本机订阅" <<<"${output}"
@@ -2251,29 +2251,29 @@ n"
         resetMenuActions
         setMenuSmokeRole uninitialized
         output=
-        manageSubscriptionLocalHome <<<"9"
+        manageSubscriptionLocalHome <<<"0"
         grep -q "返回主菜单" <<<"${output}"
         grep -q "查看当前订阅链接" <<<"${output}"
         resetMenuActions
         output=
-        manageSubscriptionLocalHome <<<"9"
+        manageSubscriptionLocalHome <<<"0"
         [[ -z "${actions}" ]]
         resetMenuActions
         manageSubscriptionLocalHome <<<"1
-9"
+0"
         [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\nrunSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
         resetMenuActions
-        manageSubscriptionLocalHome <<< $'10\n9'
+        manageSubscriptionLocalHome <<< $'9\n0'
         [[ "${actions}" == $'errorCard:选择错误，请重新选择\n' ]]
         (
             resetMenuActions
             initSubscriptionWireGuardMain() { recordMenuAction init-failed; return 1; }
-            manageSubscription <<< $'7\n2\n9'
+            manageSubscription <<< $'7\n2\n0'
             [[ "${actions}" == $'init-failed\nshowPublishedSubscriptionLinks:\n' ]]
         )
         (
             resetMenuActions
-            manageSubscription <<< $'8\ninvalid-invite\n\n2\n9'
+            manageSubscription <<< $'8\ninvalid-invite\n\n2\n0'
             [[ "${actions}" == $'errorCard:主控邀请无效，请复制完整内容后重试\nshowPublishedSubscriptionLinks:\n' ]]
             [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
         )
@@ -2305,7 +2305,7 @@ n"
             setMenuSmokeRole uninitialized
             resetMenuActions
             output=
-            manageSubscription <<< $'7\nn\n2\n9'
+            manageSubscription <<< $'7\nn\n2\n0'
             assertMenuAction initSubscriptionWireGuardMain
             assertMenuAction 'showPublishedSubscriptionLinks:'
             [[ "$(subscriptionCurrentRoleNormalized)" == main ]]
@@ -2315,7 +2315,7 @@ n"
             setMenuSmokeRole uninitialized
             resetMenuActions
             output=
-            manageSubscription <<< $'8\ninvite-credential\n2\n8'
+            manageSubscription <<< $'8\ninvite-credential\n2\n0'
             assertMenuAction subscriptionWireGuardJoinInvite
             [[ "$(grep -cxF showSubscriptionWireGuardStatus <<<"${actions}")" == "2" ]]
             [[ "$(subscriptionCurrentRoleNormalized)" == controlled ]]
@@ -2367,7 +2367,7 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         output=
-        manageSubscription <<<"9"
+        manageSubscription <<<"0"
         grep -q "查看当前订阅链接" <<<"${output}"
         grep -q "订阅同步" <<<"${output}"
         grep -q "管理被控服务器" <<<"${output}"
@@ -2389,8 +2389,8 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         resetMenuRender
-        manageSubscriptionMainHome <<<"9"
-        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n9:return\n' ]]
+        manageSubscriptionMainHome <<<"0"
+        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n0:return\n' ]]
         [[ "${menuItems}" == $'安装/更新发布服务\n查看当前订阅链接\n分享订阅\n流量与限额\n立即完整同步\n订阅同步\n'* ]]
         grep -q "查看当前订阅链接" <<<"${output}"
         ! grep -q "新建并发布订阅" <<<"${output}"
@@ -2407,15 +2407,15 @@ invite-credential"
         fi
         resetMenuActions
         manageSubscriptionMainHome <<<"1
-9"
+0"
         [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\nrunSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
         resetMenuActions
         manageSubscriptionMainHome <<<"2
-9"
+0"
         [[ "${actions}" == $'showPublishedSubscriptionLinks:\n' ]]
         resetMenuActions
         manageSubscriptionMainHome <<<"5
-9"
+0"
         [[ "${actions}" == $'runSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
         ! assertMenuAction installSubscribe
         ! assertMenuAction subscribe
@@ -2425,25 +2425,25 @@ invite-credential"
             readNginxSubscribe() { recordMenuAction readNginxSubscribe; return 99; }
             installSubscribe() { recordMenuAction installSubscribe; return 99; }
             SUBSCRIPTION_SYNC_PUBLISHED=true
-            manageSubscriptionMainHome <<< $'5\n9'
+            manageSubscriptionMainHome <<< $'5\n0'
             [[ "${actions}" == $'runSubscriptionGroupSync:\nstatusCard:账号同步已完成，未发布订阅链接\n' ]]
             [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == false ]]
         )
         resetMenuActions
         manageSubscriptionMainHome <<<"4
-7
-9"
+0
+0"
         [[ "${actions}" == $'showSubscriptionTrafficOverview\n' ]]
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"6
-5
-9"
+0
+0"
         grep -q "立即完整同步" <<<"${output}"
         [[ -z "${actions}" ]]
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"9"
+        manageSubscriptionMainHome <<<"0"
         grep -q "本机自用订阅来自协议配置" <<<"${output}"
         grep -q "查看当前订阅链接" <<<"${output}"
         grep -q "立即完整同步" <<<"${output}"
@@ -2454,14 +2454,14 @@ invite-credential"
         grep -q "返回主菜单" <<<"${output}"
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"9"
+        manageSubscriptionMainHome <<<"0"
         grep -q "安装/更新发布服务" <<<"${output}"
         grep -q "查看当前订阅链接" <<<"${output}"
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"3
 
-9"
+0"
         grep -q "暂无分享订阅" <<<"${output}"
         ! grep -q "输入编号或订阅 ID" <<<"${output}"
         [[ -z "${actions}" ]]
@@ -2477,7 +2477,7 @@ invite-credential"
         manageSubscriptionMainHome <<<"3
 
 2
-9" || true
+0" || true
         subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
         [[ "${actions}" == $'showPublishedSubscriptionLinks:\n' ]]
     fi
@@ -2492,9 +2492,9 @@ invite-credential"
 demo-user
 main
 0
-9
+0
 2
-9"
+0"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
         assertMenuAction 'showPublishedSubscriptionLinks:'
         ! assertMenuAction 'errorCard:用户订阅选择无效，请输入列表编号、完整 ID 或菜单中的选择项'
@@ -2520,8 +2520,8 @@ main
 demo-user
 main
 0
-9
-9"
+0
+0"
         fi
         resetMenuActions
         output=
@@ -2531,9 +2531,9 @@ main
 3
 2
 6
-9
+0
 2
-9"
+0"
         grep -q "查看当前已发布链接" <<<"${output}"
         grep -q "立即同步并更新链接" <<<"${output}"
         grep -q "查看当前流量" <<<"${output}"
@@ -2557,8 +2557,8 @@ main
 team-a
 *
 0
-9
-9"
+0
+0"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.sync.enabled == false' >/dev/null
         assertMenuAction 'runSubscriptionGroupSync:'
@@ -2578,8 +2578,8 @@ team-a
 team-b
 main
 0
-9
-9"
+0
+0"
         ! assertMenuAction refreshSubscriptionGroupSyncCron
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionGroupsStateRead -e '.sync.enabled == true' >/dev/null
@@ -2596,15 +2596,15 @@ main
                 return 1
             }
             resetMenuActions
-            manageSubscriptionSyncDiagnostics <<< $'7\n2\n8'
+            manageSubscriptionSyncDiagnostics <<< $'7\n2\n0'
             assertMenuAction 'forced-sync:true' || return 1
             assertMenuAction showSubscriptionServiceStatus || return 1
             [[ "${SUBSCRIPTION_SYNC_FORCE_RETRY:-false}" != "true" ]]
         ) || return 1
         resetMenuActions
         resetMenuRender
-        manageSubscriptionSyncSettings <<<"5"
-        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5:return\n' ]]
+        manageSubscriptionSyncSettings <<<"0"
+        [[ "${menuNumbers}" == $'1\n2\n3\n4\n0:return\n' ]]
         ! grep -q "立即完整同步" <<<"${output}"
         grep -q "开启/关闭自动同步" <<<"${output}"
         grep -q "设置同步间隔" <<<"${output}"
@@ -2616,7 +2616,7 @@ main
             return 1
         fi
         resetMenuActions
-        manageSubscriptionSyncSettings <<< $'6\n5'
+        manageSubscriptionSyncSettings <<< $'6\n0'
         [[ "${actions}" == $'errorCard:选择错误，请重新选择\n' ]]
         resetMenuActions
         (
@@ -2649,11 +2649,11 @@ main
             }
             autoRead() { read -r "$3"; }
             resetMenuActions
-            manageSubscriptionSyncSettings <<< $'2\n\n5'
-            manageSubscriptionSyncSettings <<< $'2\n10\n5'
+            manageSubscriptionSyncSettings <<< $'2\n\n0'
+            manageSubscriptionSyncSettings <<< $'2\n10\n0'
             manageSubscriptionSyncSettings < <(printf '2\n20')
             [[ "${settingWrites}" == "0" && "${cronWrites}" == "0" && "${syncInterval}" == "10" ]]
-            manageSubscriptionSyncSettings <<< $'2\ninvalid\n60\n17\n5'
+            manageSubscriptionSyncSettings <<< $'2\ninvalid\n60\n17\n0'
             [[ "${settingWrites}" == "1" && "${cronWrites}" == "1" && "${syncInterval}" == "17" ]]
             setSubscriptionGroupSyncIntervalWithCron 17
             [[ "${settingWrites}" == "2" && "${cronWrites}" == "2" ]]
@@ -2668,7 +2668,7 @@ main
                     fi
                 }
                 resetMenuActions
-                manageSubscriptionSyncSettings <<< $'1\n5'
+                manageSubscriptionSyncSettings <<< $'1\n0'
                 [[ "${settingWrites}" == "0" && "${cronWrites}" == "0" && "${syncEnabled}" == "false" ]]
                 assertMenuAction 'errorCard:同步设置已变化，请重新读取后重试'
             )
@@ -2689,7 +2689,7 @@ main
                 command jq "$@"
             }
             : >"${syncStatusJqLog}"
-            manageSubscriptionSyncSettings <<<"5"
+            manageSubscriptionSyncSettings <<<"0"
             [[ "$(wc -l <"${syncStatusJqLog}")" == "1" ]]
         )
         (
@@ -2722,7 +2722,7 @@ main
             local inviteIdB='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
             initialPending=$(command jq -cn --arg idA "${inviteIdA}" --arg idB "${inviteIdB}" '
               [{invite_id:$idA,alias:"edge-a",address:"10.77.0.2/24",expires_at:1770000000,remaining_seconds:3600,status:"pending"},
-               {invite_id:$idB,alias:"2",address:"10.77.0.3/24",expires_at:1770000000,remaining_seconds:3600,status:"incomplete",token:"never-print-token"}]')
+               {invite_id:$idB,alias:"0",address:"10.77.0.3/24",expires_at:1770000000,remaining_seconds:3600,status:"incomplete",token:"never-print-token"}]')
             pendingState=${initialPending}
             subscriptionWireGuardListPendingInvites() {
                 [[ "${1:-}" == true ]] || return 99
@@ -2743,8 +2743,8 @@ main
             : >"${listLog}"
             resetMenuActions
             output=
-            originalManageSubscriptionPendingInvites >"${pendingStdout}" <<< $'invalid\nedge-a\nn\nedge-a\ny\n2\ny'
-            [[ "${cancelCount}" == "2" && "${cancelLog}" == "edge-a:${inviteIdA}"$'\n'"2:${inviteIdB}"$'\n' &&
+            originalManageSubscriptionPendingInvites >"${pendingStdout}" <<< $'invalid\nedge-a\nn\nedge-a\ny\nid:0\ny'
+            [[ "${cancelCount}" == "2" && "${cancelLog}" == "edge-a:${inviteIdA}"$'\n'"0:${inviteIdB}"$'\n' &&
                 "${pendingState}" == '[]' && "$(wc -l <"${listLog}")" == "4" ]]
             assertMenuAction 'errorCard:待完成邀请别名无效，请重新输入'
             assertMenuAction 'statusCard:已保留待完成邀请'
@@ -2755,7 +2755,7 @@ main
             pendingState=${initialPending}
             cancelCount=0
             cancelLog=
-            originalManageSubscriptionPendingInvites <<<""
+            originalManageSubscriptionPendingInvites <<<"0"
             originalManageSubscriptionPendingInvites </dev/null
             originalManageSubscriptionPendingInvites < <(printf edge-a)
             originalManageSubscriptionPendingInvites < <(printf 'edge-a\n')
@@ -2764,7 +2764,7 @@ main
             : >"${listLog}"
             cancelShouldFail=true
             resetMenuActions
-            regressionExpectStatus 1 originalManageSubscriptionPendingInvites <<< $'edge-a\ny\n2\ny'
+            regressionExpectStatus 1 originalManageSubscriptionPendingInvites <<< $'edge-a\ny\nid:0\ny'
             [[ "${cancelCount}" == "1" && "${cancelLog}" == "edge-a:${inviteIdA}"$'\n' &&
                 "$(wc -l <"${listLog}")" == "1" && "${pendingState}" == "${initialPending}" ]]
             ! assertMenuAction 'successCard:待完成邀请已取消'
@@ -2772,42 +2772,42 @@ main
         resetMenuActions
         output=
         manageSubscriptionSyncSettings <<<"4
-5
-5"
+0
+0"
         grep -q "返回订阅同步" <<<"${output}"
         resetMenuActions
         manageSubscriptionSyncSettings <<<"3
 1
-8
-5"
+0
+0"
         assertMenuAction showSubscriptionGroupsStateSummary
         assertMenuAction showSubscriptionSources
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"2
-8"
+0"
         assertMenuAction showSubscriptionServiceStatus
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"3
-8"
+0"
         assertMenuAction showSubscriptionLocalSyncPlan
         assertMenuAction subscriptionSyncPlan
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"4
-8"
+0"
         assertMenuAction showSubscriptionRemoteSyncPlan
         assertMenuAction subscriptionRemoteSyncPlan
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"5
-8"
+0"
         assertMenuAction showSubscriptionRemoteHealthPlan
         assertMenuAction subscriptionRemoteControlHealthAll
         resetMenuActions
         resetMenuRender
-        manageSubscriptionSyncDiagnostics <<<"8"
-        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8:return\n' ]]
+        manageSubscriptionSyncDiagnostics <<<"0"
+        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n0:return\n' ]]
         resetMenuRender
         manageTrafficAndQuota <<<"1
-7"
+0"
         [[ "${actions}" == $'showSubscriptionTrafficOverview\ncollectSubscriptionTraffic\nshowSubscriptionTrafficOverview\n' ]]
         grep -q "返回订阅首页" <<<"${output}"
         resetMenuActions
@@ -2816,9 +2816,9 @@ main
             showSubscriptionTrafficOverview() { trafficActions+="overview"$'\n'; }
             collectSubscriptionTraffic() { trafficActions+="collect"$'\n'; return 0; }
             resetMenuRender
-            manageTrafficAndQuota <<<"7"
+            manageTrafficAndQuota <<<"0"
             [[ "${trafficActions}" == $'overview\n' ]]
-            [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7:return\n' ]]
+            [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n0:return\n' ]]
         )
         resetMenuActions
         local trafficCommitted
@@ -2832,7 +2832,7 @@ main
                     return 1
                 }
                 manageTrafficAndQuota <<<"1
-7"
+0"
                 [[ "${trafficActions}" == $'overview\ncollect\noverview\n' ]]
             )
         done
@@ -2841,13 +2841,13 @@ main
             showSubscriptionTrafficOverview() { trafficActions+="overview"$'\n'; return 1; }
             collectSubscriptionTraffic() { trafficActions+="collect"$'\n'; return 1; }
             manageTrafficAndQuota <<<"1
-7"
+0"
             [[ "${trafficActions}" == $'overview\ncollect\noverview\n' ]]
             [[ "${actions}" == $'errorCard:流量总览暂不可读\nwarnCard:流量未完整刷新\nerrorCard:流量总览暂不可读\n' ]]
         )
         resetMenuActions
         manageTrafficAndQuota <<<"3
-7"
+0"
         assertMenuAction showAdminSubscriptionTraffic
         (
             resetMenuActions
@@ -2858,7 +2858,7 @@ main
             manageTrafficAndQuota <<<"2
 4
 8
-7"
+0"
             [[ "${actions}" == $'showSubscriptionTrafficOverview\nmanageSharedSubscriptions\nshowSubscriptionTrafficOverview\nshowSubscriptionSourcesTraffic\nshowSubscriptionTrafficOverview\nerrorCard:选择错误，请重新选择\nshowSubscriptionTrafficOverview\n' ]]
             grep -q '管理分享订阅与额度' <<<"${output}"
             ! grep -q '分享订阅概览' <<<"${output}"
@@ -2869,16 +2869,16 @@ main
             showSubscriptionTrafficOverview() { recordMenuAction "overview:${savedLimit}"; }
             manageSharedSubscriptions() { recordMenuAction edit-limit; savedLimit=2; }
             collectSubscriptionTraffic() { recordMenuAction collect; return 99; }
-            manageTrafficAndQuota <<< $'2\n7'
+            manageTrafficAndQuota <<< $'2\n0'
             [[ "${actions}" == $'overview:1\nedit-limit\noverview:2\n' ]]
         )
         resetMenuActions
         manageTrafficAndQuota <<<"5
-7"
+0"
         assertMenuAction executeSubscriptionQuotaPlanMenu
         resetMenuActions
         manageTrafficAndQuota <<<"6
-7"
+0"
         assertMenuAction 'successCard:限额自动执行状态已更新'
         subscriptionGroupsStateRead -e '.sync.quota_auto_apply == true' >/dev/null
         (
@@ -2906,18 +2906,18 @@ main
         )
         resetMenuActions
         manageSubscriptionMainControlDetails <<<"1
-5"
+0"
         assertMenuAction showSubscriptionWireGuardMainCredential
         resetMenuActions
         manageSubscriptionMainControlDetails <<<"2
-5"
+0"
         assertMenuAction showSubscriptionWireGuardPeers
         assertMenuAction showSubscriptionSourceControlUrls
         for wgAction in "3:restartSubscriptionWireGuardControl" "4:uninstallSubscriptionWireGuardControl"; do
             wgChoice=${wgAction%%:*}
             resetMenuActions
             manageSubscriptionMainControlDetails <<<"${wgChoice}
-5"
+0"
             assertMenuAction "${wgAction#*:}"
         done
         grep -q "卸载主控控制面" <<<"${output}"
@@ -2932,7 +2932,7 @@ main
                     setMenuSmokeRole uninitialized
                     return "${uninstallStatus}"
                 }
-                manageSubscription <<< $'8\n4\n2\n9'
+                manageSubscription <<< $'8\n4\n2\n0'
                 [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
                 [[ "${actions}" == $'showSubscriptionWireGuardStatus\nuninstallSubscriptionWireGuardControl\nshowPublishedSubscriptionLinks:\n' ]]
                 grep -q "启用主控协同" <<<"${output}"
@@ -2945,7 +2945,7 @@ main
                     recordMenuAction uninstallSubscriptionWireGuardControl
                     return "${uninstallStatus}"
                 }
-                manageSubscription <<< $'8\n4\n1\n5\n9'
+                manageSubscription <<< $'8\n4\n1\n0\n0'
                 [[ "$(subscriptionCurrentRoleNormalized)" == main ]]
                 [[ "${actions}" == $'showSubscriptionWireGuardStatus\nuninstallSubscriptionWireGuardControl\nshowSubscriptionWireGuardStatus\nshowSubscriptionWireGuardMainCredential\nshowSubscriptionWireGuardStatus\n' ]]
                 ! grep -q "启用主控协同" <<<"${output}"
@@ -2954,22 +2954,22 @@ main
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"7
-6
-9"
+0
+0"
         [[ -z "${actions}" ]]
         grep -q "管理被控服务器" <<<"${output}"
         grep -q "维护本机控制面" <<<"${output}"
         ! grep -q "查看协同状态" <<<"${output}"
         resetMenuActions
         manageSubscriptionMainHome <<<"8
-5
-9"
+0
+0"
         assertMenuAction showSubscriptionWireGuardStatus
         resetMenuRender
-        manageSubscriptionServers <<<"6"
-        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6:return\n' ]]
+        manageSubscriptionServers <<<"0"
+        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n0:return\n' ]]
         resetMenuActions
-        manageSubscriptionServers <<< $'7\n8\n6'
+        manageSubscriptionServers <<< $'6\n8\n0'
         [[ "${actions}" == $'errorCard:选择错误，请重新选择\nerrorCard:选择错误，请重新选择\n' ]]
         for wgAction in \
             "1:createSubscriptionWireGuardInviteMenu" \
@@ -2979,7 +2979,7 @@ main
             wgChoice=${wgAction%%:*}
             resetMenuActions
             manageSubscriptionServers <<<"${wgChoice}
-6"
+0"
             assertMenuAction "${wgAction#*:}"
         done
         (
@@ -3004,7 +3004,7 @@ main
             }
             manageSubscriptionServerItem() { recordMenuAction "server-detail:${1:-}"; }
             resetMenuActions
-            manageSubscriptionServers <<< $'2\nvalid-receipt\n6'
+            manageSubscriptionServers <<< $'2\nvalid-receipt\n0'
             [[ "${actions}" == $'complete-invite\nsuccessCard:被控接入已完成\nforced-sync\nserver-detail:edge-new\n' ]]
             syncStatus=1
             resetMenuActions
@@ -3012,7 +3012,7 @@ main
             [[ "${actions}" == $'errorCard:接入回执无效，请复制完整内容后重试\nerrorCard:请粘贴接入回执\ncomplete-invite\nsuccessCard:被控接入已完成\nforced-sync\nserver-detail:edge-new\nerrorCard:接入回执无效，请复制完整内容后重试\n' ]]
             completionShouldFail=true
             resetMenuActions
-            manageSubscriptionServers <<< $'2\nvalid-receipt\n6'
+            manageSubscriptionServers <<< $'2\nvalid-receipt\n0'
             [[ "${actions}" == $'complete-invite\n' ]]
             completionShouldFail=false
             regressionExpectStatus 1 addOtherSubscribe completedId <<<valid-receipt
@@ -3048,7 +3048,7 @@ main
             resetMenuActions
             manageSubscriptionServers <<<"4
 5
-6"
+0"
             [[ "${actions}" == $'manageSubscriptionServerItem\nshowSubscriptionSources\n' ]]
         )
         (
@@ -3098,8 +3098,8 @@ main
             runSubscriptionGroupSync() { printf 'sync\n' >>"${serverActionLog}"; }
             : >"${serverActionLog}"
             resetMenuRender
-            manageSubscriptionServerItem edge-a <<<"8"
-            [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8:return\n' ]]
+            manageSubscriptionServerItem edge-a <<<"0"
+            [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n0:return\n' ]]
             [[ "${serverSelectCount}" == "0" && ! -s "${serverActionLog}" ]]
             serverSourcesJson=$(subscriptionActiveGroupRead -c '.sources')
             (
@@ -3108,7 +3108,7 @@ main
                 resetMenuRender
                 manageSubscriptionServerItem <<<"7
 3
-8"
+0"
                 [[ "${serverSelectCount}" == "0" && "$(<"${serverActionLog}")" == 'health:edge-a' ]]
                 assertMenuAction 'statusCard:没有其他被控服务器'
                 grep -qF '名称：Edge A（edge-a）' <<<"${output}"
@@ -3129,7 +3129,7 @@ main
 5
 7
 1
-8"
+0"
             [[ "${serverSelectCount}" == "1" ]]
             [[ "$(<"${serverActionLog}")" == $'update:edge-a\nenabled:edge-a:false\nhealth:edge-a\nsync\nupdate:edge-b' ]]
             ! grep -qF 'secret-server-token' <<<"${output}"
@@ -3141,9 +3141,9 @@ main
             (
                 addSubscriptionSourceState edge-c "Edge C" 10.77.0.4 39778
                 manageSubscriptionServerItem edge-a <<<"7
-
+0
 3
-8"
+0"
                 [[ "${serverSelectCount}" == "2" && "$(<"${serverActionLog}")" == 'health:edge-a' ]]
             )
             subscriptionActiveGroupWrite --argjson sources "${serverSourcesJson}" '.sources = $sources'
@@ -3151,10 +3151,10 @@ main
             serverHealthOk=false
             resetMenuActions
             manageSubscriptionServerItem edge-a >"${serverStdoutLog}" <<<"3
-8"
+0"
             serverHealthObjectError=true
             manageSubscriptionServerItem edge-a >>"${serverStdoutLog}" <<<"3
-8"
+0"
             [[ "$(<"${serverActionLog}")" == $'health:edge-a\nhealth:edge-a' ]]
             assertMenuAction 'errorCard:被控服务器连接检查失败'
             ! grep -qF 'secret-health-token' "${serverStdoutLog}"
@@ -3202,19 +3202,19 @@ yes
         )
         resetMenuActions
         manageSubscriptionStateBackups <<<"1
-5"
+0"
         assertMenuAction showSubscriptionGroupsStateSummary
         resetMenuActions
         manageSubscriptionStateBackups <<<"2
-5"
+0"
         assertMenuAction createSubscriptionGroupsBackupMenu
         resetMenuActions
         manageSubscriptionStateBackups <<<"3
-5"
+0"
         assertMenuAction restoreSubscriptionGroupsBackupMenu
         resetMenuActions
         manageSubscriptionStateBackups <<<"4
-5"
+0"
         assertMenuAction resetSubscriptionGroupsStateMenu
         (
             local menuReadCount=0 backupActionCount=0
@@ -3239,7 +3239,7 @@ yes
         setMenuSmokeRole controlled
         resetMenuActions
         output=
-        manageSubscription <<<"8"
+        manageSubscription <<<"0"
         grep -q "接入主控" <<<"${output}"
         grep -q "查看本机状态" <<<"${output}"
         grep -q "导入/更新主控接入凭据" <<<"${output}"
@@ -3261,7 +3261,7 @@ yes
                     setMenuSmokeRole uninitialized
                     return "${uninstallStatus}"
                 }
-                manageSubscription <<< $'7\n2\n9'
+                manageSubscription <<< $'7\n2\n0'
                 [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
                 [[ "${actions}" == $'uninstallSubscriptionWireGuardControl\nshowPublishedSubscriptionLinks:\n' ]]
                 grep -q "启用主控协同" <<<"${output}"
@@ -3274,7 +3274,7 @@ yes
                     recordMenuAction uninstallSubscriptionWireGuardControl
                     return "${uninstallStatus}"
                 }
-                manageSubscription <<< $'7\n4\n8'
+                manageSubscription <<< $'7\n4\n0'
                 [[ "$(subscriptionCurrentRoleNormalized)" == controlled ]]
                 [[ "${actions}" == $'uninstallSubscriptionWireGuardControl\nshowSubscriptionWireGuardControlledAccessCredential\n' ]]
                 ! grep -q "启用主控协同" <<<"${output}"
@@ -3284,7 +3284,7 @@ yes
         manageSubscriptionControlledHome <<<"1
 invite-credential
 y
-8"
+0"
         assertMenuAction subscriptionWireGuardJoinInvite
         assertMenuAction showSubscriptionWireGuardJoinReceipt
         assertMenuAction showSubscriptionWireGuardStatus
@@ -3325,7 +3325,7 @@ ${mainCredential}"
         resetMenuActions
         output=
         manageSubscriptionControlledHome <<<"2
-8"
+0"
         grep -q "当前服务器角色：" <<<"${output}"
         if assertMenuAction showSubscriptionWireGuardControlledCredential || assertMenuAction showSubscriptionWireGuardJoinReceipt; then
             return 1
@@ -3349,32 +3349,32 @@ ${mainCredential}"
         assertMenuAction 'errorCard:当前机器已初始化为主控'
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"9"
+        manageSubscriptionMainHome <<<"0"
         grep -q "查看当前订阅链接" <<<"${output}"
         resetMenuActions
         output=
-        manageTrafficAndQuota <<<"7"
+        manageTrafficAndQuota <<<"0"
         grep -q "刷新并显示总览" <<<"${output}"
         resetMenuActions
         setMenuSmokeRole controlled
-        manageTrafficAndQuota <<<"7" || true
+        manageTrafficAndQuota <<<"0" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
-        manageSubscriptionStateBackups <<<"5" || true
+        manageSubscriptionStateBackups <<<"0" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
-        manageSubscriptionSyncSettings <<<"5" || true
+        manageSubscriptionSyncSettings <<<"0" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         setMenuSmokeRole uninitialized
-        manageTrafficAndQuota <<<"7"
+        manageTrafficAndQuota <<<"0"
         [[ "${actions}" == $'showSubscriptionTrafficOverview\n' ]]
         resetMenuActions
-        manageSubscriptionStateBackups <<<"5"
+        manageSubscriptionStateBackups <<<"0"
         [[ -z "${actions}" ]]
         resetMenuActions
         output=
-        manageSubscriptionSyncSettings <<<"5"
+        manageSubscriptionSyncSettings <<<"0"
         ! grep -q "立即完整同步" <<<"${output}"
         grep -q "状态与排障" <<<"${output}"
         grep -q "状态备份与恢复" <<<"${output}"
@@ -3385,10 +3385,10 @@ ${mainCredential}"
         fi
         [[ -z "${actions}" ]]
         resetMenuRender
-        manageSubscriptionSyncDiagnostics <<<"5"
-        [[ "${menuNumbers}" == $'1\n2\n3\n4\n5:return\n' ]]
+        manageSubscriptionSyncDiagnostics <<<"0"
+        [[ "${menuNumbers}" == $'1\n2\n3\n4\n0:return\n' ]]
         resetMenuActions
-        manageSubscriptionSyncDiagnostics <<< $'6\n7\n5'
+        manageSubscriptionSyncDiagnostics <<< $'5\n7\n0'
         [[ "${actions}" == $'errorCard:选择错误，请重新选择\nerrorCard:选择错误，请重新选择\n' ]]
     fi
 
@@ -3399,18 +3399,18 @@ ${mainCredential}"
 
         resetMenuActions
         resetMenuRender
-        xrayVersionManageMenu <<<"3"
+        xrayVersionManageMenu <<<"0"
         xrayLifecycleItems=${menuItems}
         [[ "${xrayLifecycleItems}" == "${expectedLifecycleItems}" ]]
-        [[ "${menuNumbers}" == $'1\n2\n3:return\n' ]]
+        [[ "${menuNumbers}" == $'1\n2\n0:return\n' ]]
         ! grep -Eq '普通模式|严格模式' <<<"${output}"
         [[ -z "${actions}" ]]
 
         resetMenuActions
         resetMenuRender
-        singBoxVersionManageMenu <<<"3"
+        singBoxVersionManageMenu <<<"0"
         [[ "${menuItems}" == "${xrayLifecycleItems}" ]]
-        [[ "${menuNumbers}" == $'1\n2\n3:return\n' ]]
+        [[ "${menuNumbers}" == $'1\n2\n0:return\n' ]]
         [[ -z "${actions}" ]]
 
         (
@@ -3440,13 +3440,13 @@ ${mainCredential}"
                 : >"${versionListLog}"
                 resetMenuActions
                 resetMenuRender
-                "${menuFn}" <<< $'1\n\n3' >"${versionOutput}"
+                "${menuFn}" <<< $'1\n\n0' >"${versionOutput}"
                 assertMenuAction "${upgradeLabel}:false "
                 grep -qF 'v1.2.3 [正式版]' "${versionOutput}"
                 grep -qF 'v1.3.0-beta.1 [预发布版]' "${versionOutput}"
                 ! grep -qF '手动输入版本号' <<<"${menuItems}"
                 resetMenuActions
-                "${menuFn}" <<< $'1\n1\n1\n3\n1\n2\n3'
+                "${menuFn}" <<< $'1\n1\n1\n3\n1\n2\n0'
                 assertMenuAction "${upgradeLabel}:false v1.2.3"
                 assertMenuAction "${upgradeLabel}:false v1.2.2"
                 assertMenuAction "${upgradeLabel}:true v1.3.0-beta.1"
@@ -3454,12 +3454,12 @@ ${mainCredential}"
                 [[ "$(wc -l <"${versionListLog}")" == 4 ]]
 
                 resetMenuActions
-                "${menuFn}" <<< $'1\n0\n3'
+                "${menuFn}" <<< $'1\n0\n0'
                 [[ -z "${actions}" ]]
                 resetMenuActions
                 "${menuFn}" < <(printf '1\n')
                 [[ -z "${actions}" ]]
-                for input in $'1\n999\n3' $'1\nm\n3' $'1\nM\n3' $'1\nv1.2.1\n3'; do
+                for input in $'1\n999\n0' $'1\nm\n0' $'1\nM\n0' $'1\nv1.2.1\n0'; do
                     resetMenuActions
                     "${menuFn}" <<<"${input}"
                     assertMenuAction 'errorCard:输入有误，请重新输入'
@@ -3467,7 +3467,7 @@ ${mainCredential}"
                 done
                 for listState in failed empty; do
                     resetMenuActions
-                    "${menuFn}" <<< $'1\n3'
+                    "${menuFn}" <<< $'1\n0'
                     assertMenuAction 'errorCard:获取版本列表失败，请稍后重试'
                     ! grep -q "^${upgradeLabel}:" <<<"${actions}"
                 done
@@ -3479,11 +3479,11 @@ ${mainCredential}"
             xrayInstalledState=false
             singBoxInstalledState=false
             resetMenuActions
-            xrayVersionManageMenu <<< $'1\n2\n3'
+            xrayVersionManageMenu <<< $'1\n2\n0'
             assertMenuAction 'statusCard:Xray-core 生命周期'
             assertMenuAction showXrayConfigHealthCheck
             assertMenuAction showXrayCompatibilityAudit
-            singBoxVersionManageMenu <<< $'1\n2\n3'
+            singBoxVersionManageMenu <<< $'1\n2\n0'
             assertMenuAction 'statusCard:sing-box 生命周期'
             assertMenuAction showSingBoxConfigValidation
             assertMenuAction showSingBoxCompatibilityAudit
@@ -3491,7 +3491,7 @@ ${mainCredential}"
             ! assertMenuAction checkXrayPrereleaseCompatibility
             ! assertMenuAction checkSingBoxPrereleaseCompatibility
             resetMenuRender
-            coreVersionManageMenu <<<"6"
+            coreVersionManageMenu <<<"0"
             [[ ! -s "${versionListLog}" ]]
         )
 
@@ -3503,7 +3503,7 @@ ${mainCredential}"
             for checkActionShouldFail in "" "${lifecycleCheckFn}" "${lifecycleAuditFn}"; do
                 resetMenuActions
                 resetMenuRender
-                "${lifecycleMenuFn}" <<< $'2\n3'
+                "${lifecycleMenuFn}" <<< $'2\n0'
                 [[ "${actions}" == "${lifecycleCheckFn}"$'\n'"${lifecycleAuditFn}"$'\n' ]]
                 [[ "$(grep -c '^升级/切换版本$' <<<"${menuItems}")" == "2" ]]
             done
@@ -3512,11 +3512,11 @@ ${mainCredential}"
 
         resetMenuActions
         resetMenuRender
-        xrayVersionManageMenu <<<'invalid
-still-invalid
+        xrayVersionManageMenu <<<'3
+invalid
 4
 5
-3'
+0'
         [[ "$(grep -cF 'errorCard:输入有误，请重新输入' <<<"${actions}")" == "4" ]]
         [[ "$(grep -c '^升级/切换版本$' <<<"${menuItems}")" == "5" ]]
         ! assertMenuAction checkXrayPrereleaseCompatibility
@@ -3524,7 +3524,7 @@ still-invalid
 
         resetMenuActions
         resetMenuRender
-        coreVersionManageMenu <<<"6"
+        coreVersionManageMenu <<<"0"
         [[ "${menuItems}" == $'Xray-core 生命周期\nsing-box 生命周期\n服务运行态\n日志与诊断\nXray Geo 数据\n返回主菜单\n' ]]
         ! assertMenuAction showXrayCompatibilityAudit
         ! assertMenuAction checkXrayPrereleaseCompatibility
@@ -3535,14 +3535,16 @@ still-invalid
         resetMenuActions
         resetMenuRender
         coreServiceControlMenu xray <<<'3
-4'
+4
+0'
         assertMenuAction 'runServiceAction:xray:restart'
+        assertMenuAction 'errorCard:输入有误，请重新输入'
 
         serviceActionShouldFail=sing-box:restart
         resetMenuActions
         resetMenuRender
         coreServiceControlMenu sing-box <<<'3
-4'
+0'
         serviceActionShouldFail=
         assertMenuAction 'runServiceAction:sing-box:restart'
         assertMenuAction 'errorCard:sing-box 服务重启失败'
@@ -3552,7 +3554,7 @@ still-invalid
         resetMenuRender
         coreServiceControlMenu xray <<<'2
 
-4'
+0'
         assertMenuAction 'statusCard:已取消'
         ! assertMenuAction 'runServiceAction:xray:stop'
 
@@ -3560,7 +3562,7 @@ still-invalid
         resetMenuActions
         resetMenuRender
         coreAllServicesMenu <<<'3
-4'
+0'
         assertMenuAction 'statusCard:Nginx 服务'
         ! grep -q '^runServiceAction:nginx:' <<<"${actions}"
 
@@ -3569,7 +3571,7 @@ still-invalid
         resetMenuActions
         resetMenuRender
         coreServiceControlMenu nginx <<<'4
-5'
+0'
         assertMenuAction 'statusCard:Nginx reload'
         ! assertMenuAction 'runServiceAction:nginx:reload'
         grep -q '^reload（不可用）$' <<<"${menuItems}"
@@ -3578,7 +3580,7 @@ still-invalid
         resetMenuActions
         resetMenuRender
         coreServiceControlMenu nginx <<<'4
-5'
+0'
         assertMenuAction 'runServiceAction:nginx:reload'
 
         (
@@ -3593,14 +3595,14 @@ still-invalid
             }
             nginxReasonsMock="订阅发布"
             : >"${controlServiceProbeLog}"
-            coreServiceControlMenu nginx <<<"5"
+            coreServiceControlMenu nginx <<<"0"
             [[ "$(grep -c '^running:nginx$' "${controlServiceProbeLog}")" == "1" ]]
         )
 
         resetMenuActions
         resetMenuRender
         coreLogsMenu <<<'4
-5'
+0'
         assertMenuAction checkNginxConfig
 
         resetMenuActions
@@ -3608,7 +3610,7 @@ still-invalid
         xrayGeoDataMenu <<<'1
 2
 3
-4'
+0'
         assertMenuAction updateGeoSite
         assertMenuAction showXrayGeoStatus
         assertMenuAction installCronUpdateGeo

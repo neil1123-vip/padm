@@ -1346,14 +1346,14 @@ runProtocolEntryConfigUpdateRegression() (
         local modeLog="${root}/hysteria-mode.log" inputFd unread
         commitHysteria2ConfigUpdate() { commitXHTTPConfigUpdate "$@"; }
         menuLine() { printf '%s\n' "$*" >>"${modeLog}"; }
-        manageHysteria2Bandwidth <<< $'2\n3'
+        manageHysteria2Bandwidth <<< $'2\n0'
         grep -qx '当前模式：brutal' "${modeLog}"
         grep -qx '当前模式：bbr' "${modeLog}"
         [[ "${commits}" == 7 ]]
         command jq '.inbounds[0] += {ignore_client_bandwidth:true,up_mbps:100,down_mbps:50}' "${fixtureConfig}" >"${root}/hysteria-bandwidth.json"
         mv "${root}/hysteria-bandwidth.json" "${fixtureConfig}"
         : >"${modeLog}"
-        manageHysteria2Bandwidth <<<3
+        manageHysteria2Bandwidth <<<0
         grep -qx '当前模式：brutal' "${modeLog}"
         [[ "$(grep -cx '当前模式：brutal' "${modeLog}")" == 1 && "${commits}" == 7 ]]
         for value in malformed empty missing; do
@@ -1470,18 +1470,18 @@ runProtocolEntryConfigUpdateRegression() (
             readInstallProtocolType() { :; }
             readConfigHostPathUUID() { :; }
             menuLine() { printf '%s\n' "$*" >>"${menuLog}"; }
-            manageCDN 1 <<< $'1\ncdn.example.com\n4'
+            manageCDN 1 <<< $'1\ncdn.example.com\n0'
             [[ "$(<"${root}/cdn")" == cdn.example.com ]]
             grep -q '当前是传统 TLS/CDN 协议' "${menuLog}"
             currentInstallProtocolType=,2,
-            manageCDN 1 <<< $'1\nxhttp.example.com\n4'
+            manageCDN 1 <<< $'1\nxhttp.example.com\n0'
             [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
             grep -q '当前已安装 Reality XHTTP' "${menuLog}"
             currentInstallProtocolType=,1,
-            manageCDN 1 <<< $'1\n4'
+            manageCDN 1 <<< $'1\n\n0'
             [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
             beforeStatus=$(wc -l <"${statusLog}")
-            manageCDN 1 <<< $'2\n4'
+            manageCDN 1 <<< $'2\n0'
             [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
             [[ "$(wc -l <"${statusLog}")" == "$((beforeStatus + 1))" ]]
             tail -n 1 "${statusLog}" | grep -q '^不可用 '
@@ -1496,7 +1496,7 @@ runProtocolEntryConfigUpdateRegression() (
             menuLine() { printf '%s\n' "$*" >>"${menuLog}"; }
             rm -f "${root}/cdn"
             printf 'entry.example.com\n' >"${root}/reality-entry"
-            manageCDN 1 <<<4
+            manageCDN 1 <<<0
             grep -q '当前入口地址：entry.example.com' "${menuLog}"
         )
     )
@@ -1517,10 +1517,10 @@ runProtocolEntryConfigUpdateRegression() (
         setXHTTPMode packet-up
         applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xmux |=
             (.hMaxRequestTimes = "42-84" | .hMaxReusableSecs = "90-120" | .cMaxReuseTimes = 7)' fixture
-        manageXHTTPXmux <<< $'1\n4'
+        manageXHTTPXmux <<< $'1\n0'
         command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and
             .xmux == {"maxConcurrency":"16-32","hMaxRequestTimes":"42-84","hMaxReusableSecs":"90-120","cMaxReuseTimes":7}' "${fixtureConfig}" >/dev/null
-        manageXHTTPXmux <<< $'2\n4'
+        manageXHTTPXmux <<< $'2\n0'
         command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and
             .xmux == {"maxConcurrency":1,"hMaxRequestTimes":"42-84","hMaxReusableSecs":"90-120","cMaxReuseTimes":7}' "${fixtureConfig}" >/dev/null
         setXHTTPCustomXmux <<< $'8-16\n50-100\n120-180'
@@ -1613,7 +1613,7 @@ runProtocolEntryConfigUpdateRegression() (
             rm -f "${fixtureConfig}"
             : >"${menuLog}"
             detections=0 summaries=0 installs=0 removals=0
-            "${command}" <<< $'1\n2\n2'
+            "${command}" <<< $'1\n2\n0'
             [[ "${detections}:${summaries}:${installs}:${removals}" == 3:1:1:1 ]]
             [[ "${coreInstallType}" == 1 && -z "${singBoxConfigPath}" && ! -e "${fixtureConfig}" ]]
             grep -qx 重新安装 "${menuLog}"
@@ -1971,13 +1971,13 @@ runProtocolEntryMenuSyncRegression() (
             >"${PADM_XRAY_CONF_DIR}/12_VLESS_XHTTP_inbounds.json"
         printf '%s\n' '{"inbounds":[{"listen_port":16295}]}' >"${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
         corePortApplyReloadTransaction() { "$@"; }
-        addCorePort <<< $'2\n2053\n2053\n4' || return 1
+        addCorePort <<< $'2\n2053\n2053\n0' || return 1
         grep -qx 'allow:2053:udp' "${log}" || return 1
         jq -e '.inbounds[0].settings.port == 16295' "${configPath}02_dokodemodoor_inbounds_hysteria_2053.json" >/dev/null || return 1
         rm "${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
         hysteriaPort=16295
         : >"${log}"
-        addCorePort <<< $'2\n2061\n\n4' || return 1
+        addCorePort <<< $'2\n2061\n\n0' || return 1
         ! grep -q ':udp$' "${log}" || return 1
         [[ -z "${hysteriaPort}" && ! -e "${configPath}02_dokodemodoor_inbounds_hysteria_2061.json" ]] || return 1
         for invalidFile in 06_hysteria2_inbounds.json 09_tuic_inbounds.json; do
@@ -2007,12 +2007,12 @@ runProtocolEntryMenuSyncRegression() (
     for hysteriaPort in '' 16295; do
         for choice in 2 3; do
             if [[ "${choice}" == 2 ]]; then
-                input=$'2\n2053\n2053\n4'
+                input=$'2\n2053\n2053\n0'
                 expected='allow:2053:tcp'
                 [[ -z "${hysteriaPort}" ]] || expected+=$'\nallow:2053:udp'
                 expected+=$'\napply:corePortWriteAddFiles\nrefresh\nnotify'
             else
-                input=$'3\n1\n4'
+                input=$'3\n1\n0'
                 expected=$'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh\nnotify'
             fi
             : >"${log}"
@@ -2058,18 +2058,18 @@ runProtocolEntryMenuSyncRegression() (
     transactionStatus=0
     refreshStatus=0
     local denyStatus=1
-    regressionExpectStatus 1 addCorePort <<< $'3\n1\n4'
+    regressionExpectStatus 1 addCorePort <<< $'3\n1\n0'
     [[ "$(<"${log}")" == $'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nerror:入口端口配置已删除，但防火墙规则回收失败，请检查防火墙状态\nrefresh\nnotify' ]]
     denyStatus=0
     : >"${log}"
-    PADM_SKIP_CONTROLLER_REFRESH=1 addCorePort <<< $'3\n1\n4'
+    PADM_SKIP_CONTROLLER_REFRESH=1 addCorePort <<< $'3\n1\n0'
     [[ "$(<"${log}")" == $'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh' ]]
     : >"${log}"
-    PADM_CONTROL_SERVER=1 addCorePort <<< $'3\n1\n4'
+    PADM_CONTROL_SERVER=1 addCorePort <<< $'3\n1\n0'
     [[ "$(<"${log}")" == $'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh' ]]
     : >"${log}"
     corePortResolveByIndex() { :; }
-    addCorePort <<< $'3\nbad\n4'
+    addCorePort <<< $'3\nbad\n0'
     [[ ! -s "${log}" ]]
     corePortResolveByIndex() { return 1; }
     regressionExpectStatus 1 addCorePort <<< $'3\n1'
@@ -2159,7 +2159,7 @@ runRealityManageMenuStateRegression() (
     }
     showRealityStreamSplitStatus() { :; }
 
-    manageReality <<< $'2\n8\n6'
+    manageReality <<< $'2\n0\n0'
     [[ "${protocolReads}:${configReads}" == 1:1 && "${targetSeen}" == "${storedTarget}" ]] || return 1
 
     regenerateRealityProfile() {
@@ -2172,13 +2172,13 @@ runRealityManageMenuStateRegression() (
     for action in 1 3 5; do
         for mutationStatus in 0 1; do
             protocolReads=0 configReads=0 storedTarget=installed.example.com targetSeen=
-            manageReality <<<"${action}"$'\n2\n8\n6'
+            manageReality <<<"${action}"$'\n2\n0\n0'
             [[ "${protocolReads}:${configReads}" == 2:2 && "${targetSeen}" == "${storedTarget}" ]] || return 1
         done
     done
     protocolReads=0 configReads=0 storedTarget=installed.example.com
     manageRealityTarget() { realityTargetHost=pending.example.com; return 1; }
-    manageReality <<< $'2\n4\n6'
+    manageReality <<< $'2\n4\n0'
     [[ "${protocolReads}:${configReads}" == 2:2 && "${realityTargetHost}" == "${storedTarget}" ]]
 )
 
@@ -2211,11 +2211,11 @@ runRealityTargetMenuStateRegression() (
         printf -v "$3" '%s' "${choice}"
     }
 
-    manageRealityTarget <<< $'7\n8'
+    manageRealityTarget <<< $'7\n0'
     [[ "${protocolReads}:${configReads}" == 1:1 ]] || return 1
     changeRealityTargetFromScanResults() { realityTargetHost=pending.example.com; return 1; }
     protocolReads=0 configReads=0 targetSeen=
-    manageRealityTarget <<< $'5\n8'
+    manageRealityTarget <<< $'5\n0'
     [[ "${protocolReads}:${configReads}" == 2:2 && "${targetSeen}" == www.example.com ]]
 )
 
@@ -2259,13 +2259,13 @@ runSingBoxProtocolMenuStateRegression() (
     }
 
     set +e
-    manageHysteria <<< $'3\n5'
+    manageHysteria <<< $'3\n0'
     local hysteriaRc=$?
     set -e
     [[ "${hysteriaRc}" == 0 && "${installReads}:${protocolReads}:${hoppingCalls}" == 1:1:1 ]] || return 1
     installReads=0 protocolReads=0 hoppingCalls=0
     set +e
-    manageTuic <<< $'3\n7'
+    manageTuic <<< $'3\n0'
     local tuicRc=$?
     set -e
     [[ "${tuicRc}" == 0 && "${installReads}:${protocolReads}:${hoppingCalls}" == 1:1:1 ]] || return 1
@@ -2273,9 +2273,9 @@ runSingBoxProtocolMenuStateRegression() (
     for protocol in hysteria2 tuic; do
         installReads=0 protocolReads=0 hoppingCalls=0 diskPort=18443
         if [[ "${protocol}" == hysteria2 ]]; then
-            manageHysteria <<< $'1\n3\n5'
+            manageHysteria <<< $'1\n3\n0'
         else
-            manageTuic <<< $'1\n3\n7'
+            manageTuic <<< $'1\n3\n0'
         fi
         [[ "${installReads}:${protocolReads}:${hoppingCalls}" == 2:2:1 && "${diskPort}" == 24444 ]] || return 1
     done
@@ -2311,7 +2311,7 @@ runCorePortMenuStateRegression() (
     denyPort() { printf 'deny\n' >>"${mutations}"; return 1; }
     refreshManagedProtocolSubscriptions() { printf 'refresh\n' >>"${mutations}"; return 1; }
 
-    addCorePort >"${output}" <<< $'1\n3\n4'
+    addCorePort >"${output}" <<< $'1\n3\n0'
     [[ "${installReads}:${singBoxReads}" == 1:1 ]]
     [[ "$(grep -c '额外入口端口 暂无额外入口 原监听端口仍保留' "${cards}")" == 2 ]]
     [[ ! -s "${mutations}" ]]
@@ -2319,14 +2319,14 @@ runCorePortMenuStateRegression() (
     grep -qx 'item:1:查看额外入口' "${rendered}"
     grep -qx 'item:2:添加额外入口' "${rendered}"
     grep -qx 'item:3:删除额外入口' "${rendered}"
-    grep -qx 'return:4:返回协议与入口' "${rendered}"
+    grep -qx 'return:0:返回协议与入口' "${rendered}"
     ! grep -q '查看账号时只展示默认端口账号' "${rendered}"
 
     mkdir -p "${configPath}"
     printf '{}\n' >"${configPath}02_dokodemodoor_inbounds_2053.json"
     printf '{}\n' >"${configPath}02_dokodemodoor_inbounds_2083_default.json"
     : >"${cards}"
-    addCorePort >"${output}" <<< $'1\n4'
+    addCorePort >"${output}" <<< $'1\n0'
     [[ "${installReads}:${singBoxReads}" == 2:2 ]]
     [[ ! -s "${output}" ]]
     grep -qx '额外入口端口 额外入口: 2053,2083 订阅默认入口: 2083' "${cards}"
@@ -2334,7 +2334,7 @@ runCorePortMenuStateRegression() (
 
     mv -- "${configPath}02_dokodemodoor_inbounds_2083_default.json" "${configPath}02_dokodemodoor_inbounds_2083.json"
     : >"${cards}"
-    addCorePort >"${output}" <<< $'1\n4'
+    addCorePort >"${output}" <<< $'1\n0'
     grep -qx '额外入口端口 额外入口: 2053,2083 订阅默认入口: 原入口' "${cards}"
     [[ ! -s "${output}" && ! -s "${mutations}" ]]
 

@@ -141,6 +141,9 @@ runMenuReadChoiceRegression() (
     value=previous
     menuReadChoice regression_menu_allow_empty "请选择:" value true < <(printf '\n')
     [[ -z "${value}" ]]
+    menuReadChoice regression_menu_empty "请选择:" value interactive < <(printf '\n')
+    [[ -z "${value}" ]]
+    regressionExpectStatus 1 menuReadChoice regression_menu_eof "请选择:" value interactive </dev/null
 
     AUTO_INSTALL=true
     AUTO_INSTALL_TYPE=reality
@@ -148,6 +151,8 @@ runMenuReadChoiceRegression() (
     value=previous
     menuReadChoice install_type "请选择:" value </dev/null
     [[ "${value}" == "3" ]]
+    regressionExpectStatus 1 menuReadChoice regression_menu_empty "请选择:" value interactive </dev/null
+    [[ -z "${value}" ]]
     unset AUTO_INSTALL AUTO_INSTALL_TYPE AUTO_INSTALL_SUMMARY_SHOWN
 
     (
@@ -249,9 +254,9 @@ runInstallWorkflowRegression() (
     )
 
     # 纠错只读取当前安装输入，中文逗号与两位协议号都使用真实能力库校验。
-    exec {inputFd}< <(printf '999\n1，2\nnext-parent-action\n')
+    exec {inputFd}< <(printf '999\n0,1\n1，2\nnext-parent-action\n')
     selectCoreInstallProtocols xray <&"${inputFd}"
-    [[ "${selectCustomInstallType}" == ",1,2," && "${errors}" == "1" ]]
+    [[ "${selectCustomInstallType}" == ",1,2," && "${errors}" == "2" ]]
     read -r -u "${inputFd}" nextInput
     [[ "${nextInput}" == "next-parent-action" ]]
     exec {inputFd}<&-
@@ -304,7 +309,7 @@ runInstallWorkflowRegression() (
     selectCustomInstallType=previous
     regressionExpectStatus 1 selectCoreInstallProtocols xray < <(printf 'invalid')
     [[ -z "${selectCustomInstallType}" ]]
-    exec {inputFd}< <(printf '\nnext-parent-action\n')
+    exec {inputFd}< <(printf '\n0\nnext-parent-action\n')
     regressionExpectStatus 1 selectCoreInstallProtocols xray <&"${inputFd}"
     [[ -z "${selectCustomInstallType}" ]]
     read -r -u "${inputFd}" nextInput
@@ -518,12 +523,12 @@ runInstallWorkflowRegression() (
         for core in xray sing-box; do
             install=customXrayInstall
             [[ "${core}" != sing-box ]] || install=customSingBoxInstall
-            for input in "" $'\n' $'1\n' $'1\n2'; do
+            for input in "" $'0\n' $'1\n' $'1\n2' $'1\n0\n'; do
                 events=
                 regressionExpectStatus 1 "${install}" < <(printf '%s' "${input}")
                 [[ -z "${events}" ]]
             done
-            exec {inputFd}< <(printf '\nnext-parent-action\n')
+            exec {inputFd}< <(printf '0\nnext-parent-action\n')
             regressionExpectStatus 1 "${install}" <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
             [[ -z "${events}" && "${nextInput}" == next-parent-action ]]
@@ -2164,7 +2169,7 @@ runInstallWorkflowRegression() (
         showInstallStatus() { :; }
         customXrayInstall() { selectCoreInstallProtocols xray; }
         manageSubscription() { followupCalls=$((followupCalls + 1)); }
-        menu < <(printf '1\n5\n1\n\n2\n')
+        menu < <(printf '1\n5\n1\n0\n2\n0\n')
         [[ "${followupCalls}" == 1 ]]
         installMenu() { installCalls=$((installCalls + 1)); return 17; }
         for AUTO_INSTALL in true 1 false; do
@@ -3827,7 +3832,7 @@ runAutoInstallRealityRouteRegression() (
     menuItem() { output+="$2 $3"$'\n'; }
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuDangerItem() { output+="$2 $3"$'\n'; }
-    menuReturnItem() { output+="$2 $3"$'\n'; }
+    menuReturnItem() { output+="$2 ${3:-}"$'\n'; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
     runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }

@@ -1409,7 +1409,7 @@ menuReadChoice() {
         return "${readStatus}"
     fi
     if [[ -z "${!resultVar}" && "${allowEmpty}" != "true" ]]; then
-        return 1
+        [[ "${allowEmpty}" == interactive && -z "${AUTO_INSTALL:-}" ]] || return 1
     fi
     return 0
 }

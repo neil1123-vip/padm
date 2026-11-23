@@ -37,7 +37,7 @@ runRegressionUiSmokeSuiteRoot() {
     menuLine() { output+="$*"$'\n'; }
     menuItem() { output+="$2 $3"$'\n'; }
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
-    menuReturnItem() { output+="$2 $3"$'\n'; }
+    menuReturnItem() { output+="$2 ${3:-}"$'\n'; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
@@ -88,12 +88,22 @@ runRegressionUiSmokeSuiteRoot() {
         selectCoreInstall() { recordMenuAction selectCoreInstall; }
         : >"${menuRenderLog}"
         resetMenuActions
-        installMenu <<< $'bad\n7'
+        installMenu <<< $'7\n0'
         assertMenuAction 'errorCard:选择错误'
         ! assertMenuAction customXrayInstall
         ! assertMenuAction customSingBoxInstall
         ! assertMenuAction selectCoreInstall
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+
+        selectCoreInstall() { originalSelectCoreInstall; }
+        : >"${menuRenderLog}"
+        resetMenuActions
+        installMenu <<< $'5\n\n0\n0'
+        [[ "$(grep -cF '安装与重装 ─' "${menuRenderLog}")" == 2 ]]
+        [[ "$(grep -cF '选择核心 ─' "${menuRenderLog}")" == 2 ]]
+        assertMenuAction 'errorCard:选择错误'
+        ! assertMenuAction customXrayInstall
+        ! assertMenuAction customSingBoxInstall
     )
 
     (
@@ -111,7 +121,7 @@ runRegressionUiSmokeSuiteRoot() {
 
         : >"${menuRenderLog}"
         resetMenuActions
-        originalManageCDN 1 <<< $'bad\n4'
+        originalManageCDN 1 <<< $'4\n0'
         assertMenuAction 'errorCard:选择错误'
         ! assertMenuAction protocolEntryMenu
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
@@ -119,33 +129,33 @@ runRegressionUiSmokeSuiteRoot() {
         : >"${menuRenderLog}"
         resetMenuActions
         coreInstallType=1
-        originalAddCorePort 1 <<< $'bad\n4'
+        originalAddCorePort 1 <<< $'4\n0'
         assertMenuAction 'errorCard:选择错误'
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
 
         : >"${menuRenderLog}"
         resetMenuActions
-        originalManageHysteria <<< $'bad\n2'
-        assertMenuAction 'errorCard:选择错误'
-        ! assertMenuAction protocolEntryMenu
-        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
-
-        : >"${menuRenderLog}"
-        resetMenuActions
-        originalManageTuic <<< $'bad\n2'
+        originalManageHysteria <<< $'2\n0'
         assertMenuAction 'errorCard:选择错误'
         ! assertMenuAction protocolEntryMenu
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
 
         : >"${menuRenderLog}"
         resetMenuActions
-        manageTuicCongestionControl <<< $'bad\n4'
+        originalManageTuic <<< $'2\n0'
+        assertMenuAction 'errorCard:选择错误'
+        ! assertMenuAction protocolEntryMenu
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+
+        : >"${menuRenderLog}"
+        resetMenuActions
+        manageTuicCongestionControl <<< $'4\n0'
         assertMenuAction 'errorCard:选择错误'
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
 
         : >"${menuRenderLog}"
         resetMenuActions
-        manageTuicAdvanced <<< $'bad\n5'
+        manageTuicAdvanced <<< $'5\n0'
         assertMenuAction 'errorCard:选择错误'
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
         singBoxConfigPath="${oldSingBoxConfigPath}"
@@ -179,14 +189,14 @@ runRegressionUiSmokeSuiteRoot() {
             assertMenuAction 'errorCard:选择错误'
             [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
         }
-        runMenuLoopSmoke originalManageXHTTP $'bad\n5'
+        runMenuLoopSmoke originalManageXHTTP $'5\n0'
         ! assertMenuAction protocolEntryMenu
-        runMenuLoopSmoke originalManageXHTTPNormal $'bad\n5'
-        runMenuLoopSmoke originalManageXHTTPAdvanced $'bad\n5'
-        runMenuLoopSmoke originalManageXHTTPExperiment $'bad\n3'
-        runMenuLoopSmoke originalManageXHTTPPresets $'bad\n5'
-        runMenuLoopSmoke originalManageXHTTPMode $'bad\n4'
-        runMenuLoopSmoke originalManageXHTTPXmux $'bad\n4'
+        runMenuLoopSmoke originalManageXHTTPNormal $'5\n0'
+        runMenuLoopSmoke originalManageXHTTPAdvanced $'5\n0'
+        runMenuLoopSmoke originalManageXHTTPExperiment $'3\n0'
+        runMenuLoopSmoke originalManageXHTTPPresets $'5\n0'
+        runMenuLoopSmoke originalManageXHTTPMode $'4\n0'
+        runMenuLoopSmoke originalManageXHTTPXmux $'4\n0'
         coreInstallType="${oldCoreInstallType}"
     )
 
@@ -215,11 +225,11 @@ runRegressionUiSmokeSuiteRoot() {
             assertMenuAction 'errorCard:选择错误'
             [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
         }
-        runMenuLoopSmoke originalManageVlessEncryptionExperiment $'bad\n3'
-        runMenuLoopSmoke originalManageTraditionalTlsFallback $'bad\n7'
-        runMenuLoopSmoke originalManageTraditionalTlsStaticSite $'1\n4'
-        runMenuLoopSmoke originalManageTraditionalTlsRedirect $'bad\n3'
-        runMenuLoopSmoke originalSetTraditionalTlsAlpnManual $'bad\n4'
+        runMenuLoopSmoke originalManageVlessEncryptionExperiment $'3\n0'
+        runMenuLoopSmoke originalManageTraditionalTlsFallback $'7\n0'
+        runMenuLoopSmoke originalManageTraditionalTlsStaticSite $'4\n0'
+        runMenuLoopSmoke originalManageTraditionalTlsRedirect $'3\n0'
+        runMenuLoopSmoke originalSetTraditionalTlsAlpnManual $'4\n0'
         coreInstallType="${oldCoreInstallType}"
         nginxStaticPath="${oldNginxStaticPath}"
     )
@@ -229,7 +239,7 @@ runRegressionUiSmokeSuiteRoot() {
         echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
         : >"${menuRenderLog}"
         resetMenuActions
-        originalBbrInstall <<< $'bad\n5'
+        originalBbrInstall <<< $'5\n0'
         assertMenuAction 'errorCard:选择错误'
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
     )
@@ -244,7 +254,7 @@ runRegressionUiSmokeSuiteRoot() {
         fail2banRecommendedProfileName() { printf 'sshd'; }
         : >"${menuRenderLog}"
         resetMenuActions
-        originalManageFail2ban <<< $'bad\n9'
+        originalManageFail2ban <<< $'9\n0'
         assertMenuAction 'errorCard:选择错误'
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
     )
@@ -260,12 +270,12 @@ runRegressionUiSmokeSuiteRoot() {
         manageVlessEncryptionExperiment() { recordMenuAction manageVlessEncryptionExperiment; }
         : >"${menuRenderLog}"
         resetMenuActions
-        systemScriptMenu <<< $'bad\n5'
+        systemScriptMenu <<< $'5\n0'
         assertMenuAction 'errorCard:选择错误'
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
         : >"${menuRenderLog}"
         resetMenuActions
-        advancedDangerMenu <<< $'bad\n3'
+        advancedDangerMenu <<< $'3\n0'
         assertMenuAction 'errorCard:选择错误'
         ! assertMenuAction unInstall
         ! assertMenuAction manageVlessEncryptionExperiment

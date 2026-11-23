@@ -1934,6 +1934,13 @@ dockerProtocolCommand() (
         esac
         status=0
         dockerRealityTargetAction "${selected}" select "${workspace}/selection.json" || status=$?
+        if [[ "${status}" -eq 3 ]]; then
+            if [[ "${PADM_DOCKER_REALITY_MENU_SELECT:-}" == 1 ]]; then
+                dockerSetupCleanup || return "${PADM_DOCKER_RC_STATE}"
+                return 3
+            fi
+            return 0
+        fi
         [[ "${status}" -eq 2 ]] || return "${status}"
         selectedHost=$(jq -er '.host' "${workspace}/selection.json") &&
             selectedPort=$(jq -er '.port' "${workspace}/selection.json") &&

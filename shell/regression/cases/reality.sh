@@ -232,6 +232,7 @@ runRealityProfileFailureRegression() (
         printRealityTargetProfile() { :; }
         menuItem() { printf '%s %s\n' "$1" "$2"; }
         menuRecommendedItem() { menuItem "$@"; }
+        menuReturnItem() { menuItem "$@"; }
         selectDefaultRealityTarget() { defaultTargetCalls=$((defaultTargetCalls + 1)); return 1; }
         selectAutoRecommendedRealityTarget() {
             autoTargetCalls=$((autoTargetCalls + 1))
@@ -267,10 +268,35 @@ runRealityProfileFailureRegression() (
             read -r -u "${inputFd}" nextInput
             [[ "${realityTargetHost}" == candidate.example.com && "${nextInput}" == next-parent-action ]]
             [[ "${defaultTargetCalls}" == 0 ]]
-            [[ "$(<"${menuLog}")" == $'1 检测候选后选择\n2 手动输入' ]]
+            [[ "$(<"${menuLog}")" == $'1 检测候选后选择\n2 手动输入\n0 返回' ]]
             exec {inputFd}<&-
         done
         [[ "${candidateCalls}" == 2 ]]
+        (
+            local choice selectionFails=false
+            selectRealityTargetCandidateInteractive() {
+                [[ "$1" == detect-first ]] || return 1
+                candidateCalls=$((candidateCalls + 1))
+                [[ "${selectionFails}" == false ]] || return 1
+                IFS= read -r choice || return 1
+                [[ "${choice}" == 0 ]] && return 2
+                return 1
+            }
+            realityTargetHost=
+            collectRealityProfile <<< $'1\n0\n2\nreturned.example.com' >"${menuLog}"
+            [[ "${realityTargetHost}" == returned.example.com && "${candidateCalls}" == 3 ]]
+            [[ "$(grep -c '^0 返回$' "${menuLog}")" == 2 ]]
+            realityTargetHost=
+            regressionExpectStatus 1 collectRealityProfile <<< '1' >"${menuLog}"
+            [[ "$(grep -c '^0 返回$' "${menuLog}")" == 1 && "${candidateCalls}" == 4 ]]
+            selectionFails=true
+            exec {inputFd}< <(printf '1\nnext-parent-action\n')
+            regressionExpectStatus 1 collectRealityProfile <&"${inputFd}" >"${menuLog}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action && "${candidateCalls}" == 5 ]]
+            [[ "$(grep -c '^0 返回$' "${menuLog}")" == 1 ]]
+        )
         targetValidations=0
         for input in "" manual.example.com:9443; do
             realityTargetHost=
@@ -1097,7 +1123,7 @@ EOF
     )
 
     (
-        local selectedTarget selectedSni switched=0 confirmation=n menuSequence="2 1 2 2 5 8" scope=
+        local selectedTarget selectedSni switched=0 confirmation=n menuSequence="2 1 2 2 5 0" scope=
         realityTargetHost=installed.example.com
         realityTargetPort=443
         realitySNI=installed-sni.example.com
@@ -1155,12 +1181,12 @@ EOF
             [[ "${switched}" == 0 && "${realityTargetHost}" == installed.example.com && "${realitySNI}" == installed-sni.example.com ]]
         done
         autoRead() { printf -v "$3" '%s' ''; }
-        menuSequence='6 8'
+        menuSequence='6 0'
         manageRealityTarget
-        [[ "${menuSequence}" == 8 && "${switched}" == 0 ]]
+        [[ "${menuSequence}" == 0 && "${switched}" == 0 ]]
         for REALITY_TARGET_PAGE_SIZE in 0 invalid; do
-            menuSequence=r
-            regressionExpectStatus 1 selectRealityTargetCandidateInteractive
+            menuSequence=0
+            regressionExpectStatus 2 selectRealityTargetCandidateInteractive
         done
     )
 
@@ -1247,7 +1273,7 @@ EOF
     grep -qF $'fixture-asia.example.com:443\t' <<<"$(realityTargetRefreshRecords all)"
     (
         local pageResultsFile="${TMP_DIR}/reality-page-selection-results.tsv"
-        local pageChoiceSequence pageIndex REALITY_TARGET_RESULT_PAGE_SIZE=10
+        local pageChoiceSequence pageIndex resultFilter=scanner REALITY_TARGET_RESULT_PAGE_SIZE=10
         export PADM_REALITY_TARGET_RESULTS_FILE="${pageResultsFile}"
         : >"${pageResultsFile}"
         for ((pageIndex = 1; pageIndex <= 11; pageIndex++)); do
@@ -1269,11 +1295,11 @@ EOF
         regressionExpectStatus 2 showRealityTargetScanResults all interactive 1
         [[ "${realityTargetHost}" == "page-1.example.com" ]]
         [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "1" ]]
-        pageChoiceSequence="0 1"
+        pageChoiceSequence="00 1"
         regressionExpectStatus 2 showRealityTargetScanResults all interactive 2
         [[ "${realityTargetHost}" == "page-11.example.com" ]]
         [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "2" ]]
-        selectRealityTargetScanResultFilter() { printf 'scanner\n'; }
+        selectRealityTargetScanResultFilter() { printf '%s\n' "${resultFilter}"; }
         formatRealityTargetResultLine "page-scanner.example.com:443" "scanner-sni.example.com" \
             "Scanner" "scanner" "no" "192.0.2.12" "AS64500" "ExampleNet" \
             "same_asn" "A" "yes" "4000" "yes" "1234567890" "scanner fixture" >>"${pageResultsFile}"
@@ -1281,8 +1307,30 @@ EOF
         regressionExpectStatus 2 showRealityTargetScanResults all interactive 2
         [[ "${realityTargetHost}" == "page-scanner.example.com" && "${realitySNI}" == "scanner-sni.example.com" ]]
         [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "4" ]]
+        resultFilter=return
+        pageChoiceSequence="f 1"
+        regressionExpectStatus 2 showRealityTargetScanResults all interactive 2
+        [[ "${realityTargetHost}" == "page-11.example.com" ]]
+        pageChoiceSequence="r R  0 1"
+        regressionExpectStatus 3 showRealityTargetScanResults all interactive
+        [[ "${pageChoiceSequence}" == 1 ]]
+        [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "7" ]]
         REALITY_TARGET_RESULT_PAGE_SIZE=0
         showRealityTargetScanResults all once
+        local qualityMenus=0 changed=0
+        echoContent() {
+            if [[ "$*" == *'REALITY 目标站后续操作'* ]]; then
+                qualityMenus=$((qualityMenus + 1))
+            fi
+        }
+        menuReadChoice() { IFS= read -r "$3"; }
+        autoConfirm() { printf -v "$4" '%s' y; }
+        changeInstalledRealityTarget() { changed=$((changed + 1)); }
+        showRealityTargetQualityActions fixture.example.com:443 <<< $'1\n0\n1\n1'
+        [[ "${qualityMenus}" == 2 && "${changed}" == 1 ]]
+        qualityMenus=0
+        showRealityTargetQualityActions fixture.example.com:443 <<< '1'
+        [[ "${qualityMenus}" == 1 && "${changed}" == 1 ]]
     )
     (
         local persistenceRoot="${TMP_DIR}/reality-persistence-failure"
@@ -1397,6 +1445,13 @@ EOF
             regressionExpectStatus 1 runRealityScannerSameAsnPrefixes
             [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
         done
+        autoRead() { IFS= read -r "$3"; }
+        realityTargetPublicIPv4() { printf '192.0.2.1\n'; }
+        : >"${persistenceStatusLog}"
+        regressionExpectStatus 1 runRealityScannerAdvanced <<< $'y\n0'
+        ! grep -q '^red' "${persistenceStatusLog}"
+        regressionExpectStatus 1 runRealityScannerAdvanced < <(printf 'y\n9\n192.0.2.0/24')
+        ! grep -q '^red' "${persistenceStatusLog}"
         [[ "${scanCalls}" == 0 ]]
     )
     (
@@ -1476,7 +1531,7 @@ EOF
             printf 'blocked\n' >>"${option5BlockedCallsFile}"
             originalRealityTargetBlockedCandidates
         }
-        showRealityTargetScanResults all interactive <<<"r" >/dev/null
+        regressionExpectStatus 3 showRealityTargetScanResults all interactive <<<"0" >/dev/null
         [[ "$(wc -l <"${option5SortCallsFile}" | tr -d ' ')" == "1" ]]
         [[ "$(wc -l <"${option5BlockedCallsFile}" | tr -d ' ')" == "1" ]]
     )
@@ -1555,7 +1610,7 @@ EOF
         autoRead() { read -r "$3"; }
         : >"${snapshotCalls}"
         : >"${snapshotItems}"
-        selectRealityTargetCandidateInteractive < <(printf 'n\n0\n01\n999999999999999999999999999999\n3\n') >/dev/null
+        selectRealityTargetCandidateInteractive <<< $'n\nr\nR\n01\n999999999999999999999999999999\n3' >/dev/null
         [[ "${realityTargetHost}" == fixture-media.example.com ]]
         [[ "$(wc -l <"${snapshotCalls}")" == 1 ]]
         grep -qxF $'3\tfixture-media.example.com:443' "${snapshotItems}"
@@ -1596,10 +1651,7 @@ manual.example.com:8443
         [[ "$(realityTargetCandidateField "$(realityTargetCandidateLineByIndex 1)" 1)" == "fixture-primary.example.com" ]]
         unset PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN
     )
-    if selectRealityTargetCandidateInteractive <<<"r
-"; then
-        return 1
-    fi
+    regressionExpectStatus 2 selectRealityTargetCandidateInteractive <<< $'0\n1'
 
     if [[ -n "${oldCandidatesFile}" ]]; then
         export PADM_REALITY_TARGET_CANDIDATES_FILE="${oldCandidatesFile}"
@@ -1661,6 +1713,12 @@ EOF
     [[ "$(realityIntToIpv4 "${prefixLast}")" == "172.16.0.14" ]]
     [[ "${prefixUsable}" == "14" ]]
     [[ "$(realityAsnPrefixTotalUsableAddressCount <"${asnPrefixFile}")" == "486" ]]
+    regressionExpectStatus 1 selectRealityAsnSampleSize 486 <<< $'7\nr\nR\n0'
+    [[ "${selectedRealityAsnSampleSize}" == 0 ]]
+    regressionExpectStatus 1 selectRealityAsnSampleSize 486 <<< '5'
+    [[ "${selectedRealityAsnSampleSize}" == 0 ]]
+    selectRealityAsnSampleSize 486 <<< $'5\n'
+    [[ "${selectedRealityAsnSampleSize}" == 486 ]]
     generateRealityAsnSampleIps "${asnPrefixFile}" 12 "${sampleFile}"
     while IFS= read -r _sampleIp; do
         sampleCount=$((sampleCount + 1))
@@ -1723,6 +1781,7 @@ runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate candidateHost
     [[ "$(realityTargetCandidateCount)" == "25" ]]
     [[ "$(realityTargetCandidatePool | wc -l | tr -d ' ')" == "25" ]]
+    [[ "$(realityTargetCandidatePool | cut -d'|' -f1 | sort -u | wc -l | tr -d ' ')" == "25" ]]
     [[ "$(realityTargetFilteredCandidateCount all)" == "$(realityTargetCandidateCount)" ]]
     [[ "$(realityTargetBuiltInCdnBlockedCandidates | sort -u | wc -l | tr -d ' ')" == "154" ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" == "25" ]]
@@ -1730,11 +1789,11 @@ runRealityCandidateFullRegression() {
     ! realityTargetCandidates | grep -qF 'www.microsoft.com|'
     [[ "$(realityTargetFilteredCandidateCount dev)" == "$(realityTargetFilteredCandidateCount developer)" ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
-    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.libreoffice.org" ]]
+    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "pgxn.org" ]]
     firstRealityCandidate=$(realityTargetCandidateLineByIndex 1)
-    [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.libreoffice.org" ]]
+    [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "pgxn.org" ]]
     secondRealityCandidate=$(realityTargetCandidateLineByIndex 2)
-    [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.collaboraoffice.com" ]]
+    [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "mirrors.lug.mtu.edu" ]]
     ! realityTargetFilteredCandidates recommended | grep -Eq '^(www.gnu.org|www.debian.org|www.ubuntu.com|mariadb.org)[|]'
     blockedCloudflareRealityCandidate=$(realityTargetBlockedCandidates | grep '^www.cloudflare.com|')
     [[ -n "${blockedCloudflareRealityCandidate}" ]]
@@ -2439,7 +2498,10 @@ CSV
     [[ "$(realityTargetResultCount)" == "2" ]]
     ! grep -qF $'hidden-c.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     [[ "$(realityTargetFilterTitle all)" == "全部" ]]
-    [[ "$(selectRealityTargetScanResultFilter <<<"2" 2>/dev/null)" == "same_asn" ]]
+    [[ "$(selectRealityTargetScanResultFilter <<< $'6\nr\nR\n2' 2>/dev/null)" == "same_asn" ]]
+    [[ "$(selectRealityTargetScanResultFilter <<<"0" 2>/dev/null)" == "return" ]]
+    regressionExpectStatus 1 selectRealityScannerRange '192.0.2.1' <<<"0"
+    [[ -z "${selectedRealityScannerRange}" ]]
     ! realityTargetScanResultFilterMatches "C" "same_asn" "all" "test"
     local selectedScanTarget selectedScanSni
     if ! selectRealityTargetFromScanResults selectedScanTarget selectedScanSni <<<"1"; then
@@ -2456,11 +2518,11 @@ CSV
     rm -f "${PADM_REALITY_TARGET_SCAN_FILE}" "${REALITY_TLS_PING_ARGS_FILE}"
     unset AUTO_REALITY_SERVER_NAME
     unset PADM_REALITY_TARGET_CANDIDATES_FILE
-    PADM_FAKE_XRAY_ONLY_HOST=www.libreoffice.org selectDefaultRealityTarget
-    [[ "${realityTargetHost}" == "www.libreoffice.org" ]]
+    PADM_FAKE_XRAY_ONLY_HOST=pgxn.org selectDefaultRealityTarget
+    [[ "${realityTargetHost}" == "pgxn.org" ]]
     [[ "${realityTargetPort}" == "443" ]]
-    [[ "${realitySNI}" == "www.libreoffice.org" ]]
-    grep -q "tls ping -ip 192.0.2.1 www.libreoffice.org:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    [[ "${realitySNI}" == "pgxn.org" ]]
+    grep -qF "tls ping -ip 192.0.2.1 pgxn.org:443" "${REALITY_TLS_PING_ARGS_FILE}"
     (
         export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality-singbox-openssl-results.tsv"
         export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"

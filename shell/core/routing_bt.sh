@@ -33,12 +33,12 @@ btTools() {
 
     menuItem 3 "查看当前状态" "显示 Xray / sing-box 规则状态"
 
-    menuReturnItem 4 "返回路由与访问控制" "回到上级菜单"
+    menuReturnItem 0 "返回路由与访问控制" "回到上级菜单"
 
     menuClose
 
     btStatus=
-    menuReadChoice bt_menu "请选择:" btStatus || return 0
+    menuReadChoice bt_menu "请选择:" btStatus interactive || return 0
 
     if [[ "${btStatus}" == "1" ]]; then
 
@@ -60,7 +60,7 @@ btTools() {
 
         return $?
 
-    elif [[ "${btStatus}" == "4" ]]; then
+    elif [[ "${btStatus}" == "0" ]]; then
 
         return 0
 

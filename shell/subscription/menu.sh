@@ -299,9 +299,9 @@ manageSubscriptionControlledHome() {
         menuItem 5 "查看控制面与 Peer 细节" "显示 WireGuard 状态以及与主控的 Peer 连接细节"
         menuItem 6 "重写配置并重启被控控制面" "重写配置并重启 WireGuard 和控制服务"
         menuDangerItem 7 "卸载被控控制面" "清理主控下发账号和控制连接，保留本机代理、发布服务及自建订阅"
-        menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
-        menuReadChoice subscription_controlled_home_menu "请选择:" controlledHomeStatus || return 0
+        menuReadChoice subscription_controlled_home_menu "请选择:" controlledHomeStatus interactive || return 0
         case "${controlledHomeStatus}" in
         1) runSubscriptionControlledWizard ;;
         2)
@@ -322,7 +322,7 @@ manageSubscriptionControlledHome() {
             currentRole=$(subscriptionCurrentRoleNormalized) || return 1
             [[ "${currentRole}" == "controlled" ]] || return 0
             ;;
-        8) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -340,9 +340,9 @@ manageSubscriptionMainControlDetails() {
         menuItem 2 "查看连接详情" "一次查看 WireGuard Peer、Health 和 Sync 地址"
         menuItem 3 "重写配置并重启主控控制面" "重写配置并重启控制服务"
         menuDangerItem 4 "卸载主控控制面" "清理控制连接和远端节点记录，保留本机代理、发布服务及自建订阅"
-        menuReturnItem 5 "返回主控首页" "回到上级菜单"
+        menuReturnItem 0 "返回主控首页" "回到上级菜单"
         menuClose
-        menuReadChoice subscription_main_control_details_menu "请选择:" mainControlDetailsStatus || return 0
+        menuReadChoice subscription_main_control_details_menu "请选择:" mainControlDetailsStatus interactive || return 0
         case "${mainControlDetailsStatus}" in
         1) showSubscriptionWireGuardMainCredential ;;
         2) showSubscriptionWireGuardPeers; showSubscriptionSourceControlUrls ;;
@@ -352,7 +352,7 @@ manageSubscriptionMainControlDetails() {
             currentRole=$(subscriptionCurrentRoleNormalized) || return 1
             [[ "${currentRole}" == "main" ]] || return 0
             ;;
-        5) return ;;
+        0) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -553,9 +553,9 @@ manageSubscriptionCatalog() {
             canDisablePublication=true
             menuDangerItem 10 "停用发布服务" "停用本机公网订阅链接，保留已保存的订阅和节点配置"
         fi
-        menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
-        menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus || return 0
+        menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus interactive || return 0
         case "${subscriptionCatalogStatus}" in
         1) installSubscribe && showSubscriptionServiceStatus && syncAndShowSubscriptionLinks ;;
         2) showPublishedSubscriptionLinks ;;
@@ -586,7 +586,6 @@ manageSubscriptionCatalog() {
                 coreSelectionErrorCard
             fi
             ;;
-        9) return 0 ;;
         10)
             if [[ "${canDisablePublication}" != "true" ]]; then
                 coreSelectionErrorCard
@@ -600,6 +599,7 @@ manageSubscriptionCatalog() {
                 statusCard "已取消停用发布服务"
             fi
             ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -697,10 +697,12 @@ selectSubscriptionSourceId() {
         sourceIndex=$((sourceIndex + 1))
         menuItem "${sourceIndex}" "${sourceName}（${rowSourceId}）" "${sourceHost}:${sourcePort} / ${sourceEnabled} / 同步：${sourceStatus}"
     done <<<"${sourceRows}"
-    menuLine "输入编号或服务器 ID；纯数字 ID 使用 id:ID；直接回车返回"
+    menuLine "输入编号或服务器 ID；纯数字 ID 使用 id:ID"
+    menuReturnItem 0 "返回"
     menuClose
     while true; do
-        menuReadChoice "${menuKey}" "${prompt}" choice || return 1
+        menuReadChoice "${menuKey}" "${prompt}" choice interactive || return 1
+        [[ "${choice}" != 0 ]] || return 1
         selected=$(jq -r --arg choice "${choice}" '
           if $choice | test("^[0-9]+$") then
             ($choice | tonumber) as $index |
@@ -741,9 +743,11 @@ selectUserSubscriptionSources() {
         menuItem "${sourceIndex}" "${sourceName}（${sourceId}）" "${sourceEnabled}"
     done <<<"${sourceRows}"
     menuLine "*：全部服务器；可用逗号多选编号或 ID；纯数字 ID 使用 id:ID"
+    menuReturnItem 0 "返回"
     menuClose
     while true; do
         menuReadChoice "${menuKey}" "${prompt}" sourceChoice true || return 1
+        [[ "${sourceChoice}" != 0 ]] || return 1
         if [[ -z "${sourceChoice}" ]]; then
             printf -v "${resultVar}" '%s' "${currentSources}"
             [[ -z "${changedVar}" ]] || printf -v "${changedVar}" '%s' false
@@ -910,13 +914,15 @@ selectUserSubscriptionId() {
         menuItem "@on" "选择全部已启用订阅"
         menuItem "@off" "选择全部已停用订阅"
         menuItem "@over" "选择全部已超限订阅" "包含已停用但仍超限的订阅"
-        menuLine "输入编号或订阅 ID；逗号分隔可多选，* 选择全部；纯数字 ID 使用 id:ID；直接回车返回"
+        menuLine "输入编号或订阅 ID；逗号分隔可多选，* 选择全部；纯数字 ID 使用 id:ID"
     else
-        menuLine "输入编号或订阅 ID；纯数字 ID 使用 id:ID；直接回车返回"
+        menuLine "输入编号或订阅 ID；纯数字 ID 使用 id:ID"
     fi
+    menuReturnItem 0 "返回"
     menuClose
     while true; do
-        menuReadChoice select_user_subscription_id "请选择订阅:" choice || return 1
+        menuReadChoice select_user_subscription_id "请选择订阅:" choice interactive || return 1
+        [[ "${choice}" != 0 ]] || return 1
         if [[ "${allowCreate}" == "true" && "${choice}" == "+" ]]; then
             selectedUserSubscriptionId=+
             selectedUserSubscriptionIds='[]'
@@ -1262,23 +1268,30 @@ editUserSubscriptionsMenu() {
         menuItem "$((6 - fieldOffset))" "保存并立即同步" "自动保留其他字段的最新变化；冲突时保留草稿"
         menuItem "$((7 - fieldOffset))" "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
         menuItem "$((8 - fieldOffset))" "刷新并保留草稿" "读取最新状态；身份或草稿字段冲突时拒绝刷新"
-        menuReturnItem "$((9 - fieldOffset))" "取消并丢弃草稿" "返回分享订阅"
         menuLine "字段可用逗号连续选择（例 $((2 - fieldOffset)),$((3 - fieldOffset))）；末尾加 $((6 - fieldOffset)) 填写后直接保存；取消和重新读取单独选择"
+        menuReturnItem 0 "取消并丢弃草稿" "返回分享订阅"
         menuClose
         if [[ -n "${pendingFields}" ]]; then
             editPrompt="请选择[回车保存并立即同步]:"
         else
-            editPrompt="请选择[回车返回]:"
+            editPrompt="请选择:"
         fi
         menuReadChoice edit_user_subscription_menu "${editPrompt}" choice true || return 1
+        if [[ "${choice}" == 0 ]]; then
+            coreCancelledStatusCard "操作未执行"
+            return 1
+        fi
         if [[ -z "${choice}" ]]; then
-            [[ -n "${pendingFields}" ]] || return 0
+            if [[ -z "${pendingFields}" ]]; then
+                coreSelectionErrorCard
+                continue
+            fi
             choice=$((6 - fieldOffset))
         fi
         fieldChoices=$(jq -ern --arg choice "${choice}" --argjson offset "${fieldOffset}" '
           $choice | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
           select(all(.[]; test("^[1-9]$"))) | map(tonumber + $offset) |
-          select(all(.[]; . <= 9)) |
+          select(all(.[]; . <= 8)) |
           select(length == (unique | length)) |
           select(length == 1 or all(.[]; . <= 5) or
             (.[-1] == 6 and all(.[:-1][]; . <= 5))) |
@@ -1342,10 +1355,6 @@ editUserSubscriptionsMenu() {
                     return 0
                 fi
                 warnCard "订阅编辑未完成" "草稿仍保留，可修正后重试；身份或同字段冲突请选 $((7 - fieldOffset)) 重读"
-                ;;
-            9)
-                coreCancelledStatusCard "操作未执行"
-                return 1
                 ;;
             7 | 8)
                 reload=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
@@ -1468,9 +1477,9 @@ manageUserSubscriptionsMenu() {
             menuItem "${copyChoice}" "按当前配置新建订阅" "复制节点范围和额度，不复制身份、流量和令牌"
         fi
         menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
-        menuReturnItem 9 "返回上级菜单" "结束当前订阅管理"
+        menuReturnItem 0 "返回上级菜单" "结束当前订阅管理"
         menuClose
-        menuReadChoice "${menuKey}" "请选择:" userSubscriptionItemStatus || return 0
+        menuReadChoice "${menuKey}" "请选择:" userSubscriptionItemStatus interactive || return 0
         case "${userSubscriptionItemStatus}" in
         1) showPublishedSubscriptionLinks "${linkArgs[@]}" ;;
         2)
@@ -1507,7 +1516,7 @@ manageUserSubscriptionsMenu() {
         "${deleteChoice}")
             removeUserSubscriptionMenu "${userSubscriptionId}" "${batchScope}" "${usersJson}" && return
             ;;
-        9) return ;;
+        0) return ;;
         "${switchChoice}")
             if selectUserSubscriptionId false true; then
                 idsJson=${selectedUserSubscriptionIds}
@@ -1588,8 +1597,9 @@ manageSubscriptionPendingInvites() {
         done <<<"${inviteRows}"
         menuClose
         while true; do
-            autoRead subscription_cancel_invite_alias "输入要取消的唯一别名[直接回车返回]:" alias || return 0
-            [[ -n "${alias}" ]] || return 0
+            menuReadChoice subscription_cancel_invite_alias "输入要取消的唯一别名[0 返回，纯数字别名使用 id:别名]:" alias interactive || return 0
+            [[ "${alias}" != 0 ]] || return 0
+            alias=${alias#id:}
             inviteId=$(jq -r --arg alias "${alias}" 'first(.[]? | select(.alias == $alias)).invite_id // empty' <<<"${pendingJson}") || return 1
             [[ -z "${inviteId}" ]] || break
             errorCard "待完成邀请别名无效，请重新输入"
@@ -1711,9 +1721,9 @@ manageSubscriptionServers() {
         menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
         menuItem 4 "管理已有被控服务器" "状态、凭据、启停、连接检查和移除"
         menuItem 5 "查看服务器总览" "只读查看所有来源的状态"
-        menuReturnItem 6 "返回主控首页" "回到上级菜单"
+        menuReturnItem 0 "返回主控首页" "回到上级菜单"
         menuClose
-        menuReadChoice server_source_menu "请选择:" serverStatus || return 0
+        menuReadChoice server_source_menu "请选择:" serverStatus interactive || return 0
         case "${serverStatus}" in
         1) createSubscriptionWireGuardInviteMenu ;;
         2)
@@ -1723,7 +1733,7 @@ manageSubscriptionServers() {
         3) manageSubscriptionPendingInvites ;;
         4) manageSubscriptionServerItem ;;
         5) showSubscriptionSources ;;
-        6) return ;;
+        0) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1767,9 +1777,9 @@ manageSubscriptionServerItem() {
         menuItem 5 "刷新当前状态" "重新读取已保存的服务器状态"
         menuDangerItem 6 "移除当前服务器" "清理远端托管账号并移除来源和 Peer"
         menuItem 7 "切换服务器" "选择另一服务器继续维护"
-        menuReturnItem 8 "返回服务器列表" "回到被控服务器"
+        menuReturnItem 0 "返回服务器列表" "回到被控服务器"
         menuClose
-        menuReadChoice subscription_server_item_menu "请选择:" choice || return 0
+        menuReadChoice subscription_server_item_menu "请选择:" choice interactive || return 0
         case "${choice}" in
         1) setSubscriptionSourceControlTokenMenu "${sourceId}" "${source}" "${expectedPeer}" || true ;;
         2) changeSubscriptionSourceEnabledMenu "${sourceId}" "${source}" "${targetEnabled}" || true ;;
@@ -1804,7 +1814,7 @@ manageSubscriptionServerItem() {
                 'any(.sources[]?; .id == $id and .role != "main")') || return 1
             [[ "${idExists}" == "true" ]] || return 0
             ;;
-        8) return 0 ;;
+        0) return 0 ;;
         7)
             sourcesJson=$(subscriptionActiveGroupRead -c --arg id "${sourceId}" \
                 '[.sources[]? | select(.role != "main" and .id != $id)]') || continue
@@ -1997,12 +2007,10 @@ setSubscriptionGroupSyncIntervalWithCron() {
 manageSubscriptionSyncDiagnostics() {
     local role
     local diagnosticStatus=
-    local returnChoice=5
     local roleAction=cron
     role=$(subscriptionCurrentRoleNormalized) || return 1
     [[ "${role}" == "main" || "${role}" == "uninitialized" ]] || return 1
     if [[ "${role}" == "main" ]]; then
-        returnChoice=8
         roleAction=remote
     fi
     while true; do
@@ -2018,9 +2026,9 @@ manageSubscriptionSyncDiagnostics() {
         else
             menuItem 4 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
         fi
-        menuReturnItem "${returnChoice}" "返回订阅同步" "回到上级菜单"
+        menuReturnItem 0 "返回订阅同步" "回到上级菜单"
         menuClose
-        menuReadChoice subscription_sync_diagnostics_menu "请选择:" diagnosticStatus || return 0
+        menuReadChoice subscription_sync_diagnostics_menu "请选择:" diagnosticStatus interactive || return 0
         case "${diagnosticStatus}" in
         1) showSubscriptionGroupsStateSummary; showSubscriptionSources ;;
         2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
@@ -2032,8 +2040,9 @@ manageSubscriptionSyncDiagnostics() {
                 crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true
             fi
             ;;
-        "${returnChoice}") return ;;
+        0) return ;;
         5)
+            [[ "${roleAction}" == "remote" ]] || { coreSelectionErrorCard; continue; }
             showSubscriptionRemoteHealthPlan
             ;;
         6)
@@ -2084,9 +2093,9 @@ manageSubscriptionSyncSettings() {
         menuItem 2 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"
         menuItem 3 "状态与排障" "查看失败、健康、计划和定时任务"
         menuItem 4 "状态备份与恢复" "查看、备份、恢复或重建 groups.json"
-        menuReturnItem 5 "${returnText}" "回到上级菜单"
+        menuReturnItem 0 "${returnText}" "回到上级菜单"
         menuClose
-        menuReadChoice sync_settings_menu "请选择:" syncSettingsStatus || return 0
+        menuReadChoice sync_settings_menu "请选择:" syncSettingsStatus interactive || return 0
         case "${syncSettingsStatus}" in
         1)
             expectedSyncEnabled=$(jq -r '.enabled' <<<"${syncStatus}") || return 1
@@ -2123,7 +2132,7 @@ manageSubscriptionSyncSettings() {
             ;;
         3) manageSubscriptionSyncDiagnostics ;;
         4) manageSubscriptionStateBackups sync ;;
-        5) return ;;
+        0) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done

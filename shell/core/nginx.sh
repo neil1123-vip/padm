@@ -578,11 +578,13 @@ configureRealityStreamSplitApply() {
         menuLine "SNI stream 的 default 只能转给一个 Reality 后端"
         menuRecommendedItem 1 "Reality Vision" "公网 443 默认转发到 Vision"
         menuRecommendedItem 2 "Reality XHTTP" "公网 443 默认转发到 XHTTP"
+        menuReturnItem 0 "返回"
         menuClose
         menuReadChoice reality_stream_default_protocol "请选择[默认 Vision]:" selectDefaultRealityProtocol true || return 1
         case "${selectDefaultRealityProtocol}" in
         ""|1) defaultProtocol=vision ;;
         2) defaultProtocol=xhttp ;;
+        0) return 1 ;;
         *) errorCard "Reality 默认后端选择不合法"; return 1 ;;
         esac
     elif currentProtocolHas 2; then

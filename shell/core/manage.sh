@@ -427,9 +427,9 @@ manageVlessEncryptionExperiment() {
         vlessEncryptionStateSummary
         menuDangerItem 1 "启用实验开关" "优先应用到 Reality XHTTP，否则应用到 Reality Vision"
         menuItem 2 "关闭实验开关" "恢复 decryption=none 并删除实验订阅参数"
-        menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         echoContent title "└──────────────────────────────────────────────────"
-        menuReadChoice vless_encryption_menu "请选择:" selectVlessEncryptionMenu || return 0
+        menuReadChoice vless_encryption_menu "请选择:" selectVlessEncryptionMenu interactive || return 0
         case "${selectVlessEncryptionMenu}" in
         1)
             warnCard \
@@ -446,7 +446,7 @@ manageVlessEncryptionExperiment() {
         2)
             setVlessRealityEncryption disable && successCard "VLESS Encryption 实验开关已关闭" || true
             ;;
-        3)
+        0)
             return 0
             ;;
         *)
@@ -487,9 +487,11 @@ selectPanelCertDomain() {
     if [[ -z "${currentHost}" ]]; then
         echoContent title "\n读取${title}配置\n"
         echo "${certList}"
+        menuReturnItem 0 "返回"
         while true; do
             selectBTDomain=
             autoRead bt_domain_select "请输入编号选择:" selectBTDomain || return 2
+            [[ "${selectBTDomain}" != 0 ]] || return 2
             btDomain=$(awk -F ':' -v selected="${selectBTDomain}" '$1 == selected {print $2; exit}' <<<"${certList}")
             [[ -n "${btDomain}" ]] && return 0
             coreSelectionErrorCard "选择错误"
@@ -864,10 +866,10 @@ manageTraditionalTlsFallback() {
         menuItem 4 "ALPN 诊断" "检查 h2 fallback、ALPN 与 Nginx 承接层是否匹配"
         menuRecommendedItem 5 "修复为推荐 ALPN" "存在 h2 fallback 时设置 h2,http/1.1"
         menuItem 6 "手动设置 ALPN" "兼容排障时手动调整 ALPN 顺序"
-        menuReturnItem 7 "返回站点与证书" "回到上级菜单"
+        menuReturnItem 0 "返回站点与证书" "回到上级菜单"
         menuClose
         selectTraditionalTlsMenu=
-        menuReadChoice traditional_tls_menu "请选择:" selectTraditionalTlsMenu || return 0
+        menuReadChoice traditional_tls_menu "请选择:" selectTraditionalTlsMenu interactive || return 0
 
         case "${selectTraditionalTlsMenu}" in
         1) ensureTraditionalTlsFallbackNginxConfig || true ;;
@@ -876,7 +878,7 @@ manageTraditionalTlsFallback() {
         4) diagnoseTraditionalTlsAlpn || true ;;
         5) repairTraditionalTlsAlpn || true ;;
         6) setTraditionalTlsAlpnManual || true ;;
-        7) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -940,10 +942,10 @@ manageTraditionalTlsStaticSite() {
         menuItem notes "笔记布局起点" "示例文章、阅读记录和完整内页"
         menuItem photos "摄影布局起点" "示例照片、观察笔记和图集内页"
         menuItem docs "文档布局起点" "示例目录、入门和配置文档"
-        menuReturnItem 4 "返回" "回到上级菜单"
+        menuReturnItem 0 "返回" "回到上级菜单"
         menuClose
         selectInstallNginxBlogType=
-        menuReadChoice nginx_blog_menu "请选择:" selectInstallNginxBlogType || return 0
+        menuReadChoice nginx_blog_menu "请选择:" selectInstallNginxBlogType interactive || return 0
 
         if [[ "${selectInstallNginxBlogType}" == import ]]; then
             sourceDirectory=
@@ -961,7 +963,7 @@ manageTraditionalTlsStaticSite() {
             if installNginxStaticTemplate "${selectInstallNginxBlogType}" true "${siteTitle}"; then
                 successCard "本地站点更新成功"
             fi
-        elif [[ "${selectInstallNginxBlogType}" == "4" ]]; then
+        elif [[ "${selectInstallNginxBlogType}" == "0" ]]; then
             return 0
         else
             coreSelectionErrorCard "选择错误"
@@ -977,10 +979,10 @@ manageTraditionalTlsRedirect() {
         menuLine "如想恢复静态站点展示，需要先删除 302 重定向配置"
         menuItem 1 "添加" "写入 302 重定向目标"
         menuItem 2 "删除" "移除当前 302 重定向"
-        menuReturnItem 3 "返回" "回到传统 TLS fallback 维护"
+        menuReturnItem 0 "返回" "回到传统 TLS fallback 维护"
         menuClose
         redirectStatus=
-        menuReadChoice nginx_redirect_menu "请选择:" redirectStatus || return 0
+        menuReadChoice nginx_redirect_menu "请选择:" redirectStatus interactive || return 0
 
         if [[ "${redirectStatus}" == "1" ]]; then
             redirectDomain=
@@ -1017,7 +1019,7 @@ manageTraditionalTlsRedirect() {
                 return 1
             fi
             successCard "移除302重定向成功"
-        elif [[ "${redirectStatus}" == "3" ]]; then
+        elif [[ "${redirectStatus}" == "0" ]]; then
             return 0
         else
             coreSelectionErrorCard "选择错误"
@@ -1144,15 +1146,15 @@ setTraditionalTlsAlpnManual() {
         menuRecommendedItem 1 "h2,http/1.1" "推荐用于存在 h2 fallback/gRPC 的场景"
         menuItem 2 "http/1.1,h2" "旧客户端兼容排障"
         menuItem 3 "http/1.1" "仅 HTTP/1.1"
-        menuReturnItem 4 "返回" "回到传统 TLS fallback 维护"
+        menuReturnItem 0 "返回" "回到传统 TLS fallback 维护"
         menuClose
         selectAlpnManual=
-        menuReadChoice traditional_tls_alpn_manual "请选择:" selectAlpnManual || return 0
+        menuReadChoice traditional_tls_alpn_manual "请选择:" selectAlpnManual interactive || return 0
         case "${selectAlpnManual}" in
         1) applyTraditionalTlsAlpn '["h2","http/1.1"]' || true ;;
         2) applyTraditionalTlsAlpn '["http/1.1","h2"]' || true ;;
         3) applyTraditionalTlsAlpn '["http/1.1"]' || true ;;
-        4) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -1634,9 +1636,9 @@ addCorePort() {
         menuItem 1 "查看额外入口" "查看端口和订阅默认入口"
         menuItem 2 "添加额外入口" "批量添加新端口"
         menuItem 3 "删除额外入口" "移除已添加端口"
-        menuReturnItem 4 "返回协议与入口" "回到上级菜单"
+        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
         menuClose
-        menuReadChoice core_port_menu "请选择:" selectNewPortType || return 0
+        menuReadChoice core_port_menu "请选择:" selectNewPortType interactive || return 0
         case "${selectNewPortType}" in
         2)
             newPort=
@@ -1698,7 +1700,7 @@ addCorePort() {
                 statusCard "输入错误" "编号输入错误，请重新选择"
             fi
             ;;
-        4)
+        0)
             return 0
             ;;
         *)
@@ -2242,9 +2244,9 @@ manageCDN() {
         menuItem 1 "设置入口地址" "写入 CDN CNAME、优选 IP 或自有域名"
         menuItem 2 "清空入口地址" "恢复订阅使用安装入口地址"
         menuItem 3 "CDN / H3 使用说明" "查看协议选择和排障提示"
-        menuReturnItem 4 "返回协议与入口" "回到上级菜单"
+        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
         menuClose
-        menuReadChoice cdn_menu "请选择:" selectCDNType || return 0
+        menuReadChoice cdn_menu "请选择:" selectCDNType interactive || return 0
 
         case "${selectCDNType}" in
         1)
@@ -2264,7 +2266,7 @@ manageCDN() {
         3)
             showCDNUsageNotes
             ;;
-        4)
+        0)
             return 0
             ;;
         *)
@@ -3241,9 +3243,9 @@ manageRealityTarget() {
         menuItem 5 "查看/切换 A 级目标" "分页查看目标库中的 A 级目标并切换"
         menuItem 6 "手动设置目标站" "输入 host[:port] 和可选 SNI"
         menuItem 7 "查看目标站黑名单" "显示不会参与目标库刷新或扫描导入的目标"
-        menuReturnItem 8 "返回" "回到 REALITY 管理"
+        menuReturnItem 0 "返回" "回到 REALITY 管理"
         menuClose
-        menuReadChoice reality_target_manage_menu "请选择：" selectTargetMenu || return 0
+        menuReadChoice reality_target_manage_menu "请选择：" selectTargetMenu interactive || return 0
         case "${selectTargetMenu}" in
         1)
             if [[ "${currentTarget}" != "未读取到" ]]; then
@@ -3254,13 +3256,13 @@ manageRealityTarget() {
             echoContent title "\n┌─ REALITY 刷新范围 ───────────────────────────────"
             menuItem 1 "目标库 + 推荐候选" "复测目标库中的 A 级目标，并补测推荐候选"
             menuItem 2 "推荐候选" "仅复测推荐候选，不额外合并目标库"
-            menuReturnItem 3 "返回" "回到目标站管理"
+            menuReturnItem 0 "返回" "回到目标站管理"
             menuClose
             menuReadChoice reality_target_refresh_scope "请选择刷新范围[默认1]：" refreshChoice true || return 0
             case "${refreshChoice:-1}" in
             1) scanLocalAsnRealityTargets || true ;;
             2) scanLocalAsnRealityTargets recommended_only || true ;;
-            3|r|R) ;;
+            0) ;;
             *) coreSelectionErrorCard "选择错误" ;;
             esac
             ;;
@@ -3284,7 +3286,7 @@ manageRealityTarget() {
         7)
             showRealityTargetBlockedCandidates
             ;;
-        8|9|10)
+        0)
             return 0
             ;;
         *)
@@ -3394,11 +3396,11 @@ manageReality() {
         menuItem 3 "配置 443 共存分流" "同机真实网站与 Reality 共用公网 443"
         menuItem 4 "查看当前分流状态" "检查 state、Nginx stream 与后端监听"
         menuItem 5 "关闭 443 共存分流" "恢复 Reality 原入口端口并清理分流配置"
-        menuReturnItem 6 "返回协议与入口" "回到上级菜单"
+        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
         menuLine "Reality 不需要本机伪装站点；443 共存分流仅用于同机真实网站"
         menuLine "分流时只填写真实网站域名，其他 SNI 默认转给 Reality"
         menuClose
-        menuReadChoice reality_manage_menu "请选择:" selectRealityManageType || return 0
+        menuReadChoice reality_manage_menu "请选择:" selectRealityManageType interactive || return 0
 
         case "${selectRealityManageType}" in
         1) regenerateRealityProfile || true; refreshRealityState=true ;;
@@ -3406,7 +3408,7 @@ manageReality() {
         3) configureRealityStreamSplit || true; refreshRealityState=true ;;
         4) showRealityStreamSplitStatus || true ;;
         5) disableRealityStreamSplit || true; refreshRealityState=true ;;
-        6) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -3812,15 +3814,15 @@ manageXHTTPPresets() {
         menuItem 2 "兼容优先" "packet-up，适合未知 CDN/反代"
         menuItem 3 "性能优先" "stream-up，适合 H2/gRPC 兼容链路"
         menuItem 4 "测速/单并发" "auto + maxConcurrency=1"
-        menuReturnItem 5 "返回" "回到 XHTTP 普通设置"
+        menuReturnItem 0 "返回" "回到 XHTTP 普通设置"
         menuClose
-        menuReadChoice xhttp_preset_menu "请选择:" selectXHTTPPreset || return 0
+        menuReadChoice xhttp_preset_menu "请选择:" selectXHTTPPreset interactive || return 0
         case "${selectXHTTPPreset}" in
         1) setXHTTPPreset daily || true ;;
         2) setXHTTPPreset compatible || true ;;
         3) setXHTTPPreset stream || true ;;
         4) setXHTTPPreset single || true ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -3833,14 +3835,14 @@ manageXHTTPMode() {
         menuRecommendedItem 1 "auto" "推荐默认，由 Xray 自动选择"
         menuItem 2 "packet-up" "兼容性最强"
         menuItem 3 "stream-up" "流式上行，效率更高"
-        menuReturnItem 4 "返回" "回到 XHTTP 普通设置"
+        menuReturnItem 0 "返回" "回到 XHTTP 普通设置"
         menuClose
-        menuReadChoice xhttp_mode_menu "请选择:" selectXHTTPMode || return 0
+        menuReadChoice xhttp_mode_menu "请选择:" selectXHTTPMode interactive || return 0
         case "${selectXHTTPMode}" in
         1) setXHTTPMode auto || true ;;
         2) setXHTTPMode packet-up || true ;;
         3) setXHTTPMode stream-up || true ;;
-        4) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -3853,14 +3855,14 @@ manageXHTTPXmux() {
         menuItem 1 "日常随机复用" "maxConcurrency 16-32"
         menuItem 2 "单并发" "maxConcurrency 1，测速/排障"
         menuItem 3 "自定义范围" "自定义 maxConcurrency/request/time"
-        menuReturnItem 4 "返回" "回到 XHTTP 高级设置"
+        menuReturnItem 0 "返回" "回到 XHTTP 高级设置"
         menuClose
-        menuReadChoice xhttp_xmux_menu "请选择:" selectXHTTPXmux || return 0
+        menuReadChoice xhttp_xmux_menu "请选择:" selectXHTTPXmux interactive || return 0
         case "${selectXHTTPXmux}" in
         1) setXHTTPXmux '"16-32"' || true ;;
         2) setXHTTPXmux 1 || true ;;
         3) setXHTTPCustomXmux || true ;;
-        4) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -3875,15 +3877,15 @@ manageXHTTPNormal() {
         menuItem 2 "场景预设" "日常、兼容、性能、测速"
         menuItem 3 "mode 设置" "auto / packet-up / stream-up"
         menuItem 4 "CDN / H3 使用说明" "查看 Cloudflare、H3 和兼容性提示"
-        menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
+        menuReturnItem 0 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
-        menuReadChoice xhttp_normal_menu "请选择:" selectXHTTPNormal || return 0
+        menuReadChoice xhttp_normal_menu "请选择:" selectXHTTPNormal interactive || return 0
         case "${selectXHTTPNormal}" in
         1) xhttpSettingsSummary || true ;;
         2) manageXHTTPPresets || true ;;
         3) manageXHTTPMode || true ;;
         4) showXHTTPUsageNotes ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -3898,15 +3900,15 @@ manageXHTTPAdvanced() {
         menuItem 2 "path / host 设置" "CDN 域前置或特殊反代场景"
         menuItem 3 "header / packet / stream 参数" "xPadding、sc*、gRPC/SSE header"
         menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
-        menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
+        menuReturnItem 0 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
-        menuReadChoice xhttp_advanced_menu "请选择:" selectXHTTPAdvanced || return 0
+        menuReadChoice xhttp_advanced_menu "请选择:" selectXHTTPAdvanced interactive || return 0
         case "${selectXHTTPAdvanced}" in
         1) manageXHTTPXmux || true ;;
         2) setXHTTPPathHost || true ;;
         3) setXHTTPAdvancedParams || true ;;
         4) setXHTTPRecommendedDefaults || true ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -3919,13 +3921,13 @@ manageXHTTPExperiment() {
         menuLine "实验功能依赖客户端、CDN 和反代行为；填错会导致连接失败"
         menuDangerItem 1 "启用上下行分离" "配置独立下行 downloadSettings"
         menuItem 2 "关闭上下行分离" "删除 downloadSettings"
-        menuReturnItem 3 "返回 XHTTP 管理" "回到上级菜单"
+        menuReturnItem 0 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
-        menuReadChoice xhttp_experiment_menu "请选择:" selectXHTTPExperiment || return 0
+        menuReadChoice xhttp_experiment_menu "请选择:" selectXHTTPExperiment interactive || return 0
         case "${selectXHTTPExperiment}" in
         1) setXHTTPDownloadSettings || true ;;
         2) disableXHTTPDownloadSettings || true ;;
-        3) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -3958,16 +3960,16 @@ manageXHTTP() {
         menuItem 2 "高级设置" "XMUX、path/host、header/packet/stream 参数"
         menuDangerItem 3 "实验功能" "上下行分离等高风险能力"
         menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
-        menuReturnItem 5 "返回协议与入口" "回到上级菜单"
+        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
         menuClose
-        menuReadChoice xhttp_manage_menu "请选择:" selectXHTTPManageType || return 0
+        menuReadChoice xhttp_manage_menu "请选择:" selectXHTTPManageType interactive || return 0
 
         case "${selectXHTTPManageType}" in
         1) manageXHTTPNormal || true ;;
         2) manageXHTTPAdvanced || true ;;
         3) manageXHTTPExperiment || true ;;
         4) setXHTTPRecommendedDefaults || true ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -4085,13 +4087,13 @@ manageHysteria2Bandwidth() {
         menuLine "Brutal 适合带宽稳定且可测速的线路；BBR 适合波动、移动网络或不确定线路"
         menuItem 1 "Brutal" "固定带宽；切换时可调整上下行 Mbps"
         menuRecommendedItem 2 "BBR" "自适应带宽；无需填写速率"
-        menuReturnItem 3 "返回" "回到 Hysteria2 管理"
+        menuReturnItem 0 "返回" "回到 Hysteria2 管理"
         menuClose
-        menuReadChoice hysteria_bandwidth_manage_menu "请选择:" selectMode || return 0
+        menuReadChoice hysteria_bandwidth_manage_menu "请选择:" selectMode interactive || return 0
         case "${selectMode}" in
         1) setHysteria2BandwidthMode brutal || true ;;
         2) setHysteria2BandwidthMode bbr || true ;;
-        3) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -4116,15 +4118,13 @@ manageHysteria() {
             menuItem 2 "卸载" "移除 Hysteria2 入站配置"
             menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
             menuItem 4 "拥塞模式" "切换 Brutal 固定带宽或 BBR 自适应"
-            menuReturnItem 5 "返回协议与入口" "回到上级菜单"
             hysteria2Status=true
         else
             menuItem 1 "安装" "新增 Hysteria2 入站配置"
-            menuReturnItem 2 "返回协议与入口" "回到上级菜单"
         fi
-
+        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
         menuClose
-        menuReadChoice hysteria_menu "请选择:" installHysteria2Status || return 0
+        menuReadChoice hysteria_menu "请选择:" installHysteria2Status interactive || return 0
         if [[ "${installHysteria2Status}" == "1" ]]; then
             singBoxHysteria2Install || true
             refreshInstallState=true
@@ -4135,7 +4135,7 @@ manageHysteria() {
             portHoppingMenu hysteria2 || true
         elif [[ "${installHysteria2Status}" == "4" && "${hysteria2Status}" == "true" ]]; then
             manageHysteria2Bandwidth || true
-        elif [[ ( "${installHysteria2Status}" == "5" && "${hysteria2Status}" == "true" ) || ( "${installHysteria2Status}" == "2" && "${hysteria2Status}" != "true" ) ]]; then
+        elif [[ "${installHysteria2Status}" == "0" ]]; then
             return 0
         else
             coreSelectionErrorCard "选择错误"
@@ -4261,14 +4261,14 @@ manageTuicCongestionControl() {
         menuRecommendedItem 1 "cubic" "默认推荐"
         menuItem 2 "bbr" "高带宽/长距离链路可试"
         menuItem 3 "new_reno" "兼容保守"
-        menuReturnItem 4 "返回" "回到 Tuic 管理"
+        menuReturnItem 0 "返回" "回到 Tuic 管理"
         menuClose
-        menuReadChoice tuic_congestion_menu "请选择:" selectTuicCongestion || return 0
+        menuReadChoice tuic_congestion_menu "请选择:" selectTuicCongestion interactive || return 0
         case "${selectTuicCongestion}" in
         1) setTuicCongestionControl cubic || true ;;
         2) setTuicCongestionControl bbr || true ;;
         3) setTuicCongestionControl new_reno || true ;;
-        4) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -4283,15 +4283,15 @@ manageTuicAdvanced() {
         menuDangerItem 2 "启用 0-RTT" "减少握手但增加重放风险"
         menuRecommendedItem 3 "关闭 0-RTT" "恢复上游推荐的安全默认值"
         menuRecommendedItem 4 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
-        menuReturnItem 5 "返回 Tuic 管理" "回到上级菜单"
+        menuReturnItem 0 "返回 Tuic 管理" "回到上级菜单"
         menuClose
-        menuReadChoice tuic_advanced_menu "请选择:" selectTuicAdvanced || return 0
+        menuReadChoice tuic_advanced_menu "请选择:" selectTuicAdvanced interactive || return 0
         case "${selectTuicAdvanced}" in
         1) setTuicConnectionParams || true ;;
         2) setTuicZeroRtt true || true ;;
         3) setTuicZeroRtt false || true ;;
         4) setTuicRecommendedDefaults || true ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -4318,15 +4318,13 @@ manageTuic() {
             menuItem 4 "拥塞控制" "cubic / bbr / new_reno"
             menuItem 5 "高级设置" "auth_timeout、heartbeat、0-RTT"
             menuRecommendedItem 6 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
-            menuReturnItem 7 "返回协议与入口" "回到上级菜单"
             tuicStatus=true
         else
             menuItem 1 "安装" "新增 Tuic 入站配置"
-            menuReturnItem 2 "返回协议与入口" "回到上级菜单"
         fi
-
+        menuReturnItem 0 "返回协议与入口" "回到上级菜单"
         menuClose
-        menuReadChoice tuic_menu "请选择:" installTuicStatus || return 0
+        menuReadChoice tuic_menu "请选择:" installTuicStatus interactive || return 0
         if [[ "${installTuicStatus}" == "1" ]]; then
             singBoxTuicInstall || true
             refreshInstallState=true
@@ -4341,7 +4339,7 @@ manageTuic() {
             manageTuicAdvanced || true
         elif [[ "${installTuicStatus}" == "6" && "${tuicStatus}" == "true" ]]; then
             setTuicRecommendedDefaults || true
-        elif [[ ( "${installTuicStatus}" == "7" && "${tuicStatus}" == "true" ) || ( "${installTuicStatus}" == "2" && "${tuicStatus}" != "true" ) ]]; then
+        elif [[ "${installTuicStatus}" == "0" ]]; then
             return 0
         else
             coreSelectionErrorCard "选择错误"

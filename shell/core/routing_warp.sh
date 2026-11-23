@@ -254,10 +254,17 @@ warpRoutingReg() {
     menuItem 2 "添加域名" "添加 WARP ${type} 出站分流规则"
     menuDangerItem 3 "设置 WARP 全局" "删除其他出站并全局走 WARP ${type}"
     menuDangerItem 4 "卸载 WARP 分流" "移除 WARP ${type} 分流配置"
-    menuReturnItem 5 "返回 WARP 出站" "回到 WARP 出站菜单"
+    menuReturnItem 0 "返回 WARP 出站" "回到 WARP 出站菜单"
     menuClose
-    warpStatus=
-    menuReadChoice warp_ipv4_menu "请选择:" warpStatus || return 0
+    local warpStatus
+    while true; do
+        menuReadChoice warp_ipv4_menu "请选择:" warpStatus interactive || return 0
+        case "${warpStatus}" in
+        0) return 0 ;;
+        [1-4]) break ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 
     if [[ "${warpStatus}" == "1" ]]; then
         showWireGuardDomain "${type}"
@@ -295,11 +302,6 @@ warpRoutingReg() {
     elif [[ "${warpStatus}" == "4" ]]; then
         routingConfigApplyTransaction "卸载 WARP ${type} 分流失败" false true removeWireGuardRoutingConfig "${type}" || return 1
         successMessage="卸载WARP ${type}分流完毕"
-    elif [[ "${warpStatus}" == "5" ]]; then
-        return 0
-    else
-        coreSelectionErrorCard "选择错误"
-        return 1
     fi
     [[ -n "${successMessage}" ]] && successCard "${successMessage}"
 }
@@ -313,15 +315,15 @@ warpRoutingMenu() {
         menuLine "依赖第三方 warp-reg 获取账号参数；Cloudflare 服务状态或策略变化会影响可用性"
         menuItem 1 "WARP IPv4" "使用 IPv4 WARP 地址作为出站"
         menuItem 2 "WARP IPv6" "使用 IPv6 WARP 地址作为出站"
-        menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
+        menuReturnItem 0 "返回分流工具" "回到上一级分流菜单"
         menuClose
         warpRoutingType=
-        menuReadChoice warp_routing_type_menu "请选择:" warpRoutingType || return 0
+        menuReadChoice warp_routing_type_menu "请选择:" warpRoutingType interactive || return 0
 
         case "${warpRoutingType}" in
         1) warpRoutingReg 1 IPv4 || true; continue ;;
         2) warpRoutingReg 1 IPv6 || true; continue ;;
-        3) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
