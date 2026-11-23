@@ -38,11 +38,12 @@ runSubscriptionMenuWorkflowCoreRegression() (
         showSubscriptionServiceStatus() { actions+="status "; }
         runSubscriptionGroupSync() { actions+="sync "; SUBSCRIPTION_SYNC_PUBLISHED=true; }
         showPublishedSubscriptionLinks() { actions+="links "; }
+        browsePublishedSubscriptionLinks() { actions+="browse "; }
         for role in uninitialized main; do
             actions=
             : >"${errorLog}"
             manageSubscriptionCatalog "${role}" <<< $'1\n9\n2\n\n1'
-            [[ "${actions}" == 'install status sync links links ' ]]
+            [[ "${actions}" == 'install status sync links browse ' ]]
             [[ "$(grep -c '选择错误，请重新选择' "${errorLog}")" == 1 ]]
         done
         actions= installStatus=1
@@ -593,6 +594,41 @@ runSubscriptionMenuWorkflowCoreRegression() (
         ! grep -qF "${removedHash}" "${linkLog}"
         [[ "${serviceCount}" == "0" && "${syncCount}" == "0" && "${publishCount}" == "0" ]]
         [[ "$(<"${localBase}/subscribeSalt")" == "fixed-salt" ]]
+        (
+            local displayLog="${root}/published-list.log" linkLog="${root}/published-selection.log"
+            local errorLog="${root}/published-choice-errors.log" returnKey remaining
+            printf 'local-unpublished\n' >"${localBase}/default/unpublished-personal"
+            for returnKey in '' 0; do
+                : >"${displayLog}"
+                : >"${linkLog}"
+                exec 3<<<"${returnKey}"$'\nnext-parent-action'
+                browsePublishedSubscriptionLinks <&3
+                IFS= read -r remaining <&3
+                exec 3<&-
+                [[ "${remaining}" == next-parent-action && ! -s "${linkLog}" ]]
+                grep -qE '^1 .*personal' "${displayLog}"
+                grep -qE '^2 .*Alpha.*alpha' "${displayLog}"
+                ! grep -qE 'https://|Numeric ID|pending-team|unpublished-personal|removed' "${displayLog}"
+            done
+
+            exec 3<<< $'3\n1\n\n0\nnext-parent-action'
+            browsePublishedSubscriptionLinks <&3
+            IFS= read -r remaining <&3
+            exec 3<&-
+            [[ "${remaining}" == next-parent-action && "$(wc -l <"${linkLog}")" == 2 ]]
+            grep -qF "https://links.example.com:39778/s/default/${personalHash}" "${linkLog}"
+            grep -qF "https://links.example.com:39778/s/sing-box/${personalHash}" "${linkLog}"
+            ! grep -qF "${accountHash}" "${linkLog}"
+
+            : >"${linkLog}"
+            browsePublishedSubscriptionLinks <<< $'2\n0\n0'
+            [[ "$(wc -l <"${linkLog}")" == 2 ]]
+            grep -qF "https://links.example.com:39778/s/default/${accountHash}" "${linkLog}"
+            grep -qF "https://links.example.com:39778/s/clashMetaProfiles/${accountHash}" "${linkLog}"
+            ! grep -qF "${personalHash}" "${linkLog}"
+            [[ "${serviceCount}" == 0 && "${syncCount}" == 0 && "${publishCount}" == 0 &&
+                "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        )
         setUserSubscriptionEnabled alpha false
         regressionExpectStatus 1 showPublishedSubscriptionLinks alpha
         [[ "$(wc -l <"${linkLog}")" == "6" ]]

@@ -535,7 +535,7 @@ manageSubscriptionCatalog() {
         showSubscriptionServerRoleSummary
         menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和流量。"
         menuItem 1 "安装/更新发布服务" "配置公网发布入口，随后完整同步并显示链接"
-        menuItem 2 "查看当前订阅链接" "只读查看已发布的本机自用和分享订阅"
+        menuItem 2 "查看当前订阅链接" "从名单选择本机自用或分享订阅，再查看链接"
         menuItem 3 "分享订阅" "新建或维护已有分享订阅"
         menuItem 4 "流量与限额" "查看流量明细，并处理超限和自动限额"
         menuItem 5 "立即完整同步" "同步账号及启用来源；已配置发布服务时更新并显示链接"
@@ -558,7 +558,7 @@ manageSubscriptionCatalog() {
         menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus interactive || return 0
         case "${subscriptionCatalogStatus}" in
         1) installSubscribe && showSubscriptionServiceStatus && syncAndShowSubscriptionLinks ;;
-        2) showPublishedSubscriptionLinks ;;
+        2) browsePublishedSubscriptionLinks ;;
         3) manageSharedSubscriptions ;;
         4) manageTrafficAndQuota ;;
         5) syncAndShowSubscriptionLinks ;;
@@ -1006,17 +1006,51 @@ syncAndShowSubscriptionLinks() {
     fi
 }
 
+browsePublishedSubscriptionLinks() {
+    local choice count index
+    local -a publishedAccounts=() publishedUserIds=() publishedLabels=()
+    while true; do
+        publishedAccounts=() publishedUserIds=() publishedLabels=()
+        readPublishedSubscriptionLinks list || return 0
+        count=${#publishedAccounts[@]}
+        userResultCard "查看当前订阅链接"
+        for index in "${!publishedLabels[@]}"; do
+            menuItem "$((index + 1))" "${publishedLabels[index]}"
+        done
+        menuReturnItem 0 "返回订阅首页"
+        menuClose
+        while true; do
+            menuReadChoice published_subscription_choice "请选择:" choice interactive || return 0
+            [[ "${choice}" != 0 ]] || return 0
+            if [[ "${choice}" =~ ^[1-9][0-9]*$ && "${#choice}" -le "${#count}" ]] && (( choice <= count )); then
+                break
+            fi
+            coreSelectionErrorCard
+        done
+        index=$((choice - 1))
+        readPublishedSubscriptionLinks show "${publishedUserIds[index]}" "" "${publishedAccounts[index]}" || continue
+        while true; do
+            menuReadChoice published_subscription_links_return "按回车或输入 0 返回订阅名单：" choice interactive || return 0
+            [[ "${choice}" != 0 ]] || break
+            coreSelectionErrorCard
+        done
+    done
+}
+
 showPublishedSubscriptionLinks() {
-    local userSubscriptionId=${1:-}
-    local idsJson=${2:-}
+    readPublishedSubscriptionLinks show "$@"
+}
+
+readPublishedSubscriptionLinks() {
+    local mode=$1 userSubscriptionId=${2:-} idsJson=${3:-} localAccount=${4:-}
     local enabled accountName salt accountHash domain publicBase format title
-    local accounts= enabledUsers defaultFile
+    local accounts= enabledUsers defaultFile shareId shareName
     local shown=false
     if [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]]; then
         local SUBSCRIPTION_GROUPS_LOCK_SKIPPED=false
         local readStatus=0
         PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=true \
-            subscriptionGroupsWithLock showPublishedSubscriptionLinks "${userSubscriptionId}" "${idsJson}" || readStatus=$?
+            subscriptionGroupsWithLock readPublishedSubscriptionLinks "$@" || readStatus=$?
         if [[ "${SUBSCRIPTION_GROUPS_LOCK_SKIPPED}" == "true" ]]; then
             statusCard "订阅正在同步或修改" "请稍后重试查看已发布链接"
             return 1
@@ -1037,6 +1071,9 @@ showPublishedSubscriptionLinks() {
             return 1
         fi
         accounts=$(subscriptionSyncAccountName "${userSubscriptionId}") || return 1
+    elif [[ -n "${localAccount}" ]]; then
+        [[ "${localAccount}" != sub_* && -f "$(subscribeLocalBaseDir)/default/${localAccount}" ]] || return 1
+        accounts=${localAccount}
     else
         enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
         # 本地旧输出可能仍有已停用或已删除的托管账号，不展示这些链接。
@@ -1046,7 +1083,7 @@ showPublishedSubscriptionLinks() {
             [[ "${accountName}" == sub_* ]] && continue
             accounts+="${accountName}"$'\n'
         done
-        accounts+=$(jq -r '.[].account' <<<"${enabledUsers}") || return 1
+        accounts+=$(jq -r '.[] | [.account, .id, .name] | @tsv' <<<"${enabledUsers}") || return 1
     fi
     subscribePort= subscribeDomain= subscribeType=
     readNginxSubscribe || { errorCard "订阅服务配置读取失败"; return 1; }
@@ -1062,11 +1099,22 @@ showPublishedSubscriptionLinks() {
         domain+=":${currentDefaultPort}"
     fi
     publicBase=$(subscribePublicBaseDir)
-    while IFS= read -r accountName; do
+    while IFS=$'\t' read -r accountName shareId shareName; do
         [[ -n "${accountName}" ]] || continue
         accountHash=$(printf '%s\n' "${accountName}${salt}" | md5sum | awk '{print $1}') || return 1
         for format in default clashMetaProfiles sing-box; do
             [[ -s "${publicBase}/${format}/${accountHash}" ]] || continue
+            if [[ "${mode}" == list ]]; then
+                publishedAccounts+=("${accountName}")
+                publishedUserIds+=("${shareId}")
+                if [[ -n "${shareId}" ]]; then
+                    publishedLabels+=("${shareName}（${shareId}）")
+                else
+                    publishedLabels+=("本机自用（${accountName}）")
+                fi
+                shown=true
+                break
+            fi
             case "${format}" in
             default) title="默认订阅" ;;
             clashMetaProfiles) title="Clash Meta 订阅" ;;

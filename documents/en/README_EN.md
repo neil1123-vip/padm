@@ -2235,7 +2235,7 @@ Recommended flow for local-only or controller-side shared subscriptions:
 2. In the same menu, open `Create shared subscription`, using an ID such as `team-a`.
 3. Follow the wizard to select server sources and traffic limit.
 4. With automatic sync enabled, saving triggers one full sync. If it is disabled, run a manual full sync later from `Subscription sync`. The managed account `sub_<ID>` is written to the core config.
-5. After the full sync completes, open `Subscriptions & users` -> `Refresh and view subscription links` and copy the user link.
+5. After the full sync completes, open `View current subscription links` on the local or controller home, then choose a published subscription and copy its link.
 
 Recommended multi-server flow:
 

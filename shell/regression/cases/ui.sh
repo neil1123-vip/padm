@@ -1583,6 +1583,7 @@ EOF
     readNginxSubscribe() { subscribePort=39778; subscribeDomain=main.example.com; subscribeType=https; }
     showAccounts() { recordMenuAction showAccounts; }
     showPublishedSubscriptionLinks() { recordMenuAction "showPublishedSubscriptionLinks:$*"; }
+    browsePublishedSubscriptionLinks() { recordMenuAction browsePublishedSubscriptionLinks; }
     installSubscribe() { recordMenuAction installSubscribe; }
     runSubscriptionGroupSync() {
         recordMenuAction "runSubscriptionGroupSync:$*"
@@ -2273,12 +2274,12 @@ n"
             resetMenuActions
             initSubscriptionWireGuardMain() { recordMenuAction init-failed; return 1; }
             manageSubscription <<< $'7\n2\n0'
-            [[ "${actions}" == $'init-failed\nshowPublishedSubscriptionLinks:\n' ]]
+            [[ "${actions}" == $'init-failed\nbrowsePublishedSubscriptionLinks\n' ]]
         )
         (
             resetMenuActions
             manageSubscription <<< $'8\ninvalid-invite\n\n2\n0'
-            [[ "${actions}" == $'errorCard:主控邀请无效，请复制完整内容后重试\nshowPublishedSubscriptionLinks:\n' ]]
+            [[ "${actions}" == $'errorCard:主控邀请无效，请复制完整内容后重试\nbrowsePublishedSubscriptionLinks\n' ]]
             [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
         )
         (
@@ -2311,7 +2312,7 @@ n"
             output=
             manageSubscription <<< $'7\nn\n2\n0'
             assertMenuAction initSubscriptionWireGuardMain
-            assertMenuAction 'showPublishedSubscriptionLinks:'
+            assertMenuAction browsePublishedSubscriptionLinks
             [[ "$(subscriptionCurrentRoleNormalized)" == main ]]
             grep -q "管理被控服务器" <<<"${output}"
         )
@@ -2416,7 +2417,7 @@ invite-credential"
         resetMenuActions
         manageSubscriptionMainHome <<<"2
 0"
-        [[ "${actions}" == $'showPublishedSubscriptionLinks:\n' ]]
+        [[ "${actions}" == $'browsePublishedSubscriptionLinks\n' ]]
         resetMenuActions
         manageSubscriptionMainHome <<<"5
 0"
@@ -2483,7 +2484,7 @@ invite-credential"
 2
 0" || true
         subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
-        [[ "${actions}" == $'showPublishedSubscriptionLinks:\n' ]]
+        [[ "${actions}" == $'browsePublishedSubscriptionLinks\n' ]]
     fi
 
     if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-create; then
@@ -2500,7 +2501,7 @@ main
 2
 0"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
-        assertMenuAction 'showPublishedSubscriptionLinks:'
+        assertMenuAction browsePublishedSubscriptionLinks
         ! assertMenuAction 'errorCard:用户订阅选择无效，请输入列表编号、完整 ID 或菜单中的选择项'
         local duplicateSideEffectMarker="${TMP_DIR}/duplicate-user-side-effect"
         rm -f "${duplicateSideEffectMarker}"
@@ -2545,7 +2546,7 @@ main
         ! grep -q "输入编号或订阅 ID" <<<"${output}"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
         assertMenuAction 'runSubscriptionGroupSync:'
-        assertMenuAction 'showPublishedSubscriptionLinks:'
+        assertMenuAction browsePublishedSubscriptionLinks
         ! assertMenuAction 'errorCard:用户订阅选择无效，请输入列表编号、完整 ID 或菜单中的选择项'
         resetMenuActions
     fi
@@ -2938,7 +2939,7 @@ main
                 }
                 manageSubscription <<< $'8\n4\n2\n0'
                 [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
-                [[ "${actions}" == $'showSubscriptionWireGuardStatus\nuninstallSubscriptionWireGuardControl\nshowPublishedSubscriptionLinks:\n' ]]
+                [[ "${actions}" == $'showSubscriptionWireGuardStatus\nuninstallSubscriptionWireGuardControl\nbrowsePublishedSubscriptionLinks\n' ]]
                 grep -q "启用主控协同" <<<"${output}"
             )
             (
@@ -3267,7 +3268,7 @@ yes
                 }
                 manageSubscription <<< $'7\n2\n0'
                 [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
-                [[ "${actions}" == $'uninstallSubscriptionWireGuardControl\nshowPublishedSubscriptionLinks:\n' ]]
+                [[ "${actions}" == $'uninstallSubscriptionWireGuardControl\nbrowsePublishedSubscriptionLinks\n' ]]
                 grep -q "启用主控协同" <<<"${output}"
             )
             (
