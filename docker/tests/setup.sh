@@ -455,10 +455,10 @@ snapshot() {
 assertClean() {
     [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail 'setup retained deployment lock'
     [[ ! -e "${EVENTS}.bootstrap" ]] || fail 'setup retained a bootstrap Nginx container'
-    [[ -z "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 2 -type d \
-        \( -name '.setup.*' -o -name '.edit.*' -o -name '.protocol.*' -o \
-            -name '.candidate.*' -o -name '.manifest.*' -o -name '.stage.*' \) -print -quit)" ]] ||
-        fail 'setup retained a candidate directory'
+    [[ -z "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 2 \
+        \( -type d \( -name '.setup.*' -o -name '.edit.*' -o -name '.protocol.*' -o \
+            -name '.candidate.*' -o -name '.manifest.*' -o -name '.stage.*' \) -o \
+            -name '.subscription.*' \) -print -quit)" ]] || fail '部署遗留候选目录或订阅草稿'
 }
 
 assertUnconfigured() {
@@ -2525,6 +2525,44 @@ for grpcProtocol in 24 25; do
     jq -e --argjson protocol "${grpcProtocol}" '.subscription.enabled and
       all(.core.protocols[]; .id == $protocol)' "${SPEC}" >/dev/null ||
         fail "${grpcProtocol}: gRPC TLS 单入口未能通过编辑启用发布"
+    if [[ "${grpcProtocol}" == 24 ]]; then
+        # 复用已有受管证书，实际执行 Compose 候选切换和回滚。
+        publicationCompose="${PADM_DOCKER_INSTALL_DIR}/compose.json"
+        publicationNginx="${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf"
+        publicationLink=$(bash -u "${CLI}" subscription links --base)
+        publicationFile="${PADM_DOCKER_INSTALL_DIR}/data/subscription/${publicationLink##*/}"
+        publicationTls=("${PADM_DOCKER_INSTALL_DIR}/secrets/tls/grpc.example.com."{crt,key})
+        publicationFiles=("${SPEC}" "${publicationCompose}" "${publicationNginx}"
+            "${publicationFile}" "${publicationTls[@]}")
+        publicationHash=$(sha256sum -- "${publicationFiles[@]}")
+        publicationTlsHash=$(sha256sum -- "${publicationTls[@]}")
+        cp -- "${SPEC}" "${TEST_ROOT}/publication-spec.json"
+        cp -- "${publicationCompose}" "${TEST_ROOT}/publication-compose.json"
+
+        rm -f -- "${EVENTS}.up-failed"
+        FAKE_SETUP_MODE=health-fail-once runPty 14 publication-disable-failed '' subscription publish disable --yes
+        [[ -f "${EVENTS}.up-failed" ]] && grep -Fq '正在恢复旧配置' "${CONTROL_LOG}" &&
+            ! grep -Fq '旧配置恢复失败' "${CONTROL_LOG}" &&
+            [[ "$(sha256sum -- "${publicationFiles[@]}")" == "${publicationHash}" ]] ||
+            fail '停用发布启动失败后未恢复原有部署和订阅'
+        rm -f -- "${EVENTS}.up-failed"
+
+        runPty 0 publication-disable '' subscription publish disable --yes
+        jq -e --slurpfile published "${TEST_ROOT}/publication-spec.json" \
+            '. == ($published[0] | .subscription.enabled = false)' "${SPEC}" >/dev/null &&
+            jq -e --slurpfile published "${TEST_ROOT}/publication-compose.json" '
+              . == ($published[0] | del(.services.subscription, .services.nginx.depends_on.subscription))
+            ' "${publicationCompose}" >/dev/null &&
+            [[ "$(sha256sum -- "${publicationTls[@]}")" == "${publicationTlsHash}" && ! -e "${publicationFile}" ]] &&
+            grep -Fq "grpc_pass grpc://xray:${backend};" "${publicationNginx}" &&
+            ! grep -Fq 'proxy_pass http://subscription:' "${publicationNginx}" ||
+            fail '停用发布未撤销公网路由，或影响了现有 TLS 入口'
+
+        runPty 0 publication-enable '' subscription publish enable
+        [[ "$(bash -u "${CLI}" subscription links --base)" == "${publicationLink}" &&
+            "$(sha256sum -- "${publicationFiles[@]}")" == "${publicationHash}" ]] ||
+            fail '重新启用发布未恢复原有链接和部署配置'
+    fi
     for grpcFailure in tls-fail health-fail; do
         newState "grpc-tls-${grpcProtocol}-${grpcFailure}"
         export FAKE_SETUP_MODE="${grpcFailure}"

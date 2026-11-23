@@ -521,7 +521,7 @@ manageSubscriptionCatalog() {
     subscriptionRequireLocalPublisherRole || return 1
     local subscriptionCatalogStatus=
     local role=${1:-} currentRole
-    local homeTitle menuKey
+    local homeTitle menuKey publicationConfig canDisablePublication confirmDisable
     [[ -n "${role}" ]] || role=$(subscriptionCurrentRoleNormalized) || return 1
     if [[ "${role}" == "main" ]]; then
         homeTitle="主控首页"
@@ -547,6 +547,12 @@ manageSubscriptionCatalog() {
             menuItem 7 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
             menuItem 8 "接入主控" "粘贴主控邀请，将本机初始化为被控"
         fi
+        canDisablePublication=false
+        if publicationConfig=$(nginxConfigFilePath subscribe.conf) &&
+            [[ -f "${publicationConfig}" && ! -L "${publicationConfig}" ]]; then
+            canDisablePublication=true
+            menuDangerItem 10 "停用发布服务" "停用本机公网订阅链接，保留已保存的订阅和节点配置"
+        fi
         menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
         menuClose
         menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus || return 0
@@ -568,6 +574,7 @@ manageSubscriptionCatalog() {
             ;;
         8)
             if [[ "${role}" == "uninitialized" ]]; then
+                subscriptionControlledTransitionPreflight || continue
                 runSubscriptionControlledWizard || true
                 currentRole=$(subscriptionCurrentRoleNormalized 2>/dev/null) || return
                 [[ "${currentRole}" != "${role}" ]] && return
@@ -580,6 +587,19 @@ manageSubscriptionCatalog() {
             fi
             ;;
         9) return 0 ;;
+        10)
+            if [[ "${canDisablePublication}" != "true" ]]; then
+                coreSelectionErrorCard
+                continue
+            fi
+            confirmDisable=
+            autoRead subscription_disable_publication_confirm "停用后，本机公网订阅链接将无法刷新。确认请输入 yes:" confirmDisable || continue
+            if [[ "${confirmDisable}" == "yes" ]]; then
+                disableSubscribePublication || true
+            else
+                statusCard "已取消停用发布服务"
+            fi
+            ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1937,6 +1957,7 @@ setSubscriptionGroupSyncValueWithCron() {
         subscriptionGroupsWithLock setSubscriptionGroupSyncValueWithCron "$@"
         return $?
     fi
+    subscriptionRequireLocalPublisherRole || return 1
     local value=$1 query=$2 setterFn=$3 valueRestoreError=$4 cronRestoreError=$5
     local expectedValue=${6:-}
     local previousValue

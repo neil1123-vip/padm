@@ -3334,7 +3334,12 @@ set -u
 source "${MENU_UI_PROJECT_ROOT}/docker/lib/setup.sh"
 source "${MENU_UI_PROJECT_ROOT}/docker/lib/menu.sh"
 dockerMenuCli() { printf '%s\n' "$0"; }
-dockerMenuRun() { printf '%s\n' "$*" >>"${MENU_UI_ACTIONS}"; }
+dockerMenuRun() {
+    printf '%s\n' "$*" >>"${MENU_UI_ACTIONS}"
+    if [[ "$*" == 'subscription publish status' ]]; then
+        printf '公网订阅发布：已启用\n'
+    fi
+}
 dockerError() { printf '%s\n' "$*" >&2; }
 PADM_DOCKER_RC_USAGE=2
 dockerMenu
@@ -3352,6 +3357,15 @@ grep -Fq '┌─ ' "${CONTROL_LOG}" && grep -Fq '└─' "${CONTROL_LOG}" ||
     fail '原生分类返回项未逐次返回首页'
 [[ "$(<"${MENU_UI_ACTIONS}")" == "$(printf 'status --summary\n%.0s' {1..9})" ]] ||
     fail '首页重绘未逐次更新状态，或分类返回触发了业务命令'
+
+: >"${MENU_UI_ACTIONS}"
+runPty ui-subscription-publish plain $'2\n7\n1\n3\nn\n3\ny\n2\n0\n6\n0\n' "${MENU_UI_CLI}"
+grep -Fq '7. HTTPS 订阅发布' "${CONTROL_LOG}" &&
+    grep -Fq '公网订阅发布：已启用' "${CONTROL_LOG}" &&
+    grep -Fq '本机公网订阅链接将无法刷新' "${CONTROL_LOG}" ||
+    fail 'HTTPS 订阅发布入口、状态或停用提示缺失'
+[[ "$(<"${MENU_UI_ACTIONS}")" == $'status --summary\nsubscription publish status\nsubscription publish disable --yes\nsubscription publish enable\nstatus --summary' ]] ||
+    fail 'HTTPS 订阅发布参数分发错误、取消后仍停用，或无法返回首页'
 
 : >"${MENU_UI_ACTIONS}"
 runPty ui-socks5-unavailable plain $'5\n1\n3\n2\n4\n6\n4\n0\n' "${MENU_UI_CLI}"

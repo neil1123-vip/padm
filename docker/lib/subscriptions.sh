@@ -360,20 +360,22 @@ dockerSubscriptionContent() {
 
 dockerSubscriptionPublishAuthority() {
     local specFile=$1
-    jq -e '.subscription.enabled == true and .tls != null' "${specFile}" >/dev/null 2>&1 || {
+    jq -e '.subscription.enabled == true' "${specFile}" >/dev/null 2>&1 || {
         dockerError '当前部署没有启用受管 TLS 订阅，暂不能生成公网分享链接'
         return "${PADM_DOCKER_RC_STATE}"
     }
     jq -er '
-      . as $request |
-      [.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)] |
-      .[0] | if . == null then error("没有订阅发布入口") else
-        (if $request.reality_stream != null and
-          $request.reality_stream.website_listener_id == .listener_id
-          then 443 else .public_port end) as $port |
-        $request.tls.domain + (if $port == 443 then "" else ":" + ($port | tostring) end)
-      end
-    ' "${specFile}"
+      select(.tls != null) as $request |
+      first($request.core.protocols[] |
+        select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)) |
+      (if $request.reality_stream != null and
+        $request.reality_stream.website_listener_id == .listener_id
+        then 443 else .public_port end) as $port |
+      $request.tls.domain + (if $port == 443 then "" else ":" + ($port | tostring) end)
+    ' "${specFile}" || {
+        dockerError '缺少支持订阅发布的 HTTPS 入口，请先配置入口'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
 }
 
 dockerSubscriptionLinks() {
@@ -411,6 +413,57 @@ dockerSubscriptionConfirm() {
     case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
 }
 
+dockerSubscriptionPublishCommand() {
+    local action=${1:-} enabled target='' root specFile draft answer
+    shift || true
+    case "${action}" in
+    status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    enable)
+        [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        target=true
+        ;;
+    disable)
+        [[ "$#" -eq 0 || ( "$#" -eq 1 && "$1" == --yes ) ]] || return "${PADM_DOCKER_RC_USAGE}"
+        target=false
+        ;;
+    *) return "${PADM_DOCKER_RC_USAGE}" ;;
+    esac
+
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    specFile=$(dockerSubscriptionSpecFile) || return $?
+    enabled=$(jq -er '.subscription.enabled | tostring' "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
+    target=${target:-${enabled}}
+
+    if [[ "${target}" != "${enabled}" ]]; then
+        if [[ "${target}" == false && "${1:-}" != --yes ]]; then
+            [[ -t 0 && -t 1 ]] || {
+                dockerError '停用公网订阅发布需要 --yes 确认'
+                return "${PADM_DOCKER_RC_USAGE}"
+            }
+            dockerSetupRead answer '停用公网订阅发布？现有公网订阅链接将暂时失效。[y/N]: ' n || return "${PADM_DOCKER_RC_USAGE}"
+            case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+        fi
+        root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+        # 草稿和部署事务由 CLI 在同一进程清理，中断时一并恢复宿主调度。
+        DOCKER_SETUP_CANDIDATE=$(mktemp -d "${root}/.subscription.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+        dockerManagedPathIsSafe "${root}" "${DOCKER_SETUP_CANDIDATE}" || return "${PADM_DOCKER_RC_STATE}"
+        draft="${DOCKER_SETUP_CANDIDATE}/spec.json"
+        (umask 077; jq --argjson enabled "${target}" '.subscription.enabled = $enabled' "${specFile}" >"${draft}") ||
+            return "${PADM_DOCKER_RC_STATE}"
+        if [[ "${target}" == true ]]; then
+            dockerSubscriptionPublishAuthority "${draft}" >/dev/null || return $?
+        fi
+        dockerAccountApplyDraft "${draft}" || return $?
+    fi
+
+    if [[ "${target}" == true ]]; then
+        printf '公网订阅发布：已启用\n'
+    else
+        printf '公网订阅发布：已停用\n'
+    fi
+}
+
 dockerSubscriptionCommand() {
     local action=${1:-} state='' specFile='' root='' groupId='' name='' \
         accountsRaw='' listenersRaw='' accounts='' listeners=''
@@ -419,6 +472,7 @@ dockerSubscriptionCommand() {
         groupJson='' tokenBackup='' newTokenBackup=''
     shift || true
     case "${action}" in
+    publish) dockerSubscriptionPublishCommand "$@" ;;
     list)
         while [[ "$#" -gt 0 ]]; do
             [[ "$1" == --json && "${json}" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"

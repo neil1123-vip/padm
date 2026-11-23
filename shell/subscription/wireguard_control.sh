@@ -721,25 +721,24 @@ subscriptionWireGuardRole() {
     subscriptionWireGuardReadState | jq -r '.role'
 }
 
-subscriptionManagedGroupSyncCronActive() {
-    readUserCrontabContent 2>/dev/null | grep -q '/etc/padm/install.sh SyncSubscriptionGroups'
-}
-
 subscriptionControlledTransitionPreflight() {
-    subscribePort=
-    subscribeDomain=
-    subscribeType=
-    subscribeConfigState=
+    local subscribePort= subscribeDomain= subscribeType= subscribeConfigState=
+    local subscribeCertificateFile= subscribeKeyFile=
+    local currentCrontab
     if ! readNginxSubscribe; then
         errorCard "订阅 Nginx 配置损坏，不能切换为被控" "请先修复或移除受管 subscribe.conf"
         return 1
     fi
     if [[ "${subscribeConfigState:-}" == "valid" || -n "${subscribePort:-}" ]]; then
-        errorCard "检测到活动公网订阅发布服务，不能切换为被控" "请先在本机模式中停用订阅发布服务"
+        errorCard "检测到活动公网订阅发布服务，不能切换为被控" "请先选择 本机订阅首页 -> 10. 停用发布服务"
         return 1
     fi
-    if subscriptionManagedGroupSyncCronActive; then
-        errorCard "检测到受管订阅同步定时任务，不能切换为被控" "请先在本机模式中关闭自动同步"
+    if ! currentCrontab=$(readUserCrontabContent); then
+        errorCard "无法读取订阅同步定时任务，不能切换为被控" "请检查 crontab 后重试"
+        return 1
+    fi
+    if [[ "${currentCrontab}" == *'/etc/padm/install.sh SyncSubscriptionGroups'* ]]; then
+        errorCard "检测到受管订阅同步定时任务，不能切换为被控" "请到 本机订阅首页 -> 6. 订阅同步 -> 1. 开启/关闭自动同步，将其关闭"
         return 1
     fi
 }
@@ -1472,6 +1471,7 @@ subscriptionWireGuardJoinInviteUnlocked() {
     endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
     controlPort=$(subscriptionWireGuardDefaultControlPort)
     if [[ "$(jq -r '.role' <<<"${currentState}")" == "uninitialized" ]]; then
+        subscriptionControlledTransitionPreflight || return 1
         localGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
     fi
     subscriptionWireGuardWriteState \

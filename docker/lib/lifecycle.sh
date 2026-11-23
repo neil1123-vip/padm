@@ -216,6 +216,7 @@ dockerUsage() {
    padm-docker subscription rotate <分享组 ID> [--yes]
    padm-docker subscription content <分享组 ID|--base>
    padm-docker subscription links <分享组 ID|--base>
+   padm-docker subscription publish status|enable|disable [--yes]
    padm-docker share <同上 subscription 命令>
   padm-docker control status [--json]
   padm-docker control init --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> [--yes]

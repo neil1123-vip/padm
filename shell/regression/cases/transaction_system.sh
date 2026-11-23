@@ -742,6 +742,114 @@ runNginxServiceRefreshRegression() (
     nginxRequired=false
     runServiceAction nginx refresh >/dev/null 2>&1
     [[ "$(<"${actionLog}")" == 'nginx:-t' ]]
+
+    (
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local nginxConfigPath="${root}/nginx/" PADM_TLS_DIR="${root}/tls"
+        local PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+        local target="${nginxConfigPath}subscribe.conf" other="${nginxConfigPath}alone.conf"
+        local fixture="${root}/subscribe-fixture.conf" fixtureRole=uninitialized
+        local nginxFailure= presence cronMode=empty
+        mkdir -p "${nginxConfigPath}" "${PADM_TLS_DIR}"
+        printf '其他站点\n' >"${other}"
+        cat >"${fixture}" <<EOF
+server {
+    listen 39778 ssl;
+    server_name subscribe.example.com;
+    ssl_certificate ${PADM_TLS_DIR}/subscribe.example.com.crt;
+    ssl_certificate_key ${PADM_TLS_DIR}/subscribe.example.com.key;
+    location ~ sing-box_profiles { }
+}
+EOF
+        subscriptionWireGuardRole() { printf '%s\n' "${fixtureRole}"; }
+        readUserCrontabContent() {
+            case "${cronMode}" in
+            empty) return 0 ;;
+            active) printf '%s\n' '*/10 * * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups' ;;
+            error) return 2 ;;
+            esac
+        }
+        allowPort() { printf 'allowPort:%s\n' "$*" >>"${actionLog}"; }
+        denyPort() { printf 'denyPort:%s\n' "$*" >>"${actionLog}"; }
+        nginx() {
+            [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == 1 ]] || return 1
+            presence=absent
+            [[ ! -f "${target}" ]] || presence=present
+            printf 'nginx:%s:%s\n' "$*" "${presence}" >>"${actionLog}"
+            if [[ "${presence}" == absent && "${nginxFailure}" == "$*" ]]; then
+                printf '模拟 Nginx 失败：%s\n' "$*" >&2
+                return 1
+            fi
+        }
+
+        cp -- "${fixture}" "${target}"
+        regressionExpectFailure subscriptionControlledTransitionPreflight
+        : >"${actionLog}"
+        nginxState=running
+        disableSubscribePublication
+        [[ ! -e "${target}" && ! -L "${target}" ]]
+        grep -Fxq -- 'nginx:-t:absent' "${actionLog}"
+        assertEquals 'nginx:-s reload:absent' "$(grep -F -- 'nginx:-s ' "${actionLog}")" '停用发布平滑重载'
+        regressionExpectStatus 1 grep -Eq '^(start|allowPort:|denyPort:)' "${actionLog}"
+        regressionExpectStatus 0 subscriptionControlledTransitionPreflight
+        cronMode=active
+        regressionExpectFailure subscriptionControlledTransitionPreflight
+        cronMode=error
+        regressionExpectFailure subscriptionControlledTransitionPreflight
+
+        : >"${actionLog}"
+        disableSubscribePublication
+        [[ ! -s "${actionLog}" ]]
+
+        nginxState=stopped
+        nginxRequired=true
+        cp -- "${fixture}" "${target}"
+        disableSubscribePublication
+        [[ ! -e "${target}" ]]
+        assertEquals 'nginx:-t:absent' "$(<"${actionLog}")" '停用发布保持 Nginx 停止'
+
+        nginxState=running
+        cp -- "${fixture}" "${target}"
+        : >"${actionLog}"
+        nginxFailure=-t
+        regressionExpectFailure disableSubscribePublication
+        cmp -s -- "${fixture}" "${target}"
+        grep -Fxq -- 'nginx:-t:absent' "${actionLog}"
+        regressionExpectStatus 1 grep -Fq -- 'nginx:-s reload:absent' "${actionLog}"
+
+        : >"${actionLog}"
+        nginxFailure='-s reload'
+        regressionExpectFailure disableSubscribePublication
+        cmp -s -- "${fixture}" "${target}"
+        assertEquals $'nginx:-s reload:absent\nnginx:-s reload:present' \
+            "$(grep -F -- 'nginx:-s ' "${actionLog}")" '重载失败时恢复订阅发布'
+        grep -Fxq -- '模拟 Nginx 失败：-s reload' "${PADM_NGINX_ERROR_LOG}"
+
+        : >"${actionLog}"
+        fixtureRole=controlled
+        regressionExpectFailure disableSubscribePublication
+        cmp -s -- "${fixture}" "${target}"
+        fixtureRole=uninitialized
+        (
+            cd -- "${root}"
+            local nginxConfigPath=nginx/
+            regressionExpectFailure disableSubscribePublication
+        )
+        cmp -s -- "${fixture}" "${target}"
+        rm -- "${target}"
+        ln -s -- "${fixture}" "${target}"
+        regressionExpectFailure disableSubscribePublication
+        [[ -L "${target}" && "$(readlink -- "${target}")" == "${fixture}" ]]
+        rm -- "${target}"
+        mkdir -- "${target}"
+        regressionExpectFailure disableSubscribePublication
+        rmdir -- "${target}"
+        printf '损坏配置\n' >"${target}"
+        regressionExpectFailure disableSubscribePublication
+        assertEquals '损坏配置' "$(<"${target}")" '保留损坏的原配置'
+        assertEquals '其他站点' "$(<"${other}")" '保留其他站点'
+        [[ ! -s "${actionLog}" ]]
+    )
 )
 
 runUninstallWireGuardCleanupRegression() (

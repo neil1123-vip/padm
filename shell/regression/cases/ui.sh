@@ -1089,6 +1089,20 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     testWireGuardStateValidated=true
     printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
     (
+        local preflightCount=0
+        stateBefore=$(subscriptionWireGuardReadState)
+        groupsBefore=$(subscriptionGroupsStateRead -c '.')
+        subscriptionControlledTransitionPreflight() {
+            preflightCount=$((preflightCount + 1))
+            [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-0}" != 1 ]]
+        }
+        regressionExpectStatus 1 subscriptionWireGuardJoinInvite "${joinJson}" false
+        [[ "${preflightCount}" == 2 && ! -e "${wireGuardConfig}" ]]
+        [[ "$(subscriptionWireGuardReadState)" == "${stateBefore}" &&
+            "$(<"${stateMarker}")" == "${stateBefore}" &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${groupsBefore}" ]]
+    )
+    (
         groupsBefore=$(subscriptionGroupsStateRead -c '.')
         local installSawLocalOwnership=false
         subscriptionWireGuardInstallControlPlane() {
@@ -1202,7 +1216,13 @@ runSubscriptionWireGuardMenuFlowBootstrapRegression() {
         mkdir -p "${PADM_WIREGUARD_CONTROL_DIR}"
         stateFile=$(subscriptionWireGuardStateFile)
         padmRunPortAllowTransaction() { printf 'install\n' >>"${callLog}"; }
-        subscriptionGroupsWithLock() { printf 'sync\n' >>"${callLog}"; }
+        subscriptionGroupsWithLock() {
+            if [[ "$1" == installSubscribeLocked ]]; then
+                "$@"
+            else
+                printf 'sync\n' >>"${callLog}"
+            fi
+        }
 
         : >"${callLog}"
         printf '%s\n' "${controlledState}" >"${stateFile}"
@@ -1513,6 +1533,7 @@ EOF
     }
     importSubscriptionWireGuardMainCredential() { recordMenuAction importSubscriptionWireGuardMainCredential; }
     subscriptionWireGuardImportMainCredentialJson() { recordMenuAction importSubscriptionWireGuardMainCredential; }
+    subscriptionControlledTransitionPreflight() { return 0; }
     subscriptionWireGuardCredentialDecode() {
         [[ "$1" == "invite-credential" ]] || return 1
         jq -n '{version:1,kind:"invite",invite_id:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",alias:"edge-a",address:"10.77.0.2/24",network:"10.77.0.0/24",main_address:"10.77.0.1/24",endpoint_host:"main.example.com",listen_port:51820,main_public_key:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",expires_at:1770000000}'
@@ -3225,7 +3246,7 @@ yes
         grep -q "查看控制面与 Peer 细节" <<<"${output}"
         grep -q "卸载被控控制面" <<<"${output}"
         ! grep -q "关闭被控控制面" <<<"${output}"
-        if grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "主控维护与排障" <<<"${output}"; then
+        if grep -qE '发布订阅|停用发布服务|多服务器协同|主控维护与排障' <<<"${output}"; then
             printf 'menu-smoke failed: controlled top-level still shows main entries\n' >&2
             return 1
         fi

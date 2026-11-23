@@ -30,7 +30,7 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 | 编号 | 菜单 | 常用入口 |
 | --- | --- | --- |
 | `1` | 安装与重装 | 首次配置、重新选择核心与协议、完整规格重装 |
-| `2` | 订阅与用户 | `1` 账号、`2` 订阅、`3` 流量额度、`4` 控制连接、`5` 业务备份 |
+| `2` | 订阅与用户 | `1` 账号、`2` 订阅、`3` 流量额度、`4` 控制连接、`5` 业务备份、`7` HTTPS 订阅发布 |
 | `3` | 协议与入口 | REALITY、XHTTP、Hysteria2、TUIC、额外端口、CDN；`9` 入口高级管理 |
 | `4` | 站点与证书 | `1` 传统 TLS fallback 与站点、`2` 本机 TLS 证书 |
 | `5` | 路由与访问控制 | `1` 分流工具、`2` BT、`3` 访问控制 |
@@ -66,6 +66,19 @@ Reality 共存选中的 website 入口实际公开端口为 `443`。4A.7 已通�
 直接输出部署主订阅内容或 HTTPS 链接。内容复用现有节点生成器，包含自用及启用账号，
 即使关闭发布或只有 Reality 入口仍可本地读取；HTTPS 链接要求已启用发布。
 查询不创建分享组或修改发布文件，内容和链接含凭据，仅交给获授权的客户端。
+已配置的部署可在“订阅与用户 → HTTPS 订阅发布”（`2 → 7`）查看状态、启用或停用发布，也可使用以下命令。
+
+```bash
+padm-docker subscription publish status
+padm-docker subscription publish enable
+padm-docker subscription publish disable
+```
+
+停用需交互确认，脚本中可使用 `disable --yes`。
+停用后，主订阅和分享组的 HTTPS 地址停止提供订阅，账号、分享组、token、证书和协议入口均保留。
+满足发布条件时重新启用，继续使用原 token。启停会重建受管容器，连接可能短暂中断。
+主控切换失败时，配置恢复可能禁用 Peer 授权，可通过 `control peers list` 查看。
+
 Xray Reality 分享链接带 `support-x25519mlkem768=true`，sing-box 链接不变。
 Mihomo `v1.19.31` 已在隔离 Linux amd64 和原生 ARM64 环境直接导入 Vision、XHTTP 和 gRPC 原链接。
 Vision/XHTTP 涵盖启用和未启用 VLESS Encryption，gRPC 验证普通 `encryption=none`；
@@ -1563,7 +1576,10 @@ v1 恢复、失败回滚或显式版本回滚均禁用授权，避免复活旧 t
 邀请文件原子交付后即使配置失败也保留，但不保证授权有效，以 `control status` 为准。
 被控端先配置并启动归属一致的单 Peer WireGuard，再将邀请安全送至其 root 私有目录。
 主控地址须是唯一 Peer 的 `/32` AllowedIPs，本机接口地址须与邀请的 `peer_address` 一致，
-到主控的指定源地址路由必须走 `wg-padm`。接入和手动同步也可从“控制连接”菜单执行：
+到主控的指定源地址路由必须走 `wg-padm`。被控通过 WireGuard 拉取主控账号，接入和同步均无需启用本机的 HTTPS 订阅发布。
+如果没有客户端需要刷新被控机的公网订阅，可在 `2 → 7` 停用发布。当前 Docker 主控的管理员订阅和分享组均只生成本机节点。
+跨服务器分享订阅的对齐范围见 [4C.15](docker-menu-parity-plan.md#4c15-主控分享订阅与被控来源对齐待实现)。
+以下命令也可从“控制连接”菜单执行。
 
 ```bash
 padm-docker control join --invite /root/padm-control-invite.json --listener entry-reality --yes

@@ -18,7 +18,6 @@ source "${PROJECT_ROOT}/install-docker.sh"
 dockerHostPreflight() { :; }
 dockerLockInstalledDeployment() { :; }
 dockerReleaseDeploymentLock() { :; }
-dockerSetupCleanup() { :; }
 dockerCleanupStagedBundle() { :; }
 dockerManifestCleanup() { :; }
 dockerEntryCleanup() { :; }
@@ -284,6 +283,98 @@ done <<<"${CONTENT}"
 LINK=$(dockerSubscriptionCommand links "${GROUP}")
 [[ "${LINK}" == "https://ws.example.com:8443/subscriptions/${GROUP_TOKEN}" ]] ||
     fail '分享 HTTPS 链接错误'
+
+# 替换事务提交边界，使用真实规格校验、链接和本地内容入口。
+(
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/publication"
+    publicationSpec="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    publicationGroups="${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json"
+    publicationLog="${TEST_ROOT}/publication.log"
+    publicationCalls="${TEST_ROOT}/publication.calls"
+    publicationSchedule="${TEST_ROOT}/publication.schedule"
+    mkdir -p -- "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/locks"
+    cp -p -- "${SPEC}" "${publicationSpec}"
+    cp -p -- "${STATE_FILE}" "${publicationGroups}"
+    : >"${publicationCalls}"
+    dockerMaintenanceScheduleRestore() { cp -- "$1/previous" "${publicationSchedule}"; }
+    dockerAccountApplyDraft() {
+        [[ "$(stat -c '%a' "$1")" == 600 ]] && dockerConfigureSpecValidate "$1" ||
+            fail '发布提交未生成权限受限的有效规格'
+        printf 'apply\n' >>"${publicationCalls}"
+        [[ "${publicationFailApply:-0}" != 1 ]] || return "${PADM_DOCKER_RC_COMPOSE}"
+        if [[ "${publicationTermApply:-0}" == 1 ]]; then
+            # 模拟改写流量调度后、完成配置提交前收到 TERM。
+            DOCKER_MAINTENANCE_SNAPSHOT=$(mktemp -d "${PADM_DOCKER_INSTALL_DIR}/locks/traffic-schedule.XXXXXX")
+            cp -- "${publicationSchedule}" "${DOCKER_MAINTENANCE_SNAPSHOT}/previous"
+            DOCKER_MAINTENANCE_JOB=traffic DOCKER_MAINTENANCE_CHANGED=1
+            DOCKER_MAINTENANCE_UNIT_DIR='' DOCKER_MAINTENANCE_SYSTEMD_READY=0
+            DOCKER_MAINTENANCE_TIMER_ENABLED=0 DOCKER_MAINTENANCE_TIMER_ACTIVE=0
+            printf 'partial\n' >"${publicationSchedule}"
+            kill -TERM "${BASHPID}"
+            fail '订阅发布未响应中断'
+        fi
+        cp -- "$1" "${publicationSpec}"
+    }
+    publicationCheck() {
+        local expected=$1 actual=0
+        shift
+        dockerMain subscription publish "$@" </dev/null >"${publicationLog}" 2>&1 || actual=$?
+        [[ "${actual}" == "${expected}" ]] || fail "发布命令 $*: 退出码 ${actual}，预期 ${expected}"
+    }
+    publicationSnapshot() (
+        cd -- "${PADM_DOCKER_INSTALL_DIR}"
+        find . -printf '%P|%y|%m\n' | LC_ALL=C sort
+        find . -type f -print0 | sort -z | xargs -0 -r sha256sum
+    )
+
+    publicationOriginal=$(publicationSnapshot)
+    publicationCheck 0 status
+    [[ "$(<"${publicationLog}")" == '公网订阅发布：已启用' ]] || fail '发布启用状态输出错误'
+    publicationCheck 0 enable
+    publicationCheck "${PADM_DOCKER_RC_USAGE}" disable
+    [[ ! -s "${publicationCalls}" && "$(publicationSnapshot)" == "${publicationOriginal}" ]] ||
+        fail '重复启用或未经确认停用改写了部署'
+
+    publicationCheck 0 disable --yes
+    jq -en --slurpfile before "${SPEC}" --slurpfile after "${publicationSpec}" \
+        '$after[0] == ($before[0] | .subscription.enabled = false)' >/dev/null ||
+        fail '停用改变了发布开关以外的规格'
+    cmp -s -- "${STATE_FILE}" "${publicationGroups}" || fail '停用改变了分享组'
+    publicationCheck 0 status
+    [[ "$(<"${publicationLog}")" == '公网订阅发布：已停用' ]] || fail '发布停用状态输出错误'
+    reject dockerMain subscription links --base
+    reject dockerMain subscription links "${GROUP}"
+    [[ "$(dockerMain subscription content "${GROUP}")" == "${CONTENT}" ]] || fail '停用改变了本地分享内容'
+
+    before=$(publicationSnapshot)
+    publicationCheck 0 disable --yes
+    [[ "$(wc -l <"${publicationCalls}")" == 1 ]] || fail '重复停用触发了部署'
+    publicationFailApply=1 publicationCheck "${PADM_DOCKER_RC_COMPOSE}" enable
+    [[ "$(publicationSnapshot)" == "${before}" ]] || fail '启用提交失败后留下了状态变更或暂存规格'
+    publicationCheck 0 enable
+    [[ "$(dockerMain subscription links "${GROUP}")" == "${LINK}" &&
+        "$(dockerMain subscription links --base)" == "https://ws.example.com:8443/subscriptions/${MAIN_TOKEN}" ]] ||
+        fail '重新启用改变了原有公网链接'
+    [[ "$(publicationSnapshot)" == "${publicationOriginal}" ]] ||
+        fail '重新启用改变了部署'
+
+    jq '.subscription.enabled = false | .tls = null |
+      .core.protocols |= map(select(.id == 1)) |
+      .accounts |= map(select(.listeners == ["entry-reality"]))' "${SPEC}" >"${publicationSpec}"
+    before=$(publicationSnapshot)
+    publicationCheck "${PADM_DOCKER_RC_STATE}" enable
+    [[ "$(wc -l <"${publicationCalls}")" == 3 && "$(publicationSnapshot)" == "${before}" ]] ||
+        fail '缺少 HTTPS 入口时触发了提交或修改了部署'
+
+    cp -p -- "${SPEC}" "${publicationSpec}"
+    printf 'original\n' >"${publicationSchedule}"
+    interrupted=0
+    (publicationTermApply=1 dockerMain subscription publish disable --yes) \
+        </dev/null >"${publicationLog}" 2>&1 || interrupted=$?
+    [[ "${interrupted}" == 143 && "$(<"${publicationSchedule}")" == original &&
+        "$(publicationSnapshot)" == "${publicationOriginal}" ]] ||
+        fail '中断停用后未恢复调度，或遗留了调度快照和订阅草稿'
+)
 
 # 分享服务使用实际发布入口，不能把内部 TLS 端口或空入口 ID 当成公网 443。
 (

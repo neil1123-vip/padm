@@ -55,6 +55,48 @@ runSubscriptionMenuWorkflowCoreRegression() (
     )
 
     (
+        local nginxConfigPath="${root}/nginx/"
+        local publicationPath="${nginxConfigPath}subscribe.conf"
+        local role disableCount=0 publicationReads=0 preflightCount=0 inviteReads=0
+        mkdir -p "${nginxConfigPath}"
+        showSubscriptionServerRoleSummary() { :; }
+        readNginxSubscribe() { publicationReads=$((publicationReads + 1)); return 1; }
+        disableSubscribePublication() {
+            disableCount=$((disableCount + 1))
+            rm -f -- "${publicationPath}"
+        }
+
+        for role in uninitialized main; do
+            disableCount=0
+            : >"${displayLog}"
+            manageSubscriptionCatalog "${role}" <<< $'10\n9'
+            [[ "$(<"${displayLog}")" != *'停用发布服务'* && "${disableCount}" == 0 ]]
+
+            printf '%s\n' '受管订阅配置' >"${publicationPath}"
+            manageSubscriptionCatalog "${role}" <<< $'10\ny\n9'
+            grep -q '^10 停用发布服务' "${displayLog}"
+            [[ -f "${publicationPath}" && "${disableCount}" == 0 ]]
+
+            : >"${displayLog}"
+            manageSubscriptionCatalog "${role}" <<< $'10\nyes\n10\n9'
+            [[ ! -e "${publicationPath}" && "${disableCount}" == 1 ]]
+            [[ "$(grep -c '^10 停用发布服务' "${displayLog}")" == 1 ]]
+        done
+        [[ "${publicationReads}" == 0 ]]
+
+        subscriptionControlledTransitionPreflight() {
+            preflightCount=$((preflightCount + 1))
+            return 1
+        }
+        subscriptionWireGuardReadCredential() {
+            inviteReads=$((inviteReads + 1))
+            return 1
+        }
+        manageSubscriptionCatalog uninitialized <<< $'8\n9'
+        [[ "${preflightCount}" == 1 && "${inviteReads}" == 0 ]]
+    )
+
+    (
         local readLog="${root}/reads.log"
         : >"${readLog}"
         eval "$(declare -f subscriptionActiveGroupRead | sed '1s/^subscriptionActiveGroupRead/originalSubscriptionActiveGroupRead/')"

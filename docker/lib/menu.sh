@@ -272,7 +272,8 @@ dockerMenuRun() {
         ( "${1:-}" == business && "${2:-}" == restore ) ||
         ( "${1:-}" == account && "${2:-}" != list ) ||
         ( ( "${1:-}" == subscription || "${1:-}" == share ) &&
-          "${2:-}" != list && "${2:-}" != content && "${2:-}" != links ) ||
+          "${2:-}" != list && "${2:-}" != content && "${2:-}" != links &&
+          "${2:-}" != publish ) ||
         ( "${1:-}" == tls && "${2:-}" == manage ) ||
         ( "${1:-}" == control && "${2:-}" != status ) ||
         ( "${1:-}" == wireguard && "${2:-}" != status ) ||
@@ -1263,6 +1264,34 @@ dockerMenuSubscriptions() {
             ;;
         10) dockerMenuRun subscription content --base || true ;;
         11) dockerMenuRun subscription links --base || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuSubscriptionPublish() {
+    local choice answer
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        dockerMenuHeader 'Docker HTTPS 订阅发布'
+        dockerMenuOptions '1. 查看发布状态' '2. 启用 HTTPS 订阅发布' '3. 停用 HTTPS 订阅发布' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun subscription publish status || true ;;
+        2) dockerMenuRun subscription publish enable || true ;;
+        3)
+            dockerSetupRead answer '停用后，本机公网订阅链接将无法刷新。确认停用？[y/N]: ' n || continue
+            case "${answer}" in
+            y|Y|yes|YES) dockerMenuRun subscription publish disable --yes || true ;;
+            n|N|no|NO) ;;
+            *) printf '请输入 y 或 n。\n' ;;
+            esac
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -2385,6 +2414,7 @@ dockerMenuSubscriptionUsers() {
         menuItem 3 '流量与额度' '查看、采集、限额和重置累计'
         menuItem 4 '控制连接' 'WireGuard、主控/被控与同步'
         menuItem 5 '业务备份恢复' '账号和分享组的分范围备份'
+        menuItem 7 'HTTPS 订阅发布' '查看、启用和停用本机公网发布'
         menuReturnItem 6 '返回主菜单' '回到 padm 管理面板'
         menuClose
         dockerSetupRead choice '请选择: ' || {
@@ -2398,6 +2428,7 @@ dockerMenuSubscriptionUsers() {
         4) dockerMenuControl ;;
         5) dockerMenuBusiness ;;
         6) return 0 ;;
+        7) dockerMenuSubscriptionPublish ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

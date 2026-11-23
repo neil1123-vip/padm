@@ -701,9 +701,97 @@ EOF
     padmRemoveCleanupPath "${installBackupDir}"
 }
 
-installSubscribe() {
+installSubscribeLocked() {
     subscriptionRequireLocalPublisherRole || return 1
     padmRunPortAllowTransaction installSubscribeApply "$@"
+}
+
+installSubscribe() {
+    subscriptionRequireLocalPublisherRole || return 1
+    subscriptionGroupsWithLock installSubscribeLocked "$@"
+}
+
+rollbackDisableSubscribePublication() {
+    local backupPath="${subscribeDisableBackupDir}/subscribe.conf"
+    [[ "${subscribeDisablePending}" == "true" && -f "${backupPath}" ]] || return 0
+    subscribeDisablePending=false
+    if [[ -e "${subscribeDisableTarget}" || -L "${subscribeDisableTarget}" ]] ||
+        ! commitGeneratedFile "${backupPath}" "${subscribeDisableTarget}"; then
+        padmForgetCleanupPath "${subscribeDisableBackupDir}"
+        errorCard "订阅发布配置恢复失败" "备份位置：${backupPath}"
+        return 1
+    fi
+    local restoreLog="${subscribeDisableBackupDir}/nginx-restore.log"
+    if [[ "${subscribeDisableReloadAttempted}" == "true" ]] &&
+        ! PADM_NGINX_ERROR_LOG="${restoreLog}" runSubscribeNginxAction reload; then
+        padmForgetCleanupPath "${subscribeDisableBackupDir}"
+        errorCard "订阅发布配置已恢复，但 Nginx 重载失败" "恢复日志：${restoreLog}"
+        return 1
+    fi
+}
+
+disableSubscribePublicationLocked() {
+    subscribeDisableLockEntered=true
+    subscriptionRequireLocalPublisherRole || return 1
+    local subscribeDisableTarget subscribeDisableBackupDir failure=
+    local subscribePort= subscribeDomain= subscribeType= subscribeConfigState=
+    local subscribeCertificateFile= subscribeKeyFile=
+    local subscribeDisableReloadAttempted=false subscribeDisablePending=true
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    if ! subscribeDisableTarget=$(nginxConfigFilePath subscribe.conf); then
+        errorCard "订阅 Nginx 配置路径异常"
+        return 1
+    fi
+    if [[ ! -e "${subscribeDisableTarget}" && ! -L "${subscribeDisableTarget}" ]]; then
+        statusCard "公网订阅发布已处于停用状态"
+        return 0
+    fi
+    if [[ ! -f "${subscribeDisableTarget}" || -L "${subscribeDisableTarget}" ]] ||
+        ! readNginxSubscribe || [[ "${subscribeConfigState}" != "valid" ]]; then
+        errorCard "订阅 Nginx 配置无效，无法停用" "请先检查 ${subscribeDisableTarget}"
+        return 1
+    fi
+    # 在同一文件系统内暂存原文件，保留其权限，并避开 Nginx 的配置匹配。
+    if ! padmCreateTempPath subscribeDisableBackupDir -d "${subscribeDisableTarget%/*}/.subscribe-disable.XXXXXX"; then
+        errorCard "订阅发布配置备份失败"
+        return 1
+    fi
+    padmRegisterExitRollback rollbackDisableSubscribePublication
+    if ! mv -- "${subscribeDisableTarget}" "${subscribeDisableBackupDir}/subscribe.conf"; then
+        errorCard "无法移出订阅发布配置"
+        if padmRunRollback rollbackDisableSubscribePublication; then
+            padmRemoveCleanupPath "${subscribeDisableBackupDir}"
+        fi
+        return 1
+    fi
+
+    if nginxRunning; then
+        subscribeDisableReloadAttempted=true
+        runSubscribeNginxAction reload || failure="停用订阅发布时应用 Nginx 配置失败"
+    else
+        checkNginxConfig true || failure="停用订阅发布时 Nginx 配置校验失败"
+    fi
+    if [[ -n "${failure}" ]]; then
+        if padmRunRollback rollbackDisableSubscribePublication; then
+            padmRemoveCleanupPath "${subscribeDisableBackupDir}"
+            errorCard "${failure}，已恢复订阅发布配置"
+        fi
+        return 1
+    fi
+    subscribeDisablePending=false
+    padmRemoveCleanupPath "${subscribeDisableBackupDir}"
+    successCard "公网订阅发布已停用" "原公网订阅地址已停止发布，订阅数据与节点配置已保留"
+}
+
+disableSubscribePublication() {
+    subscriptionRequireLocalPublisherRole || return 1
+    local subscribeDisableLockEntered=false
+    local PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=false
+    if ! subscriptionGroupsWithLock disableSubscribePublicationLocked; then
+        [[ "${subscribeDisableLockEntered}" == "true" ]] || errorCard "无法取得订阅状态锁" "请稍后重试"
+        return 1
+    fi
 }
 
 # 卸载订阅服务
