@@ -81,8 +81,14 @@ selectSubscriptionGroupsBackupFile() {
     for index in "${!backups[@]}"; do
         menuLine "$((index + 1)). ${backups[${index}]}"
     done
+    menuReturnItem 0 "返回"
     menuClose
-    menuReadChoice subscription_backup_choice "请输入备份编号或完整路径:" backupChoice || return 0
+    while true; do
+        menuReadChoice subscription_backup_choice "请输入备份编号或完整路径:" backupChoice interactive || return 0
+        [[ -z "${backupChoice}" ]] || break
+        coreSelectionErrorCard
+    done
+    [[ "${backupChoice}" != 0 ]] || return 0
     if [[ "${backupChoice}" =~ ^[0-9]+$ ]]; then
         backupIndex=${backupChoice#"${backupChoice%%[!0]*}"}
         backupCount=${#backups[@]}
@@ -258,15 +264,15 @@ manageSubscriptionStateBackups() {
         menuItem 2 "创建状态备份" "保存当前 groups.json 到 backups 目录"
         menuItem 3 "恢复状态备份" "选择备份，确认后先备份当前状态再覆盖"
         menuDangerItem 4 "重建订阅状态" "确认后先备份当前状态，再重置为空的默认订阅组"
-        menuReturnItem 5 "${returnText}" "回到上级菜单"
+        menuReturnItem 0 "${returnText}" "回到上级菜单"
         menuClose
-        menuReadChoice subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus || return 0
+        menuReadChoice subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus interactive || return 0
         case "${subscriptionStateBackupStatus}" in
         1) showSubscriptionGroupsStateSummary ;;
         2) createSubscriptionGroupsBackupMenu ;;
         3) restoreSubscriptionGroupsBackupMenu ;;
         4) resetSubscriptionGroupsStateMenu ;;
-        5) return ;;
+        0) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done

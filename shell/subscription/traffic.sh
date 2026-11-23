@@ -853,9 +853,9 @@ manageTrafficAndQuota() {
         else
             menuItem 6 "自动限额状态暂不可读" "恢复状态后再修改"
         fi
-        menuReturnItem 7 "返回订阅首页" "回到本机或主控首页"
+        menuReturnItem 0 "返回订阅首页" "回到本机或主控首页"
         menuClose
-        menuReadChoice traffic_quota_menu "请选择:" trafficQuotaStatus || return 0
+        menuReadChoice traffic_quota_menu "请选择:" trafficQuotaStatus interactive || return 0
         case "${trafficQuotaStatus}" in
         1)
             if ! collectSubscriptionTraffic; then
@@ -874,7 +874,7 @@ manageTrafficAndQuota() {
                 errorCard "限额自动执行状态切换失败"
             fi
             ;;
-        7) return ;;
+        0) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done

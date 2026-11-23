@@ -2723,7 +2723,8 @@ The home view always has six entries:
 3. Service state
 4. Logs and diagnostics
 5. Xray Geo data
-6. Return to the main menu
+
+Press `0` to return to the main menu.
 
 `Install & reinstall` exists only in the main menu, and there is no separate configuration-health page. Both lifecycle pages use the same order and expose `Check current configuration`, `Scan upgrade risks`, and `Trial the prerelease`. Results are `Passed`, `Needs attention`, `Failed`, or `Unable to check`. The first two actions are read-only and offline; a prerelease trial neither replaces the binary nor operates the service.
 

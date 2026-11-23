@@ -174,8 +174,8 @@ initHysteria2Network() {
         menuLine "Brutal：适合客户端与服务端之间带宽较稳定的线路；需手填上下行，可从实测速率的 70%-80% 起步"
         menuLine "BBR：适合带宽波动、移动网络或多人共享出口；无需手填带宽，不确定时建议选 2"
         menuLine "此处 BBR 是 Hysteria2/QUIC 自适应拥塞控制，与系统 TCP BBR 设置无关"
-        echoContent yellow "请选择 Hysteria2 拥塞模式：1 Brutal（固定带宽），2 BBR（自适应），回车保持 ${existingBandwidthMode}"
-        menuReadChoice hysteria_bandwidth_mode "模式[1 Brutal/2 BBR，回车保持]:" bandwidthMode true || return 1
+        echoContent yellow "请选择 Hysteria2 拥塞模式：1 Brutal（固定带宽），2 BBR（自适应），0 返回，回车保持 ${existingBandwidthMode}"
+        menuReadChoice hysteria_bandwidth_mode "模式[1 Brutal/2 BBR/0 返回，回车保持]:" bandwidthMode true || return 1
         bandwidthMode=${bandwidthMode:-${existingBandwidthMode}}
         case "${bandwidthMode}" in
         1|brutal)
@@ -189,6 +189,7 @@ initHysteria2Network() {
             statusCard "Hysteria2 拥塞模式" "BBR 自适应"
             break
             ;;
+        0) return 1 ;;
         *)
             statusCard "Hysteria2 拥塞模式" "模式不合法"
             [[ -z "${AUTO_INSTALL:-}" ]] || return 1
@@ -815,6 +816,7 @@ portHoppingMenu() {
         menuItem 1 "添加端口跳跃" "配置 UDP 端口范围转发到当前服务端口"
         menuItem 2 "删除端口跳跃" "移除当前端口跳跃规则"
         menuItem 3 "查看端口跳跃" "显示当前端口跳跃范围"
+        menuReturnItem 0 "返回"
         menuClose
         selectPortHoppingStatus=
         menuReadChoice port_hopping_menu "请选择:" selectPortHoppingStatus || return 0
@@ -847,6 +849,7 @@ portHoppingMenu() {
             fi
             return 0
             ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -897,6 +900,7 @@ initTuicProtocol() {
     menuRecommendedItem 1 "cubic" "sing-box 默认算法"
     menuItem 2 "bbr" "高带宽或长距离链路可尝试"
     menuItem 3 "new_reno" "兼容保守拥塞控制"
+    menuReturnItem 0 "返回"
     menuClose
     while true; do
         menuReadChoice tuic_algorithm_menu "请选择[回车保持 ${defaultAlgorithm}]:" selectedAlgorithm true || return 1
@@ -904,8 +908,9 @@ initTuicProtocol() {
         1 | cubic) tuicAlgorithm=cubic ;;
         2 | bbr) tuicAlgorithm=bbr ;;
         3 | new_reno) tuicAlgorithm=new_reno ;;
+        0) return 1 ;;
         *)
-            errorCard "请选择 1、2 或 3"
+            errorCard "请选择 1、2、3 或 0"
             [[ -z "${AUTO_INSTALL:-}" ]] || return 1
             continue
             ;;
@@ -1104,7 +1109,7 @@ collectRealityProfile() {
     local targetInput=
     local selectRealityTargetMode=
     local selectionPolicy=manual
-    local selectedTarget
+    local selectedTarget candidateStatus
 
     [[ -n "${realityEntryHost:-}" ]] || collectEntryProfile || return 1
 
@@ -1124,20 +1129,25 @@ collectRealityProfile() {
         menuLine "候选列表仅展示 cdn_risk=no 的实测 A 级结果，不推荐 B/C 级备选"
         menuLine "PQC/ML-DSA-65 场景需要目标站支持 X25519MLKEM768 且证书链足够长"
         menuClose
-        echoContent title "┌─ REALITY 目标站选择 ───────────────────────────────"
-        menuItem 1 "检测候选后选择" "先检测全部候选，再从 A 级结果中选择"
-        menuItem 2 "手动输入" "输入 host 或 host:port，端口默认 443"
-        menuClose
         while true; do
+            echoContent title "┌─ REALITY 目标站选择 ───────────────────────────────"
+            menuItem 1 "检测候选后选择" "先检测全部候选，再从 A 级结果中选择"
+            menuItem 2 "手动输入" "输入 host 或 host:port，端口默认 443"
+            menuReturnItem 0 "返回"
+            menuClose
             menuReadChoice reality_target_mode "请选择[默认1]:" selectRealityTargetMode true || return 1
             case "${selectRealityTargetMode:-1}" in
             1)
-                selectRealityTargetCandidateInteractive detect-first || return 1
+                candidateStatus=0
+                selectRealityTargetCandidateInteractive detect-first || candidateStatus=$?
+                [[ "${candidateStatus}" != 2 ]] || continue
+                [[ "${candidateStatus}" == 0 ]] || return 1
                 ;;
             2)
                 menuReadChoice reality_target "请输入REALITY伪装目标 host[:port]，默认端口443[回车取消]:" targetInput || return 1
                 parseRealityTargetInput "${targetInput}" || return 1
                 ;;
+            0) return 1 ;;
             *)
                 errorCard "选择错误"
                 continue

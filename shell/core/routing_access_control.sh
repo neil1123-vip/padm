@@ -39,11 +39,11 @@ accessControlMenu() {
         menuItem 4 "添加直连例外" "添加优先直连域名规则"
         menuDangerItem 5 "区域阻断策略" "屏蔽 geosite:cn / geoip:cn 等高风险策略"
         menuItem 6 "移除访问控制" "按类型移除阻断或例外规则"
-        menuReturnItem 7 "返回路由与访问控制" "回到上级菜单"
+        menuReturnItem 0 "返回路由与访问控制" "回到上级菜单"
         menuClose
 
         accessControlStatus=
-        menuReadChoice access_control_menu "请选择:" accessControlStatus || return 0
+        menuReadChoice access_control_menu "请选择:" accessControlStatus interactive || return 0
         case "${accessControlStatus}" in
         1) showAccessControlStatus || true; continue ;;
         2) addBlockedDomains || true; continue ;;
@@ -51,7 +51,7 @@ accessControlMenu() {
         4) addDirectAllowDomains || true; continue ;;
         5) manageRegionalBlockPolicy || true; continue ;;
         6) removeAccessControlMenu || true; continue ;;
-        7) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -231,12 +231,12 @@ manageRegionalBlockPolicyApply() {
         menuDangerItem 1 "屏蔽 geosite:cn + geoip:cn" "同时阻断大陆域名和大陆 IP"
         menuDangerItem 2 "仅屏蔽 geosite:cn" "只按域名规则阻断"
         menuDangerItem 3 "仅屏蔽 geoip:cn" "只按 IP 规则阻断"
-        menuReturnItem 4 "返回" "回到访问控制"
+        menuReturnItem 0 "返回" "回到访问控制"
         menuClose
         policyStatus=
-        menuReadChoice access_region_policy "请选择:" policyStatus || return 0
+        menuReadChoice access_region_policy "请选择:" policyStatus interactive || return 0
         case "${policyStatus}" in
-        4) return 0 ;;
+        0) return 0 ;;
         1 | 2 | 3) ;;
         *) coreSelectionErrorCard "选择错误"; continue ;;
         esac
@@ -285,13 +285,13 @@ removeAccessControlMenuApply() {
         menuItem 3 "只移除直连例外" "保留阻断规则"
         menuItem 4 "只移除区域阻断" "移除 cn 域名/IP 区域策略"
         menuDangerItem 5 "移除全部访问控制" "移除域名/IP 阻断、区域阻断和直连例外"
-        menuReturnItem 6 "返回" "回到访问控制"
+        menuReturnItem 0 "返回" "回到访问控制"
         menuClose
         removeStatus=
-        menuReadChoice access_remove_menu "请选择:" removeStatus || return 0
+        menuReadChoice access_remove_menu "请选择:" removeStatus interactive || return 0
         case "${removeStatus}" in
         1|2|3|4|5) ;;
-        6) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误"; continue ;;
         esac
         accessControlBackupCreate || return 1

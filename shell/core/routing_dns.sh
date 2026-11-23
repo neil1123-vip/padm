@@ -35,15 +35,15 @@ dnsRouting() {
         menuLine "适合少量域名定向解析；如果目标是固定后端 IP，优先用 DNS/hosts 覆盖"
         menuItem 1 "添加" "添加 DNS 分流配置"
         menuDangerItem 2 "卸载" "移除 DNS 分流配置"
-        menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
+        menuReturnItem 0 "返回分流工具" "回到上一级分流菜单"
         menuClose
         selectType=
-        menuReadChoice dns_routing_menu "请选择:" selectType || return 0
+        menuReadChoice dns_routing_menu "请选择:" selectType interactive || return 0
 
         case "${selectType}" in
         1) setUnlockDNS || true; continue ;;
         2) removeUnlockDNS || true; continue ;;
-        3) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -62,15 +62,15 @@ sniRouting() {
         menuLine "Xray 支持 geosite/domain 规则；sing-box 仅支持具体域名的精确映射"
         menuItem 1 "添加" "添加 DNS/hosts 覆盖规则"
         menuDangerItem 2 "卸载" "移除 DNS/hosts 覆盖配置"
-        menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
+        menuReturnItem 0 "返回分流工具" "回到上一级分流菜单"
         menuClose
         selectType=
-        menuReadChoice sni_routing_menu "请选择:" selectType || return 0
+        menuReadChoice sni_routing_menu "请选择:" selectType interactive || return 0
 
         case "${selectType}" in
         1) setUnlockSNI || true; continue ;;
         2) removeUnlockSNI || true; continue ;;
-        3) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done

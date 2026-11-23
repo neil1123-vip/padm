@@ -939,10 +939,10 @@ manageFail2ban() {
         menuItem 6 "关闭站点扫描扩展防护" "恢复为纯基线防护，不影响 SSH / 控制面基线策略"
         menuItem 7 "查看当前封禁" "查看 fail2ban 当前 jail 与被封禁 IP"
         menuDangerItem 8 "停用 padm 管理的防护" "保留 fail2ban 软件包，只关闭 padm 管理的 jail"
-        menuReturnItem 9 "返回系统与脚本" "回到上级菜单"
+        menuReturnItem 0 "返回系统与脚本" "回到上级菜单"
         menuClose
         selectFail2banMenuType=
-        menuReadChoice fail2ban_menu "请选择:" selectFail2banMenuType || return 0
+        menuReadChoice fail2ban_menu "请选择:" selectFail2banMenuType interactive || return 0
         case "${selectFail2banMenuType}" in
         1) showFail2banRuntimeStatus || true ;;
         2) fail2banApplyProfile "$(fail2banRecommendedProfileName)" || true ;;
@@ -952,7 +952,7 @@ manageFail2ban() {
         6) fail2banApplyNginxScanExtension disable || true ;;
         7) showFail2banBans || true ;;
         8) fail2banApplyProfile disabled || true ;;
-        9) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done

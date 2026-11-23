@@ -1505,13 +1505,18 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
         menuReadChoice() { printf -v "$3" '%s' "${backupSelectionInput}"; }
         userResultCard() { :; }
         menuLine() { :; }
+        menuReturnItem() { [[ "$1" == 0 ]]; }
         menuClose() { :; }
         errorCard() { :; }
         for backupSelectionInput in 08 09 010; do
             selectSubscriptionGroupsBackupFile
             [[ "${selectedSubscriptionGroupsBackupFile}" == "${backupRoot}/$((10#${backupSelectionInput})).json" ]]
         done
-        for backupSelectionInput in 0 00 11 99999999999999999999999999999999999999999999; do
+        backupSelectionInput=0
+        selectedSubscriptionGroupsBackupFile=stale
+        selectSubscriptionGroupsBackupFile
+        [[ -z "${selectedSubscriptionGroupsBackupFile}" ]]
+        for backupSelectionInput in 00 11 99999999999999999999999999999999999999999999; do
             selectedSubscriptionGroupsBackupFile=stale
             regressionExpectStatus 1 selectSubscriptionGroupsBackupFile
             [[ -z "${selectedSubscriptionGroupsBackupFile}" ]]
@@ -1519,6 +1524,9 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
         backupSelectionInput="${backupRoot}/10.json"
         selectSubscriptionGroupsBackupFile
         [[ "${selectedSubscriptionGroupsBackupFile}" == "${backupSelectionInput}" ]]
+        menuReadChoice() { IFS= read -r "$3"; }
+        selectSubscriptionGroupsBackupFile <<< $'\n1'
+        [[ "${selectedSubscriptionGroupsBackupFile}" == "${backupRoot}/1.json" ]]
     )
 }
 

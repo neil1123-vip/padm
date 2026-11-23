@@ -13,18 +13,18 @@ routingToolsMenu() {
         menuItem 3 "Socks5 中继" "接入外部 Socks5 或给其他机器提供 Socks5 入站"
         menuItem 4 "DNS 覆盖" "为指定域名改用指定 DNS 解析"
         menuItem 5 "DNS/hosts 覆盖" "把指定域名解析到指定后端 IP"
-        menuReturnItem 6 "返回路由与访问控制" "回到上级菜单"
+        menuReturnItem 0 "返回路由与访问控制" "回到上级菜单"
         menuClose
 
         selectType=
-        menuReadChoice routing_tools_menu "请选择:" selectType || return 0
+        menuReadChoice routing_tools_menu "请选择:" selectType interactive || return 0
         case "${selectType}" in
         1) warpRoutingMenu || true; continue ;;
         2) ipv6Routing 1 || true; continue ;;
         3) socks5Routing || true; continue ;;
         4) dnsRouting 1 || true; continue ;;
         5) sniRouting 1 || true; continue ;;
-        6) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done

@@ -238,6 +238,7 @@ runSubscriptionsDriver() {
 
 runTrafficDriver() {
     local scenario=$1 action value accountId=alpha
+    local limitPrompt='额度 GiB（0 不限额，空输入取消）'
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'10\n'
     targetReply 'Docker 账号管理' $'9\n'
@@ -248,7 +249,7 @@ runTrafficDriver() {
         for value in 0 0.5 000.500000; do
             targetReply 'Docker 流量与额度' $'3\n'
             targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
-            targetReply '额度 GiB（0 不限额，空输入/r 返回）' "${value}"$'\n'
+            targetReply "${limitPrompt}" "${value}"$'\n'
             targetReply '确认设置账号' $'y\n'
         done
         targetReply 'Docker 流量与额度' $'4\n'
@@ -262,17 +263,15 @@ runTrafficDriver() {
                 targetReply '流量账号 ID（空输入/0 返回）' "${value}"$'\n'
             done
         done
-        for value in '' r R; do
-            targetReply 'Docker 流量与额度' $'3\n'
-            targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
-            targetReply '额度 GiB（0 不限额，空输入/r 返回）' "${value}"$'\n'
-        done
+        targetReply 'Docker 流量与额度' $'3\n'
+        targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
+        targetReply "${limitPrompt}" $'\n'
         for action in 3 4; do
             for value in '' 0 n; do
                 targetReply 'Docker 流量与额度' "${action}"$'\n'
                 targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
                 if [[ "${action}" == 3 ]]; then
-                    targetReply '额度 GiB（0 不限额，空输入/r 返回）' $'1\n'
+                    targetReply "${limitPrompt}" $'1\n'
                     targetReply '确认设置账号' "${value}"$'\n'
                 else
                     targetReply '确认清零账号' "${value}"$'\n'
@@ -287,12 +286,12 @@ runTrafficDriver() {
         done
         targetReply 'Docker 流量与额度' $'3\n'
         targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
-        targetReply '额度 GiB（0 不限额，空输入/r 返回）' $'\004'
+        targetReply "${limitPrompt}" $'\004'
         for action in 3 4; do
             targetReply 'Docker 流量与额度' "${action}"$'\n'
             targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
             if [[ "${action}" == 3 ]]; then
-                targetReply '额度 GiB（0 不限额，空输入/r 返回）' $'1\n'
+                targetReply "${limitPrompt}" $'1\n'
                 targetReply '确认设置账号' $'\004'
             else
                 targetReply '确认清零账号' $'\004'
@@ -303,17 +302,22 @@ runTrafficDriver() {
         targetReply 'Docker 流量与额度' $'3\n'
         targetReply 'Docker 流量与额度' $'4\n'
         ;;
-    invalid|unknown|failed)
+    invalid)
+        for value in not-a-limit r R; do
+            targetReply 'Docker 流量与额度' $'3\n'
+            targetReply '流量账号 ID（空输入/0 返回）' $'alpha\n'
+            targetReply "${limitPrompt}" "${value}"$'\n'
+            targetReply '确认设置账号' $'y\n'
+        done
+        ;;
+    unknown|failed)
         [[ "${scenario}" != unknown ]] || accountId=missing-account
         [[ "${scenario}" != failed ]] || targetReply 'Docker 流量与额度' $'2\n'
         for action in 3 4; do
-            [[ "${scenario}" != invalid || "${action}" == 3 ]] || continue
             targetReply 'Docker 流量与额度' "${action}"$'\n'
             targetReply '流量账号 ID（空输入/0 返回）' "${accountId}"$'\n'
             if [[ "${action}" == 3 ]]; then
-                value=0.5
-                [[ "${scenario}" != invalid ]] || value=not-a-limit
-                targetReply '额度 GiB（0 不限额，空输入/r 返回）' "${value}"$'\n'
+                targetReply "${limitPrompt}" $'0.5\n'
                 targetReply '确认设置账号' $'y\n'
             else
                 targetReply '确认清零账号' $'y\n'
@@ -342,13 +346,16 @@ runTargetsDriver() {
         targetReply 'Reality 入口 ID（空输入检测全部，0 返回）' $'entry-fixture\n'
         targetReply 'Reality 目标站后续操作' $'1\n'
         targetReply '切换目标的 Reality 入口 ID（0 返回）' $'\n'
+        targetReply 'fixture-target-input: select-target' $'0\n'
+        targetReply 'Reality 目标站后续操作' $'1\n'
+        targetReply '切换目标的 Reality 入口 ID（0 返回）' $'\n'
         targetReply 'fixture-target-input: select-target' $'selected\n'
         targetReply 'Docker Reality 目标站' $'2\n'
         targetReply '请选择刷新范围 [1]' $'\n'
         targetReply 'Docker Reality 目标站' $'2\n'
         targetReply '请选择刷新范围 [1]' $'2\n'
         targetReply 'Docker Reality 目标站' $'2\n'
-        targetReply '请选择刷新范围 [1]' $'3\n'
+        targetReply '请选择刷新范围 [1]' $'0\n'
         targetReply 'Docker Reality 目标站' $'3\n'
         targetReply 'fixture-target-input: scan-targets' $'scan\n'
         targetReply 'Docker Reality 目标站' $'4\n'
@@ -391,7 +398,13 @@ runTargetsDriver() {
         targetReply 'Reality 目标 host[:port]（0 返回）' $'target.example.com\n'
         targetReply 'Reality SNI [target.example.com]' $'0\n'
         targetReply 'Docker Reality 目标站' $'2\n'
+        targetReply '请选择刷新范围 [1]' $'3\n'
+        targetReply '请选择刷新范围 [1]' $'r\n'
+        targetReply '请选择刷新范围 [1]' $'R\n'
         targetReply '请选择刷新范围 [1]' $'0\n'
+        targetReply 'Docker Reality 目标站' $'8\n'
+        targetReply 'Docker Reality 目标站' $'9\n'
+        targetReply 'Docker Reality 目标站' $'10\n'
         ;;
     eof)
         targetReply 'Docker Reality 目标站' $'6\n'
@@ -403,6 +416,10 @@ runTargetsDriver() {
         targetReply 'Docker Reality 目标站' $'1\n'
         targetReply 'Reality 入口 ID（空输入检测全部，0 返回）' $'entry-fixture\n'
         targetReply 'Reality 目标站后续操作' $'3\n'
+        targetReply 'Reality 目标站后续操作' $'r\n'
+        targetReply 'Reality 目标站后续操作' $'R\n'
+        targetReply 'Reality 目标站后续操作' $'\n'
+        targetReply 'Reality 目标站后续操作' $'0\n'
         ;;
     int|term)
         targetReply 'Docker Reality 目标站' $'1\n'
@@ -416,7 +433,7 @@ runTargetsDriver() {
         printf '\003' >&3
         ;;
     esac
-    targetReply 'Docker Reality 目标站' $'8\n'
+    targetReply 'Docker Reality 目标站' $'0\n'
     targetReply 'Docker 协议与入口' $'0\n'
     targetReply 'Docker 管理菜单' $'1\n'
     targetReply 'Docker 管理菜单' $'0\n'
@@ -3325,7 +3342,7 @@ if [[ "${MENU_SCOPE}" == full ]]; then
     [[ "${summaryCommandStatus}" -eq 2 ]] || fail 'status 接受了多余参数'
 )
 
-# 仅替换 CLI 边界，直接核对首页、兼容返回键与受限入口。
+# 仅替换 CLI 边界，直接核对首页、返回键与受限入口。
 MENU_UI_CLI="${TEST_ROOT}/menu-ui.sh"
 export MENU_UI_PROJECT_ROOT="${PROJECT_ROOT}" MENU_UI_ACTIONS="${TEST_ROOT}/menu-ui.actions"
 cat >"${MENU_UI_CLI}" <<'EOF'
@@ -3345,7 +3362,7 @@ PADM_DOCKER_RC_USAGE=2
 dockerMenu
 EOF
 : >"${MENU_UI_ACTIONS}"
-runPty ui-categories plain $'1\n0\n2\n6\n3\n8\n4\n3\n5\n4\n6\n3\nn\n0\n7\n5\n8\n3\n0\n' "${MENU_UI_CLI}"
+runPty ui-categories plain $'1\n0\n2\n6\n0\n3\n8\n2\n4\n0\n0\n4\n3\n0\n5\n4\n1\n6\n0\n0\n6\n3\nn\n0\n7\n5\n0\n8\n3\n0\n0\n' "${MENU_UI_CLI}"
 for menuLabel in '1. 安装与重装' '2. 订阅与用户' '3. 协议与入口' '4. 站点与证书' \
     '5. 路由与访问控制' '6. 核心与服务' '7. 系统与脚本' '8. 高级/危险操作'; do
     grep -Fq "${menuLabel}" "${CONTROL_LOG}" || fail "首页缺少原生分类: ${menuLabel}"
@@ -3355,11 +3372,13 @@ grep -Fq '┌─ ' "${CONTROL_LOG}" && grep -Fq '└─' "${CONTROL_LOG}" ||
 ! grep -q $'\033' "${CONTROL_LOG}" || fail 'PADM_NO_COLOR 仍输出终端转义'
 [[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 9 ]] ||
     fail '原生分类返回项未逐次返回首页'
+[[ "$(grep -Fc '无效选项，请重新选择。' "${CONTROL_LOG}")" -eq 8 ]] ||
+    fail '分类菜单仍接受旧返回键'
 [[ "$(<"${MENU_UI_ACTIONS}")" == "$(printf 'status --summary\n%.0s' {1..9})" ]] ||
     fail '首页重绘未逐次更新状态，或分类返回触发了业务命令'
 
 : >"${MENU_UI_ACTIONS}"
-runPty ui-menu-order plain $'2\n0\n3\n0\n4\n0\n5\n1\n0\n4\n0\n' "${MENU_UI_CLI}"
+runPty ui-menu-order plain $'2\n0\n3\n0\n4\n0\n5\n1\n0\n0\n0\n' "${MENU_UI_CLI}"
 awk '
     /^┌─ (订阅与用户|协议与入口|站点与证书|分流工具) / { menu = $2; last = -1; next }
     !menu { next }
@@ -3379,7 +3398,7 @@ awk '
     fail '输入 0 未逐层返回，或触发了业务命令'
 
 : >"${MENU_UI_ACTIONS}"
-runPty ui-subscription-publish plain $'2\n7\n1\n3\nn\n3\ny\n2\n0\n6\n0\n' "${MENU_UI_CLI}"
+runPty ui-subscription-publish plain $'2\n7\n1\n3\nn\n3\ny\n2\n0\n0\n0\n' "${MENU_UI_CLI}"
 grep -Fq '7. HTTPS 订阅发布' "${CONTROL_LOG}" &&
     grep -Fq '公网订阅发布：已启用' "${CONTROL_LOG}" &&
     grep -Fq '本机公网订阅链接将无法刷新' "${CONTROL_LOG}" ||
@@ -3388,11 +3407,13 @@ grep -Fq '7. HTTPS 订阅发布' "${CONTROL_LOG}" &&
     fail 'HTTPS 订阅发布参数分发错误、取消后仍停用，或无法返回首页'
 
 : >"${MENU_UI_ACTIONS}"
-runPty ui-socks5-unavailable plain $'5\n1\n3\n2\n4\n6\n4\n0\n' "${MENU_UI_CLI}"
+runPty ui-socks5-unavailable plain $'5\n1\n3\n2\n4\n0\n0\n0\n0\n' "${MENU_UI_CLI}"
 grep -Fq 'SOCKS5 入站' "${CONTROL_LOG}" && grep -Fq '不可用' "${CONTROL_LOG}" ||
     fail 'SOCKS5 入站未说明受限原因'
-[[ "$(grep -Fc '┌─ Socks5 中继' "${CONTROL_LOG}")" -eq 2 ]] ||
+[[ "$(grep -Fc '┌─ Socks5 中继' "${CONTROL_LOG}")" -eq 3 ]] ||
     fail '受限项未返回 Socks5 中继菜单'
+[[ "$(grep -Fc '无效选项，请重新选择。' "${CONTROL_LOG}")" -eq 1 ]] ||
+    fail 'Socks5 中继仍接受旧返回键'
 [[ "$(grep -Fc "${MAIN_MENU_TITLE}" "${CONTROL_LOG}")" -eq 2 ]] ||
     fail 'Socks5 中继未逐层返回首页'
 [[ "$(<"${MENU_UI_ACTIONS}")" == $'status --summary\nstatus --summary' ]] ||
@@ -3600,6 +3621,10 @@ protocol)
         printf 'fixture-target-input: %s: ' "$2"
         IFS= read -r targetInput || exit 19
         recordAction target-input "$2" "${targetInput}"
+        if [[ "$2" == select-target && "${targetInput}" == 0 ]]; then
+            [[ "${PADM_DOCKER_REALITY_MENU_SELECT:-}" == 1 ]] || exit 0
+            exit 3
+        fi
         ;;
     check-target)
         if [[ "${TARGET_CHECK_WAIT:-0}" == 1 ]]; then
@@ -6283,12 +6308,13 @@ unset UDP_EDIT_STATUS UDP_PROTOCOL_STATUS
 runPty targets-dispatch targets flow "${TLS_WIZARD_CLI}" menu
 for targetLabel in '1. 检测当前目标' '2. 刷新目标库' '3. 扫描指定网段' \
     '4. 同 ASN 抽样扫描' '5. 查看/切换 A 级目标' '6. 手动设置目标站' \
-    '7. 查看目标站黑名单' '8. 返回'; do
+    '7. 查看目标站黑名单' '0. 返回'; do
     grep -Fq "${targetLabel}" "${CONTROL_LOG}" || fail "missing target menu item: ${targetLabel}"
 done
-expectedTargets=$'protocol list\nprotocol check-target entry-fixture\nprotocol select-target entry-fixture\ntarget-input select-target selected\nprotocol refresh-targets recommended\nprotocol refresh-targets recommended_only\nprotocol scan-targets\ntarget-input scan-targets scan\nprotocol scan-targets-asn\ntarget-input scan-targets-asn scan-asn\nprotocol select-target entry-secondary\ntarget-input select-target selected-secondary\nedit --reality-target entry-fixture target.example.com 443 target.example.com\nedit --reality-target entry-secondary alt.example.com 8443 edge.example.net\nprotocol blocked-targets\nprotocol check-target\nprotocol targets entry-secondary\nprotocol check-target entry-secondary\nprotocol targets entry-secondary\nprotocol block-current-target entry-secondary'
+expectedTargets=$'protocol list\nprotocol check-target entry-fixture\nprotocol select-target entry-fixture\ntarget-input select-target 0\nprotocol select-target entry-fixture\ntarget-input select-target selected\nprotocol refresh-targets recommended\nprotocol refresh-targets recommended_only\nprotocol scan-targets\ntarget-input scan-targets scan\nprotocol scan-targets-asn\ntarget-input scan-targets-asn scan-asn\nprotocol select-target entry-secondary\ntarget-input select-target selected-secondary\nedit --reality-target entry-fixture target.example.com 443 target.example.com\nedit --reality-target entry-secondary alt.example.com 8443 edge.example.net\nprotocol blocked-targets\nprotocol check-target\nprotocol targets entry-secondary\nprotocol check-target entry-secondary\nprotocol targets entry-secondary\nprotocol block-current-target entry-secondary'
 [[ "$(grep -v '^protocol target-status$' "${TLS_WIZARD_ACTIONS}")" == "${expectedTargets}" ]] ||
     fail 'target menu dispatched incorrect actions, listener, refresh scope or host/SNI'
+! grep -Fq '操作失败，退出码: 3' "${CONTROL_LOG}" || fail '目标库返回被误报为操作失败'
 for targetCase in cancel eof failed int term; do
     : >"${TLS_WIZARD_ACTIONS}"
     export TARGET_CHECK_STATUS=0 TARGET_CHECK_WAIT=0 TARGET_CHECK_PID="${TEST_ROOT}/target-check.pid"
@@ -6308,6 +6334,11 @@ for targetCase in cancel eof failed int term; do
             fail "target ${targetCase} left the checker alive"
     elif [[ "${targetCase}" == failed ]]; then
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed target check was not reported'
+        [[ "$(grep -Fc '无效选项，请重新选择。' "${CONTROL_LOG}")" -eq 4 ]] ||
+            fail '目标站后续操作仍接受旧返回键或回车'
+    elif [[ "${targetCase}" == cancel ]]; then
+        [[ "$(grep -Fc '无效选项，请重新选择。' "${CONTROL_LOG}")" -eq 6 ]] ||
+            fail '目标站或刷新范围仍接受旧返回键'
     fi
 done
 unset TARGET_CHECK_STATUS TARGET_CHECK_WAIT TARGET_CHECK_PID
@@ -6363,7 +6394,7 @@ for trafficCase in flow cancel eof status-failed invalid unknown failed; do
         limitConfirmations=3 resetConfirmations=1
         ;;
     cancel)
-        expectedTraffic=$(printf 'traffic show\n%.0s' {1..14})
+        expectedTraffic=$(printf 'traffic show\n%.0s' {1..12})
         limitConfirmations=3 resetConfirmations=3
         ;;
     eof)
@@ -6376,10 +6407,10 @@ for trafficCase in flow cancel eof status-failed invalid unknown failed; do
             fail 'traffic 状态失败后仍读取账号 ID'
         ;;
     invalid)
-        expectedTraffic=$'traffic show\ntraffic limit alpha not-a-limit\ntraffic show'
-        limitConfirmations=1
-        grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" ||
-            fail 'traffic 非法额度未保留 CLI 退出码'
+        expectedTraffic=$'traffic show\ntraffic limit alpha not-a-limit\ntraffic show\ntraffic limit alpha r\ntraffic show\ntraffic limit alpha R\ntraffic show'
+        limitConfirmations=3
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 3 ]] ||
+            fail 'traffic 仍接受旧返回键或未保留非法额度的 CLI 退出码'
         ;;
     unknown)
         expectedTraffic=$'traffic show\ntraffic limit missing-account 0.5\ntraffic show\ntraffic reset missing-account\ntraffic show'

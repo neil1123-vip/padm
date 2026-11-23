@@ -18,10 +18,10 @@ installMenu() {
         menuRecommendedItem 4 "TLS 指纹抗性 NaiveProxy" "需要真实域名和证书；不是无域名 Reality 替代"
         menuItem 5 "自定义安装" "手动选择核心和协议组合，适合熟悉参数的人"
         menuItem 6 "传统 TLS 兼容安装" "仅用于旧客户端、迁移或已有 TLS/fallback 架构"
-        menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectInstallType=
-        menuReadChoice install_type "请选择:" selectInstallType || return 0
+        menuReadChoice install_type "请选择:" selectInstallType interactive || return 0
         case "${selectInstallType}" in
         1)
             selectInstallType=2
@@ -35,28 +35,22 @@ installMenu() {
             customXrayInstall 2
             return $?
             ;;
-        3)
-            selectInstallType=3
-            selectCoreInstall
-            return $?
-            ;;
         4)
             selectInstallType=2
             selectCoreType=2
             customSingBoxInstall 5
             return $?
             ;;
-        5)
-            selectInstallType=2
-            selectCoreInstall
-            return $?
+        3 | 5 | 6)
+            case "${selectInstallType}" in
+            5) selectInstallType=2 ;;
+            6) selectInstallType=1 ;;
+            esac
+            selectCoreInstall || return $?
+            [[ "${selectCoreType:-}" != 0 ]] || continue
+            return 0
             ;;
-        6)
-            selectInstallType=1
-            selectCoreInstall
-            return $?
-            ;;
-        7) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -76,9 +70,9 @@ protocolEntryMenu() {
         menuItem 5 "Tuic 管理" "安装、卸载和高级参数"
         menuItem 6 "额外入口端口管理" "为已安装 Xray 追加或移除入口端口"
         menuItem 7 "CDN 入口管理" "订阅入口地址覆盖、CDN/H3 使用说明"
-        menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
-        menuReadChoice protocol_entry_menu "请选择:" selectProtocolMenuType || return 0
+        menuReadChoice protocol_entry_menu "请选择:" selectProtocolMenuType interactive || return 0
         case "${selectProtocolMenuType}" in
         1) showLocalProtocolLinks || true ;;
         2) manageReality 1 || true ;;
@@ -87,7 +81,7 @@ protocolEntryMenu() {
         5) manageTuic || true ;;
         6) addCorePort 1 || true ;;
         7) manageCDN 1 || true ;;
-        8) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -103,15 +97,15 @@ siteCertificateMenu() {
         menuItem 1 "传统 TLS fallback 维护" "静态站点、302 重定向、ALPN 诊断/修复"
         menuItem 2 "本机 TLS 证书管理" "续签或查看 /etc/padm/tls 证书"
         menuItem 4 "本地静态站点" "导入自有网站或使用内置布局起点"
-        menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectSiteCertificateMenuType=
-        menuReadChoice site_certificate_menu "请选择:" selectSiteCertificateMenuType || return 0
+        menuReadChoice site_certificate_menu "请选择:" selectSiteCertificateMenuType interactive || return 0
         case "${selectSiteCertificateMenuType}" in
         1) manageTraditionalTlsFallback 1 || true; continue ;;
         2) manageTLSCertificates || true; continue ;;
         4) manageTraditionalTlsStaticSite || true; continue ;;
-        3) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -126,15 +120,15 @@ routingAccessMenu() {
         menuItem 1 "分流工具" "WARP、IPv6、Socks5、DNS/hosts 覆盖"
         menuItem 2 "BT 下载管理" "P2P/BT 下载访问控制"
         menuItem 3 "访问控制" "域名/IP 阻断、直连例外、区域阻断"
-        menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectRoutingAccessMenuType=
-        menuReadChoice routing_access_menu "请选择:" selectRoutingAccessMenuType || return 0
+        menuReadChoice routing_access_menu "请选择:" selectRoutingAccessMenuType interactive || return 0
         case "${selectRoutingAccessMenuType}" in
         1) routingToolsMenu 1 || true; continue ;;
         2) btTools 1 || true; continue ;;
         3) accessControlMenu 1 || true; continue ;;
-        4) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -150,16 +144,16 @@ systemScriptMenu() {
         menuItem 2 "查看脚本安装状态" "显示入口校验、版本、ref 和 manifest"
         menuItem 3 "Fail2ban 防护" "SSH 和 /s/control/ 的最小防护入口"
         menuItem 4 "网络优化" "查看或启用官方 BBR + fq"
-        menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectSystemMenuType=
-        menuReadChoice system_script_menu "请选择:" selectSystemMenuType || return 0
+        menuReadChoice system_script_menu "请选择:" selectSystemMenuType interactive || return 0
         case "${selectSystemMenuType}" in
         1) updatePadm 1 || true; continue ;;
         2) showPadmScriptInstallStatus || true; continue ;;
         3) manageFail2ban || true; continue ;;
         4) bbrInstall || true; continue ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -172,14 +166,14 @@ advancedDangerMenu() {
         menuLine "这里只放不可逆、实验性或容易影响现有连接的操作"
         menuDangerItem 1 "卸载脚本" "移除脚本和相关配置，执行前请确认备份"
         menuDangerItem 2 "VLESS Encryption 实验" "Xray-only，高级兼容性实验开关"
-        menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectDangerMenuType=
-        menuReadChoice danger_menu "请选择:" selectDangerMenuType || return 0
+        menuReadChoice danger_menu "请选择:" selectDangerMenuType interactive || return 0
         case "${selectDangerMenuType}" in
         1) unInstall 1; return $? ;;
         2) manageVlessEncryptionExperiment || true; continue ;;
-        3) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -287,10 +281,10 @@ coreLifecycleMenu() {
         echoContent title "\n┌─ ${title} 生命周期 ─────────────────────────────────"
         menuItem 1 "升级/切换版本" "${upgradeText}"
         menuItem 2 "检查与诊断" "检查当前配置并扫描已知升级风险"
-        menuReturnItem 3 "返回核心与服务" "回到核心与服务"
+        menuReturnItem 0 "返回核心与服务" "回到核心与服务"
         menuClose
         selection=
-        menuReadChoice "${menuKey}" "请选择:" selection || return 0
+        menuReadChoice "${menuKey}" "请选择:" selection interactive || return 0
         case "${selection}" in
         1)
             if ! "${installedFn}"; then
@@ -315,7 +309,7 @@ coreLifecycleMenu() {
             "${checkFn}" || true
             "${auditFn}" || true
             ;;
-        3) return 0 ;;
+        0) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done
@@ -370,13 +364,11 @@ coreServiceControlMenu() {
             else
                 menuItem 4 "reload（不可用）" "Nginx 未运行，无法平滑重载"
             fi
-            menuReturnItem 5 "返回服务运行态" "回到服务列表"
-        else
-            menuReturnItem 4 "返回服务运行态" "回到服务列表"
         fi
+        menuReturnItem 0 "返回服务运行态" "回到服务列表"
         menuClose
         selectServiceAction=
-        menuReadChoice core_service_control "请选择:" selectServiceAction || return 0
+        menuReadChoice core_service_control "请选择:" selectServiceAction interactive || return 0
         case "${selectServiceAction}" in
         1) coreServiceControlAction "${serviceName}" start || true ;;
         2)
@@ -397,10 +389,10 @@ coreServiceControlMenu() {
                     statusCard "Nginx reload" "不可用" "Nginx 未运行，未执行服务动作"
                 fi
             else
-                return 0
+                coreInvalidInputErrorCard
             fi
             ;;
-        5) [[ "${serviceName}" == "nginx" ]] && return 0 || coreInvalidInputErrorCard ;;
+        0) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done
@@ -419,10 +411,10 @@ coreAllServicesMenu() {
         else
             menuItem 3 "Nginx 服务（只读）" "非 padm 当前依赖，不提供服务动作"
         fi
-        menuReturnItem 4 "返回核心与服务" "回到核心与服务"
+        menuReturnItem 0 "返回核心与服务" "回到核心与服务"
         menuClose
         selectCoreService=
-        menuReadChoice core_services_menu "请选择:" selectCoreService || return 0
+        menuReadChoice core_services_menu "请选择:" selectCoreService interactive || return 0
         case "${selectCoreService}" in
         1) coreServiceControlMenu xray ;;
         2) coreServiceControlMenu sing-box ;;
@@ -433,7 +425,7 @@ coreAllServicesMenu() {
                 statusCard "Nginx 服务" "只读" "未检测到 padm 当前依赖，未执行服务动作"
             fi
             ;;
-        4) return 0 ;;
+        0) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done
@@ -455,10 +447,10 @@ coreLogsMenu() {
             menuItem 3 "开启 sing-box 调试日志" "记录调试日志并实时查看"
         fi
         menuItem 4 "Nginx 配置检查" "执行 nginx -t，不重载服务"
-        menuReturnItem 5 "返回核心与服务" "回到核心与服务"
+        menuReturnItem 0 "返回核心与服务" "回到核心与服务"
         menuClose
         selectLogs=
-        menuReadChoice core_logs_menu "请选择:" selectLogs || return 0
+        menuReadChoice core_logs_menu "请选择:" selectLogs interactive || return 0
         case "${selectLogs}" in
         1) checkLog 1 || true ;;
         2 | 3)
@@ -472,7 +464,7 @@ coreLogsMenu() {
                 tail -f "${logFile}"
             ;;
         4) checkNginxConfig || true ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done
@@ -485,15 +477,15 @@ xrayGeoDataMenu() {
         menuItem 1 "更新 Xray Geo 数据" "更新 geosite.dat / geoip.dat"
         menuItem 2 "查看 Xray Geo 状态" "查看文件、版本和自动更新状态"
         menuItem 3 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
-        menuReturnItem 4 "返回核心与服务" "回到核心与服务"
+        menuReturnItem 0 "返回核心与服务" "回到核心与服务"
         menuClose
         selectGeoAction=
-        menuReadChoice xray_geo_menu "请选择:" selectGeoAction || return 0
+        menuReadChoice xray_geo_menu "请选择:" selectGeoAction interactive || return 0
         case "${selectGeoAction}" in
         1) updateGeoSite || true ;;
         2) showXrayGeoStatus || true ;;
         3) installCronUpdateGeo || true ;;
-        4) return 0 ;;
+        0) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done
@@ -510,17 +502,17 @@ coreVersionManageMenu() {
         menuItem 3 "服务运行态" "Xray、sing-box 和 padm 依赖的 Nginx"
         menuItem 4 "日志与诊断" "Xray、sing-box 日志和 Nginx 配置检查"
         menuItem 5 "Xray Geo 数据" "更新、查看状态或设置自动更新"
-        menuReturnItem 6 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectCore=
-        menuReadChoice core_manage_menu "请选择:" selectCore || return 0
+        menuReadChoice core_manage_menu "请选择:" selectCore interactive || return 0
         case "${selectCore}" in
         1) xrayVersionManageMenu ;;
         2) singBoxVersionManageMenu ;;
         3) coreAllServicesMenu ;;
         4) coreLogsMenu ;;
         5) xrayGeoDataMenu ;;
-        6) return 0 ;;
+        0) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done
@@ -556,9 +548,10 @@ menu() {
         menuItem 7 "系统与脚本" "更新 padm、网络优化和宿主机辅助项"
         menuDangerItem 8 "高级/危险操作" "卸载和实验性高风险开关"
         menuLine "新人建议：1 安装与重装里先看怎么选；安装后 2 查看订阅"
+        menuReturnItem 0 "退出" "结束当前菜单会话"
         menuClose
         selectMainMenuType=
-        menuReadChoice main_menu "请选择:" selectMainMenuType || return 0
+        menuReadChoice main_menu "请选择:" selectMainMenuType interactive || return 0
         PADM_INSTALL_STATUS_READY=0
         case ${selectMainMenuType} in
         1)
@@ -588,6 +581,7 @@ menu() {
         8)
             advancedDangerMenu
             ;;
+        0) return 0 ;;
         *)
             coreInvalidInputErrorCard
             ;;

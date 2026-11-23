@@ -3002,6 +3002,7 @@ configureRealityDomainMode() {
         menuItem 1 "普通 Reality" "客户端入口使用服务器 IP、历史入口或 --entry-host"
         menuItem 2 "严格域名 Reality" "客户端入口必须是解析到本机的自有域名"
         menuLine "entry 是客户端连接地址；target/SNI 是 REALITY 伪装目标"
+        menuReturnItem 0 "返回"
         menuClose
         while true; do
             menuReadChoice reality_domain "请选择[默认1]:" realityOnlyInstallType true || return 1
@@ -3011,6 +3012,7 @@ configureRealityDomainMode() {
                 strictRequested=true
                 break
                 ;;
+            0) return 1 ;;
             esac
             coreSelectionErrorCard "选择错误"
             [[ -z "${AUTO_INSTALL:-}" ]] || return 1
@@ -3157,7 +3159,7 @@ selectCoreInstallProtocols() {
     selectCustomInstallType=
     if [[ -z "${preselectedProtocols}" ]]; then
         echoContent title "\n┌─ ${core} 个性化安装 ──────────────────────────────────"
-        menuLine "可输入单个编号，或用中英文逗号多选；回车取消"
+        menuLine "可输入单个编号，或用中英文逗号多选"
         if [[ "${core}" == "xray" ]]; then
             menuLine "推荐新人：优先选 1；需要 XHTTP 时选 2"
         else
@@ -3169,13 +3171,18 @@ selectCoreInstallProtocols() {
         protocolRegistryMenuByLifecycle "${allowedIds}" recommended
         menuLine "高级能力"
         protocolRegistryMenuByLifecycle "${allowedIds}" advanced
+        menuReturnItem 0 "取消"
         menuClose
     fi
     while true; do
         if [[ -n "${preselectedProtocols}" ]]; then
             selectCustomInstallType=${preselectedProtocols}
         else
-            menuReadChoice protocols "请选择协议[逗号分隔多选，回车取消]:" selectCustomInstallType || return 1
+            menuReadChoice protocols "请选择协议[逗号分隔多选]:" selectCustomInstallType true || return 1
+            if [[ "${selectCustomInstallType}" == 0 ]]; then
+                selectCustomInstallType=
+                return 1
+            fi
         fi
         selectCustomInstallType=$(protocolSelectionNormalizeCsv "${selectCustomInstallType}") || return 1
         unsupportedReason=$(protocolCoreUnsupportedReason "${core}" "${selectCustomInstallType}" 2>/dev/null || true)
@@ -3291,9 +3298,10 @@ selectCoreInstall() {
         echoContent title "\n┌─ 选择核心 ─────────────────────────────────────────"
         menuRecommendedItem 1 "Xray-core" "推荐新人优先选择，Reality Vision 与 Reality XHTTP 场景验证最多"
         menuItem 2 "sing-box" "适合 Hysteria2、Tuic、Naive、AnyTLS 或统一 sing-box 配置"
+        menuReturnItem 0 "返回安装与重装"
         menuClose
         selectCoreType=
-        menuReadChoice core "请选择:" selectCoreType || return 0
+        menuReadChoice core "请选择:" selectCoreType interactive || return 0
         case "${selectCoreType}" in
         1)
             if [[ "${selectInstallType}" == "1" ]]; then
@@ -3315,6 +3323,7 @@ selectCoreInstall() {
             fi
             return $?
             ;;
+        0) return 0 ;;
         *)
             coreSelectionErrorCard "选择错误"
             ;;

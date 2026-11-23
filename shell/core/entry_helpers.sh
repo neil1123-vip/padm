@@ -1101,16 +1101,16 @@ bbrInstall() {
         menuItem 2 "启用官方 BBR + fq" "写入 ${PADM_BBR_SYSCTL_CONF}"
         menuItem 3 "关闭 padm BBR 设置" "只删除 padm 写入的 sysctl 配置"
         menuDangerItem 4 "高级：第三方 TCP 加速脚本" "可能换内核、改引导、需要重启"
-        menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 0 "返回主菜单" "回到 padm 管理面板"
         menuClose
         installBBRStatus=
-        menuReadChoice bbr_menu "请选择:" installBBRStatus || return 0
+        menuReadChoice bbr_menu "请选择:" installBBRStatus interactive || return 0
         case "${installBBRStatus}" in
         1) showNetworkOptimizationStatus || true ;;
         2) enableOfficialBbrFq || true ;;
         3) disablePadmBbr || true ;;
         4) runThirdPartyTcpAccelerationScript || true ;;
-        5) return 0 ;;
+        0) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
@@ -1255,9 +1255,18 @@ checkLog() {
     menuItem 4 "查看证书定时任务日志" "查看 TLS cron 日志"
     menuItem 5 "查看证书安装日志" "查看证书申请/安装日志"
     menuItem 6 "清空日志" "清理当前日志文件"
+    menuReturnItem 0 "返回"
     menuClose
 
-    menuReadChoice log_menu "请选择:" selectAccessLogType || return 0
+    local selectAccessLogType
+    while true; do
+        menuReadChoice log_menu "请选择:" selectAccessLogType interactive || return 0
+        case "${selectAccessLogType}" in
+        0) return 0 ;;
+        [1-6]) break ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
     local configPathLog=${configPath%conf/}
 
     case ${selectAccessLogType} in

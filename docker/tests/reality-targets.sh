@@ -520,7 +520,7 @@ try:
                 break
             output.extend(part)
             if not selected and "请选择本页编号切换".encode() in output:
-                os.write(master, b"r\n" if sys.argv[2] == "return" else b"1\n")
+                os.write(master, b"0\n" if sys.argv[2] == "return" else b"1\n")
                 selected = True
             elif selected and not confirmed and b"[y/N]: " in output:
                 if sys.argv[2] in ("int", "term"):
@@ -577,6 +577,9 @@ for answer in return n int term; do
     fi
 done
 before=$(targetDeploymentSnapshot)
+PADM_DOCKER_REALITY_MENU_SELECT=1 runTargetSelectionPty return 3
+[[ "$(targetDeploymentSnapshot)" == "${before}" ]] && ! grep -Eq '^compose .* up -d ' "${EVENTS}" ||
+    fail '后续操作中返回目标库改变或启动部署'
 FAKE_TARGET_MODE=dns-fail runTargetSelectionPty dns-fail 15
 [[ "$(targetDeploymentSnapshot)" == "${before}" ]] && ! grep -Eq '^compose .* up -d ' "${EVENTS}" ||
     fail '缓存 A 级复测失败仍改变或启动部署'
