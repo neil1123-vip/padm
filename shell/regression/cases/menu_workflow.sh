@@ -33,22 +33,45 @@ runSubscriptionMenuWorkflowCoreRegression() (
 
     (
         local actions= installStatus=0 role
+        local publishedLinksAvailable=true
         showSubscriptionServerRoleSummary() { :; }
         installSubscribe() { actions+="install "; return "${installStatus}"; }
         showSubscriptionServiceStatus() { actions+="status "; }
         runSubscriptionGroupSync() { actions+="sync "; SUBSCRIPTION_SYNC_PUBLISHED=true; }
         showPublishedSubscriptionLinks() { actions+="links "; }
+        readPublishedSubscriptionLinks() {
+            actions+="read:$1 "
+            if [[ "${publishedLinksAvailable}" != "true" ]]; then
+                statusCard "当前没有可用的已发布链接"
+                return 1
+            fi
+        }
         browsePublishedSubscriptionLinks() { actions+="browse "; }
         for role in uninitialized main; do
             actions=
             : >"${errorLog}"
+            : >"${statusLog}"
             manageSubscriptionCatalog "${role}" <<< $'1\n9\n2\n\n1'
-            [[ "${actions}" == 'install status sync links browse ' ]]
+            [[ "${actions}" == 'install status sync read:list browse ' ]]
+            grep -qF '订阅已发布 请进入「查看当前订阅链接」选择订阅' "${statusLog}"
             [[ "$(grep -c '选择错误，请重新选择' "${errorLog}")" == 1 ]]
         done
         actions= installStatus=1
         manageSubscriptionCatalog uninitialized <<< $'1\n0' || true
         [[ "${actions}" == 'install ' ]]
+        actions= installStatus=0
+        publishedLinksAvailable=false
+        : >"${statusLog}"
+        manageSubscriptionCatalog main <<< $'1\n0' || true
+        [[ "${actions}" == 'install status sync read:list ' ]]
+        [[ "$(cat "${statusLog}")" == '当前没有可用的已发布链接' ]]
+        actions= publishedLinksAvailable=true
+        : >"${statusLog}"
+        runSubscriptionGroupSync() { actions+="sync "; SUBSCRIPTION_SYNC_PUBLISHED=true; return 1; }
+        manageSubscriptionCatalog main <<< $'1\n0'
+        [[ "${actions}" == 'install status sync read:list ' ]]
+        grep -qF '订阅同步部分失败' "${statusLog}"
+        grep -qF '订阅已发布 请进入「查看当前订阅链接」选择订阅' "${statusLog}"
         actions= installStatus=0
         runSubscriptionGroupSync() { actions+="sync "; return 1; }
         SUBSCRIPTION_SYNC_PUBLISHED=true

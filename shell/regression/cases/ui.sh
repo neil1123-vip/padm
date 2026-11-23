@@ -1583,6 +1583,7 @@ EOF
     readNginxSubscribe() { subscribePort=39778; subscribeDomain=main.example.com; subscribeType=https; }
     showAccounts() { recordMenuAction showAccounts; }
     showPublishedSubscriptionLinks() { recordMenuAction "showPublishedSubscriptionLinks:$*"; }
+    readPublishedSubscriptionLinks() { recordMenuAction "readPublishedSubscriptionLinks:$*"; }
     browsePublishedSubscriptionLinks() { recordMenuAction browsePublishedSubscriptionLinks; }
     installSubscribe() { recordMenuAction installSubscribe; }
     runSubscriptionGroupSync() {
@@ -2267,7 +2268,7 @@ n"
         resetMenuActions
         manageSubscriptionLocalHome <<<"1
 0"
-        [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\nrunSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
+        [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\nrunSubscriptionGroupSync:\nreadPublishedSubscriptionLinks:list\nstatusCard:订阅已发布\n' ]]
         resetMenuActions
         manageSubscriptionLocalHome <<< $'9\n0'
         [[ "${actions}" == $'errorCard:选择错误，请重新选择\n' ]]
@@ -2414,7 +2415,7 @@ invite-credential"
         resetMenuActions
         manageSubscriptionMainHome <<<"1
 0"
-        [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\nrunSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
+        [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\nrunSubscriptionGroupSync:\nreadPublishedSubscriptionLinks:list\nstatusCard:订阅已发布\n' ]]
         resetMenuActions
         manageSubscriptionMainHome <<<"2
 0"
@@ -2451,7 +2452,6 @@ invite-credential"
         output=
         manageSubscriptionMainHome <<<"0"
         grep -qF "管理员订阅汇总本机和已启用被控服务器的可用节点" <<<"${output}"
-        grep -qF "只读查看已发布的管理员订阅和分享订阅" <<<"${output}"
         grep -q "查看当前订阅链接" <<<"${output}"
         grep -q "立即完整同步" <<<"${output}"
         grep -q "安装/更新发布服务" <<<"${output}"

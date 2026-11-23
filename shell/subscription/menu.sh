@@ -538,7 +538,7 @@ manageSubscriptionCatalog() {
         else
             menuLine "管理员订阅包含本机协议配置中的节点。"
         fi
-        menuItem 1 "安装/更新发布服务" "配置公网发布入口，随后完整同步并显示链接"
+        menuItem 1 "安装/更新发布服务" "配置公网发布入口，随后完整同步"
         menuItem 2 "查看当前订阅链接" "选择已发布的管理员订阅或分享订阅，再查看链接"
         menuItem 3 "分享订阅" "新建或维护已有分享订阅"
         menuItem 4 "流量与限额" "查看流量明细，并处理超限和自动限额"
@@ -561,7 +561,7 @@ manageSubscriptionCatalog() {
         menuClose
         menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus interactive || return 0
         case "${subscriptionCatalogStatus}" in
-        1) installSubscribe && showSubscriptionServiceStatus && syncAndShowSubscriptionLinks ;;
+        1) installSubscribe && showSubscriptionServiceStatus && syncAndShowSubscriptionLinks "" "" false ;;
         2) browsePublishedSubscriptionLinks ;;
         3) manageSharedSubscriptions ;;
         4) manageTrafficAndQuota ;;
@@ -974,6 +974,7 @@ selectUserSubscriptionId() {
 syncAndShowSubscriptionLinks() {
     local userSubscriptionId=${1:-}
     local idsJson=${2:-}
+    local showLinks=${3:-true}
     local enabled
     if [[ -n "${idsJson}" ]]; then
         enabled=$(subscriptionActiveGroupRead -r --argjson ids "${idsJson}" '
@@ -1001,6 +1002,12 @@ syncAndShowSubscriptionLinks() {
     fi
     if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" != "true" ]]; then
         statusCard "账号同步已完成，未发布订阅链接" "如需分享链接，请从订阅首页安装/更新发布服务，再执行立即完整同步"
+        return 0
+    fi
+    if [[ "${showLinks}" == "false" ]]; then
+        local -a publishedAccounts=() publishedUserIds=() publishedLabels=()
+        readPublishedSubscriptionLinks list || return 1
+        statusCard "订阅已发布" "请进入「查看当前订阅链接」选择订阅"
         return 0
     fi
     if [[ -n "${idsJson}" ]]; then
