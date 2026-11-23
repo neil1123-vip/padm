@@ -858,7 +858,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
             printf '%s\n' "${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT:-unset}" >>"${lockTimeoutLog}"
             return 1
         }
-        autoRead() { printf -v "$3" '%s' 7; }
+        autoRead() { printf -v "$3" '%s' 0; }
         echoContent() { :; }
         menuLine() { printf '%s\n' "$*"; }
         menuItem() { :; }
