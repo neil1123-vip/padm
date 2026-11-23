@@ -887,6 +887,7 @@ stageRemoteSubscribe() {
     local escapedEmail=
     local stageDir publicBase localBase defaultTarget clashTarget singBoxTarget
     local validSourceCount=0
+    local mergedRemoteSingBox=false
 
     subscriptionRemoteScopeEnabled || return 0
     subscriptionRemoteSubscribeSourcesForAccount "${email}" sourceLines || return 1
@@ -953,14 +954,16 @@ stageRemoteSubscribe() {
         fi
         jq -r '.clash_meta // ""' <<<"${controlledResponse}" >"${clashFile}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         jq -r '.default // ""' <<<"${controlledResponse}" >"${defaultFile}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
-        jq -c '.sing_box // []' <<<"${controlledResponse}" >"${singBoxFile}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+        jq -c '.sing_box' <<<"${controlledResponse}" >"${singBoxFile}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
 
-        clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed -E \
-            -e "s/^([[:space:]-]*name:[[:space:]]*\")${escapedEmail}([^\"]*)(\".*)$/\1${email}_${serverAlias}\2\3/" \
-            -e "s/^([[:space:]-]*name:[[:space:]]*)${escapedEmail}([^[:space:]]*)([[:space:]]*)$/\1${email}_${serverAlias}\2\3/")
-        if [[ -z "${clashMetaProxies}" || "${clashMetaProxies}" == *nginx* ]]; then
-            errorCard "clashMeta订阅 ${remoteUrl}:${email} 快照无效或不存在"
-            sourceInvalid=true
+        if [[ -n "$(<"${clashFile}")" ]]; then
+            clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed -E \
+                -e "s/^([[:space:]-]*name:[[:space:]]*\")${escapedEmail}([^\"]*)(\".*)$/\1${email}_${serverAlias}\2\3/" \
+                -e "s/^([[:space:]-]*name:[[:space:]]*)${escapedEmail}([^[:space:]]*)([[:space:]]*)$/\1${email}_${serverAlias}\2\3/")
+            if [[ -z "${clashMetaProxies}" || "${clashMetaProxies}" == *nginx* ]]; then
+                errorCard "clashMeta订阅 ${remoteUrl}:${email} 快照无效"
+                sourceInvalid=true
+            fi
         fi
 
         default=$(<"${defaultFile}")
@@ -980,29 +983,35 @@ stageRemoteSubscribe() {
         fi
 
         singBoxSubscribe=$(<"${singBoxFile}")
-        if [[ -n "${singBoxSubscribe}" && "${singBoxSubscribe}" != *nginx* ]] && echo "${singBoxSubscribe}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-            if ! singBoxSubscribe=$(jq --arg email "${email}" --arg alias "${serverAlias}" 'map(if ((.tag // "") | startswith($email)) then .tag = ($email + "_" + $alias + (.tag[($email | length):])) else . end)' <<<"${singBoxSubscribe}"); then
-                padmRemoveCleanupPath "${stageDir}"
-                return 1
+        # XHTTP 等协议没有 sing-box 产物，控制端以空数组表示。
+        if [[ "${singBoxSubscribe}" != '[]' ]]; then
+            if [[ "${singBoxSubscribe}" == *nginx* ]] || ! singBoxSubscribe=$(jq -ce --arg email "${email}" --arg alias "${serverAlias}" '
+              select(type == "array" and all(.[]; type == "object")) |
+              map(if ((.tag // "") | startswith($email)) then .tag = ($email + "_" + $alias + (.tag[($email | length):])) else . end)
+            ' <<<"${singBoxSubscribe}" 2>/dev/null); then
+                errorCard "sing-box订阅 ${remoteUrl}:${email} 快照无效"
+                sourceInvalid=true
             fi
-        else
-            errorCard "sing-box订阅 ${remoteUrl}:${email} 快照无效或不存在"
-            sourceInvalid=true
         fi
         if [[ "${sourceInvalid}" == "true" ]]; then
             rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
             continue
         fi
-        # 保留节点块内重复出现的 YAML 字段，如不同节点的 type 和 port。
-        if ! printf '%s\n' "${clashMetaProxies}" >>"${clashTarget}" ||
-            ! appendUniqueLines "${default}" "${defaultTarget}" ||
-            ! mergeSingBoxSubscribeOutbounds "${singBoxTarget}" "${singBoxSubscribe}"; then
+        if ! appendUniqueLines "${default}" "${defaultTarget}"; then
             padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
-        successCard "clashMeta订阅 ${remoteUrl}:${email} 更新成功"
+        if [[ -n "${clashMetaProxies}" ]]; then
+            # 保留节点块内重复出现的 YAML 字段，如不同节点的 type 和 port。
+            printf '%s\n' "${clashMetaProxies}" >>"${clashTarget}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+            successCard "clashMeta订阅 ${remoteUrl}:${email} 更新成功"
+        fi
+        if [[ "${singBoxSubscribe}" != '[]' ]]; then
+            mergeSingBoxSubscribeOutbounds "${singBoxTarget}" "${singBoxSubscribe}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+            mergedRemoteSingBox=true
+            successCard "sing-box订阅 ${remoteUrl}:${email} 更新成功"
+        fi
         successCard "通用订阅 ${remoteUrl}:${email} 更新成功"
-        successCard "sing-box订阅 ${remoteUrl}:${email} 更新成功"
         validSourceCount=$((validSourceCount + 1))
         rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
     done <<<"${sourceLines}"
@@ -1013,10 +1022,14 @@ stageRemoteSubscribe() {
     fi
 
     padmEnsureSafeDirectory "${publicBase}/default" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
-    padmEnsureSafeDirectory "${publicBase}/clashMeta" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
-    padmEnsureSafeDirectory "${localBase}/sing-box" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
     commitSubscribePublicFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
-    commitSubscribePublicFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
-    commitGeneratedJsonFile "${singBoxTarget}" "${localBase}/sing-box/${email}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    if [[ -s "${clashTarget}" ]]; then
+        padmEnsureSafeDirectory "${publicBase}/clashMeta" &&
+            commitSubscribePublicFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    fi
+    if [[ "${mergedRemoteSingBox}" == "true" ]]; then
+        padmEnsureSafeDirectory "${localBase}/sing-box" &&
+            commitGeneratedJsonFile "${singBoxTarget}" "${localBase}/sing-box/${email}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    fi
     padmRemoveCleanupPath "${stageDir}"
 }
