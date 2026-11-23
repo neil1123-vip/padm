@@ -8,7 +8,7 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 
 当前导航（2026-10-19）：Docker 首页已按原生版归为安装与重装、订阅与用户、
 协议与入口、站点与证书、路由与访问控制、核心与服务、系统与脚本、
-高级与危险操作 8 类，并复用共享菜单样式。当前路径见 [README](../README.md#docker-版)；
+高级与危险操作 8 类，并复用共享菜单样式。当前路径见 [Docker 菜单导航](docker-guide.md#安装)。
 下文历史记录的顶层 `9` 协议、`17` 路由和 `18` 维护，分别对应
 `3 → 8`、`5 → 1 → 8` 和 `7 → 1`。菜单按可见操作连续编号。
 SOCKS5 入站保留不可用说明；两版核心升级机制保持原样，Docker 继续整包验签升级与回滚。
@@ -675,7 +675,7 @@ Reality 共存选中的 website 入口使用公开 `443`。首配 `12–17` 接�
 5A.1d–5A.1e 将受管模板扩展到已有 sing-box `23`，并复用原生 renderer 接入可选站名；
 仅渲染公开内容，不新增规格字段或放宽模板资源校验。
 
-机器可读状态位于 [`docker/contracts/features.json`](../docker/contracts/features.json)：
+机器可读状态由 [`docker/contracts/features.json`](https://github.com/neil1123-vip/padm/blob/main/docker/contracts/features.json) 记录。
 
 - `protocols[]` 记录公开协议 ID、配置运行状态、管理状态、核心、profile、`transport`、`udp_support` 和原因。
 - `features` 保留旧的兼容状态子集；同名值必须与 `feature_matrix` 一致。
@@ -700,7 +700,7 @@ Sigstore bundle、control-bundle；逐字段取消或 EOF 不执行恢复，应�
 
 ## 公网协议
 
-协议 ID 与原生 [`shell/core/protocols.sh`](../shell/core/protocols.sh) 的
+协议 ID 与原生 [`shell/core/protocols.sh`](https://github.com/neil1123-vip/padm/blob/main/shell/core/protocols.sh) 的
 `category=node` 注册表保持一致。Docker 当前只接受配置运行状态为 `supported`
 且核心匹配的协议；管理状态独立记录，不能由运行状态推断。
 

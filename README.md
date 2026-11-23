@@ -1,146 +1,50 @@
 <h1 align="center">padm</h1>
 
-<p align="center"><strong>✨ 面向 Xray-core / sing-box 的一站式安装与长期运维脚本</strong></p>
-<p align="center">🚀 节点安装 · 🔗 订阅发布 · 🌐 多服务器协同 · 🧭 路由控制 · 🔐 证书维护 · ⚙️ 核心升级</p>
+<p align="center"><strong>✨ Xray-core / sing-box 节点安装与运维</strong></p>
+<p align="center">🚀 节点安装 · 🔗 订阅发布 · 🌐 多服务器协同 · 🧭 分流与访问控制 · 🔐 站点与证书</p>
 <p align="center"><a href="documents/en/README_EN.md">🌍 English</a></p>
 
 <p align="center">
   <a href="#快速选择">🚀 快速选择</a> ·
-  <a href="#安装">📦 安装</a> ·
+  <a href="#安装">📦 原生安装</a> ·
   <a href="#docker-版">🐳 Docker 版</a> ·
-  <a href="#协议选择">🧭 协议选择</a> ·
-  <a href="#订阅与用户">🔗 订阅与用户</a>
-  <br>
-  <a href="#路由与访问控制">🧱 路由控制</a> ·
-  <a href="#核心与服务">⚙️ 核心服务</a> ·
-  <a href="#参数参考">📋 参数参考</a> ·
-  <a href="#验收与回归">✅ 验收回归</a>
+  <a href="#订阅与用户">🔗 获取订阅</a> ·
+  <a href="#文档导航">📚 文档导航</a>
 </p>
 
 ---
 
-> **✨ 一句话选协议**
->
-> 🧭 直连/有域名 `Reality Vision` · 🌐 CDN/反代 `Reality XHTTP`
->
-> 📍 无域名 `Reality` · 🛡️ TLS 指纹抗性 `NaiveProxy`
-
 ## 快速选择
 
-第一次使用时，不需要先理解全部协议。运行脚本后按这个路径走：
+原生版首次安装时，打开 `1. 安装与重装`，按域名和连接方式选择。容器部署见 [🐳 Docker 版](#docker-版)。
 
 | 场景 | 菜单入口 | 说明 |
 | --- | --- | --- |
-| 🧭 不知道选什么 | `安装与重装` -> `推荐直连 Reality Vision` | 新手首选，配置少，适合直连或自有域名入口。 |
-| 🌐 需要 CDN / 反代 | `安装与重装` -> `推荐 CDN Reality XHTTP` | 新建 CDN 场景优先选它，使用 XHTTP 与 XMUX。 |
-| 📍 没有域名 | `安装与重装` -> `无域名 Reality` | 使用服务器 IP 或自定义 entry-host，不需要本机证书。 |
-| 🛡️ 需要 TLS 指纹抗性 | `安装与重装` -> `TLS 指纹抗性 NaiveProxy` | 需要真实域名和可信证书，不是无域名 Reality 的替代品。 |
-| 🧰 已有旧客户端或迁移需求 | `安装与重装` -> `传统 TLS 兼容安装` | 仅在明确需要 WS/TLS、VMess、Trojan 等旧形态时使用。 |
-| 📱 无域名自用拿节点 | `协议与入口` -> `查看全部协议链接` | 查看当前本机自用协议链接和二维码，无需订阅发布服务。 |
-| 🔗 安装完成后拿订阅 | `订阅与用户` | 未初始化时可选择本机单独使用、这台作为主控或这台作为被控。 |
-
-> [!TIP]
-> **第一次使用：** 优先走上面的推荐路径。只有明确了解客户端、网络和运维目标时，再进入自定义协议组合、CDN 入口细调、多服务器同步或危险实验开关。
+| 🧭 用自有域名直连 | `1. 推荐直连 Reality Vision` | 首次安装推荐。域名需解析到本机。 |
+| 🌐 经 CDN 或反代连接 | `2. 推荐 CDN Reality XHTTP` | 客户端需支持 XHTTP。 |
+| 📍 没有域名 | `3. 无域名 Reality` | 使用服务器 IP 或自定义入口，无需本机 TLS 证书。 |
+| 🛡️ 需要 TLS 指纹抗性 | `4. TLS 指纹抗性 NaiveProxy` | 需要自有域名和可信证书。 |
+| 🧰 兼容旧客户端或迁移 | `6. 传统 TLS 兼容安装` | 适用于需要 WS/TLS、VMess 或 Trojan 等协议的场景。 |
 
 ## 安装
 
 ### 交互式安装
 
+在 Linux 服务器上以 root 运行，在菜单中选择 `1. 安装与重装`。安装后可随时运行 `padm` 返回管理面板。
+
 ```bash
 wget -O /root/install.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh" && chmod 700 /root/install.sh && /root/install.sh
 ```
 
-首次运行时，如果入口脚本检测到本地缺少 `shell/`、`documents/`、`assets/` 或模块 manifest 不匹配，会自动下载完整仓库归档并补齐模块。
-
-怀疑本地模块仍是旧版本时，可以强制刷新模块：
-
-```bash
-wget -O /root/install.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh" && chmod 700 /root/install.sh && PADM_FORCE_SCRIPT_MODULE_REFRESH=1 /root/install.sh
-```
-
-安装后再次打开管理面板：
-
-```bash
-padm
-```
-
-### 短链二维码
-
-可选组件：通过 Cloudflare Worker 保存完整协议链接，并在终端显示短 HTTPS 地址的二维码。
-适用于完整链接二维码超出终端宽度的场景。以 root 登录 VPS，执行以下命令部署：
-
-```bash
-mkdir -p -m 700 /root/padm-shortlink && wget -O /root/padm-shortlink/deploy.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/tools/shortlink-worker/deploy.sh" && test -s /root/padm-shortlink/deploy.sh && chmod 700 /root/padm-shortlink/deploy.sh && bash /root/padm-shortlink/deploy.sh
-```
-
-按提示输入 Cloudflare API Token 和 Account ID，脚本自动安装依赖、部署 Worker 并保存配置；
-部署凭据用 `age` 口令加密，再次部署时解锁。日常运行 `padm` 不需要口令。
-已安装的 padm 随后自动使用短链。协议内容存于 Cloudflare KV，短链接应按节点凭据保管。
-用手机相机打开短链可查看完整协议 PNG，保存后由客户端识别图片导入节点；
-v2rayNG 直接扫描短 HTTPS 地址时会作为订阅导入。
-系统要求、授权权限、客户端导入和本地源码部署见 [部署说明](tools/shortlink-worker/README.md)。
-
-### 非交互安装
-
-查看脚本当前支持的参数和示例：
-
-```bash
-bash install.sh --help
-```
-
-以下命令中的 `target.example.com` 仅为占位符，必须替换为通过实时检测的 Reality 目标站。
-
-推荐直连 Reality Vision：
-
-```bash
-bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target target.example.com:443 --reality-server-name target.example.com --reuse-last no
-```
-
-推荐 CDN Reality XHTTP：
-
-```bash
-bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target target.example.com:443 --reality-server-name target.example.com --reuse-last no
-```
-
-无域名 Reality：
-
-```bash
-bash install.sh --install-type reality --core xray --reality-target target.example.com:443 --reuse-last no
-```
-
-NaiveProxy：
-
-```bash
-bash install.sh --install-type custom --core sing-box --protocols 5 --domain naive.example.com --port 443 --reuse-last no
-```
-
-命令行用逗号分隔公开协议 ID，例如 `--protocols 1,2,21`。交互安装按当前菜单列出的连续编号选择，支持逗号多选。旧版 `0..13/20` 协议 ID 已废弃，已有旧配置需要重新选择当前协议后重装或调整。
-
-传统 TLS 兼容安装，Cloudflare DNS-01 可全程非交互：
-
-```bash
-bash install.sh --install-type install --core xray --domain example.com --port 443 --tls-ca letsencrypt --dns-api yes --dns-api-type cloudflare --dns-api-wildcard yes --cloudflare-api-token <token> --cloudflare-zone-id <zone_id> --reuse-last no
-```
-
-Cloudflare 建议使用限制到目标 Zone 的 API Token，至少具备 `Zone:DNS:Edit`。为避免 token 出现在命令历史中，也可以用环境变量：
-
-```bash
-PADM_CLOUDFLARE_API_TOKEN=<token> PADM_CLOUDFLARE_ZONE_ID=<zone_id> bash install.sh --install-type install --core xray --domain example.com --dns-api yes --dns-api-type cloudflare
-```
-
-已有节点只补装或刷新 HTTPS 订阅发布服务：
-
-```bash
-bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-port 39778 --install-nginx yes
-```
-
-订阅发布独立管理自己的 TLS 域名和证书，不会自动使用 Reality entry 或传统 TLS 域名。已有匹配且可用的证书会直接复用；缺少证书时可继续传入上面的 `--tls-ca`、`--dns-api` 和服务商凭据参数完成签发。自定义证书可复用，但需自行续期。
+系统要求、模块刷新、非交互安装和命令行参数见 [📦 原生版安装与参数](documents/native-install.md)。
 
 ## Docker 版
 
-Docker 版将 Xray / sing-box、Nginx、订阅和运维任务放入容器，使用独立入口 `install-docker.sh` / `padm-docker`，与原生版互斥，不自动迁移。
+🐳 Docker 版用容器运行 Xray / sing-box、Nginx、订阅和运维任务。通过 `install-docker.sh` 安装，日常使用 `padm-docker`。原生版与 Docker 版需择一部署，迁移需单独安排。
 
-需要 Linux、root、本机 rootful Docker Engine、Compose v2+，支持 `amd64` / `arm64`。发布验签需要支持 Sigstore bundle v0.3 的 `cosign`，缺少时停止。完整依赖见 [Docker 版要求](#docker-版要求)。
+### Docker 版要求
+
+需要 Linux、root、本机 rootful Docker Engine、Compose v2+，支持 `amd64` / `arm64`。发布验签需要支持 Sigstore bundle v0.3 的 `cosign`，缺少时停止。完整依赖见 [Docker 指南的系统要求](documents/docker-guide.md#docker-版要求)。
 
 ### 安装与配置
 
@@ -148,587 +52,37 @@ Docker 版将 Xray / sing-box、Nginx、订阅和运维任务放入容器，使�
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
 ```
 
-缺少 Docker 时会询问是否从官方软件源安装。业务镜像由 CI 预构建，生产机不执行 `docker build`。
-交互安装成功后自动进入菜单，选择 `安装与重装 → 首次配置`；以后运行 `padm-docker` 打开菜单，也可用 `padm-docker setup` 配置。
+缺少 Docker 时，脚本会询问是否从官方软件源安装。在交互终端中安装成功后，菜单会自动打开。进入 `1. 安装与重装 → 1. 首次配置` 部署服务。首次配置会验签并拉取 CI 构建的镜像。
 
-| 菜单 | 常用功能 |
-| --- | --- |
-| `1` 安装与重装 | 首次配置、重新选择核心与协议、完整规格重装。 |
-| `2` 订阅与用户 | 账号、订阅、流量额度、控制连接、业务备份；`6` 管理 HTTPS 订阅发布。 |
-| `3` 协议与入口 | Reality、XHTTP、Hysteria2、TUIC、端口、CDN；`8` 入口高级管理。 |
-| `4` 站点与证书 | TLS fallback、站点和本机 TLS 证书。 |
-| `5` 路由与访问控制 | 分流、BT 和访问控制；`1 → 8` 完整路由管理。 |
-| `6` 核心与服务 | 状态、启停、日志、校验、升级评估、Geo 和配置编辑。 |
-| `7` 系统与脚本 | `1` 发布包维护、`2` 安装状态、`3` Fail2ban。 |
-| `8` 高级与危险操作 | 保留数据卸载、VLESS Encryption 实验。 |
+以后运行 `padm-docker` 可打开菜单。尚未部署服务时，也可在交互终端运行 `padm-docker setup` 直接进入首次配置。
 
-协议、订阅发布和宿主集成的支持范围见 [功能对照表](documents/docker-feature-matrix.md)。
+<a name="日常管理"></a>
 
-### 日常管理
-
-| 命令 | 用途 |
-| --- | --- |
-| `padm-docker status` | 查看状态。 |
-| `padm-docker logs` | 查看日志。 |
-| `padm-docker validate` | 校验配置。 |
-| `padm-docker assess` | 升级评估。 |
-| `padm-docker up` / `down` / `restart` | 启动、停止或重启。 |
-| `padm-docker update` | 验签后同时更新镜像和宿主控制脚本，失败时尝试恢复。 |
-| `padm-docker rollback` | 使用最近一次受管更新快照回滚。 |
-| `padm-docker uninstall` | 卸载容器和控制命令，保留配置、数据、备份和镜像。 |
-
-配置和运行数据位于 `/etc/padm-docker`。协议编辑、证书、订阅、流量额度、路由、备份恢复、旧版升级及清除数据等详细操作见 [Docker 版使用指南](documents/docker-guide.md)。
-
-## 系统要求
-
-padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentOS/AlmaLinux/Rocky/Oracle Linux、Fedora 和 Alpine，并按系统使用 `apt`、`yum` 或 `apk` 安装必要组件。
-
-| 项目 | 要求 |
-| --- | --- |
-| 权限 | 需要 root 或等价权限。 |
-| 架构 | `x86_64/amd64`、`aarch64/arm64`。 |
-| 基础命令 | 入口下载至少需要 `curl` 或 `wget`，wget 回退还需 `timeout` 限制总时长；完整包刷新需要 `tar`。 |
-| 常用依赖 | 脚本会按功能安装或使用 `jq`、`nginx`、`acme.sh`、WireGuard tools、Fail2ban 等组件。 |
-| 服务管理 | 核心服务优先使用 systemd；Alpine/OpenRC 路径有专门处理。主控/被控订阅控制服务目前要求 systemd 和 `python3`。 |
-
-### Docker 版要求
-
-| 项目 | 要求 |
-| --- | --- |
-| 操作系统 | Linux；Docker daemon 必须运行 Linux 容器。Windows、macOS 和 Docker Desktop 不在首发支持范围。 |
-| 权限与连接 | root，rootful Docker Engine，本机 rootful Unix socket；不支持 rootless daemon、远程 context 或用户级 socket。 |
-| Compose | Docker Compose CLI 插件（主版本 v2 及以上）。 |
-| 架构 | `amd64` 或 `arm64`，主机和 daemon 架构必须一致。 |
-| 主机命令 | `bash` 4+、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；可信发布输入和签名更新还需要支持 Sigstore bundle v0.3 的 `cosign`（CI 当前使用 3.x）。缺少 Docker 时，`install-docker.sh install` 会先询问是否从 Docker 官方软件源安装 Engine、Compose CLI 插件及其宿主前置工具。 |
-| 用户统计 | 正在运行的 systemd 或 cron；sing-box 还需宿主 `nsenter`（通常来自 `util-linux`）及支持 HTTP/2 的 `curl`。配置或更新时检查，缺少则停止。 |
-| 内核能力 | 普通 profile 不需要额外 capability；WireGuard、Fail2ban、TUN/TProxy 等 `net-*` profile 需要按支持矩阵提供 `NET_ADMIN`、host network 或 `/dev/net/tun`。 |
-
-首次执行 `install-docker.sh install` 时，如果检测不到 `docker` 命令，脚本会询问是否从 Docker 官方软件源安装 Docker Engine 和 Compose CLI 插件；回答否、未确认或安装失败都会停止，且不会初始化 `/etc/padm-docker`。宿主软件包或软件源已经完成的变更不会由脚本擅自删除。仅在命令缺失时触发询问；已有 Docker 但 daemon 或 Compose 不可用时仍直接报错，不会重装。自动安装目前只覆盖 Debian、Ubuntu、CentOS、Fedora、RHEL 的 rootful systemd 主机；其它发行版请先手动安装 Docker。脚本不会安装 Xray、sing-box、Nginx 等业务宿主依赖，也不会执行 `docker build`。检测到原生版已安装、正在运行或残留状态时会拒绝安装，请先明确清理原生部署；两种模式不提供隐式迁移。
-
-> [!IMPORTANT]
-> **CentOS / RHEL：** SELinux 处于 Enforcing 时，脚本会提示先手动关闭后再继续。
-
-## 主菜单
-
-padm 主菜单按任务对象分组，一个功能只放在一个主要入口里：
-
-| 菜单 | 负责什么 |
-| --- | --- |
-| 🚀 安装与重装 | 新手选择指引；推荐直连、推荐 CDN、无域名 Reality、NaiveProxy、自定义安装、传统 TLS 兼容安装。 |
-| 🔗 订阅与用户 | 可本机单独使用，也可初始化主控/被控，再处理发布订阅、多服务器协同、流量限额、同步和备份恢复。 |
-| 🧭 协议与入口 | 本机协议链接与二维码、REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口地址。 |
-| 🔐 站点与证书 | 传统 TLS fallback 站点、302 重定向、ALPN 诊断/修复和本机 TLS 证书。 |
-| 🧱 路由与访问控制 | WARP、IPv6、Socks5、DNS/hosts、BT 阻断、域名/IP 阻断、直连例外和区域阻断。 |
-| ⚙️ 核心与服务 | Xray-core / sing-box 生命周期、服务运行态、日志诊断和 Xray Geo 数据；首页只读本地状态。 |
-| 🧰 系统与脚本 | 更新 padm、查看脚本安装状态、Fail2ban 防护、网络优化 / BBR。 |
-| ⚠️ 高级与危险操作 | 卸载脚本和 VLESS Encryption 实验。 |
-
-`协议与入口` 的第 1 项 `查看全部协议链接` 从当前配置生成本机自用链接，不修改订阅缓存、
-公网产物或服务状态。安装完成和此入口共用完整协议链接与本地二维码展示；二维码依赖
-`qrencode`，使用紧凑黑白半块字符，最多显示 80 列；二维码过宽、缺失或生成失败时仍保留完整链接。
-协议链接保留客户端导入所需参数；
-扫码可避免复制长链接，需要 URL 订阅时仍使用 `订阅与用户` 中已配置的发布服务。
-半块字符需按单列显示；若终端将其显示为双宽，二维码仍可能错位，需调整终端的字符宽度设置。
-
-## 运行模型
-
-padm 不是单个超长 Bash 文件，而是“独立入口 + 分模块运行时”：
-
-1. 原生入口是 `install.sh`，Docker 入口是 `install-docker.sh`；两者分别维护 `/etc/padm` 和 `/etc/padm-docker`，不会互相迁移或混装。
-2. 模块刷新会原子替换 `shell/`、`documents/`、`assets/`、`README.md` 和 `.padm-module-manifest`；失败时尽量恢复旧模块。
-3. `shell/core/bootstrap.sh` 是运行时装配点，按顺序加载平台、运行时、协议、Reality、服务、路由、TLS、订阅、菜单等模块。
-4. 交互菜单和正式子命令共用同一套模块。正式子命令包括 `RenewTLS`、`UpdateGeo`、`SyncSubscriptionGroups`、`SubscriptionControl`、`InstallSubscription`。
-5. Docker 控制 bundle 位于 `docker/`，由宿主上的 `padm-docker` 直接调用 Docker CLI 和 Compose；容器不挂载 Docker Socket。
-6. 排障时先找实际控制点：入口脚本、模块加载顺序、状态文件、生成配置和校验命令，而不是只看菜单文案。
-
-| 路径 | 作用 |
-| --- | --- |
-| `install.sh` | 🚪 仓库入口；负责自刷新、参数解析、正式子命令分发和首次模块补齐。 |
-| `install-docker.sh` | 🐳 Docker 独立入口；安装并刷新 Docker 控制 bundle，不构建镜像。 |
-| `padm-docker` | 🎛️ 安装后的 Docker 宿主控制命令；调用固定的 `padm-docker` Compose project。 |
-| `docker/` | 📦 Dockerfile、Compose、manifest、配置合同和生命周期实现。 |
-| `shell/core/` | ⚙️ 平台检测、运行时 helper、协议模板、Reality/TLS/路由/服务/菜单等核心逻辑。 |
-| `shell/subscription/` | 🔗 订阅发布、订阅组状态、用户账号、WireGuard 控制面、远程同步和流量统计。 |
-| `shell/regression/` | 🧪 `framework/` 提供环境、runner 和 registry，`cases/` 单次加载 fixture、stub 与测试函数，`suites/` 只注册 selector、分组和组合。 |
-| `shell/subscription_groups_regression.sh` | 🧪 唯一公开回归分发入口；统一分发 suite、aggregate、contract 和 composition selector。 |
-| `shell/validate_install.sh` | ✅ 安装后的只读验收脚本。 |
-| `documents/` | 📚 示例配置和英文 README。 |
-| `assets/` | 🖼️ 三套本地静态站点资产，供 Nginx 或原生 Hysteria2 使用。 |
-
-## 安装后的控制点
-
-这些路径是 padm 真正读写和校验的状态源。排障、备份、迁移或读代码时优先看它们：
-
-| 路径 | 作用 |
-| --- | --- |
-| `/etc/padm/install.sh` | 🚪 已安装入口；`padm` 命令最终回到这里。 |
-| `/etc/padm/.padm-ref` | 🏷️ 当前已安装模块 ref，用于脚本刷新状态展示。 |
-| `/etc/padm/.padm-module-manifest` | 🧾 当前模块 manifest，用于检测模块集是否完整。 |
-| `/etc/padm/xray/conf/` | 🧩 Xray 分片配置目录；用 `xray -test -confdir` 校验。 |
-| `/etc/padm/sing-box/conf/config/` | 🧩 sing-box 分片配置目录；合并成 `config.json` 后校验。 |
-| `/etc/padm/tls/` | 🔐 本机 TLS 证书、密钥和 acme 日志。 |
-| `/etc/padm/subscribe/` | 🔗 面向客户端发布的订阅产物。 |
-| `/etc/padm/subscribe_local/` | 📦 本机订阅缓存和中间产物。 |
-| `/etc/padm/subscribe_groups/groups.json` | 🧭 订阅组状态真源，包含角色、服务器源、用户订阅、额度、同步和流量统计。 |
-| `/etc/padm/subscribe_groups/backups/` | 💾 `groups.json` 备份目录。 |
-| `/etc/padm/wireguard/` | 🔒 主控/被控 WireGuard 控制面状态、密钥和 peer 信息。 |
-| `/etc/wireguard/wg-padm.conf` | 🔒 padm 控制面 WireGuard 配置。 |
-| `/etc/padm/reality_entry_host` | 📍 当前 Reality 客户端入口地址。 |
-| `/etc/padm/reality_targets_results.tsv` | 📊 Reality 目标库，按目标保留最新实测结果。 |
-
-Docker 部署的实际状态源：
-
-| 路径 | 作用 |
-| --- | --- |
-| `/etc/padm-docker/mode` | 🏷️ 固定为 `docker` 的模式标记，用于互斥和卸载保护。 |
-| `/etc/padm-docker/bundle` | 🔗 当前已验证控制 bundle 的原子指针。 |
-| `/etc/padm-docker/deployment.json` | 🧾 当前版本、profiles、端口和五个镜像 digest。 |
-| `/etc/padm-docker/compose.json`、`images.env` | 🐳 当前 Compose 配置和固定镜像引用。 |
-| `/etc/padm-docker/config/`、`data/`、`secrets/`、`backups/` | 💾 配置、运行数据、密钥和更新/卸载备份。 |
-
-Docker 与原生菜单的逐项支持边界见
-[Docker 版功能对照表](documents/docker-feature-matrix.md)。新增 Docker 能力时先更新
-该矩阵和 `docker/contracts/features.json`，避免把“已有镜像”误认为“已有菜单功能”。
-
-公网订阅和服务器间控制面是两套地址体系：
-
-- 🌍 客户端订阅走 `/s/default/...`、`/s/clashMeta/...`、`/s/sing-box...` 等 HTTPS 路径。
-- 🔒 主控/被控控制接口走 `/s/control/...`，只通过 WireGuard 内网访问，不提供公网 HTTP/HTTPS 来源回退。
-
-## 协议选择
-
-常规推荐按目标选协议，而不是按“看起来功能更多”选协议：
-
-| 目标 | 推荐协议 | 说明 |
-| --- | --- | --- |
-| 新手直连、有域名或普通自用 | `1` VLESS Reality Vision | 当前主线推荐；不依赖本机伪装站点。 |
-| CDN / 反代 | `2` VLESS Reality XHTTP | 新建 CDN 节点优先；使用 XHTTP 与 XMUX。本项目只用 Xray 生成 XHTTP，sing-box 当前没有 XHTTP transport。 |
-| 没有域名 | 无域名 Reality | 菜单会走 Reality 快速路径。 |
-| TLS 指纹抗性 | `5` NaiveProxy | 需要真实域名和证书；依赖 sing-box。 |
-| UDP、移动网络、弱网 | `3` Hysteria2 | Hysteria2 节点流量不套 CDN/Nginx；需要 UDP 可达，可按需使用端口跳跃。 |
-| 明确需要 AnyTLS | `4` AnyTLS | sing-box AnyTLS 场景；确认客户端支持后再用。 |
-| 兼容或迁移 | 高级协议 `21..31` | 仅在旧客户端、存量 CDN、传统 TLS 或迁移窗口需要时选择。 |
-
-能力库是协议选择、核心支持、Nginx 拓扑和订阅输出的统一事实源。`--protocols` 接受 `category=node` 的当前公开 ID，交互菜单使用显示编号。订阅同步也使用当前公开 ID。
-
-### 推荐公网节点能力
-
-| ID | 能力 | 项目生成核心 | Nginx 模式 | UDP | CDN | 推荐场景 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `1` | VLESS Reality Vision | Xray / sing-box | `none` | 否 | 否 | 新手直连、有域名或无域名 Reality 首选。 |
-| `2` | VLESS Reality XHTTP | Xray | `none` | 否 | 条件支持 | 新建 CDN / 反代首选；XHTTP 在本项目中是 Xray-only。 |
-| `3` | Hysteria2 | sing-box | `none` | 是 | 否 | 移动网络、UDP、弱网和端口跳跃场景；节点流量不经过 CDN/Nginx。 |
-| `4` | AnyTLS | sing-box | `none` | 否 | 否 | 明确需要 sing-box AnyTLS 且客户端支持时选择。 |
-| `5` | NaiveProxy | sing-box | `none` | 否 | 否 | 明确需要 TLS 指纹抗性且有真实域名和可信证书时选择。 |
-
-### 高级公网节点能力
-
-gRPC、WebSocket 和 HTTPUpgrade 是高级协议，不是删除协议。它们仍可显式选择，但新建节点优先使用推荐能力，特别是直连 Reality Vision 或 CDN/反代 Reality XHTTP。
-
-| ID | 能力 | 项目生成核心 | Nginx 模式 | 使用边界 |
-| --- | --- | --- | --- | --- |
-| `21` | VLESS WS TLS | Xray | `http_front` | WebSocket 属高级兼容方案；新建 CDN 优先选 `2`。 |
-| `22` | VMess WS TLS | Xray | `http_front` | VMess 与 WS 均为高级兼容方案；新建优先选 `1` 或 `2`。 |
-| `23` | VMess HTTPUpgrade TLS | Xray / sing-box | `http_front` | HTTPUpgrade 属高级兼容方案；新建 CDN 优先选 `2`。 |
-| `24` | VLESS gRPC TLS | Xray | `grpc_front` | gRPC 有主动探测与 fallback 限制；新建优先选 `2`。 |
-| `25` | Trojan gRPC TLS | Xray | `grpc_front` | 仅在明确需要 Trojan + gRPC 时使用；可考虑 `4` 或 `2`。 |
-| `26` | VLESS Reality gRPC | Xray / sing-box | `none` | Reality gRPC 是高级直连方案；新建优先选 `1` 或 `2`。 |
-| `27` | VLESS TCP TLS Vision | Xray | `fallback_backend` | 传统 TLS/fallback 迁移路径；新建直连优先选 `1`。 |
-| `28` | Trojan TCP TLS direct | Xray / sing-box | `none` | 传统 TLS 协议，仅在旧客户端或明确需求下选择。 |
-| `29` | Trojan TCP TLS fallback | Xray | `fallback_backend` | fallback 只适用于 TCP+TLS；新建优先考虑 `4` 或 `1`。 |
-| `30` | Shadowsocks | sing-box | `none` | 高级兼容项，不作为默认公网节点推荐。 |
-| `31` | TUIC | sing-box | `none` | UDP/弱网高级项；新装优先引导使用 `3`。 |
-
-### 内部服务端能力
-
-内部能力只进入路由、中继、透明代理、访问控制或管理菜单，不能作为公网节点安装输入：`201` Socks 中继、`202` HTTP 中继、`203` WireGuard、`204` TUN、`205` Redirect/TProxy、`206` DNS/Direct/Block、`207` Tunnel/dokodemo-door。
-
-### 上游已知但本项目暂不生成的能力
-
-`301..309` 仅用于 `--list-capabilities` 和文档说明，不生成安装入口，包括 Xray Hysteria2 inbound、Hysteria v1、ShadowTLS、mKCP 组合、Cloudflared inbound、Selector、URLTest、Tor outbound、SSH outbound，以及纯 transport/security 说明项。
-
-### Nginx 拓扑
-
-| `nginx_mode` | 含义 | 适用能力 |
-| --- | --- | --- |
-| `none` | 核心直接监听公网；节点流量不安装、不启动 Nginx。 | Reality Vision、Reality XHTTP、Hysteria2、AnyTLS、NaiveProxy、Reality gRPC、Trojan direct、Shadowsocks、TUIC。 |
-| `http_front` | Nginx HTTP/1.1 反代，显式处理 `Upgrade` / `Connection`。 | WS / HTTPUpgrade 能力 `21..23`。 |
-| `grpc_front` | Nginx HTTP/2 + `grpc_pass` 反代。 | gRPC TLS 能力 `24..25`。 |
-| `xhttp_front` | 预留给显式 XHTTP TLS/CDN/反代能力；默认不套到 Reality XHTTP。 | 当前无默认公网节点使用。 |
-| `fallback_backend` | Xray fallback 后端，只允许 TCP+TLS 能力使用。 | `27`、`29`。 |
-| `acme_only` | Nginx 可服务证书申请或订阅发布，不代表节点流量经过 Nginx。 | 证书与订阅服务。 |
-
-sing-box 订阅输出中的 `utls.fingerprint=chrome` 是客户端兼容/模拟选项，不是抗封锁保证。需要抗 TLS 指纹识别时，优先考虑 Reality Vision、Reality XHTTP 或 NaiveProxy。
-
-## Reality 语义
-
-Reality 里有三个容易混淆的概念：
-
-| 概念 | 含义 | 出现位置 |
-| --- | --- | --- |
-| 📍 entry | 客户端实际连接到你的服务器的地址 | 订阅链接 `@host`、Clash `server`、sing-box `server` |
-| 🎭 Reality target | Reality 伪装访问的外部真实 HTTPS 站点 | Xray `realitySettings.target`；sing-box `tls.reality.handshake` |
-| 🧾 Reality SNI | Reality 握手使用的 SNI | Xray `serverNames`；sing-box `tls.server_name`；订阅 `sni/servername` |
-
-常见配置是：客户端连接 `node.example.com`，Reality target 使用已实测的 `target.example.com:443`，Reality SNI 使用 `target.example.com`。
-
-Reality Vision、Reality XHTTP 和 Reality gRPC 均不申请本机 TLS 证书；纯 Reality 安装不创建或清理站点，不操作 ACME/Cron，也不停止、启动或重载 Nginx。`--reality-domain yes` 是严格域名模式，只允许单选 Reality Vision `1`，并校验 entry 域名及 DNS；协议 `2`、`26` 或任何多选组合会在安装依赖和写配置前拒绝。
-
-Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`、`currentHost`、公网 IP 的顺序选择。普通单选 Reality 端口按显式 `--port`、历史端口、`443` 的顺序选择；多协议继续使用各自端口，不把顶层 `--port` 注入 Reality 子端口。启用 443 共存后，客户端仍连接记录的公网端口，核心继续复用已记录的内部端口。
-
-交互安装没有显式目标或可复用目标时，仅提供两种方式：`1：检测候选后选择`（默认）和 `2：手动输入`。方式 1 先检测全部候选，仅展示 `cdn_risk=no` 且评分为 A 的实测结果，由用户选择，不自动替用户选站；方式 2 接受 `host[:port]`，端口默认 `443`，留空取消。非交互安装优先使用 `--reality-target` 或已有目标；都没有时检测全部推荐候选，从本次 `no + A` 结果中随机选择一个，不混入未复测的旧目标库记录。无 Xray、检测失败或没有 A 级时安装失败，不使用 B/C 级或未经检测的兜底目标。选中后仍复测全部 A/AAAA，随机推荐必须保持 `no + A` 才能写配置。每个地址独立评分并取最差结果：任一地址属于 AS13335 或可响应 `cloudflare.com` SNI 即标记 `cloudflare_relay`；DNS CNAME 指向已知 CDN 边缘域名，或 ASN/组织属于已知专属 CDN 时标记 `cdn_edge`，两者都会拒绝。DNS、ASN 或 TLS 探测不完整则标记 `unknown` 并拒绝。手工仅接受 `no + A/B/C`，其中 B/C 会明确警告；检测当前已安装目标只告警，不会静默切换配置。`java.com`、`nodejs.org` 与 `riotcdn.net` 及其子域名属于不可覆盖的静态硬风险，候选刷新、扫描导入、自动/手工选择和 Docker 部署都会拒绝。
-
-内置清单维护 25 个实测为 `cdn_risk=no` 且评分为 A 的推荐候选。2026-11-23 复测时，这 25 个域名均仅返回 IPv4 地址，分属 25 个 ASN。安装时仍按部署网络的实际 DNS 和 TLS 结果筛选。已知 CDN/边缘代理域名由独立黑名单维护，用于运行时过滤、审计和黑名单展示。候选筛选统一按关键词处理，`dev`、`developer`、`开发者` 是同一筛选别名。
-
-Reality 目标站主结果库使用 16 列 TSV 写入 `/etc/padm/reality_targets_results.tsv`，末列为实测 IP 的英文地理位置，例如 `Los Angeles, United States`；兼容旧 15 列记录。位置来自 IP 地理查询，成功结果按完整 IP 复用；批量写入仅查询缺少缓存的唯一 IP，沿用 `PADM_REALITY_SECONDARY_JOBS` 分批并行，默认 8、最多 16 个请求，完成后统一入库。城市缺失时回退区域或国家，查询失败显示 `Unknown`，不影响评分与切换。物理上仅保留每个目标最新状态仍为 `cdn_risk=no`、评分为 A 且未命中静态或自定义黑名单的记录。目标的新结果降为 B/C/FAIL、风险或 `unknown` 时会移除旧 A；空批次写入也会清理旧格式风险记录。评分包含 TLS 1.3、`X25519MLKEM768` 和证书链长度；可选目标按 `same_asn > same_provider > different_network > unknown`、证书链长度、检测时间排序。
-
-`协议与入口` -> `REALITY 管理` 可检测当前目标、刷新目标库、运行 RealiTLScanner、切换 A 级目标、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。“刷新目标库”统一选择范围：默认复测目标库与推荐候选，并自动补测尚未出现在结果文件的 `recommended=yes` 目标；选择“全部候选”可覆盖全部内置/托管候选。查看与详情页共用选择确认流程，取消或切换失败不会提前覆盖当前目标状态。
-
-> [!WARNING]
-> **扫描风险：** RealiTLScanner 是高级功能，云端扫描可能导致 VPS 被标记；脚本会在执行前提示确认。
-
-## XHTTP 与 CDN
-
-安装 `2. VLESS Reality XHTTP` 后，在 `协议与入口` -> `XHTTP 管理` 调整协议参数：
-
-| 层级 | 内容 |
-| --- | --- |
-| ✅ 普通设置 | 查看当前配置、选择场景预设、切换 `auto` / `packet-up` / `stream-up`。 |
-| 🧪 高级设置 | 调整 XMUX、path/host、首部开关和四项原生 packet/stream limits。 |
-| ⚠️ 实验功能 | 配置或关闭上下行分离 `downloadSettings`。 |
-
-默认推荐值面向日常和 CDN：`mode=auto`，`xmux.maxConcurrency=16-32`，`hMaxRequestTimes=600-900`，`hMaxReusableSecs=1800-3000`。每次修改都会先写临时配置并执行 Xray 校验，失败会自动回滚并提示日志路径。
-
-XHTTP 在本项目中由 Xray 生成；sing-box 当前没有 XHTTP transport，因此不会输出 sing-box XHTTP 客户端配置。
-
-`协议与入口` -> `CDN 入口管理` 只负责订阅里的客户端入口地址覆盖，例如 CDN CNAME、优选 IP 或多个入口地址。XHTTP 的 mode、XMUX、path/host 等协议参数仍在 `XHTTP 管理` 中调整。
-
-## 传统 TLS 与本机站点
-
-`站点与证书` -> `传统 TLS fallback 维护` 只服务于传统 TLS/fallback 协议。当流量没有命中代理协议时，Nginx fallback 可以展示本机静态页面或 302 跳转。
-
-这个入口提供：
-
-- 🖼️ 优先导入自有静态网站；没有现成网站时，可用 `notes`、`photos`、`docs` 三套内置布局初始化，包含文章、关于页、本地图片和 404 页面。
-- ↪️ 302 重定向维护。
-- 🔎 ALPN 诊断/修复，检查 Xray fallback、`fallbacks[].alpn=h2` 和 Nginx h2 fallback 是否匹配。
-- ✅ 写入后执行 `xray -test -confdir /etc/padm/xray/conf`，失败自动回滚。
-
-Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Reality 的伪装由外部 target 和 SNI 完成。只有你继续使用 VLESS TCP TLS Vision、WS TLS、gRPC TLS、Trojan TLS 等传统 TLS/fallback 协议，或确实要在本机展示网站时，才需要维护这个入口。
-
-`站点与证书` -> `本地静态站点` 可独立维护网页，不要求安装 Xray。首选 `import`：在独立绝对 Linux 目录（如 `/srv/own-site/`）准备完整静态网站，再原样复制到 `nginxStaticPath`（默认 `/usr/share/nginx/html/`）。源与目标不得重叠，源必须含可读 `index.html`；路径和文件名暂限 `A-Za-z0-9_./-`，不接受点文件、符号链接、硬链接、特殊文件、`check` 或 `static-site.json`。导入不改写原文或资源；更新源目录后需再次导入。
-
-导入和内置布局复用暂存、原子替换与失败回滚。自动安装保留已有或修改过的网页；从菜单明确更换自有或修改过的网站时，先将持久私有备份保存到 `/etc/padm/static-site-backups/`。未修改的内置主题只做失败回滚所需的事务临时备份，不为每次切换保存档案。归属状态保存在公开目录之外的 `/etc/padm/static-site.json`，安装或后续配置事务失败时恢复网页与状态；卸载保留自有和导入网站，仅清理归属与内容摘要仍匹配的内置站点。自有网站有 `404.html` 时 Nginx 使用该页面，否则使用默认 404；响应状态均保持 404。
-
-内置布局可配置站名，默认站名与配色固定，同主题重装保持已保存的值。安装后应持续维护真实文章、图片、导航和内页；整套内容与配置可在独立目录准备后导入。同一布局仍共用 HTML/CSS 结构，随机外观或内容差异都不能提供抗识别保证。
-
-原生 Hysteria2 的“认证失败伪装”可直接填写 `file:///srv/own-site/` 使用独立自有网站目录，或填写受你控制的网站 `http://`、`https://` URL 进行反向代理。`local` 使用已有本机网页，`notes`、`photos`、`docs` 初始化内置布局；文件目录须满足上述可读首页及内容限制。sing-box 文件服务的未知路径使用 Go 默认 404 文本。启用混淆后，普通浏览器不能以标准 HTTP/3 访问该入口。Docker 仅支持受管静态网页加 `local`，使用固定只读目录并要求关闭混淆。协议细节参见 [Hysteria2 协议](https://v2.hysteria.network/docs/developers/Protocol/) 与 [sing-box Hysteria2 入站](https://sing-box.sagernet.org/configuration/inbound/hysteria2/)。
+日常管理、状态路径、更新和回滚见 [🐳 Docker 版使用指南](documents/docker-guide.md)。
 
 ## 订阅与用户
 
-订阅系统按服务器角色组织；本机和主控首页按使用顺序排列：`1. 安装/更新发布服务`、`2. 查看当前订阅链接`、`3. 分享订阅`、`4. 流量与限额`、`5. 立即完整同步`、`6. 订阅同步`，最后是角色对应的协同/控制入口和返回。
+📱 直接导入本机节点时，打开 `协议与入口 → 查看全部协议链接`，复制链接或扫描二维码。要让客户端定期刷新，用 HTTPS 订阅。
 
-| 状态 | 菜单形态 | 适合做什么 |
-| --- | --- | --- |
-| 🟡 未初始化 | 本机订阅首页提供发布、链接、分享、流量和同步；末尾提供启用主控协同、接入主控 | 单机先安装发布服务即可使用订阅；需要多服务器时再选择主控或被控。 |
-| 🟢 主控 | 主控首页与本机订阅首页共用发布和订阅入口，末尾提供被控服务器和本机控制面 | 查看管理员订阅与分享订阅，创建分享订阅、添加被控服务器、执行同步和限额治理。 |
-| 🔵 被控 | 被控首页直接提供接入、状态、凭据和控制面动作 | 粘贴主控邀请、提供本机节点给主控、查看 WireGuard 与同步状态。 |
+<a name="-选订阅和链接格式"></a><a name="-创建分享订阅"></a><a name="-接入被控服务器"></a><a name="-同步与恢复"></a>
 
-主控和本机模式首页的第 5 项执行 `立即完整同步`，第 6 项 `订阅同步` 提供开启/关闭自动同步、设置间隔、状态与排障、状态备份与恢复。自动同步开关控制节点配置变更通知后的同步和 cron；分享订阅及被控服务器的手动管理动作仍立即同步一次，不改变自动同步设置。
+- **原生版。** 从 `订阅与用户 → 安装/更新发布服务` 发布订阅，再打开 `查看当前订阅链接`。选中管理员或分享订阅，然后复制「默认订阅」。
+- **Docker 版。** 配置 HTTPS 发布后，从 `订阅与用户 → 订阅管理 → 查看主订阅 HTTPS 链接` 复制链接，对应编号 `2 → 2 → 11`。
 
-首页的 `安装/更新发布服务` 成功后立即完整同步。发布完成后，进入 `查看当前订阅链接`，在已发布的管理员订阅和分享订阅中选择一项，即可查看该订阅的链接。`分享订阅` 与 `流量与限额` -> `管理分享订阅与额度` 共用同一个列表和详情。列表和详情直接显示已保存用量及限额状态，不隐式采集流量。选一次即可修改额度、启停或同步，支持多选。新建 ID 或编辑额度输入有误时在当前字段重试，未保存的草稿不会写入。
+原生版主控的管理员订阅汇总本机和已启用被控的可用节点。分享订阅按所选节点范围发布。 [🔗 订阅与用户指南](documents/subscriptions.md)
 
-本机模式的管理员订阅来自本机协议配置。主控模式的管理员订阅还汇总已启用被控服务器返回的可用节点。
+## 文档导航
 
-原生版已配置公网订阅时，本机和主控首页显示 `9. 停用发布服务`。确认停用后，本机公网订阅 URL 无法刷新，已保存的订阅和节点配置保留。首次接入主控前，如本机仍在发布订阅或运行受管订阅同步定时任务，按提示先停用发布或关闭自动同步，再选择 `接入主控`。
-
-- 主控会同步所有已启用的被控服务器源，不再另设全局“远程同步”开关；在 `管理被控服务器` -> `管理已接入服务器` 选择一次目标，即可连续更新凭据、启停、检查连接、同步或移除，失败后保留当前目标。
-- 同步会先完成本机配置，再按来源处理被控服务器快照。只要本机成功且远端同步结果可解析，就发布本次成功来源；失败来源从本次输出排除，并将整体标记为“部分失败”。仅远端用户没有任何可用来源时，保留该用户上一版输出；本机失败或远端结果整体无效时，保留整版公网订阅。
-- 修改任一被控的 Reality 目标等节点配置后，被控会通过 WireGuard 通知主控；主控自动同步开启时会重新生成本机节点、拉取启用来源并发布可用来源。外层 HTTPS 订阅地址不变，其他成功服务器节点仍会保留。
-- 被控服务器不提供主动同步菜单；配置变更通知失败时，请在主控执行“立即完整同步”。
-
-本机或主控创建分享订阅推荐流程：
-
-1. 在本机或主控首页进入第 1 项 `安装/更新发布服务`，配置公网订阅入口并自动完整同步。看到「订阅已发布」后，可从第 2 项 `查看当前订阅链接` 选择订阅。
-2. 在同一菜单进入 `分享订阅` -> `新建分享订阅`，使用英文、数字或短横线 ID，例如 `team-a`。
-3. 按向导选择可用服务器源和流量上限。
-4. 保存后立即执行一次完整同步，不改变自动同步设置。托管账号 `sub_<ID>` 会写入核心配置。
-5. 完整同步完成后，在分享订阅管理页查看链接；首页的第 2 项 `查看当前订阅链接` 只读查看，第 5 项 `立即完整同步` 可刷新全部链接。
-
-多服务器协同推荐流程：
-
-1. 主控服务器从本机订阅首页进入 `启用主控协同` 完成初始化，再进入 `管理被控服务器` -> `创建被控邀请`，输入一次被控别名。主控会自动预留 WireGuard 地址。
-2. 被控服务器进入 `接入主控`，粘贴邀请即可完成初始化和主控 Peer 导入；无需填写地址。成功后复制一次接入回执。
-3. 回到主控服务器，从主控首页进入 `管理被控服务器` -> `完成被控接入`，粘贴回执即可按预留别名完成 Peer、服务器源和控制 Token 写入，并立即完整同步。
-4. 需要暂时排除某台被控时，在 `管理已接入服务器` 选择目标并停用；清理远端托管账号后立即同步，保留 Peer、Token 和历史状态。启用、凭据更新及移除后也立即同步。
-5. 待完成邀请可按别名查看或取消；邀请和回执都是 bearer secret，列表、普通状态和健康结果不会显示完整秘密。丢失邀请时应取消并重建。
-6. 旧版 `main` / `controlled` 凭据仅保留在明确命名的维护入口，用于更新已有连接；首次接入只接受邀请/回执。包含长期控制 Token 的回执或旧版被控凭据只通过可信通道传递。
-7. WireGuard 使用 UDP，控制 API 只在隧道内使用 HTTP，不需要 TLS 证书；客户端订阅继续单独使用公网 HTTPS。
-
-`订阅同步` -> `状态备份与恢复` 只作用于 `/etc/padm/subscribe_groups/groups.json`。恢复备份或重建状态前会先要求输入 `yes`，确认后才创建当前状态备份；当前结构为精确的 `version: 6` 单组根对象，不再持久化 `groups[]`、`active_group` 或流量汇总字段，并按 Xray / sing-box 核心分别保存流量基线。首次读取旧 `version: 2`、`3`、`4`、`5` 状态时会原子迁移；其中 v5 聚合基线先保存为兼容基线，并在首次新格式采集后替换为按核心基线。旧文件会备份到对应的 `groups-pre-v3-migration-*`、`groups-pre-v4-migration-*`、`groups-pre-v5-migration-*` 或 `groups-pre-v6-migration-*`；多组、其他旧版结构以及含额外、缺失或无效字段的状态会被拒绝。
-
-## 路由与访问控制
-
-`路由与访问控制` 负责服务端出站和访问策略，不是客户端配置教程。
-
-| 功能 | 说明 |
+| 想了解什么 | 文档 |
 | --- | --- |
-| 🧭 分流工具 | WARP WireGuard 出站、IPv6 出站、Socks5 中继、DNS 覆盖和 hosts 覆盖。 |
-| ⛔ BT 下载管理 | 通过协议嗅探阻断已识别的 bittorrent 流量；加密、混淆或部分 uTP 场景无法保证完全覆盖。 |
-| 🧱 访问控制 | 域名/IP 阻断、直连例外、区域阻断。 |
-
-Xray 访问控制使用 routing + blackhole/direct；sing-box 使用 remote rule_set、domain_suffix/domain 和 ip_cidr。直连例外会放在阻断规则之前，适合系统更新、证书签发或必须直连的客户端服务。区域阻断属于危险操作，可能影响系统更新、证书申请和应用连接。
-
-> [!NOTE]
-> **安全写入：** 修改访问控制前会快照相关规则文件；写入后会执行 Xray 和 sing-box 校验，失败自动回滚并提示日志路径。
-
-## 核心与服务
-
-`核心与服务` 首页只读取本地版本、配置、服务和 Xray Geo 状态，不执行配置检查或访问网络。即使尚未安装核心，也可以进入页面查看状态和执行不依赖本机二进制的只读扫描；远端版本只在明确升级/切换版本时获取。
-
-### Xray 主核心与 sing-box 辅助核心
-
-本项目支持保留 Xray 作为主核心，同时增量启用 sing-box 作为辅助核心。操作步骤如下：
-
-1. 先通过 `安装与重装` 安装 Xray。
-2. 打开 `协议与入口`，进入 `Hysteria2` 或 `Tuic`，选择安装。
-3. sing-box 会独立安装、生成自己的分片配置并运行对应服务；Xray 的配置和服务会继续保留，订阅和状态页会同时读取两套核心。
-
-这不是 `--core both` 模式；`--core` 仍然只能填写 `xray` 或 `sing-box`。从 `安装与重装` 重新执行完整的 sing-box 安装会切换主核心并清理 Xray。当前公开的辅助核心增量入口是 Hysteria2 和 Tuic。
-
-辅助 Hysteria2/TUIC 重装时，回车一次即可复用本协议全部用户、端口和网络参数；选择 `n` 后逐项调整，仍可保留用户只修改端口或网络参数。取消输入或前置校验失败不会进入安装事务，也不影响主核心及其他协议。
-
-Hysteria2 安装会统一生成服务端、Clash Meta 和 sing-box 订阅参数：默认使用 Brutal 固定带宽，带宽按客户端视角填写（下行是服务端到客户端，上行是客户端到服务端）；选择 BBR 时不写入固定带宽，由客户端使用自适应 BBR。端口跳跃会在 sing-box 订阅中生成 `server_ports` 范围。混淆为可选项，支持 `salamander` 和 `gecko`，开启后会同步到 Clash Meta、sing-box 和 Hysteria2 URI；回车重装会保留已有模式和混淆配置，输入 `off` 可关闭混淆。
-
-首页固定为 6 个入口：
-
-1. Xray-core 生命周期
-2. sing-box 生命周期
-3. 服务运行态
-4. 日志与诊断
-5. Xray Geo 数据
-
-直接回车或输入 `0` 返回主菜单。
-
-`安装与重装` 只在主菜单提供；不再有独立的“配置健康与兼容”页面。两个核心生命周期页固定为“升级/切换版本”“检查与诊断”“返回核心与服务”三项。“检查与诊断”依次执行当前配置校验和已知升级风险扫描，分别显示“通过”“需关注”“失败”或“无法检查”，只读且不联网、不操作服务。配置校验失败或核心二进制缺失时，仍继续执行不依赖二进制的风险扫描。
-
-`升级/切换版本` 将最近 20 个版本合并显示，每项标注“正式版”或“预发布版”。直接选择编号可升级或切回列表中的旧版本，回车使用最新正式版；选择预发布版后先自动预检，通过后再确认安装。取消安装即可只预检而不替换核心；预检仅用目标二进制校验配置，不代表真实连接验收。输入 `0` 或结束输入取消，不执行升级。
-
-“检查与诊断”的配置校验使用当前核心：Xray 内部依次执行运行检查和严格检查，运行检查失败显示“失败”，仅严格阶段未通过显示“需关注”；sing-box 会先将分片合并到临时文件，再执行 `sing-box check -c <临时配置>`，无分片时校验已有合并配置，不发布配置或操作服务。随后独立显示兼容提示，风险提示不会混为配置校验失败。技术阶段和日志路径只在结果详情中显示。
-
-sing-box 的兼容提示显示本机版本，优先扫描分片、无分片时扫描合并配置，同类提示只报告一次。旧 WireGuard/special outbound、DNS server 格式和 domain_strategy 等显示为历史兼容提示；1.14 弃用字段提示在 1.16 前迁移，TUN `stack` 提示 1.15 起弃用、1.17 移除。JSON 解析或扫描失败仍显示“失败”；当前配置能否被接受以已安装核心的 `merge + check` 为准。升级和安装预检仍保留严格扫描、迁移拒绝和失败回滚。
-
-升级或回退核心时，脚本先下载目标版本到临时目录，用目标二进制校验当前配置；校验通过后才替换 `/etc/padm/xray/xray` 或 `/etc/padm/sing-box/sing-box` 并重启服务。若新核心启动失败，会尝试恢复旧二进制。
-
-Nginx 只在当前协议、站点或订阅配置确实依赖它时可启动、停止、重启或平滑 reload；已安装但不属于 padm 当前依赖的 Nginx 只读。Nginx 配置仍由协议、站点和订阅入口管理，服务页只负责状态与动作。Xray `geosite.dat` / `geoip.dat` 的更新、状态和定时任务统一位于 `Xray Geo 数据`。
-
-### sing-box 统计版与流量恢复
-
-原生部署的 sing-box 主核心、副核心及 Docker 的 `padm-sing-box` 镜像默认使用本仓库 CI 从上游源码构建的统计版，保留上游默认构建标签并追加 `with_purego,with_v2ray_api`，具备 Hysteria2、TUIC 等协议的按用户流量统计能力。原生版本菜单还可选择上游尚未发布统计包的版本，确认后在本机编译；Docker 继续下载锁定镜像。
-
-`with_grpc` 控制完整的 gRPC 传输实现；未启用时仍有默认 gRPC lite，本项目的 Reality gRPC 配置可以使用。按用户统计由 `with_v2ray_api` 独立启用，Hysteria2 和 TUIC 也不依赖 `with_grpc`。
-
-Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官方包摘要单独保留，用于统计版构建时校验 Cronet 来源。Docker 已接入上述用户采集和额度管理，执行 `padm-docker update` 会同时更新镜像、宿主控制 bundle 并初始化统计。尚不支持自更新的旧版先按“更新”章节完成一次过渡刷新，必须使用新下载的入口，避免旧 `padm-docker install` 遗漏新增共享模块。现有协议配置会保留，协议入口仍以 Docker 支持矩阵为准。以下菜单步骤适用于原生部署。
-
-若旧核心出现 `v2ray api is not included in this build`，或曾清理统计配置后恢复连接，请在运行 sing-box 的服务器上执行：
-
-1. 从 `系统与脚本` 更新 padm 脚本。
-2. 进入 `核心与服务` -> `sing-box 生命周期` -> `升级/切换版本`，回车选择上游最新正式版，或直接选择列表中的版本编号。
-3. 在 `核心与服务` 确认 `sing-box 用户统计能力` 为“支持”、服务正常，并执行“检查与诊断”。
-
-升级成功后会根据现有协议用户自动恢复 `14_stats_api.json` 并重载核心，统计 API 仅监听 `127.0.0.1:10087`；已有端口、证书和用户凭据继续保留。统计恢复失败时会尝试回滚核心和配置。复用上次安装配置时，也会将缺少统计能力的旧核心切换为统计版。未采集期间的历史流量无法补算，恢复后的新流量继续按现有账号归集。
-
-升级/切换版本菜单显示上游正式版和预发布版，优先下载本仓库已发布的 `sing-box-v<上游版本>`。明确缺少统计包时，可选择在原生 Linux amd64 / arm64 上编译：解析目标源码提交并下载固定提交的源码，按源码要求下载并校验 Go 工具链，复用与 CI 相同的构建参数，并从该版本官方包提取已校验的 `libcronet.so`。工具链、依赖和编译缓存保留在 `/etc/padm/cache/sing-box-build`，不会替换系统 Go。编译期间旧服务继续运行，版本、统计能力和当前配置校验通过后才进入安装事务，失败或取消不会替换旧核心。网络、限流、摘要或版本校验失败直接停止，不会自动改走编译。旧源码缺少当前构建文件时会拒绝；不承诺所有历史版本可编译或兼容当前配置。
-
-维护者可运行 Actions 的 `Build sing-box Traffic Stats` 工作流，`version` 留空时读取 `versions.lock`，也可指定上游标签（如 `v1.14.0`）。推送至 `main` 时，仅统计版构建文件、统计解码器、镜像检查或相关版本锁输入变化才进入构建准备；无关锁变化跳过。构建逻辑、distroless 运行层或同版本官方摘要变化，以及手动运行，都会重新验证已发布版本，但不会覆盖已发布资产；日常巡检和已发布版本的锁升级仍可复用统计包。两个架构均须通过原生启动、Naive/Cronet 加载、Hysteria2/TUIC 实际传输和用户统计检查，再将本次候选包放入实际 Dockerfile，使用锁定的 Debian 依赖与 distroless 底座完成镜像 smoke，才会发布二进制包、对应源码包和 `SHA256SUMS`。二进制包包含 `LICENSE` 和构建信息；统计版 release 不占用 padm 自身的 latest 标记。首次使用前需等待该工作流成功发布。
-
-`Refresh Upstream Versions` 每天北京时间 11:17 调度检查官方 sing-box 最新稳定版（GitHub 调度可能延迟），也可手动运行。发现尚未发布的统计版时，自动调用上述双架构构建工作流；日常巡检复用已完整发布的版本。刷新在独立临时分支更新 Docker 版本锁，完成锁校验、依赖预检和该提交的 Docker CI 后，仅在 `main` 基线未变化且差异仅含 `versions.lock` 时快进合入，再显式派发 Release；派发失败后可补派。真实测试失败或并发基线变化会停止，不会绕过验证。统计版构建失败时工作流仍报告失败，但允许为已发布版本刷新基础镜像与 Debian 快照锁；失败候选不会进入锁。自动刷新只选择本仓库已发布的正式统计版，忽略草稿和预发布版。需要预发布版时仍可手动指定 `version` 运行统计版工作流。
-
-Dependabot 每日检查 GitHub Actions，将大版本、次版本和补丁更新合为一组，均可自动合入。`Dependabot Automation` 只响应 Dependabot 分支的 Docker CI 成功事件，并匹配该事件的分支和提交；每天北京时间 12:37 全量巡检，也可手动运行。它只处理同仓库 Dependabot PR 中允许的稳定版 Action 引用升级，拒绝降级；主分支前进时自动同步更新分支，精确提交的最新 CI 及 Cosign 安装、本地签验和篡改拒绝检查通过后，以 PR 标题生成合并提交，保持受测文件树不变、`main` 为第一父提交，再非强制更新 `main`。单提交差异因此只显示本次依赖升级，完整历史仍保留分支同步提交。其它文件或逻辑变化、人工要求修改和真实测试失败均留待人工处理；启用主分支保护后会停止直接合入，须先配置兼容的合并门禁。本地签验不替代正式发布时的 OIDC 签名和可信身份验证。
-
-启用前，在仓库的 Settings → Secrets and variables → Actions 中配置 `DEPENDABOT_AUTOMATION_TOKEN`。使用仅授权本仓库的 fine-grained PAT，授予 `Actions`、`Contents`、`Pull requests`、`Workflows` 的读写权限；到期后需更换。内置 `GITHUB_TOKEN` 无法同步含 workflow 文件变化的分支，不能通过 YAML 的 `permissions` 增加该权限。未配置 Secret 时自动化会在任何 API 调用前明确失败，不会提升分支。
-
-专用 PAT 同步分支后由 `pull_request` 事件启动 CI；更新不足 10 分钟时等待自然触发，之后由巡检补派缺失运行。同一提交已有手动 CI 时，不再因原生 CI 待审批而反复补派；排队、运行中及真实失败均不自动重跑。合入后由 `push` 触发 Release，定时或手动巡检只在合入至少 10 分钟、当前 `main` 仍为该合并提交且无发布记录时补派，已有失败发布也保留。Release 不强制生成新版本；主分支回归继续保留，无需发布时跳过已经做过合同检查的镜像工作流。
-
-## 系统与脚本
-
-`系统与脚本` 负责 padm 自身和宿主机辅助项：
-
-- 🔄 更新 padm 脚本；若订阅控制服务已启用或正在运行，会同步刷新并重启。刷新失败不会回滚脚本更新，界面会提示从控制面维护入口重试。
-- 🧾 查看入口校验、版本、ref 和 manifest。
-- 🛡️ 管理 Fail2ban 防护：原生版包含 SSH 和 `/s/control/`；Docker 版提供 WS、控制面及专用 SSH service 防护，完整宿主验收仍待补。
-- 🚀 查看或启用网络优化 / BBR。
-
-网络优化推荐项只启用当前内核提供的官方 `bbr`，并写入 padm 自己管理的 `/etc/sysctl.d/99-padm-bbr.conf`：
-
-```conf
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-```
-
-关闭时只删除 padm 自己写入的 sysctl 文件，并尝试恢复启用前的拥塞控制和 qdisc，不会改动用户其它 sysctl 文件。
-
-## 高级实验
-
-`高级与危险操作` -> `VLESS Encryption 实验` 可为 Xray Reality 节点启用实验加密。脚本调用 `xray vlessenc` 生成参数：
-
-- 🧭 Reality Vision：`VLESS Encryption + XTLS Vision`
-- 🌐 Reality XHTTP：`VLESS Encryption + XTLS Vision + XHTTP XMUX`
-
-> [!CAUTION]
-> **兼容性提醒：** default VLESS 分享链接和 Mihomo（原 Clash.Meta）订阅会携带 experimental encryption 字段；需 Mihomo v1.19.13+。sing-box 上游尚不支持该字段，因此 sing-box 订阅仍会省略。该功能属于高级实验，不建议新手默认开启。
-
-## 参数参考
-
-| 参数 | 可选值 | 默认/行为 | 说明 |
-| --- | --- | --- | --- |
-| `--install-type` | `install`、`custom`、`reality` | 无自动参数时进入交互菜单；传其它安装参数但不传本参数时默认 `custom` | 安装类型。 |
-| `--core` | `xray`、`sing-box`、`1`、`2` | `xray` | `1` 等同 `xray`，`2` 等同 `sing-box`。 |
-| `--protocols` | 当前公开协议编号，逗号分隔 | 无固定默认 | 自定义安装协议，例如 `1` 或 `1,2,21`；旧版 `0..13/20` 编号已废弃。 |
-| `--list-protocols` | 无 | 输出后退出 | 列出可安装的公网节点能力。 |
-| `--list-capabilities` | 无 | 输出后退出 | 列出公网节点、内部能力和上游已知能力。 |
-| `--show-risky-protocols` | 无 | 输出后退出 | 列出带风险提示的高级公网节点能力。 |
-| `--domain` | 域名 | TLS 安装时必须提供或交互输入 | TLS 证书域名；也是 Reality entry 的第二优先级，但 Reality 不为其申请证书。 |
-| `--entry-host` | 域名或 IP | 优先于 `--domain`、历史 entry、`currentHost` 和公网 IP | Reality 客户端实际连接地址。 |
-| `--reality-target` | `host[:port]` | 未传时进入目标站选择器；无可接受的安全结果则失败 | Reality 伪装目标站；显式目标也必须通过实时风险校验。 |
-| `--reality-server-name` | SNI 域名 | 默认等于 target host | Reality SNI。 |
-| `--port` | 端口号 | TLS 默认 `443`；单选 Reality 为显式端口 > 历史端口 > `443` | TLS 入口端口或单选 Reality 客户端连接端口；多协议不注入 Reality 子端口。 |
-| `--tls-ca` | `letsencrypt`、`zerossl`、`buypass` | `letsencrypt` | 证书 CA。 |
-| `--dns-api` | `yes`、`no`、`y`、`n` | `no` | 是否使用 DNS API 申请证书。 |
-| `--dns-api-type` | `cloudflare`、`aliyun`、`1`、`2` | `cloudflare` | DNS API 服务商。 |
-| `--dns-api-wildcard` | `yes`、`no`、`y`、`n` | `no` | 是否申请 `*.根域名` 通配符证书。 |
-| `--cloudflare-api-token` | token | 也可用 `PADM_CLOUDFLARE_API_TOKEN` | Cloudflare DNS API Token。 |
-| `--cloudflare-zone-id` | zone id | 可选，也可用 `PADM_CLOUDFLARE_ZONE_ID` | 设置 `CF_Zone_ID`，减少 Zone 查询依赖。 |
-| `--aliyun-api-key` | key | 也可用 `PADM_ALIYUN_API_KEY` | 阿里云 AccessKey ID。 |
-| `--aliyun-api-secret` | secret | 也可用 `PADM_ALIYUN_API_SECRET` | 阿里云 AccessKey Secret。 |
-| `--reuse-last` | `yes`、`no`、`y`、`n` | 已有配置时默认复用；交互回车保留 | `no` 重新填写安装参数和用户，保留证书和订阅，不清空现有安装。 |
-| `--clean-acme` | `yes`、`no`、`y`、`n` | 忽略 | 仅为兼容旧脚本保留；重装始终保留 ACME 证书和账号配置。 |
-| `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 严格域名模式，仅支持单选 Reality Vision `1`；优先用 `--entry-host`，其次 `--domain`。 |
-| `--subscribe-port` | 端口号 | 无固定默认 | 订阅发布服务端口。 |
-| `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅或反代需要 Nginx 时是否自动安装。 |
-| `--uuid` | UUID 或密码 | 新建时随机生成；复用时保留已有用户 | 纯密码的自定义协议可用普通密码；含 VLESS、VMess 或 TUIC 时必须是 UUID。复用历史时，显式值须匹配已有用户，否则在安装前失败。 |
-| `--user` | 用户名 | 新建时随机生成；复用时保留已有用户 | 初始用户名；与 `--uuid` 同传时须匹配同一已有用户。需要新建用户时指定 `--reuse-last no`。 |
-
-完整参数以 `bash install.sh --help` 为准。
-
-## 验收与回归
-
-安装后只读验收：
-
-```bash
-bash shell/validate_install.sh [domain]
-```
-
-检查公网 HTTP/HTTPS/TLS 可达性：
-
-```bash
-bash shell/validate_install.sh --online example.com
-```
-
-回归统一通过 selector dispatcher 运行，按三个层级使用：
-
-Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回归入口，首次运行自动构建 `padm-regression:local`
-工具镜像，后续复用构建缓存：
-
-```powershell
-.\shell\regression\run-docker.ps1 -Selector fast
-.\shell\regression\run-docker.ps1 -Selector ui-subscription-workflow-focused
-.\shell\regression\run-docker.ps1 -Selector docker-routing-domains-workflow
-.\shell\regression\run-docker.ps1 -Selector ci -Jobs 3
-.\shell\regression\run-docker.ps1 -Selector docker-contracts -Jobs 6
-```
-
-普通定向 selector 默认 `-Jobs 2`，完整 `ci`、`ci-pr`、`all` 默认 `-Jobs 3`，
-`docker-contracts` 与 `docker-contracts-full` 默认 `-Jobs 6`（支持 1–8）。
-日常 `docker-contracts` 收敛为 34 项高频核心门禁，保留权限、所有权、密钥、回滚、恢复预览及控制链检查，
-以本机 5 分钟内反馈为目标。完整集合使用 `docker-contracts-full`，
-包含恢复 apply 故障注入、升级、协议、首配、菜单、多入口与路由工作流深层矩阵；
-CI 分片继续覆盖这套完整集合。
-CI 保持 18 个合同分片，将 TLS 续期与重装拆开，分散站点、菜单、恢复和所有权长任务，
-合并较短场景；原 65 项断言全部保留，TLS 拆分后为 66 个执行单元。
-分片内长任务先启动，工具容器的源码和临时目录使用 tmpfs，
-CI 仅构建 `contracts` 工具 target，本机默认完整镜像保留 Docker daemon、Wrangler 和二维码缓存。
-恢复 apply、XHTTP 编辑及路由分片直接使用 runner 工具，省去不需要的镜像准备；
-新版 OpenSSL、站点分片继续使用隔离工具镜像；
-端口跳跃在 runner 复用同一快照适配器，配置、目标及监督检查并行执行。
-两者均按当前快照匹配成功结果，`-ForceRun` 可强制实际重跑。
-Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workflow` 和 `docker-menu`；
-工作流定向复用原事务断言，不替代 Schema、生成器、其它路由矩阵和真实流量验收。
-额外入口端口改动使用 `docker-entry-port-alias` 与 `docker-menu-port-alias`；
-菜单定向复用完整入口的全部别名 PTY 断言，完整 `docker-menu` 保留原集合。
-多入口/双核心拓扑改动使用 `docker-phase3-entries-topology`，
-协议增删、TLS 或重装管理改动使用 `docker-phase3-entries-management`。
-`docker-phase3-entries` 保留管理与拓扑的并行分组；`docker-contracts-full` 直接调度这些分组，CI 分片覆盖相同叶子。
-各任务先运行匹配改动的定向回归；需要综合回归时默认使用 `docker-contracts -Jobs 6`，
-日常集合外的功能补充对应定向 selector。跨文件、集成完成或准备提交不自动触发 `docker-contracts-full`；
-全量仅用于明确要求的验收，或发布前由一个集成任务集中执行一次。
-入口归档当前工作区的已跟踪文件和未忽略的新文件，包含未提交修改，不包含 `.git`
-和 `.tmp-*`；源码、`TMPDIR`、`HOME` 在容器内部，不挂载 Windows 工作目录。
-每次运行的源码快照、日志和结果保存在 `.tmp-regression-docker-*/`，测试失败保留日志并返回原退出码。
-镜像只装工具，不固化项目源码；使用 Debian 官方依赖、固定 digest 的官方静态 jq 1.8.2 和官方 Docker CLI/Buildx/Compose，
-不安装 daemon、不挂 Docker socket，运行时无网络。工具层需要重新安装时使用 `-Rebuild`。
-工具镜像同时登记 `padm-regression:local-<工具内容 SHA256>` 标签；
-不同 worktree 的工具输入各自复用对应标签，避免 `local` 被更新后反复构建。
-复用前仍核对 Linux 原生架构及工具内容标签，本次回归固定镜像 ID。
-同一仓库、同一 Windows 用户的各任务和 worktree 试用三个回归槽位；普通 selector 占一个，
-`ci`、`ci-pr`、`all`、`docker-contracts` 和 `docker-contracts-full` 占两个。完整回归登记等待后，不再放行新普通任务，
-优先等待所需槽位；取得槽位后，普通任务可以使用剩余一槽。最多三个普通任务或一套完整回归加一个普通任务，
-两套完整回归不能重叠；没有足够空位时自动等待，不保证严格 FIFO。
-排队前生成源码快照；镜像构建串行化并固定镜像 ID；异常退出后的槽位接管会先清理本入口标记的残留容器。
-完整回归复用输入相同的成功结果：源码按路径、内容、类型和权限匹配，忽略归档时间戳；
-同时匹配工具镜像内容、selector、架构和 `Jobs`。失败、输入变化或 `-ForceRun` 都会实际执行。
-共享索引放在主工作区 `.tmp-regression-shared-*/`；原始日志或结果丢失/改变时不再复用。
-`result.json` 记录等待时长、占用槽位数、总预算 `queue_budget`、镜像 ID 和复用来源；
-`-Jobs` 只控制容器内测试并发，不是宿主资源配额。
-真实宿主、重启、公网及业务容器连通性验收仍须单独环境，普通回归容器不能代替。
-入口自检运行 `.\shell\regression\test-run-docker.ps1`。下面的 Bash 命令适用于 Linux 执行环境。
-
-| 层级 | 命令 | 用途 |
-| --- | --- | --- |
-| 快速反馈 | `bash shell/subscription_groups_regression.sh fast` | 日常小改后的代表性检查；完整 fast 集合用 `fast-full`。 |
-| 主产品回归 | `bash shell/subscription_groups_regression.sh all` | 较大改动的主验证集；按资源预算编排核心产品 suite，但不是所有公开 selector 的并集。 |
-| 按需专项 | `bash shell/subscription_groups_regression.sh <selector>` | 按改动范围补跑协议、深层回滚或 harness 行为检查。 |
-
-PR 的原生门槛使用 `ci-pr` 作为默认快速集合；订阅或 harness 改动升级到 `ci`，主分支发布门槛始终使用完整 `ci`。两者顶层默认并发为 3，可用 `PADM_REGRESSION_CI_PARALLEL_JOBS` 或 Docker CI 手动输入在 2 到 4 之间调整。Release 的静态检查、原生回归和发布准备固定到同一提交，后续主分支推送不会替换已验证的候选源码。
-
-`all` 在同一资源预算内并行运行 `subscription`、`ui`、`transaction-core-main`、`transaction-system`、`routing`、`runtime`、`remote-control-smoke`、远程控制服务安装契约和远程控制响应契约。完整 `transaction-core`、`fast-full`、`protocol-capabilities`、`remote-control-deep` 和 harness 契约按改动范围追加。
-
-常用产品专项：
-
-```bash
-bash shell/subscription_groups_regression.sh protocol-capabilities
-bash shell/subscription_groups_regression.sh platform-hot
-bash shell/subscription_groups_regression.sh platform-smoke
-bash shell/subscription_groups_regression.sh fast-full
-# sing-box 1.14 兼容性迁移专项（fast-full 已包含）
-bash shell/subscription_groups_regression.sh fast-only-compatibility
-bash shell/subscription_groups_regression.sh subscription-output
-bash shell/subscription_groups_regression.sh transaction-core
-bash shell/subscription_groups_regression.sh core-safety-rollback
-bash shell/subscription_groups_regression.sh routing-safety
-bash shell/subscription_groups_regression.sh subscription-safety
-bash shell/subscription_groups_regression.sh transaction-system
-bash shell/subscription_groups_regression.sh remote-control-smoke
-bash shell/subscription_groups_regression.sh remote-control-contract
-bash shell/subscription_groups_regression.sh remote-control-deep
-bash shell/subscription_groups_regression.sh subscription-state
-bash shell/subscription_groups_regression.sh ui-full-core
-bash shell/subscription_groups_regression.sh ui-full-core-maintenance
-```
-
-harness 专项：
-
-```bash
-bash shell/subscription_groups_regression.sh regression-dispatcher-contract
-bash shell/subscription_groups_regression.sh regression-case-loader-contract
-bash shell/subscription_groups_regression.sh framework-parallel-selector-list-with-jobs
-bash shell/subscription_groups_regression.sh targeted-batch-helpers
-```
-
-需要压并发或保守跑重型 suite 时，优先用 `PADM_REGRESSION_PARALLEL_JOBS`、`PADM_REGRESSION_CHILD_PARALLEL_JOBS`，以及按 suite 开启 `PADM_REGRESSION_*_RESOURCE_PROFILE=all`。`shell/regression/protocol_capabilities.sh` 仅作为保留原成功标记的兼容转发入口。
-
-主入口按 `framework/`、`cases/load.sh`、`suites/` 的固定顺序装配回归；case 只加载一次，不再保留历史 source-only 分组层。
+| <a name="系统要求"></a><a name="主菜单"></a><a name="短链二维码"></a><a name="非交互安装"></a><a name="参数参考"></a>原生版的系统要求、主菜单、短链二维码、非交互安装和参数 | [📦 原生版安装与参数](documents/native-install.md) |
+| Docker 部署、日常命令和功能支持范围 | [🐳 Docker 版使用指南](documents/docker-guide.md) · [功能对照表](documents/docker-feature-matrix.md) |
+| <a name="协议选择"></a><a name="推荐公网节点能力"></a><a name="高级公网节点能力"></a><a name="内部服务端能力"></a><a name="上游已知但本项目暂不生成的能力"></a><a name="nginx-拓扑"></a><a name="reality-语义"></a><a name="xhttp-与-cdn"></a><a name="传统-tls-与本机站点"></a><a name="高级实验"></a>协议编号、Reality 目标站、XHTTP、CDN 和传统 TLS | [🧭 协议与入口](documents/protocols.md) |
+| 管理员与分享订阅、流量额度、接入被控和同步恢复 | [🔗 订阅与用户](documents/subscriptions.md) |
+| <a name="路由与访问控制"></a><a name="核心与服务"></a><a name="xray-主核心与-sing-box-辅助核心"></a><a name="-配置检查与版本切换"></a><a name="sing-box-统计版与流量恢复"></a><a name="系统与脚本"></a><a name="安装后的控制点"></a>核心升级、日志诊断、访问控制、安装路径和宿主维护 | [⚙️ 服务与系统运维](documents/operations.md) |
+| <a name="验收与回归"></a><a name="-安装后验收"></a><a name="-windows-本机回归"></a><a name="-并发快照与结果"></a><a name="-linux-与-ci"></a>部署验收、本机回归和 CI | [🧪 验收与回归](documents/regression.md) |
+| <a name="运行模型"></a><a name="-统计版构建与依赖更新"></a><a name="-github-actions-依赖维护"></a>仓库结构、统计版构建和依赖维护 | [🛠️ 维护者指南](documents/maintenance.md) |
 
 ## 许可证
 
-本项目根据 [AGPL-3.0 许可证](LICENSE) 授权。
+📄 本项目采用 AGPL-3.0。 [查看许可证](https://github.com/neil1123-vip/padm/blob/main/LICENSE)

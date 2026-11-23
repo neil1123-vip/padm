@@ -13,7 +13,7 @@
 提供明确的宿主操作入口或保留支持限制，不伪装成纯容器功能。
 
 当前导航（2026-11-23）：Docker 首页已采用原生版相同的 8 类入口和共享菜单样式，
-当前操作路径见 [README](../README.md#docker-版)。下文历史顶层 `9` 协议、
+当前操作路径见 [Docker 菜单导航](docker-guide.md#安装)。下文历史顶层 `9` 协议、
 `17` 路由和 `18` 维护分别迁至 `3 → 8`、`5 → 1 → 8` 和 `7 → 1`。
 专项菜单按可见操作连续编号，回车或 `0` 返回。SOCKS5 入站显示不可用及原因；
 两版核心升级机制均保持原样，Docker 仍使用整包验签升级与回滚。
@@ -271,7 +271,7 @@ ShellCheck error 通过。最后补充临时文件创建失败时清空旧状态
 成功及失败补验的源码包/清单清理，日志/result 保留；整体目标仍 active。
 
 当前机器可读支持状态以
-[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 的初始
+[`features.json`](https://github.com/neil1123-vip/padm/blob/main/docker/contracts/features.json) 为准。协议 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 的初始
 配置运行及声明范围内的管理工作流均为 `supported`，逐项证据见 3D.26。
 14 个功能汇总键仍为 `deferred`，已有证据、剩余门槛和明确拒绝范围见
 [2026-11-04 对账表](docker-deferred-status-2026-11-04.md)；汇总键有重叠，不按 14 项新增功能计数。
@@ -13195,7 +13195,7 @@ POST，stream-up 实测 `1/1/1/1`。两个持续例均在同一业务连接完�
 | `vless-encryption` | 5C.10 有限实验子能力已交付，完整能力与剩余环境验收仍 deferred |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
-[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]`，
+[`phase3.sh`](https://github.com/neil1123-vip/padm/blob/main/docker/tests/phase3.sh) 当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]`，
 同时要求上述 16 个协议的 `management_status` 为 `supported`，
 功能汇总键 `interactive-menu` 和 `reality-coexistence` 仍为 `deferred`；
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。

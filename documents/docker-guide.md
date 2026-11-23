@@ -1,21 +1,36 @@
 # Docker 版使用指南
 
-[返回 README](../README.md#docker-版) · [系统要求](../README.md#docker-版要求) · [功能对照表](docker-feature-matrix.md)
+[仓库首页](https://github.com/neil1123-vip/padm#docker-版) · [系统要求](#docker-版要求) · [功能对照表](docker-feature-matrix.md)
 
 [安装](#安装) · [五个镜像](#五个镜像) · [状态与日常控制](#状态与日常控制) · [可信发布输入](#可信发布输入) · [灾备归档](#灾备归档) · [用户流量与额度](#用户流量与额度) · [更新](#更新) · [回滚](#回滚) · [卸载](#卸载)
 
 Docker 版用于把核心、Nginx、订阅和运维任务与宿主系统隔离。它和原生版是两条独立且互斥的入口：原生版使用 `install.sh` / `padm`，Docker 版使用 `install-docker.sh` / `padm-docker`；不会自动混装、迁移或接管另一种部署。
 
+## Docker 版要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 操作系统 | 原生 Linux，Docker daemon 运行 Linux 容器。Windows、macOS 和 Docker Desktop 不在支持范围。 |
+| 权限与连接 | root 权限和通过本机 Unix socket 连接的 rootful Docker Engine。rootless daemon、远程 context 和用户级 socket 均超出支持范围。 |
+| Compose | Docker Compose CLI 插件 v2 或更新版本。 |
+| 架构 | `amd64` 或 `arm64`，主机和 daemon 架构必须一致。 |
+| 主机命令 | `bash` 4+、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`。发布验签和签名更新需要支持 Sigstore bundle v0.3 的 `cosign`（CI 使用 3.x）。 |
+| 用户统计 | 正在运行的 systemd 或 cron。sing-box 还需宿主 `nsenter`（通常来自 `util-linux`）及支持 HTTP/2 的 `curl`。配置或更新时缺少相应依赖会停止。 |
+| 内核能力 | 普通 profile 无需额外 capability。WireGuard、Fail2ban、TUN/TProxy 等 `net-*` profile 按功能对照表要求使用 `NET_ADMIN`、host network 或 `/dev/net/tun`。 |
+
+**📦 自动安装 Docker。** `install-docker.sh install` 仅在找不到 `docker` 命令时询问是否从 Docker 官方软件源安装 Engine、Compose 插件和宿主前置工具。自动安装适用于运行 systemd 的 Debian、Ubuntu、CentOS、Fedora 和 RHEL，其他发行版请先手动安装。
+
+取消或安装失败时，脚本在初始化 `/etc/padm-docker` 前停止，保留已完成的宿主软件包和软件源变更。已有 Docker 时，daemon 或 Compose 不可用会直接报错。检测到原生版安装、运行或残留状态时，请先处理原生部署。
+
 ## 安装
 
-Docker 入口会安装并校验 Docker 控制 bundle；缺少 Docker 时，`install` 会在明确确认后引导安装 Docker Engine 和 Compose CLI 插件（v2 及以上）。它不在生产机执行 `docker build`，也不会把 Xray、sing-box、Nginx 或其它业务依赖安装到宿主机。镜像由本仓库 CI 预构建并发布，首次部署可在菜单中完成：
+Docker 入口负责安装并校验控制 bundle。`docker build` 在 CI 中执行，生产宿主机直接拉取已发布的镜像。Xray、sing-box、Nginx 等业务依赖随镜像交付。先在宿主机运行以下命令安装控制入口。
 
 ```bash
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
 ```
 
-交互终端安装成功后自动进入菜单；已安装后直接运行 `padm-docker` 或
-`padm-docker menu` 可查看状态、启停重启和日志，选择“安装与重装 → 首次配置”收集核心、协议、地址和证书。
+交互终端安装成功后自动进入菜单。选择 `1. 安装与重装 → 1. 首次配置` 设置核心、协议、地址和证书。以后运行 `padm-docker` 或 `padm-docker menu` 打开菜单。尚未部署服务时，也可在交互终端运行 `padm-docker setup` 直接进入首次配置。
 当前向导支持 Xray Reality Vision/XHTTP/gRPC、sing-box Reality Vision/gRPC/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC，以及两核心 direct Trojan、VMess HTTPUpgrade TLS，
 以及 Xray VLESS WS TLS、VMess WS TLS、VLESS/Trojan gRPC TLS、VLESS TCP TLS Vision、Trojan TLS fallback 或 Reality Vision + WS TLS；
 已有部署可从同一菜单选择重装，或改用下述保身份编辑入口。
@@ -29,14 +44,14 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 
 | 编号 | 菜单 | 常用入口 |
 | --- | --- | --- |
-| `1` | 安装与重装 | 首次配置、重新选择核心与协议、完整规格重装 |
-| `2` | 订阅与用户 | `1` 账号、`2` 订阅、`3` 流量额度、`4` 控制连接、`5` 业务备份、`6` HTTPS 订阅发布 |
-| `3` | 协议与入口 | REALITY、XHTTP、Hysteria2、TUIC、额外端口、CDN；`8` 入口高级管理 |
-| `4` | 站点与证书 | `1` 传统 TLS fallback 与站点、`2` 本机 TLS 证书、`3` 本地静态站点 |
-| `5` | 路由与访问控制 | `1` 分流工具、`2` BT、`3` 访问控制 |
-| `6` | 核心与服务 | 状态、启停、重启、日志、校验；`7` 升级评估、`8` Geo、`9` 配置编辑 |
-| `7` | 系统与脚本 | `1` 原有发布包维护、`2` 安装状态、`3` Fail2ban |
-| `8` | 高级与危险操作 | `1` 卸载服务与控制命令（保留数据）、`2` VLESS Encryption 实验 |
+| `1` | 🚀 安装与重装 | `1` 首次配置、`2` 重新选择核心与协议、`3` 从完整规格重装 |
+| `2` | 🔗 订阅与用户 | `1` 账号管理、`2` 订阅管理、`3` 流量与额度、`4` 控制连接、`5` 业务备份恢复、`6` HTTPS 订阅发布 |
+| `3` | 🧭 协议与入口 | REALITY、XHTTP、Hysteria2、TUIC、额外端口、CDN。`8` 为「入口高级管理」 |
+| `4` | 🔐 站点与证书 | `1` 传统 TLS fallback 维护、`2` 本机 TLS 证书管理、`3` 本地静态站点 |
+| `5` | 🧱 路由与访问控制 | `1` 分流工具、`2` BT 下载管理、`3` 访问控制。`1 → 8` 进入「完整路由维护」 |
+| `6` | ⚙️ 核心与服务 | 状态、启停、重启、日志、校验。`7` 核心升级评估、`8` Xray Geo 数据、`9` 编辑配置/导入原始规格 |
+| `7` | 🧰 系统与脚本 | `1` 更新、回滚与部署维护、`2` 查看安装状态、`3` Fail2ban 防护 |
+| `8` | ⚠️ 高级与危险操作 | `1` 卸载服务与控制命令（保留数据）、`2` VLESS Encryption 实验 |
 
 旧协议菜单 `9` 迁至 `3 → 8`，旧完整路由菜单 `17`
 迁至 `5 → 1 → 8`，旧服务维护菜单 `18` 迁至 `7 → 1`。
@@ -52,7 +67,7 @@ padm-docker validate
 padm-docker status
 ```
 
-向导最终确认后才验签发布、生成 UUID/Reality 参数/订阅 token，并准备候选配置与证书。
+选择检测 Reality 候选时，向导先验签并准备探测镜像。最终确认后，向导生成 UUID、Reality 参数和订阅 token，并准备候选配置与证书。
 没有 `cosign` 时停止，不自动从未验证来源安装验证器，也不能跳过验签。
 WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01/HTTP-01 standalone/TLS-ALPN-01；
 私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布要求至少一个 Nginx TLS `21–25` 或 Xray TLS fallback `27/29` 入口和同域受管证书，可仅使用 sing-box HTTPUpgrade `23`。
@@ -1213,17 +1228,30 @@ CI 按每个镜像的目录、共享构建定义及实际锁定依赖判断是�
 
 ## 状态与日常控制
 
-Docker 状态根固定为 `/etc/padm-docker`，原生状态根 `/etc/padm` 不会被 Docker 入口读取或覆盖。常用命令如下：
+Docker 状态根固定为 `/etc/padm-docker`。宿主上的 `padm-docker` 通过 Docker CLI 和 Compose 操作受管部署。业务容器不挂载 Docker socket。
 
-```bash
-padm-docker status
-padm-docker up
-padm-docker down
-padm-docker restart
-padm-docker logs
-padm-docker validate
-padm-docker assess
-```
+| 路径 | 作用 |
+| --- | --- |
+| `/etc/padm-docker/mode` | 🏷️ 固定为 `docker` 的模式标记，用于互斥和卸载保护。 |
+| `/etc/padm-docker/bundle` | 🔗 当前已验证控制 bundle 的原子指针。 |
+| `/etc/padm-docker/deployment.json` | 🧾 当前版本、profiles、端口和五个镜像 digest。 |
+| `/etc/padm-docker/compose.json`、`images.env` | 🐳 当前 Compose 配置和固定镜像引用。 |
+| `/etc/padm-docker/config/`、`data/`、`secrets/`、`backups/` | 💾 配置、运行数据、密钥和更新/卸载备份。 |
+
+Docker 能力的菜单入口和支持范围由功能对照表和 `docker/contracts/features.json` 共同维护，新增能力时同步更新两处。[Docker 版功能对照表](docker-feature-matrix.md)
+
+### 常用命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `padm-docker status` | 查看部署、容器和协议状态。 |
+| `padm-docker logs` | 查看服务日志。 |
+| `padm-docker validate` | 校验当前配置。 |
+| `padm-docker assess` | 评估升级风险。 |
+| `padm-docker up` / `down` / `restart` | 启动、停止或重启服务。 |
+| `padm-docker update` | 验签后更新镜像和宿主控制脚本，失败时尝试恢复。[更新](#更新) |
+| `padm-docker rollback` | 使用最近一次受管更新快照回滚。[回滚](#回滚) |
+| `padm-docker uninstall` | 卸载容器和控制命令，保留配置、数据、备份和镜像。[卸载](#卸载) |
 
 菜单 `7 → 3. Fail2ban 防护` 提供受管 Fail2ban 的状态、单 IP 解封、WS 站点扫描启停及参数管理：
 
