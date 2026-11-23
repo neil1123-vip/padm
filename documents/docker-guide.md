@@ -1,6 +1,6 @@
 # Docker 版使用指南
 
-[仓库首页](https://github.com/neil1123-vip/padm#docker-版) · [系统要求](#docker-版要求) · [功能对照表](docker-feature-matrix.md)
+[仓库首页](https://github.com/neil1123-vip/padm#docker-版) · [系统要求](#docker-版要求) · [功能对照表](docker-feature-matrix.md) · [🌍 English](https://github.com/neil1123-vip/padm/blob/main/documents/en/docker-guide.md)
 
 [安装](#安装) · [五个镜像](#五个镜像) · [状态与日常控制](#状态与日常控制) · [可信发布输入](#可信发布输入) · [灾备归档](#灾备归档) · [用户流量与额度](#用户流量与额度) · [更新](#更新) · [回滚](#回滚) · [卸载](#卸载)
 

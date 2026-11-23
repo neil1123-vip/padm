@@ -1,6 +1,6 @@
 # 🧭 协议与入口
 
-[🏠 返回首页](../README.md#文档导航)
+[🏠 返回首页](../README.md#文档导航) · [🌍 English](en/protocols.md)
 
 按连接场景选择协议。部署后从 `协议与入口` 调整 Reality、XHTTP 和 CDN，或从 `站点与证书` 维护传统 TLS 与本机站点。
 

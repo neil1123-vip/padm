@@ -1,6 +1,6 @@
 # 🧪 验收与回归
 
-[🏠 返回首页](../README.md#文档导航)
+[🏠 返回首页](../README.md#文档导航) · [🌍 English](en/regression.md)
 
 部署后可用只读脚本验收。在仓库开发时，可按改动范围选择回归。
 
@@ -81,7 +81,7 @@ Linux 环境统一通过 Bash 回归入口按 selector 运行。
 
 PR 原生回归默认执行 `ci-pr`，订阅或回归框架改动使用 `ci`。Release 始终运行完整原生 `ci`，静态检查、回归和发布准备固定到同一提交。CI 的 Docker 合同分片覆盖全量场景。`ci` 和 `ci-pr` 默认并发为 3，可用 `PADM_REGRESSION_CI_PARALLEL_JOBS` 或 Docker CI 手动输入在 2–4 之间调整。
 
-`all` 在同一资源预算内并行运行 `subscription`、`ui`、`transaction-core-main`、`transaction-system`、`routing`、`runtime`、`remote-control-smoke`、远程控制服务安装契约和远程控制响应契约。完整 `transaction-core`、`fast-full`、`protocol-capabilities`、`remote-control-deep` 和 harness 契约按改动范围追加。
+`all` 在同一资源预算内并行运行 `subscription`、`static-sites`、`ui`、`transaction-core-main`、`transaction-system`、`routing`、`runtime`、`remote-control-smoke`、远程控制服务安装契约和远程控制响应契约。完整 `transaction-core`、`fast-full`、`protocol-capabilities`、`remote-control-deep` 和 harness 契约按改动范围追加。
 
 <details>
 <summary>🧪 常用产品专项命令</summary>

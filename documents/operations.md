@@ -1,6 +1,6 @@
 # ⚙️ 服务与系统运维
 
-[🏠 返回首页](../README.md#文档导航)
+[🏠 返回首页](../README.md#文档导航) · [🌍 English](en/operations.md)
 
 管理原生版的流量出口、核心版本、服务状态和宿主机配置。Docker 版的操作见 [Docker 版使用指南](docker-guide.md)。
 

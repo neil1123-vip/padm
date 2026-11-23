@@ -1,6 +1,6 @@
 # 📦 原生版安装与参数
 
-[🏠 返回首页](../README.md#文档导航)
+[🏠 返回首页](../README.md#文档导航) · [🌍 English](en/native-install.md)
 
 在 Linux 服务器上使用 `install.sh` 部署原生版。首次安装命令见 [README 的安装入口](../README.md#安装)，容器部署见 [Docker 版使用指南](docker-guide.md)。
 
@@ -56,7 +56,7 @@ padm
 
 ## 短链二维码
 
-📱 完整链接的二维码超出终端宽度时，可部署 Cloudflare Worker，在终端显示较短的 HTTPS 二维码。以 root 登录 VPS 后运行以下命令。
+📱 完整链接的二维码超出终端宽度时，可部署 Cloudflare Worker，在终端显示较短的 HTTPS 二维码。在 glibc 2.35 或更新版本的 Linux 主机上以 root 运行以下命令，例如 Debian 12 或 Ubuntu 22.04。
 
 ```bash
 mkdir -p -m 700 /root/padm-shortlink && wget -O /root/padm-shortlink/deploy.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/tools/shortlink-worker/deploy.sh" && test -s /root/padm-shortlink/deploy.sh && chmod 700 /root/padm-shortlink/deploy.sh && bash /root/padm-shortlink/deploy.sh
@@ -105,14 +105,16 @@ bash install.sh --install-type custom --core sing-box --protocols 5 --domain nai
 
 **🔐 传统 TLS 兼容安装（Cloudflare DNS-01）**
 
+在运行环境中设置 `PADM_CLOUDFLARE_API_TOKEN` 和 `PADM_CLOUDFLARE_ZONE_ID`。API Token 建议仅授权目标 Zone，并授予 `Zone:DNS:Edit`。可以显式传入这些值，也可以让脚本直接读取环境变量。
+
 ```bash
-bash install.sh --install-type install --core xray --domain example.com --port 443 --tls-ca letsencrypt --dns-api yes --dns-api-type cloudflare --dns-api-wildcard yes --cloudflare-api-token <token> --cloudflare-zone-id <zone_id> --reuse-last no
+bash install.sh --install-type install --core xray --domain example.com --port 443 --tls-ca letsencrypt --dns-api yes --dns-api-type cloudflare --dns-api-wildcard yes --cloudflare-api-token "$PADM_CLOUDFLARE_API_TOKEN" --cloudflare-zone-id "$PADM_CLOUDFLARE_ZONE_ID" --reuse-last no
 ```
 
-Cloudflare API Token 建议仅授权目标 Zone，并授予 `Zone:DNS:Edit`。脚本也可从环境变量读取 Token 和 Zone ID。请通过运行环境注入真实凭据。
+直接使用环境变量时，可省略凭据参数。
 
 ```bash
-PADM_CLOUDFLARE_API_TOKEN=<token> PADM_CLOUDFLARE_ZONE_ID=<zone_id> bash install.sh --install-type install --core xray --domain example.com --dns-api yes --dns-api-type cloudflare
+bash install.sh --install-type install --core xray --domain example.com --dns-api yes --dns-api-type cloudflare
 ```
 
 **🔗 为已有节点安装或更新 HTTPS 订阅发布**
@@ -121,7 +123,9 @@ PADM_CLOUDFLARE_API_TOKEN=<token> PADM_CLOUDFLARE_ZONE_ID=<zone_id> bash install
 bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-port 39778 --install-nginx yes
 ```
 
-订阅发布单独配置 TLS 域名和证书。脚本优先复用该域名的可用证书，缺少证书时可用 `--tls-ca`、`--dns-api` 和服务商凭据完成签发。复用自定义证书时由你负责续期。
+订阅发布单独配置 TLS 域名和证书。脚本优先复用该域名的可用证书，缺少证书时默认使用 HTTP-01。使用 DNS-01 时，传入 `--dns-api yes`、服务商设置和凭据。复用自定义证书时由你负责续期。
+
+命令执行成功后，从 `订阅与用户 → 5. 立即完整同步` 生成或刷新已发布的链接。
 
 ## 参数参考
 
@@ -140,7 +144,7 @@ bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-p
 | `--reality-target` | `host[:port]` | 未传时按安装方式复用或选择目标。 | Reality 目标站，必须通过实时风险校验。 |
 | `--reality-server-name` | SNI 域名 | 默认等于 target host | Reality SNI。 |
 | `--port` | 端口号 | TLS 默认 `443`；单选 Reality 为显式端口 > 历史端口 > `443` | TLS 入口端口或单选 Reality 客户端连接端口；多协议不注入 Reality 子端口。 |
-| `--tls-ca` | `letsencrypt`、`zerossl`、`buypass` | `letsencrypt` | 证书 CA。 |
+| `--tls-ca` | `letsencrypt`、`zerossl`、`buypass` | `letsencrypt` | 证书 CA。`buypass` 需要关闭 DNS API。 |
 | `--dns-api` | `yes`、`no`、`y`、`n` | `no` | 是否使用 DNS API 申请证书。 |
 | `--dns-api-type` | `cloudflare`、`aliyun`、`1`、`2` | `cloudflare` | DNS API 服务商。 |
 | `--dns-api-wildcard` | `yes`、`no`、`y`、`n` | `no` | 是否申请 `*.根域名` 通配符证书。 |
@@ -152,7 +156,7 @@ bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-p
 | `--clean-acme` | `yes`、`no`、`y`、`n` | 忽略 | 仅为兼容旧脚本保留；重装始终保留 ACME 证书和账号配置。 |
 | `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 严格域名模式，仅支持单选 Reality Vision `1`；优先用 `--entry-host`，其次 `--domain`。 |
 | `--subscribe-port` | 端口号 | 无固定默认 | 订阅发布服务端口。 |
-| `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅或反代需要 Nginx 时是否自动安装。 |
+| `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅发布需要 Nginx 时是否自动安装。 |
 | `--uuid` | UUID 或密码 | 新建时随机生成；复用时保留已有用户 | 纯密码的自定义协议可用普通密码；含 VLESS、VMess 或 TUIC 时必须是 UUID。复用历史时，显式值须匹配已有用户，否则在安装前失败。 |
 | `--user` | 用户名 | 新建时随机生成；复用时保留已有用户 | 初始用户名；与 `--uuid` 同传时须匹配同一已有用户。需要新建用户时指定 `--reuse-last no`。 |
 
