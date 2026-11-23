@@ -2925,7 +2925,6 @@ renderSubscribeUserOutputs() {
     local showStatus=$5
     local remoteSnapshots=${6:-}
     local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath clashSourcePath clashContentPath
-    local localDefaultAvailable=false
     local remoteStageStatus=0
     local previousBase
 
@@ -2945,7 +2944,6 @@ renderSubscribeUserOutputs() {
     singBoxPath="${stageDir}/sing-box/${emailMd5}"
 
     if [[ -f "${localBase}/default/${email}" ]]; then
-        localDefaultAvailable=true
         if ! cp "${localBase}/default/${email}" "${defaultPath}"; then
             padmRemoveCleanupPath "${stageDir}"
             return 1
@@ -2969,17 +2967,8 @@ renderSubscribeUserOutputs() {
             padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
-        if [[ "${remoteStageStatus}" -eq 2 && "${localDefaultAvailable}" == "true" ]]; then
-            previousBase=${PADM_SUBSCRIBE_PREVIOUS_DIR:-}
-            if [[ -n "${previousBase}" ]] &&
-                previousBase=$(padmResolveManagedAbsolutePath "${previousBase}") &&
-                [[ -s "${previousBase}/default/${emailMd5}" ]]; then
-                [[ -z "${showStatus}" ]] || statusCard "订阅输出" "${email} 暂无可用被控来源，已保留上一版公网输出"
-                padmRemoveCleanupPath "${stageDir}"
-                return 0
-            fi
-        fi
-        if [[ "${remoteStageStatus}" -eq 2 && "${localDefaultAvailable}" != "true" ]]; then
+        # 有本机节点时直接发布本轮结果，避免带回已移除的被控节点。
+        if [[ "${remoteStageStatus}" -eq 2 && ! -s "${defaultPath}" ]]; then
             previousBase=${PADM_SUBSCRIBE_PREVIOUS_DIR:-}
             if [[ -z "${previousBase}" ]] || ! previousBase=$(padmResolveManagedAbsolutePath "${previousBase}") ||
                 [[ ! -s "${previousBase}/default/${emailMd5}" ]]; then

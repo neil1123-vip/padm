@@ -889,6 +889,8 @@ stageRemoteSubscribe() {
     local validSourceCount=0
 
     subscriptionRemoteScopeEnabled || return 0
+    subscriptionRemoteSubscribeSourcesForAccount "${email}" sourceLines || return 1
+    [[ -n "${sourceLines}" ]] || return 0
 
     padmCreateTmpRootPath stageDir padm-remote-subscribe-stage.XXXXXX -d || return 1
     publicBase=$(subscribePublicBaseDir)
@@ -915,10 +917,6 @@ stageRemoteSubscribe() {
         printf '[]\n' >"${singBoxTarget}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
     fi
 
-    if ! subscriptionRemoteSubscribeSourcesForAccount "${email}" sourceLines; then
-        padmRemoveCleanupPath "${stageDir}"
-        return 1
-    fi
     escapedEmail=$(printf '%s\n' "${email}" | sed 's/[][\/.^$*+?(){}|]/\\&/g')
 
     while IFS= read -r line; do
@@ -995,7 +993,8 @@ stageRemoteSubscribe() {
             rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
             continue
         fi
-        if ! appendUniqueLines "${clashMetaProxies}" "${clashTarget}" ||
+        # 保留节点块内重复出现的 YAML 字段，如不同节点的 type 和 port。
+        if ! printf '%s\n' "${clashMetaProxies}" >>"${clashTarget}" ||
             ! appendUniqueLines "${default}" "${defaultTarget}" ||
             ! mergeSingBoxSubscribeOutbounds "${singBoxTarget}" "${singBoxSubscribe}"; then
             padmRemoveCleanupPath "${stageDir}"
