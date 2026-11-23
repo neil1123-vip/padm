@@ -911,28 +911,43 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
 runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
     local localSnapshot
     local remoteResults
+    local remoteAdminAccount remoteAdminId
     local collectedItems
     local stateBefore
     local mainBefore
     prepareSubscriptionStateQuotaUsageFixture
-    subscriptionActiveGroupWrite '
+    remoteAdminId=$(subscriptionRemoteAdminUserId remote-edge) || return 1
+    remoteAdminAccount=$(subscriptionRemoteAdminAccountName remote-edge) || return 1
+    subscriptionActiveGroupWrite --arg id "${remoteAdminId}" '
       .sources += [{id:"edge-2",name:"edge-2",role:"secondary",scheme:"wireguard",transport:"wireguard",host:"10.77.0.4",port:48780,enabled:true,sync_status:"pending",control_token:"token-ghi"}] |
+      .user_groups += [{id:$id,name:"旧分享",enabled:true,allowed_sources:["edge-2"],traffic_limit_gb:0}] |
       .traffic = {admin:{sources:{}},user_groups:{},sources:{}}
-    '
+    ' || return 1
     localSnapshot='{"ok":true,"items":[{"account":"admin","upload":10,"download":20},{"account":"sub_team_a","upload":30,"download":40}]}'
     remoteResults='[{"source_id":"remote-edge","status":"success","response":{"items":[{"account":"admin","upload":5,"download":6},{"account":"sub_team_a","upload":7,"download":8}]}},{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":2,"download":3},{"account":"sub_team_a","upload":4,"download":5}]}}]'
-    writeSubscriptionTrafficSnapshot "${localSnapshot}" "${remoteResults}" collectedItems
+    remoteResults=$(jq -c --arg account "${remoteAdminAccount}" '
+      .[0].response.items += [{account:$account,upload:11,download:13}] |
+      .[1].response.items += [{account:$account,upload:17,download:19}]
+    ' <<<"${remoteResults}") || return 1
+    writeSubscriptionTrafficSnapshot "${localSnapshot}" "${remoteResults}" collectedItems || return 1
     [[ "${collectedItems}" == "$(jq -c '.items' <<<"${localSnapshot}")" ]]
-    jq -e '
+    jq -e --arg account "${remoteAdminAccount}" --arg id "${remoteAdminId}" '
       (.traffic.sources | length) == 3 and
-      .traffic.admin.sources["remote-edge"].upload == 5 and
+      .traffic.admin.sources["remote-edge"].upload == 16 and
+      .traffic.admin.sources["remote-edge"].download == 19 and
+      .traffic.admin.sources["remote-edge"].counters[$account].legacy.upload == 11 and
+      .traffic.admin.sources["edge-2"].upload == 2 and
+      .traffic.user_groups[$id].sources.main == {upload:0,download:0,counters:{}} and
+      .traffic.user_groups[$id].sources["remote-edge"].upload == 0 and
+      .traffic.user_groups[$id].sources["edge-2"].upload == 17 and
       .traffic.user_groups["team-a"].sources["remote-edge"].upload == 7 and
-      .traffic.sources["edge-2"].upload == 6 and
+      .traffic.sources["edge-2"].upload == 23 and
       .traffic.sources["edge-2"].counters.sub_team_a.legacy.upload == 4 and
       (.traffic | has("global") | not) and
       (.traffic.admin | has("upload") | not) and
       (.traffic.user_groups["team-a"] | has("upload") | not)
-    ' "$(subscriptionGroupsFile)" >/dev/null
+    ' "$(subscriptionGroupsFile)" >/dev/null || return 1
+    removeUserSubscriptionState "${remoteAdminId}" || return 1
 
     localSnapshot='{"ok":true,"items":[{"account":"admin","upload":3,"download":4},{"account":"sub_team_a","upload":1,"download":2}]}'
     remoteResults='[{"source_id":"remote-edge","status":"success","response":{"items":[{"account":"admin","upload":1,"download":1},{"account":"sub_team_a","upload":2,"download":1}]}},{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":3,"download":1},{"account":"sub_team_a","upload":1,"download":2}]}}]'
@@ -2264,6 +2279,7 @@ runSubscriptionGroupSyncRemoteFailureRegression() (
 JSON
     originalConfig=$(<"${syncConfigFile}")
 
+    statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     subscriptionCurrentRoleNormalized() { printf 'main\n'; }
     subscriptionRemoteScopeEnabled() { [[ "${remoteFailureMode}" != "control-disabled" ]]; }
     subscriptionRemoteControlSources() {
@@ -2291,6 +2307,7 @@ JSON
     refreshPublishedSubscriptions() {
         printf 'refresh\n' >>"${refreshLog}"
         printf '%s\n' "$1" >"${snapshotFile}"
+        SUBSCRIPTION_PUBLISH_ACCOUNTS=admin
         return 0
     }
 
@@ -2312,6 +2329,7 @@ JSON
         [[ -f "${refreshLog}" ]]
         [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == "true" ]]
         jq -e '."edge-a" == null' "${snapshotFile}" >/dev/null
+        grep -q '成功来源 0 个，失败来源 1 个，本轮发布账号 1 个' "${statusLog}"
         grep -q '已按可用来源发布订阅' "${statusLog}"
     fi
     if [[ "${remoteFailureMode}" == "control-disabled" ]]; then

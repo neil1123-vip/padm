@@ -219,6 +219,10 @@ def parse(line):
     required = {"encryption","security","sni","fp","pbk","sid","type"}
     if "pqv" in q:
         required.add("pqv")
+    # Xray 的 XHTTP 和 gRPC 入口都导出混合握手提示。
+    if uri.port in (35451, 35452):
+        required.add("support-x25519mlkem768")
+        assert q.get("support-x25519mlkem768") == ["true"], q
     if q.get("type") == ["xhttp"]:
         required |= {"path","host","mode"}
     elif q.get("type") == ["grpc"]:

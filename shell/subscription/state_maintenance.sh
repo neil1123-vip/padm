@@ -134,7 +134,7 @@ applySubscriptionGroupsStateMaintenanceUnlocked() {
         SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${actionName}前备份本机配置或订阅输出失败，未执行${actionName}"
         return 1
     fi
-    if ! subscriptionGroupsStateReplace "${targetStateFile}" "$(subscriptionGroupsFile)"; then
+    if ! subscriptionGroupsStateReplace "${targetStateFile}" "$(subscriptionGroupsFile)" "${currentBackup}"; then
         subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
         SUBSCRIPTION_STATE_MAINTENANCE_ERROR="订阅状态${actionName}失败，当前状态未变"
         return 1

@@ -5,16 +5,60 @@ subscriptionRemoteControlSources() {
       [.sources[]? | select(.role != "main" and .enabled == true)]'
 }
 
+subscriptionRemoteAdminUserId() {
+    local digest
+    digest=$(printf '%s' "$1" | sha256sum) || return 1
+    printf 'padm-admin-%s\n' "${digest:0:32}"
+}
+
+subscriptionRemoteAdminAccountName() {
+    local id
+    id=$(subscriptionRemoteAdminUserId "$1") || return 1
+    subscriptionSyncAccountName "${id}"
+}
+
+subscriptionRemoteInitializeAdminUUIDsUnlocked() {
+    local sources=$1
+    local missingIds sourceId uuid
+    local -a entries=()
+    local adminUUIDs
+
+    adminUUIDs=$(subscriptionActiveGroupRead -c '
+      [.sources[] | select(has("admin_uuid")) | {key:.id, value:.admin_uuid}] | from_entries
+    ') || return 1
+    missingIds=$(jq -r --argjson existing "${adminUUIDs}" '
+      .[] | select((.control_token // "") != "" and $existing[.id] == null) | .id
+    ' <<<"${sources}") || return 1
+    if [[ -n "${missingIds}" ]]; then
+        while IFS= read -r sourceId; do
+            uuid=$(generateRandomUuidValue) || return 1
+            entries+=("${sourceId}"$'\t'"${uuid}")
+        done <<<"${missingIds}"
+        adminUUIDs=$(jq -cn --argjson existing "${adminUUIDs}" --args '
+          $existing + ($ARGS.positional | map(split("\t") | {key:.[0], value:.[1]}) | from_entries)
+        ' -- "${entries[@]}") || return 1
+        subscriptionActiveGroupWrite --argjson adminUUIDs "${adminUUIDs}" '
+          .sources |= map(if .role == "secondary" and $adminUUIDs[.id] != null then
+            .admin_uuid = $adminUUIDs[.id] else . end)
+        ' || return 1
+    fi
+    jq -c --argjson adminUUIDs "${adminUUIDs}" '
+      map(if $adminUUIDs[.id] != null then .admin_uuid = $adminUUIDs[.id] else . end)
+    ' <<<"${sources}"
+}
+
 subscriptionRemoteDesiredUsersBySource() {
     local sources=$1
     local state=${2:-}
+    local mode=${3:-}
     local enabledUsers
+    local desiredUsers sourceRows sourceId id account uuid
     if [[ -n "${state}" ]]; then
         enabledUsers=$(subscriptionEnabledUsersJsonFromState "${state}") || return 1
     else
         enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
     fi
-    jq -c -e -s '
+    desiredUsers=$(jq -c -e -s '
       select(length == 2) |
       .[0] as $sources |
       .[1] as $users |
@@ -26,7 +70,30 @@ subscriptionRemoteDesiredUsersBySource() {
           | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
           | {id, uuid, account}
         ])
-    ' < <(printf '%s\n%s\n' "${sources}" "${enabledUsers}") || return 1
+    ' < <(printf '%s\n%s\n' "${sources}" "${enabledUsers}")) || return 1
+    if [[ "${mode}" == "apply" ]]; then
+        sources=$(subscriptionGroupsWithLock subscriptionRemoteInitializeAdminUUIDsUnlocked "${sources}") || return 1
+    fi
+    sourceRows=$(jq -r --arg mode "${mode}" '
+      .[] | select((.control_token // "") != "" and (has("admin_uuid") or $mode == "preview")) |
+      [.id, ((.admin_uuid // "") | ascii_downcase)] | @tsv
+    ' <<<"${sources}") || return 1
+    while IFS=$'\t' read -r sourceId uuid; do
+        [[ -n "${sourceId}" ]] || continue
+        id=$(subscriptionRemoteAdminUserId "${sourceId}") || return 1
+        account=$(subscriptionSyncAccountName "${id}") || return 1
+        if [[ -z "${uuid}" ]]; then
+            uuid=$(generateRandomUuidValue) || return 1
+        fi
+        desiredUsers=$(jq -ce --arg sourceId "${sourceId}" --arg id "${id}" --arg account "${account}" --arg uuid "${uuid}" '
+          .[$sourceId] |= (
+            if any(.[]; .id == $id or (.uuid | ascii_downcase) == $uuid) then
+              error("管理员订阅凭据与分享订阅冲突")
+            else . + [{id:$id, uuid:$uuid, account:$account}]
+            end)
+        ' <<<"${desiredUsers}") || return 1
+    done <<<"${sourceRows}"
+    printf '%s\n' "${desiredUsers}"
 }
 
 subscriptionRemoteSourceSelfReference() {
@@ -811,7 +878,7 @@ subscriptionRemoteSyncPlan() {
     local -a workerArgs=()
     sources=$(subscriptionRemoteControlSources) || return 1
     if [[ "${sources}" != '[]' ]]; then
-        desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
+        desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}" '' preview) || return 1
         if selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty'); then
             workerArgs=("${selfAddress}")
         fi
@@ -862,7 +929,7 @@ runSubscriptionRemoteSync() {
         printf '%s\n' '{"failures":[],"snapshots":{}}'
         return 0
     fi
-    desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
+    desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}" '' apply) || return 1
     if selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty'); then
         workerArgs=("${selfAddress}")
     fi

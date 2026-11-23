@@ -1485,16 +1485,17 @@ runSubscriptionGroupSyncUnlocked() {
                     publishedWithRemoteFailures=true
                 fi
             fi
-            local publishedAccountCount
+            local publishedAccountCount=0
             local remoteSourceCount
             local remoteFailureCount
             local remoteSuccessCount
-            publishedAccountCount=$(printf '%s\n' "${SUBSCRIPTION_PUBLISH_ACCOUNTS:-}" | sed '/^$/d' | wc -l | tr -d ' ') || publishedAccountCount=0
+            if [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == "true" ]]; then
+                publishedAccountCount=$(printf '%s\n' "${SUBSCRIPTION_PUBLISH_ACCOUNTS:-}" | sed '/^$/d' | wc -l | tr -d ' ') || publishedAccountCount=0
+            fi
             remoteSourceCount=$(jq 'length' <<<"${remoteSources}" 2>/dev/null || printf '0')
-            remoteFailureCount=$(jq 'length' <<<"${remoteFailures}" 2>/dev/null || printf '0')
-            remoteSuccessCount=$((remoteSourceCount - remoteFailureCount))
-            ((remoteSuccessCount >= 0)) || remoteSuccessCount=0
-            statusCard "订阅摘要" "成功来源 ${remoteSuccessCount} 个，失败来源 ${remoteFailureCount} 个，实际发布账号 ${publishedAccountCount} 个，失败来源沿用旧快照：$(if [[ "${remoteFailures}" != "[]" ]]; then printf '是'; else printf '否'; fi)"
+            remoteSuccessCount=$(jq '[.[] | objects] | length' <<<"${remoteSnapshots}" 2>/dev/null || printf '0')
+            remoteFailureCount=$((remoteSourceCount - remoteSuccessCount))
+            statusCard "订阅摘要" "成功来源 ${remoteSuccessCount} 个，失败来源 ${remoteFailureCount} 个，本轮发布账号 ${publishedAccountCount} 个"
         fi
     fi
 

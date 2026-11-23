@@ -3631,6 +3631,47 @@ runRealityStreamSplitRegression() (
 )
 
 runRealityConfigRefreshSubscriptionRegression() {
+    (
+        source "${PROJECT_ROOT}/shell/core/manage.sh"
+        local actions= simulatedSyncStatus=0 remoteScope=true SUBSCRIPTION_SYNC_PUBLISHED=false
+        local subscribePort= SUBSCRIPTION_GROUPS_LOCK_HELD=0 coreInstallType=2
+        readNginxSubscribe() { :; }
+        readInstallProtocolType() { actions+="read "; }
+        subscriptionRequireLocalPublisherRole() { return 0; }
+        installSubscribeLocked() {
+            [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD}" == "1" ]] || return 98
+            actions+="install "
+        }
+        subscriptionRemoteScopeEnabled() { [[ "${remoteScope}" == "true" ]]; }
+        subscriptionHasEnabledRemoteSources() { return 0; }
+        subscriptionGroupsWithLock() { SUBSCRIPTION_GROUPS_LOCK_HELD=1 "$@"; }
+        runSubscriptionGroupSync() {
+            actions+="sync "
+            [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD}" == "0" ]] || return 98
+            subscriptionGroupsWithLock refreshPublishedSubscriptions '{"remote":{}}' || return 98
+            SUBSCRIPTION_SYNC_PUBLISHED=true
+            return "${simulatedSyncStatus}"
+        }
+        generateSubscribeOutputsUnlocked() {
+            [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD}" == "1" ]] || return 98
+            actions+="generate:${5:-local} "
+        }
+        showPublishedSubscriptionLinks() { actions+="links "; }
+        coreTemplateConfigTransaction() { actions+="transaction "; }
+
+        realityStreamRefreshSubscribeIfInstalled
+        [[ -z "${actions}" ]] || return 1
+        subscribePort=39778 simulatedSyncStatus=7
+        regressionExpectStatus 7 realityStreamRefreshSubscribeIfInstalled || return 1
+        [[ "${actions}" == 'read install read sync read generate:{"remote":{}} ' ]] || return 1
+        actions=
+        regressionExpectStatus 1 regenerateRealityProfile || return 1
+        [[ "${actions}" == 'transaction read install read sync read generate:{"remote":{}} links ' ]] || return 1
+        actions= remoteScope=false
+        realityStreamRefreshSubscribeIfInstalled || return 1
+        [[ "${actions}" == 'read install generate:local ' ]]
+    ) || return 1
+
     local oldNginxConfigPath="${nginxConfigPath:-}"
     local oldSubscribePort="${subscribePort:-}"
     local refreshCalls=0 subscribeCalls=0

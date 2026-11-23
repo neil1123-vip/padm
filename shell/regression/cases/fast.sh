@@ -5525,6 +5525,9 @@ JSON
     : >"${qrLog}"
     release=debian showSubscriptionUrlCard "订阅" self "${subscriptionUrl}" >"${output}"
     [[ "$(<"${qrLog}")" == "${subscriptionUrl}" && ! -e "${unexpectedAction}" ]]
+    grep -qF '管理员 · 订阅' "${output}"
+    release=alpine showSubscriptionUrlCard "订阅" sub_guest "${subscriptionUrl}" >"${output}"
+    ! grep -qF '管理员 · 订阅' "${output}"
     # 非 HTTPS 地址和换行密钥必须在发请求前拒绝。
     PADM_QR_SHORTENER_URL=http://short.example.test \
         regressionExpectStatus 1 subscribeOutputCreateShortLink "${link}"

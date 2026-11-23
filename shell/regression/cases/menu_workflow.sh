@@ -606,7 +606,7 @@ runSubscriptionMenuWorkflowCoreRegression() (
                 IFS= read -r remaining <&3
                 exec 3<&-
                 [[ "${remaining}" == next-parent-action && ! -s "${linkLog}" ]]
-                grep -qE '^1 .*personal' "${displayLog}"
+                grep -qE '^1 .*管理员（personal）' "${displayLog}"
                 grep -qE '^2 .*Alpha.*alpha' "${displayLog}"
                 ! grep -qE 'https://|Numeric ID|pending-team|unpublished-personal|removed' "${displayLog}"
             done

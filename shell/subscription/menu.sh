@@ -533,9 +533,13 @@ manageSubscriptionCatalog() {
     while true; do
         echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
         showSubscriptionServerRoleSummary
-        menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和流量。"
+        if [[ "${role}" == "main" ]]; then
+            menuLine "管理员订阅汇总本机和已启用被控服务器的可用节点。"
+        else
+            menuLine "管理员订阅包含本机协议配置中的节点。"
+        fi
         menuItem 1 "安装/更新发布服务" "配置公网发布入口，随后完整同步并显示链接"
-        menuItem 2 "查看当前订阅链接" "从名单选择本机自用或分享订阅，再查看链接"
+        menuItem 2 "查看当前订阅链接" "选择已发布的管理员订阅或分享订阅，再查看链接"
         menuItem 3 "分享订阅" "新建或维护已有分享订阅"
         menuItem 4 "流量与限额" "查看流量明细，并处理超限和自动限额"
         menuItem 5 "立即完整同步" "同步账号及启用来源；已配置发布服务时更新并显示链接"
@@ -989,7 +993,7 @@ syncAndShowSubscriptionLinks() {
     SUBSCRIPTION_SYNC_PUBLISHED=false
     if ! runSubscriptionGroupSync; then
         if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
-            warnCard "订阅同步部分失败，但本机已发布可用链接" "失败来源沿用旧快照；请到 订阅同步 -> 状态与排障 查看详情"
+            warnCard "订阅同步部分失败，但本机已发布可用链接" "请到 订阅同步 -> 状态与排障 查看失败来源"
         else
             errorCard "订阅同步失败，未生成新的订阅链接" "修复同步问题后重试，或只读查看现有链接"
             return 1
@@ -1110,7 +1114,7 @@ readPublishedSubscriptionLinks() {
                 if [[ -n "${shareId}" ]]; then
                     publishedLabels+=("${shareName}（${shareId}）")
                 else
-                    publishedLabels+=("本机自用（${accountName}）")
+                    publishedLabels+=("管理员（${accountName}）")
                 fi
                 shown=true
                 break
