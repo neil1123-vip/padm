@@ -1723,6 +1723,7 @@ runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate candidateHost
     [[ "$(realityTargetCandidateCount)" == "25" ]]
     [[ "$(realityTargetCandidatePool | wc -l | tr -d ' ')" == "25" ]]
+    [[ "$(realityTargetCandidatePool | cut -d'|' -f1 | sort -u | wc -l | tr -d ' ')" == "25" ]]
     [[ "$(realityTargetFilteredCandidateCount all)" == "$(realityTargetCandidateCount)" ]]
     [[ "$(realityTargetBuiltInCdnBlockedCandidates | sort -u | wc -l | tr -d ' ')" == "154" ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" == "25" ]]
@@ -1730,11 +1731,11 @@ runRealityCandidateFullRegression() {
     ! realityTargetCandidates | grep -qF 'www.microsoft.com|'
     [[ "$(realityTargetFilteredCandidateCount dev)" == "$(realityTargetFilteredCandidateCount developer)" ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
-    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.libreoffice.org" ]]
+    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "pgxn.org" ]]
     firstRealityCandidate=$(realityTargetCandidateLineByIndex 1)
-    [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.libreoffice.org" ]]
+    [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "pgxn.org" ]]
     secondRealityCandidate=$(realityTargetCandidateLineByIndex 2)
-    [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.collaboraoffice.com" ]]
+    [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "mirrors.lug.mtu.edu" ]]
     ! realityTargetFilteredCandidates recommended | grep -Eq '^(www.gnu.org|www.debian.org|www.ubuntu.com|mariadb.org)[|]'
     blockedCloudflareRealityCandidate=$(realityTargetBlockedCandidates | grep '^www.cloudflare.com|')
     [[ -n "${blockedCloudflareRealityCandidate}" ]]
@@ -2456,11 +2457,11 @@ CSV
     rm -f "${PADM_REALITY_TARGET_SCAN_FILE}" "${REALITY_TLS_PING_ARGS_FILE}"
     unset AUTO_REALITY_SERVER_NAME
     unset PADM_REALITY_TARGET_CANDIDATES_FILE
-    PADM_FAKE_XRAY_ONLY_HOST=www.libreoffice.org selectDefaultRealityTarget
-    [[ "${realityTargetHost}" == "www.libreoffice.org" ]]
+    PADM_FAKE_XRAY_ONLY_HOST=pgxn.org selectDefaultRealityTarget
+    [[ "${realityTargetHost}" == "pgxn.org" ]]
     [[ "${realityTargetPort}" == "443" ]]
-    [[ "${realitySNI}" == "www.libreoffice.org" ]]
-    grep -q "tls ping -ip 192.0.2.1 www.libreoffice.org:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    [[ "${realitySNI}" == "pgxn.org" ]]
+    grep -qF "tls ping -ip 192.0.2.1 pgxn.org:443" "${REALITY_TLS_PING_ARGS_FILE}"
     (
         export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality-singbox-openssl-results.tsv"
         export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"

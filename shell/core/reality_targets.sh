@@ -65,31 +65,31 @@ realityTargetCandidatePool() {
         return 0
     fi
     cat <<'EOF'
-www.libreoffice.org|www.libreoffice.org|LibreOffice|global|developer|unknown|100|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4492 字节、异 SNI 拒绝；部署网络须复测
-www.collaboraoffice.com|www.collaboraoffice.com|Collabora Office|global|developer|unknown|99|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4449 字节、异 SNI 拒绝；部署网络须复测
-www.documentfoundation.org|www.documentfoundation.org|The Document Foundation|global|developer|unknown|98|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4283 字节、异 SNI 拒绝；部署网络须复测
-www.postgresql.org|www.postgresql.org|PostgreSQL|global|developer|unknown|97|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链至少 4405 字节、异 SNI 拒绝；部署网络须复测
-ftp.uni-stuttgart.de|ftp.uni-stuttgart.de|University of Stuttgart Mirror|global|download|unknown|96|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链至少 5417 字节、异 SNI 拒绝；部署网络须复测
-ftp.snt.utwente.nl|ftp.snt.utwente.nl|University of Twente Mirror|global|download|unknown|95|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4127 字节、异 SNI 拒绝；部署网络须复测
-ftp.lysator.liu.se|ftp.lysator.liu.se|Lysator Mirror|global|download|unknown|94|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4146 字节、异 SNI 拒绝；部署网络须复测
-mirror.init7.net|mirror.init7.net|Init7 Mirror|global|download|unknown|93|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4052 字节、异 SNI 拒绝；部署网络须复测
-enterprise.proxmox.com|enterprise.proxmox.com|Proxmox Enterprise|global|cloud|unknown|92|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4575 字节、异 SNI 拒绝；部署网络须复测
-sdk.collaboraonline.com|sdk.collaboraonline.com|Collabora Online SDK|global|developer|unknown|91|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4965 字节、异 SNI 拒绝；部署网络须复测
-blog.documentfoundation.org|blog.documentfoundation.org|Document Foundation Blog|global|developer|unknown|90|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4556 字节、异 SNI 拒绝；部署网络须复测
-bugs.documentfoundation.org|bugs.documentfoundation.org|Document Foundation Bugzilla|global|developer|unknown|89|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4310 字节、异 SNI 拒绝；部署网络须复测
-translations.documentfoundation.org|translations.documentfoundation.org|Document Foundation Weblate|global|developer|unknown|88|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4448 字节、异 SNI 拒绝；部署网络须复测
-ci.libreoffice.org|ci.libreoffice.org|LibreOffice CI|global|developer|unknown|87|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4233 字节、异 SNI 拒绝；部署网络须复测
-gerrit.libreoffice.org|gerrit.libreoffice.org|LibreOffice Gerrit|global|developer|unknown|86|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4215 字节、异 SNI 拒绝；部署网络须复测
-conference.libreoffice.org|conference.libreoffice.org|LibreOffice Conference|global|developer|unknown|85|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4358 字节、异 SNI 拒绝；部署网络须复测
-www.pgadmin.org|www.pgadmin.org|pgAdmin|global|developer|unknown|84|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4319 字节、异 SNI 拒绝；部署网络须复测
-www.postgresql.eu|www.postgresql.eu|PostgreSQL Europe|global|developer|unknown|83|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4317 字节、异 SNI 拒绝；部署网络须复测
-www.postgresql.us|www.postgresql.us|PostgreSQL US|global|developer|unknown|82|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4320 字节、异 SNI 拒绝；部署网络须复测
-pgconf.dev|pgconf.dev|PGConf.dev|global|developer|unknown|81|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4334 字节、异 SNI 拒绝；部署网络须复测
-git.postgresql.org|git.postgresql.org|PostgreSQL Git|global|developer|unknown|80|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4312 字节、异 SNI 拒绝；部署网络须复测
-commitfest.postgresql.org|commitfest.postgresql.org|PostgreSQL Commitfest|global|developer|unknown|79|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4391 字节、异 SNI 拒绝；部署网络须复测
-planet.postgresql.org|planet.postgresql.org|Planet PostgreSQL|global|developer|unknown|78|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4342 字节、异 SNI 拒绝；部署网络须复测
-pgxn.org|pgxn.org|PostgreSQL Extension Network|global|developer|unknown|77|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4307 字节、异 SNI 拒绝；部署网络须复测
-www.netmeister.org|www.netmeister.org|Netmeister|global|developer|unknown|76|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 3507 字节、异 SNI 拒绝；部署网络须复测
+pgxn.org|pgxn.org|PostgreSQL Extension Network|global|developer|unknown|100|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4307 字节、异 SNI 拒绝，部署网络须复测
+mirrors.lug.mtu.edu|mirrors.lug.mtu.edu|Michigan Tech LUG Arch Linux Mirror|global|download|unknown|99|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4804 字节、异 SNI 拒绝，部署网络须复测
+ftp.fr.openbsd.org|ftp.fr.openbsd.org|OpenBSD France Mirror|global|download|unknown|98|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4380 字节、异 SNI 拒绝，部署网络须复测
+openbsd.cs.toronto.edu|openbsd.cs.toronto.edu|University of Toronto OpenBSD Mirror|global|download|unknown|97|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4346 字节、异 SNI 拒绝，部署网络须复测
+mirror.franscorack.com|mirror.franscorack.com|Franscorack Arch Linux Mirror|global|download|unknown|96|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4326 字节、异 SNI 拒绝，部署网络须复测
+arch.yourlabs.org|arch.yourlabs.org|YourLabs Arch Linux Mirror|global|download|unknown|95|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4310 字节、异 SNI 拒绝，部署网络须复测
+mirrors.xjtu.edu.cn|mirrors.xjtu.edu.cn|Xi'an Jiaotong University Arch Linux Mirror|asia|download|unknown|94|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4065 字节、异 SNI 拒绝，部署网络须复测
+mirror.juniorjpdj.pl|mirror.juniorjpdj.pl|JuniorJPDJ Arch Linux Mirror|global|download|unknown|93|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4059 字节、异 SNI 拒绝，部署网络须复测
+archlinux.lysakermoen.com|archlinux.lysakermoen.com|Lysakermoen Arch Linux Mirror|global|download|unknown|92|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4053 字节、异 SNI 拒绝，部署网络须复测
+fr.mirror.shibe.party|fr.mirror.shibe.party|Shibe France Arch Linux Mirror|global|download|unknown|91|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 3777 字节、异 SNI 拒绝，部署网络须复测
+repository.su|repository.su|Repository.su Arch Linux Mirror|global|download|unknown|90|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 3754 字节、异 SNI 拒绝，部署网络须复测
+cran.r-project.org|cran.r-project.org|Comprehensive R Archive Network|global|developer|unknown|89|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 6502 字节、异 SNI 拒绝，部署网络须复测
+softlibre.unizar.es|softlibre.unizar.es|University of Zaragoza Debian Mirror|global|download|unknown|88|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 5534 字节、异 SNI 拒绝，部署网络须复测
+mirror.heigou.pe.kr|mirror.heigou.pe.kr|Heigou Void Linux Mirror|asia|download|unknown|87|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4314 字节、异 SNI 拒绝，部署网络须复测
+mirror.tspu.ru|mirror.tspu.ru|Tomsk State Pedagogical University Slackware Mirror|global|download|unknown|86|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4049 字节、异 SNI 拒绝，部署网络须复测
+mirrors.atviras.lt|mirrors.atviras.lt|Atviras Slackware Mirror|global|download|unknown|85|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4317 字节、异 SNI 拒绝，部署网络须复测
+mirror.sajattack.xyz|mirror.sajattack.xyz|Sajattack Nura Mirror|global|download|unknown|84|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4318 字节、异 SNI 拒绝，部署网络须复测
+ubuntu.ccns.ncku.edu.tw|ubuntu.ccns.ncku.edu.tw|National Cheng Kung University Ubuntu Mirror|asia|download|unknown|83|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4737 字节、异 SNI 拒绝，部署网络须复测
+mirror.javier.eu.org|mirror.javier.eu.org|Javier Gentoo Mirror|global|download|unknown|82|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4001 字节、异 SNI 拒绝，部署网络须复测
+mirror.unair.ac.id|mirror.unair.ac.id|Universitas Airlangga Ubuntu Mirror|asia|download|unknown|81|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4046 字节、异 SNI 拒绝，部署网络须复测
+mirror.almalinux.peralex.com|mirror.almalinux.peralex.com|Peralex AlmaLinux Mirror|global|download|unknown|80|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4333 字节、异 SNI 拒绝，部署网络须复测
+mirror.premierdc.com.tr|mirror.premierdc.com.tr|PremierDC Linux Mirror|global|download|unknown|79|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 6674 字节、异 SNI 拒绝，部署网络须复测
+mirror.lstn.net|mirror.lstn.net|Limestone Networks Linux Mirror|global|download|unknown|78|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 5023 字节、异 SNI 拒绝，部署网络须复测
+mirrors.egr.msu.edu|mirrors.egr.msu.edu|Michigan State University Linux Mirror|global|download|unknown|77|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4059 字节、异 SNI 拒绝，部署网络须复测
+mirror.cloudpropeller.com|mirror.cloudpropeller.com|Cloud Propeller Linux Mirror|global|download|unknown|76|yes|2026-11-23 仅 IPv4，原生实测 TLS/PQC A 级、证书链 4109 字节、异 SNI 拒绝，部署网络须复测
 EOF
 }
 
